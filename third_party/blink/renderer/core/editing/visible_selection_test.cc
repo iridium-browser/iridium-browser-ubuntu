@@ -6,6 +6,7 @@
 
 #include "third_party/blink/renderer/core/dom/range.h"
 #include "third_party/blink/renderer/core/editing/ephemeral_range.h"
+#include "third_party/blink/renderer/core/editing/frame_selection.h"
 #include "third_party/blink/renderer/core/editing/selection_adjuster.h"
 #include "third_party/blink/renderer/core/editing/selection_template.h"
 #include "third_party/blink/renderer/core/editing/testing/editing_test_base.h"
@@ -47,6 +48,14 @@ class VisibleSelectionTest : public EditingTestBase {
   }
 
   std::string GetWordSelectionText(const std::string&);
+
+  std::string ComputeVisibleSelection(const std::string& selection_text) {
+    Selection().SetSelection(SetSelectionTextToBody(selection_text),
+                             SetSelectionOptions());
+    const VisibleSelection& visible =
+        Selection().ComputeVisibleSelectionInDOMTree();
+    return GetSelectionTextFromBody(visible.AsSelection());
+  }
 };
 
 std::string VisibleSelectionTest::GetWordSelectionText(
@@ -101,6 +110,7 @@ TEST_F(VisibleSelectionTest, expandUsingGranularity) {
   Node* three = shadow_root->getElementById("three")->firstChild();
   Node* four = shadow_root->getElementById("four")->firstChild();
   Node* five = shadow_root->getElementById("five")->firstChild();
+  Node* space = shadow_root->getElementById("space")->firstChild();
 
   VisibleSelection selection;
   VisibleSelectionInFlatTree selection_in_flat_tree;
@@ -118,8 +128,8 @@ TEST_F(VisibleSelectionTest, expandUsingGranularity) {
 
   EXPECT_EQ(selection.Start(), selection.Base());
   EXPECT_EQ(selection.End(), selection.Extent());
-  EXPECT_EQ(Position(one, 0), selection.Start());
-  EXPECT_EQ(Position(two, 2), selection.End());
+  EXPECT_EQ(Position(five, 5), selection.Start());
+  EXPECT_EQ(Position(five, 5), selection.End());
 
   EXPECT_EQ(selection_in_flat_tree.Start(), selection_in_flat_tree.Base());
   EXPECT_EQ(selection_in_flat_tree.End(), selection_in_flat_tree.Extent());
@@ -139,8 +149,8 @@ TEST_F(VisibleSelectionTest, expandUsingGranularity) {
 
   EXPECT_EQ(selection.Start(), selection.Base());
   EXPECT_EQ(selection.End(), selection.Extent());
-  EXPECT_EQ(Position(one, 0), selection.Start());
-  EXPECT_EQ(Position(two, 2), selection.End());
+  EXPECT_EQ(Position(space, 0), selection.Start());
+  EXPECT_EQ(Position(five, 5), selection.End());
 
   EXPECT_EQ(selection_in_flat_tree.Start(), selection_in_flat_tree.Base());
   EXPECT_EQ(selection_in_flat_tree.End(), selection_in_flat_tree.Extent());
@@ -689,6 +699,55 @@ TEST_F(VisibleSelectionTest, BackwardSelectionWithMultipleEmptyBodies) {
   EXPECT_EQ("^<body></body>", GetSelectionTextFromBody(selection));
   EXPECT_EQ("|<body></body>",
             GetSelectionTextFromBody(visible_selection.AsSelection()));
+}
+
+// Confirm canonicalization.
+#define EXPECT_EQ_VS(input, expect) \
+  EXPECT_EQ(ComputeVisibleSelection(input), expect)
+
+TEST_F(VisibleSelectionTest, ComputeVisibleSelectionBasic) {
+  EXPECT_EQ_VS("fo^o<br>ba|r", "fo^o<br>ba|r");
+  EXPECT_EQ_VS("fo|o<br>ba^r", "fo|o<br>ba^r");
+  EXPECT_EQ_VS("foo<!--|--><br><!--^-->bar", "foo|<br>^bar");
+}
+
+TEST_F(VisibleSelectionTest, ComputeVisibleSelectionBR) {
+  EXPECT_EQ_VS("fo^o<br>|", "fo^o|<br>");
+  EXPECT_EQ_VS("fo^o<br><br>|", "fo^o<br>|<br>");
+  EXPECT_EQ_VS("foo<br>^<br>|", "foo<br>|<br>");
+  EXPECT_EQ_VS("foo<!--|--><br>", "foo|<br>");
+  EXPECT_EQ_VS("foo<br>|", "foo|<br>");
+}
+
+TEST_F(VisibleSelectionTest, ComputeVisibleSelectionCaret) {
+  EXPECT_EQ_VS("fo|o", "fo|o");
+  EXPECT_EQ_VS("<!--|-->foo", "|foo");
+  EXPECT_EQ_VS("foo<!--|-->", "foo|");
+  EXPECT_EQ_VS("<div>|</div>", "|<div></div>");
+  EXPECT_EQ_VS("<div contenteditable><div>|</div></div>",
+               "<div contenteditable><div></div></div>");
+  EXPECT_EQ_VS("<div contenteditable>foo<div>|</div>bar</div>",
+               "<div contenteditable>foo<div></div>|bar</div>");
+  EXPECT_EQ_VS("<div contenteditable>|</div>", "<div contenteditable>|</div>");
+}
+
+TEST_F(VisibleSelectionTest, ComputeVisibleSelectionEdgeIsNone) {
+  EXPECT_EQ_VS("fo|o<b style=\"display:none;\">b^ar</b>",
+               "fo|o^<b style=\"display:none;\">bar</b>");
+  EXPECT_EQ_VS("<b style=\"display:none;\">f^oo</b>ba|r",
+               "<b style=\"display:none;\">foo</b>^ba|r");
+  EXPECT_EQ_VS(
+      "<b style=\"display:none;\">f^oo</b>"
+      "bar<b style=\"display:none;\">b|az</b>",
+      "<b style=\"display:none;\">foo</b>"
+      "^bar|<b style=\"display:none;\">baz</b>");
+}
+
+TEST_F(VisibleSelectionTest, ComputeVisibleSelectionInsideNone) {
+  EXPECT_EQ_VS("foo<b style=\"display:none;\">b^a|r</b>baz",
+               "foo|<b style=\"display:none;\">bar</b>baz");
+  EXPECT_EQ_VS("<b style=\"display:none;\">b|a^r</b>baz",
+               "<b style=\"display:none;\">bar</b>|baz");
 }
 
 }  // namespace blink

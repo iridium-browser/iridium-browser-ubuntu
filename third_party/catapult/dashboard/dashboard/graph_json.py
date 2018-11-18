@@ -184,7 +184,8 @@ def _PositiveIntOrNone(input_str):
 
 def _GetAnomalyAnnotationMap(test):
   """Gets a map of revision numbers to Anomaly entities."""
-  anomalies = anomaly.Anomaly.GetAlertsForTest(test)
+  anomalies, _, _ = anomaly.Anomaly.QueryAsync(
+      test=test, limit=1000).get_result()
   return dict((a.end_revision, a) for a in anomalies)
 
 
@@ -214,16 +215,13 @@ def _UpdateRevisionMap(revision_map, parent_test, rev, num_points,
          not parent_test.internal_only)
 
   if start_rev and end_rev:
-    rows = graph_data.GetRowsForTestInRange(
-        parent_test.key, start_rev, end_rev, True)
+    rows = graph_data.GetRowsForTestInRange(parent_test.key, start_rev, end_rev)
   elif rev:
     assert num_points
-    rows = graph_data.GetRowsForTestAroundRev(
-        parent_test.key, rev, num_points, True)
+    rows = graph_data.GetRowsForTestAroundRev(parent_test.key, rev, num_points)
   else:
     assert num_points
-    rows = graph_data.GetLatestRowsForTest(
-        parent_test.key, num_points, privileged=True)
+    rows = graph_data.GetLatestRowsForTest(parent_test.key, num_points)
 
   parent_test_key = parent_test.key.urlsafe()
   for row in rows:
@@ -250,27 +248,13 @@ def _PointInfoDict(row, anomaly_annotation_map):
     point_info['g_anomaly'] = alerts.GetAnomalyDict(anomaly_entity)
   row_dict = row.to_dict()
   for name, val in row_dict.iteritems():
-    # TODO(sullivan): Remove this hack when data containing these broken links
-    # is sufficiently stale, after June 2016.
-    if (_IsMarkdownLink(val) and
-        val.find('(None') != -1 and
-        'a_stdio_uri_prefix' in row_dict):
-      # Many data points have been added with a stdio prefix expanded out to
-      # 'None' when 'a_stdio_uri_prefix' is set correctly. Fix them up.
-      # Add in the master name as well; if the waterfall is 'CamelCase' it
-      # should be 'camel.client.case'.
-      master_camel_case = utils.TestPath(row.parent_test).split('/')[0]
-      master_parts = re.findall('([A-Z][a-z0-9]+)', master_camel_case)
-      if master_parts and len(master_parts) == 2:
-        master_name = '%s.client.%s' % (
-            master_parts[1].lower(), master_parts[0].lower())
-        val = val.replace('(None', '(%s/%s/' % (
-            row_dict['a_stdio_uri_prefix'], master_name))
     if _IsMarkdownLink(val) and 'Buildbot stdio' in val:
       logdog_link, status_page_link = _GetUpdatedBuildbotLinks(val)
       if logdog_link:
         val = logdog_link
-      if status_page_link:
+      # TODO(simonhatch): Remove this sometime in 2019.
+      # crbug.com/891424
+      if status_page_link and not 'a_build_uri' in row_dict:
         point_info['a_buildbot_status_page'] = status_page_link
 
     if name.startswith('r_'):
@@ -440,7 +424,7 @@ def _GetFlotJson(revision_map, tests):
         continue
 
       timestamp = point_info.get('timestamp')
-      if timestamp and type(timestamp) is datetime.datetime:
+      if timestamp and isinstance(timestamp, datetime.datetime):
         point_info['timestamp'] = utils.TimestampMilliseconds(timestamp)
 
       # TODO(simonhatch): Need to filter out NaN values.

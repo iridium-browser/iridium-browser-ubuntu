@@ -26,6 +26,7 @@
 #include "third_party/blink/renderer/modules/webgl/webgl_rendering_context.h"
 
 #include <memory>
+#include "base/numerics/checked_math.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_graphics_context_3d_provider.h"
@@ -43,6 +44,7 @@
 #include "third_party/blink/renderer/modules/webgl/ext_shader_texture_lod.h"
 #include "third_party/blink/renderer/modules/webgl/ext_srgb.h"
 #include "third_party/blink/renderer/modules/webgl/ext_texture_filter_anisotropic.h"
+#include "third_party/blink/renderer/modules/webgl/khr_parallel_shader_compile.h"
 #include "third_party/blink/renderer/modules/webgl/oes_element_index_uint.h"
 #include "third_party/blink/renderer/modules/webgl/oes_standard_derivatives.h"
 #include "third_party/blink/renderer/modules/webgl/oes_texture_float.h"
@@ -52,7 +54,6 @@
 #include "third_party/blink/renderer/modules/webgl/oes_vertex_array_object.h"
 #include "third_party/blink/renderer/modules/webgl/webgl_color_buffer_float.h"
 #include "third_party/blink/renderer/modules/webgl/webgl_compressed_texture_astc.h"
-#include "third_party/blink/renderer/modules/webgl/webgl_compressed_texture_atc.h"
 #include "third_party/blink/renderer/modules/webgl/webgl_compressed_texture_etc.h"
 #include "third_party/blink/renderer/modules/webgl/webgl_compressed_texture_etc1.h"
 #include "third_party/blink/renderer/modules/webgl/webgl_compressed_texture_pvrtc.h"
@@ -65,7 +66,6 @@
 #include "third_party/blink/renderer/modules/webgl/webgl_draw_buffers.h"
 #include "third_party/blink/renderer/modules/webgl/webgl_lose_context.h"
 #include "third_party/blink/renderer/platform/graphics/gpu/drawing_buffer.h"
-#include "third_party/blink/renderer/platform/wtf/checked_numeric.h"
 
 namespace blink {
 
@@ -93,8 +93,8 @@ CanvasRenderingContext* WebGLRenderingContext::Factory::Create(
     const CanvasContextCreationAttributesCore& attrs) {
   bool using_gpu_compositing;
   std::unique_ptr<WebGraphicsContext3DProvider> context_provider(
-      CreateWebGraphicsContext3DProvider(host, attrs, 1,
-                                         &using_gpu_compositing));
+      CreateWebGraphicsContext3DProvider(
+          host, attrs, Platform::kWebGL1ContextType, &using_gpu_compositing));
   if (!ShouldCreateContext(context_provider.get()))
     return nullptr;
 
@@ -114,7 +114,7 @@ CanvasRenderingContext* WebGLRenderingContext::Factory::Create(
 
 void WebGLRenderingContext::Factory::OnError(HTMLCanvasElement* canvas,
                                              const String& error) {
-  canvas->DispatchEvent(WebGLContextEvent::Create(
+  canvas->DispatchEvent(*WebGLContextEvent::Create(
       EventTypeNames::webglcontextcreationerror, error));
 }
 
@@ -127,7 +127,7 @@ WebGLRenderingContext::WebGLRenderingContext(
                                 std::move(context_provider),
                                 using_gpu_compositing,
                                 requested_attributes,
-                                1) {}
+                                Platform::kWebGL1ContextType) {}
 
 void WebGLRenderingContext::SetCanvasGetContextResult(
     RenderingContext& result) {
@@ -159,6 +159,8 @@ void WebGLRenderingContext::RegisterContextExtensions() {
   RegisterExtension<EXTTextureFilterAnisotropic>(
       ext_texture_filter_anisotropic_, kApprovedExtension, kBothPrefixes);
   RegisterExtension<EXTsRGB>(exts_rgb_);
+  RegisterExtension<KHRParallelShaderCompile>(khr_parallel_shader_compile_,
+                                              kDraftExtension);
   RegisterExtension<OESElementIndexUint>(oes_element_index_uint_);
   RegisterExtension<OESStandardDerivatives>(oes_standard_derivatives_);
   RegisterExtension<OESTextureFloat>(oes_texture_float_);
@@ -168,8 +170,6 @@ void WebGLRenderingContext::RegisterContextExtensions() {
   RegisterExtension<OESVertexArrayObject>(oes_vertex_array_object_);
   RegisterExtension<WebGLColorBufferFloat>(webgl_color_buffer_float_);
   RegisterExtension<WebGLCompressedTextureASTC>(webgl_compressed_texture_astc_);
-  RegisterExtension<WebGLCompressedTextureATC>(
-      webgl_compressed_texture_atc_, kApprovedExtension, kBothPrefixes);
   RegisterExtension<WebGLCompressedTextureETC>(webgl_compressed_texture_etc_,
                                                kDraftExtension);
   RegisterExtension<WebGLCompressedTextureETC1>(webgl_compressed_texture_etc1_);
@@ -197,6 +197,7 @@ void WebGLRenderingContext::Trace(blink::Visitor* visitor) {
   visitor->Trace(ext_shader_texture_lod_);
   visitor->Trace(ext_texture_filter_anisotropic_);
   visitor->Trace(exts_rgb_);
+  visitor->Trace(khr_parallel_shader_compile_);
   visitor->Trace(oes_element_index_uint_);
   visitor->Trace(oes_standard_derivatives_);
   visitor->Trace(oes_texture_float_);
@@ -206,7 +207,6 @@ void WebGLRenderingContext::Trace(blink::Visitor* visitor) {
   visitor->Trace(oes_vertex_array_object_);
   visitor->Trace(webgl_color_buffer_float_);
   visitor->Trace(webgl_compressed_texture_astc_);
-  visitor->Trace(webgl_compressed_texture_atc_);
   visitor->Trace(webgl_compressed_texture_etc_);
   visitor->Trace(webgl_compressed_texture_etc1_);
   visitor->Trace(webgl_compressed_texture_pvrtc_);
@@ -218,12 +218,6 @@ void WebGLRenderingContext::Trace(blink::Visitor* visitor) {
   visitor->Trace(webgl_draw_buffers_);
   visitor->Trace(webgl_lose_context_);
   WebGLRenderingContextBase::Trace(visitor);
-}
-
-void WebGLRenderingContext::TraceWrappers(
-    const ScriptWrappableVisitor* visitor) const {
-  // Extensions are managed base WebGLRenderingContextBase.
-  WebGLRenderingContextBase::TraceWrappers(visitor);
 }
 
 }  // namespace blink

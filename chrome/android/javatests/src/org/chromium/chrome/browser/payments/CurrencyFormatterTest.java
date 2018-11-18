@@ -15,7 +15,7 @@ import org.junit.runner.RunWith;
 import org.chromium.base.LocaleUtils;
 import org.chromium.base.test.BaseJUnit4ClassRunner;
 import org.chromium.components.payments.CurrencyFormatter;
-import org.chromium.content.browser.test.NativeLibraryTestRule;
+import org.chromium.content_public.browser.test.NativeLibraryTestRule;
 
 import java.util.Arrays;
 import java.util.List;
@@ -108,7 +108,7 @@ public class CurrencyFormatterTest {
             String expectedAmountFormatting = (String) testCase[4];
 
             CurrencyFormatter formatter =
-                    new CurrencyFormatter(currency, "", LocaleUtils.forLanguageTag(locale));
+                    new CurrencyFormatter(currency, LocaleUtils.forLanguageTag(locale));
 
             String formattedAmount = formatter.format(amount).replace(SPACE, " ");
             Assert.assertEquals("\"" + currency + "\" \"" + amount + "\" (\"" + locale

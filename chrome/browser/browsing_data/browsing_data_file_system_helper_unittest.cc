@@ -10,7 +10,6 @@
 #include "base/bind_helpers.h"
 #include "base/files/file_util.h"
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -283,8 +282,7 @@ TEST_F(BrowsingDataFileSystemHelperTest, CannedAddFileSystem) {
   FetchCannedFileSystems();
 
   EXPECT_EQ(2U, file_system_info_list_->size());
-  std::list<BrowsingDataFileSystemHelper::FileSystemInfo>::iterator info =
-      file_system_info_list_->begin();
+  auto info = file_system_info_list_->begin();
   EXPECT_EQ(kOrigin1, info->origin);
   EXPECT_TRUE(base::ContainsKey(info->usage_map, kPersistent));
   EXPECT_FALSE(base::ContainsKey(info->usage_map, kTemporary));

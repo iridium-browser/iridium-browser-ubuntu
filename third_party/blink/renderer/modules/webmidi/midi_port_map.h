@@ -5,9 +5,9 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_WEBMIDI_MIDI_PORT_MAP_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_WEBMIDI_MIDI_PORT_MAP_H_
 
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
 #include "third_party/blink/renderer/bindings/core/v8/maplike.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
@@ -21,7 +21,7 @@ class MIDIPortMap : public ScriptWrappable, public Maplike<String, T*> {
       : entries_(entries) {}
 
   // IDL attributes / methods
-  size_t size() const { return entries_.size(); }
+  uint32_t size() const { return entries_.size(); }
 
   void Trace(blink::Visitor* visitor) override {
     visitor->Trace(entries_);
@@ -76,7 +76,7 @@ class MIDIPortMap : public ScriptWrappable, public Maplike<String, T*> {
       return true;
     }
 
-    virtual void Trace(blink::Visitor* visitor) {
+    void Trace(blink::Visitor* visitor) override {
       visitor->Trace(map_);
       PairIterable<String, T*>::IterationSource::Trace(visitor);
     }

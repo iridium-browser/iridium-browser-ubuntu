@@ -64,7 +64,7 @@ StreamParserBuffer::StreamParserBuffer(const uint8_t* data,
       config_id_(kInvalidConfigId),
       type_(type),
       track_id_(track_id),
-      duration_type_(DurationType::kKnownDuration) {
+      is_duration_estimated_(false) {
   // TODO(scherkus): Should DataBuffer constructor accept a timestamp and
   // duration to force clients to set them? Today they end up being zero which
   // is both a common and valid value and could lead to bugs.
@@ -89,18 +89,7 @@ void StreamParserBuffer::SetConfigId(int config_id) {
 }
 
 const char* StreamParserBuffer::GetTypeName() const {
-  switch (type()) {
-    case DemuxerStream::AUDIO:
-      return "audio";
-    case DemuxerStream::VIDEO:
-      return "video";
-    case DemuxerStream::TEXT:
-      return "text";
-    case DemuxerStream::UNKNOWN:
-      return "unknown";
-  }
-  NOTREACHED();
-  return "";
+  return DemuxerStream::GetTypeName(type());
 }
 
 void StreamParserBuffer::SetPrerollBuffer(

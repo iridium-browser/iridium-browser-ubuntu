@@ -9,14 +9,12 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/app_list/app_list_controller_delegate.h"
-#include "chrome/browser/ui/app_list/app_list_service.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_icon_loader.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_list_prefs.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_utils.h"
 #include "chrome/browser/ui/app_list/arc/arc_usb_host_permission_manager.h"
 #include "chrome/browser/ui/browser_dialogs.h"
-#include "chrome/browser/ui/views/harmony/chrome_layout_provider.h"
+#include "chrome/browser/ui/views/chrome_layout_provider.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/constrained_window/constrained_window_views.h"
 #include "components/strings/grit/components_strings.h"
@@ -34,8 +32,7 @@ namespace arc {
 
 namespace {
 
-const int kRightColumnWidth = 210;
-const int kIconSize = 64;
+const int kArcAppIconSize = 64;
 // Currenty ARC apps only support 48*48 native icon.
 const int kIconSourceSize = 48;
 
@@ -45,7 +42,6 @@ class ArcAppDialogView : public views::DialogDelegateView,
                          public AppIconLoaderDelegate {
  public:
   ArcAppDialogView(Profile* profile,
-                   AppListControllerDelegate* controller,
                    const std::string& app_id,
                    const base::string16& window_title,
                    const base::string16& heading_text,
@@ -61,13 +57,16 @@ class ArcAppDialogView : public views::DialogDelegateView,
  private:
   // views::WidgetDelegate:
   base::string16 GetWindowTitle() const override;
-  void DeleteDelegate() override;
   ui::ModalType GetModalType() const override;
+  bool ShouldShowCloseButton() const override;
 
   // views::DialogDelegate:
   base::string16 GetDialogButtonLabel(ui::DialogButton button) const override;
   bool Accept() override;
   bool Cancel() override;
+
+  // views::View:
+  gfx::Size CalculatePreferredSize() const override;
 
   // AppIconLoaderDelegate:
   void OnAppImageUpdated(const std::string& app_id,
@@ -86,8 +85,6 @@ class ArcAppDialogView : public views::DialogDelegateView,
 
   Profile* const profile_;
 
-  AppListControllerDelegate* controller_;
-
   const std::string app_id_;
   const base::string16 window_title_;
   const base::string16 confirm_button_text_;
@@ -101,7 +98,6 @@ class ArcAppDialogView : public views::DialogDelegateView,
 ArcAppDialogView* g_current_arc_app_dialog_view = nullptr;
 
 ArcAppDialogView::ArcAppDialogView(Profile* profile,
-                                   AppListControllerDelegate* controller,
                                    const std::string& app_id,
                                    const base::string16& window_title,
                                    const base::string16& heading_text,
@@ -110,7 +106,6 @@ ArcAppDialogView::ArcAppDialogView(Profile* profile,
                                    const base::string16& cancel_button_text,
                                    ArcAppConfirmCallback confirm_callback)
     : profile_(profile),
-      controller_(controller),
       app_id_(app_id),
       window_title_(window_title),
       confirm_button_text_(confirm_button_text),
@@ -124,7 +119,7 @@ ArcAppDialogView::ArcAppDialogView(Profile* profile,
       provider->GetDistanceMetric(views::DISTANCE_RELATED_CONTROL_HORIZONTAL)));
 
   icon_view_ = new views::ImageView();
-  icon_view_->SetPreferredSize(gfx::Size(kIconSize, kIconSize));
+  icon_view_->SetPreferredSize(gfx::Size(kArcAppIconSize, kArcAppIconSize));
   AddChildView(icon_view_);
 
   views::View* text_container = new views::View();
@@ -142,7 +137,8 @@ ArcAppDialogView::ArcAppDialogView(Profile* profile,
   if (!subheading_text.empty())
     AddMultiLineLabel(text_container, subheading_text);
 
-  icon_loader_.reset(new ArcAppIconLoader(profile_, kIconSourceSize, this));
+  icon_loader_ = std::make_unique<ArcAppIconLoader>(
+      profile_, kIconSourceSize, this);
   // The dialog will show once the icon is loaded.
   icon_loader_->FetchImage(app_id_);
   chrome::RecordDialogCreation(chrome::DialogIdentifier::ARC_APP);
@@ -159,7 +155,6 @@ void ArcAppDialogView::AddMultiLineLabel(views::View* parent,
   label->SetMultiLine(true);
   label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
   label->SetAllowCharacterBreak(true);
-  label->SizeToFit(kRightColumnWidth);
   parent->AddChildView(label);
 }
 
@@ -175,14 +170,12 @@ base::string16 ArcAppDialogView::GetWindowTitle() const {
   return window_title_;
 }
 
-void ArcAppDialogView::DeleteDelegate() {
-  if (controller_)
-    controller_->OnCloseChildDialog();
-  DialogDelegateView::DeleteDelegate();
-}
-
 ui::ModalType ArcAppDialogView::GetModalType() const {
   return ui::MODAL_TYPE_WINDOW;
+}
+
+bool ArcAppDialogView::ShouldShowCloseButton() const {
+  return false;
 }
 
 base::string16 ArcAppDialogView::GetDialogButtonLabel(
@@ -203,6 +196,12 @@ bool ArcAppDialogView::Cancel() {
   return true;
 }
 
+gfx::Size ArcAppDialogView::CalculatePreferredSize() const {
+  const int default_width = views::LayoutProvider::Get()->GetDistanceMetric(
+      DISTANCE_MODAL_DIALOG_PREFERRED_WIDTH);
+  return gfx::Size(default_width, GetHeightForWidth(default_width));
+}
+
 void ArcAppDialogView::OnAppImageUpdated(const std::string& app_id,
                                          const gfx::ImageSkia& image) {
   DCHECK_EQ(app_id, app_id_);
@@ -218,9 +217,6 @@ void ArcAppDialogView::OnAppImageUpdated(const std::string& app_id,
 
 void ArcAppDialogView::Show() {
   initial_setup_ = false;
-
-  if (controller_)
-    controller_->OnShowChildDialog();
 
   g_current_arc_app_dialog_view = this;
   constrained_window::CreateBrowserModalDialogViews(this, nullptr)->Show();
@@ -242,7 +238,6 @@ std::unique_ptr<ArcAppListPrefs::AppInfo> GetArcAppInfo(
 }  // namespace
 
 void ShowArcAppUninstallDialog(Profile* profile,
-                               AppListControllerDelegate* controller,
                                const std::string& app_id) {
   std::unique_ptr<ArcAppListPrefs::AppInfo> app_info =
       GetArcAppInfo(profile, app_id);
@@ -271,7 +266,7 @@ void ShowArcAppUninstallDialog(Profile* profile,
 
   base::string16 cancel_button_text = l10n_util::GetStringUTF16(IDS_CANCEL);
   new ArcAppDialogView(
-      profile, controller, app_id, window_title, heading_text, subheading_text,
+      profile, app_id, window_title, heading_text, subheading_text,
       confirm_button_text, cancel_button_text,
       base::BindOnce(HandleArcAppUninstall,
                      base::BindOnce(UninstallArcApp, app_id, profile)));
@@ -298,8 +293,8 @@ void ShowUsbScanDeviceListPermissionDialog(Profile* profile,
 
   base::string16 cancel_button_text = l10n_util::GetStringUTF16(IDS_CANCEL);
 
-  new ArcAppDialogView(profile, nullptr /*controller*/, app_id, window_title,
-                       heading_text, base::string16() /*subheading_text*/,
+  new ArcAppDialogView(profile, app_id, window_title, heading_text,
+                       base::string16() /*subheading_text*/,
                        confirm_button_text, cancel_button_text,
                        std::move(callback));
 }
@@ -327,9 +322,9 @@ void ShowUsbAccessPermissionDialog(Profile* profile,
 
   base::string16 cancel_button_text = l10n_util::GetStringUTF16(IDS_CANCEL);
 
-  new ArcAppDialogView(profile, nullptr /*controller*/, app_id, window_title,
-                       heading_text, subheading_text, confirm_button_text,
-                       cancel_button_text, std::move(callback));
+  new ArcAppDialogView(profile, app_id, window_title, heading_text,
+                       subheading_text, confirm_button_text, cancel_button_text,
+                       std::move(callback));
 }
 
 bool IsArcAppDialogViewAliveForTest() {

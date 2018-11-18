@@ -39,9 +39,9 @@
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/input_type_names.h"
 #include "third_party/blink/renderer/core/layout/layout_image.h"
+#include "third_party/blink/renderer/core/scroll/scrollbar.h"
 #include "third_party/blink/renderer/core/svg/svg_element.h"
 #include "third_party/blink/renderer/platform/geometry/region.h"
-#include "third_party/blink/renderer/platform/scroll/scrollbar.h"
 
 namespace blink {
 
@@ -52,34 +52,15 @@ HitTestResult::HitTestResult()
       cacheable_(true),
       is_over_embedded_content_view_(false) {}
 
-HitTestResult::HitTestResult(const HitTestRequest& request,
-                             const LayoutPoint& point)
-    : hit_test_location_(point),
-      hit_test_request_(request),
-      cacheable_(true),
-      point_in_inner_node_frame_(point),
-      is_over_embedded_content_view_(false) {}
-
-HitTestResult::HitTestResult(const HitTestRequest& request,
-                             const LayoutPoint& center_point,
-                             const LayoutRectOutsets& padding)
-    : hit_test_location_(center_point, padding),
-      hit_test_request_(request),
-      cacheable_(true),
-      point_in_inner_node_frame_(center_point),
-      is_over_embedded_content_view_(false) {}
-
 HitTestResult::HitTestResult(const HitTestRequest& other_request,
-                             const HitTestLocation& other)
-    : hit_test_location_(other),
-      hit_test_request_(other_request),
+                             const HitTestLocation& location)
+    : hit_test_request_(other_request),
       cacheable_(true),
-      point_in_inner_node_frame_(hit_test_location_.Point()),
+      point_in_inner_node_frame_(location.Point()),
       is_over_embedded_content_view_(false) {}
 
 HitTestResult::HitTestResult(const HitTestResult& other)
-    : hit_test_location_(other.hit_test_location_),
-      hit_test_request_(other.hit_test_request_),
+    : hit_test_request_(other.hit_test_request_),
       cacheable_(other.cacheable_),
       inner_node_(other.InnerNode()),
       inner_possibly_pseudo_node_(other.inner_possibly_pseudo_node_),
@@ -98,7 +79,6 @@ HitTestResult::HitTestResult(const HitTestResult& other)
 HitTestResult::~HitTestResult() = default;
 
 HitTestResult& HitTestResult::operator=(const HitTestResult& other) {
-  hit_test_location_ = other.hit_test_location_;
   hit_test_request_ = other.hit_test_request_;
   PopulateFromCachedResult(other);
 
@@ -117,7 +97,6 @@ bool HitTestResult::EqualForCacheability(const HitTestResult& other) const {
 }
 
 void HitTestResult::CacheValues(const HitTestResult& other) {
-  *this = other;
   hit_test_request_ =
       other.hit_test_request_.GetType() & ~HitTestRequest::kAvoidCache;
 }
@@ -215,7 +194,7 @@ void HitTestResult::SetInnerNode(Node* n) {
     return;
   }
   if (n->IsPseudoElement())
-    n = ToPseudoElement(n)->FindAssociatedNode();
+    n = ToPseudoElement(n)->InnerNodeForHitTesting();
   inner_node_ = n;
   if (HTMLAreaElement* area = ImageAreaForImage()) {
     inner_node_ = area;
@@ -237,12 +216,12 @@ LocalFrame* HitTestResult::InnerNodeFrame() const {
   return nullptr;
 }
 
-bool HitTestResult::IsSelected() const {
+bool HitTestResult::IsSelected(const HitTestLocation& location) const {
   if (!inner_node_)
     return false;
 
   if (LocalFrame* frame = inner_node_->GetDocument().GetFrame())
-    return frame->Selection().Contains(hit_test_location_.Point());
+    return frame->Selection().Contains(location.Point());
   return false;
 }
 
@@ -252,14 +231,14 @@ String HitTestResult::Title(TextDirection& dir) const {
   // For <area> tags in image maps, walk the tree for the <area>, not the <img>
   // using it.
   if (inner_node_.Get())
-    inner_node_->UpdateDistribution();
+    inner_node_->UpdateDistributionForFlatTreeTraversal();
   for (Node* title_node = inner_node_.Get(); title_node;
        title_node = FlatTreeTraversal::Parent(*title_node)) {
     if (title_node->IsElementNode()) {
       String title = ToElement(title_node)->title();
       if (!title.IsNull()) {
         if (LayoutObject* layout_object = title_node->GetLayoutObject())
-          dir = layout_object->Style()->Direction();
+          dir = layout_object->StyleRef().Direction();
         return title;
       }
     }
@@ -469,13 +448,9 @@ HitTestResult::NodeSet& HitTestResult::MutableListBasedTestResult() {
   return *list_based_test_result_;
 }
 
-void HitTestResult::ResolveRectBasedTest(
+HitTestLocation HitTestResult::ResolveRectBasedTest(
     Node* resolved_inner_node,
     const LayoutPoint& resolved_point_in_main_frame) {
-  DCHECK(IsRectBasedTest());
-  DCHECK(hit_test_location_.ContainsPoint(
-      FloatPoint(resolved_point_in_main_frame)));
-  hit_test_location_ = HitTestLocation(resolved_point_in_main_frame);
   point_in_inner_node_frame_ = resolved_point_in_main_frame;
   inner_node_ = nullptr;
   inner_possibly_pseudo_node_ = nullptr;
@@ -488,7 +463,8 @@ void HitTestResult::ResolveRectBasedTest(
   DCHECK(resolved_inner_node);
   if (auto* layout_object = resolved_inner_node->GetLayoutObject())
     layout_object->UpdateHitTestResult(*this, LayoutPoint());
-  DCHECK(!IsRectBasedTest());
+
+  return HitTestLocation(resolved_point_in_main_frame);
 }
 
 Element* HitTestResult::InnerElement() const {

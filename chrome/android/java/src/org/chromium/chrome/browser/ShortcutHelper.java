@@ -24,7 +24,6 @@ import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.Icon;
 import android.net.Uri;
-import android.os.AsyncTask;
 import android.os.Build;
 import android.text.TextUtils;
 import android.util.Base64;
@@ -33,9 +32,11 @@ import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.CollectionUtil;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
+import org.chromium.base.StrictModeContext;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.task.AsyncTask;
 import org.chromium.blink_public.platform.WebDisplayMode;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.webapps.WebApkInfo;
@@ -92,7 +93,7 @@ public class ShortcutHelper {
     // be correctly populated into the WebappRegistry/WebappDataStorage.
     public static final int WEBAPP_SHORTCUT_VERSION = 2;
 
-    // This value is equal to kInvalidOrMissingColor in the C++ content::Manifest struct.
+    // This value is equal to kInvalidOrMissingColor in the C++ blink::Manifest struct.
     public static final long MANIFEST_COLOR_INVALID_OR_MISSING = ((long) Integer.MAX_VALUE) + 1;
 
     private static final String TAG = "ShortcutHelper";
@@ -162,9 +163,9 @@ public class ShortcutHelper {
             final Bitmap icon, @WebDisplayMode final int displayMode, final int orientation,
             final int source, final long themeColor, final long backgroundColor,
             final String splashScreenUrl, final long callbackPointer) {
-        new AsyncTask<Void, Void, Intent>() {
+        new AsyncTask<Intent>() {
             @Override
-            protected Intent doInBackground(Void... args0) {
+            protected Intent doInBackground() {
                 // Encoding {@link icon} as a string and computing the mac are expensive.
 
                 Context context = ContextUtils.getApplicationContext();
@@ -198,7 +199,8 @@ public class ShortcutHelper {
                     showAddedToHomescreenToast(userTitle);
                 }
             }
-        }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+        }
+                .executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
     }
 
     /**
@@ -279,9 +281,9 @@ public class ShortcutHelper {
     private static void storeWebappSplashImage(final String id, final Bitmap splashImage) {
         final WebappDataStorage storage = WebappRegistry.getInstance().getWebappDataStorage(id);
         if (storage != null) {
-            new AsyncTask<Void, Void, String>() {
+            new AsyncTask<String>() {
                 @Override
-                protected String doInBackground(Void... args0) {
+                protected String doInBackground() {
                     return encodeBitmapAsString(splashImage);
                 }
 
@@ -289,7 +291,8 @@ public class ShortcutHelper {
                 protected void onPostExecute(String encodedImage) {
                     storage.updateSplashScreenImage(encodedImage);
                 }
-            }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+            }
+                    .executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
         }
     }
 
@@ -608,24 +611,20 @@ public class ShortcutHelper {
         // - Clearing the URL's query and fragment.
 
         Uri uri = Uri.parse(url);
-        List<String> path = uri.getPathSegments();
-        int endIndex = path.size();
+        String path = uri.getEncodedPath();
 
         // Remove the last path element if there is at least one path element, *and* the path does
         // not end with a slash. This means that URLs to specific files have the file component
         // removed, but URLs to directories retain the directory.
-        if (endIndex > 0 && !uri.getPath().endsWith("/")) {
-            endIndex -= 1;
+        int lastSlashIndex = (path == null) ? -1 : path.lastIndexOf("/");
+        if (lastSlashIndex < 0) {
+            path = "/";
+        } else if (lastSlashIndex < path.length() - 1) {
+            path = path.substring(0, lastSlashIndex + 1);
         }
 
-        // Make sure the path starts and ends with a slash (or is only a slash if there is no path).
         Uri.Builder builder = uri.buildUpon();
-        String scope_path = "/" + TextUtils.join("/", path.subList(0, endIndex));
-        if (scope_path.length() > 1) {
-            scope_path += "/";
-        }
-        builder.path(scope_path);
-
+        builder.encodedPath(path);
         builder.fragment("");
         builder.query("");
         return builder.build().toString();
@@ -683,7 +682,9 @@ public class ShortcutHelper {
     private static void checkIfRequestPinShortcutSupported() {
         sShortcutManager =
                 ContextUtils.getApplicationContext().getSystemService(ShortcutManager.class);
-        sIsRequestPinShortcutSupported = sShortcutManager.isRequestPinShortcutSupported();
+        try (StrictModeContext unused = StrictModeContext.allowDiskReads()) {
+            sIsRequestPinShortcutSupported = sShortcutManager.isRequestPinShortcutSupported();
+        }
     }
 
     private static int getSizeFromResourceInPx(Context context, int resource) {

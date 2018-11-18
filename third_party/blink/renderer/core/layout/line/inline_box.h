@@ -26,7 +26,6 @@
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/layout/api/line_layout_box_model.h"
 #include "third_party/blink/renderer/core/layout/api/line_layout_item.h"
-#include "third_party/blink/renderer/core/layout/api/selection_state.h"
 #include "third_party/blink/renderer/platform/fonts/font_vertical_position_type.h"
 #include "third_party/blink/renderer/platform/graphics/paint/display_item_client.h"
 #include "third_party/blink/renderer/platform/text/text_direction.h"
@@ -40,14 +39,6 @@ class LayoutObject;
 class RootInlineBox;
 
 enum MarkLineBoxes { kMarkLineBoxesDirty, kDontMarkLineBoxes };
-
-// Returns whether the position type is CSS "line-over"; i.e., ascender side
-// or "top" side of a line box.
-// https://drafts.csswg.org/css-writing-modes-3/#line-over
-static inline bool IsLineOverSide(FontVerticalPositionType type) {
-  return type == FontVerticalPositionType::TextTop ||
-         type == FontVerticalPositionType::TopOfEmHeight;
-}
 
 // InlineBox represents a rectangle that occurs on a line.  It corresponds to
 // some LayoutObject (i.e., it represents a portion of that LayoutObject).
@@ -139,7 +130,7 @@ class CORE_EXPORT InlineBox : public DisplayItemClient {
   // DisplayItemClient methods
   String DebugName() const override;
   LayoutRect VisualRect() const override;
-  LayoutRect PartialInvalidationRect() const override;
+  LayoutRect PartialInvalidationVisualRect() const override;
 
   bool IsText() const { return bitfields_.IsText(); }
   void SetIsText(bool is_text) { bitfields_.SetIsText(is_text); }
@@ -202,9 +193,6 @@ class CORE_EXPORT InlineBox : public DisplayItemClient {
   InlineBox* PrevLeafChild() const;
 
   // Helper functions for editing and hit-testing code.
-  // FIXME: These two functions should be moved to RenderedPosition once the
-  // code to convert between Position and inline box, offset pair is moved to
-  // RenderedPosition.
   InlineBox* NextLeafChildIgnoringLineBreak() const;
   InlineBox* PrevLeafChildIgnoringLineBreak() const;
 
@@ -319,7 +307,7 @@ class CORE_EXPORT InlineBox : public DisplayItemClient {
 
   virtual void DirtyLineBoxes();
 
-  virtual SelectionState GetSelectionState() const;
+  virtual bool IsSelected() const;
 
   virtual bool CanAccommodateEllipsis(bool ltr,
                                       LayoutUnit block_edge,

@@ -83,6 +83,9 @@
 #include "util/win/initial_client_data.h"
 #include "util/win/session_end_watcher.h"
 #elif defined(OS_FUCHSIA)
+#include <zircon/process.h>
+#include <zircon/processargs.h>
+
 #include "handler/fuchsia/crash_report_exception_handler.h"
 #include "handler/fuchsia/exception_handler_server.h"
 #elif defined(OS_LINUX)
@@ -141,6 +144,8 @@ void Usage(const base::FilePath& me) {
 "      --trace-parent-with-exception=EXCEPTION_INFORMATION_ADDRESS\n"
 "                              request a dump for the handler's parent process\n"
 "      --initial-client-fd=FD  a socket connected to a client.\n"
+"      --sanitization_information=SANITIZATION_INFORMATION_ADDRESS\n"
+"                              the address of a SanitizationInformation struct.\n"
 #endif  // OS_LINUX || OS_ANDROID
 "      --url=URL               send crash reports to this Breakpad server URL,\n"
 "                              only if uploads are enabled for the database\n"
@@ -164,6 +169,7 @@ struct Options {
 #elif defined(OS_LINUX) || defined(OS_ANDROID)
   VMAddress exception_information_address;
   int initial_client_fd;
+  VMAddress sanitization_information_address;
 #elif defined(OS_WIN)
   std::string pipe_name;
   InitialClientData initial_client_data;
@@ -390,17 +396,19 @@ void InstallCrashHandler() {
   ALLOW_UNUSED_LOCAL(terminate_handler);
 }
 
-#elif defined(OS_FUCHSIA) || defined(OS_LINUX)
+#elif defined(OS_FUCHSIA)
 
 void InstallCrashHandler() {
-  // TODO(scottmg): Fuchsia: https://crashpad.chromium.org/bug/196
-  // TODO(jperaza): Linux: https://crashpad.chromium.org/bug/30
-  NOTREACHED();
+  // There's nothing to do here. Crashes in this process will already be caught
+  // here because this handler process is in the same job that has had its
+  // exception port bound.
+
+  // TODO(scottmg): This should collect metrics on handler crashes, at a
+  // minimum. https://crashpad.chromium.org/bug/230.
 }
 
 void ReinstallCrashHandler() {
   // TODO(scottmg): Fuchsia: https://crashpad.chromium.org/bug/196
-  // TODO(jperaza): Linux: https://crashpad.chromium.org/bug/30
   NOTREACHED();
 }
 
@@ -530,6 +538,7 @@ int HandlerMain(int argc,
 #if defined(OS_LINUX) || defined(OS_ANDROID)
     kOptionTraceParentWithException,
     kOptionInitialClientFD,
+    kOptionSanitizationInformation,
 #endif
     kOptionURL,
 
@@ -585,6 +594,10 @@ int HandlerMain(int argc,
      nullptr,
      kOptionTraceParentWithException},
     {"initial-client-fd", required_argument, nullptr, kOptionInitialClientFD},
+    {"sanitization-information",
+     required_argument,
+     nullptr,
+     kOptionSanitizationInformation},
 #endif  // OS_LINUX || OS_ANDROID
     {"url", required_argument, nullptr, kOptionURL},
     {"help", no_argument, nullptr, kOptionHelp},
@@ -603,6 +616,7 @@ int HandlerMain(int argc,
 #if defined(OS_LINUX) || defined(OS_ANDROID)
   options.exception_information_address = 0;
   options.initial_client_fd = kInvalidFileHandle;
+  options.sanitization_information_address = 0;
 #endif
 
   int opt;
@@ -709,6 +723,15 @@ int HandlerMain(int argc,
         }
         break;
       }
+      case kOptionSanitizationInformation: {
+        if (!StringToNumber(optarg,
+                            &options.sanitization_information_address)) {
+          ToolSupport::UsageHint(me,
+                                 "failed to parse --sanitization-information");
+          return ExitFailure();
+        }
+        break;
+      }
 #endif  // OS_LINUX || OS_ANDROID
       case kOptionURL: {
         options.url = optarg;
@@ -758,8 +781,14 @@ int HandlerMain(int argc,
   if (!options.exception_information_address &&
       options.initial_client_fd == kInvalidFileHandle) {
     ToolSupport::UsageHint(
+        me, "--trace-parent-with-exception or --initial_client_fd is required");
+    return ExitFailure();
+  }
+  if (options.sanitization_information_address &&
+      !options.exception_information_address) {
+    ToolSupport::UsageHint(
         me,
-        "--exception_information_address or --initial_client_fd is required");
+        "--sanitization_information requires --trace-parent-with-exception");
     return ExitFailure();
   }
 #endif  // OS_MACOSX
@@ -831,13 +860,20 @@ int HandlerMain(int argc,
       database.get(),
       static_cast<CrashReportUploadThread*>(upload_thread.Get()),
       &options.annotations,
+#if defined(OS_FUCHSIA)
+      // TODO(scottmg): Process level file attachments, and for all platforms.
+      nullptr,
+#endif
       user_stream_sources);
 
  #if defined(OS_LINUX) || defined(OS_ANDROID)
   if (options.exception_information_address) {
-    return exception_handler.HandleException(getppid(),
-                                      options.exception_information_address) ?
-    EXIT_SUCCESS : ExitFailure();
+    ClientInformation info;
+    info.exception_information_address = options.exception_information_address;
+    info.sanitization_information_address =
+        options.sanitization_information_address;
+    return exception_handler.HandleException(getppid(), info) ? EXIT_SUCCESS
+                                                              : ExitFailure();
   }
 #endif  // OS_LINUX || OS_ANDROID
 
@@ -901,7 +937,27 @@ int HandlerMain(int argc,
   if (!options.pipe_name.empty()) {
     exception_handler_server.SetPipeName(base::UTF8ToUTF16(options.pipe_name));
   }
-#elif defined(OS_LINUX) || defined(OS_ANDROID) || defined(OS_FUCHSIA)
+#elif defined(OS_FUCHSIA)
+  // These handles are logically "moved" into these variables when retrieved by
+  // zx_take_startup_handle(). Both are given to ExceptionHandlerServer which
+  // owns them in this process. There is currently no "connect-later" mode on
+  // Fuchsia, all the binding must be done by the client before starting
+  // crashpad_handler.
+  zx::job root_job(zx_take_startup_handle(PA_HND(PA_USER0, 0)));
+  if (!root_job.is_valid()) {
+    LOG(ERROR) << "no process handle passed in startup handle 0";
+    return EXIT_FAILURE;
+  }
+
+  zx::port exception_port(zx_take_startup_handle(PA_HND(PA_USER0, 1)));
+  if (!exception_port.is_valid()) {
+    LOG(ERROR) << "no exception port handle passed in startup handle 1";
+    return EXIT_FAILURE;
+  }
+
+  ExceptionHandlerServer exception_handler_server(std::move(root_job),
+                                                  std::move(exception_port));
+#elif defined(OS_LINUX) || defined(OS_ANDROID)
   ExceptionHandlerServer exception_handler_server;
 #endif  // OS_MACOSX
 

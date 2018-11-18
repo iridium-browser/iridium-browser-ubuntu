@@ -56,7 +56,7 @@ void ContainerFullWidthBehavior::InitializeShowAnimationStartingState(
   container->layer()->SetOpacity(kAnimationStartOrAfterHideOpacity);
 }
 
-const gfx::Rect ContainerFullWidthBehavior::AdjustSetBoundsRequest(
+gfx::Rect ContainerFullWidthBehavior::AdjustSetBoundsRequest(
     const gfx::Rect& display_bounds,
     const gfx::Rect& requested_bounds_in_screen_coords) {
   gfx::Rect new_bounds;
@@ -112,11 +112,19 @@ bool ContainerFullWidthBehavior::TextBlurHidesKeyboard() const {
   return !controller_->keyboard_locked();
 }
 
-bool ContainerFullWidthBehavior::BoundsObscureUsableRegion() const {
-  return true;
+void ContainerFullWidthBehavior::SetOccludedBounds(
+    const gfx::Rect& occluded_bounds_in_window) {
+  occluded_bounds_in_window_ = occluded_bounds_in_window;
 }
 
-bool ContainerFullWidthBehavior::BoundsAffectWorkspaceLayout() const {
+gfx::Rect ContainerFullWidthBehavior::GetOccludedBounds(
+    const gfx::Rect& visual_bounds_in_window) const {
+  DCHECK(visual_bounds_in_window.Contains(occluded_bounds_in_window_));
+  return occluded_bounds_in_window_.IsEmpty() ? visual_bounds_in_window
+                                              : occluded_bounds_in_window_;
+}
+
+bool ContainerFullWidthBehavior::OccludedBoundsAffectWorkspaceLayout() const {
   return controller_->keyboard_locked();
 }
 

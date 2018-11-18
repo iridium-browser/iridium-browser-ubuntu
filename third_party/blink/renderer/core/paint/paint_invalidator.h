@@ -8,27 +8,29 @@
 #include "third_party/blink/renderer/core/layout/layout_object.h"
 #include "third_party/blink/renderer/core/paint/paint_property_tree_builder.h"
 #include "third_party/blink/renderer/platform/geometry/layout_rect.h"
+#include "third_party/blink/renderer/platform/graphics/paint_invalidation_reason.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
 
 class NGPaintFragment;
 class PrePaintTreeWalk;
+
 struct CORE_EXPORT PaintInvalidatorContext {
-  DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
+  DISALLOW_NEW();
 
  public:
   class ParentContextAccessor {
    public:
     ParentContextAccessor() = default;
     ParentContextAccessor(PrePaintTreeWalk* tree_walk,
-                          size_t parent_context_index)
+                          wtf_size_t parent_context_index)
         : tree_walk_(tree_walk), parent_context_index_(parent_context_index) {}
     const PaintInvalidatorContext* ParentContext() const;
 
    private:
     PrePaintTreeWalk* tree_walk_ = nullptr;
-    size_t parent_context_index_ = 0u;
+    wtf_size_t parent_context_index_ = 0u;
   };
 
   PaintInvalidatorContext() = default;
@@ -42,16 +44,24 @@ struct CORE_EXPORT PaintInvalidatorContext {
             ParentContext()->paint_invalidation_container_for_stacked_contents),
         painting_layer(ParentContext()->painting_layer) {}
 
-  void MapLocalRectToVisualRectInBacking(const LayoutObject&,
-                                         LayoutRect&) const;
+  void MapLocalRectToVisualRect(const LayoutObject&, LayoutRect&) const;
 
   bool NeedsVisualRectUpdate(const LayoutObject& object) const {
 #if DCHECK_IS_ON()
     if (force_visual_rect_update_for_checking_)
       return true;
 #endif
+    // If an ancestor needed a visual rect update and any subtree flag was set,
+    // then we require that the subtree also needs a visual rect update.
     return object.NeedsPaintOffsetAndVisualRectUpdate() ||
            (subtree_flags & PaintInvalidatorContext::kSubtreeVisualRectUpdate);
+  }
+
+  bool NeedsSubtreeWalk() const {
+    return subtree_flags &
+           (kSubtreeInvalidationChecking | kSubtreeVisualRectUpdate |
+            kSubtreeFullInvalidation |
+            kSubtreeFullInvalidationForStackedContents);
   }
 
   const PaintInvalidatorContext* ParentContext() const {
@@ -64,15 +74,15 @@ struct CORE_EXPORT PaintInvalidatorContext {
   ParentContextAccessor parent_context_accessor_;
 
  public:
+  // When adding new subtree flags, ensure |NeedsSubtreeWalk| is updated.
   enum SubtreeFlag {
     kSubtreeInvalidationChecking = 1 << 0,
     kSubtreeVisualRectUpdate = 1 << 1,
     kSubtreeFullInvalidation = 1 << 2,
     kSubtreeFullInvalidationForStackedContents = 1 << 3,
-    kSubtreeSVGResourceChange = 1 << 4,
 
     // For repeated objects inside multicolumn.
-    kSubtreeSlowPathRect = 1 << 5,
+    kSubtreeSlowPathRect = 1 << 4,
 
     // When this flag is set, no paint or raster invalidation will be issued
     // for the subtree.
@@ -107,21 +117,9 @@ struct CORE_EXPORT PaintInvalidatorContext {
 
   PaintLayer* painting_layer = nullptr;
 
-  // Store the old visual rect in the paint invalidation backing's coordinates.
-  // It does *not* account for composited scrolling.
-  // See LayoutObject::AdjustVisualRectForCompositedScrolling().
+  // The previous VisualRect and PaintOffset of FragmentData.
   LayoutRect old_visual_rect;
-  // Use LayoutObject::VisualRect() to get the new visual rect.
-
-  // This field and LayoutObject::LocationInBacking() store the old and new
-  // origins of the object's local coordinates in the paint invalidation
-  // backing's coordinates. They are used to detect layoutObject shifts that
-  // force a full invalidation and invalidation check in subtree.
-  // The points do *not* account for composited scrolling. See
-  // LayoutObject::adjustVisualRectForCompositedScrolling().
-  // This field will be removed for SPv175.
-  LayoutPoint old_location;
-  // Use LayoutObject::LocationInBacking() to get the new location.
+  LayoutPoint old_paint_offset;
 
   const FragmentData* fragment_data;
 
@@ -133,7 +131,6 @@ struct CORE_EXPORT PaintInvalidatorContext {
 
 #if DCHECK_IS_ON()
   bool tree_builder_context_actually_needed_ = false;
-  friend class FindVisualRectNeedingUpdateScope;
   friend class FindVisualRectNeedingUpdateScopeBase;
   mutable bool force_visual_rect_update_for_checking_ = false;
 #endif
@@ -162,21 +159,18 @@ class PaintInvalidator {
       const PaintInvalidatorContext&,
       Rect&);
   template <typename Rect, typename Point>
-  static LayoutRect MapLocalRectToVisualRectInBacking(
-      const LayoutObject&,
-      const Rect&,
-      const PaintInvalidatorContext&,
-      bool disable_flip = false);
+  static LayoutRect MapLocalRectToVisualRect(const LayoutObject&,
+                                             const Rect&,
+                                             const PaintInvalidatorContext&,
+                                             bool disable_flip = false);
 
+  ALWAYS_INLINE LayoutRect ComputeVisualRect(const LayoutObject&,
+                                             const PaintInvalidatorContext&);
   ALWAYS_INLINE LayoutRect
-  ComputeVisualRectInBacking(const LayoutObject&,
-                             const PaintInvalidatorContext&);
-  ALWAYS_INLINE LayoutRect
-  ComputeVisualRectInBacking(const NGPaintFragment&,
-                             const LayoutObject&,
-                             const PaintInvalidatorContext&);
-  ALWAYS_INLINE LayoutPoint
-  ComputeLocationInBacking(const LayoutObject&, const PaintInvalidatorContext&);
+  MapFragmentLocalRectToVisualRect(const LayoutRect&,
+                                   const LayoutObject&,
+                                   const NGPaintFragment&,
+                                   const PaintInvalidatorContext&);
   ALWAYS_INLINE void UpdatePaintingLayer(const LayoutObject&,
                                          PaintInvalidatorContext&);
   ALWAYS_INLINE void UpdatePaintInvalidationContainer(const LayoutObject&,

@@ -119,10 +119,6 @@ class ImmersiveModeController {
 
   Type type() const { return type_; }
 
-  // Returns the widget hosting the reveal, null if a widget isn't used to
-  // host the reveal, or not currently revealed.
-  virtual views::Widget* GetRevealWidget() = 0;
-
   // Called by browser view to indicate the widget activation has changed.
   // Immersive mode should be enabled/disabled if the widget is
   // active/nonactive when the auto hide title bars in tablet mode feature is
@@ -134,7 +130,7 @@ class ImmersiveModeController {
   virtual void RemoveObserver(Observer* observer);
 
  protected:
-  base::ObserverList<Observer> observers_;
+  base::ObserverList<Observer>::Unchecked observers_;
 
  private:
   const Type type_;

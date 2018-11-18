@@ -12,6 +12,7 @@
 #include "base/containers/circular_deque.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
+#include "base/sequence_checker.h"
 #include "components/sync/base/model_type.h"
 #include "components/sync/base/weak_handle.h"
 #include "components/sync/engine/cycle/sync_cycle_snapshot.h"
@@ -55,6 +56,7 @@ class DebugInfoEventListener : public SyncManager::Observer,
   // SyncEncryptionHandler::Observer implementation.
   void OnPassphraseRequired(
       PassphraseRequiredReason reason,
+      const KeyDerivationParams& key_derivation_params,
       const sync_pb::EncryptedData& pending_keys) override;
   void OnPassphraseAccepted() override;
   void OnBootstrapTokenUpdated(const std::string& bootstrap_token,
@@ -107,7 +109,7 @@ class DebugInfoEventListener : public SyncManager::Observer,
   // Cryptographer is initialized and does not have pending keys.
   bool cryptographer_ready_;
 
-  base::ThreadChecker thread_checker_;
+  SEQUENCE_CHECKER(sequence_checker_);
 
   base::WeakPtrFactory<DebugInfoEventListener> weak_ptr_factory_;
 

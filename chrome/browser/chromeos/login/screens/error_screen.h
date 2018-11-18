@@ -16,6 +16,8 @@
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
 #include "chrome/browser/ui/webui/chromeos/login/network_state_informer.h"
 #include "chromeos/login/auth/login_performer.h"
+#include "chromeos/network/network_connection_observer.h"
+#include "components/web_modal/web_contents_modal_dialog_manager_delegate.h"
 
 namespace chromeos {
 
@@ -24,7 +26,9 @@ class CaptivePortalWindowProxy;
 class NetworkErrorView;
 
 // Controller for the error screen.
-class ErrorScreen : public BaseScreen, public LoginPerformer::Delegate {
+class ErrorScreen : public BaseScreen,
+                    public LoginPerformer::Delegate,
+                    public NetworkConnectionObserver {
  public:
   using ConnectRequestCallbackSubscription =
       std::unique_ptr<base::CallbackList<void()>::Subscription>;
@@ -37,10 +41,13 @@ class ErrorScreen : public BaseScreen, public LoginPerformer::Delegate {
   static const char kUserActionLocalStateErrorPowerwashButtonClicked[];
   static const char kUserActionRebootButtonClicked[];
   static const char kUserActionShowCaptivePortalClicked[];
-  static const char kUserActionConnectRequested[];
 
   ErrorScreen(BaseScreenDelegate* base_screen_delegate, NetworkErrorView* view);
   ~ErrorScreen() override;
+
+  CaptivePortalWindowProxy* captive_portal_window_proxy() {
+    return captive_portal_window_proxy_.get();
+  }
 
   // Toggles the guest sign-in prompt.
   void AllowGuestSignin(bool allowed);
@@ -92,6 +99,10 @@ class ErrorScreen : public BaseScreen, public LoginPerformer::Delegate {
   ConnectRequestCallbackSubscription RegisterConnectRequestCallback(
       const base::Closure& callback);
 
+  // Creates an instance of CaptivePortalWindowProxy, if one has not already
+  // been created.
+  void MaybeInitCaptivePortalWindowProxy(content::WebContents* web_contents);
+
   // BaseScreen overrides:
   void Show() override;
   void Hide() override;
@@ -108,6 +119,9 @@ class ErrorScreen : public BaseScreen, public LoginPerformer::Delegate {
   void WhiteListCheckFailed(const std::string& email) override;
   void PolicyLoadFailed() override;
   void SetAuthFlowOffline(bool offline) override;
+
+  // NetworkConnectionObserver overrides:
+  void ConnectToNetworkRequested(const std::string& service_path) override;
 
   // Default hide_closure for Hide().
   void DefaultHideCallback();
@@ -127,9 +141,6 @@ class ErrorScreen : public BaseScreen, public LoginPerformer::Delegate {
 
   // Handle uses action to reboot device.
   void OnRebootButtonClicked();
-
-  // The user indicated to make an attempt to connect to the network.
-  void OnConnectRequested();
 
   // Handles the response of an ownership check and starts the guest session if
   // applicable.

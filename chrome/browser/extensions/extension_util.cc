@@ -22,6 +22,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
+#include "chrome/browser/web_applications/extensions/bookmark_app_util.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/api/url_handlers/url_handlers_parser.h"
@@ -153,7 +154,7 @@ bool CanLoadInIncognito(const Extension* extension,
 bool AllowFileAccess(const std::string& extension_id,
                      content::BrowserContext* context) {
   return base::CommandLine::ForCurrentProcess()->HasSwitch(
-             switches::kDisableExtensionsFileAccessCheck) ||
+             ::switches::kDisableExtensionsFileAccessCheck) ||
          ExtensionPrefs::Get(context)->AllowFileAccess(extension_id);
 }
 
@@ -320,7 +321,7 @@ bool IsNewBookmarkAppsEnabled() {
 bool CanHostedAppsOpenInWindows() {
 #if defined(OS_MACOSX)
   return base::CommandLine::ForCurrentProcess()->HasSwitch(
-             switches::kEnableHostedAppsInWindows) ||
+             ::switches::kEnableHostedAppsInWindows) ||
          base::FeatureList::IsEnabled(features::kDesktopPWAWindowing);
 #else
   return true;
@@ -336,17 +337,19 @@ const Extension* GetInstalledPwaForUrl(
     content::BrowserContext* context,
     const GURL& url,
     base::Optional<LaunchContainer> launch_container_filter) {
-  DCHECK(base::FeatureList::IsEnabled(features::kDesktopPWAWindowing));
+  DCHECK(base::FeatureList::IsEnabled(::features::kDesktopPWAWindowing));
   const ExtensionPrefs* prefs = ExtensionPrefs::Get(context);
   for (scoped_refptr<const Extension> app :
        ExtensionRegistry::Get(context)->enabled_extensions()) {
     if (!app->from_bookmark())
       continue;
+    if (!BookmarkAppIsLocallyInstalled(prefs, app.get()))
+      continue;
     if (launch_container_filter &&
         GetLaunchContainer(prefs, app.get()) != *launch_container_filter) {
       continue;
     }
-    if (UrlHandlers::FindMatchingUrlHandler(app.get(), url))
+    if (UrlHandlers::CanBookmarkAppHandleUrl(app.get(), url))
       return app.get();
   }
   return nullptr;

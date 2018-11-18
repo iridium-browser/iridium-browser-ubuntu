@@ -8,23 +8,30 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_avatar_icon_util.h"
 #include "chrome/browser/signin/account_consistency_mode_manager.h"
-#include "chrome/browser/signin/unified_consent_helper.h"
+#include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/ui/webui/signin/sync_confirmation_handler.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/browser_resources.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/signin/core/browser/avatar_icon_util.h"
+#include "components/strings/grit/components_strings.h"
+#include "components/unified_consent/feature.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
+#include "services/identity/public/cpp/identity_manager.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/webui/web_ui_util.h"
 
 SyncConfirmationUI::SyncConfirmationUI(content::WebUI* web_ui)
-    : SigninWebDialogUI(web_ui) {
+    : SigninWebDialogUI(web_ui),
+      consent_feature_(consent_auditor::Feature::CHROME_SYNC) {
   Profile* profile = Profile::FromWebUI(web_ui);
   bool is_sync_allowed = profile->IsSyncAllowed();
-  bool is_unified_consent_enabled = IsUnifiedConsentEnabled(profile);
+  bool is_unified_consent_enabled =
+      unified_consent::IsUnifiedConsentFeatureEnabled();
 
   content::WebUIDataSource* source =
       content::WebUIDataSource::Create(chrome::kChromeUISyncConfirmationHost);
@@ -36,6 +43,8 @@ SyncConfirmationUI::SyncConfirmationUI(content::WebUI* web_ui)
   int undo_button_ids = -1;
   if (is_unified_consent_enabled && is_sync_allowed) {
     source->SetDefaultResource(IDR_DICE_SYNC_CONFIRMATION_HTML);
+    source->AddResourcePath("icons.html",
+                            IDR_DICE_SYNC_CONFIRMATION_ICONS_HTML);
     source->AddResourcePath("sync_confirmation_browser_proxy.html",
                             IDR_DICE_SYNC_CONFIRMATION_BROWSER_PROXY_HTML);
     source->AddResourcePath("sync_confirmation_browser_proxy.js",
@@ -57,10 +66,51 @@ SyncConfirmationUI::SyncConfirmationUI(content::WebUI* web_ui)
                       IDS_SYNC_CONFIRMATION_DICE_SYNC_SETTINGS_LINK_BODY);
     AddStringResource(source, "syncConfirmationSyncSettingsDescription",
                       IDS_SYNC_CONFIRMATION_DICE_SYNC_SETTINGS_DESCRIPTION);
+    AddStringResource(source, "syncConfirmationSettingsLabel",
+                      IDS_SYNC_CONFIRMATION_DICE_SETTINGS_BUTTON_LABEL);
+
+    AddStringResource(source, "syncConfirmationMoreOptionsLabel",
+                      IDS_SYNC_CONFIRMATION_UNITY_MORE_OPTIONS_BUTTON_LABEL);
+    AddStringResource(source, "syncConfirmationOptionsTitle",
+                      IDS_SYNC_CONFIRMATION_UNITY_MORE_OPTIONS_TITLE);
+    AddStringResource(source, "syncConfirmationOptionsSubtitle",
+                      IDS_SYNC_CONFIRMATION_UNITY_MORE_OPTIONS_SUBTITLE);
+    AddStringResource(
+        source, "syncConfirmationOptionsReviewSettingsTitle",
+        IDS_SYNC_CONFIRMATION_UNITY_OPTIONS_REVIEW_SETTINGS_TITLE);
+    AddStringResource(
+        source, "syncConfirmationOptionsMakeNoChangesTitle",
+        IDS_SYNC_CONFIRMATION_UNITY_OPTIONS_MAKE_NO_CHANGES_TITLE);
+    AddStringResource(
+        source, "syncConfirmationOptionsMakeNoChangesSubtitle",
+        IDS_SYNC_CONFIRMATION_UNITY_OPTIONS_MAKE_NO_CHANGES_SUBTITLE);
+    AddStringResource(source, "syncConfirmationOptionsUseDefaultTitle",
+                      IDS_SYNC_CONFIRMATION_UNITY_OPTIONS_USE_DEFAULT_TITLE);
+    AddStringResource(source, "syncConfirmationOptionsUseDefaultSubtitle",
+                      IDS_SYNC_CONFIRMATION_UNITY_OPTIONS_USE_DEFAULT_SUBTITLE);
+    AddStringResource(source, "syncConfirmationOptionsConfirmLabel", IDS_OK);
+    AddStringResource(source, "syncConfirmationOptionsBackLabel",
+                      IDS_SYNC_CONFIRMATION_UNITY_OPTIONS_BACK_BUTTON_LABEL);
+    AddStringResource(source, "syncConsentBumpTitle",
+                      IDS_SYNC_CONFIRMATION_UNITY_CONSENT_BUMP_TITLE);
+
+    constexpr int kAccountPictureSize = 68;
+    std::string custom_picture_url = profiles::GetPlaceholderAvatarIconUrl();
+    GURL account_picture_url(IdentityManagerFactory::GetForProfile(profile)
+                                 ->GetPrimaryAccountInfo()
+                                 .picture_url);
+    if (account_picture_url.is_valid()) {
+      custom_picture_url = signin::GetAvatarImageURLWithOptions(
+                               account_picture_url, kAccountPictureSize,
+                               false /* no_silhouette */)
+                               .spec();
+    }
+    source->AddString("accountPictureUrl", custom_picture_url);
 
     title_ids = IDS_SYNC_CONFIRMATION_UNITY_TITLE;
     confirm_button_ids = IDS_SYNC_CONFIRMATION_DICE_CONFIRM_BUTTON_LABEL;
-    undo_button_ids = IDS_SYNC_CONFIRMATION_DICE_UNDO_BUTTON_LABEL;
+    undo_button_ids = IDS_CANCEL;
+    consent_feature_ = consent_auditor::Feature::CHROME_UNIFIED_CONSENT;
   } else {
     source->SetDefaultResource(IDR_SYNC_CONFIRMATION_HTML);
     source->AddResourcePath("sync_confirmation.css", IDR_SYNC_CONFIRMATION_CSS);
@@ -84,8 +134,9 @@ SyncConfirmationUI::SyncConfirmationUI(content::WebUI* web_ui)
     title_ids = AccountConsistencyModeManager::IsDiceEnabledForProfile(profile)
                     ? IDS_SYNC_CONFIRMATION_DICE_TITLE
                     : IDS_SYNC_CONFIRMATION_TITLE;
-    confirm_button_ids = IDS_SYNC_CONFIRMATION_CONFIRM_BUTTON_LABEL;
-    undo_button_ids = IDS_SYNC_CONFIRMATION_UNDO_BUTTON_LABEL;
+    confirm_button_ids = IDS_SETTINGS_TURN_ON;
+    undo_button_ids = IDS_CANCEL;
+    consent_feature_ = consent_auditor::Feature::CHROME_SYNC;
     if (!is_sync_allowed) {
       title_ids = IDS_SYNC_DISABLED_CONFIRMATION_CHROME_SYNC_TITLE;
       confirm_button_ids = IDS_SYNC_DISABLED_CONFIRMATION_CONFIRM_BUTTON_LABEL;
@@ -113,7 +164,7 @@ SyncConfirmationUI::~SyncConfirmationUI() {}
 
 void SyncConfirmationUI::InitializeMessageHandlerWithBrowser(Browser* browser) {
   web_ui()->AddMessageHandler(std::make_unique<SyncConfirmationHandler>(
-      browser, js_localized_string_to_ids_map_));
+      browser, js_localized_string_to_ids_map_, consent_feature_));
 }
 
 void SyncConfirmationUI::AddStringResource(content::WebUIDataSource* source,

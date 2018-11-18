@@ -11,10 +11,10 @@
 #include "base/memory/weak_ptr.h"
 #include "components/offline_pages/core/offline_page_thumbnail.h"
 #include "components/offline_pages/core/offline_page_types.h"
-#include "components/offline_pages/core/task.h"
+#include "components/offline_pages/task/task.h"
 
 namespace offline_pages {
-class OfflinePageMetadataStoreSQL;
+class OfflinePageMetadataStore;
 
 // CleanupThumbnailsTask deletes thumbnails from page_thumbnails if they
 // are no longer needed.
@@ -25,7 +25,7 @@ class CleanupThumbnailsTask : public Task {
     int removed_thumbnails = 0;
   };
 
-  CleanupThumbnailsTask(OfflinePageMetadataStoreSQL* store,
+  CleanupThumbnailsTask(OfflinePageMetadataStore* store,
                         base::Time now,
                         CleanupThumbnailsCallback complete_callback);
   ~CleanupThumbnailsTask() override;
@@ -35,7 +35,7 @@ class CleanupThumbnailsTask : public Task {
 
  private:
   void Complete(Result result);
-  OfflinePageMetadataStoreSQL* store_;
+  OfflinePageMetadataStore* store_;
   base::Time now_;
 
   CleanupThumbnailsCallback complete_callback_;

@@ -134,13 +134,18 @@ void EventPageRequestManager::AttemptWakeEventPage() {
   // |this|.
   if (!event_page_tracker_->WakeEventPage(
           media_route_provider_extension_id_,
-          base::Bind(&EventPageRequestManager::OnWakeComplete,
-                     weak_factory_.GetWeakPtr()))) {
+          base::BindOnce(&EventPageRequestManager::OnWakeComplete,
+                         weak_factory_.GetWeakPtr()))) {
     DLOG(ERROR) << "Failed to schedule a wakeup for event page.";
   }
 }
 
 void EventPageRequestManager::OnWakeComplete(bool success) {
+  // If there are multiple overlapping WakeEventPage requests, ensure the
+  // metrics are only recorded once.
+  if (current_wake_reason_ == MediaRouteProviderWakeReason::TOTAL_COUNT)
+    return;
+
   if (success) {
     MediaRouterMojoMetrics::RecordMediaRouteProviderWakeReason(
         current_wake_reason_);

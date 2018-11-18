@@ -4,12 +4,9 @@
 
 #include "chrome/browser/printing/print_view_manager_common.h"
 
-#include "chrome/common/webui_url_constants.h"
 #include "content/public/browser/render_frame_host.h"
 #include "extensions/buildflags/buildflags.h"
-#include "extensions/common/constants.h"
 #include "printing/buildflags/buildflags.h"
-#include "url/gurl.h"
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
 #include "components/guest_view/browser/guest_view_manager.h"
@@ -93,12 +90,9 @@ void StartPrint(content::WebContents* contents,
   }
 #endif  // ENABLE_PRINT_PREVIEW
 
-#if BUILDFLAG(ENABLE_BASIC_PRINTING)
   print_view_manager->PrintNow(rfh_to_use);
-#endif  // ENABLE_BASIC_PRINTING
 }
 
-#if BUILDFLAG(ENABLE_BASIC_PRINTING)
 void StartBasicPrint(content::WebContents* contents) {
 #if BUILDFLAG(ENABLE_PRINT_PREVIEW)
   content::WebContents* contents_to_use = GetWebContentsToUse(contents);
@@ -115,21 +109,12 @@ void StartBasicPrint(content::WebContents* contents) {
   print_view_manager->BasicPrint(rfh_to_use);
 #endif  // ENABLE_PRINT_PREVIEW
 }
-#endif  // ENABLE_BASIC_PRINTING
 
 content::RenderFrameHost* GetFrameToPrint(content::WebContents* contents) {
   auto* focused_frame = contents->GetFocusedFrame();
   return (focused_frame && focused_frame->HasSelection())
              ? focused_frame
              : contents->GetMainFrame();
-}
-
-bool PrintingPdfContent(content::RenderFrameHost* rfh) {
-  GURL url = rfh->GetLastCommittedURL();
-  // Whether it is inside print preview or pdf plugin extension.
-  return url.GetOrigin() == chrome::kChromeUIPrintURL ||
-         (url.SchemeIs(extensions::kExtensionScheme) &&
-          url.host_piece() == extension_misc::kPdfExtensionId);
 }
 
 }  // namespace printing

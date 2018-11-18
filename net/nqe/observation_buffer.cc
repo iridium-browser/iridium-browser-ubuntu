@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "base/macros.h"
+#include "base/stl_util.h"
 #include "base/time/default_tick_clock.h"
 #include "base/time/time.h"
 #include "net/nqe/network_quality_estimator_params.h"
@@ -39,6 +40,15 @@ ObservationBuffer::ObservationBuffer(
   DCHECK(tick_clock_);
 }
 
+ObservationBuffer::ObservationBuffer(const ObservationBuffer& other)
+    : params_(other.params_),
+      weight_multiplier_per_second_(other.weight_multiplier_per_second_),
+      weight_multiplier_per_signal_level_(
+          other.weight_multiplier_per_signal_level_),
+      tick_clock_(other.tick_clock_) {
+  DCHECK(other.observations_.empty());
+}
+
 ObservationBuffer::~ObservationBuffer() = default;
 
 void ObservationBuffer::AddObservation(const Observation& observation) {
@@ -47,6 +57,10 @@ void ObservationBuffer::AddObservation(const Observation& observation) {
   // Observations must be in the non-decreasing order of the timestamps.
   DCHECK(observations_.empty() ||
          observation.timestamp() >= observations_.back().timestamp());
+
+  DCHECK(observation.signal_strength() == INT32_MIN ||
+         (observation.signal_strength() >= 0 &&
+          observation.signal_strength() <= 4));
 
   // Evict the oldest element if the buffer is already full.
   if (observations_.size() == params_->observation_buffer_size())
@@ -58,9 +72,12 @@ void ObservationBuffer::AddObservation(const Observation& observation) {
 
 base::Optional<int32_t> ObservationBuffer::GetPercentile(
     base::TimeTicks begin_timestamp,
-    const base::Optional<int32_t>& current_signal_strength,
+    int32_t current_signal_strength,
     int percentile,
     size_t* observations_count) const {
+  DCHECK(current_signal_strength == INT32_MIN ||
+         (current_signal_strength >= 0 && current_signal_strength <= 4));
+
   // Stores weighted observations in increasing order by value.
   std::vector<WeightedObservation> weighted_observations;
 
@@ -153,19 +170,16 @@ void ObservationBuffer::GetPercentileForEachHostWithCounts(
 
 void ObservationBuffer::RemoveObservationsWithSource(
     bool deleted_observation_sources[NETWORK_QUALITY_OBSERVATION_SOURCE_MAX]) {
-  observations_.erase(
-      std::remove_if(
-          observations_.begin(), observations_.end(),
-          [deleted_observation_sources](const Observation& observation) {
-            return deleted_observation_sources[static_cast<size_t>(
-                observation.source())];
-          }),
-      observations_.end());
+  base::EraseIf(observations_,
+                [deleted_observation_sources](const Observation& observation) {
+                  return deleted_observation_sources[static_cast<size_t>(
+                      observation.source())];
+                });
 }
 
 void ObservationBuffer::ComputeWeightedObservations(
     const base::TimeTicks& begin_timestamp,
-    const base::Optional<int32_t>& current_signal_strength,
+    int32_t current_signal_strength,
     std::vector<WeightedObservation>* weighted_observations,
     double* total_weight) const {
   DCHECK_GE(Capacity(), Size());
@@ -183,10 +197,9 @@ void ObservationBuffer::ComputeWeightedObservations(
         pow(weight_multiplier_per_second_, time_since_sample_taken.InSeconds());
 
     double signal_strength_weight = 1.0;
-    if (current_signal_strength && observation.signal_strength()) {
+    if (current_signal_strength >= 0 && observation.signal_strength() >= 0) {
       int32_t signal_strength_weight_diff =
-          std::abs(current_signal_strength.value() -
-                   observation.signal_strength().value());
+          std::abs(current_signal_strength - observation.signal_strength());
       signal_strength_weight =
           pow(weight_multiplier_per_signal_level_, signal_strength_weight_diff);
     }

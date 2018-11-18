@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 
+#include "base/bind.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/json/json_reader.h"
 #include "base/macros.h"
@@ -487,8 +488,8 @@ class MockEventRouter : public EventRouter {
                     const GURL& event_url,
                     EventRouter::UserGestureState state));
 
-  virtual void DispatchEventToExtension(const std::string& extension_id,
-                                        std::unique_ptr<Event> event) {
+  void DispatchEventToExtension(const std::string& extension_id,
+                                std::unique_ptr<Event> event) override {
     DispatchEventToExtensionMock(extension_id,
                                  event->event_name,
                                  event->event_args.release(),
@@ -571,7 +572,7 @@ TEST_F(MenuManagerTest, ExecuteCommand) {
   TestingProfile profile;
   MockEventRouter* mock_event_router = static_cast<MockEventRouter*>(
       EventRouterFactory::GetInstance()->SetTestingFactoryAndUse(
-          &profile, &MockEventRouterFactoryFunction));
+          &profile, base::BindRepeating(&MockEventRouterFactoryFunction)));
 
   content::ContextMenuParams params;
   params.media_type = blink::WebContextMenuData::kMediaTypeImage;

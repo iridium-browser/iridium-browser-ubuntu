@@ -8,6 +8,7 @@
 #include <stdint.h>
 
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "base/callback_forward.h"
@@ -119,8 +120,7 @@ class CONTENT_EXPORT BrowserAccessibilityManager : public ui::AXEventGenerator {
       BrowserAccessibilityDelegate* delegate,
       BrowserAccessibilityFactory* factory = new BrowserAccessibilityFactory());
 
-  static BrowserAccessibilityManager* FromID(
-      ui::AXTreeIDRegistry::AXTreeID ax_tree_id);
+  static BrowserAccessibilityManager* FromID(ui::AXTreeID ax_tree_id);
 
   ~BrowserAccessibilityManager() override;
 
@@ -203,6 +203,7 @@ class CONTENT_EXPORT BrowserAccessibilityManager : public ui::AXEventGenerator {
   // by sending a message to the renderer to perform the respective action
   // on the given node.  See the definition of |ui::AXActionData| for more
   // information about each of these actions.
+  void ClearAccessibilityFocus(const BrowserAccessibility& node);
   void Decrement(const BrowserAccessibility& node);
   void DoDefaultAction(const BrowserAccessibility& node);
   void GetImageData(const BrowserAccessibility& node,
@@ -214,10 +215,10 @@ class CONTENT_EXPORT BrowserAccessibilityManager : public ui::AXEventGenerator {
       const BrowserAccessibility& node, gfx::Rect subfocus);
   void ScrollToPoint(
       const BrowserAccessibility& node, gfx::Point point);
+  void SetAccessibilityFocus(const BrowserAccessibility& node);
   void SetFocus(const BrowserAccessibility& node);
   void SetScrollOffset(const BrowserAccessibility& node, gfx::Point offset);
-  void SetValue(
-      const BrowserAccessibility& node, const base::string16& value);
+  void SetValue(const BrowserAccessibility& node, const std::string& value);
   void SetSelection(
       ui::AXRange<
           BrowserAccessibilityPosition::AXPositionInstance::element_type>
@@ -232,8 +233,7 @@ class CONTENT_EXPORT BrowserAccessibilityManager : public ui::AXEventGenerator {
   void ActivateFindInPageResult(int request_id, int match_index);
 
   // Called when the renderer process has notified us of about tree changes.
-  virtual void OnAccessibilityEvents(
-      const std::vector<AXEventNotificationDetails>& details);
+  virtual void OnAccessibilityEvents(const AXEventNotificationDetails& details);
 
   // Called when the renderer process updates the location of accessibility
   // objects. Calls SendLocationChangeEvents(), which can be overridden.
@@ -339,15 +339,13 @@ class CONTENT_EXPORT BrowserAccessibilityManager : public ui::AXEventGenerator {
       int end_offset);
 
   // Accessors.
-  ui::AXTreeIDRegistry::AXTreeID ax_tree_id() const { return ax_tree_id_; }
+  ui::AXTreeID ax_tree_id() const { return ax_tree_id_; }
   float device_scale_factor() const { return device_scale_factor_; }
-  const ui::AXTree* ax_tree() const { return tree_.get(); }
+  ui::AXTree* ax_tree() const { return tree_.get(); }
 
   // AXTreeDelegate implementation.
   void OnNodeWillBeDeleted(ui::AXTree* tree, ui::AXNode* node) override;
   void OnSubtreeWillBeDeleted(ui::AXTree* tree, ui::AXNode* node) override;
-  void OnNodeWillBeReparented(ui::AXTree* tree, ui::AXNode* node) override;
-  void OnSubtreeWillBeReparented(ui::AXTree* tree, ui::AXNode* node) override;
   void OnNodeCreated(ui::AXTree* tree, ui::AXNode* node) override;
   void OnNodeReparented(ui::AXTree* tree, ui::AXNode* node) override;
   void OnNodeChanged(ui::AXTree* tree, ui::AXNode* node) override;
@@ -442,7 +440,7 @@ class CONTENT_EXPORT BrowserAccessibilityManager : public ui::AXEventGenerator {
   // last object found by an asynchronous hit test. Subsequent hit test
   // requests that remain within this object's bounds will return the same
   // object, but will also trigger a new asynchronous hit test request.
-  int last_hover_ax_tree_id_;
+  ui::AXTreeID last_hover_ax_tree_id_;
   int last_hover_node_id_;
   gfx::Rect last_hover_bounds_;
 
@@ -452,12 +450,7 @@ class CONTENT_EXPORT BrowserAccessibilityManager : public ui::AXEventGenerator {
   bool connected_to_parent_tree_node_;
 
   // The global ID of this accessibility tree.
-  ui::AXTreeIDRegistry::AXTreeID ax_tree_id_;
-
-  // If this tree has a parent tree, this is the cached ID of the parent
-  // node within that parent tree. It's computed as needed and cached for
-  // speed so that it can be accessed quickly if it hasn't changed.
-  int parent_node_id_from_parent_tree_;
+  ui::AXTreeID ax_tree_id_;
 
   // The device scale factor for the view associated with this frame,
   // cached each time there's any update to the accessibility tree.

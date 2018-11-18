@@ -103,19 +103,19 @@ void SVGStyleElement::FinishParsingChildren() {
 }
 
 Node::InsertionNotificationRequest SVGStyleElement::InsertedInto(
-    ContainerNode* insertion_point) {
+    ContainerNode& insertion_point) {
   SVGElement::InsertedInto(insertion_point);
-  return kInsertionShouldCallDidNotifySubtreeInsertions;
+  if (isConnected()) {
+    if (StyleElement::ProcessStyleSheet(GetDocument(), *this) ==
+        StyleElement::kProcessingFatalError) {
+      NotifyLoadedSheetAndAllCriticalSubresources(
+          kErrorOccurredLoadingSubresource);
+    }
+  }
+  return kInsertionDone;
 }
 
-void SVGStyleElement::DidNotifySubtreeInsertionsToDocument() {
-  if (StyleElement::ProcessStyleSheet(GetDocument(), *this) ==
-      StyleElement::kProcessingFatalError)
-    NotifyLoadedSheetAndAllCriticalSubresources(
-        kErrorOccurredLoadingSubresource);
-}
-
-void SVGStyleElement::RemovedFrom(ContainerNode* insertion_point) {
+void SVGStyleElement::RemovedFrom(ContainerNode& insertion_point) {
   SVGElement::RemovedFrom(insertion_point);
   StyleElement::RemovedFrom(*this, insertion_point);
 }
@@ -139,7 +139,7 @@ void SVGStyleElement::NotifyLoadedSheetAndAllCriticalSubresources(
 }
 
 void SVGStyleElement::DispatchPendingEvent() {
-  DispatchEvent(Event::Create(EventTypeNames::error));
+  DispatchEvent(*Event::Create(EventTypeNames::error));
 }
 
 void SVGStyleElement::Trace(blink::Visitor* visitor) {

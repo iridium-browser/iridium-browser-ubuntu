@@ -9,15 +9,17 @@
 
 #include "base/containers/flat_map.h"
 #include "base/macros.h"
+#include "base/optional.h"
+#include "gpu/command_buffer/client/client_font_manager.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
 #include "gpu/command_buffer/client/raster_interface.h"
 #include "gpu/command_buffer/common/capabilities.h"
 #include "gpu/raster_export.h"
 #include "third_party/skia/include/core/SkColor.h"
+#include "third_party/skia/include/core/SkColorSpace.h"
 
 namespace gpu {
-
-class ContextSupport;
+class CommandBuffer;
 
 namespace raster {
 
@@ -27,7 +29,7 @@ struct Capabilities;
 class RASTER_EXPORT RasterImplementationGLES : public RasterInterface {
  public:
   RasterImplementationGLES(gles2::GLES2Interface* gl,
-                           ContextSupport* support,
+                           CommandBuffer* command_buffer,
                            const gpu::Capabilities& caps);
   ~RasterImplementationGLES() override;
 
@@ -66,8 +68,7 @@ class RASTER_EXPORT RasterImplementationGLES : public RasterInterface {
   void TexParameteri(GLuint texture_id, GLenum pname, GLint param) override;
 
   // Mailboxes.
-  void GenMailbox(GLbyte* mailbox) override;
-  void ProduceTextureDirect(GLuint texture, const GLbyte* mailbox) override;
+  void ProduceTextureDirect(GLuint texture, GLbyte* mailbox) override;
   GLuint CreateAndConsumeTexture(bool use_buffer,
                                  gfx::BufferUsage buffer_usage,
                                  viz::ResourceFormat format,
@@ -84,7 +85,6 @@ class RASTER_EXPORT RasterImplementationGLES : public RasterInterface {
 
   // Texture allocation and copying.
   void TexStorage2D(GLuint texture_id,
-                    GLsizei levels,
                     GLsizei width,
                     GLsizei height) override;
 
@@ -96,7 +96,6 @@ class RASTER_EXPORT RasterImplementationGLES : public RasterInterface {
                       GLint y,
                       GLsizei width,
                       GLsizei height) override;
-  void CompressedCopyTextureCHROMIUM(GLuint source_id, GLuint dest_id) override;
   void UnpremultiplyAndDitherCopyCHROMIUM(GLuint source_id,
                                           GLuint dest_id,
                                           GLint x,
@@ -104,19 +103,13 @@ class RASTER_EXPORT RasterImplementationGLES : public RasterInterface {
                                           GLsizei width,
                                           GLsizei height) override;
 
-  // Discardable textures.
-  void InitializeDiscardableTextureCHROMIUM(GLuint texture_id) override;
-  void UnlockDiscardableTextureCHROMIUM(GLuint texture_id) override;
-  bool LockDiscardableTextureCHROMIUM(GLuint texture_id) override;
-
   // OOP-Raster
-  void BeginRasterCHROMIUM(
-      GLuint texture_id,
-      GLuint sk_color,
-      GLuint msaa_sample_count,
-      GLboolean can_use_lcd_text,
-      GLint color_type,
-      const cc::RasterColorSpace& raster_color_space) override;
+  void BeginRasterCHROMIUM(GLuint sk_color,
+                           GLuint msaa_sample_count,
+                           GLboolean can_use_lcd_text,
+                           GLint color_type,
+                           const cc::RasterColorSpace& raster_color_space,
+                           const GLbyte* mailbox) override;
   void RasterCHROMIUM(const cc::DisplayItemList* list,
                       cc::ImageProvider* provider,
                       const gfx::Size& content_size,
@@ -130,6 +123,13 @@ class RASTER_EXPORT RasterImplementationGLES : public RasterInterface {
   // Raster via GrContext.
   void BeginGpuRaster() override;
   void EndGpuRaster() override;
+
+  void TraceBeginCHROMIUM(const char* category_name,
+                          const char* trace_name) override;
+  void TraceEndCHROMIUM() override;
+
+  void SetActiveURLCHROMIUM(const char* url) override {}
+  void ResetActiveURLCHROMIUM() override {}
 
  private:
   struct Texture {
@@ -149,8 +149,6 @@ class RASTER_EXPORT RasterImplementationGLES : public RasterInterface {
   Texture* EnsureTextureBound(Texture* texture);
 
   gles2::GLES2Interface* gl_;
-  SkColor background_color_;
-  ContextSupport* support_;
   gpu::Capabilities caps_;
   bool use_texture_storage_;
   bool use_texture_storage_image_;

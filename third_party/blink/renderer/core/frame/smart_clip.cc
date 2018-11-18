@@ -45,7 +45,7 @@ namespace blink {
 static IntRect ConvertToContentCoordinatesWithoutCollapsingToZero(
     const IntRect& rect_in_viewport,
     const LocalFrameView* view) {
-  IntRect rect_in_contents = view->ViewportToContents(rect_in_viewport);
+  IntRect rect_in_contents = view->ViewportToFrame(rect_in_viewport);
   if (rect_in_viewport.Width() > 0 && !rect_in_contents.Width())
     rect_in_contents.SetWidth(1);
   if (rect_in_viewport.Height() > 0 && !rect_in_contents.Height())
@@ -86,13 +86,13 @@ SmartClipData SmartClip::DataForRect(const IntRect& crop_rect_in_viewport) {
   // Unite won't work with the empty rect, so we initialize to the first rect.
   IntRect united_rects = hit_nodes[0]->PixelSnappedBoundingBox();
   StringBuilder collected_text;
-  for (size_t i = 0; i < hit_nodes.size(); ++i) {
+  for (wtf_size_t i = 0; i < hit_nodes.size(); ++i) {
     collected_text.Append(ExtractTextFromNode(hit_nodes[i]));
     united_rects.Unite(hit_nodes[i]->PixelSnappedBoundingBox());
   }
 
   return SmartClipData(
-      frame_->GetDocument()->View()->ContentsToViewport(united_rects),
+      frame_->GetDocument()->View()->FrameToViewport(united_rects),
       collected_text.ToString());
 }
 
@@ -173,7 +173,7 @@ Node* SmartClip::FindBestOverlappingNode(Node* root_node,
     if (layout_object && !node_rect.IsEmpty()) {
       if (layout_object->IsText() || layout_object->IsLayoutImage() ||
           node->IsFrameOwnerElement() ||
-          (layout_object->Style()->HasBackgroundImage() &&
+          (layout_object->StyleRef().HasBackgroundImage() &&
            !ShouldSkipBackgroundImage(node))) {
         if (resized_crop_rect.Intersects(node_rect)) {
           min_node = MinNodeContainsNodes(min_node, node);
@@ -203,8 +203,8 @@ bool SmartClip::ShouldSkipBackgroundImage(Node* node) {
   // or a width. On the other hand, if we've got a legit background image,
   // it's very likely the height or the width will be set to auto.
   LayoutObject* layout_object = node->GetLayoutObject();
-  if (layout_object && (layout_object->Style()->LogicalHeight().IsAuto() ||
-                        layout_object->Style()->LogicalWidth().IsAuto()))
+  if (layout_object && (layout_object->StyleRef().LogicalHeight().IsAuto() ||
+                        layout_object->StyleRef().LogicalWidth().IsAuto()))
     return true;
 
   return false;

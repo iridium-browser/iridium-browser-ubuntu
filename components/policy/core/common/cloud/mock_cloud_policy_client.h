@@ -11,14 +11,21 @@
 
 #include "base/macros.h"
 #include "components/policy/core/common/cloud/cloud_policy_client.h"
+#include "components/policy/core/common/cloud/dm_auth.h"
 #include "testing/gmock/include/gmock/gmock.h"
+
+namespace network {
+class SharedURLLoaderFactory;
+}
 
 namespace policy {
 
 class MockCloudPolicyClient : public CloudPolicyClient {
  public:
   MockCloudPolicyClient();
-  virtual ~MockCloudPolicyClient();
+  explicit MockCloudPolicyClient(
+      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory);
+  ~MockCloudPolicyClient() override;
 
   MOCK_METHOD3(SetupRegistration,
                void(const std::string&,
@@ -30,7 +37,7 @@ class MockCloudPolicyClient : public CloudPolicyClient {
            enterprise_management::DeviceRegisterRequest::Flavor flavor,
            enterprise_management::DeviceRegisterRequest::Lifetime lifetime,
            enterprise_management::LicenseType::LicenseTypeEnum license_type,
-           const std::string&,
+           std::unique_ptr<DMAuth>,
            const std::string&,
            const std::string&,
            const std::string&));
@@ -39,6 +46,8 @@ class MockCloudPolicyClient : public CloudPolicyClient {
   MOCK_METHOD2(UploadEnterpriseMachineCertificate,
                void(const std::string&, const StatusCallback&));
   MOCK_METHOD2(UploadEnterpriseEnrollmentCertificate,
+               void(const std::string&, const StatusCallback&));
+  MOCK_METHOD2(UploadEnterpriseEnrollmentId,
                void(const std::string&, const StatusCallback&));
   MOCK_METHOD3(UploadDeviceStatus,
                void(const enterprise_management::DeviceStatusReportRequest*,
@@ -49,6 +58,11 @@ class MockCloudPolicyClient : public CloudPolicyClient {
                     const StatusCallback& callback));
   MOCK_METHOD0(CancelAppInstallReportUpload, void(void));
   MOCK_METHOD2(UpdateGcmId, void(const std::string&, const StatusCallback&));
+  MOCK_METHOD4(UploadPolicyValidationReport,
+               void(CloudPolicyValidatorBase::Status,
+                    const std::vector<ValueValidationIssue>&,
+                    const std::string&,
+                    const std::string&));
 
   // Sets the DMToken.
   void SetDMToken(const std::string& token);
@@ -87,11 +101,10 @@ class MockCloudPolicyClient : public CloudPolicyClient {
 class MockCloudPolicyClientObserver : public CloudPolicyClient::Observer {
  public:
   MockCloudPolicyClientObserver();
-  virtual ~MockCloudPolicyClientObserver();
+  ~MockCloudPolicyClientObserver() override;
 
   MOCK_METHOD1(OnPolicyFetched, void(CloudPolicyClient*));
   MOCK_METHOD1(OnRegistrationStateChanged, void(CloudPolicyClient*));
-  MOCK_METHOD1(OnRobotAuthCodesFetched, void(CloudPolicyClient*));
   MOCK_METHOD1(OnClientError, void(CloudPolicyClient*));
 
  private:

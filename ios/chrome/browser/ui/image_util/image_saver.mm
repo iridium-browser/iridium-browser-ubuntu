@@ -6,15 +6,17 @@
 
 #import <Photos/Photos.h>
 
+#include "base/bind.h"
 #include "base/files/file_path.h"
 #include "base/format_macros.h"
-#include "base/mac/bind_objc_block.h"
 #include "base/strings/sys_string_conversions.h"
-#include "base/task_scheduler/post_task.h"
-#include "base/threading/thread_restrictions.h"
+#include "base/task/post_task.h"
+#include "base/threading/scoped_blocking_call.h"
 #include "components/image_fetcher/ios/ios_image_data_fetcher_wrapper.h"
 #include "components/strings/grit/components_strings.h"
 #import "ios/chrome/browser/ui/alert_coordinator/alert_coordinator.h"
+#import "ios/chrome/browser/ui/image_util/image_util.h"
+#import "ios/chrome/browser/web/image_fetch_tab_helper.h"
 #include "ios/chrome/grit/ios_chromium_strings.h"
 #include "ios/chrome/grit/ios_strings.h"
 #include "net/base/mime_util.h"
@@ -45,6 +47,7 @@
   return self;
 }
 
+// TODO(crbug.com/163201):Remove this when kCopyImage flag is removed.
 - (void)saveImageData:(NSData*)data
          withMetadata:(const image_fetcher::RequestMetadata&)metadata {
   DCHECK(data);
@@ -67,6 +70,34 @@
   NSString* fileExtension =
       [@"." stringByAppendingString:base::SysUTF8ToNSString(extension)];
   [self managePermissionAndSaveImage:data withFileExtension:fileExtension];
+}
+
+- (void)saveImageAtURL:(const GURL&)url
+              referrer:(const web::Referrer&)referrer
+              webState:(web::WebState*)webState {
+  ImageFetchTabHelper* tabHelper = ImageFetchTabHelper::FromWebState(webState);
+  DCHECK(tabHelper);
+
+  __weak ImageSaver* weakSelf = self;
+  tabHelper->GetImageData(url, referrer, ^(NSData* data) {
+    ImageSaver* strongSelf = weakSelf;
+    if (!strongSelf)
+      return;
+
+    if (data.length == 0) {
+      [strongSelf displayPrivacyErrorAlertOnMainQueue:
+                      l10n_util::GetNSString(
+                          IDS_IOS_SAVE_IMAGE_NO_INTERNET_CONNECTION)];
+      return;
+    }
+
+    NSString* extension = GetImageExtensionFromData(data);
+    NSString* fileExtension =
+        [@"." stringByAppendingString:extension ? extension : @"png"];
+
+    [strongSelf managePermissionAndSaveImage:data
+                           withFileExtension:fileExtension];
+  });
 }
 
 // Saves the image or display error message, based on privacy settings.
@@ -120,10 +151,11 @@
            completion:(void (^)(BOOL, NSError*))completion {
   base::PostTaskWithTraits(
       FROM_HERE,
-      {base::MayBlock(), base::TaskPriority::BACKGROUND,
+      {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
        base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},
-      base::BindBlockArc(^{
-        base::AssertBlockingAllowed();
+      base::BindOnce(^{
+        base::ScopedBlockingCall scoped_blocking_call(
+            base::BlockingType::MAY_BLOCK);
 
         NSString* fileName = [[[NSProcessInfo processInfo] globallyUniqueString]
             stringByAppendingString:fileExtension];
@@ -145,10 +177,11 @@
             completionHandler:^(BOOL success, NSError* error) {
               base::PostTaskWithTraits(
                   FROM_HERE,
-                  {base::MayBlock(), base::TaskPriority::BACKGROUND,
+                  {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
                    base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},
-                  base::BindBlockArc(^{
-                    base::AssertBlockingAllowed();
+                  base::BindOnce(^{
+                    base::ScopedBlockingCall scoped_blocking_call(
+                        base::BlockingType::MAY_BLOCK);
                     if (completion)
                       completion(success, error);
 

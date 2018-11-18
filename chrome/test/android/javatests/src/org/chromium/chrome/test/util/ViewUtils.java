@@ -12,8 +12,8 @@ import android.view.ViewGroup;
 
 import org.hamcrest.Matcher;
 
-import org.chromium.content.browser.test.util.Criteria;
-import org.chromium.content.browser.test.util.CriteriaHelper;
+import org.chromium.content_public.browser.test.util.Criteria;
+import org.chromium.content_public.browser.test.util.CriteriaHelper;
 
 import java.lang.annotation.Retention;
 import java.util.ArrayList;
@@ -112,5 +112,28 @@ public class ViewUtils {
      */
     public static void waitForView(ViewGroup root, Matcher<View> viewMatcher) {
         waitForView(root, viewMatcher, VIEW_VISIBLE);
+    }
+
+    /**
+     * Wait until the specified view has finished layout updates.
+     * @param view The specified view.
+     */
+    public static void waitForStableView(final View view) {
+        CriteriaHelper.pollUiThread(new Criteria() {
+            @Override
+            public boolean isSatisfied() {
+                if (view.isDirty()) {
+                    updateFailureReason("The view is dirty.");
+                    return false;
+                }
+
+                if (view.isLayoutRequested()) {
+                    updateFailureReason("The view has layout requested.");
+                    return false;
+                }
+
+                return true;
+            }
+        });
     }
 }

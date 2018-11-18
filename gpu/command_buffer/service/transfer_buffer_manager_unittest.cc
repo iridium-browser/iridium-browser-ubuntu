@@ -11,8 +11,6 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using base::SharedMemory;
-
 namespace gpu {
 
 const static size_t kBufferSize = 1024;
@@ -27,49 +25,39 @@ class TransferBufferManagerTest : public testing::Test {
 };
 
 TEST_F(TransferBufferManagerTest, ZeroHandleMapsToNull) {
-  EXPECT_TRUE(NULL == transfer_buffer_manager_->GetTransferBuffer(0).get());
+  EXPECT_TRUE(nullptr == transfer_buffer_manager_->GetTransferBuffer(0).get());
 }
 
 TEST_F(TransferBufferManagerTest, NegativeHandleMapsToNull) {
-  EXPECT_TRUE(NULL == transfer_buffer_manager_->GetTransferBuffer(-1).get());
+  EXPECT_TRUE(nullptr == transfer_buffer_manager_->GetTransferBuffer(-1).get());
 }
 
 TEST_F(TransferBufferManagerTest, OutOfRangeHandleMapsToNull) {
-  EXPECT_TRUE(NULL == transfer_buffer_manager_->GetTransferBuffer(1).get());
+  EXPECT_TRUE(nullptr == transfer_buffer_manager_->GetTransferBuffer(1).get());
 }
 
 TEST_F(TransferBufferManagerTest, CanRegisterTransferBuffer) {
-  std::unique_ptr<base::SharedMemory> shm(new base::SharedMemory());
-  shm->CreateAndMapAnonymous(kBufferSize);
-  base::SharedMemory* shm_raw_pointer = shm.get();
-  std::unique_ptr<SharedMemoryBufferBacking> backing(
-      new SharedMemoryBufferBacking(std::move(shm), kBufferSize));
+  base::UnsafeSharedMemoryRegion shm_region =
+      base::UnsafeSharedMemoryRegion::Create(kBufferSize);
+  base::WritableSharedMemoryMapping shm_mapping = shm_region.Map();
+  auto shm_guid = shm_region.GetGUID();
+  auto backing = std::make_unique<SharedMemoryBufferBacking>(
+      std::move(shm_region), std::move(shm_mapping));
   SharedMemoryBufferBacking* backing_raw_ptr = backing.get();
 
-  EXPECT_TRUE(
-      transfer_buffer_manager_->RegisterTransferBuffer(1, std::move(backing)));
+  EXPECT_TRUE(transfer_buffer_manager_->RegisterTransferBuffer(
+      1, base::MakeRefCounted<Buffer>(std::move(backing))));
   scoped_refptr<Buffer> registered =
       transfer_buffer_manager_->GetTransferBuffer(1);
 
   // Shared-memory ownership is transfered. It should be the same memory.
   EXPECT_EQ(backing_raw_ptr, registered->backing());
-  EXPECT_EQ(shm_raw_pointer, backing_raw_ptr->shared_memory());
+  EXPECT_EQ(shm_guid, backing_raw_ptr->GetGUID());
 }
-
-class FakeBufferBacking : public BufferBacking {
- public:
-  void* GetMemory() const override {
-    return reinterpret_cast<void*>(0xBADF00D0);
-  }
-  size_t GetSize() const override { return 42; }
-  static std::unique_ptr<BufferBacking> Make() {
-    return std::unique_ptr<BufferBacking>(new FakeBufferBacking);
-  }
-};
 
 TEST_F(TransferBufferManagerTest, CanDestroyTransferBuffer) {
   EXPECT_TRUE(transfer_buffer_manager_->RegisterTransferBuffer(
-      1, std::unique_ptr<BufferBacking>(new FakeBufferBacking)));
+      1, MakeMemoryBuffer(42)));
   transfer_buffer_manager_->DestroyTransferBuffer(1);
   scoped_refptr<Buffer> registered =
       transfer_buffer_manager_->GetTransferBuffer(1);
@@ -80,19 +68,19 @@ TEST_F(TransferBufferManagerTest, CanDestroyTransferBuffer) {
 
 TEST_F(TransferBufferManagerTest, CannotRegregisterTransferBufferId) {
   EXPECT_TRUE(transfer_buffer_manager_->RegisterTransferBuffer(
-      1, FakeBufferBacking::Make()));
+      1, MakeMemoryBuffer(42)));
   EXPECT_FALSE(transfer_buffer_manager_->RegisterTransferBuffer(
-      1, FakeBufferBacking::Make()));
+      1, MakeMemoryBuffer(42)));
   EXPECT_FALSE(transfer_buffer_manager_->RegisterTransferBuffer(
-      1, FakeBufferBacking::Make()));
+      1, MakeMemoryBuffer(42)));
 }
 
 TEST_F(TransferBufferManagerTest, CanReuseTransferBufferIdAfterDestroying) {
   EXPECT_TRUE(transfer_buffer_manager_->RegisterTransferBuffer(
-      1, FakeBufferBacking::Make()));
+      1, MakeMemoryBuffer(42)));
   transfer_buffer_manager_->DestroyTransferBuffer(1);
   EXPECT_TRUE(transfer_buffer_manager_->RegisterTransferBuffer(
-      1, FakeBufferBacking::Make()));
+      1, MakeMemoryBuffer(42)));
 }
 
 TEST_F(TransferBufferManagerTest, DestroyUnusedTransferBufferIdDoesNotCrash) {
@@ -101,14 +89,12 @@ TEST_F(TransferBufferManagerTest, DestroyUnusedTransferBufferIdDoesNotCrash) {
 
 TEST_F(TransferBufferManagerTest, CannotRegisterNullTransferBuffer) {
   EXPECT_FALSE(transfer_buffer_manager_->RegisterTransferBuffer(
-      0, FakeBufferBacking::Make()));
+      0, MakeMemoryBuffer(42)));
 }
 
 TEST_F(TransferBufferManagerTest, CannotRegisterNegativeTransferBufferId) {
-  std::unique_ptr<base::SharedMemory> shm(new base::SharedMemory());
-  shm->CreateAndMapAnonymous(kBufferSize);
   EXPECT_FALSE(transfer_buffer_manager_->RegisterTransferBuffer(
-      -1, FakeBufferBacking::Make()));
+      -1, MakeMemoryBuffer(42)));
 }
 
 }  // namespace gpu

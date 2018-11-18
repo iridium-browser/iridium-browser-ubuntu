@@ -21,11 +21,14 @@ TEST_CONFIGS = [
   'crashpad',
   'custom_tabs_client',
   'dart',
+  'dawn',
   'disable_syntax_validation',
+  'expect_tests',
   'gerrit_test_cq_normal',
   'gyp',
   'infra',
   'infradata_master_manager',
+  'infradata_config',
   'internal_deps',
   'luci_gae',
   'luci_go',
@@ -40,6 +43,7 @@ TEST_CONFIGS = [
   'wasm_llvm',
   'webports',
   'with_branch_heads',
+  'with_tags',
 ]
 
 
@@ -76,8 +80,6 @@ def RunSteps(api):
   del api.gclient.spec_alias
 
   api.gclient.runhooks()
-
-  assert not api.gclient.is_blink_mode
 
 
 def GenTests(api):

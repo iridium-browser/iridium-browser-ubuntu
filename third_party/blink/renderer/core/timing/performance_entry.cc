@@ -33,6 +33,7 @@
 #include "base/atomic_sequence_num.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_value.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_object_builder.h"
+#include "third_party/blink/renderer/core/performance_entry_names.h"
 
 namespace blink {
 
@@ -40,26 +41,15 @@ namespace {
 static base::AtomicSequenceNumber index_seq;
 }
 
-PerformanceEntry::PerformanceEntry(const String& name,
-                                   const String& entry_type,
+PerformanceEntry::PerformanceEntry(const AtomicString& name,
                                    double start_time,
                                    double finish_time)
-    : name_(name),
-      entry_type_(entry_type),
+    : duration_(finish_time - start_time),
+      name_(name),
       start_time_(start_time),
-      duration_(finish_time - start_time),
-      entry_type_enum_(ToEntryTypeEnum(entry_type)),
       index_(index_seq.GetNext()) {}
 
 PerformanceEntry::~PerformanceEntry() = default;
-
-String PerformanceEntry::name() const {
-  return name_;
-}
-
-String PerformanceEntry::entryType() const {
-  return entry_type_;
-}
 
 DOMHighResTimeStamp PerformanceEntry::startTime() const {
   return start_time_;
@@ -70,25 +60,29 @@ DOMHighResTimeStamp PerformanceEntry::duration() const {
 }
 
 PerformanceEntry::EntryType PerformanceEntry::ToEntryTypeEnum(
-    const String& entry_type) {
-  if (entry_type == "composite")
-    return kComposite;
-  if (entry_type == "longtask")
+    const AtomicString& entry_type) {
+  if (entry_type == PerformanceEntryNames::longtask)
     return kLongTask;
-  if (entry_type == "mark")
+  if (entry_type == PerformanceEntryNames::mark)
     return kMark;
-  if (entry_type == "measure")
+  if (entry_type == PerformanceEntryNames::measure)
     return kMeasure;
-  if (entry_type == "render")
-    return kRender;
-  if (entry_type == "resource")
+  if (entry_type == PerformanceEntryNames::resource)
     return kResource;
-  if (entry_type == "navigation")
+  if (entry_type == PerformanceEntryNames::navigation)
     return kNavigation;
-  if (entry_type == "taskattribution")
+  if (entry_type == PerformanceEntryNames::taskattribution)
     return kTaskAttribution;
-  if (entry_type == "paint")
+  if (entry_type == PerformanceEntryNames::paint)
     return kPaint;
+  if (entry_type == PerformanceEntryNames::event)
+    return kEvent;
+  if (entry_type == PerformanceEntryNames::firstInput)
+    return kFirstInput;
+  if (entry_type == PerformanceEntryNames::element)
+    return kElement;
+  if (entry_type == PerformanceEntryNames::layoutJank)
+    return kLayoutJank;
   return kInvalid;
 }
 

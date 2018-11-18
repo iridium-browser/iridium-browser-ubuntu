@@ -45,6 +45,7 @@ PaintedOverlayScrollbarLayer::PaintedOverlayScrollbarLayer(
       thumb_thickness_(scrollbar_->ThumbThickness()),
       thumb_length_(scrollbar_->ThumbLength()) {
   DCHECK(scrollbar_->UsesNinePatchThumbResource());
+  SetIsScrollbar(true);
 }
 
 PaintedOverlayScrollbarLayer::~PaintedOverlayScrollbarLayer() = default;
@@ -95,10 +96,6 @@ void PaintedOverlayScrollbarLayer::PushPropertiesTo(LayerImpl* layer) {
     scrollbar_layer->set_track_ui_resource_id(track_resource_->id());
   else
     scrollbar_layer->set_track_ui_resource_id(0);
-}
-
-ScrollbarLayerInterface* PaintedOverlayScrollbarLayer::ToScrollbarLayer() {
-  return this;
 }
 
 void PaintedOverlayScrollbarLayer::SetLayerTreeHost(LayerTreeHost* host) {

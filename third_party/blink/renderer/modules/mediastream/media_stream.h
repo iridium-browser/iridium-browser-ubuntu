@@ -48,7 +48,7 @@ class MODULES_EXPORT MediaStreamObserver : public GarbageCollectedMixin {
   // Invoked when |MediaStream::removeTrack| is called.
   virtual void OnStreamRemoveTrack(MediaStream*, MediaStreamTrack*) = 0;
 
-  virtual void Trace(blink::Visitor* visitor) {}
+  void Trace(blink::Visitor* visitor) override {}
 };
 
 class MODULES_EXPORT MediaStream final : public EventTargetWithInlineData,
@@ -82,6 +82,9 @@ class MODULES_EXPORT MediaStream final : public EventTargetWithInlineData,
 
   String id() const { return descriptor_->Id(); }
 
+  // Adds the track, this may cause "onactive" to fire but it won't cause
+  // "onaddtrack" because the track was added explicitly by the JavaScript
+  // application.
   void addTrack(MediaStreamTrack*, ExceptionState&);
   void removeTrack(MediaStreamTrack*, ExceptionState&);
   MediaStreamTrack* getTrackById(String);
@@ -105,8 +108,16 @@ class MODULES_EXPORT MediaStream final : public EventTargetWithInlineData,
 
   // MediaStreamDescriptorClient implementation
   void StreamEnded() override;
-  void AddTrackByComponent(MediaStreamComponent*) override;
-  void RemoveTrackByComponent(MediaStreamComponent*) override;
+  void AddTrackByComponentAndFireEvents(MediaStreamComponent*) override;
+  void RemoveTrackByComponentAndFireEvents(MediaStreamComponent*) override;
+
+  // Adds the track and, unlike JavaScript-invoked addTrack(), fires related
+  // events like "onaddtrack".
+  void AddTrackAndFireEvents(MediaStreamTrack*);
+  void RemoveTrackAndFireEvents(MediaStreamTrack*);
+
+  void AddRemoteTrack(MediaStreamTrack*);
+  void RemoveRemoteTrack(MediaStreamTrack*);
 
   MediaStreamDescriptor* Descriptor() const { return descriptor_; }
 
@@ -119,7 +130,7 @@ class MODULES_EXPORT MediaStream final : public EventTargetWithInlineData,
   // URLRegistrable
   URLRegistry& Registry() const override;
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  protected:
   bool AddEventListenerInternal(

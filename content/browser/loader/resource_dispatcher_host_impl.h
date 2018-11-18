@@ -29,25 +29,24 @@
 #include "base/single_thread_task_runner.h"
 #include "base/time/time.h"
 #include "content/browser/blob_storage/chrome_blob_storage_context.h"
-#include "content/browser/loader/global_routing_id.h"
 #include "content/browser/loader/resource_loader_delegate.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/global_request_id.h"
+#include "content/public/browser/global_routing_id.h"
 #include "content/public/browser/resource_dispatcher_host.h"
 #include "content/public/browser/resource_request_info.h"
 #include "content/public/browser/stream_handle.h"
 #include "content/public/common/previews_state.h"
-#include "content/public/common/request_context_type.h"
 #include "content/public/common/resource_type.h"
 #include "net/base/load_states.h"
 #include "net/base/request_priority.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "services/network/keepalive_statistics_recorder.h"
 #include "services/network/public/mojom/url_loader.mojom.h"
+#include "third_party/blink/public/platform/modules/fetch/fetch_api_request.mojom.h"
 #include "url/gurl.h"
 
 namespace base {
-class FilePath;
 class OneShotTimer;
 }
 
@@ -59,18 +58,17 @@ class URLRequestContextGetter;
 
 namespace network {
 class ResourceScheduler;
+class ScopedThrottlingToken;
 }  // namespace network
 
 namespace storage {
 class FileSystemContext;
-class ShareableFileReference;
 }
 
 namespace content {
 class AppCacheNavigationHandleCore;
 class AppCacheService;
 class LoaderDelegate;
-class NavigationURLLoaderImplCore;
 class NavigationUIData;
 class ResourceContext;
 class ResourceDispatcherHostDelegate;
@@ -126,16 +124,6 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
 
   // Cancels the given request if it still exists.
   void CancelRequest(int child_id, int request_id);
-
-  // Marks the request, with its current |response|, as "parked". This
-  // happens if a request is redirected cross-site and needs to be
-  // resumed by a new process.
-  void MarkAsTransferredNavigation(
-      const GlobalRequestID& id,
-      const base::Closure& on_transfer_complete_callback);
-
-  // Resumes the request without transferring it to a new process.
-  void ResumeDeferredNavigation(const GlobalRequestID& id);
 
   // Returns the number of pending requests. This is designed for the unittests
   int pending_requests() const {
@@ -193,15 +181,6 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
   void CancelBlockedRequestsForRoute(
       const GlobalFrameRoutingId& global_routing_id);
 
-  // Maintains a collection of temp files created in support of
-  // the download_to_file capability. Used to grant access to the
-  // child process and to defer deletion of the file until it's
-  // no longer needed.
-  void RegisterDownloadedTempFile(
-      int child_id, int request_id,
-      const base::FilePath& file_path);
-  void UnregisterDownloadedTempFile(int child_id, int request_id);
-
   // Indicates whether third-party sub-content can pop-up HTTP basic auth
   // dialog boxes.
   bool allow_cross_origin_auth_prompt();
@@ -251,22 +230,20 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
   void FinishedWithResourcesForRequest(net::URLRequest* request);
 
   // PlzNavigate: Begins a request for NavigationURLLoader. |loader| is the
-  // loader to attach to the leaf resource handler.
-  // After calling this function, |global_request_id| will contains the
-  // request's global id.
+  // loader to attach to the leaf resource handler. |global_request_id| needs to
+  // be created by MakeGlobalRequestID() before calling this method.
   void BeginNavigationRequest(
       ResourceContext* resource_context,
       net::URLRequestContext* request_context,
       storage::FileSystemContext* upload_file_system_context,
       const NavigationRequestInfo& info,
       std::unique_ptr<NavigationUIData> navigation_ui_data,
-      NavigationURLLoaderImplCore* loader,
       network::mojom::URLLoaderClientPtr url_loader_client,
       network::mojom::URLLoaderRequest url_loader_request,
       ServiceWorkerNavigationHandleCore* service_worker_handle_core,
       AppCacheNavigationHandleCore* appcache_handle_core,
       uint32_t url_loader_options,
-      GlobalRequestID* global_request_id);
+      const GlobalRequestID& global_request_id);
 
   int num_in_flight_requests_for_testing() const {
     return num_in_flight_requests_;
@@ -323,6 +300,11 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
   // of |request_id_| for the details. Must be called on the IO thread.
   int MakeRequestID();
 
+  // Creates a new global request ID for browser initiated requests. The ID
+  // is consistent with the request id created by MakeRequestID(). Must be
+  // called on the IO thread.
+  GlobalRequestID MakeGlobalRequestID();
+
   // Cancels a request as requested by a renderer. This function is called when
   // a mojo connection is lost.
   // Note that this cancel is subtly different from the other CancelRequest
@@ -341,8 +323,14 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
     return &keepalive_statistics_recorder_;
   }
 
+  // Checks if needs to prompt for login.
+  bool DoNotPromptForLogin(ResourceType resource_type,
+                           const GURL& url,
+                           const GURL& site_for_cookies);
+
  private:
   class ScheduledResourceRequestAdapter;
+  friend class NetworkServiceClient;
   friend class ResourceDispatcherHostTest;
 
   FRIEND_TEST_ALL_PREFIXES(ResourceDispatcherHostTest,
@@ -360,7 +348,6 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
   FRIEND_TEST_ALL_PREFIXES(ResourceDispatcherHostTest, LoadInfoSamePriority);
   FRIEND_TEST_ALL_PREFIXES(ResourceDispatcherHostTest, LoadInfoUploadProgress);
   FRIEND_TEST_ALL_PREFIXES(ResourceDispatcherHostTest, LoadInfoTwoRenderViews);
-  FRIEND_TEST_ALL_PREFIXES(WebContentsImplBrowserTest, UpdateLoadState);
 
   struct OustandingRequestsStats {
     int memory_cost;
@@ -428,9 +415,11 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
   void OnShutdown();
 
   // Helper function for URL requests.
-  void BeginRequestInternal(std::unique_ptr<net::URLRequest> request,
-                            std::unique_ptr<ResourceHandler> handler,
-                            bool is_initiated_by_fetch_api);
+  void BeginRequestInternal(
+      std::unique_ptr<net::URLRequest> request,
+      std::unique_ptr<ResourceHandler> handler,
+      bool is_initiated_by_fetch_api,
+      std::unique_ptr<network::ScopedThrottlingToken> throttling_token);
 
   void StartLoading(ResourceRequestInfoImpl* info,
                     std::unique_ptr<ResourceLoader> loader);
@@ -547,37 +536,19 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
       int request_id,
       bool is_sync_load,
       const network::ResourceRequest& request_data,
+      uint32_t url_loader_options,
       network::mojom::URLLoaderRequest mojo_request,
       network::mojom::URLLoaderClientPtr url_loader_client,
       const net::NetworkTrafficAnnotationTag& traffic_annotation);
 
   bool IsRequestIDInUse(const GlobalRequestID& id) const;
 
-  // Update the ResourceRequestInfo and internal maps when a request is
-  // transferred from one process to another.
-  void UpdateRequestForTransfer(
-      ResourceRequesterInfo* requester_info,
-      int route_id,
-      int request_id,
-      const network::ResourceRequest& request_data,
-      LoaderMap::iterator iter,
-      network::mojom::URLLoaderRequest mojo_request,
-      network::mojom::URLLoaderClientPtr url_loader_client);
-
-  // If |request_data| is for a request being transferred from another process,
-  // then CompleteTransfer method can be used to complete the transfer.
-  void CompleteTransfer(ResourceRequesterInfo* requester_info,
-                        int request_id,
-                        const network::ResourceRequest& request_data,
-                        int route_id,
-                        network::mojom::URLLoaderRequest mojo_request,
-                        network::mojom::URLLoaderClientPtr url_loader_client);
-
   void BeginRequest(ResourceRequesterInfo* requester_info,
                     int request_id,
                     const network::ResourceRequest& request_data,
                     bool is_sync_load,
                     int route_id,
+                    uint32_t url_loader_options,
                     network::mojom::URLLoaderRequest mojo_request,
                     network::mojom::URLLoaderClientPtr url_loader_client,
                     const net::NetworkTrafficAnnotationTag& traffic_annotation);
@@ -597,6 +568,7 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
       bool is_sync_load,
       int route_id,
       const net::HttpRequestHeaders& headers,
+      uint32_t url_loader_options,
       network::mojom::URLLoaderRequest mojo_request,
       network::mojom::URLLoaderClientPtr url_loader_client,
       BlobHandles blob_handles,
@@ -612,34 +584,24 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
       int route_id,
       int child_id,
       ResourceContext* resource_context,
+      uint32_t url_loader_options,
       network::mojom::URLLoaderRequest mojo_request,
       network::mojom::URLLoaderClientPtr url_loader_client);
-
-  // Creates either MojoAsyncResourceHandler or AsyncResourceHandler.
-  std::unique_ptr<ResourceHandler> CreateBaseResourceHandler(
-      net::URLRequest* request,
-      network::mojom::URLLoaderRequest mojo_request,
-      network::mojom::URLLoaderClientPtr url_loader_client,
-      ResourceType resource_type);
 
   // Wraps |handler| in the standard resource handlers for normal resource
   // loading and navigation requests. This adds MimeTypeResourceHandler and
   // ResourceThrottles.
-  // PlzNavigate: |navigation_loader_core| and |stream_handle| are used to
-  // properly initialized the NavigationResourceHandler placed in navigation
-  // requests. They should be non-null in that case.
   std::unique_ptr<ResourceHandler> AddStandardHandlers(
       net::URLRequest* request,
       ResourceType resource_type,
       ResourceContext* resource_context,
       network::mojom::FetchRequestMode fetch_request_mode,
-      RequestContextType fetch_request_context_type,
+      blink::mojom::RequestContextType fetch_request_context_type,
+      uint32_t url_loader_options,
       AppCacheService* appcache_service,
       int child_id,
       int route_id,
-      std::unique_ptr<ResourceHandler> handler,
-      NavigationURLLoaderImplCore* navigation_loader_core,
-      std::unique_ptr<StreamHandle> stream_handle);
+      std::unique_ptr<ResourceHandler> handler);
 
   // Creates ResourceRequestInfoImpl for a download or page save.
   // |download| should be true if the request is a file download.
@@ -662,13 +624,6 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
 
   HttpAuthRelationType HttpAuthRelationTypeOf(const GURL& request_url,
                                               const GURL& first_party);
-
-  // Returns whether the URLRequest identified by |transferred_request_id| is
-  // currently in the process of being transferred to a different renderer.
-  // This happens if a request is redirected cross-site and needs to be resumed
-  // by a new process.
-  bool IsTransferredNavigation(
-      const GlobalRequestID& transferred_request_id) const;
 
   ResourceLoader* GetLoader(const GlobalRequestID& id) const;
   ResourceLoader* GetLoader(int child_id, int request_id) const;
@@ -699,18 +654,13 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
       GlobalRequestID request_id,
       const base::Optional<net::AuthCredentials>& credentials);
 
+  static void RecordFetchRequestMode(const GURL& url,
+                                     base::StringPiece method,
+                                     network::mojom::FetchRequestMode mode);
+
   static net::NetworkTrafficAnnotationTag GetTrafficAnnotation();
 
   LoaderMap pending_loaders_;
-
-  // Collection of temp files downloaded for child processes via
-  // the download_to_file mechanism. We avoid deleting them until
-  // the client no longer needs them.
-  typedef std::map<int, scoped_refptr<storage::ShareableFileReference> >
-      DeletableFilesMap;  // key is request id
-  typedef std::map<int, DeletableFilesMap>
-      RegisteredTempFiles;  // key is child process id
-  RegisteredTempFiles registered_temp_files_;
 
   // A timer that periodically calls UpdateLoadInfo while |pending_loaders_| is
   // not empty, at least one RenderViewHost is loading, and not waiting on an
@@ -769,12 +719,6 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
   //       kAvgBytesPerOutstandingRequest)
   int max_outstanding_requests_cost_per_process_;
 
-  // Largest number of outstanding requests seen so far across all processes.
-  int largest_outstanding_request_count_seen_;
-
-  // Largest number of outstanding requests seen so far in any single process.
-  int largest_outstanding_request_per_process_count_seen_;
-
   // Time of the last user gesture. Stored so that we can add a load
   // flag to requests occurring soon after a gesture to indicate they
   // may be because of explicit user action.
@@ -802,7 +746,9 @@ class CONTENT_EXPORT ResourceDispatcherHostImpl
   // Task runner for the IO thead.
   scoped_refptr<base::SingleThreadTaskRunner> io_thread_task_runner_;
 
-  base::WeakPtrFactory<ResourceDispatcherHostImpl> weak_ptr_factory_;
+  // Used on the IO thread to allow PostTaskAndReply replies to the IO thread
+  // to be abandoned if they run after OnShutdown().
+  base::WeakPtrFactory<ResourceDispatcherHostImpl> weak_factory_on_io_;
 
   DISALLOW_COPY_AND_ASSIGN(ResourceDispatcherHostImpl);
 };

@@ -36,14 +36,6 @@ class FileSystemOperationRunner;
 class FileSystemURL;
 }
 
-namespace leveldb {
-class Env;
-}
-
-namespace net {
-class URLRequestContext;
-}
-
 namespace storage {
 class QuotaManager;
 }
@@ -74,7 +66,7 @@ class CannedSyncableFileSystem
 
   CannedSyncableFileSystem(
       const GURL& origin,
-      leveldb::Env* env_override,
+      bool in_memory_file_system,
       const scoped_refptr<base::SingleThreadTaskRunner>& io_task_runner,
       const scoped_refptr<base::SingleThreadTaskRunner>& file_task_runner);
   ~CannedSyncableFileSystem() override;
@@ -141,8 +133,7 @@ class CannedSyncableFileSystem
                                   FileEntryList* entries);
 
   // Returns the # of bytes written (>=0) or an error code (<0).
-  int64_t Write(net::URLRequestContext* url_request_context,
-                const storage::FileSystemURL& url,
+  int64_t Write(const storage::FileSystemURL& url,
                 std::unique_ptr<storage::BlobDataHandle> blob_data_handle);
   int64_t WriteString(const storage::FileSystemURL& url,
                       const std::string& data);
@@ -204,8 +195,7 @@ class CannedSyncableFileSystem
   void DoReadDirectory(const storage::FileSystemURL& url,
                        FileEntryList* entries,
                        const StatusCallback& callback);
-  void DoWrite(net::URLRequestContext* url_request_context,
-               const storage::FileSystemURL& url,
+  void DoWrite(const storage::FileSystemURL& url,
                std::unique_ptr<storage::BlobDataHandle> blob_data_handle,
                const WriteCallback& callback);
   void DoWriteString(const storage::FileSystemURL& url,
@@ -241,7 +231,7 @@ class CannedSyncableFileSystem
   base::File::Error result_;
   sync_file_system::SyncStatusCode sync_status_;
 
-  leveldb::Env* env_override_;
+  const bool in_memory_file_system_;
   scoped_refptr<base::SingleThreadTaskRunner> io_task_runner_;
   scoped_refptr<base::SingleThreadTaskRunner> file_task_runner_;
 

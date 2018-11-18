@@ -7,7 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-include "clang/StaticAnalyzer/Checkers/CheckerBase.td"
+include "CheckerBase.td"
 
 //===----------------------------------------------------------------------===//
 // Packages.
@@ -220,11 +220,15 @@ def NullableReturnedFromNonnullChecker : Checker<"NullableReturnedFromNonnull">,
 
 let ParentPackage = APIModeling in {
 
+def StdCLibraryFunctionsChecker : Checker<"StdCLibraryFunctions">,
+  HelpText<"Improve modeling of the C standard library functions">,
+  DescFile<"StdLibraryFunctionsChecker.cpp">;
+
 def TrustNonnullChecker : Checker<"TrustNonnull">,
   HelpText<"Trust that returns from framework methods annotated with _Nonnull are not null">,
   DescFile<"TrustNonnullChecker.cpp">;
 
-}
+} // end "apiModeling"
 
 //===----------------------------------------------------------------------===//
 // Evaluate "builtin" functions.
@@ -276,6 +280,10 @@ def ReturnUndefChecker : Checker<"UndefReturn">,
 
 let ParentPackage = Cplusplus in {
 
+def InnerPointerChecker : Checker<"InnerPointer">,
+  HelpText<"Check for inner pointers of C++ containers used after re/deallocation">,
+  DescFile<"InnerPointerChecker.cpp">;
+
 def NewDeleteChecker : Checker<"NewDelete">,
   HelpText<"Check for double-free and use-after-free problems. Traces memory managed by new/delete.">,
   DescFile<"MallocChecker.cpp">;
@@ -305,14 +313,26 @@ def DeleteWithNonVirtualDtorChecker : Checker<"DeleteWithNonVirtualDtor">,
            "destructor in their base class">,
   DescFile<"DeleteWithNonVirtualDtorChecker.cpp">;
 
+def InvalidatedIteratorChecker : Checker<"InvalidatedIterator">,
+  HelpText<"Check for use of invalidated iterators">,
+  DescFile<"IteratorChecker.cpp">;
+
 def IteratorRangeChecker : Checker<"IteratorRange">,
   HelpText<"Check for iterators used outside their valid ranges">,
+  DescFile<"IteratorChecker.cpp">;
+
+def MismatchedIteratorChecker : Checker<"MismatchedIterator">,
+  HelpText<"Check for use of iterators of different containers where iterators of the same container are expected">,
   DescFile<"IteratorChecker.cpp">;
 
 def MisusedMovedObjectChecker: Checker<"MisusedMovedObject">,
      HelpText<"Method calls on a moved-from object and copying a moved-from "
               "object will be reported">,
      DescFile<"MisusedMovedObjectChecker.cpp">;
+
+def UninitializedObjectChecker: Checker<"UninitializedObject">,
+     HelpText<"Reports uninitialized fields after object construction">,
+     DescFile<"UninitializedObjectChecker.cpp">;
 
 } // end: "alpha.cplusplus"
 
@@ -373,6 +393,15 @@ def PaddingChecker : Checker<"Padding">,
 //===----------------------------------------------------------------------===//
 
 let ParentPackage = InsecureAPI in {
+  def bcmp : Checker<"bcmp">,
+    HelpText<"Warn on uses of the 'bcmp' function">,
+    DescFile<"CheckSecuritySyntaxOnly.cpp">;
+  def bcopy : Checker<"bcopy">,
+    HelpText<"Warn on uses of the 'bcopy' function">,
+    DescFile<"CheckSecuritySyntaxOnly.cpp">;
+  def bzero : Checker<"bzero">,
+    HelpText<"Warn on uses of the 'bzero' function">,
+    DescFile<"CheckSecuritySyntaxOnly.cpp">;
   def gets : Checker<"gets">,
     HelpText<"Warn on uses of the 'gets' function">,
     DescFile<"CheckSecuritySyntaxOnly.cpp">;
@@ -423,7 +452,7 @@ def MallocOverflowSecurityChecker : Checker<"MallocOverflow">,
   DescFile<"MallocOverflowSecurityChecker.cpp">;
 
 // Operating systems specific PROT_READ/PROT_WRITE values is not implemented,
-// the defaults are correct for several common operating systems though, 
+// the defaults are correct for several common operating systems though,
 // but may need to be overridden via the related analyzer-config flags.
 def MmapWriteExecChecker : Checker<"MmapWriteExec">,
   HelpText<"Warn on mmap() calls that are both writable and executable">,
@@ -468,10 +497,6 @@ def MismatchedDeallocatorChecker : Checker<"MismatchedDeallocator">,
 def VforkChecker : Checker<"Vfork">,
   HelpText<"Check for proper usage of vfork">,
   DescFile<"VforkChecker.cpp">;
-
-def StdCLibraryFunctionsChecker : Checker<"StdCLibraryFunctions">,
-  HelpText<"Improve modeling of the C standard library functions">,
-  DescFile<"StdLibraryFunctionsChecker.cpp">;
 
 } // end "unix"
 
@@ -551,6 +576,10 @@ def ObjCPropertyChecker : Checker<"ObjCProperty">,
 
 let ParentPackage = Cocoa in {
 
+def RunLoopAutoreleaseLeakChecker : Checker<"RunLoopAutoreleaseLeak">,
+  HelpText<"Check for leaked memory in autorelease pools that will never be drained">,
+  DescFile<"RunLoopAutoreleaseLeakChecker.cpp">;
+
 def ObjCAtSyncChecker : Checker<"AtSync">,
   HelpText<"Check for nil pointers used as mutexes for @synchronized">,
   DescFile<"ObjCAtSyncChecker.cpp">;
@@ -616,6 +645,9 @@ def ObjCSuperDeallocChecker : Checker<"SuperDealloc">,
   HelpText<"Warn about improper use of '[super dealloc]' in Objective-C">,
   DescFile<"ObjCSuperDeallocChecker.cpp">;
 
+def AutoreleaseWriteChecker : Checker<"AutoreleaseWrite">,
+  HelpText<"Warn about potentially crashing writes to autoreleasing objects from different autoreleasing pools in Objective-C">,
+  DescFile<"ObjCAutoreleaseWriteChecker.cpp">;
 } // end "osx.cocoa"
 
 let ParentPackage = Performance in {

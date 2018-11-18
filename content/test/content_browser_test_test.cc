@@ -26,6 +26,7 @@
 #include "content/public/test/test_utils.h"
 #include "content/shell/browser/shell.h"
 #include "content/shell/common/shell_switches.h"
+#include "services/service_manager/sandbox/switches.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace content {
@@ -68,7 +69,7 @@ IN_PROC_BROWSER_TEST_F(ContentBrowserTest, MANUAL_RendererCrash) {
 
 // Tests that browser tests print the callstack when a child process crashes.
 IN_PROC_BROWSER_TEST_F(ContentBrowserTest, RendererCrashCallStack) {
-  base::ThreadRestrictions::ScopedAllowIO allow_io_for_temp_dir;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
   base::CommandLine new_test =
@@ -81,7 +82,7 @@ IN_PROC_BROWSER_TEST_F(ContentBrowserTest, RendererCrashCallStack) {
 #if defined(THREAD_SANITIZER)
   // TSan appears to not be able to report intentional crashes from sandboxed
   // renderer processes.
-  new_test.AppendSwitch(switches::kNoSandbox);
+  new_test.AppendSwitch(service_manager::switches::kNoSandbox);
 #endif
 
   std::string output;
@@ -109,7 +110,7 @@ IN_PROC_BROWSER_TEST_F(ContentBrowserTest, MANUAL_BrowserCrash) {
 
 // Tests that browser tests print the callstack on asserts.
 IN_PROC_BROWSER_TEST_F(ContentBrowserTest, BrowserCrashCallStack) {
-  base::ThreadRestrictions::ScopedAllowIO allow_io_for_temp_dir;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   base::ScopedTempDir temp_dir;
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
   base::CommandLine new_test =

@@ -31,21 +31,22 @@
 
 namespace media {
 
-// Always use 2 or more threads for video decoding. Most machines today will
-// have 2-8 execution contexts. Using more cores generally doesn't seem to
-// increase power usage and allows us to decode video faster.
-//
-// Handling decoding on separate threads also frees up the pipeline thread to
-// continue processing. Although it'd be nice to have the option of a single
-// decoding thread, FFmpeg treats having one thread the same as having zero
-// threads (i.e., decoding will execute on the calling thread). Yet another
-// reason for having two threads :)
-static const int kDecodeThreads = 2;
-static const int kMaxDecodeThreads = 16;
 
 // Returns the number of threads given the FFmpeg CodecID. Also inspects the
 // command line for a valid --video-threads flag.
-static int GetThreadCount(const VideoDecoderConfig& config) {
+static int GetFFmpegVideoDecoderThreadCount(const VideoDecoderConfig& config) {
+  // Always use 2 or more threads for video decoding. Most machines today will
+  // have 2-8 execution contexts. Using more cores generally doesn't seem to
+  // increase power usage and allows us to decode video faster.
+  //
+  // Handling decoding on separate threads also frees up the pipeline thread to
+  // continue processing. Although it'd be nice to have the option of a single
+  // decoding thread, FFmpeg treats having one thread the same as having zero
+  // threads (i.e., decoding will execute on the calling thread). Yet another
+  // reason for having two threads :)
+  constexpr int kDecodeThreads = 2;
+  constexpr int kMaxDecodeThreads = 16;
+
   // Refer to http://crbug.com/93932 for tsan suppressions on decoding.
   int decode_threads = kDecodeThreads;
 
@@ -115,6 +116,7 @@ bool FFmpegVideoDecoder::IsCodecSupported(VideoCodec codec) {
 
 FFmpegVideoDecoder::FFmpegVideoDecoder(MediaLog* media_log)
     : media_log_(media_log), state_(kUninitialized), decode_nalus_(false) {
+  DVLOG(1) << __func__;
   thread_checker_.DetachFromThread();
 }
 
@@ -149,7 +151,8 @@ int FFmpegVideoDecoder::GetVideoBuffer(struct AVCodecContext* codec_context,
                                   codec_context->sample_aspect_ratio.num,
                                   codec_context->sample_aspect_ratio.den);
   } else {
-    natural_size = config_.natural_size();
+    natural_size =
+        GetNaturalSize(gfx::Rect(size), config_.GetPixelAspectRatio());
   }
 
   // FFmpeg has specific requirements on the allocation size of the frame.  The
@@ -181,8 +184,19 @@ int FFmpegVideoDecoder::GetVideoBuffer(struct AVCodecContext* codec_context,
                                                     codec_context->color_range);
   if (color_space == COLOR_SPACE_UNSPECIFIED)
     color_space = config_.color_space();
-  video_frame->metadata()->SetInteger(VideoFrameMetadata::COLOR_SPACE,
-                                      color_space);
+  switch (color_space) {
+    case COLOR_SPACE_UNSPECIFIED:
+      break;
+    case COLOR_SPACE_HD_REC709:
+      video_frame->set_color_space(gfx::ColorSpace::CreateREC709());
+      break;
+    case COLOR_SPACE_SD_REC601:
+      video_frame->set_color_space(gfx::ColorSpace::CreateREC601());
+      break;
+    case COLOR_SPACE_JPEG:
+      video_frame->set_color_space(gfx::ColorSpace::CreateJpeg());
+      break;
+  }
 
   if (codec_context->codec_id == AV_CODEC_ID_VP8 &&
       codec_context->color_primaries == AVCOL_PRI_UNSPECIFIED &&
@@ -241,9 +255,10 @@ void FFmpegVideoDecoder::Initialize(
     const InitCB& init_cb,
     const OutputCB& output_cb,
     const WaitingForDecryptionKeyCB& /* waiting_for_decryption_key_cb */) {
+  DVLOG(1) << __func__ << ": " << config.AsHumanReadableString();
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(config.IsValidConfig());
-  DCHECK(!output_cb.is_null());
+  DCHECK(output_cb);
 
   InitCB bound_init_cb = BindToCurrentLoop(init_cb);
 
@@ -266,9 +281,10 @@ void FFmpegVideoDecoder::Initialize(
 
 void FFmpegVideoDecoder::Decode(scoped_refptr<DecoderBuffer> buffer,
                                 const DecodeCB& decode_cb) {
+  DVLOG(3) << __func__;
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(buffer.get());
-  DCHECK(!decode_cb.is_null());
+  DCHECK(decode_cb);
   CHECK_NE(state_, kUninitialized);
 
   DecodeCB decode_cb_bound = BindToCurrentLoop(decode_cb);
@@ -318,6 +334,7 @@ void FFmpegVideoDecoder::Decode(scoped_refptr<DecoderBuffer> buffer,
 }
 
 void FFmpegVideoDecoder::Reset(const base::Closure& closure) {
+  DVLOG(2) << __func__;
   DCHECK(thread_checker_.CalledOnValidThread());
 
   avcodec_flush_buffers(codec_context_.get());
@@ -413,7 +430,7 @@ bool FFmpegVideoDecoder::ConfigureDecoder(const VideoDecoderConfig& config,
   codec_context_.reset(avcodec_alloc_context3(NULL));
   VideoDecoderConfigToAVCodecContext(config, codec_context_.get());
 
-  codec_context_->thread_count = GetThreadCount(config);
+  codec_context_->thread_count = GetFFmpegVideoDecoderThreadCount(config);
   codec_context_->thread_type =
       FF_THREAD_SLICE | (low_delay ? 0 : FF_THREAD_FRAME);
   codec_context_->opaque = this;

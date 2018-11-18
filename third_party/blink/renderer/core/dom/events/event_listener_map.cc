@@ -32,6 +32,7 @@
 
 #include "third_party/blink/renderer/core/dom/events/event_listener_map.h"
 
+#include "third_party/blink/renderer/core/dom/events/event_listener.h"
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
@@ -128,15 +129,15 @@ static bool RemoveListenerFromVector(
     EventListenerVector* listener_vector,
     const EventListener* listener,
     const EventListenerOptions& options,
-    size_t* index_of_removed_listener,
+    wtf_size_t* index_of_removed_listener,
     RegisteredEventListener* registered_listener) {
-  const auto begin = listener_vector->data();
-  const auto end = begin + listener_vector->size();
+  auto* const begin = listener_vector->data();
+  auto* const end = begin + listener_vector->size();
 
   // Do a manual search for the matching RegisteredEventListener. It is not
   // possible to create a RegisteredEventListener on the stack because of the
   // const on |listener|.
-  const auto it = std::find_if(
+  auto* const it = std::find_if(
       begin, end,
       [listener, options](const RegisteredEventListener& event_listener)
           -> bool { return event_listener.Matches(listener, options); });
@@ -146,7 +147,7 @@ static bool RemoveListenerFromVector(
     return false;
   }
   *registered_listener = *it;
-  *index_of_removed_listener = it - begin;
+  *index_of_removed_listener = static_cast<wtf_size_t>(it - begin);
   listener_vector->EraseAt(*index_of_removed_listener);
   return true;
 }
@@ -154,7 +155,7 @@ static bool RemoveListenerFromVector(
 bool EventListenerMap::Remove(const AtomicString& event_type,
                               const EventListener* listener,
                               const EventListenerOptions& options,
-                              size_t* index_of_removed_listener,
+                              wtf_size_t* index_of_removed_listener,
                               RegisteredEventListener* registered_listener) {
   CheckNoActiveIterators();
 
@@ -188,7 +189,7 @@ static void CopyListenersNotCreatedFromMarkupToTarget(
     EventListenerVector* listener_vector,
     EventTarget* target) {
   for (auto& event_listener : *listener_vector) {
-    if (event_listener.Callback()->WasCreatedFromMarkup())
+    if (event_listener.Callback()->IsEventHandlerForContentAttribute())
       continue;
     AddEventListenerOptionsResolved options = event_listener.Options();
     target->addEventListener(event_type, event_listener.Callback(), options);
@@ -207,16 +208,6 @@ void EventListenerMap::CopyEventListenersNotCreatedFromMarkupToTarget(
 
 void EventListenerMap::Trace(blink::Visitor* visitor) {
   visitor->Trace(entries_);
-}
-
-void EventListenerMap::TraceWrappers(
-    const ScriptWrappableVisitor* visitor) const {
-  // Trace wrappers in entries_.
-  for (auto& entry : entries_) {
-    for (auto& listener : *entry.second) {
-      visitor->TraceWrappers(listener);
-    }
-  }
 }
 
 }  // namespace blink

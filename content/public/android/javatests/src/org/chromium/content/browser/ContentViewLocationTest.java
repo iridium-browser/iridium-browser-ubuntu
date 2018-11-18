@@ -16,13 +16,13 @@ import org.junit.runner.RunWith;
 
 import org.chromium.base.test.BaseJUnit4ClassRunner;
 import org.chromium.base.test.util.Feature;
-import org.chromium.content.browser.test.util.Criteria;
-import org.chromium.content.browser.test.util.CriteriaHelper;
-import org.chromium.content.browser.test.util.TestCallbackHelperContainer;
-import org.chromium.content.browser.test.util.TestCallbackHelperContainer.OnEvaluateJavaScriptResultHelper;
 import org.chromium.content_public.browser.LoadUrlParams;
+import org.chromium.content_public.browser.test.util.Criteria;
+import org.chromium.content_public.browser.test.util.CriteriaHelper;
+import org.chromium.content_public.browser.test.util.TestCallbackHelperContainer;
+import org.chromium.content_public.browser.test.util.TestCallbackHelperContainer.OnEvaluateJavaScriptResultHelper;
 import org.chromium.content_shell_apk.ContentShellActivityTestRule;
-import org.chromium.device.geolocation.LocationProviderFactory;
+import org.chromium.device.geolocation.LocationProviderOverrider;
 import org.chromium.device.geolocation.MockLocationProvider;
 
 import java.util.concurrent.Callable;
@@ -98,7 +98,7 @@ public class ContentViewLocationTest {
     @Before
     public void setUp() throws Exception {
         mMockLocationProvider = new MockLocationProvider();
-        LocationProviderFactory.setLocationProviderImpl(mMockLocationProvider);
+        LocationProviderOverrider.setLocationProviderImpl(mMockLocationProvider);
 
         try {
             mActivityTestRule.launchContentShellWithUrlSync(
@@ -108,7 +108,7 @@ public class ContentViewLocationTest {
         }
 
         mTestCallbackHelperContainer =
-                new TestCallbackHelperContainer(mActivityTestRule.getContentViewCore());
+                new TestCallbackHelperContainer(mActivityTestRule.getWebContents());
         mJavascriptHelper = new OnEvaluateJavaScriptResultHelper();
 
         ensureGeolocationRunning(false);
@@ -141,8 +141,7 @@ public class ContentViewLocationTest {
         ensureGeolocationRunning(true);
 
         // Navigate away and ensure that geolocation stops.
-        mActivityTestRule.loadUrl(
-                mActivityTestRule.getContentViewCore().getWebContents().getNavigationController(),
+        mActivityTestRule.loadUrl(mActivityTestRule.getWebContents().getNavigationController(),
                 mTestCallbackHelperContainer, new LoadUrlParams("about:blank"));
         ensureGeolocationRunning(false);
     }
@@ -188,8 +187,7 @@ public class ContentViewLocationTest {
         startGeolocationWatchPosition();
         ensureGeolocationRunning(false);
 
-        mActivityTestRule.loadUrl(
-                mActivityTestRule.getContentViewCore().getWebContents().getNavigationController(),
+        mActivityTestRule.loadUrl(mActivityTestRule.getWebContents().getNavigationController(),
                 mTestCallbackHelperContainer, new LoadUrlParams("about:blank"));
         showContentViewOnUiThread();
         ensureGeolocationRunning(false);

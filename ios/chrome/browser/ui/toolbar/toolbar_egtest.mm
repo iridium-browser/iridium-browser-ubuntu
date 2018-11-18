@@ -11,9 +11,8 @@
 #import "ios/chrome/browser/ui/content_suggestions/ntp_home_constant.h"
 #import "ios/chrome/browser/ui/ntp/new_tab_page_controller.h"
 #import "ios/chrome/browser/ui/omnibox/popup/omnibox_popup_row.h"
-#import "ios/chrome/browser/ui/toolbar/clean/toolbar_view.h"
-#import "ios/chrome/browser/ui/toolbar/legacy/toolbar_controller.h"
-#include "ios/chrome/browser/ui/tools_menu/public/tools_menu_constants.h"
+#import "ios/chrome/browser/ui/popup_menu/popup_menu_constants.h"
+#import "ios/chrome/browser/ui/toolbar/buttons/toolbar_constants.h"
 #include "ios/chrome/browser/ui/ui_util.h"
 #include "ios/chrome/grit/ios_strings.h"
 #import "ios/chrome/test/app/chrome_test_util.h"
@@ -30,8 +29,9 @@
 #error "This file requires ARC support."
 #endif
 
-using chrome_test_util::ButtonWithAccessibilityLabelId;
 using chrome_test_util::OmniboxText;
+using chrome_test_util::SystemSelectionCallout;
+using chrome_test_util::SystemSelectionCalloutCopyButton;
 
 // Toolbar integration tests for Chrome.
 @interface ToolbarTestCase : ChromeTestCase
@@ -93,14 +93,18 @@ using chrome_test_util::OmniboxText;
 
   [ChromeEarlGrey loadURL:URL];
 
+  if (IsRefreshLocationBarEnabled()) {
+    [[EarlGrey
+        selectElementWithMatcher:chrome_test_util::DefocusedLocationView()]
+        performAction:grey_tap()];
+  }
   [[EarlGrey selectElementWithMatcher:chrome_test_util::Omnibox()]
       assertWithMatcher:chrome_test_util::OmniboxText(URL.GetContent())];
   [[EarlGrey selectElementWithMatcher:chrome_test_util::Omnibox()]
       performAction:grey_typeText(@"foo")];
 
   id<GREYMatcher> cancelButton =
-      grey_allOf(chrome_test_util::CancelButton(),
-                 grey_not(grey_accessibilityID(@"Typing Shield")), nil);
+      grey_accessibilityID(kToolbarCancelOmniboxEditButtonIdentifier);
   [[EarlGrey selectElementWithMatcher:cancelButton] performAction:grey_tap()];
 
   [[EarlGrey selectElementWithMatcher:chrome_test_util::Omnibox()]
@@ -158,64 +162,13 @@ using chrome_test_util::OmniboxText;
 
   [[EarlGrey selectElementWithMatcher:chrome_test_util::Omnibox()]
       assertWithMatcher:chrome_test_util::OmniboxText(URL.GetContent())];
-  [[EarlGrey selectElementWithMatcher:chrome_test_util::Omnibox()]
-      performAction:grey_typeText(@"foo")];
+  [ChromeEarlGreyUI focusOmniboxAndType:@"foo"];
 
   id<GREYMatcher> typingShield = grey_accessibilityID(@"Typing Shield");
   [[EarlGrey selectElementWithMatcher:typingShield] performAction:grey_tap()];
 
   [[EarlGrey selectElementWithMatcher:chrome_test_util::Omnibox()]
       assertWithMatcher:chrome_test_util::OmniboxText(URL.GetContent())];
-}
-
-// Verifies the existence and state of toolbar UI elements.
-- (void)testPreRefreshToolbarUI {
-  if (IsUIRefreshPhase1Enabled()) {
-    EARL_GREY_TEST_SKIPPED(
-        @"This test is specific to the pre-refresh toolbar layout");
-  }
-
-  id<GREYMatcher> reloadButton =
-      chrome_test_util::ButtonWithAccessibilityLabelId(IDS_IOS_ACCNAME_RELOAD);
-  id<GREYMatcher> bookmarkButton =
-      chrome_test_util::ButtonWithAccessibilityLabelId(IDS_TOOLTIP_STAR);
-  id<GREYMatcher> voiceSearchButton =
-      grey_allOf(chrome_test_util::ButtonWithAccessibilityLabelId(
-                     IDS_IOS_ACCNAME_VOICE_SEARCH),
-                 grey_ancestor(grey_kindOfClass([ToolbarView class])), nil);
-  NSString* ntpOmniboxLabel = l10n_util::GetNSString(IDS_OMNIBOX_EMPTY_HINT);
-  NSString* focusedOmniboxLabel = l10n_util::GetNSString(IDS_ACCNAME_LOCATION);
-  NSString* omniboxLabel =
-      IsIPadIdiom() ? focusedOmniboxLabel : ntpOmniboxLabel;
-  id<GREYMatcher> locationbarButton =
-      grey_allOf(grey_accessibilityLabel(omniboxLabel),
-                 grey_minimumVisiblePercent(0.2), nil);
-
-  [[EarlGrey selectElementWithMatcher:locationbarButton]
-      assertWithMatcher:grey_sufficientlyVisible()];
-
-  if (IsIPadIdiom()) {
-    [[EarlGrey selectElementWithMatcher:chrome_test_util::BackButton()]
-        assertWithMatcher:grey_sufficientlyVisible()];
-    [[EarlGrey selectElementWithMatcher:chrome_test_util::ForwardButton()]
-        assertWithMatcher:grey_sufficientlyVisible()];
-    [[EarlGrey selectElementWithMatcher:reloadButton]
-        assertWithMatcher:grey_sufficientlyVisible()];
-    [[EarlGrey selectElementWithMatcher:bookmarkButton]
-        assertWithMatcher:grey_sufficientlyVisible()];
-    [[EarlGrey selectElementWithMatcher:voiceSearchButton]
-        assertWithMatcher:grey_sufficientlyVisible()];
-  } else {
-    [[EarlGrey selectElementWithMatcher:chrome_test_util::ToolsMenuButton()]
-        assertWithMatcher:grey_sufficientlyVisible()];
-    [[EarlGrey selectElementWithMatcher:chrome_test_util::ShowTabsButton()]
-        assertWithMatcher:grey_sufficientlyVisible()];
-  }
-
-  // Navigate to a page and verify the back button is enabled.
-  [ChromeEarlGrey loadURL:GURL("chrome://version")];
-  [[EarlGrey selectElementWithMatcher:chrome_test_util::BackButton()]
-      assertWithMatcher:grey_interactable()];
 }
 
 // Verifies that the keyboard is properly dismissed when a toolbar button
@@ -274,6 +227,12 @@ using chrome_test_util::OmniboxText;
 
 // Verifies that copying and pasting a URL includes the hidden protocol prefix.
 - (void)testCopyPasteURL {
+  if (IsRefreshLocationBarEnabled()) {
+    // TODO(crbug.com/834345): Enable this test when long press on the steady
+    // location bar is supported.
+    EARL_GREY_TEST_SKIPPED(@"Test not supported yet in UI Refresh.");
+  }
+
   // Clear generalPasteboard before and after the test.
   [UIPasteboard generalPasteboard].string = @"";
   [self setTearDownHandler:^{
@@ -308,11 +267,23 @@ using chrome_test_util::OmniboxText;
                                      grey_kindOfClass([UILabel class]), nil)]
         performAction:grey_tap()];
 
-    [[[EarlGrey selectElementWithMatcher:grey_accessibilityLabel(@"Copy")]
-        inRoot:grey_kindOfClass(NSClassFromString(@"UICalloutBarButton"))]
-        performAction:grey_tap()];
-    [[EarlGrey selectElementWithMatcher:grey_accessibilityID(@"Typing Shield")]
-        performAction:grey_tap()];
+    [[[EarlGrey selectElementWithMatcher:SystemSelectionCalloutCopyButton()]
+        inRoot:SystemSelectionCallout()] performAction:grey_tap()];
+
+    if (IsIPadIdiom()) {
+      [[EarlGrey
+          selectElementWithMatcher:grey_accessibilityID(@"Typing Shield")]
+          performAction:grey_tap()];
+
+    } else {
+      // Typing shield might be unavailable if there are any suggestions
+      // displayed in the popup.
+      [[EarlGrey
+          selectElementWithMatcher:
+              grey_accessibilityID(kToolbarCancelOmniboxEditButtonIdentifier)]
+          performAction:grey_tap()];
+    }
+
   } else {
     [ChromeEarlGreyUI openShareMenu];
     [[EarlGrey
@@ -321,13 +292,6 @@ using chrome_test_util::OmniboxText;
   }
 
   [ChromeEarlGrey loadURL:secondURL];
-
-  if (IsRefreshLocationBarEnabled()) {
-    // Tap on the steady location view to expose omnibox for pasting.
-    [[EarlGrey
-        selectElementWithMatcher:chrome_test_util::DefocusedLocationView()]
-        performAction:grey_tap()];
-  }
   [[EarlGrey selectElementWithMatcher:chrome_test_util::Omnibox()]
       performAction:grey_longPress()];
 
@@ -364,8 +328,9 @@ using chrome_test_util::OmniboxText;
   [[EarlGrey selectElementWithMatcher:chrome_test_util::Omnibox()]
       assertWithMatcher:chrome_test_util::OmniboxText("foo")];
 
-  id<GREYMatcher> CancelButton = grey_accessibilityLabel(@"Clear Text");
-  [[EarlGrey selectElementWithMatcher:CancelButton] performAction:grey_tap()];
+  id<GREYMatcher> cancelButton = grey_accessibilityLabel(@"Clear Text");
+
+  [[EarlGrey selectElementWithMatcher:cancelButton] performAction:grey_tap()];
 
   [[EarlGrey selectElementWithMatcher:chrome_test_util::Omnibox()]
       assertWithMatcher:chrome_test_util::OmniboxText("")];
@@ -384,11 +349,7 @@ using chrome_test_util::OmniboxText;
   web::test::SetUpSimpleHttpServer(responses);
   [ChromeEarlGrey loadURL:GURL(URL)];
 
-  [[EarlGrey selectElementWithMatcher:chrome_test_util::Omnibox()]
-      performAction:grey_typeText(@"javascript:alert('Hello');")];
-
-  [[EarlGrey selectElementWithMatcher:grey_accessibilityID(@"Go")]
-      performAction:grey_tap()];
+  [ChromeEarlGreyUI focusOmniboxAndType:@"javascript:alert('Hello');\n"];
 
   [[EarlGrey selectElementWithMatcher:grey_accessibilityLabel(@"Hello")]
       assertWithMatcher:grey_notNil()];
@@ -403,11 +364,7 @@ using chrome_test_util::OmniboxText;
     EARL_GREY_TEST_DISABLED(@"Disabled for iPad due to a typing bug.");
   }
   [ChromeEarlGrey loadURL:GURL("chrome://version")];
-  [[EarlGrey selectElementWithMatcher:chrome_test_util::Omnibox()]
-      performAction:grey_typeText(@"javascript:alert('Hello');")];
-
-  [[EarlGrey selectElementWithMatcher:grey_accessibilityID(@"Go")]
-      performAction:grey_tap()];
+  [ChromeEarlGreyUI focusOmniboxAndType:@"javascript:alert('Hello');\n"];
 
   [[EarlGrey selectElementWithMatcher:grey_accessibilityLabel(@"Hello")]
       assertWithMatcher:grey_nil()];
@@ -420,11 +377,7 @@ using chrome_test_util::OmniboxText;
     EARL_GREY_TEST_DISABLED(@"Disabled for iPad due to a simulator bug.");
   }
 
-  id<GREYMatcher> locationbarButton = grey_allOf(
-      grey_accessibilityLabel(l10n_util::GetNSString(IDS_OMNIBOX_EMPTY_HINT)),
-      grey_minimumVisiblePercent(0.2), nil);
-
-  [[EarlGrey selectElementWithMatcher:locationbarButton]
+  [[EarlGrey selectElementWithMatcher:chrome_test_util::NewTabPageOmnibox()]
       performAction:grey_typeText(@"a")];
   [[EarlGrey selectElementWithMatcher:grey_allOf(grey_accessibilityLabel(@"a"),
                                                  grey_kindOfClass(
@@ -494,11 +447,13 @@ using chrome_test_util::OmniboxText;
                                    nil)]
       assertWithMatcher:grey_sufficientlyVisible()];
 
-  NSString* cancelButtonText = l10n_util::GetNSString(IDS_CANCEL);
-  NSString* typingShield = @"Hide keyboard";
-  NSString* clearText = IsIPadIdiom() ? typingShield : cancelButtonText;
+  id<GREYMatcher> cancelButton =
+      grey_accessibilityID(kToolbarCancelOmniboxEditButtonIdentifier);
+  DCHECK(cancelButton);
 
-  [[EarlGrey selectElementWithMatcher:grey_accessibilityLabel(clearText)]
+  [[EarlGrey
+      selectElementWithMatcher:grey_allOf(cancelButton,
+                                          grey_sufficientlyVisible(), nil)]
       performAction:grey_tap()];
   [[EarlGrey selectElementWithMatcher:chrome_test_util::Omnibox()]
       assertWithMatcher:chrome_test_util::OmniboxText("")];
@@ -507,11 +462,10 @@ using chrome_test_util::OmniboxText;
 // Tests typing in the omnibox using the keyboard accessory view.
 - (void)testToolbarOmniboxKeyboardAccessoryView {
   // Select the omnibox to get the keyboard up.
-  id<GREYMatcher> locationbarButton = grey_allOf(
-      grey_accessibilityLabel(l10n_util::GetNSString(IDS_OMNIBOX_EMPTY_HINT)),
-      grey_minimumVisiblePercent(0.2), nil);
-  [[EarlGrey selectElementWithMatcher:locationbarButton]
+  [[EarlGrey selectElementWithMatcher:chrome_test_util::NewTabPageOmnibox()]
       performAction:grey_tap()];
+  [ChromeEarlGrey
+      waitForElementWithMatcherSufficientlyVisible:chrome_test_util::Omnibox()];
 
   // Tap the "/" keyboard accessory button.
   id<GREYMatcher> slashButtonMatcher = grey_allOf(

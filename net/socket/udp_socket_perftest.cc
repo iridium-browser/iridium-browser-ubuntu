@@ -16,7 +16,6 @@
 #include "net/socket/udp_server_socket.h"
 #include "net/socket/udp_socket.h"
 #include "net/test/gtest_util.h"
-#include "net/test/net_test_suite.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -31,7 +30,8 @@ namespace {
 class UDPSocketPerfTest : public PlatformTest {
  public:
   UDPSocketPerfTest()
-      : buffer_(new IOBufferWithSize(kPacketSize)), weak_factory_(this) {}
+      : buffer_(base::MakeRefCounted<IOBufferWithSize>(kPacketSize)),
+        weak_factory_(this) {}
 
   void DoneWritePacketsToSocket(UDPClientSocket* socket,
                                 int num_of_packets,
@@ -55,6 +55,8 @@ class UDPSocketPerfTest : public PlatformTest {
   base::WeakPtrFactory<UDPSocketPerfTest> weak_factory_;
 };
 
+const int UDPSocketPerfTest::kPacketSize;
+
 // Creates and address from an ip/port and returns it in |address|.
 void CreateUDPAddress(const std::string& ip_str,
                       uint16_t port,
@@ -68,7 +70,8 @@ void CreateUDPAddress(const std::string& ip_str,
 void UDPSocketPerfTest::WritePacketsToSocket(UDPClientSocket* socket,
                                              int num_of_packets,
                                              base::Closure done_callback) {
-  scoped_refptr<IOBufferWithSize> io_buffer(new IOBufferWithSize(kPacketSize));
+  scoped_refptr<IOBufferWithSize> io_buffer =
+      base::MakeRefCounted<IOBufferWithSize>(kPacketSize);
   memset(io_buffer->data(), 'G', kPacketSize);
 
   while (num_of_packets) {

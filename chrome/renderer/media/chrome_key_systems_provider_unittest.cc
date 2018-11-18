@@ -12,8 +12,8 @@
 #include "base/bind_helpers.h"
 #include "base/test/simple_test_tick_clock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-
-#include "widevine_cdm_version.h"  // In SHARED_INTERMEDIATE_DIR.
+#include "third_party/widevine/cdm/buildflags.h"
+#include "third_party/widevine/cdm/widevine_cdm_common.h"
 
 namespace {
 
@@ -27,26 +27,37 @@ class TestKeySystemProperties : public media::KeySystemProperties {
       media::EmeInitDataType init_data_type) const override {
     return false;
   }
+
+  media::EmeConfigRule GetEncryptionSchemeConfigRule(
+      media::EncryptionMode encryption_scheme) const override {
+    return media::EmeConfigRule::NOT_SUPPORTED;
+  }
+
   media::SupportedCodecs GetSupportedCodecs() const override {
     return media::EME_CODEC_NONE;
   }
+
   media::EmeConfigRule GetRobustnessConfigRule(
       media::EmeMediaType media_type,
       const std::string& requested_robustness) const override {
     return requested_robustness.empty() ? media::EmeConfigRule::SUPPORTED
                                         : media::EmeConfigRule::NOT_SUPPORTED;
   }
+
   media::EmeSessionTypeSupport GetPersistentLicenseSessionSupport()
       const override {
     return media::EmeSessionTypeSupport::NOT_SUPPORTED;
   }
-  media::EmeSessionTypeSupport GetPersistentReleaseMessageSessionSupport()
+
+  media::EmeSessionTypeSupport GetPersistentUsageRecordSessionSupport()
       const override {
     return media::EmeSessionTypeSupport::NOT_SUPPORTED;
   }
+
   media::EmeFeatureSupport GetPersistentStateSupport() const override {
     return media::EmeFeatureSupport::NOT_SUPPORTED;
   }
+
   media::EmeFeatureSupport GetDistinctiveIdentifierSupport() const override {
     return media::EmeFeatureSupport::NOT_SUPPORTED;
   }
@@ -65,7 +76,7 @@ class TestKeySystemsProviderDelegate {
         new TestKeySystemProperties("com.example.foobar"));
 
     if (include_widevine_) {
-#if defined(WIDEVINE_CDM_AVAILABLE)
+#if BUILDFLAG(ENABLE_WIDEVINE)
       key_systems->emplace_back(
           new TestKeySystemProperties(kWidevineKeySystem));
 #else
@@ -116,7 +127,7 @@ TEST(ChromeKeySystemsProviderTest, IsKeySystemsUpdateNeeded) {
   EXPECT_FALSE(key_systems_provider.IsKeySystemsUpdateNeeded());
   tick_clock.Advance(base::TimeDelta::FromMilliseconds(10));
 
-#if defined(WIDEVINE_CDM_AVAILABLE) && defined(WIDEVINE_CDM_IS_COMPONENT)
+#if BUILDFLAG(ENABLE_WIDEVINE_CDM_COMPONENT)
   // Require update once enough time has passed for builds that install Widevine
   // as a component.
   EXPECT_TRUE(key_systems_provider.IsKeySystemsUpdateNeeded());
@@ -146,5 +157,5 @@ TEST(ChromeKeySystemsProviderTest, IsKeySystemsUpdateNeeded) {
   // No update needed for builds that either don't offer Widevine or do so
   // as part of Chrome rather than component installer.
   EXPECT_FALSE(key_systems_provider.IsKeySystemsUpdateNeeded());
-#endif  // defined(WIDEVINE_CDM_AVAILABLE) && defined(WIDEVINE_CDM_IS_COMPONENT)
+#endif  // BUILDFLAG(ENABLE_WIDEVINE_CDM_COMPONENT)
 }

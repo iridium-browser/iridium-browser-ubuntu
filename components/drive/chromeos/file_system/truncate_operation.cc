@@ -71,19 +71,17 @@ TruncateOperation::TruncateOperation(
       weak_ptr_factory_(this) {
 }
 
-TruncateOperation::~TruncateOperation() {
-}
+TruncateOperation::~TruncateOperation() = default;
 
 void TruncateOperation::Truncate(const base::FilePath& file_path,
                                  int64_t length,
                                  const FileOperationCallback& callback) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK(!callback.is_null());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  DCHECK(callback);
 
   if (length < 0) {
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE,
-        base::Bind(callback, FILE_ERROR_INVALID_OPERATION));
+        FROM_HERE, base::BindOnce(callback, FILE_ERROR_INVALID_OPERATION));
     return;
   }
 
@@ -104,8 +102,8 @@ void TruncateOperation::TruncateAfterEnsureFileDownloadedByPath(
     FileError error,
     const base::FilePath& local_file_path,
     std::unique_ptr<ResourceEntry> entry) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK(!callback.is_null());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  DCHECK(callback);
 
   if (error != FILE_ERROR_OK) {
     callback.Run(error);
@@ -133,8 +131,8 @@ void TruncateOperation::TruncateAfterTruncateOnBlockingPool(
     const std::string& local_id,
     const FileOperationCallback& callback,
     FileError error) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK(!callback.is_null());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  DCHECK(callback);
 
   delegate_->OnEntryUpdatedByOperation(ClientContext(USER_INITIATED), local_id);
 

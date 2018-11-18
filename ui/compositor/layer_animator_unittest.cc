@@ -10,8 +10,13 @@
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
+#include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
+#include "base/test/scoped_mock_clock_override.h"
+#include "base/test/scoped_task_environment.h"
 #include "base/time/time.h"
+#include "cc/trees/layer_tree_host.h"
+#include "cc/trees/mutator_host.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/compositor/layer.h"
 #include "ui/compositor/layer_animation_delegate.h"
@@ -3248,6 +3253,8 @@ TEST(LayerAnimatorTest, AnimatorRemovedFromCollectionWhenLayerIsDestroyed) {
 }
 
 TEST(LayerAnimatorTest, LayerMovedBetweenCompositorsDuringAnimation) {
+  base::test::ScopedTaskEnvironment scoped_task_environment_(
+      base::test::ScopedTaskEnvironment::MainThreadType::UI);
   bool enable_pixel_output = false;
   ui::ContextFactory* context_factory = nullptr;
   ui::ContextFactoryPrivate* context_factory_private = nullptr;
@@ -3264,10 +3271,14 @@ TEST(LayerAnimatorTest, LayerMovedBetweenCompositorsDuringAnimation) {
   Compositor* compositor_1 = host_1->GetCompositor();
   Layer root_1;
   compositor_1->SetRootLayer(&root_1);
+  cc::MutatorHost* mutator_host_1 =
+      root_1.cc_layer_for_testing()->layer_tree_host()->mutator_host();
 
   Compositor* compositor_2 = host_2->GetCompositor();
   Layer root_2;
   compositor_2->SetRootLayer(&root_2);
+  cc::MutatorHost* mutator_host_2 =
+      root_2.cc_layer_for_testing()->layer_tree_host()->mutator_host();
 
   // Verify that neither compositor has active animators.
   EXPECT_FALSE(compositor_1->layer_animator_collection()->HasActiveAnimators());
@@ -3276,9 +3287,12 @@ TEST(LayerAnimatorTest, LayerMovedBetweenCompositorsDuringAnimation) {
   Layer layer;
   layer.SetOpacity(0.5f);
   root_1.Add(&layer);
-  LayerAnimator* animator = layer.GetAnimator();
-  EXPECT_FALSE(layer.cc_layer_for_testing()->HasTickingAnimationForTesting());
+  EXPECT_FALSE(
+      mutator_host_1->HasTickingKeyframeModelForTesting(layer.element_id()));
+  EXPECT_FALSE(
+      mutator_host_2->HasTickingKeyframeModelForTesting(layer.element_id()));
 
+  LayerAnimator* animator = layer.GetAnimator();
   double target_opacity = 1.0;
   base::TimeDelta time_delta = base::TimeDelta::FromSeconds(1);
 
@@ -3286,12 +3300,18 @@ TEST(LayerAnimatorTest, LayerMovedBetweenCompositorsDuringAnimation) {
       LayerAnimationElement::CreateOpacityElement(target_opacity, time_delta)));
   EXPECT_TRUE(compositor_1->layer_animator_collection()->HasActiveAnimators());
   EXPECT_FALSE(compositor_2->layer_animator_collection()->HasActiveAnimators());
-  EXPECT_TRUE(layer.cc_layer_for_testing()->HasTickingAnimationForTesting());
+  EXPECT_TRUE(
+      mutator_host_1->HasTickingKeyframeModelForTesting(layer.element_id()));
+  EXPECT_FALSE(
+      mutator_host_2->HasTickingKeyframeModelForTesting(layer.element_id()));
 
   root_2.Add(&layer);
   EXPECT_FALSE(compositor_1->layer_animator_collection()->HasActiveAnimators());
   EXPECT_TRUE(compositor_2->layer_animator_collection()->HasActiveAnimators());
-  EXPECT_TRUE(layer.cc_layer_for_testing()->HasTickingAnimationForTesting());
+  EXPECT_FALSE(
+      mutator_host_1->HasTickingKeyframeModelForTesting(layer.element_id()));
+  EXPECT_TRUE(
+      mutator_host_2->HasTickingKeyframeModelForTesting(layer.element_id()));
 
   host_2.reset();
   host_1.reset();
@@ -3299,6 +3319,8 @@ TEST(LayerAnimatorTest, LayerMovedBetweenCompositorsDuringAnimation) {
 }
 
 TEST(LayerAnimatorTest, ThreadedAnimationSurvivesIfLayerRemovedAdded) {
+  base::test::ScopedTaskEnvironment scoped_task_environment_(
+      base::test::ScopedTaskEnvironment::MainThreadType::UI);
   bool enable_pixel_output = false;
   ui::ContextFactory* context_factory = nullptr;
   ui::ContextFactoryPrivate* context_factory_private = nullptr;
@@ -3324,16 +3346,129 @@ TEST(LayerAnimatorTest, ThreadedAnimationSurvivesIfLayerRemovedAdded) {
 
   animator->ScheduleAnimation(new LayerAnimationSequence(
       LayerAnimationElement::CreateOpacityElement(target_opacity, time_delta)));
-  EXPECT_TRUE(layer.cc_layer_for_testing()->HasTickingAnimationForTesting());
+
+  cc::MutatorHost* mutator =
+      layer.cc_layer_for_testing()->layer_tree_host()->mutator_host();
+  EXPECT_TRUE(mutator->HasTickingKeyframeModelForTesting(layer.element_id()));
 
   root.Remove(&layer);
-  EXPECT_FALSE(layer.cc_layer_for_testing()->HasTickingAnimationForTesting());
 
   root.Add(&layer);
-  EXPECT_TRUE(layer.cc_layer_for_testing()->HasTickingAnimationForTesting());
+
+  mutator = layer.cc_layer_for_testing()->layer_tree_host()->mutator_host();
+  EXPECT_TRUE(mutator->HasTickingKeyframeModelForTesting(layer.element_id()));
 
   host.reset();
   TerminateContextFactoryForTests();
+}
+
+// A simple AnimationMetricsReporter class that remembers smoothness metric
+// when animation completes.
+class TestMetricsReporter : public ui::AnimationMetricsReporter {
+ public:
+  TestMetricsReporter() {}
+  ~TestMetricsReporter() override {}
+
+  bool report_called() { return report_called_; }
+  int value() const { return value_; }
+
+ protected:
+  void Report(int value) override {
+    value_ = value;
+    report_called_ = true;
+  }
+
+ private:
+  bool report_called_ = false;
+  int value_ = -1;
+
+  DISALLOW_COPY_AND_ASSIGN(TestMetricsReporter);
+};
+
+// Starts an animation and tests that incrementing compositor frame count can
+// be used to report animation smoothness metrics. This verifies that when an
+// animation is smooth (frame count matches refresh rate) that we receive a
+// smoothness value of 100.
+TEST(LayerAnimatorTest, ReportMetricsSmooth) {
+  base::ScopedMockClockOverride mock_clock_;
+  const base::TimeDelta kAnimationDuration =
+      base::TimeDelta::FromMilliseconds(100);
+
+  std::unique_ptr<Layer> root(new Layer(LAYER_SOLID_COLOR));
+  TestLayerAnimationDelegate delegate;
+  scoped_refptr<LayerAnimator> animator(CreateImplicitTestAnimator(&delegate));
+
+  std::unique_ptr<ui::LayerAnimationElement> animation_element =
+      ui::LayerAnimationElement::CreateColorElement(SK_ColorRED,
+                                                    kAnimationDuration);
+  ui::LayerAnimationSequence* animation_sequence =
+      new ui::LayerAnimationSequence(std::move(animation_element));
+  TestMetricsReporter reporter;
+
+  animation_sequence->SetAnimationMetricsReporter(&reporter);
+  animator->StartAnimation(animation_sequence);
+  // Advances the frame count, simulating having produced 6 frames, and received
+  // an ack for each one. This implicitly simulates calling LayerAnimator::Step
+  // with an increased clock 6 times.
+  delegate.SetFrameNumber(6);
+
+  // Advancing the clock does not implicitly advance frame count. It allows the
+  // next call of LayerAnimator::Step to detect that the animation is finished,
+  // thus triggering the processing of metrics reporting.
+  mock_clock_.Advance(kAnimationDuration);
+  animator->Step(mock_clock_.NowTicks());
+
+  CHECK(reporter.report_called());
+  // With the clock being controlled, the animations should be smooth regardless
+  // of the test bots. Smoothness is based on a calculated duration of the
+  // animation when compared to the requested duration, as an integer
+  // percentage. With 100 being 100%. When the number of frames match the
+  // refresh rate, reporter should be notified of a smoothness of 100.
+  EXPECT_EQ(reporter.value(), 100);
+}
+
+// Starts an animation and tests that incrementing compositor frame count can
+// be used to report animation smoothness metrics. This verifies that when an
+// animation is not smooth (frame count doesn't match refresh rate) that we
+// receive a smoothness value that is not 100.
+TEST(LayerAnimatorTest, ReportMetricsNotSmooth) {
+  base::ScopedMockClockOverride mock_clock_;
+  const base::TimeDelta kAnimationDuration =
+      base::TimeDelta::FromMilliseconds(100);
+
+  std::unique_ptr<Layer> root(new Layer(LAYER_SOLID_COLOR));
+  TestLayerAnimationDelegate delegate;
+  scoped_refptr<LayerAnimator> animator(CreateImplicitTestAnimator(&delegate));
+
+  std::unique_ptr<ui::LayerAnimationElement> animation_element =
+      ui::LayerAnimationElement::CreateColorElement(SK_ColorRED,
+                                                    kAnimationDuration);
+  ui::LayerAnimationSequence* animation_sequence =
+      new ui::LayerAnimationSequence(std::move(animation_element));
+  TestMetricsReporter reporter;
+
+  animation_sequence->SetAnimationMetricsReporter(&reporter);
+  animator->StartAnimation(animation_sequence);
+  // Advances the frame count, simulating having produced 1 frame, and received
+  // an ack for it. This implicitly simulates calling LayerAnimator::Step with
+  // an increased clock 1 time.
+  delegate.SetFrameNumber(1);
+
+  // Advancing the clock does not implicitly advance frame count. It allows the
+  // next call of LayerAnimator::Step to detect that the animation is finished,
+  // thus triggering the processing of metrics reporting.
+  mock_clock_.Advance(kAnimationDuration);
+  animator->Step(mock_clock_.NowTicks());
+
+  CHECK(reporter.report_called());
+  // With the clock being controlled, we have direct control of the smoothness
+  // regardless of the test bots. Smoothness is based on a calculated duration
+  // of the animation when compared to the requested duration, as an integer
+  // percentage. With 100 being 100%. With a single frame being generated over
+  // 100ms, the reporter should be notified of a smoothness matching the
+  // interval between refreshes.
+  int expected = base::Time::kMillisecondsPerSecond / delegate.GetRefreshRate();
+  EXPECT_EQ(reporter.value(), expected);
 }
 
 class LayerOwnerAnimationObserver : public LayerAnimationObserver {

@@ -7,12 +7,12 @@
 #include "base/mac/foundation_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/time/time.h"
-#include "ios/chrome/browser/experimental_flags.h"
 #import "ios/chrome/browser/ui/collection_view/cells/collection_view_text_item.h"
 #import "ios/chrome/browser/ui/history/history_entry_item_interface.h"
 #include "ios/chrome/browser/ui/history/history_util.h"
 #import "ios/chrome/browser/ui/list_model/list_model.h"
 #import "ios/chrome/browser/ui/table_view/cells/table_view_text_header_footer_item.h"
+#include "ios/chrome/browser/ui/ui_util.h"
 #include "url/gurl.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -80,15 +80,22 @@
                               inSortedRange:range
                                     options:NSBinarySearchingInsertionIndex
                             usingComparator:objectComparator];
+
+    // Calculate the new tableView indexPath row before inserting into the
+    // model. No matter where in the model the item is inserted, a new row will
+    // be created for the tableView. For this reason, make sure to insert a new
+    // index into the tableView after the item has been inserted into the model.
+    NSInteger section =
+        [_listModel sectionForSectionIdentifier:sectionIdentifier];
+    NSInteger tableViewRow = [_listModel numberOfItemsInSection:section];
+    NSIndexPath* tableIndexPath =
+        [NSIndexPath indexPathForRow:tableViewRow inSection:section];
+
     [_listModel insertItem:item
         inSectionWithIdentifier:sectionIdentifier
                         atIndex:index];
-    NSIndexPath* indexPath = [NSIndexPath
-        indexPathForItem:index
-               inSection:[_listModel
-                             sectionForSectionIdentifier:sectionIdentifier]];
     [self.delegate historyEntryInserter:self
-               didInsertItemAtIndexPath:indexPath];
+               didInsertItemAtIndexPath:tableIndexPath];
   }
 }
 
@@ -120,22 +127,15 @@
                            usingComparator:comparator];
   [_dates insertObject:date atIndex:index];
   NSInteger insertionIndex = _firstSectionIndex + index;
-  if (experimental_flags::IsCollectionsUIRebootEnabled()) {
+  [_listModel insertSectionWithIdentifier:sectionIdentifier
+                                  atIndex:insertionIndex];
+
     TableViewTextHeaderFooterItem* header =
         [[TableViewTextHeaderFooterItem alloc] initWithType:kItemTypeEnumZero];
     header.text =
         base::SysUTF16ToNSString(history::GetRelativeDateLocalized(timestamp));
     [_listModel setHeader:header forSectionWithIdentifier:sectionIdentifier];
 
-  } else {
-    CollectionViewTextItem* header =
-        [[CollectionViewTextItem alloc] initWithType:kItemTypeEnumZero];
-    header.text =
-        base::SysUTF16ToNSString(history::GetRelativeDateLocalized(timestamp));
-    [_listModel setHeader:header forSectionWithIdentifier:sectionIdentifier];
-  }
-  [_listModel insertSectionWithIdentifier:sectionIdentifier
-                                  atIndex:insertionIndex];
   [self.delegate historyEntryInserter:self
               didInsertSectionAtIndex:insertionIndex];
   return sectionIdentifier;

@@ -34,14 +34,14 @@ TEST_F(BluetoothSocketApiUnittest, Permission) {
 // Tests bluetoothSocket.create() and bluetoothSocket.close().
 // Regression test for https://crbug.com/831651.
 TEST_F(BluetoothSocketApiUnittest, CreateThenClose) {
-  scoped_refptr<Extension> extension_with_socket_permitted =
+  scoped_refptr<const Extension> extension_with_socket_permitted =
       ExtensionBuilder()
           .SetManifest(
               DictionaryBuilder()
                   .Set("name", "bluetooth app")
                   .Set("version", "1.0")
                   .Set("bluetooth",
-                       DictionaryBuilder().SetBoolean("socket", true).Build())
+                       DictionaryBuilder().Set("socket", true).Build())
                   .Set("app",
                        DictionaryBuilder()
                            .Set("background",

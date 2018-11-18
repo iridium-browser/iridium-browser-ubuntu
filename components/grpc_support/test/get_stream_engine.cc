@@ -40,7 +40,7 @@ class BidirectionalStreamTestURLRequestContextGetter
       : task_runner_(task_runner) {}
 
   net::URLRequestContext* GetURLRequestContext() override {
-    if (!request_context_.get()) {
+    if (!request_context_) {
       request_context_.reset(
           new net::TestURLRequestContext(true /* delay_initialization */));
       auto mock_host_resolver = std::make_unique<net::MockHostResolver>();
@@ -60,7 +60,7 @@ class BidirectionalStreamTestURLRequestContextGetter
           "https", net::QuicSimpleTestServer::GetHost(), 443);
       server_properties_->SetQuicAlternativeService(
           quic_hint_server, alternative_service, base::Time::Max(),
-          net::QuicTransportVersionVector());
+          quic::QuicTransportVersionVector());
 
       request_context_->set_cert_verifier(mock_cert_verifier_.get());
       request_context_->set_host_resolver(host_resolver_.get());

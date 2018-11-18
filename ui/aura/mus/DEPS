@@ -1,6 +1,6 @@
 include_rules = [
   "+cc/base/switches.h",
-  "+cc/ipc/compositor_frame_sink.mojom.h",
+  "+cc/mojo_embedder/async_layer_tree_frame_sink.h",
   "+cc/trees/layer_tree_frame_sink_client.h",
   "+cc/trees/layer_tree_frame_sink.h",
   "+cc/scheduler/begin_frame_source.h",
@@ -12,9 +12,9 @@ include_rules = [
   "+gpu/ipc/client/gpu_channel_host.h",
   "+mojo/public/cpp/system/buffer.h",
   "+mojo/public/cpp/system/platform_handle.h",
-  "+services/ui/common/accelerator_util.h",
-  "+services/ui/common/task_runner_test_base.h",
-  "+services/ui/public",
+  "+services/ws/common/accelerator_util.h",
+  "+services/ws/common/task_runner_test_base.h",
+  "+services/ws/public",
   "+ui/gl/gl_bindings.h",
 ]
 

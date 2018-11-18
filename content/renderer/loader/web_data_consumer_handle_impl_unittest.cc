@@ -14,10 +14,10 @@
 
 #include "base/bind.h"
 #include "base/location.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/test/scoped_task_environment.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "mojo/public/cpp/system/data_pipe.h"
@@ -62,11 +62,12 @@ class ClientImpl final : public WebDataConsumerHandle::Client {
 class ReadDataOperation : public ReadDataOperationBase {
  public:
   typedef WebDataConsumerHandle::Result Result;
-  ReadDataOperation(mojo::ScopedDataPipeConsumerHandle handle,
-                    base::MessageLoop* main_message_loop,
-                    const base::Closure& on_done)
+  ReadDataOperation(
+      mojo::ScopedDataPipeConsumerHandle handle,
+      scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner,
+      const base::Closure& on_done)
       : handle_(new WebDataConsumerHandleImpl(std::move(handle))),
-        main_message_loop_(main_message_loop),
+        main_thread_task_runner_(main_thread_task_runner),
         on_done_(on_done) {}
 
   const std::string& result() const { return result_; }
@@ -107,14 +108,14 @@ class ReadDataOperation : public ReadDataOperationBase {
 
     // The operation is done.
     reader_.reset();
-    main_message_loop_->task_runner()->PostTask(FROM_HERE, on_done_);
+    main_thread_task_runner_->PostTask(FROM_HERE, on_done_);
   }
 
  private:
   std::unique_ptr<WebDataConsumerHandleImpl> handle_;
   std::unique_ptr<WebDataConsumerHandle::Reader> reader_;
   std::unique_ptr<WebDataConsumerHandle::Client> client_;
-  base::MessageLoop* main_message_loop_;
+  scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner_;
   base::Closure on_done_;
   std::string result_;
 };
@@ -122,11 +123,12 @@ class ReadDataOperation : public ReadDataOperationBase {
 class TwoPhaseReadDataOperation : public ReadDataOperationBase {
  public:
   typedef WebDataConsumerHandle::Result Result;
-  TwoPhaseReadDataOperation(mojo::ScopedDataPipeConsumerHandle handle,
-                            base::MessageLoop* main_message_loop,
-                            const base::Closure& on_done)
+  TwoPhaseReadDataOperation(
+      mojo::ScopedDataPipeConsumerHandle handle,
+      scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner,
+      const base::Closure& on_done)
       : handle_(new WebDataConsumerHandleImpl(std::move(handle))),
-        main_message_loop_(main_message_loop),
+        main_thread_task_runner_(main_thread_task_runner),
         on_done_(on_done) {}
 
   const std::string& result() const { return result_; }
@@ -160,7 +162,7 @@ class TwoPhaseReadDataOperation : public ReadDataOperationBase {
       if (rv != kOk) {
         // Something is wrong.
         result_ = "error";
-        main_message_loop_->task_runner()->PostTask(FROM_HERE, on_done_);
+        main_thread_task_runner_->PostTask(FROM_HERE, on_done_);
         return;
       }
     }
@@ -177,14 +179,14 @@ class TwoPhaseReadDataOperation : public ReadDataOperationBase {
 
     // The operation is done.
     reader_.reset();
-    main_message_loop_->task_runner()->PostTask(FROM_HERE, on_done_);
+    main_thread_task_runner_->PostTask(FROM_HERE, on_done_);
   }
 
  private:
   std::unique_ptr<WebDataConsumerHandleImpl> handle_;
   std::unique_ptr<WebDataConsumerHandle::Reader> reader_;
   std::unique_ptr<WebDataConsumerHandle::Client> client_;
-  base::MessageLoop* main_message_loop_;
+  scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner_;
   base::Closure on_done_;
   std::string result_;
 };
@@ -196,7 +198,7 @@ class WebDataConsumerHandleImplTest : public ::testing::Test {
   void SetUp() override {
     MojoCreateDataPipeOptions options;
     options.struct_size = sizeof(MojoCreateDataPipeOptions);
-    options.flags = MOJO_CREATE_DATA_PIPE_OPTIONS_FLAG_NONE;
+    options.flags = MOJO_CREATE_DATA_PIPE_FLAG_NONE;
     options.element_num_bytes = 1;
     options.capacity_num_bytes = kDataPipeCapacity;
 
@@ -236,7 +238,7 @@ class WebDataConsumerHandleImplTest : public ::testing::Test {
     return expected;
   }
 
-  base::MessageLoop message_loop_;
+  base::test::ScopedTaskEnvironment task_environment_;
 
   mojo::ScopedDataPipeProducerHandle producer_;
   mojo::ScopedDataPipeConsumerHandle consumer_;
@@ -245,7 +247,8 @@ class WebDataConsumerHandleImplTest : public ::testing::Test {
 TEST_F(WebDataConsumerHandleImplTest, ReadData) {
   base::RunLoop run_loop;
   auto operation = std::make_unique<ReadDataOperation>(
-      std::move(consumer_), &message_loop_, run_loop.QuitClosure());
+      std::move(consumer_), base::ThreadTaskRunnerHandle::Get(),
+      run_loop.QuitClosure());
 
   base::Thread t("DataConsumerHandle test thread");
   ASSERT_TRUE(t.Start());
@@ -266,7 +269,8 @@ TEST_F(WebDataConsumerHandleImplTest, ReadData) {
 TEST_F(WebDataConsumerHandleImplTest, TwoPhaseReadData) {
   base::RunLoop run_loop;
   auto operation = std::make_unique<TwoPhaseReadDataOperation>(
-      std::move(consumer_), &message_loop_, run_loop.QuitClosure());
+      std::move(consumer_), base::ThreadTaskRunnerHandle::Get(),
+      run_loop.QuitClosure());
 
   base::Thread t("DataConsumerHandle test thread");
   ASSERT_TRUE(t.Start());
@@ -326,7 +330,7 @@ class CountDidGetReadableClient : public blink::WebDataConsumerHandle::Client {
 
 TEST_F(WebDataConsumerHandleImplTest, DidGetReadable) {
   static constexpr size_t kBlockSize = kDataPipeCapacity / 3;
-  static constexpr size_t kTotalSize = kBlockSize * 3;
+  static constexpr size_t kTotalSize = kBlockSize * 2;
 
   std::unique_ptr<CountDidGetReadableClient> client =
       std::make_unique<CountDidGetReadableClient>();
@@ -337,7 +341,7 @@ TEST_F(WebDataConsumerHandleImplTest, DidGetReadable) {
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(0, client->num_did_get_readable_called());
 
-  // Push three blocks.
+  // Push two blocks.
   {
     std::string expected;
     int index = 0;
@@ -365,10 +369,10 @@ TEST_F(WebDataConsumerHandleImplTest, DidGetReadable) {
     EXPECT_EQ(sizeof(buffer), size);
   }
   base::RunLoop().RunUntilIdle();
-  // |client| is notified the pipe is still ready.
-  EXPECT_EQ(2, client->num_did_get_readable_called());
+  // |client| is NOT notified since the data is still available.
+  EXPECT_EQ(1, client->num_did_get_readable_called());
 
-  // Read one more block.
+  // Read the other block.
   {
     const void* buffer = nullptr;
     size_t size = sizeof(buffer);
@@ -378,28 +382,38 @@ TEST_F(WebDataConsumerHandleImplTest, DidGetReadable) {
     EXPECT_TRUE(buffer);
     EXPECT_EQ(kTotalSize - kBlockSize, size);
     base::RunLoop().RunUntilIdle();
-    // |client| is NOT notified until EndRead is called.
-    EXPECT_EQ(2, client->num_did_get_readable_called());
 
     rv = reader->EndRead(kBlockSize);
     EXPECT_EQ(Result::kOk, rv);
   }
   base::RunLoop().RunUntilIdle();
-  // |client| is notified the pipe is still ready.
-  EXPECT_EQ(3, client->num_did_get_readable_called());
+  // |client| is NOT notified the pipe is still waiting for more data.
+  EXPECT_EQ(1, client->num_did_get_readable_called());
 
-  // Read the final block.
+  // Read one more.
   {
     char buffer[kBlockSize];
     size_t size = 0;
     Result rv = reader->Read(&buffer, sizeof(buffer),
                              WebDataConsumerHandle::kFlagNone, &size);
-    EXPECT_EQ(Result::kOk, rv);
-    EXPECT_EQ(sizeof(buffer), size);
+    EXPECT_EQ(Result::kShouldWait, rv);
   }
   base::RunLoop().RunUntilIdle();
-  // |client| is NOT notified because the pipe doesn't have any data.
-  EXPECT_EQ(3, client->num_did_get_readable_called());
+  // |client| is NOT notified because the pipe is still waiting for more data.
+  EXPECT_EQ(1, client->num_did_get_readable_called());
+
+  // Push one more block.
+  {
+    std::string expected(kBlockSize, 'x');
+    uint32_t size = expected.size();
+    MojoResult rv =
+        producer_->WriteData(expected.data(), &size, MOJO_WRITE_DATA_FLAG_NONE);
+    EXPECT_EQ(MOJO_RESULT_OK, rv);
+    EXPECT_EQ(expected.size(), size);
+  }
+  base::RunLoop().RunUntilIdle();
+  // |client| is notified the pipe gets ready.
+  EXPECT_EQ(2, client->num_did_get_readable_called());
 }
 
 }  // namespace

@@ -45,6 +45,9 @@ const CGFloat kGridLayoutLineSpacingCompactRegularLimitedWidth = 15.0f;
 const CGFloat kGridLayoutLineSpacingRegularCompact = 32.0f;
 const CGFloat kGridLayoutLineSpacingRegularRegular = 14.0f;
 
+const CGFloat kReorderingInactiveCellOpacity = 0.80;
+const CGFloat kReorderingActiveCellScale = 1.15;
+
 // GridCell styling.
 // Common colors.
 const int kGridCellIconBackgroundColor = 0xF1F3F4;
@@ -59,6 +62,8 @@ const int kGridDarkThemeCellTitleColor = 0xFFFFFF;
 const int kGridDarkThemeCellHeaderColor = 0x5F6368;
 const int kGridDarkThemeCellSelectionColor = 0x9AA0A6;
 const int kGridDarkThemeCellCloseButtonTintColor = 0xFFFFFF;
+const CGFloat kGridDarkThemeCellHighlightColorAlpha = 0.7;
+const int kGridDarkThemeCellSeparatorColor = 0x535354;
 
 // GridCell dimensions.
 const CGSize kGridCellSizeSmall = CGSize{144.0f, 168.0f};
@@ -68,8 +73,10 @@ const CGFloat kGridCellCornerRadius = 13.0f;
 const CGFloat kGridCellIconCornerRadius = 3.0f;
 // The cell header contains the icon, title, and close button.
 const CGFloat kGridCellHeaderHeight = 32.0f;
-const CGFloat kGridCellHeaderLeadingInset = 5.0f;
+const CGFloat kGridCellHeaderLeadingInset = 9.0f;
+const CGFloat kGridCellCloseTapTargetWidthHeight = 44.0f;
 const CGFloat kGridCellCloseButtonContentInset = 8.5f;
-const CGFloat kGridCellIconDiameter = 22.0f;
+const CGFloat kGridCellTitleLabelContentInset = 4.0f;
+const CGFloat kGridCellIconDiameter = 16.0f;
 const CGFloat kGridCellSelectionRingGapWidth = 2.0f;
 const CGFloat kGridCellSelectionRingTintWidth = 5.0f;

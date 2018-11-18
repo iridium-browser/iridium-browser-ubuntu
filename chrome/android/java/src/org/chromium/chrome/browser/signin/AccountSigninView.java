@@ -6,7 +6,6 @@ package org.chromium.chrome.browser.signin;
 
 import android.app.Activity;
 import android.content.Context;
-import android.os.AsyncTask;
 import android.os.Bundle;
 import android.os.SystemClock;
 import android.support.annotation.IntDef;
@@ -25,6 +24,7 @@ import android.widget.TextView;
 import org.chromium.base.Log;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
+import org.chromium.base.task.AsyncTask;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.consent_auditor.ConsentAuditorFeature;
 import org.chromium.chrome.browser.externalauth.UserRecoverableErrorHandler;
@@ -117,25 +117,26 @@ public class AccountSigninView extends FrameLayout {
             "AccountSigninView.ChildAccountStatus";
     private static final String ARGUMENT_UNDO_BEHAVIOR = "AccountSigninView.UndoBehavior";
 
-    @IntDef({SIGNIN_FLOW_DEFAULT, SIGNIN_FLOW_CONFIRMATION_ONLY, SIGNIN_FLOW_ADD_NEW_ACCOUNT})
+    @IntDef({SigninFlowType.DEFAULT, SigninFlowType.CONFIRMATION_ONLY,
+            SigninFlowType.ADD_NEW_ACCOUNT})
     @Retention(RetentionPolicy.SOURCE)
-    public @interface SigninFlowType {}
-
-    public static final int SIGNIN_FLOW_DEFAULT = 0;
-    public static final int SIGNIN_FLOW_CONFIRMATION_ONLY = 1;
-    public static final int SIGNIN_FLOW_ADD_NEW_ACCOUNT = 2;
+    public @interface SigninFlowType {
+        int DEFAULT = 0;
+        int CONFIRMATION_ONLY = 1;
+        int ADD_NEW_ACCOUNT = 2;
+    }
 
     /** Specifies different behaviors for "Undo" button on signin confirmation page. */
-    @IntDef({UNDO_INVISIBLE, UNDO_BACK_TO_SELECTION, UNDO_ABORT})
+    @IntDef({UndoBehavior.INVISIBLE, UndoBehavior.BACK_TO_SELECTION, UndoBehavior.ABORT})
     @Retention(RetentionPolicy.SOURCE)
-    public @interface UndoBehavior {}
-
-    /** "Undo" button is invisible. */
-    public static final int UNDO_INVISIBLE = 0;
-    /** "Undo" button opens account selection page. */
-    public static final int UNDO_BACK_TO_SELECTION = 1;
-    /** "Undo" button calls {@link Listener#onAccountSelectionCanceled()}. */
-    public static final int UNDO_ABORT = 2;
+    public @interface UndoBehavior {
+        /** "Undo" button is invisible. */
+        int INVISIBLE = 0;
+        /** "Undo" button opens account selection page. */
+        int BACK_TO_SELECTION = 1;
+        /** "Undo" button calls {@link Listener#onAccountSelectionCanceled()}. */
+        int ABORT = 2;
+    }
 
     private final AccountsChangeObserver mAccountsChangedObserver;
     private final ProfileDataCache.Observer mProfileDataCacheObserver;
@@ -189,10 +190,10 @@ public class AccountSigninView extends FrameLayout {
     public static Bundle createArgumentsForDefaultFlow(
             @SigninAccessPoint int accessPoint, @ChildAccountStatus.Status int childAccountStatus) {
         Bundle result = new Bundle();
-        result.putInt(ARGUMENT_SIGNIN_FLOW_TYPE, SIGNIN_FLOW_DEFAULT);
+        result.putInt(ARGUMENT_SIGNIN_FLOW_TYPE, SigninFlowType.DEFAULT);
         result.putInt(ARGUMENT_ACCESS_POINT, accessPoint);
         result.putInt(ARGUMENT_CHILD_ACCOUNT_STATUS, childAccountStatus);
-        result.putInt(ARGUMENT_UNDO_BEHAVIOR, UNDO_BACK_TO_SELECTION);
+        result.putInt(ARGUMENT_UNDO_BEHAVIOR, UndoBehavior.BACK_TO_SELECTION);
         return result;
     }
 
@@ -203,11 +204,11 @@ public class AccountSigninView extends FrameLayout {
      */
     public static Bundle createArgumentsForAddAccountFlow(@SigninAccessPoint int accessPoint) {
         Bundle result = new Bundle();
-        result.putInt(ARGUMENT_SIGNIN_FLOW_TYPE, SIGNIN_FLOW_ADD_NEW_ACCOUNT);
+        result.putInt(ARGUMENT_SIGNIN_FLOW_TYPE, SigninFlowType.ADD_NEW_ACCOUNT);
         result.putInt(ARGUMENT_ACCESS_POINT, accessPoint);
         result.putInt(ARGUMENT_CHILD_ACCOUNT_STATUS,
                 ChildAccountStatus.NOT_CHILD); // Children profiles can't add accounts
-        result.putInt(ARGUMENT_UNDO_BEHAVIOR, UNDO_ABORT);
+        result.putInt(ARGUMENT_UNDO_BEHAVIOR, UndoBehavior.ABORT);
         return result;
     }
 
@@ -224,7 +225,7 @@ public class AccountSigninView extends FrameLayout {
             @ChildAccountStatus.Status int childAccountStatus, String accountName,
             boolean isDefaultAccount, @UndoBehavior int undoBehavior) {
         Bundle result = new Bundle();
-        result.putInt(ARGUMENT_SIGNIN_FLOW_TYPE, SIGNIN_FLOW_CONFIRMATION_ONLY);
+        result.putInt(ARGUMENT_SIGNIN_FLOW_TYPE, SigninFlowType.CONFIRMATION_ONLY);
         result.putInt(ARGUMENT_ACCESS_POINT, accessPoint);
         result.putInt(ARGUMENT_CHILD_ACCOUNT_STATUS, childAccountStatus);
         result.putString(ARGUMENT_ACCOUNT_NAME, accountName);
@@ -257,10 +258,10 @@ public class AccountSigninView extends FrameLayout {
         updateConsentText();
 
         switch (mSigninFlowType) {
-            case SIGNIN_FLOW_DEFAULT:
+            case SigninFlowType.DEFAULT:
                 showSigninPage();
                 break;
-            case SIGNIN_FLOW_CONFIRMATION_ONLY: {
+            case SigninFlowType.CONFIRMATION_ONLY: {
                 String accountName = arguments.getString(ARGUMENT_ACCOUNT_NAME);
                 assert accountName != null;
                 boolean isDefaultAccount = arguments.getBoolean(ARGUMENT_IS_DEFAULT_ACCOUNT, false);
@@ -268,7 +269,7 @@ public class AccountSigninView extends FrameLayout {
                 triggerUpdateAccounts();
                 break;
             }
-            case SIGNIN_FLOW_ADD_NEW_ACCOUNT:
+            case SigninFlowType.ADD_NEW_ACCOUNT:
                 showSigninPage();
                 RecordUserAction.record("Signin_AddAccountToDevice");
                 mListener.onNewAccount();
@@ -299,27 +300,25 @@ public class AccountSigninView extends FrameLayout {
     protected void onFinishInflate() {
         super.onFinishInflate();
 
-        mSigninChooseView = (AccountSigninChooseView) findViewById(R.id.account_signin_choose_view);
+        mSigninChooseView = findViewById(R.id.account_signin_choose_view);
         mSigninChooseView.setAddNewAccountObserver(() -> {
             mListener.onNewAccount();
             RecordUserAction.record("Signin_AddAccountToDevice");
         });
 
-        mPositiveButton = (ButtonCompat) findViewById(R.id.positive_button);
-        mNegativeButton = (Button) findViewById(R.id.negative_button);
-        mMoreButton = (Button) findViewById(R.id.more_button);
-        mSigninConfirmationView =
-                (AccountSigninConfirmationView) findViewById(R.id.signin_confirmation_view);
-        mSigninAccountImage = (ImageView) findViewById(R.id.signin_account_image);
-        mSigninAccountName = (TextView) findViewById(R.id.signin_account_name);
-        mSigninAccountEmail = (TextView) findViewById(R.id.signin_account_email);
-        mSigninSyncTitle = (TextView) findViewById(R.id.signin_sync_title);
-        mSigninSyncDescription = (TextView) findViewById(R.id.signin_sync_description);
-        mSigninPersonalizeServiceTitle =
-                (TextView) findViewById(R.id.signin_personalize_service_title);
+        mPositiveButton = findViewById(R.id.positive_button);
+        mNegativeButton = findViewById(R.id.negative_button);
+        mMoreButton = findViewById(R.id.more_button);
+        mSigninConfirmationView = findViewById(R.id.signin_confirmation_view);
+        mSigninAccountImage = findViewById(R.id.signin_account_image);
+        mSigninAccountName = findViewById(R.id.signin_account_name);
+        mSigninAccountEmail = findViewById(R.id.signin_account_email);
+        mSigninSyncTitle = findViewById(R.id.signin_sync_title);
+        mSigninSyncDescription = findViewById(R.id.signin_sync_description);
+        mSigninPersonalizeServiceTitle = findViewById(R.id.signin_personalize_service_title);
         mSigninPersonalizeServiceDescription =
-                (TextView) findViewById(R.id.signin_personalize_service_description);
-        mSigninSettingsControl = (TextView) findViewById(R.id.signin_settings_control);
+                findViewById(R.id.signin_personalize_service_description);
+        mSigninSettingsControl = findViewById(R.id.signin_settings_control);
         // For the spans to be clickable.
         mSigninSettingsControl.setMovementMethod(LinkMovementMethod.getInstance());
     }
@@ -342,17 +341,14 @@ public class AccountSigninView extends FrameLayout {
         mConsentTextTracker.setText(mMoreButton, R.string.more);
 
         // The clickable "Settings" link.
-        NoUnderlineClickableSpan settingsSpan = new NoUnderlineClickableSpan() {
-            @Override
-            public void onClick(View widget) {
-                mListener.onAccountSelected(mSelectedAccountName, mIsDefaultAccountSelected, true);
-                RecordUserAction.record("Signin_Signin_WithAdvancedSyncSettings");
+        NoUnderlineClickableSpan settingsSpan = new NoUnderlineClickableSpan((widget) -> {
+            mListener.onAccountSelected(mSelectedAccountName, mIsDefaultAccountSelected, true);
+            RecordUserAction.record("Signin_Signin_WithAdvancedSyncSettings");
 
-                // Record the fact that the user consented to the consent text by clicking
-                // on |mSigninSettingsControl|.
-                recordConsent((TextView) widget);
-            }
-        };
+            // Record the fact that the user consented to the consent text by clicking
+            // on |mSigninSettingsControl|.
+            recordConsent((TextView) widget);
+        });
         mConsentTextTracker.setText(mSigninSettingsControl,
                 getSettingsControlDescription(mChildAccountStatus), input -> {
                     return SpanApplier.applySpans(input.toString(),
@@ -408,7 +404,7 @@ public class AccountSigninView extends FrameLayout {
      */
     public void cancelConfirmationScreen() {
         assert isInConfirmationScreen();
-        mUndoBehavior = UNDO_BACK_TO_SELECTION;
+        mUndoBehavior = UndoBehavior.BACK_TO_SELECTION;
         showSigninPage();
     }
 
@@ -459,7 +455,7 @@ public class AccountSigninView extends FrameLayout {
         if (mSelectedAccountName != null) {
             if (accountNames.contains(mSelectedAccountName)) return;
 
-            if (mUndoBehavior == UNDO_BACK_TO_SELECTION) {
+            if (mUndoBehavior == UndoBehavior.BACK_TO_SELECTION) {
                 RecordUserAction.record("Signin_Undo_Signin");
                 showSigninPage();
             } else {
@@ -729,7 +725,7 @@ public class AccountSigninView extends FrameLayout {
     }
 
     private void setUpUndoButton() {
-        if (mUndoBehavior == UNDO_INVISIBLE) {
+        if (mUndoBehavior == UndoBehavior.INVISIBLE) {
             setNegativeButtonVisible(false);
             return;
         }
@@ -742,10 +738,10 @@ public class AccountSigninView extends FrameLayout {
     }
 
     private void onSigninConfirmationCancel() {
-        if (mUndoBehavior == UNDO_BACK_TO_SELECTION) {
+        if (mUndoBehavior == UndoBehavior.BACK_TO_SELECTION) {
             showSigninPage();
         } else {
-            assert mUndoBehavior == UNDO_ABORT;
+            assert mUndoBehavior == UndoBehavior.ABORT;
             mListener.onAccountSelectionCanceled();
         }
     }
@@ -809,9 +805,9 @@ public class AccountSigninView extends FrameLayout {
     private void recordConsent(TextView confirmationView) {
         // TODO(crbug.com/831257): Provide the account id synchronously from AccountManagerFacade.
         final AccountIdProvider accountIdProvider = AccountIdProvider.getInstance();
-        new AsyncTask<Void, Void, String>() {
+        new AsyncTask<String>() {
             @Override
-            public String doInBackground(Void... params) {
+            public String doInBackground() {
                 return accountIdProvider.getAccountId(mSelectedAccountName);
             }
 

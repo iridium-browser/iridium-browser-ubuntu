@@ -31,15 +31,13 @@
 - (void)configureHeaderFooterView:(UITableViewHeaderFooterView*)headerFooter
                        withStyler:(ChromeTableViewStyler*)styler {
   [super configureHeaderFooterView:headerFooter withStyler:styler];
-
-  // Set the contentView backgroundColor, not the header's.
-  headerFooter.contentView.backgroundColor = styler.tableViewBackgroundColor;
-
   TableViewTextHeaderFooterView* header =
       base::mac::ObjCCastStrict<TableViewTextHeaderFooterView>(headerFooter);
   header.textLabel.text = self.text;
   header.subtitleLabel.text = self.subtitleText;
   header.accessibilityLabel = self.text;
+  if (styler.cellHighlightColor)
+    header.highlightColor = styler.cellHighlightColor;
 }
 
 @end
@@ -53,6 +51,7 @@
 
 @implementation TableViewTextHeaderFooterView
 @synthesize cellAnimator = _cellAnimator;
+@synthesize highlightColor = _highlightColor;
 @synthesize subtitleLabel = _subtitleLabel;
 @synthesize textLabel = _textLabel;
 
@@ -71,7 +70,6 @@
     UIStackView* verticalStack = [[UIStackView alloc]
         initWithArrangedSubviews:@[ _textLabel, _subtitleLabel ]];
     verticalStack.axis = UILayoutConstraintAxisVertical;
-    verticalStack.spacing = kTableViewVerticalLabelStackSpacing;
     verticalStack.translatesAutoresizingMaskIntoConstraints = NO;
 
     // Container View.
@@ -82,21 +80,41 @@
     [containerView addSubview:verticalStack];
     [self.contentView addSubview:containerView];
 
+    // Lower the padding constraints priority. UITableView might try to set
+    // the header view height/width to 0 breaking the constraints. See
+    // https://crbug.com/854117 for more information.
+    NSLayoutConstraint* heightConstraint =
+        [self.contentView.heightAnchor constraintGreaterThanOrEqualToConstant:
+                                           kTableViewHeaderFooterViewHeight];
+    // Set this constraint to UILayoutPriorityDefaultHigh + 1 in order to guard
+    // against some elements that might UILayoutPriorityDefaultHigh to expand
+    // beyond the margins.
+    heightConstraint.priority = UILayoutPriorityDefaultHigh + 1;
+    NSLayoutConstraint* topAnchorConstraint = [containerView.topAnchor
+        constraintGreaterThanOrEqualToAnchor:self.contentView.topAnchor
+                                    constant:kTableViewVerticalSpacing];
+    topAnchorConstraint.priority = UILayoutPriorityDefaultHigh;
+    NSLayoutConstraint* bottomAnchorConstraint = [containerView.bottomAnchor
+        constraintLessThanOrEqualToAnchor:self.contentView.bottomAnchor
+                                 constant:-kTableViewVerticalSpacing];
+    bottomAnchorConstraint.priority = UILayoutPriorityDefaultHigh;
+    NSLayoutConstraint* leadingAnchorConstraint = [containerView.leadingAnchor
+        constraintEqualToAnchor:self.contentView.leadingAnchor
+                       constant:kTableViewHorizontalSpacing];
+    leadingAnchorConstraint.priority = UILayoutPriorityDefaultHigh;
+    NSLayoutConstraint* trailingAnchorConstraint = [containerView.trailingAnchor
+        constraintEqualToAnchor:self.contentView.trailingAnchor
+                       constant:-kTableViewHorizontalSpacing];
+    trailingAnchorConstraint.priority = UILayoutPriorityDefaultHigh;
+
     // Set and activate constraints.
     [NSLayoutConstraint activateConstraints:@[
       // Container Constraints.
-      [containerView.leadingAnchor
-          constraintEqualToAnchor:self.contentView.leadingAnchor
-                         constant:kTableViewCellViewSpacing],
-      [containerView.trailingAnchor
-          constraintEqualToAnchor:self.contentView.trailingAnchor
-                         constant:-kTableViewCellViewSpacing],
-      [containerView.topAnchor
-          constraintGreaterThanOrEqualToAnchor:self.contentView.topAnchor
-                                      constant:kTableViewCellViewSpacing],
-      [containerView.bottomAnchor
-          constraintLessThanOrEqualToAnchor:self.contentView.bottomAnchor
-                                   constant:-kTableViewCellViewSpacing],
+      heightConstraint,
+      topAnchorConstraint,
+      bottomAnchorConstraint,
+      leadingAnchorConstraint,
+      trailingAnchorConstraint,
       [containerView.centerYAnchor
           constraintEqualToAnchor:self.contentView.centerYAnchor],
       // Vertical StackView Constraints.
@@ -118,9 +136,7 @@
       initWithDuration:kTableViewCellSelectionAnimationDuration
                  curve:UIViewAnimationCurveLinear
             animations:^{
-              self.contentView.backgroundColor =
-                  UIColorFromRGB(kTableViewHighlightedCellColor,
-                                 kTableViewHighlightedCellColorAlpha);
+              self.contentView.backgroundColor = self.highlightColor;
             }];
   __weak TableViewTextHeaderFooterView* weakSelf = self;
   [self.cellAnimator addCompletion:^(UIViewAnimatingPosition finalPosition) {

@@ -594,7 +594,8 @@ class CrashReportDatabaseWin : public CrashReportDatabase {
   OperationStatus GetCompletedReports(std::vector<Report>* reports) override;
   OperationStatus GetReportForUploading(
       const UUID& uuid,
-      std::unique_ptr<const UploadReport>* report) override;
+      std::unique_ptr<const UploadReport>* report,
+      bool report_metrics) override;
   OperationStatus SkipReportUpload(const UUID& uuid,
                                    Metrics::CrashSkippedReason reason) override;
   OperationStatus DeleteReport(const UUID& uuid) override;
@@ -614,6 +615,16 @@ class CrashReportDatabaseWin : public CrashReportDatabase {
 
   DISALLOW_COPY_AND_ASSIGN(CrashReportDatabaseWin);
 };
+
+FileWriter* CrashReportDatabase::NewReport::AddAttachment(
+    const std::string& name) {
+  // Attachments aren't implemented in the Windows database yet.
+  return nullptr;
+}
+
+void CrashReportDatabase::UploadReport::InitializeAttachments() {
+  // Attachments aren't implemented in the Windows database yet.
+}
 
 CrashReportDatabaseWin::CrashReportDatabaseWin(const base::FilePath& path)
     : CrashReportDatabase(), base_dir_(path), settings_(), initialized_() {}
@@ -653,7 +664,8 @@ OperationStatus CrashReportDatabaseWin::PrepareNewCrashReport(
   INITIALIZATION_STATE_DCHECK_VALID(initialized_);
 
   std::unique_ptr<NewReport> new_report(new NewReport());
-  if (!new_report->Initialize(base_dir_.Append(kReportsDirectory),
+  if (!new_report->Initialize(this,
+                              base_dir_.Append(kReportsDirectory),
                               std::wstring(L".") + kCrashReportFileExtension)) {
     return kFileSystemError;
   }
@@ -720,7 +732,8 @@ OperationStatus CrashReportDatabaseWin::GetCompletedReports(
 
 OperationStatus CrashReportDatabaseWin::GetReportForUploading(
     const UUID& uuid,
-    std::unique_ptr<const UploadReport>* report) {
+    std::unique_ptr<const UploadReport>* report,
+    bool report_metrics) {
   INITIALIZATION_STATE_DCHECK_VALID(initialized_);
 
   std::unique_ptr<Metadata> metadata(AcquireMetadata());
@@ -738,6 +751,7 @@ OperationStatus CrashReportDatabaseWin::GetReportForUploading(
     if (!upload_report->Initialize(upload_report->file_path, this)) {
       return kFileSystemError;
     }
+    upload_report->report_metrics_ = report_metrics;
 
     report->reset(upload_report.release());
   }
@@ -750,7 +764,9 @@ OperationStatus CrashReportDatabaseWin::RecordUploadAttempt(
     const std::string& id) {
   INITIALIZATION_STATE_DCHECK_VALID(initialized_);
 
-  Metrics::CrashUploadAttempted(successful);
+  if (report->report_metrics_) {
+    Metrics::CrashUploadAttempted(successful);
+  }
 
   std::unique_ptr<Metadata> metadata(AcquireMetadata());
   if (!metadata)

@@ -6,6 +6,8 @@
 
 #include "fpdfsdk/formfiller/cffl_textfield.h"
 
+#include <utility>
+
 #include "fpdfsdk/cpdfsdk_common.h"
 #include "fpdfsdk/cpdfsdk_formfillenvironment.h"
 #include "fpdfsdk/cpdfsdk_widget.h"
@@ -67,26 +69,25 @@ CPWL_Wnd::CreateParams CFFL_TextField::GetCreateParam() {
   return cp;
 }
 
-CPWL_Wnd* CFFL_TextField::NewPDFWindow(const CPWL_Wnd::CreateParams& cp) {
-  auto* pWnd = new CPWL_Edit();
+std::unique_ptr<CPWL_Wnd> CFFL_TextField::NewPDFWindow(
+    const CPWL_Wnd::CreateParams& cp) {
+  auto pWnd = pdfium::MakeUnique<CPWL_Edit>();
   pWnd->AttachFFLData(this);
   pWnd->Create(cp);
   pWnd->SetFillerNotify(m_pFormFillEnv->GetInteractiveFormFiller());
 
   int32_t nMaxLen = m_pWidget->GetMaxLen();
   WideString swValue = m_pWidget->GetValue();
-
   if (nMaxLen > 0) {
     if (pWnd->HasFlag(PES_CHARARRAY)) {
       pWnd->SetCharArray(nMaxLen);
-      pWnd->SetAlignFormatV(PEAV_CENTER);
+      pWnd->SetAlignFormatVerticalCenter();
     } else {
       pWnd->SetLimitChar(nMaxLen);
     }
   }
-
   pWnd->SetText(swValue);
-  return pWnd;
+  return std::move(pWnd);
 }
 
 bool CFFL_TextField::OnChar(CPDFSDK_Annot* pAnnot,
@@ -100,7 +101,7 @@ bool CFFL_TextField::OnChar(CPDFSDK_Annot* pAnnot,
       CPDFSDK_PageView* pPageView = GetCurPageView(true);
       ASSERT(pPageView);
       m_bValid = !m_bValid;
-      m_pFormFillEnv->Invalidate(pAnnot->GetUnderlyingPage(),
+      m_pFormFillEnv->Invalidate(pAnnot->GetPage(),
                                  pAnnot->GetRect().GetOuterRect());
 
       if (m_bValid) {
@@ -138,19 +139,20 @@ void CFFL_TextField::SaveData(CPDFSDK_PageView* pPageView) {
 
   WideString sOldValue = m_pWidget->GetValue();
   WideString sNewValue = pWnd->GetText();
-
   CPDFSDK_Widget::ObservedPtr observed_widget(m_pWidget.Get());
   CFFL_TextField::ObservedPtr observed_this(this);
-
-  m_pWidget->SetValue(sNewValue, false);
+  m_pWidget->SetValue(sNewValue, NotificationOption::kDoNotNotify);
   if (!observed_widget)
     return;
+
   m_pWidget->ResetFieldAppearance(true);
   if (!observed_widget)
     return;
+
   m_pWidget->UpdateField();
   if (!observed_widget || !observed_this)
     return;
+
   SetChangeMark();
 }
 

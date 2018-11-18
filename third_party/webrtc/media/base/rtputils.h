@@ -12,6 +12,7 @@
 #define MEDIA_BASE_RTPUTILS_H_
 
 #include "rtc_base/byteorder.h"
+#include "rtc_base/system/rtc_export.h"
 
 namespace rtc {
 struct PacketTimeUpdateParams;
@@ -31,13 +32,13 @@ struct RtpHeader {
 };
 
 enum RtcpTypes {
-  kRtcpTypeSR = 200,      // Sender report payload type.
-  kRtcpTypeRR = 201,      // Receiver report payload type.
-  kRtcpTypeSDES = 202,    // SDES payload type.
-  kRtcpTypeBye = 203,     // BYE payload type.
-  kRtcpTypeApp = 204,     // APP payload type.
-  kRtcpTypeRTPFB = 205,   // Transport layer Feedback message payload type.
-  kRtcpTypePSFB = 206,    // Payload-specific Feedback message payload type.
+  kRtcpTypeSR = 200,     // Sender report payload type.
+  kRtcpTypeRR = 201,     // Receiver report payload type.
+  kRtcpTypeSDES = 202,   // SDES payload type.
+  kRtcpTypeBye = 203,    // BYE payload type.
+  kRtcpTypeApp = 204,    // APP payload type.
+  kRtcpTypeRTPFB = 205,  // Transport layer Feedback message payload type.
+  kRtcpTypePSFB = 206,   // Payload-specific Feedback message payload type.
 };
 
 bool GetRtpPayloadType(const void* data, size_t len, int* value);
@@ -55,6 +56,7 @@ bool SetRtpHeader(void* data, size_t len, const RtpHeader& header);
 
 bool IsRtpPacket(const void* data, size_t len);
 
+bool IsRtcpPacket(const char* data, size_t len);
 // True if |payload type| is 0-127.
 bool IsValidRtpPayloadType(int payload_type);
 
@@ -67,9 +69,9 @@ bool IsValidRtpRtcpPacketSize(bool rtcp, size_t size);
 const char* RtpRtcpStringLiteral(bool rtcp);
 
 // Verifies that a packet has a valid RTP header.
-bool ValidateRtpHeader(const uint8_t* rtp,
-                       size_t length,
-                       size_t* header_length);
+bool RTC_EXPORT ValidateRtpHeader(const uint8_t* rtp,
+                                  size_t length,
+                                  size_t* header_length);
 
 // Helper method which updates the absolute send time extension if present.
 bool UpdateRtpAbsSendTimeExtension(uint8_t* rtp,
@@ -79,11 +81,11 @@ bool UpdateRtpAbsSendTimeExtension(uint8_t* rtp,
 
 // Applies specified |options| to the packet. It updates the absolute send time
 // extension header if it is present present then updates HMAC.
-bool ApplyPacketOptions(uint8_t* data,
-                        size_t length,
-                        const rtc::PacketTimeUpdateParams& packet_time_params,
-                        uint64_t time_us);
-
+bool RTC_EXPORT
+ApplyPacketOptions(uint8_t* data,
+                   size_t length,
+                   const rtc::PacketTimeUpdateParams& packet_time_params,
+                   uint64_t time_us);
 
 }  // namespace cricket
 

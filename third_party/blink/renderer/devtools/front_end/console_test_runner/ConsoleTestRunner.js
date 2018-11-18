@@ -49,23 +49,32 @@ ConsoleTestRunner.dumpConsoleMessagesIntoArray = function(printOriginatingComman
 
     let classNames;
     if (dumpClassNames) {
-      classNames = [];
+      classNames = [''];
       for (let node = element.firstChild; node; node = node.traverseNextNode(element)) {
         if (node.nodeType === Node.ELEMENT_NODE && node.className) {
-          classNames.push(node.className.replace('platform-linux', 'platform-*')
-                              .replace('platform-mac', 'platform-*')
-                              .replace('platform-windows', 'platform-*'));
+          let depth = 0;
+          let depthTest = node;
+          while (depthTest !== element) {
+            if (depthTest.nodeType === Node.ELEMENT_NODE && depthTest.className)
+              depth++;
+            depthTest = depthTest.parentNodeOrShadowHost();
+          }
+          classNames.push(
+              '  '.repeat(depth) +
+              node.className.replace('platform-linux', 'platform-*')
+                  .replace('platform-mac', 'platform-*')
+                  .replace('platform-windows', 'platform-*'));
         }
       }
     }
 
     if (ConsoleTestRunner.dumpConsoleTableMessage(uiMessage, false, result)) {
       if (dumpClassNames)
-        result.push(classNames.join(' > '));
+        result.push(classNames.join('\n'));
     } else {
       let messageText = formatter(element, message);
       messageText = messageText.replace(/VM\d+/g, 'VM');
-      result.push(messageText + (dumpClassNames ? ' ' + classNames.join(' > ') : ''));
+      result.push(messageText + (dumpClassNames ? ' ' + classNames.join('\n') : ''));
     }
 
     if (printOriginatingCommand && uiMessage.consoleMessage().originatingMessage())
@@ -371,6 +380,15 @@ ConsoleTestRunner.expandConsoleMessages = function(callback, deepFilter, section
 };
 
 /**
+ * @param {function(!Element):boolean} deepFilter
+ * @param {function(!ObjectUI.ObjectPropertiesSection):boolean} sectionFilter
+ * @return {!Promise}
+ */
+ConsoleTestRunner.expandConsoleMessagesPromise = function(deepFilter, sectionFilter) {
+  return new Promise(fulfill => ConsoleTestRunner.expandConsoleMessages(fulfill, deepFilter, sectionFilter));
+};
+
+/**
  * @param {!Function} callback
  */
 ConsoleTestRunner.expandGettersInConsoleMessages = function(callback) {
@@ -421,6 +439,13 @@ ConsoleTestRunner.waitForRemoteObjectsConsoleMessages = function(callback) {
   for (let i = 0; i < messages.length; ++i)
     messages[i].toMessageElement();
   TestRunner.deprecatedRunAfterPendingDispatches(callback);
+};
+
+/**
+ * @return {!Promise}
+ */
+ConsoleTestRunner.waitForRemoteObjectsConsoleMessagesPromise = function() {
+  return new Promise(resolve => ConsoleTestRunner.waitForRemoteObjectsConsoleMessages(resolve));
 };
 
 /**
@@ -593,14 +618,12 @@ ConsoleTestRunner.dumpStackTraces = function() {
 };
 
 /**
- * Returns actual visible indices. Messages in the margin are treated as NOT visible.
  * @return {!{first: number, last: number, count: number}}
  */
 ConsoleTestRunner.visibleIndices = function() {
   const consoleView = Console.ConsoleView.instance();
   const viewport = consoleView._viewport;
   const viewportRect = viewport.element.getBoundingClientRect();
-  const viewportPadding = parseFloat(window.getComputedStyle(viewport.element).paddingTop);
   let first = -1;
   let last = -1;
   let count = 0;
@@ -610,8 +633,7 @@ ConsoleTestRunner.visibleIndices = function() {
     if (!item._element || !item._element.isConnected)
       continue;
     const itemRect = item._element.getBoundingClientRect();
-    const isVisible = (itemRect.bottom > viewportRect.top + viewportPadding + 1) &&
-        (itemRect.top <= viewportRect.bottom - viewportPadding - 1);
+    const isVisible = (itemRect.bottom > viewportRect.top + 1) && (itemRect.top <= viewportRect.bottom - 1);
     if (isVisible) {
       first = first === -1 ? i : first;
       last = i;

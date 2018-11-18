@@ -34,7 +34,12 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterWin
       public BluetoothTaskManagerWin::Observer {
  public:
   static base::WeakPtr<BluetoothAdapter> CreateAdapter(
-      const InitCallback& init_callback);
+      InitCallback init_callback);
+
+  static base::WeakPtr<BluetoothAdapter> CreateClassicAdapter(
+      InitCallback init_callback);
+
+  static bool UseNewBLEWinImplementation();
 
   // BluetoothAdapter:
   std::string GetAddress() const override;
@@ -107,7 +112,7 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterWin
     DISCOVERY_STOPPING
   };
 
-  explicit BluetoothAdapterWin(const InitCallback& init_callback);
+  explicit BluetoothAdapterWin(InitCallback init_callback);
   ~BluetoothAdapterWin() override;
 
   // BluetoothAdapter:
@@ -115,18 +120,20 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterWin
   void AddDiscoverySession(
       BluetoothDiscoveryFilter* discovery_filter,
       const base::Closure& callback,
-      const DiscoverySessionErrorCallback& error_callback) override;
+      DiscoverySessionErrorCallback error_callback) override;
   void RemoveDiscoverySession(
       BluetoothDiscoveryFilter* discovery_filter,
       const base::Closure& callback,
-      const DiscoverySessionErrorCallback& error_callback) override;
+      DiscoverySessionErrorCallback error_callback) override;
   void SetDiscoveryFilter(
       std::unique_ptr<BluetoothDiscoveryFilter> discovery_filter,
       const base::Closure& callback,
-      const DiscoverySessionErrorCallback& error_callback) override;
+      DiscoverySessionErrorCallback error_callback) override;
 
   void Init();
   void InitForTest(
+      std::unique_ptr<win::BluetoothClassicWrapper> classic_wrapper,
+      std::unique_ptr<win::BluetoothLowEnergyWrapper> le_wrapper,
       scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner,
       scoped_refptr<base::SequencedTaskRunner> bluetooth_task_runner);
 

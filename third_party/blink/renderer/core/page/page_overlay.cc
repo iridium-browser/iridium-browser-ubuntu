@@ -32,7 +32,7 @@
 #include <utility>
 
 #include "base/memory/ptr_util.h"
-#include "third_party/blink/public/platform/web_layer.h"
+#include "cc/layers/picture_layer.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/visual_viewport.h"
 #include "third_party/blink/renderer/core/frame/web_frame_widget_base.h"
@@ -47,14 +47,14 @@
 namespace blink {
 
 std::unique_ptr<PageOverlay> PageOverlay::Create(
-    WebLocalFrameImpl* frame_impl,
+    LocalFrame* local_frame,
     std::unique_ptr<PageOverlay::Delegate> delegate) {
-  return base::WrapUnique(new PageOverlay(frame_impl, std::move(delegate)));
+  return base::WrapUnique(new PageOverlay(local_frame, std::move(delegate)));
 }
 
-PageOverlay::PageOverlay(WebLocalFrameImpl* frame_impl,
+PageOverlay::PageOverlay(LocalFrame* local_frame,
                          std::unique_ptr<PageOverlay::Delegate> delegate)
-    : frame_impl_(frame_impl), delegate_(std::move(delegate)) {}
+    : frame_(local_frame), delegate_(std::move(delegate)) {}
 
 PageOverlay::~PageOverlay() {
   if (!layer_)
@@ -64,37 +64,37 @@ PageOverlay::~PageOverlay() {
 }
 
 void PageOverlay::Update() {
-  if (!frame_impl_->LocalRootFrameWidget()->IsAcceleratedCompositingActive())
+  if (!frame_)
     return;
 
-  LocalFrame* frame = frame_impl_->GetFrame();
-  if (!frame)
+  auto* local_root_frame_widget =
+      WebLocalFrameImpl::FromFrame(frame_)->LocalRootFrameWidget();
+  if (!local_root_frame_widget->IsAcceleratedCompositingActive())
     return;
 
   if (!layer_) {
+    GraphicsLayer* parent_layer =
+        frame_->IsMainFrame()
+            ? frame_->GetPage()->GetVisualViewport().ContainerLayer()
+            : local_root_frame_widget->RootGraphicsLayer();
+    if (!parent_layer)
+      return;
+
     layer_ = GraphicsLayer::Create(*this);
     layer_->SetDrawsContent(true);
+    parent_layer->AddChild(layer_.get());
 
     // This is required for contents of overlay to stay in sync with the page
     // while scrolling.
-    WebLayer* platform_layer = layer_->PlatformLayer();
-    platform_layer->AddMainThreadScrollingReasons(
+    cc::Layer* cc_layer = layer_->CcLayer();
+    cc_layer->AddMainThreadScrollingReasons(
         MainThreadScrollingReason::kPageOverlay);
-    if (frame->IsMainFrame()) {
-      frame->GetPage()->GetVisualViewport().ContainerLayer()->AddChild(
-          layer_.get());
-    } else {
-      frame_impl_->LocalRootFrameWidget()->RootGraphicsLayer()->AddChild(
-          layer_.get());
-    }
 
-    if (RuntimeEnabledFeatures::SlimmingPaintV175Enabled()) {
-      layer_->SetLayerState(PropertyTreeState(PropertyTreeState::Root()),
-                            IntPoint());
-    }
+    layer_->SetLayerState(PropertyTreeState(PropertyTreeState::Root()),
+                          IntPoint());
   }
 
-  FloatSize size(frame->GetPage()->GetVisualViewport().Size());
+  gfx::Size size(frame_->GetPage()->GetVisualViewport().Size());
   if (size != layer_->Size())
     layer_->SetSize(size);
 
@@ -104,12 +104,12 @@ void PageOverlay::Update() {
 
 LayoutRect PageOverlay::VisualRect() const {
   DCHECK(layer_.get());
-  return LayoutRect(FloatPoint(), layer_->Size());
+  return LayoutRect(IntPoint(), IntSize(layer_->Size()));
 }
 
 IntRect PageOverlay::ComputeInterestRect(const GraphicsLayer* graphics_layer,
                                          const IntRect&) const {
-  return IntRect(IntPoint(), ExpandedIntSize(layer_->Size()));
+  return IntRect(IntPoint(), IntSize(layer_->Size()));
 }
 
 void PageOverlay::PaintContents(const GraphicsLayer* graphics_layer,
@@ -121,7 +121,7 @@ void PageOverlay::PaintContents(const GraphicsLayer* graphics_layer,
 }
 
 String PageOverlay::DebugName(const GraphicsLayer*) const {
-  return "WebViewImpl Page Overlay Content Layer";
+  return "Page Overlay Content Layer";
 }
 
 }  // namespace blink

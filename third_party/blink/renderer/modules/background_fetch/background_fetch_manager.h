@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_BACKGROUND_FETCH_BACKGROUND_FETCH_MANAGER_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_BACKGROUND_FETCH_BACKGROUND_FETCH_MANAGER_H_
 
+#include "base/time/time.h"
 #include "third_party/blink/public/platform/modules/background_fetch/background_fetch.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/core/dom/context_lifecycle_observer.h"
@@ -54,7 +55,7 @@ class MODULES_EXPORT BackgroundFetchManager final
   ScriptPromise get(ScriptState* script_state, const String& id);
   ScriptPromise getIds(ScriptState* script_state);
 
-  void Trace(blink::Visitor* visitor);
+  void Trace(blink::Visitor* visitor) override;
 
   // ContextLifecycleObserver interface
   void ContextDestroyed(ExecutionContext* context) override;
@@ -66,29 +67,36 @@ class MODULES_EXPORT BackgroundFetchManager final
 
   // Creates a vector of WebServiceWorkerRequest objects for the given set of
   // |requests|, which can be either Request objects or URL strings.
+  // |has_requests_with_body| will be set if any of the |requests| has a body.
   static Vector<WebServiceWorkerRequest> CreateWebRequestVector(
       ScriptState* script_state,
       const RequestOrUSVStringOrRequestOrUSVStringSequence& requests,
-      ExceptionState& exception_state);
+      ExceptionState& exception_state,
+      bool* has_requests_with_body);
 
   void DidLoadIcons(const String& id,
                     Vector<WebServiceWorkerRequest> web_requests,
                     mojom::blink::BackgroundFetchOptionsPtr options,
                     ScriptPromiseResolver* resolver,
-                    const SkBitmap& icon);
+                    BackgroundFetchIconLoader* loader,
+                    const SkBitmap& icon,
+                    int64_t ideal_to_chosen_icon_size);
   void DidFetch(ScriptPromiseResolver* resolver,
+                base::Time time_started,
                 mojom::blink::BackgroundFetchError error,
                 BackgroundFetchRegistration* registration);
   void DidGetRegistration(ScriptPromiseResolver* script_state,
+                          base::Time time_started,
                           mojom::blink::BackgroundFetchError error,
                           BackgroundFetchRegistration* registration);
   void DidGetDeveloperIds(ScriptPromiseResolver* script_state,
+                          base::Time time_started,
                           mojom::blink::BackgroundFetchError error,
                           const Vector<String>& developer_ids);
 
   Member<ServiceWorkerRegistration> registration_;
   Member<BackgroundFetchBridge> bridge_;
-  Member<BackgroundFetchIconLoader> loader_;
+  HeapVector<Member<BackgroundFetchIconLoader>> loaders_;
 };
 
 }  // namespace blink

@@ -75,14 +75,6 @@ struct ParseTiming {
   mojo_base.mojom.TimeDelta? parse_blocked_on_script_execution_from_document_write_duration;
 };
 
-struct StyleSheetTiming {
-  // Total time spent parsing author style sheets, before the first contentful
-  // paint.
-  mojo_base.mojom.TimeDelta? author_style_sheet_parse_duration_before_fcp;
-  // Time spent in Document::updateStyle before FCP.
-  mojo_base.mojom.TimeDelta? update_style_duration_before_fcp;
-};
-
 struct InteractiveTiming {
   // The first time the page is considered 'interactive'. This is determined
   // using heuristics based on main thread and network activity. Time delta is
@@ -110,6 +102,14 @@ struct InteractiveTiming {
 
   // The timestamp of the event whose delay is reported by GetFirstInputDelay().
   mojo_base.mojom.TimeDelta? first_input_timestamp;
+
+  // Queueing Time of the meaningful input event with longest delay. Meaningful
+  // input events are click, tap, key press, cancellable touchstart, or pointer
+  // down followed by a pointer up.
+  mojo_base.mojom.TimeDelta? longest_input_delay;
+
+  // The timestamp of the event whose delay is reported as longest_input_delay.
+  mojo_base.mojom.TimeDelta? longest_input_timestamp;
 };
 
 
@@ -130,7 +130,10 @@ struct PageLoadTiming {
   InteractiveTiming interactive_timing;
   PaintTiming paint_timing;
   ParseTiming parse_timing;
-  StyleSheetTiming style_sheet_timing;
+  // Time between user input and navigation start. This is set for navigations
+  // where the input start timing is known; currently when the navigation is
+  // initiated by a link click in the renderer, or from the desktop omnibox.
+  mojo_base.mojom.TimeDelta? input_to_navigation_start;
 
   // If you add additional members, also be sure to update page_load_timing.h.
 };
@@ -152,10 +155,50 @@ struct PageLoadFeatures {
   array<int32> animated_css_properties;
 };
 
+struct ResourceDataUpdate {
+  // The id for the resource request.
+  int32 request_id = 0;
+
+  // Network bytes received for the resource since the last timing update
+  // from renderer to browser.
+  int64 delta_bytes = 0;
+
+  // Total network bytes received for the resource across timing updates. This
+  // is the aggregate of the |delta_bytes| from each timing update.
+  int64 received_data_length = 0;
+
+  // The length of the response body for the resource before removing any
+  // content encodings.
+  int64 encoded_body_length = 0;
+
+  // Whether this resource load has completed.
+  bool is_complete;
+
+  // Compression ratio estimated from the response headers if data saver was
+  // used.
+  double data_reduction_proxy_compression_ratio_estimate;
+
+  // Whether this resource was tagged as an ad in the renderer. This flag can
+  // be set to true at any point during a resource load. A more recent
+  // ResourceDataUpdate can have a different flag than the previous update.
+  // Once this is set to true, it will be true for all future updates.
+  bool reported_as_ad_resource;
+
+  // Whether this resource was loaded in the top-level frame.
+  bool is_main_frame_resource;
+
+  // Whether this resource was fetched from the http cache.
+  bool was_fetched_via_cache;
+
+  // Mime type for the resource found in the network response header.
+  string mime_type;
+};
+
 // Sent from renderer to browser process when the PageLoadTiming for the
 // associated frame changed.
 interface PageLoadMetrics {
   UpdateTiming(PageLoadTiming page_load_timing,
                PageLoadMetadata page_load_metadata,
-               PageLoadFeatures new_features);
+               PageLoadFeatures new_features,
+               array<ResourceDataUpdate> resources);
 };

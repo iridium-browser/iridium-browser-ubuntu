@@ -7,14 +7,13 @@
 #include <vector>
 
 #include "base/macros.h"
-#include "base/test/scoped_feature_list.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "ios/chrome/browser/browser_state/test_chrome_browser_state.h"
 #import "ios/chrome/browser/download/download_manager_tab_helper.h"
 #include "ios/chrome/browser/download/pass_kit_mime_type.h"
 #import "ios/chrome/browser/download/pass_kit_tab_helper.h"
 #import "ios/web/public/download/download_controller.h"
 #import "ios/web/public/download/download_task.h"
-#include "ios/web/public/features.h"
 #import "ios/web/public/test/fakes/fake_download_task.h"
 #import "ios/web/public/test/fakes/test_web_state.h"
 #include "ios/web/public/test/test_web_thread_bundle.h"
@@ -62,8 +61,6 @@ class BrowserDownloadServiceTest : public PlatformTest {
  protected:
   BrowserDownloadServiceTest()
       : browser_state_(browser_state_builder_.Build()) {
-    feature_list_.InitAndEnableFeature(web::features::kNewFileDownload);
-
     StubTabHelper<PassKitTabHelper>::CreateForWebState(&web_state_);
     StubTabHelper<DownloadManagerTabHelper>::CreateForWebState(&web_state_);
 
@@ -103,7 +100,7 @@ class BrowserDownloadServiceTest : public PlatformTest {
   std::unique_ptr<TestChromeBrowserState> browser_state_;
   std::unique_ptr<BrowserDownloadService> service_;
   web::TestWebState web_state_;
-  base::test::ScopedFeatureList feature_list_;
+  base::HistogramTester histogram_tester_;
 };
 
 // Tests that BrowserDownloadService downloads the task using
@@ -118,6 +115,10 @@ TEST_F(BrowserDownloadServiceTest, PkPassMimeType) {
   ASSERT_EQ(1U, pass_kit_tab_helper()->tasks().size());
   EXPECT_EQ(task_ptr, pass_kit_tab_helper()->tasks()[0].get());
   ASSERT_TRUE(download_manager_tab_helper()->tasks().empty());
+  histogram_tester_.ExpectUniqueSample(
+      "Download.IOSDownloadMimeType",
+      static_cast<base::HistogramBase::Sample>(DownloadMimeTypeResult::PkPass),
+      1);
 }
 
 // Tests that BrowserDownloadService uses DownloadManagerTabHelper for PDF Mime
@@ -132,4 +133,83 @@ TEST_F(BrowserDownloadServiceTest, PdfMimeType) {
   ASSERT_TRUE(pass_kit_tab_helper()->tasks().empty());
   ASSERT_EQ(1U, download_manager_tab_helper()->tasks().size());
   EXPECT_EQ(task_ptr, download_manager_tab_helper()->tasks()[0].get());
+  histogram_tester_.ExpectUniqueSample(
+      "Download.IOSDownloadMimeType",
+      static_cast<base::HistogramBase::Sample>(DownloadMimeTypeResult::Other),
+      1);
+}
+
+// Tests that BrowserDownloadService uses DownloadManagerTabHelper for Mobile
+// Config Mime Type.
+TEST_F(BrowserDownloadServiceTest, iOSMobileConfigMimeType) {
+  ASSERT_TRUE(download_controller()->GetDelegate());
+  auto task = std::make_unique<web::FakeDownloadTask>(
+      GURL(kUrl), "application/x-apple-aspen-config");
+  web::DownloadTask* task_ptr = task.get();
+  download_controller()->GetDelegate()->OnDownloadCreated(
+      download_controller(), &web_state_, std::move(task));
+  ASSERT_TRUE(pass_kit_tab_helper()->tasks().empty());
+  ASSERT_EQ(1U, download_manager_tab_helper()->tasks().size());
+  EXPECT_EQ(task_ptr, download_manager_tab_helper()->tasks()[0].get());
+  histogram_tester_.ExpectUniqueSample(
+      "Download.IOSDownloadMimeType",
+      static_cast<base::HistogramBase::Sample>(
+          DownloadMimeTypeResult::iOSMobileConfig),
+      1);
+}
+
+// Tests that BrowserDownloadService uses DownloadManagerTabHelper for Zip Mime
+// Type.
+TEST_F(BrowserDownloadServiceTest, ZipArchiveMimeType) {
+  ASSERT_TRUE(download_controller()->GetDelegate());
+  auto task =
+      std::make_unique<web::FakeDownloadTask>(GURL(kUrl), "application/zip");
+  web::DownloadTask* task_ptr = task.get();
+  download_controller()->GetDelegate()->OnDownloadCreated(
+      download_controller(), &web_state_, std::move(task));
+  ASSERT_TRUE(pass_kit_tab_helper()->tasks().empty());
+  ASSERT_EQ(1U, download_manager_tab_helper()->tasks().size());
+  EXPECT_EQ(task_ptr, download_manager_tab_helper()->tasks()[0].get());
+  histogram_tester_.ExpectUniqueSample("Download.IOSDownloadMimeType",
+                                       static_cast<base::HistogramBase::Sample>(
+                                           DownloadMimeTypeResult::ZipArchive),
+                                       1);
+}
+
+// Tests that BrowserDownloadService uses DownloadManagerTabHelper for .exe Mime
+// Type.
+TEST_F(BrowserDownloadServiceTest, ExeMimeType) {
+  ASSERT_TRUE(download_controller()->GetDelegate());
+  auto task = std::make_unique<web::FakeDownloadTask>(
+      GURL(kUrl), "application/x-msdownload");
+  web::DownloadTask* task_ptr = task.get();
+  download_controller()->GetDelegate()->OnDownloadCreated(
+      download_controller(), &web_state_, std::move(task));
+  ASSERT_TRUE(pass_kit_tab_helper()->tasks().empty());
+  ASSERT_EQ(1U, download_manager_tab_helper()->tasks().size());
+  EXPECT_EQ(task_ptr, download_manager_tab_helper()->tasks()[0].get());
+  histogram_tester_.ExpectUniqueSample(
+      "Download.IOSDownloadMimeType",
+      static_cast<base::HistogramBase::Sample>(
+          DownloadMimeTypeResult::MicrosoftApplication),
+      1);
+}
+
+// Tests that BrowserDownloadService uses DownloadManagerTabHelper for .apk Mime
+// Type.
+TEST_F(BrowserDownloadServiceTest, ApkMimeType) {
+  ASSERT_TRUE(download_controller()->GetDelegate());
+  auto task = std::make_unique<web::FakeDownloadTask>(
+      GURL(kUrl), "application/vnd.android.package-archive");
+  web::DownloadTask* task_ptr = task.get();
+  download_controller()->GetDelegate()->OnDownloadCreated(
+      download_controller(), &web_state_, std::move(task));
+  ASSERT_TRUE(pass_kit_tab_helper()->tasks().empty());
+  ASSERT_EQ(1U, download_manager_tab_helper()->tasks().size());
+  EXPECT_EQ(task_ptr, download_manager_tab_helper()->tasks()[0].get());
+  histogram_tester_.ExpectUniqueSample(
+      "Download.IOSDownloadMimeType",
+      static_cast<base::HistogramBase::Sample>(
+          DownloadMimeTypeResult::AndroidPackageArchive),
+      1);
 }

@@ -5,9 +5,10 @@
 #include "third_party/blink/renderer/core/fetch/data_consumer_handle_test_util.h"
 
 #include <memory>
+#include "base/single_thread_task_runner.h"
 #include "third_party/blink/public/platform/scheduler/test/renderer_scheduler_test_support.h"
 #include "third_party/blink/renderer/platform/bindings/dom_wrapper_world.h"
-#include "third_party/blink/renderer/platform/scheduler/child/web_scheduler.h"
+#include "third_party/blink/renderer/platform/scheduler/public/thread_scheduler.h"
 
 namespace blink {
 
@@ -40,7 +41,7 @@ class WaitingHandle final : public WebDataConsumerHandle {
 }  // namespace
 
 DataConsumerHandleTestUtil::Thread::Thread(
-    const WebThreadCreationParams& params,
+    const ThreadCreationParams& params,
     InitializationPolicy initialization_policy)
     : thread_(WebThreadSupportingGC::Create(params)),
       initialization_policy_(initialization_policy),
@@ -60,7 +61,8 @@ void DataConsumerHandleTestUtil::Thread::Initialize() {
   DCHECK(thread_->IsCurrentThread());
   if (initialization_policy_ >= kScriptExecution) {
     isolate_holder_ = std::make_unique<gin::IsolateHolder>(
-        scheduler::GetSingleThreadTaskRunnerForTesting());
+        scheduler::GetSingleThreadTaskRunnerForTesting(),
+        gin::IsolateHolder::IsolateType::kTest);
     GetIsolate()->Enter();
   }
   thread_->InitializeOnThread();

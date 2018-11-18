@@ -8,43 +8,48 @@
 
 #include "core/fpdfapi/page/cpdf_page.h"
 #include "core/fpdfapi/parser/cpdf_document.h"
-#include "core/fxcrt/fx_fallthrough.h"
 #include "fpdfsdk/cpdfsdk_helpers.h"
 #include "fpdfsdk/fpdfxfa/cpdfxfa_context.h"
 #include "fpdfsdk/fpdfxfa/cxfa_fwladaptertimermgr.h"
 #include "public/fpdf_formfill.h"
-#include "third_party/base/ptr_util.h"
+#include "third_party/base/compiler_specific.h"
 #include "xfa/fxfa/cxfa_ffdocview.h"
 #include "xfa/fxfa/cxfa_ffpageview.h"
 
 CPDFXFA_Page::CPDFXFA_Page(CPDFXFA_Context* pContext, int page_index)
-    : m_pXFAPageView(nullptr), m_pContext(pContext), m_iPageIndex(page_index) {}
+    : m_pContext(pContext), m_iPageIndex(page_index) {
+  ASSERT(m_pContext);
+  ASSERT(m_iPageIndex >= 0);
+}
 
-CPDFXFA_Page::~CPDFXFA_Page() {}
+CPDFXFA_Page::~CPDFXFA_Page() = default;
+
+CPDF_Page* CPDFXFA_Page::AsPDFPage() {
+  return m_pPDFPage.Get();
+}
+
+CPDFXFA_Page* CPDFXFA_Page::AsXFAPage() {
+  return this;
+}
+
+CPDF_Document* CPDFXFA_Page::GetDocument() const {
+  return m_pContext->GetPDFDoc();
+}
 
 bool CPDFXFA_Page::LoadPDFPage() {
-  if (!m_pContext)
-    return false;
-
-  CPDF_Document* pPDFDoc = m_pContext->GetPDFDoc();
-  if (!pPDFDoc)
-    return false;
-
-  CPDF_Dictionary* pDict = pPDFDoc->GetPage(m_iPageIndex);
+  CPDF_Document* pPDFDoc = GetDocument();
+  CPDF_Dictionary* pDict = pPDFDoc->GetPageDictionary(m_iPageIndex);
   if (!pDict)
     return false;
 
-  if (!m_pPDFPage || m_pPDFPage->m_pFormDict != pDict) {
-    m_pPDFPage = pdfium::MakeUnique<CPDF_Page>(pPDFDoc, pDict, true);
+  if (!m_pPDFPage || m_pPDFPage->GetDict() != pDict) {
+    m_pPDFPage = pdfium::MakeRetain<CPDF_Page>(pPDFDoc, pDict, true);
     m_pPDFPage->ParseContent();
   }
   return true;
 }
 
 bool CPDFXFA_Page::LoadXFAPageView() {
-  if (!m_pContext)
-    return false;
-
   CXFA_FFDoc* pXFADoc = m_pContext->GetXFADoc();
   if (!pXFADoc)
     return false;
@@ -62,9 +67,6 @@ bool CPDFXFA_Page::LoadXFAPageView() {
 }
 
 bool CPDFXFA_Page::LoadPage() {
-  if (!m_pContext || m_iPageIndex < 0)
-    return false;
-
   switch (m_pContext->GetFormType()) {
     case FormType::kNone:
     case FormType::kAcroForm:
@@ -73,17 +75,18 @@ bool CPDFXFA_Page::LoadPage() {
     case FormType::kXFAFull:
       return LoadXFAPageView();
   }
+  NOTREACHED();
   return false;
 }
 
-bool CPDFXFA_Page::LoadPDFPage(CPDF_Dictionary* pageDict) {
-  if (!m_pContext || m_iPageIndex < 0 || !pageDict)
-    return false;
-
-  m_pPDFPage =
-      pdfium::MakeUnique<CPDF_Page>(m_pContext->GetPDFDoc(), pageDict, true);
+void CPDFXFA_Page::LoadPDFPageFromDict(CPDF_Dictionary* pPageDict) {
+  ASSERT(pPageDict);
+  m_pPDFPage = pdfium::MakeRetain<CPDF_Page>(GetDocument(), pPageDict, true);
   m_pPDFPage->ParseContent();
-  return true;
+}
+
+CPDF_Document::Extension* CPDFXFA_Page::GetDocumentExtension() const {
+  return m_pContext.Get();
 }
 
 float CPDFXFA_Page::GetPageWidth() const {
@@ -96,7 +99,7 @@ float CPDFXFA_Page::GetPageWidth() const {
     case FormType::kXFAForeground:
       if (m_pPDFPage)
         return m_pPDFPage->GetPageWidth();
-      FX_FALLTHROUGH;
+      FALLTHROUGH;
     case FormType::kXFAFull:
       if (m_pXFAPageView)
         return m_pXFAPageView->GetPageViewRect().width;
@@ -116,7 +119,7 @@ float CPDFXFA_Page::GetPageHeight() const {
     case FormType::kXFAForeground:
       if (m_pPDFPage)
         return m_pPDFPage->GetPageHeight();
-      FX_FALLTHROUGH;
+      FALLTHROUGH;
     case FormType::kXFAFull:
       if (m_pXFAPageView)
         return m_pXFAPageView->GetPageViewRect().height;
@@ -160,7 +163,7 @@ CFX_Matrix CPDFXFA_Page::GetDisplayMatrix(const FX_RECT& rect,
     case FormType::kXFAForeground:
       if (m_pPDFPage)
         return m_pPDFPage->GetDisplayMatrix(rect, iRotate);
-      FX_FALLTHROUGH;
+      FALLTHROUGH;
     case FormType::kXFAFull:
       if (m_pXFAPageView)
         return m_pXFAPageView->GetDisplayMatrix(rect, iRotate);

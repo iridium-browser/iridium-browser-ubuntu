@@ -49,7 +49,7 @@ static struct vp8_extracfg default_extracfg = {
 #if !(CONFIG_REALTIME_ONLY)
   0, /* cpu_used      */
 #else
-  4, /* cpu_used      */
+  4,                      /* cpu_used      */
 #endif
   0, /* enable_auto_alt_ref */
   0, /* noise_sensitivity */
@@ -258,9 +258,7 @@ static vpx_codec_err_t validate_img(vpx_codec_alg_priv_t *ctx,
                                     const vpx_image_t *img) {
   switch (img->fmt) {
     case VPX_IMG_FMT_YV12:
-    case VPX_IMG_FMT_I420:
-    case VPX_IMG_FMT_VPXI420:
-    case VPX_IMG_FMT_VPXYV12: break;
+    case VPX_IMG_FMT_I420: break;
     default:
       ERROR("Invalid image format. Only YV12 and I420 images are supported");
   }

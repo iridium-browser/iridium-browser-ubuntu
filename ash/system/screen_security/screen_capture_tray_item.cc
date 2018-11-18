@@ -9,7 +9,7 @@
 #include "ash/metrics/user_metrics_action.h"
 #include "ash/metrics/user_metrics_recorder.h"
 #include "ash/public/cpp/ash_features.h"
-#include "ash/resources/grit/ash_resources.h"
+
 #include "ash/resources/vector_icons/vector_icons.h"
 #include "ash/shell.h"
 #include "ash/strings/grit/ash_strings.h"
@@ -19,7 +19,7 @@
 namespace ash {
 
 ScreenCaptureTrayItem::ScreenCaptureTrayItem(SystemTray* system_tray)
-    : ScreenTrayItem(system_tray, UMA_SCREEN_CAPTURE) {
+    : ScreenTrayItem(system_tray, SystemTrayItemUmaType::UMA_SCREEN_CAPTURE) {
   Shell::Get()->AddShellObserver(this);
   Shell::Get()->system_tray_notifier()->AddScreenCaptureObserver(this);
 }

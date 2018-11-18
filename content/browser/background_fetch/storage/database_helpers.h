@@ -7,7 +7,12 @@
 
 #include <string>
 
-#include "content/common/service_worker/service_worker_status_code.h"
+#include "content/browser/background_fetch/background_fetch.pb.h"
+#include "content/common/background_fetch/background_fetch_types.h"
+#include "content/common/content_export.h"
+#include "content/common/service_worker/service_worker_types.h"
+#include "content/public/browser/background_fetch_delegate.h"
+#include "third_party/blink/public/common/service_worker/service_worker_status_code.h"
 
 namespace content {
 
@@ -20,30 +25,49 @@ namespace background_fetch {
 // Warning: registration |developer_id|s may contain kSeparator characters.
 const char kSeparator[] = "_";
 
-const char kRequestKeyPrefix[] = "bgfetch_request_";
-const char kRegistrationKeyPrefix[] = "bgfetch_registration_";
-const char kPendingRequestKeyPrefix[] = "bgfetch_pending_request_";
 const char kActiveRegistrationUniqueIdKeyPrefix[] =
     "bgfetch_active_registration_unique_id_";
+const char kRegistrationKeyPrefix[] = "bgfetch_registration_";
+const char kUIOptionsKeyPrefix[] = "bgfetch_ui_options_";
+const char kPendingRequestKeyPrefix[] = "bgfetch_pending_request_";
+const char kActiveRequestKeyPrefix[] = "bgfetch_active_request_";
+const char kCompletedRequestKeyPrefix[] = "bgfetch_completed_request_";
 
-std::string ActiveRegistrationUniqueIdKey(const std::string& developer_id);
+// Database Keys.
+CONTENT_EXPORT std::string ActiveRegistrationUniqueIdKey(
+    const std::string& developer_id);
 
-std::string RegistrationKey(const std::string& unique_id);
+CONTENT_EXPORT std::string RegistrationKey(const std::string& unique_id);
 
-std::string RequestKeyPrefix(const std::string& unique_id);
+std::string UIOptionsKey(const std::string& unique_id);
 
-std::string PendingRequestKeyPrefix(
-    int64_t registration_creation_microseconds_since_unix_epoch,
-    const std::string& unique_id);
+std::string PendingRequestKeyPrefix(const std::string& unique_id);
 
-std::string PendingRequestKey(
-    int64_t registration_creation_microseconds_since_unix_epoch,
-    const std::string& unique_id,
-    int request_index);
+std::string PendingRequestKey(const std::string& unique_id, int request_index);
 
+std::string ActiveRequestKeyPrefix(const std::string& unique_id);
+
+std::string ActiveRequestKey(const std::string& unique_id, int request_index);
+
+std::string CompletedRequestKeyPrefix(const std::string& unique_id);
+
+std::string CompletedRequestKey(const std::string& unique_id,
+                                int request_index);
+
+// Database status.
 enum class DatabaseStatus { kOk, kFailed, kNotFound };
 
-DatabaseStatus ToDatabaseStatus(ServiceWorkerStatusCode status);
+DatabaseStatus ToDatabaseStatus(blink::ServiceWorkerStatusCode status);
+
+// Converts the |metadata_proto| to a BackgroundFetchRegistration object.
+bool ToBackgroundFetchRegistration(
+    const proto::BackgroundFetchMetadata& metadata_proto,
+    BackgroundFetchRegistration* registration);
+
+bool MojoFailureReasonFromRegistrationProto(
+    proto::BackgroundFetchRegistration_BackgroundFetchFailureReason
+        proto_failure_reason,
+    blink::mojom::BackgroundFetchFailureReason* failure_reason);
 
 }  // namespace background_fetch
 

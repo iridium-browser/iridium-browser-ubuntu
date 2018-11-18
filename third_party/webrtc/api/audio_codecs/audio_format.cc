@@ -17,26 +17,12 @@ namespace webrtc {
 SdpAudioFormat::SdpAudioFormat(const SdpAudioFormat&) = default;
 SdpAudioFormat::SdpAudioFormat(SdpAudioFormat&&) = default;
 
-SdpAudioFormat::SdpAudioFormat(const char* name,
+SdpAudioFormat::SdpAudioFormat(absl::string_view name,
                                int clockrate_hz,
                                size_t num_channels)
     : name(name), clockrate_hz(clockrate_hz), num_channels(num_channels) {}
 
-SdpAudioFormat::SdpAudioFormat(const std::string& name,
-                               int clockrate_hz,
-                               size_t num_channels)
-    : name(name), clockrate_hz(clockrate_hz), num_channels(num_channels) {}
-
-SdpAudioFormat::SdpAudioFormat(const char* name,
-                               int clockrate_hz,
-                               size_t num_channels,
-                               const Parameters& param)
-    : name(name),
-      clockrate_hz(clockrate_hz),
-      num_channels(num_channels),
-      parameters(param) {}
-
-SdpAudioFormat::SdpAudioFormat(const std::string& name,
+SdpAudioFormat::SdpAudioFormat(absl::string_view name,
                                int clockrate_hz,
                                size_t num_channels,
                                const Parameters& param)
@@ -58,28 +44,6 @@ bool operator==(const SdpAudioFormat& a, const SdpAudioFormat& b) {
   return STR_CASE_CMP(a.name.c_str(), b.name.c_str()) == 0 &&
          a.clockrate_hz == b.clockrate_hz && a.num_channels == b.num_channels &&
          a.parameters == b.parameters;
-}
-
-void swap(SdpAudioFormat& a, SdpAudioFormat& b) {
-  using std::swap;
-  swap(a.name, b.name);
-  swap(a.clockrate_hz, b.clockrate_hz);
-  swap(a.num_channels, b.num_channels);
-  swap(a.parameters, b.parameters);
-}
-
-std::ostream& operator<<(std::ostream& os, const SdpAudioFormat& saf) {
-  os << "{name: " << saf.name;
-  os << ", clockrate_hz: " << saf.clockrate_hz;
-  os << ", num_channels: " << saf.num_channels;
-  os << ", parameters: {";
-  const char* sep = "";
-  for (const auto& kv : saf.parameters) {
-    os << sep << kv.first << ": " << kv.second;
-    sep = ", ";
-  }
-  os << "}}";
-  return os;
 }
 
 AudioCodecInfo::AudioCodecInfo(int sample_rate_hz,
@@ -106,25 +70,6 @@ AudioCodecInfo::AudioCodecInfo(int sample_rate_hz,
   RTC_DCHECK_GE(min_bitrate_bps, 0);
   RTC_DCHECK_LE(min_bitrate_bps, default_bitrate_bps);
   RTC_DCHECK_GE(max_bitrate_bps, default_bitrate_bps);
-}
-
-std::ostream& operator<<(std::ostream& os, const AudioCodecInfo& aci) {
-  os << "{sample_rate_hz: " << aci.sample_rate_hz;
-  os << ", num_channels: " << aci.num_channels;
-  os << ", default_bitrate_bps: " << aci.default_bitrate_bps;
-  os << ", min_bitrate_bps: " << aci.min_bitrate_bps;
-  os << ", max_bitrate_bps: " << aci.max_bitrate_bps;
-  os << ", allow_comfort_noise: " << aci.allow_comfort_noise;
-  os << ", supports_network_adaption: " << aci.supports_network_adaption;
-  os << "}";
-  return os;
-}
-
-std::ostream& operator<<(std::ostream& os, const AudioCodecSpec& acs) {
-  os << "{format: " << acs.format;
-  os << ", info: " << acs.info;
-  os << "}";
-  return os;
 }
 
 }  // namespace webrtc

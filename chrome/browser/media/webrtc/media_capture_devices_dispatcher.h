@@ -19,7 +19,6 @@
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/common/media_stream_request.h"
 
-class DesktopStreamsRegistry;
 class MediaAccessHandler;
 class MediaStreamCaptureIndicator;
 class Profile;
@@ -81,11 +80,10 @@ class MediaCaptureDevicesDispatcher : public content::MediaObserver {
   // Method called from WebCapturerDelegate implementations to process access
   // requests. |extension| is set to NULL if request was made from a drive-by
   // page.
-  void ProcessMediaAccessRequest(
-      content::WebContents* web_contents,
-      const content::MediaStreamRequest& request,
-      const content::MediaResponseCallback& callback,
-      const extensions::Extension* extension);
+  void ProcessMediaAccessRequest(content::WebContents* web_contents,
+                                 const content::MediaStreamRequest& request,
+                                 content::MediaResponseCallback callback,
+                                 const extensions::Extension* extension);
 
   // Method called from WebCapturerDelegate implementations to check media
   // access permission. Note that this does not query the user.
@@ -153,8 +151,6 @@ class MediaCaptureDevicesDispatcher : public content::MediaObserver {
 
   scoped_refptr<MediaStreamCaptureIndicator> GetMediaStreamCaptureIndicator();
 
-  DesktopStreamsRegistry* GetDesktopStreamsRegistry();
-
   // Return true if there is any ongoing insecured capturing. The capturing is
   // deemed secure if all connected video sinks are reported secure and the
   // extension is trusted.
@@ -196,14 +192,12 @@ class MediaCaptureDevicesDispatcher : public content::MediaObserver {
   content::MediaStreamDevices test_video_devices_;
 
   // A list of observers for the device update notifications.
-  base::ObserverList<Observer> observers_;
+  base::ObserverList<Observer>::Unchecked observers_;
 
   // Flag used by unittests to disable device enumeration.
   bool is_device_enumeration_disabled_;
 
   scoped_refptr<MediaStreamCaptureIndicator> media_stream_capture_indicator_;
-
-  std::unique_ptr<DesktopStreamsRegistry> desktop_streams_registry_;
 
   // Handlers for processing media access requests.
   std::vector<std::unique_ptr<MediaAccessHandler>> media_access_handlers_;

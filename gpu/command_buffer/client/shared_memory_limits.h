@@ -9,6 +9,7 @@
 
 #include "base/sys_info.h"
 #include "build/build_config.h"
+#include "ui/gfx/geometry/size.h"
 
 namespace gpu {
 
@@ -28,16 +29,16 @@ struct SharedMemoryLimits {
     // On memory constrained devices, switch to lower limits.
     if (base::SysInfo::AmountOfPhysicalMemoryMB() <= 512) {
       command_buffer_size = 512 * 1024;
-      start_transfer_buffer_size = 256 * 1024;
-      min_transfer_buffer_size = 128 * 1024;
+      start_transfer_buffer_size = 32 * 1024;
+      min_transfer_buffer_size = 32 * 1024;
       mapped_memory_chunk_size = 256 * 1024;
     }
 #endif
   }
 
   int32_t command_buffer_size = 1024 * 1024;
-  uint32_t start_transfer_buffer_size = 1024 * 1024;
-  uint32_t min_transfer_buffer_size = 256 * 1024;
+  uint32_t start_transfer_buffer_size = 64 * 1024;
+  uint32_t min_transfer_buffer_size = 64 * 1024;
   uint32_t max_transfer_buffer_size = 16 * 1024 * 1024;
 
   static constexpr uint32_t kNoLimit = 0;
@@ -54,6 +55,46 @@ struct SharedMemoryLimits {
     limits.min_transfer_buffer_size = 64 * 1024;
     return limits;
   }
+
+  static SharedMemoryLimits ForOOPRasterContext() {
+    SharedMemoryLimits limits;
+    limits.command_buffer_size = 64 * 1024;
+    // TODO(khushalsagar): See if transfer buffer sizes can be fine-tuned
+    // further. A 16M max_transfer_buffer_size doesn't make sense if only paint
+    // commands are being sent through this buffer, and all large transfers use
+    // the transfer cache backed by mapped memory.
+    return limits;
+  }
+
+#if defined(OS_ANDROID)
+  static SharedMemoryLimits ForDisplayCompositor(const gfx::Size& screen_size) {
+    DCHECK(!screen_size.IsEmpty());
+
+    SharedMemoryLimits limits;
+    constexpr size_t kBytesPerPixel = 4;
+    const size_t full_screen_texture_size_in_bytes =
+        screen_size.width() * screen_size.height() * kBytesPerPixel;
+
+    // Android uses a smaller command buffer for the display compositor. Meant
+    // to hold the contents of the display compositor drawing the scene. See
+    // discussion here: https://goo.gl/s23m5j
+    limits.command_buffer_size = 64 * 1024;
+    // These limits are meant to hold the uploads for the browser UI without
+    // any excess space.
+    limits.start_transfer_buffer_size = 64 * 1024;
+    limits.min_transfer_buffer_size = 64 * 1024;
+    limits.max_transfer_buffer_size = full_screen_texture_size_in_bytes;
+    // Texture uploads may use mapped memory so give a reasonable limit for
+    // them.
+    limits.mapped_memory_reclaim_limit = full_screen_texture_size_in_bytes;
+
+    return limits;
+  }
+#else
+  static SharedMemoryLimits ForDisplayCompositor() {
+    return SharedMemoryLimits();
+  }
+#endif
 };
 
 }  // namespace gpu

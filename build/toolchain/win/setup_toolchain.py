@@ -149,10 +149,9 @@ def _LoadToolchainEnv(cpu, sdk_dir, target_store):
     # Store target must come before any SDK version declaration
     if (target_store):
       args.append(['store'])
-    # Chromium requires the 10.0.15063.468 SDK - previous versions don't have
-    # all of the required declarations and 10.0.16299.0 has some
-    # incompatibilities (crbug.com/773476).
-    args.append('10.0.15063.0')
+    # Chromium requires the 10.0.17134.0 SDK - previous versions don't have
+    # all of the required declarations.
+    args.append('10.0.17134.0')
     variables = _LoadEnvFromBat(args)
   return _ExtractImportantEnvironment(variables)
 
@@ -182,11 +181,11 @@ def _LowercaseDict(d):
 
 
 def main():
-  if len(sys.argv) != 8:
+  if len(sys.argv) != 7:
     print('Usage setup_toolchain.py '
           '<visual studio path> <win sdk path> '
           '<runtime dirs> <target_os> <target_cpu> '
-          '<environment block name|none> <goma_disabled>')
+          '<environment block name|none>')
     sys.exit(2)
   win_sdk_path = sys.argv[2]
   runtime_dirs = sys.argv[3]
@@ -195,7 +194,6 @@ def main():
   environment_block_name = sys.argv[6]
   if (environment_block_name == 'none'):
     environment_block_name = ''
-  goma_disabled = sys.argv[7]
 
   if (target_os == 'winuwp'):
     target_store = True
@@ -209,6 +207,7 @@ def main():
   vc_lib_atlmfc_path = ''
   vc_lib_um_path = ''
   include = ''
+  lib = ''
 
   # TODO(scottmg|goma): Do we need an equivalent of
   # ninja_use_custom_environment_files?
@@ -218,7 +217,6 @@ def main():
       # Extract environment variables for subprocesses.
       env = _LoadToolchainEnv(cpu, win_sdk_path, target_store)
       env['PATH'] = runtime_dirs + os.pathsep + env['PATH']
-      env['GOMA_DISABLED'] = goma_disabled
 
       for path in env['PATH'].split(os.pathsep):
         if os.path.exists(os.path.join(path, 'cl.exe')):
@@ -243,8 +241,25 @@ def main():
       # The separator for INCLUDE here must match the one used in
       # _LoadToolchainEnv() above.
       include = [p.replace('"', r'\"') for p in env['INCLUDE'].split(';') if p]
-      include_I = ' '.join(['"/I' + i + '"' for i in include])
-      include_imsvc = ' '.join(['"-imsvc' + i + '"' for i in include])
+
+      # Make include path relative to builddir when cwd and sdk in same drive.
+      try:
+        include = map(os.path.relpath, include)
+      except ValueError:
+        pass
+
+      lib = [p.replace('"', r'\"') for p in env['LIB'].split(';') if p]
+      # Make lib path relative to builddir when cwd and sdk in same drive.
+      try:
+        lib = map(os.path.relpath, lib)
+      except ValueError:
+        pass
+
+      def q(s):  # Quote s if it contains spaces or other weird characters.
+        return s if re.match(r'^[a-zA-Z0-9._/\\:-]*$', s) else '"' + s + '"'
+      include_I = ' '.join([q('/I' + i) for i in include])
+      include_imsvc = ' '.join([q('-imsvc' + i) for i in include])
+      libpath_flags = ' '.join([q('-libpath:' + i) for i in lib])
 
       if (environment_block_name != ''):
         env_block = _FormatAsEnvironmentBlock(env)
@@ -269,6 +284,9 @@ def main():
   assert vc_lib_um_path
   print 'vc_lib_um_path = ' + gn_helpers.ToGNString(vc_lib_um_path)
   print 'paths = ' + gn_helpers.ToGNString(env['PATH'])
+  assert libpath_flags
+  print 'libpath_flags = ' + gn_helpers.ToGNString(libpath_flags)
+
 
 if __name__ == '__main__':
   main()

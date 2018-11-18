@@ -63,7 +63,7 @@ class SVGMarkerOrientEnumeration final
                               SVGElement*) override;
   float CalculateDistance(SVGPropertyBase*, SVGElement*) override;
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  private:
   SVGMarkerOrientEnumeration(SVGAngle*);
@@ -94,6 +94,13 @@ class SVGAngle final : public SVGPropertyHelper<SVGAngle> {
 
   void SetValue(float);
   float Value() const;
+
+  // Technically speaking, we don't need any bits (it's always the
+  // same), but we want SetInitial to be called.
+  static constexpr int kInitialValueBits = 1;
+  void SetInitial(unsigned) {
+    NewValueSpecifiedUnits(kSvgAngletypeUnspecified, 0);
+  }
 
   void SetValueInSpecifiedUnits(float value_in_specified_units) {
     value_in_specified_units_ = value_in_specified_units;
@@ -132,7 +139,7 @@ class SVGAngle final : public SVGPropertyHelper<SVGAngle> {
 
   static AnimatedPropertyType ClassType() { return kAnimatedAngle; }
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  private:
   SVGAngle();

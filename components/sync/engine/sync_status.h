@@ -10,7 +10,7 @@
 
 #include "base/time/time.h"
 #include "components/sync/base/model_type.h"
-#include "components/sync/base/passphrase_type.h"
+#include "components/sync/base/passphrase_enums.h"
 #include "components/sync/engine/sync_encryption_handler.h"
 #include "components/sync/protocol/sync_protocol_error.h"
 
@@ -49,6 +49,7 @@ struct SyncStatus {
   // Number of items successfully committed during most recent sync cycle.
   int committed_count;
 
+  // Whether a sync cycle is going on right now.
   bool syncing;
 
   // Total updates received by the syncer since browser start.

@@ -6,8 +6,10 @@
 #define CHROME_BROWSER_UI_VIEWS_BUBBLE_ANCHOR_UTIL_VIEWS_H_
 
 #include "chrome/browser/ui/bubble_anchor_util.h"
+#include "ui/views/bubble/bubble_border.h"
 
 namespace views {
+class Button;
 class View;
 }
 
@@ -15,9 +17,19 @@ class Browser;
 
 namespace bubble_anchor_util {
 
-// Returns the PageInfo |anchor| View for |browser|, or null if it should not be
-// used.
-views::View* GetPageInfoAnchorView(Browser* browser, Anchor = kLocationBar);
+struct AnchorConfiguration {
+  views::View* anchor_view = nullptr;
+  views::Button* highlighted_button = nullptr;
+  views::BubbleBorder::Arrow bubble_arrow = views::BubbleBorder::TOP_LEFT;
+};
+
+// Returns:
+// - The PageInfo |anchor| View.
+// - The view the be highlighted for |browser|, or null if it should not be
+//   used.
+// - The arrow position for the PageInfo bubble.
+AnchorConfiguration GetPageInfoAnchorConfiguration(Browser* browser,
+                                                   Anchor = kLocationBar);
 
 }  // namespace bubble_anchor_util
 

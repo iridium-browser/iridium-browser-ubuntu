@@ -33,6 +33,7 @@ namespace blink {
 
 struct PaintInfo;
 class LineLayoutBox;
+class NGConstraintSpace;
 class WordMeasurement;
 
 typedef WTF::ListHashSet<LayoutBox*, 16> TrackedLayoutBoxListHashSet;
@@ -195,6 +196,12 @@ class CORE_EXPORT LayoutBlock : public LayoutBox {
     width_available_to_children_changed_ = true;
   }
 
+  // Return true if this is the anonymous child wrapper of an NG fieldset
+  // container. Such a wrapper holds all the fieldset contents. Only the
+  // rendered legend is laid out on the outside, although the layout object
+  // itself for the legend is still a child of this object.
+  bool IsAnonymousNGFieldsetContentWrapper() const;
+
   void SetHasMarkupTruncation(bool b) { has_markup_truncation_ = b; }
   bool HasMarkupTruncation() const { return has_markup_truncation_; }
 
@@ -212,9 +219,6 @@ class CORE_EXPORT LayoutBlock : public LayoutBox {
   LayoutUnit TextIndentOffset() const;
 
   PositionWithAffinity PositionForPoint(const LayoutPoint&) const override;
-
-  LayoutUnit BlockDirectionOffset(const LayoutSize& offset_from_block) const;
-  LayoutUnit InlineDirectionOffset(const LayoutSize& offset_from_block) const;
 
   static LayoutBlock* CreateAnonymousWithParentAndDisplay(
       const LayoutObject*,
@@ -286,43 +290,47 @@ class CORE_EXPORT LayoutBlock : public LayoutBox {
         .ClampNegativeToZero();
   }
   DISABLE_CFI_PERF LayoutUnit LogicalLeftOffsetForContent() const {
-    return IsHorizontalWritingMode() ? BorderLeft() + PaddingLeft()
-                                     : BorderTop() + PaddingTop();
+    return IsHorizontalWritingMode() ? ContentLeft() : ContentTop();
   }
   LayoutUnit LogicalRightOffsetForContent() const {
     return LogicalLeftOffsetForContent() + AvailableLogicalWidth();
   }
   LayoutUnit StartOffsetForContent() const {
-    return Style()->IsLeftToRightDirection()
+    return StyleRef().IsLeftToRightDirection()
                ? LogicalLeftOffsetForContent()
                : LogicalWidth() - LogicalRightOffsetForContent();
   }
   LayoutUnit EndOffsetForContent() const {
-    return !Style()->IsLeftToRightDirection()
+    return !StyleRef().IsLeftToRightDirection()
                ? LogicalLeftOffsetForContent()
                : LogicalWidth() - LogicalRightOffsetForContent();
   }
-
-  virtual LayoutUnit LogicalLeftSelectionOffset(const LayoutBlock* root_block,
-                                                LayoutUnit position) const;
-  virtual LayoutUnit LogicalRightSelectionOffset(const LayoutBlock* root_block,
-                                                 LayoutUnit position) const;
 
 #if DCHECK_IS_ON()
   void CheckPositionedObjectsNeedLayout();
 #endif
 
+  // This method returns the size that percentage logical heights should
+  // resolve against *if* this LayoutBlock is the containing block for the
+  // percentage calculation.
+  //
+  // A version of this function without the above restriction, (that will walk
+  // the ancestor chain in quirks mode), see:
+  // LayoutBox::ContainingBlockLogicalHeightForPercentageResolution
   LayoutUnit AvailableLogicalHeightForPercentageComputation() const;
   bool HasDefiniteLogicalHeight() const;
 
+  const NGConstraintSpace* CachedConstraintSpace() const;
+  void SetCachedConstraintSpace(const NGConstraintSpace& space);
+
  protected:
   bool RecalcNormalFlowChildOverflowIfNeeded(LayoutObject*);
-  bool RecalcPositionedDescendantsOverflowAfterStyleChange();
-  bool RecalcSelfOverflowAfterStyleChange();
+  bool RecalcPositionedDescendantsOverflow();
+  bool RecalcSelfOverflow();
 
  public:
-  bool RecalcChildOverflowAfterStyleChange();
-  bool RecalcOverflowAfterStyleChange() override;
+  bool RecalcChildOverflow();
+  bool RecalcOverflow() override;
 
   // An example explaining layout tree structure about first-line style:
   // <style>
@@ -365,16 +373,30 @@ class CORE_EXPORT LayoutBlock : public LayoutBox {
   void MarkFixedPositionObjectForLayoutIfNeeded(LayoutObject* child,
                                                 SubtreeLayoutScope&);
 
+ public:
+  bool IsLegacyInitiatedOutOfFlowLayout() const {
+    return is_legacy_initiated_out_of_flow_layout_;
+  }
+
+  void SetIsLegacyInitiatedOutOfFlowLayout(bool b) {
+    is_legacy_initiated_out_of_flow_layout_ = b;
+  }
+
+ protected:
   LayoutUnit MarginIntrinsicLogicalWidthForChild(const LayoutBox& child) const;
 
   LayoutUnit BeforeMarginInLineDirection(LineDirectionMode) const;
 
-  void Paint(const PaintInfo&, const LayoutPoint&) const override;
-
  public:
-  virtual void PaintObject(const PaintInfo&, const LayoutPoint&) const;
-  virtual void PaintChildren(const PaintInfo&, const LayoutPoint&) const;
+  void Paint(const PaintInfo&) const override;
+  virtual void PaintObject(const PaintInfo&,
+                           const LayoutPoint& paint_offset) const;
+  virtual void PaintChildren(const PaintInfo&,
+                             const LayoutPoint& paint_offset) const;
   void UpdateAfterLayout() override;
+
+  void ComputeOverflow(LayoutUnit old_client_after_edge,
+                       bool recompute_floats = false);
 
  protected:
   virtual void AdjustInlineDirectionLineBounds(
@@ -425,19 +447,25 @@ class CORE_EXPORT LayoutBlock : public LayoutBox {
   bool SimplifiedLayout();
   virtual void SimplifiedNormalFlowLayout();
 
- public:
-  virtual void ComputeOverflow(LayoutUnit old_client_after_edge,
-                               bool recompute_floats = false);
+ private:
+  void AddVisualOverflowFromBlockChildren();
+  void AddVisualOverflowFromTheme();
+  void AddLayoutOverflowFromPositionedObjects();
+  void AddLayoutOverflowFromBlockChildren();
 
  protected:
-  virtual void AddOverflowFromChildren();
-  void AddOverflowFromPositionedObjects();
-  void AddOverflowFromBlockChildren();
-  void AddVisualOverflowFromTheme();
+  virtual void ComputeVisualOverflow(
+      const LayoutRect& previous_visual_overflow_rect,
+      bool recompute_floats);
+  virtual void ComputeLayoutOverflow(LayoutUnit old_client_after_edge,
+                                     bool recompute_floats);
+
+  virtual void AddLayoutOverflowFromChildren();
+  virtual void AddVisualOverflowFromChildren();
 
   void AddOutlineRects(Vector<LayoutRect>&,
                        const LayoutPoint& additional_offset,
-                       IncludeBlockVisualOverflowOrNot) const override;
+                       NGOutlineType) const override;
 
   void UpdateBlockChildDirtyBitsBeforeLayout(bool relayout_children,
                                              LayoutBox&);
@@ -451,6 +479,11 @@ class CORE_EXPORT LayoutBlock : public LayoutBox {
   }
 
   bool NeedsPreferredWidthsRecalculation() const override;
+
+  bool IsInSelfHitTestingPhase(HitTestAction hit_test_action) const final {
+    return hit_test_action == kHitTestBlockBackground ||
+           hit_test_action == kHitTestChildBlockBackground;
+  }
 
  private:
   LayoutObjectChildList* VirtualChildren() final { return Children(); }
@@ -468,11 +501,6 @@ class CORE_EXPORT LayoutBlock : public LayoutBox {
   // Returns true if the positioned movement-only layout succeeded.
   bool TryLayoutDoingPositionedMovementOnly();
 
-  bool IsInSelfHitTestingPhase(HitTestAction hit_test_action) const final {
-    return hit_test_action == kHitTestBlockBackground ||
-           hit_test_action == kHitTestChildBlockBackground;
-  }
-
   bool IsPointInOverflowControl(HitTestResult&,
                                 const LayoutPoint& location_in_container,
                                 const LayoutPoint& accumulated_offset) const;
@@ -488,8 +516,7 @@ class CORE_EXPORT LayoutBlock : public LayoutBox {
   }
 
  protected:
-  PaintInvalidationReason InvalidatePaint(
-      const PaintInvalidatorContext&) const override;
+  void InvalidatePaint(const PaintInvalidatorContext&) const override;
 
   void ClearPreviousVisualRects() override;
 
@@ -526,6 +553,7 @@ class CORE_EXPORT LayoutBlock : public LayoutBox {
   virtual bool UpdateLogicalWidthAndColumnWidth();
 
   LayoutObjectChildList children_;
+  std::unique_ptr<NGConstraintSpace> cached_constraint_space_;
 
   unsigned
       has_margin_before_quirk_ : 1;  // Note these quirk values can't be put
@@ -550,6 +578,10 @@ class CORE_EXPORT LayoutBlock : public LayoutBox {
   // be forced breaks somewhere in there that we suddenly have to pay attention
   // to, for all we know.
   unsigned pagination_state_changed_ : 1;
+
+  // LayoutNG-only: This flag is true if an NG out of flow layout was
+  // initiated by Legacy positioning code.
+  unsigned is_legacy_initiated_out_of_flow_layout_ : 1;
 
   // FIXME: This is temporary as we move code that accesses block flow
   // member variables out of LayoutBlock and into LayoutBlockFlow.

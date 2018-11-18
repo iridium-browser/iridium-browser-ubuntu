@@ -41,6 +41,7 @@ namespace blink {
 
 class DedicatedWorkerObjectProxy;
 class DedicatedWorkerThread;
+class PostMessageOptions;
 class ScriptState;
 struct GlobalScopeCreationParams;
 
@@ -48,9 +49,10 @@ class CORE_EXPORT DedicatedWorkerGlobalScope final : public WorkerGlobalScope {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  DedicatedWorkerGlobalScope(std::unique_ptr<GlobalScopeCreationParams>,
+  DedicatedWorkerGlobalScope(const String& name,
+                             std::unique_ptr<GlobalScopeCreationParams>,
                              DedicatedWorkerThread*,
-                             double time_origin);
+                             base::TimeTicks time_origin);
   ~DedicatedWorkerGlobalScope() override;
 
   bool IsDedicatedWorkerGlobalScope() const override { return true; }
@@ -58,21 +60,39 @@ class CORE_EXPORT DedicatedWorkerGlobalScope final : public WorkerGlobalScope {
   // EventTarget
   const AtomicString& InterfaceName() const override;
 
-  void postMessage(ScriptState*,
-                   scoped_refptr<SerializedScriptValue>,
-                   const MessagePortArray&,
-                   ExceptionState&);
+  // WorkerGlobalScope
+  void ImportModuleScript(
+      const KURL& module_url_record,
+      FetchClientSettingsObjectSnapshot* outside_settings_object,
+      network::mojom::FetchCredentialsMode) override;
 
-  static bool CanTransferArrayBuffersAndImageBitmaps() { return true; }
+  const String name() const;
+
+  void postMessage(ScriptState*,
+                   const ScriptValue& message,
+                   Vector<ScriptValue>& transfer,
+                   ExceptionState&);
+  void postMessage(ScriptState*,
+                   const ScriptValue& message,
+                   const PostMessageOptions&,
+                   ExceptionState&);
 
   DEFINE_ATTRIBUTE_EVENT_LISTENER(message);
   DEFINE_ATTRIBUTE_EVENT_LISTENER(messageerror);
 
   void Trace(blink::Visitor*) override;
 
- private:
   DedicatedWorkerObjectProxy& WorkerObjectProxy() const;
+
+ private:
+  const String name_;
 };
+
+DEFINE_TYPE_CASTS(DedicatedWorkerGlobalScope,
+                  ExecutionContext,
+                  context,
+                  context->IsDedicatedWorkerGlobalScope(),
+                  context.IsDedicatedWorkerGlobalScope());
 
 }  // namespace blink
 

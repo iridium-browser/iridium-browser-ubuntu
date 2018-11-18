@@ -164,50 +164,31 @@ function updateAboutResource(aboutResource) {
   $('root-resource-id').textContent = aboutResource['root-resource-id'];
 }
 
-/**
- * Updates the summary about app list.
- * @param {Object} appList Dictionary describing app list.
- */
-function updateAppList(appList) {
-  $('app-list-etag').textContent = appList['etag'];
-
-  var itemContainer = $('app-list-items');
-  for (var i = 0; i < appList['items'].length; i++) {
-    var app = appList['items'][i];
-    var tr = document.createElement('tr');
-    tr.className = 'installed-app';
-    tr.appendChild(createElementFromText('td', app.name));
-    tr.appendChild(createElementFromText('td', app.application_id));
-    tr.appendChild(createElementFromText('td', app.object_type));
-    tr.appendChild(createElementFromText('td', app.supports_create));
-
-    itemContainer.appendChild(tr);
-  }
-}
-
-/**
- * Updates the local cache information about account metadata.
- * @param {Object} localMetadata Dictionary describing account metadata.
- */
-function updateLocalMetadata(localMetadata) {
-  var changestamp = localMetadata['account-largest-changestamp-local'];
-
-  $('account-largest-changestamp-local').textContent = changestamp.toString() +
-      (changestamp > 0 ? ' (loaded)' : ' (not loaded)') +
-      (localMetadata['account-metadata-refreshing'] ? ' (refreshing)' : '');
-}
-
-/**
+/*
  * Updates the summary about delta update status.
  * @param {Object} deltaUpdateStatus Dictionary describing delta update status.
  */
 function updateDeltaUpdateStatus(deltaUpdateStatus) {
   $('push-notification-enabled').textContent =
       deltaUpdateStatus['push-notification-enabled'];
-  $('last-update-check-time').textContent =
-      deltaUpdateStatus['last-update-check-time'];
-  $('last-update-check-error').textContent =
-      deltaUpdateStatus['last-update-check-error'];
+
+  var itemContainer = $('delta-update-status');
+  for (var i = 0; i < deltaUpdateStatus['items'].length; i++) {
+    var update = deltaUpdateStatus['items'][i];
+    var tr = document.createElement('tr');
+    tr.className = 'delta-update';
+    tr.appendChild(createElementFromText('td', update.id));
+    tr.appendChild(createElementFromText('td', update.root_entry_path));
+    var startPageToken = update.start_page_token;
+    tr.appendChild(createElementFromText(
+        'td',
+        startPageToken + (startPageToken ? ' (loaded)' : ' (not loaded)')));
+    tr.appendChild(createElementFromText('td', update.last_check_time));
+    tr.appendChild(createElementFromText('td', update.last_check_result));
+    tr.appendChild(createElementFromText('td', update.refreshing));
+
+    itemContainer.appendChild(tr);
+  }
 }
 
 /**
@@ -216,6 +197,15 @@ function updateDeltaUpdateStatus(deltaUpdateStatus) {
  */
 function updateEventLog(log) {
   var ul = $('event-log');
+  updateKeyValueList(ul, log);
+}
+
+/**
+ * Updates the service log section.
+ * @param {Array} log Log lines.
+ */
+function updateServiceLog(log) {
+  var ul = $('service-log');
   updateKeyValueList(ul, log);
 }
 

@@ -3,6 +3,7 @@
 chrishtr@chromium.org
 flackr@chromium.org
 fmalita@chromium.org
+fserb@chromium.org
 jbroman@chromium.org
 junov@chromium.org
 kbr@chromium.org
@@ -10,6 +11,9 @@ pdr@chromium.org
 schenney@chromium.org
 senorblanco@chromium.org
 vollick@chromium.org
+
+# lowLatency canvas
+mcasas@chromium.org
 
 # TEAM: paint-dev@chromium.org
 # COMPONENT: Blink>Paint

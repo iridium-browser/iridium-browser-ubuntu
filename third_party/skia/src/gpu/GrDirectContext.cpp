@@ -10,6 +10,7 @@
 #include "GrContextPriv.h"
 #include "GrGpu.h"
 
+#include "effects/GrSkSLFP.h"
 #include "gl/GrGLGpu.h"
 #include "mock/GrMockGpu.h"
 #include "text/GrGlyphCache.h"
@@ -58,9 +59,10 @@ protected:
     bool init(const GrContextOptions& options) override {
         SkASSERT(fCaps);  // should've been set in ctor
         SkASSERT(!fThreadSafeProxy);
-
+        SkASSERT(!fFPFactoryCache);
+        fFPFactoryCache.reset(new GrSkSLFPFactoryCache());
         fThreadSafeProxy.reset(new GrContextThreadSafeProxy(fCaps, this->uniqueID(),
-                                                            fBackend, options));
+                                                            fBackend, options, fFPFactoryCache));
 
         if (!INHERITED::initCommon(options)) {
             return false;
@@ -83,7 +85,6 @@ protected:
                                            allowMultitexturing);
         this->contextPriv().addOnFlushCallbackObject(fAtlasManager);
 
-        SkASSERT(glyphCache->getGlyphSizeLimit() == fAtlasManager->getGlyphSizeLimit());
         return true;
     }
 
@@ -146,17 +147,22 @@ sk_sp<GrContext> GrContext::MakeMock(const GrMockOptions* mockOptions,
     return context;
 }
 
+sk_sp<GrContext> GrContext::MakeVulkan(const GrVkBackendContext& backendContext) {
 #ifdef SK_VULKAN
-sk_sp<GrContext> GrContext::MakeVulkan(sk_sp<const GrVkBackendContext> backendContext) {
     GrContextOptions defaultOptions;
-    return MakeVulkan(std::move(backendContext), defaultOptions);
+    return MakeVulkan(backendContext, defaultOptions);
+#else
+    return nullptr;
+#endif
 }
 
-sk_sp<GrContext> GrContext::MakeVulkan(sk_sp<const GrVkBackendContext> backendContext,
+sk_sp<GrContext> GrContext::MakeVulkan(const GrVkBackendContext& backendContext,
                                        const GrContextOptions& options) {
+#ifdef SK_VULKAN
+    GrContextOptions defaultOptions;
     sk_sp<GrContext> context(new GrDirectContext(kVulkan_GrBackend));
 
-    context->fGpu = GrVkGpu::Make(std::move(backendContext), options, context.get());
+    context->fGpu = GrVkGpu::Make(backendContext, options, context.get());
     if (!context->fGpu) {
         return nullptr;
     }
@@ -166,8 +172,10 @@ sk_sp<GrContext> GrContext::MakeVulkan(sk_sp<const GrVkBackendContext> backendCo
         return nullptr;
     }
     return context;
-}
+#else
+    return nullptr;
 #endif
+}
 
 #ifdef SK_METAL
 sk_sp<GrContext> GrContext::MakeMetal(void* device, void* queue) {
@@ -182,6 +190,8 @@ sk_sp<GrContext> GrContext::MakeMetal(void* device, void* queue, const GrContext
     if (!context->fGpu) {
         return nullptr;
     }
+
+    context->fCaps = context->fGpu->refCaps();
     if (!context->init(options)) {
         return nullptr;
     }

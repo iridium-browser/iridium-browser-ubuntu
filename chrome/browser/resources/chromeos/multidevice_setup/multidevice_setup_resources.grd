@@ -12,16 +12,25 @@
   </outputs>
   <release seq="1">
     <structures>
-      <structure name="IDR_MULTIDEVICE_SETUP_MULTIDEVICE_SETUP_HTML"
-                 file="multidevice_setup.html"
-                 type="chrome_html" />
-      <structure name="IDR_MULTIDEVICE_SETUP_MULTIDEVICE_SETUP_JS"
-                 file="multidevice_setup.js"
+      <structure name="IDR_MULTIDEVICE_SETUP_I18N_SETUP_HTML"
+                 file="i18n_setup.html"
                  type="chrome_html" />
       <structure name="IDR_MULTIDEVICE_SETUP_MULTIDEVICE_SETUP_DIALOG_HTML"
                  file="multidevice_setup_dialog.html"
                  flattenhtml="true"
                  allowexternalscript="true"
+                 type="chrome_html" />
+      <structure name="IDR_MULTIDEVICE_SETUP_MULTIDEVICE_SETUP_POST_OOBE_HTML"
+                 file="multidevice_setup_post_oobe.html"
+                 type="chrome_html" />
+      <structure name="IDR_MULTIDEVICE_SETUP_MULTIDEVICE_SETUP_POST_OOBE_JS"
+                 file="multidevice_setup_post_oobe.js"
+                 type="chrome_html" />
+      <structure name="IDR_MULTIDEVICE_SETUP_POST_OOBE_DELEGATE_HTML"
+                 file="post_oobe_delegate.html"
+                 type="chrome_html" />
+      <structure name="IDR_MULTIDEVICE_SETUP_POST_OOBE_DELEGATE_JS"
+                 file="post_oobe_delegate.js"
                  type="chrome_html" />
     </structures>
   </release>

@@ -8,6 +8,7 @@
 #include "base/strings/string16.h"
 #include "build/build_config.h"
 #include "content/browser/frame_host/render_frame_host_delegate.h"
+#include "content/public/browser/file_select_listener.h"
 #include "ipc/ipc_message.h"
 #include "ui/gfx/native_widget_types.h"
 #include "url/gurl.h"
@@ -33,6 +34,13 @@ bool RenderFrameHostDelegate::DidAddMessageToConsole(
   return false;
 }
 
+void RenderFrameHostDelegate::RunFileChooser(
+    RenderFrameHost* render_frame_host,
+    std::unique_ptr<FileSelectListener> listener,
+    const blink::mojom::FileChooserParams& params) {
+  listener->FileSelectionCanceled();
+}
+
 WebContents* RenderFrameHostDelegate::GetAsWebContents() {
   return nullptr;
 }
@@ -43,11 +51,11 @@ InterstitialPage* RenderFrameHostDelegate::GetAsInterstitialPage() {
 
 void RenderFrameHostDelegate::RequestMediaAccessPermission(
     const MediaStreamRequest& request,
-    const MediaResponseCallback& callback) {
+    MediaResponseCallback callback) {
   LOG(ERROR) << "RenderFrameHostDelegate::RequestMediaAccessPermission: "
              << "Not supported.";
-  callback.Run(MediaStreamDevices(), MEDIA_DEVICE_NOT_SUPPORTED,
-               std::unique_ptr<MediaStreamUI>());
+  std::move(callback).Run(MediaStreamDevices(), MEDIA_DEVICE_NOT_SUPPORTED,
+                          std::unique_ptr<MediaStreamUI>());
 }
 
 bool RenderFrameHostDelegate::CheckMediaAccessPermission(
@@ -120,6 +128,15 @@ RenderFrameHostDelegate::GetJavaRenderFrameHostDelegate() {
 
 bool RenderFrameHostDelegate::IsBeingDestroyed() const {
   return false;
+}
+
+Visibility RenderFrameHostDelegate::GetVisibility() const {
+  return Visibility::HIDDEN;
+}
+
+ukm::SourceId RenderFrameHostDelegate::GetUkmSourceIdForLastCommittedSource()
+    const {
+  return ukm::kInvalidSourceId;
 }
 
 }  // namespace content

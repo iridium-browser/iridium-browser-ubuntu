@@ -10,7 +10,6 @@
 #include "ash/root_window_controller.h"
 #include "ash/shelf/shelf.h"
 #include "ash/shell.h"
-#include "ash/shell_port.h"
 #include "ash/wm/fullscreen_window_finder.h"
 #include "ash/wm/mru_window_tracker.h"
 #include "ash/wm/window_state.h"
@@ -38,7 +37,7 @@ const int kInitialAnimationDurationMS = 200;
 
 WorkspaceController::WorkspaceController(aura::Window* viewport)
     : viewport_(viewport),
-      event_handler_(ShellPort::Get()->CreateWorkspaceEventHandler(viewport)),
+      event_handler_(std::make_unique<WorkspaceEventHandler>(viewport)),
       layout_manager_(new WorkspaceLayoutManager(viewport)) {
   viewport_->AddObserver(this);
   ::wm::SetWindowVisibilityAnimationTransition(viewport_, ::wm::ANIMATE_NONE);

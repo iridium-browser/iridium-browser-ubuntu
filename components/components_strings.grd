@@ -186,7 +186,6 @@
       <part file="autofill_strings.grdp" />
       <part file="bookmark_bar_strings.grdp" />
       <part file="bookmark_component_strings.grdp" />
-      <part file="browser_sync_strings.grdp" />
       <part file="browsing_data_strings.grdp" />
       <part file="components_settings_strings.grdp" />
       <part file="crash_strings.grdp" />
@@ -203,9 +202,8 @@
       <part file="password_manager_strings.grdp" />
       <part file="payments_strings.grdp" />
       <part file="pdf_strings.grdp" />
-      <part file="physical_web_ui_strings.grdp" />
       <part file="policy_strings.grdp" />
-      <part file="printing_strings.grdp" />
+      <part file="printing_component_strings.grdp" />
       <part file="reset_password_strings.grdp" />
       <part file="safe_browsing_strings.grdp" />
       <part file="security_interstitials_strings.grdp" />
@@ -216,6 +214,10 @@
       <part file="translate_strings.grdp" />
       <part file="undo_strings.grdp" />
       <part file="version_ui_strings.grdp" />
+
+      <if expr="not is_android and not is_ios">
+        <part file="management_strings.grdp" />
+      </if>
 
       <!-- Generic terms -->
       <message name="IDS_CANCEL" desc="Used for Cancel on buttons">
@@ -239,9 +241,16 @@
       <message name="IDS_SAVE" desc="Used on a button to save information you are editing.">
         Save
       </message>
-      <message name="IDS_NO_THANKS" desc="Used to dismiss various prompts.">
-        No thanks
-      </message>
+      <if expr="not use_titlecase">
+        <message name="IDS_NO_THANKS" desc="Used to dismiss various prompts.">
+          No thanks
+        </message>
+      </if>
+      <if expr="use_titlecase">
+        <message name="IDS_NO_THANKS" desc="In Title Case: Used to dismiss various prompts.">
+          No Thanks
+        </message>
+      </if>
       <if expr="not use_titlecase">
         <message name="IDS_NOT_NOW" desc="Used on a button that avoids taking a suggested action.  The action will likely be suggested again or automatically taken later.">
           Not now

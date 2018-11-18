@@ -10,9 +10,10 @@
 
 #include "base/macros.h"
 #include "content/browser/service_worker/service_worker_context_wrapper.h"
+#include "content/public/browser/global_routing_id.h"
 #include "content/public/browser/stored_payment_app.h"
 #include "content/public/browser/web_contents_observer.h"
-#include "content/public/common/manifest.h"
+#include "third_party/blink/public/common/manifest/manifest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
 namespace content {
@@ -41,7 +42,7 @@ class PaymentAppInfoFetcher {
   // Only accessed on the UI thread.
   static void StartOnUI(
       const GURL& context_url,
-      const std::unique_ptr<std::vector<std::pair<int, int>>>& provider_hosts,
+      const std::unique_ptr<std::vector<GlobalFrameRoutingId>>& provider_hosts,
       PaymentAppInfoFetchCallback callback);
 
   // Keeps track of the web contents.
@@ -59,7 +60,7 @@ class PaymentAppInfoFetcher {
     ~SelfDeleteFetcher();
 
     void Start(const GURL& context_url,
-               const std::unique_ptr<std::vector<std::pair<int, int>>>&
+               const std::unique_ptr<std::vector<GlobalFrameRoutingId>>&
                    provider_hosts);
 
    private:
@@ -67,7 +68,7 @@ class PaymentAppInfoFetcher {
 
     // The WebContents::GetManifestCallback.
     void FetchPaymentAppManifestCallback(const GURL& url,
-                                         const Manifest& manifest);
+                                         const blink::Manifest& manifest);
 
     // The ManifestIconDownloader::IconFetchCallback.
     void OnIconFetched(const SkBitmap& icon);

@@ -33,8 +33,7 @@
 
 #include <algorithm>
 #include <limits>
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
-#include "third_party/blink/renderer/core/dom/ax_object_cache.h"
+#include "third_party/blink/renderer/core/accessibility/ax_object_cache.h"
 #include "third_party/blink/renderer/core/dom/events/scoped_event_queue.h"
 #include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
@@ -53,6 +52,7 @@
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/input_type_names.h"
 #include "third_party/blink/renderer/core/layout/layout_slider.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
 
 namespace blink {
@@ -154,12 +154,12 @@ bool RangeInputType::IsSteppable() const {
   return true;
 }
 
-void RangeInputType::HandleMouseDownEvent(MouseEvent* event) {
+void RangeInputType::HandleMouseDownEvent(MouseEvent& event) {
   if (GetElement().IsDisabledFormControl())
     return;
 
-  Node* target_node = event->target()->ToNode();
-  if (event->button() !=
+  Node* target_node = event.target()->ToNode();
+  if (event.button() !=
           static_cast<short>(WebPointerProperties::Button::kLeft) ||
       !target_node)
     return;
@@ -170,14 +170,14 @@ void RangeInputType::HandleMouseDownEvent(MouseEvent* event) {
   SliderThumbElement* thumb = GetSliderThumbElement();
   if (target_node == thumb)
     return;
-  thumb->DragFrom(LayoutPoint(event->AbsoluteLocation()));
+  thumb->DragFrom(LayoutPoint(event.AbsoluteLocation()));
 }
 
-void RangeInputType::HandleKeydownEvent(KeyboardEvent* event) {
+void RangeInputType::HandleKeydownEvent(KeyboardEvent& event) {
   if (GetElement().IsDisabledFormControl())
     return;
 
-  const String& key = event->key();
+  const String& key = event.key();
 
   const Decimal current = ParseToNumberOrNaN(GetElement().value());
   DCHECK(current.IsFinite());
@@ -236,7 +236,7 @@ void RangeInputType::HandleKeydownEvent(KeyboardEvent* event) {
       cache->HandleValueChanged(&GetElement());
   }
 
-  event->SetDefaultHandled();
+  event.SetDefaultHandled();
 }
 
 void RangeInputType::CreateShadowSubtree() {
@@ -250,7 +250,6 @@ void RangeInputType::CreateShadowSubtree() {
   HTMLElement* container = SliderContainerElement::Create(document);
   container->AppendChild(track);
   GetElement().UserAgentShadowRoot()->AppendChild(container);
-  container->setAttribute(styleAttr, "-webkit-appearance:inherit");
 }
 
 LayoutObject* RangeInputType::CreateLayoutObject(const ComputedStyle&) const {
@@ -341,10 +340,8 @@ inline Element* RangeInputType::SliderTrackElement() const {
 
 void RangeInputType::ListAttributeTargetChanged() {
   tick_mark_values_dirty_ = true;
-  if (GetElement().GetLayoutObject())
-    GetElement()
-        .GetLayoutObject()
-        ->SetShouldDoFullPaintInvalidationIncludingNonCompositingDescendants();
+  if (auto* object = GetElement().GetLayoutObject())
+    object->SetSubtreeShouldDoFullPaintInvalidation();
   Element* slider_track_element = SliderTrackElement();
   if (slider_track_element->GetLayoutObject())
     slider_track_element->GetLayoutObject()->SetNeedsLayout(
@@ -383,9 +380,9 @@ Decimal RangeInputType::FindClosestTickMarkValue(const Decimal& value) {
   if (!tick_mark_values_.size())
     return Decimal::Nan();
 
-  size_t left = 0;
-  size_t right = tick_mark_values_.size();
-  size_t middle;
+  wtf_size_t left = 0;
+  wtf_size_t right = tick_mark_values_.size();
+  wtf_size_t middle;
   while (true) {
     DCHECK_LE(left, right);
     middle = left + (right - left) / 2;

@@ -26,15 +26,15 @@
 #include "third_party/blink/renderer/modules/mediastream/media_stream_track.h"
 
 #include <memory>
+
 #include "third_party/blink/public/platform/web_media_stream_track.h"
-#include "third_party/blink/renderer/bindings/core/v8/exception_messages.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/deprecation.h"
+#include "third_party/blink/renderer/core/origin_trials/origin_trials.h"
 #include "third_party/blink/renderer/modules/imagecapture/image_capture.h"
 #include "third_party/blink/renderer/modules/mediastream/apply_constraints_request.h"
 #include "third_party/blink/renderer/modules/mediastream/media_constraints_impl.h"
@@ -58,6 +58,7 @@ static const char kContentHintStringAudioSpeech[] = "speech";
 static const char kContentHintStringAudioMusic[] = "music";
 static const char kContentHintStringVideoMotion[] = "motion";
 static const char kContentHintStringVideoDetail[] = "detail";
+static const char kContentHintStringVideoText[] = "text";
 
 // The set of constrainable properties for image capture is available at
 // https://w3c.github.io/mediacapture-image/#constrainable-properties
@@ -70,10 +71,12 @@ bool ConstraintSetHasImageCapture(
          constraint_set.hasExposureMode() || constraint_set.hasFocusMode() ||
          constraint_set.hasPointsOfInterest() ||
          constraint_set.hasExposureCompensation() ||
+         constraint_set.hasExposureTime() ||
          constraint_set.hasColorTemperature() || constraint_set.hasIso() ||
          constraint_set.hasBrightness() || constraint_set.hasContrast() ||
          constraint_set.hasSaturation() || constraint_set.hasSharpness() ||
-         constraint_set.hasZoom() || constraint_set.hasTorch();
+         constraint_set.hasFocusDistance() || constraint_set.hasZoom() ||
+         constraint_set.hasTorch();
 }
 
 bool ConstraintSetHasNonImageCapture(
@@ -224,6 +227,8 @@ String MediaStreamTrack::ContentHint() const {
       return kContentHintStringVideoMotion;
     case WebMediaStreamTrack::ContentHintType::kVideoDetail:
       return kContentHintStringVideoDetail;
+    case WebMediaStreamTrack::ContentHintType::kVideoText:
+      return kContentHintStringVideoText;
   }
 
   NOTREACHED();
@@ -255,6 +260,8 @@ void MediaStreamTrack::SetContentHint(const String& hint) {
         translated_hint = WebMediaStreamTrack::ContentHintType::kVideoMotion;
       } else if (hint == kContentHintStringVideoDetail) {
         translated_hint = WebMediaStreamTrack::ContentHintType::kVideoDetail;
+      } else if (hint == kContentHintStringVideoText) {
+        translated_hint = WebMediaStreamTrack::ContentHintType::kVideoText;
       } else {
         // TODO(pbos): Log warning?
         // Invalid values for video are to be ignored (similar to invalid enum
@@ -289,7 +296,7 @@ void MediaStreamTrack::stopTrack(ExecutionContext* execution_context) {
     return;
 
   ready_state_ = MediaStreamSource::kReadyStateEnded;
-  Document* document = ToDocument(execution_context);
+  Document* document = To<Document>(execution_context);
   UserMediaController* user_media =
       UserMediaController::From(document->GetFrame());
   if (user_media)
@@ -315,9 +322,11 @@ void MediaStreamTrack::SetConstraints(const WebMediaConstraints& constraints) {
 void MediaStreamTrack::getCapabilities(MediaTrackCapabilities& capabilities) {
   if (image_capture_)
     capabilities = image_capture_->GetMediaTrackCapabilities();
-
   auto platform_capabilities = component_->Source()->GetCapabilities();
+
   capabilities.setDeviceId(platform_capabilities.device_id);
+  if (!platform_capabilities.group_id.IsNull())
+    capabilities.setGroupId(platform_capabilities.group_id);
 
   if (component_->Source()->GetType() == MediaStreamSource::kTypeAudio) {
     Vector<bool> echo_cancellation, auto_gain_control, noise_suppression;
@@ -330,6 +339,10 @@ void MediaStreamTrack::getCapabilities(MediaTrackCapabilities& capabilities) {
     for (bool value : platform_capabilities.noise_suppression)
       noise_suppression.push_back(value);
     capabilities.setNoiseSuppression(noise_suppression);
+    Vector<String> echo_cancellation_type;
+    for (String value : platform_capabilities.echo_cancellation_type)
+      echo_cancellation_type.push_back(value);
+    capabilities.setEchoCancellationType(echo_cancellation_type);
   }
 
   if (component_->Source()->GetType() == MediaStreamSource::kTypeVideo) {
@@ -394,12 +407,14 @@ void MediaStreamTrack::getConstraints(MediaTrackConstraints& constraints) {
       image_capture_constraints.hasExposureMode() ||
       image_capture_constraints.hasFocusMode() ||
       image_capture_constraints.hasExposureCompensation() ||
+      image_capture_constraints.hasExposureTime() ||
       image_capture_constraints.hasColorTemperature() ||
       image_capture_constraints.hasIso() ||
       image_capture_constraints.hasBrightness() ||
       image_capture_constraints.hasContrast() ||
       image_capture_constraints.hasSaturation() ||
       image_capture_constraints.hasSharpness() ||
+      image_capture_constraints.hasFocusDistance() ||
       image_capture_constraints.hasZoom()) {
     // Add image capture constraints, if any, as another entry to advanced().
     vector.emplace_back(image_capture_constraints);
@@ -435,6 +450,8 @@ void MediaStreamTrack::getSettings(MediaTrackSettings& settings) {
       settings.setFocalLengthY(platform_settings.focal_length_y);
   }
   settings.setDeviceId(platform_settings.device_id);
+  if (!platform_settings.group_id.IsNull())
+    settings.setGroupId(platform_settings.group_id);
   if (platform_settings.HasFacingMode()) {
     switch (platform_settings.facing_mode) {
       case WebMediaStreamTrack::FacingMode::kUser:
@@ -461,9 +478,61 @@ void MediaStreamTrack::getSettings(MediaTrackSettings& settings) {
     settings.setAutoGainControl(*platform_settings.auto_gain_control);
   if (platform_settings.noise_supression)
     settings.setNoiseSuppression(*platform_settings.noise_supression);
+  if (OriginTrials::ExperimentalHardwareEchoCancellationEnabled(
+          GetExecutionContext()) &&
+      !platform_settings.echo_cancellation_type.IsNull()) {
+    settings.setEchoCancellationType(platform_settings.echo_cancellation_type);
+  }
+
+  if (platform_settings.HasSampleRate())
+    settings.setSampleRate(platform_settings.sample_rate);
+  if (platform_settings.HasSampleSize())
+    settings.setSampleSize(platform_settings.sample_size);
+  if (platform_settings.HasChannelCount())
+    settings.setChannelCount(platform_settings.channel_count);
+  if (platform_settings.HasLatency())
+    settings.setLatency(platform_settings.latency);
+  if (platform_settings.HasVolume())
+    settings.setVolume(platform_settings.volume);
 
   if (image_capture_)
     image_capture_->GetMediaTrackSettings(settings);
+
+  if (platform_settings.display_surface) {
+    WTF::String value;
+    switch (platform_settings.display_surface.value()) {
+      case WebMediaStreamTrack::DisplayCaptureSurfaceType::kMonitor:
+        value = "monitor";
+        break;
+      case WebMediaStreamTrack::DisplayCaptureSurfaceType::kWindow:
+        value = "window";
+        break;
+      case WebMediaStreamTrack::DisplayCaptureSurfaceType::kApplication:
+        value = "application";
+        break;
+      case WebMediaStreamTrack::DisplayCaptureSurfaceType::kBrowser:
+        value = "browser";
+        break;
+    }
+    settings.setDisplaySurface(value);
+  }
+  if (platform_settings.logical_surface)
+    settings.setLogicalSurface(platform_settings.logical_surface.value());
+  if (platform_settings.cursor) {
+    WTF::String value;
+    switch (platform_settings.cursor.value()) {
+      case WebMediaStreamTrack::CursorCaptureType::kNever:
+        value = "never";
+        break;
+      case WebMediaStreamTrack::CursorCaptureType::kAlways:
+        value = "always";
+        break;
+      case WebMediaStreamTrack::CursorCaptureType::kMotion:
+        value = "motion";
+        break;
+    }
+    settings.setCursor(value);
+  }
 }
 
 ScriptPromise MediaStreamTrack::applyConstraints(
@@ -514,7 +583,7 @@ ScriptPromise MediaStreamTrack::applyConstraints(
     return promise;
   }
 
-  Document* document = ToDocument(execution_context);
+  Document* document = To<Document>(execution_context);
   UserMediaController* user_media =
       UserMediaController::From(document->GetFrame());
   if (!user_media) {
@@ -552,14 +621,14 @@ void MediaStreamTrack::SourceChangedState() {
   switch (ready_state_) {
     case MediaStreamSource::kReadyStateLive:
       component_->SetMuted(false);
-      DispatchEvent(Event::Create(EventTypeNames::unmute));
+      DispatchEvent(*Event::Create(EventTypeNames::unmute));
       break;
     case MediaStreamSource::kReadyStateMuted:
       component_->SetMuted(true);
-      DispatchEvent(Event::Create(EventTypeNames::mute));
+      DispatchEvent(*Event::Create(EventTypeNames::mute));
       break;
     case MediaStreamSource::kReadyStateEnded:
-      DispatchEvent(Event::Create(EventTypeNames::ended));
+      DispatchEvent(*Event::Create(EventTypeNames::ended));
       PropagateTrackEnded();
       break;
   }

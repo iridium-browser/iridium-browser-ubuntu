@@ -9,12 +9,10 @@
 
 #import "ios/chrome/browser/ui/reading_list/reading_list_data_source.h"
 
-namespace favicon {
-class LargeIconService;
-}
-
+class FaviconLoader;
 class GURL;
 class ReadingListEntry;
+@class ReadingListListItemFactory;
 class ReadingListModel;
 
 // Mediator between the Model and the UI.
@@ -23,15 +21,16 @@ class ReadingListModel;
 - (nullable instancetype)init NS_UNAVAILABLE;
 
 - (nullable instancetype)initWithModel:(nonnull ReadingListModel*)model
-                      largeIconService:
-                          (nonnull favicon::LargeIconService*)largeIconService
+                         faviconLoader:(nonnull FaviconLoader*)faviconLoader
+                       listItemFactory:
+                           (nonnull ReadingListListItemFactory*)itemFactory
     NS_DESIGNATED_INITIALIZER;
 
 // Returns the entry corresponding to the |item|. The item should be of type
 // ReadingListCollectionViewItem. Returns nullptr if there is no corresponding
 // entry.
 - (nullable const ReadingListEntry*)entryFromItem:
-    (nonnull CollectionViewItem*)item;
+    (nonnull id<ReadingListListItem>)item;
 
 // Marks the entry with |URL| as read.
 - (void)markEntryRead:(const GURL&)URL;

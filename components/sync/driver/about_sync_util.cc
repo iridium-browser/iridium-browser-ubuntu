@@ -8,19 +8,20 @@
 #include <utility>
 #include <vector>
 
+#include "base/i18n/time_formatting.h"
 #include "base/logging.h"
+#include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
-#include "components/strings/grit/components_strings.h"
 #include "components/sync/driver/sync_service.h"
+#include "components/sync/driver/sync_token_status.h"
 #include "components/sync/engine/cycle/sync_cycle_snapshot.h"
 #include "components/sync/engine/sync_status.h"
 #include "components/sync/engine/sync_string_conversions.h"
 #include "components/sync/model/time.h"
 #include "components/sync/protocol/proto_enum_conversions.h"
-#include "ui/base/l10n/l10n_util.h"
-#include "ui/base/l10n/time_format.h"
+#include "url/gurl.h"
 
 namespace syncer {
 
@@ -49,10 +50,16 @@ const char kGetAllNodes[] = "getAllNodes";
 const char kGetAllNodesCallback[] = "chrome.sync.getAllNodesCallback";
 const char kRegisterForEvents[] = "registerForEvents";
 const char kRegisterForPerTypeCounters[] = "registerForPerTypeCounters";
+const char kRequestIncludeSpecificsInitialState[] =
+    "requestIncludeSpecificsInitialState";
 const char kRequestListOfTypes[] = "requestListOfTypes";
+const char kRequestStart[] = "requestStart";
+const char kRequestStopKeepData[] = "requestStopKeepData";
+const char kRequestStopClearData[] = "requestStopClearData";
 const char kRequestUpdatedAboutInfo[] = "requestUpdatedAboutInfo";
 const char kRequestUserEventsVisibility[] = "requestUserEventsVisibility";
 const char kSetIncludeSpecifics[] = "setIncludeSpecifics";
+const char kTriggerRefresh[] = "triggerRefresh";
 const char kUserEventsVisibilityCallback[] =
     "chrome.sync.userEventsVisibilityCallback";
 const char kWriteUserEvent[] = "writeUserEvent";
@@ -61,10 +68,13 @@ const char kWriteUserEvent[] = "writeUserEvent";
 const char kCommit[] = "commit";
 const char kCounters[] = "counters";
 const char kCounterType[] = "counterType";
+const char kIncludeSpecifics[] = "includeSpecifics";
 const char kModelType[] = "modelType";
 const char kOnAboutInfoUpdated[] = "onAboutInfoUpdated";
 const char kOnCountersUpdated[] = "onCountersUpdated";
 const char kOnProtocolEvent[] = "onProtocolEvent";
+const char kOnReceivedIncludeSpecificsInitialState[] =
+    "onReceivedIncludeSpecificsInitialState";
 const char kOnReceivedListOfTypes[] = "onReceivedListOfTypes";
 const char kStatus[] = "status";
 const char kTypes[] = "types";
@@ -171,6 +181,45 @@ class SectionList {
   std::vector<std::unique_ptr<Section>> sections_;
 };
 
+std::string GetDisableReasonsString(int disable_reasons) {
+  if (disable_reasons == syncer::SyncService::DISABLE_REASON_NONE) {
+    return "None";
+  }
+  std::vector<std::string> reason_strings;
+  if (disable_reasons & syncer::SyncService::DISABLE_REASON_PLATFORM_OVERRIDE)
+    reason_strings.push_back("Platform override");
+  if (disable_reasons & syncer::SyncService::DISABLE_REASON_ENTERPRISE_POLICY)
+    reason_strings.push_back("Enterprise policy");
+  if (disable_reasons & syncer::SyncService::DISABLE_REASON_NOT_SIGNED_IN)
+    reason_strings.push_back("Not signed in");
+  if (disable_reasons & syncer::SyncService::DISABLE_REASON_USER_CHOICE)
+    reason_strings.push_back("User choice");
+  if (disable_reasons & syncer::SyncService::DISABLE_REASON_UNRECOVERABLE_ERROR)
+    reason_strings.push_back("Unrecoverable error");
+  return base::JoinString(reason_strings, ", ");
+}
+
+std::string GetTransportStateString(syncer::SyncService::TransportState state) {
+  switch (state) {
+    case syncer::SyncService::TransportState::DISABLED:
+      return "Disabled";
+    case syncer::SyncService::TransportState::WAITING_FOR_START_REQUEST:
+      return "Waiting for start request";
+    case syncer::SyncService::TransportState::START_DEFERRED:
+      return "Start deferred";
+    case syncer::SyncService::TransportState::INITIALIZING:
+      return "Initializing";
+    case syncer::SyncService::TransportState::PENDING_DESIRED_CONFIGURATION:
+      return "Pending desired configuration";
+    case syncer::SyncService::TransportState::CONFIGURING:
+      return "Configuring data types";
+    case syncer::SyncService::TransportState::ACTIVE:
+      return "Active";
+  }
+  NOTREACHED();
+  return std::string();
+}
+
 // Returns a string describing the chrome version environment. Version format:
 // <Build Info> <OS> <Version number> (<Last change>)<channel or "-devel">
 // If version information is unavailable, returns "invalid."
@@ -196,29 +245,34 @@ std::string GetVersionString(version_info::Channel channel) {
 }
 
 std::string GetTimeStr(base::Time time, const std::string& default_msg) {
-  std::string time_str;
   if (time.is_null())
-    time_str = default_msg;
-  else
-    time_str = GetTimeDebugString(time);
-  return time_str;
+    return default_msg;
+  return GetTimeDebugString(time);
+}
+
+// Analogous to GetTimeDebugString from components/sync/base/time.h. Consider
+// moving it there if more places need this.
+std::string GetTimeDeltaDebugString(base::TimeDelta t) {
+  base::string16 result;
+  if (!base::TimeDurationFormat(t, base::DURATION_WIDTH_WIDE, &result)) {
+    return "Invalid TimeDelta?!";
+  }
+  return base::UTF16ToUTF8(result);
 }
 
 std::string GetLastSyncedTimeString(base::Time last_synced_time) {
   if (last_synced_time.is_null())
-    return l10n_util::GetStringUTF8(IDS_SYNC_TIME_NEVER);
+    return "Never";
 
   base::TimeDelta time_since_last_sync = base::Time::Now() - last_synced_time;
 
   if (time_since_last_sync < base::TimeDelta::FromMinutes(1))
-    return l10n_util::GetStringUTF8(IDS_SYNC_TIME_JUST_NOW);
+    return "Just now";
 
-  return base::UTF16ToUTF8(ui::TimeFormat::Simple(
-      ui::TimeFormat::FORMAT_ELAPSED, ui::TimeFormat::LENGTH_SHORT,
-      time_since_last_sync));
+  return GetTimeDeltaDebugString(time_since_last_sync) + " ago";
 }
 
-std::string GetConnectionStatus(const SyncService::SyncTokenStatus& status) {
+std::string GetConnectionStatus(const SyncTokenStatus& status) {
   switch (status.connection_status) {
     case CONNECTION_NOT_ATTEMPTED:
       return "not attempted";
@@ -241,27 +295,26 @@ std::string GetConnectionStatus(const SyncService::SyncTokenStatus& status) {
 
 }  // namespace
 
-std::unique_ptr<base::DictionaryValue> ConstructAboutInformation_DEPRECATED(
-    SyncService* service,
-    version_info::Channel channel) {
-  return ConstructAboutInformation(
-      service, service->GetAuthenticatedAccountInfo(), channel);
-}
-
 // This function both defines the structure of the message to be returned and
 // its contents.  Most of the message consists of simple fields in about:sync
 // which are grouped into sections and populated with the help of the SyncStat
 // classes defined above.
 std::unique_ptr<base::DictionaryValue> ConstructAboutInformation(
     SyncService* service,
-    AccountInfo primary_account_info,
     version_info::Channel channel) {
   auto about_info = std::make_unique<base::DictionaryValue>();
 
   SectionList section_list;
 
   Section* section_summary = section_list.AddSection("Summary");
-  Stat<std::string>* summary_string = section_summary->AddStringStat("Summary");
+  Stat<std::string>* transport_state =
+      section_summary->AddStringStat("Transport State");
+  Stat<std::string>* disable_reasons =
+      section_summary->AddStringStat("Disable Reasons");
+  Stat<bool>* feature_enabled =
+      section_summary->AddBoolStat("Sync Feature Enabled");
+  Stat<bool>* setup_in_progress =
+      section_summary->AddBoolStat("Setup In Progress");
 
   Section* section_version = section_list.AddSection("Version Info");
   Stat<std::string>* client_version =
@@ -275,14 +328,15 @@ std::unique_ptr<base::DictionaryValue> ConstructAboutInformation(
   Stat<std::string>* invalidator_id =
       section_identity->AddStringStat("Invalidator Client ID");
   Stat<std::string>* username = section_identity->AddStringStat("Username");
+  Stat<bool>* user_is_primary = section_identity->AddBoolStat("Is Primary");
 
   Section* section_credentials = section_list.AddSection("Credentials");
   Stat<std::string>* request_token_time =
       section_credentials->AddStringStat("Requested Token");
   Stat<std::string>* receive_token_time =
       section_credentials->AddStringStat("Received Token");
-  Stat<std::string>* token_request_status =
-      section_credentials->AddStringStat("Token Request Status");
+  Stat<std::string>* last_token_request_result =
+      section_credentials->AddStringStat("Last Token Request Result");
   Stat<std::string>* next_token_request =
       section_credentials->AddStringStat("Next Token Request");
 
@@ -292,9 +346,7 @@ std::unique_ptr<base::DictionaryValue> ConstructAboutInformation(
   Stat<std::string>* last_synced = section_local->AddStringStat("Last Synced");
   Stat<bool>* is_setup_complete =
       section_local->AddBoolStat("Sync First-Time Setup Complete");
-  Stat<std::string>* backend_initialization =
-      section_local->AddStringStat("Sync Backend Initialization");
-  Stat<bool>* is_syncing = section_local->AddBoolStat("Syncing");
+  Stat<bool>* is_syncing = section_local->AddBoolStat("Sync Cycle Ongoing");
   Stat<bool>* is_local_sync_enabled =
       section_local->AddBoolStat("Local Sync Backend Enabled");
   Stat<std::string>* local_backend_path =
@@ -386,20 +438,21 @@ std::unique_ptr<base::DictionaryValue> ConstructAboutInformation(
   client_version->Set(GetVersionString(channel));
 
   if (!service) {
-    summary_string->Set("Sync service does not exist");
+    transport_state->Set("Sync service does not exist");
     about_info->SetKey(kDetailsKey, section_list.ToValue());
     return about_info;
   }
 
+  // Summary.
+  transport_state->Set(GetTransportStateString(service->GetTransportState()));
+  disable_reasons->Set(GetDisableReasonsString(service->GetDisableReasons()));
+  feature_enabled->Set(service->IsSyncFeatureEnabled());
+  setup_in_progress->Set(service->IsSetupInProgress());
+
   SyncStatus full_status;
   bool is_status_valid = service->QueryDetailedSyncStatus(&full_status);
   const SyncCycleSnapshot& snapshot = service->GetLastCycleSnapshot();
-  const SyncService::SyncTokenStatus& token_status =
-      service->GetSyncTokenStatus();
-
-  // Summary.
-  if (is_status_valid)
-    summary_string->Set(service->QuerySyncStatusSummaryString());
+  const SyncTokenStatus& token_status = service->GetSyncTokenStatus();
 
   // Version Info.
   // |client_version| was already set above.
@@ -410,13 +463,14 @@ std::unique_ptr<base::DictionaryValue> ConstructAboutInformation(
     sync_id->Set(full_status.sync_id);
   if (is_status_valid && !full_status.invalidator_client_id.empty())
     invalidator_id->Set(full_status.invalidator_client_id);
-  username->Set(primary_account_info.email);
+  username->Set(service->GetAuthenticatedAccountInfo().email);
+  user_is_primary->Set(service->IsAuthenticatedAccountPrimary());
 
   // Credentials.
   request_token_time->Set(GetTimeStr(token_status.token_request_time, "n/a"));
   receive_token_time->Set(GetTimeStr(token_status.token_receive_time, "n/a"));
   std::string err = token_status.last_get_token_error.error_message();
-  token_request_status->Set(err.empty() ? "OK" : err);
+  last_token_request_result->Set(err.empty() ? "OK" : err);
   next_token_request->Set(
       GetTimeStr(token_status.next_token_request_time, "not scheduled"));
 
@@ -424,7 +478,6 @@ std::unique_ptr<base::DictionaryValue> ConstructAboutInformation(
   server_connection->Set(GetConnectionStatus(token_status));
   last_synced->Set(GetLastSyncedTimeString(service->GetLastSyncedTime()));
   is_setup_complete->Set(service->IsFirstSetupComplete());
-  backend_initialization->Set(service->GetEngineInitializationStateString());
   if (is_status_valid)
     is_syncing->Set(full_status.syncing);
   is_local_sync_enabled->Set(service->IsLocalSyncEnabled());
@@ -442,7 +495,7 @@ std::unique_ptr<base::DictionaryValue> ConstructAboutInformation(
     are_notifications_enabled->Set(full_status.notifications_enabled);
 
   // Encryption.
-  if (service->IsSyncActive()) {
+  if (service->IsSyncFeatureActive()) {
     is_using_explicit_passphrase->Set(service->IsUsingSecondaryPassphrase());
     is_passphrase_required->Set(service->IsPassphraseRequired());
     passphrase_time->Set(

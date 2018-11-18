@@ -5,7 +5,6 @@
 #include "extensions/browser/api/declarative/declarative_rule.h"
 
 #include "base/bind.h"
-#include "base/message_loop/message_loop.h"
 #include "base/test/values_test_util.h"
 #include "base/values.h"
 #include "components/url_matcher/url_matcher_constants.h"
@@ -318,10 +317,10 @@ TEST(DeclarativeRuleTest, Create) {
       json_rule.get()));
 
   const char kExtensionId[] = "ext1";
-  scoped_refptr<Extension> extension = ExtensionBuilder()
-                                           .SetManifest(SimpleManifest())
-                                           .SetID(kExtensionId)
-                                           .Build();
+  scoped_refptr<const Extension> extension = ExtensionBuilder()
+                                                 .SetManifest(SimpleManifest())
+                                                 .SetID(kExtensionId)
+                                                 .Build();
 
   base::Time install_time = base::Time::Now();
 
@@ -372,10 +371,10 @@ TEST(DeclarativeRuleTest, CheckConsistency) {
   std::string error;
   linked_ptr<Rule::JsonRule> json_rule(new Rule::JsonRule);
   const char kExtensionId[] = "ext1";
-  scoped_refptr<Extension> extension = ExtensionBuilder()
-                                           .SetManifest(SimpleManifest())
-                                           .SetID(kExtensionId)
-                                           .Build();
+  scoped_refptr<const Extension> extension = ExtensionBuilder()
+                                                 .SetManifest(SimpleManifest())
+                                                 .SetID(kExtensionId)
+                                                 .Build();
 
   ASSERT_TRUE(Rule::JsonRule::Populate(
       *ParseJson("{ \n"

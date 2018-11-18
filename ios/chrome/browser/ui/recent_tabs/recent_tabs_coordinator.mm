@@ -6,30 +6,26 @@
 
 #include "base/ios/block_types.h"
 #include "base/mac/foundation_util.h"
-#import "ios/chrome/browser/ui/ntp/recent_tabs/recent_tabs_handset_view_controller.h"
+#include "ios/chrome/browser/ui/commands/application_commands.h"
 #import "ios/chrome/browser/ui/recent_tabs/recent_tabs_mediator.h"
+#import "ios/chrome/browser/ui/recent_tabs/recent_tabs_presentation_delegate.h"
 #import "ios/chrome/browser/ui/recent_tabs/recent_tabs_table_view_controller.h"
 #import "ios/chrome/browser/ui/recent_tabs/recent_tabs_transitioning_delegate.h"
-#import "ios/chrome/browser/ui/table_view/table_container_view_controller.h"
-#import "ios/chrome/browser/ui/util/form_sheet_navigation_controller.h"
-#include "ios/chrome/grit/ios_strings.h"
-#include "ui/base/l10n/l10n_util.h"
+#import "ios/chrome/browser/ui/table_view/table_view_navigation_controller.h"
+#import "ios/chrome/browser/ui/table_view/table_view_navigation_controller_constants.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
 
-// TODO(crbug.com/805135): Remove RecentTabsHandsetViewControllerCommand and
-// recent_tabs_handset_view_controller.h import. We need this to dismiss for
-// now, but it can be improved.
-@interface RecentTabsCoordinator ()<RecentTabsHandsetViewControllerCommand>
+@interface RecentTabsCoordinator ()<RecentTabsPresentationDelegate>
 // Completion block called once the recentTabsViewController is dismissed.
 @property(nonatomic, copy) ProceduralBlock completion;
 // Mediator being managed by this Coordinator.
 @property(nonatomic, strong) RecentTabsMediator* mediator;
 // ViewController being managed by this Coordinator.
 @property(nonatomic, strong)
-    TableContainerViewController* recentTabsContainerViewController;
+    TableViewNavigationController* recentTabsNavigationController;
 @property(nonatomic, strong)
     RecentTabsTransitioningDelegate* recentTabsTransitioningDelegate;
 @end
@@ -39,8 +35,7 @@
 @synthesize dispatcher = _dispatcher;
 @synthesize loader = _loader;
 @synthesize mediator = _mediator;
-@synthesize recentTabsContainerViewController =
-    _recentTabsContainerViewController;
+@synthesize recentTabsNavigationController = _recentTabsNavigationController;
 @synthesize recentTabsTransitioningDelegate = _recentTabsTransitioningDelegate;
 
 - (void)start {
@@ -50,67 +45,84 @@
   recentTabsTableViewController.browserState = self.browserState;
   recentTabsTableViewController.loader = self.loader;
   recentTabsTableViewController.dispatcher = self.dispatcher;
-  recentTabsTableViewController.handsetCommandHandler = self;
+  recentTabsTableViewController.presentationDelegate = self;
+
+  // Adds the "Done" button and hooks it up to |stop|.
+  UIBarButtonItem* dismissButton = [[UIBarButtonItem alloc]
+      initWithBarButtonSystemItem:UIBarButtonSystemItemDone
+                           target:self
+                           action:@selector(stop)];
+  [dismissButton
+      setAccessibilityIdentifier:kTableViewNavigationDismissButtonId];
+  recentTabsTableViewController.navigationItem.rightBarButtonItem =
+      dismissButton;
 
   // Initialize and configure RecentTabsMediator.
   DCHECK(!self.mediator);
   self.mediator = [[RecentTabsMediator alloc] init];
   self.mediator.browserState = self.browserState;
   // Set the consumer first before calling [self.mediator initObservers] and
-  // then [self.mediator reloadSessions].
+  // then [self.mediator configureConsumer].
   self.mediator.consumer = recentTabsTableViewController;
+  // TODO(crbug.com/845636) : Currently, the image data source must be set
+  // before the mediator starts updating its consumer. Fix this so that order of
+  // calls does not matter.
+  recentTabsTableViewController.imageDataSource = self.mediator;
+  recentTabsTableViewController.delegate = self.mediator;
   [self.mediator initObservers];
-  [self.mediator reloadSessions];
+  [self.mediator configureConsumer];
 
-  // Initialize and configure RecentTabsViewController.
-  self.recentTabsContainerViewController = [[TableContainerViewController alloc]
+  // Present RecentTabsNavigationController.
+  self.recentTabsNavigationController = [[TableViewNavigationController alloc]
       initWithTable:recentTabsTableViewController];
-  self.recentTabsContainerViewController.title =
-      l10n_util::GetNSString(IDS_IOS_CONTENT_SUGGESTIONS_RECENT_TABS);
-  // TODO(crbug.com/805135): Move this configuration code to
-  // RecentTabsContainerVC once its created, we will use a dispatcher then.
-  [self.recentTabsContainerViewController.dismissButton setTarget:self];
-  [self.recentTabsContainerViewController.dismissButton
-      setAction:@selector(stop)];
-  self.recentTabsContainerViewController.navigationItem.rightBarButtonItem =
-      self.recentTabsContainerViewController.dismissButton;
-
-  // Present RecentTabsViewController.
-  FormSheetNavigationController* navController =
-      [[FormSheetNavigationController alloc]
-          initWithRootViewController:self.recentTabsContainerViewController];
+  self.recentTabsNavigationController.toolbarHidden = YES;
   self.recentTabsTransitioningDelegate =
       [[RecentTabsTransitioningDelegate alloc] init];
-  [navController.navigationBar setBackgroundImage:[UIImage new]
-                                    forBarMetrics:UIBarMetricsDefault];
-  navController.navigationBar.translucent = NO;
-  navController.transitioningDelegate = self.recentTabsTransitioningDelegate;
-  [navController setModalPresentationStyle:UIModalPresentationCustom];
-  [self.baseViewController presentViewController:navController
-                                        animated:YES
-                                      completion:nil];
+  self.recentTabsNavigationController.transitioningDelegate =
+      self.recentTabsTransitioningDelegate;
+  [self.recentTabsNavigationController
+      setModalPresentationStyle:UIModalPresentationCustom];
+  [self.baseViewController
+      presentViewController:self.recentTabsNavigationController
+                   animated:YES
+                 completion:nil];
 }
 
 - (void)stop {
-  // TODO(crbug.com/805135): Move this dismissal code to RecentTabsContainerVC
-  // once its created. Remove "base/mac/foundation_util.h" import then.
+  // TODO(crbug.com/805135): Create RecentTabsLocalCommands?. Remove
+  // "base/mac/foundation_util.h" import then.
   RecentTabsTableViewController* recentTabsTableViewController =
       base::mac::ObjCCastStrict<RecentTabsTableViewController>(
-          self.recentTabsContainerViewController.tableViewController);
+          self.recentTabsNavigationController.tableViewController);
   [recentTabsTableViewController dismissModals];
-  [self.recentTabsContainerViewController
+  [self.recentTabsNavigationController
       dismissViewControllerAnimated:YES
                          completion:self.completion];
-  self.recentTabsContainerViewController = nil;
+  self.recentTabsNavigationController = nil;
   self.recentTabsTransitioningDelegate = nil;
   [self.mediator disconnect];
-  self.mediator = nil;
 }
 
-#pragma mark - RecentTabsHandsetViewControllerCommand
+#pragma mark - RecentTabsPresentationDelegate
 
-- (void)dismissRecentTabsWithCompletion:(void (^)())completion {
-  self.completion = completion;
+- (void)dismissRecentTabs {
+  self.completion = nil;
+  [self stop];
+}
+
+- (void)showActiveRegularTabFromRecentTabs {
+  // Stopping this coordinator reveals the tab UI underneath.
+  self.completion = nil;
+  [self stop];
+}
+
+- (void)showHistoryFromRecentTabs {
+  // Dismiss recent tabs before presenting history.
+  __weak RecentTabsCoordinator* weakSelf = self;
+  self.completion = ^{
+    [weakSelf.dispatcher showHistory];
+    weakSelf.completion = nil;
+  };
   [self stop];
 }
 

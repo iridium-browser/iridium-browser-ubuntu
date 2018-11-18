@@ -12,7 +12,7 @@ Persistence.PersistenceUtils = class {
     if (!binding)
       return '';
     if (uiSourceCode === binding.network)
-      return Common.UIString('Persisted to file system: %s', binding.fileSystem.url().trimMiddle(150));
+      return Persistence.FileSystemWorkspaceBinding.tooltipForUISourceCode(binding.fileSystem);
     if (binding.network.contentType().isFromSourceMap())
       return Common.UIString('Linked to source map: %s', binding.network.url().trimMiddle(150));
     return Common.UIString('Linked to %s', binding.network.url().trimMiddle(150));
@@ -25,15 +25,19 @@ Persistence.PersistenceUtils = class {
   static iconForUISourceCode(uiSourceCode) {
     const binding = Persistence.persistence.binding(uiSourceCode);
     if (binding) {
+      if (!binding.fileSystem.url().startsWith('file://'))
+        return null;
       const icon = UI.Icon.create('mediumicon-file-sync');
-      icon.title = Persistence.PersistenceUtils.tooltipForUISourceCode(binding.fileSystem);
+      icon.title = Persistence.PersistenceUtils.tooltipForUISourceCode(binding.network);
       // TODO(allada) This will not work properly with dark theme.
       if (Persistence.networkPersistenceManager.project() === binding.fileSystem.project())
         icon.style.filter = 'hue-rotate(160deg)';
       return icon;
     }
-    if (uiSourceCode.project().type() !== Workspace.projectTypes.FileSystem)
+    if (uiSourceCode.project().type() !== Workspace.projectTypes.FileSystem ||
+        !uiSourceCode.url().startsWith('file://'))
       return null;
+
     const icon = UI.Icon.create('mediumicon-file');
     icon.title = Persistence.PersistenceUtils.tooltipForUISourceCode(uiSourceCode);
     return icon;

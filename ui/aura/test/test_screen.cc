@@ -10,6 +10,7 @@
 #include "ui/aura/env.h"
 #include "ui/aura/mus/window_tree_client.h"
 #include "ui/aura/mus/window_tree_host_mus.h"
+#include "ui/aura/mus/window_tree_host_mus_init_params.h"
 #include "ui/aura/test/mus/window_tree_client_private.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
@@ -18,6 +19,7 @@
 #include "ui/gfx/geometry/rect_conversions.h"
 #include "ui/gfx/geometry/size_conversions.h"
 #include "ui/gfx/native_widget_types.h"
+#include "ui/platform_window/platform_window_init_properties.h"
 
 namespace aura {
 
@@ -44,14 +46,17 @@ TestScreen::~TestScreen() {
   delete host_;
 }
 
-WindowTreeHost* TestScreen::CreateHostForPrimaryDisplay() {
+WindowTreeHost* TestScreen::CreateHostForPrimaryDisplay(Env* env) {
   DCHECK(!host_);
   if (window_tree_client_) {
-    host_ = WindowTreeClientPrivate(window_tree_client_)
-                .CallWmNewDisplayAdded(GetPrimaryDisplay());
-  } else {
     host_ =
-        WindowTreeHost::Create(gfx::Rect(GetPrimaryDisplay().GetSizeInPixel()));
+        new WindowTreeHostMus(CreateInitParamsForTopLevel(window_tree_client_));
+    host_->SetBoundsInPixels(gfx::Rect(GetPrimaryDisplay().GetSizeInPixel()));
+  } else {
+    host_ = WindowTreeHost::Create(ui::PlatformWindowInitProperties{gfx::Rect(
+                                       GetPrimaryDisplay().GetSizeInPixel())},
+                                   env)
+                .release();
   }
   // Some tests don't correctly manage window focus/activation states.
   // Makes sure InputMethod is default focused so that IME basics can work.
@@ -152,12 +157,15 @@ void TestScreen::OnWindowBoundsChanged(Window* window,
 void TestScreen::OnWindowDestroying(Window* window) {
   if (host_->window() == window) {
     host_->window()->RemoveObserver(this);
-    host_ = NULL;
+    host_ = nullptr;
   }
 }
 
 gfx::Point TestScreen::GetCursorScreenPoint() {
-  return Env::GetInstance()->last_mouse_location();
+  // This may be hit during shutdown, after |host_| has been destroyed.
+  return host_ && host_->window()
+             ? host_->window()->env()->last_mouse_location()
+             : gfx::Point();
 }
 
 bool TestScreen::IsWindowUnderCursor(gfx::NativeWindow window) {

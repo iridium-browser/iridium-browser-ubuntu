@@ -252,6 +252,7 @@ TabRestoreServiceHelper::RemoveTabEntryById(SessionID id) {
 
   auto tab = std::unique_ptr<Tab>(static_cast<Tab*>(it->release()));
   entries_.erase(it);
+  NotifyTabsChanged();
   return tab;
 }
 
@@ -259,7 +260,7 @@ std::vector<LiveTab*> TabRestoreServiceHelper::RestoreEntryById(
     LiveTabContext* context,
     SessionID id,
     WindowOpenDisposition disposition) {
-  Entries::iterator entry_iterator = GetEntryIteratorById(id);
+  auto entry_iterator = GetEntryIteratorById(id);
   if (entry_iterator == entries_.end()) {
     // Don't hoark here, we allow an invalid id.
     return std::vector<LiveTab*>();
@@ -319,11 +320,10 @@ std::vector<LiveTab*> TabRestoreServiceHelper::RestoreEntryById(
       } else {
         // Restore a single tab from the window. Find the tab that matches the
         // ID in the window and restore it.
-        for (auto tab_i = window.tabs.begin(); tab_i != window.tabs.end();
-             ++tab_i) {
+        for (size_t tab_i = 0; tab_i < window.tabs.size(); tab_i++) {
           SessionID::id_type restored_tab_browser_id;
           {
-            const Tab& tab = **tab_i;
+            const Tab& tab = *window.tabs[tab_i];
             if (tab.id != id)
               continue;
 
@@ -331,13 +331,20 @@ std::vector<LiveTab*> TabRestoreServiceHelper::RestoreEntryById(
             LiveTab* restored_tab = nullptr;
             context = RestoreTab(tab, context, disposition, &restored_tab);
             live_tabs.push_back(restored_tab);
-            window.tabs.erase(tab_i);
+            DCHECK(ValidateWindow(window));
+            window.tabs.erase(window.tabs.begin() + tab_i);
           }
           // If restoring the tab leaves the window with nothing else, delete it
           // as well.
           if (window.tabs.empty()) {
             entries_.erase(entry_iterator);
           } else {
+            // Adjust |selected_tab index| to keep the window in a valid state.
+            if (static_cast<int>(tab_i) <= window.selected_tab_index) {
+              window.selected_tab_index =
+                  std::max(0, window.selected_tab_index - 1);
+            }
+            DCHECK(ValidateWindow(window));
             // Update the browser ID of the rest of the tabs in the window so if
             // any one is restored, it goes into the same window as the tab
             // being restored now.
@@ -417,7 +424,7 @@ void TabRestoreServiceHelper::PruneEntries() {
 
 TabRestoreService::Entries::iterator
 TabRestoreServiceHelper::GetEntryIteratorById(SessionID id) {
-  for (Entries::iterator i = entries_.begin(); i != entries_.end(); ++i) {
+  for (auto i = entries_.begin(); i != entries_.end(); ++i) {
     if ((*i)->id == id)
       return i;
 

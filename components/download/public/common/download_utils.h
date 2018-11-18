@@ -5,8 +5,12 @@
 #ifndef COMPONENTS_DOWNLOAD_PUBLIC_COMMON_DOWNLOAD_UTILS_H_
 #define COMPONENTS_DOWNLOAD_PUBLIC_COMMON_DOWNLOAD_UTILS_H_
 
+#include "components/download/database/download_db_entry.h"
+#include "components/download/database/in_progress/download_entry.h"
 #include "components/download/public/common/download_export.h"
 #include "components/download/public/common/download_interrupt_reasons.h"
+#include "components/download/public/common/download_item.h"
+#include "components/download/public/common/download_source.h"
 #include "net/base/net_errors.h"
 #include "net/cert/cert_status_flags.h"
 #include "net/http/http_response_headers.h"
@@ -56,6 +60,28 @@ COMPONENTS_DOWNLOAD_EXPORT int GetLoadFlags(DownloadUrlParameters* params,
 // Gets addtional request headers from |params|.
 COMPONENTS_DOWNLOAD_EXPORT std::unique_ptr<net::HttpRequestHeaders>
 GetAdditionalRequestHeaders(DownloadUrlParameters* params);
+
+// Helper functions for DownloadItem -> DownloadEntry for InProgressCache.
+COMPONENTS_DOWNLOAD_EXPORT DownloadEntry CreateDownloadEntryFromItem(
+    const DownloadItem& item,
+    const std::string& request_origin,
+    DownloadSource download_source,
+    bool fetch_error_body,
+    const DownloadUrlParameters::RequestHeadersType& request_headers);
+
+// Helper functions for DownloadItem -> DownloadDBEntry for DownloadDB.
+COMPONENTS_DOWNLOAD_EXPORT DownloadDBEntry CreateDownloadDBEntryFromItem(
+    const DownloadItem& item,
+    const UkmInfo& ukm_info,
+    bool fetch_error_body,
+    const DownloadUrlParameters::RequestHeadersType& request_headers);
+
+// Helper function to convert DownloadDBEntry to DownloadEntry.
+// TODO(qinmin): remove this function after DownloadEntry is deprecated.
+COMPONENTS_DOWNLOAD_EXPORT base::Optional<DownloadEntry>
+CreateDownloadEntryFromDownloadDBEntry(base::Optional<DownloadDBEntry> entry);
+
+COMPONENTS_DOWNLOAD_EXPORT uint64_t GetUniqueDownloadId();
 
 }  // namespace download
 

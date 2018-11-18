@@ -6,17 +6,20 @@
 #include "base/command_line.h"
 #include "base/run_loop.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/task/post_task.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/test_timeouts.h"
 #include "build/build_config.h"
 #include "content/browser/frame_host/render_frame_host_impl.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_launcher_utils.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_process_host_observer.h"
 #include "content/public/browser/web_contents.h"
+#include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
@@ -77,8 +80,7 @@ class RenderProcessHostTest : public ContentBrowserTest,
 
   // RenderProcessHostObserver:
   void RenderProcessExited(RenderProcessHost* host,
-                           base::TerminationStatus status,
-                           int exit_code) override {
+                           const ChildProcessTerminationInfo& info) override {
     ++process_exits_;
     if (!process_exit_callback_.is_null())
       process_exit_callback_.Run();
@@ -135,38 +137,6 @@ class NonSpareRendererContentBrowserClient : public TestContentBrowserClient {
  private:
   DISALLOW_COPY_AND_ASSIGN(NonSpareRendererContentBrowserClient);
 };
-
-// Sometimes the renderer process's ShutdownRequest (corresponding to the
-// ViewMsg_WasSwappedOut from a previous navigation) doesn't arrive until after
-// the browser process decides to re-use the renderer for a new purpose.  This
-// test makes sure the browser doesn't let the renderer die in that case.  See
-// http://crbug.com/87176.
-IN_PROC_BROWSER_TEST_F(RenderProcessHostTest,
-                       ShutdownRequestFromActiveTabIgnored) {
-  ASSERT_TRUE(embedded_test_server()->Start());
-
-  GURL test_url = embedded_test_server()->GetURL("/simple_page.html");
-  NavigateToURL(shell(), test_url);
-  RenderProcessHost* rph =
-      shell()->web_contents()->GetMainFrame()->GetProcess();
-
-  host_destructions_ = 0;
-  process_exits_ = 0;
-
-  rph->AddObserver(this);
-
-  static_cast<mojom::RendererHost*>(static_cast<RenderProcessHostImpl*>(rph))
-      ->ShutdownRequest();
-
-  // If the RPH sends a mistaken ProcessShutdown, the renderer process
-  // will take some time to die. Wait for a second tab to load in order to give
-  // that time to happen.
-  NavigateToURL(CreateBrowser(), test_url);
-
-  EXPECT_EQ(0, process_exits_);
-  if (!host_destructions_)
-    rph->RemoveObserver(this);
-}
 
 IN_PROC_BROWSER_TEST_F(RenderProcessHostTest,
                        GuestsAreNotSuitableHosts) {
@@ -499,8 +469,7 @@ class RenderProcessHostObserverCounter : public RenderProcessHostObserver {
   }
 
   void RenderProcessExited(RenderProcessHost* host,
-                           base::TerminationStatus status,
-                           int exit_code) override {
+                           const ChildProcessTerminationInfo& info) override {
     DCHECK(observing_);
     DCHECK_EQ(host, observed_host_);
     exited_count_++;
@@ -596,8 +565,7 @@ class ShellCloser : public RenderProcessHostObserver {
  protected:
   // RenderProcessHostObserver:
   void RenderProcessExited(RenderProcessHost* host,
-                           base::TerminationStatus status,
-                           int exit_code) override {
+                           const ChildProcessTerminationInfo& info) override {
     logging_string_->append("ShellCloser::RenderProcessExited ");
     shell_->Close();
   }
@@ -620,8 +588,7 @@ class ObserverLogger : public RenderProcessHostObserver {
  protected:
   // RenderProcessHostObserver:
   void RenderProcessExited(RenderProcessHost* host,
-                           base::TerminationStatus status,
-                           int exit_code) override {
+                           const ChildProcessTerminationInfo& info) override {
     logging_string_->append("ObserverLogger::RenderProcessExited ");
   }
 
@@ -710,22 +677,22 @@ IN_PROC_BROWSER_TEST_F(RenderProcessHostTest, KillProcessOnBadMojoMessage) {
     rph->RemoveObserver(this);
 }
 
-class MediaStopObserver : public WebContentsObserver {
+class AudioStartObserver : public WebContentsObserver {
  public:
-  MediaStopObserver(WebContents* web_contents, base::Closure quit_closure)
+  AudioStartObserver(WebContents* web_contents,
+                     base::OnceClosure audible_closure)
       : WebContentsObserver(web_contents),
-        quit_closure_(std::move(quit_closure)) {}
-  ~MediaStopObserver() override {}
+        audible_closure_(std::move(audible_closure)) {}
+  ~AudioStartObserver() override {}
 
-  void MediaStoppedPlaying(
-      const WebContentsObserver::MediaPlayerInfo& media_info,
-      const WebContentsObserver::MediaPlayerId& id,
-      WebContentsObserver::MediaStoppedReason reason) override {
-    quit_closure_.Run();
+  // WebContentsObserver:
+  void OnAudioStateChanged(bool audible) override {
+    if (audible && audible_closure_)
+      std::move(audible_closure_).Run();
   }
 
  private:
-  base::Closure quit_closure_;
+  base::OnceClosure audible_closure_;
 };
 
 // Tests that audio stream counts (used for process priority calculations) are
@@ -734,7 +701,9 @@ class MediaStopObserver : public WebContentsObserver {
 // Note: This test can't run when the Mojo Renderer is used since it does not
 // create audio streams through the normal audio pathways; at present this is
 // only used by Chromecast.
-#if BUILDFLAG(ENABLE_MOJO_RENDERER)
+//
+// crbug.com/864476: flaky on Android for unclear reasons.
+#if BUILDFLAG(ENABLE_MOJO_RENDERER) || defined(OS_ANDROID)
 #define KillProcessZerosAudioStreams DISABLED_KillProcessZerosAudioStreams
 #endif
 IN_PROC_BROWSER_TEST_F(RenderProcessHostTest, KillProcessZerosAudioStreams) {
@@ -743,18 +712,21 @@ IN_PROC_BROWSER_TEST_F(RenderProcessHostTest, KillProcessZerosAudioStreams) {
   embedded_test_server()->ServeFilesFromSourceDirectory(
       media::GetTestDataPath());
   ASSERT_TRUE(embedded_test_server()->Start());
-  NavigateToURL(shell(), embedded_test_server()->GetURL("/sfx_s16le.wav"));
+  ASSERT_TRUE(NavigateToURL(
+      shell(), embedded_test_server()->GetURL("/webaudio_oscillator.html")));
   RenderProcessHostImpl* rph = static_cast<RenderProcessHostImpl*>(
       shell()->web_contents()->GetMainFrame()->GetProcess());
 
   {
-    // Wait for media playback to complete. We use the stop signal instead of
-    // the start signal here since the start signal does not mean the audio
-    // has actually started playing yet. Whereas the stop signal is sent before
-    // the audio device is actually torn down.
+    // Start audio and wait for it to become audible.
     base::RunLoop run_loop;
-    MediaStopObserver stop_observer(shell()->web_contents(),
-                                    run_loop.QuitClosure());
+    AudioStartObserver observer(shell()->web_contents(),
+                                run_loop.QuitClosure());
+
+    std::string result;
+    EXPECT_TRUE(
+        ExecuteScriptAndExtractString(shell(), "StartOscillator();", &result))
+        << "Failed to execute javascript.";
     run_loop.Run();
 
     // No point in running the rest of the test if this is wrong.
@@ -783,8 +755,8 @@ IN_PROC_BROWSER_TEST_F(RenderProcessHostTest, KillProcessZerosAudioStreams) {
     // Cycle UI and IO loop once to ensure OnChannelClosing() has been delivered
     // to audio stream owners and they get a chance to notify of stream closure.
     base::RunLoop run_loop;
-    BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
-                            media::BindToCurrentLoop(run_loop.QuitClosure()));
+    base::PostTaskWithTraits(FROM_HERE, {BrowserThread::IO},
+                             media::BindToCurrentLoop(run_loop.QuitClosure()));
     run_loop.Run();
   }
 
@@ -814,19 +786,6 @@ class CaptureStreamRenderProcessHostTest : public RenderProcessHostTest {
     RenderProcessHostTest::SetUpCommandLine(command_line);
   }
 };
-
-// These tests contain WebRTC calls and cannot be run when it isn't enabled.
-#if !BUILDFLAG(ENABLE_WEBRTC)
-#define GetUserMediaIncrementsVideoCaptureStreams \
-  DISABLED_GetUserMediaIncrementsVideoCaptureStreams
-#define StopResetsVideoCaptureStreams DISABLED_StopResetsVideoCaptureStreams
-#define KillProcessZerosVideoCaptureStreams \
-  DISABLED_KillProcessZerosVideoCaptureStreams
-#define GetUserMediaAudioOnlyIncrementsMediaStreams \
-  DISABLED_GetUserMediaAudioOnlyIncrementsMediaStreams
-#define KillProcessZerosAudioCaptureStreams \
-  DISABLED_KillProcessZerosAudioCaptureStreams
-#endif  // BUILDFLAG(ENABLE_WEBRTC)
 
 // Tests that video capture stream count increments when getUserMedia() is
 // called.
@@ -895,8 +854,8 @@ IN_PROC_BROWSER_TEST_F(CaptureStreamRenderProcessHostTest,
     // Cycle UI and IO loop once to ensure OnChannelClosing() has been delivered
     // to audio stream owners and they get a chance to notify of stream closure.
     base::RunLoop run_loop;
-    BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
-                            media::BindToCurrentLoop(run_loop.QuitClosure()));
+    base::PostTaskWithTraits(FROM_HERE, {BrowserThread::IO},
+                             media::BindToCurrentLoop(run_loop.QuitClosure()));
     run_loop.Run();
   }
 
@@ -960,8 +919,8 @@ IN_PROC_BROWSER_TEST_F(CaptureStreamRenderProcessHostTest,
     // Cycle UI and IO loop once to ensure OnChannelClosing() has been delivered
     // to audio stream owners and they get a chance to notify of stream closure.
     base::RunLoop run_loop;
-    BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
-                            media::BindToCurrentLoop(run_loop.QuitClosure()));
+    base::PostTaskWithTraits(FROM_HERE, {BrowserThread::IO},
+                             media::BindToCurrentLoop(run_loop.QuitClosure()));
     run_loop.Run();
   }
 
@@ -999,7 +958,15 @@ IN_PROC_BROWSER_TEST_F(RenderProcessHostTest, KeepAliveRendererProcess) {
     rph->RemoveObserver(this);
 }
 
-IN_PROC_BROWSER_TEST_F(RenderProcessHostTest, KeepAliveRendererProcess_Hung) {
+// Test is flaky on Android builders: https://crbug.com/875179
+#if defined(OS_ANDROID)
+#define MAYBE_KeepAliveRendererProcess_Hung \
+  DISABLED_KeepAliveRendererProcess_Hung
+#else
+#define MAYBE_KeepAliveRendererProcess_Hung KeepAliveRendererProcess_Hung
+#endif
+IN_PROC_BROWSER_TEST_F(RenderProcessHostTest,
+                       MAYBE_KeepAliveRendererProcess_Hung) {
   embedded_test_server()->RegisterRequestHandler(
       base::BindRepeating(HandleHungBeacon));
   ASSERT_TRUE(embedded_test_server()->Start());
@@ -1026,8 +993,16 @@ IN_PROC_BROWSER_TEST_F(RenderProcessHostTest, KeepAliveRendererProcess_Hung) {
     rph->RemoveObserver(this);
 }
 
+// Test is flaky on Android builders: https://crbug.com/875179
+#if defined(OS_ANDROID)
+#define MAYBE_FetchKeepAliveRendererProcess_Hung \
+  DISABLED_FetchKeepAliveRendererProcess_Hung
+#else
+#define MAYBE_FetchKeepAliveRendererProcess_Hung \
+  FetchKeepAliveRendererProcess_Hung
+#endif
 IN_PROC_BROWSER_TEST_F(RenderProcessHostTest,
-                       FetchKeepAliveRendererProcess_Hung) {
+                       MAYBE_FetchKeepAliveRendererProcess_Hung) {
   embedded_test_server()->RegisterRequestHandler(
       base::BindRepeating(HandleHungBeacon));
   ASSERT_TRUE(embedded_test_server()->Start());
@@ -1055,6 +1030,38 @@ IN_PROC_BROWSER_TEST_F(RenderProcessHostTest,
     rph->RemoveObserver(this);
 }
 
+// This test verifies properties of RenderProcessHostImpl *before* Init method
+// is called.
+IN_PROC_BROWSER_TEST_F(RenderProcessHostTest, ConstructedButNotInitializedYet) {
+  RenderProcessHost* process = RenderProcessHostImpl::CreateRenderProcessHost(
+      ShellContentBrowserClient::Get()->browser_context(), nullptr, nullptr,
+      false /* is_for_guests_only */);
+
+  // Just verifying that the arguments of CreateRenderProcessHost got processed
+  // correctly.
+  EXPECT_EQ(ShellContentBrowserClient::Get()->browser_context(),
+            process->GetBrowserContext());
+  EXPECT_FALSE(process->IsForGuestsOnly());
+
+  // There should be no OS process before Init() method is called.
+  EXPECT_FALSE(process->IsInitializedAndNotDead());
+  EXPECT_FALSE(process->IsReady());
+  EXPECT_FALSE(process->GetProcess().IsValid());
+  EXPECT_EQ(base::kNullProcessHandle, process->GetProcess().Handle());
+
+  // TODO(lukasza): https://crbug.com/813045: RenderProcessHost shouldn't have
+  // an associated IPC channel (and shouldn't accumulate IPC messages) unless
+  // the Init() method was called and the RPH either has connection to an actual
+  // OS process or is currently attempting to spawn the OS process.  After this
+  // bug is fixed the 1st test assertion below should be reversed (unsure about
+  // the 2nd one).
+  EXPECT_TRUE(process->GetChannel());
+  EXPECT_TRUE(process->GetRendererInterface());
+
+  // Cleanup the resources acquired by the test.
+  process->Cleanup();
+}
+
 // This test verifies that a fast shutdown is possible for a starting process.
 IN_PROC_BROWSER_TEST_F(RenderProcessHostTest, FastShutdownForStartingProcess) {
   RenderProcessHost* process = RenderProcessHostImpl::CreateRenderProcessHost(
@@ -1062,6 +1069,7 @@ IN_PROC_BROWSER_TEST_F(RenderProcessHostTest, FastShutdownForStartingProcess) {
       false /* is_for_guests_only */);
   process->Init();
   EXPECT_TRUE(process->FastShutdownIfPossible());
+  process->Cleanup();
 }
 
 }  // namespace

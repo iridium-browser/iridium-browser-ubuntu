@@ -7,6 +7,11 @@
 
 class AppMenuButton;
 class BrowserActionsContainer;
+class PageActionIconContainerView;
+
+namespace gfx {
+class Rect;
+}
 
 namespace views {
 class AccessiblePaneView;
@@ -19,8 +24,16 @@ class ToolbarButtonProvider {
   // Gets the browser actions container.
   virtual BrowserActionsContainer* GetBrowserActionsContainer() = 0;
 
+  // Gets the page action icon container.
+  virtual PageActionIconContainerView* GetPageActionIconContainerView() = 0;
+
   // Gets the app menu button.
   virtual AppMenuButton* GetAppMenuButton() = 0;
+
+  // Gets the area available for the find bar in widget space where
+  // |contents_height| is the amount of vertical space available, otherwise if
+  // there is no appropriate anchor point returns empty gfx::Rect.
+  virtual gfx::Rect GetFindBarBoundingBox(int contents_height) const = 0;
 
   // Gives the toolbar focus.
   virtual void FocusToolbar() = 0;

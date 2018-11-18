@@ -30,7 +30,9 @@
 #include <memory>
 #include "base/memory/scoped_refptr.h"
 #include "base/single_thread_task_runner.h"
-#include "third_party/blink/public/common/message_port/message_port_channel.h"
+#include "mojo/public/cpp/bindings/connector.h"
+#include "mojo/public/cpp/bindings/message.h"
+#include "third_party/blink/public/common/messaging/message_port_channel.h"
 #include "third_party/blink/public/platform/web_vector.h"
 #include "third_party/blink/renderer/bindings/core/v8/active_script_wrappable.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/serialized_script_value.h"
@@ -44,8 +46,8 @@ namespace blink {
 
 class ExceptionState;
 class ExecutionContext;
+class PostMessageOptions;
 class ScriptState;
-class SerializedScriptValue;
 
 class CORE_EXPORT MessagePort : public EventTargetWithInlineData,
                                 public mojo::MessageReceiver,
@@ -59,10 +61,13 @@ class CORE_EXPORT MessagePort : public EventTargetWithInlineData,
   ~MessagePort() override;
 
   void postMessage(ScriptState*,
-                   scoped_refptr<SerializedScriptValue> message,
-                   const MessagePortArray&,
+                   const ScriptValue& message,
+                   Vector<ScriptValue>& transfer,
                    ExceptionState&);
-  static bool CanTransferArrayBuffersAndImageBitmaps() { return true; }
+  void postMessage(ScriptState*,
+                   const ScriptValue& message,
+                   const PostMessageOptions&,
+                   ExceptionState&);
 
   void start();
   void close();
@@ -122,9 +127,9 @@ class CORE_EXPORT MessagePort : public EventTargetWithInlineData,
   bool IsNeutered() const { return !connector_ || !connector_->is_valid(); }
 
   // For testing only: allows inspection of the entangled channel.
-  MojoHandle EntangledHandleForTesting() const;
+  ::MojoHandle EntangledHandleForTesting() const;
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  protected:
   explicit MessagePort(ExecutionContext&);
@@ -133,12 +138,15 @@ class CORE_EXPORT MessagePort : public EventTargetWithInlineData,
   // mojo::MessageReceiver implementation.
   bool Accept(mojo::Message*) override;
   void ResetMessageCount();
+  bool ShouldYieldAfterNewMessage();
 
   std::unique_ptr<mojo::Connector> connector_;
   int messages_in_current_task_ = 0;
 
   bool started_ = false;
   bool closed_ = false;
+
+  base::Optional<base::TimeTicks> task_start_time_;
 
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
 };

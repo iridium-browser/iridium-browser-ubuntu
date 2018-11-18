@@ -18,10 +18,9 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task_scheduler/task_scheduler.h"
+#include "base/task/task_scheduler/task_scheduler.h"
 #include "base/test/scoped_task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/storage_monitor/mock_removable_storage_observer.h"
@@ -143,7 +142,7 @@ class TestStorageMonitorLinux : public StorageMonitorLinux {
     // Once the storage monitor picks up the changes to the fake mtab file,
     // exit the RunLoop that should be blocking the main test thread.
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::MessageLoop::QuitWhenIdleClosure());
+        FROM_HERE, base::RunLoop::QuitCurrentWhenIdleClosureDeprecated());
   }
 
   DISALLOW_COPY_AND_ASSIGN(TestStorageMonitorLinux);

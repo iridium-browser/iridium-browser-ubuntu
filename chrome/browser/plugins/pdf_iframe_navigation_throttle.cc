@@ -4,11 +4,14 @@
 
 #include "chrome/browser/plugins/pdf_iframe_navigation_throttle.h"
 
+#include <string>
+
 #include "base/feature_list.h"
 #include "chrome/common/chrome_content_client.h"
 #include "chrome/common/chrome_features.h"
-#include "chrome/common/pdf_uma.h"
+#include "chrome/common/pdf_util.h"
 #include "content/public/browser/browser_context.h"
+#include "content/public/browser/download_utils.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
@@ -41,8 +44,8 @@ PDFIFrameNavigationThrottle::MaybeCreateThrottleFor(
 
 #if BUILDFLAG(ENABLE_PLUGINS)
   content::WebPluginInfo pdf_plugin_info;
-  base::FilePath pdf_plugin_path =
-      base::FilePath::FromUTF8Unsafe(ChromeContentClient::kPDFPluginPath);
+  static const base::FilePath pdf_plugin_path(
+      ChromeContentClient::kPDFPluginPath);
   content::PluginService::GetInstance()->GetPluginInfoByPath(pdf_plugin_path,
                                                              &pdf_plugin_info);
 
@@ -76,15 +79,19 @@ PDFIFrameNavigationThrottle::WillProcessResponse() {
   if (mime_type != kPDFMimeType)
     return content::NavigationThrottle::PROCEED;
 
+  // We MUST download responses marked as attachments rather than showing
+  // a placeholder.
+  if (content::download_utils::MustDownload(navigation_handle()->GetURL(),
+                                            response_headers, mime_type)) {
+    return content::NavigationThrottle::PROCEED;
+  }
+
   ReportPDFLoadStatus(PDFLoadStatus::kLoadedIframePdfWithNoPdfViewer);
 
   if (!base::FeatureList::IsEnabled(features::kClickToOpenPDFPlaceholder))
     return content::NavigationThrottle::PROCEED;
 
-  std::string html = base::StringPrintf(
-      R"(<body style="margin: 0;"><object data="%s" type="application/pdf" )"
-      R"(style="width: 100%%; height: 100%%;"></object></body>)",
-      navigation_handle()->GetURL().spec().c_str());
+  std::string html = GetPDFPlaceholderHTML(navigation_handle()->GetURL());
   GURL data_url("data:text/html," + net::EscapePath(html));
 
   navigation_handle()->GetWebContents()->OpenURL(

@@ -9,7 +9,6 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.PackageManager.NameNotFoundException;
 import android.content.res.Resources;
-import android.os.AsyncTask;
 import android.util.Pair;
 
 import org.json.JSONArray;
@@ -19,6 +18,7 @@ import org.json.JSONObject;
 import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
+import org.chromium.base.task.AsyncTask;
 import org.chromium.chrome.browser.instantapps.InstantAppsHandler;
 import org.chromium.installedapp.mojom.InstalledAppProvider;
 import org.chromium.installedapp.mojom.RelatedApplication;
@@ -90,9 +90,9 @@ public class InstalledAppProviderImpl implements InstalledAppProvider {
 
         // Use an AsyncTask to execute the installed/related checks on a background thread (so as
         // not to block the UI thread).
-        new AsyncTask<Void, Void, Pair<RelatedApplication[], Integer>>() {
+        new AsyncTask<Pair<RelatedApplication[], Integer>>() {
             @Override
-            protected Pair<RelatedApplication[], Integer> doInBackground(Void... unused) {
+            protected Pair<RelatedApplication[], Integer> doInBackground() {
                 return filterInstalledAppsOnBackgroundThread(relatedApps, frameUrl);
             }
 
@@ -109,7 +109,8 @@ public class InstalledAppProviderImpl implements InstalledAppProvider {
                     }
                 }, delayMillis);
             }
-        }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+        }
+                .executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
     }
 
     @Override

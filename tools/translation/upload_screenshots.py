@@ -43,6 +43,12 @@ TRANSLATION_EXPECTATIONS_PATH = os.path.join('tools', 'gritsettings',
 # This is writable by @google.com accounts, readable by everyone.
 BUCKET_URL = 'gs://chromium-translation-screenshots'
 
+if sys.platform.startswith('win'):
+  # Use the |git.bat| in the depot_tools/ on Windows.
+  GIT = 'git.bat'
+else:
+  GIT = 'git'
+
 
 def query_yes_no(question, default='yes'):
   """Ask a yes/no question via raw_input() and return their answer.
@@ -80,7 +86,7 @@ def list_grds_in_repository(repo_path):
   # This works because git does its own glob expansion even though there is no
   # shell to do it.
   output = subprocess.check_output(
-      ['git', 'ls-files', '--', '*.grd'], cwd=repo_path)
+      [GIT, 'ls-files', '--', '*.grd'], cwd=repo_path)
   return output.strip().splitlines()
 
 
@@ -91,7 +97,7 @@ def git_add(files, repo_root):
   added_count = 0
   while added_count < len(files):
     batch = files[added_count:added_count+BATCH_SIZE]
-    command = ['git', 'add'] + batch
+    command = [GIT, 'add'] + batch
     subprocess.check_call(command, cwd=repo_root)
     added_count += len(batch)
 
@@ -125,7 +131,7 @@ def find_screenshots(repo_root, translation_expectations):
     if not os.path.exists(screenshots_dir):
       continue
     for f in os.listdir(screenshots_dir):
-      if f.endswith('.sha1'):
+      if f in ('OWNERS', 'README.md') or f.endswith('.sha1'):
         continue
       if not f.endswith('.png'):
         print 'File with unexpected extension: %s in %s' % (f, screenshots_dir)
@@ -170,10 +176,11 @@ def main():
         gsutil=gsutil,
         force=False,
         use_md5=False,
-        num_threads=1,
+        num_threads=10,
         skip_hashing=False,
         gzip=None) != 0:
-      print 'Error uploading screenshots, exiting.'
+      print ('Error uploading screenshots. Try running '
+             '`download_from_google_storage --config`.')
       exit(1)
 
   print

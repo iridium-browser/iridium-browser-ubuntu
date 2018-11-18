@@ -8,7 +8,6 @@
 // <security.h> needs this.
 #define SECURITY_WIN32 1
 #include <security.h>  // For GetUserNameEx()
-#include <shlwapi.h>   // For PathIsUNC()
 #include <stddef.h>
 
 #include <memory>
@@ -36,9 +35,9 @@
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
+#include "base/win/shlwapi.h"  // For PathIsUNC()
 #include "base/win/win_util.h"
 #include "base/win/windows_version.h"
-#include "components/json_schema/json_schema_constants.h"
 #include "components/policy/core/common/policy_bundle.h"
 #include "components/policy/core/common/policy_load_status.h"
 #include "components/policy/core/common/policy_map.h"
@@ -47,8 +46,6 @@
 #include "components/policy/core/common/registry_dict.h"
 #include "components/policy/core/common/schema.h"
 #include "components/policy/policy_constants.h"
-
-namespace schema = json_schema_constants;
 
 namespace policy {
 
@@ -66,19 +63,23 @@ const char kBlockedExtensionPrefix[] = "[BLOCKED]";
 
 // List of policies that are considered only if the user is part of a AD domain.
 // Please document any new additions in policy_templates.json!
-const char* kInsecurePolicies[] = {key::kMetricsReportingEnabled,
-                                   key::kDefaultSearchProviderEnabled,
-                                   key::kHomepageIsNewTabPage,
-                                   key::kHomepageLocation,
-                                   key::kNewTabPageLocation,
-                                   key::kRestoreOnStartup,
-                                   key::kRestoreOnStartupURLs,
-                                   key::kSafeBrowsingForTrustedSourcesEnabled,
-                                   key::kCloudPolicyOverridesMachinePolicy,
-                                   key::kSafeBrowsingEnabled,
-                                   key::kSafeBrowsingWhitelistDomains,
-                                   key::kPasswordProtectionLoginURLs,
-                                   key::kPasswordProtectionChangePasswordURL};
+const char* kInsecurePolicies[] = {
+    key::kChromeCleanupEnabled,
+    key::kChromeCleanupReportingEnabled,
+    key::kCloudPolicyOverridesMachinePolicy,
+    key::kDefaultSearchProviderEnabled,
+    key::kHomepageIsNewTabPage,
+    key::kHomepageLocation,
+    key::kMetricsReportingEnabled,
+    key::kNewTabPageLocation,
+    key::kPasswordProtectionChangePasswordURL,
+    key::kPasswordProtectionLoginURLs,
+    key::kRestoreOnStartup,
+    key::kRestoreOnStartupURLs,
+    key::kSafeBrowsingForTrustedSourcesEnabled,
+    key::kSafeBrowsingEnabled,
+    key::kSafeBrowsingWhitelistDomains,
+};
 
 // The list of possible errors that can occur while collecting information about
 // the current enterprise environment.
@@ -96,7 +97,11 @@ enum DomainCheckErrors {
 // Encapculates logic to determine if enterprise policies should be honored.
 // This is used in various places below.
 bool ShouldHonorPolicies() {
-  return base::win::IsEnterpriseManaged();
+  bool is_enterprise_version =
+      base::win::OSInfo::GetInstance()->version_type() != base::win::SUITE_HOME;
+  return base::win::IsEnrolledToDomain() ||
+         (base::win::IsDeviceRegisteredWithManagement() &&
+          is_enterprise_version);
 }
 
 // Verifies that untrusted policies contain only safe values. Modifies the
@@ -152,8 +157,8 @@ void FilterUntrustedPolicy(PolicyMap* policy) {
     }
   }
 
-  UMA_HISTOGRAM_COUNTS("EnterpriseCheck.InvalidPoliciesDetected",
-                       invalid_policies);
+  UMA_HISTOGRAM_COUNTS_1M("EnterpriseCheck.InvalidPoliciesDetected",
+                          invalid_policies);
 }
 
 // Parses |gpo_dict| according to |schema| and writes the resulting policy
@@ -211,7 +216,7 @@ bool IsDomainJoined() {
   bool got_function_addresses = false;
   // Use an absolute path to load the DLL to avoid DLL preloading attacks.
   base::FilePath path;
-  if (PathService::Get(base::DIR_SYSTEM, &path)) {
+  if (base::PathService::Get(base::DIR_SYSTEM, &path)) {
     HINSTANCE net_api_library = ::LoadLibraryEx(
         path.Append(FILE_PATH_LITERAL("netapi32.dll")).value().c_str(), nullptr,
         LOAD_WITH_ALTERED_SEARCH_PATH);

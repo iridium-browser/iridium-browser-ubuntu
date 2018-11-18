@@ -31,7 +31,7 @@ class HeadlessContentBrowserClient : public content::ContentBrowserClient {
   void GetQuotaSettings(
       content::BrowserContext* context,
       content::StoragePartition* partition,
-      storage::OptionalQuotaSettingsCallback callback) override;
+      ::storage::OptionalQuotaSettingsCallback callback) override;
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
   void GetAdditionalMappedFilesForChildProcess(
       const base::CommandLine& command_line,
@@ -40,7 +40,7 @@ class HeadlessContentBrowserClient : public content::ContentBrowserClient {
 #endif
   void AppendExtraCommandLineSwitches(base::CommandLine* command_line,
                                       int child_process_id) override;
-
+  std::string GetAcceptLangs(content::BrowserContext* context) override;
   void AllowCertificateError(
       content::WebContents* web_contents,
       int cert_error,
@@ -51,34 +51,20 @@ class HeadlessContentBrowserClient : public content::ContentBrowserClient {
       bool expired_previous_decision,
       const base::Callback<void(content::CertificateRequestResultType)>&
           callback) override;
-
   void SelectClientCertificate(
       content::WebContents* web_contents,
       net::SSLCertRequestInfo* cert_request_info,
       net::ClientCertIdentityList client_certs,
       std::unique_ptr<content::ClientCertificateDelegate> delegate) override;
-
   void ResourceDispatcherHostCreated() override;
-
-  net::NetLog* GetNetLog() override;
-
-  bool AllowGetCookie(const GURL& url,
-                      const GURL& first_party,
-                      const net::CookieList& cookie_list,
-                      content::ResourceContext* context,
-                      int render_process_id,
-                      int render_frame_id) override;
-
-  bool AllowSetCookie(const GURL& url,
-                      const GURL& first_party,
-                      const net::CanonicalCookie& cookie,
-                      content::ResourceContext* context,
-                      int render_process_id,
-                      int render_frame_id,
-                      const net::CookieOptions& options) override;
-
   bool DoesSiteRequireDedicatedProcess(content::BrowserContext* browser_context,
                                        const GURL& effective_site_url) override;
+  bool ShouldEnableStrictSiteIsolation() override;
+
+  ::network::mojom::NetworkContextPtr CreateNetworkContext(
+      content::BrowserContext* context,
+      bool in_memory,
+      const base::FilePath& relative_partition_path) override;
 
  private:
   std::unique_ptr<base::Value> GetBrowserServiceManifestOverlay();

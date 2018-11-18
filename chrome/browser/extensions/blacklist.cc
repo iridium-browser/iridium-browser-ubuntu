@@ -14,6 +14,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
+#include "base/task/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/blacklist_factory.h"
@@ -21,6 +22,7 @@
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "components/prefs/pref_service.h"
 #include "components/safe_browsing/db/util.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "extensions/browser/extension_prefs.h"
 
@@ -79,19 +81,26 @@ class SafeBrowsingClientImpl
 
   // Constructs a client to query the database manager for |extension_ids| and
   // run |callback| with the IDs of those which have been blacklisted.
-  SafeBrowsingClientImpl(
+  static void Start(
       const std::set<std::string>& extension_ids,
-      const OnResultCallback& callback)
-      : callback_task_runner_(base::ThreadTaskRunnerHandle::Get()),
-        callback_(callback) {
-    BrowserThread::PostTask(
-        BrowserThread::IO, FROM_HERE,
-        base::BindOnce(&SafeBrowsingClientImpl::StartCheck, this,
-                       g_database_manager.Get().get(), extension_ids));
+      const OnResultCallback& callback) {
+    auto safe_browsing_client = base::WrapRefCounted(
+        new SafeBrowsingClientImpl(extension_ids, callback));
+    base::PostTaskWithTraits(
+        FROM_HERE, {BrowserThread::IO},
+        base::BindOnce(&SafeBrowsingClientImpl::StartCheck,
+                       safe_browsing_client, g_database_manager.Get().get(),
+                       extension_ids));
   }
 
  private:
   friend class base::RefCountedThreadSafe<SafeBrowsingClientImpl>;
+
+  SafeBrowsingClientImpl(const std::set<std::string>& extension_ids,
+                         const OnResultCallback& callback)
+      : callback_task_runner_(base::ThreadTaskRunnerHandle::Get()),
+        callback_(callback) {}
+
   ~SafeBrowsingClientImpl() override {}
 
   // Pass |database_manager| as a parameter to avoid touching
@@ -197,9 +206,9 @@ void Blacklist::GetBlacklistedIDs(const std::set<std::string>& ids,
   // safebrowsing for the blacklisted extensions. The set of blacklisted
   // extensions returned by SafeBrowsing will then be passed to
   // GetBlacklistStateIDs to get the particular BlacklistState for each id.
-  new SafeBrowsingClientImpl(
-      ids, base::Bind(&Blacklist::GetBlacklistStateForIDs, AsWeakPtr(),
-                      callback));
+  SafeBrowsingClientImpl::Start(
+      ids,
+      base::Bind(&Blacklist::GetBlacklistStateForIDs, AsWeakPtr(), callback));
 }
 
 void Blacklist::GetMalwareIDs(const std::set<std::string>& ids,

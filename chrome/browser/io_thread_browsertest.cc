@@ -20,6 +20,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "components/certificate_transparency/features.h"
 #include "components/certificate_transparency/tree_state_tracker.h"
 #include "components/prefs/pref_service.h"
 #include "components/variations/variations_associated_data.h"
@@ -31,92 +32,72 @@
 #include "net/nqe/network_quality_estimator.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/simple_connection_listener.h"
-#include "net/url_request/url_fetcher.h"
-#include "net/url_request/url_fetcher_delegate.h"
+#include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/url_request_context.h"
+#include "services/network/public/cpp/network_quality_tracker.h"
+#include "services/network/public/cpp/simple_url_loader.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 
 namespace {
 
-// URLFetcherDelegate that expects a request to hang.
-class HangingURLFetcherDelegate : public net::URLFetcherDelegate {
+class TestNetworkQualityObserver
+    : public network::NetworkQualityTracker::EffectiveConnectionTypeObserver {
  public:
-  HangingURLFetcherDelegate() {}
-  ~HangingURLFetcherDelegate() override {}
+  explicit TestNetworkQualityObserver(network::NetworkQualityTracker* tracker)
+      : run_loop_wait_effective_connection_type_(
+            net::EFFECTIVE_CONNECTION_TYPE_UNKNOWN),
+        tracker_(tracker),
+        effective_connection_type_(net::EFFECTIVE_CONNECTION_TYPE_UNKNOWN) {
+    tracker_->AddEffectiveConnectionTypeObserver(this);
+  }
 
-  void OnURLFetchComplete(const net::URLFetcher* source) override {
-    ADD_FAILURE() << "This request should never complete.";
+  ~TestNetworkQualityObserver() override {
+    tracker_->RemoveEffectiveConnectionTypeObserver(this);
+  }
+
+  // NetworkQualityTracker::EffectiveConnectionTypeObserver implementation:
+  void OnEffectiveConnectionTypeChanged(
+      net::EffectiveConnectionType type) override {
+    DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+
+    net::EffectiveConnectionType queried_type =
+        tracker_->GetEffectiveConnectionType();
+    EXPECT_EQ(type, queried_type);
+
+    effective_connection_type_ = type;
+    if (effective_connection_type_ != run_loop_wait_effective_connection_type_)
+      return;
+    if (run_loop_)
+      run_loop_->Quit();
+  }
+
+  void WaitForNotification(
+      net::EffectiveConnectionType run_loop_wait_effective_connection_type) {
+    if (effective_connection_type_ == run_loop_wait_effective_connection_type)
+      return;
+    ASSERT_NE(net::EFFECTIVE_CONNECTION_TYPE_UNKNOWN,
+              run_loop_wait_effective_connection_type);
+    run_loop_.reset(new base::RunLoop());
+    run_loop_wait_effective_connection_type_ =
+        run_loop_wait_effective_connection_type;
+    run_loop_->Run();
+    run_loop_.reset();
   }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(HangingURLFetcherDelegate);
+  net::EffectiveConnectionType run_loop_wait_effective_connection_type_;
+  std::unique_ptr<base::RunLoop> run_loop_;
+  network::NetworkQualityTracker* tracker_;
+  net::EffectiveConnectionType effective_connection_type_;
+
+  DISALLOW_COPY_AND_ASSIGN(TestNetworkQualityObserver);
 };
 
-// URLFetcherDelegate that can wait for a request to succeed.
-class TestURLFetcherDelegate : public net::URLFetcherDelegate {
- public:
-  TestURLFetcherDelegate() {}
-  ~TestURLFetcherDelegate() override {}
-
-  void OnURLFetchComplete(const net::URLFetcher* source) override {
-    run_loop_.Quit();
-  }
-
-  void WaitForCompletion() { run_loop_.Run(); }
-
- private:
-  base::RunLoop run_loop_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestURLFetcherDelegate);
-};
-
-// Runs a task on the IOThread and waits for it to complete.
-void RunOnIOThreadBlocking(base::OnceClosure task) {
-  base::RunLoop run_loop;
-  content::BrowserThread::PostTaskAndReply(content::BrowserThread::IO,
-                                           FROM_HERE, std::move(task),
-                                           run_loop.QuitClosure());
-  run_loop.Run();
-}
-
-void CheckCnameLookup(IOThread* io_thread, bool expected) {
-  EXPECT_EQ(expected,
-            io_thread->globals()
-                ->http_auth_preferences->NegotiateDisableCnameLookup());
-}
-
-void CheckNegotiateEnablePort(IOThread* io_thread, bool expected) {
-  EXPECT_EQ(expected,
-            io_thread->globals()->http_auth_preferences->NegotiateEnablePort());
-}
-
-void CheckCanUseDefaultCredentials(IOThread* io_thread,
-                                   bool expected,
-                                   const GURL& url) {
-  EXPECT_EQ(
-      expected,
-      io_thread->globals()->http_auth_preferences->CanUseDefaultCredentials(
-          url));
-}
-
-void CheckCanDelegate(IOThread* io_thread, bool expected, const GURL& url) {
-  EXPECT_EQ(expected,
-            io_thread->globals()->http_auth_preferences->CanDelegate(url));
-}
-
-void CheckEffectiveConnectionType(IOThread* io_thread,
-                                  net::EffectiveConnectionType expected) {
-  EXPECT_EQ(expected, io_thread->globals()
-                          ->system_request_context->network_quality_estimator()
-                          ->GetEffectiveConnectionType());
-}
-
-void CheckSCTsAreSentToTreeTracker(IOThread* io_thread) {
-  EXPECT_EQ(io_thread->ct_tree_tracker(),
-            io_thread->globals()
-                ->system_request_context->cert_transparency_verifier()
-                ->GetObserver());
+void CheckEffectiveConnectionType(net::EffectiveConnectionType expected) {
+  TestNetworkQualityObserver network_quality_observer(
+      g_browser_process->network_quality_tracker());
+  network_quality_observer.WaitForNotification(expected);
 }
 
 class IOThreadBrowserTest : public InProcessBrowserTest {
@@ -142,73 +123,6 @@ class IOThreadBrowserTest : public InProcessBrowserTest {
   }
 };
 
-// This test uses the kDisableAuthNegotiateCnameLookup to check that
-// the HttpAuthPreferences are correctly initialized and running on the
-// IO thread. The other preferences are tested by the HttpAuthPreferences
-// unit tests.
-IN_PROC_BROWSER_TEST_F(IOThreadBrowserTest, UpdateNegotiateDisableCnameLookup) {
-  g_browser_process->local_state()->SetBoolean(
-      prefs::kDisableAuthNegotiateCnameLookup, false);
-  RunOnIOThreadBlocking(
-      base::Bind(&CheckCnameLookup,
-                 base::Unretained(g_browser_process->io_thread()), false));
-  g_browser_process->local_state()->SetBoolean(
-      prefs::kDisableAuthNegotiateCnameLookup, true);
-  RunOnIOThreadBlocking(
-      base::Bind(&CheckCnameLookup,
-                 base::Unretained(g_browser_process->io_thread()), true));
-}
-
-IN_PROC_BROWSER_TEST_F(IOThreadBrowserTest, UpdateEnableAuthNegotiatePort) {
-  g_browser_process->local_state()->SetBoolean(prefs::kEnableAuthNegotiatePort,
-                                               false);
-  RunOnIOThreadBlocking(
-      base::Bind(&CheckNegotiateEnablePort,
-                 base::Unretained(g_browser_process->io_thread()), false));
-  g_browser_process->local_state()->SetBoolean(prefs::kEnableAuthNegotiatePort,
-                                               true);
-  RunOnIOThreadBlocking(
-      base::Bind(&CheckNegotiateEnablePort,
-                 base::Unretained(g_browser_process->io_thread()), true));
-}
-
-IN_PROC_BROWSER_TEST_F(IOThreadBrowserTest, UpdateServerWhitelist) {
-  GURL url("http://test.example.com");
-
-  g_browser_process->local_state()->SetString(prefs::kAuthServerWhitelist,
-                                              "xxx");
-  RunOnIOThreadBlocking(
-      base::Bind(&CheckCanUseDefaultCredentials,
-                 base::Unretained(g_browser_process->io_thread()), false, url));
-
-  g_browser_process->local_state()->SetString(prefs::kAuthServerWhitelist, "*");
-  RunOnIOThreadBlocking(
-      base::Bind(&CheckCanUseDefaultCredentials,
-                 base::Unretained(g_browser_process->io_thread()), true, url));
-}
-
-IN_PROC_BROWSER_TEST_F(IOThreadBrowserTest, UpdateDelegateWhitelist) {
-  GURL url("http://test.example.com");
-
-  g_browser_process->local_state()->SetString(
-      prefs::kAuthNegotiateDelegateWhitelist, "");
-  RunOnIOThreadBlocking(
-      base::Bind(&CheckCanDelegate,
-                 base::Unretained(g_browser_process->io_thread()), false, url));
-
-  g_browser_process->local_state()->SetString(
-      prefs::kAuthNegotiateDelegateWhitelist, "*");
-  RunOnIOThreadBlocking(
-      base::Bind(&CheckCanDelegate,
-                 base::Unretained(g_browser_process->io_thread()), true, url));
-}
-
-IN_PROC_BROWSER_TEST_F(IOThreadBrowserTest, SCTsAreSentToTreeTracker) {
-  RunOnIOThreadBlocking(
-      base::BindOnce(&CheckSCTsAreSentToTreeTracker,
-                     base::Unretained(g_browser_process->io_thread())));
-}
-
 class IOThreadEctCommandLineBrowserTest : public IOThreadBrowserTest {
  public:
   IOThreadEctCommandLineBrowserTest() {}
@@ -222,10 +136,7 @@ class IOThreadEctCommandLineBrowserTest : public IOThreadBrowserTest {
 
 IN_PROC_BROWSER_TEST_F(IOThreadEctCommandLineBrowserTest,
                        ForceECTFromCommandLine) {
-  RunOnIOThreadBlocking(
-      base::Bind(&CheckEffectiveConnectionType,
-                 base::Unretained(g_browser_process->io_thread()),
-                 net::EFFECTIVE_CONNECTION_TYPE_SLOW_2G));
+  CheckEffectiveConnectionType(net::EFFECTIVE_CONNECTION_TYPE_SLOW_2G);
 }
 
 class IOThreadEctFieldTrialBrowserTest : public IOThreadBrowserTest {
@@ -246,10 +157,7 @@ class IOThreadEctFieldTrialBrowserTest : public IOThreadBrowserTest {
 
 IN_PROC_BROWSER_TEST_F(IOThreadEctFieldTrialBrowserTest,
                        ForceECTUsingFieldTrial) {
-  RunOnIOThreadBlocking(
-      base::Bind(&CheckEffectiveConnectionType,
-                 base::Unretained(g_browser_process->io_thread()),
-                 net::EFFECTIVE_CONNECTION_TYPE_2G));
+  CheckEffectiveConnectionType(net::EFFECTIVE_CONNECTION_TYPE_2G);
 }
 
 class IOThreadEctFieldTrialAndCommandLineBrowserTest
@@ -267,10 +175,7 @@ class IOThreadEctFieldTrialAndCommandLineBrowserTest
 
 IN_PROC_BROWSER_TEST_F(IOThreadEctFieldTrialAndCommandLineBrowserTest,
                        ECTFromCommandLineOverridesFieldTrial) {
-  RunOnIOThreadBlocking(
-      base::Bind(&CheckEffectiveConnectionType,
-                 base::Unretained(g_browser_process->io_thread()),
-                 net::EFFECTIVE_CONNECTION_TYPE_SLOW_2G));
+  CheckEffectiveConnectionType(net::EFFECTIVE_CONNECTION_TYPE_SLOW_2G);
 }
 
 class IOThreadBrowserTestWithHangingPacRequest : public IOThreadBrowserTest {
@@ -307,12 +212,17 @@ IN_PROC_BROWSER_TEST_F(IOThreadBrowserTestWithHangingPacRequest, Shutdown) {
   // Request that should hang while trying to request the PAC script.
   // Enough requests are created on startup that this probably isn't needed, but
   // best to be safe.
-  HangingURLFetcherDelegate hanging_fetcher_delegate;
-  std::unique_ptr<net::URLFetcher> hanging_fetcher = net::URLFetcher::Create(
-      GURL("http://blah/"), net::URLFetcher::GET, &hanging_fetcher_delegate);
-  hanging_fetcher->SetRequestContext(
-      g_browser_process->io_thread()->system_url_request_context_getter());
-  hanging_fetcher->Start();
+  auto resource_request = std::make_unique<network::ResourceRequest>();
+  resource_request->url = GURL("http://blah/");
+  auto simple_loader = network::SimpleURLLoader::Create(
+      std::move(resource_request), TRAFFIC_ANNOTATION_FOR_TESTS);
+
+  auto* context_manager = g_browser_process->system_network_context_manager();
+  simple_loader->DownloadToStringOfUnboundedSizeUntilCrashAndDie(
+      context_manager->GetURLLoaderFactory(),
+      base::BindOnce([](std::unique_ptr<std::string> body) {
+        ADD_FAILURE() << "This request should never complete.";
+      }));
 
   connection_listener_->WaitForConnections();
 }

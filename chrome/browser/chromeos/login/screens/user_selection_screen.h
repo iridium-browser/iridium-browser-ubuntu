@@ -18,7 +18,7 @@
 #include "chrome/browser/chromeos/login/signin/token_handle_util.h"
 #include "chrome/browser/chromeos/login/ui/login_display.h"
 #include "chromeos/components/proximity_auth/screenlock_bridge.h"
-#include "components/signin/core/account_id/account_id.h"
+#include "components/account_id/account_id.h"
 #include "components/user_manager/user.h"
 #include "ui/base/user_activity/user_activity_observer.h"
 
@@ -39,7 +39,6 @@ class UserSelectionScreen
   explicit UserSelectionScreen(const std::string& display_type);
   ~UserSelectionScreen() override;
 
-  void SetLoginDisplayDelegate(LoginDisplay::Delegate* login_display_delegate);
   void SetHandler(LoginDisplayWebUIHandler* handler);
   void SetView(UserBoardView* view);
 
@@ -99,7 +98,7 @@ class UserSelectionScreen
 
   // Fills |user_dict| with information about |user|.
   static void FillUserDictionary(
-      user_manager::User* user,
+      const user_manager::User* user,
       bool is_owner,
       bool is_signin_to_add,
       proximity_auth::mojom::AuthType auth_type,
@@ -107,24 +106,17 @@ class UserSelectionScreen
       base::DictionaryValue* user_dict);
 
   // Fills |user_dict| with |user| multi-profile related preferences.
-  static void FillMultiProfileUserPrefs(user_manager::User* user,
+  static void FillMultiProfileUserPrefs(const user_manager::User* user,
                                         base::DictionaryValue* user_dict,
                                         bool is_signin_to_add);
 
   // Determines if user auth status requires online sign in.
   static bool ShouldForceOnlineSignIn(const user_manager::User* user);
 
-  // Fills |user_info| with information about |user|.
-  // TODO: Public sesssions exist in login screen, but not lock screen.
-  // We will need public session locales in the future when we change login
-  // screen to view-based as well. See crbug.com/732452.
-  static void FillUserMojoStruct(
-      const user_manager::User* user,
-      bool is_owner,
-      bool is_signin_to_add,
-      proximity_auth::mojom::AuthType auth_type,
-      const std::vector<std::string>* public_session_recommended_locales,
-      ash::mojom::LoginUserInfo* user_info);
+  // Builds a |UserAvatarPtr| instance which contains the current image for
+  // |user|.
+  static ash::mojom::UserAvatarPtr BuildMojoUserAvatarForUser(
+      const user_manager::User* user);
 
   std::unique_ptr<base::ListValue> UpdateAndReturnUserListForWebUI();
   std::vector<ash::mojom::LoginUserInfoPtr> UpdateAndReturnUserListForMojo();
@@ -150,7 +142,6 @@ class UserSelectionScreen
                            TokenHandleUtil::TokenHandleStatus status);
 
   LoginDisplayWebUIHandler* handler_ = nullptr;
-  LoginDisplay::Delegate* login_display_delegate_ = nullptr;
 
   // Purpose of the screen (see constants in OobeUI).
   const std::string display_type_;
@@ -158,7 +149,7 @@ class UserSelectionScreen
   // Set of Users that are visible.
   user_manager::UserList users_;
 
-  // Map of accounnt ids to their current authentication type. If a user is not
+  // Map of account ids to their current authentication type. If a user is not
   // contained in the map, it is using the default authentication type.
   std::map<AccountId, proximity_auth::mojom::AuthType> user_auth_type_map_;
 

@@ -20,19 +20,18 @@
 #include "chrome/browser/media_galleries/media_galleries_preferences.h"
 #include "chrome/browser/media_galleries/media_galleries_preferences_factory.h"
 #include "chrome/browser/media_galleries/media_galleries_test_util.h"
+#include "chrome/common/apps/platform_apps/media_galleries_permission.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/storage_monitor/test_storage_monitor.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/extension.h"
-#include "extensions/common/permissions/media_galleries_permission.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/login/users/scoped_test_user_manager.h"
-#include "chrome/browser/chromeos/settings/cros_settings.h"
-#include "chrome/browser/chromeos/settings/device_settings_service.h"
+#include "chrome/browser/chromeos/settings/scoped_cros_settings_test_helper.h"
 #endif
 
 namespace component_updater {
@@ -88,7 +87,7 @@ class GalleryWatchManagerTest : public GalleryWatchManagerObserver,
 
     std::vector<std::string> read_permissions;
     read_permissions.push_back(
-        extensions::MediaGalleriesPermission::kReadPermission);
+        chrome_apps::MediaGalleriesPermission::kReadPermission);
     extension_ = AddMediaGalleriesApp("read", read_permissions, profile_.get());
 
     manager_.reset(new GalleryWatchManager);
@@ -202,8 +201,7 @@ class GalleryWatchManagerTest : public GalleryWatchManagerObserver,
   EnsureMediaDirectoriesExists mock_gallery_locations_;
 
 #if defined(OS_CHROMEOS)
-  chromeos::ScopedTestDeviceSettingsService test_device_settings_service_;
-  chromeos::ScopedTestCrosSettings test_cros_settings_;
+  chromeos::ScopedCrosSettingsTestHelper cros_settings_test_helper_;
   std::unique_ptr<chromeos::ScopedTestUserManager> test_user_manager_;
 #endif
 

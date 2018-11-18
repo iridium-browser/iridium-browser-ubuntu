@@ -10,37 +10,25 @@
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/paint/paint_event.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/timer.h"
 #include "third_party/blink/renderer/platform/wtf/time.h"
 
 namespace blink {
 
 class Document;
+class LayoutObjectCounter;
 class PaintTiming;
 
 // FirstMeaningfulPaintDetector observes layout operations during page load
-// until network stable (2 seconds of no network activity), and computes the
+// until network stable (0.5 seconds of no network activity), and computes the
 // layout-based First Meaningful Paint.
 // See https://goo.gl/vpaxv6 and http://goo.gl/TEiMi4 for more details.
 class CORE_EXPORT FirstMeaningfulPaintDetector
     : public GarbageCollectedFinalized<FirstMeaningfulPaintDetector> {
 
  public:
-  // Used by FrameView to keep track of the number of layout objects created
-  // in the frame.
-  class LayoutObjectCounter {
-   public:
-    void Reset() { count_ = 0; }
-    void Increment() { count_++; }
-    unsigned Count() const { return count_; }
-
-   private:
-    unsigned count_ = 0;
-  };
-
   static FirstMeaningfulPaintDetector& From(Document&);
 
-  FirstMeaningfulPaintDetector(PaintTiming*, Document&);
+  explicit FirstMeaningfulPaintDetector(PaintTiming*);
   virtual ~FirstMeaningfulPaintDetector() = default;
 
   void MarkNextPaintAsMeaningfulIfNeeded(const LayoutObjectCounter&,
@@ -49,9 +37,12 @@ class CORE_EXPORT FirstMeaningfulPaintDetector
                                          int visible_height);
   void NotifyInputEvent();
   void NotifyPaint();
-  void CheckNetworkStable();
-  void ReportSwapTime(PaintEvent, WebLayerTreeView::SwapResult, double);
+  void ReportSwapTime(PaintEvent,
+                      WebLayerTreeView::SwapResult,
+                      base::TimeTicks);
   void NotifyFirstContentfulPaint(TimeTicks swap_stamp);
+  void OnNetwork0Quiet();
+  void OnNetwork2Quiet();
 
   void Trace(blink::Visitor*);
 
@@ -66,16 +57,8 @@ class CORE_EXPORT FirstMeaningfulPaintDetector
     kDeferFirstContentfulPaintNotSet
   };
 
-  // The page is n-quiet if there are no more than n active network requests for
-  // this duration of time.
-  static constexpr double kNetwork2QuietWindowSeconds = 0.5;
-  static constexpr double kNetwork0QuietWindowSeconds = 0.5;
-
   Document* GetDocument();
   int ActiveConnections();
-  void SetNetworkQuietTimers(int active_connections);
-  void Network0QuietTimerFired(TimerBase*);
-  void Network2QuietTimerFired(TimerBase*);
   void ReportHistograms();
   void RegisterNotifySwapTime(PaintEvent);
   void SetFirstMeaningfulPaint(TimeTicks stamp, TimeTicks swap_stamp);
@@ -98,8 +81,6 @@ class CORE_EXPORT FirstMeaningfulPaintDetector
   TimeTicks first_meaningful_paint2_quiet_;
   unsigned outstanding_swap_promise_count_ = 0;
   DeferFirstMeaningfulPaint defer_first_meaningful_paint_ = kDoNotDefer;
-  TaskRunnerTimer<FirstMeaningfulPaintDetector> network0_quiet_timer_;
-  TaskRunnerTimer<FirstMeaningfulPaintDetector> network2_quiet_timer_;
   DISALLOW_COPY_AND_ASSIGN(FirstMeaningfulPaintDetector);
 };
 

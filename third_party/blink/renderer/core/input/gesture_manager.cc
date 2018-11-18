@@ -10,6 +10,7 @@
 #include "third_party/blink/renderer/core/dom/user_gesture_indicator.h"
 #include "third_party/blink/renderer/core/editing/selection_controller.h"
 #include "third_party/blink/renderer/core/events/gesture_event.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
@@ -19,6 +20,8 @@
 #include "third_party/blink/renderer/core/input/input_device_capabilities.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/page/page.h"
+#include "third_party/blink/renderer/core/paint/paint_layer_scrollable_area.h"
+#include "third_party/blink/renderer/core/scroll/scroll_animator_base.h"
 
 #if BUILDFLAG(ENABLE_UNHANDLED_TAP)
 #include "services/service_manager/public/cpp/interface_provider.h"
@@ -49,7 +52,6 @@ GestureManager::GestureManager(LocalFrame& frame,
 void GestureManager::Clear() {
   suppress_mouse_events_from_gestures_ = false;
   long_tap_should_invoke_context_menu_ = false;
-  last_show_press_timestamp_.reset();
 }
 
 void GestureManager::Trace(blink::Visitor* visitor) {
@@ -102,7 +104,7 @@ WebInputEventResult GestureManager::HandleGestureEventInFrame(
         event_target->GetDocument().domWindow(), gesture_event);
     if (gesture_dom_event) {
       DispatchEventResult gesture_dom_event_result =
-          event_target->DispatchEvent(gesture_dom_event);
+          event_target->DispatchEvent(*gesture_dom_event);
       if (gesture_dom_event_result != DispatchEventResult::kNotCanceled) {
         DCHECK(gesture_dom_event_result !=
                DispatchEventResult::kCanceledByEventHandler);
@@ -125,9 +127,6 @@ WebInputEventResult GestureManager::HandleGestureEventInFrame(
       return HandleGestureLongTap(targeted_event);
     case WebInputEvent::kGestureTwoFingerTap:
       return HandleGestureTwoFingerTap(targeted_event);
-    case WebInputEvent::kGesturePinchBegin:
-    case WebInputEvent::kGesturePinchEnd:
-    case WebInputEvent::kGesturePinchUpdate:
     case WebInputEvent::kGestureTapCancel:
     case WebInputEvent::kGestureTapUnconfirmed:
       break;
@@ -157,10 +156,12 @@ WebInputEventResult GestureManager::HandleGestureTap(
   uint64_t pre_dispatch_style_version = frame_->GetDocument()->StyleVersion();
 
   HitTestResult current_hit_test = targeted_event.GetHitTestResult();
+  const HitTestLocation& current_hit_test_location =
+      targeted_event.GetHitTestLocation();
 
   // We use the adjusted position so the application isn't surprised to see a
   // event with co-ordinates outside the target's bounds.
-  IntPoint adjusted_point = frame_view->RootFrameToContents(
+  IntPoint adjusted_point = frame_view->ConvertFromRootFrame(
       FlooredIntPoint(gesture_event.PositionInRootFrame()));
 
   const unsigned modifiers = gesture_event.GetModifiers();
@@ -173,7 +174,7 @@ WebInputEventResult GestureManager::HandleGestureTap(
         static_cast<WebInputEvent::Modifiers>(
             modifiers |
             WebInputEvent::Modifiers::kIsCompatibilityEventForTouch),
-        gesture_event.TimeStampSeconds());
+        gesture_event.TimeStamp());
     mouse_event_manager_->SetMousePositionAndDispatchMouseEvent(
         current_hit_test.InnerNode(), current_hit_test.CanvasRegionId(),
         EventTypeNames::mousemove, fake_mouse_move);
@@ -191,12 +192,12 @@ WebInputEventResult GestureManager::HandleGestureTap(
   if (current_hit_test.InnerNode()) {
     LocalFrame& main_frame = frame_->LocalFrameRoot();
     if (!main_frame.View() ||
-        !main_frame.View()->UpdateLifecycleToPrePaintClean())
+        !main_frame.View()->UpdateAllLifecyclePhasesExceptPaint())
       return WebInputEventResult::kNotHandled;
-    adjusted_point = frame_view->RootFrameToContents(
+    adjusted_point = frame_view->ConvertFromRootFrame(
         FlooredIntPoint(gesture_event.PositionInRootFrame()));
     current_hit_test = EventHandlingUtil::HitTestResultInFrame(
-        frame_, adjusted_point, hit_type);
+        frame_, HitTestLocation(adjusted_point), hit_type);
   }
 
   // Capture data for showUnhandledTapUIIfNeeded.
@@ -205,7 +206,7 @@ WebInputEventResult GestureManager::HandleGestureTap(
   Node* tapped_node = current_hit_test.InnerNode();
   Element* tapped_element = current_hit_test.InnerElement();
   std::unique_ptr<UserGestureIndicator> gesture_indicator =
-      Frame::NotifyUserActivation(
+      LocalFrame::NotifyUserActivation(
           tapped_node ? tapped_node->GetDocument().GetFrame() : nullptr);
 
   mouse_event_manager_->SetClickElement(tapped_element);
@@ -216,7 +217,7 @@ WebInputEventResult GestureManager::HandleGestureTap(
       static_cast<WebInputEvent::Modifiers>(
           modifiers | WebInputEvent::Modifiers::kLeftButtonDown |
           WebInputEvent::Modifiers::kIsCompatibilityEventForTouch),
-      gesture_event.TimeStampSeconds());
+      gesture_event.TimeStamp());
 
   // TODO(mustaq): We suppress MEs plus all it's side effects. What would that
   // mean for for TEs?  What's the right balance here? crbug.com/617255
@@ -239,7 +240,8 @@ WebInputEventResult GestureManager::HandleGestureTap(
     }
     if (mouse_down_event_result == WebInputEventResult::kNotHandled) {
       mouse_down_event_result = mouse_event_manager_->HandleMousePressEvent(
-          MouseEventWithHitTestResults(fake_mouse_down, current_hit_test));
+          MouseEventWithHitTestResults(
+              fake_mouse_down, current_hit_test_location, current_hit_test));
     }
   }
 
@@ -256,9 +258,9 @@ WebInputEventResult GestureManager::HandleGestureTap(
     LocalFrame& main_frame = frame_->LocalFrameRoot();
     if (main_frame.View())
       main_frame.View()->UpdateAllLifecyclePhases();
-    adjusted_point = frame_view->RootFrameToContents(tapped_position);
+    adjusted_point = frame_view->ConvertFromRootFrame(tapped_position);
     current_hit_test = EventHandlingUtil::HitTestResultInFrame(
-        frame_, adjusted_point, hit_type);
+        frame_, HitTestLocation(adjusted_point), hit_type);
   }
 
   WebMouseEvent fake_mouse_up(
@@ -266,7 +268,7 @@ WebInputEventResult GestureManager::HandleGestureTap(
       WebPointerProperties::Button::kLeft, gesture_event.TapCount(),
       static_cast<WebInputEvent::Modifiers>(
           modifiers | WebInputEvent::Modifiers::kIsCompatibilityEventForTouch),
-      gesture_event.TimeStampSeconds());
+      gesture_event.TimeStamp());
   WebInputEventResult mouse_up_event_result =
       suppress_mouse_events_from_gestures_
           ? WebInputEventResult::kHandledSuppressed
@@ -283,7 +285,7 @@ WebInputEventResult GestureManager::HandleGestureTap(
       // tappedNonTextNode and currentHitTest.innerNode()) don't need to be
       // updated because commonAncestor() will exit early if their documents are
       // different.
-      tapped_element->UpdateDistribution();
+      tapped_element->UpdateDistributionForFlatTreeTraversal();
       Node* click_target_node = current_hit_test.InnerNode()->CommonAncestor(
           *tapped_element, EventHandlingUtil::ParentForClickEvent);
       click_event_result =
@@ -294,9 +296,11 @@ WebInputEventResult GestureManager::HandleGestureTap(
     mouse_event_manager_->SetClickElement(nullptr);
   }
 
-  if (mouse_up_event_result == WebInputEventResult::kNotHandled)
+  if (mouse_up_event_result == WebInputEventResult::kNotHandled) {
     mouse_up_event_result = mouse_event_manager_->HandleMouseReleaseEvent(
-        MouseEventWithHitTestResults(fake_mouse_up, current_hit_test));
+        MouseEventWithHitTestResults(fake_mouse_up, current_hit_test_location,
+                                     current_hit_test));
+  }
   mouse_event_manager_->ClearDragHeuristicState();
 
   WebInputEventResult event_result = EventHandlingUtil::MergeEventResult(
@@ -328,10 +332,10 @@ WebInputEventResult GestureManager::HandleGestureLongPress(
   // overhaul of the touch drag-and-drop code and LongPress is such a special
   // scenario that it's unlikely to matter much in practice.
 
-  IntPoint hit_test_point = frame_->View()->RootFrameToContents(
-      FlooredIntPoint(gesture_event.PositionInRootFrame()));
+  HitTestLocation location(frame_->View()->ConvertFromRootFrame(
+      FlooredIntPoint(gesture_event.PositionInRootFrame())));
   HitTestResult hit_test_result =
-      frame_->GetEventHandler().HitTestResultAtPoint(hit_test_point);
+      frame_->GetEventHandler().HitTestResultAtLocation(location);
 
   long_tap_should_invoke_context_menu_ = false;
   bool hit_test_contains_links = hit_test_result.URLElement() ||
@@ -356,6 +360,9 @@ WebInputEventResult GestureManager::HandleGestureLongPress(
     return WebInputEventResult::kNotHandled;
   }
 
+  std::unique_ptr<UserGestureIndicator> gesture_indicator =
+      LocalFrame::NotifyUserActivation(
+          inner_node ? inner_node->GetDocument().GetFrame() : nullptr);
   return SendContextMenuEventForGesture(targeted_event);
 }
 
@@ -391,7 +398,7 @@ WebInputEventResult GestureManager::SendContextMenuEventForGesture(
         /* clickCount */ 0,
         static_cast<WebInputEvent::Modifiers>(
             modifiers | WebInputEvent::kIsCompatibilityEventForTouch),
-        gesture_event.TimeStampSeconds());
+        gesture_event.TimeStamp());
     mouse_event_manager_->SetMousePositionAndDispatchMouseEvent(
         targeted_event.GetHitTestResult().InnerNode(),
         targeted_event.CanvasRegionId(), EventTypeNames::mousemove,
@@ -408,11 +415,11 @@ WebInputEventResult GestureManager::SendContextMenuEventForGesture(
       /* clickCount */ 0,
       static_cast<WebInputEvent::Modifiers>(
           modifiers | WebInputEvent::kIsCompatibilityEventForTouch),
-      gesture_event.TimeStampSeconds());
+      gesture_event.TimeStamp());
 
   if (!suppress_mouse_events_from_gestures_ && frame_->View()) {
     HitTestRequest request(HitTestRequest::kActive);
-    LayoutPoint document_point = frame_->View()->RootFrameToContents(
+    LayoutPoint document_point = frame_->View()->ConvertFromRootFrame(
         FlooredIntPoint(targeted_event.Event().PositionInRootFrame()));
     MouseEventWithHitTestResults mev =
         frame_->GetDocument()->PerformMouseEventHitTest(request, document_point,
@@ -427,27 +434,18 @@ WebInputEventResult GestureManager::SendContextMenuEventForGesture(
 }
 
 WebInputEventResult GestureManager::HandleGestureShowPress() {
-  last_show_press_timestamp_ = CurrentTimeTicks();
-
   LocalFrameView* view = frame_->View();
   if (!view)
     return WebInputEventResult::kNotHandled;
-  if (ScrollAnimatorBase* scroll_animator = view->ExistingScrollAnimator())
-    scroll_animator->CancelAnimation();
   const LocalFrameView::ScrollableAreaSet* areas = view->ScrollableAreas();
   if (!areas)
     return WebInputEventResult::kNotHandled;
-  for (const ScrollableArea* scrollable_area : *areas) {
+  for (const PaintLayerScrollableArea* scrollable_area : *areas) {
     ScrollAnimatorBase* animator = scrollable_area->ExistingScrollAnimator();
     if (animator)
       animator->CancelAnimation();
   }
   return WebInputEventResult::kNotHandled;
-}
-
-WTF::Optional<WTF::TimeTicks> GestureManager::GetLastShowPressTimestamp()
-    const {
-  return last_show_press_timestamp_;
 }
 
 void GestureManager::ShowUnhandledTapUIIfNeeded(

@@ -38,7 +38,6 @@ namespace gpu {
 
 class DecoderClient;
 struct Mailbox;
-class ServiceTransferCache;
 
 namespace gles2 {
 
@@ -65,7 +64,6 @@ struct DisallowedFeatures {
     oes_texture_half_float_linear = false;
   }
 
-  bool gpu_memory_manager = false;
   bool npot_support = false;
   bool chromium_color_buffer_float_rgba = false;
   bool chromium_color_buffer_float_rgb = false;
@@ -129,11 +127,9 @@ class GPU_GLES2_EXPORT GLES2Decoder : public CommonDecoder,
   }
 
   // Set to true to LOG every command.
-  void set_log_commands(bool log_commands) {
-    log_commands_ = log_commands;
-  }
+  void SetLogCommands(bool log_commands) override;
 
-  Outputter* outputter() const { return outputter_; }
+  Outputter* outputter() const override;
 
   // Set the surface associated with the default FBO.
   virtual void SetSurface(const scoped_refptr<gl::GLSurface>& surface) = 0;
@@ -170,9 +166,6 @@ class GPU_GLES2_EXPORT GLES2Decoder : public CommonDecoder,
 
   // Gets the ImageManager for this context.
   virtual ImageManager* GetImageManagerForTest() = 0;
-
-  // Gets the ServiceTransferCache for this context.
-  virtual ServiceTransferCache* GetTransferCacheForTest() = 0;
 
   // Get the service texture ID corresponding to a client texture ID.
   // If no such record is found then return false.

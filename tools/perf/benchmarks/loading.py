@@ -18,13 +18,19 @@ class _LoadingBase(perf_benchmark.PerfBenchmark):
 
   options = {'pageset_repeat': 2}
 
+  def SetExtraBrowserOptions(self, options):
+    options.AppendExtraBrowserArgs([
+        '--enable-features=TracingPerfettoBackend',
+    ])
+
   def CreateCoreTimelineBasedMeasurementOptions(self):
     tbm_options = timeline_based_measurement.Options()
     loading_metrics_category.AugmentOptionsForLoadingMetrics(tbm_options)
     return tbm_options
 
 
-@benchmark.Owner(emails=['kouhei@chromium.org', 'ksakamoto@chromium.org'])
+@benchmark.Info(emails=['kouhei@chromium.org', 'ksakamoto@chromium.org'],
+                documentation_url='https://bit.ly/loading-benchmarks')
 class LoadingDesktop(_LoadingBase):
   """ A benchmark measuring loading performance of desktop sites. """
   SUPPORTED_PLATFORMS = [story.expectations.ALL_DESKTOP]
@@ -38,7 +44,8 @@ class LoadingDesktop(_LoadingBase):
     return 'loading.desktop'
 
 
-@benchmark.Owner(emails=['kouhei@chromium.org', 'ksakamoto@chromium.org'])
+@benchmark.Info(emails=['kouhei@chromium.org', 'ksakamoto@chromium.org'],
+                documentation_url='https://bit.ly/loading-benchmarks')
 class LoadingMobile(_LoadingBase):
   """ A benchmark measuring loading performance of mobile sites. """
   SUPPORTED_PLATFORMS = [story.expectations.ALL_MOBILE]

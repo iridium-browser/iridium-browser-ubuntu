@@ -4,8 +4,16 @@
 
 import("//build/config/linux/pkg_config.gni")
 import("//ui/ozone/ozone.gni")
+import("//gpu/vulkan/features.gni")
 
 visibility = [ "//ui/ozone/*" ]
+
+declare_args() {
+  # Enables commiting of CRTC properties on page flip events.
+  # This is not enabled by default because of a bug on Intel:
+  # https://crbug.com/854753
+  drm_commit_properties_on_page_flip = false
+}
 
 source_set("gbm") {
   sources = [
@@ -18,10 +26,6 @@ source_set("gbm") {
     "common/scoped_drm_types.h",
     "gpu/crtc_controller.cc",
     "gpu/crtc_controller.h",
-    "gpu/drm_buffer.cc",
-    "gpu/drm_buffer.h",
-    "gpu/drm_console_buffer.cc",
-    "gpu/drm_console_buffer.h",
     "gpu/drm_device.cc",
     "gpu/drm_device.h",
     "gpu/drm_device_generator.cc",
@@ -30,8 +34,16 @@ source_set("gbm") {
     "gpu/drm_device_manager.h",
     "gpu/drm_display.cc",
     "gpu/drm_display.h",
+    "gpu/drm_dumb_buffer.cc",
+    "gpu/drm_dumb_buffer.h",
+    "gpu/drm_framebuffer.cc",
+    "gpu/drm_framebuffer.h",
     "gpu/drm_gpu_display_manager.cc",
     "gpu/drm_gpu_display_manager.h",
+    "gpu/drm_gpu_util.cc",
+    "gpu/drm_gpu_util.h",
+    "gpu/drm_overlay_plane.cc",
+    "gpu/drm_overlay_plane.h",
     "gpu/drm_overlay_validator.cc",
     "gpu/drm_overlay_validator.h",
     "gpu/drm_thread.cc",
@@ -40,18 +52,14 @@ source_set("gbm") {
     "gpu/drm_thread_message_proxy.h",
     "gpu/drm_thread_proxy.cc",
     "gpu/drm_thread_proxy.h",
-    "gpu/drm_vsync_provider.cc",
-    "gpu/drm_vsync_provider.h",
     "gpu/drm_window.cc",
     "gpu/drm_window.h",
     "gpu/drm_window_proxy.cc",
     "gpu/drm_window_proxy.h",
-    "gpu/gbm_buffer.cc",
-    "gpu/gbm_buffer.h",
-    "gpu/gbm_device.cc",
-    "gpu/gbm_device.h",
-    "gpu/gbm_surface.cc",
-    "gpu/gbm_surface.h",
+    "gpu/gbm_overlay_surface.cc",
+    "gpu/gbm_overlay_surface.h",
+    "gpu/gbm_pixmap.cc",
+    "gpu/gbm_pixmap.h",
     "gpu/gbm_surface_factory.cc",
     "gpu/gbm_surface_factory.h",
     "gpu/gbm_surfaceless.cc",
@@ -62,6 +70,8 @@ source_set("gbm") {
     "gpu/hardware_display_plane.h",
     "gpu/hardware_display_plane_atomic.cc",
     "gpu/hardware_display_plane_atomic.h",
+    "gpu/hardware_display_plane_dummy.cc",
+    "gpu/hardware_display_plane_dummy.h",
     "gpu/hardware_display_plane_manager.cc",
     "gpu/hardware_display_plane_manager.h",
     "gpu/hardware_display_plane_manager_atomic.cc",
@@ -70,13 +80,10 @@ source_set("gbm") {
     "gpu/hardware_display_plane_manager_legacy.h",
     "gpu/inter_thread_messaging_proxy.cc",
     "gpu/inter_thread_messaging_proxy.h",
-    "gpu/overlay_plane.cc",
-    "gpu/overlay_plane.h",
     "gpu/page_flip_request.cc",
     "gpu/page_flip_request.h",
     "gpu/proxy_helpers.cc",
     "gpu/proxy_helpers.h",
-    "gpu/scanout_buffer.h",
     "gpu/screen_manager.cc",
     "gpu/screen_manager.h",
     "host/drm_cursor.cc",
@@ -113,10 +120,11 @@ source_set("gbm") {
 
   deps = [
     "//base",
+    "//gpu/vulkan:buildflags",
     "//ipc",
     "//mojo/public/cpp/system",
     "//services/service_manager/public/cpp",
-    "//services/ui/public/interfaces:constants",
+    "//services/ws/public/mojom:constants",
     "//skia",
     "//third_party/libdrm",
     "//third_party/libsync",
@@ -136,13 +144,26 @@ source_set("gbm") {
     "//ui/gl",
     "//ui/ozone:ozone_base",
     "//ui/ozone/common",
+    "//ui/ozone/common/linux",
     "//ui/ozone/public/interfaces",
     "//ui/platform_window",
   ]
 
+  if (enable_vulkan) {
+    sources += [
+      "gpu/vulkan_implementation_gbm.cc",
+      "gpu/vulkan_implementation_gbm.h",
+    ]
+    deps += [ "//gpu/vulkan" ]
+  }
+
   public_configs = [ "//third_party/khronos:khronos_headers" ]
 
   defines = [ "OZONE_IMPLEMENTATION" ]
+
+  if (drm_commit_properties_on_page_flip) {
+    defines += [ "COMMIT_PROPERTIES_ON_PAGE_FLIP" ]
+  }
 }
 
 source_set("gbm_unittests") {
@@ -151,20 +172,12 @@ source_set("gbm_unittests") {
     "common/drm_util_unittest.cc",
     "gpu/drm_overlay_validator_unittest.cc",
     "gpu/drm_window_unittest.cc",
-    "gpu/fake_plane_info.cc",
-    "gpu/fake_plane_info.h",
     "gpu/hardware_display_controller_unittest.cc",
     "gpu/hardware_display_plane_manager_unittest.cc",
     "gpu/mock_drm_device.cc",
     "gpu/mock_drm_device.h",
-    "gpu/mock_dumb_buffer_generator.cc",
-    "gpu/mock_dumb_buffer_generator.h",
-    "gpu/mock_hardware_display_plane_manager.cc",
-    "gpu/mock_hardware_display_plane_manager.h",
-    "gpu/mock_scanout_buffer.cc",
-    "gpu/mock_scanout_buffer.h",
-    "gpu/mock_scanout_buffer_generator.cc",
-    "gpu/mock_scanout_buffer_generator.h",
+    "gpu/mock_gbm_device.cc",
+    "gpu/mock_gbm_device.h",
     "gpu/proxy_helpers_unittest.cc",
     "gpu/screen_manager_unittest.cc",
   ]
@@ -178,5 +191,10 @@ source_set("gbm_unittests") {
     "//ui/gfx",
     "//ui/ozone:platform",
     "//ui/ozone/common",
+    "//ui/ozone/common/linux",
   ]
+
+  if (drm_commit_properties_on_page_flip) {
+    defines = [ "COMMIT_PROPERTIES_ON_PAGE_FLIP" ]
+  }
 }

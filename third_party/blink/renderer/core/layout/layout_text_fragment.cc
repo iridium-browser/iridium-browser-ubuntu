@@ -70,7 +70,7 @@ LayoutTextFragment* LayoutTextFragment::CreateAnonymous(PseudoElement& pseudo,
 
 void LayoutTextFragment::WillBeDestroyed() {
   if (is_remaining_text_layout_object_ && first_letter_pseudo_element_)
-    first_letter_pseudo_element_->SetRemainingTextLayoutObject(nullptr);
+    first_letter_pseudo_element_->ClearRemainingTextLayoutObject();
   first_letter_pseudo_element_ = nullptr;
   LayoutText::WillBeDestroyed();
 }
@@ -92,8 +92,10 @@ scoped_refptr<StringImpl> LayoutTextFragment::OriginalText() const {
   return result->Substring(Start(), FragmentLength());
 }
 
-void LayoutTextFragment::SetText(scoped_refptr<StringImpl> text, bool force) {
-  LayoutText::SetText(std::move(text), force);
+void LayoutTextFragment::SetText(scoped_refptr<StringImpl> text,
+                                 bool force,
+                                 bool avoid_layout_and_only_paint) {
+  LayoutText::SetText(std::move(text), force, avoid_layout_and_only_paint);
 
   start_ = 0;
   fragment_length_ = TextLength();
@@ -160,8 +162,21 @@ Text* LayoutTextFragment::AssociatedTextNode() const {
   return (node && node->IsTextNode()) ? ToText(node) : nullptr;
 }
 
+LayoutText* LayoutTextFragment::GetFirstLetterPart() const {
+  if (!is_remaining_text_layout_object_)
+    return nullptr;
+  // Node: We assume first letter pseudo element has only one child and it
+  // is LayoutTextFragment.
+  LayoutObject* const first_letter_container =
+      GetFirstLetterPseudoElement()->GetLayoutObject();
+  LayoutObject* const child = first_letter_container->SlowFirstChild();
+  CHECK(child->IsText());
+  DCHECK_EQ(child, first_letter_container->SlowLastChild());
+  return ToLayoutTextFragment(child);
+}
+
 void LayoutTextFragment::UpdateHitTestResult(HitTestResult& result,
-                                             const LayoutPoint& point) {
+                                             const LayoutPoint& point) const {
   if (result.InnerNode())
     return;
 
@@ -183,10 +198,10 @@ Position LayoutTextFragment::PositionForCaretOffset(unsigned offset) const {
   return Position(node, Start() + offset);
 }
 
-Optional<unsigned> LayoutTextFragment::CaretOffsetForPosition(
+base::Optional<unsigned> LayoutTextFragment::CaretOffsetForPosition(
     const Position& position) const {
   if (position.IsNull() || position.AnchorNode() != AssociatedTextNode())
-    return WTF::nullopt;
+    return base::nullopt;
   unsigned dom_offset;
   if (position.IsBeforeAnchor()) {
     dom_offset = 0;
@@ -199,7 +214,7 @@ Optional<unsigned> LayoutTextFragment::CaretOffsetForPosition(
     dom_offset = position.OffsetInContainerNode();
   }
   if (dom_offset < Start() || dom_offset > Start() + FragmentLength())
-    return WTF::nullopt;
+    return base::nullopt;
   return dom_offset - Start();
 }
 

@@ -18,6 +18,7 @@ struct WhitelistEntry {
   const char* const* arg_name_filter;
 };
 
+const char* const kGPUAllowedArgs[] = {nullptr};
 const char* const kInputLatencyAllowedArgs[] = {"data", nullptr};
 const char* const kMemoryDumpAllowedArgs[] = {"dumps", nullptr};
 
@@ -25,30 +26,40 @@ const WhitelistEntry kEventArgsWhitelist[] = {
     {"__metadata", "thread_name", nullptr},
     {"__metadata", "process_name", nullptr},
     {"__metadata", "process_uptime_seconds", nullptr},
+    {"__metadata", "chrome_library_address", nullptr},
+    {"__metadata", "chrome_library_module", nullptr},
     {"__metadata", "stackFrames", nullptr},
     {"__metadata", "typeNames", nullptr},
+    {"GPU", "*", kGPUAllowedArgs},
+    {"ipc", "GpuChannelHost::Send", nullptr},
     {"ipc", "SyncChannel::Send", nullptr},
-    {"toplevel", "*", nullptr},
     {"latencyInfo", "*", kInputLatencyAllowedArgs},
+    {"shutdown", "*", nullptr},
+    {"task_scheduler", "*", nullptr},
+    {"toplevel", "*", nullptr},
+    {TRACE_DISABLED_BY_DEFAULT("cpu_profiler"), "StackCpuSampling", nullptr},
     // Redefined the string since MemoryDumpManager::kTraceCategory causes
     // static initialization of this struct.
     {TRACE_DISABLED_BY_DEFAULT("memory-infra"), "*", kMemoryDumpAllowedArgs},
+    {TRACE_DISABLED_BY_DEFAULT("system_stats"), "*", nullptr},
     {nullptr, nullptr, nullptr}};
 
-const char* kMetadataWhitelist[] = {
-  "clock-domain",
-  "config",
-  "cpu-*",
-  "field-trials",
-  "gpu-*",
-  "highres-ticks",
-  "network-type",
-  "num-cpus",
-  "os-*",
-  "physical-memory",
-  "product-version",
-  "user-agent"
-};
+const char* kMetadataWhitelist[] = {"chrome-library-name",
+                                    "clock-domain",
+                                    "config",
+                                    "cpu-*",
+                                    "field-trials",
+                                    "gpu-*",
+                                    "highres-ticks",
+                                    "last_triggered_rule",
+                                    "network-type",
+                                    "num-cpus",
+                                    "os-*",
+                                    "physical-memory",
+                                    "product-version",
+                                    "scenario_name",
+                                    "trace-config",
+                                    "user-agent"};
 
 }  // namespace
 

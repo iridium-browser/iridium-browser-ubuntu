@@ -8,27 +8,29 @@
 // DO NOT MODIFY!
 
 // clang-format off
-#include "v8_test_interface_partial.h"
+#include "third_party/blink/renderer/bindings/tests/results/modules/v8_test_interface_partial.h"
 
 #include "base/memory/scoped_refptr.h"
-#include "bindings/core/v8/exception_state.h"
-#include "bindings/core/v8/idl_types.h"
-#include "bindings/core/v8/native_value_traits_impl.h"
-#include "bindings/core/v8/script_promise.h"
-#include "bindings/core/v8/v8_document.h"
-#include "bindings/core/v8/v8_dom_configuration.h"
-#include "bindings/core/v8/v8_node.h"
-#include "bindings/core/v8/v8_test_callback_interface.h"
-#include "bindings/core/v8/v8_test_interface.h"
-#include "bindings/tests/idls/modules/test_interface_partial_3_implementation.h"
-#include "bindings/tests/idls/modules/test_interface_partial_4.h"
-#include "core/execution_context/execution_context.h"
-#include "core/origin_trials/origin_trials.h"
-#include "platform/bindings/runtime_call_stats.h"
-#include "platform/bindings/script_state.h"
-#include "platform/bindings/v8_object_constructor.h"
-#include "platform/runtime_enabled_features.h"
-#include "platform/wtf/get_ptr.h"
+#include "third_party/blink/renderer/bindings/core/v8/idl_types.h"
+#include "third_party/blink/renderer/bindings/core/v8/native_value_traits_impl.h"
+#include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_document.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_dom_configuration.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_node.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_test_callback_interface.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_test_interface.h"
+#include "third_party/blink/renderer/bindings/tests/idls/modules/test_interface_partial_3_implementation.h"
+#include "third_party/blink/renderer/bindings/tests/idls/modules/test_interface_partial_4.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
+#include "third_party/blink/renderer/core/origin_trials/origin_trials.h"
+#include "third_party/blink/renderer/platform/bindings/exception_messages.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
+#include "third_party/blink/renderer/platform/bindings/runtime_call_stats.h"
+#include "third_party/blink/renderer/platform/bindings/script_state.h"
+#include "third_party/blink/renderer/platform/bindings/v8_object_constructor.h"
+#include "third_party/blink/renderer/platform/bindings/v8_per_context_data.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
+#include "third_party/blink/renderer/platform/wtf/get_ptr.h"
 
 namespace blink {
 
@@ -95,6 +97,7 @@ static void voidMethodPartialOverload3Method(const v8::FunctionCallbackInfo<v8::
 
 static void voidMethodPartialOverloadMethod(const v8::FunctionCallbackInfo<v8::Value>& info) {
   bool isArityError = false;
+
   switch (std::min(1, info.Length())) {
     case 0:
       break;
@@ -109,7 +112,6 @@ static void voidMethodPartialOverloadMethod(const v8::FunctionCallbackInfo<v8::V
   }
 
   ExceptionState exceptionState(info.GetIsolate(), ExceptionState::kExecutionContext, "TestInterface", "voidMethodPartialOverload");
-
   if (isArityError) {
   }
   exceptionState.ThrowTypeError("No function was found that matched the signature provided.");
@@ -126,6 +128,7 @@ static void staticVoidMethodPartialOverload2Method(const v8::FunctionCallbackInf
 
 static void staticVoidMethodPartialOverloadMethod(const v8::FunctionCallbackInfo<v8::Value>& info) {
   bool isArityError = false;
+
   switch (std::min(1, info.Length())) {
     case 0:
       break;
@@ -140,7 +143,6 @@ static void staticVoidMethodPartialOverloadMethod(const v8::FunctionCallbackInfo
   }
 
   ExceptionState exceptionState(info.GetIsolate(), ExceptionState::kExecutionContext, "TestInterface", "staticVoidMethodPartialOverload");
-
   if (isArityError) {
   }
   exceptionState.ThrowTypeError("No function was found that matched the signature provided.");
@@ -170,6 +172,7 @@ static void promiseMethodPartialOverload3Method(const v8::FunctionCallbackInfo<v
 
 static void promiseMethodPartialOverloadMethod(const v8::FunctionCallbackInfo<v8::Value>& info) {
   bool isArityError = false;
+
   switch (std::min(1, info.Length())) {
     case 0:
       break;
@@ -185,7 +188,6 @@ static void promiseMethodPartialOverloadMethod(const v8::FunctionCallbackInfo<v8
 
   ExceptionState exceptionState(info.GetIsolate(), ExceptionState::kExecutionContext, "TestInterface", "promiseMethodPartialOverload");
   ExceptionToRejectPromiseScope rejectPromiseScope(info, exceptionState);
-
   if (isArityError) {
   }
   exceptionState.ThrowTypeError("No function was found that matched the signature provided.");
@@ -205,6 +207,7 @@ static void staticPromiseMethodPartialOverload2Method(const v8::FunctionCallback
 
 static void staticPromiseMethodPartialOverloadMethod(const v8::FunctionCallbackInfo<v8::Value>& info) {
   bool isArityError = false;
+
   switch (std::min(1, info.Length())) {
     case 0:
       break;
@@ -220,7 +223,6 @@ static void staticPromiseMethodPartialOverloadMethod(const v8::FunctionCallbackI
 
   ExceptionState exceptionState(info.GetIsolate(), ExceptionState::kExecutionContext, "TestInterface", "staticPromiseMethodPartialOverload");
   ExceptionToRejectPromiseScope rejectPromiseScope(info, exceptionState);
-
   if (isArityError) {
   }
   exceptionState.ThrowTypeError("No function was found that matched the signature provided.");
@@ -252,6 +254,7 @@ static void partial2VoidMethod3Method(const v8::FunctionCallbackInfo<v8::Value>&
 
 static void partial2VoidMethodMethod(const v8::FunctionCallbackInfo<v8::Value>& info) {
   bool isArityError = false;
+
   switch (std::min(1, info.Length())) {
     case 0:
       break;
@@ -270,7 +273,6 @@ static void partial2VoidMethodMethod(const v8::FunctionCallbackInfo<v8::Value>& 
   }
 
   ExceptionState exceptionState(info.GetIsolate(), ExceptionState::kExecutionContext, "TestInterface", "partial2VoidMethod");
-
   if (isArityError) {
   }
   exceptionState.ThrowTypeError("No function was found that matched the signature provided.");
@@ -294,7 +296,7 @@ static void partialVoidTestEnumModulesArgMethodMethod(const v8::FunctionCallback
       "EnumModulesValue1",
       "EnumModulesValue2",
   };
-  if (!IsValidEnum(arg, validArgValues, WTF_ARRAY_LENGTH(validArgValues), "TestEnumModules", exceptionState)) {
+  if (!IsValidEnum(arg, validArgValues, base::size(validArgValues), "TestEnumModules", exceptionState)) {
     return;
   }
 
@@ -312,6 +314,7 @@ static void partial2StaticVoidMethod2Method(const v8::FunctionCallbackInfo<v8::V
 
 static void partial2StaticVoidMethodMethod(const v8::FunctionCallbackInfo<v8::Value>& info) {
   bool isArityError = false;
+
   switch (std::min(1, info.Length())) {
     case 0:
       break;
@@ -326,7 +329,6 @@ static void partial2StaticVoidMethodMethod(const v8::FunctionCallbackInfo<v8::Va
   }
 
   ExceptionState exceptionState(info.GetIsolate(), ExceptionState::kExecutionContext, "TestInterface", "partial2StaticVoidMethod");
-
   if (isArityError) {
   }
   exceptionState.ThrowTypeError("No function was found that matched the signature provided.");
@@ -467,10 +469,10 @@ void V8TestInterfacePartial::installV8TestInterfaceTemplate(
   };
   V8DOMConfiguration::InstallConstants(
       isolate, interfaceTemplate, prototypeTemplate,
-      V8TestInterfaceConstants, WTF_ARRAY_LENGTH(V8TestInterfaceConstants));
+      V8TestInterfaceConstants, base::size(V8TestInterfaceConstants));
   V8DOMConfiguration::InstallMethods(
       isolate, world, instanceTemplate, prototypeTemplate, interfaceTemplate,
-      signature, V8TestInterfaceMethods, WTF_ARRAY_LENGTH(V8TestInterfaceMethods));
+      signature, V8TestInterfaceMethods, base::size(V8TestInterfaceMethods));
 
   // Custom signature
 
@@ -504,14 +506,14 @@ void V8TestInterfacePartial::installOriginTrialPartialFeature(v8::Isolate* isola
   bool isSecureContext = (executionContext && executionContext->IsSecureContext());
   if (isSecureContext) {
     static const V8DOMConfiguration::AccessorConfiguration accessorpartial4LongAttributeConfiguration[] = {
-      { "partial4LongAttribute", V8TestInterfacePartial::partial4LongAttributeAttributeGetterCallback, V8TestInterfacePartial::partial4LongAttributeAttributeSetterCallback, V8PrivateProperty::kNoCachedAccessor, static_cast<v8::PropertyAttribute>(v8::None), V8DOMConfiguration::kOnPrototype, V8DOMConfiguration::kCheckHolder, V8DOMConfiguration::kHasSideEffect, V8DOMConfiguration::kAllWorlds }
+      { "partial4LongAttribute", V8TestInterfacePartial::partial4LongAttributeAttributeGetterCallback, V8TestInterfacePartial::partial4LongAttributeAttributeSetterCallback, V8PrivateProperty::kNoCachedAccessor, static_cast<v8::PropertyAttribute>(v8::None), V8DOMConfiguration::kOnPrototype, V8DOMConfiguration::kCheckHolder, V8DOMConfiguration::kHasSideEffect, V8DOMConfiguration::kAlwaysCallGetter, V8DOMConfiguration::kAllWorlds }
     };
     for (const auto& accessorConfig : accessorpartial4LongAttributeConfiguration)
       V8DOMConfiguration::InstallAccessor(isolate, world, instance, prototype, interface, signature, accessorConfig);
   }
   if (isSecureContext) {
     static const V8DOMConfiguration::AccessorConfiguration accessorpartial4StaticLongAttributeConfiguration[] = {
-      { "partial4StaticLongAttribute", V8TestInterfacePartial::partial4StaticLongAttributeAttributeGetterCallback, V8TestInterfacePartial::partial4StaticLongAttributeAttributeSetterCallback, V8PrivateProperty::kNoCachedAccessor, static_cast<v8::PropertyAttribute>(v8::None), V8DOMConfiguration::kOnInterface, V8DOMConfiguration::kCheckHolder, V8DOMConfiguration::kHasSideEffect, V8DOMConfiguration::kAllWorlds }
+      { "partial4StaticLongAttribute", V8TestInterfacePartial::partial4StaticLongAttributeAttributeGetterCallback, V8TestInterfacePartial::partial4StaticLongAttributeAttributeSetterCallback, V8PrivateProperty::kNoCachedAccessor, static_cast<v8::PropertyAttribute>(v8::None), V8DOMConfiguration::kOnInterface, V8DOMConfiguration::kCheckHolder, V8DOMConfiguration::kHasSideEffect, V8DOMConfiguration::kAlwaysCallGetter, V8DOMConfiguration::kAllWorlds }
     };
     for (const auto& accessorConfig : accessorpartial4StaticLongAttributeConfiguration)
       V8DOMConfiguration::InstallAccessor(isolate, world, instance, prototype, interface, signature, accessorConfig);
@@ -568,7 +570,12 @@ void V8TestInterfacePartial::InstallConditionalFeatures(
     if (prototypeObject->HasOwnProperty(context, unscopablesSymbol).To(&has_unscopables) && has_unscopables) {
       unscopables = prototypeObject->Get(context, unscopablesSymbol).ToLocalChecked().As<v8::Object>();
     } else {
+      // Web IDL 3.6.3. Interface prototype object
+      // https://heycam.github.io/webidl/#create-an-interface-prototype-object
+      // step 8.1. Let unscopableObject be the result of performing
+      //   ! ObjectCreate(null).
       unscopables = v8::Object::New(isolate);
+      unscopables->SetPrototype(context, v8::Null(isolate)).ToChecked();
     }
     unscopables->CreateDataProperty(
         context, V8AtomicString(isolate, "unscopableVoidMethod"), v8::True(isolate))

@@ -34,6 +34,7 @@ class MockMediaRouteProvider : public mojom::MediaRouteProvider {
  public:
   using RouteCallback =
       base::OnceCallback<void(const base::Optional<MediaRoute>&,
+                              mojom::RoutePresentationConnectionPtr,
                               const base::Optional<std::string>&,
                               RouteRequestResult::ResultCode)>;
 
@@ -47,7 +48,7 @@ class MockMediaRouteProvider : public mojom::MediaRouteProvider {
                    int tab_id,
                    base::TimeDelta timeout,
                    bool incognito,
-                   CreateRouteCallback callback) {
+                   CreateRouteCallback callback) override {
     CreateRouteInternal(source_urn, sink_id, presentation_id, origin, tab_id,
                         timeout, incognito, callback);
   }
@@ -66,7 +67,7 @@ class MockMediaRouteProvider : public mojom::MediaRouteProvider {
                  int tab_id,
                  base::TimeDelta timeout,
                  bool incognito,
-                 JoinRouteCallback callback) {
+                 JoinRouteCallback callback) override {
     JoinRouteInternal(source_urn, presentation_id, origin, tab_id, timeout,
                       incognito, callback);
   }
@@ -85,7 +86,7 @@ class MockMediaRouteProvider : public mojom::MediaRouteProvider {
                              int tab_id,
                              base::TimeDelta timeout,
                              bool incognito,
-                             JoinRouteCallback callback) {
+                             JoinRouteCallback callback) override {
     ConnectRouteByRouteIdInternal(source_urn, route_id, presentation_id, origin,
                                   tab_id, timeout, incognito, callback);
   }
@@ -100,7 +101,7 @@ class MockMediaRouteProvider : public mojom::MediaRouteProvider {
                     JoinRouteCallback& callback));
   MOCK_METHOD1(DetachRoute, void(const std::string& route_id));
   void TerminateRoute(const std::string& route_id,
-                      TerminateRouteCallback callback) {
+                      TerminateRouteCallback callback) override {
     TerminateRouteInternal(route_id, callback);
   }
   MOCK_METHOD2(TerminateRouteInternal,
@@ -108,24 +109,12 @@ class MockMediaRouteProvider : public mojom::MediaRouteProvider {
                     TerminateRouteCallback& callback));
   MOCK_METHOD1(StartObservingMediaSinks, void(const std::string& source));
   MOCK_METHOD1(StopObservingMediaSinks, void(const std::string& source));
-  void SendRouteMessage(const std::string& media_route_id,
-                        const std::string& message,
-                        SendRouteMessageCallback callback) {
-    SendRouteMessageInternal(media_route_id, message, callback);
-  }
-  MOCK_METHOD3(SendRouteMessageInternal,
+  MOCK_METHOD2(SendRouteMessage,
                void(const std::string& media_route_id,
-                    const std::string& message,
-                    SendRouteMessageCallback& callback));
-  void SendRouteBinaryMessage(const std::string& media_route_id,
-                              const std::vector<uint8_t>& data,
-                              SendRouteMessageCallback callback) override {
-    SendRouteBinaryMessageInternal(media_route_id, data, callback);
-  }
-  MOCK_METHOD3(SendRouteBinaryMessageInternal,
+                    const std::string& message));
+  MOCK_METHOD2(SendRouteBinaryMessage,
                void(const std::string& media_route_id,
-                    const std::vector<uint8_t>& data,
-                    SendRouteMessageCallback& callback));
+                    const std::vector<uint8_t>& data));
   MOCK_METHOD1(StartListeningForRouteMessages,
                void(const std::string& route_id));
   MOCK_METHOD1(StopListeningForRouteMessages,
@@ -169,8 +158,6 @@ class MockMediaRouteProvider : public mojom::MediaRouteProvider {
   void RouteRequestSuccess(RouteCallback& cb) const;
   void RouteRequestTimeout(RouteCallback& cb) const;
   void TerminateRouteSuccess(TerminateRouteCallback& cb) const;
-  void SendRouteMessageSuccess(SendRouteMessageCallback& cb) const;
-  void SendRouteBinaryMessageSuccess(SendRouteBinaryMessageCallback& cb) const;
   void SearchSinksSuccess(SearchSinksCallback& cb) const;
   void CreateMediaRouteControllerSuccess(
       CreateMediaRouteControllerCallback& cb) const;
@@ -193,7 +180,7 @@ class MockEventPageTracker : public extensions::EventPageTracker {
   MOCK_METHOD1(IsEventPageSuspended, bool(const std::string& extension_id));
   MOCK_METHOD2(WakeEventPage,
                bool(const std::string& extension_id,
-                    const base::Callback<void(bool)>& callback));
+                    base::OnceCallback<void(bool)> callback));
 };
 
 class MockEventPageRequestManager : public EventPageRequestManager {
@@ -201,7 +188,7 @@ class MockEventPageRequestManager : public EventPageRequestManager {
   static std::unique_ptr<KeyedService> Create(content::BrowserContext* context);
 
   explicit MockEventPageRequestManager(content::BrowserContext* context);
-  ~MockEventPageRequestManager();
+  ~MockEventPageRequestManager() override;
 
   MOCK_METHOD1(SetExtensionId, void(const std::string& extension_id));
   void RunOrDefer(base::OnceClosure request,
@@ -338,7 +325,7 @@ class MediaRouterMojoTest : public ::testing::Test {
                                   MediaRouteProviderId provider_id);
 
   content::TestBrowserThreadBundle test_thread_bundle_;
-  scoped_refptr<extensions::Extension> extension_;
+  scoped_refptr<const extensions::Extension> extension_;
   TestingProfile profile_;
   std::unique_ptr<MediaRouterMojoImpl> media_router_;
   mojo::BindingSet<mojom::MediaRouteProvider> provider_bindings_;

@@ -350,6 +350,7 @@ WebContentsAccessibilityAndroid::WebContentsAccessibilityAndroid(
     : java_ref_(env, obj),
       web_contents_(static_cast<WebContentsImpl*>(web_contents)),
       frame_info_initialized_(false),
+      use_zoom_for_dsf_enabled_(IsUseZoomForDSFEnabled()),
       root_manager_(nullptr),
       connector_(new Connector(web_contents, this)) {
   CollectStats();
@@ -550,7 +551,8 @@ bool WebContentsAccessibilityAndroid::OnHoverEvent(
   if (event.GetAction() != ui::MotionEvent::Action::HOVER_EXIT &&
       root_manager_) {
     gfx::PointF point =
-        IsUseZoomForDSFEnabled() ? event.GetPointPix() : event.GetPoint();
+        use_zoom_for_dsf_enabled_ ? event.GetPointPix() : event.GetPoint();
+    point.Scale(1 / page_scale_);
     root_manager_->HitTest(gfx::ToFlooredPoint(point));
   }
   return true;
@@ -693,10 +695,15 @@ jboolean WebContentsAccessibilityAndroid::PopulateAccessibilityNodeInfo(
         base::android::ConvertUTF16ToJavaString(env, element_id));
   }
 
-  gfx::Rect absolute_rect = node->GetPageBoundsRect();
+  float dip_scale = use_zoom_for_dsf_enabled_
+                        ? 1 / root_manager_->device_scale_factor()
+                        : 1.0;
+  gfx::Rect absolute_rect = gfx::ScaleToEnclosingRect(node->GetPageBoundsRect(),
+                                                      dip_scale, dip_scale);
   gfx::Rect parent_relative_rect = absolute_rect;
   if (node->PlatformGetParent()) {
-    gfx::Rect parent_rect = node->PlatformGetParent()->GetPageBoundsRect();
+    gfx::Rect parent_rect = gfx::ScaleToEnclosingRect(
+        node->PlatformGetParent()->GetPageBoundsRect(), dip_scale, dip_scale);
     parent_relative_rect.Offset(-parent_rect.OffsetFromOrigin());
   }
   bool is_root = node->PlatformGetParent() == NULL;
@@ -854,7 +861,7 @@ void WebContentsAccessibilityAndroid::SetTextFieldValue(
   BrowserAccessibilityAndroid* node = GetAXFromUniqueID(unique_id);
   if (node) {
     node->manager()->SetValue(
-        *node, base::android::ConvertJavaStringToUTF16(env, value));
+        *node, base::android::ConvertJavaStringToUTF8(env, value));
   }
 }
 
@@ -908,7 +915,7 @@ jboolean WebContentsAccessibilityAndroid::AdjustSlider(
   value += (increment ? delta : -delta);
   value = std::max(std::min(value, max), min);
   if (value != original_value) {
-    node->manager()->SetValue(*node, base::NumberToString16(value));
+    node->manager()->SetValue(*node, base::NumberToString(value));
     return true;
   }
   return false;
@@ -1042,15 +1049,25 @@ jboolean WebContentsAccessibilityAndroid::PreviousAtGranularity(
   return false;
 }
 
-void WebContentsAccessibilityAndroid::SetAccessibilityFocus(
+void WebContentsAccessibilityAndroid::MoveAccessibilityFocus(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj,
-    jint unique_id) {
+    jint old_unique_id,
+    jint new_unique_id) {
+  BrowserAccessibilityAndroid* old_node = GetAXFromUniqueID(old_unique_id);
+  if (old_node)
+    old_node->manager()->ClearAccessibilityFocus(*old_node);
+
+  BrowserAccessibilityAndroid* node = GetAXFromUniqueID(new_unique_id);
+  if (!node)
+    return;
+  node->manager()->SetAccessibilityFocus(*node);
+
   // When Android sets accessibility focus to a node, we load inline text
   // boxes for that node so that subsequent requests for character bounding
-  // boxes will succeed.
-  BrowserAccessibilityAndroid* node = GetAXFromUniqueID(unique_id);
-  if (node)
+  // boxes will succeed. However, don't do that for the root of the tree,
+  // as that will result in loading inline text boxes for the whole tree.
+  if (node != node->manager()->GetRoot())
     node->manager()->LoadInlineTextBoxes(*node);
 }
 
@@ -1178,7 +1195,7 @@ WebContentsAccessibilityAndroid::GetCharacterBoundingBoxes(
   gfx::Rect object_bounds = node->GetPageBoundsRect();
   int coords[4 * len];
   for (int i = 0; i < len; i++) {
-    gfx::Rect char_bounds = node->GetPageBoundsForRange(start + i, 1);
+    gfx::Rect char_bounds = node->GetPageBoundsForRange(start + i, 1, false);
     if (char_bounds.IsEmpty())
       char_bounds = object_bounds;
     coords[4 * i + 0] = char_bounds.x();
@@ -1196,7 +1213,8 @@ BrowserAccessibilityAndroid* WebContentsAccessibilityAndroid::GetAXFromUniqueID(
       BrowserAccessibilityAndroid::GetFromUniqueId(unique_id));
 }
 
-void WebContentsAccessibilityAndroid::UpdateFrameInfo() {
+void WebContentsAccessibilityAndroid::UpdateFrameInfo(float page_scale) {
+  page_scale_ = page_scale;
   if (frame_info_initialized_)
     return;
 

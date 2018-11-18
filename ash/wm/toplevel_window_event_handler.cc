@@ -6,7 +6,6 @@
 
 #include "ash/shell.h"
 #include "ash/wm/window_state.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "ui/aura/client/cursor_client.h"
 #include "ui/aura/env.h"
@@ -45,19 +44,19 @@ bool ToplevelWindowEventHandler::AttemptToStartDrag(
     aura::Window* window,
     const gfx::Point& point_in_parent,
     int window_component,
-    const wm::WmToplevelWindowEventHandler::EndClosure& end_closure) {
+    wm::WmToplevelWindowEventHandler::EndClosure end_closure) {
   aura::Window* gesture_target =
       wm_toplevel_window_event_handler_.gesture_target();
   ::wm::WindowMoveSource source = gesture_target
                                       ? ::wm::WINDOW_MOVE_SOURCE_TOUCH
                                       : ::wm::WINDOW_MOVE_SOURCE_MOUSE;
   if (gesture_target) {
-    ui::GestureRecognizer::Get()->TransferEventsTo(
-        gesture_target, window,
-        ui::GestureRecognizer::ShouldCancelTouches::DontCancel);
+    window->env()->gesture_recognizer()->TransferEventsTo(
+        gesture_target, window, ui::TransferTouchesBehavior::kDontCancel);
   }
   return wm_toplevel_window_event_handler_.AttemptToStartDrag(
-      window, point_in_parent, window_component, source, end_closure);
+      window, point_in_parent, window_component, source,
+      std::move(end_closure));
 }
 
 ::wm::WindowMoveResult ToplevelWindowEventHandler::RunMoveLoop(
@@ -69,10 +68,11 @@ bool ToplevelWindowEventHandler::AttemptToStartDrag(
   DCHECK(root_window);
   gfx::Point drag_location;
   if (move_source == ::wm::WINDOW_MOVE_SOURCE_TOUCH &&
-      aura::Env::GetInstance()->is_touch_down()) {
+      Shell::Get()->aura_env()->is_touch_down()) {
     gfx::PointF drag_location_f;
-    bool has_point = ui::GestureRecognizer::Get()->GetLastTouchPointForTarget(
-        source, &drag_location_f);
+    bool has_point =
+        source->env()->gesture_recognizer()->GetLastTouchPointForTarget(
+            source, &drag_location_f);
     drag_location = gfx::ToFlooredPoint(drag_location_f);
     DCHECK(has_point);
   } else {
@@ -88,7 +88,7 @@ bool ToplevelWindowEventHandler::AttemptToStartDrag(
   if (cursor_client)
     cursor_client->SetCursor(ui::CursorType::kPointer);
 
-  base::RunLoop run_loop;
+  base::RunLoop run_loop(base::RunLoop::Type::kNestableTasksAllowed);
 
   wm::WmToplevelWindowEventHandler::DragResult result =
       wm::WmToplevelWindowEventHandler::DragResult::SUCCESS;
@@ -102,8 +102,6 @@ bool ToplevelWindowEventHandler::AttemptToStartDrag(
   in_move_loop_ = true;
   base::WeakPtr<ToplevelWindowEventHandler> weak_ptr(
       weak_factory_.GetWeakPtr());
-  base::MessageLoop* loop = base::MessageLoop::current();
-  base::MessageLoop::ScopedNestableTaskAllower allow_nested(loop);
 
   // Disable window position auto management while dragging and restore it
   // aftrewards.

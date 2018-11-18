@@ -112,7 +112,7 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadItem : public base::SupportsUserData {
   // parallel downloading is enabled. Slices should have different offsets
   // so that they don't overlap. |finished| will be marked as true when the
   // download stream is successfully completed.
-  struct COMPONENTS_DOWNLOAD_EXPORT ReceivedSlice {
+  struct ReceivedSlice {
     ReceivedSlice(int64_t offset, int64_t received_bytes)
         : offset(offset), received_bytes(received_bytes), finished(false) {}
 
@@ -321,6 +321,11 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadItem : public base::SupportsUserData {
   // return the path requested.
   virtual const base::FilePath& GetForcedFilePath() const = 0;
 
+  // Path to the temporary file. This could be empty if full path is already
+  // determined.
+  // TODO(qinmin): merge this with GetFullPath().
+  virtual base::FilePath GetTemporaryFilePath() const = 0;
+
   // Returns the file-name that should be reported to the user. If a display
   // name has been explicitly set using SetDisplayName(), this function returns
   // that display name. Otherwise returns the final target filename.
@@ -342,7 +347,7 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadItem : public base::SupportsUserData {
   // If the file is successfully deleted, then GetFileExternallyRemoved() will
   // become true, GetFullPath() will become empty, and
   // DownloadItem::OnDownloadUpdated() will be called. Does nothing if
-  // GetState() == COMPLETE or GetFileExternallyRemoved() is already true or
+  // GetState() != COMPLETE or GetFileExternallyRemoved() is already true or
   // GetFullPath() is already empty. The callback is always run, and it is
   // always run asynchronously. It will be passed true if the file is
   // successfully deleted or if GetFilePath() was already empty or if
@@ -431,6 +436,11 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadItem : public base::SupportsUserData {
   // up after completion and not shown in the UI, and will not prompt to user
   // for target file path determination.
   virtual bool IsTransient() const = 0;
+
+  // Returns whether the download item corresponds to a parallel download. This
+  // usually means parallel download has been enabled and the download job is
+  // parallelizable.
+  virtual bool IsParallelDownload() const = 0;
 
   // External state transitions/setters ----------------------------------------
 

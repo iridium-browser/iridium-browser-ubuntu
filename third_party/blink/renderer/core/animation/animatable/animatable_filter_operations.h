@@ -33,14 +33,15 @@
 
 #include "third_party/blink/renderer/core/animation/animatable/animatable_value.h"
 #include "third_party/blink/renderer/core/style/filter_operations.h"
+#include "third_party/blink/renderer/platform/heap/persistent.h"
 
 namespace blink {
 
 class AnimatableFilterOperations final : public AnimatableValue {
  public:
-  static scoped_refptr<AnimatableFilterOperations> Create(
+  static AnimatableFilterOperations* Create(
       const FilterOperations& operations) {
-    return base::AdoptRef(new AnimatableFilterOperations(operations));
+    return new AnimatableFilterOperations(operations);
   }
 
   ~AnimatableFilterOperations() override = default;
@@ -49,9 +50,11 @@ class AnimatableFilterOperations final : public AnimatableValue {
     return operation_wrapper_->Operations();
   }
 
+  void Trace(Visitor*) override;
+
  protected:
-  scoped_refptr<AnimatableValue> InterpolateTo(const AnimatableValue*,
-                                               double fraction) const override;
+  AnimatableValue* InterpolateTo(const AnimatableValue*,
+                                 double fraction) const override;
 
  private:
   AnimatableFilterOperations(const FilterOperations& operations)
@@ -59,7 +62,7 @@ class AnimatableFilterOperations final : public AnimatableValue {
 
   AnimatableType GetType() const override { return kTypeFilterOperations; }
 
-  Persistent<FilterOperationsWrapper> operation_wrapper_;
+  Member<FilterOperationsWrapper> operation_wrapper_;
 };
 
 DEFINE_ANIMATABLE_VALUE_TYPE_CASTS(AnimatableFilterOperations,

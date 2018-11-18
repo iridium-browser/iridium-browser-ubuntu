@@ -30,8 +30,9 @@ namespace {
 
 class MockCallback {
  public:
-  MOCK_METHOD3(CreateRoute,
+  MOCK_METHOD4(CreateRoute,
                void(const base::Optional<MediaRoute>& route,
+                    mojom::RoutePresentationConnectionPtr connection,
                     const base::Optional<std::string>& error,
                     RouteRequestResult::ResultCode result));
   MOCK_METHOD2(TerminateRoute,
@@ -181,9 +182,11 @@ class WiredDisplayMediaRouteProviderTest : public testing::Test {
   void TearDown() override {
     provider_.reset();
     display::Screen::SetScreenInstance(nullptr);
+    test_thread_bundle_.RunUntilIdle();
   }
 
  protected:
+  content::TestBrowserThreadBundle test_thread_bundle_;
   // A mojo pointer to |provider_|.
   mojom::MediaRouteProviderPtr provider_pointer_;
   std::unique_ptr<TestWiredDisplayMediaRouteProvider> provider_;
@@ -202,7 +205,6 @@ class WiredDisplayMediaRouteProviderTest : public testing::Test {
   MockReceiverCreator receiver_creator_;
 
  private:
-  content::TestBrowserThreadBundle test_thread_bundle_;
   TestingProfile profile_;
   display::test::TestScreen test_screen_;
 };
@@ -223,6 +225,10 @@ TEST_F(WiredDisplayMediaRouteProviderTest, GetDisplaysAsSinks) {
             EXPECT_EQ(sinks[0].sink().id(), primary_id);
             EXPECT_EQ(sinks[1].sink().id(), secondary_id1);
             EXPECT_EQ(sinks[2].sink().id(), secondary_id2);
+
+            EXPECT_EQ(sinks[0].sink().provider_id(),
+                      MediaRouteProviderId::WIRED_DISPLAY);
+            EXPECT_EQ(sinks[0].sink().icon_type(), SinkIconType::WIRED_DISPLAY);
           })));
   provider_pointer_->StartObservingMediaSinks(kPresentationSource);
   base::RunLoop().RunUntilIdle();
@@ -306,7 +312,7 @@ TEST_F(WiredDisplayMediaRouteProviderTest, CreateAndTerminateRoute) {
   base::RunLoop().RunUntilIdle();
 
   // Create a route for |presentation_id|.
-  EXPECT_CALL(callback, CreateRoute(_, base::Optional<std::string>(),
+  EXPECT_CALL(callback, CreateRoute(_, _, base::Optional<std::string>(),
                                     RouteRequestResult::OK))
       .WillOnce(WithArg<0>(
           Invoke([&presentation_id](const base::Optional<MediaRoute>& route) {
@@ -335,6 +341,10 @@ TEST_F(WiredDisplayMediaRouteProviderTest, CreateAndTerminateRoute) {
   EXPECT_CALL(callback, TerminateRoute(base::Optional<std::string>(),
                                        RouteRequestResult::OK));
   EXPECT_CALL(*receiver_creator_.receiver(), TerminateInternal());
+  EXPECT_CALL(router_,
+              OnPresentationConnectionStateChanged(
+                  presentation_id,
+                  mojom::MediaRouter::PresentationConnectionState::TERMINATED));
   provider_pointer_->TerminateRoute(
       presentation_id, base::BindOnce(&MockCallback::TerminateRoute,
                                       base::Unretained(&callback)));

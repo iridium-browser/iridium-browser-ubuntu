@@ -31,7 +31,8 @@
 
 #include "third_party/blink/renderer/core/html/forms/text_field_input_type.h"
 
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
+#include "third_party/blink/renderer/core/css/style_change_reason.h"
+#include "third_party/blink/renderer/core/dom/events/event_dispatch_forbidden_scope.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/editing/frame_selection.h"
 #include "third_party/blink/renderer/core/events/before_text_inserted_event.h"
@@ -49,7 +50,8 @@
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
-#include "third_party/blink/renderer/platform/event_dispatch_forbidden_scope.h"
+#include "third_party/blink/renderer/core/paint/paint_layer_scrollable_area.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
@@ -68,24 +70,24 @@ class DataListIndicatorElement final : public HTMLDivElement {
     return new LayoutDetailsMarker(this);
   }
 
-  EventDispatchHandlingState* PreDispatchEventHandler(Event* event) override {
+  EventDispatchHandlingState* PreDispatchEventHandler(Event& event) override {
     // Chromium opens autofill popup in a mousedown event listener
     // associated to the document. We don't want to open it in this case
     // because we opens a datalist chooser later.
     // FIXME: We should dispatch mousedown events even in such case.
-    if (event->type() == EventTypeNames::mousedown)
-      event->stopPropagation();
+    if (event.type() == EventTypeNames::mousedown)
+      event.stopPropagation();
     return nullptr;
   }
 
-  void DefaultEventHandler(Event* event) override {
+  void DefaultEventHandler(Event& event) override {
     DCHECK(GetDocument().IsActive());
-    if (event->type() != EventTypeNames::click)
+    if (event.type() != EventTypeNames::click)
       return;
     HTMLInputElement* host = HostInput();
     if (host && !host->IsDisabledOrReadOnly()) {
       GetDocument().GetPage()->GetChromeClient().OpenTextDataListChooser(*host);
-      event->SetDefaultHandled();
+      event.SetDefaultHandled();
     }
   }
 
@@ -128,7 +130,7 @@ SpinButtonElement* TextFieldInputType::GetSpinButtonElement() const {
           ShadowElementNames::SpinButton()));
 }
 
-bool TextFieldInputType::ShouldShowFocusRingOnMouseFocus() const {
+bool TextFieldInputType::MayTriggerVirtualKeyboard() const {
   return true;
 }
 
@@ -191,45 +193,45 @@ void TextFieldInputType::SetValue(const String& sanitized_value,
   }
 }
 
-void TextFieldInputType::HandleKeydownEvent(KeyboardEvent* event) {
+void TextFieldInputType::HandleKeydownEvent(KeyboardEvent& event) {
   if (!GetElement().IsFocused())
     return;
   if (ChromeClient* chrome_client = GetChromeClient()) {
-    chrome_client->HandleKeyboardEventOnTextField(GetElement(), *event);
+    chrome_client->HandleKeyboardEventOnTextField(GetElement(), event);
     return;
   }
-  event->SetDefaultHandled();
+  event.SetDefaultHandled();
 }
 
-void TextFieldInputType::HandleKeydownEventForSpinButton(KeyboardEvent* event) {
+void TextFieldInputType::HandleKeydownEventForSpinButton(KeyboardEvent& event) {
   if (GetElement().IsDisabledOrReadOnly())
     return;
-  const String& key = event->key();
+  const String& key = event.key();
   if (key == "ArrowUp")
     SpinButtonStepUp();
-  else if (key == "ArrowDown" && !event->altKey())
+  else if (key == "ArrowDown" && !event.altKey())
     SpinButtonStepDown();
   else
     return;
   GetElement().DispatchFormControlChangeEvent();
-  event->SetDefaultHandled();
+  event.SetDefaultHandled();
 }
 
-void TextFieldInputType::ForwardEvent(Event* event) {
+void TextFieldInputType::ForwardEvent(Event& event) {
   if (SpinButtonElement* spin_button = GetSpinButtonElement()) {
     spin_button->ForwardEvent(event);
-    if (event->DefaultHandled())
+    if (event.DefaultHandled())
       return;
   }
 
   if (GetElement().GetLayoutObject() &&
-      (event->IsMouseEvent() || event->IsDragEvent() ||
-       event->HasInterface(EventNames::WheelEvent) ||
-       event->type() == EventTypeNames::blur ||
-       event->type() == EventTypeNames::focus)) {
+      (event.IsMouseEvent() || event.IsDragEvent() ||
+       event.HasInterface(EventNames::WheelEvent) ||
+       event.type() == EventTypeNames::blur ||
+       event.type() == EventTypeNames::focus)) {
     LayoutTextControlSingleLine* layout_text_control =
         ToLayoutTextControlSingleLine(GetElement().GetLayoutObject());
-    if (event->type() == EventTypeNames::blur) {
+    if (event.type() == EventTypeNames::blur) {
       if (LayoutBox* inner_editor_layout_object =
               GetElement().InnerEditorElement()->GetLayoutBox()) {
         // FIXME: This class has no need to know about PaintLayer!
@@ -243,7 +245,7 @@ void TextFieldInputType::ForwardEvent(Event* event) {
       }
 
       layout_text_control->CapsLockStateMayHaveChanged();
-    } else if (event->type() == EventTypeNames::focus) {
+    } else if (event.type() == EventTypeNames::focus) {
       layout_text_control->CapsLockStateMayHaveChanged();
     }
 
@@ -258,10 +260,10 @@ void TextFieldInputType::HandleBlurEvent() {
     spin_button->ReleaseCapture();
 }
 
-bool TextFieldInputType::ShouldSubmitImplicitly(Event* event) {
-  return (event->type() == EventTypeNames::textInput &&
-          event->HasInterface(EventNames::TextEvent) &&
-          ToTextEvent(event)->data() == "\n") ||
+bool TextFieldInputType::ShouldSubmitImplicitly(const Event& event) {
+  return (event.type() == EventTypeNames::textInput &&
+          event.HasInterface(EventNames::TextEvent) &&
+          ToTextEvent(event).data() == "\n") ||
          InputTypeView::ShouldSubmitImplicitly(event);
 }
 
@@ -366,14 +368,20 @@ void TextFieldInputType::AttributeChanged() {
   UpdateView();
 }
 
-void TextFieldInputType::DisabledAttributeChanged() {
+void TextFieldInputType::DisabledOrReadonlyAttributeChanged(
+    const QualifiedName& attr) {
   if (SpinButtonElement* spin_button = GetSpinButtonElement())
     spin_button->ReleaseCapture();
+  GetElement().InnerEditorElement()->SetNeedsStyleRecalc(
+      kLocalStyleChange, StyleChangeReasonForTracing::FromAttribute(attr));
+}
+
+void TextFieldInputType::DisabledAttributeChanged() {
+  DisabledOrReadonlyAttributeChanged(disabledAttr);
 }
 
 void TextFieldInputType::ReadonlyAttributeChanged() {
-  if (SpinButtonElement* spin_button = GetSpinButtonElement())
-    spin_button->ReleaseCapture();
+  DisabledOrReadonlyAttributeChanged(readonlyAttr);
 }
 
 bool TextFieldInputType::SupportsReadOnly() const {
@@ -399,7 +407,7 @@ String TextFieldInputType::SanitizeValue(const String& proposed_value) const {
 }
 
 void TextFieldInputType::HandleBeforeTextInsertedEvent(
-    BeforeTextInsertedEvent* event) {
+    BeforeTextInsertedEvent& event) {
   // Make sure that the text to be inserted will not violate the maxLength.
 
   // We use HTMLInputElement::innerEditorValue() instead of
@@ -439,7 +447,7 @@ void TextFieldInputType::HandleBeforeTextInsertedEvent(
 
   // Truncate the inserted text to avoid violating the maxLength and other
   // constraints.
-  String event_text = event->GetText();
+  String event_text = event.GetText();
   unsigned text_length = event_text.length();
   while (text_length > 0 && IsASCIILineBreak(event_text[text_length - 1]))
     text_length--;
@@ -448,7 +456,7 @@ void TextFieldInputType::HandleBeforeTextInsertedEvent(
   event_text.Replace('\r', ' ');
   event_text.Replace('\n', ' ');
 
-  event->SetText(LimitLength(event_text, appendable_length));
+  event.SetText(LimitLength(event_text, appendable_length));
 }
 
 bool TextFieldInputType::ShouldRespectListAttribute() {
@@ -487,8 +495,10 @@ void TextFieldInputType::AppendToFormData(FormData& form_data) const {
   InputType::AppendToFormData(form_data);
   const AtomicString& dirname_attr_value =
       GetElement().FastGetAttribute(dirnameAttr);
-  if (!dirname_attr_value.IsNull())
-    form_data.append(dirname_attr_value, GetElement().DirectionForFormData());
+  if (!dirname_attr_value.IsNull()) {
+    form_data.AppendFromElement(dirname_attr_value,
+                                GetElement().DirectionForFormData());
+  }
 }
 
 String TextFieldInputType::ConvertFromVisibleValue(

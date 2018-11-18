@@ -5,7 +5,11 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_TESTING_SIM_SIM_COMPOSITOR_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_TESTING_SIM_SIM_COMPOSITOR_H_
 
-#include "third_party/blink/public/platform/web_layer_tree_view.h"
+#include "base/time/time.h"
+#include "cc/trees/layer_tree_host.h"
+#include "content/renderer/gpu/layer_tree_view.h"
+#include "content/test/stub_layer_tree_view_delegate.h"
+#include "third_party/blink/renderer/core/frame/frame_test_helpers.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_canvas.h"
 
 namespace blink {
@@ -21,18 +25,27 @@ class WebViewImpl;
 // only part of the layer was invalid.
 //
 // Note: This also does not support compositor driven animations.
-class SimCompositor final : public WebLayerTreeView {
+class SimCompositor final : public content::StubLayerTreeViewDelegate {
  public:
-  explicit SimCompositor();
-  ~SimCompositor();
+  SimCompositor();
+  ~SimCompositor() override;
 
-  void SetWebView(WebViewImpl&);
+  // This compositor should be given to the WebViewImpl passed to SetWebView.
+  content::LayerTreeView& layer_tree_view() { return *layer_tree_view_; }
+
+  // When the compositor asks for a main frame, this WebViewImpl will have its
+  // lifecycle updated and be painted. The WebLayerTreeView that is being used
+  // to composite the WebViewImpl is passed separately as the underlying
+  // content::LayerTreeView type, in order to bypass the Web* API surface
+  // provided to blink.
+  void SetWebView(WebViewImpl&, content::LayerTreeView&);
 
   // Executes the BeginMainFrame processing steps, an approximation of what
   // cc::ThreadProxy::BeginMainFrame would do.
   // If time is not specified a 60Hz frame rate time progression is used.
   // Returns all drawing commands that were issued during painting the frame
   // (including cached ones).
+  // TODO(dcheng): This should take a base::TimeDelta.
   SimCanvas::Commands BeginFrame(double time_delta_in_seconds = 0.016);
 
   // Similar to BeginFrame() but doesn't require NeedsBeginFrame(). This is
@@ -40,29 +53,45 @@ class SimCompositor final : public WebLayerTreeView {
   // we don't schedule a BeginFrame).
   SimCanvas::Commands PaintFrame();
 
-  bool NeedsBeginFrame() const { return needs_begin_frame_; }
-  bool DeferCommits() const { return defer_commits_; }
-
-  bool HasSelection() const { return has_selection_; }
-
-  void SetBackgroundColor(WebColor background_color) override {
-    background_color_ = background_color;
+  // Helpers to query the state of the compositor from tests.
+  //
+  // Returns true if a main frame has been requested from blink, until the
+  // BeginFrame() step occurs.
+  bool NeedsBeginFrame() const {
+    return layer_tree_view_->layer_tree_host()->RequestedMainFramePending();
+  }
+  // Returns true if commits are deferred in the compositor. Since these tests
+  // use synchronous compositing through BeginFrame(), the deferred state has no
+  // real effect.
+  bool DeferCommits() const {
+    return layer_tree_view_->layer_tree_host()->defer_commits();
+  }
+  // Returns true if a selection is set on the compositor.
+  bool HasSelection() const {
+    return layer_tree_view_->layer_tree_host()->selection() !=
+           cc::LayerSelection();
+  }
+  // Returns the background color set on the compositor.
+  SkColor background_color() {
+    return layer_tree_view_->layer_tree_host()->background_color();
   }
 
-  WebColor background_color() { return background_color_; }
-
  private:
-  void SetNeedsBeginFrame() override;
-  void SetDeferCommits(bool) override;
-  void RegisterSelection(const WebSelection&) override;
-  void ClearSelection() override;
+  // content::LayerTreeViewDelegate implementation.
+  void RequestNewLayerTreeFrameSink(
+      LayerTreeFrameSinkCallback callback) override;
+  void BeginMainFrame(base::TimeTicks frame_time) override;
 
-  bool needs_begin_frame_;
-  bool defer_commits_;
-  bool has_selection_;
-  WebViewImpl* web_view_;
-  double last_frame_time_monotonic_;
-  WebColor background_color_;
+  WebViewImpl* web_view_ = nullptr;
+  base::TimeTicks last_frame_time_;
+
+  // During BeginFrame(), painting is done, and the result is stored here to
+  // be returned from BeginFrame().
+  SimCanvas::Commands* paint_commands_;
+
+  content::LayerTreeView* layer_tree_view_ = nullptr;
+
+  std::unique_ptr<cc::ScopedDeferCommits> scoped_defer_commits_;
 };
 
 }  // namespace blink

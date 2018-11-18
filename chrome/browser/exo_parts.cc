@@ -15,7 +15,6 @@
 #include "chrome/browser/chromeos/file_manager/fileapi_util.h"
 #include "chrome/browser/chromeos/file_manager/path_util.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
-#include "chrome/browser/ui/ash/ash_util.h"
 #include "chrome/common/chrome_switches.h"
 #include "components/exo/file_helper.h"
 #include "components/user_manager/user_manager.h"
@@ -23,7 +22,7 @@
 #include "content/public/common/drop_data.h"
 #include "storage/browser/fileapi/file_system_context.h"
 #include "storage/browser/fileapi/file_system_url.h"
-#include "ui/arc/notification/arc_notification_surface_manager_impl.h"
+#include "ui/base/ui_base_features.h"
 
 namespace {
 
@@ -107,7 +106,7 @@ class ChromeFileHelper : public exo::FileHelper {
 // static
 std::unique_ptr<ExoParts> ExoParts::CreateIfNecessary() {
   // For mash, exosphere will not run in the browser process.
-  if (ash_util::IsRunningInMash())
+  if (features::IsMultiProcessMash())
     return nullptr;
   if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
           ash::switches::kAshEnableWaylandServer)) {
@@ -122,11 +121,8 @@ ExoParts::~ExoParts() {
 }
 
 ExoParts::ExoParts() {
-  DCHECK(!ash_util::IsRunningInMash());
-  arc_notification_surface_manager_ =
-      std::make_unique<arc::ArcNotificationSurfaceManagerImpl>();
+  DCHECK(!features::IsMultiProcessMash());
   std::unique_ptr<ChromeFileHelper> file_helper =
       std::make_unique<ChromeFileHelper>();
-  ash::Shell::Get()->InitWaylandServer(arc_notification_surface_manager_.get(),
-                                       std::move(file_helper));
+  ash::Shell::Get()->InitWaylandServer(std::move(file_helper));
 }

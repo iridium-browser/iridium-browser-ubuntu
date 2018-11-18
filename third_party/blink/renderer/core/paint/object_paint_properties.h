@@ -43,67 +43,146 @@ class CORE_EXPORT ObjectPaintProperties {
     return base::WrapUnique(new ObjectPaintProperties());
   }
 
+  ~ObjectPaintProperties() { DCHECK(!is_immutable_); }
+
+  class UpdateResult {
+   public:
+    bool Unchanged() const { return result_ == kUnchanged; }
+    bool NewNodeCreated() const { return result_ == kNewNodeCreated; }
+
+   private:
+    friend class ObjectPaintProperties;
+    enum Result { kUnchanged, kValueChanged, kNewNodeCreated };
+    UpdateResult(Result r) : result_(r) {}
+    Result result_;
+  };
+
+// The following defines 3 functions and one variable:
+// - Foo(): a getter for the property.
+// - UpdateFoo(): an update function.
+// - ClearFoo(): a clear function
+// - foo_: the variable itself.
+//
+// Note that clear* functions return true if the property tree structure
+// changes (an existing node was deleted), and false otherwise. See the
+// class-level comment ("update & clear implementation note") for details
+// about why this is needed for efficient updates.
+#define ADD_NODE(type, function, variable)                                   \
+  const type##PaintPropertyNode* function() const { return variable.get(); } \
+  UpdateResult Update##function(const type##PaintPropertyNode& parent,       \
+                                type##PaintPropertyNode::State&& state,      \
+                                bool is_parent_alias = false) {              \
+    auto result = is_parent_alias                                            \
+                      ? UpdateAlias(variable, parent)                        \
+                      : Update(variable, parent, std::move(state));          \
+    DCHECK(!is_immutable_ || result.Unchanged())                             \
+        << "Value changed while immutable. New state:\n"                     \
+        << *variable;                                                        \
+    return result;                                                           \
+  }                                                                          \
+  bool Clear##function() {                                                   \
+    DCHECK(!is_immutable_ || !variable)                                      \
+        << "Value cleared while immutable. Old state:\n"                     \
+        << *variable;                                                        \
+    return Clear(variable);                                                  \
+  }                                                                          \
+                                                                             \
+ private:                                                                    \
+  scoped_refptr<type##PaintPropertyNode> variable;                           \
+                                                                             \
+ public:
+// (End of ADD_NODE definition)
+
+#define ADD_TRANSFORM(function, variable) \
+  ADD_NODE(Transform, function, variable)
+#define ADD_EFFECT(function, variable) ADD_NODE(Effect, function, variable)
+#define ADD_CLIP(function, variable) ADD_NODE(Clip, function, variable)
+
   // The hierarchy of the transform subtree created by a LayoutObject is as
   // follows:
-  // [ paintOffsetTranslation ]           Normally paint offset is accumulated
-  // |                                    without creating a node until we see,
-  // |                                    for example, transform or
-  // |                                    position:fixed.
-  // +---[ transform ]                    The space created by CSS transform.
-  //     |                                This is the local border box space.
-  //     +---[ perspective ]              The space created by CSS perspective.
-  //         +---[ svgLocalToBorderBoxTransform ] Additional transform for
-  //                                      children of the outermost root SVG.
-  //                    OR                (SVG does not support scrolling.)
-  //         +---[ scrollTranslation ]    The space created by overflow clip.
-  const TransformPaintPropertyNode* PaintOffsetTranslation() const {
-    return paint_offset_translation_.get();
-  }
-  const TransformPaintPropertyNode* Transform() const {
-    return transform_.get();
-  }
-  const TransformPaintPropertyNode* Perspective() const {
-    return perspective_.get();
-  }
-  const TransformPaintPropertyNode* SvgLocalToBorderBoxTransform() const {
-    return svg_local_to_border_box_transform_.get();
-  }
-  const ScrollPaintPropertyNode* Scroll() const { return scroll_.get(); }
-  const TransformPaintPropertyNode* ScrollTranslation() const {
-    return scroll_translation_.get();
-  }
+  // [ PaintOffsetTranslation ]
+  // |   Normally paint offset is accumulated without creating a node until
+  // |   we see, for example, transform or position:fixed.
+  // +-[ StickyTranslation ]
+  //  /    This applies the sticky offset induced by position:sticky.
+  // |
+  // +-[ Transform ]
+  //   |   The space created by CSS transform. This is the local border box
+  //   |   space.
+  //   +-[ Perspective ]
+  //     |   The space created by CSS perspective.
+  //     +-[ ReplacedContentTransform ]
+  //         Additional transform for replaced elements to implement object-fit.
+  //         (Replaced elements don't scroll.)
+  //     OR
+  //     +-[ ScrollTranslation ]
+  //         The space created by overflow clip. The translation equals the
+  //         offset between the scrolling contents and the scrollable area of
+  //         the container, both originated from the top-left corner, so it is
+  //         the sum of scroll origin and scroll offset of the ScrollableArea.
+  //         To use any content offset based on ScrollOrigin() (e.g. LayoutBox
+  //         or InlineBox's PhysicalLocation()) in this space, we should add
+  //         ScrollOrigin() to the offset.
+  //
+  // ... +-[ TransformIsolationNode ]
+  //         This serves as a parent to subtree transforms on an element with
+  //         paint containment. It induces a PaintOffsetTranslation node and
+  //         is the deepest child of any transform tree on the contain: paint
+  //         element.
+  ADD_TRANSFORM(PaintOffsetTranslation, paint_offset_translation_);
+  ADD_TRANSFORM(StickyTranslation, sticky_translation_);
+  ADD_TRANSFORM(Transform, transform_);
+  ADD_TRANSFORM(Perspective, perspective_);
+  ADD_TRANSFORM(ReplacedContentTransform, replaced_content_transform_);
+  ADD_TRANSFORM(ScrollTranslation, scroll_translation_);
+  ADD_NODE(Scroll, Scroll, scroll_);
+  ADD_TRANSFORM(TransformIsolationNode, transform_isolation_node_);
 
   // The hierarchy of the effect subtree created by a LayoutObject is as
   // follows:
   // [ effect ]
-  // |   Isolated group to apply various CSS effects, including opacity,
-  // |   mix-blend-mode, and for isolation if a mask needs to be applied or
-  // |   backdrop-dependent children are present.
+  // |     Isolated group to apply various CSS effects, including opacity,
+  // |     mix-blend-mode, and for isolation if a mask needs to be applied or
+  // |     backdrop-dependent children are present.
   // +-[ filter ]
   // |     Isolated group for CSS filter.
+  // +-[ vertical/horizontal scrollbar effect ]
+  // |     Overlay Scrollbars on Aura and Android need effect node for fade
+  // |     animation.
   // +-[ mask ]
   // |     Isolated group for painting the CSS mask. This node will have
   // |     SkBlendMode::kDstIn and shall paint last, i.e. after masked contents.
   // +-[ clip path ]
-  //       Isolated group for painting the CSS clip-path. This node will have
-  //       SkBlendMode::kDstIn and shall paint last, i.e. after clipped
-  //       contents.
-  const EffectPaintPropertyNode* Effect() const { return effect_.get(); }
-  const EffectPaintPropertyNode* Filter() const { return filter_.get(); }
-  const EffectPaintPropertyNode* Mask() const { return mask_.get(); }
-  const EffectPaintPropertyNode* ClipPath() const { return clip_path_.get(); }
+  // |     Isolated group for painting the CSS clip-path. This node will have
+  // |     SkBlendMode::kDstIn and shall paint last, i.e. after clipped
+  // |     contents.
+  // +-[ link highlight effect ]
+  //       The link highlight effect is only used for link highlight animations
+  //       and should never have descendants.
+  //
+  // ... +-[ effectIsolationNode ]
+  //       This serves as a parent to subtree effects on an element with paint
+  //       containment, It is the deepest child of any effect tree on the
+  //       contain: paint element.
+  ADD_EFFECT(Effect, effect_);
+  ADD_EFFECT(Filter, filter_);
+  ADD_EFFECT(VerticalScrollbarEffect, vertical_scrollbar_effect_);
+  ADD_EFFECT(HorizontalScrollbarEffect, horizontal_scrollbar_effect_);
+  ADD_EFFECT(Mask, mask_);
+  ADD_EFFECT(ClipPath, clip_path_);
+  ADD_EFFECT(LinkHighlightEffect, link_highlight_effect_);
+  ADD_EFFECT(EffectIsolationNode, effect_isolation_node_);
 
   // The hierarchy of the clip subtree created by a LayoutObject is as follows:
   // [ fragment clip ]
   // |    Clips to a fragment's bounds.
-  // |    This is only present for content under a fragmentation
-  // |    container.
-  // | NOTE: for composited SPv1/SPv175 clip path clips, we move clip path clip
-  // |       below mask.
+  // |    This is only present for content under a fragmentation container.
   // +-[ clip path clip ]
   //   |  Clip created by path-based CSS clip-path. Only exists if the
   //  /   clip-path is "simple" that can be applied geometrically. This and
   // /    the clip path effect node are mutually exclusive.
+  // | NOTE: for composited SPv1 clip path clips, we move clip path clip
+  // |       below mask.
   // +-[ mask clip ]
   //   |   Clip created by CSS mask or CSS clip-path. It serves two purposes:
   //   |   1. Cull painting of the masked subtree. Because anything outside of
@@ -127,197 +206,43 @@ class CORE_EXPORT ObjectPaintProperties {
   //   [ css clip fixed position ]
   //       Clip created by CSS clip. Only exists if the current clip includes
   //       some clip that doesn't apply to our fixed position descendants.
-  const ClipPaintPropertyNode* FragmentClip() const {
-    return fragment_clip_.get();
-  }
-  const ClipPaintPropertyNode* ClipPathClip() const {
-    return clip_path_clip_.get();
-  }
-  const ClipPaintPropertyNode* MaskClip() const { return mask_clip_.get(); }
-  const ClipPaintPropertyNode* CssClip() const { return css_clip_.get(); }
-  const ClipPaintPropertyNode* CssClipFixedPosition() const {
-    return css_clip_fixed_position_.get();
-  }
-  const ClipPaintPropertyNode* OverflowControlsClip() const {
-    return overflow_controls_clip_.get();
-  }
-  const ClipPaintPropertyNode* InnerBorderRadiusClip() const {
-    return inner_border_radius_clip_.get();
-  }
-  const ClipPaintPropertyNode* OverflowOrInnerBorderRadiusClip() const {
-    return overflow_clip_ ? overflow_clip_.get()
-                          : inner_border_radius_clip_.get();
-  }
-
-  // The following clear* functions return true if the property tree structure
-  // changes (an existing node was deleted), and false otherwise. See the
-  // class-level comment ("update & clear implementation note") for details
-  // about why this is needed for efficient updates.
-  bool ClearPaintOffsetTranslation() {
-    return Clear(paint_offset_translation_);
-  }
-  bool ClearTransform() { return Clear(transform_); }
-  bool ClearEffect() { return Clear(effect_); }
-  bool ClearFilter() { return Clear(filter_); }
-  bool ClearMask() { return Clear(mask_); }
-  bool ClearClipPath() { return Clear(clip_path_); }
-  bool ClearFragmentClip() { return Clear(fragment_clip_); }
-  bool ClearClipPathClip() { return Clear(clip_path_clip_); }
-  bool ClearMaskClip() { return Clear(mask_clip_); }
-  bool ClearCssClip() { return Clear(css_clip_); }
-  bool ClearCssClipFixedPosition() { return Clear(css_clip_fixed_position_); }
-  bool ClearOverflowControlsClip() { return Clear(overflow_controls_clip_); }
-  bool ClearInnerBorderRadiusClip() { return Clear(inner_border_radius_clip_); }
-  bool ClearOverflowClip() { return Clear(overflow_clip_); }
-  bool ClearPerspective() { return Clear(perspective_); }
-  bool ClearSvgLocalToBorderBoxTransform() {
-    return Clear(svg_local_to_border_box_transform_);
-  }
-  bool ClearScroll() { return Clear(scroll_); }
-  bool ClearScrollTranslation() { return Clear(scroll_translation_); }
-
-  class UpdateResult {
-   public:
-    bool Unchanged() const { return result_ == kUnchanged; }
-    bool NewNodeCreated() const { return result_ == kNewNodeCreated; }
-
-   private:
-    friend class ObjectPaintProperties;
-    enum Result { kUnchanged, kValueChanged, kNewNodeCreated };
-    UpdateResult(Result r) : result_(r) {}
-    Result result_;
-  };
-
-  template <typename... Args>
-  UpdateResult UpdatePaintOffsetTranslation(Args&&... args) {
-    return Update(paint_offset_translation_, std::forward<Args>(args)...);
-  }
-  template <typename... Args>
-  UpdateResult UpdateTransform(Args&&... args) {
-    return Update(transform_, std::forward<Args>(args)...);
-  }
-  template <typename... Args>
-  UpdateResult UpdatePerspective(Args&&... args) {
-    return Update(perspective_, std::forward<Args>(args)...);
-  }
-  template <typename... Args>
-  UpdateResult UpdateSvgLocalToBorderBoxTransform(Args&&... args) {
-    DCHECK(!ScrollTranslation()) << "SVG elements cannot scroll so there "
-                                    "should never be both a scroll translation "
-                                    "and an SVG local to border box transform.";
-    return Update(svg_local_to_border_box_transform_,
-                  std::forward<Args>(args)...);
-  }
-  template <typename... Args>
-  UpdateResult UpdateScroll(Args&&... args) {
-    return Update(scroll_, std::forward<Args>(args)...);
-  }
-  template <typename... Args>
-  UpdateResult UpdateScrollTranslation(Args&&... args) {
-    DCHECK(!SvgLocalToBorderBoxTransform())
-        << "SVG elements cannot scroll so there should never be both a scroll "
-           "translation and an SVG local to border box transform.";
-    return Update(scroll_translation_, std::forward<Args>(args)...);
-  }
-  template <typename... Args>
-  UpdateResult UpdateEffect(Args&&... args) {
-    return Update(effect_, std::forward<Args>(args)...);
-  }
-  template <typename... Args>
-  UpdateResult UpdateFilter(Args&&... args) {
-    return Update(filter_, std::forward<Args>(args)...);
-  }
-  template <typename... Args>
-  UpdateResult UpdateMask(Args&&... args) {
-    return Update(mask_, std::forward<Args>(args)...);
-  }
-  template <typename... Args>
-  UpdateResult UpdateClipPath(Args&&... args) {
-    return Update(clip_path_, std::forward<Args>(args)...);
-  }
-  template <typename... Args>
-  UpdateResult UpdateFragmentClip(Args&&... args) {
-    return Update(fragment_clip_, std::forward<Args>(args)...);
-  }
-  template <typename... Args>
-  UpdateResult UpdateClipPathClip(Args&&... args) {
-    return Update(clip_path_clip_, std::forward<Args>(args)...);
-  }
-  template <typename... Args>
-  UpdateResult UpdateMaskClip(Args&&... args) {
-    return Update(mask_clip_, std::forward<Args>(args)...);
-  }
-  template <typename... Args>
-  UpdateResult UpdateCssClip(Args&&... args) {
-    return Update(css_clip_, std::forward<Args>(args)...);
-  }
-  template <typename... Args>
-  UpdateResult UpdateCssClipFixedPosition(Args&&... args) {
-    return Update(css_clip_fixed_position_, std::forward<Args>(args)...);
-  }
-  template <typename... Args>
-  UpdateResult UpdateOverflowControlsClip(Args&&... args) {
-    return Update(overflow_controls_clip_, std::forward<Args>(args)...);
-  }
-  template <typename... Args>
-  UpdateResult UpdateInnerBorderRadiusClip(Args&&... args) {
-    return Update(inner_border_radius_clip_, std::forward<Args>(args)...);
-  }
-  template <typename... Args>
-  UpdateResult UpdateOverflowClip(Args&&... args) {
-    return Update(overflow_clip_, std::forward<Args>(args)...);
-  }
+  //
+  //  ... +-[ clipIsolationNode ]
+  //       This serves as a parent to subtree clips on an element with paint
+  //       containment. It is the deepest child of any clip tree on the contain:
+  //       paint element.
+  ADD_CLIP(FragmentClip, fragment_clip_);
+  ADD_CLIP(ClipPathClip, clip_path_clip_);
+  ADD_CLIP(MaskClip, mask_clip_);
+  ADD_CLIP(CssClip, css_clip_);
+  ADD_CLIP(CssClipFixedPosition, css_clip_fixed_position_);
+  ADD_CLIP(OverflowControlsClip, overflow_controls_clip_);
+  ADD_CLIP(InnerBorderRadiusClip, inner_border_radius_clip_);
+  ADD_CLIP(OverflowClip, overflow_clip_);
+  ADD_CLIP(ClipIsolationNode, clip_isolation_node_);
 
 #if DCHECK_IS_ON()
-  // Used by FindPropertiesNeedingUpdate.h for recording the current properties.
-  std::unique_ptr<ObjectPaintProperties> Clone() const {
-    std::unique_ptr<ObjectPaintProperties> cloned = Create();
-    if (paint_offset_translation_)
-      cloned->paint_offset_translation_ = paint_offset_translation_->Clone();
-    if (transform_)
-      cloned->transform_ = transform_->Clone();
-    if (effect_)
-      cloned->effect_ = effect_->Clone();
-    if (filter_)
-      cloned->filter_ = filter_->Clone();
-    if (mask_)
-      cloned->mask_ = mask_->Clone();
-    if (clip_path_)
-      cloned->clip_path_ = clip_path_->Clone();
-    if (fragment_clip_)
-      cloned->fragment_clip_ = fragment_clip_->Clone();
-    if (clip_path_clip_)
-      cloned->clip_path_clip_ = clip_path_clip_->Clone();
-    if (mask_clip_)
-      cloned->mask_clip_ = mask_clip_->Clone();
-    if (css_clip_)
-      cloned->css_clip_ = css_clip_->Clone();
-    if (css_clip_fixed_position_)
-      cloned->css_clip_fixed_position_ = css_clip_fixed_position_->Clone();
-    if (overflow_controls_clip_)
-      cloned->overflow_controls_clip_ = overflow_controls_clip_->Clone();
-    if (inner_border_radius_clip_)
-      cloned->inner_border_radius_clip_ = inner_border_radius_clip_->Clone();
-    if (overflow_clip_)
-      cloned->overflow_clip_ = overflow_clip_->Clone();
-    if (perspective_)
-      cloned->perspective_ = perspective_->Clone();
-    if (svg_local_to_border_box_transform_) {
-      cloned->svg_local_to_border_box_transform_ =
-          svg_local_to_border_box_transform_->Clone();
-    }
-    if (scroll_)
-      cloned->scroll_ = scroll_->Clone();
-    if (scroll_translation_)
-      cloned->scroll_translation_ = scroll_translation_->Clone();
-    return cloned;
+  // Used by FindPropertiesNeedingUpdate.h for verifying state doesn't change.
+  void SetImmutable() const { is_immutable_ = true; }
+  bool IsImmutable() const { return is_immutable_; }
+  void SetMutable() const { is_immutable_ = false; }
+
+  void Validate() {
+    DCHECK(!ScrollTranslation() || !ReplacedContentTransform())
+        << "Replaced elements don't scroll so there should never be both a "
+           "scroll translation and a replaced content transform.";
+    DCHECK(!ClipPathClip() || !ClipPath())
+        << "ClipPathClip and ClipPathshould be mutually exclusive.";
+    DCHECK((!TransformIsolationNode() && !ClipIsolationNode() &&
+            !EffectIsolationNode()) ||
+           (TransformIsolationNode() && ClipIsolationNode() &&
+            EffectIsolationNode()))
+        << "Isolation nodes have to be created for all of transform, clip, and "
+           "effect trees.";
   }
 #endif
 
  private:
-  friend const ClipPaintPropertyNode* OverflowClip(
-      const ObjectPaintProperties&);
-
   ObjectPaintProperties() = default;
 
   // Return true if the property tree structure changes (an existing node was
@@ -335,50 +260,36 @@ class CORE_EXPORT ObjectPaintProperties {
   // Return true if the property tree structure changes (a new node was
   // created), and false otherwise. See the class-level comment ("update & clear
   // implementation note") for details about why this is needed for efficiency.
-  template <typename PaintPropertyNode, typename... Args>
-  UpdateResult Update(scoped_refptr<PaintPropertyNode>& field, Args&&... args) {
+  template <typename PaintPropertyNode>
+  UpdateResult Update(scoped_refptr<PaintPropertyNode>& field,
+                      const PaintPropertyNode& parent,
+                      typename PaintPropertyNode::State&& state) {
     if (field) {
-      return field->Update(std::forward<Args>(args)...)
+      return field->Update(parent, std::move(state))
                  ? UpdateResult::kValueChanged
                  : UpdateResult::kUnchanged;
     }
-    field = PaintPropertyNode::Create(std::forward<Args>(args)...);
+    field = PaintPropertyNode::Create(parent, std::move(state));
+    return UpdateResult::kNewNodeCreated;
+  }
+  template <typename PaintPropertyNode>
+  UpdateResult UpdateAlias(scoped_refptr<PaintPropertyNode>& field,
+                           const PaintPropertyNode& parent) {
+    if (field) {
+      DCHECK(field->IsParentAlias());
+      return field->SetParent(&parent) ? UpdateResult::kValueChanged
+                                       : UpdateResult::kUnchanged;
+    }
+    field = PaintPropertyNode::CreateAlias(parent);
     return UpdateResult::kNewNodeCreated;
   }
 
-  // ATTENTION! Make sure to keep FindPropertiesNeedingUpdate.h in sync when
-  // new properites are added!
-  scoped_refptr<TransformPaintPropertyNode> paint_offset_translation_;
-  scoped_refptr<TransformPaintPropertyNode> transform_;
-  scoped_refptr<EffectPaintPropertyNode> effect_;
-  scoped_refptr<EffectPaintPropertyNode> filter_;
-  scoped_refptr<EffectPaintPropertyNode> mask_;
-  scoped_refptr<EffectPaintPropertyNode> clip_path_;
-  scoped_refptr<ClipPaintPropertyNode> fragment_clip_;
-  scoped_refptr<ClipPaintPropertyNode> clip_path_clip_;
-  scoped_refptr<ClipPaintPropertyNode> mask_clip_;
-  scoped_refptr<ClipPaintPropertyNode> css_clip_;
-  scoped_refptr<ClipPaintPropertyNode> css_clip_fixed_position_;
-  scoped_refptr<ClipPaintPropertyNode> overflow_controls_clip_;
-  scoped_refptr<ClipPaintPropertyNode> inner_border_radius_clip_;
-  scoped_refptr<ClipPaintPropertyNode> overflow_clip_;
-  scoped_refptr<TransformPaintPropertyNode> perspective_;
-  // TODO(pdr): Only LayoutSVGRoot needs this and it should be moved there.
-  scoped_refptr<TransformPaintPropertyNode> svg_local_to_border_box_transform_;
-  scoped_refptr<ScrollPaintPropertyNode> scroll_;
-  scoped_refptr<TransformPaintPropertyNode> scroll_translation_;
+  // This is used in DCHECKs only, but is not guarded by DCHECK_IS_ON() because
+  // we can't have a similar guard in a macro definition.
+  mutable bool is_immutable_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(ObjectPaintProperties);
 };
-
-// ObjectPaintProperties doesn't provide public OverflowClip() method to avoid
-// misuse because in most cases we want OverflowOrInnerBorderRadiusClip().
-// This function returns the actual OverflowClip for actual requirements of
-// mere OverflowClip, e.g. PaintPropertyTreePrinter, tests etc.
-inline const ClipPaintPropertyNode* OverflowClip(
-    const ObjectPaintProperties& properties) {
-  return properties.overflow_clip_.get();
-}
 
 }  // namespace blink
 

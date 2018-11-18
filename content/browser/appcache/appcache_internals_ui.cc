@@ -13,6 +13,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/post_task.h"
 #include "base/threading/platform_thread.h"
 #include "base/values.h"
 #include "content/browser/appcache/appcache.h"
@@ -20,6 +21,7 @@
 #include "content/browser/storage_partition_impl.h"
 #include "content/grit/content_resources.h"
 #include "content/public/browser/browser_context.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
@@ -127,7 +129,7 @@ GetDictionaryValueForAppCacheResourceInfo(
 }
 
 std::unique_ptr<base::ListValue> GetListValueForAppCacheResourceInfoVector(
-    AppCacheResourceInfoVector* resource_info_vector) {
+    std::vector<AppCacheResourceInfo>* resource_info_vector) {
   std::unique_ptr<base::ListValue> list(new base::ListValue);
   for (const AppCacheResourceInfo& res_info : *resource_info_vector)
     list->Append(GetDictionaryValueForAppCacheResourceInfo(res_info));
@@ -145,8 +147,8 @@ AppCacheInternalsUI::Proxy::Proxy(
 void AppCacheInternalsUI::Proxy::Initialize(
     const scoped_refptr<ChromeAppCacheService>& chrome_appcache_service) {
   if (!BrowserThread::CurrentlyOn(BrowserThread::IO)) {
-    BrowserThread::PostTask(
-        BrowserThread::IO, FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, {BrowserThread::IO},
         base::BindOnce(&Proxy::Initialize, this, chrome_appcache_service));
     return;
   }
@@ -161,8 +163,8 @@ AppCacheInternalsUI::Proxy::~Proxy() {
 
 void AppCacheInternalsUI::Proxy::Shutdown() {
   if (!BrowserThread::CurrentlyOn(BrowserThread::IO)) {
-    BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
-                            base::BindOnce(&Proxy::Shutdown, this));
+    base::PostTaskWithTraits(FROM_HERE, {BrowserThread::IO},
+                             base::BindOnce(&Proxy::Shutdown, this));
     return;
   }
   shutdown_called_ = true;
@@ -175,8 +177,8 @@ void AppCacheInternalsUI::Proxy::Shutdown() {
 
 void AppCacheInternalsUI::Proxy::RequestAllAppCacheInfo() {
   if (!BrowserThread::CurrentlyOn(BrowserThread::IO)) {
-    BrowserThread::PostTask(
-        BrowserThread::IO, FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, {BrowserThread::IO},
         base::BindOnce(&Proxy::RequestAllAppCacheInfo, this));
     return;
   }
@@ -192,8 +194,8 @@ void AppCacheInternalsUI::Proxy::RequestAllAppCacheInfo() {
 void AppCacheInternalsUI::Proxy::OnAllAppCacheInfoReady(
     scoped_refptr<AppCacheInfoCollection> collection,
     int net_result_code) {
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::UI},
       base::BindOnce(&AppCacheInternalsUI::OnAllAppCacheInfoReady,
                      appcache_internals_ui_, collection, partition_path_));
 }
@@ -201,8 +203,8 @@ void AppCacheInternalsUI::Proxy::OnAllAppCacheInfoReady(
 void AppCacheInternalsUI::Proxy::DeleteAppCache(
     const std::string& manifest_url) {
   if (!BrowserThread::CurrentlyOn(BrowserThread::IO)) {
-    BrowserThread::PostTask(
-        BrowserThread::IO, FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, {BrowserThread::IO},
         base::BindOnce(&Proxy::DeleteAppCache, this, manifest_url));
     return;
   }
@@ -216,8 +218,8 @@ void AppCacheInternalsUI::Proxy::DeleteAppCache(
 void AppCacheInternalsUI::Proxy::OnAppCacheInfoDeleted(
     const std::string& manifest_url,
     int net_result_code) {
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::UI},
       base::BindOnce(&AppCacheInternalsUI::OnAppCacheInfoDeleted,
                      appcache_internals_ui_, partition_path_, manifest_url,
                      net_result_code == net::OK));
@@ -226,8 +228,8 @@ void AppCacheInternalsUI::Proxy::OnAppCacheInfoDeleted(
 void AppCacheInternalsUI::Proxy::RequestAppCacheDetails(
     const std::string& manifest_url) {
   if (!BrowserThread::CurrentlyOn(BrowserThread::IO)) {
-    BrowserThread::PostTask(
-        BrowserThread::IO, FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, {BrowserThread::IO},
         base::BindOnce(&Proxy::RequestAppCacheDetails, this, manifest_url));
     return;
   }
@@ -238,16 +240,16 @@ void AppCacheInternalsUI::Proxy::RequestAppCacheDetails(
 
 void AppCacheInternalsUI::Proxy::OnGroupLoaded(AppCacheGroup* appcache_group,
                                                const GURL& manifest_gurl) {
-  std::unique_ptr<AppCacheResourceInfoVector> resource_info_vector;
+  std::unique_ptr<std::vector<AppCacheResourceInfo>> resource_info_vector;
   if (appcache_group && appcache_group->newest_complete_cache()) {
-    resource_info_vector.reset(new AppCacheResourceInfoVector);
+    resource_info_vector.reset(new std::vector<AppCacheResourceInfo>);
     appcache_group->newest_complete_cache()->ToResourceInfoVector(
         resource_info_vector.get());
     std::sort(resource_info_vector->begin(), resource_info_vector->end(),
               SortByResourceUrl);
   }
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::UI},
       base::BindOnce(&AppCacheInternalsUI::OnAppCacheDetailsReady,
                      appcache_internals_ui_, partition_path_,
                      manifest_gurl.spec(), std::move(resource_info_vector)));
@@ -256,8 +258,8 @@ void AppCacheInternalsUI::Proxy::OnGroupLoaded(AppCacheGroup* appcache_group,
 void AppCacheInternalsUI::Proxy::RequestFileDetails(
     const ResponseEnquiry& response_enquiry) {
   if (!BrowserThread::CurrentlyOn(BrowserThread::IO)) {
-    BrowserThread::PostTask(
-        BrowserThread::IO, FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, {BrowserThread::IO},
         base::BindOnce(&Proxy::RequestFileDetails, this, response_enquiry));
     return;
   }
@@ -289,11 +291,12 @@ void AppCacheInternalsUI::Proxy::OnResponseInfoLoaded(
     const int64_t kLimit = 100 * 1000;
     int64_t amount_to_read =
         std::min(kLimit, response_info->response_data_size());
-    scoped_refptr<net::IOBuffer> response_data(
-        new net::IOBuffer(base::checked_cast<size_t>(amount_to_read)));
-    std::unique_ptr<AppCacheResponseReader> reader(
+    scoped_refptr<net::IOBuffer> response_data =
+        base::MakeRefCounted<net::IOBuffer>(
+            base::checked_cast<size_t>(amount_to_read));
+    std::unique_ptr<AppCacheResponseReader> reader =
         appcache_service_->storage()->CreateResponseReader(
-            GURL(response_enquiry.manifest_url), response_enquiry.response_id));
+            GURL(response_enquiry.manifest_url), response_enquiry.response_id);
 
     reader->ReadData(response_data.get(), amount_to_read,
                      base::BindOnce(&Proxy::OnResponseDataReadComplete, this,
@@ -313,14 +316,14 @@ void AppCacheInternalsUI::Proxy::OnResponseDataReadComplete(
   if (shutdown_called_)
     return;
   if (!response_info || net_result_code < 0) {
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, {BrowserThread::UI},
         base::BindOnce(&AppCacheInternalsUI::OnFileDetailsFailed,
                        appcache_internals_ui_, response_enquiry,
                        net_result_code));
   } else {
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, {BrowserThread::UI},
         base::BindOnce(&AppCacheInternalsUI::OnFileDetailsReady,
                        appcache_internals_ui_, response_enquiry, response_info,
                        response_data, net_result_code));
@@ -350,6 +353,8 @@ AppCacheInternalsUI::AppCacheInternalsUI(WebUI* web_ui)
 
   WebUIDataSource* source =
       WebUIDataSource::Create(kChromeUIAppCacheInternalsHost);
+  source->OverrideContentSecurityPolicyScriptSrc(
+      "script-src chrome://resources 'self' 'unsafe-eval';");
 
   source->SetJsonPath("strings.js");
   source->AddResourcePath("appcache_internals.js", IDR_APPCACHE_INTERNALS_JS);
@@ -443,7 +448,7 @@ void AppCacheInternalsUI::OnAppCacheInfoDeleted(
 void AppCacheInternalsUI::OnAppCacheDetailsReady(
     const base::FilePath& partition_path,
     const std::string& manifest_url,
-    std::unique_ptr<AppCacheResourceInfoVector> resource_info_vector) {
+    std::unique_ptr<std::vector<AppCacheResourceInfo>> resource_info_vector) {
   if (resource_info_vector) {
     web_ui()->CallJavascriptFunctionUnsafe(
         kFunctionOnAppCacheDetailsReady, base::Value(manifest_url),
@@ -462,25 +467,22 @@ void AppCacheInternalsUI::OnFileDetailsReady(
     scoped_refptr<net::IOBuffer> response_data,
     int data_length) {
   std::string headers;
-  if (response_info->http_response_info()) {
-    headers.append("<hr><pre>");
-    headers.append(net::EscapeForHTML(
-        response_info->http_response_info()->headers->GetStatusLine()));
-    headers.push_back('\n');
+  headers.append("<hr><pre>");
+  headers.append(net::EscapeForHTML(
+      response_info->http_response_info().headers->GetStatusLine()));
+  headers.push_back('\n');
 
-    size_t iter = 0;
-    std::string name, value;
-    while (response_info->http_response_info()->headers->EnumerateHeaderLines(
-        &iter, &name, &value)) {
-      headers.append(net::EscapeForHTML(name));
-      headers.append(": ");
-      headers.append(net::EscapeForHTML(value));
-      headers.push_back('\n');
-    }
-    headers.append("</pre>");
-  } else {
-    headers.append("Failed to read response headers. <br>");
+  size_t iter = 0;
+  std::string name, value;
+  while (response_info->http_response_info().headers->EnumerateHeaderLines(
+      &iter, &name, &value)) {
+    headers.append(net::EscapeForHTML(name));
+    headers.append(": ");
+    headers.append(net::EscapeForHTML(value));
+    headers.push_back('\n');
   }
+  headers.append("</pre>");
+
   std::string hex_dump = base::StringPrintf(
       "<hr><pre> Showing %d of %d bytes\n\n", static_cast<int>(data_length),
       static_cast<int>(response_info->response_data_size()));

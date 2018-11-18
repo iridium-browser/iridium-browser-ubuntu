@@ -9,7 +9,6 @@ import android.support.v7.widget.RecyclerView;
 import org.chromium.base.Callback;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
-import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.ntp.NewTabPage;
 import org.chromium.chrome.browser.ntp.snippets.CategoryInt;
 import org.chromium.chrome.browser.ntp.snippets.FaviconFetchResult;
@@ -30,20 +29,14 @@ public abstract class SuggestionsMetrics {
     // UI Element interactions
 
     public static void recordSurfaceVisible() {
-        if (!ChromePreferenceManager.getInstance().getSuggestionsSurfaceShown()) {
+        if (!ChromePreferenceManager.getInstance().readBoolean(
+                    ChromePreferenceManager.CONTENT_SUGGESTIONS_SHOWN_KEY, false)) {
             RecordUserAction.record("Suggestions.FirstTimeSurfaceVisible");
-            ChromePreferenceManager.getInstance().setSuggestionsSurfaceShown();
+            ChromePreferenceManager.getInstance().writeBoolean(
+                    ChromePreferenceManager.CONTENT_SUGGESTIONS_SHOWN_KEY, true);
         }
 
         RecordUserAction.record("Suggestions.SurfaceVisible");
-    }
-
-    public static void recordSurfaceHalfVisible() {
-        RecordUserAction.record("Suggestions.SurfaceHalfVisible");
-    }
-
-    public static void recordSurfaceFullyVisible() {
-        RecordUserAction.record("Suggestions.SurfaceFullyVisible");
     }
 
     public static void recordSurfaceHidden() {
@@ -72,18 +65,6 @@ public abstract class SuggestionsMetrics {
 
     public static void recordCardSwipedAway() {
         RecordUserAction.record("Suggestions.Card.SwipedAway");
-    }
-
-    public static void recordContextualSuggestionOpened() {
-        RecordUserAction.record("Suggestions.ContextualSuggestion.Open");
-    }
-
-    public static void recordContextualSuggestionsCarouselShown() {
-        RecordUserAction.record("Suggestions.Contextual.Carousel.Shown");
-    }
-
-    public static void recordContextualSuggestionsCarouselScrolled() {
-        RecordUserAction.record("Suggestions.Contextual.Carousel.Scrolled");
     }
 
     // Effect/Purpose of the interactions. Most are recorded in |content_suggestions_metrics.h|
@@ -116,11 +97,6 @@ public abstract class SuggestionsMetrics {
      * Records whether article suggestions are set visible by user.
      */
     public static void recordArticlesListVisible() {
-        if (!ChromeFeatureList.isEnabled(
-                    ChromeFeatureList.NTP_ARTICLE_SUGGESTIONS_EXPANDABLE_HEADER)) {
-            return;
-        }
-
         RecordHistogram.recordBooleanHistogram("NewTabPage.ContentSuggestions.ArticlesListVisible",
                 PrefServiceBridge.getInstance().getBoolean(Pref.NTP_ARTICLES_LIST_VISIBLE));
     }

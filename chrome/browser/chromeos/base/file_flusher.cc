@@ -12,7 +12,8 @@
 #include "base/files/file_enumerator.h"
 #include "base/logging.h"
 #include "base/synchronization/cancellation_flag.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 
 namespace chromeos {
@@ -98,7 +99,7 @@ void FileFlusher::Job::Start() {
   }
 
   base::PostTaskWithTraitsAndReply(
-      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
       base::Bind(&FileFlusher::Job::FlushAsync, base::Unretained(this)),
       base::Bind(&FileFlusher::Job::FinishOnUIThread, base::Unretained(this)));
 }
@@ -148,8 +149,8 @@ void FileFlusher::Job::ScheduleFinish() {
     return;
 
   finish_scheduled_ = true;
-  content::BrowserThread::PostTask(
-      content::BrowserThread::UI, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {content::BrowserThread::UI},
       base::Bind(&Job::FinishOnUIThread, base::Unretained(this)));
 }
 

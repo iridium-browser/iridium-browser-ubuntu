@@ -7,7 +7,7 @@
 #include <algorithm>
 #include <memory>
 
-#include "ash/ash_constants.h"
+#include "ash/public/cpp/ash_constants.h"
 #include "ash/shelf/ink_drop_button_listener.h"
 #include "ash/shelf/shelf.h"
 #include "ash/shelf/shelf_constants.h"
@@ -15,6 +15,7 @@
 #include "ash/system/tray/tray_popup_utils.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/time/time.h"
+#include "chromeos/chromeos_switches.h"
 #include "skia/ext/image_operations.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/base/ui_base_features.h"
@@ -35,23 +36,22 @@
 
 namespace {
 
-constexpr int kIconSize = 32;
 constexpr int kStatusIndicatorAttentionThrobDurationMS = 800;
 constexpr int kStatusIndicatorMaxAnimationSeconds = 10;
-constexpr int kStatusIndicatorOffsetFromBottom = 3;
 constexpr int kStatusIndicatorRadiusDip = 2;
+constexpr int kStatusIndicatorMaxSize = 10;
+constexpr int kStatusIndicatorActiveSize = 8;
+constexpr int kStatusIndicatorRunningSize = 4;
+constexpr int kStatusIndicatorThickness = 2;
 constexpr int kNotificationIndicatorRadiusDip = 7;
-constexpr SkColor kIndicatorBorderColor = SkColorSetA(SK_ColorBLACK, 0x4D);
 constexpr SkColor kIndicatorColor = SK_ColorWHITE;
 
-// Shelf item ripple constants.
-constexpr int kInkDropSmallSize = 48;
-constexpr int kInkDropLargeSize = 60;
+// Slightly different colors and alpha in the new UI.
+constexpr SkColor kIndicatorColorActive = kIndicatorColor;
+constexpr SkColor kIndicatorColorRunning = SkColorSetA(SK_ColorWHITE, 0x7F);
 
-// Padding from the edge of the shelf to the application icon when the shelf
-// is horizontally and vertically aligned, respectively.
-constexpr int kIconPaddingHorizontal = 7;
-constexpr int kIconPaddingVertical = 8;
+// Shelf item ripple size.
+constexpr int kInkDropLargeSize = 60;
 
 // The time threshold before an item can be dragged.
 constexpr int kDragTimeThresholdMs = 300;
@@ -128,7 +128,7 @@ class ShelfButtonAnimation : public gfx::AnimationDelegate {
   }
 
   gfx::ThrobAnimation animation_;
-  base::ObserverList<Observer> observers_;
+  base::ObserverList<Observer>::Unchecked observers_;
 
   DISALLOW_COPY_AND_ASSIGN(ShelfButtonAnimation);
 };
@@ -189,8 +189,7 @@ class ShelfButton::AppStatusIndicatorView
     : public views::View,
       public ShelfButtonAnimation::Observer {
  public:
-  AppStatusIndicatorView()
-      : show_attention_(false), animation_end_time_(base::TimeTicks()) {
+  AppStatusIndicatorView() : show_attention_(false), active_(false) {
     // Make sure the events reach the parent view for handling.
     set_can_process_events_within_subtree(false);
   }
@@ -210,25 +209,33 @@ class ShelfButton::AppStatusIndicatorView
       canvas->SaveLayerAlpha(alpha);
     }
 
-    DCHECK_EQ(width(), height());
-    DCHECK_EQ(kStatusIndicatorRadiusDip, width() / 2);
     const float dsf = canvas->UndoDeviceScaleFactor();
-    const int kStrokeWidthPx = 1;
     gfx::PointF center = gfx::RectF(GetLocalBounds()).CenterPoint();
-    center.Scale(dsf);
-
-    // Fill the center.
     cc::PaintFlags flags;
-    flags.setColor(kIndicatorColor);
+    // Active and running indicators look a little different in the new UI.
+    flags.setColor(active_ ? kIndicatorColorActive : kIndicatorColorRunning);
     flags.setAntiAlias(true);
-    canvas->DrawCircle(center, dsf * kStatusIndicatorRadiusDip - kStrokeWidthPx,
-                       flags);
-
-    // Stroke the border.
-    flags.setColor(kIndicatorBorderColor);
+    flags.setStrokeCap(cc::PaintFlags::Cap::kRound_Cap);
+    flags.setStrokeJoin(cc::PaintFlags::Join::kRound_Join);
+    flags.setStrokeWidth(kStatusIndicatorThickness);
     flags.setStyle(cc::PaintFlags::kStroke_Style);
-    canvas->DrawCircle(
-        center, dsf * kStatusIndicatorRadiusDip - kStrokeWidthPx / 2.0f, flags);
+    float stroke_length =
+        active_ ? kStatusIndicatorActiveSize : kStatusIndicatorRunningSize;
+    gfx::PointF start;
+    gfx::PointF end;
+    if (horizontal_shelf_) {
+      start = gfx::PointF(center.x() - stroke_length / 2, center.y());
+      end = start;
+      end.Offset(stroke_length, 0);
+    } else {
+      start = gfx::PointF(center.x(), center.y() - stroke_length / 2);
+      end = start;
+      end.Offset(0, stroke_length);
+    }
+    gfx::Path path;
+    path.moveTo(start.x() * dsf, start.y() * dsf);
+    path.lineTo(end.x() * dsf, end.y() * dsf);
+    canvas->DrawPath(path, flags);
   }
 
   // ShelfButtonAnimation::Observer
@@ -252,13 +259,29 @@ class ShelfButton::AppStatusIndicatorView
     }
   }
 
+  void ShowActiveStatus(bool active) {
+    if (active_ == active)
+      return;
+    active_ = active;
+    SchedulePaint();
+  }
+
+  void SetHorizontalShelf(bool horizontal_shelf) {
+    if (horizontal_shelf_ == horizontal_shelf)
+      return;
+    horizontal_shelf_ = horizontal_shelf;
+    SchedulePaint();
+  }
+
  private:
   void UpdateAnimating() {
     if (base::TimeTicks::Now() > animation_end_time_)
       ShelfButtonAnimation::GetInstance()->RemoveObserver(this);
   }
 
-  bool show_attention_;
+  bool show_attention_ = false;
+  bool active_ = false;
+  bool horizontal_shelf_ = true;
   base::TimeTicks animation_end_time_;  // For attention throbbing underline.
 
   DISALLOW_COPY_AND_ASSIGN(AppStatusIndicatorView);
@@ -279,8 +302,8 @@ ShelfButton::ShelfButton(InkDropButtonListener* listener, ShelfView* shelf_view)
       notification_indicator_(nullptr),
       state_(STATE_NORMAL),
       destroyed_flag_(nullptr),
-      is_touchable_app_context_menu_enabled_(
-          features::IsTouchableAppContextMenuEnabled()) {
+      is_notification_indicator_enabled_(
+          features::IsNotificationIndicatorEnabled()) {
   SetFocusBehavior(FocusBehavior::ACCESSIBLE_ONLY);
   SetInkDropMode(InkDropMode::ON_NO_GESTURE_HANDLER);
   set_ink_drop_base_color(kShelfInkDropBaseColor);
@@ -305,7 +328,7 @@ ShelfButton::ShelfButton(InkDropButtonListener* listener, ShelfView* shelf_view)
 
   AddChildView(indicator_);
   AddChildView(icon_view_);
-  if (is_touchable_app_context_menu_enabled_) {
+  if (is_notification_indicator_enabled_) {
     notification_indicator_ = new AppNotificationIndicatorView(kIndicatorColor);
     notification_indicator_->SetPaintToLayer();
     notification_indicator_->layer()->SetFillsBoundsOpaquely(false);
@@ -333,13 +356,20 @@ void ShelfButton::SetImage(const gfx::ImageSkia& image) {
     return;
   }
 
+  const int icon_size = ShelfConstants::button_icon_size();
+
+  if (icon_size > image.width() || icon_size > image.height()) {
+    LOG(WARNING) << "An icon of size " << image.width() << "x" << image.height()
+                 << "is being scaled up and will look blurry.";
+  }
+
   // Resize the image maintaining our aspect ratio.
   float aspect_ratio =
       static_cast<float>(image.width()) / static_cast<float>(image.height());
-  int height = kIconSize;
+  int height = icon_size;
   int width = static_cast<int>(aspect_ratio * height);
-  if (width > kIconSize) {
-    width = kIconSize;
+  if (width > icon_size) {
+    width = icon_size;
     height = static_cast<int>(width / aspect_ratio);
   }
 
@@ -363,7 +393,10 @@ void ShelfButton::AddState(State state) {
     if (state & STATE_ATTENTION)
       indicator_->ShowAttention(true);
 
-    if (is_touchable_app_context_menu_enabled_ && (state & STATE_NOTIFICATION))
+    if (state & STATE_ACTIVE)
+      indicator_->ShowActiveStatus(true);
+
+    if (is_notification_indicator_enabled_ && (state & STATE_NOTIFICATION))
       notification_indicator_->SetVisible(true);
 
     if (state & STATE_DRAGGING)
@@ -377,8 +410,10 @@ void ShelfButton::ClearState(State state) {
     Layout();
     if (state & STATE_ATTENTION)
       indicator_->ShowAttention(false);
+    if (state & STATE_ACTIVE)
+      indicator_->ShowActiveStatus(false);
 
-    if (is_touchable_app_context_menu_enabled_ && (state & STATE_NOTIFICATION))
+    if (is_notification_indicator_enabled_ && (state & STATE_NOTIFICATION))
       notification_indicator_->SetVisible(false);
 
     if (state & STATE_DRAGGING)
@@ -399,8 +434,9 @@ void ShelfButton::OnDragStarted(const ui::LocatedEvent* event) {
 }
 
 void ShelfButton::OnMenuClosed() {
-  if (GetInkDrop()->GetTargetInkDropState() != views::InkDropState::DEACTIVATED)
-    GetInkDrop()->AnimateToState(views::InkDropState::DEACTIVATED);
+  DCHECK_EQ(views::InkDropState::ACTIVATED,
+            GetInkDrop()->GetTargetInkDropState());
+  GetInkDrop()->AnimateToState(views::InkDropState::DEACTIVATED);
 }
 
 void ShelfButton::ShowContextMenu(const gfx::Point& p,
@@ -412,9 +448,11 @@ void ShelfButton::ShowContextMenu(const gfx::Point& p,
   destroyed_flag_ = &destroyed;
 
   Button::ShowContextMenu(p, source_type);
-  UMA_HISTOGRAM_ENUMERATION("Apps.ContextMenuShowSource.ShelfButton",
-                            source_type, ui::MENU_SOURCE_TYPE_LAST);
 
+  if (source_type == ui::MenuSourceType::MENU_SOURCE_MOUSE ||
+      source_type == ui::MenuSourceType::MENU_SOURCE_KEYBOARD) {
+    GetInkDrop()->AnimateToState(views::InkDropState::ACTIVATED);
+  }
   if (!destroyed) {
     destroyed_flag_ = nullptr;
     // The menu will not propagate mouse events while its shown. To address,
@@ -478,21 +516,28 @@ void ShelfButton::GetAccessibleNodeData(ui::AXNodeData* node_data) {
 }
 
 void ShelfButton::Layout() {
+  // TODO: Find out why there is an extra pixel of padding between each item
+  // and the inner side of the shelf.
+  int icon_padding =
+      (ShelfConstants::shelf_size() - ShelfConstants::button_icon_size()) / 2 -
+      1;
+  const int icon_size = ShelfConstants::button_icon_size();
+  const int status_indicator_offet_from_shelf_edge =
+      ShelfConstants::status_indicator_offset_from_edge();
+
   const gfx::Rect button_bounds(GetContentsBounds());
   Shelf* shelf = shelf_view_->shelf();
   const bool is_horizontal_shelf = shelf->IsHorizontalAlignment();
-  const int icon_pad =
-      is_horizontal_shelf ? kIconPaddingHorizontal : kIconPaddingVertical;
-  int x_offset = is_horizontal_shelf ? 0 : icon_pad;
-  int y_offset = is_horizontal_shelf ? icon_pad : 0;
+  int x_offset = is_horizontal_shelf ? 0 : icon_padding;
+  int y_offset = is_horizontal_shelf ? icon_padding : 0;
 
-  int icon_width = std::min(kIconSize, button_bounds.width() - x_offset);
-  int icon_height = std::min(kIconSize, button_bounds.height() - y_offset);
+  int icon_width = std::min(icon_size, button_bounds.width() - x_offset);
+  int icon_height = std::min(icon_size, button_bounds.height() - y_offset);
 
   // If on the left or top 'invert' the inset so the constant gap is on
   // the interior (towards the center of display) edge of the shelf.
   if (SHELF_ALIGNMENT_LEFT == shelf->alignment())
-    x_offset = button_bounds.width() - (kIconSize + icon_pad);
+    x_offset = button_bounds.width() - (icon_size + icon_padding);
 
   // Center icon with respect to the secondary axis.
   if (is_horizontal_shelf)
@@ -511,7 +556,7 @@ void ShelfButton::Layout() {
 
   // The indicators should be aligned with the icon, not the icon + shadow.
   gfx::Point indicator_midpoint = icon_view_bounds.CenterPoint();
-  if (is_touchable_app_context_menu_enabled_) {
+  if (is_notification_indicator_enabled_) {
     notification_indicator_->SetBoundsRect(
         gfx::Rect(icon_view_bounds.right() - kNotificationIndicatorRadiusDip,
                   icon_view_bounds.y(), kNotificationIndicatorRadiusDip * 2,
@@ -525,29 +570,29 @@ void ShelfButton::Layout() {
   // Icon size has been incorrect when running
   // PanelLayoutManagerTest.PanelAlignmentSecondDisplay on valgrind bot, see
   // http://crbug.com/234854.
-  DCHECK_LE(icon_width, kIconSize);
-  DCHECK_LE(icon_height, kIconSize);
+  DCHECK_LE(icon_width, icon_size);
+  DCHECK_LE(icon_height, icon_size);
 
   switch (shelf->alignment()) {
     case SHELF_ALIGNMENT_BOTTOM:
     case SHELF_ALIGNMENT_BOTTOM_LOCKED:
       indicator_midpoint.set_y(button_bounds.bottom() -
                                kStatusIndicatorRadiusDip -
-                               kStatusIndicatorOffsetFromBottom);
+                               status_indicator_offet_from_shelf_edge);
       break;
     case SHELF_ALIGNMENT_LEFT:
       indicator_midpoint.set_x(button_bounds.x() + kStatusIndicatorRadiusDip +
-                               kStatusIndicatorOffsetFromBottom);
+                               status_indicator_offet_from_shelf_edge);
       break;
     case SHELF_ALIGNMENT_RIGHT:
       indicator_midpoint.set_x(button_bounds.right() -
                                kStatusIndicatorRadiusDip -
-                               kStatusIndicatorOffsetFromBottom);
+                               status_indicator_offet_from_shelf_edge);
       break;
   }
 
   gfx::Rect indicator_bounds(indicator_midpoint, gfx::Size());
-  indicator_bounds.Inset(gfx::Insets(-kStatusIndicatorRadiusDip));
+  indicator_bounds.Inset(gfx::Insets(-kStatusIndicatorMaxSize));
   indicator_->SetBoundsRect(indicator_bounds);
 
   UpdateState();
@@ -576,8 +621,11 @@ void ShelfButton::OnGestureEvent(ui::GestureEvent* event) {
       // If the button is being dragged, or there is an active context menu,
       // for this ShelfButton, don't deactivate the ink drop.
       if (!(state_ & STATE_DRAGGING) &&
-          !shelf_view_->IsShowingMenuForView(this))
+          !shelf_view_->IsShowingMenuForView(this) &&
+          (GetInkDrop()->GetTargetInkDropState() ==
+           views::InkDropState::ACTIVATED)) {
         GetInkDrop()->AnimateToState(views::InkDropState::DEACTIVATED);
+      }
       ClearState(STATE_HOVERED);
       ClearState(STATE_DRAGGING);
       break;
@@ -623,11 +671,12 @@ void ShelfButton::OnGestureEvent(ui::GestureEvent* event) {
 }
 
 std::unique_ptr<views::InkDropRipple> ShelfButton::CreateInkDropRipple() const {
+  const int ink_drop_small_size = ash::ShelfConstants::shelf_size();
   return std::make_unique<views::SquareInkDropRipple>(
       gfx::Size(kInkDropLargeSize, kInkDropLargeSize),
-      kInkDropLargeCornerRadius,
-      gfx::Size(kInkDropSmallSize, kInkDropSmallSize),
-      kInkDropSmallCornerRadius, GetLocalBounds().CenterPoint(),
+      ink_drop_large_corner_radius(),
+      gfx::Size(ink_drop_small_size, ink_drop_small_size),
+      ink_drop_small_corner_radius(), GetLocalBounds().CenterPoint(),
       GetInkDropBaseColor(), ink_drop_visible_opacity());
 }
 
@@ -652,11 +701,14 @@ void ShelfButton::NotifyClick(const ui::Event& event) {
 }
 
 void ShelfButton::UpdateState() {
-  indicator_->SetVisible(!(state_ & STATE_HIDDEN) &&
-                         (state_ & STATE_ATTENTION || state_ & STATE_RUNNING));
-
   const bool is_horizontal_shelf =
       shelf_view_->shelf()->IsHorizontalAlignment();
+
+  indicator_->SetVisible(!(state_ & STATE_HIDDEN) &&
+                         (state_ & STATE_ATTENTION || state_ & STATE_RUNNING ||
+                          state_ & STATE_ACTIVE));
+  indicator_->SetHorizontalShelf(is_horizontal_shelf);
+
   icon_view_->SetHorizontalAlignment(is_horizontal_shelf
                                          ? views::ImageView::CENTER
                                          : views::ImageView::LEADING);

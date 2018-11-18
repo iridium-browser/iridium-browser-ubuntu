@@ -10,18 +10,20 @@
 #include "base/command_line.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "build/build_config.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/push_messaging_service.h"
 #include "content/public/browser/resource_context.h"
+#include "content/shell/browser/layout_test/layout_test_background_fetch_delegate.h"
 #include "content/shell/browser/layout_test/layout_test_download_manager_delegate.h"
 #include "content/shell/browser/layout_test/layout_test_permission_manager.h"
 #include "content/shell/browser/layout_test/layout_test_push_messaging_service.h"
 #include "content/shell/browser/layout_test/layout_test_url_request_context_getter.h"
 #include "content/shell/browser/shell_url_request_context_getter.h"
 #include "content/test/mock_background_sync_controller.h"
-#include "device/geolocation/public/cpp/scoped_geolocation_overrider.h"
+#include "services/device/public/cpp/test/scoped_geolocation_overrider.h"
 
 #if defined(OS_WIN)
 #include "base/base_paths_win.h"
@@ -52,7 +54,7 @@ LayoutTestBrowserContext::CreateURLRequestContextGetter(
     URLRequestInterceptorScopedVector request_interceptors) {
   return new LayoutTestURLRequestContextGetter(
       ignore_certificate_errors(), IsOffTheRecord(), GetPath(),
-      BrowserThread::GetTaskRunnerForThread(BrowserThread::IO),
+      base::CreateSingleThreadTaskRunnerWithTraits({BrowserThread::IO}),
       protocol_handlers, std::move(request_interceptors), net_log());
 }
 
@@ -70,27 +72,42 @@ LayoutTestBrowserContext::GetDownloadManagerDelegate() {
 }
 
 PushMessagingService* LayoutTestBrowserContext::GetPushMessagingService() {
-  if (!push_messaging_service_)
-    push_messaging_service_.reset(new LayoutTestPushMessagingService());
+  if (!push_messaging_service_) {
+    push_messaging_service_ =
+        std::make_unique<LayoutTestPushMessagingService>();
+  }
   return push_messaging_service_.get();
 }
 
-PermissionManager* LayoutTestBrowserContext::GetPermissionManager() {
+PermissionControllerDelegate*
+LayoutTestBrowserContext::GetPermissionControllerDelegate() {
   if (!permission_manager_.get())
-    permission_manager_.reset(new LayoutTestPermissionManager());
+    permission_manager_ = std::make_unique<LayoutTestPermissionManager>();
   return permission_manager_.get();
+}
+
+BackgroundFetchDelegate*
+LayoutTestBrowserContext::GetBackgroundFetchDelegate() {
+  if (!background_fetch_delegate_) {
+    background_fetch_delegate_ =
+        std::make_unique<LayoutTestBackgroundFetchDelegate>(this);
+  }
+  return background_fetch_delegate_.get();
 }
 
 BackgroundSyncController*
 LayoutTestBrowserContext::GetBackgroundSyncController() {
-  if (!background_sync_controller_)
-    background_sync_controller_.reset(new MockBackgroundSyncController());
+  if (!background_sync_controller_) {
+    background_sync_controller_ =
+        std::make_unique<MockBackgroundSyncController>();
+  }
   return background_sync_controller_.get();
 }
 
 LayoutTestPermissionManager*
 LayoutTestBrowserContext::GetLayoutTestPermissionManager() {
-  return static_cast<LayoutTestPermissionManager*>(GetPermissionManager());
+  return static_cast<LayoutTestPermissionManager*>(
+      GetPermissionControllerDelegate());
 }
 
 }  // namespace content

@@ -8,6 +8,8 @@
 #include <memory>
 #include <string>
 
+#include "ash/public/cpp/app_menu_constants.h"
+#include "base/callback.h"
 #include "base/macros.h"
 #include "ui/base/models/simple_menu_model.h"
 
@@ -21,36 +23,15 @@ class AppContextMenuDelegate;
 // Base class of all context menus in app list view.
 class AppContextMenu : public ui::SimpleMenuModel::Delegate {
  public:
-  // Defines command ids, used in context menu of all types.
-  // These are used in histograms, do not remove/renumber entries. Only add at
-  // the end just before USE_LAUNCH_TYPE_COMMAND_END or after INSTALL and before
-  // USE_LAUNCH_TYPE_COMMAND_START. If you're adding to this enum with the
-  // intention that it will be logged, add checks to ensure stability of the
-  // enum and update the ChromeOSUICommands enum listing in
-  // tools/metrics/histograms/enums.xml.
-  enum CommandId {
-    LAUNCH_NEW = 100,
-    TOGGLE_PIN = 101,
-    SHOW_APP_INFO = 102,
-    OPTIONS = 103,
-    UNINSTALL = 104,
-    REMOVE_FROM_FOLDER = 105,
-    MENU_NEW_WINDOW = 106,
-    MENU_NEW_INCOGNITO_WINDOW = 107,
-    INSTALL = 108,
-    // Order matters in USE_LAUNCH_TYPE_* and must match the LaunchType enum.
-    USE_LAUNCH_TYPE_COMMAND_START = 200,
-    USE_LAUNCH_TYPE_PINNED = USE_LAUNCH_TYPE_COMMAND_START,
-    USE_LAUNCH_TYPE_REGULAR = 201,
-    USE_LAUNCH_TYPE_FULLSCREEN = 202,
-    USE_LAUNCH_TYPE_WINDOW = 203,
-    USE_LAUNCH_TYPE_COMMAND_END,
-  };
-
+  AppContextMenu(AppContextMenuDelegate* delegate,
+                 Profile* profile,
+                 const std::string& app_id,
+                 AppListControllerDelegate* controller);
   ~AppContextMenu() override;
 
-  // Note this could return nullptr if corresponding app item is gone.
-  virtual ui::MenuModel* GetMenuModel();
+  using GetMenuModelCallback =
+      base::OnceCallback<void(std::unique_ptr<ui::MenuModel>)>;
+  virtual void GetMenuModel(GetMenuModelCallback callback);
 
   // ui::SimpleMenuModel::Delegate overrides:
   bool IsItemForCommandIdDynamic(int command_id) const override;
@@ -61,11 +42,6 @@ class AppContextMenu : public ui::SimpleMenuModel::Delegate {
   bool GetIconForCommandId(int command_id, gfx::Image* icon) const override;
 
  protected:
-  AppContextMenu(AppContextMenuDelegate* delegate,
-                 Profile* profile,
-                 const std::string& app_id,
-                 AppListControllerDelegate* controller);
-
   // Creates default items, derived class may override to add their specific
   // items.
   virtual void BuildMenu(ui::SimpleMenuModel* menu_model);
@@ -74,7 +50,9 @@ class AppContextMenu : public ui::SimpleMenuModel::Delegate {
   void TogglePin(const std::string& shelf_app_id);
 
   // Helper method to add touchable or normal context menu options.
-  void AddContextMenuOption(CommandId command_id, int string_id);
+  void AddContextMenuOption(ui::SimpleMenuModel* menu_model,
+                            ash::CommandId command_id,
+                            int string_id);
 
   // Helper method to get the gfx::VectorIcon for a |command_id|. Returns an
   // empty gfx::VectorIcon if there is no icon for this |command_id|.
@@ -91,8 +69,6 @@ class AppContextMenu : public ui::SimpleMenuModel::Delegate {
   Profile* profile_;
   const std::string app_id_;
   AppListControllerDelegate* controller_;
-
-  std::unique_ptr<ui::SimpleMenuModel> menu_model_;
 
   DISALLOW_COPY_AND_ASSIGN(AppContextMenu);
 };

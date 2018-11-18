@@ -9,10 +9,9 @@
 #include <algorithm>
 #include <utility>
 
-CFX_BinaryBuf::CFX_BinaryBuf()
-    : m_AllocStep(0), m_AllocSize(0), m_DataSize(0) {}
+CFX_BinaryBuf::CFX_BinaryBuf() = default;
 
-CFX_BinaryBuf::~CFX_BinaryBuf() {}
+CFX_BinaryBuf::~CFX_BinaryBuf() = default;
 
 void CFX_BinaryBuf::Delete(size_t start_index, size_t count) {
   if (!m_pBuffer || count > m_DataSize || start_index > m_DataSize - count)
@@ -37,8 +36,7 @@ std::unique_ptr<uint8_t, FxFreeDeleter> CFX_BinaryBuf::DetachBuffer() {
   return std::move(m_pBuffer);
 }
 
-void CFX_BinaryBuf::EstimateSize(size_t size, size_t step) {
-  m_AllocStep = step;
+void CFX_BinaryBuf::EstimateSize(size_t size) {
   if (m_AllocSize < size)
     ExpandBuf(size - m_DataSize);
 }

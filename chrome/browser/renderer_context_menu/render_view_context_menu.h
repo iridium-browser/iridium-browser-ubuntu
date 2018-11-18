@@ -80,7 +80,9 @@ class RenderViewContextMenu : public RenderViewContextMenuBase {
       base::OnceCallback<void(RenderViewContextMenu*)> cb);
 
  protected:
-  Profile* GetProfile();
+  Profile* GetProfile() const;
+
+  // This may return nullptr (e.g. for WebUI dialogs).
   Browser* GetBrowser() const;
 
   // Returns a (possibly truncated) version of the current selection text
@@ -98,6 +100,10 @@ class RenderViewContextMenu : public RenderViewContextMenuBase {
   // Returns true if the browser is in HTML fullscreen mode, initiated by the
   // page (as opposed to the user). Used to determine which shortcut to display.
   bool IsHTML5Fullscreen() const;
+
+  // Returns true if keyboard lock is active and requires the user to press and
+  // hold escape to exit exclusive access mode.
+  bool IsPressAndHoldEscRequiredToExitFullscreen() const;
 
  private:
   friend class RenderViewContextMenuTest;
@@ -133,6 +139,7 @@ class RenderViewContextMenu : public RenderViewContextMenuBase {
   void AppendDevtoolsForUnpackedExtensions();
   void AppendLinkItems();
   void AppendOpenWithLinkItems();
+  void AppendSmartSelectionActionItems();
   void AppendOpenInBookmarkAppLinkItems();
   void AppendImageItems();
   void AppendAudioItems();
@@ -239,6 +246,9 @@ class RenderViewContextMenu : public RenderViewContextMenuBase {
 #if defined(OS_CHROMEOS)
   // An observer that handles "Open with <app>" items.
   std::unique_ptr<RenderViewContextMenuObserver> open_with_menu_observer_;
+  // An observer that handles smart text selection action items.
+  std::unique_ptr<RenderViewContextMenuObserver>
+      start_smart_selection_action_menu_observer_;
 #endif
 
 #if BUILDFLAG(ENABLE_PRINT_PREVIEW)

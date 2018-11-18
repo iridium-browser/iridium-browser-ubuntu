@@ -26,6 +26,7 @@
 #include "third_party/blink/renderer/core/css/css_image_generator_value.h"
 #include "third_party/blink/renderer/platform/geometry/float_size.h"
 #include "third_party/blink/renderer/platform/geometry/layout_size.h"
+#include "third_party/blink/renderer/platform/graphics/image.h"
 
 namespace blink {
 
@@ -35,6 +36,13 @@ StyleGeneratedImage::StyleGeneratedImage(const CSSImageGeneratorValue& value)
   is_generated_image_ = true;
   if (value.IsPaintValue())
     is_paint_image_ = true;
+}
+
+bool StyleGeneratedImage::IsEqual(const StyleImage& other) const {
+  if (!other.IsGeneratedImage())
+    return false;
+  const auto& other_generated = ToStyleGeneratedImage(other);
+  return image_generator_value_ == other_generated.image_generator_value_;
 }
 
 CSSValue* StyleGeneratedImage::CssValue() const {

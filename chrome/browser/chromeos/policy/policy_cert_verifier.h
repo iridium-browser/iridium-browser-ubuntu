@@ -12,7 +12,7 @@
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "net/base/completion_callback.h"
+#include "net/base/completion_once_callback.h"
 #include "net/cert/cert_verifier.h"
 
 namespace net {
@@ -44,17 +44,15 @@ class PolicyCertVerifier : public net::CertVerifier {
   void SetTrustAnchors(const net::CertificateList& trust_anchors);
 
   // CertVerifier:
-  // Note: |callback| can be null.
   int Verify(const RequestParams& params,
-             net::CRLSet* crl_set,
              net::CertVerifyResult* verify_result,
-             const net::CompletionCallback& callback,
+             net::CompletionOnceCallback callback,
              std::unique_ptr<Request>* out_req,
              const net::NetLogWithSource& net_log) override;
-
-  bool SupportsOCSPStapling() override;
+  void SetConfig(const Config& config) override;
 
  private:
+  net::CertVerifier::Config orig_config_;
   net::CertificateList trust_anchors_;
   base::Closure anchor_used_callback_;
   std::unique_ptr<CertVerifier> delegate_;

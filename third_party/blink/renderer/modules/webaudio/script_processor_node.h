@@ -31,6 +31,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/active_script_wrappable.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_node.h"
 #include "third_party/blink/renderer/platform/audio/audio_bus.h"
+#include "third_party/blink/renderer/platform/heap/persistent.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
@@ -67,7 +68,7 @@ class ScriptProcessorHandler final : public AudioHandler {
   void SetChannelCount(unsigned long, ExceptionState&) override;
   void SetChannelCountMode(const String&, ExceptionState&) override;
 
-  virtual unsigned NumberOfOutputChannels() const {
+  unsigned NumberOfOutputChannels() const override {
     return number_of_output_channels_;
   }
 
@@ -91,8 +92,8 @@ class ScriptProcessorHandler final : public AudioHandler {
 
   // These Persistent don't make reference cycles including the owner
   // ScriptProcessorNode.
-  PersistentHeapVector<Member<AudioBuffer>> input_buffers_;
-  PersistentHeapVector<Member<AudioBuffer>> output_buffers_;
+  CrossThreadPersistent<HeapVector<Member<AudioBuffer>>> input_buffers_;
+  CrossThreadPersistent<HeapVector<Member<AudioBuffer>>> output_buffers_;
 
   size_t buffer_size_;
   unsigned buffer_read_write_index_;
@@ -126,14 +127,14 @@ class ScriptProcessorNode final
   // The value chosen must carefully balance between latency and audio quality.
   static ScriptProcessorNode* Create(BaseAudioContext&, ExceptionState&);
   static ScriptProcessorNode* Create(BaseAudioContext&,
-                                     size_t buffer_size,
+                                     size_t requested_buffer_size,
                                      ExceptionState&);
   static ScriptProcessorNode* Create(BaseAudioContext&,
-                                     size_t buffer_size,
+                                     size_t requested_buffer_size,
                                      unsigned number_of_input_channels,
                                      ExceptionState&);
   static ScriptProcessorNode* Create(BaseAudioContext&,
-                                     size_t buffer_size,
+                                     size_t requested_buffer_size,
                                      unsigned number_of_input_channels,
                                      unsigned number_of_output_channels,
                                      ExceptionState&);
@@ -144,7 +145,7 @@ class ScriptProcessorNode final
   // ScriptWrappable
   bool HasPendingActivity() const final;
 
-  virtual void Trace(blink::Visitor* visitor) { AudioNode::Trace(visitor); }
+  void Trace(blink::Visitor* visitor) override { AudioNode::Trace(visitor); }
 
  private:
   ScriptProcessorNode(BaseAudioContext&,

@@ -382,6 +382,22 @@ class ExtensionPrefs : public KeyedService {
   void SetActivePermissions(const std::string& extension_id,
                             const PermissionSet& permissions);
 
+  // Returns the set of runtime-granted permissions. These are permissions that
+  // the user explicitly approved at runtime, rather than install time (such
+  // as those granted through the permissions API or the runtime host
+  // permissions feature). Note that, similar to granted permissions, this can
+  // include permissions granted to the extension, even if they are not active.
+  std::unique_ptr<const PermissionSet> GetRuntimeGrantedPermissions(
+      const ExtensionId& extension_id) const;
+
+  // Adds to the set of runtime-granted permissions.
+  void AddRuntimeGrantedPermissions(const ExtensionId& extension_id,
+                                    const PermissionSet& permissions);
+
+  // Removes from the set of runtime-granted permissions.
+  void RemoveRuntimeGrantedPermissions(const ExtensionId& extension_id,
+                                       const PermissionSet& permissions);
+
   // Records whether or not this extension is currently running.
   void SetExtensionRunning(const std::string& extension_id, bool is_running);
 
@@ -416,7 +432,8 @@ class ExtensionPrefs : public KeyedService {
   // version directory and the location. Blacklisted extensions won't be saved
   // and neither will external extensions the user has explicitly uninstalled.
   // Caller takes ownership of returned structure.
-  std::unique_ptr<ExtensionsInfo> GetInstalledExtensionsInfo() const;
+  std::unique_ptr<ExtensionsInfo> GetInstalledExtensionsInfo(
+      bool include_component_extensions = false) const;
 
   // Same as above, but only includes external extensions the user has
   // explicitly uninstalled.
@@ -425,7 +442,8 @@ class ExtensionPrefs : public KeyedService {
   // Returns the ExtensionInfo from the prefs for the given extension. If the
   // extension is not present, NULL is returned.
   std::unique_ptr<ExtensionInfo> GetInstalledExtensionInfo(
-      const std::string& extension_id) const;
+      const std::string& extension_id,
+      bool include_component_extensions = false) const;
 
   // We've downloaded an updated .crx file for the extension, but are waiting
   // to install it.
@@ -555,13 +573,14 @@ class ExtensionPrefs : public KeyedService {
   // |dnr_ruleset_checksum|.
   bool GetDNRRulesetChecksum(const ExtensionId& extension_id,
                              int* dnr_ruleset_checksum) const;
+  void SetDNRRulesetChecksum(const ExtensionId& extension_id,
+                             int dnr_ruleset_checksum);
 
-  // Sets the set of whitelisted pages for the given |extension_id|.
-  void SetDNRWhitelistedPages(const ExtensionId& extension_id,
-                              URLPatternSet set);
+  // Sets the set of allowed pages for the given |extension_id|.
+  void SetDNRAllowedPages(const ExtensionId& extension_id, URLPatternSet set);
 
-  // Returns the set of whitelisted pages for the given |extension_id|.
-  URLPatternSet GetDNRWhitelistedPages(const ExtensionId& extension_id) const;
+  // Returns the set of allowed pages for the given |extension_id|.
+  URLPatternSet GetDNRAllowedPages(const ExtensionId& extension_id) const;
 
   // When called before the ExtensionService is created, alerts that are
   // normally suppressed in first run will still trigger.
@@ -603,7 +622,8 @@ class ExtensionPrefs : public KeyedService {
   // |extension| dictionary.
   std::unique_ptr<ExtensionInfo> GetInstalledInfoHelper(
       const std::string& extension_id,
-      const base::DictionaryValue* extension) const;
+      const base::DictionaryValue* extension,
+      bool include_component_extensions) const;
 
   // Interprets the list pref, |pref_key| in |extension_id|'s preferences, as a
   // URLPatternSet. The |valid_schemes| specify how to parse the URLPatterns.
@@ -641,6 +661,16 @@ class ExtensionPrefs : public KeyedService {
   void SetExtensionPrefPermissionSet(const std::string& extension_id,
                                      base::StringPiece pref_key,
                                      const PermissionSet& new_value);
+
+  // Common implementation to add permissions to a stored permission set.
+  void AddToPrefPermissionSet(const ExtensionId& extension_id,
+                              const PermissionSet& permissions,
+                              const char* pref_name);
+
+  // Common implementation to remove permissions from a stored permission set.
+  void RemoveFromPrefPermissionSet(const ExtensionId& extension_id,
+                                   const PermissionSet& permissions,
+                                   const char* pref_name);
 
   // Returns an immutable dictionary for extension |id|'s prefs, or NULL if it
   // doesn't exist.
@@ -723,7 +753,7 @@ class ExtensionPrefs : public KeyedService {
 
   bool extensions_disabled_;
 
-  base::ObserverList<ExtensionPrefsObserver> observer_list_;
+  base::ObserverList<ExtensionPrefsObserver>::Unchecked observer_list_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionPrefs);
 };

@@ -7,31 +7,21 @@
 
 #import <UIKit/UIKit.h>
 
-@class InfoBarView;
-class InfoBarViewDelegate;
+#import "ios/chrome/browser/ui/infobars/infobar_view_sizing_delegate.h"
+
 namespace infobars {
 class InfoBarDelegate;
-}
+}  // namespace infobars
+
+class InfoBarControllerDelegate;
+@protocol InfoBarViewSizing;
 
 // InfoBar for iOS acts as a UIViewController for InfoBarView.
-@interface InfoBarController : NSObject
-
-@property(nonatomic, readonly) InfoBarViewDelegate* delegate;
-
-// Designated initializer.
-- (instancetype)initWithDelegate:(InfoBarViewDelegate*)delegate
-    NS_DESIGNATED_INITIALIZER;
-
-- (instancetype)init NS_UNAVAILABLE;
+@interface InfoBarController : NSObject<InfoBarViewSizingDelegate>
 
 // Creates a view and lays out all the infobar elements in it. Will not add
-// it as a subview yet. This method must be overriden in subclasses.
-- (InfoBarView*)viewForDelegate:(infobars::InfoBarDelegate*)delegate
-                          frame:(CGRect)bounds;
-
-// Creates the view.
-- (void)layoutForDelegate:(infobars::InfoBarDelegate*)delegate
-                    frame:(CGRect)bounds;
+// it as a subview yet.
+- (void)layoutForFrame:(CGRect)bounds;
 
 // Detaches view from its delegate.
 // After this function is called, no user interaction can be handled.
@@ -47,7 +37,17 @@ class InfoBarDelegate;
 - (void)removeView;
 
 // Accesses the view.
-- (InfoBarView*)view;
+- (UIView<InfoBarViewSizing>*)view;
+
+@property(nonatomic, assign) InfoBarControllerDelegate* delegate;  // weak
+
+@property(nonatomic, readonly)
+    infobars::InfoBarDelegate* infoBarDelegate;  // weak
+
+- (instancetype)init NS_UNAVAILABLE;
+
+- (instancetype)initWithInfoBarDelegate:
+    (infobars::InfoBarDelegate*)infoBarDelegate NS_DESIGNATED_INITIALIZER;
 
 @end
 

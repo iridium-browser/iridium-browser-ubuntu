@@ -8,7 +8,7 @@
 #include "third_party/blink/renderer/modules/event_modules.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/modules/push_messaging/push_message_data.h"
-#include "third_party/blink/renderer/modules/serviceworkers/extendable_event.h"
+#include "third_party/blink/renderer/modules/service_worker/extendable_event.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
@@ -38,7 +38,7 @@ class MODULES_EXPORT PushEvent final : public ExtendableEvent {
 
   PushMessageData* data();
 
-  virtual void Trace(blink::Visitor* visitor);
+  void Trace(blink::Visitor* visitor) override;
 
  private:
   PushEvent(const AtomicString& type,

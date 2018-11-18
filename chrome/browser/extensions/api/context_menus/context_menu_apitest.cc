@@ -59,8 +59,7 @@ class ExtensionContextMenuApiTest : public ExtensionApiTest {
   void CallAPI(const std::string& script) { CallAPI(extension_, script); }
 
   void CallAPI(const Extension* extension, const std::string& script) {
-    content::RenderViewHost* background_page =
-        GetBackgroundPage(extension->id());
+    content::WebContents* background_page = GetBackgroundPage(extension->id());
     bool error = false;
     ASSERT_TRUE(
         content::ExecuteScriptAndExtractBool(background_page, script, &error));
@@ -110,10 +109,10 @@ class ExtensionContextMenuApiTest : public ExtensionApiTest {
   ui::MenuModel* top_level_model_;
 
  private:
-  content::RenderViewHost* GetBackgroundPage(const std::string& extension_id) {
+  content::WebContents* GetBackgroundPage(const std::string& extension_id) {
     return process_manager()
         ->GetBackgroundHostForExtension(extension_id)
-        ->render_view_host();
+        ->host_contents();
   }
 
   ProcessManager* process_manager() { return ProcessManager::Get(profile()); }
@@ -274,11 +273,6 @@ IN_PROC_BROWSER_TEST_F(ExtensionContextMenuApiTest,
   VerifyMenuItem("parent", top_level_model_, top_level_index(),
                  ui::MenuModel::TYPE_SUBMENU, true);
 
-  // Since the extension submenu is shown, the previous separator should be in
-  // the model.
-  EXPECT_EQ(ui::MenuModel::TYPE_SEPARATOR,
-            top_level_model_->GetTypeAt(top_level_index() - 1));
-
   ui::MenuModel* submodel =
       top_level_model_->GetSubmenuModelAt(top_level_index());
   ASSERT_TRUE(submodel);
@@ -307,11 +301,6 @@ IN_PROC_BROWSER_TEST_F(ExtensionContextMenuApiTest,
   VerifyMenuItem("parent", top_level_model_, top_level_index(),
                  ui::MenuModel::TYPE_SUBMENU, true);
 
-  // Since the extension submenu is shown, the previous separator should be in
-  // the model.
-  EXPECT_EQ(ui::MenuModel::TYPE_SEPARATOR,
-            top_level_model_->GetTypeAt(top_level_index() - 1));
-
   ui::MenuModel* submodel =
       top_level_model_->GetSubmenuModelAt(top_level_index());
   ASSERT_TRUE(submodel);
@@ -339,11 +328,6 @@ IN_PROC_BROWSER_TEST_F(ExtensionContextMenuApiTest,
 
   VerifyMenuItem(extension()->name(), top_level_model_, top_level_index(),
                  ui::MenuModel::TYPE_SUBMENU, true);
-
-  // Since the extension submenu is shown, the previous separator should be in
-  // the model.
-  EXPECT_EQ(ui::MenuModel::TYPE_SEPARATOR,
-            top_level_model_->GetTypeAt(top_level_index() - 1));
 
   ui::MenuModel* submodel =
       top_level_model_->GetSubmenuModelAt(top_level_index());
@@ -378,11 +362,6 @@ IN_PROC_BROWSER_TEST_F(ExtensionContextMenuApiTest,
 
   VerifyMenuItem(extension()->name(), top_level_model_, top_level_index(),
                  ui::MenuModel::TYPE_SUBMENU, true);
-
-  // Since the extension submenu is shown, the previous separator should be in
-  // the model.
-  EXPECT_EQ(ui::MenuModel::TYPE_SEPARATOR,
-            top_level_model_->GetTypeAt(top_level_index() - 1));
 
   ui::MenuModel* submodel =
       top_level_model_->GetSubmenuModelAt(top_level_index());

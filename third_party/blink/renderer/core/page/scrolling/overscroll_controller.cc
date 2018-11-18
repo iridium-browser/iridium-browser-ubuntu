@@ -4,10 +4,13 @@
 
 #include "third_party/blink/renderer/core/page/scrolling/overscroll_controller.h"
 
+#include "cc/input/overscroll_behavior.h"
+#include "third_party/blink/renderer/core/computed_style_base_constants.h"
 #include "third_party/blink/renderer/core/frame/visual_viewport.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/platform/geometry/float_point.h"
 #include "third_party/blink/renderer/platform/geometry/float_size.h"
+#include "third_party/blink/renderer/platform/graphics/paint/scroll_paint_property_node.h"
 #include "third_party/blink/renderer/platform/scroll/scroll_types.h"
 
 namespace blink {
@@ -74,7 +77,7 @@ void OverscrollController::HandleOverscroll(
 }
 
 void OverscrollController::SetOverscrollBehavior(
-    const WebOverscrollBehavior& behavior) {
+    const cc::OverscrollBehavior& behavior) {
   if (behavior != overscroll_behavior_) {
     overscroll_behavior_ = behavior;
     chrome_client_->SetOverscrollBehavior(behavior);

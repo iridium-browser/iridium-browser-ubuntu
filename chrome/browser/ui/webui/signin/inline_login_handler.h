@@ -13,9 +13,15 @@ namespace base {
 class DictionaryValue;
 }
 
+namespace net {
+class CanonicalCookie;
+}
+
 namespace signin_metrics {
 enum class AccessPoint;
 }
+
+extern const char kSignInPromoQueryKeyShowAccountManagement[];
 
 // The base class handler for the inline login WebUI.
 class InlineLoginHandler : public content::WebUIMessageHandler {
@@ -28,7 +34,7 @@ class InlineLoginHandler : public content::WebUIMessageHandler {
 
  protected:
   // Enum for gaia auth mode, must match AuthMode defined in
-  // chrome/browser/resources/gaia_auth_host/gaia_auth_host.js.
+  // chrome/browser/resources/gaia_auth_host/authenticator.js.
   enum AuthMode {
     kDefaultAuthMode = 0,
     kOfflineAuthMode = 1,
@@ -52,6 +58,12 @@ class InlineLoginHandler : public content::WebUIMessageHandler {
   // work.
   void HandleCompleteLoginMessage(const base::ListValue* args);
 
+  // Called by HandleCompleteLoginMessage after it gets the GAIA URL's cookies
+  // from the CookieManager.
+  void HandleCompleteLoginMessageWithCookies(
+      const base::ListValue& args,
+      const std::vector<net::CanonicalCookie>& cookies);
+
   // JS callback to switch the UI from a constrainted dialog to a full tab.
   void HandleSwitchToFullTabMessage(const base::ListValue* args);
 
@@ -63,7 +75,14 @@ class InlineLoginHandler : public content::WebUIMessageHandler {
   void HandleDialogClose(const base::ListValue* args);
 
   virtual void SetExtraInitParams(base::DictionaryValue& params) {}
-  virtual void CompleteLogin(const base::ListValue* args) = 0;
+  virtual void CompleteLogin(const std::string& email,
+                             const std::string& password,
+                             const std::string& gaia_id,
+                             const std::string& auth_code,
+                             bool skip_for_now,
+                             bool trusted,
+                             bool trusted_found,
+                             bool choose_what_to_sync) = 0;
 
   base::WeakPtrFactory<InlineLoginHandler> weak_ptr_factory_;
 

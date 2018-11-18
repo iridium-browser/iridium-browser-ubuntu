@@ -46,9 +46,8 @@ class SVGAnimatedPathLength final : public SVGAnimatedNumber {
     return new SVGAnimatedPathLength(context_element);
   }
 
-  SVGParsingError SetBaseValueAsString(const String& value) override {
-    SVGParsingError parse_status =
-        SVGAnimatedNumber::SetBaseValueAsString(value);
+  SVGParsingError AttributeChanged(const String& value) override {
+    SVGParsingError parse_status = SVGAnimatedNumber::AttributeChanged(value);
     if (parse_status == SVGParseStatus::kNoError && BaseValue()->Value() < 0)
       parse_status = SVGParseStatus::kNegativeValue;
     return parse_status;
@@ -96,10 +95,11 @@ bool SVGGeometryElement::isPointInFill(SVGPointTearOff* point) const {
   HitTestRequest request(HitTestRequest::kReadOnly);
   PointerEventsHitRules hit_rules(
       PointerEventsHitRules::SVG_GEOMETRY_HITTESTING, request,
-      GetLayoutObject()->Style()->PointerEvents());
+      GetLayoutObject()->StyleRef().PointerEvents());
   hit_rules.can_hit_stroke = false;
+  HitTestLocation location(point->Target()->Value());
   return ToLayoutSVGShape(GetLayoutObject())
-      ->NodeAtFloatPointInternal(request, point->Target()->Value(), hit_rules);
+      ->NodeAtPointInternal(request, location, hit_rules);
 }
 
 bool SVGGeometryElement::isPointInStroke(SVGPointTearOff* point) const {
@@ -113,10 +113,11 @@ bool SVGGeometryElement::isPointInStroke(SVGPointTearOff* point) const {
   HitTestRequest request(HitTestRequest::kReadOnly);
   PointerEventsHitRules hit_rules(
       PointerEventsHitRules::SVG_GEOMETRY_HITTESTING, request,
-      GetLayoutObject()->Style()->PointerEvents());
+      GetLayoutObject()->StyleRef().PointerEvents());
   hit_rules.can_hit_fill = false;
+  HitTestLocation location(point->Target()->Value());
   return ToLayoutSVGShape(GetLayoutObject())
-      ->NodeAtFloatPointInternal(request, point->Target()->Value(), hit_rules);
+      ->NodeAtPointInternal(request, location, hit_rules);
 }
 
 Path SVGGeometryElement::ToClipPath() const {
@@ -125,7 +126,7 @@ Path SVGGeometryElement::ToClipPath() const {
 
   DCHECK(GetLayoutObject());
   DCHECK(GetLayoutObject()->Style());
-  path.SetWindRule(GetLayoutObject()->Style()->SvgStyle().ClipRule());
+  path.SetWindRule(GetLayoutObject()->StyleRef().SvgStyle().ClipRule());
   return path;
 }
 
@@ -141,8 +142,17 @@ SVGPointTearOff* SVGGeometryElement::getPointAtLength(float length) {
   GetDocument().UpdateStyleAndLayoutIgnorePendingStylesheets();
 
   FloatPoint point;
-  if (GetLayoutObject())
-    point = AsPath().PointAtLength(length);
+  if (GetLayoutObject()) {
+    const Path& path = AsPath();
+    if (length < 0) {
+      length = 0;
+    } else {
+      float computed_length = path.length();
+      if (length > computed_length)
+        length = computed_length;
+    }
+    point = path.PointAtLength(length);
+  }
   return SVGPointTearOff::CreateDetached(point);
 }
 

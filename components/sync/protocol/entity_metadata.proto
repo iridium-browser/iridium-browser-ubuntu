@@ -2,11 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// If you change or add any fields in this file, update proto_visitors.h and
+// potentially proto_enum_conversions.{h, cc}.
+
 syntax = "proto2";
 
 option optimize_for = LITE_RUNTIME;
 
 package sync_pb;
+
+import "unique_position.proto";
 
 // Sync proto to store entity metadata in model type storage.
 message EntityMetadata {
@@ -41,9 +46,9 @@ message EntityMetadata {
   // those changes are based.
   optional int64 server_version = 6 [default = -1];
 
-  // Entity creation and modification timestamps.
-  // Assigned by the client and synced by the server, though the server usually
-  // doesn't bother to inspect their values.
+  // Entity creation and modification timestamps. Assigned by the client and
+  // synced by the server, though the server usually doesn't bother to inspect
+  // their values. They are encoded as milliseconds since the Unix epoch.
   optional int64 creation_time = 7;
   optional int64 modification_time = 8;
 
@@ -57,4 +62,10 @@ message EntityMetadata {
   // value will be the empty string only in the following cases: the entity is
   // in sync with the server, has never been synced, or is deleted.
   optional string base_specifics_hash = 10;
+
+  // Used for positioning entities among their siblings. Relevant only for data
+  // types that support positions (e.g bookmarks). Refer to its definition in
+  // unique_position.proto for more information about its internal
+  // representation.
+  optional UniquePosition unique_position = 11;
 }

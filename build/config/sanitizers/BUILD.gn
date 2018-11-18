@@ -13,11 +13,9 @@ if (is_ios) {
   import("//build/config/ios/ios_sdk.gni")
 }
 
-# Contains the dependencies needed for sanitizers to link into
-# executables and shared_libraries. Unconditionally depend upon
-# "//build/config:exe_and_shlib_deps" to pull in this target.
+# Contains the dependencies needed for sanitizers to link into executables and
+# shared_libraries.
 group("deps") {
-  visibility = [ "//build/config:exe_and_shlib_deps" ]
   if (using_sanitizer) {
     public_configs = [
       ":sanitizer_options_link_helper",
@@ -199,9 +197,18 @@ config("default_sanitizer_ldflags") {
     if (is_ubsan_vptr) {
       ldflags += [ "-fsanitize=vptr" ]
     }
+    if (is_safestack) {
+      ldflags += [ "-fsanitize=safe-stack" ]
+    }
 
     if (use_sanitizer_coverage) {
-      ldflags += [ "-fsanitize-coverage=$sanitizer_coverage_flags" ]
+      # TODO(crbug.com/892167): Remove the is_mac check when new instrumentation
+      # works on Mac.
+      if (use_libfuzzer && !is_mac) {
+        ldflags += [ "-fsanitize=fuzzer-no-link" ]
+      } else {
+        ldflags += [ "-fsanitize-coverage=$sanitizer_coverage_flags" ]
+      }
     }
 
     if (is_cfi && current_toolchain == default_toolchain) {
@@ -212,6 +219,9 @@ config("default_sanitizer_ldflags") {
           "-fsanitize=cfi-unrelated-cast",
         ]
       }
+      if (use_cfi_icall) {
+        ldflags += [ "-fsanitize=cfi-icall" ]
+      }
       if (use_cfi_diag) {
         ldflags += [ "-fno-sanitize-trap=cfi" ]
         if (use_cfi_recover) {
@@ -219,28 +229,37 @@ config("default_sanitizer_ldflags") {
         }
       }
     }
-  } else if (is_win && is_asan) {
+  } else if (is_win) {
     # Windows directly calls link.exe instead of the compiler driver when
-    # linking.  Hence, pass the runtime libraries instead of -fsanitize=address.
-    # In the static-library build, libraries are different for executables
-    # and dlls, see link_executable and link_shared_library below.
-    # This here handles only the component build.
-    if (target_cpu == "x64") {
-      # Windows 64-bit.
-      if (is_component_build) {
+    # linking.  Hence, pass the runtime libraries instead of -fsanitize=address
+    # or -fsanitize=fuzzer.
+    if (is_asan && is_component_build) {
+      # In the static-library build, ASan libraries are different for
+      # executables and dlls, see link_executable and link_shared_library below.
+      # This here handles only the component build.
+      if (target_cpu == "x64") {
+        # Windows 64-bit.
         libs = [
           "clang_rt.asan_dynamic-x86_64.lib",
           "clang_rt.asan_dynamic_runtime_thunk-x86_64.lib",
         ]
-      }
-    } else {
-      assert(target_cpu == "x86", "WinASan unsupported architecture")
-      if (is_component_build) {
+      } else {
+        assert(target_cpu == "x86", "WinASan unsupported architecture")
         libs = [
           "clang_rt.asan_dynamic-i386.lib",
           "clang_rt.asan_dynamic_runtime_thunk-i386.lib",
         ]
       }
+    }
+    if (use_libfuzzer) {
+      assert(target_cpu == "x64", "LibFuzzer unsupported architecture")
+      assert(!is_component_build,
+             "LibFuzzer only supports non-component builds on Windows")
+
+      # Incremental linking causes padding that messes up SanitizerCoverage.
+      # Don't do it.
+      ldflags = [ "/INCREMENTAL:NO" ]
+      libs = [ "clang_rt.fuzzer_no_main-x86_64.lib" ]
     }
   }
 }
@@ -248,25 +267,16 @@ config("default_sanitizer_ldflags") {
 config("common_sanitizer_flags") {
   cflags = []
 
-  # Sanitizers need line table info for stack traces. They don't need type info
-  # or variable info, so we can leave that out to speed up the build (unless
-  # it's explicitly asked for by setting |sanitizer_keep_symbols| to true).
   if (using_sanitizer) {
     assert(is_clang, "sanitizers only supported with clang")
     assert(!is_official_build, "sanitizers not supported in official builds")
 
-    if (!sanitizer_no_symbols) {
-      if (!sanitizer_keep_symbols) {
-        cflags += [ "-gline-tables-only" ]
-      }
-
-      cflags += [
-        # Column info in debug data confuses Visual Studio's debugger, so don't
-        # use this by default.  However, clusterfuzz needs it for good
-        # attribution of reports to CLs, so turn it on there.
-        "-gcolumn-info",
-      ]
-    }
+    cflags += [
+      # Column info in debug data confuses Visual Studio's debugger, so don't
+      # use this by default.  However, clusterfuzz needs it for good
+      # attribution of reports to CLs, so turn it on there.
+      "-gcolumn-info",
+    ]
 
     # Frame pointers are controlled in //build/config/compiler:default_stack_frames
   }
@@ -308,22 +318,10 @@ config("asan_flags") {
 config("link_executable") {
   if (is_asan && is_win && !is_component_build) {
     if (target_cpu == "x64") {
-      libs = [ "clang_rt.asan-x86_64.lib" ]
-      ldflags = [
-        "-wholearchive:clang_rt.asan-x86_64.lib",
-        "-include:__asan_get_free_stack",
-      ]
+      ldflags = [ "-wholearchive:clang_rt.asan-x86_64.lib" ]
     } else {
       assert(target_cpu == "x86", "WinASan unsupported architecture")
-      libs = [ "clang_rt.asan-i386.lib" ]
-      ldflags = [
-        "-wholearchive:clang_rt.asan-i386.lib",
-
-        # TODO(crbug.com/777087): The linker in VS 15.4 does not respect
-        # /wholearchive. This manually includes a symbol to work around that.
-        # We can remove it when the linker is fixed.
-        "-include:___asan_get_free_stack",
-      ]
+      ldflags = [ "-wholearchive:clang_rt.asan-i386.lib" ]
     }
   }
 }
@@ -345,11 +343,6 @@ config("cfi_flags") {
     if (!defined(cfi_blacklist_path)) {
       cfi_blacklist_path =
           rebase_path("//tools/cfi/blacklist.txt", root_build_dir)
-      if (is_android) {
-        cflags +=
-            [ "-fsanitize-blacklist=" +
-              rebase_path("//tools/cfi/blacklist_android.txt", root_build_dir) ]
-      }
     }
     cflags += [
       "-fsanitize=cfi-vcall",
@@ -400,19 +393,27 @@ config("cfi_icall_generalize_pointers") {
 config("coverage_flags") {
   cflags = []
   if (use_sanitizer_coverage) {
-    cflags += [
-      "-fsanitize-coverage=$sanitizer_coverage_flags",
-      "-mllvm",
-      "-sanitizer-coverage-prune-blocks=1",
-    ]
-    if (current_cpu == "arm") {
-      # http://crbug.com/517105
-      cflags += [
-        "-mllvm",
-        "-sanitizer-coverage-block-threshold=0",
-      ]
-    }
+    # Used by sandboxing code to allow coverage dump to be written on the disk.
     defines = [ "SANITIZER_COVERAGE" ]
+
+    # TODO(crbug.com/892167): Remove the is_mac check when new instrumentation
+    # works on Mac.
+    if (use_libfuzzer && !is_mac) {
+      cflags += [ "-fsanitize=fuzzer-no-link" ]
+    } else {
+      cflags += [
+        "-fsanitize-coverage=$sanitizer_coverage_flags",
+        "-mllvm",
+        "-sanitizer-coverage-prune-blocks=1",
+      ]
+      if (current_cpu == "arm") {
+        # http://crbug.com/517105
+        cflags += [
+          "-mllvm",
+          "-sanitizer-coverage-block-threshold=0",
+        ]
+      }
+    }
   }
 }
 
@@ -434,6 +435,12 @@ config("msan_flags") {
       "-fsanitize-memory-track-origins=$msan_track_origins",
       "-fsanitize-blacklist=$msan_blacklist_path",
     ]
+  }
+}
+
+config("safestack_flags") {
+  if (is_safestack) {
+    cflags = [ "-fsanitize=safe-stack" ]
   }
 }
 
@@ -466,6 +473,7 @@ config("ubsan_flags") {
       "-fsanitize=integer-divide-by-zero",
       "-fsanitize=null",
       "-fsanitize=object-size",
+      "-fsanitize=pointer-overflow",
       "-fsanitize=return",
       "-fsanitize=returns-nonnull-attribute",
       "-fsanitize=shift-exponent",
@@ -507,7 +515,12 @@ config("ubsan_security_flags") {
           rebase_path("//tools/ubsan/security_blacklist.txt", root_build_dir)
     }
     cflags = [
-      "-fsanitize=signed-integer-overflow,shift,vptr,function,vla-bound",
+      "-fsanitize=function",
+      "-fsanitize=pointer-overflow",
+      "-fsanitize=shift",
+      "-fsanitize=signed-integer-overflow",
+      "-fsanitize=vla-bound",
+      "-fsanitize=vptr",
       "-fsanitize-blacklist=$ubsan_security_blacklist_path",
     ]
   }
@@ -533,7 +546,7 @@ config("ubsan_vptr_flags") {
 }
 
 config("fuzzing_build_mode") {
-  if (use_fuzzing_engine) {
+  if (use_fuzzing_engine && optimize_for_fuzzing) {
     defines = [ "FUZZING_BUILD_MODE_UNSAFE_FOR_PRODUCTION" ]
   }
 }
@@ -546,6 +559,7 @@ all_sanitizer_configs = [
   ":cfi_flags",
   ":lsan_flags",
   ":msan_flags",
+  ":safestack_flags",
   ":tsan_flags",
   ":ubsan_flags",
   ":ubsan_no_recover",

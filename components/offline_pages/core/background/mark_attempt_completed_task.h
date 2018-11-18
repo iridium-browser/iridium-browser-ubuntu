@@ -11,7 +11,7 @@
 #include "components/offline_items_collection/core/fail_state.h"
 #include "components/offline_pages/core/background/request_queue_results.h"
 #include "components/offline_pages/core/background/update_request_task.h"
-#include "components/offline_pages/core/task.h"
+#include "components/offline_pages/task/task.h"
 
 namespace offline_pages {
 
@@ -22,12 +22,12 @@ class MarkAttemptCompletedTask : public UpdateRequestTask {
   MarkAttemptCompletedTask(RequestQueueStore* store,
                            int64_t request_id,
                            FailState fail_state,
-                           const RequestQueueStore::UpdateCallback& callback);
+                           RequestQueueStore::UpdateCallback callback);
   ~MarkAttemptCompletedTask() override;
 
  protected:
   // UpdateRequestTask implementation:
-  void UpdateRequestImpl(std::unique_ptr<UpdateRequestsResult> result) override;
+  void UpdateRequestImpl(UpdateRequestsResult result) override;
 
  private:
   // Reason attempt failed, if any.

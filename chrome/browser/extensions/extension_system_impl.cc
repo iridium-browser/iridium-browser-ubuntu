@@ -14,11 +14,10 @@
 #include "base/files/file_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string_tokenizer.h"
+#include "base/task/post_task.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
-#include "chrome/browser/apps/browser_context_keyed_service_factories.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/chrome_app_sorting.h"
 #include "chrome/browser/extensions/chrome_content_verifier_delegate.h"
 #include "chrome/browser/extensions/component_loader.h"
@@ -40,9 +39,10 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
+#include "chrome/browser/ui/webui/extensions/extensions_internals_source.h"
 #include "chrome/common/chrome_switches.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/notification_service.h"
 #include "content/public/browser/url_data_source.h"
 #include "extensions/browser/content_verifier.h"
 #include "extensions/browser/extension_pref_store.h"
@@ -99,11 +99,7 @@ UninstallPingSender::FilterResult ShouldSendUninstallPing(
 // ExtensionSystemImpl::Shared
 //
 
-ExtensionSystemImpl::Shared::Shared(Profile* profile)
-    : profile_(profile) {
-  registrar_.Add(this, chrome::NOTIFICATION_APP_TERMINATING,
-                 content::NotificationService::AllSources());
-}
+ExtensionSystemImpl::Shared::Shared(Profile* profile) : profile_(profile) {}
 
 ExtensionSystemImpl::Shared::~Shared() {
 }
@@ -193,7 +189,8 @@ void ExtensionSystemImpl::Shared::Init(bool extensions_enabled) {
 
   navigation_observer_.reset(new NavigationObserver(profile_));
 
-  bool allow_noisy_errors = !command_line->HasSwitch(switches::kNoErrorDialogs);
+  bool allow_noisy_errors =
+      !command_line->HasSwitch(::switches::kNoErrorDialogs);
   LoadErrorReporter::Init(allow_noisy_errors);
 
   content_verifier_ = new ContentVerifier(
@@ -281,7 +278,12 @@ void ExtensionSystemImpl::Shared::Init(bool extensions_enabled) {
   ExtensionSyncService::Get(profile_);
 
   // Make the chrome://extension-icon/ resource available.
-  content::URLDataSource::Add(profile_, new ExtensionIconSource(profile_));
+  content::URLDataSource::Add(profile_,
+                              std::make_unique<ExtensionIconSource>(profile_));
+
+  // Register the source for the chrome://extensions-internals page.
+  content::URLDataSource::Add(
+      profile_, std::make_unique<ExtensionsInternalsSource>(profile_));
 }
 
 void ExtensionSystemImpl::Shared::Shutdown() {
@@ -341,14 +343,6 @@ AppSorting* ExtensionSystemImpl::Shared::app_sorting() {
 
 ContentVerifier* ExtensionSystemImpl::Shared::content_verifier() {
   return content_verifier_.get();
-}
-
-void ExtensionSystemImpl::Shared::Observe(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
-  DCHECK_EQ(chrome::NOTIFICATION_APP_TERMINATING, type);
-  chrome_apps::NotifyApplicationTerminating(profile_);
 }
 
 //
@@ -446,6 +440,7 @@ void ExtensionSystemImpl::InstallUpdate(
     const std::string& extension_id,
     const std::string& public_key,
     const base::FilePath& unpacked_dir,
+    bool install_immediately,
     InstallUpdateCallback install_update_callback) {
   DCHECK(!install_update_callback.is_null());
 
@@ -455,6 +450,7 @@ void ExtensionSystemImpl::InstallUpdate(
   scoped_refptr<CrxInstaller> installer = CrxInstaller::CreateSilent(service);
   installer->set_delete_source(true);
   installer->set_installer_callback(std::move(install_update_callback));
+  installer->set_install_immediately(install_immediately);
   installer->UpdateExtensionFromUnpackedCrx(extension_id, public_key,
                                             unpacked_dir);
 }
@@ -489,8 +485,8 @@ void ExtensionSystemImpl::RegisterExtensionWithRequestContexts(
   notifications_disabled =
       !notifier_state_tracker->IsNotifierEnabled(notifier_id);
 
-  BrowserThread::PostTaskAndReply(
-      BrowserThread::IO, FROM_HERE,
+  base::PostTaskWithTraitsAndReply(
+      FROM_HERE, {BrowserThread::IO},
       base::BindOnce(&InfoMap::AddExtension, info_map(),
                      base::RetainedRef(extension), install_time,
                      incognito_enabled, notifications_disabled),
@@ -500,9 +496,9 @@ void ExtensionSystemImpl::RegisterExtensionWithRequestContexts(
 void ExtensionSystemImpl::UnregisterExtensionWithRequestContexts(
     const std::string& extension_id,
     const UnloadedExtensionReason reason) {
-  BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
-                          base::BindOnce(&InfoMap::RemoveExtension, info_map(),
-                                         extension_id, reason));
+  base::PostTaskWithTraits(FROM_HERE, {BrowserThread::IO},
+                           base::BindOnce(&InfoMap::RemoveExtension, info_map(),
+                                          extension_id, reason));
 }
 
 }  // namespace extensions

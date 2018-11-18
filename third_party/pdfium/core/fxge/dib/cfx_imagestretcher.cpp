@@ -9,8 +9,8 @@
 #include <climits>
 #include <tuple>
 
+#include "core/fxge/dib/cfx_dibbase.h"
 #include "core/fxge/dib/cfx_dibitmap.h"
-#include "core/fxge/dib/cfx_dibsource.h"
 #include "core/fxge/dib/cstretchengine.h"
 #include "core/fxge/fx_dib.h"
 #include "third_party/base/ptr_util.h"
@@ -23,7 +23,7 @@ bool SourceSizeWithinLimit(int width, int height) {
   return !height || width < kMaxProgressiveStretchPixels / height;
 }
 
-FXDIB_Format GetStretchedFormat(const CFX_DIBSource& src) {
+FXDIB_Format GetStretchedFormat(const CFX_DIBBase& src) {
   FXDIB_Format format = src.GetFormat();
   if (format == FXDIB_1bppMask)
     return FXDIB_8bppMask;
@@ -43,7 +43,7 @@ std::tuple<int, int, int, int> CmykDecode(const uint32_t cmyk) {
 }  // namespace
 
 CFX_ImageStretcher::CFX_ImageStretcher(ScanlineComposerIface* pDest,
-                                       const RetainPtr<CFX_DIBSource>& pSource,
+                                       const RetainPtr<CFX_DIBBase>& pSource,
                                        int dest_width,
                                        int dest_height,
                                        const FX_RECT& bitmap_rect,
@@ -160,10 +160,11 @@ bool CFX_ImageStretcher::StartQuickStretch() {
     return false;
 
   size *= m_DestBPP;
-  m_pScanline.reset(FX_Alloc(uint8_t, (size / 8 + 3) / 4 * 4));
-  if (m_pSource->m_pAlphaMask)
-    m_pMaskScanline.reset(FX_Alloc(uint8_t, (m_ClipRect.Width() + 3) / 4 * 4));
-
+  m_pScanline.reset(FX_Alloc(uint8_t, FxAlignToBoundary<4>(size / 8)));
+  if (m_pSource->m_pAlphaMask) {
+    m_pMaskScanline.reset(
+        FX_Alloc(uint8_t, FxAlignToBoundary<4>(m_ClipRect.Width())));
+  }
   if (SourceSizeWithinLimit(m_pSource->GetWidth(), m_pSource->GetHeight())) {
     ContinueQuickStretch(nullptr);
     return false;
@@ -180,17 +181,28 @@ bool CFX_ImageStretcher::ContinueQuickStretch(PauseIndicatorIface* pPause) {
   int src_height = m_pSource->GetHeight();
   for (; m_LineIndex < result_height; ++m_LineIndex) {
     int dest_y;
-    int src_y;
+    FX_SAFE_INT64 calc_buf;
     if (m_bFlipY) {
       dest_y = result_height - m_LineIndex - 1;
-      src_y = (m_DestHeight - (dest_y + m_ClipRect.top) - 1) * src_height /
-              m_DestHeight;
+      calc_buf = m_DestHeight;
+      calc_buf -= dest_y;
+      calc_buf -= m_ClipRect.top;
+      calc_buf -= 1;
+      calc_buf *= src_height;
+      calc_buf /= m_DestHeight;
     } else {
       dest_y = m_LineIndex;
-      src_y = (dest_y + m_ClipRect.top) * src_height / m_DestHeight;
+      calc_buf = dest_y;
+      calc_buf += m_ClipRect.top;
+      calc_buf *= src_height;
+      calc_buf /= m_DestHeight;
     }
-    src_y = pdfium::clamp(src_y, 0, src_height - 1);
 
+    int src_y;
+    if (!calc_buf.AssignIfValid(&src_y))
+      return false;
+
+    src_y = pdfium::clamp(src_y, 0, src_height - 1);
     if (m_pSource->SkipToScanline(src_y, pPause))
       return true;
 

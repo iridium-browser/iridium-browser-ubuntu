@@ -5,6 +5,8 @@
 package org.chromium.chrome.browser.media.ui;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.doCallRealMethod;
 
@@ -36,8 +38,7 @@ import org.chromium.chrome.browser.media.ui.MediaNotificationManager.ListenerSer
         // Remove this after updating to a version of Robolectric that supports
         // notification channel creation. crbug.com/774315
         sdk = Build.VERSION_CODES.N_MR1,
-        shadows = {MediaNotificationTestShadowResources.class,
-                MediaNotificationTestShadowNotificationManager.class})
+        shadows = {MediaNotificationTestShadowResources.class})
 public class MediaNotificationFaviconTest extends MediaNotificationManagerTestBase {
     private static final int TAB_ID_1 = 1;
     private static final String IS_LOW_END_DEVICE_SWITCH =
@@ -49,10 +50,16 @@ public class MediaNotificationFaviconTest extends MediaNotificationManagerTestBa
     // Mock LargeIconBridge that runs callback using the given favicon.
     private class TestLargeIconBridge extends LargeIconBridge {
         private LargeIconCallback mCallback;
+        private boolean mGetIconCalledAtLeastOnce;
+
+        public boolean getIconCalledAtLeastOnce() {
+            return mGetIconCalledAtLeastOnce;
+        }
 
         @Override
         public boolean getLargeIconForUrl(
                 final String pageUrl, int desiredSizePx, final LargeIconCallback callback) {
+            mGetIconCalledAtLeastOnce = true;
             mCallback = callback;
             return true;
         }
@@ -115,22 +122,34 @@ public class MediaNotificationFaviconTest extends MediaNotificationManagerTestBa
         TestLargeIconBridge largeIconBridge = new TestLargeIconBridge();
         mTabHolder.mMediaSessionTabHelper.mLargeIconBridge = largeIconBridge;
 
+        // Simulate and hide notification.
+        mTabHolder.simulateMediaSessionStateChanged(true, false);
+        assertEquals(null, getDisplayedIcon());
+        mTabHolder.simulateMediaSessionStateChanged(false, false);
+
+        // Since the onFaviconUpdated was never called with valid favicon, the helper does not try
+        // to fetch favicon.
+        assertFalse(largeIconBridge.getIconCalledAtLeastOnce());
+        mTabHolder.simulateFaviconUpdated(mFavicon);
+
         mTabHolder.simulateMediaSessionStateChanged(true, false);
         assertEquals(null, getDisplayedIcon());
 
+        assertTrue(largeIconBridge.getIconCalledAtLeastOnce());
         largeIconBridge.runCallback(null);
         assertEquals(null, getDisplayedIcon());
     }
 
     @Test
     public void testGetNotificationIcon() {
-        mTabHolder.simulateFaviconUpdated(null);
+        mTabHolder.simulateFaviconUpdated(mFavicon);
         TestLargeIconBridge largeIconBridge = new TestLargeIconBridge();
         mTabHolder.mMediaSessionTabHelper.mLargeIconBridge = largeIconBridge;
 
         mTabHolder.simulateMediaSessionStateChanged(true, false);
         assertEquals(null, getDisplayedIcon());
 
+        assertTrue(largeIconBridge.getIconCalledAtLeastOnce());
         largeIconBridge.runCallback(mFavicon);
         assertEquals(mFavicon, getDisplayedIcon());
     }

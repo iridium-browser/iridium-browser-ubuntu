@@ -4,12 +4,13 @@
 
 #include "net/socket/udp_socket_posix.h"
 
+#include "net/base/completion_repeating_callback.h"
 #include "net/base/net_errors.h"
 #include "net/log/test_net_log.h"
 #include "net/log/test_net_log_entry.h"
 #include "net/log/test_net_log_util.h"
 #include "net/socket/datagram_socket.h"
-#include "net/test/net_test_suite.h"
+#include "net/test/test_with_scoped_task_environment.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -108,7 +109,7 @@ class MockUDPSocketPosix : public UDPSocketPosix {
     datagram_buffer_pool_->Enqueue(msg.data(), msg.length(), buffers);
   }
 
-  void SetWriteCallback(CompletionCallback callback) {
+  void SetWriteCallback(CompletionOnceCallback callback) {
     UDPSocketPosix::SetWriteCallback(std::move(callback));
   }
 
@@ -125,10 +126,12 @@ class MockUDPSocketPosix : public UDPSocketPosix {
   }
 };
 
-class UDPSocketPosixTest : public testing::Test {
+class UDPSocketPosixTest : public TestWithScopedTaskEnvironment {
  public:
   UDPSocketPosixTest()
-      : socket_(DatagramSocket::DEFAULT_BIND, &client_log_, NetLogSource()),
+      : TestWithScopedTaskEnvironment(
+            base::test::ScopedTaskEnvironment::MainThreadType::MOCK_TIME),
+        socket_(DatagramSocket::DEFAULT_BIND, &client_log_, NetLogSource()),
         callback_fired_(false),
         weak_factory_(this) {
     write_callback_ = base::BindRepeating(&UDPSocketPosixTest::OnWriteComplete,
@@ -136,24 +139,8 @@ class UDPSocketPosixTest : public testing::Test {
   }
 
   void SetUp() override {
-    NetTestSuite::SetScopedTaskEnvironment(
-        base::test::ScopedTaskEnvironment::MainThreadType::MOCK_TIME);
     socket_.SetWriteAsyncEnabled(true);
     socket_.SetMaxPacketSize(kMaxPacketSize);
-  }
-
-  void TearDown() override { NetTestSuite::ResetScopedTaskEnvironment(); }
-
-  void RunUntilIdle() {
-    NetTestSuite::GetScopedTaskEnvironment()->RunUntilIdle();
-  }
-
-  void FastForwardBy(base::TimeDelta delta) {
-    NetTestSuite::GetScopedTaskEnvironment()->FastForwardBy(delta);
-  }
-
-  void FastForwardUntilNoTasksRemain() {
-    NetTestSuite::GetScopedTaskEnvironment()->FastForwardUntilNoTasksRemain();
   }
 
   void AddBuffer(const std::string& msg) {
@@ -243,7 +230,7 @@ class UDPSocketPosixTest : public testing::Test {
   int total_lengths_ =
       kHelloMsg.length() + kSecondMsg.length() + kThirdMsg.length();
   DatagramBuffer* buffer_ptrs_[kNumMsgs];
-  CompletionCallback write_callback_;
+  CompletionRepeatingCallback write_callback_;
 #if HAVE_SENDMMSG
   struct iovec msg_iov_[kNumMsgs];
   struct mmsghdr msgvec_[kNumMsgs];

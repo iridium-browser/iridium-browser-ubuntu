@@ -23,15 +23,14 @@
  * DAMAGE.
  */
 
+#include "third_party/blink/renderer/modules/webaudio/convolver_node.h"
 #include <memory>
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_buffer.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_node_input.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_node_output.h"
-#include "third_party/blink/renderer/modules/webaudio/convolver_node.h"
 #include "third_party/blink/renderer/modules/webaudio/convolver_options.h"
 #include "third_party/blink/renderer/platform/audio/reverb.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 
 // Note about empirical tuning:
 // The maximum FFT size affects reverb performance and accuracy.
@@ -95,12 +94,15 @@ void ConvolverHandler::SetBuffer(AudioBuffer* buffer,
                                  ExceptionState& exception_state) {
   DCHECK(IsMainThread());
 
-  if (!buffer)
+  if (!buffer) {
+    reverb_.reset();
+    buffer_ = buffer;
     return;
+  }
 
   if (buffer->sampleRate() != Context()->sampleRate()) {
     exception_state.ThrowDOMException(
-        kNotSupportedError,
+        DOMExceptionCode::kNotSupportedError,
         "The buffer sample rate of " + String::Number(buffer->sampleRate()) +
             " does not match the context rate of " +
             String::Number(Context()->sampleRate()) + " Hz.");
@@ -119,8 +121,9 @@ void ConvolverHandler::SetBuffer(AudioBuffer* buffer,
 
   if (!is_channel_count_good) {
     exception_state.ThrowDOMException(
-        kNotSupportedError, "The buffer must have 1, 2, or 4 channels, not " +
-                                String::Number(number_of_channels));
+        DOMExceptionCode::kNotSupportedError,
+        "The buffer must have 1, 2, or 4 channels, not " +
+            String::Number(number_of_channels));
     return;
   }
 
@@ -207,7 +210,7 @@ void ConvolverHandler::SetChannelCount(unsigned long channel_count,
   // channelCount must be 2.
   if (channel_count != 2) {
     exception_state.ThrowDOMException(
-        kNotSupportedError,
+        DOMExceptionCode::kNotSupportedError,
         "ConvolverNode: channelCount cannot be changed from 2");
   }
 }
@@ -220,14 +223,14 @@ void ConvolverHandler::SetChannelCountMode(const String& mode,
   // channcelCountMode must be 'clamped-max'.
   if (mode != "clamped-max") {
     exception_state.ThrowDOMException(
-        kNotSupportedError,
+        DOMExceptionCode::kNotSupportedError,
         "ConvolverNode: channelCountMode cannot be changed from 'clamped-max'");
   }
 }
 
 void ConvolverHandler::CheckNumberOfChannelsForInput(AudioNodeInput* input) {
   DCHECK(Context()->IsAudioThread());
-  DCHECK(Context()->IsGraphOwner());
+  Context()->AssertGraphOwner();
 
   DCHECK(input);
   DCHECK_EQ(input, &this->Input(0));

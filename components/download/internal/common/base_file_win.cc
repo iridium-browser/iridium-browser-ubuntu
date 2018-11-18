@@ -14,46 +14,13 @@
 #include "base/files/file_util.h"
 #include "base/guid.h"
 #include "base/macros.h"
-#include "base/metrics/histogram_macros.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/threading/thread_restrictions.h"
+#include "base/threading/scoped_blocking_call.h"
 #include "components/download/public/common/download_interrupt_reasons_utils.h"
 #include "components/download/public/common/download_stats.h"
 
 namespace download {
 namespace {
-
-const int kAllSpecialShFileOperationCodes[] = {
-    // Should be kept in sync with the case statement below.
-    ERROR_ACCESS_DENIED,
-    ERROR_SHARING_VIOLATION,
-    ERROR_INVALID_PARAMETER,
-    0x71,
-    0x72,
-    0x73,
-    0x74,
-    0x75,
-    0x76,
-    0x78,
-    0x79,
-    0x7A,
-    0x7C,
-    0x7D,
-    0x7E,
-    0x80,
-    0x81,
-    0x82,
-    0x83,
-    0x84,
-    0x85,
-    0x86,
-    0x87,
-    0x88,
-    0xB7,
-    0x402,
-    0x10000,
-    0x10074,
-};
 
 // Maps the result of a call to |SHFileOperation()| onto a
 // |DownloadInterruptReason|.
@@ -253,31 +220,6 @@ DownloadInterruptReason MapShFileOperationCodes(int code) {
       break;
   }
 
-  // Narrow down on the reason we're getting some catch-all interrupt reasons.
-  if (result == DOWNLOAD_INTERRUPT_REASON_FILE_FAILED) {
-    UMA_HISTOGRAM_CUSTOM_ENUMERATION(
-        "Download.MapWinShErrorFileFailed", code,
-        base::CustomHistogram::ArrayToCustomRanges(
-            kAllSpecialShFileOperationCodes,
-            arraysize(kAllSpecialShFileOperationCodes)));
-  }
-
-  if (result == DOWNLOAD_INTERRUPT_REASON_FILE_ACCESS_DENIED) {
-    UMA_HISTOGRAM_CUSTOM_ENUMERATION(
-        "Download.MapWinShErrorAccessDenied", code,
-        base::CustomHistogram::ArrayToCustomRanges(
-            kAllSpecialShFileOperationCodes,
-            arraysize(kAllSpecialShFileOperationCodes)));
-  }
-
-  if (result == DOWNLOAD_INTERRUPT_REASON_FILE_TRANSIENT_ERROR) {
-    UMA_HISTOGRAM_CUSTOM_ENUMERATION(
-        "Download.MapWinShErrorTransientError", code,
-        base::CustomHistogram::ArrayToCustomRanges(
-            kAllSpecialShFileOperationCodes,
-            arraysize(kAllSpecialShFileOperationCodes)));
-  }
-
   if (result != DOWNLOAD_INTERRUPT_REASON_NONE)
     return result;
 
@@ -293,7 +235,7 @@ DownloadInterruptReason MapShFileOperationCodes(int code) {
 // Returns a network error, or net::OK for success.
 DownloadInterruptReason BaseFile::MoveFileAndAdjustPermissions(
     const base::FilePath& new_path) {
-  base::AssertBlockingAllowed();
+  base::ScopedBlockingCall scoped_blocking_call(base::BlockingType::MAY_BLOCK);
 
   // The parameters to SHFileOperation must be terminated with 2 NULL chars.
   base::FilePath::StringType source = full_path_.value();
@@ -302,7 +244,7 @@ DownloadInterruptReason BaseFile::MoveFileAndAdjustPermissions(
   source.append(1, L'\0');
   target.append(1, L'\0');
 
-  SHFILEOPSTRUCT move_info = {0};
+  SHFILEOPSTRUCT move_info = {nullptr};
   move_info.wFunc = FO_MOVE;
   move_info.pFrom = source.c_str();
   move_info.pTo = target.c_str();

@@ -16,7 +16,7 @@ namespace internal {
 namespace compiler {
 
 MemoryOptimizer::MemoryOptimizer(JSGraph* jsgraph, Zone* zone,
-                                 PoisoningMitigationLevel poisoning_enabled,
+                                 PoisoningMitigationLevel poisoning_level,
                                  AllocationFolding allocation_folding)
     : jsgraph_(jsgraph),
       empty_state_(AllocationState::Empty(zone)),
@@ -24,7 +24,7 @@ MemoryOptimizer::MemoryOptimizer(JSGraph* jsgraph, Zone* zone,
       tokens_(zone),
       zone_(zone),
       graph_assembler_(jsgraph, nullptr, nullptr, zone),
-      poisoning_enabled_(poisoning_enabled),
+      poisoning_level_(poisoning_level),
       allocation_folding_(allocation_folding) {}
 
 void MemoryOptimizer::Optimize() {
@@ -67,7 +67,7 @@ MemoryOptimizer::AllocationState::AllocationState(AllocationGroup* group)
     : group_(group), size_(std::numeric_limits<int>::max()), top_(nullptr) {}
 
 MemoryOptimizer::AllocationState::AllocationState(AllocationGroup* group,
-                                                  int size, Node* top)
+                                                  intptr_t size, Node* top)
     : group_(group), size_(size), top_(top) {}
 
 bool MemoryOptimizer::AllocationState::IsNewSpaceAllocation() const {
@@ -101,12 +101,16 @@ void MemoryOptimizer::VisitNode(Node* node, AllocationState const* state) {
     case IrOpcode::kIfException:
     case IrOpcode::kLoad:
     case IrOpcode::kProtectedLoad:
+    case IrOpcode::kUnalignedLoad:
     case IrOpcode::kStore:
     case IrOpcode::kProtectedStore:
+    case IrOpcode::kUnalignedStore:
     case IrOpcode::kRetain:
     case IrOpcode::kUnsafePointerAdd:
     case IrOpcode::kDebugBreak:
     case IrOpcode::kUnreachable:
+    case IrOpcode::kWord32PoisonOnSpeculation:
+    case IrOpcode::kWord64PoisonOnSpeculation:
       return VisitOtherEffect(node, state);
     default:
       break;
@@ -171,27 +175,35 @@ void MemoryOptimizer::VisitAllocateRaw(Node* node,
 
   // Check if we can fold this allocation into a previous allocation represented
   // by the incoming {state}.
-  Int32Matcher m(size);
-  if (m.HasValue() && m.Value() < kMaxRegularHeapObjectSize) {
-    int32_t const object_size = m.Value();
+  IntPtrMatcher m(size);
+  if (m.IsInRange(0, kMaxRegularHeapObjectSize)) {
+    intptr_t const object_size = m.Value();
     if (allocation_folding_ == AllocationFolding::kDoAllocationFolding &&
         state->size() <= kMaxRegularHeapObjectSize - object_size &&
         state->group()->pretenure() == pretenure) {
       // We can fold this Allocate {node} into the allocation {group}
       // represented by the given {state}. Compute the upper bound for
       // the new {state}.
-      int32_t const state_size = state->size() + object_size;
+      intptr_t const state_size = state->size() + object_size;
 
       // Update the reservation check to the actual maximum upper bound.
       AllocationGroup* const group = state->group();
-      if (OpParameter<int32_t>(group->size()->op()) < state_size) {
-        NodeProperties::ChangeOp(group->size(),
-                                 common()->Int32Constant(state_size));
+      if (machine()->Is64()) {
+        if (OpParameter<int64_t>(group->size()->op()) < state_size) {
+          NodeProperties::ChangeOp(group->size(),
+                                   common()->Int64Constant(state_size));
+        }
+      } else {
+        if (OpParameter<int32_t>(group->size()->op()) < state_size) {
+          NodeProperties::ChangeOp(
+              group->size(),
+              common()->Int32Constant(static_cast<int32_t>(state_size)));
+        }
       }
 
       // Update the allocation top with the new object allocation.
       // TODO(bmeurer): Defer writing back top as much as possible.
-      Node* top = __ IntAdd(state->top(), __ IntPtrConstant(object_size));
+      Node* top = __ IntAdd(state->top(), size);
       __ Store(StoreRepresentation(MachineType::PointerRepresentation(),
                                    kNoWriteBarrier),
                top_address, __ IntPtrConstant(0), top);
@@ -209,7 +221,7 @@ void MemoryOptimizer::VisitAllocateRaw(Node* node,
 
       // Setup a mutable reservation size node; will be patched as we fold
       // additional allocations into this new group.
-      Node* size = __ UniqueInt32Constant(object_size);
+      Node* size = __ UniqueIntPtrConstant(object_size);
 
       // Load allocation top and limit.
       Node* top =
@@ -219,10 +231,7 @@ void MemoryOptimizer::VisitAllocateRaw(Node* node,
 
       // Check if we need to collect garbage before we can start bump pointer
       // allocation (always done for folded allocations).
-      Node* check = __ UintLessThan(
-          __ IntAdd(top,
-                    machine()->Is64() ? __ ChangeInt32ToInt64(size) : size),
-          limit);
+      Node* check = __ UintLessThan(__ IntAdd(top, size), limit);
 
       __ GotoIfNot(check, &call_runtime);
       __ Goto(&done, top);
@@ -234,8 +243,10 @@ void MemoryOptimizer::VisitAllocateRaw(Node* node,
                                      : __
                                        AllocateInOldSpaceStubConstant();
         if (!allocate_operator_.is_set()) {
-          auto call_descriptor =
-              Linkage::GetAllocateCallDescriptor(graph()->zone());
+          auto descriptor = AllocateDescriptor{};
+          auto call_descriptor = Linkage::GetStubCallDescriptor(
+              graph()->zone(), descriptor, descriptor.GetStackParameterCount(),
+              CallDescriptor::kCanUseRoots, Operator::kNoThrow);
           allocate_operator_.set(common()->Call(call_descriptor));
         }
         Node* vfalse = __ Call(allocate_operator_.get(), target, size);
@@ -271,8 +282,7 @@ void MemoryOptimizer::VisitAllocateRaw(Node* node,
         __ Load(MachineType::Pointer(), limit_address, __ IntPtrConstant(0));
 
     // Compute the new top.
-    Node* new_top =
-        __ IntAdd(top, machine()->Is64() ? __ ChangeInt32ToInt64(size) : size);
+    Node* new_top = __ IntAdd(top, size);
 
     // Check if we can do bump pointer allocation here.
     Node* check = __ UintLessThan(new_top, limit);
@@ -289,8 +299,10 @@ void MemoryOptimizer::VisitAllocateRaw(Node* node,
                                  : __
                                    AllocateInOldSpaceStubConstant();
     if (!allocate_operator_.is_set()) {
-      auto call_descriptor =
-          Linkage::GetAllocateCallDescriptor(graph()->zone());
+      auto descriptor = AllocateDescriptor{};
+      auto call_descriptor = Linkage::GetStubCallDescriptor(
+          graph()->zone(), descriptor, descriptor.GetStackParameterCount(),
+          CallDescriptor::kCanUseRoots, Operator::kNoThrow);
       allocate_operator_.set(common()->Call(call_descriptor));
     }
     __ Goto(&done, __ Call(allocate_operator_.get(), target, size));
@@ -353,7 +365,7 @@ void MemoryOptimizer::VisitLoadElement(Node* node,
   ElementAccess const& access = ElementAccessOf(node->op());
   Node* index = node->InputAt(1);
   node->ReplaceInput(1, ComputeIndex(access, index));
-  if (poisoning_enabled_ == PoisoningMitigationLevel::kOn &&
+  if (NeedsPoisoning(access.load_sensitivity) &&
       access.machine_type.representation() !=
           MachineRepresentation::kTaggedPointer) {
     NodeProperties::ChangeOp(node,
@@ -369,7 +381,7 @@ void MemoryOptimizer::VisitLoadField(Node* node, AllocationState const* state) {
   FieldAccess const& access = FieldAccessOf(node->op());
   Node* offset = jsgraph()->IntPtrConstant(access.offset - access.tag());
   node->InsertInput(graph()->zone(), 1, offset);
-  if (poisoning_enabled_ == PoisoningMitigationLevel::kOn &&
+  if (NeedsPoisoning(access.load_sensitivity) &&
       access.machine_type.representation() !=
           MachineRepresentation::kTaggedPointer) {
     NodeProperties::ChangeOp(node,
@@ -415,19 +427,7 @@ void MemoryOptimizer::VisitOtherEffect(Node* node,
   EnqueueUses(node, state);
 }
 
-Node* MemoryOptimizer::ComputeIndex(ElementAccess const& access, Node* key) {
-  Node* index;
-  if (machine()->Is64()) {
-    // On 64-bit platforms, we need to feed a Word64 index to the Load and
-    // Store operators. Since LoadElement or StoreElement don't do any bounds
-    // checking themselves, we can be sure that the {key} was already checked
-    // and is in valid range, so we can do the further address computation on
-    // Word64 below, which ideally allows us to fuse the address computation
-    // with the actual memory access operation on Intel platforms.
-    index = graph()->NewNode(machine()->ChangeUint32ToUint64(), key);
-  } else {
-    index = key;
-  }
+Node* MemoryOptimizer::ComputeIndex(ElementAccess const& access, Node* index) {
   int const element_size_shift =
       ElementSizeLog2Of(access.machine_type.representation());
   if (element_size_shift) {
@@ -540,6 +540,21 @@ CommonOperatorBuilder* MemoryOptimizer::common() const {
 
 MachineOperatorBuilder* MemoryOptimizer::machine() const {
   return jsgraph()->machine();
+}
+
+bool MemoryOptimizer::NeedsPoisoning(LoadSensitivity load_sensitivity) const {
+  // Safe loads do not need poisoning.
+  if (load_sensitivity == LoadSensitivity::kSafe) return false;
+
+  switch (poisoning_level_) {
+    case PoisoningMitigationLevel::kDontPoison:
+      return false;
+    case PoisoningMitigationLevel::kPoisonAll:
+      return true;
+    case PoisoningMitigationLevel::kPoisonCriticalOnly:
+      return load_sensitivity == LoadSensitivity::kCritical;
+  }
+  UNREACHABLE();
 }
 
 }  // namespace compiler

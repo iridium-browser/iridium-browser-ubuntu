@@ -44,7 +44,6 @@ namespace blink {
 
 class MediaStreamSource;
 class WebAudioDestinationConsumer;
-class WebMediaConstraints;
 class WebString;
 
 class WebMediaStreamSource {
@@ -74,20 +73,24 @@ class WebMediaStreamSource {
     kReadyStateEnded = 2
   };
 
+  enum class EchoCancellationMode { kDisabled, kBrowser, kAec3, kSystem };
+
   struct Capabilities {
     // WebVector is used to store an optional range for the below numeric
     // fields. All of them should have 0 or 2 values representing min/max.
-    WebVector<long> width;
-    WebVector<long> height;
+    WebVector<uint32_t> width;
+    WebVector<uint32_t> height;
     WebVector<double> aspect_ratio;
     WebVector<double> frame_rate;
     WebVector<bool> echo_cancellation;
+    WebVector<WebString> echo_cancellation_type;
     WebVector<bool> auto_gain_control;
     WebVector<bool> noise_suppression;
 
     WebMediaStreamTrack::FacingMode facing_mode =
         WebMediaStreamTrack::FacingMode::kNone;
     WebString device_id;
+    WebString group_id;
   };
 
   WebMediaStreamSource() = default;
@@ -116,6 +119,9 @@ class WebMediaStreamSource {
   BLINK_PLATFORM_EXPORT WebString GetName() const;
   BLINK_PLATFORM_EXPORT bool Remote() const;
 
+  BLINK_PLATFORM_EXPORT void SetGroupId(const WebString& group_id);
+  BLINK_PLATFORM_EXPORT WebString GroupId() const;
+
   BLINK_PLATFORM_EXPORT void SetReadyState(ReadyState);
   BLINK_PLATFORM_EXPORT ReadyState GetReadyState() const;
 
@@ -127,11 +133,9 @@ class WebMediaStreamSource {
   BLINK_PLATFORM_EXPORT void SetExtraData(ExtraData*);
 
   BLINK_PLATFORM_EXPORT void SetAudioProcessingProperties(
-      bool echo_cancellation,
+      EchoCancellationMode echo_cancellation_mode,
       bool auto_gain_control,
       bool noise_supression);
-
-  BLINK_PLATFORM_EXPORT WebMediaConstraints Constraints();
 
   BLINK_PLATFORM_EXPORT void SetCapabilities(const Capabilities&);
 

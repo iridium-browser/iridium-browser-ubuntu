@@ -27,7 +27,7 @@ class CopyOutputResult;
 }
 
 namespace ui {
-class Event;
+class LocatedEvent;
 class MouseEvent;
 }
 
@@ -57,6 +57,10 @@ class Pointer : public SurfaceTreeHost,
   // pointer location, in surface local coordinates.
   void SetCursor(Surface* surface, const gfx::Point& hotspot);
 
+  // Set the pointer cursor type. This is similar to SetCursor, but this method
+  // accepts ui::CursorType instead of the surface for the pointer image.
+  void SetCursorType(ui::CursorType cursor_type);
+
   // Set delegate for pinch events.
   void SetGesturePinchDelegate(PointerGesturePinchDelegate* delegate);
 
@@ -80,7 +84,7 @@ class Pointer : public SurfaceTreeHost,
 
  private:
   // Returns the effective target for |event|.
-  Surface* GetEffectiveTargetForEvent(ui::Event* event) const;
+  Surface* GetEffectiveTargetForEvent(ui::LocatedEvent* event) const;
 
   // Change pointer focus to |surface|.
   void SetFocus(Surface* surface,

@@ -23,8 +23,9 @@ import org.junit.runner.RunWith;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.Feature;
-import org.chromium.content.browser.test.ContentJUnit4ClassRunner;
+import org.chromium.content_public.browser.ViewEventSink;
 import org.chromium.content_public.browser.WebContents;
+import org.chromium.content_public.browser.test.ContentJUnit4ClassRunner;
 import org.chromium.content_shell_apk.ContentShellActivityTestRule;
 
 /**
@@ -36,11 +37,11 @@ public class PopupZoomerTest {
     public ContentShellActivityTestRule mActivityTestRule = new ContentShellActivityTestRule();
 
     private CustomCanvasPopupZoomer mPopupZoomer;
-    private ContentViewCoreImpl mContentViewCore;
+    private ViewEventSink mViewEventSink;
 
     private static class CustomCanvasPopupZoomer extends PopupZoomer {
         Canvas mCanvas;
-        long mPendingDraws = 0;
+        long mPendingDraws;
 
         CustomCanvasPopupZoomer(Context context, ViewGroup containerView, Canvas c) {
             super(context, containerView, null, null);
@@ -94,10 +95,10 @@ public class PopupZoomerTest {
             @Override
             public void run() {
                 Context context = mActivityTestRule.getActivity();
-                WebContents webContents = mActivityTestRule.getContentViewCore().getWebContents();
-                mContentViewCore = new ContentViewCoreImpl(webContents);
+                WebContents webContents = mActivityTestRule.getWebContents();
+                mViewEventSink = new ViewEventSinkImpl(webContents);
                 mPopupZoomer = createPopupZoomerForTest(InstrumentationRegistry.getTargetContext(),
-                        mActivityTestRule.getContentViewCore().getContainerView());
+                        mActivityTestRule.getContainerView());
                 TapDisambiguator.fromWebContents(webContents).setPopupZoomerForTest(mPopupZoomer);
             }
         });
@@ -234,7 +235,7 @@ public class PopupZoomerTest {
                 Assert.assertTrue(mPopupZoomer.isShowing());
 
                 // Simulate losing the focus.
-                mContentViewCore.onViewFocusChanged(false);
+                mViewEventSink.onViewFocusChanged(false);
 
                 // Wait for the hide animation to finish.
                 mPopupZoomer.finishPendingDraws();

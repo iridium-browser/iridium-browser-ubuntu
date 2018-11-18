@@ -16,7 +16,6 @@
 #include "base/supports_user_data.h"
 #include "content/common/content_export.h"
 #include "content/common/service_worker/controller_service_worker.mojom.h"
-#include "content/common/service_worker/service_worker.mojom.h"
 #include "content/common/service_worker/service_worker_provider.mojom.h"
 #include "content/renderer/service_worker/service_worker_provider_context.h"
 #include "third_party/blink/public/mojom/service_worker/service_worker_provider_type.mojom.h"
@@ -60,29 +59,43 @@ class CONTENT_EXPORT ServiceWorkerNetworkProvider {
   // Creates a ServiceWorkerNetworkProvider for navigation and wraps it
   // with WebServiceWorkerNetworkProvider to be owned by Blink.
   //
+  // |request_params| are navigation parameters that were transmitted to the
+  // renderer by the browser on a navigation commit. It is null if we have not
+  // yet heard from the browser (currently only during the time it takes from
+  // having the renderer initiate a navigation until the browser commits it).
+  // Note: in particular, provisional load failure do not provide
+  // |request_params|.
+  // TODO(ahemery): Update this comment when do not create placeholder document
+  // loaders for renderer-initiated navigations. In this case, this should never
+  // be null.
+  //
   // For S13nServiceWorker:
   // |controller_info| contains the endpoint and object info that is needed to
   // set up the controller service worker for the client.
-  // |default_loader_factory| is a default loader factory for network requests,
-  // and is used when we create a subresource loader for controllees. This is
-  // non-null only if the provider is created for controllees, and if the
-  // loading context, e.g. a frame, provides it.
+  // |fallback_loader_factory| is a default loader factory for fallback
+  // requests, and is used when we create a subresource loader for controllees.
+  // This is non-null only if the provider is created for controllees, and if
+  // the loading context, e.g. a frame, provides it.
   static std::unique_ptr<blink::WebServiceWorkerNetworkProvider>
   CreateForNavigation(
       int route_id,
-      const RequestNavigationParams& request_params,
+      const RequestNavigationParams* request_params,
       blink::WebLocalFrame* frame,
-      bool content_initiated,
       mojom::ControllerServiceWorkerInfoPtr controller_info,
-      scoped_refptr<network::SharedURLLoaderFactory> default_loader_factory);
+      scoped_refptr<network::SharedURLLoaderFactory> fallback_loader_factory);
 
   // Creates a ServiceWorkerNetworkProvider for a shared worker (as a
   // non-document service worker client).
+  //
+  // For NetworkService (PlzWorker):
+  // |controller_info| contains the endpoint and object info that is needed to
+  // set up the controller service worker for the client.
   static std::unique_ptr<ServiceWorkerNetworkProvider> CreateForSharedWorker(
       mojom::ServiceWorkerProviderInfoForSharedWorkerPtr info,
       network::mojom::URLLoaderFactoryAssociatedPtrInfo
           script_loader_factory_info,
-      scoped_refptr<network::SharedURLLoaderFactory> default_loader_factory);
+      mojom::ControllerServiceWorkerInfoPtr controller_info,
+      scoped_refptr<network::SharedURLLoaderFactory> fallback_loader_factory);
 
   // Creates a ServiceWorkerNetworkProvider for a "controller" (i.e.
   // a service worker execution context).
@@ -103,7 +116,12 @@ class CONTENT_EXPORT ServiceWorkerNetworkProvider {
     return script_loader_factory_.get();
   }
 
-  bool IsControlledByServiceWorker() const;
+  // Returns whether the context this provider is for is controlled by a service
+  // worker. Can be called only for providers for service worker clients.
+  blink::mojom::ControllerServiceWorkerMode IsControlledByServiceWorker() const;
+
+  // Called when blink::IdlenessDetector emits its network idle signal.
+  void DispatchNetworkQuiet();
 
  private:
   // Creates an invalid instance (provider_id() returns
@@ -116,20 +134,21 @@ class CONTENT_EXPORT ServiceWorkerNetworkProvider {
   //
   // For S13nServiceWorker:
   // See the comment at CreateForNavigation() for |controller_info| and
-  // |default_loader_factory|.
+  // |fallback_loader_factory|.
   ServiceWorkerNetworkProvider(
       int route_id,
       blink::mojom::ServiceWorkerProviderType type,
       int provider_id,
       bool is_parent_frame_secure,
       mojom::ControllerServiceWorkerInfoPtr controller_info,
-      scoped_refptr<network::SharedURLLoaderFactory> default_loader_factory);
+      scoped_refptr<network::SharedURLLoaderFactory> fallback_loader_factory);
 
   ServiceWorkerNetworkProvider(
       mojom::ServiceWorkerProviderInfoForSharedWorkerPtr info,
       network::mojom::URLLoaderFactoryAssociatedPtrInfo
           script_loader_factory_info,
-      scoped_refptr<network::SharedURLLoaderFactory> default_loader_factory);
+      mojom::ControllerServiceWorkerInfoPtr controller_info,
+      scoped_refptr<network::SharedURLLoaderFactory> fallback_loader_factory);
 
   // This is for controllers, used in CreateForController.
   explicit ServiceWorkerNetworkProvider(

@@ -14,12 +14,12 @@
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 #include "chromecast/base/task_runner_impl.h"
-#include "chromecast/media/cma/backend/av_sync.h"
 #include "chromecast/media/cma/backend/media_pipeline_backend_for_mixer.h"
 #include "chromecast/media/cma/base/decoder_buffer_adapter.h"
 #include "chromecast/media/cma/base/decoder_buffer_base.h"
 #include "chromecast/public/media/cast_decoder_buffer.h"
 #include "media/base/audio_bus.h"
+#include "media/base/audio_timestamp_helper.h"
 #include "media/base/channel_layout.h"
 #include "media/base/decoder_buffer.h"
 #include "media/base/sample_format.h"
@@ -38,8 +38,12 @@ namespace media {
 
 namespace {
 
+int64_t SamplesToMicroseconds(int64_t samples, int sample_rate) {
+  return ::media::AudioTimestampHelper::FramesToTime(samples, sample_rate)
+      .InMicroseconds();
+}
+
 const int kNumChannels = 2;
-const int kBitsPerSample = 32;
 const int kDefaultFramesPerBuffer = 1024;
 const int kSilenceBufferFrames = 2048;
 const int kMaxOutputMs = 20;
@@ -55,6 +59,21 @@ const int64_t kInvalidTimestamp = std::numeric_limits<int64_t>::min();
 
 const int64_t kNoPendingOutput = -1;
 
+// TODO(jameswest): Replace numeric playout channel with AudioChannel enum in
+// mixer.
+int ToPlayoutChannel(AudioChannel audio_channel) {
+  switch (audio_channel) {
+    case AudioChannel::kAll:
+      return kChannelAll;
+    case AudioChannel::kLeft:
+      return 0;
+    case AudioChannel::kRight:
+      return 1;
+  }
+  NOTREACHED();
+  return kChannelAll;
+}
+
 }  // namespace
 
 // static
@@ -63,7 +82,10 @@ bool MediaPipelineBackend::AudioDecoder::RequiresDecryption() {
 }
 
 AudioDecoderForMixer::RateShifterInfo::RateShifterInfo(float playback_rate)
-    : rate(playback_rate), input_frames(0), output_frames(0) {}
+    : rate(playback_rate),
+      input_frames(0),
+      output_frames(0),
+      base_pts(INT64_MIN) {}
 
 AudioDecoderForMixer::AudioDecoderForMixer(
     MediaPipelineBackendForMixer* backend)
@@ -84,7 +106,6 @@ AudioDecoderForMixer::AudioDecoderForMixer(
       pending_output_frames_(kNoPendingOutput),
       volume_multiplier_(1.0f),
       pool_(new ::media::AudioBufferMemoryPool()),
-      av_sync_(AvSync::Create(backend->GetTaskRunner(), backend)),
       weak_factory_(this) {
   TRACE_FUNCTION_ENTRY0();
   DCHECK(backend_);
@@ -117,16 +138,18 @@ void AudioDecoderForMixer::Initialize() {
   paused_pts_ = kInvalidTimestamp;
   pending_output_frames_ = kNoPendingOutput;
 
-  last_mixer_delay_.timestamp_microseconds = kInvalidTimestamp;
-  last_mixer_delay_.delay_microseconds = 0;
+  last_mixer_delay_ = RenderingDelay();
 }
 
-bool AudioDecoderForMixer::Start(int64_t start_pts) {
+bool AudioDecoderForMixer::Start(int64_t playback_start_pts,
+                                 bool start_playback_asap) {
   TRACE_FUNCTION_ENTRY0();
   DCHECK(IsValidConfig(config_));
   mixer_input_.reset(new BufferingMixerSource(
       this, config_.samples_per_second, backend_->Primary(),
-      backend_->DeviceId(), backend_->ContentType(), config_.playout_channel));
+      backend_->DeviceId(), backend_->ContentType(),
+      ToPlayoutChannel(backend_->AudioChannel()), playback_start_pts,
+      start_playback_asap));
 
   mixer_input_->SetVolumeMultiplier(volume_multiplier_);
   // Create decoder_ if necessary. This can happen if Stop() was called, and
@@ -137,8 +160,26 @@ bool AudioDecoderForMixer::Start(int64_t start_pts) {
   if (!rate_shifter_) {
     CreateRateShifter(config_.samples_per_second);
   }
-  av_sync_->NotifyStart();
+  playback_start_pts_ = playback_start_pts;
+  start_playback_asap_ = start_playback_asap;
+
   return true;
+}
+
+void AudioDecoderForMixer::StartPlaybackAt(int64_t playback_start_timestamp) {
+  LOG(INFO) << __func__
+            << " playback_start_timestamp_=" << playback_start_timestamp;
+  mixer_input_->StartPlaybackAt(playback_start_timestamp);
+}
+
+void AudioDecoderForMixer::RestartPlaybackAt(int64_t timestamp, int64_t pts) {
+  LOG(INFO) << __func__ << " pts=" << pts << " timestamp=" << timestamp;
+
+  last_push_timestamp_ = kInvalidTimestamp;
+  last_push_pts_ = kInvalidTimestamp;
+  last_mixer_delay_ = RenderingDelay();
+
+  mixer_input_->RestartPlaybackAt(timestamp, pts);
 }
 
 void AudioDecoderForMixer::Stop() {
@@ -147,7 +188,6 @@ void AudioDecoderForMixer::Stop() {
   mixer_input_.reset();
   rate_shifter_.reset();
   weak_factory_.InvalidateWeakPtrs();
-  av_sync_->NotifyStop();
 
   Initialize();
 }
@@ -157,7 +197,6 @@ bool AudioDecoderForMixer::Pause() {
   DCHECK(mixer_input_);
   mixer_input_->SetPaused(true);
   paused_pts_ = GetCurrentPts();
-  av_sync_->NotifyPause();
   return true;
 }
 
@@ -166,11 +205,13 @@ bool AudioDecoderForMixer::Resume() {
   DCHECK(mixer_input_);
   paused_pts_ = kInvalidTimestamp;
   mixer_input_->SetPaused(false);
-  av_sync_->NotifyResume();
+  last_push_timestamp_ = kInvalidTimestamp;
+  last_push_pts_ = kInvalidTimestamp;
+  last_mixer_delay_ = RenderingDelay();
   return true;
 }
 
-bool AudioDecoderForMixer::SetPlaybackRate(float rate) {
+float AudioDecoderForMixer::SetPlaybackRate(float rate) {
   if (std::abs(rate - 1.0) < kPlaybackRateEpsilon) {
     // AudioRendererAlgorithm treats values close to 1 as exactly 1.
     rate = 1.0f;
@@ -189,7 +230,35 @@ bool AudioDecoderForMixer::SetPlaybackRate(float rate) {
     }
   }
 
+  // If the rate_shifter_info_ is empty, then the playback rate will take
+  // effect right away, so we should notify now.
+  if (rate_shifter_info_.empty()) {
+    LOG(INFO) << "New playback rate in effect: " << rate;
+    backend_->NewAudioPlaybackRateInEffect(rate);
+  }
+
   rate_shifter_info_.push_back(RateShifterInfo(rate));
+  return rate;
+}
+
+float AudioDecoderForMixer::SetAvSyncPlaybackRate(float rate) {
+  return mixer_input_->SetAvSyncPlaybackRate(rate);
+}
+
+// TODO(almasrymina): This function currently only really works well when
+// audio is in steady playback, because it returns the timestamp at buffer
+// push. We need to call into the BufferingMixerSource here to get the values
+// of the last *played* buffer.
+bool AudioDecoderForMixer::GetTimestampedPts(int64_t* timestamp,
+                                             int64_t* pts) const {
+  if (last_push_timestamp_ == kInvalidTimestamp ||
+      last_push_pts_ == kInvalidTimestamp)
+    return false;
+
+  // Hmm this timestamp may be in the future. That should be fine, but it's
+  // a bit weird.
+  *timestamp = last_push_timestamp_;
+  *pts = last_push_pts_;
   return true;
 }
 
@@ -217,6 +286,7 @@ AudioDecoderForMixer::BufferStatus AudioDecoderForMixer::PushBuffer(
   DCHECK(!got_eos_);
   DCHECK(!mixer_error_);
   DCHECK(!pending_buffer_complete_);
+  DCHECK(mixer_input_);
 
   uint64_t input_bytes = buffer->end_of_stream() ? 0 : buffer->data_size();
   scoped_refptr<DecoderBufferBase> buffer_base(
@@ -227,18 +297,18 @@ AudioDecoderForMixer::BufferStatus AudioDecoderForMixer::PushBuffer(
   if (BypassDecoder()) {
     DCHECK(!decoder_);
     task_runner_->PostTask(
-        FROM_HERE,
-        base::BindOnce(&AudioDecoderForMixer::OnBufferDecoded,
-                       weak_factory_.GetWeakPtr(), input_bytes,
-                       CastAudioDecoder::Status::kDecodeOk, buffer_base));
+        FROM_HERE, base::BindOnce(&AudioDecoderForMixer::OnBufferDecoded,
+                                  weak_factory_.GetWeakPtr(), input_bytes,
+                                  CastAudioDecoder::Status::kDecodeOk, config_,
+                                  buffer_base));
     return MediaPipelineBackend::kBufferPending;
   }
 
   DCHECK(decoder_);
   // Decode the buffer.
-  decoder_->Decode(buffer_base,
-                   base::Bind(&AudioDecoderForMixer::OnBufferDecoded,
-                              weak_factory_.GetWeakPtr(), input_bytes));
+  decoder_->Decode(std::move(buffer_base),
+                   base::BindOnce(&AudioDecoderForMixer::OnBufferDecoded,
+                                  base::Unretained(this), input_bytes));
   return MediaPipelineBackend::kBufferPending;
 }
 
@@ -270,14 +340,7 @@ bool AudioDecoderForMixer::SetConfig(const AudioConfig& config) {
   }
 
   if (mixer_input_ && changed_sample_rate) {
-    // Destroy the old input first to ensure that the mixer output sample rate
-    // is updated.
-    mixer_input_.reset();
-    mixer_input_.reset(new BufferingMixerSource(
-        this, config.samples_per_second, backend_->Primary(),
-        backend_->DeviceId(), backend_->ContentType(), config.playout_channel));
-    mixer_input_->SetVolumeMultiplier(volume_multiplier_);
-    pending_output_frames_ = kNoPendingOutput;
+    ResetMixerInputForNewSampleRate(config.samples_per_second);
   }
 
   config_ = config;
@@ -289,6 +352,19 @@ bool AudioDecoderForMixer::SetConfig(const AudioConfig& config) {
     delegate_->OnPushBufferComplete(MediaPipelineBackend::kBufferSuccess);
   }
   return true;
+}
+
+void AudioDecoderForMixer::ResetMixerInputForNewSampleRate(int sample_rate) {
+  // Destroy the old input first to ensure that the mixer output sample rate
+  // is updated.
+  mixer_input_.reset();
+  mixer_input_.reset(new BufferingMixerSource(
+      this, sample_rate, backend_->Primary(), backend_->DeviceId(),
+      backend_->ContentType(), ToPlayoutChannel(backend_->AudioChannel()),
+      playback_start_pts_, start_playback_asap_));
+  mixer_input_->SetVolumeMultiplier(volume_multiplier_);
+  pending_output_frames_ = kNoPendingOutput;
+  last_mixer_delay_ = AudioDecoderForMixer::RenderingDelay();
 }
 
 void AudioDecoderForMixer::CreateDecoder() {
@@ -304,8 +380,9 @@ void AudioDecoderForMixer::CreateDecoder() {
   // Create a decoder.
   decoder_ = CastAudioDecoder::Create(
       task_runner_, config_, kDecoderSampleFormat,
-      base::Bind(&AudioDecoderForMixer::OnDecoderInitialized,
-                 weak_factory_.GetWeakPtr()));
+      ::media::CHANNEL_LAYOUT_STEREO,
+      base::BindOnce(&AudioDecoderForMixer::OnDecoderInitialized,
+                     base::Unretained(this)));
 }
 
 void AudioDecoderForMixer::CreateRateShifter(int samples_per_second) {
@@ -317,8 +394,7 @@ void AudioDecoderForMixer::CreateRateShifter(int samples_per_second) {
   rate_shifter_->Initialize(
       ::media::AudioParameters(::media::AudioParameters::AUDIO_PCM_LINEAR,
                                ::media::CHANNEL_LAYOUT_STEREO,
-                               samples_per_second, kBitsPerSample,
-                               kDefaultFramesPerBuffer),
+                               samples_per_second, kDefaultFramesPerBuffer),
       is_encrypted);
 }
 
@@ -365,13 +441,18 @@ void AudioDecoderForMixer::OnDecoderInitialized(bool success) {
 void AudioDecoderForMixer::OnBufferDecoded(
     uint64_t input_bytes,
     CastAudioDecoder::Status status,
-    const scoped_refptr<DecoderBufferBase>& decoded) {
+    const AudioConfig& config,
+    scoped_refptr<DecoderBufferBase> decoded) {
   TRACE_FUNCTION_ENTRY0();
   DCHECK(task_runner_->BelongsToCurrentThread());
   DCHECK(!got_eos_);
   DCHECK(!pending_buffer_complete_);
   DCHECK(rate_shifter_);
 
+  if (!mixer_input_) {
+    LOG(DFATAL) << "Buffer pushed before Start() or after Stop()";
+    return;
+  }
   if (status == CastAudioDecoder::Status::kDecodeError) {
     LOG(ERROR) << "Decode error";
     delegate_->OnPushBufferComplete(MediaPipelineBackend::kBufferFailed);
@@ -385,6 +466,18 @@ void AudioDecoderForMixer::OnBufferDecoded(
   Statistics delta;
   delta.decoded_bytes = input_bytes;
   UpdateStatistics(delta);
+
+  if (config.samples_per_second != config_.samples_per_second) {
+    LOG(INFO) << "Input sample rate changed from " << config_.samples_per_second
+              << " to " << config.samples_per_second;
+    // Sample rate from actual stream doesn't match supposed sample rate from
+    // the container. Update the mixer and rate shifter. Note that for now we
+    // assume that this can only happen at start of stream (ie, on the first
+    // decoded buffer).
+    config_.samples_per_second = config.samples_per_second;
+    CreateRateShifter(config.samples_per_second);
+    ResetMixerInputForNewSampleRate(config.samples_per_second);
+  }
 
   pending_buffer_complete_ = true;
   if (decoded->end_of_stream()) {
@@ -422,7 +515,7 @@ void AudioDecoderForMixer::OnBufferDecoded(
         DCHECK(!pushed_eos_);
         pushed_eos_ = true;
       }
-      WritePcmWrapper(decoded);
+      mixer_input_->WritePcm(std::move(decoded));
       return;
     }
 
@@ -436,6 +529,9 @@ void AudioDecoderForMixer::OnBufferDecoded(
         base::TimeDelta(), pool_);
     rate_shifter_->EnqueueBuffer(buffer);
     rate_shifter_info_.back().input_frames += input_frames;
+    if (rate_shifter_info_.back().base_pts == INT64_MIN) {
+      rate_shifter_info_.back().base_pts = decoded->timestamp();
+    }
   }
 
   PushRateShifted();
@@ -493,7 +589,7 @@ void AudioDecoderForMixer::PushRateShifted() {
 
       scoped_refptr<DecoderBufferBase> eos_buffer(
           new DecoderBufferAdapter(::media::DecoderBuffer::CreateEOSBuffer()));
-      WritePcmWrapper(eos_buffer);
+      mixer_input_->WritePcm(eos_buffer);
     }
     return;
   }
@@ -513,6 +609,10 @@ void AudioDecoderForMixer::PushRateShifted() {
     return;
   }
 
+  int64_t buffer_timestamp =
+      rate_info->base_pts + SamplesToMicroseconds(rate_info->output_frames,
+                                                  config_.samples_per_second);
+
   rate_info->output_frames += out_frames;
   DCHECK_GE(possible_output_frames, rate_info->output_frames);
 
@@ -523,8 +623,12 @@ void AudioDecoderForMixer::PushRateShifted() {
     memcpy(output_buffer->writable_data() + c * channel_data_size,
            rate_shifter_output_->channel(c), channel_data_size);
   }
+  DCHECK(rate_shifter_info_.front().base_pts != INT64_MIN);
+  output_buffer->set_timestamp(
+      base::TimeDelta::FromMicroseconds(buffer_timestamp));
+
   pending_output_frames_ = out_frames;
-  WritePcmWrapper(output_buffer);
+  mixer_input_->WritePcm(output_buffer);
 
   if (rate_shifter_info_.size() > 1 &&
       rate_info->output_frames == possible_output_frames) {
@@ -534,6 +638,7 @@ void AudioDecoderForMixer::PushRateShifted() {
 
     rate_info = &rate_shifter_info_.front();
     LOG(INFO) << "New playback rate in effect: " << rate_info->rate;
+    backend_->NewAudioPlaybackRateInEffect(rate_info->rate);
     rate_info->input_frames += remaining_input_frames;
     DCHECK_EQ(0, rate_info->output_frames);
 
@@ -596,12 +701,9 @@ void AudioDecoderForMixer::OnEos() {
   delegate_->OnEndOfStream();
 }
 
-void AudioDecoderForMixer::WritePcmWrapper(
-    const scoped_refptr<DecoderBufferBase>& buffer) {
-  av_sync_->NotifyAudioBufferPushed(
-      buffer->end_of_stream() ? INT64_MAX : buffer->timestamp(),
-      GetRenderingDelay());
-  mixer_input_->WritePcm(buffer);
+void AudioDecoderForMixer::OnAudioReadyForPlayback() {
+  DCHECK(task_runner_->BelongsToCurrentThread());
+  backend_->OnAudioReadyForPlayback();
 }
 
 }  // namespace media

@@ -11,7 +11,6 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/containers/circular_deque.h"
-#include "base/message_loop/message_loop.h"
 #include "base/test/simple_test_tick_clock.h"
 #include "media/base/fake_single_thread_task_runner.h"
 #include "media/base/test_random.h"
@@ -144,7 +143,7 @@ class TestMultiBuffer : public MultiBuffer {
 
   void CheckPresentState() {
     IntervalMap<MultiBufferBlockId, int32_t> tmp;
-    for (DataMap::iterator i = data_.begin(); i != data_.end(); ++i) {
+    for (auto i = data_.begin(); i != data_.end(); ++i) {
       CHECK(i->second);  // Null poineters are not allowed in data_
       CHECK_NE(!!pinned_[i->first], lru_->Contains(this, i->first))
           << " i->first = " << i->first;
@@ -167,7 +166,7 @@ class TestMultiBuffer : public MultiBuffer {
   }
 
   void CheckLRUState() {
-    for (DataMap::iterator i = data_.begin(); i != data_.end(); ++i) {
+    for (auto i = data_.begin(); i != data_.end(); ++i) {
       CHECK(i->second);  // Null poineters are not allowed in data_
       CHECK_NE(!!pinned_[i->first], lru_->Contains(this, i->first))
           << " i->first = " << i->first;
@@ -254,9 +253,6 @@ class MultiBufferTest : public testing::Test {
   scoped_refptr<FakeSingleThreadTaskRunner> task_runner_;
   scoped_refptr<MultiBuffer::GlobalLRU> lru_;
   TestMultiBuffer multibuffer_;
-
-  // TODO(hubbe): Make MultiBufferReader take a task_runner_
-  base::MessageLoop message_loop_;
 };
 
 TEST_F(MultiBufferTest, ReadAll) {

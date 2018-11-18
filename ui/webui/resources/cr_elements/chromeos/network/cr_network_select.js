@@ -62,6 +62,13 @@ Polymer({
     cellularDeviceState_: Object,
   },
 
+  /**
+   * Returns network list object for testing.
+   */
+  getNetworkListForTest: function() {
+    return this.$.networkList.$$('#networkList');
+  },
+
   /** @type {!CrOnc.NetworkStateProperties|undefined} */
   defaultNetworkState_: undefined,
 
@@ -152,6 +159,8 @@ Polymer({
     if (this.cellularDeviceState_)
       this.ensureCellularNetwork_(networkStates);
     this.networkStateList_ = networkStates;
+    this.fire('network-list-changed', networkStates);
+
     var defaultNetwork;
     for (var i = 0; i < networkStates.length; ++i) {
       var state = networkStates[i];

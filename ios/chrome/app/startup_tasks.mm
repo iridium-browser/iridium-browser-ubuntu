@@ -6,7 +6,7 @@
 
 #import <MediaPlayer/MediaPlayer.h>
 
-#import "base/mac/bind_objc_block.h"
+#include "base/bind.h"
 #include "components/bookmarks/browser/startup_task_runner_service.h"
 #import "ios/chrome/app/deferred_initialization_runner.h"
 #include "ios/chrome/app/tests_hook.h"
@@ -19,6 +19,7 @@
 #include "ios/chrome/browser/reading_list/reading_list_download_service_factory.h"
 #import "ios/chrome/browser/ui/main/browser_view_information.h"
 #import "ios/chrome/browser/upgrade/upgrade_center.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -63,10 +64,8 @@ NSString* const kStartProfileStartupTaskRunners =
     return;
   // Start omaha service. We only do this on official builds.
   OmahaService::Start(
-      GetApplicationContext()
-          ->GetIOSChromeIOThread()
-          ->system_url_request_context_getter(),
-      base::BindBlockArc(^(const UpgradeRecommendedDetails& details) {
+      GetApplicationContext()->GetSharedURLLoaderFactory()->Clone(),
+      base::BindRepeating(^(const UpgradeRecommendedDetails& details) {
         [[UpgradeCenter sharedInstance] upgradeNotificationDidOccur:details];
       }));
 #endif  // defined(GOOGLE_CHROME_BUILD)

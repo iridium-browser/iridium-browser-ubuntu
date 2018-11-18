@@ -10,11 +10,13 @@
 
 NS_ASSUME_NONNULL_BEGIN
 
+@class CWVScriptCommand;
 @class CWVScrollView;
 @class CWVTranslationController;
 @class CWVWebViewConfiguration;
-@protocol CWVUIDelegate;
 @protocol CWVNavigationDelegate;
+@protocol CWVScriptCommandHandler;
+@protocol CWVUIDelegate;
 
 // A web view component (like WKWebView) which uses iOS Chromium's web view
 // implementation.
@@ -85,6 +87,10 @@ CWV_EXPORT
 // The scroll view associated with the web view.
 @property(nonatomic, readonly) CWVScrollView* scrollView;
 
+// A Boolean value indicating whether horizontal swipe gestures will trigger
+// back-forward list navigations.
+@property(nonatomic) BOOL allowsBackForwardNavigationGestures;
+
 // The User Agent product string used to build the full User Agent.
 + (NSString*)userAgentProduct;
 
@@ -133,8 +139,55 @@ CWV_EXPORT
 
 // Evaluates a JavaScript string.
 // The completion handler is invoked when script evaluation completes.
+//
+// Note that |javaScriptString| is wrapped with:
+//   if (<implementation defined>) { ... }
+// before evaluation, which causes some tricky side effect when you use |let| or
+// |const| in the script.
+//
+//   1. Variables defined with |let| or |const| at the top level of the script
+//      do NOT become a global variable. i.e., It is accessible neither from
+//      scripts in the page nor another call to
+//      -evaluateJavaScript:completionHandler:. Variables defined with |var|
+//      DOES become a global variable.
+//
+//   2. Variables defined with |let| or |const| at the top level are not
+//      accessible from top level functions, even in the same script. Variable
+//      defined with |var| doesn't have this issue either. e.g., evaluation of
+//      this script causes an error:
+//
+//        let a =  3;
+//        function f() {
+//          console.log(a);  // ReferenceError: Can't find variable: a
+//        }
+//        f();
+//
+// To workaround the issue, you can use |var| instead, or an explicit reference
+// to window.xxx. This is because |let| and |const| are scoped by braces while
+// |var| isn't, and due to tricky behavior of WebKit in non-strict mode.
 - (void)evaluateJavaScript:(NSString*)javaScriptString
          completionHandler:(void (^)(id, NSError*))completionHandler;
+
+// Registers a handler that will be called when a command matching
+// |commandPrefix| is received.
+//
+// Web pages can send a command by executing JavaScript like this:
+//   __gCrWeb.message.invokeOnHost(
+//       {'command': 'test.command1', 'key1':'value1', 'key2': 42});
+// And receive it by:
+//   [webView addScriptCommandHandler:handler commandPrefix:@"test"];
+//
+// Make sure to call -removeScriptCommandHandlerForCommandPrefix: with the same
+// prefix before deallocating a CWVWebView instance. Otherwise it causes an
+// assertion failure.
+//
+// This provides a similar functionarity to -[WKUserContentController
+// addScriptMessageHandler:name:].
+- (void)addScriptCommandHandler:(id<CWVScriptCommandHandler>)handler
+                  commandPrefix:(NSString*)commandPrefix;
+
+// Removes the handler associated with |commandPrefix|.
+- (void)removeScriptCommandHandlerForCommandPrefix:(NSString*)commandPrefix;
 
 @end
 

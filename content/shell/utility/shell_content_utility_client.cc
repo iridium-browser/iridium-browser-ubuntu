@@ -24,14 +24,21 @@
 #include "services/service_manager/public/cpp/binder_registry.h"
 #include "services/test/echo/echo_service.h"
 
+#if defined(OS_CHROMEOS)
+// TODO(https://crbug.com/784179): Remove nogncheck.
+#include "services/ws/test_ws/test_window_service_factory.h"  // nogncheck
+#include "services/ws/test_ws/test_ws.mojom.h"                // nogncheck
+#include "ui/base/ui_base_features.h"
+#endif
+
 namespace content {
 
 namespace {
 
-class TestServiceImpl : public mojom::TestService {
+class TestUtilityServiceImpl : public mojom::TestService {
  public:
   static void Create(mojom::TestServiceRequest request) {
-    mojo::MakeStrongBinding(base::WrapUnique(new TestServiceImpl),
+    mojo::MakeStrongBinding(base::WrapUnique(new TestUtilityServiceImpl),
                             std::move(request));
   }
 
@@ -42,6 +49,10 @@ class TestServiceImpl : public mojom::TestService {
 
   void DoTerminateProcess(DoTerminateProcessCallback callback) override {
     base::Process::TerminateCurrentProcessImmediately(0);
+  }
+
+  void DoCrashImmediately(DoCrashImmediatelyCallback callback) override {
+    IMMEDIATE_CRASH();
   }
 
   void CreateFolder(CreateFolderCallback callback) override {
@@ -69,9 +80,9 @@ class TestServiceImpl : public mojom::TestService {
   }
 
  private:
-  explicit TestServiceImpl() {}
+  explicit TestUtilityServiceImpl() {}
 
-  DISALLOW_COPY_AND_ASSIGN(TestServiceImpl);
+  DISALLOW_COPY_AND_ASSIGN(TestUtilityServiceImpl);
 };
 
 std::unique_ptr<service_manager::Service> CreateTestService() {
@@ -85,6 +96,7 @@ ShellContentUtilityClient::ShellContentUtilityClient(bool is_browsertest) {
       base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
           switches::kProcessType) == switches::kUtilityProcess) {
     network_service_test_helper_ = std::make_unique<NetworkServiceTestHelper>();
+    audio_service_test_helper_ = std::make_unique<AudioServiceTestHelper>();
   }
 }
 
@@ -93,7 +105,7 @@ ShellContentUtilityClient::~ShellContentUtilityClient() {
 
 void ShellContentUtilityClient::UtilityThreadStarted() {
   auto registry = std::make_unique<service_manager::BinderRegistry>();
-  registry->AddInterface(base::BindRepeating(&TestServiceImpl::Create),
+  registry->AddInterface(base::BindRepeating(&TestUtilityServiceImpl::Create),
                          base::ThreadTaskRunnerHandle::Get());
   registry->AddInterface<mojom::PowerMonitorTest>(
       base::BindRepeating(
@@ -118,11 +130,25 @@ void ShellContentUtilityClient::RegisterServices(StaticServiceMap* services) {
     info.factory = base::BindRepeating(&echo::CreateEchoService);
     services->insert(std::make_pair(echo::mojom::kServiceName, info));
   }
+
+#if defined(OS_CHROMEOS)
+  if (features::IsMultiProcessMash()) {
+    service_manager::EmbeddedServiceInfo info;
+    info.factory =
+        base::BindRepeating(&ws::test::CreateOutOfProcessWindowService);
+    services->insert(std::make_pair(test_ws::mojom::kServiceName, info));
+  }
+#endif
 }
 
 void ShellContentUtilityClient::RegisterNetworkBinders(
     service_manager::BinderRegistry* registry) {
   network_service_test_helper_->RegisterNetworkBinders(registry);
+}
+
+void ShellContentUtilityClient::RegisterAudioBinders(
+    service_manager::BinderRegistry* registry) {
+  audio_service_test_helper_->RegisterAudioBinders(registry);
 }
 
 }  // namespace content

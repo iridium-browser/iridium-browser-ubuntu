@@ -51,14 +51,9 @@ ForwardingAgentHost::ForwardingAgentHost(
 ForwardingAgentHost::~ForwardingAgentHost() {
 }
 
-void ForwardingAgentHost::AttachClient(DevToolsAgentHostClient* client) {
+bool ForwardingAgentHost::AttachClient(DevToolsAgentHostClient* client) {
   session_proxies_[client].reset(new SessionProxy(this, client));
-}
-
-void ForwardingAgentHost::ForceAttachClient(DevToolsAgentHostClient* client) {
-  while (!session_proxies_.empty())
-    session_proxies_.begin()->second->ConnectionClosed();
-  AttachClient(client);
+  return true;
 }
 
 bool ForwardingAgentHost::DetachClient(DevToolsAgentHostClient* client) {

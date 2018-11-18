@@ -7,7 +7,6 @@ package org.chromium.chrome.browser.widget;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
-import android.os.AsyncTask;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.support.v4.util.AtomicFile;
@@ -21,6 +20,8 @@ import org.chromium.base.Log;
 import org.chromium.base.StreamUtil;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
+import org.chromium.base.task.AsyncTask;
+import org.chromium.chrome.browser.util.ConversionUtils;
 import org.chromium.chrome.browser.widget.ThumbnailCacheEntry.ContentId;
 import org.chromium.chrome.browser.widget.ThumbnailCacheEntry.ThumbnailEntry;
 
@@ -49,7 +50,8 @@ import java.util.LinkedHashSet;
  */
 public class ThumbnailDiskStorage implements ThumbnailGeneratorCallback {
     private static final String TAG = "ThumbnailStorage";
-    private static final int MAX_CACHE_BYTES = 1024 * 1024; // Max disk cache size is 1MB.
+    private static final int MAX_CACHE_BYTES =
+            ConversionUtils.BYTES_PER_MEGABYTE; // Max disk cache size is 1MB.
 
     // LRU cache of a pair of thumbnail's contentID and size. The order is based on the sequence of
     // add and get with the most recent at the end. The order at initialization (i.e. browser
@@ -78,17 +80,17 @@ public class ThumbnailDiskStorage implements ThumbnailGeneratorCallback {
     @VisibleForTesting
     long mSizeBytes;
 
-    private class InitTask extends AsyncTask<Void, Void, Void> {
+    private class InitTask extends AsyncTask<Void> {
         @Override
-        protected Void doInBackground(Void... params) {
+        protected Void doInBackground() {
             initDiskCache();
             return null;
         }
     }
 
-    private class ClearTask extends AsyncTask<Void, Void, Void> {
+    private class ClearTask extends AsyncTask<Void> {
         @Override
-        protected Void doInBackground(Void... params) {
+        protected Void doInBackground() {
             clearDiskCache();
             return null;
         }
@@ -98,7 +100,7 @@ public class ThumbnailDiskStorage implements ThumbnailGeneratorCallback {
      * Writes to disk cache.
      */
     @VisibleForTesting
-    class CacheThumbnailTask extends AsyncTask<Void, Void, Void> {
+    class CacheThumbnailTask extends AsyncTask<Void> {
         private final String mContentId;
         private final Bitmap mBitmap;
         private final int mIconSizePx;
@@ -110,7 +112,7 @@ public class ThumbnailDiskStorage implements ThumbnailGeneratorCallback {
         }
 
         @Override
-        protected Void doInBackground(Void... params) {
+        protected Void doInBackground() {
             addToDisk(mContentId, mBitmap, mIconSizePx);
             return null;
         }
@@ -119,7 +121,7 @@ public class ThumbnailDiskStorage implements ThumbnailGeneratorCallback {
     /**
      * Reads from disk cache. If missing, fetch from {@link ThumbnailGenerator}.
      */
-    private class GetThumbnailTask extends AsyncTask<Void, Void, Bitmap> {
+    private class GetThumbnailTask extends AsyncTask<Bitmap> {
         private final ThumbnailProvider.ThumbnailRequest mRequest;
 
         public GetThumbnailTask(ThumbnailProvider.ThumbnailRequest request) {
@@ -127,7 +129,7 @@ public class ThumbnailDiskStorage implements ThumbnailGeneratorCallback {
         }
 
         @Override
-        protected Bitmap doInBackground(Void... params) {
+        protected Bitmap doInBackground() {
             if (sDiskLruCache.contains(
                         Pair.create(mRequest.getContentId(), mRequest.getIconSize()))) {
                 return getFromDisk(mRequest.getContentId(), mRequest.getIconSize());
@@ -149,7 +151,7 @@ public class ThumbnailDiskStorage implements ThumbnailGeneratorCallback {
     /**
      * Removes thumbnails with the given contentId from disk cache.
      */
-    private class RemoveThumbnailTask extends AsyncTask<Void, Void, Void> {
+    private class RemoveThumbnailTask extends AsyncTask<Void> {
         private final String mContentId;
 
         public RemoveThumbnailTask(String contentId) {
@@ -157,7 +159,7 @@ public class ThumbnailDiskStorage implements ThumbnailGeneratorCallback {
         }
 
         @Override
-        protected Void doInBackground(Void... params) {
+        protected Void doInBackground() {
             // Check again if thumbnails with the specified content ID still exists
             if (!sIconSizesMap.containsKey(mContentId)) return null;
 

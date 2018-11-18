@@ -17,7 +17,6 @@
 #include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
 #include "base/threading/thread_checker.h"
 #include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
@@ -120,8 +119,7 @@ class ProfileManager : public content::NotificationObserver,
   void CreateProfileAsync(const base::FilePath& profile_path,
                           const CreateCallback& callback,
                           const base::string16& name,
-                          const std::string& icon_url,
-                          const std::string& supervised_user_id);
+                          const std::string& icon_url);
 
   // Returns true if the profile pointer is known to point to an existing
   // profile.
@@ -170,11 +168,9 @@ class ProfileManager : public content::NotificationObserver,
   // and CREATE_STATUS_CREATED) so binding parameters with bind::Passed() is
   // prohibited. Returns the file path to the profile that will be created
   // asynchronously.
-  static base::FilePath CreateMultiProfileAsync(
-      const base::string16& name,
-      const std::string& icon_url,
-      const CreateCallback& callback,
-      const std::string& supervised_user_id);
+  static base::FilePath CreateMultiProfileAsync(const base::string16& name,
+                                                const std::string& icon_url,
+                                                const CreateCallback& callback);
 
   // Returns the full path to be used for guest profiles.
   static base::FilePath GetGuestProfilePath();

@@ -14,7 +14,7 @@ from telemetry.internal.backends import browser_backend
 from telemetry.internal.backends.chrome import extension_backend
 from telemetry.internal.backends.chrome import tab_list_backend
 from telemetry.internal.backends.chrome_inspector import devtools_client_backend
-from telemetry.internal.backends.chrome_inspector import websocket
+from telemetry.internal.backends.chrome_inspector import inspector_websocket
 from telemetry.internal.browser import web_contents
 from telemetry.testing import options_for_unittests
 
@@ -39,8 +39,6 @@ class ChromeBrowserBackend(browser_backend.BrowserBackend):
     self._supports_tab_control = supports_tab_control
 
     self._devtools_client = None
-    # TODO(crbug.com/799415): Move forwarder into DevToolsClientBackend
-    self._forwarder = None
 
     self._extensions_to_load = browser_options.extensions_to_load
     if not supports_extensions and len(self._extensions_to_load) > 0:
@@ -96,30 +94,10 @@ class ChromeBrowserBackend(browser_backend.BrowserBackend):
     except EnvironmentError:
       return None  # Port information not ready, will retry.
 
-    # Since the method may be called multiple times due to retries, we need to
-    # restart the forwarder if the ports changed.
-    if (self._forwarder is not None and
-        self._forwarder.remote_port != devtools_port):
-      self._forwarder.Close()
-      self._forwarder = None
-
-    if self._forwarder is None:
-      # When running on a local platform this creates a DoNothingForwarder,
-      # and by setting local_port=None we let the forwarder choose a port.
-      self._forwarder = self.platform_backend.forwarder_factory.Create(
-          local_port=None, remote_port=devtools_port, reverse=True)
-
-    devtools_config = devtools_client_backend.DevToolsClientConfig(
-        local_port=self._forwarder.local_port,
-        remote_port=self._forwarder.remote_port,
-        browser_target=browser_target,
-        app_backend=self)
-
-    logging.info('Got devtools config: %s', devtools_config)
-    if not devtools_config.IsAgentReady():
-      return None  # Will retry.
-
-    return devtools_config.Create()
+    return devtools_client_backend.GetDevToolsBackEndIfReady(
+        devtools_port=devtools_port,
+        app_backend=self,
+        browser_target=browser_target)
 
   def BindDevToolsClient(self):
     """Find an existing DevTools agent and bind this browser backend to it."""
@@ -207,20 +185,6 @@ class ChromeBrowserBackend(browser_backend.BrowserBackend):
   def supports_tracing(self):
     return True
 
-  def StartTracing(self, trace_options,
-                   timeout=web_contents.DEFAULT_WEB_CONTENTS_TIMEOUT):
-    """
-    Args:
-        trace_options: An tracing_options.TracingOptions instance.
-    """
-    return self.devtools_client.StartChromeTracing(trace_options, timeout)
-
-  def StopTracing(self):
-    self.devtools_client.StopChromeTracing()
-
-  def CollectTracingData(self, trace_data_builder):
-    self.devtools_client.CollectChromeTracingData(trace_data_builder)
-
   def GetProcessName(self, cmd_line):
     """Returns a user-friendly name for the process of the given |cmd_line|."""
     if not cmd_line:
@@ -239,22 +203,38 @@ class ChromeBrowserBackend(browser_backend.BrowserBackend):
       return 'browser'
     return types[0]
 
+  @staticmethod
+  def GetThreadType(thread_name):
+    if not thread_name:
+      return 'unknown'
+    if (thread_name.startswith('Chrome_ChildIO') or
+        thread_name.startswith('Chrome_IO')):
+      return 'io'
+    if thread_name.startswith('Compositor'):
+      return 'compositor'
+    if thread_name.startswith('CrGpuMain'):
+      return 'gpu'
+    if (thread_name.startswith('ChildProcessMai') or
+        thread_name.startswith('CrRendererMain')):
+      return 'main'
+    if thread_name.startswith('RenderThread'):
+      return 'render'
+
   def Close(self):
+    # If Chrome tracing is running, flush the trace before closing the browser.
+    tracing_backend = self._platform_backend.tracing_controller_backend
+    if tracing_backend.is_chrome_tracing_running:
+      tracing_backend.FlushTracing()
+
     if self._devtools_client:
       self._devtools_client.Close()
       self._devtools_client = None
-    if self._forwarder:
-      self._forwarder.Close()
-      self._forwarder = None
 
-  @property
-  def supports_system_info(self):
-    return self.GetSystemInfo() != None
 
   def GetSystemInfo(self):
     try:
       return self.devtools_client.GetSystemInfo()
-    except (websocket.WebSocketException, socket.error) as e:
+    except (inspector_websocket.WebSocketException, socket.error) as e:
       if not self.IsBrowserRunning():
         raise exceptions.BrowserGoneException(self.browser, e)
       raise exceptions.BrowserConnectionGoneException(self.browser, e)
@@ -313,8 +293,7 @@ class ChromeBrowserBackend(browser_backend.BrowserBackend):
       paths_to_flush = self.GetDirectoryPathsToFlushOsPageCacheFor()
       if (platform.CanFlushIndividualFilesFromSystemCache() and
           paths_to_flush):
-        for path in paths_to_flush:
-          platform.FlushSystemCacheForDirectory(path)
+        platform.FlushSystemCacheForDirectories(paths_to_flush)
       elif platform.SupportFlushEntireSystemCache():
         platform.FlushEntireSystemCache()
       else:

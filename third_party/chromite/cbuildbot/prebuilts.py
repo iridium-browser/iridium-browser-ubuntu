@@ -54,12 +54,12 @@ def _AddPackagesForPrebuilt(filename):
           logging.warning('Could not split atom %r (line: %r)', atom, line)
           continue
         if cpv:
-          cmd.extend(['--packages=%s/%s' % (cpv.category, cpv.package)])
+          cmd.extend(['--packages=%s' % cpv.cp])
     return cmd
   except IOError as e:
-    logging.warning('Problem with package file %s' % filename)
+    logging.warning('Problem with package file %s', filename)
     logging.warning('Skipping uploading of prebuilts.')
-    logging.warning('ERROR(%d): %s' % (e.errno, e.strerror))
+    logging.warning('ERROR(%d): %s', e.errno, e.strerror)
     return None
 
 
@@ -187,7 +187,7 @@ def UploadPrebuilts(category, chrome_rev, private_bucket, buildroot,
   elif config_lib.IsPFQType(category):
     extra_args.extend(['--key', _PREFLIGHT_BINHOST])
   else:
-    assert category in (constants.BUILD_FROM_SOURCE_TYPE,
+    assert category in (constants.FULL_TYPE,
                         constants.CHROOT_BUILDER_TYPE)
     extra_args.extend(['--key', _FULL_BINHOST])
 

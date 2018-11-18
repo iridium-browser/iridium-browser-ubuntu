@@ -81,31 +81,36 @@ SelectToSpeakE2ETest.prototype = {
   /**
    * From chromevox_next_e2e_test_base.js
    * Gets the desktop from the automation API and Launches a new tab with
-   * the given document, and runs |callback| when a load complete fires.
+   * the given document, and runs |callback| with the desktop when a load
+   * complete fires on the created tab.
    * Arranges to call |testDone()| after |callback| returns.
    * NOTE: Callbacks created inside |callback| must be wrapped with
    * |this.newCallback| if passed to asynchonous calls.  Otherwise, the test
    * will be finished prematurely.
    * @param {string} url Url to load and wait for.
-   * @param {function(chrome.automation.AutomationNode)} callback
-   *     Called once the document is ready.
+   * @param {function(chrome.automation.AutomationNode)} callback Called with
+   *     the desktop node once the document is ready.
    */
   runWithLoadedTree: function(url, callback) {
     callback = this.newCallback(callback);
-    chrome.automation.getDesktop(function(r) {
-      var listener = function(evt) {
-        if (evt.target.root.url != url)
-          return;
-
-        r.removeEventListener('focus', listener, true);
-        r.removeEventListener('loadComplete', listener, true);
-        callback && callback(evt.target);
-        callback = null;
-      };
-      r.addEventListener('focus', listener, true);
-      r.addEventListener('loadComplete', listener, true);
+    chrome.automation.getDesktop(function(desktopRootNode) {
       var createParams = {active: true, url: url};
-      chrome.tabs.create(createParams);
+      chrome.tabs.create(createParams, function(unused_tab) {
+        chrome.automation.getTree(function(returnedRootNode) {
+          rootNode = returnedRootNode;
+          if (rootNode.docLoaded) {
+            callback && callback(desktopRootNode);
+            callback = null;
+            return;
+          }
+          rootNode.addEventListener('loadComplete', function(evt) {
+            if (evt.target.root.url != url)
+              return;
+            callback && callback(desktopRootNode);
+            callback = null;
+          });
+        });
+      });
     }.bind(this));
   },
 

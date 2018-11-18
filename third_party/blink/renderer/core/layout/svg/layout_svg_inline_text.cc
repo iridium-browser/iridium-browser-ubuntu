@@ -69,7 +69,7 @@ void LayoutSVGInlineText::StyleDidChange(StyleDifference diff,
   UpdateScaledFont();
 
   bool new_preserves =
-      Style() ? Style()->WhiteSpace() == EWhiteSpace::kPre : false;
+      Style() ? StyleRef().WhiteSpace() == EWhiteSpace::kPre : false;
   bool old_preserves =
       old_style ? old_style->WhiteSpace() == EWhiteSpace::kPre : false;
   if (old_preserves != new_preserves) {
@@ -420,8 +420,8 @@ void LayoutSVGInlineText::ComputeNewScaledFontForStyle(
   scaled_font.Update(document.GetStyleEngine().GetFontSelector());
 }
 
-LayoutRect LayoutSVGInlineText::AbsoluteVisualRect() const {
-  return Parent()->AbsoluteVisualRect();
+LayoutRect LayoutSVGInlineText::VisualRectInDocument() const {
+  return Parent()->VisualRectInDocument();
 }
 
 FloatRect LayoutSVGInlineText::VisualRectInLocalSVGCoordinates() const {

@@ -7,17 +7,20 @@
 #include <stddef.h>
 
 #include <map>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "base/command_line.h"
 #include "base/metrics/histogram_samples.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/test/histogram_tester.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/renderer/searchbox/search_bouncer.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_headers.h"
+#include "content/public/common/content_switches.h"
 #include "content/public/common/webplugininfo.h"
 #include "extensions/buildflags/buildflags.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -64,9 +67,9 @@ const bool kHostedApp = true;
 const char kExtensionUrl[] = "chrome-extension://extension_id/background.html";
 
 const char kChatManifestFS[] = "filesystem:https://talkgadget.google.com/foo";
-#endif
 
 const char kChatAppURL[] = "https://talkgadget.google.com/hangouts/foo";
+#endif
 
 void AddContentTypeHandler(content::WebPluginInfo* info,
                            const char* mime_type,
@@ -80,8 +83,15 @@ void AddContentTypeHandler(content::WebPluginInfo* info,
 
 }  // namespace
 
-typedef testing::Test ChromeContentRendererClientTest;
-
+class ChromeContentRendererClientTest : public testing::Test {
+ public:
+  void SetUp() override {
+    // Ensure that this looks like the renderer process based on the command
+    // line.
+    base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+        switches::kProcessType, switches::kRendererProcess);
+  }
+};
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
 scoped_refptr<const extensions::Extension> CreateTestExtension(
@@ -294,15 +304,6 @@ TEST_F(ChromeContentRendererClientTest, NaClRestriction) {
 #endif  // BUILDFLAG(ENABLE_NACL)
 }
 
-TEST_F(ChromeContentRendererClientTest, AllowPepperMediaStreamAPI) {
-  ChromeContentRendererClient test;
-#if defined(OS_ANDROID)
-  EXPECT_FALSE(test.AllowPepperMediaStreamAPI(GURL(kChatAppURL)));
-#else
-  EXPECT_TRUE(test.AllowPepperMediaStreamAPI(GURL(kChatAppURL)));
-#endif
-}
-
 // SearchBouncer doesn't exist on Android.
 #if !defined(OS_ANDROID)
 TEST_F(ChromeContentRendererClientTest, ShouldSuppressErrorPage) {
@@ -462,17 +463,25 @@ class ChromeContentRendererClientMetricsTest : public testing::Test {
  public:
   ChromeContentRendererClientMetricsTest() = default;
 
+  void SetUp() override {
+    // Ensure that this looks like the renderer process based on the command
+    // line.
+    base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
+        switches::kProcessType, switches::kRendererProcess);
+    client_ = std::make_unique<ChromeContentRendererClient>();
+  }
+
   std::unique_ptr<base::HistogramSamples> GetHistogramSamples() {
     return histogram_tester_.GetHistogramSamplesSinceCreation(
         internal::kFlashYouTubeRewriteUMA);
   }
 
   void OverrideFlashEmbed(const GURL& gurl) {
-    client_.OverrideFlashEmbedWithHTML(gurl);
+    client_->OverrideFlashEmbedWithHTML(gurl);
   }
 
  private:
-  ChromeContentRendererClient client_;
+  std::unique_ptr<ChromeContentRendererClient> client_;
   base::HistogramTester histogram_tester_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeContentRendererClientMetricsTest);
@@ -543,7 +552,14 @@ TEST_F(ChromeContentRendererClientMetricsTest, RewriteEmbedSuccess) {
   EXPECT_EQ(total_count, samples->TotalCount());
 }
 
-TEST_F(ChromeContentRendererClientMetricsTest, RewriteEmbedSuccessRewrite) {
+// Crashes on Mac/Win only. http://crbug.com/879644
+#if defined(OS_WIN) || defined(OS_MACOSX)
+#define MAYBE_RewriteEmbedSuccessRewrite DISABLED_RewriteEmbedSuccessRewrite
+#else
+#define MAYBE_RewriteEmbedSuccessRewrite RewriteEmbedSuccessRewrite
+#endif
+
+TEST_F(ChromeContentRendererClientMetricsTest, MAYBE_RewriteEmbedSuccessRewrite) {
   ChromeContentRendererClient client;
 
   std::unique_ptr<base::HistogramSamples> samples = GetHistogramSamples();

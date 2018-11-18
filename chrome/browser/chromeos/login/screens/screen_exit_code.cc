@@ -10,8 +10,8 @@ namespace chromeos {
 
 std::string ExitCodeToString(ScreenExitCode code) {
   switch (code) {
-    case ScreenExitCode::NETWORK_CONNECTED:
-      return "NETWORK_CONNECTED";
+    case ScreenExitCode::WELCOME_CONTINUED:
+      return "WELCOME_CONTINUED";
     case ScreenExitCode::HID_DETECTION_COMPLETED:
       return "HID_DETECTION_COMPLETED";
     case ScreenExitCode::CONNECTION_FAILED:
@@ -72,8 +72,38 @@ std::string ExitCodeToString(ScreenExitCode code) {
       return "WAIT_FOR_CONTAINER_READY_ERROR";
     case ScreenExitCode::SYNC_CONSENT_FINISHED:
       return "SYNC_CONSENT_FINISHED";
-    case ScreenExitCode::DEMO_MODE_SETUP_CLOSED:
-      return "DEMO_MODE_SETUP_CLOSED";
+    case ScreenExitCode::DEMO_MODE_SETUP_FINISHED:
+      return "DEMO_MODE_SETUP_FINISHED";
+    case ScreenExitCode::DEMO_MODE_SETUP_CANCELED:
+      return "DEMO_MODE_SETUP_CANCELED";
+    case ScreenExitCode::RECOMMEND_APPS_SKIPPED:
+      return "RECOMMEND_APPS_SKIPPED";
+    case ScreenExitCode::RECOMMEND_APPS_SELECTED:
+      return "RECOMMEND_APPS_SELECTED";
+    case ScreenExitCode::DEMO_MODE_PREFERENCES_CONTINUED:
+      return "DEMO_MODE_PREFERENCES_CONTINUED";
+    case ScreenExitCode::DEMO_MODE_PREFERENCES_CANCELED:
+      return "DEMO_MODE_PREFERENCES_CANCELED";
+    case ScreenExitCode::APP_DOWNLOADING_FINISHED:
+      return "APP_DOWNLOADING_FINISHED";
+    case ScreenExitCode::ARC_TERMS_OF_SERVICE_BACK:
+      return "ARC_TERMS_OF_SERVICE_BACK";
+    case ScreenExitCode::DISCOVER_FINISHED:
+      return "DISCOVER_FINISHED";
+    case ScreenExitCode::NETWORK_BACK:
+      return "NETWORK_BACK";
+    case ScreenExitCode::NETWORK_CONNECTED:
+      return "NETWORK_CONNECTED";
+    case ScreenExitCode::NETWORK_OFFLINE_DEMO_SETUP:
+      return "NETWORK_OFFLINE_DEMO_SETUP";
+    case ScreenExitCode::FINGERPRINT_SETUP_FINISHED:
+      return "FINGERPRINT_SETUP_FINISHED";
+    case ScreenExitCode::MARKETING_OPT_IN_FINISHED:
+      return "MARKETING_OPT_IN_FINISHED";
+    case ScreenExitCode::ASSISTANT_OPTIN_FLOW_FINISHED:
+      return "ASSISTANT_OPTIN_FLOW_FINISHED";
+    case ScreenExitCode::MULTIDEVICE_SETUP_FINISHED:
+      return "MULTIDEVICE_SETUP_FINISHED";
     case ScreenExitCode::EXIT_CODES_COUNT:
     default:
       NOTREACHED();

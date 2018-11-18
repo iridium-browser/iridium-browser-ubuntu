@@ -417,9 +417,8 @@ class PrebuiltUploader(object):
     if not self._packages:
       return False
     cpv = portage_util.SplitCPV(pkg['CPV'])
-    cp = '%s/%s' % (cpv.category, cpv.package)
-    self._found_packages.add(cp)
-    return cpv.package not in self._packages and cp not in self._packages
+    self._found_packages.add(cpv.cp)
+    return cpv.package not in self._packages and cpv.cp not in self._packages
 
   def _UploadPrebuilt(self, package_path, url_suffix):
     """Upload host or board prebuilt files to Google Storage space.
@@ -435,7 +434,7 @@ class PrebuiltUploader(object):
     uploads = pkg_index.ResolveDuplicateUploads(self._pkg_indexes)
     unmatched_pkgs = self._packages - self._found_packages
     if unmatched_pkgs:
-      logging.warning('unable to match packages: %r' % unmatched_pkgs)
+      logging.warning('unable to match packages: %r', unmatched_pkgs)
 
     # Write Packages file.
     pkg_index.header['TTL'] = _BINPKG_TTL

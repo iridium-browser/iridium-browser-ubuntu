@@ -11,6 +11,7 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/file_version_info.h"
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/mac/authorization_util.h"
@@ -21,7 +22,8 @@
 #include "base/memory/ref_counted.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/sys_string_conversions.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
+#include "base/version.h"
 #include "build/build_config.h"
 #import "chrome/browser/mac/keystone_registration.h"
 #include "chrome/common/channel_info.h"
@@ -83,7 +85,7 @@ class PerformBridge : public base::RefCountedThreadSafe<PerformBridge> {
 
     scoped_refptr<PerformBridge> op = new PerformBridge(target, sel, arg);
     base::PostTaskWithTraits(FROM_HERE,
-                             {base::MayBlock(), base::TaskPriority::BACKGROUND,
+                             {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
                               base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
                              base::Bind(&PerformBridge::Run, op.get()));
   }
@@ -174,21 +176,13 @@ class PerformBridge : public base::RefCountedThreadSafe<PerformBridge> {
 - (void)determineUpdateStatus;
 - (void)determineUpdateStatusForVersion:(NSString*)version;
 
-// Returns YES if registration_ is definitely on a user ticket.  If definitely
-// on a system ticket, or uncertain of ticket type (due to an older version
-// of Keystone being used), returns NO.
-- (BOOL)isUserTicket;
+// Returns YES if registration_ is definitely on a system ticket.
+- (BOOL)isSystemTicket;
 
 // Returns YES if Keystone is definitely installed at the system level,
 // determined by the presence of an executable ksadmin program at the expected
 // system location.
 - (BOOL)isSystemKeystone;
-
-// Returns YES if on a system ticket but system Keystone is not present.
-// Returns NO otherwise. The "doomed" condition will result in the
-// registration framework appearing to have registered Chrome, but no updates
-// ever actually taking place.
-- (BOOL)isSystemTicketDoomed;
 
 // Called when ticket promotion completes.
 - (void)promotionComplete:(NSNotification*)notification;
@@ -237,7 +231,6 @@ NSString* const kVersionKey = @"KSVersion";
 
 + (id)defaultKeystoneGlue {
   static bool sTriedCreatingDefaultKeystoneGlue = false;
-  // TODO(jrg): use base::SingletonObjC<KeystoneGlue>
   static KeystoneGlue* sDefaultKeystoneGlue = nil;  // leaked
 
   if (!sTriedCreatingDefaultKeystoneGlue) {
@@ -282,11 +275,6 @@ NSString* const kVersionKey = @"KSVersion";
 }
 
 - (void)dealloc {
-  [productID_ release];
-  [appPath_ release];
-  [url_ release];
-  [version_ release];
-  [registration_ release];
   [[NSNotificationCenter defaultCenter] removeObserver:self];
   [super dealloc];
 }
@@ -326,17 +314,17 @@ NSString* const kVersionKey = @"KSVersion";
   // dev and beta tags since we've been "promoted".
   version_info::Channel channelType = chrome::GetChannelByName(channel);
   if (channelType == version_info::Channel::STABLE) {
-    channel = ksr::KSRegistrationRemoveExistingTag.UTF8String;
+    channel = base::SysNSStringToUTF8(ksr::KSRegistrationRemoveExistingTag);
 #if defined(GOOGLE_CHROME_BUILD)
     DCHECK(chrome::GetChannelByName(channel) == version_info::Channel::STABLE)
         << "-channel name modification has side effect";
 #endif
   }
 
-  productID_ = [productID retain];
-  appPath_ = [appPath retain];
-  url_ = [url retain];
-  version_ = [version retain];
+  productID_.reset([productID copy]);
+  appPath_.reset([appPath copy]);
+  url_.reset([url copy]);
+  version_.reset([version copy]);
   channel_ = channel;
 }
 
@@ -352,7 +340,7 @@ NSString* const kVersionKey = @"KSVersion";
   NSString* systemBrandFile = SystemBrandFilePath(channel);
 
   // Default to none.
-  brandFile_ = @"";
+  brandFile_.reset(@"", base::scoped_policy::RETAIN);
 
   // Only the stable and canary channel can have independent brand codes.
 
@@ -382,7 +370,7 @@ NSString* const kVersionKey = @"KSVersion";
       // System
 
       // Use the system file that is there.
-      brandFile_ = systemBrandFile;
+      brandFile_.reset(systemBrandFile, base::scoped_policy::RETAIN);
 
       // Clean up any old user level file.
       if ([fm fileExistsAtPath:userBrandFile]) {
@@ -423,11 +411,11 @@ NSString* const kVersionKey = @"KSVersion";
           }
         }
         if ([storedBrandDict writeToFile:userBrandFile atomically:YES]) {
-          brandFile_ = userBrandFile;
+          brandFile_.reset(userBrandFile, base::scoped_policy::RETAIN);
         }
       } else if (storedBrandID) {
         // Had stored brand, use it.
-        brandFile_ = userBrandFile;
+        brandFile_.reset(userBrandFile, base::scoped_policy::RETAIN);
       }
     }
   }
@@ -453,7 +441,7 @@ NSString* const kVersionKey = @"KSVersion";
   if (!ksr)
     return NO;
 
-  registration_ = [ksr retain];
+  registration_.reset([ksr retain]);
   ksUnsignedReportingAttributeClass_ =
       [ksrBundle classNamed:@"KSUnsignedReportingAttribute"];
   return YES;
@@ -486,20 +474,20 @@ NSString* const kVersionKey = @"KSVersion";
       [NSString stringWithFormat:@"%s%@", channel_.c_str(), tagSuffix];
   NSString* tagKey = [kChannelKey stringByAppendingString:tagSuffix];
 
-  return [NSDictionary dictionaryWithObjectsAndKeys:
-             version_, ksr::KSRegistrationVersionKey,
-             appInfoPlistPath, ksr::KSRegistrationVersionPathKey,
-             kVersionKey, ksr::KSRegistrationVersionKeyKey,
-             xcType, ksr::KSRegistrationExistenceCheckerTypeKey,
-             appPath_, ksr::KSRegistrationExistenceCheckerStringKey,
-             url_, ksr::KSRegistrationServerURLStringKey,
-             preserveTTToken, ksr::KSRegistrationPreserveTrustedTesterTokenKey,
-             tagValue, ksr::KSRegistrationTagKey,
-             appInfoPlistPath, ksr::KSRegistrationTagPathKey,
-             tagKey, ksr::KSRegistrationTagKeyKey,
-             brandPath, ksr::KSRegistrationBrandPathKey,
-             brandKey, ksr::KSRegistrationBrandKeyKey,
-             nil];
+  return @{
+    ksr::KSRegistrationVersionKey : version_,
+    ksr::KSRegistrationVersionPathKey : appInfoPlistPath,
+    ksr::KSRegistrationVersionKeyKey : kVersionKey,
+    ksr::KSRegistrationExistenceCheckerTypeKey : xcType,
+    ksr::KSRegistrationExistenceCheckerStringKey : appPath_.get(),
+    ksr::KSRegistrationServerURLStringKey : url_.get(),
+    ksr::KSRegistrationPreserveTrustedTesterTokenKey : preserveTTToken,
+    ksr::KSRegistrationTagKey : tagValue,
+    ksr::KSRegistrationTagPathKey : appInfoPlistPath,
+    ksr::KSRegistrationTagKeyKey : tagKey,
+    ksr::KSRegistrationBrandPathKey : brandPath,
+    ksr::KSRegistrationBrandKeyKey : brandKey
+  };
 }
 
 - (void)setRegistrationActive {
@@ -581,7 +569,7 @@ NSString* const kVersionKey = @"KSVersion";
      [userInfo objectForKey:ksr::KSRegistrationUpdateCheckRawErrorMessagesKey]);
 
   if ([status boolValue]) {
-    if ([self isSystemTicketDoomed]) {
+    if ([self needsPromotion]) {
       [self updateStatus:kAutoupdateNeedsPromotion
                  version:nil
                    error:errorMessages];
@@ -731,8 +719,7 @@ NSString* const kVersionKey = @"KSVersion";
     // then don't even bother comparing versions.
     status = kAutoupdateInstalled;
   } else {
-    NSString* currentVersion =
-        [NSString stringWithUTF8String:chrome::kChromeVersion];
+    NSString* currentVersion = base::SysUTF8ToNSString(chrome::kChromeVersion);
     if (!version) {
       // If the version on disk could not be determined, assume that
       // whatever's running is current.
@@ -794,9 +781,9 @@ NSString* const kVersionKey = @"KSVersion";
          status == kAutoupdatePromoting;
 }
 
-- (BOOL)isUserTicket {
+- (BOOL)isSystemTicket {
   DCHECK(registration_);
-  return [registration_ ticketType] == ksr::kKSRegistrationUserTicket;
+  return [registration_ ticketType] == ksr::kKSRegistrationSystemTicket;
 }
 
 - (BOOL)isSystemKeystone {
@@ -814,11 +801,6 @@ NSString* const kVersionKey = @"KSVersion";
   return YES;
 }
 
-- (BOOL)isSystemTicketDoomed {
-  BOOL isSystemTicket = ![self isUserTicket];
-  return isSystemTicket && ![self isSystemKeystone];
-}
-
 - (BOOL)isOnReadOnlyFilesystem {
   const char* appPathC = [appPath_ fileSystemRepresentation];
   struct statfs statfsBuf;
@@ -833,7 +815,51 @@ NSString* const kVersionKey = @"KSVersion";
 }
 
 - (BOOL)isAutoupdateEnabledForAllUsers {
-  return [self isSystemKeystone] && ![self isUserTicket];
+  return [self isSystemKeystone] && [self isSystemTicket];
+}
+
+// Compares the version of the installed system Keystone to the version of
+// KeystoneRegistration.framework. The method is a class method, so that
+// tests can pick it up.
++ (BOOL)isValidSystemKeystone:(NSDictionary*)systemKeystonePlistContents
+            comparedToBundled:(NSDictionary*)bundledKeystonePlistContents {
+  NSString* versionKey = base::mac::CFToNSCast(kCFBundleVersionKey);
+
+  // If the bundled version is missing or broken, this question is irrelevant.
+  NSString* bundledKeystoneVersionString =
+      base::mac::ObjCCast<NSString>(bundledKeystonePlistContents[versionKey]);
+  if (!bundledKeystoneVersionString.length)
+    return YES;
+  base::Version bundled_version(
+      base::SysNSStringToUTF8(bundledKeystoneVersionString));
+  if (!bundled_version.IsValid())
+    return YES;
+
+  NSString* systemKeystoneVersionString =
+      base::mac::ObjCCast<NSString>(systemKeystonePlistContents[versionKey]);
+  if (!systemKeystoneVersionString.length)
+    return NO;
+
+  // Installed Keystone's version should always be >= than the bundled one.
+  base::Version system_version(
+      base::SysNSStringToUTF8(systemKeystoneVersionString));
+  if (!system_version.IsValid() || system_version < bundled_version)
+    return NO;
+
+  return YES;
+}
+
+- (BOOL)isSystemKeystoneBroken {
+  DCHECK([self isSystemKeystone])
+      << "Call this method only for system Keystone.";
+
+  NSDictionary* systemKeystonePlist =
+      [NSDictionary dictionaryWithContentsOfFile:
+                        @"/Library/Google/GoogleSoftwareUpdate/"
+                        @"GoogleSoftwareUpdate.bundle/Contents/Info.plist"];
+  NSBundle* keystoneFramework = [NSBundle bundleForClass:[registration_ class]];
+  return ![[self class] isValidSystemKeystone:systemKeystonePlist
+                            comparedToBundled:keystoneFramework.infoDictionary];
 }
 
 - (BOOL)needsPromotion {
@@ -842,17 +868,16 @@ NSString* const kVersionKey = @"KSVersion";
     return NO;
   }
 
-  // Promotion is required when a system ticket is present but system Keystone
-  // is not.
-  if ([self isSystemTicketDoomed]) {
-    return YES;
+  BOOL isSystemKeystone = [self isSystemKeystone];
+  if (isSystemKeystone) {
+    // We can recover broken user keystone, but not broken system one.
+    if ([self isSystemKeystoneBroken])
+      return YES;
   }
 
-  // If on a system ticket and system Keystone is present, promotion is not
-  // required.
-  if (![self isUserTicket]) {
-    return NO;
-  }
+  // System ticket requires system Keystone for the updates to work.
+  if ([self isSystemTicket])
+    return !isSystemKeystone;
 
   // Check the outermost bundle directory, the main executable path, and the
   // framework directory.  It may be enough to just look at the outermost
@@ -876,7 +901,7 @@ NSString* const kVersionKey = @"KSVersion";
   }
 
   // These are the same unpromotable cases as in -needsPromotion.
-  if ([self isOnReadOnlyFilesystem] || ![self isUserTicket]) {
+  if ([self isOnReadOnlyFilesystem] || [self isSystemTicket]) {
     return NO;
   }
 
@@ -905,12 +930,12 @@ NSString* const kVersionKey = @"KSVersion";
   [self promoteTicketWithAuthorization:authorization.release() synchronous:NO];
 }
 
-- (void)promoteTicketWithAuthorization:(AuthorizationRef)authorization_arg
+- (void)promoteTicketWithAuthorization:(AuthorizationRef)anAuthorization
                            synchronous:(BOOL)synchronous {
   DCHECK(registration_);
 
-  base::mac::ScopedAuthorizationRef authorization(authorization_arg);
-  authorization_arg = NULL;
+  base::mac::ScopedAuthorizationRef authorization(anAuthorization);
+  anAuthorization = nullptr;
 
   if ([self asyncOperationPending]) {
     // Starting a synchronous operation while an asynchronous one is pending
@@ -1011,11 +1036,11 @@ NSString* const kVersionKey = @"KSVersion";
   // If the brand file is user level, update parameters to point to the new
   // system level file during promotion.
   if (userBrand) {
-    NSMutableDictionary* temp_parameters =
+    NSMutableDictionary* tempParameters =
         [[parameters mutableCopy] autorelease];
-    temp_parameters[ksr::KSRegistrationBrandPathKey] = systemBrandFile;
-    brandFile_ = systemBrandFile;
-    parameters = temp_parameters;
+    tempParameters[ksr::KSRegistrationBrandPathKey] = systemBrandFile;
+    brandFile_.reset(systemBrandFile, base::scoped_policy::RETAIN);
+    parameters = tempParameters;
   }
 
   if (![registration_ promoteWithParameters:parameters
@@ -1115,8 +1140,7 @@ NSString* const kVersionKey = @"KSVersion";
 
 - (void)setAppPath:(NSString*)appPath {
   if (appPath != appPath_) {
-    [appPath_ release];
-    appPath_ = [appPath copy];
+    appPath_.reset([appPath copy]);
   }
 }
 
@@ -1181,7 +1205,7 @@ std::string BrandCodeInternal() {
   NSString* brand_code =
       base::mac::ObjCCast<NSString>([dict objectForKey:kBrandKey]);
   if (brand_code)
-    return [brand_code UTF8String];
+    return base::SysNSStringToUTF8(brand_code);
 
   return std::string();
 }

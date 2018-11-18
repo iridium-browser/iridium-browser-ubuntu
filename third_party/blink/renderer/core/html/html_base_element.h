@@ -27,22 +27,29 @@
 
 namespace blink {
 
+class ExceptionState;
+class USVStringOrTrustedURL;
+
 class HTMLBaseElement final : public HTMLElement {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
   DECLARE_NODE_FACTORY(HTMLBaseElement);
 
+  // Returns attributes that should be checked against Trusted Types
+  const HashSet<AtomicString>& GetCheckedAttributeNames() const override;
+
   KURL href() const;
-  void setHref(const AtomicString&);
+  void href(USVStringOrTrustedURL&) const;
+  void setHref(const USVStringOrTrustedURL&, ExceptionState&);
 
  private:
   explicit HTMLBaseElement(Document&);
 
   bool IsURLAttribute(const Attribute&) const override;
   void ParseAttribute(const AttributeModificationParams&) override;
-  InsertionNotificationRequest InsertedInto(ContainerNode*) override;
-  void RemovedFrom(ContainerNode*) override;
+  InsertionNotificationRequest InsertedInto(ContainerNode&) override;
+  void RemovedFrom(ContainerNode&) override;
 };
 
 }  // namespace blink

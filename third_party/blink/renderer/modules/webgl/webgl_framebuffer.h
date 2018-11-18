@@ -28,7 +28,7 @@
 
 #include "third_party/blink/renderer/modules/webgl/webgl_context_object.h"
 #include "third_party/blink/renderer/modules/webgl/webgl_shared_object.h"
-#include "third_party/blink/renderer/platform/bindings/script_wrappable_visitor.h"
+#include "third_party/blink/renderer/platform/bindings/name_client.h"
 
 namespace gpu {
 namespace gles2 {
@@ -46,7 +46,7 @@ class WebGLFramebuffer final : public WebGLContextObject {
 
  public:
   class WebGLAttachment : public GarbageCollected<WebGLAttachment>,
-                          public TraceWrapperBase {
+                          public NameClient {
    public:
     virtual WebGLSharedObject* Object() const = 0;
     virtual bool IsSharedObject(WebGLSharedObject*) const = 0;
@@ -76,12 +76,15 @@ class WebGLFramebuffer final : public WebGLContextObject {
 
   GLuint Object() const { return object_; }
 
+  // For a non-multiview attachment, set the num_views parameter to 0. For a
+  // multiview attachment, set the layer to the base view index.
   void SetAttachmentForBoundFramebuffer(GLenum target,
                                         GLenum attachment,
                                         GLenum tex_target,
                                         WebGLTexture*,
                                         GLint level,
-                                        GLint layer);
+                                        GLint layer,
+                                        GLsizei num_views);
   void SetAttachmentForBoundFramebuffer(GLenum target,
                                         GLenum attachment,
                                         WebGLRenderbuffer*);
@@ -116,8 +119,7 @@ class WebGLFramebuffer final : public WebGLContextObject {
 
   GLenum GetReadBuffer() const { return read_buffer_; }
 
-  virtual void Trace(blink::Visitor*);
-  void TraceWrappers(const ScriptWrappableVisitor*) const override;
+  void Trace(blink::Visitor*) override;
   const char* NameInHeapSnapshot() const override { return "WebGLFramebuffer"; }
 
  protected:

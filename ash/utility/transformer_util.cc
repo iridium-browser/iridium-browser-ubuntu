@@ -7,9 +7,11 @@
 #include <cmath>
 
 #include "third_party/skia/include/core/SkMatrix44.h"
+#include "ui/gfx/geometry/size_f.h"
 #include "ui/gfx/transform.h"
 
 namespace ash {
+namespace {
 
 // Round near zero value to zero.
 void RoundNearZero(gfx::Transform* transform) {
@@ -23,28 +25,29 @@ void RoundNearZero(gfx::Transform* transform) {
   }
 }
 
+}  // namespace
+
 gfx::Transform CreateRotationTransform(display::Display::Rotation old_rotation,
                                        display::Display::Rotation new_rotation,
-                                       const display::Display& display) {
+                                       const gfx::SizeF& size_to_rotate) {
   const int rotation_angle = 90 * (((new_rotation - old_rotation) + 4) % 4);
   gfx::Transform rotate;
   switch (rotation_angle) {
     case 0:
       break;
     case 90:
-      rotate.Translate(display.bounds().height(), 0);
+      rotate.Translate(size_to_rotate.height(), 0);
       rotate.Rotate(90);
       break;
     case 180:
-      rotate.Translate(display.bounds().width(), display.bounds().height());
+      rotate.Translate(size_to_rotate.width(), size_to_rotate.height());
       rotate.Rotate(180);
       break;
     case 270:
-      rotate.Translate(0, display.bounds().width());
+      rotate.Translate(0, size_to_rotate.width());
       rotate.Rotate(270);
       break;
   }
-
   RoundNearZero(&rotate);
   return rotate;
 }

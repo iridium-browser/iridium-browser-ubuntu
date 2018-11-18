@@ -13,10 +13,39 @@
 #include "base/format_macros.h"
 #include "base/macros.h"
 #include "base/memory/aligned_memory.h"
+#include "base/memory/read_only_shared_memory_region.h"
+#include "base/memory/shared_memory.h"
+#include "base/memory/unsafe_shared_memory_region.h"
 #include "base/strings/stringprintf.h"
+#include "build/build_config.h"
 #include "gpu/command_buffer/common/mailbox_holder.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/libyuv/include/libyuv.h"
+
+namespace {
+// Creates the backing storage for a frame suitable for WrapExternalData. Note
+// that this is currently used only to test frame creation and tear-down, and so
+// may not have alignment or other properties correct further video processing.
+// |memory| must be at least 2 * coded_size.width() * coded_size.height() in
+// bytes.
+void CreateTestY16Frame(const gfx::Size& coded_size,
+                        const gfx::Rect& visible_rect,
+                        void* memory) {
+  const int offset_x = visible_rect.x();
+  const int offset_y = visible_rect.y();
+  const int stride = coded_size.width();
+
+  // In the visible rect, fill upper byte with [0-255] and lower with [255-0].
+  uint16_t* data = static_cast<uint16_t*>(memory);
+  for (int j = 0; j < visible_rect.height(); j++) {
+    for (int i = 0; i < visible_rect.width(); i++) {
+      const int value = i + j * visible_rect.width();
+      data[(stride * (j + offset_y)) + i + offset_x] =
+          ((value & 0xFF) << 8) | (~value & 0xFF);
+    }
+  }
+}
+}  // namespace
 
 namespace media {
 
@@ -282,6 +311,120 @@ TEST(VideoFrame, WrapVideoFrame) {
   frame = NULL;
   EXPECT_TRUE(done_callback_was_run);
 }
+
+// Create a frame that wraps unowned memory.
+TEST(VideoFrame, WrapExternalData) {
+  uint8_t memory[2 * 256 * 256];
+  gfx::Size coded_size(256, 256);
+  gfx::Rect visible_rect(coded_size);
+  CreateTestY16Frame(coded_size, visible_rect, memory);
+  auto timestamp = base::TimeDelta::FromMilliseconds(1);
+  auto frame = VideoFrame::WrapExternalData(media::PIXEL_FORMAT_Y16, coded_size,
+                                            visible_rect, visible_rect.size(),
+                                            memory, sizeof(memory), timestamp);
+
+  EXPECT_EQ(frame->coded_size(), coded_size);
+  EXPECT_EQ(frame->visible_rect(), visible_rect);
+  EXPECT_EQ(frame->timestamp(), timestamp);
+  EXPECT_EQ(frame->data(media::VideoFrame::kYPlane)[0], 0xff);
+}
+
+// Create a frame that wraps read-only shared memory.
+TEST(VideoFrame, WrapExternalReadOnlySharedMemory) {
+  const size_t kDataSize = 2 * 256 * 256;
+  auto mapped_region = base::ReadOnlySharedMemoryRegion::Create(kDataSize);
+  gfx::Size coded_size(256, 256);
+  gfx::Rect visible_rect(coded_size);
+  CreateTestY16Frame(coded_size, visible_rect, mapped_region.mapping.memory());
+  auto timestamp = base::TimeDelta::FromMilliseconds(1);
+  auto frame = VideoFrame::WrapExternalReadOnlySharedMemory(
+      media::PIXEL_FORMAT_Y16, coded_size, visible_rect, visible_rect.size(),
+      static_cast<uint8_t*>(mapped_region.mapping.memory()), kDataSize,
+      &mapped_region.region, 0, timestamp);
+
+  EXPECT_EQ(frame->coded_size(), coded_size);
+  EXPECT_EQ(frame->visible_rect(), visible_rect);
+  EXPECT_EQ(frame->timestamp(), timestamp);
+  EXPECT_EQ(frame->data(media::VideoFrame::kYPlane)[0], 0xff);
+}
+
+// Create a frame that wraps unsafe shared memory.
+TEST(VideoFrame, WrapExternalUnsafeSharedMemory) {
+  const size_t kDataSize = 2 * 256 * 256;
+  auto region = base::UnsafeSharedMemoryRegion::Create(kDataSize);
+  auto mapping = region.Map();
+  gfx::Size coded_size(256, 256);
+  gfx::Rect visible_rect(coded_size);
+  CreateTestY16Frame(coded_size, visible_rect, mapping.memory());
+  auto timestamp = base::TimeDelta::FromMilliseconds(1);
+  auto frame = VideoFrame::WrapExternalUnsafeSharedMemory(
+      media::PIXEL_FORMAT_Y16, coded_size, visible_rect, visible_rect.size(),
+      static_cast<uint8_t*>(mapping.memory()), kDataSize, &region, 0,
+      timestamp);
+
+  EXPECT_EQ(frame->coded_size(), coded_size);
+  EXPECT_EQ(frame->visible_rect(), visible_rect);
+  EXPECT_EQ(frame->timestamp(), timestamp);
+  EXPECT_EQ(frame->data(media::VideoFrame::kYPlane)[0], 0xff);
+}
+
+// Create a frame that wraps a legacy shared memory handle.
+TEST(VideoFrame, WrapExternalSharedMemory) {
+  const size_t kDataSize = 2 * 256 * 256;
+  base::SharedMemory shm;
+  ASSERT_TRUE(shm.CreateAndMapAnonymous(kDataSize));
+  gfx::Size coded_size(256, 256);
+  gfx::Rect visible_rect(coded_size);
+  CreateTestY16Frame(coded_size, visible_rect, shm.memory());
+  auto timestamp = base::TimeDelta::FromMilliseconds(1);
+  auto frame = VideoFrame::WrapExternalSharedMemory(
+      media::PIXEL_FORMAT_Y16, coded_size, visible_rect, visible_rect.size(),
+      static_cast<uint8_t*>(shm.memory()), kDataSize, shm.handle(), 0,
+      timestamp);
+
+  EXPECT_EQ(frame->coded_size(), coded_size);
+  EXPECT_EQ(frame->visible_rect(), visible_rect);
+  EXPECT_EQ(frame->timestamp(), timestamp);
+  EXPECT_EQ(frame->data(media::VideoFrame::kYPlane)[0], 0xff);
+}
+
+#if defined(OS_LINUX)
+TEST(VideoFrame, WrapExternalDmabufs) {
+  gfx::Size coded_size = gfx::Size(256, 256);
+  gfx::Rect visible_rect(coded_size);
+  std::vector<int32_t> strides = {384, 192, 192};
+  std::vector<size_t> offsets = {0, 100, 200};
+  std::vector<size_t> buffer_sizes = {73728, 18432, 18432};
+  std::vector<VideoFrameLayout::Plane> planes(strides.size());
+
+  for (size_t i = 0; i < planes.size(); i++) {
+    planes[i].stride = strides[i];
+    planes[i].offset = offsets[i];
+  }
+  auto timestamp = base::TimeDelta::FromMilliseconds(1);
+  VideoFrameLayout layout(PIXEL_FORMAT_I420, coded_size, planes, buffer_sizes);
+  std::vector<base::ScopedFD> dmabuf_fds(3u);
+  auto frame =
+      VideoFrame::WrapExternalDmabufs(layout, visible_rect, visible_rect.size(),
+                                      std::move(dmabuf_fds), timestamp);
+
+  EXPECT_EQ(frame->layout().format(), PIXEL_FORMAT_I420);
+  EXPECT_EQ(frame->layout().coded_size(), coded_size);
+  EXPECT_EQ(frame->layout().num_planes(), 3u);
+  EXPECT_EQ(frame->layout().num_buffers(), 3u);
+  EXPECT_EQ(frame->layout().GetTotalBufferSize(), 110592u);
+  for (size_t i = 0; i < 3; ++i) {
+    EXPECT_EQ(frame->layout().planes()[i].stride, strides[i]);
+    EXPECT_EQ(frame->layout().planes()[i].offset, offsets[i]);
+    EXPECT_EQ(frame->layout().buffer_sizes()[i], buffer_sizes[i]);
+  }
+  EXPECT_TRUE(frame->HasDmaBufs());
+  EXPECT_EQ(frame->DmabufFds().size(), 3u);
+  EXPECT_EQ(frame->coded_size(), coded_size);
+  EXPECT_EQ(frame->visible_rect(), visible_rect);
+  EXPECT_EQ(frame->timestamp(), timestamp);
+}
+#endif
 
 // Ensure each frame is properly sized and allocated.  Will trigger OOB reads
 // and writes as well as incorrect frame hashes otherwise.

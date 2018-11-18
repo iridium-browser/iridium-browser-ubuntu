@@ -19,13 +19,14 @@
 #include "chrome/browser/ui/find_bar/find_bar_state.h"
 #include "chrome/browser/ui/find_bar/find_bar_state_factory.h"
 #include "chrome/browser/ui/find_bar/find_tab_helper.h"
-#include "chrome/browser/ui/location_bar/location_bar.h"
+#include "chrome/browser/ui/page_action/page_action_icon_container.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/browser/web_contents.h"
 #include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/range/range.h"
 
 using content::NavigationController;
 using content::WebContents;
@@ -34,7 +35,9 @@ using content::WebContents;
 static const int kMinFindWndDistanceFromSelection = 5;
 
 FindBarController::FindBarController(FindBar* find_bar, Browser* browser)
-    : find_bar_(find_bar), browser_(browser) {}
+    : find_bar_(find_bar),
+      browser_(browser),
+      find_bar_platform_helper_(FindBarPlatformHelper::Create(this)) {}
 
 FindBarController::~FindBarController() {
   DCHECK(!web_contents_);
@@ -83,7 +86,8 @@ void FindBarController::EndFindSession(SelectionAction selection_action,
 }
 
 void FindBarController::FindBarVisibilityChanged() {
-  browser_->window()->GetLocationBar()->UpdateFindBarIconVisibility();
+  browser_->window()->GetPageActionIconContainer()->UpdatePageActionIcon(
+      PageActionIconType::kFind);
 }
 
 void FindBarController::ChangeWebContents(WebContents* contents) {
@@ -132,6 +136,15 @@ void FindBarController::ChangeWebContents(WebContents* contents) {
 
   UpdateFindBarForCurrentResult();
   find_bar_->UpdateFindBarForChangedWebContents();
+}
+
+void FindBarController::SetText(base::string16 text) {
+  find_bar_->SetFindTextAndSelectedRange(text, find_bar_->GetSelectedRange());
+}
+
+void FindBarController::OnUserChangedFindText(base::string16 text) {
+  if (find_bar_platform_helper_)
+    find_bar_platform_helper_->OnUserChangedFindText(text);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -230,7 +243,6 @@ void FindBarController::UpdateFindBarForCurrentResult() {
   FindTabHelper* find_tab_helper =
       FindTabHelper::FromWebContents(web_contents_);
   const FindNotificationDetails& find_result = find_tab_helper->find_result();
-
   // Avoid bug 894389: When a new search starts (and finds something) it reports
   // an interim match count result of 1 before the scoping effort starts. This
   // is to provide feedback as early as possible that we will find something.
@@ -239,11 +251,13 @@ void FindBarController::UpdateFindBarForCurrentResult() {
   // the scoping effort starts updating the match count. We avoid this flash by
   // ignoring interim results of 1 if we already have a positive number.
   if (find_result.number_of_matches() > -1) {
-    if (last_reported_matchcount_ > 0 &&
-        find_result.number_of_matches() == 1 &&
-        !find_result.final_update())
+    if (last_reported_matchcount_ > 0 && find_result.number_of_matches() == 1 &&
+        !find_result.final_update() &&
+        last_reported_ordinal_ == find_result.active_match_ordinal()) {
       return;  // Don't let interim result override match count.
+    }
     last_reported_matchcount_ = find_result.number_of_matches();
+    last_reported_ordinal_ = find_result.active_match_ordinal();
   }
 
   find_bar_->UpdateUIForFindResult(find_result, find_tab_helper->find_text());

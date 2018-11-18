@@ -27,7 +27,7 @@ class TranslateService
   // Initializes the TranslateService in a way that it can be initialized
   // multiple times in a unit test suite (once for each test). Should be paired
   // with ShutdownForTesting at the end of the test.
-  static void InitializeForTesting();
+  static void InitializeForTesting(network::mojom::ConnectionType type);
 
   // Shuts down the TranslateService at the end of a test in a way that the next
   // test can initialize and use the service.
@@ -43,6 +43,9 @@ class TranslateService
 
   // Returns true if the URL can be translated.
   static bool IsTranslatableURL(const GURL& url);
+
+  // Returns true if the service is available and enabled by user preferences.
+  static bool IsAvailable(PrefService* prefs);
 
  private:
   TranslateService();

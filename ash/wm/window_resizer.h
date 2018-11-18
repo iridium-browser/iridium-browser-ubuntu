@@ -21,6 +21,10 @@ namespace gfx {
 class Rect;
 }
 
+namespace ui {
+class GestureEvent;
+}
+
 namespace ash {
 
 // WindowResizer is used by ToplevelWindowEventFilter to handle dragging, moving
@@ -58,6 +62,9 @@ class ASH_EXPORT WindowResizer {
   // Reverts the drag.
   virtual void RevertDrag() = 0;
 
+  // Flings or Swipes to end the drag.
+  virtual void FlingOrSwipe(ui::GestureEvent* event) = 0;
+
   // Returns the target window the resizer was created for.
   aura::Window* GetTarget() const;
 
@@ -94,6 +101,10 @@ class ASH_EXPORT WindowResizer {
 
   // Returns the height of the drag.
   int GetHeightForDrag(int min_height, int* delta_y);
+
+  // Updates |new_bounds| to adhere to the aspect ratio.
+  void CalculateBoundsWithAspectRatio(float aspect_ratio,
+                                      gfx::Rect* new_bounds);
 
   DISALLOW_COPY_AND_ASSIGN(WindowResizer);
 };

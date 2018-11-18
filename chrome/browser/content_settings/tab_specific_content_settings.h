@@ -33,10 +33,6 @@ namespace content {
 class NavigationHandle;
 }
 
-namespace net {
-class CookieOptions;
-}
-
 namespace url {
 class Origin;
 }  // namespace url
@@ -121,7 +117,6 @@ class TabSpecificContentSettings
       const GURL& url,
       const GURL& first_party_url,
       const net::CanonicalCookie& cookie,
-      const net::CookieOptions& options,
       bool blocked_by_policy);
 
   // Called when a specific Web database in the current page was accessed. If
@@ -336,7 +331,6 @@ class TabSpecificContentSettings
   void OnCookieChange(const GURL& url,
                       const GURL& first_party_url,
                       const net::CanonicalCookie& cookie,
-                      const net::CookieOptions& options,
                       bool blocked_by_policy);
   void OnFileSystemAccessed(const GURL& url,
                             bool blocked_by_policy);
@@ -400,12 +394,17 @@ class TabSpecificContentSettings
 
   explicit TabSpecificContentSettings(content::WebContents* tab);
 
+  void MaybeSendRendererContentSettingsRules(
+      content::WebContents* web_contents);
+
   // content::WebContentsObserver overrides.
   void RenderFrameForInterstitialPageCreated(
       content::RenderFrameHost* render_frame_host) override;
   bool OnMessageReceived(const IPC::Message& message,
                          content::RenderFrameHost* render_frame_host) override;
   void DidStartNavigation(
+      content::NavigationHandle* navigation_handle) override;
+  void ReadyToCommitNavigation(
       content::NavigationHandle* navigation_handle) override;
   void DidFinishNavigation(
       content::NavigationHandle* navigation_handle) override;
@@ -416,7 +415,7 @@ class TabSpecificContentSettings
   void OnContentSettingChanged(const ContentSettingsPattern& primary_pattern,
                                const ContentSettingsPattern& secondary_pattern,
                                ContentSettingsType content_type,
-                               std::string resource_identifier) override;
+                               const std::string& resource_identifier) override;
 
   // Notifies all registered |SiteDataObserver|s.
   void NotifySiteDataObservers();
@@ -437,7 +436,7 @@ class TabSpecificContentSettings
   void MidiDidNavigate(content::NavigationHandle* navigation_handle);
 
   // All currently registered |SiteDataObserver|s.
-  base::ObserverList<SiteDataObserver> observer_list_;
+  base::ObserverList<SiteDataObserver>::Unchecked observer_list_;
 
   struct ContentSettingsStatus {
     bool blocked;
@@ -446,6 +445,9 @@ class TabSpecificContentSettings
   };
   // Stores which content setting types actually have blocked content.
   std::map<ContentSettingsType, ContentSettingsStatus> content_settings_status_;
+
+  // Profile-bound, this will outlive this class (which is WebContents bound).
+  HostContentSettingsMap* map_;
 
   // Stores the blocked/allowed cookies.
   LocalSharedObjectsContainer allowed_local_shared_objects_;

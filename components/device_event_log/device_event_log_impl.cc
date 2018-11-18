@@ -33,6 +33,7 @@ const char* kLogTypeBluetoothDesc = "Bluetooth";
 const char* kLogTypeUsbDesc = "USB";
 const char* kLogTypeHidDesc = "HID";
 const char* kLogTypeMemoryDesc = "Memory";
+const char* kLogTypePrinterDesc = "Printer";
 
 std::string GetLogTypeString(LogType type) {
   switch (type) {
@@ -50,6 +51,8 @@ std::string GetLogTypeString(LogType type) {
       return kLogTypeHidDesc;
     case LOG_TYPE_MEMORY:
       return kLogTypeMemoryDesc;
+    case LOG_TYPE_PRINTER:
+      return kLogTypePrinterDesc;
     case LOG_TYPE_UNKNOWN:
       break;
   }
@@ -306,8 +309,7 @@ void DeviceEventLogImpl::RemoveEntry() {
   // Remove the first (oldest) non-error entry, or the oldest entry if more
   // than half the entries are errors.
   size_t error_count = 0;
-  for (LogEntryList::iterator iter = entries_.begin(); iter != entries_.end();
-       ++iter) {
+  for (auto iter = entries_.begin(); iter != entries_.end(); ++iter) {
     if (iter->log_level != LOG_LEVEL_ERROR) {
       entries_.erase(iter);
       return;
@@ -400,10 +402,10 @@ std::string DeviceEventLogImpl::GetAsString(StringOrder order,
 }
 
 void DeviceEventLogImpl::Clear(const base::Time& begin, const base::Time& end) {
-  LogEntryList::iterator begin_it = std::find_if(
+  auto begin_it = std::find_if(
       entries_.begin(), entries_.end(),
       [begin](const LogEntry& entry) { return entry.time >= begin; });
-  LogEntryList::reverse_iterator end_rev_it =
+  auto end_rev_it =
       std::find_if(entries_.rbegin(), entries_.rend(),
                    [end](const LogEntry& entry) { return entry.time <= end; });
 

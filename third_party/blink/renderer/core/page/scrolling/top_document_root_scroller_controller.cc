@@ -8,6 +8,7 @@
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/frame/page_scale_constraints_set.h"
+#include "third_party/blink/renderer/core/frame/root_frame_viewport.h"
 #include "third_party/blink/renderer/core/frame/visual_viewport.h"
 #include "third_party/blink/renderer/core/html/html_frame_owner_element.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
@@ -18,7 +19,8 @@
 #include "third_party/blink/renderer/core/page/scrolling/viewport_scroll_callback.h"
 #include "third_party/blink/renderer/core/paint/compositing/paint_layer_compositor.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
-#include "third_party/blink/renderer/platform/scroll/scrollable_area.h"
+#include "third_party/blink/renderer/core/paint/paint_layer_scrollable_area.h"
+#include "third_party/blink/renderer/core/scroll/scrollable_area.h"
 
 namespace blink {
 
@@ -69,7 +71,7 @@ IntSize TopDocumentRootScrollerController::RootScrollerVisibleArea() const {
 
   return TopDocument()
              ->View()
-             ->LayoutViewportScrollableArea()
+             ->LayoutViewport()
              ->VisibleContentRect(kExcludeScrollbars)
              .Size() +
          IntSize(0, browser_controls_adjustment);
@@ -123,16 +125,9 @@ void SetNeedsCompositingUpdateOnAncestors(Element* element) {
       continue;
 
     LayoutView* layout_view = ToLocalFrame(frame)->View()->GetLayoutView();
-    if (RuntimeEnabledFeatures::RootLayerScrollingEnabled()) {
-      PaintLayer* frame_root_layer = layout_view->Layer();
-      DCHECK(frame_root_layer);
-      frame_root_layer->SetNeedsCompositingInputsUpdate();
-    } else {
-      if (PaintLayerCompositor* plc = layout_view->Compositor()) {
-        plc->SetNeedsCompositingUpdate(
-            kCompositingUpdateAfterCompositingInputChange);
-      }
-    }
+    PaintLayer* frame_root_layer = layout_view->Layer();
+    DCHECK(frame_root_layer);
+    frame_root_layer->SetNeedsCompositingInputsUpdate();
   }
 }
 
@@ -217,8 +212,8 @@ void TopDocumentRootScrollerController::DidDisposeScrollableArea(
   RootFrameViewport* rfv = frame_view->GetRootFrameViewport();
 
   if (rfv && &area == &rfv->LayoutViewport()) {
-    DCHECK(frame_view->LayoutViewportScrollableArea());
-    rfv->SetLayoutViewport(*frame_view->LayoutViewportScrollableArea());
+    DCHECK(frame_view->LayoutViewport());
+    rfv->SetLayoutViewport(*frame_view->LayoutViewport());
   }
 }
 

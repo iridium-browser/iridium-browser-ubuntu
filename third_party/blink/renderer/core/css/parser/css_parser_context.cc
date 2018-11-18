@@ -11,6 +11,7 @@
 #include "third_party/blink/renderer/core/frame/deprecation.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/html/imports/html_imports_controller.h"
+#include "third_party/blink/renderer/core/loader/document_loader.h"
 #include "third_party/blink/renderer/core/page/page.h"
 
 namespace blink {
@@ -27,10 +28,10 @@ CSSParserContext* CSSParserContext::Create(const ExecutionContext& context) {
     policy_disposition = kCheckContentSecurityPolicy;
 
   return new CSSParserContext(
-      context.Url(), WTF::TextEncoding(), kHTMLStandardMode, kHTMLStandardMode,
-      kDynamicProfile, referrer, true, false, context.GetSecureContextMode(),
-      policy_disposition,
-      context.IsDocument() ? &ToDocument(context) : nullptr);
+      context.Url(), false /* is_opaque_response_from_service_worker */,
+      WTF::TextEncoding(), kHTMLStandardMode, kHTMLStandardMode, kLiveProfile,
+      referrer, true, false, context.GetSecureContextMode(), policy_disposition,
+      DynamicTo<Document>(context));
 }
 
 // static
@@ -54,8 +55,9 @@ CSSParserContext* CSSParserContext::Create(
     const CSSParserContext* other,
     const Document* use_counter_document) {
   return new CSSParserContext(
-      other->base_url_, other->charset_, other->mode_, other->match_mode_,
-      other->profile_, other->referrer_, other->is_html_document_,
+      other->base_url_, other->is_opaque_response_from_service_worker_,
+      other->charset_, other->mode_, other->match_mode_, other->profile_,
+      other->referrer_, other->is_html_document_,
       other->use_legacy_background_size_shorthand_behavior_,
       other->secure_context_mode_, other->should_check_content_security_policy_,
       use_counter_document);
@@ -65,11 +67,13 @@ CSSParserContext* CSSParserContext::Create(
 CSSParserContext* CSSParserContext::Create(
     const CSSParserContext* other,
     const KURL& base_url,
+    bool is_opaque_response_from_service_worker,
     ReferrerPolicy referrer_policy,
     const WTF::TextEncoding& charset,
     const Document* use_counter_document) {
   return new CSSParserContext(
-      base_url, charset, other->mode_, other->match_mode_, other->profile_,
+      base_url, is_opaque_response_from_service_worker, charset, other->mode_,
+      other->match_mode_, other->profile_,
       Referrer(base_url.StrippedForUseAsReferrer(), referrer_policy),
       other->is_html_document_,
       other->use_legacy_background_size_shorthand_behavior_,
@@ -83,23 +87,26 @@ CSSParserContext* CSSParserContext::Create(
     SecureContextMode secure_context_mode,
     SelectorProfile profile,
     const Document* use_counter_document) {
-  return new CSSParserContext(KURL(), WTF::TextEncoding(), mode, mode, profile,
-                              Referrer(), false, false, secure_context_mode,
-                              kDoNotCheckContentSecurityPolicy,
-                              use_counter_document);
+  return new CSSParserContext(
+      KURL(), false /* is_opaque_response_from_service_worker */,
+      WTF::TextEncoding(), mode, mode, profile, Referrer(), false, false,
+      secure_context_mode, kDoNotCheckContentSecurityPolicy,
+      use_counter_document);
 }
 
 // static
 CSSParserContext* CSSParserContext::Create(const Document& document) {
-  return CSSParserContext::Create(document, document.BaseURL(),
-                                  document.GetReferrerPolicy(),
-                                  WTF::TextEncoding(), kDynamicProfile);
+  return CSSParserContext::Create(
+      document, document.BaseURL(),
+      false /* is_opaque_response_from_service_worker */,
+      document.GetReferrerPolicy(), WTF::TextEncoding(), kLiveProfile);
 }
 
 // static
 CSSParserContext* CSSParserContext::Create(
     const Document& document,
     const KURL& base_url_override,
+    bool is_opaque_response_from_service_worker,
     ReferrerPolicy referrer_policy_override,
     const WTF::TextEncoding& charset,
     SelectorProfile profile) {
@@ -107,7 +114,7 @@ CSSParserContext* CSSParserContext::Create(
       document.InQuirksMode() ? kHTMLQuirksMode : kHTMLStandardMode;
   CSSParserMode match_mode;
   HTMLImportsController* imports_controller = document.ImportsController();
-  if (imports_controller && profile == kDynamicProfile) {
+  if (imports_controller && profile == kLiveProfile) {
     match_mode = imports_controller->Master()->InQuirksMode()
                      ? kHTMLQuirksMode
                      : kHTMLStandardMode;
@@ -131,13 +138,15 @@ CSSParserContext* CSSParserContext::Create(
     policy_disposition = kCheckContentSecurityPolicy;
 
   return new CSSParserContext(
-      base_url_override, charset, mode, match_mode, profile, referrer,
-      document.IsHTMLDocument(), use_legacy_background_size_shorthand_behavior,
+      base_url_override, is_opaque_response_from_service_worker, charset, mode,
+      match_mode, profile, referrer, document.IsHTMLDocument(),
+      use_legacy_background_size_shorthand_behavior,
       document.GetSecureContextMode(), policy_disposition, &document);
 }
 
 CSSParserContext::CSSParserContext(
     const KURL& base_url,
+    bool is_opaque_response_from_service_worker,
     const WTF::TextEncoding& charset,
     CSSParserMode mode,
     CSSParserMode match_mode,
@@ -149,6 +158,8 @@ CSSParserContext::CSSParserContext(
     ContentSecurityPolicyDisposition policy_disposition,
     const Document* use_counter_document)
     : base_url_(base_url),
+      is_opaque_response_from_service_worker_(
+          is_opaque_response_from_service_worker),
       charset_(charset),
       mode_(mode),
       match_mode_(match_mode),
@@ -190,6 +201,10 @@ const CSSParserContext* StrictCSSParserContext(
   return context;
 }
 
+bool CSSParserContext::IsOpaqueResponseFromServiceWorker() const {
+  return is_opaque_response_from_service_worker_;
+}
+
 bool CSSParserContext::IsSecureContext() const {
   return secure_context_mode_ == SecureContextMode::kSecureContext;
 }
@@ -213,8 +228,8 @@ void CSSParserContext::CountDeprecation(WebFeature feature) const {
 }
 
 void CSSParserContext::Count(CSSParserMode mode, CSSPropertyID property) const {
-  if (IsUseCounterRecordingEnabled() && document_->GetPage()) {
-    UseCounter* use_counter = &document_->GetPage()->GetUseCounter();
+  if (IsUseCounterRecordingEnabled() && document_->Loader()) {
+    UseCounter* use_counter = &document_->Loader()->GetUseCounter();
     if (use_counter)
       use_counter->Count(mode, property, document_->GetFrame());
   }

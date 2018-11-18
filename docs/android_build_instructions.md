@@ -6,7 +6,8 @@ There are instructions for other platforms linked from the
 ## Instructions for Google Employees
 
 Are you a Google employee? See
-[go/building-chrome](https://goto.google.com/building-chrome) instead.
+[go/building-android-chrome](https://goto.google.com/building-android-chrome)
+instead.
 
 [TOC]
 
@@ -114,11 +115,11 @@ development and testing purposes.
 
 ## Setting up the build
 
-Chromium uses [Ninja](https://ninja-build.org) as its main build tool along
-with a tool called [GN](../tools/gn/docs/quick_start.md) to generate `.ninja`
-files. You can create any number of *build directories* with different
-configurations. To create a build directory which builds Chrome for Android,
-run:
+Chromium uses [Ninja](https://ninja-build.org) as its main build tool along with
+a tool called [GN](https://gn.googlesource.com/gn/+/master/docs/quick_start.md)
+to generate `.ninja` files. You can create any number of *build directories*
+with different configurations. To create a build directory which builds Chrome
+for Android, run:
 
 ```shell
 gn gen --args='target_os="android"' out/Default
@@ -143,8 +144,12 @@ require you to set `CHROMIUM_OUTPUT_DIR=out/Default`.
 Build Chromium with Ninja using the command:
 
 ```shell
-ninja -C out/Default chrome_public_apk
+autoninja -C out/Default chrome_public_apk
 ```
+
+`autoninja` is a wrapper that automatically provides optimal values for the
+arguments passed to `ninja`.
+
 
 You can get a list of all of the other build targets from GN by running `gn ls
 out/Default` from the command line. To compile one, pass the GN label to Ninja
@@ -181,6 +186,8 @@ two targets can be substituted.
 
 **Note**: These targets are actually the open-source equivalents to the
 closed-source targets that get shipped to the Play Store.
+
+**Note**: For more in-depth differences, see [android_native_libraries.md](android_native_libraries.md).
 
 ## Updating your checkout
 
@@ -225,10 +232,23 @@ third_party/android_tools/sdk/platform-tools/adb devices
 Which prints a list of connected devices. If not connected, try
 unplugging and reattaching your device.
 
+### Enable apps from unknown sources
+
+Allow Android to run APKs that haven't been signed through the Play Store:
+
+*   Enable 'Unknown sources' under Settings \> Security
+
+In case that setting isn't present, it may be possible to configure it via
+`adb shell` instead:
+
+```shell
+third_party/android_tools/sdk/platform-tools/adb shell settings put global verifier_verify_adb_installs 0
+```
+
 ### Build the full browser
 
 ```shell
-ninja -C out/Default chrome_public_apk
+autoninja -C out/Default chrome_public_apk
 ```
 
 And deploy it to your Android device:
@@ -246,7 +266,7 @@ Wraps the content module (but not the /chrome embedder). See
 for details on the content module and content shell.
 
 ```shell
-ninja -C out/Default content_shell_apk
+autoninja -C out/Default content_shell_apk
 out/Default/bin/content_shell_apk install
 ```
 
@@ -317,7 +337,7 @@ a little slower since updated dex files are installed manually.
 Here's an example:
 
 ```shell
-ninja -C out/Default chrome_public_apk_incremental
+autoninja -C out/Default chrome_public_apk_incremental
 out/Default/bin/chrome_public_apk install --incremental --verbose
 ```
 
@@ -325,14 +345,14 @@ For gunit tests (note that run_*_incremental automatically add
 `--fast-local-dev` when calling `test_runner.py`):
 
 ```shell
-ninja -C out/Default base_unittests_incremental
+autoninja -C out/Default base_unittests_incremental
 out/Default/bin/run_base_unittests_incremental
 ```
 
 For instrumentation tests:
 
 ```shell
-ninja -C out/Default chrome_public_test_apk_incremental
+autoninja -C out/Default chrome_public_test_apk_incremental
 out/Default/bin/run_chrome_public_test_apk_incremental
 ```
 
@@ -349,6 +369,11 @@ incremental_apk_by_default = true
 ```
 
 This will make `chrome_public_apk` build in incremental mode.
+
+## Installing and Running Chromium on an Emulator
+
+Running on an emulator is the same as on a device. Refer to
+[android_emulator.md](android_emulator.md) for setting up emulators.
 
 
 ## Tips, tricks, and troubleshooting

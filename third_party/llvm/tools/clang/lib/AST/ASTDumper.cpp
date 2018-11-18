@@ -450,6 +450,7 @@ namespace  {
     // OpenMP decls
     void VisitOMPThreadPrivateDecl(const OMPThreadPrivateDecl *D);
     void VisitOMPDeclareReductionDecl(const OMPDeclareReductionDecl *D);
+    void VisitOMPRequiresDecl(const OMPRequiresDecl *D);
     void VisitOMPCapturedExprDecl(const OMPCapturedExprDecl *D);
 
     // C++ Decls
@@ -521,10 +522,12 @@ namespace  {
     // Exprs
     void VisitExpr(const Expr *Node);
     void VisitCastExpr(const CastExpr *Node);
+    void VisitImplicitCastExpr(const ImplicitCastExpr *Node);
     void VisitDeclRefExpr(const DeclRefExpr *Node);
     void VisitPredefinedExpr(const PredefinedExpr *Node);
     void VisitCharacterLiteral(const CharacterLiteral *Node);
     void VisitIntegerLiteral(const IntegerLiteral *Node);
+    void VisitFixedPointLiteral(const FixedPointLiteral *Node);
     void VisitFloatingLiteral(const FloatingLiteral *Node);
     void VisitStringLiteral(const StringLiteral *Str);
     void VisitInitListExpr(const InitListExpr *ILE);
@@ -995,7 +998,7 @@ void ASTDumper::dumpTemplateArgument(const TemplateArgument &A, SourceRange R) {
       A.getAsTemplate().dump(OS);
       break;
     case TemplateArgument::TemplateExpansion:
-      OS << " template expansion";
+      OS << " template expansion ";
       A.getAsTemplateOrTemplatePattern().dump(OS);
       break;
     case TemplateArgument::Expression:
@@ -1338,6 +1341,26 @@ void ASTDumper::VisitOMPDeclareReductionDecl(const OMPDeclareReductionDecl *D) {
   }
 }
 
+void ASTDumper::VisitOMPRequiresDecl(const OMPRequiresDecl *D) {
+  for (auto *C : D->clauselists()) {
+    dumpChild([=] {
+      if (!C) {
+        ColorScope Color(*this, NullColor);
+        OS << "<<<NULL>>> OMPClause";
+        return;
+      }
+      {
+        ColorScope Color(*this, AttrColor);
+        StringRef ClauseName(getOpenMPClauseName(C->getClauseKind()));
+        OS << "OMP" << ClauseName.substr(/*Start=*/0, /*N=*/1).upper()
+           << ClauseName.drop_front() << "Clause";
+      }
+      dumpPointer(C);
+      dumpSourceRange(SourceRange(C->getBeginLoc(), C->getEndLoc()));
+    });
+  }
+}
+
 void ASTDumper::VisitOMPCapturedExprDecl(const OMPCapturedExprDecl *D) {
   dumpName(D);
   dumpType(D->getType());
@@ -1639,6 +1662,9 @@ void ASTDumper::VisitTemplateTypeParmDecl(const TemplateTypeParmDecl *D) {
   dumpName(D);
   if (D->hasDefaultArgument())
     dumpTemplateArgument(D->getDefaultArgument());
+  if (auto *From = D->getDefaultArgStorage().getInheritedFrom())
+    dumpDeclRef(From, D->defaultArgumentWasInherited() ? "inherited from"
+                                                       : "previous");
 }
 
 void ASTDumper::VisitNonTypeTemplateParmDecl(const NonTypeTemplateParmDecl *D) {
@@ -1649,6 +1675,9 @@ void ASTDumper::VisitNonTypeTemplateParmDecl(const NonTypeTemplateParmDecl *D) {
   dumpName(D);
   if (D->hasDefaultArgument())
     dumpTemplateArgument(D->getDefaultArgument());
+  if (auto *From = D->getDefaultArgStorage().getInheritedFrom())
+    dumpDeclRef(From, D->defaultArgumentWasInherited() ? "inherited from"
+                                                       : "previous");
 }
 
 void ASTDumper::VisitTemplateTemplateParmDecl(
@@ -1660,6 +1689,9 @@ void ASTDumper::VisitTemplateTemplateParmDecl(
   dumpTemplateParameters(D->getTemplateParameters());
   if (D->hasDefaultArgument())
     dumpTemplateArgumentLoc(D->getDefaultArgument());
+  if (auto *From = D->getDefaultArgStorage().getInheritedFrom())
+    dumpDeclRef(From, D->defaultArgumentWasInherited() ? "inherited from"
+                                                       : "previous");
 }
 
 void ASTDumper::VisitUsingDecl(const UsingDecl *D) {
@@ -1964,7 +1996,7 @@ void ASTDumper::dumpStmt(const Stmt *S) {
 }
 
 void ASTDumper::VisitStmt(const Stmt *Node) {
-  {   
+  {
     ColorScope Color(*this, StmtColor);
     OS << Node->getStmtClassName();
   }
@@ -2030,7 +2062,7 @@ void ASTDumper::VisitOMPExecutableDirective(
            << ClauseName.drop_front() << "Clause";
       }
       dumpPointer(C);
-      dumpSourceRange(SourceRange(C->getLocStart(), C->getLocEnd()));
+      dumpSourceRange(SourceRange(C->getBeginLoc(), C->getEndLoc()));
       if (C->isImplicit())
         OS << " <implicit>";
       for (auto *S : C->children())
@@ -2118,6 +2150,12 @@ void ASTDumper::VisitCastExpr(const CastExpr *Node) {
   OS << ">";
 }
 
+void ASTDumper::VisitImplicitCastExpr(const ImplicitCastExpr *Node) {
+  VisitCastExpr(Node);
+  if (Node->isPartOfExplicitCast())
+    OS << " part_of_explicit_cast";
+}
+
 void ASTDumper::VisitDeclRefExpr(const DeclRefExpr *Node) {
   VisitExpr(Node);
 
@@ -2175,6 +2213,13 @@ void ASTDumper::VisitIntegerLiteral(const IntegerLiteral *Node) {
   bool isSigned = Node->getType()->isSignedIntegerType();
   ColorScope Color(*this, ValueColor);
   OS << " " << Node->getValue().toString(10, isSigned);
+}
+
+void ASTDumper::VisitFixedPointLiteral(const FixedPointLiteral *Node) {
+  VisitExpr(Node);
+
+  ColorScope Color(*this, ValueColor);
+  OS << " " << Node->getValueAsString(/*Radix=*/10);
 }
 
 void ASTDumper::VisitFloatingLiteral(const FloatingLiteral *Node) {

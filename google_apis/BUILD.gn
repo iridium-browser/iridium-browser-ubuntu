@@ -84,8 +84,6 @@ config("key_defines") {
 template("google_apis_tmpl") {
   source_set(target_name) {
     sources = [
-      "gaia/account_tracker.cc",
-      "gaia/account_tracker.h",
       "gaia/gaia_auth_consumer.cc",
       "gaia/gaia_auth_consumer.h",
       "gaia/gaia_auth_fetcher.cc",
@@ -102,8 +100,7 @@ template("google_apis_tmpl") {
       "gaia/gaia_urls.h",
       "gaia/google_service_auth_error.cc",
       "gaia/google_service_auth_error.h",
-      "gaia/identity_provider.cc",
-      "gaia/identity_provider.h",
+      "gaia/oauth2_access_token_consumer.cc",
       "gaia/oauth2_access_token_consumer.h",
       "gaia/oauth2_access_token_fetcher.cc",
       "gaia/oauth2_access_token_fetcher.h",
@@ -123,6 +120,8 @@ template("google_apis_tmpl") {
       "gaia/oauth2_token_service_delegate.h",
       "gaia/oauth2_token_service_request.cc",
       "gaia/oauth2_token_service_request.h",
+      "gaia/oauth_multilogin_result.cc",
+      "gaia/oauth_multilogin_result.h",
       "gaia/oauth_request_signer.cc",
       "gaia/oauth_request_signer.h",
       "gaia/ubertoken_fetcher.cc",
@@ -141,6 +140,7 @@ template("google_apis_tmpl") {
       "//base/third_party/dynamic_annotations",
       "//crypto",
       "//mojo/public/cpp/bindings:struct_traits",
+      "//services/network/public/cpp",
     ]
 
     if (defined(invoker.deps)) {
@@ -164,8 +164,6 @@ template("google_apis_tmpl") {
         "drive/drive_api_url_generator.cc",
         "drive/drive_api_url_generator.h",
         "drive/drive_common_callbacks.h",
-        "drive/drive_switches.cc",
-        "drive/drive_switches.h",
         "drive/files_list_request_runner.cc",
         "drive/files_list_request_runner.h",
         "drive/request_sender.cc",
@@ -195,6 +193,7 @@ template("google_apis_tmpl") {
 google_apis_tmpl("google_apis") {
   deps = [
     "//net",
+    "//services/network/public/cpp",
   ]
 }
 
@@ -203,8 +202,6 @@ static_library("test_support") {
   sources = [
     "gaia/fake_gaia.cc",
     "gaia/fake_gaia.h",
-    "gaia/fake_identity_provider.cc",
-    "gaia/fake_identity_provider.h",
     "gaia/fake_oauth2_token_service.cc",
     "gaia/fake_oauth2_token_service.h",
     "gaia/fake_oauth2_token_service_delegate.cc",
@@ -219,6 +216,9 @@ static_library("test_support") {
     "//base",
     "//base/test:test_support",
     "//net:test_support",
+    "//services/network:network_service",
+    "//services/network:test_support",
+    "//services/network/public/cpp",
   ]
 
   if (enable_extensions) {
@@ -231,9 +231,20 @@ static_library("test_support") {
   }
 }
 
+source_set("run_all_unittests") {
+  testonly = true
+  sources = [
+    "run_all_unittests.cc",
+  ]
+
+  deps = [
+    "//base/test:test_support",
+    "//mojo/core/embedder",
+  ]
+}
+
 test("google_apis_unittests") {
   sources = [
-    "gaia/account_tracker_unittest.cc",
     "gaia/gaia_auth_fetcher_unittest.cc",
     "gaia/gaia_auth_util_unittest.cc",
     "gaia/gaia_oauth_client_unittest.cc",
@@ -244,6 +255,7 @@ test("google_apis_unittests") {
     "gaia/oauth2_mint_token_flow_unittest.cc",
     "gaia/oauth2_token_service_request_unittest.cc",
     "gaia/oauth2_token_service_unittest.cc",
+    "gaia/oauth_multilogin_result_unittest.cc",
     "gaia/oauth_request_signer_unittest.cc",
     "gaia/ubertoken_fetcher_unittest.cc",
     "google_api_keys_unittest.cc",
@@ -258,9 +270,10 @@ test("google_apis_unittests") {
 
   deps = [
     ":google_apis",
+    ":run_all_unittests",
     ":test_support",
     "//base",
-    "//base/test:run_all_unittests",
+    "//base/test:test_support",
     "//testing/gmock",
     "//testing/gtest",
   ]

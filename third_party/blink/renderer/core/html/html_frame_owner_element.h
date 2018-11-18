@@ -23,11 +23,11 @@
 
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/core/feature_policy/feature_policy.h"
 #include "third_party/blink/renderer/core/frame/dom_window.h"
 #include "third_party/blink/renderer/core/frame/embedded_content_view.h"
 #include "third_party/blink/renderer/core/frame/frame_owner.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
-#include "third_party/blink/renderer/platform/feature_policy/feature_policy.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/scroll/scroll_types.h"
 #include "third_party/blink/renderer/platform/weborigin/security_policy.h"
@@ -37,9 +37,8 @@ namespace blink {
 
 class ExceptionState;
 class Frame;
-class IntersectionObserver;
-class IntersectionObserverEntry;
 class LayoutEmbeddedContent;
+class LazyLoadFrameObserver;
 class WebPluginContainerImpl;
 
 class CORE_EXPORT HTMLFrameOwnerElement : public HTMLElement,
@@ -117,16 +116,19 @@ class CORE_EXPORT HTMLFrameOwnerElement : public HTMLElement,
   // For unit tests, manually trigger the UpdateContainerPolicy method.
   void UpdateContainerPolicyForTests() { UpdateContainerPolicy(); }
 
+  // This function is to notify ChildFrameCompositor of pointer-events changes
+  // of an OOPIF.
+  void PointerEventsChanged();
+
   void CancelPendingLazyLoad();
 
-  // TODO(sclittle): Make the root margins configurable via field trial
-  // params instead of just hardcoding the value here.
-  static constexpr int kLazyLoadRootMarginPx = 800;
+  void ParseAttribute(const AttributeModificationParams&) override;
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  protected:
   HTMLFrameOwnerElement(const QualifiedName& tag_name, Document&);
+
   void SetSandboxFlags(SandboxFlags);
 
   bool LoadOrRedirectSubframe(const KURL&,
@@ -143,25 +145,18 @@ class CORE_EXPORT HTMLFrameOwnerElement : public HTMLElement,
   // This method is intended to be overridden by specific frame classes.
   virtual scoped_refptr<const SecurityOrigin> GetOriginForFeaturePolicy()
       const {
-    return SecurityOrigin::CreateUnique();
+    return SecurityOrigin::CreateUniqueOpaque();
   }
 
   // Return a feature policy container policy for this frame, based on the
   // frame attributes and the effective origin specified in the frame
   // attributes.
-  // If |old_syntax| (bool*) is not null, it will be set true if the deprecated
-  // space-deparated feature list syntax is detected.
-  // TODO(loonybear): remove the boolean once the space separated feature list
-  // syntax is deprecated.
-  // https://crbug.com/761009.
   virtual ParsedFeaturePolicy ConstructContainerPolicy(
-      Vector<String>* /*  messages */,
-      bool* /* old_syntax */) const = 0;
+      Vector<String>* /*  messages */) const = 0;
 
   // Update the container policy and notify the frame loader client of any
   // changes.
-  void UpdateContainerPolicy(Vector<String>* messages = nullptr,
-                             bool* old_syntax = nullptr);
+  void UpdateContainerPolicy(Vector<String>* messages = nullptr);
 
  private:
   // Intentionally private to prevent redundant checks when the type is
@@ -175,18 +170,13 @@ class CORE_EXPORT HTMLFrameOwnerElement : public HTMLElement,
     return kReferrerPolicyDefault;
   }
 
-  void LoadIfHiddenOrNearViewport(
-      const ResourceRequest&,
-      FrameLoadType,
-      const HeapVector<Member<IntersectionObserverEntry>>&);
-
   Member<Frame> content_frame_;
   Member<EmbeddedContentView> embedded_content_view_;
   SandboxFlags sandbox_flags_;
 
   ParsedFeaturePolicy container_policy_;
 
-  Member<IntersectionObserver> lazy_load_intersection_observer_;
+  Member<LazyLoadFrameObserver> lazy_load_frame_observer_;
   bool should_lazy_load_children_;
 };
 

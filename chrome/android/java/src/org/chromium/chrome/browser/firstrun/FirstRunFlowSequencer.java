@@ -10,6 +10,7 @@ import android.app.PendingIntent;
 import android.content.Context;
 import android.content.Intent;
 import android.content.res.TypedArray;
+import android.net.Uri;
 import android.os.Bundle;
 import android.text.TextUtils;
 
@@ -20,7 +21,9 @@ import org.chromium.base.Log;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.IntentHandler;
 import org.chromium.chrome.browser.LaunchIntentDispatcher;
+import org.chromium.chrome.browser.UrlConstants;
 import org.chromium.chrome.browser.locale.LocaleManager;
 import org.chromium.chrome.browser.net.spdyproxy.DataReductionProxySettings;
 import org.chromium.chrome.browser.preferences.PrefServiceBridge;
@@ -29,7 +32,7 @@ import org.chromium.chrome.browser.services.AndroidEduAndChildAccountHelper;
 import org.chromium.chrome.browser.signin.SigninManager;
 import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.chrome.browser.util.IntentUtils;
-import org.chromium.chrome.browser.vr_shell.VrIntentUtils;
+import org.chromium.chrome.browser.vr.VrModuleProvider;
 import org.chromium.chrome.browser.webapps.WebApkActivity;
 import org.chromium.components.signin.AccountManagerFacade;
 import org.chromium.components.signin.ChildAccountStatus;
@@ -58,7 +61,6 @@ public abstract class FirstRunFlowSequencer  {
     private boolean mIsAndroidEduDevice;
     private @ChildAccountStatus.Status int mChildAccountStatus;
     private Account[] mGoogleAccounts;
-    private boolean mOnlyOneAccount;
     private boolean mForceEduSignIn;
 
     /**
@@ -137,9 +139,10 @@ public abstract class FirstRunFlowSequencer  {
 
     @VisibleForTesting
     protected boolean shouldShowSearchEnginePage() {
+        @LocaleManager.SearchEnginePromoType
         int searchPromoType = LocaleManager.getInstance().getSearchEnginePromoShowType();
-        return searchPromoType == LocaleManager.SEARCH_ENGINE_PROMO_SHOW_NEW
-                || searchPromoType == LocaleManager.SEARCH_ENGINE_PROMO_SHOW_EXISTING;
+        return searchPromoType == LocaleManager.SearchEnginePromoType.SHOW_NEW
+                || searchPromoType == LocaleManager.SearchEnginePromoType.SHOW_EXISTING;
     }
 
     @VisibleForTesting
@@ -158,10 +161,9 @@ public abstract class FirstRunFlowSequencer  {
         mIsAndroidEduDevice = isAndroidEduDevice;
         mChildAccountStatus = childAccountStatus;
         mGoogleAccounts = getGoogleAccounts();
-        mOnlyOneAccount = mGoogleAccounts.length == 1;
         // EDU devices should always have exactly 1 google account, which will be automatically
         // signed-in. All FRE screens are skipped in this case.
-        mForceEduSignIn = mIsAndroidEduDevice && mOnlyOneAccount && !isSignedIn();
+        mForceEduSignIn = mIsAndroidEduDevice && mGoogleAccounts.length == 1 && !isSignedIn();
     }
 
     void processFreEnvironmentPreNative() {
@@ -203,18 +205,11 @@ public abstract class FirstRunFlowSequencer  {
         boolean offerSignInOk = isSyncAllowed() && !isSignedIn() && !mForceEduSignIn
                 && (!shouldSkipFirstUseHints() || mGoogleAccounts.length > 0);
         freProperties.putBoolean(FirstRunActivity.SHOW_SIGNIN_PAGE, offerSignInOk);
-        if (offerSignInOk || mForceEduSignIn) {
-            // If the user has accepted the ToS in the Setup Wizard and there is exactly
-            // one account, or if the device has a child account, or if the device is an
-            // Android EDU device and there is exactly one account, preselect the sign-in
-            // account and force the selection if necessary.
-            if ((hasAnyUserSeenToS() && mOnlyOneAccount)
-                    || ChildAccountStatus.isChild(mChildAccountStatus) || mForceEduSignIn) {
-                freProperties.putString(
-                        AccountFirstRunFragment.FORCE_SIGNIN_ACCOUNT_TO, mGoogleAccounts[0].name);
-                freProperties.putBoolean(AccountFirstRunFragment.PRESELECT_BUT_ALLOW_TO_CHANGE,
-                        !mForceEduSignIn && !ChildAccountStatus.isChild(mChildAccountStatus));
-            }
+        if (mForceEduSignIn || ChildAccountStatus.isChild(mChildAccountStatus)) {
+            // If the device is an Android EDU device or has a child account, there should be
+            // exactly account on the device. Force sign-in in to that account.
+            freProperties.putString(
+                    AccountFirstRunFragment.FORCE_SIGNIN_ACCOUNT_TO, mGoogleAccounts[0].name);
         }
 
         freProperties.putBoolean(
@@ -345,9 +340,16 @@ public abstract class FirstRunFlowSequencer  {
         // Check if the user needs to go through First Run at all.
         if (!checkIfFirstRunIsNecessary(caller, intent, preferLightweightFre)) return false;
 
+        String intentUrl = IntentHandler.getUrlFromIntent(intent);
+        Uri uri = intentUrl != null ? Uri.parse(intentUrl) : null;
+        if (uri != null && UrlConstants.CONTENT_SCHEME.equals(uri.getScheme())) {
+            caller.grantUriPermission(
+                    caller.getPackageName(), uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        }
+
         Log.d(TAG, "Redirecting user through FRE.");
         if ((intent.getFlags() & Intent.FLAG_ACTIVITY_NEW_TASK) != 0) {
-            boolean isVrIntent = VrIntentUtils.isVrIntent(intent);
+            boolean isVrIntent = VrModuleProvider.getIntentDelegate().isVrIntent(intent);
             boolean isGenericFreActive = false;
             List<WeakReference<Activity>> activities = ApplicationStatus.getRunningActivities();
             for (WeakReference<Activity> weakActivity : activities) {
@@ -380,7 +382,8 @@ public abstract class FirstRunFlowSequencer  {
 
             if (!(caller instanceof Activity)) freIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             if (isVrIntent) {
-                freIntent = VrIntentUtils.setupVrFreIntent(caller, intent, freIntent);
+                freIntent =
+                        VrModuleProvider.getIntentDelegate().setupVrFreIntent(caller, freIntent);
             }
             IntentUtils.safeStartActivity(caller, freIntent);
         } else {

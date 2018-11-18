@@ -9,7 +9,9 @@
 #include "chromeos/components/proximity_auth/webui/proximity_auth_webui_handler.h"
 #include "chromeos/components/proximity_auth/webui/url_constants.h"
 #include "chromeos/grit/chromeos_resources.h"
+#include "chromeos/services/device_sync/public/cpp/device_sync_client.h"
 #include "chromeos/services/multidevice_setup/public/mojom/constants.mojom.h"
+#include "chromeos/services/secure_channel/public/cpp/client/secure_channel_client.h"
 #include "components/grit/components_resources.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/web_contents.h"
@@ -19,10 +21,12 @@
 
 namespace proximity_auth {
 
-ProximityAuthUI::ProximityAuthUI(content::WebUI* web_ui,
-                                 ProximityAuthClient* delegate)
-    : ui::MojoWebUIController<
-          chromeos::multidevice_setup::mojom::MultiDeviceSetup>(web_ui) {
+ProximityAuthUI::ProximityAuthUI(
+    content::WebUI* web_ui,
+    ProximityAuthClient* proximity_auth_client,
+    chromeos::device_sync::DeviceSyncClient* device_sync_client,
+    chromeos::secure_channel::SecureChannelClient* secure_channel_client)
+    : ui::MojoWebUIController(web_ui, true /* enable_chrome_send */) {
   content::WebUIDataSource* source =
       content::WebUIDataSource::Create(kChromeUIProximityAuthHost);
   source->SetDefaultResource(IDR_PROXIMITY_AUTH_INDEX_HTML);
@@ -38,25 +42,19 @@ ProximityAuthUI::ProximityAuthUI(content::WebUI* web_ui,
   source->AddResourcePath("pollux.html", IDR_PROXIMITY_AUTH_POLLUX_HTML);
   source->AddResourcePath("pollux.css", IDR_PROXIMITY_AUTH_POLLUX_CSS);
   source->AddResourcePath("pollux.js", IDR_PROXIMITY_AUTH_POLLUX_JS);
-  source->AddResourcePath(
-      "chromeos/services/multidevice_setup/public/mojom/"
-      "multidevice_setup.mojom.js",
-      IDR_MULTIDEVICE_SETUP_MOJOM_JS);
-  source->AddResourcePath(
-      "chromeos/services/multidevice_setup/public/mojom/"
-      "multidevice_setup_constants.mojom.js",
-      IDR_MULTIDEVICE_SETUP_CONSTANTS_MOJOM_JS);
 
   content::BrowserContext* browser_context =
       web_ui->GetWebContents()->GetBrowserContext();
   content::WebUIDataSource::Add(browser_context, source);
-  web_ui->AddMessageHandler(
-      std::make_unique<ProximityAuthWebUIHandler>(delegate));
+  web_ui->AddMessageHandler(std::make_unique<ProximityAuthWebUIHandler>(
+      proximity_auth_client, device_sync_client, secure_channel_client));
+  AddHandlerToRegistry(base::BindRepeating(
+      &ProximityAuthUI::BindMultiDeviceSetup, base::Unretained(this)));
 }
 
 ProximityAuthUI::~ProximityAuthUI() = default;
 
-void ProximityAuthUI::BindUIHandler(
+void ProximityAuthUI::BindMultiDeviceSetup(
     chromeos::multidevice_setup::mojom::MultiDeviceSetupRequest request) {
   service_manager::Connector* connector =
       content::BrowserContext::GetConnectorFor(

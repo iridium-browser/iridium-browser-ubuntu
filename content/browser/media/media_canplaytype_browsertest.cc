@@ -15,7 +15,7 @@
 #include "content/shell/browser/shell.h"
 #include "media/base/media_switches.h"
 #include "media/media_buildflags.h"
-#include "third_party/libaom/av1_features.h"
+#include "third_party/libaom/av1_buildflags.h"
 #include "ui/display/display_switches.h"
 
 #if defined(OS_ANDROID)
@@ -203,11 +203,13 @@ class MediaCanPlayTypeTest : public MediaBrowserTest {
     EXPECT_EQ(kNot, CanPlay("'" + mime + "; codecs=\"avc1.4D401E, vorbis\"'"));
     EXPECT_EQ(kNot, CanPlay("'" + mime + "; codecs=\"avc3.64001F, vorbis\"'"));
 
-    EXPECT_EQ(kNot, CanPlay("'" + mime + "; codecs=\"opus\"'"));
-    EXPECT_EQ(kNot, CanPlay("'" + mime + "; codecs=\"avc1, opus\"'"));
-    EXPECT_EQ(kNot, CanPlay("'" + mime + "; codecs=\"avc3, opus\"'"));
-    EXPECT_EQ(kNot, CanPlay("'" + mime + "; codecs=\"avc1.4D401E, opus\"'"));
-    EXPECT_EQ(kNot, CanPlay("'" + mime + "; codecs=\"avc3.64001F, opus\"'"));
+    if (mime != "audio/mp4" && mime != "video/mp4") {
+      EXPECT_EQ(kNot, CanPlay("'" + mime + "; codecs=\"opus\"'"));
+      EXPECT_EQ(kNot, CanPlay("'" + mime + "; codecs=\"avc1, opus\"'"));
+      EXPECT_EQ(kNot, CanPlay("'" + mime + "; codecs=\"avc3, opus\"'"));
+      EXPECT_EQ(kNot, CanPlay("'" + mime + "; codecs=\"avc1.4D401E, opus\"'"));
+      EXPECT_EQ(kNot, CanPlay("'" + mime + "; codecs=\"avc3.64001F, opus\"'"));
+    }
 
     EXPECT_EQ(kNot, CanPlay("'" + mime + "; codecs=\"vp8\"'"));
     EXPECT_EQ(kNot, CanPlay("'" + mime + "; codecs=\"vp9\"'"));
@@ -591,21 +593,21 @@ class AV1MediaCanPlayTypeTest : public MediaCanPlayTypeTest {
 // Note: This must be a separate test since features can not be changed after
 // the initial navigation.
 IN_PROC_BROWSER_TEST_F(AV1MediaCanPlayTypeTest, CodecSupportTest_av1) {
-  // TODO(dalecurtis): This is not the correct final string. Fix before enabling
-  // by default. This test needs to be merged into the existing mp4 and webm
-  // before release as well. http://crbug.com/784607
-  EXPECT_EQ(kProbably, CanPlay("'video/webm; codecs=\"av1\"'"));
-  EXPECT_EQ(kProbably, CanPlay("'video/mp4; codecs=\"av1\"'"));
-}
-#endif  // BUILDFLAG(ENABLE_AV1_DECODER)
-
-IN_PROC_BROWSER_TEST_F(MediaCanPlayTypeTest, CodecSupportTest_av1_unsupported) {
-  // TODO(dalecurtis): This is not the correct final string. Fix before enabling
-  // by default. This test needs to be merged into the existing mp4 and webm
-  // before release as well. http://crbug.com/784607
+  // Fully qualified codec strings are required. These tests are not exhaustive
+  // since codec string parsing is exhaustively tested elsewhere.
   EXPECT_EQ(kNot, CanPlay("'video/webm; codecs=\"av1\"'"));
   EXPECT_EQ(kNot, CanPlay("'video/mp4; codecs=\"av1\"'"));
+  EXPECT_EQ(kProbably, CanPlay("'video/webm; codecs=\"av01.0.04M.08\"'"));
+  EXPECT_EQ(kProbably, CanPlay("'video/mp4; codecs=\"av01.0.04M.08\"'"));
 }
+#else
+// AV1 is enabled by default. However, on platforms where it is not built, such
+// as ARM-based devices, av1 must be unsupported.
+IN_PROC_BROWSER_TEST_F(MediaCanPlayTypeTest, CodecSupportTest_av1_unsupported) {
+  EXPECT_EQ(kNot, CanPlay("'video/webm; codecs=\"av01.0.04M.08\"'"));
+  EXPECT_EQ(kNot, CanPlay("'video/mp4; codecs=\"av01.0.04M.08\"'"));
+}
+#endif  // BUILDFLAG(ENABLE_AV1_DECODER)
 
 IN_PROC_BROWSER_TEST_F(MediaCanPlayTypeTest, CodecSupportTest_wav) {
   EXPECT_EQ(kMaybe, CanPlay("'audio/wav'"));
@@ -825,6 +827,8 @@ IN_PROC_BROWSER_TEST_F(MediaCanPlayTypeTest, CodecSupportTest_mp4) {
   EXPECT_EQ(kPropMaybe, CanPlay("'video/mp4; codecs=\"avc1, avc3\"'"));
   EXPECT_EQ(kPropMaybe, CanPlay("'video/mp4; codecs=\"avc1, flac\"'"));
   EXPECT_EQ(kPropMaybe, CanPlay("'video/mp4; codecs=\"avc3, flac\"'"));
+  EXPECT_EQ(kPropMaybe, CanPlay("'video/mp4; codecs=\"avc1, opus\"'"));
+  EXPECT_EQ(kPropMaybe, CanPlay("'video/mp4; codecs=\"avc3, opus\"'"));
 
   EXPECT_EQ(kPropProbably, CanPlay("'video/mp4; codecs=\"avc1.42E01E\"'"));
   EXPECT_EQ(kPropProbably, CanPlay("'video/mp4; codecs=\"avc1.42101E\"'"));
@@ -896,6 +900,11 @@ IN_PROC_BROWSER_TEST_F(MediaCanPlayTypeTest, CodecSupportTest_mp4) {
             CanPlay("'video/mp4; codecs=\"avc1.4D401E, flac\"'"));
   EXPECT_EQ(kPropProbably,
             CanPlay("'video/mp4; codecs=\"avc3.64001F, flac\"'"));
+  EXPECT_EQ(kProbably, CanPlay("'video/mp4; codecs=\"opus\"'"));
+  EXPECT_EQ(kPropProbably,
+            CanPlay("'video/mp4; codecs=\"avc1.4D401E, opus\"'"));
+  EXPECT_EQ(kPropProbably,
+            CanPlay("'video/mp4; codecs=\"avc3.64001F, opus\"'"));
 
   TestMPEGUnacceptableCombinations("video/mp4");
   // This result is incorrect. See https://crbug.com/592889.
@@ -970,6 +979,7 @@ IN_PROC_BROWSER_TEST_F(MediaCanPlayTypeTest, CodecSupportTest_mp4) {
   EXPECT_EQ(kNot, CanPlay("'video/x-m4v; codecs=\"avc1.640028,mp4a.A6\"'"));
 
   EXPECT_EQ(kNot, CanPlay("'video/x-m4v; codecs=\"flac\"'"));
+  EXPECT_EQ(kNot, CanPlay("'video/x-m4v; codecs=\"opus\"'"));
 
   TestMPEGUnacceptableCombinations("video/x-m4v");
 
@@ -988,6 +998,7 @@ IN_PROC_BROWSER_TEST_F(MediaCanPlayTypeTest, CodecSupportTest_mp4) {
   EXPECT_EQ(kPropProbably, CanPlay("'audio/mp4; codecs=\"mp4a.40.29\"'"));
 
   EXPECT_EQ(kProbably, CanPlay("'audio/mp4; codecs=\"flac\"'"));
+  EXPECT_EQ(kProbably, CanPlay("'audio/mp4; codecs=\"opus\"'"));
 
   EXPECT_EQ(kNot, CanPlay("'audio/mp4; codecs=\"avc1\"'"));
   EXPECT_EQ(kNot, CanPlay("'audio/mp4; codecs=\"avc3\"'"));
@@ -1055,6 +1066,7 @@ IN_PROC_BROWSER_TEST_F(MediaCanPlayTypeTest, CodecSupportTest_mp4) {
   EXPECT_EQ(kNot, CanPlay("'audio/x-m4a; codecs=\"mp4a.A6\"'"));
 
   EXPECT_EQ(kNot, CanPlay("'video/x-m4a; codecs=\"flac\"'"));
+  EXPECT_EQ(kNot, CanPlay("'video/x-m4a; codecs=\"opus\"'"));
 
   TestMPEGUnacceptableCombinations("audio/x-m4a");
 }

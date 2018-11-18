@@ -166,6 +166,13 @@ bool ParsePhoneNumber(const base::string16& value,
   if (destination_length > area_length)
     area_length = destination_length;
 
+  if (area_length >= static_cast<int>(national_significant_number.size())) {
+    // For some non-ASCII strings |destination_length| is bigger than phone
+    // string size. It might be because of incorrect treating of non-ASCII
+    // characters.
+    return false;
+  }
+
   std::string area_code;
   std::string subscriber_number;
   if (area_length > 0) {
@@ -241,14 +248,14 @@ bool PhoneNumbersMatch(const base::string16& number_a,
 
   // Parse phone numbers based on the region
   ::i18n::phonenumbers::PhoneNumber i18n_number1;
-  if (phone_util->Parse(base::UTF16ToUTF8(number_a), region.c_str(),
-                        &i18n_number1) != PhoneNumberUtil::NO_PARSING_ERROR) {
+  if (phone_util->Parse(base::UTF16ToUTF8(number_a), region, &i18n_number1) !=
+      PhoneNumberUtil::NO_PARSING_ERROR) {
     return false;
   }
 
   ::i18n::phonenumbers::PhoneNumber i18n_number2;
-  if (phone_util->Parse(base::UTF16ToUTF8(number_b), region.c_str(),
-                        &i18n_number2) != PhoneNumberUtil::NO_PARSING_ERROR) {
+  if (phone_util->Parse(base::UTF16ToUTF8(number_b), region, &i18n_number2) !=
+      PhoneNumberUtil::NO_PARSING_ERROR) {
     return false;
   }
 
@@ -379,7 +386,7 @@ PhoneObject& PhoneObject::operator=(const PhoneObject& other) {
 
   region_ = other.region_;
 
-  if (other.i18n_number_.get())
+  if (other.i18n_number_)
     i18n_number_.reset(
         new ::i18n::phonenumbers::PhoneNumber(*other.i18n_number_));
   else

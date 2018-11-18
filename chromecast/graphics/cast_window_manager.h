@@ -16,7 +16,8 @@ class Event;
 
 namespace chromecast {
 
-class CastSideSwipeGestureHandlerInterface;
+class CastTouchActivityObserver;
+class CastGestureHandler;
 
 // Chromecast's window-manager interface.
 // This declares the interface to add top-level windows to the Chromecast
@@ -27,17 +28,20 @@ class CastWindowManager {
   // Note: these window IDs are ordered by z-order.
   enum WindowId {
     BOTTOM = -1,
+    // Base layer for WebUiManager and apps and activities managed by it.
     APP = BOTTOM,
+    // Apps running in this layer won't be managed by WebUiManager.
+    UNMANAGED_APP,
     DEBUG_OVERLAY,
     INFO_OVERLAY,
     SOFT_KEYBOARD,
     VOLUME,
     MEDIA_INFO,
-    TOP = MEDIA_INFO
+    SETTINGS,
+    BOOT_ANIMATION_OVERLAY,
+    CORNERS_OVERLAY,
+    TOP = CORNERS_OVERLAY
   };
-
-  // Creates the platform-specific CastWindowManager.
-  static std::unique_ptr<CastWindowManager> Create(bool enable_input);
 
   virtual ~CastWindowManager() {}
 
@@ -60,16 +64,26 @@ class CastWindowManager {
   // Inject a UI event into the Cast window.
   virtual void InjectEvent(ui::Event* event) = 0;
 
-  // Register a new handler for a system side swipe event.
-  virtual void AddSideSwipeGestureHandler(
-      CastSideSwipeGestureHandlerInterface* handler) = 0;
+  // Register a new handler for system gesture events.
+  virtual void AddGestureHandler(CastGestureHandler* handler) = 0;
 
-  // Remove the registration of a system side swipe event handler.
-  virtual void RemoveSideSwipeGestureHandler(
-      CastSideSwipeGestureHandlerInterface* handler) = 0;
+  // Remove the registration of a system gesture events handler.
+  virtual void RemoveGestureHandler(CastGestureHandler* handler) = 0;
 
   // Enable/Disable color inversion.
   virtual void SetColorInversion(bool enable) = 0;
+
+  // Enable/disable the handling of all touch events.
+  virtual void SetTouchInputDisabled(bool disabled) = 0;
+
+  // Add an observer for when input events occur while touch input is disabled.
+  virtual void AddTouchActivityObserver(
+      CastTouchActivityObserver* observer) = 0;
+
+  // Remove an observer for when input events occur while touch input is
+  // disabled.
+  virtual void RemoveTouchActivityObserver(
+      CastTouchActivityObserver* observer) = 0;
 };
 
 }  // namespace chromecast

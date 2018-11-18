@@ -4,21 +4,22 @@
 
 #include "third_party/blink/renderer/core/paint/svg_shape_painter.h"
 
+#include "base/optional.h"
 #include "third_party/blink/renderer/core/layout/svg/layout_svg_resource_marker.h"
 #include "third_party/blink/renderer/core/layout/svg/layout_svg_shape.h"
 #include "third_party/blink/renderer/core/layout/svg/svg_layout_support.h"
 #include "third_party/blink/renderer/core/layout/svg/svg_marker_data.h"
 #include "third_party/blink/renderer/core/layout/svg/svg_resources.h"
 #include "third_party/blink/renderer/core/layout/svg/svg_resources_cache.h"
-#include "third_party/blink/renderer/core/paint/object_painter.h"
 #include "third_party/blink/renderer/core/paint/paint_info.h"
+#include "third_party/blink/renderer/core/paint/scoped_svg_paint_state.h"
 #include "third_party/blink/renderer/core/paint/svg_container_painter.h"
-#include "third_party/blink/renderer/core/paint/svg_paint_context.h"
+#include "third_party/blink/renderer/core/paint/svg_model_object_painter.h"
+#include "third_party/blink/renderer/core/paint/svg_object_painter.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context_state_saver.h"
 #include "third_party/blink/renderer/platform/graphics/paint/drawing_recorder.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_record.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_record_builder.h"
-#include "third_party/blink/renderer/platform/wtf/optional.h"
 
 namespace blink {
 
@@ -42,31 +43,35 @@ static SkPath::FillType FillRuleFromStyle(const PaintInfo& paint_info,
 
 void SVGShapePainter::Paint(const PaintInfo& paint_info) {
   if (paint_info.phase != PaintPhase::kForeground ||
-      layout_svg_shape_.Style()->Visibility() != EVisibility::kVisible ||
+      layout_svg_shape_.StyleRef().Visibility() != EVisibility::kVisible ||
       layout_svg_shape_.IsShapeEmpty())
     return;
 
-  FloatRect bounding_box = layout_svg_shape_.VisualRectInLocalSVGCoordinates();
-  if (!paint_info.GetCullRect().IntersectsCullRect(
-          layout_svg_shape_.LocalSVGTransform(), bounding_box))
-    return;
-
   PaintInfo paint_info_before_filtering(paint_info);
-  // Shapes cannot have children so do not call updateCullRect.
-  SVGTransformContext transform_context(paint_info_before_filtering,
-                                        layout_svg_shape_,
-                                        layout_svg_shape_.LocalSVGTransform());
+
+  if (SVGModelObjectPainter(layout_svg_shape_)
+          .CullRectSkipsPainting(paint_info_before_filtering)) {
+    return;
+  }
+  // Shapes cannot have children so do not call UpdateCullRect.
+
+  ScopedSVGTransformState transform_state(
+      paint_info_before_filtering, layout_svg_shape_,
+      layout_svg_shape_.LocalSVGTransform());
   {
-    SVGPaintContext paint_context(layout_svg_shape_,
-                                  paint_info_before_filtering);
-    if (paint_context.ApplyClipMaskAndFilterIfNecessary() &&
+    ScopedSVGPaintState paint_state(layout_svg_shape_,
+                                    paint_info_before_filtering);
+    if (paint_state.ApplyClipMaskAndFilterIfNecessary() &&
         !DrawingRecorder::UseCachedDrawingIfPossible(
-            paint_context.GetPaintInfo().context, layout_svg_shape_,
-            paint_context.GetPaintInfo().phase)) {
-      DrawingRecorder recorder(paint_context.GetPaintInfo().context,
+            paint_state.GetPaintInfo().context, layout_svg_shape_,
+            paint_state.GetPaintInfo().phase)) {
+      if (RuntimeEnabledFeatures::PaintTouchActionRectsEnabled())
+        SVGModelObjectPainter::RecordHitTestData(layout_svg_shape_, paint_info);
+      DrawingRecorder recorder(paint_state.GetPaintInfo().context,
                                layout_svg_shape_,
-                               paint_context.GetPaintInfo().phase);
-      const SVGComputedStyle& svg_style = layout_svg_shape_.Style()->SvgStyle();
+                               paint_state.GetPaintInfo().phase);
+      const SVGComputedStyle& svg_style =
+          layout_svg_shape_.StyleRef().SvgStyle();
 
       bool should_anti_alias = svg_style.ShapeRendering() != SR_CRISPEDGES &&
                                svg_style.ShapeRendering() != SR_OPTIMIZESPEED;
@@ -75,20 +80,20 @@ void SVGShapePainter::Paint(const PaintInfo& paint_info) {
         switch (svg_style.PaintOrderType(i)) {
           case PT_FILL: {
             PaintFlags fill_flags;
-            if (!SVGPaintContext::PaintForLayoutObject(
-                    paint_context.GetPaintInfo(), layout_svg_shape_.StyleRef(),
-                    layout_svg_shape_, kApplyToFillMode, fill_flags))
+            if (!SVGObjectPainter(layout_svg_shape_)
+                     .PreparePaint(paint_state.GetPaintInfo(),
+                                   layout_svg_shape_.StyleRef(),
+                                   kApplyToFillMode, fill_flags))
               break;
             fill_flags.setAntiAlias(should_anti_alias);
-            FillShape(
-                paint_context.GetPaintInfo().context, fill_flags,
-                FillRuleFromStyle(paint_context.GetPaintInfo(), svg_style));
+            FillShape(paint_state.GetPaintInfo().context, fill_flags,
+                      FillRuleFromStyle(paint_state.GetPaintInfo(), svg_style));
             break;
           }
           case PT_STROKE:
             if (svg_style.HasVisibleStroke()) {
               GraphicsContextStateSaver state_saver(
-                  paint_context.GetPaintInfo().context, false);
+                  paint_state.GetPaintInfo().context, false);
               AffineTransform non_scaling_transform;
               const AffineTransform* additional_paint_server_transform =
                   nullptr;
@@ -106,11 +111,11 @@ void SVGShapePainter::Paint(const PaintInfo& paint_info) {
               }
 
               PaintFlags stroke_flags;
-              if (!SVGPaintContext::PaintForLayoutObject(
-                      paint_context.GetPaintInfo(),
-                      layout_svg_shape_.StyleRef(), layout_svg_shape_,
-                      kApplyToStrokeMode, stroke_flags,
-                      additional_paint_server_transform))
+              if (!SVGObjectPainter(layout_svg_shape_)
+                       .PreparePaint(paint_state.GetPaintInfo(),
+                                     layout_svg_shape_.StyleRef(),
+                                     kApplyToStrokeMode, stroke_flags,
+                                     additional_paint_server_transform))
                 break;
               stroke_flags.setAntiAlias(should_anti_alias);
 
@@ -120,11 +125,12 @@ void SVGShapePainter::Paint(const PaintInfo& paint_info) {
                   layout_svg_shape_.DashScaleFactor());
               stroke_data.SetupPaint(&stroke_flags);
 
-              StrokeShape(paint_context.GetPaintInfo().context, stroke_flags);
+              StrokeShape(paint_state.GetPaintInfo().context, stroke_flags);
             }
             break;
           case PT_MARKERS:
-            PaintMarkers(paint_context.GetPaintInfo(), bounding_box);
+            PaintMarkers(paint_state.GetPaintInfo(),
+                         layout_svg_shape_.VisualRectInLocalSVGCoordinates());
             break;
           default:
             NOTREACHED();
@@ -134,12 +140,8 @@ void SVGShapePainter::Paint(const PaintInfo& paint_info) {
     }
   }
 
-  if (layout_svg_shape_.Style()->OutlineWidth()) {
-    PaintInfo outline_paint_info(paint_info_before_filtering);
-    outline_paint_info.phase = PaintPhase::kSelfOutlineOnly;
-    ObjectPainter(layout_svg_shape_)
-        .PaintOutline(outline_paint_info, LayoutPoint(bounding_box.Location()));
-  }
+  SVGModelObjectPainter(layout_svg_shape_)
+      .PaintOutline(paint_info_before_filtering);
 }
 
 class PathWithTemporaryWindingRule {
@@ -178,7 +180,7 @@ void SVGShapePainter::FillShape(GraphicsContext& context,
 
 void SVGShapePainter::StrokeShape(GraphicsContext& context,
                                   const PaintFlags& flags) {
-  if (!layout_svg_shape_.Style()->SvgStyle().HasVisibleStroke())
+  if (!layout_svg_shape_.StyleRef().SvgStyle().HasVisibleStroke())
     return;
 
   switch (layout_svg_shape_.GeometryCodePath()) {
@@ -190,10 +192,9 @@ void SVGShapePainter::StrokeShape(GraphicsContext& context,
       break;
     default:
       DCHECK(layout_svg_shape_.HasPath());
-      Path* use_path = &layout_svg_shape_.GetPath();
+      const Path* use_path = &layout_svg_shape_.GetPath();
       if (layout_svg_shape_.HasNonScalingStroke())
-        use_path = layout_svg_shape_.NonScalingStrokePath(
-            use_path, layout_svg_shape_.NonScalingStrokeTransform());
+        use_path = &layout_svg_shape_.NonScalingStrokePath();
       context.DrawPath(use_path->GetSkPath(), flags);
   }
 }
@@ -236,7 +237,7 @@ void SVGShapePainter::PaintMarker(const PaintInfo& paint_info,
   AffineTransform transform = marker.MarkerTransformation(
       position.origin, position.angle, stroke_width);
 
-  PaintCanvas* canvas = paint_info.context.Canvas();
+  cc::PaintCanvas* canvas = paint_info.context.Canvas();
 
   canvas->save();
   canvas->concat(AffineTransformToSkMatrix(transform));
@@ -248,7 +249,7 @@ void SVGShapePainter::PaintMarker(const PaintInfo& paint_info,
   // It's expensive to track the transformed paint cull rect for each
   // marker so just disable culling. The shape paint call will already
   // be culled if it is outside the paint info cull rect.
-  marker_paint_info.cull_rect_.rect_ = LayoutRect::InfiniteIntRect();
+  marker_paint_info.cull_rect_ = CullRect(LayoutRect::InfiniteIntRect());
 
   SVGContainerPainter(marker).Paint(marker_paint_info);
   builder.EndRecording(*canvas);

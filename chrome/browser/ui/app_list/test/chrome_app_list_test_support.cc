@@ -10,8 +10,7 @@
 #include "base/run_loop.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/ui/app_list/app_list_service.h"
-#include "chrome/browser/ui/app_list/app_list_service_impl.h"
+#include "chrome/browser/ui/app_list/app_list_client_impl.h"
 #include "chrome/browser/ui/app_list/app_list_syncable_service.h"
 #include "chrome/browser/ui/app_list/app_list_syncable_service_factory.h"
 
@@ -32,7 +31,6 @@ class CreateProfileHelper {
         base::Bind(&CreateProfileHelper::OnProfileCreated,
                    base::Unretained(this)),
         base::string16(),
-        std::string(),
         std::string());
     run_loop_.Run();
     return profile_;
@@ -54,16 +52,16 @@ class CreateProfileHelper {
 
 }  // namespace
 
-AppListModelUpdater* GetModelUpdater(AppListService* service) {
+AppListModelUpdater* GetModelUpdater(AppListClientImpl* client) {
   return app_list::AppListSyncableServiceFactory::GetForProfile(
-             service->GetCurrentAppListProfile())
+             client->GetCurrentAppListProfile())
       ->GetModelUpdater();
 }
 
-AppListServiceImpl* GetAppListServiceImpl() {
-  // AppListServiceImpl is the only subclass of AppListService, which has pure
-  // virtuals. So this must either be NULL, or an AppListServiceImpl.
-  return static_cast<AppListServiceImpl*>(AppListService::Get());
+AppListClientImpl* GetAppListClient() {
+  AppListClientImpl* client = AppListClientImpl::GetInstance();
+  client->UpdateProfile();
+  return client;
 }
 
 Profile* CreateSecondProfileAsync() {

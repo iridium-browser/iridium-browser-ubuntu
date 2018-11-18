@@ -16,7 +16,7 @@
 #include "base/observer_list.h"
 #include "base/synchronization/lock.h"
 #include "base/time/time.h"
-#include "components/signin/core/account_id/account_id.h"
+#include "components/account_id/account_id.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
 #include "components/user_manager/user_manager_export.h"
@@ -365,10 +365,10 @@ class USER_MANAGER_EXPORT UserManagerBase : public UserManager {
   // been read from trusted device policy yet.
   AccountId owner_account_id_ = EmptyAccountId();
 
-  base::ObserverList<UserManager::Observer> observer_list_;
+  base::ObserverList<UserManager::Observer>::Unchecked observer_list_;
 
   // TODO(nkostylev): Merge with session state refactoring CL.
-  base::ObserverList<UserManager::UserSessionStateObserver>
+  base::ObserverList<UserManager::UserSessionStateObserver>::Unchecked
       session_state_observer_list_;
 
   // Time at which this object was created.

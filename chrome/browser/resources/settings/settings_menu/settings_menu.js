@@ -17,16 +17,15 @@ Polymer({
       notify: true,
     },
 
+    // TODO(jdoerrie): https://crbug.com/854562.
+    // Remove once Autofill Home is launched.
+    autofillHomeEnabled: Boolean,
+
     /**
      * Dictionary defining page visibility.
      * @type {!GuestModePageVisibility}
      */
     pageVisibility: Object,
-  },
-
-  listeners: {
-    'topMenu.click': 'onLinkTap_',
-    'subMenu.click': 'onLinkTap_',
   },
 
   /** @param {!settings.Route} newRoute */
@@ -51,7 +50,7 @@ Polymer({
    * @param {!Event} event
    * @private
    */
-  onLinkTap_: function(event) {
+  onLinkClick_: function(event) {
     if (event.target.matches('a:not(#extensionsLink)'))
       event.preventDefault();
   },

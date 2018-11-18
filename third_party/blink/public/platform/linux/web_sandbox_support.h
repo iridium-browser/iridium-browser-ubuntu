@@ -31,7 +31,7 @@
 #ifndef THIRD_PARTY_BLINK_PUBLIC_PLATFORM_LINUX_WEB_SANDBOX_SUPPORT_H_
 #define THIRD_PARTY_BLINK_PUBLIC_PLATFORM_LINUX_WEB_SANDBOX_SUPPORT_H_
 
-#include "third_party/blink/public/platform/linux/web_fallback_font.h"
+#include "third_party/blink/public/platform/linux/out_of_process_font.h"
 #include "third_party/blink/public/platform/web_common.h"
 #include "third_party/blink/public/platform/web_string.h"
 
@@ -52,26 +52,33 @@ class WebSandboxSupport {
   //   preferredLocale: preferred locale identifier for the |characters|
   //                    (e.g. "en", "ja", "zh-CN")
   //
-  // Returns a WebFallbackFont instance with the font name and filename.
+  // Returns a OutOfProcessFont instance with the font name and filename.
   // The instance has empty font name if the request cannot be satisfied.
   virtual void GetFallbackFontForCharacter(WebUChar32,
                                            const char* preferred_locale,
-                                           WebFallbackFont*) = 0;
+                                           OutOfProcessFont*) = 0;
+
+  // Get a OutOfProcessFont specification for a font uniquely identified by full
+  // font name or postscript name.  Specify full font name or postscript name as
+  // argument in UTF-8.
+  //
+  // The OutOfProcessFont out parameter will contain a filename, ttc index and
+  // fontconfig interface id, with the italic and bold members set always
+  // initialised to false.
+  virtual void MatchFontByPostscriptNameOrFullFontName(
+      const char* font_unique_name,
+      OutOfProcessFont*) = 0;
 
   // Fill out the given WebFontRenderStyle with the user's preferences for
-  // rendering the given font at the given size (in pixels).
-  //   family: i.e. "Times New Roman"
-  //   sizeAndStyle:
-  //      3322222222221111111111
-  //      10987654321098765432109876543210
-  //     +--------------------------------+
-  //     |..............Size............IB|
-  //     +--------------------------------+
-  //     I: italic flag
-  //     B: bold flag
-  // TODO(derat): Use separate parameters for the size and the style.
+  // rendering the given font at the given size (in pixels), given weight and
+  // given slant and given device scale factor. The device scale factor is
+  // needed in gfx::GetFontRenderParams for determining subpixel and hinting
+  // settings.
   virtual void GetWebFontRenderStyleForStrike(const char* family,
-                                              int size_and_style,
+                                              int size,
+                                              bool is_bold,
+                                              bool is_italic,
+                                              float device_scale_factor,
                                               WebFontRenderStyle*) = 0;
 };
 

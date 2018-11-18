@@ -5,16 +5,14 @@
 #ifndef CHROME_BROWSER_VR_MODEL_WEB_VR_MODEL_H_
 #define CHROME_BROWSER_VR_MODEL_WEB_VR_MODEL_H_
 
+#include "chrome/browser/vr/vr_export.h"
+
 namespace vr {
 
 // As we wait for WebVR frames, we may pass through the following states.
 enum WebVrState {
   // We are not awaiting a WebVR frame.
   kWebVrNoTimeoutPending = 0,
-  // We are waiting for the minimum splash screen duration to be over. We're in
-  // this state only during WebVR auto-presentation. During this phase, sending
-  // VSync to the WebVR page is paused.
-  kWebVrAwaitingMinSplashScreenDuration,
   kWebVrAwaitingFirstFrame,
   // We are awaiting a WebVR frame, and we will soon exceed the amount of time
   // that we're willing to wait. In this state, it could be appropriate to show
@@ -29,15 +27,12 @@ enum WebVrState {
   kWebVrPresenting,
 };
 
-struct WebVrModel {
+struct VR_EXPORT WebVrModel {
   WebVrState state = kWebVrNoTimeoutPending;
   bool has_received_permissions = false;
   bool showing_hosted_ui = false;
   bool presenting_web_vr() const {
     return state == kWebVrPresenting && !showing_hosted_ui;
-  }
-  bool awaiting_min_splash_screen_duration() const {
-    return state == kWebVrAwaitingMinSplashScreenDuration;
   }
 };
 

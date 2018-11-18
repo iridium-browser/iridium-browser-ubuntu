@@ -39,13 +39,11 @@
 
 const size_t kMaximumNumberOfPopups = 25;
 
-DEFINE_WEB_CONTENTS_USER_DATA_KEY(PopupBlockerTabHelper);
-
 struct PopupBlockerTabHelper::BlockedRequest {
-  BlockedRequest(const NavigateParams& params,
+  BlockedRequest(NavigateParams&& params,
                  const blink::mojom::WindowFeatures& window_features,
                  PopupBlockType block_type)
-      : params(params),
+      : params(std::move(params)),
         window_features(window_features),
         block_type(block_type) {}
 
@@ -109,17 +107,16 @@ void PopupBlockerTabHelper::PopupNotificationVisibilityChanged(
 bool PopupBlockerTabHelper::MaybeBlockPopup(
     content::WebContents* web_contents,
     const base::Optional<GURL>& opener_url,
-    const NavigateParams& params,
+    NavigateParams* params,
     const content::OpenURLParams* open_url_params,
     const blink::mojom::WindowFeatures& window_features) {
+  DCHECK(web_contents);
   DCHECK(!open_url_params ||
-         open_url_params->user_gesture == params.user_gesture);
+         open_url_params->user_gesture == params->user_gesture);
 
   LogAction(Action::kInitiated);
 
-  const bool user_gesture = params.user_gesture;
-  if (!web_contents)
-    return false;
+  const bool user_gesture = params->user_gesture;
 
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kDisablePopupBlocking)) {
@@ -165,7 +162,7 @@ bool PopupBlockerTabHelper::MaybeBlockPopup(
 }
 
 void PopupBlockerTabHelper::AddBlockedPopup(
-    const NavigateParams& params,
+    NavigateParams* params,
     const blink::mojom::WindowFeatures& window_features,
     PopupBlockType block_type) {
   LogAction(Action::kBlocked);
@@ -174,12 +171,12 @@ void PopupBlockerTabHelper::AddBlockedPopup(
 
   int id = next_id_;
   next_id_++;
-  blocked_popups_[id] =
-      std::make_unique<BlockedRequest>(params, window_features, block_type);
+  blocked_popups_[id] = std::make_unique<BlockedRequest>(
+      std::move(*params), window_features, block_type);
   TabSpecificContentSettings::FromWebContents(web_contents())->
       OnContentBlocked(CONTENT_SETTINGS_TYPE_POPUPS);
   for (auto& observer : observers_)
-    observer.BlockedPopupAdded(id, params.url);
+    observer.BlockedPopupAdded(id, blocked_popups_[id]->params.url);
 }
 
 void PopupBlockerTabHelper::ShowBlockedPopup(
@@ -207,13 +204,13 @@ void PopupBlockerTabHelper::ShowBlockedPopup(
 #else
   Navigate(&popup->params);
 #endif
-  if (popup->params.target_contents) {
-    PopupTracker::CreateForWebContents(popup->params.target_contents,
-                                       web_contents());
+  if (popup->params.navigated_or_inserted_contents) {
+    PopupTracker::CreateForWebContents(
+        popup->params.navigated_or_inserted_contents, web_contents());
 
     if (popup->params.disposition == WindowOpenDisposition::NEW_POPUP) {
       content::RenderFrameHost* host =
-          popup->params.target_contents->GetMainFrame();
+          popup->params.navigated_or_inserted_contents->GetMainFrame();
       DCHECK(host);
       chrome::mojom::ChromeRenderFrameAssociatedPtr client;
       host->GetRemoteAssociatedInterfaces()->GetInterface(&client);

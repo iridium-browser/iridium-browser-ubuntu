@@ -59,20 +59,18 @@
 // Invoked by WebStateObserverBridge::DidSuppressDialog.
 - (void)webStateDidSuppressDialog:(web::WebState*)webState;
 
-// Invoked by WebStateObserverBridge::DocumentSubmitted.
-- (void)webState:(web::WebState*)webState
-    didSubmitDocumentWithFormNamed:(const std::string&)formName
-                     userInitiated:(BOOL)userInitiated
-                       isMainFrame:(BOOL)isMainFrame;
-
-// Invoked by WebStateObserverBridge::FormActivityRegistered.
-- (void)webState:(web::WebState*)webState
-    didRegisterFormActivity:(const web::FormActivityParams&)params;
-
 // Invoked by WebStateObserverBridge::FaviconUrlUpdated.
 - (void)webState:(web::WebState*)webState
     didUpdateFaviconURLCandidates:
         (const std::vector<web::FaviconURL>&)candidates;
+
+// Invoked by WebStateObserverBridge::WebFrameDidBecomeAvailable.
+- (void)webState:(web::WebState*)webState
+    frameDidBecomeAvailable:(web::WebFrame*)web_frame;
+
+// Invoked by WebStateObserverBridge::WebFrameWillBecomeUnavailable.
+- (void)webState:(web::WebState*)webState
+    frameWillBecomeUnavailable:(web::WebFrame*)web_frame;
 
 // Invoked by WebStateObserverBridge::RenderProcessGone.
 - (void)renderProcessGoneForWebState:(web::WebState*)webState;
@@ -119,14 +117,12 @@ class WebStateObserverBridge : public web::WebStateObserver {
   void TitleWasSet(web::WebState* web_state) override;
   void DidChangeVisibleSecurityState(web::WebState* web_state) override;
   void DidSuppressDialog(web::WebState* web_state) override;
-  void DocumentSubmitted(web::WebState* web_state,
-                         const std::string& form_name,
-                         bool user_initiated,
-                         bool is_main_frame) override;
-  void FormActivityRegistered(web::WebState* web_state,
-                              const FormActivityParams& params) override;
   void FaviconUrlUpdated(web::WebState* web_state,
                          const std::vector<FaviconURL>& candidates) override;
+  void WebFrameDidBecomeAvailable(WebState* web_state,
+                                  WebFrame* web_frame) override;
+  void WebFrameWillBecomeUnavailable(WebState* web_state,
+                                     WebFrame* web_frame) override;
   void RenderProcessGone(web::WebState* web_state) override;
   void WebStateDestroyed(web::WebState* web_state) override;
   void DidStartLoading(web::WebState* web_state) override;

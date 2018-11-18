@@ -7,7 +7,7 @@
 #include <memory>
 
 #include "components/password_manager/core/browser/credentials_filter.h"
-#include "components/password_manager/core/browser/password_form_manager.h"
+#include "components/password_manager/core/browser/password_form_manager_for_ui.h"
 
 namespace password_manager {
 
@@ -17,13 +17,13 @@ StubPasswordManagerClient::StubPasswordManagerClient()
 StubPasswordManagerClient::~StubPasswordManagerClient() {}
 
 bool StubPasswordManagerClient::PromptUserToSaveOrUpdatePassword(
-    std::unique_ptr<PasswordFormManager> form_to_save,
+    std::unique_ptr<PasswordFormManagerForUI> form_to_save,
     bool update_password) {
   return false;
 }
 
 void StubPasswordManagerClient::ShowManualFallbackForSaving(
-    std::unique_ptr<PasswordFormManager> form_to_save,
+    std::unique_ptr<PasswordFormManagerForUI> form_to_save,
     bool has_generated_password,
     bool update_password) {}
 
@@ -49,7 +49,7 @@ void StubPasswordManagerClient::NotifySuccessfulLoginWithExistingPassword(
 void StubPasswordManagerClient::NotifyStorePasswordCalled() {}
 
 void StubPasswordManagerClient::AutomaticPasswordSave(
-    std::unique_ptr<PasswordFormManager> saved_manager) {}
+    std::unique_ptr<PasswordFormManagerForUI> saved_manager) {}
 
 PrefService* StubPasswordManagerClient::GetPrefs() const {
   return nullptr;
@@ -83,7 +83,7 @@ void StubPasswordManagerClient::CheckSafeBrowsingReputation(
     const GURL& frame_url) {}
 
 void StubPasswordManagerClient::CheckProtectedPasswordEntry(
-    bool matches_sync_password,
+    metrics_util::PasswordType reused_password_type,
     const std::vector<std::string>& matching_domains,
     bool password_field_exists) {}
 
@@ -94,12 +94,12 @@ ukm::SourceId StubPasswordManagerClient::GetUkmSourceId() {
   return ukm_source_id_;
 }
 
-PasswordManagerMetricsRecorder&
+PasswordManagerMetricsRecorder*
 StubPasswordManagerClient::GetMetricsRecorder() {
   if (!metrics_recorder_) {
     metrics_recorder_.emplace(GetUkmSourceId(), GetMainFrameURL());
   }
-  return metrics_recorder_.value();
+  return base::OptionalOrNullptr(metrics_recorder_);
 }
 
 }  // namespace password_manager

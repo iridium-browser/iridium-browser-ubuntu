@@ -28,6 +28,7 @@
 
 #include "third_party/blink/public/platform/web_coalesced_input_event.h"
 #include "third_party/blink/renderer/core/dom/events/event_dispatcher.h"
+#include "third_party/blink/renderer/core/dom/events/event_path.h"
 #include "third_party/blink/renderer/core/frame/frame_console.h"
 #include "third_party/blink/renderer/core/frame/intervention.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
@@ -36,6 +37,7 @@
 #include "third_party/blink/renderer/core/html/html_element.h"
 #include "third_party/blink/renderer/core/input/input_device_capabilities.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
+#include "third_party/blink/renderer/core/paint/paint_layer_scrollable_area.h"
 #include "third_party/blink/renderer/platform/bindings/dom_wrapper_world.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/histogram.h"
@@ -181,7 +183,7 @@ void LogTouchTargetHistogram(EventTarget* event_target,
 
   if (document) {
     LocalFrameView* view = document->View();
-    if (view && view->IsScrollable())
+    if (view && view->LayoutViewport()->ScrollsOverflow())
       result += kTouchTargetHistogramScrollableDocumentOffset;
   }
 
@@ -227,7 +229,7 @@ TouchEvent::TouchEvent(const WebCoalescedInputEvent& event,
           view,
           0,
           static_cast<WebInputEvent::Modifiers>(event.Event().GetModifiers()),
-          TimeTicksFromSeconds(event.Event().TimeStampSeconds()),
+          event.Event().TimeStamp(),
           view ? view->GetInputDeviceCapabilities()->FiresTouchEvents(true)
                : nullptr),
       touches_(touches),
@@ -263,40 +265,17 @@ void TouchEvent::preventDefault() {
   // A common developer error is to wait too long before attempting to stop
   // scrolling by consuming a touchmove event. Generate an error if this
   // event is uncancelable.
+  String id;
   String message;
   switch (HandlingPassive()) {
     case PassiveMode::kNotPassive:
     case PassiveMode::kNotPassiveDefault:
       if (!cancelable()) {
-        if (view() && view()->IsLocalDOMWindow() && view()->GetFrame()) {
-          UseCounter::Count(
-              ToLocalFrame(view()->GetFrame()),
-              WebFeature::kUncancelableTouchEventPreventDefaulted);
-        }
-
-        if (native_event_ &&
-            GetWebTouchEvent(*native_event_)->dispatch_type ==
-                WebInputEvent::
-                    kListenersForcedNonBlockingDueToMainThreadResponsiveness) {
-          // Non blocking due to main thread responsiveness.
-          if (view() && view()->IsLocalDOMWindow() && view()->GetFrame()) {
-            UseCounter::Count(
-                ToLocalFrame(view()->GetFrame()),
-                WebFeature::
-                    kUncancelableTouchEventDueToMainThreadResponsivenessPreventDefaulted);
-          }
-          message =
-              "Ignored attempt to cancel a " + type() +
-              " event with cancelable=false. This event was forced to be "
-              "non-cancellable because the page was too busy to handle the "
-              "event promptly.";
-        } else {
-          // Non blocking for any other reason.
-          message = "Ignored attempt to cancel a " + type() +
-                    " event with cancelable=false, for example "
-                    "because scrolling is in progress and "
-                    "cannot be interrupted.";
-        }
+        id = "IgnoredEventCancel";
+        message = "Ignored attempt to cancel a " + type() +
+                  " event with cancelable=false, for example "
+                  "because scrolling is in progress and "
+                  "cannot be interrupted.";
       }
       break;
     case PassiveMode::kPassiveForcedDocumentLevel:
@@ -304,6 +283,7 @@ void TouchEvent::preventDefault() {
       // an author may use touch action but call preventDefault for interop with
       // browsers that don't support touch-action.
       if (current_touch_action_ == TouchAction::kTouchActionAuto) {
+        id = "PreventDefaultPassive";
         message =
             "Unable to preventDefault inside passive event listener due to "
             "target being treated as passive. See "
@@ -316,7 +296,8 @@ void TouchEvent::preventDefault() {
 
   if (!message.IsEmpty() && view() && view()->IsLocalDOMWindow() &&
       view()->GetFrame()) {
-    Intervention::GenerateReport(ToLocalDOMWindow(view())->GetFrame(), message);
+    Intervention::GenerateReport(ToLocalDOMWindow(view())->GetFrame(), id,
+                                 message);
   }
 
   if ((type() == EventTypeNames::touchstart ||

@@ -102,14 +102,46 @@ cr.googleTranslate = (function() {
    */
   var endTime = 0.0;
 
+  /**
+   * Callback invoked when Translate Element's ready state is known.
+   * @type {function}
+   */
+  var readyCallback;
+
+  /**
+   * Callback invoked when Translate Element's translation result is known.
+   * @type {function}
+   */
+  var resultCallback;
+
+  /**
+   * Callback invoked when Translate Element requests load of javascript files.
+   * Currently main.js and element_main.js are expected to be loaded.
+   * @type {function(string)}
+   */
+  var loadJavascriptCallback;
+
+  /**
+   * Listens to security policy violations to set |errorCode|.
+   */
+  document.addEventListener('securitypolicyviolation', function(event) {
+    if (securityOrigin.startsWith(event.blockedURI) &&
+        event.effectiveDirective == 'script-src') {
+      errorCode = ERROR['BAD_ORIGIN'];
+      invokeReadyCallback();
+    }
+  });
+
   function checkLibReady() {
     if (lib.isAvailable()) {
       readyTime = performance.now();
       libReady = true;
+      invokeReadyCallback();
       return;
     }
     if (checkReadyCount++ > 5) {
       errorCode = ERROR['TRANSLATION_TIMEOUT'];
+      invokeReadyCallback();
       return;
     }
     setTimeout(checkLibReady, 100);
@@ -123,16 +155,62 @@ cr.googleTranslate = (function() {
       errorCode = ERROR['TRANSLATION_ERROR'];
       // We failed to translate, restore so the page is in a consistent state.
       lib.restore();
+      invokeResultCallback();
     } else if (typeof opt_error == 'number' && opt_error != 0) {
       errorCode = TRANSLATE_ERROR_TO_ERROR_CODE_MAP[opt_error];
       lib.restore();
+      invokeResultCallback();
     }
-    if (finished)
+    if (finished) {
       endTime = performance.now();
+      invokeResultCallback();
+    }
+  }
+
+  function invokeReadyCallback() {
+    if (readyCallback) {
+      readyCallback();
+    }
+  }
+
+  function invokeResultCallback() {
+    if (resultCallback) {
+      resultCallback();
+    }
   }
 
   // Public API.
   return {
+    /**
+     * Setter for readyCallback. No op if already set.
+     * @param {function} callback The function to be invoked.
+     */
+    set readyCallback(callback) {
+      if (!readyCallback) {
+        readyCallback = callback;
+      }
+    },
+
+    /**
+     * Setter for resultCallback. No op if already set.
+     * @param {function} callback The function to be invoked.
+     */
+    set resultCallback(callback) {
+      if (!resultCallback) {
+        resultCallback = callback;
+      }
+    },
+
+    /**
+     * Setter for loadJavascriptCallback. No op if already set.
+     * @param {function(string)} callback The function to be invoked.
+     */
+    set loadJavascriptCallback(callback) {
+      if (!loadJavascriptCallback) {
+        loadJavascriptCallback = callback;
+      }
+    },
+
     /**
      * Whether the library is ready.
      * The translate function should only be called when |libReady| is true.
@@ -235,6 +313,7 @@ cr.googleTranslate = (function() {
       } catch (err) {
         console.error('Translate: ' + err);
         errorCode = ERROR['UNEXPECTED_SCRIPT_ERROR'];
+        invokeResultCallback();
         return false;
       }
       return true;
@@ -246,6 +325,15 @@ cr.googleTranslate = (function() {
      */
     revert: function() {
       lib.restore();
+    },
+
+    /**
+     * Called when an error is caught while executing script fetched in
+     * translate_script.cc.
+     */
+    onTranslateElementError: function(error) {
+      errorCode = ERROR['UNEXPECTED_SCRIPT_ERROR'];
+      invokeReadyCallback();
     },
 
     /**
@@ -270,6 +358,7 @@ cr.googleTranslate = (function() {
         translateApiKey = undefined;
         serverParams = undefined;
         gtTimeInfo = undefined;
+        invokeReadyCallback();
         return;
       }
       // The TranslateService is not available immediately as it needs to start
@@ -303,6 +392,12 @@ cr.googleTranslate = (function() {
         errorCode = ERROR['BAD_ORIGIN'];
         return;
       }
+
+      if (loadJavascriptCallback) {
+        loadJavascriptCallback(url);
+        return;
+      }
+
       var xhr = new XMLHttpRequest();
       xhr.open('GET', url, true);
       xhr.onreadystatechange = function() {

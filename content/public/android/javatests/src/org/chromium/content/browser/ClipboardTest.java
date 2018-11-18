@@ -21,9 +21,9 @@ import org.chromium.base.test.BaseJUnit4ClassRunner;
 import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.UrlUtils;
-import org.chromium.content.browser.test.util.Criteria;
-import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content.browser.webcontents.WebContentsImpl;
+import org.chromium.content_public.browser.test.util.Criteria;
+import org.chromium.content_public.browser.test.util.CriteriaHelper;
 import org.chromium.content_shell_apk.ContentShellActivityTestRule;
 import org.chromium.content_shell_apk.ContentShellActivityTestRule.RerunWithUpdatedContainerView;
 
@@ -78,8 +78,7 @@ public class ClipboardTest {
         clipboardManager.setPrimaryClip(ClipData.newPlainText(null, ""));
         Assert.assertFalse(hasPrimaryClip(clipboardManager));
 
-        final WebContentsImpl webContents =
-                (WebContentsImpl) mActivityTestRule.getContentViewCore().getWebContents();
+        final WebContentsImpl webContents = (WebContentsImpl) mActivityTestRule.getWebContents();
         selectAll(webContents);
         copy(webContents);
 

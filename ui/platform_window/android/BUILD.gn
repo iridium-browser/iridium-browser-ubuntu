@@ -25,11 +25,13 @@ jumbo_component("android") {
     ":platform_window_java",
     "//base",
     "//skia",
+    "//ui/events:dom_keycode_converter",
     "//ui/events:events",
     "//ui/events:events_base",
     "//ui/gfx",
     "//ui/gfx/geometry",
     "//ui/platform_window",
+    "//ui/platform_window/stub",
   ]
 
   libs = [ "android" ]

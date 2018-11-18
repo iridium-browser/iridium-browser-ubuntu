@@ -58,7 +58,7 @@ class BackgroundTracingManagerImpl : public BackgroundTracingManager {
   CONTENT_EXPORT static BackgroundTracingManagerImpl* GetInstance();
 
   bool SetActiveScenario(std::unique_ptr<BackgroundTracingConfig>,
-                         const ReceiveCallback&,
+                         ReceiveCallback,
                          DataFiltering data_filtering) override;
   void WhenIdle(IdleCallback idle_callback) override;
 
@@ -93,6 +93,9 @@ class BackgroundTracingManagerImpl : public BackgroundTracingManager {
       const base::Closure& callback);
   void FireTimerForTesting() override;
   CONTENT_EXPORT bool IsTracingForTesting();
+  CONTENT_EXPORT bool requires_anonymized_data_for_testing() const {
+    return requires_anonymized_data_;
+  }
 
  private:
   BackgroundTracingManagerImpl();
@@ -104,7 +107,7 @@ class BackgroundTracingManagerImpl : public BackgroundTracingManager {
   void OnFinalizeStarted(base::Closure started_finalizing_closure,
                          std::unique_ptr<const base::DictionaryValue> metadata,
                          base::RefCountedString*);
-  void OnFinalizeComplete();
+  void OnFinalizeComplete(bool success);
   void BeginFinalizing(StartedFinalizingCallback);
   void ValidateStartupScenario();
 
@@ -118,8 +121,9 @@ class BackgroundTracingManagerImpl : public BackgroundTracingManager {
       TriggerHandle handle) const;
   bool IsSupportedConfig(BackgroundTracingConfigImpl* config);
 
-  std::string GetCategoryFilterStringForCategoryPreset(
-      BackgroundTracingConfigImpl::CategoryPreset) const;
+  base::trace_event::TraceConfig GetConfigForCategoryPreset(
+      BackgroundTracingConfigImpl::CategoryPreset,
+      base::trace_event::TraceRecordMode) const;
 
   class TracingTimer {
    public:

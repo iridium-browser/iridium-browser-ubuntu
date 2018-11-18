@@ -7,19 +7,21 @@
 Design doc: http://www.chromium.org/developers/design-documents/idl-compiler
 """
 
-from utilities import to_snake_case
 from v8_globals import includes
+import v8_types
 
 CALLBACK_FUNCTION_H_INCLUDES = frozenset([
     'platform/bindings/callback_function_base.h',
 ])
 CALLBACK_FUNCTION_CPP_INCLUDES = frozenset([
-    'bindings/core/v8/exception_state.h',
+    'base/stl_util.h',
     'bindings/core/v8/generated_code_helper.h',
     'bindings/core/v8/native_value_traits_impl.h',
     'bindings/core/v8/to_v8_for_core.h',
     'bindings/core/v8/v8_binding_for_core.h',
     'core/execution_context/execution_context.h',
+    'platform/bindings/exception_messages.h',
+    'platform/bindings/exception_state.h',
 ])
 
 
@@ -44,17 +46,10 @@ def callback_function_context(callback_function):
         'forward_declarations': sorted(forward_declarations(callback_function)),
         'header_includes': sorted(CALLBACK_FUNCTION_H_INCLUDES),
         'idl_type': idl_type_str,
+        'is_treat_non_object_as_null': 'TreatNonObjectAsNull' in callback_function.extended_attributes,
+        'native_value_traits_tag': v8_types.idl_type_to_native_value_traits_tag(idl_type),
         'return_cpp_type': idl_type.cpp_type,
-        'this_include_header_name': to_snake_case('V8%s' % callback_function.name),
     }
-
-    if idl_type_str != 'void':
-        context.update({
-            'return_value_conversion': idl_type.v8_value_to_local_cpp_value(
-                callback_function.extended_attributes,
-                'call_result', 'native_result', isolate='GetIsolate()',
-                bailout_return_value='v8::Nothing<%s>()' % context['return_cpp_type']),
-        })
 
     context.update(arguments_context(callback_function.arguments))
     return context
@@ -85,13 +80,21 @@ def arguments_context(arguments):
                 creation_context='argument_creation_context'),
             'enum_type': idl_type.enum_type,
             'enum_values': idl_type.enum_values,
+            'is_variadic': argument.is_variadic,
             'name': argument.name,
             'v8_name': 'v8_%s' % argument.name,
         }
 
+    def argument_cpp_type(argument):
+        cpp_type = argument.idl_type.callback_cpp_type
+        if argument.is_variadic:
+            return 'const Vector<%s>&' % cpp_type
+        else:
+            return cpp_type
+
     argument_declarations = ['ScriptWrappable* callback_this_value']
     argument_declarations.extend(
-        '%s %s' % (argument.idl_type.callback_cpp_type, argument.name)
+        '%s %s' % (argument_cpp_type(argument), argument.name)
         for argument in arguments)
     return {
         'argument_declarations': argument_declarations,

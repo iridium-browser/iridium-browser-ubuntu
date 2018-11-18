@@ -236,9 +236,6 @@ class ASH_EXPORT TouchExplorationController
   ui::EventRewriteStatus InTouchExploration(
       const ui::TouchEvent& event,
       std::unique_ptr<ui::Event>* rewritten_event);
-  ui::EventRewriteStatus InCornerPassthrough(
-      const ui::TouchEvent& event,
-      std::unique_ptr<ui::Event>* rewritten_event);
   ui::EventRewriteStatus InOneFingerPassthrough(
       const ui::TouchEvent& event,
       std::unique_ptr<ui::Event>* rewritten_event);
@@ -267,13 +264,6 @@ class ASH_EXPORT TouchExplorationController
   // we treat that as a single mouse move (touch exploration) event.
   void StartTapTimer();
   void OnTapTimerFired();
-
-  // This timer is started every timer we get the first press event and the
-  // finger is in the corner of the screen.
-  // It fires after the corner passthrough delay elapses. If the
-  // user is still in the corner by the time this timer fires, all subsequent
-  // fingers added on the screen will be passed through.
-  void OnPassthroughTimerFired();
 
   // Dispatch a new event outside of the event rewriting flow.
   void DispatchEvent(ui::Event* event);
@@ -336,6 +326,10 @@ class ASH_EXPORT TouchExplorationController
   // The split tap slop  is a bit more generous since keeping two
   // fingers in place is a bit harder.
   float GetSplitTapTouchSlop();
+
+  // Convert a gfx::PointF from DIP back to raw screen coordinates. Origin is
+  // based on its root window host.
+  gfx::PointF ConvertDIPToPixels(const gfx::PointF& location);
 
   enum State {
     // No fingers are down and no events are pending.
@@ -400,11 +394,6 @@ class ASH_EXPORT TouchExplorationController
     // all fingers.
     ONE_FINGER_PASSTHROUGH,
 
-    // If the user has pressed and held down the left corner past long press,
-    // then as long as they are holding the corner, all subsequent fingers
-    // registered will be in passthrough.
-    CORNER_PASSTHROUGH,
-
     // If the user added another finger in SINGLE_TAP_PRESSED, or if the user
     // has multiple fingers fingers down in any other state between
     // passthrough, touch exploration, and gestures, they must release
@@ -439,11 +428,6 @@ class ASH_EXPORT TouchExplorationController
     BOTTOM_LEFT_CORNER = LEFT_EDGE | BOTTOM_EDGE,
     BOTTOM_RIGHT_CORNER = RIGHT_EDGE | BOTTOM_EDGE,
   };
-
-  // Return the bounds of the root window in actual device pixels, not DIP,
-  // in order to match the coordinate system of touch events. Note that this
-  // is not the same as screen coordinates, which span multiple displays.
-  gfx::Rect GetRootWindowBoundsInScreenUnits();
 
   // Given a point, if it is within the given inset of an edge, returns the
   // edge. If it is within the given inset of two edges, returns an int with
@@ -502,8 +486,8 @@ class ASH_EXPORT TouchExplorationController
   // point used when the user double-taps, holds, and drags. This can be
   // set either via touch exploration, or by a call to
   // SetTouchAccessibilityAnchorPoint when focus moves due to something other
-  // than touch exploration.
-  gfx::PointF anchor_point_;
+  // than touch exploration. Origin of this coordinate is its root window host.
+  gfx::PointF anchor_point_dip_;
 
   // The current state of the anchor point.
   AnchorPointState anchor_point_state_;
@@ -513,9 +497,6 @@ class ASH_EXPORT TouchExplorationController
 
   // A timer that fires after the double-tap delay.
   base::OneShotTimer tap_timer_;
-
-  // A timer that fires to enter passthrough.
-  base::OneShotTimer passthrough_timer_;
 
   // A timer to fire an indicating sound when sliding to change volume.
   base::RepeatingTimer sound_timer_;
@@ -537,6 +518,8 @@ class ASH_EXPORT TouchExplorationController
   bool VLOG_on_;
 
   // LocatedEvents within this area should be left alone.
+  // TODO(crbug.com/616793): Multi display support. With this implementation, we
+  // cannot specify display.
   gfx::Rect exclude_bounds_;
 
   // Code that detects a touch-screen gesture to enable or disable
@@ -548,10 +531,15 @@ class ASH_EXPORT TouchExplorationController
   // Any touch exploration that both starts and ends (touch pressed, and
   // released) within this rectangle, triggers a simulated single finger tap at
   // the anchor point on release.
+  // TODO(crbug.com/616793): Multi display support. With this implementation, we
+  // cannot specify display.
   gfx::Rect lift_activation_bounds_;
 
   // Whether or not we've seen a touch press event yet.
   bool seen_press_ = false;
+
+  // The maximum touch points seen in the current gesture.
+  size_t max_gesture_touch_points_ = 0;
 
   DISALLOW_COPY_AND_ASSIGN(TouchExplorationController);
 };

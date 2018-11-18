@@ -5,6 +5,8 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_LOADER_TESTING_MOCK_FETCH_CONTEXT_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_LOADER_TESTING_MOCK_FETCH_CONTEXT_H_
 
+#include "base/optional.h"
+#include "base/single_thread_task_runner.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_url_loader_factory.h"
 #include "third_party/blink/renderer/platform/exported/wrapped_resource_request.h"
@@ -14,7 +16,6 @@
 #include "third_party/blink/renderer/platform/scheduler/public/frame_scheduler.h"
 #include "third_party/blink/renderer/platform/scheduler/test/fake_frame_scheduler.h"
 #include "third_party/blink/renderer/platform/scheduler/test/fake_task_runner.h"
-#include "third_party/blink/renderer/platform/wtf/optional.h"
 
 #include <memory>
 
@@ -31,10 +32,12 @@ class MockFetchContext : public FetchContext {
     kShouldLoadNewResource,
     kShouldNotLoadNewResource,
   };
-  static MockFetchContext* Create(LoadPolicy load_policy,
-                                  scoped_refptr<base::SingleThreadTaskRunner>
-                                      loading_task_runner = nullptr) {
-    return new MockFetchContext(load_policy, std::move(loading_task_runner));
+  static MockFetchContext* Create(
+      LoadPolicy load_policy,
+      scoped_refptr<base::SingleThreadTaskRunner> loading_task_runner = nullptr,
+      std::unique_ptr<WebURLLoaderFactory> url_loader_factory = nullptr) {
+    return new MockFetchContext(load_policy, std::move(loading_task_runner),
+                                std::move(url_loader_factory));
   }
 
   ~MockFetchContext() override = default;
@@ -51,7 +54,7 @@ class MockFetchContext : public FetchContext {
   }
 
   // The last ResourceRequest passed to DispatchWillSendRequest.
-  WTF::Optional<ResourceRequest> RequestFromWillSendRequest() const {
+  base::Optional<ResourceRequest> RequestFromWillSendRequest() const {
     return will_send_request_;
   }
 
@@ -60,37 +63,31 @@ class MockFetchContext : public FetchContext {
       unsigned long identifier,
       ResourceRequest& request,
       const ResourceResponse& redirect_response,
-      Resource::Type,
+      ResourceType,
       const FetchInitiatorInfo& = FetchInitiatorInfo()) override {
     will_send_request_ = request;
   }
   bool AllowImage(bool images_enabled, const KURL&) const override {
     return true;
   }
-  ResourceRequestBlockedReason CanRequest(
-      Resource::Type,
+  base::Optional<ResourceRequestBlockedReason> CanRequest(
+      ResourceType,
       const ResourceRequest&,
       const KURL&,
       const ResourceLoaderOptions&,
       SecurityViolationReportingPolicy,
-      FetchParameters::OriginRestriction,
       ResourceRequest::RedirectStatus redirect_status) const override {
-    return ResourceRequestBlockedReason::kNone;
+    return base::nullopt;
   }
-  ResourceRequestBlockedReason CheckCSPForRequest(
-      WebURLRequest::RequestContext,
+  base::Optional<ResourceRequestBlockedReason> CheckCSPForRequest(
+      mojom::RequestContextType,
       const KURL& url,
       const ResourceLoaderOptions& options,
       SecurityViolationReportingPolicy reporting_policy,
       ResourceRequest::RedirectStatus redirect_status) const override {
-    return ResourceRequestBlockedReason::kNone;
+    return base::nullopt;
   }
-  virtual ResourceRequestBlockedReason CheckResponseNosniff(
-      WebURLRequest::RequestContext,
-      const ResourceResponse&) const {
-    return ResourceRequestBlockedReason::kNone;
-  }
-  bool ShouldLoadNewResource(Resource::Type) const override {
+  bool ShouldLoadNewResource(ResourceType) const override {
     return load_policy_ == kShouldLoadNewResource;
   }
   bool IsLoadComplete() const override { return complete_; }
@@ -101,14 +98,14 @@ class MockFetchContext : public FetchContext {
 
   std::unique_ptr<WebURLLoader> CreateURLLoader(
       const ResourceRequest& request,
-      scoped_refptr<base::SingleThreadTaskRunner> task_runner,
       const ResourceLoaderOptions&) override {
     if (!url_loader_factory_) {
       url_loader_factory_ =
           Platform::Current()->CreateDefaultURLLoaderFactory();
     }
     WrappedResourceRequest wrapped(request);
-    return url_loader_factory_->CreateURLLoader(wrapped, task_runner);
+    return url_loader_factory_->CreateURLLoader(
+        wrapped, CreateResourceLoadingTaskRunnerHandle());
   }
 
   ResourceLoadScheduler::ThrottlingPolicy InitialLoadThrottlingPolicy()
@@ -120,8 +117,10 @@ class MockFetchContext : public FetchContext {
     return frame_scheduler_.get();
   }
 
-  scoped_refptr<base::SingleThreadTaskRunner> GetLoadingTaskRunner() override {
-    return frame_scheduler_->GetTaskRunner(TaskType::kInternalTest);
+  std::unique_ptr<blink::scheduler::WebResourceLoadingTaskRunnerHandle>
+  CreateResourceLoadingTaskRunnerHandle() override {
+    return scheduler::WebResourceLoadingTaskRunnerHandle::CreateUnprioritized(
+        GetLoadingTaskRunner());
   }
 
  private:
@@ -141,24 +140,25 @@ class MockFetchContext : public FetchContext {
 
   MockFetchContext(
       LoadPolicy load_policy,
-      scoped_refptr<base::SingleThreadTaskRunner> loading_task_runner)
-      : load_policy_(load_policy),
-        runner_(loading_task_runner
-                    ? std::move(loading_task_runner)
-                    : base::MakeRefCounted<scheduler::FakeTaskRunner>()),
-        security_origin_(SecurityOrigin::CreateUnique()),
-        frame_scheduler_(new MockFrameScheduler(runner_)),
+      scoped_refptr<base::SingleThreadTaskRunner> loading_task_runner,
+      std::unique_ptr<WebURLLoaderFactory> url_loader_factory)
+      : FetchContext(loading_task_runner
+                         ? std::move(loading_task_runner)
+                         : base::MakeRefCounted<scheduler::FakeTaskRunner>()),
+        load_policy_(load_policy),
+        security_origin_(SecurityOrigin::CreateUniqueOpaque()),
+        frame_scheduler_(new MockFrameScheduler(GetLoadingTaskRunner())),
+        url_loader_factory_(std::move(url_loader_factory)),
         complete_(false),
         transfer_size_(-1) {}
 
   enum LoadPolicy load_policy_;
-  scoped_refptr<base::SingleThreadTaskRunner> runner_;
   scoped_refptr<const SecurityOrigin> security_origin_;
   std::unique_ptr<FrameScheduler> frame_scheduler_;
   std::unique_ptr<WebURLLoaderFactory> url_loader_factory_;
   bool complete_;
   long long transfer_size_;
-  WTF::Optional<ResourceRequest> will_send_request_;
+  base::Optional<ResourceRequest> will_send_request_;
 };
 
 }  // namespace blink

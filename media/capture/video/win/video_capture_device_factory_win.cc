@@ -18,6 +18,7 @@
 #include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/single_thread_task_runner.h"
+#include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/win/core_winrt_util.h"
@@ -29,11 +30,6 @@
 #include "media/capture/video/win/metrics.h"
 #include "media/capture/video/win/video_capture_device_mf_win.h"
 #include "media/capture/video/win/video_capture_device_win.h"
-
-using namespace ABI::Windows::Devices::Enumeration;
-using namespace ABI::Windows::Foundation;
-using namespace ABI::Windows::Foundation::Collections;
-using namespace Microsoft::WRL;
 
 using Descriptor = media::VideoCaptureDeviceDescriptor;
 using Descriptors = media::VideoCaptureDeviceDescriptors;
@@ -83,6 +79,10 @@ static_assert(arraysize(kBlacklistedCameraNames) == BLACKLISTED_CAMERA_MAX + 1,
               "kBlacklistedCameraNames should be same size as "
               "BlacklistedCameraNames enum");
 
+const char* const kModelIdsBlacklistedForMediaFoundation[] = {
+    // Devices using Empia 2860 or 2820 chips, see https://crbug.com/849636.
+    "eb1a:2860", "eb1a:2820", "1ce6:2820"};
+
 const std::pair<VideoCaptureApi, std::vector<std::pair<GUID, GUID>>>
     kMfAttributes[] = {{VideoCaptureApi::WIN_MEDIA_FOUNDATION,
                         {
@@ -98,6 +98,11 @@ const std::pair<VideoCaptureApi, std::vector<std::pair<GUID, GUID>>>
 bool IsDeviceBlacklistedForQueryingDetailedFrameRates(
     const std::string& display_name) {
   return display_name.find("WebcamMax") != std::string::npos;
+}
+
+bool IsDeviceBlacklistedForMediaFoundationByModelId(
+    const std::string& model_id) {
+  return base::ContainsValue(kModelIdsBlacklistedForMediaFoundation, model_id);
 }
 
 bool LoadMediaFoundationDlls() {
@@ -161,21 +166,6 @@ bool CreateVideoCaptureDeviceMediaFoundation(const Descriptor& descriptor,
   return SUCCEEDED(MFCreateDeviceSource(attributes.Get(), source));
 }
 
-bool EnumerateVideoDevicesMediaFoundation(
-    const std::vector<std::pair<GUID, GUID>>& attributes_data,
-    VideoCaptureDeviceFactoryWin::MFEnumDeviceSourcesFunc
-        mf_enum_device_sources_func,
-    IMFActivate*** devices,
-    UINT32* count) {
-  ComPtr<IMFAttributes> attributes;
-  if (!PrepareVideoCaptureAttributesMediaFoundation(
-          attributes_data, attributes_data.size(), attributes.GetAddressOf())) {
-    return false;
-  }
-  return SUCCEEDED(
-      mf_enum_device_sources_func(attributes.Get(), devices, count));
-}
-
 bool IsDeviceBlackListed(const std::string& name) {
   DCHECK_EQ(BLACKLISTED_CAMERA_MAX + 1,
             static_cast<int>(arraysize(kBlacklistedCameraNames)));
@@ -223,59 +213,6 @@ HRESULT EnumerateDirectShowDevices(IEnumMoniker** enum_moniker) {
   return hr;
 }
 
-void GetDeviceDescriptorsDirectShow(
-    VideoCaptureDeviceFactoryWin::DirectShowEnumDevicesFunc
-        direct_show_enum_devices_func,
-    Descriptors* device_descriptors) {
-  DCHECK(device_descriptors);
-  DVLOG(1) << __func__;
-
-  ComPtr<IEnumMoniker> enum_moniker;
-  HRESULT hr = direct_show_enum_devices_func.Run(enum_moniker.GetAddressOf());
-  // CreateClassEnumerator returns S_FALSE on some Windows OS
-  // when no camera exist. Therefore the FAILED macro can't be used.
-  if (hr != S_OK)
-    return;
-
-  // Enumerate all video capture devices.
-  for (ComPtr<IMoniker> moniker;
-       enum_moniker->Next(1, moniker.GetAddressOf(), NULL) == S_OK;
-       moniker.Reset()) {
-    ComPtr<IPropertyBag> prop_bag;
-    hr = moniker->BindToStorage(0, 0, IID_PPV_ARGS(&prop_bag));
-    if (FAILED(hr))
-      continue;
-
-    // Find the description or friendly name.
-    ScopedVariant name;
-    hr = prop_bag->Read(L"Description", name.Receive(), 0);
-    if (FAILED(hr))
-      hr = prop_bag->Read(L"FriendlyName", name.Receive(), 0);
-
-    if (FAILED(hr) || name.type() != VT_BSTR)
-      continue;
-
-    const std::string device_name(base::SysWideToUTF8(V_BSTR(name.ptr())));
-    if (IsDeviceBlackListed(device_name))
-      continue;
-
-    name.Reset();
-    hr = prop_bag->Read(L"DevicePath", name.Receive(), 0);
-    std::string id;
-    if (FAILED(hr) || name.type() != VT_BSTR) {
-      id = device_name;
-    } else {
-      DCHECK_EQ(name.type(), VT_BSTR);
-      id = base::SysWideToUTF8(V_BSTR(name.ptr()));
-    }
-
-    const std::string model_id = GetDeviceModelId(id);
-
-    device_descriptors->emplace_back(device_name, id, model_id,
-                                     VideoCaptureApi::WIN_DIRECT_SHOW);
-  }
-}
-
 bool DescriptorsContainDeviceId(const Descriptors& descriptors,
                                 const std::string& device_id) {
   return std::find_if(
@@ -285,88 +222,16 @@ bool DescriptorsContainDeviceId(const Descriptors& descriptors,
              }) != descriptors.end();
 }
 
-// Returns true if the provided descriptors contains a non DirectShow descriptor
-// using the provided name and model
-bool DescriptorsContainNonDirectShowNameAndModel(
+// Returns a non DirectShow descriptor using the provided name and model
+Descriptors::const_iterator FindNonDirectShowDescriptorByNameAndModel(
     const Descriptors& descriptors,
     const std::string& name_and_model) {
   return std::find_if(
-             descriptors.begin(), descriptors.end(),
-             [name_and_model](const VideoCaptureDeviceDescriptor& descriptor) {
-               return descriptor.capture_api !=
-                          VideoCaptureApi::WIN_DIRECT_SHOW &&
-                      name_and_model == descriptor.GetNameAndModel();
-             }) != descriptors.end();
-}
-
-void GetDeviceDescriptorsMediaFoundation(
-    VideoCaptureDeviceFactoryWin::MFEnumDeviceSourcesFunc
-        mf_enum_device_sources_func,
-    VideoCaptureDeviceFactoryWin::DirectShowEnumDevicesFunc
-        direct_show_enum_devices_func,
-    Descriptors* device_descriptors) {
-  DVLOG(1) << " GetDeviceDescriptorsMediaFoundation";
-  // Recent non-RGB (depth, IR) cameras could be marked as sensor cameras in
-  // driver inf file and MFEnumDeviceSources enumerates them only if attribute
-  // KSCATEGORY_SENSOR_CAMERA is supplied. We enumerate twice. As it is possible
-  // that SENSOR_CAMERA is also in VIDEO_CAMERA category, we prevent duplicate
-  // entries. https://crbug.com/807293
-  for (const auto& api_attributes : kMfAttributes) {
-    ScopedCoMem<IMFActivate*> devices;
-    UINT32 count;
-    if (!EnumerateVideoDevicesMediaFoundation(api_attributes.second,
-                                              mf_enum_device_sources_func,
-                                              &devices, &count)) {
-      return;
-    }
-    const bool list_was_empty = !device_descriptors->size();
-    for (UINT32 i = 0; i < count; ++i) {
-      ScopedCoMem<wchar_t> name;
-      UINT32 name_size;
-      HRESULT hr = devices[i]->GetAllocatedString(
-          MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME, &name, &name_size);
-      if (SUCCEEDED(hr)) {
-        ScopedCoMem<wchar_t> id;
-        UINT32 id_size;
-        hr = devices[i]->GetAllocatedString(
-            MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK, &id,
-            &id_size);
-        if (SUCCEEDED(hr)) {
-          const std::string device_id =
-              base::SysWideToUTF8(std::wstring(id, id_size));
-          const std::string model_id = GetDeviceModelId(device_id);
-          if (list_was_empty ||
-              !DescriptorsContainDeviceId(*device_descriptors, device_id)) {
-            device_descriptors->emplace_back(
-                base::SysWideToUTF8(std::wstring(name, name_size)), device_id,
-                model_id, api_attributes.first);
-          }
-        }
-      }
-      DLOG_IF(ERROR, FAILED(hr)) << "GetAllocatedString failed: "
-                                 << logging::SystemErrorCodeToString(hr);
-      devices[i]->Release();
-    }
-  }
-
-  // DirectShow virtual cameras are not supported by MediaFoundation.
-  // To overcome this, based on device name and model, we append
-  // missing DirectShow device descriptor to full descriptors list.
-  Descriptors direct_show_descriptors;
-  GetDeviceDescriptorsDirectShow(direct_show_enum_devices_func,
-                                 &direct_show_descriptors);
-  for (const auto& direct_show_descriptor : direct_show_descriptors) {
-    // DirectShow can produce two descriptors with same name and model.
-    // If those descriptors are missing from MediaFoundation, we want them both
-    // appended to the full descriptors list.
-    // Therefore, we prevent duplication by always comparing a DirectShow
-    // descriptor with a MediaFoundation one.
-    if (DescriptorsContainNonDirectShowNameAndModel(
-            *device_descriptors, direct_show_descriptor.GetNameAndModel())) {
-      continue;
-    }
-    device_descriptors->emplace_back(direct_show_descriptor);
-  }
+      descriptors.begin(), descriptors.end(),
+      [name_and_model](const VideoCaptureDeviceDescriptor& descriptor) {
+        return descriptor.capture_api != VideoCaptureApi::WIN_DIRECT_SHOW &&
+               name_and_model == descriptor.GetNameAndModel();
+      });
 }
 
 void GetDeviceSupportedFormatsDirectShow(const Descriptor& descriptor,
@@ -488,7 +353,13 @@ VideoCaptureDeviceFactoryWin::VideoCaptureDeviceFactoryWin()
       PlatformSupportsMediaFoundation() ? MFEnumDeviceSources : nullptr;
   direct_show_enum_devices_func_ =
       base::BindRepeating(&EnumerateDirectShowDevices);
-  if (!PlatformSupportsMediaFoundation()) {
+
+  mf_get_supported_formats_func_ =
+      base::BindRepeating(&GetDeviceSupportedFormatsMediaFoundation);
+  direct_show_get_supported_formats_func_ =
+      base::BindRepeating(&GetDeviceSupportedFormatsDirectShow);
+
+  if (use_media_foundation_ && !PlatformSupportsMediaFoundation()) {
     use_media_foundation_ = false;
     LogVideoCaptureWinBackendUsed(
         VideoCaptureWinBackendUsed::kUsingDirectShowAsFallback);
@@ -501,7 +372,11 @@ VideoCaptureDeviceFactoryWin::VideoCaptureDeviceFactoryWin()
   }
 }
 
-VideoCaptureDeviceFactoryWin::~VideoCaptureDeviceFactoryWin() = default;
+VideoCaptureDeviceFactoryWin::~VideoCaptureDeviceFactoryWin() {
+  if (com_thread_.IsRunning()) {
+    com_thread_.Stop();
+  }
+}
 
 std::unique_ptr<VideoCaptureDevice> VideoCaptureDeviceFactoryWin::CreateDevice(
     const Descriptor& device_descriptor) {
@@ -544,12 +419,10 @@ void VideoCaptureDeviceFactoryWin::GetDeviceDescriptors(
   DCHECK(thread_checker_.CalledOnValidThread());
 
   if (use_media_foundation_) {
-    GetDeviceDescriptorsMediaFoundation(mf_enum_device_sources_func_,
-                                        direct_show_enum_devices_func_,
-                                        device_descriptors);
+    GetDeviceDescriptorsMediaFoundation(device_descriptors);
+    AugmentDescriptorListWithDirectShowOnlyDevices(device_descriptors);
   } else {
-    GetDeviceDescriptorsDirectShow(direct_show_enum_devices_func_,
-                                   device_descriptors);
+    GetDeviceDescriptorsDirectShow(device_descriptors);
   }
 }
 
@@ -590,7 +463,9 @@ void VideoCaptureDeviceFactoryWin::EnumerateDevicesUWP(
       base::Unretained(factory), base::Passed(&device_descriptors),
       base::Passed(&result_callback));
   auto callback =
-      Callback<IAsyncOperationCompletedHandler<DeviceInformationCollection*>>(
+      Microsoft::WRL::Callback<
+          ABI::Windows::Foundation::IAsyncOperationCompletedHandler<
+              DeviceInformationCollection*>>(
           [factory, com_thread_runner, device_info_callback](
               IAsyncOperation<DeviceInformationCollection*>* operation,
               AsyncStatus status) -> HRESULT {
@@ -600,9 +475,10 @@ void VideoCaptureDeviceFactoryWin::EnumerateDevicesUWP(
             return S_OK;
           });
 
-  ComPtr<IDeviceInformationStatics> dev_info_statics;
+  ComPtr<ABI::Windows::Devices::Enumeration::IDeviceInformationStatics>
+      dev_info_statics;
   HRESULT hr = GetActivationFactory<
-      IDeviceInformationStatics,
+      ABI::Windows::Devices::Enumeration::IDeviceInformationStatics,
       RuntimeClass_Windows_Devices_Enumeration_DeviceInformation>(
       &dev_info_statics);
   if (FAILED(hr)) {
@@ -611,8 +487,8 @@ void VideoCaptureDeviceFactoryWin::EnumerateDevicesUWP(
   }
 
   IAsyncOperation<DeviceInformationCollection*>* async_op;
-  hr = dev_info_statics->FindAllAsyncDeviceClass(DeviceClass_VideoCapture,
-                                                 &async_op);
+  hr = dev_info_statics->FindAllAsyncDeviceClass(
+      ABI::Windows::Devices::Enumeration::DeviceClass_VideoCapture, &async_op);
   if (FAILED(hr)) {
     UWP_ENUM_ERROR_HANDLER(hr, "Find all devices asynchronously failed: ");
     return;
@@ -642,14 +518,18 @@ void VideoCaptureDeviceFactoryWin::FoundAllDevicesUWP(
     return;
   }
 
-  ComPtr<IVectorView<DeviceInformation*>> devices;
+  ComPtr<ABI::Windows::Foundation::Collections::IVectorView<
+      ABI::Windows::Devices::Enumeration::DeviceInformation*>>
+      devices;
   operation->GetResults(devices.GetAddressOf());
 
   unsigned int count = 0;
-  devices->get_Size(&count);
+  if (devices) {
+    devices->get_Size(&count);
+  }
 
   for (unsigned int j = 0; j < count; ++j) {
-    ComPtr<IDeviceInformation> device_info;
+    ComPtr<ABI::Windows::Devices::Enumeration::IDeviceInformation> device_info;
     HRESULT hr = devices->GetAt(j, device_info.GetAddressOf());
     if (SUCCEEDED(hr)) {
       HSTRING id;
@@ -660,7 +540,8 @@ void VideoCaptureDeviceFactoryWin::FoundAllDevicesUWP(
                 ::tolower);
       const std::string model_id = GetDeviceModelId(device_id);
 
-      ComPtr<IEnclosureLocation> enclosure_location;
+      ComPtr<ABI::Windows::Devices::Enumeration::IEnclosureLocation>
+          enclosure_location;
       hr =
           device_info->get_EnclosureLocation(enclosure_location.GetAddressOf());
       if (FAILED(hr)) {
@@ -669,16 +550,16 @@ void VideoCaptureDeviceFactoryWin::FoundAllDevicesUWP(
 
       VideoFacingMode facing = VideoFacingMode::MEDIA_VIDEO_FACING_NONE;
       if (enclosure_location) {
-        Panel panel;
+        ABI::Windows::Devices::Enumeration::Panel panel;
         enclosure_location->get_Panel(&panel);
         switch (panel) {
-          case Panel_Unknown:
+          case ABI::Windows::Devices::Enumeration::Panel_Unknown:
             facing = VideoFacingMode::MEDIA_VIDEO_FACING_NONE;
             break;
-          case Panel_Front:
+          case ABI::Windows::Devices::Enumeration::Panel_Front:
             facing = VideoFacingMode::MEDIA_VIDEO_FACING_USER;
             break;
-          case Panel_Back:
+          case ABI::Windows::Devices::Enumeration::Panel_Back:
             facing = VideoFacingMode::MEDIA_VIDEO_FACING_ENVIRONMENT;
             break;
           default:
@@ -714,27 +595,181 @@ void VideoCaptureDeviceFactoryWin::DeviceInfoReady(
     com_thread_.Stop();
   }
 
-  base::ResetAndReturn(&result_callback).Run(std::move(device_descriptors));
+  std::move(result_callback).Run(std::move(device_descriptors));
+}
+
+void VideoCaptureDeviceFactoryWin::GetDeviceDescriptorsMediaFoundation(
+    Descriptors* device_descriptors) {
+  DVLOG(1) << " GetDeviceDescriptorsMediaFoundation";
+  // Recent non-RGB (depth, IR) cameras could be marked as sensor cameras in
+  // driver inf file and MFEnumDeviceSources enumerates them only if attribute
+  // KSCATEGORY_SENSOR_CAMERA is supplied. We enumerate twice. As it is possible
+  // that SENSOR_CAMERA is also in VIDEO_CAMERA category, we prevent duplicate
+  // entries. https://crbug.com/807293
+  for (const auto& api_attributes : kMfAttributes) {
+    ScopedCoMem<IMFActivate*> devices;
+    UINT32 count;
+    if (!EnumerateVideoDevicesMediaFoundation(api_attributes.second, &devices,
+                                              &count)) {
+      return;
+    }
+    const bool list_was_empty = !device_descriptors->size();
+    for (UINT32 i = 0; i < count; ++i) {
+      ScopedCoMem<wchar_t> name;
+      UINT32 name_size;
+      HRESULT hr = devices[i]->GetAllocatedString(
+          MF_DEVSOURCE_ATTRIBUTE_FRIENDLY_NAME, &name, &name_size);
+      if (SUCCEEDED(hr)) {
+        ScopedCoMem<wchar_t> id;
+        UINT32 id_size;
+        hr = devices[i]->GetAllocatedString(
+            MF_DEVSOURCE_ATTRIBUTE_SOURCE_TYPE_VIDCAP_SYMBOLIC_LINK, &id,
+            &id_size);
+        if (SUCCEEDED(hr)) {
+          const std::string device_id =
+              base::SysWideToUTF8(std::wstring(id, id_size));
+          const std::string model_id = GetDeviceModelId(device_id);
+          if (IsDeviceBlacklistedForMediaFoundationByModelId(model_id))
+            continue;
+          if (list_was_empty ||
+              !DescriptorsContainDeviceId(*device_descriptors, device_id)) {
+            device_descriptors->emplace_back(
+                base::SysWideToUTF8(std::wstring(name, name_size)), device_id,
+                model_id, api_attributes.first);
+          }
+        }
+      }
+      DLOG_IF(ERROR, FAILED(hr)) << "GetAllocatedString failed: "
+                                 << logging::SystemErrorCodeToString(hr);
+      devices[i]->Release();
+    }
+  }
+}
+
+// Adds descriptors that are only reported by the DirectShow API.
+// Replaces MediaFoundation descriptors with corresponding DirectShow
+// ones if the MediaFoundation one has no supported formats,
+// but the DirectShow one does.
+void VideoCaptureDeviceFactoryWin::
+    AugmentDescriptorListWithDirectShowOnlyDevices(
+        VideoCaptureDeviceDescriptors* device_descriptors) {
+  // DirectShow virtual cameras are not supported by MediaFoundation.
+  // To overcome this, based on device name and model, we append
+  // missing DirectShow device descriptor to full descriptors list.
+  Descriptors direct_show_descriptors;
+  GetDeviceDescriptorsDirectShow(&direct_show_descriptors);
+  for (const auto& direct_show_descriptor : direct_show_descriptors) {
+    // DirectShow can produce two descriptors with same name and model.
+    // If those descriptors are missing from MediaFoundation, we want them both
+    // appended to the full descriptors list.
+    // Therefore, we prevent duplication by always comparing a DirectShow
+    // descriptor with a MediaFoundation one.
+
+    Descriptors::const_iterator matching_non_direct_show_descriptor =
+        FindNonDirectShowDescriptorByNameAndModel(
+            *device_descriptors, direct_show_descriptor.GetNameAndModel());
+
+    // Devices like the Pinnacle Dazzle, appear both in DirectShow and
+    // MediaFoundation. In MediaFoundation, they will have no supported video
+    // format while in DirectShow they will have at least one video format.
+    // Therefore, we must prioritize the MediaFoundation descriptor if it has at
+    // least one supported format
+    if (matching_non_direct_show_descriptor != device_descriptors->end()) {
+      if (GetNumberOfSupportedFormats(*matching_non_direct_show_descriptor) > 0)
+        continue;
+      if (GetNumberOfSupportedFormats(direct_show_descriptor) == 0)
+        continue;
+      device_descriptors->erase(matching_non_direct_show_descriptor);
+    }
+    device_descriptors->emplace_back(direct_show_descriptor);
+  }
+}
+
+bool VideoCaptureDeviceFactoryWin::EnumerateVideoDevicesMediaFoundation(
+    const std::vector<std::pair<GUID, GUID>>& attributes_data,
+    IMFActivate*** devices,
+    UINT32* count) {
+  ComPtr<IMFAttributes> attributes;
+  if (!PrepareVideoCaptureAttributesMediaFoundation(
+          attributes_data, attributes_data.size(), attributes.GetAddressOf())) {
+    return false;
+  }
+  return SUCCEEDED(
+      mf_enum_device_sources_func_(attributes.Get(), devices, count));
+}
+
+void VideoCaptureDeviceFactoryWin::GetDeviceDescriptorsDirectShow(
+    Descriptors* device_descriptors) {
+  DCHECK(device_descriptors);
+  DVLOG(1) << __func__;
+
+  ComPtr<IEnumMoniker> enum_moniker;
+  HRESULT hr = direct_show_enum_devices_func_.Run(enum_moniker.GetAddressOf());
+  // CreateClassEnumerator returns S_FALSE on some Windows OS
+  // when no camera exist. Therefore the FAILED macro can't be used.
+  if (hr != S_OK)
+    return;
+
+  // Enumerate all video capture devices.
+  for (ComPtr<IMoniker> moniker;
+       enum_moniker->Next(1, moniker.GetAddressOf(), NULL) == S_OK;
+       moniker.Reset()) {
+    ComPtr<IPropertyBag> prop_bag;
+    hr = moniker->BindToStorage(0, 0, IID_PPV_ARGS(&prop_bag));
+    if (FAILED(hr))
+      continue;
+
+    // Find the description or friendly name.
+    ScopedVariant name;
+    hr = prop_bag->Read(L"Description", name.Receive(), 0);
+    if (FAILED(hr))
+      hr = prop_bag->Read(L"FriendlyName", name.Receive(), 0);
+
+    if (FAILED(hr) || name.type() != VT_BSTR)
+      continue;
+
+    const std::string device_name(base::SysWideToUTF8(V_BSTR(name.ptr())));
+    if (IsDeviceBlackListed(device_name))
+      continue;
+
+    name.Reset();
+    hr = prop_bag->Read(L"DevicePath", name.Receive(), 0);
+    std::string id;
+    if (FAILED(hr) || name.type() != VT_BSTR) {
+      id = device_name;
+    } else {
+      DCHECK_EQ(name.type(), VT_BSTR);
+      id = base::SysWideToUTF8(V_BSTR(name.ptr()));
+    }
+
+    const std::string model_id = GetDeviceModelId(id);
+
+    device_descriptors->emplace_back(device_name, id, model_id,
+                                     VideoCaptureApi::WIN_DIRECT_SHOW);
+  }
+}
+
+int VideoCaptureDeviceFactoryWin::GetNumberOfSupportedFormats(
+    const Descriptor& device) {
+  VideoCaptureFormats formats;
+  GetApiSpecificSupportedFormats(device, &formats);
+  return formats.size();
+}
+
+void VideoCaptureDeviceFactoryWin::GetApiSpecificSupportedFormats(
+    const Descriptor& device,
+    VideoCaptureFormats* formats) {
+  if (device.capture_api != VideoCaptureApi::WIN_DIRECT_SHOW)
+    mf_get_supported_formats_func_.Run(device, formats);
+  else
+    direct_show_get_supported_formats_func_.Run(device, formats);
 }
 
 void VideoCaptureDeviceFactoryWin::GetSupportedFormats(
     const Descriptor& device,
     VideoCaptureFormats* formats) {
   DCHECK(thread_checker_.CalledOnValidThread());
-  if (use_media_foundation_)
-    GetDeviceSupportedFormatsMediaFoundation(device, formats);
-  else
-    GetDeviceSupportedFormatsDirectShow(device, formats);
-}
-
-// static
-VideoCaptureDeviceFactory*
-VideoCaptureDeviceFactory::CreateVideoCaptureDeviceFactory(
-    scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner,
-    gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
-    MojoJpegDecodeAcceleratorFactoryCB jda_factory,
-    MojoJpegEncodeAcceleratorFactoryCB jea_factory) {
-  return new VideoCaptureDeviceFactoryWin();
+  GetApiSpecificSupportedFormats(device, formats);
 }
 
 }  // namespace media

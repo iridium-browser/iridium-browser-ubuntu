@@ -7,15 +7,19 @@
 #include "public/fpdf_text.h"
 
 #include <algorithm>
+#include <memory>
 #include <vector>
 
+#include "core/fpdfapi/font/cpdf_font.h"
 #include "core/fpdfapi/page/cpdf_page.h"
+#include "core/fpdfapi/page/cpdf_textobject.h"
 #include "core/fpdfdoc/cpdf_viewerpreferences.h"
 #include "core/fpdftext/cpdf_linkextract.h"
 #include "core/fpdftext/cpdf_textpage.h"
 #include "core/fpdftext/cpdf_textpagefind.h"
 #include "fpdfsdk/cpdfsdk_helpers.h"
 #include "third_party/base/numerics/safe_conversions.h"
+#include "third_party/base/ptr_util.h"
 #include "third_party/base/stl_util.h"
 
 #ifdef PDF_ENABLE_XFA
@@ -31,18 +35,6 @@ namespace {
 
 constexpr size_t kBytesPerCharacter = sizeof(unsigned short);
 
-CPDF_TextPage* CPDFTextPageFromFPDFTextPage(FPDF_TEXTPAGE text_page) {
-  return static_cast<CPDF_TextPage*>(text_page);
-}
-
-CPDF_TextPageFind* CPDFTextPageFindFromFPDFSchHandle(FPDF_SCHHANDLE handle) {
-  return static_cast<CPDF_TextPageFind*>(handle);
-}
-
-CPDF_LinkExtract* CPDFLinkExtractFromFPDFPageLink(FPDF_PAGELINK link) {
-  return static_cast<CPDF_LinkExtract*>(link);
-}
-
 }  // namespace
 
 FPDF_EXPORT FPDF_TEXTPAGE FPDF_CALLCONV FPDFText_LoadPage(FPDF_PAGE page) {
@@ -50,19 +42,12 @@ FPDF_EXPORT FPDF_TEXTPAGE FPDF_CALLCONV FPDFText_LoadPage(FPDF_PAGE page) {
   if (!pPDFPage)
     return nullptr;
 
-#ifdef PDF_ENABLE_XFA
-  CPDFXFA_Page* pPage = (CPDFXFA_Page*)page;
-  CPDFXFA_Context* pContext = pPage->GetContext();
-  CPDF_ViewerPreferences viewRef(pContext->GetPDFDoc());
-#else  // PDF_ENABLE_XFA
-  CPDF_ViewerPreferences viewRef(pPDFPage->m_pDocument.Get());
-#endif  // PDF_ENABLE_XFA
-
+  CPDF_ViewerPreferences viewRef(pPDFPage->GetDocument());
   CPDF_TextPage* textpage = new CPDF_TextPage(
       pPDFPage, viewRef.IsDirectionR2L() ? FPDFText_Direction::Right
                                          : FPDFText_Direction::Left);
   textpage->ParseTextPage();
-  return textpage;
+  return FPDFTextPageFromCPDFTextPage(textpage);
 }
 
 FPDF_EXPORT void FPDF_CALLCONV FPDFText_ClosePage(FPDF_TEXTPAGE text_page) {
@@ -103,6 +88,37 @@ FPDF_EXPORT double FPDF_CALLCONV FPDFText_GetFontSize(FPDF_TEXTPAGE text_page,
   FPDF_CHAR_INFO charinfo;
   textpage->GetCharInfo(index, &charinfo);
   return charinfo.m_FontSize;
+}
+
+FPDF_EXPORT unsigned long FPDF_CALLCONV
+FPDFText_GetFontInfo(FPDF_TEXTPAGE text_page,
+                     int index,
+                     void* buffer,
+                     unsigned long buflen,
+                     int* flags) {
+  if (!text_page)
+    return 0;
+  CPDF_TextPage* pTextObj = CPDFTextPageFromFPDFTextPage(text_page);
+
+  if (index < 0 || index >= pTextObj->CountChars())
+    return 0;
+
+  FPDF_CHAR_INFO charinfo;
+  pTextObj->GetCharInfo(index, &charinfo);
+  if (!charinfo.m_pTextObj)
+    return 0;
+
+  CPDF_Font* font = charinfo.m_pTextObj->GetFont();
+  if (!font)
+    return 0;
+
+  if (flags)
+    *flags = font->GetFontFlags();
+  ByteString basefont = font->GetBaseFont();
+  unsigned long length = basefont.GetLength() + 1;
+  if (buffer && buflen >= length)
+    memcpy(buffer, basefont.c_str(), length);
+  return length;
 }
 
 FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV FPDFText_GetCharBox(FPDF_TEXTPAGE text_page,
@@ -269,7 +285,7 @@ FPDFText_FindStart(FPDF_TEXTPAGE text_page,
   textpageFind->FindFirst(
       WideString::FromUTF16LE(findwhat, len), flags,
       start_index >= 0 ? Optional<size_t>(start_index) : Optional<size_t>());
-  return textpageFind;
+  return FPDFSchHandleFromCPDFTextPageFind(textpageFind);
 }
 
 FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV FPDFText_FindNext(FPDF_SCHHANDLE handle) {
@@ -309,9 +325,9 @@ FPDF_EXPORT void FPDF_CALLCONV FPDFText_FindClose(FPDF_SCHHANDLE handle) {
   if (!handle)
     return;
 
-  CPDF_TextPageFind* textpageFind = CPDFTextPageFindFromFPDFSchHandle(handle);
-  delete textpageFind;
-  handle = nullptr;
+  // Take ownership back from caller and destroy.
+  std::unique_ptr<CPDF_TextPageFind> textpageFind(
+      CPDFTextPageFindFromFPDFSchHandle(handle));
 }
 
 // web link
@@ -320,10 +336,12 @@ FPDFLink_LoadWebLinks(FPDF_TEXTPAGE text_page) {
   if (!text_page)
     return nullptr;
 
-  CPDF_LinkExtract* pageLink =
-      new CPDF_LinkExtract(CPDFTextPageFromFPDFTextPage(text_page));
+  CPDF_TextPage* pPage = CPDFTextPageFromFPDFTextPage(text_page);
+  auto pageLink = pdfium::MakeUnique<CPDF_LinkExtract>(pPage);
   pageLink->ExtractLinks();
-  return pageLink;
+
+  // Caller takes ownership.
+  return FPDFPageLinkFromCPDFLinkExtract(pageLink.release());
 }
 
 FPDF_EXPORT int FPDF_CALLCONV FPDFLink_CountWebLinks(FPDF_PAGELINK link_page) {

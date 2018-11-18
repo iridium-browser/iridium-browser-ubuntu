@@ -10,7 +10,6 @@ import android.app.ActivityManager.AppTask;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
-import android.os.AsyncTask;
 import android.os.Build;
 import android.os.StrictMode;
 import android.os.SystemClock;
@@ -21,6 +20,7 @@ import org.chromium.base.FileUtils;
 import org.chromium.base.Log;
 import org.chromium.base.PathUtils;
 import org.chromium.base.metrics.RecordHistogram;
+import org.chromium.base.task.AsyncTask;
 import org.chromium.chrome.browser.document.DocumentUtils;
 import org.chromium.chrome.browser.metrics.WebApkUma;
 
@@ -51,7 +51,7 @@ public class WebappDirectoryManager {
     private static final AtomicBoolean sMustCleanUpOldDirectories = new AtomicBoolean(true);
 
     /** AsyncTask that is used to clean up the web app directories. */
-    private AsyncTask<Void, Void, Void> mCleanupTask;
+    private AsyncTask<Void> mCleanupTask;
 
     /**
      * Deletes web app directories with stale data.
@@ -66,9 +66,9 @@ public class WebappDirectoryManager {
     public void cleanUpDirectories(final Context context, final String currentWebappId) {
         if (mCleanupTask != null) return;
 
-        mCleanupTask = new AsyncTask<Void, Void, Void>() {
+        mCleanupTask = new AsyncTask<Void>() {
             @Override
-            protected final Void doInBackground(Void... params) {
+            protected final Void doInBackground() {
                 recordNumberOfStaleWebApkUpdateRequestFiles();
 
                 Set<File> directoriesToDelete = new HashSet<File>();

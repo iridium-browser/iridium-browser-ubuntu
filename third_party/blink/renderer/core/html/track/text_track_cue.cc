@@ -31,11 +31,10 @@
 
 #include "third_party/blink/renderer/core/html/track/text_track_cue.h"
 
-#include "third_party/blink/renderer/bindings/core/v8/exception_messages.h"
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/html/track/text_track.h"
 #include "third_party/blink/renderer/core/html/track/text_track_cue_list.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 
 namespace blink {
 
@@ -121,7 +120,7 @@ unsigned TextTrackCue::CueIndex() {
   return cue_index_;
 }
 
-DispatchEventResult TextTrackCue::DispatchEventInternal(Event* event) {
+DispatchEventResult TextTrackCue::DispatchEventInternal(Event& event) {
   // When a TextTrack's mode is disabled: no cues are active, no events fired.
   if (!track() || track()->mode() == TextTrack::DisabledKeyword())
     return DispatchEventResult::kCanceledBeforeDispatch;

@@ -5,6 +5,7 @@
 #include "third_party/blink/renderer/core/layout/scroll_anchor.h"
 
 #include "third_party/blink/renderer/core/dom/static_node_list.h"
+#include "third_party/blink/renderer/core/frame/root_frame_viewport.h"
 #include "third_party/blink/renderer/core/frame/visual_viewport.h"
 #include "third_party/blink/renderer/core/geometry/dom_rect.h"
 #include "third_party/blink/renderer/core/layout/layout_box.h"
@@ -18,16 +19,11 @@ namespace blink {
 
 using Corner = ScrollAnchor::Corner;
 
-typedef bool TestParamRootLayerScrolling;
-class ScrollAnchorTest
-    : public testing::WithParamInterface<TestParamRootLayerScrolling>,
-      private ScopedRootLayerScrollingForTest,
-      private ScopedScrollAnchoringForTest,
-      public RenderingTest {
+class ScrollAnchorTest : public testing::WithParamInterface<bool>,
+                         private ScopedLayoutNGForTest,
+                         public RenderingTest {
  public:
-  ScrollAnchorTest()
-      : ScopedRootLayerScrollingForTest(GetParam()),
-        ScopedScrollAnchoringForTest(true) {}
+  ScrollAnchorTest() : ScopedLayoutNGForTest(GetParam()) {}
 
  protected:
   void Update() {
@@ -37,7 +33,7 @@ class ScrollAnchorTest
   }
 
   ScrollableArea* LayoutViewport() {
-    return GetDocument().View()->LayoutViewportScrollableArea();
+    return GetDocument().View()->LayoutViewport();
   }
 
   VisualViewport& GetVisualViewport() {
@@ -82,9 +78,6 @@ class ScrollAnchorTest
         GetDocument().QuerySelectorAll(AtomicString(serialized.selector));
     EXPECT_EQ(ele_list->length(), 1u);
   }
-
- private:
-  std::unique_ptr<ScopedScrollAnchoringForTest> scroll_anchoring_;
 };
 
 INSTANTIATE_TEST_CASE_P(All, ScrollAnchorTest, testing::Bool());
@@ -443,6 +436,10 @@ TEST_P(ScrollAnchorTest, FlexboxDelayedAdjustmentRespectsSANACLAP) {
 // TODO(skobes): Convert this to web-platform-tests when document.rootScroller
 // is launched (http://crbug.com/505516).
 TEST_P(ScrollAnchorTest, NonDefaultRootScroller) {
+  // TODO(crbug.com/889449): The test fails in LayoutNG mode.
+  if (RuntimeEnabledFeatures::LayoutNGEnabled())
+    return;
+
   SetBodyInnerHTML(R"HTML(
     <style>
         ::-webkit-scrollbar {
@@ -895,5 +892,44 @@ TEST_P(ScrollAnchorTest, RestoreAnchorSucceedsWhenScriptForbidden) {
   EXPECT_TRUE(
       GetScrollAnchor(LayoutViewport()).RestoreAnchor(serialized_anchor));
   EXPECT_EQ(LayoutViewport()->ScrollOffsetInt().Height(), 100);
+}
+
+TEST_P(ScrollAnchorTest, RestoreAnchorSucceedsWithExistingAnchorObject) {
+  SetBodyInnerHTML(
+      "<style> body { height: 1000px; margin: 0; } div { height: 100px } "
+      "</style>"
+      "<div id='block1'>abc</div>"
+      "<div id='block2'>def</div>");
+
+  EXPECT_FALSE(GetScrollAnchor(LayoutViewport()).AnchorObject());
+
+  SerializedAnchor serialized_anchor("#block1", LayoutPoint(0, 0));
+
+  EXPECT_TRUE(
+      GetScrollAnchor(LayoutViewport()).RestoreAnchor(serialized_anchor));
+  EXPECT_TRUE(GetScrollAnchor(LayoutViewport()).AnchorObject());
+  EXPECT_EQ(LayoutViewport()->ScrollOffsetInt().Height(), 0);
+
+  EXPECT_TRUE(
+      GetScrollAnchor(LayoutViewport()).RestoreAnchor(serialized_anchor));
+  EXPECT_TRUE(GetScrollAnchor(LayoutViewport()).AnchorObject());
+  EXPECT_EQ(LayoutViewport()->ScrollOffsetInt().Height(), 0);
+}
+
+TEST_P(ScrollAnchorTest, DeleteAnonymousBlockCrash) {
+  SetBodyInnerHTML(R"HTML(
+    <div>
+      <div id="deleteMe" style="height:20000px;"></div>
+      torsk
+    </div>
+  )HTML");
+
+  // Removing #deleteMe will also remove the anonymous block around the text
+  // node. This would cause NG to point to dead layout objects, prior to
+  // https://chromium-review.googlesource.com/1193868 and therefore crash.
+
+  ScrollLayoutViewport(ScrollOffset(0, 20000));
+  GetDocument().getElementById("deleteMe")->remove();
+  Update();
 }
 }

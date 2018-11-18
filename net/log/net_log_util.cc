@@ -36,11 +36,16 @@
 #include "net/proxy_resolution/proxy_config.h"
 #include "net/proxy_resolution/proxy_resolution_service.h"
 #include "net/proxy_resolution/proxy_retry_info.h"
-#include "net/quic/core/quic_error_codes.h"
-#include "net/quic/core/quic_packets.h"
 #include "net/socket/ssl_client_socket.h"
+#include "net/third_party/quic/core/quic_error_codes.h"
+#include "net/third_party/quic/core/quic_packets.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
+
+#if BUILDFLAG(ENABLE_REPORTING)
+#include "net/network_error_logging/network_error_logging_service.h"
+#include "net/reporting/reporting_service.h"
+#endif  // BUILDFLAG(ENABLE_REPORTING)
 
 namespace net {
 
@@ -202,8 +207,9 @@ std::unique_ptr<base::DictionaryValue> GetNetConstants() {
   {
     std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
 
-    for (QuicErrorCode error = QUIC_NO_ERROR; error < QUIC_LAST_ERROR;
-         error = static_cast<QuicErrorCode>(error + 1)) {
+    for (quic::QuicErrorCode error = quic::QUIC_NO_ERROR;
+         error < quic::QUIC_LAST_ERROR;
+         error = static_cast<quic::QuicErrorCode>(error + 1)) {
       dict->SetInteger(QuicErrorCodeToString(error), static_cast<int>(error));
     }
 
@@ -215,9 +221,9 @@ std::unique_ptr<base::DictionaryValue> GetNetConstants() {
   {
     std::unique_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
 
-    for (QuicRstStreamErrorCode error = QUIC_STREAM_NO_ERROR;
-         error < QUIC_STREAM_LAST_ERROR;
-         error = static_cast<QuicRstStreamErrorCode>(error + 1)) {
+    for (quic::QuicRstStreamErrorCode error = quic::QUIC_STREAM_NO_ERROR;
+         error < quic::QUIC_STREAM_LAST_ERROR;
+         error = static_cast<quic::QuicRstStreamErrorCode>(error + 1)) {
       dict->SetInteger(QuicRstStreamErrorCodeToString(error),
                        static_cast<int>(error));
     }
@@ -337,8 +343,7 @@ NET_EXPORT std::unique_ptr<base::DictionaryValue> GetNetInfo(
 
     auto list = std::make_unique<base::ListValue>();
 
-    for (ProxyRetryInfoMap::const_iterator it = bad_proxies_map.begin();
-         it != bad_proxies_map.end(); ++it) {
+    for (auto it = bad_proxies_map.begin(); it != bad_proxies_map.end(); ++it) {
       const std::string& proxy_uri = it->first;
       const ProxyRetryInfo& retry_info = it->second;
 
@@ -448,6 +453,34 @@ NET_EXPORT std::unique_ptr<base::DictionaryValue> GetNetInfo(
 
     net_info_dict->Set(NetInfoSourceToString(NET_INFO_HTTP_CACHE),
                        std::move(info_dict));
+  }
+
+  if (info_sources & NET_INFO_REPORTING) {
+#if BUILDFLAG(ENABLE_REPORTING)
+    ReportingService* reporting_service = context->reporting_service();
+    if (reporting_service) {
+      base::Value reporting_dict = reporting_service->StatusAsValue();
+      NetworkErrorLoggingService* network_error_logging_service =
+          context->network_error_logging_service();
+      if (network_error_logging_service) {
+        reporting_dict.SetKey("networkErrorLogging",
+                              network_error_logging_service->StatusAsValue());
+      }
+      net_info_dict->SetKey(NetInfoSourceToString(NET_INFO_REPORTING),
+                            std::move(reporting_dict));
+    } else {
+      base::Value reporting_dict(base::Value::Type::DICTIONARY);
+      reporting_dict.SetKey("reportingEnabled", base::Value(false));
+      net_info_dict->SetKey(NetInfoSourceToString(NET_INFO_REPORTING),
+                            std::move(reporting_dict));
+    }
+
+#else   // BUILDFLAG(ENABLE_REPORTING)
+    base::Value reporting_dict(base::Value::Type::DICTIONARY);
+    reporting_dict.SetKey("reportingEnabled", base::Value(false));
+    net_info_dict->SetKey(NetInfoSourceToString(NET_INFO_REPORTING),
+                          std::move(reporting_dict));
+#endif  // BUILDFLAG(ENABLE_REPORTING)
   }
 
   return net_info_dict;

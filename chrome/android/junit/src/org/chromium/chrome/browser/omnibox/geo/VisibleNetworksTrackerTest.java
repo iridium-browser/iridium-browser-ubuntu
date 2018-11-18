@@ -20,11 +20,11 @@ import org.robolectric.shadows.ShadowLooper;
 import org.robolectric.shadows.ShadowSystemClock;
 
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.task.test.CustomShadowAsyncTask;
 import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.chrome.browser.omnibox.geo.VisibleNetworks.VisibleCell;
 import org.chromium.chrome.browser.omnibox.geo.VisibleNetworks.VisibleWifi;
 import org.chromium.chrome.browser.omnibox.geo.VisibleNetworksTrackerTest.ShadowPlatformNetworksManager;
-import org.chromium.testing.local.CustomShadowAsyncTask;
 
 import java.util.Arrays;
 import java.util.HashSet;
@@ -43,16 +43,15 @@ public class VisibleNetworksTrackerTest {
             VisibleWifi.create("ssid1", "11:11:11:11:11:11", 1, 10L);
     private static final VisibleWifi VISIBLE_WIFI_2 =
             VisibleWifi.create("ssid2", "11:11:11:11:11:12", 2, 20L);
-    private static final VisibleCell VISIBLE_CELL_1 =
-            VisibleCell.builder(VisibleCell.GSM_RADIO_TYPE)
-                    .setCellId(30)
-                    .setLocationAreaCode(31)
-                    .setMobileCountryCode(32)
-                    .setMobileNetworkCode(33)
-                    .setTimestamp(30L)
-                    .build();
+    private static final VisibleCell VISIBLE_CELL_1 = VisibleCell.builder(VisibleCell.RadioType.GSM)
+                                                              .setCellId(30)
+                                                              .setLocationAreaCode(31)
+                                                              .setMobileCountryCode(32)
+                                                              .setMobileNetworkCode(33)
+                                                              .setTimestamp(30L)
+                                                              .build();
     private static final VisibleCell VISIBLE_CELL_2 =
-            VisibleCell.builder(VisibleCell.CDMA_RADIO_TYPE)
+            VisibleCell.builder(VisibleCell.RadioType.CDMA)
                     .setCellId(40)
                     .setLocationAreaCode(41)
                     .setMobileCountryCode(42)

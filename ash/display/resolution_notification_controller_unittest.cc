@@ -64,12 +64,12 @@ class ResolutionNotificationControllerTest : public AshTestBase {
         false /* native */);
     display::ManagedDisplayMode new_mode(
         new_resolution, old_mode.refresh_rate(), old_mode.is_interlaced(),
-        old_mode.native(), old_mode.ui_scale(), old_mode.device_scale_factor());
+        old_mode.native(), old_mode.device_scale_factor());
 
     EXPECT_TRUE(controller()->PrepareNotificationAndSetDisplayMode(
         display.id(), old_mode, new_mode,
-        base::Bind(&ResolutionNotificationControllerTest::OnAccepted,
-                   base::Unretained(this))));
+        base::BindOnce(&ResolutionNotificationControllerTest::OnAccepted,
+                       base::Unretained(this))));
 
     // OnConfigurationChanged event won't be emitted in the test environment,
     // so invoke UpdateDisplay() to emit that event explicitly.
@@ -319,7 +319,9 @@ TEST_F(ResolutionNotificationControllerTest, DisplayDisconnected) {
   EXPECT_EQ(59.0f, mode.refresh_rate());
 }
 
-TEST_F(ResolutionNotificationControllerTest, MultipleResolutionChange) {
+// See http://crbug.com/869401 for details.
+TEST_F(ResolutionNotificationControllerTest,
+       DISABLED_MultipleResolutionChange) {
   UpdateDisplay(
       "300x300#300x300%56|200x200%57,"
       "250x250#250x250%58|200x200%59");
@@ -397,6 +399,7 @@ TEST_F(ResolutionNotificationControllerTest, NoTimeoutInKioskMode) {
   mojom::UserSessionPtr session = mojom::UserSession::New();
   session->session_id = 1u;
   session->user_info = mojom::UserInfo::New();
+  session->user_info->avatar = mojom::UserAvatar::New();
   session->user_info->type = user_manager::USER_TYPE_KIOSK_APP;
   session->user_info->account_id = AccountId::FromUserEmail("user1@test.com");
   session->user_info->display_name = "User 1";

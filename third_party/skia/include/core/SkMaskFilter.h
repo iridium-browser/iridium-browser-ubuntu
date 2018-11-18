@@ -25,16 +25,11 @@ class SkString;
 class SK_API SkMaskFilter : public SkFlattenable {
 public:
     /** Create a blur maskfilter.
-     *  @param style     The SkBlurStyle to use
-     *  @param sigma     Standard deviation of the Gaussian blur to apply. Must be > 0.
-     *  @param occluder  The rect for which no pixels need be drawn (b.c. it will be overdrawn
-     *                   with some opaque object. This is just a hint which backends are free to
-     *                   ignore.
+     *  @param style      The SkBlurStyle to use
+     *  @param sigma      Standard deviation of the Gaussian blur to apply. Must be > 0.
      *  @param respectCTM if true the blur's sigma is modified by the CTM.
      *  @return The new blur maskfilter
      */
-    static sk_sp<SkMaskFilter> MakeBlur(SkBlurStyle style, SkScalar sigma, const SkRect& occluder,
-                                        bool respectCTM = true);
     static sk_sp<SkMaskFilter> MakeBlur(SkBlurStyle style, SkScalar sigma,
                                         bool respectCTM = true);
 
@@ -59,8 +54,20 @@ public:
      */
     sk_sp<SkMaskFilter> makeWithMatrix(const SkMatrix&) const;
 
-    virtual void toString(SkString* str) const = 0;
-    SK_DEFINE_FLATTENABLE_TYPE(SkMaskFilter)
+    static SkFlattenable::Type GetFlattenableType() {
+        return kSkMaskFilter_Type;
+    }
+
+    SkFlattenable::Type getFlattenableType() const override {
+        return kSkMaskFilter_Type;
+    }
+
+    static sk_sp<SkMaskFilter> Deserialize(const void* data, size_t size,
+                                          const SkDeserialProcs* procs = nullptr) {
+        return sk_sp<SkMaskFilter>(static_cast<SkMaskFilter*>(
+                                  SkFlattenable::Deserialize(
+                                  kSkMaskFilter_Type, data, size, procs).release()));
+    }
 
 private:
     static void InitializeFlattenables();

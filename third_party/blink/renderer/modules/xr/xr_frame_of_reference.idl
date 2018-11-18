@@ -2,16 +2,17 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// https://immersive-web.github.io/webxr/spec/latest/#xrframeofreference-interface
+// https://immersive-web.github.io/webxr/#xrframeofreference-interface
 
 enum XRFrameOfReferenceType {
-  "headModel",
-  "eyeLevel",
+  "head-model",
+  "eye-level",
   "stage",
 };
 
 [
     SecureContext,
+    Exposed=Window,
     OriginTrialEnabled=WebXR
 ] interface XRFrameOfReference : XRCoordinateSystem {
   readonly attribute XRStageBounds? bounds;

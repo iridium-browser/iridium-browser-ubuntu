@@ -5,6 +5,8 @@
 #ifndef V8_HEAP_SPACES_INL_H_
 #define V8_HEAP_SPACES_INL_H_
 
+#include "src/base/atomic-utils.h"
+#include "src/base/bounded-page-allocator.h"
 #include "src/base/v8-fallthrough.h"
 #include "src/heap/incremental-marking.h"
 #include "src/heap/spaces.h"
@@ -45,7 +47,7 @@ HeapObject* SemiSpaceIterator::Next() {
     if (Page::IsAlignedToPageSize(current_)) {
       Page* page = Page::FromAllocationAreaAddress(current_);
       page = page->next_page();
-      DCHECK(!page->is_anchor());
+      DCHECK(page);
       current_ = page->area_start();
       if (current_ == limit_) return nullptr;
     }
@@ -90,6 +92,27 @@ HeapObject* HeapObjectIterator::FromCurrentPage() {
     }
   }
   return nullptr;
+}
+
+void Space::IncrementExternalBackingStoreBytes(ExternalBackingStoreType type,
+                                               size_t amount) {
+  base::CheckedIncrement(&external_backing_store_bytes_[type], amount);
+  heap()->IncrementExternalBackingStoreBytes(type, amount);
+}
+
+void Space::DecrementExternalBackingStoreBytes(ExternalBackingStoreType type,
+                                               size_t amount) {
+  base::CheckedDecrement(&external_backing_store_bytes_[type], amount);
+  heap()->DecrementExternalBackingStoreBytes(type, amount);
+}
+
+void Space::MoveExternalBackingStoreBytes(ExternalBackingStoreType type,
+                                          Space* from, Space* to,
+                                          size_t amount) {
+  if (from == to) return;
+
+  base::CheckedDecrement(&(from->external_backing_store_bytes_[type]), amount);
+  base::CheckedIncrement(&(to->external_backing_store_bytes_[type]), amount);
 }
 
 // -----------------------------------------------------------------------------
@@ -139,7 +162,7 @@ bool NewSpace::ToSpaceContains(Object* o) { return to_space_.Contains(o); }
 bool NewSpace::FromSpaceContains(Object* o) { return from_space_.Contains(o); }
 
 bool PagedSpace::Contains(Address addr) {
-  if (heap_->lo_space()->FindPage(addr)) return false;
+  if (heap()->lo_space()->FindPage(addr)) return false;
   return MemoryChunk::FromAnyPointerAddress(heap(), addr)->owner() == this;
 }
 
@@ -171,7 +194,7 @@ size_t PagedSpace::RelinkFreeListCategories(Page* page) {
 }
 
 bool PagedSpace::TryFreeLast(HeapObject* object, int object_size) {
-  if (allocation_info_.top() != nullptr) {
+  if (allocation_info_.top() != kNullAddress) {
     const Address object_address = object->address();
     if ((allocation_info_.top() - object_size) == object_address) {
       allocation_info_.set_top(object_address);
@@ -187,6 +210,28 @@ MemoryChunk* MemoryChunk::FromAnyPointerAddress(Heap* heap, Address addr) {
     chunk = MemoryChunk::FromAddress(addr);
   }
   return chunk;
+}
+
+void MemoryChunk::IncrementExternalBackingStoreBytes(
+    ExternalBackingStoreType type, size_t amount) {
+  base::CheckedIncrement(&external_backing_store_bytes_[type], amount);
+  owner()->IncrementExternalBackingStoreBytes(type, amount);
+}
+
+void MemoryChunk::DecrementExternalBackingStoreBytes(
+    ExternalBackingStoreType type, size_t amount) {
+  base::CheckedDecrement(&external_backing_store_bytes_[type], amount);
+  owner()->DecrementExternalBackingStoreBytes(type, amount);
+}
+
+void MemoryChunk::MoveExternalBackingStoreBytes(ExternalBackingStoreType type,
+                                                MemoryChunk* from,
+                                                MemoryChunk* to,
+                                                size_t amount) {
+  base::CheckedDecrement(&(from->external_backing_store_bytes_[type]), amount);
+  base::CheckedIncrement(&(to->external_backing_store_bytes_[type]), amount);
+  Space::MoveExternalBackingStoreBytes(type, from->owner(), to->owner(),
+                                       amount);
 }
 
 void Page::MarkNeverAllocateForTesting() {
@@ -315,6 +360,7 @@ HeapObject* PagedSpace::TryAllocateLinearlyAligned(
 
 AllocationResult PagedSpace::AllocateRawUnaligned(
     int size_in_bytes, UpdateSkipList update_skip_list) {
+  DCHECK_IMPLIES(identity() == RO_SPACE, heap()->CanAllocateInReadOnlySpace());
   if (!EnsureLinearAllocationArea(size_in_bytes)) {
     return AllocationResult::Retry(identity());
   }
@@ -330,7 +376,8 @@ AllocationResult PagedSpace::AllocateRawUnaligned(
 
 AllocationResult PagedSpace::AllocateRawAligned(int size_in_bytes,
                                                 AllocationAlignment alignment) {
-  DCHECK(identity() == OLD_SPACE);
+  DCHECK(identity() == OLD_SPACE || identity() == RO_SPACE);
+  DCHECK_IMPLIES(identity() == RO_SPACE, heap()->CanAllocateInReadOnlySpace());
   int allocation_size = size_in_bytes;
   HeapObject* object = TryAllocateLinearlyAligned(&allocation_size, alignment);
   if (object == nullptr) {
@@ -356,7 +403,7 @@ AllocationResult PagedSpace::AllocateRaw(int size_in_bytes,
       SupportsInlineAllocation()) {
     // Generated code decreased the top() pointer to do folded allocations.
     // The top_on_previous_step_ can be one byte beyond the current page.
-    DCHECK_NOT_NULL(top());
+    DCHECK_NE(top(), kNullAddress);
     DCHECK_EQ(Page::FromAllocationAreaAddress(top()),
               Page::FromAllocationAreaAddress(top_on_previous_step_ - 1));
     top_on_previous_step_ = top();
@@ -396,7 +443,8 @@ AllocationResult NewSpace::AllocateRawAligned(int size_in_bytes,
   int filler_size = Heap::GetFillToAlign(top, alignment);
   int aligned_size_in_bytes = size_in_bytes + filler_size;
 
-  if (allocation_info_.limit() - top < aligned_size_in_bytes) {
+  if (allocation_info_.limit() - top <
+      static_cast<uintptr_t>(aligned_size_in_bytes)) {
     // See if we can create room.
     if (!EnsureAllocation(size_in_bytes, alignment)) {
       return AllocationResult::Retry();
@@ -465,16 +513,6 @@ V8_WARN_UNUSED_RESULT inline AllocationResult NewSpace::AllocateRawSynchronized(
   return AllocateRaw(size_in_bytes, alignment);
 }
 
-size_t LargeObjectSpace::Available() {
-  return ObjectSizeFor(heap()->memory_allocator()->Available());
-}
-
-
-LocalAllocationBuffer LocalAllocationBuffer::InvalidBuffer() {
-  return LocalAllocationBuffer(nullptr, LinearAllocationArea(nullptr, nullptr));
-}
-
-
 LocalAllocationBuffer LocalAllocationBuffer::FromResult(Heap* heap,
                                                         AllocationResult result,
                                                         intptr_t size) {
@@ -491,7 +529,7 @@ LocalAllocationBuffer LocalAllocationBuffer::FromResult(Heap* heap,
 bool LocalAllocationBuffer::TryMerge(LocalAllocationBuffer* other) {
   if (allocation_info_.top() == other->allocation_info_.limit()) {
     allocation_info_.set_top(other->allocation_info_.top());
-    other->allocation_info_.Reset(nullptr, nullptr);
+    other->allocation_info_.Reset(kNullAddress, kNullAddress);
     return true;
   }
   return false;

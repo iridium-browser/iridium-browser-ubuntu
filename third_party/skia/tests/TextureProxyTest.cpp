@@ -9,14 +9,11 @@
 
 #include "Test.h"
 
-#if SK_SUPPORT_GPU
-
 #include "GrBackendSurface.h"
 #include "GrContextPriv.h"
 #include "GrResourceCache.h"
 #include "GrProxyProvider.h"
 #include "GrResourceProvider.h"
-#include "GrTest.h"
 #include "GrTexture.h"
 #include "GrTextureProxy.h"
 
@@ -67,7 +64,7 @@ static sk_sp<GrTextureProxy> wrapped(skiatest::Reporter* reporter,
                                      GrProxyProvider* proxyProvider, SkBackingFit fit) {
     const GrSurfaceDesc desc = make_desc(kNone_GrSurfaceFlags);
 
-    sk_sp<GrTextureProxy> proxy = proxyProvider->createInstantiatedProxy(
+    sk_sp<GrTextureProxy> proxy = proxyProvider->testingOnly_createInstantiatedProxy(
             desc, kBottomLeft_GrSurfaceOrigin, fit, SkBudgeted::kYes);
     // Only budgeted & wrapped external proxies get to carry uniqueKeys
     REPORTER_ASSERT(reporter, !proxy->getUniqueKey().isValid());
@@ -88,7 +85,7 @@ static sk_sp<GrTextureProxy> wrapped_with_key(skiatest::Reporter* reporter,
     const GrSurfaceDesc desc = make_desc(kNone_GrSurfaceFlags);
 
     // Only budgeted & wrapped external proxies get to carry uniqueKeys
-    sk_sp<GrTextureProxy> proxy = proxyProvider->createInstantiatedProxy(
+    sk_sp<GrTextureProxy> proxy = proxyProvider->testingOnly_createInstantiatedProxy(
             desc, kBottomLeft_GrSurfaceOrigin, fit, SkBudgeted::kYes);
     SkAssertResult(proxyProvider->assignUniqueKeyToProxy(key, proxy.get()));
     REPORTER_ASSERT(reporter, proxy->getUniqueKey().isValid());
@@ -108,6 +105,7 @@ static sk_sp<GrTextureProxy> create_wrapped_backend(GrContext* context, SkBackin
     }
 
     GrBackendTexture backendTex = (*backingSurface)->getBackendTexture();
+    backendTex.setPixelConfig(desc.fConfig);
 
     return proxyProvider->wrapBackendTexture(backendTex, kBottomLeft_GrSurfaceOrigin);
 }
@@ -117,7 +115,7 @@ static sk_sp<GrTextureProxy> create_wrapped_backend(GrContext* context, SkBackin
 // and looking them up work, etc.
 static void basic_test(GrContext* context,
                        skiatest::Reporter* reporter,
-                       sk_sp<GrTextureProxy> proxy, bool proxyIsCached) {
+                       sk_sp<GrTextureProxy> proxy) {
     static int id = 1;
 
     GrResourceProvider* resourceProvider = context->contextPriv().resourceProvider();
@@ -149,48 +147,35 @@ static void basic_test(GrContext* context,
                                                                 key, kBottomLeft_GrSurfaceOrigin));
     REPORTER_ASSERT(reporter, 1 == proxyProvider->numUniqueKeyProxies_TestOnly());
 
+    int expectedCacheCount = startCacheCount + (proxy->isInstantiated() ? 0 : 1);
+
     // Once instantiated, the backing resource should have the same key
     SkAssertResult(proxy->instantiate(resourceProvider));
-    const GrUniqueKey& texKey = proxy->priv().peekSurface()->getUniqueKey();
+    const GrUniqueKey& texKey = proxy->peekSurface()->getUniqueKey();
     REPORTER_ASSERT(reporter, texKey.isValid());
     REPORTER_ASSERT(reporter, key == texKey);
-    if (proxyIsCached) {
-        REPORTER_ASSERT(reporter, 1 == cache->getResourceCount());
-    }
 
     // deleting the proxy should delete it from the hash but not the cache
     proxy = nullptr;
     REPORTER_ASSERT(reporter, 0 == proxyProvider->numUniqueKeyProxies_TestOnly());
-    REPORTER_ASSERT(reporter, 1 == cache->getResourceCount());
+    REPORTER_ASSERT(reporter, expectedCacheCount == cache->getResourceCount());
 
     // If the proxy was cached refinding it should bring it back to life
     proxy = proxyProvider->findOrCreateProxyByUniqueKey(key, kBottomLeft_GrSurfaceOrigin);
-    if (proxyIsCached) {
-        REPORTER_ASSERT(reporter, proxy);
-        REPORTER_ASSERT(reporter, 1 == proxyProvider->numUniqueKeyProxies_TestOnly());
-    } else {
-        REPORTER_ASSERT(reporter, !proxy);
-        REPORTER_ASSERT(reporter, 0 == proxyProvider->numUniqueKeyProxies_TestOnly());
-    }
-    REPORTER_ASSERT(reporter, 1 == cache->getResourceCount());
+    REPORTER_ASSERT(reporter, proxy);
+    REPORTER_ASSERT(reporter, 1 == proxyProvider->numUniqueKeyProxies_TestOnly());
+    REPORTER_ASSERT(reporter, expectedCacheCount == cache->getResourceCount());
 
     // Mega-purging it should remove it from both the hash and the cache
     proxy = nullptr;
     cache->purgeAllUnlocked();
-    if (proxyIsCached) {
-        REPORTER_ASSERT(reporter, 0 == cache->getResourceCount());
-    } else {
-        REPORTER_ASSERT(reporter, 1 == cache->getResourceCount());
-    }
+    expectedCacheCount--;
+    REPORTER_ASSERT(reporter, expectedCacheCount == cache->getResourceCount());
 
     // We can bring neither the texture nor proxy back from perma-death
     proxy = proxyProvider->findOrCreateProxyByUniqueKey(key, kBottomLeft_GrSurfaceOrigin);
     REPORTER_ASSERT(reporter, !proxy);
-    if (proxyIsCached) {
-        REPORTER_ASSERT(reporter, 0 == cache->getResourceCount());
-    } else {
-        REPORTER_ASSERT(reporter, 1 == cache->getResourceCount());
-    }
+    REPORTER_ASSERT(reporter, expectedCacheCount == cache->getResourceCount());
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -256,7 +241,8 @@ static void invalidation_and_instantiation_test(GrContext* context, skiatest::Re
     SkAssertResult(proxyProvider->assignUniqueKeyToProxy(key, proxy.get()));
 
     // Send an invalidation message, which will be sitting in the cache's inbox
-    SkMessageBus<GrUniqueKeyInvalidatedMessage>::Post(GrUniqueKeyInvalidatedMessage(key));
+    SkMessageBus<GrUniqueKeyInvalidatedMessage>::Post(
+            GrUniqueKeyInvalidatedMessage(key, context->uniqueID()));
 
     REPORTER_ASSERT(reporter, 1 == proxyProvider->numUniqueKeyProxies_TestOnly());
     REPORTER_ASSERT(reporter, 0 == cache->getResourceCount());
@@ -266,7 +252,7 @@ static void invalidation_and_instantiation_test(GrContext* context, skiatest::Re
     SkAssertResult(proxy->instantiate(resourceProvider));
 
     REPORTER_ASSERT(reporter, !proxy->getUniqueKey().isValid());
-    REPORTER_ASSERT(reporter, !proxy->priv().peekTexture()->getUniqueKey().isValid());
+    REPORTER_ASSERT(reporter, !proxy->peekTexture()->getUniqueKey().isValid());
     REPORTER_ASSERT(reporter, 0 == proxyProvider->numUniqueKeyProxies_TestOnly());
     REPORTER_ASSERT(reporter, 1 == cache->getResourceCount());
 
@@ -288,13 +274,13 @@ DEF_GPUTEST_FOR_RENDERING_CONTEXTS(TextureProxyTest, reporter, ctxInfo) {
     for (auto fit : { SkBackingFit::kExact, SkBackingFit::kApprox }) {
         for (auto create : { deferred_tex, deferred_texRT, wrapped, wrapped_with_key }) {
             REPORTER_ASSERT(reporter, 0 == cache->getResourceCount());
-            basic_test(context, reporter, create(reporter, proxyProvider, fit), true);
+            basic_test(context, reporter, create(reporter, proxyProvider, fit));
         }
 
         REPORTER_ASSERT(reporter, 0 == cache->getResourceCount());
         sk_sp<GrTexture> backingTex;
         sk_sp<GrTextureProxy> proxy = create_wrapped_backend(context, fit, &backingTex);
-        basic_test(context, reporter, std::move(proxy), false);
+        basic_test(context, reporter, std::move(proxy));
 
         backingTex = nullptr;
         cache->purgeAllUnlocked();
@@ -303,5 +289,3 @@ DEF_GPUTEST_FOR_RENDERING_CONTEXTS(TextureProxyTest, reporter, ctxInfo) {
     invalidation_test(context, reporter);
     invalidation_and_instantiation_test(context, reporter);
 }
-
-#endif

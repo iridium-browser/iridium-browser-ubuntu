@@ -2,9 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// https://immersive-web.github.io/webxr/spec/latest/#xrsessionevent-interface
+// https://immersive-web.github.io/webxr/#xrsessionevent-interface
 [
     SecureContext,
+    Exposed=Window,
     OriginTrialEnabled=WebXR,
     Constructor(DOMString type, XRSessionEventInit eventInitDict)
 ] interface XRSessionEvent : Event {

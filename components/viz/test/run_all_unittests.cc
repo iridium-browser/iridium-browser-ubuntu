@@ -5,14 +5,14 @@
 #include "base/bind.h"
 #include "base/test/launcher/unit_test_launcher.h"
 #include "components/viz/test/viz_test_suite.h"
-#include "mojo/edk/embedder/embedder.h"
+#include "mojo/core/embedder/embedder.h"
 
 int main(int argc, char** argv) {
   viz::VizTestSuite test_suite(argc, argv);
 
-  mojo::edk::Init();
+  mojo::core::Init();
 
   return base::LaunchUnitTests(
       argc, argv,
-      base::Bind(&viz::VizTestSuite::Run, base::Unretained(&test_suite)));
+      base::BindOnce(&viz::VizTestSuite::Run, base::Unretained(&test_suite)));
 }

@@ -9,7 +9,6 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.ProviderInfo;
 import android.database.Cursor;
 import android.net.Uri;
-import android.os.AsyncTask;
 import android.support.annotation.Nullable;
 import android.text.TextUtils;
 
@@ -19,6 +18,7 @@ import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.task.AsyncTask;
 import org.chromium.chrome.browser.AppHooks;
 import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.ChromeVersionInfo;
@@ -200,8 +200,7 @@ public class PartnerBrowserCustomizations {
         sIsInitialized = false;
         Provider provider = AppHooks.get().getCustomizationProvider();
         // Setup an initializing async task.
-        final AsyncTask<Void, Void, Void> initializeAsyncTask =
-                new AsyncTask<Void, Void, Void>() {
+        final AsyncTask<Void> initializeAsyncTask = new AsyncTask<Void>() {
             private boolean mDisablePartnerBookmarksShim;
             private boolean mHomepageUriChanged;
 
@@ -241,7 +240,7 @@ public class PartnerBrowserCustomizations {
             }
 
             @Override
-            protected Void doInBackground(Void... params) {
+            protected Void doInBackground() {
                 try {
                     boolean systemOrPreStable =
                             (context.getApplicationInfo().flags & ApplicationInfo.FLAG_SYSTEM) == 1

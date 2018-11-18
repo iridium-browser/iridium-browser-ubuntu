@@ -12,7 +12,8 @@ namespace ui {
 MockIMEInputContextHandler::MockIMEInputContextHandler()
     : commit_text_call_count_(0),
       update_preedit_text_call_count_(0),
-      delete_surrounding_text_call_count_(0) {}
+      delete_surrounding_text_call_count_(0),
+      last_sent_key_event_(ui::ET_KEY_PRESSED, ui::VKEY_SPACE, 0) {}
 
 MockIMEInputContextHandler::~MockIMEInputContextHandler() {}
 
@@ -38,14 +39,21 @@ void MockIMEInputContextHandler::DeleteSurroundingText(int32_t offset,
   last_delete_surrounding_text_arg_.length = length;
 }
 
+SurroundingTextInfo MockIMEInputContextHandler::GetSurroundingTextInfo() {
+  return SurroundingTextInfo();
+}
+
 void MockIMEInputContextHandler::Reset() {
   commit_text_call_count_ = 0;
   update_preedit_text_call_count_ = 0;
   delete_surrounding_text_call_count_ = 0;
   last_commit_text_.clear();
+  last_sent_key_event_ = ui::KeyEvent(ui::ET_KEY_PRESSED, ui::VKEY_SPACE, 0);
 }
 
-void MockIMEInputContextHandler::SendKeyEvent(KeyEvent* event) {}
+void MockIMEInputContextHandler::SendKeyEvent(KeyEvent* event) {
+  last_sent_key_event_ = *event;
+}
 
 InputMethod* MockIMEInputContextHandler::GetInputMethod() {
   return nullptr;

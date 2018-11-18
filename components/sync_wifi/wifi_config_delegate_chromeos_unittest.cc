@@ -59,6 +59,12 @@ class FakeManagedNetworkConfigurationHandler
                      const ErrorCallback& error_callback) override {
     NOTIMPLEMENTED();
   }
+  void SetManagerProperty(const std::string& property_name,
+                          const base::Value& value,
+                          const base::Closure& callback,
+                          const ErrorCallback& error_callback) override {
+    NOTIMPLEMENTED();
+  }
   void CreateConfiguration(const std::string& userhash,
                            const base::DictionaryValue& properties,
                            const ServiceResultCallback& callback,
@@ -112,6 +118,22 @@ class FakeManagedNetworkConfigurationHandler
       ::onc::ONCSource* onc_source) const override {
     NOTIMPLEMENTED();
     return nullptr;
+  }
+  bool AllowOnlyPolicyNetworksToConnect() const override {
+    NOTIMPLEMENTED();
+    return false;
+  }
+  bool AllowOnlyPolicyNetworksToConnectIfAvailable() const override {
+    NOTIMPLEMENTED();
+    return false;
+  }
+  bool AllowOnlyPolicyNetworksToAutoconnect() const override {
+    NOTIMPLEMENTED();
+    return false;
+  }
+  std::vector<std::string> GetBlacklistedHexSSIDs() const override {
+    NOTIMPLEMENTED();
+    return std::vector<std::string>();
   }
 
   bool create_configuration_called() const {

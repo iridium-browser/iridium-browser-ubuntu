@@ -7,6 +7,7 @@
 
 #include <stddef.h>
 
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -29,12 +30,13 @@ namespace autofill {
 
 class AutofillChange;
 class AutofillEntry;
+struct AutofillMetadata;
 class AutofillProfile;
 class AutofillTableEncryptor;
 class AutofillTableTest;
 class CreditCard;
-
 struct FormFieldData;
+struct PaymentsCustomerData;
 
 // This class manages the various Autofill tables within the SQLite database
 // passed to the constructor. It expects the following schemas:
@@ -90,7 +92,10 @@ struct FormFieldData;
 //   validity_bitfield  A bitfield representing the validity state of different
 //                      fields in the profile.
 //                      Added in version 75.
-//
+//   is_client_validity_states_updated
+//                      A flag indicating whether the validity states of
+//                      different fields according to the client validity api is
+//                      updated or not. Added in version 80.
 // autofill_profile_names
 //                      This table contains the multi-valued name fields
 //                      associated with a profile.
@@ -249,15 +254,25 @@ struct FormFieldData;
 // autofill_sync_metadata
 //                      Sync-specific metadata for autofill records.
 //
+//   model_type         An int value corresponding to syncer::ModelType enum.
+//                      Added in version 78.
 //   storage_key        A string that uniquely identifies the metadata record
 //                      as well as the corresponding autofill record.
 //   value              The serialized EntityMetadata record.
 //
 // autofill_model_type_state
-//                      Single row table that contains the sync ModelTypeState
-//                      for the autofill model type.
+//                      Contains sync ModelTypeStates for autofill model types.
 //
+//   model_type         An int value corresponding to syncer::ModelType enum.
+//                      Added in version 78. Previously, the table was used only
+//                      for one model type, there was an id column with value 1
+//                      for the single entry.
 //   value              The serialized ModelTypeState record.
+//
+// payments_customer_data
+//                      Contains Google Payments customer data.
+//
+//   customer_id        A string representing the Google Payments customer id.
 
 class AutofillTable : public WebDatabaseTable,
                       public syncer::SyncMetadataStore {
@@ -390,13 +405,36 @@ class AutofillTable : public WebDatabaseTable,
                               const base::string16& full_number);
   bool MaskServerCreditCard(const std::string& id);
 
+  // Methods to add, update, remove and get the metadata for server cards and
+  // addresses.
+  bool AddServerCardMetadata(const AutofillMetadata& card_metadata);
   bool UpdateServerCardMetadata(const CreditCard& credit_card);
+  bool RemoveServerCardMetadata(const std::string& id);
+  bool GetServerCardsMetadata(
+      std::map<std::string, AutofillMetadata>* cards_metadata) const;
+  bool AddServerAddressMetadata(const AutofillMetadata& address_metadata);
   bool UpdateServerAddressMetadata(const AutofillProfile& profile);
+  bool RemoveServerAddressMetadata(const std::string& id);
+  bool GetServerAddressesMetadata(
+      std::map<std::string, AutofillMetadata>* addresses_metadata) const;
+
+  // Setters and getters related to the Google Payments customer data.
+  // Passing null to the setter will clear the data.
+  void SetPaymentsCustomerData(const PaymentsCustomerData* customer_data);
+  // Getter returns false if it could not execute the database statement, and
+  // may return true but leave |customer_data| untouched if there is no data.
+  bool GetPaymentsCustomerData(
+      std::unique_ptr<PaymentsCustomerData>* customer_data) const;
 
   // Deletes all data from the server card and profile tables. Returns true if
   // any data was deleted, false if not (so false means "commit not needed"
   // rather than "error").
   bool ClearAllServerData();
+
+  // Deletes all data from the local card and profiles table. Returns true if
+  // any data was deleted, false if not (so false means "commit not needed"
+  // rather than "error").
+  bool ClearAllLocalData();
 
   // Removes rows from autofill_profiles and credit_cards if they were created
   // on or after |delete_begin| and strictly before |delete_end|.  Returns the
@@ -435,6 +473,9 @@ class AutofillTable : public WebDatabaseTable,
   // Clear all profiles.
   bool ClearAutofillProfiles();
 
+  // Clear all credit cards.
+  bool ClearCreditCards();
+
   // Read all the stored metadata for |model_type| and fill |metadata_batch|
   // with it.
   bool GetAllSyncMetadata(syncer::ModelType model_type,
@@ -450,6 +491,12 @@ class AutofillTable : public WebDatabaseTable,
       syncer::ModelType model_type,
       const sync_pb::ModelTypeState& model_type_state) override;
   bool ClearModelTypeState(syncer::ModelType model_type) override;
+
+  // Removes the orphan rows in the autofill_profile_names,
+  // autofill_profile_emails and autofill_profile_phones table that were not
+  // removed in the previous implementation of
+  // RemoveAutofillDataModifiedBetween(see crbug.com/836737).
+  bool RemoveOrphanAutofillTableRows();
 
   // Table migration functions. NB: These do not and should not rely on other
   // functions in this class. The implementation of a function such as
@@ -473,7 +520,8 @@ class AutofillTable : public WebDatabaseTable,
   bool MigrateToVersion73AddMaskedCardBankName();
   bool MigrateToVersion74AddServerCardTypeColumn();
   bool MigrateToVersion75AddProfileValidityBitfieldColumn();
-
+  bool MigrateToVersion78AddModelTypeColumns();
+  bool MigrateToVersion80AddIsClientValidityStatesUpdatedColumn();
   // Max data length saved in the table, AKA the maximum length allowed for
   // form data.
   // Copied to components/autofill/ios/browser/resources/autofill_controller.js.
@@ -529,6 +577,9 @@ class AutofillTable : public WebDatabaseTable,
                              std::vector<AutofillChange>* changes,
                              base::Time time);
 
+  bool SupportsMetadataForModelType(syncer::ModelType model_type) const;
+  int GetKeyValueForModelType(syncer::ModelType model_type) const;
+
   bool GetAllSyncEntityMetadata(syncer::ModelType model_type,
                                 syncer::MetadataBatch* metadata_batch);
 
@@ -558,7 +609,6 @@ class AutofillTable : public WebDatabaseTable,
 
   bool InitMainTable();
   bool InitCreditCardsTable();
-  bool InitDatesTable();
   bool InitProfilesTable();
   bool InitProfileNamesTable();
   bool InitProfileEmailsTable();
@@ -571,6 +621,7 @@ class AutofillTable : public WebDatabaseTable,
   bool InitServerAddressMetadataTable();
   bool InitAutofillSyncMetadataTable();
   bool InitModelTypeStateTable();
+  bool InitPaymentsCustomerDataTable();
 
   std::unique_ptr<AutofillTableEncryptor> autofill_table_encryptor_;
 

@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_TIMING_PERFORMANCE_NAVIGATION_TIMING_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_TIMING_PERFORMANCE_NAVIGATION_TIMING_H_
 
+#include "third_party/blink/public/web/web_navigation_type.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/context_lifecycle_observer.h"
 #include "third_party/blink/renderer/core/dom/dom_high_res_time_stamp.h"
@@ -37,6 +38,8 @@ class CORE_EXPORT PerformanceNavigationTiming final
 
   // Attributes inheritted from PerformanceEntry.
   DOMHighResTimeStamp duration() const override;
+  AtomicString entryType() const override;
+  PerformanceEntryType EntryTypeEnum() const override;
 
   AtomicString initiatorType() const override;
 
@@ -58,7 +61,7 @@ class CORE_EXPORT PerformanceNavigationTiming final
   DOMHighResTimeStamp redirectEnd() const override;
   DOMHighResTimeStamp responseEnd() const override;
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  protected:
   void BuildJSONValue(V8ObjectBuilder&) const override;
@@ -66,18 +69,18 @@ class CORE_EXPORT PerformanceNavigationTiming final
  private:
   ~PerformanceNavigationTiming() override;
 
-  static AtomicString GetNavigationType(NavigationType, const Document*);
+  static AtomicString GetNavigationType(WebNavigationType, const Document*);
 
   const DocumentTiming* GetDocumentTiming() const;
   DocumentLoader* GetDocumentLoader() const;
   DocumentLoadTiming* GetDocumentLoadTiming() const;
 
-  virtual ResourceLoadTiming* GetResourceLoadTiming() const;
-  virtual bool AllowTimingDetails() const;
-  virtual bool DidReuseConnection() const;
-  virtual unsigned long long GetTransferSize() const;
-  virtual unsigned long long GetEncodedBodySize() const;
-  virtual unsigned long long GetDecodedBodySize() const;
+  ResourceLoadTiming* GetResourceLoadTiming() const override;
+  bool AllowTimingDetails() const override;
+  bool DidReuseConnection() const override;
+  unsigned long long GetTransferSize() const override;
+  unsigned long long GetEncodedBodySize() const override;
+  unsigned long long GetDecodedBodySize() const override;
 
   bool GetAllowRedirectDetails() const;
 

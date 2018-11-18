@@ -105,12 +105,20 @@ class SwReporterOnDemandFetcher : public ServiceObserver {
 // SwReporter. Once ready, this may trigger a periodic run of the reporter.
 void RegisterSwReporterComponent(ComponentUpdateService* cus);
 
+// Allow tests to register a function to be called when the registration
+// of the reporter component is done.
+void SetRegisterSwReporterComponentCallbackForTesting(
+    base::OnceClosure registration_cb);
+
 // Register local state preferences related to the SwReporter.
 void RegisterPrefsForSwReporter(PrefRegistrySimple* registry);
 
 // Register profile preferences related to the SwReporter.
 void RegisterProfilePrefsForSwReporter(
     user_prefs::PrefRegistrySyncable* registry);
+
+// Checks if we have information from the Cleaner and records UMA statistics.
+void ReportUMAForLastCleanerRun();
 
 }  // namespace component_updater
 

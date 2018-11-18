@@ -19,8 +19,21 @@
 
 namespace autofill {
 
+struct AutofillMetadata;
+
 // A midline horizontal ellipsis (U+22EF).
 extern const base::char16 kMidlineEllipsis[];
+
+namespace internal {
+
+// Returns an obfuscated representation of a credit card number given its last
+// digits. To ensure that the obfuscation is placed at the left of the last four
+// digits, even for RTL languages, inserts a Left-To-Right Embedding mark at the
+// beginning and a Pop Directional Formatting mark at the end.
+// Exposed for testing.
+base::string16 GetObfuscatedStringForCardDigits(const base::string16& digits);
+
+}  // namespace internal
 
 // A form group that stores card information.
 class CreditCard : public AutofillDataModel {
@@ -94,6 +107,10 @@ class CreditCard : public AutofillDataModel {
   // Sets/gets the status of a server card.
   void SetServerStatus(ServerStatus status);
   ServerStatus GetServerStatus() const;
+
+  // AutofillDataModel:
+  AutofillMetadata GetMetadata() const override;
+  bool SetMetadata(const AutofillMetadata metadata) override;
 
   // FormGroup:
   void GetMatchingTypes(const base::string16& text,
@@ -218,7 +235,7 @@ class CreditCard : public AutofillDataModel {
 
   // Various display functions.
 
-  // Card preview summary, for example: "Visa - 1234", ", 01/2020".
+  // Card preview summary, for example: "Visa - ****1234", ", 01/2020".
   const std::pair<base::string16, base::string16> LabelPieces() const;
   // Like LabelPieces, but appends the two pieces together.
   const base::string16 Label() const;
@@ -227,21 +244,39 @@ class CreditCard : public AutofillDataModel {
   base::string16 LastFourDigits() const;
   // The user-visible issuer network of the card, e.g. 'Mastercard'.
   base::string16 NetworkForDisplay() const;
-  // A label for this card formatted as 'IssuerNetwork - 2345'.
+  // A label for this card formatted as '****2345'.
+  base::string16 ObfuscatedLastFourDigits() const;
+  // A label for this card formatted as 'IssuerNetwork - ****2345'.
   base::string16 NetworkAndLastFourDigits() const;
-  // A label for this card formatted as 'BankName' - 2345' if bank name
-  // experiment turned on and bank name available; otherwise, formated as
-  // 'IssuerNetwork - 2345'.
+  // A label for this card formatted as 'BankName' - ****2345' if bank name
+  // experiment turned on and bank name available; otherwise, formatted as
+  // 'IssuerNetwork - ****2345'.
   base::string16 NetworkOrBankNameAndLastFourDigits() const;
-  // Localized expiration for this card formatted as 'Exp: 06/17'.
-  base::string16 AbbreviatedExpirationDateForDisplay() const;
-  // Returns the date when the card was last used in autofill.
-  base::string16 GetLastUsedDateForDisplay(const std::string& app_locale) const;
+  // A label for this card formatted as
+  // 'BankName/Netowrk' - ****2345, expires on MM/YY' if bank name
+  // experiment turned on and bank name available; otherwise, formatted as
+  // 'IssuerNetwork - ****2345, expires on MM/YY'.
+  // This label is used as a second line label when the autofill dropdown
+  // layout experiment is enabled and the cardholder name is selected.
+  base::string16 NetworkOrBankNameLastFourDigitsAndDescriptiveExpiration(
+      const std::string& app_locale) const;
+  // A label for this card formatted as 'Expires on MM/YY'.
+  // This label is used as a second line label when the autofill dropdown
+  // uses a two line layout and the credit card number is selected.
+  base::string16 DescriptiveExpiration(const std::string& app_locale) const;
+
+  // Localized expiration for this card formatted as 'Exp: 06/17' if with_prefix
+  // is true or as '06/17' otherwise.
+  base::string16 AbbreviatedExpirationDateForDisplay(bool with_prefix) const;
   // Formatted expiration date (e.g., 05/2020).
   base::string16 ExpirationDateForDisplay() const;
   // Expiration functions.
   base::string16 ExpirationMonthAsString() const;
   base::string16 Expiration4DigitYearAsString() const;
+
+  // Whether the cardholder name was created from separate first name and last
+  // name fields.
+  bool HasFirstAndLastName() const;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(CreditCardTest, SetExpirationDateFromString);
@@ -267,6 +302,9 @@ class CreditCard : public AutofillDataModel {
 
   // A label for this card formatted as 'BankName - 2345'.
   base::string16 BankNameAndLastFourDigits() const;
+
+  // Sets the name_on_card_ value based on the saved name parts.
+  void SetNameOnCardFromSeparateParts();
 
   // See enum definition above.
   RecordType record_type_;
@@ -300,6 +338,12 @@ class CreditCard : public AutofillDataModel {
 
   // The identifier of the billing address for this card.
   std::string billing_address_id_;
+
+  // The credit card holder's name parts. Used when creating a new card to hold
+  // on to the value until the credit card holder's other name part is set,
+  // since we only store the full name.
+  base::string16 temp_card_first_name_;
+  base::string16 temp_card_last_name_;
 };
 
 // So we can compare CreditCards with EXPECT_EQ().

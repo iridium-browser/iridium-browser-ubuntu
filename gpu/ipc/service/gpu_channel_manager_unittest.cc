@@ -40,14 +40,19 @@ class GpuChannelManagerTest : public GpuChannelTestCommon {
     gpu::ContextResult result = gpu::ContextResult::kFatalFailure;
     gpu::Capabilities capabilities;
     HandleMessage(channel, new GpuChannelMsg_CreateCommandBuffer(
-                               init_params, kRouteId, GetSharedHandle(),
+                               init_params, kRouteId, GetSharedMemoryRegion(),
                                &result, &capabilities));
     EXPECT_EQ(result, gpu::ContextResult::kSuccess);
+
+    auto raster_decoder_state =
+        channel_manager()->GetRasterDecoderContextState(&result);
+    EXPECT_EQ(result, ContextResult::kSuccess);
+    ASSERT_TRUE(raster_decoder_state);
 
     CommandBufferStub* stub = channel->LookupCommandBuffer(kRouteId);
     EXPECT_TRUE(stub);
 
-    channel_manager()->OnApplicationBackgrounded();
+    channel_manager()->OnBackgroundCleanup();
 
     channel = channel_manager()->LookupChannel(kClientId);
     if (should_destroy_channel) {
@@ -55,6 +60,10 @@ class GpuChannelManagerTest : public GpuChannelTestCommon {
     } else {
       EXPECT_TRUE(channel);
     }
+
+    // We should always clear the shared raster state on background cleanup.
+    ASSERT_NE(channel_manager()->GetRasterDecoderContextState(&result).get(),
+              raster_decoder_state.get());
   }
 #endif
 };
@@ -64,8 +73,8 @@ TEST_F(GpuChannelManagerTest, EstablishChannel) {
   uint64_t kClientTracingId = 1;
 
   ASSERT_TRUE(channel_manager());
-  GpuChannel* channel =
-      channel_manager()->EstablishChannel(kClientId, kClientTracingId, false);
+  GpuChannel* channel = channel_manager()->EstablishChannel(
+      kClientId, kClientTracingId, false, true);
   EXPECT_TRUE(channel);
   EXPECT_EQ(channel_manager()->LookupChannel(kClientId), channel);
 }

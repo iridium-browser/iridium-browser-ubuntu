@@ -27,9 +27,6 @@
 
 #include "base/location.h"
 #include "third_party/blink/public/platform/task_type.h"
-#include "third_party/blink/renderer/bindings/core/v8/exception_messages.h"
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/modules/webdatabase/database.h"
@@ -38,6 +35,7 @@
 #include "third_party/blink/renderer/modules/webdatabase/database_task.h"
 #include "third_party/blink/renderer/modules/webdatabase/database_tracker.h"
 #include "third_party/blink/renderer/modules/webdatabase/storage_log.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 
 namespace blink {
@@ -51,7 +49,7 @@ DatabaseManager& DatabaseManager::Manager() {
   return *g_database_manager;
 }
 
-DatabaseManager::DatabaseManager() = default;
+DatabaseManager::DatabaseManager() : context_map_(new ContextMap) {}
 
 DatabaseManager::~DatabaseManager() = default;
 
@@ -63,7 +61,7 @@ DatabaseContext* DatabaseManager::ExistingDatabaseContextFor(
   DCHECK_LE(database_context_registered_count_,
             database_context_instance_count_);
 #endif
-  return context_map_.at(context);
+  return context_map_->at(context);
 }
 
 DatabaseContext* DatabaseManager::DatabaseContextFor(
@@ -76,7 +74,7 @@ DatabaseContext* DatabaseManager::DatabaseContextFor(
 void DatabaseManager::RegisterDatabaseContext(
     DatabaseContext* database_context) {
   ExecutionContext* context = database_context->GetExecutionContext();
-  context_map_.Set(context, database_context);
+  context_map_->Set(context, database_context);
 #if DCHECK_IS_ON()
   database_context_registered_count_++;
 #endif
@@ -85,11 +83,11 @@ void DatabaseManager::RegisterDatabaseContext(
 void DatabaseManager::UnregisterDatabaseContext(
     DatabaseContext* database_context) {
   ExecutionContext* context = database_context->GetExecutionContext();
-  DCHECK(context_map_.at(context));
+  DCHECK(context_map_->at(context));
 #if DCHECK_IS_ON()
   database_context_registered_count_--;
 #endif
-  context_map_.erase(context);
+  context_map_->erase(context);
 }
 
 #if DCHECK_IS_ON()
@@ -115,7 +113,8 @@ void DatabaseManager::ThrowExceptionForDatabaseError(
       exception_state.ThrowSecurityError(error_message);
       return;
     case DatabaseError::kInvalidDatabaseState:
-      exception_state.ThrowDOMException(kInvalidStateError, error_message);
+      exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
+                                        error_message);
       return;
     default:
       NOTREACHED();

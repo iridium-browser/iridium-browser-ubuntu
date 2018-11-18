@@ -8,6 +8,8 @@
 #ifndef BASE_CALLBACK_H_
 #define BASE_CALLBACK_H_
 
+#include <stddef.h>
+
 #include "base/callback_forward.h"
 #include "base/callback_internal.h"
 
@@ -34,7 +36,8 @@
 //   }, 1);
 //   // Run() only needs the remaining unbound argument |y|.
 //   printf("1 + 2 = %d\n", std::move(cb).Run(2));  // Prints 3
-//   printf("cb is null? %s\n", cb ? "true" : "false");  // Prints true
+//   printf("cb is null? %s\n",
+//          cb.is_null() ? "true" : "false");  // Prints true
 //   std::move(cb).Run(2);  // Crashes since |cb| has already run.
 //
 // Callbacks also support cancellation. A common use is binding the receiver
@@ -54,9 +57,10 @@ class OnceCallback<R(Args...)> : public internal::CallbackBase {
  public:
   using RunType = R(Args...);
   using PolymorphicInvoke = R (*)(internal::BindStateBase*,
-                                  internal::PassingTraitsType<Args>...);
+                                  internal::PassingType<Args>...);
 
   constexpr OnceCallback() = default;
+  OnceCallback(std::nullptr_t) = delete;
 
   explicit OnceCallback(internal::BindStateBase* bind_state)
       : internal::CallbackBase(bind_state) {}
@@ -64,8 +68,8 @@ class OnceCallback<R(Args...)> : public internal::CallbackBase {
   OnceCallback(const OnceCallback&) = delete;
   OnceCallback& operator=(const OnceCallback&) = delete;
 
-  OnceCallback(OnceCallback&&) = default;
-  OnceCallback& operator=(OnceCallback&&) = default;
+  OnceCallback(OnceCallback&&) noexcept = default;
+  OnceCallback& operator=(OnceCallback&&) noexcept = default;
 
   OnceCallback(RepeatingCallback<RunType> other)
       : internal::CallbackBase(std::move(other)) {}
@@ -101,9 +105,10 @@ class RepeatingCallback<R(Args...)> : public internal::CallbackBaseCopyable {
  public:
   using RunType = R(Args...);
   using PolymorphicInvoke = R (*)(internal::BindStateBase*,
-                                  internal::PassingTraitsType<Args>...);
+                                  internal::PassingType<Args>...);
 
   constexpr RepeatingCallback() = default;
+  RepeatingCallback(std::nullptr_t) = delete;
 
   explicit RepeatingCallback(internal::BindStateBase* bind_state)
       : internal::CallbackBaseCopyable(bind_state) {}
@@ -111,8 +116,8 @@ class RepeatingCallback<R(Args...)> : public internal::CallbackBaseCopyable {
   // Copyable and movable.
   RepeatingCallback(const RepeatingCallback&) = default;
   RepeatingCallback& operator=(const RepeatingCallback&) = default;
-  RepeatingCallback(RepeatingCallback&&) = default;
-  RepeatingCallback& operator=(RepeatingCallback&&) = default;
+  RepeatingCallback(RepeatingCallback&&) noexcept = default;
+  RepeatingCallback& operator=(RepeatingCallback&&) noexcept = default;
 
   bool Equals(const RepeatingCallback& other) const {
     return EqualsInternal(other);

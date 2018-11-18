@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef PAPPI_TESTS_TEST_URL_LOADER_H_
-#define PAPPI_TESTS_TEST_URL_LOADER_H_
+#ifndef PPAPI_TESTS_TEST_URL_LOADER_H_
+#define PPAPI_TESTS_TEST_URL_LOADER_H_
 
 #include <stdint.h>
 
@@ -41,14 +41,17 @@ class TestURLLoader : public TestCase {
                              std::string* message);
   std::string GetReachableAbsoluteURL(const std::string& file_name);
   std::string GetReachableCrossOriginURL(const std::string& file_name);
-  int32_t OpenUntrusted(const pp::URLRequestInfo& request);
-  int32_t OpenTrusted(const pp::URLRequestInfo& request);
+  int32_t OpenUntrusted(const pp::URLRequestInfo& request,
+                        std::string* response_body);
+  int32_t OpenTrusted(const pp::URLRequestInfo& request,
+                      std::string* response_body);
   int32_t OpenUntrusted(const std::string& method,
                         const std::string& header);
   int32_t OpenTrusted(const std::string& method,
                       const std::string& header);
   int32_t Open(const pp::URLRequestInfo& request,
-               bool with_universal_access);
+               bool with_universal_access,
+               std::string* response_body);
   int32_t OpenWithPrefetchBufferThreshold(int32_t lower, int32_t upper);
 
   std::string TestBasicGET();
@@ -65,6 +68,8 @@ class TestURLLoader : public TestCase {
   std::string TestTrustedSameOriginRestriction();
   std::string TestUntrustedCrossOriginRequest();
   std::string TestTrustedCrossOriginRequest();
+  std::string TestUntrustedCorbEligibleRequest();
+  std::string TestTrustedCorbEligibleRequest();
   std::string TestUntrustedJavascriptURLRestriction();
   std::string TestTrustedJavascriptURLRestriction();
   std::string TestUntrustedHttpRequests();
@@ -80,4 +85,4 @@ class TestURLLoader : public TestCase {
   const PPB_URLLoaderTrusted* url_loader_trusted_interface_;
 };
 
-#endif  // PAPPI_TESTS_TEST_URL_LOADER_H_
+#endif  // PPAPI_TESTS_TEST_URL_LOADER_H_

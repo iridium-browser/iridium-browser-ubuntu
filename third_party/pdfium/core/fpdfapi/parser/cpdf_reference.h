@@ -15,7 +15,7 @@
 
 class CPDF_IndirectObjectHolder;
 
-class CPDF_Reference : public CPDF_Object {
+class CPDF_Reference final : public CPDF_Object {
  public:
   CPDF_Reference(CPDF_IndirectObjectHolder* pDoc, uint32_t objnum);
   ~CPDF_Reference() override;
@@ -23,25 +23,31 @@ class CPDF_Reference : public CPDF_Object {
   // CPDF_Object:
   Type GetType() const override;
   std::unique_ptr<CPDF_Object> Clone() const override;
-  CPDF_Object* GetDirect() const override;
+  CPDF_Object* GetDirect() override;
+  const CPDF_Object* GetDirect() const override;
   ByteString GetString() const override;
   float GetNumber() const override;
   int GetInteger() const override;
-  CPDF_Dictionary* GetDict() const override;
+  CPDF_Dictionary* GetDict() override;
+  const CPDF_Dictionary* GetDict() const override;
   bool IsReference() const override;
   CPDF_Reference* AsReference() override;
   const CPDF_Reference* AsReference() const override;
-  bool WriteTo(IFX_ArchiveStream* archive) const override;
+  bool WriteTo(IFX_ArchiveStream* archive,
+               const CPDF_Encryptor* encryptor) const override;
+  std::unique_ptr<CPDF_Object> MakeReference(
+      CPDF_IndirectObjectHolder* holder) const override;
 
   CPDF_IndirectObjectHolder* GetObjList() const { return m_pObjList.Get(); }
   uint32_t GetRefObjNum() const { return m_RefObjNum; }
   void SetRef(CPDF_IndirectObjectHolder* pDoc, uint32_t objnum);
 
- protected:
+ private:
   std::unique_ptr<CPDF_Object> CloneNonCyclic(
       bool bDirect,
       std::set<const CPDF_Object*>* pVisited) const override;
-  CPDF_Object* SafeGetDirect() const;
+  CPDF_Object* SafeGetDirect();
+  const CPDF_Object* SafeGetDirect() const;
 
   UnownedPtr<CPDF_IndirectObjectHolder> m_pObjList;
   uint32_t m_RefObjNum;

@@ -227,6 +227,10 @@ void CrashReportUploadThread::ProcessPendingReport(
       database_->RecordUploadComplete(std::move(upload_report), response_body);
       break;
     case UploadResult::kPermanentFailure:
+      upload_report.reset();
+      database_->SkipReportUpload(
+          report.uuid, Metrics::CrashSkippedReason::kPrepareForUploadFailed);
+      break;
     case UploadResult::kRetry:
       upload_report.reset();
 
@@ -282,6 +286,11 @@ CrashReportUploadThread::UploadResult CrashReportUploadThread::UploadReport(
     } else {
       http_multipart_builder.SetFormData(kv.first, kv.second);
     }
+  }
+
+  for (const auto& it : report->GetAttachments()) {
+    http_multipart_builder.SetFileAttachment(
+        it.first, it.first, it.second, "application/octet-stream");
   }
 
   http_multipart_builder.SetFileAttachment(kMinidumpKey,

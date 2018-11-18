@@ -7,24 +7,17 @@
 
 #include "base/macros.h"
 #include "build/build_config.h"
-#include "chrome/browser/upgrade_observer.h"
+#include "chrome/browser/upgrade_detector/upgrade_observer.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
-
-#if defined(OS_WIN)
-#include "chrome/browser/win/enumerate_modules_model.h"
-#endif
 
 class Profile;
 
 // AppMenuIconController encapsulates the logic for badging the app menu icon
 // as a result of various events - such as available updates, errors, etc.
 class AppMenuIconController :
-#if defined(OS_WIN)
-    public EnumerateModulesModel::Observer,
-#endif
     public content::NotificationObserver,
     public UpgradeObserver {
  public:
@@ -32,7 +25,6 @@ class AppMenuIconController :
     NONE,
     UPGRADE_NOTIFICATION,
     GLOBAL_ERROR,
-    INCOMPATIBILITY_WARNING,
   };
   enum class Severity {
     NONE,
@@ -67,12 +59,6 @@ class AppMenuIconController :
   void UpdateDelegate();
 
  private:
-#if defined(OS_WIN)
-  // EnumerateModulesModel::Observer:
-  void OnScanCompleted() override;
-  void OnConflictsAcknowledged() override;
-#endif
-
   // content::NotificationObserver:
   void Observe(int type,
                const content::NotificationSource& source,
@@ -81,6 +67,8 @@ class AppMenuIconController :
   // UpgradeObserver:
   void OnUpgradeRecommended() override;
 
+  // True for desktop Chrome on dev and canary channels.
+  const bool is_unstable_channel_;
   Profile* profile_;
   Delegate* delegate_;
   content::NotificationRegistrar registrar_;

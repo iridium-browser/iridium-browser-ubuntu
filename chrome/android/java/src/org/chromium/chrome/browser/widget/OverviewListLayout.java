@@ -65,7 +65,7 @@ public class OverviewListLayout extends Layout implements AccessibilityTabModelA
     }
 
     @Override
-    public ViewportMode getViewportMode() {
+    public @ViewportMode int getViewportMode() {
         return ViewportMode.ALWAYS_FULLSCREEN;
     }
 
@@ -80,7 +80,7 @@ public class OverviewListLayout extends Layout implements AccessibilityTabModelA
                 (FrameLayout.LayoutParams) mTabModelWrapper.getLayoutParams();
         if (params == null) return;
 
-        params.bottomMargin = (int) (getTopBrowserControlsHeight() * mDensity);
+        params.bottomMargin = (int) (getBottomBrowserControlsHeight() * mDensity);
         params.topMargin = (int) (getTopBrowserControlsHeight() * mDensity);
 
         mTabModelWrapper.setLayoutParams(params);
@@ -169,7 +169,7 @@ public class OverviewListLayout extends Layout implements AccessibilityTabModelA
     }
 
     @VisibleForTesting
-    public ViewGroup getContainer() {
+    public AccessibilityTabModelWrapper getContainer() {
         return mTabModelWrapper;
     }
 

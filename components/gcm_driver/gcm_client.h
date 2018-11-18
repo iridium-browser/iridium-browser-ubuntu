@@ -16,18 +16,23 @@
 #include "components/gcm_driver/common/gcm_messages.h"
 #include "components/gcm_driver/gcm_activity.h"
 #include "components/gcm_driver/registration_info.h"
+#include "services/network/public/mojom/proxy_resolving_socket.mojom.h"
 
 template <class T> class scoped_refptr;
 
 namespace base {
 class FilePath;
+class RetainingOneShotTimer;
 class SequencedTaskRunner;
-class Timer;
 }
 
 namespace net {
 class IPEndPoint;
-class URLRequestContextGetter;
+}
+
+namespace network {
+class NetworkConnectionTracker;
+class SharedURLLoaderFactory;
 }
 
 namespace gcm {
@@ -129,6 +134,7 @@ class GCMClient {
     base::Time last_checkin;
     base::Time next_checkin;
     uint64_t android_id;
+    uint64_t android_secret;
     std::vector<std::string> registered_app_ids;
     int send_queue_size;
     int resend_queue_size;
@@ -230,16 +236,20 @@ class GCMClient {
   // |chrome_build_info|: chrome info, i.e., version, channel and etc.
   // |store_path|: path to the GCM store.
   // |blocking_task_runner|: for running blocking file tasks.
-  // |url_request_context_getter|: for url requests. The GCMClient must be
-  //     deleted before the Getter's underlying URLRequestContext.
+  // |get_socket_factory_callback|: a callback that can accept a request for a
+  //     network::mojom::ProxyResolvingSocketFactoryPtr. It needs to be safe to
+  //     run on any thread.
   // |delegate|: the delegate whose methods will be called asynchronously in
   //     response to events and messages.
   virtual void Initialize(
       const ChromeBuildInfo& chrome_build_info,
       const base::FilePath& store_path,
       const scoped_refptr<base::SequencedTaskRunner>& blocking_task_runner,
-      const scoped_refptr<net::URLRequestContextGetter>&
-          url_request_context_getter,
+      base::RepeatingCallback<
+          void(network::mojom::ProxyResolvingSocketFactoryRequest)>
+          get_socket_factory_callback,
+      const scoped_refptr<network::SharedURLLoaderFactory>& url_loader_factory,
+      network::NetworkConnectionTracker* network_connection_tracker_,
       std::unique_ptr<Encryptor> encryptor,
       Delegate* delegate) = 0;
 
@@ -317,7 +327,8 @@ class GCMClient {
   virtual void SetLastTokenFetchTime(const base::Time& time) = 0;
 
   // Updates the timer used by the HeartbeatManager for sending heartbeats.
-  virtual void UpdateHeartbeatTimer(std::unique_ptr<base::Timer> timer) = 0;
+  virtual void UpdateHeartbeatTimer(
+      std::unique_ptr<base::RetainingOneShotTimer> timer) = 0;
 
   // Adds the Instance ID data for a specific app to the persistent store.
   virtual void AddInstanceIDData(const std::string& app_id,

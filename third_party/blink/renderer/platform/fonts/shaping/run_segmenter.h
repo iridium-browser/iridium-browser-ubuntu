@@ -36,6 +36,7 @@ class PLATFORM_EXPORT RunSegmenter {
     FontFallbackPriority font_fallback_priority;
   };
 
+  // Initialize a RunSegmenter.
   RunSegmenter(const UChar* buffer, unsigned buffer_size, FontOrientation);
 
   bool Consume(RunSegmenterRange*);

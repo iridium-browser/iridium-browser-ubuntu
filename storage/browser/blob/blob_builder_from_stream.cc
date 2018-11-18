@@ -7,7 +7,7 @@
 #include "base/containers/span.h"
 #include "base/guid.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "storage/browser/blob/blob_data_item.h"
 #include "storage/browser/blob/blob_storage_context.h"
 #include "storage/browser/blob/shareable_file_reference.h"
@@ -322,8 +322,10 @@ BlobBuilderFromStream::BlobBuilderFromStream(
       weak_factory_(this) {
   DCHECK(context_);
 
-  AllocateMoreMemorySpace(length_hint, std::move(progress_client),
-                          std::move(data));
+  context_->mutable_memory_controller()->CallWhenStorageLimitsAreKnown(
+      base::BindOnce(&BlobBuilderFromStream::AllocateMoreMemorySpace,
+                     weak_factory_.GetWeakPtr(), length_hint,
+                     std::move(progress_client), std::move(data)));
 }
 
 BlobBuilderFromStream::~BlobBuilderFromStream() {

@@ -82,6 +82,14 @@ const AtomicString& ErrorEvent::InterfaceName() const {
   return EventNames::ErrorEvent;
 }
 
+bool ErrorEvent::IsErrorEvent() const {
+  return true;
+}
+
+bool ErrorEvent::CanBeDispatchedInWorld(const DOMWrapperWorld& world) const {
+  return !world_ || world_ == &world;
+}
+
 ScriptValue ErrorEvent::error(ScriptState* script_state) const {
   // Don't return |m_error| when we are in the different worlds to avoid
   // leaking a V8 value.
@@ -95,12 +103,8 @@ ScriptValue ErrorEvent::error(ScriptState* script_state) const {
 }
 
 void ErrorEvent::Trace(blink::Visitor* visitor) {
+  visitor->Trace(error_);
   Event::Trace(visitor);
-}
-
-void ErrorEvent::TraceWrappers(const ScriptWrappableVisitor* visitor) const {
-  visitor->TraceWrappers(error_);
-  Event::TraceWrappers(visitor);
 }
 
 }  // namespace blink

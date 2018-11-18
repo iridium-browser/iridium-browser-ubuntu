@@ -10,13 +10,13 @@
 #include "base/files/file_util.h"
 #include "base/format_macros.h"
 #include "base/location.h"
-#include "base/mac/bind_objc_block.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "base/run_loop.h"
 #include "base/strings/sys_string_conversions.h"
-#include "base/task_scheduler/task_scheduler.h"
+#include "base/task/task_scheduler/task_scheduler.h"
 #include "base/time/time.h"
 #import "ios/chrome/browser/snapshots/snapshot_cache_internal.h"
+#import "ios/chrome/browser/snapshots/snapshot_cache_observer.h"
 #include "ios/web/public/test/test_web_thread_bundle.h"
 #include "ios/web/public/web_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -29,6 +29,18 @@
 
 static const NSUInteger kSessionCount = 10;
 static const NSUInteger kSnapshotPixelSize = 8;
+
+@interface FakeSnapshotCacheObserver : NSObject<SnapshotCacheObserver>
+@property(nonatomic, copy) NSString* lastUpdatedIdentifier;
+@end
+
+@implementation FakeSnapshotCacheObserver
+@synthesize lastUpdatedIdentifier = _lastUpdatedIdentifier;
+- (void)snapshotCache:(SnapshotCache*)snapshotCache
+    didUpdateSnapshotForIdentifier:(NSString*)identifier {
+  self.lastUpdatedIdentifier = identifier;
+}
+@end
 
 namespace {
 
@@ -79,6 +91,16 @@ class SnapshotCacheTest : public PlatformTest {
     CGContextFillRect(
         context, CGRectMake(0.0, 0.0, kSnapshotPixelSize, kSnapshotPixelSize));
     return UIGraphicsGetImageFromCurrentImageContext();
+  }
+
+  // Generates an image of |size|, filled with a random color.
+  UIImage* GenerateRandomImage(CGSize size) {
+    UIGraphicsBeginImageContextWithOptions(size, /*opaque=*/NO,
+                                           UIScreen.mainScreen.scale);
+    CGContextRef context = UIGraphicsGetCurrentContext();
+    UIImage* image = GenerateRandomImage(context);
+    UIGraphicsEndImageContext();
+    return image;
   }
 
   // Flushes all the runloops internally used by the snapshot cache.
@@ -570,4 +592,55 @@ TEST_F(SnapshotCacheTest, DeleteRetinaImages) {
   EXPECT_FALSE(base::PathExists(retinaFile));
 }
 
+// Tests that a marked image does not immediately delete when calling
+// |-removeImageWithSessionID:|. Calling |-removeMarkedImages| immediately
+// deletes the marked image.
+TEST_F(SnapshotCacheTest, MarkedImageNotImmediatelyDeleted) {
+  SnapshotCache* cache = GetSnapshotCache();
+  UIImage* image =
+      GenerateRandomImage(CGSizeMake(kSnapshotPixelSize, kSnapshotPixelSize));
+  [cache setImage:image withSessionID:@"sessionID"];
+  base::FilePath image_path = [cache imagePathForSessionID:@"sessionID"];
+  [cache markImageWithSessionID:@"sessionID"];
+  [cache removeImageWithSessionID:@"sessionID"];
+  // Give enough time for deletion.
+  FlushRunLoops();
+  EXPECT_TRUE(base::PathExists(image_path));
+  [cache removeMarkedImages];
+  FlushRunLoops();
+  EXPECT_FALSE(base::PathExists(image_path));
+}
+
+// Tests that unmarked images are not deleted when calling
+// |-removeMarkedImages|.
+TEST_F(SnapshotCacheTest, UnmarkedImageNotDeleted) {
+  SnapshotCache* cache = GetSnapshotCache();
+  UIImage* image =
+      GenerateRandomImage(CGSizeMake(kSnapshotPixelSize, kSnapshotPixelSize));
+  [cache setImage:image withSessionID:@"sessionID"];
+  base::FilePath image_path = [cache imagePathForSessionID:@"sessionID"];
+  [cache markImageWithSessionID:@"sessionID"];
+  [cache unmarkAllImages];
+  [cache removeMarkedImages];
+  // Give enough time for deletion.
+  FlushRunLoops();
+  EXPECT_TRUE(base::PathExists(image_path));
+}
+
+// Tests that observers are notified when a snapshot is cached and removed.
+TEST_F(SnapshotCacheTest, ObserversNotifiedOnSetAndRemoveImage) {
+  SnapshotCache* cache = GetSnapshotCache();
+  FakeSnapshotCacheObserver* observer =
+      [[FakeSnapshotCacheObserver alloc] init];
+  [cache addObserver:observer];
+  EXPECT_NSEQ(nil, observer.lastUpdatedIdentifier);
+  UIImage* image = [testImages_ objectAtIndex:0];
+  NSString* sessionID = [testSessions_ objectAtIndex:0];
+  [cache setImage:image withSessionID:sessionID];
+  EXPECT_NSEQ(sessionID, observer.lastUpdatedIdentifier);
+  observer.lastUpdatedIdentifier = nil;
+  [cache removeImageWithSessionID:sessionID];
+  EXPECT_NSEQ(sessionID, observer.lastUpdatedIdentifier);
+  [cache removeObserver:observer];
+}
 }  // namespace

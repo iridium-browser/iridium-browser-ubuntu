@@ -4,6 +4,7 @@ include_rules = [
   "+ios/third_party",
   "+net",
   "+services/network/test",
+  "+services/network/public/cpp",
   "+sql",
   "+ui/base",
   "+ui/gfx",
@@ -26,4 +27,8 @@ include_rules = [
   # web::TestBrowserState in ios/chrome.
   "+ios/web/public",
   "-ios/web/public/test/fakes/test_browser_state.h",
+
+  # web::HttpServer is deprecated in favor of net::EmbeddedTestServer.
+  # See crbug.com/891834.
+  "-ios/web/public/test/http_server",
 ]

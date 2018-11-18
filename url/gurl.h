@@ -78,7 +78,7 @@ class URL_EXPORT GURL {
   ~GURL();
 
   GURL& operator=(const GURL& other);
-  GURL& operator=(GURL&& other);
+  GURL& operator=(GURL&& other) noexcept;
 
   // Returns true when this object represents a valid parsed URL. When not
   // valid, other functions will still succeed, but you will not get canonical
@@ -151,8 +151,8 @@ class URL_EXPORT GURL {
   //
   // It is an error to resolve a URL relative to an invalid URL. The result
   // will be the empty URL.
-  GURL Resolve(const std::string& relative) const;
-  GURL Resolve(const base::string16& relative) const;
+  GURL Resolve(base::StringPiece relative) const;
+  GURL Resolve(base::StringPiece16 relative) const;
 
   // Creates a new GURL by replacing the current URL's components with the
   // supplied versions. See the Replacements class in url_canon.h for more.
@@ -490,6 +490,6 @@ URL_EXPORT bool operator!=(const base::StringPiece& spec, const GURL& x);
 // variable named |<var_name>|.  This helps ensure that the value of |url| gets
 // preserved in crash dumps.
 #define DEBUG_ALIAS_FOR_GURL(var_name, url) \
-  DEBUG_ALIAS_FOR_CSTR(var_name, url.possibly_invalid_spec().c_str(), 128)
+  DEBUG_ALIAS_FOR_CSTR(var_name, (url).possibly_invalid_spec().c_str(), 128)
 
 #endif  // URL_GURL_H_

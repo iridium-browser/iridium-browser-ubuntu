@@ -39,7 +39,8 @@ class CONTENT_EXPORT AppCacheURLLoaderJob : public AppCacheJob,
   ~AppCacheURLLoaderJob() override;
 
   // Sets up the bindings.
-  void Start(network::mojom::URLLoaderRequest request,
+  void Start(const network::ResourceRequest& resource_request,
+             network::mojom::URLLoaderRequest request,
              network::mojom::URLLoaderClientPtr client);
 
   // AppCacheJob overrides.
@@ -55,7 +56,10 @@ class CONTENT_EXPORT AppCacheURLLoaderJob : public AppCacheJob,
   base::WeakPtr<AppCacheURLLoaderJob> GetDerivedWeakPtr();
 
   // network::mojom::URLLoader implementation:
-  void FollowRedirect() override;
+  void FollowRedirect(const base::Optional<std::vector<std::string>>&
+                          to_be_removed_request_headers,
+                      const base::Optional<net::HttpRequestHeaders>&
+                          modified_request_headers) override;
   void ProceedWithResponse() override;
   void SetPriority(net::RequestPriority priority,
                    int32_t intra_priority_value) override;
@@ -86,8 +90,9 @@ class CONTENT_EXPORT AppCacheURLLoaderJob : public AppCacheJob,
   // Callback invoked when the data pipe can be written to.
   void OnResponseBodyStreamReady(MojoResult result);
 
-  // Mojo binding error handler.
-  void OnConnectionError();
+  // Schedules a task to delete self with some clean-ups. This is also used as
+  // a mojo binding error handler.
+  void DeleteSoon();
 
   void SendResponseInfo();
   void ReadMore();

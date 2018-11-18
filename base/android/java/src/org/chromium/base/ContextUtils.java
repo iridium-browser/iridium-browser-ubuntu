@@ -7,10 +7,8 @@ package org.chromium.base;
 import android.app.Application;
 import android.content.Context;
 import android.content.ContextWrapper;
-import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.res.AssetManager;
-import android.os.Build;
 import android.os.Process;
 import android.preference.PreferenceManager;
 
@@ -109,26 +107,6 @@ public class ContextUtils {
         Holder.sSharedPreferences = fetchAppSharedPreferences();
     }
 
-    /**
-     * Starts a service with {@code Intent}.  This will be started with the foreground expectation
-     * on Android O and higher.
-     * TODO(crbug.com/769683): Temporary measure until we roll the support library to 26.1.0.
-     *
-     * @param context Context to start Service from.
-     * @param intent The description of the Service to start.
-     *
-     * @see {@link android.support.v4.content.ContextCompat#startForegroundService(Context,Intent)}
-     * @see Context#startForegroundService(Intent)
-     * @see Context#startService(Intent)
-     */
-    public static void startForegroundService(Context context, Intent intent) {
-        if (Build.VERSION.SDK_INT >= 26) {
-            context.startForegroundService(intent);
-        } else {
-            context.startService(intent);
-        }
-    }
-
     private static void initJavaSideApplicationContext(Context appContext) {
         if (appContext == null) {
             throw new RuntimeException("Global application context cannot be set to null.");
@@ -189,9 +167,5 @@ public class ContextUtils {
             // https://chromium-review.googlesource.com/c/chromium/src/+/905563/1
             throw new RuntimeException(e);
         }
-    }
-
-    public static boolean isMainProcess() {
-        return !getProcessName().contains(":");
     }
 }

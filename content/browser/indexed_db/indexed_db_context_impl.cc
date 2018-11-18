@@ -16,7 +16,7 @@
 #include "base/sequenced_task_runner.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time/default_clock.h"
 #include "base/time/time.h"
@@ -177,13 +177,15 @@ base::ListValue* IndexedDBContextImpl::GetAllOriginsDetails() {
     info->SetString("url", origin.Serialize());
     info->SetString("size", ui::FormatBytes(GetOriginDiskUsage(origin)));
     info->SetDouble("last_modified", GetOriginLastModified(origin).ToJsTime());
+
+    auto paths = std::make_unique<base::ListValue>();
     if (!is_incognito()) {
-      std::unique_ptr<base::ListValue> paths(
-          std::make_unique<base::ListValue>());
       for (const base::FilePath& path : GetStoragePaths(origin))
         paths->AppendString(path.value());
-      info->Set("paths", std::move(paths));
+    } else {
+      paths->AppendString("N/A");
     }
+    info->Set("paths", std::move(paths));
     info->SetDouble("connection_count", GetConnectionCount(origin));
 
     // This ends up being O(n^2) since we iterate over all open databases
@@ -198,9 +200,7 @@ base::ListValue* IndexedDBContextImpl::GetAllOriginsDetails() {
       std::unique_ptr<base::ListValue> database_list(
           std::make_unique<base::ListValue>());
 
-      for (IndexedDBFactory::OriginDBMapIterator it = range.first;
-           it != range.second;
-           ++it) {
+      for (auto it = range.first; it != range.second; ++it) {
         const IndexedDBDatabase* db = it->second;
         std::unique_ptr<base::DictionaryValue> db_info(
             std::make_unique<base::DictionaryValue>());
@@ -292,16 +292,24 @@ int IndexedDBContextImpl::GetOriginBlobFileCount(const Origin& origin) {
 
 int64_t IndexedDBContextImpl::GetOriginDiskUsage(const Origin& origin) {
   DCHECK(TaskRunner()->RunsTasksInCurrentSequence());
-  if (data_path_.empty() || !HasOrigin(origin))
+  if (!HasOrigin(origin))
     return 0;
+
   EnsureDiskUsageCacheInitialized(origin);
   return origin_size_map_[origin];
 }
 
 base::Time IndexedDBContextImpl::GetOriginLastModified(const Origin& origin) {
   DCHECK(TaskRunner()->RunsTasksInCurrentSequence());
-  if (data_path_.empty() || !HasOrigin(origin))
+  if (!HasOrigin(origin))
     return base::Time();
+
+  if (is_incognito()) {
+    if (!factory_)
+      return base::Time();
+    return factory_->GetLastModified(origin);
+  }
+
   base::FilePath idb_directory = GetLevelDBPath(origin);
   base::File::Info file_info;
   if (!base::GetFileInfo(idb_directory, &file_info))
@@ -317,8 +325,14 @@ void IndexedDBContextImpl::DeleteForOrigin(const GURL& origin_url) {
 void IndexedDBContextImpl::DeleteForOrigin(const Origin& origin) {
   DCHECK(TaskRunner()->RunsTasksInCurrentSequence());
   ForceClose(origin, FORCE_CLOSE_DELETE_ORIGIN);
-  if (data_path_.empty() || !HasOrigin(origin))
+  if (!HasOrigin(origin))
     return;
+
+  if (is_incognito()) {
+    GetOriginSet()->erase(origin);
+    origin_size_map_.erase(origin);
+    return;
+  }
 
   base::FilePath idb_directory = GetLevelDBPath(origin);
   EnsureDiskUsageCacheInitialized(origin);
@@ -336,7 +350,7 @@ void IndexedDBContextImpl::DeleteForOrigin(const Origin& origin) {
   base::DeleteFile(GetBlobStorePath(origin), true /* recursive */);
   QueryDiskAndUpdateQuotaUsage(origin);
   if (s.ok()) {
-    RemoveFromOriginSet(origin);
+    GetOriginSet()->erase(origin);
     origin_size_map_.erase(origin);
   }
 }
@@ -350,7 +364,7 @@ void IndexedDBContextImpl::CopyOriginData(const GURL& origin_url,
 void IndexedDBContextImpl::CopyOriginData(const Origin& origin,
                                           IndexedDBContext* dest_context) {
   DCHECK(TaskRunner()->RunsTasksInCurrentSequence());
-  if (data_path_.empty() || !HasOrigin(origin))
+  if (is_incognito() || !HasOrigin(origin))
     return;
 
   IndexedDBContextImpl* dest_context_impl =
@@ -385,17 +399,43 @@ void IndexedDBContextImpl::ForceClose(const Origin origin,
                             reason,
                             FORCE_CLOSE_REASON_MAX);
 
-  if (data_path_.empty() || !HasOrigin(origin))
+  if (!HasOrigin(origin))
     return;
 
   if (factory_.get())
-    factory_->ForceClose(origin);
+    factory_->ForceClose(origin, reason == FORCE_CLOSE_DELETE_ORIGIN);
   DCHECK_EQ(0UL, GetConnectionCount(origin));
+}
+
+bool IndexedDBContextImpl::ForceSchemaDowngrade(const Origin& origin) {
+  DCHECK(TaskRunner()->RunsTasksInCurrentSequence());
+
+  if (is_incognito() || !HasOrigin(origin))
+    return false;
+
+  if (factory_.get()) {
+    factory_->ForceSchemaDowngrade(origin);
+    return true;
+  }
+  this->ForceClose(origin, FORCE_SCHEMA_DOWNGRADE_INTERNALS_PAGE);
+  return false;
+}
+
+V2SchemaCorruptionStatus IndexedDBContextImpl::HasV2SchemaCorruption(
+    const Origin& origin) {
+  DCHECK(TaskRunner()->RunsTasksInCurrentSequence());
+
+  if (is_incognito() || !HasOrigin(origin))
+    return V2SchemaCorruptionStatus::kUnknown;
+
+  if (factory_.get())
+    return factory_->HasV2SchemaCorruption(origin);
+  return V2SchemaCorruptionStatus::kUnknown;
 }
 
 size_t IndexedDBContextImpl::GetConnectionCount(const Origin& origin) {
   DCHECK(TaskRunner()->RunsTasksInCurrentSequence());
-  if (data_path_.empty() || !HasOrigin(origin))
+  if (!HasOrigin(origin))
     return 0;
 
   if (!factory_.get())
@@ -439,7 +479,7 @@ void IndexedDBContextImpl::ConnectionOpened(const Origin& origin,
   quota_manager_proxy()->NotifyStorageAccessed(
       storage::QuotaClient::kIndexedDatabase, origin,
       blink::mojom::StorageType::kTemporary);
-  if (AddToOriginSet(origin)) {
+  if (GetOriginSet()->insert(origin).second) {
     // A newly created db, notify the quota system.
     QueryDiskAndUpdateQuotaUsage(origin);
   } else {
@@ -463,7 +503,7 @@ void IndexedDBContextImpl::TransactionComplete(const Origin& origin) {
 }
 
 void IndexedDBContextImpl::DatabaseDeleted(const Origin& origin) {
-  AddToOriginSet(origin);
+  GetOriginSet()->insert(origin);
   QueryDiskAndUpdateQuotaUsage(origin);
 }
 
@@ -504,7 +544,7 @@ IndexedDBContextImpl::~IndexedDBContextImpl() {
                                           std::move(factory_)));
   }
 
-  if (data_path_.empty())
+  if (is_incognito())
     return;
 
   if (force_keep_session_state_)
@@ -544,19 +584,23 @@ base::FilePath IndexedDBContextImpl::GetLevelDBFileName(const Origin& origin) {
 
 base::FilePath IndexedDBContextImpl::GetBlobStorePath(
     const Origin& origin) const {
-  DCHECK(!data_path_.empty());
+  DCHECK(!is_incognito());
   return data_path_.Append(GetBlobStoreFileName(origin));
 }
 
 base::FilePath IndexedDBContextImpl::GetLevelDBPath(
     const Origin& origin) const {
-  DCHECK(!data_path_.empty());
+  DCHECK(!is_incognito());
   return data_path_.Append(GetLevelDBFileName(origin));
 }
 
 int64_t IndexedDBContextImpl::ReadUsageFromDisk(const Origin& origin) const {
-  if (data_path_.empty())
-    return 0;
+  if (is_incognito()) {
+    if (!factory_)
+      return 0;
+    return factory_->GetInMemoryDBSize(origin);
+  }
+
   int64_t total_size = 0;
   for (const base::FilePath& path : GetStoragePaths(origin))
     total_size += base::ComputeDirectorySize(path);

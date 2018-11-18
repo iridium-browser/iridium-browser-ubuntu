@@ -9,6 +9,7 @@
 #include <set>
 #include <utility>
 
+#include "constants/page_object.h"
 #include "core/fpdfapi/cpdf_pagerendercontext.h"
 #include "core/fpdfapi/page/cpdf_contentparser.h"
 #include "core/fpdfapi/page/cpdf_pageobject.h"
@@ -22,21 +23,23 @@
 CPDF_Page::CPDF_Page(CPDF_Document* pDocument,
                      CPDF_Dictionary* pPageDict,
                      bool bPageCache)
-    : CPDF_PageObjectHolder(pDocument, pPageDict), m_PageSize(100, 100) {
+    : CPDF_PageObjectHolder(pDocument, pPageDict),
+      m_PageSize(100, 100),
+      m_pPDFDocument(pDocument) {
   if (bPageCache)
     m_pPageRender = pdfium::MakeUnique<CPDF_PageRenderCache>(this);
   if (!pPageDict)
     return;
 
-  CPDF_Object* pPageAttr = GetPageAttr("Resources");
+  CPDF_Object* pPageAttr = GetPageAttr(pdfium::page_object::kResources);
   m_pResources = pPageAttr ? pPageAttr->GetDict() : nullptr;
   m_pPageResources = m_pResources;
 
-  CFX_FloatRect mediabox = GetBox("MediaBox");
+  CFX_FloatRect mediabox = GetBox(pdfium::page_object::kMediaBox);
   if (mediabox.IsEmpty())
     mediabox = CFX_FloatRect(0, 0, 612, 792);
 
-  m_BBox = GetBox("CropBox");
+  m_BBox = GetBox(pdfium::page_object::kCropBox);
   if (m_BBox.IsEmpty())
     m_BBox = mediabox;
   else
@@ -65,26 +68,45 @@ CPDF_Page::CPDF_Page(CPDF_Document* pDocument,
       break;
   }
 
-  m_iTransparency = PDFTRANS_ISOLATED;
+  m_Transparency = CPDF_Transparency();
+  m_Transparency.SetIsolated();
   LoadTransInfo();
 }
 
 CPDF_Page::~CPDF_Page() {}
 
+CPDF_Page* CPDF_Page::AsPDFPage() {
+  return this;
+}
+
+CPDFXFA_Page* CPDF_Page::AsXFAPage() {
+  return nullptr;
+}
+
+CPDF_Document* CPDF_Page::GetDocument() const {
+  return GetPDFDocument();
+}
+
+float CPDF_Page::GetPageWidth() const {
+  return m_PageSize.width;
+}
+
+float CPDF_Page::GetPageHeight() const {
+  return m_PageSize.height;
+}
+
 bool CPDF_Page::IsPage() const {
   return true;
 }
 
-void CPDF_Page::StartParse() {
-  if (m_ParseState == CONTENT_PARSED || m_ParseState == CONTENT_PARSING)
+void CPDF_Page::ParseContent() {
+  if (GetParseState() == ParseState::kParsed)
     return;
 
-  m_pParser = pdfium::MakeUnique<CPDF_ContentParser>(this);
-  m_ParseState = CONTENT_PARSING;
-}
+  if (GetParseState() == ParseState::kNotParsed)
+    StartParse(pdfium::MakeUnique<CPDF_ContentParser>(this));
 
-void CPDF_Page::ParseContent() {
-  StartParse();
+  ASSERT(GetParseState() == ParseState::kParsing);
   ContinueParse(nullptr);
 }
 
@@ -94,14 +116,14 @@ void CPDF_Page::SetRenderContext(
 }
 
 CPDF_Object* CPDF_Page::GetPageAttr(const ByteString& name) const {
-  CPDF_Dictionary* pPageDict = m_pFormDict.Get();
+  CPDF_Dictionary* pPageDict = GetDict();
   std::set<CPDF_Dictionary*> visited;
   while (1) {
     visited.insert(pPageDict);
     if (CPDF_Object* pObj = pPageDict->GetDirectObjectFor(name))
       return pObj;
 
-    pPageDict = pPageDict->GetDictFor("Parent");
+    pPageDict = pPageDict->GetDictFor(pdfium::page_object::kParent);
     if (!pPageDict || pdfium::ContainsKey(visited, pPageDict))
       break;
   }
@@ -193,21 +215,7 @@ CFX_Matrix CPDF_Page::GetDisplayMatrix(const FX_RECT& rect, int iRotate) const {
 }
 
 int CPDF_Page::GetPageRotation() const {
-  CPDF_Object* pRotate = GetPageAttr("Rotate");
+  CPDF_Object* pRotate = GetPageAttr(pdfium::page_object::kRotate);
   int rotate = pRotate ? (pRotate->GetInteger() / 90) % 4 : 0;
   return (rotate < 0) ? (rotate + 4) : rotate;
-}
-
-bool GraphicsData::operator<(const GraphicsData& other) const {
-  if (fillAlpha != other.fillAlpha)
-    return fillAlpha < other.fillAlpha;
-  if (strokeAlpha != other.strokeAlpha)
-    return strokeAlpha < other.strokeAlpha;
-  return blendType < other.blendType;
-}
-
-bool FontData::operator<(const FontData& other) const {
-  if (baseFont != other.baseFont)
-    return baseFont < other.baseFont;
-  return type < other.type;
 }

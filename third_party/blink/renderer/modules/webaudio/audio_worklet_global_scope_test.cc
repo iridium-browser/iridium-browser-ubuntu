@@ -24,6 +24,7 @@
 #include "third_party/blink/renderer/core/messaging/message_channel.h"
 #include "third_party/blink/renderer/core/messaging/message_port.h"
 #include "third_party/blink/renderer/core/origin_trials/origin_trial_context.h"
+#include "third_party/blink/renderer/core/script/script.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
 #include "third_party/blink/renderer/core/workers/global_scope_creation_params.h"
 #include "third_party/blink/renderer/core/workers/worker_backing_thread.h"
@@ -54,7 +55,7 @@ static const size_t kRenderQuantumFrames = 128;
 class AudioWorkletGlobalScopeTest : public PageTestBase {
  public:
   void SetUp() override {
-    AudioWorkletThread::CreateSharedBackingThreadForTest();
+    AudioWorkletThread::EnsureSharedBackingThread();
     PageTestBase::SetUp(IntSize());
     Document* document = &GetDocument();
     document->SetURL(KURL("https://example.com/"));
@@ -64,20 +65,19 @@ class AudioWorkletGlobalScopeTest : public PageTestBase {
 
   std::unique_ptr<AudioWorkletThread> CreateAudioWorkletThread() {
     std::unique_ptr<AudioWorkletThread> thread =
-        AudioWorkletThread::Create(nullptr, *reporting_proxy_);
+        AudioWorkletThread::Create(*reporting_proxy_);
     Document* document = &GetDocument();
     thread->Start(
         std::make_unique<GlobalScopeCreationParams>(
-            document->Url(), document->UserAgent(),
-            nullptr /* content_security_policy_parsed_headers */,
-            document->GetReferrerPolicy(), document->GetSecurityOrigin(),
-            document->IsSecureContext(), nullptr /* worker_clients */,
+            document->Url(), ScriptType::kModule, document->UserAgent(),
+            Vector<CSPHeaderAndType>(), document->GetReferrerPolicy(),
+            document->GetSecurityOrigin(), document->IsSecureContext(),
+            document->GetHttpsState(), nullptr /* worker_clients */,
             document->AddressSpace(),
             OriginTrialContext::GetTokens(document).get(),
             base::UnguessableToken::Create(), nullptr /* worker_settings */,
-            kV8CacheOptionsDefault,
-            new WorkletModuleResponsesMap(document->Fetcher())),
-        WTF::nullopt, WorkerInspectorProxy::PauseOnWorkerStart::kDontPause,
+            kV8CacheOptionsDefault, new WorkletModuleResponsesMap),
+        base::nullopt, WorkerInspectorProxy::PauseOnWorkerStart::kDontPause,
         ParentExecutionContextTaskRunners::Create());
     return thread;
   }

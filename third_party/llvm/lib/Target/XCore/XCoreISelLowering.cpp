@@ -24,6 +24,7 @@
 #include "llvm/CodeGen/MachineJumpTableInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/SelectionDAGISel.h"
+#include "llvm/CodeGen/ValueTypes.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
@@ -31,7 +32,6 @@
 #include "llvm/IR/GlobalAlias.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Intrinsics.h"
-#include "llvm/IR/ValueTypes.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/KnownBits.h"
@@ -91,10 +91,6 @@ XCoreTargetLowering::XCoreTargetLowering(const TargetMachine &TM,
   // XCore does not have the NodeTypes below.
   setOperationAction(ISD::BR_CC,     MVT::i32,   Expand);
   setOperationAction(ISD::SELECT_CC, MVT::i32,   Expand);
-  setOperationAction(ISD::ADDC, MVT::i32, Expand);
-  setOperationAction(ISD::ADDE, MVT::i32, Expand);
-  setOperationAction(ISD::SUBC, MVT::i32, Expand);
-  setOperationAction(ISD::SUBE, MVT::i32, Expand);
 
   // 64bit
   setOperationAction(ISD::ADD, MVT::i64, Custom);

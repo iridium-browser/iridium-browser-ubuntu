@@ -1,5 +1,5 @@
 include_rules = [
+  "+chrome/browser/ui/views",
   "+mojo",
-  "+components/chrome_cleaner",
   "+services/network/test",
 ]

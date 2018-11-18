@@ -10,6 +10,7 @@
 #include "SkCanvas.h"
 #include "SkColorFilter.h"
 #include "SkColorPriv.h"
+#include "SkFlattenablePriv.h"
 #include "SkImageFilterPriv.h"
 #include "SkShader.h"
 
@@ -32,7 +33,6 @@ public:
         return sk_sp<SkImageFilter>(new FailImageFilter);
     }
 
-    void toString(SkString* str) const override;
     SK_DECLARE_PUBLIC_FLATTENABLE_DESERIALIZATION_PROCS(FailImageFilter)
 
 protected:
@@ -43,7 +43,7 @@ protected:
         return nullptr;
     }
     sk_sp<SkImageFilter> onMakeColorSpace(SkColorSpaceXformer*) const override {
-        return nullptr;
+        return sk_ref_sp(this);
     }
 
 private:
@@ -55,11 +55,6 @@ static FailImageFilter::Registrar gReg0;
 sk_sp<SkFlattenable> FailImageFilter::CreateProc(SkReadBuffer& buffer) {
     SK_IMAGEFILTER_UNFLATTEN_COMMON(common, 0);
     return FailImageFilter::Make();
-}
-
-void FailImageFilter::toString(SkString* str) const {
-    str->appendf("FailImageFilter: (");
-    str->append(")");
 }
 
 class IdentityImageFilter : public SkImageFilter {
@@ -76,7 +71,6 @@ public:
         return sk_sp<SkImageFilter>(new IdentityImageFilter(std::move(input)));
     }
 
-    void toString(SkString* str) const override;
     SK_DECLARE_PUBLIC_FLATTENABLE_DESERIALIZATION_PROCS(IdentityImageFilter)
 
 protected:
@@ -100,11 +94,6 @@ static IdentityImageFilter::Registrar gReg1;
 sk_sp<SkFlattenable> IdentityImageFilter::CreateProc(SkReadBuffer& buffer) {
     SK_IMAGEFILTER_UNFLATTEN_COMMON(common, 1);
     return IdentityImageFilter::Make(common.getInput(0));
-}
-
-void IdentityImageFilter::toString(SkString* str) const {
-    str->appendf("IdentityImageFilter: (");
-    str->append(")");
 }
 
 ///////////////////////////////////////////////////////////////////////////////

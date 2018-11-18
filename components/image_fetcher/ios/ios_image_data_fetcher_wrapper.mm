@@ -4,13 +4,13 @@
 
 #import "components/image_fetcher/ios/ios_image_data_fetcher_wrapper.h"
 
-#import "base/mac/bind_objc_block.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/bind.h"
+#include "base/task/post_task.h"
 #import "components/image_fetcher/ios/webp_decoder.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_status_code.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
-#include "net/url_request/url_fetcher.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "url/url_constants.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -22,29 +22,31 @@
 namespace image_fetcher {
 
 IOSImageDataFetcherWrapper::IOSImageDataFetcherWrapper(
-    net::URLRequestContextGetter* url_request_context_getter)
-    : image_data_fetcher_(url_request_context_getter) {}
+    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory)
+    : image_data_fetcher_(url_loader_factory) {}
 
 IOSImageDataFetcherWrapper::~IOSImageDataFetcherWrapper() {}
 
 void IOSImageDataFetcherWrapper::FetchImageDataWebpDecoded(
     const GURL& image_url,
-    IOSImageDataFetcherCallback callback) {
+    ImageDataFetcherBlock callback,
+    bool send_cookies) {
   image_data_fetcher_.FetchImageData(image_url,
                                      CallbackForImageDataFetcher(callback),
-                                     NO_TRAFFIC_ANNOTATION_YET);
+                                     NO_TRAFFIC_ANNOTATION_YET, send_cookies);
 }
 
 void IOSImageDataFetcherWrapper::FetchImageDataWebpDecoded(
     const GURL& image_url,
-    IOSImageDataFetcherCallback callback,
+    ImageDataFetcherBlock callback,
     const std::string& referrer,
-    net::URLRequest::ReferrerPolicy referrer_policy) {
+    net::URLRequest::ReferrerPolicy referrer_policy,
+    bool send_cookies) {
   DCHECK(callback);
 
   image_data_fetcher_.FetchImageData(
       image_url, CallbackForImageDataFetcher(callback), referrer,
-      referrer_policy, NO_TRAFFIC_ANNOTATION_YET);
+      referrer_policy, NO_TRAFFIC_ANNOTATION_YET, send_cookies);
 }
 
 void IOSImageDataFetcherWrapper::SetDataUseServiceName(
@@ -52,11 +54,11 @@ void IOSImageDataFetcherWrapper::SetDataUseServiceName(
   image_data_fetcher_.SetDataUseServiceName(data_use_service_name);
 }
 
-ImageDataFetcher::ImageDataFetcherCallback
+ImageDataFetcherCallback
 IOSImageDataFetcherWrapper::CallbackForImageDataFetcher(
-    IOSImageDataFetcherCallback callback) {
-  return base::BindBlockArc(^(const std::string& image_data,
-                              const RequestMetadata& metadata) {
+    ImageDataFetcherBlock callback) {
+  return base::BindOnce(^(const std::string& image_data,
+                          const RequestMetadata& metadata) {
     // Create a NSData from the returned data and notify the callback.
     NSData* data =
         [NSData dataWithBytes:image_data.data() length:image_data.size()];
@@ -72,13 +74,13 @@ IOSImageDataFetcherWrapper::CallbackForImageDataFetcher(
     base::PostTaskWithTraitsAndReplyWithResult(
         FROM_HERE,
         {
-            base::TaskPriority::BACKGROUND,
+            base::TaskPriority::BEST_EFFORT,
             base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN,
         },
-        base::BindBlockArc(^NSData*() {
+        base::BindOnce(^NSData*() {
           return webp_transcode::WebpDecoder::DecodeWebpImage(data);
         }),
-        base::BindBlockArc(^(NSData* decoded_data) {
+        base::BindOnce(^(NSData* decoded_data) {
           callback(decoded_data, webp_metadata);
         }));
   });

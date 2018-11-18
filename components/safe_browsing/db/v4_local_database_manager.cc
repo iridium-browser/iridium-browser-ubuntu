@@ -17,10 +17,11 @@
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "base/timer/elapsed_timer.h"
 #include "components/safe_browsing/db/v4_feature_list.h"
 #include "components/safe_browsing/db/v4_protocol_manager_util.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "crypto/sha2.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
@@ -42,7 +43,8 @@ const char* const kV3Suffix = ".V3.";
 // safely deleted from the disk. There's no overlap allowed between the files
 // on this list and the list returned by GetListInfos().
 const char* const kStoreFileNamesToDelete[] = {
-    "AnyIpMalware.store", "ChromeFilenameClientIncident.store"};
+    "AnyIpMalware.store", "ChromeFilenameClientIncident.store",
+    "UrlSuspiciousSiteId.store"};
 
 ListInfos GetListInfos() {
 // NOTE(vakh): When adding a store here, add the corresponding store-specific
@@ -62,14 +64,8 @@ ListInfos GetListInfos() {
   const bool kSyncAlways = true;
   const bool kSyncNever = false;
   return ListInfos({
-      ListInfo(kSyncOnlyOnChromeBuilds, "CertCsdDownloadWhitelist.store",
-               GetCertCsdDownloadWhitelistId(), SB_THREAT_TYPE_UNUSED),
       ListInfo(kSyncAlways, "IpMalware.store", GetIpMalwareId(),
                SB_THREAT_TYPE_UNUSED),
-      ListInfo(kSyncOnlyOnChromeBuilds, "UrlCsdDownloadWhitelist.store",
-               GetUrlCsdDownloadWhitelistId(), SB_THREAT_TYPE_UNUSED),
-      ListInfo(kSyncOnlyOnChromeBuilds, "UrlCsdWhitelist.store",
-               GetUrlCsdWhitelistId(), SB_THREAT_TYPE_CSD_WHITELIST),
       ListInfo(kSyncAlways, "UrlSoceng.store", GetUrlSocEngId(),
                SB_THREAT_TYPE_URL_PHISHING),
       ListInfo(kSyncAlways, "UrlMalware.store", GetUrlMalwareId(),
@@ -80,12 +76,22 @@ ListInfos GetListInfos() {
                SB_THREAT_TYPE_URL_BINARY_MALWARE),
       ListInfo(kSyncAlways, "ChromeExtMalware.store", GetChromeExtMalwareId(),
                SB_THREAT_TYPE_EXTENSION),
+      ListInfo(kSyncOnlyOnChromeBuilds, "CertCsdDownloadWhitelist.store",
+               GetCertCsdDownloadWhitelistId(), SB_THREAT_TYPE_UNUSED),
       ListInfo(kSyncOnlyOnChromeBuilds, "ChromeUrlClientIncident.store",
                GetChromeUrlClientIncidentId(),
                SB_THREAT_TYPE_BLACKLISTED_RESOURCE),
-      ListInfo(kSyncNever, "", GetChromeUrlApiId(), SB_THREAT_TYPE_API_ABUSE),
+      ListInfo(kSyncAlways, "UrlBilling.store", GetUrlBillingId(),
+               SB_THREAT_TYPE_BILLING),
+      ListInfo(kSyncOnlyOnChromeBuilds, "UrlCsdDownloadWhitelist.store",
+               GetUrlCsdDownloadWhitelistId(), SB_THREAT_TYPE_UNUSED),
+      ListInfo(kSyncOnlyOnChromeBuilds, "UrlCsdWhitelist.store",
+               GetUrlCsdWhitelistId(), SB_THREAT_TYPE_CSD_WHITELIST),
       ListInfo(kSyncOnlyOnChromeBuilds, "UrlSubresourceFilter.store",
                GetUrlSubresourceFilterId(), SB_THREAT_TYPE_SUBRESOURCE_FILTER),
+      ListInfo(kSyncOnlyOnChromeBuilds, "UrlSuspiciousSite.store",
+               GetUrlSuspiciousSiteId(), SB_THREAT_TYPE_SUSPICIOUS_SITE),
+      ListInfo(kSyncNever, "", GetChromeUrlApiId(), SB_THREAT_TYPE_API_ABUSE),
   });
   // NOTE(vakh): IMPORTANT: Please make sure that the server already supports
   // any list before adding it to this list otherwise the prefix updates break
@@ -108,6 +114,10 @@ ThreatSeverity GetThreatSeverity(const ListIdentifier& list_id) {
       return 2;
     case CSD_WHITELIST:
       return 3;
+    case SUSPICIOUS:
+      return 4;
+    case BILLING:
+      return 15;
     default:
       NOTREACHED() << "Unexpected ThreatType encountered: "
                    << list_id.threat_type();
@@ -126,6 +136,12 @@ ListIdentifier GetUrlIdFromSBThreatType(SBThreatType sb_threat_type) {
 
     case SB_THREAT_TYPE_URL_UNWANTED:
       return GetUrlUwsId();
+
+    case SB_THREAT_TYPE_SUSPICIOUS_SITE:
+      return GetUrlSuspiciousSiteId();
+
+    case SB_THREAT_TYPE_BILLING:
+      return GetUrlBillingId();
 
     default:
       NOTREACHED();
@@ -286,10 +302,6 @@ bool V4LocalDatabaseManager::CanCheckResourceType(
   return true;
 }
 
-bool V4LocalDatabaseManager::CanCheckSubresourceFilter() const {
-  return true;
-}
-
 bool V4LocalDatabaseManager::CanCheckUrl(const GURL& url) const {
   return url.SchemeIsHTTPOrHTTPS() || url.SchemeIs(url::kFtpScheme) ||
          url.SchemeIsWSOrWSS();
@@ -374,7 +386,6 @@ bool V4LocalDatabaseManager::CheckResourceUrl(const GURL& url, Client* client) {
 bool V4LocalDatabaseManager::CheckUrlForSubresourceFilter(const GURL& url,
                                                           Client* client) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  DCHECK(CanCheckSubresourceFilter());
 
   StoresToCheck stores_to_check(
       {GetUrlSocEngId(), GetUrlSubresourceFilterId()});
@@ -521,6 +532,7 @@ void V4LocalDatabaseManager::DatabaseReadyForChecks(
   // The following check is needed because it is possible that by the time the
   // database is ready, StopOnIOThread has been called.
   if (enabled_) {
+    V4Database::Destroy(std::move(v4_database_));
     v4_database_ = std::move(v4_database);
 
     v4_database_->RecordFileSizeHistograms();
@@ -558,16 +570,11 @@ void V4LocalDatabaseManager::DatabaseUpdated() {
     v4_database_->RecordFileSizeHistograms();
     UpdateListClientStates(GetStoreStateMap());
 
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, {BrowserThread::UI},
         base::BindOnce(
-            &V4LocalDatabaseManager::PostUpdateNotificationOnUIThread, this));
+            &SafeBrowsingDatabaseManager::NotifyDatabaseUpdateFinished, this));
   }
-}
-
-void V4LocalDatabaseManager::PostUpdateNotificationOnUIThread() {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  update_complete_callback_list_.Notify();
 }
 
 void V4LocalDatabaseManager::DeletePVer3StoreFiles() {
@@ -585,9 +592,9 @@ void V4LocalDatabaseManager::DeletePVer3StoreFiles() {
     if (!path_exists) {
       continue;
     }
-    task_runner_->PostTask(
-        FROM_HERE, base::Bind(base::IgnoreResult(&base::DeleteFile), store_path,
-                              false /* recursive */));
+    task_runner_->PostTask(FROM_HERE,
+                           base::BindOnce(base::IgnoreResult(&base::DeleteFile),
+                                          store_path, false /* recursive */));
   }
 }
 
@@ -608,9 +615,9 @@ void V4LocalDatabaseManager::DeleteUnusedStoreFiles() {
       if (!path_exists) {
         continue;
       }
-      task_runner_->PostTask(FROM_HERE,
-                             base::Bind(base::IgnoreResult(&base::DeleteFile),
-                                        store_path, false /* recursive */));
+      task_runner_->PostTask(
+          FROM_HERE, base::BindOnce(base::IgnoreResult(&base::DeleteFile),
+                                    store_path, false /* recursive */));
     } else {
       NOTREACHED() << "Trying to delete a store file that's in use: "
                    << store_filename_to_delete;
@@ -749,8 +756,8 @@ void V4LocalDatabaseManager::ScheduleFullHashCheck(
   pending_checks_.insert(check.get());
 
   // Post on the IO thread to enforce async behavior.
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::IO},
       base::BindOnce(&V4LocalDatabaseManager::PerformFullHashCheck,
                      weak_factory_.GetWeakPtr(), std::move(check),
                      full_hash_to_store_and_hash_prefixes));
@@ -854,7 +861,7 @@ void V4LocalDatabaseManager::RespondSafeToQueuedChecks() {
 
 void V4LocalDatabaseManager::RespondToClient(
     std::unique_ptr<PendingCheck> check) {
-  DCHECK(check.get());
+  DCHECK(check);
 
   switch (check->client_callback_type) {
     case ClientCallbackType::CHECK_BROWSE_URL:

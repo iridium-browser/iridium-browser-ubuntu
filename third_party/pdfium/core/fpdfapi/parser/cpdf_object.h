@@ -17,6 +17,8 @@
 class CPDF_Array;
 class CPDF_Boolean;
 class CPDF_Dictionary;
+class CPDF_Encryptor;
+class CPDF_IndirectObjectHolder;
 class CPDF_Name;
 class CPDF_Null;
 class CPDF_Number;
@@ -56,12 +58,14 @@ class CPDF_Object {
   // copied to the object it points to directly.
   virtual std::unique_ptr<CPDF_Object> CloneDirectObject() const;
 
-  virtual CPDF_Object* GetDirect() const;
+  virtual CPDF_Object* GetDirect();
+  virtual const CPDF_Object* GetDirect() const;
   virtual ByteString GetString() const;
   virtual WideString GetUnicodeText() const;
   virtual float GetNumber() const;
   virtual int GetInteger() const;
-  virtual CPDF_Dictionary* GetDict() const;
+  virtual CPDF_Dictionary* GetDict();
+  virtual const CPDF_Dictionary* GetDict() const;
 
   virtual void SetString(const ByteString& str);
 
@@ -92,7 +96,8 @@ class CPDF_Object {
   virtual CPDF_String* AsString();
   virtual const CPDF_String* AsString() const;
 
-  virtual bool WriteTo(IFX_ArchiveStream* archive) const = 0;
+  virtual bool WriteTo(IFX_ArchiveStream* archive,
+                       const CPDF_Encryptor* encryptor) const = 0;
 
   // Create a deep copy of the object with the option to either
   // copy a reference object or directly copy the object it refers to
@@ -103,6 +108,11 @@ class CPDF_Object {
   virtual std::unique_ptr<CPDF_Object> CloneNonCyclic(
       bool bDirect,
       std::set<const CPDF_Object*>* pVisited) const;
+
+  // Return a reference to itself.
+  // The object must be direct (!IsInlined).
+  virtual std::unique_ptr<CPDF_Object> MakeReference(
+      CPDF_IndirectObjectHolder* holder) const;
 
  protected:
   CPDF_Object() : m_ObjNum(0), m_GenNum(0) {}

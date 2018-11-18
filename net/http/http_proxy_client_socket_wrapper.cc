@@ -17,14 +17,15 @@
 #include "net/log/net_log_event_type.h"
 #include "net/log/net_log_source.h"
 #include "net/log/net_log_source_type.h"
-#include "net/quic/chromium/quic_http_utils.h"
-#include "net/quic/chromium/quic_proxy_client_socket.h"
+#include "net/quic/quic_http_utils.h"
+#include "net/quic/quic_proxy_client_socket.h"
+#include "net/socket/client_socket_factory.h"
 #include "net/socket/client_socket_handle.h"
 #include "net/socket/socket_tag.h"
-#include "net/spdy/chromium/spdy_proxy_client_socket.h"
-#include "net/spdy/chromium/spdy_session.h"
-#include "net/spdy/chromium/spdy_session_pool.h"
-#include "net/spdy/chromium/spdy_stream.h"
+#include "net/spdy/spdy_proxy_client_socket.h"
+#include "net/spdy/spdy_session.h"
+#include "net/spdy/spdy_session_pool.h"
+#include "net/spdy/spdy_stream.h"
 #include "net/ssl/ssl_cert_request_info.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "url/gurl.h"
@@ -42,7 +43,7 @@ HttpProxyClientSocketWrapper::HttpProxyClientSocketWrapper(
     SSLClientSocketPool* ssl_pool,
     const scoped_refptr<TransportSocketParams>& transport_params,
     const scoped_refptr<SSLSocketParams>& ssl_params,
-    QuicTransportVersion quic_version,
+    quic::QuicTransportVersion quic_version,
     const std::string& user_agent,
     const HostPortPair& endpoint,
     HttpAuthCache* http_auth_cache,
@@ -87,11 +88,12 @@ HttpProxyClientSocketWrapper::HttpProxyClientSocketWrapper(
       traffic_annotation_(traffic_annotation) {
   net_log_.BeginEvent(NetLogEventType::SOCKET_ALIVE,
                       net_log.source().ToEventParametersCallback());
-  // If doing a QUIC proxy, |quic_version| must not be QUIC_VERSION_UNSUPPORTED,
-  // and |ssl_params| must be valid while |transport_params| is null.
-  // Otherwise, |quic_version| must be QUIC_VERSION_UNSUPPORTED, and exactly
-  // one of |transport_params| or |ssl_params| must be set.
-  DCHECK(quic_version_ == QUIC_VERSION_UNSUPPORTED
+  // If doing a QUIC proxy, |quic_version| must not be
+  // quic::QUIC_VERSION_UNSUPPORTED, and |ssl_params| must be valid while
+  // |transport_params| is null. Otherwise, |quic_version| must be
+  // quic::QUIC_VERSION_UNSUPPORTED, and exactly one of |transport_params| or
+  // |ssl_params| must be set.
+  DCHECK(quic_version_ == quic::QUIC_VERSION_UNSUPPORTED
              ? (bool)transport_params != (bool)ssl_params
              : !transport_params && ssl_params);
 }
@@ -177,7 +179,7 @@ NextProto HttpProxyClientSocketWrapper::GetProxyNegotiatedProtocol() const {
   return kProtoUnknown;
 }
 
-int HttpProxyClientSocketWrapper::Connect(const CompletionCallback& callback) {
+int HttpProxyClientSocketWrapper::Connect(CompletionOnceCallback callback) {
   DCHECK(!callback.is_null());
   DCHECK(connect_callback_.is_null());
 
@@ -189,7 +191,7 @@ int HttpProxyClientSocketWrapper::Connect(const CompletionCallback& callback) {
   next_state_ = STATE_BEGIN_CONNECT;
   int rv = DoLoop(OK);
   if (rv == ERR_IO_PENDING) {
-    connect_callback_ = callback;
+    connect_callback_ = std::move(callback);
   } else {
     connect_timer_.Stop();
   }
@@ -229,20 +231,6 @@ bool HttpProxyClientSocketWrapper::IsConnectedAndIdle() const {
 
 const NetLogWithSource& HttpProxyClientSocketWrapper::NetLog() const {
   return net_log_;
-}
-
-void HttpProxyClientSocketWrapper::SetSubresourceSpeculation() {
-  // This flag isn't passed to reconnected sockets, as only the first connection
-  // can be a preconnect.
-  if (transport_socket_)
-    transport_socket_->SetSubresourceSpeculation();
-}
-
-void HttpProxyClientSocketWrapper::SetOmniboxSpeculation() {
-  // This flag isn't passed to reconnected sockets, as only the first connection
-  // can be a preconnect.
-  if (transport_socket_)
-    transport_socket_->SetOmniboxSpeculation();
 }
 
 bool HttpProxyClientSocketWrapper::WasEverUsed() const {
@@ -311,19 +299,35 @@ void HttpProxyClientSocketWrapper::ApplySocketTag(const SocketTag& tag) {
 
 int HttpProxyClientSocketWrapper::Read(IOBuffer* buf,
                                        int buf_len,
-                                       const CompletionCallback& callback) {
+                                       CompletionOnceCallback callback) {
   if (transport_socket_)
-    return transport_socket_->Read(buf, buf_len, callback);
+    return transport_socket_->Read(buf, buf_len, std::move(callback));
   return ERR_SOCKET_NOT_CONNECTED;
+}
+
+int HttpProxyClientSocketWrapper::ReadIfReady(IOBuffer* buf,
+                                              int buf_len,
+                                              CompletionOnceCallback callback) {
+  if (transport_socket_)
+    return transport_socket_->ReadIfReady(buf, buf_len, std::move(callback));
+  return ERR_SOCKET_NOT_CONNECTED;
+}
+
+int HttpProxyClientSocketWrapper::CancelReadIfReady() {
+  if (transport_socket_)
+    return transport_socket_->CancelReadIfReady();
+  return OK;
 }
 
 int HttpProxyClientSocketWrapper::Write(
     IOBuffer* buf,
     int buf_len,
-    const CompletionCallback& callback,
+    CompletionOnceCallback callback,
     const NetworkTrafficAnnotationTag& traffic_annotation) {
-  if (transport_socket_)
-    return transport_socket_->Write(buf, buf_len, callback, traffic_annotation);
+  if (transport_socket_) {
+    return transport_socket_->Write(buf, buf_len, std::move(callback),
+                                    traffic_annotation);
+  }
   return ERR_SOCKET_NOT_CONNECTED;
 }
 
@@ -358,7 +362,7 @@ void HttpProxyClientSocketWrapper::OnIOComplete(int result) {
   if (rv != ERR_IO_PENDING) {
     connect_timer_.Stop();
     // May delete |this|.
-    base::ResetAndReturn(&connect_callback_).Run(rv);
+    std::move(connect_callback_).Run(rv);
   }
 }
 
@@ -432,7 +436,7 @@ int HttpProxyClientSocketWrapper::DoLoop(int result) {
 int HttpProxyClientSocketWrapper::DoBeginConnect() {
   connect_start_time_ = base::TimeTicks::Now();
   SetConnectTimer(connect_timeout_duration_);
-  if (quic_version_ != QUIC_VERSION_UNSUPPORTED) {
+  if (quic_version_ != quic::QUIC_VERSION_UNSUPPORTED) {
     next_state_ = STATE_QUIC_PROXY_CREATE_SESSION;
   } else if (transport_params_) {
     next_state_ = STATE_TCP_CONNECT;
@@ -533,9 +537,8 @@ int HttpProxyClientSocketWrapper::DoSSLConnectComplete(int result) {
     return ERR_PROXY_CONNECTION_FAILED;
   }
 
-  SSLClientSocket* ssl =
-      static_cast<SSLClientSocket*>(transport_socket_handle_->socket());
-  negotiated_protocol_ = ssl->GetNegotiatedProtocol();
+  negotiated_protocol_ =
+      transport_socket_handle_->socket()->GetNegotiatedProtocol();
   using_spdy_ = negotiated_protocol_ == kProtoHTTP2;
 
   // Reset the timer to just the length of time allowed for HttpProxy handshake
@@ -569,10 +572,12 @@ int HttpProxyClientSocketWrapper::DoHttpProxyConnect() {
   }
 
   // Add a HttpProxy connection on top of the tcp socket.
-  transport_socket_.reset(new HttpProxyClientSocket(
-      std::move(transport_socket_handle_), user_agent_, endpoint_,
-      http_auth_controller_.get(), tunnel_, using_spdy_, negotiated_protocol_,
-      ssl_params_.get() != nullptr, traffic_annotation_));
+  transport_socket_ =
+      transport_pool_->client_socket_factory()->CreateProxyClientSocket(
+          std::move(transport_socket_handle_), user_agent_, endpoint_,
+          http_auth_controller_.get(), tunnel_, using_spdy_,
+          negotiated_protocol_, ssl_params_.get() != nullptr,
+          traffic_annotation_);
   return transport_socket_->Connect(base::Bind(
       &HttpProxyClientSocketWrapper::OnIOComplete, base::Unretained(this)));
 }
@@ -644,6 +649,7 @@ int HttpProxyClientSocketWrapper::DoQuicProxyCreateSession() {
       initial_socket_tag_, ssl_params_->ssl_config().GetCertVerifyFlags(),
       GURL("https://" + proxy_server.ToString()), net_log_,
       &quic_net_error_details_,
+      /*failed_on_default_network_callback=*/CompletionOnceCallback(),
       base::Bind(&HttpProxyClientSocketWrapper::OnIOComplete,
                  base::Unretained(this)));
 }
@@ -669,7 +675,8 @@ int HttpProxyClientSocketWrapper::DoQuicProxyCreateStreamComplete(int result) {
   std::unique_ptr<QuicChromiumClientStream::Handle> quic_stream =
       quic_session_->ReleaseStream();
 
-  SpdyPriority spdy_priority = ConvertRequestPriorityToQuicPriority(priority_);
+  spdy::SpdyPriority spdy_priority =
+      ConvertRequestPriorityToQuicPriority(priority_);
   quic_stream->SetPriority(spdy_priority);
 
   transport_socket_.reset(new QuicProxyClientSocket(

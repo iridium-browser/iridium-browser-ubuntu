@@ -33,6 +33,8 @@
 
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 
+#include <stdint.h>
+
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "third_party/blink/renderer/platform/wtf/text/cstring.h"
@@ -83,7 +85,7 @@ TEST(KURLTest, Getters) {
        "xn--6qqa088eba", 0, "", nullptr, "/", nullptr, nullptr, nullptr, false},
   };
 
-  for (size_t i = 0; i < WTF_ARRAY_LENGTH(cases); i++) {
+  for (size_t i = 0; i < arraysize(cases); i++) {
     const GetterCase& c = cases[i];
 
     const String& url = String::FromUTF8(c.url);
@@ -174,7 +176,7 @@ TEST(KURLTest, Setters) {
        nullptr, "http://goo.com:92/#b"},
   };
 
-  for (size_t i = 0; i < WTF_ARRAY_LENGTH(cases); i++) {
+  for (size_t i = 0; i < arraysize(cases); i++) {
     KURL kurl(cases[i].url);
 
     kurl.SetProtocol(cases[i].protocol);
@@ -230,7 +232,7 @@ TEST(KURLTest, DecodeURLEscapeSequences) {
       {"%e4%bd%a0%e5%a5%bd", "\xe4\xbd\xa0\xe5\xa5\xbd"},
   };
 
-  for (size_t i = 0; i < WTF_ARRAY_LENGTH(decode_cases); i++) {
+  for (size_t i = 0; i < arraysize(decode_cases); i++) {
     String input(decode_cases[i].input);
     String str = DecodeURLEscapeSequences(input);
     EXPECT_STREQ(decode_cases[i].output, str.Utf8().data());
@@ -243,14 +245,15 @@ TEST(KURLTest, DecodeURLEscapeSequences) {
   // Decode UTF-8.
   String decoded = DecodeURLEscapeSequences("%e6%bc%a2%e5%ad%97");
   const UChar kDecodedExpected[] = {0x6F22, 0x5b57};
-  EXPECT_EQ(String(kDecodedExpected, WTF_ARRAY_LENGTH(kDecodedExpected)),
-            decoded);
+  EXPECT_EQ(String(kDecodedExpected, arraysize(kDecodedExpected)), decoded);
 
   // Test the error behavior for invalid UTF-8 (we differ from WebKit here).
+  // %e4 %a0 are invalid for UTF-8, but %e5%a5%bd is valid.
   String invalid = DecodeURLEscapeSequences("%e4%a0%e5%a5%bd");
-  UChar invalid_expected_helper[4] = {0x00e4, 0x00a0, 0x597d, 0};
+  UChar invalid_expected_helper[6] = {0x00e4, 0x00a0, 0x00e5,
+                                      0x00a5, 0x00bd, 0};
   String invalid_expected(
-      reinterpret_cast<const ::UChar*>(invalid_expected_helper), 3);
+      reinterpret_cast<const ::UChar*>(invalid_expected_helper), 5);
   EXPECT_EQ(invalid_expected, invalid);
 }
 
@@ -272,7 +275,7 @@ TEST(KURLTest, EncodeWithURLEscapeSequences) {
       {"pqrstuvwxyz{|}~\x7f", "pqrstuvwxyz%7B%7C%7D~%7F"},
   };
 
-  for (size_t i = 0; i < WTF_ARRAY_LENGTH(encode_cases); i++) {
+  for (size_t i = 0; i < arraysize(encode_cases); i++) {
     String input(encode_cases[i].input);
     String expected_output(encode_cases[i].output);
     String output = EncodeWithURLEscapeSequences(input);
@@ -280,7 +283,7 @@ TEST(KURLTest, EncodeWithURLEscapeSequences) {
   }
 
   // Our encode escapes NULLs for safety, so we need to check that too.
-  String input("\x00\x01", 2);
+  String input("\x00\x01", 2u);
   String reference("%00%01");
 
   String output = EncodeWithURLEscapeSequences(input);
@@ -773,11 +776,43 @@ TEST(KURLTest, LastPathComponent) {
 }
 
 TEST(KURLTest, IsHierarchical) {
-  const KURL url1("http://host/path/to/file.txt");
-  EXPECT_TRUE(url1.IsHierarchical());
+  // Note that it's debatable whether "filesystem" URLs are or hierarchical.
+  // They're currently registered in the url lib as standard; but the parsed
+  // url never has a valid hostname (the inner URL does)."
+  const char* standard_urls[] = {
+      "http://host/path/to/file.txt",
+      "ftp://andrew.cmu.edu/foo",
+      "file:///path/to/resource",
+      "file://hostname/etc/"
+      "filesystem:http://www.google.com/type/",
+      "filesystem:http://user:pass@google.com:21/blah#baz",
+  };
 
-  const KURL invalid_utf8("http://a@9%aa%:/path/to/file.txt");
-  EXPECT_FALSE(invalid_utf8.IsHierarchical());
+  for (const char* input : standard_urls) {
+    SCOPED_TRACE(input);
+    KURL url(input);
+    EXPECT_TRUE(url.IsHierarchical());
+    EXPECT_TRUE(url.CanSetHostOrPort());
+    EXPECT_TRUE(url.CanSetPathname());
+  }
+
+  const char* nonstandard_urls[] = {
+      "blob:null/guid-goes-here",
+      "blob:http://example.com/guid-goes-here",
+      "http://a@9%aa%:/path/to/file.txt",
+      "about:blank://hostname",
+      "about:blank",
+      "javascript:void(0);",
+      "data:text/html,greetings",
+  };
+
+  for (const char* input : nonstandard_urls) {
+    SCOPED_TRACE(input);
+    KURL url(input);
+    EXPECT_FALSE(url.IsHierarchical());
+    EXPECT_FALSE(url.CanSetHostOrPort());
+    EXPECT_FALSE(url.CanSetPathname());
+  }
 }
 
 TEST(KURLTest, PathAfterLastSlash) {
@@ -831,11 +866,127 @@ TEST(KURLTest, strippedForUseAsReferrer) {
       {"https://www.google.com/#", "https://www.google.com/"},
   };
 
-  for (size_t i = 0; i < WTF_ARRAY_LENGTH(referrer_cases); i++) {
+  for (size_t i = 0; i < arraysize(referrer_cases); i++) {
     const KURL kurl(referrer_cases[i].input);
     String referrer = kurl.StrippedForUseAsReferrer();
     EXPECT_STREQ(referrer_cases[i].output, referrer.Utf8().data());
   }
 }
+
+enum class PortIsValid {
+  // The constructor does strict checking. Ports which are considered valid by
+  // the constructor are kAlways valid.
+  kAlways,
+
+  // SetHostAndPort() truncates to the initial numerical prefix, and then does
+  // strict checking. kInSetHostAndPort is used for ports which are considered
+  // valid by SetHostAndPort() but not by the constructor. In this case, the
+  // expected value is the same as for SetPort().
+  kInSetHostAndPort,
+
+  // SetPort() considers all input valid.
+  kInSetPort
+};
+
+struct PortTestCase {
+  const char* input;
+  const uint16_t constructor_output;
+  const uint16_t set_port_output;
+  const PortIsValid is_valid;
+};
+
+// The tested behaviour matches the implementation. It doesn't necessarily match
+// the URL Standard.
+const PortTestCase port_test_cases[] = {
+    {"80", 0, 0, PortIsValid::kAlways},  // 0 because scheme is http.
+    {"443", 443, 443, PortIsValid::kAlways},
+    {"8000", 8000, 8000, PortIsValid::kAlways},
+    {"0", 0, 0, PortIsValid::kAlways},
+    {"1", 1, 1, PortIsValid::kAlways},
+    {"00000000000000000000000000000000000443", 443, 443, PortIsValid::kAlways},
+    {"+80", 0, 0, PortIsValid::kInSetHostAndPort},
+    {"-80", 0, 0, PortIsValid::kInSetHostAndPort},
+    {"443e0", 0, 443, PortIsValid::kInSetHostAndPort},
+    {"0x80", 0, 0, PortIsValid::kInSetHostAndPort},
+    {"8%30", 0, 8, PortIsValid::kInSetHostAndPort},
+    {" 443", 0, 0, PortIsValid::kInSetHostAndPort},
+    {"443 ", 0, 443, PortIsValid::kInSetHostAndPort},
+    {":443", 0, 0, PortIsValid::kInSetHostAndPort},
+    {"65535", 65535, 65535, PortIsValid::kAlways},
+    {"65534", 65534, 65534, PortIsValid::kAlways},
+    {"65536", 0, 0, PortIsValid::kInSetPort},
+    {"65537", 0, 1, PortIsValid::kInSetPort},
+    {"2147483647", 0, 65535, PortIsValid::kInSetPort},
+    {"2147483648", 0, 0, PortIsValid::kInSetPort},
+    {"2147483649", 0, 1, PortIsValid::kInSetPort},
+    {"4294967295", 0, 65535, PortIsValid::kInSetPort},
+    {"4294967296", 0, 0, PortIsValid::kInSetPort},
+    {"4294967297", 0, 0, PortIsValid::kInSetPort},
+    {"18446744073709551615", 0, 0, PortIsValid::kInSetPort},
+    {"18446744073709551616", 0, 0, PortIsValid::kInSetPort},
+    {"18446744073709551617", 0, 0, PortIsValid::kInSetPort},
+    {"9999999999999999999999999999990999999999", 0, 0, PortIsValid::kInSetPort},
+};
+
+void PrintTo(const PortTestCase& port_test_case, ::std::ostream* os) {
+  *os << '"' << port_test_case.input << '"';
+}
+
+class KURLPortTest : public ::testing::TestWithParam<PortTestCase> {};
+
+TEST_P(KURLPortTest, Construct) {
+  const auto& param = GetParam();
+  const KURL url(String("http://a:") + param.input + "/");
+  EXPECT_EQ(url.Port(), param.constructor_output);
+  if (param.is_valid == PortIsValid::kAlways) {
+    EXPECT_EQ(url.IsValid(), true);
+  } else {
+    EXPECT_EQ(url.IsValid(), false);
+  }
+}
+
+TEST_P(KURLPortTest, ConstructRelative) {
+  const auto& param = GetParam();
+  const KURL base("http://a/");
+  const KURL url(base, String("//a:") + param.input + "/");
+  EXPECT_EQ(url.Port(), param.constructor_output);
+  if (param.is_valid == PortIsValid::kAlways) {
+    EXPECT_EQ(url.IsValid(), true);
+  } else {
+    EXPECT_EQ(url.IsValid(), false);
+  }
+}
+
+TEST_P(KURLPortTest, SetPort) {
+  const auto& param = GetParam();
+  KURL url("http://a:8888/");
+  url.SetPort(param.input);
+  EXPECT_EQ(url.Port(), param.set_port_output);
+  EXPECT_EQ(url.IsValid(), true);
+}
+
+TEST_P(KURLPortTest, SetHostAndPort) {
+  const auto& param = GetParam();
+  KURL url("http://a:8888/");
+  url.SetHostAndPort(String("a:") + param.input);
+  switch (param.is_valid) {
+    case PortIsValid::kAlways:
+      EXPECT_EQ(url.Port(), param.constructor_output);
+      EXPECT_EQ(url.IsValid(), true);
+      break;
+
+    case PortIsValid::kInSetHostAndPort:
+      EXPECT_EQ(url.Port(), param.set_port_output);
+      EXPECT_EQ(url.IsValid(), true);
+      break;
+
+    case PortIsValid::kInSetPort:
+      EXPECT_EQ(url.Port(), param.constructor_output);
+      EXPECT_EQ(url.IsValid(), false);
+      break;
+  }
+}
+
+INSTANTIATE_TEST_CASE_P(, KURLPortTest, ::testing::ValuesIn(port_test_cases));
 
 }  // namespace blink

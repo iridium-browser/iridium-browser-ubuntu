@@ -4,6 +4,9 @@
 
 #include "device/vr/openvr/openvr_render_loop.h"
 
+#include "base/metrics/histogram_functions.h"
+#include "device/vr/openvr/openvr_api_wrapper.h"
+#include "device/vr/openvr/openvr_gamepad_helper.h"
 #include "device/vr/openvr/openvr_type_converters.h"
 #include "ui/gfx/geometry/angle_conversions.h"
 #include "ui/gfx/transform.h"
@@ -42,218 +45,159 @@ gfx::Transform HmdMatrix34ToTransform(const vr::HmdMatrix34_t& mat) {
 
 }  // namespace
 
-OpenVRRenderLoop::OpenVRRenderLoop(vr::IVRSystem* vr)
-    : base::Thread("OpenVRRenderLoop"),
-      main_thread_task_runner_(base::ThreadTaskRunnerHandle::Get()),
-      vr_system_(vr),
-      binding_(this),
-      weak_ptr_factory_(this) {
-  DCHECK(main_thread_task_runner_);
-}
+OpenVRRenderLoop::OpenVRRenderLoop() : XRCompositorCommon() {}
 
 OpenVRRenderLoop::~OpenVRRenderLoop() {
   Stop();
 }
 
-void OpenVRRenderLoop::SubmitFrameMissing(int16_t frame_index,
-                                          const gpu::SyncToken& sync_token) {
-  // Nothing to do. It's OK to start the next frame even if the current
-  // one didn't get sent to OpenVR.
-}
-
-void OpenVRRenderLoop::SubmitFrame(int16_t frame_index,
-                                   const gpu::MailboxHolder& mailbox,
-                                   base::TimeDelta time_waited) {
-  NOTREACHED();
-}
-
-void OpenVRRenderLoop::SubmitFrameDrawnIntoTexture(
-    int16_t frame_index,
-    const gpu::SyncToken& sync_token,
-    base::TimeDelta time_waited) {
-  // Not currently implemented for Windows.
-  NOTREACHED();
-}
-
-void OpenVRRenderLoop::SubmitFrameWithTextureHandle(
-    int16_t frame_index,
-    mojo::ScopedHandle texture_handle) {
-  TRACE_EVENT1("gpu", "SubmitFrameWithTextureHandle", "frameIndex",
-               frame_index);
-
-#if defined(OS_WIN)
-  MojoPlatformHandle platform_handle;
-  platform_handle.struct_size = sizeof(platform_handle);
-  MojoResult result = MojoUnwrapPlatformHandle(texture_handle.release().value(),
-                                               &platform_handle);
-  if (result != MOJO_RESULT_OK)
-    return;
-
-  texture_helper_.SetSourceTexture(
-      base::win::ScopedHandle(reinterpret_cast<HANDLE>(platform_handle.value)));
+bool OpenVRRenderLoop::PreComposite() {
   texture_helper_.AllocateBackBuffer();
-  bool copy_successful = texture_helper_.CopyTextureToBackBuffer(true);
-  if (copy_successful) {
-    vr::Texture_t texture;
-    texture.handle = texture_helper_.GetBackbuffer().Get();
-    texture.eType = vr::TextureType_DirectX;
-    texture.eColorSpace = vr::ColorSpace_Auto;
+  return true;
+}
 
-    vr::VRTextureBounds_t bounds[2];
-    bounds[0] = {left_bounds_.x(), left_bounds_.y(),
-                 left_bounds_.width() + left_bounds_.x(),
-                 left_bounds_.height() + left_bounds_.y()};
-    bounds[1] = {right_bounds_.x(), right_bounds_.y(),
-                 right_bounds_.width() + right_bounds_.x(),
-                 right_bounds_.height() + right_bounds_.y()};
+bool OpenVRRenderLoop::SubmitCompositedFrame() {
+  DCHECK(openvr_);
+  vr::IVRCompositor* vr_compositor = openvr_->GetCompositor();
+  DCHECK(vr_compositor);
+  if (!vr_compositor)
+    return false;
 
-    vr::EVRCompositorError error =
-        vr_compositor_->Submit(vr::EVREye::Eye_Left, &texture, &bounds[0]);
-    if (error != vr::VRCompositorError_None) {
-      ExitPresent();
-      return;
+  vr::Texture_t texture;
+  texture.handle = texture_helper_.GetBackbuffer().Get();
+  texture.eType = vr::TextureType_DirectX;
+  texture.eColorSpace = vr::ColorSpace_Auto;
+
+  gfx::RectF left_bounds = texture_helper_.BackBufferLeft();
+  gfx::RectF right_bounds = texture_helper_.BackBufferRight();
+
+  vr::VRTextureBounds_t bounds[2];
+  bounds[0] = {left_bounds.x(), left_bounds.y(),
+               left_bounds.width() + left_bounds.x(),
+               left_bounds.height() + left_bounds.y()};
+  bounds[1] = {right_bounds.x(), right_bounds.y(),
+               right_bounds.width() + right_bounds.x(),
+               right_bounds.height() + right_bounds.y()};
+
+  vr::EVRCompositorError error =
+      vr_compositor->Submit(vr::EVREye::Eye_Left, &texture, &bounds[0]);
+  if (error != vr::VRCompositorError_None) {
+    return false;
+  }
+  error = vr_compositor->Submit(vr::EVREye::Eye_Right, &texture, &bounds[1]);
+  if (error != vr::VRCompositorError_None) {
+    return false;
+  }
+  vr_compositor->PostPresentHandoff();
+  return true;
+}
+
+bool OpenVRRenderLoop::StartRuntime() {
+  if (!openvr_) {
+    openvr_ = std::make_unique<OpenVRWrapper>(true);
+    if (!openvr_->IsInitialized()) {
+      openvr_ = nullptr;
+      return false;
     }
-    error = vr_compositor_->Submit(vr::EVREye::Eye_Right, &texture, &bounds[1]);
-    if (error != vr::VRCompositorError_None) {
-      ExitPresent();
-      return;
-    }
-    vr_compositor_->PostPresentHandoff();
+
+    openvr_->GetCompositor()->SuspendRendering(true);
+    openvr_->GetCompositor()->SetTrackingSpace(
+        vr::ETrackingUniverseOrigin::TrackingUniverseSeated);
   }
 
-  // Tell WebVR that we are done with the texture.
-  submit_client_->OnSubmitFrameTransferred(copy_successful);
-  submit_client_->OnSubmitFrameRendered();
-#endif
-}
-
-void OpenVRRenderLoop::CleanUp() {
-  submit_client_ = nullptr;
-  binding_.Close();
-}
-
-void OpenVRRenderLoop::UpdateLayerBounds(int16_t frame_id,
-                                         const gfx::RectF& left_bounds,
-                                         const gfx::RectF& right_bounds,
-                                         const gfx::Size& source_size) {
-  // Bounds are updated instantly, rather than waiting for frame_id.  This works
-  // since blink always passes the current frame_id when updating the bounds.
-  // Ignoring the frame_id keeps the logic simpler, so this can more easily
-  // merge with vr_shell_gl eventually.
-  left_bounds_ = left_bounds;
-  right_bounds_ = right_bounds;
-  source_size_ = source_size;
-};
-
-void OpenVRRenderLoop::RequestPresent(
-    mojom::VRSubmitFrameClientPtrInfo submit_client_info,
-    mojom::VRPresentationProviderRequest request,
-    device::mojom::VRRequestPresentOptionsPtr present_options,
-    device::mojom::VRDisplayHost::RequestPresentCallback callback) {
 #if defined(OS_WIN)
   int32_t adapter_index;
-  vr::VRSystem()->GetDXGIOutputInfo(&adapter_index);
+  openvr_->GetSystem()->GetDXGIOutputInfo(&adapter_index);
   if (!texture_helper_.SetAdapterIndex(adapter_index) ||
       !texture_helper_.EnsureInitialized()) {
-    main_thread_task_runner_->PostTask(
-        FROM_HERE, base::BindOnce(std::move(callback), false, nullptr));
-    return;
+    openvr_ = nullptr;
+    return false;
   }
 #endif
-  submit_client_.Bind(std::move(submit_client_info));
 
-  binding_.Close();
-  binding_.Bind(std::move(request));
+  uint32_t width, height;
+  openvr_->GetSystem()->GetRecommendedRenderTargetSize(&width, &height);
+  texture_helper_.SetDefaultSize(gfx::Size(width, height));
 
-  device::mojom::VRDisplayFrameTransportOptionsPtr transport_options =
-      device::mojom::VRDisplayFrameTransportOptions::New();
-  transport_options->transport_method =
-      device::mojom::VRDisplayFrameTransportMethod::SUBMIT_AS_TEXTURE_HANDLE;
-  // Only set boolean options that we need. Default is false, and we should be
-  // able to safely ignore ones that our implementation doesn't care about.
-  transport_options->wait_for_transfer_notification = true;
-
-  report_webxr_input_ = present_options->webxr_input;
-  if (report_webxr_input_) {
-    // Reset the active states for all the controllers.
-    for (uint32_t i = 0; i < vr::k_unMaxTrackedDeviceCount; ++i) {
-      InputActiveState& input_active_state = input_active_states_[i];
-      input_active_state.active = false;
-      input_active_state.primary_input_pressed = false;
-      input_active_state.device_class = vr::TrackedDeviceClass_Invalid;
-      input_active_state.controller_role = vr::TrackedControllerRole_Invalid;
-    }
-  }
-
-  main_thread_task_runner_->PostTask(
-      FROM_HERE,
-      base::BindOnce(std::move(callback), true, std::move(transport_options)));
-  is_presenting_ = true;
-  vr_compositor_->SuspendRendering(false);
+  return true;
 }
 
-void OpenVRRenderLoop::ExitPresent() {
-  is_presenting_ = false;
-  report_webxr_input_ = false;
-  vr_compositor_->SuspendRendering(true);
+void OpenVRRenderLoop::StopRuntime() {
+  if (openvr_)
+    openvr_->GetCompositor()->SuspendRendering(true);
+  openvr_ = nullptr;
+}
+
+void OpenVRRenderLoop::OnSessionStart() {
+  // Reset the active states for all the controllers.
+  for (uint32_t i = 0; i < vr::k_unMaxTrackedDeviceCount; ++i) {
+    InputActiveState& input_active_state = input_active_states_[i];
+    input_active_state.active = false;
+    input_active_state.primary_input_pressed = false;
+    input_active_state.device_class = vr::TrackedDeviceClass_Invalid;
+    input_active_state.controller_role = vr::TrackedControllerRole_Invalid;
+  }
+
+  openvr_->GetCompositor()->SuspendRendering(false);
+
+  // Measure the VrViewerType we are presenting with.
+  using ViewerMap = std::map<std::string, VrViewerType>;
+  CR_DEFINE_STATIC_LOCAL(ViewerMap, viewer_types,
+                         ({
+                             {"Oculus Rift CV1", VrViewerType::OPENVR_RIFT_CV1},
+                             {"Vive MV", VrViewerType::OPENVR_VIVE},
+                         }));
+  VrViewerType type = VrViewerType::OPENVR_UNKNOWN;
+  std::string model =
+      GetOpenVRString(openvr_->GetSystem(), vr::Prop_ModelNumber_String);
+  auto it = viewer_types.find(model);
+  if (it != viewer_types.end())
+    type = it->second;
+
+  base::UmaHistogramSparse("VRViewerType", static_cast<int>(type));
+}
+
+mojom::XRGamepadDataPtr OpenVRRenderLoop::GetNextGamepadData() {
+  if (!openvr_) {
+    return nullptr;
+  }
+  return OpenVRGamepadHelper::GetGamepadData(openvr_->GetSystem());
 }
 
 mojom::VRPosePtr OpenVRRenderLoop::GetPose() {
   vr::TrackedDevicePose_t rendering_poses[vr::k_unMaxTrackedDeviceCount];
 
   TRACE_EVENT0("gpu", "WaitGetPoses");
-  vr_compositor_->WaitGetPoses(rendering_poses, vr::k_unMaxTrackedDeviceCount,
-                               nullptr, 0);
+  openvr_->GetCompositor()->WaitGetPoses(
+      rendering_poses, vr::k_unMaxTrackedDeviceCount, nullptr, 0);
 
   mojom::VRPosePtr pose = mojo::ConvertTo<mojom::VRPosePtr>(
       rendering_poses[vr::k_unTrackedDeviceIndex_Hmd]);
 
   // Update WebXR input sources.
-  if (pose && report_webxr_input_) {
-    pose->input_state =
-        GetInputState(rendering_poses, vr::k_unMaxTrackedDeviceCount);
-  }
+  DCHECK(pose);
+  pose->input_state =
+      GetInputState(rendering_poses, vr::k_unMaxTrackedDeviceCount);
 
   return pose;
 }
 
-void OpenVRRenderLoop::Init() {
-  vr_compositor_ = vr::VRCompositor();
-  if (vr_compositor_ == nullptr) {
-    DLOG(ERROR) << "Failed to initialize compositor.";
-    return;
+mojom::XRFrameDataPtr OpenVRRenderLoop::GetNextFrameData() {
+  mojom::XRFrameDataPtr frame_data = mojom::XRFrameData::New();
+  frame_data->frame_id = next_frame_id_;
+
+  if (openvr_) {
+    frame_data->pose = GetPose();
+    vr::Compositor_FrameTiming timing;
+    timing.m_nSize = sizeof(vr::Compositor_FrameTiming);
+    bool valid_time = openvr_->GetCompositor()->GetFrameTiming(&timing);
+    if (valid_time) {
+      frame_data->time_delta =
+          base::TimeDelta::FromSecondsD(timing.m_flSystemTimeInSeconds);
+    }
   }
 
-  vr_compositor_->SuspendRendering(true);
-  vr_compositor_->SetTrackingSpace(
-      vr::ETrackingUniverseOrigin::TrackingUniverseSeated);
-}
-
-base::WeakPtr<OpenVRRenderLoop> OpenVRRenderLoop::GetWeakPtr() {
-  return weak_ptr_factory_.GetWeakPtr();
-}
-
-void OpenVRRenderLoop::GetVSync(
-    mojom::VRPresentationProvider::GetVSyncCallback callback) {
-  DCHECK(is_presenting_);
-  int16_t frame = next_frame_id_;
-  next_frame_id_ += 1;
-  if (next_frame_id_ < 0) {
-    next_frame_id_ = 0;
-  }
-
-  mojom::VRPosePtr pose = GetPose();
-
-  vr::Compositor_FrameTiming timing;
-  timing.m_nSize = sizeof(vr::Compositor_FrameTiming);
-  bool valid_time = vr_compositor_->GetFrameTiming(&timing);
-  base::TimeDelta time =
-      valid_time ? base::TimeDelta::FromSecondsD(timing.m_flSystemTimeInSeconds)
-                 : base::TimeDelta();
-
-  std::move(callback).Run(std::move(pose), time, frame,
-                          mojom::VRPresentationProvider::VSyncStatus::SUCCESS,
-                          base::nullopt);
+  return frame_data;
 }
 
 std::vector<mojom::XRInputSourceStatePtr> OpenVRRenderLoop::GetInputState(
@@ -261,7 +205,7 @@ std::vector<mojom::XRInputSourceStatePtr> OpenVRRenderLoop::GetInputState(
     uint32_t count) {
   std::vector<mojom::XRInputSourceStatePtr> input_states;
 
-  if (!vr_system_)
+  if (!openvr_)
     return input_states;
 
   // Loop through every device pose and determine which are controllers
@@ -285,7 +229,8 @@ std::vector<mojom::XRInputSourceStatePtr> OpenVRRenderLoop::GetInputState(
     bool newly_active = false;
     if (!input_active_state.active) {
       input_active_state.active = true;
-      input_active_state.device_class = vr_system_->GetTrackedDeviceClass(i);
+      input_active_state.device_class =
+          openvr_->GetSystem()->GetTrackedDeviceClass(i);
       newly_active = true;
     }
 
@@ -298,8 +243,8 @@ std::vector<mojom::XRInputSourceStatePtr> OpenVRRenderLoop::GetInputState(
         device::mojom::XRInputSourceState::New();
 
     vr::VRControllerState_t controller_state;
-    vr_system_->GetControllerState(i, &controller_state,
-                                   sizeof(vr::VRControllerState_t));
+    openvr_->GetSystem()->GetControllerState(i, &controller_state,
+                                             sizeof(vr::VRControllerState_t));
     bool pressed = controller_state.ulButtonPressed &
                    vr::ButtonMaskFromId(vr::k_EButton_SteamVR_Trigger);
 
@@ -319,7 +264,7 @@ std::vector<mojom::XRInputSourceStatePtr> OpenVRRenderLoop::GetInputState(
 
     // Poll controller roll per-frame, since OpenVR controllers can swap hands.
     vr::ETrackedControllerRole controller_role =
-        vr_system_->GetControllerRoleForTrackedDeviceIndex(i);
+        openvr_->GetSystem()->GetControllerRoleForTrackedDeviceIndex(i);
 
     // If this is a newly active controller or if the handedness has changed
     // since the last update, re-send the controller's description.
@@ -328,7 +273,7 @@ std::vector<mojom::XRInputSourceStatePtr> OpenVRRenderLoop::GetInputState(
           device::mojom::XRInputSourceDescription::New();
 
       // It's a handheld pointing device.
-      desc->pointer_origin = device::mojom::XRPointerOrigin::HAND;
+      desc->target_ray_mode = device::mojom::XRTargetRayMode::POINTING;
 
       // Set handedness.
       switch (controller_role) {

@@ -24,20 +24,22 @@ class Animation;
 class ComputedStyle;
 
 class NewCSSAnimation {
-  DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
+  DISALLOW_NEW();
 
  public:
   NewCSSAnimation(AtomicString name,
                   size_t name_index,
                   const InertEffect& effect,
                   Timing timing,
-                  StyleRuleKeyframes* style_rule)
+                  StyleRuleKeyframes* style_rule,
+                  const Vector<EAnimPlayState>& play_state_list)
       : name(name),
         name_index(name_index),
         effect(effect),
         timing(timing),
         style_rule(style_rule),
-        style_rule_version(this->style_rule->Version()) {}
+        style_rule_version(this->style_rule->Version()),
+        play_state_list(play_state_list) {}
 
   void Trace(blink::Visitor* visitor) {
     visitor->Trace(effect);
@@ -50,23 +52,26 @@ class NewCSSAnimation {
   Timing timing;
   Member<StyleRuleKeyframes> style_rule;
   unsigned style_rule_version;
+  Vector<EAnimPlayState> play_state_list;
 };
 
 class UpdatedCSSAnimation {
-  DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
+  DISALLOW_NEW();
 
  public:
-  UpdatedCSSAnimation(size_t index,
+  UpdatedCSSAnimation(wtf_size_t index,
                       Animation* animation,
                       const InertEffect& effect,
                       Timing specified_timing,
-                      StyleRuleKeyframes* style_rule)
+                      StyleRuleKeyframes* style_rule,
+                      const Vector<EAnimPlayState>& play_state_list)
       : index(index),
         animation(animation),
         effect(&effect),
         specified_timing(specified_timing),
         style_rule(style_rule),
-        style_rule_version(this->style_rule->Version()) {}
+        style_rule_version(this->style_rule->Version()),
+        play_state_list(play_state_list) {}
 
   void Trace(blink::Visitor* visitor) {
     visitor->Trace(animation);
@@ -74,12 +79,13 @@ class UpdatedCSSAnimation {
     visitor->Trace(style_rule);
   }
 
-  size_t index;
+  wtf_size_t index;
   Member<Animation> animation;
   Member<const InertEffect> effect;
   Timing specified_timing;
   Member<StyleRuleKeyframes> style_rule;
   unsigned style_rule_version;
+  Vector<EAnimPlayState> play_state_list;
 };
 
 }  // namespace blink
@@ -106,24 +112,28 @@ class CSSAnimationUpdate final {
                       size_t name_index,
                       const InertEffect& effect,
                       const Timing& timing,
-                      StyleRuleKeyframes* style_rule) {
+                      StyleRuleKeyframes* style_rule,
+                      const Vector<EAnimPlayState>& play_state_list) {
     new_animations_.push_back(NewCSSAnimation(animation_name, name_index,
-                                              effect, timing, style_rule));
+                                              effect, timing, style_rule,
+                                              play_state_list));
   }
-  void CancelAnimation(size_t index, const Animation& animation) {
+  void CancelAnimation(wtf_size_t index, const Animation& animation) {
     cancelled_animation_indices_.push_back(index);
     suppressed_animations_.insert(&animation);
   }
-  void ToggleAnimationIndexPaused(size_t index) {
+  void ToggleAnimationIndexPaused(wtf_size_t index) {
     animation_indices_with_pause_toggled_.push_back(index);
   }
-  void UpdateAnimation(size_t index,
+  void UpdateAnimation(wtf_size_t index,
                        Animation* animation,
                        const InertEffect& effect,
                        const Timing& specified_timing,
-                       StyleRuleKeyframes* style_rule) {
-    animations_with_updates_.push_back(UpdatedCSSAnimation(
-        index, animation, effect, specified_timing, style_rule));
+                       StyleRuleKeyframes* style_rule,
+                       const Vector<EAnimPlayState>& play_state_list) {
+    animations_with_updates_.push_back(
+        UpdatedCSSAnimation(index, animation, effect, specified_timing,
+                            style_rule, play_state_list));
     suppressed_animations_.insert(animation);
   }
   void UpdateCompositorKeyframes(Animation* animation) {
@@ -148,13 +158,13 @@ class CSSAnimationUpdate final {
   const HeapVector<NewCSSAnimation>& NewAnimations() const {
     return new_animations_;
   }
-  const Vector<size_t>& CancelledAnimationIndices() const {
+  const Vector<wtf_size_t>& CancelledAnimationIndices() const {
     return cancelled_animation_indices_;
   }
   const HeapHashSet<Member<const Animation>>& SuppressedAnimations() const {
     return suppressed_animations_;
   }
-  const Vector<size_t>& AnimationIndicesWithPauseToggled() const {
+  const Vector<wtf_size_t>& AnimationIndicesWithPauseToggled() const {
     return animation_indices_with_pause_toggled_;
   }
   const HeapVector<UpdatedCSSAnimation>& AnimationsWithUpdates() const {
@@ -165,7 +175,7 @@ class CSSAnimationUpdate final {
   }
 
   struct NewTransition {
-    DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
+    DISALLOW_NEW();
 
    public:
     NewTransition();
@@ -248,6 +258,10 @@ class CSSAnimationUpdate final {
     visitor->Trace(suppressed_animations_);
     visitor->Trace(animations_with_updates_);
     visitor->Trace(updated_compositor_keyframes_);
+    visitor->Trace(active_interpolations_for_custom_animations_);
+    visitor->Trace(active_interpolations_for_standard_animations_);
+    visitor->Trace(active_interpolations_for_custom_transitions_);
+    visitor->Trace(active_interpolations_for_standard_transitions_);
   }
 
  private:
@@ -256,9 +270,9 @@ class CSSAnimationUpdate final {
   // with the same name, due to the way in which we split up animations with
   // incomplete keyframes.
   HeapVector<NewCSSAnimation> new_animations_;
-  Vector<size_t> cancelled_animation_indices_;
+  Vector<wtf_size_t> cancelled_animation_indices_;
   HeapHashSet<Member<const Animation>> suppressed_animations_;
-  Vector<size_t> animation_indices_with_pause_toggled_;
+  Vector<wtf_size_t> animation_indices_with_pause_toggled_;
   HeapVector<UpdatedCSSAnimation> animations_with_updates_;
   HeapVector<Member<Animation>> updated_compositor_keyframes_;
 

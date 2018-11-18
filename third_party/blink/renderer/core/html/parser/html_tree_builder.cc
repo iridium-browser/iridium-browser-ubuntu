@@ -29,7 +29,6 @@
 #include <memory>
 
 #include "base/macros.h"
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/document_fragment.h"
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
@@ -49,6 +48,7 @@
 #include "third_party/blink/renderer/core/xlink_names.h"
 #include "third_party/blink/renderer/core/xml_names.h"
 #include "third_party/blink/renderer/core/xmlns_names.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/runtime_call_stats.h"
 #include "third_party/blink/renderer/platform/bindings/v8_per_isolate_data.h"
 #include "third_party/blink/renderer/platform/text/platform_locale.h"
@@ -283,11 +283,11 @@ void HTMLTreeBuilder::Trace(blink::Visitor* visitor) {
 void HTMLTreeBuilder::Detach() {
 #if DCHECK_IS_ON()
   // This call makes little sense in fragment mode, but for consistency
-  // DocumentParser expects detach() to always be called before it's destroyed.
+  // DocumentParser expects Detach() to always be called before it's destroyed.
   is_attached_ = false;
 #endif
-  // HTMLConstructionSite might be on the callstack when detach() is called
-  // otherwise we'd just call m_tree.clear() here instead.
+  // HTMLConstructionSite might be on the callstack when Detach() is called
+  // otherwise we'd just call tree_.Clear() here instead.
   tree_.Detach();
 }
 
@@ -552,7 +552,8 @@ void HTMLTreeBuilder::ProcessStartTagForInBody(AtomicHTMLToken* token) {
       token->GetName() == bgsoundTag || token->GetName() == commandTag ||
       token->GetName() == linkTag || token->GetName() == metaTag ||
       token->GetName() == noframesTag || token->GetName() == scriptTag ||
-      token->GetName() == styleTag || token->GetName() == titleTag) {
+      token->GetName() == styleTag || token->GetName() == titleTag ||
+      token->GetName() == templateTag) {
     bool did_process = ProcessStartTagForInHead(token);
     DCHECK(did_process);
     return;
@@ -845,10 +846,6 @@ void HTMLTreeBuilder::ProcessStartTagForInBody(AtomicHTMLToken* token) {
       IsTableBodyContextTag(token->GetName()) ||
       IsTableCellContextTag(token->GetName()) || token->GetName() == trTag) {
     ParseError(token);
-    return;
-  }
-  if (token->GetName() == templateTag) {
-    ProcessTemplateStartTag(token);
     return;
   }
   tree_.ReconstructTheActiveFormattingElements();
@@ -1237,10 +1234,6 @@ void HTMLTreeBuilder::ProcessStartTag(AtomicHTMLToken* token) {
         ProcessStartTagForInHead(token);
         return;
       }
-      if (token->GetName() == templateTag) {
-        ProcessTemplateStartTag(token);
-        return;
-      }
       ParseError(token);
       break;
     case kAfterFramesetMode:
@@ -1346,9 +1339,7 @@ void HTMLTreeBuilder::ProcessStartTag(AtomicHTMLToken* token) {
       }
 
       InsertionMode insertion_mode = kTemplateContentsMode;
-      if (token->GetName() == frameTag)
-        insertion_mode = kInFramesetMode;
-      else if (token->GetName() == colTag)
+      if (token->GetName() == colTag)
         insertion_mode = kInColumnGroupMode;
       else if (IsCaptionColOrColgroupTag(token->GetName()) ||
                IsTableBodyContextTag(token->GetName()))
@@ -1825,7 +1816,7 @@ bool HTMLTreeBuilder::ProcessCaptionEndTagForInCaption() {
     return false;
   }
   tree_.GenerateImpliedEndTags();
-  // FIXME: parse error if (!m_tree.currentStackItem()->hasTagName(captionTag))
+  // FIXME: parse error if (!tree_.CurrentStackItem()->HasTagName(captionTag))
   tree_.OpenElements()->PopUntilPopped(captionTag.LocalName());
   tree_.ActiveFormattingElements()->ClearToLastMarker();
   SetInsertionMode(kInTableMode);
@@ -2066,10 +2057,6 @@ void HTMLTreeBuilder::ProcessEndTag(AtomicHTMLToken* token) {
         if (!IsParsingFragment() &&
             !tree_.CurrentStackItem()->HasTagName(framesetTag))
           SetInsertionMode(kAfterFramesetMode);
-        return;
-      }
-      if (token->GetName() == templateTag) {
-        ProcessTemplateEndTag(token);
         return;
       }
       break;

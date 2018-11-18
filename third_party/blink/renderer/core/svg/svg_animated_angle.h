@@ -55,15 +55,13 @@ class SVGAnimatedAngle final : public ScriptWrappable,
   }
 
   // SVGAnimatedPropertyBase:
-  bool NeedsSynchronizeAttribute() override;
+  bool NeedsSynchronizeAttribute() const override;
   void SynchronizeAttribute() override;
 
   void SetAnimatedValue(SVGPropertyBase*) override;
   void AnimationEnded() override;
 
   void Trace(blink::Visitor*) override;
-
-  void TraceWrappers(const ScriptWrappableVisitor*) const override;
 
  protected:
   explicit SVGAnimatedAngle(SVGElement* context_element);

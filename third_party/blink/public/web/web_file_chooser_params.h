@@ -31,22 +31,17 @@
 #ifndef THIRD_PARTY_BLINK_PUBLIC_WEB_WEB_FILE_CHOOSER_PARAMS_H_
 #define THIRD_PARTY_BLINK_PUBLIC_WEB_WEB_FILE_CHOOSER_PARAMS_H_
 
+#include "third_party/blink/public/mojom/choosers/file_chooser.mojom-shared.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/platform/web_url.h"
 #include "third_party/blink/public/platform/web_vector.h"
-#include "third_party/blink/public/web/web_file_chooser_completion.h"
 
 namespace blink {
 
 struct WebFileChooserParams {
-  // If |multiSelect| is true, the dialog allows the user to select multiple
-  // files.
-  bool multi_select;
-  // If |directory| is true, the dialog allows the user to select a directory.
-  bool directory;
-  // If |saveAs| is true, the dialog allows the user to select a possibly
-  // non-existent file. This can be used for a "Save As" dialog.
-  bool save_as;
+  // See FileChooserParams in file_chooser.mojom.
+  using Mode = mojom::FileChooserParams_Mode;
+  Mode mode = Mode::kOpen;
   // |title| is the title for a file chooser dialog. It can be an empty string.
   WebString title;
   // This contains MIME type strings such as "audio/*" "text/plain" or file
@@ -56,35 +51,26 @@ struct WebFileChooserParams {
   // This list comes from an 'accept' attribute value of an INPUT element, and
   // it contains only lower-cased MIME type strings and file extensions.
   WebVector<WebString> accept_types;
-  // |selectedFiles| has filenames which a file upload control already selected.
-  // A WebViewClient implementation may ask a user to select
+  // |selected_files| has filenames which a file upload control already
+  // selected. A WebLocalFrameClient implementation may ask a user to select
   //  - removing a file from the selected files,
   //  - appending other files, or
   //  - replacing with other files
   // before opening a file chooser dialog.
   WebVector<WebString> selected_files;
   // See http://www.w3.org/TR/html-media-capture/ for the semantics of the
-  // capture attribute. If |useMediaCapture| is true, the media types
-  // indicated in |acceptTypes| should be obtained from the device's
-  // environment using a media capture mechanism. |capture| is deprecated and
-  // provided for compatibility reasons.
-  WebString capture;
-  bool use_media_capture;
+  // capture attribute. If |use_media_capture| is true, the media types
+  // indicated in |accept_types| should be obtained from the device's
+  // environment using a media capture mechanism.
+  bool use_media_capture = false;
   // Whether WebFileChooserCompletion needs local paths or not. If the result
   // of file chooser is handled by the implementation of
   // WebFileChooserCompletion that can handle files without local paths,
   // 'false' should be specified to the flag.
-  bool need_local_path;
+  bool need_local_path = true;
   // If non-empty, represents the URL of the requestor if the request was
   // initiated by a document.
   WebURL requestor;
-
-  WebFileChooserParams()
-      : multi_select(false),
-        directory(false),
-        save_as(false),
-        use_media_capture(false),
-        need_local_path(true) {}
 };
 
 }  // namespace blink

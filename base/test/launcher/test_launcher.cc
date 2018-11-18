@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <map>
+#include <random>
 #include <utility>
 
 #include "base/at_exit.h"
@@ -38,8 +39,8 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/sys_info.h"
-#include "base/task_scheduler/post_task.h"
-#include "base/task_scheduler/task_scheduler.h"
+#include "base/task/post_task.h"
+#include "base/task/task_scheduler/task_scheduler.h"
 #include "base/test/gtest_util.h"
 #include "base/test/launcher/test_launcher_tracer.h"
 #include "base/test/launcher/test_results_tracker.h"
@@ -66,10 +67,13 @@
 #endif
 
 #if defined(OS_FUCHSIA)
-// TODO(scottmg): For temporary code in OnOutputTimeout().
-#include <zircon/syscalls.h>
-#include <zircon/syscalls/object.h>
+#include <lib/zx/job.h>
+#include "base/atomic_sequence_num.h"
+#include "base/base_paths_fuchsia.h"
 #include "base/fuchsia/default_job.h"
+#include "base/fuchsia/file_utils.h"
+#include "base/fuchsia/fuchsia_logging.h"
+#include "base/path_service.h"
 #endif
 
 namespace base {
@@ -106,6 +110,10 @@ const size_t kOutputSnippetLinesLimit = 5000;
 // Limit of output snippet size. Exceeding this limit
 // results in truncating the output and failing the test.
 const size_t kOutputSnippetBytesLimit = 300 * 1024;
+
+// Limit of seed values for gtest shuffling. Arbitrary, but based on
+// gtest's similarly arbitrary choice.
+const uint32_t kRandomSeedUpperBound = 100000;
 
 // Set of live launch test processes with corresponding lock (it is allowed
 // for callers to launch processes on different threads).
@@ -146,10 +154,7 @@ void CreateAndStartTaskScheduler(int num_parallel_jobs) {
        {num_parallel_jobs, kSuggestedReclaimTime}});
 }
 
-// TODO(fuchsia): Fuchsia does not have POSIX signals, but equivalent
-// functionality will probably be necessary eventually. See
-// https://crbug.com/706592.
-#if defined(OS_POSIX) && !defined(OS_FUCHSIA)
+#if defined(OS_POSIX)
 // Self-pipe that makes it possible to do complex shutdown handling
 // outside of the signal handler.
 int g_shutdown_pipe[2] = { -1, -1 };
@@ -193,7 +198,7 @@ void KillSpawnedTestProcesses() {
   fprintf(stdout, "done.\n");
   fflush(stdout);
 }
-#endif  // defined(OS_POSIX) && !defined(OS_FUCHSIA)
+#endif  // defined(OS_POSIX)
 
 // Parses the environment variable var as an Int32.  If it is unset, returns
 // true.  If it is set, unsets it then converts it to Int32 before
@@ -245,8 +250,10 @@ CommandLine PrepareCommandLineForGTest(const CommandLine& command_line,
   CommandLine new_command_line(command_line.GetProgram());
   CommandLine::SwitchMap switches = command_line.GetSwitches();
 
-  // Strip out gtest_repeat flag - this is handled by the launcher process.
+  // Handled by the launcher process.
   switches.erase(kGTestRepeatFlag);
+  switches.erase(kGTestShuffleFlag);
+  switches.erase(kGTestRandomSeedFlag);
 
   // Don't try to write the final XML report in child processes.
   switches.erase(kGTestOutputFlag);
@@ -262,7 +269,7 @@ CommandLine PrepareCommandLineForGTest(const CommandLine& command_line,
   // TODO(phajdan.jr): Give it a try to support CommandLine removing switches.
 #if defined(OS_WIN)
   new_command_line.PrependWrapper(ASCIIToUTF16(wrapper));
-#elif defined(OS_POSIX)
+#else
   new_command_line.PrependWrapper(wrapper);
 #endif
 
@@ -279,11 +286,8 @@ int LaunchChildTestProcessWithOptions(const CommandLine& command_line,
                                       ProcessLifetimeObserver* observer,
                                       bool* was_timeout) {
   TimeTicks start_time(TimeTicks::Now());
-#if defined(OS_FUCHSIA)  // TODO(scottmg): https://crbug.com/755282
-  const bool kOnBot = getenv("CHROME_HEADLESS") != nullptr;
-#endif  // OS_FUCHSIA
 
-#if defined(OS_POSIX) && !defined(OS_FUCHSIA)
+#if defined(OS_POSIX)
   // Make sure an option we rely on is present - see LaunchChildGTestProcess.
   DCHECK(options.new_process_group);
 #endif
@@ -320,10 +324,61 @@ int LaunchChildTestProcessWithOptions(const CommandLine& command_line,
 #elif defined(OS_FUCHSIA)
   DCHECK(!new_options.job_handle);
 
-  ScopedZxHandle job_handle;
-  zx_status_t result = zx_job_create(GetDefaultJob(), 0, job_handle.receive());
-  CHECK_EQ(ZX_OK, result) << "zx_job_create: " << zx_status_get_string(result);
+  // Set the clone policy, deliberately omitting FDIO_SPAWN_CLONE_NAMESPACE so
+  // that we can install a different /data.
+  new_options.spawn_flags = FDIO_SPAWN_CLONE_STDIO | FDIO_SPAWN_CLONE_JOB;
+  new_options.paths_to_clone.push_back(base::FilePath("/config/ssl"));
+  new_options.paths_to_clone.push_back(base::FilePath("/dev/null"));
+  new_options.paths_to_clone.push_back(base::FilePath("/dev/zero"));
+  new_options.paths_to_clone.push_back(base::FilePath("/pkg"));
+  new_options.paths_to_clone.push_back(base::FilePath("/svc"));
+  new_options.paths_to_clone.push_back(base::FilePath("/tmp"));
+
+  zx::job job_handle;
+  zx_status_t result = zx::job::create(*GetDefaultJob(), 0, &job_handle);
+  ZX_CHECK(ZX_OK == result, result) << "zx_job_create";
   new_options.job_handle = job_handle.get();
+
+  // Give this test its own isolated /data directory by creating a new temporary
+  // subdirectory under data (/data/test-$PID) and binding that to /data on the
+  // child process.
+  base::FilePath data_path("/data");
+  CHECK(base::PathExists(data_path));
+
+  // Create the test subdirectory with a name that is unique to the child test
+  // process (qualified by parent PID and an autoincrementing test process
+  // index).
+  static base::AtomicSequenceNumber child_launch_index;
+  base::FilePath nested_data_path = data_path.AppendASCII(
+      base::StringPrintf("test-%" PRIuS "-%d", base::Process::Current().Pid(),
+                         child_launch_index.GetNext()));
+  CHECK(!base::DirectoryExists(nested_data_path));
+  CHECK(base::CreateDirectory(nested_data_path));
+  DCHECK(base::DirectoryExists(nested_data_path));
+
+  // Bind the new test subdirectory to /data in the child process' namespace.
+  new_options.paths_to_transfer.push_back(
+      {data_path, base::fuchsia::GetHandleFromFile(
+                      base::File(nested_data_path,
+                                 base::File::FLAG_OPEN | base::File::FLAG_READ |
+                                     base::File::FLAG_DELETE_ON_CLOSE))
+                      .release()});
+
+  // The test launcher can use a shared data directory for providing tests with
+  // files deployed at runtime. The files are located under the directory
+  // "/data/shared". They will be mounted at "/test-shared" under the child
+  // process' namespace.
+  const base::FilePath kSharedDataSourcePath("/data/shared");
+  const base::FilePath kSharedDataTargetPath("/test-shared");
+  if (base::PathExists(kSharedDataSourcePath)) {
+    zx::handle shared_directory_handle = base::fuchsia::GetHandleFromFile(
+        base::File(kSharedDataSourcePath,
+                   base::File::FLAG_OPEN | base::File::FLAG_READ |
+                       base::File::FLAG_DELETE_ON_CLOSE));
+    new_options.paths_to_transfer.push_back(
+        {kSharedDataTargetPath, shared_directory_handle.release()});
+  }
+
 #endif  // defined(OS_FUCHSIA)
 
 #if defined(OS_LINUX)
@@ -364,13 +419,6 @@ int LaunchChildTestProcessWithOptions(const CommandLine& command_line,
     if (!process.IsValid())
       return -1;
 
-#if defined(OS_FUCHSIA)  // TODO(scottmg): https://crbug.com/755282
-    if (kOnBot) {
-      LOG(ERROR) << base::StringPrintf("adding %x to live process list",
-                                       process.Handle());
-    }
-#endif  // OS_FUCHSIA
-
     // TODO(rvargas) crbug.com/417532: Don't store process handles.
     GetLiveProcesses()->insert(std::make_pair(process.Handle(), command_line));
   }
@@ -393,23 +441,6 @@ int LaunchChildTestProcessWithOptions(const CommandLine& command_line,
     *was_timeout = true;
     exit_code = -1;  // Set a non-zero exit code to signal a failure.
 
-#if defined(OS_FUCHSIA)  // TODO(scottmg): https://crbug.com/755282
-    if (kOnBot) {
-      LOG(ERROR) << base::StringPrintf("about to process.Terminate() %x",
-                                       process.Handle());
-    }
-
-    // TODO(crbug.com/799268): Remove once we have debugged timed-out/hung
-    // test job processes.
-    LOG(ERROR) << "Dumping threads in process " << process.Pid();
-
-    CommandLine threads_cmdline(base::FilePath("/boot/bin/threads"));
-    threads_cmdline.AppendArg(IntToString(process.Pid()));
-
-    LaunchOptions threads_options;
-    threads_options.wait = true;
-    LaunchProcess(threads_cmdline, threads_options);
-#endif  // OS_FUCHSIA
     {
       base::ScopedAllowBaseSyncPrimitivesForTesting allow_base_sync_primitives;
       // Ensure that the process terminates.
@@ -424,13 +455,12 @@ int LaunchChildTestProcessWithOptions(const CommandLine& command_line,
     AutoLock lock(*GetLiveProcessesLock());
 
 #if defined(OS_FUCHSIA)
-    // TODO(scottmg): https://crbug.com/755282
-    if (kOnBot) {
-      LOG(ERROR) << base::StringPrintf("going to zx_task_kill(job) for %x",
-                                       process.Handle());
-    }
+    zx_status_t status = job_handle.kill();
+    ZX_CHECK(status == ZX_OK, status);
 
-    CHECK_EQ(zx_task_kill(job_handle.get()), ZX_OK);
+    // The child process' data dir should have been deleted automatically,
+    // thanks to the DELETE_ON_CLOSE flag.
+    DCHECK(!base::DirectoryExists(nested_data_path));
 #elif defined(OS_POSIX)
     if (exit_code != 0) {
       // On POSIX, in case the test does not exit cleanly, either due to a crash
@@ -441,12 +471,6 @@ int LaunchChildTestProcessWithOptions(const CommandLine& command_line,
     }
 #endif
 
-#if defined(OS_FUCHSIA)  // TODO(scottmg): https://crbug.com/755282
-    if (kOnBot) {
-      LOG(ERROR) << base::StringPrintf("removing %x from live process list",
-                                       process.Handle());
-    }
-#endif  // OS_FUCHSIA
     GetLiveProcesses()->erase(process.Handle());
   }
 
@@ -475,6 +499,7 @@ void DoLaunchChildTestProcess(
 
   LaunchOptions options;
 #if defined(OS_WIN)
+
   options.inherit_mode = test_launch_options.inherit_mode;
   options.handles_to_inherit = test_launch_options.handles_to_inherit;
   if (redirect_stdio) {
@@ -491,7 +516,9 @@ void DoLaunchChildTestProcess(
       options.handles_to_inherit.push_back(handle);
     }
   }
-#elif defined(OS_POSIX)
+
+#else  // if !defined(OS_WIN)
+
   options.fds_to_remap = test_launch_options.fds_to_remap;
   if (redirect_stdio) {
     int output_file_fd = fileno(output_file.get());
@@ -509,7 +536,7 @@ void DoLaunchChildTestProcess(
   options.kill_on_parent_death = true;
 #endif
 
-#endif  // defined(OS_POSIX)
+#endif  // !defined(OS_WIN)
 
   bool was_timeout = false;
   int exit_code = LaunchChildTestProcessWithOptions(
@@ -520,7 +547,11 @@ void DoLaunchChildTestProcess(
   if (redirect_stdio) {
     fflush(output_file.get());
     output_file.reset();
-    CHECK(ReadFileToString(output_filename, &output_file_contents));
+    // Reading the file can sometimes fail when the process was killed midflight
+    // (e.g. on test suite timeout): https://crbug.com/826408. Attempt to read
+    // the output file anyways, but do not crash on failure in this case.
+    CHECK(ReadFileToString(output_filename, &output_file_contents) ||
+          exit_code != 0);
 
     if (!DeleteFile(output_filename, false)) {
       // This needs to be non-fatal at least for Windows.
@@ -547,6 +578,8 @@ const char kGTestListTestsFlag[] = "gtest_list_tests";
 const char kGTestRepeatFlag[] = "gtest_repeat";
 const char kGTestRunDisabledTestsFlag[] = "gtest_also_run_disabled_tests";
 const char kGTestOutputFlag[] = "gtest_output";
+const char kGTestShuffleFlag[] = "gtest_shuffle";
+const char kGTestRandomSeedFlag[] = "gtest_random_seed";
 
 TestLauncherDelegate::~TestLauncherDelegate() = default;
 
@@ -570,6 +603,8 @@ TestLauncher::TestLauncher(TestLauncherDelegate* launcher_delegate,
       retry_limit_(0),
       force_run_broken_tests_(false),
       run_result_(true),
+      shuffle_(false),
+      shuffle_seed_(0),
       watchdog_timer_(FROM_HERE,
                       kOutputTimeout,
                       this,
@@ -577,7 +612,9 @@ TestLauncher::TestLauncher(TestLauncherDelegate* launcher_delegate,
       parallel_jobs_(parallel_jobs) {}
 
 TestLauncher::~TestLauncher() {
-  base::TaskScheduler::GetInstance()->Shutdown();
+  if (base::TaskScheduler::GetInstance()) {
+    base::TaskScheduler::GetInstance()->Shutdown();
+  }
 }
 
 bool TestLauncher::Run() {
@@ -588,9 +625,7 @@ bool TestLauncher::Run() {
   // original value.
   int requested_cycles = cycles_;
 
-// TODO(fuchsia): Fuchsia does not have POSIX signals. Something similiar to
-// this will likely need to be implemented. See https://crbug.com/706592.
-#if defined(OS_POSIX) && !defined(OS_FUCHSIA)
+#if defined(OS_POSIX)
   CHECK_EQ(0, pipe(g_shutdown_pipe));
 
   struct sigaction action;
@@ -605,7 +640,7 @@ bool TestLauncher::Run() {
   auto controller = base::FileDescriptorWatcher::WatchReadable(
       g_shutdown_pipe[0],
       base::Bind(&TestLauncher::OnShutdownPipeReadable, Unretained(this)));
-#endif  // defined(OS_POSIX) && !defined(OS_FUCHSIA)
+#endif  // defined(OS_POSIX)
 
   // Start the watchdog timer.
   watchdog_timer_.Reset();
@@ -747,9 +782,9 @@ void TestLauncher::OnTestFinished(const TestResult& original_result) {
             test_broken_count_);
     fflush(stdout);
 
-#if defined(OS_POSIX) && !defined(OS_FUCHSIA)
+#if defined(OS_POSIX)
     KillSpawnedTestProcesses();
-#endif  // defined(OS_POSIX) && !defined(OS_FUCHSIA)
+#endif  // defined(OS_POSIX)
 
     MaybeSaveSummaryAsJSON({"BROKEN_TEST_EARLY_EXIT", kUnreliableResultsTag});
 
@@ -931,6 +966,38 @@ bool TestLauncher::Init() {
   if (command_line->HasSwitch(switches::kTestLauncherForceRunBrokenTests))
     force_run_broken_tests_ = true;
 
+  // Some of the TestLauncherDelegate implementations don't call into gtest
+  // until they've already split into test-specific processes. This results
+  // in gtest's native shuffle implementation attempting to shuffle one test.
+  // Shuffling the list of tests in the test launcher (before the delegate
+  // gets involved) ensures that the entire shard is shuffled.
+  if (command_line->HasSwitch(kGTestShuffleFlag)) {
+    shuffle_ = true;
+
+    if (command_line->HasSwitch(kGTestRandomSeedFlag)) {
+      const std::string custom_seed_str =
+          command_line->GetSwitchValueASCII(kGTestRandomSeedFlag);
+      uint32_t custom_seed = 0;
+      if (!StringToUint(custom_seed_str, &custom_seed)) {
+        LOG(ERROR) << "Unable to parse seed \"" << custom_seed_str << "\".";
+        return false;
+      }
+      if (custom_seed >= kRandomSeedUpperBound) {
+        LOG(ERROR) << "Seed " << custom_seed << " outside of expected range "
+                   << "[0, " << kRandomSeedUpperBound << ")";
+        return false;
+      }
+      shuffle_seed_ = custom_seed;
+    } else {
+      std::uniform_int_distribution<uint32_t> dist(0, kRandomSeedUpperBound);
+      std::random_device random_dev;
+      shuffle_seed_ = dist(random_dev);
+    }
+  } else if (command_line->HasSwitch(kGTestRandomSeedFlag)) {
+    LOG(ERROR) << kGTestRandomSeedFlag << " requires " << kGTestShuffleFlag;
+    return false;
+  }
+
   fprintf(stdout, "Using %" PRIuS " parallel jobs.\n", parallel_jobs_);
   fflush(stdout);
 
@@ -940,11 +1007,17 @@ bool TestLauncher::Init() {
   std::vector<std::string> positive_gtest_filter;
 
   if (command_line->HasSwitch(switches::kTestLauncherFilterFile)) {
-    base::FilePath filter_file_path = base::MakeAbsoluteFilePath(
-        command_line->GetSwitchValuePath(switches::kTestLauncherFilterFile));
-    if (!LoadFilterFile(filter_file_path, &positive_file_filter,
-                        &negative_test_filter_))
-      return false;
+    auto filter =
+        command_line->GetSwitchValueNative(switches::kTestLauncherFilterFile);
+    for (auto filter_file :
+         SplitString(filter, FILE_PATH_LITERAL(";"), base::TRIM_WHITESPACE,
+                     base::SPLIT_WANT_ALL)) {
+      base::FilePath filter_file_path =
+          base::MakeAbsoluteFilePath(FilePath(filter_file));
+      if (!LoadFilterFile(filter_file_path, &positive_file_filter,
+                          &negative_test_filter_))
+        return false;
+    }
   }
 
   // Split --gtest_filter at '-', if there is one, to separate into
@@ -1148,6 +1221,15 @@ void TestLauncher::RunTests() {
     test_names.push_back(test_name);
   }
 
+  if (shuffle_) {
+    std::mt19937 randomizer;
+    randomizer.seed(shuffle_seed_);
+    std::shuffle(test_names.begin(), test_names.end(), randomizer);
+
+    fprintf(stdout, "Randomizing with seed %u\n", shuffle_seed_);
+    fflush(stdout);
+  }
+
   // Save an early test summary in case the launcher crashes or gets killed.
   MaybeSaveSummaryAsJSON({"EARLY_SUMMARY", kUnreliableResultsTag});
 
@@ -1188,7 +1270,7 @@ void TestLauncher::RunTestIteration() {
       FROM_HERE, BindOnce(&TestLauncher::RunTests, Unretained(this)));
 }
 
-#if defined(OS_POSIX) && !defined(OS_FUCHSIA)
+#if defined(OS_POSIX)
 // I/O watcher for the reading end of the self-pipe above.
 // Terminates any launched child processes and exits the process.
 void TestLauncher::OnShutdownPipeReadable() {
@@ -1261,26 +1343,6 @@ void TestLauncher::OnOutputTimeout() {
 #else
     fprintf(stdout, "\t%s\n", pair.second.GetCommandLineString().c_str());
 #endif
-
-#if defined(OS_FUCHSIA)
-    // TODO(scottmg): Temporary code to try to identify why child processes
-    // appear to not be terminated after a timeout correctly.
-    // https://crbug.com/750370 and https://crbug.com/738275.
-
-    zx_info_process_t proc_info = {};
-    zx_status_t status =
-        zx_object_get_info(pair.first, ZX_INFO_PROCESS, &proc_info,
-                           sizeof(proc_info), nullptr, nullptr);
-    if (status != ZX_OK) {
-      fprintf(stdout, "zx_object_get_info failed for '%s', status=%d\n",
-              pair.second.GetCommandLineString().c_str(), status);
-    } else {
-      fprintf(stdout, "  return_code=%d\n", proc_info.return_code);
-      fprintf(stdout, "  started=%d\n", proc_info.started);
-      fprintf(stdout, "  exited=%d\n", proc_info.exited);
-      fprintf(stdout, "  debugger_attached=%d\n", proc_info.debugger_attached);
-    }
-#endif  // OS_FUCHSIA
   }
 
   fflush(stdout);

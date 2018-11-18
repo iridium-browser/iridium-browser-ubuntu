@@ -12,7 +12,7 @@
  *
  * @param {!DirectoryModel} directoryModel A directory model.
  * @param {!ThumbnailModel} thumbnailModel Thumbnail metadata model.
- * @param {!VolumeManagerWrapper} volumeManager Volume manager.
+ * @param {!VolumeManager} volumeManager Volume manager.
  * @param {Function=} opt_thumbnailLoaderConstructor A constructor of thumbnail
  *     loader. This argument is used for testing.
  * @struct
@@ -33,7 +33,7 @@ function ListThumbnailLoader(
   this.thumbnailModel_ = thumbnailModel;
 
   /**
-   * @private {!VolumeManagerWrapper}
+   * @private {!VolumeManager}
    */
   this.volumeManager_ = volumeManager;
 
@@ -244,7 +244,7 @@ ListThumbnailLoader.prototype.continue_ = function() {
   var entry = /** @type {Entry} */ (this.dataModel_.item(this.cursor_));
 
   // Check volume type for optimizing the parameters.
-  var volumeInfo = this.volumeManager_.getVolumeInfo(entry);
+  var volumeInfo = this.volumeManager_.getVolumeInfo(assert(entry));
   this.currentVolumeType_ = volumeInfo ? volumeInfo.volumeType : null;
 
   // If tasks are running full or all items are scanned, do nothing.
@@ -386,7 +386,7 @@ ListThumbnailLoader.ThumbnailData = function(fileUrl, dataUrl, width, height) {
  * A task to load thumbnail.
  *
  * @param {!Entry} entry An entry.
- * @param {!VolumeManagerWrapper} volumeManager Volume manager.
+ * @param {!VolumeManager} volumeManager Volume manager.
  * @param {!ThumbnailModel} thumbnailModel Metadata cache.
  * @param {!Function} thumbnailLoaderConstructor A constructor of thumbnail
  *     loader.

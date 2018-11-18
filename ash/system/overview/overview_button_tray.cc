@@ -138,11 +138,7 @@ void OverviewButtonTray::OnSessionStateChanged(
   UpdateIconVisibility();
 }
 
-void OverviewButtonTray::OnTabletModeStarted() {
-  UpdateIconVisibility();
-}
-
-void OverviewButtonTray::OnTabletModeEnded() {
+void OverviewButtonTray::OnTabletModeEventsBlockingChanged() {
   UpdateIconVisibility();
 }
 
@@ -160,8 +156,7 @@ base::string16 OverviewButtonTray::GetAccessibleNameForTray() {
   return l10n_util::GetStringUTF16(IDS_ASH_OVERVIEW_BUTTON_ACCESSIBLE_NAME);
 }
 
-void OverviewButtonTray::HideBubbleWithView(
-    const views::TrayBubbleView* bubble_view) {
+void OverviewButtonTray::HideBubbleWithView(const TrayBubbleView* bubble_view) {
   // This class has no bubbles to hide.
 }
 
@@ -171,13 +166,12 @@ void OverviewButtonTray::UpdateIconVisibility() {
   // not change during transient times in which CanSelect is false. Such as when
   // a modal dialog is present.
   SessionController* session_controller = Shell::Get()->session_controller();
-
-  Shell* shell = Shell::Get();
-  SetVisible(
-      shell->tablet_mode_controller()->IsTabletModeWindowManagerEnabled() &&
-      session_controller->GetSessionState() ==
-          session_manager::SessionState::ACTIVE &&
-      !session_controller->IsRunningInAppMode());
+  SetVisible(Shell::Get()
+                 ->tablet_mode_controller()
+                 ->AreInternalInputDeviceEventsBlocked() &&
+             session_controller->GetSessionState() ==
+                 session_manager::SessionState::ACTIVE &&
+             !session_controller->IsRunningInAppMode());
 }
 
 }  // namespace ash

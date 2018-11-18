@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/callback_helpers.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
@@ -69,9 +70,7 @@ class FFmpegVideoDecoderTest : public testing::Test {
     corrupt_i_frame_buffer_ = ReadTestDataFile("vp8-corrupt-I-frame");
   }
 
-  virtual ~FFmpegVideoDecoderTest() {
-    Destroy();
-  }
+  ~FFmpegVideoDecoderTest() override { Destroy(); }
 
   void Initialize() {
     InitializeWithConfig(TestVideoConfig::Normal());
@@ -82,7 +81,7 @@ class FFmpegVideoDecoderTest : public testing::Test {
     decoder_->Initialize(
         config, false, nullptr, NewExpectedBoolCB(success),
         base::Bind(&FFmpegVideoDecoderTest::FrameReady, base::Unretained(this)),
-        VideoDecoder::WaitingForDecryptionKeyCB());
+        base::NullCallback());
     base::RunLoop().RunUntilIdle();
   }
 
@@ -125,8 +124,7 @@ class FFmpegVideoDecoderTest : public testing::Test {
   // output frames into |output_frames|.
   // Returns the last decode status returned by the decoder.
   DecodeStatus DecodeMultipleFrames(const InputBuffers& input_buffers) {
-    for (InputBuffers::const_iterator iter = input_buffers.begin();
-         iter != input_buffers.end();
+    for (auto iter = input_buffers.begin(); iter != input_buffers.end();
          ++iter) {
       DecodeStatus status = Decode(*iter);
       switch (status) {

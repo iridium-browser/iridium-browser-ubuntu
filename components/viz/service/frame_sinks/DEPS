@@ -2,7 +2,6 @@
 
 include_rules = [
   "+cc/base",
-  "+cc/ipc",
   "+cc/scheduler",
   "+components/viz/service/display",
   "+components/viz/service/display_embedder",
@@ -11,3 +10,12 @@ include_rules = [
   "+gpu/ipc/common",
   "+mojo/public",
 ]
+
+specific_include_rules = {
+  ".*unittest\.cc": [
+    "+third_party/khronos/GLES2",
+  ],
+  "external_begin_frame_source_android.cc": [
+    "+jni/ExternalBeginFrameSourceAndroid_jni.h",
+  ],
+}

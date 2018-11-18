@@ -34,6 +34,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_SKIA_SKIA_UTILS_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_SKIA_SKIA_UTILS_H_
 
+#include "cc/paint/paint_canvas.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_types.h"
 #include "third_party/blink/renderer/platform/graphics/image.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
@@ -41,6 +42,7 @@
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkColor.h"
+#include "third_party/skia/include/core/SkPoint.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
 #include "third_party/skia/include/core/SkScalar.h"
 
@@ -62,20 +64,22 @@ bool PLATFORM_EXPORT IsValidImageSize(const IntSize&);
 
 SkBlendMode PLATFORM_EXPORT
     WebCoreCompositeToSkiaComposite(CompositeOperator,
-                                    WebBlendMode = WebBlendMode::kNormal);
-CompositeOperator PLATFORM_EXPORT CompositeOperatorFromSkia(SkBlendMode);
-WebBlendMode PLATFORM_EXPORT BlendModeFromSkia(SkBlendMode);
-
-// Map alpha values from [0, 1] to [0, 256] for alpha blending.
-int PLATFORM_EXPORT ClampedAlphaForBlending(float);
+                                    BlendMode = BlendMode::kNormal);
+SkBlendMode PLATFORM_EXPORT WebCoreBlendModeToSkBlendMode(BlendMode);
+CompositeOperator PLATFORM_EXPORT CompositeOperatorFromSkBlendMode(SkBlendMode);
+BlendMode PLATFORM_EXPORT BlendModeFromSkBlendMode(SkBlendMode);
 
 // Multiply a color's alpha channel by an additional alpha factor where
 // alpha is in the range [0, 1].
 SkColor PLATFORM_EXPORT ScaleAlpha(SkColor, float);
 
-// Multiply a color's alpha channel by an additional alpha factor where
-// alpha is in the range [0, 256].
-SkColor PLATFORM_EXPORT ScaleAlpha(SkColor, int);
+// Convert a SkColorSpace to a gfx::ColorSpace
+gfx::ColorSpace PLATFORM_EXPORT
+SkColorSpaceToGfxColorSpace(const sk_sp<SkColorSpace>);
+
+bool PLATFORM_EXPORT
+ApproximatelyEqualSkColorSpaces(sk_sp<SkColorSpace> src_color_space,
+                                sk_sp<SkColorSpace> dst_color_space);
 
 // Skia has problems when passed infinite, etc floats, filter them to 0.
 inline SkScalar WebCoreFloatToSkScalar(float f) {
@@ -107,6 +111,11 @@ inline WindRule SkFillTypeToWindRule(SkPath::FillType fill_type) {
   return RULE_NONZERO;
 }
 
+inline SkPoint FloatPointToSkPoint(const FloatPoint& point) {
+  return SkPoint::Make(WebCoreFloatToSkScalar(point.X()),
+                       WebCoreFloatToSkScalar(point.Y()));
+}
+
 SkMatrix PLATFORM_EXPORT AffineTransformToSkMatrix(const AffineTransform&);
 
 bool NearlyIntegral(float value);
@@ -128,16 +137,16 @@ inline SkScalar SkBlurRadiusToSigma(SkScalar radius) {
 
 template <typename PrimitiveType>
 void DrawPlatformFocusRing(const PrimitiveType&,
-                           PaintCanvas*,
+                           cc::PaintCanvas*,
                            SkColor,
                            float width);
 
 // TODO(fmalita): remove in favor of direct SrcRectConstraint use.
-inline PaintCanvas::SrcRectConstraint WebCoreClampingModeToSkiaRectConstraint(
-    Image::ImageClampingMode clamp_mode) {
+inline cc::PaintCanvas::SrcRectConstraint
+WebCoreClampingModeToSkiaRectConstraint(Image::ImageClampingMode clamp_mode) {
   return clamp_mode == Image::kClampImageToSourceRect
-             ? PaintCanvas::kStrict_SrcRectConstraint
-             : PaintCanvas::kFast_SrcRectConstraint;
+             ? cc::PaintCanvas::kStrict_SrcRectConstraint
+             : cc::PaintCanvas::kFast_SrcRectConstraint;
 }
 
 // Skia's smart pointer APIs are preferable over their legacy raw pointer

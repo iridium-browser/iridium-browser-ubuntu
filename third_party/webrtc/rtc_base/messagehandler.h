@@ -11,7 +11,6 @@
 #ifndef RTC_BASE_MESSAGEHANDLER_H_
 #define RTC_BASE_MESSAGEHANDLER_H_
 
-#include <memory>
 #include <utility>
 
 #include "rtc_base/constructormagic.h"
@@ -40,9 +39,7 @@ class FunctorMessageHandler : public MessageHandler {
  public:
   explicit FunctorMessageHandler(FunctorT&& functor)
       : functor_(std::forward<FunctorT>(functor)) {}
-  virtual void OnMessage(Message* msg) {
-    result_ = functor_();
-  }
+  virtual void OnMessage(Message* msg) { result_ = functor_(); }
   const ReturnT& result() const { return result_; }
 
   // Returns moved result. Should not call result() or MoveResult() again
@@ -58,11 +55,8 @@ class FunctorMessageHandler : public MessageHandler {
 template <class FunctorT>
 class FunctorMessageHandler<void, FunctorT> : public MessageHandler {
  public:
-  explicit FunctorMessageHandler(const FunctorT& functor)
-      : functor_(functor) {}
-  virtual void OnMessage(Message* msg) {
-    functor_();
-  }
+  explicit FunctorMessageHandler(const FunctorT& functor) : functor_(functor) {}
+  virtual void OnMessage(Message* msg) { functor_(); }
   void result() const {}
   void MoveResult() {}
 
@@ -70,6 +64,6 @@ class FunctorMessageHandler<void, FunctorT> : public MessageHandler {
   FunctorT functor_;
 };
 
-} // namespace rtc
+}  // namespace rtc
 
-#endif // RTC_BASE_MESSAGEHANDLER_H_
+#endif  // RTC_BASE_MESSAGEHANDLER_H_

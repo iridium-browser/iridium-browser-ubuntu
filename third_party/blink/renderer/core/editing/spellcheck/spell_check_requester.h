@@ -90,8 +90,9 @@ class CORE_EXPORT SpellCheckRequester final
   ~SpellCheckRequester();
   void Trace(blink::Visitor*);
 
-  void RequestCheckingFor(const EphemeralRange&);
-  void RequestCheckingFor(const EphemeralRange&, int request_num);
+  // Returns true if a request is initiated. Returns false otherwise.
+  bool RequestCheckingFor(const EphemeralRange&);
+  bool RequestCheckingFor(const EphemeralRange&, int request_num);
   void CancelCheck();
 
   int LastRequestSequence() const { return last_request_sequence_; }
@@ -126,7 +127,7 @@ class CORE_EXPORT SpellCheckRequester final
 
   int last_request_sequence_;
   int last_processed_sequence_;
-  double last_request_time_;
+  TimeTicks last_request_time_;
 
   TaskRunnerTimer<SpellCheckRequester> timer_to_process_queued_request_;
 

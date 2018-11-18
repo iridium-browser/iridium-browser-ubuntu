@@ -41,7 +41,6 @@ namespace blink {
 
 void ChromeClient::Trace(blink::Visitor* visitor) {
   visitor->Trace(last_mouse_over_node_);
-  PlatformChromeClient::Trace(visitor);
 }
 
 void ChromeClient::InstallSupplements(LocalFrame& frame) {
@@ -165,6 +164,7 @@ bool ChromeClient::OpenJavaScriptPrompt(LocalFrame* frame,
 }
 
 void ChromeClient::MouseDidMoveOverElement(LocalFrame& frame,
+                                           const HitTestLocation& location,
                                            const HitTestResult& result) {
   if (!result.GetScrollbar() && result.InnerNode() &&
       result.InnerNode()->GetDocument().IsDNSPrefetchEnabled())
@@ -175,17 +175,19 @@ void ChromeClient::MouseDidMoveOverElement(LocalFrame& frame,
   if (result.GetScrollbar())
     ClearToolTip(frame);
   else
-    SetToolTip(frame, result);
+    SetToolTip(frame, location, result);
 }
 
-void ChromeClient::SetToolTip(LocalFrame& frame, const HitTestResult& result) {
+void ChromeClient::SetToolTip(LocalFrame& frame,
+                              const HitTestLocation& location,
+                              const HitTestResult& result) {
   // First priority is a tooltip for element with "title" attribute.
   TextDirection tool_tip_direction;
   String tool_tip = result.Title(tool_tip_direction);
 
   // Lastly, some elements provide default tooltip strings.  e.g. <input
   // type="file" multiple> shows a tooltip for the selected filenames.
-  if (tool_tip.IsEmpty()) {
+  if (tool_tip.IsNull()) {
     if (Node* node = result.InnerNode()) {
       if (node->IsElementNode()) {
         tool_tip = ToElement(node)->DefaultToolTip();
@@ -200,7 +202,7 @@ void ChromeClient::SetToolTip(LocalFrame& frame, const HitTestResult& result) {
     }
   }
 
-  if (last_tool_tip_point_ == result.GetHitTestLocation().Point() &&
+  if (last_tool_tip_point_ == location.Point() &&
       last_tool_tip_text_ == tool_tip)
     return;
 
@@ -214,7 +216,7 @@ void ChromeClient::SetToolTip(LocalFrame& frame, const HitTestResult& result) {
       !last_tool_tip_text_.IsEmpty() && tool_tip == last_tool_tip_text_)
     ClearToolTip(frame);
 
-  last_tool_tip_point_ = result.GetHitTestLocation().Point();
+  last_tool_tip_point_ = location.Point();
   last_tool_tip_text_ = tool_tip;
   last_mouse_over_node_ = result.InnerNodeOrImageMapImage();
   SetToolTip(frame, tool_tip, tool_tip_direction);

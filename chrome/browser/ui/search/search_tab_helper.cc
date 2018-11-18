@@ -14,24 +14,25 @@
 #include "chrome/browser/search/instant_service.h"
 #include "chrome/browser/search/instant_service_factory.h"
 #include "chrome/browser/search/search.h"
-#include "chrome/browser/signin/signin_manager_factory.h"
+#include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/chrome_select_file_policy.h"
 #include "chrome/browser/ui/location_bar/location_bar.h"
 #include "chrome/browser/ui/omnibox/clipboard_utils.h"
 #include "chrome/browser/ui/search/ntp_user_data_logger.h"
 #include "chrome/browser/ui/search/search_ipc_router_policy_impl.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/browser_sync/profile_sync_service.h"
-#include "components/google/core/browser/google_util.h"
+#include "components/google/core/common/google_util.h"
 #include "components/omnibox/browser/omnibox_edit_model.h"
 #include "components/omnibox/browser/omnibox_popup_model.h"
 #include "components/omnibox/browser/omnibox_view.h"
 #include "components/search/search.h"
-#include "components/signin/core/browser/signin_manager.h"
 #include "components/strings/grit/components_strings.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/navigation_entry.h"
@@ -42,10 +43,9 @@
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
 #include "google_apis/gaia/gaia_auth_util.h"
+#include "services/identity/public/cpp/identity_manager.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "url/gurl.h"
-
-DEFINE_WEB_CONTENTS_USER_DATA_KEY(SearchTabHelper);
 
 namespace {
 
@@ -217,10 +217,8 @@ void SearchTabHelper::TitleWasSet(content::NavigationEntry* entry) {
 
 void SearchTabHelper::DidFinishLoad(content::RenderFrameHost* render_frame_host,
                                     const GURL& /* validated_url */) {
-  if (!render_frame_host->GetParent()) {
-    if (search::IsInstantNTP(web_contents_))
-      RecordNewTabLoadTime(web_contents_);
-  }
+  if (!render_frame_host->GetParent() && search::IsInstantNTP(web_contents_))
+    RecordNewTabLoadTime(web_contents_);
 }
 
 void SearchTabHelper::NavigationEntryCommitted(
@@ -240,45 +238,34 @@ void SearchTabHelper::ThemeInfoChanged(const ThemeBackgroundInfo& theme_info) {
 }
 
 void SearchTabHelper::MostVisitedItemsChanged(
-    const std::vector<InstantMostVisitedItem>& items) {
-  ipc_router_.SendMostVisitedItems(items);
+    const std::vector<InstantMostVisitedItem>& items,
+    bool is_custom_links) {
+  ipc_router_.SendMostVisitedItems(items, is_custom_links);
 }
 
-void SearchTabHelper::FocusOmnibox(OmniboxFocusState state) {
+void SearchTabHelper::FocusOmnibox(bool focus) {
   OmniboxView* omnibox_view = GetOmniboxView();
   if (!omnibox_view)
     return;
 
-  // Do not add a default case in the switch block for the following reasons:
-  // (1) Explicitly handle the new states. If new states are added in the
-  // OmniboxFocusState, the compiler will warn the developer to handle the new
-  // states.
-  // (2) An attacker may control the renderer and sends the browser process a
-  // malformed IPC. This function responds to the invalid |state| values by
-  // doing nothing instead of crashing the browser process (intentional no-op).
-  switch (state) {
-    case OMNIBOX_FOCUS_VISIBLE:
-      omnibox_view->SetFocus();
-      omnibox_view->model()->SetCaretVisibility(true);
-      break;
-    case OMNIBOX_FOCUS_INVISIBLE:
-      omnibox_view->SetFocus();
-      omnibox_view->model()->SetCaretVisibility(false);
-      // If the user clicked on the fakebox, any text already in the omnibox
-      // should get cleared when they start typing. Selecting all the existing
-      // text is a convenient way to accomplish this. It also gives a slight
-      // visual cue to users who really understand selection state about what
-      // will happen if they start typing.
-      omnibox_view->SelectAll(false);
-      omnibox_view->ShowImeIfNeeded();
-      break;
-    case OMNIBOX_FOCUS_NONE:
-      // Remove focus only if the popup is closed. This will prevent someone
-      // from changing the omnibox value and closing the popup without user
-      // interaction.
-      if (!omnibox_view->model()->popup_model()->IsOpen())
-        web_contents()->Focus();
-      break;
+  if (focus) {
+    omnibox_view->SetFocus();
+    omnibox_view->model()->SetCaretVisibility(false);
+    // If the user clicked on the fakebox, any text already in the omnibox
+    // should get cleared when they start typing. Selecting all the existing
+    // text is a convenient way to accomplish this. It also gives a slight
+    // visual cue to users who really understand selection state about what
+    // will happen if they start typing.
+    omnibox_view->SelectAll(false);
+#if !defined(OS_WIN)
+    omnibox_view->ShowVirtualKeyboardIfEnabled();
+#endif
+  } else {
+    // Remove focus only if the popup is closed. This will prevent someone
+    // from changing the omnibox value and closing the popup without user
+    // interaction.
+    if (!omnibox_view->model()->popup_model()->IsOpen())
+      web_contents()->Focus();
   }
 }
 
@@ -297,6 +284,50 @@ void SearchTabHelper::OnUndoMostVisitedDeletion(const GURL& url) {
 void SearchTabHelper::OnUndoAllMostVisitedDeletions() {
   if (instant_service_)
     instant_service_->UndoAllMostVisitedDeletions();
+}
+
+bool SearchTabHelper::OnAddCustomLink(const GURL& url,
+                                      const std::string& title) {
+  DCHECK(!url.is_empty());
+  if (instant_service_)
+    return instant_service_->AddCustomLink(url, title);
+  return false;
+}
+
+bool SearchTabHelper::OnUpdateCustomLink(const GURL& url,
+                                         const GURL& new_url,
+                                         const std::string& new_title) {
+  DCHECK(!url.is_empty());
+  if (instant_service_)
+    return instant_service_->UpdateCustomLink(url, new_url, new_title);
+  return false;
+}
+
+bool SearchTabHelper::OnDeleteCustomLink(const GURL& url) {
+  DCHECK(!url.is_empty());
+  if (instant_service_)
+    return instant_service_->DeleteCustomLink(url);
+  return false;
+}
+
+void SearchTabHelper::OnUndoCustomLinkAction() {
+  if (instant_service_)
+    instant_service_->UndoCustomLinkAction();
+}
+
+void SearchTabHelper::OnResetCustomLinks() {
+  if (instant_service_)
+    instant_service_->ResetCustomLinks();
+}
+
+void SearchTabHelper::OnDoesUrlResolve(
+    const GURL& url,
+    chrome::mojom::EmbeddedSearch::DoesUrlResolveCallback callback) {
+  DCHECK(!url.is_empty());
+  if (instant_service_)
+    instant_service_->DoesUrlResolve(url, std::move(callback));
+  else
+    std::move(callback).Run(/*resolves=*/true, /*timeout=*/false);
 }
 
 void SearchTabHelper::OnLogEvent(NTPLoggingEventType event,
@@ -342,14 +373,81 @@ void SearchTabHelper::PasteIntoOmnibox(const base::string16& text) {
 }
 
 bool SearchTabHelper::ChromeIdentityCheck(const base::string16& identity) {
-  SigninManagerBase* manager = SigninManagerFactory::GetForProfile(profile());
-  return manager &&
+  identity::IdentityManager* identity_manager =
+      IdentityManagerFactory::GetForProfile(profile());
+  return identity_manager &&
          gaia::AreEmailsSame(base::UTF16ToUTF8(identity),
-                             manager->GetAuthenticatedAccountInfo().email);
+                             identity_manager->GetPrimaryAccountInfo().email);
 }
 
 bool SearchTabHelper::HistorySyncCheck() {
   return IsHistorySyncEnabled(profile());
+}
+
+void SearchTabHelper::OnSetCustomBackgroundURL(const GURL& url) {
+  if (instant_service_)
+    instant_service_->SetCustomBackgroundURL(url);
+}
+
+void SearchTabHelper::OnSetCustomBackgroundURLWithAttributions(
+    const GURL& background_url,
+    const std::string& attribution_line_1,
+    const std::string& attribution_line_2,
+    const GURL& action_url) {
+  if (instant_service_) {
+    instant_service_->SetCustomBackgroundURLWithAttributions(
+        background_url, attribution_line_1, attribution_line_2, action_url);
+  }
+}
+
+void SearchTabHelper::FileSelected(const base::FilePath& path,
+                                   int index,
+                                   void* params) {
+  if (instant_service_) {
+    profile()->set_last_selected_directory(path.DirName());
+    instant_service_->SelectLocalBackgroundImage(path);
+  }
+
+  select_file_dialog_ = nullptr;
+  // File selection can happen at any time after NTP load, and is not logged
+  // with the event.
+  NTPUserDataLogger::GetOrCreateFromWebContents(web_contents())
+      ->LogEvent(NTP_CUSTOMIZE_LOCAL_IMAGE_DONE,
+                 base::TimeDelta::FromSeconds(0));
+}
+
+void SearchTabHelper::FileSelectionCanceled(void* params) {
+  select_file_dialog_ = nullptr;
+  // File selection can happen at any time after NTP load, and is not logged
+  // with the event.
+  NTPUserDataLogger::GetOrCreateFromWebContents(web_contents())
+      ->LogEvent(NTP_CUSTOMIZE_LOCAL_IMAGE_CANCEL,
+                 base::TimeDelta::FromSeconds(0));
+}
+
+void SearchTabHelper::OnSelectLocalBackgroundImage() {
+  if (select_file_dialog_)
+    return;
+
+  select_file_dialog_ = ui::SelectFileDialog::Create(
+      this, std::make_unique<ChromeSelectFilePolicy>(web_contents_));
+
+  const base::FilePath directory = profile()->last_selected_directory();
+
+  gfx::NativeWindow parent_window = web_contents_->GetTopLevelNativeWindow();
+
+  ui::SelectFileDialog::FileTypeInfo file_types;
+  file_types.allowed_paths = ui::SelectFileDialog::FileTypeInfo::NATIVE_PATH;
+  file_types.extensions.resize(1);
+  file_types.extensions[0].push_back(FILE_PATH_LITERAL("jpg"));
+  file_types.extensions[0].push_back(FILE_PATH_LITERAL("jpeg"));
+  file_types.extensions[0].push_back(FILE_PATH_LITERAL("png"));
+  file_types.extension_description_overrides.push_back(
+      l10n_util::GetStringUTF16(IDS_UPLOAD_IMAGE_FORMAT));
+
+  select_file_dialog_->SelectFile(
+      ui::SelectFileDialog::SELECT_OPEN_FILE, base::string16(), directory,
+      &file_types, 0, base::FilePath::StringType(), parent_window, nullptr);
 }
 
 const OmniboxView* SearchTabHelper::GetOmniboxView() const {

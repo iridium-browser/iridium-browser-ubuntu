@@ -7,6 +7,7 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <vector>
 
 #include "base/callback.h"
@@ -15,8 +16,8 @@
 #include "base/memory/weak_ptr.h"
 #include "base/optional.h"
 #include "device/fido/authenticator_make_credential_response.h"
-#include "device/fido/authenticator_selection_criteria.h"
 #include "device/fido/ctap_make_credential_request.h"
+#include "device/fido/device_operation.h"
 #include "device/fido/fido_constants.h"
 #include "device/fido/fido_task.h"
 
@@ -27,12 +28,14 @@ namespace device {
 class COMPONENT_EXPORT(DEVICE_FIDO) MakeCredentialTask : public FidoTask {
  public:
   using MakeCredentialTaskCallback = base::OnceCallback<void(
-      CtapDeviceResponseCode return_code,
-      base::Optional<AuthenticatorMakeCredentialResponse> response_data)>;
+      CtapDeviceResponseCode,
+      base::Optional<AuthenticatorMakeCredentialResponse>)>;
+  using RegisterOperation =
+      DeviceOperation<CtapMakeCredentialRequest,
+                      AuthenticatorMakeCredentialResponse>;
 
   MakeCredentialTask(FidoDevice* device,
                      CtapMakeCredentialRequest request_parameter,
-                     AuthenticatorSelectionCriteria authenticator_criteria,
                      MakeCredentialTaskCallback callback);
   ~MakeCredentialTask() override;
 
@@ -42,19 +45,10 @@ class COMPONENT_EXPORT(DEVICE_FIDO) MakeCredentialTask : public FidoTask {
 
   void MakeCredential();
   void U2fRegister();
-  void OnCtapMakeCredentialResponseReceived(
-      base::Optional<std::vector<uint8_t>> device_response);
-
-  // Invoked after retrieving response to AuthenticatorGetInfo request. Filters
-  // out authenticators based on |authenticator_selection_criteria_| constraints
-  // provided by the relying party. If |device_| does not satisfy the
-  // constraints, then this request is silently dropped.
-  bool CheckIfAuthenticatorSelectionCriteriaAreSatisfied();
 
   CtapMakeCredentialRequest request_parameter_;
-  AuthenticatorSelectionCriteria authenticator_selection_criteria_;
+  std::unique_ptr<RegisterOperation> register_operation_;
   MakeCredentialTaskCallback callback_;
-
   base::WeakPtrFactory<MakeCredentialTask> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(MakeCredentialTask);

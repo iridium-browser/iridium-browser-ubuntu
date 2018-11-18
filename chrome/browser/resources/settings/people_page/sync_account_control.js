@@ -21,6 +21,18 @@ Polymer({
      */
     syncStatus: Object,
 
+    // String to be used as a title when the promo has an account.
+    promoLabelWithAccount: String,
+
+    // String to be used as title of the promo has no account.
+    promoLabelWithNoAccount: String,
+
+    // String to be used as a subtitle when the promo has an account.
+    promoSecondaryLabelWithAccount: String,
+
+    // String to be used as subtitle of the promo has no account.
+    promoSecondaryLabelWithNoAccount: String,
+
     /**
      * Proxy variable for syncStatus.signedIn to shield observer from being
      * triggered multiple times whenever syncStatus changes.
@@ -44,9 +56,20 @@ Polymer({
       reflectToAttribute: true,
     },
 
-    promoLabel: String,
+    // This property should be set by the parent only and should not change
+    // after the element is created.
+    embeddedInSubpage: {
+      type: Boolean,
+      reflectToAttribute: true,
+    },
 
-    promoSecondaryLabel: String,
+    // This property should be set by the parent only and should not change
+    // after the element is created.
+    hideButtons: {
+      type: Boolean,
+      value: false,
+      reflectToAttribute: true,
+    },
 
     /** @private {boolean} */
     shouldShowAvatarRow_: {
@@ -108,6 +131,11 @@ Polymer({
 
   /** @private */
   onSignedInChanged_: function() {
+    if (this.embeddedInSubpage) {
+      this.showingPromo = true;
+      return;
+    }
+
     if (!this.showingPromo && !this.syncStatus.signedIn &&
         this.syncBrowserProxy_.getPromoImpressionCount() <
             settings.MAX_SIGNIN_PROMO_IMPRESSION) {
@@ -122,6 +150,16 @@ Polymer({
   },
 
   /**
+   * @param {string} labelWithAccount
+   * @param {string} labelWithNoAccount
+   * @return {string}
+   * @private
+   */
+  getLabel_: function(labelWithAccount, labelWithNoAccount) {
+    return this.shownAccount_ ? labelWithAccount : labelWithNoAccount;
+  },
+
+  /**
    * @param {string} label
    * @param {string} name
    * @return {string}
@@ -132,32 +170,14 @@ Polymer({
   },
 
   /**
-   * @param {string} syncErrorLabel
-   * @param {string} authErrorLabel
-   * @return {string}
-   * @private
-   */
-  getErrorLabel_: function(syncErrorLabel, authErrorLabel) {
-    if (this.syncStatus.hasError) {
-      // Most of the time re-authenticate states are caused by intentional user
-      // action, so they will be displayed differently as other errors.
-      return this.syncStatus.statusAction ==
-              settings.StatusAction.REAUTHENTICATE ?
-          authErrorLabel :
-          syncErrorLabel;
-    }
-
-    return '';
-  },
-
-  /**
    * @param {string} label
    * @param {string} account
    * @return {string}
    * @private
    */
   getAccountLabel_: function(label, account) {
-    return this.syncStatus.signedIn && !this.syncStatus.hasError ?
+    return this.syncStatus.signedIn && !this.syncStatus.hasError &&
+            !this.syncStatus.disabled ?
         loadTimeData.substituteString(label, account) :
         account;
   },
@@ -173,19 +193,75 @@ Polymer({
   },
 
   /**
+   * Returns the class of the sync icon.
+   * @return {string}
+   * @private
+   */
+  getSyncIconStyle_: function() {
+    if (!!this.syncStatus.hasUnrecoverableError)
+      return 'sync-problem';
+    if (!!this.syncStatus.hasError) {
+      return this.syncStatus.statusAction ==
+              settings.StatusAction.REAUTHENTICATE ?
+          'sync-paused' :
+          'sync-problem';
+    }
+    if (!!this.syncStatus.disabled)
+      return 'sync-disabled';
+    return 'sync';
+  },
+
+  /**
    * Returned value must match one of iron-icon's settings:(*) icon name.
    * @return {string}
    * @private
    */
   getSyncIcon_: function() {
-    if (this.syncStatus.hasError) {
-      return this.syncStatus.statusAction ==
-              settings.StatusAction.REAUTHENTICATE ?
-          'sync-disabled' :
-          'sync-problem';
+    switch (this.getSyncIconStyle_()) {
+      case 'sync-problem':
+        return 'settings:sync-problem';
+      case 'sync-paused':
+        return 'settings:sync-disabled';
+      default:
+        return 'cr:sync';
     }
+  },
 
-    return 'sync';
+  /**
+   * @return {string}
+   * @private
+   */
+  getAvatarRowTitle_: function(
+      accountName, syncErrorLabel, authErrorLabel, disabledLabel) {
+    switch (this.getSyncIconStyle_()) {
+      case 'sync-problem':
+        return syncErrorLabel;
+      case 'sync-paused':
+        return authErrorLabel;
+      case 'sync-disabled':
+        return disabledLabel;
+      default:
+        return accountName;
+    }
+  },
+
+  /**
+   * @return {boolean}
+   * @private
+   */
+  shouldShowTurnOffButton_: function() {
+    return !this.hideButtons && !!this.syncStatus.signedIn &&
+        !this.embeddedInSubpage;
+  },
+
+  /**
+   * @return {boolean}
+   * @private
+   */
+  shouldShowSigninAgainButton_: function() {
+    return !this.hideButtons && !!this.syncStatus.signedIn &&
+        this.embeddedInSubpage && !!this.syncStatus.hasError &&
+        this.syncStatus.statusAction == settings.StatusAction.REAUTHENTICATE;
   },
 
   /**
@@ -201,6 +277,9 @@ Polymer({
    * @private
    */
   computeShouldShowAvatarRow_: function() {
+    if (this.storedAccounts_ === undefined || this.syncStatus === undefined)
+      return false;
+
     return this.syncStatus.signedIn || this.storedAccounts_.length > 0;
   },
 
@@ -212,6 +291,12 @@ Polymer({
     if (this.$$('#menu')) {
       /** @type {!CrActionMenuElement} */ (this.$$('#menu')).close();
     }
+  },
+
+  /** @private */
+  onSignoutTap_: function() {
+    this.syncBrowserProxy_.signOut(false /* deleteProfile */);
+    /** @type {!CrActionMenuElement} */ (this.$$('#menu')).close();
   },
 
   /** @private */
@@ -260,6 +345,9 @@ Polymer({
 
   /** @private */
   onShownAccountShouldChange_: function() {
+    if (this.storedAccounts_ === undefined || this.syncStatus === undefined)
+      return;
+
     if (this.syncStatus.signedIn) {
       for (let i = 0; i < this.storedAccounts_.length; i++) {
         if (this.storedAccounts_[i].email == this.syncStatus.signedInUsername) {

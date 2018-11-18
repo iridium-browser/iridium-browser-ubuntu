@@ -12,7 +12,6 @@
 #include "base/cancelable_callback.h"
 #include "base/command_line.h"
 #include "base/location.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/stringprintf.h"
@@ -36,8 +35,7 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/login/users/scoped_test_user_manager.h"
-#include "chrome/browser/chromeos/settings/cros_settings.h"
-#include "chrome/browser/chromeos/settings/device_settings_service.h"
+#include "chrome/browser/chromeos/settings/scoped_cros_settings_test_helper.h"
 #endif
 
 namespace extensions {
@@ -97,7 +95,7 @@ class FullStreamUIPolicyTest : public testing::Test {
         extension_id, type, api_name, page_url, arg_url, days_ago,
         base::BindOnce(&FullStreamUIPolicyTest::CheckWrapper,
                        std::move(checker),
-                       base::MessageLoop::current()->QuitWhenIdleClosure()));
+                       base::RunLoop::QuitCurrentWhenIdleClosureDeprecated()));
 
     // Set up a timeout for receiving results; if we haven't received anything
     // when the timeout triggers then assume that the test is broken.
@@ -328,8 +326,7 @@ class FullStreamUIPolicyTest : public testing::Test {
   content::TestBrowserThreadBundle thread_bundle_;
 
 #if defined OS_CHROMEOS
-  chromeos::ScopedTestDeviceSettingsService test_device_settings_service_;
-  chromeos::ScopedTestCrosSettings test_cros_settings_;
+  chromeos::ScopedCrosSettingsTestHelper cros_settings_test_helper_;
   std::unique_ptr<chromeos::ScopedTestUserManager> test_user_manager_;
 #endif
 };
@@ -749,7 +746,7 @@ TEST_F(FullStreamUIPolicyTest, CapReturns) {
   policy->Flush();
   GetActivityLogTaskRunner()->PostTaskAndReply(
       FROM_HERE, base::DoNothing(),
-      base::MessageLoop::current()->QuitWhenIdleClosure());
+      base::RunLoop::QuitCurrentWhenIdleClosureDeprecated());
   base::RunLoop().Run();
 
   CheckReadFilteredData(

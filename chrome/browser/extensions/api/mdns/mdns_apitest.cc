@@ -23,12 +23,12 @@ namespace api = extensions::api;
 
 namespace {
 
-class MDnsAPITest : public ExtensionApiTest {
+class MDnsAPITest : public extensions::ExtensionApiTest {
  public:
   MDnsAPITest() {}
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
-    ExtensionApiTest::SetUpCommandLine(command_line);
+    extensions::ExtensionApiTest::SetUpCommandLine(command_line);
     command_line->AppendSwitchASCII(
         extensions::switches::kWhitelistedExtensionID,
         "ddchlicdkolnonkihahngkmmmjnjlkkf");
@@ -100,7 +100,7 @@ IN_PROC_BROWSER_TEST_F(MDnsAPITest, MAYBE_ForceDiscovery) {
   EXPECT_CALL(*dns_sd_registry_, RegisterDnsSdListener(service_type)).Times(1);
   EXPECT_CALL(*dns_sd_registry_, UnregisterDnsSdListener(service_type))
       .Times(1);
-  EXPECT_CALL(*dns_sd_registry_, ForceDiscovery()).Times(1);
+  EXPECT_CALL(*dns_sd_registry_, ResetAndDiscover()).Times(1);
   EXPECT_CALL(*dns_sd_registry_,
               RemoveObserver(A<DnsSdRegistry::DnsSdObserver*>()))
       .Times(1);

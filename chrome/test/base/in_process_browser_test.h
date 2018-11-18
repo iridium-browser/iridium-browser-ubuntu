@@ -42,6 +42,10 @@ class ScopedCOMInitializer;
 #endif  // defined(OS_WIN)
 }  // namespace base
 
+#if defined(TOOLKIT_VIEWS)
+class AccessibilityChecker;
+#endif
+
 class Browser;
 class Profile;
 #if defined(OS_MACOSX)
@@ -148,6 +152,11 @@ class InProcessBrowserTest : public content::BrowserTestBase {
   // outstanding resources.
   void CloseAllBrowsers();
 
+  // Runs the main thread message loop until the BrowserProcess indicates
+  // we should quit. This will normally be called automatically during test
+  // teardown, but may instead be run manually by the test, if necessary.
+  void RunUntilBrowserProcessQuits();
+
   // Convenience methods for adding tabs to a Browser.
   void AddTabAtIndexToBrowser(Browser* browser,
                               int index,
@@ -171,6 +180,9 @@ class InProcessBrowserTest : public content::BrowserTestBase {
   // directory before the browser starts up, it can do so here. Returns true if
   // successful.
   virtual bool SetUpUserDataDirectory() WARN_UNUSED_RESULT;
+
+  // Initializes the display::Screen instance on X11.
+  virtual void SetScreenInstance();
 
   // BrowserTestBase:
   void PreRunTestOnMainThread() override;
@@ -243,6 +255,9 @@ class InProcessBrowserTest : public content::BrowserTestBase {
   // Browser created in BrowserMain().
   Browser* browser_;
 
+  // Used to run the process until the BrowserProcess signals the test to quit.
+  std::unique_ptr<base::RunLoop> run_loop_;
+
   // Temporary user data directory. Used only when a user data directory is not
   // specified in the command line.
   base::ScopedTempDir temp_user_data_dir_;
@@ -281,6 +296,10 @@ class InProcessBrowserTest : public content::BrowserTestBase {
 
 #if defined(OS_WIN)
   std::unique_ptr<base::win::ScopedCOMInitializer> com_initializer_;
+#endif
+
+#if defined(TOOLKIT_VIEWS)
+  std::unique_ptr<AccessibilityChecker> accessibility_checker_;
 #endif
 };
 

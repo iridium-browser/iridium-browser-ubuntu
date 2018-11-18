@@ -145,6 +145,24 @@ void UseCounterCallback(v8::Isolate* isolate,
     case v8::Isolate::kDeoptimizerDisableSpeculation:
       blink_feature = WebFeature::kV8DeoptimizerDisableSpeculation;
       break;
+    case v8::Isolate::kArrayPrototypeSortJSArrayModifiedPrototype:
+      blink_feature = WebFeature::kV8ArrayPrototypeSortJSArrayModifiedPrototype;
+      break;
+    case v8::Isolate::kFunctionTokenOffsetTooLongForToString:
+      blink_feature = WebFeature::kV8FunctionTokenOffsetTooLongForToString;
+      break;
+    case v8::Isolate::kWasmSharedMemory:
+      blink_feature = WebFeature::kV8WasmSharedMemory;
+      break;
+    case v8::Isolate::kWasmThreadOpcodes:
+      blink_feature = WebFeature::kV8WasmThreadOpcodes;
+      break;
+    case v8::Isolate::kAtomicsNotify:
+      blink_feature = WebFeature::kV8AtomicsNotify;
+      break;
+    case v8::Isolate::kAtomicsWake:
+      blink_feature = WebFeature::kV8AtomicsWake;
+      break;
     default:
       // This can happen if V8 has added counters that this version of Blink
       // does not know about. It's harmless.

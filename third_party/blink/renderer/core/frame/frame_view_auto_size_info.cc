@@ -4,11 +4,12 @@
 
 #include "third_party/blink/renderer/core/frame/frame_view_auto_size_info.h"
 
+#include "base/auto_reset.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/layout/layout_box.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
-#include "third_party/blink/renderer/platform/wtf/auto_reset.h"
+#include "third_party/blink/renderer/core/paint/paint_layer_scrollable_area.h"
 
 namespace blink {
 
@@ -39,7 +40,7 @@ void FrameViewAutoSizeInfo::AutoSizeIfNeeded() {
   if (in_auto_size_)
     return;
 
-  AutoReset<bool> change_in_auto_size(&in_auto_size_, true);
+  base::AutoReset<bool> change_in_auto_size(&in_auto_size_, true);
 
   Document* document = frame_view_->GetFrame().GetDocument();
   if (!document || !document->IsActive())
@@ -55,7 +56,7 @@ void FrameViewAutoSizeInfo::AutoSizeIfNeeded() {
     frame_view_->Resize(frame_view_->Width(), min_auto_size_.Height());
 
   IntSize size = frame_view_->Size();
-  ScrollableArea* layout_viewport = frame_view_->LayoutViewportScrollableArea();
+  PaintLayerScrollableArea* layout_viewport = frame_view_->LayoutViewport();
 
   // Do the resizing twice. The first time is basically a rough calculation
   // using the preferred width which may result in a height change during the
@@ -85,29 +86,17 @@ void FrameViewAutoSizeInfo::AutoSizeIfNeeded() {
     // Since the dimensions are only for the view rectangle, once a
     // dimension exceeds the maximum, there is no need to increase it further.
     if (new_size.Width() > max_auto_size_.Width()) {
-      Scrollbar* local_horizontal_scrollbar =
-          layout_viewport->HorizontalScrollbar();
-      if (!local_horizontal_scrollbar) {
-        local_horizontal_scrollbar =
-            layout_viewport->CreateScrollbar(kHorizontalScrollbar);
-      }
-      if (!local_horizontal_scrollbar->IsOverlayScrollbar()) {
-        new_size.SetHeight(new_size.Height() +
-                           local_horizontal_scrollbar->Height());
-      }
-
+      new_size.Expand(0, layout_viewport->HypotheticalScrollbarThickness(
+                             kHorizontalScrollbar));
       // Don't bother checking for a vertical scrollbar because the width is at
       // already greater the maximum.
-    } else if (new_size.Height() > max_auto_size_.Height()) {
-      Scrollbar* local_vertical_scrollbar =
-          layout_viewport->VerticalScrollbar();
-      if (!local_vertical_scrollbar) {
-        local_vertical_scrollbar =
-            layout_viewport->CreateScrollbar(kVerticalScrollbar);
-      }
-      if (!local_vertical_scrollbar->IsOverlayScrollbar())
-        new_size.SetWidth(new_size.Width() + local_vertical_scrollbar->Width());
-
+    } else if (new_size.Height() > max_auto_size_.Height() &&
+               // If we have a real vertical scrollbar, it's already included in
+               // MinPreferredLogicalWidth, so don't add a hypothetical one.
+               !layout_viewport->HasVerticalScrollbar()) {
+      new_size.Expand(
+          layout_viewport->HypotheticalScrollbarThickness(kVerticalScrollbar),
+          0);
       // Don't bother checking for a horizontal scrollbar because the height is
       // already greater the maximum.
     }
@@ -145,8 +134,8 @@ void FrameViewAutoSizeInfo::AutoSizeIfNeeded() {
     // causing them to be needed. For example, a vertical scrollbar may cause
     // text to wrap and thus increase the height (which is the only reason the
     // scollbar is needed).
-    layout_viewport->SetAutosizeScrollbarModes(vertical_scrollbar_mode,
-                                               horizontal_scrollbar_mode);
+    frame_view_->GetLayoutView()->SetAutosizeScrollbarModes(
+        horizontal_scrollbar_mode, vertical_scrollbar_mode);
   }
   did_run_autosize_ = true;
 }

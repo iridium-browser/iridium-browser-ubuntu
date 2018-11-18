@@ -8,13 +8,15 @@
 
 #include "base/strings/string_number_conversions.h"
 #include "build/build_config.h"
+#include "content/browser/devtools/devtools_agent_host_impl.h"
 #include "content/browser/frame_host/render_frame_host_impl.h"
 #include "content/browser/renderer_host/input/touch_emulator.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
-#include "content/common/view_messages.h"
+#include "content/common/widget_messages.h"
 #include "content/public/common/url_constants.h"
-#include "device/geolocation/public/cpp/geoposition.h"
+#include "net/http/http_util.h"
+#include "services/device/public/cpp/geolocation/geoposition.h"
 #include "services/device/public/mojom/geolocation_context.mojom.h"
 #include "services/device/public/mojom/geoposition.mojom.h"
 #include "ui/events/gesture_detection/gesture_provider_config_helper.h"
@@ -64,15 +66,22 @@ EmulationHandler::EmulationHandler()
 EmulationHandler::~EmulationHandler() {
 }
 
+// static
+std::vector<EmulationHandler*> EmulationHandler::ForAgentHost(
+    DevToolsAgentHostImpl* host) {
+  return host->HandlersByName<EmulationHandler>(
+      Emulation::Metainfo::domainName);
+}
+
 void EmulationHandler::SetRenderer(int process_host_id,
                                    RenderFrameHostImpl* frame_host) {
   if (host_ == frame_host)
     return;
-
   host_ = frame_host;
   if (touch_emulation_enabled_)
     UpdateTouchEventEmulationState();
-  UpdateDeviceEmulationState();
+  if (device_emulation_enabled_)
+    UpdateDeviceEmulationState();
 }
 
 void EmulationHandler::Wire(UberDispatcher* dispatcher) {
@@ -84,8 +93,11 @@ Response EmulationHandler::Disable() {
     touch_emulation_enabled_ = false;
     UpdateTouchEventEmulationState();
   }
-  device_emulation_enabled_ = false;
-  UpdateDeviceEmulationState();
+  user_agent_ = std::string();
+  if (device_emulation_enabled_) {
+    device_emulation_enabled_ = false;
+    UpdateDeviceEmulationState();
+  }
   return Response::OK();
 }
 
@@ -304,6 +316,23 @@ Response EmulationHandler::SetVisibleSize(int width, int height) {
   return Response::OK();
 }
 
+Response EmulationHandler::SetUserAgentOverride(
+    const std::string& user_agent,
+    Maybe<std::string> accept_language,
+    Maybe<std::string> platform) {
+  if (!user_agent.empty() && !net::HttpUtil::IsValidHeaderValue(user_agent))
+    return Response::InvalidParams("Invalid characters found in userAgent");
+  std::string accept_lang = accept_language.fromMaybe(std::string());
+  if (!accept_lang.empty() && !net::HttpUtil::IsValidHeaderValue(accept_lang)) {
+    return Response::InvalidParams(
+        "Invalid characters found in acceptLanguage");
+  }
+
+  user_agent_ = user_agent;
+  accept_language_ = accept_lang;
+  return Response::FallThrough();
+}
+
 blink::WebDeviceEmulationParams EmulationHandler::GetDeviceEmulationParams() {
   return device_emulation_params_;
 }
@@ -327,12 +356,22 @@ void EmulationHandler::UpdateTouchEventEmulationState() {
     return;
   if (host_->GetParent() && !host_->IsCrossProcessSubframe())
     return;
+
+  // We only have a single TouchEmulator for all frames, so let the main frame's
+  // EmulationHandler enable/disable it.
+  if (!host_->frame_tree_node()->IsMainFrame())
+    return;
+
   if (touch_emulation_enabled_) {
-    host_->GetRenderWidgetHost()->GetTouchEmulator()->Enable(
-        TouchEmulator::Mode::kEmulatingTouchFromMouse,
-        TouchEmulationConfigurationToType(touch_emulation_configuration_));
+    if (auto* touch_emulator =
+            host_->GetRenderWidgetHost()->GetTouchEmulator()) {
+      touch_emulator->Enable(
+          TouchEmulator::Mode::kEmulatingTouchFromMouse,
+          TouchEmulationConfigurationToType(touch_emulation_configuration_));
+    }
   } else {
-    host_->GetRenderWidgetHost()->GetTouchEmulator()->Disable();
+    if (auto* touch_emulator = host_->GetRenderWidgetHost()->GetTouchEmulator())
+      touch_emulator->Disable();
   }
   if (GetWebContents()) {
     GetWebContents()->SetForceDisableOverscrollContent(
@@ -350,15 +389,25 @@ void EmulationHandler::UpdateDeviceEmulationState() {
   // emulation params were applied. That way, we can avoid having to handle
   // Set/ClearDeviceMetricsOverride in the renderer. With the old IPC system,
   // this is tricky since we'd have to track the DevTools message id with the
-  // ViewMsg and acknowledgment, as well as plump the acknowledgment back to the
-  // EmulationHandler somehow. Mojo callbacks should make this much simpler.
+  // WidgetMsg and acknowledgment, as well as plump the acknowledgment back to
+  // the EmulationHandler somehow. Mojo callbacks should make this much simpler.
   if (device_emulation_enabled_) {
-    host_->GetRenderWidgetHost()->Send(new ViewMsg_EnableDeviceEmulation(
+    host_->GetRenderWidgetHost()->Send(new WidgetMsg_EnableDeviceEmulation(
         host_->GetRenderWidgetHost()->GetRoutingID(),
         device_emulation_params_));
   } else {
-    host_->GetRenderWidgetHost()->Send(new ViewMsg_DisableDeviceEmulation(
+    host_->GetRenderWidgetHost()->Send(new WidgetMsg_DisableDeviceEmulation(
         host_->GetRenderWidgetHost()->GetRoutingID()));
+  }
+}
+
+void EmulationHandler::ApplyOverrides(net::HttpRequestHeaders* headers) {
+  if (!user_agent_.empty())
+    headers->SetHeader(net::HttpRequestHeaders::kUserAgent, user_agent_);
+  if (!accept_language_.empty()) {
+    headers->SetHeader(
+        net::HttpRequestHeaders::kAcceptLanguage,
+        net::HttpUtil::GenerateAcceptLanguageHeader(accept_language_));
   }
 }
 

@@ -9,54 +9,73 @@
 
 #include "base/macros.h"
 #include "base/single_thread_task_runner.h"
+#include "device/vr/openvr/openvr_api_wrapper.h"
 #include "device/vr/public/mojom/vr_service.mojom.h"
 #include "device/vr/vr_device_base.h"
 #include "mojo/public/cpp/bindings/binding.h"
 
-namespace vr {
-class IVRSystem;
-}  // namespace vr
-
 namespace device {
 
-class OpenVRRenderLoop;
+class XRCompositorCommon;
 
-class OpenVRDevice : public VRDeviceBase {
+class DEVICE_VR_EXPORT OpenVRDevice
+    : public VRDeviceBase,
+      public mojom::XRSessionController,
+      public mojom::IsolatedXRGamepadProviderFactory,
+      public mojom::XRCompositorHost {
  public:
-  OpenVRDevice(vr::IVRSystem* vr);
+  OpenVRDevice();
   ~OpenVRDevice() override;
 
   void Shutdown();
 
   // VRDeviceBase
-  void RequestPresent(
-      VRDisplayImpl* display,
-      mojom::VRSubmitFrameClientPtr submit_client,
-      mojom::VRPresentationProviderRequest request,
-      mojom::VRRequestPresentOptionsPtr present_options,
-      mojom::VRDisplayHost::RequestPresentCallback callback) override;
-  void ExitPresent() override;
+  void RequestSession(
+      mojom::XRRuntimeSessionOptionsPtr options,
+      mojom::XRRuntime::RequestSessionCallback callback) override;
 
   void OnPollingEvents();
 
-  void OnRequestPresentResult(
-      mojom::VRDisplayHost::RequestPresentCallback callback,
-      bool result,
-      mojom::VRDisplayFrameTransportOptionsPtr transport_options);
+  void OnRequestSessionResult(mojom::XRRuntime::RequestSessionCallback callback,
+                              bool result,
+                              mojom::XRSessionPtr session);
+
+  bool IsInitialized() { return !!openvr_; }
+
+  mojom::IsolatedXRGamepadProviderFactoryPtr BindGamepadFactory();
+  mojom::XRCompositorHostPtr BindCompositorHost();
 
  private:
   // VRDeviceBase
-  void OnMagicWindowPoseRequest(
-      mojom::VRMagicWindowProvider::GetPoseCallback callback) override;
+  void OnMagicWindowFrameDataRequest(
+      mojom::XRFrameDataProvider::GetFrameDataCallback callback) override;
 
-  // TODO (BillOrr): This should not be a unique_ptr because the render_loop_
-  // binds to VRVSyncProvider requests, so its lifetime should be tied to the
-  // lifetime of that binding.
-  std::unique_ptr<OpenVRRenderLoop> render_loop_;
-  mojom::VRSubmitFrameClientPtr submit_client_;
-  mojom::VRDisplayInfoPtr display_info_;
-  vr::IVRSystem* vr_system_;
+  // XRSessionController
+  void SetFrameDataRestricted(bool restricted) override;
+
+  // mojom::IsolatedXRGamepadProviderFactory
+  void GetIsolatedXRGamepadProvider(
+      mojom::IsolatedXRGamepadProviderRequest provider_request) override;
+
+  // XRCompositorHost
+  void CreateImmersiveOverlay(
+      mojom::ImmersiveOverlayRequest overlay_request) override;
+
+  void OnPresentingControllerMojoConnectionError();
+  void OnPresentationEnded();
+
+  std::unique_ptr<XRCompositorCommon> render_loop_;
+  std::unique_ptr<OpenVRWrapper> openvr_;
   scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner_;
+
+  mojo::Binding<mojom::XRSessionController> exclusive_controller_binding_;
+
+  mojo::Binding<mojom::IsolatedXRGamepadProviderFactory>
+      gamepad_provider_factory_binding_;
+  mojom::IsolatedXRGamepadProviderRequest provider_request_;
+
+  mojo::Binding<mojom::XRCompositorHost> compositor_host_binding_;
+  mojom::ImmersiveOverlayRequest overlay_request_;
 
   base::WeakPtrFactory<OpenVRDevice> weak_ptr_factory_;
 

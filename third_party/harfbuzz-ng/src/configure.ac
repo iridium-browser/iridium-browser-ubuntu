@@ -1,6 +1,6 @@
 AC_PREREQ([2.64])
 AC_INIT([HarfBuzz],
-        [1.7.6],
+        [1.9.0],
         [https://github.com/harfbuzz/harfbuzz/issues/new],
         [harfbuzz],
         [http://harfbuzz.org/])
@@ -12,6 +12,7 @@ AC_CONFIG_HEADERS([config.h])
 AM_INIT_AUTOMAKE([1.13.0 gnits tar-ustar dist-bzip2 no-dist-gzip -Wall no-define color-tests -Wno-portability])
 AM_SILENT_RULES([yes])
 AX_CODE_COVERAGE
+AC_USE_SYSTEM_EXTENSIONS
 
 # Initialize libtool
 m4_ifdef([AM_PROG_AR], [AM_PROG_AR])
@@ -19,7 +20,6 @@ LT_PREREQ([2.2])
 LT_INIT([disable-static])
 
 # Check for programs
-AC_USE_SYSTEM_EXTENSIONS
 AC_PROG_CC
 AC_PROG_CC_C99
 AM_PROG_CC_C_O
@@ -77,9 +77,8 @@ GTK_DOC_CHECK([1.15],[--flavour no-tmpl])
 	AM_CONDITIONAL([ENABLE_GTK_DOC], false)
 ])
 
-# Functions, and headers
-
-AC_CHECK_FUNCS(atexit mprotect sysconf getpagesize mmap isatty newlocale strtod_l)
+# Functions and headers
+AC_CHECK_FUNCS(atexit mprotect sysconf getpagesize mmap isatty newlocale strtod_l posix_memalign)
 
 save_libs="$LIBS"
 LIBS="$LIBS -lm"
@@ -95,6 +94,14 @@ if test "x$GCC" = "xyes"; then
 
 	# Make symbols link locally
 	AX_CHECK_LINK_FLAG([[-Bsymbolic-functions]], [LDFLAGS="$LDFLAGS -Bsymbolic-functions"])
+
+	# Make it possible to not link to libstdc++
+	# No threadsafe statics in C++ as we do it ourselves.
+	# We don't use these features, so it's safe to disable them
+	# even in the cases where we DO link to libstdc++.
+	# Put -fno-rtti before $CXXFLAGS such that users can re-enable it
+	# by overriding CXXFLAGS.
+	CXXFLAGS="-fno-rtti $CXXFLAGS -fno-exceptions -fno-threadsafe-statics"
 
 	# Assorted warnings
 	CXXFLAGS="$CXXFLAGS -Wcast-align"
@@ -323,7 +330,7 @@ AC_ARG_WITH(graphite2,
 			[Use the graphite2 library @<:@default=no@:>@])],,
 	[with_graphite2=no])
 have_graphite2=false
-GRAPHITE2_DEPS="graphite2"
+GRAPHITE2_DEPS="graphite2 >= 1.2.0"
 AC_SUBST(GRAPHITE2_DEPS)
 if test "x$with_graphite2" = "xyes" -o "x$with_graphite2" = "xauto"; then
 	PKG_CHECK_MODULES(GRAPHITE2, $GRAPHITE2_DEPS, have_graphite2=true, :)
@@ -499,7 +506,6 @@ dnl ===========================================================================
 AC_CONFIG_FILES([
 Makefile
 src/Makefile
-src/hb-version.h
 src/harfbuzz-config.cmake
 src/hb-ucdn/Makefile
 util/Makefile
@@ -539,8 +545,8 @@ Additional shapers (the more the merrier):
 
 Platform shapers (not normally needed):
 	CoreText:		${have_coretext}
-	Uniscribe:		${have_uniscribe}
 	DirectWrite:		${have_directwrite}
+	Uniscribe:		${have_uniscribe}
 
 Other features:
 	Documentation:		${enable_gtk_doc}

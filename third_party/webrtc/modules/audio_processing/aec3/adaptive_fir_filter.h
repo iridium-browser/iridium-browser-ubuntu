@@ -22,6 +22,7 @@
 #include "modules/audio_processing/aec3/render_buffer.h"
 #include "modules/audio_processing/logging/apm_data_dumper.h"
 #include "rtc_base/constructormagic.h"
+#include "rtc_base/system/arch.h"
 
 namespace webrtc {
 namespace aec3 {
@@ -143,6 +144,15 @@ class AdaptiveFirFilter {
     h_.resize(current_size);
   }
 
+  // Scale the filter impulse response and spectrum by a factor.
+  void ScaleFilter(float factor);
+
+  // Set the filter coefficients.
+  void SetFilter(const std::vector<FftData>& H);
+
+  // Gets the filter coefficients.
+  const std::vector<FftData>& GetFilter() const { return H_; }
+
  private:
   // Constrain the filter partitions in a cyclic manner.
   void Constrain();
@@ -154,6 +164,7 @@ class AdaptiveFirFilter {
   void UpdateSize();
 
   ApmDataDumper* const data_dumper_;
+  const bool use_partial_filter_reset_;
   const Aec3Fft fft_;
   const Aec3Optimization optimization_;
   const size_t max_size_partitions_;

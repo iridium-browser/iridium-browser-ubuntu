@@ -5,6 +5,7 @@
 #include "components/prefs/pref_service.h"
 
 #include <algorithm>
+#include <map>
 #include <utility>
 
 #include "base/bind.h"
@@ -23,7 +24,6 @@
 #include "components/prefs/default_pref_store.h"
 #include "components/prefs/pref_notifier_impl.h"
 #include "components/prefs/pref_registry.h"
-#include "components/prefs/pref_value_store.h"
 
 namespace {
 
@@ -56,6 +56,29 @@ uint32_t GetWriteFlags(const PrefService::Preference* pref) {
   return write_flags;
 }
 
+// For prefs names in |pref_store| that are not presented in |pref_changed_map|,
+// check if their values differ from those in pref_service->FindPreference() and
+// add the result into |pref_changed_map|.
+void CheckForNewPrefChangesInPrefStore(
+    std::map<std::string, bool>* pref_changed_map,
+    PrefStore* pref_store,
+    PrefService* pref_service) {
+  if (!pref_store)
+    return;
+  auto values = pref_store->GetValues();
+  for (const auto& item : values->DictItems()) {
+    // If the key already presents, skip it as a store with higher precedence
+    // already sets the entry.
+    if (pref_changed_map->find(item.first) != pref_changed_map->end())
+      continue;
+    const PrefService::Preference* pref =
+        pref_service->FindPreference(item.first);
+    if (!pref)
+      continue;
+    pref_changed_map->emplace(item.first, *(pref->GetValue()) != item.second);
+  }
+}
+
 }  // namespace
 
 PrefService::PrefService(
@@ -68,9 +91,9 @@ PrefService::PrefService(
     bool async)
     : pref_notifier_(std::move(pref_notifier)),
       pref_value_store_(std::move(pref_value_store)),
-      pref_registry_(std::move(pref_registry)),
       user_pref_store_(std::move(user_prefs)),
-      read_error_callback_(std::move(read_error_callback)) {
+      read_error_callback_(std::move(read_error_callback)),
+      pref_registry_(std::move(pref_registry)) {
   pref_notifier_->SetPrefService(this);
 
   DCHECK(pref_registry_);
@@ -92,18 +115,17 @@ void PrefService::InitFromStorage(bool async) {
     // Guarantee that initialization happens after this function returned.
     base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
-        base::Bind(&PersistentPrefStore::ReadPrefsAsync, user_pref_store_,
-                   new ReadErrorHandler(read_error_callback_)));
+        base::BindOnce(&PersistentPrefStore::ReadPrefsAsync, user_pref_store_,
+                       new ReadErrorHandler(read_error_callback_)));
   }
 }
 
-void PrefService::CommitPendingWrite() {
-  CommitPendingWrite(base::OnceClosure());
-}
-
-void PrefService::CommitPendingWrite(base::OnceClosure done_callback) {
+void PrefService::CommitPendingWrite(
+    base::OnceClosure reply_callback,
+    base::OnceClosure synchronous_done_callback) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  user_pref_store_->CommitPendingWrite(std::move(done_callback));
+  user_pref_store_->CommitPendingWrite(std::move(reply_callback),
+                                       std::move(synchronous_done_callback));
 }
 
 void PrefService::SchedulePendingLossyWrites() {
@@ -219,7 +241,7 @@ std::unique_ptr<base::DictionaryValue> PrefService::GetPreferenceValues(
 const PrefService::Preference* PrefService::FindPreference(
     const std::string& pref_name) const {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  PreferenceMap::iterator it = prefs_map_.find(pref_name);
+  auto it = prefs_map_.find(pref_name);
   if (it != prefs_map_.end())
     return &(it->second);
   const base::Value* default_value = nullptr;
@@ -274,6 +296,17 @@ bool PrefService::IsUserModifiablePreference(
     const std::string& pref_name) const {
   const Preference* pref = FindPreference(pref_name);
   return pref && pref->IsUserModifiable();
+}
+
+const base::Value* PrefService::Get(const std::string& path) const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  const base::Value* value = GetPreferenceValue(path);
+  if (!value) {
+    NOTREACHED() << "Trying to read an unregistered pref: " << path;
+    return nullptr;
+  }
+  return value;
 }
 
 const base::DictionaryValue* PrefService::GetDictionary(
@@ -383,6 +416,45 @@ void PrefService::OnStoreDeletionFromDisk() {
   user_pref_store_->OnStoreDeletionFromDisk();
 }
 
+void PrefService::ChangePrefValueStore(
+    PrefStore* managed_prefs,
+    PrefStore* supervised_user_prefs,
+    PrefStore* extension_prefs,
+    PrefStore* recommended_prefs,
+    std::unique_ptr<PrefValueStore::Delegate> delegate) {
+  // Only adding new pref stores are supported.
+  DCHECK(!pref_value_store_->HasPrefStore(PrefValueStore::MANAGED_STORE) ||
+         !managed_prefs);
+  DCHECK(
+      !pref_value_store_->HasPrefStore(PrefValueStore::SUPERVISED_USER_STORE) ||
+      !supervised_user_prefs);
+  DCHECK(!pref_value_store_->HasPrefStore(PrefValueStore::EXTENSION_STORE) ||
+         !extension_prefs);
+  DCHECK(!pref_value_store_->HasPrefStore(PrefValueStore::RECOMMENDED_STORE) ||
+         !recommended_prefs);
+
+  // If some of the stores are already initialized, check for pref value changes
+  // according to store precedence.
+  std::map<std::string, bool> pref_changed_map;
+  CheckForNewPrefChangesInPrefStore(&pref_changed_map, managed_prefs, this);
+  CheckForNewPrefChangesInPrefStore(&pref_changed_map, supervised_user_prefs,
+                                    this);
+  CheckForNewPrefChangesInPrefStore(&pref_changed_map, extension_prefs, this);
+  CheckForNewPrefChangesInPrefStore(&pref_changed_map, recommended_prefs, this);
+
+  pref_value_store_ = pref_value_store_->CloneAndSpecialize(
+      managed_prefs, supervised_user_prefs, extension_prefs,
+      nullptr /* command_line_prefs */, nullptr /* user_prefs */,
+      recommended_prefs, nullptr /* default_prefs */, pref_notifier_.get(),
+      std::move(delegate));
+
+  // Notify |pref_notifier_| on all changed values.
+  for (const auto& kv : pref_changed_map) {
+    if (kv.second)
+      pref_notifier_.get()->OnPreferenceChanged(kv.first);
+  }
+}
+
 void PrefService::AddPrefObserverAllPrefs(PrefObserver* obs) {
   pref_notifier_->AddPrefObserverAllPrefs(obs);
 }
@@ -413,7 +485,8 @@ void PrefService::SetString(const std::string& path, const std::string& value) {
 
 void PrefService::SetFilePath(const std::string& path,
                               const base::FilePath& value) {
-  SetUserPrefValue(path, base::CreateFilePathValue(value));
+  SetUserPrefValue(
+      path, base::Value::ToUniquePtrValue(base::CreateFilePathValue(value)));
 }
 
 void PrefService::SetInt64(const std::string& path, int64_t value) {
@@ -467,6 +540,14 @@ void PrefService::SetTime(const std::string& path, base::Time value) {
 base::Time PrefService::GetTime(const std::string& path) const {
   return base::Time::FromDeltaSinceWindowsEpoch(
       base::TimeDelta::FromMicroseconds(GetInt64(path)));
+}
+
+void PrefService::SetTimeDelta(const std::string& path, base::TimeDelta value) {
+  SetInt64(path, value.InMicroseconds());
+}
+
+base::TimeDelta PrefService::GetTimeDelta(const std::string& path) const {
+  return base::TimeDelta::FromMicroseconds(GetInt64(path));
 }
 
 base::Value* PrefService::GetMutableUserPref(const std::string& path,

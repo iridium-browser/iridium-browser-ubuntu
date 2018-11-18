@@ -25,7 +25,6 @@
 #include <cstdlib>
 
 #include "base/macros.h"
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_html_marquee_element.h"
 #include "third_party/blink/renderer/core/animation/document_timeline.h"
 #include "third_party/blink/renderer/core/animation/keyframe_effect.h"
@@ -38,6 +37,7 @@
 #include "third_party/blink/renderer/core/css/css_style_declaration.h"
 #include "third_party/blink/renderer/core/css_property_names.h"
 #include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/core/dom/events/event_listener.h"
 #include "third_party/blink/renderer/core/dom/frame_request_callback_collection.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
@@ -47,6 +47,7 @@
 #include "third_party/blink/renderer/core/html/html_style_element.h"
 #include "third_party/blink/renderer/core/html/parser/html_parser_idioms.h"
 #include "third_party/blink/renderer/core/html_names.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 
 namespace blink {
 
@@ -90,7 +91,7 @@ class HTMLMarqueeElement::RequestAnimationFrameCallback final
     marquee_->ContinueAnimation();
   }
 
-  virtual void Trace(blink::Visitor* visitor) {
+  void Trace(blink::Visitor* visitor) override {
     visitor->Trace(marquee_);
     FrameRequestCallbackCollection::FrameCallback::Trace(visitor);
   }
@@ -115,7 +116,7 @@ class HTMLMarqueeElement::AnimationFinished final : public EventListener {
     marquee_->start();
   }
 
-  virtual void Trace(blink::Visitor* visitor) {
+  void Trace(blink::Visitor* visitor) override {
     visitor->Trace(marquee_);
     EventListener::Trace(visitor);
   }
@@ -127,7 +128,7 @@ class HTMLMarqueeElement::AnimationFinished final : public EventListener {
 };
 
 Node::InsertionNotificationRequest HTMLMarqueeElement::InsertedInto(
-    ContainerNode* insertion_point) {
+    ContainerNode& insertion_point) {
   HTMLElement::InsertedInto(insertion_point);
 
   if (isConnected())
@@ -136,9 +137,9 @@ Node::InsertionNotificationRequest HTMLMarqueeElement::InsertedInto(
   return kInsertionDone;
 }
 
-void HTMLMarqueeElement::RemovedFrom(ContainerNode* insertion_point) {
+void HTMLMarqueeElement::RemovedFrom(ContainerNode& insertion_point) {
   HTMLElement::RemovedFrom(insertion_point);
-  if (insertion_point->isConnected()) {
+  if (insertion_point.isConnected()) {
     stop();
   }
 }
@@ -186,9 +187,10 @@ int HTMLMarqueeElement::loop() const {
 
 void HTMLMarqueeElement::setLoop(int value, ExceptionState& exception_state) {
   if (value <= 0 && value != -1) {
-    exception_state.ThrowDOMException(
-        kIndexSizeError, "The provided value (" + String::Number(value) +
-                             ") is neither positive nor -1.");
+    exception_state.ThrowDOMException(DOMExceptionCode::kIndexSizeError,
+                                      "The provided value (" +
+                                          String::Number(value) +
+                                          ") is neither positive nor -1.");
     return;
   }
   SetIntegralAttribute(HTMLNames::loopAttr, value);
@@ -254,21 +256,24 @@ StringKeyframeEffectModel* HTMLMarqueeElement::CreateEffectModel(
   SecureContextMode secure_context_mode =
       mover_->GetDocument().GetSecureContextMode();
 
-  scoped_refptr<StringKeyframe> keyframe1 = StringKeyframe::Create();
+  StringKeyframeVector keyframes;
+  StringKeyframe* keyframe1 = StringKeyframe::Create();
   set_result = keyframe1->SetCSSPropertyValue(
       CSSPropertyTransform, parameters.transform_begin, secure_context_mode,
       style_sheet_contents);
   DCHECK(set_result.did_parse);
+  keyframes.push_back(keyframe1);
 
-  scoped_refptr<StringKeyframe> keyframe2 = StringKeyframe::Create();
+  StringKeyframe* keyframe2 = StringKeyframe::Create();
   set_result = keyframe2->SetCSSPropertyValue(
       CSSPropertyTransform, parameters.transform_end, secure_context_mode,
       style_sheet_contents);
   DCHECK(set_result.did_parse);
+  keyframes.push_back(keyframe2);
 
-  return StringKeyframeEffectModel::Create(
-      {std::move(keyframe1), std::move(keyframe2)},
-      EffectModel::kCompositeReplace, LinearTimingFunction::Shared());
+  return StringKeyframeEffectModel::Create(keyframes,
+                                           EffectModel::kCompositeReplace,
+                                           LinearTimingFunction::Shared());
 }
 
 void HTMLMarqueeElement::ContinueAnimation() {
@@ -290,7 +295,7 @@ void HTMLMarqueeElement::ContinueAnimation() {
   double duration = 0;
   if (scroll_amount)
     duration = parameters.distance * scroll_delay / scroll_amount;
-  if (!duration)
+  if (duration <= 0)
     return;
 
   StringKeyframeEffectModel* effect_model = CreateEffectModel(parameters);

@@ -32,6 +32,7 @@
 #include "components/search_engines/template_url.h"
 #include "components/search_engines/template_url_service.h"
 #include "components/search_engines/template_url_service_client.h"
+#include "net/url_request/url_request.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/metrics_proto/omnibox_event.pb.h"
 
@@ -151,7 +152,7 @@ void TestProvider::Start(const AutocompleteInput& input, bool minimal_changes) {
   if (input.want_asynchronous_matches()) {
     done_ = false;
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::Bind(&TestProvider::Run, this));
+        FROM_HERE, base::BindOnce(&TestProvider::Run, this));
   }
 }
 
@@ -453,7 +454,7 @@ void AutocompleteProviderTest::RunKeywordTest(const base::string16& input,
   controller_->UpdateAssociatedKeywords(&result);
   for (size_t j = 0; j < result.size(); ++j) {
     EXPECT_EQ(match_data[j].expected_associated_keyword,
-              result.match_at(j)->associated_keyword.get()
+              result.match_at(j)->associated_keyword
                   ? result.match_at(j)->associated_keyword->keyword
                   : base::string16());
   }

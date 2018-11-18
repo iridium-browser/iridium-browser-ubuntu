@@ -13,13 +13,16 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/ui/layout_constants.h"
-#include "chrome/browser/ui/views/harmony/chrome_typography.h"
+#include "chrome/browser/ui/omnibox/omnibox_theme.h"
+#include "chrome/browser/ui/views/chrome_typography.h"
 #include "chrome/browser/ui/views/location_bar/background_with_1_px_border.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/omnibox/browser/omnibox_field_trial.h"
 #include "components/search_engines/template_url_service.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/material_design/material_design_controller.h"
 #include "ui/gfx/color_utils.h"
 #include "ui/strings/grit/ui_strings.h"
 #include "ui/views/accessibility/view_accessibility.h"
@@ -29,8 +32,7 @@
 
 KeywordHintView::KeywordHintView(views::ButtonListener* listener,
                                  Profile* profile,
-                                 SkColor text_color,
-                                 SkColor background_color)
+                                 OmniboxTint tint)
     : Button(listener),
       profile_(profile),
       leading_label_(nullptr),
@@ -38,6 +40,16 @@ KeywordHintView::KeywordHintView(views::ButtonListener* listener,
       chip_label_(
           new views::Label(base::string16(), CONTEXT_OMNIBOX_DECORATION)),
       trailing_label_(nullptr) {
+  const bool experimental_keyword_mode =
+      OmniboxFieldTrial::IsExperimentalKeywordModeEnabled();
+  const bool is_newer_material =
+      ui::MaterialDesignController::IsNewerMaterialUi();
+  SkColor text_color =
+      is_newer_material
+          ? GetOmniboxColor(OmniboxPart::LOCATION_BAR_TEXT_DEFAULT, tint)
+          : GetOmniboxColor(OmniboxPart::LOCATION_BAR_TEXT_DIMMED, tint);
+  SkColor background_color =
+      GetOmniboxColor(OmniboxPart::LOCATION_BAR_BACKGROUND, tint);
   leading_label_ = CreateLabel(text_color, background_color);
 
   constexpr int kPaddingInsideBorder = 5;
@@ -48,17 +60,30 @@ KeywordHintView::KeywordHintView(views::ButtonListener* listener,
                                      : kPaddingInsideBorder + 1;
   chip_label_->SetBorder(
       views::CreateEmptyBorder(gfx::Insets(0, horizontal_padding)));
+
+  SkColor tab_bg_color = SkColorSetA(text_color, 0x13);
+  SkColor tab_border_color = text_color;
+  if (color_utils::IsDark(background_color)) {
+    tab_bg_color = SK_ColorWHITE;
+    tab_border_color = SK_ColorWHITE;
+  }
+  if (is_newer_material) {
+    tab_border_color =
+        GetOmniboxColor(OmniboxPart::LOCATION_BAR_BUBBLE_OUTLINE, tint);
+    if (!experimental_keyword_mode) {
+      tab_bg_color = GetOmniboxColor(OmniboxPart::RESULTS_BACKGROUND, tint);
+    } else {
+      tab_bg_color = tab_border_color;
+      text_color = SK_ColorWHITE;
+    }
+  }
   chip_label_->SetEnabledColor(text_color);
-  bool inverted = color_utils::IsDark(background_color);
-  SkColor tab_bg_color =
-      inverted ? SK_ColorWHITE : SkColorSetA(text_color, 0x13);
-  SkColor tab_border_color = inverted ? SK_ColorWHITE : text_color;
   chip_label_->SetBackgroundColor(tab_bg_color);
 
-  chip_container_->SetBorder(views::CreateEmptyBorder(
-      gfx::Insets(GetLayoutConstant(LOCATION_BAR_BUBBLE_VERTICAL_PADDING), 0)));
-  chip_container_->SetBackground(std::make_unique<BackgroundWith1PxBorder>(
-      tab_bg_color, tab_border_color));
+  chip_container_->SetBackground(CreateBackgroundFromPainter(
+      views::Painter::CreateRoundRectWith1PxBorderPainter(
+          tab_bg_color, tab_border_color,
+          GetLayoutConstant(LOCATION_BAR_BUBBLE_CORNER_RADIUS))));
   chip_container_->AddChildView(chip_label_);
   chip_container_->SetLayoutManager(std::make_unique<views::FillLayout>());
   AddChildView(chip_container_);
@@ -79,7 +104,8 @@ void KeywordHintView::SetKeyword(const base::string16& keyword) {
   // When the virtual keyboard is visible, we show a modified touch UI
   // containing only the chip and no surrounding labels.
   const bool was_touch_ui = leading_label_->text().empty();
-  const bool is_touch_ui = LocationBarView::IsVirtualKeyboardVisible();
+  const bool is_touch_ui =
+      LocationBarView::IsVirtualKeyboardVisible(GetWidget());
   if (is_touch_ui == was_touch_ui && keyword_ == keyword)
     return;
 
@@ -132,9 +158,10 @@ void KeywordHintView::SetKeyword(const base::string16& keyword) {
 }
 
 gfx::Insets KeywordHintView::GetInsets() const {
-  if (!LocationBarView::IsRounded())
-    return gfx::Insets(0,
-                       GetLayoutConstant(LOCATION_BAR_ICON_INTERIOR_PADDING));
+  if (!LocationBarView::IsRounded()) {
+    return gfx::Insets(
+        0, GetLayoutInsets(LOCATION_BAR_ICON_INTERIOR_PADDING).left());
+  }
 
   // The location bar and keyword hint view chip have rounded ends. Ensure the
   // chip label's corner with the furthest extent from its midpoint is still at
@@ -154,7 +181,8 @@ gfx::Insets KeywordHintView::GetInsets() const {
   // omnibox, but the padding should be symmetrical, so use it on both sides,
   // collapsing into the horizontal padding used by the previous View.
   const int left_margin =
-      horizontal_margin - GetLayoutConstant(LOCATION_BAR_ICON_INTERIOR_PADDING);
+      horizontal_margin -
+      GetLayoutInsets(LOCATION_BAR_ICON_INTERIOR_PADDING).left();
   return gfx::Insets(0, std::max(0, left_margin), 0, horizontal_margin);
 }
 
@@ -175,10 +203,9 @@ void KeywordHintView::Layout() {
   gfx::Size leading_size(leading_label_->GetPreferredSize());
   leading_label_->SetBounds(GetInsets().left(), 0,
                             show_labels ? leading_size.width() : 0, height());
-  const int chip_height = LocationBarView::IsRounded()
-                              ? GetLayoutConstant(LOCATION_BAR_ICON_SIZE) +
-                                    chip_container_->GetInsets().height()
-                              : height();
+  const int chip_height = GetLayoutConstant(LOCATION_BAR_ICON_SIZE) +
+                          chip_container_->GetInsets().height();
+
   const int chip_vertical_padding = std::max(0, height() - chip_height) / 2;
   chip_container_->SetBounds(leading_label_->bounds().right(),
                              chip_vertical_padding, chip_width, chip_height);

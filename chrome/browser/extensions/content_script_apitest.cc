@@ -20,8 +20,10 @@
 #include "chrome/browser/search/search.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/javascript_dialogs/javascript_dialog_tab_helper.h"
+#include "chrome/browser/ui/search/local_ntp_test_utils.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/webui_url_constants.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/javascript_dialog_manager.h"
 #include "content/public/browser/render_frame_host.h"
@@ -29,6 +31,7 @@
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/test/browser_test_utils.h"
 #include "extensions/browser/browsertest_util.h"
+#include "extensions/browser/extension_registry.h"
 #include "extensions/browser/notification_types.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_features.h"
@@ -192,14 +195,7 @@ IN_PROC_BROWSER_TEST_F(ContentScriptApiTest, ContentScriptFragmentNavigation) {
   ASSERT_TRUE(RunExtensionTest(extension_name)) << message_;
 }
 
-// Times out on Linux: http://crbug.com/163097
-#if defined(OS_LINUX)
-#define MAYBE_ContentScriptIsolatedWorlds DISABLED_ContentScriptIsolatedWorlds
-#else
-#define MAYBE_ContentScriptIsolatedWorlds ContentScriptIsolatedWorlds
-#endif
-IN_PROC_BROWSER_TEST_F(ContentScriptApiTest,
-                       MAYBE_ContentScriptIsolatedWorlds) {
+IN_PROC_BROWSER_TEST_F(ContentScriptApiTest, ContentScriptIsolatedWorlds) {
   // This extension runs various bits of script and tests that they all run in
   // the same isolated world.
   ASSERT_TRUE(StartEmbeddedTestServer());
@@ -402,22 +398,22 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTestWithManagementPolicy,
   // Set enterprise policy to block injection to policy specified host.
   {
     ExtensionManagementPolicyUpdater pref(&policy_provider_);
-    pref.AddRuntimeBlockedHost("*", "*://example.com");
+    pref.AddPolicyBlockedHost("*", "*://example.com");
   }
   ASSERT_TRUE(StartEmbeddedTestServer());
   ASSERT_TRUE(RunExtensionTest("content_scripts/policy")) << message_;
 }
 
-// Verifies wildcard can be used for effecitve TLD.
+// Verifies wildcard can NOT be used for effective TLD.
 IN_PROC_BROWSER_TEST_F(ExtensionApiTestWithManagementPolicy,
                        ContentScriptPolicyWildcard) {
   // Set enterprise policy to block injection to policy specified hosts.
   {
     ExtensionManagementPolicyUpdater pref(&policy_provider_);
-    pref.AddRuntimeBlockedHost("*", "*://example.*");
+    pref.AddPolicyBlockedHost("*", "*://example.*");
   }
   ASSERT_TRUE(StartEmbeddedTestServer());
-  ASSERT_TRUE(RunExtensionTest("content_scripts/policy")) << message_;
+  ASSERT_FALSE(RunExtensionTest("content_scripts/policy")) << message_;
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionApiTestWithManagementPolicy,
@@ -441,7 +437,7 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTestWithManagementPolicy,
   // specified host.
   {
     ExtensionManagementPolicyUpdater pref(&policy_provider_);
-    pref.AddRuntimeBlockedHost(extension_id, "*://example.com");
+    pref.AddPolicyBlockedHost(extension_id, "*://example.com");
   }
   // Some policy updating operations are performed asynchronuosly. Wait for them
   // to complete before installing extension.
@@ -764,6 +760,220 @@ IN_PROC_BROWSER_TEST_F(ContentScriptApiTest, ExecuteScriptCodeSameSiteCookies) {
 
   EXPECT_EQ("success", result);
   EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();
+}
+
+// Tests that extension content scripts can execute (including asynchronously
+// through timeouts) in pages with Content-Security-Policy: sandbox.
+// See https://crbug.com/811528.
+IN_PROC_BROWSER_TEST_F(ContentScriptApiTest, ExecuteScriptBypassingSandbox) {
+  ASSERT_TRUE(StartEmbeddedTestServer());
+
+  TestExtensionDir test_dir;
+  test_dir.WriteManifest(
+      R"({
+           "name": "Bypass Sandbox CSP",
+           "description": "Extensions should bypass a page's CSP sandbox.",
+           "version": "0.1",
+           "manifest_version": 2,
+           "content_scripts": [{
+             "matches": ["*://example.com:*/*"],
+             "js": ["script.js"]
+           }]
+         })");
+  test_dir.WriteFile(
+      FILE_PATH_LITERAL("script.js"),
+      R"(window.setTimeout(() => { chrome.test.notifyPass(); }, 10);)");
+
+  ResultCatcher catcher;
+  const Extension* extension = LoadExtension(test_dir.UnpackedPath());
+  ASSERT_TRUE(extension);
+
+  GURL url = embedded_test_server()->GetURL(
+      "example.com", "/extensions/page_with_sandbox_csp.html");
+  ui_test_utils::NavigateToURL(browser(), url);
+  ASSERT_TRUE(catcher.GetNextResult()) << catcher.message();
+}
+
+// Tests the cross-origin access of content scripts.
+IN_PROC_BROWSER_TEST_F(ContentScriptApiTest, CrossOriginXhr) {
+  ASSERT_TRUE(StartEmbeddedTestServer());
+
+  TestExtensionDir test_dir;
+  test_dir.WriteManifest(
+      R"({
+           "name": "Cross Origin XHR",
+           "description": "Content script cross origin XHR",
+           "version": "0.1",
+           "manifest_version": 2,
+           "content_scripts": [{
+             "matches": ["*://example.com:*/*"],
+             "js": ["script.js"]
+           }],
+           "permissions": ["http://chromium.org:*/*"]
+         })");
+  constexpr char kScript[] =
+      R"(document.getElementById('go-button').addEventListener(
+             'click',
+             function() {
+               fetch('%s').then((response) => {
+                 domAutomationController.send('Fetched');
+               }).catch((e) => {
+                 domAutomationController.send('Not Fetched');
+               });
+             });)";
+
+  const GURL cross_origin_url =
+      embedded_test_server()->GetURL("chromium.org", "/extensions/body1.html");
+  test_dir.WriteFile(
+      FILE_PATH_LITERAL("script.js"),
+      base::StringPrintf(kScript, cross_origin_url.spec().c_str()));
+
+  const Extension* extension = LoadExtension(test_dir.UnpackedPath());
+  ASSERT_TRUE(extension);
+
+  const GURL example_com_url = embedded_test_server()->GetURL(
+      "example.com", "/extensions/page_with_button.html");
+  ui_test_utils::NavigateToURL(browser(), example_com_url);
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+
+  constexpr char kClickButtonScript[] =
+      "document.getElementById('go-button').click();";
+
+  {
+    // Since the extension has permission to access chromium.org, it should be
+    // able to make a cross-origin fetch.
+    content::DOMMessageQueue message_queue;
+    content::ExecuteScriptAsync(web_contents, kClickButtonScript);
+    std::string message;
+    EXPECT_TRUE(message_queue.WaitForMessage(&message));
+    EXPECT_EQ(R"("Fetched")", message);
+  }
+
+  extension_service()->DisableExtension(extension->id(),
+                                        disable_reason::DISABLE_USER_ACTION);
+  EXPECT_FALSE(ExtensionRegistry::Get(profile())->enabled_extensions().GetByID(
+      extension->id()));
+
+  {
+    // When the extension is unloaded, the content script remains injected
+    // (since we don't currently have any means of "uninjecting" JS). However,
+    // it should no longer have the extra cross-origin permissions, so a
+    // cross-origin fetch should fail.
+    // https://crbug.com/843381.
+    content::DOMMessageQueue message_queue;
+    content::ExecuteScriptAsync(web_contents, kClickButtonScript);
+    std::string message;
+    EXPECT_TRUE(message_queue.WaitForMessage(&message));
+    EXPECT_EQ(R"("Not Fetched")", message);
+  }
+}
+
+// Regression test for https://crbug.com/883526.
+IN_PROC_BROWSER_TEST_F(ContentScriptApiTest, InifiniteLoopInGetEffectiveURL) {
+  // Create an extension that injects content scripts into about:blank frames
+  // (and therefore has a chance to trigger an infinite loop in
+  // ScriptContext::GetEffectiveDocumentURL).
+  TestExtensionDir test_dir;
+  test_dir.WriteManifest(
+      R"({
+           "name": "Content scripts everywhere",
+           "description": "Content scripts everywhere",
+           "version": "0.1",
+           "manifest_version": 2,
+           "content_scripts": [{
+             "matches": ["<all_urls>"],
+             "all_frames": true,
+             "match_about_blank": true,
+             "js": ["script.js"]
+           }],
+           "permissions": ["*://*/*"],
+         })");
+  test_dir.WriteFile(FILE_PATH_LITERAL("script.js"), "console.log('blah')");
+
+  // Create an "infinite" loop for hopping over parent/opener:
+  // subframe1 ---parent---> mainFrame ---opener--> subframe1 ...
+  ui_test_utils::NavigateToURL(browser(), GURL(url::kAboutBlankURL));
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  ASSERT_TRUE(content::ExecJs(web_contents,
+                              R"(
+                                  var iframe = document.createElement('iframe');
+                                  document.body.appendChild(iframe);
+                                  window.name = 'main-frame'; )"));
+  content::RenderFrameHost* subframe1 = web_contents->GetAllFrames()[1];
+  ASSERT_TRUE(
+      content::ExecJs(subframe1, "var w = window.open('', 'main-frame');"));
+  EXPECT_EQ(subframe1, web_contents->GetOpener());
+
+  // Trigger GetEffectiveURL from another subframe:
+  ASSERT_TRUE(content::ExecJs(web_contents,
+                              R"(
+                                  var iframe = document.createElement('iframe');
+                                  document.body.appendChild(iframe); )"));
+
+  // Verify that the renderer is still responsive / that the renderer didn't
+  // enter an infinite loop.
+  EXPECT_EQ(123, content::EvalJs(web_contents, "123"));
+}
+
+// Test fixture which sets a custom NTP Page.
+// TODO(karandeepb): Similar logic to set up a custom NTP is used elsewhere as
+// well. Abstract this away into a reusable test fixture class.
+class NTPInterceptionTest : public ExtensionApiTest {
+ public:
+  NTPInterceptionTest()
+      : https_test_server_(net::EmbeddedTestServer::TYPE_HTTPS) {}
+
+  // ExtensionApiTest override:
+  void SetUpOnMainThread() override {
+    ExtensionApiTest::SetUpOnMainThread();
+    test_data_dir_ = test_data_dir_.AppendASCII("ntp_content_script");
+    https_test_server_.ServeFilesFromDirectory(test_data_dir_);
+    ASSERT_TRUE(https_test_server_.Start());
+
+    GURL ntp_url = https_test_server_.GetURL("/fake_ntp.html");
+    local_ntp_test_utils::SetUserSelectedDefaultSearchProvider(
+        profile(), https_test_server_.base_url().spec(), ntp_url.spec());
+  }
+
+  const net::EmbeddedTestServer* https_test_server() const {
+    return &https_test_server_;
+  }
+
+ private:
+  net::EmbeddedTestServer https_test_server_;
+  DISALLOW_COPY_AND_ASSIGN(NTPInterceptionTest);
+};
+
+// Ensure extensions can't inject a content script into the New Tab page.
+// Regression test for crbug.com/844428.
+IN_PROC_BROWSER_TEST_F(NTPInterceptionTest, ContentScript) {
+  // Load an extension which tries to inject a script into every frame.
+  ExtensionTestMessageListener listener("ready", false /*will_reply*/);
+  const Extension* extension = LoadExtension(test_data_dir_);
+  ASSERT_TRUE(extension);
+  ASSERT_TRUE(listener.WaitUntilSatisfied());
+
+  // Create a corresponding off the record profile for the current profile. This
+  // is necessary to reproduce crbug.com/844428, which occurs in part due to
+  // incorrect handling of multiple profiles by the NTP code.
+  Browser* incognito_browser = CreateIncognitoBrowser(profile());
+  ASSERT_TRUE(incognito_browser);
+
+  // Ensure that the extension isn't able to inject the script into the New Tab
+  // Page.
+  ui_test_utils::NavigateToURL(browser(), GURL(chrome::kChromeUINewTabURL));
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  ASSERT_TRUE(search::IsInstantNTP(web_contents));
+
+  bool script_injected_in_ntp = false;
+  ASSERT_TRUE(ExecuteScriptAndExtractBool(
+      web_contents,
+      "window.domAutomationController.send(document.title !== 'Fake NTP');",
+      &script_injected_in_ntp));
+  EXPECT_FALSE(script_injected_in_ntp);
 }
 
 }  // namespace extensions

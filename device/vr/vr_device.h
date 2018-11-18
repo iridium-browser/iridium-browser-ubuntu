@@ -7,6 +7,7 @@
 
 #include "base/callback.h"
 #include "base/macros.h"
+#include "device/vr/public/mojom/isolated_xr_service.mojom.h"
 #include "device/vr/public/mojom/vr_service.mojom.h"
 #include "device/vr/vr_export.h"
 
@@ -32,34 +33,6 @@ enum class XrRuntimeAvailable {
   NONE = 0,
   OPENVR = 1,
   COUNT,
-};
-
-const unsigned int VR_DEVICE_LAST_ID = 0xFFFFFFFF;
-
-// Represents one of the platform's VR devices. Owned by the respective
-// VRDeviceProvider.
-// TODO(mthiesse, crbug.com/769373): Remove DEVICE_VR_EXPORT.
-class DEVICE_VR_EXPORT VRDevice {
- public:
-  virtual ~VRDevice() {}
-
-  virtual unsigned int GetId() const = 0;
-  virtual void PauseTracking() = 0;
-  virtual void ResumeTracking() = 0;
-  virtual void Blur() = 0;
-  virtual void Focus() = 0;
-  virtual mojom::VRDisplayInfoPtr GetVRDisplayInfo() = 0;
-  virtual void SetMagicWindowEnabled(bool enabled) = 0;
-
-  // The fallback device should only be provided in lieu of other devices.
-  virtual bool IsFallbackDevice() = 0;
-
-  // TODO(mthiesse): The browser should handle browser-side exiting of
-  // presentation before device/ is even aware presentation is being exited.
-  // Then the browser should call ExitPresent() on Device, which does device/
-  // exiting of presentation before notifying displays. This is currently messy
-  // because browser-side notions of presentation are mostly Android-specific.
-  virtual void OnExitPresent() = 0;
 };
 
 }  // namespace device

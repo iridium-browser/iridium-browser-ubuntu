@@ -21,15 +21,14 @@
 #include "api/call/audio_sink.h"
 #include "api/jsep.h"
 #include "api/rtpreceiverinterface.h"
-#include "api/videosinkinterface.h"
-#include "api/videosourceinterface.h"
+#include "api/video/video_sink_interface.h"
+#include "api/video/video_source_interface.h"
+#include "call/rtp_packet_sink_interface.h"
 #include "media/base/mediachannel.h"
 #include "media/base/mediaengine.h"
 #include "media/base/streamparams.h"
 #include "p2p/base/dtlstransportinternal.h"
 #include "p2p/base/packettransportinternal.h"
-#include "pc/audiomonitor.h"
-#include "pc/bundlefilter.h"
 #include "pc/dtlssrtptransport.h"
 #include "pc/mediasession.h"
 #include "pc/rtptransport.h"
@@ -39,7 +38,7 @@
 #include "rtc_base/asyncudpsocket.h"
 #include "rtc_base/criticalsection.h"
 #include "rtc_base/network.h"
-#include "rtc_base/sigslot.h"
+#include "rtc_base/third_party/sigslot/sigslot.h"
 
 namespace webrtc {
 class AudioSinkInterface;
@@ -68,9 +67,10 @@ class MediaContentDescription;
 // vtable, and the media channel's thread using BaseChannel as the
 // NetworkInterface.
 
-class BaseChannel
-    : public rtc::MessageHandler, public sigslot::has_slots<>,
-      public MediaChannel::NetworkInterface {
+class BaseChannel : public rtc::MessageHandler,
+                    public sigslot::has_slots<>,
+                    public MediaChannel::NetworkInterface,
+                    public webrtc::RtpPacketSinkInterface {
  public:
   // If |srtp_required| is true, the channel will not send or receive any
   // RTP/RTCP packets without using SRTP (either using SDES or DTLS-SRTP).
@@ -108,7 +108,7 @@ class BaseChannel
   // encryption, an SrtpTransport for SDES or a DtlsSrtpTransport for DTLS-SRTP.
   // This can be called from any thread and it hops to the network thread
   // internally. It would replace the |SetTransports| and its variants.
-  void SetRtpTransport(webrtc::RtpTransportInternal* rtp_transport);
+  bool SetRtpTransport(webrtc::RtpTransportInternal* rtp_transport);
 
   // Channel control
   bool SetLocalContent(const MediaContentDescription* content,
@@ -120,7 +120,7 @@ class BaseChannel
 
   bool Enable(bool enable);
 
-  // Multiplexing
+  // TODO(zhihuang): These methods are used for testing and can be removed.
   bool AddRecvStream(const StreamParams& sp);
   bool RemoveRecvStream(uint32_t ssrc);
   bool AddSendStream(const StreamParams& sp);
@@ -166,27 +166,19 @@ class BaseChannel
   void OnTransportReadyToSend(bool ready);
 
   // Only public for unit tests.  Otherwise, consider protected.
-  int SetOption(SocketType type, rtc::Socket::Option o, int val)
-      override;
+  int SetOption(SocketType type, rtc::Socket::Option o, int val) override;
   int SetOption_n(SocketType type, rtc::Socket::Option o, int val);
 
   virtual cricket::MediaType media_type() = 0;
 
-  // Public for testing.
-  // TODO(zstein): Remove this once channels register themselves with
-  // an RtpTransport in a more explicit way.
-  bool HandlesPayloadType(int payload_type) const;
+  // RtpPacketSinkInterface overrides.
+  void OnRtpPacket(const webrtc::RtpPacketReceived& packet) override;
 
   // Used by the RTCStatsCollector tests to set the transport name without
   // creating RtpTransports.
   void set_transport_name_for_testing(const std::string& transport_name) {
     transport_name_ = transport_name;
   }
-
-  void SetMetricsObserver(
-      rtc::scoped_refptr<webrtc::MetricsObserverInterface> metrics_observer);
-
-  void DisableEncryption(bool disabled) { encryption_disabled_ = disabled; }
 
  protected:
   virtual MediaChannel* media_channel() const { return media_channel_.get(); }
@@ -223,7 +215,7 @@ class BaseChannel
   // From RtpTransportInternal
   void OnWritableState(bool writable);
 
-  void OnNetworkRouteChanged(rtc::Optional<rtc::NetworkRoute> network_route);
+  void OnNetworkRouteChanged(absl::optional<rtc::NetworkRoute> network_route);
 
   bool PacketIsRtcp(const rtc::PacketTransportInternal* transport,
                     const char* data,
@@ -232,12 +224,11 @@ class BaseChannel
                   rtc::CopyOnWriteBuffer* packet,
                   const rtc::PacketOptions& options);
 
-  bool WantsPacket(bool rtcp, const rtc::CopyOnWriteBuffer* packet);
-  void HandlePacket(bool rtcp, rtc::CopyOnWriteBuffer* packet,
-                    const rtc::PacketTime& packet_time);
-  // TODO(zstein): packet can be const once the RtpTransport handles protection.
+  void OnRtcpPacketReceived(rtc::CopyOnWriteBuffer* packet,
+                            const rtc::PacketTime& packet_time);
+
   void OnPacketReceived(bool rtcp,
-                        rtc::CopyOnWriteBuffer* packet,
+                        const rtc::CopyOnWriteBuffer& packet,
                         const rtc::PacketTime& packet_time);
   void ProcessPacket(bool rtcp,
                      const rtc::CopyOnWriteBuffer& packet,
@@ -282,11 +273,6 @@ class BaseChannel
   RtpHeaderExtensions GetFilteredRtpHeaderExtensions(
       const RtpHeaderExtensions& extensions);
 
-  // Helper method to get RTP Absoulute SendTime extension header id if
-  // present in remote supported extensions list.
-  void MaybeCacheRtpAbsSendTimeHeaderExtension_w(
-      const std::vector<webrtc::RtpExtension>& extensions);
-
   // From MessageHandler
   void OnMessage(rtc::Message* pmsg) override;
 
@@ -298,8 +284,13 @@ class BaseChannel
 
   void AddHandledPayloadType(int payload_type);
 
+  void UpdateRtpHeaderExtensionMap(
+      const RtpHeaderExtensions& header_extensions);
+
+  bool RegisterRtpDemuxerSink();
+
  private:
-  void ConnectToRtpTransport();
+  bool ConnectToRtpTransport();
   void DisconnectFromRtpTransport();
   void SignalSentPacket_n(const rtc::SentPacket& sent_packet);
   void SignalSentPacket_w(const rtc::SentPacket& sent_packet);
@@ -314,14 +305,7 @@ class BaseChannel
   // Won't be set when using raw packet transports. SDP-specific thing.
   std::string transport_name_;
 
-  rtc::scoped_refptr<webrtc::MetricsObserverInterface> metrics_observer_;
-
   webrtc::RtpTransportInternal* rtp_transport_ = nullptr;
-  // Only one of these transports is non-null at a time. One for DTLS-SRTP, one
-  // for SDES and one for unencrypted RTP.
-  std::unique_ptr<webrtc::SrtpTransport> sdes_transport_;
-  std::unique_ptr<webrtc::DtlsSrtpTransport> dtls_srtp_transport_;
-  std::unique_ptr<webrtc::RtpTransport> unencrypted_rtp_transport_;
 
   std::vector<std::pair<rtc::Socket::Option, int> > socket_options_;
   std::vector<std::pair<rtc::Socket::Option, int> > rtcp_socket_options_;
@@ -345,14 +329,7 @@ class BaseChannel
   webrtc::RtpTransceiverDirection remote_content_direction_ =
       webrtc::RtpTransceiverDirection::kInactive;
 
-  // The cached encrypted header extension IDs.
-  rtc::Optional<std::vector<int>> cached_send_extension_ids_;
-  rtc::Optional<std::vector<int>> cached_recv_extension_ids_;
-
-  // TODO(zhihuang): These two variables can be removed once switching to
-  // RtpDemuxer.
-  BundleFilter bundle_filter_;
-  bool encryption_disabled_ = false;
+  webrtc::RtpDemuxerCriteria demuxer_criteria_;
 };
 
 // VoiceChannel is a specialization that adds support for early media, DTMF,
@@ -460,9 +437,7 @@ class RtpDataChannel : public BaseChannel {
                         SendDataResult* result);
 
   // Should be called on the signaling thread only.
-  bool ready_to_send_data() const {
-    return ready_to_send_data_;
-  }
+  bool ready_to_send_data() const { return ready_to_send_data_; }
 
   sigslot::signal2<const ReceiveDataParams&, const rtc::CopyOnWriteBuffer&>
       SignalDataReceived;
@@ -483,11 +458,7 @@ class RtpDataChannel : public BaseChannel {
     SendDataMessageData(const SendDataParams& params,
                         const rtc::CopyOnWriteBuffer* payload,
                         SendDataResult* result)
-        : params(params),
-          payload(payload),
-          result(result),
-          succeeded(false) {
-    }
+        : params(params), payload(payload), result(result), succeeded(false) {}
 
     const SendDataParams& params;
     const rtc::CopyOnWriteBuffer* payload;
@@ -499,11 +470,10 @@ class RtpDataChannel : public BaseChannel {
     // We copy the data because the data will become invalid after we
     // handle DataMediaChannel::SignalDataReceived but before we fire
     // SignalDataReceived.
-    DataReceivedMessageData(
-        const ReceiveDataParams& params, const char* data, size_t len)
-        : params(params),
-          payload(data, len) {
-    }
+    DataReceivedMessageData(const ReceiveDataParams& params,
+                            const char* data,
+                            size_t len)
+        : params(params), payload(data, len) {}
     const ReceiveDataParams params;
     const rtc::CopyOnWriteBuffer payload;
   };
@@ -523,8 +493,9 @@ class RtpDataChannel : public BaseChannel {
   void UpdateMediaSendRecvState_w() override;
 
   void OnMessage(rtc::Message* pmsg) override;
-  void OnDataReceived(
-      const ReceiveDataParams& params, const char* data, size_t len);
+  void OnDataReceived(const ReceiveDataParams& params,
+                      const char* data,
+                      size_t len);
   void OnDataChannelReadyToSend(bool writable);
 
   bool ready_to_send_data_ = false;

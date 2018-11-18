@@ -15,6 +15,7 @@
 #include "libANGLE/Surface.h"
 #include "libANGLE/formatutils.h"
 #include "libANGLE/renderer/ContextImpl.h"
+#include "libANGLE/renderer/d3d/ContextD3D.h"
 #include "libANGLE/renderer/d3d/RenderTargetD3D.h"
 #include "libANGLE/renderer/d3d/RenderbufferD3D.h"
 #include "libANGLE/renderer/d3d/RendererD3D.h"
@@ -259,18 +260,21 @@ gl::Error FramebufferD3D::readPixels(const gl::Context *context,
 
     const gl::InternalFormat &sizedFormatInfo = gl::GetInternalFormatInfo(format, type);
 
+    ContextD3D *contextD3D = GetImplAs<ContextD3D>(context);
+
     GLuint outputPitch = 0;
-    ANGLE_TRY_RESULT(sizedFormatInfo.computeRowPitch(type, origArea.width, packState.alignment,
-                                                     packState.rowLength),
-                     outputPitch);
+    ANGLE_CHECK_HR_MATH(contextD3D,
+                        sizedFormatInfo.computeRowPitch(type, origArea.width, packState.alignment,
+                                                        packState.rowLength, &outputPitch));
+
     GLuint outputSkipBytes = 0;
-    ANGLE_TRY_RESULT(sizedFormatInfo.computeSkipBytes(outputPitch, 0, packState, false),
-                     outputSkipBytes);
+    ANGLE_CHECK_HR_MATH(contextD3D, sizedFormatInfo.computeSkipBytes(
+                                        type, outputPitch, 0, packState, false, &outputSkipBytes));
     outputSkipBytes +=
         (area.x - origArea.x) * sizedFormatInfo.pixelBytes + (area.y - origArea.y) * outputPitch;
 
     return readPixelsImpl(context, area, format, type, outputPitch, packState,
-                          reinterpret_cast<uint8_t *>(pixels) + outputSkipBytes);
+                          static_cast<uint8_t *>(pixels) + outputSkipBytes);
 }
 
 gl::Error FramebufferD3D::blit(const gl::Context *context,
@@ -293,8 +297,7 @@ bool FramebufferD3D::checkStatus(const gl::Context *context) const
 {
     // if we have both a depth and stencil buffer, they must refer to the same object
     // since we only support packed_depth_stencil and not separate depth and stencil
-    if (mState.getDepthAttachment() != nullptr && mState.getStencilAttachment() != nullptr &&
-        mState.getDepthStencilAttachment() == nullptr)
+    if (mState.hasSeparateDepthAndStencilAttachments())
     {
         return false;
     }
@@ -319,12 +322,12 @@ bool FramebufferD3D::checkStatus(const gl::Context *context) const
     return true;
 }
 
-gl::Error FramebufferD3D::syncState(const gl::Context *context,
-                                    const gl::Framebuffer::DirtyBits &dirtyBits)
+angle::Result FramebufferD3D::syncState(const gl::Context *context,
+                                        const gl::Framebuffer::DirtyBits &dirtyBits)
 {
     if (!mColorAttachmentsForRender.valid())
     {
-        return gl::NoError();
+        return angle::Result::Continue();
     }
 
     for (auto dirtyBit : dirtyBits)
@@ -337,7 +340,7 @@ gl::Error FramebufferD3D::syncState(const gl::Context *context,
         }
     }
 
-    return gl::NoError();
+    return angle::Result::Continue();
 }
 
 const gl::AttachmentList &FramebufferD3D::getColorAttachmentsForRender(const gl::Context *context)
@@ -402,8 +405,7 @@ const gl::AttachmentList &FramebufferD3D::getColorAttachmentsForRender(const gl:
 
             gl::Texture *dummyTex = nullptr;
             // TODO(Jamie): Handle error if dummy texture can't be created.
-            ANGLE_SWALLOW_ERR(
-                mRenderer->getIncompleteTexture(context, gl::TextureType::_2D, &dummyTex));
+            (void)mRenderer->getIncompleteTexture(context, gl::TextureType::_2D, &dummyTex);
             if (dummyTex)
             {
 

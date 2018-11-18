@@ -199,6 +199,7 @@ class RTCIceCandidateStats : public RTCStats {
   RTCStatsMember<std::string> ip;
   RTCStatsMember<int32_t> port;
   RTCStatsMember<std::string> protocol;
+  RTCStatsMember<std::string> relay_protocol;
   // TODO(hbos): Support enum types? "RTCStatsMember<RTCIceCandidateType>"?
   RTCStatsMember<std::string> candidate_type;
   RTCStatsMember<int32_t> priority;
@@ -209,8 +210,9 @@ class RTCIceCandidateStats : public RTCStats {
   RTCStatsMember<bool> deleted;  // = false
 
  protected:
-  RTCIceCandidateStats(
-      const std::string& id, int64_t timestamp_us, bool is_remote);
+  RTCIceCandidateStats(const std::string& id,
+                       int64_t timestamp_us,
+                       bool is_remote);
   RTCIceCandidateStats(std::string&& id, int64_t timestamp_us, bool is_remote);
 };
 
@@ -258,9 +260,11 @@ class RTCMediaStreamTrackStats final : public RTCStats {
  public:
   WEBRTC_RTCSTATS_DECL();
 
-  RTCMediaStreamTrackStats(const std::string& id, int64_t timestamp_us,
+  RTCMediaStreamTrackStats(const std::string& id,
+                           int64_t timestamp_us,
                            const char* kind);
-  RTCMediaStreamTrackStats(std::string&& id, int64_t timestamp_us,
+  RTCMediaStreamTrackStats(std::string&& id,
+                           int64_t timestamp_us,
                            const char* kind);
   RTCMediaStreamTrackStats(const RTCMediaStreamTrackStats& other);
   ~RTCMediaStreamTrackStats() override;
@@ -334,7 +338,8 @@ class RTCRTPStreamStats : public RTCStats {
   // TODO(hbos): Remote case not supported by |RTCStatsCollector|.
   // crbug.com/657855, 657856
   RTCStatsMember<bool> is_remote;  // = false
-  RTCStatsMember<std::string> media_type;
+  RTCStatsMember<std::string> media_type;  // renamed to kind.
+  RTCStatsMember<std::string> kind;
   RTCStatsMember<std::string> track_id;
   RTCStatsMember<std::string> transport_id;
   RTCStatsMember<std::string> codec_id;

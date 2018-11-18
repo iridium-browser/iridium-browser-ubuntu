@@ -17,7 +17,7 @@
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
-#include "base/test/histogram_tester.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_path_override.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/value_conversions.h"
@@ -289,7 +289,7 @@ class DownloadTargetDeterminerTest : public ChromeRenderViewHostTestHarness {
 
   base::FilePath test_download_dir() const {
     base::FilePath path;
-    CHECK(PathService::Get(chrome::DIR_DEFAULT_DOWNLOADS, &path));
+    CHECK(base::PathService::Get(chrome::DIR_DEFAULT_DOWNLOADS, &path));
     return path;
   }
 
@@ -327,6 +327,7 @@ void DownloadTargetDeterminerTest::SetUp() {
   download_prefs_.reset(new DownloadPrefs(profile()));
   web_contents()->SetDelegate(&web_contents_delegate_);
   test_virtual_dir_ = test_download_dir().Append(FILE_PATH_LITERAL("virtual"));
+  download_prefs_->SetDownloadPath(test_download_dir());
   delegate_.SetupDefaults();
   SetUpFileTypePolicies();
 #if defined(OS_ANDROID)
@@ -407,7 +408,8 @@ void DownloadTargetDeterminerTest::EnableAutoOpenBasedOnExtension(
 void DownloadTargetDeterminerTest::SetManagedDownloadPath(
     const base::FilePath& path) {
   profile()->GetTestingPrefService()->SetManagedPref(
-      prefs::kDownloadDefaultDirectory, base::CreateFilePathValue(path));
+      prefs::kDownloadDefaultDirectory,
+      base::Value::ToUniquePtrValue(base::CreateFilePathValue(path)));
 }
 
 void DownloadTargetDeterminerTest::SetPromptForDownload(bool prompt) {

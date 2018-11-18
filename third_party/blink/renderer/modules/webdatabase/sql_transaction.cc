@@ -28,8 +28,6 @@
 
 #include "third_party/blink/renderer/modules/webdatabase/sql_transaction.h"
 
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/modules/webdatabase/database.h"
 #include "third_party/blink/renderer/modules/webdatabase/database_authorizer.h"
@@ -39,6 +37,7 @@
 #include "third_party/blink/renderer/modules/webdatabase/sql_transaction_backend.h"
 #include "third_party/blink/renderer/modules/webdatabase/sql_transaction_client.h"  // FIXME: Should be used in the backend only.
 #include "third_party/blink/renderer/modules/webdatabase/storage_log.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
@@ -153,7 +152,7 @@ SQLTransaction::StateFunction SQLTransaction::StateFunctionFor(
       &SQLTransaction::DeliverSuccessCallback            // 12.
   };
 
-  DCHECK(WTF_ARRAY_LENGTH(kStateFunctions) ==
+  DCHECK(arraysize(kStateFunctions) ==
          static_cast<int>(SQLTransactionState::kNumberOfStates));
   DCHECK(state < SQLTransactionState::kNumberOfStates);
 
@@ -313,13 +312,13 @@ void SQLTransaction::ExecuteSQL(const String& sql_statement,
                                 ExceptionState& exception_state) {
   DCHECK(IsMainThread());
   if (!execute_sql_allowed_) {
-    exception_state.ThrowDOMException(kInvalidStateError,
+    exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
                                       "SQL execution is disallowed.");
     return;
   }
 
   if (!database_->Opened()) {
-    exception_state.ThrowDOMException(kInvalidStateError,
+    exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
                                       "The database has not been opened.");
     return;
   }
@@ -342,12 +341,13 @@ void SQLTransaction::executeSql(ScriptState* script_state,
              exception_state);
 }
 
-void SQLTransaction::executeSql(ScriptState* script_state,
-                                const String& sql_statement,
-                                const Optional<Vector<ScriptValue>>& arguments,
-                                V8SQLStatementCallback* callback,
-                                V8SQLStatementErrorCallback* callback_error,
-                                ExceptionState& exception_state) {
+void SQLTransaction::executeSql(
+    ScriptState* script_state,
+    const String& sql_statement,
+    const base::Optional<Vector<ScriptValue>>& arguments,
+    V8SQLStatementCallback* callback,
+    V8SQLStatementErrorCallback* callback_error,
+    ExceptionState& exception_state) {
   Vector<SQLValue> sql_values;
   if (arguments) {
     sql_values.ReserveInitialCapacity(arguments.value().size());

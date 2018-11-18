@@ -10,7 +10,7 @@
 #include "third_party/blink/renderer/modules/payments/can_make_payment_event_init.h"
 #include "third_party/blink/renderer/modules/payments/payment_details_modifier.h"
 #include "third_party/blink/renderer/modules/payments/payment_method_data.h"
-#include "third_party/blink/renderer/modules/serviceworkers/extendable_event.h"
+#include "third_party/blink/renderer/modules/service_worker/extendable_event.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 
 namespace WTF {
@@ -37,14 +37,14 @@ class MODULES_EXPORT CanMakePaymentEvent final : public ExtendableEvent {
 
   const AtomicString& InterfaceName() const override;
 
-  const String& topLevelOrigin() const;
+  const String& topOrigin() const;
   const String& paymentRequestOrigin() const;
   const HeapVector<PaymentMethodData>& methodData() const;
   const HeapVector<PaymentDetailsModifier>& modifiers() const;
 
   void respondWith(ScriptState*, ScriptPromise, ExceptionState&);
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  private:
   CanMakePaymentEvent(const AtomicString& type,
@@ -52,7 +52,7 @@ class MODULES_EXPORT CanMakePaymentEvent final : public ExtendableEvent {
                       RespondWithObserver*,
                       WaitUntilObserver*);
 
-  String top_level_origin_;
+  String top_origin_;
   String payment_request_origin_;
   HeapVector<PaymentMethodData> method_data_;
   HeapVector<PaymentDetailsModifier> modifiers_;

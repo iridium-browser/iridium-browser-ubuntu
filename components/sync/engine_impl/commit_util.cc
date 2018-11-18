@@ -48,8 +48,7 @@ void AddExtensionsActivityToMessage(
   activity->GetAndClearRecords(extensions_activity_buffer);
 
   const ExtensionsActivity::Records& records = *extensions_activity_buffer;
-  for (ExtensionsActivity::Records::const_iterator it = records.begin();
-       it != records.end(); ++it) {
+  for (auto it = records.begin(); it != records.end(); ++it) {
     sync_pb::ChromiumExtensionsActivity* activity_message =
         message->add_extensions_activity();
     activity_message->set_extension_id(it->second.extension_id);
@@ -62,10 +61,10 @@ void AddClientConfigParamsToMessage(ModelTypeSet enabled_types,
                                     bool cookie_jar_mismatch,
                                     sync_pb::CommitMessage* message) {
   sync_pb::ClientConfigParams* config_params = message->mutable_config_params();
-  for (ModelTypeSet::Iterator it = enabled_types.First(); it.Good(); it.Inc()) {
-    if (ProxyTypes().Has(it.Get()))
+  for (ModelType type : enabled_types) {
+    if (ProxyTypes().Has(type))
       continue;
-    int field_number = GetSpecificsFieldNumberFromModelType(it.Get());
+    int field_number = GetSpecificsFieldNumberFromModelType(type);
     config_params->mutable_enabled_type_ids()->Add(field_number);
   }
   config_params->set_tabs_datatype_enabled(enabled_types.Has(PROXY_TABS));
@@ -160,8 +159,8 @@ void BuildCommitItem(const syncable::Entry& meta_entry,
       // in sync.proto for more information.
       sync_entry->set_position_in_parent(
           meta_entry.GetUniquePosition().ToInt64());
-      meta_entry.GetUniquePosition().ToProto(
-          sync_entry->mutable_unique_position());
+      sync_entry->mutable_unique_position()->CopyFrom(
+          meta_entry.GetUniquePosition().ToProto());
     }
     // Always send specifics for bookmarks.
     SetEntrySpecifics(meta_entry, sync_entry);
@@ -283,9 +282,7 @@ void UpdateServerFieldsAfterCommit(
     return;
   }
 
-  local_entry->PutServerIsDir(
-      (committed_entry.folder() ||
-       committed_entry.bookmarkdata().bookmark_folder()));
+  local_entry->PutServerIsDir(committed_entry.folder());
   local_entry->PutServerSpecifics(committed_entry.specifics());
   local_entry->PutServerMtime(ProtoTimeToTime(committed_entry.mtime()));
   local_entry->PutServerCtime(ProtoTimeToTime(committed_entry.ctime()));

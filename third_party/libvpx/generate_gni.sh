@@ -226,6 +226,7 @@ function print_config_basic {
 # $3 - Optional - any additional arguments to pass through.
 function gen_rtcd_header {
   echo "Generate $LIBVPX_CONFIG_DIR/$1/*_rtcd.h files."
+  format="clang-format -i -style=Chromium"
 
   rm -rf $BASE_DIR/$TEMP_DIR/libvpx.config
   if [[ "$2" == "mipsel" || "$2" == "mips64el" || "$2" == nacl ]]; then
@@ -244,7 +245,7 @@ function gen_rtcd_header {
     $BASE_DIR/$LIBVPX_SRC_DIR/vp8/common/rtcd_defs.pl \
     > $BASE_DIR/$LIBVPX_CONFIG_DIR/$1/vp8_rtcd.h
 
-  clang-format -i $BASE_DIR/$LIBVPX_CONFIG_DIR/$1/vp8_rtcd.h
+  ${format} $BASE_DIR/$LIBVPX_CONFIG_DIR/$1/vp8_rtcd.h
 
   $BASE_DIR/$LIBVPX_SRC_DIR/build/make/rtcd.pl \
     --arch=$2 \
@@ -253,7 +254,7 @@ function gen_rtcd_header {
     $BASE_DIR/$LIBVPX_SRC_DIR/vp9/common/vp9_rtcd_defs.pl \
     > $BASE_DIR/$LIBVPX_CONFIG_DIR/$1/vp9_rtcd.h
 
-  clang-format -i $BASE_DIR/$LIBVPX_CONFIG_DIR/$1/vp9_rtcd.h
+  ${format} $BASE_DIR/$LIBVPX_CONFIG_DIR/$1/vp9_rtcd.h
 
   $BASE_DIR/$LIBVPX_SRC_DIR/build/make/rtcd.pl \
     --arch=$2 \
@@ -262,7 +263,7 @@ function gen_rtcd_header {
     $BASE_DIR/$LIBVPX_SRC_DIR/vpx_scale/vpx_scale_rtcd.pl \
     > $BASE_DIR/$LIBVPX_CONFIG_DIR/$1/vpx_scale_rtcd.h
 
-  clang-format -i $BASE_DIR/$LIBVPX_CONFIG_DIR/$1/vpx_scale_rtcd.h
+  ${format} $BASE_DIR/$LIBVPX_CONFIG_DIR/$1/vpx_scale_rtcd.h
 
   $BASE_DIR/$LIBVPX_SRC_DIR/build/make/rtcd.pl \
     --arch=$2 \
@@ -271,7 +272,7 @@ function gen_rtcd_header {
     $BASE_DIR/$LIBVPX_SRC_DIR/vpx_dsp/vpx_dsp_rtcd_defs.pl \
     > $BASE_DIR/$LIBVPX_CONFIG_DIR/$1/vpx_dsp_rtcd.h
 
-  clang-format -i $BASE_DIR/$LIBVPX_CONFIG_DIR/$1/vpx_dsp_rtcd.h
+  ${format} $BASE_DIR/$LIBVPX_CONFIG_DIR/$1/vpx_dsp_rtcd.h
 
   rm -rf $BASE_DIR/$TEMP_DIR/libvpx.config
 }
@@ -347,6 +348,8 @@ gen_config_files linux/arm "--target=armv7-linux-gcc --disable-neon ${all_platfo
 gen_config_files linux/arm-neon "--target=armv7-linux-gcc ${all_platforms}"
 gen_config_files linux/arm-neon-cpu-detect "--target=armv7-linux-gcc --enable-runtime-cpu-detect ${all_platforms}"
 gen_config_files linux/arm64 "--target=armv8-linux-gcc ${all_platforms}"
+gen_config_files linux/chromeos-arm-neon "--target=armv7-linux-gcc ${all_platforms} ${HIGHBD}"
+gen_config_files linux/chromeos-arm64 "--target=armv8-linux-gcc ${all_platforms} ${HIGHBD}"
 gen_config_files linux/mipsel "--target=mips32-linux-gcc ${all_platforms}"
 gen_config_files linux/mips64el "--target=mips64-linux-gcc ${all_platforms}"
 gen_config_files linux/generic "--target=generic-gnu $HIGHBD ${all_platforms}"
@@ -369,6 +372,8 @@ lint_config linux/arm
 lint_config linux/arm-neon
 lint_config linux/arm-neon-cpu-detect
 lint_config linux/arm64
+lint_config linux/chromeos-arm-neon
+lint_config linux/chromeos-arm64
 lint_config linux/mipsel
 lint_config linux/mips64el
 lint_config linux/generic
@@ -386,18 +391,23 @@ rm -rf $TEMP_DIR
 cp -R $LIBVPX_SRC_DIR $TEMP_DIR
 cd $TEMP_DIR
 
-gen_rtcd_header linux/ia32 x86
+# chromium has required sse2 for x86 since 2014
+require_sse2="--require-mmx --require-sse --require-sse2"
+
+gen_rtcd_header linux/ia32 x86 "${require_sse2}"
 gen_rtcd_header linux/x64 x86_64
 gen_rtcd_header linux/arm armv7 "--disable-neon --disable-neon_asm"
 gen_rtcd_header linux/arm-neon armv7
 gen_rtcd_header linux/arm-neon-cpu-detect armv7
 gen_rtcd_header linux/arm64 armv8
+gen_rtcd_header linux/chromeos-arm-neon armv7
+gen_rtcd_header linux/chromeos-arm64 armv8
 gen_rtcd_header linux/mipsel mipsel
 gen_rtcd_header linux/mips64el mips64el
 gen_rtcd_header linux/generic generic
-gen_rtcd_header win/ia32 x86
+gen_rtcd_header win/ia32 x86 "${require_sse2}"
 gen_rtcd_header win/x64 x86_64
-gen_rtcd_header mac/ia32 x86
+gen_rtcd_header mac/ia32 x86 "${require_sse2}"
 gen_rtcd_header mac/x64 x86_64
 gen_rtcd_header ios/arm-neon armv7
 gen_rtcd_header ios/arm64 armv8
@@ -454,6 +464,18 @@ if [ -z $ONLY_CONFIGS ]; then
   make_clean
   make libvpx_srcs.txt target=libs $config > /dev/null
   convert_srcs_to_project_files libvpx_srcs.txt libvpx_srcs_arm64
+
+  echo "Generate ChromeOS ARM NEON source list."
+  config=$(print_config linux/chromeos-arm-neon)
+  make_clean
+  make libvpx_srcs.txt target=libs $config > /dev/null
+  convert_srcs_to_project_files libvpx_srcs.txt libvpx_srcs_chromeos_arm_neon
+
+  echo "Generate ChromeOS ARM64 source list."
+  config=$(print_config linux/chromeos-arm64)
+  make_clean
+  make libvpx_srcs.txt target=libs $config > /dev/null
+  convert_srcs_to_project_files libvpx_srcs.txt libvpx_srcs_chromeos_arm64
 
   echo "Generate MIPS source list."
   config=$(print_config_basic linux/mipsel)

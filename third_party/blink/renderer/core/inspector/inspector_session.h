@@ -6,7 +6,9 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_INSPECTOR_INSPECTOR_SESSION_H_
 
 #include "base/macros.h"
+#include "third_party/blink/public/web/devtools_agent.mojom-blink.h"
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/core/inspector/inspector_session_state.h"
 #include "third_party/blink/renderer/core/inspector/protocol/Forward.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
@@ -17,6 +19,7 @@
 namespace blink {
 
 class InspectorAgent;
+class InspectedFrames;
 class CoreProbeSink;
 class LocalFrame;
 
@@ -27,21 +30,26 @@ class CORE_EXPORT InspectorSession
  public:
   class Client {
    public:
-    virtual void SendProtocolResponse(int session_id,
-                                      int call_id,
-                                      const String& response,
-                                      const String& state) = 0;
-    virtual void SendProtocolNotification(int session_id,
-                                          const String& message) = 0;
+    virtual void SendProtocolResponse(
+        int session_id,
+        int call_id,
+        const String& response,
+        mojom::blink::DevToolsSessionStatePtr updates) = 0;
+    virtual void SendProtocolNotification(
+        int session_id,
+        const String& message,
+        mojom::blink::DevToolsSessionStatePtr updates) = 0;
     virtual ~Client() = default;
   };
 
-  InspectorSession(Client*,
-                   CoreProbeSink*,
-                   int session_id,
-                   v8_inspector::V8Inspector*,
-                   int context_group_id,
-                   const String& reattach_state);
+  InspectorSession(
+      Client*,
+      CoreProbeSink*,
+      InspectedFrames*,
+      int session_id,
+      v8_inspector::V8Inspector*,
+      int context_group_id,
+      mojom::blink::DevToolsSessionStatePtr reattach_session_state);
   ~InspectorSession() override;
   // TODO(dgozman): remove session id once WokrerInspectorController
   // does not use it anymore.
@@ -51,12 +59,18 @@ class CORE_EXPORT InspectorSession
   void Append(InspectorAgent*);
   void Restore();
   void Dispose();
+  void DidStartProvisionalLoad(LocalFrame*);
+  void DidFailProvisionalLoad(LocalFrame*);
   void DidCommitLoadForLocalFrame(LocalFrame*);
-  void DispatchProtocolMessage(const String& method, const String& message);
+  void DispatchProtocolMessage(int call_id,
+                               const String& method,
+                               const String& message);
   void DispatchProtocolMessage(const String& message);
   void flushProtocolNotifications() override;
 
   void Trace(blink::Visitor*);
+
+  static bool ShouldInterruptForMethod(const String& method);
 
  private:
   // protocol::FrontendChannel implementation.
@@ -74,18 +88,23 @@ class CORE_EXPORT InspectorSession
       std::unique_ptr<v8_inspector::StringBuffer> message) override;
 
   void SendProtocolResponse(int call_id, const String& message);
+  void fallThrough(int call_id,
+                   const String& method,
+                   const String& message) override;
 
   Client* client_;
   std::unique_ptr<v8_inspector::V8InspectorSession> v8_session_;
   int session_id_;
   bool disposed_;
   Member<CoreProbeSink> instrumenting_agents_;
+  Member<InspectedFrames> inspected_frames_;
   std::unique_ptr<protocol::UberDispatcher> inspector_backend_dispatcher_;
-  std::unique_ptr<protocol::DictionaryValue> state_;
+  InspectorSessionState session_state_;
   HeapVector<Member<InspectorAgent>> agents_;
   class Notification;
   Vector<std::unique_ptr<Notification>> notification_queue_;
-  String last_sent_state_;
+  InspectorAgentState v8_session_state_;
+  InspectorAgentState::String v8_session_state_json_;
 
   DISALLOW_COPY_AND_ASSIGN(InspectorSession);
 };

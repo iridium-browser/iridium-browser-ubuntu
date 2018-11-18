@@ -24,8 +24,8 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_HTML_HTML_META_ELEMENT_H_
 
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/core/dom/viewport_description.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
+#include "third_party/blink/renderer/core/page/viewport_description.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_encoding.h"
 
 namespace blink {
@@ -35,7 +35,8 @@ enum ViewportErrorCode {
   kUnrecognizedViewportArgumentValueError,
   kTruncatedViewportArgumentValueError,
   kMaximumScaleTooLargeError,
-  kTargetDensityDpiUnsupported
+  kTargetDensityDpiUnsupported,
+  kViewportFitUnsupported
 };
 
 class CORE_EXPORT HTMLMetaElement final : public HTMLElement {
@@ -66,14 +67,14 @@ class CORE_EXPORT HTMLMetaElement final : public HTMLElement {
                                           const String& key,
                                           const String& value,
                                           bool viewport_meta_zero_values_quirk,
-                                          void* data);
+                                          ViewportDescription&);
   static void ParseContentAttribute(const String& content,
-                                    void* data,
+                                    ViewportDescription&,
                                     Document*,
                                     bool viewport_meta_zero_values_quirk);
 
   void ParseAttribute(const AttributeModificationParams&) override;
-  InsertionNotificationRequest InsertedInto(ContainerNode*) override;
+  InsertionNotificationRequest InsertedInto(ContainerNode&) override;
   void DidNotifySubtreeInsertionsToDocument() override;
 
   static float ParsePositiveNumber(Document*,
@@ -103,6 +104,9 @@ class CORE_EXPORT HTMLMetaElement final : public HTMLElement {
                                        bool report_warnings,
                                        const String& key,
                                        const String& value);
+
+  static mojom::ViewportFit ParseViewportFitValueAsEnum(bool& unknown_value,
+                                                        const String& value);
 
   static void ReportViewportWarning(Document*,
                                     ViewportErrorCode,

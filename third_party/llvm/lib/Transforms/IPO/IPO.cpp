@@ -34,6 +34,7 @@ void llvm::initializeIPO(PassRegistry &Registry) {
   initializeGlobalDCELegacyPassPass(Registry);
   initializeGlobalOptLegacyPassPass(Registry);
   initializeGlobalSplitPass(Registry);
+  initializeHotColdSplittingLegacyPassPass(Registry);
   initializeIPCPPass(Registry);
   initializeAlwaysInlinerLegacyPassPass(Registry);
   initializeSimpleInlinerPass(Registry);
@@ -59,7 +60,6 @@ void llvm::initializeIPO(PassRegistry &Registry) {
   initializeSampleProfileLoaderLegacyPassPass(Registry);
   initializeFunctionImportLegacyPassPass(Registry);
   initializeWholeProgramDevirtPass(Registry);
-  initializeMetaRenamerPass(Registry);
 }
 
 void LLVMInitializeIPO(LLVMPassRegistryRef R) {

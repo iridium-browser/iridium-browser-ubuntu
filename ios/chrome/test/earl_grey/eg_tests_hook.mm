@@ -10,6 +10,10 @@
 
 namespace tests_hook {
 
+bool DisableAppGroupAccess() {
+  return true;
+}
+
 bool DisableContentSuggestions() {
   return true;
 }
@@ -32,10 +36,6 @@ bool DisableSigninRecallPromo() {
 
 bool DisableUpdateService() {
   return true;
-}
-
-bool ForceUIRefreshPhase1() {
-  return false;
 }
 
 void SetUpTestsIfPresent() {

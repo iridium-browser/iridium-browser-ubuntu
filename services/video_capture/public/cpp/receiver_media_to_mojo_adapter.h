@@ -19,15 +19,16 @@ class ReceiverMediaToMojoAdapter : public mojom::Receiver {
   ~ReceiverMediaToMojoAdapter() override;
 
   // video_capture::mojom::Receiver:
-  void OnNewBufferHandle(int32_t buffer_id,
-                         mojo::ScopedSharedBufferHandle buffer_handle) override;
+  void OnNewBuffer(int32_t buffer_id,
+                   media::mojom::VideoBufferHandlePtr buffer_handle) override;
   void OnFrameReadyInBuffer(
       int32_t buffer_id,
       int32_t frame_feedback_id,
       mojom::ScopedAccessPermissionPtr access_permission,
       media::mojom::VideoFrameInfoPtr frame_info) override;
   void OnBufferRetired(int32_t buffer_id) override;
-  void OnError() override;
+  void OnError(media::VideoCaptureError error) override;
+  void OnFrameDropped(media::VideoCaptureFrameDropReason reason) override;
   void OnLog(const std::string& message) override;
   void OnStarted() override;
   void OnStartedUsingGpuDecode() override;

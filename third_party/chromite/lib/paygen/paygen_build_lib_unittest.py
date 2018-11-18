@@ -14,10 +14,10 @@ import tarfile
 
 from chromite.lib import config_lib_unittest
 from chromite.lib import cros_test_lib
+from chromite.lib import gs
 from chromite.lib import parallel
 
 from chromite.lib.paygen import gslock
-from chromite.lib.paygen import gslib
 from chromite.lib.paygen import gspaths
 from chromite.lib.paygen import urilib
 from chromite.lib.paygen import paygen_build_lib
@@ -32,8 +32,6 @@ class BasePaygenBuildLibTest(cros_test_lib.MockTestCase):
   """Base class for testing PaygenBuildLib class."""
 
   def setUp(self):
-    self.maxDiff = None
-
     # Clear json cache.
     paygen_build_lib.PaygenBuild._cachedPaygenJson = None
 
@@ -59,13 +57,13 @@ class PaygenJsonTests(BasePaygenBuildLibTest):
 
   def testGetPaygenJsonCaching(self):
     result = paygen_build_lib.PaygenBuild.GetPaygenJson()
-    self.assertEqual(len(result), 1360)
+    self.assertEqual(len(result), 1359)
     self.mockGetJson.assert_called_once()
 
     # Validate caching, by proving we don't refetch.
     self.mockGetJson.reset_mock()
     result = paygen_build_lib.PaygenBuild.GetPaygenJson()
-    self.assertEqual(len(result), 1360)
+    self.assertEqual(len(result), 1359)
     self.mockGetJson.assert_not_called()
 
   def testGetPaygenJsonBoard(self):
@@ -126,8 +124,6 @@ class BasePaygenBuildLibTestWithBuilds(BasePaygenBuildLibTest,
   """Test PaygenBuildLib class."""
 
   def setUp(self):
-    self.maxDiff = None
-
     self.prev_build = gspaths.Build(bucket='crt',
                                     channel='foo-channel',
                                     board='foo-board',
@@ -768,9 +764,9 @@ class TestPayloadGeneration(BasePaygenBuildLibTestWithBuilds):
     self.assertEqual(
         poolMock.call_args_list,
         [mock.call(paygen_build_lib._GenerateSinglePayload,
-                   [(self.mp_full_payload, self.tempdir, True, False),
-                    (self.mp_delta_payload, self.tempdir, True, False),
-                    (self.test_delta_payload, self.tempdir, False, False)])])
+                   [(self.mp_full_payload, True, False),
+                    (self.mp_delta_payload, True, False),
+                    (self.test_delta_payload, False, False)])])
 
   def testGeneratePayloadsDryrun(self):
     """Ensure we correctly pass along the dryrun flag."""
@@ -784,9 +780,9 @@ class TestPayloadGeneration(BasePaygenBuildLibTestWithBuilds):
     self.assertEqual(
         poolMock.call_args_list,
         [mock.call(paygen_build_lib._GenerateSinglePayload,
-                   [(self.mp_full_payload, self.tempdir, True, True),
-                    (self.mp_delta_payload, self.tempdir, True, True),
-                    (self.test_delta_payload, self.tempdir, False, True)])])
+                   [(self.mp_full_payload, True, True),
+                    (self.mp_delta_payload, True, True),
+                    (self.test_delta_payload, False, True)])])
 
   def testGeneratePayloadInProcess(self):
     """Make sure the _GenerateSinglePayload calls into paygen_payload_lib."""
@@ -794,19 +790,18 @@ class TestPayloadGeneration(BasePaygenBuildLibTestWithBuilds):
         paygen_payload_lib, 'CreateAndUploadPayload')
 
     paygen_build_lib._GenerateSinglePayload(
-        self.test_delta_payload, self.tempdir, False, False)
+        self.test_delta_payload, False, False)
 
     self.assertEqual(
         createMock.call_args_list,
         [mock.call(self.test_delta_payload,
                    mock.ANY,
-                   work_dir=self.tempdir,
                    sign=False,
                    dry_run=False)])
 
   def testCleanupBuild(self):
     """Test PaygenBuild._CleanupBuild."""
-    removeMock = self.PatchObject(gslib, 'Remove')
+    removeMock = self.PatchObject(gs.GSContext, 'Remove')
 
     paygen = self._GetPaygenBuildInstance()
 
@@ -815,15 +810,13 @@ class TestPayloadGeneration(BasePaygenBuildLibTestWithBuilds):
     self.assertEqual(
         removeMock.call_args_list,
         [mock.call('gs://crt/foo-channel/foo-board/1.2.3/payloads/signing',
-                   recurse=True, ignore_no_match=True)])
+                   recursive=True, ignore_missing=True)])
 
 
 class TestCreatePayloads(BasePaygenBuildLibTestWithBuilds):
   """Test CreatePayloads."""
   def setUp(self):
-    self.mockCreate = self.PatchObject(gslib, 'CreateWithContents')
-    self.mockExists = self.PatchObject(gslib, 'Exists')
-    self.mockRemove = self.PatchObject(gslib, 'Remove')
+    self.mockRemove = self.PatchObject(gs.GSContext, 'Remove')
     self.mockLock = self.PatchObject(gslock, 'Lock')
 
     self.mockDiscover = self.PatchObject(
@@ -849,7 +842,6 @@ class TestCreatePayloads(BasePaygenBuildLibTestWithBuilds):
 
   def testCreatePayloadsBuildNotReady(self):
     """Test paygen_build_lib._GeneratePayloads if not all images are there."""
-    self.mockExists.return_value = False
     self.mockDiscover.side_effect = paygen_build_lib.BuildNotReady
 
     paygen = self._GetPaygenBuildInstance()
@@ -889,7 +881,6 @@ class TestCreatePayloads(BasePaygenBuildLibTestWithBuilds):
         self.delta_payload_test,
     ]
 
-    self.mockExists.return_value = False
     self.mockDiscover.return_value = (payloads, payload_tests)
 
     paygen = self._GetPaygenBuildInstance()
@@ -932,7 +923,6 @@ class TestCreatePayloads(BasePaygenBuildLibTestWithBuilds):
         self.delta_payload_test,
     ]
 
-    self.mockExists.return_value = False
     self.mockDiscover.return_value = (payloads, payload_tests)
 
     paygen = self._GetPaygenBuildInstance()
@@ -967,10 +957,10 @@ class TestAutotestPayloadsPayloads(BasePaygenBuildLibTestWithBuilds):
         side_effect=lambda channel, version: ['%s_%s_uri' % (channel, version)])
 
     self.mockExists = self.PatchObject(
-        urilib, 'Exists',
+        gs.GSContext, 'Exists',
         side_effect=lambda uri: uri and uri.endswith('stateful.tgz'))
 
-    self.mockCopy = self.PatchObject(gslib, 'Copy')
+    self.mockCopy = self.PatchObject(gs.GSContext, 'Copy')
 
     # Our images have to exist, and have URIs for autotest.
     self.test_image.uri = 'test_image_uri'

@@ -39,7 +39,7 @@ class MockFramebufferImpl : public rx::FramebufferImpl
     MOCK_METHOD5(readPixels,
                  gl::Error(const gl::Context *, const gl::Rectangle &, GLenum, GLenum, void *));
 
-    MOCK_CONST_METHOD2(getSamplePosition, gl::Error(size_t, GLfloat *));
+    MOCK_CONST_METHOD3(getSamplePosition, gl::Error(const gl::Context *, size_t, GLfloat *));
 
     MOCK_METHOD5(blit,
                  gl::Error(const gl::Context *,
@@ -50,7 +50,7 @@ class MockFramebufferImpl : public rx::FramebufferImpl
 
     MOCK_CONST_METHOD1(checkStatus, bool(const gl::Context *));
 
-    MOCK_METHOD2(syncState, gl::Error(const gl::Context *, const gl::Framebuffer::DirtyBits &));
+    MOCK_METHOD2(syncState, angle::Result(const gl::Context *, const gl::Framebuffer::DirtyBits &));
 
     MOCK_METHOD0(destructor, void());
 };

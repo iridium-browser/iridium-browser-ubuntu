@@ -140,7 +140,7 @@ class GconvModules(object):
     for module in all_modules:
       deps = lddtree.ParseELF(os.path.join(modules_dir, '%s.so' % module),
                               modules_dir, [])
-      if not 'needed' in deps:
+      if 'needed' not in deps:
         continue
       for lib in deps['needed']:
         # Ignore the libs without a path defined (outside the modules_dir).
@@ -291,15 +291,15 @@ def GconvStrip(opts):
   global_used = [charset in STICKY_MODULES for charset in charsets]
 
   for filename in files:
-    used_filename = MultipleStringMatch(strings,
-                                        osutils.ReadFile(filename, mode='rb'))
+    used_filenames = MultipleStringMatch(strings,
+                                         osutils.ReadFile(filename, mode='rb'))
 
-    global_used = map(operator.or_, global_used, used_filename)
+    global_used = map(operator.or_, global_used, used_filenames)
     # Check the debug flag to avoid running an useless loop.
-    if opts.debug and any(used_filename):
+    if opts.debug and any(used_filenames):
       logging.debug('File %s:', filename)
-      for i in range(len(used_filename)):
-        if used_filename[i]:
+      for i, used_filename in enumerate(used_filenames):
+        if used_filename:
           logging.debug(' - %s', strings[i])
 
   used_charsets = [cs for cs, used in zip(charsets, global_used) if used]

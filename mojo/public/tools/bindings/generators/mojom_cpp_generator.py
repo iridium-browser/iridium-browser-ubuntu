@@ -307,7 +307,6 @@ class Generator(generator.Generator):
       "structs": self.module.structs,
       "support_lazy_serialization": self.support_lazy_serialization,
       "unions": self.module.unions,
-      "use_once_callback": self.use_once_callback,
       "variant": self.variant,
     }
 
@@ -517,8 +516,7 @@ class Generator(generator.Generator):
 
   def _GetCppWrapperType(self, kind, add_same_module_namespaces=False):
     def _AddOptional(type_name):
-      pattern = "WTF::Optional<%s>" if self.for_blink else "base::Optional<%s>"
-      return pattern % type_name
+      return "base::Optional<%s>" % type_name
 
     if self._IsTypemappedKind(kind):
       type_name = self._GetNativeTypeName(kind)
@@ -541,7 +539,7 @@ class Generator(generator.Generator):
           kind.kind, add_same_module_namespaces=add_same_module_namespaces)
     if mojom.IsMapKind(kind):
       pattern = ("WTF::HashMap<%s, %s>" if self.for_blink else
-                 "std::unordered_map<%s, %s>")
+                 "base::flat_map<%s, %s>")
       if mojom.IsNullableKind(kind):
         pattern = _AddOptional(pattern)
       return pattern % (

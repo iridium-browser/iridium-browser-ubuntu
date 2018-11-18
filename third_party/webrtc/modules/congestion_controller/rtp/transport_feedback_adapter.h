@@ -14,6 +14,7 @@
 #include <deque>
 #include <vector>
 
+#include "api/transport/network_types.h"
 #include "modules/congestion_controller/rtp/send_time_history.h"
 #include "rtc_base/criticalsection.h"
 #include "rtc_base/thread_annotations.h"
@@ -48,7 +49,7 @@ class TransportFeedbackAdapter {
   // to the CongestionController interface.
   void OnTransportFeedback(const rtcp::TransportFeedback& feedback);
   std::vector<PacketFeedback> GetTransportFeedbackVector() const;
-  rtc::Optional<PacketFeedback> GetPacket(uint16_t sequence_number) const;
+  absl::optional<PacketFeedback> GetPacket(uint16_t sequence_number) const;
 
   void SetTransportOverhead(int transport_overhead_bytes_per_packet);
 

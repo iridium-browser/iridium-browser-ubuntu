@@ -45,15 +45,26 @@ void TestWallpaperController::SetCustomWallpaper(
     ash::WallpaperLayout layout,
     const gfx::ImageSkia& image,
     bool preview_mode) {
-  set_custom_wallpaper_count_++;
+  ++set_custom_wallpaper_count_;
 }
 
-void TestWallpaperController::SetOnlineWallpaper(
+void TestWallpaperController::SetOnlineWallpaperIfExists(
     ash::mojom::WallpaperUserInfoPtr user_info,
-    const gfx::ImageSkia& image,
     const std::string& url,
     ash::WallpaperLayout layout,
-    bool preview_mode) {
+    bool preview_mode,
+    ash::mojom::WallpaperController::SetOnlineWallpaperIfExistsCallback
+        callback) {
+  NOTIMPLEMENTED();
+}
+
+void TestWallpaperController::SetOnlineWallpaperFromData(
+    ash::mojom::WallpaperUserInfoPtr user_info,
+    const std::string& image_data,
+    const std::string& url,
+    ash::WallpaperLayout layout,
+    bool preview_mode,
+    SetOnlineWallpaperFromDataCallback callback) {
   NOTIMPLEMENTED();
 }
 
@@ -61,7 +72,7 @@ void TestWallpaperController::SetDefaultWallpaper(
     ash::mojom::WallpaperUserInfoPtr user_info,
     const std::string& wallpaper_files_id,
     bool show_wallpaper) {
-  set_default_wallpaper_count_++;
+  ++set_default_wallpaper_count_;
 }
 
 void TestWallpaperController::SetCustomizedDefaultWallpaperPaths(
@@ -115,15 +126,25 @@ void TestWallpaperController::ShowSigninWallpaper() {
   NOTIMPLEMENTED();
 }
 
+void TestWallpaperController::ShowOneShotWallpaper(
+    const gfx::ImageSkia& image) {
+  NOTIMPLEMENTED();
+}
+
 void TestWallpaperController::RemoveUserWallpaper(
     ash::mojom::WallpaperUserInfoPtr user_info,
     const std::string& wallpaper_files_id) {
-  remove_user_wallpaper_count_++;
+  ++remove_user_wallpaper_count_;
 }
 
 void TestWallpaperController::RemovePolicyWallpaper(
     ash::mojom::WallpaperUserInfoPtr user_info,
     const std::string& wallpaper_files_id) {
+  NOTIMPLEMENTED();
+}
+
+void TestWallpaperController::GetOfflineWallpaperList(
+    ash::mojom::WallpaperController::GetOfflineWallpaperListCallback callback) {
   NOTIMPLEMENTED();
 }
 
@@ -163,14 +184,19 @@ void TestWallpaperController::GetWallpaperColors(
   NOTIMPLEMENTED();
 }
 
+void TestWallpaperController::IsWallpaperBlurred(
+    ash::mojom::WallpaperController::IsWallpaperBlurredCallback callback) {
+  NOTIMPLEMENTED();
+}
+
 void TestWallpaperController::IsActiveUserWallpaperControlledByPolicy(
     ash::mojom::WallpaperController::
         IsActiveUserWallpaperControlledByPolicyCallback callback) {
   NOTIMPLEMENTED();
 }
 
-void TestWallpaperController::GetActiveUserWallpaperLocation(
-    ash::mojom::WallpaperController::GetActiveUserWallpaperLocationCallback
+void TestWallpaperController::GetActiveUserWallpaperInfo(
+    ash::mojom::WallpaperController::GetActiveUserWallpaperInfoCallback
         callback) {
   NOTIMPLEMENTED();
 }

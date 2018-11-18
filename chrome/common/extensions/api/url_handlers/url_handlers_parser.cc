@@ -32,6 +32,25 @@ using net::NetworkChangeNotifier;
 
 namespace extensions {
 
+namespace {
+
+const UrlHandlerInfo* GetMatchingUrlHandler(const Extension* extension,
+                                            const GURL& url) {
+  const std::vector<UrlHandlerInfo>* handlers =
+      UrlHandlers::GetUrlHandlers(extension);
+  if (!handlers)
+    return nullptr;
+
+  for (const auto& handler : *handlers) {
+    if (handler.patterns.MatchesURL(url))
+      return &handler;
+  }
+
+  return nullptr;
+}
+
+}  // namespace
+
 namespace mkeys = manifest_keys;
 namespace merrors = manifest_errors;
 
@@ -56,31 +75,29 @@ const std::vector<UrlHandlerInfo>* UrlHandlers::GetUrlHandlers(
 }
 
 // static
-bool UrlHandlers::CanExtensionHandleUrl(
-    const Extension* extension,
-    const GURL& url) {
-  return FindMatchingUrlHandler(extension, url) != NULL;
+bool UrlHandlers::CanPlatformAppHandleUrl(const Extension* app,
+                                          const GURL& url) {
+  DCHECK(app->is_platform_app());
+  return !!GetMatchingPlatformAppUrlHandler(app, url);
 }
 
 // static
-const UrlHandlerInfo* UrlHandlers::FindMatchingUrlHandler(
-    const Extension* extension,
+bool UrlHandlers::CanBookmarkAppHandleUrl(const Extension* app,
+                                          const GURL& url) {
+  DCHECK(app->from_bookmark());
+  return !!GetMatchingUrlHandler(app, url);
+}
+
+// static
+const UrlHandlerInfo* UrlHandlers::GetMatchingPlatformAppUrlHandler(
+    const Extension* app,
     const GURL& url) {
-  const std::vector<UrlHandlerInfo>* handlers = GetUrlHandlers(extension);
-  if (!handlers)
-    return NULL;
+  DCHECK(app->is_platform_app());
 
   if (NetworkChangeNotifier::IsOffline() &&
-      !OfflineEnabledInfo::IsOfflineEnabled(extension))
-    return NULL;
-
-  for (std::vector<extensions::UrlHandlerInfo>::const_iterator it =
-       handlers->begin(); it != handlers->end(); it++) {
-    if (it->patterns.MatchesURL(url))
-      return &(*it);
-  }
-
-  return NULL;
+      !OfflineEnabledInfo::IsOfflineEnabled(app))
+    return nullptr;
+  return GetMatchingUrlHandler(app, url);
 }
 
 UrlHandlersParser::UrlHandlersParser() {
@@ -111,8 +128,7 @@ bool ParseUrlHandler(const std::string& handler_id,
     return false;
   }
 
-  for (base::ListValue::const_iterator it = manif_patterns->begin();
-       it != manif_patterns->end(); ++it) {
+  for (auto it = manif_patterns->begin(); it != manif_patterns->end(); ++it) {
     std::string str_pattern;
     it->GetAsString(&str_pattern);
     // TODO(sergeygs): Limit this to non-top-level domains.
@@ -120,7 +136,7 @@ bool ParseUrlHandler(const std::string& handler_id,
     // URL patterns claimed here belong to the app's author verified sites.
     URLPattern pattern(URLPattern::SCHEME_HTTP |
                        URLPattern::SCHEME_HTTPS);
-    if (pattern.Parse(str_pattern) != URLPattern::PARSE_SUCCESS) {
+    if (pattern.Parse(str_pattern) != URLPattern::ParseResult::kSuccess) {
       *error = ErrorUtils::FormatErrorMessageUTF16(
           merrors::kInvalidURLHandlerPatternElement, handler_id);
       return false;
@@ -169,8 +185,9 @@ bool UrlHandlersParser::Parse(Extension* extension, base::string16* error) {
   return true;
 }
 
-const std::vector<std::string> UrlHandlersParser::Keys() const {
-  return SingleKey(mkeys::kUrlHandlers);
+base::span<const char* const> UrlHandlersParser::Keys() const {
+  static constexpr const char* kKeys[] = {mkeys::kUrlHandlers};
+  return kKeys;
 }
 
 }  // namespace extensions

@@ -74,6 +74,13 @@ AppListItem* AppListModel::AddItem(std::unique_ptr<AppListItem> item) {
   return AddItemToItemListAndNotify(std::move(item));
 }
 
+void AppListModel::AddPageBreakItemAfter(const AppListItem* previous_item) {
+  AppListItem* page_break_item =
+      top_level_item_list()->AddPageBreakItemAfter(previous_item);
+  for (auto& observer : observers_)
+    observer.OnAppListItemAdded(page_break_item);
+}
+
 AppListItem* AppListModel::AddItemToFolder(std::unique_ptr<AppListItem> item,
                                            const std::string& folder_id) {
   if (folder_id.empty())
@@ -141,8 +148,8 @@ const std::string AppListModel::MergeItems(const std::string& target_item_id,
   // Create a new folder in the same location as the target item.
   std::string new_folder_id = AppListFolderItem::GenerateId();
   DVLOG(2) << "Creating folder for merge: " << new_folder_id;
-  std::unique_ptr<AppListItem> new_folder_ptr(new AppListFolderItem(
-      new_folder_id, AppListFolderItem::FOLDER_TYPE_NORMAL));
+  std::unique_ptr<AppListItem> new_folder_ptr =
+      std::make_unique<app_list::AppListFolderItem>(new_folder_id);
   new_folder_ptr->set_position(target_item_ptr->position());
   AppListFolderItem* new_folder = static_cast<AppListFolderItem*>(
       AddItemToItemListAndNotify(std::move(new_folder_ptr)));
@@ -299,8 +306,8 @@ AppListFolderItem* AppListModel::FindOrCreateFolderItem(
     return dest_folder;
 
   DVLOG(2) << "Creating new folder: " << folder_id;
-  std::unique_ptr<AppListFolderItem> new_folder(
-      new AppListFolderItem(folder_id, AppListFolderItem::FOLDER_TYPE_NORMAL));
+  std::unique_ptr<AppListFolderItem> new_folder =
+      std::make_unique<app_list::AppListFolderItem>(folder_id);
   new_folder->set_position(
       top_level_item_list_->CreatePositionBefore(syncer::StringOrdinal()));
   AppListItem* new_folder_item =

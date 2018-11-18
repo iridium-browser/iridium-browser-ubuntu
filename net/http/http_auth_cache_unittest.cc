@@ -8,6 +8,8 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/simple_test_clock.h"
+#include "base/test/simple_test_tick_clock.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_auth_cache.h"
 #include "net/http/http_auth_handler.h"
@@ -45,7 +47,7 @@ class MockAuthHandler : public HttpAuthHandler {
 
   int GenerateAuthTokenImpl(const AuthCredentials*,
                             const HttpRequestInfo*,
-                            const CompletionCallback& callback,
+                            CompletionOnceCallback callback,
                             std::string* auth_token) override {
     *auth_token = "mock-credentials";
     return OK;
@@ -175,55 +177,59 @@ TEST(HttpAuthCacheTest, Basic) {
   EXPECT_EQ(ASCIIToUTF16("realm2-password"), entry->credentials().password());
 
   // Check that subpaths are recognized.
-  HttpAuthCache::Entry* realm2_entry = cache.Lookup(
-      origin, kRealm2, HttpAuth::AUTH_SCHEME_BASIC);
-  HttpAuthCache::Entry* realm4_entry = cache.Lookup(
-      origin, kRealm4, HttpAuth::AUTH_SCHEME_BASIC);
-  EXPECT_FALSE(NULL == realm2_entry);
-  EXPECT_FALSE(NULL == realm4_entry);
+  HttpAuthCache::Entry* p_realm2_entry =
+      cache.Lookup(origin, kRealm2, HttpAuth::AUTH_SCHEME_BASIC);
+  HttpAuthCache::Entry* p_realm4_entry =
+      cache.Lookup(origin, kRealm4, HttpAuth::AUTH_SCHEME_BASIC);
+  EXPECT_FALSE(NULL == p_realm2_entry);
+  EXPECT_FALSE(NULL == p_realm4_entry);
+  HttpAuthCache::Entry realm2_entry = *p_realm2_entry;
+  HttpAuthCache::Entry realm4_entry = *p_realm4_entry;
   // Realm4 applies to '/' and Realm2 applies to '/foo2/'.
   // LookupByPath() should return the closest enclosing path.
   // Positive tests:
   entry = cache.LookupByPath(origin, "/foo2/index.html");
-  EXPECT_TRUE(realm2_entry == entry);
+  EXPECT_TRUE(realm2_entry.IsEqualForTesting(*entry));
   entry = cache.LookupByPath(origin, "/foo2/foobar.html");
-  EXPECT_TRUE(realm2_entry == entry);
+  EXPECT_TRUE(realm2_entry.IsEqualForTesting(*entry));
   entry = cache.LookupByPath(origin, "/foo2/bar/index.html");
-  EXPECT_TRUE(realm2_entry == entry);
+  EXPECT_TRUE(realm2_entry.IsEqualForTesting(*entry));
   entry = cache.LookupByPath(origin, "/foo2/");
-  EXPECT_TRUE(realm2_entry == entry);
+  EXPECT_TRUE(realm2_entry.IsEqualForTesting(*entry));
   entry = cache.LookupByPath(origin, "/foo2");
-  EXPECT_TRUE(realm4_entry == entry);
+  EXPECT_TRUE(realm4_entry.IsEqualForTesting(*entry));
   entry = cache.LookupByPath(origin, "/");
-  EXPECT_TRUE(realm4_entry == entry);
+  EXPECT_TRUE(realm4_entry.IsEqualForTesting(*entry));
 
   // Negative tests:
   entry = cache.LookupByPath(origin, "/foo3/index.html");
-  EXPECT_FALSE(realm2_entry == entry);
+  EXPECT_FALSE(realm2_entry.IsEqualForTesting(*entry));
   entry = cache.LookupByPath(origin, std::string());
-  EXPECT_FALSE(realm2_entry == entry);
+  EXPECT_FALSE(realm2_entry.IsEqualForTesting(*entry));
 
   // Confirm we find the same realm, different auth scheme by path lookup
-  HttpAuthCache::Entry* realm3_digest_entry =
+  HttpAuthCache::Entry* p_realm3_digest_entry =
       cache.Lookup(origin, kRealm3, HttpAuth::AUTH_SCHEME_DIGEST);
-  EXPECT_FALSE(NULL == realm3_digest_entry);
+  EXPECT_FALSE(NULL == p_realm3_digest_entry);
+  HttpAuthCache::Entry realm3_digest_entry = *p_realm3_digest_entry;
   entry = cache.LookupByPath(origin, "/baz/index.html");
-  EXPECT_TRUE(realm3_digest_entry == entry);
+  EXPECT_TRUE(realm3_digest_entry.IsEqualForTesting(*entry));
   entry = cache.LookupByPath(origin, "/baz/");
-  EXPECT_TRUE(realm3_digest_entry == entry);
+  EXPECT_TRUE(realm3_digest_entry.IsEqualForTesting(*entry));
   entry = cache.LookupByPath(origin, "/baz");
-  EXPECT_FALSE(realm3_digest_entry == entry);
+  EXPECT_FALSE(realm3_digest_entry.IsEqualForTesting(*entry));
 
   // Confirm we find the same realm, different auth scheme by path lookup
-  HttpAuthCache::Entry* realm3DigestEntry =
+  HttpAuthCache::Entry* p_realm3DigestEntry =
       cache.Lookup(origin, kRealm3, HttpAuth::AUTH_SCHEME_DIGEST);
-  EXPECT_FALSE(NULL == realm3DigestEntry);
+  EXPECT_FALSE(NULL == p_realm3DigestEntry);
+  HttpAuthCache::Entry realm3DigestEntry = *p_realm3DigestEntry;
   entry = cache.LookupByPath(origin, "/baz/index.html");
-  EXPECT_TRUE(realm3DigestEntry == entry);
+  EXPECT_TRUE(realm3DigestEntry.IsEqualForTesting(*entry));
   entry = cache.LookupByPath(origin, "/baz/");
-  EXPECT_TRUE(realm3DigestEntry == entry);
+  EXPECT_TRUE(realm3DigestEntry.IsEqualForTesting(*entry));
   entry = cache.LookupByPath(origin, "/baz");
-  EXPECT_FALSE(realm3DigestEntry == entry);
+  EXPECT_FALSE(realm3DigestEntry.IsEqualForTesting(*entry));
 
   // Lookup using empty path (may be used for proxy).
   entry = cache.LookupByPath(origin, std::string());
@@ -377,21 +383,23 @@ TEST(HttpAuthCacheTest, Remove) {
   EXPECT_FALSE(NULL == entry);
 }
 
-TEST(HttpAuthCacheTest, ClearEntriesAddedWithin) {
+TEST(HttpAuthCacheTest, ClearEntriesAddedSince) {
   GURL origin("http://foobar.com");
 
-  HttpAuthCache cache;
-  base::TimeTicks old_creation_time =
-      base::TimeTicks::Now() - base::TimeDelta::FromMinutes(2);
-  cache
-      .Add(origin, kRealm1, HttpAuth::AUTH_SCHEME_BASIC, "basic realm=Realm1",
-           AuthCredentials(kAlice, k123), "/")
-      ->set_creation_time_for_testing(old_creation_time);
-  cache
-      .Add(origin, kRealm2, HttpAuth::AUTH_SCHEME_BASIC, "basic realm=Realm2",
-           AuthCredentials(kRoot, kWileCoyote), "/")
-      ->set_creation_time_for_testing(old_creation_time);
+  base::Time start_time;
+  ASSERT_TRUE(base::Time::FromString("30 May 2018 12:00:00", &start_time));
+  base::SimpleTestClock test_clock;
+  test_clock.SetNow(start_time);
 
+  HttpAuthCache cache;
+  cache.set_clock_for_testing(&test_clock);
+
+  cache.Add(origin, kRealm1, HttpAuth::AUTH_SCHEME_BASIC, "basic realm=Realm1",
+            AuthCredentials(kAlice, k123), "/");
+  cache.Add(origin, kRealm2, HttpAuth::AUTH_SCHEME_BASIC, "basic realm=Realm2",
+            AuthCredentials(kRoot, kWileCoyote), "/");
+
+  test_clock.Advance(base::TimeDelta::FromSeconds(10));  // Time now 12:00:10
   cache.Add(origin, kRealm3, HttpAuth::AUTH_SCHEME_BASIC, "basic realm=Realm3",
             AuthCredentials(kAlice2, k1234), "/");
   cache.Add(origin, kRealm4, HttpAuth::AUTH_SCHEME_BASIC, "basic realm=Realm4",
@@ -400,8 +408,11 @@ TEST(HttpAuthCacheTest, ClearEntriesAddedWithin) {
   cache.Add(origin, kRealm2, HttpAuth::AUTH_SCHEME_BASIC, "basic realm=Realm2",
             AuthCredentials(kAdmin, kPassword), "/baz/");
 
-  cache.ClearEntriesAddedWithin(base::TimeDelta::FromMinutes(1));
+  base::Time test_time;
+  ASSERT_TRUE(base::Time::FromString("30 May 2018 12:00:05", &test_time));
+  cache.ClearEntriesAddedSince(test_time);
 
+  // Realms 1 and 2 are older than 12:00:05 and should not be cleared
   EXPECT_NE(nullptr,
             cache.Lookup(origin, kRealm1, HttpAuth::AUTH_SCHEME_BASIC));
   EXPECT_NE(nullptr,
@@ -409,6 +420,90 @@ TEST(HttpAuthCacheTest, ClearEntriesAddedWithin) {
   // Creation time is set for a whole entry rather than for a particular path.
   // Path added within the requested duration isn't be removed.
   EXPECT_NE(nullptr, cache.LookupByPath(origin, "/baz/"));
+
+  // Realms 3 and 4 are newer than 12:00:05 and should be cleared.
+  EXPECT_EQ(nullptr,
+            cache.Lookup(origin, kRealm3, HttpAuth::AUTH_SCHEME_BASIC));
+  EXPECT_EQ(nullptr,
+            cache.Lookup(origin, kRealm4, HttpAuth::AUTH_SCHEME_BASIC));
+
+  cache.ClearEntriesAddedSince(start_time - base::TimeDelta::FromSeconds(1));
+  EXPECT_EQ(nullptr,
+            cache.Lookup(origin, kRealm1, HttpAuth::AUTH_SCHEME_BASIC));
+  EXPECT_EQ(nullptr,
+            cache.Lookup(origin, kRealm2, HttpAuth::AUTH_SCHEME_BASIC));
+  EXPECT_EQ(nullptr, cache.LookupByPath(origin, "/baz/"));
+}
+
+TEST(HttpAuthCacheTest, ClearEntriesAddedSinceWithNullTime) {
+  GURL origin("http://foobar.com");
+
+  base::SimpleTestClock test_clock;
+  test_clock.SetNow(base::Time::Now());
+
+  HttpAuthCache cache;
+  cache.set_clock_for_testing(&test_clock);
+
+  cache.Add(origin, kRealm1, HttpAuth::AUTH_SCHEME_BASIC, "basic realm=Realm1",
+            AuthCredentials(kAlice, k123), "/");
+  cache.Add(origin, kRealm2, HttpAuth::AUTH_SCHEME_BASIC, "basic realm=Realm2",
+            AuthCredentials(kRoot, kWileCoyote), "/");
+
+  test_clock.Advance(base::TimeDelta::FromSeconds(10));
+  cache.Add(origin, kRealm3, HttpAuth::AUTH_SCHEME_BASIC, "basic realm=Realm3",
+            AuthCredentials(kAlice2, k1234), "/");
+  cache.Add(origin, kRealm4, HttpAuth::AUTH_SCHEME_BASIC, "basic realm=Realm4",
+            AuthCredentials(kUsername, kPassword), "/");
+  // Add path to existing entry.
+  cache.Add(origin, kRealm2, HttpAuth::AUTH_SCHEME_BASIC, "basic realm=Realm2",
+            AuthCredentials(kAdmin, kPassword), "/baz/");
+
+  cache.ClearEntriesAddedSince(base::Time());
+
+  // All entries should be cleared.
+  EXPECT_EQ(nullptr,
+            cache.Lookup(origin, kRealm1, HttpAuth::AUTH_SCHEME_BASIC));
+  EXPECT_EQ(nullptr,
+            cache.Lookup(origin, kRealm2, HttpAuth::AUTH_SCHEME_BASIC));
+  EXPECT_EQ(nullptr, cache.LookupByPath(origin, "/baz/"));
+  EXPECT_EQ(nullptr,
+            cache.Lookup(origin, kRealm3, HttpAuth::AUTH_SCHEME_BASIC));
+  EXPECT_EQ(nullptr,
+            cache.Lookup(origin, kRealm4, HttpAuth::AUTH_SCHEME_BASIC));
+}
+
+TEST(HttpAuthCacheTest, ClearAllEntries) {
+  GURL origin("http://foobar.com");
+
+  base::SimpleTestClock test_clock;
+  test_clock.SetNow(base::Time::Now());
+
+  HttpAuthCache cache;
+  cache.set_clock_for_testing(&test_clock);
+
+  cache.Add(origin, kRealm1, HttpAuth::AUTH_SCHEME_BASIC, "basic realm=Realm1",
+            AuthCredentials(kAlice, k123), "/");
+  cache.Add(origin, kRealm2, HttpAuth::AUTH_SCHEME_BASIC, "basic realm=Realm2",
+            AuthCredentials(kRoot, kWileCoyote), "/");
+
+  test_clock.Advance(base::TimeDelta::FromSeconds(10));
+  cache.Add(origin, kRealm3, HttpAuth::AUTH_SCHEME_BASIC, "basic realm=Realm3",
+            AuthCredentials(kAlice2, k1234), "/");
+  cache.Add(origin, kRealm4, HttpAuth::AUTH_SCHEME_BASIC, "basic realm=Realm4",
+            AuthCredentials(kUsername, kPassword), "/");
+  // Add path to existing entry.
+  cache.Add(origin, kRealm2, HttpAuth::AUTH_SCHEME_BASIC, "basic realm=Realm2",
+            AuthCredentials(kAdmin, kPassword), "/baz/");
+
+  test_clock.Advance(base::TimeDelta::FromSeconds(55));
+  cache.ClearAllEntries();
+
+  // All entries should be cleared.
+  EXPECT_EQ(nullptr,
+            cache.Lookup(origin, kRealm1, HttpAuth::AUTH_SCHEME_BASIC));
+  EXPECT_EQ(nullptr,
+            cache.Lookup(origin, kRealm2, HttpAuth::AUTH_SCHEME_BASIC));
+  EXPECT_EQ(nullptr, cache.LookupByPath(origin, "/baz/"));
   EXPECT_EQ(nullptr,
             cache.Lookup(origin, kRealm3, HttpAuth::AUTH_SCHEME_BASIC));
   EXPECT_EQ(nullptr,

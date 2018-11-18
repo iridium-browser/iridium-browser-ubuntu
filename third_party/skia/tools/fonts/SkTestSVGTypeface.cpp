@@ -5,6 +5,10 @@
  * found in the LICENSE file.
  */
 
+#include "SkTestSVGTypeface.h"
+
+#ifdef SK_XML
+
 #include "Resources.h"
 #include "SkAdvancedTypefaceMetrics.h"
 #include "SkBitmap.h"
@@ -35,7 +39,6 @@
 #include "SkSize.h"
 #include "SkStream.h"
 #include "SkSurface.h"
-#include "SkTestSVGTypeface.h"
 #include "SkTDArray.h"
 #include "SkTemplates.h"
 #include "SkUtils.h"
@@ -100,15 +103,17 @@ void SkTestSVGTypeface::onFilterRec(SkScalerContextRec* rec) const {
     rec->setHinting(SkPaint::kNo_Hinting);
 }
 
+void SkTestSVGTypeface::getGlyphToUnicodeMap(SkUnichar* glyphToUnicode) const {
+    SkDEBUGCODE(unsigned glyphCount = this->countGlyphs());
+    fCMap.foreach([=](const SkUnichar& c, const SkGlyphID& g) {
+        SkASSERT(g < glyphCount);
+        glyphToUnicode[g] = c;
+    });
+}
+
 std::unique_ptr<SkAdvancedTypefaceMetrics> SkTestSVGTypeface::onGetAdvancedMetrics() const {
     std::unique_ptr<SkAdvancedTypefaceMetrics> info(new SkAdvancedTypefaceMetrics);
-    info->fFontName.set(fName);
-
-    SkTDArray<SkUnichar>& toUnicode = info->fGlyphToUnicode;
-    toUnicode.setCount(fGlyphCount);
-    fCMap.foreach([&toUnicode](const SkUnichar& c, const SkGlyphID& g) {
-        toUnicode[g] = c;
-    });
+    info->fFontName = fName;
     return info;
 }
 
@@ -175,13 +180,14 @@ protected:
         return g;
     }
 
-    void generateAdvance(SkGlyph* glyph) override {
+    bool generateAdvance(SkGlyph* glyph) override {
         this->geTestSVGTypeface()->getAdvance(glyph);
 
         const SkVector advance = fMatrix.mapXY(SkFloatToScalar(glyph->fAdvanceX),
                                                SkFloatToScalar(glyph->fAdvanceY));
         glyph->fAdvanceX = SkScalarToFloat(advance.fX);
         glyph->fAdvanceY = SkScalarToFloat(advance.fY);
+        return true;
     }
 
     void generateMetrics(SkGlyph* glyph) override {
@@ -1294,3 +1300,4 @@ void SkTestSVGTypeface::exportTtxColr(SkWStream* out) const {
 
     out->writeText("</ttFont>\n");
 }
+#endif  // SK_XML

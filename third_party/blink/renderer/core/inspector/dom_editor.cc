@@ -32,7 +32,6 @@
 
 #include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/dom/element.h"
@@ -42,6 +41,7 @@
 #include "third_party/blink/renderer/core/inspector/dom_patch_support.h"
 #include "third_party/blink/renderer/core/inspector/inspector_history.h"
 #include "third_party/blink/renderer/core/inspector/protocol/Protocol.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 
 namespace blink {
 
@@ -230,8 +230,8 @@ class DOMEditor::SetOuterHTMLAction final : public InspectorHistory::Action {
 
   bool Perform(ExceptionState& exception_state) override {
     old_html_ = CreateMarkup(node_.Get());
-    Document* document =
-        node_->IsDocumentNode() ? ToDocument(node_) : node_->ownerDocument();
+    Document* document = IsA<Document>(node_.Get()) ? To<Document>(node_.Get())
+                                                    : node_->ownerDocument();
     DCHECK(document);
     if (!document->documentElement())
       return false;
@@ -446,8 +446,12 @@ bool DOMEditor::SetNodeValue(Node* node,
 
 static Response ToResponse(ExceptionState& exception_state) {
   if (exception_state.HadException()) {
-    return Response::Error(DOMException::GetErrorName(exception_state.Code()) +
-                           " " + exception_state.Message());
+    String name_prefix = IsDOMExceptionCode(exception_state.Code())
+                             ? DOMException::GetErrorName(
+                                   exception_state.CodeAs<DOMExceptionCode>()) +
+                                   " "
+                             : g_empty_string;
+    return Response::Error(name_prefix + exception_state.Message());
   }
   return Response::OK();
 }

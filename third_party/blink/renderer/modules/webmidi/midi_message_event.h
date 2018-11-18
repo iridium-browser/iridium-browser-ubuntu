@@ -32,6 +32,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_WEBMIDI_MIDI_MESSAGE_EVENT_H_
 
 #include "base/time/time.h"
+#include "third_party/blink/renderer/core/event_type_names.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_typed_array.h"
 #include "third_party/blink/renderer/modules/event_modules.h"
 
@@ -59,7 +60,7 @@ class MIDIMessageEvent final : public Event {
     return EventNames::MIDIMessageEvent;
   }
 
-  virtual void Trace(blink::Visitor* visitor) {
+  void Trace(blink::Visitor* visitor) override {
     visitor->Trace(data_);
     Event::Trace(visitor);
   }

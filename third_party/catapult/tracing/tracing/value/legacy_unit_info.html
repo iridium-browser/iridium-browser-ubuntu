@@ -5,7 +5,7 @@ Use of this source code is governed by a BSD-style license that can be
 found in the LICENSE file.
 -->
 
-<link rel="import" href="/tracing/base/base.html">
+<link rel="import" href="/tracing/base/unit.html">
 
 <script>
 'use strict';
@@ -157,7 +157,7 @@ tr.exportTo('tr.v', function() {
     defaultImprovementDirection: tr.b.ImprovementDirection.SMALLER_IS_BETTER,
   });
   LEGACY_UNIT_INFO.set('minutes', {
-    name: 'timeDurationInMs',
+    name: 'timeInMsAutoFormat',
     conversionFactor: 60e3,
     // Used for NaCl build time.
     defaultImprovementDirection: tr.b.ImprovementDirection.SMALLER_IS_BETTER,
@@ -252,6 +252,11 @@ tr.exportTo('tr.v', function() {
   LEGACY_UNIT_INFO.set('tokens/s', {
     name: 'unitlessNumber',
     defaultImprovementDirection: tr.b.ImprovementDirection.BIGGER_IS_BETTER,
+  });
+  LEGACY_UNIT_INFO.set('tasks', {
+    // Used by thread_times but actually indicates tasks/s, so not count.
+    name: 'unitlessNumber',
+    defaultImprovementDirection: tr.b.ImprovementDirection.SMALLER_IS_BETTER,
   });
   LEGACY_UNIT_INFO.set('us', {
     name: 'timeDurationInMs',

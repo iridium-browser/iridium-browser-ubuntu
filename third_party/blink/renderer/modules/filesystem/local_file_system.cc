@@ -31,25 +31,32 @@
 #include "third_party/blink/renderer/modules/filesystem/local_file_system.h"
 
 #include <memory>
+#include "base/feature_list.h"
+#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/task_type.h"
-#include "third_party/blink/public/platform/web_file_system.h"
+#include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/fileapi/file_error.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
+#include "third_party/blink/renderer/core/frame/local_frame_client.h"
 #include "third_party/blink/renderer/core/workers/worker_global_scope.h"
+#include "third_party/blink/renderer/modules/filesystem/dom_file_system.h"
 #include "third_party/blink/renderer/modules/filesystem/file_system_client.h"
+#include "third_party/blink/renderer/modules/filesystem/file_system_dispatcher.h"
 #include "third_party/blink/renderer/platform/async_file_system_callbacks.h"
 #include "third_party/blink/renderer/platform/content_setting_callbacks.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
+#include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 
 namespace blink {
 
 namespace {
 
 void ReportFailure(std::unique_ptr<AsyncFileSystemCallbacks> callbacks,
-                   FileError::ErrorCode error) {
+                   base::File::Error error) {
   callbacks->DidFail(error);
 }
 
@@ -76,13 +83,14 @@ LocalFileSystem::~LocalFileSystem() = default;
 void LocalFileSystem::ResolveURL(
     ExecutionContext* context,
     const KURL& file_system_url,
-    std::unique_ptr<AsyncFileSystemCallbacks> callbacks) {
+    std::unique_ptr<AsyncFileSystemCallbacks> callbacks,
+    SynchronousType type) {
   CallbackWrapper* wrapper = new CallbackWrapper(std::move(callbacks));
   RequestFileSystemAccessInternal(
       context,
       WTF::Bind(&LocalFileSystem::ResolveURLInternal,
                 WrapCrossThreadPersistent(this), WrapPersistent(context),
-                file_system_url, WrapPersistent(wrapper)),
+                file_system_url, WrapPersistent(wrapper), type),
       WTF::Bind(&LocalFileSystem::FileSystemNotAllowedInternal,
                 WrapCrossThreadPersistent(this), WrapPersistent(context),
                 WrapPersistent(wrapper)));
@@ -90,26 +98,19 @@ void LocalFileSystem::ResolveURL(
 
 void LocalFileSystem::RequestFileSystem(
     ExecutionContext* context,
-    FileSystemType type,
+    mojom::blink::FileSystemType type,
     long long size,
-    std::unique_ptr<AsyncFileSystemCallbacks> callbacks) {
+    std::unique_ptr<AsyncFileSystemCallbacks> callbacks,
+    SynchronousType sync_type) {
   CallbackWrapper* wrapper = new CallbackWrapper(std::move(callbacks));
   RequestFileSystemAccessInternal(
       context,
       WTF::Bind(&LocalFileSystem::FileSystemAllowedInternal,
                 WrapCrossThreadPersistent(this), WrapPersistent(context), type,
-                WrapPersistent(wrapper)),
+                WrapPersistent(wrapper), sync_type),
       WTF::Bind(&LocalFileSystem::FileSystemNotAllowedInternal,
                 WrapCrossThreadPersistent(this), WrapPersistent(context),
                 WrapPersistent(wrapper)));
-}
-
-WebFileSystem* LocalFileSystem::GetFileSystem() const {
-  Platform* platform = Platform::Current();
-  if (!platform)
-    return nullptr;
-
-  return platform->FileSystem();
 }
 
 void LocalFileSystem::RequestFileSystemAccessInternal(
@@ -134,7 +135,7 @@ void LocalFileSystem::FileSystemNotAvailable(ExecutionContext* context,
   context->GetTaskRunner(TaskType::kFileReading)
       ->PostTask(FROM_HERE,
                  WTF::Bind(&ReportFailure, WTF::Passed(callbacks->Release()),
-                           FileError::kAbortErr));
+                           base::File::FILE_ERROR_ABORT));
 }
 
 void LocalFileSystem::FileSystemNotAllowedInternal(ExecutionContext* context,
@@ -142,33 +143,40 @@ void LocalFileSystem::FileSystemNotAllowedInternal(ExecutionContext* context,
   context->GetTaskRunner(TaskType::kFileReading)
       ->PostTask(FROM_HERE,
                  WTF::Bind(&ReportFailure, WTF::Passed(callbacks->Release()),
-                           FileError::kAbortErr));
+                           base::File::FILE_ERROR_ABORT));
 }
 
-void LocalFileSystem::FileSystemAllowedInternal(ExecutionContext* context,
-                                                FileSystemType type,
-                                                CallbackWrapper* callbacks) {
-  WebFileSystem* file_system = GetFileSystem();
-  if (!file_system) {
-    FileSystemNotAvailable(context, callbacks);
-    return;
-  }
+void LocalFileSystem::FileSystemAllowedInternal(
+    ExecutionContext* context,
+    mojom::blink::FileSystemType type,
+    CallbackWrapper* callbacks,
+    SynchronousType sync_type) {
   KURL storage_partition =
       KURL(NullURL(), context->GetSecurityOrigin()->ToString());
-  file_system->OpenFileSystem(storage_partition,
-                              static_cast<WebFileSystemType>(type),
-                              callbacks->Release());
+  std::unique_ptr<AsyncFileSystemCallbacks> async_callbacks =
+      callbacks->Release();
+  FileSystemDispatcher& dispatcher = FileSystemDispatcher::From(context);
+  if (sync_type == kSynchronous) {
+    dispatcher.OpenFileSystemSync(storage_partition, type,
+                                  std::move(async_callbacks));
+  } else {
+    dispatcher.OpenFileSystem(storage_partition, type,
+                              std::move(async_callbacks));
+  }
 }
 
 void LocalFileSystem::ResolveURLInternal(ExecutionContext* context,
                                          const KURL& file_system_url,
-                                         CallbackWrapper* callbacks) {
-  WebFileSystem* file_system = GetFileSystem();
-  if (!file_system) {
-    FileSystemNotAvailable(context, callbacks);
-    return;
+                                         CallbackWrapper* callbacks,
+                                         SynchronousType sync_type) {
+  FileSystemDispatcher& dispatcher = FileSystemDispatcher::From(context);
+  std::unique_ptr<AsyncFileSystemCallbacks> async_callbacks =
+      callbacks->Release();
+  if (sync_type == kSynchronous) {
+    dispatcher.ResolveURLSync(file_system_url, std::move(async_callbacks));
+  } else {
+    dispatcher.ResolveURL(file_system_url, std::move(async_callbacks));
   }
-  file_system->ResolveURL(file_system_url, callbacks->Release());
 }
 
 LocalFileSystem::LocalFileSystem(LocalFrame& frame,
@@ -188,19 +196,12 @@ void LocalFileSystem::Trace(blink::Visitor* visitor) {
   Supplement<WorkerClients>::Trace(visitor);
 }
 
-void LocalFileSystem::TraceWrappers(
-    const ScriptWrappableVisitor* visitor) const {
-  Supplement<LocalFrame>::TraceWrappers(visitor);
-  Supplement<WorkerClients>::TraceWrappers(visitor);
-}
-
 const char LocalFileSystem::kSupplementName[] = "LocalFileSystem";
 
 LocalFileSystem* LocalFileSystem::From(ExecutionContext& context) {
-  if (context.IsDocument()) {
+  if (auto* document = DynamicTo<Document>(context)) {
     LocalFileSystem* file_system =
-        Supplement<LocalFrame>::From<LocalFileSystem>(
-            ToDocument(context).GetFrame());
+        Supplement<LocalFrame>::From<LocalFileSystem>(document->GetFrame());
     DCHECK(file_system);
     return file_system;
   }

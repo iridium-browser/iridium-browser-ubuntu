@@ -5,13 +5,13 @@
 #ifndef UI_VIEWS_CONTROLS_SCROLLBAR_COCOA_SCROLL_BAR_H_
 #define UI_VIEWS_CONTROLS_SCROLLBAR_COCOA_SCROLL_BAR_H_
 
-#include "base/macros.h"
 #import "base/mac/scoped_nsobject.h"
+#include "base/macros.h"
 #include "ui/compositor/layer_animation_observer.h"
 #include "ui/gfx/animation/slide_animation.h"
-#import "ui/views/cocoa/views_scrollbar_bridge.h"
 #include "ui/views/controls/scrollbar/base_scroll_bar.h"
 #include "ui/views/views_export.h"
+#import "ui/views_bridge_mac/views_scrollbar_bridge.h"
 
 namespace views {
 
@@ -98,7 +98,7 @@ class VIEWS_EXPORT CocoaScrollBar : public BaseScrollBar,
   NSScrollerStyle scroller_style_;
 
   // Timer that will start the scrollbar's hiding animation when it reaches 0.
-  base::Timer hide_scrollbar_timer_;
+  base::RetainingOneShotTimer hide_scrollbar_timer_;
 
   // Slide animation that animates the thickness of an overlay scrollbar.
   // The animation expands the scrollbar as the showing animation and shrinks

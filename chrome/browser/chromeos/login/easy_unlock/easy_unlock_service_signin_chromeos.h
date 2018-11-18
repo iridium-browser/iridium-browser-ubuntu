@@ -18,11 +18,19 @@
 #include "chromeos/components/proximity_auth/screenlock_bridge.h"
 #include "chromeos/login/login_state.h"
 
+namespace cryptauth {
+class RemoteDeviceCache;
+}  // namespace cryptauth
+
 namespace proximity_auth {
 class ProximityAuthLocalStatePrefManager;
-}
+}  // namespace proximity_auth
 
 namespace chromeos {
+
+namespace secure_channel {
+class SecureChannelClient;
+}  // namespace secure_channel
 
 class EasyUnlockChallengeWrapper;
 
@@ -32,7 +40,9 @@ class EasyUnlockServiceSignin
       public proximity_auth::ScreenlockBridge::Observer,
       public LoginState::Observer {
  public:
-  explicit EasyUnlockServiceSignin(Profile* profile);
+  EasyUnlockServiceSignin(
+      Profile* profile,
+      secure_channel::SecureChannelClient* secure_channel_client);
   ~EasyUnlockServiceSignin() override;
 
   // Wraps the challenge for the remote device identified by |account_id| and
@@ -86,7 +96,6 @@ class EasyUnlockServiceSignin
   void ClearPermitAccess() override;
   const base::ListValue* GetRemoteDevices() const override;
   void SetRemoteDevices(const base::ListValue& devices) override;
-  void SetRemoteBleDevices(const base::ListValue& devices) override;
   void RunTurnOffFlow() override;
   void ResetTurnOffFlow() override;
   TurnOffFlowStatus GetTurnOffFlowStatus() const override;
@@ -150,6 +159,8 @@ class EasyUnlockServiceSignin
 
   // The timestamp for the most recent time when a user pod was focused.
   base::TimeTicks user_pod_last_focused_timestamp_;
+
+  std::unique_ptr<cryptauth::RemoteDeviceCache> remote_device_cache_;
 
   // Handles wrapping the user's challenge with the TPM.
   std::unique_ptr<EasyUnlockChallengeWrapper> challenge_wrapper_;

@@ -4,11 +4,12 @@
 
 #include "cc/trees/layer_tree_frame_sink.h"
 
+#include "base/single_thread_task_runner.h"
 #include "base/test/test_simple_task_runner.h"
 #include "cc/test/fake_layer_tree_frame_sink_client.h"
 #include "components/viz/common/quads/compositor_frame.h"
 #include "components/viz/test/test_context_provider.h"
-#include "components/viz/test/test_web_graphics_context_3d.h"
+#include "components/viz/test/test_gles2_interface.h"
 #include "gpu/GLES2/gl2extchromium.h"
 #include "gpu/command_buffer/client/raster_interface.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -25,7 +26,6 @@ class StubLayerTreeFrameSink : public LayerTreeFrameSink {
       : LayerTreeFrameSink(std::move(context_provider),
                            std::move(worker_context_provider),
                            std::move(compositor_task_runner),
-                           nullptr,
                            nullptr) {}
 
   void SubmitCompositorFrame(viz::CompositorFrame frame) override {
@@ -66,7 +66,7 @@ TEST(LayerTreeFrameSinkTest, ContextLossFailsBind) {
       viz::TestContextProvider::CreateWorker();
 
   // Lose the context so BindToClient fails.
-  context_provider->UnboundTestContext3d()->set_context_lost(true);
+  context_provider->UnboundTestContextGL()->set_context_lost(true);
 
   auto task_runner = base::MakeRefCounted<base::TestSimpleTaskRunner>();
   StubLayerTreeFrameSink layer_tree_frame_sink(context_provider,
@@ -112,7 +112,7 @@ TEST(LayerTreeFrameSinkTest, WorkerContextLossFailsBind) {
       viz::TestContextProvider::CreateWorker();
 
   // Lose the context so BindToClient fails.
-  worker_provider->UnboundTestContext3d()->set_context_lost(true);
+  worker_provider->UnboundTestContextGL()->set_context_lost(true);
 
   auto task_runner = base::MakeRefCounted<base::TestSimpleTaskRunner>();
   StubLayerTreeFrameSink layer_tree_frame_sink(context_provider,

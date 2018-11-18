@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/callback_helpers.h"
 #include "base/command_line.h"
@@ -14,6 +15,7 @@
 #include "base/location.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/trace_event/trace_event.h"
 #include "media/base/audio_decoder_config.h"
 #include "media/base/audio_renderer.h"
 #include "media/base/bind_to_current_loop.h"
@@ -30,8 +32,6 @@ namespace media {
 
 // See |video_underflow_threshold_|.
 static const int kDefaultVideoUnderflowThresholdMs = 3000;
-
-static const int kAudioRestartUnderflowThresholdMs = 2000;
 
 class RendererImpl::RendererClientInternal final : public RendererClient {
  public:
@@ -95,11 +95,15 @@ RendererImpl::RendererImpl(
       video_buffering_state_(BUFFERING_HAVE_NOTHING),
       audio_ended_(false),
       video_ended_(false),
+      audio_playing_(false),
+      video_playing_(false),
       cdm_context_(nullptr),
       underflow_disabled_for_testing_(false),
       clockless_video_playback_enabled_for_testing_(false),
       video_underflow_threshold_(
           base::TimeDelta::FromMilliseconds(kDefaultVideoUnderflowThresholdMs)),
+      pending_audio_track_change_(false),
+      pending_video_track_change_(false),
       weak_factory_(this) {
   weak_this_ = weak_factory_.GetWeakPtr();
   DVLOG(1) << __func__;
@@ -130,11 +134,10 @@ RendererImpl::~RendererImpl() {
   video_renderer_.reset();
   audio_renderer_.reset();
 
-  if (!init_cb_.is_null()) {
+  if (init_cb_)
     FinishInitialization(PIPELINE_ERROR_ABORT);
-  } else if (!flush_cb_.is_null()) {
-    base::ResetAndReturn(&flush_cb_).Run();
-  }
+  else if (flush_cb_)
+    FinishFlush();
 }
 
 void RendererImpl::Initialize(MediaResource* media_resource,
@@ -143,8 +146,9 @@ void RendererImpl::Initialize(MediaResource* media_resource,
   DVLOG(1) << __func__;
   DCHECK(task_runner_->BelongsToCurrentThread());
   DCHECK_EQ(state_, STATE_UNINITIALIZED);
-  DCHECK(!init_cb.is_null());
+  DCHECK(init_cb);
   DCHECK(client);
+  TRACE_EVENT_ASYNC_BEGIN0("media", "RendererImpl::Initialize", this);
 
   client_ = client;
   media_resource_ = media_resource;
@@ -165,6 +169,7 @@ void RendererImpl::SetCdm(CdmContext* cdm_context,
   DVLOG(1) << __func__;
   DCHECK(task_runner_->BelongsToCurrentThread());
   DCHECK(cdm_context);
+  TRACE_EVENT0("media", "RendererImpl::SetCdm");
 
   if (cdm_context_) {
     DVLOG(1) << "Switching CDM not supported.";
@@ -178,7 +183,7 @@ void RendererImpl::SetCdm(CdmContext* cdm_context,
   if (state_ != STATE_INIT_PENDING_CDM)
     return;
 
-  DCHECK(!init_cb_.is_null());
+  DCHECK(init_cb_);
   state_ = STATE_INITIALIZING;
   InitializeAudioRenderer();
 }
@@ -186,10 +191,13 @@ void RendererImpl::SetCdm(CdmContext* cdm_context,
 void RendererImpl::Flush(const base::Closure& flush_cb) {
   DVLOG(1) << __func__;
   DCHECK(task_runner_->BelongsToCurrentThread());
-  DCHECK(flush_cb_.is_null());
+  DCHECK(!flush_cb_);
+  DCHECK(!(pending_audio_track_change_ || pending_video_track_change_));
+  TRACE_EVENT_ASYNC_BEGIN0("media", "RendererImpl::Flush", this);
 
   if (state_ == STATE_FLUSHED) {
-    task_runner_->PostTask(FROM_HERE, flush_cb);
+    flush_cb_ = BindToCurrentLoop(flush_cb);
+    FinishFlush();
     return;
   }
 
@@ -201,30 +209,16 @@ void RendererImpl::Flush(const base::Closure& flush_cb) {
   flush_cb_ = flush_cb;
   state_ = STATE_FLUSHING;
 
-  // If we are currently handling a media stream status change, then postpone
-  // Flush until after that's done (because stream status changes also flush
-  // audio_renderer_/video_renderer_ and they need to be restarted before they
-  // can be flushed again). OnStreamRestartCompleted will resume Flush
-  // processing after audio/video restart has completed and there are no other
-  // pending stream status changes.
-  // TODO(dalecurtis, servolk) We should abort the StartPlaying call post Flush
-  // to avoid unnecessary work.
-  if ((restarting_audio_ || restarting_video_) &&
-      pending_flush_for_stream_change_) {
-    pending_actions_.push_back(
-        base::Bind(&RendererImpl::FlushInternal, weak_this_));
-    return;
-  }
-
   // If a stream restart is pending, this Flush() will complete it. Upon flush
   // completion any pending actions will be executed as well.
-
   FlushInternal();
 }
 
 void RendererImpl::StartPlayingFrom(base::TimeDelta time) {
   DVLOG(1) << __func__;
   DCHECK(task_runner_->BelongsToCurrentThread());
+  TRACE_EVENT1("media", "RendererImpl::StartPlayingFrom", "time_us",
+               time.InMicroseconds());
 
   if (state_ != STATE_FLUSHED) {
     DCHECK_EQ(state_, STATE_ERROR);
@@ -234,15 +228,20 @@ void RendererImpl::StartPlayingFrom(base::TimeDelta time) {
   time_source_->SetMediaTime(time);
 
   state_ = STATE_PLAYING;
-  if (audio_renderer_)
+  if (audio_renderer_) {
+    audio_playing_ = true;
     audio_renderer_->StartPlaying();
-  if (video_renderer_)
+  }
+  if (video_renderer_) {
+    video_playing_ = true;
     video_renderer_->StartPlayingFrom(time);
+  }
 }
 
 void RendererImpl::SetPlaybackRate(double playback_rate) {
   DVLOG(1) << __func__ << "(" << playback_rate << ")";
   DCHECK(task_runner_->BelongsToCurrentThread());
+  TRACE_EVENT1("media", "RendererImpl::SetPlaybackRate", "rate", playback_rate);
 
   // Playback rate changes are only carried out while playing.
   if (state_ != STATE_PLAYING && state_ != STATE_FLUSHED)
@@ -274,11 +273,12 @@ base::TimeDelta RendererImpl::GetMediaTime() {
   // threads.
   {
     base::AutoLock lock(restarting_audio_lock_);
-    if (restarting_audio_) {
+    if (pending_audio_track_change_) {
       DCHECK_NE(kNoTimestamp, restarting_audio_time_);
       return restarting_audio_time_;
     }
   }
+
   return time_source_->CurrentMediaTime();
 }
 
@@ -341,15 +341,23 @@ bool RendererImpl::HasEncryptedStream() {
 }
 
 void RendererImpl::FinishInitialization(PipelineStatus status) {
-  DCHECK(!init_cb_.is_null());
-  base::ResetAndReturn(&init_cb_).Run(status);
+  DCHECK(init_cb_);
+  TRACE_EVENT_ASYNC_END1("media", "RendererImpl::Initialize", this, "status",
+                         MediaLog::PipelineStatusToString(status));
+  std::move(init_cb_).Run(status);
+}
+
+void RendererImpl::FinishFlush() {
+  DCHECK(flush_cb_);
+  TRACE_EVENT_ASYNC_END0("media", "RendererImpl::Flush", this);
+  std::move(flush_cb_).Run();
 }
 
 void RendererImpl::InitializeAudioRenderer() {
   DVLOG(1) << __func__;
   DCHECK(task_runner_->BelongsToCurrentThread());
   DCHECK_EQ(state_, STATE_INITIALIZING);
-  DCHECK(!init_cb_.is_null());
+  DCHECK(init_cb_);
 
   PipelineStatusCB done_cb =
       base::Bind(&RendererImpl::OnAudioRendererInitializeDone, weak_this_);
@@ -358,9 +366,10 @@ void RendererImpl::InitializeAudioRenderer() {
   // pick the first enabled stream to preserve the existing behavior.
   DemuxerStream* audio_stream =
       media_resource_->GetFirstStream(DemuxerStream::AUDIO);
+
   if (!audio_stream) {
     audio_renderer_.reset();
-    task_runner_->PostTask(FROM_HERE, base::Bind(done_cb, PIPELINE_OK));
+    task_runner_->PostTask(FROM_HERE, base::BindOnce(done_cb, PIPELINE_OK));
     return;
   }
 
@@ -381,7 +390,7 @@ void RendererImpl::OnAudioRendererInitializeDone(PipelineStatus status) {
   // OnError() may be fired at any time by the renderers, even if they thought
   // they initialized successfully (due to delayed output device setup).
   if (state_ != STATE_INITIALIZING) {
-    DCHECK(init_cb_.is_null());
+    DCHECK(!init_cb_);
     audio_renderer_.reset();
     return;
   }
@@ -391,7 +400,7 @@ void RendererImpl::OnAudioRendererInitializeDone(PipelineStatus status) {
     return;
   }
 
-  DCHECK(!init_cb_.is_null());
+  DCHECK(init_cb_);
   InitializeVideoRenderer();
 }
 
@@ -399,7 +408,7 @@ void RendererImpl::InitializeVideoRenderer() {
   DVLOG(1) << __func__;
   DCHECK(task_runner_->BelongsToCurrentThread());
   DCHECK_EQ(state_, STATE_INITIALIZING);
-  DCHECK(!init_cb_.is_null());
+  DCHECK(init_cb_);
 
   PipelineStatusCB done_cb =
       base::Bind(&RendererImpl::OnVideoRendererInitializeDone, weak_this_);
@@ -408,9 +417,10 @@ void RendererImpl::InitializeVideoRenderer() {
   // pick the first enabled stream to preserve the existing behavior.
   DemuxerStream* video_stream =
       media_resource_->GetFirstStream(DemuxerStream::VIDEO);
+
   if (!video_stream) {
     video_renderer_.reset();
-    task_runner_->PostTask(FROM_HERE, base::Bind(done_cb, PIPELINE_OK));
+    task_runner_->PostTask(FROM_HERE, base::BindOnce(done_cb, PIPELINE_OK));
     return;
   }
 
@@ -431,21 +441,18 @@ void RendererImpl::OnVideoRendererInitializeDone(PipelineStatus status) {
   // OnError() may be fired at any time by the renderers, even if they thought
   // they initialized successfully (due to delayed output device setup).
   if (state_ != STATE_INITIALIZING) {
-    DCHECK(init_cb_.is_null());
+    DCHECK(!init_cb_);
     audio_renderer_.reset();
     video_renderer_.reset();
     return;
   }
 
-  DCHECK(!init_cb_.is_null());
+  DCHECK(init_cb_);
 
   if (status != PIPELINE_OK) {
     FinishInitialization(status);
     return;
   }
-
-  media_resource_->SetStreamStatusChangeCB(
-      base::Bind(&RendererImpl::OnStreamStatusChanged, weak_this_));
 
   if (audio_renderer_) {
     time_source_ = audio_renderer_->GetTimeSource();
@@ -465,7 +472,7 @@ void RendererImpl::FlushInternal() {
   DVLOG(1) << __func__;
   DCHECK(task_runner_->BelongsToCurrentThread());
   DCHECK_EQ(state_, STATE_FLUSHING);
-  DCHECK(!flush_cb_.is_null());
+  DCHECK(flush_cb_);
 
   if (time_ticking_)
     PausePlayback();
@@ -473,19 +480,19 @@ void RendererImpl::FlushInternal() {
   FlushAudioRenderer();
 }
 
+// TODO(tmathmeyer) Combine this functionality with track switching flushing.
 void RendererImpl::FlushAudioRenderer() {
   DVLOG(1) << __func__;
   DCHECK(task_runner_->BelongsToCurrentThread());
   DCHECK_EQ(state_, STATE_FLUSHING);
-  DCHECK(!flush_cb_.is_null());
+  DCHECK(flush_cb_);
 
-  if (!audio_renderer_) {
+  if (!audio_renderer_ || !audio_playing_) {
     OnAudioRendererFlushDone();
-    return;
+  } else {
+    audio_renderer_->Flush(base::BindRepeating(
+        &RendererImpl::OnAudioRendererFlushDone, weak_this_));
   }
-
-  audio_renderer_->Flush(
-      base::Bind(&RendererImpl::OnAudioRendererFlushDone, weak_this_));
 }
 
 void RendererImpl::OnAudioRendererFlushDone() {
@@ -493,19 +500,20 @@ void RendererImpl::OnAudioRendererFlushDone() {
   DCHECK(task_runner_->BelongsToCurrentThread());
 
   if (state_ == STATE_ERROR) {
-    DCHECK(flush_cb_.is_null());
+    DCHECK(!flush_cb_);
     return;
   }
 
   DCHECK_EQ(state_, STATE_FLUSHING);
-  DCHECK(!flush_cb_.is_null());
+  DCHECK(flush_cb_);
 
   // If we had a deferred video renderer underflow prior to the flush, it should
   // have been cleared by the audio renderer changing to BUFFERING_HAVE_NOTHING.
   DCHECK(deferred_video_underflow_cb_.IsCancelled());
-
   DCHECK_EQ(audio_buffering_state_, BUFFERING_HAVE_NOTHING);
   audio_ended_ = false;
+  audio_playing_ = false;
+
   FlushVideoRenderer();
 }
 
@@ -513,15 +521,14 @@ void RendererImpl::FlushVideoRenderer() {
   DVLOG(1) << __func__;
   DCHECK(task_runner_->BelongsToCurrentThread());
   DCHECK_EQ(state_, STATE_FLUSHING);
-  DCHECK(!flush_cb_.is_null());
+  DCHECK(flush_cb_);
 
-  if (!video_renderer_) {
+  if (!video_renderer_ || !video_playing_) {
     OnVideoRendererFlushDone();
-    return;
+  } else {
+    video_renderer_->Flush(base::BindRepeating(
+        &RendererImpl::OnVideoRendererFlushDone, weak_this_));
   }
-
-  video_renderer_->Flush(
-      base::Bind(&RendererImpl::OnVideoRendererFlushDone, weak_this_));
 }
 
 void RendererImpl::OnVideoRendererFlushDone() {
@@ -529,93 +536,24 @@ void RendererImpl::OnVideoRendererFlushDone() {
   DCHECK(task_runner_->BelongsToCurrentThread());
 
   if (state_ == STATE_ERROR) {
-    DCHECK(flush_cb_.is_null());
+    DCHECK(!flush_cb_);
     return;
   }
 
   DCHECK_EQ(state_, STATE_FLUSHING);
-  DCHECK(!flush_cb_.is_null());
+  DCHECK(flush_cb_);
 
   DCHECK_EQ(video_buffering_state_, BUFFERING_HAVE_NOTHING);
   video_ended_ = false;
+  video_playing_ = false;
   state_ = STATE_FLUSHED;
-  base::ResetAndReturn(&flush_cb_).Run();
-
-  if (!pending_actions_.empty()) {
-    base::Closure closure = pending_actions_.front();
-    pending_actions_.pop_front();
-    closure.Run();
-  }
+  FinishFlush();
 }
 
-void RendererImpl::OnStreamStatusChanged(DemuxerStream* stream,
-                                         bool enabled,
-                                         base::TimeDelta time) {
-  DCHECK(task_runner_->BelongsToCurrentThread());
-  DCHECK(stream);
-  bool video = (stream->type() == DemuxerStream::VIDEO);
-  DVLOG(1) << __func__ << (video ? " video" : " audio") << " stream=" << stream
-           << " enabled=" << enabled << " time=" << time.InSecondsF();
-
-  if ((state_ != STATE_PLAYING && state_ != STATE_FLUSHING &&
-       state_ != STATE_FLUSHED) ||
-      (audio_ended_ && video_ended_))
-    return;
-
-  if (restarting_audio_ || restarting_video_ || state_ == STATE_FLUSHING) {
-    DVLOG(3) << __func__ << ": postponed stream " << stream
-             << " status change handling.";
-    pending_actions_.push_back(base::Bind(&RendererImpl::OnStreamStatusChanged,
-                                          weak_this_, stream, enabled, time));
-    return;
-  }
-
-  DCHECK(state_ == STATE_PLAYING || state_ == STATE_FLUSHED);
-  if (stream->type() == DemuxerStream::VIDEO) {
-    DCHECK(video_renderer_);
-    restarting_video_ = true;
-    base::Closure handle_track_status_cb =
-        base::Bind(stream == current_video_stream_
-                       ? &RendererImpl::RestartVideoRenderer
-                       : &RendererImpl::ReinitializeVideoRenderer,
-                   weak_this_, stream, time);
-    if (state_ == STATE_FLUSHED) {
-      handle_track_status_cb.Run();
-    } else {
-      pending_flush_for_stream_change_ = true;
-      video_renderer_->Flush(handle_track_status_cb);
-    }
-  } else if (stream->type() == DemuxerStream::AUDIO) {
-    DCHECK(audio_renderer_);
-    DCHECK(time_source_);
-    {
-      base::AutoLock lock(restarting_audio_lock_);
-      restarting_audio_time_ = time;
-      restarting_audio_ = true;
-    }
-    base::Closure handle_track_status_cb =
-        base::Bind(stream == current_audio_stream_
-                       ? &RendererImpl::RestartAudioRenderer
-                       : &RendererImpl::ReinitializeAudioRenderer,
-                   weak_this_, stream, time);
-    if (state_ == STATE_FLUSHED) {
-      handle_track_status_cb.Run();
-      return;
-    }
-    // Stop ticking (transition into paused state) in audio renderer before
-    // calling Flush, since after Flush we are going to restart playback by
-    // calling audio renderer StartPlaying which would fail in playing state.
-    if (time_ticking_) {
-      time_ticking_ = false;
-      time_source_->StopTicking();
-    }
-    pending_flush_for_stream_change_ = true;
-    audio_renderer_->Flush(handle_track_status_cb);
-  }
-}
-
-void RendererImpl::ReinitializeAudioRenderer(DemuxerStream* stream,
-                                             base::TimeDelta time) {
+void RendererImpl::ReinitializeAudioRenderer(
+    DemuxerStream* stream,
+    base::TimeDelta time,
+    base::OnceClosure reinitialize_completed_cb) {
   DVLOG(2) << __func__ << " stream=" << stream << " time=" << time.InSecondsF();
   DCHECK(task_runner_->BelongsToCurrentThread());
   DCHECK_NE(stream, current_audio_stream_);
@@ -623,25 +561,31 @@ void RendererImpl::ReinitializeAudioRenderer(DemuxerStream* stream,
   current_audio_stream_ = stream;
   audio_renderer_->Initialize(
       stream, cdm_context_, audio_renderer_client_.get(),
-      base::Bind(&RendererImpl::OnAudioRendererReinitialized, weak_this_,
-                 stream, time));
+      base::BindRepeating(&RendererImpl::OnAudioRendererReinitialized,
+                          weak_this_, stream, time,
+                          base::Passed(&reinitialize_completed_cb)));
 }
 
-void RendererImpl::OnAudioRendererReinitialized(DemuxerStream* stream,
-                                                base::TimeDelta time,
-                                                PipelineStatus status) {
+void RendererImpl::OnAudioRendererReinitialized(
+    DemuxerStream* stream,
+    base::TimeDelta time,
+    base::OnceClosure reinitialize_completed_cb,
+    PipelineStatus status) {
   DVLOG(2) << __func__ << ": status=" << status;
   DCHECK_EQ(stream, current_audio_stream_);
 
   if (status != PIPELINE_OK) {
+    std::move(reinitialize_completed_cb).Run();
     OnError(status);
     return;
   }
-  RestartAudioRenderer(stream, time);
+  RestartAudioRenderer(stream, time, std::move(reinitialize_completed_cb));
 }
 
-void RendererImpl::ReinitializeVideoRenderer(DemuxerStream* stream,
-                                             base::TimeDelta time) {
+void RendererImpl::ReinitializeVideoRenderer(
+    DemuxerStream* stream,
+    base::TimeDelta time,
+    base::OnceClosure reinitialize_completed_cb) {
   DVLOG(2) << __func__ << " stream=" << stream << " time=" << time.InSecondsF();
   DCHECK(task_runner_->BelongsToCurrentThread());
   DCHECK_NE(stream, current_video_stream_);
@@ -650,156 +594,83 @@ void RendererImpl::ReinitializeVideoRenderer(DemuxerStream* stream,
   video_renderer_->OnTimeStopped();
   video_renderer_->Initialize(
       stream, cdm_context_, video_renderer_client_.get(),
-      base::Bind(&RendererImpl::GetWallClockTimes, base::Unretained(this)),
-      base::Bind(&RendererImpl::OnVideoRendererReinitialized, weak_this_,
-                 stream, time));
+      base::BindRepeating(&RendererImpl::GetWallClockTimes,
+                          base::Unretained(this)),
+      base::BindRepeating(&RendererImpl::OnVideoRendererReinitialized,
+                          weak_this_, stream, time,
+                          base::Passed(&reinitialize_completed_cb)));
 }
 
-void RendererImpl::OnVideoRendererReinitialized(DemuxerStream* stream,
-                                                base::TimeDelta time,
-                                                PipelineStatus status) {
+void RendererImpl::OnVideoRendererReinitialized(
+    DemuxerStream* stream,
+    base::TimeDelta time,
+    base::OnceClosure reinitialize_completed_cb,
+    PipelineStatus status) {
   DVLOG(2) << __func__ << ": status=" << status;
   DCHECK_EQ(stream, current_video_stream_);
 
   if (status != PIPELINE_OK) {
+    std::move(reinitialize_completed_cb).Run();
     OnError(status);
     return;
   }
-  RestartVideoRenderer(stream, time);
+  RestartVideoRenderer(stream, time, std::move(reinitialize_completed_cb));
 }
 
-void RendererImpl::RestartAudioRenderer(DemuxerStream* stream,
-                                        base::TimeDelta time) {
+void RendererImpl::RestartAudioRenderer(
+    DemuxerStream* stream,
+    base::TimeDelta time,
+    base::OnceClosure restart_completed_cb) {
   DVLOG(2) << __func__ << " stream=" << stream << " time=" << time.InSecondsF();
   DCHECK(task_runner_->BelongsToCurrentThread());
-  DCHECK(state_ == STATE_PLAYING || state_ == STATE_FLUSHED ||
-         state_ == STATE_FLUSHING);
-  DCHECK(time_source_);
   DCHECK(audio_renderer_);
   DCHECK_EQ(stream, current_audio_stream_);
+  DCHECK(state_ == STATE_PLAYING || state_ == STATE_FLUSHED ||
+         state_ == STATE_FLUSHING);
 
-  audio_ended_ = false;
   if (state_ == STATE_FLUSHED) {
     // If we are in the FLUSHED state, then we are done. The audio renderer will
     // be restarted by a subsequent RendererImpl::StartPlayingFrom call.
-    OnStreamRestartCompleted();
-  } else {
-    // Stream restart will be completed when the audio renderer decodes enough
-    // data and reports HAVE_ENOUGH to HandleRestartedStreamBufferingChanges.
-    pending_flush_for_stream_change_ = false;
-    audio_renderer_->StartPlaying();
+    std::move(restart_completed_cb).Run();
+    return;
   }
+
+  {
+    base::AutoLock lock(restarting_audio_lock_);
+    audio_playing_ = true;
+    pending_audio_track_change_ = false;
+  }
+  audio_renderer_->StartPlaying();
+  std::move(restart_completed_cb).Run();
 }
 
-void RendererImpl::RestartVideoRenderer(DemuxerStream* stream,
-                                        base::TimeDelta time) {
+void RendererImpl::RestartVideoRenderer(
+    DemuxerStream* stream,
+    base::TimeDelta time,
+    base::OnceClosure restart_completed_cb) {
   DVLOG(2) << __func__ << " stream=" << stream << " time=" << time.InSecondsF();
   DCHECK(task_runner_->BelongsToCurrentThread());
   DCHECK(video_renderer_);
+  DCHECK_EQ(stream, current_video_stream_);
   DCHECK(state_ == STATE_PLAYING || state_ == STATE_FLUSHED ||
          state_ == STATE_FLUSHING);
-  DCHECK_EQ(stream, current_video_stream_);
 
-  video_ended_ = false;
   if (state_ == STATE_FLUSHED) {
     // If we are in the FLUSHED state, then we are done. The video renderer will
     // be restarted by a subsequent RendererImpl::StartPlayingFrom call.
-    OnStreamRestartCompleted();
-  } else {
-    // Stream restart will be completed when the video renderer decodes enough
-    // data and reports HAVE_ENOUGH to HandleRestartedStreamBufferingChanges.
-    pending_flush_for_stream_change_ = false;
-    video_renderer_->StartPlayingFrom(time);
+    std::move(restart_completed_cb).Run();
+    return;
   }
+
+  video_playing_ = true;
+  pending_video_track_change_ = false;
+  video_renderer_->StartPlayingFrom(time);
+  std::move(restart_completed_cb).Run();
 }
 
 void RendererImpl::OnStatisticsUpdate(const PipelineStatistics& stats) {
   DCHECK(task_runner_->BelongsToCurrentThread());
   client_->OnStatisticsUpdate(stats);
-}
-
-bool RendererImpl::HandleRestartedStreamBufferingChanges(
-    DemuxerStream::Type type,
-    BufferingState new_buffering_state) {
-  DCHECK(task_runner_->BelongsToCurrentThread());
-  // When restarting playback we want to defer the BUFFERING_HAVE_NOTHING for
-  // the stream being restarted, to allow continuing uninterrupted playback on
-  // the other stream.
-  if (type == DemuxerStream::VIDEO && restarting_video_) {
-    if (new_buffering_state == BUFFERING_HAVE_ENOUGH) {
-      DVLOG(1) << __func__ << " Got BUFFERING_HAVE_ENOUGH for video stream,"
-                              " resuming playback.";
-      task_runner_->PostTask(
-          FROM_HERE,
-          base::Bind(&RendererImpl::OnStreamRestartCompleted, weak_this_));
-      if (state_ == STATE_PLAYING &&
-          !deferred_video_underflow_cb_.IsCancelled()) {
-        // If deferred_video_underflow_cb_ wasn't triggered, then audio should
-        // still be playing, we only need to unpause the video stream.
-        DVLOG(4) << "deferred_video_underflow_cb_.Cancel()";
-        deferred_video_underflow_cb_.Cancel();
-        video_buffering_state_ = new_buffering_state;
-        if (playback_rate_ > 0)
-          video_renderer_->OnTimeProgressing();
-        return true;
-      }
-    }
-    // We don't handle the BUFFERING_HAVE_NOTHING case explicitly here, since
-    // the existing logic for deferring video underflow reporting in
-    // OnBufferingStateChange is exactly what we need. So fall through to the
-    // regular video underflow handling path in OnBufferingStateChange.
-  }
-
-  if (type == DemuxerStream::AUDIO && restarting_audio_) {
-    if (new_buffering_state == BUFFERING_HAVE_NOTHING) {
-      if (deferred_video_underflow_cb_.IsCancelled() &&
-          deferred_audio_restart_underflow_cb_.IsCancelled()) {
-        DVLOG(1) << __func__ << " Deferring BUFFERING_HAVE_NOTHING for "
-                                "audio stream which is being restarted.";
-        audio_buffering_state_ = new_buffering_state;
-        deferred_audio_restart_underflow_cb_.Reset(
-            base::Bind(&RendererImpl::OnBufferingStateChange, weak_this_, type,
-                       new_buffering_state));
-        task_runner_->PostDelayedTask(
-            FROM_HERE, deferred_audio_restart_underflow_cb_.callback(),
-            base::TimeDelta::FromMilliseconds(
-                kAudioRestartUnderflowThresholdMs));
-        return true;
-      }
-      // Cancel the deferred callback and report the underflow immediately.
-      DVLOG(4) << "deferred_audio_restart_underflow_cb_.Cancel()";
-      deferred_audio_restart_underflow_cb_.Cancel();
-    } else if (new_buffering_state == BUFFERING_HAVE_ENOUGH) {
-      DVLOG(1) << __func__ << " Got BUFFERING_HAVE_ENOUGH for audio stream,"
-                              " resuming playback.";
-      deferred_audio_restart_underflow_cb_.Cancel();
-      // Now that we have decoded enough audio, pause playback momentarily to
-      // ensure video renderer is synchronised with audio.
-      PausePlayback();
-      task_runner_->PostTask(
-          FROM_HERE,
-          base::Bind(&RendererImpl::OnStreamRestartCompleted, weak_this_));
-    }
-  }
-  return false;
-}
-
-void RendererImpl::OnStreamRestartCompleted() {
-  DVLOG(3) << __func__ << " restarting_audio_=" << restarting_audio_
-           << " restarting_video_=" << restarting_video_;
-  DCHECK(task_runner_->BelongsToCurrentThread());
-  DCHECK(restarting_audio_ || restarting_video_);
-  {
-    base::AutoLock lock(restarting_audio_lock_);
-    restarting_audio_ = false;
-    restarting_audio_time_ = kNoTimestamp;
-  }
-  restarting_video_ = false;
-  if (!pending_actions_.empty()) {
-    base::Closure closure = pending_actions_.front();
-    pending_actions_.pop_front();
-    closure.Run();
-  }
 }
 
 void RendererImpl::OnBufferingStateChange(DemuxerStream::Type type,
@@ -809,16 +680,27 @@ void RendererImpl::OnBufferingStateChange(DemuxerStream::Type type,
                                         ? &audio_buffering_state_
                                         : &video_buffering_state_;
 
-  DVLOG(1) << __func__ << (type == DemuxerStream::AUDIO ? " audio " : " video ")
+  const auto* type_string = DemuxerStream::GetTypeName(type);
+  DVLOG(1) << __func__ << " " << type_string << " "
            << MediaLog::BufferingStateToString(*buffering_state) << " -> "
            << MediaLog::BufferingStateToString(new_buffering_state);
   DCHECK(task_runner_->BelongsToCurrentThread());
+  TRACE_EVENT2("media", "RendererImpl::OnBufferingStateChange", "type",
+               type_string, "state",
+               MediaLog::BufferingStateToString(new_buffering_state));
 
   bool was_waiting_for_enough_data = WaitingForEnoughData();
 
-  if (restarting_audio_ || restarting_video_) {
-    if (HandleRestartedStreamBufferingChanges(type, new_buffering_state))
+  if (new_buffering_state == BUFFERING_HAVE_NOTHING) {
+    if ((pending_audio_track_change_ && type == DemuxerStream::AUDIO) ||
+        (pending_video_track_change_ && type == DemuxerStream::VIDEO)) {
+      // Don't pass up a nothing event if it was triggered by a track change.
+      // This would cause the renderer to effectively lie about underflow state.
+      // Even though this might cause an immediate video underflow due to
+      // changing an audio track, all playing is paused when audio is disabled.
+      *buffering_state = new_buffering_state;
       return;
+    }
   }
 
   // When audio is present and has enough data, defer video underflow callbacks
@@ -869,9 +751,14 @@ void RendererImpl::OnBufferingStateChange(DemuxerStream::Type type,
 
   // Renderer prerolled.
   if (was_waiting_for_enough_data && !WaitingForEnoughData()) {
-    StartPlayback();
-    client_->OnBufferingStateChange(BUFFERING_HAVE_ENOUGH);
-    return;
+    // Prevent condition where audio or video is sputtering and flipping back
+    // and forth between NOTHING and ENOUGH mixing with a track change, causing
+    // a StartPlayback to be called while the audio renderer is being flushed.
+    if (!pending_audio_track_change_ && !pending_video_track_change_) {
+      StartPlayback();
+      client_->OnBufferingStateChange(BUFFERING_HAVE_ENOUGH);
+      return;
+    }
   }
 }
 
@@ -889,9 +776,12 @@ bool RendererImpl::WaitingForEnoughData() const {
 void RendererImpl::PausePlayback() {
   DVLOG(1) << __func__;
   DCHECK(task_runner_->BelongsToCurrentThread());
+  TRACE_EVENT0("media", "RendererImpl::PausePlayback");
+
   switch (state_) {
     case STATE_PLAYING:
-      DCHECK(PlaybackHasEnded() || WaitingForEnoughData() || restarting_audio_)
+      DCHECK(PlaybackHasEnded() || WaitingForEnoughData() ||
+             pending_audio_track_change_)
           << "Playback should only pause due to ending or underflowing or"
              " when restarting audio stream";
 
@@ -912,11 +802,11 @@ void RendererImpl::PausePlayback() {
       // An error state may occur at any time.
       break;
   }
-
   if (time_ticking_) {
     time_ticking_ = false;
     time_source_->StopTicking();
   }
+
   if (playback_rate_ > 0 && video_renderer_)
     video_renderer_->OnTimeStopped();
 }
@@ -925,30 +815,41 @@ void RendererImpl::StartPlayback() {
   DVLOG(1) << __func__;
   DCHECK(task_runner_->BelongsToCurrentThread());
   DCHECK_EQ(state_, STATE_PLAYING);
-  DCHECK(!time_ticking_);
   DCHECK(!WaitingForEnoughData());
+  TRACE_EVENT0("media", "RendererImpl::StartPlayback");
 
-  time_ticking_ = true;
-  time_source_->StartTicking();
-  if (playback_rate_ > 0 && video_renderer_)
+  if (!time_ticking_) {
+    time_ticking_ = true;
+    audio_playing_ = true;
+    time_source_->StartTicking();
+  }
+  if (playback_rate_ > 0 && video_renderer_) {
+    video_playing_ = true;
     video_renderer_->OnTimeProgressing();
+  }
 }
 
 void RendererImpl::OnRendererEnded(DemuxerStream::Type type) {
-  DVLOG(1) << __func__ << (type == DemuxerStream::AUDIO ? " audio" : " video");
+  const auto* type_string = DemuxerStream::GetTypeName(type);
+  DVLOG(1) << __func__ << ": " << type_string;
   DCHECK(task_runner_->BelongsToCurrentThread());
   DCHECK((type == DemuxerStream::AUDIO) || (type == DemuxerStream::VIDEO));
+  TRACE_EVENT1("media", "RendererImpl::OnRendererEnded", "type", type_string);
 
   if (state_ != STATE_PLAYING)
     return;
 
   if (type == DemuxerStream::AUDIO) {
-    DCHECK(!audio_ended_);
+    // If all streams are ended, do not propagate a redundant ended event.
+    if (audio_ended_ && PlaybackHasEnded())
+      return;
     audio_ended_ = true;
   } else {
-    DCHECK(!video_ended_);
-    video_ended_ = true;
     DCHECK(video_renderer_);
+    // If all streams are ended, do not propagate a redundant ended event.
+    if (audio_ended_ && PlaybackHasEnded())
+      return;
+    video_ended_ = true;
     video_renderer_->OnTimeStopped();
   }
 
@@ -984,6 +885,8 @@ void RendererImpl::OnError(PipelineStatus error) {
   DVLOG(1) << __func__ << "(" << error << ")";
   DCHECK(task_runner_->BelongsToCurrentThread());
   DCHECK_NE(PIPELINE_OK, error) << "PIPELINE_OK isn't an error!";
+  TRACE_EVENT1("media", "RendererImpl::OnError", "error",
+               MediaLog::PipelineStatusToString(error));
 
   // An error has already been delivered.
   if (state_ == STATE_ERROR)
@@ -992,7 +895,7 @@ void RendererImpl::OnError(PipelineStatus error) {
   const State old_state = state_;
   state_ = STATE_ERROR;
 
-  if (!init_cb_.is_null()) {
+  if (init_cb_) {
     DCHECK(old_state == STATE_INITIALIZING ||
            old_state == STATE_INIT_PENDING_CDM);
     FinishInitialization(error);
@@ -1002,8 +905,8 @@ void RendererImpl::OnError(PipelineStatus error) {
   // After OnError() returns, the pipeline may destroy |this|.
   client_->OnError(error);
 
-  if (!flush_cb_.is_null())
-    base::ResetAndReturn(&flush_cb_).Run();
+  if (flush_cb_)
+    FinishFlush();
 }
 
 void RendererImpl::OnWaitingForDecryptionKey() {
@@ -1029,6 +932,92 @@ void RendererImpl::OnVideoNaturalSizeChange(const gfx::Size& size) {
 void RendererImpl::OnVideoOpacityChange(bool opaque) {
   DCHECK(task_runner_->BelongsToCurrentThread());
   client_->OnVideoOpacityChange(opaque);
+}
+
+void RendererImpl::CleanUpTrackChange(base::RepeatingClosure on_finished,
+                                      bool* ended,
+                                      bool* playing) {
+  *playing = false;
+  // If either stream is alive (i.e. hasn't reached ended state), ended can be
+  // set to false. If both streams are dead, keep ended=true.
+  if ((audio_renderer_ && !audio_ended_) || (video_renderer_ && !video_ended_))
+    *ended = false;
+  std::move(on_finished).Run();
+}
+
+void RendererImpl::OnSelectedVideoTracksChanged(
+    const std::vector<DemuxerStream*>& enabled_tracks,
+    base::OnceClosure change_completed_cb) {
+  DCHECK(task_runner_->BelongsToCurrentThread());
+  TRACE_EVENT0("media", "RendererImpl::OnSelectedVideoTracksChanged");
+
+  DCHECK_LT(enabled_tracks.size(), 2u);
+  DemuxerStream* stream = enabled_tracks.empty() ? nullptr : enabled_tracks[0];
+
+  if (!stream && !video_playing_) {
+    std::move(change_completed_cb).Run();
+    return;
+  }
+
+  // 'fixing' the stream -> restarting if its the same stream,
+  //                        reinitializing if it is different.
+  base::RepeatingClosure fix_stream_cb;
+  if (stream && stream != current_video_stream_) {
+    fix_stream_cb = base::BindRepeating(
+        &RendererImpl::ReinitializeVideoRenderer, weak_this_, stream,
+        GetMediaTime(), base::Passed(&change_completed_cb));
+  } else {
+    fix_stream_cb = base::BindRepeating(
+        &RendererImpl::RestartVideoRenderer, weak_this_, current_video_stream_,
+        GetMediaTime(), base::Passed(&change_completed_cb));
+  }
+
+  pending_video_track_change_ = true;
+  video_renderer_->Flush(base::BindRepeating(
+      &RendererImpl::CleanUpTrackChange, weak_this_,
+      base::Passed(&fix_stream_cb), &video_ended_, &video_playing_));
+}
+
+void RendererImpl::OnEnabledAudioTracksChanged(
+    const std::vector<DemuxerStream*>& enabled_tracks,
+    base::OnceClosure change_completed_cb) {
+  DCHECK(task_runner_->BelongsToCurrentThread());
+  TRACE_EVENT0("media", "RendererImpl::OnEnabledAudioTracksChanged");
+
+  DCHECK_LT(enabled_tracks.size(), 2u);
+  DemuxerStream* stream = enabled_tracks.empty() ? nullptr : enabled_tracks[0];
+
+  if (!stream && !audio_playing_) {
+    std::move(change_completed_cb).Run();
+    return;
+  }
+
+  // 'fixing' the stream -> restarting if its the same stream,
+  //                        reinitializing if it is different.
+  base::RepeatingClosure fix_stream_cb;
+
+  if (stream && stream != current_audio_stream_) {
+    fix_stream_cb = base::BindRepeating(
+        &RendererImpl::ReinitializeAudioRenderer, weak_this_, stream,
+        GetMediaTime(), base::Passed(&change_completed_cb));
+  } else {
+    fix_stream_cb = base::BindRepeating(
+        &RendererImpl::RestartAudioRenderer, weak_this_, current_audio_stream_,
+        GetMediaTime(), base::Passed(&change_completed_cb));
+  }
+
+  {
+    base::AutoLock lock(restarting_audio_lock_);
+    pending_audio_track_change_ = true;
+    restarting_audio_time_ = time_source_->CurrentMediaTime();
+  }
+
+  if (audio_playing_)
+    PausePlayback();
+
+  audio_renderer_->Flush(base::BindRepeating(
+      &RendererImpl::CleanUpTrackChange, weak_this_,
+      base::Passed(&fix_stream_cb), &audio_ended_, &audio_playing_));
 }
 
 }  // namespace media

@@ -10,9 +10,8 @@
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "chrome/browser/ui/browser_dialogs.h"
+#include "chrome/browser/ui/views/chrome_layout_provider.h"
 #include "chrome/browser/ui/views/extensions/media_gallery_checkbox_view.h"
-#include "chrome/browser/ui/views/harmony/chrome_layout_provider.h"
-#include "chrome/browser/ui/views_mode_controller.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/locale_settings.h"
 #include "components/constrained_window/constrained_window_views.h"
@@ -110,12 +109,8 @@ void MediaGalleriesDialogViews::InitChildViews() {
 
   int column_set_id = 0;
   views::ColumnSet* columns = layout->AddColumnSet(column_set_id);
-  columns->AddColumn(views::GridLayout::LEADING,
-                     views::GridLayout::LEADING,
-                     1,
-                     views::GridLayout::FIXED,
-                     dialog_content_width,
-                     0);
+  columns->AddColumn(views::GridLayout::LEADING, views::GridLayout::LEADING,
+                     1.0, views::GridLayout::FIXED, dialog_content_width, 0);
 
   // Message text.
   const int vertical_padding =
@@ -123,12 +118,12 @@ void MediaGalleriesDialogViews::InitChildViews() {
   views::Label* subtext = new views::Label(controller_->GetSubtext());
   subtext->SetMultiLine(true);
   subtext->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-  layout->StartRow(0, column_set_id);
+  layout->StartRow(views::GridLayout::kFixedSize, column_set_id);
   layout->AddView(
       subtext, 1, 1,
       views::GridLayout::FILL, views::GridLayout::LEADING,
       dialog_content_width, subtext->GetHeightForWidth(dialog_content_width));
-  layout->AddPaddingRow(0, vertical_padding);
+  layout->AddPaddingRow(views::GridLayout::kFixedSize, vertical_padding);
 
   // Scrollable area for checkboxes.
   const int small_vertical_padding =
@@ -175,10 +170,11 @@ void MediaGalleriesDialogViews::InitChildViews() {
   views::ScrollView* scroll_view =
       views::ScrollView::CreateScrollViewWithBorder();
   scroll_view->SetContents(scroll_container);
-  layout->StartRowWithPadding(1, column_set_id, 0, vertical_padding);
-  layout->AddView(scroll_view, 1, 1,
-                  views::GridLayout::FILL, views::GridLayout::FILL,
-                  dialog_content_width, kScrollAreaHeight);
+  layout->StartRowWithPadding(1.0, column_set_id, views::GridLayout::kFixedSize,
+                              vertical_padding);
+  layout->AddView(scroll_view, 1.0, 1.0, views::GridLayout::FILL,
+                  views::GridLayout::FILL, dialog_content_width,
+                  kScrollAreaHeight);
 }
 
 void MediaGalleriesDialogViews::UpdateGalleries() {
@@ -193,7 +189,7 @@ bool MediaGalleriesDialogViews::AddOrUpdateGallery(
     const MediaGalleriesDialogController::Entry& gallery,
     views::View* container,
     int trailing_vertical_space) {
-  CheckboxMap::iterator iter = checkbox_map_.find(gallery.pref_info.pref_id);
+  auto iter = checkbox_map_.find(gallery.pref_info.pref_id);
   if (iter != checkbox_map_.end()) {
     views::Checkbox* checkbox = iter->second->checkbox();
     checkbox->SetChecked(gallery.selected);
@@ -317,9 +313,10 @@ void MediaGalleriesDialogViews::ShowContextMenu(const gfx::Point& point,
       base::Bind(&MediaGalleriesDialogViews::OnMenuClosed,
                  base::Unretained(this))));
 
-  context_menu_runner_->RunMenuAt(GetWidget(), NULL,
-                                  gfx::Rect(point.x(), point.y(), 0, 0),
-                                  views::MENU_ANCHOR_TOPLEFT, source_type);
+  context_menu_runner_->RunMenuAt(
+      GetWidget(), NULL,
+      gfx::Rect(point.x(), point.y(), views::GridLayout::kFixedSize, 0),
+      views::MENU_ANCHOR_TOPLEFT, source_type);
 }
 
 bool MediaGalleriesDialogViews::ControllerHasWebContents() const {
@@ -335,9 +332,5 @@ void MediaGalleriesDialogViews::OnMenuClosed() {
 // static
 MediaGalleriesDialog* MediaGalleriesDialog::Create(
     MediaGalleriesDialogController* controller) {
-#if defined(OS_MACOSX)
-  if (views_mode_controller::IsViewsBrowserCocoa())
-    return MediaGalleriesDialog::CreateCocoa(controller);
-#endif
   return new MediaGalleriesDialogViews(controller);
 }

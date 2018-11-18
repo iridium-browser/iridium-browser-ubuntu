@@ -14,6 +14,9 @@
 #include "compiler/preprocessor/Token.h"
 #include "compiler/preprocessor/Tokenizer.h"
 
+namespace angle
+{
+
 namespace pp
 {
 
@@ -30,12 +33,8 @@ struct PreprocessorImpl
                      const PreprocessorSettings &settings)
         : diagnostics(diag),
           tokenizer(diag),
-          directiveParser(&tokenizer,
-                          &macroSet,
-                          diag,
-                          directiveHandler,
-                          settings.maxMacroExpansionDepth),
-          macroExpander(&directiveParser, &macroSet, diag, settings.maxMacroExpansionDepth)
+          directiveParser(&tokenizer, &macroSet, diag, directiveHandler, settings),
+          macroExpander(&directiveParser, &macroSet, diag, settings, false)
     {
     }
 };
@@ -105,3 +104,5 @@ void Preprocessor::setMaxTokenSize(size_t maxTokenSize)
 }
 
 }  // namespace pp
+
+}  // namespace angle

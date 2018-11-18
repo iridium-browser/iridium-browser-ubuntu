@@ -20,6 +20,10 @@
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_metrics.h"
 #include "components/data_reduction_proxy/core/browser/db_data_owner.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_event_storage_delegate.h"
+#include "components/data_use_measurement/core/data_use_user_data.h"
+#include "net/nqe/effective_connection_type.h"
+#include "services/network/public/cpp/network_quality_tracker.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 
 class PrefService;
 
@@ -31,6 +35,7 @@ class Value;
 }
 
 namespace net {
+class HttpRequestHeaders;
 class URLRequestContextGetter;
 }
 
@@ -46,7 +51,9 @@ class DataReductionProxySettings;
 // Contains and initializes all Data Reduction Proxy objects that have a
 // lifetime based on the UI thread.
 class DataReductionProxyService
-    : public DataReductionProxyEventStorageDelegate {
+    : public DataReductionProxyEventStorageDelegate,
+      public network::NetworkQualityTracker::EffectiveConnectionTypeObserver,
+      public network::NetworkQualityTracker::RTTAndThroughputEstimatesObserver {
  public:
   // The caller must ensure that |settings|, |prefs|, |request_context|, and
   // |io_task_runner| remain alive for the lifetime of the
@@ -58,14 +65,16 @@ class DataReductionProxyService
       DataReductionProxySettings* settings,
       PrefService* prefs,
       net::URLRequestContextGetter* request_context_getter,
+      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
       std::unique_ptr<DataStore> store,
       std::unique_ptr<DataReductionProxyPingbackClient> pingback_client,
+      network::NetworkQualityTracker* network_quality_tracker,
       const scoped_refptr<base::SequencedTaskRunner>& ui_task_runner,
       const scoped_refptr<base::SingleThreadTaskRunner>& io_task_runner,
       const scoped_refptr<base::SequencedTaskRunner>& db_task_runner,
       const base::TimeDelta& commit_delay);
 
-  virtual ~DataReductionProxyService();
+  ~DataReductionProxyService() override;
 
   // Sets the DataReductionProxyIOData weak pointer.
   void SetIOData(base::WeakPtr<DataReductionProxyIOData> io_data);
@@ -84,11 +93,15 @@ class DataReductionProxyService
 
   // Records daily data savings statistics in |compression_stats_|.
   // Virtual for testing.
-  virtual void UpdateContentLengths(int64_t data_used,
-                                    int64_t original_size,
-                                    bool data_reduction_proxy_enabled,
-                                    DataReductionProxyRequestType request_type,
-                                    const std::string& mime_type);
+  virtual void UpdateContentLengths(
+      int64_t data_used,
+      int64_t original_size,
+      bool data_reduction_proxy_enabled,
+      DataReductionProxyRequestType request_type,
+      const std::string& mime_type,
+      bool is_user_traffic,
+      data_use_measurement::DataUseUserData::DataUseContentType content_type,
+      int32_t service_hash_code);
 
   // Overrides of DataReductionProxyEventStorageDelegate.
   void AddEvent(std::unique_ptr<base::Value> event) override;
@@ -132,6 +145,21 @@ class DataReductionProxyService
   // cleared.
   void OnCacheCleared(const base::Time start, const base::Time end);
 
+  // When triggering previews, prevent long term black list rules.
+  void SetIgnoreLongTermBlackListRules(bool ignore_long_term_black_list_rules);
+
+  // Returns the current network quality estimates.
+  net::EffectiveConnectionType GetEffectiveConnectionType() const;
+  base::Optional<base::TimeDelta> GetHttpRttEstimate() const;
+
+  // Sends the given |headers| to |DataReductionProxySettings|.
+  void SetProxyRequestHeadersOnUI(const net::HttpRequestHeaders& headers);
+
+  // Sets a config client that can be used to update Data Reduction Proxy
+  // settings when the network service is enabled.
+  void SetCustomProxyConfigClient(
+      network::mojom::CustomProxyConfigClientPtrInfo config_client_info);
+
   // Accessor methods.
   DataReductionProxyCompressionStats* compression_stats() const {
     return compression_stats_.get();
@@ -145,6 +173,11 @@ class DataReductionProxyService
     return url_request_context_getter_;
   }
 
+  std::unique_ptr<network::SharedURLLoaderFactoryInfo> url_loader_factory_info()
+      const {
+    return url_loader_factory_->Clone();
+  }
+
   DataReductionProxyPingbackClient* pingback_client() const {
     return pingback_client_.get();
   }
@@ -155,10 +188,19 @@ class DataReductionProxyService
   FRIEND_TEST_ALL_PREFIXES(DataReductionProxySettingsTest,
                            TestLoFiSessionStateHistograms);
 
+  void OnEffectiveConnectionTypeChanged(
+      net::EffectiveConnectionType type) override;
+
+  void OnRTTOrThroughputEstimatesComputed(
+      base::TimeDelta http_rtt,
+      base::TimeDelta transport_rtt,
+      int32_t downstream_throughput_kbps) override;
+
   // Loads the Data Reduction Proxy configuration from |prefs_| and applies it.
   void ReadPersistedClientConfig();
 
   net::URLRequestContextGetter* url_request_context_getter_;
+  scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory_;
 
   // Tracks compression statistics to be displayed to the user.
   std::unique_ptr<DataReductionProxyCompressionStats> compression_stats_;
@@ -184,9 +226,18 @@ class DataReductionProxyService
   // make calls to IO based objects.
   base::WeakPtr<DataReductionProxyIOData> io_data_;
 
-  base::ObserverList<DataReductionProxyServiceObserver> observer_list_;
+  base::ObserverList<DataReductionProxyServiceObserver>::Unchecked
+      observer_list_;
 
   bool initialized_;
+
+  // Must be accessed on UI thread. Guaranteed to be non-null during the
+  // lifetime of |this|.
+  network::NetworkQualityTracker* network_quality_tracker_;
+
+  // Current network quality estimates.
+  net::EffectiveConnectionType effective_connection_type_;
+  base::Optional<base::TimeDelta> http_rtt_;
 
   SEQUENCE_CHECKER(sequence_checker_);
 

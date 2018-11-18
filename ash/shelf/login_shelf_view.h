@@ -5,8 +5,13 @@
 #ifndef ASH_SHELF_LOGIN_SHELF_VIEW_H_
 #define ASH_SHELF_LOGIN_SHELF_VIEW_H_
 
+#include <vector>
+
 #include "ash/ash_export.h"
 #include "ash/lock_screen_action/lock_screen_action_background_observer.h"
+#include "ash/login/login_screen_controller_observer.h"
+#include "ash/public/interfaces/kiosk_app_info.mojom.h"
+#include "ash/public/interfaces/login_screen.mojom.h"
 #include "ash/shutdown_controller.h"
 #include "ash/tray_action/tray_action_observer.h"
 #include "base/scoped_observer.h"
@@ -26,6 +31,9 @@ namespace ash {
 class LockScreenActionBackgroundController;
 enum class LockScreenActionBackgroundState;
 class TrayAction;
+class LoginScreenController;
+
+class KioskAppsButton;
 
 // LoginShelfView contains the shelf buttons visible outside of an active user
 // session. ShelfView and LoginShelfView should never be shown together.
@@ -33,17 +41,18 @@ class ASH_EXPORT LoginShelfView : public views::View,
                                   public views::ButtonListener,
                                   public TrayActionObserver,
                                   public LockScreenActionBackgroundObserver,
-                                  public ShutdownController::Observer {
+                                  public ShutdownController::Observer,
+                                  public LoginScreenControllerObserver {
  public:
   enum ButtonId {
-    kShutdown = 1,   // Shut down the device.
-    kRestart,        // Restart the device.
-    kSignOut,        // Sign out the active user session.
-    kCloseNote,      // Close the lock screen note.
-    kCancel,         // Cancel multiple user sign-in.
-    kBrowseAsGuest,  // Use in guest mode.
-    kAddUser,        // Add a new user.
-    kShowWebUiLogin  // Show webui login.
+    kShutdown = 1,    // Shut down the device.
+    kRestart,         // Restart the device.
+    kSignOut,         // Sign out the active user session.
+    kCloseNote,       // Close the lock screen note.
+    kCancel,          // Cancel multiple user sign-in.
+    kBrowseAsGuest,   // Use in guest mode.
+    kAddUser,         // Add a new user.
+    kApps,            // Show list of available kiosk apps.
   };
 
   explicit LoginShelfView(
@@ -53,6 +62,23 @@ class ASH_EXPORT LoginShelfView : public views::View,
   // ShelfWidget observes SessionController for higher-level UI changes and
   // then notifies LoginShelfView to update its own UI.
   void UpdateAfterSessionStateChange(session_manager::SessionState state);
+
+  // Sets the list of kiosk apps that can be launched from the login shelf.
+  void SetKioskApps(std::vector<mojom::KioskAppInfoPtr> kiosk_apps);
+
+  // Sets the state of the login dialog.
+  void SetLoginDialogState(mojom::OobeDialogState state);
+
+  // Sets if the guest button on the login shelf can be shown. Even if set to
+  // true the button may still not be visible.
+  void SetAllowLoginAsGuest(bool allow_guest);
+
+  // Sets if the guest button on the login shelf can be shown during gaia
+  // signin screen.
+  void SetShowGuestButtonForGaiaScreen(bool can_show);
+
+  // Sets whether users can be added from the login screen.
+  void SetAddUserButtonEnabled(bool enable_add_user);
 
   // views::View:
   const char* GetClassName() const override;
@@ -74,12 +100,19 @@ class ASH_EXPORT LoginShelfView : public views::View,
   // ShutdownController::Observer:
   void OnShutdownPolicyChanged(bool reboot_on_shutdown) override;
 
+  // LoginScreenControllerObserver:
+  void OnOobeDialogStateChanged(mojom::OobeDialogState state) override;
+
  private:
   bool LockScreenActionBackgroundAnimating() const;
 
   // Updates the visibility of buttons based on state changes, e.g. shutdown
   // policy updates, session state changes etc.
   void UpdateUi();
+
+  mojom::OobeDialogState dialog_state_ = mojom::OobeDialogState::HIDDEN;
+  bool allow_guest_ = true;
+  bool allow_guest_during_gaia_ = false;
 
   LockScreenActionBackgroundController* lock_screen_action_background_;
 
@@ -91,6 +124,11 @@ class ASH_EXPORT LoginShelfView : public views::View,
 
   ScopedObserver<ShutdownController, ShutdownController::Observer>
       shutdown_controller_observer_;
+
+  ScopedObserver<LoginScreenController, LoginScreenControllerObserver>
+      login_screen_controller_observer_;
+
+  KioskAppsButton* kiosk_apps_button_ = nullptr;  // Owned by view hierarchy
 
   DISALLOW_COPY_AND_ASSIGN(LoginShelfView);
 };

@@ -20,7 +20,7 @@
 #include "chrome/browser/chromeos/login/easy_unlock/easy_unlock_screenlock_state_handler.h"
 #include "chrome/browser/chromeos/login/easy_unlock/easy_unlock_types.h"
 #include "chromeos/components/proximity_auth/screenlock_state.h"
-#include "components/cryptauth/remote_device.h"
+#include "components/cryptauth/remote_device_ref.h"
 #include "components/keyed_service/core/keyed_service.h"
 
 class AccountId;
@@ -46,6 +46,10 @@ class Profile;
 class PrefRegistrySimple;
 
 namespace chromeos {
+
+namespace secure_channel {
+class SecureChannelClient;
+}  // namespace secure_channel
 
 class EasyUnlockAppManager;
 class EasyUnlockServiceObserver;
@@ -97,7 +101,6 @@ class EasyUnlockService : public KeyedService {
   // Gets/Sets the remote devices list.
   virtual const base::ListValue* GetRemoteDevices() const = 0;
   virtual void SetRemoteDevices(const base::ListValue& devices) = 0;
-  virtual void SetRemoteBleDevices(const base::ListValue& devices) = 0;
 
   // Runs the flow for turning Easy unlock off.
   virtual void RunTurnOffFlow() = 0;
@@ -139,6 +142,9 @@ class EasyUnlockService : public KeyedService {
 
   // Returns true if ChromeOS login is enabled by the user.
   virtual bool IsChromeOSLoginEnabled() const;
+
+  // TODO(crbug.com/894585): Remove this legacy special case after M71.
+  virtual bool IsInLegacyHostMode() const;
 
   // Sets the hardlock state for the associated user.
   void SetHardlockState(EasyUnlockScreenlockStateHandler::HardlockState state);
@@ -197,7 +203,8 @@ class EasyUnlockService : public KeyedService {
   }
 
  protected:
-  explicit EasyUnlockService(Profile* profile);
+  EasyUnlockService(Profile* profile,
+                    secure_channel::SecureChannelClient* secure_channel_client);
   ~EasyUnlockService() override;
 
   // Does a service type specific initialization.
@@ -225,8 +232,7 @@ class EasyUnlockService : public KeyedService {
   void Shutdown() override;
 
   // Exposes the profile to which the service is attached to subclasses.
-  const Profile* profile() const { return profile_; }
-  Profile* profile() { return profile_; }
+  Profile* profile() const { return profile_; }
 
   // Opens an Easy Unlock Setup app window.
   void OpenSetupApp();
@@ -269,7 +275,8 @@ class EasyUnlockService : public KeyedService {
   // are loaded for |account_id|.
   void SetProximityAuthDevices(
       const AccountId& account_id,
-      const cryptauth::RemoteDeviceList& remote_devices);
+      const cryptauth::RemoteDeviceRefList& remote_devices,
+      base::Optional<cryptauth::RemoteDeviceRef> local_device);
 
  private:
   // A class to detect whether a bluetooth adapter is present.
@@ -300,6 +307,7 @@ class EasyUnlockService : public KeyedService {
   void EnsureTpmKeyPresentIfNeeded();
 
   Profile* const profile_;
+  secure_channel::SecureChannelClient* secure_channel_client_;
 
   ChromeProximityAuthClient proximity_auth_client_;
 
@@ -316,7 +324,7 @@ class EasyUnlockService : public KeyedService {
   std::unique_ptr<BluetoothDetector> bluetooth_detector_;
 
   // Handles connecting, authenticating, and updating the UI on the lock/sign-in
-  // screen. After a |RemoteDevice| instance is provided, this object will
+  // screen. After a |RemoteDeviceRef| instance is provided, this object will
   // handle the rest.
   // TODO(tengs): This object is intended as a replacement of the background
   // page of the easy_unlock Chrome app. We are in the process of removing the
@@ -332,7 +340,7 @@ class EasyUnlockService : public KeyedService {
 
   bool tpm_key_checked_;
 
-  base::ObserverList<EasyUnlockServiceObserver> observers_;
+  base::ObserverList<EasyUnlockServiceObserver>::Unchecked observers_;
 
   base::WeakPtrFactory<EasyUnlockService> weak_ptr_factory_;
 

@@ -52,9 +52,9 @@ static_assert(FX_ArraySize(kOnedCode39CharacterEncoding) == 44, "Wrong size");
 
 }  // namespace
 
-CBC_OnedCode39Writer::CBC_OnedCode39Writer() : m_iWideNarrRatio(3) {}
+CBC_OnedCode39Writer::CBC_OnedCode39Writer() = default;
 
-CBC_OnedCode39Writer::~CBC_OnedCode39Writer() {}
+CBC_OnedCode39Writer::~CBC_OnedCode39Writer() = default;
 
 bool CBC_OnedCode39Writer::CheckContentValidity(
     const WideStringView& contents) {
@@ -73,6 +73,7 @@ bool CBC_OnedCode39Writer::CheckContentValidity(
 WideString CBC_OnedCode39Writer::FilterContents(
     const WideStringView& contents) {
   WideString filtercontents;
+  filtercontents.Reserve(contents.GetLength());
   for (size_t i = 0; i < contents.GetLength(); i++) {
     wchar_t ch = contents[i];
     if (ch == L'*' && (i == 0 || i == contents.GetLength() - 1)) {

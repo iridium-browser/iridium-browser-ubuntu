@@ -71,6 +71,8 @@ class CONTENT_EXPORT UtilityProcessHost
   // SANDBOX_TYPE_NO_SANDBOX is specified.
   void SetSandboxType(service_manager::SandboxType sandbox_type);
 
+  service_manager::SandboxType sandbox_type() const { return sandbox_type_; }
+
   // Returns information about the utility child process.
   const ChildProcessData& GetData();
 #if defined(OS_POSIX)
@@ -86,6 +88,11 @@ class CONTENT_EXPORT UtilityProcessHost
 
   // Sets the name of the process to appear in the task manager.
   void SetName(const base::string16& name);
+
+  // Sets the name used for metrics reporting. This should not be a localized
+  // name. This is recorded to metrics, so update UtilityProcessNameHash enum in
+  // enums.xml if new values are passed here.
+  void SetMetricsName(const std::string& metrics_name);
 
   void set_child_flags(int flags) { child_flags_ = flags; }
 
@@ -111,14 +118,6 @@ class CONTENT_EXPORT UtilityProcessHost
   void OnProcessLaunchFailed(int error_code) override;
   void OnProcessCrashed(int exit_code) override;
 
-  // Cleans up |this| as a result of a failed Start().
-  void NotifyAndDelete(int error_code);
-
-  // Notifies the client that the launch failed and deletes |host|.
-  static void NotifyLaunchFailedAndDelete(
-      base::WeakPtr<UtilityProcessHost> host,
-      int error_code);
-
   // Pointer to our client interface used for progress notifications.
   scoped_refptr<UtilityProcessHostClient> client_;
 
@@ -139,6 +138,9 @@ class CONTENT_EXPORT UtilityProcessHost
 
   // The process name used to identify the process in task manager.
   base::string16 name_;
+
+  // The non-localized name used for metrics reporting.
+  std::string metrics_name_;
 
   // Child process host implementation.
   std::unique_ptr<BrowserChildProcessHostImpl> process_;

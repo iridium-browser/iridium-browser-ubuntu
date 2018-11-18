@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "base/callback.h"
+#include "base/component_export.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
@@ -32,7 +33,7 @@ class AudioSender;
 
 namespace mirroring {
 
-class RtpStreamClient {
+class COMPONENT_EXPORT(MIRRORING_SERVICE) RtpStreamClient {
  public:
   virtual ~RtpStreamClient() {}
 
@@ -43,10 +44,6 @@ class RtpStreamClient {
   virtual void RequestRefreshFrame() = 0;
 
   // The following are for hardware video encoding.
-
-  // Query the supported hardware encoding profiles.
-  virtual media::VideoEncodeAccelerator::SupportedProfiles
-  GetSupportedVideoEncodeAcceleratorProfiles() = 0;
 
   virtual void CreateVideoEncodeAccelerator(
       const media::cast::ReceiveVideoEncodeAcceleratorCallback& callback) = 0;
@@ -65,22 +62,16 @@ class RtpStreamClient {
 // regular intervals for a short period of time. This provides the video
 // encoder, downstream, several copies of the last frame so that it may clear up
 // lossy encoding artifacts.
-class VideoRtpStream {
+class COMPONENT_EXPORT(MIRRORING_SERVICE) VideoRtpStream
+    : public base::SupportsWeakPtr<VideoRtpStream> {
  public:
   VideoRtpStream(std::unique_ptr<media::cast::VideoSender> video_sender,
                  base::WeakPtr<RtpStreamClient> client);
   ~VideoRtpStream();
 
-  static std::vector<media::cast::FrameSenderConfig> GetSupportedConfigs(
-      RtpStreamClient* client);
-
   // Called by VideoCaptureClient when a video frame is received.
   // |video_frame| is required to provide REFERENCE_TIME in the metadata.
   void InsertVideoFrame(scoped_refptr<media::VideoFrame> video_frame);
-
-  base::WeakPtr<VideoRtpStream> AsWeakPtr() {
-    return weak_factory_.GetWeakPtr();
-  }
 
   void SetTargetPlayoutDelay(base::TimeDelta playout_delay);
 
@@ -101,25 +92,20 @@ class VideoRtpStream {
   // cleared once the next frame is received.
   bool expecting_a_refresh_frame_;
 
-  base::WeakPtrFactory<VideoRtpStream> weak_factory_;
-
   DISALLOW_COPY_AND_ASSIGN(VideoRtpStream);
 };
 
 // Receives audio data and submits the data to media::cast::AudioSender.
-// TODO(xjz): Complete implementation after Audio Service mirroring refactoring
-// is landed.
-class AudioRtpStream {
+class COMPONENT_EXPORT(MIRRORING_SERVICE) AudioRtpStream
+    : public base::SupportsWeakPtr<AudioRtpStream> {
  public:
   AudioRtpStream(std::unique_ptr<media::cast::AudioSender> audio_sender,
                  base::WeakPtr<RtpStreamClient> client);
   ~AudioRtpStream();
 
-  static std::vector<media::cast::FrameSenderConfig> GetSupportedConfigs();
-
   // Called by AudioCaptureClient when new audio data is available.
   void InsertAudio(std::unique_ptr<media::AudioBus> audio_bus,
-                   base::TimeTicks estimated_capture_time);
+                   const base::TimeTicks& estimated_capture_time);
 
   void SetTargetPlayoutDelay(base::TimeDelta playout_delay);
 

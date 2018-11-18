@@ -23,6 +23,7 @@
 
 namespace blink {
 enum class WebFullscreenVideoStatus;
+struct PictureInPictureControlInfo;
 }  // namespace blink
 
 namespace media {
@@ -32,6 +33,10 @@ enum class MediaContentType;
 namespace gfx {
 class Size;
 }  // namespace size
+
+namespace viz {
+class SurfaceId;
+}  // namespace viz
 
 namespace content {
 
@@ -69,12 +74,17 @@ class CONTENT_EXPORT MediaWebContentsObserver : public WebContentsObserver {
   const base::Optional<MediaPlayerId>& GetPictureInPictureVideoMediaPlayerId()
       const;
 
+  // Reset the MediaPlayerId of the picture in picture video when user closes
+  // Picture-in-Picture window manually.
+  void ResetPictureInPictureVideoMediaPlayerId();
+
   // WebContentsObserver implementation.
   void WebContentsDestroyed() override;
   void RenderFrameDeleted(RenderFrameHost* render_frame_host) override;
   bool OnMessageReceived(const IPC::Message& message,
                          RenderFrameHost* render_frame_host) override;
   void OnVisibilityChanged(content::Visibility visibility) override;
+  void DidUpdateAudioMutingState(bool muted) override;
 
   // TODO(zqzhang): this method is temporarily in MediaWebContentsObserver as
   // the effectively fullscreen video code is also here. We need to consider
@@ -85,13 +95,16 @@ class CONTENT_EXPORT MediaWebContentsObserver : public WebContentsObserver {
   // Returns whether or not the given player id is active.
   bool IsPlayerActive(const MediaPlayerId& player_id) const;
 
+  // Called by the Picture-in-Picture controller when the associated window is
+  // resized. |window_size| represents the new size of the window. It MUST be
+  // called when there is a player in Picture-in-Picture.
+  void OnPictureInPictureWindowResize(const gfx::Size& window_size);
+
   bool has_audio_wake_lock_for_testing() const {
     return has_audio_wake_lock_for_testing_;
   }
 
-  bool has_video_wake_lock_for_testing() const {
-    return has_video_wake_lock_for_testing_;
-  }
+  bool has_video_wake_lock_for_testing() const { return has_video_wake_lock_; }
 
  protected:
   MediaSessionControllersManager* session_controllers_manager() {
@@ -119,10 +132,24 @@ class CONTENT_EXPORT MediaWebContentsObserver : public WebContentsObserver {
   void OnMediaMutedStatusChanged(RenderFrameHost* render_frame_host,
                                  int delegate_id,
                                  bool muted);
-  void OnPictureInPictureSourceChanged(RenderFrameHost* render_frame_host,
-                                       int delegate_id);
+  void OnPictureInPictureModeStarted(RenderFrameHost* render_frame_host,
+                                     int delegate_id,
+                                     const viz::SurfaceId&,
+                                     const gfx::Size& natural_size,
+                                     int request_id,
+                                     bool show_play_pause_button);
   void OnPictureInPictureModeEnded(RenderFrameHost* render_frame_host,
-                                   int delegate_id);
+                                   int delegate_id,
+                                   int request_id);
+  void OnSetPictureInPictureCustomControls(
+      RenderFrameHost* render_frame_host,
+      int delegate_id,
+      const std::vector<blink::PictureInPictureControlInfo>& controls);
+  void OnPictureInPictureSurfaceChanged(RenderFrameHost*,
+                                        int delegate_id,
+                                        const viz::SurfaceId&,
+                                        const gfx::Size&,
+                                        bool show_play_pause_button);
 
   // Clear |render_frame_host|'s tracking entry for its WakeLocks.
   void ClearWakeLocks(RenderFrameHost* render_frame_host);
@@ -130,12 +157,10 @@ class CONTENT_EXPORT MediaWebContentsObserver : public WebContentsObserver {
   device::mojom::WakeLock* GetAudioWakeLock();
   device::mojom::WakeLock* GetVideoWakeLock();
 
+  // WakeLock related methods for audio and video.
   void LockAudio();
-  void LockVideo();
-
   void CancelAudioLock();
-  void CancelVideoLock();
-  void MaybeCancelVideoLock();
+  void UpdateVideoLock();
 
   // Helper methods for adding or removing player entries in |player_map|.
   void AddMediaPlayerEntry(const MediaPlayerId& id,
@@ -149,6 +174,10 @@ class CONTENT_EXPORT MediaWebContentsObserver : public WebContentsObserver {
                                    ActiveMediaPlayerMap* player_map,
                                    std::set<MediaPlayerId>* removed_players);
 
+  // Internal method to exit Picture-in-Picture from an event received from the
+  // renderer process.
+  void ExitPictureInPictureInternal();
+
   // Convenience method that casts web_contents() to a WebContentsImpl*.
   WebContentsImpl* web_contents_impl() const;
 
@@ -161,7 +190,7 @@ class CONTENT_EXPORT MediaWebContentsObserver : public WebContentsObserver {
   base::Optional<MediaPlayerId> pip_player_;
   base::Optional<bool> picture_in_picture_allowed_in_fullscreen_;
   bool has_audio_wake_lock_for_testing_ = false;
-  bool has_video_wake_lock_for_testing_ = false;
+  bool has_video_wake_lock_ = false;
 
   MediaSessionControllersManager session_controllers_manager_;
 

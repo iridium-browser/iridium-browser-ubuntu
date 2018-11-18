@@ -15,7 +15,7 @@
 #include "base/memory/ref_counted_memory.h"
 #include "base/path_service.h"
 #include "base/strings/string_util.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
 #include "chrome/common/url_constants.h"
@@ -123,12 +123,12 @@ void SendLocalFileResourceWithOrigin(
     const std::string& origin,
     const content::URLDataSource::GotDataCallback& callback) {
   base::FilePath fullpath;
-  PathService::Get(base::DIR_SOURCE_ROOT, &fullpath);
+  base::PathService::Get(base::DIR_SOURCE_ROOT, &fullpath);
   fullpath = fullpath.AppendASCII(kBasePath).AppendASCII(path);
   content::URLDataSource::GotDataCallback wrapper =
       base::Bind(&CheckLocalIncludes, callback);
   base::PostTaskWithTraitsAndReplyWithResult(
-      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
       base::Bind(&ReadFileAndReturn, fullpath),
       base::Bind(&CallbackWithLoadedResource, origin, wrapper));
 }

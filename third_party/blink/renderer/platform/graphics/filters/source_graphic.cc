@@ -21,7 +21,7 @@
 #include "third_party/blink/renderer/platform/graphics/filters/source_graphic.h"
 
 #include "third_party/blink/renderer/platform/graphics/filters/filter.h"
-#include "third_party/blink/renderer/platform/text/text_stream.h"
+#include "third_party/blink/renderer/platform/wtf/text/text_stream.h"
 
 namespace blink {
 
@@ -36,15 +36,15 @@ SourceGraphic* SourceGraphic::Create(Filter* filter) {
 }
 
 FloatRect SourceGraphic::MapInputs(const FloatRect& rect) const {
-  return !source_rect_.IsEmpty() ? source_rect_ : rect;
+  return !source_rect_.IsEmpty() ? FloatRect(source_rect_) : rect;
 }
 
 void SourceGraphic::SetSourceRect(const IntRect& source_rect) {
   source_rect_ = source_rect;
 }
 
-TextStream& SourceGraphic::ExternalRepresentation(TextStream& ts,
-                                                  int indent) const {
+WTF::TextStream& SourceGraphic::ExternalRepresentation(WTF::TextStream& ts,
+                                                       int indent) const {
   WriteIndent(ts, indent);
   ts << "[SourceGraphic]\n";
   return ts;

@@ -32,7 +32,7 @@
 
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/public/web/web_apply_constraints_request.h"
-#include "third_party/blink/public/web/web_frame_client.h"
+#include "third_party/blink/public/web/web_local_frame_client.h"
 #include "third_party/blink/public/web/web_user_media_client.h"
 #include "third_party/blink/public/web/web_user_media_request.h"
 #include "third_party/blink/renderer/modules/mediastream/apply_constraints_request.h"
@@ -46,10 +46,10 @@ UserMediaClient::UserMediaClient(WebUserMediaClient* client)
 void UserMediaClient::RequestUserMedia(UserMediaRequest* request) {
   if (client_) {
     client_->RequestUserMedia(request);
-  } else {
-    request->Fail(WebUserMediaRequest::Error::kNotSupported,
-                  "User Media support is disabled");
+    return;
   }
+  request->Fail(WebUserMediaRequest::Error::kNotSupported,
+                "User Media support is disabled");
 }
 
 void UserMediaClient::CancelUserMediaRequest(UserMediaRequest* request) {
@@ -67,6 +67,13 @@ void UserMediaClient::StopTrack(MediaStreamComponent* track) {
   if (client_) {
     client_->StopTrack(WebMediaStreamTrack(track));
   }
+}
+
+bool UserMediaClient::IsCapturing() {
+  if (!client_)
+    return false;
+
+  return client_->IsCapturing();
 }
 
 }  // namespace blink

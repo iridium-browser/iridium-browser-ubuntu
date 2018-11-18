@@ -5,8 +5,10 @@
 #include "components/variations/variations_seed_store.h"
 
 #include <stdint.h>
+#include <utility>
 
 #include "base/base64.h"
+#include "base/bind_helpers.h"
 #include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/numerics/safe_math.h"
@@ -23,6 +25,7 @@
 
 #if defined(OS_ANDROID)
 #include "components/variations/android/variations_seed_bridge.h"
+#include "components/variations/metrics.h"
 #endif  // OS_ANDROID
 
 namespace variations {
@@ -62,14 +65,12 @@ VerifySignatureResult VerifySeedSignature(
 
   crypto::SignatureVerifier verifier;
   if (!verifier.VerifyInit(crypto::SignatureVerifier::ECDSA_SHA256,
-                           reinterpret_cast<const uint8_t*>(signature.data()),
-                           signature.size(), kPublicKey,
-                           arraysize(kPublicKey))) {
+                           base::as_bytes(base::make_span(signature)),
+                           kPublicKey)) {
     return VerifySignatureResult::INVALID_SIGNATURE;
   }
 
-  verifier.VerifyUpdate(reinterpret_cast<const uint8_t*>(seed_bytes.data()),
-                        seed_bytes.size());
+  verifier.VerifyUpdate(base::as_bytes(base::make_span(seed_bytes)));
   if (!verifier.VerifyFinal())
     return VerifySignatureResult::INVALID_SEED;
 
@@ -111,14 +112,17 @@ UpdateSeedDateResult GetSeedDateChangeState(
 }  // namespace
 
 VariationsSeedStore::VariationsSeedStore(PrefService* local_state)
-    : local_state_(local_state) {
+    : VariationsSeedStore(local_state, nullptr, base::DoNothing()) {}
+
+VariationsSeedStore::VariationsSeedStore(
+    PrefService* local_state,
+    std::unique_ptr<SeedResponse> initial_seed,
+    base::OnceCallback<void()> on_initial_seed_stored)
+    : local_state_(local_state),
+      on_initial_seed_stored_(std::move(on_initial_seed_stored)) {
 #if defined(OS_ANDROID)
-  // If there is a first run seed to import, do so as soon as possible. This is
-  // especially important because some clients query the seed store prefs
-  // directly rather than accessing them via the seed store API:
-  // https://crbug.com/829527
-  if (!local_state_->HasPrefPath(prefs::kVariationsSeedSignature))
-    ImportFirstRunJavaSeed();
+  if (initial_seed)
+    ImportInitialSeed(std::move(initial_seed));
 #endif  // OS_ANDROID
 }
 
@@ -420,33 +424,25 @@ void VariationsSeedStore::ClearPrefs(SeedType seed_type) {
 }
 
 #if defined(OS_ANDROID)
-void VariationsSeedStore::ImportFirstRunJavaSeed() {
-  DVLOG(1) << "Importing first run seed from Java preferences.";
-
-  std::string seed_data;
-  std::string seed_signature;
-  std::string seed_country;
-  std::string response_date;
-  bool is_gzip_compressed;
-
-  android::GetVariationsFirstRunSeed(&seed_data, &seed_signature, &seed_country,
-                                     &response_date, &is_gzip_compressed);
-  if (seed_data.empty()) {
+void VariationsSeedStore::ImportInitialSeed(
+    std::unique_ptr<SeedResponse> initial_seed) {
+  if (initial_seed->data.empty()) {
     RecordFirstRunSeedImportResult(
         FirstRunSeedImportResult::FAIL_NO_FIRST_RUN_SEED);
     return;
   }
 
-  base::Time current_date;
-  if (!base::Time::FromUTCString(response_date.c_str(), &current_date)) {
+  base::Time date;
+  if (!base::Time::FromUTCString(initial_seed->date.c_str(), &date)) {
     RecordFirstRunSeedImportResult(
         FirstRunSeedImportResult::FAIL_INVALID_RESPONSE_DATE);
-    LOG(WARNING) << "Invalid response date: " << response_date;
+    LOG(WARNING) << "Invalid response date: " << date;
     return;
   }
 
-  if (!StoreSeedData(seed_data, seed_signature, seed_country, current_date,
-                     false, is_gzip_compressed, false, nullptr)) {
+  if (!StoreSeedData(initial_seed->data, initial_seed->signature,
+                     initial_seed->country, date, false,
+                     initial_seed->is_gzip_compressed, false, nullptr)) {
     RecordFirstRunSeedImportResult(FirstRunSeedImportResult::FAIL_STORE_FAILED);
     LOG(WARNING) << "First run variations seed is invalid.";
     return;
@@ -539,15 +535,14 @@ bool VariationsSeedStore::StoreSeedDataNoDelta(
     return false;
   }
 
-#if defined(OS_ANDROID)
-  // If currently we do not have any stored pref then we mark seed storing as
-  // successful on the Java side of Chrome for Android to avoid repeated seed
-  // fetches and clear preferences on the Java side.
-  if (local_state_->GetString(prefs::kVariationsCompressedSeed).empty()) {
-    android::MarkVariationsSeedAsStored();
-    android::ClearJavaFirstRunPrefs();
+  // This callback is only useful on Chrome for Android.
+  if (!on_initial_seed_stored_.is_null()) {
+    // If currently we do not have any stored pref then we mark seed storing as
+    // successful on the Java side to avoid repeated seed fetches and clear
+    // preferences on the Java side.
+    if (local_state_->GetString(prefs::kVariationsCompressedSeed).empty())
+      std::move(on_initial_seed_stored_).Run();
   }
-#endif
 
   // Update the saved country code only if one was returned from the server.
   if (!country_code.empty())

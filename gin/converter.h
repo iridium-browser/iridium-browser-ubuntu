@@ -220,19 +220,23 @@ template <typename T>
 std::conditional_t<ToV8ReturnsMaybe<T>::value,
                    v8::MaybeLocal<v8::Value>,
                    v8::Local<v8::Value>>
-ConvertToV8(v8::Isolate* isolate, T input) {
+ConvertToV8(v8::Isolate* isolate, const T& input) {
   return Converter<T>::ToV8(isolate, input);
 }
 
 template <typename T>
-std::enable_if_t<ToV8ReturnsMaybe<T>::value, bool>
-TryConvertToV8(v8::Isolate* isolate, T input, v8::Local<v8::Value>* output) {
+std::enable_if_t<ToV8ReturnsMaybe<T>::value, bool> TryConvertToV8(
+    v8::Isolate* isolate,
+    const T& input,
+    v8::Local<v8::Value>* output) {
   return ConvertToV8(isolate, input).ToLocal(output);
 }
 
 template <typename T>
-std::enable_if_t<!ToV8ReturnsMaybe<T>::value, bool>
-TryConvertToV8(v8::Isolate* isolate, T input, v8::Local<v8::Value>* output) {
+std::enable_if_t<!ToV8ReturnsMaybe<T>::value, bool> TryConvertToV8(
+    v8::Isolate* isolate,
+    const T& input,
+    v8::Local<v8::Value>* output) {
   *output = ConvertToV8(isolate, input);
   return true;
 }
@@ -251,10 +255,12 @@ GIN_EXPORT v8::Local<v8::String> StringToSymbol(v8::Isolate* isolate,
 template<typename T>
 bool ConvertFromV8(v8::Isolate* isolate, v8::Local<v8::Value> input,
                    T* result) {
+  DCHECK(isolate);
   return Converter<T>::FromV8(isolate, input, result);
 }
 
-GIN_EXPORT std::string V8ToString(v8::Local<v8::Value> value);
+GIN_EXPORT std::string V8ToString(v8::Isolate* isolate,
+                                  v8::Local<v8::Value> value);
 
 }  // namespace gin
 

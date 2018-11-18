@@ -12,7 +12,6 @@
 
 #include "base/command_line.h"
 #include "base/logging.h"
-#include "base/mac/bind_objc_block.h"
 #include "base/mac/foundation_util.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
@@ -616,8 +615,8 @@ void HttpProtocolHandlerCore::AllocateReadBuffer(int last_read_data_size) {
     read_buffer_size_ = std::max(read_buffer_size_ / 2, kIOBufferMinSize);
   }
   read_buffer_.reset(static_cast<char*>(malloc(read_buffer_size_)));
-  read_buffer_wrapper_ =
-      new WrappedIOBuffer(static_cast<const char*>(read_buffer_.get()));
+  read_buffer_wrapper_ = base::MakeRefCounted<WrappedIOBuffer>(
+      static_cast<const char*>(read_buffer_.get()));
 }
 
 HttpProtocolHandlerCore::~HttpProtocolHandlerCore() {

@@ -23,11 +23,12 @@
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/plugins/plugin_prefs.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/webui/webui_util.h"
 #include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -53,13 +54,15 @@ using base::UserMetricsAction;
 using content::BrowserThread;
 using content::PluginService;
 using content::WebUIMessageHandler;
+using webui::webui_util::AddPair;
 
 namespace {
 
 content::WebUIDataSource* CreateNaClUIHTMLSource() {
   content::WebUIDataSource* source =
       content::WebUIDataSource::Create(chrome::kChromeUINaClHost);
-
+  source->OverrideContentSecurityPolicyScriptSrc(
+      "script-src chrome://resources 'self' 'unsafe-eval';");
   source->SetJsonPath("strings.js");
   source->AddResourcePath("about_nacl.css", IDR_ABOUT_NACL_CSS);
   source->AddResourcePath("about_nacl.js", IDR_ABOUT_NACL_JS);
@@ -155,17 +158,6 @@ void NaClDomHandler::RegisterMessages() {
                           base::Unretained(this)));
 }
 
-// Helper functions for collecting a list of key-value pairs that will
-// be displayed.
-void AddPair(base::ListValue* list,
-             const base::string16& key,
-             const base::string16& value) {
-  std::unique_ptr<base::DictionaryValue> results(new base::DictionaryValue());
-  results->SetString("key", key);
-  results->SetString("value", value);
-  list->Append(std::move(results));
-}
-
 // Generate an empty data-pair which acts as a line break.
 void AddLineBreak(base::ListValue* list) {
   AddPair(list, ASCIIToUTF16(""), ASCIIToUTF16(""));
@@ -259,7 +251,8 @@ void NaClDomHandler::AddPnaclInfo(base::ListValue* list) {
 
   // Obtain the version of the PNaCl translator.
   base::FilePath pnacl_path;
-  bool got_path = PathService::Get(chrome::DIR_PNACL_COMPONENT, &pnacl_path);
+  bool got_path =
+      base::PathService::Get(chrome::DIR_PNACL_COMPONENT, &pnacl_path);
   if (!got_path || pnacl_path.empty() || !pnacl_path_exists_) {
     AddPair(list,
             ASCIIToUTF16("PNaCl translator"),
@@ -344,7 +337,8 @@ void CheckVersion(const base::FilePath& pnacl_path, std::string* version) {
 
 bool CheckPathAndVersion(std::string* version) {
   base::FilePath pnacl_path;
-  bool got_path = PathService::Get(chrome::DIR_PNACL_COMPONENT, &pnacl_path);
+  bool got_path =
+      base::PathService::Get(chrome::DIR_PNACL_COMPONENT, &pnacl_path);
   if (got_path && !pnacl_path.empty() && base::PathExists(pnacl_path)) {
     CheckVersion(pnacl_path, version);
     return true;
@@ -361,7 +355,7 @@ void NaClDomHandler::MaybeRespondToPage() {
   if (!pnacl_path_validated_) {
     std::string* version_string = new std::string;
     base::PostTaskWithTraitsAndReplyWithResult(
-        FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
+        FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
         base::Bind(&CheckPathAndVersion, version_string),
         base::Bind(&NaClDomHandler::DidCheckPathAndVersion,
                    weak_ptr_factory_.GetWeakPtr(),

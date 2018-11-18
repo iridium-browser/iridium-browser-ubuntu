@@ -34,12 +34,6 @@ public class NavigationParams {
     public final boolean isExternalProtocol;
 
     /**
-     * If this navigation was triggered by an anchor with a download
-     * attribute, this is the (possibly empty) value of that attribute.
-     * */
-    public final String suggestedFilename;
-
-    /**
      * True if the navigation was originated from a navigation which had been
      * initiated by the user.
      */
@@ -48,9 +42,12 @@ public class NavigationParams {
     /** True if the navigation was originated from the main frame. */
     public final boolean isMainFrame;
 
+    /** True if navigation is renderer initiated. Eg clicking on a link. */
+    public final boolean isRendererInitiated;
+
     public NavigationParams(String url, String referrer, boolean isPost, boolean hasUserGesture,
             int pageTransitionType, boolean isRedirect, boolean isExternalProtocol,
-            boolean isMainFrame, String suggestedFilename, boolean hasUserGestureCarryover) {
+            boolean isMainFrame, boolean isRendererInitiated, boolean hasUserGestureCarryover) {
         this.url = url;
         this.referrer = TextUtils.isEmpty(referrer) ? null : referrer;
         this.isPost = isPost;
@@ -59,17 +56,17 @@ public class NavigationParams {
         this.isRedirect = isRedirect;
         this.isExternalProtocol = isExternalProtocol;
         this.isMainFrame = isMainFrame;
-        this.suggestedFilename = suggestedFilename;
+        this.isRendererInitiated = isRendererInitiated;
         this.hasUserGestureCarryover = hasUserGestureCarryover;
     }
 
     @CalledByNative
     public static NavigationParams create(String url, String referrer, boolean isPost,
             boolean hasUserGesture, int pageTransitionType, boolean isRedirect,
-            boolean isExternalProtocol, boolean isMainFrame, String suggestedFilename,
+            boolean isExternalProtocol, boolean isMainFrame, boolean isRendererInitiated,
             boolean hasUserGestureCarryover) {
         return new NavigationParams(url, referrer, isPost, hasUserGesture, pageTransitionType,
-                isRedirect, isExternalProtocol, isMainFrame, suggestedFilename,
+                isRedirect, isExternalProtocol, isMainFrame, isRendererInitiated,
                 hasUserGestureCarryover);
     }
 }

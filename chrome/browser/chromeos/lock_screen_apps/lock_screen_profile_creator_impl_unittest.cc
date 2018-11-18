@@ -14,14 +14,13 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
-#include "base/test/histogram_tester.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "base/test/simple_test_tick_clock.h"
 #include "chrome/browser/chromeos/arc/arc_session_manager.h"
 #include "chrome/browser/chromeos/login/users/scoped_test_user_manager.h"
 #include "chrome/browser/chromeos/note_taking_helper.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
-#include "chrome/browser/chromeos/settings/cros_settings.h"
-#include "chrome/browser/chromeos/settings/device_settings_service.h"
+#include "chrome/browser/chromeos/settings/scoped_cros_settings_test_helper.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/test_extension_system.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -260,7 +259,7 @@ class LockScreenProfileCreatorImplTest : public testing::Test {
         ListBuilder()
             .Append(DictionaryBuilder()
                         .Set("action", "new_note")
-                        .SetBoolean("enabled_on_lock_screen", true)
+                        .Set("enabled_on_lock_screen", true)
                         .Build())
             .Build();
 
@@ -342,8 +341,8 @@ class LockScreenProfileCreatorImplTest : public testing::Test {
   base::ScopedTempDir user_data_dir_;
   ScopedTestingLocalState local_state_;
   content::TestBrowserThreadBundle threads_;
-  chromeos::ScopedTestDeviceSettingsService test_device_settings_service_;
-  chromeos::ScopedTestCrosSettings test_cros_settings_;
+
+  chromeos::ScopedCrosSettingsTestHelper cros_settings_test_helper_;
   chromeos::ScopedTestUserManager test_user_manager_;
 
   UnittestProfileManager* profile_manager_;

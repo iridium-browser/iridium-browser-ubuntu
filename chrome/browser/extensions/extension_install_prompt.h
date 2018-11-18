@@ -55,7 +55,7 @@ class ExtensionInstallPrompt {
   enum PromptType {
     UNSET_PROMPT_TYPE = -1,
     INSTALL_PROMPT = 0,
-    INLINE_INSTALL_PROMPT = 1,
+    // INLINE_INSTALL_PROMPT_DEPRECATED = 1,
     // BUNDLE_INSTALL_PROMPT_DEPRECATED = 2,
     RE_ENABLE_PROMPT = 3,
     PERMISSIONS_PROMPT = 4,
@@ -67,6 +67,7 @@ class ExtensionInstallPrompt {
     DELEGATED_PERMISSIONS_PROMPT = 10,
     // DELEGATED_BUNDLE_PERMISSIONS_PROMPT_DEPRECATED = 11,
     NUM_PROMPT_TYPES = 12,
+    WEBSTORE_WIDGET_PROMPT = 13,
   };
 
   // The last prompt type to display; only used for testing.
@@ -75,17 +76,8 @@ class ExtensionInstallPrompt {
   // Enumeration for permissions and retained files details.
   enum DetailsType {
     PERMISSIONS_DETAILS = 0,
-    WITHHELD_PERMISSIONS_DETAILS,
     RETAINED_FILES_DETAILS,
     RETAINED_DEVICES_DETAILS,
-  };
-
-  // This enum is used to differentiate regular and withheld permissions for
-  // segregation in the install prompt.
-  enum PermissionsType {
-    REGULAR_PERMISSIONS = 0,
-    WITHHELD_PERMISSIONS,
-    ALL_PERMISSIONS,
   };
 
   // Extra information needed to display an installation or uninstallation
@@ -97,8 +89,7 @@ class ExtensionInstallPrompt {
     explicit Prompt(PromptType type);
     ~Prompt();
 
-    void AddPermissions(const extensions::PermissionMessages& permissions,
-                        PermissionsType permissions_type);
+    void AddPermissions(const extensions::PermissionMessages& permissions);
     void SetIsShowingDetails(DetailsType type,
                              size_t index,
                              bool is_showing_details);
@@ -115,14 +106,11 @@ class ExtensionInstallPrompt {
     // Returns the empty string when there should be no "accept" button.
     base::string16 GetAcceptButtonLabel() const;
     base::string16 GetAbortButtonLabel() const;
-    base::string16 GetPermissionsHeading(
-        PermissionsType permissions_type) const;
+    base::string16 GetPermissionsHeading() const;
     base::string16 GetRetainedFilesHeading() const;
     base::string16 GetRetainedDevicesHeading() const;
 
     bool ShouldShowPermissions() const;
-
-    bool ShouldUseTabModalDialog() const;
 
     // Getters for webstore metadata. Only populated when the type is
     // INLINE_INSTALL_PROMPT, EXTERNAL_INSTALL_PROMPT, or REPAIR_PROMPT.
@@ -135,13 +123,10 @@ class ExtensionInstallPrompt {
     void AppendRatingStars(StarAppender appender, void* data) const;
     base::string16 GetRatingCount() const;
     base::string16 GetUserCount() const;
-    size_t GetPermissionCount(PermissionsType permissions_type) const;
-    size_t GetPermissionsDetailsCount(PermissionsType permissions_type) const;
-    base::string16 GetPermission(size_t index,
-                                 PermissionsType permissions_type) const;
-    base::string16 GetPermissionsDetails(
-        size_t index,
-        PermissionsType permissions_type) const;
+    size_t GetPermissionCount() const;
+    size_t GetPermissionsDetailsCount() const;
+    base::string16 GetPermission(size_t index) const;
+    base::string16 GetPermissionsDetails(size_t index) const;
     bool GetIsShowingDetails(DetailsType type, size_t index) const;
     size_t GetRetainedFileCount() const;
     base::string16 GetRetainedFile(size_t index) const;
@@ -191,13 +176,6 @@ class ExtensionInstallPrompt {
 
     bool ShouldDisplayRevokeButton() const;
 
-    // Returns the InstallPromptPermissions corresponding to
-    // |permissions_type|.
-    InstallPromptPermissions& GetPermissionsForType(
-        PermissionsType permissions_type);
-    const InstallPromptPermissions& GetPermissionsForType(
-        PermissionsType permissions_type) const;
-
     bool ShouldDisplayRevokeFilesButton() const;
 
     const PromptType type_;
@@ -205,8 +183,6 @@ class ExtensionInstallPrompt {
     // Permissions that are being requested (may not be all of an extension's
     // permissions if only additional ones are being requested)
     InstallPromptPermissions prompt_permissions_;
-    // Permissions that will be withheld upon install.
-    InstallPromptPermissions withheld_prompt_permissions_;
 
     bool is_showing_details_for_retained_files_;
     bool is_showing_details_for_retained_devices_;

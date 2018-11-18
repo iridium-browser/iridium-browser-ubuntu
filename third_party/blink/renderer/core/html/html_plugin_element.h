@@ -67,7 +67,7 @@ class CORE_EXPORT HTMLPlugInElement
 
  public:
   ~HTMLPlugInElement() override;
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
   bool IsPlugin() override { return true; }
 
@@ -100,12 +100,8 @@ class CORE_EXPORT HTMLPlugInElement
 
   bool ShouldAccelerate() const;
 
-  void RequestPluginCreationWithoutLayoutObjectIfPossible();
-  void CreatePluginWithoutLayoutObject();
-
-  virtual ParsedFeaturePolicy ConstructContainerPolicy(
-      Vector<String>* /* messages */,
-      bool* /* old_syntax */) const;
+  ParsedFeaturePolicy ConstructContainerPolicy(
+      Vector<String>* /* messages */) const override;
 
  protected:
   HTMLPlugInElement(const QualifiedName& tag_name,
@@ -114,7 +110,7 @@ class CORE_EXPORT HTMLPlugInElement
                     PreferPlugInsForImagesOption);
 
   // Node functions:
-  void RemovedFrom(ContainerNode* insertion_point) override;
+  void RemovedFrom(ContainerNode& insertion_point) override;
   void DidMoveToNewDocument(Document& old_document) override;
   void AttachLayoutTree(AttachContext&) override;
 
@@ -164,7 +160,7 @@ class CORE_EXPORT HTMLPlugInElement
   bool CanContainRangeEndPoint() const override { return false; }
   bool CanStartSelection() const override;
   bool WillRespondToMouseClickEvents() final;
-  void DefaultEventHandler(Event*) final;
+  void DefaultEventHandler(Event&) final;
   void DetachLayoutTree(const AttachContext& = AttachContext()) final;
   void FinishParsingChildren() final;
 
@@ -174,6 +170,7 @@ class CORE_EXPORT HTMLPlugInElement
   bool IsFocusableStyle() const final;
   bool IsKeyboardFocusable() const final;
   void DidAddUserAgentShadowRoot(ShadowRoot&) final;
+  scoped_refptr<ComputedStyle> CustomStyleForLayoutObject() final;
 
   // HTMLElement overrides:
   bool HasCustomFocusLogic() const override;
@@ -191,8 +188,7 @@ class CORE_EXPORT HTMLPlugInElement
   bool LoadPlugin(const KURL&,
                   const String& mime_type,
                   const PluginParameters& plugin_params,
-                  bool use_fallback,
-                  bool require_layout_object);
+                  bool use_fallback);
   // Perform checks after we have determined that a plugin will be used to
   // show the object (i.e after allowedToLoadObject).
   bool AllowedToLoadPlugin(const KURL&, const String& mime_type);
@@ -228,6 +224,8 @@ class CORE_EXPORT HTMLPlugInElement
   // off embedded_content_view_ here while the plugin is persisting but not
   // being displayed.
   Member<WebPluginContainerImpl> persisted_plugin_;
+
+  bool handled_externally_ = false;
 };
 
 inline bool IsHTMLPlugInElement(const HTMLElement& element) {

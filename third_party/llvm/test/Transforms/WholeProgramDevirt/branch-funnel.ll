@@ -1,10 +1,14 @@
 ; RUN: opt -S -wholeprogramdevirt %s | FileCheck --check-prefixes=CHECK,RETP %s
 ; RUN: sed -e 's,+retpoline,-retpoline,g' %s | opt -S -wholeprogramdevirt | FileCheck --check-prefixes=CHECK,NORETP %s
+
 ; RUN: opt -wholeprogramdevirt -wholeprogramdevirt-summary-action=export -wholeprogramdevirt-read-summary=%S/Inputs/export.yaml -wholeprogramdevirt-write-summary=%t -S -o - %s | FileCheck --check-prefixes=CHECK,RETP %s
+
+; RUN: opt -wholeprogramdevirt -wholeprogramdevirt-summary-action=export -wholeprogramdevirt-read-summary=%S/Inputs/export.yaml -wholeprogramdevirt-write-summary=%t  -O3 -S -o - %s | FileCheck --check-prefixes=CHECK %s
+
 ; RUN: FileCheck --check-prefix=SUMMARY %s < %t
 
 ; SUMMARY:      TypeIdMap:       
-; SUMMARY-NEXT:   typeid1:         
+; SUMMARY-NEXT:   typeid3:
 ; SUMMARY-NEXT:     TTRes:           
 ; SUMMARY-NEXT:       Kind:            Unsat
 ; SUMMARY-NEXT:       SizeM1BitWidth:  0
@@ -17,7 +21,20 @@
 ; SUMMARY-NEXT:         Kind:            BranchFunnel
 ; SUMMARY-NEXT:         SingleImplName:  ''
 ; SUMMARY-NEXT:         ResByArg:        
-; SUMMARY-NEXT:   typeid2:         
+; SUMMARY-NEXT:   typeid1:
+; SUMMARY-NEXT:     TTRes:           
+; SUMMARY-NEXT:       Kind:            Unsat
+; SUMMARY-NEXT:       SizeM1BitWidth:  0
+; SUMMARY-NEXT:       AlignLog2:       0
+; SUMMARY-NEXT:       SizeM1:          0
+; SUMMARY-NEXT:       BitMask:         0
+; SUMMARY-NEXT:       InlineBits:      0
+; SUMMARY-NEXT:     WPDRes:          
+; SUMMARY-NEXT:       0:               
+; SUMMARY-NEXT:         Kind:            BranchFunnel
+; SUMMARY-NEXT:         SingleImplName:  ''
+; SUMMARY-NEXT:         ResByArg:        
+; SUMMARY-NEXT:   typeid2:
 ; SUMMARY-NEXT:     TTRes:           
 ; SUMMARY-NEXT:       Kind:            Unsat
 ; SUMMARY-NEXT:       SizeM1BitWidth:  0
@@ -28,19 +45,6 @@
 ; SUMMARY-NEXT:     WPDRes:          
 ; SUMMARY-NEXT:       0:               
 ; SUMMARY-NEXT:         Kind:            Indir
-; SUMMARY-NEXT:         SingleImplName:  ''
-; SUMMARY-NEXT:         ResByArg:        
-; SUMMARY-NEXT:   typeid3:         
-; SUMMARY-NEXT:     TTRes:           
-; SUMMARY-NEXT:       Kind:            Unsat
-; SUMMARY-NEXT:       SizeM1BitWidth:  0
-; SUMMARY-NEXT:       AlignLog2:       0
-; SUMMARY-NEXT:       SizeM1:          0
-; SUMMARY-NEXT:       BitMask:         0
-; SUMMARY-NEXT:       InlineBits:      0
-; SUMMARY-NEXT:     WPDRes:          
-; SUMMARY-NEXT:       0:               
-; SUMMARY-NEXT:         Kind:            BranchFunnel
 ; SUMMARY-NEXT:         SingleImplName:  ''
 ; SUMMARY-NEXT:         ResByArg:        
 
@@ -89,7 +93,10 @@ declare i32 @vf3_2(i8* %this, i32 %arg)
 declare i32 @vf4_1(i8* %this, i32 %arg)
 declare i32 @vf4_2(i8* %this, i32 %arg)
 
-; CHECK: define i32 @fn1
+
+
+; CHECK-LABEL: define i32 @fn1
+; CHECK-NOT: call void (...) @llvm.icall.branch.funnel
 define i32 @fn1(i8* %obj) #0 {
   %vtableptr = bitcast i8* %obj to [1 x i8*]**
   %vtable = load [1 x i8*]*, [1 x i8*]** %vtableptr
@@ -107,7 +114,8 @@ define i32 @fn1(i8* %obj) #0 {
   ret i32 %result
 }
 
-; CHECK: define i32 @fn2
+; CHECK-LABEL: define i32 @fn2
+; CHECK-NOT: call void (...) @llvm.icall.branch.funnel
 define i32 @fn2(i8* %obj) #0 {
   %vtableptr = bitcast i8* %obj to [1 x i8*]**
   %vtable = load [1 x i8*]*, [1 x i8*]** %vtableptr
@@ -122,7 +130,8 @@ define i32 @fn2(i8* %obj) #0 {
   ret i32 %result
 }
 
-; CHECK: define i32 @fn3
+; CHECK-LABEL: define i32 @fn3
+; CHECK-NOT: call void (...) @llvm.icall.branch.funnel
 define i32 @fn3(i8* %obj) #0 {
   %vtableptr = bitcast i8* %obj to [1 x i8*]**
   %vtable = load [1 x i8*]*, [1 x i8*]** %vtableptr
@@ -138,10 +147,9 @@ define i32 @fn3(i8* %obj) #0 {
   ret i32 %result
 }
 
-; CHECK: define internal void @branch_funnel(i8* nest, ...)
-
+; CHECK-LABEL: define internal void @branch_funnel(i8*
 ; CHECK: define hidden void @__typeid_typeid1_0_branch_funnel(i8* nest, ...)
-; CHECK-NEXT: call void (...) @llvm.icall.branch.funnel(i8* %0, i8* bitcast ([1 x i8*]* @vt1_1 to i8*), i32 (i8*, i32)* @vf1_1, i8* bitcast ([1 x i8*]* @vt1_2 to i8*), i32 (i8*, i32)* @vf1_2, ...)
+; CHECK-NEXT: musttail call void (...) @llvm.icall.branch.funnel(i8* %0, i8* bitcast ([1 x i8*]* {{(nonnull )?}}@vt1_1 to i8*), i32 (i8*, i32)* {{(nonnull )?}}@vf1_1, i8* bitcast ([1 x i8*]* {{(nonnull )?}}@vt1_2 to i8*), i32 (i8*, i32)* {{(nonnull )?}}@vf1_2, ...)
 
 declare i1 @llvm.type.test(i8*, metadata)
 declare void @llvm.assume(i1)

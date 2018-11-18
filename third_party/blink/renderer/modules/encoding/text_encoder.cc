@@ -30,9 +30,9 @@
 
 #include "third_party/blink/renderer/modules/encoding/text_encoder.h"
 
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/modules/encoding/encoding.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/wtf/text/cstring.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_encoding_registry.h"
 
@@ -67,10 +67,10 @@ NotShared<DOMUint8Array> TextEncoder::encode(const String& input) {
   // are present in the input.
   if (input.Is8Bit()) {
     result = codec_->Encode(input.Characters8(), input.length(),
-                            WTF::kEntitiesForUnencodables);
+                            WTF::kNoUnencodables);
   } else {
     result = codec_->Encode(input.Characters16(), input.length(),
-                            WTF::kEntitiesForUnencodables);
+                            WTF::kNoUnencodables);
   }
 
   const char* buffer = result.data();

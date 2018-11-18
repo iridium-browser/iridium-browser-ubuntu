@@ -50,9 +50,8 @@ std::unique_ptr<SyncScheduler> EngineComponentsFactoryImpl::BuildScheduler(
     // Only protocol types can have their delay customized.
     ModelTypeSet protocol_types = syncer::ProtocolTypes();
     std::map<ModelType, base::TimeDelta> nudge_delays;
-    for (ModelTypeSet::Iterator it = protocol_types.First(); it.Good();
-         it.Inc()) {
-      nudge_delays[it.Get()] =
+    for (ModelType type : protocol_types) {
+      nudge_delays[type] =
           TimeDelta::FromMilliseconds(kShortNudgeDelayDurationMS);
     }
     scheduler->OnReceivedCustomNudgeDelays(nudge_delays);
@@ -67,14 +66,16 @@ std::unique_ptr<SyncCycleContext> EngineComponentsFactoryImpl::BuildContext(
     const std::vector<SyncEngineEventListener*>& listeners,
     DebugInfoGetter* debug_info_getter,
     ModelTypeRegistry* model_type_registry,
-    const std::string& invalidation_client_id) {
-  return std::unique_ptr<SyncCycleContext>(
-      new SyncCycleContext(connection_manager, directory, extensions_activity,
-                           listeners, debug_info_getter, model_type_registry,
-                           switches_.encryption_method == ENCRYPTION_KEYSTORE,
-                           switches_.pre_commit_updates_policy ==
-                               FORCE_ENABLE_PRE_COMMIT_UPDATE_AVOIDANCE,
-                           invalidation_client_id));
+    const std::string& invalidation_client_id,
+    base::TimeDelta short_poll_interval,
+    base::TimeDelta long_poll_interval) {
+  return std::make_unique<SyncCycleContext>(
+      connection_manager, directory, extensions_activity, listeners,
+      debug_info_getter, model_type_registry,
+      switches_.encryption_method == ENCRYPTION_KEYSTORE,
+      switches_.pre_commit_updates_policy ==
+          FORCE_ENABLE_PRE_COMMIT_UPDATE_AVOIDANCE,
+      invalidation_client_id, short_poll_interval, long_poll_interval);
 }
 
 std::unique_ptr<syncable::DirectoryBackingStore>

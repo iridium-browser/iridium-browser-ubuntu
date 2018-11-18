@@ -29,7 +29,7 @@ class MediaControlTimelineElement : public MediaControlSliderElement {
 
   void OnPlaying();
 
-  void OnMediaKeyboardEvent(Event* event) { DefaultEventHandler(event); }
+  void OnMediaKeyboardEvent(Event* event) { DefaultEventHandler(*event); }
 
   void RenderBarSegments();
 
@@ -37,14 +37,14 @@ class MediaControlTimelineElement : public MediaControlSliderElement {
   void OnControlsShown();
   void OnControlsHidden();
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  protected:
   const char* GetNameForHistograms() const override;
 
  private:
-  void DefaultEventHandler(Event*) override;
-  bool KeepEventInNode(Event*) override;
+  void DefaultEventHandler(Event&) override;
+  bool KeepEventInNode(const Event&) const override;
 
   // Checks if we can begin or end a scrubbing event. If the event is a pointer
   // event then it needs to start and end with valid pointer events. If the

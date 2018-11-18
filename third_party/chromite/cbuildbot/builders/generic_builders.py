@@ -119,7 +119,7 @@ class Builder(object):
     try:
       parallel.RunParallelSteps(steps)
     except BaseException as ex:
-      logging.error('BaseException in _RunParallelStages %s' % ex,
+      logging.error('BaseException in _RunParallelStages %s', ex,
                     exc_info=True)
       # If a stage threw an exception, it might not have correctly reported
       # results (e.g. because it was killed before it could report the
@@ -142,7 +142,15 @@ class Builder(object):
             if (not db.HasFailureMsgForStage(build_stage_id) and
                 (stage_status is None or stage_status['status']
                  not in constants.BUILDER_NON_FAILURE_STATUSES)):
-              failures_lib.ReportStageFailureToCIDB(db, build_stage_id, ex)
+              metrics_fields = {
+                  'branch_name': stage.metrics_branch,
+                  'build_config': stage.build_config,
+                  'tryjob': stage.metrics_tryjob,
+                  'failed_stage': stage.name,
+                  'category': stage.category,
+              }
+              failures_lib.ReportStageFailure(
+                  db, build_stage_id, ex, metrics_fields=metrics_fields)
 
             # If this stage has non_completed status in buildStageTable, mark
             # the stage as 'fail' status in buildStageTable.
@@ -364,6 +372,25 @@ because the stage that threw the exception should be marked as failing.""")
     return success
 
 
+class ManifestVersionedBuilder(Builder):
+  """Base class for most custom Builder classes.
+
+  This class uses ManifestVersionedSync, which is appropriate for most builders
+  without specific sync requirements.
+  """
+  def GetVersionInfo(self):
+    """Returns the CrOS version info from the chromiumos-overlay."""
+    return manifest_version.VersionInfo.from_repo(self._run.buildroot)
+
+  def GetSyncInstance(self):
+    """Returns an instance of a SyncStage that should be run."""
+    return self._GetStageInstance(sync_stages.ManifestVersionedSyncStage)
+
+  def RunStages(self):
+    """Subclasses must override this method."""
+    raise NotImplementedError()
+
+
 class PreCqBuilder(Builder):
   """Builder that runs PreCQ tests.
 
@@ -388,14 +415,6 @@ class PreCqBuilder(Builder):
     self.patch_pool.gerrit_patches = []
 
     return self.sync_stage
-
-  def GetCompletionInstance(self):
-    """Return the completion instance.
-
-    Returns:
-      generic_stages.BuilderStage subclass, or None if completion hasn't run.
-    """
-    return self.completion_instance
 
   def RunStages(self):
     """Run something after sync/reexec."""

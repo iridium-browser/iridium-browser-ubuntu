@@ -6,11 +6,11 @@
 
 #include <utility>
 
+#include "base/containers/span.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/threading/thread_restrictions.h"
 #include "base/timer/elapsed_timer.h"
 #include "extensions/browser/api/declarative_net_request/flat/extension_ruleset_generated.h"
 #include "extensions/browser/api/declarative_net_request/utils.h"
@@ -35,7 +35,6 @@ RulesetMatcher::LoadRulesetResult RulesetMatcher::CreateVerifiedMatcher(
     std::unique_ptr<RulesetMatcher>* matcher) {
   DCHECK(matcher);
   DCHECK(IsAPIAvailable());
-  base::AssertBlockingAllowed();
 
   base::ElapsedTimer timer;
 
@@ -46,10 +45,15 @@ RulesetMatcher::LoadRulesetResult RulesetMatcher::CreateVerifiedMatcher(
   if (!base::ReadFileToString(indexed_ruleset_path, &ruleset_data))
     return kLoadErrorFileRead;
 
+  if (!StripVersionHeaderAndParseVersion(&ruleset_data))
+    return kLoadErrorVersionMismatch;
+
   // This guarantees that no memory access will end up outside the buffer.
-  if (!IsValidRulesetData(reinterpret_cast<const uint8_t*>(ruleset_data.data()),
-                          ruleset_data.size(), expected_ruleset_checksum)) {
-    return kLoadErrorRulesetVerification;
+  if (!IsValidRulesetData(
+          base::make_span(reinterpret_cast<const uint8_t*>(ruleset_data.data()),
+                          ruleset_data.size()),
+          expected_ruleset_checksum)) {
+    return kLoadErrorChecksumMismatch;
   }
 
   UMA_HISTOGRAM_TIMES(
@@ -77,10 +81,10 @@ bool RulesetMatcher::ShouldBlockRequest(const GURL& url,
   const bool disable_generic_rules = false;
 
   bool success =
-      !!blacklist_matcher_.FindMatch(
+      !!blocking_matcher_.FindMatch(
           url, first_party_origin, element_type, flat_rule::ActivationType_NONE,
           is_third_party, disable_generic_rules, FindRuleStrategy::kAny) &&
-      !whitelist_matcher_.FindMatch(
+      !allowing_matcher_.FindMatch(
           url, first_party_origin, element_type, flat_rule::ActivationType_NONE,
           is_third_party, disable_generic_rules, FindRuleStrategy::kAny);
   return success;
@@ -130,8 +134,8 @@ bool RulesetMatcher::ShouldRedirectRequest(
 RulesetMatcher::RulesetMatcher(std::string ruleset_data)
     : ruleset_data_(std::move(ruleset_data)),
       root_(flat::GetExtensionIndexedRuleset(ruleset_data_.data())),
-      blacklist_matcher_(root_->blacklist_index()),
-      whitelist_matcher_(root_->whitelist_index()),
+      blocking_matcher_(root_->blocking_index()),
+      allowing_matcher_(root_->allowing_index()),
       redirect_matcher_(root_->redirect_index()),
       metadata_list_(root_->extension_metadata()) {}
 

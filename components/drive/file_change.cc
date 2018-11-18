@@ -16,6 +16,11 @@ FileChange::Change::Change(ChangeType change, FileType file_type)
     : change_(change), file_type_(file_type) {
 }
 
+FileChange::Change::Change(ChangeType change,
+                           FileType file_type,
+                           const std::string& team_drive_id)
+    : change_(change), file_type_(file_type), team_drive_id_(team_drive_id) {}
+
 std::string FileChange::Change::DebugString() const {
   const char* change_string = nullptr;
   switch (change()) {
@@ -41,11 +46,9 @@ std::string FileChange::Change::DebugString() const {
   return base::StringPrintf("%s:%s", change_string, type_string);
 }
 
-FileChange::ChangeList::ChangeList() {
-}
+FileChange::ChangeList::ChangeList() = default;
 FileChange::ChangeList::ChangeList(const ChangeList& other) = default;
-FileChange::ChangeList::~ChangeList() {
-}
+FileChange::ChangeList::~ChangeList() = default;
 
 void FileChange::ChangeList::Update(const Change& new_change) {
   if (list_.empty()) {
@@ -55,6 +58,11 @@ void FileChange::ChangeList::Update(const Change& new_change) {
 
   Change& last = list_.back();
   if (last.IsFile() != new_change.IsFile()) {
+    list_.push_back(new_change);
+    return;
+  }
+
+  if (last.team_drive_id() != new_change.team_drive_id()) {
     list_.push_back(new_change);
     return;
   }
@@ -89,10 +97,9 @@ std::string FileChange::ChangeList::DebugString() const {
   return ss.str();
 }
 
-FileChange::FileChange() {
-}
+FileChange::FileChange() = default;
 FileChange::FileChange(const FileChange& other) = default;
-FileChange::~FileChange() {}
+FileChange::~FileChange() = default;
 
 void FileChange::Update(const base::FilePath file_path,
                         const FileChange::Change& new_change) {
@@ -117,25 +124,28 @@ void FileChange::Update(const base::FilePath file_path,
 void FileChange::Update(const base::FilePath file_path,
                         const ResourceEntry& entry,
                         FileChange::ChangeType change) {
-  FileType type = !entry.has_file_info()
-                      ? FILE_TYPE_NO_INFO
-                      : entry.file_info().is_directory() ? FILE_TYPE_DIRECTORY
-                                                         : FILE_TYPE_FILE;
-
-  Update(file_path, type, change);
+  FileType type = FILE_TYPE_NO_INFO;
+  std::string team_drive_id;
+  if (entry.has_file_info()) {
+    type =
+        entry.file_info().is_directory() ? FILE_TYPE_DIRECTORY : FILE_TYPE_FILE;
+    if (entry.file_info().is_team_drive_root()) {
+      team_drive_id = entry.resource_id();
+    }
+  }
+  Update(file_path, FileChange::Change(change, type, team_drive_id));
 }
 
 void FileChange::Apply(const FileChange& new_changed_files) {
-  for (Map::const_iterator it = new_changed_files.map().begin();
-       it != new_changed_files.map().end();
-       it++) {
+  for (auto it = new_changed_files.map().begin();
+       it != new_changed_files.map().end(); it++) {
     Update(it->first, it->second);
   }
 }
 
 size_t FileChange::CountDirectory(const base::FilePath& directory_path) const {
   size_t count = 0;
-  for (Map::const_iterator it = map_.begin(); it != map_.end(); it++) {
+  for (auto it = map_.begin(); it != map_.end(); it++) {
     if (it->first.DirName() == directory_path)
       count++;
   }
@@ -145,8 +155,7 @@ size_t FileChange::CountDirectory(const base::FilePath& directory_path) const {
 std::string FileChange::DebugString() const {
   std::ostringstream ss;
   ss << "{ ";
-  for (FileChange::Map::const_iterator it = map_.begin(); it != map_.end();
-       it++) {
+  for (auto it = map_.begin(); it != map_.end(); it++) {
     ss << it->first.value() << ": " << it->second.DebugString() << ", ";
   }
   ss << "}";

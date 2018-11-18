@@ -7,9 +7,12 @@
 #include "base/base64.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/post_task.h"
 #include "content/browser/devtools/protocol/network_handler.h"
 #include "content/browser/devtools/protocol/page.h"
+#include "content/browser/loader/download_utils_impl.h"
 #include "content/browser/loader/resource_request_info_impl.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "ipc/ipc_channel.h"
 #include "net/base/completion_once_callback.h"
 #include "net/base/elements_upload_data_stream.h"
@@ -17,11 +20,13 @@
 #include "net/base/upload_bytes_element_reader.h"
 #include "net/base/upload_element_reader.h"
 #include "net/cert/cert_status_flags.h"
+#include "net/cookies/cookie_options.h"
+#include "net/cookies/cookie_store.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_util.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/url_request/url_request_context.h"
-
+#include "third_party/blink/public/platform/resource_request_blocked_reason.h"
 namespace {
 static const int kInitialBufferSize = 4096;
 static const int kMaxBufferSize = IPC::Channel::kMaximumMessageSize / 4;
@@ -103,8 +108,8 @@ DevToolsURLInterceptorRequestJob::SubRequest::SubRequest(
             "This feature cannot be disabled in settings, however it happens "
             "only when user is debugging a page."
           chrome_policy {
-            DeveloperToolsDisabled {
-              DeveloperToolsDisabled: true
+            DeveloperToolsAvailability {
+              DeveloperToolsAvailability: 2
             }
           }
         })");
@@ -118,6 +123,13 @@ DevToolsURLInterceptorRequestJob::SubRequest::SubRequest(
       devtools_interceptor_request_job->request_headers_callback_);
   request_->SetResponseHeadersCallback(
       devtools_interceptor_request_job->response_headers_callback_);
+
+  net::URLRequest* original_request =
+      devtools_interceptor_request_job_->request();
+  request_->set_attach_same_site_cookies(
+      original_request->attach_same_site_cookies());
+  request_->set_site_for_cookies(original_request->site_for_cookies());
+  request_->set_initiator(original_request->initiator());
 
   // Mimic the ResourceRequestInfoImpl of the original request.
   const ResourceRequestInfoImpl* resource_request_info =
@@ -134,7 +146,6 @@ DevToolsURLInterceptorRequestJob::SubRequest::SubRequest(
       resource_request_info->IsMainFrame(),
       resource_request_info->GetResourceType(),
       resource_request_info->GetPageTransition(),
-      resource_request_info->should_replace_current_entry(),
       resource_request_info->IsDownload(), resource_request_info->is_stream(),
       resource_request_info->allow_download(),
       resource_request_info->HasUserGesture(),
@@ -146,10 +157,10 @@ DevToolsURLInterceptorRequestJob::SubRequest::SubRequest(
       resource_request_info->IsPrerendering(),
       resource_request_info->GetContext(),
       resource_request_info->ShouldReportRawHeaders(),
+      resource_request_info->ShouldReportSecurityInfo(),
       resource_request_info->IsAsync(),
       resource_request_info->GetPreviewsState(), resource_request_info->body(),
-      resource_request_info->initiated_in_secure_context(),
-      resource_request_info->suggested_filename());
+      resource_request_info->initiated_in_secure_context());
   extra_data->AssociateWithRequest(request_.get());
 
   if (request_details.post_data)
@@ -264,7 +275,7 @@ DevToolsURLInterceptorRequestJob::InterceptedRequest::InterceptedRequest(
     : SubRequest(request_details,
                  devtools_interceptor_request_job,
                  interceptor),
-      response_buffer_(new net::GrowableIOBuffer()),
+      response_buffer_(base::MakeRefCounted<net::GrowableIOBuffer>()),
       read_response_result_(0),
       read_started_(false) {}
 
@@ -447,8 +458,6 @@ int DevToolsURLInterceptorRequestJob::MockResponseDetails::ReadRawData(
 
 namespace {
 
-using DevToolsStatus = ResourceRequestInfoImpl::DevToolsStatus;
-
 void SendPendingBodyRequestsOnUiThread(
     std::vector<std::unique_ptr<
         protocol::Network::Backend::GetResponseBodyForInterceptionCallback>>
@@ -523,12 +532,20 @@ std::unique_ptr<net::UploadDataStream> GetUploadData(net::URLRequest* request) {
       std::move(proxy_readers), 0);
 }
 
-void SetDevToolsStatus(net::URLRequest* request,
-                       DevToolsStatus devtools_status) {
-  ResourceRequestInfoImpl* resource_request_info =
-      ResourceRequestInfoImpl::ForRequest(request);
-  DCHECK(resource_request_info);
-  resource_request_info->set_devtools_status(devtools_status);
+bool IsDownload(net::URLRequest* orig_request, net::URLRequest* subrequest) {
+  auto* req_info = ResourceRequestInfoImpl::ForRequest(orig_request);
+  // Only happens to downloads that are initiated by the download manager.
+  if (req_info->IsDownload())
+    return true;
+
+  // Note this will not correctly identify a download for the MIME types
+  // inferred with content sniffing. The new interception implementation
+  // should not have this problem, as it's on top of MIME sniffer.
+  std::string mime_type;
+  subrequest->GetMimeType(&mime_type);
+  return req_info->allow_download() &&
+         download_utils::IsDownload(orig_request->url(),
+                                    subrequest->response_headers(), mime_type);
 }
 
 }  // namespace
@@ -541,7 +558,6 @@ DevToolsURLInterceptorRequestJob::DevToolsURLInterceptorRequestJob(
     net::NetworkDelegate* original_network_delegate,
     const base::UnguessableToken& devtools_token,
     DevToolsNetworkInterceptor::RequestInterceptedCallback callback,
-    bool is_redirect,
     ResourceType resource_type,
     InterceptionStage stage_to_intercept)
     : net::URLRequestJob(original_request, original_network_delegate),
@@ -559,7 +575,6 @@ DevToolsURLInterceptorRequestJob::DevToolsURLInterceptorRequestJob(
       owning_entry_id_(owning_entry_id),
       devtools_token_(devtools_token),
       callback_(callback),
-      is_redirect_(is_redirect),
       resource_type_(resource_type),
       stage_to_intercept_(stage_to_intercept),
       weak_ptr_factory_(this) {
@@ -581,28 +596,32 @@ void DevToolsURLInterceptorRequestJob::SetExtraRequestHeaders(
 
 void DevToolsURLInterceptorRequestJob::Start() {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  if (stage_to_intercept_ == InterceptionStage::DONT_INTERCEPT) {
-    sub_request_.reset(new SubRequest(request_details_, this, interceptor_));
+  auto* store = request_details_.url_request_context->cookie_store();
+  if (!store || (request()->load_flags() & net::LOAD_DO_NOT_SEND_COOKIES)) {
+    StartWithCookies(net::CookieList());
     return;
   }
 
-  if (is_redirect_) {
-    if (stage_to_intercept_ == InterceptionStage::REQUEST) {
-      // If we are a redirect and we do not plan on grabbing the response we are
-      // done. If we are here this means we must have already sent an
-      // intercepted event to front-end for this redirect and the front-end
-      // allowed it. Since we have already allowed the redirect and we are only
-      // intercepting the request, we only need to catch it again if it's
-      // another redirect, which SubRequest will send the
-      // OnSubRequestRedirectReceived event.
-      sub_request_.reset(new SubRequest(request_details_, this, interceptor_));
-    } else {
-      // Otherwise we have already issued the request interception and had a
-      // continue and now we must issue a response interception for the
-      // redirect.
-      sub_request_.reset(
-          new InterceptedRequest(request_details_, this, interceptor_));
-    }
+  net::CookieOptions options;
+  options.set_include_httponly();
+  if (request()->attach_same_site_cookies()) {
+    options.set_same_site_cookie_mode(
+        net::CookieOptions::SameSiteCookieMode::INCLUDE_STRICT_AND_LAX);
+  }
+  store->GetCookieListWithOptionsAsync(
+      request_details_.url, options,
+      base::BindOnce(&DevToolsURLInterceptorRequestJob::StartWithCookies,
+                     weak_ptr_factory_.GetWeakPtr()));
+}
+
+void DevToolsURLInterceptorRequestJob::StartWithCookies(
+    const net::CookieList& cookie_list) {
+  request_details_.cookie_line =
+      net::CanonicalCookie::BuildCookieLine(cookie_list);
+
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+  if (stage_to_intercept_ == InterceptionStage::DONT_INTERCEPT) {
+    sub_request_.reset(new SubRequest(request_details_, this, interceptor_));
     return;
   }
 
@@ -617,14 +636,12 @@ void DevToolsURLInterceptorRequestJob::Start() {
   DCHECK(stage_to_intercept_ == InterceptionStage::REQUEST ||
          stage_to_intercept_ == InterceptionStage::BOTH);
   waiting_for_user_response_ = WaitingForUserResponse::WAITING_FOR_REQUEST_ACK;
-  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                          base::BindOnce(callback_, BuildRequestInfo()));
+  base::PostTaskWithTraits(FROM_HERE, {BrowserThread::UI},
+                           base::BindOnce(callback_, BuildRequestInfo()));
 }
 
 void DevToolsURLInterceptorRequestJob::Kill() {
-  if (sub_request_)
-    sub_request_->Cancel();
-
+  sub_request_.reset();
   URLRequestJob::Kill();
 }
 
@@ -746,8 +763,8 @@ void DevToolsURLInterceptorRequestJob::OnSubRequestAuthRequired(
           .SetScheme(auth_info->scheme)
           .SetRealm(auth_info->realm)
           .Build();
-  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                          base::BindOnce(callback_, std::move(request_info)));
+  base::PostTaskWithTraits(FROM_HERE, {BrowserThread::UI},
+                           base::BindOnce(callback_, std::move(request_info)));
 }
 
 void DevToolsURLInterceptorRequestJob::OnSubRequestResponseStarted(
@@ -769,13 +786,10 @@ void DevToolsURLInterceptorRequestJob::OnSubRequestRedirectReceived(
     bool* defer_redirect) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK(sub_request_);
-  SetDevToolsStatus(sub_request_->request(),
-                    DevToolsStatus::kCanceledAsRedirect);
 
   // If we're not intercepting results or are a response then cancel this
   // redirect and tell the parent request it was redirected through |redirect_|.
-  if (stage_to_intercept_ == InterceptionStage::DONT_INTERCEPT ||
-      stage_to_intercept_ == InterceptionStage::RESPONSE) {
+  if (!(stage_to_intercept_ & InterceptionStage::RESPONSE)) {
     *defer_redirect = false;
     ProcessRedirect(redirectinfo.status_code, redirectinfo.new_url.spec());
     redirect_.reset();
@@ -805,8 +819,8 @@ void DevToolsURLInterceptorRequestJob::OnSubRequestRedirectReceived(
       protocol::Object::fromValue(headers_dict.get(), nullptr);
   request_info->http_response_status_code = redirectinfo.status_code;
   request_info->redirect_url = redirectinfo.new_url.spec();
-  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                          base::BindOnce(callback_, std::move(request_info)));
+  base::PostTaskWithTraits(FROM_HERE, {BrowserThread::UI},
+                           base::BindOnce(callback_, std::move(request_info)));
   sub_request_.reset();
 }
 
@@ -839,9 +853,10 @@ void DevToolsURLInterceptorRequestJob::OnInterceptedRequestResponseStarted(
         sub_request_->request()->GetResponseCode();
     request_info->response_headers =
         protocol::Object::fromValue(headers_dict.get(), nullptr);
+    request_info->is_download = IsDownload(request(), sub_request_->request());
   }
-  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                          base::BindOnce(callback_, std::move(request_info)));
+  base::PostTaskWithTraits(FROM_HERE, {BrowserThread::UI},
+                           base::BindOnce(callback_, std::move(request_info)));
 }
 
 // If result is < 0 it means error.
@@ -851,8 +866,8 @@ void DevToolsURLInterceptorRequestJob::OnInterceptedRequestResponseReady(
   DCHECK(sub_request_);
   if (result < 0) {
     sub_request_->Cancel();
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, {BrowserThread::UI},
         base::BindOnce(
             &SendPendingBodyRequestsWithErrorOnUiThread,
             std::move(pending_body_requests_),
@@ -860,10 +875,10 @@ void DevToolsURLInterceptorRequestJob::OnInterceptedRequestResponseReady(
                 "Could not get response body because of error code: %d",
                 result))));
   } else {
-    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                            base::BindOnce(&SendPendingBodyRequestsOnUiThread,
-                                           std::move(pending_body_requests_),
-                                           std::string(buf.data(), result)));
+    base::PostTaskWithTraits(FROM_HERE, {BrowserThread::UI},
+                             base::BindOnce(&SendPendingBodyRequestsOnUiThread,
+                                            std::move(pending_body_requests_),
+                                            std::string(buf.data(), result)));
   }
   if (request_->status().status() == net::URLRequestStatus::CANCELED ||
       waiting_for_user_response_ != WaitingForUserResponse::NOT_WAITING) {
@@ -895,8 +910,7 @@ void DevToolsURLInterceptorRequestJob::StopIntercepting() {
               base::nullopt, base::nullopt, protocol::Maybe<std::string>(),
               protocol::Maybe<std::string>(), protocol::Maybe<std::string>(),
               protocol::Maybe<protocol::Network::Headers>(),
-              protocol::Maybe<protocol::Network::AuthChallengeResponse>(),
-              false));
+              protocol::Maybe<protocol::Network::AuthChallengeResponse>()));
       return;
     case WaitingForUserResponse::WAITING_FOR_AUTH_ACK: {
       std::unique_ptr<protocol::Network::AuthChallengeResponse> auth_response =
@@ -909,7 +923,7 @@ void DevToolsURLInterceptorRequestJob::StopIntercepting() {
               base::nullopt, base::nullopt, protocol::Maybe<std::string>(),
               protocol::Maybe<std::string>(), protocol::Maybe<std::string>(),
               protocol::Maybe<protocol::Network::Headers>(),
-              std::move(auth_response), false));
+              std::move(auth_response)));
       return;
     }
 
@@ -925,8 +939,8 @@ void DevToolsURLInterceptorRequestJob::ContinueInterceptedRequest(
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   switch (waiting_for_user_response_) {
     case WaitingForUserResponse::NOT_WAITING:
-      BrowserThread::PostTask(
-          BrowserThread::UI, FROM_HERE,
+      base::PostTaskWithTraits(
+          FROM_HERE, {BrowserThread::UI},
           base::BindOnce(&ContinueInterceptedRequestCallback::sendFailure,
                          std::move(callback),
                          protocol::Response::InvalidParams(
@@ -937,8 +951,8 @@ void DevToolsURLInterceptorRequestJob::ContinueInterceptedRequest(
     // Fallthough.
     case WaitingForUserResponse::WAITING_FOR_REQUEST_ACK:
       if (modifications->auth_challenge_response.isJust()) {
-        BrowserThread::PostTask(
-            BrowserThread::UI, FROM_HERE,
+        base::PostTaskWithTraits(
+            FROM_HERE, {BrowserThread::UI},
             base::BindOnce(&ContinueInterceptedRequestCallback::sendFailure,
                            std::move(callback),
                            protocol::Response::InvalidParams(
@@ -946,16 +960,16 @@ void DevToolsURLInterceptorRequestJob::ContinueInterceptedRequest(
         break;
       }
       ProcessInterceptionResponse(std::move(modifications));
-      BrowserThread::PostTask(
-          BrowserThread::UI, FROM_HERE,
+      base::PostTaskWithTraits(
+          FROM_HERE, {BrowserThread::UI},
           base::BindOnce(&ContinueInterceptedRequestCallback::sendSuccess,
                          std::move(callback)));
       break;
 
     case WaitingForUserResponse::WAITING_FOR_AUTH_ACK:
       if (!modifications->auth_challenge_response.isJust()) {
-        BrowserThread::PostTask(
-            BrowserThread::UI, FROM_HERE,
+        base::PostTaskWithTraits(
+            FROM_HERE, {BrowserThread::UI},
             base::BindOnce(&ContinueInterceptedRequestCallback::sendFailure,
                            std::move(callback),
                            protocol::Response::InvalidParams(
@@ -963,13 +977,13 @@ void DevToolsURLInterceptorRequestJob::ContinueInterceptedRequest(
         break;
       }
       if (ProcessAuthResponse(std::move(modifications))) {
-        BrowserThread::PostTask(
-            BrowserThread::UI, FROM_HERE,
+        base::PostTaskWithTraits(
+            FROM_HERE, {BrowserThread::UI},
             base::BindOnce(&ContinueInterceptedRequestCallback::sendSuccess,
                            std::move(callback)));
       } else {
-        BrowserThread::PostTask(
-            BrowserThread::UI, FROM_HERE,
+        base::PostTaskWithTraits(
+            FROM_HERE, {BrowserThread::UI},
             base::BindOnce(&ContinueInterceptedRequestCallback::sendFailure,
                            std::move(callback),
                            protocol::Response::InvalidParams(
@@ -997,7 +1011,6 @@ void DevToolsURLInterceptorRequestJob::ProcessRedirect(
       base::MakeRefCounted<net::HttpResponseHeaders>(raw_headers), "", 0,
       base::TimeTicks::Now()));
 
-  interceptor_->ExpectRequestAfterRedirect(request(), interception_id_);
   NotifyHeadersComplete();
 }
 
@@ -1016,8 +1029,8 @@ void DevToolsURLInterceptorRequestJob::GetResponseBody(
         "received.";
   }
   if (error_reason.size()) {
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, {BrowserThread::UI},
         base::BindOnce(
             &GetResponseBodyForInterceptionCallback::sendFailure,
             std::move(callback),
@@ -1034,7 +1047,8 @@ DevToolsURLInterceptorRequestJob::BuildRequestInfo() {
   auto result = std::make_unique<InterceptedRequestInfo>();
   result->interception_id = interception_id_;
   result->network_request =
-      protocol::NetworkHandler::CreateRequestFromURLRequest(request());
+      protocol::NetworkHandler::CreateRequestFromURLRequest(
+          request(), request_details_.cookie_line);
   result->frame_id = devtools_token_;
   result->resource_type = resource_type_;
   result->is_navigation =
@@ -1048,13 +1062,20 @@ void DevToolsURLInterceptorRequestJob::ProcessInterceptionResponse(
                          WaitingForUserResponse::WAITING_FOR_RESPONSE_ACK;
   waiting_for_user_response_ = WaitingForUserResponse::NOT_WAITING;
 
-  if (modifications->mark_as_canceled)
-    SetDevToolsStatus(request(), DevToolsStatus::kCanceled);
-
   if (modifications->error_reason) {
     if (sub_request_) {
       sub_request_->Cancel();
       sub_request_.reset();
+    }
+    if (modifications->error_reason == net::ERR_BLOCKED_BY_CLIENT) {
+      // So we know that these modifications originated from devtools
+      // (also known as inspector), and can therefore annotate the
+      // request. We only do this for one specific error code thus
+      // far, to minimize risk of breaking other usages.
+      ResourceRequestInfoImpl* resource_request_info =
+          ResourceRequestInfoImpl::ForRequest(request());
+      resource_request_info->SetResourceRequestBlockedReason(
+          blink::ResourceRequestBlockedReason::kInspector);
     }
     NotifyStartError(net::URLRequestStatus(net::URLRequestStatus::FAILED,
                                            *modifications->error_reason));
@@ -1065,9 +1086,31 @@ void DevToolsURLInterceptorRequestJob::ProcessInterceptionResponse(
     mock_response_details_.reset(new MockResponseDetails(
         std::move(*modifications->raw_response), base::TimeTicks::Now()));
 
-    std::string value;
-    if (mock_response_details_->response_headers()->IsRedirect(&value)) {
-      interceptor_->ExpectRequestAfterRedirect(request(), interception_id_);
+    // Set cookies in the network stack.
+    net::CookieOptions options;
+    options.set_include_httponly();
+    base::Time response_date;
+    if (!mock_response_details_->response_headers()->GetDateValue(
+            &response_date)) {
+      response_date = base::Time();
+    }
+    options.set_server_time(response_date);
+
+    const base::StringPiece name("Set-Cookie");
+    std::string cookie_line;
+    size_t iter = 0;
+    while (mock_response_details_->response_headers()->EnumerateHeader(
+        &iter, name, &cookie_line)) {
+      std::unique_ptr<net::CanonicalCookie> cookie =
+          net::CanonicalCookie::Create(request_details_.url, cookie_line,
+                                       base::Time::Now(), options);
+      if (!cookie)
+        continue;
+
+      auto* store = request_details_.url_request_context->cookie_store();
+      store->SetCanonicalCookieAsync(
+          std::move(cookie), request_details_.url.SchemeIsCryptographic(),
+          !options.exclude_httponly(), net::CookieStore::SetCookiesCallback());
     }
 
     if (sub_request_) {
@@ -1189,6 +1232,11 @@ void DevToolsURLInterceptorRequestJob::SetRequestHeadersCallback(
 void DevToolsURLInterceptorRequestJob::SetResponseHeadersCallback(
     net::ResponseHeadersCallback callback) {
   response_headers_callback_ = std::move(callback);
+}
+
+void DevToolsURLInterceptorRequestJob::ContinueDespiteLastError() {
+  if (sub_request_)
+    sub_request_->request()->ContinueDespiteLastError();
 }
 
 DevToolsURLInterceptorRequestJob::RequestDetails::RequestDetails(

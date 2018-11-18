@@ -26,8 +26,7 @@ scoped_refptr<blink::StaticBitmapImage> ToStaticBitmapImage(
 
   SkImageInfo info = sk_bitmap.info();
   if (!sk_bitmap.readPixels(info, array_buffer_contents.Data(),
-                            info.minRowBytes(), 0, 0,
-                            SkTransferFunctionBehavior::kIgnore))
+                            info.minRowBytes(), 0, 0))
     return nullptr;
 
   return blink::StaticBitmapImage::Create(array_buffer_contents, info);
@@ -72,7 +71,7 @@ bool StructTraits<blink::mojom::blink::TransferableMessage::DataView,
   if (!data.ReadMessage(static_cast<blink::BlinkCloneableMessage*>(out)) ||
       !data.ReadArrayBufferContentsArray(&array_buffer_contents_array) ||
       !data.ReadImageBitmapContentsArray(&sk_bitmaps) ||
-      !data.ReadPorts(&ports)) {
+      !data.ReadPorts(&ports) || !data.ReadUserActivation(&out->user_activation)) {
     return false;
   }
 
@@ -99,7 +98,6 @@ bool StructTraits<blink::mojom::blink::TransferableMessage::DataView,
     image_bitmap_contents_array.push_back(bitmap_contents);
   }
   out->message->SetImageBitmapContentsArray(image_bitmap_contents_array);
-
   return true;
 }
 

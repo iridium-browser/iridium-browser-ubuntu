@@ -11,10 +11,10 @@
 #include <algorithm>
 #include <memory>
 
+#include "api/transport/test/network_control_tester.h"
 #include "modules/congestion_controller/bbr/bbr_factory.h"
 #include "modules/congestion_controller/bbr/bbr_network_controller.h"
-#include "modules/congestion_controller/network_control/test/mock_network_control.h"
-#include "modules/congestion_controller/network_control/test/network_control_tester.h"
+#include "test/gmock.h"
 #include "test/gtest.h"
 
 using testing::Field;
@@ -53,8 +53,14 @@ NetworkControllerConfig InitialConfig(
   config.constraints.at_time = kDefaultStartTime;
   config.constraints.min_data_rate = DataRate::kbps(min_data_rate_kbps);
   config.constraints.max_data_rate = DataRate::kbps(max_data_rate_kbps);
-  config.starting_bandwidth = DataRate::kbps(starting_bandwidth_kbps);
+  config.constraints.starting_rate = DataRate::kbps(starting_bandwidth_kbps);
   return config;
+}
+
+ProcessInterval InitialProcessInterval() {
+  ProcessInterval process_interval;
+  process_interval.at_time = kDefaultStartTime;
+  return process_interval;
 }
 
 NetworkRouteChange CreateRouteChange(Timestamp at_time,
@@ -66,7 +72,7 @@ NetworkRouteChange CreateRouteChange(Timestamp at_time,
   route_change.constraints.at_time = at_time;
   route_change.constraints.min_data_rate = min_rate;
   route_change.constraints.max_data_rate = max_rate;
-  route_change.starting_rate = start_rate;
+  route_change.constraints.starting_rate = start_rate;
   return route_change;
 }
 }  // namespace
@@ -77,37 +83,35 @@ class BbrNetworkControllerTest : public ::testing::Test {
   ~BbrNetworkControllerTest() override {}
 };
 
-TEST_F(BbrNetworkControllerTest, SendsConfigurationOnInitialization) {
-  StrictMock<webrtc::test::MockNetworkControllerObserver> observer;
-  EXPECT_CALL(observer,
-              OnTargetTransferRate(TargetRateCloseTo(kInitialBitrate)));
-  EXPECT_CALL(observer, OnPacerConfig(Property(&PacerConfig::data_rate,
-                                               Ge(kInitialBitrate))));
-  EXPECT_CALL(observer,
-              OnCongestionWindow(Field(&CongestionWindow::data_window,
-                                       Property(&DataSize::IsFinite, true))));
-
+TEST_F(BbrNetworkControllerTest, SendsConfigurationOnFirstProcess) {
   std::unique_ptr<NetworkControllerInterface> controller_;
-  controller_.reset(new BbrNetworkController(&observer, InitialConfig()));
-  testing::Mock::VerifyAndClearExpectations(&observer);
+  controller_.reset(new BbrNetworkController(InitialConfig()));
+
+  NetworkControlUpdate update =
+      controller_->OnProcessInterval(InitialProcessInterval());
+  EXPECT_THAT(*update.target_rate, TargetRateCloseTo(kInitialBitrate));
+  EXPECT_THAT(*update.pacer_config,
+              Property(&PacerConfig::data_rate, Ge(kInitialBitrate)));
+  EXPECT_THAT(*update.congestion_window, Property(&DataSize::IsFinite, true));
 }
 
 TEST_F(BbrNetworkControllerTest, SendsConfigurationOnNetworkRouteChanged) {
-  StrictMock<webrtc::test::MockNetworkControllerObserver> observer;
-  EXPECT_CALL(observer, OnTargetTransferRate(_));
-  EXPECT_CALL(observer, OnPacerConfig(_));
-  EXPECT_CALL(observer, OnCongestionWindow(_));
   std::unique_ptr<NetworkControllerInterface> controller_;
-  controller_.reset(new BbrNetworkController(&observer, InitialConfig()));
+  controller_.reset(new BbrNetworkController(InitialConfig()));
+
+  NetworkControlUpdate update =
+      controller_->OnProcessInterval(InitialProcessInterval());
+  EXPECT_TRUE(update.target_rate.has_value());
+  EXPECT_TRUE(update.pacer_config.has_value());
+  EXPECT_TRUE(update.congestion_window.has_value());
 
   DataRate new_bitrate = DataRate::bps(200000);
-  EXPECT_CALL(observer, OnTargetTransferRate(TargetRateCloseTo(new_bitrate)));
-  EXPECT_CALL(observer, OnPacerConfig(Property(&PacerConfig::data_rate,
-                                               Ge(kInitialBitrate))));
-  EXPECT_CALL(observer, OnCongestionWindow(_));
-  controller_->OnNetworkRouteChange(
+  update = controller_->OnNetworkRouteChange(
       CreateRouteChange(kDefaultStartTime, new_bitrate));
-  testing::Mock::VerifyAndClearExpectations(&observer);
+  EXPECT_THAT(*update.target_rate, TargetRateCloseTo(new_bitrate));
+  EXPECT_THAT(*update.pacer_config,
+              Property(&PacerConfig::data_rate, Ge(kInitialBitrate)));
+  EXPECT_TRUE(update.congestion_window.has_value());
 }
 
 // Bandwidth estimation is updated when feedbacks are received.

@@ -26,7 +26,7 @@ import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.util.ColorUtils;
 import org.chromium.chrome.browser.util.MathUtils;
-import org.chromium.chrome.browser.vr_shell.VrShellDelegate;
+import org.chromium.chrome.browser.vr.VrModuleProvider;
 import org.chromium.ui.UiUtils;
 import org.chromium.ui.interpolators.BakedBezierInterpolator;
 
@@ -262,6 +262,13 @@ public class ToolbarProgressBar extends ClipDrawableProgressBar {
     public void onDetachedFromWindow() {
         super.onDetachedFromWindow();
         mIsAttachedToWindow = false;
+
+        if (mProgressThrottle != null) {
+            mProgressThrottle.setTimeListener(null);
+            mProgressThrottle.cancel();
+        }
+        mSmoothProgressAnimator.setTimeListener(null);
+        mSmoothProgressAnimator.cancel();
     }
 
     /**
@@ -472,7 +479,7 @@ public class ToolbarProgressBar extends ClipDrawableProgressBar {
     @Override
     public void setVisibility(int visibility) {
         // The progress bar should never show up while in VR.
-        if (VrShellDelegate.isInVr()) visibility = GONE;
+        if (VrModuleProvider.getDelegate().isInVr()) visibility = GONE;
         super.setVisibility(visibility);
         if (mAnimatingView != null) mAnimatingView.setVisibility(visibility);
     }
@@ -483,14 +490,14 @@ public class ToolbarProgressBar extends ClipDrawableProgressBar {
      */
     public void setThemeColor(int color, boolean isIncognito) {
         mThemeColor = color;
-        boolean isDefaultTheme = ColorUtils.isUsingDefaultToolbarColor(
-                getResources(), mUseStatusBarColorAsBackground, isIncognito, mThemeColor);
+        boolean isDefaultTheme =
+                ColorUtils.isUsingDefaultToolbarColor(getResources(), isIncognito, mThemeColor);
 
         // All colors use a single path if using the status bar color as the background.
         if (mUseStatusBarColorAsBackground) {
             if (isDefaultTheme) color = Color.BLACK;
             setForegroundColor(
-                    ApiCompatibilityUtils.getColor(getResources(), R.color.white_alpha_70));
+                    ApiCompatibilityUtils.getColor(getResources(), R.color.modern_grey_400));
             setBackgroundColor(ColorUtils.getDarkenedColorForStatusBar(color));
             return;
         }

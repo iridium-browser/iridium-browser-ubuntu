@@ -11,8 +11,9 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/single_thread_task_runner.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "url/gurl.h"
 
 namespace chromeos {
 
@@ -20,12 +21,21 @@ namespace {
 
 // Performs fake mounting by creating a directory with a dummy file.
 MountError PerformFakeMount(const std::string& source_path,
-                            const base::FilePath& mounted_path) {
+                            const base::FilePath& mounted_path,
+                            MountType type) {
+  if (mounted_path.empty())
+    return MOUNT_ERROR_INVALID_ARGUMENT;
+
   // Just create an empty directory and shows it as the mounted directory.
   if (!base::CreateDirectory(mounted_path)) {
     DLOG(ERROR) << "Failed to create directory at " << mounted_path.value();
     return MOUNT_ERROR_DIRECTORY_CREATION_FAILED;
   }
+
+  // Fake network mounts are responsible for populating their mount paths so
+  // don't need a dummy file.
+  if (type == MOUNT_TYPE_NETWORK_STORAGE)
+    return MOUNT_ERROR_NONE;
 
   // Put a dummy file.
   const base::FilePath dummy_file_path =
@@ -46,7 +56,7 @@ MountError PerformFakeMount(const std::string& source_path,
 
 FakeCrosDisksClient::FakeCrosDisksClient()
     : unmount_call_count_(0),
-      unmount_success_(true),
+      unmount_error_(MOUNT_ERROR_NONE),
       format_call_count_(0),
       format_success_(true),
       rename_call_count_(0),
@@ -69,6 +79,7 @@ void FakeCrosDisksClient::RemoveObserver(Observer* observer) {
 void FakeCrosDisksClient::Mount(const std::string& source_path,
                                 const std::string& source_format,
                                 const std::string& mount_label,
+                                const std::vector<std::string>& mount_options,
                                 MountAccessMode access_mode,
                                 RemountOption remount,
                                 VoidDBusMethodCallback callback) {
@@ -76,6 +87,10 @@ void FakeCrosDisksClient::Mount(const std::string& source_path,
   // is empty, or an archive otherwise.
   MountType type =
       source_format.empty() ? MOUNT_TYPE_DEVICE : MOUNT_TYPE_ARCHIVE;
+
+  // Network storage source paths are URIs.
+  if (GURL(source_path).is_valid())
+    type = MOUNT_TYPE_NETWORK_STORAGE;
 
   base::FilePath mounted_path;
   switch (type) {
@@ -87,6 +102,15 @@ void FakeCrosDisksClient::Mount(const std::string& source_path,
       mounted_path = GetRemovableDiskMountPoint().Append(
           base::FilePath::FromUTF8Unsafe(mount_label));
       break;
+    case MOUNT_TYPE_NETWORK_STORAGE:
+      // Call all registered callbacks until mounted_path is non-empty.
+      for (auto const& callback : custom_mount_point_callbacks_) {
+        mounted_path = callback.Run(source_path, mount_options);
+        if (!mounted_path.empty()) {
+          break;
+        }
+      }
+      break;
     case MOUNT_TYPE_INVALID:
       NOTREACHED();
       return;
@@ -96,7 +120,7 @@ void FakeCrosDisksClient::Mount(const std::string& source_path,
   base::PostTaskWithTraitsAndReplyWithResult(
       FROM_HERE,
       {base::MayBlock(), base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
-      base::BindOnce(&PerformFakeMount, source_path, mounted_path),
+      base::BindOnce(&PerformFakeMount, source_path, mounted_path, type),
       base::BindOnce(&FakeCrosDisksClient::DidMount,
                      weak_ptr_factory_.GetWeakPtr(), source_path, type,
                      mounted_path, std::move(callback)));
@@ -120,7 +144,7 @@ void FakeCrosDisksClient::DidMount(const std::string& source_path,
 
 void FakeCrosDisksClient::Unmount(const std::string& device_path,
                                   UnmountOptions options,
-                                  VoidDBusMethodCallback callback) {
+                                  UnmountCallback callback) {
   DCHECK(!callback.is_null());
 
   unmount_call_count_++;
@@ -131,32 +155,26 @@ void FakeCrosDisksClient::Unmount(const std::string& device_path,
   if (mounted_paths_.erase(base::FilePath::FromUTF8Unsafe(device_path))) {
     base::PostTaskWithTraitsAndReply(
         FROM_HERE,
-        {base::MayBlock(), base::TaskPriority::BACKGROUND,
+        {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
          base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
         base::BindOnce(base::IgnoreResult(&base::DeleteFile),
                        base::FilePath::FromUTF8Unsafe(device_path),
                        true /* recursive */),
-        base::BindOnce(std::move(callback), unmount_success_));
+        base::BindOnce(std::move(callback), unmount_error_));
   } else {
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::BindOnce(std::move(callback), unmount_success_));
+        FROM_HERE, base::BindOnce(std::move(callback), unmount_error_));
   }
   if (!unmount_listener_.is_null())
     unmount_listener_.Run();
 }
 
-void FakeCrosDisksClient::EnumerateAutoMountableDevices(
-    const EnumerateDevicesCallback& callback,
-    const base::Closure& error_callback) {}
-
-void FakeCrosDisksClient::EnumerateDevices(
-    const EnumerateDevicesCallback& callback,
-    const base::Closure& error_callback) {}
+void FakeCrosDisksClient::EnumerateDevices(EnumerateDevicesCallback callback,
+                                           base::OnceClosure error_callback) {}
 
 void FakeCrosDisksClient::EnumerateMountEntries(
-    const EnumerateMountEntriesCallback& callback,
-    const base::Closure& error_callback) {
-}
+    EnumerateMountEntriesCallback callback,
+    base::OnceClosure error_callback) {}
 
 void FakeCrosDisksClient::Format(const std::string& device_path,
                                  const std::string& filesystem,
@@ -184,9 +202,8 @@ void FakeCrosDisksClient::Rename(const std::string& device_path,
 
 void FakeCrosDisksClient::GetDeviceProperties(
     const std::string& device_path,
-    const GetDevicePropertiesCallback& callback,
-    const base::Closure& error_callback) {
-}
+    GetDevicePropertiesCallback callback,
+    base::OnceClosure error_callback) {}
 
 void FakeCrosDisksClient::NotifyMountCompleted(MountError error_code,
                                                const std::string& source_path,
@@ -210,6 +227,11 @@ void FakeCrosDisksClient::NotifyRenameCompleted(
     const std::string& device_path) {
   for (auto& observer : observer_list_)
     observer.OnRenameCompleted(error_code, device_path);
+}
+
+void FakeCrosDisksClient::AddCustomMountPointCallback(
+    FakeCrosDisksClient::CustomMountPointCallback custom_mount_point_callback) {
+  custom_mount_point_callbacks_.emplace_back(custom_mount_point_callback);
 }
 
 }  // namespace chromeos

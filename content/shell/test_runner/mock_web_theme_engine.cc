@@ -16,8 +16,6 @@
 #include "third_party/skia/include/core/SkPath.h"
 #include "third_party/skia/include/core/SkRect.h"
 
-using blink::WebCanvas;
-using blink::WebColor;
 using blink::WebRect;
 using blink::WebThemeEngine;
 
@@ -303,7 +301,7 @@ void markState(cc::PaintCanvas* canvas,
   }
 }
 
-void MockWebThemeEngine::Paint(blink::WebCanvas* canvas,
+void MockWebThemeEngine::Paint(cc::PaintCanvas* canvas,
                                WebThemeEngine::Part part,
                                WebThemeEngine::State state,
                                const blink::WebRect& rect,

@@ -39,14 +39,16 @@ TEST(AutomaticGainController2AdaptiveModeLevelEstimator, LevelShouldStabilize) {
   ApmDataDumper apm_data_dumper(0);
   AdaptiveModeLevelEstimator level_estimator(&apm_data_dumper);
 
-  constexpr float kSpeechRmsDbfs = -15.f;
-  RunOnConstantLevel(
-      100,
-      VadWithLevel::LevelAndProbability(
-          1.f, kSpeechRmsDbfs - kInitialSaturationMarginDb, kSpeechRmsDbfs),
-      &level_estimator);
+  constexpr float kSpeechPeakDbfs = -15.f;
+  RunOnConstantLevel(100,
+                     VadWithLevel::LevelAndProbability(
+                         1.f, kSpeechPeakDbfs - GetInitialSaturationMarginDb(),
+                         kSpeechPeakDbfs),
+                     &level_estimator);
 
-  EXPECT_NEAR(level_estimator.LatestLevelEstimate(), kSpeechRmsDbfs, 0.1f);
+  EXPECT_NEAR(level_estimator.LatestLevelEstimate() -
+                  GetExtraSaturationMarginOffsetDb(),
+              kSpeechPeakDbfs, 0.1f);
 }
 
 TEST(AutomaticGainController2AdaptiveModeLevelEstimator,
@@ -59,7 +61,7 @@ TEST(AutomaticGainController2AdaptiveModeLevelEstimator,
   RunOnConstantLevel(
       100,
       VadWithLevel::LevelAndProbability(
-          1.f, kSpeechRmsDbfs - kInitialSaturationMarginDb, kSpeechRmsDbfs),
+          1.f, kSpeechRmsDbfs - GetInitialSaturationMarginDb(), kSpeechRmsDbfs),
       &level_estimator);
 
   // Run for one more second, but mark as not speech.
@@ -69,32 +71,34 @@ TEST(AutomaticGainController2AdaptiveModeLevelEstimator,
       &level_estimator);
 
   // Level should not have changed.
-  EXPECT_NEAR(level_estimator.LatestLevelEstimate(), kSpeechRmsDbfs, 0.1f);
+  EXPECT_NEAR(level_estimator.LatestLevelEstimate() -
+                  GetExtraSaturationMarginOffsetDb(),
+              kSpeechRmsDbfs, 0.1f);
 }
 
 TEST(AutomaticGainController2AdaptiveModeLevelEstimator, TimeToAdapt) {
   ApmDataDumper apm_data_dumper(0);
   AdaptiveModeLevelEstimator level_estimator(&apm_data_dumper);
 
-  // Run for one 'window size' interval
+  // Run for one 'window size' interval.
   constexpr float kInitialSpeechRmsDbfs = -30.f;
   RunOnConstantLevel(
       kFullBufferSizeMs / kFrameDurationMs,
       VadWithLevel::LevelAndProbability(
-          1.f, kInitialSpeechRmsDbfs - kInitialSaturationMarginDb,
+          1.f, kInitialSpeechRmsDbfs - GetInitialSaturationMarginDb(),
           kInitialSpeechRmsDbfs),
       &level_estimator);
 
   // Run for one half 'window size' interval. This should not be enough to
   // adapt.
   constexpr float kDifferentSpeechRmsDbfs = -10.f;
-  // It should at most differ by 25% after one 'window size' interval.
+  // It should at most differ by 25% after one half 'window size' interval.
   const float kMaxDifferenceDb =
       0.25 * std::abs(kDifferentSpeechRmsDbfs - kInitialSpeechRmsDbfs);
   RunOnConstantLevel(
       static_cast<int>(kFullBufferSizeMs / kFrameDurationMs / 2),
       VadWithLevel::LevelAndProbability(
-          1.f, kDifferentSpeechRmsDbfs - kInitialSaturationMarginDb,
+          1.f, kDifferentSpeechRmsDbfs - GetInitialSaturationMarginDb(),
           kDifferentSpeechRmsDbfs),
       &level_estimator);
   EXPECT_GT(
@@ -105,11 +109,47 @@ TEST(AutomaticGainController2AdaptiveModeLevelEstimator, TimeToAdapt) {
   RunOnConstantLevel(
       static_cast<int>(3 * kFullBufferSizeMs / kFrameDurationMs),
       VadWithLevel::LevelAndProbability(
-          1.f, kDifferentSpeechRmsDbfs - kInitialSaturationMarginDb,
+          1.f, kDifferentSpeechRmsDbfs - GetInitialSaturationMarginDb(),
           kDifferentSpeechRmsDbfs),
       &level_estimator);
-  EXPECT_NEAR(level_estimator.LatestLevelEstimate(), kDifferentSpeechRmsDbfs,
-              kMaxDifferenceDb);
+  EXPECT_NEAR(level_estimator.LatestLevelEstimate() -
+                  GetExtraSaturationMarginOffsetDb(),
+              kDifferentSpeechRmsDbfs, kMaxDifferenceDb * 0.5f);
+}
+
+TEST(AutomaticGainController2AdaptiveModeLevelEstimator,
+     ResetGivesFastAdaptation) {
+  ApmDataDumper apm_data_dumper(0);
+  AdaptiveModeLevelEstimator level_estimator(&apm_data_dumper);
+
+  // Run the level estimator for one window size interval. This gives time to
+  // adapt.
+  constexpr float kInitialSpeechRmsDbfs = -30.f;
+  RunOnConstantLevel(
+      kFullBufferSizeMs / kFrameDurationMs,
+      VadWithLevel::LevelAndProbability(
+          1.f, kInitialSpeechRmsDbfs - GetInitialSaturationMarginDb(),
+          kInitialSpeechRmsDbfs),
+      &level_estimator);
+
+  constexpr float kDifferentSpeechRmsDbfs = -10.f;
+  // Reset and run one half window size interval.
+  level_estimator.Reset();
+
+  RunOnConstantLevel(
+      kFullBufferSizeMs / kFrameDurationMs / 2,
+      VadWithLevel::LevelAndProbability(
+          1.f, kDifferentSpeechRmsDbfs - GetInitialSaturationMarginDb(),
+          kDifferentSpeechRmsDbfs),
+      &level_estimator);
+
+  // The level should be close to 'kDifferentSpeechRmsDbfs'.
+  const float kMaxDifferenceDb =
+      0.1f * std::abs(kDifferentSpeechRmsDbfs - kInitialSpeechRmsDbfs);
+  EXPECT_LT(std::abs(kDifferentSpeechRmsDbfs -
+                     (level_estimator.LatestLevelEstimate() -
+                      GetExtraSaturationMarginOffsetDb())),
+            kMaxDifferenceDb);
 }
 
 }  // namespace webrtc

@@ -7,12 +7,13 @@
 
 #include <deque>
 #include <memory>
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/core/dom/dom_node_ids.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/page/scrolling/scroll_state_init.h"
+#include "third_party/blink/renderer/core/scroll/scroll_state_data.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/scroll/scroll_state_data.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 
 namespace blink {
@@ -26,7 +27,7 @@ class CORE_EXPORT ScrollState final : public ScriptWrappable {
   static ScrollState* Create(ScrollStateInit);
   static ScrollState* Create(std::unique_ptr<ScrollStateData>);
 
-  ~ScrollState() = default;
+  ~ScrollState() override = default;
 
   // Web exposed methods.
 
@@ -68,7 +69,7 @@ class CORE_EXPORT ScrollState final : public ScriptWrappable {
   void ConsumeDeltaNative(double x, double y);
 
   // TODO(tdresser): this needs to be web exposed. See crbug.com/483091.
-  void SetScrollChain(std::deque<int> scroll_chain) {
+  void SetScrollChain(std::deque<DOMNodeId> scroll_chain) {
     scroll_chain_ = scroll_chain;
   }
 
@@ -98,7 +99,7 @@ class CORE_EXPORT ScrollState final : public ScriptWrappable {
   explicit ScrollState(std::unique_ptr<ScrollStateData>);
 
   std::unique_ptr<ScrollStateData> data_;
-  std::deque<int> scroll_chain_;
+  std::deque<DOMNodeId> scroll_chain_;
   Member<Element> element_;
 };
 

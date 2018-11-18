@@ -6,64 +6,13 @@
 
 #include "src/builtins/builtins-utils-gen.h"
 #include "src/heap/factory-inl.h"
+#include "src/objects/js-promise.h"
 #include "src/objects/shared-function-info.h"
 
 namespace v8 {
 namespace internal {
 
 using compiler::Node;
-
-void AsyncBuiltinsAssembler::Await(Node* context, Node* generator, Node* value,
-                                   Node* outer_promise,
-                                   Builtins::Name fulfill_builtin,
-                                   Builtins::Name reject_builtin,
-                                   Node* is_predicted_as_caught) {
-  CSA_SLOW_ASSERT(this, Word32Or(IsJSAsyncGeneratorObject(generator),
-                                 IsJSGeneratorObject(generator)));
-  CSA_SLOW_ASSERT(this, IsJSPromise(outer_promise));
-  CSA_SLOW_ASSERT(this, IsBoolean(is_predicted_as_caught));
-
-  Node* const native_context = LoadNativeContext(context);
-
-  // TODO(bmeurer): This could be optimized and folded into a single allocation.
-  Node* const promise = AllocateAndInitJSPromise(native_context);
-  Node* const promise_reactions =
-      LoadObjectField(promise, JSPromise::kReactionsOrResultOffset);
-  Node* const fulfill_handler =
-      HeapConstant(Builtins::CallableFor(isolate(), fulfill_builtin).code());
-  Node* const reject_handler =
-      HeapConstant(Builtins::CallableFor(isolate(), reject_builtin).code());
-  Node* const reaction = AllocatePromiseReaction(
-      promise_reactions, generator, fulfill_handler, reject_handler);
-  StoreObjectField(promise, JSPromise::kReactionsOrResultOffset, reaction);
-  PromiseSetHasHandler(promise);
-
-  // Perform ! Call(promiseCapability.[[Resolve]], undefined, « value »).
-  CallBuiltin(Builtins::kResolvePromise, native_context, promise, value);
-
-  // When debugging, we need to link from the {generator} to the
-  // {outer_promise} of the async function/generator.
-  Label done(this);
-  GotoIfNot(IsPromiseHookEnabledOrDebugIsActive(), &done);
-  CallRuntime(Runtime::kSetProperty, native_context, generator,
-              LoadRoot(Heap::kgenerator_outer_promise_symbolRootIndex),
-              outer_promise, SmiConstant(LanguageMode::kStrict));
-  GotoIf(IsFalse(is_predicted_as_caught), &done);
-  GotoIf(TaggedIsSmi(value), &done);
-  GotoIfNot(IsJSPromise(value), &done);
-  PromiseSetHandledHint(value);
-  Goto(&done);
-  BIND(&done);
-}
-
-void AsyncBuiltinsAssembler::Await(Node* context, Node* generator, Node* value,
-                                   Node* outer_promise,
-                                   Builtins::Name fulfill_builtin,
-                                   Builtins::Name reject_builtin,
-                                   bool is_predicted_as_caught) {
-  return Await(context, generator, value, outer_promise, fulfill_builtin,
-               reject_builtin, BooleanConstant(is_predicted_as_caught));
-}
 
 namespace {
 // Describe fields of Context associated with the AsyncIterator unwrap closure.
@@ -73,6 +22,325 @@ class ValueUnwrapContext {
 };
 
 }  // namespace
+
+Node* AsyncBuiltinsAssembler::AwaitOld(Node* context, Node* generator,
+                                       Node* value, Node* outer_promise,
+                                       Node* on_resolve_context_index,
+                                       Node* on_reject_context_index,
+                                       Node* is_predicted_as_caught) {
+  Node* const native_context = LoadNativeContext(context);
+
+  static const int kWrappedPromiseOffset =
+      FixedArray::SizeFor(Context::MIN_CONTEXT_SLOTS);
+  static const int kThrowawayPromiseOffset =
+      kWrappedPromiseOffset + JSPromise::kSizeWithEmbedderFields;
+  static const int kResolveClosureOffset =
+      kThrowawayPromiseOffset + JSPromise::kSizeWithEmbedderFields;
+  static const int kRejectClosureOffset =
+      kResolveClosureOffset + JSFunction::kSizeWithoutPrototype;
+  static const int kTotalSize =
+      kRejectClosureOffset + JSFunction::kSizeWithoutPrototype;
+
+  Node* const base = AllocateInNewSpace(kTotalSize);
+  Node* const closure_context = base;
+  {
+    // Initialize the await context, storing the {generator} as extension.
+    StoreMapNoWriteBarrier(closure_context, RootIndex::kAwaitContextMap);
+    StoreObjectFieldNoWriteBarrier(closure_context, Context::kLengthOffset,
+                                   SmiConstant(Context::MIN_CONTEXT_SLOTS));
+    Node* const empty_scope_info =
+        LoadContextElement(native_context, Context::SCOPE_INFO_INDEX);
+    StoreContextElementNoWriteBarrier(
+        closure_context, Context::SCOPE_INFO_INDEX, empty_scope_info);
+    StoreContextElementNoWriteBarrier(closure_context, Context::PREVIOUS_INDEX,
+                                      native_context);
+    StoreContextElementNoWriteBarrier(closure_context, Context::EXTENSION_INDEX,
+                                      generator);
+    StoreContextElementNoWriteBarrier(
+        closure_context, Context::NATIVE_CONTEXT_INDEX, native_context);
+  }
+
+  // Let promiseCapability be ! NewPromiseCapability(%Promise%).
+  Node* const promise_fun =
+      LoadContextElement(native_context, Context::PROMISE_FUNCTION_INDEX);
+  CSA_ASSERT(this, IsFunctionWithPrototypeSlotMap(LoadMap(promise_fun)));
+  Node* const promise_map =
+      LoadObjectField(promise_fun, JSFunction::kPrototypeOrInitialMapOffset);
+  // Assert that the JSPromise map has an instance size is
+  // JSPromise::kSizeWithEmbedderFields.
+  CSA_ASSERT(this, WordEqual(LoadMapInstanceSizeInWords(promise_map),
+                             IntPtrConstant(JSPromise::kSizeWithEmbedderFields /
+                                            kPointerSize)));
+  Node* const wrapped_value = InnerAllocate(base, kWrappedPromiseOffset);
+  {
+    // Initialize Promise
+    StoreMapNoWriteBarrier(wrapped_value, promise_map);
+    InitializeJSObjectFromMap(
+        wrapped_value, promise_map,
+        IntPtrConstant(JSPromise::kSizeWithEmbedderFields));
+    PromiseInit(wrapped_value);
+  }
+
+  Node* const throwaway = InnerAllocate(base, kThrowawayPromiseOffset);
+  {
+    // Initialize throwawayPromise
+    StoreMapNoWriteBarrier(throwaway, promise_map);
+    InitializeJSObjectFromMap(
+        throwaway, promise_map,
+        IntPtrConstant(JSPromise::kSizeWithEmbedderFields));
+    PromiseInit(throwaway);
+  }
+
+  Node* const on_resolve = InnerAllocate(base, kResolveClosureOffset);
+  {
+    // Initialize resolve handler
+    InitializeNativeClosure(closure_context, native_context, on_resolve,
+                            on_resolve_context_index);
+  }
+
+  Node* const on_reject = InnerAllocate(base, kRejectClosureOffset);
+  {
+    // Initialize reject handler
+    InitializeNativeClosure(closure_context, native_context, on_reject,
+                            on_reject_context_index);
+  }
+
+  {
+    // Add PromiseHooks if needed
+    Label next(this);
+    GotoIfNot(IsPromiseHookEnabledOrHasAsyncEventDelegate(), &next);
+    CallRuntime(Runtime::kAwaitPromisesInit, context, wrapped_value,
+                outer_promise, throwaway);
+    Goto(&next);
+    BIND(&next);
+  }
+
+  // Perform ! Call(promiseCapability.[[Resolve]], undefined, « promise »).
+  CallBuiltin(Builtins::kResolvePromise, context, wrapped_value, value);
+
+  // The Promise will be thrown away and not handled, but it shouldn't trigger
+  // unhandled reject events as its work is done
+  PromiseSetHasHandler(throwaway);
+
+  Label do_perform_promise_then(this);
+  GotoIfNot(IsDebugActive(), &do_perform_promise_then);
+  {
+    Label common(this);
+    GotoIf(TaggedIsSmi(value), &common);
+    GotoIfNot(HasInstanceType(value, JS_PROMISE_TYPE), &common);
+    {
+      // Mark the reject handler callback to be a forwarding edge, rather
+      // than a meaningful catch handler
+      Node* const key =
+          HeapConstant(factory()->promise_forwarding_handler_symbol());
+      SetPropertyStrict(CAST(context), CAST(on_reject), CAST(key),
+                        TrueConstant());
+
+      GotoIf(IsFalse(is_predicted_as_caught), &common);
+      PromiseSetHandledHint(value);
+    }
+
+    Goto(&common);
+    BIND(&common);
+    // Mark the dependency to outer Promise in case the throwaway Promise is
+    // found on the Promise stack
+    CSA_SLOW_ASSERT(this, HasInstanceType(outer_promise, JS_PROMISE_TYPE));
+
+    Node* const key = HeapConstant(factory()->promise_handled_by_symbol());
+    SetPropertyStrict(CAST(context), CAST(throwaway), CAST(key),
+                      CAST(outer_promise));
+  }
+
+  Goto(&do_perform_promise_then);
+  BIND(&do_perform_promise_then);
+  return CallBuiltin(Builtins::kPerformPromiseThen, context, wrapped_value,
+                     on_resolve, on_reject, throwaway);
+}
+
+Node* AsyncBuiltinsAssembler::AwaitOptimized(
+    Node* context, Node* generator, Node* value, Node* outer_promise,
+    Node* on_resolve_context_index, Node* on_reject_context_index,
+    Node* is_predicted_as_caught) {
+  Node* const native_context = LoadNativeContext(context);
+  Node* const promise_fun =
+      LoadContextElement(native_context, Context::PROMISE_FUNCTION_INDEX);
+  CSA_ASSERT(this, IsFunctionWithPrototypeSlotMap(LoadMap(promise_fun)));
+  CSA_ASSERT(this, IsConstructor(promise_fun));
+
+  static const int kThrowawayPromiseOffset =
+      FixedArray::SizeFor(Context::MIN_CONTEXT_SLOTS);
+  static const int kResolveClosureOffset =
+      kThrowawayPromiseOffset + JSPromise::kSizeWithEmbedderFields;
+  static const int kRejectClosureOffset =
+      kResolveClosureOffset + JSFunction::kSizeWithoutPrototype;
+  static const int kTotalSize =
+      kRejectClosureOffset + JSFunction::kSizeWithoutPrototype;
+
+  // 2. Let promise be ? PromiseResolve(« promise »).
+  Node* const promise =
+      CallBuiltin(Builtins::kPromiseResolve, context, promise_fun, value);
+
+  Node* const base = AllocateInNewSpace(kTotalSize);
+  Node* const closure_context = base;
+  {
+    // Initialize the await context, storing the {generator} as extension.
+    StoreMapNoWriteBarrier(closure_context, RootIndex::kAwaitContextMap);
+    StoreObjectFieldNoWriteBarrier(closure_context, Context::kLengthOffset,
+                                   SmiConstant(Context::MIN_CONTEXT_SLOTS));
+    Node* const empty_scope_info =
+        LoadContextElement(native_context, Context::SCOPE_INFO_INDEX);
+    StoreContextElementNoWriteBarrier(
+        closure_context, Context::SCOPE_INFO_INDEX, empty_scope_info);
+    StoreContextElementNoWriteBarrier(closure_context, Context::PREVIOUS_INDEX,
+                                      native_context);
+    StoreContextElementNoWriteBarrier(closure_context, Context::EXTENSION_INDEX,
+                                      generator);
+    StoreContextElementNoWriteBarrier(
+        closure_context, Context::NATIVE_CONTEXT_INDEX, native_context);
+  }
+
+  Node* const promise_map =
+      LoadObjectField(promise_fun, JSFunction::kPrototypeOrInitialMapOffset);
+  // Assert that the JSPromise map has an instance size is
+  // JSPromise::kSizeWithEmbedderFields.
+  CSA_ASSERT(this, WordEqual(LoadMapInstanceSizeInWords(promise_map),
+                             IntPtrConstant(JSPromise::kSizeWithEmbedderFields /
+                                            kPointerSize)));
+  Node* const throwaway = InnerAllocate(base, kThrowawayPromiseOffset);
+  {
+    // Initialize throwawayPromise
+    StoreMapNoWriteBarrier(throwaway, promise_map);
+    InitializeJSObjectFromMap(
+        throwaway, promise_map,
+        IntPtrConstant(JSPromise::kSizeWithEmbedderFields));
+    PromiseInit(throwaway);
+  }
+
+  Node* const on_resolve = InnerAllocate(base, kResolveClosureOffset);
+  {
+    // Initialize resolve handler
+    InitializeNativeClosure(closure_context, native_context, on_resolve,
+                            on_resolve_context_index);
+  }
+
+  Node* const on_reject = InnerAllocate(base, kRejectClosureOffset);
+  {
+    // Initialize reject handler
+    InitializeNativeClosure(closure_context, native_context, on_reject,
+                            on_reject_context_index);
+  }
+
+  {
+    // Add PromiseHooks if needed
+    Label next(this);
+    GotoIfNot(IsPromiseHookEnabledOrHasAsyncEventDelegate(), &next);
+    CallRuntime(Runtime::kAwaitPromisesInit, context, promise, outer_promise,
+                throwaway);
+    Goto(&next);
+    BIND(&next);
+  }
+
+  // The Promise will be thrown away and not handled, but it shouldn't trigger
+  // unhandled reject events as its work is done
+  PromiseSetHasHandler(throwaway);
+
+  Label do_perform_promise_then(this);
+  GotoIfNot(IsDebugActive(), &do_perform_promise_then);
+  {
+    Label common(this);
+    GotoIf(TaggedIsSmi(value), &common);
+    GotoIfNot(HasInstanceType(value, JS_PROMISE_TYPE), &common);
+    {
+      // Mark the reject handler callback to be a forwarding edge, rather
+      // than a meaningful catch handler
+      Node* const key =
+          HeapConstant(factory()->promise_forwarding_handler_symbol());
+      SetPropertyStrict(CAST(context), CAST(on_reject), CAST(key),
+                        TrueConstant());
+
+      GotoIf(IsFalse(is_predicted_as_caught), &common);
+      PromiseSetHandledHint(value);
+    }
+
+    Goto(&common);
+    BIND(&common);
+    // Mark the dependency to outer Promise in case the throwaway Promise is
+    // found on the Promise stack
+    CSA_SLOW_ASSERT(this, HasInstanceType(outer_promise, JS_PROMISE_TYPE));
+
+    Node* const key = HeapConstant(factory()->promise_handled_by_symbol());
+    SetPropertyStrict(CAST(context), CAST(throwaway), CAST(key),
+                      CAST(outer_promise));
+  }
+
+  Goto(&do_perform_promise_then);
+  BIND(&do_perform_promise_then);
+  return CallBuiltin(Builtins::kPerformPromiseThen, native_context, promise,
+                     on_resolve, on_reject, throwaway);
+}
+
+Node* AsyncBuiltinsAssembler::Await(Node* context, Node* generator, Node* value,
+                                    Node* outer_promise,
+                                    Node* on_resolve_context_index,
+                                    Node* on_reject_context_index,
+                                    Node* is_predicted_as_caught) {
+  VARIABLE(result, MachineRepresentation::kTagged);
+  Label if_old(this), if_new(this), done(this);
+
+  STATIC_ASSERT(sizeof(FLAG_harmony_await_optimization) == 1);
+
+  TNode<Word32T> flag_value = UncheckedCast<Word32T>(Load(
+      MachineType::Uint8(),
+      ExternalConstant(
+          ExternalReference::address_of_harmony_await_optimization_flag())));
+
+  Branch(Word32Equal(flag_value, Int32Constant(0)), &if_old, &if_new);
+
+  BIND(&if_old);
+  result.Bind(AwaitOld(context, generator, value, outer_promise,
+                       on_resolve_context_index, on_reject_context_index,
+                       is_predicted_as_caught));
+  Goto(&done);
+
+  BIND(&if_new);
+  result.Bind(AwaitOptimized(context, generator, value, outer_promise,
+                             on_resolve_context_index, on_reject_context_index,
+                             is_predicted_as_caught));
+  Goto(&done);
+
+  BIND(&done);
+  return result.value();
+}
+
+void AsyncBuiltinsAssembler::InitializeNativeClosure(Node* context,
+                                                     Node* native_context,
+                                                     Node* function,
+                                                     Node* context_index) {
+  Node* const function_map = LoadContextElement(
+      native_context, Context::STRICT_FUNCTION_WITHOUT_PROTOTYPE_MAP_INDEX);
+  // Ensure that we don't have to initialize prototype_or_initial_map field of
+  // JSFunction.
+  CSA_ASSERT(this, WordEqual(LoadMapInstanceSizeInWords(function_map),
+                             IntPtrConstant(JSFunction::kSizeWithoutPrototype /
+                                            kPointerSize)));
+  STATIC_ASSERT(JSFunction::kSizeWithoutPrototype == 7 * kPointerSize);
+  StoreMapNoWriteBarrier(function, function_map);
+  StoreObjectFieldRoot(function, JSObject::kPropertiesOrHashOffset,
+                       RootIndex::kEmptyFixedArray);
+  StoreObjectFieldRoot(function, JSObject::kElementsOffset,
+                       RootIndex::kEmptyFixedArray);
+  StoreObjectFieldRoot(function, JSFunction::kFeedbackCellOffset,
+                       RootIndex::kManyClosuresCell);
+
+  Node* shared_info = LoadContextElement(native_context, context_index);
+  CSA_ASSERT(this, IsSharedFunctionInfo(shared_info));
+  StoreObjectFieldNoWriteBarrier(
+      function, JSFunction::kSharedFunctionInfoOffset, shared_info);
+  StoreObjectFieldNoWriteBarrier(function, JSFunction::kContextOffset, context);
+
+  Node* const code = GetSharedFunctionInfoCode(shared_info);
+  StoreObjectFieldNoWriteBarrier(function, JSFunction::kCodeOffset, code);
+}
 
 Node* AsyncBuiltinsAssembler::CreateUnwrapClosure(Node* native_context,
                                                   Node* done) {

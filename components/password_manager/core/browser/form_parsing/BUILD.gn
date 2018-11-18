@@ -8,33 +8,55 @@ import("//build/config/sanitizers/sanitizers.gni")
 does_fuzzer_test_compile =
     !disable_libfuzzer && (use_fuzzing_engine || use_drfuzz || is_linux)
 
-if (does_fuzzer_test_compile || is_ios) {
-  # Compile for production under iOS and for fuzzing whenever fuzzer_tests are built.
-  static_library("form_parsing") {
-    sources = [
+static_library("form_parsing") {
+  sources = [
+    "form_parser.cc",
+    "form_parser.h",
+    "password_field_prediction.cc",
+    "password_field_prediction.h",
+  ]
+
+  # TODO(crbug.com/845426): Provide a single parser for all platforms, then
+  # remove the ios_* variant. This will be possible once the form_parser.* is
+  # used by default and causing no known issues. Note that (the
+  # non-iOS-specific) 'form_parser.*' is used by NewPasswordFormManager on
+  # every platform, including iOS.
+  if (does_fuzzer_test_compile || is_ios) {
+    sources += [
       "ios_form_parser.cc",
       "ios_form_parser.h",
     ]
-
-    deps = [
-      "//base",
-      "//components/autofill/core/common",
-    ]
   }
 
-  source_set("unit_tests") {
-    testonly = true
-    sources = [
-      "ios_form_parser_unittest.cc",
-    ]
+  deps = [
+    "//base",
+    "//components/autofill/core/browser",
+    "//components/autofill/core/browser/proto",
+    "//components/autofill/core/common",
+    "//components/password_manager/core/common",
+  ]
+}
 
-    deps = [
-      ":form_parsing",
-      "//base",
-      "//components/autofill/core/common",
-      "//testing/gmock",
-      "//testing/gtest",
-      "//url",
-    ]
+source_set("unit_tests") {
+  testonly = true
+  sources = [
+    "form_parser_unittest.cc",
+    "password_field_prediction_unittest.cc",
+  ]
+
+  if (does_fuzzer_test_compile || is_ios) {
+    sources += [ "ios_form_parser_unittest.cc" ]
   }
-}  # if (does_fuzzer_test_compile || is_ios)
+
+  deps = [
+    ":form_parsing",
+    "//base",
+    "//base/test:test_support",
+    "//components/autofill/core/browser",
+    "//components/autofill/core/browser/proto",
+    "//components/autofill/core/common",
+    "//testing/gmock",
+    "//testing/gtest",
+    "//url",
+  ]
+}

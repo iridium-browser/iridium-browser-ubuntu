@@ -10,6 +10,7 @@
 #include "ash/public/cpp/immersive/immersive_fullscreen_controller.h"
 #include "ash/public/cpp/immersive/immersive_fullscreen_controller_delegate.h"
 #include "base/macros.h"
+#include "base/scoped_observer.h"
 #include "chrome/browser/ui/views/frame/immersive_mode_controller.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -18,6 +19,10 @@
 
 namespace aura {
 class Window;
+}
+
+namespace ui {
+class EventRewriter;
 }
 
 // See ash/mus/frame/README.md for description of how immersive mode works in
@@ -46,23 +51,15 @@ class ImmersiveModeControllerAsh
   void OnFindBarVisibleBoundsChanged(
       const gfx::Rect& new_visible_bounds_in_screen) override;
   bool ShouldStayImmersiveAfterExitingFullscreen() override;
-  views::Widget* GetRevealWidget() override;
   void OnWidgetActivationChanged(views::Widget* widget, bool active) override;
 
  private:
-  // Enables or disables observers for window restore and entering / exiting
-  // tab fullscreen.
-  void EnableWindowObservers(bool enable);
-
   // Updates the browser root view's layout including window caption controls.
   void LayoutBrowserRootView();
 
-  // Used when running in mash to create |mash_reveal_widget_|. Does nothing
-  // if already null.
-  void CreateMashRevealWidget();
-
-  // Destroys |mash_reveal_widget_| if valid, does nothing otherwise.
-  void DestroyMashRevealWidget();
+  // See LocatedEventRetargeter.
+  void InstallEventRewriter();
+  void UninstallEventRewriter();
 
   // ImmersiveFullscreenController::Delegate overrides:
   void OnImmersiveRevealStarted() override;
@@ -87,10 +84,6 @@ class ImmersiveModeControllerAsh
 
   BrowserView* browser_view_ = nullptr;
 
-  // True if the observers for window restore and entering / exiting tab
-  // fullscreen are enabled.
-  bool observers_enabled_ = false;
-
   // The current visible bounds of the find bar, in screen coordinates. This is
   // an empty rect if the find bar is not visible.
   gfx::Rect find_bar_visible_bounds_in_screen_;
@@ -99,11 +92,12 @@ class ImmersiveModeControllerAsh
   // the top-of-window views are not revealed.
   double visible_fraction_ = 1.0;
 
-  // When running in mash a widget is created to draw the top container. This
-  // widget does not actually contain the top container, it just renders it.
-  std::unique_ptr<views::Widget> mash_reveal_widget_;
+  // See comment above LocatedEventRetargeter.
+  std::unique_ptr<ui::EventRewriter> event_rewriter_;
 
   content::NotificationRegistrar registrar_;
+
+  ScopedObserver<aura::Window, aura::WindowObserver> observed_windows_{this};
 
   DISALLOW_COPY_AND_ASSIGN(ImmersiveModeControllerAsh);
 };

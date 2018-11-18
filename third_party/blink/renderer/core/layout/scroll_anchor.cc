@@ -12,6 +12,7 @@
 #include "third_party/blink/renderer/core/dom/nth_index_cache.h"
 #include "third_party/blink/renderer/core/dom/static_node_list.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
+#include "third_party/blink/renderer/core/frame/root_frame_viewport.h"
 #include "third_party/blink/renderer/core/frame/use_counter.h"
 #include "third_party/blink/renderer/core/layout/layout_block_flow.h"
 #include "third_party/blink/renderer/core/layout/layout_box.h"
@@ -98,9 +99,7 @@ static LayoutRect RelativeBounds(const LayoutObject* layout_object,
       local_bounds.ShiftMaxYEdgeTo(max_y);
     }
   } else if (layout_object->IsText()) {
-    // TODO(skobes): Use first and last InlineTextBox only?
-    for (InlineTextBox* box : ToLayoutText(layout_object)->TextBoxes())
-      local_bounds.Unite(box->FrameRect());
+    local_bounds.Unite(ToLayoutText(layout_object)->LinesBoundingBox());
   } else {
     // Only LayoutBox and LayoutText are supported.
     NOTREACHED();
@@ -284,7 +283,7 @@ ScrollAnchor::ExamineResult ScrollAnchor::Examine(
   if (!CandidateMayMoveWithScroller(candidate, scroller_))
     return ExamineResult(kSkip);
 
-  if (candidate->Style()->OverflowAnchor() == EOverflowAnchor::kNone)
+  if (candidate->StyleRef().OverflowAnchor() == EOverflowAnchor::kNone)
     return ExamineResult(kSkip);
 
   LayoutRect candidate_rect = RelativeBounds(candidate, scroller_);
@@ -464,13 +463,21 @@ void ScrollAnchor::Adjust() {
 }
 
 bool ScrollAnchor::RestoreAnchor(const SerializedAnchor& serialized_anchor) {
-  if (!scroller_ || anchor_object_ || !serialized_anchor.IsValid()) {
+  if (!scroller_ || !serialized_anchor.IsValid()) {
     return false;
   }
 
   SCOPED_BLINK_UMA_HISTOGRAM_TIMER("Layout.ScrollAnchor.TimeToRestoreAnchor");
   DEFINE_STATIC_LOCAL(EnumerationHistogram, restoration_status_histogram,
                       ("Layout.ScrollAnchor.RestorationStatus", kStatusCount));
+
+  if (anchor_object_ && serialized_anchor.selector == saved_selector_) {
+    return true;
+  }
+
+  if (anchor_object_) {
+    return false;
+  }
 
   Document* document = &(ScrollerLayoutBox(scroller_)->GetDocument());
 
@@ -532,6 +539,7 @@ bool ScrollAnchor::RestoreAnchor(const SerializedAnchor& serialized_anchor) {
 
     saved_selector_ = serialized_anchor.selector;
     restoration_status_histogram.Count(kSuccess);
+
     return true;
   }
 
@@ -577,10 +585,7 @@ void ScrollAnchor::ClearSelf() {
 
 void ScrollAnchor::Dispose() {
   if (scroller_) {
-    LocalFrameView* frame_view =
-        scroller_->IsLocalFrameView()
-            ? static_cast<LocalFrameView*>(scroller_.Get())
-            : ScrollerLayoutBox(scroller_)->GetFrameView();
+    LocalFrameView* frame_view = ScrollerLayoutBox(scroller_)->GetFrameView();
     ScrollableArea* owning_scroller =
         scroller_->IsRootFrameViewport()
             ? &ToRootFrameViewport(scroller_)->LayoutViewport()
@@ -608,12 +613,6 @@ void ScrollAnchor::Clear() {
       anchor->ClearSelf();
     }
     layer = layer->Parent();
-  }
-
-  if (LocalFrameView* view = layout_object->GetFrameView()) {
-    ScrollAnchor* anchor = view->GetScrollAnchor();
-    DCHECK(anchor);
-    anchor->ClearSelf();
   }
 }
 

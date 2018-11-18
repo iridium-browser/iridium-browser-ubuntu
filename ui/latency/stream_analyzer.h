@@ -24,6 +24,30 @@ struct ThresholdResult {
   double ge_fraction = 0.0;
 };
 
+struct StreamAnalysis {
+  StreamAnalysis();
+  ~StreamAnalysis();
+
+  double mean;
+  double rms;
+  double smr;
+
+  double std_dev;
+  double variance_of_roots;
+
+  std::vector<ThresholdResult> thresholds;
+  PercentileResults percentiles;
+
+  size_t worst_sample_count = 0;
+  FrameRegionResult worst_mean;
+  FrameRegionResult worst_rms;
+  FrameRegionResult worst_smr;
+
+  void AsValueInto(base::trace_event::TracedValue* state) const;
+
+  DISALLOW_COPY_AND_ASSIGN(StreamAnalysis);
+};
+
 namespace frame_metrics {
 
 // The StreamAnalyzerClient interface is currently the same as
@@ -93,8 +117,7 @@ class StreamAnalyzer {
   // available directly.
   const WindowedAnalyzer& window() const { return windowed_analyzer_; }
 
-  std::unique_ptr<base::trace_event::ConvertableToTraceFormat> AsValue() const;
-  void AsValueInto(base::trace_event::TracedValue* state) const;
+  void ComputeSummary(StreamAnalysis* results) const;
 
  protected:
   double VarianceHelper(double accum, double square_accum) const;

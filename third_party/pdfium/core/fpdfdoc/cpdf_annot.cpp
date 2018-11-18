@@ -13,6 +13,7 @@
 #include "core/fpdfapi/page/cpdf_page.h"
 #include "core/fpdfapi/parser/cpdf_array.h"
 #include "core/fpdfapi/parser/cpdf_boolean.h"
+#include "core/fpdfapi/parser/cpdf_dictionary.h"
 #include "core/fpdfapi/parser/cpdf_document.h"
 #include "core/fpdfapi/render/cpdf_rendercontext.h"
 #include "core/fpdfapi/render/cpdf_renderoptions.h"
@@ -53,17 +54,17 @@ CPDF_Form* AnnotGetMatrix(const CPDF_Page* pPage,
   if (!pForm)
     return nullptr;
 
-  CFX_Matrix form_matrix = pForm->m_pFormDict->GetMatrixFor("Matrix");
+  CFX_Matrix form_matrix = pForm->GetDict()->GetMatrixFor("Matrix");
   CFX_FloatRect form_bbox =
-      form_matrix.TransformRect(pForm->m_pFormDict->GetRectFor("BBox"));
+      form_matrix.TransformRect(pForm->GetDict()->GetRectFor("BBox"));
   matrix->MatchRect(pAnnot->GetRect(), form_bbox);
   matrix->Concat(*pUser2Device);
   return pForm;
 }
 
-CPDF_Stream* FPDFDOC_GetAnnotAPInternal(const CPDF_Dictionary* pAnnotDict,
-                                        CPDF_Annot::AppearanceMode eMode,
-                                        bool bFallbackToNormal) {
+CPDF_Stream* GetAnnotAPInternal(CPDF_Dictionary* pAnnotDict,
+                                CPDF_Annot::AppearanceMode eMode,
+                                bool bFallbackToNormal) {
   CPDF_Dictionary* pAP = pAnnotDict->GetDictFor("AP");
   if (!pAP)
     return nullptr;
@@ -90,7 +91,7 @@ CPDF_Stream* FPDFDOC_GetAnnotAPInternal(const CPDF_Dictionary* pAnnotDict,
   if (as.IsEmpty()) {
     ByteString value = pAnnotDict->GetStringFor("V");
     if (value.IsEmpty()) {
-      CPDF_Dictionary* pParentDict = pAnnotDict->GetDictFor("Parent");
+      const CPDF_Dictionary* pParentDict = pAnnotDict->GetDictFor("Parent");
       value = pParentDict ? pParentDict->GetStringFor("V") : ByteString();
     }
     as = (!value.IsEmpty() && pDict->KeyExist(value)) ? value : "Off";
@@ -118,7 +119,8 @@ CPDF_Annot::~CPDF_Annot() {
 void CPDF_Annot::Init() {
   m_nSubtype = StringToAnnotSubtype(m_pAnnotDict->GetStringFor("Subtype"));
   m_bIsTextMarkupAnnotation = IsTextMarkupAnnotation(m_nSubtype);
-  m_bHasGeneratedAP = m_pAnnotDict->GetBooleanFor(kPDFiumKey_HasGeneratedAP);
+  m_bHasGeneratedAP =
+      m_pAnnotDict->GetBooleanFor(kPDFiumKey_HasGeneratedAP, false);
   GenerateAPIfNeeded();
 }
 
@@ -177,18 +179,18 @@ uint32_t CPDF_Annot::GetFlags() const {
   return m_pAnnotDict->GetIntegerFor("F");
 }
 
-CPDF_Stream* FPDFDOC_GetAnnotAP(const CPDF_Dictionary* pAnnotDict,
-                                CPDF_Annot::AppearanceMode eMode) {
-  return FPDFDOC_GetAnnotAPInternal(pAnnotDict, eMode, true);
+CPDF_Stream* GetAnnotAP(CPDF_Dictionary* pAnnotDict,
+                        CPDF_Annot::AppearanceMode eMode) {
+  return GetAnnotAPInternal(pAnnotDict, eMode, true);
 }
 
-CPDF_Stream* FPDFDOC_GetAnnotAPNoFallback(const CPDF_Dictionary* pAnnotDict,
-                                          CPDF_Annot::AppearanceMode eMode) {
-  return FPDFDOC_GetAnnotAPInternal(pAnnotDict, eMode, false);
+CPDF_Stream* GetAnnotAPNoFallback(CPDF_Dictionary* pAnnotDict,
+                                  CPDF_Annot::AppearanceMode eMode) {
+  return GetAnnotAPInternal(pAnnotDict, eMode, false);
 }
 
 CPDF_Form* CPDF_Annot::GetAPForm(const CPDF_Page* pPage, AppearanceMode mode) {
-  CPDF_Stream* pStream = FPDFDOC_GetAnnotAP(m_pAnnotDict.Get(), mode);
+  CPDF_Stream* pStream = GetAnnotAP(m_pAnnotDict.Get(), mode);
   if (!pStream)
     return nullptr;
 
@@ -198,7 +200,7 @@ CPDF_Form* CPDF_Annot::GetAPForm(const CPDF_Page* pPage, AppearanceMode mode) {
 
   auto pNewForm = pdfium::MakeUnique<CPDF_Form>(
       m_pDocument.Get(), pPage->m_pResources.Get(), pStream);
-  pNewForm->ParseContent();
+  pNewForm->ParseContent(nullptr, nullptr, nullptr, nullptr);
 
   CPDF_Form* pResult = pNewForm.get();
   m_APMap[pStream] = std::move(pNewForm);
@@ -229,12 +231,13 @@ CFX_FloatRect CPDF_Annot::RectFromQuadPointsArray(const CPDF_Array* pArray,
 
 // static
 CFX_FloatRect CPDF_Annot::BoundingRectFromQuadPoints(
-    CPDF_Dictionary* pAnnotDict) {
-  CPDF_Array* pArray = pAnnotDict->GetArrayFor("QuadPoints");
+    const CPDF_Dictionary* pAnnotDict) {
+  CFX_FloatRect ret;
+  const CPDF_Array* pArray = pAnnotDict->GetArrayFor("QuadPoints");
   if (!pArray)
-    return CFX_FloatRect();
+    return ret;
 
-  CFX_FloatRect ret = RectFromQuadPointsArray(pArray, 0);
+  ret = RectFromQuadPointsArray(pArray, 0);
   size_t nQuadPointCount = QuadPointCount(pArray);
   for (size_t i = 1; i < nQuadPointCount; ++i) {
     CFX_FloatRect rect = RectFromQuadPointsArray(pArray, i);
@@ -503,8 +506,7 @@ void CPDF_Annot::DrawBorder(CFX_RenderDevice* pDevice,
       if (dash_count % 2) {
         dash_count++;
       }
-      graph_state.m_DashArray = FX_Alloc(float, dash_count);
-      graph_state.m_DashCount = dash_count;
+      graph_state.m_DashArray.resize(dash_count);
       size_t i;
       for (i = 0; i < pDashArray->GetCount(); ++i) {
         graph_state.m_DashArray[i] = pDashArray->GetNumberAt(i);
@@ -513,9 +515,7 @@ void CPDF_Annot::DrawBorder(CFX_RenderDevice* pDevice,
         graph_state.m_DashArray[i] = graph_state.m_DashArray[i - 1];
       }
     } else {
-      graph_state.m_DashArray = FX_Alloc(float, 2);
-      graph_state.m_DashCount = 2;
-      graph_state.m_DashArray[0] = graph_state.m_DashArray[1] = 3 * 1.0f;
+      graph_state.m_DashArray = {3.0f, 3.0f};
     }
   }
 

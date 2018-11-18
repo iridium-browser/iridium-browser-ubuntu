@@ -2,15 +2,17 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/single_thread_task_runner.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/core/frame/use_counter.h"
 #include "third_party/blink/renderer/core/origin_trials/origin_trial_context.h"
+#include "third_party/blink/renderer/core/script/script.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
 #include "third_party/blink/renderer/core/workers/global_scope_creation_params.h"
-#include "third_party/blink/renderer/core/workers/main_thread_worklet_global_scope.h"
 #include "third_party/blink/renderer/core/workers/main_thread_worklet_reporting_proxy.h"
+#include "third_party/blink/renderer/core/workers/worklet_global_scope.h"
 #include "third_party/blink/renderer/core/workers/worklet_module_responses_map.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 
@@ -44,6 +46,9 @@ class MainThreadWorkletReportingProxyForTest final
 class MainThreadWorkletTest : public PageTestBase {
  public:
   void SetUp() override {
+    SetUpScope("script-src 'self' https://allowed.example.com");
+  }
+  void SetUpScope(const String& csp_header) {
     PageTestBase::SetUp(IntSize());
     Document* document = &GetDocument();
     document->SetURL(KURL("https://example.com/"));
@@ -52,46 +57,51 @@ class MainThreadWorkletTest : public PageTestBase {
     // Set up the CSP for Document before starting MainThreadWorklet because
     // MainThreadWorklet inherits the owner Document's CSP.
     ContentSecurityPolicy* csp = ContentSecurityPolicy::Create();
-    csp->DidReceiveHeader("script-src 'self' https://allowed.example.com",
-                          kContentSecurityPolicyHeaderTypeEnforce,
+    csp->DidReceiveHeader(csp_header, kContentSecurityPolicyHeaderTypeEnforce,
                           kContentSecurityPolicyHeaderSourceHTTP);
     document->InitContentSecurityPolicy(csp);
 
     reporting_proxy_ =
         std::make_unique<MainThreadWorkletReportingProxyForTest>(document);
     auto creation_params = std::make_unique<GlobalScopeCreationParams>(
-        document->Url(), document->UserAgent(),
-        document->GetContentSecurityPolicy()->Headers().get(),
+        document->Url(), ScriptType::kModule, document->UserAgent(),
+        document->GetContentSecurityPolicy()->Headers(),
         document->GetReferrerPolicy(), document->GetSecurityOrigin(),
-        document->IsSecureContext(), nullptr /* worker_clients */,
-        document->AddressSpace(), OriginTrialContext::GetTokens(document).get(),
+        document->IsSecureContext(), document->GetHttpsState(),
+        nullptr /* worker_clients */, document->AddressSpace(),
+        OriginTrialContext::GetTokens(document).get(),
         base::UnguessableToken::Create(), nullptr /* worker_settings */,
-        kV8CacheOptionsDefault,
-        new WorkletModuleResponsesMap(document->Fetcher()));
-    global_scope_ = new MainThreadWorkletGlobalScope(
-        &GetFrame(), std::move(creation_params), *reporting_proxy_);
+        kV8CacheOptionsDefault, new WorkletModuleResponsesMap);
+    global_scope_ = new WorkletGlobalScope(std::move(creation_params),
+                                           *reporting_proxy_, &GetFrame());
+    EXPECT_TRUE(global_scope_->IsMainThreadWorkletGlobalScope());
+    EXPECT_FALSE(global_scope_->IsThreadedWorkletGlobalScope());
   }
 
-  void TearDown() override { global_scope_->Terminate(); }
+  void TearDown() override { global_scope_->Dispose(); }
 
  protected:
   std::unique_ptr<MainThreadWorkletReportingProxyForTest> reporting_proxy_;
-  Persistent<MainThreadWorkletGlobalScope> global_scope_;
+  Persistent<WorkletGlobalScope> global_scope_;
+};
+
+class MainThreadWorkletInvalidCSPTest : public MainThreadWorkletTest {
+ public:
+  void SetUp() override { SetUpScope("invalid-csp"); }
 };
 
 TEST_F(MainThreadWorkletTest, SecurityOrigin) {
   // The SecurityOrigin for a worklet should be a unique opaque origin, while
   // the owner Document's SecurityOrigin shouldn't.
-  EXPECT_TRUE(global_scope_->GetSecurityOrigin()->IsUnique());
-  EXPECT_FALSE(global_scope_->DocumentSecurityOrigin()->IsUnique());
+  EXPECT_TRUE(global_scope_->GetSecurityOrigin()->IsOpaque());
+  EXPECT_FALSE(global_scope_->DocumentSecurityOrigin()->IsOpaque());
 }
 
 TEST_F(MainThreadWorkletTest, ContentSecurityPolicy) {
   ContentSecurityPolicy* csp = global_scope_->GetContentSecurityPolicy();
 
-  // The "script-src 'self'" directive is specified but the Worklet has a
-  // unique opaque origin, so this should not be allowed.
-  EXPECT_FALSE(csp->AllowScriptFromSource(
+  // The "script-src 'self'" directive allows this.
+  EXPECT_TRUE(csp->AllowScriptFromSource(
       global_scope_->Url(), String(), IntegrityMetadataSet(), kParserInserted));
 
   // The "script-src https://allowed.example.com" should allow this.
@@ -105,10 +115,11 @@ TEST_F(MainThreadWorkletTest, ContentSecurityPolicy) {
 }
 
 TEST_F(MainThreadWorkletTest, UseCounter) {
+  Page::InsertOrdinaryPageForTesting(&GetPage());
   // This feature is randomly selected.
   const WebFeature kFeature1 = WebFeature::kRequestFileSystem;
 
-  // API use on the MainThreadWorkletGlobalScope should be recorded in
+  // API use on WorkletGlobalScope for the main thread should be recorded in
   // UseCounter on the Document.
   EXPECT_FALSE(UseCounter::IsCounted(GetDocument(), kFeature1));
   UseCounter::Count(global_scope_, kFeature1);
@@ -121,8 +132,8 @@ TEST_F(MainThreadWorkletTest, UseCounter) {
   // This feature is randomly selected from Deprecation::deprecationMessage().
   const WebFeature kFeature2 = WebFeature::kPrefixedStorageInfo;
 
-  // Deprecated API use on the MainThreadWorkletGlobalScope should be recorded
-  // in UseCounter on the Document.
+  // Deprecated API use on WorkletGlobalScope for the main thread should be
+  // recorded in UseCounter on the Document.
   EXPECT_FALSE(UseCounter::IsCounted(GetDocument(), kFeature2));
   Deprecation::CountDeprecation(global_scope_, kFeature2);
   EXPECT_TRUE(UseCounter::IsCounted(GetDocument(), kFeature2));
@@ -136,6 +147,18 @@ TEST_F(MainThreadWorkletTest, TaskRunner) {
   scoped_refptr<base::SingleThreadTaskRunner> task_runner =
       global_scope_->GetTaskRunner(TaskType::kInternalTest);
   EXPECT_TRUE(task_runner->RunsTasksInCurrentSequence());
+}
+
+// Test that having an invalid CSP does not result in an exception.
+// See bugs: 844383,844317
+TEST_F(MainThreadWorkletInvalidCSPTest, InvalidContentSecurityPolicy) {
+  ContentSecurityPolicy* csp = global_scope_->GetContentSecurityPolicy();
+
+  // At this point check that the CSP that was set is indeed invalid.
+  EXPECT_EQ(1ul, csp->Headers().size());
+  EXPECT_EQ("invalid-csp", csp->Headers().at(0).first);
+  EXPECT_EQ(kContentSecurityPolicyHeaderTypeEnforce,
+            csp->Headers().at(0).second);
 }
 
 }  // namespace blink

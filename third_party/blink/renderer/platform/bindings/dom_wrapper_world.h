@@ -38,7 +38,7 @@
 #include "third_party/blink/public/platform/web_isolated_world_ids.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
-#include "third_party/blink/renderer/platform/weborigin/security_origin.h"
+#include "third_party/blink/renderer/platform/wtf/hash_set.h"
 #include "third_party/blink/renderer/platform/wtf/ref_counted.h"
 #include "v8/include/v8.h"
 
@@ -46,6 +46,8 @@ namespace blink {
 
 class DOMDataStore;
 class DOMObjectHolderBase;
+class ScriptWrappable;
+class SecurityOrigin;
 
 // This class represent a collection of DOM wrappers for a specific world. This
 // is identified by a world id that is a per-thread global identifier (see
@@ -69,7 +71,6 @@ class PLATFORM_EXPORT DOMWrapperWorld : public RefCounted<DOMWrapperWorld> {
     kMain,
     kIsolated,
     kInspectorIsolated,
-    kGarbageCollector,
     kRegExp,
     kTesting,
     kForV8ContextSnapshotNonMain,
@@ -96,8 +97,7 @@ class PLATFORM_EXPORT DOMWrapperWorld : public RefCounted<DOMWrapperWorld> {
       Vector<scoped_refptr<DOMWrapperWorld>>& worlds);
 
   // Traces wrappers corresponding to the ScriptWrappable in DOM data stores.
-  static void TraceWrappers(const ScriptWrappable*,
-                            const ScriptWrappableVisitor*);
+  static void Trace(const ScriptWrappable*, Visitor*);
 
   static DOMWrapperWorld& World(v8::Local<v8::Context> context) {
     return ScriptState::From(context)->World();

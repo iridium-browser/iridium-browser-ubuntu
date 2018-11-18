@@ -7,8 +7,8 @@
 #include <memory>
 #include <vector>
 
+#include "base/bind.h"
 #include "base/json/string_escape.h"
-#import "base/mac/bind_objc_block.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/strings/stringprintf.h"
 #import "base/strings/sys_string_conversions.h"
@@ -23,6 +23,7 @@
 #import "ios/web/webui/crw_web_ui_page_builder.h"
 #import "ios/web/webui/url_fetcher_block_adapter.h"
 #import "net/base/mac/url_conversions.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -75,10 +76,15 @@ const char kScriptCommandPrefix[] = "webui";
 
     __weak CRWWebUIManager* weakSelf = self;
     _webState->AddScriptCommandCallback(
-        base::BindBlockArc(
-            ^bool(const base::DictionaryValue& message, const GURL&, bool) {
-              return [weakSelf handleWebUIJSMessage:message];
-            }),
+        base::BindRepeating(^bool(const base::DictionaryValue& message,
+                                  const GURL&, bool, bool isMainFrame,
+                                  web::WebFrame* senderFrame) {
+          if (!isMainFrame) {
+            // WebUI only supports main frame.
+            return false;
+          }
+          return [weakSelf handleWebUIJSMessage:message];
+        }),
         kScriptCommandPrefix);
   }
   return self;
@@ -199,7 +205,7 @@ const char kScriptCommandPrefix[] = "webui";
     fetcherForURL:(const GURL&)URL
 completionHandler:(web::URLFetcherBlockAdapterCompletion)handler {
   return std::make_unique<web::URLFetcherBlockAdapter>(
-      URL, _webState->GetBrowserState()->GetRequestContext(), handler);
+      URL, _webState->GetBrowserState()->GetSharedURLLoaderFactory(), handler);
 }
 
 @end

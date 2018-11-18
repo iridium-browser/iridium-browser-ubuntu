@@ -17,14 +17,11 @@
 #include "components/policy/core/common/configuration_policy_provider.h"
 #include "components/policy/policy_export.h"
 #include "components/prefs/pref_member.h"
+#include "services/network/public/cpp/network_connection_tracker.h"
 
 namespace base {
 class FilePath;
 class SequencedTaskRunner;
-}
-
-namespace net {
-class URLRequestContextGetter;
 }
 
 namespace policy {
@@ -44,14 +41,13 @@ class POLICY_EXPORT CloudPolicyManager
       public ComponentCloudPolicyService::Delegate {
  public:
   // |task_runner| is the runner for policy refresh tasks.
-  // |io_task_runner| is used for network IO. Currently this must be the IO
-  // BrowserThread.
   CloudPolicyManager(
       const std::string& policy_type,
       const std::string& settings_entity_id,
       CloudPolicyStore* cloud_policy_store,
       const scoped_refptr<base::SequencedTaskRunner>& task_runner,
-      const scoped_refptr<base::SequencedTaskRunner>& io_task_runner);
+      network::NetworkConnectionTrackerGetter
+          network_connection_tracker_getter);
   ~CloudPolicyManager() override;
 
   CloudPolicyCore* core() { return &core_; }
@@ -83,7 +79,6 @@ class POLICY_EXPORT CloudPolicyManager
   void CreateComponentCloudPolicyService(
       const std::string& policy_type,
       const base::FilePath& policy_cache_path,
-      const scoped_refptr<net::URLRequestContextGetter>& request_context,
       CloudPolicyClient* client,
       SchemaRegistry* schema_registry);
 

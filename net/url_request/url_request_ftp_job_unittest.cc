@@ -9,6 +9,7 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
+#include "net/base/completion_once_callback.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/load_states.h"
 #include "net/base/proxy_server.h"
@@ -20,6 +21,7 @@
 #include "net/proxy_resolution/proxy_config_service_fixed.h"
 #include "net/socket/socket_test_util.h"
 #include "net/test/gtest_util.h"
+#include "net/test/test_with_scoped_task_environment.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/ftp_protocol_handler.h"
 #include "net/url_request/url_request.h"
@@ -46,7 +48,7 @@ class MockProxyResolverFactory : public ProxyResolverFactory {
 
   int CreateProxyResolver(const scoped_refptr<PacFileData>& pac_script,
                           std::unique_ptr<ProxyResolver>* resolver,
-                          const CompletionCallback& callback,
+                          CompletionOnceCallback callback,
                           std::unique_ptr<Request>* request) override {
     EXPECT_FALSE(resolver_);
     std::unique_ptr<MockAsyncProxyResolver> owned_resolver(
@@ -158,7 +160,7 @@ class TestURLRequestFtpJob : public URLRequestFtpJob {
 
 // Fixture for priority-related tests. Priority matters when there is
 // an HTTP proxy.
-class URLRequestFtpJobPriorityTest : public testing::Test {
+class URLRequestFtpJobPriorityTest : public TestWithScopedTaskEnvironment {
  protected:
   URLRequestFtpJobPriorityTest()
       : proxy_resolution_service_(std::make_unique<SimpleProxyConfigService>(),
@@ -250,7 +252,7 @@ TEST_F(URLRequestFtpJobPriorityTest, SetSubsequentTransactionPriority) {
   EXPECT_EQ(LOW, network_layer_.last_transaction()->priority());
 }
 
-class URLRequestFtpJobTest : public testing::Test {
+class URLRequestFtpJobTest : public TestWithScopedTaskEnvironment {
  public:
   URLRequestFtpJobTest()
       : request_context_(&socket_factory_,
@@ -265,11 +267,10 @@ class URLRequestFtpJobTest : public testing::Test {
     base::RunLoop().RunUntilIdle();
   }
 
-  void AddSocket(MockRead* reads, size_t reads_size,
-                 MockWrite* writes, size_t writes_size) {
+  void AddSocket(base::span<const MockRead> reads,
+                 base::span<const MockWrite> writes) {
     std::unique_ptr<SequencedSocketData> socket_data(
-        std::make_unique<SequencedSocketData>(reads, reads_size, writes,
-                                              writes_size));
+        std::make_unique<SequencedSocketData>(reads, writes));
     socket_data->set_connect_data(MockConnect(SYNCHRONOUS, OK));
     socket_factory_.AddSocketDataProvider(socket_data.get());
 
@@ -299,7 +300,7 @@ TEST_F(URLRequestFtpJobTest, FtpProxyRequest) {
     MockRead(ASYNC, 3, "test.html"),
   };
 
-  AddSocket(reads, arraysize(reads), writes, arraysize(writes));
+  AddSocket(reads, writes);
 
   TestDelegate request_delegate;
   std::unique_ptr<URLRequest> url_request(request_context()->CreateRequest(
@@ -403,7 +404,7 @@ TEST_F(URLRequestFtpJobTest, FtpProxyRequestNeedProxyAuthNoCredentials) {
     MockRead(ASYNC, 4, "test.html"),
   };
 
-  AddSocket(reads, arraysize(reads), writes, arraysize(writes));
+  AddSocket(reads, writes);
 
   TestDelegate request_delegate;
   std::unique_ptr<URLRequest> url_request(request_context()->CreateRequest(
@@ -449,7 +450,7 @@ TEST_F(URLRequestFtpJobTest, FtpProxyRequestNeedProxyAuthWithCredentials) {
     MockRead(ASYNC, 8, "test2.html"),
   };
 
-  AddSocket(reads, arraysize(reads), writes, arraysize(writes));
+  AddSocket(reads, writes);
 
   TestDelegate request_delegate;
   request_delegate.set_credentials(
@@ -485,7 +486,7 @@ TEST_F(URLRequestFtpJobTest, FtpProxyRequestNeedServerAuthNoCredentials) {
     MockRead(ASYNC, 4, "test.html"),
   };
 
-  AddSocket(reads, arraysize(reads), writes, arraysize(writes));
+  AddSocket(reads, writes);
 
   TestDelegate request_delegate;
   std::unique_ptr<URLRequest> url_request(request_context()->CreateRequest(
@@ -528,7 +529,7 @@ TEST_F(URLRequestFtpJobTest, FtpProxyRequestNeedServerAuthWithCredentials) {
     MockRead(ASYNC, 8, "test2.html"),
   };
 
-  AddSocket(reads, arraysize(reads), writes, arraysize(writes));
+  AddSocket(reads, writes);
 
   TestDelegate request_delegate;
   request_delegate.set_credentials(
@@ -587,7 +588,7 @@ TEST_F(URLRequestFtpJobTest, FtpProxyRequestNeedProxyAndServerAuth) {
     MockRead(ASYNC, 13, "test2.html"),
   };
 
-  AddSocket(reads, arraysize(reads), writes, arraysize(writes));
+  AddSocket(reads, writes);
 
   GURL url("ftp://ftp.example.com");
 
@@ -598,14 +599,12 @@ TEST_F(URLRequestFtpJobTest, FtpProxyRequestNeedProxyAndServerAuth) {
                       ASCIIToUTF16("passworddonotuse")));
 
   TestDelegate request_delegate;
-  request_delegate.set_quit_on_auth_required(true);
   std::unique_ptr<URLRequest> url_request(request_context()->CreateRequest(
       url, DEFAULT_PRIORITY, &request_delegate, TRAFFIC_ANNOTATION_FOR_TESTS));
   url_request->Start();
   ASSERT_TRUE(url_request->is_pending());
 
-  // Run until proxy auth is requested.
-  base::RunLoop().Run();
+  request_delegate.RunUntilAuthRequired();
 
   ASSERT_TRUE(request_delegate.auth_required_called());
   EXPECT_EQ(0, network_delegate()->completed_requests());
@@ -614,15 +613,14 @@ TEST_F(URLRequestFtpJobTest, FtpProxyRequestNeedProxyAndServerAuth) {
       AuthCredentials(ASCIIToUTF16("proxyuser"), ASCIIToUTF16("proxypass")));
 
   // Run until server auth is requested.
-  base::RunLoop().Run();
+  request_delegate.RunUntilAuthRequired();
 
   EXPECT_EQ(0, network_delegate()->completed_requests());
   EXPECT_EQ(0, network_delegate()->error_count());
   url_request->SetAuth(
       AuthCredentials(ASCIIToUTF16("myuser"), ASCIIToUTF16("mypass")));
 
-  // The TestDelegate will by default quit the message loop on completion.
-  base::RunLoop().Run();
+  request_delegate.RunUntilComplete();
 
   EXPECT_THAT(request_delegate.request_status(), IsOk());
   EXPECT_EQ(1, network_delegate()->completed_requests());
@@ -644,7 +642,7 @@ TEST_F(URLRequestFtpJobTest, FtpProxyRequestDoNotSaveCookies) {
     MockRead(ASYNC, 4, "test.html"),
   };
 
-  AddSocket(reads, arraysize(reads), writes, arraysize(writes));
+  AddSocket(reads, writes);
 
   TestDelegate request_delegate;
   std::unique_ptr<URLRequest> url_request(request_context()->CreateRequest(
@@ -678,7 +676,7 @@ TEST_F(URLRequestFtpJobTest, FtpProxyRequestDoNotFollowRedirects) {
     MockRead(ASYNC, 2, "Location: http://other.example.com/\r\n\r\n"),
   };
 
-  AddSocket(reads, arraysize(reads), writes, arraysize(writes));
+  AddSocket(reads, writes);
 
   TestDelegate request_delegate;
   std::unique_ptr<URLRequest> url_request(request_context()->CreateRequest(
@@ -715,7 +713,7 @@ TEST_F(URLRequestFtpJobTest, FtpProxyRequestReuseSocket) {
     MockRead(ASYNC, 7, "test2.html"),
   };
 
-  AddSocket(reads, arraysize(reads), writes, arraysize(writes));
+  AddSocket(reads, writes);
 
   TestDelegate request_delegate1;
 
@@ -763,12 +761,13 @@ TEST_F(URLRequestFtpJobTest, FtpProxyRequestDoNotReuseSocket) {
               "Proxy-Connection: keep-alive\r\n\r\n"),
   };
   MockWrite writes2[] = {
-    MockWrite(ASYNC, 0, "GET /second HTTP/1.1\r\n"
-              "Host: ftp.example.com\r\n"
-              "Connection: keep-alive\r\n"
-              "User-Agent:\r\n"
-              "Accept-Encoding: gzip, deflate\r\n"
-              "Accept-Language: en-us,fr\r\n\r\n"),
+      MockWrite(ASYNC, 0,
+                "GET /second HTTP/1.1\r\n"
+                "Host: ftp.example.com\r\n"
+                "Connection: keep-alive\r\n"
+                "User-Agent: \r\n"
+                "Accept-Encoding: gzip, deflate\r\n"
+                "Accept-Language: en-us,fr\r\n\r\n"),
   };
   MockRead reads1[] = {
     MockRead(ASYNC, 1, "HTTP/1.1 200 OK\r\n"),
@@ -781,8 +780,8 @@ TEST_F(URLRequestFtpJobTest, FtpProxyRequestDoNotReuseSocket) {
     MockRead(ASYNC, 3, "test2.html"),
   };
 
-  AddSocket(reads1, arraysize(reads1), writes1, arraysize(writes1));
-  AddSocket(reads2, arraysize(reads2), writes2, arraysize(writes2));
+  AddSocket(reads1, writes1);
+  AddSocket(reads2, writes2);
 
   TestDelegate request_delegate1;
   std::unique_ptr<URLRequest> url_request1(request_context()->CreateRequest(

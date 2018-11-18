@@ -8,23 +8,25 @@
 // DO NOT MODIFY!
 
 // clang-format off
-#include "v8_test_interface_constructor.h"
+#include "third_party/blink/renderer/bindings/tests/results/core/v8_test_interface_constructor.h"
 
 #include "base/memory/scoped_refptr.h"
-#include "bindings/core/v8/dictionary.h"
-#include "bindings/core/v8/exception_state.h"
-#include "bindings/core/v8/idl_types.h"
-#include "bindings/core/v8/native_value_traits_impl.h"
-#include "bindings/core/v8/v8_dom_configuration.h"
-#include "bindings/core/v8/v8_test_dictionary.h"
-#include "bindings/core/v8/v8_test_interface_empty.h"
-#include "core/dom/document.h"
-#include "core/execution_context/execution_context.h"
-#include "core/frame/local_dom_window.h"
-#include "core/frame/use_counter.h"
-#include "platform/bindings/v8_object_constructor.h"
-#include "platform/bindings/v8_private_property.h"
-#include "platform/wtf/get_ptr.h"
+#include "third_party/blink/renderer/bindings/core/v8/dictionary.h"
+#include "third_party/blink/renderer/bindings/core/v8/idl_types.h"
+#include "third_party/blink/renderer/bindings/core/v8/native_value_traits_impl.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_dom_configuration.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_test_dictionary.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_test_interface_empty.h"
+#include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
+#include "third_party/blink/renderer/core/frame/use_counter.h"
+#include "third_party/blink/renderer/platform/bindings/exception_messages.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
+#include "third_party/blink/renderer/platform/bindings/v8_object_constructor.h"
+#include "third_party/blink/renderer/platform/bindings/v8_per_context_data.h"
+#include "third_party/blink/renderer/platform/bindings/v8_private_property.h"
+#include "third_party/blink/renderer/platform/wtf/get_ptr.h"
 
 namespace blink {
 
@@ -77,7 +79,7 @@ static void constructor1(const v8::FunctionCallbackInfo<v8::Value>& info) {
 
   ExecutionContext* executionContext = ToExecutionContext(
       info.NewTarget().As<v8::Object>()->CreationContext());
-  Document& document = *ToDocument(ToExecutionContext(
+  Document& document = *To<Document>(ToExecutionContext(
       info.NewTarget().As<v8::Object>()->CreationContext()));
   TestInterfaceConstructor* impl = TestInterfaceConstructor::Create(scriptState, executionContext, document, exceptionState);
   if (exceptionState.HadException()) {
@@ -148,7 +150,7 @@ static void constructor2(const v8::FunctionCallbackInfo<v8::Value>& info) {
   if (UNLIKELY(numArgsPassed <= 7)) {
     ExecutionContext* executionContext = ToExecutionContext(
         info.NewTarget().As<v8::Object>()->CreationContext());
-    Document& document = *ToDocument(ToExecutionContext(
+    Document& document = *To<Document>(ToExecutionContext(
         info.NewTarget().As<v8::Object>()->CreationContext()));
     TestInterfaceConstructor* impl = TestInterfaceConstructor::Create(scriptState, executionContext, document, doubleArg, stringArg, testInterfaceEmptyArg, dictionaryArg, sequenceStringArg, sequenceDictionaryArg, sequenceLongOrTestDictionaryArg, exceptionState);
     if (exceptionState.HadException()) {
@@ -179,7 +181,7 @@ static void constructor2(const v8::FunctionCallbackInfo<v8::Value>& info) {
 
   ExecutionContext* executionContext = ToExecutionContext(
       info.NewTarget().As<v8::Object>()->CreationContext());
-  Document& document = *ToDocument(ToExecutionContext(
+  Document& document = *To<Document>(ToExecutionContext(
       info.NewTarget().As<v8::Object>()->CreationContext()));
   TestInterfaceConstructor* impl = TestInterfaceConstructor::Create(scriptState, executionContext, document, doubleArg, stringArg, testInterfaceEmptyArg, dictionaryArg, sequenceStringArg, sequenceDictionaryArg, sequenceLongOrTestDictionaryArg, optionalUSVStringArg, optionalDictionaryArg, optionalTestInterfaceEmptyArg, exceptionState);
   if (exceptionState.HadException()) {
@@ -212,7 +214,7 @@ static void constructor3(const v8::FunctionCallbackInfo<v8::Value>& info) {
   if (UNLIKELY(numArgsPassed <= 1)) {
     ExecutionContext* executionContext = ToExecutionContext(
         info.NewTarget().As<v8::Object>()->CreationContext());
-    Document& document = *ToDocument(ToExecutionContext(
+    Document& document = *To<Document>(ToExecutionContext(
         info.NewTarget().As<v8::Object>()->CreationContext()));
     TestInterfaceConstructor* impl = TestInterfaceConstructor::Create(scriptState, executionContext, document, arg, exceptionState);
     if (exceptionState.HadException()) {
@@ -229,7 +231,7 @@ static void constructor3(const v8::FunctionCallbackInfo<v8::Value>& info) {
 
   ExecutionContext* executionContext = ToExecutionContext(
       info.NewTarget().As<v8::Object>()->CreationContext());
-  Document& document = *ToDocument(ToExecutionContext(
+  Document& document = *To<Document>(ToExecutionContext(
       info.NewTarget().As<v8::Object>()->CreationContext()));
   TestInterfaceConstructor* impl = TestInterfaceConstructor::Create(scriptState, executionContext, document, arg, optArg, exceptionState);
   if (exceptionState.HadException()) {
@@ -264,7 +266,7 @@ static void constructor4(const v8::FunctionCallbackInfo<v8::Value>& info) {
 
   ExecutionContext* executionContext = ToExecutionContext(
       info.NewTarget().As<v8::Object>()->CreationContext());
-  Document& document = *ToDocument(ToExecutionContext(
+  Document& document = *To<Document>(ToExecutionContext(
       info.NewTarget().As<v8::Object>()->CreationContext()));
   TestInterfaceConstructor* impl = TestInterfaceConstructor::Create(scriptState, executionContext, document, arg, arg2, arg3, exceptionState);
   if (exceptionState.HadException()) {
@@ -396,7 +398,7 @@ static void V8TestInterfaceConstructorConstructorCallback(const v8::FunctionCall
   if (UNLIKELY(numArgsPassed <= 1)) {
     ExecutionContext* executionContext = ToExecutionContext(
         info.NewTarget().As<v8::Object>()->CreationContext());
-    Document& document = *ToDocument(ToExecutionContext(
+    Document& document = *To<Document>(ToExecutionContext(
         info.NewTarget().As<v8::Object>()->CreationContext()));
     TestInterfaceConstructor* impl = TestInterfaceConstructor::CreateForJSConstructor(scriptState, executionContext, document, arg, exceptionState);
     if (exceptionState.HadException()) {
@@ -413,7 +415,7 @@ static void V8TestInterfaceConstructorConstructorCallback(const v8::FunctionCall
 
   ExecutionContext* executionContext = ToExecutionContext(
       info.NewTarget().As<v8::Object>()->CreationContext());
-  Document& document = *ToDocument(ToExecutionContext(
+  Document& document = *To<Document>(ToExecutionContext(
       info.NewTarget().As<v8::Object>()->CreationContext()));
   TestInterfaceConstructor* impl = TestInterfaceConstructor::CreateForJSConstructor(scriptState, executionContext, document, arg, optArg, exceptionState);
   if (exceptionState.HadException()) {

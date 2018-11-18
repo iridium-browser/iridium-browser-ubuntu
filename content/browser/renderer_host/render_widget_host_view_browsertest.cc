@@ -7,7 +7,7 @@
 #include "base/command_line.h"
 #include "base/location.h"
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop/message_loop_current.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
@@ -63,7 +63,7 @@ class RenderWidgetHostViewBrowserTest : public ContentBrowserTest {
         frames_captured_(0) {}
 
   void SetUpOnMainThread() override {
-    ASSERT_TRUE(PathService::Get(DIR_TEST_DATA, &test_dir_));
+    ASSERT_TRUE(base::PathService::Get(DIR_TEST_DATA, &test_dir_));
   }
 
   // Attempts to set up the source surface.  Returns false if unsupported on the
@@ -152,14 +152,14 @@ class CommitBeforeSwapAckSentHelper
 
  private:
   // DidCommitProvisionalLoadInterceptor:
-  void WillDispatchDidCommitProvisionalLoad(
+  bool WillDispatchDidCommitProvisionalLoad(
       RenderFrameHost* render_frame_host,
       ::FrameHostMsg_DidCommitProvisionalLoad_Params* params,
       service_manager::mojom::InterfaceProviderRequest*
           interface_provider_request) override {
-    base::MessageLoop::ScopedNestableTaskAllower allow(
-        base::MessageLoop::current());
+    base::MessageLoopCurrent::ScopedNestableTaskAllower allow;
     frame_observer_->WaitForAnyFrameSubmission();
+    return true;
   }
 
   // Not owned.
@@ -453,13 +453,13 @@ class CompositingRenderWidgetHostViewBrowserTestTabCapture
         "<style>"
         "body { padding: 0; margin: 0; }"
         ".left { position: absolute;"
-        "        background: #0ff;"
+        "        background: %%230ff;"
         "        width: %dpx;"
         "        height: %dpx;"
         "}"
         ".right { position: absolute;"
         "         left: %dpx;"
-        "         background: #ff0;"
+        "         background: %%23ff0;"
         "         width: %dpx;"
         "         height: %dpx;"
         "}"
@@ -748,7 +748,7 @@ IN_PROC_BROWSER_TEST_P(CompositingRenderWidgetHostViewBrowserTestHiDPI,
                          "<style>"
                          "body { padding: 0; margin: 0; }"
                          ".box { position: absolute;"
-                         "        background: #0ff;"
+                         "        background: %%230ff;"
                          "        width: 100%%;"
                          "        height: %dpx;"
                          "}"

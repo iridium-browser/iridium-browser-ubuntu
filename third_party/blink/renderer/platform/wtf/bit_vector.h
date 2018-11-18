@@ -33,7 +33,7 @@
 
 namespace WTF {
 
-// This is a space-efficient, resizeable bitvector class. In the common case it
+// This is a space-efficient, resizable bitvector class. In the common case it
 // occupies one word, but if necessary, it will inflate this one word to point
 // to a single chunk of out-of-line allocated storage to store an arbitrary
 // number of bits.
@@ -167,7 +167,7 @@ class WTF_EXPORT BitVector {
   }
 
   class WTF_EXPORT OutOfLineBits {
-    DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
+    DISALLOW_NEW();
 
    public:
     size_t NumBits() const { return num_bits_; }

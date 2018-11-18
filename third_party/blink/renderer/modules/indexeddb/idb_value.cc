@@ -13,6 +13,7 @@
 #include "third_party/blink/public/platform/web_blob_info.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/serialized_script_value.h"
 #include "third_party/blink/renderer/platform/blob/blob_data.h"
+#include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "v8/include/v8.h"
 
 namespace blink {
@@ -20,7 +21,7 @@ namespace blink {
 IDBValue::IDBValue(const WebData& data,
                    const WebVector<WebBlobInfo>& web_blob_info)
     : data_(data) {
-  blob_info_.ReserveInitialCapacity(web_blob_info.size());
+  blob_info_.ReserveInitialCapacity(SafeCast<wtf_size_t>(web_blob_info.size()));
 
   for (const WebBlobInfo& info : web_blob_info) {
     blob_info_.push_back(info);
@@ -86,7 +87,7 @@ void IDBValue::SetData(scoped_refptr<SharedBuffer> new_data) {
   DCHECK(new_data) << "Value unwrapping must result in a non-empty buffer";
 
   int64_t old_external_allocated_size = external_allocated_size_;
-  external_allocated_size_ = data_->size();
+  external_allocated_size_ = new_data->size();
   isolate_->AdjustAmountOfExternalAllocatedMemory(external_allocated_size_ -
                                                   old_external_allocated_size);
 

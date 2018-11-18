@@ -38,6 +38,7 @@
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 #include "third_party/blink/renderer/platform/wtf/deque.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
+#include "third_party/blink/renderer/platform/wtf/time.h"
 
 namespace blink {
 
@@ -52,7 +53,7 @@ class Database final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  virtual ~Database();
+  ~Database() override;
   void Trace(blink::Visitor*) override;
 
   bool OpenAndVerifyVersion(bool set_version_in_new_database,
@@ -160,7 +161,7 @@ class Database final : public ScriptWrappable {
   void ReportOpenDatabaseResult(int error_site,
                                 int web_sql_error_code,
                                 int sqlite_error_code,
-                                double duration);
+                                TimeDelta duration);
   void ReportChangeVersionResult(int error_site,
                                  int web_sql_error_code,
                                  int sqlite_error_code);

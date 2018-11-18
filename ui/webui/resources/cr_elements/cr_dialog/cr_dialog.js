@@ -52,10 +52,25 @@ Polymer({
     },
 
     /**
-     * True if the dialog should not be able to be cancelled, which will hide
-     * the 'x' button and prevent 'Escape' key presses from closing the dialog.
+     * True if the dialog should consume 'keydown' events. If ignoreEnterKey
+     * is true, 'Enter' key won't be consumed.
+     */
+    consumeKeydownEvent: {
+      type: Boolean,
+      value: false,
+    },
+
+    /**
+     * True if the dialog should not be able to be cancelled, which will prevent
+     * 'Escape' key presses from closing the dialog.
      */
     noCancel: {
+      type: Boolean,
+      value: false,
+    },
+
+    // True if dialog should show the 'X' close button.
+    showCloseButton: {
       type: Boolean,
       value: false,
     },
@@ -71,6 +86,9 @@ Polymer({
   /** @private {?MutationObserver} */
   mutationObserver_: null,
 
+  /** @private {?Function} */
+  boundKeydown_: null,
+
   /** @override */
   ready: function() {
     // If the active history entry changes (i.e. user clicks back button),
@@ -82,18 +100,18 @@ Polymer({
 
     if (!this.ignoreEnterKey)
       this.addEventListener('keypress', this.onKeypress_.bind(this));
-
-    if (this.noCancel)
-      this.addEventListener('cancel', this.onCancel_.bind(this));
   },
 
   /** @override */
   attached: function() {
     var mutationObserverCallback = function() {
-      if (this.$.dialog.open)
+      if (this.$.dialog.open) {
         this.addIntersectionObserver_();
-      else
+        this.addKeydownListener_();
+      } else {
         this.removeIntersectionObserver_();
+        this.removeKeydownListener_();
+      }
     }.bind(this);
 
     this.mutationObserver_ = new MutationObserver(mutationObserverCallback);
@@ -110,6 +128,7 @@ Polymer({
   /** @override */
   detached: function() {
     this.removeIntersectionObserver_();
+    this.removeKeydownListener_();
     if (this.mutationObserver_) {
       this.mutationObserver_.disconnect();
       this.mutationObserver_ = null;
@@ -145,6 +164,7 @@ Polymer({
         callback,
         /** @type {IntersectionObserverInit} */ ({
           root: bodyContainer,
+          rootMargin: '1px 0px',
           threshold: 0,
         }));
     this.intersectionObserver_.observe(bottomMarker);
@@ -159,20 +179,49 @@ Polymer({
     }
   },
 
+  /** @private */
+  addKeydownListener_: function() {
+    if (!this.consumeKeydownEvent)
+      return;
+
+    this.boundKeydown_ = this.boundKeydown_ || this.onKeydown_.bind(this);
+
+    this.addEventListener('keydown', this.boundKeydown_);
+
+    // Sometimes <body> is key event's target and in that case the event
+    // will bypass cr-dialog. We should consume those events too in order to
+    // behave modally. This prevents accidentally triggering keyboard commands.
+    document.body.addEventListener('keydown', this.boundKeydown_);
+  },
+
+  /** @private */
+  removeKeydownListener_: function() {
+    if (!this.boundKeydown_)
+      return;
+
+    this.removeEventListener('keydown', this.boundKeydown_);
+    document.body.removeEventListener('keydown', this.boundKeydown_);
+    this.boundKeydown_ = null;
+  },
+
   showModal: function() {
     this.$.dialog.showModal();
-    this.open = this.$.dialog.open;
+    assert(this.$.dialog.open);
+    this.open = true;
+    this.fire('cr-dialog-open');
   },
 
   cancel: function() {
     this.fire('cancel');
     this.$.dialog.close();
-    this.open = this.$.dialog.open;
+    assert(!this.$.dialog.open);
+    this.open = false;
   },
 
   close: function() {
     this.$.dialog.close('success');
-    this.open = this.$.dialog.open;
+    assert(!this.$.dialog.open);
+    this.open = false;
   },
 
   /**
@@ -183,6 +232,47 @@ Polymer({
     // Because the dialog may have a default Enter key handler, prevent
     // keypress events from bubbling up from this element.
     e.stopPropagation();
+  },
+
+  /**
+   * @param {!Event} e
+   * @private
+   */
+  onNativeDialogClose_: function(e) {
+    // Ignore any 'close' events not fired directly by the <dialog> element.
+    if (e.target !== this.getNative())
+      return;
+
+    // TODO(dpapad): This is necessary to make the code work both for Polymer 1
+    // and Polymer 2. Remove once migration to Polymer 2 is completed.
+    e.stopPropagation();
+
+    // Catch and re-fire the 'close' event such that it bubbles across Shadow
+    // DOM v1.
+    this.fire('close');
+  },
+
+  /**
+   * @param {!Event} e
+   * @private
+   */
+  onNativeDialogCancel_: function(e) {
+    // Ignore any 'cancel' events not fired directly by the <dialog> element.
+    if (e.target !== this.getNative())
+      return;
+
+    if (this.noCancel) {
+      e.preventDefault();
+      return;
+    }
+
+    // When the dialog is dismissed using the 'Esc' key, need to manually update
+    // the |open| property (since close() is not called).
+    this.open = false;
+
+    // Catch and re-fire the native 'cancel' event such that it bubbles across
+    // Shadow DOM v1.
+    this.fire('cancel');
   },
 
   /**
@@ -208,8 +298,8 @@ Polymer({
     if (e.key != 'Enter')
       return;
 
-    // Accept Enter keys from either the dialog, or a child paper-input element.
-    if (e.target != this && e.target.tagName != 'PAPER-INPUT')
+    // Accept Enter keys from either the dialog, or a child input element.
+    if (e.target != this && e.target.tagName != 'CR-INPUT')
       return;
 
     var actionButton =
@@ -224,9 +314,17 @@ Polymer({
    * @param {!Event} e
    * @private
    */
-  onCancel_: function(e) {
-    if (this.noCancel)
-      e.preventDefault();
+  onKeydown_: function(e) {
+    assert(this.consumeKeydownEvent);
+
+    if (!this.getNative().open)
+      return;
+
+    if (this.ignoreEnterKey && e.key == 'Enter')
+      return;
+
+    // Stop propagation to behave modally.
+    e.stopPropagation();
   },
 
   /** @param {!PointerEvent} e */

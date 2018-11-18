@@ -4,6 +4,7 @@
 
 #include "chrome/browser/vr/elements/keyboard.h"
 
+#include "chrome/browser/vr/frame_lifecycle.h"
 #include "chrome/browser/vr/ui_element_renderer.h"
 
 namespace vr {
@@ -62,35 +63,39 @@ void Keyboard::NotifyClientFloatAnimated(float value,
   UpdateDelegateVisibility();
 }
 
-void Keyboard::OnHoverEnter(const gfx::PointF& position) {
+void Keyboard::OnHoverEnter(const gfx::PointF& position,
+                            base::TimeTicks timestamp) {
   if (!delegate_)
     return;
 
   delegate_->OnHoverEnter(position);
 }
 
-void Keyboard::OnHoverLeave() {
+void Keyboard::OnHoverLeave(base::TimeTicks) {
   if (!delegate_)
     return;
 
   delegate_->OnHoverLeave();
 }
 
-void Keyboard::OnMove(const gfx::PointF& position) {
+void Keyboard::OnHoverMove(const gfx::PointF& position,
+                           base::TimeTicks timestamp) {
   if (!delegate_)
     return;
 
-  delegate_->OnMove(position);
+  delegate_->OnHoverMove(position);
 }
 
-void Keyboard::OnButtonDown(const gfx::PointF& position) {
+void Keyboard::OnButtonDown(const gfx::PointF& position,
+                            base::TimeTicks timestamp) {
   if (!delegate_)
     return;
 
   delegate_->OnButtonDown(position);
 }
 
-void Keyboard::OnButtonUp(const gfx::PointF& position) {
+void Keyboard::OnButtonUp(const gfx::PointF& position,
+                          base::TimeTicks timestamp) {
   if (!delegate_)
     return;
 
@@ -98,20 +103,15 @@ void Keyboard::OnButtonUp(const gfx::PointF& position) {
 }
 
 void Keyboard::AdvanceKeyboardFrameIfNeeded() {
-  // If the update phase is not dirty, the frame will be advanced in
-  // OnBeginFrame. That is, we only call OnBeginFrame below when the element is
-  // not visible (i.e UiElement::kDirty is true).
-  if (!delegate_ || update_phase() != UiElement::kDirty)
+  // This is the keyboard's equivalent to OnBeginFrame(), but is separate
+  // because it must run on every frame - not just if the keyboard is visible.
+  if (!delegate_)
     return;
 
   delegate_->OnBeginFrame();
 }
 
 bool Keyboard::OnBeginFrame(const gfx::Transform& head_pose) {
-  if (!delegate_)
-    return false;
-
-  delegate_->OnBeginFrame();
   // We return false here because any visible changes to the keyboard, such as
   // hover effects and showing/hiding of the keyboard will be drawn by the
   // controller's dirtyness, so it's safe to assume no visual changes here.

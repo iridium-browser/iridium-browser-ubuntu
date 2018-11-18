@@ -323,6 +323,10 @@ bool SchedulerStateMachine::ShouldDraw() const {
   if (did_draw_)
     return false;
 
+  // Don't draw if an early check determined the frame does not have damage.
+  if (skip_draw_)
+    return false;
+
   // Don't draw if we are waiting on the first commit after a surface.
   if (layer_tree_frame_sink_state_ != LayerTreeFrameSinkState::ACTIVE)
     return false;
@@ -559,6 +563,10 @@ bool SchedulerStateMachine::ShouldInvalidateLayerTreeFrameSink() const {
 
   // Invalidations are only performed inside a BeginFrame.
   if (begin_impl_frame_state_ != BeginImplFrameState::INSIDE_BEGIN_FRAME)
+    return false;
+
+  // Don't invalidate if we cannnot draw.
+  if (PendingDrawsShouldBeAborted())
     return false;
 
   // TODO(sunnyps): needs_prepare_tiles_ is needed here because PrepareTiles is
@@ -1072,12 +1080,18 @@ void SchedulerStateMachine::OnBeginImplFrameIdle() {
 
 SchedulerStateMachine::BeginImplFrameDeadlineMode
 SchedulerStateMachine::CurrentBeginImplFrameDeadlineMode() const {
-  if (settings_.using_synchronous_renderer_compositor) {
-    // No deadline for synchronous compositor.
+  const bool outside_begin_frame =
+      begin_impl_frame_state_ != BeginImplFrameState::INSIDE_BEGIN_FRAME;
+  if (settings_.using_synchronous_renderer_compositor || outside_begin_frame) {
+    // No deadline for synchronous compositor, or when outside the begin frame.
     return BeginImplFrameDeadlineMode::NONE;
   } else if (ShouldBlockDeadlineIndefinitely()) {
+    // We do not want to wait for a deadline because we're waiting for full
+    // pipeline to be flushed for headless.
     return BeginImplFrameDeadlineMode::BLOCKED;
   } else if (ShouldTriggerBeginImplFrameDeadlineImmediately()) {
+    // We are ready to draw a new active tree immediately because there's no
+    // commit expected or we're prioritizing active tree latency.
     return BeginImplFrameDeadlineMode::IMMEDIATE;
   } else if (needs_redraw_) {
     // We have an animation or fast input path on the impl thread that wants
@@ -1085,7 +1099,7 @@ SchedulerStateMachine::CurrentBeginImplFrameDeadlineMode() const {
     return BeginImplFrameDeadlineMode::REGULAR;
   } else {
     // The impl thread doesn't have anything it wants to draw and we are just
-    // waiting for a new active tree. In short we are blocked.
+    // waiting for a new active tree.
     return BeginImplFrameDeadlineMode::LATE;
   }
 }
@@ -1199,6 +1213,10 @@ void SchedulerStateMachine::SetResourcelessSoftwareDraw(
 
 void SchedulerStateMachine::SetCanDraw(bool can_draw) {
   can_draw_ = can_draw;
+}
+
+void SchedulerStateMachine::SetSkipDraw(bool skip_draw) {
+  skip_draw_ = skip_draw;
 }
 
 void SchedulerStateMachine::SetNeedsRedraw() {

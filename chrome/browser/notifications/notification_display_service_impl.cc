@@ -46,15 +46,11 @@ namespace {
 //   * Android
 //     Always uses native notifications.
 //
-//   * Mac OS X, Linux
+//   * Mac OS X, Linux, Windows 10 RS1+
 //     Uses native notifications by default, but can fall back to the message
 //     center if base::kNativeNotifications is disabled or initialization fails.
 //
-//   * Windows 10 RS1+:
-//     Uses the message center by default, but can use native notifications if
-//     base::kNativeNotifications is enabled or initialization fails.
-//
-//   * Chrome OS:
+//   * Chrome OS
 //     Always uses the message center, either through the message center
 //     notification platform bridge when base::kNativeNotifications is disabled,
 //     which means the message center runs in-process, or through the Chrome OS
@@ -71,10 +67,7 @@ NotificationPlatformBridge* GetNativeNotificationPlatformBridge() {
   if (NotificationPlatformBridgeWin::NativeNotificationEnabled())
     return g_browser_process->notification_platform_bridge();
 #elif defined(OS_CHROMEOS)
-  if (base::FeatureList::IsEnabled(features::kNativeNotifications) ||
-      base::FeatureList::IsEnabled(features::kMash)) {
-    return g_browser_process->notification_platform_bridge();
-  }
+  return g_browser_process->notification_platform_bridge();
 #else
   if (base::FeatureList::IsEnabled(features::kNativeNotifications) &&
       g_browser_process->notification_platform_bridge()) {
@@ -161,19 +154,19 @@ void NotificationDisplayServiceImpl::ProcessNotificationOperation(
   base::OnceClosure completed_closure = base::BindOnce(&OperationCompleted);
 
   switch (operation) {
-    case NotificationCommon::CLICK:
+    case NotificationCommon::OPERATION_CLICK:
       handler->OnClick(profile_, origin, notification_id, action_index, reply,
                        std::move(completed_closure));
       break;
-    case NotificationCommon::CLOSE:
+    case NotificationCommon::OPERATION_CLOSE:
       DCHECK(by_user.has_value());
       handler->OnClose(profile_, origin, notification_id, by_user.value(),
                        std::move(completed_closure));
       break;
-    case NotificationCommon::DISABLE_PERMISSION:
+    case NotificationCommon::OPERATION_DISABLE_PERMISSION:
       handler->DisableNotifications(profile_, origin);
       break;
-    case NotificationCommon::SETTINGS:
+    case NotificationCommon::OPERATION_SETTINGS:
       handler->OpenSettings(profile_, origin);
       break;
   }
@@ -211,6 +204,7 @@ void NotificationDisplayServiceImpl::Display(
     return;
   }
 
+#if BUILDFLAG(ENABLE_NATIVE_NOTIFICATIONS)
   NotificationPlatformBridge* bridge =
       NotificationPlatformBridge::CanHandleType(notification_type)
           ? bridge_
@@ -219,6 +213,7 @@ void NotificationDisplayServiceImpl::Display(
 
   bridge->Display(notification_type, profile_, notification,
                   std::move(metadata));
+#endif
 
   NotificationHandler* handler = GetNotificationHandler(notification_type);
   if (handler)
@@ -235,6 +230,7 @@ void NotificationDisplayServiceImpl::Close(
     return;
   }
 
+#if BUILDFLAG(ENABLE_NATIVE_NOTIFICATIONS)
   NotificationPlatformBridge* bridge =
       NotificationPlatformBridge::CanHandleType(notification_type)
           ? bridge_
@@ -242,6 +238,7 @@ void NotificationDisplayServiceImpl::Close(
   DCHECK(bridge);
 
   bridge->Close(profile_, notification_id);
+#endif
 }
 
 void NotificationDisplayServiceImpl::GetDisplayed(
@@ -283,10 +280,12 @@ void NotificationDisplayServiceImpl::ProfileLoadedCallback(
 void NotificationDisplayServiceImpl::OnNotificationPlatformBridgeReady(
     bool success) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+#if BUILDFLAG(ENABLE_NATIVE_NOTIFICATIONS) && !defined(OS_CHROMEOS)
   if (base::FeatureList::IsEnabled(features::kNativeNotifications)) {
     UMA_HISTOGRAM_BOOLEAN("Notifications.UsingNativeNotificationCenter",
                           success);
   }
+#endif
 
   if (!success) {
     // Fall back to the message center if initialization failed. Initialization

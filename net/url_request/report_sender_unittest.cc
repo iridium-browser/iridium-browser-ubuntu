@@ -16,6 +16,7 @@
 #include "net/base/upload_element_reader.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_status_code.h"
+#include "net/test/test_with_scoped_task_environment.h"
 #include "net/test/url_request/url_request_failed_job.h"
 #include "net/test/url_request/url_request_mock_data_job.h"
 #include "net/test/url_request/url_request_mock_http_job.h"
@@ -145,7 +146,7 @@ class TestReportSenderNetworkDelegate : public NetworkDelegateImpl {
 
   // NetworkDelegateImpl implementation.
   int OnBeforeURLRequest(URLRequest* request,
-                         const CompletionCallback& callback,
+                         CompletionOnceCallback callback,
                          GURL* new_url) override {
     num_requests_++;
     EXPECT_EQ(expect_url_, request->url());
@@ -183,7 +184,7 @@ class TestReportSenderNetworkDelegate : public NetworkDelegateImpl {
   DISALLOW_COPY_AND_ASSIGN(TestReportSenderNetworkDelegate);
 };
 
-class ReportSenderTest : public ::testing::Test {
+class ReportSenderTest : public TestWithScopedTaskEnvironment {
  public:
   ReportSenderTest() : context_(true) {
     context_.set_network_delegate(&network_delegate_);

@@ -27,8 +27,6 @@
     boolean mShiftingMode;
 }
 
-# There is stack-walking code in our IME that breaks with obfuscation.
-# https://crbug.com/824048.
--keepnames class org.chromium.content.browser.input.* {
-  *;
-}
+# Trichrome builds don't include a native library list in the main APK; it's
+# picked up from the library APK at runtime.
+-dontwarn org.chromium.base.library_loader.NativeLibraries

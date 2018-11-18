@@ -41,18 +41,11 @@
 
 namespace blink {
 
-MessageEvent* CreateConnectEvent(MessagePort* port) {
-  MessageEvent* event = MessageEvent::Create(new MessagePortArray(1, port),
-                                             String(), String(), port);
-  event->initEvent(EventTypeNames::connect, false, false);
-  return event;
-}
-
 SharedWorkerGlobalScope::SharedWorkerGlobalScope(
     const String& name,
     std::unique_ptr<GlobalScopeCreationParams> creation_params,
     SharedWorkerThread* thread,
-    double time_origin)
+    base::TimeTicks time_origin)
     : WorkerGlobalScope(std::move(creation_params), thread, time_origin),
       name_(name) {}
 
@@ -60,6 +53,38 @@ SharedWorkerGlobalScope::~SharedWorkerGlobalScope() = default;
 
 const AtomicString& SharedWorkerGlobalScope::InterfaceName() const {
   return EventTargetNames::SharedWorkerGlobalScope;
+}
+
+// https://html.spec.whatwg.org/multipage/workers.html#worker-processing-model
+void SharedWorkerGlobalScope::ImportModuleScript(
+    const KURL& module_url_record,
+    FetchClientSettingsObjectSnapshot* outside_settings_object,
+    network::mojom::FetchCredentialsMode credentials_mode) {
+  // Step 12: "Let destination be "sharedworker" if is shared is true, and
+  // "worker" otherwise."
+
+  // Step 13: "... Fetch a module worker script graph given url, outside
+  // settings, destination, the value of the credentials member of options, and
+  // inside settings."
+
+  // TODO(nhiroki): Implement module loading for shared workers.
+  // (https://crbug.com/824646)
+  NOTREACHED();
+}
+
+void SharedWorkerGlobalScope::ConnectPausable(MessagePortChannel channel) {
+  if (IsContextPaused()) {
+    AddPausedCall(WTF::Bind(&SharedWorkerGlobalScope::ConnectPausable,
+                            WrapWeakPersistent(this), std::move(channel)));
+    return;
+  }
+
+  MessagePort* port = MessagePort::Create(*this);
+  port->Entangle(std::move(channel));
+  MessageEvent* event = MessageEvent::Create(new MessagePortArray(1, port),
+                                             String(), String(), port);
+  event->initEvent(EventTypeNames::connect, false, false);
+  DispatchEvent(*event);
 }
 
 void SharedWorkerGlobalScope::ExceptionThrown(ErrorEvent* event) {

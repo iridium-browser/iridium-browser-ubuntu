@@ -40,6 +40,14 @@ using UrlPatternIndexOffset = flatbuffers::Offset<flat::UrlPatternIndex>;
 constexpr size_t kNGramSize = 5;
 static_assert(kNGramSize <= sizeof(NGram), "NGram type is too narrow.");
 
+// The default element types mask as specified by the flatbuffer schema.
+constexpr uint16_t kDefaultFlatElementTypesMask =
+    flat::ElementType_ANY & ~flat::ElementType_MAIN_FRAME;
+
+// The default element types mask used by a proto::UrlRule.
+constexpr uint32_t kDefaultProtoElementTypesMask =
+    proto::ELEMENT_TYPE_ALL & ~proto::ELEMENT_TYPE_POPUP;
+
 // Serializes the |rule| to the FlatBuffer |builder|, and returns an offset to
 // it in the resulting buffer. Returns null offset iff the |rule| could not be
 // serialized because of unsupported options or it is otherwise invalid.
@@ -53,6 +61,12 @@ UrlRuleOffset SerializeUrlRule(const proto::UrlRule& rule,
 // |rhs_domain|, zero if |lhs_domain| is equal to |rhs_domain| and a positive
 // value if |lhs_domain| should be ordered after |rhs_domain|.
 int CompareDomains(base::StringPiece lhs_domain, base::StringPiece rhs_domain);
+
+// The current format version of UrlPatternIndex.
+// Increase this value when introducing an incompatible change to the
+// UrlPatternIndex schema (flat/url_pattern_index.fbs). url_pattern_index
+// clients can use this as a signal to rebuild rulesets.
+constexpr int kUrlPatternIndexFormatVersion = 4;
 
 // The class used to construct an index over the URL patterns of a set of URL
 // rules. The rules themselves need to be converted to FlatBuffers format by the

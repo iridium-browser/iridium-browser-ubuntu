@@ -13,9 +13,9 @@
 #include "base/macros.h"
 #include "base/no_destructor.h"
 #include "content/common/content_export.h"
-#include "device/fido/fido_discovery.h"
+#include "device/fido/fido_device_discovery.h"
 #include "mojo/public/cpp/bindings/binding_set.h"
-#include "third_party/blink/public/platform/modules/webauth/virtual_authenticator.mojom.h"
+#include "third_party/blink/public/platform/modules/webauthn/virtual_authenticator.mojom.h"
 
 namespace content {
 
@@ -31,21 +31,21 @@ class VirtualFidoDiscovery;
 // lifetime of the browser process and shared by all frames in all WebContents
 // and across all BrowserContexts.
 class CONTENT_EXPORT ScopedVirtualAuthenticatorEnvironment
-    : public webauth::test::mojom::VirtualAuthenticatorManager,
+    : public blink::test::mojom::VirtualAuthenticatorManager,
       protected device::internal::ScopedFidoDiscoveryFactory {
  public:
   static ScopedVirtualAuthenticatorEnvironment* GetInstance();
 
   void AddBinding(
-      webauth::test::mojom::VirtualAuthenticatorManagerRequest request);
+      blink::test::mojom::VirtualAuthenticatorManagerRequest request);
 
  protected:
   ScopedVirtualAuthenticatorEnvironment();
   ~ScopedVirtualAuthenticatorEnvironment() override;
 
-  // webauth::test::mojom::VirtualAuthenticatorManager:
+  // blink::test::mojom::VirtualAuthenticatorManager:
   void CreateAuthenticator(
-      webauth::test::mojom::VirtualAuthenticatorOptionsPtr options,
+      blink::test::mojom::VirtualAuthenticatorOptionsPtr options,
       CreateAuthenticatorCallback callback) override;
   void GetAuthenticators(GetAuthenticatorsCallback callback) override;
   void RemoveAuthenticator(const std::string& id,
@@ -53,7 +53,7 @@ class CONTENT_EXPORT ScopedVirtualAuthenticatorEnvironment
   void ClearAuthenticators(ClearAuthenticatorsCallback callback) override;
 
   // ScopedFidoDiscoveryFactory:
-  std::unique_ptr<::device::FidoDiscovery> CreateFidoDiscovery(
+  std::unique_ptr<::device::FidoDeviceDiscovery> CreateFidoDiscovery(
       device::FidoTransportProtocol transport,
       ::service_manager::Connector* connector) override;
 
@@ -64,7 +64,7 @@ class CONTENT_EXPORT ScopedVirtualAuthenticatorEnvironment
   // Called by VirtualFidoDiscoveries when they are destructed.
   void OnDiscoveryDestroyed(VirtualFidoDiscovery* discovery);
 
-  mojo::BindingSet<webauth::test::mojom::VirtualAuthenticatorManager> bindings_;
+  mojo::BindingSet<blink::test::mojom::VirtualAuthenticatorManager> bindings_;
 
   // The key is the unique_id of the corresponding value (the authenticator).
   std::map<std::string, std::unique_ptr<VirtualAuthenticator>> authenticators_;

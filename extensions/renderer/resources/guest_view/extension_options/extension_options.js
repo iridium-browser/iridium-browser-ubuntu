@@ -6,6 +6,8 @@ var ExtensionOptionsConstants =
     require('extensionOptionsConstants').ExtensionOptionsConstants;
 var ExtensionOptionsEvents =
     require('extensionOptionsEvents').ExtensionOptionsEvents;
+var ExtensionOptionsAttributes =
+    require('extensionOptionsAttributes').ExtensionOptionsAttributes;
 var GuestViewContainer = require('guestViewContainer').GuestViewContainer;
 
 function ExtensionOptionsImpl(extensionoptionsElement) {
@@ -17,11 +19,15 @@ function ExtensionOptionsImpl(extensionoptionsElement) {
 
 ExtensionOptionsImpl.prototype.__proto__ = GuestViewContainer.prototype;
 
-ExtensionOptionsImpl.VIEW_TYPE = 'ExtensionOptions';
-
 ExtensionOptionsImpl.prototype.onElementAttached = function() {
   this.createGuest();
-}
+};
+
+// Sets up all of the extensionoptions attributes.
+ExtensionOptionsImpl.prototype.setupAttributes = function() {
+  this.attributes[ExtensionOptionsConstants.ATTRIBUTE_EXTENSION] =
+      new ExtensionOptionsAttributes.ExtensionAttribute(this);
+};
 
 ExtensionOptionsImpl.prototype.buildContainerParams = function() {
   var params = {};
@@ -46,8 +52,6 @@ ExtensionOptionsImpl.prototype.createGuest = function() {
     }
   }, this));
 };
-
-GuestViewContainer.registerElement(ExtensionOptionsImpl);
 
 // Exports.
 exports.$set('ExtensionOptionsImpl', ExtensionOptionsImpl);

@@ -5,7 +5,6 @@
 #include "chrome/browser/chromeos/app_mode/kiosk_external_updater.h"
 
 #include "base/bind.h"
-#include "base/files/file_enumerator.h"
 #include "base/files/file_util.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/location.h"
@@ -103,19 +102,6 @@ KioskExternalUpdater::KioskExternalUpdater(
 KioskExternalUpdater::~KioskExternalUpdater() {
   if (disks::DiskMountManager::GetInstance())
     disks::DiskMountManager::GetInstance()->RemoveObserver(this);
-}
-
-void KioskExternalUpdater::OnAutoMountableDiskEvent(
-    disks::DiskMountManager::DiskEvent event,
-    const disks::DiskMountManager::Disk& disk) {}
-
-void KioskExternalUpdater::OnBootDeviceDiskEvent(
-    disks::DiskMountManager::DiskEvent event,
-    const disks::DiskMountManager::Disk& disk) {}
-
-void KioskExternalUpdater::OnDeviceEvent(
-    disks::DiskMountManager::DeviceEvent event,
-    const std::string& device_path) {
 }
 
 void KioskExternalUpdater::OnMountEvent(

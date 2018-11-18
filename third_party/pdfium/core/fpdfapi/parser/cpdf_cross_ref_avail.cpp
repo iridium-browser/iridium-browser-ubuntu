@@ -5,6 +5,7 @@
 #include "core/fpdfapi/parser/cpdf_cross_ref_avail.h"
 
 #include <algorithm>
+#include <memory>
 #include <vector>
 
 #include "core/fpdfapi/parser/cpdf_dictionary.h"
@@ -186,7 +187,7 @@ bool CPDF_CrossRefAvail::CheckCrossRefStream() {
     return false;
   }
 
-  CPDF_Name* type_name = ToName(trailer->GetObjectFor(kTypeFieldKey));
+  const CPDF_Name* type_name = ToName(trailer->GetObjectFor(kTypeFieldKey));
   if (type_name && type_name->GetString() == kXRefKeyword) {
     const int32_t xrefpos = trailer->GetIntegerFor(kPrevCrossRefFieldKey);
     if (xrefpos &&

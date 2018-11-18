@@ -16,7 +16,7 @@
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_navigator_params.h"
-#include "chrome/browser/ui/views/harmony/chrome_layout_provider.h"
+#include "chrome/browser/ui/views/chrome_layout_provider.h"
 #include "chrome/grit/generated_resources.h"
 #include "chromeos/login/login_state.h"
 #include "chromeos/network/client_cert_util.h"
@@ -179,7 +179,8 @@ void EnrollmentDialogView::InitDialog() {
   ChromeLayoutProvider* provider = ChromeLayoutProvider::Get();
 
   columns->AddPaddingColumn(
-      0, provider->GetDistanceMetric(DISTANCE_UNRELATED_CONTROL_HORIZONTAL));
+      views::GridLayout::kFixedSize,
+      provider->GetDistanceMetric(DISTANCE_UNRELATED_CONTROL_HORIZONTAL));
   columns->AddColumn(views::GridLayout::LEADING,   // Horizontal leading.
                      views::GridLayout::FILL,      // Vertical resize.
                      1,                            // Resize weight.
@@ -187,10 +188,10 @@ void EnrollmentDialogView::InitDialog() {
                      0,                            // Ignored for USE_PREF.
                      0);                           // Minimum size.
 
-  grid_layout->StartRow(0, 0);
+  grid_layout->StartRow(views::GridLayout::kFixedSize, 0);
   grid_layout->AddView(label);
   grid_layout->AddPaddingRow(
-      0,
+      views::GridLayout::kFixedSize,
       provider->GetDistanceMetric(views::DISTANCE_UNRELATED_CONTROL_VERTICAL));
   grid_layout->Layout(this);
 }
@@ -278,6 +279,7 @@ bool EnrollmentDialogAllowed(Profile* profile) {
     case LoginState::LOGGED_IN_USER_GUEST:
       return true;
     case LoginState::LOGGED_IN_USER_PUBLIC_ACCOUNT:
+    case LoginState::LOGGED_IN_USER_PUBLIC_ACCOUNT_MANAGED:
       return false;
     case LoginState::LOGGED_IN_USER_SUPERVISED:
       return true;
@@ -285,6 +287,8 @@ bool EnrollmentDialogAllowed(Profile* profile) {
       return false;
     case LoginState::LOGGED_IN_USER_ARC_KIOSK_APP:
       return false;
+    case LoginState::LOGGED_IN_USER_CHILD:
+      return true;
   }
   NOTREACHED();
   return false;

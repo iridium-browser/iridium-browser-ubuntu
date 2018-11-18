@@ -23,7 +23,7 @@ void SpellCheckMarkerListImpl::Add(DocumentMarker* marker) {
 
   // Find first marker that ends after the one being inserted starts. If any
   // markers overlap the one being inserted, this is the first one.
-  const auto& first_overlapping = std::lower_bound(
+  auto* const first_overlapping = std::lower_bound(
       markers_.begin(), markers_.end(), marker,
       [](const Member<DocumentMarker>& marker_in_list,
          const DocumentMarker* marker_to_insert) {
@@ -33,7 +33,8 @@ void SpellCheckMarkerListImpl::Add(DocumentMarker* marker) {
   // If this marker does not overlap the one being inserted, insert before it
   // and we are done.
   if (marker->EndOffset() < (*first_overlapping)->StartOffset()) {
-    markers_.insert(first_overlapping - markers_.begin(), marker);
+    markers_.insert(
+        static_cast<wtf_size_t>(first_overlapping - markers_.begin()), marker);
     return;
   }
 
@@ -42,7 +43,7 @@ void SpellCheckMarkerListImpl::Add(DocumentMarker* marker) {
   // end offsets to include all the overlapped markers, and erase the rest of
   // the old markers.
 
-  const auto& last_overlapping = std::upper_bound(
+  auto* const last_overlapping = std::upper_bound(
       first_overlapping, markers_.end(), marker,
       [](const DocumentMarker* marker_to_insert,
          const Member<DocumentMarker>& marker_in_list) {
@@ -55,8 +56,11 @@ void SpellCheckMarkerListImpl::Add(DocumentMarker* marker) {
       std::max(marker->EndOffset(), (*(last_overlapping - 1))->EndOffset()));
 
   *first_overlapping = marker;
-  size_t num_to_erase = last_overlapping - (first_overlapping + 1);
-  markers_.EraseAt(first_overlapping + 1 - markers_.begin(), num_to_erase);
+  wtf_size_t num_to_erase =
+      static_cast<wtf_size_t>(last_overlapping - (first_overlapping + 1));
+  markers_.EraseAt(
+      static_cast<wtf_size_t>(first_overlapping + 1 - markers_.begin()),
+      num_to_erase);
 }
 
 void SpellCheckMarkerListImpl::Clear() {
@@ -111,7 +115,7 @@ bool SpellCheckMarkerListImpl::RemoveMarkersUnderWords(
     const String& node_text,
     const Vector<String>& words) {
   bool removed_markers = false;
-  for (size_t j = markers_.size(); j > 0; --j) {
+  for (wtf_size_t j = markers_.size(); j > 0; --j) {
     const DocumentMarker& marker = *markers_[j - 1];
     const unsigned start = marker.StartOffset();
     const unsigned length = marker.EndOffset() - marker.StartOffset();

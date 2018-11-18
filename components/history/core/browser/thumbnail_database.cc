@@ -128,9 +128,9 @@ void RecordInvalidStructure(InvalidStructureType invalid_type) {
                             invalid_type, STRUCTURE_EVENT_MAX);
 }
 
-// TODO(shess): If this proves out, move it all into sql::Connection to be
+// TODO(shess): If this proves out, move it all into sql::Database to be
 // shared.
-void GenerateDiagnostics(sql::Connection* db,
+void GenerateDiagnostics(sql::Database* db,
                          int extended_error,
                          sql::Statement* stmt) {
   // Since some/most errors will not resolve themselves, only report
@@ -152,8 +152,8 @@ void GenerateDiagnostics(sql::Connection* db,
 
 // NOTE(shess): Schema modifications must consider initial creation in
 // |InitImpl()| and history pruning in |RetainDataForPageUrls()|.
-bool InitTables(sql::Connection* db) {
-  const char kIconMappingSql[] =
+bool InitTables(sql::Database* db) {
+  static const char kIconMappingSql[] =
       "CREATE TABLE IF NOT EXISTS icon_mapping"
       "("
       "id INTEGER PRIMARY KEY,"
@@ -163,7 +163,7 @@ bool InitTables(sql::Connection* db) {
   if (!db->Execute(kIconMappingSql))
     return false;
 
-  const char kFaviconsSql[] =
+  static const char kFaviconsSql[] =
       "CREATE TABLE IF NOT EXISTS favicons"
       "("
       "id INTEGER PRIMARY KEY,"
@@ -174,7 +174,7 @@ bool InitTables(sql::Connection* db) {
   if (!db->Execute(kFaviconsSql))
     return false;
 
-  const char kFaviconBitmapsSql[] =
+  static const char kFaviconBitmapsSql[] =
       "CREATE TABLE IF NOT EXISTS favicon_bitmaps"
       "("
       "id INTEGER PRIMARY KEY,"
@@ -195,11 +195,11 @@ bool InitTables(sql::Connection* db) {
 
 // NOTE(shess): Schema modifications must consider initial creation in
 // |InitImpl()| and history pruning in |RetainDataForPageUrls()|.
-bool InitIndices(sql::Connection* db) {
-  const char kIconMappingUrlIndexSql[] =
+bool InitIndices(sql::Database* db) {
+  static const char kIconMappingUrlIndexSql[] =
       "CREATE INDEX IF NOT EXISTS icon_mapping_page_url_idx"
       " ON icon_mapping(page_url)";
-  const char kIconMappingIdIndexSql[] =
+  static const char kIconMappingIdIndexSql[] =
       "CREATE INDEX IF NOT EXISTS icon_mapping_icon_id_idx"
       " ON icon_mapping(icon_id)";
   if (!db->Execute(kIconMappingUrlIndexSql) ||
@@ -207,12 +207,12 @@ bool InitIndices(sql::Connection* db) {
     return false;
   }
 
-  const char kFaviconsIndexSql[] =
+  static const char kFaviconsIndexSql[] =
       "CREATE INDEX IF NOT EXISTS favicons_url ON favicons(url)";
   if (!db->Execute(kFaviconsIndexSql))
     return false;
 
-  const char kFaviconBitmapsIndexSql[] =
+  static const char kFaviconBitmapsIndexSql[] =
       "CREATE INDEX IF NOT EXISTS favicon_bitmaps_icon_id ON "
       "favicon_bitmaps(icon_id)";
   if (!db->Execute(kFaviconBitmapsIndexSql))
@@ -221,7 +221,7 @@ bool InitIndices(sql::Connection* db) {
   return true;
 }
 
-void DatabaseErrorCallback(sql::Connection* db,
+void DatabaseErrorCallback(sql::Database* db,
                            const base::FilePath& db_path,
                            HistoryBackendClient* backend_client,
                            int extended_error,
@@ -263,12 +263,12 @@ void DatabaseErrorCallback(sql::Connection* db,
     // or hardware issues, not coding errors at the client level, so displaying
     // the error would probably lead to confusion.  The ignored call signals the
     // test-expectation framework that the error was handled.
-    ignore_result(sql::Connection::IsExpectedSqliteError(extended_error));
+    ignore_result(sql::Database::IsExpectedSqliteError(extended_error));
     return;
   }
 
   // The default handling is to assert on debug and to ignore on release.
-  if (!sql::Connection::IsExpectedSqliteError(extended_error))
+  if (!sql::Database::IsExpectedSqliteError(extended_error))
     DLOG(FATAL) << db->GetErrorMessage();
 }
 
@@ -776,8 +776,7 @@ bool ThumbnailDatabase::GetIconMappingsForPageURL(
     return false;
 
   bool result = false;
-  for (std::vector<IconMapping>::iterator m = mapping_data.begin();
-       m != mapping_data.end(); ++m) {
+  for (auto m = mapping_data.begin(); m != mapping_data.end(); ++m) {
     if (required_icon_types.count(m->icon_type) != 0) {
       result = true;
       if (!filtered_mapping_data)
@@ -847,7 +846,7 @@ base::Optional<GURL> ThumbnailDatabase::FindFirstPageURLForHost(
 IconMappingID ThumbnailDatabase::AddIconMapping(
     const GURL& page_url,
     favicon_base::FaviconID icon_id) {
-  const char kSql[] =
+  static const char kSql[] =
       "INSERT INTO icon_mapping (page_url, icon_id) VALUES (?, ?)";
   sql::Statement statement(db_.GetCachedStatement(SQL_FROM_HERE, kSql));
   statement.BindString(0, URLDatabase::GURLToDatabaseURL(page_url));
@@ -917,12 +916,12 @@ bool ThumbnailDatabase::RetainDataForPageUrls(
 
   // Populate temp.retained_urls with |urls_to_keep|.
   {
-    const char kCreateRetainedUrls[] =
+    static const char kCreateRetainedUrls[] =
         "CREATE TEMP TABLE retained_urls (url LONGVARCHAR PRIMARY KEY)";
     if (!db_.Execute(kCreateRetainedUrls))
       return false;
 
-    const char kRetainedUrlSql[] =
+    static const char kRetainedUrlSql[] =
         "INSERT OR IGNORE INTO temp.retained_urls (url) VALUES (?)";
     sql::Statement statement(db_.GetUniqueStatement(kRetainedUrlSql));
     for (const GURL& url : urls_to_keep) {
@@ -936,7 +935,7 @@ bool ThumbnailDatabase::RetainDataForPageUrls(
   // temp.icon_id_mapping generates new icon ids as consecutive
   // integers starting from 1, and maps them to the old icon ids.
   {
-    const char kIconMappingCreate[] =
+    static const char kIconMappingCreate[] =
         "CREATE TEMP TABLE icon_id_mapping "
         "("
         "new_icon_id INTEGER PRIMARY KEY,"
@@ -946,7 +945,7 @@ bool ThumbnailDatabase::RetainDataForPageUrls(
       return false;
 
     // Insert the icon ids for retained urls, skipping duplicates.
-    const char kIconMappingSql[] =
+    static const char kIconMappingSql[] =
         "INSERT OR IGNORE INTO temp.icon_id_mapping (old_icon_id) "
         "SELECT icon_id FROM icon_mapping "
         "JOIN temp.retained_urls "
@@ -955,9 +954,9 @@ bool ThumbnailDatabase::RetainDataForPageUrls(
       return false;
   }
 
-  const char kRenameIconMappingTable[] =
+  static const char kRenameIconMappingTable[] =
       "ALTER TABLE icon_mapping RENAME TO old_icon_mapping";
-  const char kCopyIconMapping[] =
+  static const char kCopyIconMapping[] =
       "INSERT INTO icon_mapping (page_url, icon_id) "
       "SELECT temp.retained_urls.url, mapping.new_icon_id "
       "FROM temp.retained_urls "
@@ -965,17 +964,17 @@ bool ThumbnailDatabase::RetainDataForPageUrls(
       "ON (temp.retained_urls.url = old.page_url) "
       "JOIN temp.icon_id_mapping AS mapping "
       "ON (old.icon_id = mapping.old_icon_id)";
-  const char kDropOldIconMappingTable[] = "DROP TABLE old_icon_mapping";
+  static const char kDropOldIconMappingTable[] = "DROP TABLE old_icon_mapping";
 
-  const char kRenameFaviconsTable[] =
+  static const char kRenameFaviconsTable[] =
       "ALTER TABLE favicons RENAME TO old_favicons";
-  const char kCopyFavicons[] =
+  static const char kCopyFavicons[] =
       "INSERT INTO favicons (id, url, icon_type) "
       "SELECT mapping.new_icon_id, old.url, old.icon_type "
       "FROM old_favicons AS old "
       "JOIN temp.icon_id_mapping AS mapping "
       "ON (old.id = mapping.old_icon_id)";
-  const char kDropOldFaviconsTable[] = "DROP TABLE old_favicons";
+  static const char kDropOldFaviconsTable[] = "DROP TABLE old_favicons";
 
   // Set the retained favicon bitmaps to be expired (last_updated == 0).
   // The user may be deleting their favicon bitmaps because the favicon bitmaps
@@ -983,9 +982,9 @@ bool ThumbnailDatabase::RetainDataForPageUrls(
   // the user visits a page associated with the favicon bitmap. See
   // crbug.com/474421 for an example of a bug which caused favicon bitmaps to
   // become incorrect.
-  const char kRenameFaviconBitmapsTable[] =
+  static const char kRenameFaviconBitmapsTable[] =
       "ALTER TABLE favicon_bitmaps RENAME TO old_favicon_bitmaps";
-  const char kCopyFaviconBitmaps[] =
+  static const char kCopyFaviconBitmaps[] =
       "INSERT INTO favicon_bitmaps "
       "  (icon_id, last_updated, image_data, width, height, last_requested) "
       "SELECT mapping.new_icon_id, 0, old.image_data, old.width, old.height,"
@@ -993,7 +992,7 @@ bool ThumbnailDatabase::RetainDataForPageUrls(
       "FROM old_favicon_bitmaps AS old "
       "JOIN temp.icon_id_mapping AS mapping "
       "ON (old.icon_id = mapping.old_icon_id)";
-  const char kDropOldFaviconBitmapsTable[] =
+  static const char kDropOldFaviconBitmapsTable[] =
       "DROP TABLE old_favicon_bitmaps";
 
   // Rename existing tables to new location.
@@ -1029,8 +1028,8 @@ bool ThumbnailDatabase::RetainDataForPageUrls(
   if (!InitIndices(&db_))
     return false;
 
-  const char kIconMappingDrop[] = "DROP TABLE temp.icon_id_mapping";
-  const char kRetainedUrlsDrop[] = "DROP TABLE temp.retained_urls";
+  static const char kIconMappingDrop[] = "DROP TABLE temp.icon_id_mapping";
+  static const char kRetainedUrlsDrop[] = "DROP TABLE temp.retained_urls";
   if (!db_.Execute(kIconMappingDrop) || !db_.Execute(kRetainedUrlsDrop))
     return false;
 
@@ -1057,7 +1056,7 @@ favicon_base::IconType ThumbnailDatabase::FromPersistedIconType(int icon_type) {
   return static_cast<favicon_base::IconType>(val);
 }
 
-sql::InitStatus ThumbnailDatabase::OpenDatabase(sql::Connection* db,
+sql::InitStatus ThumbnailDatabase::OpenDatabase(sql::Database* db,
                                                 const base::FilePath& db_name) {
   db->set_histogram_tag("Thumbnail");
   db->set_error_callback(base::Bind(&DatabaseErrorCallback,
@@ -1221,7 +1220,7 @@ bool ThumbnailDatabase::UpgradeToVersion7() {
 
 bool ThumbnailDatabase::UpgradeToVersion8() {
   // Add the last_requested column to the favicon_bitmaps table.
-  const char kFaviconBitmapsAddLastRequestedSql[] =
+  static const char kFaviconBitmapsAddLastRequestedSql[] =
       "ALTER TABLE favicon_bitmaps ADD COLUMN last_requested INTEGER DEFAULT 0";
   if (!db_.Execute(kFaviconBitmapsAddLastRequestedSql))
     return false;

@@ -28,17 +28,20 @@ LoadState MockAsyncProxyResolver::RequestImpl::GetLoadState() {
 MockAsyncProxyResolver::Job::Job(MockAsyncProxyResolver* resolver,
                                  const GURL& url,
                                  ProxyInfo* results,
-                                 const CompletionCallback& callback)
-    : resolver_(resolver), url_(url), results_(results), callback_(callback) {}
+                                 CompletionOnceCallback callback)
+    : resolver_(resolver),
+      url_(url),
+      results_(results),
+      callback_(std::move(callback)) {}
 
 MockAsyncProxyResolver::Job::~Job() = default;
 
 void MockAsyncProxyResolver::Job::CompleteNow(int rv) {
-  CompletionCallback callback = callback_;
+  CompletionOnceCallback callback = std::move(callback_);
 
   resolver_->RemovePendingJob(this);
 
-  callback.Run(rv);
+  std::move(callback).Run(rv);
 }
 
 MockAsyncProxyResolver::~MockAsyncProxyResolver() = default;
@@ -46,10 +49,10 @@ MockAsyncProxyResolver::~MockAsyncProxyResolver() = default;
 int MockAsyncProxyResolver::GetProxyForURL(
     const GURL& url,
     ProxyInfo* results,
-    const CompletionCallback& callback,
+    CompletionOnceCallback callback,
     std::unique_ptr<Request>* request,
     const NetLogWithSource& /*net_log*/) {
-  std::unique_ptr<Job> job(new Job(this, url, results, callback));
+  std::unique_ptr<Job> job(new Job(this, url, results, std::move(callback)));
 
   pending_jobs_.push_back(job.get());
   request->reset(new RequestImpl(std::move(job)));
@@ -59,8 +62,7 @@ int MockAsyncProxyResolver::GetProxyForURL(
 }
 
 void MockAsyncProxyResolver::AddCancelledJob(std::unique_ptr<Job> job) {
-  std::vector<Job*>::iterator it =
-      std::find(pending_jobs_.begin(), pending_jobs_.end(), job.get());
+  auto it = std::find(pending_jobs_.begin(), pending_jobs_.end(), job.get());
   // Because this is called always when RequestImpl is destructed,
   // we need to check if it is still in pending jobs.
   if (it != pending_jobs_.end()) {
@@ -71,8 +73,7 @@ void MockAsyncProxyResolver::AddCancelledJob(std::unique_ptr<Job> job) {
 
 void MockAsyncProxyResolver::RemovePendingJob(Job* job) {
   DCHECK(job);
-  std::vector<Job*>::iterator it =
-      std::find(pending_jobs_.begin(), pending_jobs_.end(), job);
+  auto it = std::find(pending_jobs_.begin(), pending_jobs_.end(), job);
   DCHECK(it != pending_jobs_.end());
   pending_jobs_.erase(it);
 }
@@ -83,11 +84,11 @@ MockAsyncProxyResolverFactory::Request::Request(
     MockAsyncProxyResolverFactory* factory,
     const scoped_refptr<PacFileData>& script_data,
     std::unique_ptr<ProxyResolver>* resolver,
-    const CompletionCallback& callback)
+    CompletionOnceCallback callback)
     : factory_(factory),
       script_data_(script_data),
       resolver_(resolver),
-      callback_(callback) {}
+      callback_(std::move(callback)) {}
 
 MockAsyncProxyResolverFactory::Request::~Request() = default;
 
@@ -100,7 +101,7 @@ void MockAsyncProxyResolverFactory::Request::CompleteNow(
   scoped_refptr<MockAsyncProxyResolverFactory::Request> keep_alive(this);
   factory_->RemovePendingRequest(this);
   factory_ = nullptr;
-  callback_.Run(rv);
+  std::move(callback_).Run(rv);
 }
 
 void MockAsyncProxyResolverFactory::Request::CompleteNowWithForwarder(
@@ -139,10 +140,10 @@ MockAsyncProxyResolverFactory::MockAsyncProxyResolverFactory(
 int MockAsyncProxyResolverFactory::CreateProxyResolver(
     const scoped_refptr<PacFileData>& pac_script,
     std::unique_ptr<ProxyResolver>* resolver,
-    const net::CompletionCallback& callback,
+    CompletionOnceCallback callback,
     std::unique_ptr<ProxyResolverFactory::Request>* request_handle) {
   scoped_refptr<Request> request =
-      new Request(this, pac_script, resolver, callback);
+      new Request(this, pac_script, resolver, std::move(callback));
   pending_requests_.push_back(request);
 
   request_handle->reset(new Job(request));
@@ -152,7 +153,7 @@ int MockAsyncProxyResolverFactory::CreateProxyResolver(
 }
 
 void MockAsyncProxyResolverFactory::RemovePendingRequest(Request* request) {
-  RequestsList::iterator it =
+  auto it =
       std::find(pending_requests_.begin(), pending_requests_.end(), request);
   DCHECK(it != pending_requests_.end());
   pending_requests_.erase(it);
@@ -170,10 +171,11 @@ ForwardingProxyResolver::ForwardingProxyResolver(ProxyResolver* impl)
 
 int ForwardingProxyResolver::GetProxyForURL(const GURL& query_url,
                                             ProxyInfo* results,
-                                            const CompletionCallback& callback,
+                                            CompletionOnceCallback callback,
                                             std::unique_ptr<Request>* request,
                                             const NetLogWithSource& net_log) {
-  return impl_->GetProxyForURL(query_url, results, callback, request, net_log);
+  return impl_->GetProxyForURL(query_url, results, std::move(callback), request,
+                               net_log);
 }
 
 }  // namespace net

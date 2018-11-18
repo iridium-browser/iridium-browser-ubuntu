@@ -6,15 +6,17 @@
 
 #include <memory>
 
-#include "chrome/browser/budget_service/budget_manager_factory.h"
+#include "base/bind.h"
+#include "base/memory/ptr_util.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
+#include "chrome/browser/engagement/site_engagement_service_factory.h"
 #include "chrome/browser/gcm/gcm_profile_service_factory.h"
-#include "chrome/browser/gcm/instance_id/instance_id_profile_service.h"
 #include "chrome/browser/gcm/instance_id/instance_id_profile_service_factory.h"
 #include "chrome/browser/permissions/permission_manager_factory.h"
 #include "chrome/browser/profiles/incognito_helpers.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/push_messaging/push_messaging_service_impl.h"
+#include "components/gcm_driver/instance_id/instance_id_profile_service.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 
 // static
@@ -26,7 +28,7 @@ PushMessagingServiceImpl* PushMessagingServiceFactory::GetForProfile(
     return nullptr;
 
   if (!instance_id::InstanceIDProfileService::IsInstanceIDEnabled(
-          Profile::FromBrowserContext(context))) {
+          Profile::FromBrowserContext(context)->GetPrefs())) {
     LOG(WARNING) << "PushMessagingService could not be built because "
                     "InstanceID is unexpectedly disabled";
     return nullptr;
@@ -45,21 +47,22 @@ PushMessagingServiceFactory::PushMessagingServiceFactory()
     : BrowserContextKeyedServiceFactory(
           "PushMessagingProfileService",
           BrowserContextDependencyManager::GetInstance()) {
-  DependsOn(BudgetManagerFactory::GetInstance());
   DependsOn(gcm::GCMProfileServiceFactory::GetInstance());
   DependsOn(instance_id::InstanceIDProfileServiceFactory::GetInstance());
   DependsOn(HostContentSettingsMapFactory::GetInstance());
   DependsOn(PermissionManagerFactory::GetInstance());
+  DependsOn(SiteEngagementServiceFactory::GetInstance());
 }
 
 PushMessagingServiceFactory::~PushMessagingServiceFactory() {}
 
 void PushMessagingServiceFactory::RestoreFactoryForTests(
     content::BrowserContext* context) {
-  SetTestingFactory(context, [](content::BrowserContext* context) {
-    return std::unique_ptr<KeyedService>(
-        GetInstance()->BuildServiceInstanceFor(context));
-  });
+  SetTestingFactory(context,
+                    base::BindRepeating([](content::BrowserContext* context) {
+                      return base::WrapUnique(
+                          GetInstance()->BuildServiceInstanceFor(context));
+                    }));
 }
 
 KeyedService* PushMessagingServiceFactory::BuildServiceInstanceFor(

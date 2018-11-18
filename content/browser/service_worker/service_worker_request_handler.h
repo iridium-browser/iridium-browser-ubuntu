@@ -14,13 +14,13 @@
 #include "base/time/time.h"
 #include "content/browser/loader/navigation_loader_interceptor.h"
 #include "content/common/content_export.h"
-#include "content/common/service_worker/service_worker_status_code.h"
 #include "content/common/service_worker/service_worker_types.h"
-#include "content/public/common/request_context_type.h"
 #include "content/public/common/resource_type.h"
 #include "net/url_request/url_request_job_factory.h"
 #include "services/network/public/mojom/fetch_api.mojom.h"
 #include "services/network/public/mojom/request_context_frame_type.mojom.h"
+#include "third_party/blink/public/common/service_worker/service_worker_status_code.h"
+#include "third_party/blink/public/platform/modules/fetch/fetch_api_request.mojom.h"
 
 namespace net {
 class NetworkDelegate;
@@ -60,7 +60,7 @@ class CONTENT_EXPORT ServiceWorkerRequestHandler
       storage::BlobStorageContext* blob_storage_context,
       bool skip_service_worker,
       ResourceType resource_type,
-      RequestContextType request_context_type,
+      blink::mojom::RequestContextType request_context_type,
       network::mojom::RequestContextFrameType frame_type,
       bool is_parent_frame_secure,
       scoped_refptr<network::ResourceRequestBody> body,
@@ -71,13 +71,13 @@ class CONTENT_EXPORT ServiceWorkerRequestHandler
   // just creates a NavigationLoaderInterceptor and returns it.
   static std::unique_ptr<NavigationLoaderInterceptor>
   InitializeForNavigationNetworkService(
-      const network::ResourceRequest& resource_request,
+      const GURL& url,
       ResourceContext* resource_context,
       ServiceWorkerNavigationHandleCore* navigation_handle_core,
       storage::BlobStorageContext* blob_storage_context,
       bool skip_service_worker,
       ResourceType resource_type,
-      RequestContextType request_context_type,
+      blink::mojom::RequestContextType request_context_type,
       network::mojom::RequestContextFrameType frame_type,
       bool is_parent_frame_secure,
       scoped_refptr<network::ResourceRequestBody> body,
@@ -106,7 +106,7 @@ class CONTENT_EXPORT ServiceWorkerRequestHandler
       const std::string& integrity,
       bool keepalive,
       ResourceType resource_type,
-      RequestContextType request_context_type,
+      blink::mojom::RequestContextType request_context_type,
       network::mojom::RequestContextFrameType frame_type,
       scoped_refptr<network::ResourceRequestBody> body);
 
@@ -139,21 +139,10 @@ class CONTENT_EXPORT ServiceWorkerRequestHandler
       ResourceContext* context) = 0;
 
   // NavigationLoaderInterceptor overrides.
-  void MaybeCreateLoader(const network::ResourceRequest& request,
+  void MaybeCreateLoader(const network::ResourceRequest& tentative_request,
                          ResourceContext* resource_context,
-                         LoaderCallback callback) override;
-
-  // These are obsolete, needed for non-PlzNavigate.
-  // TODO(falken): Remove these completely.
-  void PrepareForCrossSiteTransfer(int old_process_id);
-  void CompleteCrossSiteTransfer(int new_process_id,
-                                 int new_provider_id);
-  void MaybeCompleteCrossSiteTransferInOldProcess(
-      int old_process_id);
-
-  // Useful for detecting storage partition mismatches in the context of cross
-  // site transfer navigations.
-  bool SanityCheckIsSameContext(ServiceWorkerContextWrapper* wrapper);
+                         LoaderCallback callback,
+                         FallbackCallback fallback_callback) override;
 
  protected:
   ServiceWorkerRequestHandler(

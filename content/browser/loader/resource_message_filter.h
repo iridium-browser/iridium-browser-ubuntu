@@ -28,7 +28,6 @@ namespace net {
 class URLRequestContext;
 }  // namespace net
 
-
 namespace content {
 class ChromeAppCacheService;
 class ChromeBlobStorageContext;
@@ -36,6 +35,7 @@ class PrefetchURLLoaderService;
 class ResourceContext;
 class ResourceRequesterInfo;
 class ServiceWorkerContextWrapper;
+class SharedCorsOriginAccessList;
 
 // This class filters out incoming IPC messages for network requests and
 // processes them on the IPC thread.  As a result, network requests are not
@@ -62,6 +62,7 @@ class CONTENT_EXPORT ResourceMessageFilter
       storage::FileSystemContext* file_system_context,
       ServiceWorkerContextWrapper* service_worker_context,
       PrefetchURLLoaderService* prefetch_url_loader_service,
+      const SharedCorsOriginAccessList* shared_cors_origin_access_list,
       const GetContextsCallback& get_contexts_callback,
       const scoped_refptr<base::SingleThreadTaskRunner>& io_thread_runner);
 
@@ -81,6 +82,7 @@ class CONTENT_EXPORT ResourceMessageFilter
                             network::mojom::URLLoaderClientPtr client,
                             const net::MutableNetworkTrafficAnnotationTag&
                                 traffic_annotation) override;
+  // |request| could be queued when the channel has not been connected yet.
   void Clone(network::mojom::URLLoaderFactoryRequest request) override;
 
   int child_id() const;
@@ -116,8 +118,12 @@ class CONTENT_EXPORT ResourceMessageFilter
   scoped_refptr<ResourceRequesterInfo> requester_info_;
 
   std::unique_ptr<network::mojom::URLLoaderFactory> url_loader_factory_;
+  std::vector<network::mojom::URLLoaderFactoryRequest> queued_clone_requests_;
 
   scoped_refptr<PrefetchURLLoaderService> prefetch_url_loader_service_;
+
+  scoped_refptr<const SharedCorsOriginAccessList>
+      shared_cors_origin_access_list_;
 
   // Task runner for the IO thead.
   scoped_refptr<base::SingleThreadTaskRunner> io_thread_task_runner_;

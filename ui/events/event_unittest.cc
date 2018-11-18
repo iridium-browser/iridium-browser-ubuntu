@@ -10,7 +10,7 @@
 #include <memory>
 
 #include "base/macros.h"
-#include "base/test/histogram_tester.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -25,6 +25,7 @@
 
 #if defined(USE_X11)
 #include "ui/events/test/events_test_utils_x11.h"
+#include "ui/events/x/events_x_utils.h"  // nogncheck
 #include "ui/gfx/x/x11.h"        // nogncheck
 #include "ui/gfx/x/x11_types.h"  // nogncheck
 #endif
@@ -73,7 +74,8 @@ TEST(EventTest, GetCharacter) {
   // contains Control.
   // e.g. Control+Shift+2 produces U+200C on "Persian" keyboard.
   // http://crbug.com/582453
-  KeyEvent keyev5(0x200C, VKEY_UNKNOWN, EF_CONTROL_DOWN | EF_SHIFT_DOWN);
+  KeyEvent keyev5(0x200C, VKEY_UNKNOWN, ui::DomCode::NONE,
+                  EF_CONTROL_DOWN | EF_SHIFT_DOWN);
   EXPECT_EQ(0x200C, keyev5.GetCharacter());
 }
 
@@ -278,7 +280,7 @@ TEST(EventTest, KeyEvent) {
 }
 
 TEST(EventTest, KeyEventDirectUnicode) {
-  KeyEvent key(0x1234U, ui::VKEY_UNKNOWN, ui::EF_NONE);
+  KeyEvent key(0x1234U, ui::VKEY_UNKNOWN, ui::DomCode::NONE, ui::EF_NONE);
   EXPECT_EQ(0x1234U, key.GetCharacter());
   EXPECT_EQ(ET_KEY_PRESSED, key.type());
   EXPECT_TRUE(key.is_char());
@@ -429,6 +431,15 @@ TEST(EventTest, KeyEventCode) {
 #if defined(USE_X11)
 namespace {
 
+class MockTimestampServer : public ui::TimestampServer {
+ public:
+  Time GetCurrentServerTime() override { return base_time_; }
+  void SetBaseTime(Time time) { base_time_ = time; }
+
+ private:
+  Time base_time_ = 0;
+};
+
 void SetKeyEventTimestamp(XEvent* event, int64_t time) {
   event->xkey.time = time & UINT32_MAX;
 }
@@ -439,7 +450,29 @@ void AdvanceKeyEventTimestamp(XEvent* event) {
 
 }  // namespace
 
-TEST(EventTest, AutoRepeat) {
+class X11EventTest : public testing::Test {
+ public:
+  X11EventTest() {}
+  ~X11EventTest() override {}
+
+  void SetUp() override {
+    SetTimestampServer(&server_);
+    SetUseFixedTimeForXEventTesting(true);
+  }
+
+  void TearDown() override {
+    SetTimestampServer(nullptr);
+    SetUseFixedTimeForXEventTesting(false);
+  }
+
+ protected:
+  MockTimestampServer server_;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(X11EventTest);
+};
+
+TEST_F(X11EventTest, AutoRepeat) {
   const uint16_t kNativeCodeA =
       ui::KeycodeConverter::DomCodeToNativeKeycode(DomCode::US_A);
   const uint16_t kNativeCodeB =
@@ -467,6 +500,7 @@ TEST(EventTest, AutoRepeat) {
 
   int64_t ticks_base =
       (base::TimeTicks::Now() - base::TimeTicks()).InMilliseconds() - 5000;
+  server_.SetBaseTime(static_cast<Time>(ticks_base));
   SetKeyEventTimestamp(native_event_a_pressed, ticks_base);
   SetKeyEventTimestamp(native_event_a_pressed_1500, ticks_base + 1500);
   SetKeyEventTimestamp(native_event_a_pressed_3000, ticks_base + 3000);
@@ -581,8 +615,8 @@ TEST(EventTest, TouchEventRotationAngleFixing) {
     TouchEvent event(ui::ET_TOUCH_PRESSED, gfx::Point(0, 0), time,
                      PointerDetails(ui::EventPointerType::POINTER_TYPE_TOUCH,
                                     /* pointer_id*/ 0, radius_x, radius_y,
-                                    /* force */ 0),
-                     0, angle_in_range);
+                                    /* force */ 0, angle_in_range),
+                     0);
     EXPECT_FLOAT_EQ(angle_in_range, event.ComputeRotationAngle());
   }
 
@@ -591,8 +625,8 @@ TEST(EventTest, TouchEventRotationAngleFixing) {
     TouchEvent event(ui::ET_TOUCH_PRESSED, gfx::Point(0, 0), time,
                      PointerDetails(ui::EventPointerType::POINTER_TYPE_TOUCH,
                                     /* pointer_id*/ 0, radius_x, radius_y,
-                                    /* force */ 0),
-                     0, angle_in_range);
+                                    /* force */ 0, angle_in_range),
+                     0);
     EXPECT_FLOAT_EQ(angle_in_range, event.ComputeRotationAngle());
   }
 
@@ -601,8 +635,8 @@ TEST(EventTest, TouchEventRotationAngleFixing) {
     TouchEvent event(ui::ET_TOUCH_PRESSED, gfx::Point(0, 0), time,
                      PointerDetails(ui::EventPointerType::POINTER_TYPE_TOUCH,
                                     /* pointer_id*/ 0, radius_x, radius_y,
-                                    /* force */ 0),
-                     0, angle_negative);
+                                    /* force */ 0, angle_negative),
+                     0);
     EXPECT_FLOAT_EQ(180 - 0.1f, event.ComputeRotationAngle());
   }
 
@@ -611,8 +645,8 @@ TEST(EventTest, TouchEventRotationAngleFixing) {
     TouchEvent event(ui::ET_TOUCH_PRESSED, gfx::Point(0, 0), time,
                      PointerDetails(ui::EventPointerType::POINTER_TYPE_TOUCH,
                                     /* pointer_id*/ 0, radius_x, radius_y,
-                                    /* force */ 0),
-                     0, angle_negative);
+                                    /* force */ 0, angle_negative),
+                     0);
     EXPECT_FLOAT_EQ(360 - 200, event.ComputeRotationAngle());
   }
 
@@ -621,8 +655,8 @@ TEST(EventTest, TouchEventRotationAngleFixing) {
     TouchEvent event(ui::ET_TOUCH_PRESSED, gfx::Point(0, 0), time,
                      PointerDetails(ui::EventPointerType::POINTER_TYPE_TOUCH,
                                     /* pointer_id*/ 0, radius_x, radius_y,
-                                    /* force */ 0),
-                     0, angle_too_big);
+                                    /* force */ 0, angle_too_big),
+                     0);
     EXPECT_FLOAT_EQ(0, event.ComputeRotationAngle());
   }
 
@@ -631,8 +665,8 @@ TEST(EventTest, TouchEventRotationAngleFixing) {
     TouchEvent event(ui::ET_TOUCH_PRESSED, gfx::Point(0, 0), time,
                      PointerDetails(ui::EventPointerType::POINTER_TYPE_TOUCH,
                                     /* pointer_id*/ 0, radius_x, radius_y,
-                                    /* force */ 0),
-                     0, angle_too_big);
+                                    /* force */ 0, angle_too_big),
+                     0);
     EXPECT_FLOAT_EQ(400 - 360, event.ComputeRotationAngle());
   }
 }
@@ -918,7 +952,7 @@ TEST(EventTest, MouseEventLatencyUIComponentExists) {
   const gfx::Point origin(0, 0);
   MouseEvent mouseev(ET_MOUSE_PRESSED, origin, origin, EventTimeForNow(), 0, 0);
   EXPECT_TRUE(mouseev.latency()->FindLatency(
-      ui::INPUT_EVENT_LATENCY_UI_COMPONENT, 0, nullptr));
+      ui::INPUT_EVENT_LATENCY_UI_COMPONENT, nullptr));
 }
 
 TEST(EventTest, MouseWheelEventLatencyUIComponentExists) {
@@ -926,7 +960,7 @@ TEST(EventTest, MouseWheelEventLatencyUIComponentExists) {
   MouseWheelEvent mouseWheelev(gfx::Vector2d(), origin, origin,
                                EventTimeForNow(), 0, 0);
   EXPECT_TRUE(mouseWheelev.latency()->FindLatency(
-      ui::INPUT_EVENT_LATENCY_UI_COMPONENT, 0, nullptr));
+      ui::INPUT_EVENT_LATENCY_UI_COMPONENT, nullptr));
 }
 
 TEST(EventTest, PointerEventToMouseEvent) {
@@ -998,8 +1032,9 @@ TEST(EventTest, PointerEventToTouchEventDetails) {
                      /* pointer_id*/ 15,
                      /* radius_x */ 11.5,
                      /* radius_y */ 13.5,
-                     /* force */ 0.5),
-      0, 13.0));
+                     /* force */ 0.0,
+                     /* twist */ 13.0),
+      0));
   ui::TouchEvent touch_event(pointer_event);
 
   EXPECT_EQ(pointer_event.location(), touch_event.location());
@@ -1121,6 +1156,20 @@ TEST(EventTest, UpdateForRootTransformation) {
   }
 }
 
+TEST(EventTest, OperatorEqual) {
+  MouseEvent m1(ET_MOUSE_PRESSED, gfx::Point(1, 2), gfx::Point(2, 3),
+                EventTimeForNow(), EF_LEFT_MOUSE_BUTTON, EF_RIGHT_MOUSE_BUTTON);
+  base::flat_map<std::string, std::vector<uint8_t>> properties;
+  properties["a"] = {1u};
+  m1.SetProperties(properties);
+  EXPECT_EQ(properties, *(m1.properties()));
+  MouseEvent m2(ET_MOUSE_RELEASED, gfx::Point(11, 21), gfx::Point(2, 2),
+                EventTimeForNow(), EF_RIGHT_MOUSE_BUTTON, EF_LEFT_MOUSE_BUTTON);
+  m2 = m1;
+  ASSERT_TRUE(m2.properties());
+  EXPECT_EQ(properties, *(m2.properties()));
+}
+
 #if defined(OS_WIN)
 namespace {
 
@@ -1194,26 +1243,13 @@ class AltGraphEventTest
   }
 
   const MSG msg_;
-  base::test::ScopedFeatureList feature_list_;
   BYTE original_keyboard_state_[256] = {};
   HKL original_keyboard_layout_ = nullptr;
 };
 
 }  // namespace
 
-TEST_P(AltGraphEventTest, OldKeyEventAltGraphModifier) {
-  feature_list_.InitFromCommandLine("", "FixAltGraph");
-
-  // Old behaviour always sets AltGraph modifier whenever both Control and Alt
-  // are pressed.
-  KeyEvent event(msg_);
-  EXPECT_EQ(event.flags() & (EF_CONTROL_DOWN | EF_ALT_DOWN | EF_ALTGR_DOWN),
-            EF_CONTROL_DOWN | EF_ALT_DOWN | EF_ALTGR_DOWN);
-}
-
 TEST_P(AltGraphEventTest, KeyEventAltGraphModifer) {
-  feature_list_.InitFromCommandLine("FixAltGraph", "");
-
   KeyEvent event(msg_);
   if (message_type() == WM_CHAR) {
     // By definition, if we receive a WM_CHAR message when Control and Alt are

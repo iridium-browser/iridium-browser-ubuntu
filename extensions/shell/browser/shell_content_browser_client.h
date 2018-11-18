@@ -67,16 +67,19 @@ class ShellContentBrowserClient : public content::ContentBrowserClient {
   std::unique_ptr<content::NavigationUIData> GetNavigationUIData(
       content::NavigationHandle* navigation_handle) override;
   void RegisterNonNetworkNavigationURLLoaderFactories(
-      content::RenderFrameHost* frame_host,
+      int frame_tree_node_id,
       NonNetworkURLLoaderFactoryMap* factories) override;
   void RegisterNonNetworkSubresourceURLLoaderFactories(
-      content::RenderFrameHost* frame_host,
-      const GURL& frame_url,
+      int render_process_id,
+      int render_frame_id,
       NonNetworkURLLoaderFactoryMap* factories) override;
   bool WillCreateURLLoaderFactory(
+      content::BrowserContext* browser_context,
       content::RenderFrameHost* frame_host,
       bool is_navigation,
-      network::mojom::URLLoaderFactoryRequest* factory_request) override;
+      const url::Origin& request_initiator,
+      network::mojom::URLLoaderFactoryRequest* factory_request,
+      bool* bypass_redirect_checks) override;
   bool HandleExternalProtocol(
       const GURL& url,
       content::ResourceRequestInfo::WebContentsGetter web_contents_getter,
@@ -85,6 +88,11 @@ class ShellContentBrowserClient : public content::ContentBrowserClient {
       bool is_main_frame,
       ui::PageTransition page_transition,
       bool has_user_gesture) override;
+  network::mojom::URLLoaderFactoryPtrInfo
+  CreateURLLoaderFactoryForNetworkRequests(
+      content::RenderProcessHost* process,
+      network::mojom::NetworkContext* network_context,
+      const url::Origin& request_initiator) override;
 
  protected:
   // Subclasses may wish to provide their own ShellBrowserMainParts.

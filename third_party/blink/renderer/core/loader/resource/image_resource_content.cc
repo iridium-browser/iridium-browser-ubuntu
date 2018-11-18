@@ -16,6 +16,7 @@
 #include "third_party/blink/renderer/platform/histogram.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/blink/renderer/platform/network/http_parsers.h"
+#include "third_party/blink/renderer/platform/network/mime/mime_type_registry.h"
 #include "third_party/blink/renderer/platform/shared_buffer.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
@@ -42,6 +43,7 @@ class NullImageResourceInfo final
   bool IsSchedulingReload() const override { return false; }
   const ResourceResponse& GetResponse() const override { return response_; }
   bool ShouldShowPlaceholder() const override { return false; }
+  bool ShouldShowLazyImagePlaceholder() const override { return false; }
   bool IsCacheValidator() const override { return false; }
   bool SchedulingReloadOrShouldReloadBrokenPlaceholder() const override {
     return false;
@@ -52,8 +54,8 @@ class NullImageResourceInfo final
     return true;
   }
   bool HasCacheControlNoStoreHeader() const override { return false; }
-  Optional<ResourceError> GetResourceError() const override {
-    return WTF::nullopt;
+  base::Optional<ResourceError> GetResourceError() const override {
+    return base::nullopt;
   }
 
   void SetDecodedSize(size_t) override {}
@@ -63,6 +65,8 @@ class NullImageResourceInfo final
       ResourceFetcher*,
       const KURL&,
       const AtomicString& initiator_name) override {}
+
+  void LoadDeferredImage(ResourceFetcher* fetcher) override {}
 
   const KURL url_;
   const ResourceResponse response_;
@@ -100,9 +104,9 @@ ImageResourceContent::ImageResourceContent(scoped_refptr<blink::Image> image)
       device_pixel_ratio_header_value_(1.0),
       has_device_pixel_ratio_header_value_(false),
       image_(std::move(image)) {
-  DEFINE_STATIC_LOCAL(NullImageResourceInfo, null_info,
+  DEFINE_STATIC_LOCAL(Persistent<NullImageResourceInfo>, null_info,
                       (new NullImageResourceInfo()));
-  info_ = &null_info;
+  info_ = null_info;
 }
 
 ImageResourceContent* ImageResourceContent::CreateLoaded(
@@ -239,19 +243,6 @@ blink::Image* ImageResourceContent::GetImage() const {
   return image_.get();
 }
 
-std::pair<blink::Image*, float> ImageResourceContent::BrokenCanvas(
-    float device_scale_factor) {
-  if (device_scale_factor >= 2) {
-    DEFINE_STATIC_REF(blink::Image, broken_canvas_hi_res,
-                      (blink::Image::LoadPlatformResource("brokenCanvas@2x")));
-    return std::make_pair(broken_canvas_hi_res, 2);
-  }
-
-  DEFINE_STATIC_REF(blink::Image, broken_canvas_lo_res,
-                    (blink::Image::LoadPlatformResource("brokenCanvas")));
-  return std::make_pair(broken_canvas_lo_res, 1);
-}
-
 IntSize ImageResourceContent::IntrinsicSize(
     RespectImageOrientationEnum should_respect_image_orientation) {
   if (!image_)
@@ -264,8 +255,7 @@ IntSize ImageResourceContent::IntrinsicSize(
 
 void ImageResourceContent::NotifyObservers(
     NotifyFinishOption notifying_finish_option,
-    CanDeferInvalidation defer,
-    const IntRect* change_rect) {
+    CanDeferInvalidation defer) {
   {
     Vector<ImageResourceObserver*> finished_observers_as_vector;
     {
@@ -276,7 +266,7 @@ void ImageResourceContent::NotifyObservers(
 
     for (auto* observer : finished_observers_as_vector) {
       if (finished_observers_.Contains(observer))
-        observer->ImageChanged(this, defer, change_rect);
+        observer->ImageChanged(this, defer);
     }
   }
   {
@@ -289,7 +279,7 @@ void ImageResourceContent::NotifyObservers(
 
     for (auto* observer : observers_as_vector) {
       if (observers_.Contains(observer)) {
-        observer->ImageChanged(this, defer, change_rect);
+        observer->ImageChanged(this, defer);
         if (notifying_finish_option == kShouldNotifyFinish &&
             observers_.Contains(observer) &&
             !info_->SchedulingReloadOrShouldReloadBrokenPlaceholder()) {
@@ -357,25 +347,6 @@ void ImageResourceContent::UpdateToLoadedContentStatus(
       break;
   }
 
-  // Checks ImageResourceContent's previous status.
-  switch (GetContentStatus()) {
-    case ResourceStatus::kPending:
-      // A non-multipart image or the first part of a multipart image.
-      break;
-
-    case ResourceStatus::kCached:
-    case ResourceStatus::kLoadError:
-    case ResourceStatus::kDecodeError:
-      // Second (or later) part of a multipart image.
-      // TODO(hiroshige): Assert that this is actually a multipart image.
-      break;
-
-    case ResourceStatus::kNotStarted:
-      // Should have updated to kPending via NotifyStartLoad().
-      CHECK(false);
-      break;
-  }
-
   // Updates the status.
   content_status_ = new_status;
 }
@@ -420,10 +391,8 @@ ImageResourceContent::UpdateImageResult ImageResourceContent::UpdateImage(
 
 #if DCHECK_IS_ON()
   DCHECK(!is_update_image_being_called_);
-  AutoReset<bool> scope(&is_update_image_being_called_, true);
+  base::AutoReset<bool> scope(&is_update_image_being_called_, true);
 #endif
-
-  CHECK_NE(GetContentStatus(), ResourceStatus::kNotStarted);
 
   // Clears the existing image, if instructed by |updateImageOption|.
   switch (update_image_option) {
@@ -462,13 +431,19 @@ ImageResourceContent::UpdateImageResult ImageResourceContent::UpdateImage(
       if (size_available_ == Image::kSizeUnavailable && !all_data_received)
         return UpdateImageResult::kNoDecodeError;
 
-      if (info_->ShouldShowPlaceholder() && all_data_received) {
+      if ((info_->ShouldShowPlaceholder() ||
+           info_->ShouldShowLazyImagePlaceholder()) &&
+          all_data_received) {
         if (image_ && !image_->IsNull()) {
           IntSize dimensions = image_->Size();
           ClearImage();
-          image_ = PlaceholderImage::Create(
-              this, dimensions,
-              EstimateOriginalImageSizeForPlaceholder(info_->GetResponse()));
+          if (info_->ShouldShowLazyImagePlaceholder()) {
+            image_ = PlaceholderImage::CreateForLazyImages(this, dimensions);
+          } else {
+            image_ = PlaceholderImage::Create(
+                this, dimensions,
+                EstimateOriginalImageSizeForPlaceholder(info_->GetResponse()));
+          }
         }
       }
 
@@ -507,6 +482,32 @@ ImageResourceContent::UpdateImageResult ImageResourceContent::UpdateImage(
   }
 
   return UpdateImageResult::kNoDecodeError;
+}
+
+// Return true if the image type is one of the hard-coded 'modern' image
+// formats.
+// TODO(crbug.com/838263): Support site-defined list of acceptable formats
+// through feature policy declarations.
+bool ImageResourceContent::IsAcceptableContentType() {
+  AtomicString mime_type = GetResponse().HttpContentType();
+  // If this was loaded from disk, there is no mime type. Return true for now.
+  if (mime_type.IsNull())
+    return true;
+  return MIMETypeRegistry::IsModernImageMIMEType(mime_type);
+}
+
+// Return true if the image content is well-compressed (and not full of
+// extraneous metadata). This is currently defined as no using more than 10 bits
+// per pixel of image data.
+// TODO(crbug.com/838263): Support site-defined bit-per-pixel ratio through
+// feature policy declarations.
+bool ImageResourceContent::IsAcceptableCompressionRatio() {
+  uint64_t pixels = IntrinsicSize(kDoNotRespectImageOrientation).Area();
+  if (!pixels)
+    return true;
+  long long resource_length = GetResponse().DecodedBodyLength();
+  // Allow no more than 10 bits per compressed pixel
+  return (double)resource_length / pixels <= 1.25;
 }
 
 void ImageResourceContent::DecodedSizeChangedTo(const blink::Image* image,
@@ -563,11 +564,10 @@ void ImageResourceContent::UpdateImageAnimationPolicy() {
   image_->SetAnimationPolicy(new_policy);
 }
 
-void ImageResourceContent::ChangedInRect(const blink::Image* image,
-                                         const IntRect& rect) {
+void ImageResourceContent::Changed(const blink::Image* image) {
   if (!image || image != image_)
     return;
-  NotifyObservers(kDoNotNotifyFinish, CanDeferInvalidation::kYes, &rect);
+  NotifyObservers(kDoNotNotifyFinish, CanDeferInvalidation::kYes);
 }
 
 bool ImageResourceContent::IsAccessAllowed(
@@ -628,12 +628,16 @@ const ResourceResponse& ImageResourceContent::GetResponse() const {
   return info_->GetResponse();
 }
 
-Optional<ResourceError> ImageResourceContent::GetResourceError() const {
+base::Optional<ResourceError> ImageResourceContent::GetResourceError() const {
   return info_->GetResourceError();
 }
 
 bool ImageResourceContent::IsCacheValidator() const {
   return info_->IsCacheValidator();
+}
+
+void ImageResourceContent::LoadDeferredImage(ResourceFetcher* fetcher) {
+  info_->LoadDeferredImage(fetcher);
 }
 
 }  // namespace blink

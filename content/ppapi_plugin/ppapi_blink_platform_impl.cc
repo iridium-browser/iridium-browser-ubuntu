@@ -22,7 +22,7 @@
 #include "third_party/blink/public/platform/mac/web_sandbox_support.h"
 #elif defined(OS_POSIX) && !defined(OS_ANDROID)
 #include "content/child/child_process_sandbox_support_impl_linux.h"
-#include "third_party/blink/public/platform/linux/web_fallback_font.h"
+#include "third_party/blink/public/platform/linux/out_of_process_font.h"
 #include "third_party/blink/public/platform/linux/web_sandbox_support.h"
 #include "third_party/icu/source/common/unicode/utf16.h"
 #endif
@@ -40,27 +40,38 @@ namespace content {
 
 class PpapiBlinkPlatformImpl::SandboxSupport : public WebSandboxSupport {
  public:
+#if defined(OS_LINUX)
+  explicit SandboxSupport(sk_sp<font_service::FontLoader> font_loader)
+      : font_loader_(std::move(font_loader)) {}
+#endif
   ~SandboxSupport() override {}
 
 #if defined(OS_MACOSX)
   bool LoadFont(CTFontRef srcFont, CGFontRef* out, uint32_t* fontID) override;
-#elif defined(OS_POSIX)
+#elif defined(OS_LINUX)
   SandboxSupport();
   void GetFallbackFontForCharacter(
       WebUChar32 character,
       const char* preferred_locale,
-      blink::WebFallbackFont* fallbackFont) override;
+      blink::OutOfProcessFont* fallbackFont) override;
+  void MatchFontByPostscriptNameOrFullFontName(
+      const char* font_unique_name,
+      blink::OutOfProcessFont* fallback_font) override;
   void GetWebFontRenderStyleForStrike(const char* family,
-                                      int sizeAndStyle,
+                                      int size,
+                                      bool is_bold,
+                                      bool is_italic,
+                                      float device_scale_factor,
                                       blink::WebFontRenderStyle* out) override;
 
  private:
   // WebKit likes to ask us for the correct font family to use for a set of
   // unicode code points. It needs this information frequently so we cache it
   // here.
-  std::map<int32_t, blink::WebFallbackFont> unicode_font_families_;
-  // For debugging crbug.com/312965
-  base::PlatformThreadId creation_thread_;
+  std::map<int32_t, blink::OutOfProcessFont> unicode_font_families_;
+  sk_sp<font_service::FontLoader> font_loader_;
+  // For debugging https://crbug.com/312965
+  base::SequenceCheckerImpl creation_thread_sequence_checker_;
 #endif
 };
 
@@ -78,18 +89,16 @@ bool PpapiBlinkPlatformImpl::SandboxSupport::LoadFont(CTFontRef src_font,
 
 #elif defined(OS_POSIX)
 
-PpapiBlinkPlatformImpl::SandboxSupport::SandboxSupport()
-    : creation_thread_(base::PlatformThread::CurrentId()) {
-}
+PpapiBlinkPlatformImpl::SandboxSupport::SandboxSupport() {}
 
 void PpapiBlinkPlatformImpl::SandboxSupport::GetFallbackFontForCharacter(
     WebUChar32 character,
     const char* preferred_locale,
-    blink::WebFallbackFont* fallbackFont) {
+    blink::OutOfProcessFont* fallbackFont) {
   ppapi::ProxyLock::AssertAcquired();
   // For debugging crbug.com/312965
-  CHECK_EQ(creation_thread_, base::PlatformThread::CurrentId());
-  const std::map<int32_t, blink::WebFallbackFont>::const_iterator iter =
+  CHECK(creation_thread_sequence_checker_.CalledOnValidSequence());
+  const std::map<int32_t, blink::OutOfProcessFont>::const_iterator iter =
       unicode_font_families_.find(character);
   if (iter != unicode_font_families_.end()) {
     fallbackFont->name = iter->second.name;
@@ -102,16 +111,28 @@ void PpapiBlinkPlatformImpl::SandboxSupport::GetFallbackFontForCharacter(
     return;
   }
 
-  content::GetFallbackFontForCharacter(character, preferred_locale,
-                                       fallbackFont);
+  content::GetFallbackFontForCharacter(font_loader_, character,
+                                       preferred_locale, fallbackFont);
   unicode_font_families_.insert(std::make_pair(character, *fallbackFont));
 }
 
 void PpapiBlinkPlatformImpl::SandboxSupport::GetWebFontRenderStyleForStrike(
     const char* family,
-    int sizeAndStyle,
+    int size,
+    bool is_bold,
+    bool is_italic,
+    float device_scale_factor,
     blink::WebFontRenderStyle* out) {
-  GetRenderStyleForStrike(family, sizeAndStyle, out);
+  GetRenderStyleForStrike(font_loader_, family, size, is_bold, is_italic,
+                          device_scale_factor, out);
+}
+
+void PpapiBlinkPlatformImpl::SandboxSupport::
+    MatchFontByPostscriptNameOrFullFontName(
+        const char* font_unique_name,
+        blink::OutOfProcessFont* uniquely_matched_font) {
+  content::MatchFontByPostscriptNameOrFullFontName(
+      font_loader_, font_unique_name, uniquely_matched_font);
 }
 
 #endif
@@ -119,8 +140,14 @@ void PpapiBlinkPlatformImpl::SandboxSupport::GetWebFontRenderStyleForStrike(
 #endif  // !defined(OS_ANDROID) && !defined(OS_WIN)
 
 PpapiBlinkPlatformImpl::PpapiBlinkPlatformImpl() {
-#if !defined(OS_ANDROID) && !defined(OS_WIN)
-  sandbox_support_.reset(new PpapiBlinkPlatformImpl::SandboxSupport);
+#if defined(OS_LINUX)
+  font_loader_ =
+      sk_make_sp<font_service::FontLoader>(ChildThread::Get()->GetConnector());
+  SkFontConfigInterface::SetGlobal(font_loader_);
+  sandbox_support_.reset(
+      new PpapiBlinkPlatformImpl::SandboxSupport(font_loader_));
+#elif defined(OS_MACOSX)
+  sandbox_support_.reset(new PpapiBlinkPlatformImpl::SandboxSupport());
 #endif
 }
 
@@ -129,26 +156,12 @@ PpapiBlinkPlatformImpl::~PpapiBlinkPlatformImpl() {
 
 void PpapiBlinkPlatformImpl::Shutdown() {
 #if !defined(OS_ANDROID) && !defined(OS_WIN)
-  // SandboxSupport contains a map of WebFallbackFont objects, which hold
+  // SandboxSupport contains a map of OutOfProcessFont objects, which hold
   // WebStrings and WebVectors, which become invalidated when blink is shut
   // down. Hence, we need to clear that map now, just before blink::shutdown()
   // is called.
   sandbox_support_.reset();
 #endif
-}
-
-blink::WebThread* PpapiBlinkPlatformImpl::CurrentThread() {
-  return BlinkPlatformImpl::CurrentThread();
-}
-
-blink::WebClipboard* PpapiBlinkPlatformImpl::Clipboard() {
-  NOTREACHED();
-  return nullptr;
-}
-
-blink::WebFileUtilities* PpapiBlinkPlatformImpl::GetFileUtilities() {
-  NOTREACHED();
-  return nullptr;
 }
 
 blink::WebSandboxSupport* PpapiBlinkPlatformImpl::GetSandboxSupport() {
@@ -157,10 +170,6 @@ blink::WebSandboxSupport* PpapiBlinkPlatformImpl::GetSandboxSupport() {
 #else
   return nullptr;
 #endif
-}
-
-bool PpapiBlinkPlatformImpl::sandboxEnabled() {
-  return true;  // Assume PPAPI is always sandboxed.
 }
 
 unsigned long long PpapiBlinkPlatformImpl::VisitedLinkHash(
@@ -175,19 +184,6 @@ bool PpapiBlinkPlatformImpl::IsLinkVisited(unsigned long long link_hash) {
   return false;
 }
 
-void PpapiBlinkPlatformImpl::setCookies(const blink::WebURL& url,
-                                        const blink::WebURL& site_for_cookies,
-                                        const blink::WebString& value) {
-  NOTREACHED();
-}
-
-blink::WebString PpapiBlinkPlatformImpl::cookies(
-    const blink::WebURL& url,
-    const blink::WebURL& site_for_cookies) {
-  NOTREACHED();
-  return blink::WebString();
-}
-
 blink::WebString PpapiBlinkPlatformImpl::DefaultLocale() {
   return blink::WebString::FromUTF8("en");
 }
@@ -195,13 +191,6 @@ blink::WebString PpapiBlinkPlatformImpl::DefaultLocale() {
 blink::WebThemeEngine* PpapiBlinkPlatformImpl::ThemeEngine() {
   NOTREACHED();
   return nullptr;
-}
-
-void PpapiBlinkPlatformImpl::GetPluginList(
-    bool refresh,
-    const blink::WebSecurityOrigin& mainFrameOrigin,
-    blink::WebPluginListBuilder* builder) {
-  NOTREACHED();
 }
 
 blink::WebData PpapiBlinkPlatformImpl::GetDataResource(const char* name) {
@@ -213,16 +202,6 @@ std::unique_ptr<blink::WebStorageNamespace>
 PpapiBlinkPlatformImpl::CreateLocalStorageNamespace() {
   NOTREACHED();
   return nullptr;
-}
-
-void PpapiBlinkPlatformImpl::dispatchStorageEvent(
-    const blink::WebString& key,
-    const blink::WebString& old_value,
-    const blink::WebString& new_value,
-    const blink::WebString& origin,
-    const blink::WebURL& url,
-    bool is_local_storage) {
-  NOTREACHED();
 }
 
 int PpapiBlinkPlatformImpl::DatabaseDeleteFile(

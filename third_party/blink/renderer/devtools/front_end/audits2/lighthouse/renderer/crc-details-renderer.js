@@ -1,7 +1,18 @@
 /**
- * @license Copyright 2017 Google Inc. All Rights Reserved.
- * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License. You may obtain a copy of the License at http://www.apache.org/licenses/LICENSE-2.0
- * Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the specific language governing permissions and limitations under the License.
+ * @license
+ * Copyright 2017 Google Inc. All Rights Reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS-IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 'use strict';
 
@@ -12,11 +23,13 @@
 
 /* globals self Util */
 
+/** @typedef {import('./dom.js')} DOM */
+
 class CriticalRequestChainRenderer {
   /**
    * Create render context for critical-request-chain tree display.
-   * @param {!Object<string, !CriticalRequestChainRenderer.CRCNode>} tree
-   * @return {{tree: !Object<string, !CriticalRequestChainRenderer.CRCNode>, startTime: number, transferSize: number}}
+   * @param {LH.Audit.SimpleCriticalRequestNode} tree
+   * @return {{tree: LH.Audit.SimpleCriticalRequestNode, startTime: number, transferSize: number}}
    */
   static initTree(tree) {
     let startTime = 0;
@@ -34,13 +47,13 @@ class CriticalRequestChainRenderer {
    * parent. Calculates if this node is the last child, whether it has any
    * children itself and what the tree looks like all the way back up to the root,
    * so the tree markers can be drawn correctly.
-   * @param {!Object<string, !CriticalRequestChainRenderer.CRCNode>} parent
+   * @param {LH.Audit.SimpleCriticalRequestNode} parent
    * @param {string} id
    * @param {number} startTime
    * @param {number} transferSize
-   * @param {!Array<boolean>=} treeMarkers
+   * @param {Array<boolean>=} treeMarkers
    * @param {boolean=} parentIsLastChild
-   * @return {!CriticalRequestChainRenderer.CRCSegment}
+   * @return {CRCSegment}
    */
   static createSegment(parent, id, startTime, transferSize, treeMarkers, parentIsLastChild) {
     const node = parent[id];
@@ -68,10 +81,10 @@ class CriticalRequestChainRenderer {
 
   /**
    * Creates the DOM for a tree segment.
-   * @param {!DOM} dom
-   * @param {!DocumentFragment} tmpl
-   * @param {!CriticalRequestChainRenderer.CRCSegment} segment
-   * @return {!Node}
+   * @param {DOM} dom
+   * @param {DocumentFragment} tmpl
+   * @param {CRCSegment} segment
+   * @return {Node}
    */
   static createChainNode(dom, tmpl, segment) {
     const chainsEl = dom.cloneTemplate('#tmpl-lh-crc__chains', tmpl);
@@ -110,14 +123,14 @@ class CriticalRequestChainRenderer {
     const {file, hostname} = Util.parseURL(segment.node.request.url);
     const treevalEl = dom.find('.crc-node__tree-value', chainsEl);
     dom.find('.crc-node__tree-file', treevalEl).textContent = `${file}`;
-    dom.find('.crc-node__tree-hostname', treevalEl).textContent = `(${hostname})`;
+    dom.find('.crc-node__tree-hostname', treevalEl).textContent = hostname ? `(${hostname})` : '';
 
     if (!segment.hasChildren) {
+      const {startTime, endTime, transferSize} = segment.node.request;
       const span = dom.createElement('span', 'crc-node__chain-duration');
-      span.textContent = ' - ' + Util.chainDuration(
-          segment.node.request.startTime, segment.node.request.endTime) + 'ms, ';
+      span.textContent = ' - ' + Util.formatMilliseconds((endTime - startTime) * 1000) + ', ';
       const span2 = dom.createElement('span', 'crc-node__chain-duration');
-      span2.textContent = Util.formatBytesToKB(segment.node.request.transferSize);
+      span2.textContent = Util.formatBytesToKB(transferSize, 0.01);
 
       treevalEl.appendChild(span);
       treevalEl.appendChild(span2);
@@ -128,52 +141,48 @@ class CriticalRequestChainRenderer {
 
   /**
    * Recursively builds a tree from segments.
-   * @param {!DOM} dom
-   * @param {!DocumentFragment} tmpl
-   * @param {!CriticalRequestChainRenderer.CRCSegment} segment
-   * @param {!Element} detailsEl Parent details element.
-   * @param {!CriticalRequestChainRenderer.CRCDetailsJSON} details
+   * @param {DOM} dom
+   * @param {DocumentFragment} tmpl
+   * @param {CRCSegment} segment
+   * @param {Element} elem Parent element.
+   * @param {CRCDetailsJSON} details
    */
-  static buildTree(dom, tmpl, segment, detailsEl, details) {
-    detailsEl.appendChild(CriticalRequestChainRenderer.createChainNode(dom, tmpl, segment));
+  static buildTree(dom, tmpl, segment, elem, details) {
+    elem.appendChild(CriticalRequestChainRenderer.createChainNode(dom, tmpl, segment));
 
     for (const key of Object.keys(segment.node.children)) {
       const childSegment = CriticalRequestChainRenderer.createSegment(segment.node.children, key,
          segment.startTime, segment.transferSize, segment.treeMarkers, segment.isLastChild);
-      CriticalRequestChainRenderer.buildTree(dom, tmpl, childSegment, detailsEl, details);
+      CriticalRequestChainRenderer.buildTree(dom, tmpl, childSegment, elem, details);
     }
   }
 
   /**
-   * @param {!DOM} dom
-   * @param {!Node} templateContext
-   * @param {!CriticalRequestChainRenderer.CRCDetailsJSON} details
-   * @return {!Node}
+   * @param {DOM} dom
+   * @param {ParentNode} templateContext
+   * @param {CRCDetailsJSON} details
+   * @return {Element}
    */
   static render(dom, templateContext, details) {
     const tmpl = dom.cloneTemplate('#tmpl-lh-crc', templateContext);
+    const containerEl = dom.find('.lh-crc', tmpl);
 
     // Fill in top summary.
+    dom.find('.crc-initial-nav', tmpl).textContent = Util.UIStrings.crcInitialNavigation;
+    dom.find('.lh-crc__longest_duration_label', tmpl).textContent =
+        Util.UIStrings.crcLongestDurationLabel;
     dom.find('.lh-crc__longest_duration', tmpl).textContent =
-        Util.formatNumber(details.longestChain.duration) + 'ms';
-    dom.find('.lh-crc__longest_length', tmpl).textContent = details.longestChain.length;
-    dom.find('.lh-crc__longest_transfersize', tmpl).textContent =
-        Util.formatBytesToKB(details.longestChain.transferSize);
-
-    const detailsEl = dom.find('.lh-details', tmpl);
-    detailsEl.open = true;
-
-    dom.find('.lh-details > summary', tmpl).textContent = details.header.text;
+        Util.formatMilliseconds(details.longestChain.duration);
 
     // Construct visual tree.
     const root = CriticalRequestChainRenderer.initTree(details.chains);
     for (const key of Object.keys(root.tree)) {
       const segment = CriticalRequestChainRenderer.createSegment(root.tree, key,
           root.startTime, root.transferSize);
-      CriticalRequestChainRenderer.buildTree(dom, tmpl, segment, detailsEl, details);
+      CriticalRequestChainRenderer.buildTree(dom, tmpl, segment, containerEl, details);
     }
 
-    return tmpl;
+    return dom.find('.lh-crc-container', tmpl);
   }
 }
 
@@ -185,44 +194,19 @@ if (typeof module !== 'undefined' && module.exports) {
 }
 
 /** @typedef {{
- *     type: string,
- *     header: {text: string},
- *     longestChain: {duration: number, length: number, transferSize: number},
- *     chains: !Object<string, !CriticalRequestChainRenderer.CRCNode>
- * }}
+      type: string,
+      header: {text: string},
+      longestChain: {duration: number, length: number, transferSize: number},
+      chains: LH.Audit.SimpleCriticalRequestNode
+  }} CRCDetailsJSON
  */
-CriticalRequestChainRenderer.CRCDetailsJSON; // eslint-disable-line no-unused-expressions
 
 /** @typedef {{
- *     endTime: number,
- *     responseReceivedTime: number,
- *     startTime: number,
- *     transferSize: number,
- *     url: string
- * }}
+      node: LH.Audit.SimpleCriticalRequestNode[string],
+      isLastChild: boolean,
+      hasChildren: boolean,
+      startTime: number,
+      transferSize: number,
+      treeMarkers: Array<boolean>
+  }} CRCSegment
  */
-CriticalRequestChainRenderer.CRCRequest; // eslint-disable-line no-unused-expressions
-
-/**
- * Record type so children can circularly have CRCNode values.
- * @struct
- * @record
- */
-CriticalRequestChainRenderer.CRCNode = function() {};
-
-/** @type {!Object<string, !CriticalRequestChainRenderer.CRCNode>} */
-CriticalRequestChainRenderer.CRCNode.prototype.children; // eslint-disable-line no-unused-expressions
-
-/** @type {!CriticalRequestChainRenderer.CRCRequest} */
-CriticalRequestChainRenderer.CRCNode.prototype.request; // eslint-disable-line no-unused-expressions
-
-/** @typedef {{
- *     node: !CriticalRequestChainRenderer.CRCNode,
- *     isLastChild: boolean,
- *     hasChildren: boolean,
- *     startTime: number,
- *     transferSize: number,
- *     treeMarkers: !Array<boolean>
- * }}
- */
-CriticalRequestChainRenderer.CRCSegment; // eslint-disable-line no-unused-expressions

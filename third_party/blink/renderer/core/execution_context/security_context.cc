@@ -26,9 +26,9 @@
 
 #include "third_party/blink/renderer/core/execution_context/security_context.h"
 
+#include "third_party/blink/public/common/feature_policy/feature_policy.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/core/frame/csp/content_security_policy.h"
-#include "third_party/blink/renderer/platform/feature_policy/feature_policy.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 
@@ -63,7 +63,6 @@ void SecurityContext::Trace(blink::Visitor* visitor) {
 void SecurityContext::SetSecurityOrigin(
     scoped_refptr<SecurityOrigin> security_origin) {
   security_origin_ = std::move(security_origin);
-  UpdateFeaturePolicyOrigin();
 }
 
 void SecurityContext::SetContentSecurityPolicy(
@@ -80,10 +79,10 @@ void SecurityContext::ApplySandboxFlags(SandboxFlags mask,
   sandbox_flags_ |= mask;
 
   if (IsSandboxed(kSandboxOrigin) && GetSecurityOrigin() &&
-      !GetSecurityOrigin()->IsUnique()) {
+      !GetSecurityOrigin()->IsOpaque()) {
     scoped_refptr<SecurityOrigin> security_origin =
-        SecurityOrigin::CreateUnique();
-    security_origin->SetUniqueOriginIsPotentiallyTrustworthy(
+        GetSecurityOrigin()->DeriveNewOpaqueOrigin();
+    security_origin->SetOpaqueOriginIsPotentiallyTrustworthy(
         is_potentially_trustworthy);
     SetSecurityOrigin(std::move(security_origin));
     DidUpdateSecurityOrigin();
@@ -105,6 +104,13 @@ String SecurityContext::addressSpaceForBindings() const {
   return "public";
 }
 
+void SecurityContext::SetFeaturePolicy(
+    std::unique_ptr<FeaturePolicy> feature_policy) {
+  // This method should be called before a FeaturePolicy has been created.
+  DCHECK(!feature_policy_);
+  feature_policy_ = std::move(feature_policy);
+}
+
 void SecurityContext::InitializeFeaturePolicy(
     const ParsedFeaturePolicy& parsed_header,
     const ParsedFeaturePolicy& container_policy,
@@ -114,11 +120,17 @@ void SecurityContext::InitializeFeaturePolicy(
   feature_policy_->SetHeaderPolicy(parsed_header);
 }
 
-void SecurityContext::UpdateFeaturePolicyOrigin() {
-  if (!feature_policy_)
-    return;
-  feature_policy_ = FeaturePolicy::CreateFromPolicyWithOrigin(
-      *feature_policy_, security_origin_->ToUrlOrigin());
+bool SecurityContext::IsFeatureEnabled(mojom::FeaturePolicyFeature feature,
+                                       ReportOptions report_on_failure) const {
+  // The policy should always be initialized before checking it to ensure we
+  // properly inherit the parent policy.
+  DCHECK(feature_policy_);
+
+  if (feature_policy_->IsFeatureEnabled(feature))
+    return true;
+  if (report_on_failure == ReportOptions::kReportOnFailure)
+    ReportFeaturePolicyViolation(feature);
+  return false;
 }
 
 }  // namespace blink

@@ -4,14 +4,14 @@
 
 #include "chromecast/browser/url_request_context_factory.h"
 
+#include <algorithm>
 #include <utility>
 
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/macros.h"
-#include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "chromecast/base/cast_features.h"
 #include "chromecast/base/chromecast_switches.h"
 #include "chromecast/browser/cast_browser_process.h"
@@ -21,13 +21,14 @@
 #include "components/network_session_configurator/common/network_switches.h"
 #include "components/proxy_config/pref_proxy_config_tracker_impl.h"
 #include "content/public/browser/browser_context.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/cookie_store_factory.h"
 #include "content/public/common/url_constants.h"
 #include "net/cert/cert_verifier.h"
 #include "net/cert/ct_policy_enforcer.h"
 #include "net/cert/ct_policy_status.h"
-#include "net/cert/do_nothing_ct_verifier.h"
+#include "net/cert/multi_log_ct_verifier.h"
 #include "net/cert_net/nss_ocsp.h"
 #include "net/cookies/cookie_store.h"
 #include "net/dns/host_resolver.h"
@@ -60,20 +61,6 @@ namespace shell {
 namespace {
 
 const char kCookieStoreFile[] = "Cookies";
-
-// A CTPolicyEnforcer that accepts all certificates.
-class IgnoresCTPolicyEnforcer : public net::CTPolicyEnforcer {
- public:
-  IgnoresCTPolicyEnforcer() = default;
-  ~IgnoresCTPolicyEnforcer() override = default;
-
-  net::ct::CTPolicyCompliance CheckCompliance(
-      net::X509Certificate* cert,
-      const net::SCTList& verified_scts,
-      const net::NetLogWithSource& net_log) override {
-    return net::ct::CTPolicyCompliance::CT_POLICY_COMPLIES_VIA_SCTS;
-  }
-};
 
 bool IgnoreCertificateErrors() {
   base::CommandLine* cmd_line = base::CommandLine::ForCurrentProcess();
@@ -112,8 +99,8 @@ class URLRequestContextFactory::URLRequestContextGetter
 
   scoped_refptr<base::SingleThreadTaskRunner>
       GetNetworkTaskRunner() const override {
-    return content::BrowserThread::GetTaskRunnerForThread(
-        content::BrowserThread::IO);
+    return base::CreateSingleThreadTaskRunnerWithTraits(
+        {content::BrowserThread::IO});
   }
 
  private:
@@ -153,8 +140,8 @@ class URLRequestContextFactory::MainURLRequestContextGetter
 
   scoped_refptr<base::SingleThreadTaskRunner>
       GetNetworkTaskRunner() const override {
-    return content::BrowserThread::GetTaskRunnerForThread(
-        content::BrowserThread::IO);
+    return base::CreateSingleThreadTaskRunnerWithTraits(
+        {content::BrowserThread::IO});
   }
 
  private:
@@ -190,11 +177,10 @@ void URLRequestContextFactory::InitializeOnUIThread(net::NetLog* net_log) {
   // Proxy config service should be initialized in UI thread, since
   // ProxyConfigServiceDelegate on Android expects UI thread.
   pref_proxy_config_tracker_impl_ =
-      base::WrapUnique<PrefProxyConfigTrackerImpl>(
-          new PrefProxyConfigTrackerImpl(
-              CastBrowserProcess::GetInstance()->pref_service(),
-              content::BrowserThread::GetTaskRunnerForThread(
-                  content::BrowserThread::IO)));
+      std::make_unique<PrefProxyConfigTrackerImpl>(
+          CastBrowserProcess::GetInstance()->pref_service(),
+          base::CreateSingleThreadTaskRunnerWithTraits(
+              {content::BrowserThread::IO}));
 
   proxy_config_service_ =
       pref_proxy_config_tracker_impl_->CreateTrackingProxyConfigService(
@@ -244,11 +230,10 @@ void URLRequestContextFactory::InitializeSystemContextDependencies() {
 
   host_resolver_ = net::HostResolver::CreateDefaultResolver(NULL);
   cert_verifier_ = net::CertVerifier::CreateDefault();
-  ssl_config_service_ = new net::SSLConfigServiceDefaults;
+  ssl_config_service_.reset(new net::SSLConfigServiceDefaults);
   transport_security_state_.reset(new net::TransportSecurityState());
-  // Certificate transparency is current disabled for Chromecast.
-  cert_transparency_verifier_.reset(new net::DoNothingCTVerifier());
-  ct_policy_enforcer_.reset(new IgnoresCTPolicyEnforcer());
+  cert_transparency_verifier_.reset(new net::MultiLogCTVerifier());
+  ct_policy_enforcer_.reset(new net::DefaultCTPolicyEnforcer());
 
   http_auth_handler_factory_ =
       net::HttpAuthHandlerFactory::CreateDefault(host_resolver_.get());
@@ -258,8 +243,9 @@ void URLRequestContextFactory::InitializeSystemContextDependencies() {
   http_server_properties_.reset(new net::HttpServerPropertiesImpl);
 
   DCHECK(proxy_config_service_);
-  proxy_resolution_service_ = net::ProxyResolutionService::CreateUsingSystemProxyResolver(
-      std::move(proxy_config_service_), NULL);
+  proxy_resolution_service_ =
+      net::ProxyResolutionService::CreateUsingSystemProxyResolver(
+          std::move(proxy_config_service_), nullptr);
   system_dependencies_initialized_ = true;
 }
 
@@ -277,12 +263,12 @@ void URLRequestContextFactory::InitializeMainContextDependencies(
   for (content::ProtocolHandlerMap::iterator it = protocol_handlers->begin();
        it != protocol_handlers->end();
        ++it) {
-    set_protocol = job_factory->SetProtocolHandler(
-        it->first, base::WrapUnique(it->second.release()));
+    set_protocol =
+        job_factory->SetProtocolHandler(it->first, std::move(it->second));
     DCHECK(set_protocol);
   }
   set_protocol = job_factory->SetProtocolHandler(
-      url::kDataScheme, base::WrapUnique(new net::DataProtocolHandler));
+      url::kDataScheme, std::make_unique<net::DataProtocolHandler>());
   DCHECK(set_protocol);
 
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
@@ -291,7 +277,7 @@ void URLRequestContextFactory::InitializeMainContextDependencies(
         url::kFileScheme,
         std::make_unique<net::FileProtocolHandler>(
             base::CreateTaskRunnerWithTraits(
-                {base::MayBlock(), base::TaskPriority::BACKGROUND,
+                {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
                  base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN})));
     DCHECK(set_protocol);
   }
@@ -329,7 +315,7 @@ void URLRequestContextFactory::PopulateNetworkSessionParams(
 
   // Enable QUIC if instructed by DCS. This remains constant for the lifetime of
   // the process.
-  session_params->enable_quic = base::FeatureList::IsEnabled(kEnableQuic);
+  session_params->enable_quic = chromecast::IsFeatureEnabled(kEnableQuic);
   LOG(INFO) << "Set HttpNetworkSessionParams.enable_quic = "
             << session_params->enable_quic;
 
@@ -340,7 +326,7 @@ void URLRequestContextFactory::PopulateNetworkSessionParams(
   // 2. if idle sockets are kept alive when memory pressure happens, this may
   // cause JS engine gc frequently, leading to JS suspending.
   session_params->disable_idle_sockets_close_on_memory_pressure =
-      base::FeatureList::IsEnabled(kDisableIdleSocketsCloseOnMemoryPressure);
+      chromecast::IsFeatureEnabled(kDisableIdleSocketsCloseOnMemoryPressure);
   LOG(INFO) << "Set HttpNetworkSessionParams."
             << "disable_idle_sockets_close_on_memory_pressure = "
             << session_params->disable_idle_sockets_close_on_memory_pressure;
@@ -353,7 +339,7 @@ net::URLRequestContext* URLRequestContextFactory::CreateSystemRequestContext() {
   PopulateNetworkSessionParams(IgnoreCertificateErrors(), &session_params);
   system_job_factory_.reset(new net::URLRequestJobFactoryImpl());
   system_cookie_store_ =
-      content::CreateCookieStore(content::CookieStoreConfig());
+      content::CreateCookieStore(content::CookieStoreConfig(), net_log_);
 
   net::URLRequestContext* system_context = new net::URLRequestContext();
   system_context->set_host_resolver(host_resolver_.get());
@@ -420,7 +406,7 @@ net::URLRequestContext* URLRequestContextFactory::CreateMainRequestContext(
       protocol_handlers, std::move(request_interceptors));
 
   content::CookieStoreConfig cookie_config(cookie_path, false, true, nullptr);
-  main_cookie_store_ = content::CreateCookieStore(cookie_config);
+  main_cookie_store_ = content::CreateCookieStore(cookie_config, net_log_);
 
   net::URLRequestContext* main_context = new net::URLRequestContext();
   main_context->set_host_resolver(host_resolver_.get());

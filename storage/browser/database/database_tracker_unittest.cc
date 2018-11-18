@@ -218,10 +218,10 @@ class DatabaseTracker_TestHelper_Test {
     tracker->DatabaseOpened(kOrigin2, kDB3, kDescription, 0, &database_size);
 
     EXPECT_TRUE(base::CreateDirectory(
-        tracker->DatabaseDirectory().Append(base::FilePath::FromUTF16Unsafe(
+        tracker->database_directory().Append(base::FilePath::FromUTF16Unsafe(
             tracker->GetOriginDirectory(kOrigin1)))));
     EXPECT_TRUE(base::CreateDirectory(
-        tracker->DatabaseDirectory().Append(base::FilePath::FromUTF16Unsafe(
+        tracker->database_directory().Append(base::FilePath::FromUTF16Unsafe(
             tracker->GetOriginDirectory(kOrigin2)))));
     EXPECT_EQ(
         1, base::WriteFile(tracker->GetFullDBFilePath(kOrigin1, kDB1), "a", 1));
@@ -247,12 +247,12 @@ class DatabaseTracker_TestHelper_Test {
     result = callback.GetResult(result);
     EXPECT_EQ(net::OK, result);
     EXPECT_FALSE(
-        base::PathExists(tracker->DatabaseDirectory().AppendASCII(kOrigin1)));
+        base::PathExists(tracker->database_directory().AppendASCII(kOrigin1)));
 
     // Recreate db1.
     tracker->DatabaseOpened(kOrigin1, kDB1, kDescription, 0, &database_size);
     EXPECT_TRUE(base::CreateDirectory(
-        tracker->DatabaseDirectory().Append(base::FilePath::FromUTF16Unsafe(
+        tracker->database_directory().Append(base::FilePath::FromUTF16Unsafe(
             tracker->GetOriginDirectory(kOrigin1)))));
     EXPECT_EQ(
         1, base::WriteFile(tracker->GetFullDBFilePath(kOrigin1, kDB1), "a", 1));
@@ -281,7 +281,7 @@ class DatabaseTracker_TestHelper_Test {
     result = callback.GetResult(result);
     EXPECT_EQ(net::OK, result);
     EXPECT_FALSE(
-        base::PathExists(tracker->DatabaseDirectory().AppendASCII(kOrigin1)));
+        base::PathExists(tracker->database_directory().AppendASCII(kOrigin1)));
     EXPECT_TRUE(base::PathExists(tracker->GetFullDBFilePath(kOrigin2, kDB2)));
     EXPECT_TRUE(base::PathExists(tracker->GetFullDBFilePath(kOrigin2, kDB3)));
 
@@ -339,10 +339,10 @@ class DatabaseTracker_TestHelper_Test {
     // Write some data to each file and check that the listeners are
     // called with the appropriate values.
     EXPECT_TRUE(base::CreateDirectory(
-        tracker->DatabaseDirectory().Append(base::FilePath::FromUTF16Unsafe(
+        tracker->database_directory().Append(base::FilePath::FromUTF16Unsafe(
             tracker->GetOriginDirectory(kOrigin1)))));
     EXPECT_TRUE(base::CreateDirectory(
-        tracker->DatabaseDirectory().Append(base::FilePath::FromUTF16Unsafe(
+        tracker->database_directory().Append(base::FilePath::FromUTF16Unsafe(
             tracker->GetOriginDirectory(kOrigin2)))));
     EXPECT_EQ(
         1, base::WriteFile(tracker->GetFullDBFilePath(kOrigin1, kDB1), "a", 1));
@@ -475,7 +475,7 @@ class DatabaseTracker_TestHelper_Test {
     tracker->DatabaseClosed(kOriginId, kName);
     EXPECT_TRUE(test_quota_proxy->WasAccessNotified(kOrigin));
     EXPECT_EQ(net::OK, tracker->DeleteDatabase(kOriginId, kName,
-                                               net::CompletionCallback()));
+                                               net::CompletionOnceCallback()));
     EXPECT_TRUE(test_quota_proxy->WasModificationNotified(kOrigin, -100));
     test_quota_proxy->reset();
 
@@ -494,9 +494,9 @@ class DatabaseTracker_TestHelper_Test {
     EXPECT_TRUE(test_quota_proxy->WasModificationNotified(kOrigin, 100));
     test_quota_proxy->reset();
 
-    EXPECT_EQ(
-        net::ERR_IO_PENDING,
-        tracker->DeleteDatabase(kOriginId, kName, net::CompletionCallback()));
+    EXPECT_EQ(net::ERR_IO_PENDING,
+              tracker->DeleteDatabase(kOriginId, kName,
+                                      net::CompletionOnceCallback()));
     EXPECT_FALSE(test_quota_proxy->WasModificationNotified(kOrigin, -100));
 
     tracker->DatabaseClosed(kOriginId, kName);
@@ -728,7 +728,7 @@ class DatabaseTracker_TestHelper_Test {
 
     // Deleting it should return to the initial state.
     EXPECT_EQ(net::OK, tracker->DeleteDatabase(kOriginId, kEmptyName,
-                                               net::CompletionCallback()));
+                                               net::CompletionOnceCallback()));
     infos.clear();
     EXPECT_TRUE(tracker->GetAllOriginsInfo(&infos));
     EXPECT_TRUE(infos.empty());

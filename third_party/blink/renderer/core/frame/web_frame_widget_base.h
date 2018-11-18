@@ -5,10 +5,11 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_WEB_FRAME_WIDGET_BASE_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_WEB_FRAME_WIDGET_BASE_H_
 
+#include "base/single_thread_task_runner.h"
 #include "third_party/blink/public/platform/web_coalesced_input_event.h"
 #include "third_party/blink/public/platform/web_drag_data.h"
-#include "third_party/blink/public/platform/web_gesture_curve_target.h"
 #include "third_party/blink/public/platform/web_gesture_device.h"
+#include "third_party/blink/public/platform/web_referrer_policy.h"
 #include "third_party/blink/public/web/web_frame_widget.h"
 #include "third_party/blink/renderer/core/clipboard/data_object.h"
 #include "third_party/blink/renderer/core/core_export.h"
@@ -16,61 +17,61 @@
 #include "third_party/blink/renderer/platform/graphics/paint/paint_image.h"
 #include "third_party/blink/renderer/platform/heap/member.h"
 
+namespace cc {
+class Layer;
+}
+
 namespace blink {
 
+class AnimationWorkletMutatorDispatcherImpl;
 class CompositorAnimationHost;
-class CompositorMutatorImpl;
 class GraphicsLayer;
-struct IntrinsicSizingInfo;
-class PageWidgetEventHandler;
-class WebActiveGestureAnimation;
-class WebImage;
-class WebLayer;
-class WebLayerTreeView;
-class WebLocalFrame;
-class WebViewImpl;
 class HitTestResult;
+class PageWidgetEventHandler;
+class WebLayerTreeView;
+class WebLocalFrameImpl;
+class WebViewImpl;
+struct IntrinsicSizingInfo;
 struct WebFloatPoint;
 
 class CORE_EXPORT WebFrameWidgetBase
     : public GarbageCollectedFinalized<WebFrameWidgetBase>,
-      public WebFrameWidget,
-      public WebGestureCurveTarget {
+      public WebFrameWidget {
  public:
-  WebFrameWidgetBase();
+  explicit WebFrameWidgetBase(WebWidgetClient&);
   virtual ~WebFrameWidgetBase();
 
+  WebWidgetClient* Client() const { return client_; }
+  WebLocalFrameImpl* LocalRootImpl() const { return local_root_; }
+
+  void BindLocalRoot(WebLocalFrame&);
+
+  // Called once the local root is bound via |BindLocalRoot()|.
+  virtual void Initialize() = 0;
   virtual bool ForSubframe() const = 0;
   virtual void ScheduleAnimation() = 0;
   virtual void IntrinsicSizingInfoChanged(const IntrinsicSizingInfo&) {}
-  virtual base::WeakPtr<CompositorMutatorImpl> EnsureCompositorMutator(
+  virtual base::WeakPtr<AnimationWorkletMutatorDispatcherImpl>
+  EnsureCompositorMutatorDispatcher(
       scoped_refptr<base::SingleThreadTaskRunner>* mutator_task_runner) = 0;
-
-  virtual WebWidgetClient* Client() const = 0;
 
   // Sets the root graphics layer. |GraphicsLayer| can be null when detaching
   // the root layer.
   virtual void SetRootGraphicsLayer(GraphicsLayer*) = 0;
   virtual GraphicsLayer* RootGraphicsLayer() const = 0;
 
-  // Sets the root layer. |WebLayer| can be null when detaching the root layer.
-  virtual void SetRootLayer(WebLayer*) = 0;
+  // Sets the root layer. The |layer| can be null when detaching the root layer.
+  virtual void SetRootLayer(scoped_refptr<cc::Layer> layer) = 0;
 
   virtual WebLayerTreeView* GetLayerTreeView() const = 0;
   virtual CompositorAnimationHost* AnimationHost() const = 0;
 
   virtual HitTestResult CoreHitTestResultAt(const WebPoint&) = 0;
 
-  // Fling operations.
-  bool EndActiveFlingAnimation();
-  WebInputEventResult HandleGestureFlingEvent(const WebGestureEvent&);
-  void UpdateGestureAnimation(double last_frame_time_monotonic);
-
-  // WebGestureCurveTarget implementation.
-  bool ScrollBy(const WebFloatSize& delta,
-                const WebFloatSize& velocity) override;
-
   // WebFrameWidget implementation.
+  void Close() override;
+  WebLocalFrame* LocalRoot() const override;
+  void UpdateAllLifecyclePhasesAndCompositeForTesting(bool do_raster) override;
   WebDragOperation DragTargetDragEnter(const WebDragData&,
                                        const WebFloatPoint& point_in_viewport,
                                        const WebFloatPoint& screen_point,
@@ -97,7 +98,7 @@ class CORE_EXPORT WebFrameWidgetBase
   void StartDragging(WebReferrerPolicy,
                      const WebDragData&,
                      WebDragOperationsMask,
-                     const WebImage& drag_image,
+                     const SkBitmap& drag_image,
                      const WebPoint& drag_image_offset);
 
   bool DoingDragAndDrop() { return doing_drag_and_drop_; }
@@ -109,7 +110,6 @@ class CORE_EXPORT WebFrameWidgetBase
   void DidNotAcquirePointerLock() override;
   void DidLosePointerLock() override;
   void ShowContextMenu(WebMenuSourceType) override;
-  bool IsFlinging() const override;
 
   // Image decode functionality.
   void RequestDecode(const PaintImage&, base::OnceCallback<void(bool)>);
@@ -166,16 +166,14 @@ class CORE_EXPORT WebFrameWidgetBase
   WebDragOperation drag_operation_ = kWebDragOperationNone;
 
  private:
-  // Fling local.
-  WebGestureEvent CreateGestureScrollEventFromFling(WebInputEvent::Type,
-                                                    WebGestureDevice) const;
   void CancelDrag();
 
-  std::unique_ptr<WebActiveGestureAnimation> gesture_animation_;
-  WebFloatPoint position_on_fling_start_;
-  WebFloatPoint global_position_on_fling_start_;
-  int fling_modifier_;
-  WebGestureDevice fling_source_device_;
+  WebWidgetClient* client_;
+
+  // WebFrameWidget is associated with a subtree of the frame tree,
+  // corresponding to a maximal connected tree of LocalFrames. This member
+  // points to the root of that subtree.
+  Member<WebLocalFrameImpl> local_root_;
 
   static bool ignore_input_events_;
   scoped_refptr<UserGestureToken> pointer_lock_gesture_token_;

@@ -4,10 +4,11 @@
 
 #include "third_party/blink/renderer/core/frame/remote_frame.h"
 
-#include "third_party/blink/public/platform/web_layer.h"
+#include "cc/layers/surface_layer.h"
 #include "third_party/blink/renderer/bindings/core/v8/window_proxy.h"
 #include "third_party/blink/renderer/bindings/core/v8/window_proxy_manager.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
+#include "third_party/blink/renderer/core/frame/local_frame_client.h"
 #include "third_party/blink/renderer/core/frame/remote_dom_window.h"
 #include "third_party/blink/renderer/core/frame/remote_frame_client.h"
 #include "third_party/blink/renderer/core/frame/remote_frame_view.h"
@@ -32,6 +33,7 @@ inline RemoteFrame::RemoteFrame(RemoteFrameClient* client,
       security_context_(RemoteSecurityContext::Create()) {
   dom_window_ = RemoteDOMWindow::Create(*this);
   UpdateInertIfPossible();
+  UpdateInheritedEffectiveTouchActionIfPossible();
 }
 
 RemoteFrame* RemoteFrame::Create(RemoteFrameClient* client,
@@ -54,21 +56,21 @@ void RemoteFrame::Trace(blink::Visitor* visitor) {
   Frame::Trace(visitor);
 }
 
-void RemoteFrame::Navigate(Document& origin_document,
-                           const KURL& url,
-                           bool replace_current_item,
-                           UserGestureStatus user_gesture_status) {
+void RemoteFrame::ScheduleNavigation(Document& origin_document,
+                                     const KURL& url,
+                                     WebFrameLoadType frame_load_type,
+                                     UserGestureStatus user_gesture_status) {
   FrameLoadRequest frame_request(&origin_document, ResourceRequest(url));
-  frame_request.SetReplacesCurrentItem(replace_current_item);
   frame_request.GetResourceRequest().SetHasUserGesture(
       user_gesture_status == UserGestureStatus::kActive);
   frame_request.GetResourceRequest().SetFrameType(
       IsMainFrame() ? network::mojom::RequestContextFrameType::kTopLevel
                     : network::mojom::RequestContextFrameType::kNested);
-  Navigate(frame_request);
+  Navigate(frame_request, frame_load_type);
 }
 
-void RemoteFrame::Navigate(const FrameLoadRequest& passed_request) {
+void RemoteFrame::Navigate(const FrameLoadRequest& passed_request,
+                           WebFrameLoadType frame_load_type) {
   FrameLoadRequest frame_request(passed_request);
 
   // The process where this frame actually lives won't have sufficient
@@ -79,17 +81,11 @@ void RemoteFrame::Navigate(const FrameLoadRequest& passed_request) {
                                       frame_request.OriginDocument());
 
   Client()->Navigate(frame_request.GetResourceRequest(),
-                     frame_request.ReplacesCurrentItem());
+                     frame_load_type == WebFrameLoadType::kReplaceCurrentItem,
+                     frame_request.GetBlobURLToken());
 }
 
-void RemoteFrame::Reload(FrameLoadType frame_load_type,
-                         ClientRedirectPolicy client_redirect_policy) {
-  Client()->Reload(frame_load_type, client_redirect_policy);
-}
-
-void RemoteFrame::Detach(FrameDetachType type) {
-  lifecycle_.AdvanceTo(FrameLifecycle::kDetaching);
-
+void RemoteFrame::DetachImpl(FrameDetachType type) {
   PluginScriptForbiddenScope forbid_plugin_destructor_scripting;
   DetachChildren();
   if (!Client())
@@ -107,9 +103,8 @@ void RemoteFrame::Detach(FrameDetachType type) {
   // persistent strong references to RemoteDOMWindow will prevent the GCing
   // of all these objects. Break the cycle by notifying of detachment.
   ToRemoteDOMWindow(dom_window_)->FrameDetached();
-  if (web_layer_)
-    SetWebLayer(nullptr);
-  Frame::Detach(type);
+  if (cc_layer_)
+    SetCcLayer(nullptr, false, false);
 }
 
 bool RemoteFrame::PrepareForCommit() {
@@ -148,6 +143,23 @@ void RemoteFrame::SetIsInert(bool inert) {
   is_inert_ = inert;
 }
 
+void RemoteFrame::SetInheritedEffectiveTouchAction(TouchAction touch_action) {
+  if (inherited_effective_touch_action_ != touch_action)
+    Client()->SetInheritedEffectiveTouchAction(touch_action);
+  inherited_effective_touch_action_ = touch_action;
+}
+
+bool RemoteFrame::BubbleLogicalScrollFromChildFrame(
+    ScrollDirection direction,
+    ScrollGranularity granularity,
+    Frame* child) {
+  DCHECK(child->IsLocalFrame());
+  DCHECK(child->Client());
+  ToLocalFrame(child)->Client()->BubbleLogicalScrollInParentFrame(direction,
+                                                                  granularity);
+  return false;
+}
+
 void RemoteFrame::SetView(RemoteFrameView* view) {
   // Oilpan: as RemoteFrameView performs no finalization actions,
   // no explicit Dispose() of it needed here. (cf. LocalFrameView::Dispose().)
@@ -172,14 +184,37 @@ RemoteFrameClient* RemoteFrame::Client() const {
   return static_cast<RemoteFrameClient*>(Frame::Client());
 }
 
-void RemoteFrame::SetWebLayer(WebLayer* web_layer) {
-  if (web_layer_)
-    GraphicsLayer::UnregisterContentsLayer(web_layer_);
-  web_layer_ = web_layer;
-  if (web_layer_)
-    GraphicsLayer::RegisterContentsLayer(web_layer_);
+void RemoteFrame::PointerEventsChanged() {
+  if (!cc_layer_ || !is_surface_layer_)
+    return;
 
+  static_cast<cc::SurfaceLayer*>(cc_layer_)->SetHasPointerEventsNone(
+      IsIgnoredForHitTest());
+}
+
+bool RemoteFrame::IsIgnoredForHitTest() const {
+  HTMLFrameOwnerElement* owner = DeprecatedLocalOwner();
+  if (!owner || !owner->GetLayoutObject())
+    return false;
+  return owner->GetLayoutObject()->Style()->PointerEvents() ==
+         EPointerEvents::kNone;
+}
+
+void RemoteFrame::SetCcLayer(cc::Layer* cc_layer,
+                             bool prevent_contents_opaque_changes,
+                             bool is_surface_layer) {
   DCHECK(Owner());
+
+  if (cc_layer_)
+    GraphicsLayer::UnregisterContentsLayer(cc_layer_);
+  cc_layer_ = cc_layer;
+  prevent_contents_opaque_changes_ = prevent_contents_opaque_changes;
+  is_surface_layer_ = is_surface_layer;
+  if (cc_layer_) {
+    GraphicsLayer::RegisterContentsLayer(cc_layer_);
+    PointerEventsChanged();
+  }
+
   ToHTMLFrameOwnerElement(Owner())->SetNeedsCompositingUpdate();
 }
 

@@ -8,6 +8,8 @@
 #include <stddef.h>
 
 #include <memory>
+#include <string>
+#include <vector>
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
@@ -15,12 +17,18 @@
 #include "content/public/browser/content_browser_client.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
 
+class PrefService;
+
 namespace content {
 class RenderFrameHost;
 }
 
 namespace net {
 class NetLog;
+}
+
+namespace policy {
+class BrowserPolicyConnectorBase;
 }
 
 namespace safe_browsing {
@@ -44,7 +52,9 @@ class AwContentBrowserClient : public content::ContentBrowserClient {
 
   // Allows AwBrowserMainParts to initialize a BrowserContext at the right
   // moment during startup. AwContentBrowserClient owns the result.
-  AwBrowserContext* InitBrowserContext();
+  AwBrowserContext* InitBrowserContext(
+      std::unique_ptr<PrefService> pref_service,
+      std::unique_ptr<policy::BrowserPolicyConnectorBase> policy_connector);
 
   content::BrowserMainParts* CreateBrowserMainParts(
       const content::MainFunctionParams& parameters) override;
@@ -53,6 +63,7 @@ class AwContentBrowserClient : public content::ContentBrowserClient {
   void RenderProcessWillLaunch(
       content::RenderProcessHost* host,
       service_manager::mojom::ServiceRequest* service_request) override;
+  bool ShouldUseMobileFlingCurve() const override;
   bool IsHandledURL(const GURL& url) override;
   bool ForceSniffingFileUrlsForHtml() override;
   void AppendExtraCommandLineSwitches(base::CommandLine* command_line,
@@ -74,18 +85,17 @@ class AwContentBrowserClient : public content::ContentBrowserClient {
                       const net::CanonicalCookie& cookie,
                       content::ResourceContext* context,
                       int render_process_id,
-                      int render_frame_id,
-                      const net::CookieOptions& options) override;
+                      int render_frame_id) override;
   void AllowWorkerFileSystem(
       const GURL& url,
       content::ResourceContext* context,
-      const std::vector<std::pair<int, int>>& render_frames,
+      const std::vector<content::GlobalFrameRoutingId>& render_frames,
       base::Callback<void(bool)> callback) override;
   bool AllowWorkerIndexedDB(
       const GURL& url,
       const base::string16& name,
       content::ResourceContext* context,
-      const std::vector<std::pair<int, int>>& render_frames) override;
+      const std::vector<content::GlobalFrameRoutingId>& render_frames) override;
   content::QuotaPermissionContext* CreateQuotaPermissionContext() override;
   void GetQuotaSettings(
       content::BrowserContext* context,
@@ -148,6 +158,10 @@ class AwContentBrowserClient : public content::ContentBrowserClient {
       content::RenderFrameHost* render_frame_host,
       const std::string& interface_name,
       mojo::ScopedMessagePipeHandle interface_pipe) override;
+  bool BindAssociatedInterfaceRequestFromFrame(
+      content::RenderFrameHost* render_frame_host,
+      const std::string& interface_name,
+      mojo::ScopedInterfaceEndpointHandle* handle) override;
   void ExposeInterfacesToRenderer(
       service_manager::BinderRegistry* registry,
       blink::AssociatedInterfaceRegistry* associated_registry,
@@ -172,11 +186,12 @@ class AwContentBrowserClient : public content::ContentBrowserClient {
   scoped_refptr<content::LoginDelegate> CreateLoginDelegate(
       net::AuthChallengeInfo* auth_info,
       content::ResourceRequestInfo::WebContentsGetter web_contents_getter,
+      const content::GlobalRequestID& request_id,
       bool is_main_frame,
       const GURL& url,
+      scoped_refptr<net::HttpResponseHeaders> response_headers,
       bool first_auth_attempt,
-      const base::Callback<void(const base::Optional<net::AuthCredentials>&)>&
-          auth_required_callback) override;
+      LoginAuthRequiredCallback auth_required_callback) override;
   bool HandleExternalProtocol(
       const GURL& url,
       content::ResourceRequestInfo::WebContentsGetter web_contents_getter,
@@ -186,6 +201,14 @@ class AwContentBrowserClient : public content::ContentBrowserClient {
       ui::PageTransition page_transition,
       bool has_user_gesture) override;
   void RegisterOutOfProcessServices(OutOfProcessServiceMap* services) override;
+  bool ShouldEnableStrictSiteIsolation() override;
+  bool WillCreateURLLoaderFactory(
+      content::BrowserContext* browser_context,
+      content::RenderFrameHost* frame,
+      bool is_navigation,
+      const url::Origin& request_initiator,
+      network::mojom::URLLoaderFactoryRequest* factory_request,
+      bool* bypass_redirect_checks) override;
 
   static void DisableCreatingTaskScheduler();
 

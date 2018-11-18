@@ -75,7 +75,8 @@ void MCTargetStreamer::emitValue(const MCExpr *Value) {
 void MCTargetStreamer::emitAssignment(MCSymbol *Symbol, const MCExpr *Value) {}
 
 MCStreamer::MCStreamer(MCContext &Ctx)
-    : Context(Ctx), CurrentWinFrameInfo(nullptr) {
+    : Context(Ctx), CurrentWinFrameInfo(nullptr),
+      UseAssemblerInfoForParsing(false) {
   SectionStack.push_back(std::pair<MCSectionSubPair, MCSectionSubPair>());
 }
 
@@ -199,6 +200,15 @@ MCStreamer::tryEmitDwarfFileDirective(unsigned FileNo, StringRef Directory,
                                    Source, CUID);
 }
 
+void MCStreamer::emitDwarfFile0Directive(StringRef Directory,
+                                         StringRef Filename,
+                                         MD5::MD5Result *Checksum,
+                                         Optional<StringRef> Source,
+                                         unsigned CUID) {
+  getContext().setMCLineTableRootFile(CUID, Directory, Filename, Checksum,
+                                      Source);
+}
+
 void MCStreamer::EmitDwarfLocDirective(unsigned FileNo, unsigned Line,
                                        unsigned Column, unsigned Flags,
                                        unsigned Isa,
@@ -260,22 +270,28 @@ bool MCStreamer::EmitCVInlineSiteIdDirective(unsigned FunctionId,
 void MCStreamer::EmitCVLocDirective(unsigned FunctionId, unsigned FileNo,
                                     unsigned Line, unsigned Column,
                                     bool PrologueEnd, bool IsStmt,
-                                    StringRef FileName, SMLoc Loc) {
+                                    StringRef FileName, SMLoc Loc) {}
+
+bool MCStreamer::checkCVLocSection(unsigned FuncId, unsigned FileNo,
+                                   SMLoc Loc) {
   CodeViewContext &CVC = getContext().getCVContext();
-  MCCVFunctionInfo *FI = CVC.getCVFunctionInfo(FunctionId);
-  if (!FI)
-    return getContext().reportError(
+  MCCVFunctionInfo *FI = CVC.getCVFunctionInfo(FuncId);
+  if (!FI) {
+    getContext().reportError(
         Loc, "function id not introduced by .cv_func_id or .cv_inline_site_id");
+    return false;
+  }
 
   // Track the section
   if (FI->Section == nullptr)
     FI->Section = getCurrentSectionOnly();
-  else if (FI->Section != getCurrentSectionOnly())
-    return getContext().reportError(
+  else if (FI->Section != getCurrentSectionOnly()) {
+    getContext().reportError(
         Loc,
         "all .cv_loc directives for a function must be in the same section");
-
-  CVC.setCurrentCVLoc(FunctionId, FileNo, Line, Column, PrologueEnd, IsStmt);
+    return false;
+  }
+  return true;
 }
 
 void MCStreamer::EmitCVLinetableDirective(unsigned FunctionId,
@@ -504,7 +520,7 @@ void MCStreamer::EmitCFIEscape(StringRef Values) {
 
 void MCStreamer::EmitCFIGnuArgsSize(int64_t Size) {
   MCSymbol *Label = EmitCFILabel();
-  MCCFIInstruction Instruction = 
+  MCCFIInstruction Instruction =
     MCCFIInstruction::createGnuArgsSize(Label, Size);
   MCDwarfFrameInfo *CurFrame = getCurrentDwarfFrameInfo();
   if (!CurFrame)
@@ -651,6 +667,10 @@ void MCStreamer::EmitWinEHHandlerData(SMLoc Loc) {
     getContext().reportError(Loc, "Chained unwind areas can't have handlers!");
 }
 
+void MCStreamer::emitCGProfileEntry(const MCSymbolRefExpr *From,
+                                    const MCSymbolRefExpr *To, uint64_t Count) {
+}
+
 static MCSection *getWinCFISection(MCContext &Context, unsigned *NextWinCFIID,
                                    MCSection *MainCFISec,
                                    const MCSection *TextSec) {
@@ -659,16 +679,31 @@ static MCSection *getWinCFISection(MCContext &Context, unsigned *NextWinCFIID,
     return MainCFISec;
 
   const auto *TextSecCOFF = cast<MCSectionCOFF>(TextSec);
+  auto *MainCFISecCOFF = cast<MCSectionCOFF>(MainCFISec);
   unsigned UniqueID = TextSecCOFF->getOrAssignWinCFISectionID(NextWinCFIID);
 
   // If this section is COMDAT, this unwind section should be COMDAT associative
   // with its group.
   const MCSymbol *KeySym = nullptr;
-  if (TextSecCOFF->getCharacteristics() & COFF::IMAGE_SCN_LNK_COMDAT)
+  if (TextSecCOFF->getCharacteristics() & COFF::IMAGE_SCN_LNK_COMDAT) {
     KeySym = TextSecCOFF->getCOMDATSymbol();
 
-  return Context.getAssociativeCOFFSection(cast<MCSectionCOFF>(MainCFISec),
-                                           KeySym, UniqueID);
+    // In a GNU environment, we can't use associative comdats. Instead, do what
+    // GCC does, which is to make plain comdat selectany section named like
+    // ".[px]data$_Z3foov".
+    if (!Context.getAsmInfo()->hasCOFFAssociativeComdats()) {
+      std::string SectionName =
+          (MainCFISecCOFF->getSectionName() + "$" +
+           TextSecCOFF->getSectionName().split('$').second)
+              .str();
+      return Context.getCOFFSection(
+          SectionName,
+          MainCFISecCOFF->getCharacteristics() | COFF::IMAGE_SCN_LNK_COMDAT,
+          MainCFISecCOFF->getKind(), "", COFF::IMAGE_COMDAT_SELECT_ANY);
+    }
+  }
+
+  return Context.getAssociativeCOFFSection(MainCFISecCOFF, KeySym, UniqueID);
 }
 
 MCSection *MCStreamer::getAssociatedPDataSection(const MCSection *TextSec) {
@@ -800,6 +835,8 @@ void MCStreamer::EmitCOFFSectionIndex(MCSymbol const *Symbol) {
 }
 
 void MCStreamer::EmitCOFFSecRel32(MCSymbol const *Symbol, uint64_t Offset) {}
+
+void MCStreamer::EmitCOFFImgRel32(MCSymbol const *Symbol, int64_t Offset) {}
 
 /// EmitRawText - If this file is backed by an assembly streamer, this dumps
 /// the specified string in the output .s file.  This capability is

@@ -32,11 +32,11 @@
 
 #include "third_party/blink/renderer/bindings/core/v8/array_value.h"
 #include "third_party/blink/renderer/bindings/core/v8/dictionary.h"
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/use_counter.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/modules/mediastream/media_track_constraints.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
@@ -64,12 +64,7 @@ struct NameValueStringConstraint {
 };
 
 // Legal constraint names.
-// Temporary Note: Comments about source are where they are copied from.
-// Once the chrome parts use the new-style constraint values, they will
-// be deleted from the files mentioned.
-// TODO(hta): remove comments before https://crbug.com/543997 is closed.
 
-// From content/renderer/media/stream/media_stream_video_source.cc
 const char kMinAspectRatio[] = "minAspectRatio";
 const char kMaxAspectRatio[] = "maxAspectRatio";
 const char kMaxWidth[] = "maxWidth";
@@ -78,17 +73,15 @@ const char kMaxHeight[] = "maxHeight";
 const char kMinHeight[] = "minHeight";
 const char kMaxFrameRate[] = "maxFrameRate";
 const char kMinFrameRate[] = "minFrameRate";
-// From content/common/media/media_stream_options.cc
 const char kMediaStreamSource[] = "chromeMediaSource";
 const char kMediaStreamSourceId[] =
     "chromeMediaSourceId";                           // mapped to deviceId
 const char kMediaStreamSourceInfoId[] = "sourceId";  // mapped to deviceId
 const char kMediaStreamRenderToAssociatedSink[] =
     "chromeRenderToAssociatedSink";
-// RenderToAssociatedSink will be going away in M50-M60 some time.
+// RenderToAssociatedSink will be going away some time.
 const char kMediaStreamAudioHotword[] = "googHotword";
 // TODO(hta): googHotword should go away. https://crbug.com/577627
-// From content/renderer/media/stream/media_stream_audio_processor_options.cc
 const char kEchoCancellation[] = "echoCancellation";
 const char kDisableLocalEcho[] = "disableLocalEcho";
 const char kGoogEchoCancellation[] = "googEchoCancellation";
@@ -102,13 +95,8 @@ const char kGoogArrayGeometry[] = "googArrayGeometry";
 const char kGoogHighpassFilter[] = "googHighpassFilter";
 const char kGoogTypingNoiseDetection[] = "googTypingNoiseDetection";
 const char kGoogAudioMirroring[] = "googAudioMirroring";
-
-// From
-// third_party/libjingle/source/talk/app/webrtc/mediaconstraintsinterface.cc
-
 // Audio constraints.
 const char kDAEchoCancellation[] = "googDAEchoCancellation";
-
 // Google-specific constraint keys for a local video source (getUserMedia).
 const char kNoiseReduction[] = "googNoiseReduction";
 
@@ -139,11 +127,8 @@ const char kCpuOveruseEncodeRsdThreshold[] = "googCpuOveruseEncodeRsdThreshold";
 const char kCpuOveruseEncodeUsage[] = "googCpuOveruseEncodeUsage";
 const char kHighStartBitrate[] = "googHighStartBitrate";
 const char kPayloadPadding[] = "googPayloadPadding";
-// From webrtc_audio_capturer
 const char kAudioLatency[] = "latencyMs";
-// From media_stream_video_capturer_source
 
-// End of names from libjingle
 // Names that have been used in the past, but should now be ignored.
 // Kept around for backwards compatibility.
 // https://crbug.com/579729
@@ -231,12 +216,12 @@ static bool Parse(const Dictionary& constraints_dictionary,
     if (!ok || optional_constraints.IsUndefinedOrNull())
       return false;
 
-    size_t number_of_constraints;
+    uint32_t number_of_constraints;
     ok = optional_constraints.length(number_of_constraints);
     if (!ok)
       return false;
 
-    for (size_t i = 0; i < number_of_constraints; ++i) {
+    for (uint32_t i = 0; i < number_of_constraints; ++i) {
       Dictionary constraint;
       ok = optional_constraints.Get(i, constraint);
       if (!ok || constraint.IsUndefinedOrNull())
@@ -340,10 +325,6 @@ static void ParseOldStyleNames(
     } else if (constraint.name_.Equals(kGoogExperimentalNoiseSuppression)) {
       result.goog_experimental_noise_suppression.SetExact(
           ToBoolean(constraint.value_));
-    } else if (constraint.name_.Equals(kGoogBeamforming)) {
-      result.goog_beamforming.SetExact(ToBoolean(constraint.value_));
-    } else if (constraint.name_.Equals(kGoogArrayGeometry)) {
-      result.goog_array_geometry.SetExact(constraint.value_);
     } else if (constraint.name_.Equals(kGoogHighpassFilter)) {
       result.goog_highpass_filter.SetExact(ToBoolean(constraint.value_));
     } else if (constraint.name_.Equals(kGoogTypingNoiseDetection)) {
@@ -432,10 +413,12 @@ static void ParseOldStyleNames(
       result.goog_payload_padding.SetExact(ToBoolean(constraint.value_));
     } else if (constraint.name_.Equals(kAudioLatency)) {
       result.goog_latency_ms.SetExact(atoi(constraint.value_.Utf8().c_str()));
-    } else if (constraint.name_.Equals(kPowerLineFrequency)) {
-      result.goog_power_line_frequency.SetExact(
-          atoi(constraint.value_.Utf8().c_str()));
-    } else if (constraint.name_.Equals(kGoogLeakyBucket)) {
+    } else if (constraint.name_.Equals(kGoogLeakyBucket) ||
+               constraint.name_.Equals(kGoogBeamforming) ||
+               constraint.name_.Equals(kGoogArrayGeometry) ||
+               constraint.name_.Equals(kPowerLineFrequency)) {
+      // TODO(crbug.com/856176): Remove the kGoogBeamforming and
+      // kGoogArrayGeometry special cases.
       context->AddConsoleMessage(ConsoleMessage::Create(
           kDeprecationMessageSource, kWarningMessageLevel,
           "Obsolete constraint named " + String(constraint.name_) +
@@ -464,6 +447,7 @@ static void ParseOldStyleNames(
             kDeprecationMessageSource, kWarningMessageLevel,
             "Unknown constraint named " + String(constraint.name_) +
                 " rejected"));
+        // TODO(crbug.com/856176): Don't throw an error.
         error_state.ThrowConstraintError("Unknown name of constraint detected",
                                          constraint.name_);
       }
@@ -677,6 +661,10 @@ void CopyConstraintSet(const MediaTrackConstraintSet& constraints_in,
     CopyBooleanConstraint(constraints_in.echoCancellation(), naked_treatment,
                           constraint_buffer.echo_cancellation);
   }
+  if (constraints_in.hasEchoCancellationType()) {
+    CopyStringConstraint(constraints_in.echoCancellationType(), naked_treatment,
+                         constraint_buffer.echo_cancellation_type);
+  }
   if (constraints_in.hasAutoGainControl()) {
     CopyBooleanConstraint(constraints_in.autoGainControl(), naked_treatment,
                           constraint_buffer.goog_auto_gain_control);
@@ -788,7 +776,7 @@ bool UseNakedNumeric(T input, NakedValueDisposition which) {
   }
   NOTREACHED();
   return false;
-};
+}
 
 template <class T>
 bool UseNakedNonNumeric(T input, NakedValueDisposition which) {
@@ -802,7 +790,7 @@ bool UseNakedNonNumeric(T input, NakedValueDisposition which) {
   }
   NOTREACHED();
   return false;
-};
+}
 
 template <typename U, class T>
 U GetNakedValue(T input, NakedValueDisposition which) {
@@ -816,13 +804,13 @@ U GetNakedValue(T input, NakedValueDisposition which) {
   }
   NOTREACHED();
   return input.Exact();
-};
+}
 
 LongOrConstrainLongRange ConvertLong(const LongConstraint& input,
                                      NakedValueDisposition naked_treatment) {
   LongOrConstrainLongRange output_union;
   if (UseNakedNumeric(input, naked_treatment)) {
-    output_union.SetLong(GetNakedValue<long>(input, naked_treatment));
+    output_union.SetLong(GetNakedValue<uint32_t>(input, naked_treatment));
   } else if (!input.IsEmpty()) {
     ConstrainLongRange output;
     if (input.HasExact())

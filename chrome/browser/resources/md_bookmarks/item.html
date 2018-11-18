@@ -1,5 +1,6 @@
 <link rel="import" href="chrome://resources/html/polymer.html">
 
+<link rel="import" href="chrome://resources/cr_elements/shared_vars_css.html">
 <link rel="import" href="chrome://resources/html/icon.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-icon-button/paper-icon-button-light.html">
 <link rel="import" href="chrome://bookmarks/actions.html">
@@ -10,12 +11,12 @@
   <template>
     <style include="shared-style">
       :host {
-        -webkit-padding-start: 20px;
         align-items: center;
         color: inherit;
         display: flex;
         flex-direction: row;
         height: 40px;
+        padding-inline-start: 20px;
         position: relative;
         text-decoration: none;
         user-select: none;
@@ -26,8 +27,8 @@
       }
 
       #website-title {
-        -webkit-margin-start: 20px;
         flex: 1;
+        margin-inline-start: 20px;
         text-decoration: none;
       }
 
@@ -36,11 +37,11 @@
       }
 
       #website-url {
-        -webkit-margin-start: 20px;
-        /* Transparent version of --secondary-text-color */
+        /* Transparent version of --cr-secondary-text-color */
         color: rgba(0, 0, 0, 0.54);
         display: none;
         flex: 1;
+        margin-inline-start: 20px;
         min-width: 100px;
       }
 
@@ -49,12 +50,16 @@
       }
 
       #icon {
-        color: var(--secondary-text-color);
+        color: var(--cr-secondary-text-color);
         flex: none;
       }
 
       .more-vert-button {
-        -webkit-margin-end: 12px;
+        margin-inline-end: 12px;
+      }
+
+      :host(:focus) {
+        z-index: 1;
       }
     </style>
     <div id="icon"></div>
@@ -79,4 +84,4 @@
     </paper-icon-button-light>
   </template>
   <script src="chrome://bookmarks/item.js"></script>
-<dom-module>
+</dom-module>

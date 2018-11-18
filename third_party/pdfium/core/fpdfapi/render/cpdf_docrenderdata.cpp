@@ -12,7 +12,7 @@
 #include "core/fpdfapi/page/cpdf_function.h"
 #include "core/fpdfapi/parser/cpdf_array.h"
 #include "core/fpdfapi/parser/cpdf_document.h"
-#include "core/fpdfapi/render/cpdf_dibsource.h"
+#include "core/fpdfapi/render/cpdf_dibbase.h"
 #include "core/fpdfapi/render/cpdf_transferfunc.h"
 #include "core/fpdfapi/render/cpdf_type3cache.h"
 
@@ -62,7 +62,7 @@ void CPDF_DocRenderData::MaybePurgeCachedType3(CPDF_Type3Font* pFont) {
 }
 
 RetainPtr<CPDF_TransferFunc> CPDF_DocRenderData::GetTransferFunc(
-    CPDF_Object* pObj) {
+    const CPDF_Object* pObj) {
   if (!pObj)
     return nullptr;
 
@@ -73,7 +73,7 @@ RetainPtr<CPDF_TransferFunc> CPDF_DocRenderData::GetTransferFunc(
   std::unique_ptr<CPDF_Function> pFuncs[3];
   bool bUniTransfer = true;
   bool bIdentity = true;
-  if (CPDF_Array* pArray = pObj->AsArray()) {
+  if (const CPDF_Array* pArray = pObj->AsArray()) {
     bUniTransfer = false;
     if (pArray->GetCount() < 3)
       return nullptr;
@@ -124,7 +124,7 @@ RetainPtr<CPDF_TransferFunc> CPDF_DocRenderData::GetTransferFunc(
   return pTransfer;
 }
 
-void CPDF_DocRenderData::MaybePurgeTransferFunc(CPDF_Object* pObj) {
+void CPDF_DocRenderData::MaybePurgeTransferFunc(const CPDF_Object* pObj) {
   auto it = m_TransferFuncMap.find(pObj);
   if (it != m_TransferFuncMap.end() && it->second->HasOneRef())
     m_TransferFuncMap.erase(it);

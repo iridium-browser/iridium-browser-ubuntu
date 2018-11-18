@@ -124,10 +124,7 @@ class ShortcutsBackend : public RefcountedKeyedService,
 
   // history::HistoryServiceObserver:
   void OnURLsDeleted(history::HistoryService* history_service,
-                     bool all_history,
-                     bool expired,
-                     const history::URLRows& deleted_rows,
-                     const std::set<GURL>& favicon_urls) override;
+                     const history::DeletionInfo& deletion_info) override;
 
   // Internal initialization of the back-end. Posted by Init() to the DB thread.
   // On completion posts InitCompleted() back to UI thread.
@@ -157,7 +154,7 @@ class ShortcutsBackend : public RefcountedKeyedService,
   std::unique_ptr<SearchTermsData> search_terms_data_;
 
   CurrentState current_state_;
-  base::ObserverList<ShortcutsBackendObserver> observer_list_;
+  base::ObserverList<ShortcutsBackendObserver>::Unchecked observer_list_;
   scoped_refptr<ShortcutsDatabase> db_;
 
   // The |temp_shortcuts_map_| and |temp_guid_map_| used for temporary storage

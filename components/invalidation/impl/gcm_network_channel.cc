@@ -22,8 +22,9 @@
 #include "net/base/load_flags.h"
 #include "net/http/http_status_code.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
-#include "net/url_request/url_fetcher.h"
-#include "net/url_request/url_request_status.h"
+#include "services/network/public/cpp/resource_request.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
+#include "services/network/public/cpp/simple_url_loader.h"
 
 #if !defined(OS_ANDROID)
 // channel_common.proto defines ANDROID constant that conflicts with Android
@@ -113,16 +114,18 @@ void RecordOutgoingMessageStatus(OutgoingMessageStatus status) {
 }  // namespace
 
 GCMNetworkChannel::GCMNetworkChannel(
-    scoped_refptr<net::URLRequestContextGetter> request_context_getter,
+    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
+    network::NetworkConnectionTracker* network_connection_tracker,
     std::unique_ptr<GCMNetworkChannelDelegate> delegate)
-    : request_context_getter_(request_context_getter),
+    : url_loader_factory_(std::move(url_loader_factory)),
+      network_connection_tracker_(network_connection_tracker),
       delegate_(std::move(delegate)),
       register_backoff_entry_(new net::BackoffEntry(&kRegisterBackoffPolicy)),
       gcm_channel_online_(false),
       http_channel_online_(false),
       diagnostic_info_(this),
       weak_factory_(this) {
-  net::NetworkChangeNotifier::AddNetworkChangeObserver(this);
+  network_connection_tracker_->AddNetworkConnectionObserver(this);
   delegate_->Initialize(
       base::Bind(&GCMNetworkChannel::OnConnectionStateChanged,
                  weak_factory_.GetWeakPtr()),
@@ -132,7 +135,7 @@ GCMNetworkChannel::GCMNetworkChannel(
 
 GCMNetworkChannel::~GCMNetworkChannel() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  net::NetworkChangeNotifier::RemoveNetworkChangeObserver(this);
+  network_connection_tracker_->RemoveNetworkConnectionObserver(this);
 }
 
 void GCMNetworkChannel::Register() {
@@ -161,8 +164,9 @@ void GCMNetworkChannel::OnRegisterComplete(
       case gcm::GCMClient::UNKNOWN_ERROR: {
         register_backoff_entry_->InformOfRequest(false);
         base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-            FROM_HERE, base::Bind(&GCMNetworkChannel::Register,
-                                  weak_factory_.GetWeakPtr()),
+            FROM_HERE,
+            base::BindOnce(&GCMNetworkChannel::Register,
+                           weak_factory_.GetWeakPtr()),
             register_backoff_entry_->GetTimeUntilRelease());
         break;
       }
@@ -256,46 +260,55 @@ void GCMNetworkChannel::OnGetTokenComplete(
             "features that depend on it. It makes sense to control top level "
             "features that use InvalidationService."
         })");
-  fetcher_ =
-      net::URLFetcher::Create(BuildUrl(registration_id_), net::URLFetcher::POST,
-                              this, traffic_annotation);
-  data_use_measurement::DataUseUserData::AttachToFetcher(
-      fetcher_.get(), data_use_measurement::DataUseUserData::INVALIDATION);
-  fetcher_->SetRequestContext(request_context_getter_.get());
-  fetcher_->SetLoadFlags(net::LOAD_DO_NOT_SEND_COOKIES |
-                         net::LOAD_DO_NOT_SAVE_COOKIES);
-  const std::string auth_header("Authorization: Bearer " + access_token_);
-  fetcher_->AddExtraRequestHeader(auth_header);
+
+  auto resource_request = std::make_unique<network::ResourceRequest>();
+  resource_request->url = BuildUrl(registration_id_);
+  resource_request->load_flags =
+      net::LOAD_DO_NOT_SEND_COOKIES | net::LOAD_DO_NOT_SAVE_COOKIES;
+  resource_request->method = "POST";
+  resource_request->headers.SetHeader(net::HttpRequestHeaders::kAuthorization,
+                                      "Bearer " + access_token_);
   if (!echo_token_.empty()) {
-    const std::string echo_header("echo-token: " + echo_token_);
-    fetcher_->AddExtraRequestHeader(echo_header);
+    resource_request->headers.SetHeader("echo-token", echo_token_);
   }
-  fetcher_->SetUploadData("application/x-protobuffer", cached_message_);
-  fetcher_->Start();
+  simple_url_loader_ = network::SimpleURLLoader::Create(
+      std::move(resource_request), traffic_annotation);
+  simple_url_loader_->AttachStringForUpload(cached_message_,
+                                            "application/x-protobuffer");
+  // TODO(https://crbug.com/808498): Re-add data use measurement once
+  // SimpleURLLoader supports it.
+  // ID=data_use_measurement::DataUseUserData::INVALIDATION
+  simple_url_loader_->DownloadToStringOfUnboundedSizeUntilCrashAndDie(
+      url_loader_factory_.get(),
+      base::BindOnce(&GCMNetworkChannel::OnSimpleLoaderComplete,
+                     base::Unretained(this)));
   // Clear message to prevent accidentally resending it in the future.
   cached_message_.clear();
 }
 
-void GCMNetworkChannel::OnURLFetchComplete(const net::URLFetcher* source) {
+void GCMNetworkChannel::OnSimpleLoaderComplete(
+    std::unique_ptr<std::string> response_body) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  DCHECK_EQ(fetcher_.get(), source);
-  // Free fetcher at the end of function.
-  std::unique_ptr<net::URLFetcher> fetcher = std::move(fetcher_);
 
-  net::URLRequestStatus status = fetcher->GetStatus();
+  int net_error = simple_url_loader_->NetError();
+  bool is_success = (net_error == net::OK);
+  int response_code = -1;
+  if (simple_url_loader_->ResponseInfo() &&
+      simple_url_loader_->ResponseInfo()->headers) {
+    response_code =
+        simple_url_loader_->ResponseInfo()->headers->response_code();
+  }
+  simple_url_loader_.reset();
   diagnostic_info_.last_post_response_code_ =
-      status.is_success() ? source->GetResponseCode() : status.error();
+      (response_code / 100 != 2 || is_success) ? response_code : net_error;
 
-  if (status.is_success() &&
-      fetcher->GetResponseCode() == net::HTTP_UNAUTHORIZED) {
-    DVLOG(1) << "URLFetcher failure: HTTP_UNAUTHORIZED";
+  if (response_code == net::HTTP_UNAUTHORIZED) {
+    DVLOG(1) << "SimpleURLLoader failure: HTTP_UNAUTHORIZED";
     delegate_->InvalidateToken(access_token_);
   }
 
-  if (!status.is_success() ||
-      (fetcher->GetResponseCode() != net::HTTP_OK &&
-       fetcher->GetResponseCode() != net::HTTP_NO_CONTENT)) {
-    DVLOG(1) << "URLFetcher failure";
+  if (!response_body) {
+    DVLOG(1) << "SimpleURLLoader failure";
     RecordOutgoingMessageStatus(POST_FAILURE);
     // POST failed. Notify that http channel doesn't work.
     UpdateHttpChannelState(false);
@@ -305,7 +318,7 @@ void GCMNetworkChannel::OnURLFetchComplete(const net::URLFetcher* source) {
   RecordOutgoingMessageStatus(OUTGOING_MESSAGE_SUCCESS);
   // Successfully sent message. Http channel works.
   UpdateHttpChannelState(true);
-  DVLOG(2) << "URLFetcher success";
+  DVLOG(2) << "SimpleURLLoader success";
 }
 
 void GCMNetworkChannel::OnIncomingMessage(const std::string& message,
@@ -351,12 +364,12 @@ void GCMNetworkChannel::OnStoreReset() {
   registration_id_.clear();
 }
 
-void GCMNetworkChannel::OnNetworkChanged(
-    net::NetworkChangeNotifier::ConnectionType connection_type) {
+void GCMNetworkChannel::OnConnectionChanged(
+    network::mojom::ConnectionType connection_type) {
   // Network connection is restored. Let's notify cacheinvalidations so it has
   // chance to retry.
-  NotifyNetworkStatusChange(
-      connection_type != net::NetworkChangeNotifier::CONNECTION_NONE);
+  NotifyNetworkStatusChange(connection_type !=
+                            network::mojom::ConnectionType::CONNECTION_NONE);
 }
 
 void GCMNetworkChannel::UpdateGcmChannelState(bool online) {

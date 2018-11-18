@@ -21,6 +21,7 @@
 #include "ui/base/hit_test.h"
 #include "ui/display/screen.h"
 #include "ui/gfx/geometry/dip_util.h"
+#include "ui/views/accessibility/view_accessibility.h"
 #include "ui/views/corewm/tooltip_aura.h"
 #include "ui/views/mus/mus_client.h"
 #include "ui/views/mus/mus_property_mirror.h"
@@ -42,19 +43,37 @@ namespace views {
 namespace {
 
 // As the window manager renderers the non-client decorations this class does
-// very little but honor the client area insets from the window manager.
-class ClientSideNonClientFrameView : public NonClientFrameView {
+// very little but honor kTopViewInset.
+class ClientSideNonClientFrameView : public NonClientFrameView,
+                                     public aura::WindowObserver {
  public:
   explicit ClientSideNonClientFrameView(views::Widget* widget)
-      : widget_(widget) {}
+      : widget_(widget) {
+    // Not part of the accessibility node hierarchy because the window frame is
+    // provided by the window manager.
+    GetViewAccessibility().set_is_ignored(true);
+
+    // Initialize kTopViewInset to a default value. Further updates will come
+    // from Ash. This is necessary so that during app window creation,
+    // GetWindowBoundsForClientBounds() can calculate correctly.
+    const auto& values = views::WindowManagerFrameValues::instance();
+    widget->GetNativeWindow()->SetProperty(aura::client::kTopViewInset,
+                                           widget->IsMaximized()
+                                               ? values.maximized_insets.top()
+                                               : values.normal_insets.top());
+    observed_.Add(window());
+  }
   ~ClientSideNonClientFrameView() override {}
 
  private:
-  // Returns the default values of client area insets from the window manager.
-  static gfx::Insets GetDefaultWindowManagerInsets(bool is_maximized) {
-    const WindowManagerFrameValues& values =
-        WindowManagerFrameValues::instance();
-    return is_maximized ? values.maximized_insets : values.normal_insets;
+  gfx::Insets GetClientInsets() const {
+    const int top_inset = window()->GetProperty(aura::client::kTopViewInset);
+    return gfx::Insets(top_inset, 0, 0, 0);
+  }
+
+  // View:
+  const char* GetClassName() const override {
+    return "ClientSideNonClientFrameView";
   }
 
   // NonClientFrameView:
@@ -62,7 +81,7 @@ class ClientSideNonClientFrameView : public NonClientFrameView {
     gfx::Rect result(GetLocalBounds());
     if (widget_->IsFullscreen())
       return result;
-    result.Inset(GetDefaultWindowManagerInsets(widget_->IsMaximized()));
+    result.Inset(GetClientInsets());
     return result;
   }
   gfx::Rect GetWindowBoundsForClientBounds(
@@ -70,12 +89,9 @@ class ClientSideNonClientFrameView : public NonClientFrameView {
     if (widget_->IsFullscreen())
       return client_bounds;
 
-    const gfx::Insets insets(
-        GetDefaultWindowManagerInsets(widget_->IsMaximized()));
-    return gfx::Rect(client_bounds.x() - insets.left(),
-                     client_bounds.y() - insets.top(),
-                     client_bounds.width() + insets.width(),
-                     client_bounds.height() + insets.height());
+    gfx::Rect outset_bounds = client_bounds;
+    outset_bounds.Inset(-GetClientInsets());
+    return outset_bounds;
   }
   int NonClientHitTest(const gfx::Point& point) override { return HTNOWHERE; }
   void GetWindowMask(const gfx::Size& size, gfx::Path* window_mask) override {
@@ -115,7 +131,26 @@ class ClientSideNonClientFrameView : public NonClientFrameView {
                      max_size.height() == 0 ? 0 : converted_size.height());
   }
 
+  // aura::WindowObserver:
+  void OnWindowDestroying(aura::Window* window) override {
+    observed_.Remove(window);
+  }
+
+  void OnWindowPropertyChanged(aura::Window* window,
+                               const void* key,
+                               intptr_t old) override {
+    if (key == aura::client::kTopViewInset) {
+      InvalidateLayout();
+      widget_->GetRootView()->Layout();
+    }
+  }
+
+  aura::Window* window() const {
+    return widget_->GetNativeWindow()->GetRootWindow();
+  }
+
   views::Widget* widget_;
+  ScopedObserver<aura::Window, aura::WindowObserver> observed_{this};
 
   DISALLOW_COPY_AND_ASSIGN(ClientSideNonClientFrameView);
 };
@@ -250,20 +285,6 @@ void DesktopWindowTreeHostMus::SendClientAreaToServer() {
       std::vector<gfx::Rect>());
 }
 
-void DesktopWindowTreeHostMus::SendHitTestMaskToServer() {
-  if (!native_widget_delegate_->HasHitTestMask()) {
-    aura::WindowPortMus::Get(window())->SetHitTestMask(base::nullopt);
-    return;
-  }
-
-  gfx::Path mask_path;
-  native_widget_delegate_->GetHitTestMask(&mask_path);
-  // TODO(jamescook): Use the full path for the mask.
-  gfx::Rect mask_rect =
-      gfx::ToEnclosingRect(gfx::SkRectToRectF(mask_path.getBounds()));
-  aura::WindowPortMus::Get(window())->SetHitTestMask(mask_rect);
-}
-
 bool DesktopWindowTreeHostMus::IsFocusClientInstalledOnFocusSynchronizer()
     const {
   return MusClient::Get()
@@ -280,7 +301,11 @@ float DesktopWindowTreeHostMus::GetScaleFactor() const {
 }
 
 void DesktopWindowTreeHostMus::SetBoundsInDIP(const gfx::Rect& bounds_in_dip) {
-  SetBoundsInPixels(gfx::ConvertRectToPixel(GetScaleFactor(), bounds_in_dip));
+  // Do not use ConvertRectToPixel, enclosing rects cause problems.
+  const gfx::Rect rect(
+      gfx::ScaleToFlooredPoint(bounds_in_dip.origin(), GetScaleFactor()),
+      gfx::ScaleToCeiledSize(bounds_in_dip.size(), GetScaleFactor()));
+  SetBoundsInPixels(rect, viz::LocalSurfaceId());
 }
 
 bool DesktopWindowTreeHostMus::ShouldSendClientAreaToServer() const {
@@ -293,15 +318,10 @@ bool DesktopWindowTreeHostMus::ShouldSendClientAreaToServer() const {
 }
 
 void DesktopWindowTreeHostMus::Init(const Widget::InitParams& params) {
-  // |TYPE_WINDOW| and |TYPE_PANEL| are forced to transparent as otherwise the
-  // window is opaque and the client decorations drawn by the window manager
-  // would not be seen.
-  const bool transparent =
-      params.opacity == Widget::InitParams::TRANSLUCENT_WINDOW ||
-      params.type == Widget::InitParams::TYPE_WINDOW ||
-      params.type == Widget::InitParams::TYPE_PANEL;
-  content_window()->SetTransparent(transparent);
-  window()->SetTransparent(transparent);
+  const bool translucent =
+      MusClient::ShouldMakeWidgetWindowsTranslucent(params);
+  content_window()->SetTransparent(translucent);
+  window()->SetTransparent(translucent);
 
   window()->SetProperty(aura::client::kShowStateKey, params.show_state);
 
@@ -315,16 +335,47 @@ void DesktopWindowTreeHostMus::Init(const Widget::InitParams& params) {
 
   NativeWidgetAura::SetShadowElevationFromInitParams(window(), params);
 
-  // Transient parents are connected using the Window created by WindowTreeHost,
-  // which is owned by the window manager. This way the window manager can
-  // properly identify and honor transients.
+  // Widget's |InitParams::parent| has different meanings depending on the
+  // NativeWidgetPrivate implementation that the Widget creates (each Widget
+  // creates a NativeWidgetPrivate). When DesktopNativeWidgetAura is used as
+  // the NativeWidgetPrivate implementation, |InitParams::parent| means the
+  // entirety of the contents of the new Widget should be stacked above the
+  // entirety of the contents of the Widget for |InitParams::parent|, and
+  // the new Widget should be deleted when the Widget for
+  // |InitParams::parent| is deleted. Aura and mus provide support for
+  // transient windows, which provides both the stacking and ownership needed to
+  // support |InitParams::parent|.
+  //
+  // DesktopNativeWidgetAura internally creates two aura::Windows (one by
+  // WindowTreeHost, the other in |DesktopNativeWidgetAura::content_window_|).
+  // To have the entirety of the contents of the Widget appear on top of the
+  // entirety of the contents of another Widget, the stacking is done on the
+  // WindowTreeHost's window. For these reasons, the following code uses the
+  // Window associated with the WindowTreeHost of the |params.parent|.
+  //
+  // Views/Aura provide support for child-modal windows. Child-modal windows
+  // are windows that are modal to their transient parent. Because this code
+  // implements |InitParams::parent| in terms of transient parents, it means
+  // it is not possible to support both |InitParams::parent| as well as a
+  // child-modal window. This is *only* an issue if a Widget that uses a
+  // DesktopNativeWidgetAura needs to be child-modal to another window. At
+  // the current time NativeWidgetAura is always used for child-modal windows,
+  // so this isn't an issue.
+  //
+  // If we end up needing to use DesktopNativeWidgetAura for child-modal
+  // Widgets then we need something different. Possibilities include:
+  // . Have mus ignore child-modal windows and instead implement child-modal
+  //   entirely in the client (this is what we do on Windows). To get this
+  //   right likely means we need the ability to disable windows (see
+  //   HWNDMessageHandler::InitModalType() for how Windows OS does this).
+  // . Implement |InitParams::parent| using a different (new) API.
   if (params.parent && params.parent->GetHost()) {
     aura::client::GetTransientWindowClient()->AddTransientChild(
         params.parent->GetHost()->window(), window());
   }
 
   if (!params.accept_events)
-    window()->SetEventTargetingPolicy(ui::mojom::EventTargetingPolicy::NONE);
+    window()->SetEventTargetingPolicy(ws::mojom::EventTargetingPolicy::NONE);
   else
     aura::WindowPortMus::Get(content_window())->SetCanAcceptDrops(true);
 }
@@ -362,10 +413,19 @@ void DesktopWindowTreeHostMus::OnWidgetInitDone() {
   // the NonClientView was created, which means we may not have sent the
   // client-area and hit-test-mask.
   SendClientAreaToServer();
-  SendHitTestMaskToServer();
 
   MusClient::Get()->OnCaptureClientSet(
       aura::client::GetCaptureClient(window()));
+
+  // These views are not part of the accessibility node hierarchy because the
+  // window frame is provided by the window manager.
+  Widget* widget = native_widget_delegate_->AsWidget();
+  if (widget->non_client_view())
+    widget->non_client_view()->GetViewAccessibility().set_is_ignored(true);
+  if (widget->client_view())
+    widget->client_view()->GetViewAccessibility().set_is_ignored(true);
+
+  MusClient::Get()->OnWidgetInitDone(widget);
 }
 
 std::unique_ptr<corewm::Tooltip> DesktopWindowTreeHostMus::CreateTooltip() {
@@ -386,6 +446,9 @@ void DesktopWindowTreeHostMus::Close() {
   // Even though we don't close immediately, we need to hide immediately
   // (otherwise events may be processed, which is unexpected).
   Hide();
+
+  // This has to happen *after* Hide() above, otherwise animations won't work.
+  content_window()->Hide();
 
   // Close doesn't delete this immediately, as 'this' may still be on the stack
   // resulting in possible crashes when the stack unwindes.
@@ -420,17 +483,36 @@ aura::WindowTreeHost* DesktopWindowTreeHostMus::AsWindowTreeHost() {
   return this;
 }
 
-void DesktopWindowTreeHostMus::ShowWindowWithState(ui::WindowShowState state) {
-  if (state == ui::SHOW_STATE_MAXIMIZED || state == ui::SHOW_STATE_FULLSCREEN)
-    window()->SetProperty(aura::client::kShowStateKey, state);
+void DesktopWindowTreeHostMus::Show(ui::WindowShowState show_state,
+                                    const gfx::Rect& restore_bounds) {
+  native_widget_delegate_->OnNativeWidgetVisibilityChanging(true);
+
+  if (show_state == ui::SHOW_STATE_MAXIMIZED && !restore_bounds.IsEmpty()) {
+    window()->SetProperty(aura::client::kRestoreBoundsKey,
+                          new gfx::Rect(restore_bounds));
+  }
+  if (show_state == ui::SHOW_STATE_MAXIMIZED ||
+      show_state == ui::SHOW_STATE_FULLSCREEN) {
+    window()->SetProperty(aura::client::kShowStateKey, show_state);
+  }
+  // DesktopWindowTreeHostMus is unique in that it calls window()->Show() here.
+  // All other implementations call window()->Show() from the constructor. This
+  // is necessary as window()'s visibility is mirrored in the server, on other
+  // platforms it's the visibility of the AcceleratedWidget that matters and
+  // dictates what is actually drawn on screen.
   window()->Show();
   if (compositor())
     compositor()->SetVisible(true);
 
+  // |content_window_| is the Window that will be focused by way of Activate().
+  // Ensure |content_window_| is visible before the call to Activate(),
+  // otherwise focus goes to window().
+  content_window()->Show();
+
   native_widget_delegate_->OnNativeWidgetVisibilityChanged(true);
 
   if (native_widget_delegate_->CanActivate()) {
-    if (state != ui::SHOW_STATE_INACTIVE)
+    if (show_state != ui::SHOW_STATE_INACTIVE)
       Activate();
 
     // SetInitialFocus() should be always be called, even for
@@ -440,15 +522,8 @@ void DesktopWindowTreeHostMus::ShowWindowWithState(ui::WindowShowState state) {
     // should pass SHOW_STATE_INACTIVE to SetInitialFocus() to stop the initial
     // focused view from getting focused. See crbug.com/515594 for example.
     native_widget_delegate_->SetInitialFocus(
-        IsActive() ? state : ui::SHOW_STATE_INACTIVE);
+        IsActive() ? show_state : ui::SHOW_STATE_INACTIVE);
   }
-}
-
-void DesktopWindowTreeHostMus::ShowMaximizedWithBounds(
-    const gfx::Rect& restored_bounds) {
-  window()->SetProperty(aura::client::kRestoreBoundsKey,
-                        new gfx::Rect(restored_bounds));
-  ShowWindowWithState(ui::SHOW_STATE_MAXIMIZED);
 }
 
 bool DesktopWindowTreeHostMus::IsVisible() const {
@@ -463,7 +538,7 @@ bool DesktopWindowTreeHostMus::IsVisible() const {
 }
 
 void DesktopWindowTreeHostMus::SetSize(const gfx::Size& size) {
-  // Use GetBounds() as the origin of window() is always at 0, 0.
+  // Use GetBoundsInPixels(), as the origin of window() is always at (0, 0).
   gfx::Rect screen_bounds =
       gfx::ConvertRectToDIP(GetScaleFactor(), GetBoundsInPixels());
   screen_bounds.set_size(size);
@@ -542,10 +617,7 @@ std::string DesktopWindowTreeHostMus::GetWorkspace() const {
 }
 
 gfx::Rect DesktopWindowTreeHostMus::GetWorkAreaBoundsInScreen() const {
-  // TODO(sky): GetDisplayNearestWindow() should take a const aura::Window*.
-  return display::Screen::GetScreen()
-      ->GetDisplayNearestWindow(const_cast<aura::Window*>(window()))
-      .work_area();
+  return GetDisplay().work_area();
 }
 
 void DesktopWindowTreeHostMus::SetShape(
@@ -593,6 +665,7 @@ bool DesktopWindowTreeHostMus::IsActive() const {
 void DesktopWindowTreeHostMus::Maximize() {
   window()->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_MAXIMIZED);
 }
+
 void DesktopWindowTreeHostMus::Minimize() {
   window()->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_MINIMIZED);
 }
@@ -635,8 +708,14 @@ bool DesktopWindowTreeHostMus::IsVisibleOnAllWorkspaces() const {
 }
 
 bool DesktopWindowTreeHostMus::SetWindowTitle(const base::string16& title) {
-  if (window()->GetTitle() == title)
+  WidgetDelegate* widget_delegate =
+      native_widget_delegate_->AsWidget()->widget_delegate();
+  const bool show = widget_delegate && widget_delegate->ShouldShowWindowTitle();
+  if (window()->GetTitle() == title &&
+      window()->GetProperty(aura::client::kTitleShownKey) == show) {
     return false;
+  }
+  window()->SetProperty(aura::client::kTitleShownKey, show);
   window()->SetTitle(title);
   return true;
 }
@@ -656,10 +735,10 @@ Widget::MoveLoopResult DesktopWindowTreeHostMus::RunMoveLoop(
 
   base::RunLoop run_loop(base::RunLoop::Type::kNestableTasksAllowed);
 
-  ui::mojom::MoveLoopSource mus_source =
+  ws::mojom::MoveLoopSource mus_source =
       source == Widget::MOVE_LOOP_SOURCE_MOUSE
-          ? ui::mojom::MoveLoopSource::MOUSE
-          : ui::mojom::MoveLoopSource::TOUCH;
+          ? ws::mojom::MoveLoopSource::MOUSE
+          : ws::mojom::MoveLoopSource::TOUCH;
 
   bool success = false;
   gfx::Point cursor_location =
@@ -686,7 +765,10 @@ NonClientFrameView* DesktopWindowTreeHostMus::CreateNonClientFrameView() {
   if (!ShouldSendClientAreaToServer())
     return nullptr;
 
-  return new ClientSideNonClientFrameView(native_widget_delegate_->AsWidget());
+  auto* frame =
+      new ClientSideNonClientFrameView(native_widget_delegate_->AsWidget());
+  observed_frame_.Add(frame);
+  return frame;
 }
 
 bool DesktopWindowTreeHostMus::ShouldUseNativeFrame() const {
@@ -697,7 +779,9 @@ bool DesktopWindowTreeHostMus::ShouldWindowContentsBeTransparent() const {
   return false;
 }
 
-void DesktopWindowTreeHostMus::FrameTypeChanged() {}
+void DesktopWindowTreeHostMus::FrameTypeChanged() {
+  native_widget_delegate_->AsWidget()->ThemeChanged();
+}
 
 void DesktopWindowTreeHostMus::SetFullscreen(bool fullscreen) {
   if (IsFullscreen() == fullscreen)
@@ -710,6 +794,7 @@ bool DesktopWindowTreeHostMus::IsFullscreen() const {
   return window()->GetProperty(aura::client::kShowStateKey) ==
          ui::SHOW_STATE_FULLSCREEN;
 }
+
 void DesktopWindowTreeHostMus::SetOpacity(float opacity) {
   WindowTreeHostMus::SetOpacity(opacity);
 }
@@ -720,6 +805,9 @@ void DesktopWindowTreeHostMus::SetWindowIcons(const gfx::ImageSkia& window_icon,
 }
 
 void DesktopWindowTreeHostMus::InitModalType(ui::ModalType modal_type) {
+  // See comment in Init() related to |InitParams::parent| as to why this DCHECK
+  // is here.
+  DCHECK_NE(modal_type, ui::MODAL_TYPE_CHILD);
   window()->SetProperty(aura::client::kModalKey, modal_type);
 }
 
@@ -736,7 +824,7 @@ bool DesktopWindowTreeHostMus::IsTranslucentWindowOpacitySupported() const {
 }
 
 void DesktopWindowTreeHostMus::SizeConstraintsChanged() {
-  int32_t behavior = ui::mojom::kResizeBehaviorNone;
+  int32_t behavior = ws::mojom::kResizeBehaviorNone;
   Widget* widget = native_widget_delegate_->AsWidget();
   if (widget->widget_delegate())
     behavior = widget->widget_delegate()->GetResizeBehavior();
@@ -767,7 +855,6 @@ void DesktopWindowTreeHostMus::OnWindowManagerFrameValuesChanged() {
   }
 
   SendClientAreaToServer();
-  SendHitTestMaskToServer();
 }
 
 void DesktopWindowTreeHostMus::OnActiveFocusClientChanged(
@@ -799,11 +886,7 @@ void DesktopWindowTreeHostMus::OnWindowPropertyChanged(aura::Window* window,
 }
 
 void DesktopWindowTreeHostMus::ShowImpl() {
-  native_widget_delegate_->OnNativeWidgetVisibilityChanging(true);
-  // Using ui::SHOW_STATE_NORMAL matches that of DesktopWindowTreeHostX11.
-  ShowWindowWithState(ui::SHOW_STATE_NORMAL);
-  WindowTreeHostMus::ShowImpl();
-  native_widget_delegate_->OnNativeWidgetVisibilityChanged(true);
+  Show(ui::SHOW_STATE_NORMAL, gfx::Rect());
 }
 
 void DesktopWindowTreeHostMus::HideImpl() {
@@ -819,12 +902,12 @@ void DesktopWindowTreeHostMus::HideImpl() {
 
   native_widget_delegate_->OnNativeWidgetVisibilityChanging(false);
   WindowTreeHostMus::HideImpl();
-  window()->Hide();
   native_widget_delegate_->OnNativeWidgetVisibilityChanged(false);
 }
 
 void DesktopWindowTreeHostMus::SetBoundsInPixels(
-    const gfx::Rect& bounds_in_pixels) {
+    const gfx::Rect& bounds_in_pixels,
+    const viz::LocalSurfaceId& local_surface_id) {
   gfx::Rect final_bounds_in_pixels = bounds_in_pixels;
   if (GetBoundsInPixels().size() != bounds_in_pixels.size()) {
     gfx::Size size = bounds_in_pixels.size();
@@ -836,12 +919,20 @@ void DesktopWindowTreeHostMus::SetBoundsInPixels(
       size.SetToMin(max_size_in_pixels);
     final_bounds_in_pixels.set_size(size);
   }
-  const gfx::Rect old_bounds_in_pixels = GetBoundsInPixels();
-  WindowTreeHostMus::SetBoundsInPixels(final_bounds_in_pixels);
-  if (old_bounds_in_pixels.size() != final_bounds_in_pixels.size()) {
-    SendClientAreaToServer();
-    SendHitTestMaskToServer();
-  }
+  WindowTreeHostMus::SetBoundsInPixels(final_bounds_in_pixels,
+                                       local_surface_id);
+}
+
+void DesktopWindowTreeHostMus::OnViewBoundsChanged(views::View* observed_view) {
+  DCHECK_EQ(
+      observed_view,
+      native_widget_delegate_->AsWidget()->non_client_view()->frame_view());
+
+  SendClientAreaToServer();
+}
+
+void DesktopWindowTreeHostMus::OnViewIsDeleting(View* observed_view) {
+  observed_frame_.Remove(observed_view);
 }
 
 aura::Window* DesktopWindowTreeHostMus::content_window() {

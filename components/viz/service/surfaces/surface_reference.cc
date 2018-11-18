@@ -19,9 +19,14 @@ SurfaceReference::SurfaceReference(const SurfaceReference& other) = default;
 SurfaceReference::~SurfaceReference() = default;
 
 std::string SurfaceReference::ToString() const {
-  return base::StringPrintf("parent=%s, child=%s",
+  return base::StringPrintf("SurfaceReference(%s, %s)",
                             parent_id_.ToString().c_str(),
                             child_id_.ToString().c_str());
+}
+
+std::ostream& operator<<(std::ostream& out,
+                         const SurfaceReference& surface_reference) {
+  return out << surface_reference.ToString();
 }
 
 }  // namespace viz

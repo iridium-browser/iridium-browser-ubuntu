@@ -26,7 +26,8 @@
 #include "media/audio/audio_manager.h"
 #include "media/audio/audio_power_monitor.h"
 #include "media/audio/audio_source_diverter.h"
-#include "services/audio/group_member.h"
+#include "services/audio/loopback_group_member.h"
+#include "services/audio/stream_monitor_coordinator.h"
 
 // An OutputController controls an AudioOutputStream and provides data to this
 // output stream. It executes audio operations like play, pause, stop, etc. on
@@ -60,8 +61,9 @@
 namespace audio {
 
 class OutputController : public media::AudioOutputStream::AudioSourceCallback,
-                         public GroupMember,
-                         public media::AudioManager::AudioDeviceListener {
+                         public LoopbackGroupMember,
+                         public media::AudioManager::AudioDeviceListener,
+                         public StreamMonitorCoordinator::Observer {
  public:
   // An event handler that receives events from the OutputController. The
   // following methods are called on the audio manager thread.
@@ -108,8 +110,9 @@ class OutputController : public media::AudioOutputStream::AudioSourceCallback,
                    EventHandler* handler,
                    const media::AudioParameters& params,
                    const std::string& output_device_id,
-                   const base::UnguessableToken& group_id,
-                   SyncReader* sync_reader);
+                   SyncReader* sync_reader,
+                   StreamMonitorCoordinator* stream_monitor_coordinator,
+                   const base::UnguessableToken& processing_id);
   ~OutputController() override;
 
   // Indicates whether audio power level analysis will be performed.  If false,
@@ -149,13 +152,17 @@ class OutputController : public media::AudioOutputStream::AudioSourceCallback,
                  media::AudioBus* dest) override;
   void OnError() override;
 
-  // GroupMember implementation.
-  const base::UnguessableToken& GetGroupId() override;
-  const media::AudioParameters& GetAudioParameters() override;
-  void StartSnooping(Snooper* snooper) override;
-  void StopSnooping(Snooper* snooper) override;
+  // LoopbackGroupMember implementation.
+  const media::AudioParameters& GetAudioParameters() const override;
+  std::string GetDeviceId() const override;
+  void StartSnooping(Snooper* snooper, SnoopingMode mode) override;
+  void StopSnooping(Snooper* snooper, SnoopingMode mode) override;
   void StartMuting() override;
   void StopMuting() override;
+
+  // StreamMonitorCoordinator::Observer implementation.
+  void OnMemberJoinedGroup(StreamMonitor* monitor) override;
+  void OnMemberLeftGroup(StreamMonitor* monitor) override;
 
   // AudioDeviceListener implementation.  When called OutputController will
   // shutdown the existing |stream_|, create a new stream, and then transition
@@ -211,36 +218,6 @@ class OutputController : public media::AudioOutputStream::AudioSourceCallback,
     base::OneShotTimer wedge_timer_;
   };
 
-  // Provides a thread-safe AudioSourceDiverter proxy, sitting in front of the
-  // simpler threading model of this OutputController.
-  // TODO(crbug/824019): Remove this legacy functionality.
-  class ThreadHoppingDiverter
-      : public base::SupportsWeakPtr<ThreadHoppingDiverter>,
-        public media::AudioSourceDiverter {
-   public:
-    explicit ThreadHoppingDiverter(OutputController* controller);
-    ~ThreadHoppingDiverter() final;
-
-    // AudioSourceDiverter implementation.
-    const media::AudioParameters& GetAudioParameters() final;
-    void StartDiverting(media::AudioOutputStream* to_stream) final;
-    void StopDiverting() final;
-    void StartDuplicating(media::AudioPushSink* sink) final;
-    void StopDuplicating(media::AudioPushSink* sink) final;
-
-   private:
-    OutputController* const controller_;
-    const base::WeakPtr<ThreadHoppingDiverter> weak_this_;
-  };
-
-  // Start/StopDiverting() and Start/StopDuplicating() trampoline to these
-  // methods through |task_runner_|.
-  // TODO(crbug/824019): Remove this legacy functionality.
-  void DoStartDiverting(media::AudioOutputStream* to_stream);
-  void DoStopDiverting();
-  void DoStartDuplicating(media::AudioPushSink* sink);
-  void DoStopDuplicating(media::AudioPushSink* sink);
-
   // Notifies the EventHandler that an error has occurred.
   void ReportError();
 
@@ -265,18 +242,15 @@ class OutputController : public media::AudioOutputStream::AudioSourceCallback,
   // via tasks run by this TaskRunner.
   const scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
 
+  // Time when the controller is constructed. Used to record its lifetime on
+  // destruction.
+  const base::TimeTicks construction_time_;
+
   // Specifies the device id of the output device to open or empty for the
   // default output device.
   const std::string output_device_id_;
 
-  // A token indicating membership in a group of output controllers/streams.
-  const base::UnguessableToken group_id_;
-
   media::AudioOutputStream* stream_;
-
-  // When non-NULL, audio is being diverted to this stream.
-  // TODO(crbug/824019): Remove this legacy functionality.
-  media::AudioOutputStream* diverting_to_stream_;
 
   // When true, local audio output should be muted; either by having audio
   // diverted to |diverting_to_stream_|, or a fake AudioOutputStream.
@@ -285,12 +259,11 @@ class OutputController : public media::AudioOutputStream::AudioSourceCallback,
   // The targets for audio stream to be copied to. |should_duplicate_| is set to
   // 1 when the OnMoreData() call should proxy the data to
   // BroadcastDataToSnoopers().
-  //
-  // TODO(crbug/824019): Remove |duplication_targets_| (part of legacy
-  // functionality).
-  base::flat_set<media::AudioPushSink*> duplication_targets_;
   std::vector<Snooper*> snoopers_;
   base::AtomicRefCount should_duplicate_;
+
+  base::Lock realtime_snooper_lock_;
+  std::vector<Snooper*> realtime_snoopers_;
 
   // The current volume of the audio stream.
   double volume_;
@@ -299,6 +272,9 @@ class OutputController : public media::AudioOutputStream::AudioSourceCallback,
 
   // SyncReader is used only in low latency mode for synchronous reading.
   SyncReader* const sync_reader_;
+
+  StreamMonitorCoordinator* const stream_monitor_coordinator_;
+  base::UnguessableToken const processing_id_;
 
   // Scans audio samples from OnMoreData() as input to compute power levels.
   media::AudioPowerMonitor power_monitor_;
@@ -310,10 +286,6 @@ class OutputController : public media::AudioOutputStream::AudioSourceCallback,
   // and destroyed when a stream stops. Also reset every time there is a stream
   // being created due to device changes.
   base::Optional<ErrorStatisticsTracker> stats_tracker_;
-
-  // Instantiated in Create(), and destroyed in Close().
-  // TODO(crbug/824019): Remove this legacy functionality.
-  base::Optional<ThreadHoppingDiverter> diverter_;
 
   // WeakPtrFactory+WeakPtr that is used to post tasks that are canceled when a
   // stream is closed.

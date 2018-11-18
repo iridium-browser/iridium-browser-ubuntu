@@ -9,7 +9,6 @@
 #include <memory>
 
 #include "base/memory/ref_counted.h"
-#include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/sequenced_task_runner.h"
 #include "base/time/time.h"
@@ -22,6 +21,8 @@
 class ModuleDatabaseObserver;
 
 #if defined(GOOGLE_CHROME_BUILD)
+class ModuleLoadAttemptLogListener;
+class PrefChangeRegistrar;
 class PrefRegistrySimple;
 class ThirdPartyConflictsManager;
 #endif
@@ -33,13 +34,13 @@ class FilePath;
 // A class that keeps track of all modules loaded across Chrome processes.
 //
 // It is also the main class behind third-party modules tracking, and owns the
-// different classes that required to identify problematic programs and
+// different classes that required to identify incompatible applications and
 // record metrics.
 //
 // This is effectively a singleton, but doesn't use base::Singleton. The intent
 // is for the object to be created when Chrome is single-threaded, and for it
 // be set as the process-wide singleton via SetInstance.
-class ModuleDatabase {
+class ModuleDatabase : public ModuleDatabaseEventSource {
  public:
   // Structures for maintaining information about modules.
   using ModuleMap = std::map<ModuleInfoKey, ModuleInfoData>;
@@ -55,7 +56,7 @@ class ModuleDatabase {
   // otherwise noted. For calls from other contexts this task runner is used to
   // bounce the call when appropriate.
   explicit ModuleDatabase(scoped_refptr<base::SequencedTaskRunner> task_runner);
-  ~ModuleDatabase();
+  ~ModuleDatabase() override;
 
   // Retrieves the singleton global instance of the ModuleDatabase.
   static ModuleDatabase* GetInstance();
@@ -64,6 +65,12 @@ class ModuleDatabase {
   // global instance and deliberately leaked, unless manually cleaned up. This
   // has no locking and should be called when Chrome is single threaded.
   static void SetInstance(std::unique_ptr<ModuleDatabase> module_database);
+
+  // Initializes the ModuleLoadAttemptLogListener instance. This function is a
+  // noop on non-GOOGLE_CHROME_BUILD configurations because it is used only for
+  // third-party software blocking, which is only enabled in Google Chrome
+  // builds.
+  void StartDrainingModuleLoadAttemptsLog();
 
   // Returns true if the ModuleDatabase is idle. This means that no modules are
   // currently being inspected, and no new module events have been observed in
@@ -95,8 +102,17 @@ class ModuleDatabase {
   void OnModuleLoad(content::ProcessType process_type,
                     const base::FilePath& module_path,
                     uint32_t module_size,
-                    uint32_t module_time_date_stamp,
-                    uintptr_t module_load_address);
+                    uint32_t module_time_date_stamp);
+
+  void OnModuleBlocked(const base::FilePath& module_path,
+                       uint32_t module_size,
+                       uint32_t module_time_date_stamp);
+
+  // Marks the module as added to the module blacklist cache, which means it
+  // will be blocked on the next browser launch.
+  void OnModuleAddedToBlacklist(const base::FilePath& module_path,
+                                uint32_t module_size,
+                                uint32_t module_time_date_stamp);
 
   // TODO(chrisha): Module analysis code, and various accessors for use by
   // chrome://conflicts.
@@ -108,8 +124,10 @@ class ModuleDatabase {
   // OnModuleDatabaseIdle() will also be invoked.
   // Must be called in the same sequence as |task_runner_|, and all
   // notifications will be sent on that same task runner.
-  void AddObserver(ModuleDatabaseObserver* observer);
-  void RemoveObserver(ModuleDatabaseObserver* observer);
+  //
+  // ModuleDatabaseEventSource:
+  void AddObserver(ModuleDatabaseObserver* observer) override;
+  void RemoveObserver(ModuleDatabaseObserver* observer) override;
 
   // Raises the priority of module inspection tasks to ensure the
   // ModuleDatabase becomes idle ASAP.
@@ -118,9 +136,15 @@ class ModuleDatabase {
 #if defined(GOOGLE_CHROME_BUILD)
   static void RegisterLocalStatePrefs(PrefRegistrySimple* registry);
 
-  // Accessor for the third party conflicts manager. This is exposed so that the
-  // manager can be wired up to the ThirdPartyModuleListComponentInstaller.
-  // Returns null if the tracking of incompatible applications is disabled.
+  // Returns false if third-party modules blocking is disabled via
+  // administrative policy.
+  static bool IsThirdPartyBlockingPolicyEnabled();
+
+  // Accessor for the third party conflicts manager.
+  // Returns null if both the tracking of incompatible applications and the
+  // blocking of third-party modules are disabled.
+  // Do not hold a pointer to the manager because it can be destroyed if the
+  // ThirdPartyBlocking policy is disabled.
   ThirdPartyConflictsManager* third_party_conflicts_manager() {
     return third_party_conflicts_manager_.get();
   }
@@ -139,10 +163,16 @@ class ModuleDatabase {
   // corresponding process type. Exposed in the header for testing.
   static content::ProcessType BitIndexToProcessType(uint32_t bit_index);
 
-  // Finds or creates a mutable ModuleInfo entry.
-  ModuleInfo* FindOrCreateModuleInfo(const base::FilePath& module_path,
-                                     uint32_t module_size,
-                                     uint32_t module_time_date_stamp);
+  ModuleInfo* CreateModuleInfo(const base::FilePath& module_path,
+                               uint32_t module_size,
+                               uint32_t module_time_date_stamp);
+
+  // Finds or creates a mutable ModuleInfo entry. Returns true if the module
+  // info was created.
+  bool FindOrCreateModuleInfo(const base::FilePath& module_path,
+                              uint32_t module_size,
+                              uint32_t module_time_date_stamp,
+                              ModuleInfo** module_info);
 
   // Returns true if the enumeration of the IMEs and the shell extensions is
   // finished.
@@ -174,12 +204,14 @@ class ModuleDatabase {
   void NotifyLoadedModules(ModuleDatabaseObserver* observer);
 
 #if defined(GOOGLE_CHROME_BUILD)
-  // Initializes the ThirdPartyConflictsManager, which controls the warning of
-  // incompatible applications that injects into Chrome.
-  // The manager is not initialized if it is disabled via a base::Feature or a
-  // group policy. Note that it is also not initialized on Windows version
-  // 8.1 and less.
+  // Initializes the ThirdPartyConflictsManager, which controls showing warnings
+  // for incompatible applications that inject into Chrome and the blocking of
+  // third-party modules. The manager is only initialized if either or both of
+  // the ThirdPartyModulesBlocking and IncompatibleApplicationsWarning features
+  // are enabled.
   void MaybeInitializeThirdPartyConflictsManager();
+
+  void OnThirdPartyBlockingPolicyChanged();
 #endif
 
   // The task runner to which this object is bound.
@@ -188,7 +220,7 @@ class ModuleDatabase {
   // A map of all known modules.
   ModuleMap modules_;
 
-  base::Timer idle_timer_;
+  base::RetainingOneShotTimer idle_timer_;
 
   // Indicates if the ModuleDatabase has started processing module load events.
   bool has_started_processing_;
@@ -199,22 +231,25 @@ class ModuleDatabase {
   // Indicates if all input method editors have been enumerated.
   bool ime_enumerated_;
 
+#if defined(GOOGLE_CHROME_BUILD)
+  std::unique_ptr<ModuleLoadAttemptLogListener>
+      module_load_attempt_log_listener_;
+#endif
+
   // Inspects new modules on a blocking task runner.
   ModuleInspector module_inspector_;
 
   // Holds observers.
-  base::ObserverList<ModuleDatabaseObserver> observer_list_;
+  base::ObserverList<ModuleDatabaseObserver>::Unchecked observer_list_;
 
 #if defined(GOOGLE_CHROME_BUILD)
   std::unique_ptr<ThirdPartyConflictsManager> third_party_conflicts_manager_;
+
+  std::unique_ptr<PrefChangeRegistrar> pref_change_registrar_;
 #endif
 
   // Records metrics on third-party modules.
   ThirdPartyMetricsRecorder third_party_metrics_;
-
-  // Weak pointer factory for this object. This is used when bouncing
-  // incoming events to |task_runner_|.
-  base::WeakPtrFactory<ModuleDatabase> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ModuleDatabase);
 };

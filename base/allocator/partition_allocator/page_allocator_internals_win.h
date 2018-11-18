@@ -10,11 +10,13 @@
 namespace base {
 
 // |VirtualAlloc| will fail if allocation at the hint address is blocked.
-const bool kHintIsAdvisory = false;
+constexpr bool kHintIsAdvisory = false;
 std::atomic<int32_t> s_allocPageErrorCode{ERROR_SUCCESS};
 
 int GetAccessFlags(PageAccessibilityConfiguration accessibility) {
   switch (accessibility) {
+    case PageRead:
+      return PAGE_READONLY;
     case PageReadWrite:
       return PAGE_READWRITE;
     case PageReadExecute:

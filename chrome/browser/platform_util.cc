@@ -7,8 +7,9 @@
 #include "base/files/file.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "chrome/browser/platform_util_internal.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 
 using content::BrowserThread;
@@ -25,15 +26,15 @@ void VerifyAndOpenItemOnBlockingThread(const base::FilePath& path,
   base::File target_item(path, base::File::FLAG_OPEN | base::File::FLAG_READ);
   if (!base::PathExists(path)) {
     if (!callback.is_null())
-      BrowserThread::PostTask(
-          BrowserThread::UI, FROM_HERE,
+      base::PostTaskWithTraits(
+          FROM_HERE, {BrowserThread::UI},
           base::BindOnce(callback, OPEN_FAILED_PATH_NOT_FOUND));
     return;
   }
   if (base::DirectoryExists(path) != (type == OPEN_FOLDER)) {
     if (!callback.is_null())
-      BrowserThread::PostTask(
-          BrowserThread::UI, FROM_HERE,
+      base::PostTaskWithTraits(
+          FROM_HERE, {BrowserThread::UI},
           base::BindOnce(callback, OPEN_FAILED_INVALID_TYPE));
     return;
   }
@@ -41,8 +42,8 @@ void VerifyAndOpenItemOnBlockingThread(const base::FilePath& path,
   if (shell_operations_allowed)
     internal::PlatformOpenVerifiedItem(path, type);
   if (!callback.is_null())
-    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                            base::BindOnce(callback, OPEN_SUCCEEDED));
+    base::PostTaskWithTraits(FROM_HERE, {BrowserThread::UI},
+                             base::BindOnce(callback, OPEN_SUCCEEDED));
 }
 
 }  // namespace
@@ -61,7 +62,7 @@ void OpenItem(Profile* profile,
               const OpenOperationCallback& callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   base::PostTaskWithTraits(FROM_HERE,
-                           {base::MayBlock(), base::TaskPriority::BACKGROUND},
+                           {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
                            base::BindOnce(&VerifyAndOpenItemOnBlockingThread,
                                           full_path, item_type, callback));
 }

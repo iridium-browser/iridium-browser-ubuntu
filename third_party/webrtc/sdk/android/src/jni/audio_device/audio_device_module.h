@@ -13,13 +13,12 @@
 
 #include <memory>
 
-#include "api/optional.h"
+#include "absl/types/optional.h"
 #include "modules/audio_device/audio_device_buffer.h"
 #include "sdk/android/native_api/jni/scoped_java_ref.h"
 
 namespace webrtc {
-
-namespace android_adm {
+namespace jni {
 
 class AudioInput {
  public:
@@ -43,7 +42,6 @@ class AudioInput {
   virtual bool IsNoiseSuppressorSupported() const = 0;
 
   virtual int32_t EnableBuiltInAEC(bool enable) = 0;
-  virtual int32_t EnableBuiltInAGC(bool enable) = 0;
   virtual int32_t EnableBuiltInNS(bool enable) = 0;
 };
 
@@ -60,9 +58,9 @@ class AudioOutput {
   virtual bool Playing() const = 0;
   virtual bool SpeakerVolumeIsAvailable() = 0;
   virtual int SetSpeakerVolume(uint32_t volume) = 0;
-  virtual rtc::Optional<uint32_t> SpeakerVolume() const = 0;
-  virtual rtc::Optional<uint32_t> MaxSpeakerVolume() const = 0;
-  virtual rtc::Optional<uint32_t> MinSpeakerVolume() const = 0;
+  virtual absl::optional<uint32_t> SpeakerVolume() const = 0;
+  virtual absl::optional<uint32_t> MaxSpeakerVolume() const = 0;
+  virtual absl::optional<uint32_t> MinSpeakerVolume() const = 0;
   virtual void AttachAudioBuffer(AudioDeviceBuffer* audioBuffer) = 0;
 };
 
@@ -92,7 +90,7 @@ rtc::scoped_refptr<AudioDeviceModule> CreateAudioDeviceModuleFromInputAndOutput(
     std::unique_ptr<AudioInput> audio_input,
     std::unique_ptr<AudioOutput> audio_output);
 
-}  // namespace android_adm
+}  // namespace jni
 
 }  // namespace webrtc
 

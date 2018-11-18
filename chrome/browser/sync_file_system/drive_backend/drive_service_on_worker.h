@@ -7,6 +7,9 @@
 
 #include <stdint.h>
 
+#include <memory>
+#include <string>
+
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
@@ -56,8 +59,17 @@ class DriveServiceOnWorker : public drive::DriveServiceInterface {
   google_apis::CancelCallback GetAboutResource(
       const google_apis::AboutResourceCallback& callback) override;
 
+  google_apis::CancelCallback GetStartPageToken(
+      const std::string& team_drive_id,
+      const google_apis::StartPageTokenCallback& callback) override;
+
   google_apis::CancelCallback GetChangeList(
       int64_t start_changestamp,
+      const google_apis::ChangeListCallback& callback) override;
+
+  google_apis::CancelCallback GetChangeListByToken(
+      const std::string& team_drive_id,
+      const std::string& start_page_token,
       const google_apis::ChangeListCallback& callback) override;
 
   google_apis::CancelCallback GetRemainingChangeList(
@@ -107,16 +119,11 @@ class DriveServiceOnWorker : public drive::DriveServiceInterface {
   google_apis::CancelCallback GetAllTeamDriveList(
       const google_apis::TeamDriveListCallback& callback) override;
   google_apis::CancelCallback GetAllFileList(
+      const std::string& team_drive_id,
       const google_apis::FileListCallback& callback) override;
   google_apis::CancelCallback Search(
       const std::string& search_query,
       const google_apis::FileListCallback& callback) override;
-  google_apis::CancelCallback GetShareUrl(
-      const std::string& resource_id,
-      const GURL& embed_origin,
-      const google_apis::GetShareUrlCallback& callback) override;
-  google_apis::CancelCallback GetAppList(
-      const google_apis::AppListCallback& callback) override;
   google_apis::CancelCallback TrashResource(
       const std::string& resource_id,
       const google_apis::EntryActionCallback& callback) override;
@@ -183,13 +190,6 @@ class DriveServiceOnWorker : public drive::DriveServiceInterface {
       const google_apis::ProgressCallback& progress_callback) override;
   std::unique_ptr<drive::BatchRequestConfiguratorInterface> StartBatchRequest()
       override;
-  google_apis::CancelCallback AuthorizeApp(
-      const std::string& resource_id,
-      const std::string& app_id,
-      const google_apis::AuthorizeAppCallback& callback) override;
-  google_apis::CancelCallback UninstallApp(
-      const std::string& app_id,
-      const google_apis::EntryActionCallback& callback) override;
   google_apis::CancelCallback AddPermission(
       const std::string& resource_id,
       const std::string& email,

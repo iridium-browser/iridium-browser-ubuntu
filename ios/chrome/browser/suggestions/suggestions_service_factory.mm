@@ -10,7 +10,7 @@
 #include "base/files/file_path.h"
 #include "base/memory/singleton.h"
 #include "base/sequenced_task_runner.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "base/time/default_tick_clock.h"
 #include "components/browser_sync/profile_sync_service.h"
 #include "components/image_fetcher/core/image_fetcher.h"
@@ -24,10 +24,11 @@
 #include "components/suggestions/suggestions_store.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/signin/identity_manager_factory.h"
-#include "ios/chrome/browser/sync/ios_chrome_profile_sync_service_factory.h"
+#include "ios/chrome/browser/sync/profile_sync_service_factory.h"
 #include "ios/web/public/browser_state.h"
 #include "ios/web/public/web_thread.h"
 #include "services/identity/public/cpp/identity_manager.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -56,7 +57,7 @@ SuggestionsServiceFactory::SuggestionsServiceFactory()
           "SuggestionsService",
           BrowserStateDependencyManager::GetInstance()) {
   DependsOn(IdentityManagerFactory::GetInstance());
-  DependsOn(IOSChromeProfileSyncServiceFactory::GetInstance());
+  DependsOn(ProfileSyncServiceFactory::GetInstance());
 }
 
 SuggestionsServiceFactory::~SuggestionsServiceFactory() {
@@ -70,7 +71,7 @@ SuggestionsServiceFactory::BuildServiceInstanceFor(
   identity::IdentityManager* identity_manager =
       IdentityManagerFactory::GetForBrowserState(browser_state);
   browser_sync::ProfileSyncService* sync_service =
-      IOSChromeProfileSyncServiceFactory::GetForBrowserState(browser_state);
+      ProfileSyncServiceFactory::GetForBrowserState(browser_state);
   base::FilePath database_dir(
       browser_state->GetStatePath().Append(kThumbnailDirectory));
 
@@ -81,22 +82,23 @@ SuggestionsServiceFactory::BuildServiceInstanceFor(
 
   scoped_refptr<base::SequencedTaskRunner> db_task_runner =
       base::CreateSequencedTaskRunnerWithTraits(
-          {base::MayBlock(), base::TaskPriority::BACKGROUND});
+          {base::MayBlock(), base::TaskPriority::BEST_EFFORT});
   std::unique_ptr<leveldb_proto::ProtoDatabaseImpl<ImageData>> db(
       new leveldb_proto::ProtoDatabaseImpl<ImageData>(db_task_runner));
 
   std::unique_ptr<image_fetcher::ImageFetcher> image_fetcher =
       std::make_unique<image_fetcher::ImageFetcherImpl>(
           image_fetcher::CreateIOSImageDecoder(),
-          browser_state->GetRequestContext());
+          browser_state->GetSharedURLLoaderFactory());
 
   std::unique_ptr<ImageManager> thumbnail_manager(
       new ImageManager(std::move(image_fetcher), std::move(db), database_dir));
 
   return std::make_unique<SuggestionsServiceImpl>(
-      identity_manager, sync_service, browser_state->GetRequestContext(),
-      std::move(suggestions_store), std::move(thumbnail_manager),
-      std::move(blacklist_store), base::DefaultTickClock::GetInstance());
+      identity_manager, sync_service,
+      browser_state->GetSharedURLLoaderFactory(), std::move(suggestions_store),
+      std::move(thumbnail_manager), std::move(blacklist_store),
+      base::DefaultTickClock::GetInstance());
 }
 
 void SuggestionsServiceFactory::RegisterBrowserStatePrefs(

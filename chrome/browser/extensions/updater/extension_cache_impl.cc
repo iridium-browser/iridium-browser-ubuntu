@@ -12,27 +12,28 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/sequenced_task_runner.h"
 #include "base/stl_util.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/crx_installer.h"
-#include "chrome/browser/extensions/updater/extension_cache_delegate.h"
+#include "chrome/browser/extensions/updater/chromeos_extension_cache_delegate.h"
 #include "chrome/browser/extensions/updater/local_extension_cache.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_source.h"
 #include "extensions/browser/install/crx_install_error.h"
+#include "extensions/browser/install/sandboxed_unpacker_failure_reason.h"
 
 namespace extensions {
 
 ExtensionCacheImpl::ExtensionCacheImpl(
-    std::unique_ptr<ExtensionCacheDelegate> delegate)
+    std::unique_ptr<ChromeOSExtensionCacheDelegate> delegate)
     : cache_(new LocalExtensionCache(
           delegate->GetCacheDir(),
           delegate->GetMaximumCacheSize(),
           delegate->GetMaximumCacheAge(),
           base::CreateSequencedTaskRunnerWithTraits(
-              {base::MayBlock(), base::TaskPriority::BACKGROUND,
+              {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
                base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN}))),
       weak_ptr_factory_(this) {
   notification_registrar_.Add(
@@ -121,22 +122,28 @@ void ExtensionCacheImpl::Observe(int type,
   const std::string& hash = installer->expected_hash();
   const extensions::CrxInstallError* error =
       content::Details<const extensions::CrxInstallError>(details).ptr();
-  switch (error->type()) {
-    case extensions::CrxInstallError::ERROR_DECLINED:
-      DVLOG(2) << "Extension install was declined, file kept";
-      break;
-    case extensions::CrxInstallError::ERROR_HASH_MISMATCH:
-      if (cache_->ShouldRetryDownload(id, hash)) {
-        cache_->RemoveExtension(id, hash);
-        installer->set_hash_check_failed(true);
-      }
-      // We deliberately keep the file with incorrect hash sum, so that it
-      // will not be re-downloaded each time.
-      break;
-    default:
-      cache_->RemoveExtension(id, hash);
-      break;
+  const auto error_type = error->type();
+
+  if (error_type == extensions::CrxInstallErrorType::DECLINED) {
+    DVLOG(2) << "Extension install was declined, file kept";
+    return;
   }
+
+  if (error_type ==
+          extensions::CrxInstallErrorType::SANDBOXED_UNPACKER_FAILURE &&
+      error->sandbox_failure_detail() ==
+          extensions::SandboxedUnpackerFailureReason::
+              CRX_HASH_VERIFICATION_FAILED) {
+    if (cache_->ShouldRetryDownload(id, hash)) {
+      cache_->RemoveExtension(id, hash);
+      installer->set_hash_check_failed(true);
+    }
+    // We deliberately keep the file with incorrect hash sum, so that it
+    // will not be re-downloaded each time.
+    return;
+  }
+
+  cache_->RemoveExtension(id, hash);
 }
 
 }  // namespace extensions

@@ -7,9 +7,10 @@
 #include <utility>
 
 #include "base/bind.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "chrome/common/safe_browsing/archive_analyzer_results.h"
 #include "chrome/services/file_util/public/mojom/constants.mojom.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "services/service_manager/public/cpp/connector.h"
 
@@ -26,7 +27,7 @@ void SandboxedDMGAnalyzer::Start() {
 
   base::PostTaskWithTraits(
       FROM_HERE,
-      {base::MayBlock(), base::TaskPriority::BACKGROUND,
+      {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
        base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
       base::Bind(&SandboxedDMGAnalyzer::PrepareFileToAnalyze, this));
 }
@@ -44,18 +45,17 @@ void SandboxedDMGAnalyzer::PrepareFileToAnalyze() {
     return;
   }
 
-  content::BrowserThread::PostTask(
-      content::BrowserThread::UI, FROM_HERE,
-      base::Bind(&SandboxedDMGAnalyzer::AnalyzeFile, this,
-                 base::Passed(&file)));
+  base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI},
+                           base::Bind(&SandboxedDMGAnalyzer::AnalyzeFile, this,
+                                      base::Passed(&file)));
 }
 
 void SandboxedDMGAnalyzer::ReportFileFailure() {
   DCHECK(!content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
   DCHECK(!analyzer_ptr_);
 
-  content::BrowserThread::PostTask(
-      content::BrowserThread::UI, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {content::BrowserThread::UI},
       base::Bind(callback_, safe_browsing::ArchiveAnalyzerResults()));
 }
 

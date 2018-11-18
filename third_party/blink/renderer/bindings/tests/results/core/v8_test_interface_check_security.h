@@ -11,16 +11,16 @@
 #ifndef V8TestInterfaceCheckSecurity_h
 #define V8TestInterfaceCheckSecurity_h
 
-#include "bindings/core/v8/generated_code_helper.h"
-#include "bindings/core/v8/native_value_traits.h"
-#include "bindings/core/v8/to_v8_for_core.h"
-#include "bindings/core/v8/v8_binding_for_core.h"
-#include "bindings/tests/idls/core/test_interface_check_security.h"
-#include "core/core_export.h"
-#include "platform/bindings/script_wrappable.h"
-#include "platform/bindings/v8_dom_wrapper.h"
-#include "platform/bindings/wrapper_type_info.h"
-#include "platform/heap/handle.h"
+#include "third_party/blink/renderer/bindings/core/v8/generated_code_helper.h"
+#include "third_party/blink/renderer/bindings/core/v8/native_value_traits.h"
+#include "third_party/blink/renderer/bindings/core/v8/to_v8_for_core.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
+#include "third_party/blink/renderer/bindings/tests/idls/core/test_interface_check_security.h"
+#include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
+#include "third_party/blink/renderer/platform/bindings/v8_dom_wrapper.h"
+#include "third_party/blink/renderer/platform/bindings/wrapper_type_info.h"
+#include "third_party/blink/renderer/platform/heap/handle.h"
 
 namespace blink {
 
@@ -36,6 +36,14 @@ class V8TestInterfaceCheckSecurity {
   CORE_EXPORT static TestInterfaceCheckSecurity* ToImplWithTypeCheck(v8::Isolate*, v8::Local<v8::Value>);
   CORE_EXPORT static const WrapperTypeInfo wrapperTypeInfo;
   static const int internalFieldCount = kV8DefaultWrapperInternalFieldCount;
+
+  CORE_EXPORT static void InstallConditionalFeatures(
+      v8::Local<v8::Context>,
+      const DOMWrapperWorld&,
+      v8::Local<v8::Object> instanceObject,
+      v8::Local<v8::Object> prototypeObject,
+      v8::Local<v8::Function> interfaceObject,
+      v8::Local<v8::FunctionTemplate> interfaceTemplate);
 
   // Callback functions
 
@@ -58,6 +66,9 @@ class V8TestInterfaceCheckSecurity {
   CORE_EXPORT static void doNotCheckSecurityPerWorldBindingsVoidMethodOriginSafeMethodGetterCallbackForMainWorld(v8::Local<v8::Name>, const v8::PropertyCallbackInfo<v8::Value>&);
   CORE_EXPORT static void doNotCheckSecurityUnforgeableVoidMethodMethodCallback(const v8::FunctionCallbackInfo<v8::Value>&);
   CORE_EXPORT static void doNotCheckSecurityUnforgeableVoidMethodOriginSafeMethodGetterCallback(v8::Local<v8::Name>, const v8::PropertyCallbackInfo<v8::Value>&);
+  CORE_EXPORT static void doNotCheckSecurityVoidOverloadMethodMethodCallback(const v8::FunctionCallbackInfo<v8::Value>&);
+  CORE_EXPORT static void doNotCheckSecurityVoidOverloadMethodOriginSafeMethodGetterCallback(v8::Local<v8::Name>, const v8::PropertyCallbackInfo<v8::Value>&);
+  CORE_EXPORT static void secureContextRuntimeEnabledMethodMethodCallback(const v8::FunctionCallbackInfo<v8::Value>&);
   CORE_EXPORT static void TestInterfaceCheckSecurityOriginSafeMethodSetterCallback(v8::Local<v8::Name>, v8::Local<v8::Value>, const v8::PropertyCallbackInfo<void>&);
 
   CORE_EXPORT static bool securityCheck(v8::Local<v8::Context>, v8::Local<v8::Object>, v8::Local<v8::Value>);

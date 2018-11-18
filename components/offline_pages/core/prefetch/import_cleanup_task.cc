@@ -11,7 +11,7 @@
 #include "components/offline_pages/core/prefetch/prefetch_importer.h"
 #include "components/offline_pages/core/prefetch/prefetch_types.h"
 #include "components/offline_pages/core/prefetch/store/prefetch_store.h"
-#include "sql/connection.h"
+#include "sql/database.h"
 #include "sql/statement.h"
 #include "sql/transaction.h"
 
@@ -19,7 +19,7 @@ namespace offline_pages {
 
 namespace {
 
-std::vector<int64_t> GetAllOngoingImportsSync(sql::Connection* db) {
+std::vector<int64_t> GetAllOngoingImportsSync(sql::Database* db) {
   static const char kSql[] =
       "SELECT offline_id"
       " FROM prefetch_items"
@@ -34,7 +34,7 @@ std::vector<int64_t> GetAllOngoingImportsSync(sql::Connection* db) {
   return offline_ids;
 }
 
-bool ExpireImportSync(int64_t offline_id, sql::Connection* db) {
+bool ExpireImportSync(int64_t offline_id, sql::Database* db) {
   static const char kSql[] =
       "UPDATE prefetch_items"
       " SET state = ?, error_code = ?"
@@ -50,10 +50,7 @@ bool ExpireImportSync(int64_t offline_id, sql::Connection* db) {
 }
 
 bool CleanupImportsSync(const std::set<int64_t>& outstanding_import_offline_ids,
-                        sql::Connection* db) {
-  if (!db)
-    return false;
-
+                        sql::Database* db) {
   sql::Transaction transaction(db);
   if (!transaction.Begin())
     return false;
@@ -93,7 +90,8 @@ void ImportCleanupTask::Run() {
   prefetch_store_->Execute(
       base::BindOnce(&CleanupImportsSync, outstanding_import_offline_ids),
       base::BindOnce(&ImportCleanupTask::OnPrefetchItemUpdated,
-                     weak_ptr_factory_.GetWeakPtr()));
+                     weak_ptr_factory_.GetWeakPtr()),
+      false);
 }
 
 void ImportCleanupTask::OnPrefetchItemUpdated(bool success) {

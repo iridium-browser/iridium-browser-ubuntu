@@ -6,6 +6,7 @@ module ash.mojom;
 
 import "mojo/public/mojom/base/time.mojom";
 import "ui/accessibility/ax_enums.mojom";
+import "ui/events/mojo/event.mojom";
 import "ui/gfx/geometry/mojo/geometry.mojom";
 
 // Alert sent to the accessibility api.
@@ -36,6 +37,58 @@ enum AccessibilityAlert {
   WINDOW_OVERVIEW_MODE_ENTERED
 };
 
+enum AccessibilityPanelState {
+  // Window bounds are set explicitly.
+  BOUNDED,
+
+  // Width of panel matches screen width, y_coord and height are set by bounds.
+  FULL_WIDTH,
+
+  // Panel occupies the full screen. Bounds are ignored.
+  FULLSCREEN
+};
+
+// These values are persisted to logs and should not be renumbered or re-used.
+// See tools/metrics/histograms/enums.xml.
+enum DictationToggleSource {
+  // Toggled by the keyboard command (Search + D).
+  kKeyboard,
+
+  // Toggled by the dictation button in the tray.
+  kButton,
+
+  // Switch Access context menu button.
+  kSwitchAccess,
+
+  // Chromevox chrome extension.
+  kChromevox
+};
+
+enum SelectToSpeakState {
+  // Select to Speak is not actively selecting text or speaking.
+  kSelectToSpeakStateInactive,
+
+  // Select to Speak is being used to actively select a new region. Note that
+  // it might also be speaking, but the selecting state takes precedence.
+  kSelectToSpeakStateSelecting,
+
+  // Select to Speak is currently speaking.
+  kSelectToSpeakStateSpeaking,
+};
+
+// Allows a client to implement Select-to-Speak.
+// TODO(katie): Consider combining DispatchMouseEvent and DispatchKeyEvent
+// into a single DispatchEvent function.
+interface SelectToSpeakEventHandlerDelegate {
+  // Sends a KeyEvent to the Select-to-Speak extension in Chrome. The event
+  // is cast to a key event with a type CHECK.
+  DispatchKeyEvent(ui.mojom.Event event);
+
+  // Sends a MouseEvent to the Select-to-Speak extension in Chrome. The event
+  // is cast to a mouse event with a type CHECK.
+  DispatchMouseEvent(ui.mojom.Event event);
+};
+
 // Interface for ash client (e.g. Chrome) to control and query accessibility
 // features.
 interface AccessibilityController {
@@ -49,12 +102,34 @@ interface AccessibilityController {
   // Called when braille display state is changed.
   BrailleDisplayStateChanged(bool connected);
 
-  // Sets the focus highlight rect using |bounds_in_screen|.
+  // Sets the focus highlight rect using |bounds_in_screen|. Called when focus
+  // changed in page and a11y focus highlight feature is enabled.
   SetFocusHighlightRect(gfx.mojom.Rect bounds_in_screen);
 
-  // Sets whether the accessibility panel is filling the entire screen (e.g. to
-  // show the expanded UI for the ChromeVox spoken feedback extension).
-  SetAccessibilityPanelFullscreen(bool fullscreen);
+  // Sets the text input caret bounds used to draw the caret highlight effect.
+  // For effciency, only sent when the caret highlight feature is enabled.
+  // Setting off-screen or empty bounds suppresses the highlight.
+  SetCaretBounds(gfx.mojom.Rect bounds_in_screen);
+
+  // Sets whether the accessibility panel should always be visible, regardless
+  // of whether the window is fullscreen.
+  SetAccessibilityPanelAlwaysVisible(bool always_visible);
+
+  // Sets the bounds for the accessibility panel. Overrides current
+  // configuration (i.e. fullscreen, full-width).
+  SetAccessibilityPanelBounds(gfx.mojom.Rect bounds,
+                              AccessibilityPanelState state);
+
+  // Sets the current Select-to-Speak state. This should be used by the Select-
+  // to-Speak extension to inform ash of its updated state.
+  SetSelectToSpeakState(SelectToSpeakState state);
+
+  // Set the delegate used by the Select-to-Speak event handler.
+  SetSelectToSpeakEventHandlerDelegate(
+      SelectToSpeakEventHandlerDelegate delegate);
+
+  // Starts or stops dictation. Records metrics for toggling via SwitchAccess.
+  ToggleDictationFromSource(DictationToggleSource source);
 };
 
 // Interface for ash to request accessibility service from its client (e.g.
@@ -78,7 +153,8 @@ interface AccessibilityControllerClient {
   HandleAccessibilityGesture(ax.mojom.Gesture gesture);
 
   // Starts or stops dictation (type what you speak).
-  ToggleDictation();
+  // Returns the new dictation state after the toggle.
+  ToggleDictation() => (bool dictation_on);
 
   // Cancels all current and queued speech immediately.
   SilenceSpokenFeedback();
@@ -98,4 +174,10 @@ interface AccessibilityControllerClient {
   // Plays tick sound indicating spoken feedback will be toggled after
   // countdown.
   PlaySpokenFeedbackToggleCountdown(int32 tick_count);
+
+  // Requests the Select-to-Speak extension to change its state. This lets users
+  // do the same things in tablet mode as with a keyboard. Specifically, if
+  // Select-to-Speak is not speaking, move to capturing state; if
+  // Select-to-Speak is speaking, cancel speaking and move to inactive state.
+  RequestSelectToSpeakStateChange();
 };

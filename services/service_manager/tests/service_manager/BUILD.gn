@@ -18,7 +18,7 @@ source_set("service_manager") {
     ":interfaces",
     "//base",
     "//base/test:test_config",
-    "//mojo/edk",
+    "//mojo/public/cpp/platform",
     "//mojo/public/cpp/system",
     "//services/service_manager/public/cpp",
     "//services/service_manager/public/cpp:service_test_support",
@@ -57,7 +57,6 @@ executable("service_manager_unittest_target") {
   deps = [
     ":interfaces",
     "//base",
-    "//build/config:exe_and_shlib_deps",
     "//build/win:default_exe_manifest",
     "//services/service_manager/public/cpp",
     "//services/service_manager/public/cpp/standalone_service:main",
@@ -73,15 +72,15 @@ service_manifest("embedder_manifest") {
   name = "service_manager_unittest_embedder"
   source = "embedder_manifest.json"
   packaged_services = [
-    ":all_users_manifest",
+    ":shared_instance_across_users_manifest",
     ":regular_manifest",
     ":singleton_manifest",
   ]
 }
 
-service_manifest("all_users_manifest") {
-  name = "service_manager_unittest_all_users"
-  source = "all_users_manifest.json"
+service_manifest("shared_instance_across_users_manifest") {
+  name = "service_manager_unittest_shared_instance_across_users"
+  source = "shared_instance_across_users_manifest.json"
 }
 
 service_manifest("singleton_manifest") {
@@ -105,7 +104,6 @@ service("service_manager_unittest_embedder") {
     ":interfaces",
     "//base",
     "//build/win:default_exe_manifest",
-    "//mojo/edk",
     "//services/service_manager/public/cpp",
     "//services/service_manager/public/cpp/standalone_service:main",
     "//services/service_manager/public/mojom",

@@ -11,17 +11,32 @@
 
 namespace blink {
 
+class PropertyRegistration;
+
 // This class provides utility functions for determining whether a property
 // can accept a CSSStyleValue type or instance. Its implementation is generated
-// using input from CSSProperties.json5 and the script
+// using input from css_properties.json5 and the script
 // build/scripts/make_cssom_types.py.
 class CSSOMTypes {
   STATIC_ONLY(CSSOMTypes);
 
  public:
+  static bool IsCSSStyleValueLength(const CSSStyleValue&);
+  static bool IsCSSStyleValueNumber(const CSSStyleValue&);
+  static bool IsCSSStyleValueTime(const CSSStyleValue&);
+  static bool IsCSSStyleValueAngle(const CSSStyleValue&);
+  static bool IsCSSStyleValuePercentage(const CSSStyleValue&);
+  static bool IsCSSStyleValueResolution(const CSSStyleValue&);
+  static bool IsCSSStyleValueFlex(const CSSStyleValue&);
+  static bool IsCSSStyleValueImage(const CSSStyleValue&);
+  static bool IsCSSStyleValueTransform(const CSSStyleValue&);
+  static bool IsCSSStyleValuePosition(const CSSStyleValue&);
+
   static bool IsPropertySupported(CSSPropertyID);
-  static bool PropertyCanTake(CSSPropertyID, const CSSStyleValue&);
-  static bool PropertyCanTakeType(CSSPropertyID, CSSStyleValue::StyleValueType);
+  static bool PropertyCanTake(CSSPropertyID,
+                              const AtomicString& custom_property_name,
+                              const PropertyRegistration*,
+                              const CSSStyleValue&);
 };
 
 }  // namespace blink

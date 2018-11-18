@@ -82,7 +82,7 @@ void LoadApp(content::BrowserContext* context,
   app_state->app_launch_ordinal = app_sorting->GetAppLaunchOrdinal(id);
   app_state->page_ordinal = app_sorting->GetPageOrdinal(id);
   app_state->launch_type = extensions::GetLaunchTypePrefValue(prefs, id);
-  ExtensionService* service =
+  extensions::ExtensionService* service =
       extensions::ExtensionSystem::Get(context)->extension_service();
   const extensions::Extension* extension = service->GetInstalledExtension(id);
   // GetInstalledExtension(id) returns null if |id| is for a pending extension.
@@ -173,8 +173,8 @@ bool SyncAppHelper::AppStatesMatch(Profile* profile1, Profile* profile2) {
     return false;
   }
 
-  AppStateMap::const_iterator it1 = state_map1.begin();
-  AppStateMap::const_iterator it2 = state_map2.begin();
+  auto it1 = state_map1.begin();
+  auto it2 = state_map2.begin();
   while (it1 != state_map1.end()) {
     if (it1->first != it2->first) {
       DVLOG(2) << "Apps for profile " << profile1->GetDebugName()

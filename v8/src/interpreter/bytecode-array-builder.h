@@ -120,6 +120,10 @@ class V8_EXPORT_PRIVATE BytecodeArrayBuilder final {
   BytecodeArrayBuilder& LoadNamedProperty(Register object,
                                           const AstRawString* name,
                                           int feedback_slot);
+  // Named load property without feedback
+  BytecodeArrayBuilder& LoadNamedPropertyNoFeedback(Register object,
+                                                    const AstRawString* name);
+
   // Keyed load property. The key should be in the accumulator.
   BytecodeArrayBuilder& LoadKeyedProperty(Register object, int feedback_slot);
   // Named load property of the @@iterator symbol.
@@ -145,6 +149,12 @@ class V8_EXPORT_PRIVATE BytecodeArrayBuilder final {
                                            const AstRawString* name,
                                            int feedback_slot,
                                            LanguageMode language_mode);
+
+  // Store a property named by a property name without feedback slot. The value
+  // to be stored should be in the accumulator.
+  BytecodeArrayBuilder& StoreNamedPropertyNoFeedback(
+      Register object, const AstRawString* name, LanguageMode language_mode);
+
   // Store a property named by a constant from the constant pool. The value to
   // be stored should be in the accumulator.
   BytecodeArrayBuilder& StoreNamedProperty(Register object,
@@ -208,24 +218,21 @@ class V8_EXPORT_PRIVATE BytecodeArrayBuilder final {
   BytecodeArrayBuilder& CreateClosure(size_t shared_function_info_entry,
                                       int slot, int flags);
 
-  // Create a new local context for a |scope| and a closure which should be
-  // in the accumulator.
+  // Create a new local context for a |scope|.
   BytecodeArrayBuilder& CreateBlockContext(const Scope* scope);
 
-  // Create a new context for a catch block with |exception|, |name|,
-  // |scope|, and the closure in the accumulator.
+  // Create a new context for a catch block with |exception| and |scope|.
   BytecodeArrayBuilder& CreateCatchContext(Register exception,
-                                           const AstRawString* name,
                                            const Scope* scope);
 
-  // Create a new context with size |slots|.
-  BytecodeArrayBuilder& CreateFunctionContext(int slots);
+  // Create a new context with the given |scope| and size |slots|.
+  BytecodeArrayBuilder& CreateFunctionContext(const Scope* scope, int slots);
 
-  // Create a new eval context with size |slots|.
-  BytecodeArrayBuilder& CreateEvalContext(int slots);
+  // Create a new eval context with the given |scope| and size |slots|.
+  BytecodeArrayBuilder& CreateEvalContext(const Scope* scope, int slots);
 
   // Creates a new context with the given |scope| for a with-statement
-  // with the |object| in a register and the closure in the accumulator.
+  // with the |object| in a register.
   BytecodeArrayBuilder& CreateWithContext(Register object, const Scope* scope);
 
   // Create a new arguments object in the accumulator.
@@ -237,10 +244,13 @@ class V8_EXPORT_PRIVATE BytecodeArrayBuilder final {
   BytecodeArrayBuilder& CreateArrayLiteral(size_t constant_elements_entry,
                                            int literal_index, int flags);
   BytecodeArrayBuilder& CreateEmptyArrayLiteral(int literal_index);
+  BytecodeArrayBuilder& CreateArrayFromIterable();
   BytecodeArrayBuilder& CreateObjectLiteral(size_t constant_properties_entry,
                                             int literal_index, int flags,
                                             Register output);
   BytecodeArrayBuilder& CreateEmptyObjectLiteral();
+  BytecodeArrayBuilder& CloneObject(Register source, int flags,
+                                    int feedback_slot);
 
   // Gets or creates the template for a TemplateObjectDescription which will
   // be inserted at constant pool index |template_object_description_entry|.
@@ -276,6 +286,11 @@ class V8_EXPORT_PRIVATE BytecodeArrayBuilder final {
   // feedback is recorded in the |feedback_slot| in the type feedback vector.
   BytecodeArrayBuilder& CallAnyReceiver(Register callable, RegisterList args,
                                         int feedback_slot);
+
+  // Call a JS function with an any receiver, possibly (but not necessarily)
+  // undefined. The JSFunction or Callable to be called should be in |callable|.
+  // The arguments should be in |args|, with the receiver in |args[0]|.
+  BytecodeArrayBuilder& CallNoFeedback(Register callable, RegisterList args);
 
   // Tail call into a JS function. The JSFunction or Callable to be called
   // should be in |callable|. The arguments should be in |args|, with the
@@ -366,6 +381,7 @@ class V8_EXPORT_PRIVATE BytecodeArrayBuilder final {
   BytecodeArrayBuilder& CompareOperation(Token::Value op, Register reg,
                                          int feedback_slot);
   BytecodeArrayBuilder& CompareOperation(Token::Value op, Register reg);
+  BytecodeArrayBuilder& CompareReference(Register reg);
   BytecodeArrayBuilder& CompareUndetectable();
   BytecodeArrayBuilder& CompareUndefined();
   BytecodeArrayBuilder& CompareNull();
@@ -539,19 +555,19 @@ class V8_EXPORT_PRIVATE BytecodeArrayBuilder final {
   }
 
   // Returns the current source position for the given |bytecode|.
-  INLINE(BytecodeSourceInfo CurrentSourcePosition(Bytecode bytecode));
+  V8_INLINE BytecodeSourceInfo CurrentSourcePosition(Bytecode bytecode);
 
-#define DECLARE_BYTECODE_OUTPUT(Name, ...)                       \
-  template <typename... Operands>                                \
-  INLINE(BytecodeNode Create##Name##Node(Operands... operands)); \
-  template <typename... Operands>                                \
-  INLINE(void Output##Name(Operands... operands));               \
-  template <typename... Operands>                                \
-  INLINE(void Output##Name(BytecodeLabel* label, Operands... operands));
+#define DECLARE_BYTECODE_OUTPUT(Name, ...)                         \
+  template <typename... Operands>                                  \
+  V8_INLINE BytecodeNode Create##Name##Node(Operands... operands); \
+  template <typename... Operands>                                  \
+  V8_INLINE void Output##Name(Operands... operands);               \
+  template <typename... Operands>                                  \
+  V8_INLINE void Output##Name(BytecodeLabel* label, Operands... operands);
   BYTECODE_LIST(DECLARE_BYTECODE_OUTPUT)
 #undef DECLARE_OPERAND_TYPE_INFO
 
-  INLINE(void OutputSwitchOnSmiNoFeedback(BytecodeJumpTable* jump_table));
+  V8_INLINE void OutputSwitchOnSmiNoFeedback(BytecodeJumpTable* jump_table);
 
   bool RegisterIsValid(Register reg) const;
   bool RegisterListIsValid(RegisterList reg_list) const;

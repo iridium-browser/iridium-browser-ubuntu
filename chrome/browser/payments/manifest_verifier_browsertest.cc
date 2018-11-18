@@ -49,7 +49,7 @@ class ManifestVerifierBrowserTest : public InProcessBrowserTest {
     content::BrowserContext* context = web_contents->GetBrowserContext();
     auto downloader = std::make_unique<TestDownloader>(
         content::BrowserContext::GetDefaultStoragePartition(context)
-            ->GetURLRequestContext());
+            ->GetURLLoaderFactoryForBrowserProcess());
     downloader->AddTestServerURL("https://", https_server_->GetURL("/"));
     auto parser = std::make_unique<payments::PaymentManifestParser>();
     auto cache = WebDataServiceFactory::GetPaymentManifestWebDataForProfile(
@@ -532,6 +532,7 @@ IN_PROC_BROWSER_TEST_F(ManifestVerifierBrowserTest,
     apps[0]->enabled_methods.push_back("interledger");
     apps[0]->enabled_methods.push_back("payee-credit-transfer");
     apps[0]->enabled_methods.push_back("payer-credit-transfer");
+    apps[0]->enabled_methods.push_back("tokenized-card");
     apps[0]->enabled_methods.push_back("not-supported");
 
     Verify(std::move(apps));
@@ -539,7 +540,7 @@ IN_PROC_BROWSER_TEST_F(ManifestVerifierBrowserTest,
     EXPECT_EQ(1U, verified_apps().size());
     ExpectApp(0, "https://bobpay.com/webpay",
               {"basic-card", "interledger", "payee-credit-transfer",
-               "payer-credit-transfer"},
+               "payer-credit-transfer", "tokenized-card"},
               false);
   }
 
@@ -552,6 +553,7 @@ IN_PROC_BROWSER_TEST_F(ManifestVerifierBrowserTest,
     apps[0]->enabled_methods.push_back("interledger");
     apps[0]->enabled_methods.push_back("payee-credit-transfer");
     apps[0]->enabled_methods.push_back("payer-credit-transfer");
+    apps[0]->enabled_methods.push_back("tokenized-card");
     apps[0]->enabled_methods.push_back("not-supported");
 
     Verify(std::move(apps));
@@ -559,7 +561,7 @@ IN_PROC_BROWSER_TEST_F(ManifestVerifierBrowserTest,
     EXPECT_EQ(1U, verified_apps().size());
     ExpectApp(0, "https://bobpay.com/webpay",
               {"basic-card", "interledger", "payee-credit-transfer",
-               "payer-credit-transfer"},
+               "payer-credit-transfer", "tokenized-card"},
               false);
   }
 }

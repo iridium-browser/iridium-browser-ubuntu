@@ -9,7 +9,7 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/logging.h"
 #include "base/run_loop.h"
-#include "base/test/histogram_tester.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "content/browser/service_worker/embedded_worker_test_helper.h"
 #include "content/browser/service_worker/service_worker_context_core.h"
@@ -31,6 +31,7 @@
 #include "services/network/public/mojom/request_context_frame_type.mojom.h"
 #include "storage/browser/blob/blob_storage_context.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/mojom/service_worker/service_worker_registration.mojom.h"
 
 namespace content {
@@ -60,6 +61,11 @@ class ServiceWorkerContextRequestHandlerTest : public testing::Test {
       : browser_thread_bundle_(TestBrowserThreadBundle::IO_MAINLOOP) {}
 
   void SetUp() override {
+    // ServiceWorkerContextRequestHandler is a non-S13nServiceWorker specific
+    // class and we don't use it when S13nServiceWorker is enabled.
+    scoped_feature_list_.InitAndDisableFeature(
+        blink::features::kServiceWorkerServicification);
+
     helper_.reset(new EmbeddedWorkerTestHelper(base::FilePath()));
     context()->storage()->LazyInitializeForTest(base::DoNothing());
     base::RunLoop().RunUntilIdle();
@@ -73,9 +79,9 @@ class ServiceWorkerContextRequestHandlerTest : public testing::Test {
     options.scope = scope_;
     registration_ = base::MakeRefCounted<ServiceWorkerRegistration>(
         options, 1L, context()->AsWeakPtr());
-    version_ = new ServiceWorkerVersion(registration_.get(), script_url_,
-                                        context()->storage()->NewVersionId(),
-                                        context()->AsWeakPtr());
+    version_ = new ServiceWorkerVersion(
+        registration_.get(), script_url_, blink::mojom::ScriptType::kClassic,
+        context()->storage()->NewVersionId(), context()->AsWeakPtr());
     SetUpProvider();
 
     std::unique_ptr<MockHttpProtocolHandler> handler(
@@ -94,13 +100,9 @@ class ServiceWorkerContextRequestHandlerTest : public testing::Test {
   ServiceWorkerContextCore* context() const { return helper_->context(); }
 
   void SetUpProvider() {
-    std::unique_ptr<ServiceWorkerProviderHost> host =
-        CreateProviderHostForServiceWorkerContext(
-            helper_->mock_render_process_id(),
-            true /* is_parent_frame_secure */, version_.get(),
-            context()->AsWeakPtr(), &remote_endpoint_);
-    provider_host_ = host->AsWeakPtr();
-    context()->AddProviderHost(std::move(host));
+    provider_host_ = CreateProviderHostForServiceWorkerContext(
+        helper_->mock_render_process_id(), true /* is_parent_frame_secure */,
+        version_.get(), context()->AsWeakPtr(), &remote_endpoint_);
   }
 
   std::unique_ptr<net::URLRequest> CreateRequest(const GURL& url) {
@@ -129,7 +131,8 @@ class ServiceWorkerContextRequestHandlerTest : public testing::Test {
         network::mojom::FetchCredentialsMode::kOmit,
         network::mojom::FetchRedirectMode::kFollow,
         std::string() /* integrity */, false /* keepalive */,
-        RESOURCE_TYPE_SERVICE_WORKER, REQUEST_CONTEXT_TYPE_SERVICE_WORKER,
+        RESOURCE_TYPE_SERVICE_WORKER,
+        blink::mojom::RequestContextType::SERVICE_WORKER,
         network::mojom::RequestContextFrameType::kNone, nullptr);
   }
 
@@ -137,11 +140,6 @@ class ServiceWorkerContextRequestHandlerTest : public testing::Test {
   void TestBypassCache(const GURL& url,
                        ResourceType resource_type,
                        bool expect_bypass) {
-    // TODO(https://crbug.com/675540): Remove the following command line switch
-    // when updateViaCache is shipped to stable.
-    base::CommandLine::ForCurrentProcess()->AppendSwitch(
-        switches::kEnableExperimentalWebPlatformFeatures);
-
     std::unique_ptr<net::URLRequest> request(CreateRequest(url));
     std::unique_ptr<ServiceWorkerContextRequestHandler> handler(
         CreateHandler(resource_type));
@@ -165,6 +163,9 @@ class ServiceWorkerContextRequestHandlerTest : public testing::Test {
   }
 
  protected:
+  // |scoped_feature_list_| must be before |thread_bundle_|.
+  // See comments in ServiceWorkerProviderHostTest.
+  base::test::ScopedFeatureList scoped_feature_list_;
   TestBrowserThreadBundle browser_thread_bundle_;
   std::unique_ptr<EmbeddedWorkerTestHelper> helper_;
   scoped_refptr<ServiceWorkerRegistration> registration_;
@@ -190,37 +191,9 @@ TEST_F(ServiceWorkerContextRequestHandlerTest, UpdateBefore24Hours) {
   TestBypassCacheForImportedScript(false);
 }
 
-// TODO(https://crbug.com/675540): Remove the
-// UpdateBefore24HoursWithoutUpdateViaCache test when the update_via_cache flag
-// is shipped to stable as this is to test the legacy behavior.
-TEST_F(ServiceWorkerContextRequestHandlerTest,
-       UpdateBefore24HoursWithoutUpdateViaCache) {
-  registration_->set_last_update_check(base::Time::Now());
-  version_->SetStatus(ServiceWorkerVersion::NEW);
-
-  // Conduct a resource fetch for the main script.
-  base::HistogramTester histograms;
-  std::unique_ptr<net::URLRequest> request(CreateRequest(script_url_));
-  std::unique_ptr<ServiceWorkerContextRequestHandler> handler(
-      CreateHandler(RESOURCE_TYPE_SERVICE_WORKER));
-  std::unique_ptr<net::URLRequestJob> job(
-      handler->MaybeCreateJob(request.get(), nullptr, nullptr));
-  ASSERT_TRUE(job.get());
-  ServiceWorkerWriteToCacheJob* sw_job =
-      static_cast<ServiceWorkerWriteToCacheJob*>(job.get());
-  histograms.ExpectUniqueSample(
-      "ServiceWorker.ContextRequestHandlerStatus.NewWorker.MainScript",
-      static_cast<int>(
-          ServiceWorkerContextRequestHandler::CreateJobStatus::WRITE_JOB),
-      1);
-
-  // Verify the net request is not initialized to bypass the browser cache.
-  EXPECT_FALSE(sw_job->net_request_->load_flags() & net::LOAD_BYPASS_CACHE);
-}
-
 TEST_F(ServiceWorkerContextRequestHandlerTest,
        UpdateBefore24HoursWithUpdateViaCacheAll) {
-  registration_->set_update_via_cache(
+  registration_->SetUpdateViaCache(
       blink::mojom::ServiceWorkerUpdateViaCache::kAll);
   // Give the registration a very recent last update time and pretend
   // we're installing a new version.
@@ -233,7 +206,7 @@ TEST_F(ServiceWorkerContextRequestHandlerTest,
 
 TEST_F(ServiceWorkerContextRequestHandlerTest,
        UpdateBefore24HoursWithUpdateViaCacheNone) {
-  registration_->set_update_via_cache(
+  registration_->SetUpdateViaCache(
       blink::mojom::ServiceWorkerUpdateViaCache::kNone);
   // Give the registration a very recent last update time and pretend
   // we're installing a new version.
@@ -257,7 +230,7 @@ TEST_F(ServiceWorkerContextRequestHandlerTest, UpdateAfter24Hours) {
 
 TEST_F(ServiceWorkerContextRequestHandlerTest,
        UpdateAfter24HoursWithUpdateViaCacheAll) {
-  registration_->set_update_via_cache(
+  registration_->SetUpdateViaCache(
       blink::mojom::ServiceWorkerUpdateViaCache::kAll);
   // Give the registration a old update time and pretend
   // we're installing a new version.
@@ -271,7 +244,7 @@ TEST_F(ServiceWorkerContextRequestHandlerTest,
 
 TEST_F(ServiceWorkerContextRequestHandlerTest,
        UpdateAfter24HoursWithUpdateViaCacheNone) {
-  registration_->set_update_via_cache(
+  registration_->SetUpdateViaCache(
       blink::mojom::ServiceWorkerUpdateViaCache::kNone);
   // Give the registration a old update time and pretend
   // we're installing a new version.
@@ -284,7 +257,7 @@ TEST_F(ServiceWorkerContextRequestHandlerTest,
 }
 
 TEST_F(ServiceWorkerContextRequestHandlerTest, UpdateForceBypassCache) {
-  registration_->set_update_via_cache(
+  registration_->SetUpdateViaCache(
       blink::mojom::ServiceWorkerUpdateViaCache::kAll);
   // Give the registration a very recent last update time and pretend
   // we're installing a new version.
@@ -336,7 +309,7 @@ TEST_F(ServiceWorkerContextRequestHandlerTest,
       network::mojom::FetchCredentialsMode::kOmit,
       network::mojom::FetchRedirectMode::kFollow, std::string() /* integrity */,
       false /* keepalive */, RESOURCE_TYPE_SERVICE_WORKER,
-      REQUEST_CONTEXT_TYPE_SERVICE_WORKER,
+      blink::mojom::RequestContextType::SERVICE_WORKER,
       network::mojom::RequestContextFrameType::kNone, nullptr);
   // Verify a ServiceWorkerRequestHandler was created.
   ServiceWorkerRequestHandler* handler =
@@ -426,8 +399,8 @@ TEST_F(ServiceWorkerContextRequestHandlerTest, InstalledWorker) {
 TEST_F(ServiceWorkerContextRequestHandlerTest, Incumbent) {
   // Make an incumbent version.
   scoped_refptr<ServiceWorkerVersion> incumbent = new ServiceWorkerVersion(
-      registration_.get(), script_url_, context()->storage()->NewVersionId(),
-      context()->AsWeakPtr());
+      registration_.get(), script_url_, blink::mojom::ScriptType::kClassic,
+      context()->storage()->NewVersionId(), context()->AsWeakPtr());
   incumbent->set_fetch_handler_existence(
       ServiceWorkerVersion::FetchHandlerExistence::EXISTS);
   std::vector<ServiceWorkerDatabase::ResourceRecord> resources = {

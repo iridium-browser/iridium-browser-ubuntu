@@ -23,6 +23,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_FILTERS_FILTER_EFFECT_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_FILTERS_FILTER_EFFECT_H_
 
+#include "base/macros.h"
 #include "third_party/blink/renderer/platform/geometry/float_rect.h"
 #include "third_party/blink/renderer/platform/geometry/int_rect.h"
 #include "third_party/blink/renderer/platform/graphics/color.h"
@@ -30,14 +31,13 @@
 #include "third_party/blink/renderer/platform/graphics/paint/paint_filter.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
-#include "third_party/blink/renderer/platform/wtf/noncopyable.h"
+#include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
 
 class Filter;
 class FilterEffect;
-class TextStream;
 
 typedef HeapVector<Member<FilterEffect>> FilterEffectVector;
 
@@ -50,7 +50,6 @@ enum FilterEffectType {
 
 class PLATFORM_EXPORT FilterEffect
     : public GarbageCollectedFinalized<FilterEffect> {
-  WTF_MAKE_NONCOPYABLE(FilterEffect);
 
  public:
   virtual ~FilterEffect();
@@ -82,8 +81,8 @@ class PLATFORM_EXPORT FilterEffect
     return kFilterEffectTypeUnknown;
   }
 
-  virtual TextStream& ExternalRepresentation(TextStream&,
-                                             int indention = 0) const;
+  virtual WTF::TextStream& ExternalRepresentation(WTF::TextStream&,
+                                                  int indention = 0) const;
 
   FloatRect FilterPrimitiveSubregion() const {
     return filter_primitive_subregion_;
@@ -166,6 +165,8 @@ class PLATFORM_EXPORT FilterEffect
   InterpolationSpace operating_interpolation_space_;
 
   sk_sp<PaintFilter> image_filters_[4];
+
+  DISALLOW_COPY_AND_ASSIGN(FilterEffect);
 };
 
 }  // namespace blink

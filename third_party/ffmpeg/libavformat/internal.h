@@ -211,6 +211,14 @@ do {\
 
 struct tm *ff_brktimegm(time_t secs, struct tm *tm);
 
+/**
+ * Automatically create sub-directories
+ *
+ * @param path will create sub-directories by path
+ * @return 0, or < 0 on error
+ */
+int ff_mkdir_p(const char *path);
+
 char *ff_data_to_hex(char *buf, const uint8_t *src, int size, int lowercase);
 
 /**
@@ -238,6 +246,14 @@ void ff_read_frame_flush(AVFormatContext *s);
 
 /** Get the current time since NTP epoch in microseconds. */
 uint64_t ff_ntp_time(void);
+
+/**
+ * Get the NTP time stamp formatted as per the RFC-5905.
+ *
+ * @param ntp_time NTP time in micro seconds (since NTP epoch)
+ * @return the formatted NTP time stamp
+ */
+uint64_t ff_get_formatted_ntp_time(uint64_t ntp_time_us);
 
 /**
  * Append the media-specific SDP fragment for the media stream c
@@ -298,6 +314,16 @@ void ff_put_v(AVIOContext *bc, uint64_t val);
  *         final \\0
  */
 int ff_get_line(AVIOContext *s, char *buf, int maxlen);
+
+/**
+ * Same as ff_get_line but strip the white-space characters in the text tail
+ *
+ * @param s the read-only AVIOContext
+ * @param buf buffer to store the read line
+ * @param maxlen size of the buffer
+ * @return the length of the string written in the buffer
+ */
+int ff_get_chomp_line(AVIOContext *s, char *buf, int maxlen);
 
 /**
  * Read a whole line of text from AVIOContext to an AVBPrint buffer. Stop
@@ -731,11 +757,44 @@ int ff_unlock_avformat(void);
  */
 void ff_format_set_url(AVFormatContext *s, char *url);
 
-#if FF_API_NEXT
+#define FF_PACKETLIST_FLAG_REF_PACKET (1 << 0) /**< Create a new reference for the packet instead of
+                                                    transferring the ownership of the existing one to the
+                                                    list. */
+
 /**
-  * Register devices in deprecated format linked list.
-  */
+ * Append an AVPacket to the list.
+ *
+ * @param head  List head element
+ * @param tail  List tail element
+ * @param pkt   The packet being appended
+ * @param flags Any combination of FF_PACKETLIST_FLAG_* flags
+ * @return 0 on success, negative AVERROR value on failure. On failure,
+           the list is unchanged
+ */
+int ff_packet_list_put(AVPacketList **head, AVPacketList **tail,
+                       AVPacket *pkt, int flags);
+
+/**
+ * Remove the oldest AVPacket in the list and return it.
+ *
+ * @note The pkt will be overwritten completely. The caller owns the
+ *       packet and must unref it by itself.
+ *
+ * @param head List head element
+ * @param tail List tail element
+ * @param pkt  Pointer to an initialized AVPacket struct
+ */
+int ff_packet_list_get(AVPacketList **head, AVPacketList **tail,
+                       AVPacket *pkt);
+
+/**
+ * Wipe the list and unref all the packets in it.
+ *
+ * @param head List head element
+ * @param tail List tail element
+ */
+void ff_packet_list_free(AVPacketList **head, AVPacketList **tail);
+
 void avpriv_register_devices(const AVOutputFormat * const o[], const AVInputFormat * const i[]);
-#endif
 
 #endif /* AVFORMAT_INTERNAL_H */

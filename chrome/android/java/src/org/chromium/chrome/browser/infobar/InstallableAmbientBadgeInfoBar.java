@@ -6,27 +6,18 @@ package org.chromium.chrome.browser.infobar;
 
 import static android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO;
 
-import android.content.ActivityNotFoundException;
-import android.content.Context;
-import android.content.Intent;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
-import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.ImageView;
 import android.widget.TextView;
 
 import org.chromium.base.ApiCompatibilityUtils;
-import org.chromium.base.ContextUtils;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ResourceId;
-import org.chromium.chrome.browser.metrics.WebApkUma;
 import org.chromium.chrome.browser.widget.accessibility.AccessibleTextView;
-import org.chromium.ui.widget.Toast;
-import org.chromium.webapk.lib.client.WebApkNavigationClient;
-import org.chromium.webapk.lib.client.WebApkValidator;
 
 /**
  * An ambient infobar to tell the user that the current site they are visiting is a PWA.
@@ -34,15 +25,13 @@ import org.chromium.webapk.lib.client.WebApkValidator;
 public class InstallableAmbientBadgeInfoBar extends InfoBar implements View.OnClickListener {
     private String mMessageText;
     private String mUrl;
-    private boolean mIsInstalled;
     private boolean mIsHiding;
 
     @CalledByNative
-    private static InfoBar show(int enumeratedIconId, Bitmap iconBitmap, String messageText,
-            String url, boolean isInstalled) {
+    private static InfoBar show(
+            int enumeratedIconId, Bitmap iconBitmap, String messageText, String url) {
         int drawableId = ResourceId.mapToDrawableId(enumeratedIconId);
-        return new InstallableAmbientBadgeInfoBar(
-                drawableId, iconBitmap, messageText, url, isInstalled);
+        return new InstallableAmbientBadgeInfoBar(drawableId, iconBitmap, messageText, url);
     }
 
     @Override
@@ -61,8 +50,7 @@ public class InstallableAmbientBadgeInfoBar extends InfoBar implements View.OnCl
 
         Resources res = layout.getResources();
         prompt.setText(mMessageText);
-        prompt.setTextSize(TypedValue.COMPLEX_UNIT_PX, res.getDimension(R.dimen.infobar_text_size));
-        prompt.setTextColor(ApiCompatibilityUtils.getColor(res, R.color.google_blue_700));
+        ApiCompatibilityUtils.setTextAppearance(prompt, R.style.BlueLink1);
         prompt.setGravity(Gravity.CENTER_VERTICAL);
         prompt.setOnClickListener(this);
 
@@ -85,21 +73,7 @@ public class InstallableAmbientBadgeInfoBar extends InfoBar implements View.OnCl
     public void onClick(View v) {
         if (getNativeInfoBarPtr() == 0 || mIsHiding) return;
 
-        if (mIsInstalled) {
-            Context context = ContextUtils.getApplicationContext();
-            String packageName = WebApkValidator.queryWebApkPackage(context, mUrl);
-            Intent launchIntent =
-                    WebApkNavigationClient.createLaunchWebApkIntent(packageName, mUrl, false);
-            try {
-                context.startActivity(launchIntent);
-                WebApkUma.recordWebApkOpenAttempt(WebApkUma.WEBAPK_OPEN_LAUNCH_SUCCESS);
-            } catch (ActivityNotFoundException e) {
-                WebApkUma.recordWebApkOpenAttempt(WebApkUma.WEBAPK_OPEN_ACTIVITY_NOT_FOUND);
-                Toast.makeText(context, R.string.open_webapk_failed, Toast.LENGTH_SHORT).show();
-            }
-        } else {
-            nativeAddToHomescreen(getNativeInfoBarPtr());
-        }
+        nativeAddToHomescreen(getNativeInfoBarPtr());
     }
 
     /**
@@ -107,14 +81,12 @@ public class InstallableAmbientBadgeInfoBar extends InfoBar implements View.OnCl
      * @param iconDrawableId    Drawable ID corresponding to the icon that the infobar will show.
      * @param iconBitmap        Bitmap of the icon to display in the infobar.
      * @param messageText       String to display
-     * @param isInstalled       Whether the associated app is installed.
      */
-    private InstallableAmbientBadgeInfoBar(int iconDrawableId, Bitmap iconBitmap,
-            String messageText, String url, boolean isInstalled) {
+    private InstallableAmbientBadgeInfoBar(
+            int iconDrawableId, Bitmap iconBitmap, String messageText, String url) {
         super(iconDrawableId, iconBitmap, null);
         mMessageText = messageText;
         mUrl = url;
-        mIsInstalled = isInstalled;
     }
 
     private native void nativeAddToHomescreen(long nativeInstallableAmbientBadgeInfoBar);

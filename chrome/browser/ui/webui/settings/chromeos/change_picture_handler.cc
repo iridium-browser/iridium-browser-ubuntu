@@ -12,6 +12,7 @@
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/no_destructor.h"
 #include "base/path_service.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -149,19 +150,19 @@ void ChangePictureHandler::HandleChooseFile(const base::ListValue* args) {
       std::make_unique<ChromeSelectFilePolicy>(web_ui()->GetWebContents()));
 
   base::FilePath downloads_path;
-  if (!PathService::Get(chrome::DIR_DEFAULT_DOWNLOADS, &downloads_path)) {
+  if (!base::PathService::Get(chrome::DIR_DEFAULT_DOWNLOADS, &downloads_path)) {
     NOTREACHED();
     return;
   }
 
   // Static so we initialize it only once.
-  CR_DEFINE_STATIC_LOCAL(ui::SelectFileDialog::FileTypeInfo, file_type_info,
-                         (GetUserImageFileTypeInfo()));
+  static base::NoDestructor<ui::SelectFileDialog::FileTypeInfo> file_type_info(
+      GetUserImageFileTypeInfo());
 
   select_file_dialog_->SelectFile(
       ui::SelectFileDialog::SELECT_OPEN_FILE,
       l10n_util::GetStringUTF16(IDS_DOWNLOAD_TITLE), downloads_path,
-      &file_type_info, 0, FILE_PATH_LITERAL(""), GetBrowserWindow(), NULL);
+      file_type_info.get(), 0, FILE_PATH_LITERAL(""), GetBrowserWindow(), NULL);
 }
 
 void ChangePictureHandler::HandleDiscardPhoto(const base::ListValue* args) {

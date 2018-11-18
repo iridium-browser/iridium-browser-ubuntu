@@ -26,8 +26,11 @@ class CORE_EXPORT NGTextFragmentBuilder final : public NGBaseFragmentBuilder {
 
   // NOTE: Takes ownership of the shape result within the item result.
   void SetItem(NGPhysicalTextFragment::NGTextType,
+               const NGInlineItemsData&,
                NGInlineItemResult*,
                LayoutUnit line_height);
+
+  // Set text for generated text, e.g. hyphen and ellipsis.
   void SetText(LayoutObject*,
                const String& text,
                scoped_refptr<const ComputedStyle>,
@@ -35,7 +38,7 @@ class CORE_EXPORT NGTextFragmentBuilder final : public NGBaseFragmentBuilder {
                scoped_refptr<const ShapeResult>);
 
   // Creates the fragment. Can only be called once.
-  scoped_refptr<NGPhysicalTextFragment> ToTextFragment();
+  scoped_refptr<const NGPhysicalTextFragment> ToTextFragment();
 
  private:
   NGInlineNode inline_node_;

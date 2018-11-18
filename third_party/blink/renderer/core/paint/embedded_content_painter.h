@@ -20,12 +20,9 @@ class EmbeddedContentPainter {
   EmbeddedContentPainter(const LayoutEmbeddedContent& layout_embedded_content)
       : layout_embedded_content_(layout_embedded_content) {}
 
-  void Paint(const PaintInfo&, const LayoutPoint&);
-  void PaintContents(const PaintInfo&, const LayoutPoint&);
+  void PaintReplaced(const PaintInfo&, const LayoutPoint& paint_offset);
 
  private:
-  bool IsSelected() const;
-
   const LayoutEmbeddedContent& layout_embedded_content_;
 };
 

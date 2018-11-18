@@ -37,10 +37,10 @@
 namespace {
 
 // The standard windows size for one memory page.
-const size_t kOneMemPage = 4096;
+constexpr size_t kOneMemPage = 4096;
 // The IPC and Policy shared memory sizes.
-const size_t kIPCMemSize = kOneMemPage * 2;
-const size_t kPolMemSize = kOneMemPage * 14;
+constexpr size_t kIPCMemSize = kOneMemPage * 2;
+constexpr size_t kPolMemSize = kOneMemPage * 14;
 
 // Helper function to allocate space (on the heap) for policy.
 sandbox::PolicyGlobal* MakeBrokerPolicyMemory() {
@@ -106,7 +106,8 @@ PolicyBase::PolicyBase()
       policy_(nullptr),
       lowbox_sid_(nullptr),
       lockdown_default_dacl_(false),
-      enable_opm_redirection_(false) {
+      enable_opm_redirection_(false),
+      effective_token_(nullptr) {
   ::InitializeCriticalSection(&lock_);
   dispatcher_.reset(new TopLevelDispatcher(this));
 }
@@ -186,18 +187,18 @@ base::string16 PolicyBase::GetAlternateDesktop() const {
     // The desktop and winstation should have been created by now.
     // If we hit this scenario, it means that the user ignored the failure
     // during SetAlternateDesktop, so we ignore it here too.
-    if (!alternate_desktop_handle_ || !alternate_winstation_handle_) {
+    if (!alternate_desktop_handle_ || !alternate_winstation_handle_)
       return base::string16();
-    }
+
     return GetFullDesktopName(alternate_winstation_handle_,
                               alternate_desktop_handle_);
-  } else {
-    if (!alternate_desktop_local_winstation_handle_) {
-      return base::string16();
-    }
-    return GetFullDesktopName(nullptr,
-                              alternate_desktop_local_winstation_handle_);
   }
+
+  if (!alternate_desktop_local_winstation_handle_)
+    return base::string16();
+
+  return GetFullDesktopName(nullptr,
+                            alternate_desktop_local_winstation_handle_);
 }
 
 ResultCode PolicyBase::CreateAlternateDesktop(bool alternate_winstation) {
@@ -225,8 +226,9 @@ ResultCode PolicyBase::CreateAlternateDesktop(bool alternate_winstation) {
 
     // Verify that everything is fine.
     if (!alternate_desktop_handle_ ||
-        GetWindowObjectName(alternate_desktop_handle_).empty())
+        GetWindowObjectName(alternate_desktop_handle_).empty()) {
       return SBOX_ERROR_CANNOT_CREATE_DESKTOP;
+    }
   } else {
     // Check if it already exists.
     if (alternate_desktop_local_winstation_handle_)
@@ -240,8 +242,10 @@ ResultCode PolicyBase::CreateAlternateDesktop(bool alternate_winstation) {
 
     // Verify that everything is fine.
     if (!alternate_desktop_local_winstation_handle_ ||
-        GetWindowObjectName(alternate_desktop_local_winstation_handle_).empty())
+        GetWindowObjectName(alternate_desktop_local_winstation_handle_)
+            .empty()) {
       return SBOX_ERROR_CANNOT_CREATE_DESKTOP;
+    }
   }
 
   return SBOX_ALL_OK;
@@ -359,7 +363,8 @@ ResultCode PolicyBase::AddKernelObjectToClose(const base::char16* handle_type,
 }
 
 void PolicyBase::AddHandleToShare(HANDLE handle) {
-  CHECK(handle && handle != INVALID_HANDLE_VALUE);
+  CHECK(handle);
+  CHECK_NE(handle, INVALID_HANDLE_VALUE);
 
   // Ensure the handle can be inherited.
   bool result =
@@ -378,18 +383,19 @@ const base::HandlesToInheritVector& PolicyBase::GetHandlesBeingShared() {
 }
 
 ResultCode PolicyBase::MakeJobObject(base::win::ScopedHandle* job) {
-  if (job_level_ != JOB_NONE) {
-    // Create the windows job object.
-    Job job_obj;
-    DWORD result =
-        job_obj.Init(job_level_, nullptr, ui_exceptions_, memory_limit_);
-    if (ERROR_SUCCESS != result)
-      return SBOX_ERROR_GENERIC;
-
-    *job = job_obj.Take();
-  } else {
-    *job = base::win::ScopedHandle();
+  if (job_level_ == JOB_NONE) {
+    job->Close();
+    return SBOX_ALL_OK;
   }
+
+  // Create the windows job object.
+  Job job_obj;
+  DWORD result =
+      job_obj.Init(job_level_, nullptr, ui_exceptions_, memory_limit_);
+  if (ERROR_SUCCESS != result)
+    return SBOX_ERROR_GENERIC;
+
+  *job = job_obj.Take();
   return SBOX_ALL_OK;
 }
 
@@ -399,8 +405,8 @@ ResultCode PolicyBase::MakeTokens(base::win::ScopedHandle* initial,
   // Create the 'naked' token. This will be the permanent token associated
   // with the process and therefore with any thread that is not impersonating.
   DWORD result =
-      CreateRestrictedToken(lockdown_level_, integrity_level_, PRIMARY,
-                            lockdown_default_dacl_, lockdown);
+      CreateRestrictedToken(effective_token_, lockdown_level_, integrity_level_,
+                            PRIMARY, lockdown_default_dacl_, lockdown);
   if (ERROR_SUCCESS != result)
     return SBOX_ERROR_GENERIC;
 
@@ -463,8 +469,8 @@ ResultCode PolicyBase::MakeTokens(base::win::ScopedHandle* initial,
   // thread uses when booting up the process. It should contain most of
   // what we need (before reaching main( ))
   result =
-      CreateRestrictedToken(initial_level_, integrity_level_, IMPERSONATION,
-                            lockdown_default_dacl_, initial);
+      CreateRestrictedToken(effective_token_, initial_level_, integrity_level_,
+                            IMPERSONATION, lockdown_default_dacl_, initial);
   if (ERROR_SUCCESS != result)
     return SBOX_ERROR_GENERIC;
 
@@ -573,9 +579,9 @@ EvalResult PolicyBase::EvalPolicy(int service,
     PolicyProcessor pol_evaluator(policy_->entry[service]);
     PolicyResult result =
         pol_evaluator.Evaluate(kShortEval, params->parameters, params->count);
-    if (POLICY_MATCH == result) {
+    if (POLICY_MATCH == result)
       return pol_evaluator.GetAction();
-    }
+
     DCHECK(POLICY_ERROR != result);
   }
 
@@ -605,8 +611,9 @@ ResultCode PolicyBase::AddAppContainerProfile(const wchar_t* package_name,
 
   DCHECK(package_name);
   if (lowbox_sid_ || app_container_profile_ ||
-      integrity_level_ != INTEGRITY_LEVEL_LAST)
+      integrity_level_ != INTEGRITY_LEVEL_LAST) {
     return SBOX_ERROR_BAD_PARAMS;
+  }
 
   if (create_profile) {
     app_container_profile_ = AppContainerProfileBase::Create(
@@ -630,6 +637,11 @@ scoped_refptr<AppContainerProfile> PolicyBase::GetAppContainerProfile() {
   return GetAppContainerProfileBase();
 }
 
+void PolicyBase::SetEffectiveToken(HANDLE token) {
+  CHECK(token);
+  effective_token_ = token;
+}
+
 scoped_refptr<AppContainerProfileBase>
 PolicyBase::GetAppContainerProfileBase() {
   return app_container_profile_;
@@ -645,12 +657,8 @@ ResultCode PolicyBase::SetupAllInterceptions(TargetProcess* target) {
     }
   }
 
-  if (!blacklisted_dlls_.empty()) {
-    std::vector<base::string16>::iterator it = blacklisted_dlls_.begin();
-    for (; it != blacklisted_dlls_.end(); ++it) {
-      manager.AddToUnloadModules(it->c_str());
-    }
-  }
+  for (const base::string16& dll : blacklisted_dlls_)
+    manager.AddToUnloadModules(dll.c_str());
 
   if (!SetupBasicInterceptions(&manager, is_csrss_connected_))
     return SBOX_ERROR_SETUP_BASIC_INTERCEPTIONS;

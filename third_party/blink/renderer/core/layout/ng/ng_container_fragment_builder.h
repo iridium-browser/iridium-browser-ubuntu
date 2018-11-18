@@ -7,11 +7,14 @@
 
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/core/layout/ng/exclusions/ng_exclusion_space.h"
 #include "third_party/blink/renderer/core/layout/ng/geometry/ng_bfc_offset.h"
 #include "third_party/blink/renderer/core/layout/ng/geometry/ng_logical_size.h"
 #include "third_party/blink/renderer/core/layout/ng/geometry/ng_margin_strut.h"
 #include "third_party/blink/renderer/core/layout/ng/list/ng_unpositioned_list_marker.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_base_fragment_builder.h"
+#include "third_party/blink/renderer/core/layout/ng/ng_floats_utils.h"
+#include "third_party/blink/renderer/core/layout/ng/ng_link.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_out_of_flow_positioned_descendant.h"
 #include "third_party/blink/renderer/platform/text/text_direction.h"
 #include "third_party/blink/renderer/platform/text/writing_mode.h"
@@ -23,51 +26,77 @@ class ComputedStyle;
 class NGExclusionSpace;
 class NGLayoutResult;
 class NGPhysicalFragment;
-struct NGUnpositionedFloat;
 
 class CORE_EXPORT NGContainerFragmentBuilder : public NGBaseFragmentBuilder {
   STACK_ALLOCATED();
 
  public:
+  typedef Vector<NGLogicalOffset, 16> OffsetVector;
+
   ~NGContainerFragmentBuilder() override;
 
   LayoutUnit InlineSize() const { return size_.inline_size; }
   LayoutUnit BlockSize() const { return size_.block_size; }
   const NGLogicalSize& Size() const { return size_; }
-  NGContainerFragmentBuilder& SetInlineSize(LayoutUnit);
+  NGContainerFragmentBuilder& SetInlineSize(LayoutUnit inline_size) {
+    DCHECK_GE(inline_size, LayoutUnit());
+    size_.inline_size = inline_size;
+    return *this;
+  }
   void SetBlockSize(LayoutUnit block_size) { size_.block_size = block_size; }
+
+  LayoutUnit BfcLineOffset() const { return bfc_line_offset_; }
+  NGContainerFragmentBuilder& SetBfcLineOffset(LayoutUnit bfc_line_offset) {
+    bfc_line_offset_ = bfc_line_offset;
+    return *this;
+  }
 
   // The NGBfcOffset is where this fragment was positioned within the BFC. If
   // it is not set, this fragment may be placed anywhere within the BFC.
-  const WTF::Optional<NGBfcOffset>& BfcOffset() const { return bfc_offset_; }
-  NGContainerFragmentBuilder& SetBfcOffset(const NGBfcOffset&);
+  const base::Optional<LayoutUnit>& BfcBlockOffset() const {
+    return bfc_block_offset_;
+  }
+  NGContainerFragmentBuilder& SetBfcBlockOffset(LayoutUnit bfc_block_offset) {
+    bfc_block_offset_ = bfc_block_offset;
+    return *this;
+  }
+  NGContainerFragmentBuilder& ResetBfcBlockOffset() {
+    bfc_block_offset_.reset();
+    return *this;
+  }
 
-  NGContainerFragmentBuilder& SetEndMarginStrut(const NGMarginStrut&);
+  NGContainerFragmentBuilder& SetEndMarginStrut(
+      const NGMarginStrut& end_margin_strut) {
+    end_margin_strut_ = end_margin_strut;
+    return *this;
+  }
 
   NGContainerFragmentBuilder& SetExclusionSpace(
-      std::unique_ptr<const NGExclusionSpace> exclusion_space);
-
-  NGContainerFragmentBuilder& SwapUnpositionedFloats(
-      Vector<scoped_refptr<NGUnpositionedFloat>>*);
+      NGExclusionSpace&& exclusion_space) {
+    exclusion_space_ = std::move(exclusion_space);
+    return *this;
+  }
 
   const NGUnpositionedListMarker& UnpositionedListMarker() const {
     return unpositioned_list_marker_;
   }
   NGContainerFragmentBuilder& SetUnpositionedListMarker(
-      const NGUnpositionedListMarker&);
+      const NGUnpositionedListMarker& marker) {
+    DCHECK(!unpositioned_list_marker_ || !marker);
+    unpositioned_list_marker_ = marker;
+    return *this;
+  }
 
-  virtual NGContainerFragmentBuilder& AddChild(scoped_refptr<NGLayoutResult>,
+  virtual NGContainerFragmentBuilder& AddChild(const NGLayoutResult&,
                                                const NGLogicalOffset&);
 
   // This version of AddChild will not propagate floats/out_of_flow.
   // Use the AddChild(NGLayoutResult) variant if NGLayoutResult is available.
   virtual NGContainerFragmentBuilder& AddChild(
-      scoped_refptr<NGPhysicalFragment>,
+      scoped_refptr<const NGPhysicalFragment>,
       const NGLogicalOffset&);
 
-  const Vector<scoped_refptr<NGPhysicalFragment>>& Children() const {
-    return children_;
-  }
+  const Vector<NGLink>& Children() const { return children_; }
 
   // Builder has non-trivial out-of-flow descendant methods.
   // These methods are building blocks for implementation of
@@ -109,17 +138,32 @@ class CORE_EXPORT NGContainerFragmentBuilder : public NGBaseFragmentBuilder {
       LayoutObject* inline_container);
 
   NGContainerFragmentBuilder& AddOutOfFlowDescendant(
-      NGOutOfFlowPositionedDescendant);
+      NGOutOfFlowPositionedDescendant descendant);
 
   void GetAndClearOutOfFlowDescendantCandidates(
       Vector<NGOutOfFlowPositionedDescendant>* descendant_candidates,
       const LayoutObject* container);
+
+  // Utility routine to move all OOF descendant candidates to descendants.
+  // Use if fragment cannot position any OOF children.
+  void MoveOutOfFlowDescendantCandidatesToDescendants(
+      const LayoutObject* inline_container);
 
   NGContainerFragmentBuilder& SetIsPushedByFloats() {
     is_pushed_by_floats_ = true;
     return *this;
   }
   bool IsPushedByFloats() const { return is_pushed_by_floats_; }
+
+  NGContainerFragmentBuilder& ResetAdjoiningFloatTypes() {
+    adjoining_floats_ = kFloatTypeNone;
+    return *this;
+  }
+  NGContainerFragmentBuilder& AddAdjoiningFloatTypes(NGFloatTypes floats) {
+    adjoining_floats_ |= floats;
+    return *this;
+  }
+  NGFloatTypes AdjoiningFloatTypes() const { return adjoining_floats_; }
 
 #ifndef NDEBUG
   String ToString() const;
@@ -170,21 +214,32 @@ class CORE_EXPORT NGContainerFragmentBuilder : public NGBaseFragmentBuilder {
 
   NGLogicalSize size_;
 
-  WTF::Optional<NGBfcOffset> bfc_offset_;
+  LayoutUnit bfc_line_offset_;
+  base::Optional<LayoutUnit> bfc_block_offset_;
   NGMarginStrut end_margin_strut_;
-  std::unique_ptr<const NGExclusionSpace> exclusion_space_;
-
-  // Floats that need to be positioned by the next in-flow fragment that can
-  // determine its block position in space.
-  Vector<scoped_refptr<NGUnpositionedFloat>> unpositioned_floats_;
+  NGExclusionSpace exclusion_space_;
 
   Vector<NGOutOfFlowPositionedCandidate> oof_positioned_candidates_;
   Vector<NGOutOfFlowPositionedDescendant> oof_positioned_descendants_;
 
   NGUnpositionedListMarker unpositioned_list_marker_;
 
-  Vector<scoped_refptr<NGPhysicalFragment>> children_;
-  Vector<NGLogicalOffset> offsets_;
+  // Store NGLinks rather than NGPhysicalOffsets even though we don't have the
+  // offsets yet to allow us to move the entire vector to the fragment at
+  // construction time.
+  // Unlike OffsetVector, we don't want to keep the inline capacity around
+  // because this vector will be long-lived, and it would be wasteful to reserve
+  // space for 16 children in every fragment. Instead, we reserve some initial
+  // capacity for it when adding the first child  and shrink it down when
+  // creating the fragment.
+  Vector<NGLink> children_;
+
+  // Logical offsets for the children. Stored as logical offsets as we can't
+  // convert to physical offsets until layout of all children has been
+  // determined.
+  OffsetVector offsets_;
+
+  NGFloatTypes adjoining_floats_ = kFloatTypeNone;
 
   bool has_last_resort_break_ = false;
 

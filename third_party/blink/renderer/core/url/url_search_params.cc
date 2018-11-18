@@ -6,7 +6,9 @@
 
 #include <algorithm>
 #include <utility>
+
 #include "third_party/blink/renderer/core/url/dom_url.h"
+#include "third_party/blink/renderer/platform/bindings/exception_messages.h"
 #include "third_party/blink/renderer/platform/network/form_data_encoder.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_encoding.h"
@@ -34,7 +36,7 @@ class URLSearchParamsIterationSource final
     return true;
   }
 
-  void Trace(blink::Visitor* visitor) {
+  void Trace(blink::Visitor* visitor) override {
     visitor->Trace(params_);
     PairIterable<String, String>::IterationSource::Trace(visitor);
   }

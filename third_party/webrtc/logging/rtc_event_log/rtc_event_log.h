@@ -12,8 +12,6 @@
 #define LOGGING_RTC_EVENT_LOG_RTC_EVENT_LOG_H_
 
 #include <memory>
-#include <string>
-#include <utility>
 
 #include "api/rtceventlogoutput.h"
 #include "logging/rtc_event_log/events/rtc_event.h"
@@ -21,6 +19,7 @@
 
 namespace webrtc {
 
+// TODO(terelius): Move this to the parser.
 enum PacketDirection { kIncomingPacket = 0, kOutgoingPacket };
 
 class RtcEventLog {

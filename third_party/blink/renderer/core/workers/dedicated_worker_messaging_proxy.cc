@@ -14,6 +14,7 @@
 #include "third_party/blink/renderer/core/fetch/request.h"
 #include "third_party/blink/renderer/core/frame/csp/content_security_policy.h"
 #include "third_party/blink/renderer/core/inspector/thread_debugger.h"
+#include "third_party/blink/renderer/core/messaging/blink_transferable_message.h"
 #include "third_party/blink/renderer/core/workers/dedicated_worker.h"
 #include "third_party/blink/renderer/core/workers/dedicated_worker_object_proxy.h"
 #include "third_party/blink/renderer/core/workers/dedicated_worker_thread.h"
@@ -24,12 +25,6 @@
 #include "third_party/blink/renderer/platform/wtf/wtf.h"
 
 namespace blink {
-
-struct DedicatedWorkerMessagingProxy::QueuedTask {
-  scoped_refptr<SerializedScriptValue> message;
-  Vector<MessagePortChannel> channels;
-  v8_inspector::V8StackTraceId stack_id;
-};
 
 DedicatedWorkerMessagingProxy::DedicatedWorkerMessagingProxy(
     ExecutionContext* execution_context,
@@ -46,6 +41,7 @@ void DedicatedWorkerMessagingProxy::StartWorkerGlobalScope(
     std::unique_ptr<GlobalScopeCreationParams> creation_params,
     const WorkerOptions& options,
     const KURL& script_url,
+    FetchClientSettingsObjectSnapshot* outside_settings_object,
     const v8_inspector::V8StackTraceId& stack_id,
     const String& source_code) {
   DCHECK(IsParentContextThread());
@@ -60,38 +56,38 @@ void DedicatedWorkerMessagingProxy::StartWorkerGlobalScope(
       CreateBackingThreadStartupData(ToIsolate(GetExecutionContext())));
 
   if (options.type() == "classic") {
+    // Dedicated worker is origin-bound, so use kSharableCrossOrigin.
     GetWorkerThread()->EvaluateClassicScript(
-        script_url, source_code, nullptr /* cached_meta_data */, stack_id);
+        script_url, kSharableCrossOrigin, source_code,
+        nullptr /* cached_meta_data */, stack_id);
   } else if (options.type() == "module") {
     network::mojom::FetchCredentialsMode credentials_mode;
     bool result =
         Request::ParseCredentialsMode(options.credentials(), &credentials_mode);
     DCHECK(result);
-    GetWorkerThread()->ImportModuleScript(script_url, credentials_mode);
+    GetWorkerThread()->ImportModuleScript(script_url, outside_settings_object,
+                                          credentials_mode);
   } else {
     NOTREACHED();
   }
 }
 
 void DedicatedWorkerMessagingProxy::PostMessageToWorkerGlobalScope(
-    scoped_refptr<SerializedScriptValue> message,
-    Vector<MessagePortChannel> channels,
-    const v8_inspector::V8StackTraceId& stack_id) {
+    BlinkTransferableMessage message) {
   DCHECK(IsParentContextThread());
   if (AskedToTerminate())
     return;
   if (!was_script_evaluated_) {
-    queued_early_tasks_.push_back(
-        QueuedTask{std::move(message), std::move(channels), stack_id});
+    queued_early_tasks_.push_back(std::move(message));
     return;
   }
   PostCrossThreadTask(
       *GetWorkerThread()->GetTaskRunner(TaskType::kPostedMessage), FROM_HERE,
       CrossThreadBind(
           &DedicatedWorkerObjectProxy::ProcessMessageFromWorkerObject,
-          CrossThreadUnretained(&WorkerObjectProxy()), std::move(message),
-          WTF::Passed(std::move(channels)),
-          CrossThreadUnretained(GetWorkerThread()), stack_id));
+          CrossThreadUnretained(&WorkerObjectProxy()),
+          WTF::Passed(std::move(message)),
+          CrossThreadUnretained(GetWorkerThread())));
 }
 
 bool DedicatedWorkerMessagingProxy::HasPendingActivity() const {
@@ -103,7 +99,7 @@ void DedicatedWorkerMessagingProxy::DidEvaluateScript(bool success) {
   DCHECK(IsParentContextThread());
   was_script_evaluated_ = true;
 
-  Vector<QueuedTask> tasks;
+  Vector<BlinkTransferableMessage> tasks;
   queued_early_tasks_.swap(tasks);
 
   // The worker thread can already be terminated.
@@ -121,28 +117,25 @@ void DedicatedWorkerMessagingProxy::DidEvaluateScript(bool success) {
         CrossThreadBind(
             &DedicatedWorkerObjectProxy::ProcessMessageFromWorkerObject,
             CrossThreadUnretained(&WorkerObjectProxy()),
-            WTF::Passed(std::move(task.message)),
-            WTF::Passed(std::move(task.channels)),
-            CrossThreadUnretained(GetWorkerThread()), task.stack_id));
+            WTF::Passed(std::move(task)),
+            CrossThreadUnretained(GetWorkerThread())));
   }
 }
 
 void DedicatedWorkerMessagingProxy::PostMessageToWorkerObject(
-    scoped_refptr<SerializedScriptValue> message,
-    Vector<MessagePortChannel> channels,
-    const v8_inspector::V8StackTraceId& stack_id) {
+    BlinkTransferableMessage message) {
   DCHECK(IsParentContextThread());
   if (!worker_object_ || AskedToTerminate())
     return;
 
   ThreadDebugger* debugger =
       ThreadDebugger::From(ToIsolate(GetExecutionContext()));
-  MessagePortArray* ports =
-      MessagePort::EntanglePorts(*GetExecutionContext(), std::move(channels));
-  debugger->ExternalAsyncTaskStarted(stack_id);
+  MessagePortArray* ports = MessagePort::EntanglePorts(
+      *GetExecutionContext(), std::move(message.ports));
+  debugger->ExternalAsyncTaskStarted(message.sender_stack_trace_id);
   worker_object_->DispatchEvent(
-      MessageEvent::Create(ports, std::move(message)));
-  debugger->ExternalAsyncTaskFinished(stack_id);
+      *MessageEvent::Create(ports, std::move(message.message)));
+  debugger->ExternalAsyncTaskFinished(message.sender_stack_trace_id);
 }
 
 void DedicatedWorkerMessagingProxy::DispatchErrorEvent(
@@ -163,7 +156,8 @@ void DedicatedWorkerMessagingProxy::DispatchErrorEvent(
   // https://html.spec.whatwg.org/multipage/workers.html#runtime-script-errors-2
   ErrorEvent* event =
       ErrorEvent::Create(error_message, location->Clone(), nullptr);
-  if (worker_object_->DispatchEvent(event) != DispatchEventResult::kNotCanceled)
+  if (worker_object_->DispatchEvent(*event) !=
+      DispatchEventResult::kNotCanceled)
     return;
 
   // The worker thread can already be terminated.
@@ -187,7 +181,7 @@ void DedicatedWorkerMessagingProxy::Trace(blink::Visitor* visitor) {
   ThreadedMessagingProxyBase::Trace(visitor);
 }
 
-WTF::Optional<WorkerBackingThreadStartupData>
+base::Optional<WorkerBackingThreadStartupData>
 DedicatedWorkerMessagingProxy::CreateBackingThreadStartupData(
     v8::Isolate* isolate) {
   using HeapLimitMode = WorkerBackingThreadStartupData::HeapLimitMode;
@@ -201,8 +195,8 @@ DedicatedWorkerMessagingProxy::CreateBackingThreadStartupData(
 
 std::unique_ptr<WorkerThread>
 DedicatedWorkerMessagingProxy::CreateWorkerThread() {
-  return DedicatedWorkerThread::Create(CreateThreadableLoadingContext(),
-                                       WorkerObjectProxy());
+  return DedicatedWorkerThread::Create(
+      worker_object_->Name(), GetExecutionContext(), WorkerObjectProxy());
 }
 
 }  // namespace blink

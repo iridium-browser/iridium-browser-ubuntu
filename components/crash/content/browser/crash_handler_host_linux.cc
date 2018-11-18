@@ -24,21 +24,25 @@
 #include "base/linux_util.h"
 #include "base/location.h"
 #include "base/logging.h"
+#include "base/message_loop/message_loop_current.h"
 #include "base/path_service.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/rand_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
+#include "base/threading/scoped_blocking_call.h"
 #include "base/threading/thread.h"
-#include "base/threading/thread_restrictions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
-#include "components/crash/content/app/breakpad_linux_impl.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
-#include "third_party/breakpad/breakpad/src/client/linux/handler/exception_handler.h"
-#include "third_party/breakpad/breakpad/src/client/linux/minidump_writer/linux_dumper.h"
-#include "third_party/breakpad/breakpad/src/client/linux/minidump_writer/minidump_writer.h"
+
+#if !defined(OS_ANDROID)
+#include "third_party/breakpad/breakpad/src/client/linux/handler/exception_handler.h"  // nogncheck
+#include "third_party/breakpad/breakpad/src/client/linux/minidump_writer/linux_dumper.h"  // nogncheck
+#include "third_party/breakpad/breakpad/src/client/linux/minidump_writer/minidump_writer.h"  // nogncheck
+#endif  // ! defined(OS_ANDROID)
 
 #if defined(OS_ANDROID) && !defined(__LP64__)
 #include <sys/syscall.h>
@@ -48,10 +52,13 @@
 
 #if !defined(OS_CHROMEOS)
 #include "components/crash/content/app/crashpad.h"
-#include "third_party/crashpad/crashpad/client/crashpad_client.h"
+#include "third_party/crashpad/crashpad/client/crashpad_client.h"  // nogncheck
 #endif
 
 using content::BrowserThread;
+
+#if !defined(OS_ANDROID)
+
 using google_breakpad::ExceptionHandler;
 
 namespace breakpad {
@@ -108,7 +115,7 @@ CrashHandlerHostLinux::CrashHandlerHostLinux(const std::string& process_type,
 #if !defined(OS_ANDROID)
       upload_(upload),
 #endif
-      file_descriptor_watcher_(FROM_HERE),
+      fd_watch_controller_(FROM_HERE),
       shutting_down_(false),
       blocking_task_runner_(base::CreateSequencedTaskRunnerWithTraits(
           {base::MayBlock(), base::TaskPriority::USER_VISIBLE})) {
@@ -128,9 +135,9 @@ CrashHandlerHostLinux::CrashHandlerHostLinux(const std::string& process_type,
   process_socket_ = fds[0];
   browser_socket_ = fds[1];
 
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
-      base::Bind(&CrashHandlerHostLinux::Init, base::Unretained(this)));
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::IO},
+      base::BindOnce(&CrashHandlerHostLinux::Init, base::Unretained(this)));
 }
 
 CrashHandlerHostLinux::~CrashHandlerHostLinux() {
@@ -145,10 +152,10 @@ void CrashHandlerHostLinux::StartUploaderThread() {
 }
 
 void CrashHandlerHostLinux::Init() {
-  base::MessageLoopForIO* ml = base::MessageLoopForIO::current();
+  base::MessageLoopCurrentForIO ml = base::MessageLoopCurrentForIO::Get();
   CHECK(ml->WatchFileDescriptor(browser_socket_, true /* persistent */,
                                 base::MessagePumpForIO::WATCH_READ,
-                                &file_descriptor_watcher_, this));
+                                &fd_watch_controller_, this));
   ml->AddDestructionObserver(this);
 }
 
@@ -225,7 +232,7 @@ void CrashHandlerHostLinux::OnFileCanReadWithoutBlocking(int fd) {
                << " is disabled."
                << " msg_size:" << msg_size
                << " errno:" << errno;
-    file_descriptor_watcher_.StopWatchingFileDescriptor();
+    fd_watch_controller_.StopWatchingFileDescriptor();
     return;
   }
   const bool bad_message = (msg_size != expected_msg_size ||
@@ -404,7 +411,7 @@ void CrashHandlerHostLinux::FindCrashingThreadAndDump(
 void CrashHandlerHostLinux::WriteDumpFile(BreakpadInfo* info,
                                           std::unique_ptr<char[]> crash_context,
                                           pid_t crashing_pid) {
-  base::AssertBlockingAllowed();
+  base::ScopedBlockingCall scoped_blocking_call(base::BlockingType::MAY_BLOCK);
 
   // Set |info->distro| here because base::GetLinuxDistro() needs to run on a
   // blocking sequence.
@@ -417,7 +424,7 @@ void CrashHandlerHostLinux::WriteDumpFile(BreakpadInfo* info,
   info->distro = distro_str;
 
   base::FilePath dumps_path("/tmp");
-  PathService::Get(base::DIR_TEMP, &dumps_path);
+  base::PathService::Get(base::DIR_TEMP, &dumps_path);
   if (!info->upload)
     dumps_path = dumps_path_;
   const std::string minidump_filename =
@@ -480,7 +487,7 @@ void CrashHandlerHostLinux::QueueCrashDumpTask(
 }
 
 void CrashHandlerHostLinux::WillDestroyCurrentMessageLoop() {
-  file_descriptor_watcher_.StopWatchingFileDescriptor();
+  fd_watch_controller_.StopWatchingFileDescriptor();
 
   // If we are quitting and there are crash dumps in the queue, turn them into
   // no-ops.
@@ -494,12 +501,45 @@ bool CrashHandlerHostLinux::IsShuttingDown() const {
 
 }  // namespace breakpad
 
+#endif  // !defined(OS_ANDROID)
+
 #if !defined(OS_CHROMEOS)
 
 namespace crashpad {
 
+void CrashHandlerHost::AddObserver(Observer* observer) {
+  base::AutoLock lock(observers_lock_);
+  bool inserted = observers_.insert(observer).second;
+  DCHECK(inserted);
+}
+
+void CrashHandlerHost::RemoveObserver(Observer* observer) {
+  base::AutoLock lock(observers_lock_);
+  size_t removed = observers_.erase(observer);
+  DCHECK(removed);
+}
+
+// static
+CrashHandlerHost* CrashHandlerHost::Get() {
+  static CrashHandlerHost* instance = new CrashHandlerHost();
+  return instance;
+}
+
+int CrashHandlerHost::GetDeathSignalSocket() {
+  static bool initialized = base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::IO},
+      base::BindOnce(&CrashHandlerHost::Init, base::Unretained(this)));
+  DCHECK(initialized);
+
+  return process_socket_.get();
+}
+
+CrashHandlerHost::~CrashHandlerHost() = default;
+
 CrashHandlerHost::CrashHandlerHost()
-    : file_descriptor_watcher_(FROM_HERE),
+    : observers_lock_(),
+      observers_(),
+      fd_watch_controller_(FROM_HERE),
       process_socket_(),
       browser_socket_() {
   int fds[2];
@@ -513,30 +553,33 @@ CrashHandlerHost::CrashHandlerHost()
   process_socket_.reset(fds[0]);
   browser_socket_.reset(fds[1]);
 
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
-      base::BindOnce(&CrashHandlerHost::Init, base::Unretained(this)));
+  static const int on = 1;
+  CHECK_EQ(0, setsockopt(browser_socket_.get(), SOL_SOCKET, SO_PASSCRED, &on,
+                         sizeof(on)));
 }
 
-CrashHandlerHost::~CrashHandlerHost() = default;
-
 void CrashHandlerHost::Init() {
-  base::MessageLoopForIO* ml = base::MessageLoopForIO::current();
+  base::MessageLoopCurrentForIO ml = base::MessageLoopCurrentForIO::Get();
   CHECK(ml->WatchFileDescriptor(browser_socket_.get(), /* persistent= */ true,
                                 base::MessagePumpForIO::WATCH_READ,
-                                &file_descriptor_watcher_, this));
+                                &fd_watch_controller_, this));
   ml->AddDestructionObserver(this);
 }
 
 bool CrashHandlerHost::ReceiveClientMessage(int client_fd,
                                             base::ScopedFD* handler_fd) {
+  int signo;
+  iovec iov;
+  iov.iov_base = &signo;
+  iov.iov_len = sizeof(signo);
+
   msghdr msg;
   msg.msg_name = nullptr;
   msg.msg_namelen = 0;
-  msg.msg_iov = nullptr;
-  msg.msg_iovlen = 0;
+  msg.msg_iov = &iov;
+  msg.msg_iovlen = 1;
 
-  char cmsg_buf[CMSG_SPACE(sizeof(int))];
+  char cmsg_buf[CMSG_SPACE(sizeof(int)) + CMSG_SPACE(sizeof(ucred))];
   msg.msg_control = cmsg_buf;
   msg.msg_controllen = sizeof(cmsg_buf);
   msg.msg_flags = 0;
@@ -547,17 +590,43 @@ bool CrashHandlerHost::ReceiveClientMessage(int client_fd,
     return false;
   }
 
-  cmsghdr* cmsg = CMSG_FIRSTHDR(&msg);
-  if (!cmsg || cmsg->cmsg_level != SOL_SOCKET ||
-      cmsg->cmsg_type != SCM_RIGHTS || cmsg->cmsg_len < CMSG_LEN(sizeof(int))) {
+  base::ScopedFD child_fd;
+  pid_t child_pid = -1;
+  for (cmsghdr* cmsg = CMSG_FIRSTHDR(&msg); cmsg;
+       cmsg = CMSG_NXTHDR(&msg, cmsg)) {
+    if (cmsg->cmsg_level != SOL_SOCKET) {
+      continue;
+    }
+
+    if (cmsg->cmsg_type == SCM_RIGHTS) {
+      child_fd.reset(*reinterpret_cast<int*>(CMSG_DATA(cmsg)));
+    } else if (cmsg->cmsg_type == SCM_CREDENTIALS) {
+      child_pid = reinterpret_cast<ucred*>(CMSG_DATA(cmsg))->pid;
+    }
+  }
+
+  if (!child_fd.is_valid()) {
     LOG(ERROR) << "Death signal missing descriptor";
     return false;
   }
-  DCHECK(!CMSG_NXTHDR(&msg, cmsg));
 
-  handler_fd->reset(*reinterpret_cast<int*>(CMSG_DATA(cmsg)));
-  DCHECK(handler_fd->is_valid());
+  if (child_pid < 0) {
+    LOG(ERROR) << "Death signal missing pid";
+    return false;
+  }
+
+  NotifyCrashSignalObservers(child_pid, signo);
+
+  handler_fd->reset(child_fd.release());
   return true;
+}
+
+void CrashHandlerHost::NotifyCrashSignalObservers(base::ProcessId pid,
+                                                  int signo) {
+  base::AutoLock lock(observers_lock_);
+  for (Observer* observer : observers_) {
+    observer->ChildReceivedCrashSignal(pid, signo);
+  }
 }
 
 void CrashHandlerHost::OnFileCanWriteWithoutBlocking(int fd) {
@@ -572,26 +641,13 @@ void CrashHandlerHost::OnFileCanReadWithoutBlocking(int fd) {
     return;
   }
 
-  base::FilePath handler_path;
-  base::FilePath database_path;
-  base::FilePath metrics_path;
-  std::string url;
-  std::map<std::string, std::string> process_annotations;
-  std::vector<std::string> arguments;
-  if (!crash_reporter::internal::BuildHandlerArgs(
-          &handler_path, &database_path, &metrics_path, &url,
-          &process_annotations, &arguments)) {
-    return;
-  }
-
-  bool result = CrashpadClient::StartHandlerForClient(
-      handler_path, database_path, metrics_path, url, process_annotations,
-      arguments, handler_fd.get());
+  bool result =
+      crash_reporter::internal::StartHandlerForClient(handler_fd.get());
   DCHECK(result);
 }
 
 void CrashHandlerHost::WillDestroyCurrentMessageLoop() {
-  file_descriptor_watcher_.StopWatchingFileDescriptor();
+  fd_watch_controller_.StopWatchingFileDescriptor();
 }
 
 }  // namespace crashpad

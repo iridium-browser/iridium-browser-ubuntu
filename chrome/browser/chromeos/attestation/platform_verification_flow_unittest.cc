@@ -16,9 +16,9 @@
 #include "chrome/browser/chromeos/settings/scoped_cros_settings_test_helper.h"
 #include "chrome/browser/profiles/profile_impl.h"
 #include "chrome/common/pref_names.h"
-#include "chromeos/attestation/attestation.pb.h"
 #include "chromeos/attestation/mock_attestation_flow.h"
 #include "chromeos/cryptohome/mock_async_method_caller.h"
+#include "chromeos/dbus/attestation/attestation.pb.h"
 #include "chromeos/dbus/fake_cryptohome_client.h"
 #include "chromeos/settings/cros_settings_names.h"
 #include "content/public/test/test_browser_thread_bundle.h"
@@ -114,7 +114,7 @@ class PlatformVerificationFlowTest : public ::testing::Test {
     callback_ = base::Bind(&PlatformVerificationFlowTest::FakeChallengeCallback,
                            base::Unretained(this));
 
-    settings_helper_.ReplaceProvider(kAttestationForContentProtectionEnabled);
+    settings_helper_.ReplaceDeviceSettingsProviderWithStub();
     settings_helper_.SetBoolean(kAttestationForContentProtectionEnabled, true);
   }
 

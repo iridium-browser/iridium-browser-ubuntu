@@ -14,7 +14,7 @@
 #include "ash/test/ash_test_base.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
-#include "services/ui/public/cpp/input_devices/input_device_client_test_api.h"
+#include "services/ws/public/cpp/input_devices/input_device_client_test_api.h"
 #include "ui/events/devices/input_device_manager.h"
 #include "ui/keyboard/keyboard_util.h"
 
@@ -105,20 +105,20 @@ void TrayIMETest::SuppressKeyboard() {
   std::vector<ui::TouchscreenDevice> screens;
   screens.emplace_back(1, ui::InputDeviceType::INPUT_DEVICE_INTERNAL,
                        "Touchscreen", gfx::Size(1024, 768), 0);
-  ui::InputDeviceClientTestApi input_device_client_test_api;
+  ws::InputDeviceClientTestApi input_device_client_test_api;
   input_device_client_test_api.SetTouchscreenDevices(screens);
 
   std::vector<ui::InputDevice> keyboards;
-  keyboards.push_back(ui::InputDevice(
-      2, ui::InputDeviceType::INPUT_DEVICE_EXTERNAL, "keyboard"));
+  keyboards.push_back(
+      ui::InputDevice(2, ui::InputDeviceType::INPUT_DEVICE_USB, "keyboard"));
   input_device_client_test_api.SetKeyboardDevices(keyboards);
 }
 
 void TrayIMETest::RestoreKeyboard() {
   DCHECK(keyboard_suppressed_);
-  ui::InputDeviceClientTestApi().SetTouchscreenDevices(
+  ws::InputDeviceClientTestApi().SetTouchscreenDevices(
       touchscreen_devices_to_restore_);
-  ui::InputDeviceClientTestApi().SetKeyboardDevices(
+  ws::InputDeviceClientTestApi().SetKeyboardDevices(
       keyboard_devices_to_restore_);
 }
 

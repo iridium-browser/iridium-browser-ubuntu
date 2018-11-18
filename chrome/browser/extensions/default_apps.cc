@@ -22,6 +22,7 @@
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
 #include "components/version_info/version_info.h"
+#include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 
 namespace {
@@ -155,8 +156,8 @@ void Provider::SetPrefs(std::unique_ptr<base::DictionaryValue> prefs) {
         new_default_apps.insert(i.key());
     }
     // Filter out the new default apps for migrating users.
-    for (std::set<std::string>::iterator it = new_default_apps.begin();
-         it != new_default_apps.end(); ++it) {
+    for (auto it = new_default_apps.begin(); it != new_default_apps.end();
+         ++it) {
       prefs->Remove(*it, NULL);
     }
   }

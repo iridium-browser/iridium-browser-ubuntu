@@ -15,7 +15,7 @@
 #include "chrome/browser/chromeos/login/signin/oauth2_login_manager.h"
 #include "chrome/browser/chromeos/login/signin/oauth2_login_manager_factory.h"
 #include "chrome/common/url_constants.h"
-#include "components/google/core/browser/google_util.h"
+#include "components/google/core/common/google_util.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
@@ -209,6 +209,23 @@ bool IsSessionRestorePending(Profile* profile) {
   }
 
   return pending_session_restore;
+}
+
+void ResetAreAllSessionsMergedForTesting() {
+  if (AreAllSessionMergedAlready()) {
+    // This is safe for tests since it will only be called from SetUp() once per
+    // test and not concurrently.
+    int current_value = g_all_profiles_restored_.SubtleRefCountForDebug();
+    bool is_positive = current_value > 0;
+    if (!is_positive)
+      current_value *= -1;
+    for (int i = 0; i < current_value; i++) {
+      if (is_positive)
+        g_all_profiles_restored_.Decrement();
+      else
+        g_all_profiles_restored_.Increment();
+    }
+  }
 }
 
 }  // namespace merge_session_throttling_utils

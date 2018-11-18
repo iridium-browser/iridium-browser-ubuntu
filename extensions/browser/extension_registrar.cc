@@ -21,18 +21,12 @@
 #include "extensions/browser/process_manager.h"
 #include "extensions/browser/renderer_startup_helper.h"
 #include "extensions/browser/runtime_data.h"
+#include "extensions/browser/service_worker_task_queue.h"
 #include "extensions/common/manifest_handlers/background_info.h"
 
 using content::DevToolsAgentHost;
 
 namespace extensions {
-
-namespace {
-
-// For binding.
-void DoNothingWithExtensionHost(ExtensionHost* host) {}
-
-}  // namespace
 
 ExtensionRegistrar::ExtensionRegistrar(content::BrowserContext* browser_context,
                                        Delegate* delegate)
@@ -409,15 +403,14 @@ bool ExtensionRegistrar::IsExtensionEnabled(
 
 void ExtensionRegistrar::DidCreateRenderViewForBackgroundPage(
     ExtensionHost* host) {
-  OrphanedDevTools::iterator iter =
-      orphaned_dev_tools_.find(host->extension_id());
+  auto iter = orphaned_dev_tools_.find(host->extension_id());
   if (iter == orphaned_dev_tools_.end())
     return;
-
   // Keepalive count is reset on extension reload. This re-establishes the
   // keepalive that was added when the DevTools agent was initially attached.
   ProcessManager::Get(browser_context_)
-      ->IncrementLazyKeepaliveCount(host->extension());
+      ->IncrementLazyKeepaliveCount(host->extension(), Activity::DEV_TOOLS,
+                                    std::string());
   iter->second->ConnectWebContents(host->host_contents());
   orphaned_dev_tools_.erase(iter);
 }
@@ -435,6 +428,14 @@ void ExtensionRegistrar::ActivateExtension(const Extension* extension,
                  weak_factory_.GetWeakPtr(), WrapRefCounted(extension)));
 
   renderer_helper_->OnExtensionLoaded(*extension);
+
+  // TODO(lazyboy): We should move all logic that is required to start up an
+  // extension to a separate class, instead of calling adhoc methods like
+  // service worker ones below.
+  if (BackgroundInfo::IsServiceWorkerBased(extension)) {
+    DCHECK(extension->is_extension());
+    ServiceWorkerTaskQueue::Get(browser_context_)->ActivateExtension(extension);
+  }
 
   // Tell subsystems that use the ExtensionRegistryObserver::OnExtensionLoaded
   // about the new extension.
@@ -459,6 +460,10 @@ void ExtensionRegistrar::DeactivateExtension(const Extension* extension,
   renderer_helper_->OnExtensionUnloaded(*extension);
   extension_system_->UnregisterExtensionWithRequestContexts(extension->id(),
                                                             reason);
+  if (BackgroundInfo::IsServiceWorkerBased(extension)) {
+    ServiceWorkerTaskQueue::Get(browser_context_)
+        ->DeactivateExtension(extension);
+  }
   delegate_->PostDeactivateExtension(extension);
 }
 
@@ -517,8 +522,7 @@ void ExtensionRegistrar::MaybeSpinUpLazyBackgroundPage(
   // Wake up the event page by posting a dummy task.
   LazyBackgroundTaskQueue* queue =
       LazyBackgroundTaskQueue::Get(browser_context_);
-  queue->AddPendingTask(browser_context_, extension->id(),
-                        base::BindOnce(&DoNothingWithExtensionHost));
+  queue->AddPendingTask(browser_context_, extension->id(), base::DoNothing());
 }
 
 }  // namespace extensions

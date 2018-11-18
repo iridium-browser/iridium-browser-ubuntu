@@ -12,37 +12,37 @@
 namespace blink {
 
 // https://html.spec.whatwg.org/multipage/webappapis.html#creating-a-module-script
-ModuleScript* ModuleScript::Create(const String& source_text,
+ModuleScript* ModuleScript::Create(const ParkableString& original_source_text,
                                    Modulator* modulator,
                                    const KURL& source_url,
                                    const KURL& base_url,
                                    const ScriptFetchOptions& options,
                                    AccessControlStatus access_control_status,
                                    const TextPosition& start_position) {
-  // Step 1. If scripting is disabled for settings's responsible browsing
-  // context, then set source to the empty string. [spec text]
-  //
-  // TODO(hiroshige): Implement this.
+  // <spec step="1">If scripting is disabled for settings's responsible browsing
+  // context, then set source to the empty string.</spec>
+  ParkableString source_text;
+  if (!modulator->IsScriptingDisabled())
+    source_text = original_source_text;
 
-  // Step 2. Let script be a new module script that this algorithm will
-  // subsequently initialize. [spec text]
+  // <spec step="2">Let script be a new module script that this algorithm will
+  // subsequently initialize.</spec>
 
-  // Step 3. Set script's settings object to settings. [spec text]
+  // <spec step="3">Set script's settings object to settings.</spec>
   //
   // Note: "script's settings object" will be |modulator|.
 
-  // Step 7. Let result be ParseModule(source, settings's Realm, script). [spec
-  // text]
+  // <spec step="7">Let result be ParseModule(source, settings's Realm,
+  // script).</spec>
   ScriptState* script_state = modulator->GetScriptState();
   ScriptState::Scope scope(script_state);
   v8::Isolate* isolate = script_state->GetIsolate();
   ExceptionState exception_state(isolate, ExceptionState::kExecutionContext,
                                  "ModuleScript", "Create");
 
-  // Delegate to Modulator::CompileModule to process Steps 3-5.
-  ScriptModule result = modulator->CompileModule(
-      source_text, source_url, base_url, options, access_control_status,
-      start_position, exception_state);
+  ScriptModule result = ScriptModule::Compile(
+      isolate, source_text.ToString(), source_url, base_url, options,
+      access_control_status, start_position, exception_state);
 
   // CreateInternal processes Steps 4 and 8-10.
   //
@@ -54,46 +54,46 @@ ModuleScript* ModuleScript::Create(const String& source_text,
       CreateInternal(source_text, modulator, result, source_url, base_url,
                      options, start_position);
 
-  // Step 8. If result is a list of errors, then: [spec text]
+  // <spec step="8">If result is a list of errors, then:</spec>
   if (exception_state.HadException()) {
     DCHECK(result.IsNull());
 
-    // Step 8.1. Set script's parse error to result[0]. [spec text]
+    // <spec step="8.1">Set script's parse error to result[0].</spec>
     v8::Local<v8::Value> error = exception_state.GetException();
     exception_state.ClearException();
     script->SetParseErrorAndClearRecord(ScriptValue(script_state, error));
 
-    // Step 6.2. "Return script." [spec text]
+    // <spec step="8.2">Return script.</spec>
     return script;
   }
 
-  // Step 9. For each string requested of result.[[RequestedModules]]: [spec
-  // text]
+  // <spec step="9">For each string requested of
+  // result.[[RequestedModules]]:</spec>
   for (const auto& requested :
        modulator->ModuleRequestsFromScriptModule(result)) {
-    // Step 9.1. Let url be the result of resolving a module specifier given
-    // script and requested. [spec text]
+    // <spec step="9.1">Let url be the result of resolving a module specifier
+    // given script and requested.</spec>
     //
-    // Step 9.2. If url is failure, then: [spec text]
+    // <spec step="9.2">If url is failure, then:</spec>
     String failure_reason;
     if (script->ResolveModuleSpecifier(requested.specifier, &failure_reason)
             .IsValid())
       continue;
 
-    // Step 9.2.1. Let error be a new TypeError exception. [spec text]
+    // <spec step="9.2.1">Let error be a new TypeError exception.</spec>
     String error_message = "Failed to resolve module specifier \"" +
                            requested.specifier + "\". " + failure_reason;
     v8::Local<v8::Value> error =
         V8ThrowException::CreateTypeError(isolate, error_message);
 
-    // Step 9.2.2. Set script's parse error to error. [spec text]
+    // <spec step="9.2.2">Set script's parse error to error.</spec>
     script->SetParseErrorAndClearRecord(ScriptValue(script_state, error));
 
-    // Step 7.2.3. "Return script." [spec text]
+    // <spec step="9.2.3">Return script.</spec>
     return script;
   }
 
-  // Step 11. "Return script." [spec text]
+  // <spec step="11">Return script.</spec>
   return script;
 }
 
@@ -101,27 +101,28 @@ ModuleScript* ModuleScript::CreateForTest(Modulator* modulator,
                                           ScriptModule record,
                                           const KURL& base_url,
                                           const ScriptFetchOptions& options) {
-  String dummy_source_text = "";
+  ParkableString dummy_source_text(String("").ReleaseImpl());
   KURL dummy_source_url;
   return CreateInternal(dummy_source_text, modulator, record, dummy_source_url,
                         base_url, options, TextPosition::MinimumPosition());
 }
 
 // https://html.spec.whatwg.org/multipage/webappapis.html#creating-a-module-script
-ModuleScript* ModuleScript::CreateInternal(const String& source_text,
+ModuleScript* ModuleScript::CreateInternal(const ParkableString& source_text,
                                            Modulator* modulator,
                                            ScriptModule result,
                                            const KURL& source_url,
                                            const KURL& base_url,
                                            const ScriptFetchOptions& options,
                                            const TextPosition& start_position) {
-  // Step 6. Set script's parse error and error to rethrow to null. [spec text]
+  // <spec step="6">Set script's parse error and error to rethrow to
+  // null.</spec>
   //
-  // Step 10. Set script's record to result. [spec text]
+  // <spec step="10">Set script's record to result.</spec>
   //
-  // Step 4. Set script's base URL to baseURL. [spec text]
+  // <spec step="4">Set script's base URL to baseURL.</spec>
   //
-  // Step 5. Set script's fetch options to options. [spec text]
+  // <spec step="5">Set script's fetch options to options.</spec>
   //
   // [nospec] |source_text| is saved for CSP checks.
   ModuleScript* module_script =
@@ -140,7 +141,7 @@ ModuleScript::ModuleScript(Modulator* settings_object,
                            const KURL& source_url,
                            const KURL& base_url,
                            const ScriptFetchOptions& fetch_options,
-                           const String& source_text,
+                           const ParkableString& source_text,
                            const TextPosition& start_position)
     : Script(fetch_options, base_url),
       settings_object_(settings_object),
@@ -209,8 +210,8 @@ KURL ModuleScript::ResolveModuleSpecifier(const String& module_request,
   if (found != specifier_to_url_cache_.end())
     return found->value;
 
-  KURL url = Modulator::ResolveModuleSpecifier(module_request, BaseURL(),
-                                               failure_reason);
+  KURL url = settings_object_->ResolveModuleSpecifier(module_request, BaseURL(),
+                                                      failure_reason);
   // Cache the result only on success, so that failure_reason is set for
   // subsequent calls too.
   if (url.IsValid())
@@ -220,14 +221,10 @@ KURL ModuleScript::ResolveModuleSpecifier(const String& module_request,
 
 void ModuleScript::Trace(blink::Visitor* visitor) {
   visitor->Trace(settings_object_);
+  visitor->Trace(record_.UnsafeCast<v8::Value>());
+  visitor->Trace(parse_error_);
+  visitor->Trace(error_to_rethrow_);
   Script::Trace(visitor);
-}
-void ModuleScript::TraceWrappers(const ScriptWrappableVisitor* visitor) const {
-  // TODO(mlippautz): Support TraceWrappers(const
-  // TraceWrapperV8Reference<v8::Module>&) to remove the cast.
-  visitor->TraceWrappers(record_.UnsafeCast<v8::Value>());
-  visitor->TraceWrappers(parse_error_);
-  visitor->TraceWrappers(error_to_rethrow_);
 }
 
 void ModuleScript::RunScript(LocalFrame* frame, const SecurityOrigin*) const {
@@ -237,7 +234,7 @@ void ModuleScript::RunScript(LocalFrame* frame, const SecurityOrigin*) const {
 }
 
 String ModuleScript::InlineSourceTextForCSP() const {
-  return source_text_;
+  return source_text_.ToString();
 }
 
 std::ostream& operator<<(std::ostream& stream,

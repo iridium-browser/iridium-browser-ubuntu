@@ -6,6 +6,7 @@
 
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/blink/renderer/platform/wtf/static_constructors.h"
+#include "third_party/blink/renderer/platform/wtf/wtf.h"
 
 namespace blink {
 
@@ -21,7 +22,7 @@ const char kDesignMode[] = "DesignMode";
 const char kFontSizeChange[] = "FontSizeChange";
 const char kFonts[] = "Fonts";
 const char kFrame[] = "Frame";
-const char kFullScreen[] = "FullScreen";
+const char kFullscreen[] = "Fullscreen";
 const char kInheritedStyleChangeFromParentFrame[] =
     "InheritedStyleChangeFromParentFrame";
 const char kInline[] = "Inline";
@@ -29,8 +30,10 @@ const char kInlineCSSStyleMutated[] =
     "Inline CSS style declaration was mutated";
 const char kInspector[] = "Inspector";
 const char kLanguage[] = "Language";
+const char kInvisibleChange[] = "InvisibleChange";
 const char kLinkColorChange[] = "LinkColorChange";
 const char kPlatformColorChange[] = "PlatformColorChange";
+const char kPolicyViolation[] = "Feature Policy Violation";
 const char kPropagateInheritChangeToDistributedNodes[] =
     "PropagateInheritChangeToDistributedNodes";
 const char kPropertyRegistration[] = "PropertyRegistration";

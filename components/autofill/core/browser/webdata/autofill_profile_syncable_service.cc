@@ -21,6 +21,8 @@
 #include "components/autofill/core/browser/form_group.h"
 #include "components/autofill/core/browser/webdata/autofill_table.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
+#include "components/autofill/core/common/autofill_constants.h"
+#include "components/sync/model/sync_change_processor.h"
 #include "components/sync/model/sync_error.h"
 #include "components/sync/model/sync_error_factory.h"
 #include "components/sync/protocol/sync.pb.h"
@@ -41,7 +43,7 @@ std::string LimitData(const std::string& data) {
   return sanitized_value;
 }
 
-void* UserDataKey() {
+void* AutofillProfileSyncableServiceUserDataKey() {
   // Use the address of a static that COMDAT folding won't ever fold
   // with something else.
   static int user_data_key = 0;
@@ -73,8 +75,9 @@ void AutofillProfileSyncableService::CreateForWebDataServiceAndBackend(
     AutofillWebDataBackend* webdata_backend,
     const std::string& app_locale) {
   web_data_service->GetDBUserData()->SetUserData(
-      UserDataKey(), base::WrapUnique(new AutofillProfileSyncableService(
-                         webdata_backend, app_locale)));
+      AutofillProfileSyncableServiceUserDataKey(),
+      base::WrapUnique(
+          new AutofillProfileSyncableService(webdata_backend, app_locale)));
 }
 
 // static
@@ -82,7 +85,8 @@ AutofillProfileSyncableService*
 AutofillProfileSyncableService::FromWebDataService(
     AutofillWebDataService* web_data_service) {
   return static_cast<AutofillProfileSyncableService*>(
-      web_data_service->GetDBUserData()->GetUserData(UserDataKey()));
+      web_data_service->GetDBUserData()->GetUserData(
+          AutofillProfileSyncableServiceUserDataKey()));
 }
 
 AutofillProfileSyncableService::AutofillProfileSyncableService()
@@ -95,9 +99,9 @@ AutofillProfileSyncableService::MergeDataAndStartSyncing(
     std::unique_ptr<syncer::SyncChangeProcessor> sync_processor,
     std::unique_ptr<syncer::SyncErrorFactory> sync_error_factory) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  DCHECK(!sync_processor_.get());
-  DCHECK(sync_processor.get());
-  DCHECK(sync_error_factory.get());
+  DCHECK(!sync_processor_);
+  DCHECK(sync_processor);
+  DCHECK(sync_error_factory);
   DVLOG(1) << "Associating Autofill: MergeDataAndStartSyncing";
 
   syncer::SyncMergeResult merge_result(type);
@@ -216,7 +220,7 @@ void AutofillProfileSyncableService::StopSyncing(syncer::ModelType type) {
 syncer::SyncDataList AutofillProfileSyncableService::GetAllSyncData(
     syncer::ModelType type) const {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  DCHECK(sync_processor_.get());
+  DCHECK(sync_processor_);
   DCHECK_EQ(type, syncer::AUTOFILL_PROFILE);
 
   syncer::SyncDataList current_data;
@@ -229,7 +233,7 @@ syncer::SyncError AutofillProfileSyncableService::ProcessSyncChanges(
     const base::Location& from_here,
     const syncer::SyncChangeList& change_list) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  if (!sync_processor_.get()) {
+  if (!sync_processor_) {
     syncer::SyncError error(FROM_HERE,
                             syncer::SyncError::DATATYPE_ERROR,
                             "Models not yet associated.",
@@ -279,7 +283,7 @@ void AutofillProfileSyncableService::AutofillProfileChanged(
   // up we are going to process all when MergeData..() is called. If we receive
   // notification after the sync exited, it will be sinced next time Chrome
   // starts.
-  if (sync_processor_.get()) {
+  if (sync_processor_) {
     ActOnChange(change);
   } else if (!flare_.is_null()) {
     flare_.Run(syncer::AUTOFILL_PROFILE);
@@ -323,7 +327,10 @@ bool AutofillProfileSyncableService::OverwriteProfileWithServerData(
   bool diff = false;
   if (specifics.has_origin() && profile->origin() != specifics.origin()) {
     bool was_verified = profile->IsVerified();
-    profile->set_origin(specifics.origin());
+    // In this case, the local origin must be empty on the local |profile|, but
+    // the remote profile was verified.
+    if (specifics.origin() == kSettingsOrigin)
+      profile->set_origin(kSettingsOrigin);
     diff = true;
 
     // Verified profiles should never be overwritten by unverified ones.
@@ -409,8 +416,9 @@ bool AutofillProfileSyncableService::OverwriteProfileWithServerData(
   // Update the validity state bitfield.
   if (specifics.has_validity_state_bitfield() &&
       specifics.validity_state_bitfield() !=
-          profile->GetValidityBitfieldValue()) {
-    profile->SetValidityFromBitfieldValue(specifics.validity_state_bitfield());
+          profile->GetClientValidityBitfieldValue()) {
+    profile->SetClientValidityFromBitfieldValue(
+        specifics.validity_state_bitfield());
     diff = true;
   }
 
@@ -424,6 +432,12 @@ bool AutofillProfileSyncableService::OverwriteProfileWithServerData(
     diff = true;
   }
 
+  if (specifics.is_client_validity_states_updated() !=
+      profile->is_client_validity_states_updated()) {
+    profile->set_is_client_validity_states_updated(
+        specifics.is_client_validity_states_updated());
+    diff = true;
+  }
   return diff;
 }
 
@@ -478,7 +492,10 @@ void AutofillProfileSyncableService::WriteAutofillProfile(
       LimitData(
           UTF16ToUTF8(profile.GetRawInfo(ADDRESS_HOME_DEPENDENT_LOCALITY))));
   specifics->set_address_home_language_code(LimitData(profile.language_code()));
-  specifics->set_validity_state_bitfield(profile.GetValidityBitfieldValue());
+  specifics->set_validity_state_bitfield(
+      profile.GetClientValidityBitfieldValue());
+  specifics->set_is_client_validity_states_updated(
+      profile.is_client_validity_states_updated());
 
   // TODO(estade): this should be set_email_address.
   specifics->add_email_address(
@@ -579,7 +596,7 @@ void AutofillProfileSyncableService::ActOnChange(
       (change.type() == AutofillProfileChange::REMOVE &&
        !change.data_model()) ||
       (change.type() != AutofillProfileChange::REMOVE && change.data_model()));
-  DCHECK(sync_processor_.get());
+  DCHECK(sync_processor_);
 
   if (change.data_model() &&
       change.data_model()->record_type() != AutofillProfile::LOCAL_PROFILE) {
@@ -611,12 +628,15 @@ void AutofillProfileSyncableService::ActOnChange(
       break;
     }
     case AutofillProfileChange::REMOVE: {
-      AutofillProfile empty_profile(change.key(), std::string());
-      new_changes.push_back(
-          syncer::SyncChange(FROM_HERE,
-                             syncer::SyncChange::ACTION_DELETE,
-                             CreateData(empty_profile)));
-      profiles_map_.erase(change.key());
+      // Removals have no data_model() so this change can still be for a
+      // SERVER_PROFILE. Rule it out by a lookup in profiles_map_.
+      if (profiles_map_.find(change.key()) != profiles_map_.end()) {
+        AutofillProfile empty_profile(change.key(), std::string());
+        new_changes.push_back(
+            syncer::SyncChange(FROM_HERE, syncer::SyncChange::ACTION_DELETE,
+                               CreateData(empty_profile)));
+        profiles_map_.erase(change.key());
+      }
       break;
     }
     default:
@@ -631,6 +651,11 @@ void AutofillProfileSyncableService::ActOnChange(
             << "  Error: " << error.message() << "\n"
             << "  Guid: " << change.key();
   }
+}
+
+void AutofillProfileSyncableService::set_sync_processor(
+    syncer::SyncChangeProcessor* sync_processor) {
+  sync_processor_.reset(sync_processor);
 }
 
 syncer::SyncData AutofillProfileSyncableService::CreateData(

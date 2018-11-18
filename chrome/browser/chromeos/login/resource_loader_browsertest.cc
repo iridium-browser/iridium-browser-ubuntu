@@ -32,7 +32,7 @@ GURL CreateResource(const std::string& content, const std::string& file_ext) {
   EXPECT_EQ(static_cast<int>(content.size()),
             base::WriteFile(path, content.c_str(), content.size()));
   base::FilePath path_with_extension;
-  path_with_extension = path.AddExtension(FILE_PATH_LITERAL(file_ext));
+  path_with_extension = path.AddExtension(file_ext);
   EXPECT_TRUE(base::Move(path, path_with_extension));
   return net::FilePathToFileURL(path_with_extension);
 }
@@ -46,7 +46,7 @@ class ResourceLoaderBrowserTest : public InProcessBrowserTest {
   void SetUpOnMainThread() override {
     // Load the data pack containing resource_loader.js.
     base::FilePath resources_pack_path;
-    ASSERT_TRUE(PathService::Get(base::DIR_MODULE, &resources_pack_path));
+    ASSERT_TRUE(base::PathService::Get(base::DIR_MODULE, &resources_pack_path));
     resources_pack_path =
         resources_pack_path.AppendASCII("gen/ui/login/login_resources.pak");
     ui::ResourceBundle::GetSharedInstance().AddDataPackFromPath(

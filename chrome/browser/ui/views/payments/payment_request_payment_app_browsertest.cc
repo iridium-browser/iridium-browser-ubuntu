@@ -113,7 +113,7 @@ class PaymentRequestPaymentAppTest : public PaymentRequestBrowserTestBase {
                                            ->GetBrowserContext();
     auto downloader = std::make_unique<TestDownloader>(
         content::BrowserContext::GetDefaultStoragePartition(context)
-            ->GetURLRequestContext());
+            ->GetURLLoaderFactoryForBrowserProcess());
     downloader->AddTestServerURL("https://alicepay.com/",
                                  alicepay_.GetURL("alicepay.com", "/"));
     downloader->AddTestServerURL("https://bobpay.com/",
@@ -172,7 +172,9 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestPaymentAppTest, NotSupportedError) {
     // SetDownloaderAndIgnorePortInAppScopeForTesting again.
     SetDownloaderAndIgnorePortInAppScopeForTesting();
 
-    ResetEventWaiter(DialogEvent::NOT_SUPPORTED_ERROR);
+    ResetEventWaiterForSequence({DialogEvent::PROCESSING_SPINNER_SHOWN,
+                                 DialogEvent::PROCESSING_SPINNER_HIDDEN,
+                                 DialogEvent::NOT_SUPPORTED_ERROR});
     ASSERT_TRUE(content::ExecuteScript(GetActiveWebContents(), "buy();"));
     WaitForObservedEvent();
     ExpectBodyContains({"NotSupportedError"});
@@ -195,7 +197,9 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestPaymentAppTest, NotSupportedError) {
     // SetDownloaderAndIgnorePortInAppScopeForTesting again.
     SetDownloaderAndIgnorePortInAppScopeForTesting();
 
-    ResetEventWaiter(DialogEvent::NOT_SUPPORTED_ERROR);
+    ResetEventWaiterForSequence({DialogEvent::PROCESSING_SPINNER_SHOWN,
+                                 DialogEvent::PROCESSING_SPINNER_HIDDEN,
+                                 DialogEvent::NOT_SUPPORTED_ERROR});
     ASSERT_TRUE(content::ExecuteScript(GetActiveWebContents(), "buy();"));
     WaitForObservedEvent();
     ExpectBodyContains({"NotSupportedError"});
@@ -204,6 +208,61 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestPaymentAppTest, NotSupportedError) {
 
 // Test CanMakePayment and payment request can be fullfiled.
 IN_PROC_BROWSER_TEST_F(PaymentRequestPaymentAppTest, PayWithAlicePay) {
+  InstallAlicePayForMethod("https://alicepay.com");
+
+  {
+    SetDownloaderAndIgnorePortInAppScopeForTesting();
+
+    NavigateTo("/payment_request_bobpay_test.html");
+
+    ResetEventWaiterForSequence({DialogEvent::CAN_MAKE_PAYMENT_CALLED,
+                                 DialogEvent::CAN_MAKE_PAYMENT_RETURNED});
+    ASSERT_TRUE(
+        content::ExecuteScript(GetActiveWebContents(), "canMakePayment();"));
+    WaitForObservedEvent();
+    ExpectBodyContains({"true"});
+
+    // A new payment request will be created below, so call
+    // SetDownloaderAndIgnorePortInAppScopeForTesting again.
+    SetDownloaderAndIgnorePortInAppScopeForTesting();
+
+    InvokePaymentRequestUI();
+
+    ResetEventWaiterForSequence(
+        {DialogEvent::PROCESSING_SPINNER_SHOWN, DialogEvent::DIALOG_CLOSED});
+    ClickOnDialogViewAndWait(DialogViewID::PAY_BUTTON, dialog_view());
+    ExpectBodyContains({"https://alicepay.com"});
+  }
+
+  // Repeat should have identical results.
+  {
+    SetDownloaderAndIgnorePortInAppScopeForTesting();
+
+    NavigateTo("/payment_request_bobpay_test.html");
+
+    ResetEventWaiterForSequence({DialogEvent::CAN_MAKE_PAYMENT_CALLED,
+                                 DialogEvent::CAN_MAKE_PAYMENT_RETURNED});
+    ASSERT_TRUE(
+        content::ExecuteScript(GetActiveWebContents(), "canMakePayment();"));
+    WaitForObservedEvent();
+    ExpectBodyContains({"true"});
+
+    // A new payment request will be created below, so call
+    // SetDownloaderAndIgnorePortInAppScopeForTesting again.
+    SetDownloaderAndIgnorePortInAppScopeForTesting();
+
+    InvokePaymentRequestUI();
+
+    ResetEventWaiterForSequence(
+        {DialogEvent::PROCESSING_SPINNER_SHOWN, DialogEvent::DIALOG_CLOSED});
+    ClickOnDialogViewAndWait(DialogViewID::PAY_BUTTON, dialog_view());
+    ExpectBodyContains({"https://alicepay.com"});
+  }
+}
+
+// Test CanMakePayment and payment request can be fullfiled in incognito mode.
+IN_PROC_BROWSER_TEST_F(PaymentRequestPaymentAppTest, PayWithAlicePayIncognito) {
+  SetIncognito();
   InstallAlicePayForMethod("https://alicepay.com");
 
   {
@@ -277,7 +336,9 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestPaymentAppTest, BlockAlicePay) {
     // SetDownloaderAndIgnorePortInAppScopeForTesting again.
     SetDownloaderAndIgnorePortInAppScopeForTesting();
 
-    ResetEventWaiter(DialogEvent::NOT_SUPPORTED_ERROR);
+    ResetEventWaiterForSequence({DialogEvent::PROCESSING_SPINNER_SHOWN,
+                                 DialogEvent::PROCESSING_SPINNER_HIDDEN,
+                                 DialogEvent::NOT_SUPPORTED_ERROR});
     ASSERT_TRUE(content::ExecuteScript(GetActiveWebContents(), "buy();"));
     WaitForObservedEvent();
     ExpectBodyContains({"NotSupportedError"});
@@ -300,7 +361,9 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestPaymentAppTest, BlockAlicePay) {
     // SetDownloaderAndIgnorePortInAppScopeForTesting again.
     SetDownloaderAndIgnorePortInAppScopeForTesting();
 
-    ResetEventWaiter(DialogEvent::NOT_SUPPORTED_ERROR);
+    ResetEventWaiterForSequence({DialogEvent::PROCESSING_SPINNER_SHOWN,
+                                 DialogEvent::PROCESSING_SPINNER_HIDDEN,
+                                 DialogEvent::NOT_SUPPORTED_ERROR});
     ASSERT_TRUE(content::ExecuteScript(GetActiveWebContents(), "buy();"));
     WaitForObservedEvent();
     ExpectBodyContains({"NotSupportedError"});
@@ -327,7 +390,9 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestPaymentAppTest, CanNotPayWithBobPay) {
     // SetDownloaderAndIgnorePortInAppScopeForTesting again.
     SetDownloaderAndIgnorePortInAppScopeForTesting();
 
-    ResetEventWaiter(DialogEvent::NOT_SUPPORTED_ERROR);
+    ResetEventWaiterForSequence({DialogEvent::PROCESSING_SPINNER_SHOWN,
+                                 DialogEvent::PROCESSING_SPINNER_HIDDEN,
+                                 DialogEvent::NOT_SUPPORTED_ERROR});
     ASSERT_TRUE(content::ExecuteScript(GetActiveWebContents(), "buy();"));
     WaitForObservedEvent();
     ExpectBodyContains({"NotSupportedError"});
@@ -350,7 +415,9 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestPaymentAppTest, CanNotPayWithBobPay) {
     // SetDownloaderAndIgnorePortInAppScopeForTesting again.
     SetDownloaderAndIgnorePortInAppScopeForTesting();
 
-    ResetEventWaiter(DialogEvent::NOT_SUPPORTED_ERROR);
+    ResetEventWaiterForSequence({DialogEvent::PROCESSING_SPINNER_SHOWN,
+                                 DialogEvent::PROCESSING_SPINNER_HIDDEN,
+                                 DialogEvent::NOT_SUPPORTED_ERROR});
     ASSERT_TRUE(content::ExecuteScript(GetActiveWebContents(), "buy();"));
     WaitForObservedEvent();
     ExpectBodyContains({"NotSupportedError"});
@@ -407,7 +474,9 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestPaymentAppTest, SkipUIEnabledWithBobPay) {
     // Since the skip UI flow is available, the request will complete without
     // interaction besides hitting "pay" on the website.
     ResetEventWaiterForSequence(
-        {DialogEvent::DIALOG_OPENED, DialogEvent::DIALOG_CLOSED});
+        {DialogEvent::PROCESSING_SPINNER_SHOWN,
+         DialogEvent::PROCESSING_SPINNER_HIDDEN, DialogEvent::DIALOG_OPENED,
+         DialogEvent::PROCESSING_SPINNER_SHOWN, DialogEvent::DIALOG_CLOSED});
     content::WebContents* web_contents = GetActiveWebContents();
     const std::string click_buy_button_js =
         "(function() { document.getElementById('buy').click(); })();";
@@ -467,7 +536,7 @@ IN_PROC_BROWSER_TEST_F(PaymentRequestPaymentAppTest,
     // Since the skip UI flow is not available because the payer's email is
     // requested, the request will complete only after clicking on the Pay
     // button in the dialog.
-    ResetEventWaiter(DialogEvent::DIALOG_OPENED);
+    ResetEventWaiterForDialogOpened();
     content::WebContents* web_contents = GetActiveWebContents();
     const std::string click_buy_button_js =
         "(function() { "

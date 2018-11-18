@@ -39,8 +39,8 @@ const char kFailedMessage[] = "Failed";
 void ErrorFunction(const std::string& device_path,
                    const std::string& error_name,
                    const std::string& error_message) {
-  LOG(ERROR) << "Shill Error for: " << device_path
-             << ": " << error_name << " : " << error_message;
+  LOG(ERROR) << "Shill Error for: " << device_path << ": " << error_name
+             << " : " << error_message;
 }
 
 void PostError(const std::string& error,
@@ -103,7 +103,8 @@ void FakeShillDeviceClient::SetProperty(const dbus::ObjectPath& device_path,
                                         const ErrorCallback& error_callback) {
   if (IsReadOnlyProperty(name))
     PostError(shill::kErrorResultInvalidArguments, error_callback);
-  SetPropertyInternal(device_path, name, value, callback, error_callback);
+  SetPropertyInternal(device_path, name, value, callback, error_callback,
+                      /*notify_changed=*/true);
 }
 
 void FakeShillDeviceClient::SetPropertyInternal(
@@ -111,7 +112,8 @@ void FakeShillDeviceClient::SetPropertyInternal(
     const std::string& name,
     const base::Value& value,
     const base::Closure& callback,
-    const ErrorCallback& error_callback) {
+    const ErrorCallback& error_callback,
+    bool notify_changed) {
   base::DictionaryValue* device_properties = NULL;
   if (!stub_devices_.GetDictionaryWithoutPathExpansion(device_path.value(),
                                                        &device_properties)) {
@@ -119,10 +121,12 @@ void FakeShillDeviceClient::SetPropertyInternal(
     return;
   }
   device_properties->SetKey(name, value.Clone());
-  base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE,
-      base::BindOnce(&FakeShillDeviceClient::NotifyObserversPropertyChanged,
-                     weak_ptr_factory_.GetWeakPtr(), device_path, name));
+  if (notify_changed) {
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE,
+        base::BindOnce(&FakeShillDeviceClient::NotifyObserversPropertyChanged,
+                       weak_ptr_factory_.GetWeakPtr(), device_path, name));
+  }
   base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE, callback);
 }
 
@@ -265,7 +269,8 @@ void FakeShillDeviceClient::SetCarrier(const dbus::ObjectPath& device_path,
                                        const base::Closure& callback,
                                        const ErrorCallback& error_callback) {
   SetPropertyInternal(device_path, shill::kCarrierProperty,
-                      base::Value(carrier), callback, error_callback);
+                      base::Value(carrier), callback, error_callback,
+                      /*notify_changed=*/true);
 }
 
 void FakeShillDeviceClient::Reset(const dbus::ObjectPath& device_path,
@@ -386,8 +391,10 @@ ShillDeviceClient::TestInterface* FakeShillDeviceClient::GetTestInterface() {
 void FakeShillDeviceClient::AddDevice(const std::string& device_path,
                                       const std::string& type,
                                       const std::string& name) {
-  DBusThreadManager::Get()->GetShillManagerClient()->GetTestInterface()->
-      AddDevice(device_path);
+  DBusThreadManager::Get()
+      ->GetShillManagerClient()
+      ->GetTestInterface()
+      ->AddDevice(device_path);
 
   base::Value* properties = GetDeviceProperties(device_path);
   properties->SetKey(shill::kTypeProperty, base::Value(type));
@@ -402,39 +409,44 @@ void FakeShillDeviceClient::AddDevice(const std::string& device_path,
 }
 
 void FakeShillDeviceClient::RemoveDevice(const std::string& device_path) {
-  DBusThreadManager::Get()->GetShillManagerClient()->GetTestInterface()->
-      RemoveDevice(device_path);
+  DBusThreadManager::Get()
+      ->GetShillManagerClient()
+      ->GetTestInterface()
+      ->RemoveDevice(device_path);
 
   stub_devices_.RemoveWithoutPathExpansion(device_path, NULL);
 }
 
 void FakeShillDeviceClient::ClearDevices() {
-  DBusThreadManager::Get()->GetShillManagerClient()->GetTestInterface()->
-      ClearDevices();
+  DBusThreadManager::Get()
+      ->GetShillManagerClient()
+      ->GetTestInterface()
+      ->ClearDevices();
 
   stub_devices_.Clear();
 }
 
 void FakeShillDeviceClient::SetDeviceProperty(const std::string& device_path,
                                               const std::string& name,
-                                              const base::Value& value) {
-  VLOG(1) << "SetDeviceProperty: " << device_path
-          << ": " << name << " = " << value;
+                                              const base::Value& value,
+                                              bool notify_changed) {
+  VLOG(1) << "SetDeviceProperty: " << device_path << ": " << name << " = "
+          << value;
   SetPropertyInternal(dbus::ObjectPath(device_path), name, value,
                       base::DoNothing(),
-                      base::Bind(&ErrorFunction, device_path));
+                      base::Bind(&ErrorFunction, device_path), notify_changed);
 }
 
 std::string FakeShillDeviceClient::GetDevicePathForType(
     const std::string& type) {
-  for (base::DictionaryValue::Iterator iter(stub_devices_);
-       !iter.IsAtEnd(); iter.Advance()) {
+  for (base::DictionaryValue::Iterator iter(stub_devices_); !iter.IsAtEnd();
+       iter.Advance()) {
     const base::DictionaryValue* properties = NULL;
     if (!iter.value().GetAsDictionary(&properties))
       continue;
     std::string prop_type;
-    if (!properties->GetStringWithoutPathExpansion(
-            shill::kTypeProperty, &prop_type) ||
+    if (!properties->GetStringWithoutPathExpansion(shill::kTypeProperty,
+                                                   &prop_type) ||
         prop_type != type)
       continue;
     return iter.key();
@@ -605,8 +617,8 @@ void FakeShillDeviceClient::PassStubDeviceProperties(
     const dbus::ObjectPath& device_path,
     const DictionaryValueCallback& callback) const {
   const base::DictionaryValue* device_properties = NULL;
-  if (!stub_devices_.GetDictionaryWithoutPathExpansion(
-      device_path.value(), &device_properties)) {
+  if (!stub_devices_.GetDictionaryWithoutPathExpansion(device_path.value(),
+                                                       &device_properties)) {
     base::DictionaryValue empty_dictionary;
     callback.Run(DBUS_METHOD_CALL_FAILURE, empty_dictionary);
     return;
@@ -632,8 +644,7 @@ void FakeShillDeviceClient::NotifyObserversPropertyChanged(
   }
   base::Value* value = NULL;
   if (!dict->GetWithoutPathExpansion(property, &value)) {
-    LOG(ERROR) << "Notify for unknown property: "
-        << path << " : " << property;
+    LOG(ERROR) << "Notify for unknown property: " << path << " : " << property;
     return;
   }
   for (auto& observer : GetObserverList(device_path))

@@ -28,7 +28,7 @@ final class CronetBufferedOutputStream extends CronetOutputStream {
     private final UploadDataProvider mUploadDataProvider = new UploadDataProviderImpl();
     // Internal buffer that is used to buffer the request body.
     private ByteBuffer mBuffer;
-    private boolean mConnected = false;
+    private boolean mConnected;
 
     /**
      * Package protected constructor.
@@ -94,7 +94,8 @@ final class CronetBufferedOutputStream extends CronetOutputStream {
                     + mInitialContentLength + " bytes");
         }
         if (mConnected) {
-            throw new IllegalStateException("Cannot write after being connected.");
+            throw new IllegalStateException("Use setFixedLengthStreamingMode() or "
+                    + "setChunkedStreamingMode() for writing after connect");
         }
         if (mInitialContentLength != -1) {
             // If mInitialContentLength is known, the buffer should not grow.

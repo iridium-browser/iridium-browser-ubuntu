@@ -45,7 +45,6 @@ namespace test_runner {
 
 class MockContentSettingsClient;
 class MockScreenOrientationClient;
-class MockWebSpeechRecognizer;
 class SpellCheckClient;
 class TestInterfaces;
 class TestRunnerForSpecificView;
@@ -88,7 +87,9 @@ class TestRunner : public WebTestRunner {
   void GetAudioData(std::vector<unsigned char>* buffer_view) const override;
   bool IsRecursiveLayoutDumpRequested() override;
   std::string DumpLayout(blink::WebLocalFrame* frame) override;
-  void DumpPixelsAsync(
+  bool ShouldDumpSelectionRect() const override;
+  // Returns true if the browser should capture the pixels instead.
+  bool DumpPixelsAsync(
       blink::WebLocalFrame* frame,
       base::OnceCallback<void(const SkBitmap&)> callback) override;
   void ReplicateLayoutTestRuntimeFlagsChanges(
@@ -103,7 +104,6 @@ class TestRunner : public WebTestRunner {
   std::string GetAcceptLanguages() const;
   bool shouldStayOnPageAfterHandlingBeforeUnload() const;
   MockScreenOrientationClient* getMockScreenOrientationClient();
-  MockWebSpeechRecognizer* getMockWebSpeechRecognizer();
   bool isPrinting() const;
   bool shouldDumpAsCustomText() const;
   std::string customDumpText() const;
@@ -133,6 +133,11 @@ class TestRunner : public WebTestRunner {
     return is_web_platform_tests_mode_;
   }
   void set_is_web_platform_tests_mode() { is_web_platform_tests_mode_ = true; }
+  const base::Optional<std::vector<std::string>>& file_chooser_paths() const {
+    return file_chooser_paths_;
+  }
+  bool animation_requires_raster() const { return animation_requires_raster_; }
+  void SetAnimationRequiresRaster(bool do_raster);
 
   // To be called when |frame| starts loading - TestRunner will check if
   // there is currently no top-loading-frame being tracked and if so, then it
@@ -153,13 +158,19 @@ class TestRunner : public WebTestRunner {
   bool policyDelegateIsPermissive() const;
   bool policyDelegateShouldNotifyDone() const;
   void setToolTipText(const blink::WebString&);
-  void setDragImage(const blink::WebImage& drag_image);
+  void setDragImage(const SkBitmap& drag_image);
   bool shouldDumpNavigationPolicy() const;
 
   midi::mojom::Result midiAccessorResult();
 
   bool ShouldDumpConsoleMessages() const;
+  // Controls whether console messages produced by the page are dumped
+  // to test output.
+  void SetDumpConsoleMessages(bool value);
+
   bool ShouldDumpJavaScriptDialogs() const;
+
+  void SetShouldUseInnerTextDump(bool value);
 
   blink::WebEffectiveConnectionType effective_connection_type() const {
     return effective_connection_type_;
@@ -234,15 +245,11 @@ class TestRunner : public WebTestRunner {
   void SetCloseRemainingWindowsWhenComplete(bool close_remaining_windows);
   void ResetTestHelperControllers();
 
-  // Allows layout tests to manage origins' whitelisting.
-  void AddOriginAccessWhitelistEntry(const std::string& source_origin,
+  // Allows layout tests to manage origins' allow list.
+  void AddOriginAccessAllowListEntry(const std::string& source_origin,
                                      const std::string& destination_protocol,
                                      const std::string& destination_host,
                                      bool allow_destination_subdomains);
-  void RemoveOriginAccessWhitelistEntry(const std::string& source_origin,
-                                        const std::string& destination_protocol,
-                                        const std::string& destination_host,
-                                        bool allow_destination_subdomains);
 
   // Add |source_code| as an injected stylesheet to the active document of the
   // window of the current V8 context.
@@ -270,34 +277,6 @@ class TestRunner : public WebTestRunner {
                             int max_height);
   bool DisableAutoResizeMode(int new_width, int new_height);
 
-  // Device Motion / Device Orientation related functions
-  void SetMockDeviceMotion(bool has_acceleration_x,
-                           double acceleration_x,
-                           bool has_acceleration_y,
-                           double acceleration_y,
-                           bool has_acceleration_z,
-                           double acceleration_z,
-                           bool has_acceleration_including_gravity_x,
-                           double acceleration_including_gravity_x,
-                           bool has_acceleration_including_gravity_y,
-                           double acceleration_including_gravity_y,
-                           bool has_acceleration_including_gravity_z,
-                           double acceleration_including_gravity_z,
-                           bool has_rotation_rate_alpha,
-                           double rotation_rate_alpha,
-                           bool has_rotation_rate_beta,
-                           double rotation_rate_beta,
-                           bool has_rotation_rate_gamma,
-                           double rotation_rate_gamma,
-                           double interval);
-  void SetMockDeviceOrientation(bool has_alpha,
-                                double alpha,
-                                bool has_beta,
-                                double beta,
-                                bool has_gamma,
-                                double gamma,
-                                bool absolute);
-
   void SetMockScreenOrientation(const std::string& orientation);
   void DisableMockScreenOrientation();
 
@@ -311,7 +290,7 @@ class TestRunner : public WebTestRunner {
   void SetXSSAuditorEnabled(bool enabled);
   void SetAllowUniversalAccessFromFileURLs(bool allow);
   void SetAllowFileAccessFromFileURLs(bool allow);
-  void OverridePreference(const std::string& key, v8::Local<v8::Value> value);
+  void OverridePreference(gin::Arguments* arguments);
 
   // Modify accept_languages in RendererPreferences.
   void SetAcceptLanguages(const std::string& accept_languages);
@@ -439,7 +418,7 @@ class TestRunner : public WebTestRunner {
   void SetUseMockTheme(bool use);
 
   // Sets a flag that causes the test to be marked as completed when the
-  // WebFrameClient receives a loadURLExternally() call.
+  // WebLocalFrameClient receives a loadURLExternally() call.
   void WaitUntilExternalURLLoad();
 
   // This function sets a flag to dump the drag image when the next drag&drop is
@@ -450,10 +429,6 @@ class TestRunner : public WebTestRunner {
   // Sets a flag that tells the WebViewTestProxy to dump the default navigation
   // policy passed to the decidePolicyForNavigation callback.
   void DumpNavigationPolicy();
-
-  // Controls whether console messages produced by the page are dumped
-  // to test output.
-  void SetDumpConsoleMessages(bool value);
 
   // Controls whether JavaScript dialogs such as alert() are dumped to test
   // output.
@@ -527,15 +502,13 @@ class TestRunner : public WebTestRunner {
   // Simulates closing a Web Notification.
   void SimulateWebNotificationClose(const std::string& title, bool by_user);
 
-  // Speech recognition related functions.
-  void AddMockSpeechRecognitionResult(const std::string& transcript,
-                                      double confidence);
-  void SetMockSpeechRecognitionError(const std::string& error,
-                                     const std::string& message);
-
   // Takes care of notifying the delegate after a change to layout test runtime
   // flags.
   void OnLayoutTestRuntimeFlagsChanged();
+
+  // Sets a list of file paths to be selected in the next file chooser session.
+  // If an empty list is specified, the next file chooser will be canceled.
+  void SetFileChooserPaths(const std::vector<std::string>& paths);
 
   ///////////////////////////////////////////////////////////////////////////
   // Internal helpers
@@ -606,14 +579,13 @@ class TestRunner : public WebTestRunner {
   bool use_mock_theme_;
 
   std::unique_ptr<MockScreenOrientationClient> mock_screen_orientation_client_;
-  std::unique_ptr<MockWebSpeechRecognizer> speech_recognizer_;
   std::unique_ptr<SpellCheckClient> spellcheck_;
 
   // Number of currently active color choosers.
   int chooser_count_;
 
   // Captured drag image.
-  blink::WebImage drag_image_;
+  SkBitmap drag_image_;
 
   // View that was focused by a previous call to TestRunner::SetFocus method.
   // Note - this can be a dangling pointer to an already destroyed WebView (this
@@ -623,11 +595,18 @@ class TestRunner : public WebTestRunner {
   // True when running a test in LayoutTests/external/wpt/.
   bool is_web_platform_tests_mode_;
 
+  // True if rasterization should be performed during tests that examine
+  // fling-style animations. This includes middle-click auto-scroll behaviors.
+  // This does not include most "ordinary" animations, such as CSS animations.
+  bool animation_requires_raster_;
+
   // An effective connection type settable by layout tests.
   blink::WebEffectiveConnectionType effective_connection_type_;
 
   // Forces v8 compilation cache to be disabled (used for inspector tests).
   bool disable_v8_cache_ = false;
+
+  base::Optional<std::vector<std::string>> file_chooser_paths_;
 
   base::WeakPtrFactory<TestRunner> weak_factory_;
 

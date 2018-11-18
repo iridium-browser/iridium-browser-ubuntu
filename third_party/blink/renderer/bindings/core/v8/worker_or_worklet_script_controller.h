@@ -36,6 +36,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_cache_options.h"
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/platform/loader/fetch/access_control_status.h"
 #include "third_party/blink/renderer/platform/wtf/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_position.h"
 #include "v8/include/v8.h"
@@ -47,7 +48,7 @@ class ExceptionState;
 class ScriptSourceCode;
 class WorkerOrWorkletGlobalScope;
 
-class CORE_EXPORT WorkerOrWorkletScriptController
+class CORE_EXPORT WorkerOrWorkletScriptController final
     : public GarbageCollectedFinalized<WorkerOrWorkletScriptController> {
   WTF_MAKE_NONCOPYABLE(WorkerOrWorkletScriptController);
 
@@ -61,6 +62,7 @@ class CORE_EXPORT WorkerOrWorkletScriptController
 
   // Returns true if the evaluation completed with no uncaught exception.
   bool Evaluate(const ScriptSourceCode&,
+                AccessControlStatus access_control_status,
                 ErrorEvent** = nullptr,
                 V8CacheOptions = kV8CacheOptionsDefault);
 
@@ -69,14 +71,19 @@ class CORE_EXPORT WorkerOrWorkletScriptController
 
   // Used by WorkerThread. Returns true if the context is successfully
   // initialized or already initialized.
-  bool InitializeContextIfNeeded(const String& human_readable_name);
+  // For WorkerGlobalScope and threaded WorkletGlobalScope, |url_for_debugger|
+  // is and should be used only for setting name/origin that appears in
+  // DevTools. For other global scopes, |human_readable_name| is used for
+  // setting DOMWrapperWorld's human readable name.
+  bool InitializeContextIfNeeded(const String& human_readable_name,
+                                 const KURL& url_for_debugger);
 
   // Used by WorkerGlobalScope:
   void RethrowExceptionFromImportedScript(ErrorEvent*, ExceptionState&);
   void DisableEval(const String&);
 
   // Used by Inspector agents:
-  ScriptState* GetScriptState() { return script_state_.get(); }
+  ScriptState* GetScriptState() { return script_state_; }
 
   // Used by V8 bindings:
   v8::Local<v8::Context> GetContext() {
@@ -102,6 +109,7 @@ class CORE_EXPORT WorkerOrWorkletScriptController
 
   // Evaluate a script file in the current execution environment.
   ScriptValue EvaluateInternal(const ScriptSourceCode&,
+                               AccessControlStatus,
                                V8CacheOptions);
   void DisposeContextIfNeeded();
 
@@ -112,7 +120,7 @@ class CORE_EXPORT WorkerOrWorkletScriptController
   // usually the main thread's isolate is used.
   v8::Isolate* isolate_;
 
-  scoped_refptr<ScriptState> script_state_;
+  Member<ScriptState> script_state_;
   scoped_refptr<DOMWrapperWorld> world_;
   String disable_eval_pending_;
   bool execution_forbidden_;

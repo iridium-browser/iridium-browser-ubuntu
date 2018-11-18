@@ -33,13 +33,11 @@ class AppInfoDialogBrowserTest : public DialogBrowserTest {
     extension_ =
         extension_environment_->MakePackagedApp(kTestExtensionId, true);
     auto* web_contents = browser()->tab_strip_model()->GetActiveWebContents();
-    ShowAppInfoInNativeDialog(
-        web_contents, extension_environment_->profile(), extension_.get(),
-        base::Bind(&AppInfoDialogBrowserTest::OnDialogClosed,
-                   base::Unretained(this)));
+    ShowAppInfoInNativeDialog(web_contents, extension_environment_->profile(),
+                              extension_.get(), base::DoNothing());
   }
 
-  void OnDialogClosed() { extension_environment_.reset(); }
+  void TearDownOnMainThread() override { extension_environment_ = nullptr; }
 
 #if defined(OS_MACOSX)
   // content::BrowserTestBase:
@@ -50,7 +48,7 @@ class AppInfoDialogBrowserTest : public DialogBrowserTest {
 
  private:
   std::unique_ptr<extensions::TestExtensionEnvironment> extension_environment_;
-  scoped_refptr<extensions::Extension> extension_;
+  scoped_refptr<const extensions::Extension> extension_;
 
   DISALLOW_COPY_AND_ASSIGN(AppInfoDialogBrowserTest);
 };

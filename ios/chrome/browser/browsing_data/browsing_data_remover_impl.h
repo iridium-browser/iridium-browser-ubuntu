@@ -21,6 +21,7 @@
 #include "ios/chrome/browser/browsing_data/browsing_data_remover.h"
 
 @class SessionServiceIOS;
+@class WKWebView;
 
 namespace ios {
 class ChromeBrowserState;
@@ -63,6 +64,7 @@ class BrowsingDataRemoverImpl : public BrowsingDataRemover {
     base::Time delete_end;
     BrowsingDataRemoveMask mask;
     base::OnceClosure callback;
+    base::Time task_started;
   };
 
   // Setter for |is_removing_|; DCHECKs that we can only start removing if we're
@@ -113,6 +115,12 @@ class BrowsingDataRemoverImpl : public BrowsingDataRemover {
 
   // SessionService to use (allow injection of a specific instance for testing).
   SessionServiceIOS* session_service_ = nil;
+
+  // Dummy WKWebView. A WKWebView object is created before deleting cookies. and
+  // is deleted after deleting cookies is completed. this is a workaround that
+  // makes sure that there is a WKWebView object alive while accessing
+  // WKHTTPCookieStore.
+  WKWebView* dummy_web_view_ = nil;
 
   // Used to delete data from HTTP cache.
   scoped_refptr<net::URLRequestContextGetter> context_getter_;

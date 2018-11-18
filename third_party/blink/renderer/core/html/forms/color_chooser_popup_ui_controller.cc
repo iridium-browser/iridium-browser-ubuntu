@@ -54,9 +54,9 @@ ColorChooserPopupUIController::ColorChooserPopupUIController(
 ColorChooserPopupUIController::~ColorChooserPopupUIController() = default;
 
 void ColorChooserPopupUIController::Dispose() {
-  // Finalized earlier so as to access m_chromeClient while alive.
+  // Finalized earlier so as to access chrome_client_ while alive.
   ClosePopup();
-  // ~ColorChooserUIController calls endChooser().
+  // ~ColorChooserUIController calls EndChooser().
 }
 
 void ColorChooserPopupUIController::Trace(blink::Visitor* visitor) {
@@ -83,7 +83,7 @@ AXObject* ColorChooserPopupUIController::RootAXObject() {
 void ColorChooserPopupUIController::WriteDocument(SharedBuffer* data) {
   Vector<String> suggestion_values;
   for (auto& suggestion : client_->Suggestions())
-    suggestion_values.push_back(suggestion->label);
+    suggestion_values.push_back(Color(suggestion->color).Serialized());
   IntRect anchor_rect_in_screen = chrome_client_->ViewportToScreen(
       client_->ElementRectRelativeToViewport(), frame_->View());
 

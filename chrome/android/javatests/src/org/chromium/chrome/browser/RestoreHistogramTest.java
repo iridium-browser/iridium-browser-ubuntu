@@ -18,6 +18,7 @@ import org.chromium.base.library_loader.LibraryLoader;
 import org.chromium.base.library_loader.LibraryProcessType;
 import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.MetricsUtils;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
@@ -57,31 +58,32 @@ public class RestoreHistogramTest {
     @Test
     @SmallTest
     public void testHistogramWriter() throws ProcessInitException {
-        LibraryLoader.get(LibraryProcessType.PROCESS_BROWSER).ensureInitialized();
-        MetricsUtils.HistogramDelta noRestoreDelta = new MetricsUtils.HistogramDelta(
-                ChromeBackupAgent.HISTOGRAM_ANDROID_RESTORE_RESULT, ChromeBackupAgent.NO_RESTORE);
+        LibraryLoader.getInstance().ensureInitialized(LibraryProcessType.PROCESS_BROWSER);
+        MetricsUtils.HistogramDelta noRestoreDelta =
+                new MetricsUtils.HistogramDelta(ChromeBackupAgent.HISTOGRAM_ANDROID_RESTORE_RESULT,
+                        ChromeBackupAgent.RestoreStatus.NO_RESTORE);
         MetricsUtils.HistogramDelta restoreCompletedDelta =
                 new MetricsUtils.HistogramDelta(ChromeBackupAgent.HISTOGRAM_ANDROID_RESTORE_RESULT,
-                        ChromeBackupAgent.RESTORE_COMPLETED);
+                        ChromeBackupAgent.RestoreStatus.RESTORE_COMPLETED);
         MetricsUtils.HistogramDelta restoreStatusRecorded =
                 new MetricsUtils.HistogramDelta(ChromeBackupAgent.HISTOGRAM_ANDROID_RESTORE_RESULT,
-                        ChromeBackupAgent.RESTORE_STATUS_RECORDED);
+                        ChromeBackupAgent.RestoreStatus.RESTORE_STATUS_RECORDED);
 
         // Check behavior with no preference set
         clearPrefs();
         ChromeBackupAgent.recordRestoreHistogram();
         Assert.assertEquals(1, noRestoreDelta.getDelta());
         Assert.assertEquals(0, restoreCompletedDelta.getDelta());
-        Assert.assertEquals(
-                ChromeBackupAgent.RESTORE_STATUS_RECORDED, ChromeBackupAgent.getRestoreStatus());
+        Assert.assertEquals(ChromeBackupAgent.RestoreStatus.RESTORE_STATUS_RECORDED,
+                ChromeBackupAgent.getRestoreStatus());
 
         // Check behavior with a restore status
-        ChromeBackupAgent.setRestoreStatus(ChromeBackupAgent.RESTORE_COMPLETED);
+        ChromeBackupAgent.setRestoreStatus(ChromeBackupAgent.RestoreStatus.RESTORE_COMPLETED);
         ChromeBackupAgent.recordRestoreHistogram();
         Assert.assertEquals(1, noRestoreDelta.getDelta());
         Assert.assertEquals(1, restoreCompletedDelta.getDelta());
-        Assert.assertEquals(
-                ChromeBackupAgent.RESTORE_STATUS_RECORDED, ChromeBackupAgent.getRestoreStatus());
+        Assert.assertEquals(ChromeBackupAgent.RestoreStatus.RESTORE_STATUS_RECORDED,
+                ChromeBackupAgent.getRestoreStatus());
 
         // Second call should record nothing (note this assumes it doesn't record something totally
         // random)
@@ -96,11 +98,13 @@ public class RestoreHistogramTest {
      * @throws ProcessInitException
      */
     @Test
+    @DisabledTest(message = "Test is flaky. crbug.com/875372")
     @SmallTest
     public void testWritingHistogramAtStartup() throws InterruptedException, ProcessInitException {
-        LibraryLoader.get(LibraryProcessType.PROCESS_BROWSER).ensureInitialized();
-        MetricsUtils.HistogramDelta noRestoreDelta = new MetricsUtils.HistogramDelta(
-                ChromeBackupAgent.HISTOGRAM_ANDROID_RESTORE_RESULT, ChromeBackupAgent.NO_RESTORE);
+        LibraryLoader.getInstance().ensureInitialized(LibraryProcessType.PROCESS_BROWSER);
+        MetricsUtils.HistogramDelta noRestoreDelta =
+                new MetricsUtils.HistogramDelta(ChromeBackupAgent.HISTOGRAM_ANDROID_RESTORE_RESULT,
+                        ChromeBackupAgent.RestoreStatus.NO_RESTORE);
 
         // Histogram should be written the first time the activity is started.
         mActivityTestRule.startMainActivityOnBlankPage();

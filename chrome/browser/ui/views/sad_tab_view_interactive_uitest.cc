@@ -14,7 +14,6 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/interactive_test_utils.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "chrome/test/views/scoped_macviews_browser_mode.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/common/result_codes.h"
@@ -81,11 +80,7 @@ class SadTabViewInteractiveUITest : public InProcessBrowserTest {
   views::View* GetFocusedView() { return GetFocusManager()->GetFocusedView(); }
 
   const char* ActionButtonClassName() {
-#if defined(OS_CHROMEOS)
-    return views::BlueButton::kViewClassName;
-#else
     return views::LabelButton::kViewClassName;
-#endif
   }
 
   bool IsFocusedViewInsideViewClass(const char* view_class) {
@@ -128,8 +123,6 @@ class SadTabViewInteractiveUITest : public InProcessBrowserTest {
   }
 
  private:
-  test::ScopedMacViewsBrowserMode views_mode_{true};
-
   DISALLOW_COPY_AND_ASSIGN(SadTabViewInteractiveUITest);
 };
 
@@ -176,6 +169,9 @@ IN_PROC_BROWSER_TEST_F(SadTabViewInteractiveUITest,
 
 #if defined(OS_MACOSX)
 // Focusing or input is not completely working on Mac: http://crbug.com/824418
+#define MAYBE_ReloadMultipleSadTabs DISABLED_ReloadMultipleSadTabs
+#elif defined(OS_WIN) && defined(OFFICIAL_BUILD)
+// Test seems to fail only in official Windows builds: http://crbug.com/848049
 #define MAYBE_ReloadMultipleSadTabs DISABLED_ReloadMultipleSadTabs
 #else
 #define MAYBE_ReloadMultipleSadTabs ReloadMultipleSadTabs

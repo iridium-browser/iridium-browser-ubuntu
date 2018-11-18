@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 // TODO (scroggo): Move this to
-// third_party/WebKit/Source/platform/image-decoders ?
+// third_party/blink/renderer/platform/image-decoders ?
 
 // Compile with:
 // gn gen out/Fuzz '--args=use_libfuzzer=true is_asan=true
@@ -34,8 +34,8 @@ namespace blink {
 std::unique_ptr<ImageDecoder> CreateDecoder(
     ImageDecoder::AlphaOption alpha_option) {
   return std::make_unique<PNGImageDecoder>(
-      alpha_option, ColorBehavior::TransformToSRGB(),
-      ImageDecoder::kNoDecodedImageByteLimit);
+      alpha_option, ImageDecoder::kDefaultBitDepth,
+      ColorBehavior::TransformToSRGB(), ImageDecoder::kNoDecodedImageByteLimit);
 }
 
 int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {

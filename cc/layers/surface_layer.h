@@ -10,16 +10,22 @@
 #include "cc/layers/deadline_policy.h"
 #include "cc/layers/layer.h"
 #include "components/viz/common/surfaces/surface_info.h"
+#include "components/viz/common/surfaces/surface_range.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/geometry/size.h"
 
 namespace cc {
+
+// If given true, we should submit frames, as we are unoccluded on screen.
+// If given false, we should not submit compositor frames.
+using UpdateSubmissionStateCB = base::RepeatingCallback<void(bool is_visible)>;
 
 // A layer that renders a surface referencing the output of another compositor
 // instance or client.
 class CC_EXPORT SurfaceLayer : public Layer {
  public:
   static scoped_refptr<SurfaceLayer> Create();
+  static scoped_refptr<SurfaceLayer> Create(UpdateSubmissionStateCB);
 
   void SetPrimarySurfaceId(const viz::SurfaceId& surface_id,
                            const DeadlinePolicy& deadline_policy);
@@ -32,8 +38,11 @@ class CC_EXPORT SurfaceLayer : public Layer {
     return stretch_content_to_fill_bounds_;
   }
 
-  void SetHitTestable(bool hit_testable);
-  bool hit_testable() const { return hit_testable_; }
+  void SetSurfaceHitTestable(bool surface_hit_testable);
+
+  void SetHasPointerEventsNone(bool has_pointer_events_none);
+
+  void SetMayContainVideo(bool);
 
   // Layer overrides.
   std::unique_ptr<LayerImpl> CreateLayerImpl(LayerTreeImpl* tree_impl) override;
@@ -41,11 +50,11 @@ class CC_EXPORT SurfaceLayer : public Layer {
   void PushPropertiesTo(LayerImpl* layer) override;
 
   const viz::SurfaceId& primary_surface_id() const {
-    return primary_surface_id_;
+    return surface_range_.end();
   }
 
-  const viz::SurfaceId& fallback_surface_id() const {
-    return fallback_surface_id_;
+  const base::Optional<viz::SurfaceId>& fallback_surface_id() const {
+    return surface_range_.start();
   }
 
   base::Optional<uint32_t> deadline_in_frames() const {
@@ -54,17 +63,33 @@ class CC_EXPORT SurfaceLayer : public Layer {
 
  protected:
   SurfaceLayer();
+  explicit SurfaceLayer(UpdateSubmissionStateCB);
   bool HasDrawableContent() const override;
 
  private:
   ~SurfaceLayer() override;
 
-  viz::SurfaceId primary_surface_id_;
-  viz::SurfaceId fallback_surface_id_;
+  UpdateSubmissionStateCB update_submission_state_callback_;
+
+  bool may_contain_video_ = false;
+  viz::SurfaceRange surface_range_;
   base::Optional<uint32_t> deadline_in_frames_ = 0u;
 
   bool stretch_content_to_fill_bounds_ = false;
-  bool hit_testable_ = false;
+
+  // Whether or not the surface should submit hit test data when submitting
+  // compositor frame. The bit represents that the surface layer may be
+  // associated with an out-of-process iframe and viz hit testing needs to know
+  // the hit test information of that iframe. This bit is different from a layer
+  // being hit testable in the renderer, a hit testable surface layer may not
+  // be surface hit testable (e.g., a surface layer created by video).
+  bool surface_hit_testable_ = false;
+
+  // Whether or not the surface can accept pointer events. It is set to true if
+  // the frame owner has pointer-events: none property.
+  // TODO(sunxd): consider renaming it to oopif_has_pointer_events_none_ for
+  // disambiguation.
+  bool has_pointer_events_none_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(SurfaceLayer);
 };

@@ -27,44 +27,45 @@ void ModelTypeProcessorProxy::ConnectSync(std::unique_ptr<CommitQueue> worker) {
 
 void ModelTypeProcessorProxy::DisconnectSync() {
   task_runner_->PostTask(
-      FROM_HERE, base::Bind(&ModelTypeProcessor::DisconnectSync, processor_));
+      FROM_HERE,
+      base::BindOnce(&ModelTypeProcessor::DisconnectSync, processor_));
 }
 
 void ForwardGetLocalChangesCall(
     base::WeakPtr<ModelTypeProcessor> processor,
     size_t max_entries,
-    const ModelTypeProcessor::GetLocalChangesCallback& callback) {
+    ModelTypeProcessor::GetLocalChangesCallback callback) {
   if (processor) {
-    processor->GetLocalChanges(max_entries, callback);
+    processor->GetLocalChanges(max_entries, std::move(callback));
   } else {
     // If the processor is not valid anymore call the callback to unblock sync
     // thread.
-    callback.Run(CommitRequestDataList());
+    std::move(callback).Run(CommitRequestDataList());
   }
 }
 
 void ModelTypeProcessorProxy::GetLocalChanges(
     size_t max_entries,
-    const GetLocalChangesCallback& callback) {
+    GetLocalChangesCallback callback) {
   task_runner_->PostTask(FROM_HERE,
-                         base::Bind(&ForwardGetLocalChangesCall, processor_,
-                                    max_entries, callback));
+                         base::BindOnce(&ForwardGetLocalChangesCall, processor_,
+                                        max_entries, std::move(callback)));
 }
 
 void ModelTypeProcessorProxy::OnCommitCompleted(
     const sync_pb::ModelTypeState& type_state,
     const CommitResponseDataList& response_list) {
-  task_runner_->PostTask(
-      FROM_HERE, base::Bind(&ModelTypeProcessor::OnCommitCompleted, processor_,
-                            type_state, response_list));
+  task_runner_->PostTask(FROM_HERE,
+                         base::BindOnce(&ModelTypeProcessor::OnCommitCompleted,
+                                        processor_, type_state, response_list));
 }
 
 void ModelTypeProcessorProxy::OnUpdateReceived(
     const sync_pb::ModelTypeState& type_state,
     const UpdateResponseDataList& updates) {
-  task_runner_->PostTask(
-      FROM_HERE, base::Bind(&ModelTypeProcessor::OnUpdateReceived, processor_,
-                            type_state, updates));
+  task_runner_->PostTask(FROM_HERE,
+                         base::BindOnce(&ModelTypeProcessor::OnUpdateReceived,
+                                        processor_, type_state, updates));
 }
 
 }  // namespace syncer

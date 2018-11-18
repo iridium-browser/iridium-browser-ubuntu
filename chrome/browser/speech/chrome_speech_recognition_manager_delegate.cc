@@ -8,19 +8,21 @@
 
 #include "base/bind.h"
 #include "base/macros.h"
+#include "base/task/post_task.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/pref_names.h"
 #include "components/prefs/pref_service.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/speech_recognition_manager.h"
 #include "content/public/browser/speech_recognition_session_context.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/speech_recognition_error.h"
-#include "content/public/common/speech_recognition_result.h"
+#include "third_party/blink/public/mojom/speech/speech_recognition_error.mojom.h"
+#include "third_party/blink/public/mojom/speech/speech_recognition_result.mojom.h"
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
 #include "chrome/browser/extensions/extension_service.h"
@@ -62,12 +64,12 @@ void ChromeSpeechRecognitionManagerDelegate::OnAudioEnd(int session_id) {
 }
 
 void ChromeSpeechRecognitionManagerDelegate::OnRecognitionResults(
-    int session_id, const content::SpeechRecognitionResults& result) {
-}
+    int session_id,
+    const std::vector<blink::mojom::SpeechRecognitionResultPtr>& result) {}
 
 void ChromeSpeechRecognitionManagerDelegate::OnRecognitionError(
-    int session_id, const content::SpeechRecognitionError& error) {
-}
+    int session_id,
+    const blink::mojom::SpeechRecognitionError& error) {}
 
 void ChromeSpeechRecognitionManagerDelegate::OnAudioLevelsChange(
     int session_id, float volume, float noise_volume) {
@@ -99,8 +101,8 @@ void ChromeSpeechRecognitionManagerDelegate::CheckRecognitionIsAllowed(
 
   // Check that the render frame type is appropriate, and whether or not we
   // need to request permission from the user.
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::UI},
       base::BindOnce(&CheckRenderFrameType, std::move(callback),
                      render_process_id, render_frame_id));
 }
@@ -137,8 +139,8 @@ void ChromeSpeechRecognitionManagerDelegate::CheckRenderFrameType(
     // This happens for extensions. Manifest should be checked for permission.
     allowed = true;
     check_permission = false;
-    BrowserThread::PostTask(
-        BrowserThread::IO, FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, {BrowserThread::IO},
         base::BindOnce(std::move(callback), check_permission, allowed));
     return;
   }
@@ -164,8 +166,8 @@ void ChromeSpeechRecognitionManagerDelegate::CheckRenderFrameType(
   check_permission = true;
 #endif
 
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::IO},
       base::BindOnce(std::move(callback), check_permission, allowed));
 }
 

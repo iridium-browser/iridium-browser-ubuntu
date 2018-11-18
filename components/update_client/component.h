@@ -16,6 +16,7 @@
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/optional.h"
 #include "base/threading/thread_checker.h"
 #include "base/time/time.h"
 #include "base/version.h"
@@ -49,14 +50,14 @@ class Component {
 
   CrxUpdateItem GetCrxUpdateItem() const;
 
-  // Called by the UpdateChecker to set the update response for this component.
-  void SetParseResult(const ProtocolParser::Result& result);
-
   // Sets the uninstall state for this component.
   void Uninstall(const base::Version& cur_version, int reason);
 
   // Called by the UpdateEngine when an update check for this component is done.
-  void UpdateCheckComplete();
+  void SetUpdateCheckResult(
+      const base::Optional<ProtocolParser::Result>& result,
+      ErrorCategory error_category,
+      int error);
 
   // Returns true if the component has reached a final state and no further
   // handling and state transitions are possible.
@@ -72,7 +73,9 @@ class Component {
 
   std::string id() const { return id_; }
 
-  const CrxComponent& crx_component() const { return crx_component_; }
+  const base::Optional<CrxComponent>& crx_component() const {
+    return crx_component_;
+  }
   void set_crx_component(const CrxComponent& crx_component) {
     crx_component_ = crx_component;
   }
@@ -92,11 +95,6 @@ class Component {
   std::string next_fp() const { return next_fp_; }
   void set_next_fp(const std::string& next_fp) { next_fp_ = next_fp; }
 
-  int update_check_error() const { return update_check_error_; }
-  void set_update_check_error(int update_check_error) {
-    update_check_error_ = update_check_error;
-  }
-
   bool is_foreground() const;
 
   const std::vector<std::string>& events() const { return events_; }
@@ -105,10 +103,10 @@ class Component {
 
   bool diff_update_failed() const { return !!diff_error_code_; }
 
-  int error_category() const { return error_category_; }
+  ErrorCategory error_category() const { return error_category_; }
   int error_code() const { return error_code_; }
   int extra_code1() const { return extra_code1_; }
-  int diff_error_category() const { return diff_error_category_; }
+  ErrorCategory diff_error_category() const { return diff_error_category_; }
   int diff_error_code() const { return diff_error_code_; }
   int diff_extra_code1() const { return diff_extra_code1_; }
 
@@ -244,11 +242,10 @@ class Component {
     // State overrides.
     void DoHandle() override;
 
-    // Called when progress is being made downloading a CRX. The progress may
-    // not monotonically increase due to how the CRX downloader switches between
+    // Called when progress is being made downloading a CRX. Can be called
+    // multiple times due to how the CRX downloader switches between
     // different downloaders and fallback urls.
-    void DownloadProgress(const std::string& id,
-                          const CrxDownloader::Result& download_result);
+    void DownloadProgress(const std::string& id);
 
     void DownloadComplete(const std::string& id,
                           const CrxDownloader::Result& download_result);
@@ -268,11 +265,10 @@ class Component {
     // State overrides.
     void DoHandle() override;
 
-    // Called when progress is being made downloading a CRX. The progress may
-    // not monotonically increase due to how the CRX downloader switches between
+    // Called when progress is being made downloading a CRX. Can be called
+    // multiple times due to how the CRX downloader switches between
     // different downloaders and fallback urls.
-    void DownloadProgress(const std::string& id,
-                          const CrxDownloader::Result& download_result);
+    void DownloadProgress(const std::string& id);
 
     void DownloadComplete(const std::string& id,
                           const CrxDownloader::Result& download_result);
@@ -292,7 +288,9 @@ class Component {
     // State overrides.
     void DoHandle() override;
 
-    void InstallComplete(int error_category, int error_code, int extra_code1);
+    void InstallComplete(ErrorCategory error_category,
+                         int error_code,
+                         int extra_code1);
 
     DISALLOW_COPY_AND_ASSIGN(StateUpdatingDiff);
   };
@@ -306,7 +304,9 @@ class Component {
     // State overrides.
     void DoHandle() override;
 
-    void InstallComplete(int error_category, int error_code, int extra_code1);
+    void InstallComplete(ErrorCategory error_category,
+                         int error_code,
+                         int extra_code1);
 
     DISALLOW_COPY_AND_ASSIGN(StateUpdating);
   };
@@ -366,10 +366,12 @@ class Component {
   // Notifies registered observers about changes in the state of the component.
   void NotifyObservers(Events event) const;
 
+  void SetParseResult(const ProtocolParser::Result& result);
+
   base::ThreadChecker thread_checker_;
 
   const std::string id_;
-  CrxComponent crx_component_;
+  base::Optional<CrxComponent> crx_component_;
 
   // The status of the updatecheck response.
   std::string status_;
@@ -412,10 +414,10 @@ class Component {
   // the |extra_code1| usually contains a system error, but it can contain
   // any extended information that is relevant to either the category or the
   // error itself.
-  int error_category_ = 0;
+  ErrorCategory error_category_ = ErrorCategory::kNone;
   int error_code_ = 0;
   int extra_code1_ = 0;
-  int diff_error_category_ = 0;
+  ErrorCategory diff_error_category_ = ErrorCategory::kNone;
   int diff_error_code_ = 0;
   int diff_extra_code1_ = 0;
 

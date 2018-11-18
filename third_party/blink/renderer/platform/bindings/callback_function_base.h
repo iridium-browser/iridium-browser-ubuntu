@@ -5,8 +5,8 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_BINDINGS_CALLBACK_FUNCTION_BASE_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_BINDINGS_CALLBACK_FUNCTION_BASE_H_
 
+#include "third_party/blink/renderer/platform/bindings/name_client.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
-#include "third_party/blink/renderer/platform/bindings/trace_wrapper_base.h"
 #include "third_party/blink/renderer/platform/bindings/trace_wrapper_v8_reference.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 
@@ -25,42 +25,51 @@ class V8PersistentCallbackFunctionBase;
 // implement it.
 class PLATFORM_EXPORT CallbackFunctionBase
     : public GarbageCollectedFinalized<CallbackFunctionBase>,
-      public TraceWrapperBase {
+      public NameClient {
  public:
   virtual ~CallbackFunctionBase() = default;
 
-  virtual void Trace(blink::Visitor* visitor) {}
-  void TraceWrappers(const ScriptWrappableVisitor*) const override;
-  const char* NameInHeapSnapshot() const override {
-    return "CallbackFunctionBase";
+  virtual void Trace(blink::Visitor* visitor);
+
+  v8::Local<v8::Object> CallbackObject() {
+    return callback_function_.NewLocal(GetIsolate());
   }
 
   v8::Isolate* GetIsolate() const {
     return callback_relevant_script_state_->GetIsolate();
   }
+
   ScriptState* CallbackRelevantScriptState() {
-    return callback_relevant_script_state_.get();
+    return callback_relevant_script_state_;
   }
+
+  // Returns true if the ES function has a [[Construct]] internal method.
+  bool IsConstructor() const { return CallbackFunction()->IsConstructor(); }
 
  protected:
-  explicit CallbackFunctionBase(v8::Local<v8::Function>);
+  explicit CallbackFunctionBase(v8::Local<v8::Object>);
 
   v8::Local<v8::Function> CallbackFunction() const {
-    return callback_function_.NewLocal(GetIsolate());
+    return callback_function_.NewLocal(GetIsolate()).As<v8::Function>();
   }
-  ScriptState* IncumbentScriptState() { return incumbent_script_state_.get(); }
+  ScriptState* IncumbentScriptState() { return incumbent_script_state_; }
 
  private:
   // The "callback function type" value.
-  TraceWrapperV8Reference<v8::Function> callback_function_;
+  // Use v8::Object instead of v8::Function in order to handle
+  // [TreatNonObjectAsNull].
+  TraceWrapperV8Reference<v8::Object> callback_function_;
   // The associated Realm of the callback function type value.
-  scoped_refptr<ScriptState> callback_relevant_script_state_;
+  Member<ScriptState> callback_relevant_script_state_;
   // The callback context, i.e. the incumbent Realm when an ECMAScript value is
   // converted to an IDL value.
   // https://heycam.github.io/webidl/#dfn-callback-context
-  scoped_refptr<ScriptState> incumbent_script_state_;
+  Member<ScriptState> incumbent_script_state_;
 
   friend class V8PersistentCallbackFunctionBase;
+  friend v8::Local<v8::Value> ToV8(CallbackFunctionBase* callback,
+                                   v8::Local<v8::Object> creation_context,
+                                   v8::Isolate*);
 };
 
 // V8PersistentCallbackFunctionBase retains the underlying v8::Function of a
@@ -90,7 +99,9 @@ class PLATFORM_EXPORT V8PersistentCallbackFunctionBase
 
  private:
   Member<CallbackFunctionBase> callback_function_;
-  v8::Persistent<v8::Function> v8_function_;
+  // Use v8::Object instead of v8::Function in order to handle
+  // [TreatNonObjectAsNull].
+  v8::Persistent<v8::Object> v8_function_;
 };
 
 // V8PersistentCallbackFunction<V8CallbackFunction> is a counter-part of

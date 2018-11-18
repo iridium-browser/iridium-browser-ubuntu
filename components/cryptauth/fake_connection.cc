@@ -7,15 +7,17 @@
 #include <memory>
 #include <utility>
 
+#include "base/callback.h"
+#include "base/stl_util.h"
 #include "components/cryptauth/wire_message.h"
 
 namespace cryptauth {
 
-FakeConnection::FakeConnection(const RemoteDevice& remote_device)
+FakeConnection::FakeConnection(RemoteDeviceRef remote_device)
     : FakeConnection(remote_device, /* should_auto_connect */ true) {}
 
-FakeConnection::FakeConnection(
-    const RemoteDevice& remote_device, bool should_auto_connect)
+FakeConnection::FakeConnection(RemoteDeviceRef remote_device,
+                               bool should_auto_connect)
     : Connection(remote_device), should_auto_connect_(should_auto_connect) {
   if (should_auto_connect_) {
     Connect();
@@ -28,14 +30,18 @@ FakeConnection::~FakeConnection() {
 
 void FakeConnection::Connect() {
   if (should_auto_connect_) {
-    SetStatus(CONNECTED);
+    SetStatus(Status::CONNECTED);
   } else {
-    SetStatus(IN_PROGRESS);
+    SetStatus(Status::IN_PROGRESS);
   }
 }
 
 void FakeConnection::Disconnect() {
-  SetStatus(DISCONNECTED);
+  SetStatus(Status::DISCONNECTED);
+}
+
+std::string FakeConnection::GetDeviceAddress() {
+  return std::string();
 }
 
 void FakeConnection::AddObserver(ConnectionObserver* observer) {
@@ -44,20 +50,23 @@ void FakeConnection::AddObserver(ConnectionObserver* observer) {
 }
 
 void FakeConnection::RemoveObserver(ConnectionObserver* observer) {
-  observers_.erase(
-      std::remove(observers_.begin(), observers_.end(), observer),
-      observers_.end());
+  base::Erase(observers_, observer);
   Connection::RemoveObserver(observer);
+}
+
+void FakeConnection::GetConnectionRssi(
+    base::OnceCallback<void(base::Optional<int32_t>)> callback) {
+  std::move(callback).Run(rssi_to_return_);
 }
 
 void FakeConnection::CompleteInProgressConnection(bool success) {
   DCHECK(!should_auto_connect_);
-  DCHECK(status() == IN_PROGRESS);
+  DCHECK(status() == Status::IN_PROGRESS);
 
   if (success) {
-    SetStatus(CONNECTED);
+    SetStatus(Status::CONNECTED);
   } else {
-    SetStatus(DISCONNECTED);
+    SetStatus(Status::DISCONNECTED);
   }
 }
 
@@ -76,10 +85,6 @@ void FakeConnection::ReceiveMessage(
   OnBytesReceived(std::string());
   pending_feature_.clear();
   pending_payload_.clear();
-}
-
-void FakeConnection::NotifyGattCharacteristicsNotAvailable() {
-  Connection::NotifyGattCharacteristicsNotAvailable();
 }
 
 void FakeConnection::SendMessageImpl(std::unique_ptr<WireMessage> message) {

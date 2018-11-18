@@ -7,7 +7,7 @@
 #include <algorithm>
 #include <vector>
 
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "content/public/browser/browser_thread.h"
@@ -384,8 +384,8 @@ void SerialGetConnectionsFunction::AsyncWorkStart() {
   const base::hash_set<int>* connection_ids =
       manager_->GetResourceIds(extension_->id());
   if (connection_ids) {
-    for (base::hash_set<int>::const_iterator it = connection_ids->begin();
-         it != connection_ids->end(); ++it) {
+    for (auto it = connection_ids->cbegin(); it != connection_ids->cend();
+         ++it) {
       int connection_id = *it;
       SerialConnection* connection = GetSerialConnection(connection_id);
       if (connection) {

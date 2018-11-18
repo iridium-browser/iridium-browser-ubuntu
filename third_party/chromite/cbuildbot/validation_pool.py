@@ -21,7 +21,6 @@ from xml.dom import minidom
 
 from chromite.cbuildbot import lkgm_manager
 from chromite.cbuildbot import patch_series
-from chromite.lib import config_lib
 from chromite.lib import constants
 from chromite.lib import cl_messages
 from chromite.lib import clactions
@@ -37,9 +36,6 @@ from chromite.lib import patch as cros_patch
 from chromite.lib import timeout_util
 from chromite.lib import tree_status
 from chromite.lib import triage_lib
-
-
-site_config = config_lib.GetConfig()
 
 
 PRE_CQ = constants.PRE_CQ
@@ -200,7 +196,8 @@ class ValidationPool(object):
   def __init__(self, overlays, build_root, build_number, builder_name,
                is_master, dryrun, candidates=None, non_os_changes=None,
                conflicting_changes=None, pre_cq_trybot=False,
-               tree_was_open=True, applied=None, builder_run=None):
+               tree_was_open=True, applied=None, buildbucket_id=None,
+               builder_run=None):
     """Initializes an instance by setting default variables to instance vars.
 
     Generally use AcquirePool as an entry pool to a pool rather than this
@@ -213,7 +210,6 @@ class ValidationPool(object):
       builder_name: Builder name on buildbot dashboard.
       is_master: True if this is the master builder for the Commit Queue.
       dryrun: If set to True, do not submit anything to Gerrit.
-    Optional Args:
       candidates: List of changes to consider validating.
       non_os_changes: List of changes that are part of this validation
         pool but aren't part of the cros checkout.
@@ -223,6 +219,8 @@ class ValidationPool(object):
         launcher is NOT considered a Pre-CQ trybot.)
       tree_was_open: Whether the tree was open when the pool was created.
       applied: List of CLs that have been applied to the current repo.
+      buildbucket_id: Buildbucket id of the current build as a string .
+                      None if not buildbucket scheduled.
       builder_run: BuilderRun instance used to fetch cidb handle and metadata
         instance. Please note due to the pickling logic, this MUST be the last
         kwarg listed.
@@ -242,6 +240,10 @@ class ValidationPool(object):
 
     if not isinstance(builder_name, basestring):
       raise ValueError("Invalid builder_name: %r" % (builder_name,))
+
+    if (buildbucket_id is not None and
+        not isinstance(buildbucket_id, basestring)):
+      raise ValueError("Invalid buildbucket_id: %r" % (builder_name,))
 
     for changes_name, changes_value in (
         ('candidates', candidates),
@@ -291,6 +293,7 @@ class ValidationPool(object):
     self._overlays = overlays
     self._build_number = build_number
     self._builder_name = builder_name
+    self._buildbucket_id = buildbucket_id
 
     # Set to False if the tree was not open when we acquired changes.
     self.tree_was_open = tree_was_open
@@ -315,6 +318,9 @@ class ValidationPool(object):
 
   @property
   def build_log(self):
+    if self._buildbucket_id:
+      return tree_status.ConstructLegolandBuildURL(self._buildbucket_id)
+
     if self._run:
       return tree_status.ConstructDashboardURL(
           self._run.GetWaterfall(), self._builder_name, self._build_number)
@@ -349,7 +355,8 @@ class ValidationPool(object):
             self.changes_that_failed_to_apply_earlier,
             self.pre_cq_trybot,
             self.tree_was_open,
-            self.applied))
+            self.applied,
+            self._buildbucket_id))
 
   @classmethod
   @failures_lib.SetFailureType(failures_lib.BuilderFailure)
@@ -390,6 +397,15 @@ class ValidationPool(object):
       logging.info('Queried changes: %s', cros_patch.GetChangesAsString(
           changes))
 
+      # Tell users to publish drafts/privates before marking them commit ready.
+      # Do this before we filter out via the ready function below.
+      for change in changes:
+        if change.HasApproval('COMR', ('1', '2')):
+          if change.IsDraft():
+            self.HandleDraftChange(change)
+          elif change.IsPrivate():
+            self.HandlePrivateChange(change)
+
       if ready_fn:
         # The query passed in may include a dictionary of flags to use for
         # revalidating the query results. We need to do this because Gerrit
@@ -397,11 +413,6 @@ class ValidationPool(object):
         changes = [x for x in changes if ready_fn(x)]
         logging.info('Ready changes: %s', cros_patch.GetChangesAsString(
             changes))
-
-      # Tell users to publish drafts before marking them commit ready.
-      for change in changes:
-        if change.HasApproval('COMR', ('1', '2')) and change.IsDraft():
-          self.HandleDraftChange(change)
 
       changes, non_manifest_changes = ValidationPool._FilterNonCrosProjects(
           changes, git.ManifestCheckout.Cached(self.build_root))
@@ -420,8 +431,8 @@ class ValidationPool(object):
     return self.candidates or self.non_manifest_changes
 
   @classmethod
-  def AcquirePool(cls, overlays, repo, build_number, builder_name, query,
-                  dryrun=False, check_tree_open=True,
+  def AcquirePool(cls, overlays, repo, build_number, builder_name,
+                  buildbucket_id, query, dryrun=False, check_tree_open=True,
                   change_filter=None, builder_run=None):
     """Acquires the current pool from Gerrit.
 
@@ -434,6 +445,8 @@ class ValidationPool(object):
         against.
       build_number: Corresponding build number for the build.
       builder_name: Builder name on buildbot dashboard.
+      buildbucket_id: Buildbucket id of the current build as a string .
+                      None if not buildbucket scheduled.
       query: constants.CQ_READY_QUERY, PRECQ_READY_QUERY, or a custom
         query description of the form (<query_str>, None).
       dryrun: Don't submit anything to gerrit.
@@ -494,9 +507,17 @@ class ValidationPool(object):
         logging.error('Timeout getting experimental builders from the tree'
                       'status.')
 
-      pool = ValidationPool(overlays, repo.directory, build_number,
-                            builder_name, True, dryrun, builder_run=builder_run,
-                            tree_was_open=tree_was_open, applied=[])
+      pool = ValidationPool(
+          overlays=overlays,
+          build_root=repo.directory,
+          build_number=build_number,
+          builder_name=builder_name,
+          is_master=True,
+          dryrun=dryrun,
+          builder_run=builder_run,
+          tree_was_open=tree_was_open,
+          applied=[],
+          buildbucket_id=buildbucket_id)
 
       if pool.AcquireChanges(gerrit_query, ready_fn, change_filter):
         break
@@ -557,7 +578,7 @@ class ValidationPool(object):
 
   @classmethod
   def AcquirePoolFromManifest(cls, manifest, overlays, repo, build_number,
-                              builder_name, is_master, dryrun,
+                              builder_name, buildbucket_id, is_master, dryrun,
                               builder_run=None):
     """Acquires the current pool from a given manifest.
 
@@ -569,6 +590,8 @@ class ValidationPool(object):
       repo: The repo used to filter projects and to apply patches against.
       build_number: Corresponding build number for the build.
       builder_name: Builder name on buildbot dashboard.
+      buildbucket_id: Buildbucket id of the current build as a string .
+                      None if not buildbucket scheduled.
       is_master: Boolean that indicates whether this is a pool for a master.
         config or not.
       dryrun: Don't submit anything to gerrit.
@@ -578,9 +601,16 @@ class ValidationPool(object):
     Returns:
       ValidationPool object.
     """
-    pool = ValidationPool(overlays, repo.directory, build_number, builder_name,
-                          is_master, dryrun, builder_run=builder_run,
-                          applied=[])
+    pool = ValidationPool(
+        overlays=overlays,
+        build_root=repo.directory,
+        build_number=build_number,
+        builder_name=builder_name,
+        is_master=is_master,
+        dryrun=dryrun,
+        buildbucket_id=buildbucket_id,
+        builder_run=builder_run,
+        applied=[])
     pool.AddPendingCommitsIntoPool(manifest)
     return pool
 
@@ -800,7 +830,7 @@ class ValidationPool(object):
         candidates = [c for c in self.candidates if
                       c not in self.applied and filter_fn(c)]
 
-        # pylint: disable=E1123
+        # pylint: disable=unexpected-keyword-arg
         applied, failed_tot, failed_inflight = self.applied_patches.Apply(
             candidates, manifest=manifest)
       except (KeyboardInterrupt, RuntimeError, SystemExit):
@@ -839,7 +869,7 @@ class ValidationPool(object):
       self.applied_patches.FetchChanges(self.candidates, manifest=manifest)
       for change in self.candidates:
         try:
-          # pylint: disable=E1123
+          # pylint: disable=unexpected-keyword-arg
           self.applied_patches.ApplyChange(change, manifest=manifest)
         except cros_patch.PatchException as e:
           # Fail if any patch cannot be applied.
@@ -1613,14 +1643,17 @@ class ValidationPool(object):
                                            check_tree_open=check_tree_open,
                                            throttled_ok=throttled_ok)
     if errors:
+      logging.PrintBuildbotStepText(
+          'Submitted %d of %d verified CLs.'
+          % (len(submitted), len(verified_cls)))
       raise FailedToSubmitAllChangesException(errors, len(submitted))
 
     if self.changes_that_failed_to_apply_earlier:
       self._HandleApplyFailure(self.changes_that_failed_to_apply_earlier)
 
   def SubmitPartialPool(self, changes, messages, changes_by_config,
-                        subsys_by_config, passed_in_history_slaves_by_change,
-                        failing, inflight, no_stat):
+                        passed_in_history_slaves_by_change, failing,
+                        inflight, no_stat):
     """If the build failed, push any CLs that don't care about the failure.
 
     In this function we calculate what CLs are definitely innocent and submit
@@ -1637,8 +1670,6 @@ class ValidationPool(object):
         objects from the failed slaves.
       changes_by_config: A dictionary of relevant changes indexed by the
         config names.
-      subsys_by_config: A dictionary of pass/fail HWTest subsystems indexed
-        by the config names.
       passed_in_history_slaves_by_change: A dict mapping changes to their
         relevant slaves (build config name strings) which passed in history.
       failing: Names of the builders that failed.
@@ -1649,9 +1680,8 @@ class ValidationPool(object):
       A set of the non-submittable changes.
     """
     fully_verified = triage_lib.CalculateSuspects.GetFullyVerifiedChanges(
-        changes, changes_by_config, subsys_by_config,
-        passed_in_history_slaves_by_change, failing, inflight, no_stat,
-        messages, self.build_root)
+        changes, changes_by_config, passed_in_history_slaves_by_change,
+        failing, inflight, no_stat, messages, self.build_root)
     fully_verified_cls = fully_verified.keys()
     if fully_verified_cls:
       logging.info('The following changes will be submitted using '
@@ -1706,6 +1736,20 @@ class ValidationPool(object):
     msg = ('%(queue)s could not apply your change because the latest patch '
            'set is not published. Please publish your draft patch set before '
            'marking your commit as ready.')
+    self.SendNotification(change, msg)
+    self.RemoveReady(change)
+
+  def HandlePrivateChange(self, change):
+    """Handler for when the latest patch set of |change| is not public.
+
+    This handler removes the commit ready bit from the specified changes and
+    sends the developer a message explaining why.
+
+    Args:
+      change: GerritPatch instance to operate upon.
+    """
+    msg = ('%(queue)s could not apply your change because the CL is private. '
+           'Please make your CL public before marking your commit as ready.')
     self.SendNotification(change, msg)
     self.RemoveReady(change)
 
@@ -1857,14 +1901,48 @@ class ValidationPool(object):
         status.
     """
     retry = not sanity or lab_fail or change not in suspects.keys()
-    msg = cl_messages.CreateValidationFailureMessage(
-        self.pre_cq_trybot, change, suspects, messages,
-        sanity, infra_fail, lab_fail, no_stat, retry)
-    self.SendNotification(change, '%(details)s', details=msg)
+    if self._ShouldSendFailureNotification(change, retry):
+      cl_status_url = self._GetCLStatusURL(change)
+      msg = cl_messages.CreateValidationFailureMessage(
+          self.pre_cq_trybot, change, suspects, messages,
+          sanity, infra_fail, lab_fail, no_stat, retry, cl_status_url)
+      self.SendNotification(change, '%(details)s', details=msg)
     if retry:
       self.MarkForgiven(change)
     else:
       self.RemoveReady(change, reason=suspects.get(change))
+
+  def _ShouldSendFailureNotification(self, change, retry):
+    """Decides if we should send a failure notification.
+
+    Args:
+      change: The change to mark as failed.
+      retry: Whether the change will be retried soon.
+
+    Returns:
+      True if we should send a failure notification. False otherwise.
+    """
+    # If we are on CQ, always send a notification.
+    if not self.pre_cq_trybot:
+      return True
+
+    # We are on pre-CQ. Its notable difference from CQ is that
+    # HandleValidationFailure() is called on individual pre-CQ bots, not on
+    # a single master bot. Therefore we have to be careful not to send spammy
+    # notifications.
+
+    # If we will retry soon, skip sending a notification.
+    if retry:
+      return False
+
+    # This is a real pre-CQ failure. Send a notification only if this is the
+    # first failure.
+    # This has race conditions among bots, but sending several notifications is
+    # still acceptable.
+    _, db = self._run.GetCIDBHandle()
+    action_history = db.GetActionsForChanges([change])
+    pre_cq_status = clactions.GetCLPreCQStatus(change, action_history)
+    return pre_cq_status != constants.CL_STATUS_FAILED
 
   def HandleValidationFailure(self, messages, changes=None, sanity=True,
                               no_stat=None, failed_hwtests=None):

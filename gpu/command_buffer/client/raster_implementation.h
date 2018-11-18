@@ -16,7 +16,7 @@
 #include "base/macros.h"
 #include "base/optional.h"
 #include "base/trace_event/memory_dump_provider.h"
-#include "gpu/command_buffer/client/client_discardable_texture_manager.h"
+#include "gpu/command_buffer/client/client_font_manager.h"
 #include "gpu/command_buffer/client/context_support.h"
 #include "gpu/command_buffer/client/gpu_control_client.h"
 #include "gpu/command_buffer/client/implementation_base.h"
@@ -29,6 +29,7 @@
 #include "gpu/command_buffer/common/id_allocator.h"
 #include "gpu/command_buffer/common/raster_cmd_format.h"
 #include "gpu/raster_export.h"
+#include "third_party/skia/include/core/SkColor.h"
 
 namespace gpu {
 
@@ -44,7 +45,9 @@ class RasterCmdHelper;
 // buffer management.
 class RASTER_EXPORT RasterImplementation : public RasterInterface,
                                            public ImplementationBase,
-                                           public gles2::QueryTrackerClient {
+                                           public ClientTransferCache::Client,
+                                           public gles2::QueryTrackerClient,
+                                           public ClientFontManager::Client {
  public:
   RasterImplementation(RasterCmdHelper* helper,
                        TransferBufferInterface* transfer_buffer,
@@ -99,13 +102,12 @@ class RASTER_EXPORT RasterImplementation : public RasterInterface,
 #include "gpu/command_buffer/client/raster_implementation_autogen.h"
 
   // RasterInterface implementation.
-  void BeginRasterCHROMIUM(
-      GLuint texture_id,
-      GLuint sk_color,
-      GLuint msaa_sample_count,
-      GLboolean can_use_lcd_text,
-      GLint pixel_config,
-      const cc::RasterColorSpace& raster_color_space) override;
+  void BeginRasterCHROMIUM(GLuint sk_color,
+                           GLuint msaa_sample_count,
+                           GLboolean can_use_lcd_text,
+                           GLint color_type,
+                           const cc::RasterColorSpace& raster_color_space,
+                           const GLbyte* mailbox) override;
   void RasterCHROMIUM(const cc::DisplayItemList* list,
                       cc::ImageProvider* provider,
                       const gfx::Size& content_size,
@@ -119,30 +121,53 @@ class RASTER_EXPORT RasterImplementation : public RasterInterface,
 
   // ContextSupport implementation.
   void SetAggressivelyFreeResources(bool aggressively_free_resources) override;
-  void Swap() override;
-  void SwapWithBounds(const std::vector<gfx::Rect>& rects) override;
-  void PartialSwapBuffers(const gfx::Rect& sub_buffer) override;
-  void CommitOverlayPlanes() override;
+  void Swap(uint32_t flags,
+            SwapCompletedCallback swap_completed,
+            PresentationCallback present_callback) override;
+  void SwapWithBounds(const std::vector<gfx::Rect>& rects,
+                      uint32_t flags,
+                      SwapCompletedCallback swap_completed,
+                      PresentationCallback present_callback) override;
+  void PartialSwapBuffers(const gfx::Rect& sub_buffer,
+                          uint32_t flags,
+                          SwapCompletedCallback swap_completed,
+                          PresentationCallback present_callback) override;
+  void CommitOverlayPlanes(uint32_t flags,
+                           SwapCompletedCallback swap_completed,
+                           PresentationCallback present_callback) override;
   void ScheduleOverlayPlane(int plane_z_order,
                             gfx::OverlayTransform plane_transform,
                             unsigned overlay_texture_id,
                             const gfx::Rect& display_bounds,
                             const gfx::RectF& uv_rect,
-                            bool enable_blend) override;
+                            bool enable_blend,
+                            unsigned gpu_fence_id) override;
   uint64_t ShareGroupTracingGUID() const override;
   void SetErrorMessageCallback(
       base::RepeatingCallback<void(const char*, int32_t)> callback) override;
-  void SetSnapshotRequested() override;
   bool ThreadSafeShallowLockDiscardableTexture(uint32_t texture_id) override;
   void CompleteLockDiscardableTexureOnContextThread(
       uint32_t texture_id) override;
   bool ThreadsafeDiscardableTextureIsDeletedForTracing(
       uint32_t texture_id) override;
+  void* MapTransferCacheEntry(size_t serialized_size) override;
+  void UnmapAndCreateTransferCacheEntry(uint32_t type, uint32_t id) override;
+  bool ThreadsafeLockTransferCacheEntry(uint32_t type, uint32_t id) override;
+  void UnlockTransferCacheEntries(
+      const std::vector<std::pair<uint32_t, uint32_t>>& entries) override;
+  void DeleteTransferCacheEntry(uint32_t type, uint32_t id) override;
+  unsigned int GetTransferBufferFreeSize() const override;
 
   bool GetQueryObjectValueHelper(const char* function_name,
                                  GLuint id,
                                  GLenum pname,
                                  GLuint64* params);
+
+  void* MapRasterCHROMIUM(GLsizeiptr size);
+  void UnmapRasterCHROMIUM(GLsizeiptr written_size);
+
+  // ClientFontManager::Client implementation.
+  void* MapFontBuffer(size_t size) override;
 
  private:
   friend class RasterImplementationTest;
@@ -172,6 +197,10 @@ class RASTER_EXPORT RasterImplementation : public RasterInterface,
   void OnGpuControlLostContext() final;
   void OnGpuControlLostContextMaybeReentrant() final;
   void OnGpuControlErrorMessage(const char* message, int32_t id) final;
+  void OnGpuControlSwapBuffersCompleted(
+      const SwapBuffersCompleteParams& params) final;
+  void OnSwapBufferPresented(uint64_t swap_id,
+                             const gfx::PresentationFeedback& feedback) final;
 
   // Gets the GLError through our wrapper.
   GLenum GetGLError();
@@ -226,9 +255,6 @@ class RASTER_EXPORT RasterImplementation : public RasterInterface,
   void FailGLError(GLenum /* error */) {}
 #endif
 
-  void* MapRasterCHROMIUM(GLsizeiptr size);
-  void UnmapRasterCHROMIUM(GLsizeiptr written_size);
-
   RasterCmdHelper* helper_;
   std::string last_error_;
   gles2::DebugMarkerManager debug_marker_manager_;
@@ -250,6 +276,7 @@ class RASTER_EXPORT RasterImplementation : public RasterInterface,
   // Used to check for single threaded access.
   int use_count_;
 
+  base::Optional<ScopedMappedMemoryPtr> font_mapped_buffer_;
   base::Optional<ScopedTransferBufferPtr> raster_mapped_buffer_;
 
   base::RepeatingCallback<void(const char*, int32_t)> error_message_callback_;
@@ -263,10 +290,26 @@ class RASTER_EXPORT RasterImplementation : public RasterInterface,
   IdAllocator texture_id_allocator_;
   IdAllocator query_id_allocator_;
 
-  ClientDiscardableTextureManager discardable_texture_manager_;
+  ClientFontManager font_manager_;
 
   mutable base::Lock lost_lock_;
   bool lost_;
+
+  struct RasterProperties {
+    RasterProperties(SkColor background_color,
+                     bool can_use_lcd_text,
+                     sk_sp<SkColorSpace> color_space);
+    ~RasterProperties();
+    SkColor background_color = SK_ColorWHITE;
+    bool can_use_lcd_text = false;
+    sk_sp<SkColorSpace> color_space;
+  };
+  base::Optional<RasterProperties> raster_properties_;
+
+  ClientTransferCache transfer_cache_;
+
+  // Tracing helpers.
+  int raster_chromium_id_ = 0;
 
   DISALLOW_COPY_AND_ASSIGN(RasterImplementation);
 };

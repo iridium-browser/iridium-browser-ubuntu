@@ -1,15 +1,16 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #import "ios/chrome/browser/ui/omnibox/popup/omnibox_popup_presenter.h"
 
 #import "ios/chrome/browser/ui/omnibox/popup/omnibox_popup_positioner.h"
-#import "ios/chrome/browser/ui/omnibox/popup/table_view_owning.h"
-#import "ios/chrome/browser/ui/toolbar/public/toolbar_controller_base_feature.h"
+#import "ios/chrome/browser/ui/toolbar/buttons/toolbar_configuration.h"
+#import "ios/chrome/browser/ui/toolbar/public/features.h"
 #include "ios/chrome/browser/ui/ui_util.h"
 #import "ios/chrome/browser/ui/uikit_ui_util.h"
 #import "ios/chrome/browser/ui/util/named_guide.h"
+#include "ios/chrome/common/ui_util/constraints_ui_util.h"
 #include "ios/chrome/grit/ios_theme_resources.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -19,21 +20,15 @@
 namespace {
 const CGFloat kExpandAnimationDuration = 0.1;
 const CGFloat kCollapseAnimationDuration = 0.05;
-const CGFloat kShadowHeight = 10;
-const CGFloat kiPadVerticalOffset = 3;
-NS_INLINE CGFloat BottomPadding() {
-  return IsIPadIdiom() ? kShadowHeight : 0;
-}
+const CGFloat kVerticalOffset = 6;
 }  // namespace
 
 @interface OmniboxPopupPresenter ()
-// Constraint for the height of the popup.
-@property(nonatomic, strong) NSLayoutConstraint* heightConstraint;
 // Constraint for the bottom anchor of the popup.
 @property(nonatomic, strong) NSLayoutConstraint* bottomConstraint;
 
 @property(nonatomic, weak) id<OmniboxPopupPositioner> positioner;
-@property(nonatomic, weak) UIViewController<TableViewOwning>* viewController;
+@property(nonatomic, weak) UIViewController* viewController;
 @property(nonatomic, strong) UIView* popupContainerView;
 @end
 
@@ -41,83 +36,58 @@ NS_INLINE CGFloat BottomPadding() {
 @synthesize viewController = _viewController;
 @synthesize positioner = _positioner;
 @synthesize popupContainerView = _popupContainerView;
-@synthesize heightConstraint = _heightConstraint;
 @synthesize bottomConstraint = _bottomConstraint;
 
 - (instancetype)initWithPopupPositioner:(id<OmniboxPopupPositioner>)positioner
-                    popupViewController:
-                        (UIViewController<TableViewOwning>*)viewController {
+                    popupViewController:(UIViewController*)viewController
+                              incognito:(BOOL)incognito {
   self = [super init];
   if (self) {
     _positioner = positioner;
     _viewController = viewController;
 
-    UIView* popupContainer = [[UIView alloc] init];
-    popupContainer.translatesAutoresizingMaskIntoConstraints = NO;
+    // Popup uses same colors as the toolbar, so the ToolbarConfiguration is
+    // used to get the style.
+    ToolbarConfiguration* configuration = [[ToolbarConfiguration alloc]
+        initWithStyle:incognito ? INCOGNITO : NORMAL];
 
-    _heightConstraint =
-        [popupContainer.heightAnchor constraintEqualToConstant:0];
-    _heightConstraint.active = YES;
+    UIBlurEffect* effect = [configuration blurEffect];
 
-    CGRect popupControllerFrame = viewController.view.frame;
-    popupControllerFrame.origin = CGPointZero;
-    viewController.view.frame = popupControllerFrame;
-    [popupContainer addSubview:viewController.view];
+    if (effect) {
+      UIVisualEffectView* effectView =
+          [[UIVisualEffectView alloc] initWithEffect:effect];
+      [effectView.contentView addSubview:viewController.view];
+      _popupContainerView = effectView;
 
-    UIImageView* shadowView = [[UIImageView alloc]
-        initWithImage:NativeImage(IDR_IOS_TOOLBAR_SHADOW_FULL_BLEED)];
-    [shadowView setUserInteractionEnabled:NO];
-    [shadowView setTranslatesAutoresizingMaskIntoConstraints:NO];
-
-    [popupContainer addSubview:shadowView];
-    [NSLayoutConstraint activateConstraints:@[
-      [shadowView.leadingAnchor
-          constraintEqualToAnchor:popupContainer.leadingAnchor],
-      [shadowView.trailingAnchor
-          constraintEqualToAnchor:popupContainer.trailingAnchor],
-    ]];
-
-    if (IsIPadIdiom()) {
-      [shadowView.bottomAnchor
-          constraintEqualToAnchor:popupContainer.bottomAnchor]
-          .active = YES;
     } else {
-      [shadowView.topAnchor
-          constraintEqualToAnchor:viewController.view.topAnchor]
-          .active = YES;
+      UIView* containerView = [[UIView alloc] init];
+      [containerView addSubview:viewController.view];
+      _popupContainerView = containerView;
     }
-    _popupContainerView = popupContainer;
+    _popupContainerView.backgroundColor = [configuration blurBackgroundColor];
+    _popupContainerView.translatesAutoresizingMaskIntoConstraints = NO;
+    viewController.view.translatesAutoresizingMaskIntoConstraints = NO;
+    AddSameConstraints(viewController.view, _popupContainerView);
   }
   return self;
 }
 
 - (void)updateHeightAndAnimateAppearanceIfNecessary {
   UIView* popup = self.popupContainerView;
-  BOOL newlyAdded = ([popup superview] == nil);
+  if (!popup.superview) {
+    UIViewController* parentVC = [self.positioner popupParentViewController];
+    [parentVC addChildViewController:self.viewController];
+    [[self.positioner popupParentView] addSubview:popup];
+    [self.viewController didMoveToParentViewController:parentVC];
 
-  [[self.positioner popupParentView] addSubview:popup];
-
-  if (newlyAdded) {
     [self initialLayout];
   }
 
-  CGFloat currentHeight = popup.bounds.size.height;
-  if (IsIPadIdiom()) {
-    // Show |result.size| on iPad.
-    CGFloat height = [[self.viewController tableView] contentSize].height;
-    UIEdgeInsets insets = [[self.viewController tableView] contentInset];
-    // Note the calculation |insets.top * 2| is correct, it should not be
-    // insets.top + insets.bottom. |insets.bottom| will be larger than
-    // |insets.top| when the keyboard is visible, but |parentHeight| should stay
-    // the same.
-    CGFloat iPadHeight = height + insets.top * 2 + BottomPadding();
-    self.heightConstraint.constant = iPadHeight;
-  } else {
-    self.heightConstraint.active = NO;
+  if (!IsIPadIdiom()) {
     self.bottomConstraint.active = YES;
   }
 
-  if (currentHeight == 0) {
+  if (popup.bounds.size.height == 0) {
     // Animate if it expanding.
     [UIView animateWithDuration:kExpandAnimationDuration
                           delay:0
@@ -127,19 +97,13 @@ NS_INLINE CGFloat BottomPadding() {
                      }
                      completion:nil];
   }
-
-  // Set the size the table view.
-  CGRect popupControllerFrame = self.viewController.view.frame;
-  popupControllerFrame.size.height = popup.frame.size.height - BottomPadding();
-  self.viewController.view.frame = popupControllerFrame;
 }
 
 - (void)animateCollapse {
   UIView* retainedPopupView = self.popupContainerView;
-  self.heightConstraint.constant = 0;
+  UIViewController* retainedViewController = self.viewController;
   if (!IsIPadIdiom()) {
     self.bottomConstraint.active = NO;
-    self.heightConstraint.active = YES;
   }
 
   [UIView animateWithDuration:kCollapseAnimationDuration
@@ -149,7 +113,9 @@ NS_INLINE CGFloat BottomPadding() {
         [[self.popupContainerView superview] layoutIfNeeded];
       }
       completion:^(BOOL) {
+        [retainedViewController willMoveToParentViewController:nil];
         [retainedPopupView removeFromSuperview];
+        [retainedViewController removeFromParentViewController];
       }];
 }
 
@@ -160,7 +126,6 @@ NS_INLINE CGFloat BottomPadding() {
   UIView* popup = self.popupContainerView;
   // Creates the constraints if the view is newly added to the view hierarchy.
   // On iPad the height of the popup is fixed.
-  self.heightConstraint.constant = 0;
 
   // This constraint will only be activated on iPhone as the popup is taking
   // the full height.
@@ -173,9 +138,7 @@ NS_INLINE CGFloat BottomPadding() {
       [NamedGuide guideWithName:kOmniboxGuide view:popup];
   NSLayoutConstraint* topConstraint =
       [popup.topAnchor constraintEqualToAnchor:topLayout.bottomAnchor];
-  if (IsIPadIdiom()) {
-    topConstraint.constant = kiPadVerticalOffset;
-  }
+  topConstraint.constant = kVerticalOffset;
 
   [NSLayoutConstraint activateConstraints:@[
     [popup.leadingAnchor constraintEqualToAnchor:popup.superview.leadingAnchor],

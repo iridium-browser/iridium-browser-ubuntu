@@ -30,26 +30,29 @@
 namespace blink {
 
 class TextControlElement;
+class TextControlInnerEditorElement;
 
 class CORE_EXPORT LayoutTextControl : public LayoutBlockFlow {
  public:
   ~LayoutTextControl() override;
 
   TextControlElement* GetTextControlElement() const;
-  virtual scoped_refptr<ComputedStyle> CreateInnerEditorStyle(
-      const ComputedStyle& start_style) const = 0;
-
   const char* GetName() const override { return "LayoutTextControl"; }
+
+  bool CreatesNewFormattingContext() const final {
+    // INPUT and other replaced elements rendered by Blink itself should be
+    // completely contained.
+    return true;
+  }
 
  protected:
   LayoutTextControl(TextControlElement*);
 
   // This convenience function should not be made public because
   // innerEditorElement may outlive the layout tree.
-  HTMLElement* InnerEditorElement() const;
+  TextControlInnerEditorElement* InnerEditorElement() const;
 
   int ScrollbarThickness() const;
-  void AdjustInnerEditorStyle(ComputedStyle& text_block_style) const;
 
   void StyleDidChange(StyleDifference, const ComputedStyle* old_style) override;
 
@@ -70,7 +73,6 @@ class CORE_EXPORT LayoutTextControl : public LayoutBlockFlow {
       LayoutUnit line_height,
       LayoutUnit non_content_height) const = 0;
 
-  void UpdateFromElement() override;
   void ComputeLogicalHeight(LayoutUnit logical_height,
                             LayoutUnit logical_top,
                             LogicalExtentComputedValues&) const override;
@@ -98,7 +100,7 @@ class CORE_EXPORT LayoutTextControl : public LayoutBlockFlow {
 
   void AddOutlineRects(Vector<LayoutRect>&,
                        const LayoutPoint& additional_offset,
-                       IncludeBlockVisualOverflowOrNot) const final;
+                       NGOutlineType) const final;
 
   bool CanBeProgramaticallyScrolled() const final { return true; }
 };

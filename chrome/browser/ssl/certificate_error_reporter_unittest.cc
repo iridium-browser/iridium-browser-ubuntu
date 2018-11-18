@@ -19,11 +19,12 @@
 #include "base/test/bind_test_util.h"
 #include "components/encrypted_messages/encrypted_message.pb.h"
 #include "components/encrypted_messages/message_encrypter.h"
-#include "content/public/common/weak_wrapper_shared_url_loader_factory.h"
 #include "net/http/http_status_code.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "services/network/public/cpp/resource_request.h"
+#include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
 #include "services/network/test/test_url_loader_factory.h"
+#include "services/network/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/boringssl/src/include/openssl/curve25519.h"
 
@@ -39,7 +40,7 @@ class ErrorReporterTest : public ::testing::Test {
  public:
   ErrorReporterTest()
       : test_shared_loader_factory_(
-            base::MakeRefCounted<content::WeakWrapperSharedURLLoaderFactory>(
+            base::MakeRefCounted<network::WeakWrapperSharedURLLoaderFactory>(
                 &test_url_loader_factory_)) {
     memset(server_private_key_, 1, sizeof(server_private_key_));
     X25519_public_from_private(server_public_key_, server_private_key_);
@@ -70,11 +71,7 @@ TEST_F(ErrorReporterTest, ExtendedReportingSendReport) {
         latest_report_uri = request.url;
         request.headers.GetHeader(net::HttpRequestHeaders::kContentType,
                                   &latest_content_type);
-        auto body = request.request_body;
-        CHECK_EQ(1u, body->elements()->size());
-        auto& element = body->elements()->at(0);
-        CHECK_EQ(network::DataElement::TYPE_BYTES, element.type());
-        latest_report = std::string(element.bytes(), element.length());
+        latest_report = network::GetUploadData(request);
       }));
 
   // Data should not be encrypted when sent to an HTTPS URL.

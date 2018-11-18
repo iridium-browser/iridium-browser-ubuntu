@@ -14,14 +14,6 @@
         flex: 1;
       }
 
-      paper-button {
-        -webkit-margin-end: 0;
-        -webkit-margin-start: 32px;
-        color: var(--google-blue-300);
-        height: 32px;
-        padding: 8px;
-      }
-
       .collapsible {
         overflow: hidden;
         text-overflow: ellipsis;
@@ -31,9 +23,12 @@
         white-space: pre;
       }
     </style>
-    <cr-toast id="toast" duration="[[duration]]">
+    <cr-toast id="toast" duration="[[duration]]" role="alert">
       <div id="content" class="elided-text"></div>
-      <paper-button id="button" hidden$="[[!showUndo_]]" on-click="onUndoTap_">
+      <paper-button id="button"
+                    hidden$="[[!showUndo_]]"
+                    on-click="onUndoTap_"
+                    aria-label="$i18n{undoDescription}">
         $i18n{undo}
       </paper-button>
     </cr-toast>

@@ -34,20 +34,7 @@ class ProgramBinaryTest : public ANGLETest
     {
         ANGLETest::SetUp();
 
-        const std::string vertexShaderSource =
-            R"(attribute vec4 inputAttribute;
-            void main()
-            {
-                gl_Position = inputAttribute;
-            })";
-
-        const std::string fragmentShaderSource =
-            R"(void main()
-            {
-                gl_FragColor = vec4(1,0,0,1);
-            })";
-
-        mProgram = CompileProgram(vertexShaderSource, fragmentShaderSource);
+        mProgram = CompileProgram(essl1_shaders::vs::Simple(), essl1_shaders::fs::Red());
         if (mProgram == 0)
         {
             FAIL() << "shader compilation failed.";
@@ -140,7 +127,7 @@ TEST_P(ProgramBinaryTest, DynamicShadersSignatureBug)
     glUseProgram(mProgram);
     glBindBuffer(GL_ARRAY_BUFFER, mBuffer);
 
-    GLint attribLocation = glGetAttribLocation(mProgram, "inputAttribute");
+    GLint attribLocation = glGetAttribLocation(mProgram, essl1_shaders::PositionAttrib());
     ASSERT_NE(-1, attribLocation);
     glEnableVertexAttribArray(attribLocation);
 
@@ -244,8 +231,19 @@ TEST_P(ProgramBinaryTest, CallProgramBinaryBeforeLink)
     ANGLE_GL_BINARY_OES_PROGRAM(binaryProgram, binaryBlob, binaryFormat);
     ASSERT_GL_NO_ERROR();
 
-    drawQuad(binaryProgram, "inputAttribute", 0.5f);
+    drawQuad(binaryProgram, essl1_shaders::PositionAttrib(), 0.5f);
     ASSERT_GL_NO_ERROR();
+}
+
+// Test that unlinked programs have a binary size of 0
+TEST_P(ProgramBinaryTest, ZeroSizedUnlinkedBinary)
+{
+    ANGLE_SKIP_TEST_IF(!supported());
+
+    ANGLE_GL_EMPTY_PROGRAM(program);
+    GLsizei length = 0;
+    glGetProgramiv(program, GL_PROGRAM_BINARY_LENGTH, &length);
+    ASSERT_EQ(0, length);
 }
 
 // Use this to select which configurations (e.g. which renderer, which GLES major version) these tests should be run against.
@@ -351,10 +349,6 @@ TEST_P(ProgramBinaryES3Test, UniformBlockBindingWithDraw)
 // http://anglebug.com/1637
 TEST_P(ProgramBinaryES3Test, UniformBlockBindingNoDraw)
 {
-    // TODO(jmadill): Investigate Intel failure.
-    // http://anglebug.com/1637
-    ANGLE_SKIP_TEST_IF(IsWindows() && IsOpenGL() && IsIntel());
-
     testBinaryAndUBOBlockIndexes(false);
 }
 
@@ -416,6 +410,66 @@ TEST_P(ProgramBinaryES31Test, ProgramBinaryWithComputeShader)
     // Dispatch compute with the loaded binary program
     glUseProgram(binaryProgram.get());
     glDispatchCompute(8, 4, 2);
+    ASSERT_GL_NO_ERROR();
+}
+
+// Tests that image texture works correctly when loading a program from binary.
+TEST_P(ProgramBinaryES31Test, ImageTextureBinding)
+{
+    // We can't run the test if no program binary formats are supported.
+    GLint binaryFormatCount = 0;
+    glGetIntegerv(GL_NUM_PROGRAM_BINARY_FORMATS, &binaryFormatCount);
+    ANGLE_SKIP_TEST_IF(!binaryFormatCount);
+
+    const char kComputeShader[] =
+        R"(#version 310 es
+        layout(local_size_x=1, local_size_y=1, local_size_z=1) in;
+        layout(r32ui, binding = 1) writeonly uniform highp uimage2D writeImage;
+        void main()
+        {
+            imageStore(writeImage, ivec2(gl_LocalInvocationID.xy), uvec4(200u));
+        })";
+
+    ANGLE_GL_COMPUTE_PROGRAM(program, kComputeShader);
+
+    // Read back the binary.
+    GLint programLength = 0;
+    glGetProgramiv(program.get(), GL_PROGRAM_BINARY_LENGTH, &programLength);
+    ASSERT_GL_NO_ERROR();
+
+    GLsizei readLength  = 0;
+    GLenum binaryFormat = GL_NONE;
+    std::vector<uint8_t> binary(programLength);
+    glGetProgramBinary(program.get(), programLength, &readLength, &binaryFormat, binary.data());
+    ASSERT_GL_NO_ERROR();
+
+    EXPECT_EQ(static_cast<GLsizei>(programLength), readLength);
+
+    // Load a new program with the binary.
+    ANGLE_GL_BINARY_ES3_PROGRAM(binaryProgram, binary, binaryFormat);
+    ASSERT_GL_NO_ERROR();
+
+    // Dispatch compute with the loaded binary program
+    glUseProgram(binaryProgram.get());
+    GLTexture texture;
+    glBindTexture(GL_TEXTURE_2D, texture);
+    glTexStorage2D(GL_TEXTURE_2D, 1, GL_R32UI, 1, 1);
+    constexpr GLuint kInputValue = 100u;
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1, 1, GL_RED_INTEGER, GL_UNSIGNED_INT, &kInputValue);
+    EXPECT_GL_NO_ERROR();
+
+    glBindImageTexture(1, texture, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R32UI);
+
+    glDispatchCompute(1, 1, 1);
+    EXPECT_GL_NO_ERROR();
+
+    GLFramebuffer framebuffer;
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer);
+    glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0);
+
+    GLuint outputValue;
+    glReadPixels(0, 0, 1, 1, GL_RED_INTEGER, GL_UNSIGNED_INT, &outputValue);
+    EXPECT_EQ(200u, outputValue);
     ASSERT_GL_NO_ERROR();
 }
 
@@ -608,46 +662,12 @@ class ProgramBinariesAcrossPlatforms : public testing::TestWithParam<PlatformsWi
 
     GLuint createES2ProgramFromSource()
     {
-        const std::string testVertexShaderSource =
-            R"(attribute highp vec4 position;
-
-            void main(void)
-            {
-                gl_Position = position;
-            })";
-
-        const std::string testFragmentShaderSource =
-            R"(void main(void)
-            {
-                gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);
-            })";
-
-        return CompileProgram(testVertexShaderSource, testFragmentShaderSource);
+        return CompileProgram(essl1_shaders::vs::Simple(), essl1_shaders::fs::Red());
     }
 
     GLuint createES3ProgramFromSource()
     {
-        const std::string testVertexShaderSource =
-            R"(#version 300 es
-            precision highp float;
-            in highp vec4 position;
-
-            void main(void)
-            {
-                gl_Position = position;
-            })";
-
-        const std::string testFragmentShaderSource =
-            R"(#version 300 es
-            precision highp float;
-            out vec4 out_FragColor;
-
-            void main(void)
-            {
-                out_FragColor = vec4(1.0, 0.0, 0.0, 1.0);
-            })";
-
-        return CompileProgram(testVertexShaderSource, testFragmentShaderSource);
+        return CompileProgram(essl3_shaders::vs::Simple(), essl3_shaders::fs::Red());
     }
 
     void drawWithProgram(GLuint program)
@@ -655,7 +675,7 @@ class ProgramBinariesAcrossPlatforms : public testing::TestWithParam<PlatformsWi
         glClearColor(0, 0, 0, 1);
         glClear(GL_COLOR_BUFFER_BIT);
 
-        GLint positionLocation = glGetAttribLocation(program, "position");
+        GLint positionLocation = glGetAttribLocation(program, essl1_shaders::PositionAttrib());
 
         glUseProgram(program);
 

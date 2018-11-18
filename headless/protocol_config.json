@@ -12,7 +12,7 @@
         "options": [
             {
                 "domain": "Target",
-                "include": ["createTarget", "closeTarget", "createBrowserContext", "disposeBrowserContext"],
+                "include": ["createTarget", "closeTarget"],
                 "include_events": []
             },
             {
@@ -23,11 +23,6 @@
             {
                 "domain": "HeadlessExperimental",
                 "async": ["beginFrame"]
-            },
-            {
-                "domain": "Network",
-                "include": ["emulateNetworkConditions", "disable"],
-                "include_events": []
             },
             {
                 "domain": "Page",

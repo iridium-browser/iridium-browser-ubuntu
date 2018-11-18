@@ -34,16 +34,15 @@
 #include <memory>
 
 #include "base/containers/span.h"
+#include "base/optional.h"
 #include "third_party/blink/renderer/bindings/core/v8/native_value_traits.h"
-#include "third_party/blink/renderer/bindings/core/v8/script_value.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/transferables.h"
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/core/imagebitmap/image_bitmap.h"
+#include "third_party/blink/renderer/core/mojo/mojo_handle.h"
 #include "third_party/blink/renderer/platform/wtf/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/partitions.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
-#include "third_party/blink/renderer/platform/wtf/optional.h"
-#include "third_party/blink/renderer/platform/wtf/text/string_view.h"
+#include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/blink/renderer/platform/wtf/thread_safe_ref_counted.h"
 #include "third_party/blink/renderer/platform/wtf/typed_arrays/array_buffer_contents.h"
 #include "v8/include/v8.h"
@@ -51,14 +50,17 @@
 namespace blink {
 
 class BlobDataHandle;
-class Transferables;
+class DOMSharedArrayBuffer;
 class ExceptionState;
+class ScriptValue;
 class SharedBuffer;
+class StaticBitmapImage;
+class Transferables;
 class UnpackedSerializedScriptValue;
 class WebBlobInfo;
-class DOMSharedArrayBuffer;
 
 typedef HashMap<String, scoped_refptr<BlobDataHandle>> BlobDataHandleMap;
+typedef Vector<mojo::ScopedHandle> MojoScopedHandleArray;
 typedef Vector<WebBlobInfo> WebBlobInfoArray;
 typedef HeapVector<Member<DOMSharedArrayBuffer>> SharedArrayBufferArray;
 
@@ -86,6 +88,7 @@ class CORE_EXPORT SerializedScriptValue
   // Version 17: Remove unnecessary byte swapping.
   // Version 18: Add a list of key-value pairs for ImageBitmap and ImageData to
   //             support color space information, compression, etc.
+  // Version 19: Add DetectedBarcode, DetectedFace, and DetectedText support.
   //
   // The following versions cannot be used, in order to be able to
   // deserialize version 0 SSVs. The class implementation has details.
@@ -98,7 +101,7 @@ class CORE_EXPORT SerializedScriptValue
   //
   // Recent changes are routinely reverted in preparation for branch, and this
   // has been the cause of at least one bug in the past.
-  static constexpr uint32_t kWireFormatVersion = 18;
+  static constexpr uint32_t kWireFormatVersion = 19;
 
   // This enumeration specifies whether we're serializing a value for storage;
   // e.g. when writing to IndexedDB. This corresponds to the forStorage flag of
@@ -113,13 +116,15 @@ class CORE_EXPORT SerializedScriptValue
   };
 
   struct SerializeOptions {
+    STACK_ALLOCATED();
+
+   public:
     enum WasmSerializationPolicy {
       kUnspecified,  // Invalid value, used as default initializer.
       kTransfer,     // In-memory transfer without (necessarily) serializing.
       kSerialize,    // Serialize to a byte stream.
       kBlockedInNonSecureContext  // Block transfer or serialization.
     };
-    STACK_ALLOCATED();
 
     SerializeOptions() = default;
     explicit SerializeOptions(StoragePolicy for_storage)
@@ -159,6 +164,8 @@ class CORE_EXPORT SerializedScriptValue
   // case of failure.
   struct DeserializeOptions {
     STACK_ALLOCATED();
+
+   public:
     MessagePortArray* message_ports = nullptr;
     const WebBlobInfoArray* blob_info = nullptr;
     bool read_wasm_from_stream = false;
@@ -190,6 +197,10 @@ class CORE_EXPORT SerializedScriptValue
   static bool ExtractTransferables(v8::Isolate*,
                                    v8::Local<v8::Value>,
                                    int,
+                                   Transferables&,
+                                   ExceptionState&);
+  static bool ExtractTransferables(v8::Isolate*,
+                                   const Vector<ScriptValue>&,
                                    Transferables&,
                                    ExceptionState&);
 
@@ -231,6 +242,7 @@ class CORE_EXPORT SerializedScriptValue
     return shared_array_buffers_contents_;
   }
   BlobDataHandleMap& BlobDataHandles() { return blob_data_handles_; }
+  MojoScopedHandleArray& MojoHandles() { return mojo_handles_; }
   ArrayBufferContentsArray& GetArrayBufferContentsArray() {
     return array_buffer_contents_array_;
   }
@@ -240,8 +252,11 @@ class CORE_EXPORT SerializedScriptValue
   ImageBitmapContentsArray& GetImageBitmapContentsArray() {
     return image_bitmap_contents_array_;
   }
-  void SetImageBitmapContentsArray(ImageBitmapContentsArray contents) {
-    image_bitmap_contents_array_ = std::move(contents);
+  void SetImageBitmapContentsArray(ImageBitmapContentsArray contents);
+
+  bool IsLockedToAgentCluster() const {
+    return !wasm_modules_.IsEmpty() ||
+           !shared_array_buffers_contents_.IsEmpty();
   }
 
  private:
@@ -285,6 +300,7 @@ class CORE_EXPORT SerializedScriptValue
   // These do not have one-use transferred contents, like the above.
   TransferredWasmModulesArray wasm_modules_;
   BlobDataHandleMap blob_data_handles_;
+  MojoScopedHandleArray mojo_handles_;
   SharedArrayBufferContentsArray shared_array_buffers_contents_;
 
   bool has_registered_external_allocation_;

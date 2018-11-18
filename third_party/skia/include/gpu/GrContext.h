@@ -8,32 +8,34 @@
 #ifndef GrContext_DEFINED
 #define GrContext_DEFINED
 
-#include "GrCaps.h"
 #include "SkMatrix.h"
 #include "SkPathEffect.h"
 #include "SkTypes.h"
 #include "../private/GrAuditTrail.h"
 #include "../private/GrSingleOwner.h"
+#include "../private/GrSkSLFPFactoryCache.h"
 #include "GrContextOptions.h"
+
+// We shouldn't need this but currently Android is relying on this being include transitively.
+#include "SkUnPreMultiply.h"
 
 class GrAtlasManager;
 class GrBackendFormat;
 class GrBackendSemaphore;
+class GrCaps;
 class GrContextPriv;
 class GrContextThreadSafeProxy;
+class GrContextThreadSafeProxyPriv;
 class GrDrawingManager;
-struct GrDrawOpAtlasConfig;
 class GrFragmentProcessor;
 struct GrGLInterface;
 class GrGlyphCache;
 class GrGpu;
-class GrIndexBuffer;
 struct GrMockOptions;
-class GrOvalRenderer;
+class GrOpMemoryPool;
 class GrPath;
 class GrProxyProvider;
 class GrRenderTargetContext;
-class GrResourceEntry;
 class GrResourceCache;
 class GrResourceProvider;
 class GrSamplerState;
@@ -42,8 +44,6 @@ class GrSwizzle;
 class GrTextBlobCache;
 class GrTextContext;
 class GrTextureProxy;
-class GrTextureStripAtlasManager;
-class GrVertexBuffer;
 struct GrVkBackendContext;
 
 class SkImage;
@@ -63,10 +63,8 @@ public:
     static sk_sp<GrContext> MakeGL(const GrContextOptions&);
     static sk_sp<GrContext> MakeGL();
 
-#ifdef SK_VULKAN
-    static sk_sp<GrContext> MakeVulkan(sk_sp<const GrVkBackendContext>, const GrContextOptions&);
-    static sk_sp<GrContext> MakeVulkan(sk_sp<const GrVkBackendContext>);
-#endif
+    static sk_sp<GrContext> MakeVulkan(const GrVkBackendContext&, const GrContextOptions&);
+    static sk_sp<GrContext> MakeVulkan(const GrVkBackendContext&);
 
 #ifdef SK_METAL
     /**
@@ -108,6 +106,11 @@ public:
      * API calls may crash.
      */
     virtual void abandonContext();
+
+    /**
+     * Returns true if the context was abandoned.
+     */
+    bool abandoned() const;
 
     /**
      * This is similar to abandonContext() however the underlying 3D context is not yet lost and
@@ -203,9 +206,6 @@ public:
      */
     void purgeUnlockedResources(bool scratchResourcesOnly);
 
-    /** Access the context capabilities */
-    const GrCaps* caps() const { return fCaps.get(); }
-
     /**
      * Gets the maximum supported texture size.
      */
@@ -281,6 +281,8 @@ public:
     // Chrome is using this!
     void dumpMemoryStatistics(SkTraceMemoryDump* traceMemoryDump) const;
 
+    bool supportsDistanceFieldText() const;
+
 protected:
     GrContext(GrBackend, int32_t id = SK_InvalidGenID);
 
@@ -292,14 +294,16 @@ protected:
     const GrBackend                         fBackend;
     sk_sp<const GrCaps>                     fCaps;
     sk_sp<GrContextThreadSafeProxy>         fThreadSafeProxy;
+    sk_sp<GrSkSLFPFactoryCache>             fFPFactoryCache;
 
 private:
     sk_sp<GrGpu>                            fGpu;
     GrResourceCache*                        fResourceCache;
     GrResourceProvider*                     fResourceProvider;
     GrProxyProvider*                        fProxyProvider;
-    std::unique_ptr<GrTextureStripAtlasManager> fTextureStripAtlasManager;
 
+    // All the GrOp-derived classes use this pool.
+    sk_sp<GrOpMemoryPool>                   fOpMemoryPool;
 
     GrGlyphCache*                           fGlyphCache;
     std::unique_ptr<GrTextBlobCache>        fTextBlobCache;
@@ -329,18 +333,15 @@ private:
     friend class GrContextPriv;
 
     /**
-     * These functions create premul <-> unpremul effects. If the second argument is 'true', they
-     * use the specialized round-trip effects from GrConfigConversionEffect, otherwise they
-     * create effects that do naive multiply or divide.
+     * These functions create premul <-> unpremul effects, using the specialized round-trip effects
+     * from GrConfigConversionEffect.
      */
-    std::unique_ptr<GrFragmentProcessor> createPMToUPMEffect(std::unique_ptr<GrFragmentProcessor>,
-                                                             bool useConfigConversionEffect);
-    std::unique_ptr<GrFragmentProcessor> createUPMToPMEffect(std::unique_ptr<GrFragmentProcessor>,
-                                                             bool useConfigConversionEffect);
+    std::unique_ptr<GrFragmentProcessor> createPMToUPMEffect(std::unique_ptr<GrFragmentProcessor>);
+    std::unique_ptr<GrFragmentProcessor> createUPMToPMEffect(std::unique_ptr<GrFragmentProcessor>);
 
     /**
-     * Returns true if createPMtoUPMEffect and createUPMToPMEffect will succeed for non-sRGB 8888
-     * configs. In other words, did we find a pair of round-trip preserving conversion effects?
+     * Returns true if createPMToUPMEffect and createUPMToPMEffect will succeed. In other words,
+     * did we find a pair of round-trip preserving conversion effects?
      */
     bool validPMUPMConversionExists();
 
@@ -359,6 +360,8 @@ private:
  */
 class SK_API GrContextThreadSafeProxy : public SkRefCnt {
 public:
+    ~GrContextThreadSafeProxy();
+
     bool matches(GrContext* context) const { return context->uniqueID() == fContextUniqueID; }
 
     /**
@@ -388,38 +391,44 @@ public:
      *                               with this characterization will be replayed into
      *  @param isMipMapped           Will the surface the DDL will be replayed into have space
      *                               allocated for mipmaps?
+     *  @param willUseGLFBO0         Will the surface the DDL will be replayed into be backed by GL
+     *                               FBO 0. This flag is only valid if using an GL backend.
      */
     SkSurfaceCharacterization createCharacterization(
                                   size_t cacheMaxResourceBytes,
                                   const SkImageInfo& ii, const GrBackendFormat& backendFormat,
                                   int sampleCount, GrSurfaceOrigin origin,
                                   const SkSurfaceProps& surfaceProps,
-                                  bool isMipMapped);
+                                  bool isMipMapped, bool willUseGLFBO0 = false);
 
-    const GrCaps* caps() const { return fCaps.get(); }
-    sk_sp<const GrCaps> refCaps() const { return fCaps; }
+    bool operator==(const GrContextThreadSafeProxy& that) const {
+        // Each GrContext should only ever have a single thread-safe proxy.
+        SkASSERT((this == &that) == (fContextUniqueID == that.fContextUniqueID));
+        return this == &that;
+    }
+
+    bool operator!=(const GrContextThreadSafeProxy& that) const { return !(*this == that); }
+
+    // Provides access to functions that aren't part of the public API.
+    GrContextThreadSafeProxyPriv priv();
+    const GrContextThreadSafeProxyPriv priv() const;
 
 private:
     // DDL TODO: need to add unit tests for backend & maybe options
     GrContextThreadSafeProxy(sk_sp<const GrCaps> caps,
                              uint32_t uniqueID,
                              GrBackend backend,
-                             const GrContextOptions& options)
-        : fCaps(std::move(caps))
-        , fContextUniqueID(uniqueID)
-        , fBackend(backend)
-        , fOptions(options) {
-    }
+                             const GrContextOptions& options,
+                             sk_sp<GrSkSLFPFactoryCache> cache);
 
-    sk_sp<const GrCaps>    fCaps;
-    const uint32_t         fContextUniqueID;
-    const GrBackend        fBackend;
-    const GrContextOptions fOptions;
+    sk_sp<const GrCaps>         fCaps;
+    const uint32_t              fContextUniqueID;
+    const GrBackend             fBackend;
+    const GrContextOptions      fOptions;
+    sk_sp<GrSkSLFPFactoryCache> fFPFactoryCache;
 
     friend class GrDirectContext; // To construct this object
-    friend class GrContextPriv;   // for access to 'fOptions' in MakeDDL
-    friend class GrDDLContext;    // to implement the GrDDLContext ctor (access to all members)
-    friend class SkSurfaceCharacterization; // for access to 'fContextUniqueID' for operator==
+    friend class GrContextThreadSafeProxyPriv;
 
     typedef SkRefCnt INHERITED;
 };

@@ -31,6 +31,9 @@ class FileStream;
 namespace content {
 
 // A request job that handles reading content URIs
+//
+// Note that when the Network Service is enabled, ContentUrlLoaderFactory is
+// used instead.
 class CONTENT_EXPORT URLRequestContentJob : public net::URLRequestJob {
  public:
   URLRequestContentJob(
@@ -43,7 +46,9 @@ class CONTENT_EXPORT URLRequestContentJob : public net::URLRequestJob {
   void Start() override;
   void Kill() override;
   int ReadRawData(net::IOBuffer* buf, int buf_size) override;
-  bool IsRedirectResponse(GURL* location, int* http_status_code) override;
+  bool IsRedirectResponse(GURL* location,
+                          int* http_status_code,
+                          bool* insecure_scheme_was_upgraded) override;
   bool GetMimeType(std::string* mime_type) const override;
   void SetExtraRequestHeaders(const net::HttpRequestHeaders& headers) override;
 

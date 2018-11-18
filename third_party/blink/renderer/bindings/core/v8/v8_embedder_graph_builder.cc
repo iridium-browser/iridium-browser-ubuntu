@@ -17,11 +17,15 @@ namespace blink {
 
 V8EmbedderGraphBuilder::V8EmbedderGraphBuilder(v8::Isolate* isolate,
                                                Graph* graph)
-    : isolate_(isolate), current_parent_(nullptr), graph_(graph) {}
+    : ScriptWrappableVisitor(ThreadState::Current()),
+      isolate_(isolate),
+      current_parent_(nullptr),
+      graph_(graph) {}
 
 void V8EmbedderGraphBuilder::BuildEmbedderGraphCallback(
     v8::Isolate* isolate,
-    v8::EmbedderGraph* graph) {
+    v8::EmbedderGraph* graph,
+    void* data) {
   V8EmbedderGraphBuilder builder(isolate, graph);
   builder.BuildEmbedderGraph();
 }
@@ -109,9 +113,9 @@ void V8EmbedderGraphBuilder::VisitPersistentHandle(
   DomTreeState dom_tree_state = DomTreeStateFromWrapper(class_id, v8_value);
   EmbedderNode* graph_node = GraphNode(
       traceable, traceable->NameInHeapSnapshot(), wrapper, dom_tree_state);
-  const TraceWrapperDescriptor& wrapper_descriptor =
-      WrapperDescriptorFor<ScriptWrappable>(traceable);
-  WorklistItem item = ToWorklistItem(graph_node, wrapper_descriptor);
+  const TraceDescriptor& descriptor =
+      TraceDescriptorFor<ScriptWrappable>(traceable);
+  WorklistItem item = ToWorklistItem(graph_node, descriptor);
   switch (graph_node->GetDomTreeState()) {
     case DomTreeState::kAttached:
       PushToWorklist(item);
@@ -126,7 +130,7 @@ void V8EmbedderGraphBuilder::VisitPersistentHandle(
 }
 
 void V8EmbedderGraphBuilder::Visit(
-    const TraceWrapperV8Reference<v8::Value>& traced_wrapper) const {
+    const TraceWrapperV8Reference<v8::Value>& traced_wrapper) {
   const v8::PersistentBase<v8::Value>* value = &traced_wrapper.Get();
   // Add an edge from the current parent to the V8 object.
   v8::Local<v8::Value> v8_value = v8::Local<v8::Value>::New(isolate_, *value);
@@ -135,20 +139,33 @@ void V8EmbedderGraphBuilder::Visit(
   }
 }
 
-void V8EmbedderGraphBuilder::Visit(
-    const TraceWrapperDescriptor& wrapper_descriptor) const {
+void V8EmbedderGraphBuilder::VisitWithWrappers(
+    void* object,
+    TraceDescriptor wrapper_descriptor) {
   // Add an edge from the current parent to this object.
   // Also push the object to the worklist in order to process its members.
   const void* traceable = wrapper_descriptor.base_object_payload;
+  const char* name =
+      GCInfoTable::Get()
+          .GCInfoFromIndex(
+              HeapObjectHeader::FromPayload(traceable)->GcInfoIndex())
+          ->name_(traceable);
   EmbedderNode* graph_node =
-      GraphNode(traceable, wrapper_descriptor.name_callback(traceable), nullptr,
-                current_parent_->GetDomTreeState());
+      GraphNode(traceable, name, nullptr, current_parent_->GetDomTreeState());
   graph_->AddEdge(current_parent_, graph_node);
   PushToWorklist(ToWorklistItem(graph_node, wrapper_descriptor));
 }
 
+void V8EmbedderGraphBuilder::VisitBackingStoreStrongly(void* object,
+                                                       void** object_slot,
+                                                       TraceDescriptor desc) {
+  if (!object)
+    return;
+  desc.callback(this, desc.base_object_payload);
+}
+
 void V8EmbedderGraphBuilder::Visit(DOMWrapperMap<ScriptWrappable>* wrapper_map,
-                                   const ScriptWrappable* key) const {
+                                   const ScriptWrappable* key) {
   // Add an edge from the current parent to the V8 object.
   v8::Local<v8::Value> v8_value =
       wrapper_map->NewLocal(isolate_, const_cast<ScriptWrappable*>(key));
@@ -173,7 +190,7 @@ V8EmbedderGraphBuilder::EmbedderNode* V8EmbedderGraphBuilder::GraphNode(
   }
   // Ownership of the new node is transferred to the graph_.
   // graph_node_.at(tracable) is valid for all BuildEmbedderGraph execution.
-  auto raw_node = new EmbedderNode(name, wrapper, dom_tree_state);
+  auto* raw_node = new EmbedderNode(name, wrapper, dom_tree_state);
   EmbedderNode* node = static_cast<EmbedderNode*>(
       graph_->AddNode(std::unique_ptr<Graph::Node>(raw_node)));
   graph_node_.insert(traceable, node);
@@ -191,9 +208,8 @@ void V8EmbedderGraphBuilder::VisitPendingActivities() {
 
 V8EmbedderGraphBuilder::WorklistItem V8EmbedderGraphBuilder::ToWorklistItem(
     EmbedderNode* node,
-    const TraceWrapperDescriptor& wrapper_descriptor) const {
-  return {node, wrapper_descriptor.base_object_payload,
-          wrapper_descriptor.trace_wrappers_callback};
+    const TraceDescriptor& descriptor) const {
+  return {node, descriptor.base_object_payload, descriptor.callback};
 }
 
 void V8EmbedderGraphBuilder::PushToWorklist(WorklistItem item) const {
@@ -209,7 +225,7 @@ void V8EmbedderGraphBuilder::VisitTransitiveClosure() {
     auto item = worklist_.back();
     worklist_.pop_back();
     ParentScope parent(this, item.node);
-    item.trace_wrappers_callback(this, const_cast<void*>(item.traceable));
+    item.trace_callback(this, const_cast<void*>(item.traceable));
   }
 }
 

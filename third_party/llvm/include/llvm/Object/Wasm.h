@@ -18,9 +18,11 @@
 #define LLVM_OBJECT_WASM_H
 
 #include "llvm/ADT/ArrayRef.h"
-#include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/StringMap.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/BinaryFormat/Wasm.h"
+#include "llvm/Config/llvm-config.h"
+#include "llvm/MC/MCSymbolWasm.h"
 #include "llvm/Object/Binary.h"
 #include "llvm/Object/ObjectFile.h"
 #include "llvm/Support/Error.h"
@@ -53,6 +55,10 @@ public:
     return Info.Kind == wasm::WASM_SYMBOL_TYPE_GLOBAL;
   }
 
+  bool isTypeSection() const {
+    return Info.Kind == wasm::WASM_SYMBOL_TYPE_SECTION;
+  }
+
   bool isDefined() const { return !isUndefined(); }
 
   bool isUndefined() const {
@@ -83,29 +89,19 @@ public:
     return Info.Flags & wasm::WASM_SYMBOL_VISIBILITY_MASK;
   }
 
-  void print(raw_ostream &Out) const {
-    Out << "Name=" << Info.Name << ", Kind=" << Info.Kind
-        << ", Flags=" << Info.Flags;
-    if (!isTypeData()) {
-      Out << ", ElemIndex=" << Info.ElementIndex;
-    } else if (isDefined()) {
-      Out << ", Segment=" << Info.DataRef.Segment;
-      Out << ", Offset=" << Info.DataRef.Offset;
-      Out << ", Size=" << Info.DataRef.Size;
-    }
-  }
+  void print(raw_ostream &Out) const;
 
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
-  LLVM_DUMP_METHOD void dump() const { print(dbgs()); }
+  LLVM_DUMP_METHOD void dump() const;
 #endif
 };
 
 struct WasmSection {
   WasmSection() = default;
 
-  uint32_t Type = 0; // Section type (See below)
-  uint32_t Offset = 0; // Offset with in the file
-  StringRef Name; // Section name (User-defined sections only)
+  uint32_t Type = 0;         // Section type (See below)
+  uint32_t Offset = 0;       // Offset with in the file
+  StringRef Name;            // Section name (User-defined sections only)
   ArrayRef<uint8_t> Content; // Section content
   std::vector<wasm::WasmRelocation> Relocations; // Relocations for this section
 };
@@ -124,7 +120,7 @@ public:
   const WasmSymbol &getWasmSymbol(const DataRefImpl &Symb) const;
   const WasmSymbol &getWasmSymbol(const SymbolRef &Symbol) const;
   const WasmSection &getWasmSection(const SectionRef &Section) const;
-  const wasm::WasmRelocation &getWasmRelocation(const RelocationRef& Ref) const;
+  const wasm::WasmRelocation &getWasmRelocation(const RelocationRef &Ref) const;
 
   static bool classof(const Binary *v) { return v->isWasm(); }
 
@@ -136,7 +132,7 @@ public:
   ArrayRef<wasm::WasmGlobal> globals() const { return Globals; }
   ArrayRef<wasm::WasmExport> exports() const { return Exports; }
   ArrayRef<WasmSymbol> syms() const { return Symbols; }
-  const wasm::WasmLinkingData& linkingData() const { return LinkingData; }
+  const wasm::WasmLinkingData &linkingData() const { return LinkingData; }
   uint32_t getNumberOfSymbols() const { return Symbols.size(); }
   ArrayRef<wasm::WasmElemSegment> elements() const { return ElemSegments; }
   ArrayRef<WasmSegment> dataSegments() const { return DataSegments; }
@@ -156,7 +152,7 @@ public:
   Expected<StringRef> getSymbolName(DataRefImpl Symb) const override;
 
   Expected<uint64_t> getSymbolAddress(DataRefImpl Symb) const override;
-  uint64_t getWasmSymbolValue(const WasmSymbol& Sym) const;
+  uint64_t getWasmSymbolValue(const WasmSymbol &Sym) const;
   uint64_t getSymbolValueImpl(DataRefImpl Symb) const override;
   uint32_t getSymbolAlignment(DataRefImpl Symb) const override;
   uint64_t getCommonSymbolSizeImpl(DataRefImpl Symb) const override;
@@ -198,6 +194,12 @@ public:
   SubtargetFeatures getFeatures() const override;
   bool isRelocatableObject() const override;
 
+  struct ReadContext {
+    const uint8_t *Start;
+    const uint8_t *Ptr;
+    const uint8_t *End;
+  };
+
 private:
   bool isValidFunctionIndex(uint32_t Index) const;
   bool isDefinedFunctionIndex(uint32_t Index) const;
@@ -206,40 +208,36 @@ private:
   bool isValidFunctionSymbol(uint32_t Index) const;
   bool isValidGlobalSymbol(uint32_t Index) const;
   bool isValidDataSymbol(uint32_t Index) const;
+  bool isValidSectionSymbol(uint32_t Index) const;
   wasm::WasmFunction &getDefinedFunction(uint32_t Index);
   wasm::WasmGlobal &getDefinedGlobal(uint32_t Index);
 
   const WasmSection &getWasmSection(DataRefImpl Ref) const;
   const wasm::WasmRelocation &getWasmRelocation(DataRefImpl Ref) const;
 
-  WasmSection* findCustomSectionByName(StringRef Name);
-  WasmSection* findSectionByType(uint32_t Type);
-
   const uint8_t *getPtr(size_t Offset) const;
   Error parseSection(WasmSection &Sec);
-  Error parseCustomSection(WasmSection &Sec, const uint8_t *Ptr,
-                           const uint8_t *End);
+  Error parseCustomSection(WasmSection &Sec, ReadContext &Ctx);
 
   // Standard section types
-  Error parseTypeSection(const uint8_t *Ptr, const uint8_t *End);
-  Error parseImportSection(const uint8_t *Ptr, const uint8_t *End);
-  Error parseFunctionSection(const uint8_t *Ptr, const uint8_t *End);
-  Error parseTableSection(const uint8_t *Ptr, const uint8_t *End);
-  Error parseMemorySection(const uint8_t *Ptr, const uint8_t *End);
-  Error parseGlobalSection(const uint8_t *Ptr, const uint8_t *End);
-  Error parseExportSection(const uint8_t *Ptr, const uint8_t *End);
-  Error parseStartSection(const uint8_t *Ptr, const uint8_t *End);
-  Error parseElemSection(const uint8_t *Ptr, const uint8_t *End);
-  Error parseCodeSection(const uint8_t *Ptr, const uint8_t *End);
-  Error parseDataSection(const uint8_t *Ptr, const uint8_t *End);
+  Error parseTypeSection(ReadContext &Ctx);
+  Error parseImportSection(ReadContext &Ctx);
+  Error parseFunctionSection(ReadContext &Ctx);
+  Error parseTableSection(ReadContext &Ctx);
+  Error parseMemorySection(ReadContext &Ctx);
+  Error parseGlobalSection(ReadContext &Ctx);
+  Error parseExportSection(ReadContext &Ctx);
+  Error parseStartSection(ReadContext &Ctx);
+  Error parseElemSection(ReadContext &Ctx);
+  Error parseCodeSection(ReadContext &Ctx);
+  Error parseDataSection(ReadContext &Ctx);
 
   // Custom section types
-  Error parseNameSection(const uint8_t *Ptr, const uint8_t *End);
-  Error parseLinkingSection(const uint8_t *Ptr, const uint8_t *End);
-  Error parseLinkingSectionSymtab(const uint8_t *&Ptr, const uint8_t *End);
-  Error parseLinkingSectionComdat(const uint8_t *&Ptr, const uint8_t *End);
-  Error parseRelocSection(StringRef Name, const uint8_t *Ptr,
-                          const uint8_t *End);
+  Error parseNameSection(ReadContext &Ctx);
+  Error parseLinkingSection(ReadContext &Ctx);
+  Error parseLinkingSectionSymtab(ReadContext &Ctx);
+  Error parseLinkingSectionComdat(ReadContext &Ctx);
+  Error parseRelocSection(StringRef Name, ReadContext &Ctx);
 
   wasm::WasmObjectHeader Header;
   std::vector<WasmSection> Sections;
@@ -267,8 +265,7 @@ private:
 
 } // end namespace object
 
-inline raw_ostream &operator<<(raw_ostream &OS,
-                               const object::WasmSymbol &Sym) {
+inline raw_ostream &operator<<(raw_ostream &OS, const object::WasmSymbol &Sym) {
   Sym.print(OS);
   return OS;
 }

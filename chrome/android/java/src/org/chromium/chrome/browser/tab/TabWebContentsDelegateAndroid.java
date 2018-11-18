@@ -20,6 +20,7 @@ import android.view.View;
 
 import org.chromium.base.ActivityState;
 import org.chromium.base.ApplicationStatus;
+import org.chromium.base.BuildInfo;
 import org.chromium.base.Log;
 import org.chromium.base.ObserverList.RewindableIterator;
 import org.chromium.base.annotations.CalledByNative;
@@ -29,11 +30,12 @@ import org.chromium.chrome.browser.AppHooks;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.FullscreenActivity;
 import org.chromium.chrome.browser.RepostFormWarningDialog;
+import org.chromium.chrome.browser.SwipeRefreshHandler;
 import org.chromium.chrome.browser.document.DocumentUtils;
 import org.chromium.chrome.browser.document.DocumentWebContentsDelegate;
 import org.chromium.chrome.browser.findinpage.FindMatchRectsDetails;
 import org.chromium.chrome.browser.findinpage.FindNotificationDetails;
-import org.chromium.chrome.browser.fullscreen.FullscreenManager;
+import org.chromium.chrome.browser.fullscreen.FullscreenOptions;
 import org.chromium.chrome.browser.media.MediaCaptureNotificationService;
 import org.chromium.chrome.browser.policy.PolicyAuditor;
 import org.chromium.chrome.browser.policy.PolicyAuditor.AuditEvent;
@@ -42,10 +44,8 @@ import org.chromium.chrome.browser.tabmodel.TabModel;
 import org.chromium.chrome.browser.tabmodel.TabModel.TabLaunchType;
 import org.chromium.chrome.browser.tabmodel.TabModelUtils;
 import org.chromium.chrome.browser.tabmodel.TabWindowManager;
-import org.chromium.components.web_contents_delegate_android.WebContentsDelegateAndroid;
-import org.chromium.content.browser.ActivityContentVideoViewEmbedder;
-import org.chromium.content.browser.ContentVideoViewEmbedder;
-import org.chromium.content_public.browser.ContentViewCore;
+import org.chromium.components.embedder_support.delegate.WebContentsDelegateAndroid;
+import org.chromium.content_public.browser.GestureListenerManager;
 import org.chromium.content_public.browser.InvalidateTypes;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.common.ResourceRequestBody;
@@ -135,6 +135,12 @@ public class TabWebContentsDelegateAndroid extends WebContentsDelegateAndroid {
         }
     }
 
+    @Override
+    public boolean addMessageToConsole(int level, String message, int lineNumber, String sourceId) {
+        // Only output console.log messages on debug variants of Android OS. crbug/869804
+        return !BuildInfo.isDebugAndroid();
+    }
+
     @CalledByNative
     private void onFindMatchRectsAvailable(FindMatchRectsDetails result) {
         if (mFindMatchRectsListener != null) {
@@ -209,18 +215,33 @@ public class TabWebContentsDelegateAndroid extends WebContentsDelegateAndroid {
 
     @Override
     public void showRepostFormWarningDialog() {
-        mTab.resetSwipeRefreshHandler();
+        // When the dialog is visible, keeping the refresh animation active
+        // in the background is distracting and unnecessary (and likely to
+        // jank when the dialog is shown).
+        SwipeRefreshHandler handler = SwipeRefreshHandler.get(mTab);
+        if (handler != null) handler.reset();
+
         if (mTab.getActivity() == null) return;
         RepostFormWarningDialog warningDialog = new RepostFormWarningDialog(mTab);
         warningDialog.show(mTab.getActivity().getFragmentManager(), null);
     }
 
     @Override
-    public void toggleFullscreenModeForTab(boolean enableFullscreen) {
+    public void enterFullscreenModeForTab(boolean prefersNavigationBar) {
+        FullscreenOptions options = new FullscreenOptions(prefersNavigationBar);
         if (FullscreenActivity.shouldUseFullscreenActivity(mTab)) {
-            FullscreenActivity.toggleFullscreenMode(enableFullscreen, mTab);
+            FullscreenActivity.enterFullscreenMode(mTab, options);
         } else {
-            mTab.toggleFullscreenMode(enableFullscreen);
+            mTab.enterFullscreenMode(options);
+        }
+    }
+
+    @Override
+    public void exitFullscreenModeForTab() {
+        if (FullscreenActivity.shouldUseFullscreenActivity(mTab)) {
+            FullscreenActivity.exitFullscreenMode(mTab);
+        } else {
+            mTab.exitFullscreenMode();
         }
     }
 
@@ -277,14 +298,14 @@ public class TabWebContentsDelegateAndroid extends WebContentsDelegateAndroid {
     public void rendererUnresponsive() {
         super.rendererUnresponsive();
         if (mTab.getWebContents() != null) nativeOnRendererUnresponsive(mTab.getWebContents());
-        mTab.handleRendererUnresponsive();
+        mTab.handleRendererResponsiveStateChanged(false);
     }
 
     @Override
     public void rendererResponsive() {
         super.rendererResponsive();
         if (mTab.getWebContents() != null) nativeOnRendererResponsive(mTab.getWebContents());
-        mTab.handleRendererResponsive();
+        mTab.handleRendererResponsiveStateChanged(true);
     }
 
     @Override
@@ -523,41 +544,24 @@ public class TabWebContentsDelegateAndroid extends WebContentsDelegateAndroid {
         return mTab.controlsResizeView();
     }
 
+    /**
+     *  This is currently called when committing a pre-rendered page or activating a portal.
+     */
+    @CalledByNative
+    private void swapWebContents(
+            WebContents webContents, boolean didStartLoad, boolean didFinishLoad) {
+        mTab.swapWebContents(webContents, didStartLoad, didFinishLoad);
+    }
+
     private float getDipScale() {
         return mTab.getWindowAndroid().getDisplay().getDipScale();
     }
 
-    @Override
-    public ContentVideoViewEmbedder getContentVideoViewEmbedder() {
-        return new ActivityContentVideoViewEmbedder(mTab.getActivity()) {
-            @Override
-            public void enterFullscreenVideo(View view, boolean isVideoLoaded) {
-                super.enterFullscreenVideo(view, isVideoLoaded);
-                FullscreenManager fullscreenManager = mTab.getFullscreenManager();
-                if (fullscreenManager != null) {
-                    fullscreenManager.setOverlayVideoMode(true);
-                    // Disable double tap for video.
-                    ContentViewCore cvc = mTab.getContentViewCore();
-                    if (cvc != null) {
-                        cvc.updateDoubleTapSupport(false);
-                    }
-                }
-            }
-
-            @Override
-            public void exitFullscreenVideo() {
-                FullscreenManager fullscreenManager = mTab.getFullscreenManager();
-                if (fullscreenManager != null) {
-                    fullscreenManager.setOverlayVideoMode(false);
-                    // Disable double tap for video.
-                    ContentViewCore cvc = mTab.getContentViewCore();
-                    if (cvc != null) {
-                        cvc.updateDoubleTapSupport(true);
-                    }
-                }
-                super.exitFullscreenVideo();
-            }
-        };
+    private void enableDoubleTap(boolean enable) {
+        WebContents wc = mTab.getWebContents();
+        GestureListenerManager gestureManager =
+                wc != null ? GestureListenerManager.fromWebContents(wc) : null;
+        if (gestureManager != null) gestureManager.updateDoubleTapSupport(enable);
     }
 
     public void showFramebustBlockInfobarForTesting(String url) {

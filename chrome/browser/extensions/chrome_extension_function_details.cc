@@ -55,8 +55,8 @@ Browser* ChromeExtensionFunctionDetails::GetCurrentBrowser() const {
   Profile* profile = Profile::FromBrowserContext(
       web_contents ? web_contents->GetBrowserContext()
                    : function_->browser_context());
-  Browser* browser =
-      chrome::FindAnyBrowser(profile, function_->include_incognito());
+  Browser* browser = chrome::FindAnyBrowser(
+      profile, function_->include_incognito_information());
   if (browser)
     return browser;
 
@@ -68,21 +68,6 @@ Browser* ChromeExtensionFunctionDetails::GetCurrentBrowser() const {
   // TODO(rafaelw): Delay creation of background_page until the browser
   // is available. http://code.google.com/p/chromium/issues/detail?id=13284
   return NULL;
-}
-
-content::WebContents*
-ChromeExtensionFunctionDetails::GetAssociatedWebContents() {
-  if (function_->dispatcher()) {
-    content::WebContents* web_contents =
-        function_->dispatcher()->GetAssociatedWebContents();
-    if (web_contents)
-      return web_contents;
-  }
-
-  Browser* browser = GetCurrentBrowser();
-  if (!browser)
-    return NULL;
-  return browser->tab_strip_model()->GetActiveWebContents();
 }
 
 gfx::NativeWindow ChromeExtensionFunctionDetails::GetNativeWindowForUI() {

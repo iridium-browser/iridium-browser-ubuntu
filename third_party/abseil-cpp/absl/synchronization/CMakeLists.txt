@@ -33,8 +33,8 @@ list(APPEND SYNCHRONIZATION_INTERNAL_HEADERS
 
 
 
-# syncrhonisation library
-list(APPEND SYNCHRONIZATION_SRC 
+# synchronization library
+list(APPEND SYNCHRONIZATION_SRC
   "barrier.cc"
   "blocking_counter.cc"
   "internal/create_thread_identity.cc"
@@ -44,7 +44,8 @@ list(APPEND SYNCHRONIZATION_SRC
   "notification.cc"
   "mutex.cc"
 )
-set(SYNCHRONIZATION_PUBLIC_LIBRARIES absl::base absl_malloc_extension absl::time)
+
+set(SYNCHRONIZATION_PUBLIC_LIBRARIES absl::base absl::stacktrace absl::symbolize absl::time)
 
 absl_library(
   TARGET

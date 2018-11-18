@@ -26,14 +26,15 @@
 // THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-//
-// Author: wan@google.com (Zhanyong Wan)
+
 
 // Google Mock - a framework for writing C++ mock classes.
 //
 // This file defines some utilities useful for implementing Google
 // Mock.  They are subject to change without notice, so please DO NOT
 // USE THEM IN USER CODE.
+
+// GOOGLETEST_CM0002 DO NOT DELETE
 
 #ifndef GMOCK_INCLUDE_GMOCK_INTERNAL_GMOCK_INTERNAL_UTILS_H_
 #define GMOCK_INCLUDE_GMOCK_INTERNAL_GMOCK_INTERNAL_UTILS_H_
@@ -344,7 +345,22 @@ GTEST_API_ bool LogIsVisible(LogSeverity severity);
 GTEST_API_ void Log(LogSeverity severity, const std::string& message,
                     int stack_frames_to_skip);
 
-// TODO(wan@google.com): group all type utilities together.
+// A marker class that is used to resolve parameterless expectations to the
+// correct overload. This must not be instantiable, to prevent client code from
+// accidentally resolving to the overload; for example:
+//
+//    ON_CALL(mock, Method({}, nullptr))...
+//
+class WithoutMatchers {
+ private:
+  WithoutMatchers() {}
+  friend GTEST_API_ WithoutMatchers GetWithoutMatchers();
+};
+
+// Internal use only: access the singleton instance of WithoutMatchers.
+GTEST_API_ WithoutMatchers GetWithoutMatchers();
+
+// FIXME: group all type utilities together.
 
 // Type traits.
 

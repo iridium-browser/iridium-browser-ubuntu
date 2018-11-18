@@ -1,106 +1,171 @@
-# Blink directory structure
+## Blink architecture overview
 
-This document describes a high-level architecture of Blink's top-level directories.
+See [this "How Blink works" document](https://docs.google.com/document/d/1aitSOucL0VHZa9Z2vbRJSyAIsAz24kX8LFByQ5xQnUg/edit#).
 
-## core/ and modules/
+## `blink/renderer` directory structure
 
-core/ and modules/ are directories to implement web platform features
-defined in the specs. IDL files and their implementations should go to
-core/ and modules/.
+This section describes a high-level architecture of `blink/renderer`,
+which contains most of the Web Platform implementation, and runs exclusively
+in the renderer process.
+On the other hand, [`common/`](../common) and [`public/common`](../public/common)
+also run in the browser process.
 
-Note that the specs do not have a notion of "core" and "modules".
-The distinction between core/ and modules/ is for implementational convenience
-to avoid putting everything in core/ (which decreases code modularity and
-increases build time). Basically web platform features that are tighly coupled with
-HTML, CSS and other fundamental parts of DOM should go to core/.
-Other web platform features should go to modules/.
+All code in `blink/renderer` is an implementation detail of Blink
+and should not be used outside of it. Use [Blink's public API](../public)
+in code outside of Blink.
 
-In terms of dependencies, modules/ can depend on core/.
-core/ cannot depend on modules/. modules/xxx/ can depend on modules/yyy/.
+### `core/`
 
-## bindings/
+The `core/` directory implements the essence of the Web Platform defined by specs
+and IDL interfaces. Due to historical reasons, `core/` contains a lot of features with
+complex inter-dependencies and hence can be perceived as a single monolithic entity.
 
-bindings/ is a directory to put files that heavily use V8 APIs.
+### `modules/`
 
-In terms of dependencies, bindings/core/ and core/ are in the same link unit.
+The `modules/` directory is a collection of self-contained, well-defined features
+of the Web Platform that are factored out of a monolithic `core/`. These features are:
+ - large, tens to hundreds of files, with rare exceptions;
+ - self-contained with fine-grained responsibilities and `README.md`;
+ - have dependencies outlined with DEPS explicitly;
+ - can depend on other features under `platform/`, `core/` or `modules/`,
+   forming a healthy dependency tree.
+
+`modules/` OWNERS are responsible for making sure only features
+that satisfy requirements above are added.
+
+For example, `modules/crypto` implements WebCrypto API.
+
+### `platform/`
+
+The `platform/` directory is a collection of lower level features of Blink that are factored
+out of a monolithic `core/`. These features follow the same principles as `modules/`,
+but with different dependencies allowed:
+ - large, tens to hundreds of files, with rare exceptions;
+ - self-contained with fine-grained responsibilities and `README.md`;
+ - have dependencies outlined with DEPS explicitly;
+ - can depend on other features under `platform/` (but not `core/` or `modules/`),
+   forming a healthy dependency tree.
+
+`platform/` OWNERS are responsible for making sure only features
+that satisfy requirements above are added.
+
+For example, `platform/scheduler` implements a task scheduler for all tasks
+posted by Blink, while `platform/wtf` implements Blink-specific containers
+(e.g., `WTF::Vector`, `WTF::HashTable`, `WTF::String`).
+
+### `core` vs `modules` vs `platform` split
+
+Note that specs do not have a notion of "core", "platform" or "modules".
+The distinction between them is for implementation
+convenience to avoid putting everything in a single `core/` entity
+(which decreases code modularity and increases build time):
+  - features that are tightly coupled with HTML, CSS and other fundamental parts
+    of DOM should go to `core/`;
+  - features which conceptually depend on the features from "core"
+    should go to `modules/`;
+  - features which the "core" depends upon should go to `platform/`.
+
+Note that some of these guidelines are violated (at the time of writing this),
+but the code should gradually change and eventually conform.
+
+### `bindings/`
+
+The `bindings/` directory contains files that heavily use V8 APIs.
+The rationale for splitting bindings out is: V8 APIs are complex, error-prone and
+security-sensitive, so we want to put V8 API usage separately from other code.
+
+In terms of dependencies, `bindings/core` and `core/` are in the same link unit.
 The only difference is how heavily they are using V8 APIs.
-If a given file is using a lot of V8 APIs, it should go to bindings/core/.
-Otherwise, it should go to core/.
-(The same principle applies to bindings/modules/ and modules/.)
+If a given file is using a lot of V8 APIs, it should go to `bindings/core`.
+Otherwise, it should go to `core/`. Consult `bindings/` OWNERS when in doubt.
 
-The rationale for this split is: V8 APIs are complex, error-prone and
-security-sensitive, so we want to put V8 API usages in one directory.
+Note that over time `bindings/core` should move to `core/bindings` and become
+just a part of a larger "core".
 
-## platform/
+All of the above applies to `bindings/modules` and `modules/`.
 
-platform/ is a directory to implement low-level libraries of Blink.
-For example, platform/scheduler/ implements a task scheduler for all tasks
-posted by Blink. To avoid putting everything in core/ and modules/,
-consider factoring out low-level functionalities to platform/.
+### `controller/`
 
-platform/wtf/ is a directory to implement Blink-specific containers
-(e.g., Vector, HashTable, String).
+The `controller/` directory contains the system infrastructure
+that uses or drives Blink. Functionality that implements the Web Platform
+should not go to `controller/`, but instead reside in `platform/`, `core/`
+or `modules/`.
 
-In terms of dependencies, core/ and modules/ can depend on platform/.
-platform/ cannot depend on core/ and modules/.
+If the sole purpose of higher level functionality is to drive the Web Platform
+or to implement API for the embedder, it goes to `controller/`,
+however most of the features should go to other directories.
+Consult `controller/` OWNERS when in doubt.
 
-## controller/
+In terms of dependencies, `controller/` can depend on `core/`, `platform/` and `modules/`,
+but not vice versa.
 
-controller/ is a directory to implement high-level functionalities
-on top of core/ and modules/. Functionalities that use or drive Blink
-should go to controller/.
+### `devtools/`
 
-In terms of dependencies, controller/ can depend on core/ and modules/.
-core/ and modules/ cannot depend on controller/.
+The `devtools/` directory contains a frontend of the Chrome DevTools,
+including the build scripts and DevTools webapp.
 
-## devtools/
+In terms of dependencies, `devtools/` is a stand-alone directory.
 
-devtools/ implements a client-side of the Chrome DevTools, including all JS &
-CSS to run the DevTools webapp.
+### `build/`
 
-In terms of dependencies, devtools/ is a stand-alone directory.
+The `build/` directory contains scripts to build Blink.
 
-## build/
+In terms of dependencies, `build/` is a stand-alone directory.
 
-build/ contains scripts to build Blink.
-
-In terms of dependencies, build/ is a stand-alone directory.
-
-## Directory dependencies
+## Dependencies
 
 Dependencies only flow in the following order:
 
-- public/web/
-- controller/
-- modules/ and bindings/modules/
-- core/ and bindings/core/
-- platform/
-- public/platform/, //base/, V8 etc.
+- `public/web`
+- `controller/`
+- `modules/` and `bindings/modules`
+- `core/` and `bindings/core`
+- `platform/`
+- `public/platform`
+- `public/common`
+- `//base`, V8 etc.
 
 See [this diagram](https://docs.google.com/document/d/1yYei-V76q3Mb-5LeJfNUMitmj6cqfA5gZGcWXoPaPYQ/edit).
 
-devtools/ and build/ are stand-alone directories.
+`devtools/` and `build/` are stand-alone directories.
 
-## Type dependencies
+### Type dependencies
 
-core/, modules/, bindings/, platform/ and controller/ can use std:: types and
-types defined in Chromium. The philosophy is that we should
-share as much code between Chromium and Blink as possible.
+Member variables of the following types are strongly discouraged in Blink:
+  - STL strings and containers. Use `WTF::String` and WTF containers instead.
+  - `GURL` and `url::Origin`. Use `KURL` and `SecurityOrigin` respectively.
+  - Any `//base` type which has a matching type in `platform/wtf`. The number of
+  duplicated types between WTF and base is continuously shrinking,
+  but always look at WTF first.
 
-However, there are a couple of types that really need to be optimized
-for Blink's workload (e.g., Vector, HashTable, Bind, AtomicString).
-These types are defined in platform/wtf/. If there is an equivalent in
-platform/wtf/, Blink must use the type in platform/wtf/ instead of the type
-defined in Chromium. For example, Blink should not use std::vector
-(except places where a conversion between std::vector and WTF::Vector is needed).
+The types above could only be used at the boundary to interoperate
+with `//base`, `//services`, `//third_party/blink/common` and other
+Chromium-side or third-party code. It is also allowed to use local variables
+of these types when convenient, as long as the result is not stored
+in a member variable.
+For example, calling an utility function on an `std::string` which came
+from `//net` and then converting to `WTF::String` to store in a field
+is allowed.
+
+We try to share as much code between Chromium and Blink as possible,
+so the number of these types should go down. However, some types
+really need to be optimized for Blink's workload (e.g., `Vector`,
+`HashTable`, `AtomicString`).
+
+Exceptions to this rule:
+  - Code in `//third_party/blink/common` and `//third_party/blink/public/common`
+  also runs in the browser process, and should use STL and base instead of WTF.
+  - Selected types in `public/platform` and `public/web`,
+  whole purpose of which is conversion between WTF and STL,
+  for example `WebString` or `WebVector`.
 
 To prevent use of random types, we control allowed types by whitelisting
-them in DEPS and a [presubmit script](../Tools/Scripts/audit-non-blink-usage.py).
+them in DEPS and a [presubmit script](../tools/audit_non_blink_usage.py).
 
-## Mojo
+### Mojo
 
-core/, modules/, bindings/, platform/ and controller/ can use Mojo and
-directly talk with the browser process. This allows removal of unnecessary
+`core/`, `modules/`, `bindings/`, `platform/` and `controller/` can use Mojo and
+directly talk to the browser process. This allows removal of unnecessary
 public APIs and abstraction layers and it is highly recommended.
 
 ## Contact

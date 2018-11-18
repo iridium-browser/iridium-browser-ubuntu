@@ -35,7 +35,7 @@ DhcpPacFileFetcherChromeos::DhcpPacFileFetcherChromeos(
     net::URLRequestContext* url_request_context)
     : weak_ptr_factory_(this) {
   DCHECK(url_request_context);
-  pac_file_fetcher_.reset(new net::PacFileFetcherImpl(url_request_context));
+  pac_file_fetcher_ = net::PacFileFetcherImpl::Create(url_request_context);
   if (NetworkHandler::IsInitialized())
     network_handler_task_runner_ = NetworkHandler::Get()->task_runner();
 }
@@ -44,28 +44,33 @@ DhcpPacFileFetcherChromeos::~DhcpPacFileFetcherChromeos() = default;
 
 int DhcpPacFileFetcherChromeos::Fetch(
     base::string16* utf16_text,
-    const net::CompletionCallback& callback,
+    net::CompletionOnceCallback callback,
     const net::NetLogWithSource& net_log,
     const net::NetworkTrafficAnnotationTag traffic_annotation) {
   if (!network_handler_task_runner_.get())
     return net::ERR_PAC_NOT_IN_DHCP;
-  CHECK(!callback.is_null());
+  CHECK(callback);
+  // DhcpPacFileFetcher only allows one Fetch in progress at a time.
+  CHECK(!callback_);
+  callback_ = std::move(callback);
   base::PostTaskAndReplyWithResult(
       network_handler_task_runner_.get(), FROM_HERE,
-      base::Bind(&GetPacUrlFromDefaultNetwork),
-      base::Bind(&DhcpPacFileFetcherChromeos::ContinueFetch,
-                 weak_ptr_factory_.GetWeakPtr(), utf16_text, callback,
-                 traffic_annotation));
+      base::BindOnce(&GetPacUrlFromDefaultNetwork),
+      base::BindOnce(&DhcpPacFileFetcherChromeos::ContinueFetch,
+                     weak_ptr_factory_.GetWeakPtr(), utf16_text,
+                     traffic_annotation));
   return net::ERR_IO_PENDING;
 }
 
 void DhcpPacFileFetcherChromeos::Cancel() {
+  callback_.Reset();
   pac_file_fetcher_->Cancel();
   // Invalidate any pending callbacks (i.e. calls to ContinueFetch).
   weak_ptr_factory_.InvalidateWeakPtrs();
 }
 
 void DhcpPacFileFetcherChromeos::OnShutdown() {
+  callback_.Reset();
   pac_file_fetcher_->OnShutdown();
 }
 
@@ -79,19 +84,26 @@ std::string DhcpPacFileFetcherChromeos::GetFetcherName() const {
 
 void DhcpPacFileFetcherChromeos::ContinueFetch(
     base::string16* utf16_text,
-    net::CompletionCallback callback,
     const net::NetworkTrafficAnnotationTag traffic_annotation,
     std::string pac_url) {
   NET_LOG_EVENT("DhcpPacFileFetcher", pac_url);
   pac_url_ = GURL(pac_url);
   if (pac_url_.is_empty()) {
-    callback.Run(net::ERR_PAC_NOT_IN_DHCP);
+    std::move(callback_).Run(net::ERR_PAC_NOT_IN_DHCP);
     return;
   }
-  int res = pac_file_fetcher_->Fetch(pac_url_, utf16_text, callback,
-                                     traffic_annotation);
-  if (res != net::ERR_IO_PENDING)
-    callback.Run(res);
+
+  int result = pac_file_fetcher_->Fetch(
+      pac_url_, utf16_text,
+      base::BindOnce(&DhcpPacFileFetcherChromeos::OnFetchCompleted,
+                     weak_ptr_factory_.GetWeakPtr()),
+      traffic_annotation);
+  if (result != net::ERR_IO_PENDING)
+    std::move(callback_).Run(result);
+}
+
+void DhcpPacFileFetcherChromeos::OnFetchCompleted(int result) {
+  std::move(callback_).Run(result);
 }
 
 }  // namespace chromeos

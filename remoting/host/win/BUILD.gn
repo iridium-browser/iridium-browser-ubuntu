@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 import("//build/toolchain/win/midl.gni")
+import("//build/util/lastchange.gni")
 import("//build/win/message_compiler.gni")
 import("//media/media_options.gni")
 import("//remoting/build/config/remoting_build.gni")
@@ -81,6 +82,8 @@ source_set("win") {
     "com_security.h",
     "default_audio_device_change_detector.cc",
     "default_audio_device_change_detector.h",
+    "evaluate_3d_display_mode.cc",
+    "evaluate_3d_display_mode.h",
     "evaluate_d3d.cc",
     "evaluate_d3d.h",
     "launch_process_with_token.cc",
@@ -131,6 +134,7 @@ source_set("win") {
     "//remoting/protocol",
     "//remoting/resources",
     "//services/device/wake_lock/power_save_blocker",
+    "//third_party/webrtc/modules/desktop_capture",
     "//ui/base",
     "//ui/events:dom_keycode_converter",
     "//ui/events/platform",
@@ -138,10 +142,6 @@ source_set("win") {
 
   if (!is_ios) {
     deps += [ "//components/policy:generated" ]
-  }
-
-  if (enable_webrtc) {
-    deps += [ "//third_party/webrtc/modules/desktop_capture" ]
   }
 }
 
@@ -394,7 +394,8 @@ shared_library("remoting_core") {
     "//base/third_party/dynamic_annotations",
     "//build/win:default_exe_manifest",
     "//ipc",
-    "//mojo/edk",
+    "//mojo/public/cpp/platform",
+    "//mojo/public/cpp/system",
     "//net",
     "//remoting/base",
     "//remoting/base:breakpad",
@@ -406,6 +407,7 @@ shared_library("remoting_core") {
     "//remoting/host/setup",
     "//remoting/protocol",
     "//sandbox/win:sandbox",  # Should always use Windows version
+    "//services/network/public/mojom",
     "//third_party/webrtc/modules/desktop_capture",
   ]
 
@@ -493,7 +495,7 @@ remoting_localize("remoting_windows_resources") {
   variables = [
     rebase_path(chrome_version_file),
     rebase_path(remoting_version_file),
-    rebase_path("//build/util/LASTCHANGE"),
+    rebase_path(lastchange_file),
   ]
 
   output = "$root_gen_dir/remoting/{{source_name_part}}"

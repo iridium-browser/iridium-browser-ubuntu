@@ -20,8 +20,13 @@
 #include "services/service_manager/sandbox/sandbox.h"
 
 #if defined(OS_LINUX)
+#include "services/audio/audio_sandbox_hook_linux.h"
 #include "services/network/network_sandbox_hook_linux.h"
 #include "services/service_manager/sandbox/linux/sandbox_linux.h"
+#endif
+
+#if defined(OS_MACOSX)
+#include "base/message_loop/message_pump_mac.h"
 #endif
 
 #if defined(OS_WIN)
@@ -39,6 +44,20 @@ int UtilityMain(const MainFunctionParams& parameters) {
       parameters.command_line.HasSwitch(switches::kMessageLoopTypeUi)
           ? base::MessageLoop::TYPE_UI
           : base::MessageLoop::TYPE_DEFAULT;
+
+#if defined(OS_MACOSX)
+  // On Mac, the TYPE_UI pump for the main thread is an NSApplication loop. In
+  // a sandboxed utility process, NSApp attempts to acquire more Mach resources
+  // than a restrictive sandbox policy should allow. Services that require a
+  // TYPE_UI pump generally just need a NS/CFRunLoop to pump system work
+  // sources, so choose that pump type instead. A NSRunLoop MessagePump is used
+  // for TYPE_UI MessageLoops on non-main threads.
+  base::MessageLoop::InitMessagePumpForUIFactory(
+      []() -> std::unique_ptr<base::MessagePump> {
+        return std::make_unique<base::MessagePumpNSRunLoop>();
+      });
+#endif
+
   // The main message loop of the utility process.
   base::MessageLoop main_message_loop(message_loop_type);
   base::PlatformThread::SetName("CrUtilityMain");
@@ -53,10 +72,14 @@ int UtilityMain(const MainFunctionParams& parameters) {
   auto sandbox_type =
       service_manager::SandboxTypeFromCommandLine(parameters.command_line);
   if (parameters.zygote_child ||
-      sandbox_type == service_manager::SANDBOX_TYPE_NETWORK) {
+      sandbox_type == service_manager::SANDBOX_TYPE_NETWORK ||
+      sandbox_type == service_manager::SANDBOX_TYPE_AUDIO) {
     service_manager::SandboxLinux::PreSandboxHook pre_sandbox_hook;
     if (sandbox_type == service_manager::SANDBOX_TYPE_NETWORK)
       pre_sandbox_hook = base::BindOnce(&network::NetworkPreSandboxHook);
+    else if (sandbox_type == service_manager::SANDBOX_TYPE_AUDIO)
+      pre_sandbox_hook = base::BindOnce(&audio::AudioPreSandboxHook);
+
     service_manager::Sandbox::Initialize(
         sandbox_type, std::move(pre_sandbox_hook),
         service_manager::SandboxLinux::Options());
@@ -66,7 +89,9 @@ int UtilityMain(const MainFunctionParams& parameters) {
 #endif
 
   ChildProcess utility_process;
-  utility_process.set_main_thread(new UtilityThreadImpl());
+  base::RunLoop run_loop;
+  utility_process.set_main_thread(
+      new UtilityThreadImpl(run_loop.QuitClosure()));
 
   // Both utility process and service utility process would come
   // here, but the later is launched without connection to service manager, so
@@ -100,7 +125,7 @@ int UtilityMain(const MainFunctionParams& parameters) {
   }
 #endif
 
-  base::RunLoop().Run();
+  run_loop.Run();
 
 #if defined(LEAK_SANITIZER)
   // Invoke LeakSanitizer before shutting down the utility thread, to avoid

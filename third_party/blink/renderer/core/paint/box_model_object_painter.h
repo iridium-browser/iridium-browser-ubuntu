@@ -25,14 +25,15 @@ class BoxModelObjectPainter : public BoxPainterBase {
 
  public:
   BoxModelObjectPainter(const LayoutBoxModelObject&,
-                        const InlineFlowBox* = nullptr,
-                        const LayoutSize& flow_box_size = LayoutSize());
+                        const InlineFlowBox* = nullptr);
 
   static bool IsPaintingBackgroundOfPaintContainerIntoScrollingContentsLayer(
       const LayoutBoxModelObject*,
       const PaintInfo&);
 
  protected:
+  LayoutRectOutsets ComputeBorders() const override;
+  LayoutRectOutsets ComputePadding() const override;
   BoxPainterBase::FillLayerInfo GetFillLayerInfo(
       const Color&,
       const FillLayer&,
@@ -40,19 +41,15 @@ class BoxModelObjectPainter : public BoxPainterBase {
 
   void PaintTextClipMask(GraphicsContext&,
                          const IntRect& mask_rect,
-                         const LayoutPoint& paint_offset) override;
-  LayoutRect AdjustForScrolledContent(const PaintInfo&,
-                                      const BoxPainterBase::FillLayerInfo&,
-                                      const LayoutRect&) override;
-  FloatRoundedRect GetBackgroundRoundedRect(
-      const LayoutRect&,
-      bool include_logical_left_edge,
-      bool include_logical_right_edge) const override;
+                         const LayoutPoint& paint_offset,
+                         bool object_has_multiple_boxes) override;
+  LayoutRect AdjustRectForScrolledContent(const PaintInfo&,
+                                          const BoxPainterBase::FillLayerInfo&,
+                                          const LayoutRect&) override;
 
  private:
   const LayoutBoxModelObject& box_model_;
   const InlineFlowBox* flow_box_;
-  const LayoutSize flow_box_size_;
 };
 
 }  // namespace blink

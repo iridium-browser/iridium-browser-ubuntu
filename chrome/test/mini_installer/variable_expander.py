@@ -64,7 +64,7 @@ def _GetUserSpecificRegistrySuffix():
 class VariableExpander:
   """Expands variables in strings."""
 
-  def __init__(self, mini_installer_path, next_version_mini_installer_path,
+  def __init__(self, mini_installer_path, previous_version_mini_installer_path,
                chromedriver_path, quiet):
     """Constructor.
 
@@ -103,10 +103,10 @@ class VariableExpander:
         * $MINI_INSTALLER: the unquoted path to the mini_installer.
         * $MINI_INSTALLER_BITNESS: the bitness of the mini_installer.
         * $MINI_INSTALLER_FILE_VERSION: the file version of $MINI_INSTALLER.
-        * $NEXT_VERSION_MINI_INSTALLER: the unquoted path to a mini_installer
-            whose version is higher than $MINI_INSTALLER.
-        * $NEXT_VERSION_MINI_INSTALLER_FILE_VERSION: the file version of
-            $NEXT_VERSION_MINI_INSTALLER.
+        * $PREVIOUS_VERSION_MINI_INSTALLER: the unquoted path to a
+             mini_installer whose version is lower than $MINI_INSTALLER.
+        * $PREVIOUS_VERSION_MINI_INSTALLER_FILE_VERSION: the file version of
+            $PREVIOUS_VERSION_MINI_INSTALLER.
         * $PROGRAM_FILES: the unquoted path to the Program Files folder.
         * $USER_SPECIFIC_REGISTRY_SUFFIX: the output from the function
             _GetUserSpecificRegistrySuffix().
@@ -121,15 +121,34 @@ class VariableExpander:
             Chrome Dev.
         * $CHROME_TOAST_ACTIVATOR_CLSID_SXS: NotificationActivator's CLSID for
             Chrome SxS.
+        * $CHROME_ELEVATOR_CLSID: Elevator Service CLSID for Chrome.
+        * $CHROME_ELEVATOR_CLSID_BETA: Elevator Service CLSID for Chrome Beta.
+        * $CHROME_ELEVATOR_CLSID_DEV: Elevator Service CLSID for Chrome Dev.
+        * $CHROME_ELEVATOR_CLSID_SXS: Elevator Service CLSID for Chrome SxS.
+        * $CHROME_ELEVATION_SERVICE_NAME: Elevation Service Name for Chrome.
+        * $CHROME_ELEVATION_SERVICE_NAME_BETA: Elevation Service Name for Chrome
+            Beta.
+        * $CHROME_ELEVATION_SERVICE_NAME_DEV: Elevation Service Name for Chrome
+            Dev.
+        * $CHROME_ELEVATION_SERVICE_NAME_SXS: Elevation Service Name for Chrome
+            SxS.
+        * $CHROME_ELEVATION_SERVICE_DISPLAY_NAME: Elevation Service Display Name
+            for Chrome.
+        * $CHROME_ELEVATION_SERVICE_DISPLAY_NAME_BETA: Elevation Service Display
+            Name for Chrome Beta.
+        * $CHROME_ELEVATION_SERVICE_DISPLAY_NAME_DEV: Elevation Service Display
+            Name for Chrome Dev.
+        * $CHROME_ELEVATION_SERVICE_DISPLAY_NAME_SXS: Elevation Service Display
+            Name for Chrome SxS.
 
     Args:
       mini_installer_path: The path to a mini_installer.
-      next_version_mini_installer_path: The path to a mini_installer whose
-          version is higher than |mini_installer_path|.
+      previous_version_mini_installer_path: The path to a mini_installer whose
+          version is lower than |mini_installer_path|.
     """
     mini_installer_abspath = os.path.abspath(mini_installer_path)
-    next_version_mini_installer_abspath = os.path.abspath(
-        next_version_mini_installer_path)
+    previous_version_mini_installer_abspath = os.path.abspath(
+        previous_version_mini_installer_path)
     windows_major_ver, windows_minor_ver, _, _, _ = win32api.GetVersionEx()
     self._variable_mapping = {
         'CHROMEDRIVER_PATH': chromedriver_path,
@@ -139,9 +158,10 @@ class VariableExpander:
         'MINI_INSTALLER': mini_installer_abspath,
         'MINI_INSTALLER_FILE_VERSION': _GetFileVersion(mini_installer_abspath),
         'MINI_INSTALLER_BITNESS': _GetFileBitness(mini_installer_abspath),
-        'NEXT_VERSION_MINI_INSTALLER': next_version_mini_installer_abspath,
-        'NEXT_VERSION_MINI_INSTALLER_FILE_VERSION': _GetFileVersion(
-            next_version_mini_installer_abspath),
+        'PREVIOUS_VERSION_MINI_INSTALLER':
+            previous_version_mini_installer_abspath,
+        'PREVIOUS_VERSION_MINI_INSTALLER_FILE_VERSION': _GetFileVersion(
+            previous_version_mini_installer_abspath),
         'PROGRAM_FILES': shell.SHGetFolderPath(0,
                                                shellcon.CSIDL_PROGRAM_FILESX86,
                                                None, 0),
@@ -205,6 +225,29 @@ class VariableExpander:
             '{F01C03EB-D431-4C83-8D7A-902771E732FA}'),
           'CHROME_TOAST_ACTIVATOR_CLSID_SXS': (
             '{FA372A6E-149F-4E95-832D-8F698D40AD7F}'),
+          'CHROME_ELEVATOR_CLSID': ('{708860E0-F641-4611-8895-7D867DD3675B}'),
+          'CHROME_ELEVATOR_CLSID_BETA': (
+            '{DD2646BA-3707-4BF8-B9A7-038691A68FC2}'),
+          'CHROME_ELEVATOR_CLSID_DEV': (
+            '{DA7FDCA5-2CAA-4637-AA17-0740584DE7DA}'),
+          'CHROME_ELEVATOR_CLSID_SXS': (
+            '{704C2872-2049-435E-A469-0A534313C42B}'),
+          'CHROME_ELEVATION_SERVICE_NAME': (
+            'GoogleChromeElevationService'),
+          'CHROME_ELEVATION_SERVICE_NAME_BETA': (
+            'GoogleChromeBetaElevationService'),
+          'CHROME_ELEVATION_SERVICE_NAME_DEV': (
+            'GoogleChromeDevElevationService'),
+          'CHROME_ELEVATION_SERVICE_NAME_SXS': (
+            'GoogleChromeCanaryElevationService'),
+          'CHROME_ELEVATION_SERVICE_DISPLAY_NAME': (
+            'Google Chrome Elevation Service'),
+          'CHROME_ELEVATION_SERVICE_DISPLAY_NAME_BETA': (
+            'Google Chrome Beta Elevation Service'),
+          'CHROME_ELEVATION_SERVICE_DISPLAY_NAME_DEV': (
+            'Google Chrome Dev Elevation Service'),
+          'CHROME_ELEVATION_SERVICE_DISPLAY_NAME_SXS': (
+            'Google Chrome Canary Elevation Service'),
       })
     elif mini_installer_product_name == 'Chromium Installer':
       self._variable_mapping.update({
@@ -218,6 +261,10 @@ class VariableExpander:
           'CHROME_CLIENT_STATE_KEY': 'Software\\Chromium',
           'CHROME_TOAST_ACTIVATOR_CLSID': (
             '{635EFA6F-08D6-4EC9-BD14-8A0FDE975159}'),
+          'CHROME_ELEVATOR_CLSID': ('{D133B120-6DB4-4D6B-8BFE-83BF8CA1B1B0}'),
+          'CHROME_ELEVATION_SERVICE_NAME': 'ChromiumElevationService',
+          'CHROME_ELEVATION_SERVICE_DISPLAY_NAME': (
+            'Chromium Elevation Service'),
       })
     else:
       raise KeyError("Unknown mini_installer product name '%s'" %

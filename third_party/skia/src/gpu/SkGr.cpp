@@ -21,7 +21,6 @@
 #include "SkBlendModePriv.h"
 #include "SkCanvas.h"
 #include "SkColorFilter.h"
-#include "SkConvertPixels.h"
 #include "SkData.h"
 #include "SkImage_Base.h"
 #include "SkImageInfoPriv.h"
@@ -29,7 +28,6 @@
 #include "SkMaskFilterBase.h"
 #include "SkMessageBus.h"
 #include "SkMipMap.h"
-#include "SkPM4fPriv.h"
 #include "SkPaintPriv.h"
 #include "SkPixelRef.h"
 #include "SkResourceCache.h"
@@ -38,16 +36,58 @@
 #include "SkTraceEvent.h"
 #include "effects/GrBicubicEffect.h"
 #include "effects/GrConstColorProcessor.h"
-#include "effects/GrDitherEffect.h"
 #include "effects/GrPorterDuffXferProcessor.h"
 #include "effects/GrXfermodeFragmentProcessor.h"
+#include "effects/GrSkSLFP.h"
 
-GrSurfaceDesc GrImageInfoToSurfaceDesc(const SkImageInfo& info, const GrCaps& caps) {
+#if SK_SUPPORT_GPU
+GR_FP_SRC_STRING SKSL_DITHER_SRC = R"(
+// This controls the range of values added to color channels
+layout(key) in int rangeType;
+
+void main(int x, int y, inout half4 color) {
+    half value;
+    half range;
+    @switch (rangeType) {
+        case 0:
+            range = 1.0 / 255.0;
+            break;
+        case 1:
+            range = 1.0 / 63.0;
+            break;
+        default:
+            // Experimentally this looks better than the expected value of 1/15.
+            range = 1.0 / 15.0;
+            break;
+    }
+    @if (sk_Caps.integerSupport) {
+        // This ordered-dither code is lifted from the cpu backend.
+        uint x = uint(x);
+        uint y = uint(y);
+        uint m = (y & 1) << 5 | (x & 1) << 4 |
+                 (y & 2) << 2 | (x & 2) << 1 |
+                 (y & 4) >> 1 | (x & 4) >> 2;
+        value = half(m) * 1.0 / 64.0 - 63.0 / 128.0;
+    } else {
+        // Simulate the integer effect used above using step/mod. For speed, simulates a 4x4
+        // dither pattern rather than an 8x8 one.
+        half4 modValues = mod(float4(x, y, x, y), half4(2.0, 2.0, 4.0, 4.0));
+        half4 stepValues = step(modValues, half4(1.0, 1.0, 2.0, 2.0));
+        value = dot(stepValues, half4(8.0 / 16.0, 4.0 / 16.0, 2.0 / 16.0, 1.0 / 16.0)) - 15.0 / 32.0;
+    }
+    // For each color channel, add the random offset to the channel value and then clamp
+    // between 0 and alpha to keep the color premultiplied.
+    color = half4(clamp(color.rgb + value * range, 0.0, color.a), color.a);
+}
+)";
+#endif
+
+GrSurfaceDesc GrImageInfoToSurfaceDesc(const SkImageInfo& info) {
     GrSurfaceDesc desc;
     desc.fFlags = kNone_GrSurfaceFlags;
     desc.fWidth = info.width();
     desc.fHeight = info.height();
-    desc.fConfig = SkImageInfo2GrPixelConfig(info, caps);
+    desc.fConfig = SkImageInfo2GrPixelConfig(info);
     desc.fSampleCnt = 1;
     return desc;
 }
@@ -67,17 +107,12 @@ void GrMakeKeyFromImageID(GrUniqueKey* key, uint32_t imageID, const SkIRect& ima
 
 //////////////////////////////////////////////////////////////////////////////
 sk_sp<GrTextureProxy> GrUploadBitmapToTextureProxy(GrProxyProvider* proxyProvider,
-                                                   const SkBitmap& bitmap,
-                                                   SkColorSpace* dstColorSpace) {
+                                                   const SkBitmap& bitmap) {
     if (!bitmap.peekPixels(nullptr)) {
         return nullptr;
     }
 
-    SkDestinationSurfaceColorMode colorMode = dstColorSpace
-        ? SkDestinationSurfaceColorMode::kGammaAndColorSpaceAware
-        : SkDestinationSurfaceColorMode::kLegacy;
-
-    if (!SkImageInfoIsValid(bitmap.info(), colorMode)) {
+    if (!SkImageInfoIsValid(bitmap.info())) {
         return nullptr;
     }
 
@@ -94,23 +129,26 @@ sk_sp<GrTextureProxy> GrUploadBitmapToTextureProxy(GrProxyProvider* proxyProvide
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void GrInstallBitmapUniqueKeyInvalidator(const GrUniqueKey& key, SkPixelRef* pixelRef) {
+void GrInstallBitmapUniqueKeyInvalidator(const GrUniqueKey& key, uint32_t contextUniqueID,
+                                         SkPixelRef* pixelRef) {
     class Invalidator : public SkPixelRef::GenIDChangeListener {
     public:
-        explicit Invalidator(const GrUniqueKey& key) : fMsg(key) {}
+        explicit Invalidator(const GrUniqueKey& key, uint32_t contextUniqueID)
+                : fMsg(key, contextUniqueID) {}
+
     private:
         GrUniqueKeyInvalidatedMessage fMsg;
 
         void onChange() override { SkMessageBus<GrUniqueKeyInvalidatedMessage>::Post(fMsg); }
     };
 
-    pixelRef->addGenIDChangeListener(new Invalidator(key));
+    pixelRef->addGenIDChangeListener(new Invalidator(key, contextUniqueID));
 }
 
 sk_sp<GrTextureProxy> GrCopyBaseMipMapToTextureProxy(GrContext* ctx, GrTextureProxy* baseProxy) {
     SkASSERT(baseProxy);
 
-    if (!ctx->caps()->isConfigCopyable(baseProxy->config())) {
+    if (!ctx->contextPriv().caps()->isConfigCopyable(baseProxy->config())) {
         return nullptr;
     }
 
@@ -129,12 +167,8 @@ sk_sp<GrTextureProxy> GrCopyBaseMipMapToTextureProxy(GrContext* ctx, GrTexturePr
     }
 
     // Copy the base layer to our proxy
-    sk_sp<SkColorSpace> colorSpace;
-    if (GrPixelConfigIsSRGB(proxy->config())) {
-        colorSpace = SkColorSpace::MakeSRGB();
-    }
     sk_sp<GrSurfaceContext> sContext =
-            ctx->contextPriv().makeWrappedSurfaceContext(proxy, std::move(colorSpace));
+            ctx->contextPriv().makeWrappedSurfaceContext(proxy);
     SkASSERT(sContext);
     SkAssertResult(sContext->copy(baseProxy));
 
@@ -209,7 +243,8 @@ sk_sp<GrTextureProxy> GrMakeCachedImageProxy(GrProxyProvider* proxyProvider,
             // When recording DDLs we do not want to install change listeners because doing
             // so isn't threadsafe.
             if (bm && !proxyProvider->recordingDDL()) {
-                GrInstallBitmapUniqueKeyInvalidator(originalKey, bm->pixelRef());
+                GrInstallBitmapUniqueKeyInvalidator(originalKey, proxyProvider->contextUniqueID(),
+                                                    bm->pixelRef());
             }
         }
     }
@@ -219,36 +254,25 @@ sk_sp<GrTextureProxy> GrMakeCachedImageProxy(GrProxyProvider* proxyProvider,
 
 ///////////////////////////////////////////////////////////////////////////////
 
-GrColor4f SkColorToPremulGrColor4f(SkColor c, const GrColorSpaceInfo& colorSpaceInfo) {
-    // We want to premultiply after linearizing, so this is easy:
-    return SkColorToUnpremulGrColor4f(c, colorSpaceInfo).premul();
-}
-
-GrColor4f SkColorToPremulGrColor4fLegacy(SkColor c) {
-    return GrColor4f::FromGrColor(SkColorToUnpremulGrColor(c)).premul();
-}
-
-GrColor4f SkColorToUnpremulGrColor4f(SkColor c, const GrColorSpaceInfo& colorSpaceInfo) {
-    GrColor4f color;
-    if (colorSpaceInfo.colorSpace()) {
-        // SkColor4f::FromColor does sRGB -> Linear
-        color = GrColor4f::FromSkColor4f(SkColor4f::FromColor(c));
-    } else {
-        // GrColor4f::FromGrColor just multiplies by 1/255
-        color = GrColor4f::FromGrColor(SkColorToUnpremulGrColor(c));
-    }
-
+GrColor4f SkColor4fToUnpremulGrColor4f(SkColor4f c, const GrColorSpaceInfo& colorSpaceInfo) {
+    GrColor4f color = GrColor4f::FromRGBA4f(c);
     if (auto* xform = colorSpaceInfo.colorSpaceXformFromSRGB()) {
-        color = xform->clampedXform(color);
+        color = xform->apply(color);
     }
-
     return color;
+}
+
+SkPMColor4f SkColorToPMColor4f(SkColor c, const GrColorSpaceInfo& colorSpaceInfo) {
+    SkColor4f color = SkColor4f::FromColor(c);
+    if (auto* xform = colorSpaceInfo.colorSpaceXformFromSRGB()) {
+        color = xform->apply(color);
+    }
+    return color.premul();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
-GrPixelConfig SkImageInfo2GrPixelConfig(const SkColorType type, SkColorSpace* cs,
-                                        const GrCaps& caps) {
+GrPixelConfig SkColorType2GrPixelConfig(const SkColorType type) {
     switch (type) {
         case kUnknown_SkColorType:
             return kUnknown_GrPixelConfig;
@@ -259,15 +283,11 @@ GrPixelConfig SkImageInfo2GrPixelConfig(const SkColorType type, SkColorSpace* cs
         case kARGB_4444_SkColorType:
             return kRGBA_4444_GrPixelConfig;
         case kRGBA_8888_SkColorType:
-            return (caps.srgbSupport() && cs && cs->gammaCloseToSRGB())
-                   ? kSRGBA_8888_GrPixelConfig : kRGBA_8888_GrPixelConfig;
-        // TODO: We're checking for srgbSupport, but we can then end up picking sBGRA as our pixel
-        // config (which may not be supported). We need a better test here.
+            return kRGBA_8888_GrPixelConfig;
         case kRGB_888x_SkColorType:
             return kRGB_888_GrPixelConfig;
         case kBGRA_8888_SkColorType:
-            return (caps.srgbSupport() && cs && cs->gammaCloseToSRGB())
-                   ? kSBGRA_8888_GrPixelConfig : kBGRA_8888_GrPixelConfig;
+            return kBGRA_8888_GrPixelConfig;
         case kRGBA_1010102_SkColorType:
             return kRGBA_1010102_GrPixelConfig;
         case kRGB_101010x_SkColorType:
@@ -276,13 +296,15 @@ GrPixelConfig SkImageInfo2GrPixelConfig(const SkColorType type, SkColorSpace* cs
             return kGray_8_GrPixelConfig;
         case kRGBA_F16_SkColorType:
             return kRGBA_half_GrPixelConfig;
+        case kRGBA_F32_SkColorType:
+            return kRGBA_float_GrPixelConfig;
     }
     SkASSERT(0);    // shouldn't get here
     return kUnknown_GrPixelConfig;
 }
 
-GrPixelConfig SkImageInfo2GrPixelConfig(const SkImageInfo& info, const GrCaps& caps) {
-    return SkImageInfo2GrPixelConfig(info.colorType(), info.colorSpace(), caps);
+GrPixelConfig SkImageInfo2GrPixelConfig(const SkImageInfo& info) {
+    return SkColorType2GrPixelConfig(info.colorType());
 }
 
 bool GrPixelConfigToColorType(GrPixelConfig config, SkColorType* ctOut) {
@@ -296,24 +318,44 @@ bool GrPixelConfigToColorType(GrPixelConfig config, SkColorType* ctOut) {
     return false;
 }
 
-GrPixelConfig GrRenderableConfigForColorSpace(const SkColorSpace* colorSpace) {
-    if (!colorSpace) {
-        return kRGBA_8888_GrPixelConfig;
-    } else if (colorSpace->gammaIsLinear()) {
-        return kRGBA_half_GrPixelConfig;
-    } else if (colorSpace->gammaCloseToSRGB()) {
-        return kSRGBA_8888_GrPixelConfig;
-    } else {
-        SkDEBUGFAIL("No renderable config exists for color space with strange gamma");
-        return kUnknown_GrPixelConfig;
-    }
-}
-
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
 static inline bool blend_requires_shader(const SkBlendMode mode) {
     return SkBlendMode::kDst != mode;
 }
+
+#ifndef SK_IGNORE_GPU_DITHER
+static inline int32_t dither_range_type_for_config(GrPixelConfig dstConfig) {
+    switch (dstConfig) {
+        case kGray_8_GrPixelConfig:
+        case kGray_8_as_Lum_GrPixelConfig:
+        case kGray_8_as_Red_GrPixelConfig:
+        case kRGBA_8888_GrPixelConfig:
+        case kRGB_888_GrPixelConfig:
+        case kBGRA_8888_GrPixelConfig:
+            return 0;
+        case kRGB_565_GrPixelConfig:
+            return 1;
+        case kRGBA_4444_GrPixelConfig:
+            return 2;
+        case kUnknown_GrPixelConfig:
+        case kSRGBA_8888_GrPixelConfig:
+        case kSBGRA_8888_GrPixelConfig:
+        case kRGBA_1010102_GrPixelConfig:
+        case kAlpha_half_GrPixelConfig:
+        case kAlpha_half_as_Red_GrPixelConfig:
+        case kRGBA_float_GrPixelConfig:
+        case kRG_float_GrPixelConfig:
+        case kRGBA_half_GrPixelConfig:
+        case kAlpha_8_GrPixelConfig:
+        case kAlpha_8_as_Alpha_GrPixelConfig:
+        case kAlpha_8_as_Red_GrPixelConfig:
+            return -1;
+    }
+    SkASSERT(false);
+    return 0;
+}
+#endif
 
 static inline bool skpaint_to_grpaint_impl(GrContext* context,
                                            const GrColorSpaceInfo& colorSpaceInfo,
@@ -322,10 +364,8 @@ static inline bool skpaint_to_grpaint_impl(GrContext* context,
                                            std::unique_ptr<GrFragmentProcessor>* shaderProcessor,
                                            SkBlendMode* primColorMode,
                                            GrPaint* grPaint) {
-    grPaint->setAllowSRGBInputs(colorSpaceInfo.isGammaCorrect());
-
-    // Convert SkPaint color to 4f format, including optional linearizing and gamut conversion.
-    GrColor4f origColor = SkColorToUnpremulGrColor4f(skPaint.getColor(), colorSpaceInfo);
+    // Convert SkPaint color to 4f format in the destination color space
+    GrColor4f origColor = SkColor4fToUnpremulGrColor4f(skPaint.getColor4f(), colorSpaceInfo);
 
     const GrFPArgs fpArgs(context, &viewM, skPaint.getFilterQuality(), &colorSpaceInfo);
 
@@ -356,7 +396,7 @@ static inline bool skpaint_to_grpaint_impl(GrContext* context,
             // The geometry processor will insert the primitive color to start the color chain, so
             // the GrPaint color will be ignored.
 
-            GrColor4f shaderInput = origColor.opaque();
+            SkPMColor4f shaderInput = origColor.opaque().asRGBA4f<kPremul_SkAlphaType>();
             shaderFP = GrFragmentProcessor::OverrideInput(std::move(shaderFP), shaderInput);
             shaderFP = GrXfermodeFragmentProcessor::MakeFromSrcProcessor(std::move(shaderFP),
                                                                          *primColorMode);
@@ -367,12 +407,12 @@ static inline bool skpaint_to_grpaint_impl(GrContext* context,
             }
 
             // We can ignore origColor here - alpha is unchanged by gamma
-            GrColor paintAlpha = SkColorAlphaToGrColor(skPaint.getColor());
+            GrColor paintAlpha = GrColorPackA4(skPaint.getAlpha());
             if (GrColor_WHITE != paintAlpha) {
                 // No gamut conversion - paintAlpha is a (linear) alpha value, splatted to all
                 // color channels. It's value should be treated as the same in ANY color space.
                 grPaint->addColorFragmentProcessor(GrConstColorProcessor::Make(
-                    GrColor4f::FromGrColor(paintAlpha),
+                    GrColorToPMColor4f(paintAlpha),
                     GrConstColorProcessor::InputMode::kModulateRGBA));
             }
         } else {
@@ -384,8 +424,9 @@ static inline bool skpaint_to_grpaint_impl(GrContext* context,
         if (primColorMode) {
             // There is a blend between the primitive color and the paint color. The blend considers
             // the opaque paint color. The paint's alpha is applied to the post-blended color.
-            auto processor = GrConstColorProcessor::Make(origColor.opaque(),
-                                                         GrConstColorProcessor::InputMode::kIgnore);
+            auto processor = GrConstColorProcessor::Make(
+                    origColor.opaque().asRGBA4f<kPremul_SkAlphaType>(),
+                    GrConstColorProcessor::InputMode::kIgnore);
             processor = GrXfermodeFragmentProcessor::MakeFromSrcProcessor(std::move(processor),
                                                                           *primColorMode);
             if (processor) {
@@ -395,12 +436,12 @@ static inline bool skpaint_to_grpaint_impl(GrContext* context,
             grPaint->setColor4f(origColor.opaque());
 
             // We can ignore origColor here - alpha is unchanged by gamma
-            GrColor paintAlpha = SkColorAlphaToGrColor(skPaint.getColor());
+            GrColor paintAlpha = GrColorPackA4(skPaint.getAlpha());
             if (GrColor_WHITE != paintAlpha) {
                 // No gamut conversion - paintAlpha is a (linear) alpha value, splatted to all
                 // color channels. It's value should be treated as the same in ANY color space.
                 grPaint->addColorFragmentProcessor(GrConstColorProcessor::Make(
-                    GrColor4f::FromGrColor(paintAlpha),
+                    GrColorToPMColor4f(paintAlpha),
                     GrConstColorProcessor::InputMode::kModulateRGBA));
             }
         } else {
@@ -413,15 +454,9 @@ static inline bool skpaint_to_grpaint_impl(GrContext* context,
     SkColorFilter* colorFilter = skPaint.getColorFilter();
     if (colorFilter) {
         if (applyColorFilterToPaintColor) {
-            // If we're in legacy mode, we *must* avoid using the 4f version of the color filter,
-            // because that will combine with the linearized version of the stored color.
-            if (colorSpaceInfo.isGammaCorrect()) {
-                grPaint->setColor4f(GrColor4f::FromSkColor4f(
-                    colorFilter->filterColor4f(origColor.toSkColor4f())).premul());
-            } else {
-                grPaint->setColor4f(SkColorToPremulGrColor4fLegacy(
-                        colorFilter->filterColor(skPaint.getColor())));
-            }
+            grPaint->setColor4f(GrColor4f::FromRGBA4f(
+                    colorFilter->filterColor4f(origColor.asRGBA4f<kUnpremul_SkAlphaType>(),
+                                               colorSpaceInfo.colorSpace())).premul());
         } else {
             auto cfFP = colorFilter->asFragmentProcessor(context, colorSpaceInfo);
             if (cfFP) {
@@ -450,11 +485,15 @@ static inline bool skpaint_to_grpaint_impl(GrContext* context,
     // Conservative default, in case GrPixelConfigToColorType() fails.
     SkColorType ct = SkColorType::kRGB_565_SkColorType;
     GrPixelConfigToColorType(colorSpaceInfo.config(), &ct);
-    if (SkPaintPriv::ShouldDither(skPaint, ct) && grPaint->numColorFragmentProcessors() > 0 &&
-        !colorSpaceInfo.isGammaCorrect()) {
-        auto ditherFP = GrDitherEffect::Make(colorSpaceInfo.config());
-        if (ditherFP) {
-            grPaint->addColorFragmentProcessor(std::move(ditherFP));
+    if (SkPaintPriv::ShouldDither(skPaint, ct) && grPaint->numColorFragmentProcessors() > 0) {
+        int32_t ditherRange = dither_range_type_for_config(colorSpaceInfo.config());
+        if (ditherRange >= 0) {
+            static int ditherIndex = GrSkSLFP::NewIndex();
+            auto ditherFP = GrSkSLFP::Make(context, ditherIndex, "Dither", SKSL_DITHER_SRC,
+                                           &ditherRange, sizeof(ditherRange));
+            if (ditherFP) {
+                grPaint->addColorFragmentProcessor(std::move(ditherFP));
+            }
         }
     }
 #endif

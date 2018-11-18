@@ -5,14 +5,19 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_REMOTE_FRAME_CLIENT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_REMOTE_FRAME_CLIENT_H_
 
-#include "third_party/blink/public/platform/web_canvas.h"
+#include "cc/paint/paint_canvas.h"
+#include "third_party/blink/public/mojom/blob/blob_url_store.mojom-blink.h"
 #include "third_party/blink/public/platform/web_focus_type.h"
+#include "third_party/blink/public/web/web_frame_load_type.h"
 #include "third_party/blink/renderer/core/frame/frame_client.h"
 #include "third_party/blink/renderer/core/frame/frame_types.h"
-#include "third_party/blink/renderer/core/loader/frame_loader_types.h"
+#include "third_party/blink/renderer/platform/graphics/touch_action.h"
+
+namespace cc {
+class PaintCanvas;
+}
 
 namespace blink {
-
 class IntRect;
 class LocalFrame;
 class MessageEvent;
@@ -24,9 +29,9 @@ class RemoteFrameClient : public FrameClient {
   ~RemoteFrameClient() override = default;
 
   virtual void Navigate(const ResourceRequest&,
-                        bool should_replace_current_entry) = 0;
-  virtual void Reload(FrameLoadType, ClientRedirectPolicy) = 0;
-  virtual unsigned BackForwardLength() = 0;
+                        bool should_replace_current_entry,
+                        mojom::blink::BlobURLTokenPtr) = 0;
+  unsigned BackForwardLength() override = 0;
 
   // Notifies the remote frame to check whether it is done loading, after one
   // of its children finishes loading.
@@ -46,7 +51,8 @@ class RemoteFrameClient : public FrameClient {
                                  const IntRect& screen_space_rect) = 0;
 
   virtual void UpdateRemoteViewportIntersection(
-      const IntRect& viewport_intersection) = 0;
+      const IntRect& viewport_intersection,
+      bool occluded_or_obscured) = 0;
 
   virtual void AdvanceFocus(WebFocusType, LocalFrame* source) = 0;
 
@@ -54,10 +60,12 @@ class RemoteFrameClient : public FrameClient {
 
   virtual void SetIsInert(bool) = 0;
 
+  virtual void SetInheritedEffectiveTouchAction(TouchAction) = 0;
+
   virtual void UpdateRenderThrottlingStatus(bool isThrottled,
                                             bool subtreeThrottled) = 0;
 
-  virtual uint32_t Print(const IntRect&, WebCanvas*) const = 0;
+  virtual uint32_t Print(const IntRect&, cc::PaintCanvas*) const = 0;
 };
 
 }  // namespace blink

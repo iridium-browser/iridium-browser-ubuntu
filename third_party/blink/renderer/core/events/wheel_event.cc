@@ -24,6 +24,9 @@
 #include "third_party/blink/renderer/core/events/wheel_event.h"
 
 #include "third_party/blink/renderer/core/clipboard/data_transfer.h"
+#include "third_party/blink/renderer/core/dom/events/event_dispatcher.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
+#include "third_party/blink/renderer/core/frame/use_counter.h"
 
 namespace blink {
 
@@ -94,7 +97,7 @@ WheelEvent::WheelEvent(const AtomicString& type,
 WheelEvent::WheelEvent(const WebMouseWheelEvent& event, AbstractView* view)
     : MouseEvent(EventTypeNames::wheel,
                  GetMouseEventInitForWheel(event, view),
-                 TimeTicksFromSeconds(event.TimeStampSeconds())),
+                 event.TimeStamp()),
       wheel_delta_(event.wheel_ticks_x * kTickMultiplier,
                    event.wheel_ticks_y * kTickMultiplier),
       delta_x_(-event.DeltaXInRootFrame()),
@@ -113,6 +116,23 @@ bool WheelEvent::IsMouseEvent() const {
 
 bool WheelEvent::IsWheelEvent() const {
   return true;
+}
+
+void WheelEvent::preventDefault() {
+  MouseEvent::preventDefault();
+
+  if (!currentTarget() || !currentTarget()->IsTopLevelNode())
+    return;
+
+  PassiveMode passive_mode = HandlingPassive();
+  if (passive_mode == PassiveMode::kPassiveForcedDocumentLevel ||
+      passive_mode == PassiveMode::kNotPassiveDefault) {
+    if (ExecutionContext* context = currentTarget()->GetExecutionContext()) {
+      UseCounter::Count(
+          context,
+          WebFeature::kDocumentLevelPassiveDefaultEventListenerPreventedWheel);
+    }
+  }
 }
 
 DispatchEventResult WheelEvent::DispatchEvent(EventDispatcher& dispatcher) {

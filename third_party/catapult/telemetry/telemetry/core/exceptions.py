@@ -170,16 +170,16 @@ class EvaluateException(Error):
     return output
 
 
-class ProfilingException(Error):
-  pass
-
-
 class StoryActionError(Error):
   """Represents an error when trying to perform an action on a story."""
 
 
 class TracingException(Error):
   """Represents an error that ocurred while collecting or flushing traces."""
+
+
+class AtraceTracingError(TracingException):
+  """Represents an error that ocurred while collecting traces with Atrace."""
 
 
 class PathMissingError(Error):

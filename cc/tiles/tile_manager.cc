@@ -84,7 +84,8 @@ class RasterTaskImpl : public TileTask {
                  std::unique_ptr<RasterBuffer> raster_buffer,
                  TileTask::Vector* dependencies,
                  bool is_gpu_rasterization,
-                 PlaybackImageProvider image_provider)
+                 PlaybackImageProvider image_provider,
+                 GURL url)
       : TileTask(!is_gpu_rasterization, dependencies),
         tile_manager_(tile_manager),
         tile_id_(tile->id()),
@@ -102,7 +103,8 @@ class RasterTaskImpl : public TileTask {
         source_frame_number_(tile->source_frame_number()),
         is_gpu_rasterization_(is_gpu_rasterization),
         raster_buffer_(std::move(raster_buffer)),
-        image_provider_(std::move(image_provider)) {
+        image_provider_(std::move(image_provider)),
+        url_(std::move(url)) {
     DCHECK(origin_thread_checker_.CalledOnValidThread());
     playback_settings_.image_provider = &image_provider_;
   }
@@ -124,7 +126,7 @@ class RasterTaskImpl : public TileTask {
 
     raster_buffer_->Playback(raster_source_.get(), content_rect_,
                              invalid_content_rect_, new_content_id_,
-                             raster_transform_, playback_settings_);
+                             raster_transform_, playback_settings_, url_);
   }
 
   // Overridden from TileTask:
@@ -171,6 +173,7 @@ class RasterTaskImpl : public TileTask {
   bool is_gpu_rasterization_;
   std::unique_ptr<RasterBuffer> raster_buffer_;
   PlaybackImageProvider image_provider_;
+  GURL url_;
 
   DISALLOW_COPY_AND_ASSIGN(RasterTaskImpl);
 };
@@ -250,8 +253,7 @@ void InsertNodesForRasterTask(TaskGraph* graph,
   size_t dependencies = 0u;
 
   // Insert image decode tasks.
-  for (TileTask::Vector::const_iterator it = decode_tasks.begin();
-       it != decode_tasks.end(); ++it) {
+  for (auto it = decode_tasks.begin(); it != decode_tasks.end(); ++it) {
     TileTask* decode_task = it->get();
 
     // Skip if already decoded.
@@ -261,11 +263,10 @@ void InsertNodesForRasterTask(TaskGraph* graph,
     dependencies++;
 
     // Add decode task if it doesn't already exist in graph.
-    TaskGraph::Node::Vector::iterator decode_it =
-        std::find_if(graph->nodes.begin(), graph->nodes.end(),
-                     [decode_task](const TaskGraph::Node& node) {
-                       return node.task == decode_task;
-                     });
+    auto decode_it = std::find_if(graph->nodes.begin(), graph->nodes.end(),
+                                  [decode_task](const TaskGraph::Node& node) {
+                                    return node.task == decode_task;
+                                  });
 
     // In rare circumstances, a background category task may come in before a
     // foreground category task. In these cases, upgrade any background category
@@ -325,6 +326,36 @@ class TaskSetFinishedTaskImpl : public TileTask {
   DISALLOW_COPY_AND_ASSIGN(TaskSetFinishedTaskImpl);
 };
 
+class DidFinishRunningAllTilesTask : public TileTask {
+ public:
+  using CompletionCb = base::OnceCallback<void(bool has_pending_queries)>;
+  DidFinishRunningAllTilesTask(base::SequencedTaskRunner* task_runner,
+                               RasterBufferProvider* raster_buffer_provider,
+                               CompletionCb completion_cb)
+      : TileTask(false /* supports_concurrent_execution */),
+        task_runner_(task_runner),
+        raster_buffer_provider_(raster_buffer_provider),
+        completion_cb_(std::move(completion_cb)) {}
+
+  void RunOnWorkerThread() override {
+    TRACE_EVENT0("cc", "TaskSetFinishedTaskImpl::RunOnWorkerThread");
+    bool has_pending_queries =
+        raster_buffer_provider_->CheckRasterFinishedQueries();
+    task_runner_->PostTask(FROM_HERE, base::BindOnce(std::move(completion_cb_),
+                                                     has_pending_queries));
+  }
+
+  void OnTaskCompleted() override {}
+
+ protected:
+  ~DidFinishRunningAllTilesTask() override = default;
+
+ private:
+  base::SequencedTaskRunner* task_runner_;
+  RasterBufferProvider* raster_buffer_provider_;
+  CompletionCb completion_cb_;
+};
+
 }  // namespace
 
 RasterTaskCompletionStats::RasterTaskCompletionStats()
@@ -359,6 +390,7 @@ TileManager::TileManager(
       did_oom_on_last_assign_(false),
       image_controller_(origin_task_runner,
                         std::move(image_worker_task_runner)),
+      decoded_image_tracker_(&image_controller_, origin_task_runner),
       checker_image_tracker_(&image_controller_,
                              this,
                              tile_manager_settings_.enable_checker_imaging,
@@ -400,6 +432,7 @@ void TileManager::FinishTasksAndCleanUp() {
   signals_check_notifier_.Cancel();
   task_set_finished_weak_ptr_factory_.InvalidateWeakPtrs();
   ready_to_draw_callback_weak_ptr_factory_.InvalidateWeakPtrs();
+  check_pending_tile_queries_callback_.Cancel();
   raster_buffer_provider_ = nullptr;
 
   // Ask the tracker to drop any locked decodes since we will be destroying the
@@ -455,13 +488,14 @@ void TileManager::DidFinishRunningTileTasksRequiredForDraw() {
   signals_check_notifier_.Schedule();
 }
 
-void TileManager::DidFinishRunningAllTileTasks() {
+void TileManager::DidFinishRunningAllTileTasks(bool has_pending_queries) {
   TRACE_EVENT0("cc", "TileManager::DidFinishRunningAllTileTasks");
   TRACE_EVENT_ASYNC_END0("cc", "ScheduledTasks", this);
   DCHECK(resource_pool_);
   DCHECK(tile_task_manager_);
 
   has_scheduled_tile_tasks_ = false;
+  has_pending_queries_ = has_pending_queries;
 
   if (all_tiles_that_need_to_be_rasterized_are_scheduled_ &&
       !resource_pool_->ResourceUsageTooHigh()) {
@@ -482,7 +516,7 @@ bool TileManager::PrepareTiles(
     const GlobalStateThatImpactsTilePriority& state) {
   ++prepare_tiles_count_;
 
-  TRACE_EVENT1("cc", "TileManager::PrepareTiles", "prepare_tiles_id",
+  TRACE_EVENT1("cc,benchmark", "TileManager::PrepareTiles", "prepare_tiles_id",
                prepare_tiles_count_);
 
   if (!tile_task_manager_) {
@@ -956,8 +990,13 @@ void TileManager::ScheduleTasks(PrioritizedWorkToSchedule work_to_schedule) {
   scoped_refptr<TileTask> required_for_draw_done_task =
       CreateTaskSetFinishedTask(
           &TileManager::DidFinishRunningTileTasksRequiredForDraw);
+
+  auto all_done_cb =
+      base::BindOnce(&TileManager::DidFinishRunningAllTileTasks,
+                     task_set_finished_weak_ptr_factory_.GetWeakPtr());
   scoped_refptr<TileTask> all_done_task =
-      CreateTaskSetFinishedTask(&TileManager::DidFinishRunningAllTileTasks);
+      base::MakeRefCounted<DidFinishRunningAllTilesTask>(
+          task_runner_, raster_buffer_provider_, std::move(all_done_cb));
 
   // Build a new task queue containing all task currently needed. Tasks
   // are added in order of priority, highest priority task first.
@@ -1028,8 +1067,10 @@ void TileManager::ScheduleTasks(PrioritizedWorkToSchedule work_to_schedule) {
       prepare_tiles_count_, TilePriority::SOON,
       ImageDecodeCache::TaskType::kInRaster);
   std::vector<scoped_refptr<TileTask>> new_locked_image_tasks =
-      image_controller_.SetPredecodeImages(std::move(new_locked_images),
-                                           tracing_info);
+      image_controller_.SetPredecodeImages(new_locked_images, tracing_info);
+  // Notify |decoded_image_tracker_| after |image_controller_| to ensure we've
+  // taken new refs on the images before releasing the predecode API refs.
+  decoded_image_tracker_.OnImagesUsedInDraw(new_locked_images);
   work_to_schedule.extra_prepaint_images.clear();
 
   for (auto& task : new_locked_image_tasks) {
@@ -1151,6 +1192,9 @@ scoped_refptr<TileTask> TileManager::CreateRasterTask(
   bool has_at_raster_images = false;
   image_controller_.GetTasksForImagesAndRef(
       &sync_decoded_images, &decode_tasks, &has_at_raster_images, tracing_info);
+  // Notify |decoded_image_tracker_| after |image_controller_| to ensure we've
+  // taken new refs on the images before releasing the predecode API refs.
+  decoded_image_tracker_.OnImagesUsedInDraw(sync_decoded_images);
 
   const bool has_checker_images = !checkered_images.empty();
   tile->set_raster_task_scheduled_with_checker_images(has_checker_images);
@@ -1207,7 +1251,8 @@ scoped_refptr<TileTask> TileManager::CreateRasterTask(
       this, tile, std::move(resource), prioritized_tile.raster_source(),
       playback_settings, prioritized_tile.priority().resolution,
       invalidated_rect, prepare_tiles_count_, std::move(raster_buffer),
-      &decode_tasks, use_gpu_rasterization_, std::move(image_provider));
+      &decode_tasks, use_gpu_rasterization_, std::move(image_provider),
+      active_url_);
 }
 
 void TileManager::ResetSignalsForTesting() {
@@ -1267,10 +1312,8 @@ void TileManager::OnRasterTaskCompleted(
   }
 
   TileDrawInfo& draw_info = tile->draw_info();
-  bool needs_swizzle =
-      raster_buffer_provider_->IsResourceSwizzleRequired(!tile->is_opaque());
-  bool is_premultiplied =
-      raster_buffer_provider_->IsResourcePremultiplied(!tile->is_opaque());
+  bool needs_swizzle = raster_buffer_provider_->IsResourceSwizzleRequired();
+  bool is_premultiplied = raster_buffer_provider_->IsResourcePremultiplied();
   draw_info.SetResource(std::move(resource),
                         raster_task_was_scheduled_with_checker_images,
                         needs_swizzle, is_premultiplied);
@@ -1283,13 +1326,6 @@ void TileManager::OnRasterTaskCompleted(
     draw_info.set_resource_ready_for_draw();
     client_->NotifyTileStateChanged(tile);
   }
-}
-
-void TileManager::SetDecodedImageTracker(
-    DecodedImageTracker* decoded_image_tracker) {
-  // TODO(vmpstr): If the tile manager needs to request out-of-raster decodes,
-  // it should retain and use |decoded_image_tracker| here.
-  decoded_image_tracker->set_image_controller(&image_controller_);
 }
 
 std::unique_ptr<Tile> TileManager::CreateTile(const Tile::CreateInfo& info,
@@ -1338,17 +1374,45 @@ bool TileManager::AreRequiredTilesReadyToDraw(
 }
 
 bool TileManager::IsReadyToActivate() const {
-  TRACE_EVENT0("cc", "TileManager::IsReadyToActivate");
+  TRACE_EVENT0("cc,benchmark", "TileManager::IsReadyToActivate");
   return pending_required_for_activation_callback_id_ == 0 &&
          AreRequiredTilesReadyToDraw(
              RasterTilePriorityQueue::Type::REQUIRED_FOR_ACTIVATION);
 }
 
 bool TileManager::IsReadyToDraw() const {
-  TRACE_EVENT0("cc", "TileManager::IsReadyToDraw");
+  TRACE_EVENT0("cc,benchmark", "TileManager::IsReadyToDraw");
   return pending_required_for_draw_callback_id_ == 0 &&
          AreRequiredTilesReadyToDraw(
              RasterTilePriorityQueue::Type::REQUIRED_FOR_DRAW);
+}
+
+void TileManager::ScheduleCheckRasterFinishedQueries() {
+  DCHECK(has_pending_queries_);
+
+  if (!check_pending_tile_queries_callback_.IsCancelled())
+    return;
+
+  check_pending_tile_queries_callback_.Reset(base::Bind(
+      &TileManager::CheckRasterFinishedQueries, base::Unretained(this)));
+  task_runner_->PostDelayedTask(FROM_HERE,
+                                check_pending_tile_queries_callback_.callback(),
+                                base::TimeDelta::FromMilliseconds(100));
+}
+
+void TileManager::CheckRasterFinishedQueries() {
+  check_pending_tile_queries_callback_.Cancel();
+
+  if (!has_pending_queries_)
+    return;
+
+  // Raster tasks are in progress. The queries will be polled once they finish.
+  if (has_scheduled_tile_tasks_ || !signals_.all_tile_tasks_completed)
+    return;
+
+  has_pending_queries_ = raster_buffer_provider_->CheckRasterFinishedQueries();
+  if (has_pending_queries_)
+    ScheduleCheckRasterFinishedQueries();
 }
 
 void TileManager::FlushAndIssueSignals() {
@@ -1390,6 +1454,10 @@ void TileManager::IssueSignals() {
     if (!has_scheduled_tile_tasks_) {
       TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("cc.debug"),
                    "TileManager::IssueSignals - all tile tasks completed");
+
+      if (has_pending_queries_)
+        ScheduleCheckRasterFinishedQueries();
+
       signals_.did_notify_all_tile_tasks_completed = true;
       client_->NotifyAllTileTasksCompleted();
     }
@@ -1519,7 +1587,7 @@ void TileManager::NeedsInvalidationForCheckerImagedTiles() {
 
 viz::ResourceFormat TileManager::DetermineResourceFormat(
     const Tile* tile) const {
-  return raster_buffer_provider_->GetResourceFormat(!tile->is_opaque());
+  return raster_buffer_provider_->GetResourceFormat();
 }
 
 std::unique_ptr<base::trace_event::ConvertableToTraceFormat>
@@ -1558,6 +1626,11 @@ void TileManager::CheckPendingGpuWorkAndIssueSignals() {
     const ResourcePool::InUsePoolResource& resource =
         tile->draw_info().GetResource();
 
+    // Update requirements first so that if the tile has become required
+    // it will force a redraw.
+    if (pending_tile_requirements_dirty_)
+      tile->tiling()->UpdateRequiredStatesOnTile(tile);
+
     if (global_state_.tree_priority != SMOOTHNESS_TAKES_PRIORITY ||
         raster_buffer_provider_->IsResourceReadyToDraw(resource)) {
       tile->draw_info().set_resource_ready_for_draw();
@@ -1569,8 +1642,6 @@ void TileManager::CheckPendingGpuWorkAndIssueSignals() {
     // TODO(ericrk): If a tile in our list no longer has valid tile priorities,
     // it may still report that it is required, and unnecessarily delay
     // activation. crbug.com/687265
-    if (pending_tile_requirements_dirty_)
-      tile->tiling()->UpdateRequiredStatesOnTile(tile);
     if (tile->required_for_activation())
       required_for_activation.push_back(&resource);
     if (tile->required_for_draw())

@@ -23,8 +23,8 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/login/users/scoped_test_user_manager.h"
-#include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
+#include "chrome/browser/chromeos/settings/scoped_cros_settings_test_helper.h"
 #endif
 
 namespace extensions {
@@ -77,8 +77,7 @@ class TestExtensionEnvironment::ChromeOSEnv {
   ChromeOSEnv() {}
 
  private:
-  chromeos::ScopedTestDeviceSettingsService test_device_settings_service_;
-  chromeos::ScopedTestCrosSettings test_cros_settings_;
+  chromeos::ScopedCrosSettingsTestHelper cros_settings_test_helper_;
   chromeos::ScopedTestUserManager test_user_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeOSEnv);
@@ -131,7 +130,7 @@ const Extension* TestExtensionEnvironment::MakeExtension(
     const base::Value& manifest_extra) {
   std::unique_ptr<base::DictionaryValue> manifest =
       MakeExtensionManifest(manifest_extra);
-  scoped_refptr<Extension> result =
+  scoped_refptr<const Extension> result =
       ExtensionBuilder().SetManifest(std::move(manifest)).Build();
   GetExtensionService()->AddExtension(result.get());
   return result.get();
@@ -142,20 +141,21 @@ const Extension* TestExtensionEnvironment::MakeExtension(
     const std::string& id) {
   std::unique_ptr<base::DictionaryValue> manifest =
       MakeExtensionManifest(manifest_extra);
-  scoped_refptr<Extension> result =
+  scoped_refptr<const Extension> result =
       ExtensionBuilder().SetManifest(std::move(manifest)).SetID(id).Build();
   GetExtensionService()->AddExtension(result.get());
   return result.get();
 }
 
-scoped_refptr<Extension> TestExtensionEnvironment::MakePackagedApp(
+scoped_refptr<const Extension> TestExtensionEnvironment::MakePackagedApp(
     const std::string& id,
     bool install) {
-  scoped_refptr<Extension> result = ExtensionBuilder()
-                                        .SetManifest(MakePackagedAppManifest())
-                                        .AddFlags(Extension::FROM_WEBSTORE)
-                                        .SetID(id)
-                                        .Build();
+  scoped_refptr<const Extension> result =
+      ExtensionBuilder()
+          .SetManifest(MakePackagedAppManifest())
+          .AddFlags(Extension::FROM_WEBSTORE)
+          .SetID(id)
+          .Build();
   if (install)
     GetExtensionService()->AddExtension(result.get());
   return result;

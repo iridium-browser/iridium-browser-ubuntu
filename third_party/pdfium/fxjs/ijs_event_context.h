@@ -9,6 +9,8 @@
 
 #include "core/fxcrt/fx_string.h"
 #include "core/fxcrt/fx_system.h"
+#include "fxjs/ijs_runtime.h"
+#include "third_party/base/optional.h"
 
 class CPDF_Bookmark;
 class CPDF_FormField;
@@ -20,7 +22,10 @@ class CPDFSDK_FormFillEnvironment;
 // may trigger new events on top of one another.
 class IJS_EventContext {
  public:
-  virtual bool RunScript(const WideString& script, WideString* info) = 0;
+  virtual ~IJS_EventContext() = default;
+
+  virtual Optional<IJS_Runtime::JS_Error> RunScript(
+      const WideString& script) = 0;
 
   virtual void OnApp_Init() = 0;
 
@@ -52,39 +57,38 @@ class IJS_EventContext {
   virtual void OnField_Focus(bool bModifier,
                              bool bShift,
                              CPDF_FormField* pTarget,
-                             const WideString& Value) = 0;
+                             WideString* Value) = 0;
   virtual void OnField_Blur(bool bModifier,
                             bool bShift,
                             CPDF_FormField* pTarget,
-                            const WideString& Value) = 0;
-
+                            WideString* Value) = 0;
   virtual void OnField_Calculate(CPDF_FormField* pSource,
                                  CPDF_FormField* pTarget,
-                                 WideString& Value,
-                                 bool& bRc) = 0;
+                                 WideString* Value,
+                                 bool* bRc) = 0;
   virtual void OnField_Format(CPDF_FormField* pTarget,
-                              WideString& Value,
+                              WideString* Value,
                               bool bWillCommit) = 0;
-  virtual void OnField_Keystroke(WideString& strChange,
+  virtual void OnField_Keystroke(WideString* strChange,
                                  const WideString& strChangeEx,
                                  bool KeyDown,
                                  bool bModifier,
-                                 int& nSelEnd,
-                                 int& nSelStart,
+                                 int* nSelEnd,
+                                 int* nSelStart,
                                  bool bShift,
                                  CPDF_FormField* pTarget,
-                                 WideString& Value,
+                                 WideString* Value,
                                  bool bWillCommit,
                                  bool bFieldFull,
-                                 bool& bRc) = 0;
-  virtual void OnField_Validate(WideString& strChange,
+                                 bool* bRc) = 0;
+  virtual void OnField_Validate(WideString* strChange,
                                 const WideString& strChangeEx,
                                 bool bKeyDown,
                                 bool bModifier,
                                 bool bShift,
                                 CPDF_FormField* pTarget,
-                                WideString& Value,
-                                bool& bRc) = 0;
+                                WideString* Value,
+                                bool* bRc) = 0;
 
   virtual void OnScreen_Focus(bool bModifier,
                               bool bShift,
@@ -125,9 +129,6 @@ class IJS_EventContext {
   virtual void OnBatchExec(CPDFSDK_FormFillEnvironment* pFormFillEnv) = 0;
   virtual void OnConsole_Exec() = 0;
   virtual void OnExternal_Exec() = 0;
-
- protected:
-  virtual ~IJS_EventContext() {}
 };
 
 #endif  // FXJS_IJS_EVENT_CONTEXT_H_

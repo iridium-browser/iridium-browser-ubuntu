@@ -8,18 +8,17 @@
 #include <map>
 #include <string>
 
-#include "ash/shell_observer.h"
 #include "ash/system/system_tray_focus_observer.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/observer_list.h"
 #include "chrome/browser/chromeos/lock_screen_apps/focus_cycler_delegate.h"
+#include "chrome/browser/ui/ash/chrome_keyboard_controller_client.h"
 #include "chrome/browser/ui/chrome_web_modal_dialog_manager_delegate.h"
 #include "components/web_modal/web_contents_modal_dialog_host.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/web_contents_delegate.h"
-#include "ui/keyboard/keyboard_controller_observer.h"
 #include "ui/views/controls/webview/unhandled_keyboard_event_handler.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
@@ -42,8 +41,7 @@ class OobeUI;
 // View used to render a WebUI supporting Widget. This widget is used for the
 // WebUI based start up and lock screens. It contains a WebView.
 class WebUILoginView : public views::View,
-                       public ash::ShellObserver,
-                       public keyboard::KeyboardControllerObserver,
+                       public ChromeKeyboardControllerClient::Observer,
                        public content::WebContentsDelegate,
                        public content::NotificationObserver,
                        public ChromeWebModalDialogManagerDelegate,
@@ -147,24 +145,19 @@ class WebUILoginView : public views::View,
   // Map type for the accelerator-to-identifier map.
   typedef std::map<ui::Accelerator, std::string> AccelMap;
 
-  // ash::ShellObserver:
-  void OnVirtualKeyboardStateChanged(bool activated,
-                                     aura::Window* root_window) override;
-
-  // keyboard::KeyboardControllerObserver:
-  void OnKeyboardAvailabilityChanged(bool is_available) override;
+  // ChromeKeyboardControllerClient::Observer:
+  void OnKeyboardVisibilityChanged(bool visible) override;
 
   // Overridden from content::WebContentsDelegate.
   bool HandleContextMenu(const content::ContextMenuParams& params) override;
   void HandleKeyboardEvent(
       content::WebContents* source,
       const content::NativeWebKeyboardEvent& event) override;
-  bool IsPopupOrPanel(const content::WebContents* source) const override;
   bool TakeFocus(content::WebContents* source, bool reverse) override;
   void RequestMediaAccessPermission(
       content::WebContents* web_contents,
       const content::MediaStreamRequest& request,
-      const content::MediaResponseCallback& callback) override;
+      content::MediaResponseCallback callback) override;
   bool CheckMediaAccessPermission(content::RenderFrameHost* render_frame_host,
                                   const GURL& security_origin,
                                   content::MediaStreamType type) override;
@@ -229,7 +222,8 @@ class WebUILoginView : public views::View,
   // FocusCyclerDelegate.
   bool delegates_lock_screen_app_focus_cycle_ = false;
 
-  base::ObserverList<web_modal::ModalDialogHostObserver> observer_list_;
+  base::ObserverList<web_modal::ModalDialogHostObserver>::Unchecked
+      observer_list_;
 
   DISALLOW_COPY_AND_ASSIGN(WebUILoginView);
 };

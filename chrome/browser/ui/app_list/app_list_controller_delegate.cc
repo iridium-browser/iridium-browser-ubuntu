@@ -6,6 +6,8 @@
 
 #include <utility>
 
+#include "ash/public/cpp/app_list/app_list_features.h"
+#include "ash/public/cpp/app_list/app_list_switches.h"
 #include "base/metrics/histogram_macros.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/extension_util.h"
@@ -14,6 +16,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/app_list/extension_uninstaller.h"
 #include "chrome/browser/ui/apps/app_info_dialog.h"
+#include "chrome/browser/ui/ash/tablet_mode_client.h"
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
@@ -27,7 +30,6 @@
 #include "extensions/common/manifest_url_handlers.h"
 #include "net/base/url_util.h"
 #include "rlz/buildflags/buildflags.h"
-#include "ui/app_list/app_list_switches.h"
 #include "ui/gfx/geometry/rect.h"
 
 #if BUILDFLAG(ENABLE_RLZ)
@@ -49,18 +51,14 @@ const extensions::Extension* GetExtension(Profile* profile,
 }  // namespace
 
 AppListControllerDelegate::AppListControllerDelegate()
-    : weak_ptr_factory_(this) {}
+    : is_home_launcher_enabled_(app_list_features::IsHomeLauncherEnabled()),
+      weak_ptr_factory_(this) {}
 
 AppListControllerDelegate::~AppListControllerDelegate() {}
 
 void AppListControllerDelegate::GetAppInfoDialogBounds(
     GetAppInfoDialogBoundsCallback callback) {
   std::move(callback).Run(gfx::Rect());
-}
-
-void AppListControllerDelegate::OnShowChildDialog() {
-}
-void AppListControllerDelegate::OnCloseChildDialog() {
 }
 
 std::string AppListControllerDelegate::AppListSourceToString(
@@ -102,8 +100,6 @@ void AppListControllerDelegate::DoShowAppInfoFlow(
     return;
   }
 
-  OnShowChildDialog();
-
   UMA_HISTOGRAM_ENUMERATION("Apps.AppInfoDialog.Launches",
                             AppInfoLaunchSource::FROM_APP_LIST,
                             AppInfoLaunchSource::NUM_LAUNCH_SOURCES);
@@ -116,10 +112,7 @@ void AppListControllerDelegate::DoShowAppInfoFlow(
         const extensions::Extension* extension =
             GetExtension(profile, extension_id);
         DCHECK(extension);
-        ShowAppInfoInAppList(
-            bounds, profile, extension,
-            base::BindRepeating(&AppListControllerDelegate::OnCloseChildDialog,
-                                self));
+        ShowAppInfoInAppList(bounds, profile, extension);
       },
       weak_ptr_factory_.GetWeakPtr(), profile, extension_id));
 }
@@ -127,8 +120,7 @@ void AppListControllerDelegate::DoShowAppInfoFlow(
 void AppListControllerDelegate::UninstallApp(Profile* profile,
                                              const std::string& app_id) {
   // ExtensionUninstall deletes itself when done or aborted.
-  ExtensionUninstaller* uninstaller =
-      new ExtensionUninstaller(profile, app_id, this);
+  ExtensionUninstaller* uninstaller = new ExtensionUninstaller(profile, app_id);
   uninstaller->Run();
 }
 
@@ -217,4 +209,9 @@ void AppListControllerDelegate::OnSearchStarted() {
 #if BUILDFLAG(ENABLE_RLZ)
   rlz::RLZTracker::RecordAppListSearch();
 #endif
+}
+
+bool AppListControllerDelegate::IsHomeLauncherEnabledInTabletMode() const {
+  return is_home_launcher_enabled_ && TabletModeClient::Get() &&
+         TabletModeClient::Get()->tablet_mode_enabled();
 }

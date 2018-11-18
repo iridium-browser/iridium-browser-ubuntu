@@ -34,13 +34,16 @@ DataReductionProxyService::DataReductionProxyService(
     DataReductionProxySettings* settings,
     PrefService* prefs,
     net::URLRequestContextGetter* request_context_getter,
+    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
     std::unique_ptr<DataStore> store,
     std::unique_ptr<DataReductionProxyPingbackClient> pingback_client,
+    network::NetworkQualityTracker* network_quality_tracker,
     const scoped_refptr<base::SequencedTaskRunner>& ui_task_runner,
     const scoped_refptr<base::SingleThreadTaskRunner>& io_task_runner,
     const scoped_refptr<base::SequencedTaskRunner>& db_task_runner,
     const base::TimeDelta& commit_delay)
     : url_request_context_getter_(request_context_getter),
+      url_loader_factory_(std::move(url_loader_factory)),
       pingback_client_(std::move(pingback_client)),
       settings_(settings),
       prefs_(prefs),
@@ -48,20 +51,27 @@ DataReductionProxyService::DataReductionProxyService(
       io_task_runner_(io_task_runner),
       db_task_runner_(db_task_runner),
       initialized_(false),
+      network_quality_tracker_(network_quality_tracker),
+      effective_connection_type_(net::EFFECTIVE_CONNECTION_TYPE_UNKNOWN),
       weak_factory_(this) {
   DCHECK(settings);
+  DCHECK(network_quality_tracker_);
   db_task_runner_->PostTask(FROM_HERE,
-                            base::Bind(&DBDataOwner::InitializeOnDBThread,
-                                       db_data_owner_->GetWeakPtr()));
+                            base::BindOnce(&DBDataOwner::InitializeOnDBThread,
+                                           db_data_owner_->GetWeakPtr()));
   if (prefs_) {
     compression_stats_.reset(
         new DataReductionProxyCompressionStats(this, prefs_, commit_delay));
   }
   event_store_.reset(new DataReductionProxyEventStore());
+  network_quality_tracker_->AddEffectiveConnectionTypeObserver(this);
+  network_quality_tracker_->AddRTTAndThroughputEstimatesObserver(this);
 }
 
 DataReductionProxyService::~DataReductionProxyService() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  network_quality_tracker_->RemoveEffectiveConnectionTypeObserver(this);
+  network_quality_tracker_->RemoveRTTAndThroughputEstimatesObserver(this);
   compression_stats_.reset();
   db_task_runner_->DeleteSoon(FROM_HERE, db_data_owner_.release());
 }
@@ -71,6 +81,14 @@ void DataReductionProxyService::SetIOData(
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   io_data_ = io_data;
   initialized_ = true;
+
+  // Notify IO data of the current network quality estimates.
+  OnEffectiveConnectionTypeChanged(effective_connection_type_);
+  if (http_rtt_) {
+    OnRTTOrThroughputEstimatesComputed(http_rtt_.value(), base::TimeDelta(),
+                                       INT32_MAX);
+  }
+
   for (DataReductionProxyServiceObserver& observer : observer_list_)
     observer.OnServiceInitialized();
 
@@ -97,10 +115,6 @@ void DataReductionProxyService::ReadPersistedClientConfig() {
       !last_config_retrieval_time.is_null() &&
       time_since_last_config_retrieval > base::TimeDelta::FromHours(24);
 
-  UMA_HISTOGRAM_BOOLEAN(
-      "DataReductionProxy.ConfigService.PersistedConfigIsExpired",
-      persisted_config_is_expired);
-
   if (persisted_config_is_expired)
     return;
 
@@ -112,8 +126,37 @@ void DataReductionProxyService::ReadPersistedClientConfig() {
 
   io_task_runner_->PostTask(
       FROM_HERE,
-      base::Bind(&DataReductionProxyIOData::SetDataReductionProxyConfiguration,
-                 io_data_, config_value));
+      base::BindOnce(
+          &DataReductionProxyIOData::SetDataReductionProxyConfiguration,
+          io_data_, config_value));
+}
+
+void DataReductionProxyService::OnEffectiveConnectionTypeChanged(
+    net::EffectiveConnectionType type) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  effective_connection_type_ = type;
+
+  io_task_runner_->PostTask(
+      FROM_HERE,
+      base::BindOnce(
+          &DataReductionProxyIOData::OnEffectiveConnectionTypeChanged, io_data_,
+          type));
+}
+
+void DataReductionProxyService::OnRTTOrThroughputEstimatesComputed(
+    base::TimeDelta http_rtt,
+    base::TimeDelta transport_rtt,
+    int32_t downstream_throughput_kbps) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  http_rtt_ = http_rtt;
+
+  io_task_runner_->PostTask(
+      FROM_HERE,
+      base::BindOnce(
+          &DataReductionProxyIOData::OnRTTOrThroughputEstimatesComputed,
+          io_data_, http_rtt));
 }
 
 void DataReductionProxyService::Shutdown() {
@@ -136,12 +179,15 @@ void DataReductionProxyService::UpdateContentLengths(
     int64_t original_size,
     bool data_reduction_proxy_enabled,
     DataReductionProxyRequestType request_type,
-    const std::string& mime_type) {
+    const std::string& mime_type,
+    bool is_user_traffic,
+    data_use_measurement::DataUseUserData::DataUseContentType content_type,
+    int32_t service_hash_code) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (compression_stats_) {
-    compression_stats_->RecordDataUseWithMimeType(data_used, original_size,
-                                                  data_reduction_proxy_enabled,
-                                                  request_type, mime_type);
+    compression_stats_->RecordDataUseWithMimeType(
+        data_used, original_size, data_reduction_proxy_enabled, request_type,
+        mime_type, is_user_traffic, content_type, service_hash_code);
   }
 }
 
@@ -195,8 +241,8 @@ void DataReductionProxyService::SetProxyPrefs(bool enabled, bool at_startup) {
     return;
   }
   io_task_runner_->PostTask(
-      FROM_HERE, base::Bind(&DataReductionProxyIOData::SetProxyPrefs, io_data_,
-                            enabled, at_startup));
+      FROM_HERE, base::BindOnce(&DataReductionProxyIOData::SetProxyPrefs,
+                                io_data_, enabled, at_startup));
 }
 
 void DataReductionProxyService::SetPingbackReportingFraction(
@@ -211,6 +257,38 @@ void DataReductionProxyService::OnCacheCleared(const base::Time start,
   io_task_runner_->PostTask(
       FROM_HERE, base::BindOnce(&DataReductionProxyIOData::OnCacheCleared,
                                 io_data_, start, end));
+}
+
+net::EffectiveConnectionType
+DataReductionProxyService::GetEffectiveConnectionType() const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  return effective_connection_type_;
+}
+
+base::Optional<base::TimeDelta> DataReductionProxyService::GetHttpRttEstimate()
+    const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  return http_rtt_;
+}
+
+void DataReductionProxyService::SetProxyRequestHeadersOnUI(
+    const net::HttpRequestHeaders& headers) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  settings_->SetProxyRequestHeaders(headers);
+}
+
+void DataReductionProxyService::SetIgnoreLongTermBlackListRules(
+    bool ignore_long_term_black_list_rules) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  settings_->SetIgnoreLongTermBlackListRules(ignore_long_term_black_list_rules);
+}
+
+void DataReductionProxyService::SetCustomProxyConfigClient(
+    network::mojom::CustomProxyConfigClientPtrInfo config_client_info) {
+  io_task_runner_->PostTask(
+      FROM_HERE,
+      base::BindOnce(&DataReductionProxyIOData::SetCustomProxyConfigClient,
+                     io_data_, std::move(config_client_info)));
 }
 
 void DataReductionProxyService::LoadHistoricalDataUsage(
@@ -247,21 +325,22 @@ void DataReductionProxyService::StoreCurrentDataUsageBucket(
 }
 
 void DataReductionProxyService::DeleteHistoricalDataUsage() {
-  db_task_runner_->PostTask(FROM_HERE,
-                            base::Bind(&DBDataOwner::DeleteHistoricalDataUsage,
-                                       db_data_owner_->GetWeakPtr()));
+  db_task_runner_->PostTask(
+      FROM_HERE, base::BindOnce(&DBDataOwner::DeleteHistoricalDataUsage,
+                                db_data_owner_->GetWeakPtr()));
 }
 
 void DataReductionProxyService::DeleteBrowsingHistory(const base::Time& start,
                                                       const base::Time& end) {
   DCHECK_LE(start, end);
   db_task_runner_->PostTask(
-      FROM_HERE, base::Bind(&DBDataOwner::DeleteBrowsingHistory,
-                            db_data_owner_->GetWeakPtr(), start, end));
+      FROM_HERE, base::BindOnce(&DBDataOwner::DeleteBrowsingHistory,
+                                db_data_owner_->GetWeakPtr(), start, end));
 
   io_task_runner_->PostTask(
-      FROM_HERE, base::Bind(&DataReductionProxyIOData::DeleteBrowsingHistory,
-                            io_data_, start, end));
+      FROM_HERE,
+      base::BindOnce(&DataReductionProxyIOData::DeleteBrowsingHistory, io_data_,
+                     start, end));
 }
 
 void DataReductionProxyService::AddObserver(

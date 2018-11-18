@@ -4,18 +4,32 @@
 
 #include "ui/aura/window_targeter.h"
 
-#include "services/ui/public/interfaces/window_tree_constants.mojom.h"
+#include "services/ws/public/mojom/window_tree_constants.mojom.h"
 #include "ui/aura/client/capture_client.h"
 #include "ui/aura/client/event_client.h"
 #include "ui/aura/client/focus_client.h"
+#include "ui/aura/client/screen_position_client.h"
+#include "ui/aura/env.h"
+#include "ui/aura/mus/window_port_mus.h"
+#include "ui/aura/mus/window_tree_client.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_delegate.h"
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/aura/window_tree_host.h"
+#include "ui/display/display.h"
+#include "ui/display/screen.h"
 #include "ui/events/event_target.h"
 #include "ui/events/event_target_iterator.h"
 
 namespace aura {
+namespace {
+
+bool AreInsetsEmptyOrPositive(const gfx::Insets& insets) {
+  return insets.left() >= 0 && insets.right() >= 0 && insets.top() >= 0 &&
+         insets.bottom() >= 0;
+}
+
+}  // namespace
 
 WindowTargeter::WindowTargeter() {}
 WindowTargeter::~WindowTargeter() {}
@@ -56,11 +70,9 @@ void WindowTargeter::SetInsets(const gfx::Insets& mouse_extend,
   if (mouse_extend_ == mouse_extend && touch_extend_ == touch_extend)
     return;
 
-  const gfx::Insets last_mouse_extend_ = mouse_extend_;
-  const gfx::Insets last_touch_extend_ = touch_extend_;
   mouse_extend_ = mouse_extend;
   touch_extend_ = touch_extend;
-  OnSetInsets(last_mouse_extend_, last_touch_extend_);
+  UpdateMusIfNecessary();
 }
 
 Window* WindowTargeter::GetPriorityTargetInRootWindow(
@@ -93,7 +105,7 @@ Window* WindowTargeter::GetPriorityTargetInRootWindow(
     // Query the gesture-recognizer to find targets for touch events.
     const ui::TouchEvent& touch = *event.AsTouchEvent();
     ui::GestureConsumer* consumer =
-        ui::GestureRecognizer::Get()->GetTouchLockedTarget(touch);
+        root_window->env()->gesture_recognizer()->GetTouchLockedTarget(touch);
     if (consumer)
       return static_cast<Window*>(consumer);
   }
@@ -113,15 +125,25 @@ Window* WindowTargeter::FindTargetInRootWindow(Window* root_window,
     // Query the gesture-recognizer to find targets for touch events.
     const ui::TouchEvent& touch = *event.AsTouchEvent();
     // GetTouchLockedTarget() is handled in GetPriorityTargetInRootWindow().
-    DCHECK(!ui::GestureRecognizer::Get()->GetTouchLockedTarget(touch));
-    ui::GestureConsumer* consumer =
-        ui::GestureRecognizer::Get()->GetTargetForLocation(
-            event.location_f(), touch.source_device_id());
+    ui::GestureRecognizer* gesture_recognizer =
+        root_window->env()->gesture_recognizer();
+    DCHECK(!gesture_recognizer->GetTouchLockedTarget(touch));
+    ui::GestureConsumer* consumer = gesture_recognizer->GetTargetForLocation(
+        event.location_f(), touch.source_device_id());
     if (consumer)
       return static_cast<Window*>(consumer);
 
-    // If the initial touch is outside the root window, target the root.
-    if (!root_window->bounds().Contains(event.root_location()))
+    // If the initial touch is outside the window's display, target the root.
+    // This is used for bezel gesture events (eg. swiping in from screen edge).
+    display::Display display =
+        display::Screen::GetScreen()->GetDisplayNearestWindow(root_window);
+    // The window target may be null, so use the root's ScreenPositionClient.
+    gfx::Point screen_location = event.root_location();
+    if (client::GetScreenPositionClient(root_window)) {
+      client::GetScreenPositionClient(root_window)
+          ->ConvertPointToScreen(root_window, &screen_location);
+    }
+    if (!display.bounds().Contains(screen_location))
       return root_window;
   }
 
@@ -176,6 +198,11 @@ ui::EventTarget* WindowTargeter::FindNextBestTarget(
   return nullptr;
 }
 
+void WindowTargeter::OnInstalled(Window* window) {
+  window_ = window;
+  UpdateMusIfNecessary();
+}
+
 Window* WindowTargeter::FindTargetForLocatedEvent(Window* window,
                                                   ui::LocatedEvent* event) {
   if (!window->parent()) {
@@ -213,9 +240,9 @@ bool WindowTargeter::SubtreeCanAcceptEvent(
   if (!window->IsVisible())
     return false;
   if (window->event_targeting_policy() ==
-          ui::mojom::EventTargetingPolicy::NONE ||
+          ws::mojom::EventTargetingPolicy::NONE ||
       window->event_targeting_policy() ==
-          ui::mojom::EventTargetingPolicy::TARGET_ONLY) {
+          ws::mojom::EventTargetingPolicy::TARGET_ONLY) {
     return false;
   }
   client::EventClient* client = client::GetEventClient(window->GetRootWindow());
@@ -265,12 +292,34 @@ bool WindowTargeter::EventLocationInsideBounds(
   return false;
 }
 
-bool WindowTargeter::ShouldUseExtendedBounds(const aura::Window* window) const {
-  return true;
+bool WindowTargeter::ShouldUseExtendedBounds(const aura::Window* w) const {
+  // window() is null when this is used as the default targeter (by
+  // WindowEventDispatcher). Insets should never be set in this case, so the
+  // return should not matter.
+  if (!window()) {
+    DCHECK(mouse_extend_.IsEmpty());
+    DCHECK(touch_extend_.IsEmpty());
+    return false;
+  }
+
+  // Insets should only apply to the window. Subclasses may enforce other
+  // policies.
+  return window() == w;
 }
 
-void WindowTargeter::OnSetInsets(const gfx::Insets& last_mouse_extend,
-                                 const gfx::Insets& last_touch_extend) {}
+// TODO: this function should go away once https://crbug.com/879308 is fixed.
+void WindowTargeter::UpdateMusIfNecessary() {
+  if (!window_ || window_->env()->mode() != Env::Mode::MUS)
+    return;
+
+  // Negative insets are used solely to extend the hit-test region of child
+  // windows, which is not needed by code using MUS (negative insets are only
+  // used in the server).
+  if (AreInsetsEmptyOrPositive(mouse_extend_) &&
+      AreInsetsEmptyOrPositive(touch_extend_)) {
+    WindowPortMus::Get(window_)->SetHitTestInsets(mouse_extend_, touch_extend_);
+  }
+}
 
 Window* WindowTargeter::FindTargetForKeyEvent(Window* window,
                                               const ui::KeyEvent& key) {

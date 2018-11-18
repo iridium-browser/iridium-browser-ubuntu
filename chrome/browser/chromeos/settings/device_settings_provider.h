@@ -19,9 +19,11 @@
 #include "components/policy/proto/chrome_device_policy.pb.h"
 #include "components/prefs/pref_value_map.h"
 
+class PrefService;
+
 namespace base {
 class Value;
-}
+}  // namespace base
 
 namespace enterprise_management {
 class ChromeDeviceSettingsProto;
@@ -30,6 +32,8 @@ class ChromeDeviceSettingsProto;
 namespace chromeos {
 
 // CrosSettingsProvider implementation that works with device settings.
+// Dependency: chromeos::InstallAttributes must be initialized while this class
+// is in use.
 //
 // Note that the write path is in the process of being migrated to
 // OwnerSettingsServiceChromeOS (crbug.com/230018).
@@ -42,7 +46,8 @@ class DeviceSettingsProvider
   typedef base::Callback<policy::DeviceMode(void)> GetDeviceModeCallback;
 
   DeviceSettingsProvider(const NotifyObserversCallback& notify_cb,
-                         DeviceSettingsService* device_settings_service);
+                         DeviceSettingsService* device_settings_service,
+                         PrefService* pref_service);
   ~DeviceSettingsProvider() override;
 
   // Returns true if |path| is handled by this provider.
@@ -106,6 +111,8 @@ class DeviceSettingsProvider
   std::vector<base::Closure> callbacks_;
 
   DeviceSettingsService* device_settings_service_;
+  PrefService* local_state_;
+
   mutable PrefValueMap migration_values_;
 
   TrustedStatus trusted_status_;

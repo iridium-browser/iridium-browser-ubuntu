@@ -22,7 +22,6 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/gcm/gcm_profile_service_factory.h"
-#include "chrome/browser/gcm/instance_id/instance_id_profile_service.h"
 #include "chrome/browser/gcm/instance_id/instance_id_profile_service_factory.h"
 #include "chrome/browser/permissions/permission_manager.h"
 #include "chrome/browser/permissions/permission_result.h"
@@ -41,6 +40,7 @@
 #include "components/gcm_driver/gcm_profile_service.h"
 #include "components/gcm_driver/instance_id/instance_id.h"
 #include "components/gcm_driver/instance_id/instance_id_driver.h"
+#include "components/gcm_driver/instance_id/instance_id_profile_service.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
 #include "components/rappor/public/rappor_utils.h"
@@ -128,19 +128,6 @@ void UnregisterCallbackToClosure(
   closure.Run();
 }
 
-#if BUILDFLAG(ENABLE_BACKGROUND_MODE)
-bool UseBackgroundMode() {
-  // Note: if push is ever enabled in incognito, the background mode integration
-  // should not be enabled for it.
-  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(switches::kDisablePushApiBackgroundMode))
-    return false;
-  if (command_line->HasSwitch(switches::kEnablePushApiBackgroundMode))
-    return true;
-  return base::FeatureList::IsEnabled(features::kPushMessagingBackgroundMode);
-}
-#endif  // BUILDFLAG(ENABLE_BACKGROUND_MODE)
-
 }  // namespace
 
 // static
@@ -176,21 +163,13 @@ PushMessagingServiceImpl::~PushMessagingServiceImpl() = default;
 void PushMessagingServiceImpl::IncreasePushSubscriptionCount(int add,
                                                              bool is_pending) {
   DCHECK_GT(add, 0);
-  if (push_subscription_count_ + pending_push_subscription_count_ == 0) {
+  if (push_subscription_count_ + pending_push_subscription_count_ == 0)
     GetGCMDriver()->AddAppHandler(kPushMessagingAppIdentifierPrefix, this);
-  }
-  if (is_pending) {
+
+  if (is_pending)
     pending_push_subscription_count_ += add;
-  } else {
-#if BUILDFLAG(ENABLE_BACKGROUND_MODE)
-    if (UseBackgroundMode() && g_browser_process->background_mode_manager() &&
-        !push_subscription_count_) {
-      g_browser_process->background_mode_manager()->RegisterTrigger(
-          profile_, this, false /* should_notify_user */);
-    }
-#endif  // BUILDFLAG(ENABLE_BACKGROUND_MODE)
+  else
     push_subscription_count_ += add;
-  }
 }
 
 void PushMessagingServiceImpl::DecreasePushSubscriptionCount(int subtract,
@@ -203,16 +182,9 @@ void PushMessagingServiceImpl::DecreasePushSubscriptionCount(int subtract,
     push_subscription_count_ -= subtract;
     DCHECK_GE(push_subscription_count_, 0);
   }
-  if (push_subscription_count_ + pending_push_subscription_count_ == 0) {
-    GetGCMDriver()->RemoveAppHandler(kPushMessagingAppIdentifierPrefix);
 
-#if BUILDFLAG(ENABLE_BACKGROUND_MODE)
-    if (UseBackgroundMode() && g_browser_process->background_mode_manager()) {
-      g_browser_process->background_mode_manager()->UnregisterTrigger(profile_,
-                                                                      this);
-    }
-#endif  // BUILDFLAG(ENABLE_BACKGROUND_MODE)
-  }
+  if (push_subscription_count_ + pending_push_subscription_count_ == 0)
+    GetGCMDriver()->RemoveAppHandler(kPushMessagingAppIdentifierPrefix);
 }
 
 bool PushMessagingServiceImpl::CanHandle(const std::string& app_id) const {
@@ -295,10 +267,10 @@ void PushMessagingServiceImpl::OnMessage(const std::string& app_id,
       "PushMessaging.MessageReceived.Origin", app_identifier.origin());
 
   // The payload of a push message can be valid with content, valid with empty
-  // content, or null. Only set the payload data if it is non-null.
-  content::PushEventPayload payload;
+  // content, or null.
+  base::Optional<std::string> payload;
   if (message.decrypted)
-    payload.setData(message.raw_data);
+    payload = message.raw_data;
 
   // Dispatch the message to the appropriate Service Worker.
   content::BrowserContext::DeliverPushMessage(
@@ -314,7 +286,7 @@ void PushMessagingServiceImpl::OnMessage(const std::string& app_id,
   if (!message_dispatched_callback_for_testing_.is_null()) {
     message_dispatched_callback_for_testing_.Run(
         app_id, app_identifier.origin(),
-        app_identifier.service_worker_registration_id(), payload);
+        app_identifier.service_worker_registration_id(), std::move(payload));
   }
 }
 
@@ -580,6 +552,7 @@ void PushMessagingServiceImpl::DoSubscribe(
       ->GetInstanceID(app_identifier.app_id())
       ->GetToken(NormalizeSenderInfo(options.sender_info), kGCMScope,
                  std::map<std::string, std::string>() /* options */,
+                 false /* is_lazy */,
                  base::Bind(&PushMessagingServiceImpl::DidSubscribe,
                             weak_factory_.GetWeakPtr(), app_identifier,
                             options.sender_info, register_callback));
@@ -937,7 +910,7 @@ void PushMessagingServiceImpl::OnContentSettingChanged(
     const ContentSettingsPattern& primary_pattern,
     const ContentSettingsPattern& secondary_pattern,
     ContentSettingsType content_type,
-    std::string resource_identifier) {
+    const std::string& resource_identifier) {
   if (content_type != CONTENT_SETTINGS_TYPE_NOTIFICATIONS)
     return;
 
@@ -1020,23 +993,6 @@ void PushMessagingServiceImpl::SetContentSettingChangedCallbackForTesting(
 void PushMessagingServiceImpl::Shutdown() {
   GetGCMDriver()->RemoveAppHandler(kPushMessagingAppIdentifierPrefix);
   HostContentSettingsMapFactory::GetForProfile(profile_)->RemoveObserver(this);
-}
-
-// BackgroundTrigger methods ---------------------------------------------------
-base::string16 PushMessagingServiceImpl::GetName() {
-  return l10n_util::GetStringUTF16(IDS_NOTIFICATIONS_BACKGROUND_SERVICE_NAME);
-}
-
-gfx::ImageSkia* PushMessagingServiceImpl::GetIcon() {
-  return nullptr;
-}
-
-void PushMessagingServiceImpl::OnMenuClick() {
-#if BUILDFLAG(ENABLE_BACKGROUND_MODE)
-  chrome::ShowContentSettings(
-      BackgroundModeManager::GetBrowserWindowForProfile(profile_),
-      CONTENT_SETTINGS_TYPE_NOTIFICATIONS);
-#endif  // BUILDFLAG(ENABLE_BACKGROUND_MODE)
 }
 
 // content::NotificationObserver methods ---------------------------------------

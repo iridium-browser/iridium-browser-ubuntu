@@ -6,6 +6,7 @@
 
 #include <utility>
 
+#include "base/no_destructor.h"
 #include "build/build_config.h"
 #include "content/public/browser/browser_accessibility_state.h"
 #include "content/public/browser/browser_context.h"
@@ -22,6 +23,27 @@
 #include "ui/views/views_delegate.h"
 
 namespace views {
+
+namespace {
+
+// A testing stub that creates web contents.
+WebView::WebContentsCreator* GetCreatorForTesting() {
+  static base::NoDestructor<WebView::WebContentsCreator> creator;
+  return creator.get();
+}
+
+}  // namespace
+
+WebView::ScopedWebContentsCreatorForTesting::ScopedWebContentsCreatorForTesting(
+    WebContentsCreator creator) {
+  DCHECK(!*GetCreatorForTesting());
+  *GetCreatorForTesting() = creator;
+}
+
+WebView::ScopedWebContentsCreatorForTesting::
+    ~ScopedWebContentsCreatorForTesting() {
+  *GetCreatorForTesting() = WebView::WebContentsCreator();
+}
 
 // static
 const char WebView::kViewClassName[] = "WebView";
@@ -44,7 +66,7 @@ WebView::~WebView() {
 
 content::WebContents* WebView::GetWebContents() {
   if (!web_contents()) {
-    wc_owner_.reset(CreateWebContents(browser_context_));
+    wc_owner_ = CreateWebContents(browser_context_);
     wc_owner_->SetDelegate(this);
     SetWebContents(wc_owner_.get());
   }
@@ -69,6 +91,8 @@ void WebView::SetWebContents(content::WebContents* replacement) {
   }
   AttachWebContents();
   NotifyAccessibilityWebContentsChanged();
+
+  MaybeEnableAutoResize();
 }
 
 void WebView::SetEmbedFullscreenWidgetMode(bool enable) {
@@ -85,6 +109,14 @@ void WebView::LoadInitialURL(const GURL& url) {
 
 void WebView::SetFastResize(bool fast_resize) {
   holder_->set_fast_resize(fast_resize);
+}
+
+void WebView::EnableSizingFromWebContents(const gfx::Size& min_size,
+                                          const gfx::Size& max_size) {
+  DCHECK(!max_size.IsEmpty());
+  min_size_ = min_size;
+  max_size_ = max_size;
+  MaybeEnableAutoResize();
 }
 
 void WebView::SetResizeBackgroundColor(SkColor resize_background_color) {
@@ -115,18 +147,6 @@ void WebView::SetCrashedOverlayView(View* crashed_overlay_view) {
 
 const char* WebView::GetClassName() const {
   return kViewClassName;
-}
-
-std::unique_ptr<content::WebContents> WebView::SwapWebContents(
-    std::unique_ptr<content::WebContents> new_web_contents) {
-  if (wc_owner_)
-    wc_owner_->SetDelegate(NULL);
-  std::unique_ptr<content::WebContents> old_web_contents(std::move(wc_owner_));
-  wc_owner_ = std::move(new_web_contents);
-  if (wc_owner_)
-    wc_owner_->SetDelegate(this);
-  SetWebContents(wc_owner_.get());
-  return old_web_contents;
 }
 
 void WebView::OnBoundsChanged(const gfx::Rect& previous_bounds) {
@@ -226,6 +246,10 @@ void WebView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   // provided via other means. Providing it here would be redundant.
   // Mark the name as explicitly empty so that accessibility_checks pass.
   node_data->SetNameExplicitlyEmpty();
+  if (child_ax_tree_id_ != ui::AXTreeIDUnknown()) {
+    node_data->AddStringAttribute(ax::mojom::StringAttribute::kChildTreeId,
+                                  child_ax_tree_id_);
+  }
 }
 
 gfx::NativeViewAccessible WebView::GetNativeViewAccessible() {
@@ -249,6 +273,10 @@ bool WebView::EmbedsFullscreenWidget() const {
 ////////////////////////////////////////////////////////////////////////////////
 // WebView, content::WebContentsObserver implementation:
 
+void WebView::RenderViewCreated(content::RenderViewHost* render_view_host) {
+  MaybeEnableAutoResize();
+}
+
 void WebView::RenderViewReady() {
   UpdateCrashedOverlayView();
   NotifyAccessibilityWebContentsChanged();
@@ -261,6 +289,8 @@ void WebView::RenderViewDeleted(content::RenderViewHost* render_view_host) {
 
 void WebView::RenderViewHostChanged(content::RenderViewHost* old_host,
                                     content::RenderViewHost* new_host) {
+  MaybeEnableAutoResize();
+
   if (HasFocus())
     OnFocus();
   NotifyAccessibilityWebContentsChanged();
@@ -302,6 +332,14 @@ void WebView::OnWebContentsFocused(
 void WebView::RenderProcessGone(base::TerminationStatus status) {
   UpdateCrashedOverlayView();
   NotifyAccessibilityWebContentsChanged();
+}
+
+void WebView::ResizeDueToAutoResize(content::WebContents* source,
+                                    const gfx::Size& new_size) {
+  if (source != web_contents())
+    return;
+
+  SetPreferredSize(new_size);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -355,16 +393,8 @@ void WebView::ReattachForFullscreenChange(bool enter_fullscreen) {
 }
 
 void WebView::UpdateCrashedOverlayView() {
-  // TODO(dmazzoni): Fix WebContents::IsCrashed() so we can call that
-  // instead of checking termination status codes.
-  if (web_contents() &&
-      web_contents()->GetCrashedStatus() !=
-          base::TERMINATION_STATUS_NORMAL_TERMINATION &&
-      web_contents()->GetCrashedStatus() !=
-          base::TERMINATION_STATUS_STILL_RUNNING &&
-      crashed_overlay_view_) {
+  if (web_contents() && web_contents()->IsCrashed() && crashed_overlay_view_) {
     SetFocusBehavior(FocusBehavior::NEVER);
-    holder_->SetVisible(false);
     crashed_overlay_view_->SetVisible(true);
     return;
   }
@@ -374,20 +404,23 @@ void WebView::UpdateCrashedOverlayView() {
 
   if (crashed_overlay_view_)
     crashed_overlay_view_->SetVisible(false);
-  holder_->SetVisible(true);
 }
 
 void WebView::NotifyAccessibilityWebContentsChanged() {
-  if (web_contents())
-    NotifyAccessibilityEvent(ax::mojom::Event::kChildrenChanged, false);
+  content::RenderFrameHost* rfh =
+      web_contents() ? web_contents()->GetMainFrame() : nullptr;
+  if (rfh)
+    child_ax_tree_id_ = rfh->GetAXTreeID();
+  else
+    child_ax_tree_id_ = ui::AXTreeIDUnknown();
+  NotifyAccessibilityEvent(ax::mojom::Event::kChildrenChanged, false);
 }
 
-content::WebContents* WebView::CreateWebContents(
-      content::BrowserContext* browser_context) {
-  content::WebContents* contents = NULL;
-  if (ViewsDelegate::GetInstance()) {
-    contents =
-        ViewsDelegate::GetInstance()->CreateWebContents(browser_context, NULL);
+std::unique_ptr<content::WebContents> WebView::CreateWebContents(
+    content::BrowserContext* browser_context) {
+  std::unique_ptr<content::WebContents> contents;
+  if (*GetCreatorForTesting()) {
+    contents = GetCreatorForTesting()->Run(browser_context);
   }
 
   if (!contents) {
@@ -397,6 +430,17 @@ content::WebContents* WebView::CreateWebContents(
   }
 
   return contents;
+}
+
+void WebView::MaybeEnableAutoResize() {
+  if (max_size_.IsEmpty() || !web_contents() ||
+      !web_contents()->GetRenderWidgetHostView()) {
+    return;
+  }
+
+  content::RenderWidgetHostView* render_widget_host_view =
+      web_contents()->GetRenderWidgetHostView();
+  render_widget_host_view->EnableAutoResize(min_size_, max_size_);
 }
 
 }  // namespace views

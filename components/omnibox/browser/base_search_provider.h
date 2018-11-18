@@ -39,15 +39,6 @@ class Value;
 // autocomplete providers utilizing its functionality.
 class BaseSearchProvider : public AutocompleteProvider {
  public:
-  // ID used in creating URLFetcher for default provider's suggest results.
-  static const int kDefaultProviderURLFetcherID;
-
-  // ID used in creating URLFetcher for keyword provider's suggest results.
-  static const int kKeywordProviderURLFetcherID;
-
-  // ID used in creating URLFetcher for deleting suggestion results.
-  static const int kDeletionURLFetcherID;
-
   BaseSearchProvider(AutocompleteProvider::Type type,
                      AutocompleteProviderClient* client);
 
@@ -65,6 +56,15 @@ class BaseSearchProvider : public AutocompleteProvider {
       bool from_keyword_provider,
       const TemplateURL* template_url,
       const SearchTermsData& search_terms_data);
+
+  // Appends specific suggest client based on page |page_classification| to
+  // the additional query params of |search_terms_args| only for Google template
+  // URLs.
+  static void AppendSuggestClientToAdditionalQueryParams(
+      const TemplateURL* template_url,
+      const SearchTermsData& search_terms_data,
+      metrics::OmniboxEventProto::PageClassification page_classification,
+      TemplateURLRef::SearchTermsArgs* search_terms_args);
 
   // AutocompleteProvider:
   void DeleteMatch(const AutocompleteMatch& match) override;
@@ -119,9 +119,9 @@ class BaseSearchProvider : public AutocompleteProvider {
   // |in_keyword_mode| helps guarantee a non-keyword suggestion does not
   // appear as the default match when the user is in keyword mode.
   // |accepted_suggestion| is used to generate Assisted Query Stats.
-  // |append_extra_query_params| should be set if |template_url| is the default
-  // search engine, so the destination URL will contain any
-  // command-line-specified query params.
+  // |append_extra_query_params_from_command_line| should be set if
+  // |template_url| is the default search engine, so the destination URL will
+  // contain any command-line-specified query params.
   static AutocompleteMatch CreateSearchSuggestion(
       AutocompleteProvider* autocomplete_provider,
       const AutocompleteInput& input,
@@ -130,7 +130,7 @@ class BaseSearchProvider : public AutocompleteProvider {
       const TemplateURL* template_url,
       const SearchTermsData& search_terms_data,
       int accepted_suggestion,
-      bool append_extra_query_params);
+      bool append_extra_query_params_from_command_line);
 
   // Returns whether we can send the URL of the current page in any suggest
   // requests.  Doing this requires that all the following hold:
@@ -147,14 +147,8 @@ class BaseSearchProvider : public AutocompleteProvider {
   //   information.  HTTPS URLs may also contain sensitive information, but if
   //   they're on the same domain as the suggest server, then the relevant
   //   entity could have already seen/logged this data.
-  // * The user is OK in principle with sending URLs of current pages to their
-  //   provider.  Today, there is no explicit setting that controls this, but if
-  //   the user has tab sync enabled and tab sync is unencrypted, then they're
-  //   already sending this data to Google for sync purposes.  Thus we use this
-  //   setting as a proxy for "it's OK to send such data".  In the future,
-  //   especially if we want to support suggest providers other than Google, we
-  //   may change this to be a standalone setting or part of some explicit
-  //   general opt-in.
+  // * The user consented to sending URLs of current page to Google and have
+  //   them associated with their Google account.
   static bool CanSendURL(
       const GURL& current_page_url,
       const GURL& suggest_url,

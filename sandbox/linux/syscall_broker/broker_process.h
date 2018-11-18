@@ -74,6 +74,14 @@ class SANDBOX_EXPORT BrokerProcess {
   // Return the PID of the child created by Init().
   int broker_pid() const { return broker_pid_; }
 
+  // Can be used in bpf_dsl::Policy::EvaluateSyscall() implementations to
+  // determine if the system call |sysno| should be trapped and forwarded
+  // to the broker process for handling. This examines the
+  // |allowed_command_set_| iff |fast_check_in_client_| is true. If
+  // the fast checks are disabled, then all possible brokerable system
+  // calls are forwarded to the broker process for handling.
+  bool IsSyscallAllowed(int sysno) const;
+
   // The following methods are used in place of the equivalently-named
   // syscalls by the trap handler. They, in turn, forward the call onto
   // |broker_client_| for further processing. They will all be async signal
@@ -101,9 +109,9 @@ class SANDBOX_EXPORT BrokerProcess {
   // Can be used in place of rmdir().
   int Rmdir(const char* path) const;
 
-  // Can be used in place of stat()/stat64().
-  int Stat(const char* pathname, struct stat* sb) const;
-  int Stat64(const char* pathname, struct stat64* sb) const;
+  // Can be used in place of stat()/stat64()/lstat()/lstat64().
+  int Stat(const char* pathname, bool follow_links, struct stat* sb) const;
+  int Stat64(const char* pathname, bool follow_links, struct stat64* sb) const;
 
   // Can be used in place of unlink().
   int Unlink(const char* path) const;

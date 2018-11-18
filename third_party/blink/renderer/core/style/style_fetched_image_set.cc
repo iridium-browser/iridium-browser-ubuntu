@@ -51,6 +51,15 @@ void StyleFetchedImageSet::Dispose() {
   best_fit_image_ = nullptr;
 }
 
+bool StyleFetchedImageSet::IsEqual(const StyleImage& other) const {
+  if (!other.IsImageResourceSet())
+    return false;
+  const auto& other_image = ToStyleFetchedImageSet(other);
+  if (best_fit_image_ != other_image.best_fit_image_)
+    return false;
+  return url_ == other_image.url_;
+}
+
 WrappedImagePtr StyleFetchedImageSet::Data() const {
   return best_fit_image_.Get();
 }
@@ -94,8 +103,7 @@ FloatSize StyleFetchedImageSet::ImageSize(
   // border-image, etc.)
   //
   // https://drafts.csswg.org/css-images-3/#the-image-orientation
-  FloatSize natural_size(
-      best_fit_image_->IntrinsicSize(kDoNotRespectImageOrientation));
+  FloatSize natural_size(image->Size());
   FloatSize scaled_image_size(ApplyZoom(natural_size, multiplier));
   scaled_image_size.Scale(1 / image_scale_factor_);
   return scaled_image_size;

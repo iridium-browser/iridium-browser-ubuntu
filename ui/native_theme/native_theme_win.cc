@@ -28,7 +28,6 @@
 #include "third_party/skia/include/core/SkRefCnt.h"
 #include "third_party/skia/include/core/SkShader.h"
 #include "third_party/skia/include/core/SkSurface.h"
-#include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/ui_base_switches.h"
 #include "ui/display/win/screen_win.h"
 #include "ui/gfx/color_palette.h"
@@ -158,8 +157,8 @@ void NativeThemeWin::CloseHandles() {
 
 // static
 NativeThemeWin* NativeThemeWin::instance() {
-  CR_DEFINE_STATIC_LOCAL(NativeThemeWin, s_native_theme, ());
-  return &s_native_theme;
+  static base::NoDestructor<NativeThemeWin> s_native_theme;
+  return s_native_theme.get();
 }
 
 gfx::Size NativeThemeWin::GetPartSize(Part part,
@@ -417,26 +416,16 @@ void NativeThemeWin::PaintDirect(SkCanvas* destination_canvas,
 }
 
 SkColor NativeThemeWin::GetSystemColor(ColorId color_id) const {
-  // TODO: Obtain the correct colors using GetSysColor.
-  // Dialogs:
-  const SkColor kDialogBackgroundColor = SkColorSetRGB(251, 251, 251);
-  // FocusableBorder:
-  const SkColor kFocusedBorderColor = SkColorSetRGB(0x4d, 0x90, 0xfe);
-  const SkColor kUnfocusedBorderColor = SkColorSetRGB(0xd9, 0xd9, 0xd9);
+  // TODO: Obtain the correct colors for these using GetSysColor.
   // Button:
-  const SkColor kButtonHoverColor = SkColorSetRGB(6, 45, 117);
-  const SkColor kProminentButtonColorInvert = gfx::kGoogleBlue300;
+  constexpr SkColor kButtonHoverColor = SkColorSetRGB(6, 45, 117);
+  constexpr SkColor kProminentButtonColorInvert = gfx::kGoogleBlue300;
   // MenuItem:
-  const SkColor kMenuSchemeHighlightBackgroundColorInvert =
+  constexpr SkColor kMenuSchemeHighlightBackgroundColorInvert =
       SkColorSetRGB(0x30, 0x30, 0x30);
-  // Table:
-  const SkColor kPositiveTextColor = SkColorSetRGB(0x0b, 0x80, 0x43);
-  const SkColor kNegativeTextColor = SkColorSetRGB(0xc5, 0x39, 0x29);
-  // Results Tables:
-  const SkColor kResultsTableUrlColor = gfx::kGoogleBlue700;
-  const SkColor kResultsTableSelectedUrlColor = SK_ColorWHITE;
   // Label:
-  const SkColor kLabelTextSelectionBackgroundFocusedColor = gfx::kGoogleBlue700;
+  constexpr SkColor kLabelTextSelectionBackgroundFocusedColor =
+      gfx::kGoogleBlue700;
 
   switch (color_id) {
     // Windows
@@ -446,21 +435,12 @@ SkColor NativeThemeWin::GetSystemColor(ColorId color_id) const {
     // Dialogs
     case kColorId_DialogBackground:
     case kColorId_BubbleBackground:
-      if (ui::MaterialDesignController::IsSecondaryUiMaterial())
-        break;
-      return color_utils::IsInvertedColorScheme() ?
-          color_utils::InvertColor(kDialogBackgroundColor) :
-          kDialogBackgroundColor;
+      break;
 
     // FocusableBorder
     case kColorId_FocusedBorderColor:
-      if (ui::MaterialDesignController::IsSecondaryUiMaterial())
-        break;
-      return kFocusedBorderColor;
     case kColorId_UnfocusedBorderColor:
-      if (ui::MaterialDesignController::IsSecondaryUiMaterial())
-        break;
-      return kUnfocusedBorderColor;
+      break;
 
     // Button
     case kColorId_ButtonEnabledColor:
@@ -537,57 +517,11 @@ SkColor NativeThemeWin::GetSystemColor(ColorId color_id) const {
     case kColorId_ResultsTableHoveredBackground:
       return color_utils::AlphaBlend(system_colors_[COLOR_HIGHLIGHT],
                                      system_colors_[COLOR_WINDOW], 0x40);
-    case kColorId_ResultsTableSelectedBackground:
-      return system_colors_[COLOR_HIGHLIGHT];
     case kColorId_ResultsTableNormalText:
       return system_colors_[COLOR_WINDOWTEXT];
-    case kColorId_ResultsTableHoveredText:
-      return color_utils::GetReadableColor(
-          system_colors_[COLOR_WINDOWTEXT],
-          GetSystemColor(kColorId_ResultsTableHoveredBackground));
-    case kColorId_ResultsTableSelectedText:
-      return system_colors_[COLOR_HIGHLIGHTTEXT];
-    case kColorId_ResultsTableNormalDimmedText:
+    case kColorId_ResultsTableDimmedText:
       return color_utils::AlphaBlend(system_colors_[COLOR_WINDOWTEXT],
                                      system_colors_[COLOR_WINDOW], 0x80);
-    case kColorId_ResultsTableHoveredDimmedText:
-      return color_utils::AlphaBlend(
-          system_colors_[COLOR_WINDOWTEXT],
-          GetSystemColor(kColorId_ResultsTableHoveredBackground), 0x80);
-    case kColorId_ResultsTableSelectedDimmedText:
-      return color_utils::AlphaBlend(system_colors_[COLOR_HIGHLIGHTTEXT],
-                                     system_colors_[COLOR_HIGHLIGHT], 0x80);
-    case kColorId_ResultsTableNormalUrl:
-      return color_utils::GetReadableColor(kResultsTableUrlColor,
-                                            system_colors_[COLOR_WINDOW]);
-    case kColorId_ResultsTableHoveredUrl:
-      return color_utils::PickContrastingColor(
-          kResultsTableUrlColor, kResultsTableSelectedUrlColor,
-          GetSystemColor(kColorId_ResultsTableHoveredBackground));
-    case kColorId_ResultsTableSelectedUrl:
-      return color_utils::PickContrastingColor(
-          kResultsTableUrlColor, kResultsTableSelectedUrlColor,
-          system_colors_[COLOR_HIGHLIGHT]);
-    case kColorId_ResultsTablePositiveText:
-      return color_utils::GetReadableColor(kPositiveTextColor,
-                                           system_colors_[COLOR_WINDOW]);
-    case kColorId_ResultsTablePositiveHoveredText:
-      return color_utils::GetReadableColor(
-          kPositiveTextColor,
-          GetSystemColor(kColorId_ResultsTableHoveredBackground));
-    case kColorId_ResultsTablePositiveSelectedText:
-      return color_utils::GetReadableColor(kPositiveTextColor,
-                                           system_colors_[COLOR_HIGHLIGHT]);
-    case kColorId_ResultsTableNegativeText:
-      return color_utils::GetReadableColor(kNegativeTextColor,
-                                           system_colors_[COLOR_WINDOW]);
-    case kColorId_ResultsTableNegativeHoveredText:
-      return color_utils::GetReadableColor(
-          kNegativeTextColor,
-          GetSystemColor(kColorId_ResultsTableHoveredBackground));
-    case kColorId_ResultsTableNegativeSelectedText:
-      return color_utils::GetReadableColor(kNegativeTextColor,
-                                           system_colors_[COLOR_HIGHLIGHT]);
     default:
       break;
   }
@@ -680,7 +614,7 @@ void NativeThemeWin::PaintIndirect(cc::PaintCanvas* destination_canvas,
   // To work-around this, mark all pixels with a placeholder value, to detect
   // which pixels get touched by the paint operation. After paint, set any
   // pixels that have alpha 0 to opaque and placeholders to fully-transparent.
-  const SkColor placeholder = SkColorSetARGB(1, 0, 0, 0);
+  constexpr SkColor placeholder = SkColorSetARGB(1, 0, 0, 0);
   offscreen_canvas->clear(placeholder);
 
   // Offset destination rects to have origin (0,0).
@@ -722,7 +656,9 @@ void NativeThemeWin::PaintIndirect(cc::PaintCanvas* destination_canvas,
     }
   }
 
-  destination_canvas->drawBitmap(offscreen_bitmap, rect.x(), rect.y());
+  destination_canvas->drawImage(
+      cc::PaintImage::CreateFromBitmap(std::move(offscreen_bitmap)), rect.x(),
+      rect.y());
 }
 
 HRESULT NativeThemeWin::GetThemePartSize(ThemeName theme_name,

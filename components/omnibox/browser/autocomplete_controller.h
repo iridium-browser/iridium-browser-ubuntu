@@ -23,6 +23,7 @@
 #include "components/omnibox/browser/autocomplete_result.h"
 
 class AutocompleteControllerDelegate;
+class DocumentProvider;
 class HistoryURLProvider;
 class KeywordProvider;
 class SearchProvider;
@@ -152,6 +153,7 @@ class AutocompleteController : public AutocompleteProviderListener,
   FRIEND_TEST_ALL_PREFIXES(OmniboxViewViewsTest, AccessiblePopup);
   FRIEND_TEST_ALL_PREFIXES(OmniboxViewViewsTest, MaintainCursorAfterFocusCycle);
   FRIEND_TEST_ALL_PREFIXES(OmniboxPopupModelTest, SetSelectedLine);
+  FRIEND_TEST_ALL_PREFIXES(OmniboxPopupModelTest, TestFocusFixing);
 
   // Updates |result_| to reflect the current provider state and fires
   // notifications.  If |regenerate_result| then we clear the result
@@ -215,6 +217,8 @@ class AutocompleteController : public AutocompleteProviderListener,
   // A list of all providers.
   Providers providers_;
 
+  DocumentProvider* document_provider_;
+
   HistoryURLProvider* history_url_provider_;
 
   KeywordProvider* keyword_provider_;
@@ -261,6 +265,9 @@ class AutocompleteController : public AutocompleteProviderListener,
   // Are we in Start()? This is used to avoid updating |result_| and sending
   // notifications until Start() has been invoked on all providers.
   bool in_start_;
+
+  // Indicate whether it is the first query since startup.
+  bool first_query_;
 
   // True if the signal predicting a likely search has already been sent to the
   // service worker context during the current input session. False on

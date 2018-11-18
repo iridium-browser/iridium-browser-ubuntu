@@ -16,16 +16,6 @@ class KURL;
 namespace mojo {
 
 template <>
-struct EnumTraits<::blink::mojom::RequestContextType,
-                  ::blink::WebURLRequest::RequestContext> {
-  static ::blink::mojom::RequestContextType ToMojom(
-      ::blink::WebURLRequest::RequestContext input);
-
-  static bool FromMojom(::blink::mojom::RequestContextType input,
-                        ::blink::WebURLRequest::RequestContext* out);
-};
-
-template <>
 struct StructTraits<::blink::mojom::FetchAPIRequestDataView,
                     ::blink::WebServiceWorkerRequest> {
   static ::network::mojom::FetchRequestMode mode(
@@ -38,7 +28,7 @@ struct StructTraits<::blink::mojom::FetchAPIRequestDataView,
     return request.IsMainResourceLoad();
   }
 
-  static ::blink::WebURLRequest::RequestContext request_context_type(
+  static ::blink::mojom::RequestContextType request_context_type(
       const ::blink::WebServiceWorkerRequest& request) {
     return request.GetRequestContext();
   }
@@ -55,11 +45,7 @@ struct StructTraits<::blink::mojom::FetchAPIRequestDataView,
   static WTF::HashMap<WTF::String, WTF::String> headers(
       const ::blink::WebServiceWorkerRequest&);
 
-  static WTF::String blob_uuid(const ::blink::WebServiceWorkerRequest&);
-
-  static uint64_t blob_size(const ::blink::WebServiceWorkerRequest&);
-
-  static blink::mojom::blink::BlobPtr blob(
+  static scoped_refptr<::blink::BlobDataHandle> blob(
       const ::blink::WebServiceWorkerRequest&);
 
   static const ::blink::Referrer& referrer(
@@ -88,6 +74,11 @@ struct StructTraits<::blink::mojom::FetchAPIRequestDataView,
 
   static bool is_reload(const ::blink::WebServiceWorkerRequest& request) {
     return request.IsReload();
+  }
+
+  static bool is_history_navigation(
+      const ::blink::WebServiceWorkerRequest& request) {
+    return request.IsHistoryNavigation();
   }
 
   static bool Read(::blink::mojom::FetchAPIRequestDataView,

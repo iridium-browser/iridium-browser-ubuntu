@@ -35,16 +35,15 @@ class SVGAnimatedViewBoxRect : public SVGAnimatedRect {
     return new SVGAnimatedViewBoxRect(context_element);
   }
 
-  SVGParsingError SetBaseValueAsString(const String&) override;
+  SVGParsingError AttributeChanged(const String&) override;
 
  protected:
   SVGAnimatedViewBoxRect(SVGElement* context_element)
       : SVGAnimatedRect(context_element, SVGNames::viewBoxAttr) {}
 };
 
-SVGParsingError SVGAnimatedViewBoxRect::SetBaseValueAsString(
-    const String& value) {
-  SVGParsingError parse_status = SVGAnimatedRect::SetBaseValueAsString(value);
+SVGParsingError SVGAnimatedViewBoxRect::AttributeChanged(const String& value) {
+  SVGParsingError parse_status = SVGAnimatedRect::AttributeChanged(value);
 
   if (parse_status == SVGParseStatus::kNoError &&
       (BaseValue()->Width() < 0 || BaseValue()->Height() < 0)) {
@@ -71,7 +70,7 @@ void SVGFitToViewBox::Trace(blink::Visitor* visitor) {
 
 AffineTransform SVGFitToViewBox::ViewBoxToViewTransform(
     const FloatRect& view_box_rect,
-    SVGPreserveAspectRatio* preserve_aspect_ratio,
+    const SVGPreserveAspectRatio* preserve_aspect_ratio,
     float view_width,
     float view_height) {
   if (!view_box_rect.Width() || !view_box_rect.Height() || !view_width ||

@@ -12,7 +12,6 @@
 #include <vector>
 
 #include "base/macros.h"
-#include "base/memory/linked_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/synchronization/lock.h"
@@ -29,7 +28,7 @@
 #include "chrome/browser/chromeos/printing/external_printers.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
-#include "components/signin/core/account_id/account_id.h"
+#include "components/account_id/account_id.h"
 #include "components/user_manager/user.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -69,6 +68,9 @@ class ChromeUserManagerImpl
   // Registers user manager preferences.
   static void RegisterPrefs(PrefRegistrySimple* registry);
 
+  // Resets platform specific delegates that were set for public accounts.
+  static void ResetPublicAccountDelegatesForTesting();
+
   // UserManagerInterface implementation:
   MultiProfileUserController* GetMultiProfileUserController() override;
   UserImageManager* GetUserImageManager(const AccountId& account_id) override;
@@ -80,6 +82,10 @@ class ChromeUserManagerImpl
 
   // UserManager implementation:
   void Shutdown() override;
+  void UserLoggedIn(const AccountId& account_id,
+                    const std::string& user_id_hash,
+                    bool browser_restart,
+                    bool is_child) override;
   user_manager::UserList GetUsersAllowedForMultiProfile() const override;
   user_manager::UserList GetUsersAllowedForSupervisedUsersCreation()
       const override;
@@ -96,12 +102,6 @@ class ChromeUserManagerImpl
   bool IsGuestSessionAllowed() const override;
   bool IsGaiaUserAllowed(const user_manager::User& user) const override;
   bool IsUserAllowed(const user_manager::User& user) const override;
-  void UpdateLoginState(const user_manager::User* active_user,
-                        const user_manager::User* primary_user,
-                        bool is_current_user_owner) const override;
-  bool GetPlatformKnownUserId(const std::string& user_email,
-                              const std::string& gaia_id,
-                              AccountId* out_account_id) const override;
   const AccountId& GetGuestAccountId() const override;
   bool IsFirstExecAfterBoot() const override;
   void AsyncRemoveCryptohome(const AccountId& account_id) const override;
@@ -149,7 +149,7 @@ class ChromeUserManagerImpl
   // ChromeUserManager implementation:
   bool IsEnterpriseManaged() const override;
   void SetUserAffiliation(
-      const std::string& user_email,
+      const AccountId& account_id,
       const AffiliationIDSet& user_affiliation_ids) override;
   bool ShouldReportUser(const std::string& user_id) const override;
 
@@ -190,7 +190,8 @@ class ChromeUserManagerImpl
   friend class WallpaperManager;
   friend class WallpaperManagerTest;
 
-  using UserImageManagerMap = std::map<AccountId, linked_ptr<UserImageManager>>;
+  using UserImageManagerMap =
+      std::map<AccountId, std::unique_ptr<UserImageManager>>;
 
   ChromeUserManagerImpl();
 

@@ -31,7 +31,7 @@
 #include "url/gurl.h"
 
 #if defined(OS_MACOSX)
-#include "chrome/browser/safe_browsing/download_protection/disk_image_type_sniffer_mac.h"
+#include "chrome/common/safe_browsing/disk_image_type_sniffer_mac.h"
 #include "chrome/services/file_util/public/cpp/sandboxed_dmg_analyzer_mac.h"
 #endif
 
@@ -57,7 +57,10 @@ class CheckClientDownloadRequest
   bool ShouldSampleUnsupportedFile(const base::FilePath& filename);
   void Start();
   void StartTimeout();
-  void Cancel();
+
+  // |download_destroyed| indicates if cancellation is due to the destruction of
+  // the download item.
+  void Cancel(bool download_destroyed);
   void OnDownloadDestroyed(download::DownloadItem* download) override;
   void OnURLLoaderComplete(std::unique_ptr<std::string> response_body);
   static bool IsSupportedDownload(const download::DownloadItem& item,
@@ -130,6 +133,9 @@ class CheckClientDownloadRequest
 
 #if defined(OS_MACOSX)
   std::unique_ptr<std::vector<uint8_t>> disk_image_signature_;
+  google::protobuf::RepeatedPtrField<
+      ClientDownloadRequest_DetachedCodeSignature>
+      detached_code_signatures_;
 #endif
 
   ClientDownloadRequest_SignatureInfo signature_info_;
@@ -161,6 +167,7 @@ class CheckClientDownloadRequest
   bool skipped_certificate_whitelist_;
   bool is_extended_reporting_;
   bool is_incognito_;
+  bool is_under_advanced_protection_;
   // This task tracker is used for posting the URL whitelist check to the IO
   // thread. The posted task will be cancelled if DownloadItem gets destroyed.
   base::CancelableTaskTracker cancelable_task_tracker_;

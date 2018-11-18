@@ -14,7 +14,6 @@
 #include "base/base_paths.h"
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/json/json_file_value_serializer.h"
@@ -23,7 +22,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/path_service.h"
 #include "base/strings/string_util.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
@@ -92,7 +91,8 @@ base::FilePath GetPlatformDir(const base::FilePath& base_path) {
 
 // Tell the rest of the world where to find the platform-specific PNaCl files.
 void OverrideDirPnaclComponent(const base::FilePath& base_path) {
-  PathService::Override(chrome::DIR_PNACL_COMPONENT, GetPlatformDir(base_path));
+  base::PathService::Override(chrome::DIR_PNACL_COMPONENT,
+                              GetPlatformDir(base_path));
 }
 
 base::DictionaryValue* ReadJSONManifest(const base::FilePath& manifest_path) {
@@ -227,7 +227,7 @@ void PnaclComponentInstallerPolicy::ComponentReady(
     std::unique_ptr<base::DictionaryValue> manifest) {
   CheckVersionCompatiblity(version);
   base::PostTaskWithTraits(
-      FROM_HERE, {base::TaskPriority::BACKGROUND, base::MayBlock()},
+      FROM_HERE, {base::TaskPriority::BEST_EFFORT, base::MayBlock()},
       base::BindOnce(&OverrideDirPnaclComponent, install_dir));
 }
 

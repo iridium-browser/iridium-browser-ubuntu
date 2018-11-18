@@ -17,8 +17,10 @@
 #include "media/mojo/interfaces/audio_logging.mojom.h"
 #include "media/mojo/interfaces/audio_output_stream.mojom.h"
 #include "mojo/public/cpp/bindings/binding_set.h"
-#include "services/audio/group_coordinator.h"
+#include "services/audio/loopback_coordinator.h"
 #include "services/audio/public/mojom/stream_factory.mojom.h"
+#include "services/audio/stream_monitor_coordinator.h"
+#include "services/audio/traced_service_ref.h"
 
 namespace base {
 class UnguessableToken;
@@ -27,17 +29,13 @@ class UnguessableToken;
 namespace media {
 class AudioManager;
 class AudioParameters;
-class UserInputMonitor;
 }  // namespace media
-
-namespace service_manager {
-class ServiceContextRef;
-}
 
 namespace audio {
 
 class InputStream;
 class LocalMuter;
+class LoopbackStream;
 class OutputStream;
 
 // This class is used to provide the StreamFactory interface. It will typically
@@ -49,8 +47,7 @@ class StreamFactory final : public mojom::StreamFactory {
   explicit StreamFactory(media::AudioManager* audio_manager);
   ~StreamFactory() final;
 
-  void Bind(mojom::StreamFactoryRequest request,
-            std::unique_ptr<service_manager::ServiceContextRef> context_ref);
+  void Bind(mojom::StreamFactoryRequest request, TracedServiceRef context_ref);
 
   // StreamFactory implementation.
   void CreateInputStream(media::mojom::AudioInputStreamRequest stream_request,
@@ -61,19 +58,33 @@ class StreamFactory final : public mojom::StreamFactory {
                          const media::AudioParameters& params,
                          uint32_t shared_memory_count,
                          bool enable_agc,
+                         mojo::ScopedSharedBufferHandle key_press_count_buffer,
+                         mojom::AudioProcessingConfigPtr processing_config,
                          CreateInputStreamCallback created_callback) final;
+
+  void AssociateInputAndOutputForAec(
+      const base::UnguessableToken& input_stream_id,
+      const std::string& output_device_id) final;
 
   void CreateOutputStream(
       media::mojom::AudioOutputStreamRequest stream_request,
-      media::mojom::AudioOutputStreamClientPtr client,
       media::mojom::AudioOutputStreamObserverAssociatedPtrInfo observer_info,
       media::mojom::AudioLogPtr log,
       const std::string& output_device_id,
       const media::AudioParameters& params,
       const base::UnguessableToken& group_id,
+      const base::Optional<base::UnguessableToken>& processing_id,
       CreateOutputStreamCallback created_callback) final;
   void BindMuter(mojom::LocalMuterAssociatedRequest request,
                  const base::UnguessableToken& group_id) final;
+  void CreateLoopbackStream(
+      media::mojom::AudioInputStreamRequest stream_request,
+      media::mojom::AudioInputStreamClientPtr client,
+      media::mojom::AudioInputStreamObserverPtr observer,
+      const media::AudioParameters& params,
+      uint32_t shared_memory_count,
+      const base::UnguessableToken& group_id,
+      CreateLoopbackStreamCallback created_callback) final;
 
  private:
   using InputStreamSet =
@@ -84,19 +95,19 @@ class StreamFactory final : public mojom::StreamFactory {
   void DestroyInputStream(InputStream* stream);
   void DestroyOutputStream(OutputStream* stream);
   void DestroyMuter(LocalMuter* muter);
+  void DestroyLoopbackStream(LoopbackStream* stream);
 
   SEQUENCE_CHECKER(owning_sequence_);
 
   media::AudioManager* const audio_manager_;
-  media::UserInputMonitor* user_input_monitor_;
 
-  mojo::BindingSet<mojom::StreamFactory,
-                   std::unique_ptr<service_manager::ServiceContextRef>>
-      bindings_;
+  mojo::BindingSet<mojom::StreamFactory, TracedServiceRef> bindings_;
 
   // Order of the following members is important for a clean shutdown.
-  GroupCoordinator coordinator_;
+  LoopbackCoordinator coordinator_;
   std::vector<std::unique_ptr<LocalMuter>> muters_;
+  std::vector<std::unique_ptr<LoopbackStream>> loopback_streams_;
+  StreamMonitorCoordinator stream_monitor_coordinator_;
   InputStreamSet input_streams_;
   OutputStreamSet output_streams_;
 

@@ -67,8 +67,7 @@ TEST(RTDyldObjectLinkingLayerTest, TestSetProcessAllSections) {
   bool DebugSectionSeen = false;
   auto MM = std::make_shared<MemoryManagerWrapper>(DebugSectionSeen);
 
-  SymbolStringPool SSP;
-  ExecutionSession ES(SSP);
+  ExecutionSession ES;
 
   RTDyldObjectLinkingLayer ObjLayer(ES, [&MM](VModuleKey) {
     return RTDyldObjectLinkingLayer::Resources{
@@ -124,8 +123,7 @@ TEST_F(RTDyldObjectLinkingLayerExecutionTest, NoDuplicateFinalization) {
   if (!SupportsJIT)
     return;
 
-  SymbolStringPool SSP;
-  ExecutionSession ES(SSP);
+  ExecutionSession ES;
 
   auto MM = std::make_shared<SectionMemoryManagerWrapper>();
 
@@ -186,13 +184,13 @@ TEST_F(RTDyldObjectLinkingLayerExecutionTest, NoDuplicateFinalization) {
   };
 
   Resolvers[K2] = createSymbolResolver(
-      [&](SymbolFlagsMap &SymbolFlags, const SymbolNameSet &Symbols) {
+      [&](const SymbolNameSet &Symbols) {
         return cantFail(
-            lookupFlagsWithLegacyFn(SymbolFlags, Symbols, LegacyLookup));
+            getResponsibilitySetWithLegacyFn(Symbols, LegacyLookup));
       },
       [&](std::shared_ptr<AsynchronousSymbolQuery> Query,
           const SymbolNameSet &Symbols) {
-        return lookupWithLegacyFn(*Query, Symbols, LegacyLookup);
+        return lookupWithLegacyFn(ES, *Query, Symbols, LegacyLookup);
       });
 
   cantFail(ObjLayer.addObject(K2, std::move(Obj2)));
@@ -209,8 +207,7 @@ TEST_F(RTDyldObjectLinkingLayerExecutionTest, NoPrematureAllocation) {
   if (!SupportsJIT)
     return;
 
-  SymbolStringPool SSP;
-  ExecutionSession ES(SSP);
+  ExecutionSession ES;
 
   auto MM = std::make_shared<SectionMemoryManagerWrapper>();
 
@@ -271,8 +268,7 @@ TEST_F(RTDyldObjectLinkingLayerExecutionTest, NoPrematureAllocation) {
 }
 
 TEST_F(RTDyldObjectLinkingLayerExecutionTest, TestNotifyLoadedSignature) {
-  SymbolStringPool SSP;
-  ExecutionSession ES(SSP);
+  ExecutionSession ES;
   RTDyldObjectLinkingLayer ObjLayer(
       ES,
       [](VModuleKey) {

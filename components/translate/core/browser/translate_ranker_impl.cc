@@ -82,7 +82,7 @@ const char kDefaultTranslateRankerModelURL[] =
 #elif defined(USE_AURA)
 const char kDefaultTranslateRankerModelURL[] =
     "https://www.gstatic.com/chrome/intelligence/assist/ranker/models/"
-    "translate/translate_ranker_20180123.model";
+    "translate/2017/03/translate_ranker_model_20170329.pb.bin";
 #else
 const char kDefaultTranslateRankerModelURL[] =
     "https://www.gstatic.com/chrome/intelligence/assist/ranker/models/"
@@ -168,8 +168,8 @@ TranslateRankerImpl::TranslateRankerImpl(const base::FilePath& model_path,
         base::Bind(&ValidateModel),
         base::Bind(&TranslateRankerImpl::OnModelAvailable,
                    weak_ptr_factory_.GetWeakPtr()),
-        TranslateDownloadManager::GetInstance()->request_context(), model_path,
-        model_url, kUmaPrefix);
+        TranslateDownloadManager::GetInstance()->url_loader_factory(),
+        model_path, model_url, kUmaPrefix);
     // Kick off the initial load from cache.
     model_loader_->NotifyOfRankerActivity();
   }

@@ -16,7 +16,7 @@ import org.junit.runner.RunWith;
 import org.chromium.android_webview.AwContentsStatics;
 import org.chromium.android_webview.AwWebContentsObserver;
 import org.chromium.base.test.util.Feature;
-import org.chromium.content.browser.test.util.TestCallbackHelperContainer;
+import org.chromium.content_public.browser.test.util.TestCallbackHelperContainer;
 import org.chromium.ui.base.PageTransition;
 
 /**
@@ -44,9 +44,10 @@ public class AwWebContentsObserverTest {
         mUnreachableWebDataUrl = AwContentsStatics.getUnreachableWebDataUrl();
         // AwWebContentsObserver constructor must be run on the UI thread.
         InstrumentationRegistry.getInstrumentation().runOnMainSync(
-                () -> mWebContentsObserver = new AwWebContentsObserver(
-                        mTestContainerView.getContentViewCore().getWebContents(),
-                        mTestContainerView.getAwContents(), mContentsClient));
+                ()
+                        -> mWebContentsObserver =
+                                   new AwWebContentsObserver(mTestContainerView.getWebContents(),
+                                           mTestContainerView.getAwContents(), mContentsClient));
     }
 
     @Test
@@ -98,16 +99,18 @@ public class AwWebContentsObserverTest {
         boolean hasCommitted = true;
         boolean isSameDocument = true;
         boolean fragmentNavigation = true;
+        boolean isRendererInitiated = true;
+        boolean isDownload = false;
         int errorCode = 0;
         String errorDescription = "";
         int httpStatusCode = 200;
         callCount = onPageFinishedHelper.getCallCount();
         mWebContentsObserver.didFinishNavigation(EXAMPLE_URL, isInMainFrame, isErrorPage,
-                hasCommitted, !isSameDocument, !fragmentNavigation, PageTransition.TYPED, errorCode,
-                errorDescription, httpStatusCode);
+                hasCommitted, !isSameDocument, !fragmentNavigation, !isRendererInitiated,
+                isDownload, PageTransition.TYPED, errorCode, errorDescription, httpStatusCode);
         mWebContentsObserver.didFinishNavigation(EXAMPLE_URL_WITH_FRAGMENT, isInMainFrame,
-                isErrorPage, hasCommitted, isSameDocument, fragmentNavigation, PageTransition.TYPED,
-                errorCode, errorDescription, httpStatusCode);
+                isErrorPage, hasCommitted, isSameDocument, fragmentNavigation, isRendererInitiated,
+                isDownload, PageTransition.TYPED, errorCode, errorDescription, httpStatusCode);
         onPageFinishedHelper.waitForCallback(callCount);
         Assert.assertEquals("onPageFinished should be called for main frame fragment navigations.",
                 callCount + 1, onPageFinishedHelper.getCallCount());
@@ -116,8 +119,8 @@ public class AwWebContentsObserverTest {
 
         callCount = onPageFinishedHelper.getCallCount();
         mWebContentsObserver.didFinishNavigation(EXAMPLE_URL, isInMainFrame, isErrorPage,
-                hasCommitted, !isSameDocument, !fragmentNavigation, PageTransition.TYPED, errorCode,
-                errorDescription, httpStatusCode);
+                hasCommitted, !isSameDocument, !fragmentNavigation, !isRendererInitiated,
+                isDownload, PageTransition.TYPED, errorCode, errorDescription, httpStatusCode);
         mWebContentsObserver.didFinishLoad(frameId, SYNC_URL, mainFrame);
         mWebContentsObserver.didStopLoading(SYNC_URL);
         onPageFinishedHelper.waitForCallback(callCount);
@@ -141,6 +144,8 @@ public class AwWebContentsObserverTest {
         boolean hasCommitted = true;
         boolean isSameDocument = true;
         boolean fragmentNavigation = false;
+        boolean isRendererInitiated = false;
+        boolean isDownload = false;
         int errorCode = 0;
         String errorDescription = "";
         int httpStatusCode = 200;
@@ -149,8 +154,8 @@ public class AwWebContentsObserverTest {
 
         int callCount = doUpdateVisitedHistoryHelper.getCallCount();
         mWebContentsObserver.didFinishNavigation(nullUrl, isInMainFrame, !isErrorPage, hasCommitted,
-                !isSameDocument, fragmentNavigation, PageTransition.TYPED, errorCode,
-                errorDescription, httpStatusCode);
+                !isSameDocument, fragmentNavigation, isRendererInitiated, isDownload,
+                PageTransition.TYPED, errorCode, errorDescription, httpStatusCode);
         doUpdateVisitedHistoryHelper.waitForCallback(callCount);
         Assert.assertEquals("doUpdateVisitedHistory should be called for any url.", callCount + 1,
                 doUpdateVisitedHistoryHelper.getCallCount());
@@ -160,8 +165,8 @@ public class AwWebContentsObserverTest {
 
         callCount = doUpdateVisitedHistoryHelper.getCallCount();
         mWebContentsObserver.didFinishNavigation(EXAMPLE_URL, isInMainFrame, isErrorPage,
-                hasCommitted, !isSameDocument, fragmentNavigation, PageTransition.TYPED, errorCode,
-                errorDescription, httpStatusCode);
+                hasCommitted, !isSameDocument, fragmentNavigation, isRendererInitiated, isDownload,
+                PageTransition.TYPED, errorCode, errorDescription, httpStatusCode);
         doUpdateVisitedHistoryHelper.waitForCallback(callCount);
         Assert.assertEquals("doUpdateVisitedHistory should be called for any url.", callCount + 1,
                 doUpdateVisitedHistoryHelper.getCallCount());
@@ -171,11 +176,11 @@ public class AwWebContentsObserverTest {
 
         callCount = doUpdateVisitedHistoryHelper.getCallCount();
         mWebContentsObserver.didFinishNavigation(nullUrl, isInMainFrame, isErrorPage, hasCommitted,
-                !isSameDocument, fragmentNavigation, PageTransition.TYPED, errorCode,
-                errorDescription, httpStatusCode);
+                !isSameDocument, fragmentNavigation, isRendererInitiated, isDownload,
+                PageTransition.TYPED, errorCode, errorDescription, httpStatusCode);
         mWebContentsObserver.didFinishNavigation(EXAMPLE_URL, !isInMainFrame, isErrorPage,
-                hasCommitted, !isSameDocument, fragmentNavigation, PageTransition.TYPED, errorCode,
-                errorDescription, httpStatusCode);
+                hasCommitted, !isSameDocument, fragmentNavigation, isRendererInitiated, isDownload,
+                PageTransition.TYPED, errorCode, errorDescription, httpStatusCode);
         doUpdateVisitedHistoryHelper.waitForCallback(callCount);
         Assert.assertEquals("doUpdateVisitedHistory should only be called for the main frame.",
                 callCount + 1, doUpdateVisitedHistoryHelper.getCallCount());
@@ -185,8 +190,8 @@ public class AwWebContentsObserverTest {
 
         callCount = doUpdateVisitedHistoryHelper.getCallCount();
         mWebContentsObserver.didFinishNavigation(EXAMPLE_URL, isInMainFrame, isErrorPage,
-                hasCommitted, isSameDocument, !fragmentNavigation, PageTransition.RELOAD, errorCode,
-                errorDescription, httpStatusCode);
+                hasCommitted, isSameDocument, !fragmentNavigation, !isRendererInitiated, isDownload,
+                PageTransition.RELOAD, errorCode, errorDescription, httpStatusCode);
         doUpdateVisitedHistoryHelper.waitForCallback(callCount);
         Assert.assertEquals("doUpdateVisitedHistory should be called for reloads.", callCount + 1,
                 doUpdateVisitedHistoryHelper.getCallCount());

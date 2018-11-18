@@ -10,7 +10,7 @@ import("//third_party/blink/renderer/modules/modules_idl_files.gni")
 bindings_modules_v8_output_dir = "$bindings_output_dir/modules/v8"
 
 bindings_modules_generated_init_partial_interfaces_file =
-    "$bindings_modules_v8_output_dir/initPartialInterfacesInModules.cpp"
+    "$bindings_modules_v8_output_dir/init_partial_interfaces_in_modules.cc"
 
 # TODO(bashi): It would be better to have a way to update this list automatically.
 bindings_modules_generated_union_type_files = [
@@ -50,8 +50,12 @@ bindings_modules_generated_union_type_files = [
   "$bindings_modules_v8_output_dir/idb_object_store_or_idb_index_or_idb_cursor.h",
   "$bindings_modules_v8_output_dir/long_or_constrain_long_range.cc",
   "$bindings_modules_v8_output_dir/long_or_constrain_long_range.h",
+  "$bindings_modules_v8_output_dir/media_stream_track_or_string.cc",
+  "$bindings_modules_v8_output_dir/media_stream_track_or_string.h",
   "$bindings_modules_v8_output_dir/offscreen_rendering_context.cc",
   "$bindings_modules_v8_output_dir/offscreen_rendering_context.h",
+  "$bindings_modules_v8_output_dir/path_2d_or_string.cc",
+  "$bindings_modules_v8_output_dir/path_2d_or_string.h",
   "$bindings_modules_v8_output_dir/password_credential_data_or_html_form_element.cc",
   "$bindings_modules_v8_output_dir/password_credential_data_or_html_form_element.h",
   "$bindings_modules_v8_output_dir/point_2d_sequence_or_constrain_point_2d_parameters.cc",
@@ -72,6 +76,8 @@ bindings_modules_generated_union_type_files = [
   "$bindings_modules_v8_output_dir/string_or_unsigned_long.h",
   "$bindings_modules_v8_output_dir/unsigned_long_or_unsigned_long_sequence.cc",
   "$bindings_modules_v8_output_dir/unsigned_long_or_unsigned_long_sequence.h",
+  "$bindings_modules_v8_output_dir/usv_string_or_long.cc",
+  "$bindings_modules_v8_output_dir/usv_string_or_long.h",
   "$bindings_modules_v8_output_dir/webgl_rendering_context_or_webgl2_rendering_context.cc",
   "$bindings_modules_v8_output_dir/webgl_rendering_context_or_webgl2_rendering_context.h",
 ]
@@ -120,4 +126,4 @@ generated_modules_callback_function_files = [
 ]
 
 bindings_generated_v8_context_snapshot_external_references_file =
-    "$bindings_modules_v8_output_dir/V8ContextSnapshotExternalReferences.cpp"
+    "$bindings_modules_v8_output_dir/v8_context_snapshot_external_references.cc"

@@ -61,11 +61,6 @@ public class SuggestionsEventReporterBridge implements SuggestionsEventReporter 
             case KnownCategories.BOOKMARKS:
                 NewTabPageUma.recordAction(NewTabPageUma.ACTION_OPENED_BOOKMARKS_MANAGER);
                 break;
-            // MORE button in both categories leads to the recent tabs manager
-            case KnownCategories.FOREIGN_TABS:
-            case KnownCategories.RECENT_TABS:
-                NewTabPageUma.recordAction(NewTabPageUma.ACTION_OPENED_RECENT_TABS_MANAGER);
-                break;
             case KnownCategories.DOWNLOADS:
                 NewTabPageUma.recordAction(NewTabPageUma.ACTION_OPENED_DOWNLOADS_MANAGER);
                 break;

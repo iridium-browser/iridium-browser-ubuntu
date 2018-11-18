@@ -7,8 +7,8 @@
  *  in the file PATENTS.  All contributing project authors may
  *  be found in the AUTHORS file in the root of the source tree.
  */
-#ifndef VPX_VP8CX_H_
-#define VPX_VP8CX_H_
+#ifndef VPX_VPX_VP8CX_H_
+#define VPX_VPX_VP8CX_H_
 
 /*!\defgroup vp8_encoder WebM VP8/VP9 Encoder
  * \ingroup vp8
@@ -620,6 +620,46 @@ enum vp8e_enc_control_id {
    * Supported in codecs: VP9
    */
   VP9E_SET_SVC_FRAME_DROP_LAYER,
+
+  /*!\brief Codec control function to get the refresh and reference flags and
+   * the buffer indices, up to the last encoded spatial layer.
+   *
+   * Supported in codecs: VP9
+   */
+  VP9E_GET_SVC_REF_FRAME_CONFIG,
+
+  /*!\brief Codec control function to enable/disable use of golden reference as
+   * a second temporal reference for SVC. Only used when inter-layer prediction
+   * is disabled on INTER frames.
+   *
+   * 0: Off, 1: Enabled (default)
+   *
+   * Supported in codecs: VP9
+   */
+  VP9E_SET_SVC_GF_TEMPORAL_REF,
+
+  /*!\brief Codec control function to enable spatial layer sync frame, for any
+   * spatial layer. Enabling it for layer k means spatial layer k will disable
+   * all temporal prediction, but keep the inter-layer prediction. It will
+   * refresh any temporal reference buffer for that layer, and reset the
+   * temporal layer for the superframe to 0. Setting the layer sync for base
+   * spatial layer forces a key frame. Default is off (0) for all spatial
+   * layers. Spatial layer sync flag is reset to 0 after each encoded layer,
+   * so when control is invoked it is only used for the current superframe.
+   *
+   * 0: Off (default), 1: Enabled
+   *
+   * Supported in codecs: VP9
+   */
+  VP9E_SET_SVC_SPATIAL_LAYER_SYNC,
+
+  /*!\brief Codec control function to enable temporal dependency model.
+   *
+   * Vp9 allows the encoder to run temporal dependency model and use it to
+   * improve the compression performance. To enable, set this parameter to be
+   * 1. The default value is set to be 1.
+   */
+  VP9E_SET_TPL,
 };
 
 /*!\brief vpx 1-D scaling mode
@@ -744,8 +784,10 @@ typedef enum { VP8_TUNE_PSNR, VP8_TUNE_SSIM } vp8e_tuning;
  *
  */
 typedef struct vpx_svc_layer_id {
-  int spatial_layer_id;  /**< Spatial layer id number. */
+  int spatial_layer_id; /**< First spatial layer to start encoding. */
+  // TODO(jianj): Deprecated, to be removed.
   int temporal_layer_id; /**< Temporal layer id number. */
+  int temporal_layer_id_per_spatial[VPX_SS_MAX_LAYERS]; /**< Temp layer id. */
 } vpx_svc_layer_id_t;
 
 /*!\brief vp9 svc frame flag parameters.
@@ -757,10 +799,18 @@ typedef struct vpx_svc_layer_id {
  *
  */
 typedef struct vpx_svc_ref_frame_config {
-  int frame_flags[VPX_TS_MAX_LAYERS]; /**< Frame flags. */
-  int lst_fb_idx[VPX_TS_MAX_LAYERS];  /**< Last buffer index. */
-  int gld_fb_idx[VPX_TS_MAX_LAYERS];  /**< Golden buffer index. */
-  int alt_fb_idx[VPX_TS_MAX_LAYERS];  /**< Altref buffer index. */
+  int lst_fb_idx[VPX_SS_MAX_LAYERS];         /**< Last buffer index. */
+  int gld_fb_idx[VPX_SS_MAX_LAYERS];         /**< Golden buffer index. */
+  int alt_fb_idx[VPX_SS_MAX_LAYERS];         /**< Altref buffer index. */
+  int update_buffer_slot[VPX_SS_MAX_LAYERS]; /**< Update reference frames. */
+  // TODO(jianj): Remove update_last/golden/alt_ref, these are deprecated.
+  int update_last[VPX_SS_MAX_LAYERS];       /**< Update last. */
+  int update_golden[VPX_SS_MAX_LAYERS];     /**< Update golden. */
+  int update_alt_ref[VPX_SS_MAX_LAYERS];    /**< Update altref. */
+  int reference_last[VPX_SS_MAX_LAYERS];    /**< Last as eference. */
+  int reference_golden[VPX_SS_MAX_LAYERS];  /**< Golden as reference. */
+  int reference_alt_ref[VPX_SS_MAX_LAYERS]; /**< Altref as reference. */
+  int64_t duration[VPX_SS_MAX_LAYERS];      /**< Duration per spatial layer. */
 } vpx_svc_ref_frame_config_t;
 
 /*!\brief VP9 svc frame dropping mode.
@@ -771,7 +821,8 @@ typedef struct vpx_svc_ref_frame_config {
 typedef enum {
   CONSTRAINED_LAYER_DROP,
   /**< Upper layers are constrained to drop if current layer drops. */
-  LAYER_DROP, /**< Any spatial layer can drop. */
+  LAYER_DROP,           /**< Any spatial layer can drop. */
+  FULL_SUPERFRAME_DROP, /**< Only full superframe can drop. */
 } SVC_LAYER_DROP_MODE;
 
 /*!\brief vp9 svc frame dropping parameters.
@@ -784,8 +835,19 @@ typedef enum {
 typedef struct vpx_svc_frame_drop {
   int framedrop_thresh[VPX_SS_MAX_LAYERS]; /**< Frame drop thresholds */
   SVC_LAYER_DROP_MODE
-  framedrop_mode; /**< Layer-based or constrained dropping. */
+  framedrop_mode;      /**< Layer-based or constrained dropping. */
+  int max_consec_drop; /**< Maximum consecutive drops, for any layer. */
 } vpx_svc_frame_drop_t;
+
+/*!\brief vp9 svc spatial layer sync parameters.
+ *
+ * This defines the spatial layer sync flag, defined per spatial layer.
+ *
+ */
+typedef struct vpx_svc_spatial_layer_sync {
+  int spatial_layer_sync[VPX_SS_MAX_LAYERS]; /**< Sync layer flags */
+  int base_layer_intra_only; /**< Flag for setting Intra-only frame on base */
+} vpx_svc_spatial_layer_sync_t;
 
 /*!\cond */
 /*!\brief VP8 encoder control function parameter type
@@ -845,6 +907,9 @@ VPX_CTRL_USE_TYPE(VP9E_SET_TILE_COLUMNS, int)
 #define VPX_CTRL_VP9E_SET_TILE_COLUMNS
 VPX_CTRL_USE_TYPE(VP9E_SET_TILE_ROWS, int)
 #define VPX_CTRL_VP9E_SET_TILE_ROWS
+
+VPX_CTRL_USE_TYPE(VP9E_SET_TPL, int)
+#define VPX_CTRL_VP9E_SET_TPL
 
 VPX_CTRL_USE_TYPE(VP8E_GET_LAST_QUANTIZER, int *)
 #define VPX_CTRL_VP8E_GET_LAST_QUANTIZER
@@ -927,10 +992,20 @@ VPX_CTRL_USE_TYPE(VP9E_SET_SVC_INTER_LAYER_PRED, unsigned int)
 VPX_CTRL_USE_TYPE(VP9E_SET_SVC_FRAME_DROP_LAYER, vpx_svc_frame_drop_t *)
 #define VPX_CTRL_VP9E_SET_SVC_FRAME_DROP_LAYER
 
+VPX_CTRL_USE_TYPE(VP9E_GET_SVC_REF_FRAME_CONFIG, vpx_svc_ref_frame_config_t *)
+#define VPX_CTRL_VP9E_GET_SVC_REF_FRAME_CONFIG
+
+VPX_CTRL_USE_TYPE(VP9E_SET_SVC_GF_TEMPORAL_REF, unsigned int)
+#define VPX_CTRL_VP9E_SET_SVC_GF_TEMPORAL_REF
+
+VPX_CTRL_USE_TYPE(VP9E_SET_SVC_SPATIAL_LAYER_SYNC,
+                  vpx_svc_spatial_layer_sync_t *)
+#define VPX_CTRL_VP9E_SET_SVC_SPATIAL_LAYER_SYNC
+
 /*!\endcond */
 /*! @} - end defgroup vp8_encoder */
 #ifdef __cplusplus
 }  // extern "C"
 #endif
 
-#endif  // VPX_VP8CX_H_
+#endif  // VPX_VPX_VP8CX_H_

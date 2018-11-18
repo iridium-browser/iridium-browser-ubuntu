@@ -36,7 +36,6 @@
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/core/dom/context_lifecycle_observer.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
 #include "third_party/blink/renderer/modules/event_target_modules.h"
 #include "third_party/blink/renderer/modules/webmidi/midi_accessor.h"
 #include "third_party/blink/renderer/platform/bindings/trace_wrapper_member.h"
@@ -78,9 +77,7 @@ class MIDIPort : public EventTargetWithInlineData,
   void SetState(midi::mojom::PortState);
   ConnectionState GetConnection() const { return connection_; }
 
-  virtual void Trace(blink::Visitor*);
-
-  virtual void TraceWrappers(const ScriptWrappableVisitor*) const;
+  void Trace(blink::Visitor*) override;
 
   DEFINE_ATTRIBUTE_EVENT_LISTENER(statechange);
 
@@ -115,7 +112,6 @@ class MIDIPort : public EventTargetWithInlineData,
   void CloseAsynchronously(ScriptPromiseResolver*);
 
   ScriptPromise Accept(ScriptState*);
-  ScriptPromise Reject(ScriptState*, ExceptionCode, const String& message);
 
   void SetStates(midi::mojom::PortState, ConnectionState);
 

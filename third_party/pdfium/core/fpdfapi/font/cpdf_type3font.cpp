@@ -15,6 +15,7 @@
 #include "core/fpdfapi/parser/cpdf_dictionary.h"
 #include "core/fpdfapi/parser/cpdf_stream.h"
 #include "core/fxcrt/fx_system.h"
+#include "third_party/base/ptr_util.h"
 #include "third_party/base/stl_util.h"
 
 namespace {
@@ -23,7 +24,9 @@ constexpr int kMaxType3FormLevel = 4;
 
 }  // namespace
 
-CPDF_Type3Font::CPDF_Type3Font() {
+CPDF_Type3Font::CPDF_Type3Font(CPDF_Document* pDocument,
+                               CPDF_Dictionary* pFontDict)
+    : CPDF_SimpleFont(pDocument, pFontDict) {
   memset(m_CharWidthL, 0, sizeof(m_CharWidthL));
 }
 
@@ -43,7 +46,7 @@ CPDF_Type3Font* CPDF_Type3Font::AsType3Font() {
 
 bool CPDF_Type3Font::Load() {
   m_pFontResources = m_pFontDict->GetDictFor("Resources");
-  CPDF_Array* pMatrix = m_pFontDict->GetArrayFor("FontMatrix");
+  const CPDF_Array* pMatrix = m_pFontDict->GetArrayFor("FontMatrix");
   float xscale = 1.0f;
   float yscale = 1.0f;
   if (pMatrix) {
@@ -52,7 +55,7 @@ bool CPDF_Type3Font::Load() {
     yscale = m_FontMatrix.d;
   }
 
-  CPDF_Array* pBBox = m_pFontDict->GetArrayFor("FontBBox");
+  const CPDF_Array* pBBox = m_pFontDict->GetArrayFor("FontBBox");
   if (pBBox) {
     CFX_FloatRect box(
         pBBox->GetNumberAt(0) * xscale, pBBox->GetNumberAt(1) * yscale,
@@ -64,7 +67,7 @@ bool CPDF_Type3Font::Load() {
   static constexpr size_t kCharLimit = FX_ArraySize(m_CharWidthL);
   int StartChar = m_pFontDict->GetIntegerFor("FirstChar");
   if (StartChar >= 0 && static_cast<size_t>(StartChar) < kCharLimit) {
-    CPDF_Array* pWidthArray = m_pFontDict->GetArrayFor("Widths");
+    const CPDF_Array* pWidthArray = m_pFontDict->GetArrayFor("Widths");
     if (pWidthArray) {
       size_t count = std::min(pWidthArray->GetCount(), kCharLimit);
       count = std::min(count, kCharLimit - StartChar);
@@ -76,9 +79,8 @@ bool CPDF_Type3Font::Load() {
     }
   }
   m_pCharProcs = m_pFontDict->GetDictFor("CharProcs");
-  CPDF_Object* pEncoding = m_pFontDict->GetDirectObjectFor("Encoding");
-  if (pEncoding)
-    LoadPDFEncoding(pEncoding, m_BaseEncoding, &m_CharNames, false, false);
+  if (m_pFontDict->GetDirectObjectFor("Encoding"))
+    LoadPDFEncoding(false, false);
   return true;
 }
 
@@ -115,8 +117,7 @@ CPDF_Type3Char* CPDF_Type3Font::LoadChar(uint32_t charcode) {
   // can change as a result. Thus after it returns, check the cache again for
   // a cache hit.
   m_CharLoadingDepth++;
-  pNewChar->form()->ParseContentWithParams(nullptr, nullptr, pNewChar.get(),
-                                           nullptr);
+  pNewChar->form()->ParseContent(nullptr, nullptr, pNewChar.get(), nullptr);
   m_CharLoadingDepth--;
   it = m_CacheMap.find(charcode);
   if (it != m_CacheMap.end())

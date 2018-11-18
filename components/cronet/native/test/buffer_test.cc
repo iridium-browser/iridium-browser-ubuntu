@@ -73,7 +73,7 @@ TEST_F(BufferTest, TestInitWithAlloc) {
 }
 
 #if defined(ADDRESS_SANITIZER) || defined(MEMORY_SANITIZER) || \
-    defined(OS_FUCHSIA)
+    defined(THREAD_SANITIZER) || defined(OS_FUCHSIA)
 // ASAN and MSAN malloc by default triggers crash instead of returning null on
 // failure. Fuchsia malloc() also crashes on allocation failure in some kernel
 // builds.
@@ -133,7 +133,6 @@ TEST_F(BufferTest, TestCronetBufferAsync) {
   ASSERT_TRUE(on_destroy_called());
   Cronet_Executor_Destroy(executor);
   Cronet_BufferCallback_Destroy(buffer_callback);
-  Cronet_Runnable_Destroy(runnable);
 }
 
 }  // namespace

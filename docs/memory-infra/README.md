@@ -114,7 +114,6 @@ amount of memory used.
 
  * [Adding MemoryInfra Tracing to a Component](adding_memory_infra_tracing.md)
  * [GPU Memory Tracing](probe-gpu.md)
- * [Heap Profiler Internals](heap_profiler_internals.md)
  * [Heap Profiling with MemoryInfra](heap_profiler.md)
  * [Startup Tracing with MemoryInfra](memory_infra_startup_tracing.md)
 
@@ -141,9 +140,8 @@ contextual data:
    event? Which subsystem increased? Did memory not go down as expected after
    closing a tab? Which other threads were active during a bloat?
  * **Works out of the box on desktop and mobile.**
-   No recompilations with unmaintained `GYP_DEFINES`, no time-consuming
-   symbolizations stages. All the logic is already into Chrome, ready to dump at
-   any time.
+    No recompilations, no time-consuming symbolizations stages. All the
+   logic is already in Chrome, ready to dump at any time.
  * **The same technology is used for telemetry and the ChromePerf dashboard.**
    See [the slides][chromeperf-slides] and take a look at
    [some ChromePerf dashboards][chromeperf] and

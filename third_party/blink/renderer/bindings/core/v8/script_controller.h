@@ -39,7 +39,6 @@
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/loader/fetch/access_control_status.h"
 #include "third_party/blink/renderer/platform/loader/fetch/script_fetch_options.h"
-#include "third_party/blink/renderer/platform/wtf/hash_map.h"
 #include "third_party/blink/renderer/platform/wtf/noncopyable.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_position.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
@@ -90,20 +89,21 @@ class CORE_EXPORT ScriptController final
       ExecuteScriptPolicy = kDoNotExecuteScriptWhenScriptsDisabled);
   void ExecuteScriptInMainWorld(
       const ScriptSourceCode&,
-      const KURL& base_url = KURL(),
-      const ScriptFetchOptions& = ScriptFetchOptions(),
-      AccessControlStatus = kNotSharableCrossOrigin);
+      const KURL& base_url,
+      AccessControlStatus,
+      const ScriptFetchOptions& = ScriptFetchOptions());
   v8::Local<v8::Value> ExecuteScriptInMainWorldAndReturnValue(
       const ScriptSourceCode&,
-      const KURL& base_url = KURL(),
+      const KURL& base_url,
+      AccessControlStatus,
       const ScriptFetchOptions& = ScriptFetchOptions(),
       ExecuteScriptPolicy = kDoNotExecuteScriptWhenScriptsDisabled);
   v8::Local<v8::Value> ExecuteScriptAndReturnValue(
       v8::Local<v8::Context>,
       const ScriptSourceCode&,
-      const KURL& base_url = KURL(),
-      const ScriptFetchOptions& = ScriptFetchOptions(),
-      AccessControlStatus = kNotSharableCrossOrigin);
+      const KURL& base_url,
+      AccessControlStatus,
+      const ScriptFetchOptions& = ScriptFetchOptions());
 
   // Executes JavaScript in an isolated world. The script gets its own global
   // scope, its own prototypes for intrinsic JavaScript objects (String, Array,
@@ -111,11 +111,11 @@ class CORE_EXPORT ScriptController final
   //
   // If an isolated world with the specified ID already exists, it is reused.
   // Otherwise, a new world is created.
-  //
-  // FIXME: We don't want to support multiple scripts.
-  void ExecuteScriptInIsolatedWorld(int world_id,
-                                    const HeapVector<ScriptSourceCode>& sources,
-                                    Vector<v8::Local<v8::Value>>* results);
+  v8::Local<v8::Value> ExecuteScriptInIsolatedWorld(
+      int world_id,
+      const ScriptSourceCode&,
+      const KURL& base_url,
+      AccessControlStatus access_control_status);
 
   // Returns true if argument is a JavaScript URL.
   bool ExecuteScriptIfJavaScriptURL(const KURL&, Element*);
@@ -160,8 +160,8 @@ class CORE_EXPORT ScriptController final
 
   v8::Local<v8::Value> EvaluateScriptInMainWorld(const ScriptSourceCode&,
                                                  const KURL& base_url,
-                                                 const ScriptFetchOptions&,
                                                  AccessControlStatus,
+                                                 const ScriptFetchOptions&,
                                                  ExecuteScriptPolicy);
 
   const Member<LocalFrame> frame_;

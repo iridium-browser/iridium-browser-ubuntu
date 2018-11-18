@@ -7,8 +7,6 @@
 #ifndef XFA_FXFA_PARSER_CXFA_NODELOCALE_H_
 #define XFA_FXFA_PARSER_CXFA_NODELOCALE_H_
 
-#include <memory>
-
 #include "core/fxcrt/locale_iface.h"
 #include "xfa/fxfa/fxfa_basic.h"
 
@@ -16,15 +14,18 @@ class CXFA_Node;
 
 WideString XFA_PatternToString(FX_LOCALENUMSUBCATEGORY category);
 
-class CXFA_NodeLocale : public LocaleIface {
+class CXFA_NodeLocale final : public LocaleIface {
  public:
   explicit CXFA_NodeLocale(CXFA_Node* pLocale);
   ~CXFA_NodeLocale() override;
 
   // LocaleIface
   WideString GetName() const override;
-  WideString GetNumbericSymbol(FX_LOCALENUMSYMBOL eType) const override;
-
+  WideString GetDecimalSymbol() const override;
+  WideString GetGroupingSymbol() const override;
+  WideString GetPercentSymbol() const override;
+  WideString GetMinusSymbol() const override;
+  WideString GetCurrencySymbol() const override;
   WideString GetDateTimeSymbols() const override;
   WideString GetMonthName(int32_t nMonth, bool bAbbr) const override;
   WideString GetDayName(int32_t nWeek, bool bAbbr) const override;

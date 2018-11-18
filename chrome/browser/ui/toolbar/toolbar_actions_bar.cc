@@ -35,6 +35,7 @@
 #include "extensions/browser/runtime_data.h"
 #include "extensions/common/extension.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/base/ui_base_features.h"
 #include "ui/gfx/image/image_skia.h"
 
 namespace {
@@ -103,7 +104,6 @@ ToolbarActionsBar::ToolbarActionsBar(ToolbarActionsBarDelegate* delegate,
       suppress_layout_(false),
       suppress_animation_(true),
       should_check_extension_bubble_(!main_bar),
-      is_drag_in_progress_(false),
       popped_out_action_(nullptr),
       is_popped_out_sticky_(false),
       is_showing_bubble_(false),
@@ -136,13 +136,7 @@ void ToolbarActionsBar::RegisterProfilePrefs(
 
 // static
 gfx::Size ToolbarActionsBar::GetIconAreaSize() {
-#if defined(OS_MACOSX)
-  // On the Mac, the spec is a 24x24 button in a 28x28 space.
-  constexpr gfx::Size kIconAreaSize(24, 24);
-#else
-  constexpr gfx::Size kIconAreaSize(28, 28);
-#endif
-  return kIconAreaSize;
+  return gfx::Size(28, 28);
 }
 
 gfx::Size ToolbarActionsBar::GetViewSize() const {
@@ -254,7 +248,8 @@ bool ToolbarActionsBar::NeedsOverflow() const {
   // popped out action (because the action will pop back into overflow when the
   // menu opens).
   return GetEndIndexInBounds() != toolbar_actions_.size() ||
-         is_drag_in_progress_ || (popped_out_action_ && !is_popped_out_sticky_);
+         is_drag_in_progress() ||
+         (popped_out_action_ && !is_popped_out_sticky_);
 }
 
 gfx::Rect ToolbarActionsBar::GetFrameForIndex(
@@ -387,11 +382,13 @@ void ToolbarActionsBar::OnResizeComplete(int width) {
   model_->SetVisibleIconCount(resized_count);
 }
 
-void ToolbarActionsBar::OnDragStarted() {
-  // All drag-and-drop commands should go to the main bar.
-  ToolbarActionsBar* main_bar = in_overflow_mode() ? main_bar_ : this;
-  DCHECK(!main_bar->is_drag_in_progress_);
-  main_bar->is_drag_in_progress_ = true;
+void ToolbarActionsBar::OnDragStarted(size_t index_of_dragged_item) {
+  if (in_overflow_mode()) {
+    main_bar_->OnDragStarted(index_of_dragged_item);
+    return;
+  }
+  DCHECK(!is_drag_in_progress());
+  index_of_dragged_item_ = index_of_dragged_item;
 }
 
 void ToolbarActionsBar::OnDragEnded() {
@@ -401,8 +398,8 @@ void ToolbarActionsBar::OnDragEnded() {
     return;
   }
 
-  DCHECK(is_drag_in_progress_);
-  is_drag_in_progress_ = false;
+  DCHECK(is_drag_in_progress());
+  index_of_dragged_item_.reset();
   for (ToolbarActionsBarObserver& observer : observers_)
     observer.OnToolbarActionDragDone();
 }
@@ -426,6 +423,11 @@ void ToolbarActionsBar::OnDragDrop(int dragged_index,
                          dropped_index);
   if (delta)
     model_->SetVisibleIconCount(model_->visible_icon_count() + delta);
+}
+
+const base::Optional<size_t> ToolbarActionsBar::IndexOfDraggedItem() const {
+  DCHECK(!in_overflow_mode());
+  return index_of_dragged_item_;
 }
 
 void ToolbarActionsBar::OnAnimationEnded() {
@@ -539,6 +541,15 @@ void ToolbarActionsBar::ShowToolbarActionBubble(
   } else if (bubble->ShouldShow()) {
     // We check ShouldShow() above since we show the bubble asynchronously, and
     // it might no longer have been valid.
+
+    // If needed, close the overflow menu before showing the bubble.
+    ToolbarActionViewController* controller =
+        GetActionForId(bubble->GetAnchorActionId());
+    bool close_overflow_menu =
+        controller && !IsActionVisibleOnMainBar(controller);
+    if (close_overflow_menu)
+      delegate_->CloseOverflowMenuIfOpen();
+
     is_showing_bubble_ = true;
     delegate_->ShowToolbarActionBubble(std::move(bubble));
   }
@@ -550,6 +561,10 @@ void ToolbarActionsBar::ShowToolbarActionBubbleAsync(
       FROM_HERE,
       base::BindOnce(&ToolbarActionsBar::ShowToolbarActionBubble,
                      weak_ptr_factory_.GetWeakPtr(), std::move(bubble)));
+}
+
+bool ToolbarActionsBar::CloseOverflowMenuIfOpen() {
+  return delegate_->CloseOverflowMenuIfOpen();
 }
 
 void ToolbarActionsBar::MaybeShowExtensionBubble() {
@@ -621,7 +636,7 @@ void ToolbarActionsBar::OnToolbarActionLoadFailed() {
 }
 
 void ToolbarActionsBar::OnToolbarActionRemoved(const std::string& action_id) {
-  ToolbarActions::iterator iter = toolbar_actions_.begin();
+  auto iter = toolbar_actions_.begin();
   while (iter != toolbar_actions_.end() && (*iter)->GetId() != action_id)
     ++iter;
 

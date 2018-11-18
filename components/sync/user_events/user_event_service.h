@@ -19,8 +19,8 @@ class ModelTypeSyncBridge;
 
 class UserEventService : public KeyedService {
  public:
-  UserEventService();
-  ~UserEventService() override;
+  UserEventService() = default;
+  ~UserEventService() override = default;
 
   // Records a given event to be reported. Relevant settings will be checked to
   // verify user events should be emitted and this will no-op if the the
@@ -31,7 +31,7 @@ class UserEventService : public KeyedService {
       const sync_pb::UserEventSpecifics& specifics) = 0;
 
   // Returns the underlying Sync integration point.
-  virtual base::WeakPtr<ModelTypeSyncBridge> GetSyncBridge() = 0;
+  virtual ModelTypeSyncBridge* GetSyncBridge() = 0;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(UserEventService);

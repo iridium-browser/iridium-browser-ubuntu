@@ -12,6 +12,7 @@
 
 #include <utility>
 
+#include "absl/memory/memory.h"
 #include "api/audio_codecs/builtin_audio_decoder_factory.h"
 #include "api/audio_codecs/builtin_audio_encoder_factory.h"
 #include "api/peerconnectioninterface.h"
@@ -20,8 +21,6 @@
 #include "media/engine/internalencoderfactory.h"
 #include "media/engine/webrtcmediaengine.h"
 #include "modules/audio_processing/include/audio_processing.h"
-#include "pc/test/fakeperiodicvideocapturer.h"
-#include "rtc_base/ptr_util.h"
 #include "sdk/android/native_api/jni/java_types.h"
 #include "sdk/android/native_api/video/wrapper.h"
 
@@ -54,7 +53,7 @@ class CreateOfferObserver : public webrtc::CreateSessionDescriptionObserver {
       rtc::scoped_refptr<webrtc::PeerConnectionInterface> pc);
 
   void OnSuccess(webrtc::SessionDescriptionInterface* desc) override;
-  void OnFailure(const std::string& error) override;
+  void OnFailure(webrtc::RTCError error) override;
 
  private:
   const rtc::scoped_refptr<webrtc::PeerConnectionInterface> pc_;
@@ -70,16 +69,18 @@ class SetLocalSessionDescriptionObserver
     : public webrtc::SetSessionDescriptionObserver {
  public:
   void OnSuccess() override;
-  void OnFailure(const std::string& error) override;
+  void OnFailure(webrtc::RTCError error) override;
 };
 
 }  // namespace
 
 AndroidCallClient::AndroidCallClient()
-    : call_started_(false), pc_observer_(rtc::MakeUnique<PCObserver>(this)) {
+    : call_started_(false), pc_observer_(absl::make_unique<PCObserver>(this)) {
   thread_checker_.DetachFromThread();
   CreatePeerConnectionFactory();
 }
+
+AndroidCallClient::~AndroidCallClient() = default;
 
 void AndroidCallClient::Call(JNIEnv* env,
                              const webrtc::JavaRef<jobject>& cls,
@@ -97,16 +98,8 @@ void AndroidCallClient::Call(JNIEnv* env,
   local_sink_ = webrtc::JavaToNativeVideoSink(env, local_sink.obj());
   remote_sink_ = webrtc::JavaToNativeVideoSink(env, remote_sink.obj());
 
-  // The fake video source wants to be created on the same thread as it is
-  // destroyed. It is destroyed on the signaling thread so we have to invoke
-  // here.
-  // TODO(sakal): Get picture from camera?
-  video_source_ = pcf_->CreateVideoSource(
-      signaling_thread_
-          ->Invoke<std::unique_ptr<webrtc::FakePeriodicVideoCapturer>>(
-              RTC_FROM_HERE, [&] {
-                return rtc::MakeUnique<webrtc::FakePeriodicVideoCapturer>();
-              }));
+  video_source_ = webrtc::CreateJavaVideoSource(env, signaling_thread_.get(),
+                                                false /* is_screencast */);
 
   CreatePeerConnection();
   Connect();
@@ -138,6 +131,15 @@ void AndroidCallClient::Delete(JNIEnv* env,
   delete this;
 }
 
+webrtc::ScopedJavaLocalRef<jobject>
+AndroidCallClient::GetJavaVideoCapturerObserver(
+    JNIEnv* env,
+    const webrtc::JavaRef<jobject>& cls) {
+  RTC_DCHECK_RUN_ON(&thread_checker_);
+
+  return video_source_->GetJavaVideoCapturerObserver(env);
+}
+
 void AndroidCallClient::CreatePeerConnectionFactory() {
   network_thread_ = rtc::Thread::CreateWithSocketServer();
   network_thread_->SetName("network_thread", nullptr);
@@ -155,8 +157,8 @@ void AndroidCallClient::CreatePeerConnectionFactory() {
       cricket::WebRtcMediaEngineFactory::Create(
           nullptr /* adm */, webrtc::CreateBuiltinAudioEncoderFactory(),
           webrtc::CreateBuiltinAudioDecoderFactory(),
-          rtc::MakeUnique<webrtc::InternalEncoderFactory>(),
-          rtc::MakeUnique<webrtc::InternalDecoderFactory>(),
+          absl::make_unique<webrtc::InternalEncoderFactory>(),
+          absl::make_unique<webrtc::InternalDecoderFactory>(),
           nullptr /* audio_mixer */, webrtc::AudioProcessingBuilder().Create());
   RTC_LOG(LS_INFO) << "Media engine created: " << media_engine.get();
 
@@ -260,8 +262,9 @@ void CreateOfferObserver::OnSuccess(webrtc::SessionDescriptionInterface* desc) {
       new rtc::RefCountedObject<SetRemoteSessionDescriptionObserver>());
 }
 
-void CreateOfferObserver::OnFailure(const std::string& error) {
-  RTC_LOG(LS_INFO) << "Failed to create offer: " << error;
+void CreateOfferObserver::OnFailure(webrtc::RTCError error) {
+  RTC_LOG(LS_INFO) << "Failed to create offer: " << ToString(error.type())
+                   << ": " << error.message();
 }
 
 void SetRemoteSessionDescriptionObserver::OnSetRemoteDescriptionComplete(
@@ -273,14 +276,15 @@ void SetLocalSessionDescriptionObserver::OnSuccess() {
   RTC_LOG(LS_INFO) << "Set local description success!";
 }
 
-void SetLocalSessionDescriptionObserver::OnFailure(const std::string& error) {
-  RTC_LOG(LS_INFO) << "Set local description failure: " << error;
+void SetLocalSessionDescriptionObserver::OnFailure(webrtc::RTCError error) {
+  RTC_LOG(LS_INFO) << "Set local description failure: "
+                   << ToString(error.type()) << ": " << error.message();
 }
-
-}  // namespace webrtc_examples
 
 static jlong JNI_CallClient_CreateClient(
     JNIEnv* env,
     const webrtc::JavaParamRef<jclass>& cls) {
   return webrtc::NativeToJavaPointer(new webrtc_examples::AndroidCallClient());
 }
+
+}  // namespace webrtc_examples

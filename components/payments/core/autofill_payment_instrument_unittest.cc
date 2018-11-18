@@ -22,6 +22,9 @@
 #include "components/payments/core/test_payment_request_delegate.h"
 #include "components/strings/grit/components_strings.h"
 #include "net/url_request/url_request_test_util.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
+#include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
+#include "services/network/test/test_url_loader_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -56,21 +59,19 @@ class FakePaymentInstrumentDelegate : public PaymentInstrument::Delegate {
   bool on_instrument_details_error_called_ = false;
 };
 
-class FakePaymentRequestDelegate
-    : public PaymentRequestDelegate,
-      public autofill::payments::PaymentsClientUnmaskDelegate {
+class FakePaymentRequestDelegate : public PaymentRequestDelegate {
  public:
   FakePaymentRequestDelegate()
       : locale_("en-US"),
         last_committed_url_("https://shop.com"),
         personal_data_("en-US"),
-        request_context_(new net::TestURLRequestContextGetter(
-            base::ThreadTaskRunnerHandle::Get())),
-        payments_client_(request_context_.get(),
-                         nullptr,
-                         nullptr,
-                         this,
-                         nullptr),
+        test_shared_loader_factory_(
+            base::MakeRefCounted<network::WeakWrapperSharedURLLoaderFactory>(
+                &test_url_loader_factory_)),
+        payments_client_(test_shared_loader_factory_,
+                         /*pref_service=*/nullptr,
+                         /*identity_manager=*/nullptr,
+                         /*account_info_getter=*/nullptr),
         full_card_request_(&autofill_client_,
                            &payments_client_,
                            &personal_data_) {}
@@ -120,7 +121,8 @@ class FakePaymentRequestDelegate
   const GURL last_committed_url_;
   autofill::TestAddressNormalizer address_normalizer_;
   autofill::PersonalDataManager personal_data_;
-  scoped_refptr<net::TestURLRequestContextGetter> request_context_;
+  network::TestURLLoaderFactory test_url_loader_factory_;
+  scoped_refptr<network::SharedURLLoaderFactory> test_shared_loader_factory_;
   autofill::TestAutofillClient autofill_client_;
   autofill::payments::PaymentsClient payments_client_;
   autofill::payments::FullCardRequest full_card_request_;

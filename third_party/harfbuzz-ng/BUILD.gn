@@ -46,6 +46,7 @@ if (use_system_harfbuzz) {
 
     sources = [
       "src/src/hb-atomic-private.hh",
+      "src/src/hb-blob-private.hh",
       "src/src/hb-blob.cc",
       "src/src/hb-blob.h",
       "src/src/hb-buffer-deserialize-json.hh",
@@ -54,7 +55,8 @@ if (use_system_harfbuzz) {
       "src/src/hb-buffer-serialize.cc",
       "src/src/hb-buffer.cc",
       "src/src/hb-buffer.h",
-      "src/src/hb-cache-private.hh",
+      "src/src/hb-buffer.hh",
+      "src/src/hb-cache.hh",
       "src/src/hb-common.cc",
       "src/src/hb-common.h",
       "src/src/hb-debug.hh",
@@ -77,6 +79,8 @@ if (use_system_harfbuzz) {
       "src/src/hb-ot-color-cbdt-table.hh",
       "src/src/hb-ot-color-colr-table.hh",
       "src/src/hb-ot-color-cpal-table.hh",
+      "src/src/hb-ot-face.cc",
+      "src/src/hb-ot-face.h",
       "src/src/hb-ot-font.cc",
       "src/src/hb-ot-font.h",
       "src/src/hb-ot-hdmx-table.hh",
@@ -122,7 +126,6 @@ if (use_system_harfbuzz) {
       "src/src/hb-ot-shape-complex-myanmar.cc",
       "src/src/hb-ot-shape-complex-private.hh",
       "src/src/hb-ot-shape-complex-thai.cc",
-      "src/src/hb-ot-shape-complex-tibetan.cc",
       "src/src/hb-ot-shape-complex-use-machine.hh",
       "src/src/hb-ot-shape-complex-use-private.hh",
       "src/src/hb-ot-shape-complex-use-table.cc",
@@ -157,12 +160,14 @@ if (use_system_harfbuzz) {
       "src/src/hb-shaper-list.hh",
       "src/src/hb-shaper-private.hh",
       "src/src/hb-shaper.cc",
+      "src/src/hb-static.cc",
       "src/src/hb-string-array.hh",
       "src/src/hb-subset-glyf.hh",
       "src/src/hb-subset-plan.h",
       "src/src/hb-subset-private.hh",
       "src/src/hb-subset.h",
-      "src/src/hb-unicode-private.hh",
+      "src/src/hb-subset.hh",
+      "src/src/hb-unicode-emoji-table.hh",
       "src/src/hb-unicode.cc",
       "src/src/hb-unicode.h",
       "src/src/hb-utf-private.hh",
@@ -176,6 +181,7 @@ if (use_system_harfbuzz) {
       "HAVE_ICU",
       "HAVE_ICU_BUILTIN",
       "HAVE_INTEL_ATOMIC_PRIMITIVES",
+      "HB_NO_MMAP",
     ]
 
     if (is_component_build) {

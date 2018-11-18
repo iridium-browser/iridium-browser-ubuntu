@@ -5,9 +5,11 @@
 #include "content/browser/renderer_host/media/peer_connection_tracker_host.h"
 
 #include "base/power_monitor/power_monitor.h"
+#include "base/task/post_task.h"
 #include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/webrtc/webrtc_internals.h"
 #include "content/common/media/peer_connection_tracker_messages.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/webrtc_event_logger.h"
 
 namespace content {
@@ -62,23 +64,26 @@ void PeerConnectionTrackerHost::OnChannelClosing() {
 void PeerConnectionTrackerHost::OnAddPeerConnection(
     const PeerConnectionInfo& info) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
   WebRTCInternals* webrtc_internals = WebRTCInternals::GetInstance();
   if (webrtc_internals) {
     webrtc_internals->OnAddPeerConnection(
         render_process_id_, peer_pid(), info.lid, info.url,
         info.rtc_configuration, info.constraints);
   }
+
   WebRtcEventLogger* const logger = WebRtcEventLogger::Get();
   if (logger) {
     logger->PeerConnectionAdded(render_process_id_, info.lid,
-                                info.peer_connection_id);
+                                info.peer_connection_id,
+                                base::OnceCallback<void(bool)>());
   }
 }
 
 void PeerConnectionTrackerHost::RemovePeerConnection(int lid) {
   if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, {BrowserThread::UI},
         base::BindOnce(&PeerConnectionTrackerHost::RemovePeerConnection, this,
                        lid));
     return;
@@ -89,7 +94,8 @@ void PeerConnectionTrackerHost::RemovePeerConnection(int lid) {
   }
   WebRtcEventLogger* const logger = WebRtcEventLogger::Get();
   if (logger) {
-    logger->PeerConnectionRemoved(render_process_id_, lid);
+    logger->PeerConnectionRemoved(render_process_id_, lid,
+                                  base::OnceCallback<void(bool)>());
   }
 }
 
@@ -97,8 +103,8 @@ void PeerConnectionTrackerHost::UpdatePeerConnection(int lid,
                                                      const std::string& type,
                                                      const std::string& value) {
   if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, {BrowserThread::UI},
         base::BindOnce(&PeerConnectionTrackerHost::UpdatePeerConnection, this,
                        lid, type, value));
     return;
@@ -107,7 +113,8 @@ void PeerConnectionTrackerHost::UpdatePeerConnection(int lid,
   if (type == "stop") {
     WebRtcEventLogger* const logger = WebRtcEventLogger::Get();
     if (logger) {
-      logger->PeerConnectionStopped(render_process_id_, lid);
+      logger->PeerConnectionStopped(render_process_id_, lid,
+                                    base::OnceCallback<void(bool)>());
     }
   }
 
@@ -132,8 +139,8 @@ void PeerConnectionTrackerHost::GetUserMedia(
     const std::string& audio_constraints,
     const std::string& video_constraints) {
   if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, {BrowserThread::UI},
         base::BindOnce(&PeerConnectionTrackerHost::GetUserMedia, this, origin,
                        audio, video, audio_constraints, video_constraints));
     return;
@@ -149,21 +156,23 @@ void PeerConnectionTrackerHost::GetUserMedia(
 void PeerConnectionTrackerHost::WebRtcEventLogWrite(int lid,
                                                     const std::string& output) {
   if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, {BrowserThread::UI},
         base::BindOnce(&PeerConnectionTrackerHost::WebRtcEventLogWrite, this,
                        lid, output));
     return;
   }
   WebRtcEventLogger* const logger = WebRtcEventLogger::Get();
   if (logger) {
-    logger->OnWebRtcEventLogWrite(render_process_id_, lid, output);
+    logger->OnWebRtcEventLogWrite(
+        render_process_id_, lid, output,
+        base::OnceCallback<void(std::pair<bool, bool>)>());
   }
 }
 
 void PeerConnectionTrackerHost::OnSuspend() {
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::UI},
       base::BindOnce(&PeerConnectionTrackerHost::SendOnSuspendOnUIThread,
                      this));
 }

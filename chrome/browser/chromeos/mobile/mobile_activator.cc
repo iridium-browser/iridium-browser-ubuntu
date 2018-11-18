@@ -15,14 +15,13 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted_memory.h"
-#include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/observer_list_threadsafe.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task_scheduler/post_task.h"
-#include "base/threading/thread_restrictions.h"
+#include "base/task/post_task.h"
+#include "base/threading/scoped_blocking_call.h"
 #include "base/timer/timer.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
@@ -37,7 +36,7 @@
 #include "chromeos/network/network_state.h"
 #include "chromeos/network/network_state_handler.h"
 #include "components/prefs/pref_service.h"
-#include "components/ssl_config/ssl_config_prefs.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "third_party/cros_system_api/dbus/service_constants.h"
 
@@ -104,7 +103,7 @@ std::string CellularConfigDocument::GetErrorMessage(const std::string& code) {
 }
 
 void CellularConfigDocument::LoadCellularConfigFile() {
-  base::AssertBlockingAllowed();
+  base::ScopedBlockingCall scoped_blocking_call(base::BlockingType::MAY_BLOCK);
 
   // Load partner customization startup manifest if it is available.
   base::FilePath config_path(kCellularConfigPath);
@@ -275,7 +274,7 @@ void MobileActivator::InitiateActivation(const std::string& service_path) {
   ChangeState(network, PLAN_ACTIVATION_PAGE_LOADING, "");
 
   base::PostTaskWithTraitsAndReply(
-      FROM_HERE, {base::TaskPriority::BACKGROUND, base::MayBlock()},
+      FROM_HERE, {base::TaskPriority::BEST_EFFORT, base::MayBlock()},
       base::BindOnce(&CellularConfigDocument::LoadCellularConfigFile,
                      cellular_config_.get()),
       base::BindOnce(&MobileActivator::ContinueActivation, AsWeakPtr()));
@@ -319,9 +318,7 @@ void MobileActivator::GetPropertiesAndContinueActivation(
   base::DictionaryValue auto_connect_property;
   auto_connect_property.SetBoolean(shill::kAutoConnectProperty, true);
   NetworkHandler::Get()->network_configuration_handler()->SetShillProperties(
-      service_path_, auto_connect_property,
-      // Activation is triggered by the UI.
-      NetworkConfigurationObserver::SOURCE_USER_ACTION, base::DoNothing(),
+      service_path_, auto_connect_property, base::DoNothing(),
       network_handler::ErrorCallback());
   StartActivation();
 }
@@ -334,9 +331,10 @@ void MobileActivator::GetPropertiesFailure(
 }
 
 void MobileActivator::OnSetTransactionStatus(bool success) {
-  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-      base::Bind(&MobileActivator::HandleSetTransactionStatus,
-                 AsWeakPtr(), success));
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::UI},
+      base::Bind(&MobileActivator::HandleSetTransactionStatus, AsWeakPtr(),
+                 success));
 }
 
 void MobileActivator::HandleSetTransactionStatus(bool success) {
@@ -344,7 +342,7 @@ void MobileActivator::HandleSetTransactionStatus(bool success) {
   // again.
   if (success && state_ == PLAN_ACTIVATION_SHOWING_PAYMENT) {
     SignalCellularPlanPayment();
-    UMA_HISTOGRAM_COUNTS("Cellular.PaymentReceived", 1);
+    UMA_HISTOGRAM_COUNTS_1M("Cellular.PaymentReceived", 1);
     const NetworkState* network = GetNetworkState(service_path_);
     if (network && IsSimpleActivationFlow(network)) {
       state_ = PLAN_ACTIVATION_DONE;
@@ -354,14 +352,14 @@ void MobileActivator::HandleSetTransactionStatus(bool success) {
       StartOTASP();
     }
   } else {
-    UMA_HISTOGRAM_COUNTS("Cellular.PaymentFailed", 1);
+    UMA_HISTOGRAM_COUNTS_1M("Cellular.PaymentFailed", 1);
   }
 }
 
 void MobileActivator::OnPortalLoaded(bool success) {
-  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-      base::Bind(&MobileActivator::HandlePortalLoaded,
-                 AsWeakPtr(), success));
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::UI},
+      base::Bind(&MobileActivator::HandlePortalLoaded, AsWeakPtr(), success));
 }
 
 void MobileActivator::HandlePortalLoaded(bool success) {
@@ -409,7 +407,7 @@ void MobileActivator::StartOTASPTimer() {
 }
 
 void MobileActivator::StartActivation() {
-  UMA_HISTOGRAM_COUNTS("Cellular.MobileSetupStart", 1);
+  UMA_HISTOGRAM_COUNTS_1M("Cellular.MobileSetupStart", 1);
   const NetworkState* network = GetNetworkState(service_path_);
   // Check if we can start activation process.
   if (!network) {
@@ -567,7 +565,7 @@ void MobileActivator::ForceReconnect(const NetworkState* network,
   DCHECK(network);
   // Store away our next destination for when we complete.
   post_reconnect_state_ = next_state;
-  UMA_HISTOGRAM_COUNTS("Cellular.ActivationRetry", 1);
+  UMA_HISTOGRAM_COUNTS_1M("Cellular.ActivationRetry", 1);
   // First, disconnect...
   VLOG(1) << "Disconnecting from " << network->path();
   // Explicit service Disconnect()s disable autoconnect on the service until
@@ -931,7 +929,7 @@ void MobileActivator::HandleActivationFailure(
     NET_LOG_ERROR("Cellular service no longer exists", service_path);
     return;
   }
-  UMA_HISTOGRAM_COUNTS("Cellular.ActivationFailure", 1);
+  UMA_HISTOGRAM_COUNTS_1M("Cellular.ActivationFailure", 1);
   NET_LOG_ERROR("Failed to call Activate() on service", service_path);
   if (new_state == PLAN_ACTIVATION_OTASP) {
     ChangeState(network, PLAN_ACTIVATION_DELAY_OTASP, std::string());
@@ -948,7 +946,7 @@ void MobileActivator::RequestCellularActivation(
     const network_handler::ErrorCallback& error_callback) {
   DCHECK(network);
   NET_LOG_EVENT("Activating cellular service", network->path());
-  UMA_HISTOGRAM_COUNTS("Cellular.ActivationTry", 1);
+  UMA_HISTOGRAM_COUNTS_1M("Cellular.ActivationTry", 1);
   pending_activation_request_ = true;
   NetworkHandler::Get()->network_activation_handler()->
       Activate(network->path(),
@@ -1003,8 +1001,9 @@ void MobileActivator::ChangeState(const NetworkState* network,
     case PLAN_ACTIVATION_START:
       break;
     case PLAN_ACTIVATION_DELAY_OTASP: {
-      UMA_HISTOGRAM_COUNTS("Cellular.RetryOTASP", 1);
-      BrowserThread::PostDelayedTask(BrowserThread::UI, FROM_HERE,
+      UMA_HISTOGRAM_COUNTS_1M("Cellular.RetryOTASP", 1);
+      base::PostDelayedTaskWithTraits(
+          FROM_HERE, {BrowserThread::UI},
           base::Bind(&MobileActivator::RetryOTASP, AsWeakPtr()),
           base::TimeDelta::FromMilliseconds(kOTASPRetryDelay));
       break;
@@ -1073,11 +1072,11 @@ void MobileActivator::ChangeState(const NetworkState* network,
     case PLAN_ACTIVATION_DONE:
       DCHECK(network);
       CompleteActivation();
-      UMA_HISTOGRAM_COUNTS("Cellular.MobileSetupSucceeded", 1);
+      UMA_HISTOGRAM_COUNTS_1M("Cellular.MobileSetupSucceeded", 1);
       break;
     case PLAN_ACTIVATION_ERROR:
       CompleteActivation();
-      UMA_HISTOGRAM_COUNTS("Cellular.PlanFailed", 1);
+      UMA_HISTOGRAM_COUNTS_1M("Cellular.PlanFailed", 1);
       break;
     default:
       break;
@@ -1094,7 +1093,7 @@ void MobileActivator::ReEnableCertRevocationChecking() {
   if (!prefs)
     return;
   if (reenable_cert_check_) {
-    prefs->SetBoolean(ssl_config::prefs::kCertRevocationCheckingEnabled, true);
+    prefs->SetBoolean(prefs::kCertRevocationCheckingEnabled, true);
     reenable_cert_check_ = false;
   }
 }
@@ -1105,9 +1104,9 @@ void MobileActivator::DisableCertRevocationChecking() {
   // TODO(rkc): We want to do this only if on Cellular.
   PrefService* prefs = g_browser_process->local_state();
   if (!reenable_cert_check_ &&
-      prefs->GetBoolean(ssl_config::prefs::kCertRevocationCheckingEnabled)) {
+      prefs->GetBoolean(prefs::kCertRevocationCheckingEnabled)) {
     reenable_cert_check_ = true;
-    prefs->SetBoolean(ssl_config::prefs::kCertRevocationCheckingEnabled, false);
+    prefs->SetBoolean(prefs::kCertRevocationCheckingEnabled, false);
   }
 }
 

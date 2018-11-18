@@ -17,6 +17,9 @@ from chromite.lib import git
 from chromite.lib import osutils
 from chromite.lib import parallel
 from chromite.lib import portage_util
+from chromite.lib import repo_util
+
+from chromite.cbuildbot import manifest_version
 
 # Commit message subject for uprevving Portage packages.
 GIT_COMMIT_SUBJECT = 'Marking set of ebuilds as stable'
@@ -43,7 +46,7 @@ def CleanStalePackages(srcroot, boards, package_atoms):
     package_atoms: A list of package atoms to unmerge.
   """
   if package_atoms:
-    logging.info('Cleaning up stale packages %s.' % package_atoms)
+    logging.info('Cleaning up stale packages %s.', package_atoms)
 
   # First unmerge all the packages for a board, then eclean it.
   # We need these two steps to run in order (unmerge/eclean),
@@ -185,11 +188,10 @@ class GitBranch(object):
     if not branch:
       branch = self.branch_name
     if branch == self.tracking_branch or self.Exists(branch):
-      git_cmd = ['git', 'checkout', '-f', branch]
+      git.RunGit(self.cwd, ['checkout', '-f', branch], quiet=True)
     else:
-      git_cmd = ['repo', 'start', branch, '.']
-    cros_build_lib.RunCommand(git_cmd, print_cmd=False, cwd=self.cwd,
-                              capture_output=True)
+      repo = repo_util.Repository.MustFind(self.cwd)
+      repo.StartBranch(branch, projects=['.'], cwd=self.cwd)
 
   def Exists(self, branch=None):
     """Returns True if the branch exists."""
@@ -213,13 +215,20 @@ def GetParser():
   parser.add_argument('--force', action='store_true',
                       help='Force the stabilization of blacklisted packages. '
                       '(only compatible with -p)')
+  parser.add_argument('--list_revisions', action='store_true',
+                      help='List all revisions included in the commit message.')
   parser.add_argument('-o', '--overlays',
                       help='Colon-separated list of overlays to modify.')
+  parser.add_argument('--overlay-type',
+                      help='Populates --overlays based on "public", "private"'
+                           ', or "both".')
   parser.add_argument('-p', '--packages',
                       help='Colon separated list of packages to rev.')
+  parser.add_argument('--buildroot', type='path',
+                      help='Path to buildroot.')
   parser.add_argument('-r', '--srcroot', type='path',
-                      default=os.path.join(constants.SOURCE_ROOT, 'src'),
-                      help='Path to root src directory.')
+                      help='Path to root src. Deprecated in favor of '
+                           '--buildroot')
   parser.add_argument('--verbose', action='store_true',
                       help='Prints out debug info.')
   parser.add_argument('--staging_branch',
@@ -232,6 +241,16 @@ def GetParser():
 def main(argv):
   parser = GetParser()
   options = parser.parse_args(argv)
+
+  # TODO: Remove this code in favor of a simple default on buildroot when
+  #       srcroot is removed.
+  if options.srcroot and not options.buildroot:
+    # Convert /<repo>/src -> <repo>
+    options.buildroot = os.path.dirname(options.srcroot)
+  if not options.buildroot:
+    options.buildroot = constants.SOURCE_ROOT
+  options.srcroot = None
+
   options.Freeze()
 
   if options.command == 'commit':
@@ -241,8 +260,11 @@ def main(argv):
       parser.error('Cannot use --force with --all. You must specify a list of '
                    'packages you want to force uprev.')
 
-  if not os.path.isdir(options.srcroot):
-    parser.error('srcroot is not a valid path: %s' % options.srcroot)
+  if not os.path.isdir(options.buildroot):
+    parser.error('buildroot is not a valid path: %s' % options.buildroot)
+
+  if options.overlay_type and options.overlays:
+    parser.error('Cannot use --overlay-type with --overlays.')
 
   portage_util.EBuild.VERBOSE = options.verbose
 
@@ -256,13 +278,16 @@ def main(argv):
       if not os.path.isdir(path):
         cros_build_lib.Die('Cannot find overlay: %s' % path)
       overlays.append(os.path.realpath(path))
+  elif options.overlay_type:
+    overlays = portage_util.FindOverlays(
+        options.overlay_type, buildroot=options.buildroot)
   else:
     logging.warning('Missing --overlays argument')
     overlays.extend([
-        '%s/private-overlays/chromeos-overlay' % options.srcroot,
-        '%s/third_party/chromiumos-overlay' % options.srcroot])
+        '%s/src/private-overlays/chromeos-overlay' % options.buildroot,
+        '%s/src/third_party/chromiumos-overlay' % options.buildroot])
 
-  manifest = git.ManifestCheckout.Cached(options.srcroot)
+  manifest = git.ManifestCheckout.Cached(options.buildroot)
 
   # Dict mapping from each overlay to its tracking branch.
   overlay_tracking_branch = {}
@@ -341,9 +366,9 @@ def _WorkOnCommit(options, overlays, overlay_tracking_branch,
               for overlays_per_project in git_project_overlays.itervalues()]
     parallel.RunTasksInProcessPool(_CommitOverlays, inputs)
 
-    chroot_path = os.path.join(options.srcroot, constants.DEFAULT_CHROOT_DIR)
+    chroot_path = os.path.join(options.buildroot, constants.DEFAULT_CHROOT_DIR)
     if os.path.exists(chroot_path):
-      CleanStalePackages(options.srcroot, options.boards.split(':'),
+      CleanStalePackages(options.buildroot, options.boards.split(':'),
                          new_package_atoms)
     if options.drop_file:
       osutils.WriteFile(options.drop_file, ' '.join(revved_packages))
@@ -360,8 +385,13 @@ def _GetOverlayToEbuildsMap(options, overlays, package_list):
   Returns:
     A dict mapping each overlay to a list of ebuilds belonging to it.
   """
+  root_version = manifest_version.VersionInfo.from_repo(options.buildroot)
+  subdir_removal = manifest_version.VersionInfo('10363.0.0')
+  require_subdir_support = root_version < subdir_removal
+
   overlay_ebuilds = {}
-  inputs = [[overlay, options.all, package_list, options.force]
+  inputs = [[overlay, options.all, package_list, options.force,
+             require_subdir_support]
             for overlay in overlays]
   result = parallel.RunTasksInProcessPool(
       portage_util.GetOverlayEBuilds, inputs)
@@ -397,8 +427,15 @@ def _CommitOverlays(options, manifest, overlays, overlay_tracking_branch,
     tracking_branch = overlay_tracking_branch[overlay]
 
     existing_commit = git.GetGitRepoRevision(overlay)
+
+    # Make sure we run in the top-level git directory in case we are
+    # adding/removing an overlay in existing_commit.
+    git_root = git.FindGitTopLevel(overlay)
+    if git_root is None:
+      cros_build_lib.Die('No git repo at overlay directory %s.', overlay)
+
     work_branch = GitBranch(constants.STABLE_EBUILD_BRANCH, tracking_branch,
-                            cwd=overlay)
+                            cwd=git_root)
     work_branch.CreateBranch()
     if not work_branch.Exists():
       cros_build_lib.Die('Unable to create stabilizing branch in %s' %
@@ -406,7 +443,7 @@ def _CommitOverlays(options, manifest, overlays, overlay_tracking_branch,
 
     # In the case of uprevving overlays that have patches applied to them,
     # include the patched changes in the stabilizing branch.
-    git.RunGit(overlay, ['rebase', existing_commit])
+    git.RunGit(git_root, ['rebase', existing_commit])
 
     ebuilds = overlay_ebuilds.get(overlay, [])
     if ebuilds:
@@ -455,7 +492,8 @@ def _WorkOnEbuild(overlay, ebuild, manifest, options, ebuild_paths_to_add,
     logging.info('Working on %s, info %s', ebuild.package,
                  ebuild.cros_workon_vars)
   try:
-    result = ebuild.RevWorkOnEBuild(options.srcroot, manifest)
+    result = ebuild.RevWorkOnEBuild(os.path.join(options.buildroot, 'src'),
+                                    manifest)
     if result:
       new_package, ebuild_path_to_add, ebuild_path_to_remove = result
 
@@ -465,6 +503,29 @@ def _WorkOnEbuild(overlay, ebuild, manifest, options, ebuild_paths_to_add,
         ebuild_paths_to_remove.append(ebuild_path_to_remove)
 
       messages.append(_GIT_COMMIT_MESSAGE % ebuild.package)
+
+      if options.list_revisions:
+        info = ebuild.GetSourceInfo(os.path.join(options.buildroot, 'src'),
+                                    manifest, True)
+        srcdirs = [os.path.join(options.buildroot, 'src', srcdir)
+                   for srcdir in ebuild.cros_workon_vars.localname]
+        old_commit_ids = dict(
+            zip(srcdirs, ebuild.cros_workon_vars.commit.split(',')))
+        git_log = []
+        for srcdir in info.srcdirs:
+          old_commit_id = old_commit_ids.get(srcdir)
+          new_commit_id = ebuild.GetCommitId(srcdir)
+          if not old_commit_id or old_commit_id == new_commit_id:
+            continue
+
+          logs = git.RunGit(srcdir, [
+              'log', '%s..%s' % (old_commit_id[:8], new_commit_id[:8]),
+              '--pretty=format:%h %<(63,trunc)%s'])
+          git_log.append('$ ' + logs.cmdstr)
+          git_log.extend(line.strip() for line in logs.output.splitlines())
+        if git_log:
+          messages.append('\n'.join(git_log))
+
       revved_packages.append(ebuild.package)
       new_package_atoms.append('=%s' % new_package)
   except (OSError, IOError):

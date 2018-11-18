@@ -5,14 +5,17 @@
 #include "components/domain_reliability/service.h"
 
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
+#include "base/task/post_task.h"
 #include "base/test/test_simple_task_runner.h"
 #include "base/time/time.h"
 #include "components/domain_reliability/monitor.h"
 #include "components/domain_reliability/test_util.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/permission_manager.h"
+#include "content/public/browser/permission_controller.h"
+#include "content/public/browser/permission_controller_delegate.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/test_browser_context.h"
 #include "content/public/test/test_browser_thread_bundle.h"
@@ -27,7 +30,7 @@ namespace domain_reliability {
 
 namespace {
 
-class TestPermissionManager : public content::PermissionManager {
+class TestPermissionManager : public content::PermissionControllerDelegate {
  public:
   TestPermissionManager() : get_permission_status_count_(0) {}
 
@@ -78,7 +81,7 @@ class TestPermissionManager : public content::PermissionManager {
       const base::Callback<void(blink::mojom::PermissionStatus)>& callback)
       override {
     NOTIMPLEMENTED();
-    return kNoPendingOperation;
+    return content::PermissionController::kNoPendingOperation;
   }
 
   int RequestPermissions(
@@ -90,7 +93,7 @@ class TestPermissionManager : public content::PermissionManager {
           void(const std::vector<blink::mojom::PermissionStatus>&)>& callback)
       override {
     NOTIMPLEMENTED();
-    return kNoPendingOperation;
+    return content::PermissionController::kNoPendingOperation;
   }
 
   void ResetPermission(content::PermissionType permission,
@@ -101,8 +104,8 @@ class TestPermissionManager : public content::PermissionManager {
 
   int SubscribePermissionStatusChange(
       content::PermissionType permission,
+      content::RenderFrameHost* render_frame_host,
       const GURL& requesting_origin,
-      const GURL& embedding_origin,
       const base::Callback<void(blink::mojom::PermissionStatus)>& callback)
       override {
     NOTIMPLEMENTED();
@@ -139,19 +142,21 @@ class DomainReliabilityServiceTest : public testing::Test {
       : upload_reporter_string_("test"),
         permission_manager_(new TestPermissionManager()) {
     scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner =
-        content::BrowserThread::GetTaskRunnerForThread(
-            content::BrowserThread::UI);
+        base::CreateSingleThreadTaskRunnerWithTraits(
+            {content::BrowserThread::UI});
     scoped_refptr<base::SingleThreadTaskRunner> network_task_runner =
-        content::BrowserThread::GetTaskRunnerForThread(
-            content::BrowserThread::IO);
+        base::CreateSingleThreadTaskRunnerWithTraits(
+            {content::BrowserThread::IO});
     url_request_context_getter_ =
         new net::TestURLRequestContextGetter(network_task_runner);
-    browser_context_.SetPermissionManager(
+    browser_context_.SetPermissionControllerDelegate(
         base::WrapUnique(permission_manager_));
     service_ = base::WrapUnique(DomainReliabilityService::Create(
         upload_reporter_string_, &browser_context_));
     monitor_ = service_->CreateMonitor(ui_task_runner, network_task_runner);
     monitor_->MoveToNetworkThread();
+    // Let the NetworkConnectionTracker registration complete.
+    thread_bundle_.RunUntilIdle();
     monitor_->InitURLRequestContext(url_request_context_getter_);
     monitor_->SetDiscardUploads(true);
   }

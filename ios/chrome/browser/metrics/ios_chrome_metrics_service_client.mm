@@ -29,6 +29,7 @@
 #include "components/metrics/metrics_pref_names.h"
 #include "components/metrics/metrics_reporting_default_state.h"
 #include "components/metrics/metrics_service.h"
+#include "components/metrics/metrics_switches.h"
 #include "components/metrics/net/cellular_logic_helper.h"
 #include "components/metrics/net/net_metrics_log_uploader.h"
 #include "components/metrics/net/network_metrics_provider.h"
@@ -45,6 +46,7 @@
 #include "components/variations/variations_associated_data.h"
 #include "components/version_info/version_info.h"
 #include "ios/chrome/browser/application_context.h"
+#include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state_manager.h"
 #include "ios/chrome/browser/chrome_paths.h"
 #include "ios/chrome/browser/google/google_brand.h"
@@ -52,13 +54,14 @@
 #include "ios/chrome/browser/metrics/ios_chrome_stability_metrics_provider.h"
 #include "ios/chrome/browser/metrics/mobile_session_shutdown_metrics_provider.h"
 #include "ios/chrome/browser/signin/ios_chrome_signin_status_metrics_provider_delegate.h"
-#include "ios/chrome/browser/sync/ios_chrome_profile_sync_service_factory.h"
 #include "ios/chrome/browser/sync/ios_chrome_sync_client.h"
+#include "ios/chrome/browser/sync/profile_sync_service_factory.h"
 #include "ios/chrome/browser/tab_parenting_global_observer.h"
 #import "ios/chrome/browser/tabs/tab_model_list.h"
 #include "ios/chrome/browser/translate/translate_ranker_metrics_provider.h"
 #include "ios/chrome/common/channel_info.h"
 #include "ios/web/public/web_thread.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -97,6 +100,12 @@ void IOSChromeMetricsServiceClient::RegisterPrefs(
   metrics::StabilityMetricsHelper::RegisterPrefs(registry);
   metrics::RegisterMetricsReportingStatePrefs(registry);
   ukm::UkmService::RegisterPrefs(registry);
+}
+
+// static
+bool IOSChromeMetricsServiceClient::IsMetricsReportingForceEnabled() {
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(
+      metrics::switches::kForceEnableMetricsReporting);
 }
 
 metrics::MetricsService* IOSChromeMetricsServiceClient::GetMetricsService() {
@@ -149,7 +158,7 @@ IOSChromeMetricsServiceClient::CreateUploader(
     metrics::MetricsLogUploader::MetricServiceType service_type,
     const metrics::MetricsLogUploader::UploadCallback& on_upload_complete) {
   return std::make_unique<metrics::NetMetricsLogUploader>(
-      GetApplicationContext()->GetSystemURLRequestContext(), server_url,
+      GetApplicationContext()->GetSharedURLLoaderFactory(), server_url,
       insecure_server_url, mime_type, service_type, on_upload_complete);
 }
 
@@ -176,13 +185,14 @@ void IOSChromeMetricsServiceClient::Initialize() {
   metrics_service_ = std::make_unique<metrics::MetricsService>(
       metrics_state_manager_, this, local_state);
 
-  // Always restrict on iOS.
-  // TODO(crbug.com/828878): Use the flag to set this.
-  bool restrict_to_whitelist_entries = true;
-
-  if (base::FeatureList::IsEnabled(ukm::kUkmFeature))
+  if (IsMetricsReportingForceEnabled() ||
+      base::FeatureList::IsEnabled(ukm::kUkmFeature)) {
+    // We only need to restrict to whitelisted Entries if metrics reporting
+    // is not forced.
+    bool restrict_to_whitelist_entries = !IsMetricsReportingForceEnabled();
     ukm_service_ = std::make_unique<ukm::UkmService>(
         local_state, this, restrict_to_whitelist_entries);
+  }
 
   // Register metrics providers.
   metrics_service_->RegisterMetricsProvider(
@@ -280,9 +290,10 @@ bool IOSChromeMetricsServiceClient::RegisterForBrowserStateEvents(
           browser_state, ServiceAccessType::IMPLICIT_ACCESS);
   ObserveServiceForDeletions(history_service);
   browser_sync::ProfileSyncService* sync =
-      IOSChromeProfileSyncServiceFactory::GetInstance()->GetForBrowserState(
+      ProfileSyncServiceFactory::GetInstance()->GetForBrowserState(
           browser_state);
-  ObserveServiceForSyncDisables(static_cast<syncer::SyncService*>(sync));
+  ObserveServiceForSyncDisables(static_cast<syncer::SyncService*>(sync),
+                                browser_state->GetPrefs());
   return (history_service != nullptr && sync != nullptr);
 }
 
@@ -326,8 +337,8 @@ void IOSChromeMetricsServiceClient::OnIncognitoWebStateRemoved() {
   UpdateRunningServices();
 }
 
-bool IOSChromeMetricsServiceClient::IsHistorySyncEnabledOnAllProfiles() {
-  return SyncDisableObserver::IsHistorySyncEnabledOnAllProfiles();
+bool IOSChromeMetricsServiceClient::SyncStateAllowsUkm() {
+  return SyncDisableObserver::SyncStateAllowsUkm();
 }
 
 bool IOSChromeMetricsServiceClient::

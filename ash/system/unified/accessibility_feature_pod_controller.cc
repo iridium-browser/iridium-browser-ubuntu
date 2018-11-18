@@ -26,7 +26,11 @@ FeaturePodButton* AccessibilityFeaturePodController::CreateButton() {
   auto* button = new FeaturePodButton(this);
   button->SetLabel(
       l10n_util::GetStringUTF16(IDS_ASH_STATUS_TRAY_ACCESSIBILITY));
-  button->SetVectorIcon(kSystemMenuAccessibilityIcon);
+  button->SetVectorIcon(kUnifiedMenuAccessibilityIcon);
+  button->SetIconAndLabelTooltips(
+      l10n_util::GetStringUTF16(IDS_ASH_STATUS_TRAY_ACCESSIBILITY_TOOLTIP));
+  button->ShowDetailedViewArrow();
+  button->DisableLabelButtonFocus();
 
   AccessibilityDelegate* delegate = Shell::Get()->accessibility_delegate();
   LoginStatus login_status = Shell::Get()->session_controller()->login_status();
@@ -37,6 +41,10 @@ FeaturePodButton* AccessibilityFeaturePodController::CreateButton() {
 
 void AccessibilityFeaturePodController::OnIconPressed() {
   tray_controller_->ShowAccessibilityDetailedView();
+}
+
+SystemTrayItemUmaType AccessibilityFeaturePodController::GetUmaType() const {
+  return SystemTrayItemUmaType::UMA_ACCESSIBILITY;
 }
 
 }  // namespace ash

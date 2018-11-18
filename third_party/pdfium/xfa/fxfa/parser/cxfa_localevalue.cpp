@@ -6,10 +6,12 @@
 
 #include "xfa/fxfa/parser/cxfa_localevalue.h"
 
+#include <utility>
 #include <vector>
 
 #include "core/fxcrt/fx_extension.h"
 #include "third_party/base/ptr_util.h"
+#include "third_party/base/span.h"
 #include "third_party/base/stl_util.h"
 #include "xfa/fgas/crt/cfgas_formatstring.h"
 #include "xfa/fxfa/parser/cxfa_document.h"
@@ -60,16 +62,33 @@ bool ValueSplitDateTime(const WideString& wsDateTime,
   return true;
 }
 
+class ScopedLocale {
+ public:
+  ScopedLocale(CXFA_LocaleMgr* pLocaleMgr, LocaleIface* pNewLocale)
+      : m_pLocaleMgr(pLocaleMgr),
+        m_pNewLocale(pNewLocale),
+        m_pOrigLocale(pNewLocale ? m_pLocaleMgr->GetDefLocale() : nullptr) {
+    if (m_pNewLocale)
+      m_pLocaleMgr->SetDefLocale(pNewLocale);
+  }
+
+  ~ScopedLocale() {
+    if (m_pNewLocale)
+      m_pLocaleMgr->SetDefLocale(m_pOrigLocale);
+  }
+
+  ScopedLocale(const ScopedLocale& that) = delete;
+  ScopedLocale& operator=(const ScopedLocale& that) = delete;
+
+ private:
+  UnownedPtr<CXFA_LocaleMgr> const m_pLocaleMgr;
+  LocaleIface* const m_pNewLocale;
+  LocaleIface* const m_pOrigLocale;
+};
+
 }  // namespace
 
-CXFA_LocaleValue::CXFA_LocaleValue()
-    : m_pLocaleMgr(nullptr), m_dwType(XFA_VT_NULL), m_bValid(true) {}
-
-CXFA_LocaleValue::CXFA_LocaleValue(const CXFA_LocaleValue& value)
-    : m_pLocaleMgr(value.m_pLocaleMgr),
-      m_wsValue(value.m_wsValue),
-      m_dwType(value.m_dwType),
-      m_bValid(value.m_bValid) {}
+CXFA_LocaleValue::CXFA_LocaleValue() = default;
 
 CXFA_LocaleValue::CXFA_LocaleValue(uint32_t dwType, CXFA_LocaleMgr* pLocaleMgr)
     : m_pLocaleMgr(pLocaleMgr),
@@ -93,34 +112,31 @@ CXFA_LocaleValue::CXFA_LocaleValue(uint32_t dwType,
       m_dwType(dwType),
       m_bValid(ParsePatternValue(wsValue, wsFormat, pLocale)) {}
 
-CXFA_LocaleValue& CXFA_LocaleValue::operator=(const CXFA_LocaleValue& value) {
-  m_wsValue = value.m_wsValue;
-  m_dwType = value.m_dwType;
-  m_bValid = value.m_bValid;
-  m_pLocaleMgr = value.m_pLocaleMgr;
-  return *this;
-}
+CXFA_LocaleValue::CXFA_LocaleValue(const CXFA_LocaleValue& that) = default;
 
-CXFA_LocaleValue::~CXFA_LocaleValue() {}
+CXFA_LocaleValue& CXFA_LocaleValue::operator=(const CXFA_LocaleValue& that) =
+    default;
+
+CXFA_LocaleValue::~CXFA_LocaleValue() = default;
 
 bool CXFA_LocaleValue::ValidateValue(const WideString& wsValue,
                                      const WideString& wsPattern,
                                      LocaleIface* pLocale,
                                      WideString* pMatchFormat) {
-  WideString wsOutput;
-  LocaleIface* locale = m_pLocaleMgr->GetDefLocale();
-  if (pLocale)
-    m_pLocaleMgr->SetDefLocale(pLocale);
+  if (!m_pLocaleMgr)
+    return false;
 
-  auto pFormat = pdfium::MakeUnique<CFGAS_FormatString>(m_pLocaleMgr);
+  WideString wsOutput;
+  ScopedLocale scoped_locale(m_pLocaleMgr.Get(), pLocale);
+
+  auto pFormat = pdfium::MakeUnique<CFGAS_FormatString>(m_pLocaleMgr.Get());
   std::vector<WideString> wsPatterns;
   pFormat->SplitFormatString(wsPattern, &wsPatterns);
 
   bool bRet = false;
-  int32_t iCount = pdfium::CollectionSize<int32_t>(wsPatterns);
-  int32_t i = 0;
-  for (; i < iCount && !bRet; i++) {
-    WideString wsFormat = wsPatterns[i];
+  size_t i = 0;
+  for (; !bRet && i < wsPatterns.size(); i++) {
+    const WideString& wsFormat = wsPatterns[i];
     switch (ValueCategory(pFormat->GetCategory(wsFormat), m_dwType)) {
       case FX_LOCALECATEGORY_Null:
         bRet = pFormat->ParseNull(wsValue, wsFormat);
@@ -185,90 +201,75 @@ bool CXFA_LocaleValue::ValidateValue(const WideString& wsValue,
   }
   if (bRet && pMatchFormat)
     *pMatchFormat = wsPatterns[i - 1];
-  if (pLocale)
-    m_pLocaleMgr->SetDefLocale(locale);
-
   return bRet;
 }
 
 double CXFA_LocaleValue::GetDoubleNum() const {
-  if (m_bValid && (m_dwType == XFA_VT_BOOLEAN || m_dwType == XFA_VT_INTEGER ||
-                   m_dwType == XFA_VT_DECIMAL || m_dwType == XFA_VT_FLOAT)) {
-    int64_t nIntegral = 0;
-    uint32_t dwFractional = 0;
-    int32_t nExponent = 0;
-    int32_t cc = 0;
-    bool bNegative = false;
-    bool bExpSign = false;
-    const wchar_t* str = m_wsValue.c_str();
-    int len = m_wsValue.GetLength();
-    while (FXSYS_iswspace(str[cc]) && cc < len)
-      cc++;
-
-    if (cc >= len)
-      return 0;
-    if (str[0] == '+') {
-      cc++;
-    } else if (str[0] == '-') {
-      bNegative = true;
-      cc++;
-    }
-
-    int32_t nIntegralLen = 0;
-    while (cc < len) {
-      if (str[cc] == '.' || !FXSYS_isDecimalDigit(str[cc]) ||
-          nIntegralLen > 17) {
-        break;
-      }
-      nIntegral = nIntegral * 10 + str[cc] - '0';
-      cc++;
-      nIntegralLen++;
-    }
-
-    nIntegral = bNegative ? -nIntegral : nIntegral;
-    int32_t scale = 0;
-    double fraction = 0.0;
-    if (cc < len && str[cc] == '.') {
-      cc++;
-      while (cc < len) {
-        fraction += XFA_GetFractionalScale(scale) * (str[cc] - '0');
-        scale++;
-        cc++;
-        if (scale == XFA_GetMaxFractionalScale() ||
-            !FXSYS_isDecimalDigit(str[cc])) {
-          break;
-        }
-      }
-      dwFractional = static_cast<uint32_t>(fraction * 4294967296.0);
-    }
-    if (cc < len && (str[cc] == 'E' || str[cc] == 'e')) {
-      cc++;
-      if (cc < len) {
-        if (str[cc] == '+') {
-          cc++;
-        } else if (str[cc] == '-') {
-          bExpSign = true;
-          cc++;
-        }
-      }
-      while (cc < len) {
-        if (str[cc] == '.' || !FXSYS_isDecimalDigit(str[cc]))
-          break;
-
-        nExponent = nExponent * 10 + str[cc] - '0';
-        cc++;
-      }
-      nExponent = bExpSign ? -nExponent : nExponent;
-    }
-
-    double dValue = dwFractional / 4294967296.0;
-    dValue = nIntegral + (nIntegral >= 0 ? dValue : -dValue);
-    if (nExponent != 0)
-      dValue *= FXSYS_pow(10, static_cast<float>(nExponent));
-
-    return dValue;
+  if (!m_bValid || (m_dwType != XFA_VT_BOOLEAN && m_dwType != XFA_VT_INTEGER &&
+                    m_dwType != XFA_VT_DECIMAL && m_dwType != XFA_VT_FLOAT)) {
+    return 0;
   }
-  return 0;
+
+  size_t cc = 0;
+  pdfium::span<const wchar_t> str = m_wsValue.AsSpan();
+  while (cc < str.size() && FXSYS_iswspace(str[cc]))
+    cc++;
+
+  if (cc >= str.size())
+    return 0;
+
+  bool bNegative = false;
+  if (str[cc] == '+') {
+    cc++;
+  } else if (str[cc] == '-') {
+    bNegative = true;
+    cc++;
+  }
+
+  int64_t nIntegral = 0;
+  size_t nIntegralLen = 0;
+  while (cc < str.size()) {
+    if (str[cc] == '.' || !FXSYS_isDecimalDigit(str[cc]) || nIntegralLen > 17)
+      break;
+
+    nIntegral = nIntegral * 10 + str[cc++] - '0';
+    nIntegralLen++;
+  }
+  nIntegral = bNegative ? -nIntegral : nIntegral;
+
+  int32_t scale = 0;
+  int32_t nExponent = 0;
+  double fraction = 0.0;
+  if (cc < str.size() && str[cc] == '.') {
+    cc++;
+    while (cc < str.size() && FXSYS_isDecimalDigit(str[cc])) {
+      fraction += XFA_GetFractionalScale(scale) * (str[cc++] - '0');
+      if (++scale == XFA_GetMaxFractionalScale())
+        break;
+    }
+  }
+  if (cc < str.size() && (str[cc] == 'E' || str[cc] == 'e')) {
+    cc++;
+    bool bExpSign = false;
+    if (cc < str.size()) {
+      if (str[cc] == '+') {
+        cc++;
+      } else if (str[cc] == '-') {
+        bExpSign = true;
+        cc++;
+      }
+    }
+    while (cc < str.size() && FXSYS_isDecimalDigit(str[cc]))
+      nExponent = nExponent * 10 + str[cc++] - '0';
+
+    nExponent = bExpSign ? -nExponent : nExponent;
+  }
+
+  double dValue = nIntegral + (bNegative ? -fraction : fraction);
+  if (nExponent != 0)
+    dValue *= FXSYS_pow(10, static_cast<float>(nExponent));
+
+  return dValue;
 }
 
 CFX_DateTime CXFA_LocaleValue::GetDate() const {
@@ -320,7 +321,7 @@ bool CXFA_LocaleValue::FormatPatterns(WideString& wsResult,
                                       const WideString& wsFormat,
                                       LocaleIface* pLocale,
                                       XFA_VALUEPICTURE eValueType) const {
-  auto pFormat = pdfium::MakeUnique<CFGAS_FormatString>(m_pLocaleMgr);
+  auto pFormat = pdfium::MakeUnique<CFGAS_FormatString>(m_pLocaleMgr.Get());
   std::vector<WideString> wsPatterns;
   pFormat->SplitFormatString(wsFormat, &wsPatterns);
   wsResult.clear();
@@ -336,13 +337,14 @@ bool CXFA_LocaleValue::FormatSinglePattern(WideString& wsResult,
                                            const WideString& wsFormat,
                                            LocaleIface* pLocale,
                                            XFA_VALUEPICTURE eValueType) const {
-  LocaleIface* locale = m_pLocaleMgr->GetDefLocale();
-  if (pLocale)
-    m_pLocaleMgr->SetDefLocale(pLocale);
+  if (!m_pLocaleMgr)
+    return false;
+
+  ScopedLocale scoped_locale(m_pLocaleMgr.Get(), pLocale);
 
   wsResult.clear();
   bool bRet = false;
-  auto pFormat = pdfium::MakeUnique<CFGAS_FormatString>(m_pLocaleMgr);
+  auto pFormat = pdfium::MakeUnique<CFGAS_FormatString>(m_pLocaleMgr.Get());
   FX_LOCALECATEGORY eCategory =
       ValueCategory(pFormat->GetCategory(wsFormat), m_dwType);
   switch (eCategory) {
@@ -380,8 +382,6 @@ bool CXFA_LocaleValue::FormatSinglePattern(WideString& wsResult,
                 eValueType != XFA_VALUEPICTURE_Display)) {
     wsResult = m_wsValue;
   }
-  if (pLocale)
-    m_pLocaleMgr->SetDefLocale(locale);
 
   return bRet;
 }
@@ -603,17 +603,17 @@ bool CXFA_LocaleValue::ValidateCanonicalTime(const WideString& wsTime) {
 bool CXFA_LocaleValue::ParsePatternValue(const WideString& wsValue,
                                          const WideString& wsPattern,
                                          LocaleIface* pLocale) {
-  LocaleIface* locale = m_pLocaleMgr->GetDefLocale();
-  if (pLocale)
-    m_pLocaleMgr->SetDefLocale(pLocale);
+  if (!m_pLocaleMgr)
+    return false;
 
-  auto pFormat = pdfium::MakeUnique<CFGAS_FormatString>(m_pLocaleMgr);
+  ScopedLocale scoped_locale(m_pLocaleMgr.Get(), pLocale);
+
+  auto pFormat = pdfium::MakeUnique<CFGAS_FormatString>(m_pLocaleMgr.Get());
   std::vector<WideString> wsPatterns;
   pFormat->SplitFormatString(wsPattern, &wsPatterns);
   bool bRet = false;
-  int32_t iCount = pdfium::CollectionSize<int32_t>(wsPatterns);
-  for (int32_t i = 0; i < iCount && !bRet; i++) {
-    WideString wsFormat = wsPatterns[i];
+  for (size_t i = 0; !bRet && i < wsPatterns.size(); i++) {
+    const WideString& wsFormat = wsPatterns[i];
     switch (ValueCategory(pFormat->GetCategory(wsFormat), m_dwType)) {
       case FX_LOCALECATEGORY_Null:
         bRet = pFormat->ParseNull(wsValue, wsFormat);
@@ -629,7 +629,7 @@ bool CXFA_LocaleValue::ParsePatternValue(const WideString& wsValue,
         WideString fNum;
         bRet = pFormat->ParseNum(wsValue, wsFormat, &fNum);
         if (bRet)
-          m_wsValue = fNum;
+          m_wsValue = std::move(fNum);
         break;
       }
       case FX_LOCALECATEGORY_Text:
@@ -671,9 +671,6 @@ bool CXFA_LocaleValue::ParsePatternValue(const WideString& wsValue,
   if (!bRet)
     m_wsValue = wsValue;
 
-  if (pLocale)
-    m_pLocaleMgr->SetDefLocale(locale);
-
   return bRet;
 }
 
@@ -682,32 +679,34 @@ void CXFA_LocaleValue::GetNumericFormat(WideString& wsFormat,
                                         int32_t nDecLen) {
   ASSERT(wsFormat.IsEmpty());
   ASSERT(nIntLen >= -1 && nDecLen >= -1);
-
   int32_t nTotalLen = (nIntLen >= 0 ? nIntLen : 2) + 1 +
                       (nDecLen >= 0 ? nDecLen : 2) + (nDecLen == 0 ? 0 : 1);
-  wchar_t* lpBuf = wsFormat.GetBuffer(nTotalLen);
-  int32_t nPos = 0;
-  lpBuf[nPos++] = L's';
+  {
+    // Span's lifetime must end before ReleaseBuffer() below.
+    pdfium::span<wchar_t> lpBuf = wsFormat.GetBuffer(nTotalLen);
+    int32_t nPos = 0;
+    lpBuf[nPos++] = L's';
 
-  if (nIntLen == -1) {
-    lpBuf[nPos++] = L'z';
-    lpBuf[nPos++] = L'*';
-  } else {
-    while (nIntLen) {
+    if (nIntLen == -1) {
       lpBuf[nPos++] = L'z';
-      nIntLen--;
+      lpBuf[nPos++] = L'*';
+    } else {
+      while (nIntLen) {
+        lpBuf[nPos++] = L'z';
+        nIntLen--;
+      }
     }
-  }
-  if (nDecLen != 0) {
-    lpBuf[nPos++] = L'.';
-  }
-  if (nDecLen == -1) {
-    lpBuf[nPos++] = L'z';
-    lpBuf[nPos++] = L'*';
-  } else {
-    while (nDecLen) {
+    if (nDecLen != 0) {
+      lpBuf[nPos++] = L'.';
+    }
+    if (nDecLen == -1) {
       lpBuf[nPos++] = L'z';
-      nDecLen--;
+      lpBuf[nPos++] = L'*';
+    } else {
+      while (nDecLen) {
+        lpBuf[nPos++] = L'z';
+        nDecLen--;
+      }
     }
   }
   wsFormat.ReleaseBuffer(nTotalLen);
@@ -758,7 +757,7 @@ bool CXFA_LocaleValue::ValidateNumericTemp(const WideString& wsNumeric,
 
   WideString wsDecimalSymbol;
   if (pLocale)
-    wsDecimalSymbol = pLocale->GetNumbericSymbol(FX_LOCALENUMSYMBOL_Decimal);
+    wsDecimalSymbol = pLocale->GetDecimalSymbol();
   else
     wsDecimalSymbol = WideString(L'.');
 

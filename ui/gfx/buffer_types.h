@@ -12,11 +12,6 @@ namespace gfx {
 // The format needs to be taken into account when mapping a buffer into the
 // client's address space.
 enum class BufferFormat {
-  ATC,
-  ATCIA,
-  DXT1,
-  DXT5,
-  ETC1,
   R_8,
   R_16,
   RG_88,
@@ -51,6 +46,7 @@ enum class BufferUsage {
   SCANOUT,
   // SCANOUT_CAMERA_READ_WRITE implies CPU_READ_WRITE.
   SCANOUT_CAMERA_READ_WRITE,
+  CAMERA_AND_CPU_READ_WRITE,
   SCANOUT_CPU_READ_WRITE,
   SCANOUT_VDA_WRITE,
   GPU_READ_CPU_READ_WRITE,

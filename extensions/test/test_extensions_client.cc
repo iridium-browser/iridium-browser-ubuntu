@@ -11,28 +11,19 @@
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/stl_util.h"
-#include "extensions/common/api/generated_schemas.h"
-#include "extensions/common/common_manifest_handlers.h"
+#include "extensions/common/core_extensions_api_provider.h"
 #include "extensions/common/extension_urls.h"
-#include "extensions/common/extensions_aliases.h"
-#include "extensions/common/features/feature_provider.h"
-#include "extensions/common/features/json_feature_provider_source.h"
-#include "extensions/common/manifest_handler.h"
-#include "extensions/common/permissions/extensions_api_permissions.h"
-#include "extensions/common/permissions/permissions_info.h"
 #include "extensions/common/url_pattern_set.h"
 #include "extensions/grit/extensions_resources.h"
-#include "extensions/test/test_api_features.h"
-#include "extensions/test/test_behavior_features.h"
-#include "extensions/test/test_manifest_features.h"
-#include "extensions/test/test_permission_features.h"
 #include "extensions/test/test_permission_message_provider.h"
 
 namespace extensions {
 
 TestExtensionsClient::TestExtensionsClient()
     : webstore_base_url_(extension_urls::kChromeWebstoreBaseURL),
-      webstore_update_url_(extension_urls::kChromeWebstoreUpdateURL) {}
+      webstore_update_url_(extension_urls::kChromeWebstoreUpdateURL) {
+  AddAPIProvider(std::make_unique<CoreExtensionsAPIProvider>());
+}
 
 TestExtensionsClient::~TestExtensionsClient() {
 }
@@ -48,17 +39,6 @@ void TestExtensionsClient::RemoveBrowserImagePathsFilter(
 }
 
 void TestExtensionsClient::Initialize() {
-  // Registration could already be finalized in unit tests, where the utility
-  // thread runs in-process.
-  if (!ManifestHandler::IsRegistrationFinalized()) {
-    RegisterCommonManifestHandlers();
-    ManifestHandler::FinalizeRegistration();
-  }
-
-  // Allow the core API permissions.
-  static ExtensionsAPIPermissions extensions_api_permissions;
-  PermissionsInfo::GetInstance()->AddProvider(extensions_api_permissions,
-                                              GetExtensionsPermissionAliases());
 }
 
 void TestExtensionsClient::InitializeWebStoreUrls(
@@ -79,31 +59,6 @@ TestExtensionsClient::GetPermissionMessageProvider() const {
 
 const std::string TestExtensionsClient::GetProductName() {
   return "extensions_test";
-}
-
-std::unique_ptr<FeatureProvider> TestExtensionsClient::CreateFeatureProvider(
-    const std::string& name) const {
-  std::unique_ptr<FeatureProvider> provider;
-  if (name == "api") {
-    provider.reset(new TestAPIFeatureProvider());
-  } else if (name == "manifest") {
-    provider.reset(new TestManifestFeatureProvider());
-  } else if (name == "permission") {
-    provider.reset(new TestPermissionFeatureProvider());
-  } else if (name == "behavior") {
-    provider.reset(new TestBehaviorFeatureProvider());
-  } else {
-    NOTREACHED();
-  }
-  return provider;
-}
-
-std::unique_ptr<JSONFeatureProviderSource>
-TestExtensionsClient::CreateAPIFeatureSource() const {
-  std::unique_ptr<JSONFeatureProviderSource> source(
-      new JSONFeatureProviderSource("api"));
-  source->LoadJSON(IDR_EXTENSION_API_FEATURES);
-  return source;
 }
 
 void TestExtensionsClient::FilterHostPermissions(
@@ -132,16 +87,6 @@ URLPatternSet TestExtensionsClient::GetPermittedChromeSchemeHosts(
 bool TestExtensionsClient::IsScriptableURL(const GURL& url,
                                            std::string* error) const {
   return true;
-}
-
-bool TestExtensionsClient::IsAPISchemaGenerated(
-    const std::string& name) const {
-  return api::GeneratedSchemas::IsGenerated(name);
-}
-
-base::StringPiece TestExtensionsClient::GetAPISchema(
-    const std::string& name) const {
-  return api::GeneratedSchemas::Get(name);
 }
 
 bool TestExtensionsClient::ShouldSuppressFatalErrors() const {

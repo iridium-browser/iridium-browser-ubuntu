@@ -5,19 +5,16 @@
 #include "ash/system/tray_accessibility.h"
 
 #include "ash/accessibility/accessibility_controller.h"
+#include "ash/public/cpp/ash_features.h"
 #include "ash/public/cpp/ash_pref_names.h"
 #include "ash/session/session_controller.h"
 #include "ash/shell.h"
 #include "ash/system/tray/system_tray.h"
+#include "ash/system/tray/system_tray_item_detailed_view_delegate.h"
 #include "ash/system/tray/system_tray_test_api.h"
 #include "ash/test/ash_test_base.h"
 #include "base/macros.h"
-#include "base/strings/string16.h"
-#include "base/strings/utf_string_conversions.h"
 #include "components/prefs/pref_service.h"
-#include "ui/message_center/message_center.h"
-
-using message_center::MessageCenter;
 
 namespace ash {
 namespace {
@@ -45,92 +42,104 @@ class TrayAccessibilityTest : public AshTestBase {
   // testing::Test:
   void SetUp() override {
     AshTestBase::SetUp();
+
+    if (features::IsSystemTrayUnifiedEnabled())
+      return;
+
     tray_item_ = SystemTrayTestApi(Shell::Get()->GetPrimarySystemTray())
                      .tray_accessibility();
   }
 
-  // These functions are members so TrayAccessibility can friend the test.
-  bool CreateDetailedMenu() {
-    tray_item_->ShowDetailedView(0);
-    return tray_item_->detailed_menu_ != nullptr;
+  void CreateDetailedMenu() {
+    // TODO(tetsui): Use UnifiedDetailedViewDelegate, or create a delegate for
+    // unit testing, when removing SystemTrayItemDetailedViewDelegate.
+    delegate_ = std::make_unique<SystemTrayItemDetailedViewDelegate>(nullptr);
+    detailed_menu_ =
+        std::make_unique<tray::AccessibilityDetailedView>(delegate_.get());
   }
 
   void CloseDetailMenu() {
-    ASSERT_TRUE(tray_item_->detailed_menu_);
-    tray_item_->OnDetailedViewDestroyed();
-    ASSERT_FALSE(tray_item_->detailed_menu_);
+    detailed_menu_.reset();
+    delegate_.reset();
   }
 
   bool IsSpokenFeedbackMenuShownOnDetailMenu() const {
-    return tray_item_->detailed_menu_->spoken_feedback_view_;
+    return detailed_menu_->spoken_feedback_view_;
   }
 
   bool IsSelectToSpeakShownOnDetailMenu() const {
-    return tray_item_->detailed_menu_->select_to_speak_view_;
+    return detailed_menu_->select_to_speak_view_;
   }
 
   bool IsHighContrastMenuShownOnDetailMenu() const {
-    return tray_item_->detailed_menu_->high_contrast_view_;
+    return detailed_menu_->high_contrast_view_;
   }
 
   bool IsScreenMagnifierMenuShownOnDetailMenu() const {
-    return tray_item_->detailed_menu_->screen_magnifier_view_;
+    return detailed_menu_->screen_magnifier_view_;
   }
 
   bool IsLargeCursorMenuShownOnDetailMenu() const {
-    return tray_item_->detailed_menu_->large_cursor_view_;
+    return detailed_menu_->large_cursor_view_;
   }
 
   bool IsAutoclickMenuShownOnDetailMenu() const {
-    return tray_item_->detailed_menu_->autoclick_view_;
+    return detailed_menu_->autoclick_view_;
   }
 
   bool IsVirtualKeyboardMenuShownOnDetailMenu() const {
-    return tray_item_->detailed_menu_->virtual_keyboard_view_;
+    return detailed_menu_->virtual_keyboard_view_;
   }
 
   bool IsMonoAudioMenuShownOnDetailMenu() const {
-    return tray_item_->detailed_menu_->mono_audio_view_;
+    return detailed_menu_->mono_audio_view_;
   }
 
   bool IsCaretHighlightMenuShownOnDetailMenu() const {
-    return tray_item_->detailed_menu_->caret_highlight_view_;
+    return detailed_menu_->caret_highlight_view_;
   }
 
   bool IsHighlightMouseCursorMenuShownOnDetailMenu() const {
-    return tray_item_->detailed_menu_->highlight_mouse_cursor_view_;
+    return detailed_menu_->highlight_mouse_cursor_view_;
   }
 
   bool IsHighlightKeyboardFocusMenuShownOnDetailMenu() const {
-    return tray_item_->detailed_menu_->highlight_keyboard_focus_view_;
+    return detailed_menu_->highlight_keyboard_focus_view_;
   }
 
   bool IsStickyKeysMenuShownOnDetailMenu() const {
-    return tray_item_->detailed_menu_->sticky_keys_view_;
+    return detailed_menu_->sticky_keys_view_;
   }
 
   // In material design we show the help button but theme it as disabled if
   // it is not possible to load the help page.
   bool IsHelpAvailableOnDetailMenu() {
-    return tray_item_->detailed_menu_->help_view_->state() ==
-           views::Button::STATE_NORMAL;
+    return detailed_menu_->help_view_->state() == views::Button::STATE_NORMAL;
   }
 
   // In material design we show the settings button but theme it as disabled if
   // it is not possible to load the settings page.
   bool IsSettingsAvailableOnDetailMenu() {
-    return tray_item_->detailed_menu_->settings_view_->state() ==
+    return detailed_menu_->settings_view_->state() ==
            views::Button::STATE_NORMAL;
   }
 
   TrayAccessibility* tray_item_;  // Not owned.
 
  private:
+  std::unique_ptr<DetailedViewDelegate> delegate_;
+  std::unique_ptr<tray::AccessibilityDetailedView> detailed_menu_;
+
   DISALLOW_COPY_AND_ASSIGN(TrayAccessibilityTest);
 };
 
 // Tests that the icon becomes visible when the tray menu toggles a feature.
 TEST_F(TrayAccessibilityTest, VisibilityFromMenu) {
+  // TODO(tetsui): Remove the test after UnifiedSystemTray launch.
+  // https://crbug.com/847104
+  if (features::IsSystemTrayUnifiedEnabled())
+    return;
+
   // By default the icon isn't visible.
   EXPECT_FALSE(tray_item_->tray_view()->visible());
 
@@ -145,6 +154,11 @@ TEST_F(TrayAccessibilityTest, VisibilityFromMenu) {
 
 // Tests that the icon becomes visible when webui settings toggles a feature.
 TEST_F(TrayAccessibilityTest, VisibilityFromSettings) {
+  // TODO(tetsui): Remove the test after UnifiedSystemTray launch.
+  // https://crbug.com/847104
+  if (features::IsSystemTrayUnifiedEnabled())
+    return;
+
   // By default the icon isn't visible.
   EXPECT_FALSE(tray_item_->tray_view()->visible());
 
@@ -157,83 +171,10 @@ TEST_F(TrayAccessibilityTest, VisibilityFromSettings) {
   EXPECT_FALSE(tray_item_->tray_view()->visible());
 }
 
-TEST_F(TrayAccessibilityTest, ShowNotificationOnSpokenFeedback) {
-  const base::string16 kChromeVoxEnabledTitle =
-      base::ASCIIToUTF16("ChromeVox enabled");
-  const base::string16 kChromeVoxEnabled =
-      base::ASCIIToUTF16("Press Ctrl + Alt + Z to disable spoken feedback.");
-  AccessibilityController* controller =
-      Shell::Get()->accessibility_controller();
-
-  // Enabling spoken feedback should show the notification if specified to show
-  // notification.
-  controller->SetSpokenFeedbackEnabled(true, A11Y_NOTIFICATION_SHOW);
-  message_center::NotificationList::Notifications notifications =
-      MessageCenter::Get()->GetVisibleNotifications();
-  ASSERT_EQ(1u, notifications.size());
-  EXPECT_EQ(kChromeVoxEnabledTitle, (*notifications.begin())->title());
-  EXPECT_EQ(kChromeVoxEnabled, (*notifications.begin())->message());
-
-  // Disabling spoken feedback should not show any notification even if
-  // specified to show notification.
-  controller->SetSpokenFeedbackEnabled(false, A11Y_NOTIFICATION_SHOW);
-  notifications = MessageCenter::Get()->GetVisibleNotifications();
-  EXPECT_EQ(0u, notifications.size());
-
-  // Enabling spoken feedback but not specified to show notification should not
-  // show any notification, for example toggling on tray detailed menu.
-  // TODO(warx): migrate clicking on tray detailed menu from browser tests.
-  controller->SetSpokenFeedbackEnabled(true, A11Y_NOTIFICATION_NONE);
-  notifications = MessageCenter::Get()->GetVisibleNotifications();
-  EXPECT_EQ(0u, notifications.size());
-}
-
-TEST_F(TrayAccessibilityTest, ShowNotificationOnBrailleDisplayStateChanged) {
-  const base::string16 kBrailleConnected =
-      base::ASCIIToUTF16("Braille display connected.");
-  const base::string16 kChromeVoxEnabled =
-      base::ASCIIToUTF16("Press Ctrl + Alt + Z to disable spoken feedback.");
-  const base::string16 kBrailleConnectedAndChromeVoxEnabledTitle =
-      base::ASCIIToUTF16("Braille and ChromeVox are enabled");
-  AccessibilityController* controller =
-      Shell::Get()->accessibility_controller();
-
-  controller->SetSpokenFeedbackEnabled(true, A11Y_NOTIFICATION_SHOW);
-  EXPECT_TRUE(controller->IsSpokenFeedbackEnabled());
-  // Connecting a braille display when spoken feedback is already enabled
-  // should only show the message about the braille display.
-  controller->BrailleDisplayStateChanged(true);
-  message_center::NotificationList::Notifications notifications =
-      MessageCenter::Get()->GetVisibleNotifications();
-  ASSERT_EQ(1u, notifications.size());
-  EXPECT_EQ(base::string16(), (*notifications.begin())->title());
-  EXPECT_EQ(kBrailleConnected, (*notifications.begin())->message());
-
-  // Neither disconnecting a braille display, nor disabling spoken feedback
-  // should show any notification.
-  controller->BrailleDisplayStateChanged(false);
-  EXPECT_TRUE(controller->IsSpokenFeedbackEnabled());
-  notifications = MessageCenter::Get()->GetVisibleNotifications();
-  EXPECT_EQ(0u, notifications.size());
-  controller->SetSpokenFeedbackEnabled(false, A11Y_NOTIFICATION_SHOW);
-  notifications = MessageCenter::Get()->GetVisibleNotifications();
-  EXPECT_EQ(0u, notifications.size());
-  EXPECT_FALSE(controller->IsSpokenFeedbackEnabled());
-
-  // Connecting a braille display should enable spoken feedback and show
-  // both messages.
-  controller->BrailleDisplayStateChanged(true);
-  EXPECT_TRUE(controller->IsSpokenFeedbackEnabled());
-  notifications = MessageCenter::Get()->GetVisibleNotifications();
-  EXPECT_EQ(kBrailleConnectedAndChromeVoxEnabledTitle,
-            (*notifications.begin())->title());
-  EXPECT_EQ(kChromeVoxEnabled, (*notifications.begin())->message());
-}
-
 TEST_F(TrayAccessibilityTest, CheckMenuVisibilityOnDetailMenu) {
   // Except help & settings, others should be kept the same
   // in LOGIN | NOT LOGIN | LOCKED. https://crbug.com/632107.
-  EXPECT_TRUE(CreateDetailedMenu());
+  CreateDetailedMenu();
   EXPECT_TRUE(IsSpokenFeedbackMenuShownOnDetailMenu());
   EXPECT_TRUE(IsSelectToSpeakShownOnDetailMenu());
   EXPECT_TRUE(IsHighContrastMenuShownOnDetailMenu());
@@ -252,7 +193,7 @@ TEST_F(TrayAccessibilityTest, CheckMenuVisibilityOnDetailMenu) {
 
   // Simulate screen lock.
   BlockUserSession(BLOCKED_BY_LOCK_SCREEN);
-  EXPECT_TRUE(CreateDetailedMenu());
+  CreateDetailedMenu();
   EXPECT_TRUE(IsSpokenFeedbackMenuShownOnDetailMenu());
   EXPECT_TRUE(IsSelectToSpeakShownOnDetailMenu());
   EXPECT_TRUE(IsHighContrastMenuShownOnDetailMenu());
@@ -272,7 +213,7 @@ TEST_F(TrayAccessibilityTest, CheckMenuVisibilityOnDetailMenu) {
 
   // Simulate adding multiprofile user.
   BlockUserSession(BLOCKED_BY_USER_ADDING_SCREEN);
-  EXPECT_TRUE(CreateDetailedMenu());
+  CreateDetailedMenu();
   EXPECT_TRUE(IsSpokenFeedbackMenuShownOnDetailMenu());
   EXPECT_TRUE(IsSelectToSpeakShownOnDetailMenu());
   EXPECT_TRUE(IsHighContrastMenuShownOnDetailMenu());
@@ -299,6 +240,12 @@ class TrayAccessibilityLoginScreenTest : public NoSessionAshTestBase {
   // NoSessionAshTestBase:
   void SetUp() override {
     NoSessionAshTestBase::SetUp();
+
+    // TODO(tetsui): Remove after UnifiedSystemTray launch.
+    // https://crbug.com/847104
+    if (features::IsSystemTrayUnifiedEnabled())
+      return;
+
     tray_item_ = SystemTrayTestApi(Shell::Get()->GetPrimarySystemTray())
                      .tray_accessibility();
   }
@@ -324,6 +271,11 @@ class TrayAccessibilityLoginScreenTest : public NoSessionAshTestBase {
 };
 
 TEST_F(TrayAccessibilityLoginScreenTest, LoginStatus) {
+  // TODO(tetsui): Remove the test after UnifiedSystemTray launch.
+  // https://crbug.com/847104
+  if (features::IsSystemTrayUnifiedEnabled())
+    return;
+
   // By default the icon is not visible at the login screen.
   views::View* tray_icon = tray_item_->tray_view();
   EXPECT_FALSE(tray_icon->visible());

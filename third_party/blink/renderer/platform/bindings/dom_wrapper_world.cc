@@ -35,6 +35,7 @@
 
 #include "third_party/blink/renderer/platform/bindings/dom_data_store.h"
 #include "third_party/blink/renderer/platform/bindings/v8_per_isolate_data.h"
+#include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 #include "third_party/blink/renderer/platform/wtf/hash_traits.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 
@@ -84,7 +85,6 @@ DOMWrapperWorld::DOMWrapperWorld(v8::Isolate* isolate,
       break;
     case WorldType::kIsolated:
     case WorldType::kInspectorIsolated:
-    case WorldType::kGarbageCollector:
     case WorldType::kRegExp:
     case WorldType::kTesting:
     case WorldType::kForV8ContextSnapshotNonMain:
@@ -115,14 +115,14 @@ void DOMWrapperWorld::AllWorldsInCurrentThread(
     worlds.push_back(world);
 }
 
-void DOMWrapperWorld::TraceWrappers(const ScriptWrappable* script_wrappable,
-                                    const ScriptWrappableVisitor* visitor) {
+void DOMWrapperWorld::Trace(const ScriptWrappable* script_wrappable,
+                            Visitor* visitor) {
   // Marking for worlds other than the main world.
   DCHECK(ThreadState::Current()->GetIsolate());
   for (DOMWrapperWorld* world : GetWorldMap().Values()) {
     DOMDataStore& data_store = world->DomDataStore();
     if (data_store.ContainsWrapper(script_wrappable))
-      data_store.TraceWrappers(script_wrappable, visitor);
+      data_store.Trace(script_wrappable, visitor);
   }
 }
 
@@ -283,7 +283,6 @@ int DOMWrapperWorld::GenerateWorldIdForType(WorldType world_type) {
         return WorldId::kInvalidWorldId;
       return next_devtools_isolated_world_id++;
     }
-    case WorldType::kGarbageCollector:
     case WorldType::kRegExp:
     case WorldType::kTesting:
     case WorldType::kForV8ContextSnapshotNonMain:

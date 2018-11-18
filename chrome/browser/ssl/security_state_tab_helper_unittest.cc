@@ -7,7 +7,7 @@
 #include <string>
 
 #include "base/command_line.h"
-#include "base/test/histogram_tester.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "components/security_state/content/ssl_status_input_event_data.h"
 #include "content/public/browser/navigation_entry.h"
@@ -145,7 +145,7 @@ TEST_P(SecurityStateTabHelperHistogramTest, FormSubmissionHistogram) {
   base::HistogramTester histograms;
   StartFormSubmissionNavigation();
   histograms.ExpectUniqueSample(kFormSubmissionSecurityLevelHistogram,
-                                security_state::NONE, 1);
+                                security_state::HTTP_SHOW_WARNING, 1);
 }
 
 // Tests that UMA logs the omnibox warning when security level is

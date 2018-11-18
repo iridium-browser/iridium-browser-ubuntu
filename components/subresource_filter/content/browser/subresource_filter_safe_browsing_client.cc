@@ -37,7 +37,9 @@ SubresourceFilterSafeBrowsingClient::SubresourceFilterSafeBrowsingClient(
     : database_manager_(std::move(database_manager)),
       throttle_(std::move(throttle)),
       io_task_runner_(std::move(io_task_runner)),
-      throttle_task_runner_(std::move(throttle_task_runner)) {}
+      throttle_task_runner_(std::move(throttle_task_runner)) {
+  DCHECK(database_manager_);
+}
 
 SubresourceFilterSafeBrowsingClient::~SubresourceFilterSafeBrowsingClient() {}
 
@@ -67,9 +69,10 @@ void SubresourceFilterSafeBrowsingClient::OnCheckBrowseUrlResult(
                          "SubresourceFilterSBCheck", request, "check_result",
                          check_result.ToTracedValue());
   throttle_task_runner_->PostTask(
-      FROM_HERE, base::Bind(&SubresourceFilterSafeBrowsingActivationThrottle::
-                                OnCheckUrlResultOnUI,
-                            throttle_, check_result));
+      FROM_HERE,
+      base::BindOnce(&SubresourceFilterSafeBrowsingActivationThrottle::
+                         OnCheckUrlResultOnUI,
+                     throttle_, check_result));
 
   DCHECK(requests_.find(request) != requests_.end());
   requests_.erase(request);

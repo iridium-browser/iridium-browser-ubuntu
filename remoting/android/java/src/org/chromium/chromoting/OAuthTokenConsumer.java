@@ -5,13 +5,13 @@
 package org.chromium.chromoting;
 
 import android.content.Context;
-import android.os.AsyncTask;
 import android.os.Handler;
 import android.os.Looper;
 
 import com.google.android.gms.auth.GoogleAuthException;
 import com.google.android.gms.auth.GoogleAuthUtil;
 
+import org.chromium.base.task.AsyncTask;
 import org.chromium.chromoting.base.OAuthTokenFetcher;
 
 import java.io.IOException;
@@ -95,9 +95,9 @@ public class OAuthTokenConsumer {
      *                 callback.
      */
     public void revokeLatestToken(final OAuthTokenFetcher.Callback callback) {
-        new AsyncTask<Void, Void, Void>() {
+        new AsyncTask<Void>() {
             @Override
-            protected Void doInBackground(Void... params) {
+            protected Void doInBackground() {
                 try {
                     GoogleAuthUtil.clearToken(mContext, mLatestToken);
                     mLatestToken = null;
@@ -121,7 +121,8 @@ public class OAuthTokenConsumer {
                 }
                 return null;
             }
-        }.execute();
+        }
+                .executeOnExecutor(AsyncTask.SERIAL_EXECUTOR);
     }
 
     private void handleErrorOnMainThread(final OAuthTokenFetcher.Callback callback,

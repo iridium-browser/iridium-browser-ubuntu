@@ -4,8 +4,8 @@
 
 #include "third_party/blink/renderer/core/paint/box_model_object_painter.h"
 
+#include "third_party/blink/renderer/core/layout/layout_block.h"
 #include "third_party/blink/renderer/core/layout/layout_box_model_object.h"
-#include "third_party/blink/renderer/core/layout/layout_object.h"
 #include "third_party/blink/renderer/core/layout/line/root_inline_box.h"
 #include "third_party/blink/renderer/core/paint/background_image_geometry.h"
 #include "third_party/blink/renderer/core/paint/object_painter.h"
@@ -49,18 +49,12 @@ LayoutSize LogicalOffsetOnLine(const InlineFlowBox& flow_box) {
 }  // anonymous namespace
 
 BoxModelObjectPainter::BoxModelObjectPainter(const LayoutBoxModelObject& box,
-                                             const InlineFlowBox* flow_box,
-                                             const LayoutSize& flow_box_size)
-    : BoxPainterBase(box,
-                     &box.GetDocument(),
+                                             const InlineFlowBox* flow_box)
+    : BoxPainterBase(&box.GetDocument(),
                      box.StyleRef(),
-                     GeneratingNodeForObject(box),
-                     box.BorderBoxOutsets(),
-                     box.PaddingOutsets(),
-                     box.Layer()),
+                     GeneratingNodeForObject(box)),
       box_model_(box),
-      flow_box_(flow_box),
-      flow_box_size_(flow_box_size) {}
+      flow_box_(flow_box) {}
 
 bool BoxModelObjectPainter::
     IsPaintingBackgroundOfPaintContainerIntoScrollingContentsLayer(
@@ -74,45 +68,31 @@ bool BoxModelObjectPainter::
 
 void BoxModelObjectPainter::PaintTextClipMask(GraphicsContext& context,
                                               const IntRect& mask_rect,
-                                              const LayoutPoint& paint_offset) {
+                                              const LayoutPoint& paint_offset,
+                                              bool object_has_multiple_boxes) {
   PaintInfo paint_info(context, mask_rect, PaintPhase::kTextClip,
                        kGlobalPaintNormalPhase, 0);
   if (flow_box_) {
     LayoutSize local_offset = ToLayoutSize(flow_box_->Location());
-    if (box_model_.StyleRef().BoxDecorationBreak() ==
-        EBoxDecorationBreak::kSlice) {
+    if (object_has_multiple_boxes &&
+        box_model_.StyleRef().BoxDecorationBreak() ==
+            EBoxDecorationBreak::kSlice) {
       local_offset -= LogicalOffsetOnLine(*flow_box_);
     }
     const RootInlineBox& root = flow_box_->Root();
     flow_box_->Paint(paint_info, paint_offset - local_offset, root.LineTop(),
                      root.LineBottom());
+  } else if (box_model_.IsLayoutBlock()) {
+    ToLayoutBlock(box_model_).PaintObject(paint_info, paint_offset);
   } else {
-    // FIXME: this should only have an effect for the line box list within
-    // |box_model_|. Change this to create a LineBoxListPainter directly.
-    LayoutSize local_offset = box_model_.IsBox()
-                                  ? ToLayoutBox(&box_model_)->LocationOffset()
-                                  : LayoutSize();
-    box_model_.Paint(paint_info, paint_offset - local_offset);
+    // We should go through the above path for LayoutInlines.
+    DCHECK(!box_model_.IsLayoutInline());
+    // Other types of objects don't have anything meaningful to paint for text
+    // clip mask.
   }
 }
 
-FloatRoundedRect BoxModelObjectPainter::GetBackgroundRoundedRect(
-    const LayoutRect& border_rect,
-    bool include_logical_left_edge,
-    bool include_logical_right_edge) const {
-  FloatRoundedRect border = BoxPainterBase::GetBackgroundRoundedRect(
-      border_rect, include_logical_left_edge, include_logical_right_edge);
-  if (flow_box_ && (flow_box_->NextForSameLayoutObject() ||
-                    flow_box_->PrevForSameLayoutObject())) {
-    FloatRoundedRect segment_border = box_model_.StyleRef().GetRoundedBorderFor(
-        LayoutRect(LayoutPoint(), LayoutSize(FlooredIntSize(flow_box_size_))),
-        include_logical_left_edge, include_logical_right_edge);
-    border.SetRadii(segment_border.GetRadii());
-  }
-  return border;
-}
-
-LayoutRect BoxModelObjectPainter::AdjustForScrolledContent(
+LayoutRect BoxModelObjectPainter::AdjustRectForScrolledContent(
     const PaintInfo& paint_info,
     const BoxPainterBase::FillLayerInfo& info,
     const LayoutRect& rect) {
@@ -130,7 +110,7 @@ LayoutRect BoxModelObjectPainter::AdjustForScrolledContent(
     // the ends.
     IntSize offset = this_box.ScrolledContentOffset();
     scrolled_paint_rect.Move(-offset);
-    LayoutRectOutsets border = BorderOutsets(info);
+    LayoutRectOutsets border = AdjustedBorderOutsets(info);
     scrolled_paint_rect.SetWidth(border.Left() + this_box.ScrollWidth() +
                                  border.Right());
     scrolled_paint_rect.SetHeight(this_box.BorderTop() +
@@ -138,6 +118,14 @@ LayoutRect BoxModelObjectPainter::AdjustForScrolledContent(
                                   this_box.BorderBottom());
   }
   return scrolled_paint_rect;
+}
+
+LayoutRectOutsets BoxModelObjectPainter::ComputeBorders() const {
+  return box_model_.BorderBoxOutsets();
+}
+
+LayoutRectOutsets BoxModelObjectPainter::ComputePadding() const {
+  return box_model_.PaddingOutsets();
 }
 
 BoxPainterBase::FillLayerInfo BoxModelObjectPainter::GetFillLayerInfo(

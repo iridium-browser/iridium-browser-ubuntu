@@ -13,11 +13,14 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/optional.h"
 #include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
 #include "components/domain_reliability/clear_mode.h"
 #include "components/keyed_service/content/browser_context_keyed_service_factory.h"
+#include "content/public/browser/browser_thread.h"
 #include "extensions/buildflags/buildflags.h"
+#include "services/network/public/mojom/network_context.mojom.h"
 #include "services/network/public/mojom/network_service.mojom.h"
 
 #if defined(OS_CHROMEOS)
@@ -37,7 +40,6 @@ class ZoomLevelDelegate;
 }
 
 namespace net {
-class CookieStore;
 class URLRequestContextGetter;
 }
 
@@ -69,10 +71,9 @@ class TestingProfile : public Profile {
   // Default constructor that cannot be used with multi-profiles.
   TestingProfile();
 
-  typedef std::vector<std::pair<
-              BrowserContextKeyedServiceFactory*,
-              BrowserContextKeyedServiceFactory::TestingFactoryFunction> >
-      TestingFactories;
+  using TestingFactories =
+      std::vector<std::pair<BrowserContextKeyedServiceFactory*,
+                            BrowserContextKeyedServiceFactory::TestingFactory>>;
 
   // Helper class for building an instance of TestingProfile (allows injecting
   // mocks for various services prior to profile initialization).
@@ -92,9 +93,17 @@ class TestingProfile : public Profile {
 
     // Adds a testing factory to the TestingProfile. These testing factories
     // are applied before the ProfileKeyedServices are created.
+    // DEPRECATED: use TestingFactory version instead, see
+    // http://crbug.com/809610
     void AddTestingFactory(
         BrowserContextKeyedServiceFactory* service_factory,
-        BrowserContextKeyedServiceFactory::TestingFactoryFunction callback);
+        BrowserContextKeyedServiceFactory::TestingFactoryFunction function);
+
+    // Adds a testing factory to the TestingProfile. These testing factories
+    // are applied before the ProfileKeyedServices are created.
+    void AddTestingFactory(
+        BrowserContextKeyedServiceFactory* service_factory,
+        BrowserContextKeyedServiceFactory::TestingFactory testing_factory);
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
     // Sets the ExtensionSpecialStoragePolicy to be returned by
@@ -112,6 +121,10 @@ class TestingProfile : public Profile {
 
     // Makes the Profile being built a guest profile.
     void SetGuestSession();
+
+    // Override the default behavior of is_new_profile to return the provided
+    // value.
+    void OverrideIsNewProfile(bool is_new_profile);
 
     // Sets the supervised user ID (which is empty by default). If it is set to
     // a non-empty string, the profile is supervised.
@@ -144,6 +157,7 @@ class TestingProfile : public Profile {
     base::FilePath path_;
     Delegate* delegate_;
     bool guest_session_;
+    base::Optional<bool> is_new_profile_;
     std::string supervised_user_id_;
     std::unique_ptr<policy::PolicyService> policy_service_;
     TestingFactories testing_factories_;
@@ -175,9 +189,10 @@ class TestingProfile : public Profile {
                  std::unique_ptr<sync_preferences::PrefServiceSyncable> prefs,
                  TestingProfile* parent,
                  bool guest_session,
+                 base::Optional<bool> is_new_profile,
                  const std::string& supervised_user_id,
                  std::unique_ptr<policy::PolicyService> policy_service,
-                 const TestingFactories& factories,
+                 TestingFactories testing_factories,
                  const std::string& profile_name);
 
   ~TestingProfile() override;
@@ -220,6 +235,9 @@ class TestingProfile : public Profile {
   // Allow setting a profile as Guest after-the-fact to simplify some tests.
   void SetGuestSession(bool guest);
 
+  // Allow setting the return value of IsNewProfile.
+  void SetIsNewProfile(bool is_new_profile);
+
   sync_preferences::TestingPrefServiceSyncable* GetTestingPrefService();
 
   // Called on the parent of an incognito |profile|. Usually called from the
@@ -231,6 +249,7 @@ class TestingProfile : public Profile {
 
   // content::BrowserContext
   base::FilePath GetPath() const override;
+  base::FilePath GetCachePath() const override;
 #if !defined(OS_ANDROID)
   std::unique_ptr<content::ZoomLevelDelegate> CreateZoomLevelDelegate(
       const base::FilePath& partition_path) override;
@@ -243,7 +262,8 @@ class TestingProfile : public Profile {
   storage::SpecialStoragePolicy* GetSpecialStoragePolicy() override;
   content::PushMessagingService* GetPushMessagingService() override;
   content::SSLHostStateDelegate* GetSSLHostStateDelegate() override;
-  content::PermissionManager* GetPermissionManager() override;
+  content::PermissionControllerDelegate* GetPermissionControllerDelegate()
+      override;
   content::BackgroundFetchDelegate* GetBackgroundFetchDelegate() override;
   content::BackgroundSyncController* GetBackgroundSyncController() override;
   content::BrowsingDataRemoverDelegate* GetBrowsingDataRemoverDelegate()
@@ -297,10 +317,6 @@ class TestingProfile : public Profile {
       ExtensionSpecialStoragePolicy* extension_special_storage_policy);
 #endif
   ExtensionSpecialStoragePolicy* GetExtensionSpecialStoragePolicy() override;
-  // TODO(ajwong): Remove this API in favor of directly retrieving the
-  // CookieStore from the StoragePartition after ExtensionURLRequestContext
-  // has been removed.
-  net::CookieStore* GetCookieStore();
 
   PrefService* GetPrefs() override;
   const PrefService* GetPrefs() const override;
@@ -308,8 +324,10 @@ class TestingProfile : public Profile {
   ChromeZoomLevelPrefs* GetZoomLevelPrefs() override;
 #endif  // !defined(OS_ANDROID)
   net::URLRequestContextGetter* GetRequestContext() override;
-  net::URLRequestContextGetter* GetRequestContextForExtensions() override;
-  net::SSLConfigService* GetSSLConfigService() override;
+  base::OnceCallback<net::CookieStore*()> GetExtensionsCookieStoreGetter()
+      override;
+  scoped_refptr<network::SharedURLLoaderFactory> GetURLLoaderFactory() override;
+
   void set_last_session_exited_cleanly(bool value) {
     last_session_exited_cleanly_ = value;
   }
@@ -319,13 +337,18 @@ class TestingProfile : public Profile {
   void set_last_selected_directory(const base::FilePath& path) override;
   bool WasCreatedByVersionOrLater(const std::string& version) override;
   bool IsGuestSession() const override;
+  bool IsNewProfile() override;
   void SetExitType(ExitType exit_type) override {}
   ExitType GetLastSessionExitType() override;
-  network::mojom::NetworkContextPtr CreateMainNetworkContext() override;
+  network::mojom::NetworkContextPtr CreateNetworkContext(
+      bool in_memory,
+      const base::FilePath& relative_partition_path) override;
+
 #if defined(OS_CHROMEOS)
   void ChangeAppLocale(const std::string&, AppLocaleChangedVia) override {}
   void OnLogin() override {}
   void InitChromeOSPreferences() override {}
+  chromeos::ScopedCrosSettingsTestHelper* ScopedCrosSettingsTestHelper();
 #endif  // defined(OS_CHROMEOS)
 
   // Schedules a task on the history backend and runs a nested loop until the
@@ -333,7 +356,6 @@ class TestingProfile : public Profile {
   // history service processes all pending requests.
   void BlockUntilHistoryProcessesPendingRequests();
 
-  chrome_browser_net::Predictor* GetNetworkPredictor() override;
   GURL GetHomePage() override;
 
   PrefService* GetOffTheRecordPrefs() override;
@@ -381,15 +403,20 @@ class TestingProfile : public Profile {
   // maps to this profile.
   void CreateProfilePolicyConnector();
 
-  // Internally, this is a TestURLRequestContextGetter that creates a dummy
-  // request context. Currently, only the CookieMonster is hooked up.
-  scoped_refptr<net::URLRequestContextGetter> extensions_request_context_;
+  std::unique_ptr<net::CookieStore, content::BrowserThread::DeleteOnIOThread>
+      extensions_cookie_store_;
+
+  // Holds a dummy network context request to avoid triggering connection error
+  // handler.
+  network::mojom::NetworkContextRequest network_context_request_;
 
   bool force_incognito_;
   std::unique_ptr<Profile> incognito_profile_;
   TestingProfile* original_profile_;
 
   bool guest_session_;
+
+  base::Optional<bool> is_new_profile_;
 
   std::string supervised_user_id_;
 

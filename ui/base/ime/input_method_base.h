@@ -35,7 +35,6 @@ class UI_BASE_IME_EXPORT InputMethodBase
       public base::SupportsWeakPtr<InputMethodBase>,
       public IMEInputContextHandlerInterface {
  public:
-  explicit InputMethodBase(internal::InputMethodDelegate* delegate = nullptr);
   ~InputMethodBase() override;
 
   // Overriden from InputMethod.
@@ -63,12 +62,18 @@ class UI_BASE_IME_EXPORT InputMethodBase
   TextInputMode GetTextInputMode() const override;
   int GetTextInputFlags() const override;
   bool CanComposeInline() const override;
-  void ShowImeIfNeeded() override;
+  bool GetClientShouldDoLearning() override;
+  void ShowVirtualKeyboardIfEnabled() override;
 
   void AddObserver(InputMethodObserver* observer) override;
   void RemoveObserver(InputMethodObserver* observer) override;
 
+  InputMethodKeyboardController* GetInputMethodKeyboardController() override;
+
  protected:
+  explicit InputMethodBase(internal::InputMethodDelegate* delegate = nullptr);
+  InputMethodBase(internal::InputMethodDelegate* delegate,
+                  std::unique_ptr<InputMethodKeyboardController> controller);
   virtual void OnWillChangeFocusedClient(TextInputClient* focused_before,
                                          TextInputClient* focused) {}
   virtual void OnDidChangeFocusedClient(TextInputClient* focused_before,
@@ -80,6 +85,7 @@ class UI_BASE_IME_EXPORT InputMethodBase
                              uint32_t cursor_pos,
                              bool visible) override;
   void DeleteSurroundingText(int32_t offset, uint32_t length) override;
+  SurroundingTextInfo GetSurroundingTextInfo() override;
   void SendKeyEvent(KeyEvent* event) override;
   InputMethod* GetInputMethod() override;
 
@@ -99,11 +105,6 @@ class UI_BASE_IME_EXPORT InputMethodBase
   // OnInputMethodChanged() method. It'll only take effect if the current text
   // input type is not TEXT_INPUT_TYPE_NONE.
   void OnInputMethodChanged() const;
-
-  // Convenience method to call delegate_->DispatchKeyEventPostIME().
-  // Returns true if the event was processed
-  ui::EventDispatchDetails DispatchKeyEventPostIME(ui::KeyEvent* event) const
-      WARN_UNUSED_RESULT;
 
   virtual ui::EventDispatchDetails DispatchKeyEventPostIME(
       ui::KeyEvent* event,
@@ -139,12 +140,14 @@ class UI_BASE_IME_EXPORT InputMethodBase
 
   TextInputClient* text_input_client_;
 
-  base::ObserverList<InputMethodObserver> observer_list_;
+  base::ObserverList<InputMethodObserver>::Unchecked observer_list_;
 
   std::vector<std::unique_ptr<ui::KeyEvent>> key_events_for_testing_;
 
   // Screen bounds of a on-screen keyboard.
   gfx::Rect keyboard_bounds_;
+
+  std::unique_ptr<InputMethodKeyboardController> keyboard_controller_;
 
   DISALLOW_COPY_AND_ASSIGN(InputMethodBase);
 };

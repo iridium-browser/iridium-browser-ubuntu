@@ -8,20 +8,15 @@
  * category.
  */
 Polymer({
-
   is: 'site-list',
 
-  behaviors: [SiteSettingsBehavior, WebUIListenerBehavior],
+  behaviors: [
+    SiteSettingsBehavior,
+    WebUIListenerBehavior,
+    ListPropertyUpdateBehavior,
+  ],
 
   properties: {
-    /** @private */
-    enableSiteSettings_: {
-      type: Boolean,
-      value: function() {
-        return loadTimeData.getBoolean('enableSiteSettings');
-      },
-    },
-
     /**
      * Some content types (like Location) do not allow the user to manually
      * edit the exception list from within Settings.
@@ -65,6 +60,12 @@ Polymer({
       value: settings.INVALID_CATEGORY_SUBTYPE,
     },
 
+    /** @private */
+    hasIncognito_: Boolean,
+
+    /** @private */
+    showAddSiteDialog_: Boolean,
+
     /**
      * Whether to show the Allow action in the action menu.
      * @private
@@ -98,7 +99,22 @@ Polymer({
         SESSION_ONLY: 'SessionOnly',
       }
     },
+
+    /** @private */
+    lastFocused_: Object,
+
+    /** @private */
+    tooltipText_: String,
   },
+
+  // <if expr="chromeos">
+  /**
+   * Android messages info object containing messages feature state and
+   * exception origin.
+   * @private {?settings.AndroidSmsInfo}
+   */
+  androidSmsInfo_: null,
+  // </if>
 
   /**
    * The element to return focus to, when the currently active dialog is closed.
@@ -115,6 +131,13 @@ Polymer({
         this.siteWithinCategoryChanged_.bind(this));
     this.addWebUIListener(
         'onIncognitoStatusChanged', this.onIncognitoStatusChanged_.bind(this));
+    // <if expr="chromeos">
+    this.addWebUIListener('settings.onAndroidSmsInfoChange', (info) => {
+      this.androidSmsInfo_ = info;
+      this.populateList_();
+    });
+    // </if>
+    this.browserProxy.updateIncognitoStatus();
   },
 
   /**
@@ -134,7 +157,9 @@ Polymer({
    * Another message is sent when the *last* incognito window closes.
    * @private
    */
-  onIncognitoStatusChanged_: function() {
+  onIncognitoStatusChanged_: function(hasIncognito) {
+    this.hasIncognito_ = hasIncognito;
+
     // The SESSION_ONLY list won't have any incognito exceptions. (Minor
     // optimization, not required).
     if (this.categorySubtype == settings.ContentSetting.SESSION_ONLY)
@@ -150,6 +175,9 @@ Polymer({
    * @private
    */
   configureWidget_: function() {
+    if (this.category == undefined)
+      return;
+
     // The observer for All Sites fires before the attached/ready event, so
     // initialize this here.
     if (this.browserProxy_ === undefined) {
@@ -158,7 +186,14 @@ Polymer({
     }
 
     this.setUpActionMenu_();
+
+    // <if expr="not chromeos">
     this.populateList_();
+    // </if>
+
+    // <if expr="chromeos">
+    this.updateAndroidSmsInfo_().then(this.populateList_.bind(this));
+    // </if>
 
     // The Session permissions are only for cookies.
     if (this.categorySubtype == settings.ContentSetting.SESSION_ONLY) {
@@ -177,49 +212,91 @@ Polymer({
   },
 
   /**
-   * @param {!SiteException} exception The content setting exception.
-   * @param {boolean} readOnlyList Whether the site exception list is read-only.
-   * @return {boolean}
-   * @private
-   */
-  shouldHideResetButton_: function(exception, readOnlyList) {
-    return exception.enforcement ==
-        chrome.settingsPrivate.Enforcement.ENFORCED ||
-        !(readOnlyList || !!exception.embeddingOrigin);
-  },
-
-  /**
-   * @param {!SiteException} exception The content setting exception.
-   * @param {boolean} readOnlyList Whether the site exception list is read-only.
-   * @return {boolean}
-   * @private
-   */
-  shouldHideActionMenu_: function(exception, readOnlyList) {
-    return exception.enforcement ==
-        chrome.settingsPrivate.Enforcement.ENFORCED ||
-        readOnlyList || !!exception.embeddingOrigin;
-  },
-
-  /**
    * A handler for the Add Site button.
-   * @param {!Event} e
    * @private
    */
-  onAddSiteTap_: function(e) {
+  onAddSiteTap_: function() {
     assert(!this.readOnlyList);
-    e.preventDefault();
-    const dialog = document.createElement('add-site-dialog');
-    dialog.category = this.category;
-    dialog.contentSetting = this.categorySubtype;
-    this.shadowRoot.appendChild(dialog);
+    this.showAddSiteDialog_ = true;
+  },
 
-    dialog.open(this.categorySubtype);
+  /** @private */
+  onAddSiteDialogClosed_: function() {
+    this.showAddSiteDialog_ = false;
+    cr.ui.focusWithoutInk(assert(this.$.addSite));
+  },
 
-    dialog.addEventListener('close', () => {
-      cr.ui.focusWithoutInk(assert(this.$.addSite));
-      dialog.remove();
+  /**
+   * Need to use common tooltip since the tooltip in the entry is cut off from
+   * the iron-list.
+   * @param {!{detail: {target: HTMLElement, text: string}}} e
+   * @private
+   */
+  onShowTooltip_: function(e) {
+    this.tooltipText_ = e.detail.text;
+    const target = e.detail.target;
+    // paper-tooltip normally determines the target from the |for| property,
+    // which is a selector. Here paper-tooltip is being reused by multiple
+    // potential targets. Since paper-tooltip does not expose a public property
+    // or method to update the target, the private property |_target| is
+    // updated directly.
+    this.$.tooltip._target = target;
+    /** @type {{updatePosition: Function}} */ (this.$.tooltip).updatePosition();
+    const hide = () => {
+      this.$.tooltip.hide();
+      target.removeEventListener('mouseleave', hide);
+      target.removeEventListener('blur', hide);
+      target.removeEventListener('tap', hide);
+      this.$.tooltip.removeEventListener('mouseenter', hide);
+    };
+    target.addEventListener('mouseleave', hide);
+    target.addEventListener('blur', hide);
+    target.addEventListener('tap', hide);
+    this.$.tooltip.addEventListener('mouseenter', hide);
+    this.$.tooltip.show();
+  },
+
+  // <if expr="chromeos">
+  /**
+   * Load android sms info if required and sets it to the |androidSmsInfo_|
+   * property. Returns a promise that resolves when load is complete.
+   * @private
+   */
+  updateAndroidSmsInfo_: function() {
+    // |androidSmsInfo_| is only relevant for NOTIFICATIONS category. Don't
+    // bother fetching it for other categories.
+    if (this.category === settings.ContentSettingsTypes.NOTIFICATIONS &&
+        loadTimeData.valueExists('enableMultideviceSettings') &&
+        loadTimeData.getBoolean('enableMultideviceSettings') &&
+        !this.androidSmsInfo_) {
+      const multideviceSetupProxy =
+          settings.MultiDeviceBrowserProxyImpl.getInstance();
+      return multideviceSetupProxy.getAndroidSmsInfo().then((info) => {
+        this.androidSmsInfo_ = info;
+      });
+    }
+
+    return Promise.resolve();
+  },
+
+  /**
+   * Processes exceptions and adds showAndroidSmsNote field to
+   * the required exception item.
+   * @private
+   */
+  processExceptionsForAndroidSmsInfo_: function(sites) {
+    if (!this.androidSmsInfo_ || !this.androidSmsInfo_.enabled) {
+      return sites;
+    }
+    return sites.map((site) => {
+      if (site.origin === this.androidSmsInfo_.origin) {
+        return Object.assign({showAndroidSmsNote: true}, site);
+      } else {
+        return site;
+      }
     });
   },
+  // </if>
 
   /**
    * Populate the sites list for display.
@@ -227,53 +304,32 @@ Polymer({
    */
   populateList_: function() {
     this.browserProxy_.getExceptionList(this.category).then(exceptionList => {
-      this.processExceptions_([exceptionList]);
+      this.processExceptions_(exceptionList);
       this.closeActionMenu_();
     });
   },
 
   /**
    * Process the exception list returned from the native layer.
-   * @param {!Array<!Array<RawSiteException>>} data List of sites (exceptions)
-   *     to process.
+   * @param {!Array<RawSiteException>} exceptionList
    * @private
    */
-  processExceptions_: function(data) {
-    const sites = /** @type {!Array<RawSiteException>} */ ([]);
-    for (let i = 0; i < data.length; ++i) {
-      const exceptionList = data[i];
-      for (let k = 0; k < exceptionList.length; ++k) {
-        if (exceptionList[k].setting == settings.ContentSetting.DEFAULT ||
-            exceptionList[k].setting != this.categorySubtype) {
-          continue;
-        }
+  processExceptions_: function(exceptionList) {
+    let sites =
+        exceptionList
+            .filter(
+                site => site.setting != settings.ContentSetting.DEFAULT &&
+                    site.setting == this.categorySubtype)
+            .map(site => this.expandSiteException(site));
 
-        sites.push(exceptionList[k]);
-      }
-    }
-    this.sites = this.toSiteArray_(sites);
-  },
+    // <if expr="not chromeos">
+    this.updateList('sites', (x) => x.origin, sites);
+    // </if>
 
-  /**
-   * Converts a list of exceptions received from the C++ handler to
-   * full SiteException objects.
-   * @param {!Array<RawSiteException>} sites A list of sites to convert.
-   * @return {!Array<SiteException>} A list of full SiteExceptions.
-   * @private
-   */
-  toSiteArray_: function(sites) {
-    const results = /** @type {!Array<SiteException>} */ ([]);
-    let lastOrigin = '';
-    let lastEmbeddingOrigin = '';
-    for (let i = 0; i < sites.length; ++i) {
-      /** @type {!SiteException} */
-      const siteException = this.expandSiteException(sites[i]);
-
-      results.push(siteException);
-      lastOrigin = siteException.origin;
-      lastEmbeddingOrigin = siteException.embeddingOrigin;
-    }
-    return results;
+    // <if expr="chromeos">
+    sites = this.processExceptionsForAndroidSmsInfo_(sites);
+    this.updateList('sites', (x) => x.origin + x.showAndroidSmsNote, sites);
+    // </if>
   },
 
   /**
@@ -303,29 +359,6 @@ Polymer({
       return false;
 
     return this.showSessionOnlyAction_;
-  },
-
-  /**
-   * A handler for selecting a site (by clicking on the origin).
-   * @param {!{model: !{item: !SiteException}}} event
-   * @private
-   */
-  onOriginTap_: function(event) {
-    if (!this.enableSiteSettings_)
-      return;
-    settings.navigateTo(
-        settings.routes.SITE_SETTINGS_SITE_DETAILS,
-        new URLSearchParams('site=' + event.model.item.origin));
-  },
-
-  /**
-   * @param {?SiteException} site
-   * @private
-   */
-  resetPermissionForOrigin_: function(site) {
-    assert(site);
-    this.browserProxy.resetCategoryPermissionForPattern(
-        site.origin, site.embeddingOrigin, this.category, site.incognito);
   },
 
   /**
@@ -370,57 +403,28 @@ Polymer({
   onEditExceptionDialogClosed_: function() {
     this.showEditExceptionDialog_ = false;
     this.actionMenuSite_ = null;
-    this.activeDialogAnchor_.focus();
-    this.activeDialogAnchor_ = null;
+    if (this.activeDialogAnchor_) {
+      this.activeDialogAnchor_.focus();
+      this.activeDialogAnchor_ = null;
+    }
   },
 
   /** @private */
   onResetTap_: function() {
-    this.resetPermissionForOrigin_(this.actionMenuSite_);
+    const site = this.actionMenuSite_;
+    assert(site);
+    this.browserProxy.resetCategoryPermissionForPattern(
+        site.origin, site.embeddingOrigin, this.category, site.incognito);
     this.closeActionMenu_();
   },
 
   /**
-   * Returns the appropriate site description to display. This can, for example,
-   * be blank, an 'embedded on <site>' or 'Current incognito session' (or a
-   * mix of the last two).
-   * @param {SiteException} item The site exception entry.
-   * @return {string} The site description.
-   */
-  computeSiteDescription_: function(item) {
-    let displayName = '';
-    if (item.embeddingOrigin) {
-      displayName = loadTimeData.getStringF(
-          'embeddedOnHost', this.sanitizePort(item.embeddingOrigin));
-    } else if (this.category == settings.ContentSettingsTypes.GEOLOCATION) {
-      displayName = loadTimeData.getString('embeddedOnAnyHost');
-    }
-
-    if (item.incognito) {
-      if (displayName.length > 0)
-        return loadTimeData.getStringF('embeddedIncognitoSite', displayName);
-      return loadTimeData.getString('incognitoSite');
-    }
-    return displayName;
-  },
-
-  /**
-   * @param {!{model: !{item: !SiteException}}} e
+   * @param {!Event} e
    * @private
    */
-  onResetButtonTap_: function(e) {
-    this.resetPermissionForOrigin_(e.model.item);
-  },
-
-  /**
-   * @param {!{model: !{item: !SiteException}}} e
-   * @private
-   */
-  onShowActionMenuTap_: function(e) {
-    this.activeDialogAnchor_ = /** @type {!HTMLElement} */ (
-        Polymer.dom(/** @type {!Event} */ (e)).localTarget);
-
-    this.actionMenuSite_ = e.model.item;
+  onShowActionMenu_: function(e) {
+    this.activeDialogAnchor_ = /** @type {!HTMLElement} */ (e.detail.anchor);
+    this.actionMenuSite_ = e.detail.model;
     /** @type {!CrActionMenuElement} */ (this.$$('cr-action-menu'))
         .showAt(this.activeDialogAnchor_);
   },

@@ -15,7 +15,6 @@ import sys
 import unittest
 
 from chromite.cbuildbot import cbuildbot_run
-from chromite.cbuildbot import chromeos_config
 from chromite.cbuildbot import commands
 from chromite.cbuildbot.stages import generic_stages
 from chromite.lib.const import waterfall
@@ -25,7 +24,6 @@ from chromite.lib import config_lib
 from chromite.lib import constants
 from chromite.lib import cidb
 from chromite.lib import cros_build_lib
-from chromite.lib import cros_build_lib_unittest
 from chromite.lib import cros_test_lib
 from chromite.lib import fake_cidb
 from chromite.lib import failures_lib
@@ -46,7 +44,7 @@ DEFAULT_BUILD_STAGE_ID = 313377
 # pylint: disable=protected-access
 
 
-# The inheritence order ensures the patchers are stopped before
+# The inheritance order ensures the patchers are stopped before
 # cleaning up the temporary directories.
 class StageTestCase(cros_test_lib.MockOutputTestCase,
                     cros_test_lib.TempDirTestCase):
@@ -135,16 +133,13 @@ class StageTestCase(cros_test_lib.MockOutputTestCase,
     self._bot_id = options.build_config_name
 
     if site_config is None:
-      site_config = chromeos_config.GetConfig()
+      site_config = config_lib.GetConfig()
 
     # Populate build_config corresponding to self._bot_id.
     build_config = copy.deepcopy(site_config[self._bot_id])
     build_config['manifest_repo_url'] = 'fake_url'
     if extra_config:
       build_config.update(extra_config)
-    if options.remote_trybot:
-      build_config = config_lib.OverrideConfigForTrybot(
-          build_config, options)
     options.managed_chrome = build_config['sync_chrome']
 
     self._boards = build_config['boards']
@@ -319,12 +314,12 @@ class BuilderStageTest(AbstractStageTestCase):
     board = self._current_board
 
     envvar = 'EXAMPLE'
-    rc_mock = self.StartPatcher(cros_build_lib_unittest.RunCommandMock())
-    rc_mock.AddCmdResult(['portageq-%s' % board, 'envvar', envvar],
-                         output='RESULT\n')
+    envvar_val = 'RESULT'
+    self.PatchObject(portage_util, 'PortageqEnvvars',
+                     return_value={envvar: envvar_val})
 
     result = stage._GetPortageEnvVar(envvar, board)
-    self.assertEqual(result, 'RESULT')
+    self.assertEqual(result, envvar_val)
 
   def testStageNamePrefixSmoke(self):
     """Basic test for the StageNamePrefix() function."""
@@ -348,11 +343,6 @@ class BuilderStageTest(AbstractStageTestCase):
     exp_url = ('https://uberchromegw.corp.google.com/i/chromeos/builders/'
                'amd64-generic-paladin/builds/1234321/steps/Archive/logs/stdio')
     self.assertEqual(stage.ConstructDashboardURL(stage=stage_name), exp_url)
-
-  def test_ExtractOverlaysSmoke(self):
-    """Basic test for the _ExtractOverlays() function."""
-    stage = self.ConstructStage()
-    self.assertEqual(stage._ExtractOverlays(), ([], []))
 
   def test_PrintSmoke(self):
     """Basic test for the _Print() function."""
@@ -667,7 +657,7 @@ class MasterConfigBuilderStageTest(AbstractStageTestCase):
   def testGetScheduledSlaveBuildbucketIdsReturnsNone(self):
     """Returns None for non master build."""
     stage = self.ConstructStage()
-    stage._run.config.master = False
+    stage._run.config.slave_configs = False
     self.assertIsNone(stage.GetScheduledSlaveBuildbucketIds())
 
   def testGetSlaveConfigs(self):
@@ -739,7 +729,7 @@ class BoardSpecificBuilderStageTest(AbstractStageTestCase):
 
 
 class RunCommandAbstractStageTestCase(
-    AbstractStageTestCase, cros_build_lib_unittest.RunCommandTestCase):
+    AbstractStageTestCase, cros_test_lib.RunCommandTestCase):
   """Base test class for testing a stage and mocking RunCommand."""
 
   # pylint: disable=abstract-method

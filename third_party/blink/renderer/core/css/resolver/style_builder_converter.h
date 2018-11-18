@@ -45,6 +45,7 @@
 #include "third_party/blink/renderer/core/style/svg_computed_style_defs.h"
 #include "third_party/blink/renderer/core/style/transform_origin.h"
 #include "third_party/blink/renderer/platform/fonts/font_description.h"
+#include "third_party/blink/renderer/platform/graphics/image_orientation.h"
 #include "third_party/blink/renderer/platform/length_size.h"
 #include "third_party/blink/renderer/platform/text/tab_size.h"
 #include "third_party/blink/renderer/platform/transforms/rotation.h"
@@ -54,12 +55,14 @@ namespace blink {
 
 class ClipPathOperation;
 class CSSToLengthConversionData;
+class Font;
 class FontBuilder;
 class RotateTransformOperation;
 class ScaleTransformOperation;
 class StyleAutoColor;
 class StylePath;
 class StyleResolverState;
+class StyleSVGResource;
 class TextSizeAdjust;
 class TranslateTransformOperation;
 class UnzoomedLength;
@@ -91,8 +94,6 @@ class StyleBuilderConverter {
  public:
   static scoped_refptr<StyleReflection> ConvertBoxReflect(StyleResolverState&,
                                                           const CSSValue&);
-  static AtomicString ConvertFragmentIdentifier(StyleResolverState&,
-                                                const CSSValue&);
   static Color ConvertColor(StyleResolverState&,
                             const CSSValue&,
                             bool for_visited_link = false);
@@ -101,9 +102,13 @@ class StyleBuilderConverter {
   static LengthBox ConvertClip(StyleResolverState&, const CSSValue&);
   static scoped_refptr<ClipPathOperation> ConvertClipPath(StyleResolverState&,
                                                           const CSSValue&);
+  static scoped_refptr<StyleSVGResource> ConvertElementReference(
+      StyleResolverState&,
+      const CSSValue&);
   static FilterOperations ConvertFilterOperations(StyleResolverState&,
                                                   const CSSValue&);
-  static FilterOperations ConvertOffscreenFilterOperations(const CSSValue&);
+  static FilterOperations ConvertOffscreenFilterOperations(const CSSValue&,
+                                                           const Font&);
   template <typename T>
   static T ConvertFlags(StyleResolverState&, const CSSValue&);
   static FontDescription::FamilyDescription ConvertFontFamily(
@@ -199,6 +204,9 @@ class StyleBuilderConverter {
   static float ConvertTextStrokeWidth(StyleResolverState&, const CSSValue&);
   static TextSizeAdjust ConvertTextSizeAdjust(StyleResolverState&,
                                               const CSSValue&);
+  static TextUnderlinePosition ConvertTextUnderlinePosition(
+      StyleResolverState& state,
+      const CSSValue& value);
   static TransformOperations ConvertTransformOperations(StyleResolverState&,
                                                         const CSSValue&);
   static TransformOrigin ConvertTransformOrigin(StyleResolverState&,

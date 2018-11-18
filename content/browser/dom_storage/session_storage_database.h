@@ -21,6 +21,7 @@
 #include "base/sequence_checker.h"
 #include "base/sequenced_task_runner.h"
 #include "base/synchronization/lock.h"
+#include "base/thread_annotations.h"
 #include "content/common/content_export.h"
 #include "content/common/dom_storage/dom_storage_types.h"
 #include "third_party/leveldatabase/src/include/leveldb/status.h"
@@ -98,6 +99,12 @@ class CONTENT_EXPORT SessionStorageDatabase
 
   // Adds memory statistics to |pmd| for chrome://tracing.
   void OnMemoryDump(base::trace_event::ProcessMemoryDump* pmd);
+
+  // Used in testing to set an easier to handle in-memory database. Should
+  // happen before any database operations.
+  void SetDatabaseForTesting(std::unique_ptr<leveldb::DB> db);
+
+  leveldb::DB* db() const { return db_.get(); }
 
  private:
   class DBOperation;
@@ -224,16 +231,16 @@ class CONTENT_EXPORT SessionStorageDatabase
   base::Lock db_lock_;
 
   // True if a database error has occurred (e.g., cannot read data).
-  bool db_error_;
+  bool db_error_ GUARDED_BY(db_lock_);
   // True if the database is in an inconsistent state.
-  bool is_inconsistent_;
+  bool is_inconsistent_ GUARDED_BY(db_lock_);
   // True if the database is in a failed or inconsistent state, and we have
   // already deleted it (as an attempt to recover later).
-  bool invalid_db_deleted_;
+  bool invalid_db_deleted_ GUARDED_BY(db_lock_);
 
   // The number of database operations in progress. We need this so that we can
   // delete an inconsistent database at the right moment.
-  int operation_count_;
+  int operation_count_ GUARDED_BY(db_lock_);
 
   // Used to check methods that run on the commit sequence.
   SEQUENCE_CHECKER(sequence_checker_);

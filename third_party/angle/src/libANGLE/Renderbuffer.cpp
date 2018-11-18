@@ -11,6 +11,7 @@
 #include "libANGLE/Renderbuffer.h"
 
 #include "common/utilities.h"
+#include "libANGLE/Context.h"
 #include "libANGLE/FramebufferAttachment.h"
 #include "libANGLE/Image.h"
 #include "libANGLE/Renderbuffer.h"
@@ -66,23 +67,21 @@ void RenderbufferState::update(GLsizei width,
 
 // Renderbuffer implementation.
 Renderbuffer::Renderbuffer(rx::GLImplFactory *implFactory, GLuint id)
-    : egl::ImageSibling(id),
+    : RefCountObject(id),
       mState(),
       mImplementation(implFactory->createRenderbuffer(mState)),
       mLabel()
 {
 }
 
-Error Renderbuffer::onDestroy(const Context *context)
+void Renderbuffer::onDestroy(const Context *context)
 {
-    ANGLE_TRY(orphanImages(context));
+    ANGLE_SWALLOW_ERR(orphanImages(context));
 
     if (mImplementation)
     {
-        ANGLE_TRY(mImplementation->onDestroy(context));
+        ANGLE_SWALLOW_ERR(mImplementation->onDestroy(context));
     }
-
-    return NoError();
 }
 
 Renderbuffer::~Renderbuffer()
@@ -221,14 +220,26 @@ Extents Renderbuffer::getAttachmentSize(const gl::ImageIndex & /*imageIndex*/) c
     return Extents(mState.mWidth, mState.mHeight, 1);
 }
 
-const Format &Renderbuffer::getAttachmentFormat(GLenum /*binding*/,
-                                                const ImageIndex & /*imageIndex*/) const
+Format Renderbuffer::getAttachmentFormat(GLenum /*binding*/,
+                                         const ImageIndex & /*imageIndex*/) const
 {
     return getFormat();
 }
 GLsizei Renderbuffer::getAttachmentSamples(const ImageIndex & /*imageIndex*/) const
 {
     return getSamples();
+}
+
+bool Renderbuffer::isRenderable(const Context *context,
+                                GLenum binding,
+                                const ImageIndex &imageIndex) const
+{
+    if (isEGLImageTarget())
+    {
+        return ImageSibling::isRenderable(context, binding, imageIndex);
+    }
+    return getFormat().info->renderbufferSupport(context->getClientVersion(),
+                                                 context->getExtensions());
 }
 
 InitState Renderbuffer::initState(const gl::ImageIndex & /*imageIndex*/) const

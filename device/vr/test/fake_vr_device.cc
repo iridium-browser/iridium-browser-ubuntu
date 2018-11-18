@@ -6,7 +6,8 @@
 
 namespace device {
 
-FakeVRDevice::FakeVRDevice() : VRDeviceBase() {
+FakeVRDevice::FakeVRDevice(mojom::XRDeviceId id)
+    : VRDeviceBase(id), controller_binding_(this) {
   SetVRDisplayInfo(InitBasicDevice());
 }
 
@@ -14,7 +15,7 @@ FakeVRDevice::~FakeVRDevice() {}
 
 mojom::VRDisplayInfoPtr FakeVRDevice::InitBasicDevice() {
   mojom::VRDisplayInfoPtr display_info = mojom::VRDisplayInfo::New();
-  display_info->index = GetId();
+  display_info->id = GetId();
   display_info->displayName = "FakeVRDevice";
 
   display_info->capabilities = mojom::VRDisplayCapabilities::New();
@@ -49,23 +50,25 @@ mojom::VREyeParametersPtr FakeVRDevice::InitEye(float fov,
   return eye;
 }
 
-void FakeVRDevice::RequestPresent(
-    VRDisplayImpl* display,
-    mojom::VRSubmitFrameClientPtr submit_client,
-    mojom::VRPresentationProviderRequest request,
-    mojom::VRRequestPresentOptionsPtr present_options,
-    mojom::VRDisplayHost::RequestPresentCallback callback) {
-  SetPresentingDisplay(display);
-  std::move(callback).Run(true, mojom::VRDisplayFrameTransportOptions::New());
+void FakeVRDevice::RequestSession(
+    mojom::XRRuntimeSessionOptionsPtr options,
+    mojom::XRRuntime::RequestSessionCallback callback) {
+  OnStartPresenting();
+  // The current tests never use the return values, so it's fine to return
+  // invalid data here.
+  std::move(callback).Run(nullptr, nullptr);
 }
 
-void FakeVRDevice::ExitPresent() {
+void FakeVRDevice::OnPresentingControllerMojoConnectionError() {
   OnExitPresent();
+  controller_binding_.Close();
 }
 
-void FakeVRDevice::OnMagicWindowPoseRequest(
-    mojom::VRMagicWindowProvider::GetPoseCallback callback) {
-  std::move(callback).Run(pose_.Clone());
+void FakeVRDevice::OnMagicWindowFrameDataRequest(
+    mojom::XRFrameDataProvider::GetFrameDataCallback callback) {
+  mojom::XRFrameDataPtr frame_data = mojom::XRFrameData::New();
+  frame_data->pose = pose_.Clone();
+  std::move(callback).Run(std::move(frame_data));
 }
 
 }  // namespace device

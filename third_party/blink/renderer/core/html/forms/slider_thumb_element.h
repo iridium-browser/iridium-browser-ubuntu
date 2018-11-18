@@ -48,7 +48,7 @@ class SliderThumbElement final : public HTMLDivElement {
   void SetPositionFromValue();
 
   void DragFrom(const LayoutPoint&);
-  void DefaultEventHandler(Event*) override;
+  void DefaultEventHandler(Event&) override;
   bool WillRespondToMouseMoveEvents() override;
   bool WillRespondToMouseClickEvents() override;
   void DetachLayoutTree(const AttachContext& = AttachContext()) override;
@@ -60,6 +60,7 @@ class SliderThumbElement final : public HTMLDivElement {
  private:
   SliderThumbElement(Document&);
   LayoutObject* CreateLayoutObject(const ComputedStyle&) override;
+  scoped_refptr<ComputedStyle> CustomStyleForLayoutObject() final;
   Element* CloneWithoutAttributesAndChildren(Document&) const override;
   bool IsDisabledFormControl() const override;
   bool MatchesReadOnlyPseudoClass() const override;
@@ -89,7 +90,7 @@ class SliderContainerElement final : public HTMLDivElement {
 
   DECLARE_NODE_FACTORY(SliderContainerElement);
   HTMLInputElement* HostInput() const;
-  void DefaultEventHandler(Event*) override;
+  void DefaultEventHandler(Event&) override;
   void HandleTouchEvent(TouchEvent*);
   void UpdateTouchEventHandlerRegistry();
   void DidMoveToNewDocument(Document&) override;
@@ -98,6 +99,7 @@ class SliderContainerElement final : public HTMLDivElement {
  private:
   explicit SliderContainerElement(Document&);
   LayoutObject* CreateLayoutObject(const ComputedStyle&) override;
+  scoped_refptr<ComputedStyle> CustomStyleForLayoutObject() final;
   const AtomicString& ShadowPseudoId() const override;
   Direction GetDirection(LayoutPoint&, LayoutPoint&);
   bool CanSlide();

@@ -3,18 +3,24 @@
 // found in the LICENSE file.
 
 /**
- * @fileoverview Polymer element for displaying material design voice
- * interaction value prop screen.
+ * @fileoverview Polymer element for displaying material design assistant
+ * value prop screen.
+ *
+ * Event 'loading' will be fired when the page is loading/reloading.
+ * Event 'error' will be fired when the webview failed to load.
+ * Event 'loaded' will be fired when the page has been successfully loaded.
  */
 
 Polymer({
-  is: 'assistant-value-prop-md',
+  is: 'assistant-value-prop',
+
+  behaviors: [OobeDialogHostBehavior],
 
   properties: {
     /**
-     * Buttons are disabled when the value prop content is loading.
+     * Buttons are disabled when the webview content is loading.
      */
-    valuePropButtonsDisabled: {
+    buttonsDisabled: {
       type: Boolean,
       value: true,
     },
@@ -27,12 +33,12 @@ Polymer({
     },
 
     /**
-     * Default url for local en.
+     * Default url for locale en_us.
      */
     defaultUrl: {
       type: String,
       value:
-          'https://www.gstatic.com/opa-chromeos/oobe/en/value_proposition.html',
+          'https://www.gstatic.com/opa-android/oobe/a02187e41eed9e42/v2_omni_en_us.html',
     },
   },
 
@@ -45,27 +51,13 @@ Polymer({
 
   /**
    * Whether an error occurs while the webview is loading.
-   * @type: {boolean}
+   * @type {boolean}
    * @private
    */
-  valuePropError_: false,
+  loadingError_: false,
 
   /**
-   * Timeout ID for loading animation.
-   * @type {number}
-   * @private
-   */
-  animationTimeout_: null,
-
-  /**
-   * Timeout ID for loading (will fire an error).
-   * @type {number}
-   * @private
-   */
-  loadingTimeout_: null,
-
-  /**
-   * The value prop view object.
+   * The value prop webview object.
    * @type {Object}
    * @private
    */
@@ -79,11 +71,46 @@ Polymer({
   initialized_: false,
 
   /**
-   * Whether the response header has been received for the value prop view
-   * @type: {boolean}
+   * Whether the response header has been received for the value prop view.
+   * @type {boolean}
    * @private
    */
   headerReceived_: false,
+
+  /**
+   * Whether the webview has been successfully loaded.
+   * @type {boolean}
+   * @private
+   */
+  webViewLoaded_: false,
+
+  /**
+   * Whether all the setting zippy has been successfully loaded.
+   * @type {boolean}
+   * @private
+   */
+  settingZippyLoaded_: false,
+
+  /**
+   * Whether all the consent text strings has been successfully loaded.
+   * @type {boolean}
+   * @private
+   */
+  consentStringLoaded_: false,
+
+  /**
+   * Whether the screen has been shown to the user.
+   * @type {boolean}
+   * @private
+   */
+  screenShown_: false,
+
+  /**
+   * Sanitizer used to sanitize html snippets.
+   * @type {HtmlSanitizer}
+   * @private
+   */
+  sanitizer_: new HtmlSanitizer(),
 
   /**
    * On-tap event handler for skip button.
@@ -91,16 +118,13 @@ Polymer({
    * @private
    */
   onSkipTap_: function() {
-    chrome.send('AssistantValuePropScreen.userActed', ['skip-pressed']);
-  },
-
-  /**
-   * On-tap event handler for retry button.
-   *
-   * @private
-   */
-  onRetryTap_: function() {
-    this.reloadValueProp();
+    if (this.buttonsDisabled) {
+      return;
+    }
+    this.buttonsDisabled = true;
+    chrome.send(
+        'login.AssistantOptInFlowScreen.ValuePropScreen.userActed',
+        ['skip-pressed']);
   },
 
   /**
@@ -109,77 +133,67 @@ Polymer({
    * @private
    */
   onNextTap_: function() {
-    chrome.send('AssistantValuePropScreen.userActed', ['next-pressed']);
+    if (this.buttonsDisabled) {
+      return;
+    }
+    this.buttonsDisabled = true;
+    chrome.send(
+        'login.AssistantOptInFlowScreen.ValuePropScreen.userActed',
+        ['next-pressed']);
   },
 
   /**
-   * Add class to the list of classes of root elements.
-   * @param {string} className class to add
-   *
-   * @private
+   * Sets learn more content text and shows it as overlay dialog.
+   * @param {string} content HTML formatted text to show.
    */
-  addClass_: function(className) {
-    this.$['value-prop-dialog'].classList.add(className);
+  showLearnMoreOverlay: function(title, additionalInfo) {
+    this.$['overlay-title-text'].innerHTML =
+        this.sanitizer_.sanitizeHtml(title);
+    this.$['overlay-additional-info-text'].innerHTML =
+        this.sanitizer_.sanitizeHtml(additionalInfo);
+
+    var overlay = this.$['learn-more-overlay'];
+    overlay.hidden = false;
   },
 
   /**
-   * Remove class to the list of classes of root elements.
-   * @param {string} className class to remove
-   *
-   * @private
+   * Hides overlay dialog.
    */
-  removeClass_: function(className) {
-    this.$['value-prop-dialog'].classList.remove(className);
+  hideOverlay: function() {
+    this.$['learn-more-overlay'].hidden = true;
   },
 
   /**
-   * Reloads value prop.
+   * Reloads value prop webview.
    */
-  reloadValueProp: function() {
-    this.valuePropError_ = false;
+  reloadPage: function() {
+    this.fire('loading');
+
+    this.loadingError_ = false;
     this.headerReceived_ = false;
-    this.valuePropView_.src = 'https://www.gstatic.com/opa-chromeos/oobe/' +
-        this.locale + '/value_proposition.html';
+    this.valuePropView_.src =
+        'https://www.gstatic.com/opa-android/oobe/a02187e41eed9e42/v2_omni_' +
+        this.locale + '.html';
 
-    window.clearTimeout(this.animationTimeout_);
-    window.clearTimeout(this.loadingTimeout_);
-    this.removeClass_('value-prop-loaded');
-    this.removeClass_('value-prop-error');
-    this.addClass_('value-prop-loading');
-    this.valuePropButtonsDisabled = true;
-
-    this.animationTimeout_ = window.setTimeout(function() {
-      this.addClass_('value-prop-loading-animation');
-    }.bind(this), 500);
-    this.loadingTimeout_ = window.setTimeout(function() {
-      this.onValueViewErrorOccurred();
-    }.bind(this), 5000);
+    this.buttonsDisabled = true;
   },
 
   /**
-   * Handles event when value prop view cannot be loaded.
+   * Handles event when value prop webview cannot be loaded.
    */
-  onValueViewErrorOccurred: function(details) {
-    this.valuePropError_ = true;
-    window.clearTimeout(this.animationTimeout_);
-    window.clearTimeout(this.loadingTimeout_);
-    this.removeClass_('value-prop-loading-animation');
-    this.removeClass_('value-prop-loading');
-    this.removeClass_('value-prop-loaded');
-    this.addClass_('value-prop-error');
-
-    this.valuePropButtonsDisabled = false;
-    this.$['retry-button'].focus();
+  onWebViewErrorOccurred: function(details) {
+    this.fire('error');
+    this.loadingError_ = true;
   },
 
   /**
-   * Handles event when value prop view is loaded.
+   * Handles event when value prop webview is loaded.
    */
-  onValueViewContentLoad: function(details) {
+  onWebViewContentLoad: function(details) {
     if (details == null) {
       return;
     }
-    if (this.valuePropError_ || !this.headerReceived_) {
+    if (this.loadingError_ || !this.headerReceived_) {
       return;
     }
     if (this.reloadWithDefaultUrl_) {
@@ -189,21 +203,16 @@ Polymer({
       return;
     }
 
-    window.clearTimeout(this.animationTimeout_);
-    window.clearTimeout(this.loadingTimeout_);
-    this.removeClass_('value-prop-loading-animation');
-    this.removeClass_('value-prop-loading');
-    this.removeClass_('value-prop-error');
-    this.addClass_('value-prop-loaded');
-
-    this.valuePropButtonsDisabled = false;
-    this.$['next-button'].focus();
+    this.webViewLoaded_ = true;
+    if (this.settingZippyLoaded_ && this.consentStringLoaded_) {
+      this.onPageLoaded();
+    }
   },
 
   /**
    * Handles event when webview request headers received.
    */
-  onValueViewHeadersReceived: function(details) {
+  onWebViewHeadersReceived: function(details) {
     if (details == null) {
       return;
     }
@@ -213,11 +222,86 @@ Polymer({
         this.reloadWithDefaultUrl_ = true;
         return;
       } else {
-        this.onValueViewErrorOccurred();
+        this.onWebViewErrorOccurred();
       }
+    } else if (details.statusCode != '200') {
+      this.onWebViewErrorOccurred();
     }
-    if (details.statusCode != '200') {
-      this.onValueViewErrorOccurred();
+  },
+
+  /**
+   * Reload the page with the given consent string text data.
+   */
+  reloadContent: function(data) {
+    this.$['user-image'].src = data['valuePropUserImage'];
+    this.$['title-text'].textContent = data['valuePropTitle'];
+    this.$['intro-text'].textContent = data['valuePropIntro'];
+    this.$['user-name'].textContent = data['valuePropIdentity'];
+    this.$['next-button-text'].textContent = data['valuePropNextButton'];
+    this.$['skip-button-text'].textContent = data['valuePropSkipButton'];
+    this.$['footer-text'].innerHTML =
+        this.sanitizer_.sanitizeHtml(data['valuePropFooter']);
+
+    this.consentStringLoaded_ = true;
+    if (this.webViewLoaded_ && this.settingZippyLoaded_) {
+      this.onPageLoaded();
+    }
+  },
+
+  /**
+   * Add a setting zippy with the provided data.
+   */
+  addSettingZippy: function(zippy_data) {
+    for (var i in zippy_data) {
+      var data = zippy_data[i];
+      var zippy = document.createElement('setting-zippy');
+      zippy.setAttribute(
+          'icon-src',
+          'data:text/html;charset=utf-8,' +
+              encodeURIComponent(zippy.getWrappedIcon(data['iconUri'])));
+      zippy.setAttribute('hide-line', true);
+      zippy.setAttribute('popup-style', true);
+
+      var title = document.createElement('div');
+      title.className = 'zippy-title';
+      title.innerHTML = this.sanitizer_.sanitizeHtml(data['title']);
+      zippy.appendChild(title);
+
+      var description = document.createElement('div');
+      description.className = 'zippy-description';
+      description.innerHTML = this.sanitizer_.sanitizeHtml(data['description']);
+      zippy.appendChild(description);
+
+      var learnMoreLink = document.createElement('a');
+      learnMoreLink.className = 'learn-more-link';
+      learnMoreLink.textContent = data['popupLink'];
+      learnMoreLink.setAttribute('href', 'javascript:void(0)');
+      learnMoreLink.onclick = function(title, additionalInfo) {
+        this.showLearnMoreOverlay(title, additionalInfo);
+      }.bind(this, data['title'], data['additionalInfo']);
+      zippy.appendChild(learnMoreLink);
+
+      this.$['consents-container'].appendChild(zippy);
+    }
+
+    this.settingZippyLoaded_ = true;
+    if (this.webViewLoaded_ && this.consentStringLoaded_) {
+      this.onPageLoaded();
+    }
+  },
+
+  /**
+   * Handles event when all the page content has been loaded.
+   */
+  onPageLoaded: function() {
+    this.fire('loaded');
+
+    this.buttonsDisabled = false;
+    this.$['next-button'].focus();
+
+    if (!this.hidden && !this.screenShown_) {
+      chrome.send('login.AssistantOptInFlowScreen.ValuePropScreen.screenShown');
+      this.screenShown_ = true;
     }
   },
 
@@ -226,15 +310,20 @@ Polymer({
    */
   onShow: function() {
     var requestFilter = {urls: ['<all_urls>'], types: ['main_frame']};
+
+    this.$['overlay-close-button'].addEventListener(
+        'click', this.hideOverlay.bind(this));
     this.valuePropView_ = this.$['value-prop-view'];
+    this.locale =
+        loadTimeData.getString('locale').replace('-', '_').toLowerCase();
 
     if (!this.initialized_) {
       this.valuePropView_.request.onErrorOccurred.addListener(
-          this.onValueViewErrorOccurred.bind(this), requestFilter);
+          this.onWebViewErrorOccurred.bind(this), requestFilter);
       this.valuePropView_.request.onHeadersReceived.addListener(
-          this.onValueViewHeadersReceived.bind(this), requestFilter);
+          this.onWebViewHeadersReceived.bind(this), requestFilter);
       this.valuePropView_.request.onCompleted.addListener(
-          this.onValueViewContentLoad.bind(this), requestFilter);
+          this.onWebViewContentLoad.bind(this), requestFilter);
 
       this.valuePropView_.addContentScripts([{
         name: 'stripLinks',
@@ -249,6 +338,6 @@ Polymer({
       this.initialized_ = true;
     }
 
-    this.reloadValueProp();
+    this.reloadPage();
   },
 });

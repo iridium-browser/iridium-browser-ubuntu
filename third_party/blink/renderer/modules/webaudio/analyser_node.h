@@ -80,14 +80,14 @@ class AnalyserHandler final : public AudioBasicInspectorHandler {
   // because the node must get pulled even if there are no inputs or
   // outputs so that the internal state is properly updated with the
   // correct time data.
-  void UpdatePullStatus() override;
+  void UpdatePullStatusIfNeeded() override;
 
   bool RequiresTailProcessing() const final;
   double TailTime() const final;
 
  private:
   AnalyserHandler(AudioNode&, float sample_rate);
-  bool PropagatesSilence() const {
+  bool PropagatesSilence() const override {
     // An AnalyserNode does actually propogate silence, but to get the
     // time and FFT data updated correctly, process() needs to be
     // called even if all the inputs are silent.

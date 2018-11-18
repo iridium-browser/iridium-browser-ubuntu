@@ -13,6 +13,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/synchronization/lock.h"
 #include "chromecast/media/cma/backend/audio_fader.h"
+#include "chromecast/media/cma/backend/audio_resampler.h"
 #include "chromecast/media/cma/backend/mixer_input.h"
 #include "chromecast/public/media/media_pipeline_backend.h"
 #include "chromecast/public/volume_control.h"
@@ -53,6 +54,9 @@ class BufferingMixerSource : public MixerInput::Source,
     // Called when the end-of-stream buffer has been played out.
     virtual void OnEos() = 0;
 
+    // Called when the audio is ready to play.
+    virtual void OnAudioReadyForPlayback() = 0;
+
    protected:
     virtual ~Delegate() = default;
   };
@@ -67,7 +71,22 @@ class BufferingMixerSource : public MixerInput::Source,
                        bool primary,
                        const std::string& device_id,
                        AudioContentType content_type,
-                       int playout_channel);
+                       int playout_channel,
+                       int64_t playback_start_pts,
+                       bool start_playback_asap);
+
+  // Specifies the absolute timestamp (relative to the RenderingDelay clock)
+  // that the playback should start at. This should only be called if
+  // |start_playback_asap| is false during constructing.
+  void StartPlaybackAt(int64_t playback_start_timestamp);
+
+  // Restarts the current playback from the timestamp provided at the pts
+  // provided. Flushes any currently buffered audio. Generally does well if you
+  // require the audio to jump back and/or forth by up to 5 seconds or so,
+  // depending on how much data is already buffered by the upper layers and
+  // ready for consumption here. This API will start having problems if you try
+  // to do more than that, so it's not advised.
+  void RestartPlaybackAt(int64_t timestamp, int64_t pts);
 
   // Queues some PCM data to be mixed. |data| must be in planar float format.
   // If the buffer can accept more data, the delegate's OnWritePcmCompletion()
@@ -86,6 +105,10 @@ class BufferingMixerSource : public MixerInput::Source,
   // called, no more calls will be made to delegate methods. The source will
   // be removed from the mixer once it has faded out appropriately.
   void Remove();
+
+  // This allows for very small changes in the rate of audio playback that are
+  // (supposedly) imperceptible.
+  float SetAvSyncPlaybackRate(float rate);
 
  private:
   enum class State {
@@ -106,7 +129,8 @@ class BufferingMixerSource : public MixerInput::Source,
     struct Members {
       Members(BufferingMixerSource* source,
               int input_samples_per_second,
-              int num_channels);
+              int num_channels,
+              int64_t playback_start_timestamp);
       ~Members();
 
       State state_;
@@ -121,6 +145,12 @@ class BufferingMixerSource : public MixerInput::Source,
       AudioFader fader_;
       bool zero_fader_frames_;
       bool started_;
+      // The absolute timestamp relative to clock monotonic (raw) at which the
+      // playback should start. INT64_MIN indicates playback should start ASAP.
+      // INT64_MAX indicates playback should start at a specified timestamp,
+      // but we don't know what that timestamp is.
+      int64_t playback_start_timestamp_;
+      AudioResampler audio_resampler_;
 
      private:
       DISALLOW_COPY_AND_ASSIGN(Members);
@@ -149,7 +179,8 @@ class BufferingMixerSource : public MixerInput::Source,
 
     LockedMembers(BufferingMixerSource* source,
                   int input_samples_per_second,
-                  int num_channels);
+                  int num_channels,
+                  int64_t playback_start_timestamp);
     ~LockedMembers();
 
     AcquiredLock Lock();
@@ -191,7 +222,13 @@ class BufferingMixerSource : public MixerInput::Source,
   void PostPcmCompletion(RenderingDelay delay);
   void PostEos();
   void PostError(MixerError error);
-
+  void PostAudioReadyForPlayback();
+  int64_t GetCurrentBufferedDataInUs();
+  void DropAudio(int64_t frames);
+  bool CanDropFrames(int64_t frames_to_drop);
+  int64_t DataToFrames(int64_t size);
+  void CheckAndStartPlaybackIfNecessary(int num_frames,
+                                        int64_t playback_absolute_timestamp);
   Delegate* const delegate_;
   const int num_channels_;
   const int input_samples_per_second_;
@@ -205,8 +242,17 @@ class BufferingMixerSource : public MixerInput::Source,
   const int max_queued_frames_;
   // Minimum number of frames buffered before starting to fill data.
   const int start_threshold_frames_;
+  bool audio_ready_for_playback_fired_ = false;
+
+  // The PTS the playback should start at. We will drop audio pushed to us
+  // with PTS values below this value. If the audio doesn't have a starting
+  // PTS, then this value can be INT64_MIN, to play whatever audio is sent
+  // to us.
+  int64_t playback_start_pts_;
 
   LockedMembers locked_members_;
+
+  int remaining_silence_frames_ = 0;
 
   base::WeakPtr<BufferingMixerSource> weak_this_;
   base::WeakPtrFactory<BufferingMixerSource> weak_factory_;

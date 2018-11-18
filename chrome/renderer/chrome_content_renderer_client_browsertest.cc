@@ -9,6 +9,7 @@
 
 #include "base/command_line.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -20,6 +21,7 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/network_session_configurator/common/network_switches.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_view.h"
@@ -51,11 +53,10 @@ const char kHtmlWithIframe[] ="<iframe srcdoc=\"Nothing here\"></iframe>";
 TEST_F(InstantProcessNavigationTest, ForkForNavigationsFromInstantProcess) {
   base::CommandLine::ForCurrentProcess()->AppendSwitch(
       switches::kInstantProcess);
-  bool unused;
   ChromeContentRendererClient* client =
       static_cast<ChromeContentRendererClient*>(content_renderer_client_.get());
-  EXPECT_TRUE(client->ShouldFork(
-      GetMainFrame(), GURL("http://foo"), "GET", false, false, &unused));
+  EXPECT_TRUE(client->ShouldFork(GetMainFrame(), GURL("http://foo"), "GET",
+                                 false, false));
 }
 
 // Tests that renderer-initiated navigations from a non-Instant render process
@@ -69,16 +70,13 @@ TEST_F(InstantProcessNavigationTest, ForkForNavigationsToNewTabURLs) {
   client->RenderThreadStarted();
   SearchBouncer::GetInstance()->SetNewTabPageURL(
       GURL("http://example.com/newtab"));
-  bool unused;
   EXPECT_TRUE(client->ShouldFork(
-      GetMainFrame(), GURL("http://example.com/newtab"), "GET", false, false,
-      &unused));
+      GetMainFrame(), GURL("http://example.com/newtab"), "GET", false, false));
   EXPECT_FALSE(client->ShouldFork(GetMainFrame(),
                                   GURL("http://example.com/search?q=foo"),
-                                  "GET", false, false, &unused));
-  EXPECT_FALSE(client->ShouldFork(
-      GetMainFrame(), GURL("http://example.com/"), "GET", false, false,
-      &unused));
+                                  "GET", false, false));
+  EXPECT_FALSE(client->ShouldFork(GetMainFrame(), GURL("http://example.com/"),
+                                  "GET", false, false));
 }
 
 TEST_F(ChromeContentRendererClientSearchBoxTest, RewriteThumbnailURL) {
@@ -170,8 +168,8 @@ class ChromeContentRendererClientBrowserTest :
 
     EXPECT_EQ(request.relative_url, GetParam().expected_url)
         << "URL is wrong for test " << GetParam().name;
-    content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
-                                     message_runner_->QuitClosure());
+    base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI},
+                             message_runner_->QuitClosure());
   }
 
   void WaitForYouTubeRequest() {

@@ -15,6 +15,7 @@
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/shell/browser/shell.h"
 #include "media/base/media_switches.h"
+#include "services/media_session/public/cpp/switches.h"
 
 namespace content {
 
@@ -36,7 +37,7 @@ class MediaSessionBrowserTest : public ContentBrowserTest {
   void EnableInternalMediaSesion() {
 #if !defined(OS_ANDROID)
     base::CommandLine::ForCurrentProcess()->AppendSwitch(
-        switches::kEnableInternalMediaSession);
+        media_session::switches::kEnableInternalMediaSession);
 #endif  // !defined(OS_ANDROID)
   }
 
@@ -126,7 +127,7 @@ IN_PROC_BROWSER_TEST_F(MediaSessionBrowserTest, MediaSessionNoOpWhenDisabled) {
   StartPlaybackAndWait(shell(), "long-video");
   StartPlaybackAndWait(shell(), "long-audio");
 
-  media_session->Suspend(MediaSession::SuspendType::SYSTEM);
+  media_session->Suspend(MediaSession::SuspendType::kSystem);
   StopPlaybackAndWait(shell(), "long-audio");
 
   // At that point, only "long-audio" is paused.
@@ -145,11 +146,11 @@ IN_PROC_BROWSER_TEST_F(MediaSessionBrowserTest, SimplePlayPause) {
 
   StartPlaybackAndWait(shell(), "long-video");
 
-  media_session->Suspend(MediaSession::SuspendType::SYSTEM);
+  media_session->Suspend(MediaSession::SuspendType::kSystem);
   WaitForStop(shell());
   EXPECT_FALSE(IsPlaying(shell(), "long-video"));
 
-  media_session->Resume(MediaSession::SuspendType::SYSTEM);
+  media_session->Resume(MediaSession::SuspendType::kSystem);
   WaitForStart(shell());
   EXPECT_TRUE(IsPlaying(shell(), "long-video"));
 }
@@ -165,15 +166,36 @@ IN_PROC_BROWSER_TEST_F(MediaSessionBrowserTest, MultiplePlayersPlayPause) {
   StartPlaybackAndWait(shell(), "long-video");
   StartPlaybackAndWait(shell(), "long-audio");
 
-  media_session->Suspend(MediaSession::SuspendType::SYSTEM);
+  media_session->Suspend(MediaSession::SuspendType::kSystem);
   WaitForStop(shell());
   EXPECT_FALSE(IsPlaying(shell(), "long-video"));
   EXPECT_FALSE(IsPlaying(shell(), "long-audio"));
 
-  media_session->Resume(MediaSession::SuspendType::SYSTEM);
+  media_session->Resume(MediaSession::SuspendType::kSystem);
   WaitForStart(shell());
   EXPECT_TRUE(IsPlaying(shell(), "long-video"));
   EXPECT_TRUE(IsPlaying(shell(), "long-audio"));
+}
+
+IN_PROC_BROWSER_TEST_F(MediaSessionBrowserTest, WebContents_Muted) {
+  EnableInternalMediaSesion();
+
+  NavigateToURL(shell(), GetTestUrl("media/session", "media-session.html"));
+
+  shell()->web_contents()->SetAudioMuted(true);
+  MediaSession* media_session = MediaSession::Get(shell()->web_contents());
+  ASSERT_NE(nullptr, media_session);
+
+  StartPlaybackAndWait(shell(), "long-video");
+  EXPECT_FALSE(media_session->IsControllable());
+
+  // Unmute the web contents and the player should be created.
+  shell()->web_contents()->SetAudioMuted(false);
+  EXPECT_TRUE(media_session->IsControllable());
+
+  // Now mute it again and the player should be removed.
+  shell()->web_contents()->SetAudioMuted(true);
+  EXPECT_FALSE(media_session->IsControllable());
 }
 
 #if !defined(OS_ANDROID)
@@ -195,22 +217,22 @@ IN_PROC_BROWSER_TEST_F(MediaSessionBrowserTest, MultipleTabsPlayPause) {
   StartPlaybackAndWait(shell(), "long-video");
   StartPlaybackAndWait(other_shell, "long-video");
 
-  media_session->Suspend(MediaSession::SuspendType::SYSTEM);
+  media_session->Suspend(MediaSession::SuspendType::kSystem);
   WaitForStop(shell());
   EXPECT_FALSE(IsPlaying(shell(), "long-video"));
   EXPECT_TRUE(IsPlaying(other_shell, "long-video"));
 
-  other_media_session->Suspend(MediaSession::SuspendType::SYSTEM);
+  other_media_session->Suspend(MediaSession::SuspendType::kSystem);
   WaitForStop(other_shell);
   EXPECT_FALSE(IsPlaying(shell(), "long-video"));
   EXPECT_FALSE(IsPlaying(other_shell, "long-video"));
 
-  media_session->Resume(MediaSession::SuspendType::SYSTEM);
+  media_session->Resume(MediaSession::SuspendType::kSystem);
   WaitForStart(shell());
   EXPECT_TRUE(IsPlaying(shell(), "long-video"));
   EXPECT_FALSE(IsPlaying(other_shell, "long-video"));
 
-  other_media_session->Resume(MediaSession::SuspendType::SYSTEM);
+  other_media_session->Resume(MediaSession::SuspendType::kSystem);
   WaitForStart(other_shell);
   EXPECT_TRUE(IsPlaying(shell(), "long-video"));
   EXPECT_TRUE(IsPlaying(other_shell, "long-video"));

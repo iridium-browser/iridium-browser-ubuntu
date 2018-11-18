@@ -16,6 +16,7 @@ extern NSString* const kTabGridCloseAllButtonIdentifier;
 extern NSString* const kTabGridUndoCloseAllButtonIdentifier;
 extern NSString* const kTabGridIncognitoTabsEmptyStateIdentifier;
 extern NSString* const kTabGridRegularTabsEmptyStateIdentifier;
+extern NSString* const kTabGridScrollViewIdentifier;
 
 // All kxxxColor constants are RGB values stored in a Hex integer. These will be
 // converted into UIColors using the UIColorFromRGB() function, from
@@ -39,11 +40,16 @@ extern const CGFloat kTabGridEmptyStateVerticalInset;
 extern const CGFloat kTabGridEmptyStateHorizontalInset;
 
 // The insets from the edges for the floating button.
-extern const CGFloat kTabGridFloatingButtonVerticalInset;
+extern const CGFloat kTabGridFloatingButtonVerticalInsetSmall;
+extern const CGFloat kTabGridFloatingButtonVerticalInsetLarge;
 extern const CGFloat kTabGridFloatingButtonHorizontalInset;
 
 // Intrinsic heights of the tab grid toolbars.
 extern const CGFloat kTabGridTopToolbarHeight;
 extern const CGFloat kTabGridBottomToolbarHeight;
+
+// The delay (in milliseconds) after closing the last incognito tab and before
+// automatically scrolling to the regular tabs panel.
+extern const int64_t kTabGridScrollAnimationDelayInMilliseconds;
 
 #endif  // IOS_CHROME_BROWSER_UI_TAB_GRID_TAB_GRID_CONSTANTS_H_

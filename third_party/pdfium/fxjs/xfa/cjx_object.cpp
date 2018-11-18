@@ -10,15 +10,15 @@
 
 #include "core/fxcrt/cfx_decimal.h"
 #include "core/fxcrt/fx_extension.h"
-#include "core/fxcrt/fx_fallthrough.h"
 #include "core/fxcrt/xml/cfx_xmltext.h"
 #include "fxjs/cfxjse_engine.h"
 #include "fxjs/cfxjse_value.h"
-#include "fxjs/cjs_return.h"
+#include "fxjs/cjs_result.h"
 #include "fxjs/xfa/cjx_boolean.h"
 #include "fxjs/xfa/cjx_draw.h"
 #include "fxjs/xfa/cjx_field.h"
 #include "fxjs/xfa/cjx_instancemanager.h"
+#include "third_party/base/compiler_specific.h"
 #include "third_party/base/ptr_util.h"
 #include "xfa/fxfa/cxfa_ffnotify.h"
 #include "xfa/fxfa/cxfa_ffwidget.h"
@@ -129,10 +129,9 @@ CJX_Object::~CJX_Object() {
   ClearMapModuleBuffer();
 }
 
-void CJX_Object::DefineMethods(const CJX_MethodSpec method_specs[],
-                               size_t count) {
-  for (size_t i = 0; i < count; ++i)
-    method_specs_[method_specs[i].pName] = method_specs[i].pMethodCall;
+void CJX_Object::DefineMethods(pdfium::span<const CJX_MethodSpec> methods) {
+  for (const auto& item : methods)
+    method_specs_[item.pName] = item.pMethodCall;
 }
 
 CXFA_Document* CJX_Object::GetDocument() const {
@@ -167,20 +166,20 @@ bool CJX_Object::HasMethod(const WideString& func) const {
   return pdfium::ContainsKey(method_specs_, func.UTF8Encode());
 }
 
-CJS_Return CJX_Object::RunMethod(
+CJS_Result CJX_Object::RunMethod(
     const WideString& func,
     const std::vector<v8::Local<v8::Value>>& params) {
   auto it = method_specs_.find(func.UTF8Encode());
   if (it == method_specs_.end())
-    return CJS_Return(false);
+    return CJS_Result::Failure(JSMessage::kUnknownMethod);
+
   return it->second(this, GetXFAObject()->GetDocument()->GetScriptContext(),
                     params);
 }
 
 void CJX_Object::ThrowTooManyOccurancesException(const WideString& obj) const {
-  ThrowException(
-      L"The element [%ls] has violated its allowable number of occurrences.",
-      obj.c_str());
+  ThrowException(L"The element [" + obj +
+                 L"] has violated its allowable number of occurrences.");
 }
 
 void CJX_Object::ThrowInvalidPropertyException() const {
@@ -193,22 +192,17 @@ void CJX_Object::ThrowIndexOutOfBoundsException() const {
 
 void CJX_Object::ThrowParamCountMismatchException(
     const WideString& method) const {
-  ThrowException(L"Incorrect number of parameters calling method '%.16s'.",
-                 method.c_str());
+  ThrowException(L"Incorrect number of parameters calling method '" + method +
+                 L"'.");
 }
 
 void CJX_Object::ThrowArgumentMismatchException() const {
   ThrowException(L"Argument mismatch in property or function argument.");
 }
 
-void CJX_Object::ThrowException(const wchar_t* str, ...) const {
-  va_list arg_ptr;
-  va_start(arg_ptr, str);
-  WideString wsMessage = WideString::FormatV(str, arg_ptr);
-  va_end(arg_ptr);
-
-  ASSERT(!wsMessage.IsEmpty());
-  FXJSE_ThrowMessage(wsMessage.UTF8Encode().AsStringView());
+void CJX_Object::ThrowException(const WideString& str) const {
+  ASSERT(!str.IsEmpty());
+  FXJSE_ThrowMessage(str.UTF8Encode().AsStringView());
 }
 
 bool CJX_Object::HasAttribute(XFA_Attribute eAttr) {
@@ -216,50 +210,54 @@ bool CJX_Object::HasAttribute(XFA_Attribute eAttr) {
   return HasMapModuleKey(pKey);
 }
 
-bool CJX_Object::SetAttribute(XFA_Attribute eAttr,
+void CJX_Object::SetAttribute(XFA_Attribute eAttr,
                               const WideStringView& wsValue,
                               bool bNotify) {
   switch (ToNode(GetXFAObject())->GetAttributeType(eAttr)) {
     case XFA_AttributeType::Enum: {
       Optional<XFA_AttributeEnum> item =
           CXFA_Node::NameToAttributeEnum(wsValue);
-      return SetEnum(
-          eAttr,
-          item ? *item : *(ToNode(GetXFAObject())->GetDefaultEnum(eAttr)),
-          bNotify);
+      SetEnum(eAttr,
+              item ? *item : *(ToNode(GetXFAObject())->GetDefaultEnum(eAttr)),
+              bNotify);
+      break;
     }
     case XFA_AttributeType::CData:
-      return SetCData(eAttr, WideString(wsValue), bNotify, false);
+      SetCData(eAttr, WideString(wsValue), bNotify, false);
+      break;
     case XFA_AttributeType::Boolean:
-      return SetBoolean(eAttr, wsValue != L"0", bNotify);
+      SetBoolean(eAttr, wsValue != L"0", bNotify);
+      break;
     case XFA_AttributeType::Integer:
-      return SetInteger(eAttr,
-                        FXSYS_round(FXSYS_wcstof(wsValue.unterminated_c_str(),
-                                                 wsValue.GetLength(), nullptr)),
-                        bNotify);
+      SetInteger(eAttr,
+                 FXSYS_round(FXSYS_wcstof(wsValue.unterminated_c_str(),
+                                          wsValue.GetLength(), nullptr)),
+                 bNotify);
+      break;
     case XFA_AttributeType::Measure:
-      return SetMeasure(eAttr, CXFA_Measurement(wsValue), bNotify);
+      SetMeasure(eAttr, CXFA_Measurement(wsValue), bNotify);
+      break;
     default:
       break;
   }
-  return false;
 }
 
 void CJX_Object::SetMapModuleString(void* pKey, const WideStringView& wsValue) {
-  SetMapModuleBuffer(pKey, (void*)wsValue.unterminated_c_str(),
+  SetMapModuleBuffer(pKey, const_cast<wchar_t*>(wsValue.unterminated_c_str()),
                      wsValue.GetLength() * sizeof(wchar_t), nullptr);
 }
 
-bool CJX_Object::SetAttribute(const WideStringView& wsAttr,
+void CJX_Object::SetAttribute(const WideStringView& wsAttr,
                               const WideStringView& wsValue,
                               bool bNotify) {
   XFA_Attribute attr = CXFA_Node::NameToAttribute(wsValue);
-  if (attr != XFA_Attribute::Unknown)
-    return SetAttribute(attr, wsValue, bNotify);
+  if (attr != XFA_Attribute::Unknown) {
+    SetAttribute(attr, wsValue, bNotify);
+    return;
+  }
 
   void* pKey = GetMapKey_Custom(wsAttr);
   SetMapModuleString(pKey, wsValue);
-  return true;
 }
 
 WideString CJX_Object::GetAttribute(const WideStringView& attr) {
@@ -339,26 +337,24 @@ Optional<bool> CJX_Object::TryBoolean(XFA_Attribute eAttr, bool bUseDefault) {
   return ToNode(GetXFAObject())->GetDefaultBoolean(eAttr);
 }
 
-bool CJX_Object::SetBoolean(XFA_Attribute eAttr, bool bValue, bool bNotify) {
+void CJX_Object::SetBoolean(XFA_Attribute eAttr, bool bValue, bool bNotify) {
   CFX_XMLElement* elem = SetValue(eAttr, XFA_AttributeType::Boolean,
                                   (void*)(uintptr_t)bValue, bNotify);
   if (elem)
-    elem->SetString(CXFA_Node::AttributeToName(eAttr), bValue ? L"1" : L"0");
-  return true;
+    elem->SetAttribute(CXFA_Node::AttributeToName(eAttr), bValue ? L"1" : L"0");
 }
 
 bool CJX_Object::GetBoolean(XFA_Attribute eAttr) {
   return TryBoolean(eAttr, true).value_or(false);
 }
 
-bool CJX_Object::SetInteger(XFA_Attribute eAttr, int32_t iValue, bool bNotify) {
+void CJX_Object::SetInteger(XFA_Attribute eAttr, int32_t iValue, bool bNotify) {
   CFX_XMLElement* elem = SetValue(eAttr, XFA_AttributeType::Integer,
                                   (void*)(uintptr_t)iValue, bNotify);
   if (elem) {
-    elem->SetString(CXFA_Node::AttributeToName(eAttr),
-                    WideString::Format(L"%d", iValue));
+    elem->SetAttribute(CXFA_Node::AttributeToName(eAttr),
+                       WideString::Format(L"%d", iValue));
   }
-  return true;
 }
 
 int32_t CJX_Object::GetInteger(XFA_Attribute eAttr) {
@@ -391,30 +387,28 @@ Optional<XFA_AttributeEnum> CJX_Object::TryEnum(XFA_Attribute eAttr,
   return ToNode(GetXFAObject())->GetDefaultEnum(eAttr);
 }
 
-bool CJX_Object::SetEnum(XFA_Attribute eAttr,
+void CJX_Object::SetEnum(XFA_Attribute eAttr,
                          XFA_AttributeEnum eValue,
                          bool bNotify) {
   CFX_XMLElement* elem = SetValue(eAttr, XFA_AttributeType::Enum,
                                   (void*)(uintptr_t)eValue, bNotify);
   if (elem) {
-    elem->SetString(CXFA_Node::AttributeToName(eAttr),
-                    CXFA_Node::AttributeEnumToName(eValue));
+    elem->SetAttribute(CXFA_Node::AttributeToName(eAttr),
+                       CXFA_Node::AttributeEnumToName(eValue));
   }
-  return true;
 }
 
 XFA_AttributeEnum CJX_Object::GetEnum(XFA_Attribute eAttr) const {
   return TryEnum(eAttr, true).value_or(XFA_AttributeEnum::Unknown);
 }
 
-bool CJX_Object::SetMeasure(XFA_Attribute eAttr,
+void CJX_Object::SetMeasure(XFA_Attribute eAttr,
                             CXFA_Measurement mValue,
                             bool bNotify) {
   void* pKey = GetMapKey_Element(GetXFAObject()->GetElementType(), eAttr);
   OnChanging(eAttr, bNotify);
   SetMapModuleBuffer(pKey, &mValue, sizeof(CXFA_Measurement), nullptr);
   OnChanged(eAttr, bNotify, false);
-  return true;
 }
 
 Optional<CXFA_Measurement> CJX_Object::TryMeasure(XFA_Attribute eAttr,
@@ -424,7 +418,7 @@ Optional<CXFA_Measurement> CJX_Object::TryMeasure(XFA_Attribute eAttr,
   int32_t iBytes;
   if (GetMapModuleBuffer(pKey, pValue, iBytes, true) &&
       iBytes == sizeof(CXFA_Measurement)) {
-    return {*reinterpret_cast<CXFA_Measurement*>(pValue)};
+    return {*static_cast<CXFA_Measurement*>(pValue)};
   }
   if (!bUseDefault)
     return {};
@@ -447,7 +441,7 @@ WideString CJX_Object::GetCData(XFA_Attribute eAttr) {
   return TryCData(eAttr, true).value_or(WideString());
 }
 
-bool CJX_Object::SetCData(XFA_Attribute eAttr,
+void CJX_Object::SetCData(XFA_Attribute eAttr,
                           const WideString& wsValue,
                           bool bNotify,
                           bool bScriptModify) {
@@ -466,29 +460,27 @@ bool CJX_Object::SetCData(XFA_Attribute eAttr,
 
   if (!xfaObj->IsNeedSavingXMLNode() || eAttr == XFA_Attribute::QualifiedName ||
       eAttr == XFA_Attribute::BindingNode) {
-    return true;
+    return;
   }
 
   if (eAttr == XFA_Attribute::Name &&
       (xfaObj->GetElementType() == XFA_Element::DataValue ||
        xfaObj->GetElementType() == XFA_Element::DataGroup)) {
-    return true;
+    return;
   }
 
   if (eAttr == XFA_Attribute::Value) {
     xfaObj->SetToXML(wsValue);
-    return true;
+    return;
   }
-
-  auto* elem = static_cast<CFX_XMLElement*>(xfaObj->GetXMLMappingNode());
-  ASSERT(elem->GetType() == FX_XMLNODE_Element);
 
   WideString wsAttrName = CXFA_Node::AttributeToName(eAttr);
   if (eAttr == XFA_Attribute::ContentType)
     wsAttrName = L"xfa:" + wsAttrName;
 
-  elem->SetString(wsAttrName, wsValue);
-  return true;
+  CFX_XMLElement* elem = ToXMLElement(xfaObj->GetXMLMappingNode());
+  elem->SetAttribute(wsAttrName, wsValue);
+  return;
 }
 
 void CJX_Object::SetAttributeValue(const WideString& wsValue,
@@ -544,17 +536,13 @@ CFX_XMLElement* CJX_Object::SetValue(XFA_Attribute eAttr,
   OnChanging(eAttr, bNotify);
   SetMapModuleValue(pKey, pValue);
   OnChanged(eAttr, bNotify, false);
-  if (!ToNode(GetXFAObject())->IsNeedSavingXMLNode())
-    return nullptr;
 
-  auto* elem =
-      static_cast<CFX_XMLElement*>(ToNode(GetXFAObject())->GetXMLMappingNode());
-  ASSERT(elem->GetType() == FX_XMLNODE_Element);
-
-  return elem;
+  CXFA_Node* pNode = ToNode(GetXFAObject());
+  return pNode->IsNeedSavingXMLNode() ? ToXMLElement(pNode->GetXMLMappingNode())
+                                      : nullptr;
 }
 
-bool CJX_Object::SetContent(const WideString& wsContent,
+void CJX_Object::SetContent(const WideString& wsContent,
                             const WideString& wsXMLValue,
                             bool bNotify,
                             bool bScriptModify,
@@ -692,8 +680,9 @@ bool CJX_Object::SetContent(const WideString& wsContent,
                                            : XFA_Element::Sharptext);
         ToNode(GetXFAObject())->InsertChild(pContentRawDataNode, nullptr);
       }
-      return pContentRawDataNode->JSObject()->SetContent(
+      pContentRawDataNode->JSObject()->SetContent(
           wsContent, wsXMLValue, bNotify, bScriptModify, bSyncData);
+      return;
     }
     case XFA_ObjectType::NodeC:
     case XFA_ObjectType::TextNode:
@@ -727,7 +716,7 @@ bool CJX_Object::SetContent(const WideString& wsContent,
       break;
   }
   if (!pNode)
-    return false;
+    return;
 
   SetAttributeValue(wsContent, wsXMLValue, bNotify, bScriptModify);
   if (pBindNode && bSyncData) {
@@ -736,7 +725,6 @@ bool CJX_Object::SetContent(const WideString& wsContent,
                                          bScriptModify, false);
     }
   }
-  return true;
 }
 
 WideString CJX_Object::GetContent(bool bScriptModify) {
@@ -790,7 +778,7 @@ Optional<WideString> CJX_Object::TryContent(bool bScriptModify, bool bProto) {
     case XFA_ObjectType::NodeV:
     case XFA_ObjectType::TextNode:
       pNode = ToNode(GetXFAObject());
-      FX_FALLTHROUGH;
+      FALLTHROUGH;
     default:
       if (ToNode(GetXFAObject())->GetElementType() == XFA_Element::DataValue)
         pNode = ToNode(GetXFAObject());
@@ -812,30 +800,31 @@ Optional<WideString> CJX_Object::TryNamespace() {
   if (ToNode(GetXFAObject())->IsModelNode() ||
       ToNode(GetXFAObject())->GetElementType() == XFA_Element::Packet) {
     CFX_XMLNode* pXMLNode = ToNode(GetXFAObject())->GetXMLMappingNode();
-    if (!pXMLNode || pXMLNode->GetType() != FX_XMLNODE_Element)
+    CFX_XMLElement* element = ToXMLElement(pXMLNode);
+    if (!element)
       return {};
 
-    return {static_cast<CFX_XMLElement*>(pXMLNode)->GetNamespaceURI()};
+    return {element->GetNamespaceURI()};
   }
 
   if (ToNode(GetXFAObject())->GetPacketType() != XFA_PacketType::Datasets)
     return ToNode(GetXFAObject())->GetModelNode()->JSObject()->TryNamespace();
 
   CFX_XMLNode* pXMLNode = ToNode(GetXFAObject())->GetXMLMappingNode();
-  if (!pXMLNode || pXMLNode->GetType() != FX_XMLNODE_Element)
+  CFX_XMLElement* element = ToXMLElement(pXMLNode);
+  if (!element)
     return {};
 
   if (ToNode(GetXFAObject())->GetElementType() == XFA_Element::DataValue &&
       GetEnum(XFA_Attribute::Contains) == XFA_AttributeEnum::MetaData) {
     WideString wsNamespace;
-    bool ret = XFA_FDEExtension_ResolveNamespaceQualifier(
-        static_cast<CFX_XMLElement*>(pXMLNode),
-        GetCData(XFA_Attribute::QualifiedName), &wsNamespace);
-    if (!ret)
+    if (!XFA_FDEExtension_ResolveNamespaceQualifier(
+            element, GetCData(XFA_Attribute::QualifiedName), &wsNamespace)) {
       return {};
+    }
     return {wsNamespace};
   }
-  return {static_cast<CFX_XMLElement*>(pXMLNode)->GetNamespaceURI()};
+  return {element->GetNamespaceURI()};
 }
 
 std::pair<CXFA_Node*, int32_t> CJX_Object::GetPropertyInternal(
@@ -891,13 +880,12 @@ CXFA_Node* CJX_Object::GetOrCreatePropertyInternal(int32_t index,
   return pNewNode;
 }
 
-bool CJX_Object::SetUserData(
+void CJX_Object::SetUserData(
     void* pKey,
     void* pData,
     const XFA_MAPDATABLOCKCALLBACKINFO* pCallbackInfo) {
   SetMapModuleBuffer(pKey, &pData, sizeof(void*),
                      pCallbackInfo ? pCallbackInfo : &gs_XFADefaultFreeData);
-  return true;
 }
 
 XFA_MAPMODULEDATA* CJX_Object::CreateMapModuleData() {
@@ -1176,9 +1164,9 @@ void CJX_Object::Script_Attribute_String(CFXJSE_Value* pValue,
   WideString wsSOM;
   if (!wsValue.IsEmpty()) {
     if (wsValue[0] == '#')
-      wsID = WideString(wsValue.c_str() + 1, wsValue.GetLength() - 1);
+      wsID = wsValue.Mid(1, wsValue.GetLength() - 1);
     else
-      wsSOM = wsValue;
+      wsSOM = std::move(wsValue);
   }
 
   CXFA_Node* pProtoNode = nullptr;

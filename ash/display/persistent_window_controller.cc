@@ -5,7 +5,6 @@
 #include "ash/display/persistent_window_controller.h"
 
 #include "ash/display/persistent_window_info.h"
-#include "ash/public/cpp/ash_features.h"
 #include "ash/session/session_controller.h"
 #include "ash/shell.h"
 #include "ash/wm/mru_window_tracker.h"
@@ -30,9 +29,6 @@ MruWindowTracker::WindowList GetWindowList() {
 // Returns true when window cycle list can be processed to perform save/restore
 // operations on observing display changes.
 bool ShouldProcessWindowList() {
-  if (!features::IsPersistentWindowBoundsEnabled())
-    return false;
-
   // Window cycle list exists in active user session only.
   if (!Shell::Get()->session_controller()->IsActiveUserSessionStarted())
     return false;
@@ -100,7 +96,7 @@ void PersistentWindowController::MaybeRestorePersistentWindowBounds() {
     wm::WindowState* window_state = wm::GetWindowState(window);
     if (!window_state->persistent_window_info())
       continue;
-    const auto& persistent_window_info =
+    PersistentWindowInfo persistent_window_info =
         *window_state->persistent_window_info();
     const int64_t persistent_display_id = persistent_window_info.display_id;
     if (persistent_display_id == screen->GetDisplayNearestWindow(window).id())

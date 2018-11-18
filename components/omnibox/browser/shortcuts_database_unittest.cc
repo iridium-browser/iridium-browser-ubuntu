@@ -63,7 +63,7 @@ typedef testing::Test ShortcutsDatabaseMigrationTest;
 
 // Checks that the database at |db| has the version 2 columns iff |is_v2|.
 void CheckV2ColumnExistence(const base::FilePath& db_path, bool is_v2) {
-  sql::Connection connection;
+  sql::Database connection;
   ASSERT_TRUE(connection.Open(db_path));
   EXPECT_EQ(is_v2,
             connection.DoesColumnExist("omni_box_shortcuts", "fill_into_edit"));
@@ -75,7 +75,7 @@ void CheckV2ColumnExistence(const base::FilePath& db_path, bool is_v2) {
 
 const base::FilePath GetTestDataDir() {
   base::FilePath path;
-  PathService::Get(base::DIR_SOURCE_ROOT, &path);
+  base::PathService::Get(base::DIR_SOURCE_ROOT, &path);
   return path.AppendASCII("components/test/data/omnibox");
 }
 
@@ -183,8 +183,7 @@ TEST_F(ShortcutsDatabaseTest, DeleteShortcutsWithIds) {
   ShortcutsDatabase::GuidToShortcutMap shortcuts;
   db_->LoadShortcuts(&shortcuts);
 
-  ShortcutsDatabase::GuidToShortcutMap::iterator it =
-      shortcuts.find(shortcut_test_db[0].guid);
+  auto it = shortcuts.find(shortcut_test_db[0].guid);
   EXPECT_TRUE(it == shortcuts.end());
 
   it = shortcuts.find(shortcut_test_db[1].guid);
@@ -203,8 +202,7 @@ TEST_F(ShortcutsDatabaseTest, DeleteShortcutsWithURL) {
   ShortcutsDatabase::GuidToShortcutMap shortcuts;
   db_->LoadShortcuts(&shortcuts);
 
-  ShortcutsDatabase::GuidToShortcutMap::iterator it =
-      shortcuts.find(shortcut_test_db[0].guid);
+  auto it = shortcuts.find(shortcut_test_db[0].guid);
   EXPECT_TRUE(it != shortcuts.end());
 
   it = shortcuts.find(shortcut_test_db[1].guid);
@@ -249,7 +247,7 @@ TEST(ShortcutsDatabaseMigrationTest, MigrateTableAddFillIntoEdit) {
   CheckV2ColumnExistence(db_path, true);
 
   // Check the values in each of the new columns.
-  sql::Connection connection;
+  sql::Database connection;
   ASSERT_TRUE(connection.Open(db_path));
   sql::Statement statement(connection.GetUniqueStatement(
       "SELECT fill_into_edit, url, transition, type, keyword "
@@ -289,7 +287,7 @@ TEST(ShortcutsDatabaseMigrationTest, MigrateV0ToV1) {
   }
 
   // Check that all the old type values got converted to new values.
-  sql::Connection connection;
+  sql::Database connection;
   ASSERT_TRUE(connection.Open(db_path));
   sql::Statement statement(connection.GetUniqueStatement(
       "SELECT count(1) FROM omni_box_shortcuts WHERE type in (9, 10, 11, 12)"));
@@ -316,10 +314,10 @@ TEST(ShortcutsDatabaseMigrationTest, Recovery1) {
   ASSERT_TRUE(sql::test::CreateDatabaseFromSQL(db_path, sql_path));
 
   // Capture the row count from the golden file before corrupting the database.
-  const char kCountSql[] = "SELECT COUNT(*) FROM omni_box_shortcuts";
+  static const char kCountSql[] = "SELECT COUNT(*) FROM omni_box_shortcuts";
   int row_count;
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(db_path));
     sql::Statement statement(connection.GetUniqueStatement(kCountSql));
     ASSERT_TRUE(statement.is_valid());
@@ -336,7 +334,7 @@ TEST(ShortcutsDatabaseMigrationTest, Recovery1) {
     sql::test::ScopedErrorExpecter expecter;
     expecter.ExpectError(SQLITE_CORRUPT);
 
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(db_path));
     sql::Statement statement(connection.GetUniqueStatement(kCountSql));
     ASSERT_FALSE(statement.is_valid());
@@ -344,7 +342,7 @@ TEST(ShortcutsDatabaseMigrationTest, Recovery1) {
     ASSERT_TRUE(expecter.SawExpectedErrors());
   }
 
-  // The sql::Connection::Open() called by ShortcutsDatabase::Init() will hit
+  // The sql::Database::Open() called by ShortcutsDatabase::Init() will hit
   // the corruption, the error callback will recover and poison the database,
   // then Open() will retry successfully, allowing Init() to succeed.
   {
@@ -362,7 +360,7 @@ TEST(ShortcutsDatabaseMigrationTest, Recovery1) {
   // The previously-broken statement works and all of the data should have been
   // recovered.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(db_path));
     sql::Statement statement(connection.GetUniqueStatement(kCountSql));
     ASSERT_TRUE(statement.is_valid());

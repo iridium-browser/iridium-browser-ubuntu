@@ -30,6 +30,12 @@ const char kCopyEntryMethod[] = "CopyEntry";
 const char kGetDeleteListMethod[] = "GetDeleteList";
 const char kGetSharesMethod[] = "GetShares";
 const char kRemountMethod[] = "Remount";
+const char kSetupKerberosMethod[] = "SetupKerberos";
+const char kParseNetBiosPacketMethod[] = "ParseNetBiosPacket";
+const char kStartCopyMethod[] = "StartCopy";
+const char kContinueCopyMethod[] = "ContinueCopy";
+const char kStartReadDirectoryMethod[] = "StartReadDirectory";
+const char kContinueReadDirectoryMethod[] = "ContinueReadDirectory";
 
 }  // namespace smbprovider
 

@@ -52,6 +52,7 @@
     *   [set_defaults: Set default values for a target type.](#set_defaults)
     *   [set_sources_assignment_filter: Set a pattern to filter source files.](#set_sources_assignment_filter)
     *   [split_list: Splits a list into N different sub-lists.](#split_list)
+    *   [string_replace: Replaces substring in the given string.](#string_replace)
     *   [template: Define a template rule.](#template)
     *   [tool: Specify arguments to a toolchain tool.](#tool)
     *   [toolchain: Defines a toolchain.](#toolchain)
@@ -103,6 +104,7 @@
     *   [defines: [string list] C preprocessor defines.](#defines)
     *   [depfile: [string] File name for input dependencies for actions.](#depfile)
     *   [deps: [label list] Private linked dependencies.](#deps)
+    *   [friend: [label pattern list] Allow targets to include private headers.](#friend)
     *   [include_dirs: [directory list] Additional include directories.](#include_dirs)
     *   [inputs: [file list] Additional compile-time dependencies.](#inputs)
     *   [ldflags: [string list] Flags passed to the linker.](#ldflags)
@@ -141,13 +143,14 @@
     *   [labels: About labels.](#labels)
     *   [ninja_rules: How Ninja build rules are named.](#ninja_rules)
     *   [nogncheck: Annotating includes for checking.](#nogncheck)
+    *   [output_conversion: Specifies how to transform a value to output.](#output_conversion)
     *   [runtime_deps: How runtime dependency computation works.](#runtime_deps)
     *   [source_expansion: Map sources to outputs for scripts.](#source_expansion)
     *   [switches: Show available command-line switches.](#switches)
 
 ## <a name="commands"></a>Commands
 
-### <a name="analyze"></a>**gn analyze <out_dir> <input_path> <output_path>**
+### <a name="analyze"></a>**gn analyze &lt;out_dir&gt; &lt;input_path&gt; &lt;output_path&gt;**
 
 ```
   Analyze which targets are affected by a list of files.
@@ -217,7 +220,7 @@
   tries really hard to always write something to the output JSON and convey
   errors that way rather than via return codes.
 ```
-### <a name="args"></a>**gn args <out_dir> [\--list] [\--short] [\--args] [\--overrides-only]**
+### <a name="args"></a>**gn args &lt;out_dir&gt; [\--list] [\--short] [\--args] [\--overrides-only]**
 
 ```
   See also "gn help buildargs" for a more high-level overview of how
@@ -242,7 +245,7 @@
       Note: you can edit the build args manually by editing the file "args.gn"
       in the build directory and then running "gn gen <out_dir>".
 
-  gn args <out_dir> --list[=<exact_arg>] [--short] [--overrides-only]
+  gn args <out_dir> --list[=<exact_arg>] [--short] [--overrides-only] [--json]
       Lists all build arguments available in the current configuration, or, if
       an exact_arg is specified for the list flag, just that one build
       argument.
@@ -257,6 +260,26 @@
       If --overrides-only is specified, only the names and current values of
       arguments that have been overridden (i.e. non-default arguments) will
       be printed. Overrides come from the <out_dir>/args.gn file and //.gn
+
+      If --json is specified, the output will be emitted in json format.
+      JSON schema for output:
+      [
+        {
+          "name": variable_name,
+          "current": {
+            "value": overridden_value,
+            "file": file_name,
+            "line": line_no
+          },
+          "default": {
+            "value": default_value,
+            "file": file_name,
+            "line": line_no
+          },
+          "comment": comment_string
+        },
+        ...
+      ]
 ```
 
 #### **Examples**
@@ -282,7 +305,7 @@
     given arguments set (which may affect the values of other
     arguments).
 ```
-### <a name="check"></a>**gn check <out_dir> [<label_pattern>] [\--force]**
+### <a name="check"></a>**gn check &lt;out_dir&gt; [&lt;label_pattern&gt;] [\--force]**
 
 ```
   GN's include header checker validates that the includes for C-like source
@@ -326,10 +349,8 @@
     - Only includes using "quotes" are checked. <brackets> are assumed to be
       system includes.
 
-    - Include paths are assumed to be relative to either the source root or the
-      "root_gen_dir" and must include all the path components. (It might be
-      nice in the future to incorporate GN's knowledge of the include path to
-      handle other include styles.)
+    - Include paths are assumed to be relative to any of the "include_dirs" for
+      the target (including the implicit current dir).
 
     - GN does not run the preprocessor so will not understand conditional
       includes.
@@ -363,9 +384,9 @@
 #### **Advice on fixing problems**
 
 ```
-  If you have a third party project that uses relative includes, it's generally
-  best to exclude that target from checking altogether via
-  "check_includes = false".
+  If you have a third party project that is difficult to fix or doesn't care
+  about include checks it's generally best to exclude that target from checking
+  altogether via "check_includes = false".
 
   If you have conditional includes, make sure the build conditions and the
   preprocessor conditions match, and annotate the line with "nogncheck" (see
@@ -399,25 +420,25 @@
   gn check out/Default "//foo/*
       Check only the files in targets in the //foo directory tree.
 ```
-### <a name="clean"></a>**gn clean <out_dir>**
+### <a name="clean"></a>**gn clean &lt;out_dir&gt;**
 
 ```
   Deletes the contents of the output directory except for args.gn and
   creates a Ninja build environment sufficient to regenerate the build.
 ```
-### <a name="desc"></a>**gn desc <out_dir> <label or pattern> [<what to show>] [\--blame] "**
+### <a name="desc"></a>**gn desc &lt;out_dir&gt; &lt;label or pattern&gt; [&lt;what to show&gt;] [\--blame] "**
 #### **[\--format=json]**
 
 ```
-  Displays information about a given target or config. The build build
-  parameters will be taken for the build in the given <out_dir>.
+  Displays information about a given target or config. The build parameters
+  will be taken for the build in the given <out_dir>.
 
   The <label or pattern> can be a target label, a config label, or a label
   pattern (see "gn help label_pattern"). A label pattern will only match
   targets.
 ```
 
-#### **Possibilities for <what to show>**
+#### **Possibilities for &lt;what to show&gt;**
 
 ```
   (If unspecified an overall summary will be displayed.)
@@ -427,8 +448,8 @@
   arflags [--blame]
   args
   cflags [--blame]
+  cflags_c [--blame]
   cflags_cc [--blame]
-  cflags_cxx [--blame]
   check_includes
   configs [--tree] (see below)
   defines [--blame]
@@ -477,7 +498,7 @@
 ```
   --blame
       Used with any value specified on a config, this will name the config that
-      cause that target to get the flag. This doesn't currently work for libs
+      causes that target to get the flag. This doesn't currently work for libs
       and lib_dirs because those are inherited and are more complicated to
       figure out the blame (patches welcome).
 ```
@@ -564,7 +585,7 @@
       Shows defines set for the //base:base target, annotated by where
       each one was set from.
 ```
-### <a name="format"></a>**gn format [\--dump-tree] (\--stdin | <build_file>)**
+### <a name="format"></a>**gn format [\--dump-tree] (\--stdin | &lt;build_file&gt;)**
 
 ```
   Formats .gn file to a standard format.
@@ -607,7 +628,7 @@
   gn format /abspath/some/BUILD.gn
   gn format --stdin
 ```
-### <a name="gen"></a>**gn gen [\--check] [<ide options>] <out_dir>**
+### <a name="gen"></a>**gn gen [\--check] [&lt;ide options&gt;] &lt;out_dir&gt;**
 
 ```
   Generates ninja files from the current tree and puts them in the given output
@@ -726,7 +747,18 @@
   --json-ide-script-args=<argument>
       Optional second argument that will passed to executed script.
 ```
-### <a name="help"></a>**gn help <anything>**
+
+#### **Compilation Database**
+
+```
+  --export-compile-commands
+      Produces a compile_commands.json file in the root of the build directory
+      containing an array of “command objects”, where each command object
+      specifies one way a translation unit is compiled in the project. This is
+      used for various Clang-based tooling, allowing for the replay of individual
+      compilations independent of the build system.
+```
+### <a name="help"></a>**gn help &lt;anything&gt;**
 
 ```
   Yo dawg, I heard you like help on your help so I put help on the help in the
@@ -748,7 +780,7 @@
   gn help --markdown all
       Dump all help to stdout in markdown format.
 ```
-### <a name="ls"></a>**gn ls <out_dir> [<label_pattern>] [\--all-toolchains] [\--as=...]**
+### <a name="ls"></a>**gn ls &lt;out_dir&gt; [&lt;label_pattern&gt;] [\--all-toolchains] [\--as=...]**
 ```
       [--type=...] [--testonly=...]
 
@@ -821,7 +853,7 @@
       Lists all variants of the target //base:base (it may be referenced
       in multiple toolchains).
 ```
-### <a name="path"></a>**gn path <out_dir> <target_one> <target_two>**
+### <a name="path"></a>**gn path &lt;out_dir&gt; &lt;target_one&gt; &lt;target_two&gt;**
 
 ```
   Finds paths of dependencies between two targets. Each unique path will be
@@ -866,7 +898,7 @@
 ```
   gn path out/Default //base //tools/gn
 ```
-### <a name="refs"></a>**gn refs <out_dir> (<label_pattern>|<label>|<file>|@<response_file>)***
+### <a name="refs"></a>**gn refs &lt;out_dir&gt; (&lt;label_pattern&gt;|&lt;label&gt;|&lt;file&gt;|@&lt;response_file&gt;)***
 ```
         [--all] [--all-toolchains] [--as=...] [--testonly=...] [--type=...]
 
@@ -1020,6 +1052,7 @@
   It is recommended you put inputs to your script in the "sources" variable,
   and stuff like other Python files required to run your script in the "inputs"
   variable.
+
   The "deps" and "public_deps" for an action will always be
   completed before any part of the action is run so it can depend on
   the output of previous steps. The "data_deps" will be built if the
@@ -1033,6 +1066,7 @@
 ```
   You should specify files created by your script by specifying them in the
   "outputs".
+
   The script will be executed with the given arguments with the current
   directory being that of the root build directory. If you pass files
   to your script, see "gn help rebase_path" for how to convert
@@ -1042,6 +1076,7 @@
 ```
 
 #### **File name handling**
+
 ```
   All output files must be inside the output directory of the build.
   You would generally use |$target_out_dir| or |$target_gen_dir| to
@@ -1101,6 +1136,7 @@
   You can dynamically write input dependencies (for incremental rebuilds if an
   input file changes) by writing a depfile when the script is run (see "gn help
   depfile"). This is more flexible than "inputs".
+
   The "deps" and "public_deps" for an action will always be
   completed before any part of the action is run so it can depend on
   the output of previous steps. The "data_deps" will be built if the
@@ -1110,6 +1146,7 @@
 ```
 
 #### **Outputs**
+
 ```
   The script will be executed with the given arguments with the current
   directory being that of the root build directory. If you pass files
@@ -1120,6 +1157,7 @@
 ```
 
 #### **File name handling**
+
 ```
   All output files must be inside the output directory of the build.
   You would generally use |$target_out_dir| or |$target_gen_dir| to
@@ -1411,11 +1449,11 @@
 
 ```
   Flags: cflags, cflags_c, cflags_cc, cflags_objc, cflags_objcc,
-         asmflags, defines, include_dirs, ldflags, lib_dirs, libs,
-         precompiled_header, precompiled_source
+         asmflags, defines, include_dirs, inputs, ldflags, lib_dirs,
+         libs, precompiled_header, precompiled_source
   Deps: data_deps, deps, public_deps
   Dependent configs: all_dependent_configs, public_configs
-  General: check_includes, configs, data, inputs, output_name,
+  General: check_includes, configs, data, friend, inputs, output_name,
            output_extension, public, sources, testonly, visibility
 ```
 ### <a name="group"></a>**group**: Declare a named group of targets.
@@ -1459,11 +1497,11 @@
 
 ```
   Flags: cflags, cflags_c, cflags_cc, cflags_objc, cflags_objcc,
-         asmflags, defines, include_dirs, ldflags, lib_dirs, libs,
-         precompiled_header, precompiled_source
+         asmflags, defines, include_dirs, inputs, ldflags, lib_dirs,
+         libs, precompiled_header, precompiled_source
   Deps: data_deps, deps, public_deps
   Dependent configs: all_dependent_configs, public_configs
-  General: check_includes, configs, data, inputs, output_name,
+  General: check_includes, configs, data, friend, inputs, output_name,
            output_extension, public, sources, testonly, visibility
 ```
 ### <a name="shared_library"></a>**shared_library**: Declare a shared library target.
@@ -1480,11 +1518,11 @@
 
 ```
   Flags: cflags, cflags_c, cflags_cc, cflags_objc, cflags_objcc,
-         asmflags, defines, include_dirs, ldflags, lib_dirs, libs,
-         precompiled_header, precompiled_source
+         asmflags, defines, include_dirs, inputs, ldflags, lib_dirs,
+         libs, precompiled_header, precompiled_source
   Deps: data_deps, deps, public_deps
   Dependent configs: all_dependent_configs, public_configs
-  General: check_includes, configs, data, inputs, output_name,
+  General: check_includes, configs, data, friend, inputs, output_name,
            output_extension, public, sources, testonly, visibility
 ```
 ### <a name="source_set"></a>**source_set**: Declare a source set target.
@@ -1506,7 +1544,7 @@
   code elimination to delete code not reachable from exported functions.
 
   A source set will not do this code elimination since there is no link step.
-  This allows you to link many sources sets into a shared library and have the
+  This allows you to link many source sets into a shared library and have the
   "exported symbol" notation indicate "export from the final shared library and
   not from the intermediate targets." There is no way to express this concept
   when linking multiple static libraries into a shared library.
@@ -1516,11 +1554,11 @@
 
 ```
   Flags: cflags, cflags_c, cflags_cc, cflags_objc, cflags_objcc,
-         asmflags, defines, include_dirs, ldflags, lib_dirs, libs,
-         precompiled_header, precompiled_source
+         asmflags, defines, include_dirs, inputs, ldflags, lib_dirs,
+         libs, precompiled_header, precompiled_source
   Deps: data_deps, deps, public_deps
   Dependent configs: all_dependent_configs, public_configs
-  General: check_includes, configs, data, inputs, output_name,
+  General: check_includes, configs, data, friend, inputs, output_name,
            output_extension, public, sources, testonly, visibility
 ```
 ### <a name="static_library"></a>**static_library**: Declare a static library target.
@@ -1538,11 +1576,11 @@
 ```
   complete_static_lib
   Flags: cflags, cflags_c, cflags_cc, cflags_objc, cflags_objcc,
-         asmflags, defines, include_dirs, ldflags, lib_dirs, libs,
-         precompiled_header, precompiled_source
+         asmflags, defines, include_dirs, inputs, ldflags, lib_dirs,
+         libs, precompiled_header, precompiled_source
   Deps: data_deps, deps, public_deps
   Dependent configs: all_dependent_configs, public_configs
-  General: check_includes, configs, data, inputs, output_name,
+  General: check_includes, configs, data, friend, inputs, output_name,
            output_extension, public, sources, testonly, visibility
 ```
 ### <a name="target"></a>**target**: Declare an target with the given programmatic type.
@@ -1619,8 +1657,8 @@
 #### **Variables valid in a config definition**
 ```
   Flags: cflags, cflags_c, cflags_cc, cflags_objc, cflags_objcc,
-         asmflags, defines, include_dirs, ldflags, lib_dirs, libs,
-         precompiled_header, precompiled_source
+         asmflags, defines, include_dirs, inputs, ldflags, lib_dirs,
+         libs, precompiled_header, precompiled_source
   Nested configs: configs
 ```
 
@@ -1752,14 +1790,18 @@
   directory. If you are passing file names, you will want to use the
   rebase_path() function to make file names relative to this path (see "gn help
   rebase_path").
+
+  The default script interpreter is Python ("python" on POSIX, "python.exe" or
+  "python.bat" on Windows). This can be configured by the script_executable
+  variable, see "gn help dotfile".
 ```
 
 #### **Arguments**:
 
 ```
   filename:
-      File name of python script to execute. Non-absolute names will be treated
-      as relative to the current build file.
+      File name of script to execute. Non-absolute names will be treated as
+      relative to the current build file.
 
   arguments:
       A list of strings to be passed to the script as arguments. May be
@@ -1800,8 +1842,9 @@
     }
 
   Executes the loop contents block over each item in the list, assigning the
-  loop_var to each item in sequence. The loop_var will be a copy so assigning
-  to it will not mutate the list.
+  loop_var to each item in sequence. The <loop_var> will be a copy so assigning
+  to it will not mutate the list. The loop will iterate over a copy of <list>
+  so mutating it inside the loop will not affect iteration.
 
   The block does not introduce a new scope, so that variable assignments inside
   the loop will be visible once the loop terminates.
@@ -1850,8 +1893,7 @@
   important because most targets have an implicit configs list, which means it
   wouldn't work at all if it didn't clobber).
 
-  The sources assignment filter (see "gn help "
-     "set_sources_assignment_filter")
+  The sources assignment filter (see "gn help set_sources_assignment_filter")
   is never applied by this function. It's assumed than any desired filtering
   was already done when sources was set on the from_scope.
 
@@ -1863,6 +1905,13 @@
 #### **Examples**
 
 ```
+  # forward_variables_from(invoker, ["foo"])
+  # is equivalent to:
+  assert(!defined(foo))
+  if (defined(invoker.foo)) {
+    foo = invoker.foo
+  }
+
   # This is a common action template. It would invoke a script with some given
   # parameters, and wants to use the various types of deps and the visibility
   # from the invoker if it's defined. It also injects an additional dependency
@@ -1870,8 +1919,7 @@
   template("my_test") {
     action(target_name) {
       forward_variables_from(invoker, [ "data_deps", "deps",
-                                        "public_deps", "visibility" "
-                                                                    "])
+                                        "public_deps", "visibility"])
       # Add our test code to the dependencies.
       # "deps" may or may not be defined at this point.
       if (defined(deps)) {
@@ -1882,8 +1930,8 @@
     }
   }
 
-  # This is a template around either a target whose type depends on a global
-  # variable. It forwards all values from the invoker.
+  # This is a template around a target whose type depends on a global variable.
+  # It forwards all values from the invoker.
   template("my_wrapper") {
     target(my_wrapper_target_type, target_name) {
       forward_variables_from(invoker, "*")
@@ -2190,6 +2238,13 @@
   context of more than one toolchain it is recommended to specify an
   explicit toolchain when defining and referencing a pool.
 
+  A pool named "console" defined in the root build file represents Ninja's
+  console pool. Targets using this pool will have access to the console's
+  stdin and stdout, and output will not be buffered. This special pool must
+  have a depth of 1. Pools not defined in the root must not be named "console".
+  The console pool can only be defined for the default toolchain.
+  Refer to the Ninja documentation on the console pool for more info.
+
   A pool is referenced by its label just like a target.
 ```
 
@@ -2469,7 +2524,7 @@
     configs = [ "//tools/mything:settings" ]
   }
 
-  static_library("mylib")
+  static_library("mylib") {
     # The configs will be auto-populated as above. You can remove it if
     # you don't want the default for a particular default:
     configs -= [ "//tools/mything:settings" ]
@@ -2562,6 +2617,27 @@
   Will print:
     [[1, 2], [3, 4], [5, 6]
 ```
+### <a name="string_replace"></a>**string_replace**: Replaces substring in the given string.
+
+```
+  result = string_replace(str, old, new[, max])
+
+  Returns a copy of the string str in which the occurrences of old have been
+  replaced with new, optionally restricting the number of replacements. The
+  replacement is performed sequentially, so if new contains old, it won't be
+  replaced.
+```
+
+#### **Example**
+
+```
+  The code:
+    mystr = "Hello, world!"
+    print(string_replace(mystr, "world", "GN"))
+
+  Will print:
+    Hello, GN!
+```
 ### <a name="template"></a>**template**: Define a template rule.
 
 ```
@@ -2644,7 +2720,7 @@
 
     template("shared_library") {
       shared_library(shlib) {
-        forward_variables_from(invoker, [ "*" ])
+        forward_variables_from(invoker, "*")
         ...
       }
     }
@@ -3041,7 +3117,7 @@
         same directory as the target is declared in, they will will be the same
         as the "target" versions above. Example: "gen/base/test"
 
-  Linker tools have multiple inputs and (potentially) multiple outputs The
+  Linker tools have multiple inputs and (potentially) multiple outputs. The
   static library tool ("alink") is not considered a linker tool. The following
   expansions are available:
 
@@ -3242,10 +3318,10 @@
 
 ```
   tool()
-    The tool() function call specifies the commands commands to run for a given
-    step. See "gn help tool".
+    The tool() function call specifies the commands to run for a given step. See
+    "gn help tool".
 
-  toolchain_args
+  toolchain_args [scope]
     Overrides for build arguments to pass to the toolchain when invoking it.
     This is a variable of type "scope" where the variable names correspond to
     variables in declare_args() blocks.
@@ -3264,7 +3340,25 @@
 
     See also "gn help buildargs" for an overview of these arguments.
 
-  deps
+  propagates_configs [boolean, default=false]
+    Determines whether public_configs and all_dependent_configs in this
+    toolchain propagate to targets in other toolchains.
+
+    When false (the default), this toolchain will not propagate any configs to
+    targets in other toolchains that depend on it targets inside this
+    toolchain. This matches the most common usage of toolchains where they
+    represent different architectures or compilers and the settings that apply
+    to one won't necessarily apply to others.
+
+    When true, configs (public and all-dependent) will cross the boundary out
+    of this toolchain as if the toolchain boundary wasn't there. This only
+    affects one direction of dependencies: a toolchain can't control whether
+    it accepts such configs, only whether it pushes them. The build is
+    responsible for ensuring that any external targets depending on targets in
+    this toolchain are compatible with the compiler flags, etc. that may be
+    propagated.
+
+  deps [string list]
     Dependencies of this toolchain. These dependencies will be resolved before
     any target in the toolchain is compiled. To avoid circular dependencies
     these must be targets defined in another toolchain.
@@ -3331,7 +3425,7 @@
 ### <a name="write_file"></a>**write_file**: Write a file to disk.
 
 ```
-  write_file(filename, data)
+  write_file(filename, data, output_conversion = "")
 
   If data is a list, the list will be written one-item-per-line with no quoting
   or brackets.
@@ -3343,9 +3437,6 @@
   One use for write_file is to write a list of inputs to an script that might
   be too long for the command line. However, it is preferable to use response
   files for this purpose. See "gn help response_file_contents".
-
-  TODO(brettw) we probably need an optional third argument to control list
-  formatting.
 ```
 
 #### **Arguments**
@@ -3356,6 +3447,9 @@
 
   data
       The list or string to write.
+
+  output_conversion
+    Controls how the output is written. See "gn help output_conversion".
 ```
 ## <a name="predefined_variables"></a>Built-in predefined variables
 
@@ -3367,7 +3461,7 @@
   toolchain definitions to ensure that it always reflects the appropriate
   value.
 
-  This value is not used internally by GN for any purpose. It is set it to the
+  This value is not used internally by GN for any purpose. It is set to the
   empty string ("") by default but is declared so that it can be overridden on
   the command line if so desired.
 
@@ -3381,7 +3475,7 @@
   toolchain definitions to ensure that it always reflects the appropriate
   value.
 
-  This value is not used internally by GN for any purpose. It is set it to the
+  This value is not used internally by GN for any purpose. It is set to the
   empty string ("") by default but is declared so that it can be overridden on
   the command line if so desired.
 
@@ -3685,7 +3779,6 @@
   action("myscript") {
     # Pass the output dir to the script.
     args = [ "-o", rebase_path(target_out_dir, root_build_dir) ]"
-
   }
 ```
 ## <a name="target_variables"></a>Variables you set in targets
@@ -4526,6 +4619,67 @@
 
   See also "public_deps".
 ```
+### <a name="friend"></a>**friend**: Allow targets to include private headers.
+
+```
+  A list of label patterns (see "gn help label_pattern") that allow dependent
+  targets to include private headers. Applies to all binary targets.
+
+  Normally if a target lists headers in the "public" list (see "gn help
+  public"), other headers are implicitly marked as private. Private headers
+  can not be included by other targets, even with a public dependency path.
+  The "gn check" function performs this validation.
+
+  A friend declaration allows one or more targets to include private headers.
+  This is useful for things like unit tests that are closely associated with a
+  target and require internal knowledge without opening up all headers to be
+  included by all dependents.
+
+  A friend target does not allow that target to include headers when no
+  dependency exists. A public dependency path must still exist between two
+  targets to include any headers from a destination target. The friend
+  annotation merely allows the use of headers that would otherwise be
+  prohibited because they are private.
+
+  The friend annotation is matched only against the target containing the file
+  with the include directive. Friend annotations are not propagated across
+  public or private dependencies. Friend annotations do not affect visibility.
+```
+
+#### **Example**
+
+```
+  static_library("lib") {
+    # This target can include our private headers.
+    friend = [ ":unit_tests" ]
+
+    public = [
+      "public_api.h",  # Normal public API for dependent targets.
+    ]
+
+    # Private API and sources.
+    sources = [
+      "a_source_file.cc",
+
+      # Normal targets that depend on this one won't be able to include this
+      # because this target defines a list of "public" headers. Without the
+      # "public" list, all headers are implicitly public.
+      "private_api.h",
+    ]
+  }
+
+  executable("unit_tests") {
+    sources = [
+      # This can include "private_api.h" from the :lib target because it
+      # depends on that target and because of the friend annotation.
+      "my_test.cc",
+    ]
+
+    deps = [
+      ":lib",  # Required for the include to be allowed.
+    ]
+  }
+```
 ### <a name="include_dirs"></a>**include_dirs**: Additional include directories.
 
 ```
@@ -4609,10 +4763,10 @@
 #### **Inputs for binary targets**
 
 ```
-  Any input dependencies will be resolved before compiling any sources.
-  Normally, all actions that a target depends on will be run before any files
-  in a target are compiled. So if you depend on generated headers, you do not
-  typically need to list them in the inputs section.
+  Any input dependencies will be resolved before compiling any sources or
+  linking the target. Normally, all actions that a target depends on will be run
+  before any files in a target are compiled. So if you depend on generated
+  headers, you do not typically need to list them in the inputs section.
 
   Inputs for binary targets will be treated as implicit dependencies, meaning
   that changes in any of the inputs will force all sources in the target to be
@@ -5035,7 +5189,8 @@
   If no public files are declared, other targets (assuming they have visibility
   to depend on this target) can include any file in the sources list. If this
   variable is defined on a target, dependent targets may only include files on
-  this whitelist.
+  this whitelist unless that target is marked as a friend (see "gn help
+  friend").
 
   Header file permissions are also subject to visibility. A target must be
   visible to another target to include any files from it at all and the public
@@ -5050,6 +5205,22 @@
   GN only knows about files declared in the "sources" and "public" sections of
   targets. If a file is included that is not known to the build, it will be
   allowed.
+
+  It is common for test targets to need to include private headers for their
+  associated code. In this case, list the test target in the "friend" list of
+  the target that owns the private header to allow the inclusion. See
+  "gn help friend" for more.
+
+  When a binary target has no explicit or implicit public headers (a "public"
+  list is defined but is empty), GN assumes that the target can not propagate
+  any compile-time dependencies up the dependency tree. In this case, the build
+  can be parallelized more efficiently.
+  Say there are dependencies:
+    A (shared library) -> B (shared library) -> C (action).
+  Normally C must complete before any source files in A can compile (because
+  there might be generated includes). But when B explicitly declares no public
+  headers, C can execute in parallel with A's compile steps. C must still be
+  complete before any dependents link.
 ```
 
 #### **Examples**
@@ -5059,6 +5230,7 @@
     public = [ "foo.h", "bar.h" ]
 
   No files are public (no targets may include headers from this one):
+    # This allows starting compilation in dependent targets earlier.
     public = []
 ```
 ### <a name="public_configs"></a>**public_configs**: Configs to be applied on dependents.
@@ -5068,15 +5240,71 @@
 
   Targets directly depending on this one will have the configs listed in this
   variable added to them. These configs will also apply to the current target.
+  Generally, public configs are used to apply defines and include directories
+  necessary to compile this target's header files.
 
-  This addition happens in a second phase once a target and all of its
-  dependencies have been resolved. Therefore, a target will not see these
+  See also "gn help all_dependent_configs".
+```
+
+#### **Propagation of public configs**
+
+```
+  Public configs are applied to all targets that depend directly on this one.
+  These dependant targets can further push this target's public configs
+  higher in the dependency tree by depending on it via public_deps (see "gn
+  help public_deps").
+
+    static_library("toplevel") {
+      # This target will get "my_config" applied to it. However, since this
+      # target uses "deps" and not "public_deps", targets that depend on this
+      # one won't get it.
+      deps = [ ":intermediate" ]
+    }
+
+    static_library("intermediate") {
+      # Depending on "lower" in any way will apply "my_config" to this target.
+      # Additionall, since this target depends on "lower" via public_deps,
+      # targets that depend on this one will also get "my_config".
+      public_deps = [ ":lower" ]
+    }
+
+    static_library("lower") {
+      # This will get applied to all targets that depend on this one.
+      public_configs = [ ":my_config" ]
+    }
+
+  Public config propagation happens in a second phase once a target and all of
+  its dependencies have been resolved. Therefore, a target will not see these
   force-added configs in their "configs" variable while the script is running,
   and they can not be removed. As a result, this capability should generally
-  only be used to add defines and include directories necessary to compile a
-  target's headers.
+  only be used to add defines and include directories rather than setting
+  complicated flags that some targets may not want.
 
-  See also "all_dependent_configs".
+  Public configs may or may not be propagated across toolchain boundaries
+  depending on the value of the propagates_configs flag (see "gn help
+  toolchain") on the toolchain of the target declaring the public_config.
+```
+
+#### **Avoiding applying public configs to this target**
+
+```
+  If you want the config to apply to targets that depend on this one, but NOT
+  this one, define an extra layer of indirection using a group:
+
+    # External targets depend on this group.
+    group("my_target") {
+      # Config to apply to all targets that depend on this one.
+      public_configs = [ ":external_settings" ]
+      deps = [ ":internal_target" ]
+    }
+
+    # Internal target to actually compile the sources.
+    static_library("internal_target") {
+      # Force all external targets to depend on the group instead of directly
+      # on this so the "external_settings" config will get applied.
+      visibility = [ ":my_target" ]
+      ...
+    }
 ```
 
 #### **Ordering of flags and values**
@@ -5114,6 +5342,8 @@
     - If the current target is a shared library, other shared libraries that it
       publicly depends on (directly or indirectly) are propagated up the
       dependency tree to dependents for linking.
+
+  See also "gn help public_configs".
 ```
 
 #### **Discussion**
@@ -5343,7 +5573,7 @@
   See "gn help create_bundle" for more information.
 ```
 
-#### **Exmaple**
+#### **Example**
 
 ```
   create_bundle("chrome_xctest") {
@@ -5448,7 +5678,8 @@
   check_targets [optional]
       A list of labels and label patterns that should be checked when running
       "gn check" or "gn gen --check". If unspecified, all targets will be
-      checked. If it is the empty list, no targets will be checked.
+      checked. If it is the empty list, no targets will be checked. To bypass
+      this list, request an explicit check of targets, for instance "//*".
 
       The format of this list is identical to that of "visibility" so see "gn
       help visibility" for examples.
@@ -5830,51 +6061,87 @@
     myvalues.foo += 2
     empty_scope.new_thing = [ 1, 2, 3 ]
 ```
-### <a name="input_conversion"></a>**input_conversion**: Specifies how to transform input to a variable.
+### <a name="input_conversion"></a>**Input and output conversions are arguments to file and process functions**
+#### **that specify how to convert data to or from external formats. The possible**
+#### **values for parameters specifying conversions are**:
 
 ```
-  input_conversion is an argument to read_file and exec_script that specifies
-  how the result of the read operation should be converted into a variable.
-
   "" (the default)
-      Discard the result and return None.
+      input: Discard the result and return None.
+
+      output: If value is a list, then "list lines"; otherwise "value".
 
   "list lines"
-      Return the file contents as a list, with a string for each line. The
-      newlines will not be present in the result. The last line may or may not
-      end in a newline.
+      input:
+        Return the file contents as a list, with a string for each line. The
+        newlines will not be present in the result. The last line may or may not
+        end in a newline.
 
-      After splitting, each individual line will be trimmed of whitespace on
-      both ends.
+        After splitting, each individual line will be trimmed of whitespace on
+        both ends.
+
+      output:
+        Renders the value contents as a list, with a string for each line. The
+        newlines will not be present in the result. The last line will end in with
+        a newline.
 
   "scope"
-      Execute the block as GN code and return a scope with the resulting values
-      in it. If the input was:
-        a = [ "hello.cc", "world.cc" ]
-        b = 26
-      and you read the result into a variable named "val", then you could
-      access contents the "." operator on "val":
-        sources = val.a
-        some_count = val.b
+      input:
+        Execute the block as GN code and return a scope with the resulting values
+        in it. If the input was:
+          a = [ "hello.cc", "world.cc" ]
+          b = 26
+        and you read the result into a variable named "val", then you could
+        access contents the "." operator on "val":
+          sources = val.a
+          some_count = val.b
+
+      output:
+        Renders the value contents as a GN code block, reversing the input
+        result above.
 
   "string"
-      Return the file contents into a single string.
+      input: Return the file contents into a single string.
+
+      output:
+        Render the value contents into a single string. The output is:
+        a string renders with quotes, e.g. "str"
+        an integer renders as a stringified integer, e.g. "6"
+        a boolean renders as the associated string, e.g. "true"
+        a list renders as a representation of its contents, e.g. "[\"str\", 6]"
+        a scope renders as a GN code block of its values. If the Value was:
+            Value val;
+            val.a = [ "hello.cc", "world.cc" ];
+            val.b = 26
+          the resulting output would be:
+            "{
+                a = [ \"hello.cc\", \"world.cc\" ]
+                b = 26
+            }"
 
   "value"
-      Parse the input as if it was a literal rvalue in a buildfile. Examples of
-      typical program output using this mode:
-        [ "foo", "bar" ]     (result will be a list)
-      or
-        "foo bar"            (result will be a string)
-      or
-        5                    (result will be an integer)
+      input:
+        Parse the input as if it was a literal rvalue in a buildfile. Examples of
+        typical program output using this mode:
+          [ "foo", "bar" ]     (result will be a list)
+        or
+          "foo bar"            (result will be a string)
+        or
+          5                    (result will be an integer)
 
-      Note that if the input is empty, the result will be a null value which
-      will produce an error if assigned to a variable.
+        Note that if the input is empty, the result will be a null value which
+        will produce an error if assigned to a variable.
+
+      output:
+        Render the value contents as a literal rvalue. Strings render with escaped
+        quotes.
 
   "json"
-      Parse the input as a JSON and convert it to equivalent GN rvalue. The data
-      type mapping is:
+      input: Parse the input as a JSON and convert it to equivalent GN rvalue.
+
+      output: Convert the Value to equivalent JSON value.
+
+      The data type mapping is:
         a string in JSON maps to string in GN
         an integer in JSON maps to integer in GN
         a float in JSON is unsupported and will result in an error
@@ -5883,10 +6150,10 @@
         a boolean in JSON maps to boolean in GN
         a null in JSON is unsupported and will result in an error
 
-      Nota that the dictionary keys have to be valid GN identifiers otherwise
-      they will produce an error.
+      Nota that the input dictionary keys have to be valid GN identifiers
+      otherwise they will produce an error.
 
-  "trim ..."
+  "trim ..." (input only)
       Prefixing any of the other transformations with the word "trim" will
       result in whitespace being trimmed from the beginning and end of the
       result before processing.
@@ -5917,11 +6184,12 @@
        "//foo/bar/*"  (all targets in any subdir of //foo/bar)
        "./*"  (all targets in the current build file or sub dirs)
 
-  Any of the above forms can additionally take an explicit toolchain. In this
-  case, the toolchain must be fully qualified (no wildcards are supported in
-  the toolchain name).
+  Any of the above forms can additionally take an explicit toolchain
+  in parenthesis at the end of the label pattern. In this case, the
+  toolchain must be fully qualified (no wildcards are supported in the
+  toolchain name).
 
-    "//foo:bar(//build/toochain:mac)"
+    "//foo:bar(//build/toolchain:mac)"
         An explicit target in an explicit toolchain.
 
     ":*(//build/toolchain/linux:32bit)"
@@ -6077,6 +6345,108 @@
   advice on fixing problems. Targets can also opt-out of checking, see
   "gn help check_includes".
 ```
+### <a name="output_conversion"></a>**Input and output conversions are arguments to file and process functions**
+#### **that specify how to convert data to or from external formats. The possible**
+#### **values for parameters specifying conversions are**:
+
+```
+  "" (the default)
+      input: Discard the result and return None.
+
+      output: If value is a list, then "list lines"; otherwise "value".
+
+  "list lines"
+      input:
+        Return the file contents as a list, with a string for each line. The
+        newlines will not be present in the result. The last line may or may not
+        end in a newline.
+
+        After splitting, each individual line will be trimmed of whitespace on
+        both ends.
+
+      output:
+        Renders the value contents as a list, with a string for each line. The
+        newlines will not be present in the result. The last line will end in with
+        a newline.
+
+  "scope"
+      input:
+        Execute the block as GN code and return a scope with the resulting values
+        in it. If the input was:
+          a = [ "hello.cc", "world.cc" ]
+          b = 26
+        and you read the result into a variable named "val", then you could
+        access contents the "." operator on "val":
+          sources = val.a
+          some_count = val.b
+
+      output:
+        Renders the value contents as a GN code block, reversing the input
+        result above.
+
+  "string"
+      input: Return the file contents into a single string.
+
+      output:
+        Render the value contents into a single string. The output is:
+        a string renders with quotes, e.g. "str"
+        an integer renders as a stringified integer, e.g. "6"
+        a boolean renders as the associated string, e.g. "true"
+        a list renders as a representation of its contents, e.g. "[\"str\", 6]"
+        a scope renders as a GN code block of its values. If the Value was:
+            Value val;
+            val.a = [ "hello.cc", "world.cc" ];
+            val.b = 26
+          the resulting output would be:
+            "{
+                a = [ \"hello.cc\", \"world.cc\" ]
+                b = 26
+            }"
+
+  "value"
+      input:
+        Parse the input as if it was a literal rvalue in a buildfile. Examples of
+        typical program output using this mode:
+          [ "foo", "bar" ]     (result will be a list)
+        or
+          "foo bar"            (result will be a string)
+        or
+          5                    (result will be an integer)
+
+        Note that if the input is empty, the result will be a null value which
+        will produce an error if assigned to a variable.
+
+      output:
+        Render the value contents as a literal rvalue. Strings render with escaped
+        quotes.
+
+  "json"
+      input: Parse the input as a JSON and convert it to equivalent GN rvalue.
+
+      output: Convert the Value to equivalent JSON value.
+
+      The data type mapping is:
+        a string in JSON maps to string in GN
+        an integer in JSON maps to integer in GN
+        a float in JSON is unsupported and will result in an error
+        an object in JSON maps to scope in GN
+        an array in JSON maps to list in GN
+        a boolean in JSON maps to boolean in GN
+        a null in JSON is unsupported and will result in an error
+
+      Nota that the input dictionary keys have to be valid GN identifiers
+      otherwise they will produce an error.
+
+  "trim ..." (input only)
+      Prefixing any of the other transformations with the word "trim" will
+      result in whitespace being trimmed from the beginning and end of the
+      result before processing.
+
+      Examples: "trim string" or "trim list lines"
+
+      Note that "trim value" is useless because the value parser skips
+      whitespace anyway.
+```
 ### <a name="runtime_deps"></a>**Runtime dependencies**
 
 ```
@@ -6124,7 +6494,7 @@
   many actions into one logic unit, and the "data"-ness of A's dependency is
   lost. Solutions:
 
-   - List the outputs of the action in it's data section (if the results of
+   - List the outputs of the action in its data section (if the results of
      that action are always runtime files).
    - Have B list the action in data_deps (if the outputs of the actions are
      always runtime files).

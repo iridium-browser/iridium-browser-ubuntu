@@ -1,9 +1,10 @@
 # Copyright 2014 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+import("//build/config/jumbo.gni")
 import("//testing/test.gni")
 
-component("browser") {
+jumbo_component("browser") {
   output_name = "storage_browser"
   sources = [
     "blob/blob_builder_from_stream.cc",
@@ -112,6 +113,8 @@ component("browser") {
     "fileapi/file_system_usage_cache.h",
     "fileapi/file_writer_delegate.cc",
     "fileapi/file_writer_delegate.h",
+    "fileapi/file_writer_impl.cc",
+    "fileapi/file_writer_impl.h",
     "fileapi/isolated_context.cc",
     "fileapi/isolated_context.h",
     "fileapi/isolated_file_system_backend.cc",
@@ -166,8 +169,6 @@ component("browser") {
     "fileapi/sandbox_quota_observer.cc",
     "fileapi/sandbox_quota_observer.h",
     "fileapi/task_runner_bound_observer_list.h",
-    "fileapi/timed_task_helper.cc",
-    "fileapi/timed_task_helper.h",
     "fileapi/transient_file_util.cc",
     "fileapi/transient_file_util.h",
     "fileapi/watcher_manager.h",
@@ -177,6 +178,7 @@ component("browser") {
     "quota/quota_client.h",
     "quota/quota_database.cc",
     "quota/quota_database.h",
+    "quota/quota_macros.h",
     "quota/quota_manager.cc",
     "quota/quota_manager.h",
     "quota/quota_manager_proxy.cc",
@@ -217,6 +219,7 @@ component("browser") {
     "//base/third_party/dynamic_annotations",
     "//mojo/public/cpp/bindings",
     "//net",
+    "//services/network:network_service",
     "//services/network/public/cpp",
     "//services/network/public/mojom",
     "//sql",
@@ -234,7 +237,6 @@ executable("dump_file_system") {
   deps = [
     ":browser",
     "//base",
-    "//build/config:exe_and_shlib_deps",
     "//build/win:default_exe_manifest",
     "//storage/common",
   ]
@@ -276,6 +278,7 @@ source_set("unittests") {
     "fileapi/file_system_url_unittest.cc",
     "fileapi/file_system_usage_cache_unittest.cc",
     "fileapi/file_writer_delegate_unittest.cc",
+    "fileapi/file_writer_impl_unittest.cc",
     "fileapi/isolated_context_unittest.cc",
     "fileapi/local_file_stream_reader_unittest.cc",
     "fileapi/local_file_stream_writer_unittest.cc",
@@ -292,7 +295,6 @@ source_set("unittests") {
     "fileapi/sandbox_isolated_origin_database_unittest.cc",
     "fileapi/sandbox_origin_database_unittest.cc",
     "fileapi/sandbox_prioritized_origin_database_unittest.cc",
-    "fileapi/timed_task_helper_unittest.cc",
     "fileapi/transient_file_util_unittest.cc",
     "quota/quota_database_unittest.cc",
     "quota/quota_manager_unittest.cc",
@@ -307,22 +309,25 @@ source_set("unittests") {
     ":test_support",
     "//base/test:test_support",
     "//components/services/filesystem/public/interfaces",
-    "//mojo/common",
-    "//mojo/edk",
+    "//mojo/core/embedder",
     "//net:test_support",
     "//services/network/public/cpp",
+    "//services/network/public/mojom",
     "//sql:test_support",
     "//testing/gtest",
     "//third_party/leveldatabase",
+    "//third_party/sqlite",
   ]
 }
 
-static_library("test_support") {
+jumbo_static_library("test_support") {
   testonly = true
 
   sources = [
     "test/async_file_test_helper.cc",
     "test/async_file_test_helper.h",
+    "test/fake_blob.cc",
+    "test/fake_blob.h",
     "test/fake_progress_client.cc",
     "test/fake_progress_client.h",
     "test/fileapi_test_file_set.cc",
@@ -360,8 +365,8 @@ static_library("test_support") {
   deps = [
     ":browser",
     "//base/test:test_support",
-    "//mojo/common",
     "//net:test_support",
+    "//services/network:network_service",
     "//testing/gtest",
     "//third_party/leveldatabase",
   ]

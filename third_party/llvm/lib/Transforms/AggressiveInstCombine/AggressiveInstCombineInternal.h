@@ -13,6 +13,9 @@
 //
 //===----------------------------------------------------------------------===//
 
+#ifndef LLVM_LIB_TRANSFORMS_AGGRESSIVEINSTCOMBINE_COMBINEINTERNAL_H
+#define LLVM_LIB_TRANSFORMS_AGGRESSIVEINSTCOMBINE_COMBINEINTERNAL_H
+
 #include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Analysis/AliasAnalysis.h"
@@ -22,7 +25,6 @@
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/Pass.h"
-#include "llvm/Transforms/Scalar.h"
 using namespace llvm;
 
 //===----------------------------------------------------------------------===//
@@ -120,3 +122,5 @@ private:
   void ReduceExpressionDag(Type *SclTy);
 };
 } // end namespace llvm.
+
+#endif

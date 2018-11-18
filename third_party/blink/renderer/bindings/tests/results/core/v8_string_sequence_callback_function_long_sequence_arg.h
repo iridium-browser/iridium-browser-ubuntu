@@ -12,8 +12,8 @@
 #ifndef V8StringSequenceCallbackFunctionLongSequenceArg_h
 #define V8StringSequenceCallbackFunctionLongSequenceArg_h
 
-#include "core/core_export.h"
-#include "platform/bindings/callback_function_base.h"
+#include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/platform/bindings/callback_function_base.h"
 
 namespace blink {
 
@@ -27,6 +27,9 @@ class CORE_EXPORT V8StringSequenceCallbackFunctionLongSequenceArg final : public
 
   ~V8StringSequenceCallbackFunctionLongSequenceArg() override = default;
 
+  // NameClient overrides:
+  const char* NameInHeapSnapshot() const override;
+
   // Performs "invoke".
   // https://heycam.github.io/webidl/#es-invoking-callback-functions
   v8::Maybe<Vector<String>> Invoke(ScriptWrappable* callback_this_value, const Vector<int32_t>& arg) WARN_UNUSED_RESULT;
@@ -37,7 +40,7 @@ class CORE_EXPORT V8StringSequenceCallbackFunctionLongSequenceArg final : public
 };
 
 template <>
-class CORE_TEMPLATE_CLASS_EXPORT V8PersistentCallbackFunction<V8StringSequenceCallbackFunctionLongSequenceArg> final : public V8PersistentCallbackFunctionBase {
+class V8PersistentCallbackFunction<V8StringSequenceCallbackFunctionLongSequenceArg> final : public V8PersistentCallbackFunctionBase {
   using V8CallbackFunction = V8StringSequenceCallbackFunctionLongSequenceArg;
 
  public:
@@ -46,7 +49,6 @@ class CORE_TEMPLATE_CLASS_EXPORT V8PersistentCallbackFunction<V8StringSequenceCa
   // Returns a wrapper-tracing version of this callback function.
   V8CallbackFunction* ToNonV8Persistent() { return Proxy(); }
 
-  CORE_EXTERN_TEMPLATE_EXPORT
   v8::Maybe<Vector<String>> Invoke(ScriptWrappable* callback_this_value, const Vector<int32_t>& arg) WARN_UNUSED_RESULT;
 
  private:

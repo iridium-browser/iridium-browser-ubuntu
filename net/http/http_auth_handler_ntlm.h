@@ -28,8 +28,11 @@
 #endif
 
 #include <string>
+#include <vector>
 
+#include "base/containers/span.h"
 #include "base/strings/string16.h"
+#include "net/base/completion_once_callback.h"
 #include "net/base/net_export.h"
 #include "net/http/http_auth_handler.h"
 #include "net/http/http_auth_handler_factory.h"
@@ -134,7 +137,7 @@ class NET_EXPORT_PRIVATE HttpAuthHandlerNTLM : public HttpAuthHandler {
 
   int GenerateAuthTokenImpl(const AuthCredentials* credentials,
                             const HttpRequestInfo* request,
-                            const CompletionCallback& callback,
+                            CompletionOnceCallback callback,
                             std::string* auth_token) override;
 
  private:
@@ -149,7 +152,7 @@ class NET_EXPORT_PRIVATE HttpAuthHandlerNTLM : public HttpAuthHandler {
 
   // Given an input token received from the server, generate the next output
   // token to be sent to the server.
-  ntlm::Buffer GetNextToken(const ntlm::Buffer& in_token);
+  std::vector<uint8_t> GetNextToken(base::span<const uint8_t> in_token);
 #endif
 
   // Parse the challenge, saving the results into this instance.

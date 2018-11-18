@@ -15,10 +15,13 @@
 #include "base/optional.h"
 #include "base/sequence_checker.h"
 #include "components/sync/base/model_type.h"
+#include "components/sync/base/sync_stop_metadata_fate.h"
 #include "components/sync/engine/cycle/status_counters.h"
 #include "components/sync/engine/model_type_processor.h"
 #include "components/sync/engine/non_blocking_sync_common.h"
+#include "components/sync/model/conflict_resolution.h"
 #include "components/sync/model/data_batch.h"
+#include "components/sync/model/data_type_activation_request.h"
 #include "components/sync/model/metadata_batch.h"
 #include "components/sync/model/metadata_change_list.h"
 #include "components/sync/model/model_error.h"
@@ -34,11 +37,14 @@ class ProcessorEntityTracker;
 
 // A sync component embedded on the model type's thread that tracks entity
 // metadata in the model store and coordinates communication between sync and
-// model type threads. See
-// //docs/sync/uss/client_tag_based_model_type_processor.md for a more thorough
-// description.
+// model type threads. All changes in flight (either incoming from the server
+// or local changes reported by the bridge) must specify a client tag.
+//
+// See //docs/sync/uss/client_tag_based_model_type_processor.md for a more
+// thorough description.
 class ClientTagBasedModelTypeProcessor : public ModelTypeProcessor,
-                                         public ModelTypeChangeProcessor {
+                                         public ModelTypeChangeProcessor,
+                                         public ModelTypeControllerDelegate {
  public:
   ClientTagBasedModelTypeProcessor(ModelType type,
                                    const base::RepeatingClosure& dump_stack);
@@ -47,10 +53,6 @@ class ClientTagBasedModelTypeProcessor : public ModelTypeProcessor,
                                    const base::RepeatingClosure& dump_stack,
                                    bool commit_only);
   ~ClientTagBasedModelTypeProcessor() override;
-
-  // Whether the processor is allowing changes to its model type. If this is
-  // false, the bridge should not allow any changes to its data.
-  bool IsAllowingChanges() const;
 
   // Returns true if the handshake with sync thread is complete.
   bool IsConnected() const;
@@ -65,33 +67,54 @@ class ClientTagBasedModelTypeProcessor : public ModelTypeProcessor,
                         const std::string& storage_key,
                         MetadataChangeList* metadata_change_list) override;
   void UntrackEntity(const EntityData& entity_data) override;
-  void ModelReadyToSync(ModelTypeSyncBridge* bridge,
-                        std::unique_ptr<MetadataBatch> batch) override;
-  void OnSyncStarting(const ModelErrorHandler& error_handler,
-                      const StartCallback& callback) override;
-  void DisableSync() override;
+  void UntrackEntityForStorageKey(const std::string& storage_key) override;
+  void OnModelStarting(ModelTypeSyncBridge* bridge) override;
+  void ModelReadyToSync(std::unique_ptr<MetadataBatch> batch) override;
   bool IsTrackingMetadata() override;
+  std::string TrackedAccountId() override;
   void ReportError(const ModelError& error) override;
+  base::WeakPtr<ModelTypeControllerDelegate> GetControllerDelegate() override;
 
   // ModelTypeProcessor implementation.
   void ConnectSync(std::unique_ptr<CommitQueue> worker) override;
   void DisconnectSync() override;
   void GetLocalChanges(size_t max_entries,
-                       const GetLocalChangesCallback& callback) override;
+                       GetLocalChangesCallback callback) override;
   void OnCommitCompleted(const sync_pb::ModelTypeState& type_state,
                          const CommitResponseDataList& response_list) override;
   void OnUpdateReceived(const sync_pb::ModelTypeState& type_state,
                         const UpdateResponseDataList& updates) override;
 
+  // ModelTypeControllerDelegate implementation.
+  void OnSyncStarting(const DataTypeActivationRequest& request,
+                      StartCallback callback) override;
+  void OnSyncStopping(SyncStopMetadataFate metadata_fate) override;
+  void GetAllNodesForDebugging(AllNodesCallback callback) override;
+  void GetStatusCountersForDebugging(StatusCountersCallback callback) override;
+  void RecordMemoryUsageAndCountsHistograms() override;
+
   // Returns the estimate of dynamically allocated memory in bytes.
   size_t EstimateMemoryUsage() const;
+
+  bool HasLocalChangesForTest() const;
+
+  bool IsModelReadyToSyncForTest() const;
 
  private:
   friend class ModelTypeDebugInfo;
   friend class ClientTagBasedModelTypeProcessorTest;
 
+  // Clears all metadata and directs the bridge to clear the persisted metadata
+  // as well. In addition, it resets the state of the processor and clears all
+  // tracking maps such as |entities_| and |storage_key_to_tag_hash_|.
+  ModelTypeSyncBridge::StopSyncResponse ClearMetadataAndResetState();
+
   // Returns true if the model is ready or encountered an error.
   bool IsModelReadyOrError() const;
+
+  // Whether the processor is allowing changes to its model type. If this is
+  // false, the bridge should not allow any changes to its data.
+  bool IsAllowingChanges() const;
 
   // If preconditions are met, inform sync that we are ready to connect.
   void ConnectIfReady();
@@ -111,34 +134,52 @@ class ClientTagBasedModelTypeProcessor : public ModelTypeProcessor,
   void RecommitAllForEncryption(std::unordered_set<std::string> already_updated,
                                 MetadataChangeList* metadata_changes);
 
-  // Handle the first update received from the server after being enabled.
-  void OnInitialUpdateReceived(const sync_pb::ModelTypeState& type_state,
-                               const UpdateResponseDataList& updates);
+  // Validates the update specified by the input parameters and returns whether
+  // it should get further processed. If the update is incorrect, this function
+  // also reports an error.
+  bool ValidateUpdate(const sync_pb::ModelTypeState& model_type_state,
+                      const UpdateResponseDataList& updates);
+
+  // Handle the first update received from the server after being enabled. If
+  // the data type does not support incremental updates, this will be called for
+  // any server update.
+  base::Optional<ModelError> OnFullUpdateReceived(
+      const sync_pb::ModelTypeState& type_state,
+      const UpdateResponseDataList& updates);
+
+  // Handle any incremental updates received from the server after being
+  // enabled.
+  base::Optional<ModelError> OnIncrementalUpdateReceived(
+      const sync_pb::ModelTypeState& type_state,
+      const UpdateResponseDataList& updates);
 
   // ModelTypeSyncBridge::GetData() callback for pending loading data upon
   // GetLocalChanges call.
   void OnPendingDataLoaded(size_t max_entries,
-                           const GetLocalChangesCallback& callback,
+                           GetLocalChangesCallback callback,
+                           std::unordered_set<std::string> storage_keys_to_load,
                            std::unique_ptr<DataBatch> data_batch);
 
-  // Caches EntityData from the |data_batch| in the entity trackers.
-  void ConsumeDataBatch(std::unique_ptr<DataBatch> data_batch);
+  // Caches EntityData from the |data_batch| in the entity trackers and checks
+  // that every entity in |storage_keys_to_load| was successfully loaded (or is
+  // not tracked by the processor any more). Reports failed checks to UMA.
+  void ConsumeDataBatch(std::unordered_set<std::string> storage_keys_to_load,
+                        std::unique_ptr<DataBatch> data_batch);
 
   // Prepares Commit requests and passes them to the GetLocalChanges callback.
-  void CommitLocalChanges(size_t max_entries,
-                          const GetLocalChangesCallback& callback);
+  void CommitLocalChanges(size_t max_entries, GetLocalChangesCallback callback);
 
   // Nudges worker if there are any local entities to be committed.
   void NudgeForCommitIfNeeded();
 
-  // Computes the client tag hash for the given client |tag|.
-  std::string GetHashForTag(const std::string& tag);
+  // Returns true if there are any local entities to be committed.
+  bool HasLocalChanges() const;
 
   // Looks up the client tag hash for the given |storage_key|, and regenerates
   // with |data| if the lookup finds nothing. Does not update the storage key to
   // client tag hash mapping.
   std::string GetClientTagHash(const std::string& storage_key,
-                               const EntityData& data);
+                               const EntityData& data) const;
 
   // Gets the entity for the given storage key, or null if there isn't one.
   ProcessorEntityTracker* GetEntityForStorageKey(
@@ -168,18 +209,23 @@ class ClientTagBasedModelTypeProcessor : public ModelTypeProcessor,
       const std::vector<std::string>& storage_key_to_be_deleted,
       MetadataChangeList* metadata_changes);
 
-  // Tombstones all entries whose versions are older than
-  // |version_watermark| unless they are unsynced.
-  void ExpireEntriesByVersion(int64_t version_watermark,
-                              MetadataChangeList* metadata_changes);
+  // Removes metadata for all entries unless they are unsynced.
+  // This is used to limit the amount of data stored in sync, and this does not
+  // tell the bridge to delete the actual data.
+  void ExpireAllEntries(MetadataChangeList* metadata_changes);
 
-  // Tombstones all entries whose ages are older than
+  // Removes metadata for all entries whose ages are older than
   // |age_watermark_in_days| unless they are unsynced.
+  // This is used to limit the amount of data stored in sync, and this does not
+  // tell the bridge to delete the actual data.
   void ExpireEntriesByAge(int32_t age_watermark_in_days,
                           MetadataChangeList* metadata_changes);
 
   // If the number of |entities_| exceeds |max_number_of_items|, the
-  // processor will tombstone the extra sync entities based on the LRU rule.
+  // processor removes metadata for the extra sync entities based on the LRU
+  // rule.
+  // This is used to limit the amount of data stored in sync, and this does not
+  // tell the bridge to delete the actual data.
   void ExpireEntriesByItemLimit(int32_t max_number_of_items,
                                 MetadataChangeList* metadata_changes);
 
@@ -193,7 +239,13 @@ class ClientTagBasedModelTypeProcessor : public ModelTypeProcessor,
   // TODO(jkrcal): Replace the helper function by grouping the state naturally
   // into a few structs / nested classes so that the state can be reset by
   // resetting these structs.
-  void ResetState();
+  void ResetState(SyncStopMetadataFate metadata_fate);
+
+  // Adds metadata to all data returned by the bridge.
+  // TODO(jkrcal): Mark as const (together with functions it depends on such as
+  // GetEntityForStorageKey, GetEntityForTagHash and maybe more).
+  void MergeDataWithMetadataForDebugging(AllNodesCallback callback,
+                                         std::unique_ptr<DataBatch> batch);
 
   /////////////////////
   // Processor state //
@@ -220,6 +272,10 @@ class ClientTagBasedModelTypeProcessor : public ModelTypeProcessor,
   // and so it can be passed to sync if it happened prior to sync being ready.
   base::Optional<ModelError> model_error_;
 
+  // Whether the model has initialized its internal state for sync (and provided
+  // metadata).
+  bool model_ready_to_sync_ = false;
+
   ////////////////
   // Sync state //
   ////////////////
@@ -227,9 +283,8 @@ class ClientTagBasedModelTypeProcessor : public ModelTypeProcessor,
   // Stores the start callback in between OnSyncStarting() and ReadyToConnect().
   StartCallback start_callback_;
 
-  // The callback used for informing sync of errors; will be non-null after
-  // OnSyncStarting has been called.
-  ModelErrorHandler error_handler_;
+  // The request context passed in as part of OnSyncStarting().
+  DataTypeActivationRequest activation_request_;
 
   // Reference to the CommitQueue.
   //
@@ -264,11 +319,6 @@ class ClientTagBasedModelTypeProcessor : public ModelTypeProcessor,
   // intends to read it. This includes both data and metadata.
   const bool commit_only_;
 
-  // The version which processor already ran garbage collection against on.
-  // Cache this value is for saving resource purpose(ex. cpu, battery), so
-  // processor only run on each version once.
-  int64_t cached_gc_directive_version_;
-
   // The day which processor already ran garbage collection against on.
   // Cache this value is for saving resource purpose(ex. cpu, battery), we round
   // up garbage collection age to day, so we only run GC once a day if server
@@ -277,8 +327,14 @@ class ClientTagBasedModelTypeProcessor : public ModelTypeProcessor,
 
   SEQUENCE_CHECKER(sequence_checker_);
 
+  // WeakPtrFactory for this processor for ModelTypeController (only gets
+  // invalidated during destruction).
+  base::WeakPtrFactory<ModelTypeControllerDelegate>
+      weak_ptr_factory_for_controller_;
+
   // WeakPtrFactory for this processor which will be sent to sync thread.
-  base::WeakPtrFactory<ClientTagBasedModelTypeProcessor> weak_ptr_factory_;
+  base::WeakPtrFactory<ClientTagBasedModelTypeProcessor>
+      weak_ptr_factory_for_worker_;
 
   DISALLOW_COPY_AND_ASSIGN(ClientTagBasedModelTypeProcessor);
 };

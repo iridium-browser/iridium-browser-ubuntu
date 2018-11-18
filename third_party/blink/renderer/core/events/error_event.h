@@ -88,13 +88,14 @@ class ErrorEvent final : public Event {
   SourceLocation* Location() const { return location_.get(); }
 
   const AtomicString& InterfaceName() const override;
+  bool CanBeDispatchedInWorld(const DOMWrapperWorld&) const override;
+  bool IsErrorEvent() const override;
 
   DOMWrapperWorld* World() const { return world_.get(); }
 
   void SetUnsanitizedMessage(const String&);
 
-  virtual void Trace(blink::Visitor*);
-  virtual void TraceWrappers(const ScriptWrappableVisitor*) const;
+  void Trace(blink::Visitor*) override;
 
  private:
   ErrorEvent();
@@ -111,6 +112,8 @@ class ErrorEvent final : public Event {
 
   scoped_refptr<DOMWrapperWorld> world_;
 };
+
+DEFINE_EVENT_TYPE_CASTS(ErrorEvent);
 
 }  // namespace blink
 

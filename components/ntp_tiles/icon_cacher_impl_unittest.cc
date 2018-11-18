@@ -11,7 +11,7 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
-#include "base/test/histogram_tester.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "base/test/mock_callback.h"
 #include "base/test/scoped_task_environment.h"
 #include "base/test/test_simple_task_runner.h"
@@ -89,7 +89,7 @@ ACTION(FailFetch) {
 
 ACTION_P2(DecodeSuccessfully, width, height) {
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::Bind(arg2, gfx::test::CreateImage(width, height)));
+      FROM_HERE, base::BindOnce(arg2, gfx::test::CreateImage(width, height)));
 }
 
 ACTION_P2(PassFetch, width, height) {
@@ -197,13 +197,13 @@ class IconCacherTestPopularSites : public IconCacherTestBase {
     }
     base::FilePath pak_path;
 #if defined(OS_ANDROID)
-    PathService::Get(ui::DIR_RESOURCE_PAKS_ANDROID, &pak_path);
+    base::PathService::Get(ui::DIR_RESOURCE_PAKS_ANDROID, &pak_path);
 #else
-    PathService::Get(base::DIR_MODULE, &pak_path);
+    base::PathService::Get(base::DIR_MODULE, &pak_path);
 #endif
 
     base::FilePath ui_test_pak_path;
-    ASSERT_TRUE(PathService::Get(ui::UI_TEST_PAK, &ui_test_pak_path));
+    ASSERT_TRUE(base::PathService::Get(ui::UI_TEST_PAK, &ui_test_pak_path));
     ui::ResourceBundle::InitSharedInstanceWithPakPath(ui_test_pak_path);
 
     ui::ResourceBundle::GetSharedInstance().AddDataPackFromPath(

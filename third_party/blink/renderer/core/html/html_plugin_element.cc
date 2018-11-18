@@ -69,6 +69,16 @@ enum PluginRequestObjectResult {
   kPluginRequestObjectResultMax
 };
 
+String GetMIMETypeFromURL(const KURL& url) {
+  String filename = url.LastPathComponent();
+  int extension_pos = filename.ReverseFind('.');
+  if (extension_pos >= 0) {
+    String extension = filename.Substring(extension_pos + 1);
+    return MIMETypeRegistry::GetWellKnownMIMETypeForExtension(extension);
+  }
+  return String();
+}
+
 }  // anonymous namespace
 
 const Vector<String>& PluginParameters::Names() const {
@@ -90,7 +100,7 @@ void PluginParameters::AppendNameWithValue(const String& name,
 }
 
 int PluginParameters::FindStringInNames(const String& str) {
-  for (size_t i = 0; i < names_.size(); ++i) {
+  for (wtf_size_t i = 0; i < names_.size(); ++i) {
     if (DeprecatedEqualIgnoringCase(names_[i], str))
       return i;
   }
@@ -104,13 +114,15 @@ HTMLPlugInElement::HTMLPlugInElement(
     PreferPlugInsForImagesOption prefer_plug_ins_for_images_option)
     : HTMLFrameOwnerElement(tag_name, doc),
       is_delaying_load_event_(false),
-      // m_needsPluginUpdate(!createdByParser) allows HTMLObjectElement to delay
-      // EmbeddedContentView updates until after all children are parsed. For
-      // HTMLEmbedElement this delay is unnecessary, but it is simpler to make
-      // both classes share the same codepath in this class.
+      // needs_plugin_update_(!IsCreatedByParser) allows HTMLObjectElement to
+      // delay EmbeddedContentView updates until after all children are
+      // parsed. For HTMLEmbedElement this delay is unnecessary, but it is
+      // simpler to make both classes share the same codepath in this class.
       needs_plugin_update_(!flags.IsCreatedByParser()),
       should_prefer_plug_ins_for_images_(prefer_plug_ins_for_images_option ==
-                                         kShouldPreferPlugInsForImages) {}
+                                         kShouldPreferPlugInsForImages) {
+  SetHasCustomStyleCallbacks();
+}
 
 HTMLPlugInElement::~HTMLPlugInElement() {
   DCHECK(plugin_wrapper_.IsEmpty());  // cleared in detachLayoutTree()
@@ -146,6 +158,12 @@ void HTMLPlugInElement::SetFocused(bool focused, WebFocusType focus_type) {
 
 bool HTMLPlugInElement::RequestObjectInternal(
     const PluginParameters& plugin_params) {
+  if (handled_externally_) {
+    // TODO(ekaramad): Fix this once we know what to do with frames inside
+    // plugins (https://crbug.com/776510).
+    return true;
+  }
+
   if (url_.IsEmpty() && service_type_.IsEmpty())
     return false;
 
@@ -157,9 +175,20 @@ bool HTMLPlugInElement::RequestObjectInternal(
   if (!AllowedToLoadObject(completed_url, service_type_))
     return false;
 
+  handled_externally_ =
+      GetDocument().GetFrame()->Client()->IsPluginHandledExternally(
+          *this, completed_url,
+          service_type_.IsEmpty() ? GetMIMETypeFromURL(completed_url)
+                                  : service_type_);
+  if (handled_externally_) {
+    // This is a temporary placeholder and the logic around
+    // |handled_externally_| might change as MimeHandlerView is moving towards
+    // depending on OOPIFs instead of WebPlugin (https://crbug.com/659750).
+    completed_url = BlankURL();
+  }
   ObjectContentType object_type = GetObjectContentType();
   if (object_type == ObjectContentType::kFrame ||
-      object_type == ObjectContentType::kImage) {
+      object_type == ObjectContentType::kImage || handled_externally_) {
     // If the plugin element already contains a subframe,
     // loadOrRedirectSubframe will re-use it. Otherwise, it will create a
     // new frame and set it as the LayoutEmbeddedContent's EmbeddedContentView,
@@ -171,8 +200,7 @@ bool HTMLPlugInElement::RequestObjectInternal(
   // it be handled as a plugin to show the broken plugin icon.
   bool use_fallback =
       object_type == ObjectContentType::kNone && HasFallbackContent();
-  return LoadPlugin(completed_url, service_type_, plugin_params, use_fallback,
-                    true);
+  return LoadPlugin(completed_url, service_type_, plugin_params, use_fallback);
 }
 
 bool HTMLPlugInElement::CanProcessDrag() const {
@@ -217,21 +245,23 @@ void HTMLPlugInElement::AttachLayoutTree(AttachContext& context) {
     return;
   }
 
-  if (IsImageType()) {
-    if (!image_loader_)
-      image_loader_ = HTMLImageLoader::Create(this);
-    image_loader_->UpdateFromElement();
-  } else if (NeedsPluginUpdate() && GetLayoutEmbeddedObject() &&
-             !GetLayoutEmbeddedObject()->ShowsUnavailablePluginIndicator() &&
-             GetObjectContentType() != ObjectContentType::kPlugin &&
-             !is_delaying_load_event_) {
+  if (!IsImageType() && NeedsPluginUpdate() && GetLayoutEmbeddedObject() &&
+      !GetLayoutEmbeddedObject()->ShowsUnavailablePluginIndicator() &&
+      GetObjectContentType() != ObjectContentType::kPlugin &&
+      !is_delaying_load_event_) {
     is_delaying_load_event_ = true;
     GetDocument().IncrementLoadEventDelayCount();
     GetDocument().LoadPluginsSoon();
   }
-  LayoutObject* layout_object = GetLayoutObject();
-  if (layout_object && !layout_object->IsFloatingOrOutOfFlowPositioned())
-    context.previous_in_flow = layout_object;
+  if (LayoutObject* layout_object = GetLayoutObject()) {
+    if (image_loader_ && layout_object->IsLayoutImage()) {
+      LayoutImageResource* image_resource =
+          ToLayoutImage(layout_object)->ImageResource();
+      image_resource->SetImageResource(image_loader_->GetContent());
+    }
+    if (!layout_object->IsFloatingOrOutOfFlowPositioned())
+      context.previous_in_flow = layout_object;
+  }
 }
 
 void HTMLPlugInElement::IntrinsicSizingInfoChanged() {
@@ -249,7 +279,7 @@ void HTMLPlugInElement::UpdatePlugin() {
   }
 }
 
-void HTMLPlugInElement::RemovedFrom(ContainerNode* insertion_point) {
+void HTMLPlugInElement::RemovedFrom(ContainerNode& insertion_point) {
   // If we've persisted the plugin and we're removed from the tree then
   // make sure we cleanup the persistance pointer.
   if (persisted_plugin_) {
@@ -261,44 +291,13 @@ void HTMLPlugInElement::RemovedFrom(ContainerNode* insertion_point) {
   HTMLFrameOwnerElement::RemovedFrom(insertion_point);
 }
 
-void HTMLPlugInElement::RequestPluginCreationWithoutLayoutObjectIfPossible() {
-  if (service_type_.IsEmpty())
-    return;
-
-  if (!GetDocument().GetFrame() ||
-      !GetDocument().GetFrame()->Client()->CanCreatePluginWithoutRenderer(
-          service_type_))
-    return;
-
-  if (GetLayoutObject() && GetLayoutObject()->IsLayoutEmbeddedContent())
-    return;
-
-  CreatePluginWithoutLayoutObject();
-}
-
-void HTMLPlugInElement::CreatePluginWithoutLayoutObject() {
-  DCHECK(GetDocument().GetFrame()->Client()->CanCreatePluginWithoutRenderer(
-      service_type_));
-
-  KURL url;
-  // CSP can block src-less objects.
-  if (!AllowedToLoadObject(url, service_type_))
-    return;
-
-  PluginParameters plugin_params;
-  plugin_params.AppendNameWithValue("type", service_type_);
-
-  bool use_fallback = false;
-  LoadPlugin(url, service_type_, plugin_params, use_fallback, false);
-}
-
 bool HTMLPlugInElement::ShouldAccelerate() const {
   WebPluginContainerImpl* plugin = OwnedPlugin();
-  return plugin && plugin->PlatformLayer();
+  return plugin && plugin->CcLayer();
 }
 
-ParsedFeaturePolicy HTMLPlugInElement::ConstructContainerPolicy(Vector<String>*,
-                                                                bool*) const {
+ParsedFeaturePolicy HTMLPlugInElement::ConstructContainerPolicy(
+    Vector<String>*) const {
   // Plugin elements (<object> and <embed>) are not allowed to enable the
   // fullscreen feature. Add an empty whitelist for the fullscreen feature so
   // that the nested browsing context is unable to use the API, regardless of
@@ -437,7 +436,7 @@ void HTMLPlugInElement::CollectStyleForPresentationAttribute(
   }
 }
 
-void HTMLPlugInElement::DefaultEventHandler(Event* event) {
+void HTMLPlugInElement::DefaultEventHandler(Event& event) {
   // Firefox seems to use a fake event listener to dispatch events to plugin
   // (tested with mouse events only). This is observable via different order
   // of events - in Firefox, event listeners specified in HTML attributes
@@ -459,7 +458,7 @@ void HTMLPlugInElement::DefaultEventHandler(Event* event) {
   if (!plugin)
     return;
   plugin->HandleEvent(event);
-  if (event->DefaultHandled())
+  if (event.DefaultHandled())
     return;
   HTMLFrameOwnerElement::DefaultEventHandler(event);
 }
@@ -517,13 +516,7 @@ HTMLPlugInElement::ObjectContentType HTMLPlugInElement::GetObjectContentType()
   KURL url = GetDocument().CompleteURL(url_);
   if (mime_type.IsEmpty()) {
     // Try to guess the MIME type based off the extension.
-    String filename = url.LastPathComponent();
-    int extension_pos = filename.ReverseFind('.');
-    if (extension_pos >= 0) {
-      String extension = filename.Substring(extension_pos + 1);
-      mime_type = MIMETypeRegistry::GetWellKnownMIMETypeForExtension(extension);
-    }
-
+    mime_type = GetMIMETypeFromURL(url);
     if (mime_type.IsEmpty())
       return ObjectContentType::kFrame;
   }
@@ -549,7 +542,7 @@ HTMLPlugInElement::ObjectContentType HTMLPlugInElement::GetObjectContentType()
 bool HTMLPlugInElement::IsImageType() const {
   if (GetDocument().GetFrame())
     return GetObjectContentType() == ObjectContentType::kImage;
-  return Image::SupportsType(service_type_);
+  return MIMETypeRegistry::IsSupportedImageResourceMIMEType(service_type_);
 }
 
 LayoutEmbeddedObject* HTMLPlugInElement::GetLayoutEmbeddedObject() const {
@@ -560,7 +553,7 @@ LayoutEmbeddedObject* HTMLPlugInElement::GetLayoutEmbeddedObject() const {
   return ToLayoutEmbeddedObject(GetLayoutObject());
 }
 
-// We don't use m_url, as it may not be the final URL that the object loads,
+// We don't use url_, as it may not be the final URL that the object loads,
 // depending on <param> values.
 bool HTMLPlugInElement::AllowedToLoadFrameURL(const String& url) {
   KURL complete_url = GetDocument().CompleteURL(url);
@@ -584,8 +577,7 @@ bool HTMLPlugInElement::RequestObject(const PluginParameters& plugin_params) {
 bool HTMLPlugInElement::LoadPlugin(const KURL& url,
                                    const String& mime_type,
                                    const PluginParameters& plugin_params,
-                                   bool use_fallback,
-                                   bool require_layout_object) {
+                                   bool use_fallback) {
   if (!AllowedToLoadPlugin(url, mime_type))
     return false;
 
@@ -595,7 +587,7 @@ bool HTMLPlugInElement::LoadPlugin(const KURL& url,
 
   auto* layout_object = GetLayoutEmbeddedObject();
   // FIXME: This code should not depend on layoutObject!
-  if ((!layout_object && require_layout_object) || use_fallback)
+  if (!layout_object || use_fallback)
     return false;
 
   VLOG(1) << this << " Plugin URL: " << url_;
@@ -607,12 +599,9 @@ bool HTMLPlugInElement::LoadPlugin(const KURL& url,
   } else {
     bool load_manually =
         GetDocument().IsPluginDocument() && !GetDocument().ContainsPlugins();
-    LocalFrameClient::DetachedPluginPolicy policy =
-        require_layout_object ? LocalFrameClient::kFailOnDetachedPlugin
-                              : LocalFrameClient::kAllowDetachedPlugin;
     WebPluginContainerImpl* plugin = frame->Client()->CreatePlugin(
         *this, url, plugin_params.Names(), plugin_params.Values(), mime_type,
-        load_manually, policy);
+        load_manually);
     if (!plugin) {
       if (layout_object && !layout_object->ShowsUnavailablePluginIndicator()) {
         plugin_is_available_ = false;
@@ -631,7 +620,7 @@ bool HTMLPlugInElement::LoadPlugin(const KURL& url,
   }
 
   GetDocument().SetContainsPlugins();
-  // TODO(esprehn): WebPluginContainerImpl::setWebLayer also schedules a
+  // TODO(esprehn): WebPluginContainerImpl::SetCcLayer() also schedules a
   // compositing update, do we need both?
   SetNeedsCompositingUpdate();
   // Make sure any input event handlers introduced by the plugin are taken into
@@ -647,11 +636,12 @@ bool HTMLPlugInElement::LoadPlugin(const KURL& url,
 }
 
 void HTMLPlugInElement::DispatchErrorEvent() {
-  if (GetDocument().IsPluginDocument() && GetDocument().LocalOwner())
+  if (GetDocument().IsPluginDocument() && GetDocument().LocalOwner()) {
     GetDocument().LocalOwner()->DispatchEvent(
-        Event::Create(EventTypeNames::error));
-  else
-    DispatchEvent(Event::Create(EventTypeNames::error));
+        *Event::Create(EventTypeNames::error));
+  } else {
+    DispatchEvent(*Event::Create(EventTypeNames::error));
+  }
 }
 
 bool HTMLPlugInElement::AllowedToLoadObject(const KURL& url,
@@ -682,7 +672,7 @@ bool HTMLPlugInElement::AllowedToLoadObject(const KURL& url,
   // is specified.
   return (!mime_type.IsEmpty() && url.IsEmpty()) ||
          !MixedContentChecker::ShouldBlockFetch(
-             frame, WebURLRequest::kRequestContextObject,
+             frame, mojom::RequestContextType::OBJECT,
              network::mojom::RequestContextFrameType::kNone,
              ResourceRequest::RedirectStatus::kNoRedirect, url);
 }
@@ -726,6 +716,17 @@ void HTMLPlugInElement::UpdateServiceTypeIfEmpty() {
   if (service_type_.IsEmpty() && ProtocolIs(url_, "data")) {
     service_type_ = MimeTypeFromDataURL(url_);
   }
+}
+
+scoped_refptr<ComputedStyle> HTMLPlugInElement::CustomStyleForLayoutObject() {
+  scoped_refptr<ComputedStyle> style = OriginalStyleForLayoutObject();
+  if (IsImageType() && !GetLayoutObject() && style &&
+      LayoutObjectIsNeeded(*style)) {
+    if (!image_loader_)
+      image_loader_ = HTMLImageLoader::Create(this);
+    image_loader_->UpdateFromElement();
+  }
+  return style;
 }
 
 }  // namespace blink

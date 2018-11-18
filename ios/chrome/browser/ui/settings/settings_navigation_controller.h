@@ -11,7 +11,6 @@
 
 @protocol BrowserCommands;
 @protocol ImportDataControllerDelegate;
-@class OpenUrlCommand;
 @protocol UserFeedbackDataSource;
 
 namespace ios {
@@ -79,15 +78,6 @@ newSyncEncryptionPassphraseController:(ios::ChromeBrowserState*)browserState
                              delegate:(id<SettingsNavigationControllerDelegate>)
                                           delegate;
 
-// Creates a new ClearBrowsingDataCollectionViewController and the chrome around
-// it.
-// |browserState| is used to personalize some settings aspects and should not be
-// nil. |delegate| may be nil.
-+ (SettingsNavigationController*)
-newClearBrowsingDataController:(ios::ChromeBrowserState*)browserState
-                      delegate:
-                          (id<SettingsNavigationControllerDelegate>)delegate;
-
 // Creates a new SavePasswordsCollectionViewController and the chrome around it.
 // |browserState| is used to personalize some settings aspects and should not be
 // nil. |delegate| may be nil.
@@ -95,9 +85,10 @@ newClearBrowsingDataController:(ios::ChromeBrowserState*)browserState
 newSavePasswordsController:(ios::ChromeBrowserState*)browserState
                   delegate:(id<SettingsNavigationControllerDelegate>)delegate;
 
-// Creates and displays a new UserFeedbackViewController. |browserState| is used
-// to personalize some settings aspects and should not be nil. |dataSource| is
-// used to populate the UserFeedbackViewController. |delegate| may be nil.
+// Creates and displays a new UIViewController for user to report an issue.
+// |browserState| is used to personalize some settings aspects and should not
+// be nil. |dataSource| is used to populate the UIViewController. |delegate|
+// may be nil.
 + (SettingsNavigationController*)
 newUserFeedbackController:(ios::ChromeBrowserState*)browserState
                  delegate:(id<SettingsNavigationControllerDelegate>)delegate

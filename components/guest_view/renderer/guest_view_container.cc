@@ -103,7 +103,7 @@ void GuestViewContainer::Destroy(bool embedder_frame_destroyed) {
     g_guest_view_container_map.Get().erase(element_instance_id());
 
   if (!embedder_frame_destroyed) {
-    if (pending_response_.get())
+    if (pending_response_)
       pending_response_->ExecuteCallbackIfAvailable(0 /* argc */, nullptr);
 
     while (pending_requests_.size() > 0) {
@@ -155,7 +155,7 @@ void GuestViewContainer::PerformPendingRequest() {
 
 void GuestViewContainer::HandlePendingResponseCallback(
     const IPC::Message& message) {
-  CHECK(pending_response_.get());
+  CHECK(pending_response_);
   std::unique_ptr<GuestViewRequest> pending_response =
       std::move(pending_response_);
   pending_response->HandleResponse(message);
@@ -213,7 +213,7 @@ bool GuestViewContainer::OnMessageReceived(const IPC::Message& message) {
 
 void GuestViewContainer::Ready() {
   ready_ = true;
-  CHECK(!pending_response_.get());
+  CHECK(!pending_response_);
   PerformPendingRequest();
 
   // Give the derived type an opportunity to perform some actions when the
@@ -247,9 +247,8 @@ void GuestViewContainer::DidResizeElement(const gfx::Size& new_size) {
     return;
 
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE,
-      base::Bind(&GuestViewContainer::CallElementResizeCallback,
-                 weak_ptr_factory_.GetWeakPtr(), new_size));
+      FROM_HERE, base::BindOnce(&GuestViewContainer::CallElementResizeCallback,
+                                weak_ptr_factory_.GetWeakPtr(), new_size));
 }
 
 void GuestViewContainer::CallElementResizeCallback(

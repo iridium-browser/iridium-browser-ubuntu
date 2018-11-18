@@ -29,7 +29,7 @@ cr.define('print_preview_new', function() {
     },
 
     /**
-     * @return {!HTMLInputElement} The input element the behavior should use.
+     * @return {!CrInputElement} The cr-input element the behavior should use.
      *     Should be overridden by elements using this behavior.
      */
     getInput: function() {},
@@ -55,7 +55,7 @@ cr.define('print_preview_new', function() {
       if (event.code != 'Enter')
         return;
 
-      this.resetAndUpdate_();
+      this.resetAndUpdate();
     },
 
     /**
@@ -84,7 +84,12 @@ cr.define('print_preview_new', function() {
       }
     },
 
-    /** Called to clear the timeout and update the value. */
+    // Resets the lastValue_ so that future inputs trigger a change event.
+    resetString: function() {
+      this.lastValue_ = null;
+    },
+
+    // Called to clear the timeout and update the value.
     resetAndUpdate: function() {
       if (this.timeout_) {
         clearTimeout(this.timeout_);

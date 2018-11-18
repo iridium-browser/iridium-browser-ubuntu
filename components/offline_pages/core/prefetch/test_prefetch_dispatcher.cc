@@ -20,6 +20,11 @@ void TestPrefetchDispatcher::AddCandidatePrefetchURLs(
   new_suggestions_count++;
 }
 
+void TestPrefetchDispatcher::NewSuggestionsAvailable(
+    SuggestionsProvider* suggestions_provider) {}
+
+void TestPrefetchDispatcher::RemoveSuggestion(const GURL& url) {}
+
 void TestPrefetchDispatcher::RemoveAllUnprocessedPrefetchURLs(
     const std::string& name_space) {
   latest_prefetch_urls.clear();
@@ -57,6 +62,12 @@ void TestPrefetchDispatcher::CleanupDownloads(
     const std::map<std::string, std::pair<base::FilePath, int64_t>>&
         success_downloads) {
   cleanup_downloads_count++;
+}
+
+void TestPrefetchDispatcher::GeneratePageBundleRequested(
+    std::unique_ptr<IdsVector> ids) {
+  generate_page_bundle_requested++;
+  ids_from_generate_page_bundle_requested = std::move(ids);
 }
 
 void TestPrefetchDispatcher::DownloadCompleted(

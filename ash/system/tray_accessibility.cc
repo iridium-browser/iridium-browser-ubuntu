@@ -9,19 +9,21 @@
 
 #include "ash/accessibility/accessibility_controller.h"
 #include "ash/accessibility/accessibility_delegate.h"
-#include "ash/ash_view_ids.h"
 #include "ash/magnifier/docked_magnifier_controller.h"
 #include "ash/public/cpp/ash_features.h"
+#include "ash/public/cpp/ash_view_ids.h"
 #include "ash/resources/vector_icons/vector_icons.h"
 #include "ash/session/session_controller.h"
 #include "ash/shell.h"
 #include "ash/strings/grit/ash_strings.h"
+#include "ash/system/model/system_tray_model.h"
 #include "ash/system/tray/hover_highlight_view.h"
 #include "ash/system/tray/system_tray.h"
-#include "ash/system/tray/system_tray_controller.h"
-#include "ash/system/tray/tray_details_view.h"
+#include "ash/system/tray/system_tray_item_detailed_view_delegate.h"
+#include "ash/system/tray/tray_detailed_view.h"
 #include "ash/system/tray/tray_item_more.h"
 #include "ash/system/tray/tray_popup_utils.h"
+#include "ash/system/tray/tray_utils.h"
 #include "ash/system/tray/tri_view.h"
 #include "base/command_line.h"
 #include "base/metrics/user_metrics.h"
@@ -30,17 +32,12 @@
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/paint_vector_icon.h"
 #include "ui/gfx/vector_icon_types.h"
-#include "ui/message_center/message_center.h"
-#include "ui/message_center/public/cpp/notifier_id.h"
 #include "ui/native_theme/native_theme.h"
 #include "ui/views/controls/separator.h"
 #include "ui/views/widget/widget.h"
 
 namespace ash {
 namespace {
-
-const char kNotificationId[] = "chrome://settings/accessibility";
-const char kNotifierAccessibility[] = "ash.accessibility";
 
 enum AccessibilityState {
   A11Y_NONE = 0,
@@ -50,14 +47,14 @@ enum AccessibilityState {
   A11Y_LARGE_CURSOR = 1 << 3,
   A11Y_AUTOCLICK = 1 << 4,
   A11Y_VIRTUAL_KEYBOARD = 1 << 5,
-  A11Y_BRAILLE_DISPLAY_CONNECTED = 1 << 6,
-  A11Y_MONO_AUDIO = 1 << 7,
-  A11Y_CARET_HIGHLIGHT = 1 << 8,
-  A11Y_HIGHLIGHT_MOUSE_CURSOR = 1 << 9,
-  A11Y_HIGHLIGHT_KEYBOARD_FOCUS = 1 << 10,
-  A11Y_STICKY_KEYS = 1 << 11,
-  A11Y_SELECT_TO_SPEAK = 1 << 12,
-  A11Y_DOCKED_MAGNIFIER = 1 << 13,
+  A11Y_MONO_AUDIO = 1 << 6,
+  A11Y_CARET_HIGHLIGHT = 1 << 7,
+  A11Y_HIGHLIGHT_MOUSE_CURSOR = 1 << 8,
+  A11Y_HIGHLIGHT_KEYBOARD_FOCUS = 1 << 9,
+  A11Y_STICKY_KEYS = 1 << 10,
+  A11Y_SELECT_TO_SPEAK = 1 << 11,
+  A11Y_DOCKED_MAGNIFIER = 1 << 12,
+  A11Y_DICTATION = 1 << 13,
 };
 
 uint32_t GetAccessibilityState() {
@@ -77,8 +74,6 @@ uint32_t GetAccessibilityState() {
     state |= A11Y_AUTOCLICK;
   if (controller->IsVirtualKeyboardEnabled())
     state |= A11Y_VIRTUAL_KEYBOARD;
-  if (controller->braille_display_connected())
-    state |= A11Y_BRAILLE_DISPLAY_CONNECTED;
   if (controller->IsMonoAudioEnabled())
     state |= A11Y_MONO_AUDIO;
   if (controller->IsCaretHighlightEnabled())
@@ -91,6 +86,8 @@ uint32_t GetAccessibilityState() {
     state |= A11Y_STICKY_KEYS;
   if (controller->IsSelectToSpeakEnabled())
     state |= A11Y_SELECT_TO_SPEAK;
+  if (controller->IsDictationEnabled())
+    state |= A11Y_DICTATION;
   if (features::IsDockedMagnifierEnabled() &&
       Shell::Get()->docked_magnifier_controller()->GetEnabled()) {
     state |= A11Y_DOCKED_MAGNIFIER;
@@ -100,17 +97,6 @@ uint32_t GetAccessibilityState() {
 
 LoginStatus GetCurrentLoginStatus() {
   return Shell::Get()->session_controller()->login_status();
-}
-
-// Returns notification icon based on the enabled accessibility state.
-const gfx::VectorIcon& GetNotificationIcon(uint32_t enabled_accessibility) {
-  if ((enabled_accessibility & A11Y_BRAILLE_DISPLAY_CONNECTED) &&
-      (enabled_accessibility & A11Y_SPOKEN_FEEDBACK)) {
-    return kNotificationAccessibilityIcon;
-  }
-  if (enabled_accessibility & A11Y_BRAILLE_DISPLAY_CONNECTED)
-    return kNotificationAccessibilityBrailleIcon;
-  return kNotificationChromevoxIcon;
 }
 
 }  // namespace
@@ -146,8 +132,9 @@ class DefaultAccessibilityView : public TrayItemMore {
 ////////////////////////////////////////////////////////////////////////////////
 // ash::tray::AccessibilityDetailedView
 
-AccessibilityDetailedView::AccessibilityDetailedView(SystemTrayItem* owner)
-    : TrayDetailsView(owner) {
+AccessibilityDetailedView::AccessibilityDetailedView(
+    DetailedViewDelegate* delegate)
+    : TrayDetailedView(delegate) {
   Reset();
   AppendAccessibilityList();
   CreateTitleRow(IDS_ASH_STATUS_TRAY_ACCESSIBILITY_TITLE);
@@ -166,6 +153,12 @@ void AccessibilityDetailedView::OnAccessibilityStatusChanged() {
   select_to_speak_enabled_ = controller->IsSelectToSpeakEnabled();
   TrayPopupUtils::UpdateCheckMarkVisibility(select_to_speak_view_,
                                             select_to_speak_enabled_);
+
+  if (dictation_view_) {
+    dictation_enabled_ = controller->IsDictationEnabled();
+    TrayPopupUtils::UpdateCheckMarkVisibility(dictation_view_,
+                                              dictation_enabled_);
+  }
 
   high_contrast_enabled_ = controller->IsHighContrastEnabled();
   TrayPopupUtils::UpdateCheckMarkVisibility(high_contrast_view_,
@@ -238,6 +231,12 @@ void AccessibilityDetailedView::AppendAccessibilityList() {
           IDS_ASH_STATUS_TRAY_ACCESSIBILITY_SELECT_TO_SPEAK),
       select_to_speak_enabled_);
 
+  dictation_enabled_ = controller->IsDictationEnabled();
+  dictation_view_ = AddScrollListCheckableItem(
+      kDictationMenuIcon,
+      l10n_util::GetStringUTF16(IDS_ASH_STATUS_TRAY_ACCESSIBILITY_DICTATION),
+      dictation_enabled_);
+
   high_contrast_enabled_ = controller->IsHighContrastEnabled();
   high_contrast_view_ = AddScrollListCheckableItem(
       kSystemMenuAccessibilityContrastIcon,
@@ -275,8 +274,7 @@ void AccessibilityDetailedView::AppendAccessibilityList() {
           IDS_ASH_STATUS_TRAY_ACCESSIBILITY_VIRTUAL_KEYBOARD),
       virtual_keyboard_enabled_);
 
-  scroll_content()->AddChildView(
-      TrayPopupUtils::CreateListSubHeaderSeparator());
+  scroll_content()->AddChildView(CreateListSubHeaderSeparator());
 
   AddScrollListSubHeader(IDS_ASH_STATUS_TRAY_ACCESSIBILITY_ADDITIONAL_SETTINGS);
 
@@ -336,6 +334,11 @@ void AccessibilityDetailedView::HandleViewClicked(views::View* view) {
                      ? UserMetricsAction("StatusArea_SelectToSpeakEnabled")
                      : UserMetricsAction("StatusArea_SelectToSpeakDisabled"));
     controller->SetSelectToSpeakEnabled(new_state);
+  } else if (view == dictation_view_) {
+    bool new_state = !controller->IsDictationEnabled();
+    RecordAction(new_state ? UserMetricsAction("StatusArea_DictationEnabled")
+                           : UserMetricsAction("StatusArea_DictationDisabled"));
+    controller->SetDictationEnabled(new_state);
   } else if (view == high_contrast_view_) {
     bool new_state = !controller->IsHighContrastEnabled();
     RecordAction(new_state
@@ -432,15 +435,18 @@ void AccessibilityDetailedView::CreateExtraTitleRowButtons() {
 
 void AccessibilityDetailedView::ShowSettings() {
   if (TrayPopupUtils::CanOpenWebUISettings()) {
-    Shell::Get()->system_tray_controller()->ShowAccessibilitySettings();
-    owner()->system_tray()->CloseBubble();
+    Shell::Get()
+        ->system_tray_model()
+        ->client_ptr()
+        ->ShowAccessibilitySettings();
+    CloseBubble();
   }
 }
 
 void AccessibilityDetailedView::ShowHelp() {
   if (TrayPopupUtils::CanOpenWebUISettings()) {
-    Shell::Get()->system_tray_controller()->ShowAccessibilityHelp();
-    owner()->system_tray()->CloseBubble();
+    Shell::Get()->system_tray_model()->client_ptr()->ShowAccessibilityHelp();
+    CloseBubble();
   }
 }
 
@@ -452,13 +458,14 @@ void AccessibilityDetailedView::ShowHelp() {
 TrayAccessibility::TrayAccessibility(SystemTray* system_tray)
     : TrayImageItem(system_tray,
                     kSystemTrayAccessibilityIcon,
-                    UMA_ACCESSIBILITY),
+                    SystemTrayItemUmaType::UMA_ACCESSIBILITY),
       default_(nullptr),
       detailed_menu_(nullptr),
       tray_icon_visible_(false),
       login_(GetCurrentLoginStatus()),
-      previous_accessibility_state_(GetAccessibilityState()),
-      show_a11y_menu_on_lock_screen_(true) {
+      show_a11y_menu_on_lock_screen_(true),
+      detailed_view_delegate_(
+          std::make_unique<SystemTrayItemDetailedViewDelegate>(this)) {
   DCHECK(system_tray);
   Shell::Get()->accessibility_controller()->AddObserver(this);
 }
@@ -470,11 +477,14 @@ TrayAccessibility::~TrayAccessibility() {
 void TrayAccessibility::SetTrayIconVisible(bool visible) {
   if (tray_view())
     tray_view()->SetVisible(visible);
+
+  SetIconColor(TrayIconColor(
+      ash::Shell::Get()->session_controller()->GetSessionState()));
   tray_icon_visible_ = visible;
 }
 
 tray::AccessibilityDetailedView* TrayAccessibility::CreateDetailedMenu() {
-  return new tray::AccessibilityDetailedView(this);
+  return new tray::AccessibilityDetailedView(detailed_view_delegate_.get());
 }
 
 bool TrayAccessibility::GetInitialVisibility() {
@@ -537,61 +547,9 @@ void TrayAccessibility::OnAccessibilityStatusChanged() {
     detailed_menu_->OnAccessibilityStatusChanged();
 }
 
-// TODO(warx): Move ShowAccessibilityNotification() to AccessibilityController.
-void TrayAccessibility::ShowAccessibilityNotification() {
-  uint32_t accessibility_state = GetAccessibilityState();
-  // We'll get an extra notification if a braille display is connected when
-  // spoken feedback wasn't already enabled.  This is because the braille
-  // connection state is already updated when spoken feedback is enabled so
-  // that the notifications can be consolidated into one.  Therefore, we
-  // return early if there's no change in the state that we keep track of.
-  if (accessibility_state == previous_accessibility_state_)
-    return;
-
-  message_center::MessageCenter* message_center =
-      message_center::MessageCenter::Get();
-  message_center->RemoveNotification(kNotificationId, false /* by_user */);
-
-  // Contains bits for spoken feedback and braille display connected currently
-  // being enabled.
-  uint32_t being_enabled =
-      (accessibility_state & ~previous_accessibility_state_) &
-      (A11Y_SPOKEN_FEEDBACK | A11Y_BRAILLE_DISPLAY_CONNECTED);
-  previous_accessibility_state_ = accessibility_state;
-
-  if (being_enabled == A11Y_NONE)
-    return;
-
-  base::string16 text;
-  base::string16 title;
-  if (being_enabled & A11Y_BRAILLE_DISPLAY_CONNECTED &&
-      being_enabled & A11Y_SPOKEN_FEEDBACK) {
-    text =
-        l10n_util::GetStringUTF16(IDS_ASH_STATUS_TRAY_SPOKEN_FEEDBACK_ENABLED);
-    title = l10n_util::GetStringUTF16(
-        IDS_ASH_STATUS_TRAY_SPOKEN_FEEDBACK_BRAILLE_ENABLED_TITLE);
-  } else if (being_enabled & A11Y_BRAILLE_DISPLAY_CONNECTED) {
-    text = l10n_util::GetStringUTF16(
-        IDS_ASH_STATUS_TRAY_BRAILLE_DISPLAY_CONNECTED);
-  } else {
-    title = l10n_util::GetStringUTF16(
-        IDS_ASH_STATUS_TRAY_SPOKEN_FEEDBACK_ENABLED_TITLE);
-    text =
-        l10n_util::GetStringUTF16(IDS_ASH_STATUS_TRAY_SPOKEN_FEEDBACK_ENABLED);
-  }
-  message_center::RichNotificationData options;
-  options.should_make_spoken_feedback_for_popup_updates = false;
-  std::unique_ptr<message_center::Notification> notification =
-      message_center::Notification::CreateSystemNotification(
-          message_center::NOTIFICATION_TYPE_SIMPLE, kNotificationId, title,
-          text, gfx::Image(), base::string16(), GURL(),
-          message_center::NotifierId(
-              message_center::NotifierId::SYSTEM_COMPONENT,
-              kNotifierAccessibility),
-          options, nullptr, GetNotificationIcon(being_enabled),
-          message_center::SystemNotificationWarningLevel::NORMAL);
-  notification->set_priority(message_center::SYSTEM_PRIORITY);
-  message_center->AddNotification(std::move(notification));
+void TrayAccessibility::OnSessionStateChanged(
+    session_manager::SessionState state) {
+  SetTrayIconVisible(GetInitialVisibility());
 }
 
 }  // namespace ash

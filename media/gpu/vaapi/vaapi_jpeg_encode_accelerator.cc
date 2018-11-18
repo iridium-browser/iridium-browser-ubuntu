@@ -13,7 +13,7 @@
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/sequence_checker.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/trace_event.h"
 #include "media/base/bind_to_current_loop.h"
@@ -30,7 +30,7 @@ namespace {
 // JPEG format uses 2 bytes to denote the size of a segment, and the size
 // includes the 2 bytes used for specifying it. Therefore, maximum data size
 // allowed is: 65535 - 2 = 65533.
-const size_t kMaxExifSizeAllowed = 65533;
+constexpr size_t kMaxExifSizeAllowed = 65533;
 
 // UMA results that the VaapiJpegEncodeAccelerator class reports.
 // These values are persisted to logs, and should therefore never be renumbered
@@ -49,9 +49,9 @@ static void ReportToUMA(VAJEAEncoderResult result) {
 
 VaapiJpegEncodeAccelerator::EncodeRequest::EncodeRequest(
     int32_t buffer_id,
-    scoped_refptr<media::VideoFrame> video_frame,
-    std::unique_ptr<SharedMemoryRegion> exif_shm,
-    std::unique_ptr<SharedMemoryRegion> output_shm,
+    scoped_refptr<VideoFrame> video_frame,
+    std::unique_ptr<UnalignedSharedMemory> exif_shm,
+    std::unique_ptr<UnalignedSharedMemory> output_shm,
     int quality)
     : buffer_id(buffer_id),
       video_frame(std::move(video_frame)),
@@ -154,9 +154,17 @@ void VaapiJpegEncodeAccelerator::Encoder::EncodeTask(
     exif_buffer = static_cast<uint8_t*>(request->exif_shm->memory());
     exif_buffer_size = request->exif_shm->size();
   }
-  if (!jpeg_encoder_->Encode(input_size, exif_buffer, exif_buffer_size,
-                             request->quality, va_surface_id,
-                             cached_output_buffer_id_)) {
+
+  // When the exif buffer contains a thumbnail, the VAAPI encoder would
+  // generate a corrupted JPEG. We can work around the problem by supplying an
+  // all-zero buffer with the same size and fill in the real exif buffer after
+  // encoding.
+  // TODO(shenghao): Remove this mechanism after b/79840013 is fixed.
+  std::vector<uint8_t> exif_buffer_dummy(exif_buffer_size, 0);
+  size_t exif_offset = 0;
+  if (!jpeg_encoder_->Encode(input_size, exif_buffer_dummy.data(),
+                             exif_buffer_size, request->quality, va_surface_id,
+                             cached_output_buffer_id_, &exif_offset)) {
     VLOGF(1) << "Encode JPEG failed";
     notify_error_cb_.Run(buffer_id, PLATFORM_FAILURE);
     return;
@@ -172,6 +180,10 @@ void VaapiJpegEncodeAccelerator::Encoder::EncodeTask(
     VLOGF(1) << "Failed to retrieve output image from VA coded buffer";
     notify_error_cb_.Run(buffer_id, PLATFORM_FAILURE);
   }
+
+  // Copy the real exif buffer into preserved space.
+  memcpy(static_cast<uint8_t*>(request->output_shm->memory()) + exif_offset,
+         exif_buffer, exif_buffer_size);
 
   video_frame_ready_cb_.Run(buffer_id, encoded_size);
 }
@@ -190,7 +202,9 @@ VaapiJpegEncodeAccelerator::~VaapiJpegEncodeAccelerator() {
   VLOGF(2) << "Destroying VaapiJpegEncodeAccelerator";
 
   weak_this_factory_.InvalidateWeakPtrs();
-  encoder_task_runner_->DeleteSoon(FROM_HERE, std::move(encoder_));
+  if (encoder_task_runner_) {
+    encoder_task_runner_->DeleteSoon(FROM_HERE, std::move(encoder_));
+  }
 }
 
 void VaapiJpegEncodeAccelerator::NotifyError(int32_t buffer_id, Status status) {
@@ -252,11 +266,10 @@ size_t VaapiJpegEncodeAccelerator::GetMaxCodedBufferSize(
   return VaapiJpegEncoder::GetMaxCodedBufferSize(picture_size);
 }
 
-void VaapiJpegEncodeAccelerator::Encode(
-    scoped_refptr<media::VideoFrame> video_frame,
-    int quality,
-    const BitstreamBuffer* exif_buffer,
-    const BitstreamBuffer& output_buffer) {
+void VaapiJpegEncodeAccelerator::Encode(scoped_refptr<VideoFrame> video_frame,
+                                        int quality,
+                                        const BitstreamBuffer* exif_buffer,
+                                        const BitstreamBuffer& output_buffer) {
   DVLOGF(4);
   DCHECK(io_task_runner_->BelongsToCurrentThread());
 
@@ -272,11 +285,12 @@ void VaapiJpegEncodeAccelerator::Encode(
     return;
   }
 
-  std::unique_ptr<SharedMemoryRegion> exif_shm;
+  std::unique_ptr<UnalignedSharedMemory> exif_shm;
   if (exif_buffer) {
     // |exif_shm| will take ownership of the |exif_buffer->handle()|.
-    exif_shm = std::make_unique<SharedMemoryRegion>(*exif_buffer, true);
-    if (!exif_shm->Map()) {
+    exif_shm = std::make_unique<UnalignedSharedMemory>(
+        exif_buffer->handle(), exif_buffer->size(), true);
+    if (!exif_shm->MapAt(exif_buffer->offset(), exif_buffer->size())) {
       VLOGF(1) << "Failed to map exif buffer";
       task_runner_->PostTask(
           FROM_HERE, base::BindOnce(&VaapiJpegEncodeAccelerator::NotifyError,
@@ -293,8 +307,9 @@ void VaapiJpegEncodeAccelerator::Encode(
   }
 
   // |output_shm| will take ownership of the |output_buffer.handle()|.
-  auto output_shm = std::make_unique<SharedMemoryRegion>(output_buffer, false);
-  if (!output_shm->Map()) {
+  auto output_shm = std::make_unique<UnalignedSharedMemory>(
+      output_buffer.handle(), output_buffer.size(), false);
+  if (!output_shm->MapAt(output_buffer.offset(), output_buffer.size())) {
     VLOGF(1) << "Failed to map output buffer";
     task_runner_->PostTask(
         FROM_HERE,

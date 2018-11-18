@@ -5,6 +5,7 @@
 #ifndef V8_OBJECTS_PROMISE_INL_H_
 #define V8_OBJECTS_PROMISE_INL_H_
 
+#include "src/objects/js-promise-inl.h"
 #include "src/objects/promise.h"
 
 // Has to be the last include (doesn't have include guards):
@@ -23,7 +24,8 @@ CAST_ACCESSOR(PromiseResolveThenableJobTask)
 ACCESSORS(PromiseReaction, next, Object, kNextOffset)
 ACCESSORS(PromiseReaction, reject_handler, HeapObject, kRejectHandlerOffset)
 ACCESSORS(PromiseReaction, fulfill_handler, HeapObject, kFulfillHandlerOffset)
-ACCESSORS(PromiseReaction, payload, HeapObject, kPayloadOffset)
+ACCESSORS(PromiseReaction, promise_or_capability, HeapObject,
+          kPromiseOrCapabilityOffset)
 
 ACCESSORS(PromiseResolveThenableJobTask, context, Context, kContextOffset)
 ACCESSORS(PromiseResolveThenableJobTask, promise_to_resolve, JSPromise,
@@ -34,7 +36,8 @@ ACCESSORS(PromiseResolveThenableJobTask, thenable, JSReceiver, kThenableOffset)
 ACCESSORS(PromiseReactionJobTask, context, Context, kContextOffset)
 ACCESSORS(PromiseReactionJobTask, argument, Object, kArgumentOffset);
 ACCESSORS(PromiseReactionJobTask, handler, HeapObject, kHandlerOffset);
-ACCESSORS(PromiseReactionJobTask, payload, HeapObject, kPayloadOffset);
+ACCESSORS(PromiseReactionJobTask, promise_or_capability, HeapObject,
+          kPromiseOrCapabilityOffset);
 
 ACCESSORS(PromiseCapability, promise, HeapObject, kPromiseOffset)
 ACCESSORS(PromiseCapability, resolve, Object, kResolveOffset)

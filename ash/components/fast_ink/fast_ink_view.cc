@@ -15,6 +15,7 @@
 #include "cc/trees/layer_tree_frame_sink.h"
 #include "cc/trees/layer_tree_frame_sink_client.h"
 #include "components/viz/common/gpu/context_provider.h"
+#include "components/viz/common/hit_test/hit_test_region_list.h"
 #include "components/viz/common/quads/compositor_frame.h"
 #include "components/viz/common/quads/texture_draw_quad.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
@@ -197,6 +198,9 @@ class FastInkView::LayerTreeFrameSinkHolder
 
   // Overridden from cc::LayerTreeFrameSinkClient:
   void SetBeginFrameSource(viz::BeginFrameSource* source) override {}
+  base::Optional<viz::HitTestRegionList> BuildHitTestData() override {
+    return {};
+  }
   void ReclaimResources(
       const std::vector<viz::ReturnedResource>& resources) override {
     for (auto& entry : resources) {
@@ -217,14 +221,12 @@ class FastInkView::LayerTreeFrameSinkHolder
     if (view_)
       view_->DidReceiveCompositorFrameAck();
   }
-  void DidPresentCompositorFrame(uint32_t presentation_token,
-                                 base::TimeTicks time,
-                                 base::TimeDelta refresh,
-                                 uint32_t flags) override {
+  void DidPresentCompositorFrame(
+      uint32_t presentation_token,
+      const gfx::PresentationFeedback& feedback) override {
     if (view_)
-      view_->DidPresentCompositorFrame(time, refresh, flags);
+      view_->DidPresentCompositorFrame(feedback);
   }
-  void DidDiscardCompositorFrame(uint32_t presentation_token) override {}
   void DidLoseLayerTreeFrameSink() override {
     exported_resources_.clear();
     if (root_window_)
@@ -232,7 +234,8 @@ class FastInkView::LayerTreeFrameSinkHolder
   }
   void OnDraw(const gfx::Transform& transform,
               const gfx::Rect& viewport,
-              bool resourceless_software_draw) override {}
+              bool resourceless_software_draw,
+              bool skip_draw) override {}
   void SetMemoryPolicy(const cc::ManagedMemoryPolicy& policy) override {}
   void SetExternalTilePriorityConstraints(
       const gfx::Rect& viewport_rect,
@@ -310,7 +313,8 @@ FastInkView::FastInkView(aura::Window* container,
   // but with potential tearing. Note that we have to draw into a temporary
   // surface and copy it into GPU memory buffer to avoid flicker.
   gpu_memory_buffer_ =
-      aura::Env::GetInstance()
+      widget_->GetNativeWindow()
+          ->env()
           ->context_factory()
           ->GetGpuMemoryBufferManager()
           ->CreateGpuMemoryBuffer(buffer_size_,
@@ -392,7 +396,8 @@ void FastInkView::SubmitCompositorFrame() {
     // new instance to be created in lost context situations is acceptable and
     // keeps the code simple.
     if (!resource->context_provider) {
-      resource->context_provider = aura::Env::GetInstance()
+      resource->context_provider = widget_->GetNativeWindow()
+                                       ->env()
                                        ->context_factory()
                                        ->SharedMainThreadContextProvider();
       if (!resource->context_provider) {
@@ -419,7 +424,6 @@ void FastInkView::SubmitCompositorFrame() {
       gles2->TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
       gles2->TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
       gles2->TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-      gles2->GenMailboxCHROMIUM(resource->mailbox.name);
       gles2->ProduceTextureDirectCHROMIUM(resource->texture,
                                           resource->mailbox.name);
     }
@@ -485,7 +489,8 @@ void FastInkView::SubmitCompositorFrame() {
     // If overflow happens, we increase it again.
     if (!++presentation_token_)
       ++presentation_token_;
-    frame.metadata.presentation_token = presentation_token_;
+    frame.metadata.frame_token = presentation_token_;
+    frame.metadata.request_presentation_feedback = true;
   }
 
   viz::TextureDrawQuad* texture_quad =
@@ -526,11 +531,10 @@ void FastInkView::DidReceiveCompositorFrameAck() {
   }
 }
 
-void FastInkView::DidPresentCompositorFrame(base::TimeTicks time,
-                                            base::TimeDelta refresh,
-                                            uint32_t flags) {
+void FastInkView::DidPresentCompositorFrame(
+    const gfx::PresentationFeedback& feedback) {
   DCHECK(!presentation_callback_.is_null());
-  presentation_callback_.Run(time, refresh, flags);
+  presentation_callback_.Run(feedback);
 }
 
 void FastInkView::ReclaimResource(std::unique_ptr<Resource> resource) {

@@ -13,34 +13,44 @@
 # limitations under the License.
 
 import("//gn/standalone/android.gni")
+import("//gn/standalone/wasm.gni")
 import("//gn/standalone/sanitizers/sanitizers.gni")
 
 config("extra_warnings") {
   cflags = [
+    "-Wall",
     "-Wextra",
-    "-Wno-unused-parameter",
   ]
   if (is_clang) {
     cflags += [
       "-Weverything",
       "-Wno-c++98-compat-pedantic",
       "-Wno-c++98-compat",
+      "-Wno-disabled-macro-expansion",
       "-Wno-gnu-include-next",
       "-Wno-gnu-statement-expression",
       "-Wno-gnu-zero-variadic-macro-arguments",
       "-Wno-padded",
       "-Wno-reserved-id-macro",
-      "-Wno-weak-vtables",
     ]
   }
 }
 
 config("no_exceptions") {
-  cflags = [ "-fno-exceptions" ]
+  cflags_cc = [ "-fno-exceptions" ]
 }
 
 config("no_rtti") {
-  cflags = [ "-fno-rtti" ]
+  cflags_cc = [ "-fno-rtti" ]
+}
+
+config("c++11") {
+  cflags_cc = [ "-std=c++11" ]
+}
+
+# This is needed to compile libunwindstack.
+config("c++17") {
+  cflags_cc = [ "-std=c++17" ]
 }
 
 config("visibility_hidden") {
@@ -56,27 +66,30 @@ config("default") {
   ldflags = []
   libs = []
 
-  cflags_cc += [ "-std=c++11" ]
-
   cflags += [
     "-fstrict-aliasing",
     "-fstack-protector",
     "-fPIC",
     "-g",
-    "-Wa,--noexecstack",
     "-Wformat",
-    "-Wall",
     "-Werror",
   ]
 
-  # Color compiler output, see https://github.com/ninja-build/ninja/wiki/FAQ
+  if (!is_wasm && !is_lto) {
+    cflags += [ "-Wa,--noexecstack" ]
+  }
+
   if (is_clang) {
     cflags += [
+      # Color compiler output, see https://github.com/ninja-build/ninja/wiki/FAQ
       "-fcolor-diagnostics",
-      "-Wno-unknown-warning-option",
+      "-fdiagnostics-show-template-tree",
     ]
-  } else {
-    cflags += [ "-Wno-unknown-warning" ]
+  }
+
+  if (is_lto) {
+    cflags += [ "-flto=full" ]
+    ldflags += [ "-flto=full" ]
   }
 
   if (current_cpu == "arm") {
@@ -108,6 +121,10 @@ config("default") {
     libs += [ "log" ]
   }
 
+  if (is_debug) {
+    libs += [ "dl" ]
+  }
+
   if (is_android) {
     asmflags += [ "--target=$android_abi_target" ]
     cflags += [
@@ -115,13 +132,17 @@ config("default") {
       "-isystem$android_compile_sysroot/$android_compile_sysroot_subdir",
       "-isystem$android_compile_sysroot",
       "-DANDROID",
-      "-D__ANDROID_API__=21",
+      "-D__ANDROID_API__=${android_api_level}",
       "--target=$android_abi_target",
     ]
     cflags_cc += [
       "-I$android_ndk_root/sources/cxx-stl/llvm-libc++/include",
       "-I$android_ndk_root/sources/android/support/include",
       "-I$android_ndk_root/sources/cxx-stl/llvm-libc++abi/include",
+
+      # This is needed for NDK libc++. Using -isystem instead of -I above
+      # results in build breakage related to cmath.h.
+      "-Wno-format-nonliteral",
     ]
     ldflags += [
       "-Wl,-z,nocopyreloc",
@@ -140,13 +161,19 @@ config("default") {
       "-Wl,--warn-shared-textrel",
       "-Wl,--fatal-warnings",
     ]
-    lib_dirs = [ "$android_ndk_root/sources/cxx-stl/llvm-libc++/libs/$android_app_abi" ]
+    lib_dirs = [
+      "$android_ndk_root/sources/cxx-stl/llvm-libc++/libs/$android_app_abi",
+    ]
     libs += [
       "gcc",
       "c++_static",
       "c++abi",
-      "android_support",
     ]
+
+    if (current_cpu == "arm") {
+      # New NDKs don't have libandroid_support for arm64.
+      libs += [ "android_support" ]
+    }
   }
 }
 
@@ -154,7 +181,6 @@ config("debug_symbols") {
   cflags = [ "-O0" ]
   if (is_android || is_linux) {
     cflags += [ "-funwind-tables" ]
-    ldflags = [ "-rdynamic" ]
   }
 }
 
@@ -165,6 +191,8 @@ config("release") {
   ]
   if (is_android) {
     cflags += [ "-Oz" ]
+  } else if (use_libfuzzer) {
+    cflags += [ "-O1" ]
   } else {
     cflags += [ "-O3" ]
   }

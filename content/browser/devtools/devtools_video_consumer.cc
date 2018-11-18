@@ -4,6 +4,9 @@
 
 #include "content/browser/devtools/devtools_video_consumer.h"
 
+#include <utility>
+
+#include "base/memory/shared_memory_mapping.h"
 #include "cc/paint/skia_paint_canvas.h"
 #include "components/viz/host/host_frame_sink_manager.h"
 #include "components/viz/service/frame_sinks/video_capture/frame_sink_video_capturer_impl.h"
@@ -25,6 +28,11 @@ constexpr base::TimeDelta kDefaultMinPeriod = base::TimeDelta();
 // Allow variable aspect ratio.
 const bool kDefaultUseFixedAspectRatio = false;
 
+// Creates a ClientFrameSinkVideoCapturer via HostFrameSinkManager.
+std::unique_ptr<viz::ClientFrameSinkVideoCapturer> CreateCapturer() {
+  return GetHostFrameSinkManager()->CreateVideoCapturer();
+}
+
 }  // namespace
 
 // static
@@ -37,8 +45,7 @@ DevToolsVideoConsumer::DevToolsVideoConsumer(OnFrameCapturedCallback callback)
     : callback_(std::move(callback)),
       min_capture_period_(kDefaultMinCapturePeriod),
       min_frame_size_(kDefaultMinFrameSize),
-      max_frame_size_(kDefaultMaxFrameSize),
-      binding_(this) {}
+      max_frame_size_(kDefaultMaxFrameSize) {}
 
 DevToolsVideoConsumer::~DevToolsVideoConsumer() = default;
 
@@ -50,7 +57,7 @@ SkBitmap DevToolsVideoConsumer::GetSkBitmapFromFrame(
   skbitmap.allocN32Pixels(frame->visible_rect().width(),
                           frame->visible_rect().height());
   cc::SkiaPaintCanvas canvas(skbitmap);
-  renderer.Copy(frame, &canvas, media::Context3D());
+  renderer.Copy(frame, &canvas, media::Context3D(), nullptr);
   return skbitmap;
 }
 
@@ -63,16 +70,18 @@ void DevToolsVideoConsumer::StartCapture() {
 void DevToolsVideoConsumer::StopCapture() {
   if (!capturer_)
     return;
-  binding_.Close();
-  capturer_->Stop();
   capturer_.reset();
 }
 
 void DevToolsVideoConsumer::SetFrameSinkId(
     const viz::FrameSinkId& frame_sink_id) {
   frame_sink_id_ = frame_sink_id;
-  if (capturer_)
-    capturer_->ChangeTarget(frame_sink_id_);
+  if (capturer_) {
+    if (frame_sink_id_.is_valid())
+      capturer_->ChangeTarget(frame_sink_id_);
+    else
+      capturer_->ChangeTarget(base::nullopt);
+  }
 }
 
 void DevToolsVideoConsumer::SetMinCapturePeriod(
@@ -93,28 +102,19 @@ void DevToolsVideoConsumer::SetMinAndMaxFrameSize(gfx::Size min_frame_size,
   }
 }
 
-viz::mojom::FrameSinkVideoCapturerPtrInfo
-DevToolsVideoConsumer::CreateCapturer() {
-  viz::HostFrameSinkManager* const manager = GetHostFrameSinkManager();
-  viz::mojom::FrameSinkVideoCapturerPtr capturer;
-  manager->CreateVideoCapturer(mojo::MakeRequest(&capturer));
-  return capturer.PassInterface();
-}
-
 void DevToolsVideoConsumer::InnerStartCapture(
-    viz::mojom::FrameSinkVideoCapturerPtrInfo capturer_info) {
-  capturer_.Bind(std::move(capturer_info));
+    std::unique_ptr<viz::ClientFrameSinkVideoCapturer> capturer) {
+  capturer_ = std::move(capturer);
 
   // Give |capturer_| the capture parameters.
   capturer_->SetMinCapturePeriod(min_capture_period_);
   capturer_->SetMinSizeChangePeriod(kDefaultMinPeriod);
   capturer_->SetResolutionConstraints(min_frame_size_, max_frame_size_,
                                       kDefaultUseFixedAspectRatio);
-  capturer_->ChangeTarget(frame_sink_id_);
+  if (frame_sink_id_.is_valid())
+    capturer_->ChangeTarget(frame_sink_id_);
 
-  viz::mojom::FrameSinkVideoConsumerPtr consumer;
-  binding_.Bind(mojo::MakeRequest(&consumer));
-  capturer_->Start(std::move(consumer));
+  capturer_->Start(this);
 }
 
 bool DevToolsVideoConsumer::IsValidMinAndMaxFrameSize(
@@ -130,39 +130,52 @@ bool DevToolsVideoConsumer::IsValidMinAndMaxFrameSize(
 }
 
 void DevToolsVideoConsumer::OnFrameCaptured(
-    mojo::ScopedSharedBufferHandle buffer,
-    uint32_t buffer_size,
+    base::ReadOnlySharedMemoryRegion data,
     ::media::mojom::VideoFrameInfoPtr info,
     const gfx::Rect& update_rect,
     const gfx::Rect& content_rect,
     viz::mojom::FrameSinkVideoConsumerFrameCallbacksPtr callbacks) {
-  if (!buffer.is_valid())
+  if (!data.IsValid())
     return;
 
-  mojo::ScopedSharedBufferMapping mapping = buffer->Map(buffer_size);
-  if (!mapping) {
+  base::ReadOnlySharedMemoryMapping mapping = data.Map();
+  if (!mapping.IsValid()) {
     DLOG(ERROR) << "Shared memory mapping failed.";
     return;
   }
-
-  scoped_refptr<media::VideoFrame> frame;
-  // Setting |frame|'s visible rect equal to |content_rect| so that only the
-  // portion of the frame that contain content are used.
-  frame = media::VideoFrame::WrapExternalData(
-      info->pixel_format, info->coded_size, info->visible_rect,
-      info->visible_rect.size(), static_cast<uint8_t*>(mapping.get()),
-      buffer_size, info->timestamp);
-  if (!frame)
+  if (mapping.size() <
+      media::VideoFrame::AllocationSize(info->pixel_format, info->coded_size)) {
+    DLOG(ERROR) << "Shared memory size was less than expected.";
     return;
+  }
+
+  // Create a media::VideoFrame that wraps the read-only shared memory data.
+  // Unfortunately, a deep web of not-const-correct code exists in
+  // media::VideoFrame and media::PaintCanvasVideoRenderer (see
+  // GetSkBitmapFromFrame() above). So, the pointer's const attribute must be
+  // casted away. This is safe since the operating system will page fault if
+  // there is any attempt downstream to mutate the data.
+  //
+  // Setting |frame|'s visible rect equal to |content_rect| so that only the
+  // portion of the frame that contains content is used.
+  scoped_refptr<media::VideoFrame> frame = media::VideoFrame::WrapExternalData(
+      info->pixel_format, info->coded_size, content_rect, content_rect.size(),
+      const_cast<uint8_t*>(static_cast<const uint8_t*>(mapping.memory())),
+      mapping.size(), info->timestamp);
+  if (!frame) {
+    DLOG(ERROR) << "Unable to create VideoFrame wrapper around the shmem.";
+    return;
+  }
   frame->AddDestructionObserver(base::BindOnce(
-      [](mojo::ScopedSharedBufferMapping mapping) {}, std::move(mapping)));
+      [](base::ReadOnlySharedMemoryMapping mapping,
+         viz::mojom::FrameSinkVideoConsumerFrameCallbacksPtr callbacks) {},
+      std::move(mapping), std::move(callbacks)));
   frame->metadata()->MergeInternalValuesFrom(info->metadata);
+  if (info->color_space.has_value())
+    frame->set_color_space(info->color_space.value());
 
   callback_.Run(std::move(frame));
 }
-
-void DevToolsVideoConsumer::OnTargetLost(
-    const viz::FrameSinkId& frame_sink_id) {}
 
 void DevToolsVideoConsumer::OnStopped() {}
 

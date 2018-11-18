@@ -6,26 +6,39 @@
 
 #include "third_party/blink/public/mojom/page/page_visibility_state.mojom-blink.h"
 #include "third_party/blink/public/platform/platform.h"
+#include "third_party/blink/public/platform/web_referrer_policy.h"
 #include "third_party/blink/public/web/web_settings.h"
 #include "third_party/blink/renderer/core/exported/web_view_impl.h"
-#include "third_party/blink/renderer/core/frame/csp/content_security_policy.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/loader/frame_load_request.h"
 #include "third_party/blink/renderer/platform/loader/fetch/substitute_data.h"
 
 namespace blink {
 
-WorkerShadowPage::WorkerShadowPage(Client* client)
+namespace {
+
+constexpr char kDoNotTrackHeader[] = "DNT";
+
+}  // namespace
+
+WorkerShadowPage::WorkerShadowPage(
+    Client* client,
+    scoped_refptr<network::SharedURLLoaderFactory> loader_factory,
+    PrivacyPreferences preferences)
     : client_(client),
       web_view_(WebViewImpl::Create(nullptr,
+                                    nullptr,
                                     mojom::PageVisibilityState::kVisible,
                                     nullptr)),
-      main_frame_(WebLocalFrameImpl::CreateMainFrame(web_view_,
-                                                     this,
-                                                     nullptr,
-                                                     nullptr,
-                                                     g_empty_atom,
-                                                     WebSandboxFlags::kNone)) {
+      main_frame_(
+          WebLocalFrameImpl::CreateMainFrame(web_view_,
+                                             this,
+                                             nullptr /* interface_registry */,
+                                             nullptr /* opener */,
+                                             g_empty_atom,
+                                             WebSandboxFlags::kNone)),
+      loader_factory_(std::move(loader_factory)),
+      preferences_(std::move(preferences)) {
   DCHECK(IsMainThread());
 
   // TODO(http://crbug.com/363843): This needs to find a better way to
@@ -57,18 +70,10 @@ void WorkerShadowPage::Initialize(const KURL& script_url) {
   CString content("");
   scoped_refptr<SharedBuffer> buffer(
       SharedBuffer::Create(content.data(), content.length()));
-  main_frame_->GetFrame()->Loader().Load(FrameLoadRequest(
-      nullptr, ResourceRequest(script_url), SubstituteData(buffer)));
-}
-
-void WorkerShadowPage::SetContentSecurityPolicyAndReferrerPolicy(
-    ContentSecurityPolicy* content_security_policy,
-    String referrer_policy) {
-  DCHECK(IsMainThread());
-  content_security_policy->SetOverrideURLForSelf(GetDocument()->Url());
-  GetDocument()->InitContentSecurityPolicy(content_security_policy);
-  if (!referrer_policy.IsNull())
-    GetDocument()->ParseAndSetReferrerPolicy(referrer_policy);
+  main_frame_->GetFrame()->Loader().CommitNavigation(
+      ResourceRequest(script_url), SubstituteData(buffer),
+      ClientRedirectPolicy::kNotClientRedirect,
+      base::UnguessableToken::Create());
 }
 
 void WorkerShadowPage::DidFinishDocumentLoad() {
@@ -87,6 +92,8 @@ WorkerShadowPage::CreateApplicationCacheHost(
 std::unique_ptr<blink::WebURLLoaderFactory>
 WorkerShadowPage::CreateURLLoaderFactory() {
   DCHECK(IsMainThread());
+  if (loader_factory_)
+    return Platform::Current()->WrapSharedURLLoaderFactory(loader_factory_);
   return Platform::Current()->CreateDefaultURLLoaderFactory();
 }
 
@@ -95,6 +102,15 @@ base::UnguessableToken WorkerShadowPage::GetDevToolsFrameToken() {
   // DevTools once we stop using a frame for workers. Currently, we rely on
   // the frame's instrumentation token to match the worker.
   return client_->GetDevToolsWorkerToken();
+}
+
+void WorkerShadowPage::WillSendRequest(WebURLRequest& request) {
+  if (preferences_.enable_do_not_track) {
+    request.SetHTTPHeaderField(WebString::FromUTF8(kDoNotTrackHeader), "1");
+  }
+  if (!preferences_.enable_referrers) {
+    request.SetHTTPReferrer(WebString(), kWebReferrerPolicyDefault);
+  }
 }
 
 bool WorkerShadowPage::WasInitialized() const {
@@ -117,9 +133,8 @@ void WorkerShadowPage::AdvanceState(State new_state) {
   }
 }
 
-void WorkerShadowPage::BindDevToolsAgent(
-    mojom::blink::DevToolsAgentAssociatedRequest request) {
-  main_frame_->DevToolsAgentImpl()->BindRequest(std::move(request));
+WebDevToolsAgentImpl* WorkerShadowPage::DevToolsAgent() {
+  return main_frame_->DevToolsAgentImpl();
 }
 
 }  // namespace blink

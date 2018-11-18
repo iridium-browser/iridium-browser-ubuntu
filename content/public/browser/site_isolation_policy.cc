@@ -14,12 +14,15 @@
 #include "base/macros.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/no_destructor.h"
 #include "base/strings/string_split.h"
 #include "base/timer/timer.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/common/resource_type.h"
+#include "services/network/public/mojom/network_service.mojom.h"
 #include "url/gurl.h"
 
 namespace content {
@@ -45,42 +48,25 @@ bool SiteIsolationPolicy::UseDedicatedProcessesForAllSites() {
 }
 
 // static
-SiteIsolationPolicy::CrossSiteDocumentBlockingEnabledState
-SiteIsolationPolicy::IsCrossSiteDocumentBlockingEnabled() {
-  // --disable-web-security also disables cross-origin response blocking (CORB).
+void SiteIsolationPolicy::PopulateURLLoaderFactoryParamsPtrForCORB(
+    network::mojom::URLLoaderFactoryParams* params) {
+  // --disable-web-security also disables Cross-Origin Read Blocking (CORB).
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kDisableWebSecurity)) {
-    return XSDB_DISABLED;
+    params->is_corb_enabled = false;
+    return;
   }
 
-  if (base::FeatureList::IsEnabled(
-          ::features::kCrossSiteDocumentBlockingAlways)) {
-    return XSDB_ENABLED_UNCONDITIONALLY;
-  }
+  params->is_corb_enabled = true;
+  params->corb_detachable_resource_type = RESOURCE_TYPE_PREFETCH;
+  params->corb_excluded_resource_type = RESOURCE_TYPE_PLUGIN_RESOURCE;
 
-  if (base::FeatureList::IsEnabled(
-          ::features::kCrossSiteDocumentBlockingIfIsolating)) {
-    return XSDB_ENABLED_IF_ISOLATED;
-  }
-
-  return XSDB_DISABLED;
-}
-
-// static
-bool SiteIsolationPolicy::IsTopDocumentIsolationEnabled() {
-  // --site-per-process trumps --top-document-isolation.
-  if (UseDedicatedProcessesForAllSites())
-    return false;
-
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableSiteIsolationTrials)) {
-    return false;
-  }
-
-  // The feature needs to be checked last, because checking the feature
-  // activates the field trial and assigns the client either to a control or an
-  // experiment group - such assignment should be final.
-  return base::FeatureList::IsEnabled(::features::kTopDocumentIsolation);
+  const char* initiator_scheme_exception =
+      GetContentClient()
+          ->browser()
+          ->GetInitiatorSchemeBypassingDocumentBlocking();
+  if (initiator_scheme_exception)
+    params->corb_excluded_initiator_scheme = initiator_scheme_exception;
 }
 
 // static
@@ -105,7 +91,11 @@ bool SiteIsolationPolicy::AreIsolatedOriginsEnabled() {
 }
 
 // static
+bool SiteIsolationPolicy::IsErrorPageIsolationEnabled(bool in_main_frame) {
+  return GetContentClient()->browser()->ShouldIsolateErrorPage(in_main_frame);
+}
 
+// static
 bool SiteIsolationPolicy::ShouldPdfCompositorBeEnabledForOopifs() {
   // TODO(weili): We only create pdf compositor client and use pdf compositor
   // service when site-per-process or isolate-origins flag/feature is enabled,
@@ -113,8 +103,7 @@ bool SiteIsolationPolicy::ShouldPdfCompositorBeEnabledForOopifs() {
   // where OOPIF is used such as isolate-extensions, but should be good for
   // feature testing purpose. Eventually, we will remove this check and use pdf
   // compositor service by default for printing.
-  return AreIsolatedOriginsEnabled() || IsTopDocumentIsolationEnabled() ||
-         UseDedicatedProcessesForAllSites();
+  return AreIsolatedOriginsEnabled() || UseDedicatedProcessesForAllSites();
 }
 
 // static
@@ -172,7 +161,7 @@ std::vector<url::Origin> SiteIsolationPolicy::ParseIsolatedOrigins(
   origins.reserve(origin_strings.size());
   for (const base::StringPiece& origin_string : origin_strings) {
     url::Origin origin = url::Origin::Create(GURL(origin_string));
-    if (!origin.unique())
+    if (!origin.opaque())
       origins.push_back(origin);
   }
   return origins;
@@ -185,8 +174,8 @@ void SiteIsolationPolicy::StartRecordingSiteIsolationFlagUsage() {
   // flags can't change dynamically at runtime, collecting these stats daily
   // helps determine the overall population of users who run with a given flag
   // on any given day.
-  CR_DEFINE_STATIC_LOCAL(base::RepeatingTimer, update_stats_timer, ());
-  update_stats_timer.Start(
+  static base::NoDestructor<base::RepeatingTimer> update_stats_timer;
+  update_stats_timer->Start(
       FROM_HERE, base::TimeDelta::FromHours(24),
       base::BindRepeating(&SiteIsolationPolicy::RecordSiteIsolationFlagUsage));
 }

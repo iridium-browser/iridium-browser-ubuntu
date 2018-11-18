@@ -1,11 +1,11 @@
 Name: icu
 URL: http://site.icu-project.org/
-Version: 60.1
+Version: 62.1
 License: MIT
 Security Critical: yes
 
 Description:
-This directory contains the source code of ICU 60.1 for C/C++.
+This directory contains the source code of ICU 62.1 for C/C++.
 
 A. How to update ICU
 
@@ -14,13 +14,12 @@ A. How to update ICU
    It does preserve Chrome-specific build files (*local.mk) and
    converter files. (see section C)
 
-2. Update the source file lists for i18n and common
-   in icu.gypi and BUILD.gn. See the comments in the files.
+   BUILD.gn and icu.gyp* files are automatically updated, too.
 
-3. Review and apply patches/changes in "D. Local Modifications" if
+2. Review and apply patches/changes in "D. Local Modifications" if
    necessary/applicable. Update patch files in patches/.
 
-4. Follow the instructions in section B on building ICU data files
+3. Follow the instructions in section B on building ICU data files
 
 
 B. How to build ICU data files
@@ -40,7 +39,7 @@ Pre-built data files are generated and checked in with the following steps
 
   c. Run make
      'make' will fail  when pkgdata looks for root_subset.res. This
-     is expected. See https://ssl.icu-project.org/trac/ticket/10570
+     is expected. See https://unicode-org.atlassian.net/browse/ICU-10570
 
   d. Run
        ${CHROME_ICU_TREE_TOP}/scripts/make_data_all.sh
@@ -78,39 +77,18 @@ Pre-built data files are generated and checked in with the following steps
 
      ix) Repeat ii) and iii) for iOS to get ios/icudtl.dat
 
-     x) scripts/clean_up_data_source.sh
+     x) Repeat ii) and iii) for Flutter to get flutter/icudtl.dat
+
+     xi) scripts/clean_up_data_source.sh
 
      This reverts the result of trim_data.sh and patch_locale.sh and
      make the tree ready for committing updated ICU data files for
      non-Android and Android platforms.
 
   e. Whenever data is updated (e.g timezone update), take step d as long
-  as the ICU build directory used in a ~ c is kept. Besides, icudt.dll for
-  Windows has to be udpated following the procedure described below.
+  as the ICU build directory used in a ~ c is kept.
 
-
-2. icu data dll for Windows (non-default build option)
-
-  Follow these steps to build windows/icudt.dll. By default, we set
-  icu_use_icu_data_flag to 1 and don't use this file.
-
-  a. check out a clean copy of icu 60.1 from the upstream on Windows
-     outside the Chrome tree.
-
-    $ svn export --native-eol LF http://source.icu-project.org/repos/icu/tags/release-60-1/icu4c ${SEPARATE_ICU_ROOT}/icu60
-
-  b. copy ${CHROME_ICU_ROOT}/common/icudtl.dat to
-     ${SEPARATE_ICU_ROOT}/source/data/in/icudt60l.dat
-  c. copy ${CHROME_ICU_ROOT}/source/data/makedata.mak to
-     ${SEPARATE_ICU_ROOT}/source/data/makedata.mak
-  c. In Visual Studio, open source/allinone/allinone.sln solution
-     in ${SEPARATE_ICU_ROOT}
-  d. Build 'makedata' target
-  e. icudt60.dll will be generated in ${SEPARATE_ICU_ROOT}/bin
-  f. Copy that icudt60.dll to ${CHROME_ICU_ROOT}/windows/icudt.dll
-     and check that in.
-
-3. Note on the locale data customization
+2. Note on the locale data customization
 
   - scripts/trim_data.sh
       a. Trim the locale data for Chrome's UI langauges :
@@ -170,7 +148,7 @@ them when updating ICU.
 
 3. source/data/brkitr
   - dictionaries/khmerdict.txt: Abridged Khmer dictionary. See
-    https://ssl.icu-project.org/trac/ticket/9451
+    https://unicode-org.atlassian.net/browse/ICU-9451
   - rules/word_ja.txt (used only on Android)
     Added for Japanese-specific word-breaking without the C+J dictionary.
   - rules/{fi,root,zh,zh_Hant}.txt
@@ -199,6 +177,7 @@ D. Local Modifications
     * Currency signs in ru and uk locales (do not include 'tr' locale changes)
     * AM/PM, midnight, noon formatting for a few Indian locales
     * Timezone name changes in Korean and Chinese locales
+    * Default digit for Arabic locale is European digits.
 
   - patches/locale1.patch: Minor fixes for Korean
 
@@ -212,12 +191,12 @@ D. Local Modifications
 
   - patches/khmer-dictbe.patch
     Adjust parameters to use a smaller Khmer dictionary (khmerdict.txt).
-    https://ssl.icu-project.org/trac/ticket/9451
+    https://unicode-org.atlassian.net/browse/ICU-9451
 
   - Add several common Chinese words that were dropped previously to
     source/data/cjdict/brkitr/cjdict.txt
     patch: patches/cjdict.patch
-    upstream bug: https://ssl.icu-project.org/trac/ticket/10888
+    upstream bug: https://unicode-org.atlassian.net/browse/ICU-10888
 
 3. Timezone data update
   Run scripts/update_tz.sh to grab the latest version of the
@@ -228,15 +207,14 @@ D. Local Modifications
      windowsZones.txt
      zoneinfo64.txt
 
-  As of April 5, 2018, the latest version is 2018d and the above files
-  are available at
-  http://source.icu-project.org/repos/icu/data/trunk/tzdata/icunew/2018c/44/
+  As of Oct 18, 2018, the latest version is 2018f and the above files
+  are available at the ICU github repos.
 
 4. Build-related changes
 
   - patches/wpo.patch (only needed when icudata dll is used).
-    upstream bugs : https://ssl.icu-project.org/trac/ticket/8043
-                    https://ssl.icu-project.org/trac/ticket/5701
+    upstream bugs : https://unicode-org.atlassian.net/browse/ICU-8043
+                    https://unicode-org.atlassian.net/browse/ICU-5701
   - patches/vscomp.patch for building with Visual Studio on Windows:
     do not use WINDOWS_LOCALE_API in locmap.c
 
@@ -248,67 +226,81 @@ D. Local Modifications
       Put ICU_DATA_ENTRY_POINT(icudtXX_dat) in common when we use
       the icu data file or icudt.dll
 
-5. Cherry-pick fixes in ICU 60.2
-
-  Fix ScriptExtensions property for 5 characters
-  - patches/script_extension.patch
-    upstream bug: https://ssl.icu-project.org/trac/ticket/13462
-    (fixed in 60maint branch)
-
-  Calendar class initialization bug
-  - patches/calendar.patch - has a local addition to terminate strings.
-  - upstream fix: https://ssl.icu-project.org/trac/changeset/40670
-
-  UTF8 to UTF8 conversion bug
-  - patches/u8tou8.patch
-  - upstream bug: https://ssl.icu-project.org/trac/ticket/13510
-
-  German AM/PM marker fix in CLDR 32.0.1
-  - patches/de_ampm.patch
-  - upstream bug: https://unicode.org/cldr/trac/ticket/10735
-
-6. Fix -Wsign-compare warning in EnumSet::isValidEnum()
+5. Fix -Wsign-compare warning in EnumSet::isValidEnum()
 
   - patches/isvalidenum.patch
-    upstream bug: https://ssl.icu-project.org/trac/ticket/13509
+    upstream bug: https://unicode-org.atlassian.net/browse/ICU-13509
 
-7. Currency display name fix for Seribian locale
+7. Update IANA language tag/subtag mapping and add missing canonicalization for
+    deprecated regions
 
- - patches/curr_sr.patch
-   upstream bug: https://unicode.org/cldr/trac/ticket/10794
+  - patches/locid_map.patch
+  - upstream bugs:
+    https://unicode-org.atlassian.net/browse/ICU-13726
+    https://unicode-org.atlassian.net/browse/ICU-13723
+    https://unicode-org.atlassian.net/browse/ICU-13721
+    https://unicode-org.atlassian.net/browse/ICU-13720
+    https://unicode-org.atlassian.net/browse/ICU-13719
 
-8. Fix an integer overflow in Islamic calendar
+8. Double conversion library build failure
 
-  - patches/islamcal.patch
-    upstream bug: https://ssl.icu-project.org/trac/ticket/13538
+  - patches/double_conversion.patch
+  - upstream bugs:
+    https://unicode-org.atlassian.net/browse/ICU-13750
+    https://github.com/google/double-conversion/issues/66
 
-9. Reduce size of SmallIntFormatter implementation
+9. Cherry-pick Greek lowercase fix from the upstream
 
-  - patches/simplify_smallintformatter.patch
-    upstream bug: https://ssl.icu-project.org/trac/ticket/12390
+  - patches/greek_lowercase.patch
+  - upstream bug (fixed in 62.2-to-be)
+    https://unicode-org.atlassian.net/browse/ICU-13851
 
-  Reduce the size of the binary by about 16 kiB on Android,
-  without noticeable performance change.
+10. Max significant digit is always 6
 
-10. Apply a rule fix for a perf issue with a long sequence of letters/digits
+  - patches/nf_maxsig.patch
+  - upstream bug:
+    https://unicode-org.atlassian.net/browse/ICU-13852
 
-  - patches/word_long.patch
-    upstream bug: https://ssl.icu-project.org/trac/ticket/13692
-    (62-to-be does not have this issue)
-  - bug: crbug.com/829144
+11. Align memory buffer used in Decimal Format
 
-11. Limit the recursion depth of UnicodeSet pattern
+  - patches/decimalformat_align.patch
+  - upstream bug:
+    https://unicode-org.atlassian.net/browse/ICU-20039
 
-  - patches/uset_depth.patch
-    upstream bug: https://ssl.icu-project.org/trac/ticket/13547
+12. Cherry-pick an upstream CL for quarter support in RelativeDate format
 
-12. Fix a bug in non-BMP character handling in dictionary-based CJK
-    break iterator.
+  - patches/reldate_quarter.patch
+  - upstream bug:
+    https://unicode-org.atlassian.net/browse/ICU-20022
+  - fix: https://github.com/unicode-org/icu/pull/77
 
-  - patches/cjkdict_nonbmp.patch
-    upstream bug: https://ssl.icu-project.org/trac/ticket/13549
+13. Cherry-pick an upstream CL for BCP47 language tag validation
 
-13. Fix the undefined behavior in decimal number parsing
+  - patches/langtag_bcp47.patch
+  - upstream bug:
+    https://unicode-org.atlassian.net/browse/ICU-20098
+  - fix: https://github.com/unicode-org/icu/pull/102
 
-  - patches/number_ub.patch
-  - upstream bug: https://ssl.icu-project.org/trac/ticket/13550
+14. Another cherry-pick of upstream CL for duplicate U-extension
+    handling.
+
+  - patches/langtag_uext.patch
+  - upstream bug:
+    https://unicode-org.atlassian.net/browse/ICU-20140
+  - fix: https://github.com/unicode-org/icu/pull/136
+
+15. Cherry pick an upstream patch for Windows timezone detection
+
+  - patches/wintz_detection.patch
+  - upstream bugs:
+    https://unicode-org.atlassian.net/browse/ICU-13842
+    https://unicode-org.atlassian.net/browse/ICU-13827
+  - fixes:
+      https://github.com/unicode-org/icu/pull/55
+      https://github.com/unicode-org/icu/pull/129
+
+16. Align memory buffer used in UnicodeSet on ARM.
+
+  - patches/arm_align.patch
+  - upstream bug:
+    https://unicode-org.atlassian.net/browse/ICU-20001

@@ -11,6 +11,10 @@
 
 namespace blink {
 
+class HTMLVideoElement;
+class ScriptPromiseResolver;
+struct PictureInPictureControlInfo;
+
 // PictureInPictureController allows to know if Picture-in-Picture is allowed
 // for a video element in Blink outside of modules/ module. It
 // is an interface that the module will implement and add a provider for.
@@ -33,16 +37,43 @@ class CORE_EXPORT PictureInPictureController
   enum class Status {
     kEnabled,
     kFrameDetached,
+    kMetadataNotLoaded,
+    kVideoTrackNotAvailable,
     kDisabledBySystem,
     kDisabledByFeaturePolicy,
     kDisabledByAttribute,
   };
 
+  // Enter Picture-in-Picture for a video element and resolve promise if any.
+  virtual void EnterPictureInPicture(HTMLVideoElement*,
+                                     ScriptPromiseResolver*) = 0;
+
+  // Exit Picture-in-Picture for a video element and resolve promise if any.
+  virtual void ExitPictureInPicture(HTMLVideoElement*,
+                                    ScriptPromiseResolver*) = 0;
+
   // Returns whether a given video element in a document associated with the
   // controller is allowed to request Picture-in-Picture.
   virtual Status IsElementAllowed(const HTMLVideoElement&) const = 0;
 
-  virtual void Trace(blink::Visitor*);
+  // Should be called when an element has exited Picture-in-Picture.
+  virtual void OnExitedPictureInPicture(ScriptPromiseResolver*) = 0;
+
+  // Should be called when a custom control on a video element in
+  // Picture-in-Picture is clicked. |control_id| is the identifier for its
+  // custom control. This is defined by the site that calls the web API.
+  virtual void OnPictureInPictureControlClicked(
+      const WebString& control_id) = 0;
+
+  // Assign custom controls to be added to the Picture-in-Picture window.
+  virtual void SetPictureInPictureCustomControls(
+      HTMLVideoElement*,
+      const std::vector<PictureInPictureControlInfo>&) = 0;
+
+  // Returns whether the given element is currently in Picture-in-Picture.
+  virtual bool IsPictureInPictureElement(const Element*) const = 0;
+
+  void Trace(blink::Visitor*) override;
 
  protected:
   explicit PictureInPictureController(Document&);

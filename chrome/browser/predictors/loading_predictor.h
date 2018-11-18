@@ -7,6 +7,7 @@
 
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -66,9 +67,10 @@ class LoadingPredictor : public KeyedService,
   // KeyedService:
   void Shutdown() override;
 
-  void OnMainFrameRequest(const URLRequestSummary& summary);
-  void OnMainFrameRedirect(const URLRequestSummary& summary);
-  void OnMainFrameResponse(const URLRequestSummary& summary);
+  void OnNavigationStarted(const NavigationID& navigation_id);
+  void OnNavigationFinished(const NavigationID& old_navigation_id,
+                            const NavigationID& new_navigation_id,
+                            bool is_error_page);
 
   base::WeakPtr<LoadingPredictor> GetWeakPtr() {
     return weak_factory_.GetWeakPtr();
@@ -76,6 +78,11 @@ class LoadingPredictor : public KeyedService,
 
   // PreconnectManager::Delegate:
   void PreconnectFinished(std::unique_ptr<PreconnectStats> stats) override;
+
+  size_t GetActiveHintsSizeForTesting() { return active_hints_.size(); }
+  size_t GetActiveNavigationsSizeForTesting() {
+    return active_navigations_.size();
+  }
 
  private:
   // Cancels an active hint, from its iterator inside |active_hints_|. If the
@@ -88,7 +95,7 @@ class LoadingPredictor : public KeyedService,
   // May start preconnect and preresolve jobs according to |requests| for |url|
   // with a given hint |origin|.
   void MaybeAddPreconnect(const GURL& url,
-                          std::vector<PreconnectRequest>&& requests,
+                          std::vector<PreconnectRequest> requests,
                           HintOrigin origin);
   // If a preconnect exists for |url|, stop it.
   void MaybeRemovePreconnect(const GURL& url);
@@ -109,6 +116,12 @@ class LoadingPredictor : public KeyedService,
     preconnect_manager_ = std::move(preconnect_manager);
   }
 
+  // For testing.
+  void set_mock_loading_data_collector(
+      std::unique_ptr<LoadingDataCollector> loading_data_collector) {
+    loading_data_collector_ = std::move(loading_data_collector);
+  }
+
   LoadingPredictorConfig config_;
   Profile* profile_;
   std::unique_ptr<ResourcePrefetchPredictor> resource_prefetch_predictor_;
@@ -116,8 +129,7 @@ class LoadingPredictor : public KeyedService,
   std::unique_ptr<LoadingDataCollector> loading_data_collector_;
   std::unique_ptr<PreconnectManager> preconnect_manager_;
   std::map<GURL, base::TimeTicks> active_hints_;
-  // Initial URL.
-  std::map<NavigationID, GURL> active_navigations_;
+  std::set<NavigationID> active_navigations_;
   bool shutdown_ = false;
 
   GURL last_omnibox_origin_;
@@ -126,6 +138,7 @@ class LoadingPredictor : public KeyedService,
 
   friend class LoadingPredictorTest;
   friend class LoadingPredictorPreconnectTest;
+  friend class LoadingPredictorTabHelperTest;
   FRIEND_TEST_ALL_PREFIXES(LoadingPredictorTest,
                            TestMainFrameResponseCancelsHint);
   FRIEND_TEST_ALL_PREFIXES(LoadingPredictorTest,

@@ -1,4 +1,4 @@
-// Copyright 2017 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,13 +8,9 @@
 #import <UIKit/UIKit.h>
 
 @protocol OmniboxPopupPositioner;
-@protocol TableViewOwning;
 
+// The UI Refresh implementation of the popup presenter.
 @interface OmniboxPopupPresenter : NSObject
-
-- (instancetype)initWithPopupPositioner:(id<OmniboxPopupPositioner>)positioner
-                    popupViewController:
-                        (UIViewController<TableViewOwning>*)viewController;
 
 // Updates appearance depending on the content size of the presented view
 // controller by changing the visible height of the popup. When the popup was
@@ -22,6 +18,10 @@
 - (void)updateHeightAndAnimateAppearanceIfNecessary;
 // Call this to hide the popup with animation.
 - (void)animateCollapse;
+
+- (instancetype)initWithPopupPositioner:(id<OmniboxPopupPositioner>)positioner
+                    popupViewController:(UIViewController*)viewController
+                              incognito:(BOOL)incognito;
 
 @end
 

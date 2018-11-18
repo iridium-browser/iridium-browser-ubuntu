@@ -186,7 +186,7 @@ class TestRenderWidgetHostViewDestructionObserver::InternalObserver
   DISALLOW_COPY_AND_ASSIGN(InternalObserver);
 };
 
-#ifdef USE_AURA
+#if defined(USE_AURA)
 class InputMethodObserverAura : public TestInputMethodObserver,
                                 public ui::InputMethodObserver {
  public:
@@ -208,7 +208,8 @@ class InputMethodObserverAura : public TestInputMethodObserver,
     return ui::TEXT_INPUT_TYPE_NONE;
   }
 
-  void SetOnShowImeIfNeededCallback(const base::Closure& callback) override {
+  void SetOnShowVirtualKeyboardIfEnabledCallback(
+      const base::RepeatingClosure& callback) override {
     on_show_ime_if_needed_callback_ = callback;
   }
 
@@ -219,11 +220,13 @@ class InputMethodObserverAura : public TestInputMethodObserver,
   void OnTextInputStateChanged(const ui::TextInputClient* client) override {}
   void OnInputMethodDestroyed(const ui::InputMethod* input_method) override {}
 
-  void OnShowImeIfNeeded() override { on_show_ime_if_needed_callback_.Run(); }
+  void OnShowVirtualKeyboardIfEnabled() override {
+    on_show_ime_if_needed_callback_.Run();
+  }
 
   ui::InputMethod* input_method_;
   const ui::TextInputClient* text_input_client_;
-  base::Closure on_show_ime_if_needed_callback_;
+  base::RepeatingClosure on_show_ime_if_needed_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(InputMethodObserverAura);
 };
@@ -445,9 +448,19 @@ void TextInputStateSender::SetCanComposeInline(bool can_compose_inline) {
   text_input_state_->can_compose_inline = can_compose_inline;
 }
 
-void TextInputStateSender::SetShowImeIfNeeded(bool show_ime_if_needed) {
+void TextInputStateSender::SetShowVirtualKeyboardIfEnabled(
+    bool show_ime_if_needed) {
   text_input_state_->show_ime_if_needed = show_ime_if_needed;
 }
+
+#if defined(USE_AURA)
+void TextInputStateSender::SetLastPointerType(
+    ui::EventPointerType last_pointer_type) {
+  RenderWidgetHostViewAura* rwhva =
+      static_cast<RenderWidgetHostViewAura*>(view_);
+  rwhva->SetLastPointerType(last_pointer_type);
+}
+#endif
 
 TestInputMethodObserver::TestInputMethodObserver() {}
 
@@ -458,7 +471,7 @@ std::unique_ptr<TestInputMethodObserver> TestInputMethodObserver::Create(
     WebContents* web_contents) {
   std::unique_ptr<TestInputMethodObserver> observer;
 
-#ifdef USE_AURA
+#if defined(USE_AURA)
   RenderWidgetHostViewAura* view = static_cast<RenderWidgetHostViewAura*>(
       web_contents->GetRenderWidgetHostView());
   observer.reset(new InputMethodObserverAura(view->GetInputMethod()));

@@ -7,6 +7,7 @@
 #include "base/values.h"
 #include "components/invalidation/impl/invalidation_logger_observer.h"
 #include "components/invalidation/public/invalidation_handler.h"
+#include "components/invalidation/public/invalidation_util.h"
 
 namespace invalidation {
 class InvalidationLoggerObserver;
@@ -25,8 +26,7 @@ void InvalidationLogger::OnRegistration(const std::string& registrar_name) {
 void InvalidationLogger::OnUnregistration(const std::string& registrar_name) {
   DCHECK(registered_handlers_.find(registrar_name) !=
          registered_handlers_.end());
-  std::multiset<std::string>::iterator it =
-      registered_handlers_.find(registrar_name);
+  auto it = registered_handlers_.find(registrar_name);
   // Delete only one instance of registrar_name.
   registered_handlers_.erase(it);
   EmitRegisteredHandlers();
@@ -53,6 +53,15 @@ void InvalidationLogger::EmitState() {
   }
 }
 
+void InvalidationLogger::OnUpdateTopics(
+    std::map<std::string, syncer::TopicSet> updated_topics) {
+  for (const auto& updated_topic : updated_topics) {
+    latest_ids_[updated_topic.first] =
+        syncer::ConvertTopicsToIds(updated_topic.second);
+  }
+  EmitUpdatedIds();
+}
+
 void InvalidationLogger::OnUpdateIds(
     std::map<std::string, syncer::ObjectIdSet> updated_ids) {
   for (std::map<std::string, syncer::ObjectIdSet>::const_iterator it =
@@ -67,10 +76,8 @@ void InvalidationLogger::EmitUpdatedIds() {
        latest_ids_.begin(); it != latest_ids_.end(); ++it) {
     const syncer::ObjectIdSet& object_ids_for_handler = it->second;
     syncer::ObjectIdCountMap per_object_invalidation_count;
-    for (syncer::ObjectIdSet::const_iterator oid_it =
-             object_ids_for_handler.begin();
-         oid_it != object_ids_for_handler.end();
-         ++oid_it) {
+    for (auto oid_it = object_ids_for_handler.begin();
+         oid_it != object_ids_for_handler.end(); ++oid_it) {
       per_object_invalidation_count[*oid_it] = invalidation_count_[*oid_it];
     }
     for (auto& observer : observer_list_)

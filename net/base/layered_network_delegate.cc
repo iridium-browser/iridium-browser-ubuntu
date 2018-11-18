@@ -6,41 +6,46 @@
 
 #include <utility>
 
+#include "base/memory/ptr_util.h"
+
 namespace net {
 
 LayeredNetworkDelegate::LayeredNetworkDelegate(
     std::unique_ptr<NetworkDelegate> nested_network_delegate)
-    : nested_network_delegate_(std::move(nested_network_delegate)) {}
+    : owned_nested_network_delegate_(std::move(nested_network_delegate)),
+      nested_network_delegate_(owned_nested_network_delegate_.get()) {}
 
 LayeredNetworkDelegate::~LayeredNetworkDelegate() = default;
 
-int LayeredNetworkDelegate::OnBeforeURLRequest(
-    URLRequest* request,
-    const CompletionCallback& callback,
-    GURL* new_url) {
-  OnBeforeURLRequestInternal(request, callback, new_url);
-  return nested_network_delegate_->NotifyBeforeURLRequest(request, callback,
-                                                          new_url);
+std::unique_ptr<NetworkDelegate>
+LayeredNetworkDelegate::CreatePassThroughNetworkDelegate(
+    NetworkDelegate* unowned_nested_network_delegate) {
+  return base::WrapUnique<NetworkDelegate>(
+      new LayeredNetworkDelegate(unowned_nested_network_delegate));
 }
 
-void LayeredNetworkDelegate::OnBeforeURLRequestInternal(
-    URLRequest* request,
-    const CompletionCallback& callback,
-    GURL* new_url) {
+int LayeredNetworkDelegate::OnBeforeURLRequest(URLRequest* request,
+                                               CompletionOnceCallback callback,
+                                               GURL* new_url) {
+  OnBeforeURLRequestInternal(request, new_url);
+  return nested_network_delegate_->NotifyBeforeURLRequest(
+      request, std::move(callback), new_url);
 }
+
+void LayeredNetworkDelegate::OnBeforeURLRequestInternal(URLRequest* request,
+                                                        GURL* new_url) {}
 
 int LayeredNetworkDelegate::OnBeforeStartTransaction(
     URLRequest* request,
-    const CompletionCallback& callback,
+    CompletionOnceCallback callback,
     HttpRequestHeaders* headers) {
-  OnBeforeStartTransactionInternal(request, callback, headers);
+  OnBeforeStartTransactionInternal(request, headers);
   return nested_network_delegate_->NotifyBeforeStartTransaction(
-      request, callback, headers);
+      request, std::move(callback), headers);
 }
 
 void LayeredNetworkDelegate::OnBeforeStartTransactionInternal(
     URLRequest* request,
-    const CompletionCallback& callback,
     HttpRequestHeaders* headers) {}
 
 void LayeredNetworkDelegate::OnBeforeSendHeaders(
@@ -72,21 +77,20 @@ void LayeredNetworkDelegate::OnStartTransactionInternal(
 
 int LayeredNetworkDelegate::OnHeadersReceived(
     URLRequest* request,
-    const CompletionCallback& callback,
+    CompletionOnceCallback callback,
     const HttpResponseHeaders* original_response_headers,
     scoped_refptr<HttpResponseHeaders>* override_response_headers,
     GURL* allowed_unsafe_redirect_url) {
-  OnHeadersReceivedInternal(request, callback, original_response_headers,
+  OnHeadersReceivedInternal(request, original_response_headers,
                             override_response_headers,
                             allowed_unsafe_redirect_url);
   return nested_network_delegate_->NotifyHeadersReceived(
-      request, callback, original_response_headers, override_response_headers,
-      allowed_unsafe_redirect_url);
+      request, std::move(callback), original_response_headers,
+      override_response_headers, allowed_unsafe_redirect_url);
 }
 
 void LayeredNetworkDelegate::OnHeadersReceivedInternal(
     URLRequest* request,
-    const CompletionCallback& callback,
     const HttpResponseHeaders* original_response_headers,
     scoped_refptr<HttpResponseHeaders>* override_response_headers,
     GURL* allowed_unsafe_redirect_url) {
@@ -105,12 +109,12 @@ void LayeredNetworkDelegate::OnBeforeRedirectInternal(
 
 void LayeredNetworkDelegate::OnResponseStarted(URLRequest* request,
                                                int net_error) {
-  OnResponseStartedInternal(request);
+  OnResponseStartedInternal(request, net_error);
   nested_network_delegate_->NotifyResponseStarted(request, net_error);
 }
 
-void LayeredNetworkDelegate::OnResponseStartedInternal(URLRequest* request) {
-}
+void LayeredNetworkDelegate::OnResponseStartedInternal(URLRequest* request,
+                                                       int net_error) {}
 
 void LayeredNetworkDelegate::OnNetworkBytesReceived(URLRequest* request,
                                                     int64_t bytes_received) {
@@ -134,12 +138,13 @@ void LayeredNetworkDelegate::OnNetworkBytesSentInternal(URLRequest* request,
 void LayeredNetworkDelegate::OnCompleted(URLRequest* request,
                                          bool started,
                                          int net_error) {
-  OnCompletedInternal(request, started);
+  OnCompletedInternal(request, started, net_error);
   nested_network_delegate_->NotifyCompleted(request, started, net_error);
 }
 
 void LayeredNetworkDelegate::OnCompletedInternal(URLRequest* request,
-                                                 bool started) {}
+                                                 bool started,
+                                                 int net_error) {}
 
 void LayeredNetworkDelegate::OnURLRequestDestroyed(URLRequest* request) {
   OnURLRequestDestroyedInternal(request);
@@ -164,42 +169,49 @@ void LayeredNetworkDelegate::OnPACScriptErrorInternal(
 NetworkDelegate::AuthRequiredResponse LayeredNetworkDelegate::OnAuthRequired(
     URLRequest* request,
     const AuthChallengeInfo& auth_info,
-    const AuthCallback& callback,
+    AuthCallback callback,
     AuthCredentials* credentials) {
-  OnAuthRequiredInternal(request, auth_info, callback, credentials);
-  return nested_network_delegate_->NotifyAuthRequired(request, auth_info,
-                                                      callback, credentials);
+  OnAuthRequiredInternal(request, auth_info, credentials);
+  return nested_network_delegate_->NotifyAuthRequired(
+      request, auth_info, std::move(callback), credentials);
 }
 
 void LayeredNetworkDelegate::OnAuthRequiredInternal(
     URLRequest* request,
     const AuthChallengeInfo& auth_info,
-    const AuthCallback& callback,
-    AuthCredentials* credentials) {
-}
+    AuthCredentials* credentials) {}
 
 bool LayeredNetworkDelegate::OnCanGetCookies(const URLRequest& request,
-                                             const CookieList& cookie_list) {
-  OnCanGetCookiesInternal(request, cookie_list);
-  return nested_network_delegate_->CanGetCookies(request, cookie_list);
+                                             const CookieList& cookie_list,
+                                             bool allowed_from_caller) {
+  return nested_network_delegate_->CanGetCookies(
+      request, cookie_list,
+      OnCanGetCookiesInternal(request, cookie_list, allowed_from_caller));
 }
 
-void LayeredNetworkDelegate::OnCanGetCookiesInternal(
+bool LayeredNetworkDelegate::OnCanGetCookiesInternal(
     const URLRequest& request,
-    const CookieList& cookie_list) {
+    const CookieList& cookie_list,
+    bool allowed_from_caller) {
+  return allowed_from_caller;
 }
 
 bool LayeredNetworkDelegate::OnCanSetCookie(const URLRequest& request,
                                             const net::CanonicalCookie& cookie,
-                                            CookieOptions* options) {
-  OnCanSetCookieInternal(request, cookie, options);
-  return nested_network_delegate_->CanSetCookie(request, cookie, options);
+                                            CookieOptions* options,
+                                            bool allowed_from_caller) {
+  return nested_network_delegate_->CanSetCookie(
+      request, cookie, options,
+      OnCanSetCookieInternal(request, cookie, options, allowed_from_caller));
 }
 
-void LayeredNetworkDelegate::OnCanSetCookieInternal(
+bool LayeredNetworkDelegate::OnCanSetCookieInternal(
     const URLRequest& request,
     const net::CanonicalCookie& cookie,
-    CookieOptions* options) {}
+    CookieOptions* options,
+    bool allowed_from_caller) {
+  return allowed_from_caller;
+}
 
 bool LayeredNetworkDelegate::OnCanAccessFile(
     const URLRequest& request,
@@ -218,13 +230,15 @@ void LayeredNetworkDelegate::OnCanAccessFileInternal(
 bool LayeredNetworkDelegate::OnCanEnablePrivacyMode(
     const GURL& url,
     const GURL& site_for_cookies) const {
-  OnCanEnablePrivacyModeInternal(url, site_for_cookies);
-  return nested_network_delegate_->CanEnablePrivacyMode(url, site_for_cookies);
+  return OnCanEnablePrivacyModeInternal(url, site_for_cookies) ||
+         nested_network_delegate_->CanEnablePrivacyMode(url, site_for_cookies);
 }
 
-void LayeredNetworkDelegate::OnCanEnablePrivacyModeInternal(
+bool LayeredNetworkDelegate::OnCanEnablePrivacyModeInternal(
     const GURL& url,
-    const GURL& site_for_cookies) const {}
+    const GURL& site_for_cookies) const {
+  return false;
+}
 
 bool LayeredNetworkDelegate::OnAreExperimentalCookieFeaturesEnabled() const {
   OnAreExperimentalCookieFeaturesEnabledInternal();
@@ -239,18 +253,19 @@ bool LayeredNetworkDelegate::
         const URLRequest& request,
         const GURL& target_url,
         const GURL& referrer_url) const {
-  OnCancelURLRequestWithPolicyViolatingReferrerHeaderInternal(
-      request, target_url, referrer_url);
-  return nested_network_delegate_
-      ->CancelURLRequestWithPolicyViolatingReferrerHeader(request, target_url,
-                                                          referrer_url);
+  return OnCancelURLRequestWithPolicyViolatingReferrerHeaderInternal(
+             request, target_url, referrer_url) ||
+         nested_network_delegate_
+             ->CancelURLRequestWithPolicyViolatingReferrerHeader(
+                 request, target_url, referrer_url);
 }
 
-void LayeredNetworkDelegate::
+bool LayeredNetworkDelegate::
     OnCancelURLRequestWithPolicyViolatingReferrerHeaderInternal(
         const URLRequest& request,
         const GURL& target_url,
         const GURL& referrer_url) const {
+  return false;
 }
 
 bool LayeredNetworkDelegate::OnCanQueueReportingReport(
@@ -294,5 +309,9 @@ bool LayeredNetworkDelegate::OnCanUseReportingClient(
 void LayeredNetworkDelegate::OnCanUseReportingClientInternal(
     const url::Origin& origin,
     const GURL& endpoint) const {}
+
+LayeredNetworkDelegate::LayeredNetworkDelegate(
+    NetworkDelegate* unowned_nested_network_delegate)
+    : nested_network_delegate_(unowned_nested_network_delegate) {}
 
 }  // namespace net

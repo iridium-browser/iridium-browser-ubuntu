@@ -10,6 +10,7 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
+#include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "components/payments/content/payment_manifest_web_data_service.h"
 #include "components/payments/content/utility/payment_manifest_parser.h"
@@ -18,6 +19,7 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/console_message_level.h"
+#include "net/base/url_util.h"
 #include "url/gurl.h"
 #include "url/origin.h"
 
@@ -40,10 +42,8 @@ void EnableMethodManifestUrlForSupportedApps(
     for (auto& app : *apps) {
       if (app_origin.IsSameOriginWith(
               url::Origin::Create(app.second->scope.GetOrigin()))) {
-        app.second->has_explicitly_verified_methods =
-            std::find(supported_origin_strings.begin(),
-                      supported_origin_strings.end(),
-                      app_origin.Serialize()) != supported_origin_strings.end();
+        app.second->has_explicitly_verified_methods = base::ContainsValue(
+            supported_origin_strings, app_origin.Serialize());
         if (all_origins_supported ||
             app.second->has_explicitly_verified_methods) {
           app.second->enabled_methods.emplace_back(method_manifest_url.spec());
@@ -95,9 +95,11 @@ void ManifestVerifier::Verify(content::PaymentAppProvider::PaymentApps apps,
       // https://w3c.github.io/payment-method-basic-card/
       // https://w3c.github.io/webpayments/proposals/interledger-payment-method.html
       // https://w3c.github.io/webpayments-methods-credit-transfer-direct-debit/
+      // https://w3c.github.io/webpayments-methods-tokenization/
       if (method == "basic-card" || method == "interledger" ||
           method == "payee-credit-transfer" ||
-          method == "payer-credit-transfer") {
+          method == "payer-credit-transfer" ||
+          method == "tokenized-card") {
         verified_method_names.emplace_back(method);
         continue;
       }
@@ -109,10 +111,11 @@ void ManifestVerifier::Verify(content::PaymentAppProvider::PaymentApps apps,
         continue;
       }
 
-      // All URL payment method names must be HTTPS.
+      // All URL payment method names must be HTTPS or localhost for test.
       GURL method_manifest_url = GURL(method);
       if (!method_manifest_url.is_valid() ||
-          method_manifest_url.scheme() != "https") {
+          (method_manifest_url.scheme() != "https" &&
+           !net::IsLocalhost(method_manifest_url))) {
         dev_tools_.WarnIfPossible("\"" + method +
                                   "\" is not a valid payment method name.");
         continue;

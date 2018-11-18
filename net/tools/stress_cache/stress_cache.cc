@@ -58,7 +58,7 @@ const int kExpectedCrash = 100;
 // Starts a new process.
 int RunSlave(int iteration) {
   base::FilePath exe;
-  PathService::Get(base::FILE_EXE, &exe);
+  base::PathService::Get(base::FILE_EXE, &exe);
 
   base::CommandLine cmdline(exe);
   cmdline.AppendArg(base::IntToString(iteration));
@@ -123,7 +123,7 @@ enum Operation { NONE, OPEN, CREATE, READ, WRITE, DOOM };
 class EntryWrapper {
  public:
   EntryWrapper() : entry_(nullptr), state_(NONE) {
-    buffer_ = new net::IOBuffer(kBufferSize);
+    buffer_ = base::MakeRefCounted<net::IOBuffer>(kBufferSize);
     memset(buffer_->data(), 'k', kBufferSize);
   }
 
@@ -167,7 +167,7 @@ void EntryWrapper::DoOpen(int key) {
 
   state_ = OPEN;
   int rv = g_data->cache->OpenEntry(
-      g_data->keys[key], &entry_,
+      g_data->keys[key], net::HIGHEST, &entry_,
       base::Bind(&EntryWrapper::OnOpenDone, base::Unretained(this), key));
   if (rv != net::ERR_IO_PENDING)
     OnOpenDone(key, rv);
@@ -180,7 +180,7 @@ void EntryWrapper::OnOpenDone(int key, int result) {
   CHECK_EQ(state_, OPEN);
   state_ = CREATE;
   result = g_data->cache->CreateEntry(
-      g_data->keys[key], &entry_,
+      g_data->keys[key], net::HIGHEST, &entry_,
       base::Bind(&EntryWrapper::OnOpenDone, base::Unretained(this), key));
   if (result != net::ERR_IO_PENDING)
     OnOpenDone(key, result);
@@ -247,7 +247,8 @@ void EntryWrapper::OnWriteDone(int size, int result) {
 void EntryWrapper::DoDelete(const std::string& key) {
   state_ = DOOM;
   int rv = g_data->cache->DoomEntry(
-      key, base::Bind(&EntryWrapper::OnDeleteDone, base::Unretained(this)));
+      key, net::HIGHEST,
+      base::Bind(&EntryWrapper::OnDeleteDone, base::Unretained(this)));
   if (rv != net::ERR_IO_PENDING)
     OnDeleteDone(rv);
 }
@@ -300,7 +301,7 @@ void StressTheCache(int iteration) {
   uint32_t mask = 0xfff;       // 4096 entries.
 
   base::FilePath path;
-  PathService::Get(base::DIR_TEMP, &path);
+  base::PathService::Get(base::DIR_TEMP, &path);
   path = path.AppendASCII("cache_test_stress");
 
   base::Thread cache_thread("CacheThread");

@@ -17,7 +17,9 @@
 #import "ios/chrome/browser/ui/image_util/image_util.h"
 #include "ios/chrome/browser/ui/rtl_geometry.h"
 #include "ios/chrome/browser/ui/ui_util.h"
-#import "ios/chrome/browser/ui/util/constraints_ui_util.h"
+#import "ios/chrome/browser/ui/uikit_ui_util.h"
+#import "ios/chrome/common/highlight_button.h"
+#import "ios/chrome/common/ui_util/constraints_ui_util.h"
 #include "ios/chrome/grit/ios_strings.h"
 #import "ios/third_party/material_components_ios/src/components/ActivityIndicator/src/MaterialActivityIndicator.h"
 #import "ios/third_party/material_components_ios/src/components/Typography/src/MaterialTypography.h"
@@ -45,13 +47,16 @@ const CGFloat kFaviconLeftInset = 23.5;
 const CGFloat kFaviconVerticalOffset = 2.0;
 const CGFloat kTabStripLineMargin = 2.5;
 const CGFloat kTabStripLineHeight = 0.5;
-const CGFloat kCloseButtonHorizontalShift = 15;
+const CGFloat kCloseButtonHorizontalShift = 19;
 const CGFloat kCloseButtonVerticalShift = 4.0;
 const CGFloat kTitleLeftMargin = 8.0;
 const CGFloat kTitleRightMargin = 0.0;
 
 const CGFloat kCloseButtonSize = 24.0;
 const CGFloat kFaviconSize = 16.0;
+
+const int kTabCloseTint = 0x3C4043;
+const int kTabCloseTintIncognito = 0xFFFFFF;
 }
 
 @interface TabView ()<DropAndNavigateDelegate> {
@@ -81,9 +86,7 @@ const CGFloat kFaviconSize = 16.0;
 
   MDCActivityIndicator* _activityIndicator;
 
-#if defined(__IPHONE_11_0) && (__IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_11_0)
   API_AVAILABLE(ios(11.0)) DropAndNavigateInteraction* _dropInteraction;
-#endif
 }
 @end
 
@@ -140,7 +143,6 @@ const CGFloat kFaviconSize = 16.0;
                   action:@selector(tabWasTapped)
         forControlEvents:UIControlEventTouchUpInside];
 
-#if defined(__IPHONE_11_0) && (__IPHONE_OS_VERSION_MAX_ALLOWED >= __IPHONE_11_0)
     if (DragAndDropIsEnabled()) {
       if (@available(iOS 11, *)) {
         _dropInteraction =
@@ -148,7 +150,6 @@ const CGFloat kFaviconSize = 16.0;
         [self addInteraction:_dropInteraction];
       }
     }
-#endif
   }
   return self;
 }
@@ -166,7 +167,7 @@ const CGFloat kFaviconSize = 16.0;
   // tab_view is not an an accessible element, and making it one would add
   // several complicated layers to UIA.  Instead, simply set active/inactive
   // here to be used by UIA.
-  [_closeButton setAccessibilityValue:(selected ? @"active" : @"inactive")];
+  [_titleLabel setAccessibilityValue:(selected ? @"active" : @"inactive")];
 }
 
 - (void)setCollapsed:(BOOL)collapsed {
@@ -186,6 +187,7 @@ const CGFloat kFaviconSize = 16.0;
     [_titleLabel setTruncateMode:GTMFadeTruncatingTail];
   }
   _titleLabel.text = title;
+  [_closeButton setAccessibilityValue:title];
 }
 
 - (UIImage*)favicon {
@@ -284,16 +286,12 @@ const CGFloat kFaviconSize = 16.0;
     @"tabStripLineHeight" : @(kTabStripLineHeight)
   };
   ApplyVisualConstraintsWithMetrics(commonConstraints, commonViewsDictionary,
-                                    commonMetrics, self);
+                                    commonMetrics);
 }
 
 - (void)createButtonsAndLabel {
-  _closeButton = [UIButton buttonWithType:UIButtonTypeCustom];
+  _closeButton = [HighlightButton buttonWithType:UIButtonTypeCustom];
   [_closeButton setTranslatesAutoresizingMaskIntoConstraints:NO];
-  [_closeButton setImage:[UIImage imageNamed:@"tabstrip_tab_close"]
-                forState:UIControlStateNormal];
-  [_closeButton setImage:[UIImage imageNamed:@"tabstrip_tab_close_pressed"]
-                forState:UIControlStateHighlighted];
   [_closeButton setContentEdgeInsets:UIEdgeInsetsMake(kTabCloseTopInset,
                                                       kTabCloseLeftInset,
                                                       kTabCloseBottomInset,
@@ -351,6 +349,9 @@ const CGFloat kFaviconSize = 16.0;
     @"H:[favicon]-titleLeftMargin-[title]-titleRightMargin-[close]",
     @"V:[title(==titleHeight)]",
   ];
+
+  CGFloat faviconLeftInset = kFaviconLeftInset;
+  CGFloat faviconVerticalOffset = kFaviconVerticalOffset;
   NSDictionary* metrics = @{
     @"closeButtonSize" : @(kCloseButtonSize),
     @"closeButtonHorizontalShift" : @(kCloseButtonHorizontalShift),
@@ -358,12 +359,11 @@ const CGFloat kFaviconSize = 16.0;
     @"titleLeftMargin" : @(kTitleLeftMargin),
     @"titleRightMargin" : @(kTitleRightMargin),
     @"titleHeight" : @(kFaviconSize),
-    @"faviconLeftInset" : @(AlignValueToPixel(kFaviconLeftInset)),
-    @"faviconVerticalOffset" : @(kFaviconVerticalOffset),
+    @"faviconLeftInset" : @(AlignValueToPixel(faviconLeftInset)),
+    @"faviconVerticalOffset" : @(faviconVerticalOffset),
     @"faviconSize" : @(kFaviconSize),
   };
-  ApplyVisualConstraintsWithMetrics(constraints, viewsDictionary, metrics,
-                                    self);
+  ApplyVisualConstraintsWithMetrics(constraints, viewsDictionary, metrics);
   AddSameCenterXConstraint(self, _faviconView, _activityIndicator);
   AddSameCenterYConstraint(self, _faviconView, _activityIndicator);
   AddSameCenterYConstraint(self, _faviconView, _titleLabel);
@@ -381,21 +381,33 @@ const CGFloat kFaviconSize = 16.0;
   NSString* incognito = _incognitoStyle ? @"incognito_" : @"";
   NSString* imageName =
       [NSString stringWithFormat:@"tabstrip_%@%@_tab", incognito, state];
-  UIImage* backgroundImage = StretchableImageFromUIImage(
-      [UIImage imageNamed:imageName], kTabBackgroundLeftCapInset, 0);
+  CGFloat leftInset = kTabBackgroundLeftCapInset;
+  UIImage* backgroundImage =
+      StretchableImageFromUIImage([UIImage imageNamed:imageName], leftInset, 0);
   [_backgroundImageView setImage:backgroundImage];
 }
 
 - (void)updateCloseButtonImages {
-  UIImage* normalImage =
-      self.incognitoStyle ? [UIImage imageNamed:@"tabstrip_tab_close_incognito"]
-                          : [UIImage imageNamed:@"tabstrip_tab_close"];
-  UIImage* pressedImage =
-      self.incognitoStyle
-          ? [UIImage imageNamed:@"tabstrip_tab_close_incognito_pressed"]
-          : [UIImage imageNamed:@"tabstrip_tab_close_pressed"];
-  [_closeButton setImage:normalImage forState:UIControlStateNormal];
-  [_closeButton setImage:pressedImage forState:UIControlStateHighlighted];
+  if (IsUIRefreshPhase1Enabled()) {
+    [_closeButton
+        setImage:[[UIImage imageNamed:@"grid_cell_close_button"]
+                     imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate]
+        forState:UIControlStateNormal];
+    _closeButton.tintColor = _incognitoStyle
+                                 ? UIColorFromRGB(kTabCloseTintIncognito)
+                                 : UIColorFromRGB(kTabCloseTint);
+  } else {
+    NSString* incognito = self.incognitoStyle ? @"_incognito" : @"";
+    UIImage* normalImage = [UIImage
+        imageNamed:[NSString stringWithFormat:@"tabstrip_tab_close%@_legacy",
+                                              incognito]];
+    UIImage* pressedImage = [UIImage
+        imageNamed:[NSString
+                       stringWithFormat:@"tabstrip_tab_close%@_pressed_legacy",
+                                        incognito]];
+    [_closeButton setImage:normalImage forState:UIControlStateNormal];
+    [_closeButton setImage:pressedImage forState:UIControlStateHighlighted];
+  }
 }
 
 - (UIImage*)defaultFaviconImage {

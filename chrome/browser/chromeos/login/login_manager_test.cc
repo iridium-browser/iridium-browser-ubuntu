@@ -24,8 +24,8 @@
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/login/auth/key.h"
 #include "chromeos/login/auth/user_context.h"
+#include "components/account_id/account_id.h"
 #include "components/prefs/scoped_user_pref_update.h"
-#include "components/signin/core/account_id/account_id.h"
 #include "components/user_manager/known_user.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
@@ -52,7 +52,8 @@ constexpr char kTestUserinfoToken2[] = "fake-userinfo-token-2";
 constexpr char kTestRefreshToken2[] = "fake-refresh-token-2";
 
 UserContext CreateUserContext(const AccountId& account_id) {
-  UserContext user_context(account_id);
+  UserContext user_context(user_manager::UserType::USER_TYPE_REGULAR,
+                           account_id);
   user_context.SetKey(Key("password"));
   if (account_id.GetUserEmail() == LoginManagerTest::kEnterpriseUser1) {
     user_context.SetRefreshToken(kTestRefreshToken1);
@@ -69,8 +70,11 @@ constexpr char LoginManagerTest::kEnterpriseUser1GaiaId[] = "0000111111";
 constexpr char LoginManagerTest::kEnterpriseUser2[] = "user-2@example.com";
 constexpr char LoginManagerTest::kEnterpriseUser2GaiaId[] = "0000222222";
 
-LoginManagerTest::LoginManagerTest(bool should_launch_browser)
-    : should_launch_browser_(should_launch_browser), web_contents_(NULL) {
+LoginManagerTest::LoginManagerTest(bool should_launch_browser,
+                                   bool should_initialize_webui)
+    : should_launch_browser_(should_launch_browser),
+      should_initialize_webui_(should_initialize_webui),
+      web_contents_(NULL) {
   set_exit_when_last_browser_closes(false);
 }
 
@@ -78,7 +82,7 @@ LoginManagerTest::~LoginManagerTest() {}
 
 void LoginManagerTest::SetUp() {
   base::FilePath test_data_dir;
-  PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir);
+  base::PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir);
   embedded_test_server()->ServeFilesFromDirectory(test_data_dir);
 
   embedded_test_server()->RegisterRequestHandler(
@@ -139,11 +143,13 @@ void LoginManagerTest::SetUpOnMainThread() {
   token_info.email = kEnterpriseUser2;
   fake_gaia_.IssueOAuthToken(kTestRefreshToken2, token_info);
 
-  content::WindowedNotificationObserver(
-      chrome::NOTIFICATION_LOGIN_OR_LOCK_WEBUI_VISIBLE,
-      content::NotificationService::AllSources())
-      .Wait();
-  InitializeWebContents();
+  if (should_initialize_webui_) {
+    content::WindowedNotificationObserver(
+        chrome::NOTIFICATION_LOGIN_OR_LOCK_WEBUI_VISIBLE,
+        content::NotificationService::AllSources())
+        .Wait();
+    InitializeWebContents();
+  }
   test::UserSessionManagerTestApi session_manager_test_api(
       UserSessionManager::GetInstance());
   session_manager_test_api.SetShouldLaunchBrowserInTests(
@@ -227,8 +233,7 @@ void LoginManagerTest::InitializeWebContents() {
   LoginDisplayHost* host = LoginDisplayHost::default_host();
   EXPECT_TRUE(host != NULL);
 
-  content::WebContents* web_contents =
-      host->GetWebUILoginView()->GetWebContents();
+  content::WebContents* web_contents = host->GetOobeWebContents();
   EXPECT_TRUE(web_contents != NULL);
   set_web_contents(web_contents);
   js_checker_.set_web_contents(web_contents);

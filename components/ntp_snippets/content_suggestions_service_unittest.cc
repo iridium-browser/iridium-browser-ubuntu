@@ -284,8 +284,9 @@ TEST_F(ContentSuggestionsServiceTest, ShouldRedirectFetchSuggestionImage) {
   EXPECT_CALL(*provider1, FetchSuggestionImageMock(suggestion_id, _));
   EXPECT_CALL(*provider2, FetchSuggestionImageMock(_, _)).Times(0);
   service()->FetchSuggestionImage(
-      suggestion_id, base::Bind(&ContentSuggestionsServiceTest::OnImageFetched,
-                                base::Unretained(this)));
+      suggestion_id,
+      base::BindOnce(&ContentSuggestionsServiceTest::OnImageFetched,
+                     base::Unretained(this)));
 }
 
 TEST_F(ContentSuggestionsServiceTest,
@@ -299,8 +300,9 @@ TEST_F(ContentSuggestionsServiceTest,
   EXPECT_CALL(*this, OnImageFetched(Property(&gfx::Image::IsEmpty, Eq(true))))
       .WillOnce(InvokeWithoutArgs(&run_loop, &base::RunLoop::Quit));
   service()->FetchSuggestionImage(
-      suggestion_id, base::Bind(&ContentSuggestionsServiceTest::OnImageFetched,
-                                base::Unretained(this)));
+      suggestion_id,
+      base::BindOnce(&ContentSuggestionsServiceTest::OnImageFetched,
+                     base::Unretained(this)));
   run_loop.Run();
 }
 
@@ -576,8 +578,7 @@ TEST_F(ContentSuggestionsServiceTest, ShouldForwardDeleteAllHistoryURLs) {
       MakeRegisteredMockProvider(category);
   EXPECT_CALL(*provider, ClearHistory(base::Time(), base::Time::Max(), _));
   static_cast<history::HistoryServiceObserver*>(service())->OnURLsDeleted(
-      /*history_service=*/nullptr, /*all_history=*/true, /*expired=*/false,
-      history::URLRows(), /*favicon_urls=*/std::set<GURL>());
+      /*history_service=*/nullptr, history::DeletionInfo::ForAllHistory());
 
   service()->RemoveObserver(&observer);
 }
@@ -590,15 +591,19 @@ TEST_F(ContentSuggestionsServiceTest, ShouldIgnoreExpiredURLDeletions) {
   service()->AddObserver(&observer);
 
   static_cast<history::HistoryServiceObserver*>(service())->OnURLsDeleted(
-      /*history_service=*/nullptr, /*all_history=*/true,
-      /*expired=*/true, history::URLRows(),
-      /*favicon_urls=*/std::set<GURL>());
+      /*history_service=*/nullptr,
+      history::DeletionInfo(history::DeletionTimeRange::AllTime(),
+                            /*expired=*/true, history::URLRows(),
+                            /*favicon_urls=*/std::set<GURL>(),
+                            /*restrict_urls=*/base::nullopt));
   static_cast<history::HistoryServiceObserver*>(service())->OnURLsDeleted(
-      /*history_service=*/nullptr, /*all_history=*/false,
-      /*expired=*/true,
-      history::URLRows({history::URLRow(GURL("http://google.com")),
-                        history::URLRow(GURL("http://maps.google.com"))}),
-      /*favicon_urls=*/std::set<GURL>());
+      /*history_service=*/nullptr,
+      history::DeletionInfo(history::DeletionTimeRange::Invalid(),
+                            /*expired=*/true,
+                            {history::URLRow(GURL("http://google.com")),
+                             history::URLRow(GURL("http://maps.google.com"))},
+                            /*favicon_urls=*/std::set<GURL>(),
+                            /*restrict_urls=*/base::nullopt));
 
   service()->RemoveObserver(&observer);
 }
@@ -607,9 +612,7 @@ TEST_F(ContentSuggestionsServiceTest, ShouldIgnoreEmptyURLDeletions) {
   Category category = Category::FromKnownCategory(KnownCategories::DOWNLOADS);
   MakeRegisteredMockProvider(category);
   static_cast<history::HistoryServiceObserver*>(service())->OnURLsDeleted(
-      /*history_service=*/nullptr, /*all_history=*/false,
-      /*expired=*/false, history::URLRows(),
-      /*favicon_urls=*/std::set<GURL>());
+      /*history_service=*/nullptr, history::DeletionInfo::ForUrls({}, {}));
 }
 
 TEST_F(ContentSuggestionsServiceTest,
@@ -618,10 +621,10 @@ TEST_F(ContentSuggestionsServiceTest,
   MakeRegisteredMockProvider(category);
   // Single URLs should not trigger
   static_cast<history::HistoryServiceObserver*>(service())->OnURLsDeleted(
-      /*history_service=*/nullptr, /*all_history=*/false,
-      /*expired=*/false,
-      history::URLRows({history::URLRow(GURL("http://google.com"))}),
-      /*favicon_urls=*/std::set<GURL>());
+      /*history_service=*/nullptr,
+      history::DeletionInfo::ForUrls(
+          {history::URLRow(GURL("http://google.com"))},
+          /*favicon_urls=*/std::set<GURL>()));
 }
 
 TEST_F(ContentSuggestionsServiceTest,
@@ -636,11 +639,11 @@ TEST_F(ContentSuggestionsServiceTest,
   EXPECT_CALL(*provider, ClearHistory(base::Time(), base::Time::Max(), _));
 
   static_cast<history::HistoryServiceObserver*>(service())->OnURLsDeleted(
-      /*history_service=*/nullptr, /*all_history=*/false,
-      /*expired=*/false,
-      history::URLRows({history::URLRow(GURL("http://google.com")),
-                        history::URLRow(GURL("http://youtube.com"))}),
-      /*favicon_urls=*/std::set<GURL>());
+      /*history_service=*/nullptr,
+      history::DeletionInfo::ForUrls(
+          {history::URLRow(GURL("http://google.com")),
+           history::URLRow(GURL("http://youtube.com"))},
+          /*favicon_urls=*/std::set<GURL>()));
 
   service()->RemoveObserver(&observer);
 }

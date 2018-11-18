@@ -8,30 +8,31 @@
 // DO NOT MODIFY!
 
 // clang-format off
-#include "v8_test_typedefs.h"
+#include "third_party/blink/renderer/bindings/tests/results/core/v8_test_typedefs.h"
 
 #include "base/memory/scoped_refptr.h"
-#include "bindings/core/v8/exception_state.h"
-#include "bindings/core/v8/idl_types.h"
-#include "bindings/core/v8/native_value_traits_impl.h"
-#include "bindings/core/v8/v8_dom_configuration.h"
-#include "bindings/core/v8/v8_event.h"
-#include "bindings/core/v8/v8_node.h"
-#include "bindings/core/v8/v8_node_list.h"
-#include "bindings/core/v8/v8_test_callback_interface.h"
-#include "bindings/core/v8/v8_test_interface.h"
-#include "bindings/core/v8/v8_test_interface_empty.h"
-#include "bindings/core/v8/v8_test_object.h"
-#include "bindings/core/v8/v8_xml_http_request.h"
-#include "core/dom/name_node_list.h"
-#include "core/dom/node_list.h"
-#include "core/dom/static_node_list.h"
-#include "core/execution_context/execution_context.h"
-#include "core/frame/local_dom_window.h"
-#include "core/html/forms/labels_node_list.h"
-#include "platform/bindings/runtime_call_stats.h"
-#include "platform/bindings/v8_object_constructor.h"
-#include "platform/wtf/get_ptr.h"
+#include "third_party/blink/renderer/bindings/core/v8/idl_types.h"
+#include "third_party/blink/renderer/bindings/core/v8/native_value_traits_impl.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_dom_configuration.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_event.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_node.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_node_list.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_test_callback_interface.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_test_interface.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_test_interface_empty.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_test_object.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_xml_http_request.h"
+#include "third_party/blink/renderer/core/dom/name_node_list.h"
+#include "third_party/blink/renderer/core/dom/node_list.h"
+#include "third_party/blink/renderer/core/dom/static_node_list.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
+#include "third_party/blink/renderer/core/html/forms/labels_node_list.h"
+#include "third_party/blink/renderer/platform/bindings/exception_messages.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
+#include "third_party/blink/renderer/platform/bindings/runtime_call_stats.h"
+#include "third_party/blink/renderer/platform/bindings/v8_object_constructor.h"
+#include "third_party/blink/renderer/platform/wtf/get_ptr.h"
 
 namespace blink {
 
@@ -207,6 +208,8 @@ static void voidMethodFloatArgStringArgMethod(const v8::FunctionCallbackInfo<v8:
 }
 
 static void voidMethodTestCallbackInterfaceTypeArgMethod(const v8::FunctionCallbackInfo<v8::Value>& info) {
+  ExceptionState exceptionState(info.GetIsolate(), ExceptionState::kExecutionContext, "TestTypedefs", "voidMethodTestCallbackInterfaceTypeArg");
+
   TestTypedefs* impl = V8TestTypedefs::ToImpl(info.Holder());
 
   if (UNLIKELY(info.Length() < 1)) {
@@ -215,10 +218,14 @@ static void voidMethodTestCallbackInterfaceTypeArgMethod(const v8::FunctionCallb
   }
 
   V8TestCallbackInterface* testCallbackInterfaceTypeArg;
-  if (info[0]->IsFunction()) {
-    testCallbackInterfaceTypeArg = V8TestCallbackInterface::Create(info[0].As<v8::Object>());
+  if (info[0]->IsObject()) {
+    testCallbackInterfaceTypeArg = V8TestCallbackInterface::CreateOrNull(info[0].As<v8::Object>());
+    if (!testCallbackInterfaceTypeArg) {
+      exceptionState.ThrowSecurityError("The callback provided as parameter 1 is a cross origin object.");
+      return;
+    }
   } else {
-    V8ThrowException::ThrowTypeError(info.GetIsolate(), ExceptionMessages::FailedToExecute("voidMethodTestCallbackInterfaceTypeArg", "TestTypedefs", "The callback provided as parameter 1 is not a function."));
+    V8ThrowException::ThrowTypeError(info.GetIsolate(), ExceptionMessages::FailedToExecute("voidMethodTestCallbackInterfaceTypeArg", "TestTypedefs", "The callback provided as parameter 1 is not an object."));
     return;
   }
 
@@ -526,17 +533,17 @@ void V8TestTypedefs::voidMethodUnionWithTypedefMethodCallback(const v8::Function
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wglobal-constructors"
 #endif
-static const V8DOMConfiguration::AttributeConfiguration V8TestTypedefsLazyDataAttributes[] = {
-    { "tAttribute", V8TestTypedefs::tAttributeConstructorGetterCallback, nullptr, static_cast<v8::PropertyAttribute>(v8::DontEnum), V8DOMConfiguration::kOnInstance, V8DOMConfiguration::kCheckHolder, V8DOMConfiguration::kHasSideEffect, V8DOMConfiguration::kAllWorlds },
+static const V8DOMConfiguration::AttributeConfiguration V8TestTypedefsAttributes[] = {
+    { "tAttribute", V8TestTypedefs::tAttributeConstructorGetterCallback, nullptr, static_cast<v8::PropertyAttribute>(v8::DontEnum), V8DOMConfiguration::kOnInstance, V8DOMConfiguration::kCheckHolder, V8DOMConfiguration::kHasSideEffect, V8DOMConfiguration::kReplaceWithDataProperty, V8DOMConfiguration::kAllWorlds },
 };
 #if defined(COMPONENT_BUILD) && defined(WIN32) && defined(__clang__)
 #pragma clang diagnostic pop
 #endif
 
 static const V8DOMConfiguration::AccessorConfiguration V8TestTypedefsAccessors[] = {
-    { "uLongLongAttribute", V8TestTypedefs::uLongLongAttributeAttributeGetterCallback, V8TestTypedefs::uLongLongAttributeAttributeSetterCallback, V8PrivateProperty::kNoCachedAccessor, static_cast<v8::PropertyAttribute>(v8::None), V8DOMConfiguration::kOnPrototype, V8DOMConfiguration::kCheckHolder, V8DOMConfiguration::kHasSideEffect, V8DOMConfiguration::kAllWorlds },
-    { "longWithClampAttribute", V8TestTypedefs::longWithClampAttributeAttributeGetterCallback, V8TestTypedefs::longWithClampAttributeAttributeSetterCallback, V8PrivateProperty::kNoCachedAccessor, static_cast<v8::PropertyAttribute>(v8::None), V8DOMConfiguration::kOnPrototype, V8DOMConfiguration::kCheckHolder, V8DOMConfiguration::kHasSideEffect, V8DOMConfiguration::kAllWorlds },
-    { "domStringOrDoubleOrNullAttribute", V8TestTypedefs::domStringOrDoubleOrNullAttributeAttributeGetterCallback, V8TestTypedefs::domStringOrDoubleOrNullAttributeAttributeSetterCallback, V8PrivateProperty::kNoCachedAccessor, static_cast<v8::PropertyAttribute>(v8::None), V8DOMConfiguration::kOnPrototype, V8DOMConfiguration::kCheckHolder, V8DOMConfiguration::kHasSideEffect, V8DOMConfiguration::kAllWorlds },
+    { "uLongLongAttribute", V8TestTypedefs::uLongLongAttributeAttributeGetterCallback, V8TestTypedefs::uLongLongAttributeAttributeSetterCallback, V8PrivateProperty::kNoCachedAccessor, static_cast<v8::PropertyAttribute>(v8::None), V8DOMConfiguration::kOnPrototype, V8DOMConfiguration::kCheckHolder, V8DOMConfiguration::kHasSideEffect, V8DOMConfiguration::kAlwaysCallGetter, V8DOMConfiguration::kAllWorlds },
+    { "longWithClampAttribute", V8TestTypedefs::longWithClampAttributeAttributeGetterCallback, V8TestTypedefs::longWithClampAttributeAttributeSetterCallback, V8PrivateProperty::kNoCachedAccessor, static_cast<v8::PropertyAttribute>(v8::None), V8DOMConfiguration::kOnPrototype, V8DOMConfiguration::kCheckHolder, V8DOMConfiguration::kHasSideEffect, V8DOMConfiguration::kAlwaysCallGetter, V8DOMConfiguration::kAllWorlds },
+    { "domStringOrDoubleOrNullAttribute", V8TestTypedefs::domStringOrDoubleOrNullAttributeAttributeGetterCallback, V8TestTypedefs::domStringOrDoubleOrNullAttributeAttributeSetterCallback, V8PrivateProperty::kNoCachedAccessor, static_cast<v8::PropertyAttribute>(v8::None), V8DOMConfiguration::kOnPrototype, V8DOMConfiguration::kCheckHolder, V8DOMConfiguration::kHasSideEffect, V8DOMConfiguration::kAlwaysCallGetter, V8DOMConfiguration::kAllWorlds },
 };
 
 static const V8DOMConfiguration::MethodConfiguration V8TestTypedefsMethods[] = {
@@ -588,15 +595,15 @@ static void installV8TestTypedefsTemplate(
   ALLOW_UNUSED_LOCAL(prototypeTemplate);
 
   // Register IDL constants, attributes and operations.
-  V8DOMConfiguration::InstallLazyDataAttributes(
+  V8DOMConfiguration::InstallAttributes(
       isolate, world, instanceTemplate, prototypeTemplate,
-      V8TestTypedefsLazyDataAttributes, WTF_ARRAY_LENGTH(V8TestTypedefsLazyDataAttributes));
+      V8TestTypedefsAttributes, base::size(V8TestTypedefsAttributes));
   V8DOMConfiguration::InstallAccessors(
       isolate, world, instanceTemplate, prototypeTemplate, interfaceTemplate,
-      signature, V8TestTypedefsAccessors, WTF_ARRAY_LENGTH(V8TestTypedefsAccessors));
+      signature, V8TestTypedefsAccessors, base::size(V8TestTypedefsAccessors));
   V8DOMConfiguration::InstallMethods(
       isolate, world, instanceTemplate, prototypeTemplate, interfaceTemplate,
-      signature, V8TestTypedefsMethods, WTF_ARRAY_LENGTH(V8TestTypedefsMethods));
+      signature, V8TestTypedefsMethods, base::size(V8TestTypedefsMethods));
 
   // Custom signature
 

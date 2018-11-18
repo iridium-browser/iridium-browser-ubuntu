@@ -38,7 +38,9 @@ D3D11PictureBuffer::D3D11PictureBuffer(GLenum target,
                                        size_t level)
     : target_(target), size_(size), level_(level) {}
 
-D3D11PictureBuffer::~D3D11PictureBuffer() {}
+D3D11PictureBuffer::~D3D11PictureBuffer() {
+  // TODO(liberato): post destruction of |gpu_resources_| to the gpu thread.
+}
 
 bool D3D11PictureBuffer::Init(
     base::RepeatingCallback<gpu::CommandBufferStub*()> get_stub_cb,
@@ -71,6 +73,7 @@ bool D3D11PictureBuffer::Init(
   // device for decoding.  Sharing seems not to work very well.  Otherwise, we
   // would create the texture with KEYED_MUTEX and NTHANDLE, then send along
   // a handle that we get from |texture| as an IDXGIResource1.
+  // TODO(liberato): this should happen on the gpu thread.
   gpu_resources_ = std::make_unique<GpuResources>();
   if (!gpu_resources_->Init(std::move(get_stub_cb), level_,
                             std::move(mailboxes), target_, size_, texture,
@@ -111,13 +114,13 @@ bool D3D11PictureBuffer::GpuResources::Init(
   // Create the textures and attach them to the mailboxes.
   std::vector<uint32_t> service_ids;
   for (int texture_idx = 0; texture_idx < textures_per_picture; texture_idx++) {
-    texture_refs_.push_back(decoder_helper->CreateTexture(
+    textures_.push_back(decoder_helper->CreateTexture(
         target, GL_RGBA, size.width(), size.height(), GL_RGBA,
         GL_UNSIGNED_BYTE));
-    service_ids.push_back(texture_refs_[texture_idx]->service_id());
+    service_ids.push_back(textures_[texture_idx]->service_id());
 
     mailbox_manager->ProduceTexture(mailboxes[texture_idx],
-                                    texture_refs_[texture_idx]->texture());
+                                    textures_[texture_idx]->GetTextureBase());
   }
 
   // Create the stream for zero-copy use by gl.
@@ -184,11 +187,9 @@ bool D3D11PictureBuffer::GpuResources::Init(
   gl_image_dxgi->SetTexture(angle_texture, level);
 
   // Bind the image to each texture.
-  for (size_t texture_idx = 0; texture_idx < texture_refs_.size();
-       texture_idx++) {
-    texture_manager->SetLevelImage(texture_refs_[texture_idx].get(),
-                                   GL_TEXTURE_EXTERNAL_OES, 0, gl_image.get(),
-                                   gpu::gles2::Texture::ImageState::BOUND);
+  for (size_t texture_idx = 0; texture_idx < textures_.size(); texture_idx++) {
+    textures_[texture_idx]->BindImage(gl_image.get(),
+                                      false /* client_managed */);
   }
 
   return true;

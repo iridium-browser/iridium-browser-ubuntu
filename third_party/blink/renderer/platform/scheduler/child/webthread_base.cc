@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// An implementation of WebThread in terms of base::MessageLoop and
+// An implementation of blink::Thread in terms of base::MessageLoop and
 // base::Thread
 
 #include "third_party/blink/public/platform/scheduler/child/webthread_base.h"
@@ -12,11 +12,10 @@
 #include "base/bind_helpers.h"
 #include "base/location.h"
 #include "base/message_loop/message_loop.h"
+#include "base/message_loop/message_loop_current.h"
 #include "base/pending_task.h"
 #include "base/threading/platform_thread.h"
-#include "third_party/blink/public/platform/scheduler/single_thread_idle_task_runner.h"
 #include "third_party/blink/renderer/platform/scheduler/child/webthread_impl_for_worker_scheduler.h"
-#include "third_party/blink/renderer/platform/scheduler/utility/webthread_impl_for_utility_thread.h"
 #include "third_party/blink/renderer/platform/scheduler/worker/compositor_thread_scheduler.h"
 
 namespace blink {
@@ -25,7 +24,7 @@ namespace scheduler {
 class WebThreadBase::TaskObserverAdapter
     : public base::MessageLoop::TaskObserver {
  public:
-  explicit TaskObserverAdapter(WebThread::TaskObserver* observer)
+  explicit TaskObserverAdapter(Thread::TaskObserver* observer)
       : observer_(observer) {}
 
   void WillProcessTask(const base::PendingTask& pending_task) override {
@@ -37,7 +36,7 @@ class WebThreadBase::TaskObserverAdapter
   }
 
  private:
-  WebThread::TaskObserver* observer_;
+  Thread::TaskObserver* observer_;
 };
 
 WebThreadBase::WebThreadBase() = default;
@@ -67,36 +66,24 @@ void WebThreadBase::RemoveTaskObserver(TaskObserver* observer) {
   task_observer_map_.erase(iter);
 }
 
-void WebThreadBase::AddTaskTimeObserver(TaskTimeObserver* task_time_observer) {
+void WebThreadBase::AddTaskTimeObserver(
+    base::sequence_manager::TaskTimeObserver* task_time_observer) {
   AddTaskTimeObserverInternal(task_time_observer);
 }
 
 void WebThreadBase::RemoveTaskTimeObserver(
-    TaskTimeObserver* task_time_observer) {
+    base::sequence_manager::TaskTimeObserver* task_time_observer) {
   RemoveTaskTimeObserverInternal(task_time_observer);
 }
 
 void WebThreadBase::AddTaskObserverInternal(
     base::MessageLoop::TaskObserver* observer) {
-  base::MessageLoop::current()->AddTaskObserver(observer);
+  base::MessageLoopCurrent::Get()->AddTaskObserver(observer);
 }
 
 void WebThreadBase::RemoveTaskObserverInternal(
     base::MessageLoop::TaskObserver* observer) {
-  base::MessageLoop::current()->RemoveTaskObserver(observer);
-}
-
-// static
-void WebThreadBase::RunWebThreadIdleTask(blink::WebThread::IdleTask idle_task,
-                                         base::TimeTicks deadline) {
-  std::move(idle_task).Run((deadline - base::TimeTicks()).InSecondsF());
-}
-
-void WebThreadBase::PostIdleTask(const base::Location& location,
-                                 IdleTask idle_task) {
-  GetIdleTaskRunner()->PostIdleTask(
-      location, base::BindOnce(&WebThreadBase::RunWebThreadIdleTask,
-                               std::move(idle_task)));
+  base::MessageLoopCurrent::Get()->RemoveTaskObserver(observer);
 }
 
 bool WebThreadBase::IsCurrentThread() const {
@@ -107,18 +94,16 @@ namespace {
 
 class WebThreadForCompositor : public WebThreadImplForWorkerScheduler {
  public:
-  explicit WebThreadForCompositor(const WebThreadCreationParams& params)
-      : WebThreadImplForWorkerScheduler(params) {
-    Init();
-  }
+  explicit WebThreadForCompositor(const ThreadCreationParams& params)
+      : WebThreadImplForWorkerScheduler(params) {}
   ~WebThreadForCompositor() override = default;
 
  private:
   // WebThreadImplForWorkerScheduler:
-  std::unique_ptr<blink::scheduler::NonMainThreadScheduler>
+  std::unique_ptr<blink::scheduler::NonMainThreadSchedulerImpl>
   CreateNonMainThreadScheduler() override {
     return std::make_unique<CompositorThreadScheduler>(
-        GetThread(), TaskQueueManager::TakeOverCurrentThread());
+        base::sequence_manager::CreateSequenceManagerOnCurrentThread());
   }
 
   DISALLOW_COPY_AND_ASSIGN(WebThreadForCompositor);
@@ -127,17 +112,13 @@ class WebThreadForCompositor : public WebThreadImplForWorkerScheduler {
 }  // namespace
 
 std::unique_ptr<WebThreadBase> WebThreadBase::CreateWorkerThread(
-    const WebThreadCreationParams& params) {
+    const ThreadCreationParams& params) {
   return std::make_unique<WebThreadImplForWorkerScheduler>(params);
 }
 
 std::unique_ptr<WebThreadBase> WebThreadBase::CreateCompositorThread(
-    const WebThreadCreationParams& params) {
+    const ThreadCreationParams& params) {
   return std::make_unique<WebThreadForCompositor>(params);
-}
-
-std::unique_ptr<WebThreadBase> WebThreadBase::InitializeUtilityThread() {
-  return std::make_unique<WebThreadImplForUtilityThread>();
 }
 
 }  // namespace scheduler

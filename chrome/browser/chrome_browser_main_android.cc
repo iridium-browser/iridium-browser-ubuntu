@@ -8,8 +8,9 @@
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/message_loop/message_loop.h"
+#include "base/message_loop/message_loop_current.h"
 #include "base/path_service.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "base/trace_event/trace_event.h"
 #include "chrome/browser/android/mojo/chrome_interface_registrar_android.h"
 #include "chrome/browser/android/preferences/clipboard_android.h"
@@ -19,8 +20,8 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/descriptors_android.h"
 #include "components/crash/content/app/breakpad_linux.h"
+#include "components/crash/content/browser/child_exit_observer_android.h"
 #include "components/crash/content/browser/child_process_crash_observer_android.h"
-#include "components/crash/content/browser/crash_dump_observer_android.h"
 #include "components/metrics/stability_metrics_helper.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "content/public/browser/android/compositor.h"
@@ -33,9 +34,12 @@
 #include "ui/base/ui_base_paths.h"
 
 ChromeBrowserMainPartsAndroid::ChromeBrowserMainPartsAndroid(
-    const content::MainFunctionParams& parameters)
-    : ChromeBrowserMainParts(parameters) {
-}
+    const content::MainFunctionParams& parameters,
+    std::unique_ptr<ui::DataPack> data_pack,
+    ChromeFeatureListCreator* chrome_feature_list_creator)
+    : ChromeBrowserMainParts(parameters,
+                             std::move(data_pack),
+                             chrome_feature_list_creator) {}
 
 ChromeBrowserMainPartsAndroid::~ChromeBrowserMainPartsAndroid() {
 }
@@ -50,7 +54,7 @@ int ChromeBrowserMainPartsAndroid::PreCreateThreads() {
   // process creation). Such processes are created on the
   // PROCESS_LAUNCHER thread, and so the observer is initialized and
   // the manager registered before that thread is created.
-  breakpad::CrashDumpObserver::Create();
+  crash_reporter::ChildExitObserver::Create();
 
 #if defined(GOOGLE_CHROME_BUILD)
   // TODO(jcivelli): we should not initialize the crash-reporter when it was not
@@ -68,9 +72,9 @@ int ChromeBrowserMainPartsAndroid::PreCreateThreads() {
 
   if (breakpad_enabled) {
     base::FilePath crash_dump_dir;
-    PathService::Get(chrome::DIR_CRASH_DUMPS, &crash_dump_dir);
-    breakpad::CrashDumpObserver::GetInstance()->RegisterClient(
-        std::make_unique<breakpad::ChildProcessCrashObserver>(
+    base::PathService::Get(chrome::DIR_CRASH_DUMPS, &crash_dump_dir);
+    crash_reporter::ChildExitObserver::GetInstance()->RegisterClient(
+        std::make_unique<crash_reporter::ChildProcessCrashObserver>(
             crash_dump_dir, kAndroidMinidumpDescriptor));
   }
 
@@ -103,18 +107,13 @@ int ChromeBrowserMainPartsAndroid::PreEarlyInitialization() {
   // Android specific MessageLoop.
   DCHECK(!main_message_loop_.get());
 
-  // Create and start the MessageLoop.
-  // This is a critical point in the startup process.
+  // Create the MessageLoop if doesn't yet exist (and bind it to the native Java
+  // loop). This is a critical point in the startup process.
   {
     TRACE_EVENT0("startup",
       "ChromeBrowserMainPartsAndroid::PreEarlyInitialization:CreateUiMsgLoop");
-    main_message_loop_.reset(new base::MessageLoopForUI);
-  }
-
-  {
-    TRACE_EVENT0("startup",
-      "ChromeBrowserMainPartsAndroid::PreEarlyInitialization:StartUiMsgLoop");
-    base::MessageLoopForUI::current()->Start();
+    if (!base::MessageLoopCurrent::IsSet())
+      main_message_loop_ = std::make_unique<base::MessageLoopForUI>();
   }
 
   // In order for SetLoadSecondaryLocalePaks() to work ResourceBundle must
@@ -131,7 +130,7 @@ void ChromeBrowserMainPartsAndroid::PostBrowserStart() {
   ChromeBrowserMainParts::PostBrowserStart();
 
   base::PostDelayedTaskWithTraits(
-      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
       base::Bind(&ReportSeccompSupport), base::TimeDelta::FromMinutes(1));
 
   RegisterChromeJavaMojoInterfaces();

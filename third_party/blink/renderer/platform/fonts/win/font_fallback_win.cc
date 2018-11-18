@@ -33,13 +33,14 @@
 
 #include <unicode/uchar.h>
 #include <limits>
-#include "SkFontMgr.h"
-#include "SkTypeface.h"
+
 #include "third_party/blink/renderer/platform/fonts/font_cache.h"
 #include "third_party/blink/renderer/platform/text/icu_error.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_hash.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
+#include "third_party/skia/include/core/SkFontMgr.h"
+#include "third_party/skia/include/core/SkTypeface.h"
 
 namespace blink {
 
@@ -375,13 +376,13 @@ const UChar* GetFontBasedOnUnicodeBlock(UBlockCode block_code,
   static const UChar* math_font = 0;
   static bool initialized = false;
   if (!initialized) {
-    for (size_t i = 0; i < WTF_ARRAY_LENGTH(kEmojiFonts); i++) {
+    for (size_t i = 0; i < arraysize(kEmojiFonts); i++) {
       if (IsFontPresent(kEmojiFonts[i], font_manager)) {
         emoji_font = kEmojiFonts[i];
         break;
       }
     }
-    for (size_t i = 0; i < WTF_ARRAY_LENGTH(kMathFonts); i++) {
+    for (size_t i = 0; i < arraysize(kMathFonts); i++) {
       if (IsFontPresent(kMathFonts[i], font_manager)) {
         math_font = kMathFonts[i];
         break;

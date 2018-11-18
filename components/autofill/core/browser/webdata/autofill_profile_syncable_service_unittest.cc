@@ -17,6 +17,7 @@
 #include "components/autofill/core/browser/country_names.h"
 #include "components/autofill/core/browser/webdata/autofill_change.h"
 #include "components/autofill/core/common/autofill_constants.h"
+#include "components/sync/model/sync_change_processor.h"
 #include "components/sync/model/sync_error_factory.h"
 #include "components/sync/model/sync_error_factory_mock.h"
 #include "components/sync/protocol/sync.pb.h"
@@ -39,15 +40,14 @@ const char kGuid1[] = "EDC609ED-7EEE-4F27-B00C-423242A9C44B";
 const char kGuid2[] = "EDC609ED-7EEE-4F27-B00C-423242A9C44C";
 const char kGuid3[] = "EDC609ED-7EEE-4F27-B00C-423242A9C44D";
 const char kGuid4[] = "EDC609ED-7EEE-4F27-B00C-423242A9C44E";
-const char kHttpOrigin[] = "http://www.example.com/";
-const char kHttpsOrigin[] = "https://www.example.com/";
+const char kEmptyOrigin[] = "";
 const int kValidityStateBitfield = 1984;
 
 class MockAutofillProfileSyncableService
     : public AutofillProfileSyncableService {
  public:
   MockAutofillProfileSyncableService() {}
-  virtual ~MockAutofillProfileSyncableService() {}
+  ~MockAutofillProfileSyncableService() override {}
 
   using AutofillProfileSyncableService::DataBundle;
   using AutofillProfileSyncableService::set_sync_processor;
@@ -142,7 +142,7 @@ class TestSyncChangeProcessor : public syncer::SyncChangeProcessor {
 // returned from ConstructCompleteSyncData().
 std::unique_ptr<AutofillProfile> ConstructCompleteProfile() {
   std::unique_ptr<AutofillProfile> profile(
-      new AutofillProfile(kGuid1, kHttpsOrigin));
+      new AutofillProfile(kGuid1, kSettingsOrigin));
 
   profile->set_use_count(7);
   profile->set_use_date(base::Time::FromTimeT(1423182152));
@@ -171,7 +171,8 @@ std::unique_ptr<AutofillProfile> ConstructCompleteProfile() {
   profile->SetRawInfo(ADDRESS_HOME_DEPENDENT_LOCALITY,
                       ASCIIToUTF16("Santa Clara"));
   profile->set_language_code("en");
-  profile->SetValidityFromBitfieldValue(kValidityStateBitfield);
+  profile->SetClientValidityFromBitfieldValue(kValidityStateBitfield);
+  profile->set_is_client_validity_states_updated(true);
   return profile;
 }
 
@@ -183,7 +184,7 @@ syncer::SyncData ConstructCompleteSyncData() {
       entity_specifics.mutable_autofill_profile();
 
   specifics->set_guid(kGuid1);
-  specifics->set_origin(kHttpsOrigin);
+  specifics->set_origin(kSettingsOrigin);
   specifics->set_use_count(7);
   specifics->set_use_date(1423182152);
 
@@ -210,6 +211,7 @@ syncer::SyncData ConstructCompleteSyncData() {
   specifics->set_address_home_dependent_locality("Santa Clara");
   specifics->set_address_home_language_code("en");
   specifics->set_validity_state_bitfield(kValidityStateBitfield);
+  specifics->set_is_client_validity_states_updated(true);
 
   return syncer::SyncData::CreateLocalData(kGuid1, kGuid1, entity_specifics);
 }
@@ -271,9 +273,9 @@ TEST_F(AutofillProfileSyncableServiceTest, MergeDataAndStartSyncing) {
   std::string guid_present2 = kGuid2;
   std::string guid_synced1 = kGuid3;
   std::string guid_synced2 = kGuid4;
-  std::string origin_present1 = kHttpOrigin;
-  std::string origin_present2 = std::string();
-  std::string origin_synced1 = kHttpsOrigin;
+  std::string origin_present1 = kEmptyOrigin;
+  std::string origin_present2 = kEmptyOrigin;
+  std::string origin_synced1 = kEmptyOrigin;
   std::string origin_synced2 = kSettingsOrigin;
 
   profiles_from_web_db.push_back(
@@ -322,10 +324,10 @@ TEST_F(AutofillProfileSyncableServiceTest, MergeIdenticalProfiles) {
   std::string guid_present2 = kGuid2;
   std::string guid_synced1 = kGuid3;
   std::string guid_synced2 = kGuid4;
-  std::string origin_present1 = kHttpOrigin;
+  std::string origin_present1 = kEmptyOrigin;
   std::string origin_present2 = kSettingsOrigin;
-  std::string origin_synced1 = kHttpsOrigin;
-  std::string origin_synced2 = kHttpsOrigin;
+  std::string origin_synced1 = kEmptyOrigin;
+  std::string origin_synced2 = kEmptyOrigin;
 
   profiles_from_web_db.push_back(
       std::make_unique<AutofillProfile>(guid_present1, origin_present1));
@@ -376,10 +378,10 @@ TEST_F(AutofillProfileSyncableServiceTest, MergeSimilarProfiles) {
   std::string guid_present2 = kGuid2;
   std::string guid_synced1 = kGuid3;
   std::string guid_synced2 = kGuid4;
-  std::string origin_present1 = kHttpOrigin;
+  std::string origin_present1 = kEmptyOrigin;
   std::string origin_present2 = kSettingsOrigin;
-  std::string origin_synced1 = kHttpsOrigin;
-  std::string origin_synced2 = kHttpsOrigin;
+  std::string origin_synced1 = kEmptyOrigin;
+  std::string origin_synced2 = kEmptyOrigin;
 
   profiles_from_web_db.push_back(
       std::make_unique<AutofillProfile>(guid_present1, origin_present1));
@@ -486,10 +488,10 @@ TEST_F(AutofillProfileSyncableServiceTest, GetAllSyncData) {
   std::string guid_present2 = kGuid2;
 
   profiles_from_web_db.push_back(
-      std::make_unique<AutofillProfile>(guid_present1, kHttpOrigin));
+      std::make_unique<AutofillProfile>(guid_present1, kEmptyOrigin));
   profiles_from_web_db.back()->SetRawInfo(NAME_FIRST, ASCIIToUTF16("John"));
   profiles_from_web_db.push_back(
-      std::make_unique<AutofillProfile>(guid_present2, kHttpsOrigin));
+      std::make_unique<AutofillProfile>(guid_present2, kEmptyOrigin));
   profiles_from_web_db.back()->SetRawInfo(NAME_FIRST, ASCIIToUTF16("Jane"));
 
   syncer::SyncChangeList expected_change_list;
@@ -515,8 +517,8 @@ TEST_F(AutofillProfileSyncableServiceTest, GetAllSyncData) {
   ASSERT_EQ(2U, data.size());
   EXPECT_EQ(guid_present1, data[0].GetSpecifics().autofill_profile().guid());
   EXPECT_EQ(guid_present2, data[1].GetSpecifics().autofill_profile().guid());
-  EXPECT_EQ(kHttpOrigin, data[0].GetSpecifics().autofill_profile().origin());
-  EXPECT_EQ(kHttpsOrigin, data[1].GetSpecifics().autofill_profile().origin());
+  EXPECT_EQ(kEmptyOrigin, data[0].GetSpecifics().autofill_profile().origin());
+  EXPECT_EQ(kEmptyOrigin, data[1].GetSpecifics().autofill_profile().origin());
 
   autofill_syncable_service_.StopSyncing(syncer::AUTOFILL_PROFILE);
 }
@@ -527,14 +529,14 @@ TEST_F(AutofillProfileSyncableServiceTest, ProcessSyncChanges) {
   std::string guid_synced = kGuid2;
 
   syncer::SyncChangeList change_list;
-  AutofillProfile profile(guid_synced, kHttpOrigin);
+  AutofillProfile profile(guid_synced, kEmptyOrigin);
   profile.SetRawInfo(NAME_FIRST, ASCIIToUTF16("Jane"));
   change_list.push_back(
       syncer::SyncChange(
           FROM_HERE,
           syncer::SyncChange::ACTION_ADD,
           MockAutofillProfileSyncableService::CreateData(profile)));
-  AutofillProfile empty_profile(guid_present, kHttpsOrigin);
+  AutofillProfile empty_profile(guid_present, kEmptyOrigin);
   change_list.push_back(
       syncer::SyncChange(
           FROM_HERE,
@@ -563,7 +565,7 @@ TEST_F(AutofillProfileSyncableServiceTest, AutofillProfileAdded) {
   TestSyncChangeProcessor* sync_change_processor = new TestSyncChangeProcessor;
   autofill_syncable_service_.set_sync_processor(sync_change_processor);
 
-  AutofillProfile profile(kGuid1, kHttpsOrigin);
+  AutofillProfile profile(kGuid1, kEmptyOrigin);
   profile.SetRawInfo(NAME_FIRST, ASCIIToUTF16("Jane"));
   AutofillProfileChange change(AutofillProfileChange::ADD, kGuid1, &profile);
   autofill_syncable_service_.AutofillProfileChanged(change);
@@ -575,7 +577,7 @@ TEST_F(AutofillProfileSyncableServiceTest, AutofillProfileAdded) {
   sync_pb::AutofillProfileSpecifics specifics =
       result.sync_data().GetSpecifics().autofill_profile();
   EXPECT_EQ(kGuid1, specifics.guid());
-  EXPECT_EQ(kHttpsOrigin, specifics.origin());
+  EXPECT_EQ(kEmptyOrigin, specifics.origin());
   EXPECT_THAT(specifics.name_first(), testing::ElementsAre("Jane"));
 }
 
@@ -585,15 +587,34 @@ TEST_F(AutofillProfileSyncableServiceTest, AutofillProfileDeleted) {
   TestSyncChangeProcessor* sync_change_processor = new TestSyncChangeProcessor;
   autofill_syncable_service_.set_sync_processor(sync_change_processor);
 
-  AutofillProfileChange change(AutofillProfileChange::REMOVE, kGuid2, nullptr);
-  autofill_syncable_service_.AutofillProfileChanged(change);
+  // First add the profile so we have something to delete.
+  AutofillProfile profile(kGuid1, kEmptyOrigin);
+  profile.SetRawInfo(NAME_FIRST, ASCIIToUTF16("Jane"));
+  AutofillProfileChange change1(AutofillProfileChange::ADD, kGuid1, &profile);
+  autofill_syncable_service_.AutofillProfileChanged(change1);
+
+  AutofillProfileChange change2(AutofillProfileChange::REMOVE, kGuid1, nullptr);
+  autofill_syncable_service_.AutofillProfileChanged(change2);
 
   ASSERT_EQ(1U, sync_change_processor->changes().size());
   syncer::SyncChange result = sync_change_processor->changes()[0];
   EXPECT_EQ(syncer::SyncChange::ACTION_DELETE, result.change_type());
   sync_pb::AutofillProfileSpecifics specifics =
       result.sync_data().GetSpecifics().autofill_profile();
-  EXPECT_EQ(kGuid2, specifics.guid());
+  EXPECT_EQ(kGuid1, specifics.guid());
+}
+
+TEST_F(AutofillProfileSyncableServiceTest,
+       AutofillProfileDeletedIgnoresUnknown) {
+  // Will be owned by the syncable service.  Keep a reference available here for
+  // verifying test expectations.
+  TestSyncChangeProcessor* sync_change_processor = new TestSyncChangeProcessor;
+  autofill_syncable_service_.set_sync_processor(sync_change_processor);
+
+  AutofillProfileChange change(AutofillProfileChange::REMOVE, kGuid2, nullptr);
+  autofill_syncable_service_.AutofillProfileChanged(change);
+
+  ASSERT_EQ(0U, sync_change_processor->changes().size());
 }
 
 TEST_F(AutofillProfileSyncableServiceTest, UpdateField) {
@@ -616,10 +637,10 @@ TEST_F(AutofillProfileSyncableServiceTest, UpdateField) {
 // |from_profile| into |into_profile| but not the other way around.
 TEST_F(AutofillProfileSyncableServiceTest,
        MergeSimilarProfiles_AdditionalInfoInBothProfiles) {
-  AutofillProfile into_profile(kGuid1, kHttpOrigin);
+  AutofillProfile into_profile(kGuid1, kEmptyOrigin);
   into_profile.SetRawInfo(ADDRESS_HOME_LINE1, ASCIIToUTF16("111 First St."));
 
-  AutofillProfile from_profile(kGuid2, kHttpsOrigin);
+  AutofillProfile from_profile(kGuid2, kEmptyOrigin);
   from_profile.SetRawInfo(ADDRESS_HOME_LINE1, ASCIIToUTF16("111 First St."));
 
   from_profile.set_use_count(0);
@@ -644,7 +665,7 @@ TEST_F(AutofillProfileSyncableServiceTest,
       from_profile, &into_profile, "en-US"));
   EXPECT_EQ(ASCIIToUTF16("650234567"),
             into_profile.GetRawInfo(PHONE_HOME_WHOLE_NUMBER));
-  EXPECT_EQ(kHttpsOrigin, into_profile.origin());
+  EXPECT_EQ(kEmptyOrigin, into_profile.origin());
 
   // Make sure that the language code of |into_profile| was not added to
   // |from_profile|.
@@ -656,8 +677,8 @@ TEST_F(AutofillProfileSyncableServiceTest,
 TEST_F(AutofillProfileSyncableServiceTest,
        MergeSimilarProfiles_DifferentUseDates) {
   // Different guids, same origin.
-  AutofillProfile into_profile(kGuid1, kHttpOrigin);
-  AutofillProfile from_profile(kGuid2, kHttpOrigin);
+  AutofillProfile into_profile(kGuid1, kEmptyOrigin);
+  AutofillProfile from_profile(kGuid2, kEmptyOrigin);
 
   from_profile.set_use_count(0);
   into_profile.set_use_count(0);
@@ -687,8 +708,8 @@ TEST_F(AutofillProfileSyncableServiceTest,
 TEST_F(AutofillProfileSyncableServiceTest,
        MergeSimilarProfiles_NonZeroUseCounts) {
   // Different guids, same origin, same use date.
-  AutofillProfile into_profile(kGuid1, kHttpOrigin);
-  AutofillProfile from_profile(kGuid2, kHttpOrigin);
+  AutofillProfile into_profile(kGuid1, kEmptyOrigin);
+  AutofillProfile from_profile(kGuid2, kEmptyOrigin);
   from_profile.set_use_date(base::Time::FromTimeT(1234));
   into_profile.set_use_date(base::Time::FromTimeT(1234));
 
@@ -759,7 +780,7 @@ TEST_F(AutofillProfileSyncableServiceTest,
   sync_pb::AutofillProfileSpecifics* autofill_specifics =
       specifics.mutable_autofill_profile();
   autofill_specifics->set_guid(kGuid1);
-  autofill_specifics->set_origin(kHttpsOrigin);
+  autofill_specifics->set_origin(kEmptyOrigin);
   autofill_specifics->add_name_first(std::string());
   autofill_specifics->add_name_middle(std::string());
   autofill_specifics->add_name_last(std::string());
@@ -777,7 +798,7 @@ TEST_F(AutofillProfileSyncableServiceTest,
   // Set up expectations: Full street address takes precedence over address
   // lines.
   syncer::SyncChangeList expected_change_list;
-  AutofillProfile expected_profile(kGuid1, kHttpsOrigin);
+  AutofillProfile expected_profile(kGuid1, kEmptyOrigin);
   expected_profile.SetRawInfo(ADDRESS_HOME_STREET_ADDRESS,
                               ASCIIToUTF16("456 El Camino Real\n"
                                            "Suite #1337"));
@@ -804,7 +825,7 @@ TEST_F(AutofillProfileSyncableServiceTest, MergeDataEmptyStreetAddress) {
   std::vector<std::unique_ptr<AutofillProfile>> profiles_from_web_db;
 
   // Create a profile with the street address set.
-  AutofillProfile profile(kGuid1, kHttpsOrigin);
+  AutofillProfile profile(kGuid1, kEmptyOrigin);
   profile.SetRawInfo(ADDRESS_HOME_STREET_ADDRESS,
                      ASCIIToUTF16("123 Example St.\n"
                                   "Apt. 42"));
@@ -851,7 +872,7 @@ TEST_F(AutofillProfileSyncableServiceTest, EmptySyncPreservesOrigin) {
   std::vector<std::unique_ptr<AutofillProfile>> profiles_from_web_db;
 
   // Local autofill profile has an origin.
-  AutofillProfile profile(kGuid1, kHttpsOrigin);
+  AutofillProfile profile(kGuid1, kEmptyOrigin);
   profiles_from_web_db.push_back(std::make_unique<AutofillProfile>(profile));
 
   // Remote data does not have an origin value.
@@ -886,12 +907,53 @@ TEST_F(AutofillProfileSyncableServiceTest, EmptySyncPreservesOrigin) {
   autofill_syncable_service_.StopSyncing(syncer::AUTOFILL_PROFILE);
 }
 
+// Sync data without origin should not overwrite existing origin in local
+// autofill profile.
+TEST_F(AutofillProfileSyncableServiceTest,
+       NonSettingsOriginFromSyncIsIgnored_Merge) {
+  std::vector<std::unique_ptr<AutofillProfile>> profiles_from_web_db;
+
+  // Remote data has no origin value.
+  AutofillProfile profile(kGuid1, std::string());
+  profiles_from_web_db.push_back(std::make_unique<AutofillProfile>(profile));
+
+  // Remote data has a non-settings origin value.
+  sync_pb::EntitySpecifics specifics;
+  sync_pb::AutofillProfileSpecifics* autofill_specifics =
+      specifics.mutable_autofill_profile();
+  autofill_specifics->set_guid(profile.guid());
+  autofill_specifics->set_origin("www.example.com");
+  autofill_specifics->add_name_first("John");
+  autofill_specifics->add_name_middle(std::string());
+  autofill_specifics->add_name_last(std::string());
+  autofill_specifics->add_name_full(std::string());
+  autofill_specifics->add_email_address(std::string());
+  autofill_specifics->add_phone_home_whole_number(std::string());
+
+  syncer::SyncDataList data_list;
+  data_list.push_back(syncer::SyncData::CreateLocalData(
+      profile.guid(), profile.guid(), specifics));
+
+  // Expect the local autofill profile to still have an origin after sync.
+  MockAutofillProfileSyncableService::DataBundle expected_bundle;
+  AutofillProfile expected_profile(profile.guid(), profile.origin());
+  expected_profile.SetRawInfo(NAME_FIRST, ASCIIToUTF16("John"));
+  expected_bundle.profiles_to_update.push_back(&expected_profile);
+
+  // Expect no sync events to add origin to the remote data.
+  syncer::SyncChangeList expected_empty_change_list;
+
+  MergeDataAndStartSyncing(std::move(profiles_from_web_db), data_list,
+                           expected_bundle, expected_empty_change_list);
+  autofill_syncable_service_.StopSyncing(syncer::AUTOFILL_PROFILE);
+}
+
 // Missing language code field should not generate sync events.
 TEST_F(AutofillProfileSyncableServiceTest, NoLanguageCodeNoSync) {
   std::vector<std::unique_ptr<AutofillProfile>> profiles_from_web_db;
 
   // Local autofill profile has an empty language code.
-  AutofillProfile profile(kGuid1, kHttpsOrigin);
+  AutofillProfile profile(kGuid1, kEmptyOrigin);
   EXPECT_TRUE(profile.language_code().empty());
   profiles_from_web_db.push_back(std::make_unique<AutofillProfile>(profile));
 
@@ -930,7 +992,7 @@ TEST_F(AutofillProfileSyncableServiceTest, SyncUpdatesEmptyLanguageCode) {
   std::vector<std::unique_ptr<AutofillProfile>> profiles_from_web_db;
 
   // Local autofill profile has an empty language code.
-  AutofillProfile profile(kGuid1, kHttpsOrigin);
+  AutofillProfile profile(kGuid1, kEmptyOrigin);
   EXPECT_TRUE(profile.language_code().empty());
   profiles_from_web_db.push_back(std::make_unique<AutofillProfile>(profile));
 
@@ -956,7 +1018,7 @@ TEST_F(AutofillProfileSyncableServiceTest, SyncUpdatesEmptyLanguageCode) {
 
   // Expect the local autofill profile to have "en" language code after sync.
   MockAutofillProfileSyncableService::DataBundle expected_bundle;
-  AutofillProfile expected_profile(kGuid1, kHttpsOrigin);
+  AutofillProfile expected_profile(kGuid1, kEmptyOrigin);
   expected_profile.set_language_code("en");
   expected_bundle.profiles_to_update.push_back(&expected_profile);
 
@@ -973,7 +1035,7 @@ TEST_F(AutofillProfileSyncableServiceTest, SyncUpdatesIncorrectLanguageCode) {
   std::vector<std::unique_ptr<AutofillProfile>> profiles_from_web_db;
 
   // Local autofill profile has "de" language code.
-  AutofillProfile profile(kGuid1, kHttpsOrigin);
+  AutofillProfile profile(kGuid1, kEmptyOrigin);
   profile.set_language_code("de");
   profiles_from_web_db.push_back(std::make_unique<AutofillProfile>(profile));
 
@@ -999,7 +1061,7 @@ TEST_F(AutofillProfileSyncableServiceTest, SyncUpdatesIncorrectLanguageCode) {
 
   // Expect the local autofill profile to have "en" language code after sync.
   MockAutofillProfileSyncableService::DataBundle expected_bundle;
-  AutofillProfile expected_profile(kGuid1, kHttpsOrigin);
+  AutofillProfile expected_profile(kGuid1, kEmptyOrigin);
   expected_profile.set_language_code("en");
   expected_bundle.profiles_to_update.push_back(&expected_profile);
 
@@ -1017,7 +1079,7 @@ TEST_F(AutofillProfileSyncableServiceTest, EmptySyncPreservesLanguageCode) {
   std::vector<std::unique_ptr<AutofillProfile>> profiles_from_web_db;
 
   // Local autofill profile has "en" language code.
-  AutofillProfile profile(kGuid1, kHttpsOrigin);
+  AutofillProfile profile(kGuid1, kEmptyOrigin);
   profile.set_language_code("en");
   profiles_from_web_db.push_back(std::make_unique<AutofillProfile>(profile));
 
@@ -1060,7 +1122,7 @@ TEST_F(AutofillProfileSyncableServiceTest, LanguageCodePropagates) {
   TestSyncChangeProcessor* sync_change_processor = new TestSyncChangeProcessor;
   autofill_syncable_service_.set_sync_processor(sync_change_processor);
 
-  AutofillProfile profile(kGuid1, kHttpsOrigin);
+  AutofillProfile profile(kGuid1, kEmptyOrigin);
   profile.set_language_code("en");
   AutofillProfileChange change(AutofillProfileChange::ADD, kGuid1, &profile);
   autofill_syncable_service_.AutofillProfileChanged(change);
@@ -1072,7 +1134,7 @@ TEST_F(AutofillProfileSyncableServiceTest, LanguageCodePropagates) {
   sync_pb::AutofillProfileSpecifics specifics =
       result.sync_data().GetSpecifics().autofill_profile();
   EXPECT_EQ(kGuid1, specifics.guid());
-  EXPECT_EQ(kHttpsOrigin, specifics.origin());
+  EXPECT_EQ(kEmptyOrigin, specifics.origin());
   EXPECT_EQ("en", specifics.address_home_language_code());
 }
 
@@ -1081,8 +1143,8 @@ TEST_F(AutofillProfileSyncableServiceTest, DefaultValidityStateNoSync) {
   std::vector<std::unique_ptr<AutofillProfile>> profiles_from_web_db;
 
   // Local autofill profile has a default validity state bitfield.
-  AutofillProfile profile(kGuid1, kHttpsOrigin);
-  EXPECT_EQ(0, profile.GetValidityBitfieldValue());
+  AutofillProfile profile(kGuid1, kEmptyOrigin);
+  EXPECT_EQ(0, profile.GetClientValidityBitfieldValue());
   profiles_from_web_db.push_back(std::make_unique<AutofillProfile>(profile));
 
   // Remote data does not have a validity state bitfield value.
@@ -1115,12 +1177,13 @@ TEST_F(AutofillProfileSyncableServiceTest, DefaultValidityStateNoSync) {
 }
 
 // Default validity state bitfield should be overwritten by sync.
-TEST_F(AutofillProfileSyncableServiceTest, SyncUpdatesDefaultValidityBitfield) {
+TEST_F(AutofillProfileSyncableServiceTest,
+       SyncUpdatesDefaultValidityBitfieldAndFlag) {
   std::vector<std::unique_ptr<AutofillProfile>> profiles_from_web_db;
 
   // Local autofill profile has a default validity state.
-  AutofillProfile profile(kGuid1, kHttpsOrigin);
-  EXPECT_EQ(0, profile.GetValidityBitfieldValue());
+  AutofillProfile profile(kGuid1, kEmptyOrigin);
+  EXPECT_EQ(0, profile.GetClientValidityBitfieldValue());
   profiles_from_web_db.push_back(std::make_unique<AutofillProfile>(profile));
 
   // Remote data has a non default validity state bitfield value.
@@ -1136,6 +1199,7 @@ TEST_F(AutofillProfileSyncableServiceTest, SyncUpdatesDefaultValidityBitfield) {
   autofill_specifics->add_email_address(std::string());
   autofill_specifics->add_phone_home_whole_number(std::string());
   autofill_specifics->set_validity_state_bitfield(kValidityStateBitfield);
+  autofill_specifics->set_is_client_validity_states_updated(true);
   EXPECT_TRUE(autofill_specifics->has_validity_state_bitfield());
 
   syncer::SyncDataList data_list;
@@ -1145,8 +1209,9 @@ TEST_F(AutofillProfileSyncableServiceTest, SyncUpdatesDefaultValidityBitfield) {
   // Expect the local autofill profile to have the non default validity state
   // bitfield after sync.
   MockAutofillProfileSyncableService::DataBundle expected_bundle;
-  AutofillProfile expected_profile(kGuid1, kHttpsOrigin);
-  expected_profile.SetValidityFromBitfieldValue(kValidityStateBitfield);
+  AutofillProfile expected_profile(kGuid1, kEmptyOrigin);
+  expected_profile.SetClientValidityFromBitfieldValue(kValidityStateBitfield);
+  expected_profile.set_is_client_validity_states_updated(true);
   expected_bundle.profiles_to_update.push_back(&expected_profile);
 
   // Expect no changes to remote data.
@@ -1162,8 +1227,8 @@ TEST_F(AutofillProfileSyncableServiceTest, SyncUpdatesLocalValidityBitfield) {
   std::vector<std::unique_ptr<AutofillProfile>> profiles_from_web_db;
 
   // Local autofill profile has a non default validity state bitfield value.
-  AutofillProfile profile(kGuid1, kHttpsOrigin);
-  profile.SetValidityFromBitfieldValue(kValidityStateBitfield + 1);
+  AutofillProfile profile(kGuid1, kEmptyOrigin);
+  profile.SetClientValidityFromBitfieldValue(kValidityStateBitfield + 1);
   profiles_from_web_db.push_back(std::make_unique<AutofillProfile>(profile));
 
   // Remote data has a different non default validity state bitfield value.
@@ -1188,8 +1253,8 @@ TEST_F(AutofillProfileSyncableServiceTest, SyncUpdatesLocalValidityBitfield) {
   // Expect the local autofill profile to have the remote validity state
   // bitfield value after sync.
   MockAutofillProfileSyncableService::DataBundle expected_bundle;
-  AutofillProfile expected_profile(kGuid1, kHttpsOrigin);
-  expected_profile.SetValidityFromBitfieldValue(kValidityStateBitfield);
+  AutofillProfile expected_profile(kGuid1, kEmptyOrigin);
+  expected_profile.SetClientValidityFromBitfieldValue(kValidityStateBitfield);
   expected_bundle.profiles_to_update.push_back(&expected_profile);
 
   // Expect no changes to remote data.
@@ -1207,8 +1272,8 @@ TEST_F(AutofillProfileSyncableServiceTest,
   std::vector<std::unique_ptr<AutofillProfile>> profiles_from_web_db;
 
   // Local autofill profile has a non default validity state bitfield value.
-  AutofillProfile profile(kGuid1, kHttpsOrigin);
-  profile.SetValidityFromBitfieldValue(kValidityStateBitfield);
+  AutofillProfile profile(kGuid1, kEmptyOrigin);
+  profile.SetClientValidityFromBitfieldValue(kValidityStateBitfield);
   profiles_from_web_db.push_back(std::make_unique<AutofillProfile>(profile));
 
   // Remote data does not has no validity state bitfield value.
@@ -1233,7 +1298,7 @@ TEST_F(AutofillProfileSyncableServiceTest,
   // language code after sync.
   MockAutofillProfileSyncableService::DataBundle expected_bundle;
   AutofillProfile expected_profile(profile.guid(), profile.origin());
-  expected_profile.SetValidityFromBitfieldValue(kValidityStateBitfield);
+  expected_profile.SetClientValidityFromBitfieldValue(kValidityStateBitfield);
   expected_profile.SetRawInfo(NAME_FIRST, ASCIIToUTF16("John"));
   expected_bundle.profiles_to_update.push_back(&expected_profile);
 
@@ -1250,8 +1315,8 @@ TEST_F(AutofillProfileSyncableServiceTest, LocalValidityBitfieldPropagates) {
   TestSyncChangeProcessor* sync_change_processor = new TestSyncChangeProcessor;
   autofill_syncable_service_.set_sync_processor(sync_change_processor);
 
-  AutofillProfile profile(kGuid1, kHttpsOrigin);
-  profile.SetValidityFromBitfieldValue(kValidityStateBitfield);
+  AutofillProfile profile(kGuid1, kEmptyOrigin);
+  profile.SetClientValidityFromBitfieldValue(kValidityStateBitfield);
   AutofillProfileChange change(AutofillProfileChange::ADD, kGuid1, &profile);
   autofill_syncable_service_.AutofillProfileChanged(change);
 
@@ -1262,7 +1327,7 @@ TEST_F(AutofillProfileSyncableServiceTest, LocalValidityBitfieldPropagates) {
   sync_pb::AutofillProfileSpecifics specifics =
       result.sync_data().GetSpecifics().autofill_profile();
   EXPECT_EQ(kGuid1, specifics.guid());
-  EXPECT_EQ(kHttpsOrigin, specifics.origin());
+  EXPECT_EQ(kEmptyOrigin, specifics.origin());
   EXPECT_EQ(kValidityStateBitfield, specifics.validity_state_bitfield());
 }
 
@@ -1271,7 +1336,7 @@ TEST_F(AutofillProfileSyncableServiceTest, NoFullNameNoSync) {
   std::vector<std::unique_ptr<AutofillProfile>> profiles_from_web_db;
 
   // Local autofill profile has an empty full name.
-  AutofillProfile profile(kGuid1, kHttpsOrigin);
+  AutofillProfile profile(kGuid1, kEmptyOrigin);
   profile.SetRawInfo(NAME_FIRST, ASCIIToUTF16("John"));
   profiles_from_web_db.push_back(std::make_unique<AutofillProfile>(profile));
 
@@ -1307,7 +1372,7 @@ TEST_F(AutofillProfileSyncableServiceTest, EmptySyncPreservesFullName) {
   std::vector<std::unique_ptr<AutofillProfile>> profiles_from_web_db;
 
   // Local autofill profile has a full name.
-  AutofillProfile profile(kGuid1, kHttpsOrigin);
+  AutofillProfile profile(kGuid1, kEmptyOrigin);
   profile.SetRawInfo(NAME_FULL, ASCIIToUTF16("John Jacob Smith, Jr"));
   profiles_from_web_db.push_back(std::make_unique<AutofillProfile>(profile));
 
@@ -1347,7 +1412,7 @@ TEST_F(AutofillProfileSyncableServiceTest, NoUsageStatsNoSync) {
   std::vector<std::unique_ptr<AutofillProfile>> profiles_from_web_db;
 
   // Local autofill profile has 0 for use_count/use_date.
-  AutofillProfile profile(kGuid1, kHttpsOrigin);
+  AutofillProfile profile(kGuid1, kEmptyOrigin);
   profile.set_language_code("en");
   profile.set_use_count(0);
   profile.set_use_date(base::Time());
@@ -1447,7 +1512,7 @@ TEST_P(SyncUpdatesUsageStatsTest, SyncUpdatesUsageStats) {
   SetUp();
   std::vector<std::unique_ptr<AutofillProfile>> profiles_from_web_db;
 
-  AutofillProfile profile(kGuid1, kHttpsOrigin);
+  AutofillProfile profile(kGuid1, kEmptyOrigin);
   profile.set_language_code("en");
   profile.set_use_count(test_case.local_use_count);
   profile.set_use_date(test_case.local_use_date);
@@ -1515,7 +1580,7 @@ TEST_F(AutofillProfileSyncableServiceTest, ClientOverwritesUsageStats) {
   sync_pb::AutofillProfileSpecifics* autofill_specifics =
       specifics.mutable_autofill_profile();
   autofill_specifics->set_guid(kGuid1);
-  autofill_specifics->set_origin(kHttpsOrigin);
+  autofill_specifics->set_origin(kEmptyOrigin);
   autofill_specifics->add_name_first(std::string());
   autofill_specifics->add_name_middle(std::string());
   autofill_specifics->add_name_last(std::string());
@@ -1528,8 +1593,7 @@ TEST_F(AutofillProfileSyncableServiceTest, ClientOverwritesUsageStats) {
 
   syncer::SyncDataList data_list;
   data_list.push_back(
-      syncer::SyncData::CreateLocalData(
-          kGuid1, kHttpsOrigin, specifics));
+      syncer::SyncData::CreateLocalData(kGuid1, kEmptyOrigin, specifics));
 
   EXPECT_CALL(autofill_syncable_service_, LoadAutofillData(_))
       .Times(1)
@@ -1545,7 +1609,7 @@ TEST_F(AutofillProfileSyncableServiceTest, ClientOverwritesUsageStats) {
           new syncer::SyncErrorFactoryMock()));
 
   // Update to the usage stats for that profile.
-  AutofillProfile profile(kGuid1, kHttpsOrigin);
+  AutofillProfile profile(kGuid1, kEmptyOrigin);
   profile.set_language_code("en");
   profile.set_use_count(10U);
   profile.set_use_date(base::Time::FromTimeT(30));
@@ -1584,6 +1648,76 @@ TEST_F(AutofillProfileSyncableServiceTest, IgnoreServerProfileUpdate) {
   // Should not crash:
   autofill_syncable_service_.AutofillProfileChanged(AutofillProfileChange(
       AutofillProfileChange::UPDATE, server_profile.guid(), &server_profile));
+}
+
+// Tests that a non-settings origin from the server is never set to the local
+// profile.
+TEST_F(AutofillProfileSyncableServiceTest,
+       OverwriteProfileWithServerData_NonSettingsOrigin) {
+  // Create a profile with an empty origin.
+  AutofillProfile profile(kGuid1, std::string());
+  profile.SetRawInfo(NAME_FIRST, ASCIIToUTF16("John"));
+  profile.SetRawInfo(ADDRESS_HOME_LINE1, ASCIIToUTF16("1 1st st"));
+
+  // Create a Sync profile with a non-settings origin.
+  sync_pb::EntitySpecifics specifics;
+  sync_pb::AutofillProfileSpecifics* autofill_specifics =
+      specifics.mutable_autofill_profile();
+  autofill_specifics->set_guid(profile.guid());
+  autofill_specifics->set_origin("https://www.example.com");
+  autofill_specifics->add_name_first("John");
+  autofill_specifics->add_name_middle(std::string());
+  autofill_specifics->add_name_last(std::string());
+  autofill_specifics->add_name_full(std::string());
+  autofill_specifics->add_email_address(std::string());
+  autofill_specifics->add_phone_home_whole_number(std::string());
+  autofill_specifics->set_address_home_line1("1 1st st");
+  autofill_specifics->set_use_count(profile.use_count());
+  autofill_specifics->set_use_date(profile.use_date().ToTimeT());
+
+  // Expect that the empty origin is not overwritten.
+  autofill_syncable_service_.OverwriteProfileWithServerData(*autofill_specifics,
+                                                            &profile);
+  EXPECT_TRUE(profile.origin().empty());
+
+  // Set the local origin to settings.
+  profile.set_origin(kSettingsOrigin);
+
+  // Expect that the settings origin is not overwritten.
+  autofill_syncable_service_.OverwriteProfileWithServerData(*autofill_specifics,
+                                                            &profile);
+  EXPECT_EQ(kSettingsOrigin, profile.origin());
+}
+
+// Tests that a non-settings origin from the server is not set to the local
+// profile.
+TEST_F(AutofillProfileSyncableServiceTest,
+       OverwriteProfileWithServerData_SettingsOrigin) {
+  // Create a profile with an empty origin.
+  AutofillProfile profile(kGuid1, std::string());
+  profile.SetRawInfo(NAME_FIRST, ASCIIToUTF16("John"));
+  profile.SetRawInfo(ADDRESS_HOME_LINE1, ASCIIToUTF16("1 1st st"));
+
+  // Create a Sync profile with a non-settings origin.
+  sync_pb::EntitySpecifics specifics;
+  sync_pb::AutofillProfileSpecifics* autofill_specifics =
+      specifics.mutable_autofill_profile();
+  autofill_specifics->set_guid(profile.guid());
+  autofill_specifics->set_origin(kSettingsOrigin);
+  autofill_specifics->add_name_first("John");
+  autofill_specifics->add_name_middle(std::string());
+  autofill_specifics->add_name_last(std::string());
+  autofill_specifics->add_name_full(std::string());
+  autofill_specifics->add_email_address(std::string());
+  autofill_specifics->add_phone_home_whole_number(std::string());
+  autofill_specifics->set_address_home_line1("1 1st st");
+  autofill_specifics->set_use_count(profile.use_count());
+  autofill_specifics->set_use_date(profile.use_date().ToTimeT());
+
+  // Expect that the settings origin replaced the empty origin.
+  autofill_syncable_service_.OverwriteProfileWithServerData(*autofill_specifics,
+                                                            &profile);
+  EXPECT_EQ(kSettingsOrigin, profile.origin());
 }
 
 }  // namespace autofill

@@ -4,7 +4,6 @@
 
 #include "third_party/blink/renderer/core/animation/timing_input.h"
 
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
 #include "third_party/blink/renderer/bindings/core/v8/unrestricted_double_or_keyframe_animation_options.h"
 #include "third_party/blink/renderer/bindings/core/v8/unrestricted_double_or_keyframe_effect_options.h"
 #include "third_party/blink/renderer/core/animation/animation_effect.h"
@@ -12,6 +11,7 @@
 #include "third_party/blink/renderer/core/animation/effect_timing.h"
 #include "third_party/blink/renderer/core/animation/keyframe_effect_options.h"
 #include "third_party/blink/renderer/core/animation/optional_effect_timing.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 
 namespace blink {
 namespace {
@@ -37,6 +37,15 @@ Timing::PlaybackDirection ConvertPlaybackDirection(const String& direction) {
     return Timing::PlaybackDirection::ALTERNATE_REVERSE;
   DCHECK_EQ(direction, "normal");
   return Timing::PlaybackDirection::NORMAL;
+}
+
+base::Optional<AnimationTimeDelta> ConvertIterationDuration(
+    const UnrestrictedDoubleOrString& duration) {
+  if (duration.IsUnrestrictedDouble()) {
+    return AnimationTimeDelta::FromMillisecondsD(
+        duration.GetAsUnrestrictedDouble());
+  }
+  return base::nullopt;
 }
 
 Timing ConvertEffectTiming(const EffectTiming& timing_input,
@@ -186,17 +195,8 @@ bool TimingInput::Update(Timing& timing,
     changed |= UpdateValueIfChanged(timing.iteration_count, input.iterations());
   }
   if (input.hasDuration()) {
-    double old_duration = timing.iteration_duration;
-    if (input.duration().IsUnrestrictedDouble()) {
-      timing.iteration_duration =
-          input.duration().GetAsUnrestrictedDouble() / 1000;
-    } else {
-      timing.iteration_duration = NullValue();
-    }
-    // TODO(crbug.com/791086): This check can be simplified once we use
-    // WTF::Optional for timing.iteration_duration.
-    changed |= (timing.iteration_duration != old_duration &&
-                !(IsNull(timing.iteration_duration) && IsNull(old_duration)));
+    changed |= UpdateValueIfChanged(timing.iteration_duration,
+                                    ConvertIterationDuration(input.duration()));
   }
   if (input.hasDirection()) {
     changed |= UpdateValueIfChanged(

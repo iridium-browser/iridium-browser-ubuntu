@@ -72,15 +72,14 @@ public class GeolocationHeaderUnitTest {
             VisibleWifi.create("ssid1_nomap", "11:11:11:11:11:11", -1, 10L);
     private static final VisibleWifi VISIBLE_WIFI_OPTOUT =
             VisibleWifi.create("ssid1_optout", "11:11:11:11:11:11", -1, 10L);
-    private static final VisibleCell VISIBLE_CELL1 =
-            VisibleCell.builder(VisibleCell.CDMA_RADIO_TYPE)
-                    .setCellId(10)
-                    .setLocationAreaCode(11)
-                    .setMobileCountryCode(12)
-                    .setMobileNetworkCode(13)
-                    .setTimestamp(10L)
-                    .build();
-    private static final VisibleCell VISIBLE_CELL2 = VisibleCell.builder(VisibleCell.GSM_RADIO_TYPE)
+    private static final VisibleCell VISIBLE_CELL1 = VisibleCell.builder(VisibleCell.RadioType.CDMA)
+                                                             .setCellId(10)
+                                                             .setLocationAreaCode(11)
+                                                             .setMobileCountryCode(12)
+                                                             .setMobileNetworkCode(13)
+                                                             .setTimestamp(10L)
+                                                             .build();
+    private static final VisibleCell VISIBLE_CELL2 = VisibleCell.builder(VisibleCell.RadioType.GSM)
                                                              .setCellId(20)
                                                              .setLocationAreaCode(21)
                                                              .setMobileCountryCode(22)
@@ -93,8 +92,8 @@ public class GeolocationHeaderUnitTest {
             "CAEQDLoBJAoeChExMToxMToxMToxMToxMToxMRD___________8BGAEgCroBJAoeChExMToxMToxMToxMTox"
             + "MToxMxDi__________8BGAAgHroBEBIKCAMQChgLIAwoDRgBIAq6ARASCggBEBQYFSAWKBcYACAU";
 
-    private static int sRefreshVisibleNetworksRequests = 0;
-    private static int sRefreshLastKnownLocation = 0;
+    private static int sRefreshVisibleNetworksRequests;
+    private static int sRefreshLastKnownLocation;
 
     @Rule
     public TestRule mFeatureProcessor = new Features.JUnitProcessor();
@@ -107,7 +106,7 @@ public class GeolocationHeaderUnitTest {
         MockitoAnnotations.initMocks(this);
         GeolocationTracker.setLocationAgeForTesting(null);
         GeolocationHeader.setLocationSourceForTesting(
-                GeolocationHeader.LOCATION_SOURCE_HIGH_ACCURACY);
+                GeolocationHeader.LocationSource.HIGH_ACCURACY);
         GeolocationHeader.setAppPermissionGrantedForTesting(true);
         when(mTab.isIncognito()).thenReturn(false);
         sRefreshVisibleNetworksRequests = 0;
@@ -203,7 +202,7 @@ public class GeolocationHeaderUnitTest {
     @Test
     public void testGetGeoHeaderOldLocationHighAccuracy() throws ProcessInitException {
         GeolocationHeader.setLocationSourceForTesting(
-                GeolocationHeader.LOCATION_SOURCE_HIGH_ACCURACY);
+                GeolocationHeader.LocationSource.HIGH_ACCURACY);
         // Visible networks should be included
         checkOldLocation(
                 "X-Geo: w " + ENCODED_PROTO_LOCATION + " w " + ENCODED_PROTO_VISIBLE_NETWORKS);
@@ -212,21 +211,21 @@ public class GeolocationHeaderUnitTest {
     @Test
     public void testGetGeoHeaderOldLocationBatterySaving() throws ProcessInitException {
         GeolocationHeader.setLocationSourceForTesting(
-                GeolocationHeader.LOCATION_SOURCE_BATTERY_SAVING);
+                GeolocationHeader.LocationSource.BATTERY_SAVING);
         checkOldLocation(
                 "X-Geo: w " + ENCODED_PROTO_LOCATION + " w " + ENCODED_PROTO_VISIBLE_NETWORKS);
     }
 
     @Test
     public void testGetGeoHeaderOldLocationGpsOnly() throws ProcessInitException {
-        GeolocationHeader.setLocationSourceForTesting(GeolocationHeader.LOCATION_SOURCE_GPS_ONLY);
+        GeolocationHeader.setLocationSourceForTesting(GeolocationHeader.LocationSource.GPS_ONLY);
         // In GPS only mode, networks should never be included.
         checkOldLocation("X-Geo: w " + ENCODED_PROTO_LOCATION);
     }
 
     @Test
     public void testGetGeoHeaderOldLocationLocationOff() throws ProcessInitException {
-        GeolocationHeader.setLocationSourceForTesting(GeolocationHeader.LOCATION_SOURCE_MASTER_OFF);
+        GeolocationHeader.setLocationSourceForTesting(GeolocationHeader.LocationSource.MASTER_OFF);
         // If the master switch is off, networks should never be included (old location might).
         checkOldLocation("X-Geo: w " + ENCODED_PROTO_LOCATION);
     }
@@ -234,7 +233,7 @@ public class GeolocationHeaderUnitTest {
     @Test
     public void testGetGeoHeaderOldLocationAppPermissionDenied() throws ProcessInitException {
         GeolocationHeader.setLocationSourceForTesting(
-                GeolocationHeader.LOCATION_SOURCE_HIGH_ACCURACY);
+                GeolocationHeader.LocationSource.HIGH_ACCURACY);
         GeolocationHeader.setAppPermissionGrantedForTesting(false);
         // Nothing should be included when app permission is missing.
         checkOldLocation(null);

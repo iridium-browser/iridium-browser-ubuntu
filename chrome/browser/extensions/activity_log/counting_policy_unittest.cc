@@ -13,7 +13,6 @@
 #include "base/cancelable_callback.h"
 #include "base/command_line.h"
 #include "base/location.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_split.h"
@@ -39,8 +38,7 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/login/users/scoped_test_user_manager.h"
-#include "chrome/browser/chromeos/settings/cros_settings.h"
-#include "chrome/browser/chromeos/settings/device_settings_service.h"
+#include "chrome/browser/chromeos/settings/scoped_cros_settings_test_helper.h"
 #endif
 
 namespace extensions {
@@ -106,7 +104,7 @@ class CountingPolicyTest : public testing::Test {
     policy->ReadFilteredData(
         extension_id, type, api_name, page_url, arg_url, day,
         base::BindOnce(&CountingPolicyTest::CheckWrapper, std::move(checker),
-                       base::MessageLoop::current()->QuitWhenIdleClosure()));
+                       base::RunLoop::QuitCurrentWhenIdleClosureDeprecated()));
 
     // Set up a timeout for receiving results; if we haven't received anything
     // when the timeout triggers then assume that the test is broken.
@@ -127,7 +125,7 @@ class CountingPolicyTest : public testing::Test {
   static void CheckStringTableSizes(CountingPolicy* policy,
                                     int string_size,
                                     int url_size) {
-    sql::Connection* db = policy->GetDatabaseConnection();
+    sql::Database* db = policy->GetDatabaseConnection();
     sql::Statement statement1(db->GetCachedStatement(
         sql::StatementID(SQL_FROM_HERE), "SELECT COUNT(*) FROM string_ids"));
     ASSERT_TRUE(statement1.Step());
@@ -386,8 +384,7 @@ class CountingPolicyTest : public testing::Test {
   content::TestBrowserThreadBundle thread_bundle_;
 
 #if defined OS_CHROMEOS
-  chromeos::ScopedTestDeviceSettingsService test_device_settings_service_;
-  chromeos::ScopedTestCrosSettings test_cros_settings_;
+  chromeos::ScopedCrosSettingsTestHelper cros_settings_test_helper_;
   std::unique_ptr<chromeos::ScopedTestUserManager> test_user_manager_;
 #endif
 };

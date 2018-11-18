@@ -58,6 +58,8 @@ jumbo_component("compositor") {
     "layer_tree_owner.cc",
     "layer_tree_owner.h",
     "layer_type.h",
+    "overscroll/scroll_input_handler.cc",
+    "overscroll/scroll_input_handler.h",
     "paint_cache.cc",
     "paint_cache.h",
     "paint_context.cc",
@@ -65,6 +67,8 @@ jumbo_component("compositor") {
     "paint_recorder.cc",
     "paint_recorder.h",
     "property_change_reason.h",
+    "recyclable_compositor_mac.cc",
+    "recyclable_compositor_mac.h",
     "reflector.cc",
     "reflector.h",
     "scoped_animation_duration_scale_mode.cc",
@@ -79,24 +83,30 @@ jumbo_component("compositor") {
 
   defines = [ "COMPOSITOR_IMPLEMENTATION" ]
 
+  public_deps = [
+    "//cc",
+  ]
   deps = [
     "//base",
     "//base/third_party/dynamic_annotations",
-    "//cc",
     "//cc/animation",
     "//cc/paint",
-    "//components/viz/common",
     "//components/viz/host",
     "//components/viz/service",
     "//gpu/command_buffer/common",
     "//skia",
     "//ui/base",
     "//ui/display",
+    "//ui/events",
     "//ui/gfx",
     "//ui/gfx/animation",
     "//ui/gfx/geometry",
     "//ui/gl",
   ]
+
+  if (is_mac) {
+    deps += [ "//ui/accelerated_widget_mac" ]
+  }
 
   if (is_win && use_aura) {
     # TODO(sky): before we make this real need to remove
@@ -105,7 +115,7 @@ jumbo_component("compositor") {
   }
 }
 
-static_library("test_support") {
+jumbo_static_library("test_support") {
   testonly = true
   sources = [
     "test/context_factories_for_test.cc",
@@ -170,10 +180,20 @@ static_library("test_support") {
     deps += [ "//ui/gfx/x" ]
   }
 
+  if (is_mac) {
+    deps += [
+      "//gpu/ipc/service:service",
+      "//ui/accelerated_widget_mac",
+    ]
+  }
+
   if (use_ozone) {
     sources += [ "test/test_compositor_host_ozone.cc" ]
 
-    deps += [ "//ui/ozone" ]
+    deps += [
+      "//ui/ozone",
+      "//ui/platform_window",
+    ]
   } else if (use_x11) {
     sources += [ "test/test_compositor_host_x11.cc" ]
   }
@@ -208,7 +228,7 @@ test("compositor_unittests") {
     "//components/viz/common",
     "//components/viz/service",
     "//components/viz/test:test_support",
-    "//mojo/edk",
+    "//mojo/core/embedder",
     "//skia",
     "//testing/gmock",
     "//testing/gtest",
@@ -218,7 +238,8 @@ test("compositor_unittests") {
     "//ui/gl",
     "//ui/resources",
   ]
+
   if (is_linux) {
-    deps += [ "//third_party/mesa:osmesa" ]
+    deps += [ "//third_party/mesa_headers" ]
   }
 }

@@ -17,6 +17,8 @@ class GURL;
 
 namespace test_runner {
 
+extern const char* kIllegalString;
+
 inline bool IsASCIIAlpha(char ch) {
   return base::IsAsciiLower(ch | 0x20);
 }
@@ -31,7 +33,8 @@ std::string URLDescription(const GURL& url);
 const char* WebNavigationPolicyToString(
     const blink::WebNavigationPolicy& policy);
 
-blink::WebString V8StringToWebString(v8::Local<v8::String> v8_str);
+blink::WebString V8StringToWebString(v8::Isolate* isolate,
+                                     v8::Local<v8::String> v8_str);
 
 }  // namespace test_runner
 

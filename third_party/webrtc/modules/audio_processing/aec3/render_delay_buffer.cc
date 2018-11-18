@@ -25,9 +25,23 @@
 #include "rtc_base/checks.h"
 #include "rtc_base/constructormagic.h"
 #include "rtc_base/logging.h"
+#include "system_wrappers/include/field_trial.h"
 
 namespace webrtc {
 namespace {
+
+bool EnableZeroExternalDelayHeadroom() {
+  return !field_trial::IsEnabled(
+      "WebRTC-Aec3ZeroExternalDelayHeadroomKillSwitch");
+}
+
+size_t GetDownSamplingFactor(const EchoCanceller3Config& config) {
+  // Do not use down sampling factor 8 if kill switch is triggered.
+  return (config.delay.down_sampling_factor == 8 &&
+          field_trial::IsEnabled("WebRTC-Aec3DownSamplingFactor8KillSwitch"))
+             ? 4
+             : config.delay.down_sampling_factor;
+}
 
 class RenderDelayBufferImpl final : public RenderDelayBuffer {
  public:
@@ -57,12 +71,14 @@ class RenderDelayBufferImpl final : public RenderDelayBuffer {
   std::unique_ptr<ApmDataDumper> data_dumper_;
   const Aec3Optimization optimization_;
   const EchoCanceller3Config config_;
+  size_t down_sampling_factor_;
+  const bool use_zero_external_delay_headroom_;
   const int sub_block_size_;
   MatrixBuffer blocks_;
   VectorBuffer spectra_;
   FftBuffer ffts_;
-  rtc::Optional<size_t> delay_;
-  rtc::Optional<int> internal_delay_;
+  absl::optional<size_t> delay_;
+  absl::optional<int> internal_delay_;
   RenderBuffer echo_remover_buffer_;
   DownsampledRenderBuffer low_rate_;
   Decimator render_decimator_;
@@ -77,7 +93,7 @@ class RenderDelayBufferImpl final : public RenderDelayBuffer {
   size_t render_call_counter_ = 0;
   bool render_activity_ = false;
   size_t render_activity_counter_ = 0;
-  rtc::Optional<size_t> external_audio_buffer_delay_ms_;
+  absl::optional<size_t> external_audio_buffer_delay_;
   bool external_delay_verified_after_reset_ = false;
 
   int LowRateBufferOffset() const { return DelayEstimatorOffset(config_) >> 1; }
@@ -104,7 +120,7 @@ void IncreaseWriteIndices(int sub_block_size,
 }
 
 // Increases the read indices for the render buffers.
-void IncreaseReadIndices(const rtc::Optional<int>& delay,
+void IncreaseReadIndices(const absl::optional<int>& delay,
                          int sub_block_size,
                          MatrixBuffer* blocks,
                          VectorBuffer* spectra,
@@ -131,7 +147,7 @@ bool RenderOverrun(const MatrixBuffer& b, const DownsampledRenderBuffer& l) {
 // Checks for a render buffer underrun. If the delay is not specified, only the
 // low rate buffer underrun is counted as the delay offset for the other buffers
 // is unknown.
-bool RenderUnderrun(const rtc::Optional<int>& delay,
+bool RenderUnderrun(const absl::optional<int>& delay,
                     const MatrixBuffer& b,
                     const DownsampledRenderBuffer& l) {
   return l.read == l.write || (delay && b.read == b.write);
@@ -161,11 +177,12 @@ RenderDelayBufferImpl::RenderDelayBufferImpl(const EchoCanceller3Config& config,
           new ApmDataDumper(rtc::AtomicOps::Increment(&instance_count_))),
       optimization_(DetectOptimization()),
       config_(config),
-      sub_block_size_(
-          static_cast<int>(config.delay.down_sampling_factor > 0
-                               ? kBlockSize / config.delay.down_sampling_factor
-                               : kBlockSize)),
-      blocks_(GetRenderDelayBufferSize(config.delay.down_sampling_factor,
+      down_sampling_factor_(GetDownSamplingFactor(config)),
+      use_zero_external_delay_headroom_(EnableZeroExternalDelayHeadroom()),
+      sub_block_size_(static_cast<int>(down_sampling_factor_ > 0
+                                           ? kBlockSize / down_sampling_factor_
+                                           : kBlockSize)),
+      blocks_(GetRenderDelayBufferSize(down_sampling_factor_,
                                        config.delay.num_filters,
                                        config.filter.main.length_blocks),
               num_bands,
@@ -174,9 +191,9 @@ RenderDelayBufferImpl::RenderDelayBufferImpl(const EchoCanceller3Config& config,
       ffts_(blocks_.buffer.size()),
       delay_(config_.delay.default_delay),
       echo_remover_buffer_(&blocks_, &spectra_, &ffts_),
-      low_rate_(GetDownSampledBufferSize(config.delay.down_sampling_factor,
+      low_rate_(GetDownSampledBufferSize(down_sampling_factor_,
                                          config.delay.num_filters)),
-      render_decimator_(config.delay.down_sampling_factor),
+      render_decimator_(down_sampling_factor_),
       zero_block_(num_bands, std::vector<float>(kBlockSize, 0.f)),
       fft_(),
       render_ds_(sub_block_size_, 0.f),
@@ -202,22 +219,23 @@ void RenderDelayBufferImpl::Reset() {
       low_rate_.write, LowRateBufferOffset() * sub_block_size_);
 
   // Check for any external audio buffer delay and whether it is feasible.
-  if (external_audio_buffer_delay_ms_) {
-    constexpr size_t kHeadroom = 5;
+  if (external_audio_buffer_delay_) {
+    const size_t headroom = use_zero_external_delay_headroom_ ? 0 : 2;
     size_t external_delay_to_set = 0;
-    if (*external_audio_buffer_delay_ms_ < kHeadroom) {
+    if (*external_audio_buffer_delay_ < headroom) {
       external_delay_to_set = 0;
     } else {
-      external_delay_to_set = *external_audio_buffer_delay_ms_ - kHeadroom;
+      external_delay_to_set = *external_audio_buffer_delay_ - headroom;
     }
 
-    constexpr size_t kMaxExternalDelay = 170;
-    external_delay_to_set = std::min(external_delay_to_set, kMaxExternalDelay);
+    external_delay_to_set = std::min(external_delay_to_set, MaxDelay());
 
     // When an external delay estimate is available, use that delay as the
-    // initial render buffer delay. Avoid verifying the set delay.
-    external_delay_verified_after_reset_ = true;
-    SetDelay(external_delay_to_set);
+    // initial render buffer delay.
+    internal_delay_ = external_delay_to_set;
+    ApplyDelay(*internal_delay_);
+    delay_ = MapInternalDelayToExternalDelay();
+
     external_delay_verified_after_reset_ = false;
   } else {
     // If an external delay estimate is not available, use that delay as the
@@ -225,8 +243,8 @@ void RenderDelayBufferImpl::Reset() {
     ApplyDelay(config_.delay.default_delay);
 
     // Unset the delays which are set by SetDelay.
-    delay_ = rtc::nullopt;
-    internal_delay_ = rtc::nullopt;
+    delay_ = absl::nullopt;
+    internal_delay_ = absl::nullopt;
   }
 }
 
@@ -330,13 +348,12 @@ RenderDelayBufferImpl::PrepareCaptureProcessing() {
 
 // Sets the delay and returns a bool indicating whether the delay was changed.
 bool RenderDelayBufferImpl::SetDelay(size_t delay) {
-  if (!external_delay_verified_after_reset_ &&
-      external_audio_buffer_delay_ms_) {
-    int delay_difference = static_cast<int>(*external_audio_buffer_delay_ms_) -
-                           static_cast<int>(delay);
-    RTC_LOG(LS_WARNING) << "Difference between the externally reported delay "
-                           "and the first delay estimate: "
-                        << delay_difference << " ms.";
+  if (!external_delay_verified_after_reset_ && external_audio_buffer_delay_ &&
+      delay_) {
+    int difference = static_cast<int>(delay) - static_cast<int>(*delay_);
+    RTC_LOG(LS_WARNING) << "Mismatch between first estimated delay after reset "
+                           "and external delay: "
+                        << difference << " blocks";
     external_delay_verified_after_reset_ = true;
   }
   if (delay_ && *delay_ == delay) {
@@ -366,12 +383,14 @@ bool RenderDelayBufferImpl::CausalDelay(size_t delay) const {
 }
 
 void RenderDelayBufferImpl::SetAudioBufferDelay(size_t delay_ms) {
-  if (!external_audio_buffer_delay_ms_) {
+  if (!external_audio_buffer_delay_) {
     RTC_LOG(LS_WARNING)
         << "Receiving a first reported externally buffer delay of " << delay_ms
         << " ms.";
   }
-  external_audio_buffer_delay_ms_ = delay_ms;
+
+  // Convert delay from milliseconds to blocks (rounded down).
+  external_audio_buffer_delay_ = delay_ms / 4;
 }
 
 // Maps the externally computed delay to the delay used internally.
@@ -419,7 +438,11 @@ void RenderDelayBufferImpl::InsertBlock(
     std::copy(block[k].begin(), block[k].end(), b.buffer[b.write][k].begin());
   }
 
+  data_dumper_->DumpWav("aec3_render_decimator_input", block[0].size(),
+                        block[0].data(), 16000, 1);
   render_decimator_.Decimate(block[0], ds);
+  data_dumper_->DumpWav("aec3_render_decimator_output", ds.size(), ds.data(),
+                        16000 / down_sampling_factor_, 1);
   std::copy(ds.rbegin(), ds.rend(), lr.buffer.begin() + lr.write);
   fft_.PaddedFft(block[0], b.buffer[previous_write][0], &f.buffer[f.write]);
   f.buffer[f.write].Spectrum(optimization_, s.buffer[s.write]);

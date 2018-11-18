@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef UI_ACCESSIBILITY_AX_PLATFORM_NODE_MAC_H_
-#define UI_ACCESSIBILITY_AX_PLATFORM_NODE_MAC_H_
+#ifndef UI_ACCESSIBILITY_PLATFORM_AX_PLATFORM_NODE_MAC_H_
+#define UI_ACCESSIBILITY_PLATFORM_AX_PLATFORM_NODE_MAC_H_
 
 #import <Foundation/Foundation.h>
 
@@ -23,10 +23,16 @@ class AXPlatformNodeMac : public AXPlatformNodeBase {
   // AXPlatformNode.
   gfx::NativeViewAccessible GetNativeViewAccessible() override;
   void NotifyAccessibilityEvent(ax::mojom::Event event_type) override;
+  void AnnounceText(base::string16& text) override;
 
   // AXPlatformNodeBase.
   void Destroy() override;
   int GetIndexInParent() override;
+
+ protected:
+  void AddAttributeToList(const char* name,
+                          const char* value,
+                          PlatformAttributeList* attributes) override;
 
  private:
   ~AXPlatformNodeMac() override;
@@ -63,4 +69,4 @@ AX_EXPORT
 
 @end
 
-#endif  // UI_ACCESSIBILITY_AX_PLATFORM_NODE_MAC_H_
+#endif  // UI_ACCESSIBILITY_PLATFORM_AX_PLATFORM_NODE_MAC_H_

@@ -33,7 +33,7 @@ ScrollableArea* ScrollableAreaForRootScroller(const Node* node) {
     // getScrollableArea() since that could be the RootFrameViewport. The
     // rootScroller's ScrollableArea will be swapped in as the layout viewport
     // in RootFrameViewport so we need to ensure we get the layout viewport.
-    return node->GetDocument().View()->LayoutViewportScrollableArea();
+    return node->GetDocument().View()->LayoutViewport();
   }
 
   DCHECK(node->IsElementNode());
@@ -42,8 +42,8 @@ ScrollableArea* ScrollableAreaForRootScroller(const Node* node) {
   if (!element->GetLayoutObject() || !element->GetLayoutObject()->IsBox())
     return nullptr;
 
-  return static_cast<PaintInvalidationCapableScrollableArea*>(
-      ToLayoutBoxModelObject(element->GetLayoutObject())->GetScrollableArea());
+  return ToLayoutBoxModelObject(element->GetLayoutObject())
+      ->GetScrollableArea();
 }
 
 PaintLayer* PaintLayerForRootScroller(const Node* node) {
@@ -66,14 +66,6 @@ PaintLayer* PaintLayerForRootScroller(const Node* node) {
   return box->Layer();
 }
 
-bool IsEffective(const LayoutBox& box) {
-  if (!box.GetNode())
-    return false;
-
-  return box.GetNode() ==
-         &box.GetDocument().GetRootScrollerController().EffectiveRootScroller();
-}
-
 bool IsGlobal(const LayoutBox& box) {
   if (!box.GetNode() || !box.GetNode()->GetDocument().GetPage())
     return false;
@@ -82,13 +74,6 @@ bool IsGlobal(const LayoutBox& box) {
                               .GetPage()
                               ->GlobalRootScrollerController()
                               .GlobalRootScroller();
-}
-
-bool IsEffective(const PaintLayer& layer) {
-  if (!layer.GetLayoutBox())
-    return false;
-
-  return IsEffective(*layer.GetLayoutBox());
 }
 
 bool IsGlobal(const PaintLayer& layer) {

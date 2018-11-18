@@ -19,6 +19,7 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/no_destructor.h"
+#include "base/sequenced_task_runner.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/stringprintf.h"
 #include "base/synchronization/lock.h"
@@ -27,6 +28,7 @@
 #include "base/trace_event/memory_allocator_dump.h"
 #include "base/trace_event/memory_dump_manager.h"
 #include "base/trace_event/memory_dump_provider.h"
+#include "ipc/ipc_channel.h"
 #include "mojo/public/cpp/bindings/associated_group.h"
 #include "mojo/public/cpp/bindings/associated_group_controller.h"
 #include "mojo/public/cpp/bindings/connector.h"
@@ -118,6 +120,19 @@ class ChannelAssociatedGroupController
     return outgoing_messages_.size();
   }
 
+  std::pair<uint32_t, size_t> GetTopQueuedMessageNameAndCount() {
+    std::unordered_map<uint32_t, size_t> counts;
+    std::pair<uint32_t, size_t> top_message_name_and_count = {0, 0};
+    base::AutoLock lock(outgoing_messages_lock_);
+    for (const auto& message : outgoing_messages_) {
+      auto it_and_inserted = counts.emplace(message.name(), 0);
+      it_and_inserted.first->second++;
+      if (it_and_inserted.first->second > top_message_name_and_count.second)
+        top_message_name_and_count = *it_and_inserted.first;
+    }
+    return top_message_name_and_count;
+  }
+
   void Bind(mojo::ScopedMessagePipeHandle handle) {
     DCHECK(thread_checker_.CalledOnValidThread());
     DCHECK(task_runner_->BelongsToCurrentThread());
@@ -129,6 +144,7 @@ class ChannelAssociatedGroupController
     connector_->set_connection_error_handler(
         base::Bind(&ChannelAssociatedGroupController::OnPipeError,
                    base::Unretained(this)));
+    connector_->set_enforce_errors_from_incoming_receiver(false);
     connector_->SetWatcherHeapProfilerTag("IPC Channel");
   }
 
@@ -316,13 +332,29 @@ class ChannelAssociatedGroupController
   }
 
   void RaiseError() override {
-    if (task_runner_->BelongsToCurrentThread()) {
-      connector_->RaiseError();
-    } else {
-      task_runner_->PostTask(
-          FROM_HERE,
-          base::Bind(&ChannelAssociatedGroupController::RaiseError, this));
-    }
+    // We ignore errors on channel endpoints, leaving the pipe open. There are
+    // good reasons for this:
+    //
+    //   * We should never close a channel endpoint in either process as long as
+    //     the child process is still alive. The child's endpoint should only be
+    //     closed implicitly by process death, and the browser's endpoint should
+    //     only be closed after the child process is confirmed to be dead. Crash
+    //     reporting logic in Chrome relies on this behavior in order to do the
+    //     right thing.
+    //
+    //   * There are two interesting conditions under which RaiseError() can be
+    //     implicitly reached: an incoming message fails validation, or the
+    //     local endpoint drops a response callback without calling it.
+    //
+    //   * In the validation case, we also report the message as bad, and this
+    //     will imminently trigger the common bad-IPC path in the browser,
+    //     causing the browser to kill the offending renderer.
+    //
+    //   * In the dropped response callback case, the net result of ignoring the
+    //     issue is generally innocuous. While indicative of programmer error,
+    //     it's not a severe failure and is already covered by separate DCHECKs.
+    //
+    // See https://crbug.com/861607 for additional discussion.
   }
 
   bool PrefersSerializedMessages() override { return true; }
@@ -637,17 +669,15 @@ class ChannelAssociatedGroupController
         if (!shut_down_) {
           base::AutoLock lock(outgoing_messages_lock_);
           outgoing_messages_.emplace_back(std::move(*message));
-
-          // TODO(https://crbug.com/813045): Remove this. Typically this queue
-          // won't exceed something like 50 messages even on slow devices. If
-          // the massive leaks we see can be attributed to this queue, it would
-          // have to be quite a bit larger.
-          CHECK_LE(outgoing_messages_.size(), 100000u);
         }
         return true;
       }
       return connector_->Accept(message);
     } else {
+      // Do a message size check here so we don't lose valuable stack
+      // information to the task scheduler.
+      CHECK_LE(message->data_num_bytes(), Channel::kMaximumMessageSize);
+
       // We always post tasks to the master endpoint thread when called from
       // other threads in order to simulate IPC::ChannelProxy::Send behavior.
       task_runner_->PostTask(
@@ -952,6 +982,12 @@ bool ControllerMemoryDumpProvider::OnMemoryDump(
     dump->AddScalar(base::trace_event::MemoryAllocatorDump::kNameObjectCount,
                     base::trace_event::MemoryAllocatorDump::kUnitsObjects,
                     controller->GetQueuedMessageCount());
+    auto top_message_name_and_count =
+        controller->GetTopQueuedMessageNameAndCount();
+    dump->AddScalar("top_message_name", "id", top_message_name_and_count.first);
+    dump->AddScalar("top_message_count",
+                    base::trace_event::MemoryAllocatorDump::kUnitsObjects,
+                    top_message_name_and_count.second);
   }
 
   return true;

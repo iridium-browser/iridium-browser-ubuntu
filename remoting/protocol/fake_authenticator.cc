@@ -9,7 +9,6 @@
 
 #include "base/base64.h"
 #include "base/callback_helpers.h"
-#include "base/message_loop/message_loop.h"
 #include "base/rand_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "net/base/io_buffer.h"
@@ -43,7 +42,8 @@ void FakeChannelAuthenticator::SecureAndAuthenticate(
       // ordering deterministic.
       did_write_bytes_ = true;
     } else {
-      scoped_refptr<net::IOBuffer> write_buf = new net::IOBuffer(1);
+      scoped_refptr<net::IOBuffer> write_buf =
+          base::MakeRefCounted<net::IOBuffer>(1);
       write_buf->data()[0] = 0;
       int result = socket_->Write(
           write_buf.get(), 1,
@@ -57,7 +57,8 @@ void FakeChannelAuthenticator::SecureAndAuthenticate(
       }
     }
 
-    scoped_refptr<net::IOBuffer> read_buf = new net::IOBuffer(1);
+    scoped_refptr<net::IOBuffer> read_buf =
+        base::MakeRefCounted<net::IOBuffer>(1);
     int result =
         socket_->Read(read_buf.get(), 1,
                       base::Bind(&FakeChannelAuthenticator::OnAuthBytesRead,

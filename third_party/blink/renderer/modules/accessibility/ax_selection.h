@@ -26,10 +26,14 @@ enum class AXSelectionBehavior {
 };
 
 class MODULES_EXPORT AXSelection final {
-  DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
+  DISALLOW_NEW();
 
  public:
   class Builder;
+
+  static const AXSelection FromSelection(
+      const SelectionInDOMTree&,
+      const AXSelectionBehavior = AXSelectionBehavior::kExtendToValidDOMRange);
 
   AXSelection(const AXSelection&) = default;
   AXSelection& operator=(const AXSelection&) = default;
@@ -41,6 +45,8 @@ class MODULES_EXPORT AXSelection final {
   // The selection is invalid if either the anchor or the focus position is
   // invalid, or if the positions are in two separate documents.
   bool IsValid() const;
+
+  operator bool() const { return IsValid(); }
 
   const SelectionInDOMTree AsSelection(
       const AXSelectionBehavior =
@@ -60,7 +66,8 @@ class MODULES_EXPORT AXSelection final {
   AXPosition extent_;
 
 #if DCHECK_IS_ON()
-  // TODO(ax-dev): Use layout tree version in place of DOM and style versions.
+  // TODO(accessibility): Use layout tree version in place of DOM and style
+  // versions.
   uint64_t dom_tree_version_;
   uint64_t style_version_;
 #endif

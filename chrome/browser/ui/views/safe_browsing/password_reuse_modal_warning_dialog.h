@@ -24,6 +24,7 @@ class PasswordReuseModalWarningDialog
  public:
   PasswordReuseModalWarningDialog(content::WebContents* web_contents,
                                   ChromePasswordProtectionService* service,
+                                  ReusedPasswordType password_type,
                                   OnWarningDone done_callback);
 
   ~PasswordReuseModalWarningDialog() override;
@@ -42,18 +43,15 @@ class PasswordReuseModalWarningDialog
   base::string16 GetDialogButtonLabel(ui::DialogButton button) const override;
 
   // ChromePasswordProtectionService::Observer:
-  void OnStartingGaiaPasswordChange() override;
   void OnGaiaPasswordChanged() override;
   void OnMarkingSiteAsLegitimate(const GURL& url) override;
-  void InvokeActionForTesting(
-      ChromePasswordProtectionService::WarningAction action) override;
-  ChromePasswordProtectionService::WarningUIType GetObserverType() override;
+  void InvokeActionForTesting(WarningAction action) override;
+  WarningUIType GetObserverType() override;
 
   // content::WebContentsObserver:
   void WebContentsDestroyed() override;
 
  private:
-  const bool show_softer_warning_;
   OnWarningDone done_callback_;
   ChromePasswordProtectionService* service_;
   const GURL url_;

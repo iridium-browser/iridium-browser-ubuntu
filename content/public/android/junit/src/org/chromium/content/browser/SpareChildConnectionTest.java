@@ -4,10 +4,6 @@
 
 package org.chromium.content.browser;
 
-import android.content.ComponentName;
-import android.content.Context;
-import android.os.Bundle;
-
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
@@ -15,6 +11,10 @@ import static org.junit.Assert.assertTrue;
 import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+
+import android.content.ComponentName;
+import android.content.Context;
+import android.os.Bundle;
 
 import org.junit.After;
 import org.junit.Before;
@@ -40,7 +40,7 @@ public class SpareChildConnectionTest {
 
     // A connection allocator not used to create connections.
     private final ChildConnectionAllocator mWrongConnectionAllocator =
-            ChildConnectionAllocator.createForTest("org.chromium.test", "TestServiceName",
+            ChildConnectionAllocator.createForTest(null, "org.chromium.test", "TestServiceName",
                     3 /* serviceCount */, false /* bindToCaller */,
                     false /* bindAsExternalService */, false /* useStrongBinding */);
 
@@ -87,7 +87,7 @@ public class SpareChildConnectionTest {
         LauncherThread.setCurrentThreadAsLauncherThread();
 
         mConnectionAllocator =
-                ChildConnectionAllocator.createForTest("org.chromium.test.spare_connection",
+                ChildConnectionAllocator.createForTest(null, "org.chromium.test.spare_connection",
                         "TestServiceName", 5 /* serviceCount */, false /* bindToCaller */,
                         false /* bindAsExternalService */, false /* useStrongBinding */);
         mConnectionAllocator.setConnectionFactoryForTesting(mTestConnectionFactory);

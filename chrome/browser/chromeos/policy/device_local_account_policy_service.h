@@ -35,8 +35,8 @@ class DeviceSettingsService;
 class SessionManagerClient;
 }
 
-namespace net {
-class URLRequestContextGetter;
+namespace network {
+class SharedURLLoaderFactory;
 }
 
 namespace policy {
@@ -107,7 +107,7 @@ class DeviceLocalAccountPolicyBroker
   void ConnectIfPossible(
       chromeos::DeviceSettingsService* device_settings_service,
       DeviceManagementService* device_management_service,
-      scoped_refptr<net::URLRequestContextGetter> request_context);
+      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory);
 
   // Reads the refresh delay from policy and configures the refresh scheduler.
   void UpdateRefreshDelay();
@@ -124,9 +124,7 @@ class DeviceLocalAccountPolicyBroker
   void OnComponentCloudPolicyUpdated() override;
 
  private:
-  void CreateComponentCloudPolicyService(
-      const scoped_refptr<net::URLRequestContextGetter>& request_context,
-      CloudPolicyClient* client);
+  void CreateComponentCloudPolicyService(CloudPolicyClient* client);
 
   AffiliatedInvalidationServiceProvider* const invalidation_service_provider_;
   const std::string account_id_;
@@ -174,8 +172,7 @@ class DeviceLocalAccountPolicyService {
       scoped_refptr<base::SequencedTaskRunner> extension_cache_task_runner,
       scoped_refptr<base::SequencedTaskRunner>
           external_data_service_backend_task_runner,
-      scoped_refptr<base::SequencedTaskRunner> io_task_runner,
-      scoped_refptr<net::URLRequestContextGetter> request_context);
+      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory);
   virtual ~DeviceLocalAccountPolicyService();
 
   // Shuts down the service and prevents further policy fetches from the cloud.
@@ -236,7 +233,7 @@ class DeviceLocalAccountPolicyService {
   // Notifies the |observers_| that the policy for |user_id| has changed.
   void NotifyPolicyUpdated(const std::string& user_id);
 
-  base::ObserverList<Observer, true> observers_;
+  base::ObserverList<Observer, true>::Unchecked observers_;
 
   chromeos::SessionManagerClient* session_manager_client_;
   chromeos::DeviceSettingsService* device_settings_service_;
@@ -272,7 +269,7 @@ class DeviceLocalAccountPolicyService {
 
   std::unique_ptr<DeviceLocalAccountExternalDataService> external_data_service_;
 
-  scoped_refptr<net::URLRequestContextGetter> request_context_;
+  scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory_;
 
   const std::unique_ptr<chromeos::CrosSettings::ObserverSubscription>
       local_accounts_subscription_;

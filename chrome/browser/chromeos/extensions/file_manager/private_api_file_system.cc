@@ -5,17 +5,19 @@
 #include "chrome/browser/chromeos/extensions/file_manager/private_api_file_system.h"
 
 #include <sys/statvfs.h>
+#include <sys/xattr.h>
 
 #include <algorithm>
 #include <utility>
 
+#include "base/files/file_enumerator.h"
 #include "base/files/file_util.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/sys_info.h"
+#include "base/task/post_task.h"
 #include "base/task_runner_util.h"
-#include "base/task_scheduler/post_task.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
 #include "chrome/browser/chromeos/extensions/file_manager/event_router.h"
@@ -31,21 +33,24 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/extensions/api/file_manager_private.h"
 #include "chrome/common/extensions/api/file_manager_private_internal.h"
+#include "chromeos/chromeos_features.h"
 #include "chromeos/disks/disk_mount_manager.h"
 #include "components/drive/chromeos/file_system_interface.h"
 #include "components/drive/drive.pb.h"
 #include "components/drive/event_logger.h"
+#include "components/drive/file_system_core_util.h"
 #include "components/storage_monitor/storage_info.h"
 #include "components/storage_monitor/storage_monitor.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/url_constants.h"
-#include "device/media_transfer_protocol/media_transfer_protocol_manager.h"
 #include "extensions/browser/extension_util.h"
 #include "net/base/escape.h"
+#include "services/device/public/mojom/mtp_manager.mojom.h"
 #include "storage/browser/fileapi/file_stream_reader.h"
 #include "storage/browser/fileapi/file_system_context.h"
 #include "storage/browser/fileapi/file_system_file_util.h"
@@ -93,6 +98,22 @@ size_t GetFileNameMaxLengthAsync(const std::string& path) {
   return stat.f_namemax;
 }
 
+bool GetFileExtendedAttribute(const base::FilePath& path,
+                              const char* name,
+                              std::vector<char>* value) {
+  ssize_t len = getxattr(path.value().c_str(), name, nullptr, 0);
+  if (len < 0) {
+    PLOG_IF(ERROR, errno != ENODATA) << "getxattr: " << path;
+    return false;
+  }
+  value->resize(len);
+  if (getxattr(path.value().c_str(), name, value->data(), len) != len) {
+    PLOG(ERROR) << "getxattr: " << path;
+    return false;
+  }
+  return true;
+}
+
 // Returns EventRouter for the |profile_id| if available.
 file_manager::EventRouter* GetEventRouterByProfileId(void* profile_id) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
@@ -100,7 +121,7 @@ file_manager::EventRouter* GetEventRouterByProfileId(void* profile_id) {
   // |profile_id| needs to be checked with ProfileManager::IsValidProfile
   // before using it.
   if (!g_browser_process->profile_manager()->IsValidProfile(profile_id))
-    return NULL;
+    return nullptr;
   Profile* profile = reinterpret_cast<Profile*>(profile_id);
 
   return file_manager::EventRouterFactory::GetForProfile(profile);
@@ -135,8 +156,8 @@ void OnCopyProgress(
     int64_t size) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::UI},
       base::BindOnce(&NotifyCopyProgress, profile_id, *operation_id, type,
                      source_url, destination_url, size));
 }
@@ -168,8 +189,8 @@ void OnCopyCompleted(
     base::File::Error error) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::UI},
       base::BindOnce(&NotifyCopyCompletion, profile_id, *operation_id,
                      source_url, destination_url, error));
 }
@@ -233,25 +254,26 @@ void ComputeChecksumRespondOnUIThread(
     const base::Callback<void(const std::string&)>& callback,
     const std::string& hash) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                          base::BindOnce(callback, hash));
+  base::PostTaskWithTraits(FROM_HERE, {BrowserThread::UI},
+                           base::BindOnce(callback, hash));
 }
 
 // Calls a response callback on the UI thread.
 void GetFileMetadataRespondOnUIThread(
-    const storage::FileSystemOperation::GetMetadataCallback& callback,
+    storage::FileSystemOperation::GetMetadataCallback callback,
     base::File::Error result,
     const base::File::Info& file_info) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                          base::BindOnce(callback, result, file_info));
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::UI},
+      base::BindOnce(std::move(callback), result, file_info));
 }
 
 }  // namespace
 
 ExtensionFunction::ResponseAction
 FileManagerPrivateEnableExternalFileSchemeFunction::Run() {
-  ChildProcessSecurityPolicy::GetInstance()->GrantScheme(
+  ChildProcessSecurityPolicy::GetInstance()->GrantRequestScheme(
       render_frame_host()->GetProcess()->GetID(), content::kExternalFileScheme);
   return RespondNow(NoArguments());
 }
@@ -307,16 +329,16 @@ void PostResponseCallbackTaskToUIThread(
     const FileWatchFunctionBase::ResponseCallback& callback,
     bool success) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                          base::BindOnce(callback, success));
+  base::PostTaskWithTraits(FROM_HERE, {BrowserThread::UI},
+                           base::BindOnce(callback, success));
 }
 
 void PostNotificationCallbackTaskToUIThread(
     const storage::WatcherManager::NotificationCallback& callback,
     storage::WatcherManager::ChangeType type) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                          base::BindOnce(callback, type));
+  base::PostTaskWithTraits(FROM_HERE, {BrowserThread::UI},
+                           base::BindOnce(callback, type));
 }
 
 }  // namespace
@@ -353,8 +375,8 @@ bool FileWatchFunctionBase::RunAsync() {
   file_manager::EventRouter* const event_router =
       file_manager::EventRouterFactory::GetForProfile(GetProfile());
 
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::IO},
       base::BindOnce(&FileWatchFunctionBase::RunAsyncOnIOThread, this,
                      file_system_context, file_system_url,
                      event_router->GetWeakPtr()));
@@ -371,8 +393,8 @@ void FileWatchFunctionBase::RunAsyncOnIOThread(
       file_system_context->GetWatcherManager(file_system_url.type());
 
   if (!watcher_manager) {
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, {BrowserThread::UI},
         base::BindOnce(
             &FileWatchFunctionBase::PerformFallbackFileWatchOperationOnUIThread,
             this, file_system_url, event_router));
@@ -459,7 +481,8 @@ bool FileManagerPrivateGetSizeStatsFunction::RunAsync() {
   if (!volume.get())
     return false;
 
-  if (volume->type() == file_manager::VOLUME_TYPE_GOOGLE_DRIVE) {
+  if (volume->type() == file_manager::VOLUME_TYPE_GOOGLE_DRIVE &&
+      !base::FeatureList::IsEnabled(chromeos::features::kDriveFs)) {
     drive::FileSystemInterface* file_system =
         drive::util::GetFileSystemByProfile(GetProfile());
     if (!file_system) {
@@ -470,7 +493,7 @@ bool FileManagerPrivateGetSizeStatsFunction::RunAsync() {
       return true;
     }
 
-    file_system->GetAvailableSpace(base::Bind(
+    file_system->GetAvailableSpace(base::BindOnce(
         &FileManagerPrivateGetSizeStatsFunction::OnGetDriveAvailableSpace,
         this));
   } else if (volume->type() == file_manager::VOLUME_TYPE_MTP) {
@@ -484,8 +507,7 @@ bool FileManagerPrivateGetSizeStatsFunction::RunAsync() {
     DCHECK(!storage_name.empty());
 
     // Get MTP StorageInfo.
-    device::MediaTransferProtocolManager* manager =
-        storage_monitor->media_transfer_protocol_manager();
+    auto* manager = storage_monitor->media_transfer_protocol_manager();
     manager->GetStorageInfoFromDevice(
         storage_name,
         base::Bind(
@@ -522,7 +544,7 @@ void FileManagerPrivateGetSizeStatsFunction::OnGetDriveAvailableSpace(
 }
 
 void FileManagerPrivateGetSizeStatsFunction::OnGetMtpAvailableSpace(
-    const device::mojom::MtpStorageInfo& mtp_storage_info,
+    device::mojom::MtpStorageInfoPtr mtp_storage_info,
     const bool error) {
   if (error) {
     // If stats couldn't be gotten from MTP volume, result should be left
@@ -531,8 +553,8 @@ void FileManagerPrivateGetSizeStatsFunction::OnGetMtpAvailableSpace(
     return;
   }
 
-  const uint64_t max_capacity = mtp_storage_info.max_capacity;
-  const uint64_t free_space_in_bytes = mtp_storage_info.free_space_in_bytes;
+  const uint64_t max_capacity = mtp_storage_info->max_capacity;
+  const uint64_t free_space_in_bytes = mtp_storage_info->free_space_in_bytes;
   OnGetSizeStats(&max_capacity, &free_space_in_bytes);
 }
 
@@ -635,15 +657,15 @@ void GetFileMetadataOnIOThread(
     scoped_refptr<storage::FileSystemContext> file_system_context,
     const FileSystemURL& url,
     int fields,
-    const storage::FileSystemOperation::GetMetadataCallback& callback) {
+    storage::FileSystemOperation::GetMetadataCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   file_system_context->operation_runner()->GetMetadata(
-      url, fields, base::Bind(&GetFileMetadataRespondOnUIThread, callback));
+      url, fields,
+      base::BindOnce(&GetFileMetadataRespondOnUIThread, std::move(callback)));
 }
 
 // Checks if the available space of the |path| is enough for required |bytes|.
-bool CheckLocalDiskSpaceOnIOThread(const base::FilePath& path, int64_t bytes) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
+bool CheckLocalDiskSpace(const base::FilePath& path, int64_t bytes) {
   return bytes <= base::SysInfo::AmountOfFreeDiskSpace(path) -
                       cryptohome::kMinFreeSpaceInBytes;
 }
@@ -686,18 +708,18 @@ bool FileManagerPrivateInternalStartCopyFunction::RunAsync() {
   // spece by freeing drive caches.
   if (destination_url_.filesystem_id() ==
       file_manager::util::GetDownloadsMountPointName(GetProfile())) {
-    return BrowserThread::PostTask(
-        BrowserThread::IO, FROM_HERE,
-        base::BindOnce(&GetFileMetadataOnIOThread, file_system_context,
-                       source_url_,
-                       storage::FileSystemOperation::GET_METADATA_FIELD_SIZE,
-                       base::Bind(&FileManagerPrivateInternalStartCopyFunction::
-                                      RunAfterGetFileMetadata,
-                                  this)));
+    return base::PostTaskWithTraits(
+        FROM_HERE, {BrowserThread::IO},
+        base::BindOnce(
+            &GetFileMetadataOnIOThread, file_system_context, source_url_,
+            storage::FileSystemOperation::GET_METADATA_FIELD_SIZE,
+            base::BindOnce(&FileManagerPrivateInternalStartCopyFunction::
+                               RunAfterGetFileMetadata,
+                           this)));
   }
 
-  return BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
+  return base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::UI},
       base::BindOnce(
           &FileManagerPrivateInternalStartCopyFunction::RunAfterFreeDiskSpace,
           this, true));
@@ -723,17 +745,15 @@ void FileManagerPrivateInternalStartCopyFunction::RunAfterGetFileMetadata(
             &FileManagerPrivateInternalStartCopyFunction::RunAfterFreeDiskSpace,
             this));
   } else {
-    const bool result = BrowserThread::PostTaskAndReplyWithResult(
-        BrowserThread::IO, FROM_HERE,
-        base::Bind(
-            &CheckLocalDiskSpaceOnIOThread,
+    base::PostTaskWithTraitsAndReplyWithResult(
+        FROM_HERE, {base::MayBlock()},
+        base::BindOnce(
+            &CheckLocalDiskSpace,
             file_manager::util::GetDownloadsFolderForProfile(GetProfile()),
             file_info.size),
-        base::Bind(
+        base::BindOnce(
             &FileManagerPrivateInternalStartCopyFunction::RunAfterFreeDiskSpace,
             this));
-    if (!result)
-      SendResponse(false);
   }
 }
 
@@ -750,8 +770,8 @@ void FileManagerPrivateInternalStartCopyFunction::RunAfterFreeDiskSpace(
   scoped_refptr<storage::FileSystemContext> file_system_context =
       file_manager::util::GetFileSystemContextForRenderFrameHost(
           GetProfile(), render_frame_host());
-  const bool result = BrowserThread::PostTaskAndReplyWithResult(
-      BrowserThread::IO, FROM_HERE,
+  const bool result = base::PostTaskWithTraitsAndReplyWithResult(
+      FROM_HERE, {BrowserThread::IO},
       base::Bind(&StartCopyOnIOThread, GetProfile(), file_system_context,
                  source_url_, destination_url_),
       base::Bind(
@@ -781,9 +801,10 @@ bool FileManagerPrivateCancelCopyFunction::RunAsync() {
           GetProfile(), render_frame_host());
 
   // We don't much take care about the result of cancellation.
-  BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
-                          base::BindOnce(&CancelCopyOnIOThread,
-                                         file_system_context, params->copy_id));
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::IO},
+      base::BindOnce(&CancelCopyOnIOThread, file_system_context,
+                     params->copy_id));
   SendResponse(true);
   return true;
 }
@@ -824,10 +845,9 @@ bool FileManagerPrivateInternalResolveIsolatedEntriesFunction::RunAsync() {
   }
 
   file_manager::util::ConvertFileDefinitionListToEntryDefinitionList(
-      GetProfile(),
-      extension_->id(),
+      GetProfile(), extension_->id(),
       file_definition_list,  // Safe, since copied internally.
-      base::Bind(
+      base::BindOnce(
           &FileManagerPrivateInternalResolveIsolatedEntriesFunction::
               RunAsyncAfterConvertFileDefinitionListToEntryDefinitionList,
           this));
@@ -863,8 +883,7 @@ FileManagerPrivateInternalComputeChecksumFunction::
 }
 
 FileManagerPrivateInternalComputeChecksumFunction::
-    ~FileManagerPrivateInternalComputeChecksumFunction() {
-}
+    ~FileManagerPrivateInternalComputeChecksumFunction() = default;
 
 bool FileManagerPrivateInternalComputeChecksumFunction::RunAsync() {
   using extensions::api::file_manager_private_internal::ComputeChecksum::Params;
@@ -896,8 +915,8 @@ bool FileManagerPrivateInternalComputeChecksumFunction::RunAsync() {
       &ComputeChecksumRespondOnUIThread,
       base::Bind(&FileManagerPrivateInternalComputeChecksumFunction::Respond,
                  this));
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::IO},
       base::BindOnce(&FileStreamMd5Digester::GetMd5Digest,
                      base::Unretained(digester_.get()), base::Passed(&reader),
                      result_callback));
@@ -930,21 +949,80 @@ bool FileManagerPrivateSearchFilesByHashesFunction::RunAsync() {
   }
   set_log_on_completion(true);
 
-  drive::FileSystemInterface* const file_system =
-      drive::util::GetFileSystemByProfile(GetProfile());
-  if (!file_system) {
-    // |file_system| is NULL if Drive is disabled.
+  drive::DriveIntegrationService* integration_service =
+      drive::util::GetIntegrationServiceByProfile(GetProfile());
+  if (!integration_service) {
+    // |integration_service| is NULL if Drive is disabled or not mounted.
     return false;
   }
 
   std::set<std::string> hashes(params->hash_list.begin(),
                                params->hash_list.end());
-  file_system->SearchByHashes(
-      hashes,
-      base::Bind(
-          &FileManagerPrivateSearchFilesByHashesFunction::OnSearchByHashes,
-          this, hashes));
+
+  drive::FileSystemInterface* const file_system =
+      drive::util::GetFileSystemByProfile(GetProfile());
+  if (file_system) {
+    file_system->SearchByHashes(
+        hashes,
+        base::BindOnce(
+            &FileManagerPrivateSearchFilesByHashesFunction::OnSearchByHashes,
+            this, hashes));
+  } else {
+    // |file_system| is NULL if the backend is DriveFs. It doesn't provide
+    // dedicated backup solution yet, so for now just walk the files and check
+    // MD5 extended attribute.
+    base::PostTaskWithTraitsAndReplyWithResult(
+        FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
+        base::BindOnce(
+            &FileManagerPrivateSearchFilesByHashesFunction::SearchByAttribute,
+            this, hashes,
+            integration_service->GetMountPointPath().Append(
+                drive::util::kDriveMyDriveRootDirName),
+            drive::util::GetDriveMountPointPath(GetProfile())),
+        base::BindOnce(
+            &FileManagerPrivateSearchFilesByHashesFunction::OnSearchByAttribute,
+            this, hashes));
+  }
+
   return true;
+}
+
+std::vector<drive::HashAndFilePath>
+FileManagerPrivateSearchFilesByHashesFunction::SearchByAttribute(
+    const std::set<std::string>& hashes,
+    const base::FilePath& dir,
+    const base::FilePath& prefix) {
+  std::vector<drive::HashAndFilePath> results;
+
+  if (hashes.empty())
+    return results;
+
+  std::set<std::string> remaining = hashes;
+  std::vector<char> attribute;
+  base::FileEnumerator enumerator(dir, true, base::FileEnumerator::FILES);
+  for (base::FilePath path = enumerator.Next(); !path.empty();
+       path = enumerator.Next()) {
+    if (GetFileExtendedAttribute(path, "user.drive.md5", &attribute)) {
+      std::string md5(attribute.begin(), attribute.end());
+
+      if (remaining.erase(md5)) {
+        base::FilePath drive_path = prefix;
+        bool success = dir.AppendRelativePath(path, &drive_path);
+        DCHECK(success);
+        results.push_back({md5, drive_path});
+        if (remaining.empty())
+          break;
+      }
+    }
+  }
+
+  return results;
+}
+
+void FileManagerPrivateSearchFilesByHashesFunction::OnSearchByAttribute(
+    const std::set<std::string>& hashes,
+    const std::vector<drive::HashAndFilePath>& results) {
+  OnSearchByHashes(hashes, drive::FileError::FILE_ERROR_OK, results);
 }
 
 void FileManagerPrivateSearchFilesByHashesFunction::OnSearchByHashes(
@@ -989,9 +1067,17 @@ FileManagerPrivateInternalSetEntryTagFunction::Run() {
   const std::unique_ptr<Params> params(Params::Create(*args_));
   EXTENSION_FUNCTION_VALIDATE(params);
 
-  const base::FilePath local_path = file_manager::util::GetLocalPathFromURL(
-      render_frame_host(), chrome_details_.GetProfile(), GURL(params->url));
-  const base::FilePath drive_path = drive::util::ExtractDrivePath(local_path);
+  scoped_refptr<storage::FileSystemContext> file_system_context =
+      file_manager::util::GetFileSystemContextForRenderFrameHost(
+          Profile::FromBrowserContext(browser_context()), render_frame_host());
+  const storage::FileSystemURL file_system_url(
+      file_system_context->CrackURL(GURL(params->url)));
+  if (file_system_url.type() == storage::kFileSystemTypeDriveFs) {
+    return RespondNow(NoArguments());
+  }
+
+  const base::FilePath drive_path =
+      drive::util::ExtractDrivePath(file_system_url.path());
   if (drive_path.empty())
     return RespondNow(Error("Only Drive files and directories are supported."));
 

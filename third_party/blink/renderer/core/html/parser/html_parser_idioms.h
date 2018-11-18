@@ -27,7 +27,7 @@
 
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/qualified_name.h"
-#include "third_party/blink/renderer/platform/decimal.h"
+#include "third_party/blink/renderer/platform/wtf/decimal.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
@@ -121,11 +121,11 @@ bool ThreadSafeMatch(const String&, const QualifiedName&);
 
 enum CharacterWidth { kLikely8Bit, kForce8Bit, kForce16Bit };
 
-String AttemptStaticStringCreation(const LChar*, size_t);
+String AttemptStaticStringCreation(const LChar*, wtf_size_t);
 
-String AttemptStaticStringCreation(const UChar*, size_t, CharacterWidth);
+String AttemptStaticStringCreation(const UChar*, wtf_size_t, CharacterWidth);
 
-template <size_t inlineCapacity>
+template <wtf_size_t inlineCapacity>
 inline static String AttemptStaticStringCreation(
     const Vector<UChar, inlineCapacity>& vector,
     CharacterWidth width) {

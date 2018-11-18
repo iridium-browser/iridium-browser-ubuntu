@@ -52,7 +52,10 @@ class GaiaScreenHandler : public BaseScreenHandler,
   // GaiaView:
   void MaybePreloadAuthExtension() override;
   void DisableRestrictiveProxyCheckForTest() override;
-  void ShowGaiaAsync() override;
+  void ShowGaiaAsync(const base::Optional<AccountId>& account_id) override;
+  void ShowSigninScreenForTest(const std::string& username,
+                               const std::string& password,
+                               const std::string& services) override;
 
  private:
   // TODO (xiaoyinh): remove this dependency.
@@ -107,7 +110,8 @@ class GaiaScreenHandler : public BaseScreenHandler,
                                     const std::string& password,
                                     const std::string& auth_code,
                                     bool using_saml,
-                                    const std::string& gaps_cookie);
+                                    const std::string& gaps_cookie,
+                                    const ::login::StringList& services);
   void HandleCompleteLogin(const std::string& gaia_id,
                            const std::string& typed_email,
                            const std::string& password,
@@ -127,9 +131,16 @@ class GaiaScreenHandler : public BaseScreenHandler,
   void HandleIdentifierEntered(const std::string& account_identifier);
 
   void HandleAuthExtensionLoaded();
-  void HandleUpdateGaiaDialogSize(int width, int height);
-  void HandleUpdateGaiaDialogVisibility(bool visible);
+  void HandleUpdateOobeDialogSize(int width, int height);
+  void HandleHideOobeDialog();
   void HandleShowAddUser(const base::ListValue* args);
+  void HandleGetIsSamlUserPasswordless(const std::string& callback_id,
+                                       const std::string& typed_email,
+                                       const std::string& gaia_id);
+  void HandleUpdateSigninUIState(int state);
+  void HandleShowGuestForGaiaScreen(bool allow_guest_login,
+                                    bool can_show_for_gaia);
+
   void OnShowAddUser();
 
   // Really handles the complete login message.
@@ -157,9 +168,6 @@ class GaiaScreenHandler : public BaseScreenHandler,
                 authpolicy::ErrorType error,
                 const authpolicy::ActiveDirectoryAccountInfo& account_info);
 
-  // Show sign-in screen for the given credentials.
-  void ShowSigninScreenForTest(const std::string& username,
-                               const std::string& password);
   // Attempts login for test.
   void SubmitLoginFormForTest();
 
@@ -251,6 +259,8 @@ class GaiaScreenHandler : public BaseScreenHandler,
   // Test credentials.
   std::string test_user_;
   std::string test_pass_;
+  // Test result of userInfo.
+  std::string test_services_;
   bool test_expects_complete_login_ = false;
 
   // True if proxy doesn't allow access to google.com/generate_204.

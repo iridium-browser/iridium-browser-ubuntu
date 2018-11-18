@@ -290,8 +290,7 @@ void KeywordProvider::Start(const AutocompleteInput& input,
         keyword, !remaining_input.empty(), &matches);
   }
 
-  for (TemplateURLService::TURLsAndMeaningfulLengths::iterator
-           i(matches.begin()); i != matches.end(); ) {
+  for (auto i(matches.begin()); i != matches.end();) {
     const TemplateURL* template_url = i->first;
 
     // Prune any extension keywords that are disallowed in incognito mode (if
@@ -524,7 +523,7 @@ void KeywordProvider::FillInURLAndContents(
     DCHECK(element_ref.SupportsReplacement(
         GetTemplateURLService()->search_terms_data()));
     TemplateURLRef::SearchTermsArgs search_terms_args(remaining_input);
-    search_terms_args.append_extra_query_params =
+    search_terms_args.append_extra_query_params_from_command_line =
         element == GetTemplateURLService()->GetDefaultSearchProvider();
     match->destination_url = GURL(element_ref.ReplaceSearchTerms(
         search_terms_args, GetTemplateURLService()->search_terms_data()));

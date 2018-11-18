@@ -10,7 +10,6 @@
 #include <utility>
 
 #include "core/fxcrt/fx_extension.h"
-#include "third_party/base/ptr_util.h"
 
 #if _FX_PLATFORM_ == _FX_PLATFORM_WINDOWS_
 static_assert(sizeof(FX_COLORREF) == sizeof(COLORREF),
@@ -93,8 +92,8 @@ FX_COLORREF ArgbToColorRef(FX_ARGB argb) {
 }
 
 FX_ARGB AlphaAndColorRefToArgb(int a, FX_COLORREF colorref) {
-  return FXARGB_MAKE(a, FXSYS_GetRValue(colorref), FXSYS_GetGValue(colorref),
-                     FXSYS_GetBValue(colorref));
+  return ArgbEncode(a, FXSYS_GetRValue(colorref), FXSYS_GetGValue(colorref),
+                    FXSYS_GetBValue(colorref));
 }
 
 FX_ARGB StringToFXARGB(const WideStringView& wsValue) {

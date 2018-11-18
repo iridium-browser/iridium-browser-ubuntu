@@ -31,13 +31,24 @@
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/navigator.h"
+#include "third_party/blink/renderer/core/loader/document_loader.h"
 #include "third_party/blink/renderer/core/origin_trials/origin_trials.h"
 #include "third_party/blink/renderer/core/page/page.h"
+#include "third_party/blink/renderer/core/timing/performance.h"
 #include "third_party/blink/renderer/modules/gamepad/gamepad_dispatcher.h"
 #include "third_party/blink/renderer/modules/gamepad/gamepad_event.h"
 #include "third_party/blink/renderer/modules/gamepad/gamepad_list.h"
+#include "third_party/blink/renderer/modules/vr/navigator_vr.h"
+
+namespace blink {
 
 namespace {
+
+// A button press must have a value at least this large to qualify as a user
+// activation. The selected value should be greater than 0.5 so that axes
+// incorrectly mapped as triggers do not generate activations in the idle
+// position.
+const double kButtonActivationThreshold = 0.9;
 
 void HasGamepadConnectionChanged(const String& old_id,
                                  const String& new_id,
@@ -54,24 +65,54 @@ void HasGamepadConnectionChanged(const String& old_id,
     *gamepad_lost = id_changed || (old_connected && !new_connected);
 }
 
-}  // namespace
+bool HasUserActivation(GamepadList* gamepads) {
+  if (!gamepads)
+    return false;
+  // A button press counts as a user activation if the button's value is greater
+  // than the activation threshold. A threshold is used so that analog buttons
+  // or triggers do not generate an activation from a light touch.
+  for (wtf_size_t pad_index = 0; pad_index < gamepads->length(); ++pad_index) {
+    Gamepad* pad = gamepads->item(pad_index);
+    if (pad) {
+      const GamepadButtonVector& buttons = pad->buttons();
+      for (auto button : buttons) {
+        double value = button->value();
+        if (value > kButtonActivationThreshold)
+          return true;
+      }
+    }
+  }
+  return false;
+}
 
-namespace blink {
+}  // namespace
 
 template <typename T>
 static void SampleGamepad(unsigned index,
                           T& gamepad,
-                          const device::Gamepad& device_gamepad) {
+                          const device::Gamepad& device_gamepad,
+                          const TimeTicks& navigation_start) {
   String old_id = gamepad.id();
   bool old_was_connected = gamepad.connected();
 
+  TimeTicks last_updated =
+      TimeTicks() + TimeDelta::FromMicroseconds(device_gamepad.timestamp);
+  DOMHighResTimeStamp timestamp =
+      Performance::MonotonicTimeToDOMHighResTimeStamp(navigation_start,
+                                                      last_updated, false);
   gamepad.SetId(device_gamepad.id);
   gamepad.SetConnected(device_gamepad.connected);
-  gamepad.SetTimestamp(device_gamepad.timestamp);
+  gamepad.SetTimestamp(timestamp);
   gamepad.SetAxes(device_gamepad.axes_length, device_gamepad.axes);
   gamepad.SetButtons(device_gamepad.buttons_length, device_gamepad.buttons);
   gamepad.SetPose(device_gamepad.pose);
   gamepad.SetHand(device_gamepad.hand);
+
+  if (device_gamepad.is_xr) {
+    TimeTicks now = TimeTicks::Now();
+    TRACE_COUNTER1("input", "XR gamepad pose age (ms)",
+                   (now - last_updated).InMilliseconds());
+  }
 
   bool newly_connected;
   HasGamepadConnectionChanged(old_id, gamepad.id(), old_was_connected,
@@ -83,12 +124,22 @@ static void SampleGamepad(unsigned index,
     gamepad.SetIndex(index);
     gamepad.SetMapping(device_gamepad.mapping);
     gamepad.SetVibrationActuator(device_gamepad.vibration_actuator);
-    gamepad.SetDisplayId(device_gamepad.display_id);
+    // Re-map display ids, since we will hand out at most one VRDisplay.
+    gamepad.SetDisplayId(device_gamepad.display_id ? 1 : 0);
+  } else if (!gamepad.vibrationActuator() &&
+             device_gamepad.vibration_actuator.not_null) {
+    // Some gamepads require additional steps to determine haptics capability.
+    // These gamepads may initially set |vibration_actuator| to null and then
+    // update it some time later. Make sure such devices can correctly propagate
+    // the changed capabilities.
+    gamepad.SetVibrationActuator(device_gamepad.vibration_actuator);
   }
 }
 
 template <typename GamepadType, typename ListType>
-static void SampleGamepads(ListType* into, const ExecutionContext* context) {
+static void SampleGamepads(ListType* into,
+                           const ExecutionContext* context,
+                           const TimeTicks& navigation_start) {
   device::Gamepads gamepads;
 
   GamepadDispatcher::Instance().SampleGamepads(gamepads);
@@ -99,9 +150,9 @@ static void SampleGamepads(ListType* into, const ExecutionContext* context) {
     bool hide_xr_gamepad = false;
     if (web_gamepad.is_xr) {
       bool webxr_enabled =
-          (context && OriginTrials::webXRGamepadSupportEnabled(context) &&
-           OriginTrials::webXREnabled(context));
-      bool webvr_enabled = (context && OriginTrials::webVREnabled(context));
+          (context && OriginTrials::WebXRGamepadSupportEnabled(context) &&
+           OriginTrials::WebXREnabled(context));
+      bool webvr_enabled = (context && OriginTrials::WebVREnabled(context));
 
       if (!webxr_enabled && !webvr_enabled) {
         // If neither WebXR nor WebVR are enabled, we should not expose XR-
@@ -116,7 +167,7 @@ static void SampleGamepads(ListType* into, const ExecutionContext* context) {
       GamepadType* gamepad = into->item(i);
       if (!gamepad)
         gamepad = GamepadType::Create();
-      SampleGamepad(i, *gamepad, web_gamepad);
+      SampleGamepad(i, *gamepad, web_gamepad, navigation_start);
       into->Set(i, gamepad);
     } else {
       into->Set(i, nullptr);
@@ -144,12 +195,30 @@ NavigatorGamepad& NavigatorGamepad::From(Navigator& navigator) {
   return *supplement;
 }
 
+// static
 GamepadList* NavigatorGamepad::getGamepads(Navigator& navigator) {
   return NavigatorGamepad::From(navigator).Gamepads();
 }
 
 GamepadList* NavigatorGamepad::Gamepads() {
+  // Tell VR that gamepad is in use.
+  Document* document = GetFrame() ? GetFrame()->GetDocument() : nullptr;
+  if (document) {
+    NavigatorVR* navigator_vr = NavigatorVR::From(*document);
+    if (navigator_vr) {
+      navigator_vr->SetDidUseGamepad();
+    }
+  }
+
   SampleAndCheckConnectedGamepads();
+
+  // Allow gamepad button presses to qualify as user activations if the page is
+  // visible.
+  if (RuntimeEnabledFeatures::UserActivationV2Enabled() && GetFrame() &&
+      GetPage() && GetPage()->IsPageVisible() && HasUserActivation(gamepads_)) {
+    LocalFrame::NotifyUserActivation(GetFrame(), UserGestureToken::kNewGesture);
+  }
+
   return gamepads_.Get();
 }
 
@@ -193,7 +262,7 @@ void NavigatorGamepad::DispatchOneEvent() {
   const AtomicString& event_name = gamepad->connected()
                                        ? EventTypeNames::gamepadconnected
                                        : EventTypeNames::gamepaddisconnected;
-  DomWindow()->DispatchEvent(GamepadEvent::Create(
+  DomWindow()->DispatchEvent(*GamepadEvent::Create(
       event_name, Event::Bubbles::kNo, Event::Cancelable::kYes, gamepad));
 
   if (!pending_events_.IsEmpty()) {
@@ -216,6 +285,14 @@ NavigatorGamepad::NavigatorGamepad(Navigator& navigator)
                                : nullptr) {
   if (navigator.DomWindow())
     navigator.DomWindow()->RegisterEventListenerObserver(this);
+
+  // Fetch |window.performance.timing.navigationStart|. Gamepad timestamps are
+  // reported relative to this value.
+  if (GetFrame()) {
+    DocumentLoader* loader = GetFrame()->Loader().GetDocumentLoader();
+    if (loader)
+      navigation_start_ = loader->GetTiming().NavigationStart();
+  }
 }
 
 NavigatorGamepad::~NavigatorGamepad() = default;
@@ -291,7 +368,8 @@ void NavigatorGamepad::SampleAndCheckConnectedGamepads() {
 
       // Compare the current sample with the old data and enqueue connection
       // events for any differences.
-      SampleGamepads<Gamepad>(gamepads_back_.Get(), execution_context);
+      SampleGamepads<Gamepad>(gamepads_back_.Get(), execution_context,
+                              navigation_start_);
       if (CheckConnectedGamepads(gamepads_.Get(), gamepads_back_.Get())) {
         // If we had any disconnected gamepads, we can't overwrite gamepads_
         // because the Gamepad object from the old buffer is reused as the
@@ -304,7 +382,8 @@ void NavigatorGamepad::SampleAndCheckConnectedGamepads() {
         dispatch_one_event_runner_->RunAsync();
       }
     }
-    SampleGamepads<Gamepad>(gamepads_.Get(), execution_context);
+    SampleGamepads<Gamepad>(gamepads_.Get(), execution_context,
+                            navigation_start_);
   }
 }
 

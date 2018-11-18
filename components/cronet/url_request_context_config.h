@@ -79,6 +79,21 @@ struct URLRequestContextConfig {
     DISALLOW_COPY_AND_ASSIGN(Pkp);
   };
 
+  // Simulated headers, used to preconfigure the Reporting API and Network Error
+  // Logging before receiving those actual configuration headers from the
+  // origins.
+  struct PreloadedNelAndReportingHeader {
+    PreloadedNelAndReportingHeader(const url::Origin& origin,
+                                   std::string value);
+    ~PreloadedNelAndReportingHeader();
+
+    // Origin that is "sending" this header.
+    const url::Origin origin;
+
+    // Value of the header that is "sent".
+    const std::string value;
+  };
+
   URLRequestContextConfig(
       // Enable QUIC.
       bool enable_quic,
@@ -109,8 +124,11 @@ struct URLRequestContextConfig {
       bool enable_network_quality_estimator,
       // Enable bypassing of public key pinning for local trust anchors
       bool bypass_public_key_pinning_for_local_trust_anchors,
-      // Certificate verifier cache data.
-      const std::string& cert_verifier_data);
+      // Optional network thread priority.
+      // On Android, corresponds to android.os.Process.setThreadPriority()
+      // values. On iOS, corresponds to NSThread::setThreadPriority values. Do
+      // not specify for other targets.
+      base::Optional<double> network_thread_priority);
   ~URLRequestContextConfig();
 
   // Configures |context_builder| based on |this|.
@@ -149,9 +167,6 @@ struct URLRequestContextConfig {
   // Enable public key pinning bypass for local trust anchors.
   const bool bypass_public_key_pinning_for_local_trust_anchors;
 
-  // Data to populte CertVerifierCache.
-  const std::string cert_verifier_data;
-
   // App-provided list of servers that support QUIC.
   std::vector<std::unique_ptr<QuicHint>> quic_hints;
 
@@ -173,6 +188,17 @@ struct URLRequestContextConfig {
   // type.
   base::Optional<net::EffectiveConnectionType>
       nqe_forced_effective_connection_type;
+
+  // Preloaded Report-To headers, to preconfigure the Reporting API.
+  std::vector<PreloadedNelAndReportingHeader> preloaded_report_to_headers;
+
+  // Preloaded NEL headers, to preconfigure Network Error Logging.
+  std::vector<PreloadedNelAndReportingHeader> preloaded_nel_headers;
+
+  // Optional network thread priority.
+  // On Android, corresponds to android.os.Process.setThreadPriority() values.
+  // On iOS, corresponds to NSThread::setThreadPriority values.
+  const base::Optional<double> network_thread_priority;
 
  private:
   // Parses experimental options and makes appropriate changes to settings in
@@ -245,8 +271,11 @@ struct URLRequestContextConfigBuilder {
   // Enable public key pinning bypass for local trust anchors.
   bool bypass_public_key_pinning_for_local_trust_anchors = true;
 
-  // Data to populate CertVerifierCache.
-  std::string cert_verifier_data = "";
+  // Optional network thread priority.
+  // On Android, corresponds to android.os.Process.setThreadPriority() values.
+  // On iOS, corresponds to NSThread::setThreadPriority values.
+  // Do not specify for other targets.
+  base::Optional<double> network_thread_priority;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(URLRequestContextConfigBuilder);

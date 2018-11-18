@@ -18,9 +18,13 @@
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "build/build_config.h"
 #include "content/browser/renderer_host/media/in_process_video_capture_provider.h"
 #include "content/browser/renderer_host/media/media_stream_provider.h"
 #include "content/browser/renderer_host/media/video_capture_controller_event_handler.h"
+#include "content/browser/screenlock_monitor/screenlock_monitor.h"
+#include "content/browser/screenlock_monitor/screenlock_monitor_source.h"
+#include "content/public/browser/desktop_media_id.h"
 #include "content/public/common/media_stream_request.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "media/capture/video/fake_video_capture_device_factory.h"
@@ -33,6 +37,7 @@ using ::testing::AnyNumber;
 using ::testing::DoAll;
 using ::testing::InSequence;
 using ::testing::InvokeWithoutArgs;
+using ::testing::Mock;
 using ::testing::Return;
 using ::testing::SaveArg;
 
@@ -142,7 +147,7 @@ class WrappedDeviceFactory : public media::FakeVideoCaptureDeviceFactory {
 class MockMediaStreamProviderListener : public MediaStreamProviderListener {
  public:
   MockMediaStreamProviderListener() {}
-  ~MockMediaStreamProviderListener() {}
+  ~MockMediaStreamProviderListener() override {}
 
   MOCK_METHOD2(Opened, void(MediaStreamType, int));
   MOCK_METHOD2(Closed, void(MediaStreamType, int));
@@ -152,13 +157,15 @@ class MockMediaStreamProviderListener : public MediaStreamProviderListener {
 // Needed as an input argument to ConnectClient().
 class MockFrameObserver : public VideoCaptureControllerEventHandler {
  public:
-  MOCK_METHOD1(OnError, void(VideoCaptureControllerID id));
+  MOCK_METHOD2(OnError,
+               void(VideoCaptureControllerID id,
+                    media::VideoCaptureError error));
   MOCK_METHOD1(OnStarted, void(VideoCaptureControllerID id));
   MOCK_METHOD1(OnStartedUsingGpuDecode, void(VideoCaptureControllerID id));
 
-  void OnBufferCreated(VideoCaptureControllerID id,
-                       mojo::ScopedSharedBufferHandle handle,
-                       int length, int buffer_id) override {}
+  void OnNewBuffer(VideoCaptureControllerID id,
+                   media::mojom::VideoBufferHandlePtr buffer_handle,
+                   int buffer_id) override {}
   void OnBufferDestroyed(VideoCaptureControllerID id, int buffer_id) override {}
   void OnBufferReady(
       VideoCaptureControllerID id,
@@ -176,6 +183,18 @@ class MockVideoCaptureObserver : public media::VideoCaptureObserver {
   MOCK_METHOD1(OnVideoCaptureStopped, void(media::VideoFacingMode));
 };
 
+// Needed to generate ScreenLocked event to |vcm_|.
+class ScreenlockMonitorTestSource : public ScreenlockMonitorSource {
+ public:
+  ScreenlockMonitorTestSource() = default;
+  ~ScreenlockMonitorTestSource() override = default;
+
+  void GenerateScreenLockedEvent() {
+    ProcessScreenlockEvent(SCREEN_LOCK_EVENT);
+    base::RunLoop().RunUntilIdle();
+  }
+};
+
 }  // namespace
 
 // Test class
@@ -185,7 +204,7 @@ class VideoCaptureManagerTest : public testing::Test {
   ~VideoCaptureManagerTest() override {}
 
   void HandleEnumerationResult(
-      const base::Closure& quit_closure,
+      base::OnceClosure quit_closure,
       const media::VideoCaptureDeviceDescriptors& descriptors) {
     MediaStreamDevices devices;
     for (const auto& descriptor : descriptors) {
@@ -193,7 +212,22 @@ class VideoCaptureManagerTest : public testing::Test {
                            descriptor.GetNameAndModel());
     }
     devices_ = devices;
-    quit_closure.Run();
+    std::move(quit_closure).Run();
+  }
+
+  void HandleEnumerationResultAsDisplayMediaDevices(
+      base::OnceClosure quit_closure,
+      const media::VideoCaptureDeviceDescriptors& descriptors) {
+    MediaStreamDevices devices;
+    for (const auto& descriptor : descriptors) {
+      devices.emplace_back(MEDIA_DISPLAY_VIDEO_CAPTURE,
+                           DesktopMediaID(DesktopMediaID::TYPE_SCREEN,
+                                          DesktopMediaID::kFakeId, false)
+                               .ToString(),
+                           descriptor.GetNameAndModel());
+    }
+    devices_ = devices;
+    std::move(quit_closure).Run();
   }
 
  protected:
@@ -208,9 +242,14 @@ class VideoCaptureManagerTest : public testing::Test {
         std::make_unique<InProcessVideoCaptureProvider>(
             std::move(video_capture_system),
             base::ThreadTaskRunnerHandle::Get(), kIgnoreLogMessageCB);
+    screenlock_monitor_source_ = new ScreenlockMonitorTestSource();
+    screenlock_monitor_ = std::make_unique<ScreenlockMonitor>(
+        std::unique_ptr<ScreenlockMonitorSource>(screenlock_monitor_source_));
+
     vcm_ =
         new VideoCaptureManager(std::move(video_capture_provider),
-                                base::BindRepeating([](const std::string&) {}));
+                                base::BindRepeating([](const std::string&) {}),
+                                ScreenlockMonitor::Get());
     const int32_t kNumberOfFakeDevices = 2;
     video_capture_device_factory_->SetToDefaultDevicesConfig(
         kNumberOfFakeDevices);
@@ -219,8 +258,8 @@ class VideoCaptureManagerTest : public testing::Test {
 
     base::RunLoop run_loop;
     vcm_->EnumerateDevices(
-        base::Bind(&VideoCaptureManagerTest::HandleEnumerationResult,
-                   base::Unretained(this), run_loop.QuitClosure()));
+        base::BindOnce(&VideoCaptureManagerTest::HandleEnumerationResult,
+                       base::Unretained(this), run_loop.QuitClosure()));
     run_loop.Run();
     ASSERT_GE(devices_.size(), 2u);
   }
@@ -257,7 +296,8 @@ class VideoCaptureManagerTest : public testing::Test {
   void StopClient(VideoCaptureControllerID client_id) {
     ASSERT_TRUE(1 == controllers_.count(client_id));
     vcm_->DisconnectClient(controllers_[client_id], client_id,
-                           frame_observer_.get(), false);
+                           frame_observer_.get(),
+                           media::VideoCaptureError::kNone);
     controllers_.erase(client_id);
   }
 
@@ -291,6 +331,8 @@ class VideoCaptureManagerTest : public testing::Test {
 #endif
 
   int next_client_id_;
+  ScreenlockMonitorTestSource* screenlock_monitor_source_;
+  std::unique_ptr<ScreenlockMonitor> screenlock_monitor_;
   std::map<VideoCaptureControllerID, VideoCaptureController*> controllers_;
   scoped_refptr<VideoCaptureManager> vcm_;
   std::unique_ptr<MockMediaStreamProviderListener> listener_;
@@ -354,8 +396,9 @@ TEST_F(VideoCaptureManagerTest, CreateAndAbort) {
   // Wait for device opened.
   base::RunLoop().RunUntilIdle();
 
-  vcm_->DisconnectClient(controllers_[client_id], client_id,
-                         frame_observer_.get(), true);
+  vcm_->DisconnectClient(
+      controllers_[client_id], client_id, frame_observer_.get(),
+      media::VideoCaptureError::kIntentionalErrorRaisedByUnitTest);
 
   // Wait to check callbacks before removing the listener.
   base::RunLoop().RunUntilIdle();
@@ -413,8 +456,8 @@ TEST_F(VideoCaptureManagerTest, ConnectAndDisconnectDevices) {
   video_capture_device_factory_->SetToDefaultDevicesConfig(1);
   base::RunLoop run_loop;
   vcm_->EnumerateDevices(
-      base::Bind(&VideoCaptureManagerTest::HandleEnumerationResult,
-                 base::Unretained(this), run_loop.QuitClosure()));
+      base::BindOnce(&VideoCaptureManagerTest::HandleEnumerationResult,
+                     base::Unretained(this), run_loop.QuitClosure()));
   run_loop.Run();
   ASSERT_EQ(devices_.size(), 1u);
 
@@ -422,8 +465,8 @@ TEST_F(VideoCaptureManagerTest, ConnectAndDisconnectDevices) {
   video_capture_device_factory_->SetToDefaultDevicesConfig(3);
   base::RunLoop run_loop2;
   vcm_->EnumerateDevices(
-      base::Bind(&VideoCaptureManagerTest::HandleEnumerationResult,
-                 base::Unretained(this), run_loop2.QuitClosure()));
+      base::BindOnce(&VideoCaptureManagerTest::HandleEnumerationResult,
+                     base::Unretained(this), run_loop2.QuitClosure()));
   run_loop2.Run();
   ASSERT_EQ(devices_.size(), 3u);
 
@@ -648,7 +691,7 @@ TEST_F(VideoCaptureManagerTest, OpenTwo) {
   EXPECT_CALL(*listener_, Opened(MEDIA_DEVICE_VIDEO_CAPTURE, _)).Times(2);
   EXPECT_CALL(*listener_, Closed(MEDIA_DEVICE_VIDEO_CAPTURE, _)).Times(2);
 
-  MediaStreamDevices::iterator it = devices_.begin();
+  auto it = devices_.begin();
 
   int video_session_id_first = vcm_->Open(*it);
   ++it;
@@ -665,7 +708,7 @@ TEST_F(VideoCaptureManagerTest, OpenTwo) {
 // Try open a non-existing device.
 TEST_F(VideoCaptureManagerTest, OpenNotExisting) {
   InSequence s;
-  EXPECT_CALL(*frame_observer_, OnError(_));
+  EXPECT_CALL(*frame_observer_, OnError(_, _));
   EXPECT_CALL(*listener_, Opened(MEDIA_DEVICE_VIDEO_CAPTURE, _));
   EXPECT_CALL(*listener_, Closed(MEDIA_DEVICE_VIDEO_CAPTURE, _));
 
@@ -789,6 +832,65 @@ TEST_F(VideoCaptureManagerTest, PauseAndResumeDevice) {
   vcm_->UnregisterListener(listener_.get());
 }
 #endif
+
+// Try to open, start a device capture device, and confirm it's not affected by
+// the ScreenLocked event.
+TEST_F(VideoCaptureManagerTest, DeviceCaptureDeviceNotClosedOnScreenlock) {
+  InSequence s;
+  // ScreenLocked event shouldn't affect camera capture device.
+  EXPECT_CALL(*listener_, Opened(MEDIA_DEVICE_VIDEO_CAPTURE, _));
+  EXPECT_CALL(*frame_observer_, OnStarted(_));
+  EXPECT_CALL(*listener_, Closed(MEDIA_DEVICE_VIDEO_CAPTURE, _)).Times(0);
+
+  int video_session_id = vcm_->Open(devices_.front());
+  VideoCaptureControllerID client_id = StartClient(video_session_id, true);
+
+  // Pretend screen is locked, which should not close the device.
+  screenlock_monitor_source_->GenerateScreenLockedEvent();
+  Mock::VerifyAndClearExpectations(listener_.get());
+
+  EXPECT_CALL(*listener_, Closed(MEDIA_DEVICE_VIDEO_CAPTURE, _));
+  StopClient(client_id);
+  vcm_->Close(video_session_id);
+
+  // Wait to check callbacks before removing the listener.
+  base::RunLoop().RunUntilIdle();
+  vcm_->UnregisterListener(listener_.get());
+}
+
+#if defined(ENABLE_SCREEN_CAPTURE) && !defined(OS_ANDROID)
+// Try to open, start a desktop capture device, and confirm it's closed on
+// ScreenLocked event on desktop platforms.
+TEST_F(VideoCaptureManagerTest, DesktopCaptureDeviceClosedOnScreenlock) {
+  InSequence s;
+  // ScreenLocked event should stop desktop capture device.
+  EXPECT_CALL(*listener_, Opened(MEDIA_DISPLAY_VIDEO_CAPTURE, _));
+  EXPECT_CALL(*frame_observer_, OnStarted(_));
+  EXPECT_CALL(*listener_, Closed(MEDIA_DISPLAY_VIDEO_CAPTURE, _));
+
+  // Simulate we add 1 fake display media device.
+  video_capture_device_factory_->SetToDefaultDevicesConfig(1);
+  base::RunLoop run_loop;
+  vcm_->EnumerateDevices(base::BindOnce(
+      &VideoCaptureManagerTest::HandleEnumerationResultAsDisplayMediaDevices,
+      base::Unretained(this), run_loop.QuitClosure()));
+  run_loop.Run();
+  ASSERT_EQ(devices_.size(), 1u);
+
+  int video_session_id = vcm_->Open(devices_.front());
+  VideoCaptureControllerID client_id = StartClient(video_session_id, true);
+
+  // Pretend screen is locked, which should close the device.
+  screenlock_monitor_source_->GenerateScreenLockedEvent();
+  Mock::VerifyAndClearExpectations(listener_.get());
+
+  StopClient(client_id);
+
+  // Wait to check callbacks before removing the listener.
+  base::RunLoop().RunUntilIdle();
+  vcm_->UnregisterListener(listener_.get());
+}
+#endif  // ENABLE_SCREEN_CAPTURE && !OS_ANDROID
 
 // TODO(mcasas): Add a test to check consolidation of the supported formats
 // provided by the device when http://crbug.com/323913 is closed.

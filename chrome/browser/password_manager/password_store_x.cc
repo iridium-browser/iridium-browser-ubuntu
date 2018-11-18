@@ -10,11 +10,17 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/files/file_util.h"
 #include "base/logging.h"
+#include "base/memory/weak_ptr.h"
+#include "base/metrics/histogram_functions.h"
 #include "base/stl_util.h"
+#include "base/time/time.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "components/password_manager/core/browser/password_manager_metrics_util.h"
 #include "components/password_manager/core/browser/password_manager_util.h"
 #include "components/password_manager/core/browser/password_store_change.h"
+#include "components/password_manager/core/common/password_manager_features.h"
 #include "components/password_manager/core/common/password_manager_pref_names.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
@@ -56,15 +62,92 @@ bool RemoveLoginsByURLAndTimeFromBackend(
   return true;
 }
 
+// Disables encryption on |login_db|, if the migration to encryption has not
+// been performed yet.
+std::unique_ptr<password_manager::LoginDatabase> DisableEncryption(
+    std::unique_ptr<password_manager::LoginDatabase> login_db,
+    PrefService* prefs) {
+  if (prefs->GetInteger(password_manager::prefs::kMigrationToLoginDBStep) !=
+      PasswordStoreX::LOGIN_DB_REPLACED) {
+    login_db->disable_encryption();
+  }
+  return login_db;
+}
+
+// Returns the password_manager::metrics_util::LinuxBackendMigrationStatus
+// equivalent for |step|.
+password_manager::metrics_util::LinuxBackendMigrationStatus StepForMetrics(
+    PasswordStoreX::MigrationToLoginDBStep step) {
+  using password_manager::metrics_util::LinuxBackendMigrationStatus;
+  switch (step) {
+    case PasswordStoreX::NOT_ATTEMPTED:
+      return LinuxBackendMigrationStatus::kNotAttempted;
+    case PasswordStoreX::FAILED:
+      return LinuxBackendMigrationStatus::kFailed;
+    case PasswordStoreX::COPIED_ALL:
+      return LinuxBackendMigrationStatus::kCopiedAll;
+    case PasswordStoreX::LOGIN_DB_REPLACED:
+      return LinuxBackendMigrationStatus::kLoginDBReplaced;
+  }
+  NOTREACHED();
+  return LinuxBackendMigrationStatus::kNotAttempted;
+}
+
+// Remove |forms| from |backend|. If |forms| is empty, |backend| will be cleared
+// entirely. This must be called on |runner|, which has to be the same as
+// |backend|'s.
+void ClearNativeBackend(scoped_refptr<base::SequencedTaskRunner> runner,
+                        std::unique_ptr<PasswordStoreX::NativeBackend> backend,
+                        std::vector<std::unique_ptr<PasswordForm>> forms) {
+  if (forms.empty()) {
+    if (!backend->GetAllLogins(&forms))
+      return;
+  }
+
+  if (!forms.empty()) {
+    PasswordStoreChangeList changes;
+    backend->RemoveLogin(*forms.back(), &changes);
+    forms.pop_back();
+    if (!forms.empty()) {
+      // We yield on the task runner between deletes, because this is a
+      // background cleanup which has to happen on the native backend's
+      // preferred thread, and in the case of gnome-keyring it's the main
+      // thread.
+      runner->PostTask(FROM_HERE,
+                       base::BindOnce(&ClearNativeBackend, runner,
+                                      std::move(backend), std::move(forms)));
+    }
+  }
+}
+
 }  // namespace
 
 PasswordStoreX::PasswordStoreX(
     std::unique_ptr<password_manager::LoginDatabase> login_db,
-    std::unique_ptr<NativeBackend> backend)
-    : PasswordStoreDefault(std::move(login_db)),
+    base::FilePath login_db_file,
+    base::FilePath encrypted_login_db_file,
+    std::unique_ptr<NativeBackend> backend,
+    PrefService* prefs)
+    : PasswordStoreDefault(DisableEncryption(std::move(login_db), prefs)),
       backend_(std::move(backend)),
+      login_db_file_(std::move(login_db_file)),
+      encrypted_login_db_file_(std::move(encrypted_login_db_file)),
       migration_checked_(false),
-      allow_fallback_(false) {}
+      allow_fallback_(false),
+      weak_ptr_factory_(this) {
+  migration_step_pref_.Init(password_manager::prefs::kMigrationToLoginDBStep,
+                            prefs);
+  migration_to_login_db_step_ =
+      static_cast<MigrationToLoginDBStep>(migration_step_pref_.GetValue());
+
+  base::UmaHistogramEnumeration(
+      "PasswordManager.LinuxBackendMigration.Adoption",
+      StepForMetrics(migration_to_login_db_step_));
+
+  // No |backend_| means serving from PasswordStoreDefault.
+  if (migration_to_login_db_step_ == LOGIN_DB_REPLACED)
+    backend_.reset();
+}
 
 PasswordStoreX::~PasswordStoreX() {}
 
@@ -115,8 +198,8 @@ PasswordStoreChangeList PasswordStoreX::RemoveLoginsByURLAndTimeImpl(
     base::Time delete_begin,
     base::Time delete_end) {
   CheckMigration();
-  PasswordStoreChangeList changes;
 
+  PasswordStoreChangeList changes;
   if (use_native_backend() &&
       RemoveLoginsByURLAndTimeFromBackend(backend_.get(), url_filter,
                                           delete_begin, delete_end, &changes)) {
@@ -247,10 +330,15 @@ bool PasswordStoreX::FillBlacklistLogins(
 
 void PasswordStoreX::CheckMigration() {
   DCHECK(background_task_runner()->RunsTasksInCurrentSequence());
+
   if (migration_checked_ || !backend_.get())
     return;
   migration_checked_ = true;
-  ssize_t migrated = MigrateLogins();
+  DCHECK_NE(migration_to_login_db_step_, LOGIN_DB_REPLACED);
+
+  base::Time migration_to_native_started = base::Time::Now();
+
+  ssize_t migrated = MigrateToNativeBackend();
   if (migrated > 0) {
     VLOG(1) << "Migrated " << migrated << " passwords to native store.";
   } else if (migrated == 0) {
@@ -261,9 +349,21 @@ void PasswordStoreX::CheckMigration() {
     // succeeds on the native store, we will no longer allow fallback.
     allow_fallback_ = true;
   } else {
-    LOG(WARNING) << "Native password store migration failed! " <<
-                 "Falling back on default (unencrypted) store.";
+    LOG(WARNING) << "Native password store migration failed! "
+                 << "Falling back on default (unencrypted) store.";
     backend_.reset();
+  }
+
+  base::UmaHistogramLongTimes(
+      "PasswordManager.LinuxBackendMigration.TimeIntoNative",
+      base::Time::Now() - migration_to_native_started);
+
+  if (base::FeatureList::IsEnabled(
+          password_manager::features::kMigrateLinuxToLoginDB) &&
+      backend_) {
+    // Copy passwords from the backend into the login database, using
+    // encryption.
+    MigrateToEncryptedLoginDB();
   }
 }
 
@@ -278,7 +378,7 @@ bool PasswordStoreX::allow_default_store() {
   return !backend_.get();
 }
 
-ssize_t PasswordStoreX::MigrateLogins() {
+ssize_t PasswordStoreX::MigrateToNativeBackend() {
   DCHECK(backend_.get());
   std::vector<std::unique_ptr<PasswordForm>> forms;
   std::vector<std::unique_ptr<PasswordForm>> blacklist_forms;
@@ -319,4 +419,105 @@ ssize_t PasswordStoreX::MigrateLogins() {
   }
   ssize_t result = ok ? forms.size() : -1;
   return result;
+}
+
+void PasswordStoreX::MigrateToEncryptedLoginDB() {
+  base::Time migration_to_encrypted_started = base::Time::Now();
+
+  // Initialise the temporary database.
+  auto encrypted_login_db = std::make_unique<password_manager::LoginDatabase>(
+      encrypted_login_db_file_);
+  if (!encrypted_login_db->Init()) {
+    VLOG(1) << "Failed to init the encrypted database file. Migration "
+               "aborted.";
+    UpdateMigrationToLoginDBStep(FAILED);
+    return;  // Serve from the native backend.
+  }
+
+  // Copy everything from the backend to the temporary database.
+  VLOG(1) << "Migrating all passwords to the encrypted database. Last status: "
+          << migration_to_login_db_step_;
+  UpdateMigrationToLoginDBStep(CopyBackendToLoginDB(encrypted_login_db.get()));
+  if (migration_to_login_db_step_ == FAILED) {
+    VLOG(1) << "Migration to encryption failed.";
+    base::DeleteFile(encrypted_login_db_file_, false);
+    return;
+  }
+
+  base::UmaHistogramLongTimes(
+      "PasswordManager.LinuxBackendMigration.TimeIntoEncrypted",
+      base::Time::Now() - migration_to_encrypted_started);
+
+  // Dispose of the databases, so that we release the databases' locks.
+  PasswordStoreDefault::SetLoginDB(nullptr);
+  encrypted_login_db.reset();
+  // Move the new database onto the old.
+  if (!base::Move(encrypted_login_db_file_, login_db_file_)) {
+    LOG(ERROR) << "Could not replace login database.";
+    UpdateMigrationToLoginDBStep(FAILED);
+    base::DeleteFile(encrypted_login_db_file_, false);
+    return;  // Serve from the native backend.
+  }
+  UpdateMigrationToLoginDBStep(LOGIN_DB_REPLACED);
+
+  auto login_db =
+      std::make_unique<password_manager::LoginDatabase>(login_db_file_);
+  if (login_db->Init()) {
+    PasswordStoreDefault::SetLoginDB(std::move(login_db));
+  } else {
+    // The password manager is disabled because PasswordStoreDefault is left
+    // with no LoginDatabase and |backend_| will be disposed of.
+    LOG(ERROR) << "Could not initialise database after migration. Password "
+                  "Manager is disabled.";
+  }
+
+  // Cleanup the native backend on the background, while we serve from
+  // PasswordStoreDefault. PasswordStoreX will use the PasswordStoreDefault
+  // behaviour, because we move |backend_|.
+  auto task_runner = CreateBackgroundTaskRunner();
+  task_runner->PostTask(
+      FROM_HERE,
+      base::BindOnce(&ClearNativeBackend, task_runner, std::move(backend_),
+                     std::vector<std::unique_ptr<autofill::PasswordForm>>()));
+}
+
+PasswordStoreX::MigrationToLoginDBStep PasswordStoreX::CopyBackendToLoginDB(
+    password_manager::LoginDatabase* login_db) {
+  DCHECK(backend_);
+  DCHECK(login_db);
+
+  if (!login_db->DeleteAndRecreateDatabaseFile()) {
+    LOG(ERROR) << "Failed to create the encrypted login database file";
+    return FAILED;
+  }
+
+  std::vector<std::unique_ptr<PasswordForm>> forms;
+  if (!backend_->GetAllLogins(&forms))
+    return FAILED;
+
+  for (auto& form : forms) {
+    PasswordStoreChangeList changes = login_db->AddLogin(*form);
+    if (changes.empty() || changes.back().type() != PasswordStoreChange::ADD) {
+      return FAILED;
+    }
+  }
+
+  return COPIED_ALL;
+}
+
+void PasswordStoreX::UpdateMigrationToLoginDBStep(MigrationToLoginDBStep step) {
+  migration_to_login_db_step_ = step;
+  main_task_runner()->PostTask(
+      FROM_HERE, base::BindOnce(&PasswordStoreX::UpdateMigrationPref,
+                                weak_ptr_factory_.GetWeakPtr(),
+                                migration_to_login_db_step_));
+}
+
+void PasswordStoreX::UpdateMigrationPref(MigrationToLoginDBStep step) {
+  migration_step_pref_.SetValue(step);
+}
+
+void PasswordStoreX::ShutdownOnUIThread() {
+  migration_step_pref_.Destroy();
+  PasswordStoreDefault::ShutdownOnUIThread();
 }

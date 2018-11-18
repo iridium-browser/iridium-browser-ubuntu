@@ -47,6 +47,9 @@ class LayoutScrollbarPart final : public LayoutBlock {
 
   void UpdateLayout() override;
 
+  static int ComputeScrollbarWidth(int visible_size, const ComputedStyle*);
+  static int ComputeScrollbarHeight(int visible_size, const ComputedStyle*);
+
   // Scrollbar parts needs to be rendered at device pixel boundaries.
   LayoutUnit MarginTop() const override {
     DCHECK(IsIntegerValue(LayoutBlock::MarginTop()));
@@ -69,7 +72,7 @@ class LayoutScrollbarPart final : public LayoutBlock {
     return type == kLayoutObjectLayoutScrollbarPart ||
            LayoutBlock::IsOfType(type);
   }
-  LayoutObject* ScrollbarStyleSource() const;
+  ScrollableArea* GetScrollableArea() const { return scrollable_area_; }
 
   // Must call setStyleWithWritingModeOfParent() instead.
   void SetStyle(scoped_refptr<ComputedStyle>) = delete;
@@ -78,9 +81,7 @@ class LayoutScrollbarPart final : public LayoutBlock {
   void StyleWillChange(StyleDifference,
                        const ComputedStyle& new_style) override;
   void StyleDidChange(StyleDifference, const ComputedStyle* old_style) override;
-  void ImageChanged(WrappedImagePtr,
-                    CanDeferInvalidation,
-                    const IntRect* = nullptr) override;
+  void ImageChanged(WrappedImagePtr, CanDeferInvalidation) override;
 
  private:
   LayoutScrollbarPart(ScrollableArea*, LayoutScrollbar*, ScrollbarPart);
@@ -100,11 +101,8 @@ class LayoutScrollbarPart final : public LayoutBlock {
   void LayoutHorizontalPart();
   void LayoutVerticalPart();
 
-  void ComputeScrollbarWidth();
-  void ComputeScrollbarHeight();
-  int CalcScrollbarThicknessUsing(SizeType,
-                                  const Length&,
-                                  int containing_length);
+  void UpdateScrollbarWidth();
+  void UpdateScrollbarHeight();
 
   void SetNeedsPaintInvalidation();
 

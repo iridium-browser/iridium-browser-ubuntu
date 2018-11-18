@@ -6,7 +6,6 @@ package org.chromium.chrome.browser.autofill;
 
 import static org.chromium.base.test.util.ScalableTimeout.scaleTimeout;
 
-import android.graphics.Color;
 import android.support.test.filters.SmallTest;
 import android.view.View;
 
@@ -27,9 +26,9 @@ import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.components.autofill.AutofillDelegate;
 import org.chromium.components.autofill.AutofillPopup;
 import org.chromium.components.autofill.AutofillSuggestion;
-import org.chromium.content.browser.test.util.Criteria;
-import org.chromium.content.browser.test.util.CriteriaHelper;
-import org.chromium.content.browser.test.util.TouchCommon;
+import org.chromium.content_public.browser.test.util.Criteria;
+import org.chromium.content_public.browser.test.util.CriteriaHelper;
+import org.chromium.content_public.browser.test.util.TouchCommon;
 import org.chromium.ui.DropdownItem;
 import org.chromium.ui.base.ActivityWindowAndroid;
 import org.chromium.ui.base.ViewAndroidDelegate;
@@ -60,8 +59,7 @@ public class AutofillTest {
         mMockAutofillCallback = new MockAutofillCallback();
         final ChromeActivity activity = mActivityTestRule.getActivity();
         final ViewAndroidDelegate viewDelegate =
-                ViewAndroidDelegate.createBasicDelegate(
-                        activity.getCurrentContentViewCore().getContainerView());
+                ViewAndroidDelegate.createBasicDelegate(activity.getActivityTab().getContentView());
 
         ThreadUtils.runOnUiThreadBlocking(() -> {
             View anchorView = viewDelegate.acquireView();
@@ -69,10 +67,8 @@ public class AutofillTest {
 
             mWindowAndroid = new ActivityWindowAndroid(activity);
             mAutofillPopup = new AutofillPopup(activity, anchorView, mMockAutofillCallback);
-            mAutofillPopup.filterAndShow(new AutofillSuggestion[0], false /* isRtl */,
-                    Color.TRANSPARENT /* backgroundColor */,
-                    Color.TRANSPARENT /* dividerColor */, 0 /* dropdownItemHeight */,
-                    0 /* margin */);
+            mAutofillPopup.filterAndShow(
+                    new AutofillSuggestion[0], /* isRtl= */ false, /* isRefresh= */ false);
         });
     }
 
@@ -138,10 +134,9 @@ public class AutofillTest {
 
     public void openAutofillPopupAndWaitUntilReady(final AutofillSuggestion[] suggestions) {
         ThreadUtils.runOnUiThreadBlocking(
-                () -> mAutofillPopup.filterAndShow(suggestions, false /* isRtl */,
-                        Color.TRANSPARENT /* backgroundColor */,
-                        Color.TRANSPARENT /* dividerColor */, 0 /* dropdownItemHeight */,
-                        0 /* margin */));
+                ()
+                        -> mAutofillPopup.filterAndShow(
+                                suggestions, /* isRtl= */ false, /* isRefresh= */ false));
         CriteriaHelper.pollInstrumentationThread(new Criteria() {
             @Override
             public boolean isSatisfied() {

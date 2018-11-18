@@ -28,25 +28,23 @@
 #include "base/macros.h"
 #include "third_party/blink/public/web/web_window_features.h"
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/core/dom/viewport_description.h"
 #include "third_party/blink/renderer/core/frame/deprecation.h"
 #include "third_party/blink/renderer/core/frame/hosts_using_features.h"
-#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/settings_delegate.h"
-#include "third_party/blink/renderer/core/frame/use_counter.h"
 #include "third_party/blink/renderer/core/page/page_animator.h"
-#include "third_party/blink/renderer/core/page/page_lifecycle_state.h"
 #include "third_party/blink/renderer/core/page/page_visibility_notifier.h"
 #include "third_party/blink/renderer/core/page/page_visibility_observer.h"
 #include "third_party/blink/renderer/core/page/page_visibility_state.h"
-#include "third_party/blink/renderer/platform/geometry/layout_rect.h"
-#include "third_party/blink/renderer/platform/geometry/region.h"
+#include "third_party/blink/renderer/core/page/viewport_description.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/persistent.h"
+#include "third_party/blink/renderer/platform/scheduler/public/page_lifecycle_state.h"
 #include "third_party/blink/renderer/platform/scheduler/public/page_scheduler.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
+#include "third_party/skia/include/core/SkColor.h"
 
 namespace blink {
 
@@ -55,13 +53,15 @@ class BrowserControls;
 class ChromeClient;
 class ContextMenuController;
 class Document;
-class DOMRectList;
 class DragCaret;
 class DragController;
-class EventHandlerRegistry;
 class FocusController;
 class Frame;
+class LinkHighlights;
+class LocalFrame;
+class LocalFrameView;
 class OverscrollController;
+class PageOverlay;
 struct PageScaleConstraints;
 class PageScaleConstraintsSet;
 class PluginData;
@@ -70,7 +70,7 @@ class PointerLockController;
 class ScopedPagePauser;
 class ScrollingCoordinator;
 class ScrollbarTheme;
-class SmoothScrollSequencer;
+class SecurityOrigin;
 class Settings;
 class ConsoleMessageStorage;
 class TopDocumentRootScrollerController;
@@ -104,9 +104,7 @@ class CORE_EXPORT Page final : public GarbageCollectedFinalized<Page>,
     DISALLOW_COPY_AND_ASSIGN(PageClients);
   };
 
-  static Page* Create(PageClients& page_clients) {
-    return new Page(page_clients);
-  }
+  static Page* Create(PageClients& page_clients);
 
   // An "ordinary" page is a fully-featured page owned by a web view.
   static Page* CreateOrdinary(PageClients&, Page* opener);
@@ -116,7 +114,7 @@ class CORE_EXPORT Page final : public GarbageCollectedFinalized<Page>,
   void CloseSoon();
   bool IsClosing() const { return is_closing_; }
 
-  using PageSet = PersistentHeapHashSet<WeakMember<Page>>;
+  using PageSet = HeapHashSet<WeakMember<Page>>;
 
   // Return the current set of full-fledged, ordinary pages.
   // Each created and owned by a WebView.
@@ -124,6 +122,7 @@ class CORE_EXPORT Page final : public GarbageCollectedFinalized<Page>,
   // This set does not include Pages created for other, internal purposes
   // (SVGImages, inspector overlays, page popups etc.)
   static PageSet& OrdinaryPages();
+  static void InsertOrdinaryPageForTesting(Page*);
 
   // Returns pages related to the current browsing context (excluding the
   // current page).  See also
@@ -132,16 +131,13 @@ class CORE_EXPORT Page final : public GarbageCollectedFinalized<Page>,
 
   static void PlatformColorsChanged();
 
-  void SetNeedsRecalcStyleInAllFrames();
+  void InitialStyleChanged();
   void UpdateAcceleratedCompositingSettings();
 
   ViewportDescription GetViewportDescription() const;
 
   // Returns the plugin data associated with |main_frame_origin|.
   PluginData* GetPluginData(const SecurityOrigin* main_frame_origin);
-
-  // Refreshes the browser-side plugin cache.
-  static void RefreshPlugins();
 
   // Resets the plugin data for all pages in the renderer process and notifies
   // PluginsChangedObservers.
@@ -157,9 +153,7 @@ class CORE_EXPORT Page final : public GarbageCollectedFinalized<Page>,
   // depends on this will generally have to be rewritten to propagate any
   // necessary state through all renderer processes for that page and/or
   // coordinate/rely on the browser process to help dispatch/coordinate work.
-  LocalFrame* DeprecatedLocalMainFrame() const {
-    return ToLocalFrame(main_frame_);
-  }
+  LocalFrame* DeprecatedLocalMainFrame() const;
 
   void DocumentDetached(Document*);
 
@@ -186,17 +180,12 @@ class CORE_EXPORT Page final : public GarbageCollectedFinalized<Page>,
   ValidationMessageClient& GetValidationMessageClient() const {
     return *validation_message_client_;
   }
-  void SetValidationMessageClient(ValidationMessageClient*);
+  void SetValidationMessageClientForTesting(ValidationMessageClient*);
 
   ScrollingCoordinator* GetScrollingCoordinator();
 
-  SmoothScrollSequencer* GetSmoothScrollSequencer();
-
-  DOMRectList* NonFastScrollableRects(const LocalFrame*);
-
   Settings& GetSettings() const { return *settings_; }
 
-  UseCounter& GetUseCounter() { return use_counter_; }
   Deprecation& GetDeprecation() { return deprecation_; }
   HostsUsingFeatures& GetHostsUsingFeatures() { return hosts_using_features_; }
 
@@ -216,13 +205,12 @@ class CORE_EXPORT Page final : public GarbageCollectedFinalized<Page>,
   ConsoleMessageStorage& GetConsoleMessageStorage();
   const ConsoleMessageStorage& GetConsoleMessageStorage() const;
 
-  EventHandlerRegistry& GetEventHandlerRegistry();
-  const EventHandlerRegistry& GetEventHandlerRegistry() const;
-
   TopDocumentRootScrollerController& GlobalRootScrollerController() const;
 
   VisualViewport& GetVisualViewport();
   const VisualViewport& GetVisualViewport() const;
+
+  LinkHighlights& GetLinkHighlights();
 
   OverscrollController& GetOverscrollController();
   const OverscrollController& GetOverscrollController() const;
@@ -270,7 +258,6 @@ class CORE_EXPORT Page final : public GarbageCollectedFinalized<Page>,
   mojom::PageVisibilityState VisibilityState() const;
   bool IsPageVisible() const;
 
-  void SetLifecycleState(PageLifecycleState);
   PageLifecycleState LifecycleState() const;
 
   bool IsCursorVisible() const;
@@ -301,7 +288,7 @@ class CORE_EXPORT Page final : public GarbageCollectedFinalized<Page>,
 
   void AcceptLanguagesChanged();
 
-  void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
   void LayerTreeViewInitialized(WebLayerTreeView&, LocalFrameView*);
   void WillCloseLayerTreeView(WebLayerTreeView&, LocalFrameView*);
@@ -316,15 +303,19 @@ class CORE_EXPORT Page final : public GarbageCollectedFinalized<Page>,
 
   // PageScheduler::Delegate implementation.
   void ReportIntervention(const String& message) override;
-  void RequestBeginMainFrameNotExpected(bool new_state) override;
-  void SetPageFrozen(bool frozen) override;
-  ukm::UkmRecorder* GetUkmRecorder() override;
-  int64_t GetUkmSourceId() override;
+  bool RequestBeginMainFrameNotExpected(bool new_state) override;
+  void SetLifecycleState(PageLifecycleState) override;
 
   void AddAutoplayFlags(int32_t flags);
   void ClearAutoplayFlags();
 
   int32_t AutoplayFlags() const;
+
+  void SetPageOverlayColor(SkColor);
+
+  void UpdatePageColorOverlay();
+
+  void PaintPageColorOverlay();
 
  private:
   friend class ScopedPagePauser;
@@ -341,25 +332,6 @@ class CORE_EXPORT Page final : public GarbageCollectedFinalized<Page>,
 
   void SetPageScheduler(std::unique_ptr<PageScheduler>);
 
-  Member<PageAnimator> animator_;
-  const Member<AutoscrollController> autoscroll_controller_;
-  Member<ChromeClient> chrome_client_;
-  const Member<DragCaret> drag_caret_;
-  const Member<DragController> drag_controller_;
-  const Member<FocusController> focus_controller_;
-  const Member<ContextMenuController> context_menu_controller_;
-  const std::unique_ptr<PageScaleConstraintsSet> page_scale_constraints_set_;
-  const Member<PointerLockController> pointer_lock_controller_;
-  Member<ScrollingCoordinator> scrolling_coordinator_;
-  Member<SmoothScrollSequencer> smooth_scroll_sequencer_;
-  const Member<BrowserControls> browser_controls_;
-  const Member<ConsoleMessageStorage> console_message_storage_;
-  const Member<EventHandlerRegistry> event_handler_registry_;
-  const Member<TopDocumentRootScrollerController>
-      global_root_scroller_controller_;
-  const Member<VisualViewport> visual_viewport_;
-  const Member<OverscrollController> overscroll_controller_;
-
   // Typically, the main frame and Page should both be owned by the embedder,
   // which must call Page::willBeDestroyed() prior to destroying Page. This
   // call detaches the main frame and clears this pointer, thus ensuring that
@@ -374,11 +346,30 @@ class CORE_EXPORT Page final : public GarbageCollectedFinalized<Page>,
   // longer needed.
   Member<Frame> main_frame_;
 
+  Member<PageAnimator> animator_;
+  const Member<AutoscrollController> autoscroll_controller_;
+  Member<ChromeClient> chrome_client_;
+  const Member<DragCaret> drag_caret_;
+  const Member<DragController> drag_controller_;
+  const Member<FocusController> focus_controller_;
+  const Member<ContextMenuController> context_menu_controller_;
+  const Member<PageScaleConstraintsSet> page_scale_constraints_set_;
+  const Member<PointerLockController> pointer_lock_controller_;
+  Member<ScrollingCoordinator> scrolling_coordinator_;
+  const Member<BrowserControls> browser_controls_;
+  const Member<ConsoleMessageStorage> console_message_storage_;
+  const Member<TopDocumentRootScrollerController>
+      global_root_scroller_controller_;
+  const Member<VisualViewport> visual_viewport_;
+  const Member<OverscrollController> overscroll_controller_;
+  const Member<LinkHighlights> link_highlights_;
+
   Member<PluginData> plugin_data_;
 
   Member<ValidationMessageClient> validation_message_client_;
 
-  UseCounter use_counter_;
+  std::unique_ptr<PageOverlay> page_color_overlay_;
+
   Deprecation deprecation_;
   HostsUsingFeatures hosts_using_features_;
   WebWindowFeatures window_features_;

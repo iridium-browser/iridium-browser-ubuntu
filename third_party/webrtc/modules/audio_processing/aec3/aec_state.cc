@@ -15,17 +15,31 @@
 #include <numeric>
 #include <vector>
 
+#include "absl/types/optional.h"
 #include "api/array_view.h"
+#include "modules/audio_processing/aec3/aec3_common.h"
 #include "modules/audio_processing/logging/apm_data_dumper.h"
 #include "rtc_base/atomicops.h"
 #include "rtc_base/checks.h"
+#include "system_wrappers/include/field_trial.h"
 
 namespace webrtc {
 namespace {
 
-float ComputeGainRampupIncrease(const EchoCanceller3Config& config) {
-  const auto& c = config.echo_removal_control.gain_rampup;
-  return powf(1.f / c.first_non_zero_gain, 1.f / c.non_zero_gain_blocks);
+bool EnableErleResetsAtGainChanges() {
+  return !field_trial::IsEnabled("WebRTC-Aec3ResetErleAtGainChangesKillSwitch");
+}
+
+bool UseLegacyFilterQualityState() {
+  return field_trial::IsEnabled("WebRTC-Aec3FilterQualityStateKillSwitch");
+}
+
+bool EnableLegacySaturationBehavior() {
+  return field_trial::IsEnabled("WebRTC-Aec3NewSaturationBehaviorKillSwitch");
+}
+
+bool UseSuppressionGainLimiter() {
+  return field_trial::IsEnabled("WebRTC-Aec3GainLimiterDeactivationKillSwitch");
 }
 
 constexpr size_t kBlocksSinceConvergencedFilterInit = 10000;
@@ -35,19 +49,65 @@ constexpr size_t kBlocksSinceConsistentEstimateInit = 10000;
 
 int AecState::instance_count_ = 0;
 
+void AecState::GetResidualEchoScaling(
+    rtc::ArrayView<float> residual_scaling) const {
+  bool filter_has_had_time_to_converge;
+  if (config_.filter.conservative_initial_phase) {
+    filter_has_had_time_to_converge =
+        strong_not_saturated_render_blocks_ >= 1.5f * kNumBlocksPerSecond;
+  } else {
+    filter_has_had_time_to_converge =
+        strong_not_saturated_render_blocks_ >= 0.8f * kNumBlocksPerSecond;
+  }
+  echo_audibility_.GetResidualEchoScaling(filter_has_had_time_to_converge,
+                                          residual_scaling);
+}
+
+absl::optional<float> AecState::ErleUncertainty() const {
+  bool filter_has_had_time_to_converge;
+  if (config_.filter.conservative_initial_phase) {
+    filter_has_had_time_to_converge =
+        strong_not_saturated_render_blocks_ >= 1.5f * kNumBlocksPerSecond;
+  } else {
+    filter_has_had_time_to_converge =
+        strong_not_saturated_render_blocks_ >= 0.8f * kNumBlocksPerSecond;
+  }
+
+  if (!filter_has_had_time_to_converge) {
+    return 1.f;
+  }
+
+  if (SaturatedEcho() && use_legacy_saturation_behavior_) {
+    return 1.f;
+  }
+
+  return absl::nullopt;
+}
+
 AecState::AecState(const EchoCanceller3Config& config)
     : data_dumper_(
           new ApmDataDumper(rtc::AtomicOps::Increment(&instance_count_))),
-      erle_estimator_(config.erle.min, config.erle.max_l, config.erle.max_h),
       config_(config),
-      max_render_(config_.filter.main.length_blocks, 0.f),
-      reverb_decay_(fabsf(config_.ep_strength.default_len)),
-      gain_rampup_increase_(ComputeGainRampupIncrease(config_)),
+      use_legacy_saturation_behavior_(EnableLegacySaturationBehavior()),
+      enable_erle_resets_at_gain_changes_(EnableErleResetsAtGainChanges()),
+      use_legacy_filter_quality_(UseLegacyFilterQualityState()),
+      use_suppressor_gain_limiter_(UseSuppressionGainLimiter()),
+      initial_state_(config_),
+      delay_state_(config_),
+      transparent_state_(config_),
+      filter_quality_state_(config_),
+      legacy_filter_quality_state_(config_),
+      legacy_saturation_detector_(config_),
+      erl_estimator_(2 * kNumBlocksPerSecond),
+      erle_estimator_(2 * kNumBlocksPerSecond,
+                      config_.erle.min,
+                      config_.erle.max_l,
+                      config_.erle.max_h),
       suppression_gain_limiter_(config_),
       filter_analyzer_(config_),
-      blocks_since_converged_filter_(kBlocksSinceConvergencedFilterInit),
-      active_blocks_since_consistent_filter_estimate_(
-          kBlocksSinceConsistentEstimateInit) {}
+      echo_audibility_(
+          config_.echo_audibility.use_stationarity_properties_at_init),
+      reverb_model_estimator_(config_) {}
 
 AecState::~AecState() = default;
 
@@ -55,424 +115,489 @@ void AecState::HandleEchoPathChange(
     const EchoPathVariability& echo_path_variability) {
   const auto full_reset = [&]() {
     filter_analyzer_.Reset();
-    blocks_since_last_saturation_ = 0;
-    usable_linear_estimate_ = false;
     capture_signal_saturation_ = false;
-    echo_saturation_ = false;
-    std::fill(max_render_.begin(), max_render_.end(), 0.f);
-    blocks_with_proper_filter_adaptation_ = 0;
-    blocks_since_reset_ = 0;
-    filter_has_had_time_to_converge_ = false;
-    render_received_ = false;
+    strong_not_saturated_render_blocks_ = 0;
     blocks_with_active_render_ = 0;
-    initial_state_ = true;
-    suppression_gain_limiter_.Reset();
-    blocks_since_converged_filter_ = kBlocksSinceConvergencedFilterInit;
-    diverged_blocks_ = 0;
+    if (use_suppressor_gain_limiter_) {
+      suppression_gain_limiter_.Reset();
+    }
+    initial_state_.Reset();
+    transparent_state_.Reset();
+    if (use_legacy_saturation_behavior_) {
+      legacy_saturation_detector_.Reset();
+    }
+    erle_estimator_.Reset(true);
+    erl_estimator_.Reset();
+    if (use_legacy_filter_quality_) {
+      legacy_filter_quality_state_.Reset();
+    } else {
+      filter_quality_state_.Reset();
+    }
   };
 
   // TODO(peah): Refine the reset scheme according to the type of gain and
   // delay adjustment.
-  if (echo_path_variability.gain_change) {
-    full_reset();
-  }
 
   if (echo_path_variability.delay_change !=
-      EchoPathVariability::DelayAdjustment::kBufferReadjustment) {
+      EchoPathVariability::DelayAdjustment::kNone) {
     full_reset();
-  } else if (echo_path_variability.delay_change !=
-             EchoPathVariability::DelayAdjustment::kBufferFlush) {
-    full_reset();
-  } else if (echo_path_variability.delay_change !=
-             EchoPathVariability::DelayAdjustment::kDelayReset) {
-    full_reset();
-  } else if (echo_path_variability.delay_change !=
-             EchoPathVariability::DelayAdjustment::kNewDetectedDelay) {
-    full_reset();
-  } else if (echo_path_variability.gain_change) {
-    blocks_since_reset_ = kNumBlocksPerSecond;
+  } else if (enable_erle_resets_at_gain_changes_ &&
+             echo_path_variability.gain_change) {
+    erle_estimator_.Reset(false);
   }
+  subtractor_output_analyzer_.HandleEchoPathChange();
 }
 
 void AecState::Update(
-    const rtc::Optional<DelayEstimate>& external_delay,
+    const absl::optional<DelayEstimate>& external_delay,
     const std::vector<std::array<float, kFftLengthBy2Plus1>>&
         adaptive_filter_frequency_response,
     const std::vector<float>& adaptive_filter_impulse_response,
-    bool converged_filter,
-    bool diverged_filter,
     const RenderBuffer& render_buffer,
     const std::array<float, kFftLengthBy2Plus1>& E2_main,
     const std::array<float, kFftLengthBy2Plus1>& Y2,
-    const std::array<float, kBlockSize>& s) {
-  // Analyze the filter and compute the delays.
-  filter_analyzer_.Update(adaptive_filter_impulse_response, render_buffer);
-  filter_delay_blocks_ = filter_analyzer_.DelayBlocks();
+    const SubtractorOutput& subtractor_output,
+    rtc::ArrayView<const float> y) {
+  // Analyze the filter output.
+  subtractor_output_analyzer_.Update(subtractor_output);
 
-  if (filter_analyzer_.Consistent()) {
-    internal_delay_ = filter_analyzer_.DelayBlocks();
-  } else {
-    internal_delay_ = rtc::nullopt;
+  // Analyze the properties of the filter.
+  filter_analyzer_.Update(adaptive_filter_impulse_response,
+                          adaptive_filter_frequency_response, render_buffer);
+
+  // Estimate the direct path delay of the filter.
+  delay_state_.Update(filter_analyzer_, external_delay,
+                      strong_not_saturated_render_blocks_);
+
+  const std::vector<float>& aligned_render_block =
+      render_buffer.Block(-delay_state_.DirectPathFilterDelay())[0];
+
+  // Update render counters.
+  const float render_energy = std::inner_product(
+      aligned_render_block.begin(), aligned_render_block.end(),
+      aligned_render_block.begin(), 0.f);
+  const bool active_render =
+      render_energy > (config_.render_levels.active_render_limit *
+                       config_.render_levels.active_render_limit) *
+                          kFftLengthBy2;
+  blocks_with_active_render_ += active_render ? 1 : 0;
+  strong_not_saturated_render_blocks_ +=
+      active_render && !SaturatedCapture() ? 1 : 0;
+
+  if (use_suppressor_gain_limiter_) {
+    // Update the limit on the echo suppression after an echo path change to
+    // avoid an initial echo burst.
+    suppression_gain_limiter_.Update(render_buffer.GetRenderActivity(),
+                                     TransparentMode());
+
+    if (subtractor_output_analyzer_.ConvergedFilter()) {
+      suppression_gain_limiter_.Deactivate();
+    }
   }
 
-  external_delay_seen_ = external_delay_seen_ || external_delay;
-
-  const std::vector<float>& x = render_buffer.Block(-filter_delay_blocks_)[0];
-
-  // Update counters.
-  ++capture_block_counter_;
-  ++blocks_since_reset_;
-  const bool active_render_block = DetectActiveRender(x);
-  blocks_with_active_render_ += active_render_block ? 1 : 0;
-  blocks_with_proper_filter_adaptation_ +=
-      active_render_block && !SaturatedCapture() ? 1 : 0;
-
-  // Update the limit on the echo suppression after an echo path change to avoid
-  // an initial echo burst.
-  suppression_gain_limiter_.Update(render_buffer.GetRenderActivity(),
-                                   transparent_mode_);
+  if (config_.echo_audibility.use_stationary_properties) {
+    // Update the echo audibility evaluator.
+    echo_audibility_.Update(
+        render_buffer, delay_state_.DirectPathFilterDelay(),
+        delay_state_.ExternalDelayReported(),
+        config_.ep_strength.reverb_based_on_render ? ReverbDecay() : 0.f);
+  }
 
   // Update the ERL and ERLE measures.
-  if (converged_filter && blocks_since_reset_ >= 2 * kNumBlocksPerSecond) {
-    const auto& X2 = render_buffer.Spectrum(filter_delay_blocks_);
-    erle_estimator_.Update(X2, Y2, E2_main);
-    erl_estimator_.Update(X2, Y2);
+  if (initial_state_.TransitionTriggered()) {
+    erle_estimator_.Reset(false);
   }
+  const auto& X2 = render_buffer.Spectrum(delay_state_.DirectPathFilterDelay());
+  erle_estimator_.Update(X2, Y2, E2_main,
+                         subtractor_output_analyzer_.ConvergedFilter(),
+                         config_.erle.onset_detection);
+  erl_estimator_.Update(subtractor_output_analyzer_.ConvergedFilter(), X2, Y2);
 
   // Detect and flag echo saturation.
-  // TODO(peah): Add the delay in this computation to ensure that the render and
-  // capture signals are properly aligned.
-  if (config_.ep_strength.echo_can_saturate) {
-    echo_saturation_ = DetectEchoSaturation(x, EchoPathGain());
-  }
-
-  bool filter_has_had_time_to_converge =
-      blocks_with_proper_filter_adaptation_ >= 1.5f * kNumBlocksPerSecond;
-
-  if (!filter_should_have_converged_) {
-    filter_should_have_converged_ =
-        blocks_with_proper_filter_adaptation_ > 6 * kNumBlocksPerSecond;
-  }
-
-  // Flag whether the initial state is still active.
-  initial_state_ =
-      blocks_with_proper_filter_adaptation_ < 5 * kNumBlocksPerSecond;
-
-  // Update counters for the filter divergence and convergence.
-  diverged_blocks_ = diverged_filter ? diverged_blocks_ + 1 : 0;
-  if (diverged_blocks_ >= 60) {
-    blocks_since_converged_filter_ = kBlocksSinceConvergencedFilterInit;
+  if (use_legacy_saturation_behavior_) {
+    legacy_saturation_detector_.Update(aligned_render_block, SaturatedCapture(),
+                                       EchoPathGain());
   } else {
-    blocks_since_converged_filter_ =
-        converged_filter ? 0 : blocks_since_converged_filter_ + 1;
-  }
-  if (converged_filter) {
-    active_blocks_since_converged_filter_ = 0;
-  } else if (active_render_block) {
-    ++active_blocks_since_converged_filter_;
+    saturation_detector_.Update(aligned_render_block, SaturatedCapture(),
+                                UsableLinearEstimate(), subtractor_output,
+                                EchoPathGain());
   }
 
-  bool recently_converged_filter =
-      blocks_since_converged_filter_ < 60 * kNumBlocksPerSecond;
+  // Update the decision on whether to use the initial state parameter set.
+  initial_state_.Update(active_render, SaturatedCapture());
 
-  if (blocks_since_converged_filter_ > 20 * kNumBlocksPerSecond) {
-    converged_filter_count_ = 0;
-  } else if (converged_filter) {
-    ++converged_filter_count_;
-  }
-  if (converged_filter_count_ > 50) {
-    finite_erl_ = true;
-  }
+  // Detect whether the transparent mode should be activated.
+  transparent_state_.Update(delay_state_.DirectPathFilterDelay(),
+                            filter_analyzer_.Consistent(),
+                            subtractor_output_analyzer_.ConvergedFilter(),
+                            subtractor_output_analyzer_.DivergedFilter(),
+                            active_render, SaturatedCapture());
 
-  if (filter_analyzer_.Consistent() && filter_delay_blocks_ < 5) {
-    consistent_filter_seen_ = true;
-    active_blocks_since_consistent_filter_estimate_ = 0;
-  } else if (active_render_block) {
-    ++active_blocks_since_consistent_filter_estimate_;
-  }
-
-  bool consistent_filter_estimate_not_seen;
-  if (!consistent_filter_seen_) {
-    consistent_filter_estimate_not_seen =
-        capture_block_counter_ > 5 * kNumBlocksPerSecond;
+  // Analyze the quality of the filter.
+  if (use_legacy_filter_quality_) {
+    legacy_filter_quality_state_.Update(
+        SaturatedEcho(), active_render, SaturatedCapture(), TransparentMode(),
+        external_delay, subtractor_output_analyzer_.ConvergedFilter(),
+        subtractor_output_analyzer_.DivergedFilter());
   } else {
-    consistent_filter_estimate_not_seen =
-        active_blocks_since_consistent_filter_estimate_ >
-        30 * kNumBlocksPerSecond;
+    filter_quality_state_.Update(active_render, TransparentMode(),
+                                 SaturatedCapture(),
+                                 filter_analyzer_.Consistent(), external_delay,
+                                 subtractor_output_analyzer_.ConvergedFilter());
   }
 
-  converged_filter_seen_ = converged_filter_seen_ || converged_filter;
+  // Update the reverb estimate.
+  const bool stationary_block =
+      config_.echo_audibility.use_stationary_properties &&
+      echo_audibility_.IsBlockStationary();
 
-  // If no filter convergence is seen for a long time, reset the estimated
-  // properties of the echo path.
-  if (active_blocks_since_converged_filter_ > 60 * kNumBlocksPerSecond) {
-    converged_filter_seen_ = false;
-    finite_erl_ = false;
-  }
+  reverb_model_estimator_.Update(filter_analyzer_.GetAdjustedFilter(),
+                                 adaptive_filter_frequency_response,
+                                 erle_estimator_.GetInstLinearQualityEstimate(),
+                                 delay_state_.DirectPathFilterDelay(),
+                                 UsableLinearEstimate(), stationary_block);
 
-  // After an amount of active render samples for which an echo should have been
-  // detected in the capture signal if the ERL was not infinite, flag that a
-  // transparent mode should be entered.
-  transparent_mode_ = !config_.ep_strength.bounded_erl && !finite_erl_;
-  transparent_mode_ =
-      transparent_mode_ &&
-      (consistent_filter_estimate_not_seen || !converged_filter_seen_);
-  transparent_mode_ = transparent_mode_ &&
-                      (filter_should_have_converged_ ||
-                       (!external_delay_seen_ &&
-                        capture_block_counter_ > 10 * kNumBlocksPerSecond));
-
-  usable_linear_estimate_ = !echo_saturation_;
-  usable_linear_estimate_ =
-      usable_linear_estimate_ && filter_has_had_time_to_converge;
-  usable_linear_estimate_ =
-      usable_linear_estimate_ && recently_converged_filter;
-  usable_linear_estimate_ = usable_linear_estimate_ && !diverged_filter;
-  usable_linear_estimate_ = usable_linear_estimate_ && external_delay;
-
-  use_linear_filter_output_ = usable_linear_estimate_ && !TransparentMode();
-
-  data_dumper_->DumpRaw("aec3_erle", Erle());
-  data_dumper_->DumpRaw("aec3_erle_onset", erle_estimator_.ErleOnsets());
+  erle_estimator_.Dump(data_dumper_);
+  reverb_model_estimator_.Dump(data_dumper_.get());
   data_dumper_->DumpRaw("aec3_erl", Erl());
-  data_dumper_->DumpRaw("aec3_erle_time_domain", ErleTimeDomain());
   data_dumper_->DumpRaw("aec3_erl_time_domain", ErlTimeDomain());
   data_dumper_->DumpRaw("aec3_usable_linear_estimate", UsableLinearEstimate());
-  data_dumper_->DumpRaw("aec3_transparent_mode", transparent_mode_);
-  data_dumper_->DumpRaw("aec3_state_internal_delay",
-                        internal_delay_ ? *internal_delay_ : -1);
+  data_dumper_->DumpRaw("aec3_transparent_mode", TransparentMode());
   data_dumper_->DumpRaw("aec3_filter_delay", filter_analyzer_.DelayBlocks());
 
   data_dumper_->DumpRaw("aec3_consistent_filter",
                         filter_analyzer_.Consistent());
   data_dumper_->DumpRaw("aec3_suppression_gain_limit", SuppressionGainLimit());
-  data_dumper_->DumpRaw("aec3_initial_state", InitialState());
+  data_dumper_->DumpRaw("aec3_initial_state",
+                        initial_state_.InitialStateActive());
   data_dumper_->DumpRaw("aec3_capture_saturation", SaturatedCapture());
-  data_dumper_->DumpRaw("aec3_echo_saturation", echo_saturation_);
-  data_dumper_->DumpRaw("aec3_converged_filter", converged_filter);
-  data_dumper_->DumpRaw("aec3_diverged_filter", diverged_filter);
+  data_dumper_->DumpRaw("aec3_echo_saturation", SaturatedEcho());
+  data_dumper_->DumpRaw("aec3_converged_filter",
+                        subtractor_output_analyzer_.ConvergedFilter());
+  data_dumper_->DumpRaw("aec3_diverged_filter",
+                        subtractor_output_analyzer_.DivergedFilter());
 
   data_dumper_->DumpRaw("aec3_external_delay_avaliable",
                         external_delay ? 1 : 0);
-  data_dumper_->DumpRaw("aec3_consistent_filter_estimate_not_seen",
-                        consistent_filter_estimate_not_seen);
-  data_dumper_->DumpRaw("aec3_filter_should_have_converged",
-                        filter_should_have_converged_);
-  data_dumper_->DumpRaw("aec3_filter_has_had_time_to_converge",
-                        filter_has_had_time_to_converge);
-  data_dumper_->DumpRaw("aec3_recently_converged_filter",
-                        recently_converged_filter);
+  data_dumper_->DumpRaw("aec3_suppresion_gain_limiter_running",
+                        IsSuppressionGainLimitActive());
+  data_dumper_->DumpRaw("aec3_filter_tail_freq_resp_est",
+                        GetReverbFrequencyResponse());
 }
 
-void AecState::UpdateReverb(const std::vector<float>& impulse_response) {
-  // Echo tail estimation enabled if the below variable is set as negative.
-  if (config_.ep_strength.default_len > 0.f) {
-    return;
-  }
+AecState::InitialState::InitialState(const EchoCanceller3Config& config)
+    : conservative_initial_phase_(config.filter.conservative_initial_phase),
+      initial_state_seconds_(config.filter.initial_state_seconds) {
+  Reset();
+}
+void AecState::InitialState::InitialState::Reset() {
+  initial_state_ = true;
+  strong_not_saturated_render_blocks_ = 0;
+}
+void AecState::InitialState::InitialState::Update(bool active_render,
+                                                  bool saturated_capture) {
+  strong_not_saturated_render_blocks_ +=
+      active_render && !saturated_capture ? 1 : 0;
 
-  if ((!(filter_delay_blocks_ && usable_linear_estimate_)) ||
-      (filter_delay_blocks_ >
-       static_cast<int>(config_.filter.main.length_blocks) - 4)) {
-    return;
-  }
-
-  constexpr float kOneByFftLengthBy2 = 1.f / kFftLengthBy2;
-
-  // Form the data to match against by squaring the impulse response
-  // coefficients.
-  std::array<float, GetTimeDomainLength(kMaxAdaptiveFilterLength)>
-      matching_data_data;
-  RTC_DCHECK_LE(GetTimeDomainLength(config_.filter.main.length_blocks),
-                matching_data_data.size());
-  rtc::ArrayView<float> matching_data(
-      matching_data_data.data(),
-      GetTimeDomainLength(config_.filter.main.length_blocks));
-  std::transform(impulse_response.begin(), impulse_response.end(),
-                 matching_data.begin(), [](float a) { return a * a; });
-
-  if (current_reverb_decay_section_ < config_.filter.main.length_blocks) {
-    // Update accumulated variables for the current filter section.
-
-    const size_t start_index = current_reverb_decay_section_ * kFftLengthBy2;
-
-    RTC_DCHECK_GT(matching_data.size(), start_index);
-    RTC_DCHECK_GE(matching_data.size(), start_index + kFftLengthBy2);
-    float section_energy =
-        std::accumulate(matching_data.begin() + start_index,
-                        matching_data.begin() + start_index + kFftLengthBy2,
-                        0.f) *
-        kOneByFftLengthBy2;
-
-    section_energy = std::max(
-        section_energy, 1e-32f);  // Regularization to avoid division by 0.
-
-    RTC_DCHECK_LT(current_reverb_decay_section_, block_energies_.size());
-    const float energy_ratio =
-        block_energies_[current_reverb_decay_section_] / section_energy;
-
-    main_filter_is_adapting_ = main_filter_is_adapting_ ||
-                               (energy_ratio > 1.1f || energy_ratio < 0.9f);
-
-    // Count consecutive number of "good" filter sections, where "good" means:
-    // 1) energy is above noise floor.
-    // 2) energy of current section has not changed too much from last check.
-    if (!found_end_of_reverb_decay_ && section_energy > tail_energy_ &&
-        !main_filter_is_adapting_) {
-      ++num_reverb_decay_sections_next_;
-    } else {
-      found_end_of_reverb_decay_ = true;
-    }
-
-    block_energies_[current_reverb_decay_section_] = section_energy;
-
-    if (num_reverb_decay_sections_ > 0) {
-      // Linear regression of log squared magnitude of impulse response.
-      for (size_t i = 0; i < kFftLengthBy2; i++) {
-        auto fast_approx_log2f = [](const float in) {
-          RTC_DCHECK_GT(in, .0f);
-          // Read and interpret float as uint32_t and then cast to float.
-          // This is done to extract the exponent (bits 30 - 23).
-          // "Right shift" of the exponent is then performed by multiplying
-          // with the constant (1/2^23). Finally, we subtract a constant to
-          // remove the bias (https://en.wikipedia.org/wiki/Exponent_bias).
-          union {
-            float dummy;
-            uint32_t a;
-          } x = {in};
-          float out = x.a;
-          out *= 1.1920929e-7f;  // 1/2^23
-          out -= 126.942695f;  // Remove bias.
-          return out;
-        };
-        RTC_DCHECK_GT(matching_data.size(), start_index + i);
-        float z = fast_approx_log2f(matching_data[start_index + i]);
-        accumulated_nz_ += accumulated_count_ * z;
-        ++accumulated_count_;
-      }
-    }
-
-    num_reverb_decay_sections_ =
-        num_reverb_decay_sections_ > 0 ? num_reverb_decay_sections_ - 1 : 0;
-    ++current_reverb_decay_section_;
-
+  // Flag whether the initial state is still active.
+  bool prev_initial_state = initial_state_;
+  if (conservative_initial_phase_) {
+    initial_state_ =
+        strong_not_saturated_render_blocks_ < 5 * kNumBlocksPerSecond;
   } else {
-    constexpr float kMaxDecay = 0.95f;  // ~1 sec min RT60.
-    constexpr float kMinDecay = 0.02f;  // ~15 ms max RT60.
-
-    // Accumulated variables throughout whole filter.
-
-    // Solve for decay rate.
-
-    float decay = reverb_decay_;
-
-    if (accumulated_nn_ != 0.f) {
-      const float exp_candidate = -accumulated_nz_ / accumulated_nn_;
-      decay = powf(2.0f, -exp_candidate * kFftLengthBy2);
-      decay = std::min(decay, kMaxDecay);
-      decay = std::max(decay, kMinDecay);
-    }
-
-    // Filter tail energy (assumed to be noise).
-
-    constexpr size_t kTailLength = kFftLength;
-    constexpr float k1ByTailLength = 1.f / kTailLength;
-    const size_t tail_index =
-        GetTimeDomainLength(config_.filter.main.length_blocks) - kTailLength;
-
-    RTC_DCHECK_GT(matching_data.size(), tail_index);
-    tail_energy_ = std::accumulate(matching_data.begin() + tail_index,
-                                   matching_data.end(), 0.f) *
-                   k1ByTailLength;
-
-    // Update length of decay.
-    num_reverb_decay_sections_ = num_reverb_decay_sections_next_;
-    num_reverb_decay_sections_next_ = 0;
-    // Must have enough data (number of sections) in order
-    // to estimate decay rate.
-    if (num_reverb_decay_sections_ < 5) {
-      num_reverb_decay_sections_ = 0;
-    }
-
-    const float N = num_reverb_decay_sections_ * kFftLengthBy2;
-    accumulated_nz_ = 0.f;
-    const float k1By12 = 1.f / 12.f;
-    // Arithmetic sum $2 \sum_{i=0}^{(N-1)/2}i^2$ calculated directly.
-    accumulated_nn_ = N * (N * N - 1.0f) * k1By12;
-    accumulated_count_ = -N * 0.5f;
-    // Linear regression approach assumes symmetric index around 0.
-    accumulated_count_ += 0.5f;
-
-    // Identify the peak index of the impulse response.
-    const size_t peak_index = std::distance(
-        matching_data.begin(),
-        std::max_element(matching_data.begin(), matching_data.end()));
-
-    current_reverb_decay_section_ = peak_index * kOneByFftLengthBy2 + 3;
-    // Make sure we're not out of bounds.
-    if (current_reverb_decay_section_ + 1 >=
-        config_.filter.main.length_blocks) {
-      current_reverb_decay_section_ = config_.filter.main.length_blocks;
-    }
-    size_t start_index = current_reverb_decay_section_ * kFftLengthBy2;
-    float first_section_energy =
-        std::accumulate(matching_data.begin() + start_index,
-                        matching_data.begin() + start_index + kFftLengthBy2,
-                        0.f) *
-        kOneByFftLengthBy2;
-
-    // To estimate the reverb decay, the energy of the first filter section
-    // must be substantially larger than the last.
-    // Also, the first filter section energy must not deviate too much
-    // from the max peak.
-    bool main_filter_has_reverb = first_section_energy > 4.f * tail_energy_;
-    bool main_filter_is_sane = first_section_energy > 2.f * tail_energy_ &&
-                               matching_data[peak_index] < 100.f;
-
-    // Not detecting any decay, but tail is over noise - assume max decay.
-    if (num_reverb_decay_sections_ == 0 && main_filter_is_sane &&
-        main_filter_has_reverb) {
-      decay = kMaxDecay;
-    }
-
-    if (!main_filter_is_adapting_ && main_filter_is_sane &&
-        num_reverb_decay_sections_ > 0) {
-      decay = std::max(.97f * reverb_decay_, decay);
-      reverb_decay_ -= .1f * (reverb_decay_ - decay);
-    }
-
-    found_end_of_reverb_decay_ =
-        !(main_filter_is_sane && main_filter_has_reverb);
-    main_filter_is_adapting_ = false;
+    initial_state_ = strong_not_saturated_render_blocks_ <
+                     initial_state_seconds_ * kNumBlocksPerSecond;
   }
 
-  data_dumper_->DumpRaw("aec3_reverb_decay", reverb_decay_);
-  data_dumper_->DumpRaw("aec3_reverb_tail_energy", tail_energy_);
-  data_dumper_->DumpRaw("aec3_suppression_gain_limit", SuppressionGainLimit());
+  // Flag whether the transition from the initial state has started.
+  transition_triggered_ = !initial_state_ && prev_initial_state;
 }
 
-bool AecState::DetectActiveRender(rtc::ArrayView<const float> x) const {
-  const float x_energy = std::inner_product(x.begin(), x.end(), x.begin(), 0.f);
-  return x_energy > (config_.render_levels.active_render_limit *
-                     config_.render_levels.active_render_limit) *
-                        kFftLengthBy2;
+AecState::FilterDelay::FilterDelay(const EchoCanceller3Config& config)
+    : delay_headroom_blocks_(config.delay.delay_headroom_blocks) {}
+
+void AecState::FilterDelay::Update(
+    const FilterAnalyzer& filter_analyzer,
+    const absl::optional<DelayEstimate>& external_delay,
+    size_t blocks_with_proper_filter_adaptation) {
+  // Update the delay based on the external delay.
+  if (external_delay &&
+      (!external_delay_ || external_delay_->delay != external_delay->delay)) {
+    external_delay_ = external_delay;
+    external_delay_reported_ = true;
+  }
+
+  // Override the estimated delay if it is not certain that the filter has had
+  // time to converge.
+  const bool delay_estimator_may_not_have_converged =
+      blocks_with_proper_filter_adaptation < 2 * kNumBlocksPerSecond;
+  if (delay_estimator_may_not_have_converged && external_delay_) {
+    filter_delay_blocks_ = delay_headroom_blocks_;
+  } else {
+    filter_delay_blocks_ = filter_analyzer.DelayBlocks();
+  }
 }
 
-bool AecState::DetectEchoSaturation(rtc::ArrayView<const float> x,
-                                    float echo_path_gain) {
+AecState::TransparentMode::TransparentMode(const EchoCanceller3Config& config)
+    : bounded_erl_(config.ep_strength.bounded_erl),
+      linear_and_stable_echo_path_(
+          config.echo_removal_control.linear_and_stable_echo_path),
+      active_blocks_since_sane_filter_(kBlocksSinceConsistentEstimateInit),
+      non_converged_sequence_size_(kBlocksSinceConvergencedFilterInit) {}
+
+void AecState::TransparentMode::Reset() {
+  non_converged_sequence_size_ = kBlocksSinceConvergencedFilterInit;
+  diverged_sequence_size_ = 0;
+  strong_not_saturated_render_blocks_ = 0;
+  if (linear_and_stable_echo_path_) {
+    recent_convergence_during_activity_ = false;
+  }
+}
+
+void AecState::TransparentMode::Update(int filter_delay_blocks,
+                                       bool consistent_filter,
+                                       bool converged_filter,
+                                       bool diverged_filter,
+                                       bool active_render,
+                                       bool saturated_capture) {
+  ++capture_block_counter_;
+  strong_not_saturated_render_blocks_ +=
+      active_render && !saturated_capture ? 1 : 0;
+
+  if (consistent_filter && filter_delay_blocks < 5) {
+    sane_filter_observed_ = true;
+    active_blocks_since_sane_filter_ = 0;
+  } else if (active_render) {
+    ++active_blocks_since_sane_filter_;
+  }
+
+  bool sane_filter_recently_seen;
+  if (!sane_filter_observed_) {
+    sane_filter_recently_seen =
+        capture_block_counter_ <= 5 * kNumBlocksPerSecond;
+  } else {
+    sane_filter_recently_seen =
+        active_blocks_since_sane_filter_ <= 30 * kNumBlocksPerSecond;
+  }
+
+  if (converged_filter) {
+    recent_convergence_during_activity_ = true;
+    active_non_converged_sequence_size_ = 0;
+    non_converged_sequence_size_ = 0;
+    ++num_converged_blocks_;
+  } else {
+    if (++non_converged_sequence_size_ > 20 * kNumBlocksPerSecond) {
+      num_converged_blocks_ = 0;
+    }
+
+    if (active_render &&
+        ++active_non_converged_sequence_size_ > 60 * kNumBlocksPerSecond) {
+      recent_convergence_during_activity_ = false;
+    }
+  }
+
+  if (!diverged_filter) {
+    diverged_sequence_size_ = 0;
+  } else if (++diverged_sequence_size_ >= 60) {
+    // TODO(peah): Change these lines to ensure proper triggering of usable
+    // filter.
+    non_converged_sequence_size_ = kBlocksSinceConvergencedFilterInit;
+  }
+
+  if (active_non_converged_sequence_size_ > 60 * kNumBlocksPerSecond) {
+    finite_erl_recently_detected_ = false;
+  }
+  if (num_converged_blocks_ > 50) {
+    finite_erl_recently_detected_ = true;
+  }
+
+  if (bounded_erl_) {
+    transparency_activated_ = false;
+  } else if (finite_erl_recently_detected_) {
+    transparency_activated_ = false;
+  } else if (sane_filter_recently_seen && recent_convergence_during_activity_) {
+    transparency_activated_ = false;
+  } else {
+    const bool filter_should_have_converged =
+        strong_not_saturated_render_blocks_ > 6 * kNumBlocksPerSecond;
+    transparency_activated_ = filter_should_have_converged;
+  }
+}
+
+AecState::FilteringQualityAnalyzer::FilteringQualityAnalyzer(
+    const EchoCanceller3Config& config) {}
+
+void AecState::FilteringQualityAnalyzer::Reset() {
+  usable_linear_estimate_ = false;
+  filter_update_blocks_since_reset_ = 0;
+}
+
+void AecState::FilteringQualityAnalyzer::Update(
+    bool active_render,
+    bool transparent_mode,
+    bool saturated_capture,
+    bool consistent_estimate_,
+    const absl::optional<DelayEstimate>& external_delay,
+    bool converged_filter) {
+  // Update blocks counter.
+  const bool filter_update = active_render && !saturated_capture;
+  filter_update_blocks_since_reset_ += filter_update ? 1 : 0;
+  filter_update_blocks_since_start_ += filter_update ? 1 : 0;
+
+  // Store convergence flag when observed.
+  convergence_seen_ = convergence_seen_ || converged_filter;
+
+  // Verify requirements for achieving a decent filter. The requirements for
+  // filter adaptation at call startup are more restrictive than after an
+  // in-call reset.
+  const bool sufficient_data_to_converge_at_startup =
+      filter_update_blocks_since_start_ > kNumBlocksPerSecond * 0.4f;
+  const bool sufficient_data_to_converge_at_reset =
+      sufficient_data_to_converge_at_startup &&
+      filter_update_blocks_since_reset_ > kNumBlocksPerSecond * 0.2f;
+
+  // The linear filter can only be used it has had time to converge.
+  usable_linear_estimate_ = sufficient_data_to_converge_at_startup &&
+                            sufficient_data_to_converge_at_reset;
+
+  // The linear filter can only be used if an external delay or convergence have
+  // been identified
+  usable_linear_estimate_ =
+      usable_linear_estimate_ && (external_delay || convergence_seen_);
+
+  // If transparent mode is on, deactivate usign the linear filter.
+  usable_linear_estimate_ = usable_linear_estimate_ && !transparent_mode;
+}
+
+AecState::LegacyFilteringQualityAnalyzer::LegacyFilteringQualityAnalyzer(
+    const EchoCanceller3Config& config)
+    : conservative_initial_phase_(config.filter.conservative_initial_phase),
+      required_blocks_for_convergence_(
+          kNumBlocksPerSecond * (conservative_initial_phase_ ? 1.5f : 0.8f)),
+      linear_and_stable_echo_path_(
+          config.echo_removal_control.linear_and_stable_echo_path),
+      non_converged_sequence_size_(kBlocksSinceConvergencedFilterInit) {}
+
+void AecState::LegacyFilteringQualityAnalyzer::Reset() {
+  usable_linear_estimate_ = false;
+  strong_not_saturated_render_blocks_ = 0;
+  if (linear_and_stable_echo_path_) {
+    recent_convergence_during_activity_ = false;
+  }
+  diverged_sequence_size_ = 0;
+  // TODO(peah): Change to ensure proper triggering of usable filter.
+  non_converged_sequence_size_ = 10000;
+  recent_convergence_ = true;
+}
+
+void AecState::LegacyFilteringQualityAnalyzer::Update(
+    bool saturated_echo,
+    bool active_render,
+    bool saturated_capture,
+    bool transparent_mode,
+    const absl::optional<DelayEstimate>& external_delay,
+    bool converged_filter,
+    bool diverged_filter) {
+  diverged_sequence_size_ = diverged_filter ? diverged_sequence_size_ + 1 : 0;
+  if (diverged_sequence_size_ >= 60) {
+    // TODO(peah): Change these lines to ensure proper triggering of usable
+    // filter.
+    non_converged_sequence_size_ = 10000;
+    recent_convergence_ = true;
+  }
+
+  if (converged_filter) {
+    non_converged_sequence_size_ = 0;
+    recent_convergence_ = true;
+    active_non_converged_sequence_size_ = 0;
+    recent_convergence_during_activity_ = true;
+  } else {
+    if (++non_converged_sequence_size_ >= 60 * kNumBlocksPerSecond) {
+      recent_convergence_ = false;
+    }
+
+    if (active_render &&
+        ++active_non_converged_sequence_size_ > 60 * kNumBlocksPerSecond) {
+      recent_convergence_during_activity_ = false;
+    }
+  }
+
+  strong_not_saturated_render_blocks_ +=
+      active_render && !saturated_capture ? 1 : 0;
+  const bool filter_has_had_time_to_converge =
+      strong_not_saturated_render_blocks_ > required_blocks_for_convergence_;
+
+  usable_linear_estimate_ = filter_has_had_time_to_converge && external_delay;
+
+  if (!conservative_initial_phase_ && recent_convergence_during_activity_) {
+    usable_linear_estimate_ = true;
+  }
+
+  if (!linear_and_stable_echo_path_ && !recent_convergence_) {
+    usable_linear_estimate_ = false;
+  }
+
+  if (saturated_echo || transparent_mode) {
+    usable_linear_estimate_ = false;
+  }
+}
+
+void AecState::SaturationDetector::Update(
+    rtc::ArrayView<const float> x,
+    bool saturated_capture,
+    bool usable_linear_estimate,
+    const SubtractorOutput& subtractor_output,
+    float echo_path_gain) {
+  saturated_echo_ = saturated_capture;
+  if (usable_linear_estimate) {
+    constexpr float kSaturationThreshold = 20000.f;
+    saturated_echo_ =
+        saturated_echo_ &&
+        (subtractor_output.s_main_max_abs > kSaturationThreshold ||
+         subtractor_output.s_shadow_max_abs > kSaturationThreshold);
+  } else {
+    const float max_sample = fabs(*std::max_element(
+        x.begin(), x.end(), [](float a, float b) { return a * a < b * b; }));
+
+    const float kMargin = 10.f;
+    float peak_echo_amplitude = max_sample * echo_path_gain * kMargin;
+    saturated_echo_ = saturated_echo_ && peak_echo_amplitude > 32000;
+  }
+}
+
+AecState::LegacySaturationDetector::LegacySaturationDetector(
+    const EchoCanceller3Config& config)
+    : echo_can_saturate_(config.ep_strength.echo_can_saturate),
+      not_saturated_sequence_size_(1000) {}
+
+void AecState::LegacySaturationDetector::Reset() {
+  not_saturated_sequence_size_ = 0;
+}
+
+void AecState::LegacySaturationDetector::Update(rtc::ArrayView<const float> x,
+                                                bool saturated_capture,
+                                                float echo_path_gain) {
+  if (!echo_can_saturate_) {
+    saturated_echo_ = false;
+    return;
+  }
+
   RTC_DCHECK_LT(0, x.size());
-  const float max_sample = fabs(*std::max_element(
-      x.begin(), x.end(), [](float a, float b) { return a * a < b * b; }));
+  if (saturated_capture) {
+    const float max_sample = fabs(*std::max_element(
+        x.begin(), x.end(), [](float a, float b) { return a * a < b * b; }));
 
-  // Set flag for potential presence of saturated echo
-  const float kMargin = 10.f;
-  float peak_echo_amplitude = max_sample * echo_path_gain * kMargin;
-  if (SaturatedCapture() && peak_echo_amplitude > 32000) {
-    blocks_since_last_saturation_ = 0;
-  } else {
-    ++blocks_since_last_saturation_;
+    // Set flag for potential presence of saturated echo
+    const float kMargin = 10.f;
+    float peak_echo_amplitude = max_sample * echo_path_gain * kMargin;
+    if (peak_echo_amplitude > 32000) {
+      not_saturated_sequence_size_ = 0;
+      saturated_echo_ = true;
+      return;
+    }
   }
 
-  return blocks_since_last_saturation_ < 5;
+  saturated_echo_ = ++not_saturated_sequence_size_ < 5;
 }
 
 }  // namespace webrtc

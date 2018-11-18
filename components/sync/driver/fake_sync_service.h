@@ -25,6 +25,9 @@ class FakeSyncService : public SyncService {
   FakeSyncService();
   ~FakeSyncService() override;
 
+  // TODO(crbug.com/859874): Add setters for all the other state here, so that
+  // subclasses don't have to reimplement it N times.
+
   void set_auth_error(GoogleServiceAuthError error) {
     error_ = std::move(error);
   }
@@ -32,12 +35,14 @@ class FakeSyncService : public SyncService {
   void SetAuthenticatedAccountInfo(const AccountInfo& account_info);
   AccountInfo GetAuthenticatedAccountInfo() const override;
 
- private:
+  void SetConfigurationDone(bool configuration_done);
+
   // Dummy methods.
   // SyncService implementation.
+  int GetDisableReasons() const override;
+  TransportState GetTransportState() const override;
+  bool IsAuthenticatedAccountPrimary() const override;
   bool IsFirstSetupComplete() const override;
-  bool IsSyncAllowed() const override;
-  bool IsSyncActive() const override;
   bool IsLocalSyncEnabled() const override;
   void TriggerRefresh(const ModelTypeSet& types) override;
   ModelTypeSet GetActiveDataTypes() const override;
@@ -46,21 +51,16 @@ class FakeSyncService : public SyncService {
   void RemoveObserver(SyncServiceObserver* observer) override;
   bool HasObserver(const SyncServiceObserver* observer) const override;
   void OnDataTypeRequestsSyncStartup(ModelType type) override;
-  bool CanSyncStart() const override;
   void RequestStop(SyncService::SyncStopDataFate data_fate) override;
   void RequestStart() override;
   ModelTypeSet GetPreferredDataTypes() const override;
   void OnUserChoseDatatypes(bool sync_everything,
                             ModelTypeSet chosen_types) override;
   void SetFirstSetupComplete() override;
-  bool IsFirstSetupInProgress() const override;
   std::unique_ptr<SyncSetupInProgressHandle> GetSetupInProgressHandle()
       override;
   bool IsSetupInProgress() const override;
-  bool ConfigurationDone() const override;
   const GoogleServiceAuthError& GetAuthError() const override;
-  bool HasUnrecoverableError() const override;
-  bool IsEngineInitialized() const override;
   sync_sessions::OpenTabsUIDelegate* GetOpenTabsUIDelegate() override;
   bool IsPassphraseRequiredForDecryption() const override;
   base::Time GetExplicitPassphraseTime() const override;
@@ -72,15 +72,11 @@ class FakeSyncService : public SyncService {
   bool SetDecryptionPassphrase(const std::string& passphrase) override;
   bool IsCryptographerReady(const BaseTransaction* trans) const override;
   UserShare* GetUserShare() const override;
-  LocalDeviceInfoProvider* GetLocalDeviceInfoProvider() const override;
-  void RegisterDataTypeController(
-      std::unique_ptr<DataTypeController> data_type_controller) override;
   void ReenableDatatype(ModelType type) override;
+  void ReadyForStartChanged(syncer::ModelType type) override;
   SyncTokenStatus GetSyncTokenStatus() const override;
-  std::string QuerySyncStatusSummaryString() override;
-  bool QueryDetailedSyncStatus(SyncStatus* result) override;
+  bool QueryDetailedSyncStatus(SyncStatus* result) const override;
   base::Time GetLastSyncedTime() const override;
-  std::string GetEngineInitializationStateString() const override;
   SyncCycleSnapshot GetLastCycleSnapshot() const override;
   std::unique_ptr<base::Value> GetTypeStatusMap() override;
   const GURL& sync_service_url() const override;
@@ -93,7 +89,6 @@ class FakeSyncService : public SyncService {
   base::WeakPtr<JsController> GetJsController() override;
   void GetAllNodes(const base::Callback<void(std::unique_ptr<base::ListValue>)>&
                        callback) override;
-  GlobalIdMapper* GetGlobalIdMapper() const override;
 
   // DataTypeEncryptionHandler implementation.
   bool IsPassphraseRequired() const override;
@@ -102,12 +97,15 @@ class FakeSyncService : public SyncService {
   // KeyedService implementation.
   void Shutdown() override;
 
+ private:
   GoogleServiceAuthError error_;
   GURL sync_service_url_;
   std::string unrecoverable_error_message_;
   std::unique_ptr<UserShare> user_share_;
 
   AccountInfo account_info_;
+
+  bool configuration_done_ = true;
 };
 
 }  // namespace syncer

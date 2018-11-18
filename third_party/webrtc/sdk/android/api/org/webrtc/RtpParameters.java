@@ -11,8 +11,9 @@
 package org.webrtc;
 
 import javax.annotation.Nullable;
-import java.util.List;
 import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import org.webrtc.MediaStreamTrack;
 
 /**
@@ -33,14 +34,24 @@ public class RtpParameters {
     // Specific maximum bandwidth defined in RFC3890. If null, there is no
     // maximum bitrate.
     @Nullable public Integer maxBitrateBps;
+    // The minimum bitrate in bps for video.
+    @Nullable public Integer minBitrateBps;
+    // The max framerate in fps for video.
+    @Nullable public Integer maxFramerate;
+    // The number of temporal layers for video.
+    @Nullable public Integer numTemporalLayers;
     // SSRC to be used by this encoding.
     // Can't be changed between getParameters/setParameters.
     public Long ssrc;
 
     @CalledByNative("Encoding")
-    Encoding(boolean active, Integer maxBitrateBps, Long ssrc) {
+    Encoding(boolean active, Integer maxBitrateBps, Integer minBitrateBps, Integer maxFramerate,
+        Integer numTemporalLayers, Long ssrc) {
       this.active = active;
       this.maxBitrateBps = maxBitrateBps;
+      this.minBitrateBps = minBitrateBps;
+      this.maxFramerate = maxFramerate;
+      this.numTemporalLayers = numTemporalLayers;
       this.ssrc = ssrc;
     }
 
@@ -53,6 +64,24 @@ public class RtpParameters {
     @CalledByNative("Encoding")
     Integer getMaxBitrateBps() {
       return maxBitrateBps;
+    }
+
+    @Nullable
+    @CalledByNative("Encoding")
+    Integer getMinBitrateBps() {
+      return minBitrateBps;
+    }
+
+    @Nullable
+    @CalledByNative("Encoding")
+    Integer getMaxFramerate() {
+      return maxFramerate;
+    }
+
+    @Nullable
+    @CalledByNative("Encoding")
+    Integer getNumTemporalLayers() {
+      return numTemporalLayers;
     }
 
     @CalledByNative("Encoding")
@@ -72,15 +101,18 @@ public class RtpParameters {
     public Integer clockRate;
     // The number of audio channels used. Set to null for video codecs.
     public Integer numChannels;
+    // The "format specific parameters" field from the "a=fmtp" line in the SDP
+    public Map<String, String> parameters;
 
     @CalledByNative("Codec")
     Codec(int payloadType, String name, MediaStreamTrack.MediaType kind, Integer clockRate,
-        Integer numChannels) {
+        Integer numChannels, Map<String, String> parameters) {
       this.payloadType = payloadType;
       this.name = name;
       this.kind = kind;
       this.clockRate = clockRate;
       this.numChannels = numChannels;
+      this.parameters = parameters;
     }
 
     @CalledByNative("Codec")
@@ -107,7 +139,72 @@ public class RtpParameters {
     Integer getNumChannels() {
       return numChannels;
     }
+
+    @CalledByNative("Codec")
+    Map getParameters() {
+      return parameters;
+    }
   }
+
+  public static class Rtcp {
+    /** The Canonical Name used by RTCP */
+    private final String cname;
+    /** Whether reduced size RTCP is configured or compound RTCP */
+    private final boolean reducedSize;
+
+    @CalledByNative("Rtcp")
+    Rtcp(String cname, boolean reducedSize) {
+      this.cname = cname;
+      this.reducedSize = reducedSize;
+    }
+
+    @CalledByNative("Rtcp")
+    public String getCname() {
+      return cname;
+    }
+
+    @CalledByNative("Rtcp")
+    public boolean getReducedSize() {
+      return reducedSize;
+    }
+  }
+
+  public static class HeaderExtension {
+    /** The URI of the RTP header extension, as defined in RFC5285. */
+    private final String uri;
+    /** The value put in the RTP packet to identify the header extension. */
+    private final int id;
+    /** Whether the header extension is encrypted or not. */
+    private final boolean encrypted;
+
+    @CalledByNative("HeaderExtension")
+    HeaderExtension(String uri, int id, boolean encrypted) {
+      this.uri = uri;
+      this.id = id;
+      this.encrypted = encrypted;
+    }
+
+    @CalledByNative("HeaderExtension")
+    public String getUri() {
+      return uri;
+    }
+
+    @CalledByNative("HeaderExtension")
+    public int getId() {
+      return id;
+    }
+
+    @CalledByNative("HeaderExtension")
+    public boolean getEncrypted() {
+      return encrypted;
+    }
+  }
+
+  public final String transactionId;
+
+  private final Rtcp rtcp;
+
+  private final List<HeaderExtension> headerExtensions;
 
   public final List<Encoding> encodings;
   // Codec parameters can't currently be changed between getParameters and
@@ -115,15 +212,29 @@ public class RtpParameters {
   // remove them.
   public final List<Codec> codecs;
 
-  public RtpParameters() {
-    this.encodings = new ArrayList<>();
-    this.codecs = new ArrayList<>();
+  @CalledByNative
+  RtpParameters(String transactionId, Rtcp rtcp, List<HeaderExtension> headerExtensions,
+      List<Encoding> encodings, List<Codec> codecs) {
+    this.transactionId = transactionId;
+    this.rtcp = rtcp;
+    this.headerExtensions = headerExtensions;
+    this.encodings = encodings;
+    this.codecs = codecs;
   }
 
   @CalledByNative
-  RtpParameters(List<Encoding> encodings, List<Codec> codecs) {
-    this.encodings = encodings;
-    this.codecs = codecs;
+  String getTransactionId() {
+    return transactionId;
+  }
+
+  @CalledByNative
+  public Rtcp getRtcp() {
+    return rtcp;
+  }
+
+  @CalledByNative
+  public List<HeaderExtension> getHeaderExtensions() {
+    return headerExtensions;
   }
 
   @CalledByNative

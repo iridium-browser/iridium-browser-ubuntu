@@ -51,21 +51,22 @@ const AtomicString& SubmitInputType::FormControlType() const {
 }
 
 void SubmitInputType::AppendToFormData(FormData& form_data) const {
-  if (GetElement().IsActivatedSubmit())
-    form_data.append(GetElement().GetName(),
-                     GetElement().ValueOrDefaultLabel());
+  if (GetElement().IsActivatedSubmit()) {
+    form_data.AppendFromElement(GetElement().GetName(),
+                                GetElement().ValueOrDefaultLabel());
+  }
 }
 
 bool SubmitInputType::SupportsRequired() const {
   return false;
 }
 
-void SubmitInputType::HandleDOMActivateEvent(Event* event) {
+void SubmitInputType::HandleDOMActivateEvent(Event& event) {
   if (GetElement().IsDisabledFormControl() || !GetElement().Form())
     return;
   GetElement().Form()->PrepareForSubmission(
       event, &GetElement());  // Event handlers can run.
-  event->SetDefaultHandled();
+  event.SetDefaultHandled();
 }
 
 bool SubmitInputType::CanBeSuccessfulSubmitButton() {

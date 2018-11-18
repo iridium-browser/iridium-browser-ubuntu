@@ -42,10 +42,8 @@ class DeviceEventRouter : public VolumeManagerObserver,
   void Startup();
 
   // VolumeManagerObserver overrides.
-  void OnDiskAdded(const chromeos::disks::DiskMountManager::Disk& disk,
-                   bool mounting) override;
-  void OnDiskRemoved(
-      const chromeos::disks::DiskMountManager::Disk& disk) override;
+  void OnDiskAdded(const chromeos::disks::Disk& disk, bool mounting) override;
+  void OnDiskRemoved(const chromeos::disks::Disk& disk) override;
   void OnDeviceAdded(const std::string& device_path) override;
   void OnDeviceRemoved(const std::string& device_path) override;
   void OnVolumeMounted(chromeos::MountError error_code,
@@ -74,7 +72,6 @@ class DeviceEventRouter : public VolumeManagerObserver,
 
  private:
   void StartupDelayed();
-  void OnDeviceAddedDelayed(const std::string& device_path);
   void SuspendDoneDelayed();
 
   // Obtains device state of the device having |device_path|.
@@ -97,7 +94,7 @@ class DeviceEventRouter : public VolumeManagerObserver,
   std::map<std::string, DeviceState> device_states_;
 
   // Thread checker.
-  base::ThreadChecker thread_checker_;
+  THREAD_CHECKER(thread_checker_);
 
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate the weak pointers before any other members are destroyed.

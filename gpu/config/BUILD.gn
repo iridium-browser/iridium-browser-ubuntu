@@ -4,6 +4,7 @@
 
 import("//build/config/chrome_build.gni")
 import("//build/config/chromecast_build.gni")
+import("//build/config/jumbo.gni")
 import("//build/config/ui.gni")
 
 group("config") {
@@ -69,8 +70,10 @@ action("process_json") {
 action("workaround_list") {
   script = "build_workaround_header.py"
 
+  skia_workaround_list = "//third_party/skia/src/gpu/gpu_workaround_list.txt"
   inputs = [
     "gpu_workaround_list.txt",
+    skia_workaround_list,
   ]
 
   outputs = [
@@ -86,7 +89,7 @@ action("workaround_list") {
   }
 }
 
-source_set("config_sources") {
+jumbo_source_set("config_sources") {
   # External code should depend on this via //gpu/config above rather than
   # depending on this directly or the component build will break.
   visibility = [ "//gpu/*" ]
@@ -100,6 +103,7 @@ source_set("config_sources") {
     "gpu_control_list.h",
     "gpu_crash_keys.cc",
     "gpu_crash_keys.h",
+    "gpu_domain_guilt.h",
     "gpu_driver_bug_list.cc",
     "gpu_driver_bug_list.h",
     "gpu_driver_bug_workaround_type.h",
@@ -119,6 +123,9 @@ source_set("config_sources") {
     "gpu_info_collector_linux.cc",
     "gpu_info_collector_mac.mm",
     "gpu_info_collector_win.cc",
+    "gpu_mode.h",
+    "gpu_preferences.cc",
+    "gpu_preferences.h",
     "gpu_switches.cc",
     "gpu_switches.h",
     "gpu_switching.cc",
@@ -146,6 +153,8 @@ source_set("config_sources") {
   deps = [
     ":process_json",
     "//base",
+    "//gpu/ipc/common:gpu_preferences_interface",
+    "//media:media_buildflags",
     "//third_party/re2",
     "//ui/gl",
     "//ui/gl:gl_features",
@@ -153,12 +162,18 @@ source_set("config_sources") {
   ]
 
   # Prefer mesa GL headers to system headers, which cause problems on Win.
-  include_dirs = [ "//third_party/mesa/src/include" ]
+  include_dirs = [ "//third_party/mesa_headers" ]
 
   if (is_win) {
     libs = [
       "dxguid.lib",
       "setupapi.lib",
+    ]
+
+    sources += [
+      "//third_party/nvml/nvml.h",
+      "nvml_info.cc",
+      "nvml_info.h",
     ]
 
     if (is_chrome_branded && is_official_build) {

@@ -2,14 +2,15 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// no-include-guard-because-multiply-included
+#ifndef CONTENT_SHELL_COMMON_SHELL_MESSAGES_H_
+#define CONTENT_SHELL_COMMON_SHELL_MESSAGES_H_
+
 #include <string>
 #include <vector>
 
 #include "base/values.h"
 #include "content/public/common/common_param_traits.h"
 #include "content/public/common/page_state.h"
-#include "content/shell/common/leak_detection_result.h"
 #include "ipc/ipc_message_macros.h"
 #include "ipc/ipc_platform_file.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -21,15 +22,9 @@
 // Tells the renderer to reset all test runners.
 IPC_MESSAGE_ROUTED0(ShellViewMsg_Reset)
 
-// Sets the path to the WebKit checkout.
-IPC_MESSAGE_CONTROL1(ShellViewMsg_SetWebKitSourceDir,
-                     base::FilePath /* webkit source dir */)
-
 // Tells the main window that a secondary renderer in a different process asked
 // to finish the test.
 IPC_MESSAGE_ROUTED0(ShellViewMsg_TestFinishedInSecondaryRenderer)
-
-IPC_MESSAGE_ROUTED0(ShellViewMsg_TryLeakDetection)
 
 // Notifies BlinkTestRunner that the layout dump has completed
 // (and that it can proceed with finishing up the test).
@@ -67,14 +62,6 @@ IPC_MESSAGE_ROUTED2(ShellViewHostMsg_LoadURLForFrame,
                     std::string /* frame_name */)
 IPC_MESSAGE_ROUTED0(ShellViewHostMsg_CloseRemainingWindows)
 
-IPC_STRUCT_TRAITS_BEGIN(content::LeakDetectionResult)
-IPC_STRUCT_TRAITS_MEMBER(leaked)
-IPC_STRUCT_TRAITS_MEMBER(detail)
-IPC_STRUCT_TRAITS_END()
-
-IPC_MESSAGE_ROUTED1(ShellViewHostMsg_LeakDetectionDone,
-                    content::LeakDetectionResult /* result */)
-
 IPC_MESSAGE_ROUTED1(ShellViewHostMsg_SetBluetoothManualChooser,
                     bool /* enable */)
 IPC_MESSAGE_ROUTED0(ShellViewHostMsg_GetBluetoothManualChooserEvents)
@@ -85,3 +72,5 @@ IPC_MESSAGE_ROUTED2(ShellViewHostMsg_SendBluetoothManualChooserEvent,
                     std::string /* argument */)
 IPC_MESSAGE_ROUTED1(ShellViewHostMsg_SetPopupBlockingEnabled,
                     bool /* block_popups */)
+
+#endif  // CONTENT_SHELL_COMMON_SHELL_MESSAGES_H_

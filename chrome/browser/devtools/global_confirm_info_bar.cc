@@ -28,6 +28,7 @@ class GlobalConfirmInfoBar::DelegateProxy : public ConfirmInfoBarDelegate {
   // ConfirmInfoBarDelegate overrides
   infobars::InfoBarDelegate::InfoBarIdentifier GetIdentifier() const override;
   base::string16 GetMessageText() const override;
+  gfx::ElideBehavior GetMessageElideBehavior() const override;
   int GetButtons() const override;
   base::string16 GetButtonLabel(InfoBarButton button) const override;
   bool Accept() override;
@@ -61,6 +62,13 @@ GlobalConfirmInfoBar::DelegateProxy::GetIdentifier() const {
 base::string16 GlobalConfirmInfoBar::DelegateProxy::GetMessageText() const {
   return global_info_bar_ ? global_info_bar_->delegate_->GetMessageText()
                           : base::string16();
+}
+
+gfx::ElideBehavior
+GlobalConfirmInfoBar::DelegateProxy::GetMessageElideBehavior() const {
+  return global_info_bar_
+             ? global_info_bar_->delegate_->GetMessageElideBehavior()
+             : ConfirmInfoBarDelegate::GetMessageElideBehavior();
 }
 
 int GlobalConfirmInfoBar::DelegateProxy::GetButtons() const {
@@ -169,11 +177,15 @@ GlobalConfirmInfoBar::~GlobalConfirmInfoBar() {
   }
 }
 
-void GlobalConfirmInfoBar::TabInsertedAt(TabStripModel* tab_strip_model,
-                                         content::WebContents* web_contents,
-                                         int index,
-                                         bool foreground) {
-  MaybeAddInfoBar(web_contents);
+void GlobalConfirmInfoBar::OnTabStripModelChanged(
+    TabStripModel* tab_strip_model,
+    const TabStripModelChange& change,
+    const TabStripSelectionChange& selection) {
+  if (change.type() != TabStripModelChange::kInserted)
+    return;
+
+  for (const auto& delta : change.deltas())
+    MaybeAddInfoBar(delta.insert.contents);
 }
 
 void GlobalConfirmInfoBar::TabChangedAt(content::WebContents* web_contents,

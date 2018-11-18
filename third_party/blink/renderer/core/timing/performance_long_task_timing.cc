@@ -6,6 +6,7 @@
 
 #include "third_party/blink/renderer/bindings/core/v8/v8_object_builder.h"
 #include "third_party/blink/renderer/core/frame/dom_window.h"
+#include "third_party/blink/renderer/core/performance_entry_names.h"
 #include "third_party/blink/renderer/core/timing/sub_task_attribution.h"
 #include "third_party/blink/renderer/core/timing/task_attribution_timing.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
@@ -16,10 +17,10 @@ namespace blink {
 PerformanceLongTaskTiming* PerformanceLongTaskTiming::Create(
     double start_time,
     double end_time,
-    String name,
-    String frame_src,
-    String frame_id,
-    String frame_name,
+    const AtomicString& name,
+    const String& frame_src,
+    const String& frame_id,
+    const String& frame_name,
     const SubTaskAttribution::EntriesVector& sub_task_attributions) {
   return new PerformanceLongTaskTiming(start_time, end_time, name, frame_src,
                                        frame_id, frame_name,
@@ -29,12 +30,12 @@ PerformanceLongTaskTiming* PerformanceLongTaskTiming::Create(
 PerformanceLongTaskTiming::PerformanceLongTaskTiming(
     double start_time,
     double end_time,
-    String name,
-    String culprit_frame_src,
-    String culprit_frame_id,
-    String culprit_frame_name,
+    const AtomicString& name,
+    const String& culprit_frame_src,
+    const String& culprit_frame_id,
+    const String& culprit_frame_name,
     const SubTaskAttribution::EntriesVector& sub_task_attributions)
-    : PerformanceEntry(name, "longtask", start_time, end_time) {
+    : PerformanceEntry(name, start_time, end_time) {
   // Only one possible container type exists currently: "iframe".
   if (RuntimeEnabledFeatures::LongTaskV2Enabled()) {
     for (auto&& it : sub_task_attributions) {
@@ -54,6 +55,14 @@ PerformanceLongTaskTiming::PerformanceLongTaskTiming(
 }
 
 PerformanceLongTaskTiming::~PerformanceLongTaskTiming() = default;
+
+AtomicString PerformanceLongTaskTiming::entryType() const {
+  return PerformanceEntryNames::longtask;
+}
+
+PerformanceEntryType PerformanceLongTaskTiming::EntryTypeEnum() const {
+  return PerformanceEntry::EntryType::kLongTask;
+}
 
 TaskAttributionVector PerformanceLongTaskTiming::attribution() const {
   return attribution_;

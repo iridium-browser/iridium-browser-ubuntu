@@ -37,7 +37,9 @@ class CONTENT_EXPORT URLLoaderClientImpl final
  public:
   URLLoaderClientImpl(int request_id,
                       ResourceDispatcher* resource_dispatcher,
-                      scoped_refptr<base::SingleThreadTaskRunner> task_runner);
+                      scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+                      bool bypass_redirect_checks,
+                      const GURL& request_url);
   ~URLLoaderClientImpl() override;
 
   // Sets |is_deferred_|. From now, the received messages are not dispatched
@@ -60,21 +62,18 @@ class CONTENT_EXPORT URLLoaderClientImpl final
 
   // Binds this instance to the given URLLoaderClient endpoints so that it can
   // start getting the mojo calls from the given loader. This is used only for
-  // the main resource loading when NavigationMojoResponse and/or NetworkService
-  // is enabled. Otherwise (in regular subresource loading cases) |this| is not
-  // bound to a client request, but used via ThrottlingURLLoader to get client
-  // upcalls from the loader.
+  // the main resource loading. Otherwise (in regular subresource loading cases)
+  // |this| is not bound to a client request, but used via ThrottlingURLLoader
+  // to get client upcalls from the loader.
   void Bind(
       network::mojom::URLLoaderClientEndpointsPtr url_loader_client_endpoints);
 
   // network::mojom::URLLoaderClient implementation
   void OnReceiveResponse(
-      const network::ResourceResponseHead& response_head,
-      network::mojom::DownloadedTempFilePtr downloaded_file) override;
+      const network::ResourceResponseHead& response_head) override;
   void OnReceiveRedirect(
       const net::RedirectInfo& redirect_info,
       const network::ResourceResponseHead& response_head) override;
-  void OnDataDownloaded(int64_t data_len, int64_t encoded_data_len) override;
   void OnUploadProgress(int64_t current_position,
                         int64_t total_size,
                         OnUploadProgressCallback ack_callback) override;
@@ -84,14 +83,10 @@ class CONTENT_EXPORT URLLoaderClientImpl final
       mojo::ScopedDataPipeConsumerHandle body) override;
   void OnComplete(const network::URLLoaderCompletionStatus& status) override;
 
-  // Takes |downloaded_file_|.
-  network::mojom::DownloadedTempFilePtr TakeDownloadedTempFile();
-
  private:
   class DeferredMessage;
   class DeferredOnReceiveResponse;
   class DeferredOnReceiveRedirect;
-  class DeferredOnDataDownloaded;
   class DeferredOnUploadProgress;
   class DeferredOnReceiveCachedMetadata;
   class DeferredOnComplete;
@@ -101,7 +96,6 @@ class CONTENT_EXPORT URLLoaderClientImpl final
   void OnConnectionClosed();
 
   scoped_refptr<URLResponseBodyConsumer> body_consumer_;
-  network::mojom::DownloadedTempFilePtr downloaded_file_;
   std::vector<std::unique_ptr<DeferredMessage>> deferred_messages_;
   const int request_id_;
   bool has_received_response_ = false;
@@ -111,8 +105,9 @@ class CONTENT_EXPORT URLLoaderClientImpl final
   int32_t accumulated_transfer_size_diff_during_deferred_ = 0;
   ResourceDispatcher* const resource_dispatcher_;
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
+  bool bypass_redirect_checks_ = false;
+  GURL last_loaded_url_;
 
-  // Used in NavigationMojoResponse and NetworkService.
   network::mojom::URLLoaderPtr url_loader_;
   mojo::Binding<network::mojom::URLLoaderClient> url_loader_client_binding_;
 

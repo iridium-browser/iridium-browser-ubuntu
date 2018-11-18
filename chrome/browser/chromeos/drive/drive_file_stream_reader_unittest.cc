@@ -6,6 +6,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -53,7 +54,7 @@ class LocalReaderProxyTest : public ::testing::Test {
     ASSERT_TRUE(google_apis::test_util::CreateFileOfSpecifiedSize(
         temp_dir_.GetPath(), 1024, &file_path_, &file_content_));
 
-    worker_thread_.reset(new base::Thread("ReaderProxyTest"));
+    worker_thread_ = std::make_unique<base::Thread>("ReaderProxyTest");
     ASSERT_TRUE(worker_thread_->Start());
   }
 
@@ -118,7 +119,8 @@ TEST_F(NetworkReaderProxyTest, EmptyFile) {
 
   net::TestCompletionCallback callback;
   const int kBufferSize = 10;
-  scoped_refptr<net::IOBuffer> buffer(new net::IOBuffer(kBufferSize));
+  scoped_refptr<net::IOBuffer> buffer =
+      base::MakeRefCounted<net::IOBuffer>(kBufferSize);
   int result = proxy.Read(buffer.get(), kBufferSize, callback.callback());
 
   // For empty file, Read() should return 0 immediately.
@@ -133,7 +135,8 @@ TEST_F(NetworkReaderProxyTest, Read) {
 
     net::TestCompletionCallback callback;
     const int kBufferSize = 3;
-    scoped_refptr<net::IOBuffer> buffer(new net::IOBuffer(kBufferSize));
+    scoped_refptr<net::IOBuffer> buffer =
+        base::MakeRefCounted<net::IOBuffer>(kBufferSize);
 
     // If no data is available yet, ERR_IO_PENDING should be returned.
     int result = proxy.Read(buffer.get(), kBufferSize, callback.callback());
@@ -154,9 +157,9 @@ TEST_F(NetworkReaderProxyTest, Read) {
     EXPECT_EQ("de", std::string(buffer->data(), result));
 
     // Supply the data before calling Read operation.
-    data.reset(new std::string("fg"));
+    data = std::make_unique<std::string>("fg");
     proxy.OnGetContent(std::move(data));
-    data.reset(new std::string("hij"));
+    data = std::make_unique<std::string>("hij");
     proxy.OnGetContent(std::move(data));  // Now 10 bytes are supplied.
 
     // The data should be concatenated if possible.
@@ -183,7 +186,8 @@ TEST_F(NetworkReaderProxyTest, ReadWithLimit) {
 
   net::TestCompletionCallback callback;
   const int kBufferSize = 3;
-  scoped_refptr<net::IOBuffer> buffer(new net::IOBuffer(kBufferSize));
+  scoped_refptr<net::IOBuffer> buffer =
+      base::MakeRefCounted<net::IOBuffer>(kBufferSize);
 
   // If no data is available yet, ERR_IO_PENDING should be returned.
   int result = proxy.Read(buffer.get(), kBufferSize, callback.callback());
@@ -192,9 +196,9 @@ TEST_F(NetworkReaderProxyTest, ReadWithLimit) {
   // And when the data is supplied, the callback will be called.
   std::unique_ptr<std::string> data(new std::string("abcde"));
   proxy.OnGetContent(std::move(data));
-  data.reset(new std::string("fgh"));
+  data = std::make_unique<std::string>("fgh");
   proxy.OnGetContent(std::move(data));
-  data.reset(new std::string("ijklmno"));
+  data = std::make_unique<std::string>("ijklmno");
   proxy.OnGetContent(std::move(data));
 
   // The returned data should be fit to the buffer size.
@@ -208,9 +212,9 @@ TEST_F(NetworkReaderProxyTest, ReadWithLimit) {
   EXPECT_EQ("no", std::string(buffer->data(), result));
 
   // Supply the data before calling Read operation.
-  data.reset(new std::string("pqrs"));
+  data = std::make_unique<std::string>("pqrs");
   proxy.OnGetContent(std::move(data));
-  data.reset(new std::string("tuvwxyz"));
+  data = std::make_unique<std::string>("tuvwxyz");
   proxy.OnGetContent(std::move(data));  // 't' is the 20-th byte.
 
   // The data should be concatenated if possible.
@@ -232,7 +236,8 @@ TEST_F(NetworkReaderProxyTest, ErrorWithPendingCallback) {
 
   net::TestCompletionCallback callback;
   const int kBufferSize = 3;
-  scoped_refptr<net::IOBuffer> buffer(new net::IOBuffer(kBufferSize));
+  scoped_refptr<net::IOBuffer> buffer =
+      base::MakeRefCounted<net::IOBuffer>(kBufferSize);
 
   // Set pending callback.
   int result = proxy.Read(buffer.get(), kBufferSize, callback.callback());
@@ -253,7 +258,8 @@ TEST_F(NetworkReaderProxyTest, ErrorWithPendingData) {
 
   net::TestCompletionCallback callback;
   const int kBufferSize = 3;
-  scoped_refptr<net::IOBuffer> buffer(new net::IOBuffer(kBufferSize));
+  scoped_refptr<net::IOBuffer> buffer =
+      base::MakeRefCounted<net::IOBuffer>(kBufferSize);
 
   // Supply the data before an error.
   std::unique_ptr<std::string> data(new std::string("abcde"));
@@ -298,16 +304,17 @@ class DriveFileStreamReaderTest : public ::testing::Test {
   }
 
   void SetUp() override {
-    worker_thread_.reset(new base::Thread("DriveFileStreamReaderTest"));
+    worker_thread_ =
+        std::make_unique<base::Thread>("DriveFileStreamReaderTest");
     ASSERT_TRUE(worker_thread_->Start());
 
     // Initialize FakeDriveService.
-    fake_drive_service_.reset(new FakeDriveService);
+    fake_drive_service_ = std::make_unique<FakeDriveService>();
     ASSERT_TRUE(test_util::SetUpTestEntries(fake_drive_service_.get()));
 
     // Create a testee instance.
-    fake_file_system_.reset(
-        new test_util::FakeFileSystem(fake_drive_service_.get()));
+    fake_file_system_ =
+        std::make_unique<test_util::FakeFileSystem>(fake_drive_service_.get());
   }
 
   FileSystemInterface* GetFileSystem() {
@@ -360,8 +367,8 @@ TEST_F(DriveFileStreamReaderTest, Read) {
 
   // Create second instance and initialize it.
   // In this case, the file should be cached one.
-  reader.reset(new DriveFileStreamReader(GetFileSystemGetter(),
-                                         worker_thread_->task_runner().get()));
+  reader = std::make_unique<DriveFileStreamReader>(
+      GetFileSystemGetter(), worker_thread_->task_runner().get());
   EXPECT_FALSE(reader->IsInitialized());
 
   error = net::ERR_FAILED;
@@ -433,8 +440,8 @@ TEST_F(DriveFileStreamReaderTest, ReadRange) {
 
   // Create second instance and initialize it.
   // In this case, the file should be cached one.
-  reader.reset(new DriveFileStreamReader(GetFileSystemGetter(),
-                                         worker_thread_->task_runner().get()));
+  reader = std::make_unique<DriveFileStreamReader>(
+      GetFileSystemGetter(), worker_thread_->task_runner().get());
   EXPECT_FALSE(reader->IsInitialized());
 
   error = net::ERR_FAILED;
@@ -543,8 +550,8 @@ TEST_F(DriveFileStreamReaderTest, ZeroByteFileRead) {
 
   // Create second instance and initialize it.
   // In this case, the file should be cached one.
-  reader.reset(new DriveFileStreamReader(GetFileSystemGetter(),
-                                         worker_thread_->task_runner().get()));
+  reader = std::make_unique<DriveFileStreamReader>(
+      GetFileSystemGetter(), worker_thread_->task_runner().get());
   EXPECT_FALSE(reader->IsInitialized());
 
   error = net::ERR_FAILED;

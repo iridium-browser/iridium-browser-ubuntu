@@ -17,7 +17,7 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "base/threading/thread_checker.h"
+#include "base/sequence_checker.h"
 #include "components/invalidation/public/invalidation_handler.h"
 #include "components/sync/base/extensions_activity.h"
 #include "components/sync/base/model_type.h"
@@ -26,8 +26,8 @@
 #include "components/sync/engine/cycle/sync_cycle_snapshot.h"
 #include "components/sync/engine/cycle/type_debug_info_observer.h"
 #include "components/sync/engine/model_type_configurer.h"
+#include "components/sync/engine/sync_credentials.h"
 #include "components/sync/engine/sync_engine.h"
-#include "components/sync/engine/sync_manager.h"
 #include "components/sync/protocol/encryption.pb.h"
 #include "components/sync/protocol/sync_protocol_error.h"
 
@@ -75,13 +75,15 @@ class SyncBackendHostImpl : public SyncEngine, public InvalidationHandler {
                                  ModelSafeGroup group,
                                  ChangeProcessor* change_processor) override;
   void DeactivateDirectoryDataType(ModelType type) override;
-  void ActivateNonBlockingDataType(ModelType type,
-                                   std::unique_ptr<ActivationContext>) override;
+  void ActivateNonBlockingDataType(
+      ModelType type,
+      std::unique_ptr<DataTypeActivationResponse>) override;
   void DeactivateNonBlockingDataType(ModelType type) override;
   void EnableEncryptEverything() override;
   UserShare* GetUserShare() const override;
   Status GetDetailedStatus() override;
-  bool HasUnsyncedItems() const override;
+  void HasUnsyncedItemsForTest(
+      base::OnceCallback<void(bool)> cb) const override;
   bool IsCryptographerReady(const BaseTransaction* trans) const override;
   void GetModelSafeRoutingInfo(ModelSafeRoutingInfo* out) const override;
   void FlushDirectory() const override;
@@ -121,7 +123,8 @@ class SyncBackendHostImpl : public SyncEngine, public InvalidationHandler {
       const WeakHandle<JsBackend> js_backend,
       const WeakHandle<DataTypeDebugInfoListener> debug_info_listener,
       std::unique_ptr<ModelTypeConnector> model_type_connector,
-      const std::string& cache_guid);
+      const std::string& cache_guid,
+      const std::string& session_name);
 
   // Forwards a ProtocolEvent to the host. Will not be called unless a call to
   // SetForwardProtocolEvents() explicitly requested that we start forwarding
@@ -199,7 +202,7 @@ class SyncBackendHostImpl : public SyncEngine, public InvalidationHandler {
   SyncClient* const sync_client_;
 
   // The task runner where all the sync engine operations happen.
-  scoped_refptr<base::SingleThreadTaskRunner> sync_task_runner_;
+  scoped_refptr<base::SequencedTaskRunner> sync_task_runner_;
 
   // Name used for debugging (set from profile_->GetDebugName()).
   const std::string name_;
@@ -228,7 +231,7 @@ class SyncBackendHostImpl : public SyncEngine, public InvalidationHandler {
   bool invalidation_handler_registered_ = false;
 
   // Checks that we're on the same thread this was constructed on (UI thread).
-  base::ThreadChecker thread_checker_;
+  SEQUENCE_CHECKER(sequence_checker_);
 
   base::WeakPtrFactory<SyncBackendHostImpl> weak_ptr_factory_;
 

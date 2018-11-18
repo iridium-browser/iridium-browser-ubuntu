@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/views/frame/browser_view.h"
 
 #include "base/macros.h"
+#include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/layout_constants.h"
@@ -24,13 +25,11 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/views/controls/webview/webview.h"
 
-namespace {
-
 #if defined(OS_MACOSX)
-const ui::EventFlags kPlatformModifier = ui::EF_COMMAND_DOWN;
-#else
-const ui::EventFlags kPlatformModifier = ui::EF_CONTROL_DOWN;
-#endif  // OS_MACOSX
+#include "chrome/browser/ui/recently_audible_helper.h"
+#endif
+
+namespace {
 
 // Tab strip bounds depend on the window frame sizes.
 gfx::Point ExpectedTabStripOrigin(BrowserView* browser_view) {
@@ -102,8 +101,6 @@ TEST_F(BrowserViewTest, BrowserViewLayout) {
             browser_view()->GetIndexOf(browser_view()->find_bar_host_view()));
   EXPECT_EQ(browser_view()->child_count() - 2,
             browser_view()->GetIndexOf(browser_view()->infobar_container()));
-  EXPECT_EQ(browser_view()->child_count() - 3,
-            browser_view()->GetIndexOf(top_container));
 
   // Verify basic layout.
   EXPECT_EQ(0, top_container->x());
@@ -114,7 +111,9 @@ TEST_F(BrowserViewTest, BrowserViewLayout) {
   EXPECT_EQ(expected_tabstrip_origin.x(), tabstrip->x());
   EXPECT_EQ(expected_tabstrip_origin.y(), tabstrip->y());
   EXPECT_EQ(0, toolbar->x());
-  EXPECT_EQ(tabstrip->bounds().bottom(), toolbar->y());
+  EXPECT_EQ(
+      tabstrip->bounds().bottom() - GetLayoutConstant(TABSTRIP_TOOLBAR_OVERLAP),
+      toolbar->y());
   EXPECT_EQ(0, contents_container->x());
   EXPECT_EQ(toolbar->bounds().bottom(), contents_container->y());
   EXPECT_EQ(top_container->bounds().bottom(), contents_container->y());
@@ -151,15 +150,15 @@ TEST_F(BrowserViewTest, BrowserViewLayout) {
             browser_view()->GetIndexOf(browser_view()->find_bar_host_view()));
   EXPECT_EQ(browser_view()->child_count() - 2,
             browser_view()->GetIndexOf(browser_view()->infobar_container()));
-  EXPECT_EQ(browser_view()->child_count() - 3,
-            browser_view()->GetIndexOf(top_container));
 
   // Bookmark bar layout on NTP.
   EXPECT_EQ(0, bookmark_bar->x());
-  EXPECT_EQ(tabstrip->bounds().bottom() + toolbar->height(), bookmark_bar->y());
-  EXPECT_EQ(toolbar->bounds().bottom(), contents_container->y());
-  EXPECT_EQ(bookmark_bar->height(), devtools_web_view->y());
-  EXPECT_EQ(bookmark_bar->height(), contents_web_view->y());
+  EXPECT_EQ(tabstrip->bounds().bottom() + toolbar->height() -
+                GetLayoutConstant(TABSTRIP_TOOLBAR_OVERLAP),
+            bookmark_bar->y());
+  EXPECT_EQ(bookmark_bar->height() + bookmark_bar->y(),
+            contents_container->y());
+  EXPECT_EQ(contents_web_view->y(), devtools_web_view->y());
 
   // Bookmark bar is parented back to top container on normal page.
   NavigateAndCommitActiveTabWithTitle(browser,
@@ -168,24 +167,23 @@ TEST_F(BrowserViewTest, BrowserViewLayout) {
   EXPECT_FALSE(bookmark_bar->visible());
   EXPECT_FALSE(bookmark_bar->IsDetached());
   EXPECT_EQ(top_container, bookmark_bar->parent());
-  // Top container is still third from front.
-  EXPECT_EQ(browser_view()->child_count() - 3,
-            browser_view()->GetIndexOf(top_container));
 
   BookmarkBarView::DisableAnimationsForTesting(false);
 }
 
+// On macOS, most accelerators are handled by CommandDispatcher.
+#if !defined(OS_MACOSX)
 // Test that repeated accelerators are processed or ignored depending on the
 // commands that they refer to. The behavior for different commands is dictated
 // by IsCommandRepeatable() in chrome/browser/ui/views/accelerator_table.h.
 TEST_F(BrowserViewTest, RepeatedAccelerators) {
   // A non-repeated Ctrl-L accelerator should be processed.
-  const ui::Accelerator kLocationAccel(ui::VKEY_L, kPlatformModifier);
+  const ui::Accelerator kLocationAccel(ui::VKEY_L, ui::EF_PLATFORM_ACCELERATOR);
   EXPECT_TRUE(browser_view()->AcceleratorPressed(kLocationAccel));
 
   // If the accelerator is repeated, it should be ignored.
   const ui::Accelerator kLocationRepeatAccel(
-      ui::VKEY_L, kPlatformModifier | ui::EF_IS_REPEAT);
+      ui::VKEY_L, ui::EF_PLATFORM_ACCELERATOR | ui::EF_IS_REPEAT);
   EXPECT_FALSE(browser_view()->AcceleratorPressed(kLocationRepeatAccel));
 
   // A repeated Ctrl-Tab accelerator should be processed.
@@ -193,6 +191,7 @@ TEST_F(BrowserViewTest, RepeatedAccelerators) {
       ui::VKEY_TAB, ui::EF_CONTROL_DOWN | ui::EF_IS_REPEAT);
   EXPECT_TRUE(browser_view()->AcceleratorPressed(kNextTabRepeatAccel));
 }
+#endif  // !defined(OS_MACOSX)
 
 // Test that bookmark bar view becomes invisible when closing the browser.
 TEST_F(BrowserViewTest, BookmarkBarInvisibleOnShutdown) {
@@ -262,6 +261,38 @@ TEST_F(BrowserViewTest, AccessibleWindowTitle) {
           TestingProfile::Builder().BuildIncognito(profile)));
 }
 
+#if defined(OS_MACOSX)
+// Tests that audio playing state is reflected in the "Window" menu on Mac.
+TEST_F(BrowserViewTest, TitleAudioIndicators) {
+  base::string16 playing_icon = base::WideToUTF16(L"\U0001F50A");
+  base::string16 muted_icon = base::WideToUTF16(L"\U0001F507");
+
+  AddTab(browser_view()->browser(), GURL("about:blank"));
+  content::WebContents* contents = browser_view()->GetActiveWebContents();
+  RecentlyAudibleHelper* audible_helper =
+      RecentlyAudibleHelper::FromWebContents(contents);
+
+  audible_helper->SetNotRecentlyAudibleForTesting();
+  EXPECT_EQ(browser_view()->GetWindowTitle().find(playing_icon),
+            base::string16::npos);
+  EXPECT_EQ(browser_view()->GetWindowTitle().find(muted_icon),
+            base::string16::npos);
+
+  audible_helper->SetCurrentlyAudibleForTesting();
+  EXPECT_NE(browser_view()->GetWindowTitle().find(playing_icon),
+            base::string16::npos);
+  EXPECT_EQ(browser_view()->GetWindowTitle().find(muted_icon),
+            base::string16::npos);
+
+  audible_helper->SetRecentlyAudibleForTesting();
+  contents->SetAudioMuted(true);
+  EXPECT_EQ(browser_view()->GetWindowTitle().find(playing_icon),
+            base::string16::npos);
+  EXPECT_NE(browser_view()->GetWindowTitle().find(muted_icon),
+            base::string16::npos);
+}
+#endif
+
 class BrowserViewHostedAppTest : public TestWithBrowserView {
  public:
   BrowserViewHostedAppTest() : TestWithBrowserView(Browser::TYPE_POPUP, true) {}
@@ -293,8 +324,8 @@ TEST_F(BrowserViewHostedAppTest, Layout) {
 
   // The position of the bottom of the header (the bar with the window
   // controls) in the coordinates of BrowserView.
-  int bottom_of_header = browser_view()->frame()->GetTopInset(false) -
-      header_offset.y();
+  int bottom_of_header =
+      browser_view()->frame()->GetTopInset() - header_offset.y();
 
   // The web contents should be flush with the bottom of the header.
   EXPECT_EQ(bottom_of_header, contents_container->y());
@@ -302,5 +333,5 @@ TEST_F(BrowserViewHostedAppTest, Layout) {
   // The find bar should butt against the 1px header/web-contents separator at
   // the bottom of the header.
   EXPECT_EQ(browser_view()->GetFindBarBoundingBox().y(),
-            browser_view()->frame()->GetTopInset(false));
+            browser_view()->frame()->GetTopInset());
 }

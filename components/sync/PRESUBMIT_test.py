@@ -70,20 +70,26 @@ class MockFile(object):
 # test presubmit parsing of EntitySpecifics definition in that file.
 MOCK_PROTOFILE_CONTENTS = ('\n'
   'message EntitySpecifics {\n'
-  '//comment\n'
+  '  //comment\n'
   '\n'
-  'optional AutofillSpecifics autofill = 123;\n'
-  'optional AppSpecifics app = 456;\n'
-  'optional AppSettingSpecifics app_setting = 789;\n'
-  'optional ExtensionSettingSpecifics extension_setting = 910;\n'
-  '//comment\n'
-  '}\n')
+  '  oneof specifics_variant {\n'
+  '    AutofillSpecifics autofill = 123;\n'
+  '    AppSpecifics app = 456;\n'
+  '    AppSettingSpecifics app_setting = 789;\n'
+  '    ExtensionSettingSpecifics extension_setting = 910;\n'
+  '    ManagedUserSharedSettingSpecifics managed_user_shared_setting'
+                                                                    ' = 915;\n'
+  '    //comment\n'
+  '  }\n'
+  '}\n'
+  )
 
 
 # Format string used as the contents of a mock model_type.cc
 # in order to test presubmit parsing of the ModelTypeInfoMap in that file.
 MOCK_MODELTYPE_CONTENTS =('\n'
   'const ModelTypeInfo kModelTypeInfoMap[] = {\n'
+  '// Some comment \n'
   '{APP_SETTINGS, "APP_SETTING", "app_settings", "App settings",\n'
   'sync_pb::EntitySpecifics::kAppSettingFieldNumber, 13},\n'
   '%s\n'
@@ -105,6 +111,13 @@ class ModelTypeInfoChangeTest(unittest.TestCase):
 
   def testValidChangeGrandfatheredEntry(self):
     results = self._testChange('{PROXY_TABS, "", "", "Tabs", -1, 25},')
+    self.assertEqual(0, len(results))
+
+  def testValidChangeDeprecatedEntry(self):
+    results = self._testChange('{DEPRECATED_SUPERVISED_USER_SHARED_SETTINGS,'
+    '"MANAGED_USER_SHARED_SETTING", "managed_user_shared_settings",'
+    '"Managed User Shared Settings",'
+    'sync_pb::EntitySpecifics::kManagedUserSharedSettingFieldNumber, 30},')
     self.assertEqual(0, len(results))
 
   def testInvalidChangeMismatchedNotificationType(self):

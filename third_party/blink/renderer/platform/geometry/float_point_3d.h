@@ -25,31 +25,37 @@
 
 #include "third_party/blink/renderer/platform/geometry/float_point.h"
 #include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/skia/include/core/SkPoint3.h"
 
-namespace blink {
+namespace gfx {
+class Point3F;
+}
 
-class TextStream;
+namespace blink {
 
 class PLATFORM_EXPORT FloatPoint3D {
   DISALLOW_NEW();
 
  public:
-  FloatPoint3D() : x_(0), y_(0), z_(0) {}
+  constexpr FloatPoint3D() : x_(0), y_(0), z_(0) {}
 
-  FloatPoint3D(float x, float y, float z) : x_(x), y_(y), z_(z) {}
+  constexpr FloatPoint3D(float x, float y, float z) : x_(x), y_(y), z_(z) {}
 
-  FloatPoint3D(const FloatPoint& p) : x_(p.X()), y_(p.Y()), z_(0) {}
+  constexpr FloatPoint3D(const FloatPoint& p) : x_(p.X()), y_(p.Y()), z_(0) {}
 
-  FloatPoint3D(const FloatPoint3D& p) : x_(p.X()), y_(p.Y()), z_(p.Z()) {}
+  constexpr FloatPoint3D(const FloatPoint3D& p)
+      : x_(p.X()), y_(p.Y()), z_(p.Z()) {}
 
-  float X() const { return x_; }
+  FloatPoint3D(const gfx::Point3F&);
+
+  constexpr float X() const { return x_; }
   void SetX(float x) { x_ = x; }
 
-  float Y() const { return y_; }
+  constexpr float Y() const { return y_; }
   void SetY(float y) { y_ = y; }
 
-  float Z() const { return z_; }
+  constexpr float Z() const { return z_; }
   void SetZ(float z) { z_ = z; }
   void Set(float x, float y, float z) {
     x_ = x;
@@ -67,7 +73,7 @@ class PLATFORM_EXPORT FloatPoint3D {
     z_ *= sz;
   }
 
-  bool IsZero() const { return !x_ && !y_ && !z_; }
+  constexpr bool IsZero() const { return !x_ && !y_ && !z_; }
 
   void Normalize();
 
@@ -105,6 +111,7 @@ class PLATFORM_EXPORT FloatPoint3D {
   float DistanceTo(const FloatPoint3D& a) const;
 
   operator SkPoint3() const { return SkPoint3::Make(x_, y_, z_); }
+  operator gfx::Point3F() const;
 
   String ToString() const;
 
@@ -124,20 +131,20 @@ inline FloatPoint3D& operator-=(FloatPoint3D& a, const FloatPoint3D& b) {
   return a;
 }
 
-inline FloatPoint3D operator+(const FloatPoint3D& a, const FloatPoint3D& b) {
+constexpr FloatPoint3D operator+(const FloatPoint3D& a, const FloatPoint3D& b) {
   return FloatPoint3D(a.X() + b.X(), a.Y() + b.Y(), a.Z() + b.Z());
 }
 
-inline FloatPoint3D operator-(const FloatPoint3D& a, const FloatPoint3D& b) {
+constexpr FloatPoint3D operator-(const FloatPoint3D& a, const FloatPoint3D& b) {
   return FloatPoint3D(a.X() - b.X(), a.Y() - b.Y(), a.Z() - b.Z());
 }
 
-inline bool operator==(const FloatPoint3D& a, const FloatPoint3D& b) {
+constexpr bool operator==(const FloatPoint3D& a, const FloatPoint3D& b) {
   return a.X() == b.X() && a.Y() == b.Y() && a.Z() == b.Z();
 }
 
-inline bool operator!=(const FloatPoint3D& a, const FloatPoint3D& b) {
-  return a.X() != b.X() || a.Y() != b.Y() || a.Z() != b.Z();
+constexpr bool operator!=(const FloatPoint3D& a, const FloatPoint3D& b) {
+  return !(a == b);
 }
 
 inline float operator*(const FloatPoint3D& a, const FloatPoint3D& b) {
@@ -158,7 +165,7 @@ inline float FloatPoint3D::DistanceTo(const FloatPoint3D& a) const {
 }
 
 PLATFORM_EXPORT std::ostream& operator<<(std::ostream&, const FloatPoint3D&);
-TextStream& operator<<(TextStream&, const FloatPoint3D&);
+WTF::TextStream& operator<<(WTF::TextStream&, const FloatPoint3D&);
 
 }  // namespace blink
 

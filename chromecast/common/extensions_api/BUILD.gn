@@ -9,72 +9,100 @@ import("//tools/json_schema_compiler/json_schema_api.gni")
 assert(enable_extensions,
        "Cannot depend on extensions because enable_extensions=false.")
 
+extensions_api_schema_include_rules =
+    "extensions/common/api:extensions::api::%(namespace)s"
+
 schema_sources = [
+  # TODO(crbug/837773) De-dupe Automation later.
+  "accessibility_private.json",
+  "automation.idl",
+  "automation_internal.idl",
   "bookmarks.json",
+  "braille_display_private.idl",
   "history.json",
   "identity.idl",
+  "i18n.json",
+  "notifications.idl",
+  "tabs.json",
+  "windows.json",
 ]
+
 root_namespace = "extensions::cast::api::%(namespace)s"
 
-json_schema_api("api") {
-  sources = schema_sources
-  schemas = true
-  bundle = true
+extensions_api_uncompiled_sources = [ "extension.json" ]
+
+generated_json_strings("generated_api_json_strings") {
+  sources = schema_sources + extensions_api_uncompiled_sources + [ "tts.json" ]
   bundle_name = "Cast"
+  schema_include_rules = extensions_api_schema_include_rules
+
+  deps = [
+    "//extensions/common/api",
+  ]
+  visibility = [ ":api" ]
 }
 
-json_schema_api("api_registration") {
+function_registration("generated_api_registration") {
   sources = schema_sources
   impl_dir = "//chromecast/browser/extensions/api"
-  bundle_registration = true
   bundle_name = "Cast"
 
   deps = [
-    ":api",
     "//extensions/common",
+    "//extensions/common/api",
   ]
+  visibility = [ ":api" ]
+}
+
+generated_types("generated_api_types") {
+  sources = schema_sources
+  schema_include_rules = extensions_api_schema_include_rules
+
+  deps = [
+    "//extensions/common/api",
+  ]
+  visibility = [ ":api" ]
 }
 
 json_features("cast_api_features") {
   feature_type = "APIFeature"
-  provider_class = "CastAPIFeatureProvider"
+  method_name = "AddCastAPIFeatures"
   sources = [
-    "../../../extensions/common/api/_api_features.json",
     "_api_features.json",
   ]
 }
 
 json_features("cast_permission_features") {
   feature_type = "PermissionFeature"
-  provider_class = "CastPermissionFeatureProvider"
+  method_name = "AddCastPermissionFeatures"
   sources = [
-    "../../../extensions/common/api/_permission_features.json",
     "_permission_features.json",
   ]
 }
 
 json_features("cast_manifest_features") {
   feature_type = "ManifestFeature"
-  provider_class = "CastManifestFeatureProvider"
+  method_name = "AddCastManifestFeatures"
   sources = [
-    "../../../extensions/common/api/_manifest_features.json",
     "_manifest_features.json",
   ]
 }
 
-json_features("cast_behavior_features") {
-  feature_type = "BehaviorFeature"
-  provider_class = "CastBehaviorFeatureProvider"
-  sources = [
-    "../../../extensions/common/api/_behavior_features.json",
+# Public Targets
+
+group("api") {
+  public_deps = [
+    ":generated_api_json_strings",
+    ":generated_api_registration",
+    ":generated_api_types",
   ]
 }
 
 group("extensions_features") {
   public_deps = [
     ":cast_api_features",
-    ":cast_behavior_features",
     ":cast_manifest_features",
     ":cast_permission_features",
+    "//extensions/common/api:extensions_features",
   ]
 }

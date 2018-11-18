@@ -37,7 +37,7 @@ SourceListDirective::SourceListDirective(const String& name,
       allow_eval_(false),
       allow_wasm_eval_(false),
       allow_dynamic_(false),
-      allow_hashed_attributes_(false),
+      allow_unsafe_hashes_(false),
       report_sample_(false),
       hash_algorithms_used_(0) {
   Vector<UChar> characters;
@@ -50,7 +50,9 @@ static bool IsSourceListNone(const UChar* begin, const UChar* end) {
 
   const UChar* position = begin;
   SkipWhile<UChar, IsSourceCharacter>(position, end);
-  if (!EqualIgnoringASCIICase("'none'", StringView(begin, position - begin)))
+  if (!EqualIgnoringASCIICase(
+          "'none'",
+          StringView(begin, static_cast<wtf_size_t>(position - begin))))
     return false;
 
   SkipWhile<UChar, IsASCIISpace>(position, end);
@@ -108,8 +110,8 @@ bool SourceListDirective::AllowHash(const CSPHashValue& hash_value) const {
   return hashes_.Contains(hash_value);
 }
 
-bool SourceListDirective::AllowHashedAttributes() const {
-  return allow_hashed_attributes_;
+bool SourceListDirective::AllowUnsafeHashes() const {
+  return allow_unsafe_hashes_;
 }
 
 bool SourceListDirective::AllowReportSample() const {
@@ -118,7 +120,7 @@ bool SourceListDirective::AllowReportSample() const {
 
 bool SourceListDirective::IsNone() const {
   return !list_.size() && !allow_self_ && !allow_star_ && !allow_inline_ &&
-         !allow_hashed_attributes_ && !allow_eval_ && !allow_wasm_eval_ &&
+         !allow_unsafe_hashes_ && !allow_eval_ && !allow_wasm_eval_ &&
          !allow_dynamic_ && !nonces_.size() && !hashes_.size();
 }
 
@@ -153,8 +155,8 @@ void SourceListDirective::Parse(const UChar* begin, const UChar* end) {
     CSPSource::WildcardDisposition host_wildcard = CSPSource::kNoWildcard;
     CSPSource::WildcardDisposition port_wildcard = CSPSource::kNoWildcard;
 
-    if (ParseSource(begin_source, position, scheme, host, port, path,
-                    host_wildcard, port_wildcard)) {
+    if (ParseSource(begin_source, position, &scheme, &host, &port, &path,
+                    &host_wildcard, &port_wildcard)) {
       // Wildcard hosts and keyword sources ('self', 'unsafe-inline',
       // etc.) aren't stored in m_list, but as attributes on the source
       // list itself.
@@ -167,7 +169,8 @@ void SourceListDirective::Parse(const UChar* begin, const UChar* end) {
                                     host_wildcard, port_wildcard));
     } else {
       policy_->ReportInvalidSourceExpression(
-          directive_name_, String(begin_source, position - begin_source));
+          directive_name_, String(begin_source, static_cast<wtf_size_t>(
+                                                    position - begin_source)));
     }
 
     DCHECK(position == end || IsASCIISpace(*position));
@@ -180,16 +183,16 @@ void SourceListDirective::Parse(const UChar* begin, const UChar* end) {
 bool SourceListDirective::ParseSource(
     const UChar* begin,
     const UChar* end,
-    String& scheme,
-    String& host,
-    int& port,
-    String& path,
-    CSPSource::WildcardDisposition& host_wildcard,
-    CSPSource::WildcardDisposition& port_wildcard) {
+    String* scheme,
+    String* host,
+    int* port,
+    String* path,
+    CSPSource::WildcardDisposition* host_wildcard,
+    CSPSource::WildcardDisposition* port_wildcard) {
   if (begin == end)
     return false;
 
-  StringView token(begin, end - begin);
+  StringView token(begin, static_cast<wtf_size_t>(end - begin));
 
   if (EqualIgnoringASCIICase("'none'", token))
     return false;
@@ -214,6 +217,12 @@ bool SourceListDirective::ParseSource(
     return true;
   }
 
+  if (EqualIgnoringASCIICase("'unsafe-allow-redirects'", token) &&
+      DirectiveName() == "navigate-to") {
+    AddSourceUnsafeAllowRedirects();
+    return true;
+  }
+
   if (policy_->SupportsWasmEval() &&
       EqualIgnoringASCIICase("'wasm-eval'", token)) {
     AddSourceWasmEval();
@@ -228,8 +237,8 @@ bool SourceListDirective::ParseSource(
     return true;
   }
 
-  if (EqualIgnoringASCIICase("'unsafe-hashed-attributes'", token)) {
-    AddSourceUnsafeHashedAttributes();
+  if (EqualIgnoringASCIICase("'unsafe-hashes'", token)) {
+    AddSourceUnsafeHashes();
     return true;
   }
 
@@ -239,7 +248,7 @@ bool SourceListDirective::ParseSource(
   }
 
   String nonce;
-  if (!ParseNonce(begin, end, nonce))
+  if (!ParseNonce(begin, end, &nonce))
     return false;
 
   if (!nonce.IsNull()) {
@@ -250,7 +259,7 @@ bool SourceListDirective::ParseSource(
   DigestValue hash;
   ContentSecurityPolicyHashAlgorithm algorithm =
       kContentSecurityPolicyHashAlgorithmNone;
-  if (!ParseHash(begin, end, hash, algorithm))
+  if (!ParseHash(begin, end, &hash, &algorithm))
     return false;
 
   if (hash.size() > 0) {
@@ -323,7 +332,7 @@ bool SourceListDirective::ParseSource(
     if (!ParsePort(begin_port, begin_path, port, port_wildcard))
       return false;
   } else {
-    port = 0;
+    *port = 0;
   }
 
   if (begin_path != end) {
@@ -339,7 +348,7 @@ bool SourceListDirective::ParseSource(
 //
 bool SourceListDirective::ParseNonce(const UChar* begin,
                                      const UChar* end,
-                                     String& nonce) {
+                                     String* nonce) {
   size_t nonce_length = end - begin;
   StringView prefix("'nonce-");
 
@@ -366,7 +375,7 @@ bool SourceListDirective::ParseNonce(const UChar* begin,
   if (position + 1 != end || *position != '\'' || position == nonce_begin)
     return false;
 
-  nonce = String(nonce_begin, position - nonce_begin);
+  *nonce = String(nonce_begin, static_cast<wtf_size_t>(position - nonce_begin));
   return true;
 }
 
@@ -377,8 +386,8 @@ bool SourceListDirective::ParseNonce(const UChar* begin,
 bool SourceListDirective::ParseHash(
     const UChar* begin,
     const UChar* end,
-    DigestValue& hash,
-    ContentSecurityPolicyHashAlgorithm& hash_algorithm) {
+    DigestValue* hash,
+    ContentSecurityPolicyHashAlgorithm* hash_algorithm) {
   // Any additions or subtractions from this struct should also modify the
   // respective entries in the kAlgorithmMap array in
   // ContentSecurityPolicy::FillInCSPHashValues().
@@ -408,7 +417,7 @@ bool SourceListDirective::ParseHash(
       {"'csp3-sha-512-", kContentSecurityPolicyHashAlgorithmSha512},
       {"'csp3-ed25519-", kContentSecurityPolicyHashAlgorithmEd25519}};
 
-  const auto supportedPrefixes =
+  auto* const supportedPrefixes =
       RuntimeEnabledFeatures::ExperimentalContentSecurityPolicyFeaturesEnabled()
           ? kSupportedPrefixesExperimental
           : kSupportedPrefixes;
@@ -420,7 +429,7 @@ bool SourceListDirective::ParseHash(
           : sizeof(kSupportedPrefixes) / sizeof(kSupportedPrefixes[0]);
 
   StringView prefix;
-  hash_algorithm = kContentSecurityPolicyHashAlgorithmNone;
+  *hash_algorithm = kContentSecurityPolicyHashAlgorithmNone;
   size_t hash_length = end - begin;
 
   for (size_t i = 0; i < supportedPrefixesLength; i++) {
@@ -429,12 +438,12 @@ bool SourceListDirective::ParseHash(
     // begin).startsWith(prefix).
     if (hash_length > prefix.length() &&
         EqualIgnoringASCIICase(prefix, StringView(begin, prefix.length()))) {
-      hash_algorithm = supportedPrefixes[i].type;
+      *hash_algorithm = supportedPrefixes[i].type;
       break;
     }
   }
 
-  if (hash_algorithm == kContentSecurityPolicyHashAlgorithmNone)
+  if (*hash_algorithm == kContentSecurityPolicyHashAlgorithmNone)
     return true;
 
   const UChar* position = begin + prefix.length();
@@ -455,12 +464,13 @@ bool SourceListDirective::ParseHash(
 
   Vector<char> hash_vector;
   // We accept base64url-encoded data here by normalizing it to base64.
-  Base64Decode(NormalizeToBase64(String(hash_begin, position - hash_begin)),
+  Base64Decode(NormalizeToBase64(String(
+                   hash_begin, static_cast<wtf_size_t>(position - hash_begin))),
                hash_vector);
   if (hash_vector.size() > kMaxDigestSize)
     return false;
-  hash.Append(reinterpret_cast<uint8_t*>(hash_vector.data()),
-              hash_vector.size());
+  hash->Append(reinterpret_cast<uint8_t*>(hash_vector.data()),
+               hash_vector.size());
   return true;
 }
 
@@ -469,9 +479,9 @@ bool SourceListDirective::ParseHash(
 //
 bool SourceListDirective::ParseScheme(const UChar* begin,
                                       const UChar* end,
-                                      String& scheme) {
+                                      String* scheme) {
   DCHECK(begin <= end);
-  DCHECK(scheme.IsEmpty());
+  DCHECK(scheme->IsEmpty());
 
   if (begin == end)
     return false;
@@ -486,7 +496,7 @@ bool SourceListDirective::ParseScheme(const UChar* begin,
   if (position != end)
     return false;
 
-  scheme = String(begin, end - begin);
+  *scheme = String(begin, static_cast<wtf_size_t>(end - begin));
   return true;
 }
 
@@ -498,11 +508,11 @@ bool SourceListDirective::ParseScheme(const UChar* begin,
 bool SourceListDirective::ParseHost(
     const UChar* begin,
     const UChar* end,
-    String& host,
-    CSPSource::WildcardDisposition& host_wildcard) {
+    String* host,
+    CSPSource::WildcardDisposition* host_wildcard) {
   DCHECK(begin <= end);
-  DCHECK(host.IsEmpty());
-  DCHECK(host_wildcard == CSPSource::kNoWildcard);
+  DCHECK(host->IsEmpty());
+  DCHECK(*host_wildcard == CSPSource::kNoWildcard);
 
   if (begin == end)
     return false;
@@ -511,7 +521,7 @@ bool SourceListDirective::ParseHost(
 
   // Parse "*" or [ "*." ].
   if (SkipExactly<UChar>(position, end, '*')) {
-    host_wildcard = CSPSource::kHasWildcard;
+    *host_wildcard = CSPSource::kHasWildcard;
 
     if (position == end) {
       // "*"
@@ -537,26 +547,28 @@ bool SourceListDirective::ParseHost(
     SkipWhile<UChar, IsHostCharacter>(position, end);
   }
 
-  host = String(host_begin, end - host_begin);
+  *host = String(host_begin, static_cast<wtf_size_t>(end - host_begin));
   return true;
 }
 
 bool SourceListDirective::ParsePath(const UChar* begin,
                                     const UChar* end,
-                                    String& path) {
+                                    String* path) {
   DCHECK(begin <= end);
-  DCHECK(path.IsEmpty());
+  DCHECK(path->IsEmpty());
 
   const UChar* position = begin;
   SkipWhile<UChar, IsPathComponentCharacter>(position, end);
   // path/to/file.js?query=string || path/to/file.js#anchor
   //                ^                               ^
   if (position < end) {
-    policy_->ReportInvalidPathCharacter(directive_name_,
-                                        String(begin, end - begin), *position);
+    policy_->ReportInvalidPathCharacter(
+        directive_name_, String(begin, static_cast<wtf_size_t>(end - begin)),
+        *position);
   }
 
-  path = DecodeURLEscapeSequences(String(begin, position - begin));
+  *path = DecodeURLEscapeSequences(
+      String(begin, static_cast<wtf_size_t>(position - begin)));
 
   DCHECK(position <= end);
   DCHECK(position == end || (*position == '#' || *position == '?'));
@@ -568,11 +580,11 @@ bool SourceListDirective::ParsePath(const UChar* begin,
 bool SourceListDirective::ParsePort(
     const UChar* begin,
     const UChar* end,
-    int& port,
-    CSPSource::WildcardDisposition& port_wildcard) {
+    int* port,
+    CSPSource::WildcardDisposition* port_wildcard) {
   DCHECK(begin <= end);
-  DCHECK(!port);
-  DCHECK(port_wildcard == CSPSource::kNoWildcard);
+  DCHECK_EQ(*port, 0);
+  DCHECK(*port_wildcard == CSPSource::kNoWildcard);
 
   if (!SkipExactly<UChar>(begin, end, ':'))
     NOTREACHED();
@@ -581,8 +593,8 @@ bool SourceListDirective::ParsePort(
     return false;
 
   if (end - begin == 1 && *begin == '*') {
-    port = 0;
-    port_wildcard = CSPSource::kHasWildcard;
+    *port = 0;
+    *port_wildcard = CSPSource::kHasWildcard;
     return true;
   }
 
@@ -593,8 +605,8 @@ bool SourceListDirective::ParsePort(
     return false;
 
   bool ok;
-  port = CharactersToInt(begin, end - begin, WTF::NumberParsingOptions::kNone,
-                         &ok);
+  *port = CharactersToInt(begin, end - begin, WTF::NumberParsingOptions::kNone,
+                          &ok);
   return ok;
 }
 
@@ -604,6 +616,10 @@ void SourceListDirective::AddSourceSelf() {
 
 void SourceListDirective::AddSourceStar() {
   allow_star_ = true;
+}
+
+void SourceListDirective::AddSourceUnsafeAllowRedirects() {
+  allow_redirects_ = true;
 }
 
 void SourceListDirective::AddSourceUnsafeInline() {
@@ -622,8 +638,8 @@ void SourceListDirective::AddSourceStrictDynamic() {
   allow_dynamic_ = true;
 }
 
-void SourceListDirective::AddSourceUnsafeHashedAttributes() {
-  allow_hashed_attributes_ = true;
+void SourceListDirective::AddSourceUnsafeHashes() {
+  allow_unsafe_hashes_ = true;
 }
 
 void SourceListDirective::AddReportSample() {
@@ -654,7 +670,7 @@ void SourceListDirective::AddSourceToMap(
 bool SourceListDirective::HasSourceMatchInList(
     const KURL& url,
     ResourceRequest::RedirectStatus redirect_status) const {
-  for (size_t i = 0; i < list_.size(); ++i) {
+  for (wtf_size_t i = 0; i < list_.size(); ++i) {
     if (list_[i]->Matches(url, redirect_status))
       return true;
   }
@@ -666,13 +682,13 @@ bool SourceListDirective::AllowAllInline() const {
   const ContentSecurityPolicy::DirectiveType& type =
       ContentSecurityPolicy::GetDirectiveType(directive_name_);
   if (type != ContentSecurityPolicy::DirectiveType::kDefaultSrc &&
-      type != ContentSecurityPolicy::DirectiveType::kStyleSrc &&
-      type != ContentSecurityPolicy::DirectiveType::kScriptSrc) {
+      !ContentSecurityPolicy::IsScriptDirective(type) &&
+      !ContentSecurityPolicy::IsStyleDirective(type)) {
     return false;
   }
+
   return allow_inline_ && !IsHashOrNoncePresent() &&
-         (type != ContentSecurityPolicy::DirectiveType::kScriptSrc ||
-          !allow_dynamic_);
+         (!ContentSecurityPolicy::IsScriptDirective(type) || !allow_dynamic_);
 }
 
 HeapVector<Member<CSPSource>> SourceListDirective::GetSources(
@@ -709,20 +725,19 @@ bool SourceListDirective::Subsumes(
   bool allow_eval_other = other[0]->allow_eval_;
   bool allow_wasm_eval_other = other[0]->allow_wasm_eval_;
   bool allow_dynamic_other = other[0]->allow_dynamic_;
-  bool allow_hashed_attributes_other = other[0]->allow_hashed_attributes_;
+  bool allow_unsafe_hashes = other[0]->allow_unsafe_hashes_;
   bool is_hash_or_nonce_present_other = other[0]->IsHashOrNoncePresent();
   HashSet<String> nonces_b = other[0]->nonces_;
   HashSet<CSPHashValue> hashes_b = other[0]->hashes_;
 
   HeapVector<Member<CSPSource>> normalized_b =
       other[0]->GetSources(other[0]->policy_->GetSelfSource());
-  for (size_t i = 1; i < other.size(); i++) {
+  for (wtf_size_t i = 1; i < other.size(); i++) {
     allow_inline_other = allow_inline_other && other[i]->allow_inline_;
     allow_eval_other = allow_eval_other && other[i]->allow_eval_;
     allow_wasm_eval_other = allow_wasm_eval_other && other[i]->allow_wasm_eval_;
     allow_dynamic_other = allow_dynamic_other && other[i]->allow_dynamic_;
-    allow_hashed_attributes_other =
-        allow_hashed_attributes_other && other[i]->allow_hashed_attributes_;
+    allow_unsafe_hashes = allow_unsafe_hashes && other[i]->allow_unsafe_hashes_;
     is_hash_or_nonce_present_other =
         is_hash_or_nonce_present_other && other[i]->IsHashOrNoncePresent();
     nonces_b = other[i]->GetIntersectNonces(nonces_b);
@@ -735,23 +750,23 @@ bool SourceListDirective::Subsumes(
 
   const ContentSecurityPolicy::DirectiveType type =
       ContentSecurityPolicy::GetDirectiveType(directive_name_);
-  if (type == ContentSecurityPolicy::DirectiveType::kScriptSrc ||
-      type == ContentSecurityPolicy::DirectiveType::kStyleSrc) {
+  if (ContentSecurityPolicy::IsScriptDirective(type) ||
+      ContentSecurityPolicy::IsStyleDirective(type)) {
     if (!allow_eval_ && allow_eval_other)
       return false;
     if (!allow_wasm_eval_ && allow_wasm_eval_other)
       return false;
-    if (!allow_hashed_attributes_ && allow_hashed_attributes_other)
+    if (!allow_unsafe_hashes_ && allow_unsafe_hashes)
       return false;
     bool allow_all_inline_other =
         allow_inline_other && !is_hash_or_nonce_present_other &&
-        (type != ContentSecurityPolicy::DirectiveType::kScriptSrc ||
+        (!ContentSecurityPolicy::IsScriptDirective(type) ||
          !allow_dynamic_other);
     if (!AllowAllInline() && allow_all_inline_other)
       return false;
   }
 
-  if (type == ContentSecurityPolicy::DirectiveType::kScriptSrc &&
+  if (ContentSecurityPolicy::IsScriptDirective(type) &&
       (allow_dynamic_ || allow_dynamic_other)) {
     // If `this` does not allow `strict-dynamic`, then it must be that `other`
     // does allow, so the result is `false`.
@@ -775,8 +790,9 @@ SourceListDirective::ExposeForNavigationalChecks() const {
   WebContentSecurityPolicySourceList source_list;
   source_list.allow_self = allow_self_;
   source_list.allow_star = allow_star_;
+  source_list.allow_redirects = allow_redirects_;
   WebVector<WebContentSecurityPolicySourceExpression> list(list_.size());
-  for (size_t i = 0; i < list_.size(); ++i)
+  for (wtf_size_t i = 0; i < list_.size(); ++i)
     list[i] = list_[i]->ExposeForNavigationalChecks();
   source_list.sources.Swap(list);
   return source_list;

@@ -45,14 +45,14 @@ TextEncoding::TextEncoding(const String& name)
 }
 
 String TextEncoding::Decode(const char* data,
-                            size_t length,
+                            wtf_size_t length,
                             bool stop_on_error,
                             bool& saw_error) const {
   if (!name_)
     return String();
 
-  return NewTextCodec(*this)->Decode(data, length, kDataEOF, stop_on_error,
-                                     saw_error);
+  return NewTextCodec(*this)->Decode(data, length, FlushBehavior::kDataEOF,
+                                     stop_on_error, saw_error);
 }
 
 CString TextEncoding::Encode(const String& string,
@@ -142,6 +142,12 @@ const TextEncoding& WindowsLatin1Encoding() {
   DEFINE_THREAD_SAFE_STATIC_LOCAL(
       const TextEncoding, global_windows_latin1_encoding, ("WinLatin1"));
   return global_windows_latin1_encoding;
+}
+
+const TextEncoding& UnknownEncoding() {
+  DEFINE_THREAD_SAFE_STATIC_LOCAL(const TextEncoding, global_unknown_encoding,
+                                  ("Unknown"));
+  return global_unknown_encoding;
 }
 
 }  // namespace WTF

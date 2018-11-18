@@ -14,6 +14,7 @@
 #include "src/macro-assembler.h"
 #include "src/safepoint-table.h"
 #include "src/source-position-table.h"
+#include "src/trap-handler/trap-handler.h"
 
 namespace v8 {
 namespace internal {
@@ -27,7 +28,6 @@ class DeoptimizationExit;
 class FrameAccessState;
 class Linkage;
 class OutOfLineCode;
-class WasmCompilationData;
 
 struct BranchInfo {
   FlagsCondition condition;
@@ -50,34 +50,40 @@ class InstructionOperandIterator {
   size_t pos_;
 };
 
-// Either a non-null Handle<Object> or a double.
+enum class DeoptimizationLiteralKind { kObject, kNumber, kString };
+
+// Either a non-null Handle<Object>, a double or a StringConstantBase.
 class DeoptimizationLiteral {
  public:
-  DeoptimizationLiteral() : object_(), number_(0) {}
+  DeoptimizationLiteral() : object_(), number_(0), string_(nullptr) {}
   explicit DeoptimizationLiteral(Handle<Object> object)
-      : object_(object), number_(0) {
+      : kind_(DeoptimizationLiteralKind::kObject), object_(object) {
     DCHECK(!object_.is_null());
   }
-  explicit DeoptimizationLiteral(double number) : object_(), number_(number) {}
+  explicit DeoptimizationLiteral(double number)
+      : kind_(DeoptimizationLiteralKind::kNumber), number_(number) {}
+  explicit DeoptimizationLiteral(const StringConstantBase* string)
+      : kind_(DeoptimizationLiteralKind::kString), string_(string) {}
 
   Handle<Object> object() const { return object_; }
+  const StringConstantBase* string() const { return string_; }
 
   bool operator==(const DeoptimizationLiteral& other) const {
-    return object_.equals(other.object_) &&
-           bit_cast<uint64_t>(number_) == bit_cast<uint64_t>(other.number_);
+    return kind_ == other.kind_ && object_.equals(other.object_) &&
+           bit_cast<uint64_t>(number_) == bit_cast<uint64_t>(other.number_) &&
+           bit_cast<intptr_t>(string_) == bit_cast<intptr_t>(other.string_);
   }
 
   Handle<Object> Reify(Isolate* isolate) const;
 
- private:
-  Handle<Object> object_;
-  double number_;
-};
+  DeoptimizationLiteralKind kind() const { return kind_; }
 
-enum class CodeGeneratorPoisoningLevel {
-  kDontPoison,
-  kPoisonStackPointerInPrologue,
-  kPoisonAll
+ private:
+  DeoptimizationLiteralKind kind_;
+
+  Handle<Object> object_;
+  double number_ = 0;
+  const StringConstantBase* string_ = nullptr;
 };
 
 // Generates native code for a sequence of instructions.
@@ -89,16 +95,19 @@ class CodeGenerator final : public GapResolver::Assembler {
                          base::Optional<OsrHelper> osr_helper,
                          int start_source_position,
                          JumpOptimizationInfo* jump_opt,
-                         WasmCompilationData* wasm_compilation_data,
-                         CodeGeneratorPoisoningLevel poisoning_level);
+                         PoisoningMitigationLevel poisoning_level,
+                         const AssemblerOptions& options,
+                         int32_t builtin_index);
 
   // Generate native code. After calling AssembleCode, call FinalizeCode to
   // produce the actual code object. If an error occurs during either phase,
-  // FinalizeCode returns a null handle.
+  // FinalizeCode returns an empty MaybeHandle.
   void AssembleCode();  // Does not need to run on main thread.
-  Handle<Code> FinalizeCode();
+  MaybeHandle<Code> FinalizeCode();
 
-  Handle<ByteArray> GetSourcePositionTable();
+  OwnedVector<byte> GetSourcePositionTable();
+  OwnedVector<trap_handler::ProtectedInstructionData>
+  GetProtectedInstructions();
 
   InstructionSequence* code() const { return code_; }
   FrameAccessState* frame_access_state() const { return frame_access_state_; }
@@ -129,6 +138,11 @@ class CodeGenerator final : public GapResolver::Assembler {
   size_t GetSafepointTableOffset() const { return safepoints_.GetCodeOffset(); }
   size_t GetHandlerTableOffset() const { return handler_table_offset_; }
 
+  const ZoneVector<int>& block_starts() const { return block_starts_; }
+  const ZoneVector<int>& instr_starts() const { return instr_starts_; }
+
+  static constexpr int kBinarySearchSwitchMinimalCases = 4;
+
  private:
   GapResolver* resolver() { return &resolver_; }
   SafepointTableBuilder* safepoints() { return &safepoints_; }
@@ -149,7 +163,7 @@ class CodeGenerator final : public GapResolver::Assembler {
   // which is cheaper on some platforms than materializing the actual heap
   // object constant.
   bool IsMaterializableFromRoot(Handle<HeapObject> object,
-                                Heap::RootListIndex* index_return);
+                                RootIndex* index_return);
 
   enum CodeGenResult { kSuccess, kTooManyDeoptimizationBailouts };
 
@@ -182,6 +196,9 @@ class CodeGenerator final : public GapResolver::Assembler {
   // adjusted stack pointer is returned in |slot|.
   bool GetSlotAboveSPBeforeTailCall(Instruction* instr, int* slot);
 
+  // Determines how to call helper stubs depending on the code kind.
+  StubCallMode DetermineStubCallMode() const;
+
   CodeGenResult AssembleDeoptimizerCall(int deoptimization_id,
                                         SourcePosition pos);
 
@@ -198,6 +215,10 @@ class CodeGenerator final : public GapResolver::Assembler {
 
   void AssembleArchBoolean(Instruction* instr, FlagsCondition condition);
   void AssembleArchTrap(Instruction* instr, FlagsCondition condition);
+  void AssembleArchBinarySearchSwitchRange(Register input, RpoNumber def_block,
+                                           std::pair<int32_t, Label*>* begin,
+                                           std::pair<int32_t, Label*>* end);
+  void AssembleArchBinarySearchSwitch(Instruction* instr);
   void AssembleArchLookupSwitch(Instruction* instr);
   void AssembleArchTableSwitch(Instruction* instr);
 
@@ -419,9 +440,11 @@ class CodeGenerator final : public GapResolver::Assembler {
   int osr_pc_offset_;
   int optimized_out_literal_id_;
   SourcePositionTableBuilder source_position_table_builder_;
-  WasmCompilationData* wasm_compilation_data_;
+  ZoneVector<trap_handler::ProtectedInstructionData> protected_instructions_;
   CodeGenResult result_;
-  CodeGeneratorPoisoningLevel poisoning_level_;
+  PoisoningMitigationLevel poisoning_level_;
+  ZoneVector<int> block_starts_;
+  ZoneVector<int> instr_starts_;
 };
 
 }  // namespace compiler

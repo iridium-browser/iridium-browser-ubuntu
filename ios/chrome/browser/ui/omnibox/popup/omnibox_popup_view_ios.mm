@@ -18,7 +18,7 @@
 #include "components/open_from_clipboard/clipboard_recent_content.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #import "ios/chrome/browser/experimental_flags.h"
-#include "ios/chrome/browser/ui/omnibox/omnibox_util.h"
+#import "ios/chrome/browser/ui/omnibox/omnibox_util.h"
 #import "ios/chrome/browser/ui/omnibox/popup/omnibox_popup_mediator.h"
 #include "ios/chrome/browser/ui/omnibox/popup/omnibox_popup_view_suggestions_delegate.h"
 #include "ios/chrome/browser/ui/ui_util.h"
@@ -48,13 +48,11 @@ OmniboxPopupViewIOS::~OmniboxPopupViewIOS() {
 }
 
 // Set left image to globe or magnifying glass depending on which autocomplete
-// option comes first.
+// option is highlighted.
 void OmniboxPopupViewIOS::UpdateEditViewIcon() {
   const AutocompleteResult& result = model_->result();
-  const AutocompleteMatch& match = result.match_at(0);  // 0 for first result.
-  int image_id = GetIconForAutocompleteMatchType(
-      match.type, /* is_starred */ false, /* is_incognito */ false);
-  delegate_->OnTopmostSuggestionImageChanged(image_id);
+  const AutocompleteMatch& match = result.match_at(model_->selected_line());
+  delegate_->OnTopmostSuggestionImageChanged(match.type);
 }
 
 void OmniboxPopupViewIOS::UpdatePopupAppearance() {
@@ -69,7 +67,7 @@ void OmniboxPopupViewIOS::UpdatePopupAppearance() {
 }
 
 bool OmniboxPopupViewIOS::IsOpen() const {
-  return [mediator_ isOpen];
+  return [mediator_ hasResults];
 }
 
 OmniboxPopupModel* OmniboxPopupViewIOS::model() const {
@@ -94,6 +92,9 @@ bool OmniboxPopupViewIOS::IsStarredMatch(const AutocompleteMatch& match) const {
 
 void OmniboxPopupViewIOS::OnMatchHighlighted(size_t row) {
   model_->SetSelectedLine(row, false, true);
+  if ([mediator_ isOpen]) {
+    UpdateEditViewIcon();
+  }
 }
 
 void OmniboxPopupViewIOS::OnMatchSelected(
@@ -119,10 +120,16 @@ void OmniboxPopupViewIOS::OnMatchSelected(
 
 void OmniboxPopupViewIOS::OnMatchSelectedForAppending(
     const AutocompleteMatch& match) {
-  // Make a defensive copy of |match.contents|, as CopyToOmnibox() will trigger
-  // a new round of autocomplete and modify |match|.
-  base::string16 contents(match.contents);
-  delegate_->OnSelectedMatchForAppending(contents);
+  // Make a defensive copy of |match.fill_into_edit|, as CopyToOmnibox() will
+  // trigger a new round of autocomplete and modify |match|.
+  base::string16 fill_into_edit(match.fill_into_edit);
+
+  // If the match is not a URL, append a whitespace to the end of it.
+  if (AutocompleteMatch::IsSearchType(match.type)) {
+    fill_into_edit.append(1, ' ');
+  }
+
+  delegate_->OnSelectedMatchForAppending(fill_into_edit);
 }
 
 void OmniboxPopupViewIOS::OnMatchSelectedForDeletion(

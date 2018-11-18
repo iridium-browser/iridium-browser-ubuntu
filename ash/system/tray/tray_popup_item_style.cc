@@ -22,10 +22,10 @@ constexpr int kDisabledAlpha = 0x61;
 }  // namespace
 
 // static
-SkColor TrayPopupItemStyle::GetIconColor(ColorStyle color_style) {
-  const SkColor kBaseIconColor = features::IsSystemTrayUnifiedEnabled()
-                                     ? kUnifiedMenuIconColor
-                                     : gfx::kChromeIconGrey;
+SkColor TrayPopupItemStyle::GetIconColor(ColorStyle color_style,
+                                         bool use_unified_theme) {
+  const SkColor kBaseIconColor =
+      use_unified_theme ? kUnifiedMenuIconColor : gfx::kChromeIconGrey;
   switch (color_style) {
     case ColorStyle::ACTIVE:
       return kBaseIconColor;
@@ -41,7 +41,13 @@ SkColor TrayPopupItemStyle::GetIconColor(ColorStyle color_style) {
 }
 
 TrayPopupItemStyle::TrayPopupItemStyle(FontStyle font_style)
-    : font_style_(font_style), color_style_(ColorStyle::ACTIVE) {
+    : TrayPopupItemStyle(font_style, features::IsSystemTrayUnifiedEnabled()) {}
+
+TrayPopupItemStyle::TrayPopupItemStyle(FontStyle font_style,
+                                       bool use_unified_theme)
+    : font_style_(font_style),
+      color_style_(ColorStyle::ACTIVE),
+      use_unified_theme_(use_unified_theme) {
   if (font_style_ == FontStyle::SYSTEM_INFO)
     color_style_ = ColorStyle::INACTIVE;
 }
@@ -49,7 +55,7 @@ TrayPopupItemStyle::TrayPopupItemStyle(FontStyle font_style)
 TrayPopupItemStyle::~TrayPopupItemStyle() = default;
 
 SkColor TrayPopupItemStyle::GetTextColor() const {
-  const SkColor kBaseTextColor = features::IsSystemTrayUnifiedEnabled()
+  const SkColor kBaseTextColor = use_unified_theme_
                                      ? kUnifiedMenuTextColor
                                      : SkColorSetA(SK_ColorBLACK, 0xDE);
 
@@ -61,14 +67,15 @@ SkColor TrayPopupItemStyle::GetTextColor() const {
     case ColorStyle::DISABLED:
       return SkColorSetA(kBaseTextColor, kDisabledAlpha);
     case ColorStyle::CONNECTED:
-      return gfx::kGoogleGreen700;
+      return use_unified_theme_ ? gfx::kGoogleGreenDark600
+                                : gfx::kGoogleGreen700;
   }
   NOTREACHED();
   return gfx::kPlaceholderColor;
 }
 
 SkColor TrayPopupItemStyle::GetIconColor() const {
-  return GetIconColor(color_style_);
+  return GetIconColor(color_style_, use_unified_theme_);
 }
 
 void TrayPopupItemStyle::SetupLabel(views::Label* label) const {
@@ -79,7 +86,8 @@ void TrayPopupItemStyle::SetupLabel(views::Label* label) const {
   const gfx::FontList& base_font_list = views::Label::GetDefaultFontList();
   switch (font_style_) {
     case FontStyle::TITLE:
-      label->SetFontList(base_font_list.Derive(1, gfx::Font::NORMAL,
+      label->SetFontList(base_font_list.Derive(use_unified_theme_ ? 8 : 1,
+                                               gfx::Font::NORMAL,
                                                gfx::Font::Weight::MEDIUM));
       break;
     case FontStyle::DEFAULT_VIEW_LABEL:
@@ -87,10 +95,14 @@ void TrayPopupItemStyle::SetupLabel(views::Label* label) const {
                                                gfx::Font::Weight::NORMAL));
       break;
     case FontStyle::SUB_HEADER:
-      label->SetFontList(base_font_list.Derive(1, gfx::Font::NORMAL,
+      label->SetFontList(base_font_list.Derive(use_unified_theme_ ? 4 : 1,
+                                               gfx::Font::NORMAL,
                                                gfx::Font::Weight::MEDIUM));
-      label->SetEnabledColor(label->GetNativeTheme()->GetSystemColor(
-          ui::NativeTheme::kColorId_ProminentButtonColor));
+      label->SetEnabledColor(
+          use_unified_theme_
+              ? kUnifiedMenuTextColor
+              : label->GetNativeTheme()->GetSystemColor(
+                    ui::NativeTheme::kColorId_ProminentButtonColor));
       label->SetAutoColorReadabilityEnabled(false);
       break;
     case FontStyle::DETAILED_VIEW_LABEL:
@@ -104,10 +116,6 @@ void TrayPopupItemStyle::SetupLabel(views::Label* label) const {
       label->SetEnabledColor(label->GetNativeTheme()->GetSystemColor(
           ui::NativeTheme::kColorId_ProminentButtonColor));
       label->SetAutoColorReadabilityEnabled(false);
-      break;
-    case FontStyle::BUTTON:
-      label->SetFontList(base_font_list.Derive(0, gfx::Font::NORMAL,
-                                               gfx::Font::Weight::MEDIUM));
       break;
     case FontStyle::CAPTION:
       label->SetFontList(base_font_list.Derive(0, gfx::Font::NORMAL,

@@ -8,19 +8,20 @@
 // DO NOT MODIFY!
 
 // clang-format off
-#include "v8_test_interface_3.h"
+#include "third_party/blink/renderer/bindings/tests/results/core/v8_test_interface_3.h"
 
 #include "base/memory/scoped_refptr.h"
-#include "bindings/core/v8/exception_state.h"
-#include "bindings/core/v8/idl_types.h"
-#include "bindings/core/v8/native_value_traits_impl.h"
-#include "bindings/core/v8/v8_document.h"
-#include "bindings/core/v8/v8_dom_configuration.h"
-#include "bindings/core/v8/v8_node.h"
-#include "core/execution_context/execution_context.h"
-#include "platform/bindings/runtime_call_stats.h"
-#include "platform/bindings/v8_object_constructor.h"
-#include "platform/wtf/get_ptr.h"
+#include "third_party/blink/renderer/bindings/core/v8/idl_types.h"
+#include "third_party/blink/renderer/bindings/core/v8/native_value_traits_impl.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_document.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_dom_configuration.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_node.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
+#include "third_party/blink/renderer/platform/bindings/exception_messages.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
+#include "third_party/blink/renderer/platform/bindings/runtime_call_stats.h"
+#include "third_party/blink/renderer/platform/bindings/v8_object_constructor.h"
+#include "third_party/blink/renderer/platform/wtf/get_ptr.h"
 
 namespace blink {
 
@@ -236,8 +237,8 @@ void V8TestInterface3::indexedPropertyDefinerCallback(
 }
 
 static const V8DOMConfiguration::AccessorConfiguration V8TestInterface3Accessors[] = {
-    { "length", V8TestInterface3::lengthAttributeGetterCallback, nullptr, V8PrivateProperty::kNoCachedAccessor, static_cast<v8::PropertyAttribute>(v8::ReadOnly), V8DOMConfiguration::kOnPrototype, V8DOMConfiguration::kCheckHolder, V8DOMConfiguration::kHasSideEffect, V8DOMConfiguration::kAllWorlds },
-    { "readonlyStringifierAttribute", V8TestInterface3::readonlyStringifierAttributeAttributeGetterCallback, nullptr, V8PrivateProperty::kNoCachedAccessor, static_cast<v8::PropertyAttribute>(v8::ReadOnly), V8DOMConfiguration::kOnPrototype, V8DOMConfiguration::kCheckHolder, V8DOMConfiguration::kHasSideEffect, V8DOMConfiguration::kAllWorlds },
+    { "length", V8TestInterface3::lengthAttributeGetterCallback, nullptr, V8PrivateProperty::kNoCachedAccessor, static_cast<v8::PropertyAttribute>(v8::ReadOnly), V8DOMConfiguration::kOnPrototype, V8DOMConfiguration::kCheckHolder, V8DOMConfiguration::kHasSideEffect, V8DOMConfiguration::kAlwaysCallGetter, V8DOMConfiguration::kAllWorlds },
+    { "readonlyStringifierAttribute", V8TestInterface3::readonlyStringifierAttributeAttributeGetterCallback, nullptr, V8PrivateProperty::kNoCachedAccessor, static_cast<v8::PropertyAttribute>(v8::ReadOnly), V8DOMConfiguration::kOnPrototype, V8DOMConfiguration::kCheckHolder, V8DOMConfiguration::kHasSideEffect, V8DOMConfiguration::kAlwaysCallGetter, V8DOMConfiguration::kAllWorlds },
 };
 
 static const V8DOMConfiguration::MethodConfiguration V8TestInterface3Methods[] = {
@@ -262,10 +263,10 @@ static void installV8TestInterface3Template(
   // Register IDL constants, attributes and operations.
   V8DOMConfiguration::InstallAccessors(
       isolate, world, instanceTemplate, prototypeTemplate, interfaceTemplate,
-      signature, V8TestInterface3Accessors, WTF_ARRAY_LENGTH(V8TestInterface3Accessors));
+      signature, V8TestInterface3Accessors, base::size(V8TestInterface3Accessors));
   V8DOMConfiguration::InstallMethods(
       isolate, world, instanceTemplate, prototypeTemplate, interfaceTemplate,
-      signature, V8TestInterface3Methods, WTF_ARRAY_LENGTH(V8TestInterface3Methods));
+      signature, V8TestInterface3Methods, base::size(V8TestInterface3Methods));
 
   // Indexed properties
   v8::IndexedPropertyHandlerConfiguration indexedPropertyHandlerConfig(

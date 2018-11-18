@@ -13,22 +13,17 @@
 #include "components/nacl/common/buildflags.h"
 #include "content/public/browser/browser_main_runner.h"
 #include "content/public/common/content_switches.h"
-#include "content/public/utility/content_utility_client.h"
 #include "content/shell/common/shell_switches.h"
 #include "extensions/common/extension_paths.h"
 #include "extensions/shell/browser/default_shell_browser_main_delegate.h"
 #include "extensions/shell/browser/shell_content_browser_client.h"
 #include "extensions/shell/common/shell_content_client.h"
 #include "extensions/shell/renderer/shell_content_renderer_client.h"
+#include "services/service_manager/embedder/switches.h"
 #include "ui/base/resource/resource_bundle.h"
 
 #if defined(OS_CHROMEOS)
 #include "chromeos/chromeos_paths.h"
-#endif
-
-#if defined(OS_MACOSX)
-#include "base/mac/foundation_util.h"
-#include "extensions/shell/app/paths_mac.h"
 #endif
 
 #if BUILDFLAG(ENABLE_NACL)
@@ -80,9 +75,9 @@ base::FilePath GetDataPath() {
   data_dir = base::nix::GetXDGDirectory(
       env.get(), base::nix::kXdgConfigHomeEnvVar, base::nix::kDotConfigDir);
 #elif defined(OS_WIN)
-  CHECK(PathService::Get(base::DIR_LOCAL_APP_DATA, &data_dir));
+  CHECK(base::PathService::Get(base::DIR_LOCAL_APP_DATA, &data_dir));
 #elif defined(OS_MACOSX)
-  CHECK(PathService::Get(base::DIR_APP_DATA, &data_dir));
+  CHECK(base::PathService::Get(base::DIR_APP_DATA, &data_dir));
 #else
   NOTIMPLEMENTED();
 #endif
@@ -119,17 +114,12 @@ void InitLogging() {
 
 // Returns the path to the extensions_shell_and_test.pak file.
 base::FilePath GetResourcesPakFilePath() {
-#if defined(OS_MACOSX)
-  return base::mac::PathForFrameworkBundleResource(
-      CFSTR("extensions_shell_and_test.pak"));
-#else
   base::FilePath extensions_shell_and_test_pak_path;
-  PathService::Get(base::DIR_MODULE, &extensions_shell_and_test_pak_path);
+  base::PathService::Get(base::DIR_MODULE, &extensions_shell_and_test_pak_path);
   extensions_shell_and_test_pak_path =
       extensions_shell_and_test_pak_path.AppendASCII(
           "extensions_shell_and_test.pak");
   return extensions_shell_and_test_pak_path;
-#endif  // OS_MACOSX
 }
 
 }  // namespace
@@ -144,14 +134,8 @@ ShellMainDelegate::~ShellMainDelegate() {
 
 bool ShellMainDelegate::BasicStartupComplete(int* exit_code) {
   InitLogging();
-  content_client_.reset(CreateContentClient());
+  content_client_.reset(new ShellContentClient);
   SetContentClient(content_client_.get());
-
-#if defined(OS_MACOSX)
-  OverrideChildProcessFilePath();
-  // This must happen before InitializeResourceBundle.
-  OverrideFrameworkBundlePath();
-#endif
 
 #if defined(OS_CHROMEOS)
   chromeos::RegisterPathProvider();
@@ -170,22 +154,24 @@ void ShellMainDelegate::PreSandboxStartup() {
 #if defined(OS_LINUX) && !defined(OS_CHROMEOS)
   crash_reporter::SetCrashReporterClient(GetCrashReporterClient());
   // Reporting for sub-processes will be initialized in ZygoteForked.
-  if (process_type != switches::kZygoteProcess)
+  if (process_type != service_manager::switches::kZygoteProcess)
     breakpad::InitCrashReporter(process_type);
 #endif
 
   if (ProcessNeedsResourceBundle(process_type))
-    InitializeResourceBundle();
+    ui::ResourceBundle::InitSharedInstanceWithPakPath(
+        GetResourcesPakFilePath());
 }
 
 content::ContentBrowserClient* ShellMainDelegate::CreateContentBrowserClient() {
-  browser_client_.reset(CreateShellContentBrowserClient());
+  browser_client_ = std::make_unique<ShellContentBrowserClient>(
+      new DefaultShellBrowserMainDelegate);
   return browser_client_.get();
 }
 
 content::ContentRendererClient*
 ShellMainDelegate::CreateContentRendererClient() {
-  renderer_client_.reset(CreateShellContentRendererClient());
+  renderer_client_ = std::make_unique<ShellContentRendererClient>();
   return renderer_client_.get();
 }
 
@@ -195,7 +181,8 @@ void ShellMainDelegate::ProcessExiting(const std::string& process_type) {
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)
 void ShellMainDelegate::ZygoteStarting(
-    std::vector<std::unique_ptr<content::ZygoteForkDelegate>>* delegates) {
+    std::vector<std::unique_ptr<service_manager::ZygoteForkDelegate>>*
+        delegates) {
 #if BUILDFLAG(ENABLE_NACL)
   nacl::AddNaClZygoteForkDelegates(delegates);
 #endif  // BUILDFLAG(ENABLE_NACL)
@@ -211,36 +198,13 @@ void ShellMainDelegate::ZygoteForked() {
 }
 #endif
 
-content::ContentClient* ShellMainDelegate::CreateContentClient() {
-  return new ShellContentClient();
-}
-
-content::ContentBrowserClient*
-ShellMainDelegate::CreateShellContentBrowserClient() {
-  return new ShellContentBrowserClient(new DefaultShellBrowserMainDelegate());
-}
-
-content::ContentRendererClient*
-ShellMainDelegate::CreateShellContentRendererClient() {
-  return new ShellContentRendererClient();
-}
-
-content::ContentUtilityClient*
-ShellMainDelegate::CreateShellContentUtilityClient() {
-  return new content::ContentUtilityClient();
-}
-
-void ShellMainDelegate::InitializeResourceBundle() {
-  ui::ResourceBundle::InitSharedInstanceWithPakPath(
-      GetResourcesPakFilePath());
-}
-
 // static
 bool ShellMainDelegate::ProcessNeedsResourceBundle(
     const std::string& process_type) {
   // The browser process has no process type flag, but needs resources.
   // On Linux the zygote process opens the resources for the renderers.
-  return process_type.empty() || process_type == switches::kZygoteProcess ||
+  return process_type.empty() ||
+         process_type == service_manager::switches::kZygoteProcess ||
          process_type == switches::kRendererProcess ||
 #if BUILDFLAG(ENABLE_NACL)
          process_type == switches::kNaClLoaderProcess ||

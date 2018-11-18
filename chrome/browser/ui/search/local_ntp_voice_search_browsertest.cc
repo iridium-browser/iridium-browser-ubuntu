@@ -31,8 +31,7 @@ class LocalNTPVoiceSearchSmokeTest : public InProcessBrowserTest {
 
  private:
   void SetUp() override {
-    feature_list_.InitWithFeatures(
-        {features::kUseGoogleLocalNtp, features::kVoiceSearchOnLocalNtp}, {});
+    feature_list_.InitWithFeatures({features::kUseGoogleLocalNtp}, {});
     InProcessBrowserTest::SetUp();
   }
 
@@ -92,10 +91,9 @@ IN_PROC_BROWSER_TEST_F(LocalNTPVoiceSearchSmokeTest, MicrophonePermission) {
 
   // Make sure microphone permission for the NTP isn't set yet.
   const PermissionResult mic_permission_before =
-      permission_manager->GetPermissionStatus(
-          CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC,
-          GURL(chrome::kChromeSearchLocalNtpUrl).GetOrigin(),
-          GURL(chrome::kChromeUINewTabURL).GetOrigin());
+      permission_manager->GetPermissionStatusForFrame(
+          CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC, active_tab->GetMainFrame(),
+          GURL(chrome::kChromeSearchLocalNtpUrl).GetOrigin());
   ASSERT_EQ(CONTENT_SETTING_ASK, mic_permission_before.content_setting);
   ASSERT_EQ(PermissionStatusSource::UNSPECIFIED, mic_permission_before.source);
 
@@ -126,9 +124,8 @@ IN_PROC_BROWSER_TEST_F(LocalNTPVoiceSearchSmokeTest, MicrophonePermission) {
 
   // Now microphone permission for the NTP should be set.
   const PermissionResult mic_permission_after =
-      permission_manager->GetPermissionStatus(
-          CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC,
-          GURL(chrome::kChromeSearchLocalNtpUrl).GetOrigin(),
-          GURL(chrome::kChromeUINewTabURL).GetOrigin());
+      permission_manager->GetPermissionStatusForFrame(
+          CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC, active_tab->GetMainFrame(),
+          GURL(chrome::kChromeSearchLocalNtpUrl).GetOrigin());
   EXPECT_EQ(CONTENT_SETTING_ALLOW, mic_permission_after.content_setting);
 }

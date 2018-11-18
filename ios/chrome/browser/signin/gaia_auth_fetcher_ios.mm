@@ -20,6 +20,7 @@
 #include "net/base/net_errors.h"
 #include "net/http/http_request_headers.h"
 #include "net/url_request/url_request_status.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -112,16 +113,16 @@ NSString* EscapeAndQuoteToNSString(const std::string& value) {
 
 // Simulates a POST request on |web_view| using a XMLHttpRequest in
 // JavaScript.
-// This is needed because WKWebView ignores the HTTPBody in a POST request.
-// See
+// This is needed because WKWebView ignores the HTTPBody in a POST request
+// before iOS11 and because WKWebView cannot read response body if
+// content-disposition header is set. See
 // https://bugs.webkit.org/show_bug.cgi?id=145410
-// TODO(crbug.com/740987): Remove this function workaround once iOS 10 is
-// dropped.
+// TODO(crbug.com/889471) Remove this once requests are done using
+// NSUrlSession in iOS.
 void DoPostRequest(WKWebView* web_view,
                    const std::string& body,
                    const std::string& headers,
                    const GURL& url) {
-  DCHECK(!base::ios::IsRunningOnIOS11OrLater());
   NSMutableString* header_data = [NSMutableString string];
   net::HttpRequestHeaders request_headers;
   request_headers.AddHeadersFromString(headers);
@@ -150,7 +151,6 @@ void DoPostRequest(WKWebView* web_view,
 @implementation GaiaAuthFetcherNavigationDelegate {
   GaiaAuthFetcherIOSBridge* bridge_;  // weak
 }
-
 - (instancetype)initWithBridge:(GaiaAuthFetcherIOSBridge*)bridge {
   self = [super init];
   if (self) {
@@ -200,15 +200,21 @@ void DoPostRequest(WKWebView* web_view,
 #pragma mark - GaiaAuthFetcherIOSBridge::Request
 
 GaiaAuthFetcherIOSBridge::Request::Request()
-    : pending(false), url(), headers(), body() {}
+    : pending(false),
+      url(),
+      headers(),
+      body(),
+      shouldUseXmlHTTPRequest(false) {}
 
 GaiaAuthFetcherIOSBridge::Request::Request(const GURL& request_url,
                                            const std::string& request_headers,
-                                           const std::string& request_body)
+                                           const std::string& request_body,
+                                           bool shouldUseXmlHTTPRequest)
     : pending(true),
       url(request_url),
       headers(request_headers),
-      body(request_body) {}
+      body(request_body),
+      shouldUseXmlHTTPRequest(shouldUseXmlHTTPRequest) {}
 
 #pragma mark - GaiaAuthFetcherIOSBridge
 
@@ -226,8 +232,9 @@ GaiaAuthFetcherIOSBridge::~GaiaAuthFetcherIOSBridge() {
 
 void GaiaAuthFetcherIOSBridge::Fetch(const GURL& url,
                                      const std::string& headers,
-                                     const std::string& body) {
-  request_ = Request(url, headers, body);
+                                     const std::string& body,
+                                     bool shouldUseXmlHTTPRequest) {
+  request_ = Request(url, headers, body, shouldUseXmlHTTPRequest);
   FetchPendingRequest();
 }
 
@@ -265,7 +272,7 @@ void GaiaAuthFetcherIOSBridge::URLFetchFailure(bool is_cancelled) {
 void GaiaAuthFetcherIOSBridge::FetchPendingRequest() {
   if (!request_.pending)
     return;
-  if (!request_.body.empty() && !base::ios::IsRunningOnIOS11OrLater()) {
+  if (!request_.body.empty() && request_.shouldUseXmlHTTPRequest) {
     DoPostRequest(GetWKWebView(), request_.body, request_.headers,
                   request_.url);
   } else {
@@ -319,11 +326,12 @@ void GaiaAuthFetcherIOSBridge::OnInactive() {
 
 #pragma mark - GaiaAuthFetcherIOS definition
 
-GaiaAuthFetcherIOS::GaiaAuthFetcherIOS(GaiaAuthConsumer* consumer,
-                                       const std::string& source,
-                                       net::URLRequestContextGetter* getter,
-                                       web::BrowserState* browser_state)
-    : GaiaAuthFetcher(consumer, source, getter),
+GaiaAuthFetcherIOS::GaiaAuthFetcherIOS(
+    GaiaAuthConsumer* consumer,
+    const std::string& source,
+    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
+    web::BrowserState* browser_state)
+    : GaiaAuthFetcher(consumer, source, url_loader_factory),
       bridge_(new GaiaAuthFetcherIOSBridge(this, browser_state)),
       browser_state_(browser_state) {}
 
@@ -354,7 +362,9 @@ void GaiaAuthFetcherIOS::CreateAndStartGaiaFetcher(
   // a network request with cookies sent and saved is by making it through a
   // WKWebView.
   SetPendingFetch(true);
-  bridge_->Fetch(gaia_gurl, headers, body);
+  bool shouldUseXmlHTTPRequest =
+      IsMultiloginUrl(gaia_gurl) || !base::ios::IsRunningOnIOS11OrLater();
+  bridge_->Fetch(gaia_gurl, headers, body, shouldUseXmlHTTPRequest);
 }
 
 void GaiaAuthFetcherIOS::CancelRequest() {
@@ -373,7 +383,9 @@ void GaiaAuthFetcherIOS::FetchComplete(const GURL& url,
   DVLOG(2) << "Response " << url.spec() << ", code = " << response_code << "\n";
   DVLOG(2) << "data: " << data << "\n";
   SetPendingFetch(false);
-  DispatchFetchedRequest(url, data, cookies, status, response_code);
+  DispatchFetchedRequest(url, data, cookies,
+                         static_cast<net::Error>(status.error()),
+                         response_code);
 }
 
 void GaiaAuthFetcherIOS::SetShouldUseGaiaAuthFetcherIOSForTesting(

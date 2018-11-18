@@ -12,8 +12,8 @@ import itertools
 import json
 import os
 
-from chromite.lib.const import waterfall
 from chromite.lib import constants
+from chromite.lib import memoize
 from chromite.lib import osutils
 
 
@@ -33,17 +33,9 @@ CONFIG_TYPE_TOOLCHAIN = 'toolchain'
 
 DISPLAY_LABEL_PRECQ = 'pre_cq'
 DISPLAY_LABEL_TRYJOB = 'tryjob'
-
-# These are the build groups against which tryjobs can be directly run. All
-# other groups MUST be production builds (ie: use their -tryjob instead)
-# TODO: crbug.com/776955 Make the above statement true.
-TRYJOB_DISPLAY_LABEL = {
-    DISPLAY_LABEL_PRECQ,
-    DISPLAY_LABEL_TRYJOB,
-}
-
 DISPLAY_LABEL_INCREMENATAL = 'incremental'
 DISPLAY_LABEL_FULL = 'full'
+DISPLAY_LABEL_CHROME_INFORMATIONAL = 'chrome_informational'
 DISPLAY_LABEL_INFORMATIONAL = 'informational'
 DISPLAY_LABEL_CQ = 'cq'
 DISPLAY_LABEL_RELEASE = 'release'
@@ -56,12 +48,15 @@ DISPLAY_LABEL_FIRMWARE = 'firmware'
 DISPLAY_LABEL_FACTORY = 'factory'
 DISPLAY_LABEL_TOOLCHAIN = 'toolchain'
 DISPLAY_LABEL_UTILITY = 'utility'
-DISPLAY_LABEL_UNKNOWN_PRODUCTION = 'production_tryjob'
+DISPLAY_LABEL_PRODUCTION_TRYJOB = 'production_tryjob'
 
 # This list of constants should be kept in sync with GoldenEye code.
-ALL_DISPLAY_LABEL = TRYJOB_DISPLAY_LABEL | {
+ALL_DISPLAY_LABEL = {
+    DISPLAY_LABEL_PRECQ,
+    DISPLAY_LABEL_TRYJOB,
     DISPLAY_LABEL_INCREMENATAL,
     DISPLAY_LABEL_FULL,
+    DISPLAY_LABEL_CHROME_INFORMATIONAL,
     DISPLAY_LABEL_INFORMATIONAL,
     DISPLAY_LABEL_CQ,
     DISPLAY_LABEL_RELEASE,
@@ -74,8 +69,25 @@ ALL_DISPLAY_LABEL = TRYJOB_DISPLAY_LABEL | {
     DISPLAY_LABEL_FACTORY,
     DISPLAY_LABEL_TOOLCHAIN,
     DISPLAY_LABEL_UTILITY,
-    DISPLAY_LABEL_UNKNOWN_PRODUCTION,
+    DISPLAY_LABEL_PRODUCTION_TRYJOB,
 }
+
+# These values must be kept in sync with the ChromeOS LUCI builders.
+#
+# https://chrome-internal.git.corp.google.com/chromeos/
+#    manifest-internal/+/infra/config/cr-buildbucket.cfg
+LUCI_BUILDER_TRY = 'Try'
+LUCI_BUILDER_PRECQ = 'PreCQ'
+LUCI_BUILDER_PROD = 'Prod'
+LUCI_BUILDER_STAGING = 'Staging'
+
+ALL_LUCI_BUILDER = {
+    LUCI_BUILDER_TRY,
+    LUCI_BUILDER_PRECQ,
+    LUCI_BUILDER_PROD,
+    LUCI_BUILDER_STAGING,
+}
+
 
 def isTryjobConfig(build_config):
   """Is a given build config a tryjob config, or a production config?
@@ -86,15 +98,12 @@ def isTryjobConfig(build_config):
   Returns:
     Boolean. True if it's a tryjob config.
   """
-  return build_config.display_label in TRYJOB_DISPLAY_LABEL
+  return build_config.luci_builder in (LUCI_BUILDER_TRY, LUCI_BUILDER_PRECQ)
 
 
 # In the Json, this special build config holds the default values for all
 # other configs.
 DEFAULT_BUILD_CONFIG = '_default'
-
-# We cache the config we load from disk to avoid reparsing.
-_CACHED_CONFIG = None
 
 # Constants for config template file
 CONFIG_TEMPLATE_BOARDS = 'boards'
@@ -144,25 +153,6 @@ def IsMasterCQ(config):
   """Returns True if this build is master CQ."""
   return config.build_type == constants.PALADIN_TYPE and config.master
 
-def IsMasterBuild(config):
-  """Returns True if this build is master."""
-  return config.master
-
-def UseBuildbucketScheduler(config):
-  """Returns True if this build uses Buildbucket to schedule builds."""
-  return (config.active_waterfall in (waterfall.WATERFALL_INTERNAL,
-                                      waterfall.WATERFALL_EXTERNAL,
-                                      waterfall.WATERFALL_TRYBOT,
-                                      waterfall.WATERFALL_RELEASE) and
-          config.name in (constants.CQ_MASTER,
-                          constants.CANARY_MASTER,
-                          constants.PFQ_MASTER,
-                          constants.MST_ANDROID_PFQ_MASTER,
-                          constants.NYC_ANDROID_PFQ_MASTER,
-                          constants.PI_ANDROID_PFQ_MASTER,
-                          constants.TOOLCHAIN_MASTTER,
-                          constants.PRE_CQ_LAUNCHER_NAME))
-
 def RetryAlreadyStartedSlaves(config):
   """Returns True if wants to retry slaves which already start but fail.
 
@@ -186,55 +176,6 @@ def GetCriticalStageForRetry(config):
     return {'CommitQueueSync', 'MasterSlaveLKGMSync'}
   else:
     return set()
-
-def ScheduledByBuildbucket(config):
-  """Returns True if this build is scheduled by Buildbucket."""
-  return (config.build_type == constants.PALADIN_TYPE and
-          config.name != constants.CQ_MASTER)
-
-def OverrideConfigForTrybot(build_config, options):
-  """Apply trybot-specific configuration settings.
-
-  Args:
-    build_config: The build configuration dictionary to override.
-      The dictionary is not modified.
-    options: The options passed on the commandline.
-
-  Returns:
-    A build configuration dictionary with the overrides applied.
-  """
-  # TODO: crbug.com/504653 is about deleting this method fully.
-
-  copy_config = copy.deepcopy(build_config)
-  for my_config in [copy_config] + copy_config['child_configs']:
-    # Force uprev. This is so patched in changes are always built.
-    my_config['uprev'] = True
-    if my_config['internal']:
-      my_config['overlays'] = constants.BOTH_OVERLAYS
-
-    # Use the local manifest which only requires elevated access if it's really
-    # needed to build.
-    if not options.remote_trybot:
-      my_config['manifest'] = my_config['dev_manifest']
-
-    my_config['push_image'] = False
-
-    if my_config['build_type'] != constants.PAYLOADS_TYPE:
-      my_config['paygen'] = False
-
-    if options.hwtest and my_config['hw_tests_override'] is not None:
-      my_config['hw_tests'] = my_config['hw_tests_override']
-
-    # Default to starting with a fresh chroot on remote trybot runs.
-    if options.remote_trybot:
-      my_config['chroot_replace'] = True
-
-    # In trybots, we want to always run VM tests and all unit tests, so that
-    # developers will get better testing for their changes.
-    if my_config['vm_tests_override'] is not None:
-      my_config['vm_tests'] = my_config['vm_tests_override']
-
-  return copy_config
 
 
 class AttrDict(dict):
@@ -281,7 +222,7 @@ class BuildConfig(AttrDict):
                    'tast_vm_tests'):
           result[k] = [copy.copy(x) for x in v]
         # type(v) is faster than isinstance.
-        elif type(v) is list:
+        elif type(v) is list:  # pylint: disable=unidiomatic-typecheck
           result[k] = v[:]
 
     return result
@@ -389,18 +330,23 @@ class VMTestConfig(object):
     retry: Whether we should retry tests that fail in a suite run.
     max_retries: Integer, maximum job retries allowed at suite level.
                  None for no max.
+    warn_only: Boolean, failure on VM tests warns only.
+    use_ctest: Use the old ctest code path rather than the new chromite one.
   """
   DEFAULT_TEST_TIMEOUT = 90 * 60
 
   def __init__(self, test_type, test_suite=None,
                timeout=DEFAULT_TEST_TIMEOUT, retry=False,
-               max_retries=constants.VM_TEST_MAX_RETRIES):
+               max_retries=constants.VM_TEST_MAX_RETRIES,
+               warn_only=False, use_ctest=True):
     """Constructor -- see members above."""
     self.test_type = test_type
     self.test_suite = test_suite
     self.timeout = timeout
     self.retry = retry
     self.max_retries = max_retries
+    self.warn_only = warn_only
+    self.use_ctest = use_ctest
 
 
   def __eq__(self, other):
@@ -415,15 +361,17 @@ class GCETestConfig(object):
     test_suite: Test suite to be run in GCETest.
     timeout: Number of seconds to wait before timing out waiting for
              results.
+    use_ctest: Use the old ctest code path rather than the new chromite one.
   """
   DEFAULT_TEST_TIMEOUT = 60 * 60
 
   def __init__(self, test_type, test_suite=None,
-               timeout=DEFAULT_TEST_TIMEOUT):
+               timeout=DEFAULT_TEST_TIMEOUT, use_ctest=True):
     """Constructor -- see members above."""
     self.test_type = test_type
     self.test_suite = test_suite
     self.timeout = timeout
+    self.use_ctest = use_ctest
 
   def __eq__(self, other):
     return self.__dict__ == other.__dict__
@@ -440,7 +388,7 @@ class TastVMTestConfig(object):
     timeout: Number of seconds to wait before timing out waiting for
              results.
   """
-  DEFAULT_TEST_TIMEOUT = 10 * 60
+  DEFAULT_TEST_TIMEOUT = 30 * 60
 
   def __init__(self, suite_name, test_exprs, timeout=DEFAULT_TEST_TIMEOUT):
     """Constructor -- see members above."""
@@ -565,7 +513,8 @@ class HWTestConfig(object):
                minimum_duts=0,
                suite_min_duts=0,
                suite_args=None,
-               offload_failures_only=False):
+               offload_failures_only=False,
+               enable_skylab=True):
     """Constructor -- see members above."""
     assert not async or not blocking
     assert not warn_only or not critical
@@ -584,6 +533,10 @@ class HWTestConfig(object):
     self.suite_min_duts = suite_min_duts
     self.suite_args = suite_args
     self.offload_failures_only = offload_failures_only
+    # Usually whether to run in skylab is controlled by 'enable_skylab_hw_test'
+    # in build config. But for some particular suites, we want to exclude them
+    # from Skylab even if the build config is migrated to Skylab.
+    self.enable_skylab = enable_skylab
 
   def SetBranchedValues(self):
     """Changes the HW Test timeout/priority values to branched values."""
@@ -638,6 +591,13 @@ def DefaultSettings():
       # TODO: Make the value required after crbug.com/776955 is finished.
       display_label=None,
 
+      # This defines which LUCI Builder to use. It must match an entry in:
+      #
+      # https://chrome-internal.git.corp.google.com/chromeos/
+      #    manifest-internal/+/infra/config/cr-buildbucket.cfg
+      #
+      luci_builder=LUCI_BUILDER_PROD,
+
       # The profile of the variant to set up and build.
       profile=None,
 
@@ -652,7 +612,7 @@ def DefaultSettings():
       # this bot passed or failed. Set this to False if you are setting up a
       # new bot. Once the bot is on the waterfall and is consistently green,
       # mark the builder as important=True.
-      important=False,
+      important=True,
 
       # If True, build config should always be run as if --debug was set
       # on the cbuildbot command line. This is different from 'important'
@@ -734,9 +694,6 @@ def DefaultSettings():
       # packages.)
       build_packages_in_background=False,
 
-      # Only use binaries in build_packages for Chrome itself.
-      chrome_binhost_only=False,
-
       # Does this profile need to sync chrome?  If None, we guess based on
       # other factors.  If True/False, we always do that.
       sync_chrome=None,
@@ -750,7 +707,7 @@ def DefaultSettings():
       gcc_githash=None,
 
       # Wipe and replace the board inside the chroot.
-      board_replace=False,
+      board_replace=True,
 
       # Wipe and replace chroot, but not source.
       chroot_replace=True,
@@ -845,6 +802,9 @@ def DefaultSettings():
       # will run the stage this many times, stopping if we encounter any
       # failures.
       vm_test_runs=1,
+
+      # If True, run SkylabHWTestStage instead of HWTestStage.
+      enable_skylab_hw_tests=False,
 
       # A list of HWTestConfig objects to run.
       hw_tests=[],
@@ -976,12 +936,6 @@ def DefaultSettings():
       # Use a different branch of the project manifest for the build.
       manifest_branch=None,
 
-      # Use the Last Known Good Manifest blessed by Paladin.
-      use_lkgm=False,
-
-      # If we use_lkgm -- What is the name of the manifest to look for?
-      lkgm_manifest=constants.LKGM_MANIFEST,
-
       # LKGM for Chrome OS generated for Chrome builds that are blessed from
       # canary runs.
       use_chrome_lkgm=False,
@@ -996,10 +950,6 @@ def DefaultSettings():
       # Use SDK as opposed to building the chroot from source.
       use_sdk=True,
 
-      # List this config when user runs cbuildbot with --list option without
-      # the --all flag.
-      trybot_list=False,
-
       # The description string to print out for config when user runs --list.
       description=None,
 
@@ -1009,11 +959,6 @@ def DefaultSettings():
       # A list of the child config groups, if applicable. See the AddGroup
       # method.
       child_configs=[],
-
-      # Set shared user password for "chronos" user in built images. Use
-      # "None" (default) to remove the shared user password. Note that test
-      # images will always set the password to "test0000".
-      shared_user_password=None,
 
       # Whether this config belongs to a config group.
       grouped=False,
@@ -1029,9 +974,6 @@ def DefaultSettings():
 
       # Reexec into the buildroot after syncing.  Enabled by default.
       postsync_reexec=True,
-
-      # Create delta sysroot during ArchiveStage. Disabled by default.
-      create_delta_sysroot=False,
 
       # Run the binhost_test stage. Only makes sense for builders that have no
       # boards.
@@ -1082,8 +1024,20 @@ def DefaultSettings():
       image_test=False,
 
       # ==================================================================
+      # Workspace related options.
+
+      # Which branch should WorkspaceSyncStage checkout, if run.
+      workspace_branch=None,
+
+      # ==================================================================
       # The documentation associated with the config.
       doc=None,
+
+      # ==================================================================
+      # The goma related options.
+
+      # Which goma client to use.
+      goma_client_type=None,
 
       # ==================================================================
       # Hints to Buildbot master UI
@@ -1096,6 +1050,18 @@ def DefaultSettings():
       # waterfall that this target should be active on.
       active_waterfall=None,
 
+      # This is a LUCI Scheduler schedule string. Setting this will create
+      # a LUCI Scheduler for this build on swarming (not buildbot).
+      # See: https://goo.gl/VxSzFf
+      schedule=None,
+
+      # This is the list of git repos which can trigger this build in swarming.
+      # Implies that schedule is set, to "triggered".
+      # The format is of the form:
+      #   [ (<git repo url>, (<ref1>, <ref2>, …)),
+      #    …]
+      triggered_gitiles=None,
+
       # If true, skip package retries in BuildPackages step.
       nobuildretry=False,
 
@@ -1104,12 +1070,10 @@ def DefaultSettings():
   )
 
 
-def GerritInstanceParameters(name, instance, defaults=False):
+def GerritInstanceParameters(name, instance):
   GOB_HOST = '%s.googlesource.com'
   param_names = ['_GOB_INSTANCE', '_GERRIT_INSTANCE', '_GOB_HOST',
                  '_GERRIT_HOST', '_GOB_URL', '_GERRIT_URL']
-  if defaults:
-    return dict([('%s%s' % (name, x), None) for x in param_names])
 
   gob_instance = instance
   gerrit_instance = '%s-review' % instance
@@ -1132,10 +1096,14 @@ def DefaultSiteParameters():
   # Helper variables for defining site parameters.
   gob_host = '%s.googlesource.com'
 
+  manifest_project = 'chromiumos/manifest'
+  manifest_int_project = 'chromeos/manifest-internal'
   external_remote = 'cros'
   internal_remote = 'cros-internal'
   chromium_remote = 'chromium'
   chrome_remote = 'chrome'
+  aosp_remote = 'aosp'
+  weave_remote = 'weave'
 
   internal_change_prefix = '*'
   external_change_prefix = ''
@@ -1147,43 +1115,54 @@ def DefaultSiteParameters():
   default_site_params.update(
       GerritInstanceParameters('INTERNAL', 'chrome-internal'))
   default_site_params.update(
-      GerritInstanceParameters('AOSP', 'android', defaults=True))
+      GerritInstanceParameters('AOSP', 'android'))
   default_site_params.update(
-      GerritInstanceParameters('WEAVE', 'weave', defaults=True))
+      GerritInstanceParameters('WEAVE', 'weave'))
 
   default_site_params.update(
       # Parameters to define which manifests to use.
-      MANIFEST_PROJECT=None,
-      MANIFEST_INT_PROJECT=None,
-      MANIFEST_PROJECTS=None,
-      MANIFEST_URL=None,
-      MANIFEST_INT_URL=None,
+      MANIFEST_PROJECT=manifest_project,
+      MANIFEST_INT_PROJECT=manifest_int_project,
+      MANIFEST_PROJECTS=(manifest_project, manifest_int_project),
+      MANIFEST_URL=os.path.join(default_site_params['EXTERNAL_GOB_URL'],
+                                manifest_project),
+      MANIFEST_INT_URL=os.path.join(default_site_params['INTERNAL_GERRIT_URL'],
+                                    manifest_int_project),
 
       # CrOS remotes specified in the manifests.
       EXTERNAL_REMOTE=external_remote,
       INTERNAL_REMOTE=internal_remote,
-      GOB_REMOTES=None,
+      GOB_REMOTES={
+          default_site_params['EXTERNAL_GOB_INSTANCE']: external_remote,
+          default_site_params['INTERNAL_GOB_INSTANCE']: internal_remote,
+      },
       KAYLE_INTERNAL_REMOTE=None,
-      CHROMIUM_REMOTE=None,
-      CHROME_REMOTE=None,
-      AOSP_REMOTE=None,
-      WEAVE_REMOTE=None,
+      CHROMIUM_REMOTE=chromium_remote,
+      CHROME_REMOTE=chrome_remote,
+      AOSP_REMOTE=aosp_remote,
+      WEAVE_REMOTE=weave_remote,
 
       # Only remotes listed in CROS_REMOTES are considered branchable.
       # CROS_REMOTES and BRANCHABLE_PROJECTS must be kept in sync.
       GERRIT_HOSTS={
           external_remote: default_site_params['EXTERNAL_GERRIT_HOST'],
-          internal_remote: default_site_params['INTERNAL_GERRIT_HOST']
+          internal_remote: default_site_params['INTERNAL_GERRIT_HOST'],
+          aosp_remote: default_site_params['AOSP_GERRIT_HOST'],
+          weave_remote: default_site_params['WEAVE_GERRIT_HOST'],
       },
       CROS_REMOTES={
           external_remote: default_site_params['EXTERNAL_GOB_URL'],
-          internal_remote: default_site_params['INTERNAL_GOB_URL']
+          internal_remote: default_site_params['INTERNAL_GOB_URL'],
+          aosp_remote: default_site_params['AOSP_GOB_URL'],
+          weave_remote: default_site_params['WEAVE_GOB_URL'],
       },
       GIT_REMOTES={
           chromium_remote: default_site_params['EXTERNAL_GOB_URL'],
           chrome_remote: default_site_params['INTERNAL_GOB_URL'],
           external_remote: default_site_params['EXTERNAL_GOB_URL'],
           internal_remote: default_site_params['INTERNAL_GOB_URL'],
+          aosp_remote: default_site_params['AOSP_GOB_URL'],
+          weave_remote: default_site_params['WEAVE_GOB_URL'],
       },
 
       # Prefix to distinguish internal and external changes. This is used
@@ -1193,12 +1172,14 @@ def DefaultSiteParameters():
       INTERNAL_CHANGE_PREFIX=internal_change_prefix,
       EXTERNAL_CHANGE_PREFIX=external_change_prefix,
       CHANGE_PREFIX={
-          external_remote: internal_change_prefix,
-          internal_remote: external_change_prefix
+          external_remote: external_change_prefix,
+          internal_remote: internal_change_prefix,
       },
 
       # List of remotes that are okay to include in the external manifest.
-      EXTERNAL_REMOTES=None,
+      EXTERNAL_REMOTES=(
+          external_remote, chromium_remote, aosp_remote, weave_remote,
+      ),
 
       # Mapping 'remote name' -> regexp that matches names of repositories on
       # that remote that can be branched when creating CrOS branch.
@@ -1209,20 +1190,25 @@ def DefaultSiteParameters():
       # branchable.
       BRANCHABLE_PROJECTS={
           external_remote: r'(chromiumos|aosp)/(.+)',
-          internal_remote: r'chromeos/(.+)'
+          internal_remote: r'chromeos/(.+)',
       },
 
       # Additional parameters used to filter manifests, create modified
       # manifests, and to branch manifests.
-      MANIFEST_VERSIONS_GOB_URL=None,
-      MANIFEST_VERSIONS_GOB_URL_TEST=None,
-      MANIFEST_VERSIONS_INT_GOB_URL=None,
-      MANIFEST_VERSIONS_INT_GOB_URL_TEST=None,
-      MANIFEST_VERSIONS_GS_URL=None,
+      MANIFEST_VERSIONS_GOB_URL=('%s/chromiumos/manifest-versions' %
+                                 default_site_params['EXTERNAL_GOB_URL']),
+      MANIFEST_VERSIONS_GOB_URL_TEST=('%s/chromiumos/manifest-versions-test' %
+                                      default_site_params['EXTERNAL_GOB_URL']),
+      MANIFEST_VERSIONS_INT_GOB_URL=('%s/chromeos/manifest-versions' %
+                                     default_site_params['INTERNAL_GOB_URL']),
+      MANIFEST_VERSIONS_INT_GOB_URL_TEST=(
+          '%s/chromeos/manifest-versions-test' %
+          default_site_params['INTERNAL_GOB_URL']),
+      MANIFEST_VERSIONS_GS_URL='gs://chromeos-manifest-versions',
 
       # Standard directories under buildroot for cloning these repos.
-      EXTERNAL_MANIFEST_VERSIONS_PATH=None,
-      INTERNAL_MANIFEST_VERSIONS_PATH=None,
+      EXTERNAL_MANIFEST_VERSIONS_PATH='manifest-versions',
+      INTERNAL_MANIFEST_VERSIONS_PATH='manifest-versions-internal',
 
       # URL of the repo project.
       REPO_URL='https://chromium.googlesource.com/external/repo',
@@ -1234,15 +1220,8 @@ def DefaultSiteParameters():
   return default_site_params
 
 
-class SiteParameters(dict):
+class SiteParameters(AttrDict):
   """This holds the site-wide configuration parameters for a SiteConfig."""
-
-  def __getattr__(self, name):
-    """Support attribute-like access to each SiteValue entry."""
-    if name in self:
-      return self[name]
-
-    return super(SiteParameters, self).__getattribute__(name)
 
   @classmethod
   def HideDefaults(cls, site_params):
@@ -1410,7 +1389,7 @@ class SiteConfig(dict):
   def Add(self, name, template=None, *args, **kwargs):
     """Add a new BuildConfig to the SiteConfig.
 
-    Example usage:
+    Examples:
       # Creates default build named foo.
       site_config.Add('foo')
 
@@ -1522,6 +1501,29 @@ class SiteConfig(dict):
       # Create the new config for this board.
       result.append(
           self.Add(config_name, template, *mixins, **kwargs))
+
+    return result
+
+  def ApplyForBoards(self, suffix, boards, *args, **kwargs):
+    """Update configs for all boards in |boards|.
+
+    Args:
+      suffix: Config name is <board>-<suffix>.
+      boards: A list of board names as strings.
+      *args: Mixin templates to apply.
+      **kwargs: Additional keyword arguments to be used in AddConfig.
+
+    Returns:
+      List of the configs updated.
+    """
+    result = []
+
+    for board in boards:
+      config_name = '%s-%s' % (board, suffix)
+      assert config_name in self, ('%s does not exist.' % config_name)
+
+      # Update the config for this board.
+      result.append(self[config_name].apply(*args, **kwargs))
 
     return result
 
@@ -1777,7 +1779,7 @@ class ObjectJSONEncoder(json.JSONEncoder):
 def PrettyJsonDict(dictionary):
   """Returns a pretty-ified json dump of a dictionary."""
   return json.dumps(dictionary, cls=ObjectJSONEncoder,
-                    sort_keys=True, indent=4, separators=(',', ': '))
+                    sort_keys=True, indent=4, separators=(',', ': ')) + '\n'
 
 
 def LoadConfigFromFile(config_file=constants.CHROMEOS_CONFIG_FILE):
@@ -1891,38 +1893,26 @@ def _CreateBuildConfig(name, default, build_dict, templates):
   return result
 
 
-def ClearConfigCache():
-  """Clear the currently cached SiteConfig.
-
-  This is intended to be used very early in the startup, after we fetch/update
-  the site config information available to us.
-
-  However, this operation is never 100% safe, since the Chrome OS config, or an
-  outdated config was availble to any code that ran before (including on
-  import), and that code might have used or cached related values.
-  """
-  # pylint: disable=global-statement
-  global _CACHED_CONFIG
-  _CACHED_CONFIG = None
-
-
+@memoize.Memoize
 def GetConfig():
   """Load the current SiteConfig.
 
   Returns:
     SiteConfig instance to use for this build.
   """
-  # pylint: disable=global-statement
-  global _CACHED_CONFIG
+  return LoadConfigFromFile(constants.CHROMEOS_CONFIG_FILE)
 
-  if _CACHED_CONFIG is None:
-    if os.path.exists(constants.SITE_CONFIG_FILE):
-      # Use a site specific config, if present.
-      filename = constants.SITE_CONFIG_FILE
-    else:
-      # Fall back to default Chrome OS configuration.
-      filename = constants.CHROMEOS_CONFIG_FILE
 
-    _CACHED_CONFIG = LoadConfigFromFile(filename)
+@memoize.Memoize
+def GetSiteParams():
+  """Get the site parameter configs.
 
-  return _CACHED_CONFIG
+  This is the new, preferred method of accessing the site parameters, instead of
+  SiteConfig.params.
+
+  Returns:
+    SiteParameters
+  """
+  site_params = SiteParameters()
+  site_params.update(DefaultSiteParameters())
+  return site_params

@@ -23,6 +23,7 @@
 #include "SkMaskFilter.h"
 #include "SkMaskFilterBase.h"
 #include "SkMath.h"
+#include "SkMathPriv.h"
 #include "SkPaint.h"
 #include "SkPath.h"
 #include "SkPerlinNoiseShader.h"
@@ -39,9 +40,7 @@
 #include "Test.h"
 #include "sk_pixel_iter.h"
 
-#if SK_SUPPORT_GPU
 #include "GrContextFactory.h"
-#endif
 
 #include <math.h>
 #include <string.h>
@@ -349,9 +348,7 @@ DEF_TEST(BlurSigmaRange, reporter) {
 #if WRITE_CSV
         write_as_csv("RectSpecialCase", sigma, rectSpecialCaseResult, kSize);
         write_as_csv("GeneralCase", sigma, generalCaseResult, kSize);
-#if SK_SUPPORT_GPU
         write_as_csv("GPU", sigma, gpuResult, kSize);
-#endif
         write_as_csv("GroundTruth2D", sigma, groundTruthResult, kSize);
         write_as_csv("BruteForce1D", sigma, bruteForce1DResult, kSize);
 #endif
@@ -500,8 +497,6 @@ DEF_TEST(BlurAsABlur, reporter) {
     }
 }
 
-#if SK_SUPPORT_GPU
-
 // This exercises the problem discovered in crbug.com/570232. The return value from
 // SkBlurMask::BoxBlur wasn't being checked in SkBlurMaskFilter.cpp::GrRRectBlurEffect::Create
 DEF_GPUTEST_FOR_RENDERING_CONTEXTS(SmallBoxBlurBug, reporter, ctxInfo) {
@@ -518,9 +513,6 @@ DEF_GPUTEST_FOR_RENDERING_CONTEXTS(SmallBoxBlurBug, reporter, ctxInfo) {
 
     canvas->drawRRect(rr, p);
 }
-
-#endif
-
 
 DEF_TEST(BlurredRRectNinePatchComputation, reporter) {
     const SkRect r = SkRect::MakeXYWH(10, 10, 100, 100);
@@ -706,5 +698,47 @@ DEF_TEST(BlurZeroSigma, reporter) {
             }
         }
     }
+}
+
+
+///////////////////////////////////////////////////////////////////////////////////////////
+
+DEF_GPUTEST_FOR_RENDERING_CONTEXTS(BlurMaskBiggerThanDest, reporter, ctxInfo) {
+    GrContext* context = ctxInfo.grContext();
+
+    SkImageInfo ii = SkImageInfo::Make(32, 32, kRGBA_8888_SkColorType, kPremul_SkAlphaType);
+
+    sk_sp<SkSurface> dst(SkSurface::MakeRenderTarget(context, SkBudgeted::kNo, ii));
+    if (!dst) {
+        ERRORF(reporter, "Could not create surface for test.");
+        return;
+    }
+
+    SkPaint p;
+    p.setColor(SK_ColorRED);
+    p.setMaskFilter(SkMaskFilter::MakeBlur(kNormal_SkBlurStyle, 3));
+
+    SkCanvas* canvas = dst->getCanvas();
+
+    canvas->clear(SK_ColorBLACK);
+    canvas->drawCircle(SkPoint::Make(16, 16), 8, p);
+
+    SkBitmap readback;
+    SkAssertResult(readback.tryAllocPixels(ii));
+
+    canvas->readPixels(readback, 0, 0);
+    REPORTER_ASSERT(reporter, SkColorGetR(readback.getColor(15, 15)) > 128);
+    REPORTER_ASSERT(reporter, SkColorGetG(readback.getColor(15, 15)) == 0);
+    REPORTER_ASSERT(reporter, SkColorGetB(readback.getColor(15, 15)) == 0);
+    REPORTER_ASSERT(reporter, readback.getColor(31, 31) == SK_ColorBLACK);
+}
+
+DEF_TEST(zero_blur, reporter) {
+    SkBitmap alpha, bitmap;
+
+    SkPaint paint;
+    paint.setMaskFilter(SkMaskFilter::MakeBlur(kOuter_SkBlurStyle, 3));
+    SkIPoint offset;
+    bitmap.extractAlpha(&alpha, &paint, nullptr, &offset);
 }
 

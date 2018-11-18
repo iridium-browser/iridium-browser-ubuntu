@@ -48,10 +48,6 @@ namespace password_manager {
 class PasswordStoreSigninNotifierImpl;
 }
 
-namespace user_prefs {
-class PrefRegistrySyncable;
-}
-
 class SigninManagerBase : public KeyedService {
  public:
   class Observer {
@@ -103,13 +99,27 @@ class SigninManagerBase : public KeyedService {
         const std::string& password) {}
   };
 
+// On non-ChromeOS platforms, SigninManagerBase should only be instantiated
+// via the derived SigninManager class, as the codewise assumes the
+// invariant that any SigninManagerBase object can be cast to a
+// SigninManager object when not on ChromeOS. Make the constructor private
+// and add SigninManager as a friend to support this.
+// TODO(883648): Eliminate the need to downcast SigninManagerBase to
+// SigninManager and then eliminate this as well.
+#if !defined(OS_CHROMEOS)
+ private:
+#endif
   SigninManagerBase(SigninClient* client,
                     AccountTrackerService* account_tracker_service,
                     SigninErrorController* signin_error_controller);
+#if !defined(OS_CHROMEOS)
+ public:
+#endif
+
   ~SigninManagerBase() override;
 
   // Registers per-profile prefs.
-  static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
+  static void RegisterProfilePrefs(PrefRegistrySimple* registry);
 
   // Registers per-install prefs.
   static void RegisterPrefs(PrefRegistrySimple* registry);
@@ -201,7 +211,7 @@ class SigninManagerBase : public KeyedService {
 
   // List of observers to notify on signin events.
   // Makes sure list is empty on destruction.
-  base::ObserverList<Observer, true> observer_list_;
+  base::ObserverList<Observer, true>::Unchecked observer_list_;
 
   // Helper method to notify all registered diagnostics observers with.
   void NotifyDiagnosticsObservers(
@@ -212,6 +222,11 @@ class SigninManagerBase : public KeyedService {
   friend class FakeSigninManagerBase;
   friend class FakeSigninManager;
 
+  // Added only to allow SigninManager to call the SigninManagerBase
+  // constructor while disallowing any ad-hoc subclassing of
+  // SigninManagerBase.
+  friend class SigninManager;
+
   SigninClient* client_;
   AccountTrackerService* account_tracker_service_;
   SigninErrorController* signin_error_controller_;
@@ -221,8 +236,8 @@ class SigninManagerBase : public KeyedService {
   std::string authenticated_account_id_;
 
   // The list of SigninDiagnosticObservers.
-  base::ObserverList<signin_internals_util::SigninDiagnosticsObserver, true>
-      signin_diagnostics_observers_;
+  base::ObserverList<signin_internals_util::SigninDiagnosticsObserver,
+                     true>::Unchecked signin_diagnostics_observers_;
 
   // The list of callbacks notified on shutdown.
   base::CallbackList<void()> on_shutdown_callback_list_;

@@ -34,12 +34,12 @@
 
 namespace blink {
 
-namespace XPath {
+namespace xpath {
 
 class CORE_EXPORT Number final : public Expression {
  public:
   explicit Number(double);
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  private:
   Value Evaluate(EvaluationContext&) const override;
@@ -51,7 +51,7 @@ class CORE_EXPORT Number final : public Expression {
 class CORE_EXPORT StringExpression final : public Expression {
  public:
   explicit StringExpression(const String&);
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  private:
   Value Evaluate(EvaluationContext&) const override;
@@ -136,7 +136,7 @@ class Predicate final : public GarbageCollected<Predicate> {
   DISALLOW_COPY_AND_ASSIGN(Predicate);
 };
 
-}  // namespace XPath
+}  // namespace xpath
 
 }  // namespace blink
 

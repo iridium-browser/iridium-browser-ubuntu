@@ -6,6 +6,7 @@ package org.chromium.chrome.browser.infobar;
 
 import android.support.design.widget.TabLayout;
 import android.support.v4.content.ContextCompat;
+import android.support.v7.widget.AppCompatImageButton;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.View.OnClickListener;
@@ -20,7 +21,6 @@ import org.chromium.chrome.browser.infobar.translate.TranslateMenuHelper;
 import org.chromium.chrome.browser.infobar.translate.TranslateTabLayout;
 import org.chromium.chrome.browser.snackbar.Snackbar;
 import org.chromium.chrome.browser.snackbar.SnackbarManager.SnackbarController;
-import org.chromium.chrome.browser.widget.TintedImageButton;
 import org.chromium.ui.widget.Toast;
 
 /**
@@ -29,6 +29,7 @@ import org.chromium.ui.widget.Toast;
 public class TranslateCompactInfoBar extends InfoBar
         implements TabLayout.OnTabSelectedListener, TranslateMenuHelper.TranslateMenuListener {
     public static final int TRANSLATING_INFOBAR = 1;
+    public static final int AFTER_TRANSLATING_INFOBAR = 2;
 
     private static final int SOURCE_TAB_INDEX = 0;
     private static final int TARGET_TAB_INDEX = 1;
@@ -50,7 +51,7 @@ public class TranslateCompactInfoBar extends InfoBar
     private TranslateTabLayout mTabLayout;
 
     // Metric to track the total number of translations in a page, including reverts to original.
-    private int mTotalTranslationCount = 0;
+    private int mTotalTranslationCount;
 
     // Histogram names for logging metrics.
     private static final String INFOBAR_HISTOGRAM_TRANSLATE_LANGUAGE =
@@ -104,7 +105,7 @@ public class TranslateCompactInfoBar extends InfoBar
     private TranslateMenuHelper mOverflowMenuHelper;
     private TranslateMenuHelper mLanguageMenuHelper;
 
-    private TintedImageButton mMenuButton;
+    private AppCompatImageButton mMenuButton;
     private InfoBarCompactLayout mParent;
 
     private TranslateSnackbarController mSnackbarController;
@@ -202,16 +203,19 @@ public class TranslateCompactInfoBar extends InfoBar
         mTabLayout = (TranslateTabLayout) content.findViewById(R.id.translate_infobar_tabs);
         if (mDefaultTextColor > 0) {
             mTabLayout.setTabTextColors(
-                    ContextCompat.getColor(getContext(), R.color.black_alpha_87),
+                    ContextCompat.getColor(getContext(), R.color.default_text_color),
                     ContextCompat.getColor(getContext(), R.color.infobar_accent_blue));
         }
         mTabLayout.addTabs(mOptions.sourceLanguageName(), mOptions.targetLanguageName());
 
-        // Set translating status in the beginning for pages translated automatically.
         if (mInitialStep == TRANSLATING_INFOBAR) {
+            // Set translating status in the beginning for pages translated automatically.
             mTabLayout.getTabAt(TARGET_TAB_INDEX).select();
             mTabLayout.showProgressBarOnTab(TARGET_TAB_INDEX);
             mUserInteracted = true;
+        } else if (mInitialStep == AFTER_TRANSLATING_INFOBAR) {
+            // Focus on target tab since we are after translation.
+            mTabLayout.getTabAt(TARGET_TAB_INDEX).select();
         }
 
         mTabLayout.addOnTabSelectedListener(this);
@@ -239,7 +243,8 @@ public class TranslateCompactInfoBar extends InfoBar
             }
         });
 
-        mMenuButton = (TintedImageButton) content.findViewById(R.id.translate_infobar_menu_button);
+        mMenuButton =
+                (AppCompatImageButton) content.findViewById(R.id.translate_infobar_menu_button);
         mMenuButton.setOnClickListener(new OnClickListener() {
             @Override
             public void onClick(View v) {
@@ -256,18 +261,19 @@ public class TranslateCompactInfoBar extends InfoBar
     }
 
     private void initMenuHelper(int menuType) {
+        boolean isIncognito = nativeIsIncognito(mNativeTranslateInfoBarPtr);
         switch (menuType) {
             case TranslateMenu.MENU_OVERFLOW:
                 if (mOverflowMenuHelper == null) {
-                    mOverflowMenuHelper =
-                            new TranslateMenuHelper(getContext(), mMenuButton, mOptions, this);
+                    mOverflowMenuHelper = new TranslateMenuHelper(
+                            getContext(), mMenuButton, mOptions, this, isIncognito);
                 }
                 return;
             case TranslateMenu.MENU_TARGET_LANGUAGE:
             case TranslateMenu.MENU_SOURCE_LANGUAGE:
                 if (mLanguageMenuHelper == null) {
-                    mLanguageMenuHelper =
-                            new TranslateMenuHelper(getContext(), mMenuButton, mOptions, this);
+                    mLanguageMenuHelper = new TranslateMenuHelper(
+                            getContext(), mMenuButton, mOptions, this, isIncognito);
                 }
                 return;
             default:
@@ -382,7 +388,7 @@ public class TranslateCompactInfoBar extends InfoBar
                 return;
             case TranslateMenu.ID_OVERFLOW_ALWAYS_TRANSLATE:
                 // Only show snackbar when "Always Translate" is enabled.
-                if (!mOptions.alwaysTranslateLanguageState()) {
+                if (!mOptions.getTranslateState(TranslateOptions.Type.ALWAYS_LANGUAGE)) {
                     recordInfobarAction(INFOBAR_ALWAYS_TRANSLATE);
                     recordInfobarLanguageData(INFOBAR_HISTOGRAM_ALWAYS_TRANSLATE_LANGUAGE,
                             mOptions.sourceLanguageCode());
@@ -496,6 +502,28 @@ public class TranslateCompactInfoBar extends InfoBar
         return mLanguageMenuHelper.isShowing();
     }
 
+    /**
+     * Returns true if the tab at the given |tabIndex| is selected. This is only used for automation
+     * testing.
+     */
+    private boolean isTabSelectedForTesting(int tabIndex) {
+        return mTabLayout.getTabAt(tabIndex).isSelected();
+    }
+
+    /**
+     * Returns true if the target tab is selected. This is only used for automation testing.
+     */
+    public boolean isSourceTabSelectedForTesting() {
+        return this.isTabSelectedForTesting(SOURCE_TAB_INDEX);
+    }
+
+    /**
+     * Returns true if the target tab is selected. This is only used for automation testing.
+     */
+    public boolean isTargetTabSelectedForTesting() {
+        return this.isTabSelectedForTesting(TARGET_TAB_INDEX);
+    }
+
     private void createAndShowSnackbar(String title, int umaType, int actionId) {
         if (getSnackbarManager() == null) {
             // Directly apply menu option, if snackbar system is not working.
@@ -539,7 +567,7 @@ public class TranslateCompactInfoBar extends InfoBar
                 toggleAlwaysTranslate();
                 // Start translating if always translate is selected and if page is not already
                 // translated to the target language.
-                if (mOptions.alwaysTranslateLanguageState()
+                if (mOptions.getTranslateState(TranslateOptions.Type.ALWAYS_LANGUAGE)
                         && mTabLayout.getSelectedTabPosition() == SOURCE_TAB_INDEX) {
                     startTranslating(mTabLayout.getSelectedTabPosition());
                 }
@@ -566,9 +594,10 @@ public class TranslateCompactInfoBar extends InfoBar
     }
 
     private void toggleAlwaysTranslate() {
-        mOptions.toggleAlwaysTranslateLanguageState(!mOptions.alwaysTranslateLanguageState());
+        mOptions.toggleAlwaysTranslateLanguageState(
+                !mOptions.getTranslateState(TranslateOptions.Type.ALWAYS_LANGUAGE));
         nativeApplyBoolTranslateOption(mNativeTranslateInfoBarPtr, TranslateOption.ALWAYS_TRANSLATE,
-                mOptions.alwaysTranslateLanguageState());
+                mOptions.getTranslateState(TranslateOptions.Type.ALWAYS_LANGUAGE));
     }
 
     private static void recordInfobarAction(int action) {
@@ -599,4 +628,5 @@ public class TranslateCompactInfoBar extends InfoBar
             long nativeTranslateCompactInfoBar, int option, boolean value);
     private native boolean nativeShouldAutoNeverTranslate(
             long nativeTranslateCompactInfoBar, boolean menuExpanded);
+    private native boolean nativeIsIncognito(long nativeTranslateCompactInfoBar);
 }

@@ -26,18 +26,17 @@ class PLATFORM_EXPORT ScrollHitTestDisplayItem final : public DisplayItem {
  public:
   ScrollHitTestDisplayItem(
       const DisplayItemClient&,
-      Type,
-      scoped_refptr<const TransformPaintPropertyNode> scroll_offset_node);
-  ~ScrollHitTestDisplayItem();
+      const TransformPaintPropertyNode& scroll_offset_node);
+  ~ScrollHitTestDisplayItem() override;
 
   const TransformPaintPropertyNode& scroll_offset_node() const {
-    return *scroll_offset_node_;
+    return scroll_offset_node_;
   }
 
   // DisplayItem
   void Replay(GraphicsContext&) const override;
-  void AppendToWebDisplayItemList(const FloatSize&,
-                                  WebDisplayItemList*) const override;
+  void AppendToDisplayItemList(const FloatSize&,
+                               cc::DisplayItemList&) const override;
   bool Equals(const DisplayItem&) const override;
 #if DCHECK_IS_ON()
   void PropertiesAsJSON(JSONObject&) const override;
@@ -46,18 +45,16 @@ class PLATFORM_EXPORT ScrollHitTestDisplayItem final : public DisplayItem {
   // Create and append a ScrollHitTestDisplayItem onto the context. This is
   // similar to a recorder class (e.g., DrawingRecorder) but just emits a single
   // item.
-  static void Record(
-      GraphicsContext&,
-      const DisplayItemClient&,
-      DisplayItem::Type,
-      scoped_refptr<const TransformPaintPropertyNode> scroll_offset_node);
+  static void Record(GraphicsContext&,
+                     const DisplayItemClient&,
+                     const TransformPaintPropertyNode& scroll_offset_node);
 
  private:
   const ScrollPaintPropertyNode& scroll_node() const {
-    return *scroll_offset_node_->ScrollNode();
+    return *scroll_offset_node_.ScrollNode();
   }
 
-  scoped_refptr<const TransformPaintPropertyNode> scroll_offset_node_;
+  const TransformPaintPropertyNode& scroll_offset_node_;
 };
 
 }  // namespace blink

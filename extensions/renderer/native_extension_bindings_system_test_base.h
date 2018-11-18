@@ -44,7 +44,7 @@ class ScriptContextSet;
 class TestIPCMessageSender : public IPCMessageSender {
  public:
   TestIPCMessageSender();
-  ~TestIPCMessageSender();
+  ~TestIPCMessageSender() override;
 
   // IPCMessageSender:
   void SendRequestIPC(ScriptContext* context,
@@ -118,7 +118,7 @@ class NativeExtensionBindingsSystemUnittest : public APIBindingTest {
   std::unique_ptr<TestJSRunner::Scope> CreateTestJSRunner() override;
 
   ScriptContext* CreateScriptContext(v8::Local<v8::Context> v8_context,
-                                     Extension* extension,
+                                     const Extension* extension,
                                      Feature::Context context_type);
 
   void RegisterExtension(scoped_refptr<const Extension> extension);

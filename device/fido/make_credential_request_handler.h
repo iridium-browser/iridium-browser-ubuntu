@@ -24,28 +24,38 @@ class Connector;
 
 namespace device {
 
-class FidoDevice;
-class FidoTask;
+class FidoAuthenticator;
 class AuthenticatorMakeCredentialResponse;
 
-using RegisterResponseCallback = base::OnceCallback<void(
-    FidoReturnCode status_code,
-    base::Optional<AuthenticatorMakeCredentialResponse> response_data)>;
+using RegisterResponseCallback =
+    base::OnceCallback<void(FidoReturnCode,
+                            base::Optional<AuthenticatorMakeCredentialResponse>,
+                            FidoTransportProtocol)>;
 
 class COMPONENT_EXPORT(DEVICE_FIDO) MakeCredentialRequestHandler
     : public FidoRequestHandler<AuthenticatorMakeCredentialResponse> {
  public:
   MakeCredentialRequestHandler(
       service_manager::Connector* connector,
-      const base::flat_set<FidoTransportProtocol>& protocols,
+      const base::flat_set<FidoTransportProtocol>& supported_transports,
       CtapMakeCredentialRequest request_parameter,
       AuthenticatorSelectionCriteria authenticator_criteria,
       RegisterResponseCallback completion_callback);
   ~MakeCredentialRequestHandler() override;
 
+  // FidoRequestHandlerBase:
+  void SetPlatformAuthenticatorOrMarkUnavailable(
+      base::Optional<PlatformAuthenticatorInfo> platform_authenticator_info)
+      override;
+
  private:
   // FidoRequestHandlerBase:
-  std::unique_ptr<FidoTask> CreateTaskForNewDevice(FidoDevice* device) final;
+  void DispatchRequest(FidoAuthenticator* authenticator) override;
+
+  void HandleResponse(
+      FidoAuthenticator* authenticator,
+      CtapDeviceResponseCode response_code,
+      base::Optional<AuthenticatorMakeCredentialResponse> response);
 
   CtapMakeCredentialRequest request_parameter_;
   AuthenticatorSelectionCriteria authenticator_selection_criteria_;

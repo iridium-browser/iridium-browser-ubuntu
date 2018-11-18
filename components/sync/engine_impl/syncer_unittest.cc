@@ -21,7 +21,7 @@
 #include "base/location.h"
 #include "base/message_loop/message_loop.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/test/histogram_tester.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "components/sync/base/cancelation_signal.h"
@@ -119,8 +119,7 @@ TypeDebugInfoCache::~TypeDebugInfoCache() {}
 
 CommitCounters TypeDebugInfoCache::GetLatestCommitCounters(
     ModelType type) const {
-  std::map<ModelType, CommitCounters>::const_iterator it =
-      commit_counters_map_.find(type);
+  auto it = commit_counters_map_.find(type);
   if (it == commit_counters_map_.end()) {
     return CommitCounters();
   } else {
@@ -130,8 +129,7 @@ CommitCounters TypeDebugInfoCache::GetLatestCommitCounters(
 
 UpdateCounters TypeDebugInfoCache::GetLatestUpdateCounters(
     ModelType type) const {
-  std::map<ModelType, UpdateCounters>::const_iterator it =
-      update_counters_map_.find(type);
+  auto it = update_counters_map_.find(type);
   if (it == update_counters_map_.end()) {
     return UpdateCounters();
   } else {
@@ -141,8 +139,7 @@ UpdateCounters TypeDebugInfoCache::GetLatestUpdateCounters(
 
 StatusCounters TypeDebugInfoCache::GetLatestStatusCounters(
     ModelType type) const {
-  std::map<ModelType, StatusCounters>::const_iterator it =
-      status_counters_map_.find(type);
+  auto it = status_counters_map_.find(type);
   if (it == status_counters_map_.end()) {
     return StatusCounters();
   } else {
@@ -203,8 +200,7 @@ class SyncerTest : public testing::Test,
   }
   void OnReceivedCustomNudgeDelays(
       const std::map<ModelType, base::TimeDelta>& delay_map) override {
-    std::map<ModelType, base::TimeDelta>::const_iterator iter =
-        delay_map.find(SESSIONS);
+    auto iter = delay_map.find(SESSIONS);
     if (iter != delay_map.end() && iter->second > base::TimeDelta())
       last_sessions_commit_delay_ = iter->second;
     iter = delay_map.find(BOOKMARKS);
@@ -288,7 +284,9 @@ class SyncerTest : public testing::Test,
         debug_info_getter_.get(), model_type_registry_.get(),
         true,   // enable keystore encryption
         false,  // force enable pre-commit GU avoidance experiment
-        "fake_invalidator_client_id");
+        "fake_invalidator_client_id",
+        /*short_poll_interval=*/base::TimeDelta::FromMinutes(30),
+        /*long_poll_interval=*/base::TimeDelta::FromMinutes(180));
     syncer_ = new Syncer(&cancelation_signal_);
     scheduler_ = std::make_unique<SyncSchedulerImpl>(
         "TestSyncScheduler", BackoffDelayProvider::FromDefaults(),
@@ -648,8 +646,8 @@ TEST_F(SyncerTest, GetCommitIdsFiltersThrottledEntries) {
   } while (0)
 
 TEST_F(SyncerTest, GetCommitIdsFiltersUnreadyEntries) {
-  KeyParams key_params = {"localhost", "dummy", "foobar"};
-  KeyParams other_params = {"localhost", "dummy", "foobar2"};
+  KeyParams key_params = {KeyDerivationParams::CreateForPbkdf2(), "foobar"};
+  KeyParams other_params = {KeyDerivationParams::CreateForPbkdf2(), "foobar2"};
   sync_pb::EntitySpecifics bookmark, encrypted_bookmark;
   bookmark.mutable_bookmark()->set_url("url");
   bookmark.mutable_bookmark()->set_title("title");
@@ -1023,7 +1021,7 @@ TEST_F(SyncerTest, GetCommitIds_VerifyDeletionCommitOrderMaxEntries) {
 }
 
 TEST_F(SyncerTest, EncryptionAwareConflicts) {
-  KeyParams key_params = {"localhost", "dummy", "foobar"};
+  KeyParams key_params = {KeyDerivationParams::CreateForPbkdf2(), "foobar"};
   Cryptographer other_cryptographer(&encryptor_);
   other_cryptographer.AddKey(key_params);
   sync_pb::EntitySpecifics bookmark, encrypted_bookmark, modified_bookmark;
@@ -1196,9 +1194,9 @@ TEST_F(SyncerTest, EncryptionAwareConflicts) {
   EXPECT_EQ(1, GetUpdateCounters(BOOKMARKS).num_local_overwrites);
 
   // We successfully commited item(s).
-  EXPECT_EQ(2, GetCommitCounters(BOOKMARKS).num_commits_attempted);
+  EXPECT_EQ(2, GetCommitCounters(BOOKMARKS).num_update_commits_attempted);
   EXPECT_EQ(2, GetCommitCounters(BOOKMARKS).num_commits_success);
-  EXPECT_EQ(1, GetCommitCounters(PREFERENCES).num_commits_attempted);
+  EXPECT_EQ(1, GetCommitCounters(PREFERENCES).num_update_commits_attempted);
   EXPECT_EQ(1, GetCommitCounters(PREFERENCES).num_commits_success);
 
   EXPECT_TRUE(SyncShareNudge());
@@ -1716,15 +1714,13 @@ TEST_F(SyncerTest, TestCommitListOrderingWithNewItems) {
   // first two IDs, and that the children make up the next four.  Other than
   // that, ordering doesn't matter.
 
-  vector<syncable::Id>::const_iterator i =
-      mock_server_->committed_ids().begin();
-  vector<syncable::Id>::const_iterator parents_begin = i;
+  auto i = mock_server_->committed_ids().begin();
+  auto parents_begin = i;
   i++;
   i++;
-  vector<syncable::Id>::const_iterator parents_end = i;
-  vector<syncable::Id>::const_iterator children_begin = i;
-  vector<syncable::Id>::const_iterator children_end =
-      mock_server_->committed_ids().end();
+  auto parents_end = i;
+  auto children_begin = i;
+  auto children_end = mock_server_->committed_ids().end();
 
   EXPECT_EQ(1, count(parents_begin, parents_end, parent1_id));
   EXPECT_EQ(1, count(parents_begin, parents_end, parent2_id));
@@ -3339,73 +3335,6 @@ TEST_F(SyncerTest, UnsyncedItemAndUpdate) {
 }
 
 TEST_F(SyncerTest, NewEntryAndAlteredServerEntrySharePath) {
-  mock_server_->AddUpdateBookmark(1, 0, "Foo.htm", 10, 10, foreign_cache_guid(),
-                                  "-1");
-  EXPECT_TRUE(SyncShareNudge());
-  int64_t local_folder_handle;
-  syncable::Id local_folder_id;
-  {
-    syncable::WriteTransaction wtrans(FROM_HERE, UNITTEST, directory());
-    MutableEntry new_entry(&wtrans, CREATE, BOOKMARKS, wtrans.root_id(),
-                           "Bar.htm");
-    ASSERT_TRUE(new_entry.good());
-    local_folder_id = new_entry.GetId();
-    local_folder_handle = new_entry.GetMetahandle();
-    new_entry.PutIsUnsynced(true);
-    new_entry.PutSpecifics(DefaultBookmarkSpecifics());
-    MutableEntry old(&wtrans, GET_BY_ID, ids_.FromNumber(1));
-    ASSERT_TRUE(old.good());
-    WriteTestDataToEntry(&wtrans, &old);
-  }
-  mock_server_->AddUpdateBookmark(1, 0, "Bar.htm", 20, 20, foreign_cache_guid(),
-                                  "-1");
-  mock_server_->set_conflict_all_commits(true);
-  EXPECT_FALSE(SyncShareNudge());
-  {
-    // Update #20 should have been dropped in favor of the local version.
-    syncable::WriteTransaction wtrans(FROM_HERE, UNITTEST, directory());
-    MutableEntry server(&wtrans, GET_BY_ID, ids_.FromNumber(1));
-    MutableEntry local(&wtrans, GET_BY_HANDLE, local_folder_handle);
-    ASSERT_TRUE(server.good());
-    ASSERT_TRUE(local.good());
-    EXPECT_NE(local.GetMetahandle(), server.GetMetahandle());
-    EXPECT_FALSE(server.GetIsUnappliedUpdate());
-    EXPECT_FALSE(local.GetIsUnappliedUpdate());
-    EXPECT_TRUE(server.GetIsUnsynced());
-    EXPECT_TRUE(local.GetIsUnsynced());
-    EXPECT_EQ("Foo.htm", server.GetNonUniqueName());
-    EXPECT_EQ("Bar.htm", local.GetNonUniqueName());
-  }
-  // Allow local changes to commit.
-  mock_server_->set_conflict_all_commits(false);
-  EXPECT_TRUE(SyncShareNudge());
-
-  // Now add a server change to make the two names equal.  There should
-  // be no conflict with that, since names are not unique.
-  mock_server_->AddUpdateBookmark(1, 0, "Bar.htm", 30, 30, foreign_cache_guid(),
-                                  "-1");
-  EXPECT_TRUE(SyncShareNudge());
-  {
-    syncable::WriteTransaction wtrans(FROM_HERE, UNITTEST, directory());
-    MutableEntry server(&wtrans, GET_BY_ID, ids_.FromNumber(1));
-    MutableEntry local(&wtrans, GET_BY_HANDLE, local_folder_handle);
-    ASSERT_TRUE(server.good());
-    ASSERT_TRUE(local.good());
-    EXPECT_NE(local.GetMetahandle(), server.GetMetahandle());
-    EXPECT_FALSE(server.GetIsUnappliedUpdate());
-    EXPECT_FALSE(local.GetIsUnappliedUpdate());
-    EXPECT_FALSE(server.GetIsUnsynced());
-    EXPECT_FALSE(local.GetIsUnsynced());
-    EXPECT_EQ("Bar.htm", server.GetNonUniqueName());
-    EXPECT_EQ("Bar.htm", local.GetNonUniqueName());
-    EXPECT_EQ("http://google.com",  // Default from AddUpdateBookmark.
-              server.GetSpecifics().bookmark().url());
-  }
-}
-
-// Same as NewEntryAnddServerEntrySharePath, but using the old-style protocol.
-TEST_F(SyncerTest, NewEntryAndAlteredServerEntrySharePath_OldBookmarksProto) {
-  mock_server_->set_use_legacy_bookmarks_protocol(true);
   mock_server_->AddUpdateBookmark(1, 0, "Foo.htm", 10, 10, foreign_cache_guid(),
                                   "-1");
   EXPECT_TRUE(SyncShareNudge());
@@ -5820,7 +5749,7 @@ TEST_P(MixedResult, ExtensionsActivity) {
     }
   }
 
-  // Put some extenions activity records into the monitor.
+  // Put some extensions activity records into the monitor.
   {
     ExtensionsActivity::Records records;
     records["ABC"].extension_id = "ABC";

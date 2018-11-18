@@ -8,35 +8,40 @@
 #include <utility>
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_value.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_testing.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_object_builder.h"
 #include "third_party/blink/renderer/modules/payments/payment_address.h"
-#include "third_party/blink/renderer/modules/payments/payment_completer.h"
+#include "third_party/blink/renderer/modules/payments/payment_state_resolver.h"
 #include "third_party/blink/renderer/modules/payments/payment_test_helper.h"
+#include "third_party/blink/renderer/modules/payments/payment_validation_errors.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 
 namespace blink {
 namespace {
 
-class MockPaymentCompleter
-    : public GarbageCollectedFinalized<MockPaymentCompleter>,
-      public PaymentCompleter {
-  USING_GARBAGE_COLLECTED_MIXIN(MockPaymentCompleter);
-  WTF_MAKE_NONCOPYABLE(MockPaymentCompleter);
+class MockPaymentStateResolver final
+    : public GarbageCollectedFinalized<MockPaymentStateResolver>,
+      public PaymentStateResolver {
+  USING_GARBAGE_COLLECTED_MIXIN(MockPaymentStateResolver);
+  WTF_MAKE_NONCOPYABLE(MockPaymentStateResolver);
 
  public:
-  MockPaymentCompleter() {
+  MockPaymentStateResolver() {
     ON_CALL(*this, Complete(testing::_, testing::_))
         .WillByDefault(testing::ReturnPointee(&dummy_promise_));
   }
 
-  ~MockPaymentCompleter() override = default;
+  ~MockPaymentStateResolver() override = default;
 
   MOCK_METHOD2(Complete, ScriptPromise(ScriptState*, PaymentComplete result));
+  MOCK_METHOD2(Retry,
+               ScriptPromise(ScriptState*,
+                             const PaymentValidationErrors& errorFields));
 
-  void Trace(blink::Visitor* visitor) {}
+  void Trace(blink::Visitor* visitor) override {}
 
  private:
   ScriptPromise dummy_promise_;
@@ -49,13 +54,14 @@ TEST(PaymentResponseTest, DataCopiedOver) {
   input->method_name = "foo";
   input->stringified_details = "{\"transactionId\": 123}";
   input->shipping_option = "standardShippingOption";
-  input->payer_name = "Jon Doe";
-  input->payer_email = "abc@gmail.com";
-  input->payer_phone = "0123";
-  MockPaymentCompleter* complete_callback = new MockPaymentCompleter;
+  input->payer->name = "Jon Doe";
+  input->payer->email = "abc@gmail.com";
+  input->payer->phone = "0123";
+  MockPaymentStateResolver* complete_callback = new MockPaymentStateResolver;
 
   PaymentResponse* output =
-      new PaymentResponse(std::move(input), nullptr, complete_callback, "id");
+      new PaymentResponse(scope.GetScriptState(), std::move(input), nullptr,
+                          complete_callback, "id");
 
   EXPECT_EQ("foo", output->methodName());
   EXPECT_EQ("standardShippingOption", output->shippingOption());
@@ -64,8 +70,7 @@ TEST(PaymentResponseTest, DataCopiedOver) {
   EXPECT_EQ("0123", output->payerPhone());
   EXPECT_EQ("id", output->requestId());
 
-  ScriptValue details =
-      output->details(scope.GetScriptState(), scope.GetExceptionState());
+  ScriptValue details = output->details(scope.GetScriptState());
 
   ASSERT_FALSE(scope.GetExceptionState().HadException());
   ASSERT_TRUE(details.V8Value()->IsObject());
@@ -79,19 +84,41 @@ TEST(PaymentResponseTest, DataCopiedOver) {
   EXPECT_EQ(123, transaction_id.V8Value().As<v8::Number>()->Value());
 }
 
-TEST(PaymentResponseTest, PaymentResponseDetailsJSONObject) {
+TEST(PaymentResponseTest,
+     PaymentResponseDetailsWithUnexpectedJSONFormatString) {
   V8TestingScope scope;
   payments::mojom::blink::PaymentResponsePtr input =
       BuildPaymentResponseForTest();
   input->stringified_details = "transactionId";
-  MockPaymentCompleter* complete_callback = new MockPaymentCompleter;
+  MockPaymentStateResolver* complete_callback = new MockPaymentStateResolver;
   PaymentResponse* output =
-      new PaymentResponse(std::move(input), nullptr, complete_callback, "id");
+      new PaymentResponse(scope.GetScriptState(), std::move(input), nullptr,
+                          complete_callback, "id");
 
-  ScriptValue details =
-      output->details(scope.GetScriptState(), scope.GetExceptionState());
+  ScriptValue details = output->details(scope.GetScriptState());
+  ASSERT_TRUE(details.V8Value()->IsObject());
 
-  ASSERT_TRUE(scope.GetExceptionState().HadException());
+  String stringified_details = ToBlinkString<String>(
+      v8::JSON::Stringify(scope.GetContext(),
+                          details.V8Value().As<v8::Object>())
+          .ToLocalChecked(),
+      kDoNotExternalize);
+
+  EXPECT_EQ("{}", stringified_details);
+}
+
+TEST(PaymentResponseTest, PaymentResponseDetailsRetrunsTheSameObject) {
+  V8TestingScope scope;
+  payments::mojom::blink::PaymentResponsePtr input =
+      BuildPaymentResponseForTest();
+  input->method_name = "foo";
+  input->stringified_details = "{\"transactionId\": 123}";
+  MockPaymentStateResolver* complete_callback = new MockPaymentStateResolver;
+  PaymentResponse* output =
+      new PaymentResponse(scope.GetScriptState(), std::move(input), nullptr,
+                          complete_callback, "id");
+  EXPECT_EQ(output->details(scope.GetScriptState()),
+            output->details(scope.GetScriptState()));
 }
 
 TEST(PaymentResponseTest, CompleteCalledWithSuccess) {
@@ -100,12 +127,13 @@ TEST(PaymentResponseTest, CompleteCalledWithSuccess) {
       BuildPaymentResponseForTest();
   input->method_name = "foo";
   input->stringified_details = "{\"transactionId\": 123}";
-  MockPaymentCompleter* complete_callback = new MockPaymentCompleter;
+  MockPaymentStateResolver* complete_callback = new MockPaymentStateResolver;
   PaymentResponse* output =
-      new PaymentResponse(std::move(input), nullptr, complete_callback, "id");
+      new PaymentResponse(scope.GetScriptState(), std::move(input), nullptr,
+                          complete_callback, "id");
 
   EXPECT_CALL(*complete_callback,
-              Complete(scope.GetScriptState(), PaymentCompleter::kSuccess));
+              Complete(scope.GetScriptState(), PaymentStateResolver::kSuccess));
 
   output->complete(scope.GetScriptState(), "success");
 }
@@ -116,12 +144,13 @@ TEST(PaymentResponseTest, CompleteCalledWithFailure) {
       BuildPaymentResponseForTest();
   input->method_name = "foo";
   input->stringified_details = "{\"transactionId\": 123}";
-  MockPaymentCompleter* complete_callback = new MockPaymentCompleter;
+  MockPaymentStateResolver* complete_callback = new MockPaymentStateResolver;
   PaymentResponse* output =
-      new PaymentResponse(std::move(input), nullptr, complete_callback, "id");
+      new PaymentResponse(scope.GetScriptState(), std::move(input), nullptr,
+                          complete_callback, "id");
 
   EXPECT_CALL(*complete_callback,
-              Complete(scope.GetScriptState(), PaymentCompleter::kFail));
+              Complete(scope.GetScriptState(), PaymentStateResolver::kFail));
 
   output->complete(scope.GetScriptState(), "fail");
 }
@@ -129,13 +158,13 @@ TEST(PaymentResponseTest, CompleteCalledWithFailure) {
 TEST(PaymentResponseTest, JSONSerializerTest) {
   V8TestingScope scope;
   payments::mojom::blink::PaymentResponsePtr input =
-      payments::mojom::blink::PaymentResponse::New();
+      BuildPaymentResponseForTest();
   input->method_name = "foo";
   input->stringified_details = "{\"transactionId\": 123}";
   input->shipping_option = "standardShippingOption";
-  input->payer_email = "abc@gmail.com";
-  input->payer_phone = "0123";
-  input->payer_name = "Jon Doe";
+  input->payer->email = "abc@gmail.com";
+  input->payer->phone = "0123";
+  input->payer->name = "Jon Doe";
   input->shipping_address = payments::mojom::blink::PaymentAddress::New();
   input->shipping_address->country = "US";
   input->shipping_address->language_code = "en";
@@ -146,12 +175,13 @@ TEST(PaymentResponseTest, JSONSerializerTest) {
   PaymentAddress* address =
       new PaymentAddress(std::move(input->shipping_address));
 
-  PaymentResponse* output = new PaymentResponse(std::move(input), address,
-                                                new MockPaymentCompleter, "id");
+  PaymentResponse* output =
+      new PaymentResponse(scope.GetScriptState(), std::move(input), address,
+                          new MockPaymentStateResolver, "id");
   ScriptValue json_object = output->toJSONForBinding(scope.GetScriptState());
   EXPECT_TRUE(json_object.IsObject());
 
-  String json_string = V8StringToWebCoreString<String>(
+  String json_string = ToBlinkString<String>(
       v8::JSON::Stringify(scope.GetContext(),
                           json_object.V8Value().As<v8::Object>())
           .ToLocalChecked(),

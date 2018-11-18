@@ -12,10 +12,13 @@
 
 #include "base/base64url.h"
 #include "base/memory/ptr_util.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "chromeos/components/proximity_auth/logging/logging.h"
 #include "components/cryptauth/cryptauth_client.h"
 #include "components/cryptauth/pref_names.h"
+#include "components/cryptauth/proto/enum_util.h"
+#include "components/cryptauth/software_feature_state.h"
 #include "components/cryptauth/sync_scheduler_impl.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
@@ -50,9 +53,14 @@ const char kExternalDeviceKeyDeviceType[] = "device_type";
 const char kExternalDeviceKeyBeaconSeeds[] = "beacon_seeds";
 const char kExternalDeviceKeyArcPlusPlus[] = "arc_plus_plus";
 const char kExternalDeviceKeyPixelPhone[] = "pixel_phone";
+
+// Keys for ExternalDeviceInfo's BeaconSeed.
 const char kExternalDeviceKeyBeaconSeedData[] = "beacon_seed_data";
 const char kExternalDeviceKeyBeaconSeedStartMs[] = "beacon_seed_start_ms";
 const char kExternalDeviceKeyBeaconSeedEndMs[] = "beacon_seed_end_ms";
+
+// Keys specific to the dictionary which stores ExternalDeviceInfo info.
+const char kDictionaryKeySoftwareFeatures[] = "software_features";
 
 // Converts BeaconSeed protos to a list value that can be stored in user prefs.
 std::unique_ptr<base::ListValue> BeaconSeedsToListValue(
@@ -94,6 +102,73 @@ std::unique_ptr<base::ListValue> BeaconSeedsToListValue(
   return list;
 }
 
+void RecordDeviceSyncSoftwareFeaturesResult(bool success) {
+  UMA_HISTOGRAM_BOOLEAN("CryptAuth.DeviceSyncSoftwareFeaturesResult", success);
+}
+
+// Converts supported and enabled SoftwareFeature protos to a single dictionary
+// value that can be stored in user prefs.
+std::unique_ptr<base::DictionaryValue>
+SupportedAndEnabledSoftwareFeaturesToDictionaryValue(
+    const google::protobuf::RepeatedPtrField<std::string>&
+        supported_software_features,
+    const google::protobuf::RepeatedPtrField<std::string>&
+        enabled_software_features,
+    bool legacy_unlock_key,
+    bool legacy_mobile_hotspot_supported) {
+  std::unique_ptr<base::DictionaryValue> dictionary =
+      std::make_unique<base::DictionaryValue>();
+
+  for (const auto& supported_software_feature : supported_software_features) {
+    dictionary->SetInteger(supported_software_feature,
+                           static_cast<int>(SoftwareFeatureState::kSupported));
+  }
+
+  for (const auto& enabled_software_feature : enabled_software_features) {
+    std::string software_feature_key = enabled_software_feature;
+
+    int software_feature_state;
+    if (!dictionary->GetInteger(software_feature_key,
+                                &software_feature_state) ||
+        static_cast<SoftwareFeatureState>(software_feature_state) !=
+            SoftwareFeatureState::kSupported) {
+      PA_LOG(ERROR) << "A feature is marked as enabled but not as supported: "
+                    << software_feature_key;
+      RecordDeviceSyncSoftwareFeaturesResult(false /* success */);
+
+      continue;
+    } else {
+      RecordDeviceSyncSoftwareFeaturesResult(true /* success */);
+    }
+
+    dictionary->SetInteger(software_feature_key,
+                           static_cast<int>(SoftwareFeatureState::kEnabled));
+  }
+
+  // If software features for EASY_UNLOCK_HOST or MAGIC_TETHER_HOST have not
+  // been set, check to see if the deprecated corresponding booleans are
+  // enabled. This can happen if the CryptAuth server is not yet serving
+  // software features, and only serving the deprecated booleans.
+  int software_feature_state;
+  std::string software_feature_key;
+  software_feature_key =
+      SoftwareFeatureEnumToString(cryptauth::SoftwareFeature::EASY_UNLOCK_HOST);
+  if (legacy_unlock_key &&
+      !dictionary->GetInteger(software_feature_key, &software_feature_state)) {
+    dictionary->SetInteger(software_feature_key,
+                           static_cast<int>(SoftwareFeatureState::kEnabled));
+  }
+  software_feature_key = SoftwareFeatureEnumToString(
+      cryptauth::SoftwareFeature::MAGIC_TETHER_HOST);
+  if (legacy_mobile_hotspot_supported &&
+      !dictionary->GetInteger(software_feature_key, &software_feature_state)) {
+    dictionary->SetInteger(software_feature_key,
+                           static_cast<int>(SoftwareFeatureState::kSupported));
+  }
+
+  return dictionary;
+}
+
 // Converts an unlock key proto to a dictionary that can be stored in user
 // prefs.
 std::unique_ptr<base::DictionaryValue> UnlockKeyToDictionary(
@@ -131,10 +206,6 @@ std::unique_ptr<base::DictionaryValue> UnlockKeyToDictionary(
                           bluetooth_address_b64);
   }
 
-  if (device.has_unlock_key()) {
-    dictionary->SetBoolean(kExternalDeviceKeyUnlockKey, device.unlock_key());
-  }
-
   if (device.has_unlockable()) {
     dictionary->SetBoolean(kExternalDeviceKeyUnlockable, device.unlockable());
   }
@@ -144,14 +215,12 @@ std::unique_ptr<base::DictionaryValue> UnlockKeyToDictionary(
                           std::to_string(device.last_update_time_millis()));
   }
 
-  if (device.has_mobile_hotspot_supported()) {
-    dictionary->SetBoolean(kExternalDeviceKeyMobileHotspotSupported,
-                           device.mobile_hotspot_supported());
-  }
-
   if (device.has_device_type() && DeviceType_IsValid(device.device_type())) {
     dictionary->SetInteger(kExternalDeviceKeyDeviceType, device.device_type());
   }
+
+  dictionary->Set(kExternalDeviceKeyBeaconSeeds,
+                  BeaconSeedsToListValue(device.beacon_seeds()));
 
   if (device.has_arc_plus_plus()) {
     dictionary->SetBoolean(kExternalDeviceKeyArcPlusPlus,
@@ -162,15 +231,25 @@ std::unique_ptr<base::DictionaryValue> UnlockKeyToDictionary(
     dictionary->SetBoolean(kExternalDeviceKeyPixelPhone, device.pixel_phone());
   }
 
-  std::unique_ptr<base::ListValue> beacon_seed_list =
-      BeaconSeedsToListValue(device.beacon_seeds());
-  dictionary->Set(kExternalDeviceKeyBeaconSeeds, std::move(beacon_seed_list));
+  // In the case that the CryptAuth server is not yet serving SoftwareFeatures,
+  // but only the deprecated booleans, |unlock_key| and
+  // |mobile_hotspot_supported|, pass in the legacy values in order to correctly
+  // populate the SoftwareFeatures.
+  bool legacy_unlock_key = device.has_unlock_key() && device.unlock_key();
+  bool legacy_mobile_hotspot_supported =
+      device.has_mobile_hotspot_supported() &&
+      device.mobile_hotspot_supported();
+  dictionary->Set(kDictionaryKeySoftwareFeatures,
+                  SupportedAndEnabledSoftwareFeaturesToDictionaryValue(
+                      device.supported_software_features(),
+                      device.enabled_software_features(), legacy_unlock_key,
+                      legacy_mobile_hotspot_supported));
 
   return dictionary;
 }
 
 void AddBeaconSeedsToExternalDevice(const base::ListValue& beacon_seeds,
-                                    ExternalDeviceInfo& external_device) {
+                                    ExternalDeviceInfo* external_device) {
   for (size_t i = 0; i < beacon_seeds.GetSize(); i++) {
     const base::DictionaryValue* seed_dictionary = nullptr;
     if (!beacon_seeds.GetDictionary(i, &seed_dictionary)) {
@@ -208,10 +287,77 @@ void AddBeaconSeedsToExternalDevice(const base::ListValue& beacon_seeds,
       continue;
     }
 
-    BeaconSeed* seed = external_device.add_beacon_seeds();
+    BeaconSeed* seed = external_device->add_beacon_seeds();
     seed->set_data(seed_data);
     seed->set_start_time_millis(start_time_millis);
     seed->set_end_time_millis(end_time_millis);
+  }
+}
+
+void AddSoftwareFeaturesToExternalDevice(
+    const base::DictionaryValue& software_features_dictionary,
+    ExternalDeviceInfo* external_device,
+    bool old_unlock_key_value_from_prefs,
+    bool old_mobile_hotspot_supported_from_prefs) {
+  for (const auto& it : software_features_dictionary.DictItems()) {
+    std::string software_feature = it.first;
+    if (SoftwareFeatureStringToEnum(software_feature) ==
+        SoftwareFeature::UNKNOWN_FEATURE) {
+      // SoftwareFeatures were previously stored in prefs as ints. Now,
+      // SoftwareFeatures are stored as full string values, e.g.,
+      // "betterTogetherHost". If |it.first| is not recognized by
+      // SoftwareFeatureStringToEnum(), that means it is in the old int
+      // representation of the SoftwareFeature. Convert it to its full string
+      // representation using SoftwareFeatureEnumToString();
+      int software_feature_int = std::atoi(software_feature.c_str());
+      software_feature = SoftwareFeatureEnumToString(
+          static_cast<SoftwareFeature>(software_feature_int));
+    }
+
+    int software_feature_state;
+    if (!it.second.GetAsInteger(&software_feature_state)) {
+      PA_LOG(WARNING) << "Unable to retrieve SoftwareFeature; skipping.";
+      continue;
+    }
+
+    switch (static_cast<SoftwareFeatureState>(software_feature_state)) {
+      case SoftwareFeatureState::kEnabled:
+        external_device->add_enabled_software_features(software_feature);
+        FALLTHROUGH;
+      case SoftwareFeatureState::kSupported:
+        external_device->add_supported_software_features(software_feature);
+        break;
+      default:
+        break;
+    }
+  }
+
+  // ExternalDeviceInfos's |unlock_key| and |mobile_hotspot_supported| fields
+  // are deprecated, but it may be the case that after an update to Chrome, the
+  // prefs reflect the old style of using these deprecated fields, instead of
+  // software features. To work around this, these pref values are migrated to
+  // software features locally.
+  if (old_unlock_key_value_from_prefs) {
+    if (!base::ContainsValue(
+            external_device->supported_software_features(),
+            SoftwareFeatureEnumToString(SoftwareFeature::EASY_UNLOCK_HOST))) {
+      external_device->add_supported_software_features(
+          SoftwareFeatureEnumToString(SoftwareFeature::EASY_UNLOCK_HOST));
+    }
+    if (!base::ContainsValue(
+            external_device->enabled_software_features(),
+            SoftwareFeatureEnumToString(SoftwareFeature::EASY_UNLOCK_HOST))) {
+      external_device->add_enabled_software_features(
+          SoftwareFeatureEnumToString(SoftwareFeature::EASY_UNLOCK_HOST));
+    }
+  }
+  if (old_mobile_hotspot_supported_from_prefs) {
+    if (!base::ContainsValue(
+            external_device->supported_software_features(),
+            SoftwareFeatureEnumToString(SoftwareFeature::MAGIC_TETHER_HOST))) {
+      external_device->add_supported_software_features(
+          SoftwareFeatureEnumToString(SoftwareFeature::MAGIC_TETHER_HOST));
+    }
   }
 }
 
@@ -258,10 +404,8 @@ bool DictionaryToUnlockKey(const base::DictionaryValue& dictionary,
     }
   }
 
-  bool unlock_key;
-  if (dictionary.GetBoolean(kExternalDeviceKeyUnlockKey, &unlock_key))
-    external_device->set_unlock_key(unlock_key);
-
+  // TODO(crbug.com/848477): Migrate |unlockable| into
+  // |supported_software_features|.
   bool unlockable;
   if (dictionary.GetBoolean(kExternalDeviceKeyUnlockable, &unlockable))
     external_device->set_unlockable(unlockable);
@@ -279,22 +423,15 @@ bool DictionaryToUnlockKey(const base::DictionaryValue& dictionary,
     }
   }
 
-  bool mobile_hotspot_supported;
-  if (dictionary.GetBoolean(kExternalDeviceKeyMobileHotspotSupported,
-                            &mobile_hotspot_supported)) {
-    external_device->set_mobile_hotspot_supported(mobile_hotspot_supported);
-  }
-
   int device_type;
   if (dictionary.GetInteger(kExternalDeviceKeyDeviceType, &device_type) &&
       DeviceType_IsValid(device_type)) {
     external_device->set_device_type(static_cast<DeviceType>(device_type));
   }
 
-  const base::ListValue* beacon_seeds = nullptr;
-  dictionary.GetList(kExternalDeviceKeyBeaconSeeds, &beacon_seeds);
-  if (beacon_seeds)
-    AddBeaconSeedsToExternalDevice(*beacon_seeds, *external_device);
+  const base::ListValue* beacon_seeds;
+  if (dictionary.GetList(kExternalDeviceKeyBeaconSeeds, &beacon_seeds))
+    AddBeaconSeedsToExternalDevice(*beacon_seeds, external_device);
 
   bool arc_plus_plus;
   if (dictionary.GetBoolean(kExternalDeviceKeyArcPlusPlus, &arc_plus_plus))
@@ -303,6 +440,20 @@ bool DictionaryToUnlockKey(const base::DictionaryValue& dictionary,
   bool pixel_phone;
   if (dictionary.GetBoolean(kExternalDeviceKeyPixelPhone, &pixel_phone))
     external_device->set_pixel_phone(pixel_phone);
+
+  bool unlock_key = false;
+  dictionary.GetBoolean(kExternalDeviceKeyUnlockKey, &unlock_key);
+  bool mobile_hotspot_supported = false;
+  dictionary.GetBoolean(kExternalDeviceKeyMobileHotspotSupported,
+                        &mobile_hotspot_supported);
+
+  const base::DictionaryValue* software_features_dictionary;
+  if (dictionary.GetDictionary(kDictionaryKeySoftwareFeatures,
+                               &software_features_dictionary)) {
+    AddSoftwareFeaturesToExternalDevice(*software_features_dictionary,
+                                        external_device, unlock_key,
+                                        mobile_hotspot_supported);
+  }
 
   return true;
 }
@@ -325,13 +476,13 @@ CryptAuthDeviceManagerImpl::Factory*
 std::unique_ptr<CryptAuthDeviceManager>
 CryptAuthDeviceManagerImpl::Factory::NewInstance(
     base::Clock* clock,
-    std::unique_ptr<CryptAuthClientFactory> client_factory,
+    CryptAuthClientFactory* cryptauth_client_factory,
     CryptAuthGCMManager* gcm_manager,
     PrefService* pref_service) {
   if (!factory_instance_)
     factory_instance_ = new Factory();
 
-  return factory_instance_->BuildInstance(clock, std::move(client_factory),
+  return factory_instance_->BuildInstance(clock, cryptauth_client_factory,
                                           gcm_manager, pref_service);
 }
 
@@ -346,20 +497,20 @@ CryptAuthDeviceManagerImpl::Factory::~Factory() = default;
 std::unique_ptr<CryptAuthDeviceManager>
 CryptAuthDeviceManagerImpl::Factory::BuildInstance(
     base::Clock* clock,
-    std::unique_ptr<CryptAuthClientFactory> client_factory,
+    CryptAuthClientFactory* cryptauth_client_factory,
     CryptAuthGCMManager* gcm_manager,
     PrefService* pref_service) {
   return base::WrapUnique(new CryptAuthDeviceManagerImpl(
-      clock, std::move(client_factory), gcm_manager, pref_service));
+      clock, cryptauth_client_factory, gcm_manager, pref_service));
 }
 
 CryptAuthDeviceManagerImpl::CryptAuthDeviceManagerImpl(
     base::Clock* clock,
-    std::unique_ptr<CryptAuthClientFactory> client_factory,
+    CryptAuthClientFactory* cryptauth_client_factory,
     CryptAuthGCMManager* gcm_manager,
     PrefService* pref_service)
     : clock_(clock),
-      client_factory_(std::move(client_factory)),
+      cryptauth_client_factory_(cryptauth_client_factory),
       gcm_manager_(gcm_manager),
       pref_service_(pref_service),
       scheduler_(CreateSyncScheduler(this)),
@@ -430,8 +581,11 @@ std::vector<ExternalDeviceInfo> CryptAuthDeviceManagerImpl::GetUnlockKeys()
     const {
   std::vector<ExternalDeviceInfo> unlock_keys;
   for (const auto& device : synced_devices_) {
-    if (device.unlock_key())
+    if (base::ContainsValue(
+            device.enabled_software_features(),
+            SoftwareFeatureEnumToString(SoftwareFeature::EASY_UNLOCK_HOST))) {
       unlock_keys.push_back(device);
+    }
   }
   return unlock_keys;
 }
@@ -440,8 +594,12 @@ std::vector<ExternalDeviceInfo> CryptAuthDeviceManagerImpl::GetPixelUnlockKeys()
     const {
   std::vector<ExternalDeviceInfo> unlock_keys;
   for (const auto& device : synced_devices_) {
-    if (device.unlock_key() && device.pixel_phone())
+    if (base::ContainsValue(
+            device.enabled_software_features(),
+            SoftwareFeatureEnumToString(SoftwareFeature::EASY_UNLOCK_HOST)) &&
+        device.pixel_phone()) {
       unlock_keys.push_back(device);
+    }
   }
   return unlock_keys;
 }
@@ -450,8 +608,11 @@ std::vector<ExternalDeviceInfo> CryptAuthDeviceManagerImpl::GetTetherHosts()
     const {
   std::vector<ExternalDeviceInfo> tether_hosts;
   for (const auto& device : synced_devices_) {
-    if (device.mobile_hotspot_supported())
+    if (base::ContainsValue(
+            device.supported_software_features(),
+            SoftwareFeatureEnumToString(SoftwareFeature::MAGIC_TETHER_HOST))) {
       tether_hosts.push_back(device);
+    }
   }
   return tether_hosts;
 }
@@ -460,7 +621,10 @@ std::vector<ExternalDeviceInfo>
 CryptAuthDeviceManagerImpl::GetPixelTetherHosts() const {
   std::vector<ExternalDeviceInfo> tether_hosts;
   for (const auto& device : synced_devices_) {
-    if (device.mobile_hotspot_supported() && device.pixel_phone())
+    if (base::ContainsValue(
+            device.supported_software_features(),
+            SoftwareFeatureEnumToString(SoftwareFeature::MAGIC_TETHER_HOST)) &&
+        device.pixel_phone())
       tether_hosts.push_back(device);
   }
   return tether_hosts;
@@ -512,7 +676,7 @@ void CryptAuthDeviceManagerImpl::OnGetMyDevicesSuccess(
 }
 
 void CryptAuthDeviceManagerImpl::OnGetMyDevicesFailure(
-    const std::string& error) {
+    NetworkRequestError error) {
   PA_LOG(ERROR) << "GetMyDevices API failed: " << error;
   pref_service_->SetBoolean(prefs::kCryptAuthDeviceSyncIsRecoveringFromFailure,
                             true);
@@ -551,10 +715,16 @@ void CryptAuthDeviceManagerImpl::UpdateUnlockKeysFromPrefs() {
 
 void CryptAuthDeviceManagerImpl::OnSyncRequested(
     std::unique_ptr<SyncScheduler::SyncRequest> sync_request) {
+  // If a sync is already in progress, there is no need to start a new one.
+  if (sync_request_) {
+    sync_request->Cancel();
+    return;
+  }
+
   NotifySyncStarted();
 
   sync_request_ = std::move(sync_request);
-  cryptauth_client_ = client_factory_->CreateInstance();
+  cryptauth_client_ = cryptauth_client_factory_->CreateInstance();
 
   InvocationReason invocation_reason = INVOCATION_REASON_UNKNOWN;
 

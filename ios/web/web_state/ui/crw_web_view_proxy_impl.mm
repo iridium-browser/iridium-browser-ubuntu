@@ -90,12 +90,30 @@ UIView* GetFirstResponderSubview(UIView* view) {
   return _contentViewScrollViewProxy;
 }
 
+- (BOOL)allowsBackForwardNavigationGestures {
+  return _webController.allowsBackForwardNavigationGestures;
+}
+
+- (void)setAllowsBackForwardNavigationGestures:
+    (BOOL)allowsBackForwardNavigationGestures {
+  _webController.allowsBackForwardNavigationGestures =
+      allowsBackForwardNavigationGestures;
+}
+
 - (CGRect)bounds {
   return [_contentView bounds];
 }
 
 - (CGRect)frame {
   return [_contentView frame];
+}
+
+- (CGPoint)contentOffset {
+  return _contentView.contentOffset;
+}
+
+- (void)setContentOffset:(CGPoint)contentOffset {
+  _contentView.contentOffset = contentOffset;
 }
 
 - (UIEdgeInsets)contentInset {
@@ -165,13 +183,6 @@ UIView* GetFirstResponderSubview(UIView* view) {
     return nil;
   UIView* firstResponder = GetFirstResponderSubview(_contentView);
   return firstResponder.inputAccessoryView;
-}
-
-- (UITextInputAssistantItem*)inputAssistantItem {
-  if (!_contentView)
-    return nil;
-  UIView* firstResponder = GetFirstResponderSubview(_contentView);
-  return firstResponder.inputAssistantItem;
 }
 
 - (BOOL)becomeFirstResponder {

@@ -6,7 +6,6 @@
 #include <utility>
 
 #include "base/memory/ptr_util.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "mojo/public/cpp/bindings/binding.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
@@ -63,8 +62,8 @@ class SampleNamedObjectImpl : public sample::NamedObject {
 
   void SetName(const std::string& name) override { name_ = name; }
 
-  void GetName(const GetNameCallback& callback) override {
-    callback.Run(name_);
+  void GetName(GetNameCallback callback) override {
+    std::move(callback).Run(name_);
   }
 
  private:
@@ -78,7 +77,7 @@ class SampleFactoryImpl : public sample::Factory {
 
   void DoStuff(sample::RequestPtr request,
                ScopedMessagePipeHandle pipe,
-               const DoStuffCallback& callback) override {
+               DoStuffCallback callback) override {
     std::string text1;
     if (pipe.is_valid())
       EXPECT_TRUE(ReadTextMessage(pipe.get(), &text1));
@@ -98,7 +97,7 @@ class SampleFactoryImpl : public sample::Factory {
     }
 
     sample::ResponsePtr response(sample::Response::New(2, std::move(pipe0)));
-    callback.Run(std::move(response), text1);
+    std::move(callback).Run(std::move(response), text1);
 
     if (request->obj) {
       imported::ImportedInterfacePtr proxy(std::move(request->obj));
@@ -107,7 +106,7 @@ class SampleFactoryImpl : public sample::Factory {
   }
 
   void DoStuff2(ScopedDataPipeConsumerHandle pipe,
-                const DoStuff2Callback& callback) override {
+                DoStuff2Callback callback) override {
     // Read the data from the pipe, writing the response (as a string) to
     // DidStuff2().
     ASSERT_TRUE(pipe.is_valid());
@@ -125,7 +124,7 @@ class SampleFactoryImpl : public sample::Factory {
     ASSERT_EQ(MOJO_RESULT_OK, pipe->ReadData(data, &data_size,
                                              MOJO_READ_DATA_FLAG_ALL_OR_NONE));
 
-    callback.Run(data);
+    std::move(callback).Run(data);
   }
 
   void CreateNamedObject(
@@ -140,10 +139,9 @@ class SampleFactoryImpl : public sample::Factory {
   // interfaces.
   void RequestImportedInterface(
       InterfaceRequest<imported::ImportedInterface> imported,
-      const RequestImportedInterfaceCallback& callback) override {}
-  void TakeImportedInterface(
-      imported::ImportedInterfacePtr imported,
-      const TakeImportedInterfaceCallback& callback) override {}
+      RequestImportedInterfaceCallback callback) override {}
+  void TakeImportedInterface(imported::ImportedInterfacePtr imported,
+                             TakeImportedInterfaceCallback callback) override {}
 
  private:
   ScopedMessagePipeHandle pipe1_;
@@ -261,8 +259,7 @@ TEST_P(HandlePassingTest, DataPipe) {
   ScopedDataPipeProducerHandle producer_handle;
   ScopedDataPipeConsumerHandle consumer_handle;
   MojoCreateDataPipeOptions options = {sizeof(MojoCreateDataPipeOptions),
-                                       MOJO_CREATE_DATA_PIPE_OPTIONS_FLAG_NONE,
-                                       1,
+                                       MOJO_CREATE_DATA_PIPE_FLAG_NONE, 1,
                                        1024};
   ASSERT_EQ(MOJO_RESULT_OK,
             CreateDataPipe(&options, &producer_handle, &consumer_handle));

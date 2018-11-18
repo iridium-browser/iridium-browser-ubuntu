@@ -14,7 +14,8 @@ import tempfile
 import traceback
 
 _THIS_DIR = os.path.abspath(os.path.dirname(__file__))
-sys.path.insert(0, os.path.join(_THIS_DIR, os.pardir))
+_PARENT_DIR = os.path.join(_THIS_DIR, os.pardir)
+sys.path.insert(0, _PARENT_DIR)
 
 import archive
 import chrome_paths
@@ -55,6 +56,31 @@ def _GenerateTestCommand(script,
     cmd = ['xvfb-run', '-a'] + cmd
     cmd.append('--android-package=' + android_package)
   return cmd
+
+
+def RunReplayTests(chromedriver, chrome,
+                   chrome_version=None, chrome_version_name=None):
+  version_info = ''
+  if chrome_version_name:
+    version_info = '(%s)' % chrome_version_name
+  util.MarkBuildStepStart('replay_tests%s' % version_info)
+
+  _, log_path = tempfile.mkstemp(prefix='chromedriver_log_')
+  print 'chromedriver server log: %s' % log_path
+  cmd = [
+    sys.executable,
+    os.path.join(_PARENT_DIR, 'log_replay', 'client_replay_test.py'),
+    chromedriver,
+    chrome,
+    '--output-log-path=%s' % log_path
+  ]
+  if chrome_version:
+    cmd.append('--chrome-version=%s' % chrome_version)
+  code = util.RunCommand(cmd)
+
+  if code:
+    util.MarkBuildStepError()
+  return code
 
 
 def RunPythonTests(chromedriver, ref_chromedriver,
@@ -189,34 +215,23 @@ def main():
     return code
   else:
     versions = {'HEAD': archive.GetLatestRevision()}
-    if util.IsLinux() and not util.Is64Bit():
-      # Linux32 builds need to be special-cased, because 1) they are keyed by
-      # git hash rather than commit position, and 2) come from a different
-      # download site (so we can't just convert the commit position to a hash).
-      versions['63'] = 'adb61db19020ed8ecee5e91b1a0ea4c924ae2988'
-      versions['62'] = '17030e3a08cfbb6e591991f7dbf0eb703454b365'
-      versions['61'] = '77132a2bc78e8dc9ce411e8166bfd009f6476f6f'
-
-      # TODO(samuong): speculative fix for crbug.com/611886
-      os.environ['CHROME_DEVEL_SANDBOX'] = '/opt/chromium/chrome_sandbox'
-
     # Linux64 build numbers
-    elif util.IsLinux():
-      versions['66'] = '540276'
-      versions['65'] = '530372'
-      versions['64'] = '520842'
+    if util.IsLinux():
+      versions['70'] = '587811'
+      versions['69'] = '576753'
+      versions['68'] = '561732'
 
     # Mac build numbers
     elif util.IsMac():
-      versions['66'] = '540271'
-      versions['65'] = '530368'
-      versions['64'] = '520840'
+      versions['70'] = '587811'
+      versions['69'] = '576753'
+      versions['68'] = '561733'
 
     # Windows build numbers
     elif util.IsWindows():
-      versions['66'] = '540272'
-      versions['65'] = '530366'
-      versions['64'] = '520840'
+      versions['70'] = '587814'
+      versions['69'] = '576753'
+      versions['68'] = '561732'
 
     code = 0
     for version, revision in versions.iteritems():
@@ -238,8 +253,13 @@ def main():
                              chrome_version_name='v%s' % version_name)
       code2 = RunJavaTests(chromedriver, chrome=chrome_path,
                            chrome_version=version,
-                           chrome_version_name='v%s' % version_name)
-      code = code or code1 or code2
+                           chrome_version_name='v%s' % version_name,
+                           verbose=True)
+      code3 = RunReplayTests(chromedriver,
+                             chrome=chrome_path,
+                             chrome_version=version,
+                             chrome_version_name='v%s' % version_name)
+      code = code or code1 or code2 or code3
       _KillChromes()
       shutil.rmtree(temp_dir)
     cpp_tests = os.path.join(build_dir, cpp_tests_name)

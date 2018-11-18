@@ -42,14 +42,13 @@ enum PWL_SCROLLBAR_TYPE { SBT_HSCROLL, SBT_VSCROLL };
 
 enum PWL_SBBUTTON_TYPE { PSBT_MIN, PSBT_MAX, PSBT_POS };
 
-class CPWL_SBButton : public CPWL_Wnd {
+class CPWL_SBButton final : public CPWL_Wnd {
  public:
   CPWL_SBButton(PWL_SCROLLBAR_TYPE eScrollBarType,
                 PWL_SBBUTTON_TYPE eButtonType);
   ~CPWL_SBButton() override;
 
   // CPWL_Wnd
-  ByteString GetClassName() const override;
   void OnCreate(CreateParams* pParamsToAdjust) override;
   void DrawThisAppearance(CFX_RenderDevice* pDevice,
                           const CFX_Matrix& mtUser2Device) override;
@@ -57,30 +56,28 @@ class CPWL_SBButton : public CPWL_Wnd {
   bool OnLButtonUp(const CFX_PointF& point, uint32_t nFlag) override;
   bool OnMouseMove(const CFX_PointF& point, uint32_t nFlag) override;
 
- protected:
+ private:
   PWL_SCROLLBAR_TYPE m_eScrollBarType;
   PWL_SBBUTTON_TYPE m_eSBButtonType;
-
   bool m_bMouseDown;
 };
 
 struct PWL_FLOATRANGE {
  public:
-  PWL_FLOATRANGE();
-  PWL_FLOATRANGE(float min, float max);
+  PWL_FLOATRANGE() = default;
 
   bool operator==(const PWL_FLOATRANGE& that) const {
     return fMin == that.fMin && fMax == that.fMax;
   }
   bool operator!=(const PWL_FLOATRANGE& that) const { return !(*this == that); }
 
-  void Default();
+  void Reset();
   void Set(float min, float max);
   bool In(float x) const;
   float GetWidth() const;
 
-  float fMin;
-  float fMax;
+  float fMin = 0.0f;
+  float fMax = 0.0f;
 };
 
 struct PWL_SCROLL_PRIVATEDATA {
@@ -115,13 +112,12 @@ struct PWL_SCROLL_PRIVATEDATA {
   float fSmallStep;
 };
 
-class CPWL_ScrollBar : public CPWL_Wnd {
+class CPWL_ScrollBar final : public CPWL_Wnd {
  public:
-  explicit CPWL_ScrollBar(PWL_SCROLLBAR_TYPE sbType = SBT_HSCROLL);
+  explicit CPWL_ScrollBar(PWL_SCROLLBAR_TYPE sbType);
   ~CPWL_ScrollBar() override;
 
   // CPWL_Wnd:
-  ByteString GetClassName() const override;
   void OnCreate(CreateParams* pParamsToAdjust) override;
   void OnDestroy() override;
   bool RePosChildWnd() override;
@@ -142,7 +138,7 @@ class CPWL_ScrollBar : public CPWL_Wnd {
 
   void SetNotifyForever(bool bForever) { m_bNotifyForever = bForever; }
 
- protected:
+ private:
   void SetScrollRange(float fMin, float fMax, float fClientWidth);
   void SetScrollPos(float fPos);
 
@@ -152,7 +148,6 @@ class CPWL_ScrollBar : public CPWL_Wnd {
   void NotifyScrollWindow();
   CFX_FloatRect GetScrollArea() const;
 
- private:
   void CreateButtons(const CreateParams& cp);
 
   void OnMinButtonLBDown(const CFX_PointF& point);

@@ -15,7 +15,6 @@
 #include "third_party/blink/renderer/platform/graphics/paint/paint_recorder.h"
 #include "third_party/blink/renderer/platform/graphics/paint/scroll_hit_test_display_item.h"
 #include "third_party/blink/renderer/platform/graphics/skia/skia_utils.h"
-#include "third_party/blink/renderer/platform/testing/fake_display_item_client.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
 
 namespace blink {
@@ -28,7 +27,7 @@ class TestPaintArtifact::DummyRectClient : public FakeDisplayItemClient {
   sk_sp<PaintRecord> MakeRecord(const FloatRect& rect, Color color) {
     rect_ = rect;
     PaintRecorder recorder;
-    PaintCanvas* canvas = recorder.beginRecording(rect);
+    cc::PaintCanvas* canvas = recorder.beginRecording(rect);
     PaintFlags flags;
     flags.setColor(color.Rgb());
     canvas->drawRect(rect, flags);
@@ -39,43 +38,38 @@ class TestPaintArtifact::DummyRectClient : public FakeDisplayItemClient {
   FloatRect rect_;
 };
 
-TestPaintArtifact::TestPaintArtifact() : display_item_list_(0), built_(false) {}
+TestPaintArtifact::TestPaintArtifact() : display_item_list_(0) {}
 
 TestPaintArtifact::~TestPaintArtifact() = default;
 
-TestPaintArtifact& TestPaintArtifact::Chunk(
-    scoped_refptr<const TransformPaintPropertyNode> transform,
-    scoped_refptr<const ClipPaintPropertyNode> clip,
-    scoped_refptr<const EffectPaintPropertyNode> effect) {
-  return Chunk(NewClient(), transform, clip, effect);
+TestPaintArtifact& TestPaintArtifact::Chunk(int id) {
+  DEFINE_STATIC_LOCAL(DummyRectClient, client, ());
+  Chunk(client,
+        static_cast<DisplayItem::Type>(DisplayItem::kDrawingFirst + id));
+  // The default bounds with magic numbers make the chunks have different bounds
+  // from each other, for e.g. RasterInvalidatorTest to check the tracked raster
+  // invalidation rects of chunks. The actual values don't matter. If the chunk
+  // has display items, we will recalculate the bounds from the display items
+  // when constructing the PaintArtifact.
+  Bounds(FloatRect(id * 110, id * 220, id * 220 + 200, id * 110 + 200));
+  return *this;
 }
 
-TestPaintArtifact& TestPaintArtifact::Chunk(
-    DisplayItemClient& client,
-    scoped_refptr<const TransformPaintPropertyNode> transform,
-    scoped_refptr<const ClipPaintPropertyNode> clip,
-    scoped_refptr<const EffectPaintPropertyNode> effect) {
-  PropertyTreeState property_tree_state(transform.get(), clip.get(),
-                                        effect.get());
-  PaintChunkProperties properties(property_tree_state);
-  return Chunk(client, properties);
-}
-
-TestPaintArtifact& TestPaintArtifact::Chunk(
-    const PaintChunkProperties& properties) {
-  return Chunk(NewClient(), properties);
-}
-
-TestPaintArtifact& TestPaintArtifact::Chunk(
-    DisplayItemClient& client,
-    const PaintChunkProperties& properties) {
+TestPaintArtifact& TestPaintArtifact::Chunk(FakeDisplayItemClient& client,
+                                            DisplayItem::Type type) {
   if (!paint_chunks_.IsEmpty())
     paint_chunks_.back().end_index = display_item_list_.size();
-  paint_chunks_.push_back(PaintChunk(
-      display_item_list_.size(), 0,
-      PaintChunk::Id(client, DisplayItem::kDrawingFirst), properties));
+  paint_chunks_.push_back(PaintChunk(display_item_list_.size(), 0,
+                                     PaintChunk::Id(client, type),
+                                     PropertyTreeState::Root()));
   // Assume PaintController has processed this chunk.
   paint_chunks_.back().client_is_just_created = false;
+  return *this;
+}
+
+TestPaintArtifact& TestPaintArtifact::Properties(
+    const PropertyTreeState& properties) {
+  paint_chunks_.back().properties = properties;
   return *this;
 }
 
@@ -84,7 +78,18 @@ TestPaintArtifact& TestPaintArtifact::RectDrawing(const FloatRect& bounds,
   return RectDrawing(NewClient(), bounds, color);
 }
 
-TestPaintArtifact& TestPaintArtifact::RectDrawing(DisplayItemClient& client,
+TestPaintArtifact& TestPaintArtifact::ForeignLayer(
+    const FloatPoint& location,
+    const IntSize& size,
+    scoped_refptr<cc::Layer> layer) {
+  return ForeignLayer(NewClient(), location, size, std::move(layer));
+}
+TestPaintArtifact& TestPaintArtifact::ScrollHitTest(
+    const TransformPaintPropertyNode& scroll_offset) {
+  return ScrollHitTest(NewClient(), scroll_offset);
+}
+
+TestPaintArtifact& TestPaintArtifact::RectDrawing(FakeDisplayItemClient& client,
                                                   const FloatRect& bounds,
                                                   Color color) {
   display_item_list_.AllocateAndConstruct<DrawingDisplayItem>(
@@ -94,14 +99,7 @@ TestPaintArtifact& TestPaintArtifact::RectDrawing(DisplayItemClient& client,
 }
 
 TestPaintArtifact& TestPaintArtifact::ForeignLayer(
-    const FloatPoint& location,
-    const IntSize& size,
-    scoped_refptr<cc::Layer> layer) {
-  return ForeignLayer(NewClient(), location, size, layer);
-}
-
-TestPaintArtifact& TestPaintArtifact::ForeignLayer(
-    DisplayItemClient& client,
+    FakeDisplayItemClient& client,
     const FloatPoint& location,
     const IntSize& size,
     scoped_refptr<cc::Layer> layer) {
@@ -114,15 +112,10 @@ TestPaintArtifact& TestPaintArtifact::ForeignLayer(
 }
 
 TestPaintArtifact& TestPaintArtifact::ScrollHitTest(
-    scoped_refptr<const TransformPaintPropertyNode> scroll_offset) {
-  return ScrollHitTest(NewClient(), scroll_offset);
-}
-
-TestPaintArtifact& TestPaintArtifact::ScrollHitTest(
-    DisplayItemClient& client,
-    scoped_refptr<const TransformPaintPropertyNode> scroll_offset) {
+    FakeDisplayItemClient& client,
+    const TransformPaintPropertyNode& scroll_offset) {
   display_item_list_.AllocateAndConstruct<ScrollHitTestDisplayItem>(
-      client, DisplayItem::kScrollHitTest, std::move(scroll_offset));
+      client, scroll_offset);
   return *this;
 }
 
@@ -131,24 +124,29 @@ TestPaintArtifact& TestPaintArtifact::KnownToBeOpaque() {
   return *this;
 }
 
-const PaintArtifact& TestPaintArtifact::Build() {
-  if (built_)
-    return paint_artifact_;
-
-  if (!paint_chunks_.IsEmpty())
-    paint_chunks_.back().end_index = display_item_list_.size();
-  paint_artifact_ =
-      PaintArtifact(std::move(display_item_list_), std::move(paint_chunks_));
-  built_ = true;
-  return paint_artifact_;
+TestPaintArtifact& TestPaintArtifact::Bounds(const FloatRect& bounds) {
+  paint_chunks_.back().bounds = bounds;
+  return *this;
 }
 
-DisplayItemClient& TestPaintArtifact::NewClient() {
+TestPaintArtifact& TestPaintArtifact::Uncacheable() {
+  paint_chunks_.back().is_cacheable = false;
+  return *this;
+}
+
+scoped_refptr<PaintArtifact> TestPaintArtifact::Build() {
+  if (!paint_chunks_.IsEmpty())
+    paint_chunks_.back().end_index = display_item_list_.size();
+  return PaintArtifact::Create(std::move(display_item_list_),
+                               std::move(paint_chunks_));
+}
+
+FakeDisplayItemClient& TestPaintArtifact::NewClient() {
   dummy_clients_.push_back(std::make_unique<DummyRectClient>());
   return *dummy_clients_.back();
 }
 
-DisplayItemClient& TestPaintArtifact::Client(size_t i) const {
+FakeDisplayItemClient& TestPaintArtifact::Client(wtf_size_t i) const {
   return *dummy_clients_[i];
 }
 

@@ -86,18 +86,6 @@ TIntermTyped *CreateZeroNode(const TType &type)
         return node;
     }
 
-    if (type.getBasicType() == EbtVoid)
-    {
-        // Void array. This happens only on error condition, similarly to the case above. We don't
-        // have a constructor operator for void, so this needs special handling. We'll end up with a
-        // value without the array type, but that should not be a problem.
-        while (constType.isArray())
-        {
-            constType.toArrayElementType();
-        }
-        return CreateZeroNode(constType);
-    }
-
     TIntermSequence *arguments = new TIntermSequence();
 
     if (type.isArray())
@@ -150,7 +138,7 @@ TVariable *CreateTempVariable(TSymbolTable *symbolTable, const TType *type)
     ASSERT(symbolTable != nullptr);
     // TODO(oetuaho): Might be useful to sanitize layout qualifier etc. on the type of the created
     // variable. This might need to be done in other places as well.
-    return new TVariable(symbolTable, ImmutableString(""), type, SymbolType::AngleInternal);
+    return new TVariable(symbolTable, kEmptyImmutableString, type, SymbolType::AngleInternal);
 }
 
 TVariable *CreateTempVariable(TSymbolTable *symbolTable, const TType *type, TQualifier qualifier)
@@ -236,7 +224,7 @@ TIntermBlock *EnsureBlock(TIntermNode *node)
 
 TIntermSymbol *ReferenceGlobalVariable(const ImmutableString &name, const TSymbolTable &symbolTable)
 {
-    const TVariable *var = reinterpret_cast<const TVariable *>(symbolTable.findGlobal(name));
+    const TVariable *var = static_cast<const TVariable *>(symbolTable.findGlobal(name));
     ASSERT(var);
     return new TIntermSymbol(var);
 }
@@ -246,7 +234,7 @@ TIntermSymbol *ReferenceBuiltInVariable(const ImmutableString &name,
                                         int shaderVersion)
 {
     const TVariable *var =
-        reinterpret_cast<const TVariable *>(symbolTable.findBuiltIn(name, shaderVersion));
+        static_cast<const TVariable *>(symbolTable.findBuiltIn(name, shaderVersion));
     ASSERT(var);
     return new TIntermSymbol(var);
 }

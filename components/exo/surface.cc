@@ -25,7 +25,7 @@
 #include "components/viz/common/resources/single_release_callback.h"
 #include "components/viz/service/surfaces/surface.h"
 #include "components/viz/service/surfaces/surface_manager.h"
-#include "services/ui/public/interfaces/window_tree_constants.mojom.h"
+#include "services/ws/public/mojom/window_tree_constants.mojom.h"
 #include "third_party/khronos/GLES2/gl2.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/drag_drop_delegate.h"
@@ -42,6 +42,7 @@
 #include "ui/gfx/geometry/size_conversions.h"
 #include "ui/gfx/gpu_memory_buffer.h"
 #include "ui/gfx/path.h"
+#include "ui/gfx/presentation_feedback.h"
 #include "ui/gfx/transform_util.h"
 #include "ui/views/widget/widget.h"
 
@@ -176,12 +177,6 @@ class CustomWindowTargeter : public aura::WindowTargeter {
     return surface->HitTest(local_point);
   }
 
-  std::unique_ptr<HitTestRects> GetExtraHitTestShapeRects(
-      aura::Window* window) const override {
-    Surface* surface = Surface::AsSurface(window);
-    return surface ? surface->GetHitTestShapeRects() : nullptr;
-  }
-
  private:
   DISALLOW_COPY_AND_ASSIGN(CustomWindowTargeter);
 };
@@ -191,12 +186,14 @@ class CustomWindowTargeter : public aura::WindowTargeter {
 ////////////////////////////////////////////////////////////////////////////////
 // Surface, public:
 
-Surface::Surface() : window_(new aura::Window(new CustomWindowDelegate(this))) {
-  window_->SetType(aura::client::WINDOW_TYPE_CONTROL);
+Surface::Surface()
+    : window_(std::make_unique<aura::Window>(new CustomWindowDelegate(this),
+                                             aura::client::WINDOW_TYPE_CONTROL,
+                                             WMHelper::GetInstance()->env())) {
   window_->SetName("ExoSurface");
   window_->SetProperty(kSurfaceKey, this);
   window_->Init(ui::LAYER_NOT_DRAWN);
-  window_->SetEventTargeter(base::WrapUnique(new CustomWindowTargeter));
+  window_->SetEventTargeter(std::make_unique<CustomWindowTargeter>());
   window_->set_owned_by_parent(false);
   WMHelper::GetInstance()->SetDragDropDelegate(window_.get());
 }
@@ -215,7 +212,7 @@ Surface::~Surface() {
   presentation_callbacks_.splice(presentation_callbacks_.end(),
                                  pending_presentation_callbacks_);
   for (const auto& presentation_callback : presentation_callbacks_)
-    presentation_callback.Run(base::TimeTicks(), base::TimeDelta(), 0);
+    presentation_callback.Run(gfx::PresentationFeedback());
 
   WMHelper::GetInstance()->ResetDragDropDelegate(window_.get());
 }
@@ -514,8 +511,8 @@ void Surface::CommitSurfaceHierarchy(bool synchronized) {
 
     window_->SetEventTargetingPolicy(
         (state_.input_region.has_value() && state_.input_region->IsEmpty())
-            ? ui::mojom::EventTargetingPolicy::DESCENDANTS_ONLY
-            : ui::mojom::EventTargetingPolicy::TARGET_AND_DESCENDANTS);
+            ? ws::mojom::EventTargetingPolicy::DESCENDANTS_ONLY
+            : ws::mojom::EventTargetingPolicy::TARGET_AND_DESCENDANTS);
 
     // We update contents if Attach() has been called since last commit.
     if (has_pending_contents_) {
@@ -576,8 +573,9 @@ void Surface::CommitSurfaceHierarchy(bool synchronized) {
   if (state_.input_region) {
     hit_test_region_ = *state_.input_region;
     hit_test_region_.Intersect(surface_hierarchy_content_bounds_);
-  } else
+  } else {
     hit_test_region_ = surface_hierarchy_content_bounds_;
+  }
 
   int outset = state_.input_outset;
   if (outset > 0) {
@@ -660,17 +658,6 @@ void Surface::GetHitTestMask(gfx::Path* mask) const {
   hit_test_region_.GetBoundaryPath(mask);
 }
 
-std::unique_ptr<aura::WindowTargeter::HitTestRects>
-Surface::GetHitTestShapeRects() const {
-  if (hit_test_region_.IsEmpty())
-    return nullptr;
-
-  auto rects = std::make_unique<aura::WindowTargeter::HitTestRects>();
-  for (gfx::Rect rect : hit_test_region_)
-    rects->push_back(rect);
-  return rects;
-}
-
 void Surface::SetSurfaceDelegate(SurfaceDelegate* delegate) {
   DCHECK(!delegate_ || !delegate);
   delegate_ = delegate;
@@ -727,7 +714,7 @@ Surface::State::State() {}
 
 Surface::State::~State() = default;
 
-bool Surface::State::operator==(const State& other) {
+bool Surface::State::operator==(const State& other) const {
   return other.opaque_region == opaque_region &&
          other.input_region == input_region &&
          other.buffer_scale == buffer_scale &&
@@ -842,9 +829,6 @@ void Surface::AppendContentsToFrame(const gfx::Point& origin,
     render_pass->damage_rect.Union(
         gfx::ConvertRectToPixel(device_scale_factor, damage_rect));
   }
-
-  render_pass->output_rect.Union(
-      gfx::ConvertRectToPixel(device_scale_factor, output_rect));
 
   // Compute the total transformation from post-transform buffer coordinates to
   // target coordinates.

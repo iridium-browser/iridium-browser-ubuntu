@@ -59,10 +59,9 @@ class WebViewPermissionHelper
       content::WebContents* web_contents);
   static WebViewPermissionHelper* FromFrameID(int render_process_id,
                                               int render_frame_id);
-  void RequestMediaAccessPermission(
-      content::WebContents* source,
-      const content::MediaStreamRequest& request,
-      const content::MediaResponseCallback& callback);
+  void RequestMediaAccessPermission(content::WebContents* source,
+                                    const content::MediaStreamRequest& request,
+                                    content::MediaResponseCallback callback);
   bool CheckMediaAccessPermission(content::RenderFrameHost* render_frame_host,
                                   const GURL& security_origin,
                                   content::MediaStreamType type);
@@ -119,9 +118,13 @@ class WebViewPermissionHelper
 
   WebViewGuest* web_view_guest() { return web_view_guest_; }
 
+  void set_default_media_access_permission(bool allow_media_access) {
+    default_media_access_permission_ = allow_media_access;
+  }
+
  private:
   void OnMediaPermissionResponse(const content::MediaStreamRequest& request,
-                                 const content::MediaResponseCallback& callback,
+                                 content::MediaResponseCallback callback,
                                  bool allow,
                                  const std::string& user_input);
 
@@ -141,6 +144,8 @@ class WebViewPermissionHelper
       web_view_permission_helper_delegate_;
 
   WebViewGuest* const web_view_guest_;
+
+  bool default_media_access_permission_;
 
   base::WeakPtrFactory<WebViewPermissionHelper> weak_factory_;
 

@@ -15,18 +15,19 @@
 # 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301, USA.
 """Checkers for various standard library functions."""
 
-import re
-import six
 import sys
+
+import six
 
 import astroid
 from astroid.bases import Instance
-
 from pylint.interfaces import IAstroidChecker
 from pylint.checkers import BaseChecker
 from pylint.checkers import utils
 
 
+OPEN_FILES = {'open', 'file'}
+UNITTEST_CASE = 'unittest.case'
 if sys.version_info >= (3, 0):
     OPEN_MODULE = '_io'
 else:
@@ -50,7 +51,6 @@ def _check_mode_str(mode):
     reading = "r" in modes
     writing = "w" in modes
     appending = "a" in modes
-    updating = "+" in modes
     text = "t" in modes
     binary = "b" in modes
     if "U" in modes:
@@ -88,7 +88,7 @@ class StdlibChecker(BaseChecker):
                   'See http://docs.python.org/2/library/functions.html#open'),
         'W1502': ('Using datetime.time in a boolean context.',
                   'boolean-datetime',
-                  'Using datetetime.time in a boolean context can hide '
+                  'Using datetime.time in a boolean context can hide '
                   'subtle bugs when the time they represent matches '
                   'midnight UTC. This behaviour was fixed in Python 3.5. '
                   'See http://bugs.python.org/issue13936 for reference.',
@@ -96,23 +96,102 @@ class StdlibChecker(BaseChecker):
         'W1503': ('Redundant use of %s with constant '
                   'value %r',
                   'redundant-unittest-assert',
-                  'The first argument of assertTrue and assertFalse is'
-                  'a condition. If a constant is passed as parameter, that'
+                  'The first argument of assertTrue and assertFalse is '
+                  'a condition. If a constant is passed as parameter, that '
                   'condition will be always true. In this case a warning '
-                  'should be emitted.')
+                  'should be emitted.'),
+        'W1505': ('Using deprecated method %s()',
+                  'deprecated-method',
+                  'The method is marked as deprecated and will be removed in '
+                  'a future version of Python. Consider looking for an '
+                  'alternative in the documentation.'),
     }
 
-    @utils.check_messages('bad-open-mode', 'redundant-unittest-assert')
-    def visit_callfunc(self, node):
+    deprecated = {
+        0: [
+            'cgi.parse_qs', 'cgi.parse_qsl',
+            'ctypes.c_buffer',
+            'distutils.command.register.register.check_metadata',
+            'distutils.command.sdist.sdist.check_metadata',
+            'tkinter.Misc.tk_menuBar',
+            'tkinter.Menu.tk_bindForTraversal',
+        ],
+        2: {
+            (2, 6): [
+                'commands.getstatus',
+                'os.popen2',
+                'os.popen3',
+                'os.popen4',
+                'macostools.touched',
+            ],
+            (2, 7): [
+                'unittest.case.TestCase.assertEquals',
+                'unittest.case.TestCase.assertNotEquals',
+                'unittest.case.TestCase.assertAlmostEquals',
+                'unittest.case.TestCase.assertNotAlmostEquals',
+                'unittest.case.TestCase.assert_',
+                'xml.etree.ElementTree.Element.getchildren',
+                'xml.etree.ElementTree.Element.getiterator',
+                'xml.etree.ElementTree.XMLParser.getiterator',
+                'xml.etree.ElementTree.XMLParser.doctype',
+            ],
+        },
+        3: {
+            (3, 0): [
+                'inspect.getargspec',
+                'unittest.case.TestCase._deprecate.deprecated_func',
+            ],
+            (3, 1): [
+                'base64.encodestring', 'base64.decodestring',
+                'ntpath.splitunc',
+            ],
+            (3, 2): [
+                'cgi.escape',
+                'configparser.RawConfigParser.readfp',
+                'xml.etree.ElementTree.Element.getchildren',
+                'xml.etree.ElementTree.Element.getiterator',
+                'xml.etree.ElementTree.XMLParser.getiterator',
+                'xml.etree.ElementTree.XMLParser.doctype',
+            ],
+            (3, 3): [
+                'inspect.getmoduleinfo', 'inspect.getmodulename',
+                'logging.warn', 'logging.Logger.warn',
+                'logging.LoggerAdapter.warn',
+                'nntplib._NNTPBase.xpath',
+                'platform.popen',
+            ],
+            (3, 4): [
+                'asyncio.tasks.async',
+                'importlib.find_loader',
+                'plistlib.readPlist', 'plistlib.writePlist',
+                'plistlib.readPlistFromBytes',
+                'plistlib.writePlistToBytes',
+                'xml.etree.ElementTree.iterparse',
+            ],
+            (3, 5): [
+                'fractions.gcd',
+                'inspect.getfullargspec', 'inspect.getargvalues',
+                'inspect.formatargspec', 'inspect.formatargvalues',
+                'inspect.getcallargs',
+                'platform.linux_distribution', 'platform.dist',
+            ],
+        },
+    }
+
+    @utils.check_messages('bad-open-mode', 'redundant-unittest-assert',
+                          'deprecated-method')
+    def visit_call(self, node):
         """Visit a CallFunc node."""
-        if hasattr(node, 'func'):
-            infer = utils.safe_infer(node.func)
-            if infer:
-                if infer.root().name == OPEN_MODULE:
-                    if getattr(node.func, 'name', None) in ('open', 'file'):
+        try:
+            for inferred in node.func.infer():
+                if inferred.root().name == OPEN_MODULE:
+                    if getattr(node.func, 'name', None) in OPEN_FILES:
                         self._check_open_mode(node)
-                if infer.root().name == 'unittest.case':
-                    self._check_redundant_assert(node, infer)
+                if inferred.root().name == UNITTEST_CASE:
+                    self._check_redundant_assert(node, inferred)
+                self._check_deprecated_method(node, inferred)
+        except astroid.InferenceError:
+            return
 
     @utils.check_messages('boolean-datetime')
     def visit_unaryop(self, node):
@@ -131,6 +210,35 @@ class StdlibChecker(BaseChecker):
     def visit_boolop(self, node):
         for value in node.values:
             self._check_datetime(value)
+
+    def _check_deprecated_method(self, node, inferred):
+        py_vers = sys.version_info[0]
+
+        if isinstance(node.func, astroid.Attribute):
+            func_name = node.func.attrname
+        elif isinstance(node.func, astroid.Name):
+            func_name = node.func.name
+        else:
+            # Not interested in other nodes.
+            return
+
+        # Reject nodes which aren't of interest to us.
+        acceptable_nodes = (astroid.BoundMethod,
+                            astroid.UnboundMethod,
+                            astroid.FunctionDef)
+        if not isinstance(inferred, acceptable_nodes):
+            return
+
+        qname = inferred.qname()
+        if qname in self.deprecated[0]:
+            self.add_message('deprecated-method', node=node,
+                             args=(func_name, ))
+        else:
+            for since_vers, func_list in self.deprecated[py_vers].items():
+                if since_vers <= sys.version_info and qname in func_list:
+                    self.add_message('deprecated-method', node=node,
+                                     args=(func_name, ))
+                    break
 
     def _check_redundant_assert(self, node, infer):
         if (isinstance(infer, astroid.BoundMethod) and
@@ -151,7 +259,6 @@ class StdlibChecker(BaseChecker):
         if (isinstance(infered, Instance) and
                 infered.qname() == 'datetime.time'):
             self.add_message('boolean-datetime', node=node)
-
 
     def _check_open_mode(self, node):
         """Check that the mode argument of an open or file call is valid."""

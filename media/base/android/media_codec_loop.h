@@ -200,10 +200,14 @@ class MEDIA_EXPORT MediaCodecLoop {
   // It is used only to decouple MediaCodecLoop from BuildInfo, until we get
   // BuildInfo into a mockable state. If |timer_task_runner| is non-null,
   // timers are redirected to it.
+  //
+  // If |disable_timer| is true, the loop must be manually pumped by calling
+  // ExpectWork() when input or output buffers are expected.
   MediaCodecLoop(int sdk_level,
                  Client* client,
                  std::unique_ptr<MediaCodecBridge> media_codec,
-                 scoped_refptr<base::SingleThreadTaskRunner> timer_task_runner);
+                 scoped_refptr<base::SingleThreadTaskRunner> timer_task_runner,
+                 bool disable_timer = false);
   ~MediaCodecLoop();
 
   // Optionally set the tick clock used for testing.  It is our caller's
@@ -211,12 +215,11 @@ class MEDIA_EXPORT MediaCodecLoop {
   // FakeSingleThreadTaskRunner maintains a raw ptr to it also.
   void SetTestTickClock(const base::TickClock* test_tick_clock);
 
-  // Does the MediaCodec processing cycle: enqueues an input buffer, then
-  // dequeues output buffers.  This should be called by the client when more
-  // work becomes available, such as when new input data arrives.  If codec
-  // output buffers are freed after OnDecodedFrame returns, then this should
-  // also be called.
-  void DoPendingWork();
+  // Notify us that work can be done immediately, or in the near future.  This
+  // should be called by the client when more work becomes available, such as
+  // when new input data arrives.  If codec output buffers are freed after
+  // OnDecodedFrame returns, then this should also be called.
+  void ExpectWork();
 
   // Try to flush this media codec.  Returns true on success, false on failure.
   // Failures can result in a state change to the Error state.  If this returns
@@ -253,6 +256,11 @@ class MEDIA_EXPORT MediaCodecLoop {
     // True if we tried to enqueue this buffer before.
     bool is_pending = false;
   };
+
+  // Does the MediaCodec processing cycle: enqueues an input buffer, then
+  // dequeues output buffers.  Will restart / reset the timer if any progress is
+  // made on this call.
+  void DoPendingWork();
 
   // Enqueues one pending input buffer into MediaCodec if MediaCodec has room,
   // and if the client has any input to give us.
@@ -319,6 +327,10 @@ class MEDIA_EXPORT MediaCodecLoop {
   // might be set to other values. Will not be needed when there is a
   // mockable BuildInfo.
   const int sdk_int_;
+
+  // When true, the loop requires ExpectWork() to be called to trigger
+  // processing. Otherwise MCL will use an internal timer to pump work.
+  const bool disable_timer_;
 
   // NOTE: Weak pointers must be invalidated before all other member variables.
   base::WeakPtrFactory<MediaCodecLoop> weak_factory_;

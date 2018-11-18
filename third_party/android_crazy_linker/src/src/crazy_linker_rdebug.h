@@ -172,10 +172,11 @@ typedef void (*rdebug_callback_handler_t)(RDebug*, link_map_t*);
 
 class RDebug {
  public:
-  RDebug() : r_debug_(NULL), init_(false),
-             readonly_entries_(false), post_for_later_execution_(NULL),
-             post_for_later_execution_context_(NULL) {}
-  ~RDebug() {}
+  RDebug() = default;
+  ~RDebug() = default;
+
+  RDebug(const RDebug&) = delete;
+  RDebug& operator=(const RDebug&) = delete;
 
   // Add entries to and remove entries from the list. If post for later
   // execution is enabled, schedule callbacks, otherwise action immediately.
@@ -202,7 +203,9 @@ class RDebug {
     post_for_later_execution_context_ = context;
   }
 
-  r_debug* GetAddress() { return r_debug_; }
+  // Return address of current global _r_debug variable, or nullptr if not
+  // available.
+  r_debug* GetAddress();
 
  private:
   // Try to find the address of the global _r_debug variable, even
@@ -215,7 +218,6 @@ class RDebug {
   // is enabled, otherwise it runs immediately on the current thread.
   // AddEntryImpl() and DelEntryImpl() are the member functions called
   // by the static ones to do the actual work.
-  void WriteLinkMapField(link_map_t** link_pointer, link_map_t* entry);
   void AddEntryImpl(link_map_t* entry);
   void DelEntryImpl(link_map_t* entry);
   static void AddEntryInternal(RDebug* rdebug, link_map_t* entry) {
@@ -248,14 +250,10 @@ class RDebug {
   // list are performed.
   void CallRBrk(int state);
 
-  RDebug(const RDebug&);
-  RDebug& operator=(const RDebug&);
-
-  r_debug* r_debug_;
-  bool init_;
-  bool readonly_entries_;
-  rdebug_callback_poster_t post_for_later_execution_;
-  void* post_for_later_execution_context_;
+  r_debug* r_debug_ = nullptr;
+  bool init_ = false;
+  rdebug_callback_poster_t post_for_later_execution_ = nullptr;
+  void* post_for_later_execution_context_ = nullptr;
 };
 
 }  // namespace crazy

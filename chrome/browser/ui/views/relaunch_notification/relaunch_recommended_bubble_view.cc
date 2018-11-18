@@ -13,8 +13,8 @@
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/ui/browser_dialogs.h"
+#include "chrome/browser/ui/views/chrome_layout_provider.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
-#include "chrome/browser/ui/views/harmony/chrome_layout_provider.h"
 #include "chrome/browser/ui/views/toolbar/browser_app_menu_button.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 #include "chrome/grit/chromium_strings.h"
@@ -27,7 +27,7 @@
 #include "ui/gfx/paint_vector_icon.h"
 #include "ui/gfx/text_constants.h"
 #include "ui/views/bubble/bubble_border.h"
-#include "ui/views/bubble/bubble_dialog_delegate.h"
+#include "ui/views/bubble/bubble_dialog_delegate_view.h"
 #include "ui/views/bubble/bubble_frame_view.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/controls/label.h"
@@ -36,34 +36,7 @@
 
 #if defined(OS_MACOSX)
 #include "chrome/browser/platform_util.h"
-#if BUILDFLAG(MAC_VIEWS_BROWSER)
-#include "chrome/browser/ui/views_mode_controller.h"
-#endif  // BUILDFLAG(MAC_VIEWS_BROWSER)
-#include "chrome/browser/ui/views/relaunch_notification/get_app_menu_anchor_point.h"
 #endif  // defined(OS_MACOSX)
-
-namespace {
-
-// Returns the anchor for |browser|'s app menu, accounting for macOS running
-// with views or Cocoa.
-std::pair<views::Button*, gfx::Point> GetAnchor(Browser* browser) {
-#if defined(OS_MACOSX)
-#if BUILDFLAG(MAC_VIEWS_BROWSER)
-  if (views_mode_controller::IsViewsBrowserCocoa())
-    return std::make_pair(nullptr, GetAppMenuAnchorPoint(browser));
-#else   // BUILDFLAG(MAC_VIEWS_BROWSER)
-  return std::make_pair(nullptr, GetAppMenuAnchorPoint(browser));
-#endif  // BUILDFLAG(MAC_VIEWS_BROWSER)
-#endif  // defined(OS_MACOSX)
-#if !defined(OS_MACOSX) || BUILDFLAG(MAC_VIEWS_BROWSER)
-  return std::make_pair(BrowserView::GetBrowserViewForBrowser(browser)
-                            ->toolbar()
-                            ->app_menu_button(),
-                        gfx::Point());
-#endif  // !defined(OS_MACOSX) || BUILDFLAG(MAC_VIEWS_BROWSER)
-}
-
-}  // namespace
 
 // static
 views::Widget* RelaunchRecommendedBubbleView::ShowBubble(
@@ -72,14 +45,13 @@ views::Widget* RelaunchRecommendedBubbleView::ShowBubble(
     base::RepeatingClosure on_accept) {
   DCHECK(browser);
 
-  views::Button* anchor_button;
-  gfx::Point anchor_point;
-
   // Anchor the popup to the browser's app menu.
-  std::tie(anchor_button, anchor_point) = GetAnchor(browser);
+  auto* anchor_button = BrowserView::GetBrowserViewForBrowser(browser)
+                            ->toolbar()
+                            ->app_menu_button();
   auto* bubble_view = new RelaunchRecommendedBubbleView(
-      anchor_button, anchor_point, detection_time, std::move(on_accept));
-  bubble_view->set_arrow(views::BubbleBorder::TOP_RIGHT);
+      anchor_button, gfx::Point(), detection_time, std::move(on_accept));
+  bubble_view->SetArrow(views::BubbleBorder::TOP_RIGHT);
 
 #if defined(OS_MACOSX)
   // Parent the bubble to the browser window when there is no anchor view.
@@ -125,9 +97,7 @@ base::string16 RelaunchRecommendedBubbleView::GetDialogButtonLabel(
 }
 
 base::string16 RelaunchRecommendedBubbleView::GetWindowTitle() const {
-  const base::TimeDelta elapsed = base::TimeTicks::Now() - detection_time_;
-  return l10n_util::GetPluralStringFUTF16(IDS_RELAUNCH_RECOMMENDED_TITLE,
-                                          elapsed.InDays());
+  return relaunch_recommended_timer_.GetWindowTitle();
 }
 
 bool RelaunchRecommendedBubbleView::ShouldShowCloseButton() const {
@@ -136,8 +106,8 @@ bool RelaunchRecommendedBubbleView::ShouldShowCloseButton() const {
 
 gfx::ImageSkia RelaunchRecommendedBubbleView::GetWindowIcon() {
   return gfx::CreateVectorIcon(gfx::IconDescription(
-      vector_icons::kBusinessIcon, 20, gfx::kChromeIconGrey, base::TimeDelta(),
-      gfx::kNoneIcon));
+      vector_icons::kBusinessIcon, kTitleIconSize, gfx::kChromeIconGrey,
+      base::TimeDelta(), gfx::kNoneIcon));
 }
 
 bool RelaunchRecommendedBubbleView::ShouldShowWindowIcon() const {
@@ -151,15 +121,7 @@ int RelaunchRecommendedBubbleView::GetHeightForWidth(int width) const {
 }
 
 void RelaunchRecommendedBubbleView::Layout() {
-  // Align the body label with the left edge of the bubble's title.
-  // TODO(bsep): Remove this when fixing https://crbug.com/810970.
-  gfx::Point origin;
-  views::View::ConvertPointToWidget(GetBubbleFrameView()->title(), &origin);
-  views::View::ConvertPointFromWidget(this, &origin);
-
-  gfx::Rect bounds = GetContentsBounds();
-  bounds.Inset(origin.x(), 0, 0, 0);
-  body_label_->SetBoundsRect(bounds);
+  body_label_->SetBoundsRect(GetContentsBounds());
 }
 
 void RelaunchRecommendedBubbleView::Init() {
@@ -168,13 +130,20 @@ void RelaunchRecommendedBubbleView::Init() {
                        views::style::CONTEXT_MESSAGE_BOX_BODY_TEXT);
   body_label_->SetMultiLine(true);
   body_label_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+
+  // Align the body label with the left edge of the bubble's title.
+  // TODO(bsep): Remove this when fixing https://crbug.com/810970.
+  // Note: BubleFrameView applies INSETS_DIALOG_TITLE either side of the icon.
+  int title_offset = 2 * views::LayoutProvider::Get()
+                             ->GetInsetsMetric(views::INSETS_DIALOG_TITLE)
+                             .left() +
+                     kTitleIconSize;
+  body_label_->SetBorder(views::CreateEmptyBorder(
+      gfx::Insets(0, title_offset - margins().left(), 0, 0)));
+
   AddChildView(body_label_);
 
   base::RecordAction(base::UserMetricsAction("RelaunchRecommendedShown"));
-
-  // Start the timer for the next time the title neeeds to be updated (e.g.,
-  // from "2 days" to "3 days").
-  ScheduleNextTitleRefresh();
 }
 
 gfx::Size RelaunchRecommendedBubbleView::CalculatePreferredSize() const {
@@ -195,31 +164,28 @@ void RelaunchRecommendedBubbleView::VisibilityChanged(
   }
 }
 
+// |relaunch_recommended_timer_| automatically starts for the next time the
+// title needs to be updated (e.g., from "2 days" to "3 days").
 RelaunchRecommendedBubbleView::RelaunchRecommendedBubbleView(
     views::Button* anchor_button,
     const gfx::Point& anchor_point,
     base::TimeTicks detection_time,
     base::RepeatingClosure on_accept)
     : LocationBarBubbleDelegateView(anchor_button, anchor_point, nullptr),
-      detection_time_(detection_time),
       on_accept_(std::move(on_accept)),
-      body_label_(nullptr) {
+      body_label_(nullptr),
+      relaunch_recommended_timer_(
+          detection_time,
+          base::BindRepeating(&RelaunchRecommendedBubbleView::UpdateWindowTitle,
+                              base::Unretained(this))) {
   chrome::RecordDialogCreation(chrome::DialogIdentifier::RELAUNCH_RECOMMENDED);
   set_margins(ChromeLayoutProvider::Get()->GetDialogInsetsForContentType(
       views::TEXT, views::TEXT));
 }
 
-void RelaunchRecommendedBubbleView::ScheduleNextTitleRefresh() {
-  // Refresh at the next day boundary.
-  const base::TimeDelta elapsed = base::TimeTicks::Now() - detection_time_;
-  const base::TimeDelta delta =
-      base::TimeDelta::FromDays(elapsed.InDays() + 1) - elapsed;
-
-  refresh_timer_.Start(FROM_HERE, delta, this,
-                       &RelaunchRecommendedBubbleView::OnTitleRefresh);
-}
-
-void RelaunchRecommendedBubbleView::OnTitleRefresh() {
-  GetBubbleFrameView()->UpdateWindowTitle();
-  ScheduleNextTitleRefresh();
+void RelaunchRecommendedBubbleView::UpdateWindowTitle() {
+  GetWidget()->UpdateWindowTitle();
+  // This might update the length of the window title (for N days). Resize the
+  // bubble to match the new preferred size.
+  SizeToContents();
 }

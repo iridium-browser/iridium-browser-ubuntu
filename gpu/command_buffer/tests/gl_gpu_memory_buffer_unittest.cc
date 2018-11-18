@@ -179,13 +179,8 @@ void SetRow(gfx::BufferFormat format,
             ((pixel[0] << 2) | (pixel[0] >> 6));         // R
       }
       return;
-    case gfx::BufferFormat::ATC:
-    case gfx::BufferFormat::ATCIA:
     case gfx::BufferFormat::BGRX_8888:
     case gfx::BufferFormat::BGRX_1010102:
-    case gfx::BufferFormat::DXT1:
-    case gfx::BufferFormat::DXT5:
-    case gfx::BufferFormat::ETC1:
     case gfx::BufferFormat::R_16:
     case gfx::BufferFormat::RG_88:
     case gfx::BufferFormat::UYVY_422:
@@ -216,13 +211,8 @@ GLenum InternalFormat(gfx::BufferFormat format) {
       return GL_BGRA_EXT;
     case gfx::BufferFormat::RGBA_F16:
       return GL_RGBA;
-    case gfx::BufferFormat::ATC:
-    case gfx::BufferFormat::ATCIA:
     case gfx::BufferFormat::BGRX_8888:
     case gfx::BufferFormat::BGRX_1010102:
-    case gfx::BufferFormat::DXT1:
-    case gfx::BufferFormat::DXT5:
-    case gfx::BufferFormat::ETC1:
     case gfx::BufferFormat::RGBX_8888:
     case gfx::BufferFormat::UYVY_422:
     case gfx::BufferFormat::YVU_420:
@@ -291,7 +281,7 @@ TEST_P(GpuMemoryBufferTest, Lifecycle) {
                             InternalFormat(GetParam()));
   ASSERT_NE(0u, image_id);
   ASSERT_TRUE(gl_.decoder()->GetImageManagerForTest()->LookupImage(image_id) !=
-              NULL);
+              nullptr);
 
   // Bind the image.
   glBindTexImage2DCHROMIUM(GL_TEXTURE_2D, image_id);
@@ -395,7 +385,7 @@ TEST_F(GpuMemoryBufferTestEGL, GLCreateImageCHROMIUMFromNativePixmap) {
   // ImageManager. I.e. for the tests the ImageManager lives in the client side
   // so there is no need to call glShallowFinishCHROMIUM().
   EXPECT_TRUE(gl_.decoder()->GetImageManagerForTest()->LookupImage(image_id) !=
-              NULL);
+              nullptr);
   ASSERT_TRUE(glGetError() == GL_NO_ERROR);
 
   // Need a texture to bind the image.

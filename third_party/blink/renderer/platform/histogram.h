@@ -26,6 +26,7 @@ class PLATFORM_EXPORT CustomCountHistogram {
                        base::HistogramBase::Sample max,
                        int32_t bucket_count);
   void Count(base::HistogramBase::Sample);
+  void CountMicroseconds(base::TimeDelta);
 
  protected:
   explicit CustomCountHistogram(base::HistogramBase*);
@@ -69,7 +70,22 @@ class PLATFORM_EXPORT ScopedUsHistogramTimer {
       : start_time_(CurrentTimeTicks()), counter_(counter) {}
 
   ~ScopedUsHistogramTimer() {
-    counter_.Count((CurrentTimeTicks() - start_time_).InMicroseconds());
+    counter_.CountMicroseconds(CurrentTimeTicks() - start_time_);
+  }
+
+ private:
+  TimeTicks start_time_;
+  CustomCountHistogram& counter_;
+};
+
+class PLATFORM_EXPORT ScopedHighResUsHistogramTimer {
+ public:
+  explicit ScopedHighResUsHistogramTimer(CustomCountHistogram& counter)
+      : start_time_(CurrentTimeTicks()), counter_(counter) {}
+
+  ~ScopedHighResUsHistogramTimer() {
+    if (TimeTicks::IsHighResolution())
+      counter_.CountMicroseconds(CurrentTimeTicks() - start_time_);
   }
 
  private:
@@ -82,6 +98,12 @@ class PLATFORM_EXPORT ScopedUsHistogramTimer {
                            (name, 0, 10000000, 50), allow_cross_thread); \
   ScopedUsHistogramTimer timer(scoped_us_counter);
 
+#define SCOPED_BLINK_UMA_HISTOGRAM_TIMER_HIGHRES_IMPL(name,               \
+                                                      allow_cross_thread) \
+  DEFINE_STATIC_LOCAL_IMPL(CustomCountHistogram, scoped_us_counter,       \
+                           (name, 0, 10000000, 50), allow_cross_thread);  \
+  ScopedHighResUsHistogramTimer timer(scoped_us_counter);
+
 // Use code like this to record time, in microseconds, to execute a block of
 // code:
 //
@@ -93,6 +115,10 @@ class PLATFORM_EXPORT ScopedUsHistogramTimer {
 // Do not change this macro without renaming all metrics that use it!
 #define SCOPED_BLINK_UMA_HISTOGRAM_TIMER(name) \
   SCOPED_BLINK_UMA_HISTOGRAM_TIMER_IMPL(name, false)
+
+// Only record samples when we have a high resolution timer
+#define SCOPED_BLINK_UMA_HISTOGRAM_TIMER_HIGHRES(name) \
+  SCOPED_BLINK_UMA_HISTOGRAM_TIMER_HIGHRES_IMPL(name, false)
 
 // Thread-safe variant of SCOPED_BLINK_UMA_HISTOGRAM_TIMER.
 // Use if the histogram can be accessed by multiple threads.

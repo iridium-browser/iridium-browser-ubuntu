@@ -1,195 +1,225 @@
-# Copyright 2017 The Chromium Authors. All rights reserved.
+# Copyright 2018 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+import collections
+import sys
 
-"""Script to generate benchmark_sharding_map.json in the //tools/perf/core
-directory. This file controls which bots run which tests.
+import core.path_util
 
-The file is a JSON dictionary. It maps waterfall name to a mapping of benchmark
-to bot id. E.g.
-
-{
-  "build1-b1": {
-    "benchmarks": [
-      "battor.steady_state",
-      ...
-    ],
-  }
-}
-
-This will be used to manually shard tests to certain bots, to more efficiently
-execute all our tests.
-"""
-
-import argparse
-import json
-import os
-
-from core import path_util
-path_util.AddTelemetryToPath()
+core.path_util.AddTelemetryToPath()
 
 
-def get_sharding_map_path():
-  return os.path.join(
-      path_util.GetChromiumSrcDir(), 'tools', 'perf', 'core',
-      'benchmark_sharding_map.json')
 
+def generate_sharding_map(
+    benchmarks_to_shard, timing_data, num_shards, debug):
+  """Generate sharding map.
 
-def load_benchmark_sharding_map():
-  with open(get_sharding_map_path()) as f:
-    raw = json.load(f)
+    Args:
+      benchmarks_to_shard is a list all benchmarks to be sharded. Its
+      structure is as follows:
+      [{
+         "name": "benchmark_1",
+         "stories": [ "storyA", "storyB",...],
+         "repeat": <number of pageset_repeat>
+        },
+        {
+         "name": "benchmark_2",
+         "stories": [ "storyA", "storyB",...],
+         "repeat": <number of pageset_repeat>
+        },
+         ...
+      ]
 
-  # The raw json format is easy for people to modify, but isn't what we want
-  # here. Change it to map builder -> benchmark -> device.
-  final_map = {}
-  for builder, builder_map in raw.items():
-    if builder == 'all_benchmarks':
-      continue
+      The "stories" field contains a list of ordered story names. Notes that
+      this should match the actual order of how the benchmark stories are
+      executed for the sharding algorithm to be effective.
 
-    # Ignore comment at the top of the builder_map
-    if builder == "comment":
-      continue
-    final_builder_map = {}
-    for device, device_value in builder_map.items():
-      for benchmark_name in device_value['benchmarks']:
-        final_builder_map[benchmark_name] = device
-    final_map[builder] = final_builder_map
-
-  return final_map
-
-
-# Returns a sorted list of (benchmark, avg_runtime) pairs for every
-# benchmark in the all_benchmarks list where avg_runtime is in seconds.  Also
-# returns a list of benchmarks whose run time have not been seen before
-def get_sorted_benchmark_list_by_time(all_benchmarks):
-  runtime_list = []
-  benchmark_avgs = {}
-  timing_file_path = os.path.join(
-      path_util.GetChromiumSrcDir(), 'tools', 'perf', 'core',
-      'desktop_benchmark_avg_times.json')
-  # Load in the avg times as calculated on Nov 1st, 2016
-  with open(timing_file_path) as f:
-    benchmark_avgs = json.load(f)
-
-  for benchmark in all_benchmarks:
-    benchmark_avg_time = benchmark_avgs.get(benchmark.Name(), None)
-    assert benchmark_avg_time
-    # Need to multiple the seconds by 2 since we will be generating two tests
-    # for each benchmark to be run on the same shard for the reference build
-    runtime_list.append((benchmark, benchmark_avg_time * 2.0))
-
-  # Return a reverse sorted list by runtime
-  runtime_list.sort(key=lambda tup: tup[1], reverse=True)
-  return runtime_list
-
-
-# Returns a map of benchmark name to shard it is on.
-def shard_benchmarks(num_shards, all_benchmarks):
-  benchmark_to_shard_dict = {}
-  shard_execution_times = [0] * num_shards
-  sorted_benchmark_list = get_sorted_benchmark_list_by_time(all_benchmarks)
-  # Iterate over in reverse order and add them to the current smallest bucket.
-  for benchmark in sorted_benchmark_list:
-    # Find current smallest bucket
-    min_index = shard_execution_times.index(min(shard_execution_times))
-    benchmark_to_shard_dict[benchmark[0].Name()] = min_index
-    shard_execution_times[min_index] += benchmark[1]
-  return benchmark_to_shard_dict
-
-def regenerate(
-    benchmarks, waterfall_configs, dry_run, verbose, builder_names=None):
-  """Regenerate the shard mapping file.
-
-  This overwrites the current file with fresh data.
   """
-  if not builder_names:
-    builder_names = []
+  # Sort the list of benchmarks to be sharded by benchmark's name to make the
+  # execution of this algorithm deterministic.
+  benchmarks_to_shard.sort(key=lambda entry: entry['name'])
 
-  with open(get_sharding_map_path()) as f:
-    sharding_map = json.load(f)
+  story_timing_list = _gather_timing_data(
+      benchmarks_to_shard, timing_data, True)
 
-  all_benchmarks = [b.Name() for b in benchmarks]
-  sharding_map[u'all_benchmarks'] = all_benchmarks
+  all_stories = {}
+  for b in benchmarks_to_shard:
+    all_stories[b['name']] = b['stories']
 
-  for name, config in waterfall_configs.items():
-    for builder, tester in config['testers'].items():
-      if not tester.get('swarming'):
-        continue
+  total_time = sum(p[1] for p in story_timing_list)
+  expected_time_per_shard = total_time/num_shards
 
-      if builder not in builder_names:
-        continue
-      per_builder = {}
+  total_time_scheduled = 0
+  sharding_map = collections.OrderedDict()
+  debug_map = collections.OrderedDict()
+  min_shard_time = sys.maxint
+  min_shard_index = None
+  max_shard_time = 0
+  max_shard_index = None
+  num_stories = len(story_timing_list)
+  predicted_shard_timings = []
 
-      devices = tester['swarming_dimensions'][0]['device_ids']
-      shard_number = len(devices)
-      shard = shard_benchmarks(shard_number, benchmarks)
+  # The algorithm below removes all the stories from |story_timing_list| one by
+  # one and add them to the current shard until the shard's total time is
+  # approximately equals to |expected_time_per_shard|. After that point,
+  # it moves to the next shard.
+  # For efficient removal of |story_timing_list|'s elements & to keep the
+  # ordering of benchmark alphabetically sorted in the shards' assignment, we
+  # reverse the |story_timing_list|.
+  story_timing_list.reverse()
+  num_stories = len(story_timing_list)
+  final_shard_index = num_shards - 1
+  for i in range(num_shards):
+    shard_name = 'shard #%i' % i
+    sharding_map[str(i)] = {'benchmarks': collections.OrderedDict()}
+    debug_map[shard_name] = collections.OrderedDict()
+    time_per_shard = 0
+    stories_in_shard = []
+    expected_total_time = expected_time_per_shard * (i + 1)
+    last_diff = abs(total_time_scheduled - expected_total_time)
+    # Keep adding story to the current shard until either:
+    # * The absolute difference between the total time of shards so far and
+    #   expected total time is minimal.
+    # * The shard is final shard, and there is no more stories to add.
+    #
+    # Note: we do check for the final shard in case due to rounding error,
+    # the last_diff can be minimal even if we don't add all the stories to the
+    # final shard.
+    while story_timing_list:
+      candidate_story, candidate_story_duration = story_timing_list[-1]
+      new_diff = abs(total_time_scheduled + candidate_story_duration -
+                     expected_total_time)
+      if new_diff < last_diff or i == final_shard_index:
+        story_timing_list.pop()
+        total_time_scheduled += candidate_story_duration
+        time_per_shard += candidate_story_duration
+        stories_in_shard.append(candidate_story)
+        debug_map[shard_name][candidate_story] = candidate_story_duration
+        last_diff = abs(total_time_scheduled - expected_total_time)
+        _add_benchmarks_to_shard(sharding_map, i, stories_in_shard, all_stories)
+      else:
+        break
+    # Double time_per_shard to account for reference benchmark run.
+    debug_map[shard_name]['expected_total_time'] = time_per_shard * 2
+    if time_per_shard > max_shard_time:
+      max_shard_time = time_per_shard
+      max_shard_index = i
+    if time_per_shard < min_shard_time:
+      min_shard_time = time_per_shard
+      min_shard_index = i
 
-      for name, index in shard.items():
-        device = devices[index]
-        device_map = per_builder.get(device, {'benchmarks': []})
-        device_map['benchmarks'].append(name)
-        per_builder[device] = device_map
-      sharding_map[builder] = per_builder
+    predicted_shard_timings.append((shard_name, time_per_shard * 2))
 
+  sharding_map['extra_infos'] = collections.OrderedDict([
+      ('num_stories', num_stories),
+      # Double all the time stats by 2 to account for reference build.
+      ('predicted_min_shard_time', min_shard_time * 2),
+      ('predicted_min_shard_index', min_shard_index),
+      ('predicted_max_shard_time', max_shard_time * 2),
+      ('predicted_max_shard_index', max_shard_index),
+      ])
 
-  for name, builder_values in sharding_map.items():
-    if name == 'all_benchmarks':
-      builder_values.sort()
-      continue
-
-    for value in builder_values.values():
-      # Remove any deleted benchmarks
-      benchmarks = []
-      for b in value['benchmarks']:
-        if b in all_benchmarks:
-          benchmarks.append(b)
-      value['benchmarks'] = benchmarks
-      value['benchmarks'].sort()
-
-  if not dry_run:
-    with open(get_sharding_map_path(), 'w') as f:
-      dump_json(sharding_map, f)
+  if debug:
+    sharding_map['extra_infos'].update(debug_map)
   else:
-    f_string = 'Would have dumped new json file to %s.'
-    if verbose:
-      f_string += ' File contents:\n %s'
-      print f_string % (get_sharding_map_path(), dumps_json(sharding_map))
-    else:
-      f_string += ' To see full file contents, pass in --verbose.'
-      print f_string % get_sharding_map_path()
-
-  return 0
+    sharding_map['extra_infos'].update(predicted_shard_timings)
+  return sharding_map
 
 
-def get_args():
-  parser = argparse.ArgumentParser(
-      description=('Generate perf test sharding map.'
-                   'This needs to be done anytime you add/remove any existing'
-                   'benchmarks in tools/perf/benchmarks.'))
+def _add_benchmarks_to_shard(sharding_map, shard_index, stories_in_shard,
+    all_stories):
+  benchmarks = collections.OrderedDict()
+  for story in stories_in_shard:
+    (b, story) = story.split('/', 1)
+    if b not in benchmarks:
+      benchmarks[b] = []
+    benchmarks[b].append(story)
 
-  parser.add_argument(
-      '--builder-names', '-b', action='append', default=None,
-      help='Specifies a subset of builders which should be affected by commands'
-           '. By default, commands affect all builders.')
-  parser.add_argument(
-      '--dry-run', action='store_true',
-      help='If the current run should be a dry run. A dry run means that any'
-      ' action which would be taken (write out data to a file, for example) is'
-      ' instead simulated.')
-  parser.add_argument(
-      '--verbose', action='store_true',
-      help='Determines how verbose the script is.')
-  return parser
+  # Format the benchmark's stories by indices
+  benchmarks_in_shard = collections.OrderedDict()
+  for b in benchmarks:
+    benchmarks_in_shard[b] = {}
+    first_story = all_stories[b].index(benchmarks[b][0])
+    last_story = all_stories[b].index(benchmarks[b][-1]) + 1
+    if first_story != 0:
+      benchmarks_in_shard[b]['begin'] = first_story
+    if last_story != len(all_stories[b]):
+      benchmarks_in_shard[b]['end'] = last_story
+  sharding_map[str(shard_index)] = {'benchmarks': benchmarks_in_shard}
 
 
-def dump_json(data, f):
-  """Utility method to dump json which is indented, sorted, and readable"""
-  return json.dump(data, f, indent=2, sort_keys=True, separators=(',', ': '))
+def _gather_timing_data(benchmarks_to_shard, timing_data, repeat):
+  story_timing_dict = {}
+  benchmarks_data_by_name = {}
+  for b in benchmarks_to_shard:
+    story_list = b['stories']
+    benchmarks_data_by_name[b['name']] = b
+    # Initialize the duration of all stories to be shard to 1 * repeat.
+    # The reasons are:
+    # 1) Even if the stories are skipped, they still have non neligible
+    #    overhead.
+    # 2) For a case of sharding a set of benchmarks with no existing data about
+    #    timing, initializing the stories time within a single repeat to 1 leads
+    #    to a roughly equal distribution of stories on the shards, whereas
+    #    initializing them to zero will make the algorithm put all the stories
+    #    into the first shard.
+    for story in story_list:
+      story_timing_dict[b['name'] + '/' + story] = b['repeat']
 
-def dumps_json(data):
-  """Utility method to dump json which is indented, sorted, and readable"""
-  return json.dumps(data, indent=2, sort_keys=True, separators=(',', ': '))
+  for run in timing_data:
+    benchmark = run['name'].split('/', 1)[0]
+    if run['name'] in story_timing_dict:
+      if run['duration']:
+        if repeat:
+          story_timing_dict[run['name']] = (float(run['duration'])
+              * benchmarks_data_by_name[benchmark]['repeat'])
+        else:
+          story_timing_dict[run['name']] = float(run['duration'])
+  story_timing_list = []
+  for entry in benchmarks_to_shard:
+    benchmark_name = entry['name']
+    for story_name in entry['stories']:
+      test_name = '%s/%s' % (benchmark_name, story_name)
+      story_timing_list.append((test_name, story_timing_dict[test_name]))
+  return story_timing_list
 
-def main(args, benchmarks, configs):
-  return regenerate(
-      benchmarks, configs, args.dry_run, args.verbose, args.builder_names)
+
+def _generate_empty_sharding_map(num_shards):
+  sharding_map = collections.OrderedDict()
+  for i in range(0, num_shards):
+    sharding_map[str(i)] = {'benchmarks': collections.OrderedDict()}
+  return sharding_map
+
+
+def test_sharding_map(
+    sharding_map, benchmarks_to_shard, test_timing_data):
+  story_timing_list = _gather_timing_data(
+      benchmarks_to_shard, test_timing_data, False)
+
+  story_timing_dict = dict(story_timing_list)
+
+  results = collections.OrderedDict()
+  all_stories = {}
+  for b in benchmarks_to_shard:
+    all_stories[b['name']] = b['stories']
+
+  sharding_map.pop('extra_infos', None)
+  for shard in sharding_map:
+    results[shard] = collections.OrderedDict()
+    shard_total_time = 0
+    for benchmark_name in sharding_map[shard]['benchmarks']:
+      benchmark = sharding_map[shard]['benchmarks'][benchmark_name]
+      begin = 0
+      end = len(all_stories[benchmark_name])
+      if 'begin' in benchmark:
+        begin = benchmark['begin']
+      if 'end' in benchmark:
+        end = benchmark['end']
+      benchmark_timing = 0
+      for story in all_stories[benchmark_name][begin : end]:
+        story_timing = story_timing_dict[benchmark_name + '/' + story]
+        results[shard][benchmark_name + '/' + story] = str(story_timing)
+        benchmark_timing += story_timing
+      shard_total_time += benchmark_timing
+    results[shard]['full_time'] = shard_total_time
+  return results

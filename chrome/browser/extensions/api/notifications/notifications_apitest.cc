@@ -5,13 +5,12 @@
 #include <memory>
 
 #include "base/containers/circular_deque.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
-#include "chrome/browser/apps/app_browsertest_util.h"
+#include "chrome/browser/apps/platform_apps/app_browsertest_util.h"
 #include "chrome/browser/extensions/api/notifications/extension_notification_display_helper.h"
 #include "chrome/browser/extensions/api/notifications/extension_notification_display_helper_factory.h"
 #include "chrome/browser/extensions/api/notifications/extension_notification_handler.h"
@@ -112,7 +111,7 @@ enum class WindowState {
   NORMAL
 };
 
-class NotificationsApiTest : public ExtensionApiTest {
+class NotificationsApiTest : public extensions::ExtensionApiTest {
  public:
   const Extension* LoadExtensionAndWait(
       const std::string& test_name) {
@@ -173,7 +172,7 @@ class NotificationsApiTest : public ExtensionApiTest {
 
  protected:
   void SetUpOnMainThread() override {
-    ExtensionApiTest::SetUpOnMainThread();
+    extensions::ExtensionApiTest::SetUpOnMainThread();
 
     DCHECK(profile());
     display_service_tester_ =
@@ -182,7 +181,7 @@ class NotificationsApiTest : public ExtensionApiTest {
 
   void TearDownOnMainThread() override {
     display_service_tester_.reset();
-    ExtensionApiTest::TearDownOnMainThread();
+    extensions::ExtensionApiTest::TearDownOnMainThread();
   }
 
   // Returns the notification that's being displayed for |extension|, or nullptr
@@ -293,12 +292,13 @@ IN_PROC_BROWSER_TEST_F(NotificationsApiTest, TestPartialUpdate) {
   EXPECT_EQ(base::ASCIIToUTF16(kNewTitle), notification->title());
   EXPECT_EQ(base::ASCIIToUTF16(kNewMessage), notification->message());
   EXPECT_EQ(kNewPriority, notification->priority());
+  EXPECT_TRUE(notification->silent());
   EXPECT_EQ(1u, notification->buttons().size());
   EXPECT_EQ(base::ASCIIToUTF16(kButtonTitle), notification->buttons()[0].title);
 }
 
 IN_PROC_BROWSER_TEST_F(NotificationsApiTest, TestGetPermissionLevel) {
-  scoped_refptr<Extension> empty_extension(
+  scoped_refptr<const Extension> empty_extension(
       extensions::ExtensionBuilder("Test").Build());
 
   // Get permission level for the extension whose notifications are enabled.

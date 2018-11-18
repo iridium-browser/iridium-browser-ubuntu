@@ -15,7 +15,6 @@ namespace net {
 
 MockPacFileFetcher::MockPacFileFetcher()
     : pending_request_text_(NULL),
-      waiting_for_fetch_(false),
       is_shutdown_(false) {}
 
 MockPacFileFetcher::~MockPacFileFetcher() = default;
@@ -24,19 +23,19 @@ MockPacFileFetcher::~MockPacFileFetcher() = default;
 int MockPacFileFetcher::Fetch(
     const GURL& url,
     base::string16* text,
-    const CompletionCallback& callback,
+    CompletionOnceCallback callback,
     const NetworkTrafficAnnotationTag traffic_annotation) {
   DCHECK(!has_pending_request());
 
-  if (waiting_for_fetch_)
-    base::RunLoop::QuitCurrentWhenIdleDeprecated();
+  if (on_fetch_complete_)
+    std::move(on_fetch_complete_).Run();
 
   if (is_shutdown_)
     return ERR_CONTEXT_SHUT_DOWN;
 
   // Save the caller's information, and have them wait.
   pending_request_url_ = url;
-  pending_request_callback_ = callback;
+  pending_request_callback_ = std::move(callback);
   pending_request_text_ = text;
 
   return ERR_IO_PENDING;
@@ -74,9 +73,9 @@ bool MockPacFileFetcher::has_pending_request() const {
 
 void MockPacFileFetcher::WaitUntilFetch() {
   DCHECK(!has_pending_request());
-  waiting_for_fetch_ = true;
-  base::RunLoop().Run();
-  waiting_for_fetch_ = false;
+  base::RunLoop run_loop;
+  on_fetch_complete_ = run_loop.QuitClosure();
+  run_loop.Run();
 }
 
 }  // namespace net

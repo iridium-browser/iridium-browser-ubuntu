@@ -17,10 +17,12 @@ class Bus;
 namespace chromeos {
 
 class BiodClient;
+class CecServiceClient;
 class CrasAudioClient;
 class CryptohomeClient;
 class GsmSMSClient;
 class HammerdClient;
+class MachineLearningClient;
 class ModemMessagingClient;
 class PermissionBrokerClient;
 class PowerManagerClient;
@@ -52,10 +54,12 @@ class CHROMEOS_EXPORT DBusClientsCommon {
   friend class DBusThreadManagerSetter;
 
   std::unique_ptr<BiodClient> biod_client_;
+  std::unique_ptr<CecServiceClient> cec_service_client_;
   std::unique_ptr<CrasAudioClient> cras_audio_client_;
   std::unique_ptr<CryptohomeClient> cryptohome_client_;
   std::unique_ptr<GsmSMSClient> gsm_sms_client_;
   std::unique_ptr<HammerdClient> hammerd_client_;
+  std::unique_ptr<MachineLearningClient> machine_learning_client_;
   std::unique_ptr<ModemMessagingClient> modem_messaging_client_;
   std::unique_ptr<ShillDeviceClient> shill_device_client_;
   std::unique_ptr<ShillIPConfigClient> shill_ipconfig_client_;

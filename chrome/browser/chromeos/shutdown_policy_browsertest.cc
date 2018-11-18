@@ -7,18 +7,16 @@
 
 #include "ash/login_status.h"
 #include "ash/public/cpp/ash_switches.h"
-#include "ash/shell.h"
-#include "ash/strings/grit/ash_strings.h"
-#include "ash/system/tiles/tiles_default_view.h"
-#include "ash/system/tiles/tray_tiles.h"
-#include "ash/system/tray/system_tray.h"
-#include "ash/system/tray/system_tray_test_api.h"
+#include "ash/public/cpp/ash_view_ids.h"
+#include "ash/public/interfaces/constants.mojom.h"
+#include "ash/public/interfaces/system_tray_test_api.mojom.h"
 #include "base/command_line.h"
 #include "base/location.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/login/lock/screen_locker.h"
@@ -39,9 +37,10 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
+#include "content/public/common/service_manager_connection.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
-#include "ui/base/l10n/l10n_util.h"
+#include "services/service_manager/public/cpp/connector.h"
 #include "ui/compositor/scoped_animation_duration_scale_mode.h"
 #include "ui/views/view.h"
 
@@ -83,6 +82,14 @@ class ShutdownPolicyBaseTest
   }
 
   // policy::DevicePolicyCrosBrowserTest:
+  void SetUpOnMainThread() override {
+    policy::DevicePolicyCrosBrowserTest::SetUpOnMainThread();
+    // Connect to the ash test interface.
+    content::ServiceManagerConnection::GetForProcess()
+        ->GetConnector()
+        ->BindInterface(ash::mojom::kServiceName, &tray_test_api_);
+  }
+
   void SetUpInProcessBrowserTestFixture() override {
     policy::DevicePolicyCrosBrowserTest::SetUpInProcessBrowserTestFixture();
     InstallOwnerKey();
@@ -136,6 +143,7 @@ class ShutdownPolicyBaseTest
   content::WebContents* contents_;
   bool result_;
   std::unique_ptr<base::RunLoop> run_loop_;
+  ash::mojom::SystemTrayTestApiPtr tray_test_api_;
 };
 
 class ShutdownPolicyInSessionTest
@@ -146,41 +154,33 @@ class ShutdownPolicyInSessionTest
 
   // Opens the system tray menu. This creates the tray views.
   void OpenSystemTrayMenu() {
-    ash::Shell::Get()->GetPrimarySystemTray()->ShowDefaultView(
-        ash::BUBBLE_CREATE_NEW, false /* show_by_click */);
+    ash::mojom::SystemTrayTestApiAsyncWaiter wait_for(tray_test_api_.get());
+    wait_for.ShowBubble();
   }
 
   // Closes the system tray menu. This deletes the tray views.
   void CloseSystemTrayMenu() {
-    ash::Shell::Get()->GetPrimarySystemTray()->CloseBubble();
-  }
-
-  // Gets the shutdown button view.
-  const views::View* GetShutdownButton() {
-    ash::SystemTray* tray = ash::Shell::Get()->GetPrimarySystemTray();
-    return ash::SystemTrayTestApi(tray)
-        .tray_tiles()
-        ->GetDefaultViewForTesting()
-        ->GetShutdownButtonViewForTest();
+    ash::mojom::SystemTrayTestApiAsyncWaiter wait_for(tray_test_api_.get());
+    wait_for.CloseBubble();
   }
 
   // Returns true if the shutdown button's tooltip matches the text of the
   // resource |message_id|.
-  bool HasShutdownButtonTooltip(int message_id) {
-    const views::View* button = GetShutdownButton();
+  bool HasShutdownButtonTooltip(const std::string& tooltip) {
+    ash::mojom::SystemTrayTestApiAsyncWaiter wait_for(tray_test_api_.get());
     base::string16 actual_tooltip;
-    button->GetTooltipText(gfx::Point(), &actual_tooltip);
-    return l10n_util::GetStringUTF16(message_id) == actual_tooltip;
+    wait_for.GetBubbleViewTooltip(ash::VIEW_ID_POWER_BUTTON, &actual_tooltip);
+    return base::UTF8ToUTF16(tooltip) == actual_tooltip;
   }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(ShutdownPolicyInSessionTest);
 };
 
-// Tests that by default the shutdown button tooltip is "shutdown".
+// Tests that by default the shutdown button tooltip is "Shut down".
 IN_PROC_BROWSER_TEST_F(ShutdownPolicyInSessionTest, TestBasic) {
   OpenSystemTrayMenu();
-  EXPECT_TRUE(HasShutdownButtonTooltip(IDS_ASH_STATUS_TRAY_SHUTDOWN));
+  EXPECT_TRUE(HasShutdownButtonTooltip("Shut down"));
   CloseSystemTrayMenu();
 }
 
@@ -188,15 +188,16 @@ IN_PROC_BROWSER_TEST_F(ShutdownPolicyInSessionTest, TestBasic) {
 // tooltip to "restart". Note that the tooltip doesn't change dynamically if the
 // menu is open during the policy change -- that's a rare condition and
 // supporting it would add complexity.
-IN_PROC_BROWSER_TEST_F(ShutdownPolicyInSessionTest, PolicyChange) {
+//
+// TODO(crbug.com/851208): Disabled test due to flakiness.
+IN_PROC_BROWSER_TEST_F(ShutdownPolicyInSessionTest, DISABLED_PolicyChange) {
   // Change the policy to reboot and let it propagate over mojo to ash.
   UpdateRebootOnShutdownPolicy(true);
   SyncRefreshDevicePolicy();
   content::RunAllPendingInMessageLoop();
 
-  // When the menu is opened the tooltip reads "reboot".
   OpenSystemTrayMenu();
-  EXPECT_TRUE(HasShutdownButtonTooltip(IDS_ASH_STATUS_TRAY_REBOOT));
+  EXPECT_TRUE(HasShutdownButtonTooltip("Restart"));
   CloseSystemTrayMenu();
 
   // Change the policy to shutdown and let it propagate over mojo to ash.
@@ -204,9 +205,8 @@ IN_PROC_BROWSER_TEST_F(ShutdownPolicyInSessionTest, PolicyChange) {
   SyncRefreshDevicePolicy();
   content::RunAllPendingInMessageLoop();
 
-  // When the menu is opened the tooltip reads "shutdown".
   OpenSystemTrayMenu();
-  EXPECT_TRUE(HasShutdownButtonTooltip(IDS_ASH_STATUS_TRAY_SHUTDOWN));
+  EXPECT_TRUE(HasShutdownButtonTooltip("Shut down"));
   CloseSystemTrayMenu();
 }
 
@@ -312,11 +312,7 @@ class ShutdownPolicyLoginTest : public ShutdownPolicyBaseTest {
         content::NotificationService::AllSources()).Wait();
     LoginDisplayHost* host = LoginDisplayHost::default_host();
     ASSERT_TRUE(host);
-    WebUILoginView* web_ui_login_view = host->GetWebUILoginView();
-    ASSERT_TRUE(web_ui_login_view);
-    content::WebUI* web_ui = web_ui_login_view->GetWebUI();
-    ASSERT_TRUE(web_ui);
-    contents_ = web_ui->GetWebContents();
+    contents_ = host->GetOobeWebContents();
     ASSERT_TRUE(contents_);
 
     // Wait for the login UI to be ready.
@@ -328,7 +324,7 @@ class ShutdownPolicyLoginTest : public ShutdownPolicyBaseTest {
     if (LoginDisplayHost::default_host()) {
       base::ThreadTaskRunnerHandle::Get()->PostTask(
           FROM_HERE, base::Bind(&chrome::AttemptExit));
-      content::RunMessageLoop();
+      RunUntilBrowserProcessQuits();
     }
   }
 

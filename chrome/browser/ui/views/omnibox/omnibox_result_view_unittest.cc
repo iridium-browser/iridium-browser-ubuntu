@@ -8,6 +8,7 @@
 
 #include "chrome/browser/ui/omnibox/omnibox_theme.h"
 #include "chrome/browser/ui/views/omnibox/omnibox_popup_contents_view.h"
+#include "chrome/test/views/chrome_views_test_base.h"
 #include "components/omnibox/browser/omnibox_edit_model.h"
 #include "components/omnibox/browser/test_omnibox_client.h"
 #include "content/public/test/test_browser_thread_bundle.h"
@@ -17,7 +18,6 @@
 #include "ui/events/event_constants.h"
 #include "ui/events/event_utils.h"
 #include "ui/gfx/image/image.h"
-#include "ui/views/test/views_test_base.h"
 #include "ui/views/widget/widget.h"
 
 namespace {
@@ -29,7 +29,10 @@ static constexpr int kTestResultViewIndex = 4;
 class TestOmniboxPopupContentsView : public OmniboxPopupContentsView {
  public:
   explicit TestOmniboxPopupContentsView(OmniboxEditModel* edit_model)
-      : OmniboxPopupContentsView(gfx::FontList(), nullptr, edit_model, nullptr),
+      : OmniboxPopupContentsView(
+            /*omnibox_view=*/nullptr,
+            edit_model,
+            /*location_bar_view=*/nullptr),
         selected_index_(0) {}
 
   void SetSelectedLine(size_t index) override { selected_index_ = index; }
@@ -46,17 +49,17 @@ class TestOmniboxPopupContentsView : public OmniboxPopupContentsView {
 
 }  // namespace
 
-class OmniboxResultViewTest : public views::ViewsTestBase {
+class OmniboxResultViewTest : public ChromeViewsTestBase {
  public:
   void SetUp() override {
-    ViewsTestBase::SetUp();
+    ChromeViewsTestBase::SetUp();
 
     edit_model_ = std::make_unique<OmniboxEditModel>(
         nullptr, nullptr, std::make_unique<TestOmniboxClient>());
     popup_view_ =
         std::make_unique<TestOmniboxPopupContentsView>(edit_model_.get());
-    result_view_ = new OmniboxResultView(popup_view_.get(),
-                                         kTestResultViewIndex, gfx::FontList());
+    result_view_ =
+        new OmniboxResultView(popup_view_.get(), kTestResultViewIndex);
 
     // Create a widget and assign bounds to support calls to HitTestPoint.
     widget_.reset(new views::Widget);
@@ -74,7 +77,7 @@ class OmniboxResultViewTest : public views::ViewsTestBase {
 
   void TearDown() override {
     widget_.reset();
-    views::ViewsTestBase::TearDown();
+    ChromeViewsTestBase::TearDown();
   }
 
   ui::MouseEvent CreateEvent(ui::EventType type, int flags) {

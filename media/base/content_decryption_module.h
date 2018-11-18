@@ -41,10 +41,10 @@ typedef std::vector<std::unique_ptr<CdmKeyInformation>> CdmKeysInfo;
 // Must be consistent with the values specified in the spec:
 // https://w3c.github.io/encrypted-media/#idl-def-MediaKeySessionType
 enum class CdmSessionType {
-  TEMPORARY_SESSION,
-  PERSISTENT_LICENSE_SESSION,
-  PERSISTENT_RELEASE_MESSAGE_SESSION,
-  SESSION_TYPE_MAX = PERSISTENT_RELEASE_MESSAGE_SESSION
+  kTemporary,
+  kPersistentLicense,
+  kPersistentUsageRecord,
+  kMaxValue = kPersistentUsageRecord
 };
 
 // Type of message being sent to the application.
@@ -68,7 +68,8 @@ enum class HdcpVersion {
   kHdcpVersion2_0,
   kHdcpVersion2_1,
   kHdcpVersion2_2,
-  kHdcpVersionMax = kHdcpVersion2_2
+  kHdcpVersion2_3,
+  kHdcpVersionMax = kHdcpVersion2_3
 };
 
 // An interface that represents the Content Decryption Module (CDM) in the

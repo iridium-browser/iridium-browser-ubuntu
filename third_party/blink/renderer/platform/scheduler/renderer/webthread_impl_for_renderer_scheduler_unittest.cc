@@ -12,11 +12,11 @@
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
+#include "base/task/sequence_manager/test/sequence_manager_for_test.h"
 #include "base/test/simple_test_tick_clock.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/platform/scheduler/main_thread/main_thread_scheduler_impl.h"
-#include "third_party/blink/renderer/platform/scheduler/test/task_queue_manager_for_test.h"
 
 namespace blink {
 namespace scheduler {
@@ -30,7 +30,7 @@ class MockTask {
   MOCK_METHOD0(Run, void());
 };
 
-class MockTaskObserver : public blink::WebThread::TaskObserver {
+class MockTaskObserver : public Thread::TaskObserver {
  public:
   MOCK_METHOD0(WillProcessTask, void());
   MOCK_METHOD0(DidProcessTask, void());
@@ -43,10 +43,9 @@ class WebThreadImplForRendererSchedulerTest : public testing::Test {
   void SetUp() override {
     clock_.Advance(base::TimeDelta::FromMicroseconds(5000));
     scheduler_.reset(new MainThreadSchedulerImpl(
-        TaskQueueManagerForTest::Create(&message_loop_,
-                                        message_loop_.task_runner(), &clock_),
+        base::sequence_manager::SequenceManagerForTest::Create(
+            &message_loop_, message_loop_.task_runner(), &clock_),
         base::nullopt));
-    default_task_runner_ = scheduler_->DefaultTaskQueue();
     thread_ = scheduler_->CreateMainThread();
   }
 
@@ -63,8 +62,7 @@ class WebThreadImplForRendererSchedulerTest : public testing::Test {
   base::MessageLoop message_loop_;
   base::SimpleTestTickClock clock_;
   std::unique_ptr<MainThreadSchedulerImpl> scheduler_;
-  scoped_refptr<base::SingleThreadTaskRunner> default_task_runner_;
-  std::unique_ptr<blink::WebThread> thread_;
+  std::unique_ptr<Thread> thread_;
 
   DISALLOW_COPY_AND_ASSIGN(WebThreadImplForRendererSchedulerTest);
 };
@@ -81,7 +79,7 @@ TEST_F(WebThreadImplForRendererSchedulerTest, TestTaskObserver) {
     EXPECT_CALL(observer, DidProcessTask());
   }
 
-  thread_->GetTaskRunner()->PostTask(
+  message_loop_.task_runner()->PostTask(
       FROM_HERE, WTF::Bind(&MockTask::Run, WTF::Unretained(&task)));
   base::RunLoop().RunUntilIdle();
   thread_->RemoveTaskObserver(&observer);
@@ -100,7 +98,7 @@ TEST_F(WebThreadImplForRendererSchedulerTest, TestWorkBatchWithOneTask) {
     EXPECT_CALL(observer, DidProcessTask());
   }
 
-  thread_->GetTaskRunner()->PostTask(
+  message_loop_.task_runner()->PostTask(
       FROM_HERE, WTF::Bind(&MockTask::Run, WTF::Unretained(&task)));
   base::RunLoop().RunUntilIdle();
   thread_->RemoveTaskObserver(&observer);
@@ -124,9 +122,9 @@ TEST_F(WebThreadImplForRendererSchedulerTest, TestWorkBatchWithTwoTasks) {
     EXPECT_CALL(observer, DidProcessTask());
   }
 
-  thread_->GetTaskRunner()->PostTask(
+  message_loop_.task_runner()->PostTask(
       FROM_HERE, WTF::Bind(&MockTask::Run, WTF::Unretained(&task1)));
-  thread_->GetTaskRunner()->PostTask(
+  message_loop_.task_runner()->PostTask(
       FROM_HERE, WTF::Bind(&MockTask::Run, WTF::Unretained(&task2)));
   base::RunLoop().RunUntilIdle();
   thread_->RemoveTaskObserver(&observer);
@@ -155,21 +153,21 @@ TEST_F(WebThreadImplForRendererSchedulerTest, TestWorkBatchWithThreeTasks) {
     EXPECT_CALL(observer, DidProcessTask());
   }
 
-  thread_->GetTaskRunner()->PostTask(
+  message_loop_.task_runner()->PostTask(
       FROM_HERE, WTF::Bind(&MockTask::Run, WTF::Unretained(&task1)));
-  thread_->GetTaskRunner()->PostTask(
+  message_loop_.task_runner()->PostTask(
       FROM_HERE, WTF::Bind(&MockTask::Run, WTF::Unretained(&task2)));
-  thread_->GetTaskRunner()->PostTask(
+  message_loop_.task_runner()->PostTask(
       FROM_HERE, WTF::Bind(&MockTask::Run, WTF::Unretained(&task3)));
   base::RunLoop().RunUntilIdle();
   thread_->RemoveTaskObserver(&observer);
 }
 
-void EnterRunLoop(base::MessageLoop* message_loop, blink::WebThread* thread) {
-  // Note: WebThreads do not support nested run loops, which is why we use a
+void EnterRunLoop(base::MessageLoop* message_loop, Thread* thread) {
+  // Note: blink::Threads do not support nested run loops, which is why we use a
   // run loop directly.
   base::RunLoop run_loop;
-  thread->GetTaskRunner()->PostTask(
+  message_loop->task_runner()->PostTask(
       FROM_HERE, WTF::Bind(&base::RunLoop::Quit, WTF::Unretained(&run_loop)));
   message_loop->SetNestableTasksAllowed(true);
   run_loop.Run();

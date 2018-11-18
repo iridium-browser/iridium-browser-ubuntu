@@ -11,36 +11,37 @@
 #ifndef TestDictionary_h
 #define TestDictionary_h
 
-#include "bindings/core/v8/dictionary.h"
-#include "bindings/core/v8/double_or_double_or_null_sequence.h"
-#include "bindings/core/v8/double_or_double_sequence.h"
-#include "bindings/core/v8/double_or_string.h"
-#include "bindings/core/v8/float_or_boolean.h"
-#include "bindings/core/v8/idl_dictionary_base.h"
-#include "bindings/core/v8/long_or_boolean.h"
-#include "bindings/core/v8/script_value.h"
-#include "bindings/core/v8/test_enum_or_test_enum_or_null_sequence.h"
-#include "bindings/core/v8/test_enum_or_test_enum_sequence.h"
-#include "bindings/core/v8/test_interface_2_or_uint8_array.h"
-#include "bindings/tests/idls/core/test_interface_2.h"
-#include "core/core_export.h"
-#include "core/testing/internal_dictionary.h"
-#include "core/typed_arrays/array_buffer_view_helpers.h"
-#include "core/typed_arrays/dom_typed_array.h"
-#include "platform/heap/handle.h"
-#include "platform/wtf/text/wtf_string.h"
-#include "platform/wtf/vector.h"
+#include "third_party/blink/renderer/bindings/core/v8/dictionary.h"
+#include "third_party/blink/renderer/bindings/core/v8/double_or_double_or_null_sequence.h"
+#include "third_party/blink/renderer/bindings/core/v8/double_or_double_sequence.h"
+#include "third_party/blink/renderer/bindings/core/v8/double_or_string.h"
+#include "third_party/blink/renderer/bindings/core/v8/float_or_boolean.h"
+#include "third_party/blink/renderer/bindings/core/v8/idl_dictionary_base.h"
+#include "third_party/blink/renderer/bindings/core/v8/long_or_boolean.h"
+#include "third_party/blink/renderer/bindings/core/v8/script_value.h"
+#include "third_party/blink/renderer/bindings/core/v8/test_enum_or_test_enum_or_null_sequence.h"
+#include "third_party/blink/renderer/bindings/core/v8/test_enum_or_test_enum_sequence.h"
+#include "third_party/blink/renderer/bindings/core/v8/test_interface_2_or_uint8_array.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_void_callback_function.h"
+#include "third_party/blink/renderer/bindings/tests/idls/core/test_interface_2.h"
+#include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/core/testing/internal_dictionary.h"
+#include "third_party/blink/renderer/core/typed_arrays/array_buffer_view_helpers.h"
+#include "third_party/blink/renderer/core/typed_arrays/dom_typed_array.h"
+#include "third_party/blink/renderer/platform/bindings/trace_wrapper_member.h"
+#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
+#include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
 
 class EventTarget;
-class TestInterfaceGarbageCollected;
 class TestObject;
 class TestInterfaceImplementation;
 class Element;
 
 class CORE_EXPORT TestDictionary : public IDLDictionaryBase {
-  DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
+  DISALLOW_NEW();
  public:
   TestDictionary();
   virtual ~TestDictionary();
@@ -86,6 +87,12 @@ class CORE_EXPORT TestDictionary : public IDLDictionaryBase {
   }
   inline void setByteStringMember(const String&);
 
+  bool hasCallbackFunctionMember() const { return callback_function_member_; }
+  V8VoidCallbackFunction* callbackFunctionMember() const {
+    return callback_function_member_;
+  }
+  void setCallbackFunctionMember(V8VoidCallbackFunction*);
+
   bool hasCreateMember() const { return has_create_member_; }
   bool createMember() const {
     DCHECK(has_create_member_);
@@ -114,18 +121,18 @@ class CORE_EXPORT TestDictionary : public IDLDictionaryBase {
   void setDoubleOrNullOrDoubleOrNullSequenceMember(const DoubleOrDoubleOrNullSequence&);
 
   bool hasDoubleOrNullRecordMember() const { return has_double_or_null_record_member_; }
-  const Vector<std::pair<String, Optional<double>>>& doubleOrNullRecordMember() const {
+  const Vector<std::pair<String, base::Optional<double>>>& doubleOrNullRecordMember() const {
     DCHECK(has_double_or_null_record_member_);
     return double_or_null_record_member_;
   }
-  void setDoubleOrNullRecordMember(const Vector<std::pair<String, Optional<double>>>&);
+  void setDoubleOrNullRecordMember(const Vector<std::pair<String, base::Optional<double>>>&);
 
   bool hasDoubleOrNullSequenceMember() const { return has_double_or_null_sequence_member_; }
-  const Vector<Optional<double>>& doubleOrNullSequenceMember() const {
+  const Vector<base::Optional<double>>& doubleOrNullSequenceMember() const {
     DCHECK(has_double_or_null_sequence_member_);
     return double_or_null_sequence_member_;
   }
-  void setDoubleOrNullSequenceMember(const Vector<Optional<double>>&);
+  void setDoubleOrNullSequenceMember(const Vector<base::Optional<double>>&);
 
   bool hasDoubleOrStringMember() const { return !double_or_string_member_.IsNull(); }
   const DoubleOrString& doubleOrStringMember() const {
@@ -140,7 +147,7 @@ class CORE_EXPORT TestDictionary : public IDLDictionaryBase {
   }
   void setDoubleOrStringSequenceMember(const HeapVector<DoubleOrString>&);
 
-  bool hasElementOrNullMember() const { return element_or_null_member_; }
+  bool hasElementOrNullMember() const { return has_element_or_null_member_; }
   Element* elementOrNullMember() const {
     return element_or_null_member_;
   }
@@ -215,6 +222,13 @@ class CORE_EXPORT TestDictionary : public IDLDictionaryBase {
   }
   inline void setLongMember(int32_t);
 
+  bool hasMemberWithHyphenInName() const { return has_member_with_hyphen_in_name_; }
+  bool memberWithHyphenInName() const {
+    DCHECK(has_member_with_hyphen_in_name_);
+    return member_with_hyphen_in_name_;
+  }
+  inline void setMemberWithHyphenInName(bool);
+
   bool hasObjectMember() const { return !(object_member_.IsEmpty() || object_member_.IsNull() || object_member_.IsUndefined()); }
   ScriptValue objectMember() const {
     return object_member_;
@@ -254,6 +268,12 @@ class CORE_EXPORT TestDictionary : public IDLDictionaryBase {
     return record_member_;
   }
   void setRecordMember(const Vector<std::pair<String, int8_t>>&);
+
+  bool hasRequiredCallbackFunctionMember() const { return required_callback_function_member_; }
+  V8VoidCallbackFunction* requiredCallbackFunctionMember() const {
+    return required_callback_function_member_;
+  }
+  void setRequiredCallbackFunctionMember(V8VoidCallbackFunction*);
 
   bool hasRestrictedDoubleMember() const { return has_restricted_double_member_; }
   double restrictedDoubleMember() const {
@@ -334,33 +354,13 @@ class CORE_EXPORT TestDictionary : public IDLDictionaryBase {
   }
   void setTestInterface2OrUint8ArrayMember(const TestInterface2OrUint8Array&);
 
-  bool hasTestInterfaceGarbageCollectedMember() const { return test_interface_garbage_collected_member_; }
-  TestInterfaceGarbageCollected* testInterfaceGarbageCollectedMember() const {
-    return test_interface_garbage_collected_member_;
-  }
-  inline void setTestInterfaceGarbageCollectedMember(TestInterfaceGarbageCollected*);
-
-  bool hasTestInterfaceGarbageCollectedOrNullMember() const { return test_interface_garbage_collected_or_null_member_; }
-  TestInterfaceGarbageCollected* testInterfaceGarbageCollectedOrNullMember() const {
-    return test_interface_garbage_collected_or_null_member_;
-  }
-  inline void setTestInterfaceGarbageCollectedOrNullMember(TestInterfaceGarbageCollected*);
-  inline void setTestInterfaceGarbageCollectedOrNullMemberToNull();
-
-  bool hasTestInterfaceGarbageCollectedSequenceMember() const { return has_test_interface_garbage_collected_sequence_member_; }
-  const HeapVector<Member<TestInterfaceGarbageCollected>>& testInterfaceGarbageCollectedSequenceMember() const {
-    DCHECK(has_test_interface_garbage_collected_sequence_member_);
-    return test_interface_garbage_collected_sequence_member_;
-  }
-  void setTestInterfaceGarbageCollectedSequenceMember(const HeapVector<Member<TestInterfaceGarbageCollected>>&);
-
   bool hasTestInterfaceMember() const { return test_interface_member_; }
   TestInterfaceImplementation* testInterfaceMember() const {
     return test_interface_member_;
   }
   inline void setTestInterfaceMember(TestInterfaceImplementation*);
 
-  bool hasTestInterfaceOrNullMember() const { return test_interface_or_null_member_; }
+  bool hasTestInterfaceOrNullMember() const { return has_test_interface_or_null_member_; }
   TestInterfaceImplementation* testInterfaceOrNullMember() const {
     return test_interface_or_null_member_;
   }
@@ -442,7 +442,7 @@ class CORE_EXPORT TestDictionary : public IDLDictionaryBase {
   inline void setUsvStringOrNullMemberToNull();
 
   v8::Local<v8::Value> ToV8Impl(v8::Local<v8::Object>, v8::Isolate*) const override;
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  private:
   bool has_any_in_record_member_ = false;
@@ -453,6 +453,7 @@ class CORE_EXPORT TestDictionary : public IDLDictionaryBase {
   bool has_double_or_null_record_member_ = false;
   bool has_double_or_null_sequence_member_ = false;
   bool has_double_or_string_sequence_member_ = false;
+  bool has_element_or_null_member_ = false;
   bool has_element_or_null_record_member_ = false;
   bool has_element_or_null_sequence_member_ = false;
   bool has_enum_sequence_member_ = false;
@@ -460,6 +461,7 @@ class CORE_EXPORT TestDictionary : public IDLDictionaryBase {
   bool has_internal_dictionary_sequence_member_ = false;
   bool has_is_public_ = false;
   bool has_long_member_ = false;
+  bool has_member_with_hyphen_in_name_ = false;
   bool has_origin_trial_member_ = false;
   bool has_origin_trial_second_member_ = false;
   bool has_record_member_ = false;
@@ -469,7 +471,7 @@ class CORE_EXPORT TestDictionary : public IDLDictionaryBase {
   bool has_string_or_null_record_member_ = false;
   bool has_string_or_null_sequence_member_ = false;
   bool has_string_sequence_member_ = false;
-  bool has_test_interface_garbage_collected_sequence_member_ = false;
+  bool has_test_interface_or_null_member_ = false;
   bool has_test_interface_sequence_member_ = false;
   bool has_test_object_sequence_member_ = false;
   bool has_treat_null_as_string_sequence_member_ = false;
@@ -484,12 +486,13 @@ class CORE_EXPORT TestDictionary : public IDLDictionaryBase {
   String applicable_to_type_string_member_;
   bool boolean_member_;
   String byte_string_member_;
+  TraceWrapperMember<V8VoidCallbackFunction> callback_function_member_;
   bool create_member_;
   Dictionary dictionary_member_;
   double double_or_null_member_;
   DoubleOrDoubleOrNullSequence double_or_null_or_double_or_null_sequence_member_;
-  Vector<std::pair<String, Optional<double>>> double_or_null_record_member_;
-  Vector<Optional<double>> double_or_null_sequence_member_;
+  Vector<std::pair<String, base::Optional<double>>> double_or_null_record_member_;
+  Vector<base::Optional<double>> double_or_null_sequence_member_;
   DoubleOrString double_or_string_member_;
   HeapVector<DoubleOrString> double_or_string_sequence_member_;
   Member<Element> element_or_null_member_;
@@ -503,12 +506,14 @@ class CORE_EXPORT TestDictionary : public IDLDictionaryBase {
   HeapVector<InternalDictionary> internal_dictionary_sequence_member_;
   bool is_public_;
   int32_t long_member_;
+  bool member_with_hyphen_in_name_;
   ScriptValue object_member_;
   ScriptValue object_or_null_member_;
   bool origin_trial_member_;
   bool origin_trial_second_member_;
   DoubleOrString other_double_or_string_member_;
   Vector<std::pair<String, int8_t>> record_member_;
+  TraceWrapperMember<V8VoidCallbackFunction> required_callback_function_member_;
   double restricted_double_member_;
   bool runtime_member_;
   bool runtime_second_member_;
@@ -521,9 +526,6 @@ class CORE_EXPORT TestDictionary : public IDLDictionaryBase {
   TestEnumOrTestEnumOrNullSequence test_enum_or_test_enum_or_null_sequence_member_;
   TestEnumOrTestEnumSequence test_enum_or_test_enum_sequence_member_;
   TestInterface2OrUint8Array test_interface_2_or_uint8_array_member_;
-  Member<TestInterfaceGarbageCollected> test_interface_garbage_collected_member_;
-  Member<TestInterfaceGarbageCollected> test_interface_garbage_collected_or_null_member_;
-  HeapVector<Member<TestInterfaceGarbageCollected>> test_interface_garbage_collected_sequence_member_;
   Member<TestInterfaceImplementation> test_interface_member_;
   Member<TestInterfaceImplementation> test_interface_or_null_member_;
   HeapVector<Member<TestInterfaceImplementation>> test_interface_sequence_member_;
@@ -568,15 +570,19 @@ void TestDictionary::setDoubleOrNullMember(double value) {
   double_or_null_member_ = value;
   has_double_or_null_member_ = true;
 }
+
 void TestDictionary::setDoubleOrNullMemberToNull() {
   has_double_or_null_member_ = false;
 }
 
 void TestDictionary::setElementOrNullMember(Element* value) {
   element_or_null_member_ = value;
+  has_element_or_null_member_ = true;
 }
+
 void TestDictionary::setElementOrNullMemberToNull() {
   element_or_null_member_ = Member<Element>();
+  has_element_or_null_member_ = true;
 }
 
 void TestDictionary::setEnumMember(const String& value) {
@@ -586,6 +592,7 @@ void TestDictionary::setEnumMember(const String& value) {
 void TestDictionary::setEnumOrNullMember(const String& value) {
   enum_or_null_member_ = value;
 }
+
 void TestDictionary::setEnumOrNullMemberToNull() {
   enum_or_null_member_ = String();
 }
@@ -602,6 +609,11 @@ void TestDictionary::setIsPublic(bool value) {
 void TestDictionary::setLongMember(int32_t value) {
   long_member_ = value;
   has_long_member_ = true;
+}
+
+void TestDictionary::setMemberWithHyphenInName(bool value) {
+  member_with_hyphen_in_name_ = value;
+  has_member_with_hyphen_in_name_ = true;
 }
 
 void TestDictionary::setOriginTrialMember(bool value) {
@@ -636,19 +648,9 @@ void TestDictionary::setStringMember(const String& value) {
 void TestDictionary::setStringOrNullMember(const String& value) {
   string_or_null_member_ = value;
 }
+
 void TestDictionary::setStringOrNullMemberToNull() {
   string_or_null_member_ = String();
-}
-
-void TestDictionary::setTestInterfaceGarbageCollectedMember(TestInterfaceGarbageCollected* value) {
-  test_interface_garbage_collected_member_ = value;
-}
-
-void TestDictionary::setTestInterfaceGarbageCollectedOrNullMember(TestInterfaceGarbageCollected* value) {
-  test_interface_garbage_collected_or_null_member_ = value;
-}
-void TestDictionary::setTestInterfaceGarbageCollectedOrNullMemberToNull() {
-  test_interface_garbage_collected_or_null_member_ = Member<TestInterfaceGarbageCollected>();
 }
 
 void TestDictionary::setTestInterfaceMember(TestInterfaceImplementation* value) {
@@ -657,9 +659,12 @@ void TestDictionary::setTestInterfaceMember(TestInterfaceImplementation* value) 
 
 void TestDictionary::setTestInterfaceOrNullMember(TestInterfaceImplementation* value) {
   test_interface_or_null_member_ = value;
+  has_test_interface_or_null_member_ = true;
 }
+
 void TestDictionary::setTestInterfaceOrNullMemberToNull() {
   test_interface_or_null_member_ = Member<TestInterfaceImplementation>();
+  has_test_interface_or_null_member_ = true;
 }
 
 void TestDictionary::setUint8ArrayMember(NotShared<DOMUint8Array> value) {
@@ -674,6 +679,7 @@ void TestDictionary::setUnrestrictedDoubleMember(double value) {
 void TestDictionary::setUsvStringOrNullMember(const String& value) {
   usv_string_or_null_member_ = value;
 }
+
 void TestDictionary::setUsvStringOrNullMemberToNull() {
   usv_string_or_null_member_ = String();
 }

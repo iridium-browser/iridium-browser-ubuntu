@@ -18,13 +18,14 @@
       }
 
       .column-header {
-        -webkit-margin-start: 20px;
         margin-bottom: 15px;
+        margin-inline-start: 20px;
         margin-top: 15px;
       }
     </style>
     <div class="settings-box first two-line">
-      <div id="categoryLabel" class="start">
+      <div id="categoryLabel" class="start" on-click="categoryLabelClicked_"
+          actionable>
         [[computeHandlersDescription_(categoryEnabled)]]
       </div>
       <cr-toggle id="toggle" checked="{{categoryEnabled}}"
@@ -42,7 +43,9 @@
             <div class="favicon-image" style$="[[computeSiteIcon(item.host)]]">
             </div>
             <div class="middle" >
-              <div class="protocol-host">[[item.host]]</div>
+              <div class="protocol-host">
+                <span class="url-directionality">[[item.host]]</span>
+              </div>
               <div class="secondary protocol-default"
                   hidden$="[[!item.is_default]]">
                 $i18n{handlerIsDefault}
@@ -76,7 +79,8 @@
             <div class="favicon-image" style$="[[computeSiteIcon(item.host)]]">
             </div>
             <div class="middle" >
-              <div class="protocol-host">[[item.host]]</div>
+              <div class="protocol-host">
+                <span class="url-directionality">[[item.host]]</span></div>
               <div class="secondary protocol-protocol">
                 [[item.protocol_display_name]]
               </div>

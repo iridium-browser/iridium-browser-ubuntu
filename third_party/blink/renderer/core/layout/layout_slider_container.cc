@@ -76,7 +76,7 @@ void LayoutSliderContainer::ComputeLogicalHeight(
       int tick_length = LayoutTheme::GetTheme().SliderTickSize().Height();
       track_height = LayoutUnit(2 * (offset_from_center + tick_length));
     }
-    float zoom_factor = Style()->EffectiveZoom();
+    float zoom_factor = StyleRef().EffectiveZoom();
     if (zoom_factor != 1.0)
       track_height *= zoom_factor;
 
@@ -100,15 +100,6 @@ void LayoutSliderContainer::ComputeLogicalHeight(
 void LayoutSliderContainer::UpdateLayout() {
   HTMLInputElement* input = ToHTMLInputElement(GetNode()->OwnerShadowHost());
   bool is_vertical = HasVerticalAppearance(input);
-  MutableStyleRef().SetFlexDirection(is_vertical ? EFlexDirection::kColumn
-                                                 : EFlexDirection::kRow);
-  TextDirection old_text_direction = Style()->Direction();
-  if (is_vertical) {
-    // FIXME: Work around rounding issues in RTL vertical sliders. We want them
-    // to render identically to LTR vertical sliders. We can remove this work
-    // around when subpixel rendering is enabled on all ports.
-    MutableStyleRef().SetDirection(TextDirection::kLtr);
-  }
 
   Element* thumb_element = input->UserAgentShadowRoot()->getElementById(
       ShadowElementNames::SliderThumb());
@@ -127,7 +118,6 @@ void LayoutSliderContainer::UpdateLayout() {
 
   LayoutFlexibleBox::UpdateLayout();
 
-  MutableStyleRef().SetDirection(old_text_direction);
   // These should always exist, unless someone mutates the shadow DOM (e.g., in
   // the inspector).
   if (!thumb || !track)
@@ -143,7 +133,7 @@ void LayoutSliderContainer::UpdateLayout() {
   if (is_vertical) {
     thumb_location.SetY(thumb_location.Y() + track->ContentHeight() -
                         thumb->Size().Height() - offset);
-  } else if (Style()->IsLeftToRightDirection()) {
+  } else if (StyleRef().IsLeftToRightDirection()) {
     thumb_location.SetX(thumb_location.X() + offset);
   } else {
     thumb_location.SetX(thumb_location.X() - offset);

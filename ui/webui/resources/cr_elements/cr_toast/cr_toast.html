@@ -1,4 +1,6 @@
-<link rel="import" href="chrome://resources/html/polymer.html">
+<link rel="import" href="../../html/polymer.html">
+
+<link rel="import" href="chrome://resources/polymer/v1_0/paper-styles/color.html">
 
 <dom-module id="cr-toast">
   <template>
@@ -29,6 +31,19 @@
         opacity: 1;
         transform: translateY(0);
         visibility: visible;
+      }
+
+      :host ::slotted(paper-button) {
+        background-color: transparent;
+        border: none;
+        color: var(--google-blue-300);
+        margin-inline-start: 32px;
+        min-width: 52px;
+        padding: 8px;
+      }
+
+      :host ::slotted(paper-button:hover) {
+        background-color: transparent;
       }
     </style>
     <slot></slot>

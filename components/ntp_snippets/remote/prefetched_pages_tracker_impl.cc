@@ -55,8 +55,8 @@ void PrefetchedPagesTrackerImpl::Initialize(
     if (initialization_completed_callbacks_.size() == 1) {
       offline_page_model_->GetPagesByNamespace(
           offline_pages::kSuggestedArticlesNamespace,
-          base::BindRepeating(&PrefetchedPagesTrackerImpl::OfflinePagesLoaded,
-                              weak_ptr_factory_.GetWeakPtr()));
+          base::BindOnce(&PrefetchedPagesTrackerImpl::OfflinePagesLoaded,
+                         weak_ptr_factory_.GetWeakPtr()));
     }
   }
 }
@@ -86,16 +86,14 @@ void PrefetchedPagesTrackerImpl::OfflinePageAdded(
 
 void PrefetchedPagesTrackerImpl::OfflinePageDeleted(
     const offline_pages::OfflinePageModel::DeletedPageInfo& page_info) {
-  std::map<int64_t, GURL>::iterator offline_id_it =
-      offline_id_to_url_mapping_.find(page_info.offline_id);
+  auto offline_id_it = offline_id_to_url_mapping_.find(page_info.offline_id);
 
   if (offline_id_it == offline_id_to_url_mapping_.end()) {
     // We did not know about this page, thus, nothing to delete.
     return;
   }
 
-  std::map<GURL, int>::iterator url_it =
-      prefetched_url_counts_.find(offline_id_it->second);
+  auto url_it = prefetched_url_counts_.find(offline_id_it->second);
   DCHECK(url_it != prefetched_url_counts_.end());
   --url_it->second;
   if (url_it->second == 0) {

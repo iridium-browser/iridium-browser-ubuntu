@@ -30,15 +30,37 @@ class WebContents;
 // Create().
 class PageLoadCappingInfoBarDelegate : public ConfirmInfoBarDelegate {
  public:
-  // Creates an InfoBar for page load capping. Returns whether the infobar was
-  // created. |bytes_threshold| is the amount of bytes used to determine if the
-  // page was large enough to cap. It will be truncated to megabytes and shown
-  // on the InfoBar. |web_contents| is the WebContents that caused the data
-  // usage.
-  static bool Create(int64_t bytes_threshold,
-                     content::WebContents* web_contents);
+  // A callback that triggers the page to have its subresource loading paused or
+  // resumed based on |pause|.
+  using PauseCallback = base::RepeatingCallback<void(bool pause)>;
+
+  // A callback used to get the earliest possible time (offset from now) that
+  // the InfoBar could be dismissed based on lack of network usage.
+  // |time_to_expire| must be passed in as TimeDelta initialized to 0 to handle
+  // the case of the underlying weak pointer being destroyed.
+  using TimeToExpireCallback =
+      base::RepeatingCallback<void(base::TimeDelta* time_to_expire)>;
+
+  // Creates an InfoBar for page load capping. Returns whether the InfoBar was
+  // created. |web_contents| is the WebContents that caused the data usage.
+  // |pause_callback| is used to pause and unpause the resource loading of the
+  // page. |time_to_expire_callback| is used to get the earliest time at which
+  // the page is considered to have stopped using data.
+  static bool Create(content::WebContents* web_contents,
+                     const PauseCallback& pause_callback,
+                     const TimeToExpireCallback& time_to_expire_callback);
 
   ~PageLoadCappingInfoBarDelegate() override;
+
+  // Used to record UMA on user interaction with the capping heavy pages
+  // InfoBar.
+  enum class InfoBarInteraction {
+    kShowedInfoBar = 0,
+    kPausedPage = 1,
+    kResumedPage = 2,
+    kDismissedByNetworkStopped = 3,
+    kMaxValue = kDismissedByNetworkStopped,
+  };
 
  protected:
   PageLoadCappingInfoBarDelegate();
@@ -50,8 +72,8 @@ class PageLoadCappingInfoBarDelegate : public ConfirmInfoBarDelegate {
   int GetButtons() const override;
   bool ShouldExpire(const NavigationDetails& details) const override;
   base::string16 GetMessageText() const override = 0;
-  base::string16 GetButtonLabel(InfoBarButton button) const override = 0;
-  bool Accept() override = 0;
+  bool LinkClicked(WindowOpenDisposition disposition) override = 0;
+  base::string16 GetLinkText() const override = 0;
 
   DISALLOW_COPY_AND_ASSIGN(PageLoadCappingInfoBarDelegate);
 };

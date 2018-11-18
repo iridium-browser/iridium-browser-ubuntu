@@ -4,6 +4,7 @@
 
 #include "gpu/command_buffer/service/gl_utils.h"
 
+#include <algorithm>
 #include <unordered_set>
 
 #include "base/metrics/histogram.h"
@@ -37,6 +38,17 @@ const ASTCBlockArray kASTCBlockArray[] = {
     {5, 4}, /* and GL_COMPRESSED_SRGB8_ALPHA8_ASTC_4x4_KHR */
     {5, 5},  {6, 5},  {6, 6},  {8, 5},   {8, 6},   {8, 8},
     {10, 5}, {10, 6}, {10, 8}, {10, 10}, {12, 10}, {12, 12}};
+
+bool IsValidPVRTCSize(GLint level, GLsizei size) {
+  return GLES2Util::IsPOT(size);
+}
+
+bool IsValidS3TCSizeForWebGL(GLint level, GLsizei size) {
+  // WebGL only allows multiple-of-4 sizes, except for levels > 0 where it also
+  // allows 1 or 2. See WEBGL_compressed_texture_s3tc.
+  return (level && size == 1) || (level && size == 2) ||
+         !(size % kS3TCBlockWidth);
+}
 
 const char* GetDebugSourceString(GLenum source) {
   switch (source) {
@@ -103,8 +115,7 @@ std::vector<int> GetAllGLErrors() {
       GL_INVALID_FRAMEBUFFER_OPERATION,
       GL_OUT_OF_MEMORY,
   };
-  return base::CustomHistogram::ArrayToCustomRanges(gl_errors,
-                                                    arraysize(gl_errors));
+  return base::CustomHistogram::ArrayToCustomEnumRanges(gl_errors);
 }
 
 bool PrecisionMeetsSpecForHighpFloat(GLint rangeMin,
@@ -209,7 +220,7 @@ void PopulateNumericCapabilities(Capabilities* caps,
                 &caps->num_compressed_texture_formats);
   glGetIntegerv(GL_NUM_SHADER_BINARY_FORMATS, &caps->num_shader_binary_formats);
 
-  if (feature_info->IsWebGL2OrES3Context()) {
+  if (feature_info->IsWebGL2OrES3OrHigherContext()) {
     glGetIntegerv(GL_MAX_3D_TEXTURE_SIZE, &caps->max_3d_texture_size);
     glGetIntegerv(GL_MAX_ARRAY_TEXTURE_LAYERS, &caps->max_array_texture_layers);
     glGetIntegerv(GL_MAX_COLOR_ATTACHMENTS, &caps->max_color_attachments);
@@ -255,11 +266,21 @@ void PopulateNumericCapabilities(Capabilities* caps,
     glGetIntegerv(GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT,
                   &caps->uniform_buffer_offset_alignment);
     caps->major_version = 3;
-    caps->minor_version = 0;
+    if (feature_info->IsWebGL2ComputeContext()) {
+      glGetIntegerv(GL_MAX_ATOMIC_COUNTER_BUFFER_BINDINGS,
+                    &caps->max_atomic_counter_buffer_bindings);
+      glGetIntegerv(GL_MAX_SHADER_STORAGE_BUFFER_BINDINGS,
+                    &caps->max_shader_storage_buffer_bindings);
+      glGetIntegerv(GL_SHADER_STORAGE_BUFFER_OFFSET_ALIGNMENT,
+                    &caps->shader_storage_buffer_offset_alignment);
+      caps->minor_version = 1;
+    } else {
+      caps->minor_version = 0;
+    }
   }
   if (feature_info->feature_flags().multisampled_render_to_texture ||
       feature_info->feature_flags().chromium_framebuffer_multisample ||
-      feature_info->IsWebGL2OrES3Context()) {
+      feature_info->IsWebGL2OrES3OrHigherContext()) {
     glGetIntegerv(GL_MAX_SAMPLES, &caps->max_samples);
   }
 }
@@ -275,7 +296,9 @@ bool CheckUniqueAndNonNullIds(GLsizei n, const GLuint* client_ids) {
 const char* GetServiceVersionString(const FeatureInfo* feature_info) {
   if (feature_info->IsWebGL2OrES3Context())
     return "OpenGL ES 3.0 Chromium";
-  else
+  else if (feature_info->IsWebGL2ComputeContext()) {
+    return "OpenGL ES 3.1 Chromium";
+  } else
     return "OpenGL ES 2.0 Chromium";
 }
 
@@ -283,7 +306,9 @@ const char* GetServiceShadingLanguageVersionString(
     const FeatureInfo* feature_info) {
   if (feature_info->IsWebGL2OrES3Context())
     return "OpenGL ES GLSL ES 3.0 Chromium";
-  else
+  else if (feature_info->IsWebGL2ComputeContext()) {
+    return "OpenGL ES GLSL ES 3.1 Chromium";
+  } else
     return "OpenGL ES GLSL ES 1.0 Chromium";
 }
 
@@ -493,6 +518,272 @@ bool GetCompressedTexSizeInBytes(const char* function_name,
   return true;
 }
 
+bool ValidateCompressedTexSubDimensions(GLenum target,
+                                        GLint level,
+                                        GLint xoffset,
+                                        GLint yoffset,
+                                        GLint zoffset,
+                                        GLsizei width,
+                                        GLsizei height,
+                                        GLsizei depth,
+                                        GLenum format,
+                                        Texture* texture,
+                                        bool restrict_for_webgl,
+                                        const char** error_message) {
+  if (xoffset < 0 || yoffset < 0 || zoffset < 0) {
+    *error_message = "x/y/z offset < 0";
+    return false;
+  }
+
+  switch (format) {
+    case GL_COMPRESSED_RGB_S3TC_DXT1_EXT:
+    case GL_COMPRESSED_RGBA_S3TC_DXT1_EXT:
+    case GL_COMPRESSED_RGBA_S3TC_DXT3_EXT:
+    case GL_COMPRESSED_RGBA_S3TC_DXT5_EXT:
+    case GL_COMPRESSED_SRGB_S3TC_DXT1_EXT:
+    case GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT:
+    case GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT:
+    case GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT: {
+      const int kBlockWidth = 4;
+      const int kBlockHeight = 4;
+      if ((xoffset % kBlockWidth) || (yoffset % kBlockHeight)) {
+        *error_message = "xoffset or yoffset not multiple of 4";
+        return false;
+      }
+      GLsizei tex_width = 0;
+      GLsizei tex_height = 0;
+      if (!texture->GetLevelSize(target, level, &tex_width, &tex_height,
+                                 nullptr) ||
+          width - xoffset > tex_width || height - yoffset > tex_height) {
+        *error_message = "dimensions out of range";
+        return false;
+      }
+      if ((((width % kBlockWidth) != 0) && (width + xoffset != tex_width)) ||
+          (((height % kBlockHeight) != 0) &&
+           (height + yoffset != tex_height))) {
+        *error_message = "dimensions do not align to a block boundary";
+        return false;
+      }
+      return true;
+    }
+    case GL_COMPRESSED_RGBA_ASTC_4x4_KHR:
+    case GL_COMPRESSED_RGBA_ASTC_5x4_KHR:
+    case GL_COMPRESSED_RGBA_ASTC_5x5_KHR:
+    case GL_COMPRESSED_RGBA_ASTC_6x5_KHR:
+    case GL_COMPRESSED_RGBA_ASTC_6x6_KHR:
+    case GL_COMPRESSED_RGBA_ASTC_8x5_KHR:
+    case GL_COMPRESSED_RGBA_ASTC_8x6_KHR:
+    case GL_COMPRESSED_RGBA_ASTC_8x8_KHR:
+    case GL_COMPRESSED_RGBA_ASTC_10x5_KHR:
+    case GL_COMPRESSED_RGBA_ASTC_10x6_KHR:
+    case GL_COMPRESSED_RGBA_ASTC_10x8_KHR:
+    case GL_COMPRESSED_RGBA_ASTC_10x10_KHR:
+    case GL_COMPRESSED_RGBA_ASTC_12x10_KHR:
+    case GL_COMPRESSED_RGBA_ASTC_12x12_KHR:
+    case GL_COMPRESSED_SRGB8_ALPHA8_ASTC_4x4_KHR:
+    case GL_COMPRESSED_SRGB8_ALPHA8_ASTC_5x4_KHR:
+    case GL_COMPRESSED_SRGB8_ALPHA8_ASTC_5x5_KHR:
+    case GL_COMPRESSED_SRGB8_ALPHA8_ASTC_6x5_KHR:
+    case GL_COMPRESSED_SRGB8_ALPHA8_ASTC_6x6_KHR:
+    case GL_COMPRESSED_SRGB8_ALPHA8_ASTC_8x5_KHR:
+    case GL_COMPRESSED_SRGB8_ALPHA8_ASTC_8x6_KHR:
+    case GL_COMPRESSED_SRGB8_ALPHA8_ASTC_8x8_KHR:
+    case GL_COMPRESSED_SRGB8_ALPHA8_ASTC_10x5_KHR:
+    case GL_COMPRESSED_SRGB8_ALPHA8_ASTC_10x6_KHR:
+    case GL_COMPRESSED_SRGB8_ALPHA8_ASTC_10x8_KHR:
+    case GL_COMPRESSED_SRGB8_ALPHA8_ASTC_10x10_KHR:
+    case GL_COMPRESSED_SRGB8_ALPHA8_ASTC_12x10_KHR:
+    case GL_COMPRESSED_SRGB8_ALPHA8_ASTC_12x12_KHR: {
+      const int index =
+          (format < GL_COMPRESSED_SRGB8_ALPHA8_ASTC_4x4_KHR)
+              ? static_cast<int>(format - GL_COMPRESSED_RGBA_ASTC_4x4_KHR)
+              : static_cast<int>(format -
+                                 GL_COMPRESSED_SRGB8_ALPHA8_ASTC_4x4_KHR);
+
+      const int kBlockWidth = kASTCBlockArray[index].blockWidth;
+      const int kBlockHeight = kASTCBlockArray[index].blockHeight;
+
+      if ((xoffset % kBlockWidth) || (yoffset % kBlockHeight)) {
+        *error_message = "xoffset or yoffset not multiple of 4";
+        return false;
+      }
+      GLsizei tex_width = 0;
+      GLsizei tex_height = 0;
+      if (!texture->GetLevelSize(target, level, &tex_width, &tex_height,
+                                 nullptr) ||
+          width - xoffset > tex_width || height - yoffset > tex_height) {
+        *error_message = "dimensions out of range";
+        return false;
+      }
+      if ((((width % kBlockWidth) != 0) && (width + xoffset != tex_width)) ||
+          (((height % kBlockHeight) != 0) &&
+           (height + yoffset != tex_height))) {
+        *error_message = "dimensions do not align to a block boundary";
+        return false;
+      }
+      return true;
+    }
+    case GL_ATC_RGB_AMD:
+    case GL_ATC_RGBA_EXPLICIT_ALPHA_AMD:
+    case GL_ATC_RGBA_INTERPOLATED_ALPHA_AMD: {
+      *error_message = "not supported for ATC textures";
+      return false;
+    }
+    case GL_ETC1_RGB8_OES: {
+      *error_message = "not supported for ECT1_RGB8_OES textures";
+      return false;
+    }
+    case GL_COMPRESSED_RGB_PVRTC_4BPPV1_IMG:
+    case GL_COMPRESSED_RGB_PVRTC_2BPPV1_IMG:
+    case GL_COMPRESSED_RGBA_PVRTC_4BPPV1_IMG:
+    case GL_COMPRESSED_RGBA_PVRTC_2BPPV1_IMG: {
+      if ((xoffset != 0) || (yoffset != 0)) {
+        *error_message = "xoffset and yoffset must be zero";
+        return false;
+      }
+      GLsizei tex_width = 0;
+      GLsizei tex_height = 0;
+      if (!texture->GetLevelSize(target, level, &tex_width, &tex_height,
+                                 nullptr) ||
+          width != tex_width || height != tex_height) {
+        *error_message =
+            "dimensions must match existing texture level dimensions";
+        return false;
+      }
+      return ValidateCompressedTexDimensions(target, level, width, height, 1,
+                                             format, restrict_for_webgl,
+                                             error_message);
+    }
+
+    // ES3 formats
+    case GL_COMPRESSED_R11_EAC:
+    case GL_COMPRESSED_SIGNED_R11_EAC:
+    case GL_COMPRESSED_RG11_EAC:
+    case GL_COMPRESSED_SIGNED_RG11_EAC:
+    case GL_COMPRESSED_RGB8_ETC2:
+    case GL_COMPRESSED_SRGB8_ETC2:
+    case GL_COMPRESSED_RGB8_PUNCHTHROUGH_ALPHA1_ETC2:
+    case GL_COMPRESSED_SRGB8_PUNCHTHROUGH_ALPHA1_ETC2:
+    case GL_COMPRESSED_RGBA8_ETC2_EAC:
+    case GL_COMPRESSED_SRGB8_ALPHA8_ETC2_EAC: {
+      const int kBlockSize = 4;
+      GLsizei tex_width, tex_height;
+      if (target == GL_TEXTURE_3D ||
+          !texture->GetLevelSize(target, level, &tex_width, &tex_height,
+                                 nullptr) ||
+          (xoffset % kBlockSize) || (yoffset % kBlockSize) ||
+          ((width % kBlockSize) && xoffset + width != tex_width) ||
+          ((height % kBlockSize) && yoffset + height != tex_height)) {
+        *error_message =
+            "dimensions must match existing texture level dimensions";
+        return false;
+      }
+      return true;
+    }
+    default:
+      *error_message = "unknown compressed texture format";
+      return false;
+  }
+}
+
+bool ValidateCompressedTexDimensions(GLenum target,
+                                     GLint level,
+                                     GLsizei width,
+                                     GLsizei height,
+                                     GLsizei depth,
+                                     GLenum format,
+                                     bool restrict_for_webgl,
+                                     const char** error_message) {
+  switch (format) {
+    case GL_COMPRESSED_RGB_S3TC_DXT1_EXT:
+    case GL_COMPRESSED_RGBA_S3TC_DXT1_EXT:
+    case GL_COMPRESSED_RGBA_S3TC_DXT3_EXT:
+    case GL_COMPRESSED_RGBA_S3TC_DXT5_EXT:
+    case GL_COMPRESSED_SRGB_S3TC_DXT1_EXT:
+    case GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT:
+    case GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT:
+    case GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT:
+      DCHECK_EQ(1, depth);  // 2D formats.
+      if (restrict_for_webgl && (!IsValidS3TCSizeForWebGL(level, width) ||
+                                 !IsValidS3TCSizeForWebGL(level, height))) {
+        *error_message = "width or height invalid for level";
+        return false;
+      }
+      return true;
+    case GL_COMPRESSED_RGBA_ASTC_4x4_KHR:
+    case GL_COMPRESSED_RGBA_ASTC_5x4_KHR:
+    case GL_COMPRESSED_RGBA_ASTC_5x5_KHR:
+    case GL_COMPRESSED_RGBA_ASTC_6x5_KHR:
+    case GL_COMPRESSED_RGBA_ASTC_6x6_KHR:
+    case GL_COMPRESSED_RGBA_ASTC_8x5_KHR:
+    case GL_COMPRESSED_RGBA_ASTC_8x6_KHR:
+    case GL_COMPRESSED_RGBA_ASTC_8x8_KHR:
+    case GL_COMPRESSED_RGBA_ASTC_10x5_KHR:
+    case GL_COMPRESSED_RGBA_ASTC_10x6_KHR:
+    case GL_COMPRESSED_RGBA_ASTC_10x8_KHR:
+    case GL_COMPRESSED_RGBA_ASTC_10x10_KHR:
+    case GL_COMPRESSED_RGBA_ASTC_12x10_KHR:
+    case GL_COMPRESSED_RGBA_ASTC_12x12_KHR:
+    case GL_COMPRESSED_SRGB8_ALPHA8_ASTC_4x4_KHR:
+    case GL_COMPRESSED_SRGB8_ALPHA8_ASTC_5x4_KHR:
+    case GL_COMPRESSED_SRGB8_ALPHA8_ASTC_5x5_KHR:
+    case GL_COMPRESSED_SRGB8_ALPHA8_ASTC_6x5_KHR:
+    case GL_COMPRESSED_SRGB8_ALPHA8_ASTC_6x6_KHR:
+    case GL_COMPRESSED_SRGB8_ALPHA8_ASTC_8x5_KHR:
+    case GL_COMPRESSED_SRGB8_ALPHA8_ASTC_8x6_KHR:
+    case GL_COMPRESSED_SRGB8_ALPHA8_ASTC_8x8_KHR:
+    case GL_COMPRESSED_SRGB8_ALPHA8_ASTC_10x5_KHR:
+    case GL_COMPRESSED_SRGB8_ALPHA8_ASTC_10x6_KHR:
+    case GL_COMPRESSED_SRGB8_ALPHA8_ASTC_10x8_KHR:
+    case GL_COMPRESSED_SRGB8_ALPHA8_ASTC_10x10_KHR:
+    case GL_COMPRESSED_SRGB8_ALPHA8_ASTC_12x10_KHR:
+    case GL_COMPRESSED_SRGB8_ALPHA8_ASTC_12x12_KHR:
+    case GL_ATC_RGB_AMD:
+    case GL_ATC_RGBA_EXPLICIT_ALPHA_AMD:
+    case GL_ATC_RGBA_INTERPOLATED_ALPHA_AMD:
+    case GL_ETC1_RGB8_OES:
+      DCHECK_EQ(1, depth);  // 2D formats.
+      if (width <= 0 || height <= 0) {
+        *error_message = "width or height invalid for level";
+        return false;
+      }
+      return true;
+    case GL_COMPRESSED_RGB_PVRTC_4BPPV1_IMG:
+    case GL_COMPRESSED_RGB_PVRTC_2BPPV1_IMG:
+    case GL_COMPRESSED_RGBA_PVRTC_4BPPV1_IMG:
+    case GL_COMPRESSED_RGBA_PVRTC_2BPPV1_IMG:
+      DCHECK_EQ(1, depth);  // 2D formats.
+      if (!IsValidPVRTCSize(level, width) || !IsValidPVRTCSize(level, height)) {
+        *error_message = "width or height invalid for level";
+        return false;
+      }
+      return true;
+
+    // ES3 formats.
+    case GL_COMPRESSED_R11_EAC:
+    case GL_COMPRESSED_SIGNED_R11_EAC:
+    case GL_COMPRESSED_RG11_EAC:
+    case GL_COMPRESSED_SIGNED_RG11_EAC:
+    case GL_COMPRESSED_RGB8_ETC2:
+    case GL_COMPRESSED_SRGB8_ETC2:
+    case GL_COMPRESSED_RGB8_PUNCHTHROUGH_ALPHA1_ETC2:
+    case GL_COMPRESSED_SRGB8_PUNCHTHROUGH_ALPHA1_ETC2:
+    case GL_COMPRESSED_RGBA8_ETC2_EAC:
+    case GL_COMPRESSED_SRGB8_ALPHA8_ETC2_EAC:
+      if (width < 0 || height < 0 || depth < 0) {
+        *error_message = "width, height, or depth invalid";
+        return false;
+      }
+      if (target == GL_TEXTURE_3D) {
+        *error_message = "target invalid for format";
+        return false;
+      }
+      return true;
+    default:
+      return false;
+  }
+}
+
 bool ValidateCopyTexFormatHelper(const FeatureInfo* feature_info,
                                  GLenum internal_format,
                                  GLenum read_format,
@@ -511,7 +802,7 @@ bool ValidateCopyTexFormatHelper(const FeatureInfo* feature_info,
     *output_error_msg = std::string("incompatible format");
     return false;
   }
-  if (feature_info->IsWebGL2OrES3Context()) {
+  if (feature_info->IsWebGL2OrES3OrHigherContext()) {
     GLint color_encoding =
         GLES2Util::GetColorEncodingFromInternalFormat(read_format);
     bool float_mismatch = feature_info->ext_color_buffer_float_available()
@@ -534,7 +825,7 @@ bool ValidateCopyTexFormatHelper(const FeatureInfo* feature_info,
         std::string("can not be used with depth or stencil textures");
     return false;
   }
-  if (feature_info->IsWebGL2OrES3Context() ||
+  if (feature_info->IsWebGL2OrES3OrHigherContext() ||
       (feature_info->feature_flags().chromium_color_buffer_float_rgb &&
        internal_format == GL_RGB32F) ||
       (feature_info->feature_flags().chromium_color_buffer_float_rgba &&
@@ -640,6 +931,102 @@ CopyTextureMethod GetCopyTextureCHROMIUMMethod(const FeatureInfo* feature_info,
   // Draw to a fbo attaching level 0 of an intermediate texture,
   // then copy from the fbo to dest texture level with glCopyTexImage2D.
   return CopyTextureMethod::DRAW_AND_COPY;
+}
+
+bool ValidateCopyTextureCHROMIUMInternalFormats(const FeatureInfo* feature_info,
+                                                GLenum source_internal_format,
+                                                GLenum dest_internal_format,
+                                                std::string* output_error_msg) {
+  bool valid_dest_format = false;
+  // TODO(qiankun.miao@intel.com): ALPHA, LUMINANCE and LUMINANCE_ALPHA formats
+  // are not supported on GL core profile. See https://crbug.com/577144. Enable
+  // the workaround for glCopyTexImage and glCopyTexSubImage in
+  // gles2_cmd_copy_tex_image.cc for glCopyTextureCHROMIUM implementation.
+  switch (dest_internal_format) {
+    case GL_RGB:
+    case GL_RGBA:
+    case GL_RGB8:
+    case GL_RGBA8:
+      valid_dest_format = true;
+      break;
+    case GL_BGRA_EXT:
+    case GL_BGRA8_EXT:
+      valid_dest_format =
+          feature_info->feature_flags().ext_texture_format_bgra8888;
+      break;
+    case GL_SRGB_EXT:
+    case GL_SRGB_ALPHA_EXT:
+      valid_dest_format = feature_info->feature_flags().ext_srgb;
+      break;
+    case GL_R8:
+    case GL_R8UI:
+    case GL_RG8:
+    case GL_RG8UI:
+    case GL_SRGB8:
+    case GL_RGB565:
+    case GL_RGB8UI:
+    case GL_SRGB8_ALPHA8:
+    case GL_RGB5_A1:
+    case GL_RGBA4:
+    case GL_RGBA8UI:
+    case GL_RGB10_A2:
+      valid_dest_format = feature_info->IsWebGL2OrES3OrHigherContext();
+      break;
+    case GL_RGB9_E5:
+    case GL_R16F:
+    case GL_R32F:
+    case GL_RG16F:
+    case GL_RG32F:
+    case GL_RGB16F:
+    case GL_RGBA16F:
+    case GL_R11F_G11F_B10F:
+      valid_dest_format = feature_info->ext_color_buffer_float_available();
+      break;
+    case GL_RGB32F:
+      valid_dest_format =
+          feature_info->ext_color_buffer_float_available() ||
+          feature_info->feature_flags().chromium_color_buffer_float_rgb;
+      break;
+    case GL_RGBA32F:
+      valid_dest_format =
+          feature_info->ext_color_buffer_float_available() ||
+          feature_info->feature_flags().chromium_color_buffer_float_rgba;
+      break;
+    case GL_ALPHA:
+    case GL_LUMINANCE:
+    case GL_LUMINANCE_ALPHA:
+      valid_dest_format = true;
+      break;
+    default:
+      valid_dest_format = false;
+      break;
+  }
+
+  // TODO(aleksandar.stojiljkovic): Use sized internal formats:
+  // https://crbug.com/628064
+  bool valid_source_format =
+      source_internal_format == GL_RED || source_internal_format == GL_ALPHA ||
+      source_internal_format == GL_RGB || source_internal_format == GL_RGBA ||
+      source_internal_format == GL_RGB8 || source_internal_format == GL_RGBA8 ||
+      source_internal_format == GL_LUMINANCE ||
+      source_internal_format == GL_LUMINANCE_ALPHA ||
+      source_internal_format == GL_BGRA_EXT ||
+      source_internal_format == GL_BGRA8_EXT ||
+      source_internal_format == GL_RGB_YCBCR_420V_CHROMIUM ||
+      source_internal_format == GL_RGB_YCBCR_422_CHROMIUM ||
+      source_internal_format == GL_R16_EXT;
+  if (!valid_source_format) {
+    *output_error_msg = "invalid source internal format " +
+                        GLES2Util::GetStringEnum(source_internal_format);
+    return false;
+  }
+  if (!valid_dest_format) {
+    *output_error_msg = "invalid dest internal format " +
+                        GLES2Util::GetStringEnum(dest_internal_format);
+    return false;
+  }
+
+  return true;
 }
 
 }  // namespace gles2

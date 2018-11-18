@@ -5,6 +5,7 @@
 #ifndef COMPONENTS_OFFLINE_PAGES_CORE_STUB_OFFLINE_PAGE_MODEL_H_
 #define COMPONENTS_OFFLINE_PAGES_CORE_STUB_OFFLINE_PAGE_MODEL_H_
 
+#include <memory>
 #include <set>
 #include <string>
 #include <vector>
@@ -22,58 +23,54 @@ class StubOfflinePageModel : public OfflinePageModel {
   StubOfflinePageModel();
   ~StubOfflinePageModel() override;
 
+  void SetArchiveDirectory(const base::FilePath& path);
+
   void AddObserver(Observer* observer) override;
   void RemoveObserver(Observer* observer) override;
   void SavePage(const SavePageParams& save_page_params,
                 std::unique_ptr<OfflinePageArchiver> archiver,
                 content::WebContents* web_contents,
-                const SavePageCallback& callback) override;
-  void AddPage(const OfflinePageItem& page,
-               const AddPageCallback& callback) override;
+                SavePageCallback callback) override;
+  void AddPage(const OfflinePageItem& page, AddPageCallback callback) override;
   void MarkPageAccessed(int64_t offline_id) override;
   void DeletePagesByOfflineId(const std::vector<int64_t>& offline_ids,
-                              const DeletePageCallback& callback) override;
+                              DeletePageCallback callback) override;
   void DeletePagesByClientIds(const std::vector<ClientId>& client_ids,
-                              const DeletePageCallback& callback) override;
-  void DeletePagesByClientIdsAndOrigin(
-      const std::vector<ClientId>& client_ids,
-      const std::string& origin,
-      const DeletePageCallback& callback) override;
-  void GetPagesByClientIds(
-      const std::vector<ClientId>& client_ids,
-      const MultipleOfflinePageItemCallback& callback) override;
-  void DeleteCachedPagesByURLPredicate(
-      const UrlPredicate& predicate,
-      const DeletePageCallback& callback) override;
-  void GetAllPages(const MultipleOfflinePageItemCallback& callback) override;
-  void GetOfflineIdsForClientId(
-      const ClientId& client_id,
-      const MultipleOfflineIdCallback& callback) override;
-  void GetPageByOfflineId(
-      int64_t offline_id,
-      const SingleOfflinePageItemCallback& callback) override;
+                              DeletePageCallback callback) override;
+  void DeletePagesByClientIdsAndOrigin(const std::vector<ClientId>& client_ids,
+                                       const std::string& origin,
+                                       DeletePageCallback callback) override;
+  void GetPagesByClientIds(const std::vector<ClientId>& client_ids,
+                           MultipleOfflinePageItemCallback callback) override;
+  void DeleteCachedPagesByURLPredicate(const UrlPredicate& predicate,
+                                       DeletePageCallback callback) override;
+  void GetAllPages(MultipleOfflinePageItemCallback callback) override;
+  void GetOfflineIdsForClientId(const ClientId& client_id,
+                                MultipleOfflineIdCallback callback) override;
+  void GetPageByOfflineId(int64_t offline_id,
+                          SingleOfflinePageItemCallback callback) override;
   void GetPageByGuid(const std::string& guid,
-                     const SingleOfflinePageItemCallback& callback) override;
+                     SingleOfflinePageItemCallback callback) override;
   void GetPagesByURL(const GURL& url,
-                     URLSearchMode url_search_mode,
-                     const MultipleOfflinePageItemCallback& callback) override;
+                     MultipleOfflinePageItemCallback callback) override;
   void GetPagesByRequestOrigin(
       const std::string& origin,
-      const MultipleOfflinePageItemCallback& callback) override;
-  void GetPageBySizeAndDigest(
-      int64_t file_size,
-      const std::string& digest,
-      const SingleOfflinePageItemCallback& callback) override;
+      MultipleOfflinePageItemCallback callback) override;
+  void GetPageBySizeAndDigest(int64_t file_size,
+                              const std::string& digest,
+                              SingleOfflinePageItemCallback callback) override;
   void GetPagesRemovedOnCacheReset(
-      const MultipleOfflinePageItemCallback& callback) override;
-  void GetPagesByNamespace(
-      const std::string& name_space,
-      const MultipleOfflinePageItemCallback& callback) override;
+      MultipleOfflinePageItemCallback callback) override;
+  void GetPagesByNamespace(const std::string& name_space,
+                           MultipleOfflinePageItemCallback callback) override;
   void GetPagesSupportedByDownloads(
-      const MultipleOfflinePageItemCallback& callback) override;
+      MultipleOfflinePageItemCallback callback) override;
   void StoreThumbnail(const OfflinePageThumbnail& thumb) override;
   void GetThumbnailByOfflineId(int64_t offline_id,
                                GetThumbnailCallback callback) override;
+  void HasThumbnailForOfflineId(
+      int64_t offline_id,
+      base::OnceCallback<void(bool)> callback) override;
   void PublishInternalArchive(
       const OfflinePageItem& offline_page,
       std::unique_ptr<OfflinePageArchiver> archiver,

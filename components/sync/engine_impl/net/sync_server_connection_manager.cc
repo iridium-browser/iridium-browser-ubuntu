@@ -62,7 +62,7 @@ bool SyncBridgedConnection::Init(const char* path,
     response->server_status = HttpResponse::CONNECTION_UNAVAILABLE;
     return false;
   }
-  base::ScopedClosureRunner auto_unregister(base::Bind(
+  base::ScopedClosureRunner auto_unregister(base::BindOnce(
       &CancelationSignal::UnregisterHandler,
       base::Unretained(cancelation_signal_), base::Unretained(this)));
 
@@ -110,7 +110,7 @@ SyncServerConnectionManager::SyncServerConnectionManager(
     : ServerConnectionManager(server, port, use_ssl, cancelation_signal),
       post_provider_factory_(factory),
       cancelation_signal_(cancelation_signal) {
-  DCHECK(post_provider_factory_.get());
+  DCHECK(post_provider_factory_);
 }
 
 SyncServerConnectionManager::~SyncServerConnectionManager() = default;

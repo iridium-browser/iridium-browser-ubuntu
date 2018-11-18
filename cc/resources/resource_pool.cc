@@ -12,15 +12,20 @@
 
 #include "base/atomic_sequence_num.h"
 #include "base/format_macros.h"
-#include "base/memory/memory_coordinator_client_registry.h"
 #include "base/memory/shared_memory_handle.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/memory_dump_manager.h"
 #include "build/build_config.h"
 #include "cc/base/container_util.h"
-#include "cc/resources/layer_tree_resource_provider.h"
+#include "components/viz/client/client_resource_provider.h"
+#include "components/viz/common/gpu/context_provider.h"
 #include "components/viz/common/resources/resource_sizes.h"
+#include "gpu/command_buffer/client/context_support.h"
+#include "gpu/command_buffer/client/gles2_interface.h"
+#include "gpu/command_buffer/common/capabilities.h"
+#include "gpu/command_buffer/common/gpu_memory_buffer_support.h"
 
 using base::trace_event::MemoryAllocatorDump;
 using base::trace_event::MemoryDumpLevelOfDetail;
@@ -47,8 +52,8 @@ bool ResourceMeetsSizeRequirements(const gfx::Size& requested_size,
     return false;
 
   // GetArea will crash on overflow, however all sizes in use are tile sizes.
-  // These are capped at LayerTreeResourceProvider::max_texture_size(), and will
-  // not overflow.
+  // These are capped at viz::ClientResourceProvider::max_texture_size(), and
+  // will not overflow.
   float actual_area = actual_size.GetArea();
   float requested_area = requested_size.GetArea();
   // Don't use a resource that is more than |kReuseThreshold| times the
@@ -63,14 +68,29 @@ bool ResourceMeetsSizeRequirements(const gfx::Size& requested_size,
 
 constexpr base::TimeDelta ResourcePool::kDefaultExpirationDelay;
 
+void ResourcePool::GpuBacking::InitOverlayCandidateAndTextureTarget(
+    const viz::ResourceFormat format,
+    const gpu::Capabilities& caps,
+    bool use_gpu_memory_buffer_resources) {
+  overlay_candidate = use_gpu_memory_buffer_resources &&
+                      caps.texture_storage_image &&
+                      IsGpuMemoryBufferFormatSupported(format);
+  if (overlay_candidate) {
+    texture_target = gpu::GetBufferTextureTarget(gfx::BufferUsage::SCANOUT,
+                                                 BufferFormat(format), caps);
+  } else {
+    texture_target = GL_TEXTURE_2D;
+  }
+}
+
 ResourcePool::ResourcePool(
-    LayerTreeResourceProvider* resource_provider,
+    viz::ClientResourceProvider* resource_provider,
+    viz::ContextProvider* context_provider,
     scoped_refptr<base::SingleThreadTaskRunner> task_runner,
     const base::TimeDelta& expiration_delay,
-    Mode resource_mode,
     bool disallow_non_exact_reuse)
     : resource_provider_(resource_provider),
-      using_gpu_resources_(resource_mode == Mode::kGpu),
+      context_provider_(context_provider),
       task_runner_(std::move(task_runner)),
       resource_expiration_delay_(expiration_delay),
       disallow_non_exact_reuse_(disallow_non_exact_reuse),
@@ -78,15 +98,14 @@ ResourcePool::ResourcePool(
       weak_ptr_factory_(this) {
   base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
       this, "cc::ResourcePool", task_runner_.get());
-  // Register this component with base::MemoryCoordinatorClientRegistry.
-  base::MemoryCoordinatorClientRegistry::GetInstance()->Register(this);
+  memory_pressure_listener_.reset(
+      new base::MemoryPressureListener(base::BindRepeating(
+          &ResourcePool::OnMemoryPressure, weak_ptr_factory_.GetWeakPtr())));
 }
 
 ResourcePool::~ResourcePool() {
   base::trace_event::MemoryDumpManager::GetInstance()->UnregisterDumpProvider(
       this);
-  // Unregister this component with memory_coordinator::ClientRegistry.
-  base::MemoryCoordinatorClientRegistry::GetInstance()->Unregister(this);
 
   DCHECK_EQ(0u, in_use_resources_.size());
 
@@ -160,7 +179,7 @@ ResourcePool::InUsePoolResource ResourcePool::AcquireResource(
   PoolResource* resource = ReuseResource(size, format, color_space);
   if (!resource)
     resource = CreateResource(size, format, color_space);
-  return InUsePoolResource(resource, using_gpu_resources_);
+  return InUsePoolResource(resource, !!context_provider_);
 }
 
 // Iterate over all three resource lists (unused, in-use, and busy), updating
@@ -241,7 +260,7 @@ ResourcePool::TryAcquireResourceForPartialRaster(
     // These will be updated when raster completes successfully.
     resource->set_invalidated_rect(gfx::Rect());
     resource->set_content_id(0);
-    return InUsePoolResource(resource, using_gpu_resources_);
+    return InUsePoolResource(resource, !!context_provider_);
   }
 
   return InUsePoolResource();
@@ -275,7 +294,7 @@ void ResourcePool::OnResourceReleased(size_t unique_id,
   }
 
   resource->set_resource_id(0);
-  if (using_gpu_resources_)
+  if (context_provider_)
     resource->gpu_backing()->returned_sync_token = sync_token;
   DidFinishUsingResource(std::move(*busy_it));
   busy_resources_.erase(busy_it);
@@ -300,13 +319,9 @@ void ResourcePool::PrepareForExport(const InUsePoolResource& resource) {
   } else {
     transferable = viz::TransferableResource::MakeSoftware(
         resource.resource_->software_backing()->shared_bitmap_id,
-        // Not needed since this software resource's SharedBitmapId was
-        // notified to the display compositor through the CompositorFrameSink.
-        /*sequence_number=*/0, resource.resource_->size(),
-        resource.resource_->format());
+        resource.resource_->size(), resource.resource_->format());
   }
   transferable.format = resource.resource_->format();
-  transferable.buffer_format = viz::BufferFormat(transferable.format);
   transferable.color_space = resource.resource_->color_space();
   resource.resource_->set_resource_id(resource_provider_->ImportResource(
       std::move(transferable),
@@ -486,7 +501,11 @@ void ResourcePool::EvictExpiredResources() {
     // If nothing is evictable, we have deleted one (and possibly more)
     // resources without any new activity. Flush to ensure these deletions are
     // processed.
-    resource_provider_->FlushPendingDeletions();
+    if (context_provider_) {
+      // Flush any ContextGL work as well as any SharedImageInterface work.
+      context_provider_->ContextGL()->OrderingBarrierCHROMIUM();
+      context_provider_->ContextSupport()->FlushPendingWork();
+    }
     return;
   }
 
@@ -522,8 +541,8 @@ base::TimeTicks ResourcePool::GetUsageTimeForLRUResource() const {
 bool ResourcePool::OnMemoryDump(const base::trace_event::MemoryDumpArgs& args,
                                 base::trace_event::ProcessMemoryDump* pmd) {
   if (args.level_of_detail == MemoryDumpLevelOfDetail::BACKGROUND) {
-    std::string dump_name = base::StringPrintf(
-        "cc/tile_memory/provider_%d", resource_provider_->tracing_id());
+    std::string dump_name =
+        base::StringPrintf("cc/tile_memory/provider_%d", tracing_id_);
     MemoryAllocatorDump* dump = pmd->CreateAllocatorDump(dump_name);
     dump->AddScalar(MemoryAllocatorDump::kNameSize,
                     MemoryAllocatorDump::kUnitsBytes,
@@ -545,15 +564,16 @@ bool ResourcePool::OnMemoryDump(const base::trace_event::MemoryDumpArgs& args,
   return true;
 }
 
-void ResourcePool::OnPurgeMemory() {
-  // Release all resources, regardless of how recently they were used.
-  EvictResourcesNotUsedSince(base::TimeTicks() + base::TimeDelta::Max());
-}
-
-void ResourcePool::OnMemoryStateChange(base::MemoryState state) {
-  // While in a SUSPENDED state, we don't put resources back into the pool
-  // when they become available. Instead we free them immediately.
-  evict_busy_resources_when_unused_ = state == base::MemoryState::SUSPENDED;
+void ResourcePool::OnMemoryPressure(
+    base::MemoryPressureListener::MemoryPressureLevel level) {
+  switch (level) {
+    case base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_NONE:
+    case base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_MODERATE:
+      break;
+    case base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_CRITICAL:
+      EvictResourcesNotUsedSince(base::TimeTicks() + base::TimeDelta::Max());
+      break;
+  }
 }
 
 ResourcePool::PoolResource::PoolResource(size_t unique_id,
@@ -570,30 +590,8 @@ ResourcePool::PoolResource::~PoolResource() = default;
 void ResourcePool::PoolResource::OnMemoryDump(
     base::trace_event::ProcessMemoryDump* pmd,
     int tracing_id,
-    const LayerTreeResourceProvider* resource_provider,
+    const viz::ClientResourceProvider* resource_provider,
     bool is_free) const {
-  base::UnguessableToken shm_guid;
-  base::trace_event::MemoryAllocatorDumpGuid backing_guid;
-  if (software_backing_) {
-    // Software resources are allocated in shared memory for use cross-process
-    // in the display compositor. So we use the guid for the shared memory to
-    // identify them in tracing in all processes.
-    shm_guid = software_backing_->SharedMemoryGuid();
-  } else if (gpu_backing_) {
-    // We prefer the SharedMemoryGuid() if it exists, if the resource is backed
-    // by shared memory.
-    shm_guid = gpu_backing_->SharedMemoryGuid();
-    if (shm_guid.is_empty()) {
-      auto* dump_manager = base::trace_event::MemoryDumpManager::GetInstance();
-      backing_guid =
-          gpu_backing_->MemoryDumpGuid(dump_manager->GetTracingProcessId());
-    }
-  }
-
-  // If memory isn't allocated on the resource yet, then don't dump it.
-  if (shm_guid.is_empty() && backing_guid.empty())
-    return;
-
   // Resource IDs are not process-unique, so log with the ResourcePool's unique
   // tracing id.
   std::string dump_name = base::StringPrintf(
@@ -605,12 +603,14 @@ void ResourcePool::PoolResource::OnMemoryDump(
   // the root ownership. The gpu processes uses 0, so 2 is sufficient, and was
   // chosen historically and there is no need to adjust it.
   const int kImportance = 2;
-  if (!shm_guid.is_empty()) {
-    pmd->CreateSharedMemoryOwnershipEdge(dump->guid(), shm_guid, kImportance);
-  } else {
-    DCHECK(!backing_guid.empty());
-    pmd->CreateSharedGlobalAllocatorDump(backing_guid);
-    pmd->AddOwnershipEdge(dump->guid(), backing_guid, kImportance);
+  auto* dump_manager = base::trace_event::MemoryDumpManager::GetInstance();
+  uint64_t tracing_process_id = dump_manager->GetTracingProcessId();
+  if (software_backing_) {
+    software_backing_->OnMemoryDump(pmd, dump->guid(), tracing_process_id,
+                                    kImportance);
+  } else if (gpu_backing_) {
+    gpu_backing_->OnMemoryDump(pmd, dump->guid(), tracing_process_id,
+                               kImportance);
   }
 
   uint64_t total_bytes =

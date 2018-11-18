@@ -4,9 +4,9 @@
 
 #include "components/offline_pages/core/model/get_thumbnail_task.h"
 
-#include "components/offline_pages/core/offline_page_metadata_store_sql.h"
+#include "components/offline_pages/core/offline_page_metadata_store.h"
 #include "components/offline_pages/core/offline_store_utils.h"
-#include "sql/connection.h"
+#include "sql/database.h"
 #include "sql/statement.h"
 #include "sql/transaction.h"
 
@@ -15,7 +15,7 @@ namespace offline_pages {
 namespace {
 
 std::unique_ptr<OfflinePageThumbnail> GetThumbnailSync(int64_t offline_id,
-                                                       sql::Connection* db) {
+                                                       sql::Database* db) {
   std::unique_ptr<OfflinePageThumbnail> result;
   static const char kSql[] =
       "SELECT offline_id, expiration, thumbnail FROM page_thumbnails"
@@ -39,7 +39,7 @@ std::unique_ptr<OfflinePageThumbnail> GetThumbnailSync(int64_t offline_id,
 
 }  // namespace
 
-GetThumbnailTask::GetThumbnailTask(OfflinePageMetadataStoreSQL* store,
+GetThumbnailTask::GetThumbnailTask(OfflinePageMetadataStore* store,
                                    int64_t offline_id,
                                    CompleteCallback complete_callback)
     : store_(store),
@@ -52,7 +52,8 @@ GetThumbnailTask::~GetThumbnailTask() = default;
 void GetThumbnailTask::Run() {
   store_->Execute(base::BindOnce(GetThumbnailSync, std::move(offline_id_)),
                   base::BindOnce(&GetThumbnailTask::Complete,
-                                 weak_ptr_factory_.GetWeakPtr()));
+                                 weak_ptr_factory_.GetWeakPtr()),
+                  std::unique_ptr<OfflinePageThumbnail>());
 }
 
 void GetThumbnailTask::Complete(std::unique_ptr<OfflinePageThumbnail> result) {

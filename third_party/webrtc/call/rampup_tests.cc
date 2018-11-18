@@ -10,6 +10,7 @@
 
 #include "call/rampup_tests.h"
 
+#include "call/fake_network_pipe.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/platform_thread.h"
@@ -58,6 +59,7 @@ RampUpTester::RampUpTester(size_t num_video_streams,
       sender_call_(nullptr),
       send_stream_(nullptr),
       send_transport_(nullptr),
+      send_simulated_network_(nullptr),
       start_bitrate_bps_(start_bitrate_bps),
       min_run_time_ms_(min_run_time_ms),
       expected_bitrate_bps_(0),
@@ -75,16 +77,13 @@ RampUpTester::RampUpTester(size_t num_video_streams,
   EXPECT_LE(num_audio_streams_, 1u);
 }
 
-RampUpTester::~RampUpTester() {
-}
+RampUpTester::~RampUpTester() {}
 
-Call::Config RampUpTester::GetSenderCallConfig() {
-  Call::Config call_config(&event_log_);
+void RampUpTester::ModifySenderCallConfig(Call::Config* config) {
   if (start_bitrate_bps_ != 0) {
-    call_config.bitrate_config.start_bitrate_bps = start_bitrate_bps_;
+    config->bitrate_config.start_bitrate_bps = start_bitrate_bps_;
   }
-  call_config.bitrate_config.min_bitrate_bps = 10000;
-  return call_config;
+  config->bitrate_config.min_bitrate_bps = 10000;
 }
 
 void RampUpTester::OnVideoStreamsCreated(
@@ -96,9 +95,13 @@ void RampUpTester::OnVideoStreamsCreated(
 test::PacketTransport* RampUpTester::CreateSendTransport(
     test::SingleThreadedTaskQueueForTesting* task_queue,
     Call* sender_call) {
+  auto network = absl::make_unique<SimulatedNetwork>(forward_transport_config_);
+  send_simulated_network_ = network.get();
   send_transport_ = new test::PacketTransport(
       task_queue, sender_call, this, test::PacketTransport::kSender,
-      test::CallTest::payload_type_map_, forward_transport_config_);
+      test::CallTest::payload_type_map_,
+      absl::make_unique<FakeNetworkPipe>(Clock::GetRealTimeClock(),
+                                         std::move(network)));
   return send_transport_;
 }
 
@@ -146,12 +149,15 @@ void RampUpTester::ModifyVideoConfigs(
     // For single stream rampup until 1mbps
     expected_bitrate_bps_ = kSingleStreamTargetBps;
   } else {
-    // For multi stream rampup until all streams are being sent. That means
-    // enough bitrate to send all the target streams plus the min bitrate of
-    // the last one.
+    // To ensure simulcast rate allocation.
+    send_config->rtp.payload_name = "VP8";
+    encoder_config->codec_type = kVideoCodecVP8;
     std::vector<VideoStream> streams = test::CreateVideoStreams(
         test::CallTest::kDefaultWidth, test::CallTest::kDefaultHeight,
         *encoder_config);
+    // For multi stream rampup until all streams are being sent. That means
+    // enough bitrate to send all the target streams plus the min bitrate of
+    // the last one.
     expected_bitrate_bps_ = streams.back().min_bitrate_bps;
     for (size_t i = 0; i < streams.size() - 1; ++i) {
       expected_bitrate_bps_ += streams[i].target_bitrate_bps;
@@ -200,6 +206,10 @@ void RampUpTester::ModifyVideoConfigs(
     recv_config.rtp.remb = remb;
     recv_config.rtp.transport_cc = transport_cc;
     recv_config.rtp.extensions = send_config->rtp.extensions;
+    recv_config.decoders.reserve(1);
+    recv_config.decoders[0].payload_type = send_config->rtp.payload_type;
+    recv_config.decoders[0].video_format =
+        SdpVideoFormat(send_config->rtp.payload_name);
 
     recv_config.rtp.remote_ssrc = video_ssrcs_[i];
     recv_config.rtp.nack.rtp_history_ms = send_config->rtp.nack.rtp_history_ms;
@@ -297,7 +307,6 @@ void RampUpTester::PollStats() {
     if (sender_call_) {
       Call::Stats stats = sender_call_->GetStats();
 
-      EXPECT_GE(stats.send_bandwidth_bps, start_bitrate_bps_);
       EXPECT_GE(expected_bitrate_bps_, 0);
       if (stats.send_bandwidth_bps >= expected_bitrate_bps_ &&
           (min_run_time_ms_ == -1 ||
@@ -439,10 +448,8 @@ void RampUpDownUpTester::PollStats() {
   } while (!stop_event_.Wait(kPollIntervalMs));
 }
 
-Call::Config RampUpDownUpTester::GetReceiverCallConfig() {
-  Call::Config config(&event_log_);
-  config.bitrate_config.min_bitrate_bps = 10000;
-  return config;
+void RampUpDownUpTester::ModifyReceiverCallConfig(Call::Config* config) {
+  config->bitrate_config.min_bitrate_bps = 10000;
 }
 
 std::string RampUpDownUpTester::GetModifierString() const {
@@ -551,7 +558,7 @@ void RampUpDownUpTester::EvolveTestState(int bitrate_bps, bool suspended) {
         state_start_ms_ = now;
         interval_start_ms_ = now;
         sent_bytes_ = 0;
-        send_transport_->SetConfig(forward_transport_config_);
+        send_simulated_network_->SetConfig(forward_transport_config_);
       }
       break;
   }
@@ -560,11 +567,6 @@ void RampUpDownUpTester::EvolveTestState(int bitrate_bps, bool suspended) {
 class RampUpTest : public test::CallTest {
  public:
   RampUpTest() {}
-
-  virtual ~RampUpTest() {
-    EXPECT_EQ(nullptr, video_send_stream_);
-    EXPECT_TRUE(video_receive_streams_.empty());
-  }
 };
 
 static const uint32_t kStartBitrateBps = 60000;

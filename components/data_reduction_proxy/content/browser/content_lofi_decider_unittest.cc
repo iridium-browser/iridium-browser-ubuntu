@@ -157,8 +157,9 @@ class ContentLoFiDeciderTest : public testing::Test {
     }
 
     data_reduction_proxy_network_delegate_->NotifyBeforeStartTransaction(
-        request, base::Bind(&ContentLoFiDeciderTest::DelegateStageDone,
-                            base::Unretained(this)),
+        request,
+        base::BindOnce(&ContentLoFiDeciderTest::DelegateStageDone,
+                       base::Unretained(this)),
         headers);
     data_reduction_proxy_network_delegate_->NotifyBeforeSendHeaders(
         request, data_reduction_proxy_info, proxy_retry_info, headers);
@@ -230,15 +231,15 @@ TEST_F(ContentLoFiDeciderTest, MaybeSetAcceptTransformNoAcceptForPreviewsOff) {
 
   std::unique_ptr<net::URLRequest> request =
       CreateRequest(true /* is main */, content::PREVIEWS_OFF);
-  VerifyAcceptTransformHeader(*request.get(), false /* lite-page */,
+  VerifyAcceptTransformHeader(*request, false /* lite-page */,
                               false /* empty-image */);
 
   request = CreateRequest(true /* is main */, content::PREVIEWS_NO_TRANSFORM);
-  VerifyAcceptTransformHeader(*request.get(), false /* lite-page */,
+  VerifyAcceptTransformHeader(*request, false /* lite-page */,
                               false /* empty-image */);
 
   request = CreateRequest(true /* is main */, content::PREVIEWS_UNSPECIFIED);
-  VerifyAcceptTransformHeader(*request.get(), false /* lite-page */,
+  VerifyAcceptTransformHeader(*request, false /* lite-page */,
                               false /* empty-image */);
 }
 
@@ -255,12 +256,12 @@ TEST_F(ContentLoFiDeciderTest, MaybeSetAcceptTransformNoAcceptForHttps) {
   std::unique_ptr<net::URLRequest> request =
       CreateRequestByType(content::RESOURCE_TYPE_MAIN_FRAME, true /* https */,
                           both_previews_enabled);
-  VerifyAcceptTransformHeader(*request.get(), false /* lite-page */,
+  VerifyAcceptTransformHeader(*request, false /* lite-page */,
                               false /* empty-image */);
 
   request = CreateRequestByType(content::RESOURCE_TYPE_IMAGE, true /* https */,
                                 both_previews_enabled);
-  VerifyAcceptTransformHeader(*request.get(), false /* lite-page */,
+  VerifyAcceptTransformHeader(*request, false /* lite-page */,
                               false /* empty-image */);
 }
 
@@ -275,11 +276,11 @@ TEST_F(ContentLoFiDeciderTest, MaybeSetAcceptTransformHeaderAcceptLitePage) {
   // Verify accepting lite-page per resource type.
   std::unique_ptr<net::URLRequest> request =
       CreateRequest(true /* is main */, lite_page_enabled);
-  VerifyAcceptTransformHeader(*request.get(), true /* lite-page */,
+  VerifyAcceptTransformHeader(*request, true /* lite-page */,
                               false /* empty-image */);
 
   request = CreateRequest(false /* is main */, lite_page_enabled);
-  VerifyAcceptTransformHeader(*request.get(), false /* lite-page */,
+  VerifyAcceptTransformHeader(*request, false /* lite-page */,
                               false /* empty-image */);
 }
 
@@ -294,27 +295,27 @@ TEST_F(ContentLoFiDeciderTest, MaybeSetAcceptTransformHeaderAcceptEmptyImage) {
   // Verify accepting empty-image per resource type.
   std::unique_ptr<net::URLRequest> request = CreateRequestByType(
       content::RESOURCE_TYPE_MAIN_FRAME, false /* https */, lofi_enabled);
-  VerifyAcceptTransformHeader(*request.get(), false /* lite-page */,
+  VerifyAcceptTransformHeader(*request, false /* lite-page */,
                               false /* empty-image */);
 
   request = CreateRequestByType(content::RESOURCE_TYPE_IMAGE, false /* https */,
                                 lofi_enabled);
-  VerifyAcceptTransformHeader(*request.get(), false /* lite-page */,
+  VerifyAcceptTransformHeader(*request, false /* lite-page */,
                               true /* empty-image */);
 
   request = CreateRequestByType(content::RESOURCE_TYPE_FAVICON,
                                 false /* https */, lofi_enabled);
-  VerifyAcceptTransformHeader(*request.get(), false /* lite-page */,
+  VerifyAcceptTransformHeader(*request, false /* lite-page */,
                               true /* empty-image */);
 
   request = CreateRequestByType(content::RESOURCE_TYPE_SCRIPT,
                                 false /* https */, lofi_enabled);
-  VerifyAcceptTransformHeader(*request.get(), false /* lite-page */,
+  VerifyAcceptTransformHeader(*request, false /* lite-page */,
                               false /* empty-image */);
 
   request = CreateRequestByType(content::RESOURCE_TYPE_STYLESHEET,
                                 false /* https */, lofi_enabled);
-  VerifyAcceptTransformHeader(*request.get(), false /* lite-page */,
+  VerifyAcceptTransformHeader(*request, false /* lite-page */,
                               false /* empty-image */);
 }
 
@@ -414,43 +415,6 @@ TEST_F(ContentLoFiDeciderTest, VideoDirectiveDoesNotOverride) {
   EXPECT_EQ("empty-image", header_value);
 }
 
-TEST_F(ContentLoFiDeciderTest, IsSlowPagePreviewRequested) {
-  std::unique_ptr<data_reduction_proxy::ContentLoFiDecider> lofi_decider(
-      new data_reduction_proxy::ContentLoFiDecider());
-  net::HttpRequestHeaders headers;
-  EXPECT_FALSE(lofi_decider->IsSlowPagePreviewRequested(headers));
-  headers.SetHeader(chrome_proxy_accept_transform_header(), "lite-page");
-  EXPECT_TRUE(lofi_decider->IsSlowPagePreviewRequested(headers));
-  headers.SetHeader(chrome_proxy_accept_transform_header(), "lite-page;foo");
-  EXPECT_FALSE(lofi_decider->IsSlowPagePreviewRequested(headers));
-  headers.SetHeader(chrome_proxy_accept_transform_header(), "empty-image");
-  EXPECT_TRUE(lofi_decider->IsSlowPagePreviewRequested(headers));
-  headers.SetHeader(chrome_proxy_accept_transform_header(), "empty-image;foo");
-  EXPECT_FALSE(lofi_decider->IsSlowPagePreviewRequested(headers));
-  headers.SetHeader("Another-Header", "empty-image");
-  lofi_decider->RemoveAcceptTransformHeader(&headers);
-  EXPECT_FALSE(lofi_decider->IsSlowPagePreviewRequested(headers));
-}
-
-TEST_F(ContentLoFiDeciderTest, IsLitePagePreviewRequested) {
-  std::unique_ptr<data_reduction_proxy::ContentLoFiDecider> lofi_decider(
-      new data_reduction_proxy::ContentLoFiDecider());
-  net::HttpRequestHeaders headers;
-  EXPECT_FALSE(lofi_decider->IsLitePagePreviewRequested(headers));
-  headers.SetHeader(chrome_proxy_accept_transform_header(), "empty-image");
-  EXPECT_FALSE(lofi_decider->IsLitePagePreviewRequested(headers));
-  headers.SetHeader(chrome_proxy_accept_transform_header(),
-                    "empty-image;lite-page");
-  EXPECT_FALSE(lofi_decider->IsLitePagePreviewRequested(headers));
-  headers.SetHeader(chrome_proxy_accept_transform_header(), "lite-page");
-  EXPECT_TRUE(lofi_decider->IsLitePagePreviewRequested(headers));
-  headers.SetHeader(chrome_proxy_accept_transform_header(), "lite-page;foo");
-  EXPECT_TRUE(lofi_decider->IsLitePagePreviewRequested(headers));
-  headers.SetHeader("Another-Header", "lite-page");
-  lofi_decider->RemoveAcceptTransformHeader(&headers);
-  EXPECT_FALSE(lofi_decider->IsLitePagePreviewRequested(headers));
-}
-
 TEST_F(ContentLoFiDeciderTest, RemoveAcceptTransformHeader) {
   std::unique_ptr<data_reduction_proxy::ContentLoFiDecider> lofi_decider(
       new data_reduction_proxy::ContentLoFiDecider());
@@ -466,13 +430,13 @@ TEST_F(ContentLoFiDeciderTest, ShouldRecordLoFiUMA) {
       new data_reduction_proxy::ContentLoFiDecider());
   std::unique_ptr<net::URLRequest> request1 = CreateRequestByType(
       content::RESOURCE_TYPE_IMAGE, false, content::SERVER_LOFI_ON);
-  EXPECT_TRUE(lofi_decider->ShouldRecordLoFiUMA(*request1.get()));
+  EXPECT_TRUE(lofi_decider->ShouldRecordLoFiUMA(*request1));
   std::unique_ptr<net::URLRequest> request2 = CreateRequestByType(
       content::RESOURCE_TYPE_MAIN_FRAME, false, content::PREVIEWS_OFF);
-  EXPECT_FALSE(lofi_decider->ShouldRecordLoFiUMA(*request2.get()));
+  EXPECT_FALSE(lofi_decider->ShouldRecordLoFiUMA(*request2));
   std::unique_ptr<net::URLRequest> request3 = CreateRequestByType(
       content::RESOURCE_TYPE_MAIN_FRAME, false, content::SERVER_LITE_PAGE_ON);
-  EXPECT_TRUE(lofi_decider->ShouldRecordLoFiUMA(*request3.get()));
+  EXPECT_TRUE(lofi_decider->ShouldRecordLoFiUMA(*request3));
 }
 
 TEST_F(ContentLoFiDeciderTest, NoTransformDoesNotAddHeader) {
@@ -539,56 +503,46 @@ TEST_F(ContentLoFiDeciderTest, DetermineCommittedServerPreviewsStateLitePage) {
   content::PreviewsState enabled_previews =
       content::SERVER_LITE_PAGE_ON | content::SERVER_LOFI_ON |
       content::CLIENT_LOFI_ON | content::NOSCRIPT_ON;
-  std::unique_ptr<net::URLRequest> request = CreateRequestByType(
-      content::RESOURCE_TYPE_MAIN_FRAME, false /* https */, enabled_previews);
 
   // Add DataReductionProxyData for LitePage to URLRequest.
-  data_reduction_proxy::DataReductionProxyData* data_reduction_proxy_data =
-      data_reduction_proxy::DataReductionProxyData::GetDataAndCreateIfNecessary(
-          request.get());
-  data_reduction_proxy_data->set_used_data_reduction_proxy(true);
-  data_reduction_proxy_data->set_lite_page_received(true);
-  data_reduction_proxy_data->set_lofi_policy_received(false);
+  data_reduction_proxy::DataReductionProxyData data_reduction_proxy_data;
+  data_reduction_proxy_data.set_used_data_reduction_proxy(true);
+  data_reduction_proxy_data.set_lite_page_received(true);
+  data_reduction_proxy_data.set_lofi_policy_received(false);
 
   // Verify selects LitePage bit but doesn't touch client-only NoScript bit.
   EXPECT_EQ(content::SERVER_LITE_PAGE_ON | content::NOSCRIPT_ON,
             ContentLoFiDecider::DetermineCommittedServerPreviewsState(
-                *request, enabled_previews));
+                &data_reduction_proxy_data, enabled_previews));
 }
 
 TEST_F(ContentLoFiDeciderTest, DetermineCommittedServerPreviewsStateLoFi) {
   content::PreviewsState enabled_previews =
       content::SERVER_LITE_PAGE_ON | content::SERVER_LOFI_ON |
       content::CLIENT_LOFI_ON | content::NOSCRIPT_ON;
-  std::unique_ptr<net::URLRequest> request = CreateRequestByType(
-      content::RESOURCE_TYPE_MAIN_FRAME, false /* https */, enabled_previews);
 
   // Add DataReductionProxyData for LitePage to URLRequest.
-  data_reduction_proxy::DataReductionProxyData* data_reduction_proxy_data =
-      data_reduction_proxy::DataReductionProxyData::GetDataAndCreateIfNecessary(
-          request.get());
-  data_reduction_proxy_data->set_used_data_reduction_proxy(true);
-  data_reduction_proxy_data->set_lite_page_received(false);
-  data_reduction_proxy_data->set_lofi_policy_received(true);
+  data_reduction_proxy::DataReductionProxyData data_reduction_proxy_data;
+  data_reduction_proxy_data.set_used_data_reduction_proxy(true);
+  data_reduction_proxy_data.set_lite_page_received(false);
+  data_reduction_proxy_data.set_lofi_policy_received(true);
 
   // Verify keeps LoFi bits and also doesn't touch client-only NoScript bit.
   EXPECT_EQ(
       content::SERVER_LOFI_ON | content::CLIENT_LOFI_ON | content::NOSCRIPT_ON,
       ContentLoFiDecider::DetermineCommittedServerPreviewsState(
-          *request, enabled_previews));
+          &data_reduction_proxy_data, enabled_previews));
 }
 
 TEST_F(ContentLoFiDeciderTest, DetermineCommittedServerPreviewsStateNoProxy) {
   content::PreviewsState enabled_previews =
       content::SERVER_LITE_PAGE_ON | content::SERVER_LOFI_ON |
       content::CLIENT_LOFI_ON | content::NOSCRIPT_ON;
-  std::unique_ptr<net::URLRequest> request = CreateRequestByType(
-      content::RESOURCE_TYPE_MAIN_FRAME, false /* https */, enabled_previews);
 
   // Verify keeps LoFi bits and also doesn't touch client-only NoScript bit.
   EXPECT_EQ(content::CLIENT_LOFI_ON | content::NOSCRIPT_ON,
             ContentLoFiDecider::DetermineCommittedServerPreviewsState(
-                *request, enabled_previews));
+                nullptr, enabled_previews));
 }
 
 }  // namespace data_reduction_proxy

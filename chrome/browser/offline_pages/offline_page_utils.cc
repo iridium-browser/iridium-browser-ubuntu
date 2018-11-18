@@ -4,6 +4,10 @@
 
 #include "chrome/browser/offline_pages/offline_page_utils.h"
 
+#include <algorithm>
+#include <memory>
+#include <utility>
+
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/metrics/histogram_macros.h"
@@ -11,7 +15,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
@@ -55,15 +59,17 @@ class OfflinePageComparer {
 void OnGetPagesByURLDone(
     const GURL& url,
     int tab_id,
-    const std::vector<std::string>& namespaces_to_show_in_original_tab,
-    const base::Callback<void(const std::vector<OfflinePageItem>&)>& callback,
+    const std::vector<std::string>& namespaces_restricted_to_tab_from_client_id,
+    base::OnceCallback<void(const std::vector<OfflinePageItem>&)> callback,
     const MultipleOfflinePageItemResult& pages) {
   std::vector<OfflinePageItem> selected_pages;
   std::string tab_id_str = base::IntToString(tab_id);
 
   // Exclude pages whose tab id does not match.
+  // Note: For this restriction to work offline pages saved to tab-bound
+  // namespaces must have the assigned tab id set to their ClientId::id field.
   for (const auto& page : pages) {
-    if (base::ContainsValue(namespaces_to_show_in_original_tab,
+    if (base::ContainsValue(namespaces_restricted_to_tab_from_client_id,
                             page.client_id.name_space) &&
         page.client_id.id != tab_id_str) {
       continue;
@@ -75,7 +81,7 @@ void OnGetPagesByURLDone(
   std::sort(selected_pages.begin(), selected_pages.end(),
             OfflinePageComparer());
 
-  callback.Run(selected_pages);
+  std::move(callback).Run(selected_pages);
 }
 
 bool IsSupportedByDownload(content::BrowserContext* browser_context,
@@ -133,7 +139,7 @@ void CheckDuplicateOngoingDownloads(
 }
 
 void DoCalculateSizeBetween(
-    const offline_pages::SizeInBytesCallback& callback,
+    offline_pages::SizeInBytesCallback callback,
     const base::Time& begin_time,
     const base::Time& end_time,
     const offline_pages::MultipleOfflinePageItemResult& result) {
@@ -142,7 +148,7 @@ void DoCalculateSizeBetween(
     if (begin_time <= page.creation_time && page.creation_time < end_time)
       total_size += page.file_size;
   }
-  callback.Run(total_size);
+  std::move(callback).Run(total_size);
 }
 
 content::WebContents* GetWebContentsByFrameID(int render_process_id,
@@ -197,24 +203,22 @@ const base::FilePath::CharType OfflinePageUtils::kMHTMLExtension[] =
 void OfflinePageUtils::SelectPagesForURL(
     content::BrowserContext* browser_context,
     const GURL& url,
-    URLSearchMode url_search_mode,
     int tab_id,
-    const base::Callback<void(const std::vector<OfflinePageItem>&)>& callback) {
+    base::OnceCallback<void(const std::vector<OfflinePageItem>&)> callback) {
   OfflinePageModel* offline_page_model =
       OfflinePageModelFactory::GetForBrowserContext(browser_context);
   if (!offline_page_model) {
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::Bind(callback, std::vector<OfflinePageItem>()));
+        FROM_HERE,
+        base::BindOnce(std::move(callback), std::vector<OfflinePageItem>()));
     return;
   }
 
   offline_page_model->GetPagesByURL(
-      url,
-      url_search_mode,
-      base::Bind(&OnGetPagesByURLDone, url, tab_id,
-                 offline_page_model->GetPolicyController()
-                     ->GetNamespacesRestrictedToOriginalTab(),
-                 callback));
+      url, base::BindOnce(&OnGetPagesByURLDone, url, tab_id,
+                          offline_page_model->GetPolicyController()
+                              ->GetNamespacesRestrictedToTabFromClientId(),
+                          std::move(callback)));
 }
 
 const OfflinePageItem* OfflinePageUtils::GetOfflinePageFromWebContents(
@@ -325,8 +329,7 @@ void OfflinePageUtils::CheckDuplicateDownloads(
   };
 
   offline_page_model->GetPagesByURL(
-      url, URLSearchMode::SEARCH_BY_ALL_URLS,
-      base::Bind(continuation, browser_context, url, callback));
+      url, base::BindOnce(continuation, browser_context, url, callback));
 }
 
 // static
@@ -367,15 +370,15 @@ bool OfflinePageUtils::CanDownloadAsOfflinePage(
 // static
 bool OfflinePageUtils::GetCachedOfflinePageSizeBetween(
     content::BrowserContext* browser_context,
-    const SizeInBytesCallback& callback,
+    SizeInBytesCallback callback,
     const base::Time& begin_time,
     const base::Time& end_time) {
   OfflinePageModel* offline_page_model =
       OfflinePageModelFactory::GetForBrowserContext(browser_context);
   if (!offline_page_model || begin_time > end_time)
     return false;
-  offline_page_model->GetPagesRemovedOnCacheReset(
-      base::Bind(&DoCalculateSizeBetween, callback, begin_time, end_time));
+  offline_page_model->GetPagesRemovedOnCacheReset(base::BindOnce(
+      &DoCalculateSizeBetween, std::move(callback), begin_time, end_time));
   return true;
 }
 
@@ -411,15 +414,15 @@ bool OfflinePageUtils::IsShowingTrustedOfflinePage(
 // static
 void OfflinePageUtils::AcquireFileAccessPermission(
     content::WebContents* web_contents,
-    const base::Callback<void(bool)>& callback) {
+    base::OnceCallback<void(bool)> callback) {
 #if defined(OS_ANDROID)
   content::ResourceRequestInfo::WebContentsGetter web_contents_getter =
       GetWebContentsGetter(web_contents);
   DownloadControllerBase::Get()->AcquireFileAccessPermission(
-      web_contents_getter, callback);
+      web_contents_getter, std::move(callback));
 #else
   // Not needed in other platforms.
-  callback.Run(true /*granted*/);
+  std::move(callback).Run(true /*granted*/);
 #endif  // defined(OS_ANDROID)
 }
 

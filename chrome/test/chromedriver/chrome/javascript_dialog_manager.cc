@@ -12,7 +12,7 @@
 JavaScriptDialogManager::JavaScriptDialogManager(
     DevToolsClient* client,
     const BrowserInfo* browser_info)
-    : client_(client), browser_info_(browser_info) {
+    : client_(client) {
   client_->AddListener(this);
 }
 
@@ -24,7 +24,7 @@ bool JavaScriptDialogManager::IsDialogOpen() const {
 
 Status JavaScriptDialogManager::GetDialogMessage(std::string* message) {
   if (!IsDialogOpen())
-    return Status(kNoAlertOpen);
+    return Status(kNoSuchAlert);
 
   *message = unhandled_dialog_queue_.front();
   return Status(kOk);
@@ -32,7 +32,7 @@ Status JavaScriptDialogManager::GetDialogMessage(std::string* message) {
 
 Status JavaScriptDialogManager::GetTypeOfDialog(std::string* type) {
   if (!IsDialogOpen())
-    return Status(kNoAlertOpen);
+    return Status(kNoSuchAlert);
 
   *type = dialog_type_queue_.front();
   return Status(kOk);
@@ -41,13 +41,13 @@ Status JavaScriptDialogManager::GetTypeOfDialog(std::string* type) {
 Status JavaScriptDialogManager::HandleDialog(bool accept,
                                              const std::string* text) {
   if (!IsDialogOpen())
-    return Status(kNoAlertOpen);
+    return Status(kNoSuchAlert);
 
   base::DictionaryValue params;
   params.SetBoolean("accept", accept);
   if (text)
     params.SetString("promptText", *text);
-  else if (browser_info_->build_no >= 3175)
+  else
     params.SetString("promptText", prompt_text_);
   Status status = client_->SendCommand("Page.handleJavaScriptDialog", params);
   if (status.IsError()) {
@@ -92,12 +92,9 @@ Status JavaScriptDialogManager::OnEvent(DevToolsClient* client,
 
     dialog_type_queue_.push_back(type);
 
-    if (browser_info_->build_no >= 3175) {
-      if (!params.GetString("defaultPrompt", &prompt_text_))
-        return Status(kUnknownError,
-                      "dialog event missing or invalid 'defaultPrompt'");
-    }
-
+    if (!params.GetString("defaultPrompt", &prompt_text_))
+      return Status(kUnknownError,
+                    "dialog event missing or invalid 'defaultPrompt'");
   } else if (method == "Page.javascriptDialogClosed") {
     // Inspector only sends this event when all dialogs have been closed.
     // Clear the unhandled queue in case the user closed a dialog manually.

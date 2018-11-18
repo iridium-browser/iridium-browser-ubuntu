@@ -20,6 +20,7 @@
 namespace offline_pages {
 class PrefetchBackgroundTask;
 class PrefetchService;
+class SuggestionsProvider;
 
 // Serves as the entry point for external signals into the prefetching system.
 // It listens to these events, converts them to the appropriate internal tasks
@@ -44,6 +45,9 @@ class PrefetchService;
 //    Reconcilers during BackgroundTask processing.
 class PrefetchDispatcher {
  public:
+  // Vector of pairs of offline and client IDs.
+  using IdsVector = std::vector<std::pair<int64_t, ClientId>>;
+
   virtual ~PrefetchDispatcher() = default;
 
   // Initializes the dispatcher with its respective service instance. This must
@@ -69,6 +73,15 @@ class PrefetchDispatcher {
   virtual void AddCandidatePrefetchURLs(
       const std::string& name_space,
       const std::vector<PrefetchURL>& prefetch_urls) = 0;
+
+  // Zine/Feed: Only used with Feed.
+  // Called when the set of suggestions provided has changed.
+  virtual void NewSuggestionsAvailable(
+      SuggestionsProvider* suggestions_provider) = 0;
+
+  // Zine/Feed: Only used with Feed.
+  // Removes a suggested URL from the fetch pipeline and offline_pages store.
+  virtual void RemoveSuggestion(const GURL& url) = 0;
 
   // Called when all existing suggestions are no longer considered valid for a
   // given namespace.  The prefetch system should remove any URLs that
@@ -103,6 +116,9 @@ class PrefetchDispatcher {
       const std::set<std::string>& outstanding_download_ids,
       const std::map<std::string, std::pair<base::FilePath, int64_t>>&
           success_downloads) = 0;
+
+  // Called when a GeneratePageBundle request has been sent.
+  virtual void GeneratePageBundleRequested(std::unique_ptr<IdsVector> ids) = 0;
 
   // Called when a download is completed successfully or fails.
   virtual void DownloadCompleted(

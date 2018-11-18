@@ -13,9 +13,10 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
+#include "base/sequenced_task_runner.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "chrome/browser/safe_browsing/download_protection/download_feedback.h"
 #include "components/download/public/common/mock_download_item.h"
 #include "content/public/browser/browser_thread.h"
@@ -38,7 +39,6 @@ namespace {
 class FakeDownloadFeedback : public DownloadFeedback {
  public:
   FakeDownloadFeedback(base::TaskRunner* file_task_runner,
-                       const base::FilePath& file_path,
                        const std::string& ping_request,
                        const std::string& ping_response,
                        base::Closure deletion_callback)
@@ -68,7 +68,6 @@ class FakeDownloadFeedback : public DownloadFeedback {
 
  private:
   scoped_refptr<base::TaskRunner> file_task_runner_;
-  base::FilePath file_path_;
   std::string ping_request_;
   std::string ping_response_;
 
@@ -88,7 +87,7 @@ class FakeDownloadFeedbackFactory : public DownloadFeedbackFactory {
       const std::string& ping_request,
       const std::string& ping_response) override {
     FakeDownloadFeedback* feedback = new FakeDownloadFeedback(
-        file_task_runner, file_path, ping_request, ping_response,
+        file_task_runner, ping_request, ping_response,
         base::Bind(&FakeDownloadFeedbackFactory::DownloadFeedbackSent,
                    base::Unretained(this), feedbacks_.size()));
     feedbacks_.push_back(feedback);
@@ -123,7 +122,7 @@ class DownloadFeedbackServiceTest : public testing::Test {
  public:
   DownloadFeedbackServiceTest()
       : file_task_runner_(base::CreateSequencedTaskRunnerWithTraits(
-            {base::MayBlock(), base::TaskPriority::BACKGROUND})) {}
+            {base::MayBlock(), base::TaskPriority::BEST_EFFORT})) {}
 
   void SetUp() override {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
@@ -166,6 +165,8 @@ TEST_F(DownloadFeedbackServiceTest, MaybeStorePingsForDownload) {
     // SAFE will never upload
     EXPECT_FALSE(
         WillStorePings(DownloadCheckResult::SAFE, upload_requested, ok_size));
+    EXPECT_FALSE(WillStorePings(DownloadCheckResult::WHITELISTED_BY_POLICY,
+                                upload_requested, ok_size));
     // Others will upload if requested.
     EXPECT_EQ(upload_requested, WillStorePings(DownloadCheckResult::UNKNOWN,
                                                upload_requested, ok_size));
@@ -403,7 +404,7 @@ TEST_F(DownloadFeedbackServiceTest, MultiFeedbackWithIncomplete) {
   download_discarded_callback[2].Run(file_path[2]);
   EXPECT_EQ(2U, num_feedbacks());
 
-  // File should still exist since the FileUtilProxy task hasn't run yet.
+  // File should still exist since the file deletion task hasn't run yet.
   EXPECT_TRUE(base::PathExists(file_path[2]));
 
   content::RunAllTasksUntilIdle();

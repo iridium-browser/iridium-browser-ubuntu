@@ -31,10 +31,9 @@ import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 import org.chromium.chrome.test.util.ChromeTabUtils;
 import org.chromium.chrome.test.util.TabStripUtils;
-import org.chromium.content.browser.test.util.Criteria;
-import org.chromium.content.browser.test.util.CriteriaHelper;
-import org.chromium.content.browser.test.util.DOMUtils;
-import org.chromium.ui.UiUtils;
+import org.chromium.content_public.browser.test.util.Criteria;
+import org.chromium.content_public.browser.test.util.CriteriaHelper;
+import org.chromium.content_public.browser.test.util.DOMUtils;
 import org.chromium.ui.base.LocalizationUtils;
 import org.chromium.ui.test.util.UiRestriction;
 
@@ -827,7 +826,7 @@ public class TabStripTest {
         mActivityTestRule.loadUrl("data:text/html;charset=utf-8,<html><head></head><body><form>"
                 + "<input type='text' id='input0'></form></body></html>");
         DOMUtils.clickNode(
-                mActivityTestRule.getActivity().getActivityTab().getContentViewCore(), "input0");
+                mActivityTestRule.getActivity().getActivityTab().getWebContents(), "input0");
         assertWaitForKeyboardStatus(true);
 
         InstrumentationRegistry.getInstrumentation().waitForIdleSync();
@@ -1229,7 +1228,8 @@ public class TabStripTest {
             public boolean isSatisfied() {
                 updateFailureReason("expectsShown: " + expectsShown);
                 return expectsShown
-                        == UiUtils.isKeyboardShowing(mActivityTestRule.getActivity(),
+                        == mActivityTestRule.getKeyboardDelegate().isKeyboardShowing(
+                                   mActivityTestRule.getActivity(),
                                    mActivityTestRule.getActivity().getActivityTab().getView());
             }
         });

@@ -12,7 +12,7 @@
 namespace blink {
 
 WebGLSync::WebGLSync(WebGL2RenderingContextBase* ctx,
-                     GLsync object,
+                     GLuint object,
                      GLenum object_type)
     : WebGLSharedObject(ctx),
       sync_status_(GL_UNSIGNALED),
@@ -20,7 +20,7 @@ WebGLSync::WebGLSync(WebGL2RenderingContextBase* ctx,
       object_type_(object_type) {
   if (ctx->canvas()) {
     task_runner_ =
-        ctx->canvas()->GetDocument().GetTaskRunner(TaskType::kUnthrottled);
+        ctx->canvas()->GetDocument().GetTaskRunner(TaskType::kInternalDefault);
   } else {
     // Fallback for OffscreenCanvas (no frame scheduler)
     task_runner_ = Platform::Current()->CurrentThread()->GetTaskRunner();
@@ -43,13 +43,12 @@ void WebGLSync::UpdateCache(gpu::gles2::GLES2Interface* gl) {
 
   // We can only update the cached result when control returns to the browser.
   allow_cache_update_ = false;
-  GLsizei length = -1;
-  GLint value = 0;
-  gl->GetSynciv(object_, GL_SYNC_STATUS, 1, &length, &value);
-  if (value) {
-    sync_status_ = value;
-  }
-  if (sync_status_ != GL_SIGNALED) {
+  GLuint value = 0;
+  gl->GetQueryObjectuivEXT(object_, GL_QUERY_RESULT_AVAILABLE, &value);
+  if (value == GL_TRUE) {
+    sync_status_ = GL_SIGNALED;
+  } else {
+    sync_status_ = GL_UNSIGNALED;
     ScheduleAllowCacheUpdate();
   }
 }
@@ -87,8 +86,8 @@ void WebGLSync::AllowCacheUpdate() {
 }
 
 void WebGLSync::DeleteObjectImpl(gpu::gles2::GLES2Interface* gl) {
-  gl->DeleteSync(object_);
-  object_ = nullptr;
+  gl->DeleteQueriesEXT(1, &object_);
+  object_ = 0;
 }
 
 }  // namespace blink

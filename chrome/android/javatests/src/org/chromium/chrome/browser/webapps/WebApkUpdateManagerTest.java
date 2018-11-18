@@ -70,7 +70,7 @@ public class WebApkUpdateManagerTest {
      */
     private static class TestWebApkUpdateManager extends WebApkUpdateManager {
         private CallbackHelper mWaiter;
-        private boolean mNeedsUpdate = false;
+        private boolean mNeedsUpdate;
 
         public TestWebApkUpdateManager(CallbackHelper waiter, WebappDataStorage storage) {
             super(storage);
@@ -154,11 +154,13 @@ public class WebApkUpdateManagerTest {
             @Override
             public void run() {
                 WebApkInfo info = WebApkInfo.create(WEBAPK_ID, "", creationData.scope, null, null,
-                        creationData.name, creationData.shortName, creationData.displayMode,
+                        null, creationData.name, creationData.shortName, creationData.displayMode,
                         creationData.orientation, 0, creationData.themeColor,
-                        creationData.backgroundColor, "", WebApkVersion.CURRENT_SHELL_APK_VERSION,
+                        creationData.backgroundColor, "",
+                        WebApkVersion.REQUEST_UPDATE_FOR_SHELL_APK_VERSION,
                         creationData.manifestUrl, creationData.startUrl,
-                        creationData.iconUrlToMurmur2HashMap, false /* forceNavigation */);
+                        WebApkInfo.WebApkDistributor.BROWSER, creationData.iconUrlToMurmur2HashMap,
+                        null, false /* forceNavigation */);
                 updateManager.updateIfNeeded(mTab, info);
             }
         });

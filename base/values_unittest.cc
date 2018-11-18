@@ -15,7 +15,6 @@
 #include <vector>
 
 #include "base/containers/adapters.h"
-#include "base/memory/ptr_util.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/utf_string_conversions.h"
@@ -789,7 +788,7 @@ TEST(ValuesTest, BinaryValue) {
 
   // Test the common case of a non-empty buffer
   Value::BlobStorage buffer(15);
-  char* original_buffer = buffer.data();
+  uint8_t* original_buffer = buffer.data();
   binary.reset(new Value(std::move(buffer)));
   ASSERT_TRUE(binary.get());
   ASSERT_TRUE(binary->GetBlob().data());
@@ -801,7 +800,8 @@ TEST(ValuesTest, BinaryValue) {
   binary = Value::CreateWithCopiedBuffer(stack_buffer, 42);
   ASSERT_TRUE(binary.get());
   ASSERT_TRUE(binary->GetBlob().data());
-  ASSERT_NE(stack_buffer, binary->GetBlob().data());
+  ASSERT_NE(stack_buffer,
+            reinterpret_cast<const char*>(binary->GetBlob().data()));
   ASSERT_EQ(42U, binary->GetBlob().size());
   ASSERT_EQ(0, memcmp(stack_buffer, binary->GetBlob().data(),
                       binary->GetBlob().size()));
@@ -888,8 +888,12 @@ TEST(ValuesTest, DictionaryDeletion) {
   DictionaryValue dict;
   dict.Set(key, std::make_unique<Value>());
   EXPECT_FALSE(dict.empty());
+  EXPECT_FALSE(dict.DictEmpty());
+  EXPECT_EQ(1U, dict.DictSize());
   dict.Clear();
   EXPECT_TRUE(dict.empty());
+  EXPECT_TRUE(dict.DictEmpty());
+  EXPECT_EQ(0U, dict.DictSize());
 }
 
 TEST(ValuesTest, DictionarySetReturnsPointer) {
@@ -955,12 +959,19 @@ TEST(ValuesTest, DictionaryRemoval) {
 
   {
     DictionaryValue dict;
+    EXPECT_EQ(0U, dict.DictSize());
+    EXPECT_TRUE(dict.DictEmpty());
     dict.Set(key, std::make_unique<Value>());
     EXPECT_TRUE(dict.HasKey(key));
     EXPECT_FALSE(dict.Remove("absent key", &removed_item));
+    EXPECT_EQ(1U, dict.DictSize());
+    EXPECT_FALSE(dict.DictEmpty());
+
     EXPECT_TRUE(dict.Remove(key, &removed_item));
     EXPECT_FALSE(dict.HasKey(key));
     ASSERT_TRUE(removed_item);
+    EXPECT_EQ(0U, dict.DictSize());
+    EXPECT_TRUE(dict.DictEmpty());
   }
 
   {
@@ -1196,7 +1207,7 @@ TEST(ValuesTest, Equals) {
 
   std::unique_ptr<ListValue> list(new ListValue);
   list->Append(std::make_unique<Value>());
-  list->Append(WrapUnique(new DictionaryValue));
+  list->Append(std::make_unique<DictionaryValue>());
   auto list_copy = std::make_unique<Value>(list->Clone());
 
   ListValue* list_weak = dv.SetList("f", std::move(list));

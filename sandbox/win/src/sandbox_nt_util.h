@@ -8,6 +8,7 @@
 #include <intrin.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <memory>
 
 #include "base/macros.h"
 #include "sandbox/win/src/nt_internals.h"
@@ -89,6 +90,12 @@ __forceinline void* _InterlockedCompareExchangePointer(
 
 #endif
 
+struct NtAllocDeleter {
+  inline void operator()(void* ptr) const {
+    operator delete(ptr, AllocationType::NT_ALLOC);
+  }
+};
+
 // Returns a pointer to the IPC shared memory.
 void* GetGlobalIPCMemory();
 
@@ -100,8 +107,6 @@ enum RequiredAccess { READ, WRITE };
 // Performs basic user mode buffer validation. In any case, buffers access must
 // be protected by SEH. intent specifies if the buffer should be tested for read
 // or write.
-// Note that write intent implies destruction of the buffer content (we actually
-// write)
 bool ValidParameter(void* buffer, size_t size, RequiredAccess intent);
 
 // Copies data from a user buffer to our buffer. Returns the operation status.
@@ -109,7 +114,7 @@ NTSTATUS CopyData(void* destination, const void* source, size_t bytes);
 
 // Copies the name from an object attributes.
 NTSTATUS AllocAndCopyName(const OBJECT_ATTRIBUTES* in_object,
-                          wchar_t** out_name,
+                          std::unique_ptr<wchar_t, NtAllocDeleter>* out_name,
                           uint32_t* attributes,
                           HANDLE* root);
 
@@ -143,6 +148,12 @@ enum MappedModuleFlags {
 // InsertYourLogicHere(name);
 // operator delete(name, NT_ALLOC);
 UNICODE_STRING* GetImageInfoFromModule(HMODULE module, uint32_t* flags);
+
+// Returns the name and characteristics for a given PE module. The return
+// value is the name as defined by the export table.
+//
+// The returned buffer is within the PE module and must not be freed.
+const char* GetAnsiImageInfoFromModule(HMODULE module);
 
 // Returns the full path and filename for a given dll.
 // May return nullptr if the provided address is not backed by a named section,

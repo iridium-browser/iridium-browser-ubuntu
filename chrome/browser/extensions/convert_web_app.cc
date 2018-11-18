@@ -25,6 +25,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "base/values.h"
+#include "chrome/browser/web_applications/components/web_app_helpers.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/api/url_handlers/url_handlers_parser.h"
 #include "chrome/common/extensions/manifest_handlers/app_theme_color_info.h"
@@ -45,29 +46,9 @@ namespace extensions {
 
 namespace keys = manifest_keys;
 
-using base::Time;
-
 namespace {
-
 const char kIconsDirName[] = "icons";
 const char kScopeUrlHandlerId[] = "scope";
-
-// Create the public key for the converted web app.
-//
-// Web apps are not signed, but the public key for an extension doubles as
-// its unique identity, and we need one of those. A web app's unique identity
-// is its manifest URL, so we hash that to create a public key. There will be
-// no corresponding private key, which means that these extensions cannot be
-// auto-updated using ExtensionUpdater.
-std::string GenerateKey(const GURL& app_url) {
-  char raw[crypto::kSHA256Length] = {0};
-  std::string key;
-  crypto::SHA256HashString(app_url.spec().c_str(), raw,
-                           crypto::kSHA256Length);
-  base::Base64Encode(base::StringPiece(raw, crypto::kSHA256Length), &key);
-  return key;
-}
-
 }  // namespace
 
 std::unique_ptr<base::DictionaryValue> CreateURLHandlersForBookmarkApp(
@@ -120,16 +101,17 @@ GURL GetScopeURLFromBookmarkApp(const Extension* extension) {
 
 // Generates a version for the converted app using the current date. This isn't
 // really needed, but it seems like useful information.
-std::string ConvertTimeToExtensionVersion(const Time& create_time) {
-  Time::Exploded create_time_exploded;
+std::string ConvertTimeToExtensionVersion(const base::Time& create_time) {
+  base::Time::Exploded create_time_exploded;
   create_time.UTCExplode(&create_time_exploded);
 
   double micros = static_cast<double>(
-      (create_time_exploded.millisecond * Time::kMicrosecondsPerMillisecond) +
-      (create_time_exploded.second * Time::kMicrosecondsPerSecond) +
-      (create_time_exploded.minute * Time::kMicrosecondsPerMinute) +
-      (create_time_exploded.hour * Time::kMicrosecondsPerHour));
-  double day_fraction = micros / Time::kMicrosecondsPerDay;
+      (create_time_exploded.millisecond *
+       base::Time::kMicrosecondsPerMillisecond) +
+      (create_time_exploded.second * base::Time::kMicrosecondsPerSecond) +
+      (create_time_exploded.minute * base::Time::kMicrosecondsPerMinute) +
+      (create_time_exploded.hour * base::Time::kMicrosecondsPerHour));
+  double day_fraction = micros / base::Time::kMicrosecondsPerDay;
   int stamp =
       gfx::ToRoundedInt(day_fraction * std::numeric_limits<uint16_t>::max());
 
@@ -140,8 +122,10 @@ std::string ConvertTimeToExtensionVersion(const Time& create_time) {
 
 scoped_refptr<Extension> ConvertWebAppToExtension(
     const WebApplicationInfo& web_app,
-    const Time& create_time,
-    const base::FilePath& extensions_dir) {
+    const base::Time& create_time,
+    const base::FilePath& extensions_dir,
+    int extra_creation_flags,
+    Manifest::Location install_source) {
   base::FilePath install_temp_dir =
       file_util::GetInstallTempDir(extensions_dir);
   if (install_temp_dir.empty()) {
@@ -157,7 +141,8 @@ scoped_refptr<Extension> ConvertWebAppToExtension(
 
   // Create the manifest
   std::unique_ptr<base::DictionaryValue> root(new base::DictionaryValue);
-  root->SetString(keys::kPublicKey, GenerateKey(web_app.app_url));
+  root->SetString(keys::kPublicKey,
+                  web_app::GenerateAppKeyFromURL(web_app.app_url));
   root->SetString(keys::kName, base::UTF16ToUTF8(web_app.title));
   root->SetString(keys::kVersion, ConvertTimeToExtensionVersion(create_time));
   root->SetString(keys::kDescription, base::UTF16ToUTF8(web_app.description));
@@ -236,9 +221,9 @@ scoped_refptr<Extension> ConvertWebAppToExtension(
 
   // Finally, create the extension object to represent the unpacked directory.
   std::string error;
-  scoped_refptr<Extension> extension =
-      Extension::Create(temp_dir.GetPath(), Manifest::INTERNAL, *root,
-                        Extension::FROM_BOOKMARK, &error);
+  scoped_refptr<Extension> extension = Extension::Create(
+      temp_dir.GetPath(), install_source, *root,
+      Extension::FROM_BOOKMARK | extra_creation_flags, &error);
   if (!extension.get()) {
     LOG(ERROR) << error;
     return NULL;

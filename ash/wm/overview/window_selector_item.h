@@ -9,9 +9,10 @@
 
 #include "ash/ash_export.h"
 #include "ash/wm/overview/scoped_transform_overview_window.h"
+#include "ash/wm/overview/window_selector.h"
 #include "base/macros.h"
 #include "ui/aura/window_observer.h"
-#include "ui/gfx/geometry/insets.h"
+#include "ui/compositor/layer_animation_observer.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/controls/button/image_button.h"
@@ -20,24 +21,20 @@
 
 namespace gfx {
 class SlideAnimation;
-}
+}  // namespace gfx
 
 namespace ui {
 class Shadow;
-}
-
-namespace views {
-class ImageButton;
-}
+}  // namespace ui
 
 namespace ash {
 
-class WindowSelector;
 class WindowGrid;
 
 // This class represents an item in overview mode.
 class ASH_EXPORT WindowSelectorItem : public views::ButtonListener,
-                                      public aura::WindowObserver {
+                                      public aura::WindowObserver,
+                                      public ui::ImplicitAnimationObserver {
  public:
   // An image button with a close window icon.
   class OverviewCloseButton : public views::ImageButton {
@@ -49,7 +46,8 @@ class ASH_EXPORT WindowSelectorItem : public views::ButtonListener,
     void ResetListener() { listener_ = nullptr; }
 
    protected:
-    // views::ImageButton:
+    // views::Button:
+    std::unique_ptr<views::InkDrop> CreateInkDrop() override;
     std::unique_ptr<views::InkDropRipple> CreateInkDropRipple() const override;
     std::unique_ptr<views::InkDropHighlight> CreateInkDropHighlight()
         const override;
@@ -110,6 +108,9 @@ class ASH_EXPORT WindowSelectorItem : public views::ButtonListener,
   // descendants of the window returned by GetWindow()).
   gfx::Rect GetTargetBoundsInScreen() const;
 
+  // Returns the transformed bound of |transform_window_|.
+  gfx::Rect GetTransformedBounds() const;
+
   // Sets the bounds of this window selector item to |target_bounds| in the
   // |root_window_| root window. The bounds change will be animated as specified
   // by |animation_type|.
@@ -119,18 +120,19 @@ class ASH_EXPORT WindowSelectorItem : public views::ButtonListener,
   // Activates or deactivates selection depending on |selected|.
   // In selected state the item's caption is shown transparent and blends with
   // the selection widget.
-  void SetSelected(bool selected);
+  void set_selected(bool selected) { selected_ = selected; }
 
   // Sends an accessibility event indicating that this window became selected
   // so that it's highlighted and announced if accessibility features are
   // enabled.
   void SendAccessibleSelectionEvent();
 
+  // Slides the item up or down and then closes the associated window. Used by
+  // overview swipe to close.
+  void AnimateAndCloseWindow(bool up);
+
   // Closes |transform_window_|.
   void CloseWindow();
-
-  // Hides the original window header.
-  void HideHeader();
 
   // Called when the window is minimized or unminimized.
   void OnMinimizedStateChanged();
@@ -158,6 +160,16 @@ class ASH_EXPORT WindowSelectorItem : public views::ButtonListener,
   void DisableBackdrop();
   void UpdateBackdropBounds();
 
+  // TODO(minch): Do not actually scale up the item to get the bounds.
+  // http://crbug.com/876567.
+  // Returns the bounds of the selected item, which will be scaled up a little
+  // bit and header view will be hidden after being selected. Note, the item
+  // will be restored back after scaled up.
+  gfx::Rect GetBoundsOfSelectedItem();
+
+  // Increases the bounds of the dragged item.
+  void ScaleUpSelectedItem(OverviewAnimationType animation_type);
+
   // Sets if the item is dimmed in the overview. Changing the value will also
   // change the visibility of the transform windows.
   void SetDimmed(bool dimmed);
@@ -171,17 +183,40 @@ class ASH_EXPORT WindowSelectorItem : public views::ButtonListener,
   // |item_widget_|'s creation.
   void RestackItemWidget();
 
+  // Shift the window item up and then animates it to its original spot. Used
+  // to transition from the home launcher.
+  void SlideWindowIn();
+
+  // Translate and fade the window (or minimized widget) and |item_widget_|. It
+  // should remain in the same spot relative to the grids origin, which is given
+  // by |new_grid_y|.
+  void UpdateYPositionAndOpacity(
+      int new_grid_y,
+      float opacity,
+      WindowSelector::UpdateAnimationSettingsCallback callback);
+
   // views::ButtonListener:
   void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
   // aura::WindowObserver:
+  void OnWindowBoundsChanged(aura::Window* window,
+                             const gfx::Rect& old_bounds,
+                             const gfx::Rect& new_bounds,
+                             ui::PropertyChangeReason reason) override;
   void OnWindowDestroying(aura::Window* window) override;
   void OnWindowTitleChanged(aura::Window* window) override;
+
+  // ui::ImplicitAnimationObserver:
+  void OnImplicitAnimationsCompleted() override;
 
   // Handle the mouse/gesture event and facilitate dragging the item.
   void HandlePressEvent(const gfx::Point& location_in_screen);
   void HandleReleaseEvent(const gfx::Point& location_in_screen);
   void HandleDragEvent(const gfx::Point& location_in_screen);
+  void HandleLongPressEvent(const gfx::Point& location_in_screen);
+  void HandleFlingStartEvent(const gfx::Point& location_in_screen,
+                             float velocity_x,
+                             float velocity_y);
   void ActivateDraggedWindow();
   void ResetDraggedWindowGesture();
 
@@ -198,22 +233,26 @@ class ASH_EXPORT WindowSelectorItem : public views::ButtonListener,
   // the shadow is hidden.
   void SetShadowBounds(base::Optional<gfx::Rect> bounds_in_screen);
 
+  // Show or hide the mask and shadow on this window item.
+  void UpdateMaskAndShadow(bool show);
+
+  // Changes the opacity of all the windows the item owns.
+  void SetOpacity(float opacity);
+  float GetOpacity();
+
   void set_should_animate_when_entering(bool should_animate) {
     should_animate_when_entering_ = should_animate;
   }
-  bool ShouldAnimateWhenEntering() const;
+  bool should_animate_when_entering() const {
+    return should_animate_when_entering_;
+  }
 
   void set_should_animate_when_exiting(bool should_animate) {
     should_animate_when_exiting_ = should_animate;
   }
-  bool ShouldAnimateWhenExiting() const;
-
-  void set_should_be_observed_when_exiting(bool should_be_observed) {
-    should_be_observed_when_exiting_ = should_be_observed;
+  bool should_animate_when_exiting() const {
+    return should_animate_when_exiting_;
   }
-  bool ShouldBeObservedWhenExiting() const;
-
-  void ResetAnimationStates();
 
   OverviewAnimationType GetExitOverviewAnimationType();
   OverviewAnimationType GetExitTransformAnimationType();
@@ -224,8 +263,11 @@ class ASH_EXPORT WindowSelectorItem : public views::ButtonListener,
     should_restack_on_animation_end_ = val;
   }
 
-  float GetCloseButtonOpacityForTesting();
-  float GetTitlebarOpacityForTesting();
+  bool animating_to_close() const { return animating_to_close_; }
+  void set_animating_to_close(bool val) { animating_to_close_ = val; }
+
+  float GetCloseButtonVisibilityForTesting() const;
+  float GetTitlebarOpacityForTesting() const;
   gfx::Rect GetShadowBoundsForTesting();
 
  private:
@@ -236,18 +278,17 @@ class ASH_EXPORT WindowSelectorItem : public views::ButtonListener,
                            OverviewUnsnappableIndicatorVisibility);
 
   // The different ways the overview header can fade in and be laid out.
+  // TODO(sammiequon): See if we can combine this with
+  // WindowSelector::OverviewTransition.
   enum class HeaderFadeInMode {
     // Used when entering overview mode, to fade in the header background color.
     kEnter,
-    // Used when the overview header bounds change for the first time, to
-    // skip animating when in tablet mode.
+    // Used when the overview header bounds change for the first time to
+    // skip animating.
     kFirstUpdate,
     // Used when the overview header bounds change, to animate or move the
-    // header
-    // to the desired bounds.
+    // header to the desired bounds.
     kUpdate,
-    // Used when exiting overview mode, to fade out the header background color.
-    kExit,
   };
 
   // Sets the bounds of this selector's items to |target_bounds| in
@@ -255,9 +296,6 @@ class ASH_EXPORT WindowSelectorItem : public views::ButtonListener,
   // by |animation_type|.
   void SetItemBounds(const gfx::Rect& target_bounds,
                      OverviewAnimationType animation_type);
-
-  // Changes the opacity of all the windows the item owns.
-  void SetOpacity(float opacity);
 
   // Creates the window label.
   void CreateWindowLabel(const base::string16& title);
@@ -277,14 +315,6 @@ class ASH_EXPORT WindowSelectorItem : public views::ButtonListener,
   // Updates the accessibility name to match the window title.
   void UpdateAccessibilityName();
 
-  // Fades out a window caption when exiting overview mode.
-  void FadeOut(std::unique_ptr<views::Widget> widget);
-
-  // Select this window if |event_location| is less than the drag threshold for
-  // clicks. This should only be called if the original event was on the title
-  // bar (|tap_down_event_on_title_| has a value).
-  void SelectWindowIfBelowDistanceThreshold(const gfx::Point& event_location);
-
   // Allows a test to directly set animation state.
   gfx::SlideAnimation* GetBackgroundViewAnimation();
 
@@ -297,7 +327,7 @@ class ASH_EXPORT WindowSelectorItem : public views::ButtonListener,
 
   // True if the item is being shown in the overview, false if it's being
   // filtered.
-  bool dimmed_;
+  bool dimmed_ = false;
 
   // The root window this item is being displayed on.
   aura::Window* root_window_;
@@ -311,11 +341,11 @@ class ASH_EXPORT WindowSelectorItem : public views::ButtonListener,
   // True if running SetItemBounds. This prevents recursive calls resulting from
   // the bounds update when calling ::wm::RecreateWindowLayers to copy
   // a window layer for display on another monitor.
-  bool in_bounds_update_;
+  bool in_bounds_update_ = false;
 
   // True when |this| item is visually selected. Item header is made transparent
   // when the item is selected.
-  bool selected_;
+  bool selected_ = false;
 
   // A widget that covers the |transform_window_|. The widget has
   // |caption_container_view_| as its contents view. The widget is backed by a
@@ -330,29 +360,26 @@ class ASH_EXPORT WindowSelectorItem : public views::ButtonListener,
   // Container view that owns a Button view covering the |transform_window_|.
   // That button serves as an event shield to receive all events such as clicks
   // targeting the |transform_window_| or the overview header above the window.
-  // The shield button owns |background_view_| which owns |label_view_|
+  // The shield button owns a header view which owns |label_view_|
   // and |close_button_|.
-  CaptionContainerView* caption_container_view_;
+  CaptionContainerView* caption_container_view_ = nullptr;
 
-  // A View for the text label above the window owned by the |background_view_|.
-  views::Label* label_view_;
+  // A View for the text label above the window owned by the a header view in
+  // |caption_container_view_|.
+  views::Label* label_view_ = nullptr;
 
   // A View for the text label in the center of the window warning users that
   // this window cannot be snapped for splitview. Owned by a container in
-  // |background_view_|.
-  views::Label* cannot_snap_label_view_;
+  // |caption_container_view_|.
+  views::Label* cannot_snap_label_view_ = nullptr;
 
-  // A close button for the window in this item owned by the |background_view_|.
-  OverviewCloseButton* close_button_;
+  // A close button for the window in this item owned by a header view in
+  // |caption_container_view_|.
+  OverviewCloseButton* close_button_ = nullptr;
 
   // Pointer to the WindowSelector that owns the WindowGrid containing |this|.
   // Guaranteed to be non-null for the lifetime of |this|.
   WindowSelector* window_selector_;
-
-  // Pointer to a view that covers the original header and has rounded top
-  // corners. This view can have its color and opacity animated. It has a layer
-  // which is the only textured layer used by the |item_widget_|.
-  RoundedContainerView* background_view_;
 
   // Pointer to the WindowGrid that contains |this|. Guaranteed to be non-null
   // for the lifetime of |this|.
@@ -364,17 +391,14 @@ class ASH_EXPORT WindowSelectorItem : public views::ButtonListener,
   // True if the contained window should animate during the exiting animation.
   bool should_animate_when_exiting_ = true;
 
-  // True if the contained window is the first window that covers the available
-  // workspace in the MRU list during the exiting animation. It will create an
-  // OverviewWindowAnimationObserver for |window_grid_| and any other windows
-  // which should not animate will defer SetTranfrom by adding the their
-  // layer-transform pairs to the observer until this contained window completes
-  // its exiting animation.
-  bool should_be_observed_when_exiting_ = false;
-
   // True if after an animation, we need to reorder the stacking order of the
   // widgets.
   bool should_restack_on_animation_end_ = false;
+
+  // True if the windows are still alive so they can have a closing animation.
+  // These windows should not be used in calculations for
+  // WindowGrid::PositionWindows.
+  bool animating_to_close_ = false;
 
   // The shadow around the overview window. Shadows the original window, not
   // |item_widget_|. Done here instead of on the original window because of the

@@ -4,13 +4,14 @@
 
 #include "media/audio/mac/core_audio_util_mac.h"
 
+#include <IOKit/audio/IOAudioTypes.h>
+
 #include <utility>
 
 #include "base/mac/mac_logging.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
-#include "media/audio/audio_manager.h"
 
 namespace media {
 namespace core_audio_mac {
@@ -25,7 +26,6 @@ AudioObjectPropertyScope InputOutputScope(bool is_input) {
 base::Optional<std::string> GetDeviceStringProperty(
     AudioObjectID device_id,
     AudioObjectPropertySelector property_selector) {
-  DCHECK(AudioManager::Get()->GetTaskRunner()->BelongsToCurrentThread());
   CFStringRef property_value = nullptr;
   UInt32 size = sizeof(property_value);
   AudioObjectPropertyAddress property_address = {
@@ -55,7 +55,6 @@ base::Optional<uint32_t> GetDeviceUint32Property(
     AudioObjectID device_id,
     AudioObjectPropertySelector property_selector,
     AudioObjectPropertyScope property_scope) {
-  DCHECK(AudioManager::Get()->GetTaskRunner()->BelongsToCurrentThread());
   AudioObjectPropertyAddress property_address = {
       property_selector, property_scope, kAudioObjectPropertyElementMaster};
   UInt32 property_value;
@@ -72,7 +71,6 @@ base::Optional<uint32_t> GetDeviceUint32Property(
 uint32_t GetDevicePropertySize(AudioObjectID device_id,
                                AudioObjectPropertySelector property_selector,
                                AudioObjectPropertyScope property_scope) {
-  DCHECK(AudioManager::Get()->GetTaskRunner()->BelongsToCurrentThread());
   AudioObjectPropertyAddress property_address = {
       property_selector, property_scope, kAudioObjectPropertyElementMaster};
   UInt32 size = 0;
@@ -88,10 +86,9 @@ uint32_t GetDevicePropertySize(AudioObjectID device_id,
   return size;
 }
 
-std::vector<AudioObjectID> GetAudioDeviceIDs(
+std::vector<AudioObjectID> GetAudioObjectIDs(
     AudioObjectID audio_object_id,
     AudioObjectPropertySelector property_selector) {
-  DCHECK(AudioManager::Get()->GetTaskRunner()->BelongsToCurrentThread());
   AudioObjectPropertyAddress property_address = {
       property_selector, kAudioObjectPropertyScopeGlobal,
       kAudioObjectPropertyElementMaster};
@@ -118,7 +115,7 @@ std::vector<AudioObjectID> GetAudioDeviceIDs(
       nullptr /* inQualifierData */, &size, device_ids.data());
   if (result != noErr) {
     OSSTATUS_DLOG(WARNING, result)
-        << "Failed to read devuce IDs for property " << property_selector
+        << "Failed to read object IDs from property " << property_selector
         << " for device/object " << audio_object_id;
     return {};
   }
@@ -211,12 +208,12 @@ base::Optional<std::string> TranslateDeviceSource(AudioObjectID device_id,
 }  // namespace
 
 std::vector<AudioObjectID> GetAllAudioDeviceIDs() {
-  return GetAudioDeviceIDs(kAudioObjectSystemObject,
+  return GetAudioObjectIDs(kAudioObjectSystemObject,
                            kAudioHardwarePropertyDevices);
 }
 
 std::vector<AudioObjectID> GetRelatedDeviceIDs(AudioObjectID device_id) {
-  return GetAudioDeviceIDs(device_id, kAudioDevicePropertyRelatedDevices);
+  return GetAudioObjectIDs(device_id, kAudioDevicePropertyRelatedDevices);
 }
 
 base::Optional<std::string> GetDeviceUniqueID(AudioObjectID device_id) {
@@ -310,6 +307,51 @@ bool IsPrivateAggregateDevice(AudioObjectID device_id) {
   CFRelease(dictionary);
 
   return is_private;
+}
+
+bool IsInputDevice(AudioObjectID device_id) {
+  std::vector<AudioObjectID> streams =
+      GetAudioObjectIDs(device_id, kAudioDevicePropertyStreams);
+
+  int num_undefined_input_streams = 0;
+  int num_defined_input_streams = 0;
+  int num_output_streams = 0;
+
+  for (auto stream_id : streams) {
+    auto direction =
+        GetDeviceUint32Property(stream_id, kAudioStreamPropertyDirection,
+                                kAudioObjectPropertyScopeGlobal);
+    DCHECK(direction.has_value());
+    const UInt32 kDirectionOutput = 0;
+    const UInt32 kDirectionInput = 1;
+    if (direction == kDirectionOutput) {
+      ++num_output_streams;
+    } else if (direction == kDirectionInput) {
+      // Filter input streams based on what terminal it claims to be attached
+      // to. Note that INPUT_UNDEFINED comes from a set of terminals declared
+      // in IOKit. CoreAudio defines a number of terminals in
+      // AudioHardwareBase.h but none of them match any of the values I've
+      // seen used in practice, though I've only tested a few devices.
+      auto terminal =
+          GetDeviceUint32Property(stream_id, kAudioStreamPropertyTerminalType,
+                                  kAudioObjectPropertyScopeGlobal);
+      if (terminal.has_value() && terminal == INPUT_UNDEFINED) {
+        ++num_undefined_input_streams;
+      } else {
+        ++num_defined_input_streams;
+      }
+    }
+  }
+
+  // I've only seen INPUT_UNDEFINED introduced by the VoiceProcessing AudioUnit,
+  // but to err on the side of caution, let's allow a device with only undefined
+  // input streams and no output streams as well.
+  return num_defined_input_streams > 0 ||
+         (num_undefined_input_streams > 0 && num_output_streams == 0);
+}
+
+bool IsOutputDevice(AudioObjectID device_id) {
+  return GetNumStreams(device_id, false) > 0;
 }
 
 }  // namespace core_audio_mac

@@ -19,6 +19,7 @@ sys.path.insert(
     os.path.dirname(os.path.abspath(__file__))))
 
 
+from testrunner.local import command
 from testrunner.local import testsuite
 from testrunner.local import utils
 from testrunner.test_config import TestConfig
@@ -72,13 +73,12 @@ TEST_MAP = {
   ],
   # This needs to stay in sync with test/d8_default.isolate.
   "d8_default": [
-    # TODO(machenbach): uncomment after infra side lands.
-    #"debugger",
+    "debugger",
     "mjsunit",
     "webkit",
-    #"message",
-    #"preparser",
-    #"intl",
+    "message",
+    "preparser",
+    "intl",
   ],
   # This needs to stay in sync with test/optimize_for_size.isolate.
   "optimize_for_size": [
@@ -171,11 +171,12 @@ class BuildConfig(object):
     else:
       self.arch = build_config['v8_target_cpu']
 
-    self.is_debug = build_config['is_debug']
     self.asan = build_config['is_asan']
     self.cfi_vptr = build_config['is_cfi']
     self.dcheck_always_on = build_config['dcheck_always_on']
     self.gcov_coverage = build_config['is_gcov_coverage']
+    self.is_android = build_config['is_android']
+    self.is_debug = build_config['is_debug']
     self.msan = build_config['is_msan']
     self.no_i18n = not build_config['v8_enable_i18n_support']
     self.no_snap = not build_config['v8_use_snapshot']
@@ -221,6 +222,7 @@ class BaseTestRunner(object):
     self.build_config = None
     self.mode_name = None
     self.mode_options = None
+    self.target_os = None
 
   def execute(self, sys_args=None):
     if sys_args is None:  # pragma: no cover
@@ -234,6 +236,7 @@ class BaseTestRunner(object):
         print ' '.join(sys.argv)
 
       self._load_build_config(options)
+      command.setup(self.target_os)
 
       try:
         self._process_default_options(options)
@@ -256,6 +259,8 @@ class BaseTestRunner(object):
       return utils.EXIT_CODE_INTERNAL_ERROR
     except KeyboardInterrupt:
       return utils.EXIT_CODE_INTERRUPTED
+    finally:
+      command.tear_down()
 
   def _create_parser(self):
     parser = optparse.OptionParser()
@@ -280,6 +285,8 @@ class BaseTestRunner(object):
                       " and buildbot builds): %s" % MODES.keys())
     parser.add_option("--shell-dir", help="DEPRECATED! Executables from build "
                       "directory will be used")
+    parser.add_option("--test-root", help="Root directory of the test suites",
+                      default=os.path.join(self.basedir, 'test'))
     parser.add_option("--total-timeout-sec", default=0, type="int",
                       help="How long should fuzzer run")
     parser.add_option("--swarming", default=False, action="store_true",
@@ -304,6 +311,9 @@ class BaseTestRunner(object):
     parser.add_option("--junitout", help="File name of the JUnit output")
     parser.add_option("--junittestsuite", default="v8tests",
                       help="The testsuite name in the JUnit output file")
+    parser.add_option("--exit-after-n-failures", type="int", default=100,
+                      help="Exit after the first N failures instead of "
+                           "running all tests. Pass 0 to disable this feature.")
 
     # Rerun
     parser.add_option("--rerun-failures-count", default=0, type=int,
@@ -366,6 +376,13 @@ class BaseTestRunner(object):
     if str(self.build_config):
       print '>>> Autodetected:'
       print self.build_config
+
+    # Represents the OS where tests are run on. Same as host OS except for
+    # Android, which is determined by build output.
+    if self.build_config.is_android:
+      self.target_os = 'android'
+    else:
+      self.target_os = utils.GuessOS()
 
   # Returns possible build paths in order:
   # gn
@@ -461,7 +478,11 @@ class BaseTestRunner(object):
             'build directory (%s) instead.' % self.outdir)
 
     if options.j == 0:
-      options.j = multiprocessing.cpu_count()
+      if self.build_config.is_android:
+        # Adb isn't happy about multi-processed file pushing.
+        options.j = 1
+      else:
+        options.j = multiprocessing.cpu_count()
 
     options.command_prefix = shlex.split(options.command_prefix)
     options.extra_flags = sum(map(shlex.split, options.extra_flags), [])
@@ -560,12 +581,12 @@ class BaseTestRunner(object):
     return reduce(list.__add__, map(expand_test_group, args), [])
 
   def _get_suites(self, args, options):
-    names = self._args_to_suite_names(args)
+    names = self._args_to_suite_names(args, options.test_root)
     return self._load_suites(names, options)
 
-  def _args_to_suite_names(self, args):
+  def _args_to_suite_names(self, args, test_root):
     # Use default tests if no test configuration was provided at the cmd line.
-    all_names = set(utils.GetSuitePaths(os.path.join(self.basedir, 'test')))
+    all_names = set(utils.GetSuitePaths(test_root))
     args_names = OrderedDict([(arg.split('/')[0], None) for arg in args]) # set
     return [name for name in args_names if name in all_names]
 
@@ -578,7 +599,7 @@ class BaseTestRunner(object):
       if options.verbose:
         print '>>> Loading test suite: %s' % name
       return testsuite.TestSuite.LoadTestSuite(
-          os.path.join(self.basedir, 'test', name),
+          os.path.join(options.test_root, name),
           test_config)
     return map(load_suite, names)
 
@@ -628,7 +649,7 @@ class BaseTestRunner(object):
       "simd_mips": simd_mips,
       "simulator": utils.UseSimulator(self.build_config.arch),
       "simulator_run": False,
-      "system": utils.GuessOS(),
+      "system": self.target_os,
       "tsan": self.build_config.tsan,
       "ubsan_vptr": self.build_config.ubsan_vptr,
     }
@@ -725,6 +746,9 @@ class BaseTestRunner(object):
         self.build_config.arch,
         self.mode_options.execution_mode))
     return procs
+
+  def _create_result_tracker(self, options):
+    return progress.ResultsTracker(options.exit_after_n_failures)
 
   def _create_timeout_proc(self, options):
     if not options.total_timeout_sec:

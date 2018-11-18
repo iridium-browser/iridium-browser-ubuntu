@@ -41,7 +41,7 @@ bool LayoutIFrame::IsInlineBlockOrInlineTable() const {
 }
 
 PaintLayerType LayoutIFrame::LayerTypeRequired() const {
-  if (Style()->Resize() != EResize::kNone)
+  if (StyleRef().Resize() != EResize::kNone)
     return kNormalPaintLayer;
   return LayoutEmbeddedContent::LayerTypeRequired();
 }
@@ -59,13 +59,6 @@ void LayoutIFrame::UpdateLayout() {
   UpdateAfterLayout();
 
   ClearNeedsLayout();
-}
-
-void LayoutIFrame::UpdateAfterLayout() {
-  if (RuntimeEnabledFeatures::ImplicitRootScrollerEnabled() && GetNode())
-    GetDocument().GetRootScrollerController().ConsiderForImplicit(*GetNode());
-
-  LayoutEmbeddedContent::UpdateAfterLayout();
 }
 
 }  // namespace blink

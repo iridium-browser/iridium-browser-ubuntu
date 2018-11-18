@@ -2,6 +2,7 @@
 <html dir="$i18n{textdirection}" lang="$i18n{language}">
 <head>
   <meta charset="utf-8">
+  <meta name="theme-color" content="#fff">
   <meta name="viewport"
       content="initial-scale=1, minimum-scale=1, width=device-width">
   <title>$i18n{tabTitle}</title>
@@ -31,6 +32,9 @@
           <div id="error-debugging-info" class="hidden"></div>
         </div>
       </div>
+      <div id="recurrent-error-message">
+        $i18nRaw{recurrentErrorParagraph}
+      </div>
       <div id="extended-reporting-opt-in" class="hidden">
         <label>
           <div class="checkboxes">
@@ -43,7 +47,8 @@
     </div>
     <div class="nav-wrapper">
       <button id="primary-button">$i18n{primaryButtonText}</button>
-      <button id="details-button" class="small-link">
+      <button id="proceed-button" class="secondary-button small-link hidden"></button>
+      <button id="details-button" class="secondary-button small-link">
         $i18n{openDetails}
       </button>
     </div>

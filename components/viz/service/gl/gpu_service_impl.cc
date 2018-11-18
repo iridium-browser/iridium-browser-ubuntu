@@ -5,19 +5,20 @@
 #include "components/viz/service/gl/gpu_service_impl.h"
 
 #include <memory>
+#include <string>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/lazy_instance.h"
 #include "base/memory/shared_memory.h"
-#include "base/run_loop.h"
+#include "base/task/post_task.h"
 #include "base/task_runner_util.h"
-#include "base/task_scheduler/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "components/crash/core/common/crash_key.h"
-#include "components/viz/common/gpu/in_process_context_provider.h"
+#include "components/viz/common/gpu/vulkan_context_provider.h"
+#include "components/viz/common/gpu/vulkan_in_process_context_provider.h"
 #include "gpu/command_buffer/client/gpu_memory_buffer_manager.h"
 #include "gpu/command_buffer/service/gpu_switches.h"
 #include "gpu/command_buffer/service/scheduler.h"
@@ -26,12 +27,15 @@
 #include "gpu/config/gpu_info_collector.h"
 #include "gpu/config/gpu_switches.h"
 #include "gpu/config/gpu_util.h"
+#include "gpu/ipc/common/gpu_client_ids.h"
 #include "gpu/ipc/common/gpu_memory_buffer_support.h"
 #include "gpu/ipc/common/memory_stats.h"
+#include "gpu/ipc/in_process_command_buffer.h"
 #include "gpu/ipc/service/gpu_channel.h"
 #include "gpu/ipc/service/gpu_channel_manager.h"
 #include "gpu/ipc/service/gpu_memory_buffer_factory.h"
 #include "gpu/ipc/service/gpu_watchdog_thread.h"
+#include "gpu/vulkan/buildflags.h"
 #include "ipc/ipc_channel_handle.h"
 #include "ipc/ipc_sync_channel.h"
 #include "ipc/ipc_sync_message_filter.h"
@@ -49,14 +53,14 @@
 #include "ui/gl/gl_context.h"
 #include "ui/gl/gl_implementation.h"
 #include "ui/gl/gl_switches.h"
+#include "ui/gl/gl_utils.h"
 #include "ui/gl/gpu_switching_manager.h"
 #include "ui/gl/init/create_gr_gl_interface.h"
 #include "ui/gl/init/gl_factory.h"
 #include "url/gurl.h"
 
 #if defined(OS_ANDROID)
-#include "base/android/throw_uncaught_exception.h"
-#include "media/gpu/android/content_video_view_overlay_allocator.h"
+#include "components/viz/service/gl/throw_uncaught_exception.h"
 #endif
 
 #if defined(OS_CHROMEOS)
@@ -69,6 +73,10 @@
 
 #if defined(OS_WIN)
 #include "gpu/ipc/service/direct_composition_surface_win.h"
+#endif
+
+#if defined(OS_MACOSX)
+#include "ui/base/cocoa/quartz_util.h"
 #endif
 
 namespace viz {
@@ -90,14 +98,16 @@ bool GpuLogMessageHandler(int severity,
 
 // Returns a callback which does a PostTask to run |callback| on the |runner|
 // task runner.
-template <typename Param>
-base::OnceCallback<void(const Param&)> WrapCallback(
+template <typename... Params>
+base::OnceCallback<void(Params&&...)> WrapCallback(
     scoped_refptr<base::SingleThreadTaskRunner> runner,
-    base::OnceCallback<void(const Param&)> callback) {
+    base::OnceCallback<void(Params...)> callback) {
   return base::BindOnce(
       [](base::SingleThreadTaskRunner* runner,
-         base::OnceCallback<void(const Param&)> callback, const Param& param) {
-        runner->PostTask(FROM_HERE, base::BindOnce(std::move(callback), param));
+         base::OnceCallback<void(Params && ...)> callback, Params&&... params) {
+        runner->PostTask(FROM_HERE,
+                         base::BindOnce(std::move(callback),
+                                        std::forward<Params>(params)...));
       },
       base::RetainedRef(std::move(runner)), std::move(callback));
 }
@@ -110,12 +120,27 @@ void DestroyBinding(mojo::BindingSet<mojom::GpuService>* binding,
 
 }  // namespace
 
+struct GpuServiceImpl::GrContextAndGLContext {
+  GrContextAndGLContext() = default;
+  GrContextAndGLContext(GrContextAndGLContext&& other) = default;
+  ~GrContextAndGLContext() = default;
+  GrContextAndGLContext& operator=(GrContextAndGLContext&& other) = default;
+
+  scoped_refptr<gl::GLContext> gl_context;
+  sk_sp<GrContext> gr_context;
+};
+
 GpuServiceImpl::GpuServiceImpl(
     const gpu::GPUInfo& gpu_info,
     std::unique_ptr<gpu::GpuWatchdogThread> watchdog_thread,
     scoped_refptr<base::SingleThreadTaskRunner> io_runner,
     const gpu::GpuFeatureInfo& gpu_feature_info,
-    const gpu::GpuPreferences& gpu_preferences)
+    const gpu::GpuPreferences& gpu_preferences,
+    const base::Optional<gpu::GPUInfo>& gpu_info_for_hardware_gpu,
+    const base::Optional<gpu::GpuFeatureInfo>&
+        gpu_feature_info_for_hardware_gpu,
+    gpu::VulkanImplementation* vulkan_implementation,
+    base::OnceClosure exit_callback)
     : main_runner_(base::ThreadTaskRunnerHandle::Get()),
       io_runner_(std::move(io_runner)),
       watchdog_thread_(std::move(watchdog_thread)),
@@ -124,12 +149,30 @@ GpuServiceImpl::GpuServiceImpl(
       gpu_preferences_(gpu_preferences),
       gpu_info_(gpu_info),
       gpu_feature_info_(gpu_feature_info),
+      gpu_info_for_hardware_gpu_(gpu_info_for_hardware_gpu),
+      gpu_feature_info_for_hardware_gpu_(gpu_feature_info_for_hardware_gpu),
+#if BUILDFLAG(ENABLE_VULKAN)
+      vulkan_implementation_(vulkan_implementation),
+#endif
+      exit_callback_(std::move(exit_callback)),
       bindings_(std::make_unique<mojo::BindingSet<mojom::GpuService>>()),
       weak_ptr_factory_(this) {
   DCHECK(!io_runner_->BelongsToCurrentThread());
+  DCHECK(exit_callback_);
+
 #if defined(OS_CHROMEOS)
   protected_buffer_manager_ = new arc::ProtectedBufferManager();
 #endif  // defined(OS_CHROMEOS)
+
+#if BUILDFLAG(ENABLE_VULKAN)
+  if (vulkan_implementation_) {
+    vulkan_context_provider_ =
+        VulkanInProcessContextProvider::Create(vulkan_implementation_);
+    if (!vulkan_context_provider_)
+      DLOG(WARNING) << "Failed to create Vulkan context provider.";
+  }
+#endif
+
   weak_ptr_ = weak_ptr_factory_.GetWeakPtr();
 }
 
@@ -139,10 +182,9 @@ GpuServiceImpl::~GpuServiceImpl() {
   logging::SetLogMessageHandler(nullptr);
   g_log_callback.Get() =
       base::Callback<void(int, size_t, const std::string&)>();
-  base::WaitableEvent wait(base::WaitableEvent::ResetPolicy::MANUAL,
-                           base::WaitableEvent::InitialState::NOT_SIGNALED);
+  base::WaitableEvent wait;
   if (io_runner_->PostTask(
-          FROM_HERE, base::Bind(&DestroyBinding, bindings_.get(), &wait))) {
+          FROM_HERE, base::BindOnce(&DestroyBinding, bindings_.get(), &wait))) {
     wait.Wait();
   }
 
@@ -152,8 +194,20 @@ GpuServiceImpl::~GpuServiceImpl() {
     scheduler_->DestroySequence(skia_output_surface_sequence_id_);
   }
 
-  gr_context_ = nullptr;
-  context_for_skia_ = nullptr;
+  for (auto& key_and_data : contexts_for_gl_) {
+    auto& data = key_and_data.second;
+    if (!data.gr_context)
+      continue;
+    if (!data.gl_context ||
+        !data.gl_context->MakeCurrent(
+            gpu_channel_manager_->default_offscreen_surface())) {
+      LOG(ERROR) << "Failed to make current.";
+      data.gr_context->abandonContext();
+    }
+    data.gr_context = nullptr;
+  }
+  contexts_for_gl_.clear();
+
   media_gpu_channel_manager_.reset();
   gpu_channel_manager_.reset();
   owned_sync_point_manager_.reset();
@@ -188,10 +242,13 @@ void GpuServiceImpl::UpdateGPUInfo() {
 void GpuServiceImpl::InitializeWithHost(
     mojom::GpuHostPtr gpu_host,
     gpu::GpuProcessActivityFlags activity_flags,
+    scoped_refptr<gl::GLSurface> default_offscreen_surface,
     gpu::SyncPointManager* sync_point_manager,
     base::WaitableEvent* shutdown_event) {
   DCHECK(main_runner_->BelongsToCurrentThread());
-  gpu_host->DidInitialize(gpu_info_, gpu_feature_info_);
+  gpu_host->DidInitialize(gpu_info_, gpu_feature_info_,
+                          gpu_info_for_hardware_gpu_,
+                          gpu_feature_info_for_hardware_gpu_);
   gpu_host_ =
       mojom::ThreadSafeGpuHostPtr::Create(gpu_host.PassInterface(), io_runner_);
   if (!in_host_process()) {
@@ -217,8 +274,8 @@ void GpuServiceImpl::InitializeWithHost(
     shutdown_event_ = owned_shutdown_event_.get();
   }
 
-  scheduler_ = std::make_unique<gpu::Scheduler>(
-      base::ThreadTaskRunnerHandle::Get(), sync_point_manager_);
+  scheduler_ =
+      std::make_unique<gpu::Scheduler>(main_runner_, sync_point_manager_);
 
   skia_output_surface_sequence_id_ =
       scheduler_->CreateSequence(gpu::SchedulingPriority::kHigh);
@@ -229,7 +286,8 @@ void GpuServiceImpl::InitializeWithHost(
   gpu_channel_manager_.reset(new gpu::GpuChannelManager(
       gpu_preferences_, this, watchdog_thread_.get(), main_runner_, io_runner_,
       scheduler_.get(), sync_point_manager_, gpu_memory_buffer_factory_.get(),
-      gpu_feature_info_, std::move(activity_flags)));
+      gpu_feature_info_, std::move(activity_flags),
+      std::move(default_offscreen_surface)));
 
   media_gpu_channel_manager_.reset(
       new media::MediaGpuChannelManager(gpu_channel_manager_.get()));
@@ -248,35 +306,62 @@ void GpuServiceImpl::Bind(mojom::GpuServiceRequest request) {
   bindings_->AddBinding(this, std::move(request));
 }
 
-bool GpuServiceImpl::CreateGrContextIfNecessary(gl::GLSurface* surface) {
-  DCHECK(main_runner_->BelongsToCurrentThread());
-  DCHECK(surface);
+void GpuServiceImpl::DisableGpuCompositing() {
+  // Can be called from any thread.
+  (*gpu_host_)->DisableGpuCompositing();
+}
 
-  if (!gr_context_) {
-    DCHECK(!context_for_skia_);
+bool GpuServiceImpl::GetGrContextForGLSurface(gl::GLSurface* surface,
+                                              GrContext** gr_context,
+                                              gl::GLContext** gl_context) {
+  DCHECK(main_runner_->BelongsToCurrentThread());
+  DCHECK(!is_using_vulkan());
+  DCHECK(surface);
+  DCHECK(gr_context && !*gr_context);
+  DCHECK(gl_context && !*gl_context);
+
+  auto& data = contexts_for_gl_[surface->GetCompatibilityKey()];
+  if (!data.gr_context) {
+    DCHECK(!data.gl_context);
+
     gl::GLContextAttribs attribs;
     // TODO(penghuang) set attribs.
-    context_for_skia_ = gl::init::CreateGLContext(
+    data.gl_context = gl::init::CreateGLContext(
         gpu_channel_manager_->share_group(), surface, attribs);
-    DCHECK(context_for_skia_);
-    gpu_feature_info_.ApplyToGLContext(context_for_skia_.get());
-    if (!context_for_skia_->MakeCurrent(surface)) {
+    DCHECK(data.gl_context);
+    gpu_feature_info_.ApplyToGLContext(data.gl_context.get());
+    if (!data.gl_context->MakeCurrent(surface)) {
       LOG(FATAL) << "Failed to make current.";
       // TODO(penghuang): handle the failure.
     }
+
+    const auto* gl_version_info = data.gl_context->GetVersionInfo();
+    const bool use_version_es2 = false;
     auto native_interface =
-        GrGLMakeAssembledInterface(nullptr, [](void* ctx, const char name[]) {
-          return gl::GetGLProcAddress(name);
-        });
+        gl::init::CreateGrGLInterface(*gl_version_info, use_version_es2);
     DCHECK(native_interface);
 
     GrContextOptions options;
     options.fExplicitlyAllocateGPUResources = GrContextOptions::Enable::kYes;
     options.fUseGLBufferDataNullHint = GrContextOptions::Enable::kYes;
-    gr_context_ = GrContext::MakeGL(std::move(native_interface), options);
-    DCHECK(gr_context_);
+    data.gr_context = GrContext::MakeGL(std::move(native_interface), options);
+    DCHECK(data.gr_context);
   }
-  return !!gr_context_;
+
+  *gr_context = data.gr_context.get();
+  *gl_context = data.gl_context.get();
+  return !!gr_context;
+}
+
+GrContext* GpuServiceImpl::GetGrContextForVulkan() {
+  DCHECK(main_runner_->BelongsToCurrentThread());
+  DCHECK(is_using_vulkan());
+#if BUILDFLAG(ENABLE_VULKAN)
+  return vulkan_context_provider_->GetGrContext();
+#else
+  NOTREACHED();
+  return nullptr;
+#endif
 }
 
 gpu::ImageFactory* GpuServiceImpl::gpu_image_factory() {
@@ -412,9 +497,9 @@ void GpuServiceImpl::DestroyGpuMemoryBuffer(gfx::GpuMemoryBufferId id,
                                             int client_id,
                                             const gpu::SyncToken& sync_token) {
   if (io_runner_->BelongsToCurrentThread()) {
-    main_runner_->PostTask(FROM_HERE,
-                           base::Bind(&GpuServiceImpl::DestroyGpuMemoryBuffer,
-                                      weak_ptr_, id, client_id, sync_token));
+    main_runner_->PostTask(
+        FROM_HERE, base::BindOnce(&GpuServiceImpl::DestroyGpuMemoryBuffer,
+                                  weak_ptr_, id, client_id, sync_token));
     return;
   }
   gpu_channel_manager_->DestroyGpuMemoryBuffer(id, client_id, sync_token);
@@ -430,19 +515,19 @@ void GpuServiceImpl::GetVideoMemoryUsageStats(
     return;
   }
   gpu::VideoMemoryUsageStats video_memory_usage_stats;
-  gpu_channel_manager_->gpu_memory_manager()->GetVideoMemoryUsageStats(
-      &video_memory_usage_stats);
+  gpu_channel_manager_->GetVideoMemoryUsageStats(&video_memory_usage_stats);
   std::move(callback).Run(video_memory_usage_stats);
 }
 
-// Currently, this function only supports the Windows platform.
-void GpuServiceImpl::GetGpuSupportedRuntimeVersion() {
 #if defined(OS_WIN)
+void GpuServiceImpl::GetGpuSupportedRuntimeVersion(
+    GetGpuSupportedRuntimeVersionCallback callback) {
   if (io_runner_->BelongsToCurrentThread()) {
+    auto wrap_callback = WrapCallback(io_runner_, std::move(callback));
     main_runner_->PostTask(
         FROM_HERE,
         base::BindOnce(&GpuServiceImpl::GetGpuSupportedRuntimeVersion,
-                       weak_ptr_));
+                       weak_ptr_, std::move(wrap_callback)));
     return;
   }
   DCHECK(main_runner_->BelongsToCurrentThread());
@@ -452,13 +537,13 @@ void GpuServiceImpl::GetGpuSupportedRuntimeVersion() {
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   DCHECK(command_line->HasSwitch("disable-gpu-sandbox") || in_host_process());
 
-  gpu::RecordGpuSupportedRuntimeVersionHistograms(&gpu_info_);
+  gpu::RecordGpuSupportedRuntimeVersionHistograms(
+      &gpu_info_.dx12_vulkan_version_info);
+  std::move(callback).Run(gpu_info_.dx12_vulkan_version_info);
   if (!in_host_process()) {
-    // The unsandboxed GPU process fulfilled its duty. Rest
-    // in peace.
-    base::RunLoop().QuitCurrentWhenIdleDeprecated();
+    // The unsandboxed GPU process fulfilled its duty. Bye bye.
+    ExitProcess();
   }
-#endif
 }
 
 void GpuServiceImpl::RequestCompleteGpuInfo(
@@ -477,17 +562,15 @@ void GpuServiceImpl::RequestCompleteGpuInfo(
       base::BindOnce(
           [](GpuServiceImpl* gpu_service,
              RequestCompleteGpuInfoCallback callback) {
-            std::move(callback).Run(gpu_service->gpu_info_);
-#if defined(OS_WIN)
+            std::move(callback).Run(gpu_service->gpu_info_.dx_diagnostics);
             if (!gpu_service->in_host_process()) {
-              // The unsandboxed GPU process fulfilled its duty. Rest
-              // in peace.
-              base::RunLoop::QuitCurrentWhenIdleDeprecated();
+              // The unsandboxed GPU process fulfilled its duty. Bye bye.
+              gpu_service->ExitProcess();
             }
-#endif
           },
           this, std::move(callback))));
 }
+#endif
 
 void GpuServiceImpl::RequestHDRStatus(RequestHDRStatusCallback callback) {
   DCHECK(io_runner_->BelongsToCurrentThread());
@@ -507,26 +590,7 @@ void GpuServiceImpl::RequestHDRStatusOnMainThread(
                        base::BindOnce(std::move(callback), hdr_enabled));
 }
 
-#if defined(OS_MACOSX)
-void GpuServiceImpl::UpdateGpuInfoPlatform(
-    base::OnceClosure on_gpu_info_updated) {
-  DCHECK(main_runner_->BelongsToCurrentThread());
-  // gpu::CollectContextGraphicsInfo() is already called during gpu process
-  // initialization (see GpuInit::InitializeAndStartSandbox()) on non-mac
-  // platforms, and during in-browser gpu thread initialization on all platforms
-  // (See InProcessGpuThread::Init()).
-  if (in_host_process())
-    return;
-
-  bool success = gpu::CollectContextGraphicsInfo(&gpu_info_);
-  if (!success) {
-    LOG(ERROR) << "gpu::CollectGraphicsInfo failed.";
-    // TODO(piman): can we signal overall failure?
-  }
-  gpu::SetKeysForCrashLogging(gpu_info_);
-  std::move(on_gpu_info_updated).Run();
-}
-#elif defined(OS_WIN)
+#if defined(OS_WIN)
 void GpuServiceImpl::UpdateGpuInfoPlatform(
     base::OnceClosure on_gpu_info_updated) {
   DCHECK(main_runner_->BelongsToCurrentThread());
@@ -534,9 +598,6 @@ void GpuServiceImpl::UpdateGpuInfoPlatform(
   // or single process/in-process gpu mode on Windows.
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   DCHECK(command_line->HasSwitch("disable-gpu-sandbox") || in_host_process());
-
-  gpu::GetGpuSupportedD3DVersion(&gpu_info_);
-  gpu::GetGpuSupportedVulkanVersion(&gpu_info_);
 
   // We can continue on shutdown here because we're not writing any critical
   // state in this task.
@@ -600,11 +661,15 @@ void GpuServiceImpl::StoreShaderToDisk(int client_id,
   (*gpu_host_)->StoreShaderToDisk(client_id, key, shader);
 }
 
+void GpuServiceImpl::ExitProcess() {
+  if (exit_callback_)
+    std::move(exit_callback_).Run();
+}
+
 #if defined(OS_WIN)
-void GpuServiceImpl::SendAcceleratedSurfaceCreatedChildWindow(
-    gpu::SurfaceHandle parent_window,
-    gpu::SurfaceHandle child_window) {
-  DCHECK(main_runner_->BelongsToCurrentThread());
+void GpuServiceImpl::SendCreatedChildWindow(gpu::SurfaceHandle parent_window,
+                                            gpu::SurfaceHandle child_window) {
+  // This can be called from main or display compositor thread.
   (*gpu_host_)->SetChildSurface(parent_window, child_window);
 }
 #endif
@@ -618,7 +683,12 @@ void GpuServiceImpl::SetActiveURL(const GURL& url) {
 void GpuServiceImpl::EstablishGpuChannel(int32_t client_id,
                                          uint64_t client_tracing_id,
                                          bool is_gpu_host,
+                                         bool cache_shaders_on_disk,
                                          EstablishGpuChannelCallback callback) {
+  if (gpu::IsReservedClientId(client_id)) {
+    std::move(callback).Run(mojo::ScopedMessagePipeHandle());
+    return;
+  }
   if (io_runner_->BelongsToCurrentThread()) {
     EstablishGpuChannelCallback wrap_callback = base::BindOnce(
         [](scoped_refptr<base::SingleThreadTaskRunner> runner,
@@ -629,18 +699,18 @@ void GpuServiceImpl::EstablishGpuChannel(int32_t client_id,
         },
         io_runner_, std::move(callback));
     main_runner_->PostTask(
-        FROM_HERE, base::BindOnce(&GpuServiceImpl::EstablishGpuChannel,
-                                  weak_ptr_, client_id, client_tracing_id,
-                                  is_gpu_host, std::move(wrap_callback)));
+        FROM_HERE,
+        base::BindOnce(&GpuServiceImpl::EstablishGpuChannel, weak_ptr_,
+                       client_id, client_tracing_id, is_gpu_host,
+                       cache_shaders_on_disk, std::move(wrap_callback)));
     return;
   }
 
   gpu::GpuChannel* gpu_channel = gpu_channel_manager_->EstablishChannel(
-      client_id, client_tracing_id, is_gpu_host);
+      client_id, client_tracing_id, is_gpu_host, cache_shaders_on_disk);
 
   mojo::MessagePipe pipe;
-  gpu_channel->Init(std::make_unique<gpu::SyncChannelFilteredSender>(
-      pipe.handle0.release(), gpu_channel, io_runner_, shutdown_event_));
+  gpu_channel->Init(pipe.handle0.release(), shutdown_event_);
 
   media_gpu_channel_manager_->AddChannel(client_id);
 
@@ -649,46 +719,30 @@ void GpuServiceImpl::EstablishGpuChannel(int32_t client_id,
 
 void GpuServiceImpl::CloseChannel(int32_t client_id) {
   if (io_runner_->BelongsToCurrentThread()) {
-    main_runner_->PostTask(FROM_HERE, base::Bind(&GpuServiceImpl::CloseChannel,
-                                                 weak_ptr_, client_id));
+    main_runner_->PostTask(
+        FROM_HERE,
+        base::BindOnce(&GpuServiceImpl::CloseChannel, weak_ptr_, client_id));
     return;
   }
   gpu_channel_manager_->RemoveChannel(client_id);
 }
 
-void GpuServiceImpl::LoadedShader(const std::string& key,
+void GpuServiceImpl::LoadedShader(int32_t client_id,
+                                  const std::string& key,
                                   const std::string& data) {
   if (io_runner_->BelongsToCurrentThread()) {
-    main_runner_->PostTask(FROM_HERE, base::Bind(&GpuServiceImpl::LoadedShader,
-                                                 weak_ptr_, key, data));
+    main_runner_->PostTask(
+        FROM_HERE, base::BindOnce(&GpuServiceImpl::LoadedShader, weak_ptr_,
+                                  client_id, key, data));
     return;
   }
-  gpu_channel_manager_->PopulateShaderCache(key, data);
-}
-
-void GpuServiceImpl::DestroyingVideoSurface(
-    int32_t surface_id,
-    DestroyingVideoSurfaceCallback callback) {
-  DCHECK(io_runner_->BelongsToCurrentThread());
-#if defined(OS_ANDROID)
-  main_runner_->PostTaskAndReply(
-      FROM_HERE,
-      base::BindOnce(
-          [](int32_t surface_id) {
-            media::ContentVideoViewOverlayAllocator::GetInstance()
-                ->OnSurfaceDestroyed(surface_id);
-          },
-          surface_id),
-      std::move(callback));
-#else
-  NOTREACHED() << "DestroyingVideoSurface() not supported on this platform.";
-#endif
+  gpu_channel_manager_->PopulateShaderCache(client_id, key, data);
 }
 
 void GpuServiceImpl::WakeUpGpu() {
   if (io_runner_->BelongsToCurrentThread()) {
-    main_runner_->PostTask(FROM_HERE,
-                           base::Bind(&GpuServiceImpl::WakeUpGpu, weak_ptr_));
+    main_runner_->PostTask(
+        FROM_HERE, base::BindOnce(&GpuServiceImpl::WakeUpGpu, weak_ptr_));
     return;
   }
 #if defined(OS_ANDROID)
@@ -707,40 +761,70 @@ void GpuServiceImpl::GpuSwitched() {
 void GpuServiceImpl::DestroyAllChannels() {
   if (io_runner_->BelongsToCurrentThread()) {
     main_runner_->PostTask(
-        FROM_HERE, base::Bind(&GpuServiceImpl::DestroyAllChannels, weak_ptr_));
+        FROM_HERE,
+        base::BindOnce(&GpuServiceImpl::DestroyAllChannels, weak_ptr_));
     return;
   }
   DVLOG(1) << "GPU: Removing all contexts";
   gpu_channel_manager_->DestroyAllChannels();
 }
 
-void GpuServiceImpl::OnBackgrounded() {
+void GpuServiceImpl::OnBackgroundCleanup() {
 // Currently only called on Android.
 #if defined(OS_ANDROID)
   if (io_runner_->BelongsToCurrentThread()) {
     main_runner_->PostTask(
-        FROM_HERE, base::BindOnce(&GpuServiceImpl::OnBackgrounded, weak_ptr_));
+        FROM_HERE,
+        base::BindOnce(&GpuServiceImpl::OnBackgroundCleanup, weak_ptr_));
     return;
   }
   DVLOG(1) << "GPU: Performing background cleanup";
-  gpu_channel_manager_->OnApplicationBackgrounded();
+  gpu_channel_manager_->OnBackgroundCleanup();
 #else
   NOTREACHED();
 #endif
 }
 
+void GpuServiceImpl::OnBackgrounded() {
+  if (watchdog_thread_)
+    watchdog_thread_->OnBackgrounded();
+
+  if (io_runner_->BelongsToCurrentThread()) {
+    main_runner_->PostTask(
+        FROM_HERE, base::BindOnce(&GpuServiceImpl::OnBackgrounded, weak_ptr_));
+    return;
+  }
+  gpu_channel_manager_->OnApplicationBackgrounded();
+}
+
+void GpuServiceImpl::OnForegrounded() {
+  if (watchdog_thread_)
+    watchdog_thread_->OnForegrounded();
+}
+
+#if defined(OS_MACOSX)
+void GpuServiceImpl::BeginCATransaction() {
+  DCHECK(io_runner_->BelongsToCurrentThread());
+  main_runner_->PostTask(FROM_HERE, base::BindOnce(&ui::BeginCATransaction));
+}
+
+void GpuServiceImpl::CommitCATransaction(CommitCATransactionCallback callback) {
+  DCHECK(io_runner_->BelongsToCurrentThread());
+  main_runner_->PostTaskAndReply(FROM_HERE,
+                                 base::BindOnce(&ui::CommitCATransaction),
+                                 WrapCallback(io_runner_, std::move(callback)));
+}
+#endif
+
 void GpuServiceImpl::Crash() {
   DCHECK(io_runner_->BelongsToCurrentThread());
-  DVLOG(1) << "GPU: Simulating GPU crash";
-  // Good bye, cruel world.
-  volatile int* it_s_the_end_of_the_world_as_we_know_it = nullptr;
-  *it_s_the_end_of_the_world_as_we_know_it = 0xdead;
+  gl::Crash();
 }
 
 void GpuServiceImpl::Hang() {
   DCHECK(io_runner_->BelongsToCurrentThread());
 
-  main_runner_->PostTask(FROM_HERE, base::Bind([] {
+  main_runner_->PostTask(FROM_HERE, base::BindOnce([] {
                            DVLOG(1) << "GPU: Simulating GPU hang";
                            for (;;) {
                              // Do not sleep here. The GPU watchdog timer tracks
@@ -753,8 +837,7 @@ void GpuServiceImpl::Hang() {
 void GpuServiceImpl::ThrowJavaException() {
   DCHECK(io_runner_->BelongsToCurrentThread());
 #if defined(OS_ANDROID)
-  main_runner_->PostTask(
-      FROM_HERE, base::Bind([] { base::android::ThrowUncaughtException(); }));
+  ThrowUncaughtException();
 #else
   NOTREACHED() << "Java exception not supported on this platform.";
 #endif
@@ -763,8 +846,7 @@ void GpuServiceImpl::ThrowJavaException() {
 void GpuServiceImpl::Stop(StopCallback callback) {
   DCHECK(io_runner_->BelongsToCurrentThread());
   main_runner_->PostTaskAndReply(
-      FROM_HERE,
-      base::BindOnce([] { base::RunLoop::QuitCurrentWhenIdleDeprecated(); }),
+      FROM_HERE, base::BindOnce(&GpuServiceImpl::ExitProcess, weak_ptr_),
       std::move(callback));
 }
 

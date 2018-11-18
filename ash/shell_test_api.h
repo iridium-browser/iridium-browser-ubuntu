@@ -52,6 +52,8 @@ class ShellTestApi : public mojom::ShellTestApi {
 
   // mojom::ShellTestApi:
   void IsSystemModalWindowOpen(IsSystemModalWindowOpenCallback cb) override;
+  void EnableTabletModeWindowManager(bool enable) override;
+  void EnableVirtualKeyboard(EnableVirtualKeyboardCallback cb) override;
 
  private:
   Shell* shell_;  // not owned

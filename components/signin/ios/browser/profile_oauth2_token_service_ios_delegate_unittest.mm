@@ -53,7 +53,7 @@ class ProfileOAuth2TokenServiceIOSDelegateTest
     prefs_.registry()->RegisterIntegerPref(
         prefs::kAccountIdMigrationState,
         AccountTrackerService::MIGRATION_NOT_STARTED);
-    account_tracker_.Initialize(&client_);
+    account_tracker_.Initialize(&prefs_, base::FilePath());
 
     prefs_.registry()->RegisterBooleanPref(
         prefs::kTokenServiceExcludeAllSecondaryAccounts, false);
@@ -77,8 +77,8 @@ class ProfileOAuth2TokenServiceIOSDelegateTest
   }
 
   // OAuth2AccessTokenConsumer implementation.
-  void OnGetTokenSuccess(const std::string& access_token,
-                         const base::Time& expiration_time) override {
+  void OnGetTokenSuccess(
+      const OAuth2AccessTokenConsumer::TokenResponse& token_response) override {
     ++access_token_success_;
   }
 
@@ -261,7 +261,8 @@ TEST_F(ProfileOAuth2TokenServiceIOSDelegateTest, StartRequestSuccess) {
   scopes.push_back("scope");
   std::unique_ptr<OAuth2AccessTokenFetcher> fetcher1(
       oauth2_delegate_->CreateAccessTokenFetcher(
-          GetAccountId(account1), oauth2_delegate_->GetRequestContext(), this));
+          GetAccountId(account1), oauth2_delegate_->GetURLLoaderFactory(),
+          this));
   fetcher1->Start("foo", "bar", scopes);
   EXPECT_EQ(0, access_token_success_);
   EXPECT_EQ(0, access_token_failure_);
@@ -284,7 +285,8 @@ TEST_F(ProfileOAuth2TokenServiceIOSDelegateTest, StartRequestFailure) {
   scopes.push_back("scope");
   std::unique_ptr<OAuth2AccessTokenFetcher> fetcher1(
       oauth2_delegate_->CreateAccessTokenFetcher(
-          GetAccountId(account1), oauth2_delegate_->GetRequestContext(), this));
+          GetAccountId(account1), oauth2_delegate_->GetURLLoaderFactory(),
+          this));
   fetcher1->Start("foo", "bar", scopes);
   EXPECT_EQ(0, access_token_success_);
   EXPECT_EQ(0, access_token_failure_);

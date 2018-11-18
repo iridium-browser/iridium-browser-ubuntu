@@ -12,7 +12,9 @@
 #include "components/download/internal/common/parallel_download_utils.h"
 #include "components/download/public/common/download_create_info.h"
 #include "components/download/public/common/download_stats.h"
+#include "components/download/public/common/download_url_loader_factory_getter.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
+#include "net/url_request/url_request_context_getter.h"
 
 namespace download {
 namespace {
@@ -23,7 +25,8 @@ ParallelDownloadJob::ParallelDownloadJob(
     DownloadItem* download_item,
     std::unique_ptr<DownloadRequestHandleInterface> request_handle,
     const DownloadCreateInfo& create_info,
-    scoped_refptr<network::SharedURLLoaderFactory> shared_url_loader_factory,
+    scoped_refptr<download::DownloadURLLoaderFactoryGetter>
+        url_loader_factory_getter,
     net::URLRequestContextGetter* url_request_context_getter)
     : DownloadJobImpl(download_item, std::move(request_handle), true),
       initial_request_offset_(create_info.offset),
@@ -31,7 +34,7 @@ ParallelDownloadJob::ParallelDownloadJob(
       content_length_(create_info.total_bytes),
       requests_sent_(false),
       is_canceled_(false),
-      shared_url_loader_factory_(std::move(shared_url_loader_factory)),
+      url_loader_factory_getter_(std::move(url_loader_factory_getter)),
       url_request_context_getter_(url_request_context_getter) {}
 
 ParallelDownloadJob::~ParallelDownloadJob() = default;
@@ -121,9 +124,14 @@ void ParallelDownloadJob::BuildParallelRequestAfterDelay() {
 
 void ParallelDownloadJob::OnInputStreamReady(
     DownloadWorker* worker,
-    std::unique_ptr<InputStream> input_stream) {
-  bool success = DownloadJob::AddInputStream(
-      std::move(input_stream), worker->offset(), worker->length());
+    std::unique_ptr<InputStream> input_stream,
+    std::unique_ptr<DownloadCreateInfo> download_create_info) {
+  // If server returns a wrong range, abort the parallel request.
+  bool success = download_create_info->offset == worker->offset();
+  if (success) {
+    success = DownloadJob::AddInputStream(std::move(input_stream),
+                                          worker->offset(), worker->length());
+  }
   RecordParallelDownloadAddStreamSuccess(success);
 
   // Destroy the request if the sink is gone.
@@ -266,7 +274,6 @@ void ParallelDownloadJob::CreateRequest(int64_t offset, int64_t length) {
   // The parallel requests only use GET method.
   std::unique_ptr<DownloadUrlParameters> download_params(
       new DownloadUrlParameters(download_item_->GetURL(),
-                                url_request_context_getter_.get(),
                                 traffic_annotation));
   download_params->set_file_path(download_item_->GetFullPath());
   download_params->set_last_modified(download_item_->GetLastModifiedTime());
@@ -286,7 +293,8 @@ void ParallelDownloadJob::CreateRequest(int64_t offset, int64_t length) {
   download_params->set_referrer_policy(net::URLRequest::NEVER_CLEAR_REFERRER);
 
   // Send the request.
-  worker->SendRequest(std::move(download_params), shared_url_loader_factory_);
+  worker->SendRequest(std::move(download_params), url_loader_factory_getter_,
+                      url_request_context_getter_);
   DCHECK(workers_.find(offset) == workers_.end());
   workers_[offset] = std::move(worker);
 }

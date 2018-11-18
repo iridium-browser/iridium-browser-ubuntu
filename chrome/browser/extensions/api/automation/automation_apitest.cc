@@ -61,7 +61,7 @@ class AutomationApiTest : public ExtensionApiTest {
 
   void StartEmbeddedTestServer() {
     base::FilePath test_data;
-    ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_data));
+    ASSERT_TRUE(base::PathService::Get(chrome::DIR_TEST_DATA, &test_data));
     embedded_test_server()->ServeFilesFromDirectory(
         test_data.AppendASCII("extensions/api_test")
         .AppendASCII(kSitesDir));
@@ -152,6 +152,13 @@ IN_PROC_BROWSER_TEST_F(AutomationApiTest, ImageData) {
       << message_;
 }
 
+IN_PROC_BROWSER_TEST_F(AutomationApiTest, TableProperties) {
+  StartEmbeddedTestServer();
+  ASSERT_TRUE(
+      RunExtensionSubtest("automation/tests/tabs", "table_properties.html"))
+      << message_;
+}
+
 IN_PROC_BROWSER_TEST_F(AutomationApiTest, TabsAutomationBooleanPermissions) {
   StartEmbeddedTestServer();
   ASSERT_TRUE(RunExtensionSubtest(
@@ -210,14 +217,22 @@ IN_PROC_BROWSER_TEST_F(AutomationApiTest, DISABLED_DesktopHitTestIframe) {
       << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(AutomationApiTest, DesktopFocusViews) {
-  AutomationManagerAura::GetInstance()->Enable(browser()->profile());
+// TODO(https://crbug.com/892960): flaky.
+IN_PROC_BROWSER_TEST_F(AutomationApiTest, DISABLED_DesktopFocusViews) {
+  AutomationManagerAura::GetInstance()->Enable();
   // Trigger the shelf subtree to be computed.
   ash::Shell::Get()->accelerator_controller()->PerformActionIfEnabled(
       ash::FOCUS_SHELF);
 
   ASSERT_TRUE(
       RunExtensionSubtest("automation/tests/desktop", "focus_views.html"))
+      << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(AutomationApiTest, DesktopGetNextTextMatch) {
+  StartEmbeddedTestServer();
+  ASSERT_TRUE(RunExtensionSubtest("automation/tests/desktop",
+                                  "get_next_text_match.html"))
       << message_;
 }
 
@@ -233,8 +248,9 @@ IN_PROC_BROWSER_TEST_F(AutomationApiTest, DesktopNotRequested) {
 }
 
 #if defined(OS_CHROMEOS)
-IN_PROC_BROWSER_TEST_F(AutomationApiTest, DesktopActions) {
-  AutomationManagerAura::GetInstance()->Enable(browser()->profile());
+// TODO(https://crbug.com/894016): flaky.
+IN_PROC_BROWSER_TEST_F(AutomationApiTest, DISABLED_DesktopActions) {
+  AutomationManagerAura::GetInstance()->Enable();
   // Trigger the shelf subtree to be computed.
   ash::Shell::Get()->accelerator_controller()->PerformActionIfEnabled(
       ash::FOCUS_SHELF);
@@ -262,7 +278,8 @@ IN_PROC_BROWSER_TEST_F(AutomationApiTest, DesktopNotSupported) {
 }
 #endif  // defined(USE_AURA)
 
-IN_PROC_BROWSER_TEST_F(AutomationApiTest, CloseTab) {
+// Flaky test on site_per_browser_tests: https://crbug.com/833318
+IN_PROC_BROWSER_TEST_F(AutomationApiTest, DISABLED_CloseTab) {
   StartEmbeddedTestServer();
   ASSERT_TRUE(RunExtensionSubtest("automation/tests/tabs", "close_tab.html"))
       << message_;

@@ -270,8 +270,7 @@ class Writer : public base::RefCountedThreadSafe<Writer> {
       }
 
       std::string favicon_string;
-      BookmarkFaviconFetcher::URLFaviconMap::iterator itr =
-          favicons_map_->find(url_string);
+      auto itr = favicons_map_->find(url_string);
       if (itr != favicons_map_->end()) {
         scoped_refptr<base::RefCountedMemory> data(itr->second.get());
         std::string favicon_base64_encoded;
@@ -453,9 +452,10 @@ void BookmarkFaviconFetcher::ExecuteWriter() {
       FROM_HERE,
       base::BindOnce(
           &Writer::DoWrite,
-          new Writer(codec.Encode(
-                         BookmarkModelFactory::GetForBrowserContext(profile_)),
-                     path_, favicons_map_.release(), observer_)));
+          base::MakeRefCounted<Writer>(
+              codec.Encode(BookmarkModelFactory::GetForBrowserContext(profile_),
+                           /*sync_metadata_str=*/std::string()),
+              path_, favicons_map_.release(), observer_)));
   if (g_fetcher) {
     base::ThreadTaskRunnerHandle::Get()->DeleteSoon(FROM_HERE, g_fetcher);
     g_fetcher = nullptr;

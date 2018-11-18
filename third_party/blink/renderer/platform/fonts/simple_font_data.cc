@@ -40,13 +40,13 @@
 #include "SkTypes.h"
 
 #include "base/memory/ptr_util.h"
+#include "base/sys_byteorder.h"
 #include "build/build_config.h"
 #include "third_party/blink/renderer/platform/font_family_names.h"
 #include "third_party/blink/renderer/platform/fonts/font_description.h"
 #include "third_party/blink/renderer/platform/fonts/skia/skia_text_metrics.h"
 #include "third_party/blink/renderer/platform/geometry/float_rect.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/partitions.h"
-#include "third_party/blink/renderer/platform/wtf/byte_order.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
 #include "third_party/blink/renderer/platform/wtf/text/character_names.h"
 #include "third_party/blink/renderer/platform/wtf/text/unicode.h"
@@ -280,8 +280,8 @@ static std::pair<int16_t, int16_t> TypoAscenderAndDescender(
   size_t size = typeface->getTableData(SkSetFourByteTag('O', 'S', '/', '2'), 68,
                                        sizeof(buffer), buffer);
   if (size == sizeof(buffer)) {
-    return std::make_pair(static_cast<int16_t>(ntohs(buffer[0])),
-                          -static_cast<int16_t>(ntohs(buffer[1])));
+    return std::make_pair(static_cast<int16_t>(base::NetToHost16(buffer[0])),
+                          -static_cast<int16_t>(base::NetToHost16(buffer[1])));
   }
   return std::make_pair(0, 0);
 }
@@ -352,6 +352,17 @@ FloatRect SimpleFontData::PlatformBoundsForGlyph(Glyph glyph) const {
   SkRect bounds;
   SkiaTextMetrics(&paint_).GetSkiaBoundsForGlyph(glyph, &bounds);
   return FloatRect(bounds);
+}
+
+void SimpleFontData::BoundsForGlyphs(const Vector<Glyph, 256>& glyphs,
+                                     Vector<SkRect, 256>* bounds) const {
+  DCHECK_EQ(glyphs.size(), bounds->size());
+
+  if (!platform_data_.size())
+    return;
+
+  DCHECK_EQ(bounds->size(), glyphs.size());
+  SkiaTextMetrics(&paint_).GetSkiaBoundsForGlyphs(glyphs, bounds->data());
 }
 
 float SimpleFontData::PlatformWidthForGlyph(Glyph glyph) const {

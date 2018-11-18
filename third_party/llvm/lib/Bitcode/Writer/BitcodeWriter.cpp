@@ -28,6 +28,7 @@
 #include "llvm/Bitcode/BitCodes.h"
 #include "llvm/Bitcode/BitstreamWriter.h"
 #include "llvm/Bitcode/LLVMBitCodes.h"
+#include "llvm/Config/llvm-config.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CallSite.h"
@@ -89,6 +90,9 @@ static cl::opt<unsigned>
 cl::opt<bool> WriteRelBFToSummary(
     "write-relbf-to-summary", cl::Hidden, cl::init(false),
     cl::desc("Write relative block frequency to function summary "));
+
+extern FunctionSummary::ForceSummaryHotnessType ForceSummaryEdgesCold;
+
 namespace {
 
 /// These are manifest constants used by the bitcode writer. They do not need to
@@ -193,7 +197,7 @@ public:
           // otherwise we would have a Value for it). If so, synthesize
           // a value id.
           for (auto &CallEdge : FS->calls())
-            if (!CallEdge.first.getValue())
+            if (!CallEdge.first.haveGVs() || !CallEdge.first.getValue())
               assignValueId(CallEdge.first.getGUID());
   }
 
@@ -226,7 +230,7 @@ private:
 
   // Helper to get the valueId for the type of value recorded in VI.
   unsigned getValueId(ValueInfo VI) {
-    if (!VI.getValue())
+    if (!VI.haveGVs() || !VI.getValue())
       return getValueId(VI.getGUID());
     return VE.getValueID(VI.getValue());
   }
@@ -331,6 +335,8 @@ private:
                              unsigned Abbrev);
   void writeDILocalVariable(const DILocalVariable *N,
                             SmallVectorImpl<uint64_t> &Record, unsigned Abbrev);
+  void writeDILabel(const DILabel *N,
+                    SmallVectorImpl<uint64_t> &Record, unsigned Abbrev);
   void writeDIExpression(const DIExpression *N,
                          SmallVectorImpl<uint64_t> &Record, unsigned Abbrev);
   void writeDIGlobalVariableExpression(const DIGlobalVariableExpression *N,
@@ -670,6 +676,8 @@ static uint64_t getAttrKindEncoding(Attribute::AttrKind Kind) {
     return bitc::ATTR_KIND_STACK_PROTECT_STRONG;
   case Attribute::SafeStack:
     return bitc::ATTR_KIND_SAFESTACK;
+  case Attribute::ShadowCallStack:
+    return bitc::ATTR_KIND_SHADOWCALLSTACK;
   case Attribute::StrictFP:
     return bitc::ATTR_KIND_STRICT_FP;
   case Attribute::StructRet:
@@ -682,6 +690,8 @@ static uint64_t getAttrKindEncoding(Attribute::AttrKind Kind) {
     return bitc::ATTR_KIND_SANITIZE_THREAD;
   case Attribute::SanitizeMemory:
     return bitc::ATTR_KIND_SANITIZE_MEMORY;
+  case Attribute::SpeculativeLoadHardening:
+    return bitc::ATTR_KIND_SPECULATIVE_LOAD_HARDENING;
   case Attribute::SwiftError:
     return bitc::ATTR_KIND_SWIFT_ERROR;
   case Attribute::SwiftSelf:
@@ -1256,7 +1266,7 @@ void ModuleBitcodeWriter::writeModuleInfo() {
     // FUNCTION:  [strtab offset, strtab size, type, callingconv, isproto,
     //             linkage, paramattrs, alignment, section, visibility, gc,
     //             unnamed_addr, prologuedata, dllstorageclass, comdat,
-    //             prefixdata, personalityfn, DSO_Local]
+    //             prefixdata, personalityfn, DSO_Local, addrspace]
     Vals.push_back(addToStrtab(F.getName()));
     Vals.push_back(F.getName().size());
     Vals.push_back(VE.getTypeID(F.getFunctionType()));
@@ -1279,6 +1289,8 @@ void ModuleBitcodeWriter::writeModuleInfo() {
         F.hasPersonalityFn() ? (VE.getValueID(F.getPersonalityFn()) + 1) : 0);
 
     Vals.push_back(F.isDSOLocal());
+    Vals.push_back(F.getAddressSpace());
+
     unsigned AbbrevToUse = 0;
     Stream.EmitRecord(bitc::MODULE_CODE_FUNCTION, Vals, AbbrevToUse);
     Vals.clear();
@@ -1391,6 +1403,7 @@ unsigned ModuleBitcodeWriter::createDILocationAbbrev() {
   Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 8));
   Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 6));
   Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::VBR, 6));
+  Abbv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 1));
   return Stream.EmitAbbrev(std::move(Abbv));
 }
 
@@ -1405,6 +1418,7 @@ void ModuleBitcodeWriter::writeDILocation(const DILocation *N,
   Record.push_back(N->getColumn());
   Record.push_back(VE.getMetadataID(N->getScope()));
   Record.push_back(VE.getMetadataOrNullID(N->getInlinedAt()));
+  Record.push_back(N->isImplicitCode());
 
   Stream.EmitRecord(bitc::METADATA_LOCATION, Record, Abbrev);
   Record.clear();
@@ -1478,6 +1492,7 @@ void ModuleBitcodeWriter::writeDIBasicType(const DIBasicType *N,
   Record.push_back(N->getSizeInBits());
   Record.push_back(N->getAlignInBits());
   Record.push_back(N->getEncoding());
+  Record.push_back(N->getFlags());
 
   Stream.EmitRecord(bitc::METADATA_BASIC_TYPE, Record, Abbrev);
   Record.clear();
@@ -1594,7 +1609,7 @@ void ModuleBitcodeWriter::writeDICompileUnit(const DICompileUnit *N,
   Record.push_back(VE.getMetadataOrNullID(N->getMacros().get()));
   Record.push_back(N->getSplitDebugInlining());
   Record.push_back(N->getDebugInfoForProfiling());
-  Record.push_back(N->getGnuPubnames());
+  Record.push_back((unsigned)N->getNameTableKind());
 
   Stream.EmitRecord(bitc::METADATA_COMPILE_UNIT, Record, Abbrev);
   Record.clear();
@@ -1622,7 +1637,7 @@ void ModuleBitcodeWriter::writeDISubprogram(const DISubprogram *N,
   Record.push_back(VE.getMetadataOrNullID(N->getRawUnit()));
   Record.push_back(VE.getMetadataOrNullID(N->getTemplateParams().get()));
   Record.push_back(VE.getMetadataOrNullID(N->getDeclaration()));
-  Record.push_back(VE.getMetadataOrNullID(N->getVariables().get()));
+  Record.push_back(VE.getMetadataOrNullID(N->getRetainedNodes().get()));
   Record.push_back(N->getThisAdjustment());
   Record.push_back(VE.getMetadataOrNullID(N->getThrownTypes().get()));
 
@@ -1730,7 +1745,7 @@ void ModuleBitcodeWriter::writeDITemplateValueParameter(
 void ModuleBitcodeWriter::writeDIGlobalVariable(
     const DIGlobalVariable *N, SmallVectorImpl<uint64_t> &Record,
     unsigned Abbrev) {
-  const uint64_t Version = 1 << 1;
+  const uint64_t Version = 2 << 1;
   Record.push_back((uint64_t)N->isDistinct() | Version);
   Record.push_back(VE.getMetadataOrNullID(N->getScope()));
   Record.push_back(VE.getMetadataOrNullID(N->getRawName()));
@@ -1740,8 +1755,8 @@ void ModuleBitcodeWriter::writeDIGlobalVariable(
   Record.push_back(VE.getMetadataOrNullID(N->getType()));
   Record.push_back(N->isLocalToUnit());
   Record.push_back(N->isDefinition());
-  Record.push_back(/* expr */ 0);
   Record.push_back(VE.getMetadataOrNullID(N->getStaticDataMemberDeclaration()));
+  Record.push_back(VE.getMetadataOrNullID(N->getTemplateParams()));
   Record.push_back(N->getAlignInBits());
 
   Stream.EmitRecord(bitc::METADATA_GLOBAL_VAR, Record, Abbrev);
@@ -1776,6 +1791,19 @@ void ModuleBitcodeWriter::writeDILocalVariable(
   Record.push_back(N->getAlignInBits());
 
   Stream.EmitRecord(bitc::METADATA_LOCAL_VAR, Record, Abbrev);
+  Record.clear();
+}
+
+void ModuleBitcodeWriter::writeDILabel(
+    const DILabel *N, SmallVectorImpl<uint64_t> &Record,
+    unsigned Abbrev) {
+  Record.push_back((uint64_t)N->isDistinct());
+  Record.push_back(VE.getMetadataOrNullID(N->getScope()));
+  Record.push_back(VE.getMetadataOrNullID(N->getRawName()));
+  Record.push_back(VE.getMetadataOrNullID(N->getFile()));
+  Record.push_back(N->getLine());
+
+  Stream.EmitRecord(bitc::METADATA_LABEL, Record, Abbrev);
   Record.clear();
 }
 
@@ -3067,6 +3095,7 @@ void ModuleBitcodeWriter::writeFunction(
       Vals.push_back(DL->getColumn());
       Vals.push_back(VE.getMetadataOrNullID(DL->getScope()));
       Vals.push_back(VE.getMetadataOrNullID(DL->getInlinedAt()));
+      Vals.push_back(DL->isImplicitCode());
       Stream.EmitRecord(bitc::FUNC_CODE_DEBUG_LOC, Vals);
       Vals.clear();
 
@@ -3373,6 +3402,33 @@ static void writeFunctionTypeMetadataRecords(BitstreamWriter &Stream,
                      FS->type_checked_load_const_vcalls());
 }
 
+/// Collect type IDs from type tests used by function.
+static void
+getReferencedTypeIds(FunctionSummary *FS,
+                     std::set<GlobalValue::GUID> &ReferencedTypeIds) {
+  if (!FS->type_tests().empty())
+    for (auto &TT : FS->type_tests())
+      ReferencedTypeIds.insert(TT);
+
+  auto GetReferencedTypesFromVFuncIdVec =
+      [&](ArrayRef<FunctionSummary::VFuncId> VFs) {
+        for (auto &VF : VFs)
+          ReferencedTypeIds.insert(VF.GUID);
+      };
+
+  GetReferencedTypesFromVFuncIdVec(FS->type_test_assume_vcalls());
+  GetReferencedTypesFromVFuncIdVec(FS->type_checked_load_vcalls());
+
+  auto GetReferencedTypesFromConstVCallVec =
+      [&](ArrayRef<FunctionSummary::ConstVCall> VCs) {
+        for (auto &VC : VCs)
+          ReferencedTypeIds.insert(VC.VFunc.GUID);
+      };
+
+  GetReferencedTypesFromConstVCallVec(FS->type_test_assume_const_vcalls());
+  GetReferencedTypesFromConstVCallVec(FS->type_checked_load_const_vcalls());
+}
+
 static void writeWholeProgramDevirtResolutionByArg(
     SmallVector<uint64_t, 64> &NameVals, const std::vector<uint64_t> &args,
     const WholeProgramDevirtResolution::ByArg &ByArg) {
@@ -3436,7 +3492,8 @@ void ModuleBitcodeWriterBase::writePerModuleFunctionSummaryRecord(
   for (auto &RI : FS->refs())
     NameVals.push_back(VE.getValueID(RI.getValue()));
 
-  bool HasProfileData = F.hasProfileData();
+  bool HasProfileData =
+      F.hasProfileData() || ForceSummaryEdgesCold != FunctionSummary::FSHT_None;
   for (auto &ECI : FS->calls()) {
     NameVals.push_back(getValueId(ECI.first));
     if (HasProfileData)
@@ -3461,7 +3518,7 @@ void ModuleBitcodeWriterBase::writePerModuleFunctionSummaryRecord(
 void ModuleBitcodeWriterBase::writeModuleLevelReferences(
     const GlobalVariable &V, SmallVector<uint64_t, 64> &NameVals,
     unsigned FSModRefsAbbrev) {
-  auto VI = Index->getValueInfo(GlobalValue::getGUID(V.getName()));
+  auto VI = Index->getValueInfo(V.getGUID());
   if (!VI || VI.getSummaryList().empty()) {
     // Only declarations should not have a summary (a declaration might however
     // have a summary if the def was in module level asm).
@@ -3478,7 +3535,7 @@ void ModuleBitcodeWriterBase::writeModuleLevelReferences(
     NameVals.push_back(VE.getValueID(RI.getValue()));
   // Sort the refs for determinism output, the vector returned by FS->refs() has
   // been initialized from a DenseSet.
-  std::sort(NameVals.begin() + SizeBeforeRefs, NameVals.end());
+  llvm::sort(NameVals.begin() + SizeBeforeRefs, NameVals.end());
 
   Stream.EmitRecord(bitc::FS_PERMODULE_GLOBALVAR_INIT_REFS, NameVals,
                     FSModRefsAbbrev);
@@ -3570,7 +3627,7 @@ void ModuleBitcodeWriterBase::writePerModuleGlobalValueSummary() {
     if (!F.hasName())
       report_fatal_error("Unexpected anonymous function when writing summary");
 
-    ValueInfo VI = Index->getValueInfo(GlobalValue::getGUID(F.getName()));
+    ValueInfo VI = Index->getValueInfo(F.getGUID());
     if (!VI || VI.getSummaryList().empty()) {
       // Only declarations should not have a summary (a declaration might
       // however have a summary if the def was in module level asm).
@@ -3680,6 +3737,10 @@ void IndexBitcodeWriter::writeCombinedGlobalValueSummary() {
 
   SmallVector<uint64_t, 64> NameVals;
 
+  // Set that will be populated during call to writeFunctionTypeMetadataRecords
+  // with the type ids referenced by this index file.
+  std::set<GlobalValue::GUID> ReferencedTypeIds;
+
   // For local linkage, we also emit the original name separately
   // immediately after the record.
   auto MaybeEmitOriginalName = [&](GlobalValueSummary &S) {
@@ -3732,6 +3793,7 @@ void IndexBitcodeWriter::writeCombinedGlobalValueSummary() {
 
     auto *FS = cast<FunctionSummary>(S);
     writeFunctionTypeMetadataRecords(Stream, FS);
+    getReferencedTypeIds(FS, ReferencedTypeIds);
 
     NameVals.push_back(*ValueId);
     NameVals.push_back(Index.getModuleId(FS->modulePath()));
@@ -3776,7 +3838,7 @@ void IndexBitcodeWriter::writeCombinedGlobalValueSummary() {
           continue;
         // The mapping from OriginalId to GUID may return a GUID
         // that corresponds to a static variable. Filter it out here.
-        // This can happen when 
+        // This can happen when
         // 1) There is a call to a library function which does not have
         // a CallValidId;
         // 2) There is a static variable with the  OriginalGUID identical
@@ -3818,6 +3880,9 @@ void IndexBitcodeWriter::writeCombinedGlobalValueSummary() {
     Stream.EmitRecord(bitc::FS_COMBINED_ALIAS, NameVals, FSAliasAbbrev);
     NameVals.clear();
     MaybeEmitOriginalName(*AS);
+
+    if (auto *FS = dyn_cast<FunctionSummary>(&AS->getAliasee()))
+      getReferencedTypeIds(FS, ReferencedTypeIds);
   }
 
   if (!Index.cfiFunctionDefs().empty()) {
@@ -3838,9 +3903,13 @@ void IndexBitcodeWriter::writeCombinedGlobalValueSummary() {
     NameVals.clear();
   }
 
-  if (!Index.typeIds().empty()) {
-    for (auto &S : Index.typeIds()) {
-      writeTypeIdSummaryRecord(NameVals, StrtabBuilder, S.first, S.second);
+  // Walk the GUIDs that were referenced, and write the
+  // corresponding type id records.
+  for (auto &T : ReferencedTypeIds) {
+    auto TidIter = Index.typeIds().equal_range(T);
+    for (auto It = TidIter.first; It != TidIter.second; ++It) {
+      writeTypeIdSummaryRecord(NameVals, StrtabBuilder, It->second.first,
+                               It->second.second);
       Stream.EmitRecord(bitc::FS_TYPE_ID, NameVals);
       NameVals.clear();
     }

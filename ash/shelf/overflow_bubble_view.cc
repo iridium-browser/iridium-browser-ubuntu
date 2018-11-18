@@ -9,24 +9,29 @@
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/shelf/shelf.h"
 #include "ash/shelf/shelf_constants.h"
+#include "ash/shelf/shelf_view.h"
+#include "ash/shelf/shelf_widget.h"
 #include "ash/shell.h"
+#include "ash/wm/window_util.h"
 #include "base/i18n/rtl.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
 #include "ui/events/event.h"
 #include "ui/gfx/geometry/insets.h"
 #include "ui/views/bubble/bubble_frame_view.h"
-#include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
 
 namespace ash {
 namespace {
 
 // Padding at the two ends of the bubble.
-const int kEndPadding = 16;
+constexpr int kEndPadding = 16;
 
 // Distance between overflow bubble and the main shelf.
-const int kDistanceToMainShelf = 4;
+constexpr int kDistanceToMainShelf = 4;
+
+// Minimum margin around the bubble so that it doesn't hug the screen edges.
+constexpr int kMinimumMargin = 8;
 
 }  // namespace
 
@@ -48,20 +53,19 @@ OverflowBubbleView::~OverflowBubbleView() {
 }
 
 void OverflowBubbleView::InitOverflowBubble(views::View* anchor,
-                                            views::View* shelf_view) {
+                                            ShelfView* shelf_view) {
   shelf_view_ = shelf_view;
 
   SetAnchorView(anchor);
-  set_arrow(views::BubbleBorder::NONE);
+  SetArrow(views::BubbleBorder::NONE);
   SetBackground(nullptr);
   if (shelf_->IsHorizontalAlignment())
     set_margins(gfx::Insets(0, kEndPadding));
   else
     set_margins(gfx::Insets(kEndPadding, 0));
   set_shadow(views::BubbleBorder::NO_ASSETS);
-  // Overflow bubble should not get focus. If it get focus when it is shown,
-  // active state item is changed to running state.
-  set_can_activate(false);
+  set_close_on_deactivate(false);
+  set_accept_events(true);
 
   // Makes bubble view has a layer and clip its children layers.
   SetPaintToLayer();
@@ -74,7 +78,23 @@ void OverflowBubbleView::InitOverflowBubble(views::View* anchor,
           kShellWindowId_ShelfBubbleContainer));
 
   views::BubbleDialogDelegateView::CreateBubble(this);
+
+  // This can only be set after bubble creation:
+  GetBubbleFrameView()->bubble_border()->SetCornerRadius(
+      ShelfConstants::shelf_size() / 2);
+
   AddChildView(shelf_view_);
+}
+
+void OverflowBubbleView::ProcessGestureEvent(const ui::GestureEvent& event) {
+  if (event.type() != ui::ET_GESTURE_SCROLL_UPDATE)
+    return;
+
+  if (shelf_->IsHorizontalAlignment())
+    ScrollByXOffset(static_cast<int>(-event.details().scroll_x()));
+  else
+    ScrollByYOffset(static_cast<int>(-event.details().scroll_y()));
+  Layout();
 }
 
 void OverflowBubbleView::ScrollByXOffset(int x_offset) {
@@ -151,8 +171,10 @@ bool OverflowBubbleView::OnMouseWheel(const ui::MouseWheelEvent& event) {
 }
 
 void OverflowBubbleView::OnScrollEvent(ui::ScrollEvent* event) {
-  ScrollByXOffset(-event->x_offset());
-  ScrollByYOffset(-event->y_offset());
+  if (shelf_->IsHorizontalAlignment())
+    ScrollByXOffset(static_cast<int>(-event->x_offset()));
+  else
+    ScrollByYOffset(static_cast<int>(-event->y_offset()));
   Layout();
   event->SetHandled();
 }
@@ -168,6 +190,8 @@ gfx::Rect OverflowBubbleView::GetBubbleBounds() {
       display::Screen::GetScreen()
           ->GetDisplayNearestPoint(anchor_rect.CenterPoint())
           .work_area();
+  // Make sure no part of the bubble touches a screen edge.
+  monitor_rect.Inset(gfx::Insets(kMinimumMargin));
 
   if (shelf_->IsHorizontalAlignment()) {
     gfx::Rect bounds(
@@ -178,8 +202,8 @@ gfx::Rect OverflowBubbleView::GetBubbleBounds() {
         content_size.width() + 2 * kEndPadding, content_size.height());
     if (bounds.x() < monitor_rect.x())
       bounds.Offset(monitor_rect.x() - bounds.x(), 0);
-    else if (bounds.right() > monitor_rect.right())
-      bounds.Offset(monitor_rect.right() - bounds.right(), 0);
+    if (bounds.right() > monitor_rect.right())
+      bounds.set_width(monitor_rect.right() - bounds.x());
     return bounds;
   }
   gfx::Rect bounds(
@@ -191,9 +215,21 @@ gfx::Rect OverflowBubbleView::GetBubbleBounds() {
     bounds.set_x(anchor_rect.x() - kDistanceToMainShelf - content_size.width());
   if (bounds.y() < monitor_rect.y())
     bounds.Offset(0, monitor_rect.y() - bounds.y());
-  else if (bounds.bottom() > monitor_rect.bottom())
-    bounds.Offset(monitor_rect.bottom() - bounds.bottom(), 0);
+  if (bounds.bottom() > monitor_rect.bottom())
+    bounds.set_height(monitor_rect.bottom() - bounds.y());
   return bounds;
+}
+
+bool OverflowBubbleView::CanActivate() const {
+  if (!GetWidget())
+    return false;
+
+  // Do not activate the bubble unless the current active window is the shelf
+  // window.
+  aura::Window* active_window = wm::GetActiveWindow();
+  aura::Window* bubble_window = GetWidget()->GetNativeWindow();
+  aura::Window* shelf_window = shelf_->shelf_widget()->GetNativeWindow();
+  return active_window == bubble_window || active_window == shelf_window;
 }
 
 void OverflowBubbleView::UpdateShelfBackground(SkColor color) {

@@ -224,6 +224,7 @@ _NAMED_TYPE_INFO = {
       'GL_STENCIL_BITS',
       'GL_TEXTURE_BINDING_2D',
       'GL_TEXTURE_BINDING_CUBE_MAP',
+      'GL_TEXTURE_FILTERING_HINT_CHROMIUM',
       'GL_UNPACK_ALIGNMENT',
       'GL_BIND_GENERATES_RESOURCE_CHROMIUM',
       # we can add this because we emulate it if the driver does not support it.
@@ -662,7 +663,7 @@ _NAMED_TYPE_INFO = {
       'GL_PIXEL_PACK_BUFFER',
     ],
   },
-  'FramebufferParameter': {
+  'FramebufferAttachmentParameter': {
     'type': 'GLenum',
     'valid': [
       'GL_FRAMEBUFFER_ATTACHMENT_OBJECT_TYPE',
@@ -682,6 +683,10 @@ _NAMED_TYPE_INFO = {
       'GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_LAYER',
     ],
   },
+  'FramebufferParameter' : {
+    'type': 'GLenum',
+    'valid' : [],
+  },
   'MatrixMode': {
     'type': 'GLenum',
     'is_complete': True,
@@ -692,7 +697,6 @@ _NAMED_TYPE_INFO = {
   },
   'ProgramParameter': {
     'type': 'GLenum',
-    'is_complete': True,
     'valid': [
       'GL_DELETE_STATUS',
       'GL_LINK_STATUS',
@@ -721,6 +725,7 @@ _NAMED_TYPE_INFO = {
     'valid': [
       'GL_QUERY_RESULT_EXT',
       'GL_QUERY_RESULT_AVAILABLE_EXT',
+      'GL_QUERY_RESULT_AVAILABLE_NO_FLUSH_CHROMIUM_EXT',
     ],
   },
   'QueryParameter': {
@@ -741,6 +746,7 @@ _NAMED_TYPE_INFO = {
       'GL_LATENCY_QUERY_CHROMIUM',
       'GL_ASYNC_PIXEL_PACK_COMPLETED_CHROMIUM',
       'GL_COMMANDS_COMPLETED_CHROMIUM',
+      'GL_READBACK_SHADOW_COPIES_UPDATED_CHROMIUM',
     ],
   },
   'RenderBufferParameter': {
@@ -788,7 +794,6 @@ _NAMED_TYPE_INFO = {
   },
   'ShaderParameter': {
     'type': 'GLenum',
-    'is_complete': True,
     'valid': [
       'GL_SHADER_TYPE',
       'GL_DELETE_STATUS',
@@ -958,6 +963,7 @@ _NAMED_TYPE_INFO = {
     'type': 'GLenum',
     'valid': [
       'GL_GENERATE_MIPMAP_HINT',
+      'GL_TEXTURE_FILTERING_HINT_CHROMIUM',
     ],
     'valid_es3': [
       'GL_FRAGMENT_SHADER_DERIVATIVE_HINT',
@@ -1673,6 +1679,17 @@ _NAMED_TYPE_INFO = {
       'GL_EXCLUSIVE_EXT',
     ],
   },
+  'SwapBuffersFlags': {
+    'type': 'GLbitfield',
+    'is_complete': True,
+    'valid': [
+      '0',
+      'gpu::SwapBuffersFlags::kPresentationFeedback',
+      'gpu::SwapBuffersFlags::kVSyncParams',
+      'gpu::SwapBuffersFlags::kPresentationFeedback | '
+      'gpu::SwapBuffersFlags::kVSyncParams',
+    ],
+  },
 }
 
 # A function info object specifies the type and other special data for the
@@ -1714,7 +1731,6 @@ _NAMED_TYPE_INFO = {
 #               bind function.
 # states:       array of states that get set by this function corresponding to
 #               the given arguments
-# state_flag:   name of flag that is set to true when function is called.
 # no_gl:        no GL function is called.
 # valid_args:   A dictionary of argument indices to args to use in unit tests
 #               when they can not be automatically determined.
@@ -1736,6 +1752,8 @@ _NAMED_TYPE_INFO = {
 #               'extension': True.
 # not_shared:   For GENn types, True if objects can't be shared between contexts
 # es3:          ES3 API. True if the function requires an ES3 or WebGL2 context.
+# es31:         ES31 API. True if the function requires an WebGL2Compute
+#               context.
 
 _FUNCTION_INFO = {
   'ActiveTexture': {
@@ -1786,6 +1804,13 @@ _FUNCTION_INFO = {
     'gl_test_func': 'glBindFramebufferEXT',
     'gen_func': 'GenFramebuffersEXT',
     'trace_level': 1,
+  },
+  'BindImageTexture':{
+    'cmd_args': 'GLuint unit, GLuint texture, GLint level, GLboolean layered, '
+                'GLint layer, GLenum access, GLenum format',
+    'unit_test': False,
+    'trace_level': 2,
+    'es31': True,
   },
   'BindRenderbuffer': {
     'type': 'Bind',
@@ -1915,6 +1940,7 @@ _FUNCTION_INFO = {
   },
   'CopyBufferSubData': {
     'decoder_func': 'DoCopyBufferSubData',
+    'impl_func': False,
     'unit_test': False,
     'es3': True,
   },
@@ -2161,6 +2187,12 @@ _FUNCTION_INFO = {
     'impl_func': False,
     'unit_test': False,
   },
+  'DispatchCompute': {
+    'cmd_args': 'GLuint num_groups_x, GLuint num_groups_y, GLuint num_groups_z',
+    'trace_level': 2,
+    'es31': True,
+    'unit_test': False,
+  },
   'DrawArrays': {
     'type': 'Custom',
     'impl_func': False,
@@ -2251,10 +2283,6 @@ _FUNCTION_INFO = {
     'gl_test_func': 'glGenBuffersARB',
     'resource_type': 'Buffer',
     'resource_types': 'Buffers',
-  },
-  'GenMailboxCHROMIUM': {
-    'type': 'NoCommand',
-    'extension': "CHROMIUM_texture_mailbox",
   },
   'GenFramebuffers': {
     'type': 'GENn',
@@ -2350,17 +2378,6 @@ _FUNCTION_INFO = {
         'GLidProgram program, uint32_t name_bucket_id, GLint* location',
     'result': ['GLint'],
     'error_return': -1,
-  },
-  'GetBufferSubDataAsyncCHROMIUM': {
-    'type': 'Custom',
-    'data_transfer_methods': ['shm'],
-    'cmd_args': 'GLenumBufferTarget target, GLintptrNotNegative offset, '
-                'GLsizeiptr size, '
-                'uint32_t data_shm_id, uint32_t data_shm_offset',
-    'es3': True,
-    'impl_func': False,
-    'client_test': False,
-    'trace_level': 1,
   },
   'GetFragDataIndexEXT': {
     'type': 'Custom',
@@ -2812,6 +2829,20 @@ _FUNCTION_INFO = {
     'result': ['uint32_t'],
     'trace_level': 1,
   },
+  # MemoryBarrierEXT is in order to avoid the conflicting MemoryBarrier macro
+  # in windows.
+  'MemoryBarrierEXT': {
+    'cmd_args': 'GLbitfield barriers',
+    'unit_test': False,
+    'trace_level': 2,
+    'es31': True
+  },
+  'MemoryBarrierByRegion': {
+    'cmd_args': 'GLbitfield barriers',
+    'unit_test': False,
+    'trace_level': 2,
+    'es31': True
+  },
   'OverlayPromotionHintCHROMIUM': {
     'decoder_func': 'DoOverlayPromotionHintCHROMIUM',
     'extension': "CHROMIUM_uniform_stream_texture_matrix",
@@ -2974,6 +3005,7 @@ _FUNCTION_INFO = {
     'expectation': False,
     'extension': True,
     'trace_level': 1,
+    'trace_queueing_flow': True,
   },
   'SwapBuffersWithBoundsCHROMIUM': {
     'type': 'PUTn',
@@ -3372,11 +3404,6 @@ _FUNCTION_INFO = {
     'extension': "CHROMIUM_copy_texture",
     'trace_level': 2,
   },
-  'CompressedCopyTextureCHROMIUM': {
-    'decoder_func': 'DoCompressedCopyTextureCHROMIUM',
-    'unit_test': False,
-    'extension': 'CHROMIUM_copy_compressed_texture',
-  },
   'TexStorage2DEXT': {
     'unit_test': False,
     'extension': 'EXT_texture_storage',
@@ -3738,7 +3765,7 @@ _FUNCTION_INFO = {
     'client_test': False,
     'cmd_args': 'GLsizei num_textures, GLuint background_color, '
                 'GLuint edge_aa_mask, GLuint filter, GLuint shm_id, '
-                'GLuint shm_offset',
+                'GLuint shm_offset, bool is_protected_video',
     'extension': 'CHROMIUM_schedule_ca_layer',
   },
   'CommitOverlayPlanesCHROMIUM': {
@@ -3920,10 +3947,13 @@ _FUNCTION_INFO = {
     'extension_flag': 'chromium_raster_transport',
   },
   'RasterCHROMIUM': {
-    'type': 'Data',
-    'internal': True,
     'decoder_func': 'DoRasterCHROMIUM',
-    'data_transfer_methods': ['shm'],
+    'internal': True,
+    'impl_func': True,
+    'unit_test': False,
+    'cmd_args': 'GLuint raster_shm_id, GLuint raster_shm_offset,'
+                'GLsizeiptr raster_shm_size, GLuint font_shm_id,'
+                'GLuint font_shm_offset, GLsizeiptr font_shm_size',
     'extension': 'CHROMIUM_raster_transport',
     'extension_flag': 'chromium_raster_transport',
   },
@@ -3932,6 +3962,10 @@ _FUNCTION_INFO = {
     'extension': "CHROMIUM_raster_transport",
   },
   'UnmapRasterCHROMIUM': {
+    'type': 'NoCommand',
+    'extension': "CHROMIUM_raster_transport",
+  },
+  'MapFontBufferCHROMIUM': {
     'type': 'NoCommand',
     'extension': "CHROMIUM_raster_transport",
   },
@@ -4037,6 +4071,41 @@ _FUNCTION_INFO = {
     'impl_func': True,
     'extension': 'CHROMIUM_unpremultiply_and_dither_copy',
     'extension_flag': 'unpremultiply_and_dither_copy',
+  },
+  'InvalidateReadbackBufferShadowDataCHROMIUM': {
+    'type': 'NoCommand',
+    'impl_func': False,
+    'es3': True,
+    'extension': 'CHROMIUM_nonblocking_readback',
+  },
+  'SetReadbackBufferShadowAllocationINTERNAL': {
+    'decoder_func': 'DoSetReadbackBufferShadowAllocationINTERNAL',
+    'client_test': False,
+    'unit_test': False,
+    'impl_func': True,
+    'internal': True,
+    'es3': True,
+  },
+  'FramebufferParameteri': {
+    'decoder_func': 'DoFramebufferParameteri',
+    'unit_test': False,
+    'extension': 'MESA_framebuffer_flip_y',
+    'extension_flag': 'mesa_framebuffer_flip_y',
+  },
+  'FramebufferTextureMultiviewLayeredANGLE': {
+    'decoder_func': 'DoFramebufferTextureMultiviewLayeredANGLE',
+    'unit_test': False,
+    'extension': 'ANGLE_multiview',
+    'extension_flag': 'angle_multiview',
+    'trace_level': 1,
+    'es3': True
+  },
+  'MaxShaderCompilerThreadsKHR': {
+    'cmd_args': 'GLuint count',
+    'unit_test': False,
+    'client_test': False,
+    'extension': 'KHRParallelShaderCompile',
+    'extension_flag': 'khr_parallel_shader_compile',
   }
 }
 

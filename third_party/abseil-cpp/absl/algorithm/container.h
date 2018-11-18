@@ -314,7 +314,7 @@ container_algorithm_internal::ContainerDifferenceType<const C> c_count_if(
 
 // c_mismatch()
 //
-// Container-based version of the <algorithm> `std::mismatchf()` function to
+// Container-based version of the <algorithm> `std::mismatch()` function to
 // return the first element where two ordered containers differ.
 template <typename C1, typename C2>
 container_algorithm_internal::ContainerIterPairType<C1, C2>
@@ -634,7 +634,7 @@ container_algorithm_internal::ContainerIter<C> c_generate_n(C& c, Size n,
 
 // Note: `c_xx()` <algorithm> container versions for `remove()`, `remove_if()`,
 // and `unique()` are omitted, because it's not clear whether or not such
-// functions should call erase their supplied sequences afterwards. Either
+// functions should call erase on their supplied sequences afterwards. Either
 // behavior would be surprising for a different set of users.
 //
 
@@ -1578,7 +1578,7 @@ decay_t<T> c_inner_product(const Sequence1& factors1, const Sequence2& factors2,
 }
 
 // Overload of c_inner_product() for using binary operations other than
-// `operator+` (for computing the accumlation) and `operator*` (for computing
+// `operator+` (for computing the accumulation) and `operator*` (for computing
 // the product between the two container's element pair).
 template <typename Sequence1, typename Sequence2, typename T,
           typename BinaryOp1, typename BinaryOp2>

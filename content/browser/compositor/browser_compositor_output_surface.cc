@@ -14,7 +14,7 @@
 #include "components/viz/service/display/output_surface_client.h"
 #include "components/viz/service/display_embedder/compositor_overlay_candidate_validator.h"
 #include "content/browser/compositor/reflector_impl.h"
-#include "services/ui/public/cpp/gpu/context_provider_command_buffer.h"
+#include "services/ws/public/cpp/gpu/context_provider_command_buffer.h"
 
 namespace content {
 
@@ -36,12 +36,14 @@ BrowserCompositorOutputSurface::BrowserCompositorOutputSurface(
       update_vsync_parameters_callback_(update_vsync_parameters_callback),
       reflector_(nullptr) {}
 
+#if BUILDFLAG(ENABLE_VULKAN)
 BrowserCompositorOutputSurface::BrowserCompositorOutputSurface(
     const scoped_refptr<viz::VulkanContextProvider>& vulkan_context_provider,
     const UpdateVSyncParametersCallback& update_vsync_parameters_callback)
     : OutputSurface(std::move(vulkan_context_provider)),
       update_vsync_parameters_callback_(update_vsync_parameters_callback),
       reflector_(nullptr) {}
+#endif
 
 BrowserCompositorOutputSurface::~BrowserCompositorOutputSurface() {
   if (reflector_)

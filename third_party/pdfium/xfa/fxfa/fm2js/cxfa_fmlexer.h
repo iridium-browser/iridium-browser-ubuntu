@@ -7,9 +7,6 @@
 #ifndef XFA_FXFA_FM2JS_CXFA_FMLEXER_H_
 #define XFA_FXFA_FM2JS_CXFA_FMLEXER_H_
 
-#include <memory>
-#include <utility>
-
 #include "core/fxcrt/fx_string.h"
 
 enum XFA_FM_TOKEN {
@@ -85,7 +82,7 @@ enum XFA_FM_TOKEN {
 
 struct XFA_FMKeyword {
   XFA_FM_TOKEN m_type;
-  const wchar_t* m_keyword;
+  const wchar_t* m_keyword;  // Raw, POD struct.
 };
 
 class CXFA_FMToken {
@@ -109,6 +106,7 @@ class CXFA_FMLexer {
   ~CXFA_FMLexer();
 
   CXFA_FMToken NextToken();
+  bool IsComplete() const { return m_cursor >= m_end; }
 
  private:
   CXFA_FMToken AdvanceForNumber();

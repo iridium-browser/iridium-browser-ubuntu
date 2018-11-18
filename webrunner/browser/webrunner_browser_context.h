@@ -5,6 +5,9 @@
 #ifndef WEBRUNNER_BROWSER_WEBRUNNER_BROWSER_CONTEXT_H_
 #define WEBRUNNER_BROWSER_WEBRUNNER_BROWSER_CONTEXT_H_
 
+#include <memory>
+
+#include "base/files/file_path.h"
 #include "base/macros.h"
 #include "content/public/browser/browser_context.h"
 
@@ -15,13 +18,16 @@ class WebRunnerURLRequestContextGetter;
 
 class WebRunnerBrowserContext : public content::BrowserContext {
  public:
-  WebRunnerBrowserContext();
+  // |force_incognito|: If set, then this BrowserContext will run in incognito
+  // mode even if /data is available.
+  explicit WebRunnerBrowserContext(bool force_incognito);
   ~WebRunnerBrowserContext() override;
 
   // BrowserContext implementation.
   std::unique_ptr<content::ZoomLevelDelegate> CreateZoomLevelDelegate(
       const base::FilePath& partition_path) override;
   base::FilePath GetPath() const override;
+  base::FilePath GetCachePath() const override;
   bool IsOffTheRecord() const override;
   content::ResourceContext* GetResourceContext() override;
   content::DownloadManagerDelegate* GetDownloadManagerDelegate() override;
@@ -29,7 +35,8 @@ class WebRunnerBrowserContext : public content::BrowserContext {
   storage::SpecialStoragePolicy* GetSpecialStoragePolicy() override;
   content::PushMessagingService* GetPushMessagingService() override;
   content::SSLHostStateDelegate* GetSSLHostStateDelegate() override;
-  content::PermissionManager* GetPermissionManager() override;
+  content::PermissionControllerDelegate* GetPermissionControllerDelegate()
+      override;
   content::BackgroundFetchDelegate* GetBackgroundFetchDelegate() override;
   content::BackgroundSyncController* GetBackgroundSyncController() override;
   content::BrowsingDataRemoverDelegate* GetBrowsingDataRemoverDelegate()
@@ -50,6 +57,8 @@ class WebRunnerBrowserContext : public content::BrowserContext {
  private:
   // Contains URLRequestContextGetter required for resource loading.
   class ResourceContext;
+
+  base::FilePath data_dir_path_;
 
   std::unique_ptr<WebRunnerNetLog> net_log_;
   scoped_refptr<WebRunnerURLRequestContextGetter> url_request_getter_;

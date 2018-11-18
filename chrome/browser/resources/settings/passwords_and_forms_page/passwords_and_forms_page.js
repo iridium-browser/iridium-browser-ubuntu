@@ -25,7 +25,7 @@ Polymer({
     if (settings.routes.MANAGE_PASSWORDS) {
       this.focusConfig_.set(
           settings.routes.MANAGE_PASSWORDS.path,
-          '#passwordManagerButton .subpage-arrow');
+          '#passwordManagerButton .subpage-arrow button');
     }
   },
 
@@ -39,11 +39,18 @@ Polymer({
   },
 
   /**
-   * Shows the manage passwords sub page.
-   * @param {!Event} event
+   * Shows the manage payment methods sub page.
    * @private
    */
-  onPasswordsTap_: function(event) {
+  onPaymentsTap_: function() {
+    settings.navigateTo(settings.routes.PAYMENTS);
+  },
+
+  /**
+   * Shows the manage passwords sub page.
+   * @private
+   */
+  onPasswordsTap_: function() {
     settings.navigateTo(settings.routes.MANAGE_PASSWORDS);
   },
 });

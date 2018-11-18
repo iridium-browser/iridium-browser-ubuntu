@@ -7,10 +7,12 @@
 
 #include <stdint.h>
 
+#include <map>
+#include <memory>
+#include <string>
 #include <vector>
 
 #include "base/macros.h"
-#include "base/observer_list.h"
 #include "components/guest_view/browser/guest_view.h"
 #include "content/public/browser/javascript_dialog_manager.h"
 #include "extensions/browser/guest_view/web_view/javascript_dialog_helper.h"
@@ -19,10 +21,7 @@
 #include "extensions/browser/guest_view/web_view/web_view_permission_helper.h"
 #include "extensions/browser/guest_view/web_view/web_view_permission_types.h"
 #include "extensions/browser/script_executor.h"
-
-namespace blink {
-struct WebFindOptions;
-}  // namespace blink
+#include "third_party/blink/public/mojom/frame/find_in_page.mojom.h"
 
 namespace extensions {
 
@@ -117,7 +116,7 @@ class WebViewGuest : public guest_view::GuestView<WebViewGuest> {
 
   // Begin or continue a find request.
   void StartFind(const base::string16& search_text,
-                 const blink::WebFindOptions& options,
+                 blink::mojom::FindOptionsPtr options,
                  scoped_refptr<WebViewInternalFindFunction> find_function);
 
   // Conclude a find request to clear highlighting.
@@ -150,6 +149,12 @@ class WebViewGuest : public guest_view::GuestView<WebViewGuest> {
 
   ScriptExecutor* script_executor() { return script_executor_.get(); }
 
+  // Enables or disables spatial navigation.
+  void SetSpatialNavigationEnabled(bool enabled);
+
+  // Returns spatial navigation status.
+  bool IsSpatialNavigationEnabled() const;
+
  private:
   friend class WebViewPermissionHelper;
 
@@ -172,7 +177,7 @@ class WebViewGuest : public guest_view::GuestView<WebViewGuest> {
 
   // GuestViewBase implementation.
   void CreateWebContents(const base::DictionaryValue& create_params,
-                         const WebContentsCreatedCallback& callback) final;
+                         WebContentsCreatedCallback callback) final;
   void DidAttachToEmbedder() final;
   void DidDropLink(const GURL& url) final;
   void DidInitialize(const base::DictionaryValue& create_params) final;
@@ -193,7 +198,7 @@ class WebViewGuest : public guest_view::GuestView<WebViewGuest> {
   void GuestViewDidStopLoading() final;
   void GuestZoomChanged(double old_zoom_level, double new_zoom_level) final;
   bool IsAutoSizeSupported() const final;
-  void SignalWhenReady(const base::Closure& callback) final;
+  void SignalWhenReady(base::OnceClosure callback) final;
   void WillAttachToEmbedder() final;
   void WillDestroy() final;
 
@@ -214,11 +219,12 @@ class WebViewGuest : public guest_view::GuestView<WebViewGuest> {
                           content::RenderWidgetHost* render_widget_host) final;
   void RendererUnresponsive(
       content::WebContents* source,
-      content::RenderWidgetHost* render_widget_host) final;
+      content::RenderWidgetHost* render_widget_host,
+      base::RepeatingClosure hang_monitor_restarter) final;
   void RequestMediaAccessPermission(
       content::WebContents* source,
       const content::MediaStreamRequest& request,
-      const content::MediaResponseCallback& callback) final;
+      content::MediaResponseCallback callback) final;
   void RequestPointerLockPermission(
       bool user_gesture,
       bool last_unlocked_by_target,
@@ -232,7 +238,7 @@ class WebViewGuest : public guest_view::GuestView<WebViewGuest> {
   content::JavaScriptDialogManager* GetJavaScriptDialogManager(
       content::WebContents* source) final;
   void AddNewContents(content::WebContents* source,
-                      content::WebContents* new_contents,
+                      std::unique_ptr<content::WebContents> new_contents,
                       WindowOpenDisposition disposition,
                       const gfx::Rect& initial_rect,
                       bool user_gesture,
@@ -246,16 +252,16 @@ class WebViewGuest : public guest_view::GuestView<WebViewGuest> {
                           const std::string& frame_name,
                           const GURL& target_url,
                           content::WebContents* new_contents) final;
-  void EnterFullscreenModeForTab(content::WebContents* web_contents,
-                                 const GURL& origin) final;
+  void EnterFullscreenModeForTab(
+      content::WebContents* web_contents,
+      const GURL& origin,
+      const blink::WebFullscreenOptions& options) final;
   void ExitFullscreenModeForTab(content::WebContents* web_contents) final;
   bool IsFullscreenForTabOrPending(
       const content::WebContents* web_contents) const final;
   void RequestToLockMouse(content::WebContents* web_contents,
                           bool user_gesture,
                           bool last_unlocked_by_target) override;
-  void OnAudioStateChanged(content::WebContents* web_contents,
-                           bool audible) final;
 
   // WebContentsObserver implementation.
   void DidStartNavigation(content::NavigationHandle* navigation_handle) final;
@@ -267,6 +273,7 @@ class WebViewGuest : public guest_view::GuestView<WebViewGuest> {
   void UserAgentOverrideSet(const std::string& user_agent) final;
   void FrameNameChanged(content::RenderFrameHost* render_frame_host,
                         const std::string& name) final;
+  void OnAudioStateChanged(bool audible) final;
 
   // Informs the embedder of a frame name change.
   void ReportFrameNameChange(const std::string& name);
@@ -313,8 +320,6 @@ class WebViewGuest : public guest_view::GuestView<WebViewGuest> {
 
   // Handles find requests and replies for the webview find API.
   WebViewFindHelper find_helper_;
-
-  base::ObserverList<ScriptExecutionObserver> script_observers_;
   std::unique_ptr<ScriptExecutor> script_executor_;
 
   // True if the user agent is overridden.
@@ -364,6 +369,9 @@ class WebViewGuest : public guest_view::GuestView<WebViewGuest> {
 
   // Whether the GuestView set an explicit zoom level.
   bool did_set_explicit_zoom_;
+
+  // Store spatial navigation status.
+  bool is_spatial_navigation_enabled_;
 
   // This is used to ensure pending tasks will not fire after this object is
   // destroyed.

@@ -33,13 +33,17 @@ static const char* kInvalidAudioInputDevices[] = {
 CastAudioManagerAlsa::CastAudioManagerAlsa(
     std::unique_ptr<::media::AudioThread> audio_thread,
     ::media::AudioLogFactory* audio_log_factory,
-    std::unique_ptr<CmaBackendFactory> backend_factory,
-    scoped_refptr<base::SingleThreadTaskRunner> backend_task_runner,
+    base::RepeatingCallback<CmaBackendFactory*()> backend_factory_getter,
+    scoped_refptr<base::SingleThreadTaskRunner> browser_task_runner,
+    scoped_refptr<base::SingleThreadTaskRunner> media_task_runner,
+    service_manager::Connector* connector,
     bool use_mixer)
     : CastAudioManager(std::move(audio_thread),
                        audio_log_factory,
-                       std::move(backend_factory),
-                       backend_task_runner,
+                       std::move(backend_factory_getter),
+                       browser_task_runner,
+                       media_task_runner,
+                       connector,
                        use_mixer),
       wrapper_(new ::media::AlsaWrapper()) {}
 
@@ -61,7 +65,7 @@ void CastAudioManagerAlsa::GetAudioInputDeviceNames(
   // Need to send a valid AudioParameters object even when it will be unused.
   return ::media::AudioParameters(
       ::media::AudioParameters::AUDIO_PCM_LOW_LATENCY,
-      ::media::CHANNEL_LAYOUT_STEREO, kDefaultSampleRate, 16,
+      ::media::CHANNEL_LAYOUT_STEREO, kDefaultSampleRate,
       kDefaultInputBufferSize);
 }
 

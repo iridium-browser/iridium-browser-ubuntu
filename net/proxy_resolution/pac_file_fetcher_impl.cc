@@ -19,6 +19,7 @@
 #include "net/base/request_priority.h"
 #include "net/cert/cert_status_flags.h"
 #include "net/http/http_response_headers.h"
+#include "net/url_request/redirect_info.h"
 #include "net/url_request/url_request_context.h"
 
 // TODO(eroman):
@@ -81,17 +82,15 @@ void ConvertResponseToUTF16(const std::string& charset,
 
 }  // namespace
 
-PacFileFetcherImpl::PacFileFetcherImpl(URLRequestContext* url_request_context)
-    : url_request_context_(url_request_context),
-      buf_(new IOBuffer(kBufSize)),
-      next_id_(0),
-      cur_request_id_(0),
-      result_code_(OK),
-      result_text_(NULL),
-      max_response_bytes_(kDefaultMaxResponseBytes),
-      max_duration_(kDefaultMaxDuration),
-      weak_factory_(this) {
-  DCHECK(url_request_context);
+std::unique_ptr<PacFileFetcherImpl> PacFileFetcherImpl::Create(
+    URLRequestContext* url_request_context) {
+  return base::WrapUnique(new PacFileFetcherImpl(url_request_context, false));
+}
+
+std::unique_ptr<PacFileFetcherImpl>
+PacFileFetcherImpl::CreateWithFileUrlSupport(
+    URLRequestContext* url_request_context) {
+  return base::WrapUnique(new PacFileFetcherImpl(url_request_context, true));
 }
 
 PacFileFetcherImpl::~PacFileFetcherImpl() {
@@ -127,7 +126,7 @@ void PacFileFetcherImpl::OnResponseCompleted(URLRequest* request,
 int PacFileFetcherImpl::Fetch(
     const GURL& url,
     base::string16* text,
-    const CompletionCallback& callback,
+    CompletionOnceCallback callback,
     const NetworkTrafficAnnotationTag traffic_annotation) {
   // It is invalid to call Fetch() while a request is already in progress.
   DCHECK(!cur_request_.get());
@@ -136,6 +135,9 @@ int PacFileFetcherImpl::Fetch(
 
   if (!url_request_context_)
     return ERR_CONTEXT_SHUT_DOWN;
+
+  if (!IsUrlSchemeAllowed(url))
+    return ERR_DISALLOWED_URL_SCHEME;
 
   // Handle base-64 encoded data-urls that contain custom PAC scripts.
   if (url.SchemeIs("data")) {
@@ -169,11 +171,11 @@ int PacFileFetcherImpl::Fetch(
   // the proxy might be the only way to the outside world.  IGNORE_LIMITS is
   // used to avoid blocking proxy resolution on other network requests.
   cur_request_->SetLoadFlags(LOAD_BYPASS_PROXY | LOAD_DISABLE_CACHE |
-                             LOAD_DISABLE_CERT_REVOCATION_CHECKING |
+                             LOAD_DISABLE_CERT_NETWORK_FETCHES |
                              LOAD_IGNORE_LIMITS);
 
   // Save the caller's info for notification on completion.
-  callback_ = callback;
+  callback_ = std::move(callback);
   result_text_ = text;
 
   bytes_read_so_far_.clear();
@@ -208,6 +210,27 @@ void PacFileFetcherImpl::OnShutdown() {
   if (cur_request_) {
     result_code_ = ERR_CONTEXT_SHUT_DOWN;
     FetchCompleted();
+  }
+}
+
+void PacFileFetcherImpl::OnReceivedRedirect(URLRequest* request,
+                                            const RedirectInfo& redirect_info,
+                                            bool* defer_redirect) {
+  int error = OK;
+
+  // Redirection to file:// is never OK. Ordinarily this is handled lower in the
+  // stack (|FileProtocolHandler::IsSafeRedirectTarget|), but this is reachable
+  // when built without file:// suppport. Return the same error for consistency.
+  if (redirect_info.new_url.SchemeIsFile()) {
+    error = ERR_UNSAFE_REDIRECT;
+  } else if (!IsUrlSchemeAllowed(redirect_info.new_url)) {
+    error = ERR_DISALLOWED_URL_SCHEME;
+  }
+
+  if (error != OK) {
+    // Fail the redirect.
+    request->CancelWithError(error);
+    OnResponseCompleted(request, error);
   }
 }
 
@@ -280,6 +303,36 @@ void PacFileFetcherImpl::OnReadCompleted(URLRequest* request, int num_bytes) {
   }
 }
 
+PacFileFetcherImpl::PacFileFetcherImpl(URLRequestContext* url_request_context,
+                                       bool allow_file_url)
+    : url_request_context_(url_request_context),
+      buf_(base::MakeRefCounted<IOBuffer>(kBufSize)),
+      next_id_(0),
+      cur_request_id_(0),
+      result_code_(OK),
+      result_text_(NULL),
+      max_response_bytes_(kDefaultMaxResponseBytes),
+      max_duration_(kDefaultMaxDuration),
+      allow_file_url_(allow_file_url),
+      weak_factory_(this) {
+  DCHECK(url_request_context);
+}
+
+bool PacFileFetcherImpl::IsUrlSchemeAllowed(const GURL& url) const {
+  // Always allow http://, https://, data:, and ftp://.
+  if (url.SchemeIsHTTPOrHTTPS() || url.SchemeIs("ftp") || url.SchemeIs("data"))
+    return true;
+
+  // Only permit file:// if |allow_file_url_| was set. file:// should not be
+  // allowed for URLs that were auto-detected, or as the result of a server-side
+  // redirect.
+  if (url.SchemeIsFile())
+    return allow_file_url_;
+
+  // Disallow any other URL scheme.
+  return false;
+}
+
 void PacFileFetcherImpl::ReadBody(URLRequest* request) {
   // Read as many bytes as are available synchronously.
   while (true) {
@@ -339,11 +392,11 @@ void PacFileFetcherImpl::FetchCompleted() {
   }
 
   int result_code = result_code_;
-  CompletionCallback callback = callback_;
+  CompletionOnceCallback callback = std::move(callback_);
 
   ResetCurRequestState();
 
-  callback.Run(result_code);
+  std::move(callback).Run(result_code);
 }
 
 void PacFileFetcherImpl::ResetCurRequestState() {

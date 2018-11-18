@@ -13,6 +13,8 @@ namespace prefs {
 
 extern const char kSyncLastSyncedTime[];
 extern const char kSyncLastPollTime[];
+extern const char kSyncShortPollIntervalSeconds[];
+extern const char kSyncLongPollIntervalSeconds[];
 extern const char kSyncHasAuthError[];
 extern const char kSyncFirstSetupComplete[];
 extern const char kSyncKeepEverythingSynced[];
@@ -35,6 +37,7 @@ extern const char kSyncExtensions[];
 extern const char kSyncFaviconImages[];
 extern const char kSyncFaviconTracking[];
 extern const char kSyncHistoryDeleteDirectives[];
+extern const char kSyncMountainShares[];
 extern const char kSyncPasswords[];
 extern const char kSyncPreferences[];
 extern const char kSyncPriorityPreferences[];
@@ -51,6 +54,7 @@ extern const char kSyncSyncedNotifications[];
 extern const char kSyncTabs[];
 extern const char kSyncThemes[];
 extern const char kSyncTypedUrls[];
+extern const char kSyncUserConsents[];
 extern const char kSyncUserEvents[];
 extern const char kSyncWifiCredentials[];
 
@@ -59,8 +63,6 @@ extern const char kSyncSuppressStart[];
 
 extern const char kSyncEncryptionBootstrapToken[];
 extern const char kSyncKeystoreEncryptionBootstrapToken[];
-
-extern const char kSyncSessionsGUID[];
 
 #if defined(OS_CHROMEOS)
 extern const char kSyncSpareBootstrapToken[];

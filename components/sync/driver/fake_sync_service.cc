@@ -7,8 +7,10 @@
 #include "base/values.h"
 #include "components/signin/core/browser/account_info.h"
 #include "components/sync/driver/data_type_controller.h"
+#include "components/sync/driver/sync_token_status.h"
 #include "components/sync/syncable/base_transaction.h"
 #include "components/sync/syncable/user_share.h"
+#include "google_apis/gaia/google_service_auth_error.h"
 
 namespace syncer {
 
@@ -20,6 +22,10 @@ AccountInfo FakeSyncService::GetAuthenticatedAccountInfo() const {
   return account_info_;
 }
 
+void FakeSyncService::SetConfigurationDone(bool configuration_done) {
+  configuration_done_ = configuration_done;
+}
+
 // Dummy methods
 
 FakeSyncService::FakeSyncService()
@@ -28,15 +34,35 @@ FakeSyncService::FakeSyncService()
 
 FakeSyncService::~FakeSyncService() {}
 
+int FakeSyncService::GetDisableReasons() const {
+  // Note: Most subclasses will want to override this.
+  return DISABLE_REASON_PLATFORM_OVERRIDE;
+}
+
+syncer::SyncService::TransportState FakeSyncService::GetTransportState() const {
+  // This is a temporary partial copy of the real implementation in
+  // ProfileSyncService, containing only the things that exist in the
+  // FakeSyncService. If subclasses override some of the individual getters,
+  // this should still return a reasonable result.
+  if (GetDisableReasons() != DISABLE_REASON_NONE) {
+    return TransportState::DISABLED;
+  }
+  // From this point on, Sync can start in principle.
+  DCHECK(CanSyncFeatureStart());
+  if (!IsFirstSetupComplete()) {
+    return TransportState::PENDING_DESIRED_CONFIGURATION;
+  }
+  if (!configuration_done_) {
+    return TransportState::CONFIGURING;
+  }
+  return TransportState::ACTIVE;
+}
+
+bool FakeSyncService::IsAuthenticatedAccountPrimary() const {
+  return true;
+}
+
 bool FakeSyncService::IsFirstSetupComplete() const {
-  return false;
-}
-
-bool FakeSyncService::IsSyncAllowed() const {
-  return false;
-}
-
-bool FakeSyncService::IsSyncActive() const {
   return false;
 }
 
@@ -62,10 +88,6 @@ bool FakeSyncService::HasObserver(const SyncServiceObserver* observer) const {
   return false;
 }
 
-bool FakeSyncService::CanSyncStart() const {
-  return false;
-}
-
 void FakeSyncService::OnDataTypeRequestsSyncStartup(ModelType type) {}
 
 void FakeSyncService::RequestStop(SyncService::SyncStopDataFate data_fate) {}
@@ -81,10 +103,6 @@ void FakeSyncService::OnUserChoseDatatypes(bool sync_everything,
 
 void FakeSyncService::SetFirstSetupComplete() {}
 
-bool FakeSyncService::IsFirstSetupInProgress() const {
-  return false;
-}
-
 std::unique_ptr<SyncSetupInProgressHandle>
 FakeSyncService::GetSetupInProgressHandle() {
   return nullptr;
@@ -94,20 +112,8 @@ bool FakeSyncService::IsSetupInProgress() const {
   return false;
 }
 
-bool FakeSyncService::ConfigurationDone() const {
-  return false;
-}
-
 const GoogleServiceAuthError& FakeSyncService::GetAuthError() const {
   return error_;
-}
-
-bool FakeSyncService::HasUnrecoverableError() const {
-  return false;
-}
-
-bool FakeSyncService::IsEngineInitialized() const {
-  return false;
 }
 
 sync_sessions::OpenTabsUIDelegate* FakeSyncService::GetOpenTabsUIDelegate() {
@@ -147,33 +153,20 @@ UserShare* FakeSyncService::GetUserShare() const {
   return user_share_.get();
 }
 
-LocalDeviceInfoProvider* FakeSyncService::GetLocalDeviceInfoProvider() const {
-  return nullptr;
-}
-
-void FakeSyncService::RegisterDataTypeController(
-    std::unique_ptr<DataTypeController> data_type_controller) {}
-
 void FakeSyncService::ReenableDatatype(ModelType type) {}
 
-FakeSyncService::SyncTokenStatus FakeSyncService::GetSyncTokenStatus() const {
-  return FakeSyncService::SyncTokenStatus();
+void FakeSyncService::ReadyForStartChanged(ModelType type) {}
+
+syncer::SyncTokenStatus FakeSyncService::GetSyncTokenStatus() const {
+  return syncer::SyncTokenStatus();
 }
 
-std::string FakeSyncService::QuerySyncStatusSummaryString() {
-  return "";
-}
-
-bool FakeSyncService::QueryDetailedSyncStatus(SyncStatus* result) {
+bool FakeSyncService::QueryDetailedSyncStatus(SyncStatus* result) const {
   return false;
 }
 
 base::Time FakeSyncService::GetLastSyncedTime() const {
   return base::Time();
-}
-
-std::string FakeSyncService::GetEngineInitializationStateString() const {
-  return std::string();
 }
 
 SyncCycleSnapshot FakeSyncService::GetLastCycleSnapshot() const {
@@ -214,10 +207,6 @@ base::WeakPtr<JsController> FakeSyncService::GetJsController() {
 
 void FakeSyncService::GetAllNodes(
     const base::Callback<void(std::unique_ptr<base::ListValue>)>& callback) {}
-
-GlobalIdMapper* FakeSyncService::GetGlobalIdMapper() const {
-  return nullptr;
-}
 
 bool FakeSyncService::IsPassphraseRequired() const {
   return false;

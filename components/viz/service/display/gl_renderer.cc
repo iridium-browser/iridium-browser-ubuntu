@@ -13,6 +13,7 @@
 #include <numeric>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/bind.h"
@@ -41,7 +42,6 @@
 #include "components/viz/common/quads/stream_video_draw_quad.h"
 #include "components/viz/common/quads/texture_draw_quad.h"
 #include "components/viz/common/resources/platform_color.h"
-#include "components/viz/common/resources/resource_fence.h"
 #include "components/viz/common/resources/resource_format_utils.h"
 #include "components/viz/common/resources/resource_id.h"
 #include "components/viz/common/skia_helper.h"
@@ -50,6 +50,7 @@
 #include "components/viz/service/display/layer_quad.h"
 #include "components/viz/service/display/output_surface.h"
 #include "components/viz/service/display/output_surface_frame.h"
+#include "components/viz/service/display/resource_fence.h"
 #include "components/viz/service/display/scoped_render_pass_texture.h"
 #include "components/viz/service/display/static_geometry_binding.h"
 #include "components/viz/service/display/texture_deleter.h"
@@ -58,7 +59,6 @@
 #include "gpu/command_buffer/client/gles2_interface.h"
 #include "gpu/command_buffer/common/gpu_memory_allocation.h"
 #include "media/base/media_switches.h"
-#include "skia/ext/texture_handle.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkColorFilter.h"
@@ -222,10 +222,8 @@ struct GLRenderer::DrawRenderPassDrawQuadParams {
 
   bool use_aa = false;
 
-  // Some filters affect pixels outside the original contents bounds. This
-  // requires translation of the source when texturing, as well as a change in
-  // the bounds of the destination.
-  gfx::Point src_offset;
+  // Some filters affect pixels outside the original contents bounds, in which
+  // case ApplyImageFilter will modify this rect.
   gfx::RectF dst_rect;
 
   // A Skia image that should be sampled from instead of the original
@@ -233,25 +231,11 @@ struct GLRenderer::DrawRenderPassDrawQuadParams {
   sk_sp<SkImage> filter_image;
 
   // The original contents, bound for sampling.
-  std::unique_ptr<cc::DisplayResourceProvider::ScopedSamplerGL>
+  std::unique_ptr<DisplayResourceProvider::ScopedSamplerGL>
       bypass_quad_resource_lock;
 
   // A mask to be applied when drawing the RPDQ.
-  std::unique_ptr<cc::DisplayResourceProvider::ScopedSamplerGL>
-      mask_resource_lock;
-
-  // Original background texture.
-  uint32_t background_texture = 0;
-
-  // Backdrop bounding box.
-  gfx::Rect background_rect;
-
-  // Filtered background texture.
-  sk_sp<SkImage> background_image;
-  GLuint background_image_id = 0;
-
-  // Whether the original background texture is needed for the mask.
-  bool mask_for_background = false;
+  std::unique_ptr<DisplayResourceProvider::ScopedSamplerGL> mask_resource_lock;
 
   // Whether a color matrix needs to be applied by the shaders when drawing
   // the RPDQ.
@@ -266,6 +250,17 @@ struct GLRenderer::DrawRenderPassDrawQuadParams {
   // The color space of the texture bound for sampling (from filter_image or
   // bypass_quad_resource_lock, depending on the path taken).
   gfx::ColorSpace contents_and_bypass_color_space;
+
+  // Background filters block.
+  // Original background texture.
+  uint32_t background_texture = 0;
+  // Backdrop bounding box.
+  gfx::Rect background_rect;
+  // Filtered background texture.
+  sk_sp<SkImage> background_image;
+  GLuint background_image_id = 0;
+  // Whether the original background texture is needed for the mask.
+  bool mask_for_background = false;
 };
 
 class GLRenderer::ScopedUseGrContext {
@@ -307,7 +302,7 @@ class GLRenderer::ScopedUseGrContext {
 GLRenderer::GLRenderer(
     const RendererSettings* settings,
     OutputSurface* output_surface,
-    cc::DisplayResourceProvider* resource_provider,
+    DisplayResourceProvider* resource_provider,
     scoped_refptr<base::SingleThreadTaskRunner> current_task_runner)
     : DirectRenderer(settings, output_surface, resource_provider),
       shared_geometry_quad_(QuadVertexRect()),
@@ -452,8 +447,7 @@ void GLRenderer::BeginDrawingFrame() {
     read_lock_fence = sync_queries_.StartNewFrame();
   } else {
     read_lock_fence =
-        base::MakeRefCounted<cc::DisplayResourceProvider::SynchronousFence>(
-            gl_);
+        base::MakeRefCounted<DisplayResourceProvider::SynchronousFence>(gl_);
   }
   resource_provider_->SetReadLockFence(read_lock_fence.get());
 
@@ -764,13 +758,21 @@ GLenum GLRenderer::GetFramebufferCopyTextureFormat() {
   // texture. Otherwise, we use the format of the default framebuffer. But
   // whatever the format is, convert it to a valid format for CopyTexSubImage2D.
   GLenum format;
-  if (!current_framebuffer_texture_)
+  if (!current_framebuffer_texture_) {
     format = output_surface_->GetFramebufferCopyTextureFormat();
-  else
-    format = GLCopyTextureInternalFormat(BackbufferFormat());
+  } else {
+    ResourceFormat resource_format = BackbufferFormat();
+    DCHECK(GLSupportsFormat(resource_format));
+    format = GLCopyTextureInternalFormat(resource_format);
+  }
   // Verify the format is valid for GLES2's glCopyTexSubImage2D.
   DCHECK(format == GL_ALPHA || format == GL_LUMINANCE ||
-         format == GL_LUMINANCE_ALPHA || format == GL_RGB || format == GL_RGBA)
+         format == GL_LUMINANCE_ALPHA || format == GL_RGB ||
+         format == GL_RGBA ||
+         (output_surface_->context_provider()
+              ->ContextCapabilities()
+              .texture_format_bgra8888 &&
+          format == GL_BGRA_EXT))
       << format;
   return format;
 }
@@ -838,7 +840,7 @@ sk_sp<SkImage> GLRenderer::ApplyBackgroundFilters(
   sk_sp<SkSurface> surface = SkSurface::MakeRenderTarget(
       use_gr_context->context(), SkBudgeted::kYes, dst_info);
   if (!surface) {
-    TRACE_EVENT_INSTANT0("cc",
+    TRACE_EVENT_INSTANT0("viz",
                          "ApplyBackgroundFilters surface allocation failed",
                          TRACE_EVENT_SCOPE_THREAD);
     return nullptr;
@@ -868,54 +870,8 @@ sk_sp<SkImage> GLRenderer::ApplyBackgroundFilters(
 }
 
 const TileDrawQuad* GLRenderer::CanPassBeDrawnDirectly(const RenderPass* pass) {
-#if defined(OS_MACOSX)
-  // On Macs, this path can sometimes lead to all black output.
-  // TODO(enne): investigate this and remove this hack.
-  return nullptr;
-#endif
-
-  // Can only collapse a single tile quad.
-  if (pass->quad_list.size() != 1)
-    return nullptr;
-  // If we need copy requests, then render pass has to exist.
-  if (!pass->copy_requests.empty())
-    return nullptr;
-
-  const DrawQuad* quad = *pass->quad_list.BackToFrontBegin();
-  // Hack: this could be supported by concatenating transforms, but
-  // in practice if there is one quad, it is at the origin of the render pass
-  // and has the same size as the pass.
-  if (!quad->shared_quad_state->quad_to_target_transform.IsIdentity() ||
-      quad->rect != pass->output_rect)
-    return nullptr;
-  // The quad is expected to be the entire layer so that AA edges are correct.
-  if (quad->shared_quad_state->quad_layer_rect != quad->rect)
-    return nullptr;
-  if (quad->material != DrawQuad::TILED_CONTENT)
-    return nullptr;
-
-  // TODO(chrishtr): support could be added for opacity, but care needs
-  // to be taken to make sure it is correct w.r.t. non-commutative filters etc.
-  if (quad->shared_quad_state->opacity != 1.0f)
-    return nullptr;
-
-  const TileDrawQuad* tile_quad = TileDrawQuad::MaterialCast(quad);
-  // Hack: this could be supported by passing in a subrectangle to draw
-  // render pass, although in practice if there is only one quad there
-  // will be no border texels on the input.
-  if (tile_quad->tex_coord_rect != gfx::RectF(tile_quad->rect))
-    return nullptr;
-  // Tile quad features not supported in render pass shaders.
-  if (tile_quad->swizzle_contents || tile_quad->nearest_neighbor)
-    return nullptr;
-  // BUG=skia:3868, Skia currently doesn't support texture rectangle inputs.
-  // See also the DCHECKs about GL_TEXTURE_2D in DrawRenderPassQuad.
-  GLenum target =
-      resource_provider_->GetResourceTextureTarget(tile_quad->resource_id());
-  if (target != GL_TEXTURE_2D)
-    return nullptr;
-
-  return tile_quad;
+  return DirectRenderer::CanPassBeDrawnDirectly(pass, false,
+                                                resource_provider_);
 }
 
 void GLRenderer::DrawRenderPassQuad(const RenderPassDrawQuad* quad,
@@ -1028,6 +984,21 @@ bool GLRenderer::InitializeRPDQParameters(
   return true;
 }
 
+// Get a GL texture id from an SkImage. An optional origin pointer can be
+// passed in which will be filled out with the origin for the texture
+// backing the SkImage.
+static GLuint GetGLTextureIDFromSkImage(const SkImage* image,
+                                        GrSurfaceOrigin* origin = nullptr) {
+  GrBackendTexture backend_texture = image->getBackendTexture(true, origin);
+  if (!backend_texture.isValid()) {
+    return 0;
+  }
+  GrGLTextureInfo info;
+  bool result = backend_texture.getGLTextureInfo(&info);
+  DCHECK(result);
+  return info.fID;
+}
+
 void GLRenderer::UpdateRPDQShadersForBlending(
     DrawRenderPassDrawQuadParams* params) {
   const RenderPassDrawQuad* quad = params->quad;
@@ -1067,10 +1038,8 @@ void GLRenderer::UpdateRPDQShadersForBlending(
             params->background_rect, unclipped_rect);
         if (params->background_image) {
           params->background_image_id =
-              skia::GrBackendObjectToGrGLTextureInfo(
-                  params->background_image->getTextureHandle(true))
-                  ->fID;
-          DCHECK(params->background_image_id);
+              GetGLTextureIDFromSkImage(params->background_image.get());
+          DCHECK(params->background_image_id || IsContextLost());
         }
       }
     }
@@ -1169,7 +1138,7 @@ bool GLRenderer::UpdateRPDQWithSkiaFilters(
               src_image, src_rect, params->dst_rect, quad->filters_scale,
               std::move(filter), &offset, &subset, quad->filters_origin);
         } else {
-          cc::DisplayResourceProvider::ScopedReadLockGL
+          DisplayResourceProvider::ScopedReadLockGL
               prefilter_bypass_quad_texture_lock(
                   resource_provider_, params->bypass_quad_texture.resource_id);
           params->contents_and_bypass_color_space =
@@ -1189,8 +1158,7 @@ bool GLRenderer::UpdateRPDQWithSkiaFilters(
         params->dst_rect =
             gfx::RectF(src_rect.x() + offset.fX, src_rect.y() + offset.fY,
                        subset.width(), subset.height());
-        params->src_offset.SetPoint(subset.x(), subset.y());
-        gfx::RectF tex_rect = gfx::RectF(gfx::PointF(params->src_offset),
+        gfx::RectF tex_rect = gfx::RectF(gfx::PointF(subset.x(), subset.y()),
                                          params->dst_rect.size());
         params->tex_coord_rect = tex_rect;
       }
@@ -1203,7 +1171,7 @@ void GLRenderer::UpdateRPDQTexturesForSampling(
     DrawRenderPassDrawQuadParams* params) {
   if (params->quad->mask_resource_id()) {
     params->mask_resource_lock.reset(
-        new cc::DisplayResourceProvider::ScopedSamplerGL(
+        new DisplayResourceProvider::ScopedSamplerGL(
             resource_provider_, params->quad->mask_resource_id(), GL_TEXTURE1,
             GL_LINEAR));
   }
@@ -1211,10 +1179,8 @@ void GLRenderer::UpdateRPDQTexturesForSampling(
   if (params->filter_image) {
     GrSurfaceOrigin origin;
     GLuint filter_image_id =
-        skia::GrBackendObjectToGrGLTextureInfo(
-            params->filter_image->getTextureHandle(true, &origin))
-            ->fID;
-    DCHECK(filter_image_id);
+        GetGLTextureIDFromSkImage(params->filter_image.get(), &origin);
+    DCHECK(filter_image_id || IsContextLost());
     DCHECK_EQ(GL_TEXTURE0, GetActiveTextureUnit(gl_));
     gl_->BindTexture(GL_TEXTURE_2D, filter_image_id);
     gl_->TexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -1229,7 +1195,7 @@ void GLRenderer::UpdateRPDQTexturesForSampling(
     params->source_needs_flip = params->flip_texture;
   } else {
     params->bypass_quad_resource_lock =
-        std::make_unique<cc::DisplayResourceProvider::ScopedSamplerGL>(
+        std::make_unique<DisplayResourceProvider::ScopedSamplerGL>(
             resource_provider_, params->bypass_quad_texture.resource_id,
             GL_LINEAR);
     DCHECK_EQ(static_cast<GLenum>(GL_TEXTURE_2D),
@@ -1257,7 +1223,7 @@ void GLRenderer::ChooseRPDQProgram(DrawRenderPassDrawQuadParams* params,
                                    const gfx::ColorSpace& target_color_space) {
   TexCoordPrecision tex_coord_precision = TexCoordPrecisionRequired(
       gl_, &highp_threshold_cache_, settings_->highp_threshold_min,
-      params->quad->shared_quad_state->visible_quad_layer_rect.bottom_right());
+      params->quad->shared_quad_state->visible_quad_layer_rect.size());
 
   BlendMode shader_blend_mode =
       params->use_shaders_for_blending
@@ -1383,8 +1349,8 @@ void GLRenderer::UpdateRPDQUniforms(DrawRenderPassDrawQuadParams* params) {
 
     gl_->Uniform4f(current_program_->backdrop_rect_location(),
                    params->background_rect.x(), params->background_rect.y(),
-                   params->background_rect.width(),
-                   params->background_rect.height());
+                   1.0f / params->background_rect.width(),
+                   1.0f / params->background_rect.height());
 
     // Either |background_image_id| or |background_texture| will be the
     // |backdrop_location| in the shader.
@@ -1862,7 +1828,7 @@ void GLRenderer::DrawContentQuadAA(const ContentDrawQuadBase* quad,
   float edge[24];
   SetupQuadForClippingAndAntialiasing(device_transform, quad, &aa_quad,
                                       clip_region, &local_quad, edge);
-  cc::DisplayResourceProvider::ScopedSamplerGL quad_resource_lock(
+  DisplayResourceProvider::ScopedSamplerGL quad_resource_lock(
       resource_provider_, resource_id,
       quad->nearest_neighbor ? GL_NEAREST : GL_LINEAR);
   SamplerType sampler =
@@ -1932,7 +1898,7 @@ void GLRenderer::DrawContentQuadNoAA(const ContentDrawQuadBase* quad,
                       ? GL_LINEAR
                       : GL_NEAREST;
 
-  cc::DisplayResourceProvider::ScopedSamplerGL quad_resource_lock(
+  DisplayResourceProvider::ScopedSamplerGL quad_resource_lock(
       resource_provider_, resource_id, filter);
   SamplerType sampler =
       SamplerTypeFromTextureTarget(quad_resource_lock.target());
@@ -2045,7 +2011,7 @@ void GLRenderer::DrawYUVVideoQuad(const YUVVideoDrawQuad* quad,
 
   TexCoordPrecision tex_coord_precision = TexCoordPrecisionRequired(
       gl_, &highp_threshold_cache_, settings_->highp_threshold_min,
-      quad->shared_quad_state->visible_quad_layer_rect.bottom_right());
+      quad->shared_quad_state->visible_quad_layer_rect.size());
   YUVAlphaTextureMode alpha_texture_mode = quad->a_plane_resource_id()
                                                ? YUV_HAS_ALPHA_TEXTURE
                                                : YUV_NO_ALPHA_TEXTURE;
@@ -2054,40 +2020,48 @@ void GLRenderer::DrawYUVVideoQuad(const YUVVideoDrawQuad* quad,
           ? UV_TEXTURE_MODE_UV
           : UV_TEXTURE_MODE_U_V;
 
+  DisplayResourceProvider::ScopedSamplerGL y_plane_lock(
+      resource_provider_, quad->y_plane_resource_id(), GL_TEXTURE1, GL_LINEAR);
+  DisplayResourceProvider::ScopedSamplerGL u_plane_lock(
+      resource_provider_, quad->u_plane_resource_id(), GL_TEXTURE2, GL_LINEAR);
+  DCHECK_EQ(y_plane_lock.target(), u_plane_lock.target());
+  DCHECK_EQ(y_plane_lock.color_space(), u_plane_lock.color_space());
+
   // TODO(ccameron): There are currently three sources of the color space: the
   // resource, quad->color_space, and quad->video_color_space. Remove two of
   // them.
   gfx::ColorSpace src_color_space = quad->video_color_space;
-  gfx::ColorSpace dst_color_space =
-      current_frame()->current_render_pass->color_space;
-  cc::DisplayResourceProvider::ScopedSamplerGL y_plane_lock(
-      resource_provider_, quad->y_plane_resource_id(), GL_TEXTURE1, GL_LINEAR);
-  cc::DisplayResourceProvider::ScopedSamplerGL u_plane_lock(
-      resource_provider_, quad->u_plane_resource_id(), GL_TEXTURE2, GL_LINEAR);
-  DCHECK_EQ(y_plane_lock.target(), u_plane_lock.target());
-  DCHECK_EQ(y_plane_lock.color_space(), u_plane_lock.color_space());
-  // TODO(jbauman): Use base::Optional when available.
-  std::unique_ptr<cc::DisplayResourceProvider::ScopedSamplerGL> v_plane_lock;
-
   // Invalid or unspecified color spaces should be treated as REC709.
   if (!src_color_space.IsValid())
     src_color_space = gfx::ColorSpace::CreateREC709();
   else
     DCHECK_EQ(src_color_space, y_plane_lock.color_space());
-
   // The source color space should never be RGB.
   DCHECK_NE(src_color_space, src_color_space.GetAsFullRangeRGB());
 
+  gfx::ColorSpace dst_color_space =
+      current_frame()->current_render_pass->color_space;
+  // Force sRGB output on Windows for overlay candidate video quads to match
+  // DirectComposition behavior in case these switch between overlays and
+  // compositing. See https://crbug.com/811118 for details.
+  if (supports_dc_layers_ &&
+      resource_provider_->IsOverlayCandidate(quad->y_plane_resource_id())) {
+    DCHECK(resource_provider_->IsOverlayCandidate(quad->u_plane_resource_id()));
+    dst_color_space = gfx::ColorSpace::CreateSRGB();
+  }
+
+  // TODO(jbauman): Use base::Optional when available.
+  std::unique_ptr<DisplayResourceProvider::ScopedSamplerGL> v_plane_lock;
   if (uv_texture_mode == UV_TEXTURE_MODE_U_V) {
-    v_plane_lock.reset(new cc::DisplayResourceProvider::ScopedSamplerGL(
+    v_plane_lock.reset(new DisplayResourceProvider::ScopedSamplerGL(
         resource_provider_, quad->v_plane_resource_id(), GL_TEXTURE3,
         GL_LINEAR));
     DCHECK_EQ(y_plane_lock.target(), v_plane_lock->target());
     DCHECK_EQ(y_plane_lock.color_space(), v_plane_lock->color_space());
   }
-  std::unique_ptr<cc::DisplayResourceProvider::ScopedSamplerGL> a_plane_lock;
+  std::unique_ptr<DisplayResourceProvider::ScopedSamplerGL> a_plane_lock;
   if (alpha_texture_mode == YUV_HAS_ALPHA_TEXTURE) {
-    a_plane_lock.reset(new cc::DisplayResourceProvider::ScopedSamplerGL(
+    a_plane_lock.reset(new DisplayResourceProvider::ScopedSamplerGL(
         resource_provider_, quad->a_plane_resource_id(), GL_TEXTURE4,
         GL_LINEAR));
     DCHECK_EQ(y_plane_lock.target(), a_plane_lock->target());
@@ -2208,10 +2182,10 @@ void GLRenderer::DrawStreamVideoQuad(const StreamVideoDrawQuad* quad,
 
   TexCoordPrecision tex_coord_precision = TexCoordPrecisionRequired(
       gl_, &highp_threshold_cache_, settings_->highp_threshold_min,
-      quad->shared_quad_state->visible_quad_layer_rect.bottom_right());
+      quad->shared_quad_state->visible_quad_layer_rect.size());
 
-  cc::DisplayResourceProvider::ScopedReadLockGL lock(resource_provider_,
-                                                     quad->resource_id());
+  DisplayResourceProvider::ScopedReadLockGL lock(resource_provider_,
+                                                 quad->resource_id());
 
   SetUseProgram(ProgramKey::VideoStream(tex_coord_precision),
                 lock.color_space(),
@@ -2262,7 +2236,7 @@ void GLRenderer::FlushTextureQuadCache(BoundGeometry flush_binding) {
   SetBlendEnabled(draw_cache_.needs_blending);
 
   // Assume the current active textures is 0.
-  cc::DisplayResourceProvider::ScopedSamplerGL locked_quad(
+  DisplayResourceProvider::ScopedSamplerGL locked_quad(
       resource_provider_, draw_cache_.resource_id,
       draw_cache_.nearest_neighbor ? GL_NEAREST : GL_LINEAR);
 
@@ -2349,12 +2323,15 @@ void GLRenderer::EnqueueTextureQuad(const TextureDrawQuad* quad,
     FlushTextureQuadCache(SHARED_BINDING);
   }
 
-  TexCoordPrecision tex_coord_precision = TexCoordPrecisionRequired(
-      gl_, &highp_threshold_cache_, settings_->highp_threshold_min,
-      quad->shared_quad_state->visible_quad_layer_rect.bottom_right());
+  DisplayResourceProvider::ScopedReadLockGL lock(resource_provider_,
+                                                 quad->resource_id());
+  // ScopedReadLockGL contains the correct texture size, even when
+  // quad->resource_size_in_pixels() is empty.
+  const gfx::Size texture_size = lock.size();
+  TexCoordPrecision tex_coord_precision =
+      TexCoordPrecisionRequired(gl_, &highp_threshold_cache_,
+                                settings_->highp_threshold_min, texture_size);
 
-  cc::DisplayResourceProvider::ScopedReadLockGL lock(resource_provider_,
-                                                     quad->resource_id());
   const SamplerType sampler = SamplerTypeFromTextureTarget(lock.target());
 
   bool need_tex_clamp_rect = !quad->resource_size_in_pixels().IsEmpty() &&
@@ -2389,7 +2366,6 @@ void GLRenderer::EnqueueTextureQuad(const TextureDrawQuad* quad,
     uv_transform = UVTransform(quad);
   if (sampler == SAMPLER_TYPE_2D_RECT) {
     // Un-normalize the texture coordiantes for rectangle targets.
-    gfx::Size texture_size = lock.size();
     uv_transform.data[0] *= texture_size.width();
     uv_transform.data[2] *= texture_size.width();
     uv_transform.data[1] *= texture_size.height();
@@ -2399,7 +2375,8 @@ void GLRenderer::EnqueueTextureQuad(const TextureDrawQuad* quad,
 
   if (need_tex_clamp_rect) {
     DCHECK_EQ(1u, draw_cache_.uv_xform_data.size());
-    gfx::Size texture_size = quad->resource_size_in_pixels();
+    DCHECK_EQ(texture_size.ToString(),
+              quad->resource_size_in_pixels().ToString());
     DCHECK(!texture_size.IsEmpty());
     gfx::RectF uv_visible_rect(
         quad->uv_top_left.x(), quad->uv_top_left.y(),
@@ -2474,8 +2451,8 @@ void GLRenderer::FinishDrawingFrame() {
   ScheduleDCLayers();
   ScheduleOverlays();
 
-  TRACE_COUNTER1(TRACE_DISABLED_BY_DEFAULT("cc.debug.triangles"),
-                 "Triangles Drawn", num_triangles_drawn_);
+  TRACE_COUNTER1(TRACE_DISABLED_BY_DEFAULT("viz.triangles"), "Triangles Drawn",
+                 num_triangles_drawn_);
 }
 
 void GLRenderer::FinishDrawingQuadList() {
@@ -2659,7 +2636,8 @@ void GLRenderer::DrawQuadGeometryWithAA(const DrawQuad* quad,
                    CenteredRect(tile_rect));
 }
 
-void GLRenderer::SwapBuffers(std::vector<ui::LatencyInfo> latency_info) {
+void GLRenderer::SwapBuffers(std::vector<ui::LatencyInfo> latency_info,
+                             bool need_presentation_feedback) {
   DCHECK(visible_);
 
   TRACE_EVENT0("viz", "GLRenderer::SwapBuffers");
@@ -2670,6 +2648,7 @@ void GLRenderer::SwapBuffers(std::vector<ui::LatencyInfo> latency_info) {
   OutputSurfaceFrame output_frame;
   output_frame.latency_info = std::move(latency_info);
   output_frame.size = surface_size;
+  output_frame.need_presentation_feedback = need_presentation_feedback;
   if (use_swap_with_bounds_) {
     output_frame.content_bounds = std::move(swap_content_bounds_);
   } else if (use_partial_swap_) {
@@ -2752,7 +2731,7 @@ void GLRenderer::SwapBuffersComplete() {
     // that once a swap buffer has completed we can remove the oldest buffers
     // from the queue, but only once we've swapped another frame afterward.
     if (swapping_overlay_resources_.size() > 1) {
-      cc::DisplayResourceProvider::ScopedBatchReturnResources returner(
+      DisplayResourceProvider::ScopedBatchReturnResources returner(
           resource_provider_);
       swapping_overlay_resources_.pop_front();
     }
@@ -2770,7 +2749,7 @@ void GLRenderer::SwapBuffersComplete() {
 void GLRenderer::DidReceiveTextureInUseResponses(
     const gpu::TextureInUseResponses& responses) {
   DCHECK(settings_->release_overlay_resources_after_gpu_query);
-  cc::DisplayResourceProvider::ScopedBatchReturnResources returner(
+  DisplayResourceProvider::ScopedBatchReturnResources returner(
       resource_provider_);
   for (const gpu::TextureInUseResponse& response : responses) {
     if (response.in_use)
@@ -3085,7 +3064,7 @@ void GLRenderer::ScheduleCALayers() {
     unsigned texture_id = 0;
     if (contents_resource_id) {
       pending_overlay_resources_.push_back(
-          std::make_unique<cc::DisplayResourceProvider::ScopedReadLockGL>(
+          std::make_unique<DisplayResourceProvider::ScopedReadLockGL>(
               resource_provider_, contents_resource_id));
       texture_id = pending_overlay_resources_.back()->texture_id();
     }
@@ -3137,7 +3116,7 @@ void GLRenderer::ScheduleDCLayers() {
     for (const auto& contents_resource_id : dc_layer_overlay.resources) {
       if (contents_resource_id) {
         pending_overlay_resources_.push_back(
-            std::make_unique<cc::DisplayResourceProvider::ScopedReadLockGL>(
+            std::make_unique<DisplayResourceProvider::ScopedReadLockGL>(
                 resource_provider_, contents_resource_id));
         texture_ids[i] = pending_overlay_resources_.back()->texture_id();
         ids_to_send = i + 1;
@@ -3178,7 +3157,7 @@ void GLRenderer::ScheduleDCLayers() {
     gl_->ScheduleDCLayerCHROMIUM(ids_to_send, texture_ids, contents_rect,
                                  dc_layer_overlay.background_color,
                                  dc_layer_overlay.edge_aa_mask, bounds_rect,
-                                 filter);
+                                 filter, dc_layer_overlay.is_protected_video);
   }
 }
 
@@ -3186,7 +3165,7 @@ void GLRenderer::ScheduleOverlays() {
   if (current_frame()->overlay_list.empty())
     return;
 
-  cc::OverlayCandidateList& overlays = current_frame()->overlay_list;
+  OverlayCandidateList& overlays = current_frame()->overlay_list;
   for (const auto& overlay_candidate : overlays) {
     unsigned texture_id = 0;
     if (overlay_candidate.use_output_surface_for_resource) {
@@ -3194,7 +3173,7 @@ void GLRenderer::ScheduleOverlays() {
       DCHECK(texture_id || IsContextLost());
     } else {
       pending_overlay_resources_.push_back(
-          std::make_unique<cc::DisplayResourceProvider::ScopedReadLockGL>(
+          std::make_unique<DisplayResourceProvider::ScopedReadLockGL>(
               resource_provider_, overlay_candidate.resource_id));
       texture_id = pending_overlay_resources_.back()->texture_id();
     }
@@ -3202,7 +3181,8 @@ void GLRenderer::ScheduleOverlays() {
     context_support_->ScheduleOverlayPlane(
         overlay_candidate.plane_z_order, overlay_candidate.transform,
         texture_id, ToNearestRect(overlay_candidate.display_rect),
-        overlay_candidate.uv_rect, !overlay_candidate.is_opaque);
+        overlay_candidate.uv_rect, !overlay_candidate.is_opaque,
+        overlay_candidate.gpu_fence_id);
   }
 }
 
@@ -3511,8 +3491,8 @@ void GLRenderer::FlushOverdrawFeedback(const gfx::Rect& output_rect) {
   // Occlusion queries can be expensive, so only collect trace data if we select
   // cc.debug.overdraw.
   bool tracing_enabled;
-  TRACE_EVENT_CATEGORY_GROUP_ENABLED(
-      TRACE_DISABLED_BY_DEFAULT("cc.debug.overdraw"), &tracing_enabled);
+  TRACE_EVENT_CATEGORY_GROUP_ENABLED(TRACE_DISABLED_BY_DEFAULT("viz.overdraw"),
+                                     &tracing_enabled);
 
   // Trace only the root render pass.
   if (current_frame()->current_render_pass != current_frame()->root_render_pass)
@@ -3548,7 +3528,7 @@ void GLRenderer::FlushOverdrawFeedback(const gfx::Rect& output_rect) {
       gl_->EndQueryEXT(GL_SAMPLES_PASSED_ARB);
       context_support_->SignalQuery(
           query,
-          base::Bind(overdraw_feedback_callback, query, test.multiplier));
+          base::BindOnce(overdraw_feedback_callback, query, test.multiplier));
     }
   }
 }
@@ -3573,7 +3553,7 @@ void GLRenderer::ProcessOverdrawFeedback(std::vector<int>* overdraw,
 
   // Report GPU overdraw as a percentage of |max_result|.
   TRACE_COUNTER1(
-      TRACE_DISABLED_BY_DEFAULT("cc.debug.overdraw"), "GPU Overdraw",
+      TRACE_DISABLED_BY_DEFAULT("viz.overdraw"), "GPU Overdraw",
       (std::accumulate(overdraw->begin(), overdraw->end(), 0) * 100) /
           max_result);
 }
@@ -3614,8 +3594,7 @@ ResourceFormat GLRenderer::BackbufferFormat() const {
     DCHECK(caps.color_buffer_half_float_rgba);
     return RGBA_F16;
   }
-  return PlatformColor::BestSupportedTextureFormat(
-      caps.texture_format_bgra8888);
+  return PlatformColor::BestSupportedTextureFormat(caps);
 }
 
 void GLRenderer::AllocateRenderPassResourceIfNeeded(

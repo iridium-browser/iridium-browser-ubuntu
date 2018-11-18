@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "base/memory/ptr_util.h"
+#include "base/stl_util.h"
 #include "cc/animation/animation_host.h"
 #include "cc/animation/animation_id_provider.h"
 #include "cc/animation/keyframed_animation_curve.h"
@@ -55,6 +56,13 @@
 
 namespace cc {
 namespace {
+
+bool LayerSubtreeHasCopyRequest(Layer* layer) {
+  LayerTreeHost* host = layer->layer_tree_host();
+  int index = layer->effect_tree_index();
+  auto* node = host->property_trees()->effect_tree.Node(index);
+  return node->subtree_has_copy_request;
+}
 
 class VerifyTreeCalcsLayerTreeSettings : public LayerTreeSettings {
  public:
@@ -115,6 +123,12 @@ class LayerTreeHostCommonTestBase : public LayerTestCommon::LayerImplTest {
     inputs.page_scale_layer = page_scale_layer;
     inputs.inner_viewport_scroll_layer = inner_viewport_scroll_layer;
     inputs.outer_viewport_scroll_layer = outer_viewport_scroll_layer;
+    if (page_scale_layer) {
+      PropertyTrees* property_trees =
+          root_layer->layer_tree_host()->property_trees();
+      inputs.page_scale_transform_node = property_trees->transform_tree.Node(
+          page_scale_layer->transform_tree_index());
+    }
     LayerTreeHostCommon::CalculateDrawPropertiesForTesting(&inputs);
   }
 
@@ -149,6 +163,12 @@ class LayerTreeHostCommonTestBase : public LayerTestCommon::LayerImplTest {
     inputs.inner_viewport_scroll_layer = inner_viewport_scroll_layer;
     inputs.outer_viewport_scroll_layer = outer_viewport_scroll_layer;
     inputs.can_adjust_raster_scales = true;
+    if (page_scale_layer) {
+      PropertyTrees* property_trees =
+          root_layer->layer_tree_impl()->property_trees();
+      inputs.page_scale_transform_node = property_trees->transform_tree.Node(
+          page_scale_layer->transform_tree_index());
+    }
 
     LayerTreeHostCommon::CalculateDrawPropertiesForTesting(&inputs);
   }
@@ -184,8 +204,8 @@ class LayerTreeHostCommonTestBase : public LayerTestCommon::LayerImplTest {
         root_layer->layer_tree_host()->inner_viewport_scroll_layer();
     Layer* outer_viewport_scroll_layer =
         root_layer->layer_tree_host()->outer_viewport_scroll_layer();
-    const Layer* overscroll_elasticity_layer =
-        root_layer->layer_tree_host()->overscroll_elasticity_layer();
+    const ElementId overscroll_elasticity_element_id =
+        root_layer->layer_tree_host()->overscroll_elasticity_element_id();
     gfx::Vector2dF elastic_overscroll =
         root_layer->layer_tree_host()->elastic_overscroll();
     float page_scale_factor = 1.f;
@@ -198,7 +218,7 @@ class LayerTreeHostCommonTestBase : public LayerTestCommon::LayerImplTest {
     update_layer_list_.clear();
     PropertyTreeBuilder::BuildPropertyTrees(
         root_layer, page_scale_layer, inner_viewport_scroll_layer,
-        outer_viewport_scroll_layer, overscroll_elasticity_layer,
+        outer_viewport_scroll_layer, overscroll_elasticity_element_id,
         elastic_overscroll, page_scale_factor, device_scale_factor,
         gfx::Rect(device_viewport_size), gfx::Transform(), property_trees);
     draw_property_utils::UpdatePropertyTrees(root_layer->layer_tree_host(),
@@ -217,8 +237,8 @@ class LayerTreeHostCommonTestBase : public LayerTestCommon::LayerImplTest {
         root_layer->layer_tree_impl()->InnerViewportScrollLayer();
     LayerImpl* outer_viewport_scroll_layer =
         root_layer->layer_tree_impl()->OuterViewportScrollLayer();
-    const LayerImpl* overscroll_elasticity_layer =
-        root_layer->layer_tree_impl()->OverscrollElasticityLayer();
+    const ElementId overscroll_elasticity_element_id =
+        root_layer->layer_tree_impl()->OverscrollElasticityElementId();
     gfx::Vector2dF elastic_overscroll =
         root_layer->layer_tree_impl()->elastic_overscroll()->Current(
             root_layer->layer_tree_impl()->IsActiveTree());
@@ -233,7 +253,7 @@ class LayerTreeHostCommonTestBase : public LayerTestCommon::LayerImplTest {
         root_layer->layer_tree_impl()->property_trees();
     PropertyTreeBuilder::BuildPropertyTrees(
         root_layer, page_scale_layer, inner_viewport_scroll_layer,
-        outer_viewport_scroll_layer, overscroll_elasticity_layer,
+        outer_viewport_scroll_layer, overscroll_elasticity_element_id,
         elastic_overscroll, page_scale_factor, device_scale_factor,
         gfx::Rect(device_viewport_size), gfx::Transform(), property_trees);
     draw_property_utils::UpdatePropertyTreesAndRenderSurfaces(
@@ -285,8 +305,7 @@ class LayerTreeHostCommonTestBase : public LayerTestCommon::LayerImplTest {
 
   bool VerifyLayerInList(scoped_refptr<Layer> layer,
                          const LayerList* layer_list) {
-    return std::find(layer_list->begin(), layer_list->end(), layer) !=
-           layer_list->end();
+    return base::ContainsValue(*layer_list, layer);
   }
 
  private:
@@ -297,16 +316,6 @@ class LayerTreeHostCommonTestBase : public LayerTestCommon::LayerImplTest {
 
 class LayerTreeHostCommonTest : public LayerTreeHostCommonTestBase,
                                 public testing::Test {};
-
-class LayerWithForcedDrawsContent : public Layer {
- public:
-  LayerWithForcedDrawsContent() = default;
-
-  bool DrawsContent() const override { return true; }
-
- private:
-  ~LayerWithForcedDrawsContent() override = default;
-};
 
 class LayerTreeSettingsScaleContent : public VerifyTreeCalcsLayerTreeSettings {
  public:
@@ -1251,6 +1260,9 @@ TEST_F(LayerTreeHostCommonTest, TransformAboveRootLayer) {
         root, root->bounds(), translate, &render_surface_list_impl);
     inputs.page_scale_factor = page_scale_factor;
     inputs.page_scale_layer = root;
+    inputs.page_scale_transform_node =
+        inputs.property_trees->transform_tree.Node(
+            inputs.page_scale_layer->transform_tree_index());
     inputs.property_trees->needs_rebuild = true;
     LayerTreeHostCommon::CalculateDrawPropertiesForTesting(&inputs);
     gfx::Transform page_scaled_translate = translate;
@@ -2166,12 +2178,14 @@ TEST_F(LayerTreeHostCommonTest, LargeTransforms) {
 }
 
 static bool TransformIsAnimating(LayerImpl* layer) {
-  return layer->GetMutatorHost()->IsAnimatingTransformProperty(
+  MutatorHost* host = layer->layer_tree_impl()->mutator_host();
+  return host->IsAnimatingTransformProperty(
       layer->element_id(), layer->GetElementTypeForAnimation());
 }
 
 static bool HasPotentiallyRunningTransformAnimation(LayerImpl* layer) {
-  return layer->GetMutatorHost()->HasPotentiallyRunningTransformAnimation(
+  MutatorHost* host = layer->layer_tree_impl()->mutator_host();
+  return host->HasPotentiallyRunningTransformAnimation(
       layer->element_id(), layer->GetElementTypeForAnimation());
 }
 
@@ -2691,8 +2705,8 @@ TEST_F(LayerTreeHostCommonTest, VisibleRectWithClippingAndFilters) {
 
   ExecuteCalculateDrawProperties(root);
 
-  EXPECT_EQ(gfx::Rect(50, 40, 10, 20), filter_child->visible_layer_rect());
-  EXPECT_EQ(gfx::Rect(0, -10, 10, 20),
+  EXPECT_EQ(gfx::Rect(49, 39, 12, 21), filter_child->visible_layer_rect());
+  EXPECT_EQ(gfx::Rect(-1, -11, 12, 21),
             GetRenderSurface(filter)->content_rect());
 }
 
@@ -2744,8 +2758,8 @@ TEST_F(LayerTreeHostCommonTest, VisibleRectWithScalingClippingAndFilters) {
 
   ExecuteCalculateDrawProperties(root);
 
-  EXPECT_EQ(gfx::Rect(50, 40, 10, 20), filter_child->visible_layer_rect());
-  EXPECT_EQ(gfx::Rect(0, -30, 30, 60),
+  EXPECT_EQ(gfx::Rect(49, 39, 12, 21), filter_child->visible_layer_rect());
+  EXPECT_EQ(gfx::Rect(-1, -31, 32, 61),
             GetRenderSurface(filter)->content_rect());
 }
 
@@ -3037,7 +3051,7 @@ TEST_F(LayerTreeHostCommonTest, OcclusionBySiblingOfTarget) {
   LayerImpl* surface_child_ptr = surface_child.get();
   LayerImpl* surface_child_mask_ptr = surface_child_mask.get();
 
-  host_impl.SetViewportSize(root->bounds());
+  host_impl.active_tree()->SetDeviceViewportSize(root->bounds());
 
   surface_child->test_properties()->SetMaskLayer(std::move(surface_child_mask));
   surface->test_properties()->AddChild(std::move(surface_child));
@@ -3046,7 +3060,7 @@ TEST_F(LayerTreeHostCommonTest, OcclusionBySiblingOfTarget) {
   root->test_properties()->AddChild(std::move(child));
   host_impl.active_tree()->SetRootLayerForTesting(std::move(root));
   host_impl.SetVisible(true);
-  host_impl.InitializeRenderer(layer_tree_frame_sink.get());
+  host_impl.InitializeFrameSink(layer_tree_frame_sink.get());
   host_impl.active_tree()->BuildLayerListAndPropertyTreesForTesting();
   host_impl.active_tree()->UpdateDrawProperties();
 
@@ -3087,12 +3101,12 @@ TEST_F(LayerTreeHostCommonTest, TextureLayerSnapping) {
   fractional_translate.Translate(10.5f, 20.3f);
   child->test_properties()->transform = fractional_translate;
 
-  host_impl.SetViewportSize(root->bounds());
+  host_impl.active_tree()->SetDeviceViewportSize(root->bounds());
 
   root->test_properties()->AddChild(std::move(child));
   host_impl.active_tree()->SetRootLayerForTesting(std::move(root));
   host_impl.SetVisible(true);
-  host_impl.InitializeRenderer(layer_tree_frame_sink.get());
+  host_impl.InitializeFrameSink(layer_tree_frame_sink.get());
   host_impl.active_tree()->BuildLayerListAndPropertyTreesForTesting();
   host_impl.active_tree()->UpdateDrawProperties();
 
@@ -3147,14 +3161,14 @@ TEST_F(LayerTreeHostCommonTest,
   occluding_child->SetDrawsContent(true);
   occluding_child->SetContentsOpaque(true);
 
-  host_impl.SetViewportSize(root->bounds());
+  host_impl.active_tree()->SetDeviceViewportSize(root->bounds());
 
   child->test_properties()->AddChild(std::move(grand_child));
   root->test_properties()->AddChild(std::move(child));
   root->test_properties()->AddChild(std::move(occluding_child));
   host_impl.active_tree()->SetRootLayerForTesting(std::move(root));
   host_impl.SetVisible(true);
-  host_impl.InitializeRenderer(layer_tree_frame_sink.get());
+  host_impl.InitializeFrameSink(layer_tree_frame_sink.get());
   host_impl.active_tree()->BuildLayerListAndPropertyTreesForTesting();
   host_impl.active_tree()->UpdateDrawProperties();
 
@@ -4364,7 +4378,8 @@ TEST_F(LayerTreeHostCommonTest, LayerSearch) {
   scoped_refptr<Layer> root = Layer::Create();
   scoped_refptr<Layer> child = Layer::Create();
   scoped_refptr<Layer> grand_child = Layer::Create();
-  scoped_refptr<Layer> mask_layer = Layer::Create();
+  FakeContentLayerClient client;
+  scoped_refptr<PictureLayer> mask_layer = PictureLayer::Create(&client);
 
   child->AddChild(grand_child.get());
   child->SetMaskLayer(mask_layer.get());
@@ -6430,6 +6445,7 @@ TEST_F(LayerTreeHostCommonTest, StickyPositionSubpixelScroll) {
   sticky_position.is_sticky = true;
   sticky_position.is_anchored_bottom = true;
   sticky_position.bottom_offset = 10.0f;
+  sticky_position.constraint_box_rect = gfx::RectF(0, 0, 100, 100);
   sticky_position.scroll_container_relative_sticky_box_rect =
       gfx::Rect(0, 200, 10, 10);
   sticky_position.scroll_container_relative_containing_block_rect =
@@ -6476,6 +6492,7 @@ TEST_F(LayerTreeHostCommonTest, StickyPositionBottom) {
   sticky_position.is_sticky = true;
   sticky_position.is_anchored_bottom = true;
   sticky_position.bottom_offset = 10.0f;
+  sticky_position.constraint_box_rect = gfx::RectF(0, 0, 100, 100);
   sticky_position.scroll_container_relative_sticky_box_rect =
       gfx::Rect(0, 150, 10, 10);
   sticky_position.scroll_container_relative_containing_block_rect =
@@ -6533,18 +6550,20 @@ TEST_F(LayerTreeHostCommonTest, StickyPositionBottom) {
 
 TEST_F(LayerTreeHostCommonTest, StickyPositionBottomOuterViewportDelta) {
   scoped_refptr<Layer> root = Layer::Create();
+  scoped_refptr<Layer> page_scale = Layer::Create();
   scoped_refptr<Layer> scroller = Layer::Create();
   scoped_refptr<Layer> outer_clip = Layer::Create();
   scoped_refptr<Layer> outer_viewport = Layer::Create();
   scoped_refptr<Layer> sticky_pos = Layer::Create();
-  root->AddChild(scroller);
+  root->AddChild(page_scale);
+  page_scale->AddChild(scroller);
   scroller->AddChild(outer_clip);
   outer_clip->AddChild(outer_viewport);
   outer_viewport->AddChild(sticky_pos);
   host()->SetRootLayer(root);
   scroller->SetElementId(LayerIdToElementIdForTesting(scroller->id()));
   LayerTreeHost::ViewportLayers viewport_layers;
-  viewport_layers.page_scale = root;
+  viewport_layers.page_scale = page_scale;
   viewport_layers.inner_viewport_container = root;
   viewport_layers.outer_viewport_container = outer_clip;
   viewport_layers.inner_viewport_scroll = scroller;
@@ -6555,6 +6574,7 @@ TEST_F(LayerTreeHostCommonTest, StickyPositionBottomOuterViewportDelta) {
   sticky_position.is_sticky = true;
   sticky_position.is_anchored_bottom = true;
   sticky_position.bottom_offset = 10.0f;
+  sticky_position.constraint_box_rect = gfx::RectF(0, 0, 100, 100);
   sticky_position.scroll_container_relative_sticky_box_rect =
       gfx::Rect(0, 70, 10, 10);
   sticky_position.scroll_container_relative_containing_block_rect =
@@ -6633,6 +6653,7 @@ TEST_F(LayerTreeHostCommonTest, StickyPositionLeftRight) {
   sticky_position.is_anchored_right = true;
   sticky_position.left_offset = 10.f;
   sticky_position.right_offset = 10.f;
+  sticky_position.constraint_box_rect = gfx::RectF(0, 0, 100, 100);
   sticky_position.scroll_container_relative_sticky_box_rect =
       gfx::Rect(145, 0, 10, 10);
   sticky_position.scroll_container_relative_containing_block_rect =
@@ -7425,9 +7446,12 @@ TEST_F(LayerTreeHostCommonTest, MaximumAnimationScaleFactor) {
   EXPECT_EQ(0.f, GetStartingAnimationScale(child_raw));
   EXPECT_EQ(0.f, GetStartingAnimationScale(grand_child_raw));
 
-  grand_parent_animation->AbortKeyframeModels(TargetProperty::TRANSFORM, false);
-  parent_animation->AbortKeyframeModels(TargetProperty::TRANSFORM, false);
-  child_animation->AbortKeyframeModels(TargetProperty::TRANSFORM, false);
+  grand_parent_animation->AbortKeyframeModelsWithProperty(
+      TargetProperty::TRANSFORM, false);
+  parent_animation->AbortKeyframeModelsWithProperty(TargetProperty::TRANSFORM,
+                                                    false);
+  child_animation->AbortKeyframeModelsWithProperty(TargetProperty::TRANSFORM,
+                                                   false);
 
   TransformOperations perspective;
   perspective.AppendPerspective(10.f);
@@ -7449,7 +7473,8 @@ TEST_F(LayerTreeHostCommonTest, MaximumAnimationScaleFactor) {
   EXPECT_EQ(0.f, GetStartingAnimationScale(child_raw));
   EXPECT_EQ(0.f, GetStartingAnimationScale(grand_child_raw));
 
-  child_animation->AbortKeyframeModels(TargetProperty::TRANSFORM, false);
+  child_animation->AbortKeyframeModelsWithProperty(TargetProperty::TRANSFORM,
+                                                   false);
 
   gfx::Transform scale_matrix;
   scale_matrix.Scale(1.f, 2.f);
@@ -7844,6 +7869,8 @@ TEST_F(LayerTreeHostCommonTest, DrawPropertyScales) {
   inputs.page_scale_factor = page_scale_factor;
   inputs.can_adjust_raster_scales = true;
   inputs.page_scale_layer = root_layer;
+  inputs.page_scale_transform_node = inputs.property_trees->transform_tree.Node(
+      inputs.page_scale_layer->transform_tree_index());
   LayerTreeHostCommon::CalculateDrawPropertiesForTesting(&inputs);
 
   EXPECT_FLOAT_EQ(3.f, root_layer->GetIdealContentsScale());
@@ -8047,7 +8074,7 @@ TEST_F(LayerTreeHostCommonTest, ViewportBoundsDeltaAffectVisibleContentRect) {
   // Device viewport accomidated the root and the browser controls.
   gfx::Size device_viewport_size = gfx::Size(300, 600);
 
-  host_impl.SetViewportSize(device_viewport_size);
+  host_impl.active_tree()->SetDeviceViewportSize(device_viewport_size);
   host_impl.active_tree()->SetRootLayerForTesting(
       LayerImpl::Create(host_impl.active_tree(), 1));
 
@@ -8299,8 +8326,9 @@ TEST_F(LayerTreeHostCommonTest, AnimatedOpacityCreatesRenderSurface) {
 }
 
 static bool FilterIsAnimating(LayerImpl* layer) {
-  return layer->GetMutatorHost()->IsAnimatingFilterProperty(
-      layer->element_id(), layer->GetElementTypeForAnimation());
+  MutatorHost* host = layer->layer_tree_impl()->mutator_host();
+  return host->IsAnimatingFilterProperty(layer->element_id(),
+                                         layer->GetElementTypeForAnimation());
 }
 
 // Verify that having an animated filter (but no current filter, as these
@@ -8332,7 +8360,8 @@ TEST_F(LayerTreeHostCommonTest, AnimatedFilterCreatesRenderSurface) {
 }
 
 bool HasPotentiallyRunningFilterAnimation(const LayerImpl& layer) {
-  return layer.GetMutatorHost()->HasPotentiallyRunningFilterAnimation(
+  MutatorHost* host = layer.layer_tree_impl()->mutator_host();
+  return host->HasPotentiallyRunningFilterAnimation(
       layer.element_id(), layer.GetElementTypeForAnimation());
 }
 
@@ -8599,21 +8628,22 @@ TEST_F(LayerTreeHostCommonTest, HasCopyRequestsInTargetSubtree) {
   child2->SetOpacity(0.f);
   ExecuteCalculateDrawPropertiesAndSaveUpdateLayerList(root.get());
 
-  EXPECT_TRUE(root->has_copy_requests_in_target_subtree());
-  EXPECT_TRUE(child1->has_copy_requests_in_target_subtree());
-  EXPECT_FALSE(child2->has_copy_requests_in_target_subtree());
-  EXPECT_TRUE(grandchild->has_copy_requests_in_target_subtree());
-  EXPECT_TRUE(greatgrandchild->has_copy_requests_in_target_subtree());
+  EXPECT_TRUE(LayerSubtreeHasCopyRequest(root.get()));
+  EXPECT_TRUE(LayerSubtreeHasCopyRequest(child1.get()));
+  EXPECT_FALSE(LayerSubtreeHasCopyRequest(child2.get()));
+  EXPECT_TRUE(LayerSubtreeHasCopyRequest(grandchild.get()));
+  EXPECT_TRUE(LayerSubtreeHasCopyRequest(greatgrandchild.get()));
 }
 
 TEST_F(LayerTreeHostCommonTest, SkippingSubtreeMain) {
-  scoped_refptr<Layer> root = Layer::Create();
   FakeContentLayerClient client;
+
+  scoped_refptr<Layer> root = Layer::Create();
   client.set_bounds(root->bounds());
-  scoped_refptr<LayerWithForcedDrawsContent> child =
-      base::MakeRefCounted<LayerWithForcedDrawsContent>();
-  scoped_refptr<LayerWithForcedDrawsContent> grandchild =
-      base::MakeRefCounted<LayerWithForcedDrawsContent>();
+  scoped_refptr<Layer> child = Layer::Create();
+  child->SetIsDrawable(true);
+  scoped_refptr<Layer> grandchild = Layer::Create();
+  grandchild->SetIsDrawable(true);
   scoped_refptr<FakePictureLayer> greatgrandchild(
       FakePictureLayer::Create(&client));
 
@@ -9025,10 +9055,10 @@ TEST_F(LayerTreeHostCommonTest, LayerTreeRebuildTest) {
   child->RequestCopyOfOutput(viz::CopyOutputRequest::CreateStubForTesting());
 
   ExecuteCalculateDrawPropertiesAndSaveUpdateLayerList(root.get());
-  EXPECT_TRUE(root->has_copy_requests_in_target_subtree());
+  EXPECT_TRUE(LayerSubtreeHasCopyRequest(root.get()));
 
   ExecuteCalculateDrawPropertiesAndSaveUpdateLayerList(root.get());
-  EXPECT_TRUE(root->has_copy_requests_in_target_subtree());
+  EXPECT_TRUE(LayerSubtreeHasCopyRequest(root.get()));
 }
 
 TEST_F(LayerTreeHostCommonTest, ResetPropertyTreeIndices) {
@@ -9721,14 +9751,13 @@ TEST_F(LayerTreeHostCommonTest, LargeTransformTest) {
 
   // The root layer should be in the RenderSurfaceList.
   const auto* rsl = render_surface_list_impl();
-  EXPECT_NE(std::find(rsl->begin(), rsl->end(), GetRenderSurface(root)),
-            rsl->end());
+  EXPECT_TRUE(base::ContainsValue(*rsl, GetRenderSurface(root)));
 }
 
 TEST_F(LayerTreeHostCommonTest, PropertyTreesRebuildWithOpacityChanges) {
   scoped_refptr<Layer> root = Layer::Create();
-  scoped_refptr<LayerWithForcedDrawsContent> child =
-      base::MakeRefCounted<LayerWithForcedDrawsContent>();
+  scoped_refptr<Layer> child = Layer::Create();
+  child->SetIsDrawable(true);
   root->AddChild(child);
   host()->SetRootLayer(root);
 
@@ -9769,8 +9798,8 @@ TEST_F(LayerTreeHostCommonTest, PropertyTreesRebuildWithOpacityChanges) {
 
 TEST_F(LayerTreeHostCommonTest, OpacityAnimationsTrackingTest) {
   scoped_refptr<Layer> root = Layer::Create();
-  scoped_refptr<LayerWithForcedDrawsContent> animated =
-      base::MakeRefCounted<LayerWithForcedDrawsContent>();
+  scoped_refptr<Layer> animated = Layer::Create();
+  animated->SetIsDrawable(true);
   root->AddChild(animated);
   host()->SetRootLayer(root);
   host()->SetElementIdsForTesting();
@@ -9810,8 +9839,8 @@ TEST_F(LayerTreeHostCommonTest, OpacityAnimationsTrackingTest) {
   EXPECT_TRUE(node->is_currently_animating_opacity);
   EXPECT_TRUE(node->has_potential_opacity_animation);
 
-  animation->AbortKeyframeModels(TargetProperty::OPACITY,
-                                 false /*needs_completion*/);
+  animation->AbortKeyframeModelsWithProperty(TargetProperty::OPACITY,
+                                             false /*needs_completion*/);
   node = tree.Node(animated->effect_tree_index());
   EXPECT_FALSE(node->is_currently_animating_opacity);
   EXPECT_FALSE(node->has_potential_opacity_animation);
@@ -9819,8 +9848,8 @@ TEST_F(LayerTreeHostCommonTest, OpacityAnimationsTrackingTest) {
 
 TEST_F(LayerTreeHostCommonTest, TransformAnimationsTrackingTest) {
   scoped_refptr<Layer> root = Layer::Create();
-  scoped_refptr<LayerWithForcedDrawsContent> animated =
-      base::MakeRefCounted<LayerWithForcedDrawsContent>();
+  scoped_refptr<Layer> animated = Layer::Create();
+  animated->SetIsDrawable(true);
   root->AddChild(animated);
   host()->SetRootLayer(root);
   host()->SetElementIdsForTesting();
@@ -9869,8 +9898,8 @@ TEST_F(LayerTreeHostCommonTest, TransformAnimationsTrackingTest) {
   EXPECT_TRUE(node->is_currently_animating);
   EXPECT_TRUE(node->has_potential_animation);
 
-  animation->AbortKeyframeModels(TargetProperty::TRANSFORM,
-                                 false /*needs_completion*/);
+  animation->AbortKeyframeModelsWithProperty(TargetProperty::TRANSFORM,
+                                             false /*needs_completion*/);
   node = tree.Node(animated->transform_tree_index());
   EXPECT_FALSE(node->is_currently_animating);
   EXPECT_FALSE(node->has_potential_animation);
@@ -9985,7 +10014,6 @@ TEST_F(LayerTreeHostCommonTest, ScrollTreeBuilderTest) {
   property_tree_root->scrollable = false;
   property_tree_root->main_thread_scrolling_reasons =
       MainThreadScrollingReason::kNotScrollingOnMain;
-  property_tree_root->non_fast_scrollable_region = Region();
   property_tree_root->transform_id = kRootPropertyTreeNodeId;
 
   // The node owned by root1
@@ -10050,7 +10078,6 @@ TEST_F(LayerTreeHostCommonTest, ScrollTreeBuilderTest) {
   // The node owned by parent5
   ScrollNode scroll_parent5;
   scroll_parent5.id = 8;
-  scroll_parent5.non_fast_scrollable_region = gfx::Rect(0, 0, 50, 50);
   scroll_parent5.bounds = gfx::Size(10, 10);
   scroll_parent5.should_flatten = true;
   scroll_parent5.user_scrollable_horizontal = true;
@@ -10498,8 +10525,8 @@ TEST_F(LayerTreeHostCommonTest, VisibleRectClippedByViewport) {
   gfx::Size device_viewport_size = gfx::Size(300, 600);
   gfx::Rect viewport_visible_rect = gfx::Rect(100, 100, 200, 200);
 
-  host_impl.SetViewportSize(device_viewport_size);
-  host_impl.SetViewportVisibleRect(viewport_visible_rect);
+  host_impl.active_tree()->SetDeviceViewportSize(device_viewport_size);
+  host_impl.active_tree()->SetViewportVisibleRect(viewport_visible_rect);
   host_impl.active_tree()->SetRootLayerForTesting(
       LayerImpl::Create(host_impl.active_tree(), 1));
 

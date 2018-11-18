@@ -10,9 +10,14 @@
 #include "PreprocessorTest.h"
 #include "compiler/preprocessor/Token.h"
 
+namespace angle
+{
+
 class CharTest : public PreprocessorTest,
                  public testing::WithParamInterface<int>
 {
+  public:
+    CharTest() : PreprocessorTest(SH_GLES2_SPEC) {}
 };
 
 static const char kPunctuators[] = {
@@ -96,3 +101,4 @@ TEST_P(CharTest, Identified)
 INSTANTIATE_TEST_CASE_P(All, CharTest,
                         testing::Range(CHAR_MIN, CHAR_MAX + 1));
 
+}  // namespace angle

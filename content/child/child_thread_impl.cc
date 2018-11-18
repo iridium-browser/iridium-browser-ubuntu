@@ -17,10 +17,11 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
+#include "base/memory/memory_pressure_listener.h"
 #include "base/message_loop/timer_slack.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/optional.h"
 #include "base/process/process.h"
 #include "base/process/process_handle.h"
 #include "base/run_loop.h"
@@ -43,8 +44,8 @@
 #include "content/common/in_process_child_thread_params.h"
 #include "content/public/common/connection_filter.h"
 #include "content/public/common/content_client.h"
+#include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
-#include "content/public/common/mojo_channel_switches.h"
 #include "content/public/common/service_manager_connection.h"
 #include "content/public/common/service_names.mojom.h"
 #include "content/public/common/simple_connection_filter.h"
@@ -53,17 +54,19 @@
 #include "ipc/ipc_platform_file.h"
 #include "ipc/ipc_sync_channel.h"
 #include "ipc/ipc_sync_message_filter.h"
-#include "mojo/edk/embedder/embedder.h"
-#include "mojo/edk/embedder/incoming_broker_client_invitation.h"
-#include "mojo/edk/embedder/named_platform_channel_pair.h"
-#include "mojo/edk/embedder/platform_channel_pair.h"
-#include "mojo/edk/embedder/scoped_ipc_support.h"
+#include "mojo/core/embedder/scoped_ipc_support.h"
+#include "mojo/public/cpp/platform/named_platform_channel.h"
+#include "mojo/public/cpp/platform/platform_channel.h"
+#include "mojo/public/cpp/platform/platform_channel_endpoint.h"
+#include "mojo/public/cpp/platform/platform_handle.h"
 #include "mojo/public/cpp/system/buffer.h"
+#include "mojo/public/cpp/system/invitation.h"
 #include "mojo/public/cpp/system/platform_handle.h"
 #include "services/device/public/cpp/power_monitor/power_monitor_broadcast_source.h"
 #include "services/resource_coordinator/public/cpp/memory_instrumentation/client_process_impl.h"
 #include "services/resource_coordinator/public/mojom/memory_instrumentation/memory_instrumentation.mojom.h"
 #include "services/resource_coordinator/public/mojom/service_constants.mojom.h"
+#include "services/service_manager/embedder/switches.h"
 #include "services/service_manager/public/cpp/connector.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
 #include "services/service_manager/runner/common/client_util.h"
@@ -74,10 +77,6 @@
 #include "content/public/common/content_descriptors.h"
 #endif
 
-#if defined(OS_MACOSX)
-#include "base/allocator/allocator_interception_mac.h"
-#endif
-
 namespace content {
 namespace {
 
@@ -85,7 +84,7 @@ namespace {
 const int kConnectionTimeoutS = 15;
 
 base::LazyInstance<base::ThreadLocalPointer<ChildThreadImpl>>::DestructorAtExit
-    g_lazy_tls = LAZY_INSTANCE_INITIALIZER;
+    g_lazy_child_thread_impl_tls = LAZY_INSTANCE_INITIALIZER;
 
 // This isn't needed on Windows because there the sandbox's job object
 // terminates child processes automatically. For unsandboxed processes (i.e.
@@ -95,8 +94,8 @@ base::LazyInstance<base::ThreadLocalPointer<ChildThreadImpl>>::DestructorAtExit
 #if defined(ADDRESS_SANITIZER) || defined(LEAK_SANITIZER) || \
     defined(MEMORY_SANITIZER) || defined(THREAD_SANITIZER) || \
     defined(UNDEFINED_SANITIZER)
-// A thread delegate that waits for |duration| and then exits the process with
-// _exit(0).
+// A thread delegate that waits for |duration| and then exits the process
+// immediately, without executing finalizers.
 class WaitAndExitDelegate : public base::PlatformThread::Delegate {
  public:
   explicit WaitAndExitDelegate(base::TimeDelta duration)
@@ -104,7 +103,7 @@ class WaitAndExitDelegate : public base::PlatformThread::Delegate {
 
   void ThreadMain() override {
     base::PlatformThread::Sleep(duration_);
-    _exit(0);
+    base::Process::TerminateCurrentProcessImmediately(0);
   }
 
  private:
@@ -164,7 +163,7 @@ class SuicideOnChannelErrorFilter : public IPC::MessageFilter {
     __lsan_do_leak_check();
 #endif
 #else
-    _exit(0);
+    base::Process::TerminateCurrentProcessImmediately(0);
 #endif
   }
 
@@ -180,44 +179,27 @@ class SuicideOnChannelErrorFilter : public IPC::MessageFilter {
 class QuitClosure {
  public:
   QuitClosure();
-  ~QuitClosure();
+  ~QuitClosure() = default;
 
-  void BindToMainThread();
-  void PostQuitFromNonMainThread();
+  void BindToMainThread(base::RepeatingClosure quit_closure);
+  void QuitFromNonMainThread();
 
  private:
-  static void PostClosure(
-      const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
-      base::Closure closure);
-
   base::Lock lock_;
   base::ConditionVariable cond_var_;
-  base::Closure closure_;
+  base::RepeatingClosure closure_;
 };
 
 QuitClosure::QuitClosure() : cond_var_(&lock_) {
 }
 
-QuitClosure::~QuitClosure() {
-}
-
-void QuitClosure::PostClosure(
-    const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
-    base::Closure closure) {
-  task_runner->PostTask(FROM_HERE, closure);
-}
-
-void QuitClosure::BindToMainThread() {
+void QuitClosure::BindToMainThread(base::RepeatingClosure quit_closure) {
   base::AutoLock lock(lock_);
-  scoped_refptr<base::SingleThreadTaskRunner> task_runner(
-      base::ThreadTaskRunnerHandle::Get());
-  base::Closure quit_closure =
-      base::MessageLoop::current()->QuitWhenIdleClosure();
-  closure_ = base::Bind(&QuitClosure::PostClosure, task_runner, quit_closure);
+  closure_ = std::move(quit_closure);
   cond_var_.Signal();
 }
 
-void QuitClosure::PostQuitFromNonMainThread() {
+void QuitClosure::QuitFromNonMainThread() {
   base::AutoLock lock(lock_);
   while (closure_.is_null())
     cond_var_.Wait();
@@ -229,39 +211,34 @@ base::LazyInstance<QuitClosure>::DestructorAtExit g_quit_closure =
     LAZY_INSTANCE_INITIALIZER;
 #endif
 
-std::unique_ptr<mojo::edk::IncomingBrokerClientInvitation>
-InitializeMojoIPCChannel() {
+base::Optional<mojo::IncomingInvitation> InitializeMojoIPCChannel() {
   TRACE_EVENT0("startup", "InitializeMojoIPCChannel");
-  mojo::edk::ScopedPlatformHandle platform_channel;
+  mojo::PlatformChannelEndpoint endpoint;
 #if defined(OS_WIN)
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-      mojo::edk::PlatformChannelPair::kMojoPlatformChannelHandleSwitch)) {
-    platform_channel =
-        mojo::edk::PlatformChannelPair::PassClientHandleFromParentProcess(
-            *base::CommandLine::ForCurrentProcess());
+          mojo::PlatformChannel::kHandleSwitch)) {
+    endpoint = mojo::PlatformChannel::RecoverPassedEndpointFromCommandLine(
+        *base::CommandLine::ForCurrentProcess());
   } else {
     // If this process is elevated, it will have a pipe path passed on the
     // command line.
-    platform_channel =
-        mojo::edk::NamedPlatformChannelPair::PassClientHandleFromParentProcess(
-            *base::CommandLine::ForCurrentProcess());
+    endpoint = mojo::NamedPlatformChannel::ConnectToServer(
+        *base::CommandLine::ForCurrentProcess());
   }
 #elif defined(OS_FUCHSIA)
-  platform_channel =
-      mojo::edk::PlatformChannelPair::PassClientHandleFromParentProcess(
-          *base::CommandLine::ForCurrentProcess());
+  endpoint = mojo::PlatformChannel::RecoverPassedEndpointFromCommandLine(
+      *base::CommandLine::ForCurrentProcess());
 #elif defined(OS_POSIX)
-  platform_channel.reset(mojo::edk::PlatformHandle(
-      base::GlobalDescriptors::GetInstance()->Get(kMojoIPCChannel)));
+  endpoint = mojo::PlatformChannelEndpoint(mojo::PlatformHandle(
+      base::ScopedFD(base::GlobalDescriptors::GetInstance()->Get(
+          service_manager::kMojoIPCChannel))));
 #endif
   // Mojo isn't supported on all child process types.
   // TODO(crbug.com/604282): Support Mojo in the remaining processes.
-  if (!platform_channel.is_valid())
-    return nullptr;
+  if (!endpoint.is_valid())
+    return base::nullopt;
 
-  return mojo::edk::IncomingBrokerClientInvitation::Accept(
-      mojo::edk::ConnectionParams(mojo::edk::TransportProtocol::kLegacy,
-                                  std::move(platform_channel)));
+  return mojo::IncomingInvitation::Accept(std::move(endpoint));
 }
 
 class ChannelBootstrapFilter : public ConnectionFilter {
@@ -313,7 +290,7 @@ ChildThreadImpl::Options::Builder::InBrowserProcess(
     const InProcessChildThreadParams& params) {
   options_.browser_process_io_runner = params.io_runner();
   options_.in_process_service_request_token = params.service_request_token();
-  options_.broker_client_invitation = params.broker_client_invitation();
+  options_.mojo_invitation = params.mojo_invitation();
   return *this;
 }
 
@@ -370,18 +347,14 @@ bool ChildThreadImpl::ChildThreadMessageRouter::RouteMessage(
   return handled;
 }
 
-ChildThreadImpl::ChildThreadImpl()
-    : route_provider_binding_(this),
-      router_(this),
-      channel_connected_factory_(
-          new base::WeakPtrFactory<ChildThreadImpl>(this)),
-      weak_factory_(this) {
-  Init(Options::Builder().Build());
-}
+ChildThreadImpl::ChildThreadImpl(base::RepeatingClosure quit_closure)
+    : ChildThreadImpl(std::move(quit_closure), Options::Builder().Build()) {}
 
-ChildThreadImpl::ChildThreadImpl(const Options& options)
+ChildThreadImpl::ChildThreadImpl(base::RepeatingClosure quit_closure,
+                                 const Options& options)
     : route_provider_binding_(this),
       router_(this),
+      quit_closure_(std::move(quit_closure)),
       browser_process_io_runner_(options.browser_process_io_runner),
       channel_connected_factory_(
           new base::WeakPtrFactory<ChildThreadImpl>(this)),
@@ -411,8 +384,7 @@ void ChildThreadImpl::OnFieldTrialGroupFinalized(
   field_trial_recorder->FieldTrialActivated(trial_name);
 }
 
-void ChildThreadImpl::ConnectChannel(
-    mojo::edk::IncomingBrokerClientInvitation* invitation) {
+void ChildThreadImpl::ConnectChannel() {
   DCHECK(service_manager_connection_);
   IPC::mojom::ChannelBootstrapPtr bootstrap;
   mojo::ScopedMessagePipeHandle handle =
@@ -430,9 +402,9 @@ void ChildThreadImpl::ConnectChannel(
 
 void ChildThreadImpl::Init(const Options& options) {
   TRACE_EVENT0("startup", "ChildThreadImpl::Init");
-  g_lazy_tls.Pointer()->Set(this);
+  g_lazy_child_thread_impl_tls.Pointer()->Set(this);
   on_channel_error_called_ = false;
-  message_loop_ = base::MessageLoop::current();
+  main_thread_runner_ = base::ThreadTaskRunnerHandle::Get();
 #if BUILDFLAG(IPC_MESSAGE_LOG_ENABLED)
   // We must make sure to instantiate the IPC Logger *before* we create the
   // channel, otherwise we can get a callback on the IO thread which creates
@@ -449,24 +421,23 @@ void ChildThreadImpl::Init(const Options& options) {
     IPC::Logging::GetInstance()->SetIPCSender(this);
 #endif
 
-  std::unique_ptr<mojo::edk::IncomingBrokerClientInvitation> invitation;
   mojo::ScopedMessagePipeHandle service_request_pipe;
   if (!IsInBrowserProcess()) {
-    mojo_ipc_support_.reset(new mojo::edk::ScopedIPCSupport(
-        GetIOTaskRunner(), mojo::edk::ScopedIPCSupport::ShutdownPolicy::FAST));
-    invitation = InitializeMojoIPCChannel();
+    mojo_ipc_support_.reset(new mojo::core::ScopedIPCSupport(
+        GetIOTaskRunner(), mojo::core::ScopedIPCSupport::ShutdownPolicy::FAST));
+    base::Optional<mojo::IncomingInvitation> invitation =
+        InitializeMojoIPCChannel();
 
     std::string service_request_token =
         base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
-            switches::kServiceRequestChannelToken);
+            service_manager::switches::kServiceRequestChannelToken);
     if (!service_request_token.empty() && invitation) {
       service_request_pipe =
           invitation->ExtractMessagePipe(service_request_token);
     }
   } else {
-    service_request_pipe =
-        options.broker_client_invitation->ExtractInProcessMessagePipe(
-            options.in_process_service_request_token);
+    service_request_pipe = options.mojo_invitation->ExtractMessagePipe(
+        options.in_process_service_request_token);
   }
 
   if (service_request_pipe.is_valid()) {
@@ -476,8 +447,8 @@ void ChildThreadImpl::Init(const Options& options) {
   }
 
   sync_message_filter_ = channel_->CreateSyncMessageFilter();
-  thread_safe_sender_ = new ThreadSafeSender(
-      message_loop_->task_runner(), sync_message_filter_.get());
+  thread_safe_sender_ =
+      new ThreadSafeSender(main_thread_runner_, sync_message_filter_.get());
 
   auto registry = std::make_unique<service_manager::BinderRegistry>();
   registry->AddInterface(base::Bind(&ChildHistogramFetcherFactoryImpl::Create),
@@ -543,7 +514,7 @@ void ChildThreadImpl::Init(const Options& options) {
     channel_->AddFilter(startup_filter);
   }
 
-  ConnectChannel(invitation.get());
+  ConnectChannel();
 
   // This must always be done after ConnectChannel, because ConnectChannel() may
   // add a ConnectionFilter to the connection.
@@ -562,22 +533,14 @@ void ChildThreadImpl::Init(const Options& options) {
       connection_timeout = temp;
   }
 
-#if defined(OS_MACOSX)
-  if (base::CommandLine::InitializedForCurrentProcess() &&
-      base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableHeapProfiling)) {
-    base::allocator::PeriodicallyShimNewMallocZones();
-  }
-#endif
-
-  message_loop_->task_runner()->PostDelayedTask(
+  main_thread_runner_->PostDelayedTask(
       FROM_HERE,
       base::BindOnce(&ChildThreadImpl::EnsureConnected,
                      channel_connected_factory_->GetWeakPtr()),
       base::TimeDelta::FromSeconds(connection_timeout));
 
 #if defined(OS_ANDROID)
-  g_quit_closure.Get().BindToMainThread();
+  g_quit_closure.Get().BindToMainThread(quit_closure_);
 #endif
 
   // In single-process mode, there is no need to synchronize trials to the
@@ -587,6 +550,20 @@ void ChildThreadImpl::Init(const Options& options) {
         new variations::ChildProcessFieldTrialSyncer(this));
     field_trial_syncer_->InitFieldTrialObserving(
         *base::CommandLine::ForCurrentProcess());
+  }
+
+  if (base::FeatureList::IsEnabled(features::kMemoryCoordinator)) {
+    // Disable MemoryPressureListener when memory coordinator is enabled.
+    base::MemoryPressureListener::SetNotificationsSuppressed(true);
+
+    // TODO(bashi): Revisit how to manage the lifetime of
+    // ChildMemoryCoordinatorImpl.
+    // https://codereview.chromium.org/2094583002/#msg52
+    mojom::MemoryCoordinatorHandlePtr parent_coordinator;
+    GetConnector()->BindInterface(mojom::kBrowserServiceName,
+                                  mojo::MakeRequest(&parent_coordinator));
+    memory_coordinator_ =
+        CreateChildMemoryCoordinator(std::move(parent_coordinator), this);
   }
 }
 
@@ -608,7 +585,7 @@ void ChildThreadImpl::InitTracing() {
   channel_->AddFilter(new tracing::ChildTraceMessageFilter(
       ChildProcess::current()->io_task_runner()));
 
-  chrome_trace_event_agent_ = std::make_unique<tracing::ChromeTraceEventAgent>(
+  trace_event_agent_ = tracing::TraceEventAgent::Create(
       GetConnector(), false /* request_clock_sync_marker_on_android */);
 }
 
@@ -628,13 +605,10 @@ ChildThreadImpl::~ChildThreadImpl() {
   // automatically.  We used to watch the object handle on Windows to do this,
   // but it wasn't possible to do so on POSIX.
   channel_->ClearIPCTaskRunner();
-  g_lazy_tls.Pointer()->Set(nullptr);
+  g_lazy_child_thread_impl_tls.Pointer()->Set(nullptr);
 }
 
-void ChildThreadImpl::Shutdown() {
-  // Delete objects that hold references to blink so derived classes can
-  // safely shutdown blink in their Shutdown implementation.
-}
+void ChildThreadImpl::Shutdown() {}
 
 bool ChildThreadImpl::ShouldBeDestroyed() {
   return true;
@@ -649,11 +623,11 @@ void ChildThreadImpl::OnChannelError() {
   // If this thread runs in the browser process, only Thread::Stop should
   // stop its message loop. Otherwise, QuitWhenIdle could race Thread::Stop.
   if (!IsInBrowserProcess())
-    base::RunLoop::QuitCurrentWhenIdleDeprecated();
+    quit_closure_.Run();
 }
 
 bool ChildThreadImpl::Send(IPC::Message* msg) {
-  DCHECK(message_loop_->task_runner()->BelongsToCurrentThread());
+  DCHECK(main_thread_runner_->BelongsToCurrentThread());
   if (!channel_) {
     delete msg;
     return false;
@@ -713,7 +687,7 @@ service_manager::Connector* ChildThreadImpl::GetConnector() {
 }
 
 IPC::MessageRouter* ChildThreadImpl::GetRouter() {
-  DCHECK(message_loop_->task_runner()->BelongsToCurrentThread());
+  DCHECK(main_thread_runner_->BelongsToCurrentThread());
   return &router_;
 }
 
@@ -779,7 +753,7 @@ bool ChildThreadImpl::OnControlMessageReceived(const IPC::Message& msg) {
 }
 
 void ChildThreadImpl::ProcessShutdown() {
-  base::RunLoop::QuitCurrentWhenIdleDeprecated();
+  quit_closure_.Run();
 }
 
 #if BUILDFLAG(IPC_MESSAGE_LOG_ENABLED)
@@ -797,7 +771,7 @@ void ChildThreadImpl::OnChildControlRequest(
 }
 
 ChildThreadImpl* ChildThreadImpl::current() {
-  return g_lazy_tls.Pointer()->Get();
+  return g_lazy_child_thread_impl_tls.Pointer()->Get();
 }
 
 #if defined(OS_ANDROID)
@@ -806,7 +780,7 @@ ChildThreadImpl* ChildThreadImpl::current() {
 void ChildThreadImpl::ShutdownThread() {
   DCHECK(!ChildThreadImpl::current()) <<
       "this method should NOT be called from child thread itself";
-  g_quit_closure.Get().PostQuitFromNonMainThread();
+  g_quit_closure.Get().QuitFromNonMainThread();
 }
 #endif
 
@@ -824,14 +798,14 @@ void ChildThreadImpl::EnsureConnected() {
 
 void ChildThreadImpl::GetRoute(
     int32_t routing_id,
-    mojom::AssociatedInterfaceProviderAssociatedRequest request) {
+    blink::mojom::AssociatedInterfaceProviderAssociatedRequest request) {
   associated_interface_provider_bindings_.AddBinding(
       this, std::move(request), routing_id);
 }
 
 void ChildThreadImpl::GetAssociatedInterface(
     const std::string& name,
-    mojom::AssociatedInterfaceAssociatedRequest request) {
+    blink::mojom::AssociatedInterfaceAssociatedRequest request) {
   int32_t routing_id =
       associated_interface_provider_bindings_.dispatch_context();
   Listener* route = router_.GetRoute(routing_id);

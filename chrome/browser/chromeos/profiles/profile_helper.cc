@@ -23,7 +23,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chromeos/chromeos_constants.h"
 #include "chromeos/chromeos_switches.h"
-#include "components/signin/core/account_id/account_id.h"
+#include "components/account_id/account_id.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/browser_thread.h"
@@ -121,6 +121,9 @@ base::FilePath ProfileHelper::GetProfilePathByUserIdHash(
 // static
 base::FilePath ProfileHelper::GetSigninProfileDir() {
   ProfileManager* profile_manager = g_browser_process->profile_manager();
+  // profile_manager can be null in unit tests.
+  if (!profile_manager)
+    return base::FilePath();
   base::FilePath user_data_dir = profile_manager->user_data_dir();
   return user_data_dir.AppendASCII(chrome::kInitialProfile);
 }
@@ -238,7 +241,7 @@ bool ProfileHelper::IsEphemeralUserProfile(const Profile* profile) {
   return ChromeUserManager::Get()->AreEphemeralUsersEnabled();
 }
 
-void ProfileHelper::ProfileStartup(Profile* profile, bool process_startup) {
+void ProfileHelper::ProfileStartup(Profile* profile) {
   // Initialize Chrome OS preferences like touch pad sensitivity. For the
   // preferences to work in the guest mode, the initialization has to be
   // done after |profile| is switched to the incognito profile (which
@@ -297,6 +300,18 @@ void ProfileHelper::ClearSigninProfile(const base::Closure& on_clear_callback) {
   login::SigninPartitionManager::Factory::GetForBrowserContext(
       GetSigninProfile())
       ->CloseCurrentSigninSession(on_clear_profile_stage_finished_);
+}
+
+Profile* ProfileHelper::GetProfileByAccountId(const AccountId& account_id) {
+  const user_manager::User* user =
+      user_manager::UserManager::Get()->FindUser(account_id);
+
+  if (!user) {
+    LOG(WARNING) << "Unable to retrieve user for account_id.";
+    return nullptr;
+  }
+
+  return GetProfileByUser(user);
 }
 
 Profile* ProfileHelper::GetProfileByUser(const user_manager::User* user) {

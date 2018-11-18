@@ -71,20 +71,22 @@ class SVGResourcesCache {
     TemporaryStyleScope(LayoutObject&,
                         const ComputedStyle& original_style,
                         const ComputedStyle& temporary_style);
-    ~TemporaryStyleScope() { SwitchTo(original_style_); }
+    ~TemporaryStyleScope();
 
    private:
     void SwitchTo(const ComputedStyle&);
 
     LayoutObject& layout_object_;
     const ComputedStyle& original_style_;
+    const ComputedStyle& temporary_style_;
     const bool styles_are_equal_;
     DISALLOW_COPY_AND_ASSIGN(TemporaryStyleScope);
   };
 
  private:
-  void AddResourcesFromLayoutObject(LayoutObject&, const ComputedStyle&);
-  void RemoveResourcesFromLayoutObject(LayoutObject&);
+  bool AddResourcesFromLayoutObject(LayoutObject&, const ComputedStyle&);
+  bool RemoveResourcesFromLayoutObject(LayoutObject&);
+  bool UpdateResourcesFromLayoutObject(LayoutObject&, const ComputedStyle&);
 
   typedef HashMap<const LayoutObject*, std::unique_ptr<SVGResources>> CacheMap;
   CacheMap cache_;

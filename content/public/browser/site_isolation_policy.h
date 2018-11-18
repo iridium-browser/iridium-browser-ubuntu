@@ -13,6 +13,12 @@
 #include "content/common/content_export.h"
 #include "url/origin.h"
 
+namespace network {
+namespace mojom {
+class URLLoaderFactoryParams;
+}
+}  // namespace network
+
 namespace content {
 
 // A centralized place for making policy decisions about out-of-process iframes,
@@ -27,21 +33,16 @@ class CONTENT_EXPORT SiteIsolationPolicy {
   // Returns true if every site should be placed in a dedicated process.
   static bool UseDedicatedProcessesForAllSites();
 
-  // Returns whether cross-site document responses can be blocked.
-  enum CrossSiteDocumentBlockingEnabledState {
-    XSDB_ENABLED_UNCONDITIONALLY,
-    XSDB_ENABLED_IF_ISOLATED,
-    XSDB_DISABLED,
-  };
-  static CrossSiteDocumentBlockingEnabledState
-  IsCrossSiteDocumentBlockingEnabled();
-
-  // Returns true if third-party subframes of a page should be kept in a
-  // different process from the main frame.
-  static bool IsTopDocumentIsolationEnabled();
+  // Populates CORB-related (Cross-Origin Read Blocking related) parts of the
+  // URLLoaderFactoryParams depending on the current Site Isolation policy.
+  static void PopulateURLLoaderFactoryParamsPtrForCORB(
+      network::mojom::URLLoaderFactoryParams* params);
 
   // Returns true if isolated origins feature is enabled.
   static bool AreIsolatedOriginsEnabled();
+
+  // Returns true if error page isolation is enabled.
+  static bool IsErrorPageIsolationEnabled(bool in_main_frame);
 
   // Returns true if the PDF compositor should be enabled to allow out-of-
   // process iframes (OOPIF's) to print properly.

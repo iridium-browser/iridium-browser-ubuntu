@@ -49,7 +49,8 @@ public class HomeSheetTilesUiCaptureTest {
 
     @Before
     public void setup() throws InterruptedException {
-        ChromePreferenceManager.getInstance().setNewTabPageSigninPromoDismissed(true);
+        ChromePreferenceManager.getInstance().writeBoolean(
+                ChromePreferenceManager.NTP_SIGNIN_PROMO_DISMISSED, true);
         mActivityRule.startMainActivityOnBlankPage();
     }
 
@@ -57,7 +58,7 @@ public class HomeSheetTilesUiCaptureTest {
     @MediumTest
     @Feature({"UiCatalogue"})
     public void testAppearance() {
-        mActivityRule.setSheetState(BottomSheet.SHEET_STATE_FULL, false);
+        mActivityRule.setSheetState(BottomSheet.SheetState.FULL, false);
         waitForWindowUpdates();
         mScreenShooter.shoot("Appearance");
     }
@@ -66,7 +67,7 @@ public class HomeSheetTilesUiCaptureTest {
     @MediumTest
     @Feature({"UiCatalogue"})
     public void testContextMenu() {
-        mActivityRule.setSheetState(BottomSheet.SHEET_STATE_FULL, false);
+        mActivityRule.setSheetState(BottomSheet.SheetState.FULL, false);
         waitForWindowUpdates();
         onView(withText(NtpUiCaptureTestData.getSiteSuggestions().get(0).title))
                 .perform(longClick());

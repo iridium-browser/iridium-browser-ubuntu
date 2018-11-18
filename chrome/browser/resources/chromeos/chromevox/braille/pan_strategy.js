@@ -75,6 +75,11 @@ cvox.PanStrategy = function() {
    */
   this.panStrategyWrapped_ = false;
 
+  /** @type {{start: (number), end: (number)}} */
+  this.cursor_ = {start: -1, end: -1};
+
+  /** @type {{start: (number), end: (number)}} */
+  this.wrappedCursor_ = {start: -1, end: -1};
 };
 
 /**
@@ -142,12 +147,39 @@ cvox.PanStrategy.prototype = {
   },
 
   /**
+   * @param {boolean=} opt_showCursor Defaults to true.
    * @return {ArrayBuffer} Buffer of the slice of braille cells within the
    *    bounds of the viewport.
    */
-  getCurrentBrailleViewportContents: function() {
+  getCurrentBrailleViewportContents: function(opt_showCursor) {
+    opt_showCursor = opt_showCursor === undefined ? true : opt_showCursor;
     var buf =
         this.panStrategyWrapped_ ? this.wrappedBuffer_ : this.fixedBuffer_;
+
+    var startIndex, endIndex;
+    if (this.panStrategyWrapped_) {
+      startIndex = this.wrappedCursor_.start;
+      endIndex = this.wrappedCursor_.end;
+    } else {
+      startIndex = this.cursor_.start;
+      endIndex = this.cursor_.end;
+    }
+
+    if (startIndex >= 0 && startIndex < buf.byteLength &&
+        endIndex >= startIndex && endIndex <= buf.byteLength) {
+      var dataView = new DataView(buf);
+      while (startIndex < endIndex) {
+        var value = dataView.getUint8(startIndex);
+        if (opt_showCursor) {
+          value |= cvox.BrailleDisplayManager.CURSOR_DOTS;
+        } else {
+          value &= ~cvox.BrailleDisplayManager.CURSOR_DOTS;
+        }
+        dataView.setUint8(startIndex, value);
+        startIndex++;
+      }
+    }
+
     return buf.slice(
         this.viewPort_.firstRow * this.displaySize_.columns,
         (this.viewPort_.lastRow + 1) * this.displaySize_.columns);
@@ -252,6 +284,8 @@ cvox.PanStrategy.prototype = {
         } else {
           // |lastBreak| is at the beginning of a line, so current word is
           // bigger than |this.displaySize_.columns| so we shouldn't wrap.
+          this.maybeSetWrappedCursor_(
+              index - cellsPadded, wrappedBrailleArray.length);
           wrappedBrailleArray.push(view[index - cellsPadded]);
           this.wrappedBrailleToText_.push(
               fixedBrailleToText[index - cellsPadded]);
@@ -260,17 +294,58 @@ cvox.PanStrategy.prototype = {
         if (view[index - cellsPadded] == 0) {
           lastBreak = index;
         }
+        this.maybeSetWrappedCursor_(
+            index - cellsPadded, wrappedBrailleArray.length);
         wrappedBrailleArray.push(view[index - cellsPadded]);
         this.wrappedBrailleToText_.push(
             fixedBrailleToText[index - cellsPadded]);
       }
     }
 
+    // It's possible the end of the wrapped cursor falls at the
+    // |translatedContent.byteLength| exactly.
+    this.maybeSetWrappedCursor_(
+        index - cellsPadded, wrappedBrailleArray.length);
+
     // Convert the wrapped Braille Uint8 Array back to ArrayBuffer.
     var wrappedBrailleUint8Array = new Uint8Array(wrappedBrailleArray);
     this.wrappedBuffer_ = new ArrayBuffer(wrappedBrailleUint8Array.length);
     new Uint8Array(this.wrappedBuffer_).set(wrappedBrailleUint8Array);
     this.panToPosition_(targetPosition);
+  },
+
+  /**
+   * Sets a braille cursor.
+   * @param {number} startIndex
+   * @param {number} endIndex
+   */
+  setCursor: function(startIndex, endIndex) {
+    this.cursor_ = {start: startIndex, end: endIndex};
+  },
+
+  /**
+   * Gets the current cursor.
+   * @return {{start: (number), end: (number)}}
+   */
+  getCursor: function() {
+    return this.cursor_;
+  },
+
+  /**
+   * Refreshes the wrapped cursor given a mapping from an unwrapped index to a
+   * wrapped index.
+   * @param {number} unwrappedIndex
+   * @param {number} wrappedIndex
+   */
+  maybeSetWrappedCursor_: function(unwrappedIndex, wrappedIndex) {
+    // We only care about the bounds of the index start/end.
+    if (this.cursor_.start != unwrappedIndex &&
+        this.cursor_.end != unwrappedIndex)
+      return;
+    if (this.cursor_.start == unwrappedIndex)
+      this.wrappedCursor_.start = wrappedIndex;
+    else if (this.cursor_.end == unwrappedIndex)
+      this.wrappedCursor_.end = wrappedIndex;
   },
 
   /**

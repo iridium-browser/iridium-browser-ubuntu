@@ -17,9 +17,9 @@
 #include "media/capture/video/chromeos/camera_device_context.h"
 #include "media/capture/video/chromeos/camera_hal_delegate.h"
 #include "media/capture/video/chromeos/mock_camera_module.h"
-#include "media/capture/video/chromeos/mock_gpu_memory_buffer_manager.h"
 #include "media/capture/video/chromeos/mock_video_capture_client.h"
 #include "media/capture/video/chromeos/video_capture_device_factory_chromeos.h"
+#include "media/capture/video/mock_gpu_memory_buffer_manager.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -110,8 +110,11 @@ class MockCameraDevice : public cros::mojom::Camera3DeviceOps {
   DISALLOW_COPY_AND_ASSIGN(MockCameraDevice);
 };
 
+constexpr int32_t kJpegMaxBufferSize = 1024;
+constexpr size_t kDefaultWidth = 1280, kDefaultHeight = 720;
 const VideoCaptureDeviceDescriptor kDefaultDescriptor("Fake device", "0");
-const VideoCaptureFormat kDefaultCaptureFormat(gfx::Size(1280, 720),
+const VideoCaptureFormat kDefaultCaptureFormat(gfx::Size(kDefaultWidth,
+                                                         kDefaultHeight),
                                                30.0,
                                                PIXEL_FORMAT_I420);
 
@@ -125,7 +128,7 @@ class CameraDeviceDelegateTest : public ::testing::Test {
         hal_delegate_thread_("HalDelegateThread") {}
 
   void SetUp() override {
-    VideoCaptureDeviceFactoryChromeOS::SetBufferManagerForTesting(
+    VideoCaptureDeviceFactoryChromeOS::SetGpuBufferManager(
         &mock_gpu_memory_buffer_manager_);
     hal_delegate_thread_.Start();
     camera_hal_delegate_ =
@@ -146,6 +149,7 @@ class CameraDeviceDelegateTest : public ::testing::Test {
     camera_device_delegate_ = std::make_unique<CameraDeviceDelegate>(
         descriptor, camera_hal_delegate_,
         device_delegate_thread_.task_runner());
+    num_streams_ = 0;
   }
 
   void GetFakeCameraInfo(uint32_t camera_id,
@@ -153,16 +157,60 @@ class CameraDeviceDelegateTest : public ::testing::Test {
     cros::mojom::CameraInfoPtr camera_info = cros::mojom::CameraInfo::New();
     cros::mojom::CameraMetadataPtr static_metadata =
         cros::mojom::CameraMetadata::New();
+
+    static_metadata->entry_count = 3;
+    static_metadata->entry_capacity = 3;
+    static_metadata->entries =
+        std::vector<cros::mojom::CameraMetadataEntryPtr>();
+
     cros::mojom::CameraMetadataEntryPtr entry =
         cros::mojom::CameraMetadataEntry::New();
     entry->index = 0;
+    entry->tag = cros::mojom::CameraMetadataTag::
+        ANDROID_SCALER_AVAILABLE_STREAM_CONFIGURATIONS;
+    entry->type = cros::mojom::EntryType::TYPE_INT32;
+    entry->count = 12;
+    std::vector<int32_t> stream_configurations(entry->count);
+    stream_configurations[0] = static_cast<int32_t>(
+        cros::mojom::HalPixelFormat::HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED);
+    stream_configurations[1] = kDefaultWidth;
+    stream_configurations[2] = kDefaultHeight;
+    stream_configurations[3] = static_cast<int32_t>(
+        cros::mojom::Camera3StreamType::CAMERA3_STREAM_OUTPUT);
+    stream_configurations[4] = static_cast<int32_t>(
+        cros::mojom::HalPixelFormat::HAL_PIXEL_FORMAT_YCbCr_420_888);
+    stream_configurations[5] = kDefaultWidth;
+    stream_configurations[6] = kDefaultHeight;
+    stream_configurations[7] = static_cast<int32_t>(
+        cros::mojom::Camera3StreamType::CAMERA3_STREAM_OUTPUT);
+    stream_configurations[8] = static_cast<int32_t>(
+        cros::mojom::HalPixelFormat::HAL_PIXEL_FORMAT_BLOB);
+    stream_configurations[9] = kDefaultWidth;
+    stream_configurations[10] = kDefaultHeight;
+    stream_configurations[11] = static_cast<int32_t>(
+        cros::mojom::Camera3StreamType::CAMERA3_STREAM_OUTPUT);
+    uint8_t* as_int8 = reinterpret_cast<uint8_t*>(stream_configurations.data());
+    entry->data.assign(as_int8, as_int8 + entry->count * sizeof(int32_t));
+    static_metadata->entries->push_back(std::move(entry));
+
+    entry = cros::mojom::CameraMetadataEntry::New();
+    entry->index = 1;
     entry->tag = cros::mojom::CameraMetadataTag::ANDROID_SENSOR_ORIENTATION;
     entry->type = cros::mojom::EntryType::TYPE_INT32;
     entry->count = 1;
     entry->data = std::vector<uint8_t>(4, 0);
-    static_metadata->entries =
-        std::vector<cros::mojom::CameraMetadataEntryPtr>();
     static_metadata->entries->push_back(std::move(entry));
+
+    entry = cros::mojom::CameraMetadataEntry::New();
+    entry->index = 2;
+    entry->tag = cros::mojom::CameraMetadataTag::ANDROID_JPEG_MAX_SIZE;
+    entry->type = cros::mojom::EntryType::TYPE_INT32;
+    entry->count = 1;
+    int32_t jpeg_max_size = kJpegMaxBufferSize;
+    as_int8 = reinterpret_cast<uint8_t*>(&jpeg_max_size);
+    entry->data.assign(as_int8, as_int8 + entry->count * sizeof(int32_t));
+    static_metadata->entries->push_back(std::move(entry));
+
     switch (camera_id) {
       case 0:
         camera_info->facing = cros::mojom::CameraFacing::CAMERA_FACING_FRONT;
@@ -195,23 +243,19 @@ class CameraDeviceDelegateTest : public ::testing::Test {
       base::OnceCallback<void(int32_t,
                               cros::mojom::Camera3StreamConfigurationPtr)>&
           callback) {
-    ASSERT_EQ(1u, config->streams.size());
-    ASSERT_EQ(static_cast<uint32_t>(kDefaultCaptureFormat.frame_size.width()),
-              config->streams[0]->width);
-    ASSERT_EQ(static_cast<uint32_t>(kDefaultCaptureFormat.frame_size.height()),
-              config->streams[0]->height);
-    ASSERT_EQ(cros::mojom::HalPixelFormat::HAL_PIXEL_FORMAT_YCbCr_420_888,
-              config->streams[0]->format);
-    config->streams[0]->usage = 0;
-    config->streams[0]->max_buffers = 1;
+    ASSERT_GE(2u, config->streams.size());
+    ASSERT_LT(0u, config->streams.size());
+    for (size_t i = 0; i < config->streams.size(); ++i) {
+      config->streams[i]->usage = 0;
+      config->streams[i]->max_buffers = 1;
+    }
+    num_streams_ = config->streams.size();
     std::move(callback).Run(0, std::move(config));
   }
 
   void ConstructFakeRequestSettings(
       cros::mojom::Camera3RequestTemplate type,
       base::OnceCallback<void(cros::mojom::CameraMetadataPtr)>& callback) {
-    ASSERT_EQ(cros::mojom::Camera3RequestTemplate::CAMERA3_TEMPLATE_PREVIEW,
-              type);
     cros::mojom::CameraMetadataPtr fake_settings =
         cros::mojom::CameraMetadata::New();
     fake_settings->entry_count = 1;
@@ -289,18 +333,37 @@ class CameraDeviceDelegateTest : public ::testing::Test {
                               gfx::BufferUsage::SCANOUT_CAMERA_READ_WRITE,
                               gpu::kNullSurfaceHandle))
         .Times(1)
-        .WillOnce(Invoke(
-            &mock_gpu_memory_buffer_manager_,
-            &unittest_internal::MockGpuMemoryBufferManager::ReturnValidBuffer));
-    EXPECT_CALL(mock_gpu_memory_buffer_manager_,
-                CreateGpuMemoryBuffer(
-                    gfx::Size(1280, 720), gfx::BufferFormat::YUV_420_BIPLANAR,
-                    gfx::BufferUsage::SCANOUT_CAMERA_READ_WRITE,
-                    gpu::kNullSurfaceHandle))
+        .WillOnce(Invoke(&unittest_internal::MockGpuMemoryBufferManager::
+                             CreateFakeGpuMemoryBuffer));
+    if (num_streams_ == 2) {
+      EXPECT_CALL(
+          mock_gpu_memory_buffer_manager_,
+          CreateGpuMemoryBuffer(_, gfx::BufferFormat::R_8,
+                                gfx::BufferUsage::CAMERA_AND_CPU_READ_WRITE,
+                                gpu::kNullSurfaceHandle))
+          .Times(1)
+          .WillOnce(Invoke(&unittest_internal::MockGpuMemoryBufferManager::
+                               CreateFakeGpuMemoryBuffer));
+    }
+    EXPECT_CALL(
+        mock_gpu_memory_buffer_manager_,
+        CreateGpuMemoryBuffer(gfx::Size(kDefaultWidth, kDefaultHeight),
+                              gfx::BufferFormat::YUV_420_BIPLANAR,
+                              gfx::BufferUsage::SCANOUT_CAMERA_READ_WRITE,
+                              gpu::kNullSurfaceHandle))
         .Times(1)
-        .WillOnce(Invoke(
-            &mock_gpu_memory_buffer_manager_,
-            &unittest_internal::MockGpuMemoryBufferManager::ReturnValidBuffer));
+        .WillOnce(Invoke(&unittest_internal::MockGpuMemoryBufferManager::
+                             CreateFakeGpuMemoryBuffer));
+    if (num_streams_ == 2) {
+      EXPECT_CALL(mock_gpu_memory_buffer_manager_,
+                  CreateGpuMemoryBuffer(
+                      gfx::Size(kJpegMaxBufferSize, 1), gfx::BufferFormat::R_8,
+                      gfx::BufferUsage::CAMERA_AND_CPU_READ_WRITE,
+                      gpu::kNullSurfaceHandle))
+          .Times(1)
+          .WillOnce(Invoke(&unittest_internal::MockGpuMemoryBufferManager::
+                               CreateFakeGpuMemoryBuffer));
+    }
   }
 
   void SetUpExpectationUntilCapturing(
@@ -340,13 +403,13 @@ class CameraDeviceDelegateTest : public ::testing::Test {
         base::WaitableEvent::ResetPolicy::MANUAL,
         base::WaitableEvent::InitialState::NOT_SIGNALED);
     device_delegate_thread_.task_runner()->PostTask(
-        FROM_HERE, base::Bind(&CameraDeviceDelegate::StopAndDeAllocate,
-                              camera_device_delegate_->GetWeakPtr(),
-                              base::Bind(
-                                  [](base::WaitableEvent* device_closed) {
-                                    device_closed->Signal();
-                                  },
-                                  base::Unretained(&device_closed))));
+        FROM_HERE, base::BindOnce(&CameraDeviceDelegate::StopAndDeAllocate,
+                                  camera_device_delegate_->GetWeakPtr(),
+                                  base::BindOnce(
+                                      [](base::WaitableEvent* device_closed) {
+                                        device_closed->Signal();
+                                      },
+                                      base::Unretained(&device_closed))));
     base::TimeDelta kWaitTimeoutSecs = base::TimeDelta::FromSeconds(3);
     EXPECT_TRUE(device_closed.TimedWait(kWaitTimeoutSecs));
     EXPECT_EQ(CameraDeviceContext::State::kStopped, GetState());
@@ -366,6 +429,7 @@ class CameraDeviceDelegateTest : public ::testing::Test {
     ASSERT_TRUE(camera_device_delegate_);
     device_delegate_thread_.Stop();
     camera_device_delegate_.reset();
+    num_streams_ = 0;
   }
 
   void DoLoop() {
@@ -405,6 +469,8 @@ class CameraDeviceDelegateTest : public ::testing::Test {
 
   std::unique_ptr<CameraDeviceContext> device_context_;
 
+  size_t num_streams_;
+
  private:
   base::test::ScopedTaskEnvironment scoped_task_environment_;
   base::Thread hal_delegate_thread_;
@@ -429,9 +495,9 @@ TEST_F(CameraDeviceDelegateTest, AllocateCaptureAndStop) {
   SetUpExpectationForCaptureLoop();
 
   device_delegate_thread_.task_runner()->PostTask(
-      FROM_HERE, base::Bind(&CameraDeviceDelegate::AllocateAndStart,
-                            camera_device_delegate_->GetWeakPtr(), params,
-                            base::Unretained(device_context_.get())));
+      FROM_HERE, base::BindOnce(&CameraDeviceDelegate::AllocateAndStart,
+                                camera_device_delegate_->GetWeakPtr(), params,
+                                base::Unretained(device_context_.get())));
 
   // Wait until a frame is received.  MockVideoCaptureClient calls QuitRunLoop()
   // to stop the run loop.
@@ -459,9 +525,9 @@ TEST_F(CameraDeviceDelegateTest, StopAfterInitialized) {
   SetUpExpectationUntilInitialized();
 
   device_delegate_thread_.task_runner()->PostTask(
-      FROM_HERE, base::Bind(&CameraDeviceDelegate::AllocateAndStart,
-                            camera_device_delegate_->GetWeakPtr(), params,
-                            base::Unretained(device_context_.get())));
+      FROM_HERE, base::BindOnce(&CameraDeviceDelegate::AllocateAndStart,
+                                camera_device_delegate_->GetWeakPtr(), params,
+                                base::Unretained(device_context_.get())));
 
   EXPECT_CALL(mock_camera_device_, DoConfigureStreams(_, _))
       .Times(1)
@@ -501,9 +567,9 @@ TEST_F(CameraDeviceDelegateTest, StopAfterStreamConfigured) {
   SetUpExpectationUntilStreamConfigured();
 
   device_delegate_thread_.task_runner()->PostTask(
-      FROM_HERE, base::Bind(&CameraDeviceDelegate::AllocateAndStart,
-                            camera_device_delegate_->GetWeakPtr(), params,
-                            base::Unretained(device_context_.get())));
+      FROM_HERE, base::BindOnce(&CameraDeviceDelegate::AllocateAndStart,
+                                camera_device_delegate_->GetWeakPtr(), params,
+                                base::Unretained(device_context_.get())));
 
   EXPECT_CALL(mock_camera_device_, DoConstructDefaultRequestSettings(_, _))
       .Times(1)
@@ -539,15 +605,15 @@ TEST_F(CameraDeviceDelegateTest, FailToOpenDevice) {
 
   auto stop_on_error = [&]() {
     device_delegate_thread_.task_runner()->PostTask(
-        FROM_HERE, base::Bind(&CameraDeviceDelegate::StopAndDeAllocate,
-                              camera_device_delegate_->GetWeakPtr(),
-                              BindToCurrentLoop(base::Bind(
-                                  &CameraDeviceDelegateTest::QuitRunLoop,
-                                  base::Unretained(this)))));
+        FROM_HERE, base::BindOnce(&CameraDeviceDelegate::StopAndDeAllocate,
+                                  camera_device_delegate_->GetWeakPtr(),
+                                  BindToCurrentLoop(base::BindOnce(
+                                      &CameraDeviceDelegateTest::QuitRunLoop,
+                                      base::Unretained(this)))));
   };
-  EXPECT_CALL(*mock_client, OnError(_, _))
+  EXPECT_CALL(*mock_client, OnError(_, _, _))
       .Times(AtLeast(1))
-      .WillOnce(InvokeWithoutArgs(stop_on_error));
+      .WillRepeatedly(InvokeWithoutArgs(stop_on_error));
 
   EXPECT_CALL(mock_camera_module_, DoGetCameraInfo(0, _))
       .Times(1)
@@ -566,9 +632,9 @@ TEST_F(CameraDeviceDelegateTest, FailToOpenDevice) {
       .WillOnce(Invoke(open_device_with_error_cb));
 
   device_delegate_thread_.task_runner()->PostTask(
-      FROM_HERE, base::Bind(&CameraDeviceDelegate::AllocateAndStart,
-                            camera_device_delegate_->GetWeakPtr(), params,
-                            base::Unretained(device_context_.get())));
+      FROM_HERE, base::BindOnce(&CameraDeviceDelegate::AllocateAndStart,
+                                camera_device_delegate_->GetWeakPtr(), params,
+                                base::Unretained(device_context_.get())));
 
   // Wait unitl |camera_device_delegate_->StopAndDeAllocate| calls the
   // QuitRunLoop callback.

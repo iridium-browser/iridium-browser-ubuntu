@@ -11,6 +11,7 @@
 #include "base/optional.h"
 #include "base/strings/string16.h"
 #include "chrome/browser/engagement/site_engagement_observer.h"
+#include "chrome/browser/extensions/extension_uninstall_dialog.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 #include "third_party/skia/include/core/SkColor.h"
 
@@ -28,11 +29,9 @@ class Extension;
 
 // Class to encapsulate logic to control the browser UI for hosted apps.
 class HostedAppBrowserController : public SiteEngagementObserver,
-                                   public TabStripModelObserver {
+                                   public TabStripModelObserver,
+                                   public ExtensionUninstallDialog::Delegate {
  public:
-  // Indicates whether |browser| is a hosted app browser.
-  static bool IsForHostedApp(const Browser* browser);
-
   // Returns whether |browser| uses the experimental hosted app experience.
   static bool IsForExperimentalHostedAppBrowser(const Browser* browser);
 
@@ -78,7 +77,11 @@ class HostedAppBrowserController : public SiteEngagementObserver,
   base::string16 GetFormattedUrlOrigin() const;
 
   // Gets the extension for this controller.
-  const Extension* GetExtension() const;
+  const Extension* GetExtensionForTesting() const;
+
+  bool CanUninstall() const;
+
+  void Uninstall(UninstallReason reason, UninstallSource source);
 
   // SiteEngagementObserver overrides.
   void OnEngagementEvent(content::WebContents* web_contents,
@@ -91,12 +94,17 @@ class HostedAppBrowserController : public SiteEngagementObserver,
                      content::WebContents* contents,
                      int index,
                      bool foreground) override;
-  void TabDetachedAt(content::WebContents* contents, int index) override;
+  void TabDetachedAt(content::WebContents* contents,
+                     int index,
+                     bool was_active) override;
 
  private:
+  const Extension* GetExtension() const;
+
   Browser* const browser_;
   const std::string extension_id_;
   const bool created_for_installed_pwa_;
+  std::unique_ptr<ExtensionUninstallDialog> uninstall_dialog_;
 
   DISALLOW_COPY_AND_ASSIGN(HostedAppBrowserController);
 };

@@ -6,7 +6,7 @@
 
 #include "src/snapshot/snapshot.h"
 
-#include "src/api.h"
+#include "src/assembler-inl.h"
 #include "src/base/platform/platform.h"
 #include "src/callable.h"
 #include "src/interface-descriptors.h"
@@ -44,6 +44,7 @@ bool Snapshot::Initialize(Isolate* isolate) {
 
   const v8::StartupData* blob = isolate->snapshot_blob();
   CheckVersion(blob);
+  CHECK(VerifyChecksum(blob));
   Vector<const byte> startup_data = ExtractStartupData(blob);
   SnapshotData startup_snapshot_data(startup_data);
   Vector<const byte> builtin_data = ExtractBuiltinData(blob);
@@ -114,7 +115,8 @@ Code* Snapshot::DeserializeBuiltin(Isolate* isolate, int builtin_id) {
            Builtins::name(builtin_id), bytes, ms);
   }
 
-  if (isolate->logger()->is_logging_code_events() || isolate->is_profiling()) {
+  if (isolate->logger()->is_listening_to_code_events() ||
+      isolate->is_profiling()) {
     isolate->logger()->LogCodeObject(code);
   }
 
@@ -135,13 +137,17 @@ void Snapshot::EnsureAllBuiltinsAreDeserialized(Isolate* isolate) {
 
     DCHECK_NE(Builtins::kDeserializeLazy, i);
     Code* code = builtins->builtin(i);
-    if (code->builtin_index() == Builtins::kDeserializeLazy) {
+    if (code->builtin_index() == Builtins::LazyDeserializerForBuiltin(i)) {
       code = Snapshot::DeserializeBuiltin(isolate, i);
     }
 
     DCHECK_EQ(i, code->builtin_index());
     DCHECK_EQ(code, builtins->builtin(i));
   }
+
+  // Re-initialize the dispatch table now that any bytecodes have been
+  // deserialized.
+  isolate->interpreter()->InitializeDispatchTable();
 }
 
 // static
@@ -164,41 +170,6 @@ Code* Snapshot::EnsureBuiltinIsDeserialized(Isolate* isolate,
     DCHECK_EQ(builtin_id, code->builtin_index());
     DCHECK_EQ(code, isolate->builtins()->builtin(builtin_id));
   }
-  return code;
-}
-
-// static
-Code* Snapshot::DeserializeHandler(Isolate* isolate,
-                                   interpreter::Bytecode bytecode,
-                                   interpreter::OperandScale operand_scale) {
-  if (FLAG_trace_lazy_deserialization) {
-    PrintF("Lazy-deserializing handler %s\n",
-           interpreter::Bytecodes::ToString(bytecode, operand_scale).c_str());
-  }
-
-  base::ElapsedTimer timer;
-  if (FLAG_profile_deserialization) timer.Start();
-
-  const v8::StartupData* blob = isolate->snapshot_blob();
-  Vector<const byte> builtin_data = Snapshot::ExtractBuiltinData(blob);
-  BuiltinSnapshotData builtin_snapshot_data(builtin_data);
-
-  CodeSpaceMemoryModificationScope code_allocation(isolate->heap());
-  BuiltinDeserializer builtin_deserializer(isolate, &builtin_snapshot_data);
-  Code* code = builtin_deserializer.DeserializeHandler(bytecode, operand_scale);
-
-  if (FLAG_profile_deserialization) {
-    double ms = timer.Elapsed().InMillisecondsF();
-    int bytes = code->Size();
-    PrintF("[Deserializing handler %s (%d bytes) took %0.3f ms]\n",
-           interpreter::Bytecodes::ToString(bytecode, operand_scale).c_str(),
-           bytes, ms);
-  }
-
-  if (isolate->logger()->is_logging_code_events() || isolate->is_profiling()) {
-    isolate->logger()->LogBytecodeHandler(bytecode, operand_scale, code);
-  }
-
   return code;
 }
 
@@ -232,15 +203,22 @@ v8::StartupData Snapshot::CreateSnapshotBlob(
   uint32_t num_contexts = static_cast<uint32_t>(context_snapshots.size());
   uint32_t startup_snapshot_offset = StartupSnapshotOffset(num_contexts);
   uint32_t total_length = startup_snapshot_offset;
+  DCHECK(IsAligned(total_length, kPointerAlignment));
   total_length += static_cast<uint32_t>(startup_snapshot->RawData().length());
+  DCHECK(IsAligned(total_length, kPointerAlignment));
   total_length += static_cast<uint32_t>(builtin_snapshot->RawData().length());
+  DCHECK(IsAligned(total_length, kPointerAlignment));
   for (const auto context_snapshot : context_snapshots) {
     total_length += static_cast<uint32_t>(context_snapshot->RawData().length());
+    DCHECK(IsAligned(total_length, kPointerAlignment));
   }
 
   ProfileDeserialization(startup_snapshot, builtin_snapshot, context_snapshots);
 
   char* data = new char[total_length];
+  // Zero out pre-payload data. Part of that is only used for padding.
+  memset(data, 0, StartupSnapshotOffset(num_contexts));
+
   SetHeaderValue(data, kNumberOfContextsOffset, num_contexts);
   SetHeaderValue(data, kRehashabilityOffset, can_be_rehashed ? 1 : 0);
 
@@ -257,8 +235,9 @@ v8::StartupData Snapshot::CreateSnapshotBlob(
             reinterpret_cast<const char*>(startup_snapshot->RawData().start()),
             payload_length);
   if (FLAG_profile_deserialization) {
-    PrintF("Snapshot blob consists of:\n%10d bytes for startup\n",
-           payload_length);
+    PrintF("Snapshot blob consists of:\n%10d bytes in %d chunks for startup\n",
+           payload_length,
+           static_cast<uint32_t>(startup_snapshot->Reservations().size()));
   }
   payload_offset += payload_length;
 
@@ -283,17 +262,22 @@ v8::StartupData Snapshot::CreateSnapshotBlob(
         reinterpret_cast<const char*>(context_snapshot->RawData().start()),
         payload_length);
     if (FLAG_profile_deserialization) {
-      PrintF("%10d bytes for context #%d\n", payload_length, i);
+      PrintF("%10d bytes in %d chunks for context #%d\n", payload_length,
+             static_cast<uint32_t>(context_snapshot->Reservations().size()), i);
     }
     payload_offset += payload_length;
   }
 
-  v8::StartupData result = {data, static_cast<int>(total_length)};
   DCHECK_EQ(total_length, payload_offset);
+  v8::StartupData result = {data, static_cast<int>(total_length)};
+
+  Checksum checksum(ChecksummedContent(&result));
+  SetHeaderValue(data, kChecksumPartAOffset, checksum.a());
+  SetHeaderValue(data, kChecksumPartBOffset, checksum.b());
+
   return result;
 }
 
-#ifdef V8_EMBEDDED_BUILTINS
 namespace {
 bool BuiltinAliasesOffHeapTrampolineRegister(Isolate* isolate, Code* code) {
   DCHECK(Builtins::IsIsolateIndependent(code->builtin_index()));
@@ -304,6 +288,12 @@ bool BuiltinAliasesOffHeapTrampolineRegister(Isolate* isolate, Code* code) {
     case Builtins::TFJ:
     case Builtins::TFS:
       break;
+
+    // Bytecode handlers (and their lazy deserializers) will only ever be used
+    // by the interpreter and so there will never be a need to use trampolines
+    // with them.
+    case Builtins::BCH:
+    case Builtins::DLH:
     case Builtins::API:
     case Builtins::ASM:
       // TODO(jgruber): Extend checks to remaining kinds.
@@ -325,6 +315,51 @@ bool BuiltinAliasesOffHeapTrampolineRegister(Isolate* isolate, Code* code) {
 
   return false;
 }
+
+void FinalizeEmbeddedCodeTargets(Isolate* isolate, EmbeddedData* blob) {
+  static const int kRelocMask =
+      RelocInfo::ModeMask(RelocInfo::CODE_TARGET) |
+      RelocInfo::ModeMask(RelocInfo::RELATIVE_CODE_TARGET);
+
+  for (int i = 0; i < Builtins::builtin_count; i++) {
+    if (!Builtins::IsIsolateIndependent(i)) continue;
+
+    Code* code = isolate->builtins()->builtin(i);
+    RelocIterator on_heap_it(code, kRelocMask);
+    RelocIterator off_heap_it(blob, code, kRelocMask);
+
+#if defined(V8_TARGET_ARCH_X64) || defined(V8_TARGET_ARCH_ARM64) || \
+    defined(V8_TARGET_ARCH_ARM)
+    // On X64, ARM, ARM64 we emit relative builtin-to-builtin jumps for isolate
+    // independent builtins in the snapshot. This fixes up the relative jumps
+    // to the right offsets in the snapshot.
+    // See also: Code::IsIsolateIndependent.
+    while (!on_heap_it.done()) {
+      DCHECK(!off_heap_it.done());
+
+      RelocInfo* rinfo = on_heap_it.rinfo();
+      DCHECK_EQ(rinfo->rmode(), off_heap_it.rinfo()->rmode());
+      Code* target = Code::GetCodeFromTargetAddress(rinfo->target_address());
+      CHECK(Builtins::IsIsolateIndependentBuiltin(target));
+
+      // Do not emit write-barrier for off-heap writes.
+      off_heap_it.rinfo()->set_target_address(
+          blob->InstructionStartOfBuiltin(target->builtin_index()),
+          SKIP_WRITE_BARRIER);
+
+      on_heap_it.next();
+      off_heap_it.next();
+    }
+    DCHECK(off_heap_it.done());
+#else
+    // Architectures other than x64 and arm/arm64 do not use pc-relative calls
+    // and thus must not contain embedded code targets. Instead, we use an
+    // indirection through the root register.
+    CHECK(on_heap_it.done());
+    CHECK(off_heap_it.done());
+#endif  // defined(V8_TARGET_ARCH_X64) || defined(V8_TARGET_ARCH_ARM64)
+  }
+}
 }  // namespace
 
 // static
@@ -332,8 +367,7 @@ EmbeddedData EmbeddedData::FromIsolate(Isolate* isolate) {
   Builtins* builtins = isolate->builtins();
 
   // Store instruction stream lengths and offsets.
-  std::vector<uint32_t> lengths(kTableSize);
-  std::vector<uint32_t> offsets(kTableSize);
+  std::vector<struct Metadata> metadata(kTableSize);
 
   bool saw_unsafe_builtin = false;
   uint32_t raw_data_size = 0;
@@ -343,11 +377,21 @@ EmbeddedData EmbeddedData::FromIsolate(Isolate* isolate) {
     if (Builtins::IsIsolateIndependent(i)) {
       DCHECK(!Builtins::IsLazy(i));
 
-      // Sanity-check that the given builtin is process-independent and does not
+      // Sanity-check that the given builtin is isolate-independent and does not
       // use the trampoline register in its calling convention.
-      if (!code->IsProcessIndependent()) {
+      if (!code->IsIsolateIndependent(isolate)) {
         saw_unsafe_builtin = true;
-        fprintf(stderr, "%s is not process-independent.\n", Builtins::name(i));
+        fprintf(stderr, "%s is not isolate-independent.\n", Builtins::name(i));
+      }
+      if (Builtins::IsWasmRuntimeStub(i) &&
+          RelocInfo::RequiresRelocation(code)) {
+        // Wasm additionally requires that its runtime stubs must be
+        // individually PIC (i.e. we must be able to copy each stub outside the
+        // embedded area without relocations). In particular, that means
+        // pc-relative calls to other builtins are disallowed.
+        saw_unsafe_builtin = true;
+        fprintf(stderr, "%s is a wasm runtime stub but needs relocation.\n",
+                Builtins::name(i));
       }
       if (BuiltinAliasesOffHeapTrampolineRegister(isolate, code)) {
         saw_unsafe_builtin = true;
@@ -358,42 +402,61 @@ EmbeddedData EmbeddedData::FromIsolate(Isolate* isolate) {
       uint32_t length = static_cast<uint32_t>(code->raw_instruction_size());
 
       DCHECK_EQ(0, raw_data_size % kCodeAlignment);
-      offsets[i] = raw_data_size;
-      lengths[i] = length;
+      metadata[i].instructions_offset = raw_data_size;
+      metadata[i].instructions_length = length;
 
       // Align the start of each instruction stream.
-      raw_data_size += RoundUp<kCodeAlignment>(length);
+      raw_data_size += PadAndAlign(length);
     } else {
-      offsets[i] = raw_data_size;
-      lengths[i] = 0;
+      metadata[i].instructions_offset = raw_data_size;
     }
   }
-  CHECK(!saw_unsafe_builtin);
+  CHECK_WITH_MSG(
+      !saw_unsafe_builtin,
+      "One or more builtins marked as isolate-independent either contains "
+      "isolate-dependent code or aliases the off-heap trampoline register. "
+      "If in doubt, ask jgruber@");
 
   const uint32_t blob_size = RawDataOffset() + raw_data_size;
-  uint8_t* blob = new uint8_t[blob_size];
-  std::memset(blob, 0, blob_size);
+  uint8_t* const blob = new uint8_t[blob_size];
+  uint8_t* const raw_data_start = blob + RawDataOffset();
 
-  // Write the offsets and length tables.
-  DCHECK_EQ(OffsetsSize(), sizeof(offsets[0]) * offsets.size());
-  std::memcpy(blob + OffsetsOffset(), offsets.data(), OffsetsSize());
+  // Initially zap the entire blob, effectively padding the alignment area
+  // between two builtins with int3's (on x64/ia32).
+  ZapCode(reinterpret_cast<Address>(blob), blob_size);
 
-  DCHECK_EQ(LengthsSize(), sizeof(lengths[0]) * lengths.size());
-  std::memcpy(blob + LengthsOffset(), lengths.data(), LengthsSize());
+  // Write the metadata tables.
+  DCHECK_EQ(MetadataSize(), sizeof(metadata[0]) * metadata.size());
+  std::memcpy(blob + MetadataOffset(), metadata.data(), MetadataSize());
 
   // Write the raw data section.
   for (int i = 0; i < Builtins::builtin_count; i++) {
     if (!Builtins::IsIsolateIndependent(i)) continue;
     Code* code = builtins->builtin(i);
-    uint32_t offset = offsets[i];
-    uint8_t* dst = blob + RawDataOffset() + offset;
+    uint32_t offset = metadata[i].instructions_offset;
+    uint8_t* dst = raw_data_start + offset;
     DCHECK_LE(RawDataOffset() + offset + code->raw_instruction_size(),
               blob_size);
-    std::memcpy(dst, code->raw_instruction_start(),
+    std::memcpy(dst, reinterpret_cast<uint8_t*>(code->raw_instruction_start()),
                 code->raw_instruction_size());
   }
 
-  return {blob, blob_size};
+  EmbeddedData d(blob, blob_size);
+
+  // Fix up call targets that point to other embedded builtins.
+  FinalizeEmbeddedCodeTargets(isolate, &d);
+
+  // Hash the blob and store the result.
+  STATIC_ASSERT(HashSize() == kSizetSize);
+  const size_t hash = d.CreateHash();
+  std::memcpy(blob + HashOffset(), &hash, HashSize());
+
+  DCHECK_EQ(hash, d.CreateHash());
+  DCHECK_EQ(hash, d.Hash());
+
+  if (FLAG_serialization_statistics) d.PrintStatistics();
+
+  return d;
 }
 
 EmbeddedData EmbeddedData::FromBlob() {
@@ -404,26 +467,85 @@ EmbeddedData EmbeddedData::FromBlob() {
   return {data, size};
 }
 
-const uint8_t* EmbeddedData::InstructionStartOfBuiltin(int i) const {
+Address EmbeddedData::InstructionStartOfBuiltin(int i) const {
   DCHECK(Builtins::IsBuiltinId(i));
-
-  const uint32_t* offsets = Offsets();
-  const uint8_t* result = RawData() + offsets[i];
-  DCHECK_LT(result, data_ + size_);
-  return result;
+  const struct Metadata* metadata = Metadata();
+  const uint8_t* result = RawData() + metadata[i].instructions_offset;
+  DCHECK_LE(result, data_ + size_);
+  DCHECK_IMPLIES(result == data_ + size_, InstructionSizeOfBuiltin(i) == 0);
+  return reinterpret_cast<Address>(result);
 }
 
 uint32_t EmbeddedData::InstructionSizeOfBuiltin(int i) const {
   DCHECK(Builtins::IsBuiltinId(i));
-  const uint32_t* lengths = Lengths();
-  return lengths[i];
+  const struct Metadata* metadata = Metadata();
+  return metadata[i].instructions_length;
 }
-#endif
+
+size_t EmbeddedData::CreateHash() const {
+  STATIC_ASSERT(HashOffset() == 0);
+  STATIC_ASSERT(HashSize() == kSizetSize);
+  return base::hash_range(data_ + HashSize(), data_ + size_);
+}
 
 uint32_t Snapshot::ExtractNumContexts(const v8::StartupData* data) {
   CHECK_LT(kNumberOfContextsOffset, data->raw_size);
   uint32_t num_contexts = GetHeaderValue(data, kNumberOfContextsOffset);
   return num_contexts;
+}
+
+bool Snapshot::VerifyChecksum(const v8::StartupData* data) {
+  base::ElapsedTimer timer;
+  if (FLAG_profile_deserialization) timer.Start();
+  uint32_t expected_a = GetHeaderValue(data, kChecksumPartAOffset);
+  uint32_t expected_b = GetHeaderValue(data, kChecksumPartBOffset);
+  Checksum checksum(ChecksummedContent(data));
+  if (FLAG_profile_deserialization) {
+    double ms = timer.Elapsed().InMillisecondsF();
+    PrintF("[Verifying snapshot checksum took %0.3f ms]\n", ms);
+  }
+  return checksum.Check(expected_a, expected_b);
+}
+
+void EmbeddedData::PrintStatistics() const {
+  DCHECK(FLAG_serialization_statistics);
+
+  constexpr int kCount = Builtins::builtin_count;
+
+  int embedded_count = 0;
+  int instruction_size = 0;
+  int sizes[kCount];
+  for (int i = 0; i < kCount; i++) {
+    if (!Builtins::IsIsolateIndependent(i)) continue;
+    const int size = InstructionSizeOfBuiltin(i);
+    instruction_size += size;
+    sizes[embedded_count] = size;
+    embedded_count++;
+  }
+
+  // Sort for percentiles.
+  std::sort(&sizes[0], &sizes[embedded_count]);
+
+  const int k50th = embedded_count * 0.5;
+  const int k75th = embedded_count * 0.75;
+  const int k90th = embedded_count * 0.90;
+  const int k99th = embedded_count * 0.99;
+
+  const int metadata_size = static_cast<int>(HashSize() + MetadataSize());
+
+  PrintF("EmbeddedData:\n");
+  PrintF("  Total size:                         %d\n",
+         static_cast<int>(size()));
+  PrintF("  Metadata size:                      %d\n", metadata_size);
+  PrintF("  Instruction size:                   %d\n", instruction_size);
+  PrintF("  Padding:                            %d\n",
+         static_cast<int>(size() - metadata_size - instruction_size));
+  PrintF("  Embedded builtin count:             %d\n", embedded_count);
+  PrintF("  Instruction size (50th percentile): %d\n", sizes[k50th]);
+  PrintF("  Instruction size (75th percentile): %d\n", sizes[k75th]);
+  PrintF("  Instruction size (90th percentile): %d\n", sizes[k90th]);
+  PrintF("  Instruction size (99th percentile): %d\n", sizes[k99th]);
+  PrintF("\n");
 }
 
 uint32_t Snapshot::ExtractContextOffset(const v8::StartupData* data,
@@ -518,11 +640,17 @@ SnapshotData::SnapshotData(const Serializer<AllocatorT>* serializer) {
   // Calculate sizes.
   uint32_t reservation_size =
       static_cast<uint32_t>(reservations.size()) * kUInt32Size;
+  uint32_t payload_offset = kHeaderSize + reservation_size;
+  uint32_t padded_payload_offset = POINTER_SIZE_ALIGN(payload_offset);
   uint32_t size =
-      kHeaderSize + reservation_size + static_cast<uint32_t>(payload->size());
+      padded_payload_offset + static_cast<uint32_t>(payload->size());
+  DCHECK(IsAligned(size, kPointerAlignment));
 
   // Allocate backing store and create result data.
   AllocateData(size);
+
+  // Zero out pre-payload data. Part of that is only used for padding.
+  memset(data_, 0, padded_payload_offset);
 
   // Set header values.
   SetMagicNumber(serializer->isolate());
@@ -534,7 +662,7 @@ SnapshotData::SnapshotData(const Serializer<AllocatorT>* serializer) {
             reservation_size);
 
   // Copy serialized data.
-  CopyBytes(data_ + kHeaderSize + reservation_size, payload->data(),
+  CopyBytes(data_ + padded_payload_offset, payload->data(),
             static_cast<size_t>(payload->size()));
 }
 
@@ -553,7 +681,9 @@ std::vector<SerializedData::Reservation> SnapshotData::Reservations() const {
 Vector<const byte> SnapshotData::Payload() const {
   uint32_t reservations_size =
       GetHeaderValue(kNumReservationsOffset) * kUInt32Size;
-  const byte* payload = data_ + kHeaderSize + reservations_size;
+  uint32_t padded_payload_offset =
+      POINTER_SIZE_ALIGN(kHeaderSize + reservations_size);
+  const byte* payload = data_ + padded_payload_offset;
   uint32_t length = GetHeaderValue(kPayloadLengthOffset);
   DCHECK_EQ(data_ + size_, payload + length);
   return Vector<const byte>(payload, length);
@@ -563,30 +693,22 @@ BuiltinSnapshotData::BuiltinSnapshotData(const BuiltinSerializer* serializer)
     : SnapshotData(serializer) {}
 
 Vector<const byte> BuiltinSnapshotData::Payload() const {
-  uint32_t reservations_size =
-      GetHeaderValue(kNumReservationsOffset) * kUInt32Size;
-  const byte* payload = data_ + kHeaderSize + reservations_size;
-  const int builtin_offsets_size =
-      BuiltinSnapshotUtils::kNumberOfCodeObjects * kUInt32Size;
-  uint32_t payload_length = GetHeaderValue(kPayloadLengthOffset);
-  DCHECK_EQ(data_ + size_, payload + payload_length);
-  DCHECK_GT(payload_length, builtin_offsets_size);
-  return Vector<const byte>(payload, payload_length - builtin_offsets_size);
+  Vector<const byte> payload = SnapshotData::Payload();
+  const int builtin_offsets_size = Builtins::builtin_count * kUInt32Size;
+  DCHECK_EQ(data_ + size_, payload.start() + payload.size());
+  DCHECK_GT(payload.size(), builtin_offsets_size);
+  return Vector<const byte>(payload.start(),
+                            payload.size() - builtin_offsets_size);
 }
 
 Vector<const uint32_t> BuiltinSnapshotData::BuiltinOffsets() const {
-  uint32_t reservations_size =
-      GetHeaderValue(kNumReservationsOffset) * kUInt32Size;
-  const byte* payload = data_ + kHeaderSize + reservations_size;
-  const int builtin_offsets_size =
-      BuiltinSnapshotUtils::kNumberOfCodeObjects * kUInt32Size;
-  uint32_t payload_length = GetHeaderValue(kPayloadLengthOffset);
-  DCHECK_EQ(data_ + size_, payload + payload_length);
-  DCHECK_GT(payload_length, builtin_offsets_size);
+  Vector<const byte> payload = SnapshotData::Payload();
+  const int builtin_offsets_size = Builtins::builtin_count * kUInt32Size;
+  DCHECK_EQ(data_ + size_, payload.start() + payload.size());
+  DCHECK_GT(payload.size(), builtin_offsets_size);
   const uint32_t* data = reinterpret_cast<const uint32_t*>(
-      payload + payload_length - builtin_offsets_size);
-  return Vector<const uint32_t>(data,
-                                BuiltinSnapshotUtils::kNumberOfCodeObjects);
+      payload.start() + payload.size() - builtin_offsets_size);
+  return Vector<const uint32_t>(data, Builtins::builtin_count);
 }
 
 }  // namespace internal

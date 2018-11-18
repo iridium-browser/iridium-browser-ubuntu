@@ -13,6 +13,7 @@
 
 // Clients of this interface shouldn't depend on lots of heap internals.
 // Do not include anything from src/heap here!
+#include "include/v8-internal.h"
 #include "include/v8.h"
 #include "src/accessors.h"
 #include "src/allocation.h"
@@ -22,9 +23,9 @@
 #include "src/globals.h"
 #include "src/heap-symbols.h"
 #include "src/objects.h"
-#include "src/objects/code.h"
-#include "src/objects/hash-table.h"
+#include "src/objects/fixed-array.h"
 #include "src/objects/string-table.h"
+#include "src/roots.h"
 #include "src/visitors.h"
 
 namespace v8 {
@@ -40,383 +41,137 @@ class HeapTester;
 class TestMemoryAllocatorScope;
 }  // namespace heap
 
-class BoilerplateDescription;
+class AllocationMemento;
+class ObjectBoilerplateDescription;
 class BytecodeArray;
 class CodeDataContainer;
 class DeoptimizationData;
 class HandlerTable;
 class IncrementalMarking;
 class JSArrayBuffer;
-
+class ExternalString;
 using v8::MemoryPressureLevel;
 
-// Defines all the roots in Heap.
-#define STRONG_ROOT_LIST(V)                                                    \
-  /* Cluster the most popular ones in a few cache lines here at the top.    */ \
-  /* The first 32 entries are most often used in the startup snapshot and   */ \
-  /* can use a shorter representation in the serialization format.          */ \
-  V(Map, free_space_map, FreeSpaceMap)                                         \
-  V(Map, one_pointer_filler_map, OnePointerFillerMap)                          \
-  V(Map, two_pointer_filler_map, TwoPointerFillerMap)                          \
-  V(Oddball, uninitialized_value, UninitializedValue)                          \
-  V(Oddball, undefined_value, UndefinedValue)                                  \
-  V(Oddball, the_hole_value, TheHoleValue)                                     \
-  V(Oddball, null_value, NullValue)                                            \
-  V(Oddball, true_value, TrueValue)                                            \
-  V(Oddball, false_value, FalseValue)                                          \
-  V(String, empty_string, empty_string)                                        \
-  V(Map, meta_map, MetaMap)                                                    \
-  V(Map, byte_array_map, ByteArrayMap)                                         \
-  V(Map, fixed_array_map, FixedArrayMap)                                       \
-  V(Map, fixed_cow_array_map, FixedCOWArrayMap)                                \
-  V(Map, hash_table_map, HashTableMap)                                         \
-  V(Map, symbol_map, SymbolMap)                                                \
-  V(Map, one_byte_string_map, OneByteStringMap)                                \
-  V(Map, one_byte_internalized_string_map, OneByteInternalizedStringMap)       \
-  V(Map, scope_info_map, ScopeInfoMap)                                         \
-  V(Map, shared_function_info_map, SharedFunctionInfoMap)                      \
-  V(Map, code_map, CodeMap)                                                    \
-  V(Map, function_context_map, FunctionContextMap)                             \
-  V(Map, cell_map, CellMap)                                                    \
-  V(Map, weak_cell_map, WeakCellMap)                                           \
-  V(Map, global_property_cell_map, GlobalPropertyCellMap)                      \
-  V(Map, foreign_map, ForeignMap)                                              \
-  V(Map, heap_number_map, HeapNumberMap)                                       \
-  V(Map, transition_array_map, TransitionArrayMap)                             \
-  V(Map, feedback_vector_map, FeedbackVectorMap)                               \
-  V(ScopeInfo, empty_scope_info, EmptyScopeInfo)                               \
-  V(FixedArray, empty_fixed_array, EmptyFixedArray)                            \
-  V(DescriptorArray, empty_descriptor_array, EmptyDescriptorArray)             \
-  /* Entries beyond the first 32                                            */ \
-  /* The roots above this line should be boring from a GC point of view.    */ \
-  /* This means they are never in new space and never on a page that is     */ \
-  /* being compacted.*/                                                        \
-  /* Oddballs */                                                               \
-  V(Oddball, arguments_marker, ArgumentsMarker)                                \
-  V(Oddball, exception, Exception)                                             \
-  V(Oddball, termination_exception, TerminationException)                      \
-  V(Oddball, optimized_out, OptimizedOut)                                      \
-  V(Oddball, stale_register, StaleRegister)                                    \
-  /* Context maps */                                                           \
-  V(Map, native_context_map, NativeContextMap)                                 \
-  V(Map, module_context_map, ModuleContextMap)                                 \
-  V(Map, eval_context_map, EvalContextMap)                                     \
-  V(Map, script_context_map, ScriptContextMap)                                 \
-  V(Map, block_context_map, BlockContextMap)                                   \
-  V(Map, catch_context_map, CatchContextMap)                                   \
-  V(Map, with_context_map, WithContextMap)                                     \
-  V(Map, debug_evaluate_context_map, DebugEvaluateContextMap)                  \
-  V(Map, script_context_table_map, ScriptContextTableMap)                      \
-  /* Maps */                                                                   \
-  V(Map, feedback_metadata_map, FeedbackMetadataArrayMap)                      \
-  V(Map, array_list_map, ArrayListMap)                                         \
-  V(Map, bigint_map, BigIntMap)                                                \
-  V(Map, boilerplate_description_map, BoilerplateDescriptionMap)               \
-  V(Map, bytecode_array_map, BytecodeArrayMap)                                 \
-  V(Map, code_data_container_map, CodeDataContainerMap)                        \
-  V(Map, descriptor_array_map, DescriptorArrayMap)                             \
-  V(Map, external_map, ExternalMap)                                            \
-  V(Map, fixed_double_array_map, FixedDoubleArrayMap)                          \
-  V(Map, global_dictionary_map, GlobalDictionaryMap)                           \
-  V(Map, many_closures_cell_map, ManyClosuresCellMap)                          \
-  V(Map, message_object_map, JSMessageObjectMap)                               \
-  V(Map, module_info_map, ModuleInfoMap)                                       \
-  V(Map, mutable_heap_number_map, MutableHeapNumberMap)                        \
-  V(Map, name_dictionary_map, NameDictionaryMap)                               \
-  V(Map, no_closures_cell_map, NoClosuresCellMap)                              \
-  V(Map, number_dictionary_map, NumberDictionaryMap)                           \
-  V(Map, one_closure_cell_map, OneClosureCellMap)                              \
-  V(Map, ordered_hash_map_map, OrderedHashMapMap)                              \
-  V(Map, ordered_hash_set_map, OrderedHashSetMap)                              \
-  V(Map, property_array_map, PropertyArrayMap)                                 \
-  V(Map, side_effect_call_handler_info_map, SideEffectCallHandlerInfoMap)      \
-  V(Map, side_effect_free_call_handler_info_map,                               \
-    SideEffectFreeCallHandlerInfoMap)                                          \
-  V(Map, simple_number_dictionary_map, SimpleNumberDictionaryMap)              \
-  V(Map, sloppy_arguments_elements_map, SloppyArgumentsElementsMap)            \
-  V(Map, small_ordered_hash_map_map, SmallOrderedHashMapMap)                   \
-  V(Map, small_ordered_hash_set_map, SmallOrderedHashSetMap)                   \
-  V(Map, string_table_map, StringTableMap)                                     \
-  V(Map, weak_fixed_array_map, WeakFixedArrayMap)                              \
-  /* String maps */                                                            \
-  V(Map, native_source_string_map, NativeSourceStringMap)                      \
-  V(Map, string_map, StringMap)                                                \
-  V(Map, cons_one_byte_string_map, ConsOneByteStringMap)                       \
-  V(Map, cons_string_map, ConsStringMap)                                       \
-  V(Map, thin_one_byte_string_map, ThinOneByteStringMap)                       \
-  V(Map, thin_string_map, ThinStringMap)                                       \
-  V(Map, sliced_string_map, SlicedStringMap)                                   \
-  V(Map, sliced_one_byte_string_map, SlicedOneByteStringMap)                   \
-  V(Map, external_string_map, ExternalStringMap)                               \
-  V(Map, external_string_with_one_byte_data_map,                               \
-    ExternalStringWithOneByteDataMap)                                          \
-  V(Map, external_one_byte_string_map, ExternalOneByteStringMap)               \
-  V(Map, short_external_string_map, ShortExternalStringMap)                    \
-  V(Map, short_external_string_with_one_byte_data_map,                         \
-    ShortExternalStringWithOneByteDataMap)                                     \
-  V(Map, internalized_string_map, InternalizedStringMap)                       \
-  V(Map, external_internalized_string_map, ExternalInternalizedStringMap)      \
-  V(Map, external_internalized_string_with_one_byte_data_map,                  \
-    ExternalInternalizedStringWithOneByteDataMap)                              \
-  V(Map, external_one_byte_internalized_string_map,                            \
-    ExternalOneByteInternalizedStringMap)                                      \
-  V(Map, short_external_internalized_string_map,                               \
-    ShortExternalInternalizedStringMap)                                        \
-  V(Map, short_external_internalized_string_with_one_byte_data_map,            \
-    ShortExternalInternalizedStringWithOneByteDataMap)                         \
-  V(Map, short_external_one_byte_internalized_string_map,                      \
-    ShortExternalOneByteInternalizedStringMap)                                 \
-  V(Map, short_external_one_byte_string_map, ShortExternalOneByteStringMap)    \
-  /* Array element maps */                                                     \
-  V(Map, fixed_uint8_array_map, FixedUint8ArrayMap)                            \
-  V(Map, fixed_int8_array_map, FixedInt8ArrayMap)                              \
-  V(Map, fixed_uint16_array_map, FixedUint16ArrayMap)                          \
-  V(Map, fixed_int16_array_map, FixedInt16ArrayMap)                            \
-  V(Map, fixed_uint32_array_map, FixedUint32ArrayMap)                          \
-  V(Map, fixed_int32_array_map, FixedInt32ArrayMap)                            \
-  V(Map, fixed_float32_array_map, FixedFloat32ArrayMap)                        \
-  V(Map, fixed_float64_array_map, FixedFloat64ArrayMap)                        \
-  V(Map, fixed_uint8_clamped_array_map, FixedUint8ClampedArrayMap)             \
-  V(Map, fixed_biguint64_array_map, FixedBigUint64ArrayMap)                    \
-  V(Map, fixed_bigint64_array_map, FixedBigInt64ArrayMap)                      \
-  /* Oddball maps */                                                           \
-  V(Map, undefined_map, UndefinedMap)                                          \
-  V(Map, the_hole_map, TheHoleMap)                                             \
-  V(Map, null_map, NullMap)                                                    \
-  V(Map, boolean_map, BooleanMap)                                              \
-  V(Map, uninitialized_map, UninitializedMap)                                  \
-  V(Map, arguments_marker_map, ArgumentsMarkerMap)                             \
-  V(Map, exception_map, ExceptionMap)                                          \
-  V(Map, termination_exception_map, TerminationExceptionMap)                   \
-  V(Map, optimized_out_map, OptimizedOutMap)                                   \
-  V(Map, stale_register_map, StaleRegisterMap)                                 \
-  /* Canonical empty values */                                                 \
-  V(EnumCache, empty_enum_cache, EmptyEnumCache)                               \
-  V(PropertyArray, empty_property_array, EmptyPropertyArray)                   \
-  V(ByteArray, empty_byte_array, EmptyByteArray)                               \
-  V(BoilerplateDescription, empty_boilerplate_description,                     \
-    EmptyBoilerplateDescription)                                               \
-  V(FixedTypedArrayBase, empty_fixed_uint8_array, EmptyFixedUint8Array)        \
-  V(FixedTypedArrayBase, empty_fixed_int8_array, EmptyFixedInt8Array)          \
-  V(FixedTypedArrayBase, empty_fixed_uint16_array, EmptyFixedUint16Array)      \
-  V(FixedTypedArrayBase, empty_fixed_int16_array, EmptyFixedInt16Array)        \
-  V(FixedTypedArrayBase, empty_fixed_uint32_array, EmptyFixedUint32Array)      \
-  V(FixedTypedArrayBase, empty_fixed_int32_array, EmptyFixedInt32Array)        \
-  V(FixedTypedArrayBase, empty_fixed_float32_array, EmptyFixedFloat32Array)    \
-  V(FixedTypedArrayBase, empty_fixed_float64_array, EmptyFixedFloat64Array)    \
-  V(FixedTypedArrayBase, empty_fixed_uint8_clamped_array,                      \
-    EmptyFixedUint8ClampedArray)                                               \
-  V(FixedTypedArrayBase, empty_fixed_biguint64_array,                          \
-    EmptyFixedBigUint64Array)                                                  \
-  V(FixedTypedArrayBase, empty_fixed_bigint64_array, EmptyFixedBigInt64Array)  \
-  V(Script, empty_script, EmptyScript)                                         \
-  V(FeedbackCell, many_closures_cell, ManyClosuresCell)                        \
-  V(FixedArray, empty_sloppy_arguments_elements, EmptySloppyArgumentsElements) \
-  V(NumberDictionary, empty_slow_element_dictionary,                           \
-    EmptySlowElementDictionary)                                                \
-  V(FixedArray, empty_ordered_hash_map, EmptyOrderedHashMap)                   \
-  V(FixedArray, empty_ordered_hash_set, EmptyOrderedHashSet)                   \
-  V(FeedbackMetadata, empty_feedback_metadata, EmptyFeedbackMetadata)          \
-  V(PropertyCell, empty_property_cell, EmptyPropertyCell)                      \
-  V(WeakCell, empty_weak_cell, EmptyWeakCell)                                  \
-  V(Cell, invalid_prototype_validity_cell, InvalidPrototypeValidityCell)       \
-  V(InterceptorInfo, noop_interceptor_info, NoOpInterceptorInfo)               \
-  V(WeakFixedArray, empty_weak_fixed_array, EmptyWeakFixedArray)               \
-  /* Protectors */                                                             \
-  V(Cell, array_constructor_protector, ArrayConstructorProtector)              \
-  V(PropertyCell, no_elements_protector, NoElementsProtector)                  \
-  V(Cell, is_concat_spreadable_protector, IsConcatSpreadableProtector)         \
-  V(PropertyCell, array_species_protector, ArraySpeciesProtector)              \
-  V(PropertyCell, typed_array_species_protector, TypedArraySpeciesProtector)   \
-  V(PropertyCell, promise_species_protector, PromiseSpeciesProtector)          \
-  V(Cell, string_length_protector, StringLengthProtector)                      \
-  V(PropertyCell, array_iterator_protector, ArrayIteratorProtector)            \
-  V(PropertyCell, array_buffer_neutering_protector,                            \
-    ArrayBufferNeuteringProtector)                                             \
-  V(PropertyCell, promise_hook_protector, PromiseHookProtector)                \
-  V(Cell, promise_resolve_protector, PromiseResolveProtector)                  \
-  V(PropertyCell, promise_then_protector, PromiseThenProtector)                \
-  /* Special numbers */                                                        \
-  V(HeapNumber, nan_value, NanValue)                                           \
-  V(HeapNumber, hole_nan_value, HoleNanValue)                                  \
-  V(HeapNumber, infinity_value, InfinityValue)                                 \
-  V(HeapNumber, minus_zero_value, MinusZeroValue)                              \
-  V(HeapNumber, minus_infinity_value, MinusInfinityValue)                      \
-  /* Caches */                                                                 \
-  V(FixedArray, number_string_cache, NumberStringCache)                        \
-  V(FixedArray, single_character_string_cache, SingleCharacterStringCache)     \
-  V(FixedArray, string_split_cache, StringSplitCache)                          \
-  V(FixedArray, regexp_multiple_cache, RegExpMultipleCache)                    \
-  /* Lists and dictionaries */                                                 \
-  V(NameDictionary, empty_property_dictionary, EmptyPropertyDictionary)        \
-  V(NameDictionary, public_symbol_table, PublicSymbolTable)                    \
-  V(NameDictionary, api_symbol_table, ApiSymbolTable)                          \
-  V(NameDictionary, api_private_symbol_table, ApiPrivateSymbolTable)           \
-  V(Object, script_list, ScriptList)                                           \
-  V(SimpleNumberDictionary, code_stubs, CodeStubs)                             \
-  V(FixedArray, materialized_objects, MaterializedObjects)                     \
-  V(FixedArray, microtask_queue, MicrotaskQueue)                               \
-  V(FixedArray, detached_contexts, DetachedContexts)                           \
-  V(HeapObject, retaining_path_targets, RetainingPathTargets)                  \
-  V(ArrayList, retained_maps, RetainedMaps)                                    \
-  /* Indirection lists for isolate-independent builtins */                     \
-  V(FixedArray, builtins_constants_table, BuiltinsConstantsTable)              \
-  /* Feedback vectors that we need for code coverage or type profile */        \
-  V(Object, feedback_vectors_for_profiling_tools,                              \
-    FeedbackVectorsForProfilingTools)                                          \
-  V(Object, weak_stack_trace_list, WeakStackTraceList)                         \
-  V(Object, noscript_shared_function_infos, NoScriptSharedFunctionInfos)       \
-  V(FixedArray, serialized_objects, SerializedObjects)                         \
-  V(FixedArray, serialized_global_proxy_sizes, SerializedGlobalProxySizes)     \
-  V(TemplateList, message_listeners, MessageListeners)                         \
-  /* DeserializeLazy handlers for lazy bytecode deserialization */             \
-  V(Object, deserialize_lazy_handler, DeserializeLazyHandler)                  \
-  V(Object, deserialize_lazy_handler_wide, DeserializeLazyHandlerWide)         \
-  V(Object, deserialize_lazy_handler_extra_wide,                               \
-    DeserializeLazyHandlerExtraWide)                                           \
-  /* JS Entries */                                                             \
-  V(Code, js_entry_code, JsEntryCode)                                          \
-  V(Code, js_construct_entry_code, JsConstructEntryCode)                       \
-  V(Code, js_run_microtasks_entry_code, JsRunMicrotasksEntryCode)
-
-// Entries in this list are limited to Smis and are not visited during GC.
-#define SMI_ROOT_LIST(V)                                                       \
-  V(Smi, stack_limit, StackLimit)                                              \
-  V(Smi, real_stack_limit, RealStackLimit)                                     \
-  V(Smi, last_script_id, LastScriptId)                                         \
-  V(Smi, last_debugging_id, LastDebuggingId)                                   \
-  V(Smi, hash_seed, HashSeed)                                                  \
-  /* To distinguish the function templates, so that we can find them in the */ \
-  /* function cache of the native context. */                                  \
-  V(Smi, next_template_serial_number, NextTemplateSerialNumber)                \
-  V(Smi, arguments_adaptor_deopt_pc_offset, ArgumentsAdaptorDeoptPCOffset)     \
-  V(Smi, construct_stub_create_deopt_pc_offset,                                \
-    ConstructStubCreateDeoptPCOffset)                                          \
-  V(Smi, construct_stub_invoke_deopt_pc_offset,                                \
-    ConstructStubInvokeDeoptPCOffset)                                          \
-  V(Smi, interpreter_entry_return_pc_offset, InterpreterEntryReturnPCOffset)
-
-#define ROOT_LIST(V)  \
-  STRONG_ROOT_LIST(V) \
-  SMI_ROOT_LIST(V)    \
-  V(StringTable, string_table, StringTable)
-
+// Adapts PRIVATE_SYMBOL_LIST_GERNATOR entry to IMMORTAL_IMMOVABLE_ROOT_LIST
+// entry
+#define PRIVATE_SYMBOL_LIST_TO_IMMORTAL_IMMOVABLE_LIST_ADAPTER(V, name) V(name)
 
 // Heap roots that are known to be immortal immovable, for which we can safely
 // skip write barriers. This list is not complete and has omissions.
-#define IMMORTAL_IMMOVABLE_ROOT_LIST(V) \
-  V(ArgumentsMarker)                    \
-  V(ArgumentsMarkerMap)                 \
-  V(ArrayBufferNeuteringProtector)      \
-  V(ArrayIteratorProtector)             \
-  V(BigIntMap)                          \
-  V(BlockContextMap)                    \
-  V(BoilerplateDescriptionMap)          \
-  V(BooleanMap)                         \
-  V(ByteArrayMap)                       \
-  V(BytecodeArrayMap)                   \
-  V(CatchContextMap)                    \
-  V(CellMap)                            \
-  V(CodeMap)                            \
-  V(DebugEvaluateContextMap)            \
-  V(DescriptorArrayMap)                 \
-  V(EmptyByteArray)                     \
-  V(EmptyDescriptorArray)               \
-  V(EmptyFixedArray)                    \
-  V(EmptyFixedFloat32Array)             \
-  V(EmptyFixedFloat64Array)             \
-  V(EmptyFixedInt16Array)               \
-  V(EmptyFixedInt32Array)               \
-  V(EmptyFixedInt8Array)                \
-  V(EmptyFixedUint16Array)              \
-  V(EmptyFixedUint32Array)              \
-  V(EmptyFixedUint8Array)               \
-  V(EmptyFixedUint8ClampedArray)        \
-  V(EmptyOrderedHashMap)                \
-  V(EmptyOrderedHashSet)                \
-  V(EmptyPropertyCell)                  \
-  V(EmptyScopeInfo)                     \
-  V(EmptyScript)                        \
-  V(EmptySloppyArgumentsElements)       \
-  V(EmptySlowElementDictionary)         \
-  V(EmptyWeakCell)                      \
-  V(EvalContextMap)                     \
-  V(Exception)                          \
-  V(FalseValue)                         \
-  V(FixedArrayMap)                      \
-  V(FixedCOWArrayMap)                   \
-  V(FixedDoubleArrayMap)                \
-  V(ForeignMap)                         \
-  V(FreeSpaceMap)                       \
-  V(FunctionContextMap)                 \
-  V(GlobalDictionaryMap)                \
-  V(GlobalPropertyCellMap)              \
-  V(HashTableMap)                       \
-  V(HeapNumberMap)                      \
-  V(HoleNanValue)                       \
-  V(InfinityValue)                      \
-  V(IsConcatSpreadableProtector)        \
-  V(JSMessageObjectMap)                 \
-  V(JsConstructEntryCode)               \
-  V(JsEntryCode)                        \
-  V(ManyClosuresCell)                   \
-  V(ManyClosuresCellMap)                \
-  V(MetaMap)                            \
-  V(MinusInfinityValue)                 \
-  V(MinusZeroValue)                     \
-  V(ModuleContextMap)                   \
-  V(ModuleInfoMap)                      \
-  V(MutableHeapNumberMap)               \
-  V(NameDictionaryMap)                  \
-  V(NanValue)                           \
-  V(NativeContextMap)                   \
-  V(NoClosuresCellMap)                  \
-  V(NoElementsProtector)                \
-  V(NullMap)                            \
-  V(NullValue)                          \
-  V(NumberDictionaryMap)                \
-  V(OneClosureCellMap)                  \
-  V(OnePointerFillerMap)                \
-  V(OptimizedOut)                       \
-  V(OrderedHashMapMap)                  \
-  V(OrderedHashSetMap)                  \
-  V(PropertyArrayMap)                   \
-  V(ScopeInfoMap)                       \
-  V(ScriptContextMap)                   \
-  V(ScriptContextTableMap)              \
-  V(SharedFunctionInfoMap)              \
-  V(SimpleNumberDictionaryMap)          \
-  V(SloppyArgumentsElementsMap)         \
-  V(SmallOrderedHashMapMap)             \
-  V(SmallOrderedHashSetMap)             \
-  V(ArraySpeciesProtector)              \
-  V(TypedArraySpeciesProtector)         \
-  V(PromiseSpeciesProtector)            \
-  V(StaleRegister)                      \
-  V(StringLengthProtector)              \
-  V(StringTableMap)                     \
-  V(SymbolMap)                          \
-  V(TerminationException)               \
-  V(TheHoleMap)                         \
-  V(TheHoleValue)                       \
-  V(TransitionArrayMap)                 \
-  V(TrueValue)                          \
-  V(TwoPointerFillerMap)                \
-  V(UndefinedMap)                       \
-  V(UndefinedValue)                     \
-  V(UninitializedMap)                   \
-  V(UninitializedValue)                 \
-  V(WeakCellMap)                        \
-  V(WeakFixedArrayMap)                  \
-  V(WithContextMap)                     \
-  V(empty_string)                       \
-  PRIVATE_SYMBOL_LIST(V)
-
-#define FIXED_ARRAY_ELEMENTS_WRITE_BARRIER(heap, array, start, length) \
-  do {                                                                 \
-    heap->RecordFixedArrayElements(array, start, length);              \
-    heap->incremental_marking()->RecordWrites(array);                  \
-  } while (false)
+#define IMMORTAL_IMMOVABLE_ROOT_LIST(V)     \
+  V(ArgumentsMarker)                        \
+  V(ArgumentsMarkerMap)                     \
+  V(ArrayBufferNeuteringProtector)          \
+  V(ArrayIteratorProtector)                 \
+  V(AwaitContextMap)                        \
+  V(BigIntMap)                              \
+  V(BlockContextMap)                        \
+  V(ObjectBoilerplateDescriptionMap)        \
+  V(BooleanMap)                             \
+  V(ByteArrayMap)                           \
+  V(BytecodeArrayMap)                       \
+  V(CatchContextMap)                        \
+  V(CellMap)                                \
+  V(CodeMap)                                \
+  V(DebugEvaluateContextMap)                \
+  V(DescriptorArrayMap)                     \
+  V(EphemeronHashTableMap)                  \
+  V(EmptyByteArray)                         \
+  V(EmptyDescriptorArray)                   \
+  V(EmptyFixedArray)                        \
+  V(EmptyFixedFloat32Array)                 \
+  V(EmptyFixedFloat64Array)                 \
+  V(EmptyFixedInt16Array)                   \
+  V(EmptyFixedInt32Array)                   \
+  V(EmptyFixedInt8Array)                    \
+  V(EmptyFixedUint16Array)                  \
+  V(EmptyFixedUint32Array)                  \
+  V(EmptyFixedUint8Array)                   \
+  V(EmptyFixedUint8ClampedArray)            \
+  V(EmptyOrderedHashMap)                    \
+  V(EmptyOrderedHashSet)                    \
+  V(EmptyPropertyCell)                      \
+  V(EmptyScopeInfo)                         \
+  V(EmptyScript)                            \
+  V(EmptySloppyArgumentsElements)           \
+  V(EmptySlowElementDictionary)             \
+  V(EvalContextMap)                         \
+  V(Exception)                              \
+  V(FalseValue)                             \
+  V(FixedArrayMap)                          \
+  V(FixedCOWArrayMap)                       \
+  V(FixedDoubleArrayMap)                    \
+  V(ForeignMap)                             \
+  V(FreeSpaceMap)                           \
+  V(FunctionContextMap)                     \
+  V(GlobalDictionaryMap)                    \
+  V(GlobalPropertyCellMap)                  \
+  V(HashTableMap)                           \
+  V(HeapNumberMap)                          \
+  V(HoleNanValue)                           \
+  V(InfinityValue)                          \
+  V(IsConcatSpreadableProtector)            \
+  V(JSMessageObjectMap)                     \
+  V(JsConstructEntryCode)                   \
+  V(JsEntryCode)                            \
+  V(ManyClosuresCell)                       \
+  V(ManyClosuresCellMap)                    \
+  V(MetaMap)                                \
+  V(MinusInfinityValue)                     \
+  V(MinusZeroValue)                         \
+  V(ModuleContextMap)                       \
+  V(ModuleInfoMap)                          \
+  V(MutableHeapNumberMap)                   \
+  V(NameDictionaryMap)                      \
+  V(NanValue)                               \
+  V(NativeContextMap)                       \
+  V(NoClosuresCellMap)                      \
+  V(NoElementsProtector)                    \
+  V(NullMap)                                \
+  V(NullValue)                              \
+  V(NumberDictionaryMap)                    \
+  V(OneClosureCellMap)                      \
+  V(OnePointerFillerMap)                    \
+  V(OptimizedOut)                           \
+  V(OrderedHashMapMap)                      \
+  V(OrderedHashSetMap)                      \
+  V(PreParsedScopeDataMap)                  \
+  V(PropertyArrayMap)                       \
+  V(ScopeInfoMap)                           \
+  V(ScriptContextMap)                       \
+  V(ScriptContextTableMap)                  \
+  V(SelfReferenceMarker)                    \
+  V(SharedFunctionInfoMap)                  \
+  V(SimpleNumberDictionaryMap)              \
+  V(SloppyArgumentsElementsMap)             \
+  V(SmallOrderedHashMapMap)                 \
+  V(SmallOrderedHashSetMap)                 \
+  V(ArraySpeciesProtector)                  \
+  V(TypedArraySpeciesProtector)             \
+  V(PromiseSpeciesProtector)                \
+  V(StaleRegister)                          \
+  V(StringIteratorProtector)                \
+  V(StringLengthProtector)                  \
+  V(StringTableMap)                         \
+  V(SymbolMap)                              \
+  V(TerminationException)                   \
+  V(TheHoleMap)                             \
+  V(TheHoleValue)                           \
+  V(TransitionArrayMap)                     \
+  V(TrueValue)                              \
+  V(TwoPointerFillerMap)                    \
+  V(UndefinedMap)                           \
+  V(UndefinedValue)                         \
+  V(UninitializedMap)                       \
+  V(UninitializedValue)                     \
+  V(UncompiledDataWithoutPreParsedScopeMap) \
+  V(UncompiledDataWithPreParsedScopeMap)    \
+  V(WeakFixedArrayMap)                      \
+  V(WeakArrayListMap)                       \
+  V(WithContextMap)                         \
+  V(empty_string)                           \
+  PRIVATE_SYMBOL_LIST_GENERATOR(            \
+      PRIVATE_SYMBOL_LIST_TO_IMMORTAL_IMMOVABLE_LIST_ADAPTER, V)
 
 class AllocationObserver;
 class ArrayBufferCollector;
@@ -426,6 +181,7 @@ class GCIdleTimeAction;
 class GCIdleTimeHandler;
 class GCIdleTimeHeapState;
 class GCTracer;
+class HeapController;
 class HeapObjectAllocationTracker;
 class HeapObjectsFilter;
 class HeapStats;
@@ -442,6 +198,7 @@ class PagedSpace;
 class RootVisitor;
 class ScavengeJob;
 class Scavenger;
+class ScavengerCollector;
 class Space;
 class StoreBuffer;
 class StressScavengeObserver;
@@ -459,11 +216,13 @@ enum class ClearRecordedSlots { kYes, kNo };
 
 enum class ClearFreedMemoryMode { kClearFreedMemory, kDontClearFreedMemory };
 
+enum ExternalBackingStoreType { kArrayBuffer, kExternalString, kNumTypes };
+
 enum class FixedArrayVisitationMode { kRegular, kIncremental };
 
 enum class TraceRetainingPathMode { kEnabled, kDisabled };
 
-enum class RetainingPathOption { kDefault, kTrackEphemeralPath };
+enum class RetainingPathOption { kDefault, kTrackEphemeronPath };
 
 enum class GarbageCollectionReason {
   kUnknown = 0,
@@ -487,7 +246,8 @@ enum class GarbageCollectionReason {
   kRuntime = 18,
   kSamplingProfiler = 19,
   kSnapshotCreator = 20,
-  kTesting = 21
+  kTesting = 21,
+  kExternalFinalize = 22
   // If you add new items here, then update the incremental_marking_reason,
   // mark_compact_reason, and scavenge_reason counters in counters.h.
   // Also update src/tools/metrics/histograms/histograms.xml in chromium.
@@ -557,50 +317,6 @@ struct CommentStatistic {
 
 class Heap {
  public:
-  // Declare all the root indices.  This defines the root list order.
-  // clang-format off
-  enum RootListIndex {
-#define DECL(type, name, camel_name) k##camel_name##RootIndex,
-    STRONG_ROOT_LIST(DECL)
-#undef DECL
-
-#define DECL(name, str) k##name##RootIndex,
-    INTERNALIZED_STRING_LIST(DECL)
-#undef DECL
-
-#define DECL(name) k##name##RootIndex,
-    PRIVATE_SYMBOL_LIST(DECL)
-#undef DECL
-
-#define DECL(name, description) k##name##RootIndex,
-    PUBLIC_SYMBOL_LIST(DECL)
-    WELL_KNOWN_SYMBOL_LIST(DECL)
-#undef DECL
-
-#define DECL(accessor_name, AccessorName) k##AccessorName##AccessorRootIndex,
-    ACCESSOR_INFO_LIST(DECL)
-#undef DECL
-
-#define DECL(NAME, Name, name) k##Name##MapRootIndex,
-    STRUCT_LIST(DECL)
-#undef DECL
-
-#define DECL(NAME, Name, Size, name) k##Name##Size##MapRootIndex,
-    DATA_HANDLER_LIST(DECL)
-#undef DECL
-
-    kStringTableRootIndex,
-
-#define DECL(type, name, camel_name) k##camel_name##RootIndex,
-    SMI_ROOT_LIST(DECL)
-#undef DECL
-
-    kRootListLength,
-    kStrongRootListLength = kStringTableRootIndex,
-    kSmiRootsStart = kStringTableRootIndex + 1
-  };
-  // clang-format on
-
   enum FindMementoMode { kForRuntime, kForGC };
 
   enum HeapState {
@@ -642,28 +358,11 @@ class Heap {
   static const size_t kMaxSemiSpaceSizeInKB =
       16 * kPointerMultiplier * ((1 << kPageSizeBits) / KB);
 
-  // The old space size has to be a multiple of Page::kPageSize.
-  // Sizes are in MB.
-  static const size_t kMinOldGenerationSize = 128 * kPointerMultiplier;
-  static const size_t kMaxOldGenerationSize = 1024 * kPointerMultiplier;
-
   static const int kTraceRingBufferSize = 512;
   static const int kStacktraceBufferSize = 512;
 
-  V8_EXPORT_PRIVATE static const double kMinHeapGrowingFactor;
-  V8_EXPORT_PRIVATE static const double kMaxHeapGrowingFactor;
-  static const double kMaxHeapGrowingFactorMemoryConstrained;
-  static const double kMaxHeapGrowingFactorIdle;
-  static const double kConservativeHeapGrowingFactor;
-  static const double kTargetMutatorUtilization;
-
   static const int kNoGCFlags = 0;
   static const int kReduceMemoryFootprintMask = 1;
-  static const int kAbortIncrementalMarkingMask = 2;
-  static const int kFinalizeIncrementalMarkingMask = 4;
-
-  // Making the heap iterable requires us to abort incremental marking.
-  static const int kMakeHeapIterableMask = kAbortIncrementalMarkingMask;
 
   // The roots that have an index less than this are always in old space.
   static const int kOldSpaceRoots = 0x20;
@@ -673,13 +372,18 @@ class Heap {
 
   static const int kMinPromotedPercentForFastPromotionMode = 90;
 
-  STATIC_ASSERT(kUndefinedValueRootIndex ==
+  STATIC_ASSERT(static_cast<int>(RootIndex::kUndefinedValue) ==
                 Internals::kUndefinedValueRootIndex);
-  STATIC_ASSERT(kTheHoleValueRootIndex == Internals::kTheHoleValueRootIndex);
-  STATIC_ASSERT(kNullValueRootIndex == Internals::kNullValueRootIndex);
-  STATIC_ASSERT(kTrueValueRootIndex == Internals::kTrueValueRootIndex);
-  STATIC_ASSERT(kFalseValueRootIndex == Internals::kFalseValueRootIndex);
-  STATIC_ASSERT(kempty_stringRootIndex == Internals::kEmptyStringRootIndex);
+  STATIC_ASSERT(static_cast<int>(RootIndex::kTheHoleValue) ==
+                Internals::kTheHoleValueRootIndex);
+  STATIC_ASSERT(static_cast<int>(RootIndex::kNullValue) ==
+                Internals::kNullValueRootIndex);
+  STATIC_ASSERT(static_cast<int>(RootIndex::kTrueValue) ==
+                Internals::kTrueValueRootIndex);
+  STATIC_ASSERT(static_cast<int>(RootIndex::kFalseValue) ==
+                Internals::kFalseValueRootIndex);
+  STATIC_ASSERT(static_cast<int>(RootIndex::kempty_string) ==
+                Internals::kEmptyStringRootIndex);
 
   // Calculates the maximum amount of filler that could be required by the
   // given alignment.
@@ -690,14 +394,14 @@ class Heap {
 
   void FatalProcessOutOfMemory(const char* location);
 
-  V8_EXPORT_PRIVATE static bool RootIsImmortalImmovable(int root_index);
+  V8_EXPORT_PRIVATE static bool RootIsImmortalImmovable(RootIndex root_index);
 
   // Checks whether the space is valid.
   static bool IsValidAllocationSpace(AllocationSpace space);
 
   // Generated code can embed direct references to non-writable roots if
   // they are in new space.
-  static bool RootCanBeWrittenAfterInitialization(RootListIndex root_index);
+  static bool RootCanBeWrittenAfterInitialization(RootIndex root_index);
 
   // Zapping is needed for verify heap, and always done in debug builds.
   static inline bool ShouldZapGarbage() {
@@ -710,6 +414,10 @@ class Heap {
     return false;
 #endif
 #endif
+  }
+
+  static uintptr_t ZapValue() {
+    return FLAG_clear_free_memory ? kClearedFreeMemoryValue : kZapValue;
   }
 
   static inline bool IsYoungGenerationCollector(GarbageCollector collector) {
@@ -736,15 +444,27 @@ class Heap {
     return "Unknown collector";
   }
 
-  V8_EXPORT_PRIVATE static double MaxHeapGrowingFactor(
-      size_t max_old_generation_size);
-  V8_EXPORT_PRIVATE static double HeapGrowingFactor(double gc_speed,
-                                                    double mutator_speed,
-                                                    double max_factor);
-
   // Copy block of memory from src to dst. Size of block should be aligned
   // by pointer size.
   static inline void CopyBlock(Address dst, Address src, int byte_size);
+
+  V8_EXPORT_PRIVATE static void WriteBarrierForCodeSlow(Code* host);
+  V8_EXPORT_PRIVATE static void GenerationalBarrierSlow(HeapObject* object,
+                                                        Address slot,
+                                                        HeapObject* value);
+  V8_EXPORT_PRIVATE static void GenerationalBarrierForElementsSlow(
+      Heap* heap, FixedArray* array, int offset, int length);
+  V8_EXPORT_PRIVATE static void GenerationalBarrierForCodeSlow(
+      Code* host, RelocInfo* rinfo, HeapObject* value);
+  V8_EXPORT_PRIVATE static void MarkingBarrierSlow(HeapObject* object,
+                                                   Address slot,
+                                                   HeapObject* value);
+  V8_EXPORT_PRIVATE static void MarkingBarrierForElementsSlow(
+      Heap* heap, HeapObject* object);
+  V8_EXPORT_PRIVATE static void MarkingBarrierForCodeSlow(Code* host,
+                                                          RelocInfo* rinfo,
+                                                          HeapObject* value);
+  V8_EXPORT_PRIVATE static bool PageFlagsAreConsistent(HeapObject* object);
 
   // Notifies the heap that is ok to start marking or other activities that
   // should not happen during deserialization.
@@ -760,7 +480,8 @@ class Heap {
 
   // Move len elements within a given array from src_index index to dst_index
   // index.
-  void MoveElements(FixedArray* array, int dst_index, int src_index, int len);
+  void MoveElements(FixedArray* array, int dst_index, int src_index, int len,
+                    WriteBarrierMode mode = UPDATE_WRITE_BARRIER);
 
   // Initialize a filler object to keep the ability to iterate over the heap
   // when introducing gaps within pages. If slots could have been recorded in
@@ -773,6 +494,9 @@ class Heap {
       ClearFreedMemoryMode clear_memory_mode =
           ClearFreedMemoryMode::kDontClearFreedMemory);
 
+  template <typename T>
+  void CreateFillerForArray(T* object, int elements_to_trim, int bytes_to_trim);
+
   bool CanMoveObjectStart(HeapObject* object);
 
   static bool IsImmovable(HeapObject* object);
@@ -783,6 +507,7 @@ class Heap {
 
   // Trim the given array from the right.
   void RightTrimFixedArray(FixedArrayBase* obj, int elements_to_trim);
+  void RightTrimWeakFixedArray(WeakFixedArray* obj, int elements_to_trim);
 
   // Converts the given boolean condition to JavaScript boolean value.
   inline Oddball* ToBoolean(bool condition);
@@ -803,13 +528,10 @@ class Heap {
   // Used in CreateAllocationSiteStub and the (de)serializer.
   Object** allocation_sites_list_address() { return &allocation_sites_list_; }
 
-  void set_encountered_weak_collections(Object* weak_collection) {
-    encountered_weak_collections_ = weak_collection;
-  }
-  Object* encountered_weak_collections() const {
-    return encountered_weak_collections_;
-  }
-  void IterateEncounteredWeakCollections(RootVisitor* visitor);
+  // Traverse all the allocaions_sites [nested_site and weak_next] in the list
+  // and foreach call the visitor
+  void ForeachAllocationSite(
+      Object* list, const std::function<void(AllocationSite*)>& visitor);
 
   // Number of mark-sweeps.
   int ms_count() const { return ms_count_; }
@@ -904,7 +626,7 @@ class Heap {
 
   void IncrementDeferredCount(v8::Isolate::UseCounterFeature feature);
 
-  inline uint32_t HashSeed();
+  inline uint64_t HashSeed();
 
   inline int NextScriptId();
   inline int NextDebuggingId();
@@ -922,15 +644,17 @@ class Heap {
   void update_external_memory(int64_t delta) { external_memory_ += delta; }
 
   void update_external_memory_concurrently_freed(intptr_t freed) {
-    external_memory_concurrently_freed_.Increment(freed);
+    external_memory_concurrently_freed_ += freed;
   }
 
   void account_external_memory_concurrently_freed() {
-    external_memory_ -= external_memory_concurrently_freed_.Value();
-    external_memory_concurrently_freed_.SetValue(0);
+    external_memory_ -= external_memory_concurrently_freed_;
+    external_memory_concurrently_freed_ = 0;
   }
 
-  void CompactFixedArraysOfWeakCells();
+  size_t backing_store_bytes() const { return backing_store_bytes_; }
+
+  void CompactWeakArrayLists(PretenureFlag pretenure);
 
   void AddRetainedMap(Handle<Map> map);
 
@@ -944,6 +668,7 @@ class Heap {
   inline void OnMoveEvent(HeapObject* target, HeapObject* source,
                           int size_in_bytes);
 
+  inline bool CanAllocateInReadOnlySpace();
   bool deserialization_complete() const { return deserialization_complete_; }
 
   bool HasLowAllocationRate();
@@ -955,7 +680,7 @@ class Heap {
   bool ShouldOptimizeForMemoryUsage();
 
   bool HighMemoryPressure() {
-    return memory_pressure_level_.Value() != MemoryPressureLevel::kNone;
+    return memory_pressure_level_ != MemoryPressureLevel::kNone;
   }
 
   void RestoreHeapLimit(size_t heap_limit) {
@@ -973,15 +698,14 @@ class Heap {
   // max_semi_space_size_in_kb: maximum semi-space size in KB
   // max_old_generation_size_in_mb: maximum old generation size in MB
   // code_range_size_in_mb: code range size in MB
-  // Return false if the heap has been set up already.
-  bool ConfigureHeap(size_t max_semi_space_size_in_kb,
+  void ConfigureHeap(size_t max_semi_space_size_in_kb,
                      size_t max_old_generation_size_in_mb,
                      size_t code_range_size_in_mb);
-  bool ConfigureHeapDefault();
+  void ConfigureHeapDefault();
 
   // Prepares the heap, setting up memory areas that are needed in the isolate
   // without actually creating any objects.
-  bool SetUp();
+  void SetUp();
 
   // (Re-)Initialize hash seed from flag or RNG.
   void InitializeHashSeed();
@@ -1010,9 +734,10 @@ class Heap {
 
   NewSpace* new_space() { return new_space_; }
   OldSpace* old_space() { return old_space_; }
-  OldSpace* code_space() { return code_space_; }
+  CodeSpace* code_space() { return code_space_; }
   MapSpace* map_space() { return map_space_; }
   LargeObjectSpace* lo_space() { return lo_space_; }
+  NewLargeObjectSpace* new_lo_space() { return new_lo_space_; }
   ReadOnlySpace* read_only_space() { return read_only_space_; }
 
   inline PagedSpace* paged_space(int idx);
@@ -1046,55 +771,32 @@ class Heap {
   // ===========================================================================
   // Root set access. ==========================================================
   // ===========================================================================
+  friend class ReadOnlyRoots;
 
-  // Heap root getters.
-#define ROOT_ACCESSOR(type, name, camel_name) inline type* name();
-  ROOT_LIST(ROOT_ACCESSOR)
+ public:
+  RootsTable& roots_table() { return roots_; }
+
+// Heap root getters.
+#define ROOT_ACCESSOR(type, name, CamelName) inline type* name();
+  MUTABLE_ROOT_LIST(ROOT_ACCESSOR)
 #undef ROOT_ACCESSOR
 
-  // Utility type maps.
-#define STRUCT_MAP_ACCESSOR(NAME, Name, name) inline Map* name##_map();
-  STRUCT_LIST(STRUCT_MAP_ACCESSOR)
-#undef STRUCT_MAP_ACCESSOR
-
-#define DATA_HANDLER_MAP_ACCESSOR(NAME, Name, Size, name) \
-  inline Map* name##_map();
-  DATA_HANDLER_LIST(DATA_HANDLER_MAP_ACCESSOR)
-#undef DATA_HANDLER_MAP_ACCESSOR
-
-#define STRING_ACCESSOR(name, str) inline String* name();
-  INTERNALIZED_STRING_LIST(STRING_ACCESSOR)
-#undef STRING_ACCESSOR
-
-#define SYMBOL_ACCESSOR(name) inline Symbol* name();
-  PRIVATE_SYMBOL_LIST(SYMBOL_ACCESSOR)
-#undef SYMBOL_ACCESSOR
-
-#define SYMBOL_ACCESSOR(name, description) inline Symbol* name();
-  PUBLIC_SYMBOL_LIST(SYMBOL_ACCESSOR)
-  WELL_KNOWN_SYMBOL_LIST(SYMBOL_ACCESSOR)
-#undef SYMBOL_ACCESSOR
-
-#define ACCESSOR_INFO_ACCESSOR(accessor_name, AccessorName) \
-  inline AccessorInfo* accessor_name##_accessor();
-  ACCESSOR_INFO_LIST(ACCESSOR_INFO_ACCESSOR)
-#undef ACCESSOR_INFO_ACCESSOR
-
-  Object* root(RootListIndex index) { return roots_[index]; }
-  Handle<Object> root_handle(RootListIndex index) {
+  Object* root(RootIndex index) { return roots_[index]; }
+  Handle<Object> root_handle(RootIndex index) {
     return Handle<Object>(&roots_[index]);
   }
+
+  bool IsRootHandleLocation(Object** handle_location, RootIndex* index) const {
+    return roots_.IsRootHandleLocation(handle_location, index);
+  }
+
   template <typename T>
-  bool IsRootHandle(Handle<T> handle, RootListIndex* index) const {
-    Object** const handle_location = bit_cast<Object**>(handle.address());
-    if (handle_location >= &roots_[kRootListLength]) return false;
-    if (handle_location < &roots_[0]) return false;
-    *index = static_cast<RootListIndex>(handle_location - &roots_[0]);
-    return true;
+  bool IsRootHandle(Handle<T> handle, RootIndex* index) const {
+    return roots_.IsRootHandle(handle, index);
   }
 
   // Generated code can embed this address to get access to the roots.
-  Object** roots_array_start() { return roots_; }
+  Object** roots_array_start() { return roots_.roots_; }
 
   ExternalReferenceTable* external_reference_table() {
     DCHECK(external_reference_table_.is_initialized());
@@ -1105,27 +807,40 @@ class Heap {
     return kRootsExternalReferenceTableOffset;
   }
 
+  static constexpr int roots_to_builtins_offset() {
+    return kRootsBuiltinsOffset;
+  }
+
+  static constexpr int root_register_addressable_end_offset() {
+    return kRootRegisterAddressableEndOffset;
+  }
+
+  Address root_register_addressable_end() {
+    return reinterpret_cast<Address>(roots_array_start()) +
+           kRootRegisterAddressableEndOffset;
+  }
+
   // Sets the stub_cache_ (only used when expanding the dictionary).
   void SetRootCodeStubs(SimpleNumberDictionary* value);
 
   void SetRootMaterializedObjects(FixedArray* objects) {
-    roots_[kMaterializedObjectsRootIndex] = objects;
+    roots_[RootIndex::kMaterializedObjects] = objects;
   }
 
   void SetRootScriptList(Object* value) {
-    roots_[kScriptListRootIndex] = value;
+    roots_[RootIndex::kScriptList] = value;
   }
 
   void SetRootStringTable(StringTable* value) {
-    roots_[kStringTableRootIndex] = value;
+    roots_[RootIndex::kStringTable] = value;
   }
 
   void SetRootNoScriptSharedFunctionInfos(Object* value) {
-    roots_[kNoScriptSharedFunctionInfosRootIndex] = value;
+    roots_[RootIndex::kNoScriptSharedFunctionInfos] = value;
   }
 
   void SetMessageListeners(TemplateList* value) {
-    roots_[kMessageListenersRootIndex] = value;
+    roots_[RootIndex::kMessageListeners] = value;
   }
 
   // Set the stack limit in the roots_ array.  Some architectures generate
@@ -1138,19 +853,10 @@ class Heap {
   void ClearStackLimits();
 
   // Generated code can treat direct references to this root as constant.
-  bool RootCanBeTreatedAsConstant(RootListIndex root_index);
-
-  Map* MapForFixedTypedArray(ExternalArrayType array_type);
-  Map* MapForFixedTypedArray(ElementsKind elements_kind);
-  FixedTypedArrayBase* EmptyFixedTypedArrayForMap(const Map* map);
+  bool RootCanBeTreatedAsConstant(RootIndex root_index);
 
   void RegisterStrongRoots(Object** start, Object** end);
   void UnregisterStrongRoots(Object** start);
-
-  bool IsDeserializeLazyHandler(Code* code);
-  void SetDeserializeLazyHandler(Code* code);
-  void SetDeserializeLazyHandlerWide(Code* code);
-  void SetDeserializeLazyHandlerExtraWide(Code* code);
 
   void SetBuiltinsConstantsTable(FixedArray* cache);
 
@@ -1172,19 +878,24 @@ class Heap {
   // Performs garbage collection operation.
   // Returns whether there is a chance that another major GC could
   // collect more garbage.
-  bool CollectGarbage(
+  V8_EXPORT_PRIVATE bool CollectGarbage(
       AllocationSpace space, GarbageCollectionReason gc_reason,
       const GCCallbackFlags gc_callback_flags = kNoGCCallbackFlags);
 
-  // Performs a full garbage collection.  If (flags & kMakeHeapIterableMask) is
-  // non-zero, then the slower precise sweeper is used, which leaves the heap
-  // in a state where we can iterate over the heap visiting all objects.
-  void CollectAllGarbage(
+  // Performs a full garbage collection.
+  V8_EXPORT_PRIVATE void CollectAllGarbage(
       int flags, GarbageCollectionReason gc_reason,
       const GCCallbackFlags gc_callback_flags = kNoGCCallbackFlags);
 
   // Last hope GC, should try to squeeze as much as possible.
   void CollectAllAvailableGarbage(GarbageCollectionReason gc_reason);
+
+  // Precise garbage collection that potentially finalizes already running
+  // incremental marking before performing an atomic garbage collection.
+  // Only use if absolutely necessary or in tests to avoid floating garbage!
+  void PreciseCollectAllGarbage(
+      int flags, GarbageCollectionReason gc_reason,
+      const GCCallbackFlags gc_callback_flags = kNoGCCallbackFlags);
 
   // Reports and external memory pressure event, either performs a major GC or
   // completes incremental marking in order to free external resources.
@@ -1202,6 +913,14 @@ class Heap {
   void HandleGCRequest();
 
   // ===========================================================================
+  // Builtins. =================================================================
+  // ===========================================================================
+
+  Code* builtin(int index);
+  Address builtin_address(int index);
+  void set_builtin(int index, HeapObject* builtin);
+
+  // ===========================================================================
   // Iterators. ================================================================
   // ===========================================================================
 
@@ -1214,20 +933,12 @@ class Heap {
   void IterateWeakRoots(RootVisitor* v, VisitMode mode);
   // Iterates over weak global handles.
   void IterateWeakGlobalHandles(RootVisitor* v);
+  // Iterates over builtins.
+  void IterateBuiltins(RootVisitor* v);
 
   // ===========================================================================
   // Store buffer API. =========================================================
   // ===========================================================================
-
-  // Write barrier support for object[offset] = o;
-  inline void RecordWrite(Object* object, MaybeObject** slot,
-                          MaybeObject* value);
-  inline void RecordWrite(Object* object, Object** slot, Object* value);
-  inline void RecordWriteIntoCode(Code* host, RelocInfo* rinfo, Object* target);
-  void RecordWriteIntoCodeSlow(Code* host, RelocInfo* rinfo, Object* target);
-  void RecordWritesIntoCode(Code* code);
-  inline void RecordFixedArrayElements(FixedArray* array, int offset,
-                                       int length);
 
   // Used for query incremental marking status in generated code.
   Address* IsMarkingFlagAddress() {
@@ -1236,12 +947,16 @@ class Heap {
 
   void SetIsMarkingFlag(uint8_t flag) { is_marking_flag_ = flag; }
 
-  inline Address* store_buffer_top_address();
+  Address* store_buffer_top_address();
+  static intptr_t store_buffer_mask_constant();
+  static Address store_buffer_overflow_function_address();
 
   void ClearRecordedSlot(HeapObject* object, Object** slot);
   void ClearRecordedSlotRange(Address start, Address end);
 
-  bool HasRecordedSlot(HeapObject* object, Object** slot);
+#ifdef DEBUG
+  void VerifyClearedSlot(HeapObject* object, Object** slot);
+#endif
 
   // ===========================================================================
   // Incremental marking API. ==================================================
@@ -1269,6 +984,8 @@ class Heap {
       GCCallbackFlags gc_callback_flags = GCCallbackFlags::kNoGCCallbackFlags);
 
   void FinalizeIncrementalMarkingIfComplete(GarbageCollectionReason gc_reason);
+  // Synchronously finalizes incremental marking.
+  void FinalizeIncrementalMarkingAtomically(GarbageCollectionReason gc_reason);
 
   void RegisterDeserializedObjectsForBlackAllocation(
       Reservation* reservations, const std::vector<HeapObject*>& large_objects,
@@ -1321,12 +1038,17 @@ class Heap {
   // Embedder heap tracer support. =============================================
   // ===========================================================================
 
-  LocalEmbedderHeapTracer* local_embedder_heap_tracer() {
+  LocalEmbedderHeapTracer* local_embedder_heap_tracer() const {
     return local_embedder_heap_tracer_;
   }
+
   void SetEmbedderHeapTracer(EmbedderHeapTracer* tracer);
+  EmbedderHeapTracer* GetEmbedderHeapTracer() const;
+
   void TracePossibleWrapper(JSObject* js_object);
   void RegisterExternallyReferencedObject(Object** object);
+  void SetEmbedderStackStateForNextFinalizaton(
+      EmbedderHeapTracer::EmbedderStackState stack_state);
 
   // ===========================================================================
   // External string table API. ================================================
@@ -1335,27 +1057,38 @@ class Heap {
   // Registers an external string.
   inline void RegisterExternalString(String* string);
 
+  // Called when a string's resource is changed. The size of the payload is sent
+  // as argument of the method.
+  inline void UpdateExternalString(String* string, size_t old_payload,
+                                   size_t new_payload);
+
   // Finalizes an external string by deleting the associated external
   // data and clearing the resource pointer.
   inline void FinalizeExternalString(String* string);
+
+  static String* UpdateNewSpaceReferenceInExternalStringTableEntry(
+      Heap* heap, Object** pointer);
 
   // ===========================================================================
   // Methods checking/returning the space of a given object/address. ===========
   // ===========================================================================
 
   // Returns whether the object resides in new space.
-  inline bool InNewSpace(Object* object);
-  inline bool InNewSpace(MaybeObject* object);
-  inline bool InNewSpace(HeapObject* heap_object);
-  inline bool InFromSpace(Object* object);
-  inline bool InFromSpace(MaybeObject* object);
-  inline bool InFromSpace(HeapObject* heap_object);
-  inline bool InToSpace(Object* object);
-  inline bool InToSpace(MaybeObject* object);
-  inline bool InToSpace(HeapObject* heap_object);
+  static inline bool InNewSpace(Object* object);
+  static inline bool InNewSpace(MaybeObject* object);
+  static inline bool InNewSpace(HeapObject* heap_object);
+  static inline bool InFromSpace(Object* object);
+  static inline bool InFromSpace(MaybeObject* object);
+  static inline bool InFromSpace(HeapObject* heap_object);
+  static inline bool InToSpace(Object* object);
+  static inline bool InToSpace(MaybeObject* object);
+  static inline bool InToSpace(HeapObject* heap_object);
 
   // Returns whether the object resides in old space.
   inline bool InOldSpace(Object* object);
+
+  // Returns whether the object resides in read-only space.
+  inline bool InReadOnlySpace(Object* object);
 
   // Checks whether an address/object in the heap (including auxiliary
   // area and unused area).
@@ -1371,6 +1104,10 @@ class Heap {
   bool InSpaceSlow(Address addr, AllocationSpace space);
   inline bool InNewSpaceSlow(Address address);
   inline bool InOldSpaceSlow(Address address);
+
+  // Find the heap which owns this HeapObject. Should never be called for
+  // objects in RO space.
+  static inline Heap* FromWritableHeapObject(const HeapObject* obj);
 
   // ===========================================================================
   // Object statistics tracking. ===============================================
@@ -1414,14 +1151,8 @@ class Heap {
   size_t InitialSemiSpaceSize() { return initial_semispace_size_; }
   size_t MaxOldGenerationSize() { return max_old_generation_size_; }
 
-  static size_t ComputeMaxOldGenerationSize(uint64_t physical_memory) {
-    const size_t old_space_physical_memory_factor = 4;
-    size_t computed_size = static_cast<size_t>(
-        physical_memory / i::MB / old_space_physical_memory_factor *
-        kPointerMultiplier);
-    return Max(Min(computed_size, kMaxOldGenerationSize),
-               kMinOldGenerationSize);
-  }
+  V8_EXPORT_PRIVATE static size_t ComputeMaxOldGenerationSize(
+      uint64_t physical_memory);
 
   static size_t ComputeMaxSemiSpaceSize(uint64_t physical_memory) {
     const uint64_t min_physical_memory = 512 * MB;
@@ -1444,6 +1175,10 @@ class Heap {
 
   // Returns the capacity of the old generation.
   size_t OldGenerationCapacity();
+
+  // Returns the amount of memory currently committed for the heap and memory
+  // held alive by the unmapper.
+  size_t CommittedMemoryOfHeapAndUnmapper();
 
   // Returns the amount of memory currently committed for the heap.
   size_t CommittedMemory();
@@ -1501,8 +1236,8 @@ class Heap {
     survived_since_last_expansion_ += survived;
   }
 
-  inline uint64_t PromotedTotalSize() {
-    return PromotedSpaceSizeOfObjects() + PromotedExternalMemorySize();
+  inline uint64_t OldGenerationObjectsAndPromotedExternalMemorySize() {
+    return OldGenerationSizeOfObjects() + PromotedExternalMemorySize();
   }
 
   inline void UpdateNewSpaceAllocationCounter();
@@ -1531,18 +1266,18 @@ class Heap {
   }
 
   size_t PromotedSinceLastGC() {
-    size_t old_generation_size = PromotedSpaceSizeOfObjects();
+    size_t old_generation_size = OldGenerationSizeOfObjects();
     DCHECK_GE(old_generation_size, old_generation_size_at_last_gc_);
     return old_generation_size - old_generation_size_at_last_gc_;
   }
 
   // This is called by the sweeper when it discovers more free space
-  // as expected at the end of the last GC.
+  // than expected at the end of the preceding GC.
   void NotifyRefinedOldGenerationSize(size_t decreased_bytes) {
     if (old_generation_size_at_last_gc_ != 0) {
-      // PromotedSpaceSizeOfObjects() is now smaller by |decreased_bytes|.
-      // Adjust old_generation_size_at_last_gc_ too so that PromotedSinceLastGC
-      // stay monotonically non-decreasing function.
+      // OldGenerationSizeOfObjects() is now smaller by |decreased_bytes|.
+      // Adjust old_generation_size_at_last_gc_ too, so that PromotedSinceLastGC
+      // continues to increase monotonically, rather than decreasing here.
       DCHECK_GE(old_generation_size_at_last_gc_, decreased_bytes);
       old_generation_size_at_last_gc_ -= decreased_bytes;
     }
@@ -1550,8 +1285,9 @@ class Heap {
 
   int gc_count() const { return gc_count_; }
 
-  // Returns the size of objects residing in non new spaces.
-  size_t PromotedSpaceSizeOfObjects();
+  // Returns the size of objects residing in non-new spaces.
+  // Excludes external memory held by those objects.
+  size_t OldGenerationSizeOfObjects();
 
   // ===========================================================================
   // Prologue/epilogue callback methods.========================================
@@ -1640,6 +1376,7 @@ class Heap {
     return !allocation_trackers_.empty();
   }
 
+  // ===========================================================================
   // Retaining path tracking. ==================================================
   // ===========================================================================
 
@@ -1705,6 +1442,9 @@ class Heap {
   static const char* GarbageCollectionReasonToString(
       GarbageCollectionReason gc_reason);
 
+  // Calculates the nof entries for the full sized number to string cache.
+  inline int MaxNumberToStringCacheSize() const;
+
  private:
   class SkipStoreBufferScope;
 
@@ -1720,6 +1460,7 @@ class Heap {
 
     // Registers an external string.
     inline void AddString(String* string);
+    bool Contains(HeapObject* obj);
 
     void IterateAll(RootVisitor* v);
     void IterateNewSpaceStrings(RootVisitor* v);
@@ -1740,6 +1481,7 @@ class Heap {
 
    private:
     void Verify();
+    void VerifyNewSpace();
 
     Heap* const heap_;
 
@@ -1756,18 +1498,18 @@ class Heap {
   struct StringTypeTable {
     InstanceType type;
     int size;
-    RootListIndex index;
+    RootIndex index;
   };
 
   struct ConstantStringTable {
     const char* contents;
-    RootListIndex index;
+    RootIndex index;
   };
 
   struct StructTable {
     InstanceType type;
     int size;
-    RootListIndex index;
+    RootIndex index;
   };
 
   struct GCCallbackTuple {
@@ -1802,23 +1544,27 @@ class Heap {
 
   static const int kInitialFeedbackCapacity = 256;
 
-  static const int kMaxScavengerTasks = 8;
-
   Heap();
-
-  static String* UpdateNewSpaceReferenceInExternalStringTableEntry(
-      Heap* heap, Object** pointer);
 
   // Selects the proper allocation space based on the pretenuring decision.
   static AllocationSpace SelectSpace(PretenureFlag pretenure) {
-    return (pretenure == TENURED) ? OLD_SPACE : NEW_SPACE;
+    switch (pretenure) {
+      case TENURED_READ_ONLY:
+        return RO_SPACE;
+      case TENURED:
+        return OLD_SPACE;
+      case NOT_TENURED:
+        return NEW_SPACE;
+      default:
+        UNREACHABLE();
+    }
   }
 
   static size_t DefaultGetExternallyAllocatedMemoryInBytesCallback() {
     return 0;
   }
 
-#define ROOT_ACCESSOR(type, name, camel_name) \
+#define ROOT_ACCESSOR(type, name, CamelName) \
   inline void set_##name(type* value);
   ROOT_LIST(ROOT_ACCESSOR)
 #undef ROOT_ACCESSOR
@@ -1827,25 +1573,13 @@ class Heap {
 
   void set_current_gc_flags(int flags) {
     current_gc_flags_ = flags;
-    DCHECK(!ShouldFinalizeIncrementalMarking() ||
-           !ShouldAbortIncrementalMarking());
   }
 
   inline bool ShouldReduceMemory() const {
     return (current_gc_flags_ & kReduceMemoryFootprintMask) != 0;
   }
 
-  inline bool ShouldAbortIncrementalMarking() const {
-    return (current_gc_flags_ & kAbortIncrementalMarkingMask) != 0;
-  }
-
-  inline bool ShouldFinalizeIncrementalMarking() const {
-    return (current_gc_flags_ & kFinalizeIncrementalMarkingMask) != 0;
-  }
-
   int NumberOfScavengeTasks();
-
-  void PreprocessStackTraces();
 
   // Checks whether a global GC is necessary
   GarbageCollector SelectGarbageCollector(AllocationSpace space,
@@ -1875,9 +1609,9 @@ class Heap {
 
   // These five Create*EntryStub functions are here and forced to not be inlined
   // because of a gcc-4.4 bug that assigns wrong vtable entries.
-  NO_INLINE(void CreateJSEntryStub());
-  NO_INLINE(void CreateJSConstructEntryStub());
-  NO_INLINE(void CreateJSRunMicrotasksEntryStub());
+  V8_NOINLINE void CreateJSEntryStub();
+  V8_NOINLINE void CreateJSConstructEntryStub();
+  V8_NOINLINE void CreateJSRunMicrotasksEntryStub();
 
   void CreateFixedStubs();
 
@@ -1905,8 +1639,6 @@ class Heap {
   // Record statistics after garbage collection.
   void ReportStatisticsAfterGC();
 
-  // Creates and installs the full-sized number string cache.
-  int FullSizeNumberStringCacheLength();
   // Flush the number to string cache.
   void FlushNumberStringCache();
 
@@ -1942,19 +1674,22 @@ class Heap {
   void AddToRingBuffer(const char* string);
   void GetFromRingBuffer(char* buffer);
 
-  void CompactRetainedMaps(ArrayList* retained_maps);
+  void CompactRetainedMaps(WeakArrayList* retained_maps);
 
   void CollectGarbageOnMemoryPressure();
 
+  void EagerlyFreeExternalMemory();
+
   bool InvokeNearHeapLimitCallback();
 
-  void ComputeFastPromotionMode(double survival_rate);
+  void ComputeFastPromotionMode();
 
   // Attempt to over-approximate the weak closure by marking object groups and
   // implicit references from global handles, but don't atomically complete
   // marking. If we continue to mark incrementally, we might have marked
   // objects that die later.
-  void FinalizeIncrementalMarking(GarbageCollectionReason gc_reason);
+  void FinalizeIncrementalMarkingIncrementally(
+      GarbageCollectionReason gc_reason);
 
   // Returns the timer used for a given GC type.
   // - GCScavenger: young generation GC
@@ -2016,9 +1751,12 @@ class Heap {
   // ===========================================================================
 
   inline size_t OldGenerationSpaceAvailable() {
-    if (old_generation_allocation_limit_ <= PromotedTotalSize()) return 0;
+    if (old_generation_allocation_limit_ <=
+        OldGenerationObjectsAndPromotedExternalMemorySize())
+      return 0;
     return old_generation_allocation_limit_ -
-           static_cast<size_t>(PromotedTotalSize());
+           static_cast<size_t>(
+               OldGenerationObjectsAndPromotedExternalMemorySize());
   }
 
   // We allow incremental marking to overshoot the allocation limit for
@@ -2028,8 +1766,11 @@ class Heap {
     // This guards against too eager finalization in small heaps.
     // The number is chosen based on v8.browsing_mobile on Nexus 7v2.
     size_t kMarginForSmallHeaps = 32u * MB;
-    if (old_generation_allocation_limit_ >= PromotedTotalSize()) return false;
-    uint64_t overshoot = PromotedTotalSize() - old_generation_allocation_limit_;
+    if (old_generation_allocation_limit_ >=
+        OldGenerationObjectsAndPromotedExternalMemorySize())
+      return false;
+    uint64_t overshoot = OldGenerationObjectsAndPromotedExternalMemorySize() -
+                         old_generation_allocation_limit_;
     // Overshoot margin is 50% of allocation limit or half-way to the max heap
     // with special handling of small heaps.
     uint64_t margin =
@@ -2047,9 +1788,18 @@ class Heap {
   void CheckIneffectiveMarkCompact(size_t old_generation_size,
                                    double mutator_utilization);
 
+  inline void IncrementExternalBackingStoreBytes(ExternalBackingStoreType type,
+                                                 size_t amount);
+
+  inline void DecrementExternalBackingStoreBytes(ExternalBackingStoreType type,
+                                                 size_t amount);
+
   // ===========================================================================
   // Growing strategy. =========================================================
   // ===========================================================================
+
+  HeapController* heap_controller() { return heap_controller_; }
+  MemoryReducer* memory_reducer() { return memory_reducer_; }
 
   // For some webpages RAIL mode does not switch from PERFORMANCE_LOAD.
   // This constant limits the effect of load RAIL mode on GC.
@@ -2059,31 +1809,19 @@ class Heap {
 
   bool ShouldOptimizeForLoadTime();
 
-  // Decrease the allocation limit if the new limit based on the given
-  // parameters is lower than the current limit.
-  void DampenOldGenerationAllocationLimit(size_t old_gen_size, double gc_speed,
-                                          double mutator_speed);
-
-  // Calculates the allocation limit based on a given growing factor and a
-  // given old generation size.
-  size_t CalculateOldGenerationAllocationLimit(double factor,
-                                               size_t old_gen_size);
-
-  // Sets the allocation limit to trigger the next full garbage collection.
-  void SetOldGenerationAllocationLimit(size_t old_gen_size, double gc_speed,
-                                       double mutator_speed);
-
-  size_t MinimumAllocationLimitGrowingStep();
-
   size_t old_generation_allocation_limit() const {
     return old_generation_allocation_limit_;
   }
 
-  bool always_allocate() { return always_allocate_scope_count_.Value() != 0; }
+  bool always_allocate() { return always_allocate_scope_count_ != 0; }
 
   bool CanExpandOldGeneration(size_t size);
 
   bool ShouldExpandOldGenerationOnSlowAllocation();
+
+  enum class HeapGrowingMode { kSlow, kConservative, kMinimal, kDefault };
+
+  HeapGrowingMode CurrentHeapGrowingMode();
 
   enum class IncrementalMarkingLimit { kNoLimit, kSoftLimit, kHardLimit };
   IncrementalMarkingLimit IncrementalMarkingLimitReached();
@@ -2123,7 +1861,22 @@ class Heap {
       int size_in_bytes, AllocationSpace space,
       AllocationAlignment aligment = kWordAligned);
 
-  HeapObject* AllocateRawWithRetry(
+  // This method will try to perform an allocation of a given size in a given
+  // space. If the allocation fails, a regular full garbage collection is
+  // triggered and the allocation is retried. This is performed multiple times.
+  // If after that retry procedure the allocation still fails nullptr is
+  // returned.
+  HeapObject* AllocateRawWithLightRetry(
+      int size, AllocationSpace space,
+      AllocationAlignment alignment = kWordAligned);
+
+  // This method will try to perform an allocation of a given size in a given
+  // space. If the allocation fails, a regular full garbage collection is
+  // triggered and the allocation is retried. This is performed multiple times.
+  // If after that retry procedure the allocation still fails a "hammer"
+  // garbage collection is triggered which tries to significantly reduce memory.
+  // If the allocation still fails after that a fatal error is thrown.
+  HeapObject* AllocateRawWithRetryOrFail(
       int size, AllocationSpace space,
       AllocationAlignment alignment = kWordAligned);
   HeapObject* AllocateRawCodeInLargeObjectSpace(int size);
@@ -2132,9 +1885,16 @@ class Heap {
   V8_WARN_UNUSED_RESULT AllocationResult Allocate(Map* map,
                                                   AllocationSpace space);
 
+  // Takes a code object and checks if it is on memory which is not subject to
+  // compaction. This method will return a new code object on an immovable
+  // memory location if the original code object was movable.
+  HeapObject* EnsureImmovableCode(HeapObject* heap_object, int object_size);
+
   // Allocates a partial map for bootstrapping.
   V8_WARN_UNUSED_RESULT AllocationResult
   AllocatePartialMap(InstanceType instance_type, int instance_size);
+
+  void FinalizePartialMap(Map* map);
 
   // Allocate empty fixed typed array of given type.
   V8_WARN_UNUSED_RESULT AllocationResult
@@ -2147,7 +1907,7 @@ class Heap {
   // ===========================================================================
 
   void AddRetainer(HeapObject* retainer, HeapObject* object);
-  void AddEphemeralRetainer(HeapObject* retainer, HeapObject* object);
+  void AddEphemeronRetainer(HeapObject* retainer, HeapObject* object);
   void AddRetainingRoot(Root root, HeapObject* object);
   // Returns true if the given object is a target of retaining path tracking.
   // Stores the option corresponding to the object in the provided *option.
@@ -2155,125 +1915,144 @@ class Heap {
   void PrintRetainingPath(HeapObject* object, RetainingPathOption option);
 
   // The amount of external memory registered through the API.
-  int64_t external_memory_;
+  int64_t external_memory_ = 0;
 
   // The limit when to trigger memory pressure from the API.
-  int64_t external_memory_limit_;
+  int64_t external_memory_limit_ = kExternalAllocationSoftLimit;
 
   // Caches the amount of external memory registered at the last MC.
-  int64_t external_memory_at_last_mark_compact_;
+  int64_t external_memory_at_last_mark_compact_ = 0;
 
   // The amount of memory that has been freed concurrently.
-  base::AtomicNumber<intptr_t> external_memory_concurrently_freed_;
+  std::atomic<intptr_t> external_memory_concurrently_freed_{0};
 
   // This can be calculated directly from a pointer to the heap; however, it is
   // more expedient to get at the isolate directly from within Heap methods.
-  Isolate* isolate_;
+  Isolate* isolate_ = nullptr;
 
-  Object* roots_[kRootListLength];
+  RootsTable roots_;
 
   // This table is accessed from builtin code compiled into the snapshot, and
   // thus its offset from roots_ must remain static. This is verified in
   // Isolate::Init() using runtime checks.
   static constexpr int kRootsExternalReferenceTableOffset =
-      kRootListLength * kPointerSize;
+      static_cast<int>(RootIndex::kRootListLength) * kPointerSize;
   ExternalReferenceTable external_reference_table_;
 
-  size_t code_range_size_;
-  size_t max_semi_space_size_;
-  size_t initial_semispace_size_;
-  size_t max_old_generation_size_;
+  // As external references above, builtins are accessed through an offset from
+  // the roots register. Its offset from roots_ must remain static. This is
+  // verified in Isolate::Init() using runtime checks.
+  static constexpr int kRootsBuiltinsOffset =
+      kRootsExternalReferenceTableOffset +
+      ExternalReferenceTable::SizeInBytes();
+  Object* builtins_[Builtins::builtin_count];
+
+  // kRootRegister may be used to address any location that starts at the
+  // Isolate and ends at this point. Fields past this point are not guaranteed
+  // to live at a static offset from kRootRegister.
+  static constexpr int kRootRegisterAddressableEndOffset =
+      kRootsBuiltinsOffset + Builtins::builtin_count * kPointerSize;
+
+  size_t code_range_size_ = 0;
+  size_t max_semi_space_size_ = 8 * (kPointerSize / 4) * MB;
+  size_t initial_semispace_size_ = kMinSemiSpaceSizeInKB * KB;
+  size_t max_old_generation_size_ = 700ul * (kPointerSize / 4) * MB;
   size_t initial_max_old_generation_size_;
   size_t initial_old_generation_size_;
-  bool old_generation_size_configured_;
-  size_t maximum_committed_;
+  bool old_generation_size_configured_ = false;
+  size_t maximum_committed_ = 0;
+
+  // Backing store bytes (array buffers and external strings).
+  std::atomic<size_t> backing_store_bytes_{0};
 
   // For keeping track of how much data has survived
   // scavenge since last new space expansion.
-  size_t survived_since_last_expansion_;
+  size_t survived_since_last_expansion_ = 0;
 
   // ... and since the last scavenge.
-  size_t survived_last_scavenge_;
+  size_t survived_last_scavenge_ = 0;
 
   // This is not the depth of nested AlwaysAllocateScope's but rather a single
   // count, as scopes can be acquired from multiple tasks (read: threads).
-  base::AtomicNumber<size_t> always_allocate_scope_count_;
+  std::atomic<size_t> always_allocate_scope_count_{0};
 
   // Stores the memory pressure level that set by MemoryPressureNotification
   // and reset by a mark-compact garbage collection.
-  base::AtomicValue<MemoryPressureLevel> memory_pressure_level_;
+  std::atomic<MemoryPressureLevel> memory_pressure_level_;
 
   std::vector<std::pair<v8::NearHeapLimitCallback, void*> >
       near_heap_limit_callbacks_;
 
   // For keeping track of context disposals.
-  int contexts_disposed_;
+  int contexts_disposed_ = 0;
 
   // The length of the retained_maps array at the time of context disposal.
   // This separates maps in the retained_maps array that were created before
   // and after context disposal.
-  int number_of_disposed_maps_;
+  int number_of_disposed_maps_ = 0;
 
-  NewSpace* new_space_;
-  OldSpace* old_space_;
-  OldSpace* code_space_;
-  MapSpace* map_space_;
-  LargeObjectSpace* lo_space_;
-  ReadOnlySpace* read_only_space_;
+  NewSpace* new_space_ = nullptr;
+  OldSpace* old_space_ = nullptr;
+  CodeSpace* code_space_ = nullptr;
+  MapSpace* map_space_ = nullptr;
+  LargeObjectSpace* lo_space_ = nullptr;
+  NewLargeObjectSpace* new_lo_space_ = nullptr;
+  ReadOnlySpace* read_only_space_ = nullptr;
   // Map from the space id to the space.
   Space* space_[LAST_SPACE + 1];
 
   // Determines whether code space is write-protected. This is essentially a
   // race-free copy of the {FLAG_write_protect_code_memory} flag.
-  bool write_protect_code_memory_;
+  bool write_protect_code_memory_ = false;
 
   // Holds the number of open CodeSpaceMemoryModificationScopes.
-  uintptr_t code_space_memory_modification_scope_depth_;
+  uintptr_t code_space_memory_modification_scope_depth_ = 0;
 
-  HeapState gc_state_;
-  int gc_post_processing_depth_;
+  HeapState gc_state_ = NOT_IN_GC;
+
+  int gc_post_processing_depth_ = 0;
 
   // Returns the amount of external memory registered since last global gc.
   uint64_t PromotedExternalMemorySize();
 
   // How many "runtime allocations" happened.
-  uint32_t allocations_count_;
+  uint32_t allocations_count_ = 0;
 
   // Running hash over allocations performed.
-  uint32_t raw_allocations_hash_;
+  uint32_t raw_allocations_hash_ = 0;
 
   // Starts marking when stress_marking_percentage_% of the marking start limit
   // is reached.
-  int stress_marking_percentage_;
+  int stress_marking_percentage_ = 0;
 
   // Observer that causes more frequent checks for reached incremental marking
   // limit.
-  AllocationObserver* stress_marking_observer_;
+  AllocationObserver* stress_marking_observer_ = nullptr;
 
   // Observer that can cause early scavenge start.
-  StressScavengeObserver* stress_scavenge_observer_;
+  StressScavengeObserver* stress_scavenge_observer_ = nullptr;
 
-  bool allocation_step_in_progress_;
+  bool allocation_step_in_progress_ = false;
 
   // The maximum percent of the marking limit reached wihout causing marking.
   // This is tracked when specyfing --fuzzer-gc-analysis.
-  double max_marking_limit_reached_;
+  double max_marking_limit_reached_ = 0.0;
 
   // How many mark-sweep collections happened.
-  unsigned int ms_count_;
+  unsigned int ms_count_ = 0;
 
   // How many gc happened.
-  unsigned int gc_count_;
+  unsigned int gc_count_ = 0;
 
   // The number of Mark-Compact garbage collections that are considered as
   // ineffective. See IsIneffectiveMarkCompact() predicate.
-  int consecutive_ineffective_mark_compacts_;
+  int consecutive_ineffective_mark_compacts_ = 0;
 
   static const uintptr_t kMmapRegionMask = 0xFFFFFFFFu;
-  uintptr_t mmap_region_base_;
+  uintptr_t mmap_region_base_ = 0;
 
   // For post mortem debugging.
-  int remembered_unmapped_pages_index_;
+  int remembered_unmapped_pages_index_ = 0;
   Address remembered_unmapped_pages_[kRememberedUnmappedPages];
 
   // Limit that triggers a global GC on the next (normally caused) GC.  This
@@ -2284,17 +2063,12 @@ class Heap {
 
   // Indicates that inline bump-pointer allocation has been globally disabled
   // for all spaces. This is used to disable allocations in generated code.
-  bool inline_allocation_disabled_;
+  bool inline_allocation_disabled_ = false;
 
   // Weak list heads, threaded through the objects.
   // List heads are initialized lazily and contain the undefined_value at start.
   Object* native_contexts_list_;
   Object* allocation_sites_list_;
-
-  // List of encountered weak collections (JSWeakMap and JSWeakSet) during
-  // marking. It is initialized during marking, destroyed after marking and
-  // contains Smi(0) while marking is not active.
-  Object* encountered_weak_collections_;
 
   std::vector<GCCallbackTuple> gc_epilogue_callbacks_;
   std::vector<GCCallbackTuple> gc_prologue_callbacks_;
@@ -2303,69 +2077,62 @@ class Heap {
 
   int deferred_counters_[v8::Isolate::kUseCounterFeatureCount];
 
-  GCTracer* tracer_;
-
-  size_t promoted_objects_size_;
-  double promotion_ratio_;
-  double promotion_rate_;
-  size_t semi_space_copied_object_size_;
-  size_t previous_semi_space_copied_object_size_;
-  double semi_space_copied_rate_;
-  int nodes_died_in_new_space_;
-  int nodes_copied_in_new_space_;
-  int nodes_promoted_;
+  size_t promoted_objects_size_ = 0;
+  double promotion_ratio_ = 0.0;
+  double promotion_rate_ = 0.0;
+  size_t semi_space_copied_object_size_ = 0;
+  size_t previous_semi_space_copied_object_size_ = 0;
+  double semi_space_copied_rate_ = 0.0;
+  int nodes_died_in_new_space_ = 0;
+  int nodes_copied_in_new_space_ = 0;
+  int nodes_promoted_ = 0;
 
   // This is the pretenuring trigger for allocation sites that are in maybe
   // tenure state. When we switched to the maximum new space size we deoptimize
   // the code that belongs to the allocation site and derive the lifetime
   // of the allocation site.
-  unsigned int maximum_size_scavenges_;
+  unsigned int maximum_size_scavenges_ = 0;
 
   // Total time spent in GC.
   double total_gc_time_ms_;
 
   // Last time an idle notification happened.
-  double last_idle_notification_time_;
+  double last_idle_notification_time_ = 0.0;
 
   // Last time a garbage collection happened.
-  double last_gc_time_;
+  double last_gc_time_ = 0.0;
 
-  MarkCompactCollector* mark_compact_collector_;
-  MinorMarkCompactCollector* minor_mark_compact_collector_;
-
-  ArrayBufferCollector* array_buffer_collector_;
-
-  MemoryAllocator* memory_allocator_;
-
-  StoreBuffer* store_buffer_;
-
-  IncrementalMarking* incremental_marking_;
-  ConcurrentMarking* concurrent_marking_;
-
-  GCIdleTimeHandler* gc_idle_time_handler_;
-
-  MemoryReducer* memory_reducer_;
-
-  ObjectStats* live_object_stats_;
-  ObjectStats* dead_object_stats_;
-
-  ScavengeJob* scavenge_job_;
-  base::Semaphore parallel_scavenge_semaphore_;
-
-  AllocationObserver* idle_scavenge_observer_;
+  GCTracer* tracer_ = nullptr;
+  MarkCompactCollector* mark_compact_collector_ = nullptr;
+  MinorMarkCompactCollector* minor_mark_compact_collector_ = nullptr;
+  ScavengerCollector* scavenger_collector_ = nullptr;
+  ArrayBufferCollector* array_buffer_collector_ = nullptr;
+  MemoryAllocator* memory_allocator_ = nullptr;
+  StoreBuffer* store_buffer_ = nullptr;
+  HeapController* heap_controller_ = nullptr;
+  IncrementalMarking* incremental_marking_ = nullptr;
+  ConcurrentMarking* concurrent_marking_ = nullptr;
+  GCIdleTimeHandler* gc_idle_time_handler_ = nullptr;
+  MemoryReducer* memory_reducer_ = nullptr;
+  ObjectStats* live_object_stats_ = nullptr;
+  ObjectStats* dead_object_stats_ = nullptr;
+  ScavengeJob* scavenge_job_ = nullptr;
+  AllocationObserver* idle_scavenge_observer_ = nullptr;
+  LocalEmbedderHeapTracer* local_embedder_heap_tracer_ = nullptr;
+  StrongRootsList* strong_roots_list_ = nullptr;
 
   // This counter is increased before each GC and never reset.
   // To account for the bytes allocated since the last GC, use the
   // NewSpaceAllocationCounter() function.
-  size_t new_space_allocation_counter_;
+  size_t new_space_allocation_counter_ = 0;
 
   // This counter is increased before each GC and never reset. To
   // account for the bytes allocated since the last GC, use the
   // OldGenerationAllocationCounter() function.
-  size_t old_generation_allocation_counter_at_last_gc_;
+  size_t old_generation_allocation_counter_at_last_gc_ = 0;
 
   // The size of objects in old generation after the last MarkCompact GC.
-  size_t old_generation_size_at_last_gc_;
+  size_t old_generation_size_at_last_gc_ = 0;
 
   // The feedback storage is used to store allocation sites (keys) and how often
   // they have been visited (values) by finding a memento behind an object. The
@@ -2377,20 +2144,20 @@ class Heap {
   char trace_ring_buffer_[kTraceRingBufferSize];
 
   // Used as boolean.
-  uint8_t is_marking_flag_;
+  uint8_t is_marking_flag_ = 0;
 
   // If it's not full then the data is from 0 to ring_buffer_end_.  If it's
   // full then the data is from ring_buffer_end_ to the end of the buffer and
   // from 0 to ring_buffer_end_.
-  bool ring_buffer_full_;
-  size_t ring_buffer_end_;
+  bool ring_buffer_full_ = false;
+  size_t ring_buffer_end_ = 0;
 
   // Flag is set when the heap has been configured.  The heap can be repeatedly
   // configured through the API until it is set up.
-  bool configured_;
+  bool configured_ = false;
 
   // Currently set GC flags that are respected by all GC components.
-  int current_gc_flags_;
+  int current_gc_flags_ = Heap::kNoGCFlags;
 
   // Currently set GC callback flags that are used to pass information between
   // the embedder and V8's GC.
@@ -2400,41 +2167,37 @@ class Heap {
 
   base::Mutex relocation_mutex_;
 
-  int gc_callbacks_depth_;
+  int gc_callbacks_depth_ = 0;
 
-  bool deserialization_complete_;
-
-  StrongRootsList* strong_roots_list_;
+  bool deserialization_complete_ = false;
 
   // The depth of HeapIterator nestings.
-  int heap_iterator_depth_;
+  int heap_iterator_depth_ = 0;
 
-  LocalEmbedderHeapTracer* local_embedder_heap_tracer_;
-
-  bool fast_promotion_mode_;
+  bool fast_promotion_mode_ = false;
 
   // Used for testing purposes.
-  bool force_oom_;
-  bool delay_sweeper_tasks_for_testing_;
+  bool force_oom_ = false;
+  bool delay_sweeper_tasks_for_testing_ = false;
 
-  HeapObject* pending_layout_change_object_;
+  HeapObject* pending_layout_change_object_ = nullptr;
 
   base::Mutex unprotected_memory_chunks_mutex_;
   std::unordered_set<MemoryChunk*> unprotected_memory_chunks_;
-  bool unprotected_memory_chunks_registry_enabled_;
+  bool unprotected_memory_chunks_registry_enabled_ = false;
 
 #ifdef V8_ENABLE_ALLOCATION_TIMEOUT
   // If the --gc-interval flag is set to a positive value, this
   // variable holds the value indicating the number of allocations
   // remain until the next failure and garbage collection.
-  int allocation_timeout_;
+  int allocation_timeout_ = 0;
 #endif  // V8_ENABLE_ALLOCATION_TIMEOUT
 
   std::map<HeapObject*, HeapObject*> retainer_;
   std::map<HeapObject*, Root> retaining_root_;
   // If an object is retained by an ephemeron, then the retaining key of the
   // ephemeron is stored in this map.
-  std::map<HeapObject*, HeapObject*> ephemeral_retainer_;
+  std::map<HeapObject*, HeapObject*> ephemeron_retainer_;
   // For each index inthe retaining_path_targets_ array this map
   // stores the option of the corresponding target.
   std::map<int, RetainingPathOption> retaining_path_target_option_;
@@ -2443,9 +2206,12 @@ class Heap {
 
   // Classes in "heap" can be friends.
   friend class AlwaysAllocateScope;
+  friend class ArrayBufferCollector;
   friend class ConcurrentMarking;
+  friend class EphemeronHashTableMarkingTask;
   friend class GCCallbacksScope;
   friend class GCTracer;
+  friend class MemoryController;
   friend class HeapIterator;
   friend class IdleScavengeObserver;
   friend class IncrementalMarking;
@@ -2462,6 +2228,8 @@ class Heap {
   friend class Page;
   friend class PagedSpace;
   friend class Scavenger;
+  friend class ScavengerCollector;
+  friend class Space;
   friend class StoreBuffer;
   friend class Sweeper;
   friend class heap::TestMemoryAllocatorScope;
@@ -2475,6 +2243,9 @@ class Heap {
   // Used in cctest.
   friend class heap::HeapTester;
 
+  FRIEND_TEST(HeapControllerTest, OldGenerationAllocationLimit);
+  FRIEND_TEST(HeapTest, ExternalLimitDefault);
+  FRIEND_TEST(HeapTest, ExternalLimitStaysAboveDefaultForExplicitHandling);
   DISALLOW_COPY_AND_ASSIGN(Heap);
 };
 
@@ -2485,30 +2256,32 @@ class HeapStats {
   static const int kEndMarker = 0xDECADE01;
 
   intptr_t* start_marker;                  //  0
-  size_t* new_space_size;                  //  1
-  size_t* new_space_capacity;              //  2
-  size_t* old_space_size;                  //  3
-  size_t* old_space_capacity;              //  4
-  size_t* code_space_size;                 //  5
-  size_t* code_space_capacity;             //  6
-  size_t* map_space_size;                  //  7
-  size_t* map_space_capacity;              //  8
-  size_t* lo_space_size;                   //  9
-  size_t* global_handle_count;             // 10
-  size_t* weak_global_handle_count;        // 11
-  size_t* pending_global_handle_count;     // 12
-  size_t* near_death_global_handle_count;  // 13
-  size_t* free_global_handle_count;        // 14
-  size_t* memory_allocator_size;           // 15
-  size_t* memory_allocator_capacity;       // 16
-  size_t* malloced_memory;                 // 17
-  size_t* malloced_peak_memory;            // 18
-  size_t* objects_per_type;                // 19
-  size_t* size_per_type;                   // 20
-  int* os_error;                           // 21
-  char* last_few_messages;                 // 22
-  char* js_stacktrace;                     // 23
-  intptr_t* end_marker;                    // 24
+  size_t* ro_space_size;                   //  1
+  size_t* ro_space_capacity;               //  2
+  size_t* new_space_size;                  //  3
+  size_t* new_space_capacity;              //  4
+  size_t* old_space_size;                  //  5
+  size_t* old_space_capacity;              //  6
+  size_t* code_space_size;                 //  7
+  size_t* code_space_capacity;             //  8
+  size_t* map_space_size;                  //  9
+  size_t* map_space_capacity;              // 10
+  size_t* lo_space_size;                   // 11
+  size_t* global_handle_count;             // 12
+  size_t* weak_global_handle_count;        // 13
+  size_t* pending_global_handle_count;     // 14
+  size_t* near_death_global_handle_count;  // 15
+  size_t* free_global_handle_count;        // 16
+  size_t* memory_allocator_size;           // 17
+  size_t* memory_allocator_capacity;       // 18
+  size_t* malloced_memory;                 // 19
+  size_t* malloced_peak_memory;            // 20
+  size_t* objects_per_type;                // 21
+  size_t* size_per_type;                   // 22
+  int* os_error;                           // 23
+  char* last_few_messages;                 // 24
+  char* js_stacktrace;                     // 25
+  intptr_t* end_marker;                    // 26
 };
 
 
@@ -2567,6 +2340,7 @@ class CodePageMemoryModificationScope {
 // objects in a heap space but above the allocation pointer.
 class VerifyPointersVisitor : public ObjectVisitor, public RootVisitor {
  public:
+  explicit VerifyPointersVisitor(Heap* heap) : heap_(heap) {}
   void VisitPointers(HeapObject* host, Object** start, Object** end) override;
   void VisitPointers(HeapObject* host, MaybeObject** start,
                      MaybeObject** end) override;
@@ -2576,6 +2350,8 @@ class VerifyPointersVisitor : public ObjectVisitor, public RootVisitor {
  protected:
   virtual void VerifyPointers(HeapObject* host, MaybeObject** start,
                               MaybeObject** end);
+
+  Heap* heap_;
 };
 
 
@@ -2589,7 +2365,7 @@ class VerifySmisVisitor : public RootVisitor {
 // Space iterator for iterating over all the paged spaces of the heap: Map
 // space, old space, code space and optionally read only space. Returns each
 // space in turn, and null when it is done.
-class V8_EXPORT_PRIVATE PagedSpaces BASE_EMBEDDED {
+class V8_EXPORT_PRIVATE PagedSpaces {
  public:
   enum class SpacesSpecifier { kSweepablePagedSpaces, kAllPagedSpaces };
 
@@ -2632,7 +2408,7 @@ class SpaceIterator : public Malloced {
 // nodes filtering uses GC marks, it can't be used during MS/MC GC
 // phases. Also, it is forbidden to interrupt iteration in this mode,
 // as this will leave heap objects marked (and thus, unusable).
-class HeapIterator BASE_EMBEDDED {
+class HeapIterator {
  public:
   enum HeapObjectsFiltering { kNoFiltering, kFilterUnreachable };
 
@@ -2659,7 +2435,7 @@ class HeapIterator BASE_EMBEDDED {
 // Abstract base class for checking whether a weak object should be retained.
 class WeakObjectRetainer {
  public:
-  virtual ~WeakObjectRetainer() {}
+  virtual ~WeakObjectRetainer() = default;
 
   // Return whether this object should be retained. If nullptr is returned the
   // object has no references. Otherwise the address of the retained object
@@ -2675,7 +2451,7 @@ class AllocationObserver {
       : step_size_(step_size), bytes_to_next_step_(step_size) {
     DCHECK_LE(kPointerSize, step_size);
   }
-  virtual ~AllocationObserver() {}
+  virtual ~AllocationObserver() = default;
 
   // Called each time the observed space does an allocation step. This may be
   // more frequently than the step_size we are monitoring (e.g. when there are

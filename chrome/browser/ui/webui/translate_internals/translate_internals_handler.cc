@@ -64,6 +64,10 @@ void TranslateInternalsHandler::RegisterMessages() {
       base::BindRepeating(&TranslateInternalsHandler::OnRemovePrefItem,
                           base::Unretained(this)));
   web_ui()->RegisterMessageCallback(
+      "setRecentTargetLanguage",
+      base::BindRepeating(&TranslateInternalsHandler::OnSetRecentTargetLanguage,
+                          base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
       "requestInfo",
       base::BindRepeating(&TranslateInternalsHandler::OnRequestInfo,
                           base::Unretained(this)));
@@ -127,9 +131,7 @@ void TranslateInternalsHandler::OnTranslateEvent(
 }
 
 void TranslateInternalsHandler::OnRemovePrefItem(const base::ListValue* args) {
-  content::WebContents* web_contents = web_ui()->GetWebContents();
-  Profile* profile =
-      Profile::FromBrowserContext(web_contents->GetBrowserContext());
+  Profile* profile = Profile::FromWebUI(web_ui());
   PrefService* prefs = profile->GetOriginalProfile()->GetPrefs();
   std::unique_ptr<translate::TranslatePrefs> translate_prefs(
       ChromeTranslateClient::CreateTranslatePrefs(prefs));
@@ -164,6 +166,22 @@ void TranslateInternalsHandler::OnRemovePrefItem(const base::ListValue* args) {
   SendPrefsToJs();
 }
 
+void TranslateInternalsHandler::OnSetRecentTargetLanguage(
+    const base::ListValue* args) {
+  Profile* profile = Profile::FromWebUI(web_ui());
+  PrefService* prefs = profile->GetOriginalProfile()->GetPrefs();
+  std::unique_ptr<translate::TranslatePrefs> translate_prefs(
+      ChromeTranslateClient::CreateTranslatePrefs(prefs));
+
+  std::string new_value;
+  if (!args->GetString(0, &new_value))
+    return;
+
+  translate_prefs->SetRecentTargetLanguage(new_value);
+
+  SendPrefsToJs();
+}
+
 void TranslateInternalsHandler::OnOverrideCountry(const base::ListValue* args) {
   std::string country;
   if (args->GetString(0, &country)) {
@@ -190,17 +208,17 @@ void TranslateInternalsHandler::SendMessageToJs(const std::string& message,
 }
 
 void TranslateInternalsHandler::SendPrefsToJs() {
-  content::WebContents* web_contents = web_ui()->GetWebContents();
-  Profile* profile =
-      Profile::FromBrowserContext(web_contents->GetBrowserContext());
+  Profile* profile = Profile::FromWebUI(web_ui());
   PrefService* prefs = profile->GetOriginalProfile()->GetPrefs();
 
   base::DictionaryValue dict;
 
-  static const char* keys[] = {
+  static const char* const keys[] = {
       prefs::kOfferTranslateEnabled,
+      translate::TranslatePrefs::kPrefTranslateRecentTarget,
       translate::TranslatePrefs::kPrefTranslateBlockedLanguages,
-      translate::TranslatePrefs::kPrefTranslateSiteBlacklist,
+      translate::TranslatePrefs::kPrefTranslateSiteBlacklistDeprecated,
+      translate::TranslatePrefs::kPrefTranslateSiteBlacklistWithTime,
       translate::TranslatePrefs::kPrefTranslateWhitelists,
       translate::TranslatePrefs::kPrefTranslateDeniedCount,
       translate::TranslatePrefs::kPrefTranslateIgnoredCount,
@@ -219,9 +237,7 @@ void TranslateInternalsHandler::SendPrefsToJs() {
 
 void TranslateInternalsHandler::SendSupportedLanguagesToJs() {
   // Create translate prefs.
-  content::WebContents* web_contents = web_ui()->GetWebContents();
-  Profile* profile =
-      Profile::FromBrowserContext(web_contents->GetBrowserContext());
+  Profile* profile = Profile::FromWebUI(web_ui());
   PrefService* prefs = profile->GetOriginalProfile()->GetPrefs();
   std::unique_ptr<translate::TranslatePrefs> translate_prefs(
       ChromeTranslateClient::CreateTranslatePrefs(prefs));
@@ -234,11 +250,8 @@ void TranslateInternalsHandler::SendSupportedLanguagesToJs() {
       translate::TranslateDownloadManager::GetSupportedLanguagesLastUpdated();
 
   auto languages_list = std::make_unique<base::ListValue>();
-  for (std::vector<std::string>::iterator it = languages.begin();
-       it != languages.end(); ++it) {
-    const std::string& lang = *it;
+  for (const std::string& lang : languages)
     languages_list->AppendString(lang);
-  }
 
   base::DictionaryValue dict;
   dict.Set("languages", std::move(languages_list));

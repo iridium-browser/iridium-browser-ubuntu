@@ -21,8 +21,6 @@ constexpr int kEstimatedBitrateBps = 300000;
 }  // namespace
 
 namespace webrtc {
-namespace webrtc_cc {
-
 namespace {
 class SimulateOutgoingTrafficIn {
  public:
@@ -65,8 +63,8 @@ class SimulateOutgoingTrafficIn {
   }
   AlrDetector* const alr_detector_;
   int64_t* timestamp_ms_;
-  rtc::Optional<int> interval_ms_;
-  rtc::Optional<int> usage_percentage_;
+  absl::optional<int> interval_ms_;
+  absl::optional<int> usage_percentage_;
 };
 }  // namespace
 
@@ -152,7 +150,7 @@ TEST_F(AlrDetectorTest, BandwidthEstimateChanges) {
 TEST_F(AlrDetectorTest, ParseControlFieldTrial) {
   webrtc::test::ScopedFieldTrials field_trial(
       "WebRTC-ProbingScreenshareBwe/Control/");
-  rtc::Optional<AlrExperimentSettings> parsed_params =
+  absl::optional<AlrExperimentSettings> parsed_params =
       AlrExperimentSettings::CreateFromFieldTrial(
           "WebRTC-ProbingScreenshareBwe");
   EXPECT_FALSE(static_cast<bool>(parsed_params));
@@ -161,7 +159,7 @@ TEST_F(AlrDetectorTest, ParseControlFieldTrial) {
 TEST_F(AlrDetectorTest, ParseActiveFieldTrial) {
   webrtc::test::ScopedFieldTrials field_trial(
       "WebRTC-ProbingScreenshareBwe/1.1,2875,85,20,-20,1/");
-  rtc::Optional<AlrExperimentSettings> parsed_params =
+  absl::optional<AlrExperimentSettings> parsed_params =
       AlrExperimentSettings::CreateFromFieldTrial(
           "WebRTC-ProbingScreenshareBwe");
   ASSERT_TRUE(static_cast<bool>(parsed_params));
@@ -173,5 +171,4 @@ TEST_F(AlrDetectorTest, ParseActiveFieldTrial) {
   EXPECT_EQ(1, parsed_params->group_id);
 }
 
-}  // namespace webrtc_cc
 }  // namespace webrtc

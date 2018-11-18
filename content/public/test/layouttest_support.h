@@ -12,22 +12,18 @@
 
 #include "base/callback_forward.h"
 #include "cc/layers/texture_layer.h"
-#include "third_party/blink/public/platform/modules/screen_orientation/web_screen_orientation_type.h"
+#include "third_party/blink/public/common/screen_orientation/web_screen_orientation_type.h"
 
 class GURL;
 
 namespace blink {
+struct Manifest;
 class WebInputEvent;
 class WebLocalFrame;
 struct WebSize;
+class WebURL;
 class WebURLRequest;
 class WebView;
-class WebWidget;
-}
-
-namespace device {
-class MotionData;
-class OrientationData;
 }
 
 namespace gfx {
@@ -43,10 +39,8 @@ class WebWidgetTestProxyBase;
 namespace content {
 
 class RenderFrame;
-class RendererGamepadProvider;
 class RenderView;
 class StoragePartition;
-struct Manifest;
 
 // Turn the browser process into layout test mode.
 void EnableBrowserLayoutTestMode();
@@ -84,40 +78,11 @@ test_runner::WebWidgetTestProxyBase* GetWebWidgetTestProxyBase(
 // Enable injecting of a WebViewTestProxy between WebViews and RenderViews,
 // WebWidgetTestProxy between WebWidgets and RenderWidgets and WebFrameTestProxy
 // between WebFrames and RenderFrames.
-// |view_proxy_creation_callback| is invoked after creating WebViewTestProxy.
-// |widget_proxy_creation_callback| is invoked after creating
-// WebWidgetTestProxy.
-// |frame_proxy_creation_callback| is called after creating WebFrameTestProxy.
-using ViewProxyCreationCallback =
-    base::Callback<void(RenderView*, test_runner::WebViewTestProxyBase*)>;
-using WidgetProxyCreationCallback =
-    base::Callback<void(blink::WebWidget*,
-                        test_runner::WebWidgetTestProxyBase*)>;
-using FrameProxyCreationCallback =
-    base::Callback<void(RenderFrame*, test_runner::WebFrameTestProxyBase*)>;
-void EnableWebTestProxyCreation(
-    const ViewProxyCreationCallback& view_proxy_creation_callback,
-    const WidgetProxyCreationCallback& widget_proxy_creation_callback,
-    const FrameProxyCreationCallback& frame_proxy_creation_callback);
+void EnableWebTestProxyCreation();
 
-typedef base::OnceCallback<void(const GURL&, const Manifest&)>
+typedef base::OnceCallback<void(const GURL&, const blink::Manifest&)>
     FetchManifestCallback;
 void FetchManifest(blink::WebView* view, FetchManifestCallback callback);
-
-// Sets gamepad provider to be used for layout tests.
-void SetMockGamepadProvider(std::unique_ptr<RendererGamepadProvider> provider);
-
-// Sets a double that should be used when registering
-// a listener through BlinkPlatformImpl::setDeviceLightListener().
-void SetMockDeviceLightData(const double data);
-
-// Sets MotionData that should be used when registering
-// a listener through BlinkPlatformImpl::setDeviceMotionListener().
-void SetMockDeviceMotionData(const device::MotionData& data);
-
-// Sets OrientationData that should be used when registering
-// a listener through BlinkPlatformImpl::setDeviceOrientationListener().
-void SetMockDeviceOrientationData(const device::OrientationData& data);
 
 // Returns the length of the local session history of a render view.
 int GetLocalSessionHistoryLength(RenderView* render_view);
@@ -175,7 +140,7 @@ void DisableAutoResizeMode(RenderView* render_view,
                            const blink::WebSize& new_size);
 
 // Run all pending idle tasks immediately, and then invoke callback.
-void SchedulerRunIdleTasks(const base::Closure& callback);
+void SchedulerRunIdleTasks(base::OnceClosure callback);
 
 // Causes the RenderWidget corresponding to |render_frame| to update its
 // TextInputState.
@@ -185,6 +150,12 @@ void ForceTextInputStateUpdateForRenderFrame(RenderFrame* render_frame);
 // Returns true if the navigation identified by the |request| was initiated by
 // the browser or renderer.
 bool IsNavigationInitiatedByRenderer(const blink::WebURLRequest& request);
+
+// RewriteURLFunction must be safe to call from any thread in the renderer
+// process.
+using RewriteURLFunction = blink::WebURL (*)(const std::string&,
+                                             bool is_wpt_mode);
+void SetWorkerRewriteURLFunction(RewriteURLFunction rewrite_url_function);
 
 }  // namespace content
 

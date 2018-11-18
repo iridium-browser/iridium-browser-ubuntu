@@ -18,8 +18,6 @@ class Value;
 }
 
 class DeviceManager;
-class PortManager;
-class PortServer;
 struct Session;
 class Status;
 class URLRequestContextGetter;
@@ -27,24 +25,25 @@ class URLRequestContextGetter;
 struct InitSessionParams {
   InitSessionParams(scoped_refptr<URLRequestContextGetter> context_getter,
                     const SyncWebSocketFactory& socket_factory,
-                    DeviceManager* device_manager,
-                    PortServer* port_server,
-                    PortManager* port_manager);
+                    DeviceManager* device_manager);
   InitSessionParams(const InitSessionParams& other);
   ~InitSessionParams();
 
   scoped_refptr<URLRequestContextGetter> context_getter;
   SyncWebSocketFactory socket_factory;
   DeviceManager* device_manager;
-  PortServer* port_server;
-  PortManager* port_manager;
 };
 
 bool MergeCapabilities(const base::DictionaryValue* always_match,
                        const base::DictionaryValue* first_match,
                        base::DictionaryValue* merged);
 
-bool MatchCapabilities(base::DictionaryValue* capabilities);
+bool MatchCapabilities(const base::DictionaryValue* capabilities);
+
+Status ProcessCapabilities(const base::DictionaryValue& params,
+                           base::DictionaryValue* result_capabilities);
+
+std::string WebViewIdToWindowHandle(const std::string& web_view_id);
 
 // Initializes a session.
 Status ExecuteInitSession(const InitSessionParams& bound_params,
@@ -60,11 +59,6 @@ Status ExecuteQuit(bool allow_detach,
 
 // Gets the capabilities of a particular session.
 Status ExecuteGetSessionCapabilities(Session* session,
-                                     const base::DictionaryValue& params,
-                                     std::unique_ptr<base::Value>* value);
-
-// Retrieve the handle of the target window.
-Status ExecuteGetCurrentWindowHandle(Session* session,
                                      const base::DictionaryValue& params,
                                      std::unique_ptr<base::Value>* value);
 
@@ -86,9 +80,9 @@ Status ExecuteSwitchToWindow(Session* session,
 
 // Configure the amount of time that a particular type of operation can execute
 // for before they are aborted and a timeout error is returned to the client.
-Status ExecuteSetTimeout(Session* session,
-                         const base::DictionaryValue& params,
-                         std::unique_ptr<base::Value>* value);
+Status ExecuteSetTimeouts(Session* session,
+                          const base::DictionaryValue& params,
+                          std::unique_ptr<base::Value>* value);
 
 // Get the implicit, script and page load timeouts in milliseconds.
 Status ExecuteGetTimeouts(Session* session,
@@ -200,5 +194,9 @@ Status ExecuteSetScreenOrientation(Session* session,
 Status ExecuteDeleteScreenOrientation(Session* session,
                                       const base::DictionaryValue& params,
                                       std::unique_ptr<base::Value>* value);
+
+Status ExecuteGenerateTestReport(Session* session,
+                                 const base::DictionaryValue& params,
+                                 std::unique_ptr<base::Value>* value);
 
 #endif  // CHROME_TEST_CHROMEDRIVER_SESSION_COMMANDS_H_

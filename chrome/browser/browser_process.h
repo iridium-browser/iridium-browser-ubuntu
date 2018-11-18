@@ -37,12 +37,11 @@ class ProfileManager;
 class StatusTray;
 class SystemNetworkContextManager;
 class WatchDogThread;
-#if BUILDFLAG(ENABLE_WEBRTC)
 class WebRtcLogUploader;
-#endif
 
-namespace content {
-class NetworkConnectionTracker;
+namespace network {
+class NetworkQualityTracker;
+class SharedURLLoaderFactory;
 }
 
 namespace safe_browsing {
@@ -92,10 +91,6 @@ class NetworkTimeTracker;
 
 namespace optimization_guide {
 class OptimizationGuideService;
-}
-
-namespace physical_web {
-class PhysicalWebDataSource;
 }
 
 namespace policy {
@@ -156,6 +151,8 @@ class BrowserProcess {
   virtual ProfileManager* profile_manager() = 0;
   virtual PrefService* local_state() = 0;
   virtual net::URLRequestContextGetter* system_request_context() = 0;
+  virtual scoped_refptr<network::SharedURLLoaderFactory>
+  shared_url_loader_factory() = 0;
   virtual variations::VariationsService* variations_service() = 0;
 
   virtual BrowserProcessPlatformPart* platform_part() = 0;
@@ -175,8 +172,8 @@ class BrowserProcess {
   //
   // Can be NULL close to startup and shutdown.
   //
-  // NOTE: If you want to post a task to the IO thread, use
-  // BrowserThread::PostTask (or other variants).
+  // NOTE: If you want to post a task to the IO thread, see
+  // browser_task_traits.h.
   virtual IOThread* io_thread() = 0;
 
   // Replacement for IOThread (And ChromeNetLog). It owns and manages the
@@ -185,9 +182,9 @@ class BrowserProcess {
   // backed by the IOThread's URLRequestContext.
   virtual SystemNetworkContextManager* system_network_context_manager() = 0;
 
-  // Returns a NetworkConnectionTracker that can be used to subscribe for
-  // network change events.
-  virtual content::NetworkConnectionTracker* network_connection_tracker() = 0;
+  // Returns a NetworkQualityTracker that can be used to subscribe for
+  // network quality change events.
+  virtual network::NetworkQualityTracker* network_quality_tracker() = 0;
 
   // Returns the thread that is used for health check of all browser threads.
   virtual WatchDogThread* watchdog_thread() = 0;
@@ -221,8 +218,11 @@ class BrowserProcess {
   // defined in BCP 47. The region subtag is not included when it adds no
   // distinguishing information to the language tag (e.g. both "en-US" and "fr"
   // are correct here).
+  // When setting the locale, |preferred_locale| is the original desired locale.
+  // The actual application locale may differ.
   virtual const std::string& GetApplicationLocale() = 0;
-  virtual void SetApplicationLocale(const std::string& locale) = 0;
+  virtual void SetApplicationLocale(const std::string& actual_locale,
+                                    const std::string& preferred_locale) = 0;
 
   virtual DownloadStatusUpdater* download_status_updater() = 0;
   virtual DownloadRequestLimiter* download_request_limiter() = 0;
@@ -275,9 +275,7 @@ class BrowserProcess {
 
   virtual MediaFileSystemRegistry* media_file_system_registry() = 0;
 
-#if BUILDFLAG(ENABLE_WEBRTC)
   virtual WebRtcLogUploader* webrtc_log_uploader() = 0;
-#endif
 
   virtual network_time::NetworkTimeTracker* network_time_tracker() = 0;
 
@@ -291,9 +289,6 @@ class BrowserProcess {
   // process startup and now.
   virtual shell_integration::DefaultWebClientState
   CachedDefaultWebClientState() = 0;
-
-  // Returns the Physical Web data source.
-  virtual physical_web::PhysicalWebDataSource* GetPhysicalWebDataSource() = 0;
 
   virtual prefs::InProcessPrefServiceFactory* pref_service_factory() const = 0;
 

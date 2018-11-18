@@ -31,7 +31,6 @@
 #include "third_party/blink/renderer/core/svg/svg_animated_integer.h"
 
 #include "third_party/blink/renderer/core/svg/svg_animated_integer_optional_integer.h"
-#include "third_party/blink/renderer/core/svg/svg_element.h"
 
 namespace blink {
 
@@ -48,12 +47,6 @@ void SVGAnimatedInteger::Trace(blink::Visitor* visitor) {
   visitor->Trace(parent_integer_optional_integer_);
   SVGAnimatedProperty<SVGInteger>::Trace(visitor);
   ScriptWrappable::Trace(visitor);
-}
-
-void SVGAnimatedInteger::TraceWrappers(
-    const ScriptWrappableVisitor* visitor) const {
-  SVGAnimatedProperty<SVGInteger>::TraceWrappers(visitor);
-  ScriptWrappable::TraceWrappers(visitor);
 }
 
 }  // namespace blink

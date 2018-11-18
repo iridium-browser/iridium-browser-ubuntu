@@ -52,7 +52,6 @@ absl_library(
     ${TEST_INSTANCE_TRACKER_LIB_SRC}
   PUBLIC_LIBRARIES
     absl::container
-  DISABLE_INSTALL
 )
 
 
@@ -81,6 +80,25 @@ absl_test(
     ${FIXED_ARRAY_TEST_SRC}
   PUBLIC_LIBRARIES
     ${FIXED_ARRAY_TEST_PUBLIC_LIBRARIES}
+)
+
+
+# test fixed_array_exception_safety_test
+set(FIXED_ARRAY_EXCEPTION_SAFETY_TEST_SRC "fixed_array_exception_safety_test.cc")
+set(FIXED_ARRAY_EXCEPTION_SAFETY_TEST_PUBLIC_LIBRARIES
+  absl::container
+  absl_base_internal_exception_safety_testing
+)
+
+absl_test(
+  TARGET
+    fixed_array_exception_safety_test
+  SOURCES
+    ${FIXED_ARRAY_EXCEPTION_SAFETY_TEST_SRC}
+  PUBLIC_LIBRARIES
+    ${FIXED_ARRAY_EXCEPTION_SAFETY_TEST_PUBLIC_LIBRARIES}
+  PRIVATE_COMPILE_FLAGS
+    ${ABSL_EXCEPTIONS_FLAG}
 )
 
 

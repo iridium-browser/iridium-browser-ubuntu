@@ -33,7 +33,6 @@
 
 #include "mojo/public/cpp/bindings/binding.h"
 #include "third_party/blink/public/platform/modules/notifications/notification_service.mojom-blink.h"
-#include "third_party/blink/public/platform/modules/notifications/web_notification_data.h"
 #include "third_party/blink/public/platform/modules/permissions/permission.mojom-blink.h"
 #include "third_party/blink/public/platform/modules/permissions/permission_status.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/active_script_wrappable.h"
@@ -78,7 +77,7 @@ class MODULES_EXPORT Notification final
   // of the notification as either Showing or Closed based on |showing|.
   static Notification* Create(ExecutionContext* context,
                               const String& notification_id,
-                              const WebNotificationData& data,
+                              mojom::blink::NotificationDataPtr data,
                               bool showing);
 
   ~Notification() override;
@@ -92,8 +91,8 @@ class MODULES_EXPORT Notification final
 
   // NonPersistentNotificationListener interface.
   void OnShow() override;
-  void OnClick() override;
-  void OnClose() override;
+  void OnClick(OnClickCallback completed_closure) override;
+  void OnClose(OnCloseCallback completed_closure) override;
 
   String title() const;
   String dir() const;
@@ -131,11 +130,11 @@ class MODULES_EXPORT Notification final
   // ScriptWrappable interface.
   bool HasPendingActivity() const final;
 
-  virtual void Trace(blink::Visitor* visitor);
+  void Trace(blink::Visitor* visitor) override;
 
  protected:
   // EventTarget interface.
-  DispatchEventResult DispatchEventInternal(Event* event) final;
+  DispatchEventResult DispatchEventInternal(Event& event) final;
 
  private:
   // The type of notification this instance represents. Non-persistent
@@ -148,7 +147,7 @@ class MODULES_EXPORT Notification final
 
   Notification(ExecutionContext* context,
                Type type,
-               const WebNotificationData& data);
+               mojom::blink::NotificationDataPtr data);
 
   // Sets the state of the notification in its lifecycle.
   void SetState(State state) { state_ = state; }
@@ -180,7 +179,7 @@ class MODULES_EXPORT Notification final
   Type type_;
   State state_;
 
-  WebNotificationData data_;
+  mojom::blink::NotificationDataPtr data_;
 
   String notification_id_;
 

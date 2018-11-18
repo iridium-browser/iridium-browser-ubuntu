@@ -60,7 +60,7 @@ TEST(PictureLayerTest, NoTilesIfEmptyBounds) {
       FakeLayerTreeFrameSink::CreateSoftware();
   FakeLayerTreeHostImpl host_impl(
       LayerTreeSettings(), &impl_task_runner_provider, &task_graph_runner);
-  host_impl.InitializeRenderer(layer_tree_frame_sink.get());
+  host_impl.InitializeFrameSink(layer_tree_frame_sink.get());
   host_impl.CreatePendingTree();
   std::unique_ptr<FakePictureLayerImpl> layer_impl =
       FakePictureLayerImpl::Create(host_impl.pending_tree(), 1);
@@ -101,7 +101,7 @@ TEST(PictureLayerTest, InvalidateRasterAfterUpdate) {
   FakeLayerTreeHostImpl host_impl(
       layer_tree_settings, &impl_task_runner_provider, &task_graph_runner);
   host_impl.SetVisible(true);
-  host_impl.InitializeRenderer(layer_tree_frame_sink.get());
+  host_impl.InitializeFrameSink(layer_tree_frame_sink.get());
   host_impl.CreatePendingTree();
   host_impl.pending_tree()->SetRootLayerForTesting(
       FakePictureLayerImpl::Create(host_impl.pending_tree(), 1));
@@ -142,7 +142,7 @@ TEST(PictureLayerTest, InvalidateRasterWithoutUpdate) {
   FakeLayerTreeHostImpl host_impl(
       layer_tree_settings, &impl_task_runner_provider, &task_graph_runner);
   host_impl.SetVisible(true);
-  host_impl.InitializeRenderer(layer_tree_frame_sink.get());
+  host_impl.InitializeFrameSink(layer_tree_frame_sink.get());
   host_impl.CreatePendingTree();
   host_impl.pending_tree()->SetRootLayerForTesting(
       FakePictureLayerImpl::Create(host_impl.pending_tree(), 1));
@@ -187,7 +187,7 @@ TEST(PictureLayerTest, ClearVisibleRectWhenNoTiling) {
   FakeLayerTreeHostImpl host_impl(
       layer_tree_settings, &impl_task_runner_provider, &task_graph_runner);
   host_impl.SetVisible(true);
-  EXPECT_TRUE(host_impl.InitializeRenderer(layer_tree_frame_sink.get()));
+  EXPECT_TRUE(host_impl.InitializeFrameSink(layer_tree_frame_sink.get()));
 
   host_impl.CreatePendingTree();
   host_impl.pending_tree()->SetRootLayerForTesting(
@@ -327,8 +327,8 @@ TEST(PictureLayerTest, NonMonotonicSourceFrameNumber) {
   params.task_graph_runner = &task_graph_runner;
   params.main_task_runner = base::ThreadTaskRunnerHandle::Get();
   params.mutator_host = animation_host.get();
-  std::unique_ptr<LayerTreeHost> host1 =
-      LayerTreeHost::CreateSingleThreaded(&single_thread_client, &params);
+  std::unique_ptr<LayerTreeHost> host1 = LayerTreeHost::CreateSingleThreaded(
+      &single_thread_client, std::move(params));
   host1->SetVisible(true);
   host_client1.SetLayerTreeHost(host1.get());
 
@@ -341,8 +341,8 @@ TEST(PictureLayerTest, NonMonotonicSourceFrameNumber) {
   params2.main_task_runner = base::ThreadTaskRunnerHandle::Get();
   params2.client = &host_client2;
   params2.mutator_host = animation_host2.get();
-  std::unique_ptr<LayerTreeHost> host2 =
-      LayerTreeHost::CreateSingleThreaded(&single_thread_client, &params2);
+  std::unique_ptr<LayerTreeHost> host2 = LayerTreeHost::CreateSingleThreaded(
+      &single_thread_client, std::move(params2));
   host2->SetVisible(true);
   host_client2.SetLayerTreeHost(host2.get());
 
@@ -399,8 +399,8 @@ TEST(PictureLayerTest, ChangingHostsWithCollidingFrames) {
   params.task_graph_runner = &task_graph_runner;
   params.main_task_runner = base::ThreadTaskRunnerHandle::Get();
   params.mutator_host = animation_host.get();
-  std::unique_ptr<LayerTreeHost> host1 =
-      LayerTreeHost::CreateSingleThreaded(&single_thread_client, &params);
+  std::unique_ptr<LayerTreeHost> host1 = LayerTreeHost::CreateSingleThreaded(
+      &single_thread_client, std::move(params));
   host1->SetVisible(true);
   host_client1.SetLayerTreeHost(host1.get());
 
@@ -413,8 +413,8 @@ TEST(PictureLayerTest, ChangingHostsWithCollidingFrames) {
   params2.main_task_runner = base::ThreadTaskRunnerHandle::Get();
   params2.client = &host_client2;
   params2.mutator_host = animation_host2.get();
-  std::unique_ptr<LayerTreeHost> host2 =
-      LayerTreeHost::CreateSingleThreaded(&single_thread_client, &params2);
+  std::unique_ptr<LayerTreeHost> host2 = LayerTreeHost::CreateSingleThreaded(
+      &single_thread_client, std::move(params2));
   host2->SetVisible(true);
   host_client2.SetLayerTreeHost(host2.get());
 

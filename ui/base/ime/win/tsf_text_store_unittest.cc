@@ -43,6 +43,8 @@ class MockTextInputClient : public TextInputClient {
   MOCK_CONST_METHOD0(GetCaretBounds, gfx::Rect());
   MOCK_CONST_METHOD2(GetCompositionCharacterBounds, bool(uint32_t, gfx::Rect*));
   MOCK_CONST_METHOD0(HasCompositionText, bool());
+  MOCK_CONST_METHOD0(GetFocusReason, ui::TextInputClient::FocusReason());
+  MOCK_METHOD0(ShouldDoLearning, bool());
   MOCK_CONST_METHOD1(GetTextRange, bool(gfx::Range*));
   MOCK_CONST_METHOD1(GetCompositionTextRange, bool(gfx::Range*));
   MOCK_CONST_METHOD1(GetSelectionRange, bool(gfx::Range*));
@@ -57,7 +59,7 @@ class MockTextInputClient : public TextInputClient {
   MOCK_METHOD1(EnsureCaretNotInRect, void(const gfx::Rect&));
   MOCK_CONST_METHOD1(IsTextEditCommandEnabled, bool(TextEditCommand));
   MOCK_METHOD1(SetTextEditCommandForNextKeyEvent, void(TextEditCommand));
-  MOCK_CONST_METHOD0(GetClientSourceInfo, const std::string&());
+  MOCK_CONST_METHOD0(GetClientSourceForMetrics, ukm::SourceId());
 };
 
 class MockStoreACPSink : public ITextStoreACPSink {

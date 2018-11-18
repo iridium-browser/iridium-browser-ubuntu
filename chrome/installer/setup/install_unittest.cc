@@ -31,13 +31,11 @@
 #include "chrome/installer/setup/install_worker.h"
 #include "chrome/installer/setup/installer_state.h"
 #include "chrome/installer/setup/setup_constants.h"
-#include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/install_util.h"
 #include "chrome/installer/util/installer_util_strings.h"
 #include "chrome/installer/util/l10n_string_util.h"
 #include "chrome/installer/util/master_preferences.h"
 #include "chrome/installer/util/master_preferences_constants.h"
-#include "chrome/installer/util/product.h"
 #include "chrome/installer/util/shell_util.h"
 #include "chrome/installer/util/util_constants.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -48,22 +46,15 @@ namespace {
 // installer::CreateVisualElementsManifest. The parameters are:
 // 0: an index into a brand's install_static::kInstallModes array.
 // 1: the expected manifest.
-// 2: true to test for OS versions that support dark text on light images.
-// 3: true to test brands that include light assets.
 class CreateVisualElementsManifestTest
     : public ::testing::TestWithParam<
-          std::tuple<install_static::InstallConstantIndex,
-                     const char*,
-                     bool,
-                     bool>> {
+          std::tuple<install_static::InstallConstantIndex, const char*>> {
  protected:
   CreateVisualElementsManifestTest()
       : scoped_install_details_(false /* !system_level */,
                                 std::get<0>(GetParam())),
         start_menu_override_(base::DIR_START_MENU),
         expected_manifest_(std::get<1>(GetParam())),
-        supports_dark_text_(std::get<2>(GetParam())),
-        has_light_assets_(std::get<3>(GetParam())),
         version_("0.0.0.0") {}
 
   void SetUp() override {
@@ -104,13 +95,6 @@ class CreateVisualElementsManifestTest
         L"Logo%ls.png", install_static::InstallDetails::Get().logo_suffix());
     ASSERT_NO_FATAL_FAILURE(
         CreateTestFile(visual_elements_dir.Append(light_logo_file_name)));
-    if (has_light_assets_) {
-      base::string16 light_logo_file_name = base::StringPrintf(
-          L"Logo%lsLight.png",
-          install_static::InstallDetails::Get().logo_suffix());
-      ASSERT_NO_FATAL_FAILURE(
-          CreateTestFile(visual_elements_dir.Append(light_logo_file_name)));
-    }
   }
 
   // Creates a bogus file at the location of the start menu shortcut.
@@ -126,12 +110,6 @@ class CreateVisualElementsManifestTest
 
   // The expected contents of the manifest.
   const char* const expected_manifest_;
-
-  // True to generate the manifest for systems that support dark text.
-  const bool supports_dark_text_;
-
-  // True to test for brands that include light assets.
-  const bool has_light_assets_;
 
   // A dummy version number used to create the version directory.
   const base::Version version_;
@@ -160,18 +138,7 @@ constexpr char kExpectedPrimaryManifest[] =
     "      Square70x70Logo='0.0.0.0\\VisualElements\\SmallLogo.png'\r\n"
     "      Square44x44Logo='0.0.0.0\\VisualElements\\SmallLogo.png'\r\n"
     "      ForegroundText='light'\r\n"
-    "      BackgroundColor='#212121'/>\r\n"
-    "</Application>\r\n";
-
-constexpr char kExpectedPrimaryLightManifest[] =
-    "<Application xmlns:xsi='http://www.w3.org/2001/XMLSchema-instance'>\r\n"
-    "  <VisualElements\r\n"
-    "      ShowNameOnSquare150x150Logo='on'\r\n"
-    "      Square150x150Logo='0.0.0.0\\VisualElements\\LogoLight.png'\r\n"
-    "      Square70x70Logo='0.0.0.0\\VisualElements\\SmallLogoLight.png'\r\n"
-    "      Square44x44Logo='0.0.0.0\\VisualElements\\SmallLogoLight.png'\r\n"
-    "      ForegroundText='dark'\r\n"
-    "      BackgroundColor='#212121'/>\r\n"
+    "      BackgroundColor='#5F6368'/>\r\n"
     "</Application>\r\n";
 
 #if defined(GOOGLE_CHROME_BUILD)
@@ -183,20 +150,7 @@ constexpr char kExpectedBetaManifest[] =
     "      Square70x70Logo='0.0.0.0\\VisualElements\\SmallLogoBeta.png'\r\n"
     "      Square44x44Logo='0.0.0.0\\VisualElements\\SmallLogoBeta.png'\r\n"
     "      ForegroundText='light'\r\n"
-    "      BackgroundColor='#212121'/>\r\n"
-    "</Application>\r\n";
-
-constexpr char kExpectedBetaLightManifest[] =
-    "<Application xmlns:xsi='http://www.w3.org/2001/XMLSchema-instance'>\r\n"
-    "  <VisualElements\r\n"
-    "      ShowNameOnSquare150x150Logo='on'\r\n"
-    "      Square150x150Logo='0.0.0.0\\VisualElements\\LogoBetaLight.png'\r\n"
-    "      "
-    "Square70x70Logo='0.0.0.0\\VisualElements\\SmallLogoBetaLight.png'\r\n"
-    "      "
-    "Square44x44Logo='0.0.0.0\\VisualElements\\SmallLogoBetaLight.png'\r\n"
-    "      ForegroundText='dark'\r\n"
-    "      BackgroundColor='#212121'/>\r\n"
+    "      BackgroundColor='#5F6368'/>\r\n"
     "</Application>\r\n";
 
 constexpr char kExpectedDevManifest[] =
@@ -207,18 +161,7 @@ constexpr char kExpectedDevManifest[] =
     "      Square70x70Logo='0.0.0.0\\VisualElements\\SmallLogoDev.png'\r\n"
     "      Square44x44Logo='0.0.0.0\\VisualElements\\SmallLogoDev.png'\r\n"
     "      ForegroundText='light'\r\n"
-    "      BackgroundColor='#212121'/>\r\n"
-    "</Application>\r\n";
-
-constexpr char kExpectedDevLightManifest[] =
-    "<Application xmlns:xsi='http://www.w3.org/2001/XMLSchema-instance'>\r\n"
-    "  <VisualElements\r\n"
-    "      ShowNameOnSquare150x150Logo='on'\r\n"
-    "      Square150x150Logo='0.0.0.0\\VisualElements\\LogoDevLight.png'\r\n"
-    "      Square70x70Logo='0.0.0.0\\VisualElements\\SmallLogoDevLight.png'\r\n"
-    "      Square44x44Logo='0.0.0.0\\VisualElements\\SmallLogoDevLight.png'\r\n"
-    "      ForegroundText='dark'\r\n"
-    "      BackgroundColor='#212121'/>\r\n"
+    "      BackgroundColor='#5F6368'/>\r\n"
     "</Application>\r\n";
 
 constexpr char kExpectedCanaryManifest[] =
@@ -229,101 +172,35 @@ constexpr char kExpectedCanaryManifest[] =
     "      Square70x70Logo='0.0.0.0\\VisualElements\\SmallLogoCanary.png'\r\n"
     "      Square44x44Logo='0.0.0.0\\VisualElements\\SmallLogoCanary.png'\r\n"
     "      ForegroundText='light'\r\n"
-    "      BackgroundColor='#212121'/>\r\n"
+    "      BackgroundColor='#5F6368'/>\r\n"
     "</Application>\r\n";
 
 INSTANTIATE_TEST_CASE_P(
     GoogleChrome,
     CreateVisualElementsManifestTest,
     testing::Combine(testing::Values(install_static::STABLE_INDEX),
-                     testing::Values(kExpectedPrimaryManifest),
-                     testing::Bool(),
-                     testing::Values(false)));
-INSTANTIATE_TEST_CASE_P(
-    GoogleChromeLightAssetNoSupport,
-    CreateVisualElementsManifestTest,
-    testing::Combine(testing::Values(install_static::STABLE_INDEX),
-                     testing::Values(kExpectedPrimaryManifest),
-                     testing::Values(false),
-                     testing::Values(true)));
-INSTANTIATE_TEST_CASE_P(
-    GoogleChromeLightAssetWithSupport,
-    CreateVisualElementsManifestTest,
-    testing::Combine(testing::Values(install_static::STABLE_INDEX),
-                     testing::Values(kExpectedPrimaryLightManifest),
-                     testing::Values(true),
-                     testing::Values(true)));
+                     testing::Values(kExpectedPrimaryManifest)));
 INSTANTIATE_TEST_CASE_P(
     BetaChrome,
     CreateVisualElementsManifestTest,
     testing::Combine(testing::Values(install_static::BETA_INDEX),
-                     testing::Values(kExpectedBetaManifest),
-                     testing::Bool(),
-                     testing::Values(false)));
-INSTANTIATE_TEST_CASE_P(
-    BetaChromeLightAssetNoSupport,
-    CreateVisualElementsManifestTest,
-    testing::Combine(testing::Values(install_static::BETA_INDEX),
-                     testing::Values(kExpectedBetaManifest),
-                     testing::Values(false),
-                     testing::Values(true)));
-INSTANTIATE_TEST_CASE_P(
-    BetaChromeLightAssetWithSupport,
-    CreateVisualElementsManifestTest,
-    testing::Combine(testing::Values(install_static::BETA_INDEX),
-                     testing::Values(kExpectedBetaLightManifest),
-                     testing::Values(true),
-                     testing::Values(true)));
+                     testing::Values(kExpectedBetaManifest)));
 INSTANTIATE_TEST_CASE_P(
     DevChrome,
     CreateVisualElementsManifestTest,
     testing::Combine(testing::Values(install_static::DEV_INDEX),
-                     testing::Values(kExpectedDevManifest),
-                     testing::Bool(),
-                     testing::Values(false)));
-INSTANTIATE_TEST_CASE_P(
-    DevChromeLightAssetsNoSupport,
-    CreateVisualElementsManifestTest,
-    testing::Combine(testing::Values(install_static::DEV_INDEX),
-                     testing::Values(kExpectedDevManifest),
-                     testing::Values(false),
-                     testing::Values(true)));
-INSTANTIATE_TEST_CASE_P(
-    DevChromeLightAssetsWithSupport,
-    CreateVisualElementsManifestTest,
-    testing::Combine(testing::Values(install_static::DEV_INDEX),
-                     testing::Values(kExpectedDevLightManifest),
-                     testing::Values(true),
-                     testing::Values(true)));
+                     testing::Values(kExpectedDevManifest)));
 INSTANTIATE_TEST_CASE_P(
     CanaryChrome,
     CreateVisualElementsManifestTest,
     testing::Combine(testing::Values(install_static::CANARY_INDEX),
-                     testing::Values(kExpectedCanaryManifest),
-                     testing::Bool(),
-                     testing::Values(false)));
+                     testing::Values(kExpectedCanaryManifest)));
 #else
 INSTANTIATE_TEST_CASE_P(
     Chromium,
     CreateVisualElementsManifestTest,
     testing::Combine(testing::Values(install_static::CHROMIUM_INDEX),
-                     testing::Values(kExpectedPrimaryManifest),
-                     testing::Bool(),
-                     testing::Values(false)));
-INSTANTIATE_TEST_CASE_P(
-    ChromiumLightAssetNoSupport,
-    CreateVisualElementsManifestTest,
-    testing::Combine(testing::Values(install_static::CHROMIUM_INDEX),
-                     testing::Values(kExpectedPrimaryManifest),
-                     testing::Values(false),
-                     testing::Values(true)));
-INSTANTIATE_TEST_CASE_P(
-    ChromiumLightAssetWithSupport,
-    CreateVisualElementsManifestTest,
-    testing::Combine(testing::Values(install_static::CHROMIUM_INDEX),
-                     testing::Values(kExpectedPrimaryLightManifest),
-                     testing::Values(true),
-                     testing::Values(true)));
+                     testing::Values(kExpectedPrimaryManifest)));
 #endif
 
 class InstallShortcutTest : public testing::Test {
@@ -331,16 +208,12 @@ class InstallShortcutTest : public testing::Test {
   void SetUp() override {
     EXPECT_EQ(S_OK, CoInitialize(NULL));
 
-    dist_ = BrowserDistribution::GetDistribution();
-    ASSERT_TRUE(dist_ != NULL);
-    product_.reset(new installer::Product(dist_));
-
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     chrome_exe_ = temp_dir_.GetPath().Append(installer::kChromeExe);
     EXPECT_EQ(0, base::WriteFile(chrome_exe_, "", 0));
 
     ShellUtil::ShortcutProperties chrome_properties(ShellUtil::CURRENT_USER);
-    product_->AddDefaultShortcutProperties(chrome_exe_, &chrome_properties);
+    ShellUtil::AddDefaultShortcutProperties(chrome_exe_, &chrome_properties);
 
     expected_properties_.set_target(chrome_exe_);
     expected_properties_.set_icon(chrome_properties.icon,
@@ -369,7 +242,8 @@ class InstallShortcutTest : public testing::Test {
     common_start_menu_override_.reset(new base::ScopedPathOverride(
         base::DIR_COMMON_START_MENU, fake_common_start_menu_.GetPath()));
 
-    base::string16 shortcut_name(dist_->GetShortcutName() + installer::kLnkExt);
+    base::string16 shortcut_name(InstallUtil::GetShortcutName() +
+                                 installer::kLnkExt);
 
     user_desktop_shortcut_ = fake_user_desktop_.GetPath().Append(shortcut_name);
     user_quick_launch_shortcut_ =
@@ -378,8 +252,7 @@ class InstallShortcutTest : public testing::Test {
         fake_start_menu_.GetPath().Append(shortcut_name);
     user_start_menu_subdir_shortcut_ =
         fake_start_menu_.GetPath()
-            .Append(dist_->GetStartMenuShortcutSubfolder(
-                BrowserDistribution::SUBFOLDER_CHROME))
+            .Append(InstallUtil::GetChromeShortcutDirNameDeprecated())
             .Append(shortcut_name);
     system_desktop_shortcut_ =
         fake_common_desktop_.GetPath().Append(shortcut_name);
@@ -387,8 +260,7 @@ class InstallShortcutTest : public testing::Test {
         fake_common_start_menu_.GetPath().Append(shortcut_name);
     system_start_menu_subdir_shortcut_ =
         fake_common_start_menu_.GetPath()
-            .Append(dist_->GetStartMenuShortcutSubfolder(
-                BrowserDistribution::SUBFOLDER_CHROME))
+            .Append(InstallUtil::GetChromeShortcutDirNameDeprecated())
             .Append(shortcut_name);
   }
 
@@ -430,9 +302,7 @@ class InstallShortcutTest : public testing::Test {
   base::win::ShortcutProperties expected_properties_;
   base::win::ShortcutProperties expected_start_menu_properties_;
 
-  BrowserDistribution* dist_;
   base::FilePath chrome_exe_;
-  std::unique_ptr<installer::Product> product_;
   std::unique_ptr<installer::MasterPreferences> prefs_;
 
   base::ScopedTempDir temp_dir_;
@@ -461,8 +331,8 @@ class InstallShortcutTest : public testing::Test {
 // Test that VisualElementsManifest.xml is not created when VisualElements are
 // not present.
 TEST_P(CreateVisualElementsManifestTest, VisualElementsManifestNotCreated) {
-  ASSERT_TRUE(installer::CreateVisualElementsManifest(
-      test_dir_.GetPath(), version_, supports_dark_text_));
+  ASSERT_TRUE(
+      installer::CreateVisualElementsManifest(test_dir_.GetPath(), version_));
   ASSERT_FALSE(base::PathExists(manifest_path_));
 }
 
@@ -470,8 +340,8 @@ TEST_P(CreateVisualElementsManifestTest, VisualElementsManifestNotCreated) {
 // VisualElements are present.
 TEST_P(CreateVisualElementsManifestTest, VisualElementsManifestCreated) {
   ASSERT_NO_FATAL_FAILURE(PrepareTestVisualElementsDirectory());
-  ASSERT_TRUE(installer::CreateVisualElementsManifest(
-      test_dir_.GetPath(), version_, supports_dark_text_));
+  ASSERT_TRUE(
+      installer::CreateVisualElementsManifest(test_dir_.GetPath(), version_));
   ASSERT_TRUE(base::PathExists(manifest_path_));
 
   std::string read_manifest;
@@ -480,86 +350,10 @@ TEST_P(CreateVisualElementsManifestTest, VisualElementsManifestCreated) {
   ASSERT_STREQ(expected_manifest_, read_manifest.c_str());
 }
 
-// Test that the VisualElementsManifest is not modified when not needed.
-TEST_P(CreateVisualElementsManifestTest, UpdateVisualElementsNoChange) {
-  // Put the correct manifest into place.
-  const int expected_manifest_length =
-      static_cast<int>(strlen(expected_manifest_));
-  ASSERT_NO_FATAL_FAILURE(PrepareTestVisualElementsDirectory());
-  ASSERT_EQ(expected_manifest_length,
-            base::WriteFile(manifest_path_, expected_manifest_,
-                            expected_manifest_length));
-
-  // Create a bogus start menu shortcut.
-  ASSERT_NO_FATAL_FAILURE(CreateStartMenuShortcut());
-
-  // Push those files back in time to avoid flakes in case the test is so fast
-  // that the times aren't modified when the files are touched/rewritten.
-  base::Time the_past = base::Time::Now() - base::TimeDelta::FromSeconds(5);
-  FILETIME creation_time = the_past.ToFileTime();
-  FILETIME last_access_time = the_past.ToFileTime();
-  FILETIME last_write_time = the_past.ToFileTime();
-  ASSERT_TRUE(::SetFileTime(
-      base::File(manifest_path_,
-                 base::File::FLAG_OPEN | base::File::FLAG_WRITE_ATTRIBUTES)
-          .GetPlatformFile(),
-      &creation_time, &last_access_time, &last_write_time));
-  ASSERT_TRUE(::SetFileTime(
-      base::File(start_menu_shortcut_path_,
-                 base::File::FLAG_OPEN | base::File::FLAG_WRITE_ATTRIBUTES)
-          .GetPlatformFile(),
-      &creation_time, &last_access_time, &last_write_time));
-
-  // Get the filetimes.
-  base::File::Info manifest_info_before = {};
-  ASSERT_TRUE(base::GetFileInfo(manifest_path_, &manifest_info_before));
-  base::File::Info shortcut_info_before = {};
-  ASSERT_TRUE(
-      base::GetFileInfo(start_menu_shortcut_path_, &shortcut_info_before));
-
-  // Perform a no-op update.
-  installer::UpdateVisualElementsManifest(test_dir_.GetPath(), version_,
-                                          supports_dark_text_);
-
-  // Make sure neither file was modified.
-  base::File::Info manifest_info_after = {};
-  ASSERT_TRUE(base::GetFileInfo(manifest_path_, &manifest_info_after));
-  EXPECT_EQ(manifest_info_before.last_modified,
-            manifest_info_after.last_modified);
-  base::File::Info shortcut_info_after = {};
-  ASSERT_TRUE(
-      base::GetFileInfo(start_menu_shortcut_path_, &shortcut_info_after));
-  EXPECT_EQ(shortcut_info_before.last_modified,
-            shortcut_info_after.last_modified);
-
-  // Perform an update where OS support flips.
-  installer::UpdateVisualElementsManifest(test_dir_.GetPath(), version_,
-                                          !supports_dark_text_);
-
-  // The file should have been modified only if the brand has light assets.
-  ASSERT_TRUE(base::GetFileInfo(manifest_path_, &manifest_info_after));
-  if (has_light_assets_) {
-    EXPECT_NE(manifest_info_before.last_modified,
-              manifest_info_after.last_modified);
-  } else {
-    EXPECT_EQ(manifest_info_before.last_modified,
-              manifest_info_after.last_modified);
-  }
-  ASSERT_TRUE(
-      base::GetFileInfo(start_menu_shortcut_path_, &shortcut_info_after));
-  if (has_light_assets_) {
-    EXPECT_NE(shortcut_info_before.last_modified,
-              shortcut_info_after.last_modified);
-  } else {
-    EXPECT_EQ(shortcut_info_before.last_modified,
-              shortcut_info_after.last_modified);
-  }
-}
-
 TEST_F(InstallShortcutTest, CreateAllShortcuts) {
-  installer::CreateOrUpdateShortcuts(
-      chrome_exe_, *product_, *prefs_, installer::CURRENT_USER,
-      installer::INSTALL_SHORTCUT_CREATE_ALL);
+  installer::CreateOrUpdateShortcuts(chrome_exe_, *prefs_,
+                                     installer::CURRENT_USER,
+                                     installer::INSTALL_SHORTCUT_CREATE_ALL);
   base::win::ValidateShortcut(user_desktop_shortcut_, expected_properties_);
   base::win::ValidateShortcut(user_quick_launch_shortcut_,
                               expected_properties_);
@@ -568,9 +362,8 @@ TEST_F(InstallShortcutTest, CreateAllShortcuts) {
 }
 
 TEST_F(InstallShortcutTest, CreateAllShortcutsSystemLevel) {
-  installer::CreateOrUpdateShortcuts(
-      chrome_exe_, *product_, *prefs_, installer::ALL_USERS,
-      installer::INSTALL_SHORTCUT_CREATE_ALL);
+  installer::CreateOrUpdateShortcuts(chrome_exe_, *prefs_, installer::ALL_USERS,
+                                     installer::INSTALL_SHORTCUT_CREATE_ALL);
   base::win::ValidateShortcut(system_desktop_shortcut_, expected_properties_);
   base::win::ValidateShortcut(system_start_menu_shortcut_,
                               expected_start_menu_properties_);
@@ -583,9 +376,9 @@ TEST_F(InstallShortcutTest, CreateAllShortcutsSystemLevel) {
 TEST_F(InstallShortcutTest, CreateAllShortcutsButDesktopShortcut) {
   std::unique_ptr<installer::MasterPreferences> prefs_no_desktop(
       GetFakeMasterPrefs(true, false));
-  installer::CreateOrUpdateShortcuts(
-      chrome_exe_, *product_, *prefs_no_desktop, installer::CURRENT_USER,
-      installer::INSTALL_SHORTCUT_CREATE_ALL);
+  installer::CreateOrUpdateShortcuts(chrome_exe_, *prefs_no_desktop,
+                                     installer::CURRENT_USER,
+                                     installer::INSTALL_SHORTCUT_CREATE_ALL);
   ASSERT_FALSE(base::PathExists(user_desktop_shortcut_));
   base::win::ValidateShortcut(user_quick_launch_shortcut_,
                               expected_properties_);
@@ -596,9 +389,9 @@ TEST_F(InstallShortcutTest, CreateAllShortcutsButDesktopShortcut) {
 TEST_F(InstallShortcutTest, CreateAllShortcutsButQuickLaunchShortcut) {
   std::unique_ptr<installer::MasterPreferences> prefs_no_ql(
       GetFakeMasterPrefs(false, true));
-  installer::CreateOrUpdateShortcuts(
-      chrome_exe_, *product_, *prefs_no_ql, installer::CURRENT_USER,
-      installer::INSTALL_SHORTCUT_CREATE_ALL);
+  installer::CreateOrUpdateShortcuts(chrome_exe_, *prefs_no_ql,
+                                     installer::CURRENT_USER,
+                                     installer::INSTALL_SHORTCUT_CREATE_ALL);
   base::win::ValidateShortcut(user_desktop_shortcut_, expected_properties_);
   ASSERT_FALSE(base::PathExists(user_quick_launch_shortcut_));
   base::win::ValidateShortcut(user_start_menu_shortcut_,
@@ -627,7 +420,7 @@ TEST_F(InstallShortcutTest, ReplaceAll) {
                   base::win::SHORTCUT_CREATE_ALWAYS));
 
   installer::CreateOrUpdateShortcuts(
-      chrome_exe_, *product_, *prefs_, installer::CURRENT_USER,
+      chrome_exe_, *prefs_, installer::CURRENT_USER,
       installer::INSTALL_SHORTCUT_REPLACE_EXISTING);
   base::win::ValidateShortcut(user_desktop_shortcut_, expected_properties_);
   base::win::ValidateShortcut(user_quick_launch_shortcut_,
@@ -652,7 +445,7 @@ TEST_F(InstallShortcutTest, ReplaceExisting) {
   ASSERT_TRUE(base::CreateDirectory(user_start_menu_shortcut_.DirName()));
 
   installer::CreateOrUpdateShortcuts(
-      chrome_exe_, *product_, *prefs_, installer::CURRENT_USER,
+      chrome_exe_, *prefs_, installer::CURRENT_USER,
       installer::INSTALL_SHORTCUT_REPLACE_EXISTING);
   base::win::ValidateShortcut(user_desktop_shortcut_, expected_properties_);
   ASSERT_FALSE(base::PathExists(user_quick_launch_shortcut_));
@@ -704,8 +497,8 @@ TEST_P(MigrateShortcutTest, MigrateAwayFromDeprecatedStartMenuTest) {
   ASSERT_TRUE(base::PathExists(start_menu_subdir_shortcut));
   ASSERT_FALSE(base::PathExists(start_menu_shortcut));
 
-  installer::CreateOrUpdateShortcuts(chrome_exe_, *product_, *prefs_,
-                                     shortcut_level_, shortcut_operation_);
+  installer::CreateOrUpdateShortcuts(chrome_exe_, *prefs_, shortcut_level_,
+                                     shortcut_operation_);
   ASSERT_FALSE(base::PathExists(start_menu_subdir_shortcut));
   ASSERT_TRUE(base::PathExists(start_menu_shortcut));
 }
@@ -740,7 +533,7 @@ TEST_F(InstallShortcutTest, CreateIfNoSystemLevelAllSystemShortcutsExist) {
                   base::win::SHORTCUT_CREATE_ALWAYS));
 
   installer::CreateOrUpdateShortcuts(
-      chrome_exe_, *product_, *prefs_, installer::CURRENT_USER,
+      chrome_exe_, *prefs_, installer::CURRENT_USER,
       installer::INSTALL_SHORTCUT_CREATE_EACH_IF_NO_SYSTEM_LEVEL);
   ASSERT_FALSE(base::PathExists(user_desktop_shortcut_));
   ASSERT_FALSE(base::PathExists(user_start_menu_shortcut_));
@@ -751,7 +544,7 @@ TEST_F(InstallShortcutTest, CreateIfNoSystemLevelAllSystemShortcutsExist) {
 
 TEST_F(InstallShortcutTest, CreateIfNoSystemLevelNoSystemShortcutsExist) {
   installer::CreateOrUpdateShortcuts(
-      chrome_exe_, *product_, *prefs_, installer::CURRENT_USER,
+      chrome_exe_, *prefs_, installer::CURRENT_USER,
       installer::INSTALL_SHORTCUT_CREATE_EACH_IF_NO_SYSTEM_LEVEL);
   base::win::ValidateShortcut(user_desktop_shortcut_, expected_properties_);
   base::win::ValidateShortcut(user_quick_launch_shortcut_,
@@ -772,7 +565,7 @@ TEST_F(InstallShortcutTest, CreateIfNoSystemLevelSomeSystemShortcutsExist) {
                   base::win::SHORTCUT_CREATE_ALWAYS));
 
   installer::CreateOrUpdateShortcuts(
-      chrome_exe_, *product_, *prefs_, installer::CURRENT_USER,
+      chrome_exe_, *prefs_, installer::CURRENT_USER,
       installer::INSTALL_SHORTCUT_CREATE_EACH_IF_NO_SYSTEM_LEVEL);
   ASSERT_FALSE(base::PathExists(user_desktop_shortcut_));
   base::win::ValidateShortcut(user_quick_launch_shortcut_,

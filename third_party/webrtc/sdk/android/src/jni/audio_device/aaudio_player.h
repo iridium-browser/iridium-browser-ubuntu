@@ -14,7 +14,7 @@
 #include <aaudio/AAudio.h>
 #include <memory>
 
-#include "api/optional.h"
+#include "absl/types/optional.h"
 #include "modules/audio_device/audio_device_buffer.h"
 #include "modules/audio_device/include/audio_device_defines.h"
 #include "rtc_base/messagehandler.h"
@@ -29,7 +29,7 @@ namespace webrtc {
 class AudioDeviceBuffer;
 class FineAudioBuffer;
 
-namespace android_adm {
+namespace jni {
 
 // Implements low-latency 16-bit mono PCM audio output support for Android
 // using the C based AAudio API.
@@ -73,9 +73,9 @@ class AAudioPlayer final : public AudioOutput,
   // Not implemented in AAudio.
   bool SpeakerVolumeIsAvailable() override;
   int SetSpeakerVolume(uint32_t volume) override;
-  rtc::Optional<uint32_t> SpeakerVolume() const override;
-  rtc::Optional<uint32_t> MaxSpeakerVolume() const override;
-  rtc::Optional<uint32_t> MinSpeakerVolume() const override;
+  absl::optional<uint32_t> SpeakerVolume() const override;
+  absl::optional<uint32_t> MaxSpeakerVolume() const override;
+  absl::optional<uint32_t> MinSpeakerVolume() const override;
 
  protected:
   // AAudioObserverInterface implementation.
@@ -146,7 +146,7 @@ class AAudioPlayer final : public AudioOutput,
   double latency_millis_ RTC_GUARDED_BY(thread_checker_aaudio_) = 0;
 };
 
-}  // namespace android_adm
+}  // namespace jni
 
 }  // namespace webrtc
 

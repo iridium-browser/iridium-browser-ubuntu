@@ -34,11 +34,11 @@ namespace ui {
 // InputMethodChromeOS implementation -----------------------------------------
 InputMethodChromeOS::InputMethodChromeOS(
     internal::InputMethodDelegate* delegate)
-    : composing_text_(false),
+    : InputMethodBase(delegate),
+      composing_text_(false),
       composition_changed_(false),
       handling_key_event_(false),
       weak_ptr_factory_(this) {
-  SetDelegate(delegate);
   ui::IMEBridge::Get()->SetInputContextHandler(this);
 
   UpdateContextFocusState();
@@ -49,8 +49,10 @@ InputMethodChromeOS::~InputMethodChromeOS() {
   // We are dead, so we need to ask the client to stop relying on us.
   OnInputMethodChanged();
 
-  if (ui::IMEBridge::Get())
-    ui::IMEBridge::Get()->SetInputContextHandler(NULL);
+  if (ui::IMEBridge::Get() &&
+      ui::IMEBridge::Get()->GetInputContextHandler() == this) {
+    ui::IMEBridge::Get()->SetInputContextHandler(nullptr);
+  }
 }
 
 ui::EventDispatchDetails InputMethodChromeOS::DispatchKeyEvent(
@@ -192,7 +194,8 @@ void InputMethodChromeOS::OnTextInputTypeChanged(
     // The focus in to or out from password field should also notify engine.
     engine->FocusOut();
     ui::IMEEngineHandlerInterface::InputContext context(
-        GetTextInputType(), GetTextInputMode(), GetTextInputFlags());
+        GetTextInputType(), GetTextInputMode(), GetTextInputFlags(),
+        GetClientFocusReason(), GetClientShouldDoLearning());
     engine->FocusIn(context);
   }
 
@@ -278,6 +281,17 @@ bool InputMethodChromeOS::IsCandidatePopupOpen() const {
   return false;
 }
 
+InputMethodKeyboardController*
+InputMethodChromeOS::GetInputMethodKeyboardController() {
+  chromeos::input_method::InputMethodManager* manager =
+      chromeos::input_method::InputMethodManager::Get();
+  if (manager) {
+    if (auto* controller = manager->GetInputMethodKeyboardController())
+      return controller;
+  }
+  return InputMethodBase::GetInputMethodKeyboardController();
+}
+
 void InputMethodChromeOS::OnWillChangeFocusedClient(
     TextInputClient* focused_before,
     TextInputClient* focused) {
@@ -297,7 +311,8 @@ void InputMethodChromeOS::OnDidChangeFocusedClient(
 
   if (GetEngine()) {
     ui::IMEEngineHandlerInterface::InputContext context(
-        GetTextInputType(), GetTextInputMode(), GetTextInputFlags());
+        GetTextInputType(), GetTextInputMode(), GetTextInputFlags(),
+        GetClientFocusReason(), GetClientShouldDoLearning());
     GetEngine()->FocusIn(context);
   }
 }
@@ -341,7 +356,8 @@ void InputMethodChromeOS::UpdateContextFocusState() {
     candidate_window->FocusStateChanged(IsNonPasswordInputFieldFocused());
 
   ui::IMEEngineHandlerInterface::InputContext context(
-      GetTextInputType(), GetTextInputMode(), GetTextInputFlags());
+      GetTextInputType(), GetTextInputMode(), GetTextInputFlags(),
+      GetClientFocusReason(), GetClientShouldDoLearning());
   ui::IMEBridge::Get()->SetCurrentInputContext(context);
 
   if (!IsTextInputTypeNone())
@@ -458,7 +474,7 @@ void InputMethodChromeOS::PostProcessUnfilteredKeyPressEvent(
   if (stopped_propagation) {
     ResetContext();
     if (ack_callback)
-      std::move(ack_callback).Run(false);
+      std::move(ack_callback).Run(true);  // true matches |stopped_propagation|.
     return;
   }
 
@@ -496,7 +512,7 @@ void InputMethodChromeOS::ProcessInputMethodResult(ui::KeyEvent* event,
     if (handled && NeedInsertChar()) {
       for (base::string16::const_iterator i = result_text_.begin();
            i != result_text_.end(); ++i) {
-        ui::KeyEvent ch_event(*event);
+        KeyEvent ch_event(ET_KEY_PRESSED, VKEY_UNKNOWN, EF_NONE);
         ch_event.set_character(*i);
         client->InsertChar(ch_event);
       }
@@ -736,6 +752,11 @@ bool InputMethodChromeOS::IsNonPasswordInputFieldFocused() {
 
 bool InputMethodChromeOS::IsInputFieldFocused() {
   return GetTextInputType() != TEXT_INPUT_TYPE_NONE;
+}
+
+TextInputClient::FocusReason InputMethodChromeOS::GetClientFocusReason() const {
+  TextInputClient* client = GetTextInputClient();
+  return client ? client->GetFocusReason() : TextInputClient::FOCUS_REASON_NONE;
 }
 
 }  // namespace ui

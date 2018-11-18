@@ -8,6 +8,7 @@
 #include "third_party/blink/renderer/core/html/custom/ce_reactions_scope.h"
 #include "third_party/blink/renderer/core/html/custom/custom_element_reaction_queue.h"
 #include "third_party/blink/renderer/platform/bindings/microtask.h"
+#include "third_party/blink/renderer/platform/heap/persistent.h"
 
 namespace blink {
 
@@ -33,13 +34,6 @@ void CustomElementReactionStack::Trace(blink::Visitor* visitor) {
   visitor->Trace(backup_queue_);
 }
 
-void CustomElementReactionStack::TraceWrappers(
-    const ScriptWrappableVisitor* visitor) const {
-  for (auto key : map_.Keys()) {
-    visitor->TraceWrappers(key);
-  }
-}
-
 void CustomElementReactionStack::Push() {
   stack_.push_back(nullptr);
 }
@@ -52,7 +46,7 @@ void CustomElementReactionStack::PopInvokingReactions() {
 }
 
 void CustomElementReactionStack::InvokeReactions(ElementQueue& queue) {
-  for (size_t i = 0; i < queue.size(); ++i) {
+  for (wtf_size_t i = 0; i < queue.size(); ++i) {
     Element* element = queue[i];
     if (CustomElementReactionQueue* reactions = map_.at(element)) {
       reactions->InvokeReactions(element);

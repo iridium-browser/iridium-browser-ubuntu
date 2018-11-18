@@ -61,6 +61,14 @@ SubmenuView::~SubmenuView() {
   delete scroll_view_container_;
 }
 
+bool SubmenuView::HasEmptyMenuItemView() {
+  for (int i = 0; i < child_count(); i++) {
+    if (child_at(i)->id() == MenuItemView::kEmptyMenuItemViewID)
+      return true;
+  }
+  return false;
+}
+
 bool SubmenuView::HasVisibleChildren() {
   for (int i = 0, item_count = GetMenuItemCount(); i < item_count; i++) {
     if (GetMenuItemAt(i)->visible())
@@ -172,7 +180,7 @@ gfx::Size SubmenuView::CalculatePreferredSize() const {
     }
   }
   if (max_minor_text_width_ > 0)
-    max_minor_text_width_ += MenuConfig::instance().label_to_minor_text_padding;
+    max_minor_text_width_ += MenuConfig::instance().item_horizontal_padding;
 
   // Finish calculating our optimum width.
   gfx::Insets insets = GetInsets();
@@ -182,8 +190,9 @@ gfx::Size SubmenuView::CalculatePreferredSize() const {
                                 minimum_preferred_width_ - 2 * insets.width()));
 
   if (GetMenuItem()->GetMenuController() &&
-      GetMenuItem()->GetMenuController()->use_touchable_layout())
+      GetMenuItem()->GetMenuController()->use_touchable_layout()) {
     width = std::max(touchable_minimum_width, width);
+  }
 
   // Then, the height for that width.
   int height = 0;
@@ -373,7 +382,8 @@ void SubmenuView::SetSelectedRow(int row) {
 }
 
 base::string16 SubmenuView::GetTextForRow(int row) {
-  return GetMenuItemAt(row)->title();
+  return MenuItemView::GetAccessibleNameForMenuItem(GetMenuItemAt(row)->title(),
+                                                    base::string16());
 }
 
 bool SubmenuView::IsShowing() {
@@ -384,6 +394,7 @@ void SubmenuView::ShowAt(Widget* parent,
                          const gfx::Rect& bounds,
                          bool do_capture) {
   if (host_) {
+    host_->SetMenuHostBounds(bounds);
     host_->ShowMenuHost(do_capture);
   } else {
     host_ = new MenuHost(this);

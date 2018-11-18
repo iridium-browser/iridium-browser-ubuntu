@@ -24,14 +24,13 @@
  */
 
 #include <algorithm>
-#include "third_party/blink/renderer/bindings/core/v8/exception_messages.h"
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
+
 #include "third_party/blink/renderer/modules/webaudio/audio_node_output.h"
 #include "third_party/blink/renderer/modules/webaudio/oscillator_node.h"
 #include "third_party/blink/renderer/modules/webaudio/periodic_wave.h"
 #include "third_party/blink/renderer/platform/audio/audio_utilities.h"
 #include "third_party/blink/renderer/platform/audio/vector_math.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 
@@ -119,7 +118,7 @@ void OscillatorHandler::SetType(const String& type,
   } else if (type == "triangle") {
     SetType(TRIANGLE);
   } else if (type == "custom") {
-    exception_state.ThrowDOMException(kInvalidStateError,
+    exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
                                       "'type' cannot be set directly to "
                                       "'custom'.  Use setPeriodicWave() to "
                                       "create a custom Oscillator type.");
@@ -153,6 +152,28 @@ bool OscillatorHandler::SetType(unsigned type) {
   SetPeriodicWave(periodic_wave);
   type_ = type;
   return true;
+}
+
+// Convert the detune value (in cents) to a frequency scale multiplier:
+// 2^(d/1200)
+static float DetuneToFrequencyMultiplier(float detune_value) {
+  return std::exp2(detune_value / 1200);
+}
+
+// Clamp the frequency value to lie with Nyquist frequency. For NaN, arbitrarily
+// clamp to +Nyquist.
+static void ClampFrequency(float* frequency,
+                           int frames_to_process,
+                           float nyquist) {
+  for (int k = 0; k < frames_to_process; ++k) {
+    float f = frequency[k];
+
+    if (std::isnan(f)) {
+      frequency[k] = nyquist;
+    } else {
+      frequency[k] = clampTo(f, -nyquist, nyquist);
+    }
+  }
 }
 
 bool OscillatorHandler::CalculateSampleAccuratePhaseIncrements(
@@ -200,9 +221,9 @@ bool OscillatorHandler::CalculateSampleAccuratePhaseIncrements(
     // Convert from cents to rate scalar.
     float k = 1.0 / 1200;
     Vsmul(detune_values, 1, &k, detune_values, 1, frames_to_process);
-    for (unsigned i = 0; i < frames_to_process; ++i)
-      detune_values[i] = powf(
-          2, detune_values[i]);  // FIXME: converting to expf() will be faster.
+    for (unsigned i = 0; i < frames_to_process; ++i) {
+      detune_values[i] = std::exp2(detune_values[i]);
+    }
 
     if (has_frequency_changes) {
       // Multiply frequencies by detune scalings.
@@ -213,11 +234,13 @@ bool OscillatorHandler::CalculateSampleAccuratePhaseIncrements(
     // Handle ordinary parameter changes if there are no scheduled
     // changes.
     float detune = detune_->Value();
-    float detune_scale = powf(2, detune / 1200);
+    float detune_scale = DetuneToFrequencyMultiplier(detune);
     final_scale *= detune_scale;
   }
 
   if (has_sample_accurate_values) {
+    ClampFrequency(phase_increments, frames_to_process,
+                   Context()->sampleRate() / 2);
     // Convert from frequency to wavetable increment.
     Vsmul(phase_increments, 1, &final_scale, phase_increments, 1,
           frames_to_process);
@@ -233,6 +256,7 @@ static float DoInterpolation(double virtual_read_index,
                              const float* lower_wave_data,
                              const float* higher_wave_data) {
   DCHECK_GE(incr, 0);
+  DCHECK(std::isfinite(virtual_read_index));
 
   double sample_lower = 0;
   double sample_higher = 0;
@@ -361,8 +385,9 @@ void OscillatorHandler::Process(size_t frames_to_process) {
   size_t non_silent_frames_to_process;
   double start_frame_offset;
 
-  UpdateSchedulingInfo(frames_to_process, output_bus, quantum_frame_offset,
-                       non_silent_frames_to_process, start_frame_offset);
+  std::tie(quantum_frame_offset, non_silent_frames_to_process,
+           start_frame_offset) =
+      UpdateSchedulingInfo(frames_to_process, output_bus);
 
   if (!non_silent_frames_to_process) {
     output_bus->Zero();
@@ -392,8 +417,9 @@ void OscillatorHandler::Process(size_t frames_to_process) {
   if (!has_sample_accurate_values) {
     frequency = frequency_->Value();
     float detune = detune_->Value();
-    float detune_scale = powf(2, detune / 1200);
+    float detune_scale = DetuneToFrequencyMultiplier(detune);
     frequency *= detune_scale;
+    ClampFrequency(&frequency, 1, Context()->sampleRate() / 2);
     periodic_wave_->WaveDataForFundamentalFrequency(frequency, lower_wave_data,
                                                     higher_wave_data,
                                                     table_interpolation_factor);
@@ -470,17 +496,23 @@ OscillatorNode::OscillatorNode(BaseAudioContext& context,
                                PeriodicWave* wave_table)
     : AudioScheduledSourceNode(context),
       // Use musical pitch standard A440 as a default.
-      frequency_(AudioParam::Create(context,
-                                    kParamTypeOscillatorFrequency,
-                                    "Oscillator.frequency",
-                                    440,
-                                    -context.sampleRate() / 2,
-                                    context.sampleRate() / 2)),
+      frequency_(
+          AudioParam::Create(context,
+                             kParamTypeOscillatorFrequency,
+                             440,
+                             AudioParamHandler::AutomationRate::kAudio,
+                             AudioParamHandler::AutomationRateMode::kVariable,
+                             -context.sampleRate() / 2,
+                             context.sampleRate() / 2)),
       // Default to no detuning.
-      detune_(AudioParam::Create(context,
-                                 kParamTypeOscillatorDetune,
-                                 "Oscillator.detune",
-                                 0)) {
+      detune_(
+          AudioParam::Create(context,
+                             kParamTypeOscillatorDetune,
+                             0,
+                             AudioParamHandler::AutomationRate::kAudio,
+                             AudioParamHandler::AutomationRateMode::kVariable,
+                             -1200 * log2f(std::numeric_limits<float>::max()),
+                             1200 * log2f(std::numeric_limits<float>::max()))) {
   SetHandler(OscillatorHandler::Create(
       *this, context.sampleRate(), oscillator_type, wave_table,
       frequency_->Handler(), detune_->Handler()));
@@ -505,7 +537,7 @@ OscillatorNode* OscillatorNode::Create(BaseAudioContext* context,
                                        ExceptionState& exception_state) {
   if (options.type() == "custom" && !options.hasPeriodicWave()) {
     exception_state.ThrowDOMException(
-        kInvalidStateError,
+        DOMExceptionCode::kInvalidStateError,
         "A PeriodicWave must be specified if the type is set to \"custom\"");
     return nullptr;
   }

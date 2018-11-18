@@ -12,6 +12,7 @@
 
 #include "base/macros.h"
 #include "base/single_thread_task_runner.h"
+#include "base/threading/thread.h"
 #include "build/build_config.h"
 #include "build/buildflag.h"
 #include "chromecast/chromecast_buildflags.h"
@@ -27,6 +28,10 @@ class CrashHandlerHostLinux;
 
 namespace device {
 class BluetoothAdapterCast;
+}
+
+namespace media {
+class CdmFactory;
 }
 
 namespace metrics {
@@ -55,7 +60,6 @@ class VideoResolutionPolicy;
 }
 
 namespace shell {
-
 class CastBrowserMainParts;
 class CastResourceDispatcherHostDelegate;
 class URLRequestContextFactory;
@@ -80,23 +84,25 @@ class CastContentBrowserClient : public content::ContentBrowserClient {
 
   virtual media::VideoModeSwitcher* GetVideoModeSwitcher();
 
+  // Returns the task runner that must be used for media IO.
+  scoped_refptr<base::SingleThreadTaskRunner> GetMediaTaskRunner();
+
 #if BUILDFLAG(IS_CAST_USING_CMA_BACKEND)
   // Gets object for enforcing video resolution policy restrictions.
   virtual media::VideoResolutionPolicy* GetVideoResolutionPolicy();
-
-  // Returns the task runner that must be used for media IO.
-  scoped_refptr<base::SingleThreadTaskRunner> GetMediaTaskRunner();
 
   // Creates a CmaBackendFactory.
   virtual media::CmaBackendFactory* GetCmaBackendFactory();
 
   media::MediaResourceTracker* media_resource_tracker();
 
+  void ResetMediaResourceTracker();
+
   media::MediaPipelineBackendManager* media_pipeline_backend_manager();
 
   std::unique_ptr<::media::AudioManager> CreateAudioManager(
       ::media::AudioLogFactory* audio_log_factory) override;
-  std::unique_ptr<::media::CdmFactory> CreateCdmFactory() override;
+  bool OverridesAudioManager() override;
 #endif  // BUILDFLAG(IS_CAST_USING_CMA_BACKEND)
   media::MediaCapsImpl* media_caps();
 
@@ -129,13 +135,11 @@ class CastContentBrowserClient : public content::ContentBrowserClient {
   void SiteInstanceGotProcess(content::SiteInstance* site_instance) override;
   void AppendExtraCommandLineSwitches(base::CommandLine* command_line,
                                       int child_process_id) override;
+  std::string GetAcceptLangs(content::BrowserContext* context) override;
   void OverrideWebkitPrefs(content::RenderViewHost* render_view_host,
                            content::WebPreferences* prefs) override;
   void ResourceDispatcherHostCreated() override;
   std::string GetApplicationLocale() override;
-  void GetGeolocationRequestContext(
-      base::OnceCallback<void(scoped_refptr<net::URLRequestContextGetter>)>
-          callback) override;
   content::QuotaPermissionContext* CreateQuotaPermissionContext() override;
   void GetQuotaSettings(
       content::BrowserContext* context,
@@ -176,7 +180,9 @@ class CastContentBrowserClient : public content::ContentBrowserClient {
   void ExposeInterfacesToMediaService(
       service_manager::BinderRegistry* registry,
       content::RenderFrameHost* render_frame_host) override;
-  void RegisterInProcessServices(StaticServiceMap* services) override;
+  void RegisterInProcessServices(
+      StaticServiceMap* services,
+      content::ServiceManagerConnection* connection) override;
   std::unique_ptr<base::Value> GetServiceManifestOverlay(
       base::StringPiece service_name) override;
   void GetAdditionalMappedFilesForChildProcess(
@@ -188,6 +194,13 @@ class CastContentBrowserClient : public content::ContentBrowserClient {
   content::DevToolsManagerDelegate* GetDevToolsManagerDelegate() override;
   std::unique_ptr<content::NavigationUIData> GetNavigationUIData(
       content::NavigationHandle* navigation_handle) override;
+  bool ShouldEnableStrictSiteIsolation() override;
+  std::vector<std::unique_ptr<content::NavigationThrottle>>
+  CreateThrottlesForNavigation(content::NavigationHandle* handle) override;
+
+#if BUILDFLAG(USE_CHROMECAST_CDMS)
+  virtual std::unique_ptr<::media::CdmFactory> CreateCdmFactory();
+#endif  // BUILDFLAG(USE_CHROMECAST_CDMS)
 
  protected:
   CastContentBrowserClient();
@@ -212,6 +225,7 @@ class CastContentBrowserClient : public content::ContentBrowserClient {
       const base::Callback<void(scoped_refptr<net::X509Certificate>,
                                 scoped_refptr<net::SSLPrivateKey>)>&
           continue_callback);
+
 #if !defined(OS_ANDROID)
   // Returns the crash signal FD corresponding to the current process type.
   int GetCrashSignalFD(const base::CommandLine& command_line);
@@ -227,6 +241,14 @@ class CastContentBrowserClient : public content::ContentBrowserClient {
   // with OS for this).
   std::unique_ptr<MemoryPressureControllerImpl> memory_pressure_controller_;
 #endif  // !defined(OS_ANDROID)
+
+#if BUILDFLAG(IS_CAST_USING_CMA_BACKEND)
+  // CMA thread used by AudioManager, MojoRenderer, and MediaPipelineBackend.
+  std::unique_ptr<base::Thread> media_thread_;
+
+  // Tracks usage of media resource by e.g. CMA pipeline, CDM.
+  media::MediaResourceTracker* media_resource_tracker_ = nullptr;
+#endif  // BUILDFLAG(IS_CAST_USING_CMA_BACKEND)
 
   // Created by CastContentBrowserClient but owned by BrowserMainLoop.
   CastBrowserMainParts* cast_browser_main_parts_;

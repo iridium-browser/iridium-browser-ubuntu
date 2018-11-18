@@ -144,7 +144,7 @@ class CORE_EXPORT LayoutTableCell : public LayoutBlockFlow {
   }
 
   Length StyleOrColLogicalWidth() const {
-    Length style_width = Style()->LogicalWidth();
+    Length style_width = StyleRef().LogicalWidth();
     if (!style_width.IsAuto())
       return style_width;
     if (LayoutTableCol* first_column =
@@ -156,7 +156,7 @@ class CORE_EXPORT LayoutTableCell : public LayoutBlockFlow {
   }
 
   int LogicalHeightFromStyle() const {
-    Length height = Style()->LogicalHeight();
+    Length height = StyleRef().LogicalHeight();
     int style_logical_height =
         height.IsIntrinsicOrAuto()
             ? 0
@@ -166,7 +166,7 @@ class CORE_EXPORT LayoutTableCell : public LayoutBlockFlow {
     // add in the border and padding.
     // Call computedCSSPadding* directly to avoid including implicitPadding.
     if (!GetDocument().InQuirksMode() &&
-        Style()->BoxSizing() != EBoxSizing::kBorderBox) {
+        StyleRef().BoxSizing() != EBoxSizing::kBorderBox) {
       style_logical_height +=
           (ComputedCSSPaddingBefore() + ComputedCSSPaddingAfter()).Floor() +
           (BorderBefore() + BorderAfter()).Floor();
@@ -197,11 +197,9 @@ class CORE_EXPORT LayoutTableCell : public LayoutBlockFlow {
 
   void UpdateLayout() override;
 
-  void Paint(const PaintInfo&, const LayoutPoint&) const override;
-
   LayoutUnit CellBaselinePosition() const;
   bool IsBaselineAligned() const {
-    EVerticalAlign va = Style()->VerticalAlign();
+    EVerticalAlign va = StyleRef().VerticalAlign();
     return va == EVerticalAlign::kBaseline ||
            va == EVerticalAlign::kTextBottom ||
            va == EVerticalAlign::kTextTop || va == EVerticalAlign::kSuper ||
@@ -226,7 +224,7 @@ class CORE_EXPORT LayoutTableCell : public LayoutBlockFlow {
   LayoutUnit PaddingLeft() const override;
   LayoutUnit PaddingRight() const override;
 
-  void SetOverrideLogicalContentHeightFromRowHeight(LayoutUnit);
+  void SetOverrideLogicalHeightFromRowHeight(LayoutUnit);
 
   void ScrollbarsChanged(bool horizontal_scrollbar_changed,
                          bool vertical_scrollbar_changed,
@@ -237,7 +235,8 @@ class CORE_EXPORT LayoutTableCell : public LayoutBlockFlow {
     cell_children_need_layout_ = b;
   }
 
-  static LayoutTableCell* CreateAnonymous(Document*);
+  static LayoutTableCell* CreateAnonymous(Document*,
+                                          scoped_refptr<ComputedStyle>);
   static LayoutTableCell* CreateAnonymousWithParent(const LayoutObject*);
   LayoutBox* CreateAnonymousBoxWithSameTypeAs(
       const LayoutObject* parent) const override {
@@ -332,22 +331,17 @@ class CORE_EXPORT LayoutTableCell : public LayoutBlockFlow {
                         other->RowIndex() + other->ResolvedRowSpan();
   }
 
-  void SetIsSpanningCollapsedRow(bool spanningCollapsedRow) {
-    is_spanning_collapsed_row_ = spanningCollapsedRow;
-  }
+  void SetIsSpanningCollapsedRow(bool spanning_collapsed_row);
 
   bool IsSpanningCollapsedRow() const { return is_spanning_collapsed_row_; }
 
-  void SetIsSpanningCollapsedColumn(bool spanningCollapsedColumn) {
-    is_spanning_collapsed_column_ = spanningCollapsedColumn;
-  }
+  void SetIsSpanningCollapsedColumn(bool spanningCollapsedColumn);
 
   bool IsSpanningCollapsedColumn() const {
     return is_spanning_collapsed_column_;
   }
 
-  void ComputeOverflow(LayoutUnit old_client_after_edge,
-                       bool recompute_floats = false) override;
+  void ComputeVisualOverflow(const LayoutRect&, bool recompute_floats) override;
 
  protected:
   void StyleDidChange(StyleDifference, const ComputedStyle* old_style) override;
@@ -361,8 +355,13 @@ class CORE_EXPORT LayoutTableCell : public LayoutBlockFlow {
       const LayoutRect& container_rect,
       TouchAction container_whitelisted_touch_action) const override;
 
-  PaintInvalidationReason InvalidatePaint(
-      const PaintInvalidatorContext&) const override;
+  void InvalidatePaint(const PaintInvalidatorContext&) const override;
+
+  LayoutSize OffsetFromContainerInternal(
+      const LayoutObject*,
+      bool ignore_scroll_offset) const override;
+
+  bool CreatesNewFormattingContext() const final { return true; }
 
  protected:
   bool IsOfType(LayoutObjectType type) const override {
@@ -376,13 +375,13 @@ class CORE_EXPORT LayoutTableCell : public LayoutBlockFlow {
 
   void UpdateLogicalWidth() override;
 
-  void PaintBoxDecorationBackground(const PaintInfo&,
-                                    const LayoutPoint&) const override;
-  void PaintMask(const PaintInfo&, const LayoutPoint&) const override;
+  void PaintBoxDecorationBackground(
+      const PaintInfo&,
+      const LayoutPoint& paint_offset) const override;
+  void PaintMask(const PaintInfo&,
+                 const LayoutPoint& paint_offset) const override;
 
-  LayoutSize OffsetFromContainer(const LayoutObject*) const override;
-
-  bool ShouldClipOverflow() const override;
+  bool ComputeShouldClipOverflow() const override;
 
   using CollapsedBorderValuesMethod =
       const CollapsedBorderValue& (CollapsedBorderValues::*)() const;

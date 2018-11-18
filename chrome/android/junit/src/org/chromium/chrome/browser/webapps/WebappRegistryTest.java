@@ -23,11 +23,11 @@ import org.robolectric.annotation.Config;
 import org.robolectric.shadows.ShadowLooper;
 
 import org.chromium.base.ContextUtils;
+import org.chromium.base.task.test.BackgroundShadowAsyncTask;
 import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.browser.ShortcutHelper;
 import org.chromium.chrome.browser.browsing_data.UrlFilters;
-import org.chromium.testing.local.BackgroundShadowAsyncTask;
 import org.chromium.webapk.lib.common.WebApkConstants;
 
 import java.util.Arrays;

@@ -63,6 +63,7 @@ private:
   void readExtern();
   void readGroup();
   void readInclude();
+  void readInput();
   void readMemory();
   void readOutput();
   void readOutputArch();
@@ -71,15 +72,19 @@ private:
   void readRegionAlias();
   void readSearchDir();
   void readSections();
+  void readTarget();
   void readVersion();
   void readVersionScriptCommand();
 
-  SymbolAssignment *readAssignment(StringRef Name);
+  SymbolAssignment *readSymbolAssignment(StringRef Name);
   ByteCommand *readByteCommand(StringRef Tok);
   uint32_t readFill();
   uint32_t parseFill(StringRef Tok);
+  bool readSectionDirective(OutputSection *Cmd, StringRef Tok1, StringRef Tok2);
   void readSectionAddressType(OutputSection *Cmd);
+  OutputSection *readOverlaySectionDescription();
   OutputSection *readOutputSectionDescription(StringRef OutSec);
+  std::vector<BaseCommand *> readOverlay();
   std::vector<StringRef> readOutputSectionPhdrs();
   InputSectionDescription *readInputSectionDescription(StringRef Tok);
   StringMatcher readFilePatterns();
@@ -88,10 +93,9 @@ private:
   unsigned readPhdrType();
   SortSectionPolicy readSortKind();
   SymbolAssignment *readProvideHidden(bool Provide, bool Hidden);
-  SymbolAssignment *readProvideOrAssignment(StringRef Tok);
+  SymbolAssignment *readAssignment(StringRef Tok);
   void readSort();
-  AssertCommand *readAssert();
-  Expr readAssertExpr();
+  Expr readAssert();
   Expr readConstant();
   Expr getPageSize();
 
@@ -227,16 +231,16 @@ void ScriptParser::readLinkerScript() {
     if (Tok == ";")
       continue;
 
-    if (Tok == "ASSERT") {
-      Script->SectionCommands.push_back(readAssert());
-    } else if (Tok == "ENTRY") {
+    if (Tok == "ENTRY") {
       readEntry();
     } else if (Tok == "EXTERN") {
       readExtern();
-    } else if (Tok == "GROUP" || Tok == "INPUT") {
+    } else if (Tok == "GROUP") {
       readGroup();
     } else if (Tok == "INCLUDE") {
       readInclude();
+    } else if (Tok == "INPUT") {
+      readInput();
     } else if (Tok == "MEMORY") {
       readMemory();
     } else if (Tok == "OUTPUT") {
@@ -253,9 +257,11 @@ void ScriptParser::readLinkerScript() {
       readSearchDir();
     } else if (Tok == "SECTIONS") {
       readSections();
+    } else if (Tok == "TARGET") {
+      readTarget();
     } else if (Tok == "VERSION") {
       readVersion();
-    } else if (SymbolAssignment *Cmd = readProvideOrAssignment(Tok)) {
+    } else if (SymbolAssignment *Cmd = readAssignment(Tok)) {
       Script->SectionCommands.push_back(Cmd);
     } else {
       setError("unknown directive: " + Tok);
@@ -267,8 +273,7 @@ void ScriptParser::readDefsym(StringRef Name) {
   Expr E = readExpr();
   if (!atEOF())
     setError("EOF expected, but got " + next());
-  SymbolAssignment *Cmd = make<SymbolAssignment>(Name, E, getCurrentLocation(),
-                                                 "" /*CommandString*/);
+  SymbolAssignment *Cmd = make<SymbolAssignment>(Name, E, getCurrentLocation());
   Script->SectionCommands.push_back(Cmd);
 }
 
@@ -327,13 +332,12 @@ void ScriptParser::readExtern() {
 }
 
 void ScriptParser::readGroup() {
-  expect("(");
-  while (!errorCount() && !consume(")")) {
-    if (consume("AS_NEEDED"))
-      readAsNeeded();
-    else
-      addFile(unquote(next()));
-  }
+  bool Orig = InputFile::IsInGroup;
+  InputFile::IsInGroup = true;
+  readInput();
+  InputFile::IsInGroup = Orig;
+  if (!Orig)
+    ++InputFile::NextGroupId;
 }
 
 void ScriptParser::readInclude() {
@@ -344,12 +348,22 @@ void ScriptParser::readInclude() {
     return;
   }
 
-  if (Optional<std::string> Path = searchLinkerScript(Tok)) {
+  if (Optional<std::string> Path = searchScript(Tok)) {
     if (Optional<MemoryBufferRef> MB = readFile(*Path))
       tokenize(*MB);
     return;
   }
   setError("cannot find linker script " + Tok);
+}
+
+void ScriptParser::readInput() {
+  expect("(");
+  while (!errorCount() && !consume(")")) {
+    if (consume("AS_NEEDED"))
+      readAsNeeded();
+    else
+      addFile(unquote(next()));
+  }
 }
 
 void ScriptParser::readOutput() {
@@ -428,6 +442,49 @@ void ScriptParser::readSearchDir() {
   expect(")");
 }
 
+// This reads an overlay description. Overlays are used to describe output
+// sections that use the same virtual memory range and normally would trigger
+// linker's sections sanity check failures.
+// https://sourceware.org/binutils/docs/ld/Overlay-Description.html#Overlay-Description
+std::vector<BaseCommand *> ScriptParser::readOverlay() {
+  // VA and LMA expressions are optional, though for simplicity of
+  // implementation we assume they are not. That is what OVERLAY was designed
+  // for first of all: to allow sections with overlapping VAs at different LMAs.
+  Expr AddrExpr = readExpr();
+  expect(":");
+  expect("AT");
+  Expr LMAExpr = readParenExpr();
+  expect("{");
+
+  std::vector<BaseCommand *> V;
+  OutputSection *Prev = nullptr;
+  while (!errorCount() && !consume("}")) {
+    // VA is the same for all sections. The LMAs are consecutive in memory
+    // starting from the base load address specified.
+    OutputSection *OS = readOverlaySectionDescription();
+    OS->AddrExpr = AddrExpr;
+    if (Prev)
+      OS->LMAExpr = [=] { return Prev->getLMA() + Prev->Size; };
+    else
+      OS->LMAExpr = LMAExpr;
+    V.push_back(OS);
+    Prev = OS;
+  }
+
+  // According to the specification, at the end of the overlay, the location
+  // counter should be equal to the overlay base address plus size of the
+  // largest section seen in the overlay.
+  // Here we want to create the Dot assignment command to achieve that.
+  Expr MoveDot = [=] {
+    uint64_t Max = 0;
+    for (BaseCommand *Cmd : V)
+      Max = std::max(Max, cast<OutputSection>(Cmd)->Size);
+    return AddrExpr().getValue() + Max;
+  };
+  V.push_back(make<SymbolAssignment>(".", MoveDot, getCurrentLocation()));
+  return V;
+}
+
 void ScriptParser::readSections() {
   Script->HasSectionsCommand = true;
 
@@ -440,14 +497,16 @@ void ScriptParser::readSections() {
   std::vector<BaseCommand *> V;
   while (!errorCount() && !consume("}")) {
     StringRef Tok = next();
-    BaseCommand *Cmd = readProvideOrAssignment(Tok);
-    if (!Cmd) {
-      if (Tok == "ASSERT")
-        Cmd = readAssert();
-      else
-        Cmd = readOutputSectionDescription(Tok);
+    if (Tok == "OVERLAY") {
+      for (BaseCommand *Cmd : readOverlay())
+        V.push_back(Cmd);
+      continue;
     }
-    V.push_back(Cmd);
+
+    if (BaseCommand *Cmd = readAssignment(Tok))
+      V.push_back(Cmd);
+    else
+      V.push_back(readOutputSectionDescription(Tok));
   }
 
   if (!atEOF() && consume("INSERT")) {
@@ -467,14 +526,33 @@ void ScriptParser::readSections() {
                                  V.end());
 }
 
+void ScriptParser::readTarget() {
+  // TARGET(foo) is an alias for "--format foo". Unlike GNU linkers,
+  // we accept only a limited set of BFD names (i.e. "elf" or "binary")
+  // for --format. We recognize only /^elf/ and "binary" in the linker
+  // script as well.
+  expect("(");
+  StringRef Tok = next();
+  expect(")");
+
+  if (Tok.startswith("elf"))
+    Config->FormatBinary = false;
+  else if (Tok == "binary")
+    Config->FormatBinary = true;
+  else
+    setError("unknown target: " + Tok);
+}
+
 static int precedence(StringRef Op) {
   return StringSwitch<int>(Op)
-      .Cases("*", "/", "%", 6)
-      .Cases("+", "-", 5)
-      .Cases("<<", ">>", 4)
-      .Cases("<", "<=", ">", ">=", "==", "!=", 3)
-      .Case("&", 2)
-      .Case("|", 1)
+      .Cases("*", "/", "%", 8)
+      .Cases("+", "-", 7)
+      .Cases("<<", ">>", 6)
+      .Cases("<", "<=", ">", ">=", "==", "!=", 5)
+      .Case("&", 4)
+      .Case("|", 3)
+      .Case("&&", 2)
+      .Case("||", 1)
       .Default(-1);
 }
 
@@ -597,11 +675,7 @@ void ScriptParser::readSort() {
   expect(")");
 }
 
-AssertCommand *ScriptParser::readAssert() {
-  return make<AssertCommand>(readAssertExpr());
-}
-
-Expr ScriptParser::readAssertExpr() {
+Expr ScriptParser::readAssert() {
   expect("(");
   Expr E = readExpr();
   expect(",");
@@ -626,6 +700,26 @@ uint32_t ScriptParser::readFill() {
   return V;
 }
 
+// Tries to read the special directive for an output section definition which
+// can be one of following: "(NOLOAD)", "(COPY)", "(INFO)" or "(OVERLAY)".
+// Tok1 and Tok2 are next 2 tokens peeked. See comment for readSectionAddressType below.
+bool ScriptParser::readSectionDirective(OutputSection *Cmd, StringRef Tok1, StringRef Tok2) {
+  if (Tok1 != "(")
+    return false;
+  if (Tok2 != "NOLOAD" && Tok2 != "COPY" && Tok2 != "INFO" && Tok2 != "OVERLAY")
+    return false;
+
+  expect("(");
+  if (consume("NOLOAD")) {
+    Cmd->Noload = true;
+  } else {
+    skip(); // This is "COPY", "INFO" or "OVERLAY".
+    Cmd->NonAlloc = true;
+  }
+  expect(")");
+  return true;
+}
+
 // Reads an expression and/or the special directive for an output
 // section definition. Directive is one of following: "(NOLOAD)",
 // "(COPY)", "(INFO)" or "(OVERLAY)".
@@ -638,28 +732,12 @@ uint32_t ScriptParser::readFill() {
 // https://sourceware.org/binutils/docs/ld/Output-Section-Address.html
 // https://sourceware.org/binutils/docs/ld/Output-Section-Type.html
 void ScriptParser::readSectionAddressType(OutputSection *Cmd) {
-  if (consume("(")) {
-    if (consume("NOLOAD")) {
-      expect(")");
-      Cmd->Noload = true;
-      return;
-    }
-    if (consume("COPY") || consume("INFO") || consume("OVERLAY")) {
-      expect(")");
-      Cmd->NonAlloc = true;
-      return;
-    }
-    Cmd->AddrExpr = readExpr();
-    expect(")");
-  } else {
-    Cmd->AddrExpr = readExpr();
-  }
+  if (readSectionDirective(Cmd, peek(), peek2()))
+    return;
 
-  if (consume("(")) {
-    expect("NOLOAD");
-    expect(")");
-    Cmd->Noload = true;
-  }
+  Cmd->AddrExpr = readExpr();
+  if (peek() == "(" && !readSectionDirective(Cmd, "(", peek2()))
+    setError("unknown section directive: " + peek2());
 }
 
 static Expr checkAlignment(Expr E, std::string &Loc) {
@@ -671,6 +749,17 @@ static Expr checkAlignment(Expr E, std::string &Loc) {
     }
     return Alignment;
   };
+}
+
+OutputSection *ScriptParser::readOverlaySectionDescription() {
+  OutputSection *Cmd =
+      Script->createOutputSection(next(), getCurrentLocation());
+  Cmd->InOverlay = true;
+  expect("{");
+  while (!errorCount() && !consume("}"))
+    Cmd->SectionCommands.push_back(readInputSectionRules(next()));
+  Cmd->Phdrs = readOutputSectionPhdrs();
+  return Cmd;
 }
 
 OutputSection *ScriptParser::readOutputSectionDescription(StringRef OutSec) {
@@ -702,13 +791,10 @@ OutputSection *ScriptParser::readOutputSectionDescription(StringRef OutSec) {
     StringRef Tok = next();
     if (Tok == ";") {
       // Empty commands are allowed. Do nothing here.
-    } else if (SymbolAssignment *Assign = readProvideOrAssignment(Tok)) {
+    } else if (SymbolAssignment *Assign = readAssignment(Tok)) {
       Cmd->SectionCommands.push_back(Assign);
     } else if (ByteCommand *Data = readByteCommand(Tok)) {
       Cmd->SectionCommands.push_back(Data);
-    } else if (Tok == "ASSERT") {
-      Cmd->SectionCommands.push_back(readAssert());
-      expect(";");
     } else if (Tok == "CONSTRUCTORS") {
       // CONSTRUCTORS is a keyword to make the linker recognize C++ ctors/dtors
       // by name. This is for very old file formats such as ECOFF/XCOFF.
@@ -769,31 +855,39 @@ uint32_t ScriptParser::parseFill(StringRef Tok) {
 
 SymbolAssignment *ScriptParser::readProvideHidden(bool Provide, bool Hidden) {
   expect("(");
-  SymbolAssignment *Cmd = readAssignment(next());
+  SymbolAssignment *Cmd = readSymbolAssignment(next());
   Cmd->Provide = Provide;
   Cmd->Hidden = Hidden;
   expect(")");
-  expect(";");
   return Cmd;
 }
 
-SymbolAssignment *ScriptParser::readProvideOrAssignment(StringRef Tok) {
+SymbolAssignment *ScriptParser::readAssignment(StringRef Tok) {
+  // Assert expression returns Dot, so this is equal to ".=."
+  if (Tok == "ASSERT")
+    return make<SymbolAssignment>(".", readAssert(), getCurrentLocation());
+
+  size_t OldPos = Pos;
   SymbolAssignment *Cmd = nullptr;
-  if (peek() == "=" || peek() == "+=") {
-    Cmd = readAssignment(Tok);
-    expect(";");
-  } else if (Tok == "PROVIDE") {
+  if (peek() == "=" || peek() == "+=")
+    Cmd = readSymbolAssignment(Tok);
+  else if (Tok == "PROVIDE")
     Cmd = readProvideHidden(true, false);
-  } else if (Tok == "HIDDEN") {
+  else if (Tok == "HIDDEN")
     Cmd = readProvideHidden(false, true);
-  } else if (Tok == "PROVIDE_HIDDEN") {
+  else if (Tok == "PROVIDE_HIDDEN")
     Cmd = readProvideHidden(true, true);
+
+  if (Cmd) {
+    Cmd->CommandString =
+        Tok.str() + " " +
+        llvm::join(Tokens.begin() + OldPos, Tokens.begin() + Pos, " ");
+    expect(";");
   }
   return Cmd;
 }
 
-SymbolAssignment *ScriptParser::readAssignment(StringRef Name) {
-  size_t OldPos = Pos;
+SymbolAssignment *ScriptParser::readSymbolAssignment(StringRef Name) {
   StringRef Op = next();
   assert(Op == "=" || Op == "+=");
   Expr E = readExpr();
@@ -801,11 +895,7 @@ SymbolAssignment *ScriptParser::readAssignment(StringRef Name) {
     std::string Loc = getCurrentLocation();
     E = [=] { return add(Script->getSymbolValue(Name, Loc), E()); };
   }
-
-  std::string CommandString =
-      Name.str() + " " +
-      llvm::join(Tokens.begin() + OldPos, Tokens.begin() + Pos, " ");
-  return make<SymbolAssignment>(Name, E, getCurrentLocation(), CommandString);
+  return make<SymbolAssignment>(Name, E, getCurrentLocation());
 }
 
 // This is an operator-precedence parser to parse a linker
@@ -861,6 +951,10 @@ Expr ScriptParser::combine(StringRef Op, Expr L, Expr R) {
     return [=] { return L().getValue() == R().getValue(); };
   if (Op == "!=")
     return [=] { return L().getValue() != R().getValue(); };
+  if (Op == "||")
+    return [=] { return L().getValue() || R().getValue(); };
+  if (Op == "&&")
+    return [=] { return L().getValue() && R().getValue(); };
   if (Op == "&")
     return [=] { return bitAnd(L(), R()); };
   if (Op == "|")
@@ -1046,7 +1140,7 @@ Expr ScriptParser::readPrimary() {
     };
   }
   if (Tok == "ASSERT")
-    return readAssertExpr();
+    return readAssert();
   if (Tok == "CONSTANT")
     return readConstant();
   if (Tok == "DATA_SEGMENT_ALIGN") {

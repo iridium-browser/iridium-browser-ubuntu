@@ -28,6 +28,9 @@ class AppMenuButton : public views::MenuButton {
   explicit AppMenuButton(views::MenuButtonListener* menu_button_listener);
   ~AppMenuButton() override;
 
+  // views::MenuButton:
+  SkColor GetInkDropBaseColor() const override;
+
   // Closes the app menu, if it's open.
   void CloseMenu();
 
@@ -62,7 +65,7 @@ class AppMenuButton : public views::MenuButton {
   std::unique_ptr<AppMenu> menu_;
 
   // Listeners to call when the menu opens.
-  base::ObserverList<views::MenuListener> menu_listeners_;
+  base::ObserverList<views::MenuListener>::Unchecked menu_listeners_;
 
   DISALLOW_COPY_AND_ASSIGN(AppMenuButton);
 };

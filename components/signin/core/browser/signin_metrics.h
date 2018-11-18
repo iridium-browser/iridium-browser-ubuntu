@@ -26,6 +26,8 @@ enum DifferentPrimaryAccounts {
 };
 
 // Track all the ways a profile can become signed out as a histogram.
+// GENERATED_JAVA_ENUM_PACKAGE: org.chromium.chrome.browser.signin
+// GENERATED_JAVA_CLASS_NAME_OVERRIDE: SignoutReason
 enum ProfileSignout {
   // The value used within unit tests
   SIGNOUT_TEST = 0,
@@ -50,6 +52,9 @@ enum ProfileSignout {
   AUTHENTICATION_FAILED_WITH_FORCE_SIGNIN,
   // The user disables sync from the DICE UI.
   USER_TUNED_OFF_SYNC_FROM_DICE_UI,
+  // Android specific. Signout forced because the account was removed from the
+  // device.
+  ACCOUNT_REMOVED_FROM_DEVICE,
   // Keep this as the last enum.
   NUM_PROFILE_SIGNOUT_METRICS,
 };
@@ -64,7 +69,7 @@ enum AccessPointAction {
   HISTOGRAM_REJECTED,
   // The user pressed the X button to dismiss the infobar this time.
   HISTOGRAM_DISMISSED,
-  // The user completely ignored the infoar.  Either they navigated away, or
+  // The user completely ignored the infobar.  Either they navigated away, or
   // they used the page as is.
   HISTOGRAM_IGNORED,
   // The user clicked on the learn more link in the infobar.
@@ -146,15 +151,27 @@ enum class AccessPoint : int {
   ACCESS_POINT_RESIGNIN_INFOBAR,
   ACCESS_POINT_TAB_SWITCHER,
   ACCESS_POINT_FORCE_SIGNIN_WARNING,
+  ACCESS_POINT_SAVE_CARD_BUBBLE,
+  ACCESS_POINT_MANAGE_CARDS_BUBBLE,
   ACCESS_POINT_MAX,  // This must be last.
 };
 
-// Enum values which enumerates all user actions on the mobile sign-in promo.
+// Enum values which enumerates all user actions on the sign-in promo.
 enum class PromoAction : int {
   PROMO_ACTION_NO_SIGNIN_PROMO = 0,
+  // The user selected the default account.
   PROMO_ACTION_WITH_DEFAULT,
+  // On desktop, the user selected an account that is not the default. On
+  // mobile, the user selected the generic "Use another account" button.
   PROMO_ACTION_NOT_DEFAULT,
-  PROMO_ACTION_NEW_ACCOUNT,
+  // Non-personalized promo, pre-dice on desktop.
+  PROMO_ACTION_NEW_ACCOUNT_PRE_DICE,
+  // Non personalized promo, when there is no account on the device.
+  PROMO_ACTION_NEW_ACCOUNT_NO_EXISTING_ACCOUNT,
+  // The user clicked on the "Add account" button, when there are already
+  // accounts on the device. (desktop only, the button does not exist on
+  // mobile).
+  PROMO_ACTION_NEW_ACCOUNT_EXISTING_ACCOUNT
 };
 
 // Enum values which enumerates all reasons to start sign in process.
@@ -330,6 +347,10 @@ void LogSigninAccountReconciliation(int total_number_accounts,
                                     bool primary_accounts_same,
                                     bool is_first_reconcile,
                                     int pre_count_gaia_cookies);
+
+// Logs to UMA histograms how many accounts are in the browser for this
+// profile.
+void RecordAccountsPerProfile(int total_number_accounts);
 
 // Logs duration of a single execution of AccountReconciler to UMA histograms.
 // |duration| - How long execution of AccountReconciler took.

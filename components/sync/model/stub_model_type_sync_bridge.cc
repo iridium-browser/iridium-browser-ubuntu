@@ -13,7 +13,7 @@ namespace syncer {
 
 StubModelTypeSyncBridge::StubModelTypeSyncBridge()
     : StubModelTypeSyncBridge(
-          FakeModelTypeChangeProcessor::Create(PREFERENCES)) {}
+          std::make_unique<FakeModelTypeChangeProcessor>()) {}
 
 StubModelTypeSyncBridge::StubModelTypeSyncBridge(
     std::unique_ptr<ModelTypeChangeProcessor> change_processor)
@@ -41,7 +41,7 @@ base::Optional<ModelError> StubModelTypeSyncBridge::ApplySyncChanges(
 void StubModelTypeSyncBridge::GetData(StorageKeyList storage_keys,
                                       DataCallback callback) {}
 
-void StubModelTypeSyncBridge::GetAllData(DataCallback callback) {}
+void StubModelTypeSyncBridge::GetAllDataForDebugging(DataCallback callback) {}
 
 std::string StubModelTypeSyncBridge::GetClientTag(
     const EntityData& entity_data) {

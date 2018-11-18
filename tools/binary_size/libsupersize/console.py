@@ -23,8 +23,8 @@ import diff
 import file_format
 import match_util
 import models
-import nm
 import path_util
+import string_extract
 
 
 # Number of lines before using less for Print().
@@ -122,7 +122,8 @@ class _Session(object):
     elf_path = self._ElfPathForSymbol(
         size_info, tool_prefix, elf_path)
 
-    address, offset, _ = nm.LookupElfRodataInfo(elf_path, tool_prefix)
+    address, offset, _ = string_extract.LookupElfRodataInfo(
+        elf_path, tool_prefix)
     adjust = offset - address
     ret = []
     with open(elf_path, 'rb') as f:
@@ -152,17 +153,7 @@ class _Session(object):
     """
     before = before if before is not None else self._size_infos[0]
     after = after if after is not None else self._size_infos[1]
-    ret = diff.Diff(before, after)
-    if sort:
-      syms = ret.symbols  # Triggers clustering.
-      logging.debug('Grouping')
-      # Group path aliases so that functions defined in headers will be sorted
-      # by their actual size rather than shown as many small symbols.
-      syms = syms.GroupedByAliases(same_name_only=True)
-      logging.debug('Sorting')
-      ret.symbols = syms.Sorted()
-    logging.debug('Diff complete')
-    return ret
+    return diff.Diff(before, after, sort=sort)
 
   def _PrintFunc(self, obj=None, verbose=False, summarize=True, recursive=False,
                  use_pager=None, to_file=None):
@@ -304,9 +295,11 @@ class _Session(object):
         size_info, tool_prefix, elf_path)
 
     args = [path_util.GetObjDumpPath(tool_prefix), '--disassemble', '--source',
-            '--line-numbers', '--demangle',
-            '--start-address=0x%x' % symbol.address,
+            '--line-numbers', '--start-address=0x%x' % symbol.address,
             '--stop-address=0x%x' % symbol.end_address, elf_path]
+    # llvm-objdump does not support '--demangle' switch.
+    if not self._tool_prefix_finder.IsLld():
+      args.append('--demangle')
     if self._disassemble_prefix_len is None:
       prefix_len = self._DetectDisassemblePrefixLen(args)
       if prefix_len is not None:
@@ -469,9 +462,11 @@ def Run(args, parser):
   output_directory_finder = path_util.OutputDirectoryFinder(
       value=args.output_directory,
       any_path_within_output_directory=args.inputs[0])
+  linker_name = size_infos[-1].metadata.get(models.METADATA_LINKER_NAME)
   tool_prefix_finder = path_util.ToolPrefixFinder(
       value=args.tool_prefix,
-      output_directory_finder=output_directory_finder)
+      output_directory_finder=output_directory_finder,
+      linker_name=linker_name)
   session = _Session(size_infos, output_directory_finder, tool_prefix_finder)
 
   if args.query:

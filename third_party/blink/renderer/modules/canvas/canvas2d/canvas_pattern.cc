@@ -25,8 +25,8 @@
 
 #include "third_party/blink/renderer/modules/canvas/canvas2d/canvas_pattern.h"
 
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
+#include "third_party/blink/renderer/core/geometry/dom_matrix_read_only.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
@@ -47,7 +47,7 @@ Pattern::RepeatMode CanvasPattern::ParseRepetitionType(
     return Pattern::kRepeatModeY;
 
   exception_state.ThrowDOMException(
-      kSyntaxError,
+      DOMExceptionCode::kSyntaxError,
       "The provided type ('" + type +
           "') is not one of 'repeat', 'no-repeat', 'repeat-x', or 'repeat-y'.");
   return Pattern::kRepeatModeNone;
@@ -59,9 +59,16 @@ CanvasPattern::CanvasPattern(scoped_refptr<Image> image,
     : pattern_(Pattern::CreateImagePattern(std::move(image), repeat)),
       origin_clean_(origin_clean) {}
 
-void CanvasPattern::setTransform(SVGMatrixTearOff* transform) {
-  pattern_transform_ =
-      transform ? transform->Value() : AffineTransform(1, 0, 0, 1, 0, 0);
+void CanvasPattern::setTransform(DOMMatrix2DInit& transform,
+                                 ExceptionState& exception_state) {
+  DOMMatrixReadOnly* m =
+      DOMMatrixReadOnly::fromMatrix2D(transform, exception_state);
+
+  if (!m) {
+    return;
+  }
+
+  pattern_transform_ = m->GetAffineTransform();
 }
 
 }  // namespace blink

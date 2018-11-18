@@ -112,38 +112,38 @@ Iterable GetJavaMapEntrySet(JNIEnv* jni, const JavaRef<jobject>& j_map) {
 ScopedJavaLocalRef<jobject> GetJavaMapEntryKey(
     JNIEnv* jni,
     const JavaRef<jobject>& j_entry) {
-  return Java_JniHelper_getKey(jni, j_entry);
+  return jni::Java_JniHelper_getKey(jni, j_entry);
 }
 
 ScopedJavaLocalRef<jobject> GetJavaMapEntryValue(
     JNIEnv* jni,
     const JavaRef<jobject>& j_entry) {
-  return Java_JniHelper_getValue(jni, j_entry);
+  return jni::Java_JniHelper_getValue(jni, j_entry);
 }
 
 int64_t JavaToNativeLong(JNIEnv* env, const JavaRef<jobject>& j_long) {
   return JNI_Long::Java_Long_longValue(env, j_long);
 }
 
-rtc::Optional<bool> JavaToNativeOptionalBool(JNIEnv* jni,
-                                             const JavaRef<jobject>& boolean) {
+absl::optional<bool> JavaToNativeOptionalBool(JNIEnv* jni,
+                                              const JavaRef<jobject>& boolean) {
   if (IsNull(jni, boolean))
-    return rtc::nullopt;
+    return absl::nullopt;
   return JNI_Boolean::Java_Boolean_booleanValue(jni, boolean);
 }
 
-rtc::Optional<int32_t> JavaToNativeOptionalInt(
+absl::optional<int32_t> JavaToNativeOptionalInt(
     JNIEnv* jni,
     const JavaRef<jobject>& integer) {
   if (IsNull(jni, integer))
-    return rtc::nullopt;
+    return absl::nullopt;
   return JNI_Integer::Java_Integer_intValue(jni, integer);
 }
 
 // Given a jstring, reinterprets it to a new native string.
 std::string JavaToNativeString(JNIEnv* jni, const JavaRef<jstring>& j_string) {
   const ScopedJavaLocalRef<jbyteArray> j_byte_array =
-      Java_JniHelper_getStringBytes(jni, j_string);
+      jni::Java_JniHelper_getStringBytes(jni, j_string);
 
   const size_t len = jni->GetArrayLength(j_byte_array.obj());
   CHECK_EXCEPTION(jni) << "error during GetArrayLength";
@@ -196,13 +196,13 @@ ScopedJavaLocalRef<jstring> NativeToJavaString(JNIEnv* jni,
 
 ScopedJavaLocalRef<jobject> NativeToJavaInteger(
     JNIEnv* jni,
-    const rtc::Optional<int32_t>& optional_int) {
+    const absl::optional<int32_t>& optional_int) {
   return optional_int ? NativeToJavaInteger(jni, *optional_int) : nullptr;
 }
 
 ScopedJavaLocalRef<jstring> NativeToJavaString(
     JNIEnv* jni,
-    const rtc::Optional<std::string>& str) {
+    const absl::optional<std::string>& str) {
   return str ? NativeToJavaString(jni, *str) : nullptr;
 }
 
@@ -243,7 +243,8 @@ ScopedJavaLocalRef<jobjectArray> NativeToJavaStringArray(
       &NativeToJavaString;
   return NativeToJavaObjectArray(
       env, container,
-      static_cast<jclass>(Java_JniHelper_getStringClass(env).obj()), convert);
+      static_cast<jclass>(jni::Java_JniHelper_getStringClass(env).obj()),
+      convert);
 }
 
 JavaListBuilder::JavaListBuilder(JNIEnv* env)

@@ -25,7 +25,6 @@
 #include "core/fxge/fx_freetype.h"
 #include "core/fxge/systemfontinfo_iface.h"
 #include "core/fxge/win32/cfx_windowsdib.h"
-#include "core/fxge/win32/dwrite_int.h"
 #include "core/fxge/win32/win32_int.h"
 #include "third_party/base/ptr_util.h"
 #include "third_party/base/stl_util.h"
@@ -104,7 +103,7 @@ HPEN CreateExtPen(const CFX_GraphStateData* pGraphState,
   float width = std::max(scale * pGraphState->m_LineWidth, 1.0f);
 
   uint32_t PenStyle = PS_GEOMETRIC;
-  if (pGraphState->m_DashCount)
+  if (!pGraphState->m_DashArray.empty())
     PenStyle |= PS_USERSTYLE;
   else
     PenStyle |= PS_SOLID;
@@ -138,9 +137,9 @@ HPEN CreateExtPen(const CFX_GraphStateData* pGraphState,
   lb.lbStyle = BS_SOLID;
   lb.lbHatch = 0;
   std::vector<uint32_t> dashes;
-  if (pGraphState->m_DashCount) {
-    dashes.resize(pGraphState->m_DashCount);
-    for (int i = 0; i < pGraphState->m_DashCount; i++) {
+  if (!pGraphState->m_DashArray.empty()) {
+    dashes.resize(pGraphState->m_DashArray.size());
+    for (size_t i = 0; i < pGraphState->m_DashArray.size(); i++) {
       dashes[i] = FXSYS_round(
           pMatrix ? pMatrix->TransformDistance(pGraphState->m_DashArray[i])
                   : pGraphState->m_DashArray[i]);
@@ -148,7 +147,7 @@ HPEN CreateExtPen(const CFX_GraphStateData* pGraphState,
     }
   }
   return ExtCreatePen(PenStyle, (DWORD)ceil(width), &lb,
-                      pGraphState->m_DashCount,
+                      pGraphState->m_DashArray.size(),
                       reinterpret_cast<const DWORD*>(dashes.data()));
 }
 
@@ -672,7 +671,7 @@ bool CFX_Win32FontInfo::GetFontCharset(void* hFont, int* charset) {
 
 }  // namespace
 
-int g_pdfium_print_mode = WindowsPrintMode::kModeEmf;
+WindowsPrintMode g_pdfium_print_mode = WindowsPrintMode::kModeEmf;
 
 std::unique_ptr<SystemFontInfoIface> SystemFontInfoIface::CreateDefault(
     const char** pUnused) {
@@ -995,7 +994,7 @@ bool CGdiDeviceDriver::DrawPath(const CFX_PathData* pPathData,
   if (pPlatform->m_GdiplusExt.IsAvailable()) {
     if (bDrawAlpha ||
         ((m_DeviceClass != FXDC_PRINTER && !(fill_mode & FXFILL_FULLCOVER)) ||
-         (pGraphState && pGraphState->m_DashCount))) {
+         (pGraphState && !pGraphState->m_DashArray.empty()))) {
       if (!((!pMatrix || !pMatrix->WillScale()) && pGraphState &&
             pGraphState->m_LineWidth == 1.0f &&
             (pPathData->GetPoints().size() == 5 ||
@@ -1024,7 +1023,7 @@ bool CGdiDeviceDriver::DrawPath(const CFX_PathData* pPathData,
     hBrush = (HBRUSH)SelectObject(m_hDC, hBrush);
   }
   if (pPathData->GetPoints().size() == 2 && pGraphState &&
-      pGraphState->m_DashCount) {
+      !pGraphState->m_DashArray.empty()) {
     CFX_PointF pos1 = pPathData->GetPoint(0);
     CFX_PointF pos2 = pPathData->GetPoint(1);
     if (pMatrix) {
@@ -1188,7 +1187,7 @@ bool CGdiDisplayDriver::GetDIBits(const RetainPtr<CFX_DIBitmap>& pBitmap,
   return ret;
 }
 
-bool CGdiDisplayDriver::SetDIBits(const RetainPtr<CFX_DIBSource>& pSource,
+bool CGdiDisplayDriver::SetDIBits(const RetainPtr<CFX_DIBBase>& pSource,
                                   uint32_t color,
                                   const FX_RECT* pSrcRect,
                                   int left,
@@ -1236,7 +1235,7 @@ bool CGdiDisplayDriver::SetDIBits(const RetainPtr<CFX_DIBSource>& pSource,
 }
 
 bool CGdiDisplayDriver::UseFoxitStretchEngine(
-    const RetainPtr<CFX_DIBSource>& pSource,
+    const RetainPtr<CFX_DIBBase>& pSource,
     uint32_t color,
     int dest_left,
     int dest_top,
@@ -1262,7 +1261,7 @@ bool CGdiDisplayDriver::UseFoxitStretchEngine(
                    pClipRect->top, FXDIB_BLEND_NORMAL);
 }
 
-bool CGdiDisplayDriver::StretchDIBits(const RetainPtr<CFX_DIBSource>& pSource,
+bool CGdiDisplayDriver::StretchDIBits(const RetainPtr<CFX_DIBBase>& pSource,
                                       uint32_t color,
                                       int dest_left,
                                       int dest_top,
@@ -1329,7 +1328,7 @@ bool CGdiDisplayDriver::StretchDIBits(const RetainPtr<CFX_DIBSource>& pSource,
                            dest_height, flags);
 }
 
-bool CGdiDisplayDriver::StartDIBits(const RetainPtr<CFX_DIBSource>& pBitmap,
+bool CGdiDisplayDriver::StartDIBits(const RetainPtr<CFX_DIBBase>& pBitmap,
                                     int bitmap_alpha,
                                     uint32_t color,
                                     const CFX_Matrix* pMatrix,
@@ -1362,8 +1361,5 @@ RenderDeviceDriverIface* CFX_WindowsRenderDevice::CreateDriver(HDC hDC) {
   if (g_pdfium_print_mode == WindowsPrintMode::kModeTextOnly)
     return new CTextOnlyPrinterDriver(hDC);
 
-  // Should be PostScript
-  ASSERT(g_pdfium_print_mode == WindowsPrintMode::kModePostScript2 ||
-         g_pdfium_print_mode == WindowsPrintMode::kModePostScript3);
   return new CPSPrinterDriver(hDC, g_pdfium_print_mode, false);
 }

@@ -6,12 +6,15 @@
 
 #include <stdint.h>
 
-#include "ash/display/window_tree_host_manager.h"
-#include "ash/shell.h"
-#include "base/stl_util.h"
+#include "ash/public/interfaces/constants.mojom.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/task/post_task.h"
+#include "chrome/browser/ui/ash/ash_util.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/common/service_manager_connection.h"
+#include "services/service_manager/public/cpp/connector.h"
 #include "ui/display/display.h"
-#include "ui/display/manager/display_manager.h"
 #include "ui/display/screen.h"
 #include "ui/events/devices/input_device_manager.h"
 #include "ui/events/devices/touchscreen_device.h"
@@ -38,7 +41,14 @@ bool IsWhiteListedVendorId(uint16_t vendor_id) {
 }  // namespace
 
 OobeDisplayChooser::OobeDisplayChooser()
-    : scoped_observer_(this), weak_ptr_factory_(this) {}
+    : scoped_observer_(this), weak_ptr_factory_(this) {
+  // |connector| may be null in tests.
+  auto* connector = ash_util::GetServiceManagerConnector();
+  if (connector) {
+    connector->BindInterface(ash::mojom::kServiceName,
+                             &cros_display_config_ptr_);
+  }
+}
 
 OobeDisplayChooser::~OobeDisplayChooser() {}
 
@@ -54,8 +64,8 @@ void OobeDisplayChooser::TryToPlaceUiOnTouchDisplay() {
       display::Screen::GetScreen()->GetPrimaryDisplay();
 
   if (primary_display.is_valid() && !TouchSupportAvailable(primary_display)) {
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, {BrowserThread::UI},
         base::BindOnce(&OobeDisplayChooser::MaybeMoveToTouchDisplay,
                        weak_ptr_factory_.GetWeakPtr()));
   }
@@ -83,8 +93,11 @@ void OobeDisplayChooser::MoveToTouchDisplay() {
        input_device_manager->GetTouchscreenDevices()) {
     if (IsWhiteListedVendorId(device.vendor_id) &&
         device.target_display_id != display::kInvalidDisplayId) {
-      ash::Shell::Get()->window_tree_host_manager()->SetPrimaryDisplayId(
-          device.target_display_id);
+      auto config_properties = ash::mojom::DisplayConfigProperties::New();
+      config_properties->set_primary = true;
+      cros_display_config_ptr_->SetDisplayProperties(
+          base::Int64ToString(device.target_display_id),
+          std::move(config_properties), base::DoNothing());
       break;
     }
   }

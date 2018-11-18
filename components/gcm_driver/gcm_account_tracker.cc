@@ -17,6 +17,8 @@
 #include "components/gcm_driver/gcm_driver.h"
 #include "google_apis/gaia/google_service_auth_error.h"
 #include "net/base/ip_endpoint.h"
+#include "services/identity/public/cpp/access_token_fetcher.h"
+#include "services/identity/public/cpp/identity_manager.h"
 
 namespace gcm {
 
@@ -26,7 +28,7 @@ namespace {
 const char kGCMGroupServerScope[] = "trk:230:https://www.googleapis.com/auth/gcm";
 const char kGCMCheckinServerScope[] =
     "trk:231:https://www.googleapis.com/auth/android_checkin";
-// Name of the GCM account tracker for the OAuth2TokenService.
+// Name of the GCM account tracker for fetching access tokens.
 const char kGCMAccountTrackerName[] = "gcm_account_tracker";
 // Minimum token validity when sending to GCM groups server.
 const int64_t kMinimumTokenValidityMs = 500;
@@ -45,10 +47,11 @@ GCMAccountTracker::AccountInfo::~AccountInfo() {
 }
 
 GCMAccountTracker::GCMAccountTracker(
-    std::unique_ptr<gaia::AccountTracker> account_tracker,
+    std::unique_ptr<AccountTracker> account_tracker,
+    identity::IdentityManager* identity_manager,
     GCMDriver* driver)
-    : OAuth2TokenService::Consumer(kGCMAccountTrackerName),
-      account_tracker_(account_tracker.release()),
+    : account_tracker_(account_tracker.release()),
+      identity_manager_(identity_manager),
       driver_(driver),
       shutdown_called_(false),
       reporting_weak_ptr_factory_(this) {}
@@ -69,10 +72,9 @@ void GCMAccountTracker::Start() {
   account_tracker_->AddObserver(this);
   driver_->AddConnectionObserver(this);
 
-  std::vector<gaia::AccountIds> accounts = account_tracker_->GetAccounts();
-  for (std::vector<gaia::AccountIds>::const_iterator iter = accounts.begin();
-       iter != accounts.end();
-       ++iter) {
+  std::vector<AccountIds> accounts = account_tracker_->GetAccounts();
+  for (std::vector<AccountIds>::const_iterator iter = accounts.begin();
+       iter != accounts.end(); ++iter) {
     if (!iter->email.empty()) {
       account_infos_.insert(std::make_pair(
           iter->account_key, AccountInfo(iter->email, TOKEN_NEEDED)));
@@ -96,12 +98,13 @@ void GCMAccountTracker::ScheduleReportTokens() {
 
   reporting_weak_ptr_factory_.InvalidateWeakPtrs();
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-      FROM_HERE, base::Bind(&GCMAccountTracker::ReportTokens,
-                            reporting_weak_ptr_factory_.GetWeakPtr()),
+      FROM_HERE,
+      base::BindOnce(&GCMAccountTracker::ReportTokens,
+                     reporting_weak_ptr_factory_.GetWeakPtr()),
       GetTimeToNextTokenReporting());
 }
 
-void GCMAccountTracker::OnAccountSignInChanged(const gaia::AccountIds& ids,
+void GCMAccountTracker::OnAccountSignInChanged(const AccountIds& ids,
                                                bool is_signed_in) {
   if (is_signed_in)
     OnAccountSignedIn(ids);
@@ -109,47 +112,24 @@ void GCMAccountTracker::OnAccountSignInChanged(const gaia::AccountIds& ids,
     OnAccountSignedOut(ids);
 }
 
-void GCMAccountTracker::OnGetTokenSuccess(
-    const OAuth2TokenService::Request* request,
-    const std::string& access_token,
-    const base::Time& expiration_time) {
-  DCHECK(request);
-  DCHECK(!request->GetAccountId().empty());
-  DVLOG(1) << "Get token success: " << request->GetAccountId();
-
-  AccountInfos::iterator iter = account_infos_.find(request->GetAccountId());
+void GCMAccountTracker::OnAccessTokenFetchCompleteForAccount(
+    std::string account_id,
+    GoogleServiceAuthError error,
+    identity::AccessTokenInfo access_token_info) {
+  auto iter = account_infos_.find(account_id);
   DCHECK(iter != account_infos_.end());
   if (iter != account_infos_.end()) {
-    DCHECK(iter->second.state == GETTING_TOKEN ||
-           iter->second.state == ACCOUNT_REMOVED);
-    // If OnAccountSignedOut(..) was called most recently, account is kept in
-    // ACCOUNT_REMOVED state.
-    if (iter->second.state == GETTING_TOKEN) {
+    DCHECK_EQ(GETTING_TOKEN, iter->second.state);
+
+    if (error.state() == GoogleServiceAuthError::NONE) {
+      DVLOG(1) << "Get token success: " << account_id;
+
       iter->second.state = TOKEN_PRESENT;
-      iter->second.access_token = access_token;
-      iter->second.expiration_time = expiration_time;
-    }
-  }
+      iter->second.access_token = access_token_info.token;
+      iter->second.expiration_time = access_token_info.expiration_time;
+    } else {
+      DVLOG(1) << "Get token failure: " << account_id;
 
-  DeleteTokenRequest(request);
-  ReportTokens();
-}
-
-void GCMAccountTracker::OnGetTokenFailure(
-    const OAuth2TokenService::Request* request,
-    const GoogleServiceAuthError& error) {
-  DCHECK(request);
-  DCHECK(!request->GetAccountId().empty());
-  DVLOG(1) << "Get token failure: " << request->GetAccountId();
-
-  AccountInfos::iterator iter = account_infos_.find(request->GetAccountId());
-  DCHECK(iter != account_infos_.end());
-  if (iter != account_infos_.end()) {
-    DCHECK(iter->second.state == GETTING_TOKEN ||
-           iter->second.state == ACCOUNT_REMOVED);
-    // If OnAccountSignedOut(..) was called most recently, account is kept in
-    // ACCOUNT_REMOVED state.
-    if (iter->second.state == GETTING_TOKEN) {
       // Given the fetcher has a built in retry logic, consider this situation
       // to be invalid refresh token, that is only fixed when user signs in.
       // Once the users signs in properly the minting will retry.
@@ -158,7 +138,7 @@ void GCMAccountTracker::OnGetTokenFailure(
     }
   }
 
-  DeleteTokenRequest(request);
+  pending_token_requests_.erase(account_id);
   ReportTokens();
 }
 
@@ -183,7 +163,7 @@ void GCMAccountTracker::ReportTokens() {
     return;
   }
 
-  // Wait for gaia::AccountTracker to be done with fetching the user info, as
+  // Wait for AccountTracker to be done with fetching the user info, as
   // well as all of the pending token requests from GCMAccountTracker to be done
   // before you report the results.
   if (!account_tracker_->IsAllUserInfoFetched() ||
@@ -194,8 +174,7 @@ void GCMAccountTracker::ReportTokens() {
   bool account_removed = false;
   // Stop tracking the accounts, that were removed, as it will be reported to
   // the driver.
-  for (AccountInfos::iterator iter = account_infos_.begin();
-       iter != account_infos_.end();) {
+  for (auto iter = account_infos_.begin(); iter != account_infos_.end();) {
     if (iter->second.state == ACCOUNT_REMOVED) {
       account_removed = true;
       account_infos_.erase(iter++);
@@ -205,8 +184,8 @@ void GCMAccountTracker::ReportTokens() {
   }
 
   std::vector<GCMClient::AccountTokenInfo> account_tokens;
-  for (AccountInfos::iterator iter = account_infos_.begin();
-       iter != account_infos_.end(); ++iter) {
+  for (auto iter = account_infos_.begin(); iter != account_infos_.end();
+       ++iter) {
     if (iter->second.state == TOKEN_PRESENT) {
       GCMClient::AccountTokenInfo token_info;
       token_info.account_id = iter->first;
@@ -233,8 +212,7 @@ void GCMAccountTracker::ReportTokens() {
 }
 
 void GCMAccountTracker::SanitizeTokens() {
-  for (AccountInfos::iterator iter = account_infos_.begin();
-       iter != account_infos_.end();
+  for (auto iter = account_infos_.begin(); iter != account_infos_.end();
        ++iter) {
     if (iter->second.state == TOKEN_PRESENT &&
         iter->second.expiration_time <
@@ -252,8 +230,7 @@ bool GCMAccountTracker::IsTokenReportingRequired() const {
     return true;
 
   bool reporting_required = false;
-  for (AccountInfos::const_iterator iter = account_infos_.begin();
-       iter != account_infos_.end();
+  for (auto iter = account_infos_.begin(); iter != account_infos_.end();
        ++iter) {
     if (iter->second.state == ACCOUNT_REMOVED)
       reporting_required = true;
@@ -264,8 +241,7 @@ bool GCMAccountTracker::IsTokenReportingRequired() const {
 
 bool GCMAccountTracker::IsTokenFetchingRequired() const {
   bool token_needed = false;
-  for (AccountInfos::const_iterator iter = account_infos_.begin();
-       iter != account_infos_.end();
+  for (auto iter = account_infos_.begin(); iter != account_infos_.end();
        ++iter) {
     if (iter->second.state == TOKEN_NEEDED)
       token_needed = true;
@@ -295,17 +271,6 @@ base::TimeDelta GCMAccountTracker::GetTimeToNextTokenReporting() const {
   return time_till_next_reporting;
 }
 
-void GCMAccountTracker::DeleteTokenRequest(
-    const OAuth2TokenService::Request* request) {
-  auto iter = std::find_if(
-      pending_token_requests_.begin(), pending_token_requests_.end(),
-      [request](const std::unique_ptr<OAuth2TokenService::Request>& r) {
-        return request == r.get();
-      });
-  if (iter != pending_token_requests_.end())
-    pending_token_requests_.erase(iter);
-}
-
 void GCMAccountTracker::GetAllNeededTokens() {
   // Only start fetching tokens if driver is running, they have a limited
   // validity time and GCM connection is a good indication of network running.
@@ -315,8 +280,7 @@ void GCMAccountTracker::GetAllNeededTokens() {
   if (!driver_->IsConnected())
     return;
 
-  for (AccountInfos::iterator iter = account_infos_.begin();
-       iter != account_infos_.end();
+  for (auto iter = account_infos_.begin(); iter != account_infos_.end();
        ++iter) {
     if (iter->second.state == TOKEN_NEEDED)
       GetToken(iter);
@@ -324,22 +288,32 @@ void GCMAccountTracker::GetAllNeededTokens() {
 }
 
 void GCMAccountTracker::GetToken(AccountInfos::iterator& account_iter) {
-  DCHECK(GetTokenService());
   DCHECK_EQ(account_iter->second.state, TOKEN_NEEDED);
 
   OAuth2TokenService::ScopeSet scopes;
   scopes.insert(kGCMGroupServerScope);
   scopes.insert(kGCMCheckinServerScope);
-  std::unique_ptr<OAuth2TokenService::Request> request =
-      GetTokenService()->StartRequest(account_iter->first, scopes, this);
 
-  pending_token_requests_.push_back(std::move(request));
+  // NOTE: It is safe to use base::Unretained() here as |token_fetcher| is owned
+  // by this object and guarantees that it will not invoke its callback after
+  // its destruction.
+  std::unique_ptr<identity::AccessTokenFetcher> token_fetcher =
+      identity_manager_->CreateAccessTokenFetcherForAccount(
+          account_iter->first, kGCMAccountTrackerName, scopes,
+          base::BindOnce(
+              &GCMAccountTracker::OnAccessTokenFetchCompleteForAccount,
+              base::Unretained(this), account_iter->first),
+          identity::AccessTokenFetcher::Mode::kImmediate);
+
+  DCHECK(pending_token_requests_.count(account_iter->first) == 0);
+  pending_token_requests_.emplace(account_iter->first,
+                                  std::move(token_fetcher));
   account_iter->second.state = GETTING_TOKEN;
 }
 
-void GCMAccountTracker::OnAccountSignedIn(const gaia::AccountIds& ids) {
+void GCMAccountTracker::OnAccountSignedIn(const AccountIds& ids) {
   DVLOG(1) << "Account signed in: " << ids.email;
-  AccountInfos::iterator iter = account_infos_.find(ids.account_key);
+  auto iter = account_infos_.find(ids.account_key);
   if (iter == account_infos_.end()) {
     DCHECK(!ids.email.empty());
     account_infos_.insert(
@@ -351,20 +325,21 @@ void GCMAccountTracker::OnAccountSignedIn(const gaia::AccountIds& ids) {
   GetAllNeededTokens();
 }
 
-void GCMAccountTracker::OnAccountSignedOut(const gaia::AccountIds& ids) {
+void GCMAccountTracker::OnAccountSignedOut(const AccountIds& ids) {
   DVLOG(1) << "Account signed out: " << ids.email;
-  AccountInfos::iterator iter = account_infos_.find(ids.account_key);
+  auto iter = account_infos_.find(ids.account_key);
   if (iter == account_infos_.end())
     return;
 
   iter->second.access_token.clear();
   iter->second.state = ACCOUNT_REMOVED;
-  ReportTokens();
-}
 
-OAuth2TokenService* GCMAccountTracker::GetTokenService() {
-  DCHECK(account_tracker_->identity_provider());
-  return account_tracker_->identity_provider()->GetTokenService();
+  // Delete any ongoing access token request now so that if the account is later
+  // re-added and a new access token request made, we do not break this class'
+  // invariant that there is at most one ongoing access token request per
+  // account.
+  pending_token_requests_.erase(ids.account_key);
+  ReportTokens();
 }
 
 }  // namespace gcm

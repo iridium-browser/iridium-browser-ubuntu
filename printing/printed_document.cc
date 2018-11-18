@@ -18,12 +18,11 @@
 #include "base/json/json_writer.h"
 #include "base/lazy_instance.h"
 #include "base/memory/ref_counted_memory.h"
-#include "base/message_loop/message_loop.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time/time.h"
 #include "base/values.h"
@@ -104,7 +103,7 @@ void DebugDumpSettings(const base::string16& doc_name,
   scoped_refptr<base::RefCountedMemory> data =
       base::RefCountedString::TakeString(&settings_str);
   base::PostTaskWithTraits(
-      FROM_HERE, {base::TaskPriority::BACKGROUND, base::MayBlock()},
+      FROM_HERE, {base::TaskPriority::BEST_EFFORT, base::MayBlock()},
       base::BindOnce(&DebugDumpDataTask, doc_name, FILE_PATH_LITERAL(".json"),
                      base::RetainedRef(data)));
 }
@@ -115,14 +114,9 @@ PrintedDocument::PrintedDocument(const PrintSettings& settings,
                                  const base::string16& name,
                                  int cookie)
     : immutable_(settings, name, cookie) {
-  // Records the expected page count if a range is setup.
-  if (!settings.ranges().empty()) {
-    // If there is a range, set the number of page
-    for (unsigned i = 0; i < settings.ranges().size(); ++i) {
-      const PageRange& range = settings.ranges()[i];
-      mutable_.expected_page_count_ += range.to - range.from + 1;
-    }
-  }
+  // If there is a range, set the number of page
+  for (const PageRange& range : settings.ranges())
+    mutable_.expected_page_count_ += range.to - range.from + 1;
 
   if (HasDebugDumpPath())
     DebugDumpSettings(name, settings);
@@ -153,7 +147,7 @@ void PrintedDocument::SetPage(int page_number,
 
   if (HasDebugDumpPath()) {
     base::PostTaskWithTraits(
-        FROM_HERE, {base::TaskPriority::BACKGROUND, base::MayBlock()},
+        FROM_HERE, {base::TaskPriority::BEST_EFFORT, base::MayBlock()},
         base::BindOnce(&DebugDumpPageTask, name(), base::RetainedRef(page)));
   }
 }
@@ -184,7 +178,7 @@ void PrintedDocument::SetDocument(std::unique_ptr<MetafilePlayer> metafile,
 
   if (HasDebugDumpPath()) {
     base::PostTaskWithTraits(
-        FROM_HERE, {base::TaskPriority::BACKGROUND, base::MayBlock()},
+        FROM_HERE, {base::TaskPriority::BEST_EFFORT, base::MayBlock()},
         base::BindOnce(&DebugDumpTask, name(), mutable_.metafile_.get()));
   }
 }
@@ -283,7 +277,7 @@ void PrintedDocument::DebugDumpData(
     const base::FilePath::StringType& extension) {
   DCHECK(HasDebugDumpPath());
   base::PostTaskWithTraits(FROM_HERE,
-                           {base::TaskPriority::BACKGROUND, base::MayBlock()},
+                           {base::TaskPriority::BEST_EFFORT, base::MayBlock()},
                            base::BindOnce(&DebugDumpDataTask, name(), extension,
                                           base::RetainedRef(data)));
 }

@@ -149,8 +149,8 @@ class MediaDevicesDispatcherHostTest : public testing::TestWithParam<GURL> {
     devices_to_enumerate[MEDIA_DEVICE_TYPE_AUDIO_OUTPUT] = true;
     media_stream_manager_->media_devices_manager()->EnumerateDevices(
         devices_to_enumerate,
-        base::Bind(&PhysicalDevicesEnumerated, run_loop.QuitClosure(),
-                   &physical_devices_));
+        base::BindOnce(&PhysicalDevicesEnumerated, run_loop.QuitClosure(),
+                       &physical_devices_));
     run_loop.Run();
 
     ASSERT_GT(physical_devices_[MEDIA_DEVICE_TYPE_AUDIO_INPUT].size(), 0u);
@@ -375,9 +375,10 @@ class MediaDevicesDispatcherHostTest : public testing::TestWithParam<GURL> {
     }
   }
 
-  std::pair<std::string, url::Origin> GetSaltAndOrigin(int /* process_id */,
-                                                       int /* frame_id */) {
-    return std::make_pair(browser_context_->GetMediaDeviceIDSalt(), origin_);
+  MediaDeviceSaltAndOrigin GetSaltAndOrigin(int /* process_id */,
+                                            int /* frame_id */) {
+    return MediaDeviceSaltAndOrigin(browser_context_->GetMediaDeviceIDSalt(),
+                                    "fake_group_id_salt", origin_);
   }
 
   // The order of these members is important on teardown:

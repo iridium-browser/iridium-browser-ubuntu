@@ -17,9 +17,6 @@ KEYBOARD_EXPORT extern const char kDisableInputView[];
 // Disables voice input.
 KEYBOARD_EXPORT extern const char kDisableVoiceInput[];
 
-// Enables experimental features for IME extensions.
-KEYBOARD_EXPORT extern const char kEnableExperimentalInputViewFeatures[];
-
 // Flag which disables gesture typing for the virtual keyboard.
 KEYBOARD_EXPORT extern const char kDisableGestureTyping[];
 
@@ -32,6 +29,9 @@ KEYBOARD_EXPORT extern const char kEnableVirtualKeyboard[];
 
 // Floating virtual keyboard flag.
 KEYBOARD_EXPORT extern const char kEnableFloatingVirtualKeyboard[];
+
+// Virtual keyboard material design UI flag.
+KEYBOARD_EXPORT extern const char kEnableVirtualKeyboardMdUi[];
 
 // Disabled overscrolling of web content when the virtual keyboard is displayed.
 // If disabled, the work area is resized to restrict windows from overlapping

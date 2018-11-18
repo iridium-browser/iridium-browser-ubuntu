@@ -27,7 +27,6 @@
 #include "third_party/blink/renderer/core/editing/commands/replace_selection_command.h"
 
 #include "base/macros.h"
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
 #include "third_party/blink/renderer/core/css/css_property_value_set.h"
 #include "third_party/blink/renderer/core/css/css_style_declaration.h"
 #include "third_party/blink/renderer/core/css_property_names.h"
@@ -65,6 +64,7 @@
 #include "third_party/blink/renderer/core/input_type_names.h"
 #include "third_party/blink/renderer/core/layout/layout_object.h"
 #include "third_party/blink/renderer/core/layout/layout_text.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
@@ -212,7 +212,7 @@ ReplacementFragment::ReplacementFragment(Document* document,
       String original_text = fragment_->textContent();
       BeforeTextInsertedEvent* event =
           BeforeTextInsertedEvent::Create(original_text);
-      editable_root->DispatchEvent(event);
+      editable_root->DispatchEvent(*event);
       if (original_text != event->GetText()) {
         fragment_ = CreateFragmentFromText(
             selection.ToNormalizedEphemeralRange(), event->GetText());
@@ -244,7 +244,7 @@ ReplacementFragment::ReplacementFragment(Document* document,
 
   // Give the root a chance to change the text.
   BeforeTextInsertedEvent* evt = BeforeTextInsertedEvent::Create(text);
-  editable_root->DispatchEvent(evt);
+  editable_root->DispatchEvent(*evt);
   if (text != evt->GetText() || !HasRichlyEditableStyle(*editable_root)) {
     RestoreAndRemoveTestRenderingNodesToFragment(holder);
 
@@ -583,7 +583,7 @@ void ReplaceSelectionCommand::RemoveRedundantStylesAndKeepStyleSpanInline(
                            EditingStyle::kDoNotExtractMatchingStyle)) {
           // e.g. <font size="3" style="font-size: 20px;"> is converted to <font
           // style="font-size: 20px;">
-          for (size_t i = 0; i < attributes.size(); i++)
+          for (wtf_size_t i = 0; i < attributes.size(); i++)
             RemoveElementAttribute(html_element, attributes[i]);
         }
       }
@@ -804,7 +804,7 @@ VisiblePosition ReplaceSelectionCommand::PositionAtEndOfInsertedContent()
     const {
   // TODO(editing-dev): Hoist the call and change it into a DCHECK.
   GetDocument().UpdateStyleAndLayoutIgnorePendingStylesheets();
-  // TODO(yosin): We should set |m_endOfInsertedContent| not in SELECT
+  // TODO(yosin): We should set |end_of_inserted_content_| not in SELECT
   // element, since contents of SELECT elements, e.g. OPTION, OPTGROUP, are
   // not editable, or SELECT element is an atomic on editing.
   HTMLSelectElement* enclosing_select = ToHTMLSelectElement(
@@ -956,7 +956,7 @@ void ReplaceSelectionCommand::MergeEndIfNeeded(EditingState* editing_state) {
 
   GetDocument().UpdateStyleAndLayoutIgnorePendingStylesheets();
 
-  // Merging forward will remove m_endOfInsertedContent from the document.
+  // Merging forward will remove end_of_inserted_content from the document.
   if (merge_forward) {
     const VisibleSelection& visible_selection = EndingVisibleSelection();
     if (start_of_inserted_content_.IsOrphan()) {
@@ -964,8 +964,8 @@ void ReplaceSelectionCommand::MergeEndIfNeeded(EditingState* editing_state) {
           visible_selection.VisibleStart().DeepEquivalent();
     }
     end_of_inserted_content_ = visible_selection.VisibleEnd().DeepEquivalent();
-    // If we merged text nodes, m_endOfInsertedContent could be null. If
-    // this is the case, we use m_startOfInsertedContent.
+    // If we merged text nodes, end_of_inserted_content_ could be null. If
+    // this is the case, we use start_of_inserted_content_.
     if (end_of_inserted_content_.IsNull())
       end_of_inserted_content_ = start_of_inserted_content_;
   }
@@ -1723,8 +1723,8 @@ void ReplaceSelectionCommand::AddSpacesForSmartReplace(
       InsertNodeAfter(node, end_node, editing_state);
       if (editing_state->IsAborted())
         return;
-      // Make sure that |updateNodesInserted| does not change
-      // |m_startOfInsertedContent|.
+      // Make sure that |UpdateNodesInserted| does not change
+      // |start_of_inserted_content|.
       DCHECK(start_of_inserted_content_.IsNotNull());
       UpdateNodesInserted(node);
     }
@@ -1761,9 +1761,9 @@ void ReplaceSelectionCommand::AddSpacesForSmartReplace(
     } else {
       Text* node = GetDocument().CreateEditingTextNode(
           collapse_white_space ? NonBreakingSpaceString() : " ");
-      // Don't updateNodesInserted. Doing so would set m_endOfInsertedContent to
-      // be the node containing the leading space, but m_endOfInsertedContent is
-      // supposed to mark the end of pasted content.
+      // Don't UpdateNodesInserted. Doing so would set end_of_inserted_content_
+      // to be the node containing the leading space, but
+      // end_of_inserted_content_ issupposed to mark the end of pasted content.
       InsertNodeBefore(node, start_node, editing_state);
       if (editing_state->IsAborted())
         return;
@@ -1788,7 +1788,13 @@ void ReplaceSelectionCommand::CompleteHTMLReplacement(
 
     if (match_style_) {
       DCHECK(insertion_style_);
+      // Since |ApplyStyle()| changes contents of anchor node of |start| and
+      // |end|, we should relocate them.
+      Range* const range = Range::Create(GetDocument(), start, end);
       ApplyStyle(insertion_style_.Get(), start, end, editing_state);
+      start = range->StartPosition();
+      end = range->EndPosition();
+      range->Dispose();
       if (editing_state->IsAborted())
         return;
     }
@@ -1921,9 +1927,9 @@ void ReplaceSelectionCommand::MergeTextNodesAroundPosition(
 InputEvent::InputType ReplaceSelectionCommand::GetInputType() const {
   // |ReplaceSelectionCommand| could be used with Paste, Drag&Drop,
   // InsertFragment and |TypingCommand|.
-  // 1. Paste, Drag&Drop, InsertFragment should rely on correct |m_inputType|.
-  // 2. |TypingCommand| will supply the |inputType()|, so |m_inputType| could
-  //    default to |InputType::None|.
+  // 1. Paste, Drag&Drop, InsertFragment should rely on correct |input_type_|.
+  // 2. |TypingCommand| will supply the |GetInputType()|, so |input_type_| could
+  //    default to |InputType::kNone|.
   return input_type_;
 }
 

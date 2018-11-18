@@ -7,7 +7,12 @@
 
 #import "ios/chrome/browser/infobars/infobar_controller.h"
 
+class ConfirmInfoBarDelegate;
+
 @interface ConfirmInfoBarController : InfoBarController
+
+- (instancetype)initWithInfoBarDelegate:(ConfirmInfoBarDelegate*)infoBarDelegate
+    NS_DESIGNATED_INITIALIZER;
 
 @end
 

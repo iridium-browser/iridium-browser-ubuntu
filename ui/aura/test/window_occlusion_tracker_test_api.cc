@@ -4,21 +4,19 @@
 
 #include "ui/aura/test/window_occlusion_tracker_test_api.h"
 
+#include "ui/aura/env.h"
 #include "ui/aura/window_occlusion_tracker.h"
 
 namespace aura {
 namespace test {
 
-WindowOcclusionTrackerTestApi::WindowOcclusionTrackerTestApi() = default;
+WindowOcclusionTrackerTestApi::WindowOcclusionTrackerTestApi(Env* env)
+    : tracker_(env->GetWindowOcclusionTracker()) {}
+
 WindowOcclusionTrackerTestApi::~WindowOcclusionTrackerTestApi() = default;
 
-bool WindowOcclusionTrackerTestApi::WasOcclusionRecomputedTooManyTimes() {
-  const bool local_was_occlusion_recomputed_too_many_times =
-      WindowOcclusionTracker::GetInstance()
-          ->was_occlusion_recomputed_too_many_times_;
-  WindowOcclusionTracker::GetInstance()
-      ->was_occlusion_recomputed_too_many_times_ = false;
-  return local_was_occlusion_recomputed_too_many_times;
+int WindowOcclusionTrackerTestApi::GetNumTimesOcclusionRecomputed() const {
+  return tracker_->num_times_occlusion_recomputed_;
 }
 
 }  // namespace test

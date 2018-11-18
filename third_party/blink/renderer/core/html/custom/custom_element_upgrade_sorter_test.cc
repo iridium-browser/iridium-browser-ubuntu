@@ -6,7 +6,6 @@
 
 #include <memory>
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
 #include "third_party/blink/renderer/bindings/core/v8/string_or_dictionary.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/core/dom/document.h"
@@ -16,6 +15,7 @@
 #include "third_party/blink/renderer/core/html/html_document.h"
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 
@@ -35,14 +35,6 @@ class CustomElementUpgradeSorterTest : public PageTestBase {
 
   ScriptState* GetScriptState() {
     return ToScriptStateForMainWorld(&GetFrame());
-  }
-
-  ShadowRoot* AttachShadowTo(Element* element) {
-    NonThrowableExceptionState no_exceptions;
-    ShadowRootInit shadow_root_init;
-    shadow_root_init.setMode("open");
-    return element->attachShadow(GetScriptState(), shadow_root_init,
-                                 no_exceptions);
   }
 };
 
@@ -185,7 +177,7 @@ TEST_F(CustomElementUpgradeSorterTest, sorter_shadow) {
   Element* d = CreateElementWithId("a-a", "d");
 
   GetDocument().documentElement()->AppendChild(a);
-  ShadowRoot* s = AttachShadowTo(a);
+  ShadowRoot* s = &a->AttachShadowRootInternal(ShadowRootType::kOpen);
   a->AppendChild(d);
 
   s->AppendChild(b);
@@ -203,7 +195,5 @@ TEST_F(CustomElementUpgradeSorterTest, sorter_shadow) {
   EXPECT_EQ(c, elements[1].Get());
   EXPECT_EQ(d, elements[2].Get());
 }
-
-// TODO(kochi): Add test cases which uses HTML imports.
 
 }  // namespace blink

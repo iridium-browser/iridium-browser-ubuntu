@@ -23,16 +23,6 @@
 #include "ui/views/views_export.h"
 #include "ui/views/widget/widget.h"
 
-namespace base {
-class TimeDelta;
-}
-
-namespace content {
-class WebContents;
-class BrowserContext;
-class SiteInstance;
-}
-
 namespace gfx {
 class ImageSkia;
 class Rect;
@@ -40,13 +30,14 @@ class Rect;
 
 namespace ui {
 class ContextFactory;
+class TouchEditingControllerFactory;
 }
 
 namespace views {
 
 class NativeWidget;
 class NonClientFrameView;
-class ViewsTouchEditingControllerFactory;
+class PointerWatcher;
 class View;
 class Widget;
 
@@ -157,7 +148,7 @@ class VIEWS_EXPORT ViewsDelegate {
   // Retrieves the default window icon to use for windows if none is specified.
   virtual HICON GetDefaultWindowIcon() const;
   // Retrieves the small window icon to use for windows if none is specified.
-  virtual HICON GetSmallWindowIcon() const = 0;
+  virtual HICON GetSmallWindowIcon() const;
   // Returns true if the window passed in is in the Windows 8 metro
   // environment.
   virtual bool IsWindowInMetro(gfx::NativeWindow window) const;
@@ -175,17 +166,9 @@ class VIEWS_EXPORT ViewsDelegate {
   virtual void AddRef();
   virtual void ReleaseRef();
 
-  // Creates a web contents. This will return NULL unless overriden.
-  virtual content::WebContents* CreateWebContents(
-      content::BrowserContext* browser_context,
-      content::SiteInstance* site_instance);
-
   // Gives the platform a chance to modify the properties of a Widget.
   virtual void OnBeforeWidgetInit(Widget::InitParams* params,
-                                  internal::NativeWidgetDelegate* delegate) = 0;
-
-  // Returns the password reveal duration for Textfield.
-  virtual base::TimeDelta GetTextfieldPasswordRevealDuration();
+                                  internal::NativeWidgetDelegate* delegate);
 
   // Returns true if the operating system's window manager will always provide a
   // title bar with caption buttons (ignoring the setting to
@@ -217,11 +200,18 @@ class VIEWS_EXPORT ViewsDelegate {
   // opens in the opposite direction.
   virtual bool ShouldMirrorArrowsInRTL() const;
 
+  // Allows lower-level views components to use Mus-only PointerWatcher wiring.
+  // TODO(crbug.com/887725): Support PointerWatcher without mus, refactor.
+  virtual void AddPointerWatcher(PointerWatcher* pointer_watcher,
+                                 bool wants_moves);
+  virtual void RemovePointerWatcher(PointerWatcher* pointer_watcher);
+  virtual bool IsPointerWatcherSupported() const;
+
  protected:
   ViewsDelegate();
 
  private:
-  std::unique_ptr<ViewsTouchEditingControllerFactory>
+  std::unique_ptr<ui::TouchEditingControllerFactory>
       editing_controller_factory_;
 
 #if defined(USE_AURA)

@@ -5,105 +5,54 @@
 #ifndef CHROME_BROWSER_UI_VIEWS_FRAME_BROWSER_FRAME_HEADER_ASH_H_
 #define CHROME_BROWSER_UI_VIEWS_FRAME_BROWSER_FRAME_HEADER_ASH_H_
 
-#include <memory>
-
-#include "ash/frame/frame_header.h"
+#include "ash/public/cpp/frame_header.h"
+#include "base/callback.h"
 #include "base/macros.h"
-#include "ui/gfx/animation/animation_delegate.h"
+#include "ui/gfx/image/image_skia.h"
 
-class BrowserNonClientFrameViewAsh;
-class BrowserView;
-
-namespace ash {
-class FrameCaptionButton;
-class FrameCaptionButtonContainerView;
-}  // namespace ash
-
-namespace gfx {
-class Rect;
-class SlideAnimation;
-}  // namespace gfx
-namespace views {
-class View;
-class Widget;
-}  // namespace views
-
-// Helper class for managing the browser window header.
-class BrowserFrameHeaderAsh : public ash::FrameHeader,
-                              public gfx::AnimationDelegate {
+// Helper class for drawing a custom frame (such as for a themed Chrome Browser
+// frame).
+class BrowserFrameHeaderAsh : public ash::FrameHeader {
  public:
-  BrowserFrameHeaderAsh();
-  ~BrowserFrameHeaderAsh() override;
+  class AppearanceProvider {
+   public:
+    virtual ~AppearanceProvider() = default;
+    virtual SkColor GetTitleColor() = 0;
+    virtual SkColor GetFrameHeaderColor(bool active) = 0;
+    virtual gfx::ImageSkia GetFrameHeaderImage(bool active) = 0;
+    virtual int GetFrameHeaderImageYInset() = 0;
+    virtual gfx::ImageSkia GetFrameHeaderOverlayImage(bool active) = 0;
+  };
 
   // BrowserFrameHeaderAsh does not take ownership of any of the parameters.
-  // |back_button| can be nullptr, and the frame will not have a back button.
-  void Init(views::Widget* frame,
-            BrowserView* browser_view,
-            BrowserNonClientFrameViewAsh* header_view,
-            views::View* window_icon,
-            ash::FrameCaptionButtonContainerView* caption_button_container,
-            ash::FrameCaptionButton* back_button);
+  // |target_widget| is the widget that the caption buttons act on.
+  // |view| is the view into which |this| will paint.
+  BrowserFrameHeaderAsh(
+      views::Widget* target_widget,
+      views::View* view,
+      AppearanceProvider* appearance_provider,
+      ash::FrameCaptionButtonContainerView* caption_button_container);
+  ~BrowserFrameHeaderAsh() override;
 
-  // ash::FrameHeader overrides:
-  int GetMinimumHeaderWidth() const override;
-  void PaintHeader(gfx::Canvas* canvas, Mode mode) override;
-  void LayoutHeader() override;
-  int GetHeaderHeight() const override;
-  int GetHeaderHeightForPainting() const override;
-  void SetHeaderHeightForPainting(int height) override;
-  void SchedulePaintForTitle() override;
-  void SetPaintAsActive(bool paint_as_active) override;
-  void OnShowStateChanged(ui::WindowShowState show_state) override;
+  // Returns the amount that the frame background is inset from the left edge of
+  // the window.
+  static int GetThemeBackgroundXInset();
+
+ protected:
+  // FrameHeader:
+  void DoPaintHeader(gfx::Canvas* canvas) override;
+  void DoSetFrameColors(SkColor active_frame_color,
+                        SkColor inactive_frame_color) override;
+  ash::AshLayoutSize GetButtonLayoutSize() const override;
+  SkColor GetTitleColor() const override;
+  SkColor GetCurrentFrameColor() const override;
 
  private:
-  // gfx::AnimationDelegate override:
-  void AnimationProgressed(const gfx::Animation* animation) override;
-
-  // Does the actual work of layouting header.
-  void LayoutHeaderInternal();
-
   // Paints the frame image for the |active| state based on the current value of
   // the activation animation.
   void PaintFrameImages(gfx::Canvas* canvas, bool active);
 
-  // Paints the title bar, primarily the title string.
-  void PaintTitleBar(gfx::Canvas* canvas);
-
-  // Updates the size and icons used for the minimize, restore, and close
-  // buttons.
-  void UpdateCaptionButtons();
-
-  // Returns bounds of the region in |view_| which is painted with the header
-  // images. The region is assumed to start at the top left corner of |view_|
-  // and to have the same width as |view_|.
-  gfx::Rect GetPaintedBounds() const;
-
-  // Returns the bounds for the title.
-  gfx::Rect GetTitleBounds() const;
-
-  views::Widget* frame_;
-
-  // Whether the header is for a tabbed browser window.
-  bool is_tabbed_;
-
-  // Whether the header is for an incognito browser window.
-  bool is_incognito_;
-
-  // The header view.
-  BrowserNonClientFrameViewAsh* view_;
-
-  views::View* window_icon_;
-  ash::FrameCaptionButton* back_button_ = nullptr;
-  ash::FrameCaptionButtonContainerView* caption_button_container_;
-  int painted_height_;
-
-  // Whether the header is painted for the first time.
-  bool initial_paint_;
-
-  // Whether the header should be painted as active.
-  Mode mode_;
-
-  std::unique_ptr<gfx::SlideAnimation> activation_animation_;
+  AppearanceProvider* appearance_provider_ = nullptr;
 
   DISALLOW_COPY_AND_ASSIGN(BrowserFrameHeaderAsh);
 };

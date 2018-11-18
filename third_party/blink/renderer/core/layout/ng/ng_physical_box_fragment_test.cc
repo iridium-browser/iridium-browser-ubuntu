@@ -4,7 +4,6 @@
 
 #include "third_party/blink/renderer/core/layout/ng/ng_physical_box_fragment.h"
 
-#include "third_party/blink/renderer/core/layout/layout_block_flow.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_layout_test.h"
 
 namespace blink {
@@ -23,7 +22,7 @@ class NGPhysicalBoxFragmentTest : public NGLayoutTest {
 // instead of using |contenteditable|.
 
 // Tests that a normal old layout root box fragment has correct box type.
-TEST_F(NGPhysicalBoxFragmentTest, NormalOldLayoutRoot) {
+TEST_F(NGPhysicalBoxFragmentTest, DISABLED_NormalOldLayoutRoot) {
   SetBodyInnerHTML("<div contenteditable>X</div>");
   const NGPhysicalFragment* fragment =
       GetBodyFragment().Children().front().get();
@@ -31,11 +30,13 @@ TEST_F(NGPhysicalBoxFragmentTest, NormalOldLayoutRoot) {
   EXPECT_TRUE(fragment->IsBox());
   EXPECT_EQ(NGPhysicalFragment::kNormalBox, fragment->BoxType());
   EXPECT_TRUE(fragment->IsOldLayoutRoot());
-  EXPECT_TRUE(fragment->IsBlockLayoutRoot());
+  EXPECT_TRUE(fragment->IsBlockFormattingContextRoot());
 }
 
+// TODO(editing-dev): Once LayoutNG supports editing, we should change this
+// test to use LayoutNG tree.
 // Tests that a float old layout root box fragment has correct box type.
-TEST_F(NGPhysicalBoxFragmentTest, FloatOldLayoutRoot) {
+TEST_F(NGPhysicalBoxFragmentTest, DISABLED_FloatOldLayoutRoot) {
   SetBodyInnerHTML("<span contenteditable style='float:left'>X</span>foo");
   const NGPhysicalFragment* fragment =
       GetBodyFragment().Children().front().get();
@@ -43,11 +44,13 @@ TEST_F(NGPhysicalBoxFragmentTest, FloatOldLayoutRoot) {
   EXPECT_TRUE(fragment->IsBox());
   EXPECT_EQ(NGPhysicalFragment::kFloating, fragment->BoxType());
   EXPECT_TRUE(fragment->IsOldLayoutRoot());
-  EXPECT_TRUE(fragment->IsBlockLayoutRoot());
+  EXPECT_TRUE(fragment->IsBlockFormattingContextRoot());
 }
 
+// TODO(editing-dev): Once LayoutNG supports editing, we should change this
+// test to use LayoutNG tree.
 // Tests that an inline block old layout root box fragment has correct box type.
-TEST_F(NGPhysicalBoxFragmentTest, InlineBlockOldLayoutRoot) {
+TEST_F(NGPhysicalBoxFragmentTest, DISABLED_InlineBlockOldLayoutRoot) {
   SetBodyInnerHTML(
       "<span contenteditable style='display:inline-block'>X</span>foo");
   const NGPhysicalContainerFragment* line_box =
@@ -57,12 +60,14 @@ TEST_F(NGPhysicalBoxFragmentTest, InlineBlockOldLayoutRoot) {
   EXPECT_TRUE(fragment->IsBox());
   EXPECT_EQ(NGPhysicalFragment::kAtomicInline, fragment->BoxType());
   EXPECT_TRUE(fragment->IsOldLayoutRoot());
-  EXPECT_TRUE(fragment->IsBlockLayoutRoot());
+  EXPECT_TRUE(fragment->IsBlockFormattingContextRoot());
 }
 
+// TODO(editing-dev): Once LayoutNG supports editing, we should change this
+// test to use LayoutNG tree.
 // Tests that an out-of-flow positioned old layout root box fragment has correct
 // box type.
-TEST_F(NGPhysicalBoxFragmentTest, OutOfFlowPositionedOldLayoutRoot) {
+TEST_F(NGPhysicalBoxFragmentTest, DISABLED_OutOfFlowPositionedOldLayoutRoot) {
   SetBodyInnerHTML(
       "<style>body {position: absolute}</style>"
       "<div contenteditable style='position: absolute'>X</div>");
@@ -72,7 +77,7 @@ TEST_F(NGPhysicalBoxFragmentTest, OutOfFlowPositionedOldLayoutRoot) {
   EXPECT_TRUE(fragment->IsBox());
   EXPECT_EQ(NGPhysicalFragment::kOutOfFlowPositioned, fragment->BoxType());
   EXPECT_TRUE(fragment->IsOldLayoutRoot());
-  EXPECT_TRUE(fragment->IsBlockLayoutRoot());
+  EXPECT_TRUE(fragment->IsBlockFormattingContextRoot());
 }
 
 }  // namespace blink

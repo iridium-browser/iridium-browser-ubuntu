@@ -12,6 +12,7 @@
 namespace content {
 
 class DevToolsAgentHost;
+class RenderFrameHost;
 
 // DevToolsAgentHostClient can attach to a DevToolsAgentHost and start
 // debugging it.
@@ -25,6 +26,22 @@ class CONTENT_EXPORT DevToolsAgentHostClient {
 
   // This method is called when attached agent host is closed.
   virtual void AgentHostClosed(DevToolsAgentHost* agent_host) = 0;
+
+  // Returns true if the client is allowed to attach to the given renderer.
+  // Note: this method may be called before navigation commits.
+  virtual bool MayAttachToRenderer(content::RenderFrameHost* render_frame_host,
+                                   bool is_webui);
+
+  // Returns true if the client is allowed to attach to the browser agent host.
+  virtual bool MayAttachToBrowser();
+
+  // Returns true if the client is allowed to discover other DevTools targets.
+  // If not, it will be restricted to auto-attaching to related targets.
+  virtual bool MayDiscoverTargets();
+
+  // Returns true if the client is allowed to affect local files over the
+  // protocol. Example would be manipulating a deault downloads path.
+  virtual bool MayAffectLocalFiles();
 };
 
 }  // namespace content

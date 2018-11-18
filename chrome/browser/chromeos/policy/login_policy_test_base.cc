@@ -6,6 +6,8 @@
 
 #include "base/values.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/chromeos/login/screens/gaia_view.h"
+#include "chrome/browser/chromeos/login/ui/login_display_host.h"
 #include "chrome/browser/chromeos/login/ui/login_display_webui.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/policy/user_policy_test_helper.h"
@@ -32,6 +34,8 @@ constexpr char kTestSessionLSIDCookie[] = "fake-session-LSID-cookie";
 
 const char LoginPolicyTestBase::kAccountPassword[] = "letmein";
 const char LoginPolicyTestBase::kAccountId[] = "user@example.com";
+// Empty services list for userInfo.
+const char LoginPolicyTestBase::kEmptyServices[] = "[]";
 
 LoginPolicyTestBase::LoginPolicyTestBase() {
   set_open_about_blank_on_browser_launch(false);
@@ -109,8 +113,12 @@ void LoginPolicyTestBase::SkipToLoginScreen() {
 }
 
 void LoginPolicyTestBase::LogIn(const std::string& user_id,
-                                const std::string& password) {
-  GetLoginDisplay()->ShowSigninScreenForCreds(user_id, password);
+                                const std::string& password,
+                                const std::string& services) {
+  chromeos::LoginDisplayHost::default_host()
+      ->GetOobeUI()
+      ->GetGaiaScreenView()
+      ->ShowSigninScreenForTest(user_id, password, services);
 
   content::WindowedNotificationObserver(
       chrome::NOTIFICATION_SESSION_STARTED,

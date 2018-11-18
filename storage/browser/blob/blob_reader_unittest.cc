@@ -22,7 +22,7 @@
 #include "base/test/scoped_task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
-#include "net/base/completion_callback.h"
+#include "net/base/completion_once_callback.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
 #include "net/base/test_completion_callback.h"
@@ -81,10 +81,10 @@ class DelayedReadEntry : public disk_cache::Entry {
   bool HasPendingReadCallbacks() { return !pending_read_callbacks_.empty(); }
 
   void RunPendingReadCallbacks() {
-    std::vector<base::Callback<void(void)>> callbacks;
+    std::vector<base::OnceCallback<void(void)>> callbacks;
     pending_read_callbacks_.swap(callbacks);
-    for (const auto& callback : callbacks)
-      callback.Run();
+    for (auto& callback : callbacks)
+      std::move(callback).Run();
   }
 
   // From disk_cache::Entry:
@@ -108,12 +108,13 @@ class DelayedReadEntry : public disk_cache::Entry {
                int offset,
                IOBuffer* buf,
                int buf_len,
-               const CompletionCallback& original_callback) override {
+               CompletionOnceCallback original_callback) override {
     net::TestCompletionCallback callback;
     int rv = entry_->ReadData(index, offset, buf, buf_len, callback.callback());
     DCHECK_NE(rv, net::ERR_IO_PENDING)
         << "Test expects to use a MEMORY_CACHE instance, which is synchronous.";
-    pending_read_callbacks_.push_back(base::Bind(original_callback, rv));
+    pending_read_callbacks_.push_back(
+        base::BindOnce(std::move(original_callback), rv));
     return net::ERR_IO_PENDING;
   }
 
@@ -121,44 +122,45 @@ class DelayedReadEntry : public disk_cache::Entry {
                 int offset,
                 IOBuffer* buf,
                 int buf_len,
-                const CompletionCallback& callback,
+                CompletionOnceCallback callback,
                 bool truncate) override {
-    return entry_->WriteData(index, offset, buf, buf_len, callback, truncate);
+    return entry_->WriteData(index, offset, buf, buf_len, std::move(callback),
+                             truncate);
   }
 
   int ReadSparseData(int64_t offset,
                      IOBuffer* buf,
                      int buf_len,
-                     const CompletionCallback& callback) override {
-    return entry_->ReadSparseData(offset, buf, buf_len, callback);
+                     CompletionOnceCallback callback) override {
+    return entry_->ReadSparseData(offset, buf, buf_len, std::move(callback));
   }
 
   int WriteSparseData(int64_t offset,
                       IOBuffer* buf,
                       int buf_len,
-                      const CompletionCallback& callback) override {
-    return entry_->WriteSparseData(offset, buf, buf_len, callback);
+                      CompletionOnceCallback callback) override {
+    return entry_->WriteSparseData(offset, buf, buf_len, std::move(callback));
   }
 
   int GetAvailableRange(int64_t offset,
                         int len,
                         int64_t* start,
-                        const CompletionCallback& callback) override {
-    return entry_->GetAvailableRange(offset, len, start, callback);
+                        CompletionOnceCallback callback) override {
+    return entry_->GetAvailableRange(offset, len, start, std::move(callback));
   }
 
   bool CouldBeSparse() const override { return entry_->CouldBeSparse(); }
 
   void CancelSparseIO() override { entry_->CancelSparseIO(); }
 
-  int ReadyForSparseIO(const CompletionCallback& callback) override {
-    return entry_->ReadyForSparseIO(callback);
+  net::Error ReadyForSparseIO(CompletionOnceCallback callback) override {
+    return entry_->ReadyForSparseIO(std::move(callback));
   }
   void SetLastUsedTimeForTest(base::Time time) override { NOTREACHED(); }
 
  private:
   disk_cache::ScopedEntryPtr entry_;
-  std::vector<base::Callback<void(void)>> pending_read_callbacks_;
+  std::vector<base::OnceCallback<void(void)>> pending_read_callbacks_;
 };
 
 std::unique_ptr<disk_cache::Backend> CreateInMemoryDiskCache() {
@@ -177,12 +179,14 @@ disk_cache::ScopedEntryPtr CreateDiskCacheEntry(disk_cache::Backend* cache,
                                                 const std::string& data) {
   disk_cache::Entry* temp_entry = nullptr;
   net::TestCompletionCallback callback;
-  int rv = cache->CreateEntry(key, &temp_entry, callback.callback());
+  int rv =
+      cache->CreateEntry(key, net::HIGHEST, &temp_entry, callback.callback());
   if (callback.GetResult(rv) != net::OK)
     return nullptr;
   disk_cache::ScopedEntryPtr entry(temp_entry);
 
-  scoped_refptr<net::StringIOBuffer> iobuffer = new net::StringIOBuffer(data);
+  scoped_refptr<net::StringIOBuffer> iobuffer =
+      base::MakeRefCounted<net::StringIOBuffer>(data);
   rv = entry->WriteData(kTestDiskCacheStreamIndex, 0, iobuffer.get(),
                         iobuffer->size(), callback.callback(), false);
   EXPECT_EQ(static_cast<int>(data.size()), callback.GetResult(rv));
@@ -196,7 +200,7 @@ disk_cache::ScopedEntryPtr CreateDiskCacheEntryWithSideData(
     const std::string& side_data) {
   disk_cache::ScopedEntryPtr entry = CreateDiskCacheEntry(cache, key, data);
   scoped_refptr<net::StringIOBuffer> iobuffer =
-      new net::StringIOBuffer(side_data);
+      base::MakeRefCounted<net::StringIOBuffer>(side_data);
   net::TestCompletionCallback callback;
   int rv = entry->WriteData(kTestDiskCacheSideStreamIndex, 0, iobuffer.get(),
                             iobuffer->size(), callback.callback(), false);
@@ -212,15 +216,15 @@ void SetValue(T* address, T value) {
 class FakeFileStreamReader : public FileStreamReader {
  public:
   explicit FakeFileStreamReader(const std::string& contents)
-      : buffer_(new DrainableIOBuffer(
-            new net::StringIOBuffer(
+      : buffer_(base::MakeRefCounted<DrainableIOBuffer>(
+            base::MakeRefCounted<net::StringIOBuffer>(
                 std::unique_ptr<std::string>(new std::string(contents))),
             contents.size())),
         net_error_(net::OK),
         size_(contents.size()) {}
   FakeFileStreamReader(const std::string& contents, uint64_t size)
-      : buffer_(new DrainableIOBuffer(
-            new net::StringIOBuffer(
+      : buffer_(base::MakeRefCounted<DrainableIOBuffer>(
+            base::MakeRefCounted<net::StringIOBuffer>(
                 std::unique_ptr<std::string>(new std::string(contents))),
             contents.size())),
         net_error_(net::OK),
@@ -236,12 +240,12 @@ class FakeFileStreamReader : public FileStreamReader {
 
   int Read(net::IOBuffer* buf,
            int buf_length,
-           const net::CompletionCallback& done) override {
+           net::CompletionOnceCallback done) override {
     DCHECK(buf);
     // When async_task_runner_ is not set, return synchronously.
     if (!async_task_runner_.get()) {
       if (net_error_ == net::OK) {
-        return ReadImpl(buf, buf_length, net::CompletionCallback());
+        return ReadImpl(buf, buf_length, net::CompletionOnceCallback());
       } else {
         return net_error_;
       }
@@ -253,15 +257,15 @@ class FakeFileStreamReader : public FileStreamReader {
           FROM_HERE,
           base::BindOnce(base::IgnoreResult(&FakeFileStreamReader::ReadImpl),
                          base::Unretained(this), base::WrapRefCounted(buf),
-                         buf_length, done));
+                         buf_length, std::move(done)));
     } else {
-      async_task_runner_->PostTask(FROM_HERE, base::BindOnce(done, net_error_));
+      async_task_runner_->PostTask(FROM_HERE,
+                                   base::BindOnce(std::move(done), net_error_));
     }
     return net::ERR_IO_PENDING;
   }
 
-  int64_t GetLength(
-      const net::Int64CompletionCallback& size_callback) override {
+  int64_t GetLength(net::Int64CompletionOnceCallback size_callback) override {
     // When async_task_runner_ is not set, return synchronously.
     if (!async_task_runner_.get()) {
       if (net_error_ == net::OK) {
@@ -271,12 +275,12 @@ class FakeFileStreamReader : public FileStreamReader {
       }
     }
     if (net_error_ == net::OK) {
-      async_task_runner_->PostTask(FROM_HERE,
-                                   base::BindOnce(size_callback, size_));
+      async_task_runner_->PostTask(
+          FROM_HERE, base::BindOnce(std::move(size_callback), size_));
     } else {
       async_task_runner_->PostTask(
-          FROM_HERE,
-          base::BindOnce(size_callback, static_cast<int64_t>(net_error_)));
+          FROM_HERE, base::BindOnce(std::move(size_callback),
+                                    static_cast<int64_t>(net_error_)));
     }
     return net::ERR_IO_PENDING;
   }
@@ -284,7 +288,7 @@ class FakeFileStreamReader : public FileStreamReader {
  private:
   int ReadImpl(scoped_refptr<net::IOBuffer> buf,
                int buf_length,
-               const net::CompletionCallback& done) {
+               net::CompletionOnceCallback done) {
     CHECK_GE(buf_length, 0);
     int length = std::min(buf_length, buffer_->BytesRemaining());
     memcpy(buf->data(), buffer_->data(), length);
@@ -292,7 +296,7 @@ class FakeFileStreamReader : public FileStreamReader {
     if (done.is_null()) {
       return length;
     }
-    done.Run(length);
+    std::move(done).Run(length);
     return net::ERR_IO_PENDING;
   }
 
@@ -408,8 +412,7 @@ class BlobReaderTest : public ::testing::Test {
   }
 
   scoped_refptr<net::IOBuffer> CreateBuffer(uint64_t size) {
-    return scoped_refptr<net::IOBuffer>(
-        new net::IOBuffer(static_cast<size_t>(size)));
+    return base::MakeRefCounted<net::IOBuffer>(static_cast<size_t>(size));
   }
 
   bool IsReaderTotalSizeCalculated() {
@@ -441,7 +444,8 @@ TEST_F(BlobReaderTest, BasicMemory) {
   EXPECT_TRUE(reader_->IsInMemory());
   CheckSizeCalculatedSynchronously(kDataSize, size_result);
 
-  scoped_refptr<net::IOBuffer> buffer(new net::IOBuffer(kDataSize));
+  scoped_refptr<net::IOBuffer> buffer =
+      base::MakeRefCounted<net::IOBuffer>(kDataSize);
 
   int bytes_read = 0;
   int async_bytes_read = 0;
@@ -472,7 +476,8 @@ TEST_F(BlobReaderTest, BasicFile) {
   EXPECT_FALSE(reader_->IsInMemory());
   CheckSizeCalculatedSynchronously(kData.size(), size_result);
 
-  scoped_refptr<net::IOBuffer> buffer(new net::IOBuffer(kData.size()));
+  scoped_refptr<net::IOBuffer> buffer =
+      base::MakeRefCounted<net::IOBuffer>(kData.size());
 
   int bytes_read = 0;
   int async_bytes_read = 0;
@@ -504,7 +509,8 @@ TEST_F(BlobReaderTest, BasicFileSystem) {
 
   CheckSizeCalculatedSynchronously(kData.size(), size_result);
 
-  scoped_refptr<net::IOBuffer> buffer(new net::IOBuffer(kData.size()));
+  scoped_refptr<net::IOBuffer> buffer =
+      base::MakeRefCounted<net::IOBuffer>(kData.size());
 
   int bytes_read = 0;
   int async_bytes_read = 0;
@@ -538,7 +544,8 @@ TEST_F(BlobReaderTest, BasicDiskCache) {
 
   EXPECT_FALSE(reader_->has_side_data());
 
-  scoped_refptr<net::IOBuffer> buffer(new net::IOBuffer(kData.size()));
+  scoped_refptr<net::IOBuffer> buffer =
+      base::MakeRefCounted<net::IOBuffer>(kData.size());
 
   int bytes_read = 0;
   int async_bytes_read = 0;
@@ -599,7 +606,8 @@ TEST_F(BlobReaderTest, BufferLargerThanMemory) {
                                           &SetValue<int>, &size_result)));
   CheckSizeCalculatedSynchronously(kData.size(), size_result);
 
-  scoped_refptr<net::IOBuffer> buffer(new net::IOBuffer(kBufferSize));
+  scoped_refptr<net::IOBuffer> buffer =
+      base::MakeRefCounted<net::IOBuffer>(kBufferSize);
 
   int bytes_read = 0;
   int async_bytes_read = 0;
@@ -654,7 +662,8 @@ TEST_F(BlobReaderTest, BufferSmallerThanMemory) {
                                           &SetValue<int>, &size_result)));
   CheckSizeCalculatedSynchronously(kData.size(), size_result);
 
-  scoped_refptr<net::IOBuffer> buffer(new net::IOBuffer(kBufferSize));
+  scoped_refptr<net::IOBuffer> buffer =
+      base::MakeRefCounted<net::IOBuffer>(kBufferSize);
 
   int bytes_read = 0;
   int async_bytes_read = 0;
@@ -698,7 +707,8 @@ TEST_F(BlobReaderTest, SegmentedBufferAndMemory) {
                                           &SetValue<int>, &size_result)));
   CheckSizeCalculatedSynchronously(kTotalSize, size_result);
 
-  scoped_refptr<net::IOBuffer> buffer(new net::IOBuffer(kBufferSize));
+  scoped_refptr<net::IOBuffer> buffer =
+      base::MakeRefCounted<net::IOBuffer>(kBufferSize);
 
   current_value = 0;
   for (size_t i = 0; i < kTotalSize / kBufferSize; i++) {
@@ -740,7 +750,8 @@ TEST_F(BlobReaderTest, FileAsync) {
   base::RunLoop().RunUntilIdle();
   CheckSizeCalculatedAsynchronously(kData.size(), size_result);
 
-  scoped_refptr<net::IOBuffer> buffer(new net::IOBuffer(kData.size()));
+  scoped_refptr<net::IOBuffer> buffer =
+      base::MakeRefCounted<net::IOBuffer>(kData.size());
 
   int bytes_read = 0;
   int async_bytes_read = 0;
@@ -777,7 +788,8 @@ TEST_F(BlobReaderTest, FileSystemAsync) {
   base::RunLoop().RunUntilIdle();
   CheckSizeCalculatedAsynchronously(kData.size(), size_result);
 
-  scoped_refptr<net::IOBuffer> buffer(new net::IOBuffer(kData.size()));
+  scoped_refptr<net::IOBuffer> buffer =
+      base::MakeRefCounted<net::IOBuffer>(kData.size());
 
   int bytes_read = 0;
   int async_bytes_read = 0;
@@ -811,7 +823,8 @@ TEST_F(BlobReaderTest, DiskCacheAsync) {
                                           &SetValue<int>, &size_result)));
   CheckSizeCalculatedSynchronously(kData.size(), size_result);
 
-  scoped_refptr<net::IOBuffer> buffer(new net::IOBuffer(kData.size()));
+  scoped_refptr<net::IOBuffer> buffer =
+      base::MakeRefCounted<net::IOBuffer>(kData.size());
 
   int bytes_read = 0;
   int async_bytes_read = 0;
@@ -957,7 +970,8 @@ TEST_F(BlobReaderTest, FileSomeAsyncSegmentedOffsetsUnknownSizes) {
   base::RunLoop().RunUntilIdle();
   CheckSizeCalculatedAsynchronously(kTotalSize, size_result);
 
-  scoped_refptr<net::IOBuffer> buffer(new net::IOBuffer(kBufferSize));
+  scoped_refptr<net::IOBuffer> buffer =
+      base::MakeRefCounted<net::IOBuffer>(kBufferSize);
 
   current_value = 0;
   for (size_t i = 0; i < kTotalSize / kBufferSize; i++) {
@@ -1103,7 +1117,8 @@ TEST_F(BlobReaderTest, FileErrorsSync) {
                                           &SetValue<int>, &size_result)));
   reader->SetReturnError(net::ERR_FILE_NOT_FOUND);
 
-  scoped_refptr<net::IOBuffer> buffer(new net::IOBuffer(kData.size()));
+  scoped_refptr<net::IOBuffer> buffer =
+      base::MakeRefCounted<net::IOBuffer>(kData.size());
   int bytes_read = 0;
   int async_bytes_read = 0;
   EXPECT_EQ(BlobReader::Status::NET_ERROR,
@@ -1146,7 +1161,8 @@ TEST_F(BlobReaderTest, FileErrorsAsync) {
   reader->SetReturnError(net::ERR_FILE_NOT_FOUND);
   reader->SetAsyncRunner(base::ThreadTaskRunnerHandle::Get().get());
 
-  scoped_refptr<net::IOBuffer> buffer(new net::IOBuffer(kData.size()));
+  scoped_refptr<net::IOBuffer> buffer =
+      base::MakeRefCounted<net::IOBuffer>(kData.size());
   int bytes_read = 0;
   int async_bytes_read = 0;
   EXPECT_EQ(BlobReader::Status::IO_PENDING,
@@ -1242,7 +1258,8 @@ TEST_F(BlobReaderTest, ReadFromIncompleteBlob) {
   context_.NotifyTransportComplete(kUuid);
   base::RunLoop().RunUntilIdle();
   CheckSizeCalculatedAsynchronously(kDataSize, size_result);
-  scoped_refptr<net::IOBuffer> buffer(new net::IOBuffer(kDataSize));
+  scoped_refptr<net::IOBuffer> buffer =
+      base::MakeRefCounted<net::IOBuffer>(kDataSize);
 
   int bytes_read = 0;
   int async_bytes_read = 0;

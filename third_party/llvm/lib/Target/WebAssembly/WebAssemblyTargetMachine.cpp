@@ -8,7 +8,7 @@
 //===----------------------------------------------------------------------===//
 ///
 /// \file
-/// \brief This file defines the WebAssembly-specific subclass of TargetMachine.
+/// This file defines the WebAssembly-specific subclass of TargetMachine.
 ///
 //===----------------------------------------------------------------------===//
 
@@ -25,6 +25,7 @@
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Target/TargetOptions.h"
 #include "llvm/Transforms/Scalar.h"
+#include "llvm/Transforms/Utils.h"
 using namespace llvm;
 
 #define DEBUG_TYPE "wasm"
@@ -48,9 +49,32 @@ extern "C" void LLVMInitializeWebAssemblyTarget() {
   RegisterTargetMachine<WebAssemblyTargetMachine> Y(
       getTheWebAssemblyTarget64());
 
-  // Register exception handling pass to opt
-  initializeWebAssemblyLowerEmscriptenEHSjLjPass(
-      *PassRegistry::getPassRegistry());
+  // Register backend passes
+  auto &PR = *PassRegistry::getPassRegistry();
+  initializeWebAssemblyAddMissingPrototypesPass(PR);
+  initializeWebAssemblyLowerEmscriptenEHSjLjPass(PR);
+  initializeLowerGlobalDtorsPass(PR);
+  initializeFixFunctionBitcastsPass(PR);
+  initializeOptimizeReturnedPass(PR);
+  initializeWebAssemblyArgumentMovePass(PR);
+  initializeWebAssemblySetP2AlignOperandsPass(PR);
+  initializeWebAssemblyEHRestoreStackPointerPass(PR);
+  initializeWebAssemblyReplacePhysRegsPass(PR);
+  initializeWebAssemblyPrepareForLiveIntervalsPass(PR);
+  initializeWebAssemblyOptimizeLiveIntervalsPass(PR);
+  initializeWebAssemblyStoreResultsPass(PR);
+  initializeWebAssemblyRegStackifyPass(PR);
+  initializeWebAssemblyRegColoringPass(PR);
+  initializeWebAssemblyExplicitLocalsPass(PR);
+  initializeWebAssemblyFixIrreducibleControlFlowPass(PR);
+  initializeWebAssemblyLateEHPreparePass(PR);
+  initializeWebAssemblyExceptionInfoPass(PR);
+  initializeWebAssemblyCFGSortPass(PR);
+  initializeWebAssemblyCFGStackifyPass(PR);
+  initializeWebAssemblyLowerBrUnlessPass(PR);
+  initializeWebAssemblyRegNumberingPass(PR);
+  initializeWebAssemblyPeepholePass(PR);
+  initializeWebAssemblyCallIndirectFixupPass(PR);
 }
 
 //===----------------------------------------------------------------------===//
@@ -74,11 +98,7 @@ WebAssemblyTargetMachine::WebAssemblyTargetMachine(
                                          : "e-m:e-p:32:32-i64:64-n32:64-S128",
                         TT, CPU, FS, Options, getEffectiveRelocModel(RM),
                         CM ? *CM : CodeModel::Large, OL),
-      TLOF(TT.isOSBinFormatELF() ?
-              static_cast<TargetLoweringObjectFile*>(
-                  new WebAssemblyTargetObjectFileELF()) :
-              static_cast<TargetLoweringObjectFile*>(
-                  new WebAssemblyTargetObjectFile())) {
+      TLOF(new WebAssemblyTargetObjectFile()) {
   // WebAssembly type-checks instructions, but a noreturn function with a return
   // type that doesn't match the context will cause a check failure. So we lower
   // LLVM 'unreachable' to ISD::TRAP and then lower that to WebAssembly's
@@ -87,11 +107,9 @@ WebAssemblyTargetMachine::WebAssemblyTargetMachine(
 
   // WebAssembly treats each function as an independent unit. Force
   // -ffunction-sections, effectively, so that we can emit them independently.
-  if (!TT.isOSBinFormatELF()) {
-    this->Options.FunctionSections = true;
-    this->Options.DataSections = true;
-    this->Options.UniqueSectionNames = true;
-  }
+  this->Options.FunctionSections = true;
+  this->Options.DataSections = true;
+  this->Options.UniqueSectionNames = true;
 
   initAsmInfo();
 
@@ -132,7 +150,7 @@ class StripThreadLocal final : public ModulePass {
   // pass just converts all GlobalVariables to NotThreadLocal
   static char ID;
 
- public:
+public:
   StripThreadLocal() : ModulePass(ID) {}
   bool runOnModule(Module &M) override {
     for (auto &GV : M.globals())
@@ -192,6 +210,9 @@ void WebAssemblyPassConfig::addIRPasses() {
     addPass(createAtomicExpandPass());
   }
 
+  // Add signatures to prototype-less function declarations
+  addPass(createWebAssemblyAddMissingPrototypes());
+
   // Lower .llvm.global_dtors into .llvm_global_ctors with __cxa_atexit calls.
   addPass(createWebAssemblyLowerGlobalDtors());
 
@@ -244,22 +265,24 @@ void WebAssemblyPassConfig::addPostRegAlloc() {
   // virtual registers. Consider removing their restrictions and re-enabling
   // them.
 
-  // Has no asserts of its own, but was not written to handle virtual regs.
-  disablePass(&ShrinkWrapID);
-
   // These functions all require the NoVRegs property.
   disablePass(&MachineCopyPropagationID);
+  disablePass(&PostRAMachineSinkingID);
   disablePass(&PostRASchedulerID);
   disablePass(&FuncletLayoutID);
   disablePass(&StackMapLivenessID);
   disablePass(&LiveDebugValuesID);
   disablePass(&PatchableFunctionID);
+  disablePass(&ShrinkWrapID);
 
   TargetPassConfig::addPostRegAlloc();
 }
 
 void WebAssemblyPassConfig::addPreEmitPass() {
   TargetPassConfig::addPreEmitPass();
+
+  // Restore __stack_pointer global after an exception is thrown.
+  addPass(createWebAssemblyEHRestoreStackPointer());
 
   // Now that we have a prologue and epilogue and all frame indices are
   // rewritten, eliminate SP and FP. This allows them to be stackified,
@@ -300,6 +323,9 @@ void WebAssemblyPassConfig::addPreEmitPass() {
 
   // Insert explicit get_local and set_local operators.
   addPass(createWebAssemblyExplicitLocals());
+
+  // Do various transformations for exception handling
+  addPass(createWebAssemblyLateEHPrepare());
 
   // Sort the blocks of the CFG into topological order, a prerequisite for
   // BLOCK and LOOP markers.

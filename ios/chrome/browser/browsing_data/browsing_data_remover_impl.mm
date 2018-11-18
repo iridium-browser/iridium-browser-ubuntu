@@ -18,7 +18,9 @@
 #include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
+#include "base/sequenced_task_runner.h"
 #include "base/strings/sys_string_conversions.h"
+#include "base/task/post_task.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "components/autofill/core/browser/personal_data_manager.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
@@ -53,6 +55,7 @@
 #include "ios/chrome/browser/ui/external_file_remover_factory.h"
 #include "ios/chrome/browser/web_data_service_factory.h"
 #include "ios/net/http_cache_helper.h"
+#include "ios/web/public/web_task_traits.h"
 #include "ios/web/public/web_thread.h"
 #import "ios/web/public/web_view_creation_util.h"
 #import "ios/web/web_state/ui/wk_web_view_configuration_provider.h"
@@ -111,16 +114,14 @@ void DeleteCallbackAdapter(base::OnceClosure callback, uint32_t) {
 // Clears cookies.
 void ClearCookies(
     scoped_refptr<net::URLRequestContextGetter> request_context_getter,
-    base::Time delete_begin,
-    base::Time delete_end,
+    const net::CookieDeletionInfo::TimeRange& creation_range,
     base::OnceClosure callback) {
   DCHECK_CURRENTLY_ON(web::WebThread::IO);
   net::CookieStore* cookie_store =
       request_context_getter->GetURLRequestContext()->cookie_store();
-  cookie_store->DeleteAllCreatedBetweenAsync(
-      delete_begin, delete_end,
-      AdaptCallbackForRepeating(
-          base::BindOnce(&DeleteCallbackAdapter, std::move(callback))));
+  cookie_store->DeleteAllCreatedInTimeRangeAsync(
+      creation_range, AdaptCallbackForRepeating(base::BindOnce(
+                          &DeleteCallbackAdapter, std::move(callback))));
 }
 
 // Clears SSL connection pool and then invoke callback.
@@ -277,7 +278,8 @@ void BrowsingDataRemoverImpl::Remove(browsing_data::TimePeriod time_period,
 void BrowsingDataRemoverImpl::RunNextTask() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(!removal_queue_.empty());
-  const RemovalTask& removal_task = removal_queue_.front();
+  RemovalTask& removal_task = removal_queue_.front();
+  removal_task.task_started = base::Time::Now();
   RemoveImpl(removal_task.delete_begin, removal_task.delete_end,
              removal_task.mask);
 }
@@ -310,12 +312,16 @@ void BrowsingDataRemoverImpl::RemoveImpl(base::Time delete_begin,
     ClearIOSSnapshots(CreatePendingTaskCompletionClosure());
   }
 
+  constexpr base::TaskTraits task_traits = {
+      web::WebThread::IO, base::TaskShutdownBehavior::BLOCK_SHUTDOWN};
+
   if (IsRemoveDataMaskSet(mask, BrowsingDataRemoveMask::REMOVE_COOKIES)) {
     base::RecordAction(base::UserMetricsAction("ClearBrowsingData_Cookies"));
-    web::WebThread::PostTask(
-        web::WebThread::IO, FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, task_traits,
         base::BindOnce(
-            &ClearCookies, context_getter_, delete_begin, delete_end,
+            &ClearCookies, context_getter_,
+            net::CookieDeletionInfo::TimeRange(delete_begin, delete_end),
             base::BindOnce(base::IgnoreResult(&base::TaskRunner::PostTask),
                            current_task_runner, FROM_HERE,
                            CreatePendingTaskCompletionClosure())));
@@ -323,8 +329,8 @@ void BrowsingDataRemoverImpl::RemoveImpl(base::Time delete_begin,
 
   if (IsRemoveDataMaskSet(mask, BrowsingDataRemoveMask::REMOVE_CHANNEL_IDS)) {
     base::RecordAction(base::UserMetricsAction("ClearBrowsingData_ChannelIDs"));
-    web::WebThread::PostTask(
-        web::WebThread::IO, FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, task_traits,
         base::BindOnce(
             &ClearChannelIDs, context_getter_, delete_begin, delete_end,
             base::BindOnce(base::IgnoreResult(&base::TaskRunner::PostTask),
@@ -366,8 +372,8 @@ void BrowsingDataRemoverImpl::RemoveImpl(base::Time delete_begin,
     IOSChromeIOThread* ios_chrome_io_thread =
         GetApplicationContext()->GetIOSChromeIOThread();
     if (ios_chrome_io_thread) {
-      web::WebThread::PostTaskAndReply(
-          web::WebThread::IO, FROM_HERE,
+      base::PostTaskWithTraitsAndReply(
+          FROM_HERE, task_traits,
           base::BindOnce(&IOSChromeIOThread::ClearHostCache,
                          base::Unretained(ios_chrome_io_thread)),
           CreatePendingTaskCompletionClosure());
@@ -475,7 +481,7 @@ void BrowsingDataRemoverImpl::RemoveImpl(base::Time delete_begin,
   if (IsRemoveDataMaskSet(mask, BrowsingDataRemoveMask::REMOVE_CACHE)) {
     base::RecordAction(base::UserMetricsAction("ClearBrowsingData_Cache"));
     ClearHttpCache(context_getter_,
-                   web::WebThread::GetTaskRunnerForThread(web::WebThread::IO),
+                   base::CreateSingleThreadTaskRunnerWithTraits(task_traits),
                    delete_begin, delete_end,
                    AdaptCallbackForRepeating(
                        base::BindOnce(&NetCompletionCallbackAdapter,
@@ -601,18 +607,16 @@ void BrowsingDataRemoverImpl::RemoveDataFromWKWebsiteDataStore(
     return;
   }
 
-  // Blocks don't play well with move-only objects, so wrap the closure as
-  // a repeating closure (this is better than recreating the same API with
-  // blocks).
-  base::RepeatingClosure closure =
-      AdaptCallbackForRepeating(CreatePendingTaskCompletionClosure());
+  base::WeakPtr<BrowsingDataRemoverImpl> weak_ptr = GetWeakPtr();
+  __block base::OnceClosure closure = CreatePendingTaskCompletionClosure();
   ProceduralBlock completion_block = ^{
-    closure.Run();
+    if (BrowsingDataRemoverImpl* strong_ptr = weak_ptr.get())
+      strong_ptr->dummy_web_view_ = nil;
+    std::move(closure).Run();
   };
 
   if (IsRemoveDataMaskSet(mask, BrowsingDataRemoveMask::REMOVE_VISITED_LINKS)) {
     ProceduralBlock previous_completion_block = completion_block;
-    base::WeakPtr<BrowsingDataRemoverImpl> weak_ptr = GetWeakPtr();
 
     // TODO(crbug.com/557963): Purging the WKProcessPool is a workaround for
     // the fact that there is no public API to clear visited links in
@@ -631,31 +635,21 @@ void BrowsingDataRemoverImpl::RemoveDataFromWKWebsiteDataStore(
     };
   }
 
-  ProceduralBlock remove_from_wk_website_data_store = ^{
-    NSDate* delete_begin_date =
-        [NSDate dateWithTimeIntervalSince1970:delete_begin.ToDoubleT()];
-    [[WKWebsiteDataStore defaultDataStore]
-        removeDataOfTypes:data_types_to_remove
-            modifiedSince:delete_begin_date
-        completionHandler:completion_block];
-  };
-
-  // TODO(crbug.com/661630): creating a WKWebView and executing javascript
-  // enables the WKWebView to connect to the Networking process. This allow
-  // the -[WKWebsiteDataStore removeDataOfTypes:] API to send an IPC message
-  // to the Networking process to clear cookies. This is a workaround for
-  // https://bugs.webkit.org/show_bug.cgi?id=149078 and has been reverse-
-  // engineered by code inspection on the WebKit2 source code. Remove this
-  // workaround when bug is fixed.
+  // TODO(crbug.com/661630): |dummy_web_view_| is created to allow
+  // the -[WKWebsiteDataStore removeDataOfTypes:] API to access the cookiestore
+  // and clear cookies. This is a workaround for
+  // https://bugs.webkit.org/show_bug.cgi?id=149078. Remove this
+  // workaround when it's not needed anymore.
   if (IsRemoveDataMaskSet(mask, BrowsingDataRemoveMask::REMOVE_COOKIES)) {
-    [web::BuildWKWebView(CGRectZero, browser_state_)
-        evaluateJavaScript:@""
-         completionHandler:^(id, NSError*) {
-           remove_from_wk_website_data_store();
-         }];
-  } else {
-    remove_from_wk_website_data_store();
+    if (!dummy_web_view_)
+      dummy_web_view_ = [[WKWebView alloc] initWithFrame:CGRectZero];
   }
+
+  NSDate* delete_begin_date =
+      [NSDate dateWithTimeIntervalSince1970:delete_begin.ToDoubleT()];
+  [[WKWebsiteDataStore defaultDataStore] removeDataOfTypes:data_types_to_remove
+                                             modifiedSince:delete_begin_date
+                                         completionHandler:completion_block];
 }
 
 void BrowsingDataRemoverImpl::OnKeywordsLoaded(base::Time delete_begin,
@@ -686,6 +680,22 @@ void BrowsingDataRemoverImpl::NotifyRemovalComplete() {
 
   {
     RemovalTask task = std::move(removal_queue_.front());
+    // Only log clear browsing data on regular browsing mode. In OTR mode, only
+    // few types of data are cleared and the rest is handled by deleting the
+    // browser state, so logging in these cases will render the histogram not
+    // useful.
+    if (!browser_state_->IsOffTheRecord()) {
+      base::TimeDelta delta = base::Time::Now() - task.task_started;
+      bool is_deletion_start_earliest = task.delete_begin.is_null();
+      bool is_deletion_end_now = task.delete_end.is_max();
+      if (is_deletion_start_earliest && is_deletion_end_now) {
+        UMA_HISTOGRAM_MEDIUM_TIMES(
+            "History.ClearBrowsingData.Duration.FullDeletion", delta);
+      } else {
+        UMA_HISTOGRAM_MEDIUM_TIMES(
+            "History.ClearBrowsingData.Duration.PartialDeletion", delta);
+      }
+    }
     removal_queue_.pop();
 
     // Schedule the task to be executed soon. This ensure that the IsRemoving()

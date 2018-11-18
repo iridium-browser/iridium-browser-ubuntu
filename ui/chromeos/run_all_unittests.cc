@@ -10,7 +10,7 @@
 #include "base/path_service.h"
 #include "base/test/launcher/unit_test_launcher.h"
 #include "base/test/test_suite.h"
-#include "mojo/edk/embedder/embedder.h"
+#include "mojo/core/embedder/embedder.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/aura/env.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -31,7 +31,7 @@ class UIChromeOSTestSuite : public base::TestSuite {
     ui::RegisterPathProvider();
 
     base::FilePath ui_test_pak_path;
-    ASSERT_TRUE(PathService::Get(ui::UI_TEST_PAK, &ui_test_pak_path));
+    ASSERT_TRUE(base::PathService::Get(ui::UI_TEST_PAK, &ui_test_pak_path));
     ui::ResourceBundle::InitSharedInstanceWithPakPath(ui_test_pak_path);
     env_ = aura::Env::CreateInstance();
   }
@@ -53,7 +53,7 @@ class UIChromeOSTestSuite : public base::TestSuite {
 int main(int argc, char** argv) {
   UIChromeOSTestSuite test_suite(argc, argv);
 
-  mojo::edk::Init();
+  mojo::core::Init();
 
   return base::LaunchUnitTests(
       argc, argv,

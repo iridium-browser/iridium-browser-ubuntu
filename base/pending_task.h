@@ -11,6 +11,7 @@
 #include "base/callback.h"
 #include "base/containers/queue.h"
 #include "base/location.h"
+#include "base/optional.h"
 #include "base/time/time.h"
 
 namespace base {
@@ -44,9 +45,13 @@ struct BASE_EXPORT PendingTask {
   // The time when the task should be run.
   base::TimeTicks delayed_run_time;
 
-  // Task backtrace. mutable so it can be set while annotating const PendingTask
-  // objects from TaskAnnotator::DidQueueTask().
-  mutable std::array<const void*, 4> task_backtrace = {};
+  // The time at which the task was queued. Only set if the task was posted to a
+  // MessageLoop with SetAddQueueTimeToTasks(true).
+  Optional<TimeTicks> queue_time;
+
+  // Chain of up-to-four symbols of the parent tasks which led to this one being
+  // posted.
+  std::array<const void*, 4> task_backtrace = {};
 
   // Secondary sort key for run time.
   int sequence_num = 0;

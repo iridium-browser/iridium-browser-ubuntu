@@ -98,7 +98,12 @@ class AutofillWebDataService : public AutofillWebData,
                               const base::string16& full_number) override;
   void MaskServerCreditCard(const std::string& id) override;
 
+  // PaymentsCustomerData.
+  WebDataServiceBase::Handle GetPaymentsCustomerData(
+      WebDataServiceConsumer* consumer) override;
+
   void ClearAllServerData();
+  void ClearAllLocalData();
 
   void UpdateServerCardMetadata(const CreditCard& credit_card) override;
   void UpdateServerAddressMetadata(const AutofillProfile& profile) override;
@@ -107,6 +112,8 @@ class AutofillWebDataService : public AutofillWebData,
                                          const base::Time& delete_end) override;
   void RemoveOriginURLsModifiedBetween(const base::Time& delete_begin,
                                        const base::Time& delete_end) override;
+
+  void RemoveOrphanAutofillTableRows() override;
 
   void AddObserver(AutofillWebDataServiceObserverOnDBSequence* observer);
   void RemoveObserver(AutofillWebDataServiceObserverOnDBSequence* observer);
@@ -142,7 +149,7 @@ class AutofillWebDataService : public AutofillWebData,
   }
 
  private:
-  base::ObserverList<AutofillWebDataServiceObserverOnUISequence>
+  base::ObserverList<AutofillWebDataServiceObserverOnUISequence>::Unchecked
       ui_observer_list_;
 
   // The task runner that this class uses for UI tasks.

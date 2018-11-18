@@ -10,7 +10,8 @@
 #include "base/location.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
+#include "base/threading/thread_restrictions.h"
 #include "chrome/browser/android/shortcut_helper.h"
 #include "chrome/browser/android/webapk/chrome_webapk_host.h"
 #include "chrome/browser/android/webapk/webapk_web_manifest_checker.h"
@@ -23,12 +24,12 @@
 #include "components/favicon/core/favicon_service.h"
 #include "components/favicon_base/favicon_types.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/manifest_icon_selector.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/manifest.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
-#include "third_party/blink/public/platform/modules/screen_orientation/web_screen_orientation_lock_type.h"
+#include "third_party/blink/public/common/manifest/manifest.h"
+#include "third_party/blink/public/common/manifest/manifest_icon_selector.h"
+#include "third_party/blink/public/common/screen_orientation/web_screen_orientation_lock_type.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/favicon_size.h"
 #include "url/gurl.h"
@@ -67,8 +68,6 @@ InstallableParams ParamsToPerformInstallableCheck() {
 // - whether |icon| was used in generating the launcher icon
 std::pair<SkBitmap, bool> CreateLauncherIconInBackground(const GURL& start_url,
                                                          const SkBitmap& icon) {
-  base::AssertBlockingAllowed();
-
   bool is_generated = false;
   SkBitmap primary_icon = ShortcutHelper::FinalizeLauncherIconInBackground(
       icon, start_url, &is_generated);
@@ -84,10 +83,9 @@ std::pair<SkBitmap, bool> CreateLauncherIconInBackground(const GURL& start_url,
 std::pair<SkBitmap, bool> CreateLauncherIconFromFaviconInBackground(
     const GURL& start_url,
     const favicon_base::FaviconRawBitmapResult& bitmap_result) {
-  base::AssertBlockingAllowed();
-
   SkBitmap decoded;
   if (bitmap_result.is_valid()) {
+    base::AssertLongCPUWorkAllowed();
     gfx::PNGCodec::Decode(bitmap_result.bitmap_data->front(),
                           bitmap_result.bitmap_data->size(), &decoded);
   }
@@ -238,10 +236,10 @@ void AddToHomescreenDataFetcher::OnDidGetManifestAndIcons(
   shortcut_info_.minimum_splash_image_size_in_px =
       ShortcutHelper::GetMinimumSplashImageSizeInPx();
   shortcut_info_.splash_image_url =
-      content::ManifestIconSelector::FindBestMatchingIcon(
+      blink::ManifestIconSelector::FindBestMatchingIcon(
           data.manifest->icons, shortcut_info_.ideal_splash_image_size_in_px,
           shortcut_info_.minimum_splash_image_size_in_px,
-          content::Manifest::Icon::IconPurpose::ANY);
+          blink::Manifest::ImageResource::Purpose::ANY);
   if (data.badge_icon) {
     shortcut_info_.best_badge_icon_url = data.badge_icon_url;
     badge_icon_ = *data.badge_icon;

@@ -7,7 +7,6 @@
 #include "base/auto_reset.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/trace_event/trace_event.h"
 #include "ui/aura/window.h"
@@ -40,6 +39,11 @@
 #include "ui/views/window/custom_frame_view.h"
 #include "ui/views/window/dialog_delegate.h"
 
+#if defined(USE_AURA)
+#include "ui/aura/env.h"     // nogncheck
+#include "ui/aura/window.h"  // nogncheck
+#endif
+
 namespace views {
 
 namespace {
@@ -71,7 +75,7 @@ NativeWidget* CreateNativeWidget(const Widget::InitParams& params,
     if (native_widget)
       return native_widget;
   }
-  return internal::NativeWidgetPrivate::CreateNativeWidget(delegate);
+  return internal::NativeWidgetPrivate::CreateNativeWidget(params, delegate);
 }
 
 void NotifyCaretBoundsChanged(ui::InputMethod* input_method) {
@@ -335,11 +339,9 @@ void Widget::Init(const InitParams& in_params) {
   native_widget_ = CreateNativeWidget(params, this)->AsNativeWidgetPrivate();
   root_view_.reset(CreateRootView());
   default_theme_provider_.reset(new ui::DefaultThemeProvider);
-  if (params.type == InitParams::TYPE_MENU) {
-    is_mouse_button_pressed_ =
-        internal::NativeWidgetPrivate::IsMouseButtonDown();
-  }
   native_widget_->InitNativeWidget(params);
+  if (params.type == InitParams::TYPE_MENU)
+    is_mouse_button_pressed_ = native_widget_->IsMouseButtonDown();
   if (RequiresNonClientView(params.type)) {
     non_client_view_ = new NonClientView;
     non_client_view_->SetFrameView(CreateNonClientFrameView());
@@ -525,19 +527,7 @@ void Widget::CenterWindow(const gfx::Size& size) {
 }
 
 void Widget::SetBoundsConstrained(const gfx::Rect& bounds) {
-  gfx::Rect work_area = display::Screen::GetScreen()
-                            ->GetDisplayNearestPoint(bounds.origin())
-                            .work_area();
-  if (work_area.IsEmpty()) {
-    SetBounds(bounds);
-  } else {
-    // TODO(https://crbug.com/806936): The following code doesn't actually do
-    // what the comment describing this function says it should.
-    // Inset the work area slightly.
-    work_area.Inset(10, 10, 10, 10);
-    work_area.AdjustToFit(bounds);
-    SetBounds(work_area);
-  }
+  native_widget_->SetBoundsConstrained(bounds);
 }
 
 void Widget::SetVisibilityChangedAnimationsEnabled(bool value) {
@@ -630,19 +620,20 @@ void Widget::Show() {
     if (saved_show_state_ == ui::SHOW_STATE_MAXIMIZED &&
         !initial_restored_bounds_.IsEmpty() &&
         !IsFullscreen()) {
-      native_widget_->ShowMaximizedWithBounds(initial_restored_bounds_);
+      native_widget_->Show(ui::SHOW_STATE_MAXIMIZED, initial_restored_bounds_);
     } else {
-      native_widget_->ShowWithWindowState(
-          IsFullscreen() ? ui::SHOW_STATE_FULLSCREEN : saved_show_state_);
+      native_widget_->Show(
+          IsFullscreen() ? ui::SHOW_STATE_FULLSCREEN : saved_show_state_,
+          gfx::Rect());
     }
     // |saved_show_state_| only applies the first time the window is shown.
     // If we don't reset the value the window may be shown maximized every time
     // it is subsequently shown after being hidden.
     saved_show_state_ = ui::SHOW_STATE_NORMAL;
   } else {
-    CanActivate()
-        ? native_widget_->Show()
-        : native_widget_->ShowWithWindowState(ui::SHOW_STATE_INACTIVE);
+    native_widget_->Show(
+        CanActivate() ? ui::SHOW_STATE_NORMAL : ui::SHOW_STATE_INACTIVE,
+        gfx::Rect());
   }
 }
 
@@ -660,7 +651,7 @@ void Widget::ShowInactive() {
     SetBounds(initial_restored_bounds_);
     saved_show_state_ = ui::SHOW_STATE_NORMAL;
   }
-  native_widget_->ShowWithWindowState(ui::SHOW_STATE_INACTIVE);
+  native_widget_->Show(ui::SHOW_STATE_INACTIVE, gfx::Rect());
 }
 
 void Widget::Activate() {
@@ -729,6 +720,10 @@ void Widget::SetOpacity(float opacity) {
   DCHECK(opacity >= 0.0f);
   DCHECK(opacity <= 1.0f);
   native_widget_->SetOpacity(opacity);
+}
+
+void Widget::SetAspectRatio(const gfx::SizeF& aspect_ratio) {
+  native_widget_->SetAspectRatio(aspect_ratio);
 }
 
 void Widget::FlashFrame(bool flash) {
@@ -843,11 +838,8 @@ void Widget::UpdateWindowTitle() {
   base::i18n::AdjustStringForLocaleDirection(&window_title);
   if (!native_widget_->SetWindowTitle(window_title))
     return;
-  non_client_view_->UpdateWindowTitle();
 
-  // If the non-client view is rendering its own title, it'll need to relayout
-  // now and to get a paint update later on.
-  non_client_view_->Layout();
+  non_client_view_->UpdateWindowTitle();
 }
 
 void Widget::UpdateWindowIcon() {
@@ -961,7 +953,7 @@ void Widget::SetCapture(View* view) {
       return;
   }
 
-  if (internal::NativeWidgetPrivate::IsMouseButtonDown())
+  if (native_widget_->IsMouseButtonDown())
     is_mouse_button_pressed_ = true;
   root_view_->SetMouseHandler(view);
 }
@@ -989,7 +981,12 @@ gfx::Rect Widget::GetWorkAreaBoundsInScreen() const {
 
 void Widget::SynthesizeMouseMoveEvent() {
   // In screen coordinate.
-  gfx::Point mouse_location = EventMonitor::GetLastMouseLocation();
+  gfx::Point mouse_location =
+#if defined(USE_AURA)
+      GetNativeWindow()->env()->last_mouse_location();
+#else
+      display::Screen::GetScreen()->GetCursorScreenPoint();
+#endif
   if (!GetWindowBoundsInScreen().Contains(mouse_location))
     return;
 
@@ -1006,9 +1003,14 @@ bool Widget::IsTranslucentWindowOpacitySupported() const {
   return native_widget_->IsTranslucentWindowOpacitySupported();
 }
 
+ui::GestureRecognizer* Widget::GetGestureRecognizer() {
+  return native_widget_->GetGestureRecognizer();
+}
+
 void Widget::OnSizeConstraintsChanged() {
   native_widget_->OnSizeConstraintsChanged();
-  non_client_view_->SizeConstraintsChanged();
+  if (non_client_view_)
+    non_client_view_->SizeConstraintsChanged();
 }
 
 void Widget::OnOwnerClosing() {}
@@ -1056,11 +1058,13 @@ bool Widget::OnNativeWidgetActivationChanged(bool active) {
 }
 
 void Widget::OnNativeFocus() {
-  WidgetFocusManager::GetInstance()->OnNativeFocusChanged(GetNativeView());
+  WidgetFocusManager::GetInstance(GetNativeWindow())
+      ->OnNativeFocusChanged(GetNativeView());
 }
 
 void Widget::OnNativeBlur() {
-  WidgetFocusManager::GetInstance()->OnNativeFocusChanged(nullptr);
+  WidgetFocusManager::GetInstance(GetNativeWindow())
+      ->OnNativeFocusChanged(nullptr);
 }
 
 void Widget::OnNativeWidgetVisibilityChanging(bool visible) {
@@ -1209,7 +1213,7 @@ void Widget::OnMouseEvent(ui::MouseEvent* event) {
       // mouse-button is still down before attempting to do a capture.
       if (root_view && root_view->OnMousePressed(*event) &&
           widget_deletion_observer.IsWidgetAlive() && IsVisible() &&
-          internal::NativeWidgetPrivate::IsMouseButtonDown() &&
+          native_widget_->IsMouseButtonDown() &&
           current_capture == internal::NativeWidgetPrivate::GetGlobalCapture(
                                  native_widget_->GetNativeView())) {
         is_mouse_button_pressed_ = true;
@@ -1510,7 +1514,7 @@ void Widget::SetInitialBounds(const gfx::Rect& bounds) {
       if (bounds.origin().IsOrigin()) {
         // No initial bounds supplied, so size the window to its content and
         // center over its parent.
-        native_widget_->CenterWindow(non_client_view_->GetPreferredSize());
+        CenterWindow(non_client_view_->GetPreferredSize());
       } else {
         // Use the preferred size and the supplied origin.
         gfx::Rect preferred_bounds(bounds);

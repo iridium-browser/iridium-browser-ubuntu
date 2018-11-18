@@ -92,15 +92,20 @@ struct Configuration {
   std::string ImportName;
   bool DoGC = true;
   bool DoICF = true;
+  bool TailMerge;
   bool Relocatable = true;
-  bool Force = false;
+  bool ForceMultiple = false;
+  bool ForceUnresolved = false;
   bool Debug = false;
   bool DebugDwarf = false;
   bool DebugGHashes = false;
+  bool DebugSymtab = false;
   bool ShowTiming = false;
   unsigned DebugTypes = static_cast<unsigned>(DebugType::None);
   std::vector<std::string> NatvisFiles;
+  llvm::SmallString<128> PDBAltPath;
   llvm::SmallString<128> PDBPath;
+  llvm::SmallString<128> PDBSourcePath;
   std::vector<llvm::StringRef> Argv;
 
   // Symbols in this set are considered as live by the garbage collector.
@@ -127,10 +132,10 @@ struct Configuration {
   Symbol *SEHCount = nullptr;
 
   // Used for /opt:lldlto=N
-  unsigned LTOOptLevel = 2;
+  unsigned LTOO = 2;
 
   // Used for /opt:lldltojobs=N
-  unsigned LTOJobs = 0;
+  unsigned ThinLTOJobs = 0;
   // Used for /opt:lldltopartitions=N
   unsigned LTOPartitions = 1;
 
@@ -179,6 +184,7 @@ struct Configuration {
   uint32_t MinorImageVersion = 0;
   uint32_t MajorOSVersion = 6;
   uint32_t MinorOSVersion = 0;
+  uint32_t Timestamp = 0;
   bool DynamicBase = true;
   bool AllowBind = true;
   bool NxCompat = true;
@@ -191,7 +197,9 @@ struct Configuration {
   bool WarnMissingOrderSymbol = true;
   bool WarnLocallyDefinedImported = true;
   bool Incremental = true;
+  bool IntegrityCheck = false;
   bool KillAt = false;
+  bool Repro = false;
 };
 
 extern Configuration *Config;

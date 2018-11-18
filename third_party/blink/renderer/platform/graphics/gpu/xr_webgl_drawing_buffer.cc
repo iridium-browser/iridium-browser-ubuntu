@@ -8,6 +8,8 @@
 #include "third_party/blink/renderer/platform/graphics/accelerated_static_bitmap_image.h"
 #include "third_party/blink/renderer/platform/graphics/gpu/drawing_buffer.h"
 #include "third_party/blink/renderer/platform/graphics/gpu/extensions_3d_util.h"
+#include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
+#include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/skia/include/core/SkSurface.h"
 
 namespace blink {
@@ -22,7 +24,8 @@ XRWebGLDrawingBuffer::ColorBuffer::ColorBuffer(
     const IntSize& size,
     GLuint texture_id)
     : drawing_buffer(drawing_buffer), size(size), texture_id(texture_id) {
-  drawing_buffer->ContextGL()->GenMailboxCHROMIUM(mailbox.name);
+  gpu::gles2::GLES2Interface* gl = drawing_buffer->ContextGL();
+  gl->ProduceTextureDirectCHROMIUM(texture_id, mailbox.name);
 }
 
 XRWebGLDrawingBuffer::ColorBuffer::~ColorBuffer() {
@@ -111,6 +114,12 @@ XRWebGLDrawingBuffer::XRWebGLDrawingBuffer(DrawingBuffer* drawing_buffer,
       stencil_(want_stencil_buffer),
       alpha_(want_alpha_channel),
       multiview_(false) {}
+
+void XRWebGLDrawingBuffer::BeginDestruction() {
+  back_color_buffer_ = nullptr;
+  front_color_buffer_ = nullptr;
+  recycled_color_buffer_queue_.clear();
+}
 
 // TODO(bajones): The GL resources allocated in this function are leaking. Add
 // a way to clean up the buffers when the layer is GCed or the session ends.
@@ -204,6 +213,42 @@ IntSize XRWebGLDrawingBuffer::AdjustSize(const IntSize& new_size) {
   return IntSize(width, height);
 }
 
+void XRWebGLDrawingBuffer::OverwriteColorBufferFromMailboxTexture(
+    const gpu::MailboxHolder& mailbox_holder,
+    const IntSize& size_in) {
+  TRACE_EVENT0("gpu", __FUNCTION__);
+  gpu::gles2::GLES2Interface* gl = drawing_buffer_->ContextGL();
+
+  gl->WaitSyncTokenCHROMIUM(mailbox_holder.sync_token.GetConstData());
+
+  GLuint source_texture =
+      gl->CreateAndConsumeTextureCHROMIUM(mailbox_holder.mailbox.name);
+
+  GLuint dest_texture = back_color_buffer_->texture_id;
+
+  // TODO(836496): clean this up and move some of the math to call site.
+  int dest_width = size_.Width();
+  int dest_height = size_.Height();
+  int source_width = size_in.Width();
+  int source_height = size_in.Height();
+
+  int copy_width = std::min(source_width, dest_width);
+  int copy_height = std::min(source_height, dest_height);
+
+  // If the source is too small, center the image.
+  int dest_x0 = source_width < dest_width ? (dest_width - source_width) / 2 : 0;
+  int dest_y0 =
+      source_height < dest_height ? (dest_height - source_height) / 2 : 0;
+  int src_x0 = source_width > dest_width ? (source_width - dest_width) / 2 : 0;
+  int src_y0 =
+      source_height > dest_height ? (source_height - dest_height) / 2 : 0;
+
+  gl->CopySubTextureCHROMIUM(
+      source_texture, 0, GL_TEXTURE_2D, dest_texture, 0, dest_x0, dest_y0,
+      src_x0, src_y0, copy_width, copy_height, false /* flipY */,
+      false /* premultiplyAlpha */, false /* unmultiplyAlpha */);
+}
+
 void XRWebGLDrawingBuffer::UseSharedBuffer(
     const gpu::MailboxHolder& buffer_mailbox_holder) {
   DVLOG(3) << __FUNCTION__;
@@ -243,13 +288,16 @@ void XRWebGLDrawingBuffer::UseSharedBuffer(
     framebuffer_complete_checked_for_sharedbuffer_ = true;
   }
 
-  if (discard_framebuffer_supported_) {
-    const GLenum kAttachments[3] = {GL_COLOR_ATTACHMENT0, GL_DEPTH_ATTACHMENT,
-                                    GL_STENCIL_ATTACHMENT};
-    gl->DiscardFramebufferEXT(GL_FRAMEBUFFER, 3, kAttachments);
+  if (WantExplicitResolve()) {
+    // Bind the drawing framebuffer if it wasn't bound previously.
+    gl->BindFramebuffer(GL_FRAMEBUFFER, framebuffer_);
   }
 
+  ClearBoundFramebuffer();
+
   DrawingBuffer::Client* client = drawing_buffer_->client();
+  if (!client)
+    return;
   client->DrawingBufferClientRestoreFramebufferBinding();
 }
 
@@ -259,19 +307,14 @@ void XRWebGLDrawingBuffer::DoneWithSharedBuffer() {
   BindAndResolveDestinationFramebuffer();
 
   gpu::gles2::GLES2Interface* gl = drawing_buffer_->ContextGL();
+
+  // Discard the depth and stencil attachments since we're done with them.
+  // Don't discard the color buffer, we do need this rendered into the
+  // shared buffer.
   if (discard_framebuffer_supported_) {
-    // Discard the depth and stencil attachments since we're done with them.
-    // Don't discard the color buffer, we do need this rendered into the
-    // shared buffer.
-    if (WantExplicitResolve()) {
-      gl->BindFramebuffer(GL_FRAMEBUFFER, resolved_framebuffer_);
-    } else {
-      gl->BindFramebuffer(GL_FRAMEBUFFER, framebuffer_);
-    }
-    const GLenum kAttachments[] = {GL_DEPTH_ATTACHMENT, GL_STENCIL_ATTACHMENT};
-    gl->DiscardFramebufferEXT(GL_FRAMEBUFFER,
-                              sizeof(kAttachments) / sizeof(kAttachments[0]),
-                              kAttachments);
+    const GLenum kAttachments[3] = {GL_DEPTH_ATTACHMENT, GL_STENCIL_ATTACHMENT};
+    gl->BindFramebuffer(GL_FRAMEBUFFER, framebuffer_);
+    gl->DiscardFramebufferEXT(GL_FRAMEBUFFER, 2, kAttachments);
   }
 
   // Always bind to the default framebuffer as a hint to the GPU to start
@@ -284,7 +327,40 @@ void XRWebGLDrawingBuffer::DoneWithSharedBuffer() {
   shared_buffer_texture_id_ = 0;
 
   DrawingBuffer::Client* client = drawing_buffer_->client();
+  if (!client)
+    return;
   client->DrawingBufferClientRestoreFramebufferBinding();
+}
+
+void XRWebGLDrawingBuffer::ClearBoundFramebuffer() {
+  gpu::gles2::GLES2Interface* gl = drawing_buffer_->ContextGL();
+
+  GLbitfield clear_bits = GL_COLOR_BUFFER_BIT;
+  gl->ColorMask(true, true, true, true);
+  gl->ClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+
+  if (depth_) {
+    clear_bits |= GL_DEPTH_BUFFER_BIT;
+    gl->DepthMask(true);
+    gl->ClearDepthf(1.0f);
+  }
+
+  if (stencil_) {
+    clear_bits |= GL_STENCIL_BUFFER_BIT;
+    gl->StencilMaskSeparate(GL_FRONT, true);
+    gl->ClearStencil(0);
+  }
+
+  gl->Disable(GL_SCISSOR_TEST);
+
+  gl->Clear(clear_bits);
+
+  DrawingBuffer::Client* client = drawing_buffer_->client();
+  if (!client)
+    return;
+
+  client->DrawingBufferClientRestoreScissorTest();
+  client->DrawingBufferClientRestoreMaskAndClearValues();
 }
 
 void XRWebGLDrawingBuffer::Resize(const IntSize& new_size) {
@@ -496,11 +572,12 @@ void XRWebGLDrawingBuffer::SwapColorBuffers() {
     framebuffer_complete_checked_for_swap_ = true;
   }
 
-  if (discard_framebuffer_supported_) {
-    const GLenum kAttachments[3] = {GL_COLOR_ATTACHMENT0, GL_DEPTH_ATTACHMENT,
-                                    GL_STENCIL_ATTACHMENT};
-    gl->DiscardFramebufferEXT(GL_FRAMEBUFFER, 3, kAttachments);
+  if (WantExplicitResolve()) {
+    // Bind the drawing framebuffer if it wasn't bound previously.
+    gl->BindFramebuffer(GL_FRAMEBUFFER, framebuffer_);
   }
+
+  ClearBoundFramebuffer();
 
   client->DrawingBufferClientRestoreFramebufferBinding();
 }
@@ -519,7 +596,6 @@ XRWebGLDrawingBuffer::TransferToStaticBitmapImage(
 
     buffer = front_color_buffer_;
 
-    gl->ProduceTextureDirectCHROMIUM(buffer->texture_id, buffer->mailbox.name);
     gl->GenUnverifiedSyncTokenCHROMIUM(buffer->produce_sync_token.GetData());
 
     // This should only fail if the context is lost during the buffer swap.

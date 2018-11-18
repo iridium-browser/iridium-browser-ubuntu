@@ -8,8 +8,10 @@
 #include <memory>
 #include <ostream>
 #include <string>
+#include <vector>
 
 #include "base/callback.h"
+#include "base/files/file_path.h"
 #include "base/files/scoped_file.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
@@ -17,6 +19,10 @@
 #include "base/threading/thread_checker.h"
 #include "chromeos/dbus/session_manager_client.h"
 #include "components/arc/arc_session.h"
+
+namespace ash {
+class DefaultScaleFactorRetriever;
+}
 
 namespace arc {
 
@@ -31,6 +37,8 @@ class ArcSessionImpl : public ArcSession,
   //
   // NOT_STARTED
   // -> StartMiniInstance() ->
+  // WAITING_FOR_LCD_DENSITY
+  // -> OnLcdDensity ->
   // STARTING_MINI_INSTANCE
   //   -> OnMiniInstanceStarted() ->
   // RUNNING_MINI_INSTANCE.
@@ -44,6 +52,12 @@ class ArcSessionImpl : public ArcSession,
   // Note that, if RequestUpgrade() is called during STARTING_MINI_INSTANCE
   // state, the state change to STARTING_FULL_INSTANCE is suspended until
   // the state becomes RUNNING_MINI_INSTANCE.
+  //
+  // Upon |StartMiniInstance()| call, it queries LCD Density through
+  // Delegate::GetLcdDenstity, and moves to WAITING_FOR_LCD_DENSITY state.  The
+  // query may be made synchronlsly or asynchronosly depending on the
+  // availability of the density information. It then asks SessionManager to
+  // start mini container and moves to STARTING_MINI_INSTANCE state.
   //
   // At any state, Stop() can be called. It may not immediately stop the
   // instance, but will eventually stop it. The actual stop will be notified
@@ -90,6 +104,9 @@ class ArcSessionImpl : public ArcSession,
     // ARC is not yet started.
     NOT_STARTED,
 
+    // It's waiting for LCD dnesity to be available.
+    WAITING_FOR_LCD_DENSITY,
+
     // The request to start a mini instance has been sent.
     STARTING_MINI_INSTANCE,
 
@@ -127,6 +144,14 @@ class ArcSessionImpl : public ArcSession,
     // Returns a FD which cancels the current connection on close(2).
     virtual base::ScopedFD ConnectMojo(base::ScopedFD socket_fd,
                                        ConnectMojoCallback callback) = 0;
+
+    using GetLcdDensityCallback = base::OnceCallback<void(int32_t)>;
+
+    // Gets the lcd density via callback. The callback may be invoked
+    // immediately if its already available, or called asynchronosly later if
+    // it's not yet available. Calling this method while there is a pending
+    // callback will cancel the pending callback.
+    virtual void GetLcdDensity(GetLcdDensityCallback callback) = 0;
   };
 
   explicit ArcSessionImpl(std::unique_ptr<Delegate> delegate);
@@ -134,13 +159,14 @@ class ArcSessionImpl : public ArcSession,
 
   // Returns default delegate implementation used for the production.
   static std::unique_ptr<Delegate> CreateDelegate(
-      ArcBridgeService* arc_bridge_service);
+      ArcBridgeService* arc_bridge_service,
+      ash::DefaultScaleFactorRetriever* retriever);
 
   State GetStateForTesting() { return state_; }
 
   // ArcSession overrides:
   void StartMiniInstance() override;
-  void RequestUpgrade() override;
+  void RequestUpgrade(UpgradeParams params) override;
   void Stop() override;
   bool IsStopRequested() override;
   void OnShutdown() override;
@@ -176,6 +202,9 @@ class ArcSessionImpl : public ArcSession,
   // deleting |this| because the function calls observers' OnSessionStopped().
   void OnStopped(ArcStopReason reason);
 
+  // LCD density for the device is available.
+  void OnLcdDensity(int32_t lcd_density);
+
   // Checks whether a function runs on the thread where the instance is
   // created.
   THREAD_CHECKER(thread_checker_);
@@ -199,6 +228,9 @@ class ArcSessionImpl : public ArcSession,
   // In CONNECTING_MOJO state, this is set to the write side of the pipe
   // to notify cancelling of the procedure.
   base::ScopedFD accept_cancel_pipe_;
+
+  // Parameters to upgrade request.
+  UpgradeParams upgrade_params_;
 
   // Mojo endpoint.
   std::unique_ptr<mojom::ArcBridgeHost> arc_bridge_host_;

@@ -225,7 +225,7 @@ protected:
 
     void onDraw(SkCanvas* canvas) override {
 
-        canvas->drawColor(sk_tool_utils::color_to_565(SK_ColorGRAY));
+        canvas->drawColor(SK_ColorGRAY);
 
         SkPaint paint;
         canvas->translate(10, 40);
@@ -247,7 +247,7 @@ protected:
 
 private:
     sk_sp<SkTextBlob> fBlob;
-    SkTArray<sk_sp<SkDrawLooper>, true> fLoopers;
+    SkTArray<sk_sp<SkDrawLooper>> fLoopers;
 
     typedef GM INHERITED;
 };

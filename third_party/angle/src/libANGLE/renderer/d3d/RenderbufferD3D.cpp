@@ -29,7 +29,7 @@ RenderbufferD3D::~RenderbufferD3D()
 
 gl::Error RenderbufferD3D::onDestroy(const gl::Context *context)
 {
-    deleteRenderTarget(context);
+    SafeDelete(mRenderTarget);
     return gl::NoError();
 }
 
@@ -70,10 +70,11 @@ gl::Error RenderbufferD3D::setStorageMultisample(const gl::Context *context,
     }
 
     RenderTargetD3D *newRT = nullptr;
-    ANGLE_TRY(mRenderer->createRenderTarget(static_cast<int>(width), static_cast<int>(height),
-                                            creationFormat, static_cast<GLsizei>(samples), &newRT));
+    ANGLE_TRY(mRenderer->createRenderTarget(context, static_cast<int>(width),
+                                            static_cast<int>(height), creationFormat,
+                                            static_cast<GLsizei>(samples), &newRT));
 
-    deleteRenderTarget(context);
+    SafeDelete(mRenderTarget);
     mImage        = nullptr;
     mRenderTarget = newRT;
 
@@ -83,13 +84,13 @@ gl::Error RenderbufferD3D::setStorageMultisample(const gl::Context *context,
 gl::Error RenderbufferD3D::setStorageEGLImageTarget(const gl::Context *context, egl::Image *image)
 {
     mImage = GetImplAs<EGLImageD3D>(image);
-    deleteRenderTarget(context);
+    SafeDelete(mRenderTarget);
 
     return gl::NoError();
 }
 
-gl::Error RenderbufferD3D::getRenderTarget(const gl::Context *context,
-                                           RenderTargetD3D **outRenderTarget)
+angle::Result RenderbufferD3D::getRenderTarget(const gl::Context *context,
+                                               RenderTargetD3D **outRenderTarget)
 {
     if (mImage)
     {
@@ -98,33 +99,24 @@ gl::Error RenderbufferD3D::getRenderTarget(const gl::Context *context,
     else
     {
         *outRenderTarget = mRenderTarget;
-        return gl::NoError();
+        return angle::Result::Continue();
     }
 }
 
-gl::Error RenderbufferD3D::getAttachmentRenderTarget(const gl::Context *context,
-                                                     GLenum /*binding*/,
-                                                     const gl::ImageIndex & /*imageIndex*/,
-                                                     FramebufferAttachmentRenderTarget **rtOut)
+angle::Result RenderbufferD3D::getAttachmentRenderTarget(const gl::Context *context,
+                                                         GLenum binding,
+                                                         const gl::ImageIndex &imageIndex,
+                                                         FramebufferAttachmentRenderTarget **rtOut)
 {
     return getRenderTarget(context, reinterpret_cast<RenderTargetD3D **>(rtOut));
 }
 
-void RenderbufferD3D::deleteRenderTarget(const gl::Context *context)
-{
-    onStateChange(context, angle::SubjectMessage::DEPENDENT_DIRTY_BITS);
-    if (mRenderTarget)
-    {
-        SafeDelete(mRenderTarget);
-    }
-}
-
-gl::Error RenderbufferD3D::initializeContents(const gl::Context *context,
-                                              const gl::ImageIndex &imageIndex)
+angle::Result RenderbufferD3D::initializeContents(const gl::Context *context,
+                                                  const gl::ImageIndex &imageIndex)
 {
     RenderTargetD3D *renderTarget = nullptr;
     ANGLE_TRY(getRenderTarget(context, &renderTarget));
-    return mRenderer->initRenderTarget(renderTarget);
+    return mRenderer->initRenderTarget(context, renderTarget);
 }
 
 }  // namespace rx

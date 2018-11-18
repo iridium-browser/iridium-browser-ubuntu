@@ -9,8 +9,11 @@
 #define SkShaderBase_DEFINED
 
 #include "SkFilterQuality.h"
+#include "SkFlattenablePriv.h"
 #include "SkMask.h"
 #include "SkMatrix.h"
+#include "SkNoncopyable.h"
+#include "SkPM4f.h"
 #include "SkShader.h"
 #include "SkTLazy.h"
 
@@ -61,23 +64,16 @@ public:
      *  ContextRec acts as a parameter bundle for creating Contexts.
      */
     struct ContextRec {
-        enum DstType {
-            kPMColor_DstType, // clients prefer shading into PMColor dest
-            kPM4f_DstType,    // clients prefer shading into PM4f dest
-        };
-
         ContextRec(const SkPaint& paint, const SkMatrix& matrix, const SkMatrix* localM,
-                   DstType dstType, SkColorSpace* dstColorSpace)
+                   SkColorSpace* dstColorSpace)
             : fPaint(&paint)
             , fMatrix(&matrix)
             , fLocalMatrix(localM)
-            , fPreferredDstType(dstType)
             , fDstColorSpace(dstColorSpace) {}
 
         const SkPaint*  fPaint;            // the current paint associated with the draw
         const SkMatrix* fMatrix;           // the current matrix in the canvas
         const SkMatrix* fLocalMatrix;      // optional local matrix
-        const DstType   fPreferredDstType; // the "natural" client dest type
         SkColorSpace*   fDstColorSpace;    // the color space of the dest surface (if any)
     };
 
@@ -103,7 +99,7 @@ public:
          */
         virtual void shadeSpan(int x, int y, SkPMColor[], int count) = 0;
 
-        virtual void shadeSpan4f(int x, int y, SkPM4f[], int count);
+        virtual void shadeSpan4f(int x, int y, SkPMColor4f[], int count);
 
         // Notification from blitter::blitMask in case we need to see the non-alpha channels
         virtual void set3DMask(const SkMask*) {}
@@ -206,8 +202,6 @@ public:
     virtual SkImage* onIsAImage(SkMatrix*, TileMode[2]) const {
         return nullptr;
     }
-
-    virtual void toString(SkString* str) const;
 
     SK_DEFINE_FLATTENABLE_TYPE(SkShaderBase)
     SK_DECLARE_FLATTENABLE_REGISTRAR_GROUP()

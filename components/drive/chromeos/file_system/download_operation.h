@@ -67,18 +67,18 @@ class DownloadOperation {
   base::Closure EnsureFileDownloadedByLocalId(
       const std::string& local_id,
       const ClientContext& context,
-      const GetFileContentInitializedCallback& initialized_callback,
+      GetFileContentInitializedCallback initialized_callback,
       const google_apis::GetContentCallback& get_content_callback,
-      const GetFileCallback& completion_callback);
+      GetFileCallback completion_callback);
 
   // Does the same thing as EnsureFileDownloadedByLocalId for the file
   // specified by |file_path|.
   base::Closure EnsureFileDownloadedByPath(
       const base::FilePath& file_path,
       const ClientContext& context,
-      const GetFileContentInitializedCallback& initialized_callback,
+      GetFileContentInitializedCallback initialized_callback,
       const google_apis::GetContentCallback& get_content_callback,
-      const GetFileCallback& completion_callback);
+      GetFileCallback completion_callback);
 
  private:
   // Parameters for EnsureFileDownloaded.
@@ -120,7 +120,7 @@ class DownloadOperation {
   internal::FileCache* cache_;
   const base::FilePath temporary_file_directory_;
 
-  base::ThreadChecker thread_checker_;
+  THREAD_CHECKER(thread_checker_);
 
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate its weak pointers before any other members are destroyed.

@@ -20,6 +20,11 @@
 
 namespace base {
 class RefCountedMemory;
+class DictionaryValue;
+}
+
+namespace blink {
+class OriginTrialPolicy;
 }
 
 namespace IPC {
@@ -46,7 +51,6 @@ class ContentClient;
 class ContentGpuClient;
 class ContentRendererClient;
 class ContentUtilityClient;
-class OriginTrialPolicy;
 class ServiceManagerConnection;
 struct CdmInfo;
 struct PepperPluginInfo;
@@ -129,7 +133,9 @@ class CONTENT_EXPORT ContentClient {
     std::vector<std::string> csp_bypassing_schemes;
     // See https://www.w3.org/TR/powerful-features/#is-origin-trustworthy.
     std::vector<std::string> secure_schemes;
-    std::vector<url::Origin> secure_origins;
+    // Registers a serialized origin or a hostname pattern that should be
+    // considered trustworthy.
+    std::vector<std::string> secure_origins;
     // Registers a URL scheme as strictly empty documents, allowing them to
     // commit synchronously.
     std::vector<std::string> empty_document_schemes;
@@ -146,6 +152,7 @@ class CONTENT_EXPORT ContentClient {
   virtual std::string GetProduct() const;
 
   // Returns the user agent.  Content may cache this value.
+  // TODO(yhirano): Move this to ContentBrowserClient.
   virtual std::string GetUserAgent() const;
 
   // Returns a string resource given its id.
@@ -167,13 +174,21 @@ class CONTENT_EXPORT ContentClient {
   // doesn't know about because they're from the embedder.
   virtual std::string GetProcessTypeNameInEnglish(int type);
 
+  // Called once during initialization of NetworkService to provide constants
+  // to NetLog.  (Though it may be called multiples times if NetworkService
+  // crashes and needs to be reinitialized).  The return value is merged with
+  // |GetNetConstants()| and passed to FileNetLogObserver - see documentation
+  // of |FileNetLogObserver::CreateBounded()| for more information.  The
+  // convention is to put new constants under a subdict at the key "clientInfo".
+  virtual base::DictionaryValue GetNetLogConstants() const;
+
   // Returns whether or not V8 script extensions should be allowed for a
   // service worker.
   virtual bool AllowScriptExtensionForServiceWorker(const GURL& script_url);
 
   // Returns the origin trial policy, or nullptr if origin trials are not
   // supported by the embedder.
-  virtual OriginTrialPolicy* GetOriginTrialPolicy();
+  virtual blink::OriginTrialPolicy* GetOriginTrialPolicy();
 
 #if defined(OS_ANDROID)
   // Returns true for clients like Android WebView that uses synchronous

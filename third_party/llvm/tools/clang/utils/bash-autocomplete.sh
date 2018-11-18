@@ -12,7 +12,7 @@ _clang()
 {
   local cur prev words cword arg flags w1 w2
   # If latest bash-completion is not supported just initialize COMPREPLY and
-  # initialize variables by setting manualy.
+  # initialize variables by setting manually.
   _init_completion -n 2> /dev/null
   if [[ "$?" != 0 ]]; then
     COMPREPLY=()
@@ -38,7 +38,8 @@ _clang()
 
   # expand ~ to $HOME
   eval local path=${COMP_WORDS[0]}
-  flags=$( "$path" --autocomplete="$arg" 2>/dev/null | sed -e 's/\t.*//' )
+  # Use $'\t' so that bash expands the \t for older versions of sed.
+  flags=$( "$path" --autocomplete="$arg" 2>/dev/null | sed -e $'s/\t.*//' )
   # If clang is old that it does not support --autocomplete,
   # fall back to the filename completion.
   if [[ "$?" != 0 ]]; then

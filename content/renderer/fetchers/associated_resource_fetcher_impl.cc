@@ -86,7 +86,7 @@ class AssociatedResourceFetcherImpl::ClientImpl
 
     data_.append(data, data_length);
   }
-  void DidFinishLoading(double finishTime) override {
+  void DidFinishLoading() override {
     // The WebAssociatedURLLoader will continue after a load failure.
     // For example, for an Access Control error.
     if (completed_)
@@ -154,7 +154,7 @@ void AssociatedResourceFetcherImpl::SetLoaderOptions(
 
 void AssociatedResourceFetcherImpl::Start(
     blink::WebLocalFrame* frame,
-    blink::WebURLRequest::RequestContext request_context,
+    blink::mojom::RequestContextType request_context,
     network::mojom::FetchRequestMode fetch_request_mode,
     network::mojom::FetchCredentialsMode fetch_credentials_mode,
     network::mojom::RequestContextFrameType frame_type,

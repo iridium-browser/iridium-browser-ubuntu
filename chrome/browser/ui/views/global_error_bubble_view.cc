@@ -10,7 +10,6 @@
 
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
-#include "build/buildflag.h"
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_dialogs.h"
@@ -19,12 +18,11 @@
 #include "chrome/browser/ui/global_error/global_error.h"
 #include "chrome/browser/ui/global_error/global_error_service.h"
 #include "chrome/browser/ui/global_error/global_error_service_factory.h"
-#include "chrome/browser/ui/layout_constants.h"
+#include "chrome/browser/ui/views/chrome_layout_provider.h"
 #include "chrome/browser/ui/views/elevation_icon_setter.h"
 #include "chrome/browser/ui/views/frame/app_menu_button.h"
-#include "chrome/browser/ui/views/harmony/chrome_layout_provider.h"
+#include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
-#include "chrome/browser/ui/views_mode_controller.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_features.h"
 #include "ui/gfx/image/image.h"
@@ -37,40 +35,23 @@
 #include "ui/views/layout/grid_layout.h"
 #include "ui/views/window/dialog_client_view.h"
 
-#if !defined(OS_MACOSX) || BUILDFLAG(MAC_VIEWS_BROWSER)
-#include "chrome/browser/ui/views/frame/browser_view.h"
-#endif
-
 namespace {
 
 const int kMaxBubbleViewWidth = 362;
 
-#if !defined(OS_MACOSX) || BUILDFLAG(MAC_VIEWS_BROWSER)
-
 views::View* GetGlobalErrorBubbleAnchorView(Browser* browser) {
-#if BUILDFLAG(MAC_VIEWS_BROWSER)
-  if (views_mode_controller::IsViewsBrowserCocoa())
-    return nullptr;
-#endif
   BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser);
   return browser_view->toolbar_button_provider()->GetAppMenuButton();
 }
 
 gfx::Rect GetGlobalErrorBubbleAnchorRect(Browser* browser) {
-#if BUILDFLAG(MAC_VIEWS_BROWSER)
-  if (views_mode_controller::IsViewsBrowserCocoa())
-    return bubble_anchor_util::GetAppMenuAnchorRectCocoa(browser);
-#endif
   return gfx::Rect();
 }
-
-#endif
 
 }  // namespace
 
 // GlobalErrorBubbleViewBase ---------------------------------------------------
 
-#if !defined(OS_MACOSX) || BUILDFLAG(MAC_VIEWS_BROWSER)
 // static
 GlobalErrorBubbleViewBase* GlobalErrorBubbleViewBase::ShowStandardBubbleView(
     Browser* browser,
@@ -85,7 +66,6 @@ GlobalErrorBubbleViewBase* GlobalErrorBubbleViewBase::ShowStandardBubbleView(
   bubble_view->GetWidget()->Show();
   return bubble_view;
 }
-#endif  // !OS_MACOSX || MAC_VIEWS_BROWSER
 
 // GlobalErrorBubbleView -------------------------------------------------------
 
@@ -136,10 +116,6 @@ void GlobalErrorBubbleView::Init() {
   // |error_| is assumed to be valid, and stay valid, at least until Init()
   // returns.
 
-  // Compensate for built-in vertical padding in the anchor view's image.
-  set_anchor_view_insets(gfx::Insets(
-      GetLayoutConstant(LOCATION_BAR_BUBBLE_ANCHOR_VERTICAL_INSET), 0));
-
   std::vector<base::string16> message_strings(error_->GetBubbleViewMessages());
   std::vector<views::Label*> message_labels;
   for (size_t i = 0; i < message_strings.size(); ++i) {
@@ -154,15 +130,16 @@ void GlobalErrorBubbleView::Init() {
 
   // First row, message labels.
   views::ColumnSet* cs = layout->AddColumnSet(0);
-  cs->AddColumn(views::GridLayout::FILL, views::GridLayout::FILL, 1,
+  cs->AddColumn(views::GridLayout::FILL, views::GridLayout::FILL, 1.0,
                 views::GridLayout::FIXED, kMaxBubbleViewWidth, 0);
 
   for (size_t i = 0; i < message_labels.size(); ++i) {
-    layout->StartRow(1, 0);
+    layout->StartRow(1.0, 0);
     layout->AddView(message_labels[i]);
     if (i < message_labels.size() - 1)
-      layout->AddPaddingRow(0, ChromeLayoutProvider::Get()->GetDistanceMetric(
-                                   views::DISTANCE_RELATED_CONTROL_VERTICAL));
+      layout->AddPaddingRow(views::GridLayout::kFixedSize,
+                            ChromeLayoutProvider::Get()->GetDistanceMetric(
+                                views::DISTANCE_RELATED_CONTROL_VERTICAL));
   }
 
   // These bubbles show at times where activation is sporadic (like at startup,
@@ -207,6 +184,12 @@ int GlobalErrorBubbleView::GetDialogButtons() const {
                   error_->GetBubbleViewCancelButtonLabel().empty()
               ? 0
               : ui::DIALOG_BUTTON_CANCEL);
+}
+
+int GlobalErrorBubbleView::GetDefaultDialogButton() const {
+  if (!error_)
+    return views::BubbleDialogDelegateView::GetDefaultDialogButton();
+  return error_->GetDefaultDialogButton();
 }
 
 views::View* GlobalErrorBubbleView::CreateExtraView() {

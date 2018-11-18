@@ -28,7 +28,6 @@ namespace media {
 namespace {
 
 const int kSampleRate = AudioParameters::kAudioCDSampleRate;
-const int kBitsPerSample = 16;
 const ChannelLayout kChannelLayout = CHANNEL_LAYOUT_STEREO;
 const int kSamplesPerPacket = kSampleRate / 10;
 
@@ -39,13 +38,10 @@ const double kMaxVolume = 1.0;
 constexpr base::TimeDelta kOnMuteWaitTimeout =
     base::TimeDelta::FromMilliseconds(1500);
 
-// Posts base::MessageLoop::QuitWhenIdleClosure() on specified message loop
-// after a certain number of calls given by |limit|.
-ACTION_P3(CheckCountAndPostQuitTask, count, limit, loop_or_proxy) {
-  if (++*count >= limit) {
-    loop_or_proxy->PostTask(FROM_HERE,
-                            base::MessageLoop::QuitWhenIdleClosure());
-  }
+// Runs |quit_closure| after the |count| of calls reaches |limit|.
+ACTION_P3(CheckCountAndPostQuitTask, count, limit, quit_closure) {
+  if (++*count >= limit)
+    quit_closure.Run();
 }
 
 void RunLoopWithTimeout(base::RunLoop* run_loop, base::TimeDelta timeout) {
@@ -61,7 +57,7 @@ class MockAudioInputControllerEventHandler
  public:
   MockAudioInputControllerEventHandler() = default;
 
-  void OnLog(base::StringPiece) {}
+  void OnLog(base::StringPiece) override {}
 
   MOCK_METHOD1(OnCreated, void(bool initially_muted));
   MOCK_METHOD1(OnError, void(AudioInputController::ErrorCode error_code));
@@ -87,10 +83,10 @@ class MockUserInputMonitor : public UserInputMonitor {
  public:
   MockUserInputMonitor() = default;
 
-  size_t GetKeyPressCount() const { return 0; }
+  uint32_t GetKeyPressCount() const override { return 0; }
 
-  MOCK_METHOD0(StartKeyboardMonitoring, void());
-  MOCK_METHOD0(StopKeyboardMonitoring, void());
+  MOCK_METHOD0(EnableKeyPressMonitoring, void());
+  MOCK_METHOD0(DisableKeyPressMonitoring, void());
 };
 
 class MockAudioInputStream : public AudioInputStream {
@@ -98,14 +94,15 @@ class MockAudioInputStream : public AudioInputStream {
   MockAudioInputStream() {}
   ~MockAudioInputStream() override {}
 
-  void Start(AudioInputCallback*) {}
-  void Stop() {}
-  void Close() {}
-  double GetMaxVolume() { return kMaxVolume; }
-  double GetVolume() { return 0; }
-  bool SetAutomaticGainControl(bool) { return false; }
-  bool GetAutomaticGainControl() { return false; }
-  bool IsMuted() { return false; }
+  void Start(AudioInputCallback*) override {}
+  void Stop() override {}
+  void Close() override {}
+  double GetMaxVolume() override { return kMaxVolume; }
+  double GetVolume() override { return 0; }
+  bool SetAutomaticGainControl(bool) override { return false; }
+  bool GetAutomaticGainControl() override { return false; }
+  bool IsMuted() override { return false; }
+  void SetOutputDeviceForAec(const std::string&) override {}
 
   MOCK_METHOD0(Open, bool());
   MOCK_METHOD1(SetVolume, void(double));
@@ -120,7 +117,6 @@ class AudioInputControllerTest : public testing::TestWithParam<bool> {
         params_(AudioParameters::AUDIO_FAKE,
                 kChannelLayout,
                 kSampleRate,
-                kBitsPerSample,
                 kSamplesPerPacket) {}
 
   ~AudioInputControllerTest() override {
@@ -142,8 +138,9 @@ class AudioInputControllerTest : public testing::TestWithParam<bool> {
       return;
     }
 
-    controller_->Close(base::MessageLoop::QuitWhenIdleClosure());
-    base::RunLoop().Run();
+    base::RunLoop run_loop;
+    controller_->Close(run_loop.QuitClosure());
+    run_loop.Run();
   }
 
   base::MessageLoop message_loop_;
@@ -183,30 +180,20 @@ TEST_P(AudioInputControllerTest, CreateRecordAndClose) {
   ASSERT_TRUE(controller_.get());
 
   // Write() should be called ten times.
+  base::RunLoop run_loop;
   EXPECT_CALL(sync_writer_, Write(NotNull(), _, _, _))
       .Times(AtLeast(10))
       .WillRepeatedly(
-          CheckCountAndPostQuitTask(&count, 10, message_loop_.task_runner()));
-  EXPECT_CALL(user_input_monitor_, StartKeyboardMonitoring());
+          CheckCountAndPostQuitTask(&count, 10, run_loop.QuitClosure()));
+  EXPECT_CALL(user_input_monitor_, EnableKeyPressMonitoring());
   controller_->Record();
 
   // Record and wait until ten Write() callbacks are received.
-  base::RunLoop().Run();
+  run_loop.Run();
 
-  EXPECT_CALL(user_input_monitor_, StopKeyboardMonitoring());
+  EXPECT_CALL(user_input_monitor_, DisableKeyPressMonitoring());
   EXPECT_CALL(sync_writer_, Close());
   CloseAudioController();
-}
-
-// Test that AudioInputController rejects insanely large packet sizes.
-TEST_P(AudioInputControllerTest, SamplesPerPacketTooLarge) {
-  // Create an audio device with a very large packet size.
-  params_.set_frames_per_buffer(kSamplesPerPacket * 1000);
-
-  // OnCreated() shall not be called in this test.
-  EXPECT_CALL(event_handler_, OnCreated(_)).Times(Exactly(0));
-  CreateAudioController();
-  ASSERT_FALSE(controller_.get());
 }
 
 TEST_P(AudioInputControllerTest, CloseTwice) {
@@ -214,10 +201,10 @@ TEST_P(AudioInputControllerTest, CloseTwice) {
   CreateAudioController();
   ASSERT_TRUE(controller_.get());
 
-  EXPECT_CALL(user_input_monitor_, StartKeyboardMonitoring());
+  EXPECT_CALL(user_input_monitor_, EnableKeyPressMonitoring());
   controller_->Record();
 
-  EXPECT_CALL(user_input_monitor_, StopKeyboardMonitoring());
+  EXPECT_CALL(user_input_monitor_, DisableKeyPressMonitoring());
   EXPECT_CALL(sync_writer_, Close());
   CloseAudioController();
 

@@ -5,7 +5,7 @@
 #include "components/safe_browsing/triggers/ad_sampler_trigger.h"
 
 #include "base/metrics/field_trial_params.h"
-#include "base/test/histogram_tester.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/test_simple_task_runner.h"
 #include "components/prefs/testing_pref_service.h"
@@ -226,6 +226,7 @@ TEST(AdSamplerTriggerTestFinch, FrequencyDenominatorFeature) {
   // Make sure that setting the frequency denominator via Finch params works as
   // expected, and that the default frequency is used when no Finch config is
   // given.
+  content::TestBrowserThreadBundle thread_bundle;
   AdSamplerTrigger trigger_default(nullptr, nullptr, nullptr, nullptr, nullptr);
   EXPECT_EQ(kAdSamplerDefaultFrequency,
             trigger_default.sampler_frequency_denominator_);

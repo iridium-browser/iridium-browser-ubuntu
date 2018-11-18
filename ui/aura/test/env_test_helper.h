@@ -11,6 +11,7 @@
 #include "ui/aura/env.h"
 #include "ui/aura/env_input_state_controller.h"
 #include "ui/aura/input_state_lookup.h"
+#include "ui/events/gestures/gesture_recognizer.h"
 
 namespace aura {
 namespace test {
@@ -50,10 +51,13 @@ class EnvTestHelper {
     env_->env_controller_->touch_ids_down_ = 0;
   }
 
-  void SetMode(Env::Mode mode) {
+  // Changes Env's Mode to |mode|, returning the old value.
+  Env::Mode SetMode(Env::Mode mode) {
+    const Env::Mode old_mode = env_->mode_;
     env_->mode_ = mode;
     if (mode == Env::Mode::MUS)
       env_->EnableMusOSExchangeDataProvider();
+    return old_mode;
   }
 
   // Use to force Env::last_mouse_location() to return the value last set.
@@ -61,6 +65,11 @@ class EnvTestHelper {
   // location.
   void SetAlwaysUseLastMouseLocation(bool value) {
     env_->always_use_last_mouse_location_ = value;
+  }
+
+  void SetGestureRecognizer(
+      std::unique_ptr<ui::GestureRecognizer> gesture_recognizer) {
+    env_->gesture_recognizer_ = std::move(gesture_recognizer);
   }
 
   WindowTreeClient* GetWindowTreeClient() { return env_->window_tree_client_; }

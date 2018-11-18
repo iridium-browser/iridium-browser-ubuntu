@@ -2,14 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "src/builtins/builtins.h"
-
 #include "src/api-arguments-inl.h"
 #include "src/api-natives.h"
-#include "src/builtins/builtins-utils.h"
+#include "src/builtins/builtins-utils-inl.h"
+#include "src/builtins/builtins.h"
 #include "src/counters.h"
 #include "src/log.h"
 #include "src/objects-inl.h"
+#include "src/objects/templates.h"
 #include "src/prototype.h"
 #include "src/visitors.h"
 
@@ -21,17 +21,21 @@ namespace {
 // Returns the holder JSObject if the function can legally be called with this
 // receiver.  Returns nullptr if the call is illegal.
 // TODO(dcarney): CallOptimization duplicates this logic, merge.
-JSObject* GetCompatibleReceiver(Isolate* isolate, FunctionTemplateInfo* info,
-                                JSObject* receiver) {
+JSReceiver* GetCompatibleReceiver(Isolate* isolate, FunctionTemplateInfo* info,
+                                  JSReceiver* receiver) {
   Object* recv_type = info->signature();
   // No signature, return holder.
   if (!recv_type->IsFunctionTemplateInfo()) return receiver;
+  // A Proxy cannot have been created from the signature template.
+  if (!receiver->IsJSObject()) return nullptr;
+
+  JSObject* js_obj_receiver = JSObject::cast(receiver);
   FunctionTemplateInfo* signature = FunctionTemplateInfo::cast(recv_type);
 
   // Check the receiver. Fast path for receivers with no hidden prototypes.
-  if (signature->IsTemplateFor(receiver)) return receiver;
-  if (!receiver->map()->has_hidden_prototype()) return nullptr;
-  for (PrototypeIterator iter(isolate, receiver, kStartAtPrototype,
+  if (signature->IsTemplateFor(js_obj_receiver)) return receiver;
+  if (!js_obj_receiver->map()->has_hidden_prototype()) return nullptr;
+  for (PrototypeIterator iter(isolate, js_obj_receiver, kStartAtPrototype,
                               PrototypeIterator::END_AT_NON_HIDDEN);
        !iter.IsAtEnd(); iter.Advance()) {
     JSObject* current = iter.GetCurrent<JSObject>();
@@ -45,8 +49,8 @@ V8_WARN_UNUSED_RESULT MaybeHandle<Object> HandleApiCallHelper(
     Isolate* isolate, Handle<HeapObject> function,
     Handle<HeapObject> new_target, Handle<FunctionTemplateInfo> fun_data,
     Handle<Object> receiver, BuiltinArguments args) {
-  Handle<JSObject> js_receiver;
-  JSObject* raw_holder;
+  Handle<JSReceiver> js_receiver;
+  JSReceiver* raw_holder;
   if (is_construct) {
     DCHECK(args.receiver()->IsTheHole(isolate));
     if (fun_data->instance_template()->IsUndefined(isolate)) {
@@ -59,7 +63,7 @@ V8_WARN_UNUSED_RESULT MaybeHandle<Object> HandleApiCallHelper(
         ObjectTemplateInfo::cast(fun_data->instance_template()), isolate);
     ASSIGN_RETURN_ON_EXCEPTION(
         isolate, js_receiver,
-        ApiNatives::InstantiateObject(instance_template,
+        ApiNatives::InstantiateObject(isolate, instance_template,
                                       Handle<JSReceiver>::cast(new_target)),
         Object);
     args[0] = *js_receiver;
@@ -68,21 +72,19 @@ V8_WARN_UNUSED_RESULT MaybeHandle<Object> HandleApiCallHelper(
     raw_holder = *js_receiver;
   } else {
     DCHECK(receiver->IsJSReceiver());
-
-    if (!receiver->IsJSObject()) {
-      // This function cannot be called with the given receiver.  Abort!
-      THROW_NEW_ERROR(
-          isolate, NewTypeError(MessageTemplate::kIllegalInvocation), Object);
-    }
-
-    js_receiver = Handle<JSObject>::cast(receiver);
+    js_receiver = Handle<JSReceiver>::cast(receiver);
 
     if (!fun_data->accept_any_receiver() &&
-        js_receiver->IsAccessCheckNeeded() &&
-        !isolate->MayAccess(handle(isolate->context()), js_receiver)) {
-      isolate->ReportFailedAccessCheck(js_receiver);
-      RETURN_EXCEPTION_IF_SCHEDULED_EXCEPTION(isolate, Object);
-      return isolate->factory()->undefined_value();
+        js_receiver->IsAccessCheckNeeded()) {
+      // Proxies never need access checks.
+      DCHECK(js_receiver->IsJSObject());
+      Handle<JSObject> js_obj_receiver = Handle<JSObject>::cast(js_receiver);
+      if (!isolate->MayAccess(handle(isolate->context(), isolate),
+                              js_obj_receiver)) {
+        isolate->ReportFailedAccessCheck(js_obj_receiver);
+        RETURN_EXCEPTION_IF_SCHEDULED_EXCEPTION(isolate, Object);
+        return isolate->factory()->undefined_value();
+      }
     }
 
     raw_holder = GetCompatibleReceiver(isolate, *fun_data, *js_receiver);
@@ -147,7 +149,7 @@ class RelocatableArguments : public BuiltinArguments, public Relocatable {
   RelocatableArguments(Isolate* isolate, int length, Object** arguments)
       : BuiltinArguments(length, arguments), Relocatable(isolate) {}
 
-  virtual inline void IterateInstance(RootVisitor* v) {
+  inline void IterateInstance(RootVisitor* v) override {
     if (length() == 0) return;
     v->VisitRootPointers(Root::kRelocatable, nullptr, lowest_address(),
                          highest_address() + 1);
@@ -220,7 +222,8 @@ MaybeHandle<Object> Builtins::InvokeApiFunction(Isolate* isolate,
     argv[cursor--] = *args[i];
   }
   DCHECK_EQ(cursor, BuiltinArguments::kPaddingOffset);
-  argv[BuiltinArguments::kPaddingOffset] = isolate->heap()->the_hole_value();
+  argv[BuiltinArguments::kPaddingOffset] =
+      ReadOnlyRoots(isolate).the_hole_value();
   argv[BuiltinArguments::kArgcOffset] = Smi::FromInt(frame_argc);
   argv[BuiltinArguments::kTargetOffset] = *function;
   argv[BuiltinArguments::kNewTargetOffset] = *new_target;
@@ -258,7 +261,7 @@ V8_WARN_UNUSED_RESULT static Object* HandleApiCallAsFunctionOrConstructor(
     // right answer.
     new_target = obj;
   } else {
-    new_target = isolate->heap()->undefined_value();
+    new_target = ReadOnlyRoots(isolate).undefined_value();
   }
 
   // Get the invocation callback from the function descriptor that was
@@ -282,7 +285,7 @@ V8_WARN_UNUSED_RESULT static Object* HandleApiCallAsFunctionOrConstructor(
                                      args.length() - 1);
     Handle<Object> result_handle = custom.Call(call_data);
     if (result_handle.is_null()) {
-      result = isolate->heap()->undefined_value();
+      result = ReadOnlyRoots(isolate).undefined_value();
     } else {
       result = *result_handle;
     }

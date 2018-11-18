@@ -23,8 +23,8 @@
 #include "content/browser/indexed_db/indexed_db_database.h"
 #include "content/browser/indexed_db/indexed_db_database_error.h"
 #include "content/browser/indexed_db/indexed_db_observer.h"
-#include "content/common/indexed_db/indexed_db.mojom.h"
-#include "third_party/blink/public/platform/modules/indexeddb/web_idb_types.h"
+#include "third_party/blink/public/common/indexeddb/web_idb_types.h"
+#include "third_party/blink/public/mojom/indexeddb/indexeddb.mojom.h"
 
 namespace content {
 
@@ -95,9 +95,9 @@ class CONTENT_EXPORT IndexedDBTransaction {
 
   // Adds observation for the connection.
   void AddObservation(int32_t connection_id,
-                      ::indexed_db::mojom::ObservationPtr observation);
+                      blink::mojom::IDBObservationPtr observation);
 
-  ::indexed_db::mojom::ObserverChangesPtr* GetPendingChangesForConnection(
+  blink::mojom::IDBObserverChangesPtr* GetPendingChangesForConnection(
       int32_t connection_id);
 
   IndexedDBBackingStore::Transaction* BackingStoreTransaction() {
@@ -107,7 +107,7 @@ class CONTENT_EXPORT IndexedDBTransaction {
 
   IndexedDBDatabase* database() const { return database_.get(); }
   IndexedDBDatabaseCallbacks* callbacks() const { return callbacks_.get(); }
-  IndexedDBConnection* connection() const { return connection_; }
+  IndexedDBConnection* connection() const { return connection_.get(); }
 
   State state() const { return state_; }
   bool IsTimeoutTimerRunning() const { return timeout_timer_.IsRunning(); }
@@ -187,14 +187,15 @@ class CONTENT_EXPORT IndexedDBTransaction {
   bool used_ = false;
   State state_ = CREATED;
   bool commit_pending_ = false;
-  // We are owned by the connection object.
-  IndexedDBConnection* connection_;
+  // We are owned by the connection object, but during force closes sometimes
+  // there are issues if there is a pending OpenRequest. So use a WeakPtr.
+  base::WeakPtr<IndexedDBConnection> connection_;
   scoped_refptr<IndexedDBDatabaseCallbacks> callbacks_;
   scoped_refptr<IndexedDBDatabase> database_;
 
   // Observers in pending queue do not listen to changes until activated.
   std::vector<std::unique_ptr<IndexedDBObserver>> pending_observers_;
-  std::map<int32_t, ::indexed_db::mojom::ObserverChangesPtr>
+  std::map<int32_t, blink::mojom::IDBObserverChangesPtr>
       connection_changes_map_;
 
   // Metrics for quota.

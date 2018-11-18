@@ -5,26 +5,35 @@
  * found in the LICENSE file.
  */
 
-#include "SampleCode.h"
+#include "Sample.h"
 #include "SkAnimTimer.h"
 #include "SkCanvas.h"
 #include "SkGlyphCache.h"
 #include "SkPaint.h"
 #include "SkPath.h"
 #include "SkRandom.h"
+#include "SkStrikeCache.h"
 #include "SkTaskGroup.h"
 #include "sk_tool_utils.h"
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 // Static text from paths.
-class PathText : public SampleView {
+class PathText : public Sample {
 public:
     constexpr static int kNumPaths = 1500;
     virtual const char* getName() const { return "PathText"; }
 
-    PathText() {
+    PathText() {}
+
+    virtual void reset() {
+        for (Glyph& glyph : fGlyphs) {
+            glyph.reset(fRand, this->width(), this->height());
+        }
+    }
+
+    void onOnceBeforeDraw() final {
         SkPaint defaultPaint;
-        auto cache = SkGlyphCache::FindOrCreateStrikeExclusive(defaultPaint);
+        auto cache = SkStrikeCache::FindOrCreateStrikeExclusive(defaultPaint);
         SkPath glyphPaths[52];
         for (int i = 0; i < 52; ++i) {
             // I and l are rects on OS X ...
@@ -37,24 +46,19 @@ public:
             const SkPath& p = glyphPaths[i % 52];
             fGlyphs[i].init(fRand, p);
         }
-    }
 
-    virtual void reset() {
-        for (Glyph& glyph : fGlyphs) {
-            glyph.reset(fRand, this->width(), this->height());
-        }
+        this->INHERITED::onOnceBeforeDraw();
+        this->reset();
     }
-
-    void onOnceBeforeDraw() final { this->INHERITED::onOnceBeforeDraw(); this->reset(); }
     void onSizeChange() final { this->INHERITED::onSizeChange(); this->reset(); }
 
-    bool onQuery(SkEvent* evt) final {
-        if (SampleCode::TitleQ(*evt)) {
-            SampleCode::TitleR(evt, this->getName());
+    bool onQuery(Sample::Event* evt) final {
+        if (Sample::TitleQ(*evt)) {
+            Sample::TitleR(evt, this->getName());
             return true;
         }
         SkUnichar unichar;
-        if (SampleCode::CharQ(*evt, &unichar)) {
+        if (Sample::CharQ(*evt, &unichar)) {
             if (unichar == 'X') {
                 fDoClip = !fDoClip;
                 return true;
@@ -105,7 +109,7 @@ protected:
     SkPath     fClipPath = sk_tool_utils::make_star(SkRect{0,0,1,1}, 11, 3);
     bool       fDoClip = false;
 
-    typedef SampleView INHERITED;
+    typedef Sample INHERITED;
 };
 
 void PathText::Glyph::init(SkRandom& rand, const SkPath& path) {
@@ -318,7 +322,7 @@ public:
 
     void swapAnimationBuffers() override {
         this->INHERITED::swapAnimationBuffers();
-        fFrontPaths.swap(fBackPaths);
+        std::swap(fFrontPaths, fBackPaths);
     }
 
     void drawGlyphs(SkCanvas* canvas) override {

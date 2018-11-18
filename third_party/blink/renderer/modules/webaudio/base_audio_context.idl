@@ -34,7 +34,9 @@ callback DecodeSuccessCallback = void (AudioBuffer decodedData);
     [RaisesException] AudioBuffer createBuffer(unsigned long numberOfChannels, unsigned long numberOfFrames, float sampleRate);
 
     // Asynchronous audio file data decoding.
-    [RaisesException, MeasureAs=AudioContextDecodeAudioData, CallWith=ScriptState] Promise<AudioBuffer> decodeAudioData(ArrayBuffer audioData, optional DecodeSuccessCallback successCallback, optional DecodeErrorCallback  errorCallback);
+    // TODO(crbug.com/841185): |successCallback| and |errorCallback| are not
+    // nullable in the spec.
+    [RaisesException, MeasureAs=AudioContextDecodeAudioData, CallWith=ScriptState] Promise<AudioBuffer> decodeAudioData(ArrayBuffer audioData, optional DecodeSuccessCallback? successCallback, optional DecodeErrorCallback? errorCallback);
 
     // Sources
     [RaisesException, MeasureAs=AudioContextCreateBufferSource] AudioBufferSourceNode createBufferSource();
@@ -58,15 +60,6 @@ callback DecodeSuccessCallback = void (AudioBuffer decodedData);
     // Channel splitting and merging
     [RaisesException, MeasureAs=AudioContextCreateChannelSplitter] ChannelSplitterNode createChannelSplitter(optional unsigned long numberOfOutputs);
     [RaisesException, MeasureAs=AudioContextCreateChannelMerger] ChannelMergerNode createChannelMerger(optional unsigned long numberOfInputs);
-
-    // Pause/resume
-    [MeasureAs=AudioContextResume, CallWith=ScriptState, ImplementedAs=resumeContext] Promise<void> resume();
-
-    // TODO(rtoy): These really belong to the AudioContext, but we need them
-    // here so we can use an offline audio context to test these.
-    [RaisesException, MeasureAs=AudioContextCreateMediaElementSource] MediaElementAudioSourceNode createMediaElementSource(HTMLMediaElement mediaElement);
-    [RaisesException, MeasureAs=AudioContextCreateMediaStreamSource] MediaStreamAudioSourceNode createMediaStreamSource(MediaStream mediaStream);
-    [RaisesException, MeasureAs=AudioContextCreateMediaStreamDestination] MediaStreamAudioDestinationNode createMediaStreamDestination();
 
     [SecureContext] readonly attribute AudioWorklet audioWorklet;
 

@@ -31,8 +31,9 @@
 
 #include "third_party/blink/renderer/core/workers/shared_worker.h"
 
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
+#include "third_party/blink/public/common/blob/blob_utils.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
+#include "third_party/blink/renderer/core/fileapi/public_url_manager.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_client.h"
 #include "third_party/blink/renderer/core/frame/use_counter.h"
@@ -40,6 +41,7 @@
 #include "third_party/blink/renderer/core/messaging/message_port.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/core/workers/shared_worker_repository_client.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 
@@ -53,7 +55,6 @@ SharedWorker* SharedWorker::Create(ExecutionContext* context,
                                    const String& name,
                                    ExceptionState& exception_state) {
   DCHECK(IsMainThread());
-  SECURITY_DCHECK(context->IsDocument());
 
   UseCounter::Count(context, WebFeature::kSharedWorkerStart);
 
@@ -65,7 +66,7 @@ SharedWorker* SharedWorker::Create(ExecutionContext* context,
 
   // We don't currently support nested workers, so workers can only be created
   // from documents.
-  Document* document = ToDocument(context);
+  Document* document = To<Document>(context);
   if (!document->GetSecurityOrigin()->CanAccessSharedWorkers()) {
     exception_state.ThrowSecurityError(
         "Access to shared workers is denied to origin '" +
@@ -76,13 +77,20 @@ SharedWorker* SharedWorker::Create(ExecutionContext* context,
   }
 
   KURL script_url = ResolveURL(context, url, exception_state,
-                               WebURLRequest::kRequestContextSharedWorker);
+                               mojom::RequestContextType::SHARED_WORKER);
   if (script_url.IsEmpty())
     return nullptr;
 
+  mojom::blink::BlobURLTokenPtr blob_url_token;
+  if (script_url.ProtocolIs("blob") && BlobUtils::MojoBlobURLsEnabled()) {
+    document->GetPublicURLManager().Resolve(script_url,
+                                            MakeRequest(&blob_url_token));
+  }
+
   if (document->GetFrame()->Client()->GetSharedWorkerRepositoryClient()) {
     document->GetFrame()->Client()->GetSharedWorkerRepositoryClient()->Connect(
-        worker, std::move(remote_port), script_url, name);
+        worker, std::move(remote_port), script_url, std::move(blob_url_token),
+        name);
   }
 
   return worker;

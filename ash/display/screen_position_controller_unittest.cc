@@ -11,12 +11,15 @@
 #include "ash/shell.h"
 #include "ash/shell_test_api.h"
 #include "ash/test/ash_test_base.h"
+#include "ash/window_factory.h"
+#include "base/test/scoped_feature_list.h"
 #include "ui/aura/env.h"
 #include "ui/aura/test/test_window_delegate.h"
 #include "ui/aura/window_tracker.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/base/layout.h"
 #include "ui/display/display_layout.h"
+#include "ui/display/display_switches.h"
 #include "ui/display/manager/display_manager.h"
 #include "ui/display/screen.h"
 #include "ui/events/test/event_generator.h"
@@ -37,7 +40,7 @@ class ScreenPositionControllerTest : public AshTestBase {
 
   void SetUp() override {
     AshTestBase::SetUp();
-    window_.reset(new aura::Window(&window_delegate_));
+    window_ = window_factory::NewWindow(&window_delegate_);
     window_->SetType(aura::client::WINDOW_TYPE_NORMAL);
     window_->Init(ui::LAYER_NOT_DRAWN);
     ParentWindowInPrimaryRootWindow(window_.get());
@@ -231,20 +234,20 @@ TEST_F(ScreenPositionControllerTest, ConvertHostPointToScreenRotate) {
   EXPECT_EQ("50,150", ConvertHostPointToScreen(50, -350));
 }
 
-TEST_F(ScreenPositionControllerTest, ConvertHostPointToScreenUIScale) {
+TEST_F(ScreenPositionControllerTest, ConvertHostPointToScreenZoomScale) {
   // 1st display is 2x density with 1.5 UI scale.
-  UpdateDisplay("100+100-200x200*2@1.5,100+500-200x200");
+  UpdateDisplay("100+100-200x200*2@0.8,100+500-200x200");
   // Put |window_| to the 1st.
   window_->SetBoundsInScreen(gfx::Rect(20, 20, 50, 50),
                              display::Screen::GetScreen()->GetPrimaryDisplay());
 
   // The point is on the 1st host.
-  EXPECT_EQ("45,45", ConvertHostPointToScreen(60, 60));
+  EXPECT_EQ("37,37", ConvertHostPointToScreen(60, 60));
   // The point is out of the host windows.
-  EXPECT_EQ("45,225", ConvertHostPointToScreen(60, 300));
+  EXPECT_EQ("37,187", ConvertHostPointToScreen(60, 300));
   // The point is on the 2nd host. Point on 2nd host (60,150) -
   // - screen [+(150,0)]
-  EXPECT_EQ("210,49", ConvertHostPointToScreen(60, 450));
+  EXPECT_EQ("184,49", ConvertHostPointToScreen(60, 450));
 
   // Move |window_| to the 2nd.
   window_->SetBoundsInScreen(gfx::Rect(300, 20, 50, 50),
@@ -253,12 +256,12 @@ TEST_F(ScreenPositionControllerTest, ConvertHostPointToScreenUIScale) {
   EXPECT_EQ(root_windows[1], window_->GetRootWindow());
 
   // The point is on the 2nd host. (50,70) - ro
-  EXPECT_EQ("210,70", ConvertHostPointToScreen(60, 70));
+  EXPECT_EQ("185,70", ConvertHostPointToScreen(60, 70));
   // The point is out of the host windows.
-  EXPECT_EQ("210,-50", ConvertHostPointToScreen(60, -50));
+  EXPECT_EQ("185,-50", ConvertHostPointToScreen(60, -50));
   // The point is on the 2nd host. Point on 1nd host (60, 60)
-  // 1/2 * 1.5 = (45,45)
-  EXPECT_EQ("45,45", ConvertHostPointToScreen(60, -340));
+  // 1/2 * 1 / 0.8 = (45,45)
+  EXPECT_EQ("37,37", ConvertHostPointToScreen(60, -340));
 }
 
 namespace {
@@ -268,10 +271,10 @@ namespace {
 class ConvertToScreenEventHandler : public ui::EventHandler {
  public:
   ConvertToScreenEventHandler() : could_convert_to_screen_(true) {
-    aura::Env::GetInstance()->AddPreTargetHandler(this);
+    Shell::Get()->aura_env()->AddPreTargetHandler(this);
   }
   ~ConvertToScreenEventHandler() override {
-    aura::Env::GetInstance()->RemovePreTargetHandler(this);
+    Shell::Get()->aura_env()->RemovePreTargetHandler(this);
   }
 
   bool could_convert_to_screen() const { return could_convert_to_screen_; }
@@ -311,9 +314,9 @@ TEST_F(ScreenPositionControllerTest,
   // asynchronously when a window which contains the mouse cursor is destroyed.
   // We want to check that none of these synthetic events are dispatched after
   // ScreenPositionClient has been detached from the root window.
-  GetEventGenerator().MoveMouseTo(800, 200);
+  GetEventGenerator()->MoveMouseTo(800, 200);
   EXPECT_TRUE(window_->GetBoundsInScreen().Contains(
-      aura::Env::GetInstance()->last_mouse_location()));
+      Shell::Get()->aura_env()->last_mouse_location()));
 
   aura::Window::Windows root_windows = Shell::Get()->GetAllRootWindows();
   aura::WindowTracker tracker;

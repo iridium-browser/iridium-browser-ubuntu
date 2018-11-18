@@ -59,13 +59,12 @@ class ASH_EXPORT OverviewButtonTray : public TrayBackgroundView,
   void OnOverviewModeEnded() override;
 
   // TabletModeObserver:
-  void OnTabletModeStarted() override;
-  void OnTabletModeEnded() override;
+  void OnTabletModeEventsBlockingChanged() override;
 
   // TrayBackgroundView:
   void ClickedOutsideBubble() override;
   base::string16 GetAccessibleNameForTray() override;
-  void HideBubbleWithView(const views::TrayBubbleView* bubble_view) override;
+  void HideBubbleWithView(const TrayBubbleView* bubble_view) override;
 
  private:
   friend class OverviewButtonTrayTest;

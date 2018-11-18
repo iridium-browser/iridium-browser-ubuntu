@@ -7,12 +7,17 @@
 #include <memory>
 
 #include "base/memory/ptr_util.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/timer/mock_timer.h"
-#include "chromeos/components/tether/connection_reason.h"
+#include "chromeos/chromeos_features.h"
 #include "chromeos/components/tether/fake_ble_connection_manager.h"
 #include "chromeos/components/tether/message_wrapper.h"
 #include "chromeos/components/tether/proto_test_util.h"
 #include "chromeos/components/tether/timer_factory.h"
+#include "chromeos/services/device_sync/public/cpp/fake_device_sync_client.h"
+#include "chromeos/services/secure_channel/public/cpp/client/fake_client_channel.h"
+#include "chromeos/services/secure_channel/public/cpp/client/fake_connection_attempt.h"
+#include "chromeos/services/secure_channel/public/cpp/client/fake_secure_channel_client.h"
 #include "components/cryptauth/remote_device_test_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -29,44 +34,49 @@ const MessageType kTestMessageType = MessageType::TETHER_AVAILABILITY_REQUEST;
 
 const uint32_t kTestTimeoutSeconds = 5;
 
+const char kTetherFeature[] = "magic_tether";
+
 // A test double for MessageTransferOperation is needed because
 // MessageTransferOperation has pure virtual methods which must be overridden in
 // order to create a concrete instantiation of the class.
 class TestOperation : public MessageTransferOperation {
  public:
-  TestOperation(const std::vector<cryptauth::RemoteDevice>& devices_to_connect,
+  TestOperation(const cryptauth::RemoteDeviceRefList& devices_to_connect,
+                device_sync::DeviceSyncClient* device_sync_client,
+                secure_channel::SecureChannelClient* secure_channel_client,
                 BleConnectionManager* connection_manager)
-      : MessageTransferOperation(devices_to_connect, connection_manager) {}
+      : MessageTransferOperation(devices_to_connect,
+                                 secure_channel::ConnectionPriority::kLow,
+                                 device_sync_client,
+                                 secure_channel_client,
+                                 connection_manager) {}
   ~TestOperation() override = default;
 
-  bool HasDeviceAuthenticated(const cryptauth::RemoteDevice& remote_device) {
+  bool HasDeviceAuthenticated(cryptauth::RemoteDeviceRef remote_device) {
     const auto iter = device_map_.find(remote_device);
-    if (iter == device_map_.end()) {
+    if (iter == device_map_.end())
       return false;
-    }
 
     return iter->second.has_device_authenticated;
   }
 
   std::vector<std::shared_ptr<MessageWrapper>> GetReceivedMessages(
-      const cryptauth::RemoteDevice& remote_device) {
+      cryptauth::RemoteDeviceRef remote_device) {
     const auto iter = device_map_.find(remote_device);
-    if (iter == device_map_.end()) {
+    if (iter == device_map_.end())
       return std::vector<std::shared_ptr<MessageWrapper>>();
-    }
 
     return iter->second.received_messages;
   }
 
   // MessageTransferOperation:
   void OnDeviceAuthenticated(
-      const cryptauth::RemoteDevice& remote_device) override {
+      cryptauth::RemoteDeviceRef remote_device) override {
     device_map_[remote_device].has_device_authenticated = true;
   }
 
-  void OnMessageReceived(
-      std::unique_ptr<MessageWrapper> message_wrapper,
-      const cryptauth::RemoteDevice& remote_device) override {
+  void OnMessageReceived(std::unique_ptr<MessageWrapper> message_wrapper,
+                         cryptauth::RemoteDeviceRef remote_device) override {
     device_map_[remote_device].received_messages.push_back(
         std::move(message_wrapper));
 
@@ -82,7 +92,11 @@ class TestOperation : public MessageTransferOperation {
     return kTestMessageType;
   }
 
-  uint32_t GetTimeoutSeconds() override { return timeout_seconds_; }
+  void OnMessageSent(int sequence_number) override {
+    last_sequence_number_ = sequence_number;
+  }
+
+  uint32_t GetMessageTimeoutSeconds() override { return timeout_seconds_; }
 
   void set_timeout_seconds(uint32_t timeout_seconds) {
     timeout_seconds_ = timeout_seconds;
@@ -98,6 +112,8 @@ class TestOperation : public MessageTransferOperation {
 
   bool has_operation_finished() { return has_operation_finished_; }
 
+  base::Optional<int> last_sequence_number() { return last_sequence_number_; }
+
  private:
   struct DeviceMapValue {
     DeviceMapValue() = default;
@@ -107,12 +123,13 @@ class TestOperation : public MessageTransferOperation {
     std::vector<std::shared_ptr<MessageWrapper>> received_messages;
   };
 
-  std::map<cryptauth::RemoteDevice, DeviceMapValue> device_map_;
+  base::flat_map<cryptauth::RemoteDeviceRef, DeviceMapValue> device_map_;
 
   uint32_t timeout_seconds_ = kTestTimeoutSeconds;
   bool should_unregister_device_on_message_received_ = false;
   bool has_operation_started_ = false;
   bool has_operation_finished_ = false;
+  base::Optional<int> last_sequence_number_;
 };
 
 class TestTimerFactory : public TimerFactory {
@@ -120,16 +137,19 @@ class TestTimerFactory : public TimerFactory {
   ~TestTimerFactory() override = default;
 
   // TimerFactory:
-  std::unique_ptr<base::Timer> CreateOneShotTimer() override {
+  std::unique_ptr<base::OneShotTimer> CreateOneShotTimer() override {
     EXPECT_FALSE(device_id_for_next_timer_.empty());
-    base::MockTimer* mock_timer = new base::MockTimer(
-        false /* retain_user_task */, false /* is_repeating */);
+    base::MockOneShotTimer* mock_timer = new base::MockOneShotTimer();
     device_id_to_timer_map_[device_id_for_next_timer_] = mock_timer;
     return base::WrapUnique(mock_timer);
   }
 
-  base::MockTimer* GetTimerForDeviceId(const std::string& device_id) {
+  base::MockOneShotTimer* GetTimerForDeviceId(const std::string& device_id) {
     return device_id_to_timer_map_[device_id_for_next_timer_];
+  }
+
+  void ClearTimerForDeviceId(const std::string& device_id) {
+    device_id_to_timer_map_.erase(device_id_for_next_timer_);
   }
 
   void set_device_id_for_next_timer(
@@ -139,7 +159,7 @@ class TestTimerFactory : public TimerFactory {
 
  private:
   std::string device_id_for_next_timer_;
-  std::unordered_map<std::string, base::MockTimer*> device_id_to_timer_map_;
+  base::flat_map<std::string, base::MockOneShotTimer*> device_id_to_timer_map_;
 };
 
 TetherAvailabilityResponse CreateTetherAvailabilityResponse() {
@@ -157,7 +177,10 @@ TetherAvailabilityResponse CreateTetherAvailabilityResponse() {
 class MessageTransferOperationTest : public testing::Test {
  protected:
   MessageTransferOperationTest()
-      : test_devices_(cryptauth::GenerateTestRemoteDevices(4)) {
+      : test_local_device_(cryptauth::RemoteDeviceRefBuilder()
+                               .SetPublicKey("local device")
+                               .Build()),
+        test_devices_(cryptauth::CreateRemoteDeviceRefListForTest(4)) {
     // These tests are written under the assumption that there are a maximum of
     // 3 "empty scan" connection attempts and 6 "GATT" connection attempts; the
     // tests need to be edited if these values change.
@@ -167,13 +190,51 @@ class MessageTransferOperationTest : public testing::Test {
   }
 
   void SetUp() override {
+    fake_device_sync_client_ =
+        std::make_unique<device_sync::FakeDeviceSyncClient>();
+    fake_device_sync_client_->set_local_device_metadata(test_local_device_);
+    fake_secure_channel_client_ =
+        std::make_unique<secure_channel::FakeSecureChannelClient>();
+
     fake_ble_connection_manager_ = std::make_unique<FakeBleConnectionManager>();
   }
 
-  void ConstructOperation(std::vector<cryptauth::RemoteDevice> remote_devices) {
+  void SetMultiDeviceApiState(bool enabled) {
+    if (enabled) {
+      scoped_feature_list_.InitAndEnableFeature(
+          chromeos::features::kMultiDeviceApi);
+    } else {
+      scoped_feature_list_.InitAndDisableFeature(
+          chromeos::features::kMultiDeviceApi);
+    }
+  }
+
+  void ConstructOperation(cryptauth::RemoteDeviceRefList remote_devices,
+                          bool is_multidevice_api_enabled) {
+    SetMultiDeviceApiState(is_multidevice_api_enabled /* enabled */);
+
     test_timer_factory_ = new TestTimerFactory();
-    operation_ = base::WrapUnique(
-        new TestOperation(remote_devices, fake_ble_connection_manager_.get()));
+
+    if (base::FeatureList::IsEnabled(chromeos::features::kMultiDeviceApi)) {
+      for (auto remote_device : remote_devices) {
+        // Prepare for connection timeout timers to be made for each remote
+        // device.
+        test_timer_factory_->set_device_id_for_next_timer(
+            remote_device.GetDeviceId());
+
+        auto fake_connection_attempt =
+            std::make_unique<secure_channel::FakeConnectionAttempt>();
+        remote_device_to_fake_connection_attempt_map_[remote_device] =
+            fake_connection_attempt.get();
+        fake_secure_channel_client_->set_next_listen_connection_attempt(
+            remote_device, test_local_device_,
+            std::move(fake_connection_attempt));
+      }
+    }
+
+    operation_ = base::WrapUnique(new TestOperation(
+        remote_devices, fake_device_sync_client_.get(),
+        fake_secure_channel_client_.get(), fake_ble_connection_manager_.get()));
     operation_->SetTimerFactoryForTest(base::WrapUnique(test_timer_factory_));
     VerifyOperationStartedAndFinished(false /* has_started */,
                                       false /* has_finished */);
@@ -183,8 +244,22 @@ class MessageTransferOperationTest : public testing::Test {
     VerifyOperationStartedAndFinished(false /* has_started */,
                                       false /* has_finished */);
     operation_->Initialize();
+
+    if (base::FeatureList::IsEnabled(chromeos::features::kMultiDeviceApi)) {
+      for (const auto* arguments :
+           fake_secure_channel_client_
+               ->last_listen_for_connection_request_arguments_list()) {
+        EXPECT_EQ(kTetherFeature, arguments->feature);
+      }
+    }
+
     VerifyOperationStartedAndFinished(true /* has_started */,
                                       false /* has_finished */);
+
+    if (base::FeatureList::IsEnabled(chromeos::features::kMultiDeviceApi)) {
+      for (const auto& remote_device : operation_->remote_devices())
+        VerifyConnectionTimerCreatedForDevice(remote_device);
+    }
   }
 
   void VerifyOperationStartedAndFinished(bool has_started, bool has_finished) {
@@ -192,59 +267,242 @@ class MessageTransferOperationTest : public testing::Test {
     EXPECT_EQ(has_finished, operation_->has_operation_finished());
   }
 
-  void TransitionDeviceStatusFromDisconnectedToAuthenticated(
-      const cryptauth::RemoteDevice& remote_device) {
+  void CreateAuthenticatedChannelForDevice(
+      cryptauth::RemoteDeviceRef remote_device) {
     test_timer_factory_->set_device_id_for_next_timer(
         remote_device.GetDeviceId());
 
-    fake_ble_connection_manager_->SetDeviceStatus(
-        remote_device.GetDeviceId(),
-        cryptauth::SecureChannel::Status::CONNECTING,
-        BleConnectionManager::StateChangeDetail::STATE_CHANGE_DETAIL_NONE);
-    fake_ble_connection_manager_->SetDeviceStatus(
-        remote_device.GetDeviceId(),
-        cryptauth::SecureChannel::Status::CONNECTED,
-        BleConnectionManager::StateChangeDetail::STATE_CHANGE_DETAIL_NONE);
-    fake_ble_connection_manager_->SetDeviceStatus(
-        remote_device.GetDeviceId(),
-        cryptauth::SecureChannel::Status::AUTHENTICATING,
-        BleConnectionManager::StateChangeDetail::STATE_CHANGE_DETAIL_NONE);
-    fake_ble_connection_manager_->SetDeviceStatus(
-        remote_device.GetDeviceId(),
-        cryptauth::SecureChannel::Status::AUTHENTICATED,
-        BleConnectionManager::StateChangeDetail::STATE_CHANGE_DETAIL_NONE);
+    if (base::FeatureList::IsEnabled(chromeos::features::kMultiDeviceApi)) {
+      auto fake_client_channel =
+          std::make_unique<secure_channel::FakeClientChannel>();
+      remote_device_to_fake_client_channel_map_[remote_device] =
+          fake_client_channel.get();
+      remote_device_to_fake_connection_attempt_map_[remote_device]
+          ->NotifyConnection(std::move(fake_client_channel));
+    } else {
+      fake_ble_connection_manager_->SetDeviceStatus(
+          remote_device.GetDeviceId(),
+          cryptauth::SecureChannel::Status::CONNECTING,
+          BleConnectionManager::StateChangeDetail::STATE_CHANGE_DETAIL_NONE);
+      fake_ble_connection_manager_->SetDeviceStatus(
+          remote_device.GetDeviceId(),
+          cryptauth::SecureChannel::Status::CONNECTED,
+          BleConnectionManager::StateChangeDetail::STATE_CHANGE_DETAIL_NONE);
+      fake_ble_connection_manager_->SetDeviceStatus(
+          remote_device.GetDeviceId(),
+          cryptauth::SecureChannel::Status::AUTHENTICATING,
+          BleConnectionManager::StateChangeDetail::STATE_CHANGE_DETAIL_NONE);
+      fake_ble_connection_manager_->SetDeviceStatus(
+          remote_device.GetDeviceId(),
+          cryptauth::SecureChannel::Status::AUTHENTICATED,
+          BleConnectionManager::StateChangeDetail::STATE_CHANGE_DETAIL_NONE);
+    }
   }
 
-  base::MockTimer* GetTimerForDevice(
-      const cryptauth::RemoteDevice& remote_device) {
+  base::MockOneShotTimer* GetTimerForDevice(
+      cryptauth::RemoteDeviceRef remote_device) {
     return test_timer_factory_->GetTimerForDeviceId(
         remote_device.GetDeviceId());
   }
 
   void VerifyDefaultTimerCreatedForDevice(
-      const cryptauth::RemoteDevice& remote_device) {
+      cryptauth::RemoteDeviceRef remote_device) {
     VerifyTimerCreatedForDevice(remote_device, kTestTimeoutSeconds);
   }
 
-  void VerifyTimerCreatedForDevice(const cryptauth::RemoteDevice& remote_device,
+  void VerifyConnectionTimerCreatedForDevice(
+      cryptauth::RemoteDeviceRef remote_device) {
+    VerifyTimerCreatedForDevice(
+        remote_device, MessageTransferOperation::kConnectionTimeoutSeconds);
+  }
+
+  void VerifyTimerCreatedForDevice(cryptauth::RemoteDeviceRef remote_device,
                                    uint32_t timeout_seconds) {
     EXPECT_TRUE(GetTimerForDevice(remote_device));
     EXPECT_EQ(base::TimeDelta::FromSeconds(timeout_seconds),
               GetTimerForDevice(remote_device)->GetCurrentDelay());
   }
 
-  const std::vector<cryptauth::RemoteDevice> test_devices_;
+  int SendMessageToDevice(cryptauth::RemoteDeviceRef remote_device,
+                          std::unique_ptr<MessageWrapper> message_wrapper) {
+    return operation_->SendMessageToDevice(test_devices_[0],
+                                           std::move(message_wrapper));
+  }
 
+  const cryptauth::RemoteDeviceRef test_local_device_;
+  const cryptauth::RemoteDeviceRefList test_devices_;
+
+  base::flat_map<cryptauth::RemoteDeviceRef,
+                 secure_channel::FakeConnectionAttempt*>
+      remote_device_to_fake_connection_attempt_map_;
+  base::flat_map<cryptauth::RemoteDeviceRef, secure_channel::FakeClientChannel*>
+      remote_device_to_fake_client_channel_map_;
+
+  std::unique_ptr<device_sync::FakeDeviceSyncClient> fake_device_sync_client_;
+  std::unique_ptr<secure_channel::FakeSecureChannelClient>
+      fake_secure_channel_client_;
   std::unique_ptr<FakeBleConnectionManager> fake_ble_connection_manager_;
   TestTimerFactory* test_timer_factory_;
   std::unique_ptr<TestOperation> operation_;
+
+  base::test::ScopedFeatureList scoped_feature_list_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MessageTransferOperationTest);
 };
 
+TEST_F(MessageTransferOperationTest,
+       MultiDeviceApiEnabled_TestFailedConnection) {
+  ConstructOperation(cryptauth::RemoteDeviceRefList{test_devices_[0]},
+                     true /* is_multidevice_api_enabled */);
+  InitializeOperation();
+
+  remote_device_to_fake_connection_attempt_map_[test_devices_[0]]
+      ->NotifyConnectionAttemptFailure(
+          secure_channel::mojom::ConnectionAttemptFailureReason::
+              AUTHENTICATION_ERROR);
+
+  VerifyOperationStartedAndFinished(true /* has_started */,
+                                    true /* has_finished */);
+  EXPECT_FALSE(operation_->HasDeviceAuthenticated(test_devices_[0]));
+  EXPECT_TRUE(operation_->GetReceivedMessages(test_devices_[0]).empty());
+}
+
+TEST_F(MessageTransferOperationTest,
+       MultiDeviceApiEnabled_TestSuccessfulConnectionSendAndReceiveMessage) {
+  ConstructOperation(cryptauth::RemoteDeviceRefList{test_devices_[0]},
+                     true /* is_multidevice_api_enabled */);
+  InitializeOperation();
+
+  // Simulate how subclasses behave after a successful response: unregister the
+  // device.
+  operation_->set_should_unregister_device_on_message_received(true);
+
+  CreateAuthenticatedChannelForDevice(test_devices_[0]);
+  EXPECT_TRUE(operation_->HasDeviceAuthenticated(test_devices_[0]));
+  VerifyDefaultTimerCreatedForDevice(test_devices_[0]);
+
+  auto message_wrapper =
+      std::make_unique<MessageWrapper>(TetherAvailabilityRequest());
+  std::string expected_payload = message_wrapper->ToRawMessage();
+  int sequence_number =
+      SendMessageToDevice(test_devices_[0], std::move(message_wrapper));
+  std::vector<std::pair<std::string, base::OnceClosure>>& sent_messages =
+      remote_device_to_fake_client_channel_map_[test_devices_[0]]
+          ->sent_messages();
+  EXPECT_EQ(1u, sent_messages.size());
+  EXPECT_EQ(expected_payload, sent_messages[0].first);
+
+  EXPECT_FALSE(operation_->last_sequence_number());
+  std::move(sent_messages[0].second).Run();
+  EXPECT_EQ(sequence_number, operation_->last_sequence_number());
+
+  remote_device_to_fake_client_channel_map_[test_devices_[0]]
+      ->NotifyMessageReceived(
+          MessageWrapper(CreateTetherAvailabilityResponse()).ToRawMessage());
+
+  EXPECT_EQ(1u, operation_->GetReceivedMessages(test_devices_[0]).size());
+  std::shared_ptr<MessageWrapper> message =
+      operation_->GetReceivedMessages(test_devices_[0])[0];
+  EXPECT_EQ(MessageType::TETHER_AVAILABILITY_RESPONSE,
+            message->GetMessageType());
+  EXPECT_EQ(CreateTetherAvailabilityResponse().SerializeAsString(),
+            message->GetProto()->SerializeAsString());
+}
+
+TEST_F(MessageTransferOperationTest,
+       MultiDeviceApiEnabled_TestTimesOutBeforeAuthentication) {
+  ConstructOperation(cryptauth::RemoteDeviceRefList{test_devices_[0]},
+                     true /* is_multidevice_api_enabled */);
+  InitializeOperation();
+
+  GetTimerForDevice(test_devices_[0])->Fire();
+  EXPECT_TRUE(operation_->has_operation_finished());
+}
+
+TEST_F(MessageTransferOperationTest,
+       MultiDeviceApiEnabled_TestAuthenticatesButThenTimesOut) {
+  ConstructOperation(cryptauth::RemoteDeviceRefList{test_devices_[0]},
+                     true /* is_multidevice_api_enabled */);
+  InitializeOperation();
+
+  CreateAuthenticatedChannelForDevice(test_devices_[0]);
+  EXPECT_TRUE(operation_->HasDeviceAuthenticated(test_devices_[0]));
+  VerifyDefaultTimerCreatedForDevice(test_devices_[0]);
+
+  GetTimerForDevice(test_devices_[0])->Fire();
+
+  EXPECT_TRUE(operation_->has_operation_finished());
+}
+
+TEST_F(MessageTransferOperationTest,
+       MultiDeviceApiEnabled_TestRepeatedInputDevice) {
+  // Construct with two copies of the same device.
+  ConstructOperation(
+      cryptauth::RemoteDeviceRefList{test_devices_[0], test_devices_[0]},
+      true /* is_multidevice_api_enabled */);
+  InitializeOperation();
+
+  CreateAuthenticatedChannelForDevice(test_devices_[0]);
+  EXPECT_TRUE(operation_->HasDeviceAuthenticated(test_devices_[0]));
+  VerifyDefaultTimerCreatedForDevice(test_devices_[0]);
+
+  remote_device_to_fake_client_channel_map_[test_devices_[0]]
+      ->NotifyMessageReceived(
+          MessageWrapper(CreateTetherAvailabilityResponse()).ToRawMessage());
+
+  // Should still have received only one message even though the device was
+  // repeated twice in the constructor.
+  EXPECT_EQ(1u, operation_->GetReceivedMessages(test_devices_[0]).size());
+  std::shared_ptr<MessageWrapper> message =
+      operation_->GetReceivedMessages(test_devices_[0])[0];
+  EXPECT_EQ(MessageType::TETHER_AVAILABILITY_RESPONSE,
+            message->GetMessageType());
+  EXPECT_EQ(CreateTetherAvailabilityResponse().SerializeAsString(),
+            message->GetProto()->SerializeAsString());
+}
+
+TEST_F(MessageTransferOperationTest, MultiDeviceApiEnabled_MultipleDevices) {
+  ConstructOperation(test_devices_, true /* is_multidevice_api_enabled */);
+  InitializeOperation();
+
+  for (const auto& remote_device : test_devices_)
+    test_timer_factory_->ClearTimerForDeviceId(remote_device.GetDeviceId());
+
+  // Authenticate |test_devices_[0]|'s channel.
+  CreateAuthenticatedChannelForDevice(test_devices_[0]);
+  EXPECT_TRUE(operation_->HasDeviceAuthenticated(test_devices_[0]));
+  VerifyDefaultTimerCreatedForDevice(test_devices_[0]);
+
+  // Fail to connect to |test_devices_[1]|.
+  test_timer_factory_->set_device_id_for_next_timer(
+      test_devices_[1].GetDeviceId());
+  remote_device_to_fake_connection_attempt_map_[test_devices_[1]]
+      ->NotifyConnectionAttemptFailure(
+          secure_channel::mojom::ConnectionAttemptFailureReason::
+              GATT_CONNECTION_ERROR);
+  EXPECT_FALSE(operation_->HasDeviceAuthenticated(test_devices_[1]));
+  EXPECT_FALSE(GetTimerForDevice(test_devices_[1]));
+
+  // Authenticate |test_devices_[2]|'s channel.
+  CreateAuthenticatedChannelForDevice(test_devices_[2]);
+  EXPECT_TRUE(operation_->HasDeviceAuthenticated(test_devices_[2]));
+  VerifyDefaultTimerCreatedForDevice(test_devices_[2]);
+
+  // Fail to connect to |test_devices_[3]|.
+  test_timer_factory_->set_device_id_for_next_timer(
+      test_devices_[3].GetDeviceId());
+  remote_device_to_fake_connection_attempt_map_[test_devices_[3]]
+      ->NotifyConnectionAttemptFailure(
+          secure_channel::mojom::ConnectionAttemptFailureReason::
+              GATT_CONNECTION_ERROR);
+  EXPECT_FALSE(operation_->HasDeviceAuthenticated(test_devices_[3]));
+  EXPECT_FALSE(GetTimerForDevice(test_devices_[3]));
+}
+
 TEST_F(MessageTransferOperationTest, CannotReceiveResponse_RetryLimitReached) {
-  ConstructOperation(std::vector<cryptauth::RemoteDevice>{test_devices_[0]});
+  ConstructOperation(cryptauth::RemoteDeviceRefList{test_devices_[0]},
+                     false /* is_multidevice_api_enabled */);
   InitializeOperation();
   EXPECT_TRUE(fake_ble_connection_manager_->IsRegistered(
       test_devices_[0].GetDeviceId()));
@@ -297,7 +555,8 @@ TEST_F(MessageTransferOperationTest, CannotReceiveResponse_RetryLimitReached) {
 
 TEST_F(MessageTransferOperationTest,
        CannotCompleteGattConnection_RetryLimitReached) {
-  ConstructOperation(std::vector<cryptauth::RemoteDevice>{test_devices_[0]});
+  ConstructOperation(cryptauth::RemoteDeviceRefList{test_devices_[0]},
+                     false /* is_multidevice_api_enabled */);
   InitializeOperation();
   EXPECT_TRUE(fake_ble_connection_manager_->IsRegistered(
       test_devices_[0].GetDeviceId()));
@@ -315,7 +574,8 @@ TEST_F(MessageTransferOperationTest,
 }
 
 TEST_F(MessageTransferOperationTest, MixedConnectionAttemptFailures) {
-  ConstructOperation(std::vector<cryptauth::RemoteDevice>{test_devices_[0]});
+  ConstructOperation(cryptauth::RemoteDeviceRefList{test_devices_[0]},
+                     false /* is_multidevice_api_enabled */);
   InitializeOperation();
   EXPECT_TRUE(fake_ble_connection_manager_->IsRegistered(
       test_devices_[0].GetDeviceId()));
@@ -342,7 +602,8 @@ TEST_F(MessageTransferOperationTest, MixedConnectionAttemptFailures) {
 }
 
 TEST_F(MessageTransferOperationTest, TestFailsThenConnects_Unanswered) {
-  ConstructOperation(std::vector<cryptauth::RemoteDevice>{test_devices_[0]});
+  ConstructOperation(cryptauth::RemoteDeviceRefList{test_devices_[0]},
+                     false /* is_multidevice_api_enabled */);
   InitializeOperation();
   EXPECT_TRUE(fake_ble_connection_manager_->IsRegistered(
       test_devices_[0].GetDeviceId()));
@@ -361,7 +622,7 @@ TEST_F(MessageTransferOperationTest, TestFailsThenConnects_Unanswered) {
       test_devices_[0].GetDeviceId()));
 
   // Try again and succeed.
-  TransitionDeviceStatusFromDisconnectedToAuthenticated(test_devices_[0]);
+  CreateAuthenticatedChannelForDevice(test_devices_[0]);
   EXPECT_TRUE(fake_ble_connection_manager_->IsRegistered(
       test_devices_[0].GetDeviceId()));
   EXPECT_TRUE(operation_->HasDeviceAuthenticated(test_devices_[0]));
@@ -371,7 +632,8 @@ TEST_F(MessageTransferOperationTest, TestFailsThenConnects_Unanswered) {
 }
 
 TEST_F(MessageTransferOperationTest, TestFailsThenConnects_GattError) {
-  ConstructOperation(std::vector<cryptauth::RemoteDevice>{test_devices_[0]});
+  ConstructOperation(cryptauth::RemoteDeviceRefList{test_devices_[0]},
+                     false /* is_multidevice_api_enabled */);
   InitializeOperation();
   EXPECT_TRUE(fake_ble_connection_manager_->IsRegistered(
       test_devices_[0].GetDeviceId()));
@@ -394,7 +656,7 @@ TEST_F(MessageTransferOperationTest, TestFailsThenConnects_GattError) {
       test_devices_[0].GetDeviceId()));
 
   // Try again and succeed.
-  TransitionDeviceStatusFromDisconnectedToAuthenticated(test_devices_[0]);
+  CreateAuthenticatedChannelForDevice(test_devices_[0]);
   EXPECT_TRUE(fake_ble_connection_manager_->IsRegistered(
       test_devices_[0].GetDeviceId()));
   EXPECT_TRUE(operation_->HasDeviceAuthenticated(test_devices_[0]));
@@ -405,7 +667,8 @@ TEST_F(MessageTransferOperationTest, TestFailsThenConnects_GattError) {
 
 TEST_F(MessageTransferOperationTest,
        TestSuccessfulConnectionAndReceiveMessage) {
-  ConstructOperation(std::vector<cryptauth::RemoteDevice>{test_devices_[0]});
+  ConstructOperation(cryptauth::RemoteDeviceRefList{test_devices_[0]},
+                     false /* is_multidevice_api_enabled */);
   InitializeOperation();
   EXPECT_TRUE(fake_ble_connection_manager_->IsRegistered(
       test_devices_[0].GetDeviceId()));
@@ -414,7 +677,7 @@ TEST_F(MessageTransferOperationTest,
   // device.
   operation_->set_should_unregister_device_on_message_received(true);
 
-  TransitionDeviceStatusFromDisconnectedToAuthenticated(test_devices_[0]);
+  CreateAuthenticatedChannelForDevice(test_devices_[0]);
   EXPECT_TRUE(fake_ble_connection_manager_->IsRegistered(
       test_devices_[0].GetDeviceId()));
   EXPECT_TRUE(operation_->HasDeviceAuthenticated(test_devices_[0]));
@@ -434,7 +697,7 @@ TEST_F(MessageTransferOperationTest,
 }
 
 TEST_F(MessageTransferOperationTest, TestDevicesUnregisteredAfterDeletion) {
-  ConstructOperation(test_devices_);
+  ConstructOperation(test_devices_, false /* is_multidevice_api_enabled */);
   InitializeOperation();
   EXPECT_TRUE(fake_ble_connection_manager_->IsRegistered(
       test_devices_[0].GetDeviceId()));
@@ -461,14 +724,15 @@ TEST_F(MessageTransferOperationTest,
        TestSuccessfulConnectionAndReceiveMessage_TimeoutSeconds) {
   const uint32_t kTimeoutSeconds = 90;
 
-  ConstructOperation(std::vector<cryptauth::RemoteDevice>{test_devices_[0]});
+  ConstructOperation(cryptauth::RemoteDeviceRefList{test_devices_[0]},
+                     false /* is_multidevice_api_enabled */);
   InitializeOperation();
   EXPECT_TRUE(fake_ble_connection_manager_->IsRegistered(
       test_devices_[0].GetDeviceId()));
 
   operation_->set_timeout_seconds(kTimeoutSeconds);
 
-  TransitionDeviceStatusFromDisconnectedToAuthenticated(test_devices_[0]);
+  CreateAuthenticatedChannelForDevice(test_devices_[0]);
   EXPECT_TRUE(fake_ble_connection_manager_->IsRegistered(
       test_devices_[0].GetDeviceId()));
   EXPECT_TRUE(operation_->HasDeviceAuthenticated(test_devices_[0]));
@@ -491,12 +755,13 @@ TEST_F(MessageTransferOperationTest,
 }
 
 TEST_F(MessageTransferOperationTest, TestAuthenticatesButTimesOut) {
-  ConstructOperation(std::vector<cryptauth::RemoteDevice>{test_devices_[0]});
+  ConstructOperation(cryptauth::RemoteDeviceRefList{test_devices_[0]},
+                     false /* is_multidevice_api_enabled */);
   InitializeOperation();
   EXPECT_TRUE(fake_ble_connection_manager_->IsRegistered(
       test_devices_[0].GetDeviceId()));
 
-  TransitionDeviceStatusFromDisconnectedToAuthenticated(test_devices_[0]);
+  CreateAuthenticatedChannelForDevice(test_devices_[0]);
   EXPECT_TRUE(fake_ble_connection_manager_->IsRegistered(
       test_devices_[0].GetDeviceId()));
   EXPECT_TRUE(operation_->HasDeviceAuthenticated(test_devices_[0]));
@@ -512,12 +777,13 @@ TEST_F(MessageTransferOperationTest, TestAuthenticatesButTimesOut) {
 TEST_F(MessageTransferOperationTest, TestRepeatedInputDevice) {
   // Construct with two copies of the same device.
   ConstructOperation(
-      std::vector<cryptauth::RemoteDevice>{test_devices_[0], test_devices_[0]});
+      cryptauth::RemoteDeviceRefList{test_devices_[0], test_devices_[0]},
+      false /* is_multidevice_api_enabled */);
   InitializeOperation();
   EXPECT_TRUE(fake_ble_connection_manager_->IsRegistered(
       test_devices_[0].GetDeviceId()));
 
-  TransitionDeviceStatusFromDisconnectedToAuthenticated(test_devices_[0]);
+  CreateAuthenticatedChannelForDevice(test_devices_[0]);
   EXPECT_TRUE(fake_ble_connection_manager_->IsRegistered(
       test_devices_[0].GetDeviceId()));
   EXPECT_TRUE(operation_->HasDeviceAuthenticated(test_devices_[0]));
@@ -539,7 +805,8 @@ TEST_F(MessageTransferOperationTest, TestRepeatedInputDevice) {
 }
 
 TEST_F(MessageTransferOperationTest, TestReceiveEventForOtherDevice) {
-  ConstructOperation(std::vector<cryptauth::RemoteDevice>{test_devices_[0]});
+  ConstructOperation(cryptauth::RemoteDeviceRefList{test_devices_[0]},
+                     false /* is_multidevice_api_enabled */);
   InitializeOperation();
   EXPECT_TRUE(fake_ble_connection_manager_->IsRegistered(
       test_devices_[0].GetDeviceId()));
@@ -548,9 +815,9 @@ TEST_F(MessageTransferOperationTest, TestReceiveEventForOtherDevice) {
   // operation was only constructed with |test_devices_[0]|, this operation
   // should not be affected.
   fake_ble_connection_manager_->RegisterRemoteDevice(
-      test_devices_[1].GetDeviceId(),
-      ConnectionReason::CONNECT_TETHERING_REQUEST);
-  TransitionDeviceStatusFromDisconnectedToAuthenticated(test_devices_[1]);
+      test_devices_[1].GetDeviceId(), base::UnguessableToken::Create(),
+      secure_channel::ConnectionPriority::kLow);
+  CreateAuthenticatedChannelForDevice(test_devices_[1]);
   EXPECT_TRUE(fake_ble_connection_manager_->IsRegistered(
       test_devices_[0].GetDeviceId()));
   EXPECT_TRUE(fake_ble_connection_manager_->IsRegistered(
@@ -569,14 +836,15 @@ TEST_F(MessageTransferOperationTest, TestReceiveEventForOtherDevice) {
 
 TEST_F(MessageTransferOperationTest,
        TestAlreadyAuthenticatedBeforeInitialization) {
-  ConstructOperation(std::vector<cryptauth::RemoteDevice>{test_devices_[0]});
+  ConstructOperation(cryptauth::RemoteDeviceRefList{test_devices_[0]},
+                     false /* is_multidevice_api_enabled */);
 
   // Simulate the authentication of |test_devices_[0]|'s channel before
   // initialization.
   fake_ble_connection_manager_->RegisterRemoteDevice(
-      test_devices_[0].GetDeviceId(),
-      ConnectionReason::CONNECT_TETHERING_REQUEST);
-  TransitionDeviceStatusFromDisconnectedToAuthenticated(test_devices_[0]);
+      test_devices_[0].GetDeviceId(), base::UnguessableToken::Create(),
+      secure_channel::ConnectionPriority::kLow);
+  CreateAuthenticatedChannelForDevice(test_devices_[0]);
 
   // Now initialize; the authentication handler should have been invoked.
   InitializeOperation();
@@ -601,14 +869,15 @@ TEST_F(MessageTransferOperationTest,
 
 TEST_F(MessageTransferOperationTest,
        AlreadyAuthenticatedBeforeInitialization_TimesOut) {
-  ConstructOperation(std::vector<cryptauth::RemoteDevice>{test_devices_[0]});
+  ConstructOperation(cryptauth::RemoteDeviceRefList{test_devices_[0]},
+                     false /* is_multidevice_api_enabled */);
 
   // Simulate the authentication of |test_devices_[0]|'s channel before
   // initialization.
   fake_ble_connection_manager_->RegisterRemoteDevice(
-      test_devices_[0].GetDeviceId(),
-      ConnectionReason::CONNECT_TETHERING_REQUEST);
-  TransitionDeviceStatusFromDisconnectedToAuthenticated(test_devices_[0]);
+      test_devices_[0].GetDeviceId(), base::UnguessableToken::Create(),
+      secure_channel::ConnectionPriority::kLow);
+  CreateAuthenticatedChannelForDevice(test_devices_[0]);
 
   // Now initialize; the authentication handler should have been invoked.
   InitializeOperation();
@@ -627,7 +896,7 @@ TEST_F(MessageTransferOperationTest,
 }
 
 TEST_F(MessageTransferOperationTest, MultipleDevices) {
-  ConstructOperation(test_devices_);
+  ConstructOperation(test_devices_, false /* is_multidevice_api_enabled */);
   InitializeOperation();
   EXPECT_TRUE(fake_ble_connection_manager_->IsRegistered(
       test_devices_[0].GetDeviceId()));
@@ -640,9 +909,9 @@ TEST_F(MessageTransferOperationTest, MultipleDevices) {
 
   // Authenticate |test_devices_[0]|'s channel.
   fake_ble_connection_manager_->RegisterRemoteDevice(
-      test_devices_[0].GetDeviceId(),
-      ConnectionReason::CONNECT_TETHERING_REQUEST);
-  TransitionDeviceStatusFromDisconnectedToAuthenticated(test_devices_[0]);
+      test_devices_[0].GetDeviceId(), base::UnguessableToken::Create(),
+      secure_channel::ConnectionPriority::kLow);
+  CreateAuthenticatedChannelForDevice(test_devices_[0]);
   EXPECT_TRUE(operation_->HasDeviceAuthenticated(test_devices_[0]));
   EXPECT_TRUE(fake_ble_connection_manager_->IsRegistered(
       test_devices_[0].GetDeviceId()));
@@ -661,9 +930,9 @@ TEST_F(MessageTransferOperationTest, MultipleDevices) {
 
   // Authenticate |test_devices_[2]|'s channel.
   fake_ble_connection_manager_->RegisterRemoteDevice(
-      test_devices_[2].GetDeviceId(),
-      ConnectionReason::CONNECT_TETHERING_REQUEST);
-  TransitionDeviceStatusFromDisconnectedToAuthenticated(test_devices_[2]);
+      test_devices_[2].GetDeviceId(), base::UnguessableToken::Create(),
+      secure_channel::ConnectionPriority::kLow);
+  CreateAuthenticatedChannelForDevice(test_devices_[2]);
   EXPECT_TRUE(operation_->HasDeviceAuthenticated(test_devices_[2]));
   EXPECT_TRUE(fake_ble_connection_manager_->IsRegistered(
       test_devices_[2].GetDeviceId()));

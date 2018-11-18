@@ -10,7 +10,7 @@
 #include "base/bind.h"
 #include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/values.h"
@@ -49,6 +49,7 @@
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/network_service_instance.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/service_manager_connection.h"
 #include "extensions/browser/extension_system.h"
@@ -58,7 +59,6 @@
 #include "google_apis/drive/drive_api_url_generator.h"
 #include "mojo/public/cpp/bindings/interface_request.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
-#include "net/url_request/url_request_context_getter.h"
 #include "services/device/public/mojom/constants.mojom.h"
 #include "services/device/public/mojom/wake_lock_provider.mojom.h"
 #include "services/service_manager/public/cpp/connector.h"
@@ -97,11 +97,11 @@ constexpr net::NetworkTrafficAnnotationTag kSyncFileSystemTrafficAnnotation =
 std::unique_ptr<drive::DriveServiceInterface>
 SyncEngine::DriveServiceFactory::CreateDriveService(
     OAuth2TokenService* oauth2_token_service,
-    net::URLRequestContextGetter* url_request_context_getter,
+    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
     base::SequencedTaskRunner* blocking_task_runner) {
   return std::unique_ptr<
       drive::DriveServiceInterface>(new drive::DriveAPIService(
-      oauth2_token_service, url_request_context_getter, blocking_task_runner,
+      oauth2_token_service, url_loader_factory, blocking_task_runner,
       GURL(google_apis::DriveApiUrlGenerator::kBaseUrlForProduction),
       GURL(google_apis::DriveApiUrlGenerator::kBaseThumbnailUrlForProduction),
       std::string(), /* custom_user_agent */
@@ -199,31 +199,31 @@ std::unique_ptr<SyncEngine> SyncEngine::CreateForBrowserContext(
       base::ThreadTaskRunnerHandle::Get();
   scoped_refptr<base::SequencedTaskRunner> worker_task_runner =
       base::CreateSequencedTaskRunnerWithTraits(
-          {base::MayBlock(), base::TaskPriority::BACKGROUND,
+          {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
            base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN});
   scoped_refptr<base::SequencedTaskRunner> drive_task_runner =
       base::CreateSequencedTaskRunnerWithTraits(
-          {base::MayBlock(), base::TaskPriority::BACKGROUND,
+          {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
            base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN});
 
   Profile* profile = Profile::FromBrowserContext(context);
   drive::DriveNotificationManager* notification_manager =
       drive::DriveNotificationManagerFactory::GetForBrowserContext(context);
-  ExtensionService* extension_service =
+  extensions::ExtensionService* extension_service =
       extensions::ExtensionSystem::Get(context)->extension_service();
   SigninManagerBase* signin_manager =
       SigninManagerFactory::GetForProfile(profile);
   OAuth2TokenService* token_service =
       ProfileOAuth2TokenServiceFactory::GetForProfile(profile);
-  scoped_refptr<net::URLRequestContextGetter> request_context =
-      content::BrowserContext::GetDefaultStoragePartition(context)->
-            GetURLRequestContext();
+  scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory =
+      content::BrowserContext::GetDefaultStoragePartition(context)
+          ->GetURLLoaderFactoryForBrowserProcess();
 
   std::unique_ptr<drive_backend::SyncEngine> sync_engine(new SyncEngine(
       ui_task_runner.get(), worker_task_runner.get(), drive_task_runner.get(),
       GetSyncFileSystemDir(context->GetPath()), task_logger,
       notification_manager, extension_service, signin_manager, token_service,
-      request_context.get(), std::make_unique<DriveServiceFactory>(),
+      url_loader_factory, std::make_unique<DriveServiceFactory>(),
       nullptr /* env_override */));
 
   sync_engine->Initialize();
@@ -243,7 +243,7 @@ void SyncEngine::AppendDependsOnFactories(
 SyncEngine::~SyncEngine() {
   Reset();
 
-  net::NetworkChangeNotifier::RemoveNetworkChangeObserver(this);
+  content::GetNetworkConnectionTracker()->RemoveNetworkConnectionObserver(this);
   if (signin_manager_)
     signin_manager_->RemoveObserver(this);
   if (notification_manager_)
@@ -277,7 +277,7 @@ void SyncEngine::Initialize() {
   DCHECK(drive_service_factory_);
   std::unique_ptr<drive::DriveServiceInterface> drive_service =
       drive_service_factory_->CreateDriveService(
-          token_service_, request_context_.get(), drive_task_runner_.get());
+          token_service_, url_loader_factory_, drive_task_runner_.get());
 
   device::mojom::WakeLockProviderPtr wake_lock_provider(nullptr);
   DCHECK(content::ServiceManagerConnection::GetForProcess());
@@ -336,7 +336,8 @@ void SyncEngine::InitializeInternal(
   worker_observer_.reset(new WorkerObserver(ui_task_runner_.get(),
                                             weak_ptr_factory_.GetWeakPtr()));
 
-  base::WeakPtr<ExtensionServiceInterface> extension_service_weak_ptr;
+  base::WeakPtr<extensions::ExtensionServiceInterface>
+      extension_service_weak_ptr;
   if (extension_service_)
     extension_service_weak_ptr = extension_service_->AsWeakPtr();
 
@@ -360,7 +361,11 @@ void SyncEngine::InitializeInternal(
   drive_service_->AddObserver(this);
 
   service_state_ = REMOTE_SERVICE_TEMPORARY_UNAVAILABLE;
-  OnNetworkChanged(net::NetworkChangeNotifier::GetConnectionType());
+  auto connection_type = network::mojom::ConnectionType::CONNECTION_NONE;
+  content::GetNetworkConnectionTracker()->GetConnectionType(
+      &connection_type, base::BindOnce(&SyncEngine::OnConnectionChanged,
+                                       weak_ptr_factory_.GetWeakPtr()));
+  OnConnectionChanged(connection_type);
   if (drive_service_->HasRefreshToken())
     OnReadyToSendRequests();
   else
@@ -639,7 +644,11 @@ void SyncEngine::ApplyLocalChange(const FileChange& local_change,
                      local_path, local_metadata, url, relayed_callback));
 }
 
-void SyncEngine::OnNotificationReceived() {
+void SyncEngine::OnNotificationReceived(const std::set<std::string>& ids) {
+  OnNotificationTimerFired();
+}
+
+void SyncEngine::OnNotificationTimerFired() {
   if (!sync_worker_)
     return;
 
@@ -674,13 +683,13 @@ void SyncEngine::OnRefreshTokenInvalid() {
                                 "Found invalid refresh token."));
 }
 
-void SyncEngine::OnNetworkChanged(
-    net::NetworkChangeNotifier::ConnectionType type) {
+void SyncEngine::OnConnectionChanged(network::mojom::ConnectionType type) {
   if (!sync_worker_)
     return;
 
   bool network_available_old = network_available_;
-  network_available_ = (type != net::NetworkChangeNotifier::CONNECTION_NONE);
+  network_available_ =
+      (type != network::mojom::ConnectionType::CONNECTION_NONE);
 
   if (!network_available_old && network_available_) {
     worker_task_runner_->PostTask(
@@ -720,10 +729,10 @@ SyncEngine::SyncEngine(
     const base::FilePath& sync_file_system_dir,
     TaskLogger* task_logger,
     drive::DriveNotificationManager* notification_manager,
-    ExtensionServiceInterface* extension_service,
+    extensions::ExtensionServiceInterface* extension_service,
     SigninManagerBase* signin_manager,
     OAuth2TokenService* token_service,
-    net::URLRequestContextGetter* request_context,
+    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
     std::unique_ptr<DriveServiceFactory> drive_service_factory,
     leveldb::Env* env_override)
     : ui_task_runner_(ui_task_runner),
@@ -735,7 +744,7 @@ SyncEngine::SyncEngine(
       extension_service_(extension_service),
       signin_manager_(signin_manager),
       token_service_(token_service),
-      request_context_(request_context),
+      url_loader_factory_(url_loader_factory),
       drive_service_factory_(std::move(drive_service_factory)),
       remote_change_processor_(nullptr),
       service_state_(REMOTE_SERVICE_TEMPORARY_UNAVAILABLE),
@@ -749,7 +758,7 @@ SyncEngine::SyncEngine(
     notification_manager_->AddObserver(this);
   if (signin_manager_)
     signin_manager_->AddObserver(this);
-  net::NetworkChangeNotifier::AddNetworkChangeObserver(this);
+  content::GetNetworkConnectionTracker()->AddNetworkConnectionObserver(this);
 }
 
 void SyncEngine::OnPendingFileListUpdated(int item_count) {

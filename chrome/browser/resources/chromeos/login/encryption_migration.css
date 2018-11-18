@@ -22,8 +22,8 @@ paper-progress {
   width: 100%;
 }
 
-.bottom-buttons {
-  -webkit-padding-end: 16px;
+[slot='bottom-buttons'] {
+  padding-inline-end: 16px;
 }
 
 oobe-text-button {
@@ -47,16 +47,16 @@ oobe-dialog > iron-icon.warning {
   background-color: var(--google-red-500);
 }
 
-.footer {
+[slot='footer'] {
   overflow: hidden;
 }
 
-.footer div {
+[slot='footer'] div {
   color: rgb(51, 51, 51);
   font-size: 13px;
 }
 
-.footer div.warning {
+[slot='footer'] div.warning {
   color: rgb(197, 57, 41);
   font-weight: 500;
 }

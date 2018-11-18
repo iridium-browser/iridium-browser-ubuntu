@@ -158,8 +158,9 @@ const char kAccessPointName[] = "AccessPointName";
 const char kName[] = "Name";
 const char kUsername[] = "Username";
 const char kPassword[] = "Password";
+const char kAuthentication[] = "Authentication";
 const char kLocalizedName[] = "LocalizedName";
-const char kLanguage[] = "LocalizedName";
+const char kLanguage[] = "Language";
 }  // namespace cellular_apn
 
 namespace cellular_found_network {
@@ -232,6 +233,7 @@ const char kSSID[] = "SSID";
 const char kSecurity[] = "Security";
 const char kSecurityNone[] = "None";
 const char kSignalStrength[] = "SignalStrength";
+const char kTetheringState[] = "TetheringState";
 const char kWEP_8021X[] = "WEP-8021X";
 const char kWEP_PSK[] = "WEP-PSK";
 const char kWPA_EAP[] = "WPA-EAP";
@@ -440,11 +442,20 @@ const char kWPAD[] = "WPAD";
 }  // namespace proxy
 
 namespace substitutes {
-const char kLoginIDField[] = "${LOGIN_ID}";
-const char kPasswordField[] = "${PASSWORD}";
-const char kEmailField[] = "${LOGIN_EMAIL}";
-const char kCertSANEmail[] = "${CERT_SAN_EMAIL}";
-const char kCertSANUPN[] = "${CERT_SAN_UPN}";
+const char kLoginID[] = "LOGIN_ID";
+const char kLoginEmail[] = "LOGIN_EMAIL";
+const char kCertSANEmail[] = "CERT_SAN_EMAIL";
+const char kCertSANUPN[] = "CERT_SAN_UPN";
+const char kCertSubjectCommonName[] = "CERT_SUBJECT_COMMON_NAME";
+const char kDeviceSerialNumber[] = "DEVICE_SERIAL_NUMBER";
+const char kDeviceAssetId[] = "DEVICE_ASSET_ID";
+// The password placeholder is defined as ${PASSWORD} because it's compared
+// verbatim against the policy-specified password field, and if it matches,
+// another bool (|shill::kEapUseLoginPasswordProperty|) is set, which makes
+// shill replace the whole password field.
+// The other placeholders above on the other hand are replaced using
+// VariableExpander.
+const char kPasswordPlaceholderVerbatim[] = "${PASSWORD}";
 }  // namespace substitutes
 
 namespace global_network_config {
@@ -452,6 +463,9 @@ const char kAllowOnlyPolicyNetworksToAutoconnect[] =
     "AllowOnlyPolicyNetworksToAutoconnect";
 const char kAllowOnlyPolicyNetworksToConnect[] =
     "AllowOnlyPolicyNetworksToConnect";
+const char kAllowOnlyPolicyNetworksToConnectIfAvailable[] =
+    "AllowOnlyPolicyNetworksToConnectIfAvailable";
+const char kBlacklistedHexSSIDs[] = "BlacklistedHexSSIDs";
 const char kDisableNetworkTypes[] = "DisableNetworkTypes";
 }  // global_network_config
 
@@ -461,5 +475,11 @@ const char kDisabled[] = "Disabled";
 const char kEnabling[] = "Enabling";
 const char kEnabled[] = "Enabled";
 }  // device_state
+
+namespace tethering_state {
+const char kTetheringConfirmedState[] = "Confirmed";
+const char kTetheringNotDetectedState[] = "NotDetected";
+const char kTetheringSuspectedState[] = "Suspected";
+}  // namespace tethering_state
 
 }  // namespace onc

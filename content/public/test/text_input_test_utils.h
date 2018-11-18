@@ -17,6 +17,10 @@
 #include "content/public/browser/browser_message_filter.h"
 #endif
 
+#if defined(USE_AURA)
+#include "ui/events/event_constants.h"
+#endif
+
 namespace ipc {
 class Message;
 }
@@ -193,7 +197,10 @@ class TextInputStateSender {
   void SetMode(ui::TextInputMode mode);
   void SetFlags(int flags);
   void SetCanComposeInline(bool can_compose_inline);
-  void SetShowImeIfNeeded(bool show_ime_if_needed);
+  void SetShowVirtualKeyboardIfEnabled(bool show_ime_if_needed);
+#if defined(USE_AURA)
+  void SetLastPointerType(ui::EventPointerType last_pointer_type);
+#endif
 
  private:
   std::unique_ptr<TextInputState> text_input_state_;
@@ -215,7 +222,8 @@ class TestInputMethodObserver {
 
   virtual ui::TextInputType GetTextInputTypeFromClient() = 0;
 
-  virtual void SetOnShowImeIfNeededCallback(const base::Closure& callback) = 0;
+  virtual void SetOnShowVirtualKeyboardIfEnabledCallback(
+      const base::RepeatingClosure& callback) = 0;
 
  protected:
   TestInputMethodObserver();

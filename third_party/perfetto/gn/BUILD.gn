@@ -39,12 +39,24 @@ group("gtest_deps") {
     public_deps = [
       "//buildtools:gmock",
       "//buildtools:gtest",
-      "//buildtools:gtest_main",
     ]
   } else {
     public_deps = [
       "//testing/gmock",
       "//testing/gtest",
+    ]
+  }
+}
+
+group("gtest_main") {
+  testonly = true
+
+  if (!build_with_chromium) {
+    public_deps = [
+      "//buildtools:gtest_main",
+    ]
+  } else {
+    public_deps = [
       "//testing/gtest:gtest_main",
     ]
   }
@@ -88,16 +100,18 @@ group("default_deps") {
       "//gn/standalone/libc++:deps",
       "//gn/standalone/sanitizers:deps",
     ]
-  } else {
-    public_deps = [
-      "//build/config:exe_and_shlib_deps",
-    ]
   }
 }
 
 config("default_config") {
+  defines = [ "PERFETTO_IMPLEMENTATION" ]
+
   if (build_with_chromium) {
-    defines = [ "PERFETTO_BUILD_WITH_CHROMIUM" ]
+    if (is_component_build) {
+      defines += [ "PERFETTO_SHARED_LIBRARY" ]
+    }
+
+    defines += [ "PERFETTO_BUILD_WITH_CHROMIUM" ]
 
     if (is_android) {
       # Included for __android_log_print
@@ -112,5 +126,22 @@ config("default_config") {
 }
 
 config("public_config") {
-  include_dirs = [ "../include" ]
+  include_dirs = [
+    "../include",
+
+    # The below are needed due to generated protobuf headers including other
+    # headers with a path relative to the perfetto root.
+    "${root_gen_dir}/${perfetto_root_path}/protos",
+  ]
+}
+
+# For now JsonCpp is supported only in standalone builds outside of Android or
+# Chromium.
+group("jsoncpp_deps") {
+  if (build_standalone) {
+    public_configs = [ "//buildtools:jsoncpp_config" ]
+    public_deps = [
+      "//buildtools:jsoncpp",
+    ]
+  }
 }

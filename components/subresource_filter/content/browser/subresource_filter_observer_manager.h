@@ -14,12 +14,15 @@
 
 namespace content {
 class NavigationHandle;
+class RenderFrameHost;
 class WebContents;
 }  // namespace content
 
 namespace subresource_filter {
 
-struct ActivationState;
+namespace mojom {
+class ActivationState;
+}  // namespace mojom
 
 // Manages retaining the list of SubresourceFilterObservers and notifying them
 // of various filtering events. Scoped to the lifetime of a WebContents.
@@ -32,29 +35,34 @@ class SubresourceFilterObserverManager
   void AddObserver(SubresourceFilterObserver* observer);
   void RemoveObserver(SubresourceFilterObserver* observer);
 
-  // Called when the SubresourceFilter Safe Browsing check is available for this
-  // main frame navigation. Will be called at WillProcessResponse time at the
-  // latest. Right now it will only include phishing and subresource filter
+  // Called when the SubresourceFilter Safe Browsing checks are available for
+  // this main frame navigation. Will be called at WillProcessResponse time at
+  // the latest. Right now it will only include phishing and subresource filter
   // threat types.
-  virtual void NotifySafeBrowsingCheckComplete(
+  virtual void NotifySafeBrowsingChecksComplete(
       content::NavigationHandle* navigation_handle,
-      safe_browsing::SBThreatType threat_type,
-      const safe_browsing::ThreatMetadata& threat_metadata);
+      const SubresourceFilterObserver::SafeBrowsingCheckResults& results);
 
   // Will be called at the latest in the WillProcessResponse stage from a
   // NavigationThrottle that was registered before the throttle manager's
   // throttles created in MaybeAppendNavigationThrottles().
   void NotifyPageActivationComputed(
       content::NavigationHandle* navigation_handle,
-      ActivationDecision activation_decision,
-      const ActivationState& activation_state);
+      const mojom::ActivationState& activation_state);
 
+  // Called in WillStartRequest or WillRedirectRequest stage from a
+  // SubframeNavigationFilteringThrottle.
   void NotifySubframeNavigationEvaluated(
       content::NavigationHandle* navigation_handle,
-      LoadPolicy load_policy);
+      LoadPolicy load_policy,
+      bool is_ad_subframe);
+
+  // Called in TODO to notify observers that an ad frame has been detected
+  // with the associated RenderFrameHost.
+  void NotifyAdSubframeDetected(content::RenderFrameHost* render_frame_host);
 
  private:
-  base::ObserverList<SubresourceFilterObserver> observers_;
+  base::ObserverList<SubresourceFilterObserver>::Unchecked observers_;
   DISALLOW_COPY_AND_ASSIGN(SubresourceFilterObserverManager);
 };
 

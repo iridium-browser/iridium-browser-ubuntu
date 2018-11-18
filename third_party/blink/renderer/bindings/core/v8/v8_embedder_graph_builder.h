@@ -19,19 +19,25 @@ class V8EmbedderGraphBuilder : public ScriptWrappableVisitor,
 
   V8EmbedderGraphBuilder(v8::Isolate*, Graph*);
 
-  static void BuildEmbedderGraphCallback(v8::Isolate*, v8::EmbedderGraph*);
+  static void BuildEmbedderGraphCallback(v8::Isolate*,
+                                         v8::EmbedderGraph*,
+                                         void* data);
   void BuildEmbedderGraph();
 
   // v8::PersistentHandleVisitor override.
   void VisitPersistentHandle(v8::Persistent<v8::Value>*,
                              uint16_t class_id) override;
 
+  // Visitor overrides.
+  void Visit(const TraceWrapperV8Reference<v8::Value>&) final;
+  void VisitWithWrappers(void*, TraceDescriptor) final;
+  void Visit(DOMWrapperMap<ScriptWrappable>*, const ScriptWrappable*) final;
+  void VisitBackingStoreStrongly(void* object,
+                                 void** object_slot,
+                                 TraceDescriptor desc) final;
+
  protected:
-  // ScriptWrappableVisitor overrides.
-  void Visit(const TraceWrapperV8Reference<v8::Value>&) const final;
-  void Visit(const TraceWrapperDescriptor&) const final;
-  void Visit(DOMWrapperMap<ScriptWrappable>*,
-             const ScriptWrappable*) const final;
+  using Visitor::Visit;
 
  private:
   // Information about whether a node is attached to the main DOM tree
@@ -89,7 +95,7 @@ class V8EmbedderGraphBuilder : public ScriptWrappableVisitor,
     explicit EmbedderRootNode(const char* name)
         : EmbedderNode(name, nullptr, DomTreeState::kUnknown) {}
     // Graph::Node override.
-    bool IsRootNode() { return true; }
+    bool IsRootNode() override { return true; }
   };
 
   class ParentScope {
@@ -110,11 +116,10 @@ class V8EmbedderGraphBuilder : public ScriptWrappableVisitor,
   struct WorklistItem {
     EmbedderNode* node;
     Traceable traceable;
-    TraceWrappersCallback trace_wrappers_callback;
+    TraceCallback trace_callback;
   };
 
-  WorklistItem ToWorklistItem(EmbedderNode*,
-                              const TraceWrapperDescriptor&) const;
+  WorklistItem ToWorklistItem(EmbedderNode*, const TraceDescriptor&) const;
 
   Graph::Node* GraphNode(const v8::Local<v8::Value>&) const;
   EmbedderNode* GraphNode(Traceable,

@@ -19,12 +19,14 @@
 #include "third_party/blink/renderer/core/execution_context/security_context.h"
 #include "third_party/blink/renderer/core/exported/web_view_impl.h"
 #include "third_party/blink/renderer/core/frame/csp/content_security_policy.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/frame/remote_frame_client_impl.h"
 #include "third_party/blink/renderer/core/frame/remote_frame_owner.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
 #include "third_party/blink/renderer/core/fullscreen/fullscreen.h"
+#include "third_party/blink/renderer/core/fullscreen/fullscreen_options.h"
 #include "third_party/blink/renderer/core/html/html_frame_owner_element.h"
 #include "third_party/blink/renderer/core/layout/layout_object.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
@@ -33,7 +35,6 @@
 #include "third_party/blink/renderer/core/timing/dom_window_performance.h"
 #include "third_party/blink/renderer/core/timing/window_performance.h"
 #include "third_party/blink/renderer/platform/bindings/dom_wrapper_world.h"
-#include "third_party/blink/renderer/platform/feature_policy/feature_policy.h"
 #include "third_party/blink/renderer/platform/geometry/float_quad.h"
 #include "third_party/blink/renderer/platform/geometry/layout_rect.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
@@ -45,7 +46,7 @@ namespace {
 FloatRect DeNormalizeRect(const WebFloatRect& normalized, const IntRect& base) {
   FloatRect result = normalized;
   result.Scale(base.Width(), base.Height());
-  result.MoveBy(base.Location());
+  result.MoveBy(FloatPoint(base.Location()));
   return result;
 }
 }  // namespace
@@ -140,7 +141,7 @@ WebLocalFrame* WebRemoteFrameImpl::CreateLocalChild(
     WebTreeScopeType scope,
     const WebString& name,
     WebSandboxFlags sandbox_flags,
-    WebFrameClient* client,
+    WebLocalFrameClient* client,
     blink::InterfaceRegistry* interface_registry,
     WebFrame* previous_sibling,
     const ParsedFeaturePolicy& container_policy,
@@ -182,11 +183,11 @@ WebRemoteFrame* WebRemoteFrameImpl::CreateRemoteChild(
   return child;
 }
 
-void WebRemoteFrameImpl::SetWebLayer(WebLayer* layer) {
-  if (!GetFrame())
-    return;
-
-  GetFrame()->SetWebLayer(layer);
+void WebRemoteFrameImpl::SetCcLayer(cc::Layer* layer,
+                                    bool prevent_contents_opaque_changes,
+                                    bool is_surface_layer) {
+  GetFrame()->SetCcLayer(layer, prevent_contents_opaque_changes,
+                         is_surface_layer);
 }
 
 void WebRemoteFrameImpl::SetCoreFrame(RemoteFrame* frame) {
@@ -203,12 +204,13 @@ WebRemoteFrameImpl* WebRemoteFrameImpl::FromFrame(RemoteFrame& frame) {
 
 void WebRemoteFrameImpl::SetReplicatedOrigin(
     const WebSecurityOrigin& origin,
-    bool is_potentially_trustworthy_unique_origin) {
+    bool is_potentially_trustworthy_opaque_origin) {
   DCHECK(GetFrame());
   scoped_refptr<SecurityOrigin> security_origin = origin.Get()->IsolatedCopy();
-  security_origin->SetUniqueOriginIsPotentiallyTrustworthy(
-      is_potentially_trustworthy_unique_origin);
+  security_origin->SetOpaqueOriginIsPotentiallyTrustworthy(
+      is_potentially_trustworthy_opaque_origin);
   GetFrame()->GetSecurityContext()->SetReplicatedOrigin(security_origin);
+  ApplyReplicatedFeaturePolicyHeader();
 
   // If the origin of a remote frame changed, the accessibility object for the
   // owner element now points to a different child.
@@ -239,6 +241,11 @@ void WebRemoteFrameImpl::SetReplicatedName(const WebString& name) {
 
 void WebRemoteFrameImpl::SetReplicatedFeaturePolicyHeader(
     const ParsedFeaturePolicy& parsed_header) {
+  feature_policy_header_ = parsed_header;
+  ApplyReplicatedFeaturePolicyHeader();
+}
+
+void WebRemoteFrameImpl::ApplyReplicatedFeaturePolicyHeader() {
   FeaturePolicy* parent_feature_policy = nullptr;
   if (Parent()) {
     Frame* parent_frame = GetFrame()->Client()->Parent();
@@ -249,7 +256,7 @@ void WebRemoteFrameImpl::SetReplicatedFeaturePolicyHeader(
   if (GetFrame()->Owner())
     container_policy = GetFrame()->Owner()->ContainerPolicy();
   GetFrame()->GetSecurityContext()->InitializeFeaturePolicy(
-      parsed_header, container_policy, parent_feature_policy);
+      feature_policy_header_, container_policy, parent_feature_policy);
 }
 
 void WebRemoteFrameImpl::AddReplicatedContentSecurityPolicyHeader(
@@ -305,11 +312,7 @@ void WebRemoteFrameImpl::DidStopLoading() {
 }
 
 bool WebRemoteFrameImpl::IsIgnoredForHitTest() const {
-  HTMLFrameOwnerElement* owner = GetFrame()->DeprecatedLocalOwner();
-  if (!owner || !owner->GetLayoutObject())
-    return false;
-  return owner->GetLayoutObject()->Style()->PointerEvents() ==
-         EPointerEvents::kNone;
+  return GetFrame()->IsIgnoredForHitTest();
 }
 
 void WebRemoteFrameImpl::WillEnterFullscreen() {
@@ -330,14 +333,20 @@ void WebRemoteFrameImpl::WillEnterFullscreen() {
   // future, this should plumb in information about which request type
   // (prefixed or unprefixed) to use for firing fullscreen events.
   Fullscreen::RequestFullscreen(
-      *owner_element,
+      *owner_element, FullscreenOptions(),
       Fullscreen::RequestType::kPrefixedForCrossProcessDescendant);
 }
 
-void WebRemoteFrameImpl::SetHasReceivedUserGesture() {
-  RemoteFrame* frame = GetFrame();
-  if (frame)
-    frame->NotifyUserActivationInLocalTree();
+void WebRemoteFrameImpl::UpdateUserActivationState(
+    UserActivationUpdateType update_type) {
+  switch (update_type) {
+    case UserActivationUpdateType::kNotifyActivation:
+      GetFrame()->NotifyUserActivationInLocalTree();
+      break;
+    case UserActivationUpdateType::kConsumeTransientActivation:
+      GetFrame()->ConsumeTransientUserActivationInLocalTree();
+      break;
+  }
 }
 
 void WebRemoteFrameImpl::ScrollRectToVisible(
@@ -379,7 +388,7 @@ void WebRemoteFrameImpl::ScrollRectToVisible(
   IntRect rect_in_document =
       view_impl->MainFrameImpl()->GetFrame()->View()->RootFrameToDocument(
           EnclosingIntRect(
-              owner_element->GetDocument().View()->AbsoluteToRootFrame(
+              owner_element->GetDocument().View()->ConvertToRootFrame(
                   absolute_rect)));
   IntRect element_bounds_in_document = EnclosingIntRect(
       DeNormalizeRect(params.relative_element_bounds, rect_in_document));
@@ -387,6 +396,16 @@ void WebRemoteFrameImpl::ScrollRectToVisible(
       DeNormalizeRect(params.relative_caret_bounds, rect_in_document));
   view_impl->ZoomAndScrollToFocusedEditableElementRect(
       element_bounds_in_document, caret_bounds_in_document, true);
+}
+
+void WebRemoteFrameImpl::BubbleLogicalScroll(WebScrollDirection direction,
+                                             WebScrollGranularity granularity) {
+  Frame* parent_frame = GetFrame()->Tree().Parent();
+  DCHECK(parent_frame);
+  DCHECK(parent_frame->IsLocalFrame());
+
+  parent_frame->BubbleLogicalScrollFromChildFrame(direction, granularity,
+                                                  GetFrame());
 }
 
 void WebRemoteFrameImpl::IntrinsicSizingInfoChanged(

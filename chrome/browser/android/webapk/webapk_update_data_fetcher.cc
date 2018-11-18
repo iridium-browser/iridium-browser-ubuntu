@@ -9,14 +9,19 @@
 
 #include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
+#include "base/strings/stringprintf.h"
+#include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/android/color_helpers.h"
 #include "chrome/browser/android/shortcut_helper.h"
 #include "chrome/browser/android/webapk/webapk_icon_hasher.h"
 #include "chrome/browser/android/webapk/webapk_web_manifest_checker.h"
 #include "chrome/browser/installable/installable_manager.h"
 #include "chrome/browser/profiles/profile.h"
+#include "content/public/browser/browser_context.h"
+#include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/manifest.h"
 #include "jni/WebApkUpdateDataFetcher_jni.h"
+#include "third_party/blink/public/common/manifest/manifest.h"
 #include "third_party/smhasher/src/MurmurHash2.h"
 #include "ui/gfx/android/java_bitmap.h"
 #include "ui/gfx/codec/png_codec.h"
@@ -151,7 +156,10 @@ void WebApkUpdateDataFetcher::OnDidGetInstallableData(
       Profile::FromBrowserContext(web_contents()->GetBrowserContext());
 
   WebApkIconHasher::DownloadAndComputeMurmur2Hash(
-      profile->GetRequestContext(), info_.best_primary_icon_url,
+      content::BrowserContext::GetDefaultStoragePartition(profile)
+          ->GetURLLoaderFactoryForBrowserProcess()
+          .get(),
+      info_.best_primary_icon_url,
       base::Bind(&WebApkUpdateDataFetcher::OnGotPrimaryIconMurmur2Hash,
                  weak_ptr_factory_.GetWeakPtr()));
 }
@@ -167,7 +175,10 @@ void WebApkUpdateDataFetcher::OnGotPrimaryIconMurmur2Hash(
         Profile::FromBrowserContext(web_contents()->GetBrowserContext());
 
     WebApkIconHasher::DownloadAndComputeMurmur2Hash(
-        profile->GetRequestContext(), info_.best_badge_icon_url,
+        content::BrowserContext::GetDefaultStoragePartition(profile)
+            ->GetURLLoaderFactoryForBrowserProcess()
+            .get(),
+        info_.best_badge_icon_url,
         base::Bind(&WebApkUpdateDataFetcher::OnDataAvailable,
                    weak_ptr_factory_.GetWeakPtr(), primary_icon_murmur2_hash,
                    true));
@@ -197,26 +208,41 @@ void WebApkUpdateDataFetcher::OnDataAvailable(
       base::android::ConvertUTF8ToJavaString(
           env, info_.best_primary_icon_url.spec());
   ScopedJavaLocalRef<jstring> java_primary_icon_murmur2_hash =
-      base::android::ConvertUTF8ToJavaString(env,
-                                             primary_icon_murmur2_hash);
+      base::android::ConvertUTF8ToJavaString(env, primary_icon_murmur2_hash);
   ScopedJavaLocalRef<jobject> java_primary_icon =
       gfx::ConvertToJavaBitmap(&primary_icon_);
   ScopedJavaLocalRef<jstring> java_badge_icon_url =
       base::android::ConvertUTF8ToJavaString(env,
                                              info_.best_badge_icon_url.spec());
   ScopedJavaLocalRef<jstring> java_badge_icon_murmur2_hash =
-      base::android::ConvertUTF8ToJavaString(env,
-                                             badge_icon_murmur2_hash);
+      base::android::ConvertUTF8ToJavaString(env, badge_icon_murmur2_hash);
   ScopedJavaLocalRef<jobject> java_badge_icon;
   if (!badge_icon_.drawsNothing())
-      java_badge_icon = gfx::ConvertToJavaBitmap(&badge_icon_);
+    java_badge_icon = gfx::ConvertToJavaBitmap(&badge_icon_);
   ScopedJavaLocalRef<jobjectArray> java_icon_urls =
       base::android::ToJavaArrayOfStrings(env, info_.icon_urls);
 
+  ScopedJavaLocalRef<jstring> java_share_action;
+  ScopedJavaLocalRef<jstring> java_share_params_title;
+  ScopedJavaLocalRef<jstring> java_share_params_text;
+  ScopedJavaLocalRef<jstring> java_share_params_url;
+  if (info_.share_target.has_value()) {
+    java_share_action = base::android::ConvertUTF8ToJavaString(
+        env, info_.share_target->action.spec());
+    java_share_params_title = base::android::ConvertUTF16ToJavaString(
+        env, info_.share_target->params.title);
+    java_share_params_text = base::android::ConvertUTF16ToJavaString(
+        env, info_.share_target->params.text);
+    java_share_params_url = base::android::ConvertUTF16ToJavaString(
+        env, info_.share_target->params.url);
+  }
+
   Java_WebApkUpdateDataFetcher_onDataAvailable(
       env, java_ref_, java_url, java_scope, java_name, java_short_name,
-      java_primary_icon_url, java_primary_icon_murmur2_hash,
-      java_primary_icon, java_badge_icon_url, java_badge_icon_murmur2_hash,
-      java_badge_icon, java_icon_urls, info_.display, info_.orientation,
-      info_.theme_color, info_.background_color);
+      java_primary_icon_url, java_primary_icon_murmur2_hash, java_primary_icon,
+      java_badge_icon_url, java_badge_icon_murmur2_hash, java_badge_icon,
+      java_icon_urls, info_.display, info_.orientation,
+      OptionalSkColorToJavaColor(info_.theme_color),
+      OptionalSkColorToJavaColor(info_.background_color), java_share_action,
+      java_share_params_title, java_share_params_text, java_share_params_url);
 }

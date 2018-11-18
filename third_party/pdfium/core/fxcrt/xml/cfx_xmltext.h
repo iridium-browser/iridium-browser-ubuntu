@@ -7,10 +7,10 @@
 #ifndef CORE_FXCRT_XML_CFX_XMLTEXT_H_
 #define CORE_FXCRT_XML_CFX_XMLTEXT_H_
 
-#include <memory>
-
 #include "core/fxcrt/fx_string.h"
 #include "core/fxcrt/xml/cfx_xmlnode.h"
+
+class CFX_XMLDocument;
 
 class CFX_XMLText : public CFX_XMLNode {
  public:
@@ -19,8 +19,8 @@ class CFX_XMLText : public CFX_XMLNode {
 
   // CFX_XMLNode
   FX_XMLNODETYPE GetType() const override;
-  std::unique_ptr<CFX_XMLNode> Clone() override;
-  void Save(const RetainPtr<CFX_SeekableStreamProxy>& pXMLStream) override;
+  CFX_XMLNode* Clone(CFX_XMLDocument* doc) override;
+  void Save(const RetainPtr<IFX_SeekableWriteStream>& pXMLStream) override;
 
   WideString GetText() const { return m_wsText; }
   void SetText(const WideString& wsText) { m_wsText = wsText; }
@@ -28,5 +28,19 @@ class CFX_XMLText : public CFX_XMLNode {
  private:
   WideString m_wsText;
 };
+
+inline bool IsXMLText(const CFX_XMLNode* pNode) {
+  FX_XMLNODETYPE type = pNode->GetType();
+  return type == FX_XMLNODE_Text || type == FX_XMLNODE_CharData;
+}
+
+inline CFX_XMLText* ToXMLText(CFX_XMLNode* pNode) {
+  return pNode && IsXMLText(pNode) ? static_cast<CFX_XMLText*>(pNode) : nullptr;
+}
+
+inline const CFX_XMLText* ToXMLText(const CFX_XMLNode* pNode) {
+  return pNode && IsXMLText(pNode) ? static_cast<const CFX_XMLText*>(pNode)
+                                   : nullptr;
+}
 
 #endif  // CORE_FXCRT_XML_CFX_XMLTEXT_H_

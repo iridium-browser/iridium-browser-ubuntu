@@ -20,6 +20,9 @@ UkmRecorder::~UkmRecorder() = default;
 
 // static
 UkmRecorder* UkmRecorder::Get() {
+  // Note that SourceUrlRecorderWebContentsObserver assumes that
+  // DelegatingUkmRecorder::Get() is the canonical UkmRecorder instance. If this
+  // changes, SourceUrlRecorderWebContentsObserver should be updated to match.
   return DelegatingUkmRecorder::Get();
 }
 
@@ -28,12 +31,12 @@ ukm::SourceId UkmRecorder::GetNewSourceID() {
   return AssignNewSourceId();
 }
 
-std::unique_ptr<UkmEntryBuilder> UkmRecorder::GetEntryBuilder(
-    ukm::SourceId source_id,
-    const char* event_name) {
-  return std::make_unique<UkmEntryBuilder>(
-      base::Bind(&UkmRecorder::AddEntry, base::Unretained(this)), source_id,
-      event_name);
+void UkmRecorder::RecordOtherURL(base::UkmSourceId source_id, const GURL& url) {
+  UpdateSourceURL(source_id.ToInt64(), url);
+}
+
+void UkmRecorder::RecordAppURL(base::UkmSourceId source_id, const GURL& url) {
+  UpdateAppURL(source_id.ToInt64(), url);
 }
 
 }  // namespace ukm

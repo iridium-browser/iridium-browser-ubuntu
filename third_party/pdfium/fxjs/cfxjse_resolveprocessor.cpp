@@ -12,6 +12,7 @@
 
 #include "core/fxcrt/fx_extension.h"
 #include "fxjs/cfxjse_engine.h"
+#include "fxjs/cfxjse_value.h"
 #include "fxjs/xfa/cjx_object.h"
 #include "third_party/base/ptr_util.h"
 #include "third_party/base/stl_util.h"
@@ -25,7 +26,7 @@
 #include "xfa/fxfa/parser/xfa_utils.h"
 
 CFXJSE_ResolveProcessor::CFXJSE_ResolveProcessor()
-    : m_iCurStart(0), m_pNodeHelper(pdfium::MakeUnique<CXFA_NodeHelper>()) {}
+    : m_pNodeHelper(pdfium::MakeUnique<CXFA_NodeHelper>()) {}
 
 CFXJSE_ResolveProcessor::~CFXJSE_ResolveProcessor() {}
 
@@ -179,7 +180,7 @@ bool CFXJSE_ResolveProcessor::ResolveNumberSign(CFXJSE_ResolveNodeData& rnd) {
   rndFind.m_dwStyles = rnd.m_dwStyles;
   rndFind.m_dwStyles |= XFA_RESOLVENODE_TagName;
   rndFind.m_dwStyles &= ~XFA_RESOLVENODE_Attributes;
-  rndFind.m_wsName = wsName;
+  rndFind.m_wsName = std::move(wsName);
   rndFind.m_uHashName = static_cast<XFA_HashCode>(
       FX_HashCode_GetW(rndFind.m_wsName.AsStringView(), false));
   rndFind.m_wsCondition = wsCondition;
@@ -255,10 +256,9 @@ bool CFXJSE_ResolveProcessor::ResolveNormal(CFXJSE_ResolveNodeData& rnd) {
     } else {
       rndFind.m_CurObject = pVariablesNode;
       SetStylesForChild(dwStyles, rndFind);
-      WideString wsSaveCondition = rndFind.m_wsCondition;
-      rndFind.m_wsCondition.clear();
+      WideString wsSaveCondition = std::move(rndFind.m_wsCondition);
       ResolveNormal(rndFind);
-      rndFind.m_wsCondition = wsSaveCondition;
+      rndFind.m_wsCondition = std::move(wsSaveCondition);
       rnd.m_Objects.insert(rnd.m_Objects.end(), rndFind.m_Objects.begin(),
                            rndFind.m_Objects.end());
       rndFind.m_Objects.clear();
@@ -290,11 +290,9 @@ bool CFXJSE_ResolveProcessor::ResolveNormal(CFXJSE_ResolveNodeData& rnd) {
         }
         rndFind.m_CurObject = child;
 
-        WideString wsSaveCondition = rndFind.m_wsCondition;
-        rndFind.m_wsCondition.clear();
+        WideString wsSaveCondition = std::move(rndFind.m_wsCondition);
         ResolveNormal(rndFind);
-
-        rndFind.m_wsCondition = wsSaveCondition;
+        rndFind.m_wsCondition = std::move(wsSaveCondition);
         rnd.m_Objects.insert(rnd.m_Objects.end(), rndFind.m_Objects.begin(),
                              rndFind.m_Objects.end());
         rndFind.m_Objects.clear();
@@ -425,15 +423,12 @@ bool CFXJSE_ResolveProcessor::ResolveNormal(CFXJSE_ResolveNodeData& rnd) {
       }
       if (bInnerSearch) {
         rndFind.m_CurObject = child;
-        WideString wsOriginCondition = rndFind.m_wsCondition;
-        rndFind.m_wsCondition.clear();
-
+        WideString wsOriginCondition = std::move(rndFind.m_wsCondition);
         uint32_t dwOriginStyle = rndFind.m_dwStyles;
         rndFind.m_dwStyles = dwOriginStyle | XFA_RESOLVENODE_ALL;
         ResolveNormal(rndFind);
-
         rndFind.m_dwStyles = dwOriginStyle;
-        rndFind.m_wsCondition = wsOriginCondition;
+        rndFind.m_wsCondition = std::move(wsOriginCondition);
         rnd.m_Objects.insert(rnd.m_Objects.end(), rndFind.m_Objects.begin(),
                              rndFind.m_Objects.end());
         rndFind.m_Objects.clear();
@@ -499,66 +494,69 @@ int32_t CFXJSE_ResolveProcessor::GetFilter(const WideStringView& wsExpression,
 
   WideString& wsName = rnd.m_wsName;
   WideString& wsCondition = rnd.m_wsCondition;
-  wchar_t* pNameBuf = wsName.GetBuffer(iLength - nStart);
-  wchar_t* pConditionBuf = wsCondition.GetBuffer(iLength - nStart);
   int32_t nNameCount = 0;
   int32_t nConditionCount = 0;
-  std::vector<int32_t> stack;
-  int32_t nType = -1;
-  const wchar_t* pSrc = wsExpression.unterminated_c_str();
-  wchar_t wPrev = 0;
-  wchar_t wCur;
-  bool bIsCondition = false;
-  while (nStart < iLength) {
-    wCur = pSrc[nStart++];
-    if (wCur == '.') {
-      if (wPrev == '\\') {
-        pNameBuf[nNameCount - 1] = wPrev = '.';
-        continue;
-      }
-      if (nNameCount == 0) {
-        rnd.m_dwStyles |= XFA_RESOLVENODE_AnyChild;
-        continue;
-      }
+  {
+    // Span's lifetime must end before ReleaseBuffer() below.
+    pdfium::span<wchar_t> pNameBuf = wsName.GetBuffer(iLength - nStart);
+    pdfium::span<wchar_t> pConditionBuf =
+        wsCondition.GetBuffer(iLength - nStart);
+    std::vector<int32_t> stack;
+    int32_t nType = -1;
+    const wchar_t* pSrc = wsExpression.unterminated_c_str();
+    wchar_t wPrev = 0;
+    wchar_t wCur;
+    bool bIsCondition = false;
+    while (nStart < iLength) {
+      wCur = pSrc[nStart++];
+      if (wCur == '.') {
+        if (wPrev == '\\') {
+          pNameBuf[nNameCount - 1] = wPrev = '.';
+          continue;
+        }
+        if (nNameCount == 0) {
+          rnd.m_dwStyles |= XFA_RESOLVENODE_AnyChild;
+          continue;
+        }
 
-      wchar_t wLookahead = nStart < iLength ? pSrc[nStart] : 0;
-      if (wLookahead != '[' && wLookahead != '(' && nType < 0)
-        break;
-    }
-    if (wCur == '[' || wCur == '(') {
-      bIsCondition = true;
-    } else if (wCur == '.' && nStart < iLength &&
-               (pSrc[nStart] == '[' || pSrc[nStart] == '(')) {
-      bIsCondition = true;
-    }
-    if (bIsCondition)
-      pConditionBuf[nConditionCount++] = wCur;
-    else
-      pNameBuf[nNameCount++] = wCur;
+        wchar_t wLookahead = nStart < iLength ? pSrc[nStart] : 0;
+        if (wLookahead != '[' && wLookahead != '(' && nType < 0)
+          break;
+      }
+      if (wCur == '[' || wCur == '(') {
+        bIsCondition = true;
+      } else if (wCur == '.' && nStart < iLength &&
+                 (pSrc[nStart] == '[' || pSrc[nStart] == '(')) {
+        bIsCondition = true;
+      }
+      if (bIsCondition)
+        pConditionBuf[nConditionCount++] = wCur;
+      else
+        pNameBuf[nNameCount++] = wCur;
 
-    if ((nType == 0 && wCur == ']') || (nType == 1 && wCur == ')') ||
-        (nType == 2 && wCur == '"')) {
-      nType = stack.empty() ? -1 : stack.back();
-      if (!stack.empty())
-        stack.pop_back();
-    } else if (wCur == '[') {
-      stack.push_back(nType);
-      nType = 0;
-    } else if (wCur == '(') {
-      stack.push_back(nType);
-      nType = 1;
-    } else if (wCur == '"') {
-      stack.push_back(nType);
-      nType = 2;
+      if ((nType == 0 && wCur == ']') || (nType == 1 && wCur == ')') ||
+          (nType == 2 && wCur == '"')) {
+        nType = stack.empty() ? -1 : stack.back();
+        if (!stack.empty())
+          stack.pop_back();
+      } else if (wCur == '[') {
+        stack.push_back(nType);
+        nType = 0;
+      } else if (wCur == '(') {
+        stack.push_back(nType);
+        nType = 1;
+      } else if (wCur == '"') {
+        stack.push_back(nType);
+        nType = 2;
+      }
+      wPrev = wCur;
     }
-    wPrev = wCur;
+    if (!stack.empty())
+      return -1;
   }
-  if (!stack.empty())
-    return -1;
-
   wsName.ReleaseBuffer(nNameCount);
-  wsName.Trim();
   wsCondition.ReleaseBuffer(nConditionCount);
+  wsName.Trim();
   wsCondition.Trim();
   rnd.m_uHashName =
       static_cast<XFA_HashCode>(FX_HashCode_GetW(wsName.AsStringView(), false));

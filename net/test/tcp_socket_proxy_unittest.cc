@@ -12,6 +12,7 @@
 #include "net/socket/tcp_client_socket.h"
 #include "net/socket/tcp_server_socket.h"
 #include "net/test/gtest_util.h"
+#include "net/test/test_with_scoped_task_environment.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -20,7 +21,7 @@ using net::test::IsOk;
 
 namespace net {
 
-class TcpSocketProxyTest : public testing::Test {
+class TcpSocketProxyTest : public TestWithScopedTaskEnvironment {
  public:
   TcpSocketProxyTest() : io_thread_("TcpSocketProxyTest IO Thread") {
     EXPECT_TRUE(io_thread_.StartWithOptions(
@@ -68,14 +69,15 @@ class TcpSocketProxyTest : public testing::Test {
     // Read().
     char test_message = '0';
 
-    scoped_refptr<IOBuffer> write_buffer = new IOBuffer(1);
+    scoped_refptr<IOBuffer> write_buffer = base::MakeRefCounted<IOBuffer>(1);
     *write_buffer->data() = test_message;
     TestCompletionCallback write_callback;
     int write_result =
         socket1->Write(write_buffer.get(), 1, write_callback.callback(),
                        TRAFFIC_ANNOTATION_FOR_TESTS);
 
-    scoped_refptr<IOBufferWithSize> read_buffer(new IOBufferWithSize(1024));
+    scoped_refptr<IOBufferWithSize> read_buffer =
+        base::MakeRefCounted<IOBufferWithSize>(1024);
     TestCompletionCallback read_callback;
     int read_result = socket2->Read(read_buffer.get(), read_buffer->size(),
                                     read_callback.callback());
@@ -87,7 +89,8 @@ class TcpSocketProxyTest : public testing::Test {
   }
 
   void ExpectClosed(StreamSocket* socket) {
-    scoped_refptr<IOBufferWithSize> read_buffer(new IOBufferWithSize(1024));
+    scoped_refptr<IOBufferWithSize> read_buffer =
+        base::MakeRefCounted<IOBufferWithSize>(1024);
     TestCompletionCallback read_callback;
     int read_result = socket->Read(read_buffer.get(), read_buffer->size(),
                                    read_callback.callback());
@@ -104,6 +107,8 @@ class TcpSocketProxyTest : public testing::Test {
   std::unique_ptr<TCPServerSocket> listen_socket_;
 
   std::unique_ptr<TcpSocketProxy> proxy_;
+
+ private:
   IPEndPoint proxy_address_;
 };
 

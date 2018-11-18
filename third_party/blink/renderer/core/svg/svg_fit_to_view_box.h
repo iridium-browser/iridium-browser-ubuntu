@@ -36,7 +36,7 @@ class QualifiedName;
 class SVGFitToViewBox : public GarbageCollectedMixin {
  public:
   static AffineTransform ViewBoxToViewTransform(const FloatRect& view_box_rect,
-                                                SVGPreserveAspectRatio*,
+                                                const SVGPreserveAspectRatio*,
                                                 float view_width,
                                                 float view_height);
 
@@ -54,7 +54,7 @@ class SVGFitToViewBox : public GarbageCollectedMixin {
     return preserve_aspect_ratio_.Get();
   }
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  protected:
   explicit SVGFitToViewBox(SVGElement*);

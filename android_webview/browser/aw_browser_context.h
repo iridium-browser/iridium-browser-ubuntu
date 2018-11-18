@@ -19,14 +19,12 @@
 #include "components/visitedlink/browser/visitedlink_delegate.h"
 #include "components/web_restrictions/browser/web_restrictions_client.h"
 #include "content/public/browser/browser_context.h"
-#include "content/public/browser/content_browser_client.h"
-#include "net/url_request/url_request_job_factory.h"
 
 class GURL;
 class PrefService;
 
 namespace content {
-class PermissionManager;
+class PermissionControllerDelegate;
 class ResourceContext;
 class SSLHostStateDelegate;
 class WebContents;
@@ -67,7 +65,10 @@ extern const char kWebRestrictionsAuthority[];
 class AwBrowserContext : public content::BrowserContext,
                          public visitedlink::VisitedLinkDelegate {
  public:
-  AwBrowserContext(const base::FilePath path);
+  AwBrowserContext(
+      const base::FilePath path,
+      std::unique_ptr<PrefService> pref_service,
+      std::unique_ptr<policy::BrowserPolicyConnectorBase> policy_connector);
   ~AwBrowserContext() override;
 
   // Currently only one instance per process is supported.
@@ -92,6 +93,7 @@ class AwBrowserContext : public content::BrowserContext,
 
   // content::BrowserContext implementation.
   base::FilePath GetPath() const override;
+  base::FilePath GetCachePath() const override;
   bool IsOffTheRecord() const override;
   content::ResourceContext* GetResourceContext() override;
   content::DownloadManagerDelegate* GetDownloadManagerDelegate() override;
@@ -99,7 +101,8 @@ class AwBrowserContext : public content::BrowserContext,
   storage::SpecialStoragePolicy* GetSpecialStoragePolicy() override;
   content::PushMessagingService* GetPushMessagingService() override;
   content::SSLHostStateDelegate* GetSSLHostStateDelegate() override;
-  content::PermissionManager* GetPermissionManager() override;
+  content::PermissionControllerDelegate* GetPermissionControllerDelegate()
+      override;
   content::BackgroundFetchDelegate* GetBackgroundFetchDelegate() override;
   content::BackgroundSyncController* GetBackgroundSyncController() override;
   content::BrowsingDataRemoverDelegate* GetBrowsingDataRemoverDelegate()
@@ -126,7 +129,6 @@ class AwBrowserContext : public content::BrowserContext,
   AwSafeBrowsingWhitelistManager* GetSafeBrowsingWhitelistManager() const;
 
  private:
-  void InitUserPrefService();
   void OnWebRestrictionsAuthorityChanged();
 
   // The file path where data for this context is persisted.
@@ -142,7 +144,7 @@ class AwBrowserContext : public content::BrowserContext,
   std::unique_ptr<PrefService> user_pref_service_;
   std::unique_ptr<policy::BrowserPolicyConnectorBase> browser_policy_connector_;
   std::unique_ptr<AwSSLHostStateDelegate> ssl_host_state_delegate_;
-  std::unique_ptr<content::PermissionManager> permission_manager_;
+  std::unique_ptr<content::PermissionControllerDelegate> permission_manager_;
   std::unique_ptr<web_restrictions::WebRestrictionsClient>
       web_restriction_provider_;
   PrefChangeRegistrar pref_change_registrar_;

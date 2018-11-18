@@ -19,12 +19,17 @@ class TablePainter {
  public:
   TablePainter(const LayoutTable& layout_table) : layout_table_(layout_table) {}
 
-  void PaintObject(const PaintInfo&, const LayoutPoint&);
-  void PaintBoxDecorationBackground(const PaintInfo&, const LayoutPoint&);
-  void PaintMask(const PaintInfo&, const LayoutPoint&);
+  void PaintObject(const PaintInfo&, const LayoutPoint& paint_offset);
+  void PaintBoxDecorationBackground(const PaintInfo&,
+                                    const LayoutPoint& paint_offset);
+  void PaintMask(const PaintInfo&, const LayoutPoint& paint_offset);
 
  private:
-  void PaintCollapsedBorders(const PaintInfo&, const LayoutPoint&);
+  void PaintCollapsedBorders(const PaintInfo&);
+  // Paint a hit test display item and record hit test data. This should be
+  // called in the background paint phase even if there is no other painted
+  // content.
+  void RecordHitTestData(const PaintInfo&, const LayoutPoint& paint_offset);
 
   const LayoutTable& layout_table_;
 };

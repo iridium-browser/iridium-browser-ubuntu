@@ -14,7 +14,6 @@
 #include "base/strings/string_util.h"
 #include "base/values.h"
 #include "components/grit/components_resources.h"
-#include "components/net_log/chrome_net_log.h"
 #include "components/net_log/net_export_file_writer.h"
 #include "components/net_log/net_export_ui_constants.h"
 #include "ios/chrome/browser/application_context.h"
@@ -79,8 +78,8 @@ class NetExportMessageHandler
   void NotifyUIWithState(
       std::unique_ptr<base::DictionaryValue> file_writer_state);
 
-  // Cache of GetApplicationContex()->GetNetLog()->net_export_file_writer().
-  // This is owned by ChromeNetLog which is owned by BrowserProcessImpl.
+  // Cache of GetApplicationContext()->GetNetExportFileWriter().
+  // This is owned by the ApplicationContext.
   net_log::NetExportFileWriter* file_writer_;
 
   ScopedObserver<net_log::NetExportFileWriter,
@@ -93,16 +92,14 @@ class NetExportMessageHandler
 };
 
 NetExportMessageHandler::NetExportMessageHandler()
-    : file_writer_(
-          GetApplicationContext()->GetNetLog()->net_export_file_writer()),
+    : file_writer_(GetApplicationContext()->GetNetExportFileWriter()),
       state_observer_manager_(this),
       weak_ptr_factory_(this) {
-  file_writer_->Initialize(
-      web::WebThread::GetTaskRunnerForThread(web::WebThread::IO));
+  file_writer_->Initialize();
 }
 
 NetExportMessageHandler::~NetExportMessageHandler() {
-  file_writer_->StopNetLog(nullptr, nullptr);
+  file_writer_->StopNetLog(nullptr);
 }
 
 void NetExportMessageHandler::RegisterMessages() {
@@ -148,22 +145,24 @@ void NetExportMessageHandler::OnStartNetLog(const base::ListValue* list) {
   }
 
   // Determine the max file size.
-  size_t max_log_file_size = net_log::NetExportFileWriter::kNoLimit;
-  if (params.size() > 1 && params[1].is_int() && params[1].GetInt() > 0) {
-    max_log_file_size = params[1].GetInt();
+  uint64_t max_log_file_size = net_log::NetExportFileWriter::kNoLimit;
+  // Unlike in desktop/Android net_export_ui, the size limit here is encoded
+  // into a base::Value as a double; this is a behavior difference between
+  // ValueResultFromWKResult and V8ValueConverter[Impl]::FromV8Value[Impl].
+  if (params.size() > 1 && (params[1].is_int() || params[1].is_double()) &&
+      params[1].GetDouble() > 0.0) {
+    max_log_file_size = params[1].GetDouble();
   }
 
   file_writer_->StartNetLog(
       base::FilePath(), capture_mode, max_log_file_size,
       base::CommandLine::ForCurrentProcess()->GetCommandLineString(),
-      GetChannelString(),
-      {GetApplicationContext()->GetSystemURLRequestContext()});
+      GetChannelString(), GetApplicationContext()->GetSystemNetworkContext());
 }
 
 void NetExportMessageHandler::OnStopNetLog(const base::ListValue* list) {
   DCHECK_CURRENTLY_ON(web::WebThread::UI);
-  file_writer_->StopNetLog(
-      nullptr, GetApplicationContext()->GetSystemURLRequestContext());
+  file_writer_->StopNetLog(nullptr);
 }
 
 void NetExportMessageHandler::OnSendNetLog(const base::ListValue* list) {

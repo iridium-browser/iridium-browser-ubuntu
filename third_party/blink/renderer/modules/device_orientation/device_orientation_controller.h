@@ -5,13 +5,14 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_DEVICE_ORIENTATION_DEVICE_ORIENTATION_CONTROLLER_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_DEVICE_ORIENTATION_DEVICE_ORIENTATION_CONTROLLER_H_
 
+#include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/frame/device_single_window_event_controller.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
 
 namespace blink {
 
 class DeviceOrientationData;
-class DeviceOrientationDispatcher;
+class DeviceOrientationEventPump;
 class Event;
 
 class MODULES_EXPORT DeviceOrientationController
@@ -34,7 +35,7 @@ class MODULES_EXPORT DeviceOrientationController
   void SetOverride(DeviceOrientationData*);
   void ClearOverride();
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
   static void LogToConsolePolicyFeaturesDisabled(
       LocalFrame*,
@@ -42,11 +43,12 @@ class MODULES_EXPORT DeviceOrientationController
 
  protected:
   explicit DeviceOrientationController(Document&);
+  void RegisterWithOrientationEventPump(bool absolute);
 
-  virtual DeviceOrientationDispatcher& DispatcherInstance() const;
+  Member<DeviceOrientationEventPump> orientation_event_pump_;
 
  private:
-  // Inherited from DeviceEventControllerBase.
+  // Inherited from PlatformEventController.
   void RegisterWithDispatcher() override;
   void UnregisterWithDispatcher() override;
   bool HasLastData() override;

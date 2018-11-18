@@ -79,6 +79,7 @@ class MockDownloadItem : public DownloadItem {
   MOCK_CONST_METHOD0(GetFullPath, const base::FilePath&());
   MOCK_CONST_METHOD0(GetTargetFilePath, const base::FilePath&());
   MOCK_CONST_METHOD0(GetForcedFilePath, const base::FilePath&());
+  MOCK_CONST_METHOD0(GetTemporaryFilePath, base::FilePath());
   MOCK_CONST_METHOD0(GetFileNameToReportUser, base::FilePath());
   MOCK_CONST_METHOD0(GetTargetDisposition, TargetDisposition());
   MOCK_CONST_METHOD0(GetHash, const std::string&());
@@ -106,6 +107,7 @@ class MockDownloadItem : public DownloadItem {
   MOCK_CONST_METHOD0(GetOpened, bool());
   MOCK_CONST_METHOD0(GetLastAccessTime, base::Time());
   MOCK_CONST_METHOD0(IsTransient, bool());
+  MOCK_CONST_METHOD0(IsParallelDownload, bool());
   MOCK_METHOD2(OnContentCheckCompleted,
                void(DownloadDangerType, DownloadInterruptReason));
   MOCK_METHOD1(SetOpenWhenComplete, void(bool));
@@ -116,7 +118,7 @@ class MockDownloadItem : public DownloadItem {
   MOCK_METHOD1(SimulateErrorForTesting, void(DownloadInterruptReason));
 
  private:
-  base::ObserverList<Observer> observers_;
+  base::ObserverList<Observer>::Unchecked observers_;
 };
 
 }  // namespace download

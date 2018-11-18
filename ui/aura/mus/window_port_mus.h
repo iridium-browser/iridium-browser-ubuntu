@@ -14,25 +14,30 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/optional.h"
-#include "components/viz/client/client_layer_tree_frame_sink.h"
+#include "components/viz/common/surfaces/parent_local_surface_id_allocator.h"
 #include "components/viz/common/surfaces/surface_info.h"
-#include "services/ui/public/interfaces/cursor/cursor.mojom.h"
-#include "services/ui/public/interfaces/window_tree.mojom.h"
-#include "services/ui/public/interfaces/window_tree_constants.mojom.h"
+#include "services/ws/public/mojom/cursor/cursor.mojom.h"
+#include "services/ws/public/mojom/window_tree.mojom.h"
+#include "services/ws/public/mojom/window_tree_constants.mojom.h"
 #include "ui/aura/aura_export.h"
-#include "ui/aura/local/layer_tree_frame_sink_local.h"
 #include "ui/aura/mus/mus_types.h"
 #include "ui/aura/mus/window_mus.h"
 #include "ui/aura/window_port.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/platform_window/mojo/text_input_state.mojom.h"
 
-namespace gfx {
-class Insets;
+namespace cc {
+namespace mojo_embedder {
+class AsyncLayerTreeFrameSink;
+}
+}
+
+namespace gpu {
+class GpuMemoryBufferManager;
 }
 
 namespace viz {
-class ClientLayerTreeFrameSink;
+class ContextProvider;
 }
 
 namespace aura {
@@ -40,7 +45,6 @@ namespace aura {
 class ClientSurfaceEmbedder;
 class PropertyConverter;
 class Window;
-class WindowPortMusTest;
 class WindowTreeClient;
 class WindowTreeClientPrivate;
 class WindowTreeHostMus;
@@ -76,36 +80,32 @@ class AURA_EXPORT WindowPortMus : public WindowPort, public WindowMus {
   void SetCursor(const ui::CursorData& cursor);
 
   // Sets the EventTargetingPolicy, default is TARGET_AND_DESCENDANTS.
-  void SetEventTargetingPolicy(ui::mojom::EventTargetingPolicy policy);
+  void SetEventTargetingPolicy(ws::mojom::EventTargetingPolicy policy);
 
   // Sets whether this window can accept drops, defaults to false.
   void SetCanAcceptDrops(bool can_accept_drops);
 
-  // See description in mojom for details on this. Has no effect if not running
-  // in the window manager.
-  void SetExtendedHitRegionForChildren(const gfx::Insets& mouse_insets,
-                                       const gfx::Insets& touch_insets);
-
   // See description in mojom for details on this.
-  void SetHitTestMask(const base::Optional<gfx::Rect>& rect);
+  void SetHitTestInsets(const gfx::Insets& mouse, const gfx::Insets& touch);
 
   // Embeds a new client in this Window. See WindowTreeClient::Embed() for
   // details on arguments.
-  void Embed(ui::mojom::WindowTreeClientPtr client,
+  void Embed(ws::mojom::WindowTreeClientPtr client,
              uint32_t flags,
-             ui::mojom::WindowTree::EmbedCallback callback);
+             ws::mojom::WindowTree::EmbedCallback callback);
   void EmbedUsingToken(const base::UnguessableToken& token,
                        uint32_t flags,
-                       ui::mojom::WindowTree::EmbedCallback callback);
+                       ws::mojom::WindowTree::EmbedCallback callback);
 
-  std::unique_ptr<viz::ClientLayerTreeFrameSink> RequestLayerTreeFrameSink(
+  std::unique_ptr<cc::mojo_embedder::AsyncLayerTreeFrameSink>
+  RequestLayerTreeFrameSink(
       scoped_refptr<viz::ContextProvider> context_provider,
       gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager);
 
   viz::FrameSinkId GenerateFrameSinkIdFromServerId() const;
 
  private:
-  friend class WindowPortMusTest;
+  friend class WindowPortMusTestHelper;
   friend class WindowTreeClient;
   friend class WindowTreeClientPrivate;
   friend class WindowTreeHostMus;
@@ -115,7 +115,7 @@ class AURA_EXPORT WindowPortMus : public WindowPort, public WindowMus {
 
   // Changes to the underlying Window originating from the server must be done
   // in such a way that the same change is not applied back to the server. To
-  // accomplish this every changes from the server is associated with at least
+  // accomplish this every change from the server is associated with at least
   // one ServerChange. If the underlying Window ends up calling back to this
   // class and the change is expected then the change is ignored and not sent to
   // the server. For example, here's the flow when the server changes the
@@ -157,7 +157,7 @@ class AURA_EXPORT WindowPortMus : public WindowPort, public WindowMus {
   // Contains data needed to identify a change from the server.
   struct ServerChangeData {
     // Applies to ADD, ADD_TRANSIENT, REMOVE, REMOVE_TRANSIENT, and REORDER.
-    ui::Id child_id;
+    ws::Id child_id;
     // Applies to BOUNDS. This should be in dip.
     gfx::Rect bounds_in_dip;
     // Applies to VISIBLE.
@@ -220,6 +220,16 @@ class AURA_EXPORT WindowPortMus : public WindowPort, public WindowMus {
   ServerChanges::iterator FindChangeByTypeAndData(const ServerChangeType type,
                                                   const ServerChangeData& data);
 
+  // Called to setup state necessary for an embedding. Returns false if an
+  // embedding is not allowed in this window.
+  bool PrepareForEmbed();
+
+  // Called from OnEmbed() with the result of the embedding. |real_callback| is
+  // the callback supplied to the embed call.
+  static void OnEmbedAck(base::WeakPtr<WindowPortMus> window,
+                         ws::mojom::WindowTree::EmbedCallback real_callback,
+                         bool result);
+
   PropertyConverter* GetPropertyConverter();
 
   // WindowMus:
@@ -228,7 +238,7 @@ class AURA_EXPORT WindowPortMus : public WindowPort, public WindowMus {
   void RemoveChildFromServer(WindowMus* child) override;
   void ReorderFromServer(WindowMus* child,
                          WindowMus* relative,
-                         ui::mojom::OrderDirection) override;
+                         ws::mojom::OrderDirection) override;
   void SetBoundsFromServer(
       const gfx::Rect& bounds,
       const base::Optional<viz::LocalSurfaceId>& local_surface_id) override;
@@ -244,7 +254,6 @@ class AURA_EXPORT WindowPortMus : public WindowPort, public WindowMus {
       const gfx::Size& surface_size_in_pixels) override;
   void UpdateLocalSurfaceIdFromEmbeddedClient(
       const viz::LocalSurfaceId& embedded_client_local_surface_id) override;
-  void SetFallbackSurfaceInfo(const viz::SurfaceInfo& surface_info) override;
   void DestroyFromServer() override;
   void AddTransientChildFromServer(WindowMus* child) override;
   void RemoveTransientChildFromServer(WindowMus* child) override;
@@ -284,11 +293,10 @@ class AURA_EXPORT WindowPortMus : public WindowPort, public WindowMus {
   const viz::LocalSurfaceId& GetLocalSurfaceId() override;
   void OnEventTargetingPolicyChanged() override;
   bool ShouldRestackTransientChildren() override;
+  void RegisterFrameSinkId(const viz::FrameSinkId& frame_sink_id) override;
+  void UnregisterFrameSinkId(const viz::FrameSinkId& frame_sink_id) override;
 
   void UpdatePrimarySurfaceId();
-  void UpdateClientSurfaceEmbedder();
-
-  void OnSurfaceChanged(const viz::SurfaceInfo& surface_info);
 
   WindowTreeClient* window_tree_client_;
 
@@ -301,16 +309,24 @@ class AURA_EXPORT WindowPortMus : public WindowPort, public WindowMus {
   ServerChanges server_changes_;
 
   viz::SurfaceId primary_surface_id_;
-  viz::SurfaceInfo fallback_surface_info_;
 
   viz::LocalSurfaceId local_surface_id_;
+  // TODO(sad, fsamuel): For 'mash' mode, where the embedder is responsible for
+  // allocating the LocalSurfaceIds, this should use a
+  // ChildLocalSurfaceIdAllocator instead.
   viz::ParentLocalSurfaceIdAllocator parent_local_surface_id_allocator_;
   gfx::Size last_surface_size_in_pixels_;
 
   ui::CursorData cursor_;
 
+  // Set if this class calls SetEmbedFrameSinkId() on the associated window.
+  viz::FrameSinkId embed_frame_sink_id_;
+
   // See description in single place that changes the value for details.
   bool should_restack_transient_children_ = true;
+
+  // True if this window has an embedding.
+  bool has_embedding_ = false;
 
   // When a frame sink is created
   // for a local aura::Window, we need keep a weak ptr of it, so we can update

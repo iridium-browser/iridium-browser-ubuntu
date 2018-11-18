@@ -26,9 +26,10 @@
 
 #include "third_party/blink/renderer/core/frame/dom_timer.h"
 
+#include "base/single_thread_task_runner.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
-#include "third_party/blink/renderer/core/inspector/InspectorTraceEvents.h"
+#include "third_party/blink/renderer/core/inspector/inspector_trace_events.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/blink/renderer/platform/wtf/time.h"
@@ -115,9 +116,10 @@ DOMTimer::~DOMTimer() {
 }
 
 void DOMTimer::Stop() {
+  const bool is_interval = !RepeatInterval().is_zero();
   probe::AsyncTaskCanceledBreakable(
-      GetExecutionContext(),
-      RepeatInterval() ? "clearInterval" : "clearTimeout", this);
+      GetExecutionContext(), is_interval ? "clearInterval" : "clearTimeout",
+      this);
 
   user_gesture_token_ = nullptr;
   // Need to release JS objects potentially protected by ScheduledAction
@@ -144,19 +146,17 @@ void DOMTimer::Fired() {
 
   TRACE_EVENT1("devtools.timeline", "TimerFire", "data",
                InspectorTimerFireEvent::Data(context, timeout_id_));
-  probe::UserCallback probe(context,
-                            RepeatInterval() ? "setInterval" : "setTimeout",
-                            AtomicString(), true);
-  probe::AsyncTask async_task(context, this,
-                              RepeatInterval() ? "fired" : nullptr);
+  const bool is_interval = !RepeatInterval().is_zero();
+  probe::UserCallback probe(context, is_interval ? "setInterval" : "setTimeout",
+                            g_null_atom, true);
+  probe::AsyncTask async_task(context, this, is_interval ? "fired" : nullptr);
 
   // Simple case for non-one-shot timers.
   if (IsActive()) {
-    if (!RepeatIntervalDelta().is_zero() &&
-        RepeatIntervalDelta() < kMinimumInterval) {
+    if (is_interval && RepeatInterval() < kMinimumInterval) {
       nesting_level_++;
       if (nesting_level_ >= kMaxTimerNestingLevel)
-        AugmentRepeatInterval(kMinimumInterval - RepeatIntervalDelta());
+        AugmentRepeatInterval(kMinimumInterval - RepeatInterval());
     }
 
     // No access to member variables after this point, it can delete the timer.

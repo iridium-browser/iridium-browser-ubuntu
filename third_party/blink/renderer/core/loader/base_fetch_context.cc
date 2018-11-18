@@ -10,26 +10,128 @@
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/frame/web_feature.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
+#include "third_party/blink/renderer/core/loader/previews_resource_loading_hints.h"
 #include "third_party/blink/renderer/core/loader/private/frame_client_hints_preferences_context.h"
 #include "third_party/blink/renderer/core/loader/subresource_filter.h"
 #include "third_party/blink/renderer/platform/exported/wrapped_resource_request.h"
+#include "third_party/blink/renderer/platform/loader/cors/cors.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_initiator_type_names.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_load_priority.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_loading_log.h"
-#include "third_party/blink/renderer/platform/network/mime/mime_type_registry.h"
+#include "third_party/blink/renderer/platform/weborigin/origin_access_entry.h"
 #include "third_party/blink/renderer/platform/weborigin/scheme_registry.h"
 #include "third_party/blink/renderer/platform/weborigin/security_policy.h"
 
 namespace blink {
 
+namespace {
+
+// This function maps from Blink's internal "request context" concept to Fetch's
+// notion of a request's "destination":
+// https://fetch.spec.whatwg.org/#concept-request-destination.
+const char* GetDestinationFromContext(mojom::RequestContextType context) {
+  switch (context) {
+    case mojom::RequestContextType::UNSPECIFIED:
+    case mojom::RequestContextType::BEACON:
+    case mojom::RequestContextType::DOWNLOAD:
+    case mojom::RequestContextType::EVENT_SOURCE:
+    case mojom::RequestContextType::FETCH:
+    case mojom::RequestContextType::PING:
+    case mojom::RequestContextType::XML_HTTP_REQUEST:
+    case mojom::RequestContextType::SUBRESOURCE:
+    case mojom::RequestContextType::PREFETCH:
+      return "\"\"";
+    case mojom::RequestContextType::CSP_REPORT:
+      return "report";
+    case mojom::RequestContextType::AUDIO:
+      return "audio";
+    case mojom::RequestContextType::EMBED:
+      return "embed";
+    case mojom::RequestContextType::FONT:
+      return "font";
+    case mojom::RequestContextType::FRAME:
+    case mojom::RequestContextType::HYPERLINK:
+    case mojom::RequestContextType::IFRAME:
+    case mojom::RequestContextType::LOCATION:
+    case mojom::RequestContextType::FORM:
+      return "document";
+    case mojom::RequestContextType::IMAGE:
+    case mojom::RequestContextType::FAVICON:
+    case mojom::RequestContextType::IMAGE_SET:
+      return "image";
+    case mojom::RequestContextType::MANIFEST:
+      return "manifest";
+    case mojom::RequestContextType::OBJECT:
+      return "object";
+    case mojom::RequestContextType::SCRIPT:
+      return "script";
+    case mojom::RequestContextType::SERVICE_WORKER:
+      return "serviceworker";
+    case mojom::RequestContextType::SHARED_WORKER:
+      return "sharedworker";
+    case mojom::RequestContextType::STYLE:
+      return "style";
+    case mojom::RequestContextType::TRACK:
+      return "track";
+    case mojom::RequestContextType::VIDEO:
+      return "video";
+    case mojom::RequestContextType::WORKER:
+      return "worker";
+    case mojom::RequestContextType::XSLT:
+      return "xslt";
+    case mojom::RequestContextType::IMPORT:
+    case mojom::RequestContextType::INTERNAL:
+    case mojom::RequestContextType::PLUGIN:
+      return "unknown";
+  }
+  NOTREACHED();
+  return "";
+}
+
+MessageSource ConvertLogSourceToMessageSource(FetchContext::LogSource source) {
+  // When LogSource is extended, this switch statement should be modified to
+  // convert LogSource to blink::MessageSource.
+  switch (source) {
+    case FetchContext::kJSSource:
+      return kJSMessageSource;
+    case FetchContext::kSecuritySource:
+      return kSecurityMessageSource;
+    case FetchContext::kOtherSource:
+      return kOtherMessageSource;
+  }
+  NOTREACHED();
+  return kOtherMessageSource;
+}
+
+}  // namespace
+
+BaseFetchContext::BaseFetchContext(
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner)
+    : FetchContext(std::move(task_runner)) {}
+
 void BaseFetchContext::AddAdditionalRequestHeaders(ResourceRequest& request,
                                                    FetchResourceType type) {
   bool is_main_resource = type == kFetchMainResource;
   if (!is_main_resource) {
+    // TODO(domfarolino): we can probably *just set* the HTTP `Referer` here
+    // no matter what now.
     if (!request.DidSetHTTPReferrer()) {
+      String referrer_to_use = request.ReferrerString();
+      ReferrerPolicy referrer_policy_to_use = request.GetReferrerPolicy();
+
+      if (referrer_to_use == Referrer::ClientReferrerString())
+        referrer_to_use = GetFetchClientSettingsObject()->GetOutgoingReferrer();
+
+      if (referrer_policy_to_use == kReferrerPolicyDefault) {
+        referrer_policy_to_use =
+            GetFetchClientSettingsObject()->GetReferrerPolicy();
+      }
+
+      // TODO(domfarolino): Stop storing ResourceRequest's referrer as a header
+      // and store it elsewhere. See https://crbug.com/850813.
       request.SetHTTPReferrer(SecurityPolicy::GenerateReferrer(
-          GetReferrerPolicy(), request.Url(), GetOutgoingReferrer()));
+          referrer_policy_to_use, request.Url(), referrer_to_use));
       request.SetHTTPOriginIfNeeded(GetSecurityOrigin());
     } else {
       DCHECK_EQ(SecurityPolicy::GenerateReferrer(request.GetReferrerPolicy(),
@@ -44,55 +146,81 @@ void BaseFetchContext::AddAdditionalRequestHeaders(ResourceRequest& request,
   auto address_space = GetAddressSpace();
   if (address_space)
     request.SetExternalRequestStateFromRequestorAddressSpace(*address_space);
+
+  if (blink::RuntimeEnabledFeatures::SecMetadataEnabled()) {
+    const char* destination_value =
+        GetDestinationFromContext(request.GetRequestContext());
+    // We'll handle adding the header to navigations outside of Blink.
+    if (strncmp(destination_value, "document", 8) != 0 &&
+        request.GetRequestContext() != mojom::RequestContextType::INTERNAL) {
+      const char* site_value = "cross-site";
+      if (SecurityOrigin::Create(request.Url())
+              ->IsSameSchemeHostPort(GetSecurityOrigin())) {
+        site_value = "same-origin";
+      } else {
+        OriginAccessEntry access_entry(
+            request.Url().Protocol(), request.Url().Host(),
+            network::cors::OriginAccessEntry::kAllowRegisterableDomains);
+        if (access_entry.MatchesOrigin(*GetSecurityOrigin()) ==
+            network::cors::OriginAccessEntry::kMatchesOrigin) {
+          site_value = "same-site";
+        }
+      }
+
+      String value = String::Format("destination=%s, site=%s",
+                                    destination_value, site_value);
+      request.AddHTTPHeaderField("Sec-Metadata", AtomicString(value));
+    }
+  }
 }
 
-ResourceRequestBlockedReason BaseFetchContext::CanRequest(
-    Resource::Type type,
+base::Optional<ResourceRequestBlockedReason> BaseFetchContext::CanRequest(
+    ResourceType type,
     const ResourceRequest& resource_request,
     const KURL& url,
     const ResourceLoaderOptions& options,
     SecurityViolationReportingPolicy reporting_policy,
-    FetchParameters::OriginRestriction origin_restriction,
     ResourceRequest::RedirectStatus redirect_status) const {
-  ResourceRequestBlockedReason blocked_reason =
+  base::Optional<ResourceRequestBlockedReason> blocked_reason =
       CanRequestInternal(type, resource_request, url, options, reporting_policy,
-                         origin_restriction, redirect_status);
-  if (blocked_reason != ResourceRequestBlockedReason::kNone &&
+                         redirect_status);
+  if (blocked_reason &&
       reporting_policy == SecurityViolationReportingPolicy::kReport) {
     DispatchDidBlockRequest(resource_request, options.initiator_info,
-                            blocked_reason, type);
+                            blocked_reason.value(), type);
   }
   return blocked_reason;
 }
 
+void BaseFetchContext::AddInfoConsoleMessage(const String& message,
+                                             LogSource source) const {
+  AddConsoleMessage(ConsoleMessage::Create(
+      ConvertLogSourceToMessageSource(source), kInfoMessageLevel, message));
+}
+
 void BaseFetchContext::AddWarningConsoleMessage(const String& message,
                                                 LogSource source) const {
-  // When LogSource is extended, this DCHECK should be replaced with a logic to
-  // convert LogSource to blink::MessageSource.
-  DCHECK_EQ(source, kJSSource);
-  AddConsoleMessage(
-      ConsoleMessage::Create(kJSMessageSource, kWarningMessageLevel, message));
+  AddConsoleMessage(ConsoleMessage::Create(
+      ConvertLogSourceToMessageSource(source), kWarningMessageLevel, message));
 }
 
 void BaseFetchContext::AddErrorConsoleMessage(const String& message,
                                               LogSource source) const {
-  // When LogSource is extended, this DCHECK should be replaced with a logic to
-  // convert LogSource to blink::MessageSource.
-  DCHECK_EQ(source, kJSSource);
-  AddConsoleMessage(
-      ConsoleMessage::Create(kJSMessageSource, kErrorMessageLevel, message));
+  AddConsoleMessage(ConsoleMessage::Create(
+      ConvertLogSourceToMessageSource(source), kErrorMessageLevel, message));
 }
 
 bool BaseFetchContext::IsAdResource(
     const KURL& resource_url,
-    Resource::Type type,
-    WebURLRequest::RequestContext request_context) const {
+    ResourceType type,
+    mojom::RequestContextType request_context) const {
   SubresourceFilter* filter = GetSubresourceFilter();
 
   // We do not need main document tagging currently so skipping main resources.
-  if (filter && type != Resource::kMainResource) {
+  if (filter && type != ResourceType::kMainResource) {
     return filter->IsAdResource(resource_url, request_context);
   }
+
   return false;
 }
 
@@ -117,17 +245,9 @@ void BaseFetchContext::PrintAccessDeniedMessage(const KURL& url) const {
                                            kErrorMessageLevel, message));
 }
 
-void BaseFetchContext::AddCSPHeaderIfNecessary(Resource::Type type,
-                                               ResourceRequest& request) {
-  const ContentSecurityPolicy* csp = GetContentSecurityPolicy();
-  if (!csp)
-    return;
-  if (csp->ShouldSendCSPHeader(type))
-    request.AddHTTPHeaderField("CSP", "active");
-}
-
-ResourceRequestBlockedReason BaseFetchContext::CheckCSPForRequest(
-    WebURLRequest::RequestContext request_context,
+base::Optional<ResourceRequestBlockedReason>
+BaseFetchContext::CheckCSPForRequest(
+    mojom::RequestContextType request_context,
     const KURL& url,
     const ResourceLoaderOptions& options,
     SecurityViolationReportingPolicy reporting_policy,
@@ -137,8 +257,9 @@ ResourceRequestBlockedReason BaseFetchContext::CheckCSPForRequest(
       ContentSecurityPolicy::CheckHeaderType::kCheckReportOnly);
 }
 
-ResourceRequestBlockedReason BaseFetchContext::CheckCSPForRequestInternal(
-    WebURLRequest::RequestContext request_context,
+base::Optional<ResourceRequestBlockedReason>
+BaseFetchContext::CheckCSPForRequestInternal(
+    mojom::RequestContextType request_context,
     const KURL& url,
     const ResourceLoaderOptions& options,
     SecurityViolationReportingPolicy reporting_policy,
@@ -146,7 +267,7 @@ ResourceRequestBlockedReason BaseFetchContext::CheckCSPForRequestInternal(
     ContentSecurityPolicy::CheckHeaderType check_header_type) const {
   if (ShouldBypassMainWorldCSP() || options.content_security_policy_option ==
                                         kDoNotCheckContentSecurityPolicy) {
-    return ResourceRequestBlockedReason::kNone;
+    return base::nullopt;
   }
 
   const ContentSecurityPolicy* csp = GetContentSecurityPolicy();
@@ -156,16 +277,16 @@ ResourceRequestBlockedReason BaseFetchContext::CheckCSPForRequestInternal(
                  redirect_status, reporting_policy, check_header_type)) {
     return ResourceRequestBlockedReason::kCSP;
   }
-  return ResourceRequestBlockedReason::kNone;
+  return base::nullopt;
 }
 
-ResourceRequestBlockedReason BaseFetchContext::CanRequestInternal(
-    Resource::Type type,
+base::Optional<ResourceRequestBlockedReason>
+BaseFetchContext::CanRequestInternal(
+    ResourceType type,
     const ResourceRequest& resource_request,
     const KURL& url,
     const ResourceLoaderOptions& options,
     SecurityViolationReportingPolicy reporting_policy,
-    FetchParameters::OriginRestriction origin_restriction,
     ResourceRequest::RedirectStatus redirect_status) const {
   if (IsDetached()) {
     if (!resource_request.GetKeepalive() ||
@@ -177,12 +298,16 @@ ResourceRequestBlockedReason BaseFetchContext::CanRequestInternal(
   if (ShouldBlockRequestByInspector(resource_request.Url()))
     return ResourceRequestBlockedReason::kInspector;
 
-  const SecurityOrigin* security_origin = options.security_origin.get();
-  if (!security_origin)
-    security_origin = GetSecurityOrigin();
+  scoped_refptr<const SecurityOrigin> origin =
+      resource_request.RequestorOrigin();
 
-  if (origin_restriction != FetchParameters::kNoOriginRestriction &&
-      security_origin && !security_origin->CanDisplay(url)) {
+  const auto request_mode = resource_request.GetFetchRequestMode();
+  // On navigation cases, Context().GetSecurityOrigin() may return nullptr, so
+  // the request's origin may be nullptr.
+  // TODO(yhirano): Figure out if it's actually fine.
+  DCHECK(request_mode == network::mojom::FetchRequestMode::kNavigate || origin);
+  if (request_mode != network::mojom::FetchRequestMode::kNavigate &&
+      !origin->CanDisplay(url)) {
     if (reporting_policy == SecurityViolationReportingPolicy::kReport) {
       AddErrorConsoleMessage(
           "Not allowed to load local resource: " + url.GetString(), kJSSource);
@@ -192,52 +317,22 @@ ResourceRequestBlockedReason BaseFetchContext::CanRequestInternal(
     return ResourceRequestBlockedReason::kOther;
   }
 
-  // Some types of resources can be loaded only from the same origin. Other
-  // types of resources, like Images, Scripts, and CSS, can be loaded from
-  // any URL.
-  switch (type) {
-    case Resource::kMainResource:
-    case Resource::kImage:
-    case Resource::kCSSStyleSheet:
-    case Resource::kScript:
-    case Resource::kFont:
-    case Resource::kRaw:
-    case Resource::kLinkPrefetch:
-    case Resource::kTextTrack:
-    case Resource::kImportResource:
-    case Resource::kAudio:
-    case Resource::kVideo:
-    case Resource::kManifest:
-    case Resource::kMock:
-      // By default these types of resources can be loaded from any origin.
-      // FIXME: Are we sure about Resource::kFont?
-      if (origin_restriction == FetchParameters::kRestrictToSameOrigin &&
-          !security_origin->CanRequest(url)) {
-        PrintAccessDeniedMessage(url);
-        return ResourceRequestBlockedReason::kOrigin;
-      }
-      break;
-    case Resource::kXSLStyleSheet:
-      DCHECK(RuntimeEnabledFeatures::XSLTEnabled());
-      FALLTHROUGH;
-    case Resource::kSVGDocument:
-      if (!security_origin->CanRequest(url)) {
-        PrintAccessDeniedMessage(url);
-        return ResourceRequestBlockedReason::kOrigin;
-      }
-      break;
+  if (request_mode == network::mojom::FetchRequestMode::kSameOrigin &&
+      CORS::CalculateCORSFlag(url, origin.get(), request_mode)) {
+    PrintAccessDeniedMessage(url);
+    return ResourceRequestBlockedReason::kOrigin;
   }
 
   // User Agent CSS stylesheets should only support loading images and should be
   // restricted to data urls.
   if (options.initiator_info.name == FetchInitiatorTypeNames::uacss) {
-    if (type == Resource::kImage && url.ProtocolIsData()) {
-      return ResourceRequestBlockedReason::kNone;
+    if (type == ResourceType::kImage && url.ProtocolIsData()) {
+      return base::nullopt;
     }
     return ResourceRequestBlockedReason::kOther;
   }
 
-  WebURLRequest::RequestContext request_context =
+  mojom::RequestContextType request_context =
       resource_request.GetRequestContext();
 
   // We check the 'report-only' headers before upgrading the request (in
@@ -250,7 +345,7 @@ ResourceRequestBlockedReason BaseFetchContext::CanRequestInternal(
     return ResourceRequestBlockedReason::kCSP;
   }
 
-  if (type == Resource::kScript || type == Resource::kImportResource) {
+  if (type == ResourceType::kScript || type == ResourceType::kImportResource) {
     if (!AllowScriptFromSource(url)) {
       // TODO(estark): Use a different ResourceRequestBlockedReason here, since
       // this check has nothing to do with CSP. https://crbug.com/600795
@@ -260,7 +355,7 @@ ResourceRequestBlockedReason BaseFetchContext::CanRequestInternal(
 
   // SVG Images have unique security rules that prevent all subresource requests
   // except for data urls.
-  if (type != Resource::kMainResource && IsSVGImageChromeClient() &&
+  if (type != ResourceType::kMainResource && IsSVGImageChromeClient() &&
       !url.ProtocolIsData())
     return ResourceRequestBlockedReason::kOrigin;
 
@@ -298,47 +393,27 @@ ResourceRequestBlockedReason BaseFetchContext::CanRequestInternal(
 
   if (url.PotentiallyDanglingMarkup() && url.ProtocolIsInHTTPFamily()) {
     CountDeprecation(WebFeature::kCanRequestURLHTTPContainingNewline);
-    if (RuntimeEnabledFeatures::RestrictCanRequestURLCharacterSetEnabled())
-      return ResourceRequestBlockedReason::kOther;
+    return ResourceRequestBlockedReason::kOther;
+  }
+
+  // Loading of a subresource may be blocked by previews resource loading hints.
+  if (GetPreviewsResourceLoadingHints() &&
+      !GetPreviewsResourceLoadingHints()->AllowLoad(
+          url, resource_request.Priority())) {
+    return ResourceRequestBlockedReason::kOther;
   }
 
   // Let the client have the final say into whether or not the load should
   // proceed.
-  if (GetSubresourceFilter() && type != Resource::kMainResource &&
-      type != Resource::kImportResource) {
+  if (GetSubresourceFilter() && type != ResourceType::kMainResource &&
+      type != ResourceType::kImportResource) {
     if (!GetSubresourceFilter()->AllowLoad(url, request_context,
                                            reporting_policy)) {
       return ResourceRequestBlockedReason::kSubresourceFilter;
     }
   }
 
-  return ResourceRequestBlockedReason::kNone;
-}
-
-ResourceRequestBlockedReason BaseFetchContext::CheckResponseNosniff(
-    WebURLRequest::RequestContext request_context,
-    const ResourceResponse& response) const {
-  bool sniffing_allowed =
-      ParseContentTypeOptionsHeader(response.HttpHeaderField(
-          HTTPNames::X_Content_Type_Options)) != kContentTypeOptionsNosniff;
-  if (sniffing_allowed)
-    return ResourceRequestBlockedReason::kNone;
-
-  String mime_type = response.HttpContentType();
-  if (request_context == WebURLRequest::kRequestContextStyle &&
-      !MIMETypeRegistry::IsSupportedStyleSheetMIMEType(mime_type)) {
-    AddConsoleMessage(ConsoleMessage::Create(
-        kSecurityMessageSource, kErrorMessageLevel,
-        "Refused to apply style from '" + response.Url().ElidedString() +
-            "' because its MIME type ('" + mime_type + "') " +
-            "is not a supported stylesheet MIME type, and strict MIME checking "
-            "is enabled."));
-    return ResourceRequestBlockedReason::kContentType;
-  }
-  // TODO(mkwst): Move the 'nosniff' bit of 'AllowedByNosniff::MimeTypeAsScript'
-  // here alongside the style checks, and put its use counters somewhere else.
-
-  return ResourceRequestBlockedReason::kNone;
+  return base::nullopt;
 }
 
 void BaseFetchContext::Trace(blink::Visitor* visitor) {

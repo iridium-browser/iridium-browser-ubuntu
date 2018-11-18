@@ -25,6 +25,9 @@ const char kDriveOtherDirLocalId[] = "<other>";
 // "drive/team_drives" diretory's local ID is fixed to this value.
 const char kDriveTeamDrivesDirLocalId[] = "<team_drives>";
 
+// "drive/Computers" directory's local ID is fixed to this value.
+constexpr char kDriveComputersDirLocalId[] = "<computers>";
+
 // "drive/trash" diretory's local ID is fixed to this value.
 const char kDriveTrashDirLocalId[] = "<trash>";
 
@@ -34,7 +37,11 @@ const char kDriveGrandRootDirName[] = "drive";
 const char kDriveMyDriveRootDirName[] = "root";
 const char kDriveOtherDirName[] = "other";
 const char kDriveTeamDrivesDirName[] = "team_drives";
+constexpr char kDriveComputersDirName[] = "Computers";
 const char kDriveTrashDirName[] = "trash";
+
+// The team_drive_id value that signifies the users default corpus.
+constexpr char kTeamDriveIdDefaultCorpus[] = "";
 
 // Returns the path of the top root of the pseudo tree.
 const base::FilePath& GetDriveGrandRootPath();
@@ -45,6 +52,9 @@ const base::FilePath& GetDriveMyDriveRootPath();
 // Returns the path of the directory representing "Team Drives".
 const base::FilePath& GetDriveTeamDrivesRootPath();
 
+// Returns true if |file_path| is a child directory of the team drives root.
+bool IsTeamDrivesPath(const base::FilePath& file_path);
+
 // Escapes a file name in Drive cache.
 // Replaces percent ('%'), period ('.') and slash ('/') with %XX (hex)
 std::string EscapeCacheFileName(const std::string& filename);
@@ -52,6 +62,13 @@ std::string EscapeCacheFileName(const std::string& filename);
 // Unescapes a file path in Drive cache.
 // This is the inverse of EscapeCacheFileName.
 std::string UnescapeCacheFileName(const std::string& filename);
+
+// Converts a numerical changestamp value to a start page token.
+std::string ConvertChangestampToStartPageToken(int64_t changestamp);
+
+// Convers a start page token to a numerical changestamp
+bool ConvertStartPageTokenToChangestamp(const std::string& stat_page_token,
+                                        int64_t* changestamp);
 
 // Converts the given string to a form suitable as a file name. Specifically,
 // - Normalizes in Unicode Normalization Form C.

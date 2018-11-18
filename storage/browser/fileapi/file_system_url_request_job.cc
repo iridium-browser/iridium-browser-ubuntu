@@ -11,7 +11,6 @@
 #include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/files/file_path.h"
-#include "base/files/file_util_proxy.h"
 #include "base/location.h"
 #include "base/macros.h"
 #include "base/single_thread_task_runner.h"
@@ -87,7 +86,7 @@ int FileSystemURLRequestJob::ReadRawData(net::IOBuffer* dest, int dest_size) {
   DCHECK_NE(dest_size, 0);
   DCHECK_GE(remaining_bytes_, 0);
 
-  if (reader_.get() == NULL)
+  if (reader_.get() == nullptr)
     return net::ERR_FAILED;
 
   if (remaining_bytes_ < dest_size)
@@ -234,8 +233,10 @@ void FileSystemURLRequestJob::DidRead(int result) {
   ReadRawDataComplete(result);
 }
 
-bool FileSystemURLRequestJob::IsRedirectResponse(GURL* location,
-                                                 int* http_status_code) {
+bool FileSystemURLRequestJob::IsRedirectResponse(
+    GURL* location,
+    int* http_status_code,
+    bool* insecure_scheme_was_upgraded) {
   if (is_directory_) {
     // This happens when we discovered the file is a directory, so needs a
     // slash at the end of the path.
@@ -243,6 +244,7 @@ bool FileSystemURLRequestJob::IsRedirectResponse(GURL* location,
     new_path.push_back('/');
     GURL::Replacements replacements;
     replacements.SetPathStr(new_path);
+    *insecure_scheme_was_upgraded = false;
     *location = request_->url().ReplaceComponents(replacements);
     *http_status_code = 301;  // simulate a permanent redirect
     return true;

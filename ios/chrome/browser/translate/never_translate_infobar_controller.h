@@ -7,7 +7,15 @@
 
 #include "ios/chrome/browser/infobars/infobar_controller.h"
 
+namespace translate {
+class TranslateInfoBarDelegate;
+}
+
 @interface NeverTranslateInfoBarController : InfoBarController
+
+- (instancetype)initWithInfoBarDelegate:
+    (translate::TranslateInfoBarDelegate*)infoBarDelegate
+    NS_DESIGNATED_INITIALIZER;
 
 @end
 

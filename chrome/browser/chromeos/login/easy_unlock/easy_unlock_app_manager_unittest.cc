@@ -9,19 +9,19 @@
 #include <memory>
 #include <string>
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "build/build_config.h"
 #include "chrome/browser/chromeos/login/users/scoped_test_user_manager.h"
-#include "chrome/browser/chromeos/settings/cros_settings.h"
-#include "chrome/browser/chromeos/settings/device_settings_service.h"
+#include "chrome/browser/chromeos/settings/scoped_cros_settings_test_helper.h"
 #include "chrome/browser/extensions/api/screenlock_private/screenlock_private_api.h"
 #include "chrome/browser/extensions/component_loader.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/test_extension_system.h"
-#include "chrome/common/extensions/api/easy_unlock_private.h"
+#include "chrome/common/apps/platform_apps/api/easy_unlock_private.h"
 #include "chrome/common/extensions/api/screenlock_private.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/grit/browser_resources.h"
@@ -38,7 +38,7 @@
 #include "extensions/common/extension.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace easy_unlock_private_api = extensions::api::easy_unlock_private;
+namespace easy_unlock_private_api = chrome_apps::api::easy_unlock_private;
 namespace screenlock_private_api = extensions::api::screenlock_private;
 namespace app_runtime_api = extensions::api::app_runtime;
 
@@ -251,9 +251,11 @@ class EasyUnlockAppManagerTest : public testing::Test {
         false /* autoupdate_enabled */);
 
     extensions::ProcessManagerFactory::GetInstance()->SetTestingFactory(
-        &profile_, &CreateTestProcessManager);
+        &profile_, base::BindRepeating(&CreateTestProcessManager));
     extensions::ScreenlockPrivateEventRouter::GetFactoryInstance()
-        ->SetTestingFactory(&profile_, &CreateScreenlockPrivateEventRouter);
+        ->SetTestingFactory(
+            &profile_,
+            base::BindRepeating(&CreateScreenlockPrivateEventRouter));
 
     event_router_ = extensions::CreateAndUseTestEventRouter(&profile_);
     event_router_->AddEventObserver(&event_consumer_);
@@ -271,16 +273,15 @@ class EasyUnlockAppManagerTest : public testing::Test {
   // Needed by extension system.
   content::TestBrowserThreadBundle thread_bundle_;
 
-  // Cros settings and device settings are needed when creating user manager.
-  ScopedTestDeviceSettingsService test_device_settings_service_;
-  ScopedTestCrosSettings test_cros_settings_;
+  // Cros settings are needed when creating user manager.
+  ScopedCrosSettingsTestHelper cros_settings_test_helper_;
   // Needed for creating ExtensionService.
   ScopedTestUserManager test_user_manager_;
 
   TestingProfile profile_;
 
   EasyUnlockAppEventConsumer event_consumer_;
-  ExtensionService* extension_service_;
+  extensions::ExtensionService* extension_service_;
   extensions::TestEventRouter* event_router_;
 
   base::CommandLine command_line_;

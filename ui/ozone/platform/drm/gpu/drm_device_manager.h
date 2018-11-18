@@ -47,13 +47,10 @@ class DrmDeviceManager {
   // returns |primary_device_|.
   scoped_refptr<DrmDevice> GetDrmDevice(gfx::AcceleratedWidget widget);
 
-  // Returns |primary_device_|.
-  scoped_refptr<DrmDevice> GetPrimaryDrmDevice();
-
   const DrmDeviceVector& GetDrmDevices() const;
 
  private:
-  std::unique_ptr<DrmDeviceGenerator> drm_device_generator_;
+  const std::unique_ptr<DrmDeviceGenerator> drm_device_generator_;
 
   DrmDeviceVector devices_;
 

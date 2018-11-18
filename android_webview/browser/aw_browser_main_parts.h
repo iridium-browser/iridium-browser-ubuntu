@@ -16,8 +16,8 @@ namespace base {
 class MessageLoop;
 }
 
-namespace heap_profiling {
-class Controller;
+namespace policy {
+class BrowserPolicyConnectorBase;
 }
 
 namespace android_webview {
@@ -41,7 +41,10 @@ class AwBrowserMainParts : public content::BrowserMainParts {
   // Android specific UI MessageLoop.
   std::unique_ptr<base::MessageLoop> main_message_loop_;
 
-  std::unique_ptr<heap_profiling::Controller> heap_profiling_controller_;
+  // Created and temporarily owned by AwBrowserMainParts
+  // until ownership is transferred to AwBrowserContext.
+  std::unique_ptr<PrefService> pref_service_;
+  std::unique_ptr<policy::BrowserPolicyConnectorBase> browser_policy_connector_;
 
   AwContentBrowserClient* browser_client_;
 

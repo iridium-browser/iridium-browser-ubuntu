@@ -39,7 +39,7 @@
 #include "base/logging.h"
 #include "base/threading/thread_local.h"
 #include "build/build_config.h"
-#include "ui/gl/extension_set.h"
+#include "ui/gfx/extension_set.h"
 #include "ui/gl/gl_export.h"
 
 // The standard OpenGL native extension headers are also included.
@@ -376,11 +376,9 @@
 #define GL_RG8_EXT 0x822B
 #endif /* GL_EXT_texture_rg */
 
-// This is from NV_path_rendering, but the Mesa GL header is not up to date with
-// the most recent
-// version of the extension. This definition could be removed once glext.h
-// r27498 or later is
-// imported.
+// This is from NV_path_rendering, but the GL header is not up to date with the
+// most recent version of the extension. This definition could be removed once
+// glext.h r27498 or later is imported.
 #ifndef GL_FRAGMENT_INPUT_NV
 #define GL_FRAGMENT_INPUT_NV 0x936D
 #endif
@@ -405,6 +403,22 @@
 #define GL_NUM_WINDOW_RECTANGLES_EXT 0x8F15
 #endif /* GL_EXT_window_rectangles */
 
+#ifndef GL_CHROMIUM_nonblocking_readback
+#define GL_CHROMIUM_nonblocking_readback 1
+#define GL_READBACK_SHADOW_COPIES_UPDATED_CHROMIUM 0x84F8
+#endif /* GL_CHROMIUM_nonblocking_readback */
+
+#ifndef GL_MESA_framebuffer_flip_y
+#define GL_MESA_framebuffer_flip_y 1
+#define GL_FRAMEBUFFER_FLIP_Y_MESA 0x8BBB
+#endif /* GL_MESA_framebuffer_flip_y */
+
+#ifndef GL_KHR_parallel_shader_compile
+#define GL_KHR_parallel_shader_compile 1
+#define GL_MAX_SHADER_COMPILER_THREADS_KHR 0x91B0
+#define GL_COMPLETION_STATUS_KHR 0x91B1
+#endif /* GL_KHR_parallel_shader_compile */
+
 #define GL_GLEXT_PROTOTYPES 1
 
 #if defined(OS_WIN)
@@ -420,15 +434,18 @@
   #define GL_SERVICE_LOG_CODE_BLOCK(code) code
 #endif
 
-// Forward declare OSMesa types.
-typedef struct osmesa_context *OSMesaContext;
-typedef void (*OSMESAproc)();
+// ANGLE_multiview constants.
+#define GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_NUM_VIEWS_OVR 0x9630
+#define GL_FRAMEBUFFER_ATTACHMENT_TEXTURE_BASE_VIEW_INDEX_OVR 0x9632
+#define GL_MAX_VIEWS_OVR 0x9631
+#define GL_FRAMEBUFFER_INCOMPLETE_VIEW_TARGETS_OVR 0x9633
+
+#define GL_QUERY_RESULT_AVAILABLE_NO_FLUSH_CHROMIUM_EXT 0x8868
 
 // Forward declare EGL types.
 typedef uint64_t EGLuint64CHROMIUM;
 
 #include "gl_bindings_autogen_gl.h"
-#include "gl_bindings_autogen_osmesa.h"
 
 #if defined(USE_EGL)
 #include "gl_bindings_autogen_egl.h"
@@ -449,7 +466,7 @@ struct GLVersionInfo;
 struct GL_EXPORT DriverGL {
   void InitializeStaticBindings();
   void InitializeDynamicBindings(const GLVersionInfo* ver,
-                                 const ExtensionSet& extensions);
+                                 const gfx::ExtensionSet& extensions);
   void ClearBindings();
 
   ProcsGL fn;
@@ -465,18 +482,6 @@ struct GL_EXPORT CurrentGL {
   GLApi* Api = nullptr;
   DriverGL* Driver = nullptr;
   const GLVersionInfo* Version = nullptr;
-};
-
-struct GL_EXPORT DriverOSMESA {
-  void InitializeStaticBindings();
-  void InitializeExtensionBindings();
-  void ClearBindings();
-
-  ProcsOSMESA fn;
-  ExtensionsOSMESA ext;
-
- private:
-  static std::string GetPlatformExtensions();
 };
 
 #if defined(OS_WIN)
@@ -528,9 +533,6 @@ struct GL_EXPORT DriverGLX {
 #define g_current_gl_driver g_current_gl_context_tls->Get()->Driver
 #define g_current_gl_version g_current_gl_context_tls->Get()->Version
 GL_EXPORT extern base::ThreadLocalPointer<CurrentGL>* g_current_gl_context_tls;
-
-GL_EXPORT extern OSMESAApi* g_current_osmesa_context;
-GL_EXPORT extern DriverOSMESA g_driver_osmesa;
 
 #if defined(USE_EGL)
 GL_EXPORT extern EGLApi* g_current_egl_context;

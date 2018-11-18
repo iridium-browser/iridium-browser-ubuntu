@@ -33,7 +33,7 @@ ConvertEffectiveConnectionType(
 // the network environment.
 class NetworkMetricsProvider
     : public MetricsProvider,
-      public net::NetworkChangeNotifier::ConnectionTypeObserver {
+      public net::NetworkChangeNotifier::NetworkChangeObserver {
  public:
   // Class that provides |this| with the network quality estimator.
   class NetworkQualityEstimatorProvider {
@@ -82,8 +82,8 @@ class NetworkMetricsProvider
       ChromeUserMetricsExtension* uma_proto) override;
   void ProvideSystemProfileMetrics(SystemProfileProto* system_profile) override;
 
-  // ConnectionTypeObserver:
-  void OnConnectionTypeChanged(
+  // NetworkChangeObserver:
+  void OnNetworkChanged(
       net::NetworkChangeNotifier::ConnectionType type) override;
 
   SystemProfileProto::Network::ConnectionType GetConnectionType() const;
@@ -125,7 +125,7 @@ class NetworkMetricsProvider
   // Helper object for retrieving connected wifi access point information.
   std::unique_ptr<WifiAccessPointInfoProvider> wifi_access_point_info_provider_;
 
-  // These metrics track histogram totals for the Net.ErrorCodesForMainFrame3
+  // These metrics track histogram totals for the Net.ErrorCodesForMainFrame4
   // histogram. They are used to compute deltas at upload time.
   base::HistogramBase::Count total_aborts_;
   base::HistogramBase::Count total_codes_;

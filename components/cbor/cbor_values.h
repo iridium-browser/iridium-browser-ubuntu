@@ -12,6 +12,7 @@
 #include <vector>
 
 #include "base/containers/flat_map.h"
+#include "base/containers/span.h"
 #include "base/macros.h"
 #include "base/strings/string_piece.h"
 #include "components/cbor/cbor_export.h"
@@ -90,6 +91,7 @@ class CBOR_EXPORT CBORValue {
     STRING = 3,
     ARRAY = 4,
     MAP = 5,
+    TAG = 6,
     SIMPLE_VALUE = 7,
     NONE = -1,
   };
@@ -113,7 +115,7 @@ class CBOR_EXPORT CBORValue {
   explicit CBORValue(int64_t integer_value);
   explicit CBORValue(uint64_t integer_value) = delete;
 
-  explicit CBORValue(const BinaryValue& in_bytes);
+  explicit CBORValue(base::span<const uint8_t> in_bytes);
   explicit CBORValue(BinaryValue&& in_bytes) noexcept;
 
   explicit CBORValue(const char* in_string, Type type = Type::STRING);

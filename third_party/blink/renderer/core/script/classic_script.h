@@ -24,7 +24,7 @@ class CORE_EXPORT ClassicScript final : public Script {
                              access_control_status);
   }
 
-  void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
   const ScriptSourceCode& GetScriptSourceCode() const {
     return script_source_code_;
@@ -42,7 +42,7 @@ class CORE_EXPORT ClassicScript final : public Script {
   ScriptType GetScriptType() const override { return ScriptType::kClassic; }
   void RunScript(LocalFrame*, const SecurityOrigin*) const override;
   String InlineSourceTextForCSP() const override {
-    return script_source_code_.Source();
+    return script_source_code_.Source().ToString();
   }
 
   const ScriptSourceCode script_source_code_;

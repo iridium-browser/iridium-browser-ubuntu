@@ -738,6 +738,8 @@ LIBVPX_TEST_DATA-$(CONFIG_VP8_DECODER) += invalid-token-partition.ivf
 LIBVPX_TEST_DATA-$(CONFIG_VP8_DECODER) += invalid-token-partition.ivf.res
 LIBVPX_TEST_DATA-$(CONFIG_VP8_DECODER) += invalid-vp80-00-comprehensive-018.ivf.2kf_0x6.ivf
 LIBVPX_TEST_DATA-$(CONFIG_VP8_DECODER) += invalid-vp80-00-comprehensive-018.ivf.2kf_0x6.ivf.res
+LIBVPX_TEST_DATA-$(CONFIG_VP8_DECODER) += invalid-vp80-00-comprehensive-s17661_r01-05_b6-.ivf
+LIBVPX_TEST_DATA-$(CONFIG_VP8_DECODER) += invalid-vp80-00-comprehensive-s17661_r01-05_b6-.ivf.res
 LIBVPX_TEST_DATA-$(CONFIG_VP9_DECODER) += invalid-vp90-01-v3.webm
 LIBVPX_TEST_DATA-$(CONFIG_VP9_DECODER) += invalid-vp90-01-v3.webm.res
 LIBVPX_TEST_DATA-$(CONFIG_VP9_DECODER) += invalid-vp90-02-v2.webm
@@ -787,6 +789,7 @@ LIBVPX_TEST_DATA-$(CONFIG_VP9_DECODER) += invalid-crbug-629481.webm
 LIBVPX_TEST_DATA-$(CONFIG_VP9_DECODER) += invalid-crbug-629481.webm.res
 LIBVPX_TEST_DATA-$(CONFIG_VP9_DECODER) += invalid-crbug-667044.webm
 LIBVPX_TEST_DATA-$(CONFIG_VP9_DECODER) += invalid-crbug-667044.webm.res
+LIBVPX_TEST_DATA-$(CONFIG_VP9_DECODER) += crbug-1539.rawfile
 
 ifeq ($(CONFIG_DECODE_PERF_TESTS),yes)
 # Encode / Decode test

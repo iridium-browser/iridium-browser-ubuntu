@@ -8,11 +8,12 @@
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "content/browser/web_package/signed_exchange_prefetch_metric_recorder.h"
 #include "content/common/content_export.h"
+#include "content/common/url_loader_factory_bundle.h"
 #include "content/public/browser/browser_thread.h"
 #include "mojo/public/cpp/bindings/strong_binding_set.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
-#include "third_party/blink/public/mojom/loader/prefetch_url_loader_service.mojom.h"
 
 namespace net {
 class URLRequestContextGetter;
@@ -31,13 +32,9 @@ class URLLoaderThrottle;
 class CONTENT_EXPORT PrefetchURLLoaderService final
     : public base::RefCountedThreadSafe<PrefetchURLLoaderService,
                                         BrowserThread::DeleteOnIOThread>,
-      public network::mojom::URLLoaderFactory,
-      public blink::mojom::PrefetchURLLoaderService {
+      public network::mojom::URLLoaderFactory {
  public:
-  // |factory_getter| could be null in non-NetworkService case.
-  // Created on the UI thread.
-  PrefetchURLLoaderService(
-      scoped_refptr<URLLoaderFactoryGetter> network_loader_factory);
+  PrefetchURLLoaderService();
 
   // Must be called on the IO thread. The given |resource_context| will
   // be valid as far as request_context_getter returns non-null context.
@@ -45,8 +42,10 @@ class CONTENT_EXPORT PrefetchURLLoaderService final
       ResourceContext* resource_context,
       scoped_refptr<net::URLRequestContextGetter> request_context_getter);
 
-  void ConnectToService(int frame_tree_node_id,
-                        blink::mojom::PrefetchURLLoaderServiceRequest request);
+  void GetFactory(
+      network::mojom::URLLoaderFactoryRequest request,
+      int frame_tree_node_id,
+      std::unique_ptr<network::SharedURLLoaderFactoryInfo> factory_info);
 
   // Used only when NetworkService is not enabled (or indirectly via the
   // other CreateLoaderAndStart when NetworkService is enabled).
@@ -63,7 +62,7 @@ class CONTENT_EXPORT PrefetchURLLoaderService final
       network::mojom::URLLoaderClientPtr client,
       const net::MutableNetworkTrafficAnnotationTag& traffic_annotation,
       scoped_refptr<network::SharedURLLoaderFactory> network_loader_factory,
-      int frame_tree_node_id = -1);
+      base::RepeatingCallback<int(void)> frame_tree_node_id_getter);
 
   // Register a callback that is fired right before a prefetch load is started
   // by this service.
@@ -72,13 +71,17 @@ class CONTENT_EXPORT PrefetchURLLoaderService final
     prefetch_load_callback_for_testing_ = prefetch_load_callback;
   }
 
+  scoped_refptr<SignedExchangePrefetchMetricRecorder>
+  signed_exchange_prefetch_metric_recorder() {
+    return signed_exchange_prefetch_metric_recorder_;
+  }
+
  private:
   friend class base::DeleteHelper<content::PrefetchURLLoaderService>;
   friend struct BrowserThread::DeleteOnThread<BrowserThread::IO>;
-  ~PrefetchURLLoaderService() override;
+  struct BindContext;
 
-  // blink::mojom::PrefetchURLLoaderService:
-  void GetFactory(network::mojom::URLLoaderFactoryRequest request) override;
+  ~PrefetchURLLoaderService() override;
 
   // network::mojom::URLLoaderFactory:
   void CreateLoaderAndStart(network::mojom::URLLoaderRequest request,
@@ -93,22 +96,22 @@ class CONTENT_EXPORT PrefetchURLLoaderService final
 
   // For URLLoaderThrottlesGetter.
   std::vector<std::unique_ptr<content::URLLoaderThrottle>>
-  CreateURLLoaderThrottles(const network::ResourceRequest& request,
-                           int frame_tree_node_id);
-
-  mojo::BindingSet<blink::mojom::PrefetchURLLoaderService,
-                   int /* frame_tree_node_id */>
-      service_bindings_;
+  CreateURLLoaderThrottles(
+      const network::ResourceRequest& request,
+      base::RepeatingCallback<int(void)> frame_tree_node_id_getter);
 
   scoped_refptr<URLLoaderFactoryGetter> loader_factory_getter_;
   ResourceContext* resource_context_ = nullptr;
   scoped_refptr<net::URLRequestContextGetter> request_context_getter_;
 
   mojo::BindingSet<network::mojom::URLLoaderFactory,
-                   int /* frame_tree_node_id */>
+                   std::unique_ptr<BindContext>>
       loader_factory_bindings_;
 
   base::RepeatingClosure prefetch_load_callback_for_testing_;
+
+  scoped_refptr<SignedExchangePrefetchMetricRecorder>
+      signed_exchange_prefetch_metric_recorder_;
 
   DISALLOW_COPY_AND_ASSIGN(PrefetchURLLoaderService);
 };

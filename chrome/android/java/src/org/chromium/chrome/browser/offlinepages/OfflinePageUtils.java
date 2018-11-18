@@ -7,8 +7,8 @@ package org.chromium.chrome.browser.offlinepages;
 import android.app.Activity;
 import android.content.Context;
 import android.net.Uri;
-import android.os.AsyncTask;
 import android.os.Environment;
+import android.support.annotation.IntDef;
 import android.text.TextUtils;
 
 import org.chromium.base.ActivityState;
@@ -18,8 +18,11 @@ import org.chromium.base.Log;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
+import org.chromium.base.task.AsyncTask;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
+import org.chromium.chrome.browser.ChromeFeatureList;
+import org.chromium.chrome.browser.FileProviderHelper;
 import org.chromium.chrome.browser.UrlConstants;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.share.ShareParams;
@@ -27,12 +30,14 @@ import org.chromium.chrome.browser.snackbar.Snackbar;
 import org.chromium.chrome.browser.snackbar.SnackbarManager;
 import org.chromium.chrome.browser.snackbar.SnackbarManager.SnackbarController;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
+import org.chromium.chrome.browser.tab.SadTab;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabModel;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.tabmodel.TabModelSelectorTabModelObserver;
 import org.chromium.chrome.browser.util.ChromeFileProvider;
 import org.chromium.components.bookmarks.BookmarkId;
+import org.chromium.components.offline_items_collection.LaunchLocation;
 import org.chromium.components.offlinepages.SavePageResult;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.WebContents;
@@ -41,6 +46,8 @@ import org.chromium.net.NetworkChangeNotifier;
 import org.chromium.ui.base.PageTransition;
 
 import java.io.File;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -189,20 +196,28 @@ public class OfflinePageUtils {
      * Contains values from the histogram enum OfflinePagesTabRestoreType used for reporting the
      * OfflinePages.TabRestore metric.
      */
-    private static class TabRestoreType {
-        public static final int WHILE_ONLINE = 0;
-        public static final int WHILE_ONLINE_CANT_SAVE_FOR_OFFLINE_USAGE = 1;
-        public static final int WHILE_ONLINE_TO_OFFLINE_PAGE = 2;
-        public static final int WHILE_ONLINE_TO_OFFLINE_PAGE_FROM_LAST_N = 3;
-        public static final int WHILE_OFFLINE = 4;
-        public static final int WHILE_OFFLINE_CANT_SAVE_FOR_OFFLINE_USAGE = 5;
-        public static final int WHILE_OFFLINE_TO_OFFLINE_PAGE = 6;
-        public static final int WHILE_OFFLINE_TO_OFFLINE_PAGE_FROM_LAST_N = 7;
-        public static final int FAILED = 8;
-        public static final int CRASHED = 9;
+    @IntDef({TabRestoreType.WHILE_ONLINE, TabRestoreType.WHILE_ONLINE_CANT_SAVE_FOR_OFFLINE_USAGE,
+            TabRestoreType.WHILE_ONLINE_TO_OFFLINE_PAGE,
+            TabRestoreType.WHILE_ONLINE_TO_OFFLINE_PAGE_FROM_LAST_N, TabRestoreType.WHILE_OFFLINE,
+            TabRestoreType.WHILE_OFFLINE_CANT_SAVE_FOR_OFFLINE_USAGE,
+            TabRestoreType.WHILE_OFFLINE_TO_OFFLINE_PAGE,
+            TabRestoreType.WHILE_OFFLINE_TO_OFFLINE_PAGE_FROM_LAST_N, TabRestoreType.FAILED,
+            TabRestoreType.CRASHED})
+    @Retention(RetentionPolicy.SOURCE)
+    private @interface TabRestoreType {
+        int WHILE_ONLINE = 0;
+        int WHILE_ONLINE_CANT_SAVE_FOR_OFFLINE_USAGE = 1;
+        int WHILE_ONLINE_TO_OFFLINE_PAGE = 2;
+        int WHILE_ONLINE_TO_OFFLINE_PAGE_FROM_LAST_N = 3;
+        int WHILE_OFFLINE = 4;
+        int WHILE_OFFLINE_CANT_SAVE_FOR_OFFLINE_USAGE = 5;
+        int WHILE_OFFLINE_TO_OFFLINE_PAGE = 6;
+        int WHILE_OFFLINE_TO_OFFLINE_PAGE_FROM_LAST_N = 7;
+        int FAILED = 8;
+        int CRASHED = 9;
         // NOTE: always keep this entry at the end. Add new result types only immediately above this
         // line. Make sure to update the corresponding histogram enum accordingly.
-        public static final int COUNT = 10;
+        int NUM_ENTRIES = 10;
     }
 
     private static Internal getInstance() {
@@ -268,25 +283,8 @@ public class OfflinePageUtils {
      */
     private static boolean shouldSkipSavingTabOffline(Tab tab) {
         WebContents webContents = tab.getWebContents();
-        return tab.isShowingErrorPage() || tab.isShowingSadTab() || webContents == null
+        return tab.isShowingErrorPage() || SadTab.isShowing(tab) || webContents == null
                 || webContents.isDestroyed() || webContents.isIncognito();
-    }
-
-    /**
-     * Strips scheme from the original URL of the offline page. This is meant to be used by UI.
-     * @param onlineUrl an online URL to from which the scheme is removed
-     * @return onlineUrl without the scheme
-     */
-    public static String stripSchemeFromOnlineUrl(String onlineUrl) {
-        onlineUrl = onlineUrl.trim();
-        // Offline pages are only saved for https:// and http:// schemes.
-        if (onlineUrl.startsWith(UrlConstants.HTTPS_URL_PREFIX)) {
-            return onlineUrl.substring(8);
-        } else if (onlineUrl.startsWith(UrlConstants.HTTP_URL_PREFIX)) {
-            return onlineUrl.substring(7);
-        } else {
-            return onlineUrl;
-        }
     }
 
     /**
@@ -319,7 +317,7 @@ public class OfflinePageUtils {
      * @param context android context
      */
     public static void recordWakeupUMA(Context context, long taskScheduledTimeMillis) {
-        DeviceConditions deviceConditions = DeviceConditions.getCurrentConditions(context);
+        DeviceConditions deviceConditions = DeviceConditions.getCurrent(context);
         if (deviceConditions == null) return;
 
         // Report charging state.
@@ -361,6 +359,37 @@ public class OfflinePageUtils {
     }
 
     /**
+     * Save the page loaded in current tab and share the saved page.
+     *
+     * @param activity The activity used for sharing and file provider interaction.
+     * @param currentTab The current tab from which the page is being shared.
+     * @param shareCallback The callback to be used to send the ShareParams. This will only be
+     *                      called if this function call returns true.
+     * @return true if the sharing of the page is possible. The callback will be invoked if
+     *                      saving the page succeeds.
+     */
+    public static boolean saveAndSharePage(
+            final Activity activity, Tab tab, final Callback<ShareParams> shareCallback) {
+        OfflinePageBridge offlinePageBridge = getInstance().getOfflinePageBridge(tab.getProfile());
+
+        if (offlinePageBridge == null) {
+            Log.e(TAG, "Unable to share current tab as an offline page.");
+            return false;
+        }
+
+        WebContents webContents = tab.getWebContents();
+        if (webContents == null) return false;
+
+        GetPagesByNamespaceForLivePageSharingCallback callback =
+                new GetPagesByNamespaceForLivePageSharingCallback(
+                        activity, tab, shareCallback, offlinePageBridge);
+        offlinePageBridge.getPagesByNamespace(
+                OfflinePageBridge.LIVE_PAGE_SHARING_NAMESPACE, callback);
+
+        return true;
+    }
+
+    /**
      * If possible, creates the ShareParams needed to share the current offline page loaded in the
      * provided tab as a MHTML file.
      *
@@ -373,7 +402,22 @@ public class OfflinePageUtils {
      */
     public static boolean maybeShareOfflinePage(
             final Activity activity, Tab tab, final Callback<ShareParams> shareCallback) {
+        if (!OfflinePageBridge.isPageSharingEnabled()) return false;
+
         if (tab == null) return false;
+
+        boolean isOfflinePage = OfflinePageUtils.isOfflinePage(tab);
+        RecordHistogram.recordBooleanHistogram("OfflinePages.SharedPageWasOffline", isOfflinePage);
+
+        // If the current tab is not showing an offline page, try to see if we should do live page
+        // sharing.
+        if (!isOfflinePage) {
+            if (ChromeFeatureList.isEnabled(ChromeFeatureList.OFFLINE_PAGES_LIVE_PAGE_SHARING)) {
+                return saveAndSharePage(activity, tab, shareCallback);
+            } else {
+                return false;
+            }
+        }
 
         OfflinePageBridge offlinePageBridge = getInstance().getOfflinePageBridge(tab.getProfile());
 
@@ -386,11 +430,40 @@ public class OfflinePageUtils {
         if (webContents == null) return false;
 
         OfflinePageItem offlinePage = offlinePageBridge.getOfflinePage(webContents);
+        if (offlinePage == null) return false;
+
         String offlinePath = offlinePage.getFilePath();
 
         final String pageUrl = tab.getUrl();
+        // We share temporary pages by content URI to prevent unanticipated side effects in the
+        // public directory. Temporary pages are ones not in a user requested download namespace.
+        Uri uri;
+        boolean isPageUserRequested = offlinePageBridge.isUserRequestedDownloadNamespace(
+                offlinePage.getClientId().getNamespace());
+        // Ensure that we have a file path that is longer than just "/".
+        if (!isPageUserRequested && offlinePath.length() > 1) {
+            File file = new File(offlinePath);
+            // We might get an exception if chrome does not have sharing roots configured.  If so,
+            // just share by URL of the original page instead of sharing the offline page.
+            try {
+                uri = (new FileProviderHelper()).getContentUriFromFile(file);
+            } catch (Exception e) {
+                uri = Uri.parse(pageUrl);
+            }
+        } else {
+            uri = Uri.parse(pageUrl);
+        }
 
-        if (!isOfflinePageShareable(offlinePageBridge, offlinePage, pageUrl)) return false;
+        if (!isOfflinePageShareable(offlinePageBridge, offlinePage, uri)) return false;
+
+        if (!isPageUserRequested || !offlinePageBridge.isInPrivateDirectory(offlinePath)) {
+            // Share pages temporary pages and pages already in a public location.
+            final String pageTitle = tab.getTitle();
+            final File offlinePageFile = new File(offlinePath);
+            sharePage(activity, uri.toString(), pageTitle, offlinePath, offlinePageFile,
+                    shareCallback);
+            return true;
+        }
 
         // The file access permission is needed since we may need to publish the archive file
         // if it resides in internal directory.
@@ -400,16 +473,9 @@ public class OfflinePageUtils {
                 return;
             }
 
-            // If the page is not in a public location, we must publish it before sharing it.
-            if (offlinePageBridge.isInPrivateDirectory(offlinePath)) {
-                publishThenShareInternalPage(
-                        activity, offlinePageBridge, offlinePage, shareCallback);
-                return;
-            }
-
-            final String pageTitle = tab.getTitle();
-            final File offlinePageFile = new File(offlinePath);
-            sharePage(activity, pageUrl, pageTitle, offlinePath, offlinePageFile, shareCallback);
+            // If a user requested page is not in a public location, we must publish it before
+            // sharing it.
+            publishThenShareInternalPage(activity, offlinePageBridge, offlinePage, shareCallback);
         });
 
         return true;
@@ -423,22 +489,14 @@ public class OfflinePageUtils {
      * @return true if this page can be shared.
      */
     public static boolean isOfflinePageShareable(
-            OfflinePageBridge offlinePageBridge, OfflinePageItem offlinePage, String pageUri) {
-        // Return false if there is no offline page or sharing is not enabled.
-        if (offlinePage == null || !OfflinePageBridge.isPageSharingEnabled()) return false;
-
-        // We share temporary pages by URL instead of sharing the page to prevent unanticipated side
-        // effects in the public directory.
-        // TODO(petewil): https://crbug.com/831780 - Desired long term behavior is to share the page
-        // with a content URI instead of as a URL, so all offline pages are shared as MHTML.
-        if (isTemporaryNamespace(offlinePage.getClientId().getNamespace())) return false;
+            OfflinePageBridge offlinePageBridge, OfflinePageItem offlinePage, Uri uri) {
+        // Return false if there is no offline page.
+        if (offlinePage == null) return false;
 
         String offlinePath = offlinePage.getFilePath();
-        Uri uri = Uri.parse(pageUri);
 
         // If we have a content or file Uri, then we can share the page.
         if (isSchemeContentOrFile(uri)) {
-            assert offlinePath.isEmpty();
             return true;
         }
 
@@ -464,17 +522,6 @@ public class OfflinePageUtils {
         return isContentScheme || isFileScheme;
     }
 
-    /**
-     * Determines if the page is in one of the temporary namespaces.
-     * @param namespace Namespace of the page in question.
-     * @return true if the page is in a temporary namespace.
-     */
-    public static boolean isTemporaryNamespace(String namespace) {
-        return namespace.equals(OfflinePageBridge.BOOKMARK_NAMESPACE)
-                || namespace.equals(OfflinePageBridge.LAST_N_NAMESPACE)
-                || namespace.equals(OfflinePageBridge.CCT_NAMESPACE)
-                || namespace.equals(OfflinePageBridge.SUGGESTED_ARTICLES_NAMESPACE);
-    }
 
     /**
      * For internal pages, we must publish them, then share them.
@@ -505,13 +552,8 @@ public class OfflinePageUtils {
     public static void sharePublishedPage(OfflinePageItem page, final Activity activity,
             final Callback<ShareParams> shareCallback) {
         if (page == null) {
-            // Set share directly to true and the source component name to null to indicate failure,
-            // causing ShareHelper.share() to return.
-            ShareParams shareParams = new ShareParams.Builder(activity, "", "")
-                                              .setShareDirectly(true)
-                                              .setSourcePackageName(null)
-                                              .build();
-            shareCallback.onResult(shareParams);
+            // For errors, we don't call the shareCallback.  The callback only causes the page to be
+            // shared, and does not report errors, and is not needed to continue processing.
             return;
         }
         final String pageUrl = page.getUrl();
@@ -526,9 +568,9 @@ public class OfflinePageUtils {
     public static void sharePage(Activity activity, String pageUrl, String pageTitle,
             String offlinePath, File offlinePageFile, final Callback<ShareParams> shareCallback) {
         RecordUserAction.record("OfflinePages.Sharing.SharePageFromOverflowMenu");
-        AsyncTask<Void, Void, Uri> task = new AsyncTask<Void, Void, Uri>() {
+        AsyncTask<Uri> task = new AsyncTask<Uri>() {
             @Override
-            protected Uri doInBackground(Void... v) {
+            protected Uri doInBackground() {
                 // If we have a content or file URI, we will not have a filename, just return the
                 // URI.
                 if (offlinePath.isEmpty()) {
@@ -568,10 +610,11 @@ public class OfflinePageUtils {
      * the URL to ensure loading a specific version of offline page.
      * @param url       The url of the offline page to open.
      * @param offlineId The ID of the offline page to open.
+     * @param location  Indicates where the offline page is launched.
      * @param callback  The callback to pass back the LoadUrlParams for launching an URL.
      */
-    public static void getLoadUrlParamsForOpeningOfflineVersion(
-            final String url, long offlineId, Callback<LoadUrlParams> callback) {
+    public static void getLoadUrlParamsForOpeningOfflineVersion(final String url, long offlineId,
+            final @LaunchLocation int location, Callback<LoadUrlParams> callback) {
         OfflinePageBridge offlinePageBridge =
                 getInstance().getOfflinePageBridge(Profile.getLastUsedProfile());
         if (offlinePageBridge == null) {
@@ -579,22 +622,15 @@ public class OfflinePageUtils {
             return;
         }
 
-        offlinePageBridge.getLaunchUrlByOfflineId(offlineId, (launchUrl) -> {
-            if (launchUrl == null) callback.onResult(null);
-            LoadUrlParams params = new LoadUrlParams(launchUrl);
-            Map<String, String> headers = new HashMap<String, String>();
-            headers.put(
-                    "X-Chrome-offline", "persist=1 reason=download id=" + Long.toString(offlineId));
-            params.setExtraHeaders(headers);
-            callback.onResult(params);
-        });
+        offlinePageBridge.getLoadUrlParamsByOfflineId(
+                offlineId, location, (loadUrlParams) -> { callback.onResult(loadUrlParams); });
     }
 
     /**
      * A load url parameters to handle the intent for viewing MHTML file or content. If the
      * trusted offline page is found, the URL (http/https) of the offline page is to be opened.
      * Otherwise, the file or content URL from the intent will be launched.
-     * @param internUrl URL from the intent.
+     * @param intentUrl URL from the intent.
      * @param callback  The callback to pass back the launching URL and extra headers.
      */
     public static void getLoadUrlParamsForOpeningMhtmlFileOrContent(
@@ -687,13 +723,8 @@ public class OfflinePageUtils {
         }
 
         @Override
-        public void didAddTab(Tab tab, TabModel.TabLaunchType type) {
+        public void didAddTab(Tab tab, @TabModel.TabLaunchType int type) {
             tab.addObserver(sTabRestoreTracker);
-
-            Profile profile = mTabModelSelector.getModel(tab.isIncognito()).getProfile();
-            OfflinePageBridge bridge = OfflinePageBridge.getForProfile(profile);
-            if (bridge == null) return;
-            bridge.registerRecentTab(tab.getId());
         }
 
         @Override
@@ -712,10 +743,7 @@ public class OfflinePageUtils {
             OfflinePageBridge bridge = OfflinePageBridge.getForProfile(profile);
             if (bridge == null) return;
 
-            // First, unregister the tab with the UI.
-            bridge.unregisterRecentTab(tabId);
-
-            // Then, delete any "Last N" offline pages as well.  This is an optimization because
+            // Delete any "Last N" offline pages as well. This is an optimization because
             // the UI will no longer show the page, and the page would also be cleaned up by GC
             // given enough time.
             ClientId clientId =
@@ -826,7 +854,7 @@ public class OfflinePageUtils {
          * If the tab was being restored, reports that it crashed while doing so.
          */
         @Override
-        public void onCrash(Tab tab, boolean sadTabShown) {
+        public void onCrash(Tab tab) {
             if (tab.isBeingRestored()) recordTabRestoreHistogram(TabRestoreType.CRASHED, null);
         }
     }
@@ -834,7 +862,7 @@ public class OfflinePageUtils {
     private static void recordTabRestoreHistogram(int tabRestoreType, String url) {
         Log.d(TAG, "Concluded tab restore: type=" + tabRestoreType + ", url=" + url);
         RecordHistogram.recordEnumeratedHistogram(
-                "OfflinePages.TabRestore", tabRestoreType, TabRestoreType.COUNT);
+                "OfflinePages.TabRestore", tabRestoreType, TabRestoreType.NUM_ENTRIES);
     }
 
     @VisibleForTesting

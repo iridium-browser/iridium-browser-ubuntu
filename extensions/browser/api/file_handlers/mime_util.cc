@@ -6,7 +6,7 @@
 
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "content/public/browser/browser_context.h"
@@ -61,10 +61,9 @@ void OnGetMimeTypeFromFileForNonNativeLocalPathCompleted(
 void OnGetMimeTypeFromMetadataForNonNativeLocalPathCompleted(
     const base::FilePath& local_path,
     const base::Callback<void(const std::string&)>& callback,
-    bool success,
-    const std::string& mime_type) {
-  if (success) {
-    callback.Run(mime_type);
+    const base::Optional<std::string>& mime_type) {
+  if (mime_type) {
+    callback.Run(mime_type.value());
     return;
   }
 
@@ -136,8 +135,8 @@ void GetMimeTypeForLocalPath(
     // it can be very slow).
     delegate->GetNonNativeLocalPathMimeType(
         context, local_path,
-        base::Bind(&OnGetMimeTypeFromMetadataForNonNativeLocalPathCompleted,
-                   local_path, callback));
+        base::BindOnce(&OnGetMimeTypeFromMetadataForNonNativeLocalPathCompleted,
+                       local_path, callback));
     return;
   }
 #endif

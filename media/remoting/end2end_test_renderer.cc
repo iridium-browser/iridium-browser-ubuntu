@@ -52,7 +52,7 @@ class TestStreamSender final : public mojom::RemotingDataStreamSender {
  private:
   void OnFrameRead(bool success) {
     DCHECK(success);
-    if (!send_frame_to_sink_cb_.is_null())
+    if (send_frame_to_sink_cb_)
       send_frame_to_sink_cb_.Run(next_frame_data_, type_);
     next_frame_data_.resize(0);
   }
@@ -106,7 +106,7 @@ class TestRemoter final : public mojom::Remoter {
   }
 
   void SendMessageToSink(const std::vector<uint8_t>& message) override {
-    if (!send_message_to_sink_cb_.is_null())
+    if (send_message_to_sink_cb_)
       send_message_to_sink_cb_.Run(message);
   }
 
@@ -216,6 +216,20 @@ void End2EndTestRenderer::SendFrameToSink(const std::vector<uint8_t>& frame,
 void End2EndTestRenderer::OnMessageFromSink(
     std::unique_ptr<std::vector<uint8_t>> message) {
   controller_->OnMessageFromSink(*message);
+}
+
+void End2EndTestRenderer::OnSelectedVideoTracksChanged(
+    const std::vector<DemuxerStream*>& enabled_tracks,
+    base::OnceClosure change_completed_cb) {
+  courier_renderer_->OnSelectedVideoTracksChanged(
+      enabled_tracks, std::move(change_completed_cb));
+}
+
+void End2EndTestRenderer::OnEnabledAudioTracksChanged(
+    const std::vector<DemuxerStream*>& enabled_tracks,
+    base::OnceClosure change_completed_cb) {
+  courier_renderer_->OnEnabledAudioTracksChanged(
+      enabled_tracks, std::move(change_completed_cb));
 }
 
 }  // namespace remoting

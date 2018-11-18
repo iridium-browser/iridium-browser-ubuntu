@@ -83,11 +83,12 @@ class CastExtensionsBrowserClient : public ExtensionsBrowserClient {
   std::unique_ptr<ExtensionHostDelegate> CreateExtensionHostDelegate() override;
   bool DidVersionUpdate(content::BrowserContext* context) override;
   void PermitExternalProtocolHandler() override;
+  bool IsInDemoMode() override;
+  bool IsScreensaverInDemoMode(const std::string& app_id) override;
   bool IsRunningInForcedAppMode() override;
+  bool IsAppModeForcedForApp(const ExtensionId& id) override;
   bool IsLoggedInAsPublicAccount() override;
   ExtensionSystemProvider* GetExtensionSystemFactory() override;
-  void RegisterExtensionFunctions(
-      ExtensionFunctionRegistry* registry) const override;
   void RegisterExtensionInterfaces(service_manager::BinderRegistryWithArgs<
                                        content::RenderFrameHost*>* registry,
                                    content::RenderFrameHost* render_frame_host,
@@ -111,7 +112,6 @@ class CastExtensionsBrowserClient : public ExtensionsBrowserClient {
   KioskDelegate* GetKioskDelegate() override;
   bool IsLockScreenContext(content::BrowserContext* context) override;
   std::string GetApplicationLocale() override;
-  bool IsAppModeForcedForApp(const ExtensionId& id) override;
 
   // Sets the API client.
   void SetAPIClientForTest(ExtensionsAPIClient* api_client);

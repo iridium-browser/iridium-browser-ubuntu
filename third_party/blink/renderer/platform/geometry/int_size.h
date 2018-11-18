@@ -44,25 +44,27 @@ typedef struct CGSize CGSize;
 
 namespace gfx {
 class Size;
+class Vector2d;
 }
 
 namespace blink {
 
 class PLATFORM_EXPORT IntSize {
-  DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
+  DISALLOW_NEW();
 
  public:
-  IntSize() : width_(0), height_(0) {}
-  IntSize(int width, int height) : width_(width), height_(height) {}
+  constexpr IntSize() : width_(0), height_(0) {}
+  constexpr IntSize(int width, int height) : width_(width), height_(height) {}
+  explicit IntSize(const gfx::Size&);
 
-  int Width() const { return width_; }
-  int Height() const { return height_; }
+  constexpr int Width() const { return width_; }
+  constexpr int Height() const { return height_; }
 
   void SetWidth(int width) { width_ = width; }
   void SetHeight(int height) { height_ = height; }
 
-  bool IsEmpty() const { return width_ <= 0 || height_ <= 0; }
-  bool IsZero() const { return !width_ && !height_; }
+  constexpr bool IsEmpty() const { return width_ <= 0 || height_ <= 0; }
+  constexpr bool IsZero() const { return !width_ && !height_; }
 
   float AspectRatio() const {
     return static_cast<float>(width_) / static_cast<float>(height_);
@@ -113,7 +115,12 @@ class PLATFORM_EXPORT IntSize {
   explicit operator CGSize() const;
 #endif
 
-  operator gfx::Size() const;
+  // Use this only for logical sizes, which can not be negative. Things that are
+  // offsets instead, and can be negative, should use a gfx::Vector2d.
+  explicit operator gfx::Size() const;
+  // IntSize is used as an offset, which can be negative, but gfx::Size can not.
+  // The Vector2d type is used for offsets instead.
+  explicit operator gfx::Vector2d() const;
 
   String ToString() const;
 

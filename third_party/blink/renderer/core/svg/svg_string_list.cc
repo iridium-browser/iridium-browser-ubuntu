@@ -20,32 +20,30 @@
 
 #include "third_party/blink/renderer/core/svg/svg_string_list.h"
 
-#include "third_party/blink/renderer/bindings/core/v8/exception_messages.h"
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
-#include "third_party/blink/renderer/core/svg/svg_element.h"
 #include "third_party/blink/renderer/core/svg/svg_parser_utilities.h"
+#include "third_party/blink/renderer/platform/bindings/exception_messages.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
 namespace blink {
 
-SVGStringList::SVGStringList() = default;
+SVGStringListBase::~SVGStringListBase() = default;
 
-SVGStringList::~SVGStringList() = default;
-
-void SVGStringList::Initialize(const String& item) {
+void SVGStringListBase::Initialize(const String& item) {
   values_.clear();
   values_.push_back(item);
 }
 
-String SVGStringList::GetItem(size_t index, ExceptionState& exception_state) {
+String SVGStringListBase::GetItem(uint32_t index,
+                                  ExceptionState& exception_state) {
   if (!CheckIndexBound(index, exception_state))
     return String();
 
   return values_.at(index);
 }
 
-void SVGStringList::InsertItemBefore(const String& new_item, size_t index) {
+void SVGStringListBase::InsertItemBefore(const String& new_item,
+                                         uint32_t index) {
   // Spec: If the index is greater than or equal to numberOfItems, then the new
   // item is appended to the end of the list.
   if (index > values_.size())
@@ -58,8 +56,8 @@ void SVGStringList::InsertItemBefore(const String& new_item, size_t index) {
   values_.insert(index, new_item);
 }
 
-String SVGStringList::RemoveItem(size_t index,
-                                 ExceptionState& exception_state) {
+String SVGStringListBase::RemoveItem(uint32_t index,
+                                     ExceptionState& exception_state) {
   if (!CheckIndexBound(index, exception_state))
     return String();
 
@@ -68,13 +66,13 @@ String SVGStringList::RemoveItem(size_t index,
   return old_item;
 }
 
-void SVGStringList::AppendItem(const String& new_item) {
+void SVGStringListBase::AppendItem(const String& new_item) {
   values_.push_back(new_item);
 }
 
-void SVGStringList::ReplaceItem(const String& new_item,
-                                size_t index,
-                                ExceptionState& exception_state) {
+void SVGStringListBase::ReplaceItem(const String& new_item,
+                                    uint32_t index,
+                                    ExceptionState& exception_state) {
   if (!CheckIndexBound(index, exception_state))
     return;
 
@@ -83,21 +81,23 @@ void SVGStringList::ReplaceItem(const String& new_item,
 }
 
 template <typename CharType>
-void SVGStringList::ParseInternal(const CharType*& ptr, const CharType* end) {
-  const UChar kDelimiter = ' ';
-
+void SVGStringListBase::ParseInternal(const CharType*& ptr,
+                                      const CharType* end,
+                                      char list_delimiter) {
   while (ptr < end) {
     const CharType* start = ptr;
-    while (ptr < end && *ptr != kDelimiter && !IsHTMLSpace<CharType>(*ptr))
+    while (ptr < end && *ptr != list_delimiter && !IsHTMLSpace<CharType>(*ptr))
       ptr++;
     if (ptr == start)
       break;
-    values_.push_back(String(start, ptr - start));
-    SkipOptionalSVGSpacesOrDelimiter(ptr, end, kDelimiter);
+    values_.push_back(String(start, static_cast<wtf_size_t>(ptr - start)));
+    SkipOptionalSVGSpacesOrDelimiter(ptr, end, list_delimiter);
   }
 }
 
-SVGParsingError SVGStringList::SetValueAsString(const String& data) {
+SVGParsingError SVGStringListBase::SetValueAsStringWithDelimiter(
+    const String& data,
+    char list_delimiter) {
   // FIXME: Add more error checking and reporting.
   values_.clear();
 
@@ -107,16 +107,20 @@ SVGParsingError SVGStringList::SetValueAsString(const String& data) {
   if (data.Is8Bit()) {
     const LChar* ptr = data.Characters8();
     const LChar* end = ptr + data.length();
-    ParseInternal(ptr, end);
+    ParseInternal(ptr, end, list_delimiter);
   } else {
     const UChar* ptr = data.Characters16();
     const UChar* end = ptr + data.length();
-    ParseInternal(ptr, end);
+    ParseInternal(ptr, end, list_delimiter);
   }
   return SVGParseStatus::kNoError;
 }
 
-String SVGStringList::ValueAsString() const {
+String SVGStringListBase::ValueAsStringWithDelimiter(
+    char list_delimiter) const {
+  if (values_.IsEmpty())
+    return String();
+
   StringBuilder builder;
 
   Vector<String>::const_iterator it = values_.begin();
@@ -126,7 +130,7 @@ String SVGStringList::ValueAsString() const {
     ++it;
 
     for (; it != it_end; ++it) {
-      builder.Append(' ');
+      builder.Append(list_delimiter);
       builder.Append(*it);
     }
   }
@@ -134,38 +138,39 @@ String SVGStringList::ValueAsString() const {
   return builder.ToString();
 }
 
-bool SVGStringList::CheckIndexBound(size_t index,
-                                    ExceptionState& exception_state) {
+bool SVGStringListBase::CheckIndexBound(uint32_t index,
+                                        ExceptionState& exception_state) {
   if (index >= values_.size()) {
     exception_state.ThrowDOMException(
-        kIndexSizeError, ExceptionMessages::IndexExceedsMaximumBound(
-                             "index", index, values_.size()));
+        DOMExceptionCode::kIndexSizeError,
+        ExceptionMessages::IndexExceedsMaximumBound("index", index,
+                                                    values_.size()));
     return false;
   }
 
   return true;
 }
 
-void SVGStringList::Add(SVGPropertyBase* other, SVGElement* context_element) {
+void SVGStringListBase::Add(SVGPropertyBase* other,
+                            SVGElement* context_element) {
   // SVGStringList is never animated.
   NOTREACHED();
 }
 
-void SVGStringList::CalculateAnimatedValue(SVGAnimationElement*,
-                                           float,
-                                           unsigned,
-                                           SVGPropertyBase*,
-                                           SVGPropertyBase*,
-                                           SVGPropertyBase*,
-                                           SVGElement*) {
+void SVGStringListBase::CalculateAnimatedValue(SVGAnimationElement*,
+                                               float,
+                                               unsigned,
+                                               SVGPropertyBase*,
+                                               SVGPropertyBase*,
+                                               SVGPropertyBase*,
+                                               SVGElement*) {
   // SVGStringList is never animated.
   NOTREACHED();
 }
 
-float SVGStringList::CalculateDistance(SVGPropertyBase*, SVGElement*) {
+float SVGStringListBase::CalculateDistance(SVGPropertyBase*, SVGElement*) {
   // SVGStringList is never animated.
   NOTREACHED();
-
   return -1.0f;
 }
 

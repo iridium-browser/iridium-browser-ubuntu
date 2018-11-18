@@ -10,7 +10,7 @@
 #include "base/debug/stack_trace.h"
 #include "base/logging.h"
 #include "content/common/input/ime_text_span_conversions.h"
-#include "content/renderer/gpu/render_widget_compositor.h"
+#include "content/renderer/gpu/layer_tree_view.h"
 #include "content/renderer/ime_event_guard.h"
 #include "content/renderer/input/widget_input_handler_manager.h"
 #include "content/renderer/render_thread_impl.h"
@@ -33,7 +33,8 @@ FrameInputHandlerImpl::FrameInputHandlerImpl(
   weak_this_ = weak_ptr_factory_.GetWeakPtr();
   // If we have created an input event queue move the mojo request over to the
   // compositor thread.
-  if (RenderThreadImpl::current()->compositor_task_runner() &&
+  if (RenderThreadImpl::current() &&
+      RenderThreadImpl::current()->compositor_task_runner() &&
       input_event_queue_) {
     // Mojo channel bound on compositor thread.
     RenderThreadImpl::current()->compositor_task_runner()->PostTask(
@@ -57,11 +58,11 @@ void FrameInputHandlerImpl::CreateMojoService(
   new FrameInputHandlerImpl(render_frame, std::move(request));
 }
 
-void FrameInputHandlerImpl::RunOnMainThread(const base::Closure& closure) {
+void FrameInputHandlerImpl::RunOnMainThread(base::OnceClosure closure) {
   if (input_event_queue_) {
-    input_event_queue_->QueueClosure(closure);
+    input_event_queue_->QueueClosure(std::move(closure));
   } else {
-    closure.Run();
+    std::move(closure).Run();
   }
 }
 
@@ -213,7 +214,7 @@ void FrameInputHandlerImpl::Replace(const base::string16& word) {
   if (!render_frame_)
     return;
   blink::WebLocalFrame* frame = render_frame_->GetWebFrame();
-  if (frame->HasSelection())
+  if (!frame->HasSelection())
     frame->SelectWordAroundCaret();
   frame->ReplaceSelection(blink::WebString::FromUTF16(word));
   render_frame_->SyncSelectionIfRequired();
@@ -279,12 +280,55 @@ void FrameInputHandlerImpl::SelectRange(const gfx::Point& base,
 
   if (!render_frame_)
     return;
-  RenderViewImpl* render_view = render_frame_->render_view();
+  RenderWidget* window_widget = render_frame_->render_view()->GetWidget();
   HandlingState handling_state(render_frame_, UpdateState::kIsSelectingRange);
   render_frame_->GetWebFrame()->SelectRange(
-      render_view->ConvertWindowPointToViewport(base),
-      render_view->ConvertWindowPointToViewport(extent));
+      window_widget->ConvertWindowPointToViewport(base),
+      window_widget->ConvertWindowPointToViewport(extent));
 }
+
+#if defined(OS_ANDROID)
+void FrameInputHandlerImpl::SelectWordAroundCaret(
+    SelectWordAroundCaretCallback callback) {
+  if (!main_thread_task_runner_->BelongsToCurrentThread()) {
+    RunOnMainThread(
+        base::BindOnce(&FrameInputHandlerImpl::SelectWordAroundCaret,
+                       weak_this_, std::move(callback)));
+    return;
+  }
+
+  bool did_select = false;
+  int start_adjust = 0;
+  int end_adjust = 0;
+  if (render_frame_) {
+    blink::WebLocalFrame* frame = render_frame_->GetWebFrame();
+    blink::WebRange initial_range = frame->SelectionRange();
+    render_frame_->GetRenderWidget()->SetHandlingInputEvent(true);
+    if (!initial_range.IsNull())
+      did_select = frame->SelectWordAroundCaret();
+    if (did_select) {
+      blink::WebRange adjusted_range = frame->SelectionRange();
+      DCHECK(!adjusted_range.IsNull());
+      start_adjust = adjusted_range.StartOffset() - initial_range.StartOffset();
+      end_adjust = adjusted_range.EndOffset() - initial_range.EndOffset();
+    }
+    render_frame_->GetRenderWidget()->SetHandlingInputEvent(false);
+  }
+
+  // If the mojom channel is registered with compositor thread, we have to run
+  // the callback on compositor thread. Otherwise run it on main thread. Mojom
+  // requires the callback runs on the same thread.
+  if (RenderThreadImpl::current() &&
+      RenderThreadImpl::current()->compositor_task_runner() &&
+      input_event_queue_) {
+    RenderThreadImpl::current()->compositor_task_runner()->PostTask(
+        FROM_HERE, base::BindOnce(std::move(callback), did_select, start_adjust,
+                                  end_adjust));
+  } else {
+    std::move(callback).Run(did_select, start_adjust, end_adjust);
+  }
+}
+#endif  // defined(OS_ANDROID)
 
 void FrameInputHandlerImpl::AdjustSelectionByCharacterOffset(
     int32_t start,
@@ -333,7 +377,8 @@ void FrameInputHandlerImpl::MoveRangeSelectionExtent(const gfx::Point& extent) {
     return;
   HandlingState handling_state(render_frame_, UpdateState::kIsSelectingRange);
   render_frame_->GetWebFrame()->MoveRangeSelectionExtent(
-      render_frame_->render_view()->ConvertWindowPointToViewport(extent));
+      render_frame_->render_view()->GetWidget()->ConvertWindowPointToViewport(
+          extent));
 }
 
 void FrameInputHandlerImpl::ScrollFocusedEditableNodeIntoRect(
@@ -361,9 +406,9 @@ void FrameInputHandlerImpl::MoveCaret(const gfx::Point& point) {
   if (!render_frame_)
     return;
 
-  RenderViewImpl* render_view = render_frame_->render_view();
   render_frame_->GetWebFrame()->MoveCaretSelection(
-      render_view->ConvertWindowPointToViewport(point));
+      render_frame_->render_view()->GetWidget()->ConvertWindowPointToViewport(
+          point));
 }
 
 void FrameInputHandlerImpl::GetWidgetInputHandler(

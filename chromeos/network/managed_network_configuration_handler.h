@@ -20,6 +20,7 @@
 namespace base {
 class DictionaryValue;
 class ListValue;
+class Value;
 }
 
 namespace chromeos {
@@ -83,11 +84,16 @@ class CHROMEOS_EXPORT ManagedNetworkConfigurationHandler {
   // |service_path|. A network can be initially configured by calling
   // CreateConfiguration or if it is managed by a policy. The given properties
   // will be merged with the existing settings, and it won't clear any existing
-  // properties. This method is expected to be called by a user initiated
-  // action (see NetworkConfigurationObserver::Source).
+  // properties.
   virtual void SetProperties(
       const std::string& service_path,
       const base::DictionaryValue& user_settings,
+      const base::Closure& callback,
+      const network_handler::ErrorCallback& error_callback) = 0;
+
+  virtual void SetManagerProperty(
+      const std::string& property_name,
+      const base::Value& value,
       const base::Closure& callback,
       const network_handler::ErrorCallback& error_callback) = 0;
 
@@ -95,9 +101,7 @@ class CHROMEOS_EXPORT ManagedNetworkConfigurationHandler {
   // and returns the new identifier to |callback| if successful. Fails if the
   // network was already configured by a call to this function or because of a
   // policy. The new configuration will be owned by user |userhash|. If
-  // |userhash| is empty, the new configuration will be shared. This method is
-  // expected to be called by a user initiated action (see
-  // NetworkConfigurationObserver::Source).
+  // |userhash| is empty, the new configuration will be shared.
   virtual void CreateConfiguration(
       const std::string& userhash,
       const base::DictionaryValue& properties,
@@ -107,8 +111,6 @@ class CHROMEOS_EXPORT ManagedNetworkConfigurationHandler {
   // Removes the user's configuration from the network with |service_path|. The
   // network may still show up in the visible networks after this, but no user
   // configuration will remain. If it was managed, it will still be configured.
-  // This method is expected to be called by a user initiated action (see
-  // NetworkConfigurationObserver::Source).
   virtual void RemoveConfiguration(
       const std::string& service_path,
       const base::Closure& callback,
@@ -162,6 +164,19 @@ class CHROMEOS_EXPORT ManagedNetworkConfigurationHandler {
       const std::string& guid,
       const std::string& profile_path,
       ::onc::ONCSource* onc_source) const = 0;
+
+  // Return true if the AllowOnlyPolicyNetworksToConnect policy is enabled.
+  virtual bool AllowOnlyPolicyNetworksToConnect() const = 0;
+
+  // Return true if the AllowOnlyPolicyNetworksToConnectIfAvailable policy is
+  // enabled.
+  virtual bool AllowOnlyPolicyNetworksToConnectIfAvailable() const = 0;
+
+  // Return true if the AllowOnlyPolicyNetworksToAutoconnect policy is enabled.
+  virtual bool AllowOnlyPolicyNetworksToAutoconnect() const = 0;
+
+  // Return the list of blacklisted WiFi networks (identified by HexSSIDs).
+  virtual std::vector<std::string> GetBlacklistedHexSSIDs() const = 0;
 
  private:
   DISALLOW_ASSIGN(ManagedNetworkConfigurationHandler);

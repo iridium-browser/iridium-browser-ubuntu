@@ -5,20 +5,19 @@
 #ifndef IOS_CHROME_BROWSER_PASSWORDS_UPDATE_PASSWORD_INFOBAR_CONTROLLER_H_
 #define IOS_CHROME_BROWSER_PASSWORDS_UPDATE_PASSWORD_INFOBAR_CONTROLLER_H_
 
-#include "ios/chrome/browser/infobars/confirm_infobar_controller.h"
+#import "ios/chrome/browser/passwords/ios_password_infobar_controller.h"
 
 class IOSChromeUpdatePasswordInfoBarDelegate;
 
 // Controller for the Update Password info bar. Presents an info bar that asks
 // the user whether they want to update their password.
-@interface UpdatePasswordInfoBarController : ConfirmInfoBarController
+@interface UpdatePasswordInfoBarController : IOSPasswordInfoBarController
 
-// The base view controller from which to present UI.
-@property(nonatomic, readwrite, weak) UIViewController* baseViewController;
+- (instancetype)init NS_UNAVAILABLE;
 
-- (InfoBarView*)viewForDelegate:
-                    (IOSChromeUpdatePasswordInfoBarDelegate*)delegate
-                          frame:(CGRect)frame;
+- (instancetype)
+initWithBaseViewController:(UIViewController*)baseViewController
+           infoBarDelegate:(IOSChromeUpdatePasswordInfoBarDelegate*)delegate;
 
 @end
 

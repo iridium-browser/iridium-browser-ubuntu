@@ -23,6 +23,7 @@
 namespace content {
 
 class ServiceWorkerRegistration;
+class StoragePartition;
 
 // Base class containing common functionality needed in unit tests written for
 // the Background Fetch feature.
@@ -44,12 +45,24 @@ class BackgroundFetchTestBase : public ::testing::Test {
   // ServiceWorkerRegistration will be kept alive for the test's lifetime.
   int64_t RegisterServiceWorker();
 
+  // Unregisters the test Service Worker and verifies that the unregistration
+  // succeeded.
+  void UnregisterServiceWorker(int64_t service_worker_registration_id);
+
   // Creates a ServiceWorkerFetchRequest instance for the given details and
   // provides a faked |response|.
   ServiceWorkerFetchRequest CreateRequestWithProvidedResponse(
       const std::string& method,
       const GURL& url,
       std::unique_ptr<TestResponse> response);
+
+  // Creates a BackgroundFetchRegistration object.
+  std::unique_ptr<BackgroundFetchRegistration>
+  CreateBackgroundFetchRegistration(
+      const std::string& developer_id,
+      const std::string& unique_id,
+      blink::mojom::BackgroundFetchResult result,
+      blink::mojom::BackgroundFetchFailureReason failure_reason);
 
   // Returns the embedded worker test helper instance, which can be used to
   // influence the behavior of the Service Worker events.
@@ -59,6 +72,9 @@ class BackgroundFetchTestBase : public ::testing::Test {
 
   // Returns the browser context that should be used for the tests.
   BrowserContext* browser_context() { return &browser_context_; }
+
+  // Returns the once-initialized default storage partition to be used in tests.
+  StoragePartition* storage_partition() { return storage_partition_; }
 
   // Returns the origin that should be used for Background Fetch tests.
   const url::Origin& origin() const { return origin_; }
@@ -74,6 +90,10 @@ class BackgroundFetchTestBase : public ::testing::Test {
   BackgroundFetchEmbeddedWorkerTestHelper embedded_worker_test_helper_;
 
   url::Origin origin_;
+
+  StoragePartition* storage_partition_;
+
+  int next_pattern_id_ = 0;
 
   // Vector of ServiceWorkerRegistration instances that have to be kept alive
   // for the lifetime of this test.

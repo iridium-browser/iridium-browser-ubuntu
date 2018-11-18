@@ -16,7 +16,7 @@
 #include "base/logging.h"
 #include "base/memory/linked_ptr.h"
 #include "base/memory/ptr_util.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop/message_loop_current.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
@@ -133,7 +133,7 @@ void ExecuteGetSessions(const Command& session_capabilities_command,
   }
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE, run_loop.QuitClosure(), base::TimeDelta::FromSeconds(10));
-  base::MessageLoop::current()->SetNestableTasksAllowed(true);
+  base::MessageLoopCurrent::Get()->SetNestableTasksAllowed(true);
   run_loop.Run();
 
   callback.Run(Status(kOk), std::move(session_list), session_id, false);
@@ -185,7 +185,7 @@ void ExecuteQuitAll(
       FROM_HERE, run_loop.QuitClosure(), base::TimeDelta::FromSeconds(10));
   // Uses a nested run loop to block this thread until all the quit
   // commands have executed, or the timeout expires.
-  base::MessageLoop::current()->SetNestableTasksAllowed(true);
+  base::MessageLoopCurrent::Get()->SetNestableTasksAllowed(true);
   run_loop.Run();
   callback.Run(Status(kOk), std::unique_ptr<base::Value>(),
                session_id, false);
@@ -207,19 +207,24 @@ void ExecuteSessionCommandOnSessionThread(
     const CommandCallback& callback_on_cmd,
     const base::Closure& terminate_on_cmd) {
   Session* session = GetThreadLocalSession();
+
   if (!session) {
     cmd_task_runner->PostTask(
         FROM_HERE,
-        base::BindOnce(callback_on_cmd,
-                       Status(return_ok_without_session ? kOk : kNoSuchSession),
-                       std::unique_ptr<base::Value>(), std::string(), false));
+        base::BindOnce(
+            callback_on_cmd,
+            Status(return_ok_without_session ? kOk : kInvalidSessionId),
+            std::unique_ptr<base::Value>(), std::string(), kW3CDefault));
     return;
   }
 
   if (IsVLogOn(0)) {
     if (!session->driver_log ||
         session->driver_log->min_level() != Log::Level::kOff) {
-      VLOG(0) << "COMMAND " << command_name << " "
+      // Note: ChromeDriver log-replay depends on the format of this logging.
+      // see chromedriver/log_replay/client_replay.py
+      VLOG(0) << "[" << session->id << "] "
+              << "COMMAND " << command_name << " "
               << FormatValueForDisplay(*params);
     }
   }
@@ -269,13 +274,16 @@ void ExecuteSessionCommandOnSessionThread(
     if (IsVLogOn(0)) {
       std::string result;
       if (status.IsError()) {
-        result = status.message();
+        result = "ERROR " + status.message();
       } else if (value) {
         result = FormatValueForDisplay(*value);
       }
       if (!session->driver_log ||
           session->driver_log->min_level() != Log::Level::kOff) {
-        VLOG(0) << "RESPONSE " << command_name
+        // Note: ChromeDriver log-replay depends on the format of this logging.
+        // see chromedriver/log_replay/client_replay.py
+        VLOG(0) << "[" << session->id << "] "
+                << "RESPONSE " << command_name
                 << (result.length() ? " " + result : "");
       }
     }
@@ -308,10 +316,11 @@ void ExecuteSessionCommand(
     const base::DictionaryValue& params,
     const std::string& session_id,
     const CommandCallback& callback) {
-  SessionThreadMap::iterator iter = session_thread_map->find(session_id);
+  auto iter = session_thread_map->find(session_id);
   if (iter == session_thread_map->end()) {
-    Status status(return_ok_without_session ? kOk : kNoSuchSession);
-    callback.Run(status, std::unique_ptr<base::Value>(), session_id, false);
+    Status status(return_ok_without_session ? kOk : kInvalidSessionId);
+    callback.Run(status, std::unique_ptr<base::Value>(), session_id,
+                 kW3CDefault);
   } else {
     iter->second->task_runner()->PostTask(
         FROM_HERE,

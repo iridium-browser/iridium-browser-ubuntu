@@ -14,13 +14,15 @@ aggregate_vector_icons("components_vector_icons") {
     "business.icon",
     "check_circle.icon",
     "close.icon",
-    "close_16.icon",
+    "close_rounded.icon",
     "edit.icon",
+    "ethernet.icon",
     "folder.icon",
     "folder_managed.icon",
     "folder_managed_touch.icon",
     "folder_touch.icon",
     "forward_arrow.icon",
+    "headset.icon",
     "help_outline.icon",
     "info_outline.icon",
     "location_on.icon",
@@ -39,11 +41,14 @@ aggregate_vector_icons("components_vector_icons") {
     "usb.icon",
     "videocam.icon",
     "warning.icon",
+    "wifi_add.icon",
   ]
 }
 
 static_library("vector_icons") {
   sources = get_target_outputs(":components_vector_icons")
+
+  defines = [ "COMPONENTS_VECTOR_ICONS_IMPL" ]
 
   deps = [
     ":components_vector_icons",

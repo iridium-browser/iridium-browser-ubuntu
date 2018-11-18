@@ -19,6 +19,7 @@
 #include "chrome/renderer/searchbox/searchbox_extension.h"
 #include "components/favicon_base/favicon_types.h"
 #include "components/favicon_base/favicon_url_parser.h"
+#include "components/url_formatter/url_fixer.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_view.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
@@ -55,9 +56,10 @@ const char* GetIconTypeUrlHost(SearchBox::ImageSourceType type) {
       return "favicon";
     case SearchBox::THUMB:
       return "thumb";
-    default:
-      NOTREACHED();
+    case SearchBox::NONE:
+      break;
   }
+  NOTREACHED();
   return nullptr;
 }
 
@@ -65,7 +67,6 @@ const char* GetIconTypeUrlHost(SearchBox::ImageSourceType type) {
 // depending on |type| of image URL. Returns -1 if parse fails.
 int GetImagePathStartOfPageURL(SearchBox::ImageSourceType type,
                                const std::string& path) {
-  // TODO(huangs): Refactor this: http://crbug.com/468320.
   switch (type) {
     case SearchBox::FAVICON: {
       chrome::ParsedFaviconPath parsed;
@@ -74,11 +75,10 @@ int GetImagePathStartOfPageURL(SearchBox::ImageSourceType type,
     case SearchBox::THUMB: {
       return 0;
     }
-    default: {
-      NOTREACHED();
+    case SearchBox::NONE:
       break;
-    }
   }
+  NOTREACHED();
   return -1;
 }
 
@@ -203,6 +203,25 @@ bool TranslateIconRestrictedUrl(const GURL& transient_url,
   return true;
 }
 
+std::pair<GURL, bool> FixupAndValidateUrl(const std::string& url) {
+  GURL gurl = url_formatter::FixupURL(url, /*desired_tld=*/std::string());
+  if (!gurl.is_valid())
+    return std::make_pair(GURL(), false);
+  bool default_https = false;
+
+  // Unless "http" was specified, replaces FixupURL's default "http" with
+  // "https".
+  if (url.find(std::string("http://")) == std::string::npos &&
+      gurl.SchemeIs(url::kHttpScheme)) {
+    GURL::Replacements replacements;
+    replacements.SetSchemeStr(url::kHttpsScheme);
+    gurl = gurl.ReplaceComponents(replacements);
+    default_https = true;
+  }
+
+  return std::make_pair(gurl, default_https);
+}
+
 }  // namespace internal
 
 SearchBox::IconURLHelper::IconURLHelper() = default;
@@ -322,6 +341,87 @@ void SearchBox::UndoMostVisitedDeletion(
   embedded_search_service_->UndoMostVisitedDeletion(page_seq_no_, url);
 }
 
+bool SearchBox::IsCustomLinks() const {
+  return is_custom_links_;
+}
+
+void SearchBox::AddCustomLink(const GURL& url, const std::string& title) {
+  if (!url.is_valid()) {
+    AddCustomLinkResult(false);
+    return;
+  }
+  embedded_search_service_->AddCustomLink(
+      page_seq_no_, url, title,
+      base::BindOnce(&SearchBox::AddCustomLinkResult,
+                     weak_ptr_factory_.GetWeakPtr()));
+}
+
+void SearchBox::UpdateCustomLink(InstantRestrictedID link_id,
+                                 const GURL& new_url,
+                                 const std::string& new_title) {
+  GURL url = GetURLForMostVisitedItem(link_id);
+  if (!url.is_valid()) {
+    UpdateCustomLinkResult(false);
+    return;
+  }
+  embedded_search_service_->UpdateCustomLink(
+      page_seq_no_, url, new_url, new_title,
+      base::BindOnce(&SearchBox::UpdateCustomLinkResult,
+                     weak_ptr_factory_.GetWeakPtr()));
+}
+
+void SearchBox::DeleteCustomLink(InstantRestrictedID most_visited_item_id) {
+  GURL url = GetURLForMostVisitedItem(most_visited_item_id);
+  if (!url.is_valid()) {
+    DeleteCustomLinkResult(false);
+    return;
+  }
+  embedded_search_service_->DeleteCustomLink(
+      page_seq_no_, url,
+      base::BindOnce(&SearchBox::DeleteCustomLinkResult,
+                     weak_ptr_factory_.GetWeakPtr()));
+}
+
+void SearchBox::UndoCustomLinkAction() {
+  embedded_search_service_->UndoCustomLinkAction(page_seq_no_);
+}
+
+void SearchBox::ResetCustomLinks() {
+  embedded_search_service_->ResetCustomLinks(page_seq_no_);
+}
+
+std::string SearchBox::FixupAndValidateUrl(const std::string& url) {
+  std::pair<GURL, bool> fixed_url = internal::FixupAndValidateUrl(url);
+
+  // If URL is valid and we defaulted to https, notify whether the URL resolves.
+  if (fixed_url.first.is_valid() && fixed_url.second) {
+    embedded_search_service_->DoesUrlResolve(
+        page_seq_no_, fixed_url.first,
+        base::BindOnce(&SearchBox::DoesUrlResolveResult,
+                       weak_ptr_factory_.GetWeakPtr()));
+  } else {
+    DoesUrlResolveResult(/*resolves=*/true, /*timeout=*/false);
+  }
+  return fixed_url.first.spec();
+}
+
+void SearchBox::SetCustomBackgroundURL(const GURL& background_url) {
+  embedded_search_service_->SetCustomBackgroundURL(background_url);
+}
+
+void SearchBox::SetCustomBackgroundURLWithAttributions(
+    const GURL& background_url,
+    const std::string& attribution_line_1,
+    const std::string& attribution_line_2,
+    const GURL& action_url) {
+  embedded_search_service_->SetCustomBackgroundURLWithAttributions(
+      background_url, attribution_line_1, attribution_line_2, action_url);
+}
+
+void SearchBox::SelectLocalBackgroundImage() {
+  embedded_search_service_->SelectLocalBackgroundImage();
+}
+
 void SearchBox::SetPageSequenceNumber(int page_seq_no) {
   page_seq_no_ = page_seq_no;
 }
@@ -371,9 +471,40 @@ void SearchBox::HistorySyncCheckResult(bool sync_history) {
   }
 }
 
+void SearchBox::AddCustomLinkResult(bool success) {
+  if (can_run_js_in_renderframe_) {
+    SearchBoxExtension::DispatchAddCustomLinkResult(
+        render_frame()->GetWebFrame(), success);
+  }
+}
+
+void SearchBox::UpdateCustomLinkResult(bool success) {
+  if (can_run_js_in_renderframe_) {
+    SearchBoxExtension::DispatchUpdateCustomLinkResult(
+        render_frame()->GetWebFrame(), success);
+  }
+}
+
+void SearchBox::DeleteCustomLinkResult(bool success) {
+  if (can_run_js_in_renderframe_) {
+    SearchBoxExtension::DispatchDeleteCustomLinkResult(
+        render_frame()->GetWebFrame(), success);
+  }
+}
+
+void SearchBox::DoesUrlResolveResult(bool resolves, bool timeout) const {
+  // Do not notify if the edit custom link dialog has already timed out.
+  if (can_run_js_in_renderframe_ && !timeout) {
+    SearchBoxExtension::DispatchDoesUrlResolveResult(
+        render_frame()->GetWebFrame(), resolves);
+  }
+}
+
 void SearchBox::MostVisitedChanged(
-    const std::vector<InstantMostVisitedItem>& items) {
+    const std::vector<InstantMostVisitedItem>& items,
+    bool is_custom_links) {
   has_received_most_visited_ = true;
+  is_custom_links_ = is_custom_links;
 
   std::vector<InstantMostVisitedItemIDPair> last_known_items;
   GetMostVisitedItems(&last_known_items);
@@ -418,8 +549,8 @@ GURL SearchBox::GetURLForMostVisitedItem(InstantRestrictedID item_id) const {
   return GetMostVisitedItemWithID(item_id, &item) ? item.url : GURL();
 }
 
-void SearchBox::DidCommitProvisionalLoad(bool is_new_navigation,
-                                         bool is_same_document_navigation) {
+void SearchBox::DidCommitProvisionalLoad(bool is_same_document_navigation,
+                                         ui::PageTransition transition) {
   can_run_js_in_renderframe_ = true;
 }
 

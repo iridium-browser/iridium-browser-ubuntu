@@ -13,7 +13,6 @@
 #include "base/values.h"
 #include "chrome/browser/extensions/api/passwords_private/passwords_private_delegate_factory.h"
 #include "chrome/common/extensions/api/passwords_private.h"
-#include "components/password_manager/core/common/experiments.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/extension_function_registry.h"
 
@@ -177,7 +176,7 @@ PasswordsPrivateImportPasswordsFunction::Run() {
   PasswordsPrivateDelegate* delegate =
       PasswordsPrivateDelegateFactory::GetForBrowserContext(browser_context(),
                                                             true /* create */);
-  delegate->ImportPasswords(GetAssociatedWebContents());
+  delegate->ImportPasswords(GetSenderWebContents());
   return RespondNow(NoArguments());
 }
 
@@ -196,7 +195,7 @@ PasswordsPrivateExportPasswordsFunction::Run() {
       base::BindOnce(
           &PasswordsPrivateExportPasswordsFunction::ExportRequestCompleted,
           this),
-      GetAssociatedWebContents());
+      GetSenderWebContents());
   return RespondLater();
 }
 

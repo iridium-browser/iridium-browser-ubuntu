@@ -16,9 +16,9 @@
 #include "chrome/browser/ui/bookmarks/bookmark_editor.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/sync/sync_promo_ui.h"
-#include "chrome/browser/ui/views/harmony/chrome_layout_provider.h"
-#include "chrome/browser/ui/views/harmony/textfield_layout.h"
+#include "chrome/browser/ui/views/chrome_layout_provider.h"
 #include "chrome/browser/ui/views/sync/bubble_sync_promo_view.h"
+#include "chrome/browser/ui/views/textfield_layout.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/bookmarks/browser/bookmark_model.h"
@@ -54,6 +54,7 @@ BookmarkBubbleView* BookmarkBubbleView::bookmark_bubble_ = nullptr;
 // static
 views::Widget* BookmarkBubbleView::ShowBubble(
     views::View* anchor_view,
+    views::Button* highlighted_button,
     const gfx::Rect& anchor_rect,
     gfx::NativeView parent_window,
     bookmarks::BookmarkBubbleObserver* observer,
@@ -70,17 +71,18 @@ views::Widget* BookmarkBubbleView::ShowBubble(
   // Bookmark bubble should always anchor TOP_RIGHT, but the
   // LocationBarBubbleDelegateView does not know that and may use different
   // arrow anchoring.
-  bookmark_bubble_->set_arrow(views::BubbleBorder::TOP_RIGHT);
+  bookmark_bubble_->SetArrow(views::BubbleBorder::TOP_RIGHT);
   if (!anchor_view) {
     bookmark_bubble_->SetAnchorRect(anchor_rect);
     bookmark_bubble_->set_parent_window(parent_window);
   }
+  if (highlighted_button)
+    bookmark_bubble_->SetHighlightedButton(highlighted_button);
   views::Widget* bubble_widget =
       views::BubbleDialogDelegateView::CreateBubble(bookmark_bubble_);
   bubble_widget->Show();
   // Select the entire title textfield contents when the bubble is first shown.
   bookmark_bubble_->name_field_->SelectAll(true);
-  bookmark_bubble_->SetArrowPaintType(views::BubbleBorder::PAINT_TRANSPARENT);
 
   if (bookmark_bubble_->observer_) {
     BookmarkModel* model = BookmarkModelFactory::GetForBrowserContext(profile);
@@ -289,11 +291,9 @@ void BookmarkBubbleView::OnIOSPromotionFootnoteLinkClicked() {
 // views::BubbleDialogDelegateView ---------------------------------------------
 
 void BookmarkBubbleView::Init() {
-  using views::GridLayout;
-
   SetLayoutManager(std::make_unique<views::FillLayout>());
   bookmark_contents_view_ = new views::View();
-  GridLayout* layout = bookmark_contents_view_->SetLayoutManager(
+  views::GridLayout* layout = bookmark_contents_view_->SetLayoutManager(
       std::make_unique<views::GridLayout>(bookmark_contents_view_));
 
   constexpr int kColumnId = 0;

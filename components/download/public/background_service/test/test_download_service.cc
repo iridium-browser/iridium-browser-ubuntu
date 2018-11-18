@@ -4,8 +4,6 @@
 
 #include "components/download/public/background_service/test/test_download_service.h"
 
-#include <memory>
-
 #include "base/bind.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/download/public/background_service/client.h"
@@ -55,9 +53,8 @@ const ServiceConfig& TestDownloadService::GetConfig() {
   return *service_config_;
 }
 
-void TestDownloadService::OnStartScheduledTask(
-    DownloadTaskType task_type,
-    const TaskFinishedCallback& callback) {}
+void TestDownloadService::OnStartScheduledTask(DownloadTaskType task_type,
+                                               TaskFinishedCallback callback) {}
 
 bool TestDownloadService::OnStopScheduledTask(DownloadTaskType task_type) {
   return true;
@@ -83,8 +80,8 @@ void TestDownloadService::StartDownload(const DownloadParams& params) {
     return;
 
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::Bind(&TestDownloadService::ProcessDownload,
-                            base::Unretained(this)));
+      FROM_HERE, base::BindOnce(&TestDownloadService::ProcessDownload,
+                                base::Unretained(this)));
 }
 
 void TestDownloadService::PauseDownload(const std::string& guid) {}
@@ -139,9 +136,12 @@ void TestDownloadService::ProcessDownload() {
   downloads_.pop_front();
 
   if (!failed_download_id_.empty() && params.guid == failed_download_id_) {
-    OnDownloadFailed(params.guid, Client::FailureReason::ABORTED);
+    CompletionInfo completion_info(base::FilePath(), 0u);
+    OnDownloadFailed(params.guid, completion_info,
+                     Client::FailureReason::ABORTED);
   } else {
-    CompletionInfo completion_info(base::FilePath(), file_size_);
+    CompletionInfo completion_info(base::FilePath(), file_size_,
+                                   {params.request_params.url}, nullptr);
     OnDownloadSucceeded(params.guid, completion_info);
   }
 }
@@ -155,9 +155,10 @@ void TestDownloadService::OnDownloadSucceeded(
 
 void TestDownloadService::OnDownloadFailed(
     const std::string& guid,
+    const CompletionInfo& completion_info,
     Client::FailureReason failure_reason) {
   if (client_)
-    client_->OnDownloadFailed(guid, failure_reason);
+    client_->OnDownloadFailed(guid, completion_info, failure_reason);
 }
 
 }  // namespace test

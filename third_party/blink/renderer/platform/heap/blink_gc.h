@@ -17,7 +17,6 @@ namespace blink {
 class HeapObjectHeader;
 class MarkingVisitor;
 class Visitor;
-class ScriptWrappableVisitor;
 
 using Address = uint8_t*;
 
@@ -25,10 +24,8 @@ using FinalizationCallback = void (*)(void*);
 using VisitorCallback = void (*)(Visitor*, void*);
 using MarkingVisitorCallback = void (*)(MarkingVisitor*, void*);
 using TraceCallback = VisitorCallback;
-using TraceWrappersCallback = void (*)(ScriptWrappableVisitor*, void*);
 using WeakCallback = VisitorCallback;
 using EphemeronCallback = VisitorCallback;
-using MissedWriteBarrierCallback = void (*)();
 using NameCallback = const char* (*)(const void* self);
 
 // Callback used for unit testing the marking of conservative pointers
@@ -96,15 +93,19 @@ class PLATFORM_EXPORT BlinkGC final {
     kEagerSweeping,
   };
 
-  enum GCReason {
-    kIdleGC,
-    kPreciseGC,
-    kConservativeGC,
-    kForcedGC,
-    kMemoryPressureGC,
-    kPageNavigationGC,
-    kThreadTerminationGC,
-    kLastGCReason = kThreadTerminationGC,
+  enum class GCReason {
+    kIdleGC = 0,
+    kPreciseGC = 1,
+    kConservativeGC = 2,
+    kForcedGC = 3,
+    kMemoryPressureGC = 4,
+    kPageNavigationGC = 5,
+    kThreadTerminationGC = 6,
+    kTesting = 7,
+    kIncrementalIdleGC = 8,
+    kIncrementalV8FollowupGC = 9,
+    kUnifiedHeapGC = 10,
+    kMaxValue = kUnifiedHeapGC,
   };
 
   enum ArenaIndices {

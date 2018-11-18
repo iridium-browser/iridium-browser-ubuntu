@@ -5,13 +5,19 @@
 #ifndef CHROME_BROWSER_EXTENSIONS_CHROME_CONTENT_BROWSER_CLIENT_EXTENSIONS_PART_H_
 #define CHROME_BROWSER_EXTENSIONS_CHROME_CONTENT_BROWSER_CLIENT_EXTENSIONS_PART_H_
 
+#include <memory>
+
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "chrome/browser/chrome_content_browser_client_parts.h"
+#include "content/public/common/resource_type.h"
+#include "services/network/public/mojom/network_context.mojom.h"
+#include "services/network/public/mojom/url_loader_factory.mojom.h"
 #include "ui/base/page_transition_types.h"
 
 namespace content {
 struct Referrer;
+class RenderProcessHost;
 class ResourceContext;
 class VpnServiceProxy;
 }
@@ -33,6 +39,12 @@ class ChromeContentBrowserClientExtensionsPart
 
   // Corresponds to the ChromeContentBrowserClient function of the same name.
   static GURL GetEffectiveURL(Profile* profile, const GURL& url);
+  static bool ShouldCompareEffectiveURLsForSiteInstanceSelection(
+      content::BrowserContext* browser_context,
+      content::SiteInstance* candidate_site_instance,
+      bool is_main_frame,
+      const GURL& candidate_url,
+      const GURL& destination_url);
   static bool ShouldUseProcessPerSite(Profile* profile,
                                       const GURL& effective_url);
   static bool ShouldUseSpareRenderProcessHost(Profile* profile,
@@ -75,9 +87,16 @@ class ChromeContentBrowserClientExtensionsPart
   static std::unique_ptr<content::VpnServiceProxy> GetVpnServiceProxy(
       content::BrowserContext* browser_context);
 
-  static bool ShouldFrameShareParentSiteInstanceDespiteTopDocumentIsolation(
-      const GURL& url,
-      content::SiteInstance* parent_site_instance);
+  static void LogInitiatorSchemeBypassingDocumentBlocking(
+      const url::Origin& initiator_origin,
+      int render_process_id,
+      content::ResourceType resource_type);
+
+  static network::mojom::URLLoaderFactoryPtrInfo
+  CreateURLLoaderFactoryForNetworkRequests(
+      content::RenderProcessHost* process,
+      network::mojom::NetworkContext* network_context,
+      const url::Origin& request_initiator);
 
  private:
   FRIEND_TEST_ALL_PREFIXES(ChromeContentBrowserClientExtensionsPartTest,

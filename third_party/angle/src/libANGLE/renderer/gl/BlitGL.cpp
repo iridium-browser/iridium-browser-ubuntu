@@ -16,6 +16,7 @@
 #include "libANGLE/Framebuffer.h"
 #include "libANGLE/formatutils.h"
 #include "libANGLE/renderer/Format.h"
+#include "libANGLE/renderer/gl/ContextGL.h"
 #include "libANGLE/renderer/gl/FramebufferGL.h"
 #include "libANGLE/renderer/gl/FunctionsGL.h"
 #include "libANGLE/renderer/gl/RenderbufferGL.h"
@@ -34,31 +35,31 @@ namespace rx
 namespace
 {
 
-gl::Error CheckCompileStatus(const rx::FunctionsGL *functions, GLuint shader)
+angle::Result CheckCompileStatus(ContextGL *contextGL,
+                                 const rx::FunctionsGL *functions,
+                                 GLuint shader)
 {
     GLint compileStatus = GL_FALSE;
     functions->getShaderiv(shader, GL_COMPILE_STATUS, &compileStatus);
 
     ASSERT(compileStatus == GL_TRUE);
-    if (compileStatus == GL_FALSE)
-    {
-        return gl::OutOfMemory() << "Failed to compile internal blit shader.";
-    }
+    ANGLE_CHECK(contextGL, compileStatus == GL_TRUE, "Failed to compile internal blit shader.",
+                GL_OUT_OF_MEMORY);
 
-    return gl::NoError();
+    return angle::Result::Continue();
 }
 
-gl::Error CheckLinkStatus(const rx::FunctionsGL *functions, GLuint program)
+angle::Result CheckLinkStatus(ContextGL *contextGL,
+                              const rx::FunctionsGL *functions,
+                              GLuint program)
 {
     GLint linkStatus = GL_FALSE;
     functions->getProgramiv(program, GL_LINK_STATUS, &linkStatus);
     ASSERT(linkStatus == GL_TRUE);
-    if (linkStatus == GL_FALSE)
-    {
-        return gl::OutOfMemory() << "Failed to link internal blit program.";
-    }
+    ANGLE_CHECK(contextGL, linkStatus == GL_TRUE, "Failed to link internal blit program.",
+                GL_OUT_OF_MEMORY);
 
-    return gl::NoError();
+    return angle::Result::Continue();
 }
 
 class ScopedGLState : angle::NonCopyable
@@ -69,56 +70,65 @@ class ScopedGLState : angle::NonCopyable
         KEEP_SCISSOR = 1,
     };
 
-    ScopedGLState(StateManagerGL *stateManager,
-                  const FunctionsGL *functions,
-                  gl::Rectangle viewport,
-                  int keepState = 0)
-        : mStateManager(stateManager), mFunctions(functions)
+    ScopedGLState() {}
+
+    ~ScopedGLState() { ASSERT(mExited); }
+
+    angle::Result enter(const gl::Context *context, gl::Rectangle viewport, int keepState = 0)
     {
+        ContextGL *contextGL         = GetImplAs<ContextGL>(context);
+        StateManagerGL *stateManager = contextGL->getStateManager();
+
         if (!(keepState & KEEP_SCISSOR))
         {
-            mStateManager->setScissorTestEnabled(false);
+            stateManager->setScissorTestEnabled(false);
         }
-        mStateManager->setViewport(viewport);
-        mStateManager->setDepthRange(0.0f, 1.0f);
-        mStateManager->setBlendEnabled(false);
-        mStateManager->setColorMask(true, true, true, true);
-        mStateManager->setSampleAlphaToCoverageEnabled(false);
-        mStateManager->setSampleCoverageEnabled(false);
-        mStateManager->setDepthTestEnabled(false);
-        mStateManager->setStencilTestEnabled(false);
-        mStateManager->setCullFaceEnabled(false);
-        mStateManager->setPolygonOffsetFillEnabled(false);
-        mStateManager->setRasterizerDiscardEnabled(false);
+        stateManager->setViewport(viewport);
+        stateManager->setDepthRange(0.0f, 1.0f);
+        stateManager->setBlendEnabled(false);
+        stateManager->setColorMask(true, true, true, true);
+        stateManager->setSampleAlphaToCoverageEnabled(false);
+        stateManager->setSampleCoverageEnabled(false);
+        stateManager->setDepthTestEnabled(false);
+        stateManager->setStencilTestEnabled(false);
+        stateManager->setCullFaceEnabled(false);
+        stateManager->setPolygonOffsetFillEnabled(false);
+        stateManager->setRasterizerDiscardEnabled(false);
 
-        mStateManager->pauseTransformFeedback();
-        ANGLE_SWALLOW_ERR(mStateManager->pauseAllQueries());
+        stateManager->pauseTransformFeedback();
+        return stateManager->pauseAllQueries(context);
     }
 
-    ~ScopedGLState()
+    angle::Result exit(const gl::Context *context)
     {
+        mExited = true;
+
+        ContextGL *contextGL         = GetImplAs<ContextGL>(context);
+        StateManagerGL *stateManager = contextGL->getStateManager();
+
         // XFB resuming will be done automatically
-        ANGLE_SWALLOW_ERR(mStateManager->resumeAllQueries());
+        return stateManager->resumeAllQueries(context);
     }
 
-    void willUseTextureUnit(int unit)
+    void willUseTextureUnit(const gl::Context *context, int unit)
     {
-        if (mFunctions->bindSampler)
+        ContextGL *contextGL = GetImplAs<ContextGL>(context);
+
+        if (contextGL->getFunctions()->bindSampler)
         {
-            mStateManager->bindSampler(unit, 0);
+            contextGL->getStateManager()->bindSampler(unit, 0);
         }
     }
 
   private:
-    StateManagerGL *mStateManager;
-    const FunctionsGL *mFunctions;
+    bool mExited = false;
 };
 
-gl::Error SetClearState(StateManagerGL *stateManager,
-                        bool colorClear,
-                        bool depthClear,
-                        bool stencilClear,
-                        GLbitfield *outClearMask)
+angle::Result SetClearState(StateManagerGL *stateManager,
+                            bool colorClear,
+                            bool depthClear,
+                            bool stencilClear,
+                            GLbitfield *outClearMask)
 {
     *outClearMask = 0;
     if (colorClear)
@@ -141,15 +151,15 @@ gl::Error SetClearState(StateManagerGL *stateManager,
 
     stateManager->setScissorTestEnabled(false);
 
-    return gl::NoError();
+    return angle::Result::Continue();
 }
 
 using ClearBindTargetVector = angle::FixedVector<GLenum, 3>;
 
-gl::Error PrepareForClear(StateManagerGL *stateManager,
-                          GLenum sizedInternalFormat,
-                          ClearBindTargetVector *outBindtargets,
-                          GLbitfield *outClearMask)
+angle::Result PrepareForClear(StateManagerGL *stateManager,
+                              GLenum sizedInternalFormat,
+                              ClearBindTargetVector *outBindtargets,
+                              GLbitfield *outClearMask)
 {
     const gl::InternalFormat &internalFormatInfo =
         gl::GetSizedInternalFormatInfo(sizedInternalFormat);
@@ -173,7 +183,7 @@ gl::Error PrepareForClear(StateManagerGL *stateManager,
 
     ANGLE_TRY(SetClearState(stateManager, bindColor, bindDepth, bindStencil, outClearMask));
 
-    return gl::NoError();
+    return angle::Result::Continue();
 }
 
 void UnbindAttachments(const FunctionsGL *functions,
@@ -237,15 +247,15 @@ BlitGL::~BlitGL()
     }
 }
 
-gl::Error BlitGL::copyImageToLUMAWorkaroundTexture(const gl::Context *context,
-                                                   GLuint texture,
-                                                   gl::TextureType textureType,
-                                                   gl::TextureTarget target,
-                                                   GLenum lumaFormat,
-                                                   size_t level,
-                                                   const gl::Rectangle &sourceArea,
-                                                   GLenum internalFormat,
-                                                   gl::Framebuffer *source)
+angle::Result BlitGL::copyImageToLUMAWorkaroundTexture(const gl::Context *context,
+                                                       GLuint texture,
+                                                       gl::TextureType textureType,
+                                                       gl::TextureTarget target,
+                                                       GLenum lumaFormat,
+                                                       size_t level,
+                                                       const gl::Rectangle &sourceArea,
+                                                       GLenum internalFormat,
+                                                       gl::Framebuffer *source)
 {
     mStateManager->bindTexture(textureType, texture);
 
@@ -253,7 +263,7 @@ gl::Error BlitGL::copyImageToLUMAWorkaroundTexture(const gl::Context *context,
     GLenum format = gl::GetUnsizedFormat(internalFormat);
 
     GLenum readType = GL_NONE;
-    ANGLE_TRY(source->getImplementationColorReadType(context, &readType));
+    ANGLE_TRY_HANDLE(context, source->getImplementationColorReadType(context, &readType));
 
     gl::PixelUnpackState unpack;
     mStateManager->setPixelUnpackState(unpack);
@@ -266,30 +276,30 @@ gl::Error BlitGL::copyImageToLUMAWorkaroundTexture(const gl::Context *context,
                                                level, gl::Offset(0, 0, 0), sourceArea, source);
 }
 
-gl::Error BlitGL::copySubImageToLUMAWorkaroundTexture(const gl::Context *context,
-                                                      GLuint texture,
-                                                      gl::TextureType textureType,
-                                                      gl::TextureTarget target,
-                                                      GLenum lumaFormat,
-                                                      size_t level,
-                                                      const gl::Offset &destOffset,
-                                                      const gl::Rectangle &sourceArea,
-                                                      gl::Framebuffer *source)
+angle::Result BlitGL::copySubImageToLUMAWorkaroundTexture(const gl::Context *context,
+                                                          GLuint texture,
+                                                          gl::TextureType textureType,
+                                                          gl::TextureTarget target,
+                                                          GLenum lumaFormat,
+                                                          size_t level,
+                                                          const gl::Offset &destOffset,
+                                                          const gl::Rectangle &sourceArea,
+                                                          gl::Framebuffer *source)
 {
     ANGLE_TRY(initializeResources());
 
     BlitProgram *blitProgram = nullptr;
-    ANGLE_TRY(getBlitProgram(BlitProgramType::FLOAT_TO_FLOAT, &blitProgram));
+    ANGLE_TRY(getBlitProgram(context, BlitProgramType::FLOAT_TO_FLOAT, &blitProgram));
 
     // Blit the framebuffer to the first scratch texture
     const FramebufferGL *sourceFramebufferGL = GetImplAs<FramebufferGL>(source);
     mStateManager->bindFramebuffer(GL_FRAMEBUFFER, sourceFramebufferGL->getFramebufferID());
 
     GLenum readFormat = GL_NONE;
-    ANGLE_TRY(source->getImplementationColorReadFormat(context, &readFormat));
+    ANGLE_TRY_HANDLE(context, source->getImplementationColorReadFormat(context, &readFormat));
 
     GLenum readType = GL_NONE;
-    ANGLE_TRY(source->getImplementationColorReadType(context, &readType));
+    ANGLE_TRY_HANDLE(context, source->getImplementationColorReadType(context, &readType));
 
     nativegl::CopyTexImageImageFormat copyTexImageFormat =
         nativegl::GetCopyTexImageImageFormat(mFunctions, mWorkarounds, readFormat, readType);
@@ -318,9 +328,9 @@ gl::Error BlitGL::copySubImageToLUMAWorkaroundTexture(const gl::Context *context
                                      mScratchTextures[1], 0);
 
     // Render to the destination texture, sampling from the scratch texture
-    ScopedGLState scopedState(mStateManager, mFunctions,
-                              gl::Rectangle(0, 0, sourceArea.width, sourceArea.height));
-    scopedState.willUseTextureUnit(0);
+    ScopedGLState scopedState;
+    ANGLE_TRY(scopedState.enter(context, gl::Rectangle(0, 0, sourceArea.width, sourceArea.height)));
+    scopedState.willUseTextureUnit(context, 0);
 
     setScratchTextureParameter(GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     setScratchTextureParameter(GL_TEXTURE_MAG_FILTER, GL_NEAREST);
@@ -356,38 +366,29 @@ gl::Error BlitGL::copySubImageToLUMAWorkaroundTexture(const gl::Context *context
     // Finally orphan the scratch textures so they can be GCed by the driver.
     orphanScratchTextures();
 
-    return gl::NoError();
+    ANGLE_TRY(scopedState.exit(context));
+    return angle::Result::Continue();
 }
 
-gl::Error BlitGL::blitColorBufferWithShader(const gl::Framebuffer *source,
-                                            const gl::Framebuffer *dest,
-                                            const gl::Rectangle &sourceAreaIn,
-                                            const gl::Rectangle &destAreaIn,
-                                            GLenum filter)
+angle::Result BlitGL::blitColorBufferWithShader(const gl::Context *context,
+                                                const gl::Framebuffer *source,
+                                                const gl::Framebuffer *dest,
+                                                const gl::Rectangle &sourceAreaIn,
+                                                const gl::Rectangle &destAreaIn,
+                                                GLenum filter)
 {
     ANGLE_TRY(initializeResources());
 
     BlitProgram *blitProgram = nullptr;
-    ANGLE_TRY(getBlitProgram(BlitProgramType::FLOAT_TO_FLOAT, &blitProgram));
+    ANGLE_TRY(getBlitProgram(context, BlitProgramType::FLOAT_TO_FLOAT, &blitProgram));
 
-    // Normalize the destination area to have positive width and height because we will use
-    // glViewport to set it, which doesn't allow negative width or height.
-    gl::Rectangle sourceArea = sourceAreaIn;
-    gl::Rectangle destArea   = destAreaIn;
-    if (destArea.width < 0)
-    {
-        destArea.x += destArea.width;
-        destArea.width = -destArea.width;
-        sourceArea.x += sourceArea.width;
-        sourceArea.width = -sourceArea.width;
-    }
-    if (destArea.height < 0)
-    {
-        destArea.y += destArea.height;
-        destArea.height = -destArea.height;
-        sourceArea.y += sourceArea.height;
-        sourceArea.height = -sourceArea.height;
-    }
+    // We'll keep things simple by removing reversed coordinates from the rectangles. In the end
+    // we'll apply the reversal to the source texture coordinates if needed. The destination
+    // rectangle will be set to the gl viewport, which can't be reversed.
+    bool reverseX            = sourceAreaIn.isReversedX() != destAreaIn.isReversedX();
+    bool reverseY            = sourceAreaIn.isReversedY() != destAreaIn.isReversedY();
+    gl::Rectangle sourceArea = sourceAreaIn.removeReversal();
+    gl::Rectangle destArea   = destAreaIn.removeReversal();
 
     const gl::FramebufferAttachment *readAttachment = source->getReadColorbuffer();
     ASSERT(readAttachment->getSamples() <= 1);
@@ -397,57 +398,23 @@ gl::Error BlitGL::blitColorBufferWithShader(const gl::Framebuffer *source,
     {
         gl::Extents sourceSize = readAttachment->getSize();
         gl::Rectangle sourceBounds(0, 0, sourceSize.width, sourceSize.height);
-        gl::ClipRectangle(sourceArea, sourceBounds, &inBoundsSource);
-
-        // Note that inBoundsSource will have lost the orientation information.
-        ASSERT(inBoundsSource.width >= 0 && inBoundsSource.height >= 0);
-
-        // Early out when the sampled part is empty as the blit will be a noop,
-        // and it prevents a division by zero in later computations.
-        if (inBoundsSource.width == 0 || inBoundsSource.height == 0)
+        if (!gl::ClipRectangle(sourceArea, sourceBounds, &inBoundsSource))
         {
-            return gl::NoError();
+            // Early out when the sampled part is empty as the blit will be a noop,
+            // and it prevents a division by zero in later computations.
+            return angle::Result::Continue();
         }
     }
 
     // The blit will be emulated by getting the source of the blit in a texture and sampling it
-    // with CLAMP_TO_EDGE. The quad used to draw can trivially compute texture coordinates going
-    // from (0, 0) to (1, 1). These texture coordinates will need to be transformed to make two
-    // regions match:
-    //  - The region of the texture representing the source framebuffer region that will be sampled
-    //  - The region of the drawn quad that corresponds to non-clamped blit, this is the same as the
-    //    region of the source rectangle that is inside the source attachment.
-    //
-    //  These two regions, T (texture) and D (dest) are defined by their offset in texcoord space
-    //  in (0, 1)^2 and their size in texcoord space in (-1, 1)^2. The size can be negative to
-    //  represent the orientation of the blit.
-    //
-    //  Then if P is the quad texcoord, Q the texcoord inside T, and R the texture texcoord:
-    //    - Q = (P - D.offset) / D.size
-    //    - Q = (R - T.offset) / T.size
-    //  Hence R = (P - D.offset) / D.size * T.size - T.offset
-    //          = P * (T.size / D.size) + (T.offset - D.offset * T.size / D.size)
+    // with CLAMP_TO_EDGE.
 
     GLuint textureId;
-    Vector2 TOffset;
-    Vector2 TSize;
 
     // TODO(cwallez) once texture dirty bits are landed, reuse attached texture instead of using
     // CopyTexImage2D
     {
         textureId = mScratchTextures[0];
-        TOffset   = Vector2(0.0);
-        TSize     = Vector2(1.0);
-        if (sourceArea.width < 0)
-        {
-            TOffset.x() = 1.0;
-            TSize.x()   = -1.0;
-        }
-        if (sourceArea.height < 0)
-        {
-            TOffset.y() = 1.0;
-            TSize.y()   = -1.0;
-        }
 
         GLenum format                 = readAttachment->getFormat().info->internalFormat;
         const FramebufferGL *sourceGL = GetImplAs<FramebufferGL>(source);
@@ -457,45 +424,42 @@ gl::Error BlitGL::blitColorBufferWithShader(const gl::Framebuffer *source,
         mFunctions->copyTexImage2D(GL_TEXTURE_2D, 0, format, inBoundsSource.x, inBoundsSource.y,
                                    inBoundsSource.width, inBoundsSource.height, 0);
 
+        // Translate sourceArea to be relative to the copied image.
+        sourceArea.x -= inBoundsSource.x;
+        sourceArea.y -= inBoundsSource.y;
+
         setScratchTextureParameter(GL_TEXTURE_MIN_FILTER, filter);
         setScratchTextureParameter(GL_TEXTURE_MAG_FILTER, filter);
         setScratchTextureParameter(GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         setScratchTextureParameter(GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     }
 
-    // Compute normalized sampled draw quad region
-    // It is the same as the region of the source rectangle that is in bounds.
-    Vector2 DOffset;
-    Vector2 DSize;
+    // Transform the source area to the texture coordinate space (where 0.0 and 1.0 correspond to
+    // the edges of the texture).
+    Vector2 texCoordOffset(
+        static_cast<float>(sourceArea.x) / static_cast<float>(inBoundsSource.width),
+        static_cast<float>(sourceArea.y) / static_cast<float>(inBoundsSource.height));
+    // texCoordScale is equal to the size of the source area in texture coordinates.
+    Vector2 texCoordScale(
+        static_cast<float>(sourceArea.width) / static_cast<float>(inBoundsSource.width),
+        static_cast<float>(sourceArea.height) / static_cast<float>(inBoundsSource.height));
+
+    if (reverseX)
     {
-        ASSERT(sourceArea.width != 0 && sourceArea.height != 0);
-        gl::Rectangle orientedInBounds = inBoundsSource;
-        if (sourceArea.width < 0)
-        {
-            orientedInBounds.x += orientedInBounds.width;
-            orientedInBounds.width = -orientedInBounds.width;
-        }
-        if (sourceArea.height < 0)
-        {
-            orientedInBounds.y += orientedInBounds.height;
-            orientedInBounds.height = -orientedInBounds.height;
-        }
-
-        DOffset =
-            Vector2(static_cast<float>(orientedInBounds.x - sourceArea.x) / sourceArea.width,
-                    static_cast<float>(orientedInBounds.y - sourceArea.y) / sourceArea.height);
-        DSize = Vector2(static_cast<float>(orientedInBounds.width) / sourceArea.width,
-                        static_cast<float>(orientedInBounds.height) / sourceArea.height);
+        texCoordOffset.x() = texCoordOffset.x() + texCoordScale.x();
+        texCoordScale.x()  = -texCoordScale.x();
     }
-
-    ASSERT(DSize.x() != 0.0 && DSize.y() != 0.0);
-    Vector2 texCoordScale  = TSize / DSize;
-    Vector2 texCoordOffset = TOffset - DOffset * texCoordScale;
+    if (reverseY)
+    {
+        texCoordOffset.y() = texCoordOffset.y() + texCoordScale.y();
+        texCoordScale.y()  = -texCoordScale.y();
+    }
 
     // Reset all the state except scissor and use the viewport to draw exactly to the destination
     // rectangle
-    ScopedGLState scopedState(mStateManager, mFunctions, destArea, ScopedGLState::KEEP_SCISSOR);
-    scopedState.willUseTextureUnit(0);
+    ScopedGLState scopedState;
+    ANGLE_TRY(scopedState.enter(context, destArea, ScopedGLState::KEEP_SCISSOR));
+    scopedState.willUseTextureUnit(context, 0);
 
     // Set uniforms
     mStateManager->activeTexture(0);
@@ -514,25 +478,27 @@ gl::Error BlitGL::blitColorBufferWithShader(const gl::Framebuffer *source,
     mStateManager->bindVertexArray(mVAO, 0);
     mFunctions->drawArrays(GL_TRIANGLES, 0, 3);
 
-    return gl::NoError();
+    ANGLE_TRY(scopedState.exit(context));
+    return angle::Result::Continue();
 }
 
-gl::ErrorOrResult<bool> BlitGL::copySubTexture(const gl::Context *context,
-                                               TextureGL *source,
-                                               size_t sourceLevel,
-                                               GLenum sourceComponentType,
-                                               TextureGL *dest,
-                                               gl::TextureTarget destTarget,
-                                               size_t destLevel,
-                                               GLenum destComponentType,
-                                               const gl::Extents &sourceSize,
-                                               const gl::Rectangle &sourceArea,
-                                               const gl::Offset &destOffset,
-                                               bool needsLumaWorkaround,
-                                               GLenum lumaFormat,
-                                               bool unpackFlipY,
-                                               bool unpackPremultiplyAlpha,
-                                               bool unpackUnmultiplyAlpha)
+angle::Result BlitGL::copySubTexture(const gl::Context *context,
+                                     TextureGL *source,
+                                     size_t sourceLevel,
+                                     GLenum sourceComponentType,
+                                     TextureGL *dest,
+                                     gl::TextureTarget destTarget,
+                                     size_t destLevel,
+                                     GLenum destComponentType,
+                                     const gl::Extents &sourceSize,
+                                     const gl::Rectangle &sourceArea,
+                                     const gl::Offset &destOffset,
+                                     bool needsLumaWorkaround,
+                                     GLenum lumaFormat,
+                                     bool unpackFlipY,
+                                     bool unpackPremultiplyAlpha,
+                                     bool unpackUnmultiplyAlpha,
+                                     bool *copySucceededOut)
 {
     ASSERT(source->getType() == gl::TextureType::_2D);
     ANGLE_TRY(initializeResources());
@@ -545,12 +511,13 @@ gl::ErrorOrResult<bool> BlitGL::copySubTexture(const gl::Context *context,
     GLenum status = mFunctions->checkFramebufferStatus(GL_FRAMEBUFFER);
     if (status != GL_FRAMEBUFFER_COMPLETE)
     {
-        return false;
+        *copySucceededOut = false;
+        return angle::Result::Continue();
     }
 
     BlitProgramType blitProgramType = getBlitProgramType(sourceComponentType, destComponentType);
     BlitProgram *blitProgram        = nullptr;
-    ANGLE_TRY(getBlitProgram(blitProgramType, &blitProgram));
+    ANGLE_TRY(getBlitProgram(context, blitProgramType, &blitProgram));
 
     // Setup the source texture
     if (needsLumaWorkaround)
@@ -572,17 +539,17 @@ gl::ErrorOrResult<bool> BlitGL::copySubTexture(const gl::Context *context,
         }
 
         GLint swizzle[4] = {luminance, luminance, luminance, alpha};
-        source->setSwizzle(swizzle);
+        source->setSwizzle(context, swizzle);
     }
-    source->setMinFilter(GL_NEAREST);
-    source->setMagFilter(GL_NEAREST);
-    ANGLE_TRY(source->setBaseLevel(context, static_cast<GLuint>(sourceLevel)));
+    source->setMinFilter(context, GL_NEAREST);
+    source->setMagFilter(context, GL_NEAREST);
+    ANGLE_TRY_HANDLE(context, source->setBaseLevel(context, static_cast<GLuint>(sourceLevel)));
 
     // Render to the destination texture, sampling from the source texture
-    ScopedGLState scopedState(
-        mStateManager, mFunctions,
-        gl::Rectangle(destOffset.x, destOffset.y, sourceArea.width, sourceArea.height));
-    scopedState.willUseTextureUnit(0);
+    ScopedGLState scopedState;
+    ANGLE_TRY(scopedState.enter(
+        context, gl::Rectangle(destOffset.x, destOffset.y, sourceArea.width, sourceArea.height)));
+    scopedState.willUseTextureUnit(context, 0);
 
     mStateManager->activeTexture(0);
     mStateManager->bindTexture(gl::TextureType::_2D, source->getTextureID());
@@ -615,26 +582,38 @@ gl::ErrorOrResult<bool> BlitGL::copySubTexture(const gl::Context *context,
     mStateManager->bindVertexArray(mVAO, 0);
     mFunctions->drawArrays(GL_TRIANGLES, 0, 3);
 
-    return true;
+    *copySucceededOut = true;
+    ANGLE_TRY(scopedState.exit(context));
+    return angle::Result::Continue();
 }
 
-gl::Error BlitGL::copySubTextureCPUReadback(const gl::Context *context,
-                                            TextureGL *source,
-                                            size_t sourceLevel,
-                                            GLenum sourceComponentType,
-                                            TextureGL *dest,
-                                            gl::TextureTarget destTarget,
-                                            size_t destLevel,
-                                            GLenum destFormat,
-                                            GLenum destType,
-                                            const gl::Rectangle &sourceArea,
-                                            const gl::Offset &destOffset,
-                                            bool unpackFlipY,
-                                            bool unpackPremultiplyAlpha,
-                                            bool unpackUnmultiplyAlpha)
+angle::Result BlitGL::copySubTextureCPUReadback(const gl::Context *context,
+                                                TextureGL *source,
+                                                size_t sourceLevel,
+                                                GLenum sourceComponentType,
+                                                TextureGL *dest,
+                                                gl::TextureTarget destTarget,
+                                                size_t destLevel,
+                                                GLenum destFormat,
+                                                GLenum destType,
+                                                const gl::Rectangle &sourceArea,
+                                                const gl::Offset &destOffset,
+                                                bool unpackFlipY,
+                                                bool unpackPremultiplyAlpha,
+                                                bool unpackUnmultiplyAlpha)
 {
+    ANGLE_TRY(initializeResources());
+
+    ContextGL *contextGL = GetImplAs<ContextGL>(context);
+
     ASSERT(source->getType() == gl::TextureType::_2D);
     const auto &destInternalFormatInfo = gl::GetInternalFormatInfo(destFormat, destType);
+
+    mStateManager->bindFramebuffer(GL_FRAMEBUFFER, mScratchFBO);
+    mFunctions->framebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+                                     source->getTextureID(), static_cast<GLint>(sourceLevel));
+    GLenum status = mFunctions->checkFramebufferStatus(GL_FRAMEBUFFER);
+    ASSERT(status == GL_FRAMEBUFFER_COMPLETE);
 
     // Create a buffer for holding the source and destination memory
     const size_t sourcePixelSize = 4;
@@ -642,16 +621,14 @@ gl::Error BlitGL::copySubTextureCPUReadback(const gl::Context *context,
     size_t destBufferSize =
         sourceArea.width * sourceArea.height * destInternalFormatInfo.pixelBytes;
     angle::MemoryBuffer *buffer = nullptr;
-    ANGLE_TRY(context->getScratchBuffer(sourceBufferSize + destBufferSize, &buffer));
+    ANGLE_CHECK_GL_ALLOC(contextGL,
+                         context->getScratchBuffer(sourceBufferSize + destBufferSize, &buffer));
+
     uint8_t *sourceMemory = buffer->data();
     uint8_t *destMemory   = buffer->data() + sourceBufferSize;
 
-    mStateManager->bindFramebuffer(GL_FRAMEBUFFER, mScratchFBO);
-    mFunctions->framebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
-                                     source->getTextureID(), static_cast<GLint>(sourceLevel));
-
     GLenum readPixelsFormat        = GL_NONE;
-    ColorReadFunction readFunction = nullptr;
+    PixelReadFunction readFunction = nullptr;
     if (sourceComponentType == GL_UNSIGNED_INT)
     {
         readPixelsFormat = GL_RGBA_INTEGER;
@@ -671,15 +648,15 @@ gl::Error BlitGL::copySubTextureCPUReadback(const gl::Context *context,
     mFunctions->readPixels(sourceArea.x, sourceArea.y, sourceArea.width, sourceArea.height,
                            readPixelsFormat, GL_UNSIGNED_BYTE, sourceMemory);
 
-    angle::Format::ID destFormatID =
+    angle::FormatID destFormatID =
         angle::Format::InternalFormatToID(destInternalFormatInfo.sizedInternalFormat);
     const auto &destFormatInfo = angle::Format::Get(destFormatID);
     CopyImageCHROMIUM(
-        sourceMemory, sourceArea.width * sourcePixelSize, sourcePixelSize, readFunction, destMemory,
-        sourceArea.width * destInternalFormatInfo.pixelBytes, destInternalFormatInfo.pixelBytes,
-        destFormatInfo.colorWriteFunction, destInternalFormatInfo.format,
-        destInternalFormatInfo.componentType, sourceArea.width, sourceArea.height, unpackFlipY,
-        unpackPremultiplyAlpha, unpackUnmultiplyAlpha);
+        sourceMemory, sourceArea.width * sourcePixelSize, sourcePixelSize, 0, readFunction,
+        destMemory, sourceArea.width * destInternalFormatInfo.pixelBytes,
+        destInternalFormatInfo.pixelBytes, 0, destFormatInfo.pixelWriteFunction,
+        destInternalFormatInfo.format, destInternalFormatInfo.componentType, sourceArea.width,
+        sourceArea.height, 1, unpackFlipY, unpackPremultiplyAlpha, unpackUnmultiplyAlpha);
 
     gl::PixelPackState pack;
     pack.alignment = 1;
@@ -689,20 +666,22 @@ gl::Error BlitGL::copySubTextureCPUReadback(const gl::Context *context,
     nativegl::TexSubImageFormat texSubImageFormat =
         nativegl::GetTexSubImageFormat(mFunctions, mWorkarounds, destFormat, destType);
 
+    mStateManager->bindTexture(dest->getType(), dest->getTextureID());
     mFunctions->texSubImage2D(ToGLenum(destTarget), static_cast<GLint>(destLevel), destOffset.x,
                               destOffset.y, sourceArea.width, sourceArea.height,
                               texSubImageFormat.format, texSubImageFormat.type, destMemory);
 
-    return gl::NoError();
+    return angle::Result::Continue();
 }
 
-gl::ErrorOrResult<bool> BlitGL::copyTexSubImage(TextureGL *source,
-                                                size_t sourceLevel,
-                                                TextureGL *dest,
-                                                gl::TextureTarget destTarget,
-                                                size_t destLevel,
-                                                const gl::Rectangle &sourceArea,
-                                                const gl::Offset &destOffset)
+angle::Result BlitGL::copyTexSubImage(TextureGL *source,
+                                      size_t sourceLevel,
+                                      TextureGL *dest,
+                                      gl::TextureTarget destTarget,
+                                      size_t destLevel,
+                                      const gl::Rectangle &sourceArea,
+                                      const gl::Offset &destOffset,
+                                      bool *copySucceededOut)
 {
     ANGLE_TRY(initializeResources());
 
@@ -713,7 +692,8 @@ gl::ErrorOrResult<bool> BlitGL::copyTexSubImage(TextureGL *source,
     GLenum status = mFunctions->checkFramebufferStatus(GL_FRAMEBUFFER);
     if (status != GL_FRAMEBUFFER_COMPLETE)
     {
-        return false;
+        *copySucceededOut = false;
+        return angle::Result::Continue();
     }
 
     mStateManager->bindTexture(dest->getType(), dest->getTextureID());
@@ -722,13 +702,15 @@ gl::ErrorOrResult<bool> BlitGL::copyTexSubImage(TextureGL *source,
                                   destOffset.y, sourceArea.x, sourceArea.y, sourceArea.width,
                                   sourceArea.height);
 
-    return true;
+    *copySucceededOut = true;
+    return angle::Result::Continue();
 }
 
-gl::ErrorOrResult<bool> BlitGL::clearRenderableTexture(TextureGL *source,
-                                                       GLenum sizedInternalFormat,
-                                                       int numTextureLayers,
-                                                       const gl::ImageIndex &imageIndex)
+angle::Result BlitGL::clearRenderableTexture(TextureGL *source,
+                                             GLenum sizedInternalFormat,
+                                             int numTextureLayers,
+                                             const gl::ImageIndex &imageIndex,
+                                             bool *clearSucceededOut)
 {
     ANGLE_TRY(initializeResources());
 
@@ -744,8 +726,8 @@ gl::ErrorOrResult<bool> BlitGL::clearRenderableTexture(TextureGL *source,
         for (GLenum bindTarget : bindTargets)
         {
             mFunctions->framebufferTexture2D(GL_FRAMEBUFFER, bindTarget,
-                                             ToGLenum(imageIndex.target), source->getTextureID(),
-                                             imageIndex.mipIndex);
+                                             ToGLenum(imageIndex.getTarget()),
+                                             source->getTextureID(), imageIndex.getLevelIndex());
         }
 
         GLenum status = mFunctions->checkFramebufferStatus(GL_FRAMEBUFFER);
@@ -756,7 +738,8 @@ gl::ErrorOrResult<bool> BlitGL::clearRenderableTexture(TextureGL *source,
         else
         {
             UnbindAttachments(mFunctions, GL_FRAMEBUFFER, bindTargets);
-            return false;
+            *clearSucceededOut = false;
+            return angle::Result::Continue();
         }
     }
     else
@@ -769,7 +752,7 @@ gl::ErrorOrResult<bool> BlitGL::clearRenderableTexture(TextureGL *source,
             for (GLenum bindTarget : bindTargets)
             {
                 mFunctions->framebufferTexture(GL_FRAMEBUFFER, bindTarget, source->getTextureID(),
-                                               imageIndex.mipIndex);
+                                               imageIndex.getLevelIndex());
             }
 
             GLenum status = mFunctions->checkFramebufferStatus(GL_FRAMEBUFFER);
@@ -780,7 +763,8 @@ gl::ErrorOrResult<bool> BlitGL::clearRenderableTexture(TextureGL *source,
             else
             {
                 UnbindAttachments(mFunctions, GL_FRAMEBUFFER, bindTargets);
-                return false;
+                *clearSucceededOut = false;
+                return angle::Result::Continue();
             }
         }
         else
@@ -789,17 +773,17 @@ gl::ErrorOrResult<bool> BlitGL::clearRenderableTexture(TextureGL *source,
             GLint layerCount = numTextureLayers;
             if (imageIndex.hasLayer())
             {
-                firstLayer = imageIndex.layerIndex;
-                layerCount = imageIndex.numLayers;
+                firstLayer = imageIndex.getLayerIndex();
+                layerCount = imageIndex.getLayerCount();
             }
 
             for (GLint layer = 0; layer < layerCount; layer++)
             {
                 for (GLenum bindTarget : bindTargets)
                 {
-                    mFunctions->framebufferTextureLayer(GL_FRAMEBUFFER, bindTarget,
-                                                        source->getTextureID(), imageIndex.mipIndex,
-                                                        layer + firstLayer);
+                    mFunctions->framebufferTextureLayer(
+                        GL_FRAMEBUFFER, bindTarget, source->getTextureID(),
+                        imageIndex.getLevelIndex(), layer + firstLayer);
                 }
 
                 GLenum status = mFunctions->checkFramebufferStatus(GL_FRAMEBUFFER);
@@ -810,17 +794,19 @@ gl::ErrorOrResult<bool> BlitGL::clearRenderableTexture(TextureGL *source,
                 else
                 {
                     UnbindAttachments(mFunctions, GL_FRAMEBUFFER, bindTargets);
-                    return false;
+                    *clearSucceededOut = false;
+                    return angle::Result::Continue();
                 }
             }
         }
     }
 
     UnbindAttachments(mFunctions, GL_FRAMEBUFFER, bindTargets);
-    return true;
+    *clearSucceededOut = true;
+    return angle::Result::Continue();
 }
 
-gl::Error BlitGL::clearRenderbuffer(RenderbufferGL *source, GLenum sizedInternalFormat)
+angle::Result BlitGL::clearRenderbuffer(RenderbufferGL *source, GLenum sizedInternalFormat)
 {
     ANGLE_TRY(initializeResources());
 
@@ -842,10 +828,10 @@ gl::Error BlitGL::clearRenderbuffer(RenderbufferGL *source, GLenum sizedInternal
         mFunctions->framebufferRenderbuffer(GL_FRAMEBUFFER, bindTarget, GL_RENDERBUFFER, 0);
     }
 
-    return gl::NoError();
+    return angle::Result::Continue();
 }
 
-gl::Error BlitGL::clearFramebuffer(FramebufferGL *source)
+angle::Result BlitGL::clearFramebuffer(FramebufferGL *source)
 {
     // initializeResources skipped because no local state is used
 
@@ -856,10 +842,10 @@ gl::Error BlitGL::clearFramebuffer(FramebufferGL *source)
     mStateManager->bindFramebuffer(GL_FRAMEBUFFER, source->getFramebufferID());
     mFunctions->clear(clearMask);
 
-    return gl::NoError();
+    return angle::Result::Continue();
 }
 
-gl::Error BlitGL::initializeResources()
+angle::Result BlitGL::initializeResources()
 {
     for (size_t i = 0; i < ArraySize(mScratchTextures); i++)
     {
@@ -907,7 +893,7 @@ gl::Error BlitGL::initializeResources()
         }
     }
 
-    return gl::NoError();
+    return angle::Result::Continue();
 }
 
 void BlitGL::orphanScratchTextures()
@@ -957,8 +943,12 @@ BlitGL::BlitProgramType BlitGL::getBlitProgramType(GLenum sourceComponentType,
     }
 }
 
-gl::Error BlitGL::getBlitProgram(BlitProgramType type, BlitProgram **program)
+angle::Result BlitGL::getBlitProgram(const gl::Context *context,
+                                     BlitProgramType type,
+                                     BlitProgram **program)
 {
+    ContextGL *contextGL = GetImplAs<ContextGL>(context);
+
     BlitProgram &result = mBlitPrograms[type];
     if (result.program == 0)
     {
@@ -1021,7 +1011,7 @@ gl::Error BlitGL::getBlitProgram(BlitProgramType type, BlitProgram **program)
             GLuint vs = mFunctions->createShader(GL_VERTEX_SHADER);
             mFunctions->shaderSource(vs, 1, &vsSourceCStr, nullptr);
             mFunctions->compileShader(vs);
-            ANGLE_TRY(CheckCompileStatus(mFunctions, vs));
+            ANGLE_TRY(CheckCompileStatus(contextGL, mFunctions, vs));
 
             mFunctions->attachShader(result.program, vs);
             mFunctions->deleteShader(vs);
@@ -1128,14 +1118,14 @@ gl::Error BlitGL::getBlitProgram(BlitProgramType type, BlitProgram **program)
             GLuint fs = mFunctions->createShader(GL_FRAGMENT_SHADER);
             mFunctions->shaderSource(fs, 1, &fsSourceCStr, nullptr);
             mFunctions->compileShader(fs);
-            ANGLE_TRY(CheckCompileStatus(mFunctions, fs));
+            ANGLE_TRY(CheckCompileStatus(contextGL, mFunctions, fs));
 
             mFunctions->attachShader(result.program, fs);
             mFunctions->deleteShader(fs);
         }
 
         mFunctions->linkProgram(result.program);
-        ANGLE_TRY(CheckLinkStatus(mFunctions, result.program));
+        ANGLE_TRY(CheckLinkStatus(contextGL, mFunctions, result.program));
 
         result.sourceTextureLocation =
             mFunctions->getUniformLocation(result.program, "u_source_texture");
@@ -1148,7 +1138,7 @@ gl::Error BlitGL::getBlitProgram(BlitProgramType type, BlitProgram **program)
     }
 
     *program = &result;
-    return gl::NoError();
+    return angle::Result::Continue();
 }
 
 }  // namespace rx

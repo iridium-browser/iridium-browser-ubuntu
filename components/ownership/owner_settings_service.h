@@ -73,11 +73,11 @@ class OWNERSHIP_EXPORT OwnerSettingsService : public KeyedService {
   // Returns whether current user is owner or not. When this method
   // is called too early, incorrect result can be returned because
   // private key loading may be in progress.
-  bool IsOwner();
+  virtual bool IsOwner();
 
   // Determines whether current user is owner or not, responds via
   // |callback|.
-  void IsOwnerAsync(const IsOwnerCallback& callback);
+  virtual void IsOwnerAsync(const IsOwnerCallback& callback);
 
   // Assembles and signs |policy| on the |task_runner|, responds on
   // the original thread via |callback|.
@@ -136,7 +136,7 @@ class OWNERSHIP_EXPORT OwnerSettingsService : public KeyedService {
 
   std::vector<IsOwnerCallback> pending_is_owner_callbacks_;
 
-  base::ObserverList<Observer> observers_;
+  base::ObserverList<Observer>::Unchecked observers_;
 
   base::ThreadChecker thread_checker_;
 

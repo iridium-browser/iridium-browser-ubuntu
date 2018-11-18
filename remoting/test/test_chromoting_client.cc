@@ -28,6 +28,7 @@
 #include "remoting/signaling/xmpp_signal_strategy.h"
 #include "remoting/test/connection_setup_info.h"
 #include "remoting/test/test_video_renderer.h"
+#include "services/network/test/test_shared_url_loader_factory.h"
 
 namespace remoting {
 namespace test {
@@ -82,9 +83,11 @@ void TestChromotingClient::StartConnection(
   jingle_glue::JingleThreadWrapper::EnsureForCurrentMessageLoop();
 
   scoped_refptr<URLRequestContextGetter> request_context_getter;
-  request_context_getter = new URLRequestContextGetter(
-      base::ThreadTaskRunnerHandle::Get(),   // network_runner
-      base::ThreadTaskRunnerHandle::Get());  // file_runner
+  request_context_getter =
+      new URLRequestContextGetter(base::ThreadTaskRunnerHandle::Get());
+
+  auto test_shared_url_loader_factory =
+      base::MakeRefCounted<network::TestSharedURLLoaderFactory>();
 
   client_context_.reset(new ClientContext(base::ThreadTaskRunnerHandle::Get()));
 
@@ -125,7 +128,8 @@ void TestChromotingClient::StartConnection(
       new protocol::TransportContext(
           signal_strategy_.get(),
           std::make_unique<protocol::ChromiumPortAllocatorFactory>(),
-          std::make_unique<ChromiumUrlRequestFactory>(request_context_getter),
+          std::make_unique<ChromiumUrlRequestFactory>(
+              test_shared_url_loader_factory),
           network_settings, protocol::TransportRole::CLIENT));
 
   protocol::ClientAuthenticationConfig client_auth_config;

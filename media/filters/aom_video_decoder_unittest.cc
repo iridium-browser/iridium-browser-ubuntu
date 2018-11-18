@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "build/build_config.h"
@@ -32,7 +33,7 @@ class AomVideoDecoderTest : public testing::Test {
  public:
   AomVideoDecoderTest()
       : decoder_(new AomVideoDecoder(&media_log_)),
-        i_frame_buffer_(ReadTestDataFile("av1-I-frame-352x288")) {}
+        i_frame_buffer_(ReadTestDataFile("av1-I-frame-320x240")) {}
 
   ~AomVideoDecoderTest() override { Destroy(); }
 
@@ -45,7 +46,7 @@ class AomVideoDecoderTest : public testing::Test {
     decoder_->Initialize(
         config, false, nullptr, NewExpectedBoolCB(success),
         base::Bind(&AomVideoDecoderTest::FrameReady, base::Unretained(this)),
-        VideoDecoder::WaitingForDecryptionKeyCB());
+        base::NullCallback());
     base::RunLoop().RunUntilIdle();
   }
 
@@ -89,8 +90,8 @@ class AomVideoDecoderTest : public testing::Test {
   // output frames into |output_frames|. Returns the last decode status returned
   // by the decoder.
   DecodeStatus DecodeMultipleFrames(const InputBuffers& input_buffers) {
-    for (InputBuffers::const_iterator iter = input_buffers.begin();
-         iter != input_buffers.end(); ++iter) {
+    for (auto iter = input_buffers.begin(); iter != input_buffers.end();
+         ++iter) {
       DecodeStatus status = Decode(*iter);
       switch (status) {
         case DecodeStatus::OK:
@@ -207,7 +208,7 @@ TEST_F(AomVideoDecoderTest, DecodeFrame_Normal) {
 // the output size was adjusted.
 // TODO(dalecurtis): Get an I-frame from a larger video.
 TEST_F(AomVideoDecoderTest, DISABLED_DecodeFrame_LargerWidth) {
-  DecodeIFrameThenTestFile("av1-I-frame-352x288", gfx::Size(1280, 720));
+  DecodeIFrameThenTestFile("av1-I-frame-320x240", gfx::Size(1280, 720));
 }
 
 // Decode a VP9 frame which should trigger a decoder error.

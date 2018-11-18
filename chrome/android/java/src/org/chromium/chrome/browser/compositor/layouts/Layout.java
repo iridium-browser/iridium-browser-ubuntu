@@ -4,25 +4,20 @@
 
 package org.chromium.chrome.browser.compositor.layouts;
 
-import static org.chromium.chrome.browser.compositor.layouts.ChromeAnimation.AnimatableAnimation.createAnimation;
-
 import android.content.Context;
 import android.graphics.PointF;
 import android.graphics.RectF;
+import android.support.annotation.IntDef;
 import android.view.MotionEvent;
 import android.view.ViewGroup;
-import android.view.animation.Interpolator;
 
 import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.browser.compositor.LayerTitleCache;
 import org.chromium.chrome.browser.compositor.animation.CompositorAnimationHandler;
-import org.chromium.chrome.browser.compositor.layouts.ChromeAnimation.Animatable;
-import org.chromium.chrome.browser.compositor.layouts.ChromeAnimation.Animation;
 import org.chromium.chrome.browser.compositor.layouts.components.LayoutTab;
 import org.chromium.chrome.browser.compositor.layouts.components.VirtualView;
 import org.chromium.chrome.browser.compositor.layouts.content.TabContentManager;
 import org.chromium.chrome.browser.compositor.layouts.eventfilter.EventFilter;
-import org.chromium.chrome.browser.compositor.layouts.eventfilter.ScrollDirection;
 import org.chromium.chrome.browser.compositor.overlays.SceneOverlay;
 import org.chromium.chrome.browser.compositor.scene_layer.SceneLayer;
 import org.chromium.chrome.browser.compositor.scene_layer.SceneOverlayLayer;
@@ -33,6 +28,8 @@ import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.tabmodel.TabModelUtils;
 import org.chromium.ui.resources.ResourceManager;
 
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -46,25 +43,26 @@ public abstract class Layout implements TabContentManager.ThumbnailChangeListene
     /**
      * The orientation of the device.
      */
-    public interface Orientation {
-        public static final int UNSET = 0;
-        public static final int PORTRAIT = 1;
-        public static final int LANDSCAPE = 2;
+    public @interface Orientation {
+        int UNSET = 0;
+        int PORTRAIT = 1;
+        int LANDSCAPE = 2;
     }
 
     /** The possible variations of the visible viewport that different layouts may need. */
-    public enum ViewportMode {
+    @IntDef({ViewportMode.ALWAYS_FULLSCREEN, ViewportMode.ALWAYS_SHOWING_BROWSER_CONTROLS,
+            ViewportMode.DYNAMIC_BROWSER_CONTROLS,
+            ViewportMode.USE_PREVIOUS_BROWSER_CONTROLS_STATE})
+    @Retention(RetentionPolicy.SOURCE)
+    public @interface ViewportMode {
         /** The viewport is assumed to be always fullscreen. */
-        ALWAYS_FULLSCREEN,
-
+        int ALWAYS_FULLSCREEN = 0;
         /** The viewport is assuming that browser controls are permenantly shown. */
-        ALWAYS_SHOWING_BROWSER_CONTROLS,
-
+        int ALWAYS_SHOWING_BROWSER_CONTROLS = 1;
         /** The viewport will account for animating browser controls (both shown and hidden). */
-        DYNAMIC_BROWSER_CONTROLS,
-
+        int DYNAMIC_BROWSER_CONTROLS = 2;
         /** Use a viewport that accounts for the browser controls state in the previous layout. */
-        USE_PREVIOUS_BROWSER_CONTROLS_STATE
+        int USE_PREVIOUS_BROWSER_CONTROLS_STATE = 3;
     }
 
     // Defines to make the code easier to read.
@@ -92,8 +90,6 @@ public abstract class Layout implements TabContentManager.ThumbnailChangeListene
     protected TabModelSelector mTabModelSelector;
     protected TabContentManager mTabContentManager;
 
-    private ChromeAnimation<Animatable<?>> mLayoutAnimations;
-
     // Tablet tab strip managers.
     private final List<SceneOverlay> mSceneOverlays = new ArrayList<SceneOverlay>();
 
@@ -109,7 +105,7 @@ public abstract class Layout implements TabContentManager.ThumbnailChangeListene
     private boolean mIsHiding;
 
     // The next id to show when the layout is hidden, or TabBase#INVALID_TAB_ID if no change.
-    private int mNextTabId = Tab.INVALID_TAB_ID;
+    protected int mNextTabId = Tab.INVALID_TAB_ID;
 
     // The ratio of dp to px.
     protected final float mDpToPx;
@@ -205,8 +201,8 @@ public abstract class Layout implements TabContentManager.ThumbnailChangeListene
      * @param isTitleNeeded   Whether a title will be shown.
      * @return                The newly created {@link LayoutTab}.
      */
-    public LayoutTab createLayoutTab(int id, boolean isIncognito,
-            boolean showCloseButton, boolean isTitleNeeded) {
+    public LayoutTab createLayoutTab(
+            int id, boolean isIncognito, boolean showCloseButton, boolean isTitleNeeded) {
         return createLayoutTab(id, isIncognito, showCloseButton, isTitleNeeded, -1.f, -1.f);
     }
 
@@ -382,7 +378,7 @@ public abstract class Layout implements TabContentManager.ThumbnailChangeListene
     /**
      * @return The sizing mode for the layout.
      */
-    public ViewportMode getViewportMode() {
+    public @ViewportMode int getViewportMode() {
         return ViewportMode.ALWAYS_SHOWING_BROWSER_CONTROLS;
     }
 
@@ -489,64 +485,9 @@ public abstract class Layout implements TabContentManager.ThumbnailChangeListene
     public void detachViews() { }
 
     /**
-     * Called when the swipe animation get initiated. It gives a chance to initialize everything.
-     * @param time      The current time of the app in ms.
-     * @param direction The direction the swipe is in.
-     * @param x         The horizontal coordinate the swipe started at in dp.
-     * @param y         The vertical coordinate the swipe started at in dp.
-     */
-    public void swipeStarted(long time, ScrollDirection direction, float x, float y) { }
-
-    /**
-     * Updates a swipe gesture.
-     * @param time The current time of the app in ms.
-     * @param x    The horizontal coordinate the swipe is currently at in dp.
-     * @param y    The vertical coordinate the swipe is currently at in dp.
-     * @param dx   The horizontal delta since the last update in dp.
-     * @param dy   The vertical delta since the last update in dp.
-     * @param tx   The horizontal difference between the start and the current position in dp.
-     * @param ty   The vertical difference between the start and the current position in dp.
-     */
-    public void swipeUpdated(long time, float x, float y, float dx, float dy, float tx, float ty) {
-    }
-
-    /**
-     * Called when the swipe ends; most likely on finger up event. It gives a chance to start
-     * an ending animation to exit the mode gracefully.
-     * @param time The current time of the app in ms.
-     */
-    public void swipeFinished(long time) { }
-
-    /**
-     * Called when the user has cancelled a swipe; most likely if they have dragged their finger
-     * back to the starting position.  Some handlers will throw swipeFinished() instead.
-     * @param time The current time of the app in ms.
-     */
-    public void swipeCancelled(long time) { }
-
-    /**
-     * Fling from a swipe gesture.
-     * @param time The current time of the app in ms.
-     * @param x    The horizontal coordinate the swipe is currently at in dp.
-     * @param y    The vertical coordinate the swipe is currently at in dp.
-     * @param tx   The horizontal difference between the start and the current position in dp.
-     * @param ty   The vertical difference between the start and the current position in dp.
-     * @param vx   The horizontal velocity of the fling.
-     * @param vy   The vertical velocity of the fling.
-     */
-    public void swipeFlingOccurred(long time, float x, float y, float tx, float ty, float vx,
-            float vy) { }
-
-    /**
      * Forces the current animation to finish and broadcasts the proper event.
      */
-    protected void forceAnimationToFinish() {
-        if (mLayoutAnimations != null) {
-            mLayoutAnimations.updateAndFinish();
-            mLayoutAnimations = null;
-            onAnimationFinished();
-        }
-    }
+    protected void forceAnimationToFinish() {}
 
     /**
      * @return The width of the drawing area in dp.
@@ -590,17 +531,6 @@ public abstract class Layout implements TabContentManager.ThumbnailChangeListene
      */
     public int getOrientation() {
         return mCurrentOrientation;
-    }
-
-    /**
-     * @return Whether or not any tabs in this layer use the toolbar resource.
-     */
-    public boolean usesToolbarLayer() {
-        if (mLayoutTabs == null) return false;
-        for (int i = 0; i < mLayoutTabs.length; i++) {
-            if (mLayoutTabs[i].showToolbar()) return true;
-        }
-        return false;
     }
 
     /**
@@ -652,9 +582,6 @@ public abstract class Layout implements TabContentManager.ThumbnailChangeListene
      * @param incognito Whether or not the affected model was incognito.
      */
     public void onTabSelected(long time, int tabId, int prevId, boolean incognito) {
-        for (int i = 0; i < mSceneOverlays.size(); i++) {
-            mSceneOverlays.get(i).tabSelected(time, incognito, tabId, prevId);
-        }
     }
 
     /**
@@ -675,9 +602,6 @@ public abstract class Layout implements TabContentManager.ThumbnailChangeListene
      * @param incognito Whether or not the affected model was incognito.
      */
     public void onTabClosed(long time, int tabId, int nextTabId, boolean incognito) {
-        for (int i = 0; i < mSceneOverlays.size(); i++) {
-            mSceneOverlays.get(i).tabClosed(time, incognito, tabId);
-        }
     }
 
     /**
@@ -744,76 +668,6 @@ public abstract class Layout implements TabContentManager.ThumbnailChangeListene
     }
 
     /**
-     * Called when a tab has been moved in the tabModel.
-     * @param time      The current time of the app in ms.
-     * @param tabId     The id of the Tab.
-     * @param oldIndex  The old index of the tab in the tabModel.
-     * @param newIndex  The new index of the tab in the tabModel.
-     * @param incognito True if the tab is incognito.
-     */
-    public void onTabMoved(long time, int tabId, int oldIndex, int newIndex, boolean incognito) {
-        for (int i = 0; i < mSceneOverlays.size(); i++) {
-            mSceneOverlays.get(i).tabMoved(time, incognito, tabId, oldIndex, newIndex);
-        }
-    }
-
-    /**
-     * Called when a tab has started loading.
-     * @param id        The id of the Tab.
-     * @param incognito True if the tab is incognito.
-     */
-    public void onTabPageLoadStarted(int id, boolean incognito) {
-        for (int i = 0; i < mSceneOverlays.size(); i++) {
-            mSceneOverlays.get(i).tabPageLoadStarted(id, incognito);
-        }
-    }
-
-    /**
-     * Called when a tab has finished loading.
-     * @param id        The id of the Tab.
-     * @param incognito True if the tab is incognito.
-     */
-    public void onTabPageLoadFinished(int id, boolean incognito) {
-        for (int i = 0; i < mSceneOverlays.size(); i++) {
-            mSceneOverlays.get(i).tabPageLoadFinished(id, incognito);
-        }
-    }
-
-    /**
-     * Called when a tab has started loading resources.
-     * @param id        The id of the Tab.
-     * @param incognito True if the tab is incognito.
-     */
-    public void onTabLoadStarted(int id, boolean incognito) {
-        for (int i = 0; i < mSceneOverlays.size(); i++) {
-            mSceneOverlays.get(i).tabLoadStarted(id, incognito);
-        }
-    }
-
-    /**
-     * Called when a tab has stopped loading resources.
-     * @param id        The id of the Tab.
-     * @param incognito True if the tab is incognito.
-     */
-    public void onTabLoadFinished(int id, boolean incognito) {
-        for (int i = 0; i < mSceneOverlays.size(); i++) {
-            mSceneOverlays.get(i).tabLoadFinished(id, incognito);
-        }
-    }
-
-    /**
-     * Called when a tab close has been undone and the tab has been restored.
-     * @param time      The current time of the app in ms.
-     * @param id        The id of the Tab.
-     * @param incognito True if the tab is incognito
-     */
-    public void onTabClosureCancelled(long time, int id, boolean incognito) {
-        for (int i = 0; i < mSceneOverlays.size(); i++) {
-            mSceneOverlays.get(i).tabClosureCancelled(time, incognito, id);
-        }
-    }
-
-    /**
      * Called when a tab is finally closed if the action was previously undoable.
      * @param time      The current time of the app in ms.
      * @param id        The id of the Tab.
@@ -833,33 +687,7 @@ public abstract class Layout implements TabContentManager.ThumbnailChangeListene
      * @return          Whether the animation was finished.
      */
     protected boolean onUpdateAnimation(long time, boolean jumpToEnd) {
-        boolean finished = true;
-        if (mLayoutAnimations != null) {
-            if (jumpToEnd) {
-                finished = mLayoutAnimations.finished();
-                mLayoutAnimations.updateAndFinish();
-            } else {
-                finished = mLayoutAnimations.update(time);
-            }
-
-            if (finished || jumpToEnd) {
-                mLayoutAnimations = null;
-                onAnimationFinished();
-            }
-        }
-
-        // LayoutTabs may be running their own animations; make sure they are done. This should
-        // not block the completion state of the layout animations in general. Particularly, a tab
-        // could be driving theme changes (and therefore fade animations) that are not critical to
-        // the browser's UI. https://crbug.com/627066
-        boolean layoutTabsFinished = true;
-        for (int i = 0; mLayoutTabs != null && i < mLayoutTabs.length; i++) {
-            layoutTabsFinished &= mLayoutTabs[i].onUpdateAnimation(time);
-        }
-
-        if (!finished || !layoutTabsFinished) requestUpdate();
-
-        return finished;
+        return true;
     }
 
     /**
@@ -867,88 +695,7 @@ public abstract class Layout implements TabContentManager.ThumbnailChangeListene
      */
     @VisibleForTesting
     public boolean isLayoutAnimating() {
-        return mLayoutAnimations != null && !mLayoutAnimations.finished();
-    }
-
-    /**
-     * Called when layout-specific actions are needed after the animation finishes.
-     */
-    protected void onAnimationStarted() {
-    }
-
-    /**
-     * Called when layout-specific actions are needed after the animation finishes.
-     */
-    protected void onAnimationFinished() {
-    }
-
-    /**
-     * Creates an {@link org.chromium.chrome.browser.compositor.layouts.ChromeAnimation
-     * .AnimatableAnimation} and adds it to the animation.
-     * Automatically sets the start value at the beginning of the animation.
-     */
-    protected <T extends Enum<?>> void addToAnimation(Animatable<T> object, T prop, float start,
-            float end, long duration, long startTime) {
-        addToAnimation(object, prop, start, end, duration, startTime, false);
-    }
-
-    /**
-     * Creates an {@link org.chromium.chrome.browser.compositor.layouts.ChromeAnimation
-     * .AnimatableAnimation} and it to the animation. Uses a deceleration interpolator by default.
-     */
-    protected <T extends Enum<?>> void addToAnimation(Animatable<T> object, T prop, float start,
-            float end, long duration, long startTime, boolean setStartValueAfterDelay) {
-        addToAnimation(object, prop, start, end, duration, startTime, setStartValueAfterDelay,
-                ChromeAnimation.getDecelerateInterpolator());
-    }
-
-    /**
-     * Creates an {@link org.chromium.chrome.browser.compositor.layouts.ChromeAnimation
-     * .AnimatableAnimation} and
-     * adds it to the animation.
-     *
-     * @param <T>                     The Enum type of the Property being used
-     * @param object                  The object being animated
-     * @param prop                    The property being animated
-     * @param start                   The starting value of the animation
-     * @param end                     The ending value of the animation
-     * @param duration                The duration of the animation in ms
-     * @param startTime               The start time in ms
-     * @param setStartValueAfterDelay See {@link Animation#setStartValueAfterStartDelay(boolean)}
-     * @param interpolator            The interpolator to use for the animation
-     */
-    protected <T extends Enum<?>> void addToAnimation(Animatable<T> object, T prop, float start,
-            float end, long duration, long startTime, boolean setStartValueAfterDelay,
-            Interpolator interpolator) {
-        ChromeAnimation.Animation<Animatable<?>> component = createAnimation(object, prop, start,
-                end, duration, startTime, setStartValueAfterDelay, interpolator);
-        addToAnimation(component);
-    }
-
-    /**
-     * Appends an Animation to the current animation set and starts it immediately.  If the set is
-     * already finished or doesn't exist, the animation set is also started.
-     */
-    protected void addToAnimation(ChromeAnimation.Animation<Animatable<?>> component) {
-        if (mLayoutAnimations == null || mLayoutAnimations.finished()) {
-            onAnimationStarted();
-            mLayoutAnimations = new ChromeAnimation<Animatable<?>>();
-            mLayoutAnimations.start();
-        }
-        component.start();
-        mLayoutAnimations.add(component);
-        requestUpdate();
-    }
-
-    /**
-     * Cancels any animation for the given object and property.
-     * @param object The object being animated.
-     * @param prop   The property to search for.
-     */
-    protected <T extends Enum<?>> void cancelAnimation(Animatable<T> object, T prop) {
-        if (mLayoutAnimations != null) {
-            mLayoutAnimations.cancel(object, prop);
-        }
+        return false;
     }
 
     /**
@@ -999,6 +746,14 @@ public abstract class Layout implements TabContentManager.ThumbnailChangeListene
      */
     public boolean handlesCloseAll() {
         return false;
+    }
+
+    /**
+     * Whether or not the toolbar IncognitoToggleButton (if present) should be enabled. E.g., it can
+     * be disabled while animating a tab selection to avoid odd behavior.
+     */
+    public boolean shouldAllowIncognitoSwitching() {
+        return true;
     }
 
     /**
@@ -1112,13 +867,7 @@ public abstract class Layout implements TabContentManager.ThumbnailChangeListene
      */
     protected void updateSceneLayer(RectF viewport, RectF contentViewport,
             LayerTitleCache layerTitleCache, TabContentManager tabContentManager,
-            ResourceManager resourceManager, ChromeFullscreenManager fullscreenManager) {
-    }
-
-    @VisibleForTesting
-    public void finishAnimationsForTests() {
-        if (mLayoutAnimations != null) mLayoutAnimations.updateAndFinish();
-    }
+            ResourceManager resourceManager, ChromeFullscreenManager fullscreenManager) {}
 
     /**
      * Gets the full screen manager.

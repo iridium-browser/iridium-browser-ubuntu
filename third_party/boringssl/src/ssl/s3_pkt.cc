@@ -122,7 +122,7 @@
 #include "internal.h"
 
 
-namespace bssl {
+BSSL_NAMESPACE_BEGIN
 
 static int do_ssl3_write(SSL *ssl, int type, const uint8_t *in, unsigned len);
 
@@ -234,6 +234,9 @@ static int do_ssl3_write(SSL *ssl, int type, const uint8_t *in, unsigned len) {
     return 0;
   }
 
+  if (!tls_flush_pending_hs_data(ssl)) {
+    return -1;
+  }
   size_t flight_len = 0;
   if (ssl->s3->pending_flight != nullptr) {
     flight_len =
@@ -411,7 +414,7 @@ int ssl3_dispatch_alert(SSL *ssl) {
 
   // If the alert is fatal, flush the BIO now.
   if (ssl->s3->send_alert[0] == SSL3_AL_FATAL) {
-    BIO_flush(ssl->wbio);
+    BIO_flush(ssl->wbio.get());
   }
 
   ssl_do_msg_callback(ssl, 1 /* write */, SSL3_RT_ALERT, ssl->s3->send_alert);
@@ -422,4 +425,4 @@ int ssl3_dispatch_alert(SSL *ssl) {
   return 1;
 }
 
-}  // namespace bssl
+BSSL_NAMESPACE_END

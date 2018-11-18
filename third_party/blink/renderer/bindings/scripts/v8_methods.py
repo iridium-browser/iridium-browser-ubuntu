@@ -163,12 +163,6 @@ def method_context(interface, method, is_visible=True):
     is_raises_exception = 'RaisesException' in extended_attributes
     is_custom_call_prologue = has_extended_attribute_value(method, 'Custom', 'CallPrologue')
     is_custom_call_epilogue = has_extended_attribute_value(method, 'Custom', 'CallEpilogue')
-    is_post_message = 'PostMessage' in extended_attributes
-    if is_post_message:
-        includes.add('bindings/core/v8/serialization/serialized_script_value_factory.h')
-        includes.add('bindings/core/v8/serialization/transferables.h')
-        includes.add('core/typed_arrays/dom_array_buffer_base.h')
-        includes.add('core/imagebitmap/image_bitmap.h')
 
     if 'LenientThis' in extended_attributes:
         raise Exception('[LenientThis] is not supported for operations.')
@@ -178,6 +172,10 @@ def method_context(interface, method, is_visible=True):
     else:
         side_effect_type = 'V8DOMConfiguration::kHasSideEffect'
 
+    # [LogActivity]
+    if 'LogActivity' in extended_attributes:
+        includes.add('platform/bindings/v8_per_context_data.h')
+
     argument_contexts = [
         argument_context(interface, method, argument, index, is_visible=is_visible)
         for index, argument in enumerate(arguments)]
@@ -185,7 +183,7 @@ def method_context(interface, method, is_visible=True):
     return {
         'activity_logging_world_list': v8_utilities.activity_logging_world_list(method),  # [ActivityLogging]
         'arguments': argument_contexts,
-        'cpp_type': (v8_types.cpp_template_type('Optional', idl_type.cpp_type)
+        'cpp_type': (v8_types.cpp_template_type('base::Optional', idl_type.cpp_type)
                      if idl_type.is_explicit_nullable else idl_type.cpp_type),
         'cpp_value': this_cpp_value,
         'cpp_type_initializer': idl_type.cpp_type_initializer,
@@ -220,10 +218,9 @@ def method_context(interface, method, is_visible=True):
         'is_partial_interface_member':
             'PartialInterfaceImplementedAs' in extended_attributes,
         'is_per_world_bindings': 'PerWorldBindings' in extended_attributes,
-        'is_post_message': is_post_message,
         'is_raises_exception': is_raises_exception,
         'is_static': is_static,
-        'is_unforgeable': is_unforgeable(interface, method),
+        'is_unforgeable': is_unforgeable(method),
         'is_variadic': arguments and arguments[-1].is_variadic,
         'measure_as': v8_utilities.measure_as(method, interface),  # [MeasureAs]
         'name': name,
@@ -272,7 +269,7 @@ def argument_context(interface, method, argument, index, is_visible=True):
                                            used_as_variadic_argument=argument.is_variadic)
     context = {
         'cpp_type': (
-            v8_types.cpp_template_type('Optional', this_cpp_type)
+            v8_types.cpp_template_type('base::Optional', this_cpp_type)
             if idl_type.is_explicit_nullable and not argument.is_variadic
             else this_cpp_type),
         'cpp_value': this_cpp_value,
@@ -373,7 +370,7 @@ def v8_set_return_value(interface_name, method, cpp_value, for_main_world=False)
     # [CallWith=ScriptState], [RaisesException]
     if use_local_result(method):
         if idl_type.is_explicit_nullable:
-            # result is of type WTF::Optional<T>
+            # result is of type base::Optional<T>
             cpp_value = 'result.value()'
         else:
             cpp_value = 'result'
@@ -453,7 +450,7 @@ def property_attributes(interface, method):
     property_attributes_list = []
     if 'NotEnumerable' in extended_attributes:
         property_attributes_list.append('v8::DontEnum')
-    if is_unforgeable(interface, method):
+    if is_unforgeable(method):
         property_attributes_list.append('v8::ReadOnly')
         property_attributes_list.append('v8::DontDelete')
     return property_attributes_list

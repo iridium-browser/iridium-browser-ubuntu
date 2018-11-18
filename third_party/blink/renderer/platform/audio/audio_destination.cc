@@ -34,14 +34,13 @@
 
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_audio_latency_hint.h"
-#include "third_party/blink/public/platform/web_security_origin.h"
 #include "third_party/blink/renderer/platform/audio/audio_utilities.h"
 #include "third_party/blink/renderer/platform/audio/push_pull_fifo.h"
+#include "third_party/blink/renderer/platform/audio/vector_math.h"
 #include "third_party/blink/renderer/platform/cross_thread_functional.h"
 #include "third_party/blink/renderer/platform/histogram.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/blink/renderer/platform/web_task_runner.h"
-#include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 
 namespace blink {
 
@@ -56,18 +55,14 @@ const size_t kFIFOSize = 96 * 128;
 scoped_refptr<AudioDestination> AudioDestination::Create(
     AudioIOCallback& callback,
     unsigned number_of_output_channels,
-    const WebAudioLatencyHint& latency_hint,
-    scoped_refptr<const SecurityOrigin> security_origin) {
+    const WebAudioLatencyHint& latency_hint) {
   return base::AdoptRef(
-      new AudioDestination(callback, number_of_output_channels, latency_hint,
-                           std::move(security_origin)));
+      new AudioDestination(callback, number_of_output_channels, latency_hint));
 }
 
-AudioDestination::AudioDestination(
-    AudioIOCallback& callback,
-    unsigned number_of_output_channels,
-    const WebAudioLatencyHint& latency_hint,
-    scoped_refptr<const SecurityOrigin> security_origin)
+AudioDestination::AudioDestination(AudioIOCallback& callback,
+                                   unsigned number_of_output_channels,
+                                   const WebAudioLatencyHint& latency_hint)
     : number_of_output_channels_(number_of_output_channels),
       is_playing_(false),
       fifo_(
@@ -84,8 +79,7 @@ AudioDestination::AudioDestination(
   // renderer does not support it currently. Thus, we use zero for the number
   // of input channels.
   web_audio_device_ = Platform::Current()->CreateAudioDevice(
-      0, number_of_output_channels, latency_hint, this, String(),
-      std::move(security_origin));
+      0, number_of_output_channels, latency_hint, this, String());
   DCHECK(web_audio_device_);
 
   callback_buffer_size_ = web_audio_device_->FramesPerBuffer();
@@ -139,7 +133,7 @@ void AudioDestination::Render(const WebVector<float*>& destination_data,
 
   size_t frames_to_render = fifo_->Pull(output_bus_.get(), number_of_frames);
 
- // Use the dual-thread rendering model if the AudioWorklet is activated.
+  // Use the dual-thread rendering model if the AudioWorklet is activated.
   if (worklet_task_runner_) {
     PostCrossThreadTask(
         *worklet_task_runner_,
@@ -155,6 +149,7 @@ void AudioDestination::Render(const WebVector<float*>& destination_data,
   TRACE_EVENT_END2("webaudio", "AudioDestination::Render", "timestamp (s)",
                    delay_timestamp, "delay (s)", delay);
 }
+
 
 void AudioDestination::RequestRender(size_t frames_requested,
                                      size_t frames_to_render,
@@ -190,8 +185,9 @@ void AudioDestination::RequestRender(size_t frames_requested,
       output_position.position = 0.0;
 
     // Process WebAudio graph and push the rendered output to FIFO.
-    callback_.Render(nullptr, render_bus_.get(),
+    callback_.Render(render_bus_.get(),
                      AudioUtilities::kRenderQuantumFrames, output_position);
+
     fifo_->Push(render_bus_.get());
   }
 

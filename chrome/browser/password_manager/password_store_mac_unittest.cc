@@ -10,7 +10,7 @@
 #include "base/macros.h"
 #include "base/scoped_observer.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/test/histogram_tester.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_task_environment.h"
 #include "chrome/browser/prefs/browser_prefs.h"
 #include "components/os_crypt/os_crypt_mocker.h"
@@ -281,7 +281,7 @@ TEST_P(PasswordStoreMacTest, OperationsOnABadDatabaseSilentlyFail) {
   EXPECT_THAT(mock_consumer.forms(), IsEmpty());
 
   // Report metrics.
-  store()->ReportMetrics("Test Username", true);
+  store()->ReportMetrics("Test Username", true, false);
   FinishAsyncProcessing();
 
   // Change the login.

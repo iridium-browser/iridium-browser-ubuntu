@@ -24,6 +24,12 @@ namespace chromecast {
 // must be non-negative.
 class WeightedMovingLinearRegression {
  public:
+  struct Sample {
+    int64_t x;
+    int64_t y;
+    double weight;
+  };
+
   explicit WeightedMovingLinearRegression(int64_t max_x_range);
   ~WeightedMovingLinearRegression();
 
@@ -46,13 +52,14 @@ class WeightedMovingLinearRegression {
   // case |slope| and |error| are not modified. Returns true otherwise.
   bool EstimateSlope(double* slope, double* error) const;
 
- private:
-  struct Sample {
-    int64_t x;
-    int64_t y;
-    double weight;
-  };
+  // Dumps samples currently in the linear regression.
+  void DumpSamples() const;
 
+  // Returns a const reference to the samples currently captured. Very
+  // useful for debugging.
+  const std::deque<Sample>& samples() { return samples_; }
+
+ private:
   // Adds (x, y) to the set if |weight| is positive; removes (x, y) from the
   // set if |weight| is negative.
   void UpdateSet(int64_t x, int64_t y, double weight);
@@ -61,7 +68,7 @@ class WeightedMovingLinearRegression {
   WeightedMean x_mean_;
   WeightedMean y_mean_;
   double covariance_;
-  std::queue<Sample> samples_;
+  std::deque<Sample> samples_;
 
   double slope_;
   double slope_variance_;

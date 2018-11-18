@@ -6,14 +6,6 @@ window.metrics = {
   recordEnum: function() {}
 };
 
-function MockMetadataModel(properties) {
-  this.properties_ = properties;
-}
-
-MockMetadataModel.prototype.get = function() {
-  return Promise.resolve([this.properties_]);
-};
-
 function setUp() {
   // Behavior of window.chrome depends on each test case. window.chrome should
   // be initialized properly inside each test function.
@@ -57,6 +49,9 @@ function testExecuteEntryTask(callback) {
       new MockFileEntry(fileSystem, '/test.png', {});
   var controller = new TaskController(
       DialogType.FULL_PAGE, {
+        getLocationInfo: function(entry) {
+          return VolumeManagerCommon.RootType.DRIVE;
+        },
         getDriveConnectionState: function() {
           return VolumeManagerCommon.DriveConnectionType.ONLINE;
         },
@@ -76,7 +71,8 @@ function testExecuteEntryTask(callback) {
         getCurrentRootType: function() {
           return null;
         }
-      }, new cr.EventTarget(), null);
+      },
+      new cr.EventTarget(), null);
 
   controller.executeEntryTask(fileSystem.entries['/test.png']);
   reportPromise(new Promise(function(fulfill) {
@@ -129,7 +125,12 @@ function setupFileManagerPrivate() {
 
 function createTaskController(selectionHandler) {
   return new TaskController(
-      DialogType.FULL_PAGE, {}, {
+      DialogType.FULL_PAGE, {
+        getLocationInfo: function(entry) {
+          return VolumeManagerCommon.RootType.DRIVE;
+        }
+      },
+      {
         taskMenuButton: document.createElement('button'),
         shareMenuButton: {menu: document.createElement('div')},
         fileContextMenu:
@@ -139,7 +140,8 @@ function createTaskController(selectionHandler) {
         getCurrentRootType: function() {
           return null;
         }
-      }, selectionHandler, null);
+      },
+      selectionHandler, null);
 }
 
 // TaskController.getFileTasks should not call fileManagerPrivate.getFileTasks

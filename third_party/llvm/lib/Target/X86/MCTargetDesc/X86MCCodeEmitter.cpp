@@ -219,6 +219,8 @@ static bool Is32BitMemOperand(const MCInst &MI, unsigned Op) {
     assert(IndexReg.getReg() == 0 && "Invalid eip-based address.");
     return true;
   }
+  if (IndexReg.getReg() == X86::EIZ)
+    return true;
   return false;
 }
 
@@ -350,8 +352,14 @@ EmitImmediate(const MCOperand &DispOp, SMLoc Loc, unsigned Size,
       FixupKind == MCFixupKind(X86::reloc_riprel_4byte_movq_load) ||
       FixupKind == MCFixupKind(X86::reloc_riprel_4byte_relax) ||
       FixupKind == MCFixupKind(X86::reloc_riprel_4byte_relax_rex) ||
-      FixupKind == MCFixupKind(X86::reloc_branch_4byte_pcrel))
+      FixupKind == MCFixupKind(X86::reloc_branch_4byte_pcrel)) {
     ImmOffset -= 4;
+    // If this is a pc-relative load off _GLOBAL_OFFSET_TABLE_:
+    // leaq _GLOBAL_OFFSET_TABLE_(%rip), %r15
+    // this needs to be a GOTPC32 relocation.
+    if (StartsWithGlobalOffsetTable(Expr) != GOT_None)
+      FixupKind = MCFixupKind(X86::reloc_global_offset_table);
+  }
   if (FixupKind == FK_PCRel_2)
     ImmOffset -= 2;
   if (FixupKind == FK_PCRel_1)
@@ -399,6 +407,7 @@ void X86MCCodeEmitter::emitMemModRMByte(const MCInst &MI, unsigned Op,
         return X86::reloc_riprel_4byte_movq_load;
       case X86::CALL64m:
       case X86::JMP64m:
+      case X86::TAILJMPm64:
       case X86::TEST64mr:
       case X86::ADC64rm:
       case X86::ADD64rm:
@@ -469,7 +478,7 @@ void X86MCCodeEmitter::emitMemModRMByte(const MCInst &MI, unsigned Op,
       }
 
       if (Disp.isImm() && isDisp8(Disp.getImm())) {
-        if (Disp.getImm() == 0 && BaseRegNo != N86::EBP) {
+        if (Disp.getImm() == 0 && RMfield != 6) {
           // There is no displacement; just the register.
           EmitByte(ModRMByte(0, RegOpcodeField, RMfield), CurByte, OS);
           return;
@@ -700,10 +709,8 @@ void X86MCCodeEmitter::EmitVEXOpcodePrefix(uint64_t TSFlags, unsigned &CurByte,
   //  0b10: F3
   //  0b11: F2
   //
-  uint8_t VEX_PP;
+  uint8_t VEX_PP = 0;
   switch (TSFlags & X86II::OpPrefixMask) {
-  default: llvm_unreachable("Invalid op prefix!");
-  case X86II::PS: VEX_PP = 0x0; break; // none
   case X86II::PD: VEX_PP = 0x1; break; // 66
   case X86II::XS: VEX_PP = 0x2; break; // F3
   case X86II::XD: VEX_PP = 0x3; break; // F2

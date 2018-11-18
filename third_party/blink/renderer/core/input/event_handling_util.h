@@ -13,15 +13,18 @@
 
 namespace blink {
 
+class ContainerNode;
+class EventTarget;
 class LocalFrame;
 class ScrollableArea;
 class PaintLayer;
+enum class DispatchEventResult;
 
 namespace EventHandlingUtil {
 
 HitTestResult HitTestResultInFrame(
     LocalFrame*,
-    const LayoutPoint&,
+    const HitTestLocation&,
     HitTestRequest::HitTestRequestType hit_type = HitTestRequest::kReadOnly |
                                                   HitTestRequest::kActive);
 
@@ -48,7 +51,7 @@ LocalFrame* SubframeForHitTestResult(const MouseEventWithHitTestResults&);
 LocalFrame* SubframeForTargetNode(Node*);
 
 class PointerEventTarget {
-  DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
+  DISALLOW_NEW();
 
  public:
   void Trace(blink::Visitor* visitor) {

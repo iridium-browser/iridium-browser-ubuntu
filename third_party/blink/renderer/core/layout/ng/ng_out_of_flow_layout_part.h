@@ -7,17 +7,21 @@
 
 #include "third_party/blink/renderer/core/core_export.h"
 
+#include "base/optional.h"
+#include "third_party/blink/renderer/core/layout/ng/geometry/ng_physical_offset.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_absolute_utils.h"
-#include "third_party/blink/renderer/core/layout/ng/ng_constraint_space.h"
-#include "third_party/blink/renderer/platform/wtf/optional.h"
+#include "third_party/blink/renderer/platform/wtf/hash_map.h"
 
 namespace blink {
 
 class ComputedStyle;
+class LayoutBox;
+class LayoutObject;
 class NGBlockNode;
 class NGFragmentBuilder;
 class NGConstraintSpace;
 class NGLayoutResult;
+struct NGOutOfFlowPositionedDescendant;
 
 // Helper class for positioning of out-of-flow blocks.
 // It should be used together with NGFragmentBuilder.
@@ -27,16 +31,26 @@ class CORE_EXPORT NGOutOfFlowLayoutPart {
   STACK_ALLOCATED();
 
  public:
+  // The container_builder, borders_and_scrollers, container_space and
+  // container_style parameters are all with respect to the containing block of
+  // the relevant out-of-flow positioned descendants. If the CSS "containing
+  // block" of such an out-of-flow positioned descendant isn't a true block (but
+  // e.g. a relatively positioned inline instead), the containing block here is
+  // the containing block of said non-block.
   NGOutOfFlowLayoutPart(NGFragmentBuilder* container_builder,
                         bool contains_absolute,
                         bool contains_fixed,
-                        const NGBoxStrut& scrollbar_sizes,
+                        const NGBoxStrut& borders_and_scrollers,
                         const NGConstraintSpace& container_space,
                         const ComputedStyle& container_style);
 
-  // update_legacy will place NG OOF descendants into their Legacy container.
-  // It should be false if OOF descendants have already been placed into Legacy.
-  void Run(bool update_legacy = true);
+  // Normally this function lays out and positions all out-of-flow objects
+  // from the container_builder and additional ones it discovers through laying
+  // out those objects. However, if only_layout is specified, only that object
+  // will get laid out; any additional ones will be stored as out-of-flow
+  // descendants in the builder for use via
+  // LayoutResult::OutOfFlowPositionedDescendants.
+  void Run(LayoutBox* only_layout = nullptr);
 
  private:
   // Information needed to position descendant within a containing block.
@@ -51,6 +65,8 @@ class CORE_EXPORT NGOutOfFlowLayoutPart {
   //    Inline containing block is positioned wrt default containing block.
   struct ContainingBlockInfo {
     STACK_ALLOCATED();
+
+   public:
     // Containing block style.
     const ComputedStyle* style;
     // Logical in containing block coordinates.
@@ -79,8 +95,8 @@ class CORE_EXPORT NGOutOfFlowLayoutPart {
   scoped_refptr<NGLayoutResult> GenerateFragment(
       NGBlockNode node,
       const ContainingBlockInfo&,
-      const Optional<LayoutUnit>& block_estimate,
-      const NGAbsolutePhysicalPosition node_position);
+      const base::Optional<LayoutUnit>& block_estimate,
+      const NGAbsolutePhysicalPosition& node_position);
 
   NGFragmentBuilder* container_builder_;
   bool contains_absolute_;

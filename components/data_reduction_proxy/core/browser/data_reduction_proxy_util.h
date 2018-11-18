@@ -8,8 +8,11 @@
 #include <memory>
 #include <string>
 
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_data.h"
+#include "components/data_reduction_proxy/core/common/data_reduction_proxy_page_load_timing.h"
 #include "components/data_reduction_proxy/proto/client_config.pb.h"
 #include "components/data_reduction_proxy/proto/pageload_metrics.pb.h"
+#include "net/base/network_change_notifier.h"
 #include "net/base/proxy_server.h"
 #include "net/nqe/effective_connection_type.h"
 #include "net/proxy_resolution/proxy_retry_info.h"
@@ -120,6 +123,10 @@ int64_t EstimateOriginalReceivedBytes(const net::URLRequest& request,
 // Converts net::ProxyServer::Scheme to type ProxyScheme.
 ProxyScheme ConvertNetProxySchemeToProxyScheme(net::ProxyServer::Scheme scheme);
 
+// Returns the hostname used for the other bucket to record datause not scoped
+// to a page load such as chrome-services traffic, service worker, Downloads.
+const char* GetSiteBreakdownOtherHostName();
+
 }  // namespace util
 
 namespace protobuf_parser {
@@ -128,11 +135,20 @@ static_assert(net::EFFECTIVE_CONNECTION_TYPE_LAST == 6,
               "If net::EFFECTIVE_CONNECTION_TYPE changes, "
               "PageloadMetrics_EffectiveConnectionType needs to be updated.");
 
-// Returns the PageloadMetrics_EffectiveConnection equivalent of
+// Returns the PageloadMetrics_EffectiveConnectionType equivalent of
 // |effective_connection_type|.
 PageloadMetrics_EffectiveConnectionType
 ProtoEffectiveConnectionTypeFromEffectiveConnectionType(
     net::EffectiveConnectionType effective_connection_type);
+
+// Returns the PageloadMetrics_ConnectionType equivalent of
+// |connection_type|.
+PageloadMetrics_ConnectionType ProtoConnectionTypeFromConnectionType(
+    net::NetworkChangeNotifier::ConnectionType connection_type);
+
+// Returns the RequestInfo_Protocol equivalent of |protocol|.
+RequestInfo_Protocol ProtoRequestInfoProtocolFromRequestInfoProtocol(
+    DataReductionProxyData::RequestInfo::Protocol protocol);
 
 // Returns the |net::ProxyServer::Scheme| for a ProxyServer_ProxyScheme.
 net::ProxyServer::Scheme SchemeFromProxyScheme(

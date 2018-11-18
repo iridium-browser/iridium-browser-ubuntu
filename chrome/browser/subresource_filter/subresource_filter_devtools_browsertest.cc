@@ -108,7 +108,7 @@ IN_PROC_BROWSER_TEST_F(SubresourceFilterListInsertingBrowserTest,
   ConfigureURLWithWarning(url,
                           {safe_browsing::SubresourceFilterType::BETTER_ADS});
 
-  Configuration config(subresource_filter::ActivationLevel::ENABLED,
+  Configuration config(subresource_filter::mojom::ActivationLevel::kEnabled,
                        subresource_filter::ActivationScope::ACTIVATION_LIST,
                        subresource_filter::ActivationList::BETTER_ADS);
   ResetConfiguration(std::move(config));
@@ -136,9 +136,9 @@ IN_PROC_BROWSER_TEST_F(SubresourceFilterListInsertingBrowserTest,
 }
 
 IN_PROC_BROWSER_TEST_F(SubresourceFilterDevtoolsBrowserTest,
-                       ForceActivation_NoSubresourceLogging) {
+                       ForceActivation_SubresourceLogging) {
   content::ConsoleObserverDelegate console_observer(web_contents(),
-                                                    "*show ads*");
+                                                    kActivationConsoleMessage);
   web_contents()->SetDelegate(&console_observer);
   const GURL url(
       GetTestUrl("subresource_filter/frame_with_included_script.html"));
@@ -149,7 +149,8 @@ IN_PROC_BROWSER_TEST_F(SubresourceFilterDevtoolsBrowserTest,
 
   ui_test_utils::NavigateToURL(browser(), url);
   EXPECT_FALSE(WasParsedScriptElementLoaded(web_contents()->GetMainFrame()));
-  EXPECT_TRUE(console_observer.message().empty()) << console_observer.message();
+  EXPECT_FALSE(console_observer.message().empty());
+  console_observer.Wait();
 }
 
 // See crbug.com/813197, where agent hosts from subframes could send messages to

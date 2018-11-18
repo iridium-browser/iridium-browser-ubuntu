@@ -10,6 +10,7 @@
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_piece.h"
 #include "base/threading/thread_checker.h"
 #include "content/common/content_export.h"
@@ -66,6 +67,7 @@ class CONTENT_EXPORT MediaRecorderHandler final
   void EncodingInfo(
       const blink::WebMediaConfiguration& configuration,
       std::unique_ptr<blink::WebMediaCapabilitiesQueryCallbacks> cb) override;
+  blink::WebString ActualMimeType() override;
 
  private:
   friend class MediaRecorderHandlerTest;

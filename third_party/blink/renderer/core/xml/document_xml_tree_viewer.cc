@@ -12,6 +12,7 @@
 #include "third_party/blink/renderer/platform/bindings/dom_wrapper_world.h"
 #include "third_party/blink/renderer/platform/bindings/v8_per_isolate_data.h"
 #include "third_party/blink/renderer/platform/data_resource_helper.h"
+#include "third_party/blink/renderer/platform/loader/fetch/access_control_status.h"
 
 namespace blink {
 
@@ -20,13 +21,12 @@ void TransformDocumentToXMLTreeView(Document& document) {
       GetDataResourceAsASCIIString("DocumentXMLTreeViewer.js");
   String css_string = GetDataResourceAsASCIIString("DocumentXMLTreeViewer.css");
 
-  HeapVector<ScriptSourceCode> sources;
-  sources.push_back(
-      ScriptSourceCode(script_string, ScriptSourceLocationType::kInternal));
   v8::HandleScope handle_scope(V8PerIsolateData::MainThreadIsolate());
 
   document.GetFrame()->GetScriptController().ExecuteScriptInIsolatedWorld(
-      IsolatedWorldId::kDocumentXMLTreeViewerWorldId, sources, nullptr);
+      IsolatedWorldId::kDocumentXMLTreeViewerWorldId,
+      ScriptSourceCode(script_string, ScriptSourceLocationType::kInternal),
+      KURL(), kOpaqueResource);
 
   Element* element = document.getElementById("xml-viewer-style");
   if (element) {

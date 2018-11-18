@@ -26,15 +26,14 @@
 
 #include "third_party/blink/renderer/core/xml/xpath_result.h"
 
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
 #include "third_party/blink/renderer/core/dom/document.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
 #include "third_party/blink/renderer/core/xml/xpath_evaluator.h"
 #include "third_party/blink/renderer/core/xml/xpath_expression_node.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 
 namespace blink {
 
-using namespace XPath;
+using namespace xpath;
 
 XPathResult::XPathResult(EvaluationContext& context, const Value& value)
     : value_(value), node_set_position_(0), dom_tree_version_(0) {
@@ -188,7 +187,7 @@ Node* XPathResult::iterateNext(ExceptionState& exception_state) {
 
   if (invalidIteratorState()) {
     exception_state.ThrowDOMException(
-        kInvalidStateError,
+        DOMExceptionCode::kInvalidStateError,
         "The document has mutated since the result was returned.");
     return nullptr;
   }

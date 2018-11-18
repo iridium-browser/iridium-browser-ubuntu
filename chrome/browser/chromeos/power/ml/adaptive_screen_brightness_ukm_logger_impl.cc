@@ -4,11 +4,12 @@
 
 #include "chrome/browser/chromeos/power/ml/adaptive_screen_brightness_ukm_logger_impl.h"
 
+#include <array>
 #include <cmath>
 
 #include "base/logging.h"
 #include "chrome/browser/chromeos/power/ml/screen_brightness_event.pb.h"
-#include "chrome/browser/chromeos/power/ml/user_activity_ukm_logger_impl.h"
+#include "chrome/browser/chromeos/power/ml/user_activity_ukm_logger_helpers.h"
 #include "services/metrics/public/cpp/ukm_builders.h"
 #include "services/metrics/public/cpp/ukm_recorder.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
@@ -21,16 +22,16 @@ namespace {
 
 constexpr int kSecondsPerHour = 3600;
 
-constexpr UserActivityUkmLoggerImpl::Bucket kBatteryPercentBuckets[] = {
-    {100, 5}};
+constexpr std::array<Bucket, 1> kBatteryPercentBuckets = {{{100, 5}}};
 
-constexpr UserActivityUkmLoggerImpl::Bucket kUserInputEventBuckets[] = {
-    {100, 1},
-    {1000, 100},
-    {10000, 1000}};
+constexpr std::array<Bucket, 3> kUserInputEventBuckets = {
+    {{100, 1}, {1000, 100}, {10000, 1000}}};
 
-constexpr UserActivityUkmLoggerImpl::Bucket kRecentTimeActiveBuckets[] =
-    {{60, 1}, {600, 60}, {1200, 300}, {3600, 600}, {18000, 1800}};
+constexpr std::array<Bucket, 5> kRecentTimeActiveBuckets = {
+    {{60, 1}, {600, 60}, {1200, 300}, {3600, 600}, {18000, 1800}}};
+
+constexpr std::array<Bucket, 2> kTimeSinceLastEventBuckets = {
+    {{60, 1}, {600, 60}}};
 
 }  // namespace
 
@@ -60,31 +61,23 @@ void AdaptiveScreenBrightnessUkmLoggerImpl::LogActivity(
   }
 
   if (activity_data.has_num_recent_mouse_events()) {
-    ukm_screen_brightness.SetNumRecentMouseEvents(
-        UserActivityUkmLoggerImpl::Bucketize(
-            activity_data.num_recent_mouse_events(), kUserInputEventBuckets,
-            arraysize(kUserInputEventBuckets)));
+    ukm_screen_brightness.SetNumRecentMouseEvents(Bucketize(
+        activity_data.num_recent_mouse_events(), kUserInputEventBuckets));
   }
 
   if (activity_data.has_num_recent_key_events()) {
-    ukm_screen_brightness.SetNumRecentKeyEvents(
-        UserActivityUkmLoggerImpl::Bucketize(
-            activity_data.num_recent_key_events(), kUserInputEventBuckets,
-            arraysize(kUserInputEventBuckets)));
+    ukm_screen_brightness.SetNumRecentKeyEvents(Bucketize(
+        activity_data.num_recent_key_events(), kUserInputEventBuckets));
   }
 
   if (activity_data.has_num_recent_stylus_events()) {
-    ukm_screen_brightness.SetNumRecentStylusEvents(
-        UserActivityUkmLoggerImpl::Bucketize(
-            activity_data.num_recent_stylus_events(), kUserInputEventBuckets,
-            arraysize(kUserInputEventBuckets)));
+    ukm_screen_brightness.SetNumRecentStylusEvents(Bucketize(
+        activity_data.num_recent_stylus_events(), kUserInputEventBuckets));
   }
 
   if (activity_data.has_num_recent_touch_events()) {
-    ukm_screen_brightness.SetNumRecentTouchEvents(
-        UserActivityUkmLoggerImpl::Bucketize(
-            activity_data.num_recent_touch_events(), kUserInputEventBuckets,
-            arraysize(kUserInputEventBuckets)));
+    ukm_screen_brightness.SetNumRecentTouchEvents(Bucketize(
+        activity_data.num_recent_touch_events(), kUserInputEventBuckets));
   }
 
   if (activity_data.has_last_activity_time_sec()) {
@@ -93,10 +86,8 @@ void AdaptiveScreenBrightnessUkmLoggerImpl::LogActivity(
   }
 
   if (activity_data.has_recent_time_active_sec()) {
-    ukm_screen_brightness.SetRecentTimeActiveSec(
-        UserActivityUkmLoggerImpl::Bucketize(
-            activity_data.recent_time_active_sec(), kRecentTimeActiveBuckets,
-            arraysize(kRecentTimeActiveBuckets)));
+    ukm_screen_brightness.SetRecentTimeActiveSec(Bucketize(
+        activity_data.recent_time_active_sec(), kRecentTimeActiveBuckets));
   }
 
   if (activity_data.has_is_video_playing()) {
@@ -110,10 +101,8 @@ void AdaptiveScreenBrightnessUkmLoggerImpl::LogActivity(
   }
 
   if (env_data.has_battery_percent()) {
-    ukm_screen_brightness.SetBatteryPercent(
-        UserActivityUkmLoggerImpl::Bucketize(
-            std::floor(env_data.battery_percent()), kBatteryPercentBuckets,
-            arraysize(kBatteryPercentBuckets)));
+    ukm_screen_brightness.SetBatteryPercent(Bucketize(
+        std::floor(env_data.battery_percent()), kBatteryPercentBuckets));
   }
 
   if (env_data.has_device_mode()) {
@@ -123,6 +112,10 @@ void AdaptiveScreenBrightnessUkmLoggerImpl::LogActivity(
   if (env_data.has_night_light_temperature_percent()) {
     ukm_screen_brightness.SetNightLightTemperaturePercent(
         env_data.night_light_temperature_percent());
+  }
+
+  if (env_data.has_previous_brightness()) {
+    ukm_screen_brightness.SetPreviousBrightness(env_data.previous_brightness());
   }
 
   const ScreenBrightnessEvent_Features_AccessibilityData accessibility_data =
@@ -200,6 +193,11 @@ void AdaptiveScreenBrightnessUkmLoggerImpl::LogActivity(
 
   if (event.has_reason()) {
     ukm_screen_brightness.SetReason(event.reason());
+  }
+
+  if (event.has_time_since_last_event_sec()) {
+    ukm_screen_brightness.SetTimeSinceLastEventSec(Bucketize(
+        event.time_since_last_event_sec(), kTimeSinceLastEventBuckets));
   }
 
   ukm::UkmRecorder* const ukm_recorder = ukm::UkmRecorder::Get();

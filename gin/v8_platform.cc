@@ -13,20 +13,27 @@
 #include "base/bits.h"
 #include "base/debug/stack_trace.h"
 #include "base/location.h"
+#include "base/logging.h"
 #include "base/rand_util.h"
 #include "base/sys_info.h"
-#include "base/task_scheduler/post_task.h"
-#include "base/task_scheduler/task_scheduler.h"
+#include "base/task/post_task.h"
+#include "base/task/task_scheduler/task_scheduler.h"
+#include "base/task/task_traits.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 #include "gin/per_isolate_data.h"
-#include "gin/v8_background_task_runner.h"
 
 namespace gin {
 
 namespace {
 
 base::LazyInstance<V8Platform>::Leaky g_v8_platform = LAZY_INSTANCE_INITIALIZER;
+
+constexpr base::TaskTraits kDefaultTaskTraits = {
+    base::TaskPriority::USER_VISIBLE};
+
+constexpr base::TaskTraits kBlockingTaskTraits = {
+    base::TaskPriority::USER_BLOCKING};
 
 void PrintStackTrace() {
   base::debug::StackTrace trace;
@@ -53,7 +60,14 @@ class ConvertableToTraceFormatWrapper final
 class EnabledStateObserverImpl final
     : public base::trace_event::TraceLog::EnabledStateObserver {
  public:
-  EnabledStateObserverImpl() = default;
+  EnabledStateObserverImpl() {
+    base::trace_event::TraceLog::GetInstance()->AddEnabledStateObserver(this);
+  }
+
+  ~EnabledStateObserverImpl() override {
+    base::trace_event::TraceLog::GetInstance()->RemoveEnabledStateObserver(
+        this);
+  }
 
   void OnTraceLogEnabled() final {
     base::AutoLock lock(mutex_);
@@ -73,12 +87,9 @@ class EnabledStateObserverImpl final
     {
       base::AutoLock lock(mutex_);
       DCHECK(!observers_.count(observer));
-      if (observers_.empty()) {
-        base::trace_event::TraceLog::GetInstance()->AddEnabledStateObserver(
-            this);
-      }
       observers_.insert(observer);
     }
+
     // Fire the observer if recording is already in progress.
     if (base::trace_event::TraceLog::GetInstance()->IsEnabled())
       observer->OnTraceEnabled();
@@ -88,10 +99,6 @@ class EnabledStateObserverImpl final
     base::AutoLock lock(mutex_);
     DCHECK(observers_.count(observer) == 1);
     observers_.erase(observer);
-    if (observers_.empty()) {
-      base::trace_event::TraceLog::GetInstance()->RemoveEnabledStateObserver(
-          this);
-    }
   }
 
  private:
@@ -112,7 +119,11 @@ class TimeClamper {
   TimeClamper() : secret_(base::RandUint64()) {}
 
   double ClampTimeResolution(double time_seconds) const {
-    DCHECK_GE(time_seconds, 0);
+    bool was_negative = false;
+    if (time_seconds < 0) {
+      was_negative = true;
+      time_seconds = -time_seconds;
+    }
     // For each clamped time interval, compute a pseudorandom transition
     // threshold. The reported time will either be the start of that interval or
     // the next one depending on which side of the threshold |time_seconds| is.
@@ -121,7 +132,9 @@ class TimeClamper {
     double tick_threshold = ThresholdFor(clamped_time);
 
     if (time_seconds >= tick_threshold)
-      return (interval + 1) * kResolutionSeconds;
+      clamped_time = (interval + 1) * kResolutionSeconds;
+    if (was_negative)
+      clamped_time = -clamped_time;
     return clamped_time;
   }
 
@@ -159,6 +172,8 @@ base::LazyInstance<TimeClamper>::Leaky g_time_clamper =
 base::PageAccessibilityConfiguration GetPageConfig(
     v8::PageAllocator::Permission permission) {
   switch (permission) {
+    case v8::PageAllocator::Permission::kRead:
+      return base::PageRead;
     case v8::PageAllocator::Permission::kReadWrite:
       return base::PageReadWrite;
     case v8::PageAllocator::Permission::kReadWriteExecute:
@@ -325,21 +340,37 @@ std::shared_ptr<v8::TaskRunner> V8Platform::GetForegroundTaskRunner(
   return data->task_runner();
 }
 
-std::shared_ptr<v8::TaskRunner> V8Platform::GetBackgroundTaskRunner(
-    v8::Isolate* isolate) {
-  static std::shared_ptr<v8::TaskRunner> v8_background_task_runner =
-      std::make_shared<V8BackgroundTaskRunner>();
-  return v8_background_task_runner;
+int V8Platform::NumberOfWorkerThreads() {
+  // V8Platform assumes the scheduler uses the same set of workers for default
+  // and user blocking tasks.
+  const int num_foreground_workers =
+      base::TaskScheduler::GetInstance()
+          ->GetMaxConcurrentNonBlockedTasksWithTraitsDeprecated(
+              kDefaultTaskTraits);
+  DCHECK_EQ(num_foreground_workers,
+            base::TaskScheduler::GetInstance()
+                ->GetMaxConcurrentNonBlockedTasksWithTraitsDeprecated(
+                    kBlockingTaskTraits));
+  return std::max(1, num_foreground_workers);
 }
 
-size_t V8Platform::NumberOfAvailableBackgroundThreads() {
-  return V8BackgroundTaskRunner::NumberOfAvailableBackgroundThreads();
+void V8Platform::CallOnWorkerThread(std::unique_ptr<v8::Task> task) {
+  base::PostTaskWithTraits(FROM_HERE, kDefaultTaskTraits,
+                           base::BindOnce(&v8::Task::Run, std::move(task)));
 }
 
-void V8Platform::CallOnBackgroundThread(
-    v8::Task* task,
-    v8::Platform::ExpectedRuntime expected_runtime) {
-  GetBackgroundTaskRunner(nullptr)->PostTask(std::unique_ptr<v8::Task>(task));
+void V8Platform::CallBlockingTaskOnWorkerThread(
+    std::unique_ptr<v8::Task> task) {
+  base::PostTaskWithTraits(FROM_HERE, kBlockingTaskTraits,
+                           base::BindOnce(&v8::Task::Run, std::move(task)));
+}
+
+void V8Platform::CallDelayedOnWorkerThread(std::unique_ptr<v8::Task> task,
+                                           double delay_in_seconds) {
+  base::PostDelayedTaskWithTraits(
+      FROM_HERE, kDefaultTaskTraits,
+      base::BindOnce(&v8::Task::Run, std::move(task)),
+      base::TimeDelta::FromSecondsD(delay_in_seconds));
 }
 
 void V8Platform::CallOnForegroundThread(v8::Isolate* isolate, v8::Task* task) {

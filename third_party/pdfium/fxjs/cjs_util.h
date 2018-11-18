@@ -10,18 +10,19 @@
 #include <string>
 #include <vector>
 
-#include "fxjs/JS_Define.h"
+#include "fxjs/js_define.h"
 
 // Return values for ParseDataType() below.
 #define UTIL_INT 0
 #define UTIL_DOUBLE 1
 #define UTIL_STRING 2
 
-class CJS_Util : public CJS_Object {
+class CJS_Util final : public CJS_Object {
  public:
+  static int GetObjDefnID();
   static void DefineJSObjects(CFXJS_Engine* pEngine);
 
-  explicit CJS_Util(v8::Local<v8::Object> pObject);
+  CJS_Util(v8::Local<v8::Object> pObject, CJS_Runtime* pRuntime);
   ~CJS_Util() override;
 
   static WideString printx(const WideString& cFormat,
@@ -42,15 +43,15 @@ class CJS_Util : public CJS_Object {
 
   static int ParseDataType(std::wstring* sFormat);
 
-  CJS_Return printd(CJS_Runtime* pRuntime,
+  CJS_Result printd(CJS_Runtime* pRuntime,
                     const std::vector<v8::Local<v8::Value>>& params);
-  CJS_Return printf(CJS_Runtime* pRuntime,
+  CJS_Result printf(CJS_Runtime* pRuntime,
                     const std::vector<v8::Local<v8::Value>>& params);
-  CJS_Return printx(CJS_Runtime* pRuntime,
+  CJS_Result printx(CJS_Runtime* pRuntime,
                     const std::vector<v8::Local<v8::Value>>& params);
-  CJS_Return scand(CJS_Runtime* pRuntime,
+  CJS_Result scand(CJS_Runtime* pRuntime,
                    const std::vector<v8::Local<v8::Value>>& params);
-  CJS_Return byteToChar(CJS_Runtime* pRuntime,
+  CJS_Result byteToChar(CJS_Runtime* pRuntime,
                         const std::vector<v8::Local<v8::Value>>& params);
 };
 

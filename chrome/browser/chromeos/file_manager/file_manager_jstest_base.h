@@ -5,6 +5,8 @@
 #ifndef CHROME_BROWSER_CHROMEOS_FILE_MANAGER_FILE_MANAGER_JSTEST_BASE_H_
 #define CHROME_BROWSER_CHROMEOS_FILE_MANAGER_FILE_MANAGER_JSTEST_BASE_H_
 
+#include <string>
+
 #include "base/files/file_path.h"
 #include "chrome/test/base/in_process_browser_test.h"
 
@@ -15,7 +17,13 @@ class FileManagerJsTestBase : public InProcessBrowserTest {
   // Runs all test functions in |file|, waiting for them to complete.
   void RunTest(const base::FilePath& file);
 
+  // Same as RunTest, but starts the EmbeddedTestServer to serve a generated
+  // |file|, relative to DIR_EXE/gen/base_path.
+  void RunGeneratedTest(const std::string& file);
+
  private:
+  void RunTestImpl(const GURL& url);
+
   base::FilePath base_path_;
 };
 

@@ -71,7 +71,7 @@
         w = WIDTH / depth;                                                                 \
                                                                                            \
         for (i = 0; i < BUF_UNITS - 1; i++) {                                              \
-            int src_offset = i * SIZE_PER_UNIT + i; /* Test various alignments */          \
+            int src_offset = i * SIZE_PER_UNIT + (BUF_UNITS - 1 - i) * depth; /* Test various alignments */  \
             int dst_offset = i * SIZE_PER_UNIT; /* dst must be aligned */                  \
             randomize_buffers();                                                           \
             call_ref(top1 + src_offset, w, bot1 + src_offset, w,                           \
@@ -124,9 +124,14 @@ void checkasm_check_blend(void)
     report("8bit");
 
     check_and_report(addition_16, BLEND_ADDITION, 2)
+    check_and_report(grainmerge_16, BLEND_GRAINMERGE, 2)
     check_and_report(and_16, BLEND_AND, 2)
+    check_and_report(average_16, BLEND_AVERAGE, 2)
     check_and_report(darken_16, BLEND_DARKEN, 2)
+    check_and_report(grainextract_16, BLEND_GRAINEXTRACT, 2)
     check_and_report(difference_16, BLEND_DIFFERENCE, 2)
+    check_and_report(extremity_16, BLEND_EXTREMITY, 2)
+    check_and_report(negation_16, BLEND_NEGATION, 2)
     check_and_report(lighten_16, BLEND_LIGHTEN, 2)
     check_and_report(or_16, BLEND_OR, 2)
     check_and_report(phoenix_16, BLEND_PHOENIX, 2)

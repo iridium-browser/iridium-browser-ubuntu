@@ -81,7 +81,7 @@ Node::NodeType ProcessingInstruction::getNodeType() const {
 }
 
 Node* ProcessingInstruction::Clone(Document& factory, CloneChildrenFlag) const {
-  // FIXME: Is it a problem that this does not copy m_localHref?
+  // FIXME: Is it a problem that this does not copy local_href_?
   // What about other data members?
   return Create(factory, target_, data_);
 }
@@ -157,6 +157,8 @@ void ProcessingInstruction::Process(const String& href, const String& charset) {
   loading_ = true;
   if (is_xsl_) {
     DCHECK(RuntimeEnabledFeatures::XSLTEnabled());
+    params.MutableResourceRequest().SetFetchRequestMode(
+        network::mojom::FetchRequestMode::kSameOrigin);
     XSLStyleSheetResource::Fetch(params, GetDocument().Fetcher(), this);
   } else {
     params.SetCharset(charset.IsEmpty() ? GetDocument().Encoding()
@@ -202,6 +204,7 @@ void ProcessingInstruction::NotifyFinished(Resource* resource) {
     CSSStyleSheetResource* style_resource = ToCSSStyleSheetResource(resource);
     CSSParserContext* parser_context = CSSParserContext::Create(
         GetDocument(), style_resource->GetResponse().Url(),
+        style_resource->GetResponse().IsOpaqueResponseFromServiceWorker(),
         style_resource->GetReferrerPolicy(), style_resource->Encoding());
 
     StyleSheetContents* new_sheet =
@@ -233,9 +236,9 @@ void ProcessingInstruction::NotifyFinished(Resource* resource) {
 }
 
 Node::InsertionNotificationRequest ProcessingInstruction::InsertedInto(
-    ContainerNode* insertion_point) {
+    ContainerNode& insertion_point) {
   CharacterData::InsertedInto(insertion_point);
-  if (!insertion_point->isConnected())
+  if (!insertion_point.isConnected())
     return kInsertionDone;
 
   String href;
@@ -249,16 +252,16 @@ Node::InsertionNotificationRequest ProcessingInstruction::InsertedInto(
   return kInsertionDone;
 }
 
-void ProcessingInstruction::RemovedFrom(ContainerNode* insertion_point) {
+void ProcessingInstruction::RemovedFrom(ContainerNode& insertion_point) {
   CharacterData::RemovedFrom(insertion_point);
-  if (!insertion_point->isConnected())
+  if (!insertion_point.isConnected())
     return;
 
   // No need to remove XSLStyleSheet from StyleEngine.
   if (!DocumentXSLT::ProcessingInstructionRemovedFromDocument(GetDocument(),
                                                               this)) {
     GetDocument().GetStyleEngine().RemoveStyleSheetCandidateNode(
-        *this, *insertion_point);
+        *this, insertion_point);
   }
 
   if (sheet_) {

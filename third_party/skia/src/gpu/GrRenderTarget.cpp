@@ -29,6 +29,8 @@ GrRenderTarget::GrRenderTarget(GrGpu* gpu, const GrSurfaceDesc& desc,
     fResolveRect = SkRectPriv::MakeILargestInverted();
 }
 
+GrRenderTarget::~GrRenderTarget() = default;
+
 void GrRenderTarget::flagAsNeedingResolve(const SkIRect* rect) {
     if (kCanResolve_ResolveType == getResolveType()) {
         if (rect) {
@@ -58,31 +60,29 @@ void GrRenderTarget::flagAsResolved() {
 }
 
 void GrRenderTarget::onRelease() {
-    SkSafeSetNull(fStencilAttachment);
+    fStencilAttachment = nullptr;
 
     INHERITED::onRelease();
 }
 
 void GrRenderTarget::onAbandon() {
-    SkSafeSetNull(fStencilAttachment);
+    fStencilAttachment = nullptr;
 
     INHERITED::onAbandon();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
 
-bool GrRenderTargetPriv::attachStencilAttachment(sk_sp<GrStencilAttachment> stencil) {
+void GrRenderTargetPriv::attachStencilAttachment(sk_sp<GrStencilAttachment> stencil) {
     if (!stencil && !fRenderTarget->fStencilAttachment) {
         // No need to do any work since we currently don't have a stencil attachment and
         // we're not actually adding one.
-        return true;
+        return;
     }
-    fRenderTarget->fStencilAttachment = stencil.release();
+    fRenderTarget->fStencilAttachment = std::move(stencil);
     if (!fRenderTarget->completeStencilAttachment()) {
-        SkSafeSetNull(fRenderTarget->fStencilAttachment);
-        return false;
+        fRenderTarget->fStencilAttachment = nullptr;
     }
-    return true;
 }
 
 int GrRenderTargetPriv::numStencilBits() const {

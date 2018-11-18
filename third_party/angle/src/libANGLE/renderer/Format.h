@@ -16,18 +16,17 @@
 
 namespace angle
 {
+enum class FormatID;
 
 struct Format final : private angle::NonCopyable
 {
-    enum class ID;
-
-    constexpr Format(ID id,
+    constexpr Format(FormatID id,
                      GLenum glFormat,
                      GLenum fboFormat,
                      rx::MipGenerationFunction mipGen,
                      const rx::FastCopyFunctionMap &fastCopyFunctions,
-                     rx::ColorReadFunction colorRead,
-                     rx::ColorWriteFunction colorWrite,
+                     rx::PixelReadFunction colorRead,
+                     rx::PixelWriteFunction colorWrite,
                      GLenum componentType,
                      GLuint redBits,
                      GLuint greenBits,
@@ -38,12 +37,15 @@ struct Format final : private angle::NonCopyable
                      GLuint pixelBytes,
                      bool isBlock);
 
-    static const Format &Get(ID id);
-    static ID InternalFormatToID(GLenum internalFormat);
+    static const Format &Get(FormatID id);
+    static FormatID InternalFormatToID(GLenum internalFormat);
 
     constexpr bool hasDepthOrStencilBits() const;
+    constexpr GLuint channelCount() const;
 
-    ID id;
+    bool operator==(const Format &other) const { return this->id == other.id; }
+
+    FormatID id;
 
     // The closest matching GL internal format for the storage this format uses. Note that this
     // may be a different internal format than the one this ANGLE format is used for.
@@ -55,8 +57,8 @@ struct Format final : private angle::NonCopyable
     GLenum fboImplementationInternalFormat;
 
     rx::MipGenerationFunction mipGenerationFunction;
-    rx::ColorReadFunction colorReadFunction;
-    rx::ColorWriteFunction colorWriteFunction;
+    rx::PixelReadFunction pixelReadFunction;
+    rx::PixelWriteFunction pixelWriteFunction;
 
     // A map from a gl::FormatType to a fast pixel copy function for this format.
     const rx::FastCopyFunctionMap &fastCopyFunctions;
@@ -75,13 +77,13 @@ struct Format final : private angle::NonCopyable
     bool isBlock;
 };
 
-constexpr Format::Format(ID id,
+constexpr Format::Format(FormatID id,
                          GLenum glFormat,
                          GLenum fboFormat,
                          rx::MipGenerationFunction mipGen,
                          const rx::FastCopyFunctionMap &fastCopyFunctions,
-                         rx::ColorReadFunction colorRead,
-                         rx::ColorWriteFunction colorWrite,
+                         rx::PixelReadFunction colorRead,
+                         rx::PixelWriteFunction colorWrite,
                          GLenum componentType,
                          GLuint redBits,
                          GLuint greenBits,
@@ -95,8 +97,8 @@ constexpr Format::Format(ID id,
       glInternalFormat(glFormat),
       fboImplementationInternalFormat(fboFormat),
       mipGenerationFunction(mipGen),
-      colorReadFunction(colorRead),
-      colorWriteFunction(colorWrite),
+      pixelReadFunction(colorRead),
+      pixelWriteFunction(colorWrite),
       fastCopyFunctions(fastCopyFunctions),
       componentType(componentType),
       redBits(redBits),
@@ -114,8 +116,14 @@ constexpr bool Format::hasDepthOrStencilBits() const
 {
     return depthBits > 0 || stencilBits > 0;
 }
+
+constexpr GLuint Format::channelCount() const
+{
+    return (redBits > 0) + (greenBits > 0) + (blueBits > 0) + (alphaBits > 0) + (depthBits > 0) +
+           (stencilBits > 0);
+}
 }  // namespace angle
 
-#include "libANGLE/renderer/Format_ID_autogen.inl"
+#include "libANGLE/renderer/FormatID_autogen.inc"
 
 #endif  // LIBANGLE_RENDERER_FORMAT_H_

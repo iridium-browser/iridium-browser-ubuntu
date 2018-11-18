@@ -14,16 +14,20 @@
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/memory/singleton.h"
+#include "base/no_destructor.h"
 #include "base/process/kill.h"
 #include "base/synchronization/lock.h"
+#include "base/thread_annotations.h"
 #include "base/time/time.h"
 #include "base/values.h"
+#include "build/build_config.h"
 #include "content/public/browser/gpu_data_manager.h"
 #include "content/public/common/three_d_api_types.h"
 #include "gpu/config/gpu_control_list.h"
+#include "gpu/config/gpu_domain_guilt.h"
 #include "gpu/config/gpu_feature_info.h"
 #include "gpu/config/gpu_info.h"
+#include "gpu/config/gpu_mode.h"
 
 class GURL;
 
@@ -42,24 +46,6 @@ class GpuDataManagerImplPrivate;
 
 class CONTENT_EXPORT GpuDataManagerImpl : public GpuDataManager {
  public:
-  // Indicates the guilt level of a domain which caused a GPU reset.
-  // If a domain is 100% known to be guilty of resetting the GPU, then
-  // it will generally not cause other domains' use of 3D APIs to be
-  // blocked, unless system stability would be compromised.
-  enum DomainGuilt {
-    DOMAIN_GUILT_KNOWN,
-    DOMAIN_GUILT_UNKNOWN
-  };
-
-  // Indicates the reason that access to a given client API (like
-  // WebGL or Pepper 3D) was blocked or not. This state is distinct
-  // from blacklisting of an entire feature.
-  enum DomainBlockStatus {
-    DOMAIN_BLOCK_STATUS_BLOCKED,
-    DOMAIN_BLOCK_STATUS_ALL_DOMAINS_BLOCKED,
-    DOMAIN_BLOCK_STATUS_NOT_BLOCKED
-  };
-
   // Getter for the singleton. This will return NULL on failure.
   static GpuDataManagerImpl* GetInstance();
 
@@ -81,40 +67,37 @@ class CONTENT_EXPORT GpuDataManagerImpl : public GpuDataManager {
   void RemoveObserver(GpuDataManagerObserver* observer) override;
   void DisableHardwareAcceleration() override;
   bool HardwareAccelerationEnabled() const override;
-  void GetDisabledExtensions(std::string* disabled_extensions) const override;
 
   void RequestGpuSupportedRuntimeVersion() const;
   bool GpuProcessStartAllowed() const;
 
-  void GetDisabledWebGLExtensions(std::string* disabled_webgl_extensions) const;
-
   bool IsGpuFeatureInfoAvailable() const;
   gpu::GpuFeatureStatus GetFeatureStatus(gpu::GpuFeatureType feature) const;
 
-  // Only update if the current GPUInfo is not finalized.  If blacklist is
-  // loaded, run through blacklist and update blacklisted features.
-  void UpdateGpuInfo(const gpu::GPUInfo& gpu_info);
-
+  void UpdateGpuInfo(
+      const gpu::GPUInfo& gpu_info,
+      const base::Optional<gpu::GPUInfo>& gpu_info_for_hardware_gpu);
+#if defined(OS_WIN)
+  void UpdateDx12VulkanInfo(
+      const gpu::Dx12VulkanVersionInfo& dx12_vulkan_version_info);
+  void UpdateDxDiagNode(const gpu::DxDiagNode& dx_diagnostics);
+#endif
   // Update the GPU feature info. This updates the blacklist and enabled status
   // of GPU rasterization. In the future this will be used for more features.
-  void UpdateGpuFeatureInfo(const gpu::GpuFeatureInfo& gpu_feature_info);
+  void UpdateGpuFeatureInfo(const gpu::GpuFeatureInfo& gpu_feature_info,
+                            const base::Optional<gpu::GpuFeatureInfo>&
+                                gpu_feature_info_for_hardware_gpu);
 
   gpu::GpuFeatureInfo GetGpuFeatureInfo() const;
+
+  gpu::GPUInfo GetGPUInfoForHardwareGpu() const;
+  gpu::GpuFeatureInfo GetGpuFeatureInfoForHardwareGpu() const;
 
   // Insert switches into gpu process command line: kUseGL, etc.
   void AppendGpuCommandLine(base::CommandLine* command_line) const;
 
   // Update GpuPreferences based on blacklisting decisions.
   void UpdateGpuPreferences(gpu::GpuPreferences* gpu_preferences) const;
-
-  // Returns the reasons for the latest run of blacklisting decisions.
-  // For the structure of returned value, see documentation for
-  // GpuBlacklist::GetBlacklistedReasons().
-  void GetBlacklistReasons(base::ListValue* reasons) const;
-
-  // Returns the workarounds that are applied to the current system as
-  // a vector of strings.
-  std::vector<std::string> GetDriverBugWorkarounds() const;
 
   void AddLogMessage(int level,
                      const std::string& header,
@@ -136,7 +119,7 @@ class CONTENT_EXPORT GpuDataManagerImpl : public GpuDataManager {
   //
   // The given URL may be a partial URL (including at least the host)
   // or a full URL to a page.
-  void BlockDomainFrom3DAPIs(const GURL& url, DomainGuilt guilt);
+  void BlockDomainFrom3DAPIs(const GURL& url, gpu::DomainGuilt guilt);
   bool Are3DAPIsBlocked(const GURL& top_origin_url,
                         int render_process_id,
                         int render_frame_id,
@@ -154,46 +137,34 @@ class CONTENT_EXPORT GpuDataManagerImpl : public GpuDataManager {
   // status update.
   void NotifyGpuInfoUpdate();
 
-  // Called when GPU process initialization failed.
-  void OnGpuProcessInitFailure();
+  // Return mode describing what the GPU process will be launched to run.
+  gpu::GpuMode GetGpuMode() const;
 
-  void BlockSwiftShader();
-  bool SwiftShaderAllowed() const;
+  // Called when GPU process initialization failed or the GPU process has
+  // crashed repeatedly. This will try to disable hardware acceleration and then
+  // SwiftShader WebGL. It will also crash the browser process as a last resort
+  // on Android and Chrome OS.
+  void FallBackToNextGpuMode();
+
+  // Returns false if the latest GPUInfo gl_renderer is from SwiftShader or
+  // Disabled (in the viz case).
+  bool IsGpuProcessUsingHardwareGpu() const;
+
+  // State tracking allows us to customize GPU process launch depending on
+  // whether we are in the foreground or background.
+  void SetApplicationVisible(bool is_visible);
 
  private:
   friend class GpuDataManagerImplPrivate;
   friend class GpuDataManagerImplPrivateTest;
-  friend struct base::DefaultSingletonTraits<GpuDataManagerImpl>;
-
-  // It's similar to AutoUnlock, but we want to make it a no-op
-  // if the owner GpuDataManagerImpl is null.
-  // This should only be used by GpuDataManagerImplPrivate where
-  // callbacks are called, during which re-entering
-  // GpuDataManagerImpl is possible.
-  class UnlockedSession {
-   public:
-    explicit UnlockedSession(GpuDataManagerImpl* owner)
-        : owner_(owner) {
-      DCHECK(owner_);
-      owner_->lock_.AssertAcquired();
-      owner_->lock_.Release();
-    }
-
-    ~UnlockedSession() {
-      DCHECK(owner_);
-      owner_->lock_.Acquire();
-    }
-
-   private:
-    GpuDataManagerImpl* owner_;
-    DISALLOW_COPY_AND_ASSIGN(UnlockedSession);
-  };
+  friend class base::NoDestructor<GpuDataManagerImpl>;
 
   GpuDataManagerImpl();
   ~GpuDataManagerImpl() override;
 
   mutable base::Lock lock_;
-  std::unique_ptr<GpuDataManagerImplPrivate> private_;
+  std::unique_ptr<GpuDataManagerImplPrivate> private_ GUARDED_BY(lock_)
+      PT_GUARDED_BY(lock_);
 
   DISALLOW_COPY_AND_ASSIGN(GpuDataManagerImpl);
 };

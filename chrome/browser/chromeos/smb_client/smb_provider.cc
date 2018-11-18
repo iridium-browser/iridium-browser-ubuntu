@@ -9,6 +9,11 @@
 #include "chrome/browser/chromeos/file_system_provider/service.h"
 #include "chrome/browser/chromeos/smb_client/smb_file_system.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/ui/chrome_pages.h"
+#include "chrome/browser/ui/settings_window_manager_chromeos.h"
+#include "chrome/common/webui_url_constants.h"
+#include "chrome/grit/generated_resources.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "url/gurl.h"
 
 namespace chromeos {
@@ -20,15 +25,12 @@ SmbProvider::SmbProvider(UnmountCallback unmount_callback)
                     false /* watchable */,
                     true /* multiple_mounts */,
                     extensions::SOURCE_NETWORK),
-      // TODO(baileyberro): Localize this string, so it shows correctly in all
-      // languages. See l10n_util::GetStringUTF8.
-      name_("SMB Shares"),
+      name_(l10n_util::GetStringUTF8(IDS_SMB_SHARES_ADD_SERVICE_MENU_OPTION)),
       unmount_callback_(std::move(unmount_callback)) {
-  // TODO(baileyberro): Fill out with proper icons.
   icon_set_.SetIcon(IconSet::IconSize::SIZE_16x16,
-                    GURL("chrome://resources/images/apps/button.png"));
+                    GURL("chrome://theme/IDR_SMB_ICON"));
   icon_set_.SetIcon(IconSet::IconSize::SIZE_32x32,
-                    GURL("chrome://resources/images/2x/apps/button.png"));
+                    GURL("chrome://theme/IDR_SMB_ICON@2x"));
 }
 
 SmbProvider::~SmbProvider() = default;
@@ -58,7 +60,11 @@ const IconSet& SmbProvider::GetIconSet() const {
 }
 
 bool SmbProvider::RequestMount(Profile* profile) {
-  return false;
+  auto* settings_manager = chrome::SettingsWindowManager::GetInstance();
+  settings_manager->ShowChromePageForProfile(
+      profile, chrome::GetSettingsUrl(chrome::kSmbSharesPageAddDialog));
+
+  return true;
 }
 
 }  // namespace smb_client

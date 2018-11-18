@@ -93,7 +93,8 @@ int InstallerCrashReporterClient::GetResultCodeRespawnFailed() {
 bool InstallerCrashReporterClient::GetCrashDumpLocation(
     base::string16* crash_dir) {
   base::FilePath crash_directory_path;
-  bool ret = PathService::Get(chrome::DIR_CRASH_DUMPS, &crash_directory_path);
+  bool ret =
+      base::PathService::Get(chrome::DIR_CRASH_DUMPS, &crash_directory_path);
   if (ret)
     *crash_dir = crash_directory_path.value();
   return ret;
@@ -106,8 +107,7 @@ bool InstallerCrashReporterClient::IsRunningUnattended() {
 
 bool InstallerCrashReporterClient::GetCollectStatsConsent() {
 #if defined(GOOGLE_CHROME_BUILD)
-  return GoogleUpdateSettings::GetCollectStatsConsentAtLevel(
-      !is_per_user_install_);
+  return GoogleUpdateSettings::GetCollectStatsConsent();
 #else
   return false;
 #endif

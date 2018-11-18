@@ -20,7 +20,6 @@
 #include "chrome/renderer/media/chrome_key_systems_provider.h"
 #include "components/nacl/common/buildflags.h"
 #include "components/rappor/public/interfaces/rappor_recorder.mojom.h"
-#include "components/safe_browsing/common/safe_browsing.mojom.h"
 #include "components/spellcheck/spellcheck_buildflags.h"
 #include "content/public/renderer/content_renderer_client.h"
 #include "content/public/renderer/render_thread.h"
@@ -79,9 +78,7 @@ namespace web_cache {
 class WebCacheImpl;
 }
 
-#if BUILDFLAG(ENABLE_WEBRTC)
 class WebRtcLoggingMessageFilter;
-#endif
 
 namespace internal {
 
@@ -116,6 +113,11 @@ class ChromeContentRendererClient
   void RenderViewCreated(content::RenderView* render_view) override;
   SkBitmap* GetSadPluginBitmap() override;
   SkBitmap* GetSadWebViewBitmap() override;
+  bool MaybeCreateMimeHandlerView(content::RenderFrame* render_frame,
+                                  const blink::WebElement& plugin_element,
+                                  const GURL& original_url,
+                                  const std::string& mime_type,
+                                  int32_t instance_id_to_use) override;
   bool OverrideCreatePlugin(content::RenderFrame* render_frame,
                             const blink::WebPluginParams& params,
                             blink::WebPlugin** plugin) override;
@@ -143,22 +145,20 @@ class ChromeContentRendererClient
                            const blink::WebURLError& error,
                            base::string16* error_description) override;
 
-  void DeferMediaLoad(content::RenderFrame* render_frame,
+  bool DeferMediaLoad(content::RenderFrame* render_frame,
                       bool has_played_media_before,
-                      const base::Closure& closure) override;
+                      base::OnceClosure closure) override;
   void PostIOThreadCreated(
       base::SingleThreadTaskRunner* io_thread_task_runner) override;
   void PostCompositorThreadCreated(
       base::SingleThreadTaskRunner* compositor_thread_task_runner) override;
   bool RunIdleHandlerWhenWidgetsHidden() override;
-  bool AllowStoppingWhenProcessBackgrounded() override;
   bool AllowPopup() override;
   bool ShouldFork(blink::WebLocalFrame* frame,
                   const GURL& url,
                   const std::string& http_method,
                   bool is_initial_navigation,
-                  bool is_server_redirect,
-                  bool* send_referrer) override;
+                  bool is_server_redirect) override;
   void WillSendRequest(blink::WebLocalFrame* frame,
                        ui::PageTransition transition_type,
                        const blink::WebURL& url,
@@ -176,8 +176,8 @@ class ChromeContentRendererClient
       blink::mojom::PageVisibilityState* override_state) override;
   bool IsExternalPepperPlugin(const std::string& module_name) override;
   bool IsOriginIsolatedPepperPlugin(const base::FilePath& plugin_path) override;
-  std::unique_ptr<blink::WebSocketHandshakeThrottle>
-  CreateWebSocketHandshakeThrottle() override;
+  std::unique_ptr<content::WebSocketHandshakeThrottleProvider>
+  CreateWebSocketHandshakeThrottleProvider() override;
   std::unique_ptr<blink::WebSpeechSynthesizer> OverrideSpeechSynthesizer(
       blink::WebSpeechSynthesizerClient* client) override;
   bool ShouldReportDetailedMessageForSource(
@@ -185,7 +185,6 @@ class ChromeContentRendererClient
   std::unique_ptr<blink::WebContentSettingsClient>
   CreateWorkerContentSettingsClient(
       content::RenderFrame* render_frame) override;
-  bool AllowPepperMediaStreamAPI(const GURL& url) override;
   void AddSupportedKeySystems(
       std::vector<std::unique_ptr<::media::KeySystemProperties>>* key_systems)
       override;
@@ -214,11 +213,17 @@ class ChromeContentRendererClient
       int64_t service_worker_version_id,
       const GURL& service_worker_scope,
       const GURL& script_url) override;
+  void DidStartServiceWorkerContextOnWorkerThread(
+      int64_t service_worker_version_id,
+      const GURL& service_worker_scope,
+      const GURL& script_url) override;
   void WillDestroyServiceWorkerContextOnWorkerThread(
       v8::Local<v8::Context> context,
       int64_t service_worker_version_id,
       const GURL& service_worker_scope,
       const GURL& script_url) override;
+  bool IsExcludedHeaderForServiceWorkerFetchEvent(
+      const std::string& header_name) override;
   bool ShouldEnforceWebRTCRoutingPreferences() override;
   GURL OverrideFlashEmbedWithHTML(const GURL& url) override;
   std::unique_ptr<base::TaskScheduler::InitParams> GetTaskSchedulerInitParams()
@@ -233,6 +238,7 @@ class ChromeContentRendererClient
       content::URLLoaderThrottleProviderType provider_type) override;
   blink::WebFrame* FindFrame(blink::WebLocalFrame* relative_to_frame,
                              const std::string& name) override;
+  bool IsSafeRedirectTarget(const GURL& url) override;
 
 #if BUILDFLAG(ENABLE_PLUGINS)
   static chrome::mojom::PluginInfoHostAssociatedPtr& GetPluginInfoHost();
@@ -275,9 +281,6 @@ class ChromeContentRendererClient
   void GetInterface(const std::string& name,
                     mojo::ScopedMessagePipeHandle request_handle) override;
 
-  // Initialises |safe_browsing_| if it is not already initialised.
-  void InitSafeBrowsingIfNecessary();
-
   void PrepareErrorPageInternal(content::RenderFrame* render_frame,
                                 const blink::WebURLRequest& failed_request,
                                 const error_page::Error& error,
@@ -317,17 +320,13 @@ class ChromeContentRendererClient
 
   ChromeKeySystemsProvider key_systems_provider_;
 
-  safe_browsing::mojom::SafeBrowsingPtr safe_browsing_;
-
 #if BUILDFLAG(ENABLE_SPELLCHECK)
   std::unique_ptr<SpellCheck> spellcheck_;
 #endif
   std::unique_ptr<subresource_filter::UnverifiedRulesetDealer>
       subresource_filter_ruleset_dealer_;
   std::unique_ptr<prerender::PrerenderDispatcher> prerender_dispatcher_;
-#if BUILDFLAG(ENABLE_WEBRTC)
   scoped_refptr<WebRtcLoggingMessageFilter> webrtc_logging_message_filter_;
-#endif
 #if BUILDFLAG(ENABLE_PRINT_PREVIEW)
   std::unique_ptr<ChromePDFPrintClient> pdf_print_client_;
 #endif

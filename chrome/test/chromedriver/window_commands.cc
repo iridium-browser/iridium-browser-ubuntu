@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "chrome/test/chromedriver/window_commands.h"
+#include "chrome/test/chromedriver/session_commands.h"
 
 #include <stddef.h>
 
@@ -30,6 +31,7 @@
 #include "chrome/test/chromedriver/chrome/status.h"
 #include "chrome/test/chromedriver/chrome/ui_events.h"
 #include "chrome/test/chromedriver/chrome/web_view.h"
+#include "chrome/test/chromedriver/element_commands.h"
 #include "chrome/test/chromedriver/element_util.h"
 #include "chrome/test/chromedriver/key_converter.h"
 #include "chrome/test/chromedriver/keycode_text_conversion.h"
@@ -248,10 +250,10 @@ Status ExecuteWindowCommand(const WindowCommand& command,
 
     // Close the dialog depending on the unexpectedalert behaviour set by user
     // before returning an error, so that subsequent commands do not fail.
-    std::string alert_behaviour = session->unexpected_alert_behaviour;
-    if (alert_behaviour == kAccept)
+    std::string prompt_behavior = session->unhandled_prompt_behavior;
+    if (prompt_behavior == kAccept)
       status = dialog_manager->HandleDialog(true, session->prompt_text.get());
-    else if (alert_behaviour == kDismiss)
+    else if (prompt_behavior == kDismiss)
       status = dialog_manager->HandleDialog(false, session->prompt_text.get());
     if (status.IsError())
       return status;
@@ -311,7 +313,7 @@ Status ExecuteGet(Session* session,
   timeout->SetDuration(session->page_load_timeout);
   std::string url;
   if (!params.GetString("url", &url))
-    return Status(kUnknownError, "'url' must be a string");
+    return Status(kInvalidArgument, "'url' must be a string");
   Status status = web_view->Load(url, timeout);
   if (status.IsError())
     return status;
@@ -326,7 +328,7 @@ Status ExecuteExecuteScript(Session* session,
                             Timeout* timeout) {
   std::string script;
   if (!params.GetString("script", &script))
-    return Status(kUnknownError, "'script' must be a string");
+    return Status(kInvalidArgument, "'script' must be a string");
   if (script == ":takeHeapSnapshot") {
     return web_view->TakeHeapSnapshot(value);
   } else if (script == ":startProfile") {
@@ -336,7 +338,7 @@ Status ExecuteExecuteScript(Session* session,
   } else {
     const base::ListValue* args;
     if (!params.GetList("args", &args))
-      return Status(kUnknownError, "'args' must be a list");
+      return Status(kInvalidArgument, "'args' must be a list");
 
     return web_view->CallFunction(session->GetCurrentFrameId(),
                                   "function(){" + script + "}", *args, value);
@@ -350,10 +352,10 @@ Status ExecuteExecuteAsyncScript(Session* session,
                                  Timeout* timeout) {
   std::string script;
   if (!params.GetString("script", &script))
-    return Status(kUnknownError, "'script' must be a string");
+    return Status(kInvalidArgument, "'script' must be a string");
   const base::ListValue* args;
   if (!params.GetList("args", &args))
-    return Status(kUnknownError, "'args' must be a list");
+    return Status(kInvalidArgument, "'args' must be a list");
 
   return web_view->CallUserAsyncFunction(
       session->GetCurrentFrameId(), "function(){" + script + "}", *args,
@@ -379,7 +381,7 @@ Status ExecuteSwitchToFrame(Session* session,
   const base::DictionaryValue* id_dict;
   if (id->GetAsDictionary(&id_dict)) {
     std::string element_id;
-    if (!id_dict->GetString("ELEMENT", &element_id))
+    if (!id_dict->GetString(GetElementKey(), &element_id))
       return Status(kUnknownError, "missing 'ELEMENT'");
     bool is_displayed = false;
     Status status = IsElementDisplayed(
@@ -502,18 +504,9 @@ Status ExecuteGetCurrentUrl(Session* session,
     return status;
   if (url == kUnreachableWebDataURL ||
       url == kDeprecatedUnreachableWebDataURL) {
-    // https://bugs.chromium.org/p/chromedriver/issues/detail?id=1272
-    const BrowserInfo* browser_info = session->chrome->GetBrowserInfo();
-    bool is_kitkat_webview = browser_info->browser_name == "webview" &&
-                             browser_info->major_version <= 30 &&
-                             browser_info->is_android;
-    if (!is_kitkat_webview) {
-      // Page.getNavigationHistory isn't implemented in WebView for KitKat and
-      // older Android releases.
-      status = web_view->GetUrl(&url);
-      if (status.IsError())
-        return status;
-    }
+    status = web_view->GetUrl(&url);
+    if (status.IsError())
+      return status;
   }
   value->reset(new base::Value(url));
   return Status(kOk);
@@ -555,6 +548,28 @@ Status ExecuteRefresh(Session* session,
   if (status.IsError())
     return status;
   session->SwitchToTopFrame();
+  return Status(kOk);
+}
+
+Status ExecuteFreeze(Session* session,
+                     WebView* web_view,
+                     const base::DictionaryValue& params,
+                     std::unique_ptr<base::Value>* value,
+                     Timeout* timeout) {
+  timeout->SetDuration(session->page_load_timeout);
+  Status status = web_view->Freeze(timeout);
+  return status;
+}
+
+Status ExecuteResume(Session* session,
+                     WebView* web_view,
+                     const base::DictionaryValue& params,
+                     std::unique_ptr<base::Value>* value,
+                     Timeout* timeout) {
+  timeout->SetDuration(session->page_load_timeout);
+  Status status = web_view->Resume(timeout);
+  if (status.IsError())
+    return status;
   return Status(kOk);
 }
 
@@ -705,10 +720,6 @@ Status ExecuteTouchScroll(Session* session,
                           const base::DictionaryValue& params,
                           std::unique_ptr<base::Value>* value,
                           Timeout* timeout) {
-  if (session->chrome->GetBrowserInfo()->build_no < 2286) {
-    // TODO(samuong): remove this once we stop supporting M41.
-    return Status(kUnknownCommand, "Touch scroll action requires Chrome 42+");
-  }
   WebPoint location = session->mouse_position;
   std::string element;
   if (params.GetString("element", &element)) {
@@ -732,10 +743,6 @@ Status ExecuteTouchPinch(Session* session,
                          const base::DictionaryValue& params,
                          std::unique_ptr<base::Value>* value,
                          Timeout* timeout) {
-  if (session->chrome->GetBrowserInfo()->build_no < 2286) {
-    // TODO(samuong): remove this once we stop supporting M41.
-    return Status(kUnknownCommand, "Pinch action requires Chrome 42+");
-  }
   WebPoint location;
   if (!params.GetInteger("x", &location.x))
     return Status(kUnknownError, "'x' must be an integer");
@@ -1305,11 +1312,15 @@ Status ExecuteScreenshot(Session* session,
       return status;
     status = extension->CaptureScreenshot(&screenshot);
   } else {
-    status = web_view->CaptureScreenshot(&screenshot);
+    std::unique_ptr<base::DictionaryValue> screenshot_params(
+        const base::DictionaryValue&);
+  status = web_view->CaptureScreenshot(&screenshot, base::DictionaryValue());
   }
   if (status.IsError()) {
     LOG(WARNING) << "screenshot failed, retrying";
-    status = web_view->CaptureScreenshot(&screenshot);
+    std::unique_ptr<base::DictionaryValue> screenshot_params(
+        new base::DictionaryValue);
+    status = web_view->CaptureScreenshot(&screenshot, base::DictionaryValue());
   }
   if (status.IsError())
     return status;
@@ -1569,4 +1580,13 @@ Status ExecuteTakeHeapSnapshot(Session* session,
                                std::unique_ptr<base::Value>* value,
                                Timeout* timeout) {
   return web_view->TakeHeapSnapshot(value);
+}
+
+Status ExecuteGetCurrentWindowHandle(Session* session,
+                                     WebView* web_view,
+                                     const base::DictionaryValue& params,
+                                     std::unique_ptr<base::Value>* value,
+                                     Timeout* timeout) {
+  value->reset(new base::Value(WebViewIdToWindowHandle(web_view->GetId())));
+  return Status(kOk);
 }

@@ -20,7 +20,7 @@
 namespace gl
 {
 
-angle::CheckedNumeric<GLsizeiptr> GetVerticesNeededForDraw(GLenum primitiveMode,
+angle::CheckedNumeric<GLsizeiptr> GetVerticesNeededForDraw(PrimitiveMode primitiveMode,
                                                            GLsizei count,
                                                            GLsizei primcount)
 {
@@ -34,14 +34,14 @@ angle::CheckedNumeric<GLsizeiptr> GetVerticesNeededForDraw(GLenum primitiveMode,
     angle::CheckedNumeric<GLsizeiptr> checkedPrimcount = primcount;
     switch (primitiveMode)
     {
-        case GL_TRIANGLES:
+        case PrimitiveMode::Triangles:
             return checkedPrimcount * (checkedCount - checkedCount % 3);
-        case GL_LINES:
+        case PrimitiveMode::Lines:
             return checkedPrimcount * (checkedCount - checkedCount % 2);
-        case GL_POINTS:
+        case PrimitiveMode::Points:
             return checkedPrimcount * checkedCount;
         default:
-            NOTREACHED();
+            UNREACHABLE();
             return checkedPrimcount * checkedCount;
     }
 }
@@ -49,7 +49,7 @@ angle::CheckedNumeric<GLsizeiptr> GetVerticesNeededForDraw(GLenum primitiveMode,
 TransformFeedbackState::TransformFeedbackState(size_t maxIndexedBuffers)
     : mLabel(),
       mActive(false),
-      mPrimitiveMode(GL_NONE),
+      mPrimitiveMode(PrimitiveMode::InvalidEnum),
       mPaused(false),
       mVerticesDrawn(0),
       mVertexCapacity(0),
@@ -80,7 +80,7 @@ TransformFeedback::TransformFeedback(rx::GLImplFactory *implFactory, GLuint id, 
     ASSERT(mImplementation != nullptr);
 }
 
-Error TransformFeedback::onDestroy(const Context *context)
+void TransformFeedback::onDestroy(const Context *context)
 {
     ASSERT(!context || !context->isCurrentTransformFeedback(this));
     if (mState.mProgram)
@@ -94,8 +94,6 @@ Error TransformFeedback::onDestroy(const Context *context)
     {
         mState.mIndexedBuffers[i].set(context, nullptr);
     }
-
-    return NoError();
 }
 
 TransformFeedback::~TransformFeedback()
@@ -113,7 +111,7 @@ const std::string &TransformFeedback::getLabel() const
     return mState.mLabel;
 }
 
-void TransformFeedback::begin(const Context *context, GLenum primitiveMode, Program *program)
+void TransformFeedback::begin(const Context *context, PrimitiveMode primitiveMode, Program *program)
 {
     mState.mActive        = true;
     mState.mPrimitiveMode = primitiveMode;
@@ -145,7 +143,7 @@ void TransformFeedback::begin(const Context *context, GLenum primitiveMode, Prog
 void TransformFeedback::end(const Context *context)
 {
     mState.mActive         = false;
-    mState.mPrimitiveMode  = GL_NONE;
+    mState.mPrimitiveMode  = PrimitiveMode::InvalidEnum;
     mState.mPaused         = false;
     mState.mVerticesDrawn  = 0;
     mState.mVertexCapacity = 0;
@@ -169,17 +167,12 @@ void TransformFeedback::resume()
     mImplementation->resume();
 }
 
-bool TransformFeedback::isActive() const
-{
-    return mState.mActive;
-}
-
 bool TransformFeedback::isPaused() const
 {
     return mState.mPaused;
 }
 
-GLenum TransformFeedback::getPrimitiveMode() const
+PrimitiveMode TransformFeedback::getPrimitiveMode() const
 {
     return mState.mPrimitiveMode;
 }
@@ -238,8 +231,7 @@ void TransformFeedback::detachBuffer(const Context *context, GLuint bufferName)
         {
             if (isBound)
             {
-                mState.mIndexedBuffers[index]->onBindingChanged(false,
-                                                                BufferBinding::TransformFeedback);
+                mState.mIndexedBuffers[index]->onTFBindingChanged(context, false, true);
             }
             mState.mIndexedBuffers[index].set(context, nullptr);
             mImplementation->bindIndexedBuffer(index, mState.mIndexedBuffers[index]);
@@ -257,12 +249,12 @@ void TransformFeedback::bindIndexedBuffer(const Context *context,
     bool isBound = context && context->isCurrentTransformFeedback(this);
     if (isBound && mState.mIndexedBuffers[index].get())
     {
-        mState.mIndexedBuffers[index]->onBindingChanged(false, BufferBinding::TransformFeedback);
+        mState.mIndexedBuffers[index]->onTFBindingChanged(context, false, true);
     }
     mState.mIndexedBuffers[index].set(context, buffer, offset, size);
     if (isBound && buffer)
     {
-        buffer->onBindingChanged(true, BufferBinding::TransformFeedback);
+        buffer->onTFBindingChanged(context, true, true);
     }
 
     mImplementation->bindIndexedBuffer(index, mState.mIndexedBuffers[index]);
@@ -301,14 +293,14 @@ const rx::TransformFeedbackImpl *TransformFeedback::getImplementation() const
     return mImplementation;
 }
 
-void TransformFeedback::onBindingChanged(bool bound)
+void TransformFeedback::onBindingChanged(const Context *context, bool bound)
 {
     for (auto &buffer : mState.mIndexedBuffers)
     {
         if (buffer.get())
         {
-            buffer->onBindingChanged(bound, BufferBinding::TransformFeedback);
+            buffer->onTFBindingChanged(context, bound, true);
         }
     }
 }
-}
+}  // namespace gl

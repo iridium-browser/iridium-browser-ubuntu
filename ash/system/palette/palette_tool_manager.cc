@@ -10,6 +10,7 @@
 #include "ash/system/palette/palette_tool.h"
 #include "base/bind.h"
 #include "base/metrics/histogram_macros.h"
+#include "chromeos/chromeos_switches.h"
 
 namespace ash {
 
@@ -81,7 +82,7 @@ const gfx::VectorIcon& PaletteToolManager::GetActiveTrayIcon(
     PaletteToolId tool_id) const {
   PaletteTool* tool = FindToolById(tool_id);
   if (!tool)
-    return kPaletteTrayIconDefaultIcon;
+    return kPaletteTrayIconDefaultNewuiIcon;
 
   return tool->GetActiveTrayIcon();
 }

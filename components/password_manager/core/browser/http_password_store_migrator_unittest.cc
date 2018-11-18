@@ -23,15 +23,15 @@ using testing::SaveArg;
 using testing::Unused;
 using testing::_;
 
-constexpr char kTestHttpsURL[] = "https://example.org/";
-constexpr char kTestHttpURL[] = "http://example.org/";
-constexpr char kTestSubdomainHttpURL[] = "http://login.example.org/";
+constexpr char kTestHttpsURL[] = "https://example.org/path";
+constexpr char kTestHttpURL[] = "http://example.org/path";
+constexpr char kTestSubdomainHttpURL[] = "http://login.example.org/path2";
 
 // Creates a dummy http form with some basic arbitrary values.
 PasswordForm CreateTestForm() {
   PasswordForm form;
   form.origin = GURL(kTestHttpURL);
-  form.signon_realm = form.origin.spec();
+  form.signon_realm = form.origin.GetOrigin().spec();
   form.action = GURL("https://example.org/action.html");
   form.username_value = base::ASCIIToUTF16("user");
   form.password_value = base::ASCIIToUTF16("password");
@@ -42,7 +42,7 @@ PasswordForm CreateTestForm() {
 PasswordForm CreateTestPSLForm() {
   PasswordForm form;
   form.origin = GURL(kTestSubdomainHttpURL);
-  form.signon_realm = form.origin.spec();
+  form.signon_realm = form.origin.GetOrigin().spec();
   form.action = GURL(kTestSubdomainHttpURL);
   form.username_value = base::ASCIIToUTF16("user2");
   form.password_value = base::ASCIIToUTF16("password2");
@@ -82,12 +82,20 @@ class MockPasswordManagerClient : public StubPasswordManagerClient {
  public:
   explicit MockPasswordManagerClient(PasswordStore* store) : store_(store) {}
 
+  // PasswordManagerClient:
   PasswordStore* GetPasswordStore() const override { return store_; }
-  MOCK_CONST_METHOD2(PostHSTSQueryForHost,
-                     void(const GURL&, const HSTSCallback& callback));
+  void PostHSTSQueryForHost(const GURL& gurl,
+                            HSTSCallback callback) const override {
+    saved_callback_ = std::move(callback);
+    PostHSTSQueryForHostHelper(gurl);
+  }
+
+  MOCK_CONST_METHOD1(PostHSTSQueryForHostHelper, void(const GURL&));
+  HSTSCallback hsts_acquire_callback() { return std::move(saved_callback_); }
 
  private:
   PasswordStore* store_;
+  mutable HSTSCallback saved_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(MockPasswordManagerClient);
 };
@@ -127,19 +135,19 @@ class HttpPasswordStoreMigratorTest : public testing::Test {
 };
 
 void HttpPasswordStoreMigratorTest::TestEmptyStore(bool is_hsts) {
-  PasswordStore::FormDigest form(autofill::PasswordForm::SCHEME_HTML,
-                                 kTestHttpURL, GURL(kTestHttpURL));
+  PasswordStore::FormDigest form(CreateTestForm());
   EXPECT_CALL(store(), GetLogins(form, _));
-  PasswordManagerClient::HSTSCallback callback;
-  EXPECT_CALL(client(), PostHSTSQueryForHost(GURL(kTestHttpsURL), _))
-      .WillOnce(SaveArg<1>(&callback));
+  EXPECT_CALL(client(), PostHSTSQueryForHostHelper(GURL(kTestHttpsURL)))
+      .Times(1);
   HttpPasswordStoreMigrator migrator(GURL(kTestHttpsURL), &client(),
                                      &consumer());
-  callback.Run(is_hsts);
+  HSTSCallback callback = client().hsts_acquire_callback();
+  std::move(callback).Run(is_hsts ? HSTSResult::kYes : HSTSResult::kNo);
   // We expect a potential call to |RemoveSiteStatsImpl| which is a async task
   // posted from |PasswordStore::RemoveSiteStats|. Hence the following lines are
   // necessary to ensure |RemoveSiteStatsImpl| gets called when expected.
-  EXPECT_CALL(store(), RemoveSiteStatsImpl(GURL(kTestHttpURL))).Times(is_hsts);
+  EXPECT_CALL(store(), RemoveSiteStatsImpl(GURL(kTestHttpURL).GetOrigin()))
+      .Times(is_hsts);
   WaitForPasswordStore();
 
   EXPECT_CALL(consumer(), ProcessForms(std::vector<autofill::PasswordForm*>()));
@@ -148,19 +156,19 @@ void HttpPasswordStoreMigratorTest::TestEmptyStore(bool is_hsts) {
 }
 
 void HttpPasswordStoreMigratorTest::TestFullStore(bool is_hsts) {
-  PasswordStore::FormDigest form_digest(autofill::PasswordForm::SCHEME_HTML,
-                                        kTestHttpURL, GURL(kTestHttpURL));
+  PasswordStore::FormDigest form_digest(CreateTestForm());
   EXPECT_CALL(store(), GetLogins(form_digest, _));
-  PasswordManagerClient::HSTSCallback callback;
-  EXPECT_CALL(client(), PostHSTSQueryForHost(GURL(kTestHttpsURL), _))
-      .WillOnce(SaveArg<1>(&callback));
+  EXPECT_CALL(client(), PostHSTSQueryForHostHelper(GURL(kTestHttpsURL)))
+      .Times(1);
   HttpPasswordStoreMigrator migrator(GURL(kTestHttpsURL), &client(),
                                      &consumer());
-  callback.Run(is_hsts);
+  HSTSCallback callback = client().hsts_acquire_callback();
+  std::move(callback).Run(is_hsts ? HSTSResult::kYes : HSTSResult::kNo);
   // We expect a potential call to |RemoveSiteStatsImpl| which is a async task
   // posted from |PasswordStore::RemoveSiteStats|. Hence the following lines are
   // necessary to ensure |RemoveSiteStatsImpl| gets called when expected.
-  EXPECT_CALL(store(), RemoveSiteStatsImpl(GURL(kTestHttpURL))).Times(is_hsts);
+  EXPECT_CALL(store(), RemoveSiteStatsImpl(GURL(kTestHttpURL).GetOrigin()))
+      .Times(is_hsts);
   WaitForPasswordStore();
 
   PasswordForm form = CreateTestForm();
@@ -168,7 +176,7 @@ void HttpPasswordStoreMigratorTest::TestFullStore(bool is_hsts) {
   PasswordForm android_form = CreateAndroidCredential();
   PasswordForm expected_form = form;
   expected_form.origin = GURL(kTestHttpsURL);
-  expected_form.signon_realm = expected_form.origin.spec();
+  expected_form.signon_realm = expected_form.origin.GetOrigin().spec();
 
   EXPECT_CALL(store(), AddLogin(expected_form));
   EXPECT_CALL(store(), RemoveLogin(form)).Times(is_hsts);
@@ -187,9 +195,8 @@ void HttpPasswordStoreMigratorTest::TestMigratorDeletionByConsumer(
     bool is_hsts) {
   // Setup expectations on store and client.
   EXPECT_CALL(store(), GetLogins(_, _));
-  PasswordManagerClient::HSTSCallback callback;
-  EXPECT_CALL(client(), PostHSTSQueryForHost(GURL(kTestHttpsURL), _))
-      .WillOnce(SaveArg<1>(&callback));
+  EXPECT_CALL(client(), PostHSTSQueryForHostHelper(GURL(kTestHttpsURL)))
+      .Times(1);
 
   // Construct the migrator, call |OnGetPasswordStoreResults| explicitly and
   // manually delete it.
@@ -201,11 +208,13 @@ void HttpPasswordStoreMigratorTest::TestMigratorDeletionByConsumer(
     migrator.reset();
   }));
 
-  callback.Run(is_hsts);
+  HSTSCallback callback = client().hsts_acquire_callback();
+  std::move(callback).Run(is_hsts ? HSTSResult::kYes : HSTSResult::kNo);
   // We expect a potential call to |RemoveSiteStatsImpl| which is a async task
   // posted from |PasswordStore::RemoveSiteStats|. Hence the following lines are
   // necessary to ensure |RemoveSiteStatsImpl| gets called when expected.
-  EXPECT_CALL(store(), RemoveSiteStatsImpl(GURL(kTestHttpURL))).Times(is_hsts);
+  EXPECT_CALL(store(), RemoveSiteStatsImpl(GURL(kTestHttpURL).GetOrigin()))
+      .Times(is_hsts);
   WaitForPasswordStore();
 }
 
@@ -231,6 +240,39 @@ TEST_F(HttpPasswordStoreMigratorTest, MigratorDeletionByConsumerWithHSTS) {
 
 TEST_F(HttpPasswordStoreMigratorTest, MigratorDeletionByConsumerWithoutHSTS) {
   TestMigratorDeletionByConsumer(false);
+}
+
+TEST(HttpPasswordStoreMigrator, MigrateHttpFormToHttpsTestSignonRealm) {
+  const GURL kOrigins[] = {GURL("http://example.org/"),
+                           GURL("http://example.org/path/")};
+
+  for (bool origin_has_paths : {true, false}) {
+    PasswordForm http_html_form;
+    http_html_form.origin = kOrigins[origin_has_paths];
+    http_html_form.signon_realm = "http://example.org/";
+    http_html_form.scheme = PasswordForm::Scheme::SCHEME_HTML;
+
+    PasswordForm non_html_empty_realm_form;
+    non_html_empty_realm_form.origin = kOrigins[origin_has_paths];
+    non_html_empty_realm_form.signon_realm = "http://example.org/";
+    non_html_empty_realm_form.scheme = PasswordForm::Scheme::SCHEME_BASIC;
+
+    PasswordForm non_html_form;
+    non_html_form.origin = kOrigins[origin_has_paths];
+    non_html_form.signon_realm = "http://example.org/realm";
+    non_html_form.scheme = PasswordForm::Scheme::SCHEME_BASIC;
+
+    EXPECT_EQ(HttpPasswordStoreMigrator::MigrateHttpFormToHttps(http_html_form)
+                  .signon_realm,
+              "https://example.org/");
+    EXPECT_EQ(HttpPasswordStoreMigrator::MigrateHttpFormToHttps(
+                  non_html_empty_realm_form)
+                  .signon_realm,
+              "https://example.org/");
+    EXPECT_EQ(HttpPasswordStoreMigrator::MigrateHttpFormToHttps(non_html_form)
+                  .signon_realm,
+              "https://example.org/realm");
+  }
 }
 
 }  // namespace password_manager

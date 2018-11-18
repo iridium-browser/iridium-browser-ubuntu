@@ -21,9 +21,9 @@ class AbortController final : public ScriptWrappable {
 
  public:
   static AbortController* Create(ExecutionContext*);
-  virtual ~AbortController();
+  ~AbortController() override;
 
-  // AbortController.idl
+  // abort_controller.idl
 
   // https://dom.spec.whatwg.org/#dom-abortcontroller-signal
   AbortSignal* signal() const { return signal_.Get(); }
@@ -31,7 +31,7 @@ class AbortController final : public ScriptWrappable {
   // https://dom.spec.whatwg.org/#dom-abortcontroller-abort
   void abort();
 
-  virtual void Trace(Visitor*);
+  void Trace(Visitor*) override;
 
  private:
   explicit AbortController(ExecutionContext*);

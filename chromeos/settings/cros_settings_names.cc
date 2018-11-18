@@ -310,4 +310,20 @@ const char kDeviceHostnameTemplate[] = "cros.network.hostname_template";
 // is allowed.
 const char kVirtualMachinesAllowed[] = "cros.device.virtual_machines_allowed";
 
+// An enum specifying the authentication type for newly added users which log in
+// via SAML. See the SamlLoginAuthenticationTypeProto proto message for the list
+// of possible values.
+const char kSamlLoginAuthenticationType[] =
+    "cros.device.saml_login_authentication_type";
+
+// A list of time intervals during which the admin has disallowed automatic
+// update checks.
+const char kDeviceAutoUpdateTimeRestrictions[] =
+    "cros.system.autoUpdateTimeRestrictions";
+
+// A boolean pref that indicates whether running Crostini on Chrome OS is
+// allowed for unaffiliated user.
+const char kDeviceUnaffiliatedCrostiniAllowed[] =
+    "cros.device.unaffiliated_crostini_allowed";
+
 }  // namespace chromeos

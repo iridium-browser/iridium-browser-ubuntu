@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "base/logging.h"
+#include "base/numerics/safe_conversions.h"
 #include "components/zucchini/disassembler.h"
 #include "components/zucchini/element_detection.h"
 #include "components/zucchini/equivalence_map.h"
@@ -26,17 +27,18 @@ bool ApplyEquivalenceAndExtraData(ConstBufferView old_image,
 
   for (auto equivalence = equiv_source.GetNext(); equivalence.has_value();
        equivalence = equiv_source.GetNext()) {
-    // TODO(etiennep): Guard against out of range errors and return false
-    // instead.
     MutableBufferView::iterator next_dst_it =
         new_image.begin() + equivalence->dst_offset;
     CHECK(next_dst_it >= dst_it);
+
     offset_t gap = static_cast<offset_t>(next_dst_it - dst_it);
     base::Optional<ConstBufferView> extra_data = extra_data_source.GetNext(gap);
     if (!extra_data) {
       LOG(ERROR) << "Error reading extra_data";
       return false;
     }
+    // |extra_data| length is based on what was parsed from the patch so this
+    // copy should be valid.
     dst_it = std::copy(extra_data->begin(), extra_data->end(), dst_it);
     CHECK_EQ(dst_it, next_dst_it);
     dst_it = std::copy_n(old_image.begin() + equivalence->src_offset,
@@ -100,13 +102,20 @@ bool ApplyReferencesCorrection(ExecutableType exe_type,
     LOG(ERROR) << "Failed to create Disassembler";
     return false;
   }
+  if (old_disasm->size() != old_image.size() ||
+      new_disasm->size() != new_image.size()) {
+    LOG(ERROR) << "Disassembler and element size mismatch";
+    return false;
+  }
 
   ReferenceDeltaSource ref_delta_source = patch.GetReferenceDeltaSource();
   std::map<PoolTag, std::vector<ReferenceGroup>> pool_groups;
   for (const auto& ref_group : old_disasm->MakeReferenceGroups())
     pool_groups[ref_group.pool_tag()].push_back(ref_group);
 
-  OffsetMapper offset_mapper(patch.GetEquivalenceSource());
+  OffsetMapper offset_mapper(patch.GetEquivalenceSource(),
+                             base::checked_cast<offset_t>(old_image.size()),
+                             base::checked_cast<offset_t>(new_image.size()));
 
   std::vector<ReferenceGroup> new_groups = new_disasm->MakeReferenceGroups();
   for (const auto& pool_and_sub_groups : pool_groups) {
@@ -143,11 +152,17 @@ bool ApplyReferencesCorrection(ExecutableType exe_type,
           DCHECK_GE(ref->location, equivalence->src_offset);
           DCHECK_LT(ref->location, equivalence->src_end());
 
-          offset_t projected_target = offset_mapper.ForwardProject(ref->target);
+          offset_t projected_target =
+              offset_mapper.ExtendedForwardProject(ref->target);
           offset_t expected_key = targets.KeyForNearestOffset(projected_target);
           auto delta = ref_delta_source.GetNext();
           if (!delta.has_value()) {
             LOG(ERROR) << "Error reading reference_delta";
+            return false;
+          }
+          const key_t key = expected_key + delta.value();
+          if (!targets.KeyIsValid(key)) {
+            LOG(ERROR) << "Invalid reference_delta";
             return false;
           }
           ref->target = targets.OffsetForKey(expected_key + delta.value());
@@ -177,9 +192,9 @@ bool ApplyElement(ExecutableType exe_type,
 
 /******** Exported Functions ********/
 
-status::Code Apply(ConstBufferView old_image,
-                   const EnsemblePatchReader& patch_reader,
-                   MutableBufferView new_image) {
+status::Code ApplyBuffer(ConstBufferView old_image,
+                         const EnsemblePatchReader& patch_reader,
+                         MutableBufferView new_image) {
   if (!patch_reader.CheckOldFile(old_image)) {
     LOG(ERROR) << "Invalid old_image.";
     return status::kStatusInvalidOldImage;

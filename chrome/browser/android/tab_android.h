@@ -91,7 +91,6 @@ class TabAndroid : public CoreTabHelperDelegate,
   scoped_refptr<cc::Layer> GetContentLayer() const;
 
   // Return specific id information regarding this TabAndroid.
-  const SessionID& session_id() const { return session_tab_id_; }
   const SessionID& window_id() const { return session_window_id_; }
 
   int GetAndroidId() const;
@@ -127,12 +126,6 @@ class TabAndroid : public CoreTabHelperDelegate,
 
   bool HasPrerenderedUrl(GURL gurl);
 
-  // Overridden from CoreTabHelperDelegate:
-  void SwapTabContents(content::WebContents* old_contents,
-                       content::WebContents* new_contents,
-                       bool did_start_load,
-                       bool did_finish_load) override;
-
   // Overridden from NotificationObserver:
   void Observe(int type,
                const content::NotificationSource& source,
@@ -159,7 +152,7 @@ class TabAndroid : public CoreTabHelperDelegate,
       jboolean incognito,
       jboolean is_background_tab,
       const base::android::JavaParamRef<jobject>& jweb_contents,
-      const base::android::JavaParamRef<jobject>& jparent_web_contents,
+      jint jparent_tab_id,
       const base::android::JavaParamRef<jobject>& jweb_contents_delegate,
       const base::android::JavaParamRef<jobject>& jcontext_menu_populator);
   void UpdateDelegates(
@@ -190,9 +183,9 @@ class TabAndroid : public CoreTabHelperDelegate,
       jint referrer_policy,
       jboolean is_renderer_initiated,
       jboolean should_replace_current_entry,
-      jlong intent_received_timestamp,
       jboolean has_user_gesture,
-      jboolean should_clear_history_list);
+      jboolean should_clear_history_list,
+      jlong omnibox_input_received_timestamp);
   void SetActiveNavigationEntryTitleForUrl(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj,
@@ -321,9 +314,6 @@ class TabAndroid : public CoreTabHelperDelegate,
   void OnMediaDownloadInProductHelpConnectionError();
 
   JavaObjectWeakGlobalRef weak_java_tab_;
-
-  // The identifier used by session restore for this tab.
-  SessionID session_tab_id_;
 
   // Identifier of the window the tab is in.
   SessionID session_window_id_;

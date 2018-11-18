@@ -16,6 +16,7 @@
 #include "extensions/common/extension.h"
 
 class PrefService;
+class Profile;
 
 namespace content {
 class BrowserContext;
@@ -31,8 +32,8 @@ class ExtensionRegistry;
 class InstallationTracker : public ExtensionRegistryObserver {
  public:
   InstallationTracker(ExtensionRegistry* registry,
-                      PrefService* pref_service,
-                      std::unique_ptr<base::Timer> timer =
+                      Profile* profile,
+                      std::unique_ptr<base::OneShotTimer> timer =
                           std::make_unique<base::OneShotTimer>());
 
   ~InstallationTracker() override;
@@ -46,11 +47,13 @@ class InstallationTracker : public ExtensionRegistryObserver {
   void OnForcedExtensionsPrefChanged();
 
   // If |succeeded| report time elapsed for extensions load,
-  // otherwise amount of not yet loaded extensions.
+  // otherwise amount of not yet loaded extensions and reasons
+  // why they were not installed.
   void ReportResults(bool succeeded);
 
   // Unowned, but guaranteed to outlive this object.
   ExtensionRegistry* registry_;
+  Profile* profile_;
   // Unowned, but guaranteed to outlive this object.
   PrefService* pref_service_;
   PrefChangeRegistrar pref_change_registrar_;
@@ -70,7 +73,7 @@ class InstallationTracker : public ExtensionRegistryObserver {
   ScopedObserver<ExtensionRegistry, ExtensionRegistryObserver> observer_;
 
   // Tracks installation reporting timeout.
-  std::unique_ptr<base::Timer> timer_;
+  std::unique_ptr<base::OneShotTimer> timer_;
 
   DISALLOW_COPY_AND_ASSIGN(InstallationTracker);
 };

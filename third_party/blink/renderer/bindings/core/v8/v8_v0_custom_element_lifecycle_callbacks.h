@@ -41,6 +41,7 @@
 
 namespace blink {
 
+class V0CustomElementBinding;
 class V0CustomElementLifecycleCallbacks;
 class Element;
 class V8PerContextData;
@@ -60,7 +61,7 @@ class V8V0CustomElementLifecycleCallbacks final
 
   bool SetBinding(std::unique_ptr<V0CustomElementBinding>);
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  private:
   V8V0CustomElementLifecycleCallbacks(
@@ -83,7 +84,7 @@ class V8V0CustomElementLifecycleCallbacks final
 
   V8PerContextData* CreationContextData();
 
-  scoped_refptr<ScriptState> script_state_;
+  Member<ScriptState> script_state_;
   ScopedPersistent<v8::Object> prototype_;
   ScopedPersistent<v8::Function> created_;
   ScopedPersistent<v8::Function> attached_;

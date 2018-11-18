@@ -36,8 +36,10 @@
 #include "bn/cmp.c"
 #include "bn/ctx.c"
 #include "bn/div.c"
+#include "bn/div_extra.c"
 #include "bn/exponentiation.c"
 #include "bn/gcd.c"
+#include "bn/gcd_extra.c"
 #include "bn/generic.c"
 #include "bn/jacobi.c"
 #include "bn/montgomery.c"
@@ -55,15 +57,19 @@
 #include "des/des.c"
 #include "digest/digest.c"
 #include "digest/digests.c"
+#include "ecdh/ecdh.c"
 #include "ecdsa/ecdsa.c"
 #include "ec/ec.c"
 #include "ec/ec_key.c"
 #include "ec/ec_montgomery.c"
+#include "ec/felem.c"
 #include "ec/oct.c"
 #include "ec/p224-64.c"
 #include "../../third_party/fiat/p256.c"
 #include "ec/p256-x86_64.c"
+#include "ec/scalar.c"
 #include "ec/simple.c"
+#include "ec/simple_mul.c"
 #include "ec/util.c"
 #include "ec/wnaf.c"
 #include "hmac/hmac.c"
@@ -118,6 +124,7 @@ BORINGSSL_bcm_power_on_self_test(void) {
   if (!HMAC(EVP_sha512(), kHMACKey, sizeof(kHMACKey), start, end - start,
             result, &result_len) ||
       result_len != sizeof(result)) {
+    fprintf(stderr, "HMAC failed.\n");
     goto err;
   }
 

@@ -245,12 +245,14 @@ TEST(ToV8Test, pairHeapVector) {
       result->Get(context, V8String(scope.GetIsolate(), "one"))
           .ToLocalChecked();
   EXPECT_TRUE(one->IsObject());
-  EXPECT_EQ(String("foo"), ToCoreString(one->ToString()));
+  EXPECT_EQ(String("foo"),
+            ToCoreString(one->ToString(context).ToLocalChecked()));
   v8::Local<v8::Value> two =
       result->Get(context, V8String(scope.GetIsolate(), "two"))
           .ToLocalChecked();
   EXPECT_TRUE(two->IsObject());
-  EXPECT_EQ(String("bar"), ToCoreString(two->ToString()));
+  EXPECT_EQ(String("bar"),
+            ToCoreString(two->ToString(context).ToLocalChecked()));
 }
 
 TEST(ToV8Test, stringVectorVector) {
@@ -310,13 +312,13 @@ TEST(ToV8Test, nullableDouble) {
   v8::Isolate* isolate = scope.GetIsolate();
   {
     v8::Local<v8::Value> actual =
-        ToV8(WTF::Optional<double>(42.0), global, isolate);
+        ToV8(base::Optional<double>(42.0), global, isolate);
     ASSERT_TRUE(actual->IsNumber());
     EXPECT_EQ(42.0, actual.As<v8::Number>()->Value());
   }
   {
     v8::Local<v8::Value> actual =
-        ToV8(WTF::Optional<double>(), global, isolate);
+        ToV8(base::Optional<double>(), global, isolate);
     EXPECT_TRUE(actual->IsNull());
   }
 }

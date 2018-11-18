@@ -21,7 +21,7 @@ class STORAGE_EXPORT CopyOrMoveFileValidator {
  public:
   // Callback that is invoked when validation completes. A result of
   // base::File::FILE_OK means the file validated.
-  typedef base::Callback<void(base::File::Error result)> ResultCallback;
+  using ResultCallback = base::Callback<void(base::File::Error result)>;
 
   virtual ~CopyOrMoveFileValidator() {}
 
@@ -41,7 +41,7 @@ class CopyOrMoveFileValidatorFactory {
  public:
   virtual ~CopyOrMoveFileValidatorFactory() {}
 
-  // This method must always return a non-NULL validator. |src_url| is needed
+  // This method must always return a non-null validator. |src_url| is needed
   // in addition to |platform_path| because in the obfuscated file system
   // case, |platform_path| will be an obfuscated filename and extension.
   virtual CopyOrMoveFileValidator* CreateCopyOrMoveFileValidator(

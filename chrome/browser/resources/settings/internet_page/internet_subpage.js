@@ -161,7 +161,8 @@ Polymer({
 
   /** @private */
   deviceStateChanged_: function() {
-    this.showSpinner = !!this.deviceState.Scanning;
+    this.showSpinner =
+        this.deviceState !== undefined && !!this.deviceState.Scanning;
 
     // Scans should only be triggered by the "networks" subpage.
     if (settings.getCurrentRoute() != settings.routes.INTERNET_NETWORKS) {
@@ -211,9 +212,9 @@ Polymer({
     if (this.scanIntervalId_ != null)
       return;
     const INTERVAL_MS = 10 * 1000;
-    this.networkingPrivate.requestNetworkScan();
+    this.networkingPrivate.requestNetworkScan(this.deviceState.Type);
     this.scanIntervalId_ = window.setInterval(() => {
-      this.networkingPrivate.requestNetworkScan();
+      this.networkingPrivate.requestNetworkScan(this.deviceState.Type);
     }, INTERVAL_MS);
   },
 
@@ -363,7 +364,8 @@ Polymer({
    * @private
    */
   getAddThirdPartyVpnA11yString_: function(vpnState) {
-    return this.i18n('internetAddThirdPartyVPN', vpnState.ProviderName);
+    return this.i18n(
+        'internetAddThirdPartyVPN', vpnState.ProviderName || '');
   },
 
   /**
@@ -403,10 +405,7 @@ Polymer({
     assert(this.deviceState);
     const type = this.deviceState.Type;
     assert(type != CrOnc.Type.CELLULAR);
-    if (loadTimeData.getBoolean('networkSettingsConfig'))
-      this.fire('show-config', {GUID: '', Type: type});
-    else
-      chrome.send('addNetwork', [type]);
+    this.fire('show-config', {GUID: '', Type: type});
   },
 
   /**
@@ -417,19 +416,16 @@ Polymer({
    */
   onAddThirdPartyVpnTap_: function(event) {
     const provider = event.model.item;
-    this.browserProxy_.addThirdPartyVpn(CrOnc.Type.VPN, provider.ExtensionID);
+    this.browserProxy_.addThirdPartyVpn(provider.ExtensionID);
   },
 
   /**
-   * @param {!{model:
-   *              !{item: !settings.ArcVpnProvider},
-   *        }} event
+   * @param {!{model: !{item: !settings.ArcVpnProvider}}} event
    * @private
    */
   onAddArcVpnTap_: function(event) {
     const provider = event.model.item;
-    settings.InternetPageBrowserProxyImpl.getInstance().addThirdPartyVpn(
-        CrOnc.Type.VPN, provider.AppID);
+    this.browserProxy_.addThirdPartyVpn(provider.AppID);
   },
 
   /**
@@ -447,7 +443,7 @@ Polymer({
    */
   onKnownNetworksTap_: function() {
     assert(this.deviceState.Type == CrOnc.Type.WI_FI);
-    this.fire('show-known-networks', {Type: this.deviceState.Type});
+    this.fire('show-known-networks', {type: this.deviceState.Type});
   },
 
   /**
@@ -455,14 +451,12 @@ Polymer({
    * @param {!Event} event
    * @private
    */
-  onDeviceEnabledTap_: function(event) {
+  onDeviceEnabledChange_: function(event) {
     assert(this.deviceState);
     this.fire('device-enabled-toggled', {
       enabled: !this.deviceIsEnabled_(this.deviceState),
       type: this.deviceState.Type
     });
-    // Make sure this does not propagate to onDetailsTap_.
-    event.stopPropagation();
   },
 
   /**
@@ -517,7 +511,7 @@ Polymer({
     assert(this.defaultNetwork !== undefined);
     const state = e.detail;
     e.target.blur();
-    if (this.canConnect_(state, this.globalPolicy, this.defaultNetwork)) {
+    if (this.canConnect_(state)) {
       this.fire('network-connect', {networkProperties: state});
       return;
     }
@@ -525,23 +519,36 @@ Polymer({
   },
 
   /**
-   * Determines whether or not a network state can be connected to.
    * @param {!CrOnc.NetworkStateProperties} state The network state.
-   * @param {!chrome.networkingPrivate.GlobalPolicy} globalPolicy
-   * @param {?CrOnc.NetworkStateProperties} defaultNetwork
    * @private
    */
-  canConnect_: function(state, globalPolicy, defaultNetwork) {
-    if (state.ConnectionState != CrOnc.ConnectionState.NOT_CONNECTED)
-      return false;
-    if (state.Type == CrOnc.Type.WI_FI && globalPolicy &&
-        globalPolicy.AllowOnlyPolicyNetworksToConnect &&
-        !this.isPolicySource(state.Source)) {
+  isBlockedByPolicy_: function(state) {
+    if (state.Type != CrOnc.Type.WI_FI || this.isPolicySource(state.Source) ||
+        !this.globalPolicy) {
       return false;
     }
+    return !!this.globalPolicy.AllowOnlyPolicyNetworksToConnect ||
+        (!!this.globalPolicy.AllowOnlyPolicyNetworksToConnectIfAvailable &&
+         !!this.deviceState && !!this.deviceState.ManagedNetworkAvailable) ||
+        (!!state.WiFi && !!state.WiFi.HexSSID &&
+         !!this.globalPolicy.BlacklistedHexSSIDs &&
+         this.globalPolicy.BlacklistedHexSSIDs.includes(state.WiFi.HexSSID));
+  },
+
+  /**
+   * Determines whether or not a network state can be connected to.
+   * @param {!CrOnc.NetworkStateProperties} state The network state.
+   * @private
+   */
+  canConnect_: function(state) {
+    if (state.ConnectionState != CrOnc.ConnectionState.NOT_CONNECTED)
+      return false;
+    if (this.isBlockedByPolicy_(state))
+      return false;
     if (state.Type == CrOnc.Type.VPN &&
-        (!defaultNetwork ||
-         defaultNetwork.ConnectionState != CrOnc.ConnectionState.CONNECTED)) {
+        (!this.defaultNetwork ||
+         this.defaultNetwork.ConnectionState !=
+             CrOnc.ConnectionState.CONNECTED)) {
       return false;
     }
     return true;

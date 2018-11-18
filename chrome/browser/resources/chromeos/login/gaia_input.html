@@ -17,17 +17,21 @@
     <gaia-input value="Simple text input" required></gaia-input>
     <gaia-input type="email" domain="example.com"></gaia-input>
 
-  Attributes:
+  Slots:
+    'error' - error message displayed in case if 'isInvalid' is true.
     'label' - same as <paper-input>'s 'label'.
+
+  Attributes:
     'value' - same as <input>'s 'value'.
     'type' - same as <input>'s 'type'.
     'domain' - optional attribute for email input. The domain is displayed in
                the end of input field, if user is not provided any.
-    'error' - error message displayed in case if 'isInvalid' is true.
-    'isInvalid' - whether input data is invalid. Note: it is not changed
-                  automatically. Can be changed manually or with checkValidity()
-                  method.
+    'isInvalid' - whether input data is invalid. Supports two-way binding.
+                  Note: it is not changed automatically. Can be changed manually
+                  or with checkValidity() method.
     'required' - whether empty field is invalid.
+    'pattern' - regular expression. If set input would be validated against it
+                in checkValidity function. Ignored if 'type' == 'email'.
 
   Methods:
     'focus'         - focuses input field.
@@ -40,15 +44,21 @@
 
   <template>
     <paper-input-container id="decorator" on-tap="onTap"
-        invalid="[[isInvalid]]" disabled$="[[disabled]]">
-      <label slot="label"><span>[[label]]</span></label>
-      <input id="input" is="iron-input" on-keydown="onKeyDown"
-          bind-value="{{value}}" invalid="[[isInvalid]]" slot="input"
-          required$="[[required]]" disabled$="[[disabled]]" class="flex">
+        invalid="{{isInvalid}}" disabled$="[[disabled]]">
+      <label slot="label">
+        <slot name="label"></slot>
+      </label>
+      <iron-input id="ironInput" slot="input" class="flex"
+          bind-value="{{value}}">
+        <input id="input" on-keydown="onKeyDown"
+          value="{{value::input}}" invalid="{{isInvalid}}"
+          required$="[[required]]" disabled$="[[disabled]]"
+          pattern$="[[pattern]]" aria-label$="[[label]]">
+      </iron-input>
       <span id="domainLabel" slot="suffix">[[domain]]</span>
-      <template is="dom-if" if="[[error]]">
-        <paper-input-error slot="add-on">[[error]]</paper-input-error>
-      </template>
+      <paper-input-error slot="add-on" hidden="[[!isInvalid]]">
+        <slot name="error"></slot>
+      </paper-input-error>
     </paper-input-container>
   </template>
 </dom-module>

@@ -26,18 +26,17 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_LOADER_FRAME_LOAD_REQUEST_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LOADER_FRAME_LOAD_REQUEST_H_
 
-#include "base/unguessable_token.h"
+#include "third_party/blink/public/mojom/blob/blob_url_store.mojom-blink.h"
+#include "third_party/blink/public/web/web_triggering_event_info.h"
 #include "third_party/blink/renderer/core/dom/document.h"
-#include "third_party/blink/renderer/core/dom/events/event.h"
+#include "third_party/blink/renderer/core/frame/frame_types.h"
 #include "third_party/blink/renderer/core/loader/frame_loader_types.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_loader_options.h"
-#include "third_party/blink/renderer/platform/loader/fetch/substitute_data.h"
+#include "third_party/blink/renderer/platform/loader/fetch/resource_request.h"
 
 namespace blink {
 
 class HTMLFormElement;
-class ResourceRequest;
-class SubstituteData;
 
 struct CORE_EXPORT FrameLoadRequest {
   STACK_ALLOCATED();
@@ -50,16 +49,8 @@ struct CORE_EXPORT FrameLoadRequest {
                    const AtomicString& frame_name);
   FrameLoadRequest(Document* origin_document,
                    const ResourceRequest&,
-                   const SubstituteData&);
-  FrameLoadRequest(Document* origin_document,
-                   const ResourceRequest&,
                    const AtomicString& frame_name,
                    ContentSecurityPolicyDisposition);
-  FrameLoadRequest(Document* origin_document,
-                   const ResourceRequest&,
-                   const AtomicString& frame_name,
-                   ContentSecurityPolicyDisposition,
-                   const base::UnguessableToken& devtools_navigation_token);
 
   Document* OriginDocument() const { return origin_document_.Get(); }
 
@@ -73,21 +64,17 @@ struct CORE_EXPORT FrameLoadRequest {
     frame_name_ = frame_name;
   }
 
-  const SubstituteData& GetSubstituteData() const { return substitute_data_; }
-
-  bool ReplacesCurrentItem() const { return replaces_current_item_; }
-  void SetReplacesCurrentItem(bool replaces_current_item) {
-    replaces_current_item_ = replaces_current_item;
-  }
-
   ClientRedirectPolicy ClientRedirect() const { return client_redirect_; }
   void SetClientRedirect(ClientRedirectPolicy client_redirect) {
     client_redirect_ = client_redirect;
   }
 
-  Event* TriggeringEvent() const { return triggering_event_.Get(); }
-  void SetTriggeringEvent(Event* triggering_event) {
-    triggering_event_ = triggering_event;
+  WebTriggeringEventInfo TriggeringEventInfo() const {
+    return triggering_event_info_;
+  }
+  void SetTriggeringEventInfo(WebTriggeringEventInfo info) {
+    DCHECK(info != WebTriggeringEventInfo::kUnknown);
+    triggering_event_info_ = info;
   }
 
   HTMLFormElement* Form() const { return form_.Get(); }
@@ -108,11 +95,6 @@ struct CORE_EXPORT FrameLoadRequest {
   ContentSecurityPolicyDisposition ShouldCheckMainWorldContentSecurityPolicy()
       const {
     return should_check_main_world_content_security_policy_;
-  }
-
-  // See DocumentLoader::devtools_navigation_token_ for documentation.
-  const base::UnguessableToken& GetDevToolsNavigationToken() const {
-    return devtools_navigation_token_;
   }
 
   // Sets the BlobURLToken that should be used when fetching the resource. This
@@ -139,29 +121,27 @@ struct CORE_EXPORT FrameLoadRequest {
     return result;
   }
 
- private:
-  FrameLoadRequest(Document* origin_document,
-                   const ResourceRequest&,
-                   const AtomicString& frame_name,
-                   const SubstituteData&,
-                   ContentSecurityPolicyDisposition,
-                   const base::UnguessableToken& devtools_navigation_token);
+  void SetInputStartTime(base::TimeTicks input_start_time) {
+    input_start_time_ = input_start_time;
+  }
 
+  base::TimeTicks GetInputStartTime() const { return input_start_time_; }
+
+ private:
   Member<Document> origin_document_;
   ResourceRequest resource_request_;
   AtomicString frame_name_;
-  SubstituteData substitute_data_;
-  bool replaces_current_item_;
   ClientRedirectPolicy client_redirect_;
-  Member<Event> triggering_event_;
+  WebTriggeringEventInfo triggering_event_info_ =
+      WebTriggeringEventInfo::kNotFromEvent;
   Member<HTMLFormElement> form_;
   ShouldSendReferrer should_send_referrer_;
   ShouldSetOpener should_set_opener_;
   ContentSecurityPolicyDisposition
       should_check_main_world_content_security_policy_;
-  base::UnguessableToken devtools_navigation_token_;
   scoped_refptr<base::RefCountedData<mojom::blink::BlobURLTokenPtr>>
       blob_url_token_;
+  base::TimeTicks input_start_time_;
 };
 
 }  // namespace blink

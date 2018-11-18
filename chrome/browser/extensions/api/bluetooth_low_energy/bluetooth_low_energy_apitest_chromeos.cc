@@ -5,13 +5,13 @@
 #include <memory>
 
 #include "base/memory/ptr_util.h"
-#include "chrome/browser/apps/app_browsertest_util.h"
+#include "chrome/browser/apps/platform_apps/app_browsertest_util.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
 #include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
 #include "chrome/browser/chromeos/ownership/fake_owner_settings_service.h"
 #include "chrome/browser/chromeos/settings/scoped_cros_settings_test_helper.h"
 #include "chrome/browser/extensions/extension_apitest.h"
-#include "components/signin/core/account_id/account_id.h"
+#include "components/account_id/account_id.h"
 #include "components/user_manager/scoped_user_manager.h"
 #include "content/public/test/browser_test.h"
 #include "extensions/common/switches.h"
@@ -33,15 +33,14 @@ class BluetoothLowEnergyApiTestChromeOs : public PlatformAppBrowserTest {
 
   void SetUpOnMainThread() override {
     PlatformAppBrowserTest::SetUpOnMainThread();
-    settings_helper_.ReplaceProvider(
-        chromeos::kAccountsPrefDeviceLocalAccounts);
+    settings_helper_.ReplaceDeviceSettingsProviderWithStub();
     owner_settings_service_ =
         settings_helper_.CreateOwnerSettingsService(browser()->profile());
   }
 
   void TearDownOnMainThread() override {
     PlatformAppBrowserTest::TearDownOnMainThread();
-    settings_helper_.RestoreProvider();
+    settings_helper_.RestoreRealDeviceSettingsProvider();
     user_manager_enabler_.reset();
     fake_user_manager_ = nullptr;
   }

@@ -11,7 +11,7 @@ ContentMetadataProvider.WORKER_SCRIPT = '/js/metadata_worker.js';
 /**
  * Gallery for viewing and editing image files.
  *
- * @param {!VolumeManagerWrapper} volumeManager
+ * @param {!VolumeManager} volumeManager
  * @constructor
  * @struct
  */
@@ -88,7 +88,7 @@ function Gallery(volumeManager) {
    * @const
    */
   this.filenameEdit_ = /** @type {HTMLInputElement} */
-      (queryRequiredElement('input', this.filenameSpacer_));
+      (queryRequiredElement('#rename-input', this.filenameSpacer_));
 
   this.filenameCanvas_ = document.createElement('canvas');
   this.filenameCanvasContext_ = this.filenameCanvas_.getContext('2d');
@@ -130,10 +130,8 @@ function Gallery(volumeManager) {
 
   this.thumbnailMode_ = new ThumbnailMode(
       assertInstanceof(document.querySelector('.thumbnail-view'), HTMLElement),
-      this.errorBanner_,
-      this.dataModel_,
-      this.selectionModel_,
-      this.onChangeToSlideMode_.bind(this));
+      this.errorBanner_, this.dataModel_, this.selectionModel_,
+      this.onThumbnailActivated_.bind(this));
   this.thumbnailMode_.hide();
 
   this.slideMode_ = new SlideMode(this.container_,
@@ -182,8 +180,6 @@ function Gallery(volumeManager) {
 
   this.selectionModel_.addEventListener('change', this.onSelection_.bind(this));
   this.slideMode_.addEventListener('useraction', this.onUserAction_.bind(this));
-
-  this.shareDialog_ = new ShareDialog(this.container_);
 
   // -----------------------------------------------------------------
   // Initialize listeners.
@@ -493,14 +489,15 @@ Gallery.prototype.onModeSwitchButtonClicked_ = function(event) {
 };
 
 /**
- * Change to slide mode.
+ * Callback from ThumbnailMode: changes to slide mode, possibly autoplaying the
+ *     selected item.
  * @private
  */
-Gallery.prototype.onChangeToSlideMode_ = function() {
+Gallery.prototype.onThumbnailActivated_ = function() {
   if (this.modeSwitchButton_.disabled)
     return;
 
-  this.changeCurrentMode_(this.slideMode_);
+  this.changeCurrentMode_(this.slideMode_, true /* activate */);
 };
 
 /**
@@ -517,11 +514,12 @@ Gallery.prototype.updateModeButtonAttribute_ = function() {
 /**
  * Change current mode.
  * @param {!(SlideMode|ThumbnailMode)} mode Target mode.
+ * @param {boolean} activate Whether to activate a selected item (if any).
  * @param {Event=} opt_event Event that caused this call.
  * @return {!Promise} Resolved when mode has been changed.
  * @private
  */
-Gallery.prototype.changeCurrentMode_ = function(mode, opt_event) {
+Gallery.prototype.changeCurrentMode_ = function(mode, activate, opt_event) {
   return new Promise(function(fulfill, reject) {
     // Do not re-enter while changing the mode.
     if (this.currentMode_ === mode || this.changingMode_) {
@@ -567,6 +565,8 @@ Gallery.prototype.changeCurrentMode_ = function(mode, opt_event) {
           function() {
             // Animate to zoomed position.
             this.thumbnailMode_.hide();
+            if (activate)
+              this.slideMode_.activateContent();
           }.bind(this),
           onModeChanged);
       this.bottomToolbar_.hidden = false;
@@ -588,7 +588,8 @@ Gallery.prototype.toggleMode_ = function(opt_callback, opt_event) {
   var targetMode = this.currentMode_ === this.slideMode_ ?
       this.thumbnailMode_ : this.slideMode_;
 
-  this.changeCurrentMode_(targetMode, opt_event).then(function() {
+  let activate = false;
+  this.changeCurrentMode_(targetMode, activate, opt_event).then(function() {
     if (opt_callback)
       opt_callback();
   });
@@ -736,10 +737,6 @@ Gallery.prototype.onKeyDown_ = function(event) {
       break;
   }
 
-  // Do not capture keys when share dialog is shown.
-  if (this.shareDialog_.isShowing())
-    return;
-
   // Show UIs when user types any key.
   this.dimmableUIController_.kick();
 
@@ -817,6 +814,9 @@ Gallery.prototype.updateSelectionAndState_ = function() {
     selectedItem.touch();
     this.dataModel_.evictCache();
 
+    // Filename Edit field shows for anything selected.
+    this.filenameEdit_.hidden = false;
+
     // Update the title and the display name.
     if (numSelectedItems === 1) {
       document.title = this.selectedEntry_.name;
@@ -844,6 +844,7 @@ Gallery.prototype.updateSelectionAndState_ = function() {
     }
   } else {
     document.title = '';
+    this.filenameEdit_.hidden = true;
     this.filenameEdit_.disabled = true;
     this.filenameEdit_.value = '';
     this.resizeRenameField_();
@@ -988,7 +989,24 @@ Gallery.prototype.onShareButtonClick_ = function() {
   var item = this.getSingleSelectedItem();
   if (!item)
     return;
-  this.shareDialog_.showEntry(item.getEntry(), function() {});
+  chrome.fileManagerPrivate.getEntryProperties(
+      [item.getEntry()], ['shareUrl'], results => {
+        if (chrome.runtime.lastError) {
+          console.error(chrome.runtime.lastError.message);
+          return;
+        }
+        if (results.length != 1) {
+          console.error(
+              'getEntryProperties for shareUrl should return 1 entry ' +
+              '(returned ' + results.length + ')');
+          return;
+        }
+        if (results[0].shareUrl === undefined) {
+          console.error('getEntryProperties shareUrl is undefined');
+          return;
+        }
+        util.visitURL(assert(results[0].shareUrl));
+      });
 };
 
 /**
@@ -1004,7 +1022,7 @@ Gallery.prototype.updateThumbnails_ = function() {
  * Singleton gallery.
  * @type {Gallery}
  */
-var gallery = null;
+let gallery = null;
 
 /**
  * (Re-)loads entries.
@@ -1021,10 +1039,9 @@ function reload() {
  * Promise to initialize the load time data.
  * @type {!Promise}
  */
-var loadTimeDataPromise = new Promise(function(fulfill, reject) {
+const loadTimeDataPromise = new Promise(function(fulfill, reject) {
   chrome.fileManagerPrivate.getStrings(function(strings) {
     window.loadTimeData.data = strings;
-    i18nTemplate.process(document, loadTimeData);
     fulfill(true);
   });
 });
@@ -1033,21 +1050,58 @@ var loadTimeDataPromise = new Promise(function(fulfill, reject) {
  * Promise to initialize volume manager.
  * @type {!Promise}
  */
-var volumeManagerPromise = new Promise(function(fulfill, reject) {
-  var volumeManager = new VolumeManagerWrapper(AllowedPaths.ANY_PATH, false);
+const volumeManagerPromise = new Promise(function(fulfill, reject) {
+  let volumeManager = new FilteredVolumeManager(AllowedPaths.ANY_PATH, false);
   volumeManager.ensureInitialized(fulfill.bind(null, volumeManager));
 });
 
 /**
- * Promise to initialize both the volume manager and the load time data.
- * @type {!Promise}
+ * Promise to initialize both the volume manager and the load time data, and
+ * then create the gallery.
+ * @type {Promise}
  */
-var initializePromise =
-    Promise.all([loadTimeDataPromise, volumeManagerPromise]).
-    then(function(args) {
-      var volumeManager = args[1];
-      gallery = new Gallery(volumeManager);
-    });
+let initializePromise = null;
 
-// Loads entries.
-initializePromise.then(reload);
+/**
+ * Initializes the gallery: setup the gallery |initializePromise| and invoke
+ * it to create the gallery. Calls reload() to populate the gallery entries.
+ */
+function initializeGallery() {
+  const promise = Promise.resolve().then(() => {
+    return Promise.all([loadTimeDataPromise, volumeManagerPromise]);
+  });
+
+  /**
+   * Define the initializePromise, which runs |promise| and then creates the
+   * Gallery. Define that as a 'createGallery' function here so that name is
+   * shown in the error stack if .catch((error)) fires.
+   */
+  initializePromise = promise.then(function createGallery(results) {
+    const isReady = window.document.readyState !== 'loading';
+    assert(isReady, 'Gallery DOM document is still loading');
+    i18nTemplate.process(window.document, window.loadTimeData);
+    const volumeManager = results[1];
+    gallery = new Gallery(volumeManager);
+    window.gallery = gallery;  // for debug.
+  }).catch((error) => {
+    console.error('gallery ' + (error.stack ? error.stack : error));
+  });
+
+  /**
+   * Initialize the gallery, and reload its entries. Then expose reload() on
+   * the global window (for background page use).
+   */
+  initializePromise.then(reload).then(() => {
+    window.reload = reload;  // can be called from background page.
+  });
+}
+
+/**
+ * Ensure the gallery.html DOM is loaded before attempting to initialize the
+ * gallery from script: crbug.com/882606
+ */
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initializeGallery);
+} else {
+  initializeGallery();
+}

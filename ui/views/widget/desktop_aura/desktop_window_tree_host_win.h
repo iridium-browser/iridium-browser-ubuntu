@@ -23,6 +23,7 @@ class FocusClient;
 }
 
 namespace ui {
+enum class DomCode;
 class InputMethod;
 class KeyboardHook;
 }  // namespace ui
@@ -66,8 +67,8 @@ class VIEWS_EXPORT DesktopWindowTreeHostWin
   void Close() override;
   void CloseNow() override;
   aura::WindowTreeHost* AsWindowTreeHost() override;
-  void ShowWindowWithState(ui::WindowShowState show_state) override;
-  void ShowMaximizedWithBounds(const gfx::Rect& restored_bounds) override;
+  void Show(ui::WindowShowState show_state,
+            const gfx::Rect& restore_bounds) override;
   bool IsVisible() const override;
   void SetSize(const gfx::Size& size) override;
   void StackAbove(aura::Window* window) override;
@@ -109,6 +110,7 @@ class VIEWS_EXPORT DesktopWindowTreeHostWin
   void SetFullscreen(bool fullscreen) override;
   bool IsFullscreen() const override;
   void SetOpacity(float opacity) override;
+  void SetAspectRatio(const gfx::SizeF& aspect_ratio) override;
   void SetWindowIcons(const gfx::ImageSkia& window_icon,
                       const gfx::ImageSkia& app_icon) override;
   void InitModalType(ui::ModalType modal_type) override;
@@ -126,14 +128,17 @@ class VIEWS_EXPORT DesktopWindowTreeHostWin
   void ShowImpl() override;
   void HideImpl() override;
   gfx::Rect GetBoundsInPixels() const override;
-  void SetBoundsInPixels(const gfx::Rect& bounds) override;
+  void SetBoundsInPixels(const gfx::Rect& bounds,
+                         const viz::LocalSurfaceId& local_surface_id =
+                             viz::LocalSurfaceId()) override;
   gfx::Point GetLocationOnScreenInPixels() const override;
   void SetCapture() override;
   void ReleaseCapture() override;
   bool CaptureSystemKeyEventsImpl(
-      base::Optional<base::flat_set<int>> keys_codes) override;
+      base::Optional<base::flat_set<ui::DomCode>> dom_codes) override;
   void ReleaseSystemKeyEventCapture() override;
-  bool IsKeyLocked(int native_key_code) override;
+  bool IsKeyLocked(ui::DomCode dom_code) override;
+  base::flat_map<std::string, std::string> GetKeyboardLayoutMap() override;
   void SetCursorNative(gfx::NativeCursor cursor) override;
   void OnCursorVisibilityChangedNative(bool show) override;
   void MoveCursorToScreenLocationInPixels(
@@ -164,7 +169,8 @@ class VIEWS_EXPORT DesktopWindowTreeHostWin
   bool WillProcessWorkAreaChange() const override;
   int GetNonClientComponent(const gfx::Point& point) const override;
   void GetWindowMask(const gfx::Size& size, gfx::Path* path) override;
-  bool GetClientAreaInsets(gfx::Insets* insets) const override;
+  bool GetClientAreaInsets(gfx::Insets* insets,
+                           HMONITOR monitor) const override;
   void GetMinMaxSize(gfx::Size* min_size, gfx::Size* max_size) const override;
   gfx::Size GetRootViewSize() const override;
   gfx::Size DIPToScreenSize(const gfx::Size& dip_size) const override;

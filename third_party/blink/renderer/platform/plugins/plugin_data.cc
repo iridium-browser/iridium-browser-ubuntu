@@ -23,9 +23,11 @@
 
 #include "third_party/blink/renderer/platform/plugins/plugin_data.h"
 
+#include "third_party/blink/public/mojom/plugins/plugin_registry.mojom-blink.h"
+#include "third_party/blink/public/platform/file_path_conversion.h"
+#include "third_party/blink/public/platform/interface_provider.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_security_origin.h"
-#include "third_party/blink/renderer/platform/plugins/plugin_list_builder.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 
 namespace blink {
@@ -56,7 +58,7 @@ void PluginInfo::AddMimeType(MimeClassInfo* info) {
   mimes_.push_back(info);
 }
 
-const MimeClassInfo* PluginInfo::GetMimeClassInfo(size_t index) const {
+const MimeClassInfo* PluginInfo::GetMimeClassInfo(wtf_size_t index) const {
   if (index >= mimes_.size())
     return nullptr;
   return mimes_[index];
@@ -71,7 +73,7 @@ const MimeClassInfo* PluginInfo::GetMimeClassInfo(const String& type) const {
   return nullptr;
 }
 
-size_t PluginInfo::GetMimeClassInfoSize() const {
+wtf_size_t PluginInfo::GetMimeClassInfoSize() const {
   return mimes_.size();
 }
 
@@ -82,21 +84,34 @@ void PluginData::Trace(blink::Visitor* visitor) {
 
 // static
 void PluginData::RefreshBrowserSidePluginCache() {
-  PluginListBuilder builder(nullptr);
-  Platform::Current()->GetPluginList(true, WebSecurityOrigin::CreateUnique(),
-                                     &builder);
+  mojom::blink::PluginRegistryPtr registry;
+  Platform::Current()->GetInterfaceProvider()->GetInterface(
+      mojo::MakeRequest(&registry));
+  Vector<mojom::blink::PluginInfoPtr> plugins;
+  registry->GetPlugins(true, SecurityOrigin::CreateUniqueOpaque(), &plugins);
 }
 
 void PluginData::UpdatePluginList(const SecurityOrigin* main_frame_origin) {
   ResetPluginData();
   main_frame_origin_ = main_frame_origin;
-  PluginListBuilder builder(&plugins_);
-  Platform::Current()->GetPluginList(
-      false, WebSecurityOrigin(main_frame_origin_), &builder);
 
-  for (PluginInfo* plugin_info : plugins_) {
-    for (MimeClassInfo* mime_class_info : plugin_info->mimes_)
-      mimes_.push_back(mime_class_info);
+  mojom::blink::PluginRegistryPtr registry;
+  Platform::Current()->GetInterfaceProvider()->GetInterface(
+      mojo::MakeRequest(&registry));
+  Vector<mojom::blink::PluginInfoPtr> plugins;
+  registry->GetPlugins(false, main_frame_origin_, &plugins);
+  for (const auto& plugin : plugins) {
+    auto* plugin_info =
+        new PluginInfo(plugin->name, FilePathToWebString(plugin->filename),
+                       plugin->description, plugin->background_color);
+    plugins_.push_back(plugin_info);
+    for (const auto& mime : plugin->mime_types) {
+      auto* mime_info =
+          new MimeClassInfo(mime->mime_type, mime->description, *plugin_info);
+      mime_info->extensions_ = mime->file_extensions;
+      plugin_info->AddMimeType(mime_info);
+      mimes_.push_back(mime_info);
+    }
   }
 
   std::sort(

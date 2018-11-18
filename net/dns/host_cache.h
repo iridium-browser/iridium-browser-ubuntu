@@ -22,10 +22,12 @@
 #include "net/base/expiring_cache.h"
 #include "net/base/net_export.h"
 #include "net/dns/dns_util.h"
+#include "net/dns/host_resolver_source.h"
 
 namespace base {
 class ListValue;
-}
+class TickClock;
+}  // namespace base
 
 namespace net {
 
@@ -33,28 +35,35 @@ namespace net {
 class NET_EXPORT HostCache {
  public:
   struct Key {
-    Key(const std::string& hostname, AddressFamily address_family,
-        HostResolverFlags host_resolver_flags)
+    Key(const std::string& hostname,
+        AddressFamily address_family,
+        HostResolverFlags host_resolver_flags,
+        HostResolverSource host_resolver_source = HostResolverSource::ANY)
         : hostname(hostname),
           address_family(address_family),
-          host_resolver_flags(host_resolver_flags) {}
+          host_resolver_flags(host_resolver_flags),
+          host_resolver_source(host_resolver_source) {}
 
     Key()
-        : address_family(ADDRESS_FAMILY_UNSPECIFIED), host_resolver_flags(0) {}
+        : address_family(ADDRESS_FAMILY_UNSPECIFIED),
+          host_resolver_flags(0),
+          host_resolver_source(HostResolverSource::ANY) {}
 
     bool operator<(const Key& other) const {
       // The order of comparisons of |Key| fields is arbitrary, thus
       // |address_family| and |host_resolver_flags| are compared before
       // |hostname| under assumption that integer comparisons are faster than
       // string comparisons.
-      return std::tie(address_family, host_resolver_flags, hostname) <
+      return std::tie(address_family, host_resolver_flags, hostname,
+                      host_resolver_source) <
              std::tie(other.address_family, other.host_resolver_flags,
-                      other.hostname);
+                      other.hostname, other.host_resolver_source);
     }
 
     std::string hostname;
     AddressFamily address_family;
     HostResolverFlags host_resolver_flags;
+    HostResolverSource host_resolver_source;
   };
 
   struct NET_EXPORT EntryStaleness {
@@ -194,6 +203,10 @@ class NET_EXPORT HostCache {
 
   void set_persistence_delegate(PersistenceDelegate* delegate);
 
+  void set_tick_clock_for_testing(const base::TickClock* tick_clock) {
+    tick_clock_ = tick_clock;
+  }
+
   // Empties the cache.
   void clear();
 
@@ -264,6 +277,8 @@ class NET_EXPORT HostCache {
   size_t restore_size_;
 
   PersistenceDelegate* delegate_;
+  // Shared tick clock, overridden for testing.
+  const base::TickClock* tick_clock_;
 
   THREAD_CHECKER(thread_checker_);
 

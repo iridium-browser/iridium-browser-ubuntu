@@ -28,6 +28,7 @@
 #include "net/test/embedded_test_server/http_response.h"
 #include "net/test/embedded_test_server/request_handler_util.h"
 #include "net/test/gtest_util.h"
+#include "net/test/test_with_scoped_task_environment.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_fetcher_delegate.h"
@@ -117,13 +118,13 @@ class TestConnectionListener
 
 class EmbeddedTestServerTest
     : public testing::TestWithParam<EmbeddedTestServer::Type>,
-      public URLFetcherDelegate {
+      public URLFetcherDelegate,
+      public WithScopedTaskEnvironment {
  public:
   EmbeddedTestServerTest()
       : num_responses_received_(0),
         num_responses_expected_(0),
-        io_thread_("io_thread") {
-  }
+        io_thread_("io_thread") {}
 
   void SetUp() override {
     base::Thread::Options thread_options;
@@ -146,7 +147,7 @@ class EmbeddedTestServerTest
   void OnURLFetchComplete(const URLFetcher* source) override {
     ++num_responses_received_;
     if (num_responses_received_ == num_responses_expected_)
-      base::RunLoop::QuitCurrentWhenIdleDeprecated();
+      std::move(quit_run_loop_).Run();
   }
 
   // Waits until the specified number of responses are received.
@@ -154,7 +155,9 @@ class EmbeddedTestServerTest
     num_responses_received_ = 0;
     num_responses_expected_ = num_responses;
     // Will be terminated in OnURLFetchComplete().
-    base::RunLoop().Run();
+    base::RunLoop run_loop;
+    quit_run_loop_ = run_loop.QuitClosure();
+    run_loop.Run();
   }
 
   // Handles |request| sent to |path| and returns the response per |content|,
@@ -187,6 +190,7 @@ class EmbeddedTestServerTest
   scoped_refptr<TestURLRequestContextGetter> request_context_getter_;
   TestConnectionListener connection_listener_;
   std::unique_ptr<EmbeddedTestServer> server_;
+  base::OnceClosure quit_run_loop_;
 };
 
 TEST_P(EmbeddedTestServerTest, GetBaseURL) {
@@ -250,7 +254,7 @@ TEST_P(EmbeddedTestServerTest, RegisterRequestHandler) {
 
 TEST_P(EmbeddedTestServerTest, ServeFilesFromDirectory) {
   base::FilePath src_dir;
-  ASSERT_TRUE(PathService::Get(base::DIR_SOURCE_ROOT, &src_dir));
+  ASSERT_TRUE(base::PathService::Get(base::DIR_SOURCE_ROOT, &src_dir));
   server_->ServeFilesFromDirectory(
       src_dir.AppendASCII("net").AppendASCII("data"));
   ASSERT_TRUE(server_->Start());
@@ -270,7 +274,7 @@ TEST_P(EmbeddedTestServerTest, ServeFilesFromDirectory) {
 
 TEST_P(EmbeddedTestServerTest, MockHeadersWithoutCRLF) {
   base::FilePath src_dir;
-  ASSERT_TRUE(PathService::Get(base::DIR_SOURCE_ROOT, &src_dir));
+  ASSERT_TRUE(base::PathService::Get(base::DIR_SOURCE_ROOT, &src_dir));
   server_->ServeFilesFromDirectory(
       src_dir.AppendASCII("net").AppendASCII("data").AppendASCII(
           "embedded_test_server"));
@@ -387,7 +391,7 @@ namespace {
 
 class CancelRequestDelegate : public TestDelegate {
  public:
-  CancelRequestDelegate() = default;
+  CancelRequestDelegate() { set_on_complete(base::DoNothing()); }
   ~CancelRequestDelegate() override = default;
 
   void OnResponseStarted(URLRequest* request, int net_error) override {
@@ -499,7 +503,8 @@ INSTANTIATE_TEST_CASE_P(EmbeddedTestServerTestInstantiation,
 typedef std::tuple<bool, bool, EmbeddedTestServer::Type> ThreadingTestParams;
 
 class EmbeddedTestServerThreadingTest
-    : public testing::TestWithParam<ThreadingTestParams> {};
+    : public testing::TestWithParam<ThreadingTestParams>,
+      public WithScopedTaskEnvironment {};
 
 class EmbeddedTestServerThreadingTestDelegate
     : public base::PlatformThread::Delegate,
@@ -529,7 +534,7 @@ class EmbeddedTestServerThreadingTestDelegate
     // Create the test server instance.
     EmbeddedTestServer server(type_);
     base::FilePath src_dir;
-    ASSERT_TRUE(PathService::Get(base::DIR_SOURCE_ROOT, &src_dir));
+    ASSERT_TRUE(base::PathService::Get(base::DIR_SOURCE_ROOT, &src_dir));
     ASSERT_TRUE(server.Start());
 
     // Make a request and wait for the reply.
@@ -541,8 +546,10 @@ class EmbeddedTestServerThreadingTestDelegate
                            TRAFFIC_ANNOTATION_FOR_TESTS);
     fetcher->SetRequestContext(
         new TestURLRequestContextGetter(loop->task_runner()));
+    base::RunLoop run_loop;
+    quit_run_loop_ = run_loop.QuitClosure();
     fetcher->Start();
-    base::RunLoop().Run();
+    run_loop.Run();
     fetcher.reset();
 
     // Shut down.
@@ -554,13 +561,15 @@ class EmbeddedTestServerThreadingTestDelegate
 
   // URLFetcherDelegate override.
   void OnURLFetchComplete(const URLFetcher* source) override {
-    base::RunLoop::QuitCurrentWhenIdleDeprecated();
+    std::move(quit_run_loop_).Run();
   }
 
  private:
   const bool message_loop_present_on_initialize_;
   const bool message_loop_present_on_shutdown_;
   const EmbeddedTestServer::Type type_;
+
+  base::OnceClosure quit_run_loop_;
 
   DISALLOW_COPY_AND_ASSIGN(EmbeddedTestServerThreadingTestDelegate);
 };

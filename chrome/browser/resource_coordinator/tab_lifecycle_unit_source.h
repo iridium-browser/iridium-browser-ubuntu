@@ -9,11 +9,15 @@
 
 #include "base/macros.h"
 #include "base/observer_list.h"
+#include "base/scoped_observer.h"
 #include "chrome/browser/resource_coordinator/lifecycle_unit_source_base.h"
+#include "chrome/browser/resource_coordinator/page_signal_receiver.h"
 #include "chrome/browser/ui/browser_list_observer.h"
 #include "chrome/browser/ui/browser_tab_strip_tracker.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 
+class PrefChangeRegistrar;
+class PrefService;
 class TabStripModel;
 
 namespace content {
@@ -22,15 +26,23 @@ class WebContents;
 
 namespace resource_coordinator {
 
+class InterventionPolicyDatabase;
+class TabLifecylesEnterprisePreferenceMonitor;
 class TabLifecycleObserver;
 class TabLifecycleUnitExternal;
+class UsageClock;
 
 // Creates and destroys LifecycleUnits as tabs are created and destroyed.
 class TabLifecycleUnitSource : public BrowserListObserver,
                                public LifecycleUnitSourceBase,
+                               public PageSignalObserver,
                                public TabStripModelObserver {
  public:
-  TabLifecycleUnitSource();
+  class TabLifecycleUnit;
+
+  explicit TabLifecycleUnitSource(
+      InterventionPolicyDatabase* intervention_policy_database,
+      UsageClock* usage_clock);
   ~TabLifecycleUnitSource() override;
 
   static TabLifecycleUnitSource* GetInstance();
@@ -48,12 +60,39 @@ class TabLifecycleUnitSource : public BrowserListObserver,
   // Pretend that |tab_strip| is the TabStripModel of the focused window.
   void SetFocusedTabStripModelForTesting(TabStripModel* tab_strip);
 
+  InterventionPolicyDatabase* intervention_policy_database() const {
+    return intervention_policy_database_;
+  }
+
+  // Returns the state of the tab lifecycles feature enterprise control. This
+  // returns true if the feature should be enabled, false otherwise.
+  bool tab_lifecycles_enterprise_policy() const {
+    return tab_lifecycles_enterprise_policy_;
+  }
+
+ protected:
   class TabLifecycleUnitHolder;
+
+  // LifecycleUnitSourceBase:
+  void OnFirstLifecycleUnitCreated() override;
+  void OnAllLifecycleUnitsDestroyed() override;
 
  private:
   friend class TabLifecycleUnitTest;
-
-  class TabLifecycleUnit;
+  friend class TabManagerTest;
+  FRIEND_TEST_ALL_PREFIXES(TabLifecycleUnitSourceTest,
+                           TabProactiveDiscardedByFrozenCallback);
+  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, TabManagerWasDiscarded);
+  FRIEND_TEST_ALL_PREFIXES(TabManagerTest,
+                           TabManagerWasDiscardedCrossSiteSubFrame);
+  FRIEND_TEST_ALL_PREFIXES(TabManagerTest,
+                           ProactiveFastShutdownSingleTabProcess);
+  FRIEND_TEST_ALL_PREFIXES(TabManagerTest,
+                           ProactiveFastShutdownSharedTabProcess);
+  FRIEND_TEST_ALL_PREFIXES(TabManagerTest,
+                           ProactiveFastShutdownWithUnloadHandler);
+  FRIEND_TEST_ALL_PREFIXES(TabManagerTest,
+                           ProactiveFastShutdownWithBeforeunloadHandler);
 
   // Returns the TabLifecycleUnit instance associated with |web_contents|, or
   // nullptr if |web_contents| isn't a tab.
@@ -72,20 +111,20 @@ class TabLifecycleUnitSource : public BrowserListObserver,
   // TabInsertedAt() is called.
   void UpdateFocusedTabTo(TabLifecycleUnit* new_focused_lifecycle_unit);
 
-  // TabStripModelObserver:
-  void TabInsertedAt(TabStripModel* tab_strip_model,
+  // Methods called by OnTabStripModelChanged()
+  void OnTabInserted(TabStripModel* tab_strip_model,
                      content::WebContents* contents,
-                     int index,
-                     bool foreground) override;
-  void TabDetachedAt(content::WebContents* contents, int index) override;
-  void ActiveTabChanged(content::WebContents* old_contents,
-                        content::WebContents* new_contents,
-                        int index,
-                        int reason) override;
-  void TabReplacedAt(TabStripModel* tab_strip_model,
-                     content::WebContents* old_contents,
-                     content::WebContents* new_contents,
-                     int index) override;
+                     bool foreground);
+  void OnTabDetached(content::WebContents* contents);
+  void OnTabReplaced(content::WebContents* old_contents,
+                     content::WebContents* new_contents);
+
+  // TabStripModelObserver:
+  void OnTabStripModelChanged(
+      TabStripModel* tab_strip_model,
+      const TabStripModelChange& change,
+      const TabStripSelectionChange& selection) override;
+
   void TabChangedAt(content::WebContents* contents,
                     int index,
                     TabChangeType change_type) override;
@@ -93,6 +132,14 @@ class TabLifecycleUnitSource : public BrowserListObserver,
   // BrowserListObserver:
   void OnBrowserSetLastActive(Browser* browser) override;
   void OnBrowserNoLongerActive(Browser* browser) override;
+
+  // PageSignalObserver:
+  void OnLifecycleStateChanged(content::WebContents* web_contents,
+                               const PageNavigationIdentity& page_navigation_id,
+                               mojom::LifecycleState state) override;
+
+  // Callback for TabLifecyclesEnterprisePreferenceMonitor.
+  void SetTabLifecyclesEnterprisePolicy(bool enabled);
 
   // Tracks the BrowserList and all TabStripModels.
   BrowserTabStripTracker browser_tab_strip_tracker_;
@@ -105,9 +152,50 @@ class TabLifecycleUnitSource : public BrowserListObserver,
 
   // Observers notified when the discarded or auto-discardable state of a tab
   // changes.
-  base::ObserverList<TabLifecycleObserver> tab_lifecycle_observers_;
+  base::ObserverList<TabLifecycleObserver>::Unchecked tab_lifecycle_observers_;
+
+  // PageSignalReceiver is a static singleton so it outlives this object.
+  ScopedObserver<PageSignalReceiver, PageSignalObserver>
+      page_signal_receiver_observer_;
+
+  // The intervention policy database used to assist freezing/discarding
+  // decisions.
+  InterventionPolicyDatabase* intervention_policy_database_;
+
+  // A clock that advances when Chrome is in use.
+  UsageClock* const usage_clock_;
+
+  // The enterprise policy for overriding the tab lifecycles feature.
+  bool tab_lifecycles_enterprise_policy_ = true;
+
+  // In official production builds this monitors policy settings and reflects
+  // them in |tab_lifecycles_enterprise_policy_|.
+  std::unique_ptr<TabLifecylesEnterprisePreferenceMonitor>
+      tab_lifecycles_enterprise_preference_monitor_;
 
   DISALLOW_COPY_AND_ASSIGN(TabLifecycleUnitSource);
+};
+
+// Helper class used for getting and monitoring enterprise-policy controlled
+// preferences that can control the tab lifecycles feature. Exposed for testing.
+class TabLifecylesEnterprisePreferenceMonitor {
+ public:
+  using OnPreferenceChangedCallback = base::RepeatingCallback<void(bool)>;
+
+  // Creates a preference monitor that monitors the provided PrefService. When
+  // the preference is initially checked or changed its value is provided via
+  // the provided callback.
+  TabLifecylesEnterprisePreferenceMonitor(PrefService* pref_service,
+                                          OnPreferenceChangedCallback callback);
+
+  ~TabLifecylesEnterprisePreferenceMonitor();
+
+ private:
+  void GetPref();
+
+  PrefService* pref_service_;
+  OnPreferenceChangedCallback callback_;
+  std::unique_ptr<PrefChangeRegistrar> pref_change_registrar_;
 };
 
 }  // namespace resource_coordinator

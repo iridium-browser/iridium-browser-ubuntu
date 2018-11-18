@@ -9,9 +9,9 @@
 #include "base/metrics/histogram_macros.h"
 #include "components/offline_pages/core/client_namespace_constants.h"
 #include "components/offline_pages/core/model/offline_page_model_utils.h"
-#include "components/offline_pages/core/offline_page_metadata_store_sql.h"
+#include "components/offline_pages/core/offline_page_metadata_store.h"
 #include "components/offline_pages/core/offline_store_utils.h"
-#include "sql/connection.h"
+#include "sql/database.h"
 #include "sql/statement.h"
 #include "sql/transaction.h"
 
@@ -23,13 +23,13 @@ namespace {
 
 void ReportAccessHistogram(int64_t offline_id,
                            base::Time access_time,
-                           sql::Connection* db) {
+                           sql::Database* db) {
   // Used as upper bound of PageAccessInterval histogram which is used for
   // evaluating how good the expiration period is. The expiration period of a
   // page will be longer than one year in extreme cases so it's good enough.
   const int kMinutesPerYear = base::TimeDelta::FromDays(365).InMinutes();
 
-  const char kSql[] =
+  static const char kSql[] =
       "SELECT client_namespace, last_access_time FROM " OFFLINE_PAGES_TABLE_NAME
       " WHERE offline_id = ?";
   sql::Statement statement(db->GetCachedStatement(SQL_FROM_HERE, kSql));
@@ -51,17 +51,14 @@ void ReportAccessHistogram(int64_t offline_id,
 
 bool MarkPageAccessedSync(const base::Time& access_time,
                           int64_t offline_id,
-                          sql::Connection* db) {
-  if (!db)
-    return false;
-
+                          sql::Database* db) {
   sql::Transaction transaction(db);
   if (!transaction.Begin())
     return false;
 
   ReportAccessHistogram(offline_id, access_time, db);
 
-  const char kSql[] =
+  static const char kSql[] =
       "UPDATE OR IGNORE " OFFLINE_PAGES_TABLE_NAME
       " SET last_access_time = ?, access_count = access_count + 1"
       " WHERE offline_id = ?";
@@ -76,7 +73,7 @@ bool MarkPageAccessedSync(const base::Time& access_time,
 
 }  // namespace
 
-MarkPageAccessedTask::MarkPageAccessedTask(OfflinePageMetadataStoreSQL* store,
+MarkPageAccessedTask::MarkPageAccessedTask(OfflinePageMetadataStore* store,
                                            int64_t offline_id,
                                            const base::Time& access_time)
     : store_(store),
@@ -92,7 +89,8 @@ void MarkPageAccessedTask::Run() {
   store_->Execute(
       base::BindOnce(&MarkPageAccessedSync, access_time_, offline_id_),
       base::BindOnce(&MarkPageAccessedTask::OnMarkPageAccessedDone,
-                     weak_ptr_factory_.GetWeakPtr()));
+                     weak_ptr_factory_.GetWeakPtr()),
+      false);
 }
 
 void MarkPageAccessedTask::OnMarkPageAccessedDone(bool result) {

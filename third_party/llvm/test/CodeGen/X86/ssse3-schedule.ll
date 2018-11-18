@@ -29,10 +29,11 @@ define <16 x i8> @test_pabsb(<16 x i8> %a0, <16 x i8> *%a1) {
 ;
 ; ATOM-LABEL: test_pabsb:
 ; ATOM:       # %bb.0:
-; ATOM-NEXT:    pabsb (%rdi), %xmm1 # sched: [1:1.00]
-; ATOM-NEXT:    pabsb %xmm0, %xmm0 # sched: [1:0.50]
-; ATOM-NEXT:    por %xmm0, %xmm1 # sched: [1:0.50]
-; ATOM-NEXT:    movdqa %xmm1, %xmm0 # sched: [1:0.50]
+; ATOM-NEXT:    pabsb %xmm0, %xmm1 # sched: [1:0.50]
+; ATOM-NEXT:    pabsb (%rdi), %xmm0 # sched: [1:1.00]
+; ATOM-NEXT:    por %xmm1, %xmm0 # sched: [1:0.50]
+; ATOM-NEXT:    nop # sched: [1:0.50]
+; ATOM-NEXT:    nop # sched: [1:0.50]
 ; ATOM-NEXT:    retq # sched: [79:39.50]
 ;
 ; SLM-LABEL: test_pabsb:
@@ -157,10 +158,11 @@ define <4 x i32> @test_pabsd(<4 x i32> %a0, <4 x i32> *%a1) {
 ;
 ; ATOM-LABEL: test_pabsd:
 ; ATOM:       # %bb.0:
-; ATOM-NEXT:    pabsd (%rdi), %xmm1 # sched: [1:1.00]
-; ATOM-NEXT:    pabsd %xmm0, %xmm0 # sched: [1:0.50]
-; ATOM-NEXT:    por %xmm0, %xmm1 # sched: [1:0.50]
-; ATOM-NEXT:    movdqa %xmm1, %xmm0 # sched: [1:0.50]
+; ATOM-NEXT:    pabsd %xmm0, %xmm1 # sched: [1:0.50]
+; ATOM-NEXT:    pabsd (%rdi), %xmm0 # sched: [1:1.00]
+; ATOM-NEXT:    por %xmm1, %xmm0 # sched: [1:0.50]
+; ATOM-NEXT:    nop # sched: [1:0.50]
+; ATOM-NEXT:    nop # sched: [1:0.50]
 ; ATOM-NEXT:    retq # sched: [79:39.50]
 ;
 ; SLM-LABEL: test_pabsd:
@@ -285,10 +287,11 @@ define <8 x i16> @test_pabsw(<8 x i16> %a0, <8 x i16> *%a1) {
 ;
 ; ATOM-LABEL: test_pabsw:
 ; ATOM:       # %bb.0:
-; ATOM-NEXT:    pabsw (%rdi), %xmm1 # sched: [1:1.00]
-; ATOM-NEXT:    pabsw %xmm0, %xmm0 # sched: [1:0.50]
-; ATOM-NEXT:    por %xmm0, %xmm1 # sched: [1:0.50]
-; ATOM-NEXT:    movdqa %xmm1, %xmm0 # sched: [1:0.50]
+; ATOM-NEXT:    pabsw %xmm0, %xmm1 # sched: [1:0.50]
+; ATOM-NEXT:    pabsw (%rdi), %xmm0 # sched: [1:1.00]
+; ATOM-NEXT:    por %xmm1, %xmm0 # sched: [1:0.50]
+; ATOM-NEXT:    nop # sched: [1:0.50]
+; ATOM-NEXT:    nop # sched: [1:0.50]
 ; ATOM-NEXT:    retq # sched: [79:39.50]
 ;
 ; SLM-LABEL: test_pabsw:
@@ -616,14 +619,14 @@ define <4 x i32> @test_phaddd(<4 x i32> %a0, <4 x i32> %a1, <4 x i32> *%a2) {
 ;
 ; ZNVER1-SSE-LABEL: test_phaddd:
 ; ZNVER1-SSE:       # %bb.0:
-; ZNVER1-SSE-NEXT:    phaddd %xmm1, %xmm0 # sched: [100:?]
-; ZNVER1-SSE-NEXT:    phaddd (%rdi), %xmm0 # sched: [100:?]
+; ZNVER1-SSE-NEXT:    phaddd %xmm1, %xmm0 # sched: [100:0.25]
+; ZNVER1-SSE-NEXT:    phaddd (%rdi), %xmm0 # sched: [100:0.25]
 ; ZNVER1-SSE-NEXT:    retq # sched: [1:0.50]
 ;
 ; ZNVER1-LABEL: test_phaddd:
 ; ZNVER1:       # %bb.0:
-; ZNVER1-NEXT:    vphaddd %xmm1, %xmm0, %xmm0 # sched: [100:?]
-; ZNVER1-NEXT:    vphaddd (%rdi), %xmm0, %xmm0 # sched: [100:?]
+; ZNVER1-NEXT:    vphaddd %xmm1, %xmm0, %xmm0 # sched: [100:0.25]
+; ZNVER1-NEXT:    vphaddd (%rdi), %xmm0, %xmm0 # sched: [100:0.25]
 ; ZNVER1-NEXT:    retq # sched: [1:0.50]
   %1 = call <4 x i32> @llvm.x86.ssse3.phadd.d.128(<4 x i32> %a0, <4 x i32> %a1)
   %2 = load <4 x i32>, <4 x i32> *%a2, align 16
@@ -725,14 +728,14 @@ define <8 x i16> @test_phaddsw(<8 x i16> %a0, <8 x i16> %a1, <8 x i16> *%a2) {
 ;
 ; ZNVER1-SSE-LABEL: test_phaddsw:
 ; ZNVER1-SSE:       # %bb.0:
-; ZNVER1-SSE-NEXT:    phaddsw %xmm1, %xmm0 # sched: [100:?]
-; ZNVER1-SSE-NEXT:    phaddsw (%rdi), %xmm0 # sched: [100:?]
+; ZNVER1-SSE-NEXT:    phaddsw %xmm1, %xmm0 # sched: [100:0.25]
+; ZNVER1-SSE-NEXT:    phaddsw (%rdi), %xmm0 # sched: [100:0.25]
 ; ZNVER1-SSE-NEXT:    retq # sched: [1:0.50]
 ;
 ; ZNVER1-LABEL: test_phaddsw:
 ; ZNVER1:       # %bb.0:
-; ZNVER1-NEXT:    vphaddsw %xmm1, %xmm0, %xmm0 # sched: [100:?]
-; ZNVER1-NEXT:    vphaddsw (%rdi), %xmm0, %xmm0 # sched: [100:?]
+; ZNVER1-NEXT:    vphaddsw %xmm1, %xmm0, %xmm0 # sched: [100:0.25]
+; ZNVER1-NEXT:    vphaddsw (%rdi), %xmm0, %xmm0 # sched: [100:0.25]
 ; ZNVER1-NEXT:    retq # sched: [1:0.50]
   %1 = call <8 x i16> @llvm.x86.ssse3.phadd.sw.128(<8 x i16> %a0, <8 x i16> %a1)
   %2 = load <8 x i16>, <8 x i16> *%a2, align 16
@@ -834,14 +837,14 @@ define <8 x i16> @test_phaddw(<8 x i16> %a0, <8 x i16> %a1, <8 x i16> *%a2) {
 ;
 ; ZNVER1-SSE-LABEL: test_phaddw:
 ; ZNVER1-SSE:       # %bb.0:
-; ZNVER1-SSE-NEXT:    phaddw %xmm1, %xmm0 # sched: [100:?]
-; ZNVER1-SSE-NEXT:    phaddw (%rdi), %xmm0 # sched: [100:?]
+; ZNVER1-SSE-NEXT:    phaddw %xmm1, %xmm0 # sched: [100:0.25]
+; ZNVER1-SSE-NEXT:    phaddw (%rdi), %xmm0 # sched: [100:0.25]
 ; ZNVER1-SSE-NEXT:    retq # sched: [1:0.50]
 ;
 ; ZNVER1-LABEL: test_phaddw:
 ; ZNVER1:       # %bb.0:
-; ZNVER1-NEXT:    vphaddw %xmm1, %xmm0, %xmm0 # sched: [100:?]
-; ZNVER1-NEXT:    vphaddw (%rdi), %xmm0, %xmm0 # sched: [100:?]
+; ZNVER1-NEXT:    vphaddw %xmm1, %xmm0, %xmm0 # sched: [100:0.25]
+; ZNVER1-NEXT:    vphaddw (%rdi), %xmm0, %xmm0 # sched: [100:0.25]
 ; ZNVER1-NEXT:    retq # sched: [1:0.50]
   %1 = call <8 x i16> @llvm.x86.ssse3.phadd.w.128(<8 x i16> %a0, <8 x i16> %a1)
   %2 = load <8 x i16>, <8 x i16> *%a2, align 16
@@ -943,14 +946,14 @@ define <4 x i32> @test_phsubd(<4 x i32> %a0, <4 x i32> %a1, <4 x i32> *%a2) {
 ;
 ; ZNVER1-SSE-LABEL: test_phsubd:
 ; ZNVER1-SSE:       # %bb.0:
-; ZNVER1-SSE-NEXT:    phsubd %xmm1, %xmm0 # sched: [100:?]
-; ZNVER1-SSE-NEXT:    phsubd (%rdi), %xmm0 # sched: [100:?]
+; ZNVER1-SSE-NEXT:    phsubd %xmm1, %xmm0 # sched: [100:0.25]
+; ZNVER1-SSE-NEXT:    phsubd (%rdi), %xmm0 # sched: [100:0.25]
 ; ZNVER1-SSE-NEXT:    retq # sched: [1:0.50]
 ;
 ; ZNVER1-LABEL: test_phsubd:
 ; ZNVER1:       # %bb.0:
-; ZNVER1-NEXT:    vphsubd %xmm1, %xmm0, %xmm0 # sched: [100:?]
-; ZNVER1-NEXT:    vphsubd (%rdi), %xmm0, %xmm0 # sched: [100:?]
+; ZNVER1-NEXT:    vphsubd %xmm1, %xmm0, %xmm0 # sched: [100:0.25]
+; ZNVER1-NEXT:    vphsubd (%rdi), %xmm0, %xmm0 # sched: [100:0.25]
 ; ZNVER1-NEXT:    retq # sched: [1:0.50]
   %1 = call <4 x i32> @llvm.x86.ssse3.phsub.d.128(<4 x i32> %a0, <4 x i32> %a1)
   %2 = load <4 x i32>, <4 x i32> *%a2, align 16
@@ -1052,14 +1055,14 @@ define <8 x i16> @test_phsubsw(<8 x i16> %a0, <8 x i16> %a1, <8 x i16> *%a2) {
 ;
 ; ZNVER1-SSE-LABEL: test_phsubsw:
 ; ZNVER1-SSE:       # %bb.0:
-; ZNVER1-SSE-NEXT:    phsubsw %xmm1, %xmm0 # sched: [100:?]
-; ZNVER1-SSE-NEXT:    phsubsw (%rdi), %xmm0 # sched: [100:?]
+; ZNVER1-SSE-NEXT:    phsubsw %xmm1, %xmm0 # sched: [100:0.25]
+; ZNVER1-SSE-NEXT:    phsubsw (%rdi), %xmm0 # sched: [100:0.25]
 ; ZNVER1-SSE-NEXT:    retq # sched: [1:0.50]
 ;
 ; ZNVER1-LABEL: test_phsubsw:
 ; ZNVER1:       # %bb.0:
-; ZNVER1-NEXT:    vphsubsw %xmm1, %xmm0, %xmm0 # sched: [100:?]
-; ZNVER1-NEXT:    vphsubsw (%rdi), %xmm0, %xmm0 # sched: [100:?]
+; ZNVER1-NEXT:    vphsubsw %xmm1, %xmm0, %xmm0 # sched: [100:0.25]
+; ZNVER1-NEXT:    vphsubsw (%rdi), %xmm0, %xmm0 # sched: [100:0.25]
 ; ZNVER1-NEXT:    retq # sched: [1:0.50]
   %1 = call <8 x i16> @llvm.x86.ssse3.phsub.sw.128(<8 x i16> %a0, <8 x i16> %a1)
   %2 = load <8 x i16>, <8 x i16> *%a2, align 16
@@ -1161,14 +1164,14 @@ define <8 x i16> @test_phsubw(<8 x i16> %a0, <8 x i16> %a1, <8 x i16> *%a2) {
 ;
 ; ZNVER1-SSE-LABEL: test_phsubw:
 ; ZNVER1-SSE:       # %bb.0:
-; ZNVER1-SSE-NEXT:    phsubw %xmm1, %xmm0 # sched: [100:?]
-; ZNVER1-SSE-NEXT:    phsubw (%rdi), %xmm0 # sched: [100:?]
+; ZNVER1-SSE-NEXT:    phsubw %xmm1, %xmm0 # sched: [100:0.25]
+; ZNVER1-SSE-NEXT:    phsubw (%rdi), %xmm0 # sched: [100:0.25]
 ; ZNVER1-SSE-NEXT:    retq # sched: [1:0.50]
 ;
 ; ZNVER1-LABEL: test_phsubw:
 ; ZNVER1:       # %bb.0:
-; ZNVER1-NEXT:    vphsubw %xmm1, %xmm0, %xmm0 # sched: [100:?]
-; ZNVER1-NEXT:    vphsubw (%rdi), %xmm0, %xmm0 # sched: [100:?]
+; ZNVER1-NEXT:    vphsubw %xmm1, %xmm0, %xmm0 # sched: [100:0.25]
+; ZNVER1-NEXT:    vphsubw (%rdi), %xmm0, %xmm0 # sched: [100:0.25]
 ; ZNVER1-NEXT:    retq # sched: [1:0.50]
   %1 = call <8 x i16> @llvm.x86.ssse3.phsub.w.128(<8 x i16> %a0, <8 x i16> %a1)
   %2 = load <8 x i16>, <8 x i16> *%a2, align 16
@@ -1246,13 +1249,13 @@ define <8 x i16> @test_pmaddubsw(<16 x i8> %a0, <16 x i8> %a1, <16 x i8> *%a2) {
 ;
 ; SKX-SSE-LABEL: test_pmaddubsw:
 ; SKX-SSE:       # %bb.0:
-; SKX-SSE-NEXT:    pmaddubsw %xmm1, %xmm0 # sched: [4:0.33]
+; SKX-SSE-NEXT:    pmaddubsw %xmm1, %xmm0 # sched: [4:0.50]
 ; SKX-SSE-NEXT:    pmaddubsw (%rdi), %xmm0 # sched: [10:0.50]
 ; SKX-SSE-NEXT:    retq # sched: [7:1.00]
 ;
 ; SKX-LABEL: test_pmaddubsw:
 ; SKX:       # %bb.0:
-; SKX-NEXT:    vpmaddubsw %xmm1, %xmm0, %xmm0 # sched: [4:0.33]
+; SKX-NEXT:    vpmaddubsw %xmm1, %xmm0, %xmm0 # sched: [4:0.50]
 ; SKX-NEXT:    vpmaddubsw (%rdi), %xmm0, %xmm0 # sched: [10:0.50]
 ; SKX-NEXT:    retq # sched: [7:1.00]
 ;
@@ -1356,13 +1359,13 @@ define <8 x i16> @test_pmulhrsw(<8 x i16> %a0, <8 x i16> %a1, <8 x i16> *%a2) {
 ;
 ; SKX-SSE-LABEL: test_pmulhrsw:
 ; SKX-SSE:       # %bb.0:
-; SKX-SSE-NEXT:    pmulhrsw %xmm1, %xmm0 # sched: [4:0.33]
+; SKX-SSE-NEXT:    pmulhrsw %xmm1, %xmm0 # sched: [4:0.50]
 ; SKX-SSE-NEXT:    pmulhrsw (%rdi), %xmm0 # sched: [10:0.50]
 ; SKX-SSE-NEXT:    retq # sched: [7:1.00]
 ;
 ; SKX-LABEL: test_pmulhrsw:
 ; SKX:       # %bb.0:
-; SKX-NEXT:    vpmulhrsw %xmm1, %xmm0, %xmm0 # sched: [4:0.33]
+; SKX-NEXT:    vpmulhrsw %xmm1, %xmm0, %xmm0 # sched: [4:0.50]
 ; SKX-NEXT:    vpmulhrsw (%rdi), %xmm0, %xmm0 # sched: [10:0.50]
 ; SKX-NEXT:    retq # sched: [7:1.00]
 ;

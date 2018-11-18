@@ -11,10 +11,12 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/post_task.h"
 #include "build/build_config.h"
 #include "content/browser/gpu/compositor_util.h"
 #include "content/browser/gpu/gpu_data_manager_impl.h"
 #include "content/browser/gpu/gpu_process_host.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "gpu/config/gpu_feature_type.h"
 #include "gpu/config/gpu_info.h"
 #include "gpu/config/gpu_switches.h"
@@ -33,7 +35,8 @@ using GetInfoCallback = SystemInfo::Backend::GetInfoCallback;
 
 // Give the GPU process a few seconds to provide GPU info.
 // Linux Debug builds need more time -- see Issue 796437.
-#if defined(OS_LINUX) && !defined(NDEBUG)
+// Windows builds need more time -- see Issue 873112.
+#if (defined(OS_LINUX) && !defined(NDEBUG)) || defined(OS_WIN)
 const int kGPUInfoWatchdogTimeoutMs = 20000;
 #else
 const int kGPUInfoWatchdogTimeoutMs = 5000;
@@ -82,6 +85,14 @@ class AuxGPUInfoEnumerator : public gpu::GPUInfo::Enumerator {
   void BeginVideoEncodeAcceleratorSupportedProfile() override {}
 
   void EndVideoEncodeAcceleratorSupportedProfile() override {}
+
+  void BeginOverlayCapability() override {}
+
+  void EndOverlayCapability() override {}
+
+  void BeginDx12VulkanVersionInfo() override {}
+
+  void EndDx12VulkanVersionInfo() override {}
 
   void BeginAuxAttributes() override {
     in_aux_attributes_ = true;
@@ -159,8 +170,8 @@ class SystemInfoHandlerGpuObserver : public content::GpuDataManagerObserver {
       std::unique_ptr<GetInfoCallback> callback)
       : callback_(std::move(callback)),
         weak_factory_(this) {
-    BrowserThread::PostDelayedTask(
-        BrowserThread::UI, FROM_HERE,
+    base::PostDelayedTaskWithTraits(
+        FROM_HERE, {BrowserThread::UI},
         base::BindOnce(&SystemInfoHandlerGpuObserver::ObserverWatchdogCallback,
                        weak_factory_.GetWeakPtr()),
         base::TimeDelta::FromMilliseconds(kGPUInfoWatchdogTimeoutMs));
@@ -184,7 +195,8 @@ class SystemInfoHandlerGpuObserver : public content::GpuDataManagerObserver {
     // TODO(zmo): CHECK everywhere once https://crbug.com/796386 is fixed.
     gpu::GpuFeatureInfo gpu_feature_info =
         gpu::ComputeGpuFeatureInfoWithHardwareAccelerationDisabled();
-    GpuDataManagerImpl::GetInstance()->UpdateGpuFeatureInfo(gpu_feature_info);
+    GpuDataManagerImpl::GetInstance()->UpdateGpuFeatureInfo(gpu_feature_info,
+                                                            base::nullopt);
     UnregisterAndSendResponse();
 #else
     CHECK(false) << "Gathering system GPU info took more than 5 seconds.";

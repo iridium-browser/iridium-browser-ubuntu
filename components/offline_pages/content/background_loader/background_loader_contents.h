@@ -71,7 +71,7 @@ class BackgroundLoaderContents : public content::WebContentsDelegate {
       content::SessionStorageNamespace* session_storage_namespace) override;
 
   void AddNewContents(content::WebContents* source,
-                      content::WebContents* new_contents,
+                      std::unique_ptr<content::WebContents> new_contents,
                       WindowOpenDisposition disposition,
                       const gfx::Rect& initial_rect,
                       bool user_gesture,
@@ -84,7 +84,7 @@ class BackgroundLoaderContents : public content::WebContentsDelegate {
   void RequestMediaAccessPermission(
       content::WebContents* contents,
       const content::MediaStreamRequest& request,
-      const content::MediaResponseCallback& callback) override;
+      content::MediaResponseCallback callback) override;
   bool CheckMediaAccessPermission(content::RenderFrameHost* render_frame_host,
                                   const GURL& security_origin,
                                   content::MediaStreamType type) override;

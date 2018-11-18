@@ -124,6 +124,8 @@
     return;
 
   if (_mainTabModel) {
+    breakpad::StopMonitoringTabStateForTabModel(_mainTabModel);
+    breakpad::StopMonitoringURLsForTabModel(_mainTabModel);
     [_mainTabModel browserStateDestroyed];
     if (_tabModelObserver) {
       [_mainTabModel removeObserver:_tabModelObserver];
@@ -173,6 +175,7 @@
     return;
 
   if (_otrTabModel) {
+    breakpad::StopMonitoringTabStateForTabModel(_otrTabModel);
     [_otrTabModel browserStateDestroyed];
     if (_tabModelObserver) {
       [_otrTabModel removeObserver:_tabModelObserver];
@@ -218,6 +221,11 @@
   return self.currentBVC.browserState;
 }
 
+- (void)haltAllTabs {
+  [self.mainTabModel haltAllTabs];
+  [self.otrTabModel haltAllTabs];
+}
+
 - (void)cleanDeviceSharingManager {
   [self.deviceSharingManager updateBrowserState:NULL];
 }
@@ -252,7 +260,7 @@
   [self.deviceSharingManager updateActiveURL:activeURL];
 }
 
-- (void)deleteIncognitoTabModelState {
+- (void)destroyAndRebuildIncognitoTabModel {
   // It is theoretically possible that a Tab has been added to |_otrTabModel|
   // since the deletion has been scheduled. It is unlikely to happen for real
   // because it would require superhuman speed.
@@ -303,6 +311,9 @@
 
   [_mainTabModel removeObserver:self];
   [_otrTabModel removeObserver:self];
+
+  // Disconnect the DeviceSharingManager.
+  [self cleanDeviceSharingManager];
 
   // Stop URL monitoring of the main tab model.
   breakpad::StopMonitoringURLsForTabModel(_mainTabModel);

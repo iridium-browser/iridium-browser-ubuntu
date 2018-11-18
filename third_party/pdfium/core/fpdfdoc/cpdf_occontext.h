@@ -17,12 +17,12 @@ class CPDF_Dictionary;
 class CPDF_Document;
 class CPDF_PageObject;
 
-class CPDF_OCContext : public Retainable {
+class CPDF_OCContext final : public Retainable {
  public:
+  enum UsageType { View = 0, Design, Print, Export };
+
   template <typename T, typename... Args>
   friend RetainPtr<T> pdfium::MakeRetain(Args&&... args);
-
-  enum UsageType { View = 0, Design, Print, Export };
 
   bool CheckOCGVisible(const CPDF_Dictionary* pOCGDict);
   bool CheckObjectVisible(const CPDF_PageObject* pObj);
@@ -35,7 +35,7 @@ class CPDF_OCContext : public Retainable {
                               const CPDF_Dictionary* pOCGDict) const;
   bool LoadOCGState(const CPDF_Dictionary* pOCGDict) const;
   bool GetOCGVisible(const CPDF_Dictionary* pOCGDict);
-  bool GetOCGVE(CPDF_Array* pExpression, int nLevel);
+  bool GetOCGVE(const CPDF_Array* pExpression, int nLevel);
   bool LoadOCMDState(const CPDF_Dictionary* pOCMDDict);
 
   UnownedPtr<CPDF_Document> const m_pDocument;

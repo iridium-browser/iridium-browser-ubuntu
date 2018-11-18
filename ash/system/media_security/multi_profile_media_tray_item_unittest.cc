@@ -4,8 +4,9 @@
 
 #include "ash/system/media_security/multi_profile_media_tray_item.h"
 
-#include "ash/ash_view_ids.h"
 #include "ash/media_controller.h"
+#include "ash/public/cpp/ash_features.h"
+#include "ash/public/cpp/ash_view_ids.h"
 #include "ash/public/interfaces/media.mojom.h"
 #include "ash/session/session_controller.h"
 #include "ash/session/test_session_controller_client.h"
@@ -14,8 +15,8 @@
 #include "ash/system/status_area_widget_test_helper.h"
 #include "ash/system/tray/system_tray.h"
 #include "ash/system/tray/system_tray_bubble.h"
+#include "ash/system/tray/tray_bubble_view.h"
 #include "ash/test/ash_test_base.h"
-#include "ui/views/bubble/tray_bubble_view.h"
 
 namespace ash {
 
@@ -27,10 +28,13 @@ class MultiProfileMediaTrayItemTest : public AshTestBase {
   void SetMediaCaptureState(mojom::MediaCaptureState state) {
     // Create the fake update.
     SessionController* controller = Shell::Get()->session_controller();
-    std::vector<mojom::MediaCaptureState> v;
-    for (int i = 0; i < controller->NumberOfLoggedInUsers(); ++i)
-      v.push_back(state);
-    Shell::Get()->media_controller()->NotifyCaptureState(v);
+    base::flat_map<AccountId, mojom::MediaCaptureState> capture_states;
+    for (int i = 0; i < controller->NumberOfLoggedInUsers(); ++i) {
+      capture_states.emplace(
+          controller->GetUserSession(i)->user_info->account_id, state);
+    }
+    Shell::Get()->media_controller()->NotifyCaptureState(
+        std::move(capture_states));
   }
 
  private:
@@ -38,6 +42,11 @@ class MultiProfileMediaTrayItemTest : public AshTestBase {
 };
 
 TEST_F(MultiProfileMediaTrayItemTest, NotifyMediaCaptureChange) {
+  // TODO(tetsui): Remove the test after UnifiedSystemTray launch.
+  // https://crbug.com/847104
+  if (features::IsSystemTrayUnifiedEnabled())
+    return;
+
   GetSessionControllerClient()->CreatePredefinedUserSessions(2);
 
   SystemTray* system_tray = GetPrimarySystemTray();

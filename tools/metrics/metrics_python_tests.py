@@ -8,7 +8,7 @@ import sys
 
 THIS_DIR = os.path.abspath(os.path.dirname(__file__))
 SRC_DIR = os.path.dirname(os.path.dirname(THIS_DIR))
-TYP_DIR = os.path.join(SRC_DIR, 'third_party', 'typ')
+TYP_DIR = os.path.join(SRC_DIR, 'third_party', 'catapult', 'third_party', 'typ')
 
 if not TYP_DIR in sys.path:
     sys.path.insert(0, TYP_DIR)
@@ -22,7 +22,9 @@ def resolve(*paths):
 sys.exit(typ.main(tests=resolve(
    'actions/extract_actions_test.py',
    'histograms/generate_expired_histograms_array_unittest.py',
-   'ukm/pretty_print_test.py',
+   'histograms/pretty_print_test.py',
+   'rappor/rappor_model_test.py',
+   'ukm/ukm_model_test.py',
    "../json_comment_eater/json_comment_eater_test.py",
    "../json_to_struct/element_generator_test.py",
    "../json_to_struct/struct_generator_test.py",

@@ -7,7 +7,6 @@
 
 #include <string>
 
-#include "base/at_exit.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
@@ -53,6 +52,7 @@
 #endif
 
 #if defined(OS_ANDROID)
+#include "chrome/browser/download/download_prompt_status.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "components/infobars/core/infobar.h"
 #include "components/infobars/core/infobar_delegate.h"
@@ -164,6 +164,12 @@ class TestChromeDownloadManagerDelegate : public ChromeDownloadManagerDelegate {
         FROM_HERE, base::BindOnce(callback, result, path_to_return));
   }
 
+#if defined(OS_ANDROID)
+  void OnDownloadCanceled(
+      download::DownloadItem* download,
+      DownloadController::DownloadCancelReason reason) override {}
+#endif
+
   MOCK_METHOD5(
       MockReserveVirtualPath,
       base::FilePath(download::DownloadItem*,
@@ -250,8 +256,6 @@ class ChromeDownloadManagerDelegateTest
   void GetNextId(uint32_t next_id) { download_ids_.emplace_back(next_id); }
 
  private:
-  // Resets the global cached DefaultDownloadDirectory instance.
-  base::ShadowingAtExitManager at_exit_manager_;
   base::ScopedPathOverride download_dir_override_{
       chrome::DIR_DEFAULT_DOWNLOADS};
   sync_preferences::TestingPrefServiceSyncable* pref_service_;
@@ -266,6 +270,7 @@ ChromeDownloadManagerDelegateTest::ChromeDownloadManagerDelegateTest()
 }
 
 void ChromeDownloadManagerDelegateTest::SetUp() {
+  DownloadPrefs::ReinitializeDefaultDownloadDirectoryForTesting();
   ChromeRenderViewHostTestHarness::SetUp();
 
   CHECK(profile());
@@ -275,6 +280,11 @@ void ChromeDownloadManagerDelegateTest::SetUp() {
   delegate_->SetDownloadManager(download_manager_.get());
   pref_service_ = profile()->GetTestingPrefService();
   web_contents()->SetDelegate(&web_contents_delegate_);
+
+#if defined(OS_ANDROID)
+  pref_service_->SetInteger(prefs::kPromptForDownloadAndroid,
+                            static_cast<int>(DownloadPromptStatus::DONT_SHOW));
+#endif
 }
 
 void ChromeDownloadManagerDelegateTest::TearDown() {
@@ -377,7 +387,7 @@ bool ChromeDownloadManagerDelegateTest::CheckForFileExistence(
 base::FilePath ChromeDownloadManagerDelegateTest::GetDefaultDownloadPath()
     const {
   base::FilePath path;
-  CHECK(PathService::Get(chrome::DIR_DEFAULT_DOWNLOADS, &path));
+  CHECK(base::PathService::Get(chrome::DIR_DEFAULT_DOWNLOADS, &path));
   return path;
 }
 
@@ -613,6 +623,67 @@ TEST_F(ChromeDownloadManagerDelegateTest, BlockedByPolicy) {
             result.interrupt_reason);
 
   VerifyAndClearExpectations();
+}
+
+TEST_F(ChromeDownloadManagerDelegateTest, BlockedByHttpPolicy_HttpTarget) {
+  // Tests blocking unsafe downloads when the download target is over HTTP,
+  // using the default mime-type matching policy.
+  const GURL kUrl("http://example.com/foo");
+  const GURL kReferrerUrl("https://example.org/");
+  const std::string kMimeType("application/vnd.microsoft.portable-executable");
+  std::vector<GURL> kUrlChain;
+  kUrlChain.push_back(kReferrerUrl);
+
+  std::unique_ptr<download::MockDownloadItem> download_item =
+      CreateActiveDownloadItem(0);
+  EXPECT_CALL(*download_item, GetURL()).WillRepeatedly(ReturnRef(kUrl));
+  EXPECT_CALL(*download_item, GetUrlChain())
+      .WillRepeatedly(ReturnRef(kUrlChain));
+  EXPECT_CALL(*download_item, GetMimeType()).WillRepeatedly(Return(kMimeType));
+  DetermineDownloadTargetResult result;
+
+  {
+    // Test default mime-type filter.
+    base::test::ScopedFeatureList feature_list;
+    feature_list.InitAndEnableFeature(features::kDisallowUnsafeHttpDownloads);
+    DetermineDownloadTarget(download_item.get(), &result);
+    EXPECT_EQ(download::DOWNLOAD_INTERRUPT_REASON_FILE_BLOCKED,
+              result.interrupt_reason);
+  }
+  {
+    // Test mime-type filter override.
+    base::test::ScopedFeatureList feature_list;
+    feature_list.InitAndEnableFeatureWithParameters(
+        features::kDisallowUnsafeHttpDownloads,
+        {{"MimeTypeList", "application/pdf,image/,application/postscript"}});
+    DetermineDownloadTarget(download_item.get(), &result);
+    EXPECT_EQ(download::DOWNLOAD_INTERRUPT_REASON_NONE,
+              result.interrupt_reason);
+  }
+}
+
+TEST_F(ChromeDownloadManagerDelegateTest, BlockedByHttpPolicy_HttpChain) {
+  // Tests blocking unsafe downloads when a step in the referrer chain is HTTP,
+  // using the default mime-type matching policy.
+  const GURL kUrl("https://example.com/foo");
+  const GURL kReferrerUrl("http://example.org/");
+  const std::string kMimeType("application/vnd.microsoft.portable-executable");
+  std::vector<GURL> kUrlChain;
+  kUrlChain.push_back(kReferrerUrl);
+
+  std::unique_ptr<download::MockDownloadItem> download_item =
+      CreateActiveDownloadItem(0);
+  EXPECT_CALL(*download_item, GetURL()).WillRepeatedly(ReturnRef(kUrl));
+  EXPECT_CALL(*download_item, GetUrlChain())
+      .WillRepeatedly(ReturnRef(kUrlChain));
+  EXPECT_CALL(*download_item, GetMimeType()).WillRepeatedly(Return(kMimeType));
+
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeature(features::kDisallowUnsafeHttpDownloads);
+  DetermineDownloadTargetResult result;
+  DetermineDownloadTarget(download_item.get(), &result);
+  EXPECT_EQ(download::DOWNLOAD_INTERRUPT_REASON_FILE_BLOCKED,
+            result.interrupt_reason);
 }
 
 TEST_F(ChromeDownloadManagerDelegateTest, WithoutHistoryDbNextId) {
@@ -987,14 +1058,18 @@ class TestDownloadLocationDialogBridge : public DownloadLocationDialogBridge {
   TestDownloadLocationDialogBridge() {}
 
   // DownloadLocationDialogBridge implementation.
-  void ShowDialog(gfx::NativeWindow native_window,
-                  DownloadLocationDialogType dialog_type,
-                  const base::FilePath& suggested_path,
-                  const DownloadTargetDeterminerDelegate::ConfirmationCallback&
-                      callback) override {
+  void ShowDialog(
+      gfx::NativeWindow native_window,
+      int64_t total_bytes,
+      DownloadLocationDialogType dialog_type,
+      const base::FilePath& suggested_path,
+      DownloadLocationDialogBridge::LocationCallback callback) override {
     dialog_shown_count_++;
     dialog_type_ = dialog_type;
-    callback.Run(DownloadConfirmationResult::CANCELED, base::FilePath());
+    if (callback) {
+      std::move(callback).Run(DownloadLocationDialogResult::USER_CANCELED,
+                              base::FilePath());
+    }
   }
 
   void OnComplete(
@@ -1029,6 +1104,10 @@ class TestDownloadLocationDialogBridge : public DownloadLocationDialogBridge {
 }  // namespace
 
 TEST_F(ChromeDownloadManagerDelegateTest, RequestConfirmation_Android) {
+  // TODO(xingliu): Delete this test when download location change feature
+  // flag is deleted.
+  base::test::ScopedFeatureList scoped_list;
+  scoped_list.InitAndDisableFeature(features::kDownloadsLocationChange);
   EXPECT_FALSE(
       base::FeatureList::IsEnabled(features::kDownloadsLocationChange));
 
@@ -1124,6 +1203,10 @@ TEST_F(ChromeDownloadManagerDelegateTest,
   base::test::ScopedFeatureList scoped_list;
   scoped_list.InitAndEnableFeature(features::kDownloadsLocationChange);
   EXPECT_TRUE(base::FeatureList::IsEnabled(features::kDownloadsLocationChange));
+
+  profile()->GetTestingPrefService()->SetInteger(
+      prefs::kPromptForDownloadAndroid,
+      static_cast<int>(DownloadPromptStatus::SHOW_PREFERENCE));
 
   enum class WebContents { AVAILABLE, NONE };
   enum class ExpectPath { FULL, EMPTY };

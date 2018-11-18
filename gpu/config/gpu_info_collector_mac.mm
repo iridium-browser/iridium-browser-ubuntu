@@ -9,11 +9,12 @@
 
 namespace gpu {
 
-bool CollectContextGraphicsInfo(GPUInfo* gpu_info) {
+bool CollectContextGraphicsInfo(GPUInfo* gpu_info,
+                                const GpuPreferences& gpu_preferences) {
   DCHECK(gpu_info);
 
   TRACE_EVENT0("gpu", "gpu_info_collector::CollectGraphicsInfo");
-  return CollectGraphicsInfoGL(gpu_info);
+  return CollectGraphicsInfoGL(gpu_info, gpu_preferences);
 }
 
 bool CollectBasicGraphicsInfo(GPUInfo* gpu_info) {
@@ -23,19 +24,6 @@ bool CollectBasicGraphicsInfo(GPUInfo* gpu_info) {
   bool success = angle::GetSystemInfo(&system_info);
   FillGPUInfoFromSystemInfo(gpu_info, &system_info);
   return success;
-}
-
-void CollectDriverInfoGL(GPUInfo* gpu_info) {
-  DCHECK(gpu_info);
-
-  // Extract the OpenGL driver version string from the GL_VERSION string.
-  // Mac OpenGL drivers have the driver version
-  // at the end of the gl version string preceded by a dash.
-  // Use some jiggery-pokery to turn that utf8 string into a std::wstring.
-  size_t pos = gpu_info->gl_version.find_last_of('-');
-  if (pos == std::string::npos)
-    return;
-  gpu_info->driver_version = gpu_info->gl_version.substr(pos + 1);
 }
 
 }  // namespace gpu

@@ -12,30 +12,42 @@
 #include "ui/ozone/platform/wayland/wayland_object.h"
 #include "ui/platform_window/platform_window.h"
 #include "ui/platform_window/platform_window_delegate.h"
+#include "ui/platform_window/platform_window_handler/wm_move_resize_handler.h"
+
+namespace gfx {
+class PointF;
+}
 
 namespace ui {
 
 class BitmapCursorOzone;
+class OSExchangeData;
 class PlatformWindowDelegate;
 class WaylandConnection;
+class XDGPopupWrapper;
 class XDGSurfaceWrapper;
+
+struct PlatformWindowInitProperties;
 
 namespace {
 class XDGShellObjectFactory;
 }  // namespace
 
-class WaylandWindow : public PlatformWindow, public PlatformEventDispatcher {
+class WaylandWindow : public PlatformWindow,
+                      public PlatformEventDispatcher,
+                      public WmMoveResizeHandler {
  public:
   WaylandWindow(PlatformWindowDelegate* delegate,
-                WaylandConnection* connection,
-                const gfx::Rect& bounds);
+                WaylandConnection* connection);
   ~WaylandWindow() override;
 
   static WaylandWindow* FromSurface(wl_surface* surface);
 
-  bool Initialize();
+  bool Initialize(PlatformWindowInitProperties properties);
 
   wl_surface* surface() const { return surface_.get(); }
+  XDGSurfaceWrapper* xdg_surface() const { return xdg_surface_.get(); }
+  XDGPopupWrapper* xdg_popup() const { return xdg_popup_.get(); }
 
   // Apply the bounds specified in the most recent configure event. This should
   // be called after processing all pending events in the wayland connection.
@@ -48,8 +60,14 @@ class WaylandWindow : public PlatformWindow, public PlatformEventDispatcher {
   // Set whether this window has keyboard focus and should dispatch key events.
   void set_keyboard_focus(bool focus) { has_keyboard_focus_ = focus; }
 
+  bool has_keyboard_focus() const { return has_keyboard_focus_; }
+
   // Set whether this window has touch focus and should dispatch touch events.
   void set_touch_focus(bool focus) { has_touch_focus_ = focus; }
+
+  // Set a child of this window. It is very important in case of nested
+  // xdg_popups as long as they must be destroyed in the back order.
+  void set_child_window(WaylandWindow* window) { child_window_ = window; }
 
   // Set whether this window has an implicit grab (often referred to as capture
   // in Chrome code). Implicit grabs happen while a pointer is down.
@@ -57,6 +75,11 @@ class WaylandWindow : public PlatformWindow, public PlatformEventDispatcher {
   bool has_implicit_grab() const { return has_implicit_grab_; }
 
   bool is_active() const { return is_active_; }
+
+  // WmMoveResizeHandler
+  void DispatchHostWindowDragMovement(
+      int hittest,
+      const gfx::Point& pointer_location) override;
 
   // PlatformWindow
   void Show() override;
@@ -73,10 +96,13 @@ class WaylandWindow : public PlatformWindow, public PlatformEventDispatcher {
   void Maximize() override;
   void Minimize() override;
   void Restore() override;
+  PlatformWindowState GetPlatformWindowState() const override;
   void SetCursor(PlatformCursor cursor) override;
   void MoveCursorTo(const gfx::Point& location) override;
   void ConfineCursorToBounds(const gfx::Rect& bounds) override;
   PlatformImeController* GetPlatformImeController() override;
+  void SetRestoredBoundsInPixels(const gfx::Rect& bounds) override;
+  gfx::Rect GetRestoredBoundsInPixels() const override;
 
   // PlatformEventDispatcher
   bool CanDispatchEvent(const PlatformEvent& event) override;
@@ -90,27 +116,46 @@ class WaylandWindow : public PlatformWindow, public PlatformEventDispatcher {
 
   void OnCloseRequest();
 
+  void OnDragEnter(const gfx::PointF& point,
+                   std::unique_ptr<OSExchangeData> data,
+                   int operation);
+  int OnDragMotion(const gfx::PointF& point, uint32_t time, int operation);
+  void OnDragDrop(std::unique_ptr<OSExchangeData> data);
+  void OnDragLeave();
+  void OnDragSessionClose(uint32_t dnd_action);
+
  private:
   bool IsMinimized() const;
   bool IsMaximized() const;
   bool IsFullscreen() const;
 
-  void SetPendingBounds(int32_t width, int32_t height);
-
+  // Creates a popup window, which is visible as a menu window.
+  void CreateXdgPopup();
   // Creates a surface window, which is visible as a main window.
   void CreateXdgSurface();
+  // Creates a subsurface window, to host tooltip's content.
+  void CreateTooltipSubSurface();
+
+  // Gets a parent window for this window.
+  WaylandWindow* GetParentWindow(gfx::AcceleratedWidget parent_widget);
+
+  WmMoveResizeHandler* AsWmMoveResizeHandler();
 
   PlatformWindowDelegate* delegate_;
   WaylandConnection* connection_;
+  WaylandWindow* parent_window_ = nullptr;
+  WaylandWindow* child_window_ = nullptr;
 
   // Creates xdg objects based on xdg shell version.
   std::unique_ptr<XDGShellObjectFactory> xdg_shell_objects_factory_;
 
   wl::Object<wl_surface> surface_;
+  wl::Object<wl_subsurface> tooltip_subsurface_;
 
-  // Wrapper around xdg v5 and xdg v6 objects. WaylandWindow doesn't
+  // Wrappers around xdg v5 and xdg v6 objects. WaylandWindow doesn't
   // know anything about the version.
   std::unique_ptr<XDGSurfaceWrapper> xdg_surface_;
+  std::unique_ptr<XDGPopupWrapper> xdg_popup_;
 
   // The current cursor bitmap (immutable).
   scoped_refptr<BitmapCursorOzone> bitmap_;
@@ -128,6 +173,9 @@ class WaylandWindow : public PlatformWindow, public PlatformEventDispatcher {
   ui::PlatformWindowState state_;
 
   bool is_active_ = false;
+  bool is_minimizing_ = false;
+
+  bool is_tooltip_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(WaylandWindow);
 };

@@ -17,6 +17,10 @@
 #include "public/fpdf_formfill.h"
 #include "third_party/base/ptr_util.h"
 
+#ifdef PDF_ENABLE_XFA
+#include "fpdfsdk/fpdfxfa/cpdfxfa_context.h"
+#endif  // PDF_ENABLE_XFA
+
 // These checks are here because core/ and public/ cannot depend on each other.
 static_assert(CPDF_DataAvail::DataError == PDF_DATA_ERROR,
               "CPDF_DataAvail::DataError value mismatch");
@@ -43,7 +47,7 @@ static_assert(CPDF_DataAvail::FormNotExist == PDF_FORM_NOTEXIST,
 
 namespace {
 
-class FPDF_FileAvailContext : public CPDF_DataAvail::FileAvail {
+class FPDF_FileAvailContext final : public CPDF_DataAvail::FileAvail {
  public:
   FPDF_FileAvailContext() : m_pfileAvail(nullptr) {}
   ~FPDF_FileAvailContext() override {}
@@ -59,12 +63,10 @@ class FPDF_FileAvailContext : public CPDF_DataAvail::FileAvail {
   FX_FILEAVAIL* m_pfileAvail;
 };
 
-class FPDF_FileAccessContext : public IFX_SeekableReadStream {
+class FPDF_FileAccessContext final : public IFX_SeekableReadStream {
  public:
   template <typename T, typename... Args>
   friend RetainPtr<T> pdfium::MakeRetain(Args&&... args);
-
-  ~FPDF_FileAccessContext() override {}
 
   void Set(FPDF_FILEACCESS* pFile) { m_pFileAccess = pFile; }
 
@@ -73,16 +75,17 @@ class FPDF_FileAccessContext : public IFX_SeekableReadStream {
 
   bool ReadBlock(void* buffer, FX_FILESIZE offset, size_t size) override {
     return !!m_pFileAccess->m_GetBlock(m_pFileAccess->m_Param, offset,
-                                       (uint8_t*)buffer, size);
+                                       static_cast<uint8_t*>(buffer), size);
   }
 
  private:
   FPDF_FileAccessContext() : m_pFileAccess(nullptr) {}
+  ~FPDF_FileAccessContext() override = default;
 
   FPDF_FILEACCESS* m_pFileAccess;
 };
 
-class FPDF_DownloadHintsContext : public CPDF_DataAvail::DownloadHints {
+class FPDF_DownloadHintsContext final : public CPDF_DataAvail::DownloadHints {
  public:
   explicit FPDF_DownloadHintsContext(FX_DOWNLOADHINTS* pDownloadHints) {
     m_pDownloadHints = pDownloadHints;
@@ -154,7 +157,12 @@ FPDFAvail_GetDocument(FPDF_AVAIL avail, FPDF_BYTESTRING password) {
     ProcessParseError(error);
     return nullptr;
   }
-  CheckUnSupportError(document.get(), FPDF_ERR_SUCCESS);
+
+#ifdef PDF_ENABLE_XFA
+  document->SetExtension(pdfium::MakeUnique<CPDFXFA_Context>(document.get()));
+#endif  // PDF_ENABLE_XFA
+
+  ReportUnsupportedFeatures(document.get());
   return FPDFDocumentFromCPDFDocument(document.release());
 }
 

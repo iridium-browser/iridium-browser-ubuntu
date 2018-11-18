@@ -9,7 +9,7 @@
 
 #include "xfa/fwl/theme/cfwl_widgettp.h"
 
-class CFWL_CaretTP : public CFWL_WidgetTP {
+class CFWL_CaretTP final : public CFWL_WidgetTP {
  public:
   CFWL_CaretTP();
   ~CFWL_CaretTP() override;
@@ -17,12 +17,12 @@ class CFWL_CaretTP : public CFWL_WidgetTP {
   // CFWL_WidgetTP
   void DrawBackground(CFWL_ThemeBackground* pParams) override;
 
- protected:
+ private:
   void DrawCaretBK(CXFA_Graphics* pGraphics,
                    uint32_t dwStates,
                    const CFX_RectF* pRect,
                    CXFA_GEColor* crFill,
-                   CFX_Matrix* pMatrix = nullptr);
+                   CFX_Matrix* pMatrix);
 };
 
 #endif  // XFA_FWL_THEME_CFWL_CARETTP_H_

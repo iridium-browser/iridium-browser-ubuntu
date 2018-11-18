@@ -6,6 +6,8 @@
 
 #include <gtest/gtest.h>
 
+#include <utility>
+
 namespace crazy {
 
 TEST(GetBaseNamePtr, Test) {
@@ -40,10 +42,37 @@ TEST(String, CopyConstructor) {
   EXPECT_STREQ(s2.c_str(), s1.c_str());
 }
 
+TEST(String, MoveConstructor) {
+  String s1("Source");
+  String s2(std::move(s1));
+
+  EXPECT_TRUE(s1.IsEmpty());
+  EXPECT_EQ(6U, s2.size());
+  EXPECT_STREQ(s2.c_str(), "Source");
+}
+
 TEST(String, CharConstructor) {
   String s('H');
   EXPECT_EQ(1U, s.size());
   EXPECT_STREQ("H", s.c_str());
+}
+
+TEST(String, CopyAssign) {
+  String s1("Source");
+  String s2("Destination");
+
+  s1 = s2;
+  EXPECT_STREQ(s1.c_str(), s2.c_str());
+}
+
+TEST(String, MoveAssign) {
+  String s1("Source");
+  String s2("Destination");
+
+  s2 = std::move(s1);
+
+  EXPECT_TRUE(s1.IsEmpty());
+  EXPECT_STREQ("Source", s2.c_str());
 }
 
 TEST(String, AppendCString) {
@@ -70,6 +99,30 @@ TEST(String, ArrayAccess) {
   EXPECT_EQ('a', s[4]);
   EXPECT_EQ('r', s[5]);
   EXPECT_EQ('\0', s[6]);
+}
+
+TEST(String, EqualityOperators) {
+  String a("Foo");
+  String b("Bar");
+
+  EXPECT_TRUE(a == String("Foo"));
+  EXPECT_TRUE(a == "Foo");
+
+  EXPECT_TRUE(b != String("Foo"));
+  EXPECT_TRUE(b != "Foo");
+
+  EXPECT_TRUE(a != b);
+
+  EXPECT_TRUE(b == String("Bar"));
+  EXPECT_TRUE(b == "Bar");
+
+  EXPECT_FALSE(a == "Foo ");
+  EXPECT_FALSE(b == " Bar");
+  EXPECT_FALSE(a == "foo");
+
+  EXPECT_TRUE(a != "Foo ");
+  EXPECT_TRUE(b != " Bar");
+  EXPECT_TRUE(a != "foo");
 }
 
 TEST(String, Resize) {
@@ -109,6 +162,42 @@ TEST(Vector, PushBack2) {
   EXPECT_EQ(static_cast<size_t>(kMaxCount), v.GetCount());
 }
 
+TEST(Vector, MoveConstructor) {
+  const int kMaxCount = 500;
+  Vector<int> v1;
+  for (int n = 0; n < kMaxCount; ++n)
+    v1.PushBack(n * 100);
+
+  Vector<int> v2(std::move(v1));
+
+  EXPECT_TRUE(v1.IsEmpty());
+  EXPECT_FALSE(v2.IsEmpty());
+
+  EXPECT_EQ(static_cast<size_t>(kMaxCount), v2.GetCount());
+  for (int n = 0; n < kMaxCount; ++n) {
+    EXPECT_EQ(n * 100, v2[n]) << "Checking v[" << n << "]";
+  }
+}
+
+TEST(Vector, MoveAssign) {
+  const int kMaxCount = 500;
+  Vector<int> v1;
+  for (int n = 0; n < kMaxCount; ++n)
+    v1.PushBack(n * 100);
+
+  Vector<int> v2;
+
+  v2 = std::move(v1);
+
+  EXPECT_TRUE(v1.IsEmpty());
+  EXPECT_FALSE(v2.IsEmpty());
+
+  EXPECT_EQ(static_cast<size_t>(kMaxCount), v2.GetCount());
+  for (int n = 0; n < kMaxCount; ++n) {
+    EXPECT_EQ(n * 100, v2[n]) << "Checking v[" << n << "]";
+  }
+}
+
 TEST(Vector, At) {
   const int kMaxCount = 500;
   Vector<int> v;
@@ -120,14 +209,29 @@ TEST(Vector, At) {
   }
 }
 
-TEST(Vector, IndexOf) {
+TEST(Vector, Find) {
   const int kMaxCount = 500;
   Vector<int> v;
   for (int n = 0; n < kMaxCount; ++n)
     v.PushBack(n * 100);
 
   for (int n = 0; n < kMaxCount; ++n) {
-    EXPECT_EQ(n, v.IndexOf(n * 100)) << "Checking v.IndexOf(" << n * 100 << ")";
+    SearchResult r = v.Find(n * 100);
+    EXPECT_TRUE(r.found) << "Looking for " << n * 100;
+    EXPECT_EQ(n, r.pos) << "Looking for " << n * 100;
+  }
+}
+
+TEST(Vector, ForRangeLoop) {
+  const int kMaxCount = 500;
+  Vector<int> v;
+  for (int n = 0; n < kMaxCount; ++n)
+    v.PushBack(n * 100);
+
+  int n = 0;
+  for (const int& value : v) {
+    EXPECT_EQ(n * 100, value) << "Checking v[" << n << "]";
+    n++;
   }
 }
 

@@ -64,7 +64,7 @@ TEST_F(TextDetectionImplWinTest, ScanOnce) {
 
   // Load image data from test directory.
   base::FilePath image_path;
-  ASSERT_TRUE(PathService::Get(base::DIR_SOURCE_ROOT, &image_path));
+  ASSERT_TRUE(base::PathService::Get(base::DIR_SOURCE_ROOT, &image_path));
   image_path = image_path.Append(FILE_PATH_LITERAL("services"))
                    .Append(FILE_PATH_LITERAL("test"))
                    .Append(FILE_PATH_LITERAL("data"))
@@ -89,7 +89,9 @@ TEST_F(TextDetectionImplWinTest, ScanOnce) {
   run_loop.Run();
   ASSERT_EQ(2u, results.size());
   EXPECT_EQ("The Chromium Project website is:", results[0]->raw_value);
+  EXPECT_EQ(gfx::RectF(51, 38, 272, 17), results[0]->bounding_box);
   EXPECT_EQ("https://www.chromium.org", results[1]->raw_value);
+  EXPECT_EQ(gfx::RectF(51, 63, 209, 17), results[1]->bounding_box);
 }
 
 }  // namespace shape_detection

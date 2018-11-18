@@ -40,7 +40,7 @@ namespace blink {
 // ----------
 // Allowlists are collections of origins, although two special terms can be used
 // when declaring them:
-//   "self" refers to the orgin of the frame which is declaring the policy.
+//   "self" refers to the origin of the frame which is declaring the policy.
 //   "*" refers to all origins; any origin will match an allowlist which
 //   contains it.
 //
@@ -174,10 +174,6 @@ class BLINK_COMMON_EXPORT FeaturePolicy {
       const ParsedFeaturePolicy& container_policy,
       const url::Origin& origin);
 
-  static std::unique_ptr<FeaturePolicy> CreateFromPolicyWithOrigin(
-      const FeaturePolicy& policy,
-      const url::Origin& origin);
-
   bool IsFeatureEnabled(mojom::FeaturePolicyFeature feature) const;
 
   // Returns whether or not the given feature is enabled by this policy for a
@@ -198,7 +194,6 @@ class BLINK_COMMON_EXPORT FeaturePolicy {
  private:
   friend class FeaturePolicyTest;
 
-  explicit FeaturePolicy(url::Origin origin);
   FeaturePolicy(url::Origin origin, const FeatureList& feature_list);
   static std::unique_ptr<FeaturePolicy> CreateFromParentPolicy(
       const FeaturePolicy* parent_policy,

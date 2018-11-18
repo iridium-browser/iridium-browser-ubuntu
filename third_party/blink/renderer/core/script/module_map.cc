@@ -5,16 +5,19 @@
 #include "third_party/blink/renderer/core/script/module_map.h"
 
 #include "third_party/blink/renderer/core/loader/modulescript/module_script_fetch_request.h"
+#include "third_party/blink/renderer/core/loader/modulescript/module_script_loader.h"
 #include "third_party/blink/renderer/core/loader/modulescript/module_script_loader_client.h"
+#include "third_party/blink/renderer/core/loader/modulescript/module_script_loader_registry.h"
 #include "third_party/blink/renderer/core/script/modulator.h"
 #include "third_party/blink/renderer/core/script/module_script.h"
+#include "third_party/blink/renderer/platform/bindings/name_client.h"
 
 namespace blink {
 
 // Entry struct represents a value in "module map" spec object.
 // https://html.spec.whatwg.org/multipage/webappapis.html#module-map
 class ModuleMap::Entry final : public GarbageCollectedFinalized<Entry>,
-                               public TraceWrapperBase,
+                               public NameClient,
                                public ModuleScriptLoaderClient {
   USING_GARBAGE_COLLECTED_MIXIN(ModuleMap::Entry);
 
@@ -22,8 +25,7 @@ class ModuleMap::Entry final : public GarbageCollectedFinalized<Entry>,
   static Entry* Create(ModuleMap* map) { return new Entry(map); }
   ~Entry() override {}
 
-  void Trace(blink::Visitor*);
-  void TraceWrappers(const ScriptWrappableVisitor*) const override;
+  void Trace(blink::Visitor*) override;
   const char* NameInHeapSnapshot() const override { return "ModuleMap::Entry"; }
 
   // Notify fetched |m_moduleScript| to the client asynchronously.
@@ -57,11 +59,6 @@ void ModuleMap::Entry::Trace(blink::Visitor* visitor) {
   visitor->Trace(module_script_);
   visitor->Trace(map_);
   visitor->Trace(clients_);
-}
-
-void ModuleMap::Entry::TraceWrappers(
-    const ScriptWrappableVisitor* visitor) const {
-  visitor->TraceWrappers(module_script_);
 }
 
 void ModuleMap::Entry::DispatchFinishedNotificationAsync(
@@ -99,32 +96,33 @@ ModuleScript* ModuleMap::Entry::GetModuleScript() const {
   return module_script_.Get();
 }
 
-ModuleMap::ModuleMap(Modulator* modulator) : modulator_(modulator) {
+ModuleMap::ModuleMap(Modulator* modulator)
+    : modulator_(modulator),
+      loader_registry_(ModuleScriptLoaderRegistry::Create()) {
   DCHECK(modulator);
 }
 
 void ModuleMap::Trace(blink::Visitor* visitor) {
   visitor->Trace(map_);
   visitor->Trace(modulator_);
-}
-
-void ModuleMap::TraceWrappers(const ScriptWrappableVisitor* visitor) const {
-  for (const auto& it : map_)
-    visitor->TraceWrappers(it.value);
+  visitor->Trace(loader_registry_);
 }
 
 // https://html.spec.whatwg.org/multipage/webappapis.html#fetch-a-single-module-script
-void ModuleMap::FetchSingleModuleScript(const ModuleScriptFetchRequest& request,
-                                        ModuleGraphLevel level,
-                                        SingleModuleClient* client) {
-  // Step 1. Let moduleMap be module map settings object's module map. [spec
-  // text]
+void ModuleMap::FetchSingleModuleScript(
+    const ModuleScriptFetchRequest& request,
+    FetchClientSettingsObjectSnapshot* fetch_client_settings_object,
+    ModuleGraphLevel level,
+    ModuleScriptCustomFetchType custom_fetch_type,
+    SingleModuleClient* client) {
+  // <spec step="1">Let moduleMap be module map settings object's module
+  // map.</spec>
   //
   // Note: |this| is the ModuleMap.
 
-  // Step 2. If moduleMap[url] is "fetching", wait in parallel until that
+  // <spec step="2">If moduleMap[url] is "fetching", wait in parallel until that
   // entry's value changes, then queue a task on the networking task source to
-  // proceed with running the following steps. [spec text]
+  // proceed with running the following steps.</spec>
   MapImpl::AddResult result = map_.insert(request.Url(), nullptr);
   TraceWrapperMember<Entry>& entry = result.stored_value->value;
   if (result.is_new_entry) {
@@ -132,15 +130,17 @@ void ModuleMap::FetchSingleModuleScript(const ModuleScriptFetchRequest& request,
 
     // Steps 4-9 loads a new single module script.
     // Delegates to ModuleScriptLoader via Modulator.
-    modulator_->FetchNewSingleModule(request, level, entry);
+    ModuleScriptLoader::Fetch(request, fetch_client_settings_object, level,
+                              modulator_, custom_fetch_type, loader_registry_,
+                              entry);
   }
   DCHECK(entry);
 
-  // Step 3. If moduleMap[url] exists, asynchronously complete this algorithm
-  // with moduleMap[url], and abort these steps. [spec text]
+  // <spec step="3">If moduleMap[url] exists, asynchronously complete this
+  // algorithm with moduleMap[url], and abort these steps.</spec>
   //
-  // Step 11. Set moduleMap[url] to module script, and asynchronously complete
-  // this algorithm with module script. [spec text]
+  // <spec step="11">Set moduleMap[url] to module script, and asynchronously
+  // complete this algorithm with module script.</spec>
   if (client)
     entry->AddClient(client);
 }

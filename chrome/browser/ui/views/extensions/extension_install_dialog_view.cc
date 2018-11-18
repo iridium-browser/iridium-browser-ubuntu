@@ -16,8 +16,8 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
-#include "chrome/browser/ui/views/harmony/chrome_layout_provider.h"
-#include "chrome/browser/ui/views/harmony/chrome_typography.h"
+#include "chrome/browser/ui/views/chrome_layout_provider.h"
+#include "chrome/browser/ui/views/chrome_typography.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/constrained_window/constrained_window_views.h"
@@ -168,20 +168,12 @@ void ShowExtensionInstallDialogImpl(
     const ExtensionInstallPrompt::DoneCallback& done_callback,
     std::unique_ptr<ExtensionInstallPrompt::Prompt> prompt) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  bool use_tab_modal_dialog = prompt->ShouldUseTabModalDialog();
   ExtensionInstallDialogView* dialog = new ExtensionInstallDialogView(
       show_params->profile(), show_params->GetParentWebContents(),
       done_callback, std::move(prompt));
-  if (use_tab_modal_dialog) {
-    content::WebContents* parent_web_contents =
-        show_params->GetParentWebContents();
-    if (parent_web_contents)
-      constrained_window::ShowWebModalDialogViews(dialog, parent_web_contents);
-  } else {
-    constrained_window::CreateBrowserModalDialogViews(
-        dialog, show_params->GetParentWindow())
-        ->Show();
-  }
+  constrained_window::CreateBrowserModalDialogViews(
+      dialog, show_params->GetParentWindow())
+      ->Show();
 }
 
 // A custom scrollable view implementation for the dialog.
@@ -215,20 +207,18 @@ struct ExtensionInfoSection {
 // Adds a section to |sections| for permissions of |perm_type| if there are any.
 void AddPermissions(ExtensionInstallPrompt::Prompt* prompt,
                     std::vector<ExtensionInfoSection>& sections,
-                    int available_width,
-                    ExtensionInstallPrompt::PermissionsType perm_type) {
-  if (prompt->GetPermissionCount(perm_type) == 0)
-    return;
+                    int available_width) {
+  DCHECK_GT(prompt->GetPermissionCount(), 0u);
 
   auto permissions_view = std::make_unique<PermissionsView>(available_width);
 
-  for (size_t i = 0; i < prompt->GetPermissionCount(perm_type); ++i) {
-    permissions_view->AddItem(prompt->GetPermission(i, perm_type),
-                              prompt->GetPermissionsDetails(i, perm_type));
+  for (size_t i = 0; i < prompt->GetPermissionCount(); ++i) {
+    permissions_view->AddItem(prompt->GetPermission(i),
+                              prompt->GetPermissionsDetails(i));
   }
 
   sections.push_back(
-      {prompt->GetPermissionsHeading(perm_type), std::move(permissions_view)});
+      {prompt->GetPermissionsHeading(), std::move(permissions_view)});
 }
 
 }  // namespace
@@ -242,6 +232,7 @@ ExtensionInstallDialogView::ExtensionInstallDialogView(
       navigator_(navigator),
       done_callback_(done_callback),
       prompt_(std::move(prompt)),
+      title_(prompt_->GetDialogTitle()),
       scroll_view_(nullptr),
       handled_result_(false),
       install_button_enabled_(false) {
@@ -257,6 +248,205 @@ ExtensionInstallDialogView::~ExtensionInstallDialogView() {
     base::ResetAndReturn(&done_callback_)
         .Run(ExtensionInstallPrompt::Result::USER_CANCELED);
   }
+}
+
+void ExtensionInstallDialogView::SetInstallButtonDelayForTesting(
+    int delay_in_ms) {
+  g_install_delay_in_ms = delay_in_ms;
+}
+
+void ExtensionInstallDialogView::ResizeWidget() {
+  GetWidget()->SetSize(GetWidget()->non_client_view()->GetPreferredSize());
+}
+
+gfx::Size ExtensionInstallDialogView::CalculatePreferredSize() const {
+  const int width = ChromeLayoutProvider::Get()->GetDistanceMetric(
+                        DISTANCE_MODAL_DIALOG_PREFERRED_WIDTH) -
+                    margins().width();
+  return gfx::Size(width, GetHeightForWidth(width));
+}
+
+void ExtensionInstallDialogView::VisibilityChanged(views::View* starting_from,
+                                                   bool is_visible) {
+  if (is_visible && !install_button_enabled_) {
+    // This base::Unretained is safe because the task is owned by the timer,
+    // which is in turn owned by this object.
+    timer_.Start(FROM_HERE,
+                 base::TimeDelta::FromMilliseconds(g_install_delay_in_ms),
+                 base::Bind(&ExtensionInstallDialogView::EnableInstallButton,
+                            base::Unretained(this)));
+  }
+}
+
+void ExtensionInstallDialogView::AddedToWidget() {
+  auto title_container = std::make_unique<views::View>();
+
+  ChromeLayoutProvider* provider = ChromeLayoutProvider::Get();
+  views::GridLayout* layout = title_container->SetLayoutManager(
+      std::make_unique<views::GridLayout>(title_container.get()));
+  constexpr int kTitleColumnSetId = 0;
+  views::ColumnSet* column_set = layout->AddColumnSet(kTitleColumnSetId);
+  constexpr int icon_size = extension_misc::EXTENSION_ICON_SMALL;
+  column_set->AddColumn(views::GridLayout::CENTER, views::GridLayout::LEADING,
+                        views::GridLayout::kFixedSize, views::GridLayout::FIXED,
+                        icon_size, 0);
+
+  // Equalize padding on the left and the right of the icon.
+  column_set->AddPaddingColumn(
+      views::GridLayout::kFixedSize,
+      provider->GetInsetsMetric(views::INSETS_DIALOG).left());
+  // Set a resize weight so that the title label will be expanded to the
+  // available width.
+  column_set->AddColumn(views::GridLayout::FILL, views::GridLayout::LEADING,
+                        1.0, views::GridLayout::USE_PREF, 0, 0);
+
+  // Scale down to icon size, but allow smaller icons (don't scale up).
+  const gfx::ImageSkia* image = prompt_->icon().ToImageSkia();
+  views::ImageView* icon = new views::ImageView();
+  gfx::Size size(image->width(), image->height());
+  size.SetToMin(gfx::Size(icon_size, icon_size));
+  icon->SetImageSize(size);
+  icon->SetImage(*image);
+
+  layout->StartRow(views::GridLayout::kFixedSize, kTitleColumnSetId);
+  layout->AddView(icon);
+
+  std::unique_ptr<views::Label> title_label =
+      views::BubbleFrameView::CreateDefaultTitleLabel(title_);
+  // Setting the title's preferred size to 0 ensures it won't influence the
+  // overall size of the dialog. It will be expanded by GridLayout.
+  title_label->SetPreferredSize(gfx::Size(0, 0));
+  if (prompt_->has_webstore_data()) {
+    auto webstore_data_container = std::make_unique<views::View>();
+    webstore_data_container->SetLayoutManager(
+        std::make_unique<views::BoxLayout>(
+            views::BoxLayout::kVertical, gfx::Insets(),
+            provider->GetDistanceMetric(
+                DISTANCE_RELATED_CONTROL_VERTICAL_SMALL)));
+
+    webstore_data_container->AddChildView(title_label.release());
+
+    auto rating_container = std::make_unique<views::View>();
+    rating_container->SetLayoutManager(std::make_unique<views::BoxLayout>(
+        views::BoxLayout::kHorizontal, gfx::Insets(),
+        provider->GetDistanceMetric(views::DISTANCE_RELATED_LABEL_HORIZONTAL)));
+    auto rating = std::make_unique<RatingsView>(prompt_->average_rating(),
+                                                prompt_->rating_count());
+    prompt_->AppendRatingStars(AddResourceIcon, rating.get());
+    rating_container->AddChildView(rating.release());
+    auto rating_count = std::make_unique<RatingLabel>(prompt_->GetRatingCount(),
+                                                      CONTEXT_BODY_TEXT_LARGE);
+    rating_count->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+    rating_container->AddChildView(rating_count.release());
+    webstore_data_container->AddChildView(rating_container.release());
+
+    auto user_count = std::make_unique<views::Label>(
+        prompt_->GetUserCount(), CONTEXT_BODY_TEXT_SMALL, STYLE_SECONDARY);
+    user_count->SetAutoColorReadabilityEnabled(false);
+    user_count->SetEnabledColor(SK_ColorGRAY);
+    user_count->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+    webstore_data_container->AddChildView(user_count.release());
+
+    layout->AddView(webstore_data_container.release());
+  } else {
+    layout->AddView(title_label.release());
+  }
+
+  views::BubbleFrameView* frame_view = static_cast<views::BubbleFrameView*>(
+      GetWidget()->non_client_view()->frame_view());
+  frame_view->SetTitleView(std::move(title_container));
+}
+
+views::View* ExtensionInstallDialogView::CreateExtraView() {
+  if (!prompt_->has_webstore_data())
+    return nullptr;
+
+  views::Link* store_link = new views::Link(
+      l10n_util::GetStringUTF16(IDS_EXTENSION_PROMPT_STORE_LINK));
+  store_link->set_listener(this);
+  return store_link;
+}
+
+bool ExtensionInstallDialogView::Cancel() {
+  if (handled_result_)
+    return true;
+
+  handled_result_ = true;
+  UpdateInstallResultHistogram(false);
+  base::ResetAndReturn(&done_callback_)
+      .Run(ExtensionInstallPrompt::Result::USER_CANCELED);
+  return true;
+}
+
+bool ExtensionInstallDialogView::Accept() {
+  DCHECK(!handled_result_);
+
+  handled_result_ = true;
+  UpdateInstallResultHistogram(true);
+  base::ResetAndReturn(&done_callback_)
+      .Run(ExtensionInstallPrompt::Result::ACCEPTED);
+  return true;
+}
+
+int ExtensionInstallDialogView::GetDialogButtons() const {
+  int buttons = prompt_->GetDialogButtons();
+  // Simply having just an OK button is *not* supported. See comment on function
+  // GetDialogButtons in dialog_delegate.h for reasons.
+  DCHECK_GT(buttons & ui::DIALOG_BUTTON_CANCEL, 0);
+  return buttons;
+}
+
+int ExtensionInstallDialogView::GetDefaultDialogButton() const {
+  return ui::DIALOG_BUTTON_CANCEL;
+}
+
+base::string16 ExtensionInstallDialogView::GetDialogButtonLabel(
+    ui::DialogButton button) const {
+  switch (button) {
+    case ui::DIALOG_BUTTON_OK:
+      return prompt_->GetAcceptButtonLabel();
+    case ui::DIALOG_BUTTON_CANCEL:
+      return prompt_->GetAbortButtonLabel();
+    default:
+      NOTREACHED();
+      return base::string16();
+  }
+}
+
+bool ExtensionInstallDialogView::IsDialogButtonEnabled(
+    ui::DialogButton button) const {
+  if (button == ui::DIALOG_BUTTON_OK)
+    return install_button_enabled_;
+  return true;
+}
+
+ax::mojom::Role ExtensionInstallDialogView::GetAccessibleWindowRole() const {
+  return ax::mojom::Role::kAlertDialog;
+}
+
+base::string16 ExtensionInstallDialogView::GetAccessibleWindowTitle() const {
+  return title_;
+}
+
+ui::ModalType ExtensionInstallDialogView::GetModalType() const {
+  return ui::MODAL_TYPE_WINDOW;
+}
+
+void ExtensionInstallDialogView::LinkClicked(views::Link* source,
+                                             int event_flags) {
+  GURL store_url(extension_urls::GetWebstoreItemDetailURLPrefix() +
+                 prompt_->extension()->id());
+  OpenURLParams params(store_url, Referrer(),
+                       WindowOpenDisposition::NEW_FOREGROUND_TAB,
+                       ui::PAGE_TRANSITION_LINK, false);
+
+  if (navigator_) {
+    navigator_->OpenURL(params);
+  } else {
+    chrome::ScopedTabbedBrowserDisplayer displayer(profile_);
+    displayer.browser()->OpenURL(params);
+  }
+  GetWidget()->Close();
 }
 
 void ExtensionInstallDialogView::CreateContents() {
@@ -276,16 +466,9 @@ void ExtensionInstallDialogView::CreateContents() {
 
   std::vector<ExtensionInfoSection> sections;
   if (prompt_->ShouldShowPermissions()) {
-    bool has_permissions =
-        prompt_->GetPermissionCount(
-            ExtensionInstallPrompt::PermissionsType::ALL_PERMISSIONS) > 0;
+    bool has_permissions = prompt_->GetPermissionCount() > 0;
     if (has_permissions) {
-      AddPermissions(
-          prompt_.get(), sections, content_width,
-          ExtensionInstallPrompt::PermissionsType::REGULAR_PERMISSIONS);
-      AddPermissions(
-          prompt_.get(), sections, content_width,
-          ExtensionInstallPrompt::PermissionsType::WITHHELD_PERMISSIONS);
+      AddPermissions(prompt_.get(), sections, content_width);
     } else {
       sections.push_back(
           {l10n_util::GetStringUTF16(IDS_EXTENSION_NO_SPECIAL_PERMISSIONS),
@@ -345,204 +528,6 @@ void ExtensionInstallDialogView::CreateContents() {
   AddChildView(scroll_view_);
 }
 
-int ExtensionInstallDialogView::GetDialogButtons() const {
-  int buttons = prompt_->GetDialogButtons();
-  // Simply having just an OK button is *not* supported. See comment on function
-  // GetDialogButtons in dialog_delegate.h for reasons.
-  DCHECK_GT(buttons & ui::DIALOG_BUTTON_CANCEL, 0);
-  return buttons;
-}
-
-base::string16 ExtensionInstallDialogView::GetDialogButtonLabel(
-    ui::DialogButton button) const {
-  switch (button) {
-    case ui::DIALOG_BUTTON_OK:
-      return prompt_->GetAcceptButtonLabel();
-    case ui::DIALOG_BUTTON_CANCEL:
-      return prompt_->GetAbortButtonLabel();
-    default:
-      NOTREACHED();
-      return base::string16();
-  }
-}
-
-int ExtensionInstallDialogView::GetDefaultDialogButton() const {
-  return ui::DIALOG_BUTTON_CANCEL;
-}
-
-bool ExtensionInstallDialogView::Cancel() {
-  if (handled_result_)
-    return true;
-
-  handled_result_ = true;
-  UpdateInstallResultHistogram(false);
-  base::ResetAndReturn(&done_callback_)
-      .Run(ExtensionInstallPrompt::Result::USER_CANCELED);
-  return true;
-}
-
-bool ExtensionInstallDialogView::Accept() {
-  DCHECK(!handled_result_);
-
-  handled_result_ = true;
-  UpdateInstallResultHistogram(true);
-  base::ResetAndReturn(&done_callback_)
-      .Run(ExtensionInstallPrompt::Result::ACCEPTED);
-  return true;
-}
-
-ui::ModalType ExtensionInstallDialogView::GetModalType() const {
-  return prompt_->ShouldUseTabModalDialog() ? ui::MODAL_TYPE_CHILD
-                                            : ui::MODAL_TYPE_WINDOW;
-}
-
-void ExtensionInstallDialogView::LinkClicked(views::Link* source,
-                                             int event_flags) {
-  GURL store_url(extension_urls::GetWebstoreItemDetailURLPrefix() +
-                 prompt_->extension()->id());
-  OpenURLParams params(store_url, Referrer(),
-                       WindowOpenDisposition::NEW_FOREGROUND_TAB,
-                       ui::PAGE_TRANSITION_LINK, false);
-
-  if (navigator_) {
-    navigator_->OpenURL(params);
-  } else {
-    chrome::ScopedTabbedBrowserDisplayer displayer(profile_);
-    displayer.browser()->OpenURL(params);
-  }
-  GetWidget()->Close();
-}
-
-views::View* ExtensionInstallDialogView::CreateExtraView() {
-  if (!prompt_->has_webstore_data())
-    return nullptr;
-
-  views::Link* store_link = new views::Link(
-      l10n_util::GetStringUTF16(IDS_EXTENSION_PROMPT_STORE_LINK));
-  store_link->set_listener(this);
-  return store_link;
-}
-
-bool ExtensionInstallDialogView::IsDialogButtonEnabled(
-    ui::DialogButton button) const {
-  if (button == ui::DIALOG_BUTTON_OK)
-    return install_button_enabled_;
-  return true;
-}
-
-void ExtensionInstallDialogView::SetInstallButtonDelayForTesting(
-    int delay_in_ms) {
-  g_install_delay_in_ms = delay_in_ms;
-}
-
-void ExtensionInstallDialogView::ResizeWidget() {
-  GetWidget()->SetSize(GetWidget()->non_client_view()->GetPreferredSize());
-}
-
-gfx::Size ExtensionInstallDialogView::CalculatePreferredSize() const {
-  const int width = ChromeLayoutProvider::Get()->GetDistanceMetric(
-                        DISTANCE_MODAL_DIALOG_PREFERRED_WIDTH) -
-                    margins().width();
-  return gfx::Size(width, GetHeightForWidth(width));
-}
-
-void ExtensionInstallDialogView::AddedToWidget() {
-  auto title_container = std::make_unique<views::View>();
-
-  ChromeLayoutProvider* provider = ChromeLayoutProvider::Get();
-  views::GridLayout* layout = title_container->SetLayoutManager(
-      std::make_unique<views::GridLayout>(title_container.get()));
-  constexpr int kTitleColumnSetId = 0;
-  views::ColumnSet* column_set = layout->AddColumnSet(kTitleColumnSetId);
-  constexpr int icon_size = extension_misc::EXTENSION_ICON_SMALL;
-  column_set->AddColumn(views::GridLayout::CENTER, views::GridLayout::LEADING,
-                        0, views::GridLayout::FIXED, icon_size, 0);
-
-  // Equalize padding on the left and the right of the icon.
-  column_set->AddPaddingColumn(
-      0, provider->GetInsetsMetric(views::INSETS_DIALOG).left());
-  // Set a resize weight so that the title label will be expanded to the
-  // available width.
-  column_set->AddColumn(views::GridLayout::FILL, views::GridLayout::LEADING, 1,
-                        views::GridLayout::USE_PREF, 0, 0);
-
-  // Scale down to icon size, but allow smaller icons (don't scale up).
-  const gfx::ImageSkia* image = prompt_->icon().ToImageSkia();
-  views::ImageView* icon = new views::ImageView();
-  gfx::Size size(image->width(), image->height());
-  size.SetToMin(gfx::Size(icon_size, icon_size));
-  icon->SetImageSize(size);
-  icon->SetImage(*image);
-
-  layout->StartRow(0, kTitleColumnSetId);
-  layout->AddView(icon);
-
-  std::unique_ptr<views::Label> title_label =
-      views::BubbleFrameView::CreateDefaultTitleLabel(
-          prompt_->GetDialogTitle());
-  // Setting the title's preferred size to 0 ensures it won't influence the
-  // overall size of the dialog. It will be expanded by GridLayout.
-  title_label->SetPreferredSize(gfx::Size(0, 0));
-  if (prompt_->has_webstore_data()) {
-    auto webstore_data_container = std::make_unique<views::View>();
-    webstore_data_container->SetLayoutManager(
-        std::make_unique<views::BoxLayout>(
-            views::BoxLayout::kVertical, gfx::Insets(),
-            provider->GetDistanceMetric(
-                DISTANCE_RELATED_CONTROL_VERTICAL_SMALL)));
-
-    webstore_data_container->AddChildView(title_label.release());
-
-    auto rating_container = std::make_unique<views::View>();
-    rating_container->SetLayoutManager(std::make_unique<views::BoxLayout>(
-        views::BoxLayout::kHorizontal, gfx::Insets(),
-        provider->GetDistanceMetric(views::DISTANCE_RELATED_LABEL_HORIZONTAL)));
-    auto rating = std::make_unique<RatingsView>(prompt_->average_rating(),
-                                                prompt_->rating_count());
-    prompt_->AppendRatingStars(AddResourceIcon, rating.get());
-    rating_container->AddChildView(rating.release());
-    int rating_text_context, user_count_text_context;
-    if (provider->IsHarmonyMode()) {
-      rating_text_context = CONTEXT_BODY_TEXT_LARGE;
-      user_count_text_context = CONTEXT_BODY_TEXT_SMALL;
-    } else {
-      rating_text_context = user_count_text_context = CONTEXT_DEPRECATED_SMALL;
-    }
-    auto rating_count = std::make_unique<RatingLabel>(prompt_->GetRatingCount(),
-                                                      rating_text_context);
-    rating_count->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-    rating_container->AddChildView(rating_count.release());
-    webstore_data_container->AddChildView(rating_container.release());
-
-    auto user_count = std::make_unique<views::Label>(
-        prompt_->GetUserCount(), user_count_text_context, STYLE_SECONDARY);
-    user_count->SetAutoColorReadabilityEnabled(false);
-    user_count->SetEnabledColor(SK_ColorGRAY);
-    user_count->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-    webstore_data_container->AddChildView(user_count.release());
-
-    layout->AddView(webstore_data_container.release());
-  } else {
-    layout->AddView(title_label.release());
-  }
-
-  views::BubbleFrameView* frame_view = static_cast<views::BubbleFrameView*>(
-      GetWidget()->non_client_view()->frame_view());
-  frame_view->SetTitleView(std::move(title_container));
-}
-
-void ExtensionInstallDialogView::VisibilityChanged(views::View* starting_from,
-                                                   bool is_visible) {
-  if (is_visible && !install_button_enabled_) {
-    // This base::Unretained is safe because the task is owned by the timer,
-    // which is in turn owned by this object.
-    timer_.Start(FROM_HERE,
-                 base::TimeDelta::FromMilliseconds(g_install_delay_in_ms),
-                 base::Bind(&ExtensionInstallDialogView::EnableInstallButton,
-                            base::Unretained(this)));
-  }
-}
-
 void ExtensionInstallDialogView::EnableInstallButton() {
   install_button_enabled_ = true;
   DialogModelChanged();
@@ -553,6 +538,7 @@ void ExtensionInstallDialogView::UpdateInstallResultHistogram(bool accepted)
   if (prompt_->type() == ExtensionInstallPrompt::INSTALL_PROMPT)
     UMA_HISTOGRAM_BOOLEAN("Extensions.InstallPrompt.Accepted", accepted);
 }
+
 
 // ExpandableContainerView::DetailsView ----------------------------------------
 
@@ -597,16 +583,17 @@ ExpandableContainerView::ExpandableContainerView(
   constexpr int kColumnSetId = 0;
   views::ColumnSet* column_set = layout->AddColumnSet(kColumnSetId);
 
-  // Even though we only have one column, using a GridLayout here will properly
-  // handle a 0 height row when |details_view_| is collapsed.
+  // Even though we only have one column, using a GridLayout here will
+  // properly handle a 0 height row when |details_view_| is collapsed.
   column_set->AddColumn(views::GridLayout::LEADING, views::GridLayout::LEADING,
-                        0, views::GridLayout::FIXED, available_width, 0);
+                        views::GridLayout::kFixedSize, views::GridLayout::FIXED,
+                        available_width, 0);
 
-  layout->StartRow(0, kColumnSetId);
+  layout->StartRow(views::GridLayout::kFixedSize, kColumnSetId);
   details_view_ = new DetailsView(details);
   layout->AddView(details_view_);
 
-  layout->StartRow(0, kColumnSetId);
+  layout->StartRow(views::GridLayout::kFixedSize, kColumnSetId);
   details_link_ =
       new views::Link(l10n_util::GetStringUTF16(IDS_EXTENSIONS_SHOW_DETAILS));
   details_link_->set_listener(this);

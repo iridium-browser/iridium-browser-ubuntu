@@ -37,9 +37,10 @@ class AvSettings {
     DTS_HD = 1 << 2,
     EAC3 = 1 << 3,
     LPCM = 1 << 4,
+    MPEG_H_AUDIO = 1 << 5,
 
     // All known audio codecs.
-    ALL = AC3 | DTS | DTS_HD | EAC3 | LPCM
+    ALL = AC3 | DTS | DTS_HD | EAC3 | LPCM | MPEG_H_AUDIO
   };
 
   // Defines the type of audio volume control of the device.
@@ -135,6 +136,9 @@ class AvSettings {
 
     // This event should be fired when an HDMI error occurs.
     HDMI_ERROR = 102,
+
+    // This event should be fired when the display brightness is changed.
+    DISPLAY_BRIGHTNESS_CHANGED = 200,
   };
 
   // Delegate to inform the caller events. As a subclass of TaskRunner,
@@ -223,6 +227,13 @@ class AvSettings {
   // Returns true and sets |nits| on success.
   // Not all displays support this function.
   static bool GetDisplayMaxBrightnessNits(float* nits) __attribute__((weak));
+
+  // Gets the HDMI latency in microseconds.
+  // Returns valid values when HDMI is connected.
+  // Returns 0 when HDMI is not connected or when the latency cannot be
+  // measured.
+  // This function should only be implemented on HDMI platforms.
+  static int GetHdmiLatencyUs() __attribute__((weak));
 
   // Returns the type of volume control, i.e. MASTER_VOLUME, FIXED_VOLUME or
   // ATTENUATION_VOLUME. For example, normal TVs, devices of CEC audio

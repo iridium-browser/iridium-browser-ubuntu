@@ -11,9 +11,10 @@
 #include "base/files/file_path.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/path_service.h"
+#include "base/sequenced_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task_scheduler/post_task.h"
-#include "base/threading/thread_restrictions.h"
+#include "base/task/post_task.h"
+#include "base/threading/scoped_blocking_call.h"
 #include "components/browser_sync/profile_sync_service.h"
 #include "components/invalidation/impl/profile_invalidation_provider.h"
 #include "components/password_manager/core/browser/password_store.h"
@@ -31,7 +32,7 @@
 #include "ios/chrome/browser/chrome_constants.h"
 #include "ios/chrome/browser/chrome_paths.h"
 #include "ios/chrome/browser/desktop_promotion/desktop_promotion_sync_service_factory.h"
-#include "ios/chrome/browser/invalidation/ios_chrome_profile_invalidation_provider_factory.h"
+#include "ios/chrome/browser/invalidation/ios_chrome_deprecated_profile_invalidation_provider_factory.h"
 #include "ios/chrome/browser/pref_names.h"
 #include "ios/chrome/browser/signin/account_consistency_service_factory.h"
 #include "ios/chrome/browser/signin/account_fetcher_service_factory.h"
@@ -39,12 +40,14 @@
 #include "ios/chrome/browser/signin/account_tracker_service_factory.h"
 #include "ios/chrome/browser/signin/gaia_cookie_manager_service_factory.h"
 #include "ios/chrome/browser/signin/signin_manager_factory.h"
-#include "ios/chrome/browser/sync/ios_chrome_profile_sync_service_factory.h"
+#include "ios/chrome/browser/sync/profile_sync_service_factory.h"
+#include "ios/chrome/browser/unified_consent/unified_consent_service_factory.h"
 
 namespace {
 
 int64_t ComputeFilesSize(const base::FilePath& directory,
                          const base::FilePath::StringType& pattern) {
+  base::ScopedBlockingCall scoped_blocking_call(base::BlockingType::MAY_BLOCK);
   int64_t running_size = 0;
   base::FileEnumerator iter(directory, false, base::FileEnumerator::FILES,
                             pattern);
@@ -55,7 +58,6 @@ int64_t ComputeFilesSize(const base::FilePath& directory,
 
 // Simple task to log the size of the browser state at |path|.
 void BrowserStateSizeTask(const base::FilePath& path) {
-  base::AssertBlockingAllowed();
   const int64_t kBytesInOneMB = 1024 * 1024;
 
   int64_t size = ComputeFilesSize(path, FILE_PATH_LITERAL("*"));
@@ -102,7 +104,7 @@ void BrowserStateSizeTask(const base::FilePath& path) {
 // Gets the user data directory.
 base::FilePath GetUserDataDir() {
   base::FilePath user_data_dir;
-  bool result = PathService::Get(ios::DIR_USER_DATA, &user_data_dir);
+  bool result = base::PathService::Get(ios::DIR_USER_DATA, &user_data_dir);
   DCHECK(result);
   return user_data_dir;
 }
@@ -199,7 +201,7 @@ void ChromeBrowserStateManagerImpl::DoFinalInit(
       browser_state->GetOriginalChromeBrowserState()->GetStatePath();
   base::PostDelayedTaskWithTraits(
       FROM_HERE,
-      {base::MayBlock(), base::TaskPriority::BACKGROUND,
+      {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
        base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
       base::Bind(&BrowserStateSizeTask, path),
       base::TimeDelta::FromSeconds(112));
@@ -211,10 +213,10 @@ void ChromeBrowserStateManagerImpl::DoFinalInit(
 void ChromeBrowserStateManagerImpl::DoFinalInitForServices(
     ios::ChromeBrowserState* browser_state) {
   ios::GaiaCookieManagerServiceFactory::GetForBrowserState(browser_state)
-      ->Init();
+      ->InitCookieListener();
   ios::AccountConsistencyServiceFactory::GetForBrowserState(browser_state);
   invalidation::ProfileInvalidationProvider* invalidation_provider =
-      IOSChromeProfileInvalidationProviderFactory::GetForBrowserState(
+      IOSChromeDeprecatedProfileInvalidationProviderFactory::GetForBrowserState(
           browser_state);
   invalidation::InvalidationService* invalidation_service =
       invalidation_provider ? invalidation_provider->GetInvalidationService()
@@ -222,6 +224,9 @@ void ChromeBrowserStateManagerImpl::DoFinalInitForServices(
   ios::AccountFetcherServiceFactory::GetForBrowserState(browser_state)
       ->SetupInvalidationsOnProfileLoad(invalidation_service);
   ios::AccountReconcilorFactory::GetForBrowserState(browser_state);
+  // Initialization needs to happen after the browser context is available
+  // because ProfileSyncService needs the URL context getter.
+  UnifiedConsentServiceFactory::GetForBrowserState(browser_state);
   DesktopPromotionSyncServiceFactory::GetForBrowserState(browser_state);
 }
 

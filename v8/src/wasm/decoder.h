@@ -11,7 +11,7 @@
 #include "src/base/compiler-specific.h"
 #include "src/flags.h"
 #include "src/signature.h"
-#include "src/utils.h"
+#include "src/v8memory.h"
 #include "src/wasm/wasm-result.h"
 #include "src/zone/zone-containers.h"
 
@@ -56,7 +56,7 @@ class Decoder {
     DCHECK_EQ(static_cast<uint32_t>(end - start), end - start);
   }
 
-  virtual ~Decoder() {}
+  virtual ~Decoder() = default;
 
   inline bool validate_size(const byte* pc, uint32_t length, const char* msg) {
     DCHECK_LE(start_, pc);
@@ -280,7 +280,7 @@ class Decoder {
     } else if (!validate_size(pc, sizeof(IntType), msg)) {
       return IntType{0};
     }
-    return ReadLittleEndianValue<IntType>(pc);
+    return ReadLittleEndianValue<IntType>(reinterpret_cast<Address>(pc));
   }
 
   template <typename IntType>
@@ -373,27 +373,6 @@ class Decoder {
     }
     return result;
   }
-};
-
-// Reference to a string in the wire bytes.
-class WireBytesRef {
- public:
-  WireBytesRef() : WireBytesRef(0, 0) {}
-  WireBytesRef(uint32_t offset, uint32_t length)
-      : offset_(offset), length_(length) {
-    DCHECK_IMPLIES(offset_ == 0, length_ == 0);
-    DCHECK_LE(offset_, offset_ + length_);  // no uint32_t overflow.
-  }
-
-  uint32_t offset() const { return offset_; }
-  uint32_t length() const { return length_; }
-  uint32_t end_offset() const { return offset_ + length_; }
-  bool is_empty() const { return length_ == 0; }
-  bool is_set() const { return offset_ != 0; }
-
- private:
-  uint32_t offset_;
-  uint32_t length_;
 };
 
 #undef TRACE

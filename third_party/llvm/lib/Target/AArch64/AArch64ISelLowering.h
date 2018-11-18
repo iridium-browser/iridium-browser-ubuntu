@@ -35,6 +35,7 @@ enum NodeType : unsigned {
   // offset of a variable into X0, using the TLSDesc model.
   TLSDESC_CALLSEQ,
   ADRP,     // Page address of a TargetGlobalAddress operand.
+  ADR,      // ADR
   ADDlow,   // Add the low 12 bits of a TargetGlobalAddress operand.
   LOADgot,  // Load from automatically generated descriptor (e.g. Global
             // Offset Table, TLS record).
@@ -335,6 +336,8 @@ public:
   bool isLegalAddImmediate(int64_t) const override;
   bool isLegalICmpImmediate(int64_t) const override;
 
+  bool shouldConsiderGEPOffsetSplit() const override;
+
   EVT getOptimalMemOpType(uint64_t Size, unsigned DstAlign, unsigned SrcAlign,
                           bool IsMemset, bool ZeroMemset, bool MemcpyStrSrc,
                           MachineFunction &MF) const override;
@@ -345,7 +348,7 @@ public:
                              unsigned AS,
                              Instruction *I = nullptr) const override;
 
-  /// \brief Return the cost of the scaling factor used in the addressing
+  /// Return the cost of the scaling factor used in the addressing
   /// mode represented by AM for this target, for a load/store
   /// of the specified type.
   /// If the AM is supported, the return value must be >= 0.
@@ -360,10 +363,11 @@ public:
 
   const MCPhysReg *getScratchRegisters(CallingConv::ID CC) const override;
 
-  /// \brief Returns false if N is a bit extraction pattern of (X >> C) & Mask.
-  bool isDesirableToCommuteWithShift(const SDNode *N) const override;
+  /// Returns false if N is a bit extraction pattern of (X >> C) & Mask.
+  bool isDesirableToCommuteWithShift(const SDNode *N,
+                                     CombineLevel Level) const override;
 
-  /// \brief Returns true if it is beneficial to convert a load of a constant
+  /// Returns true if it is beneficial to convert a load of a constant
   /// to just the constant itself.
   bool shouldConvertConstantLoadToIntImm(const APInt &Imm,
                                          Type *Ty) const override;
@@ -386,7 +390,8 @@ public:
   TargetLoweringBase::AtomicExpansionKind
   shouldExpandAtomicRMWInIR(AtomicRMWInst *AI) const override;
 
-  bool shouldExpandAtomicCmpXchgInIR(AtomicCmpXchgInst *AI) const override;
+  TargetLoweringBase::AtomicExpansionKind
+  shouldExpandAtomicCmpXchgInIR(AtomicCmpXchgInst *AI) const override;
 
   bool useLoadStackGuardNode() const override;
   TargetLoweringBase::LegalizeTypeAction
@@ -441,9 +446,35 @@ public:
 
   bool isMaskAndCmp0FoldingBeneficial(const Instruction &AndI) const override;
 
-  bool hasAndNotCompare(SDValue) const override {
-    // 'bics'
-    return true;
+  bool hasAndNotCompare(SDValue V) const override {
+    // We can use bics for any scalar.
+    return V.getValueType().isScalarInteger();
+  }
+
+  bool hasAndNot(SDValue Y) const override {
+    EVT VT = Y.getValueType();
+
+    if (!VT.isVector())
+      return hasAndNotCompare(Y);
+
+    return VT.getSizeInBits() >= 64; // vector 'bic'
+  }
+
+  bool shouldTransformSignedTruncationCheck(EVT XVT,
+                                            unsigned KeptBits) const override {
+    // For vectors, we don't have a preference..
+    if (XVT.isVector())
+      return false;
+
+    auto VTIsOk = [](EVT VT) -> bool {
+      return VT == MVT::i8 || VT == MVT::i16 || VT == MVT::i32 ||
+             VT == MVT::i64;
+    };
+
+    // We are ok with KeptBitsVT being byte/word/dword, what SXT supports.
+    // XVT will be larger than KeptBitsVT.
+    MVT KeptBitsVT = MVT::getIntegerVT(KeptBits);
+    return VTIsOk(XVT) && VTIsOk(KeptBitsVT);
   }
 
   bool hasBitPreservingFPLogic(EVT VT) const override {
@@ -487,11 +518,11 @@ public:
                                                  CallingConv::ID CallConv,
                                                  bool isVarArg) const override;
 private:
-  bool isExtFreeImpl(const Instruction *Ext) const override;
-
   /// Keep a pointer to the AArch64Subtarget around so that we can
   /// make the right decision when generating code for different targets.
   const AArch64Subtarget *Subtarget;
+
+  bool isExtFreeImpl(const Instruction *Ext) const override;
 
   void addTypeForNEON(MVT VT, MVT PromotedBitwiseVT);
   void addDRTypeForNEON(MVT VT);
@@ -512,6 +543,8 @@ private:
                           const SDLoc &DL, SelectionDAG &DAG,
                           SmallVectorImpl<SDValue> &InVals, bool isThisReturn,
                           SDValue ThisVal) const;
+
+  SDValue LowerSTORE(SDValue Op, SelectionDAG &DAG) const;
 
   SDValue LowerINTRINSIC_WO_CHAIN(SDValue Op, SelectionDAG &DAG) const;
 
@@ -556,6 +589,8 @@ private:
   SDValue getAddrLarge(NodeTy *N, SelectionDAG &DAG, unsigned Flags = 0) const;
   template <class NodeTy>
   SDValue getAddr(NodeTy *N, SelectionDAG &DAG, unsigned Flags = 0) const;
+  template <class NodeTy>
+  SDValue getAddrTiny(NodeTy *N, SelectionDAG &DAG, unsigned Flags = 0) const;
   SDValue LowerADDROFRETURNADDR(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerGlobalTLSAddress(SDValue Op, SelectionDAG &DAG) const;
@@ -582,6 +617,7 @@ private:
   SDValue LowerVAARG(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerFRAMEADDR(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerRETURNADDR(SDValue Op, SelectionDAG &DAG) const;
+  SDValue LowerFLT_ROUNDS_(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerINSERT_VECTOR_ELT(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerEXTRACT_VECTOR_ELT(SDValue Op, SelectionDAG &DAG) const;
   SDValue LowerSCALAR_TO_VECTOR(SDValue Op, SelectionDAG &DAG) const;
@@ -613,7 +649,7 @@ private:
                                          SelectionDAG &DAG) const;
 
   SDValue BuildSDIVPow2(SDNode *N, const APInt &Divisor, SelectionDAG &DAG,
-                        std::vector<SDNode *> *Created) const override;
+                        SmallVectorImpl<SDNode *> &Created) const override;
   SDValue getSqrtEstimate(SDValue Operand, SelectionDAG &DAG, int Enabled,
                           int &ExtraSteps, bool &UseOneConst,
                           bool Reciprocal) const override;

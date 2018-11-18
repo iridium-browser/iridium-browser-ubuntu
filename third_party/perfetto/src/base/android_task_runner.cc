@@ -17,7 +17,6 @@
 #include "perfetto/base/android_task_runner.h"
 
 #include <errno.h>
-#include <sys/eventfd.h>
 #include <sys/timerfd.h>
 
 namespace perfetto {
@@ -25,13 +24,11 @@ namespace base {
 
 AndroidTaskRunner::AndroidTaskRunner()
     : looper_(ALooper_prepare(0 /* require callbacks */)),
-      immediate_event_(eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC)),
       delayed_timer_(
-          timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK | TFD_CLOEXEC)) {
+          timerfd_create(kWallTimeClockSource, TFD_NONBLOCK | TFD_CLOEXEC)) {
   ALooper_acquire(looper_);
-  PERFETTO_CHECK(immediate_event_);
   PERFETTO_CHECK(delayed_timer_);
-  AddFileDescriptorWatch(immediate_event_.get(),
+  AddFileDescriptorWatch(immediate_event_.fd(),
                          std::bind(&AndroidTaskRunner::RunImmediateTask, this));
   AddFileDescriptorWatch(delayed_timer_.get(),
                          std::bind(&AndroidTaskRunner::RunDelayedTask, this));
@@ -80,24 +77,10 @@ bool AndroidTaskRunner::IsIdleForTesting() {
   return immediate_tasks_.empty();
 }
 
-AndroidTaskRunner::TimePoint AndroidTaskRunner::GetTime() const {
-  static_assert(sizeof(TimePoint) == sizeof(struct timespec),
-                "TimePoint layout must match struct timespec");
-  TimePoint now;
-  if (clock_gettime(CLOCK_MONOTONIC, &now) == -1)
-    PERFETTO_DPLOG("clock_gettime");
-  return now;
-}
-
 void AndroidTaskRunner::RunImmediateTask() {
-  uint64_t unused = 0;
-  if (read(immediate_event_.get(), &unused, sizeof(unused)) != sizeof(unused) &&
-      errno != EAGAIN) {
-    PERFETTO_DPLOG("read");
-  }
+  immediate_event_.Clear();
 
-  // TODO(skyostil): Add a separate work queue in case in case locking overhead
-  // becomes an issue.
+  // If locking overhead becomes an issue, add a separate work queue.
   bool has_next;
   std::function<void()> immediate_task;
   {
@@ -113,7 +96,7 @@ void AndroidTaskRunner::RunImmediateTask() {
   if (has_next)
     ScheduleImmediateWakeUp();
   errno = 0;
-  immediate_task();
+  RunTask(immediate_task);
 }
 
 void AndroidTaskRunner::RunDelayedTask() {
@@ -124,36 +107,32 @@ void AndroidTaskRunner::RunDelayedTask() {
   }
 
   std::function<void()> delayed_task;
-  TimePoint next_wake_up;
+  TimeMillis next_wake_up{};
   {
     std::lock_guard<std::mutex> lock(lock_);
     if (delayed_tasks_.empty())
       return;
     auto it = delayed_tasks_.begin();
-    PERFETTO_DCHECK(!(GetTime() < it->first));
+    PERFETTO_DCHECK(!(GetWallTimeMs() < it->first));
     delayed_task = std::move(it->second);
     delayed_tasks_.erase(it);
     if (!delayed_tasks_.empty())
       next_wake_up = delayed_tasks_.begin()->first;
   }
-  if (next_wake_up)
+  if (next_wake_up.count())
     ScheduleDelayedWakeUp(next_wake_up);
   errno = 0;
-  delayed_task();
+  RunTask(delayed_task);
 }
 
 void AndroidTaskRunner::ScheduleImmediateWakeUp() {
-  uint64_t value = 1;
-  if (write(immediate_event_.get(), &value, sizeof(value)) == -1 &&
-      errno != EAGAIN) {
-    PERFETTO_DPLOG("write");
-  }
+  immediate_event_.Notify();
 }
 
-void AndroidTaskRunner::ScheduleDelayedWakeUp(const TimePoint& time) {
-  PERFETTO_DCHECK(time);
+void AndroidTaskRunner::ScheduleDelayedWakeUp(TimeMillis time) {
+  PERFETTO_DCHECK(time.count());
   struct itimerspec wake_up = {};
-  wake_up.it_value = time;
+  wake_up.it_value = ToPosixTimespec(time);
   if (timerfd_settime(delayed_timer_.get(), TFD_TIMER_ABSTIME, &wake_up,
                       nullptr) == -1) {
     PERFETTO_DPLOG("timerfd_settime");
@@ -172,9 +151,9 @@ void AndroidTaskRunner::PostTask(std::function<void()> task) {
 }
 
 void AndroidTaskRunner::PostDelayedTask(std::function<void()> task,
-                                        int delay_ms) {
+                                        uint32_t delay_ms) {
   PERFETTO_DCHECK(delay_ms >= 0);
-  auto runtime = GetTime().AdvanceByMs(delay_ms);
+  TimeMillis runtime = GetWallTimeMs() + TimeMillis(delay_ms);
   bool is_next = false;
   {
     std::lock_guard<std::mutex> lock(lock_);
@@ -221,7 +200,7 @@ bool AndroidTaskRunner::OnFileDescriptorEvent(int signalled_fd, int events) {
     task = it->second;
   }
   errno = 0;
-  task();
+  RunTask(task);
   return true;
 }
 

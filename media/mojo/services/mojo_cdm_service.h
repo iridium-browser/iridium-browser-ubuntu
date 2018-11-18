@@ -21,6 +21,7 @@
 #include "media/mojo/services/mojo_cdm_promise.h"
 #include "media/mojo/services/mojo_cdm_service_context.h"
 #include "media/mojo/services/mojo_decryptor_service.h"
+#include "mojo/public/cpp/bindings/binding.h"
 
 namespace media {
 
@@ -51,7 +52,8 @@ class MEDIA_MOJO_EXPORT MojoCdmService : public mojom::ContentDecryptionModule {
   ~MojoCdmService() final;
 
   // mojom::ContentDecryptionModule implementation.
-  void SetClient(mojom::ContentDecryptionModuleClientPtr client) final;
+  void SetClient(
+      mojom::ContentDecryptionModuleClientAssociatedPtrInfo client) final;
   void Initialize(const std::string& key_system,
                   const url::Origin& security_origin,
                   const CdmConfig& cdm_config,
@@ -106,13 +108,13 @@ class MEDIA_MOJO_EXPORT MojoCdmService : public mojom::ContentDecryptionModule {
   // MojoDecryptorService is passed the Decryptor from |cdm_|, so
   // |decryptor_| must not outlive |cdm_|.
   std::unique_ptr<MojoDecryptorService> decryptor_;
+  std::unique_ptr<mojo::Binding<mojom::Decryptor>> decryptor_binding_;
 
   // Set to a valid CDM ID if the |cdm_| is successfully created.
   int cdm_id_;
 
-  mojom::ContentDecryptionModuleClientPtr client_;
+  mojom::ContentDecryptionModuleClientAssociatedPtr client_;
 
-  base::WeakPtr<MojoCdmService> weak_this_;
   base::WeakPtrFactory<MojoCdmService> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(MojoCdmService);

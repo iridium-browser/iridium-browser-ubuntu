@@ -12,6 +12,7 @@ from webelement import WebElement
 
 ELEMENT_KEY_W3C = "element-6066-11e4-a52e-4f735466cecf"
 ELEMENT_KEY = "ELEMENT"
+MAX_RETRY_COUNT = 3
 
 class ChromeDriverException(Exception):
   pass
@@ -43,13 +44,13 @@ class ScriptTimeout(ChromeDriverException):
   pass
 class InvalidSelector(ChromeDriverException):
   pass
-class SessionNotCreatedException(ChromeDriverException):
+class SessionNotCreated(ChromeDriverException):
   pass
-class NoSuchSession(ChromeDriverException):
+class InvalidSessionId(ChromeDriverException):
   pass
 class UnexpectedAlertOpen(ChromeDriverException):
   pass
-class NoAlertOpen(ChromeDriverException):
+class NoSuchAlert(ChromeDriverException):
   pass
 class NoSuchCookie(ChromeDriverException):
   pass
@@ -62,7 +63,7 @@ class UnsupportedOperation(ChromeDriverException):
 
 def _ExceptionForLegacyResponse(response):
   exception_class_map = {
-    6: NoSuchSession,
+    6: InvalidSessionId,
     7: NoSuchElement,
     8: NoSuchFrame,
     9: UnknownCommand,
@@ -79,10 +80,10 @@ def _ExceptionForLegacyResponse(response):
     23: NoSuchWindow,
     24: InvalidCookieDomain,
     26: UnexpectedAlertOpen,
-    27: NoAlertOpen,
+    27: NoSuchAlert,
     28: ScriptTimeout,
     32: InvalidSelector,
-    33: SessionNotCreatedException,
+    33: SessionNotCreated,
     105: NoSuchCookie
   }
   status = response['status']
@@ -91,24 +92,24 @@ def _ExceptionForLegacyResponse(response):
 
 def _ExceptionForStandardResponse(response):
   exception_map = {
-    'no such session' : NoSuchSession,
+    'invalid session id' : InvalidSessionId,
     'no such element': NoSuchElement,
     'no such frame': NoSuchFrame,
     'unknown command': UnknownCommand,
     'stale element reference': StaleElementReference,
-    'element not visible': ElementNotVisible,
+    'element not interactable': ElementNotVisible,
     'invalid element state': InvalidElementState,
     'unknown error': UnknownError,
     'javascript error': JavaScriptError,
-    'xpath lookup error': XPathLookupError,
+    'invalid selector': XPathLookupError,
     'timeout': Timeout,
     'no such window': NoSuchWindow,
     'invalid cookie domain': InvalidCookieDomain,
     'unexpected alert open': UnexpectedAlertOpen,
-    'no alert open': NoAlertOpen,
-    'asynchronous script timeout': ScriptTimeout,
+    'no such alert': NoSuchAlert,
+    'script timeout': ScriptTimeout,
     'invalid selector': InvalidSelector,
-    'session not created exception': SessionNotCreatedException,
+    'session not created': SessionNotCreated,
     'no such cookie': NoSuchCookie,
     'invalid argument': InvalidArgument,
     'element not interactable': ElementNotInteractable,
@@ -122,17 +123,32 @@ def _ExceptionForStandardResponse(response):
 class ChromeDriver(object):
   """Starts and controls a single Chrome instance on this machine."""
 
-  def __init__(self, server_url, chrome_binary=None, android_package=None,
-               android_activity=None, android_process=None,
-               android_use_running_app=None, chrome_switches=None,
-               chrome_extensions=None, chrome_log_path=None,
-               debugger_address=None, logging_prefs=None,
-               mobile_emulation=None, experimental_options=None,
-               download_dir=None, network_connection=None,
-               send_w3c_capability=None, send_w3c_request=None,
-               page_load_strategy=None, unexpected_alert_behaviour=None,
-               devtools_events_to_log=None, accept_insecure_certs=None,
-               test_name=None):
+  retry_count = 0
+
+  def __init__(self, *args, **kwargs):
+    try:
+      self._InternalInit(*args, **kwargs)
+    except Exception as e:
+      if not e.message.startswith('timed out'):
+        raise
+      else:
+        if ChromeDriver.retry_count < MAX_RETRY_COUNT:
+          ChromeDriver.retry_count = ChromeDriver.retry_count + 1
+          self._InternalInit(*args, **kwargs)
+        else:
+          raise
+
+  def _InternalInit(self, server_url, chrome_binary=None, android_package=None,
+      android_activity=None, android_process=None,
+      android_use_running_app=None, chrome_switches=None,
+      chrome_extensions=None, chrome_log_path=None,
+      debugger_address=None, logging_prefs=None,
+      mobile_emulation=None, experimental_options=None,
+      download_dir=None, network_connection=None,
+      send_w3c_capability=None, send_w3c_request=None,
+      page_load_strategy=None, unexpected_alert_behaviour=None,
+      devtools_events_to_log=None, accept_insecure_certs=None,
+      timeouts=None, test_name=None):
     self._executor = command_executor.CommandExecutor(server_url)
     self.w3c_compliant = False
 
@@ -160,6 +176,10 @@ class ChromeDriver(object):
       chrome_switches.append('no-sandbox')
       # https://bugs.chromium.org/p/chromedriver/issues/detail?id=1695
       chrome_switches.append('disable-gpu')
+
+    if chrome_switches is None:
+      chrome_switches = []
+    chrome_switches.append('force-color-profile=srgb')
 
     if chrome_switches:
       assert type(chrome_switches) is list
@@ -225,6 +245,9 @@ class ChromeDriver(object):
 
     if accept_insecure_certs is not None:
       params['acceptInsecureCerts'] = accept_insecure_certs
+
+    if timeouts is not None:
+      params['timeouts'] = timeouts
 
     if test_name is not None:
       params['goog:testName'] = test_name
@@ -308,7 +331,7 @@ class ChromeDriver(object):
     return self.ExecuteCommand(Command.GET_CURRENT_WINDOW_HANDLE)
 
   def CloseWindow(self):
-    self.ExecuteCommand(Command.CLOSE)
+    return self.ExecuteCommand(Command.CLOSE)
 
   def Load(self, url):
     self.ExecuteCommand(Command.GET, {'url': url})
@@ -356,9 +379,11 @@ class ChromeDriver(object):
     return self.ExecuteCommand(
         Command.FIND_ELEMENTS, {'using': strategy, 'value': target})
 
-  def SetTimeout(self, type, timeout):
-    return self.ExecuteCommand(
-        Command.SET_TIMEOUT, {'type' : type, 'ms': timeout})
+  def GetTimeouts(self):
+    return self.ExecuteCommand(Command.GET_TIMEOUTS)
+
+  def SetTimeouts(self, params):
+    return self.ExecuteCommand(Command.SET_TIMEOUTS, params)
 
   def GetCurrentUrl(self):
     return self.ExecuteCommand(Command.GET_CURRENT_URL)
@@ -472,23 +497,28 @@ class ChromeDriver(object):
     return [rect['width'], rect['height'], rect['x'], rect['y']]
 
   def SetWindowSize(self, width, height):
-    self.ExecuteCommand(
+    return self.ExecuteCommand(
         Command.SET_WINDOW_SIZE,
         {'windowHandle': 'current', 'width': width, 'height': height})
 
   def SetWindowRect(self, width, height, x, y):
-    self.ExecuteCommand(
-        Command.SET_WINDOW_SIZE,
+    return self.ExecuteCommand(
+        Command.SET_WINDOW_RECT,
         {'width': width, 'height': height, 'x': x, 'y': y})
 
   def MaximizeWindow(self):
-    self.ExecuteCommand(Command.MAXIMIZE_WINDOW, {'windowHandle': 'current'})
+    return self.ExecuteCommand(Command.MAXIMIZE_WINDOW,
+                               {'windowHandle': 'current'})
 
   def MinimizeWindow(self):
-    return self.ExecuteCommand(Command.MINIMIZE_WINDOW, {'windowHandle': 'current'})
+    return self.ExecuteCommand(Command.MINIMIZE_WINDOW,
+                               {'windowHandle': 'current'})
 
   def FullScreenWindow(self):
-    self.ExecuteCommand(Command.FULLSCREEN_WINDOW)
+    return self.ExecuteCommand(Command.FULLSCREEN_WINDOW)
+
+  def TakeScreenshot(self):
+    return self.ExecuteCommand(Command.SCREENSHOT)
 
   def Quit(self):
     """Quits the browser and ends the session."""
@@ -572,3 +602,6 @@ class ChromeDriver(object):
       for i in range(len(value)):
         typing.append(value[i])
     self.ExecuteCommand(Command.SEND_KEYS_TO_ACTIVE_ELEMENT, {'value': typing})
+
+  def GenerateTestReport(self, message):
+    self.ExecuteCommand(Command.GENERATE_TEST_REPORT, {'message': message})

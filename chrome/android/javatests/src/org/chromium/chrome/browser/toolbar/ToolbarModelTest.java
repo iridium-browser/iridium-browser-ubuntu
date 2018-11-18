@@ -12,25 +12,22 @@ import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
-import org.junit.rules.TestRule;
 import org.junit.runner.RunWith;
 
+import org.chromium.base.ContextUtils;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.ChromeTabbedActivity;
 import org.chromium.chrome.browser.UrlConstants;
+import org.chromium.chrome.browser.omnibox.UrlBarData;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 import org.chromium.chrome.test.util.ChromeTabUtils;
-import org.chromium.chrome.test.util.browser.Features;
-import org.chromium.chrome.test.util.browser.Features.DisableFeatures;
-import org.chromium.chrome.test.util.browser.Features.EnableFeatures;
 
 /**
  * Tests for ToolbarModel.
@@ -40,11 +37,6 @@ import org.chromium.chrome.test.util.browser.Features.EnableFeatures;
 public class ToolbarModelTest {
     @Rule
     public ChromeTabbedActivityTestRule mActivityTestRule = new ChromeTabbedActivityTestRule();
-
-    @Rule
-    public TestRule mProcessor = new Features.InstrumentationProcessor();
-
-    private static final String TEST_PAGE = "/chrome/test/data/android/test.html";
 
     @Before
     public void setUp() throws InterruptedException {
@@ -73,8 +65,7 @@ public class ToolbarModelTest {
 
     @Test
     @SmallTest
-    @DisableFeatures(ChromeFeatureList.OMNIBOX_HIDE_SCHEME_DOMAIN_IN_STEADY_STATE)
-    public void testDisplayAndEditText_DisabledExperiment() throws Exception {
+    public void testDisplayAndEditText() throws Exception {
         ThreadUtils.runOnUiThreadBlocking(() -> {
             TestToolbarModel model = new TestToolbarModel();
             model.mUrl = UrlConstants.NTP_URL;
@@ -86,25 +77,9 @@ public class ToolbarModelTest {
             assertDisplayAndEditText(model, "chrome://about", "chrome://about");
 
             model.mUrl = "https://www.foo.com";
-            model.mDisplayUrl = "foo.com";
+            model.mDisplayUrl = "https://foo.com";
             model.mFullUrl = "https://foo.com";
             assertDisplayAndEditText(model, "https://foo.com", "https://foo.com");
-        });
-    }
-
-    @Test
-    @SmallTest
-    @EnableFeatures(ChromeFeatureList.OMNIBOX_HIDE_SCHEME_DOMAIN_IN_STEADY_STATE)
-    public void testDisplayAndEditText_EnabledExperiment() throws Exception {
-        ThreadUtils.runOnUiThreadBlocking(() -> {
-            TestToolbarModel model = new TestToolbarModel();
-            model.mUrl = UrlConstants.NTP_URL;
-            assertDisplayAndEditText(model, "", null);
-
-            model.mUrl = "chrome://about";
-            model.mDisplayUrl = "chrome://about";
-            model.mFullUrl = "chrome://about";
-            assertDisplayAndEditText(model, "chrome://about", "chrome://about");
 
             model.mUrl = "https://www.foo.com";
             model.mDisplayUrl = "foo.com";
@@ -116,10 +91,10 @@ public class ToolbarModelTest {
     private void assertDisplayAndEditText(
             ToolbarDataProvider dataProvider, String displayText, String editText) {
         ThreadUtils.runOnUiThreadBlocking(() -> {
+            UrlBarData urlBarData = dataProvider.getUrlBarData();
             Assert.assertEquals(
-                    "Display text did not match", displayText, dataProvider.getDisplayText());
-            Assert.assertEquals(
-                    "Editing text did not match", editText, dataProvider.getEditingText());
+                    "Display text did not match", displayText, urlBarData.displayText.toString());
+            Assert.assertEquals("Editing text did not match", editText, urlBarData.editingText);
         });
     }
 
@@ -143,7 +118,7 @@ public class ToolbarModelTest {
         private String mUrl;
 
         public TestToolbarModel() {
-            super(null /* bottomSheet */, false /* useModernDesign */);
+            super(ContextUtils.getApplicationContext(), null /* bottomSheet */);
             initializeWithNative();
 
             Tab tab = new Tab(0, false, null) {

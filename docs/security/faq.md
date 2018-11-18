@@ -144,13 +144,27 @@ are considered security vulnerabilities in more detail.
 
 No. Chromium contains a reflected XSS filter (called XSSAuditor) that is a
 best-effort second line of defense against reflected XSS flaws found in web
-sites.  We do not treat these bypasses as security bugs in Chromium because the
-underlying issue is in the web site itself.  We treat them as functional bugs,
-and we do appreciate such reports.
+sites. We do not treat these bypasses as security bugs in Chromium because the
+underlying security issue is in the web site itself. Instead, we treat them as
+functional bugs in Chromium.
 
-The XSSAuditor is not able to defend against persistent XSS or DOM-based XSS.
+We do appreciate reports of XSSAuditor bypasses, and endeavor to close them.
+When reporting an XSSAuditor bypass, two pieces of information are essential:
+*    The exact URL (and for POSTs, the request body) triggering the reflection.
+*    The view-source: of the page showing the reflection in the page text.
+
+Please do not provide links to vulnerable production sites seen in the wild,
+as that forces us to embargo the information in the bug.
+
+Note that the XSSAuditor is not able to defend against persistent XSS or
+DOM-based XSS. Nor is it able to defend against injections deep inside
+existing JavaScript blocks, [for
+example](https://bugs.chromium.org/p/chromium/issues/detail?id=135029), since
+the XSSAuditor is part of the HTML parser, not the JavaScript parser.
+
 There will also be a number of infrequently occurring reflected XSS corner
-cases, however, that it will never be able to cover. Among these are:
+case in an HTML context that it will never be able to cover. Among
+these are:
 *    Multiple unsanitized variables injected into the page.
 *    Unexpected server side transformation or decoding of the payload.
 
@@ -214,7 +228,7 @@ computer.
 This is essentially the same situation as with physically-local attacks. The
 attacker's code, when it runs as your user account on your machine, can do
 anything you can do. (See also [Microsoft's Ten Immutable Laws Of
-Security](https://technet.microsoft.com/en-us/library/hh278941.aspx).)
+Security](https://web.archive.org/web/20160311224620/https://technet.microsoft.com/en-us/library/hh278941.aspx).)
 
 <a name="TOC-What-about-unmasking-of-passwords-with-the-developer-tools-"></a>
 ## What about unmasking of passwords with the developer tools?

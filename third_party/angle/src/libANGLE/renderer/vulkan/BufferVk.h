@@ -18,7 +18,7 @@ namespace rx
 {
 class RendererVk;
 
-class BufferVk : public BufferImpl, public vk::CommandGraphResource
+class BufferVk : public BufferImpl
 {
   public:
     BufferVk(const gl::BufferState &state);
@@ -54,16 +54,37 @@ class BufferVk : public BufferImpl, public vk::CommandGraphResource
                             size_t count,
                             bool primitiveRestartEnabled,
                             gl::IndexRange *outRange) override;
+    GLint64 getSize();
 
-    const vk::Buffer &getVkBuffer() const;
+    const vk::BufferHelper &getBuffer() const
+    {
+        ASSERT(mBuffer.valid());
+        return mBuffer;
+    }
+
+    vk::BufferHelper &getBuffer()
+    {
+        ASSERT(mBuffer.valid());
+        return mBuffer;
+    }
+
+    angle::Result mapImpl(ContextVk *contextVk, void **mapPtr);
+    angle::Result unmapImpl(ContextVk *contextVk);
+
+    // Calls copyBuffer internally.
+    angle::Result copyToBuffer(ContextVk *contextVk,
+                               VkBuffer destbuffer,
+                               uint32_t copyCount,
+                               const VkBufferCopy *copies);
 
   private:
-    vk::Error setDataImpl(ContextVk *contextVk, const uint8_t *data, size_t size, size_t offset);
+    angle::Result setDataImpl(ContextVk *contextVk,
+                              const uint8_t *data,
+                              size_t size,
+                              size_t offset);
     void release(RendererVk *renderer);
 
-    vk::Buffer mBuffer;
-    vk::DeviceMemory mBufferMemory;
-    size_t mCurrentRequiredSize;
+    vk::BufferHelper mBuffer;
 };
 
 }  // namespace rx

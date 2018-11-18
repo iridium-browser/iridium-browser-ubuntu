@@ -21,7 +21,7 @@
 #include "net/base/ip_endpoint.h"
 #include "net/base/net_errors.h"
 #include "net/dns/dns_client.h"
-#include "net/dns/dns_config_service.h"
+#include "net/dns/dns_config.h"
 #include "net/dns/dns_hosts.h"
 
 namespace net {
@@ -213,9 +213,6 @@ void FuzzedHostResolver::SetDnsClientEnabled(bool enabled) {
   config.timeout = base::TimeDelta::FromDays(10);
 
   config.rotate = data_provider_->ConsumeBool();
-
-  // Doesn't currently seem to do anything.
-  config.edns0 = false;
 
   config.use_local_ipv6 = data_provider_->ConsumeBool();
 

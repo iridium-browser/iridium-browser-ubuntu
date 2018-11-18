@@ -208,6 +208,7 @@ BluetoothDeviceClient::Properties::Properties(
                    &services_resolved);
   RegisterProperty(bluetooth_device::kAdvertisingDataFlagsProperty,
                    &advertising_data_flags);
+  RegisterProperty(bluetooth_device::kMTUProperty, &mtu);
 }
 
 BluetoothDeviceClient::Properties::~Properties() = default;
@@ -254,8 +255,7 @@ class BluetoothDeviceClientImpl : public BluetoothDeviceClient,
     std::vector<dbus::ObjectPath> object_paths, device_paths;
     device_paths = object_manager_->GetObjectsWithInterface(
         bluetooth_device::kBluetoothDeviceInterface);
-    for (std::vector<dbus::ObjectPath>::iterator iter = device_paths.begin();
-         iter != device_paths.end(); ++iter) {
+    for (auto iter = device_paths.begin(); iter != device_paths.end(); ++iter) {
       Properties* properties = GetProperties(*iter);
       if (properties->adapter.value() == adapter_path)
         object_paths.push_back(*iter);
@@ -502,6 +502,52 @@ class BluetoothDeviceClientImpl : public BluetoothDeviceClient,
                        weak_ptr_factory_.GetWeakPtr(), error_callback));
   }
 
+  void ExecuteWrite(const dbus::ObjectPath& object_path,
+                    const base::Closure& callback,
+                    const ErrorCallback& error_callback) override {
+    dbus::MethodCall method_call(bluetooth_device::kBluetoothDeviceInterface,
+                                 bluetooth_device::kExecuteWrite);
+
+    dbus::ObjectProxy* object_proxy =
+        object_manager_->GetObjectProxy(object_path);
+    if (!object_proxy) {
+      error_callback.Run(kUnknownDeviceError, "");
+      return;
+    }
+
+    dbus::MessageWriter writer(&method_call);
+    writer.AppendBool(true);
+    object_proxy->CallMethodWithErrorCallback(
+        &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
+        base::BindOnce(&BluetoothDeviceClientImpl::OnSuccess,
+                       weak_ptr_factory_.GetWeakPtr(), callback),
+        base::BindOnce(&BluetoothDeviceClientImpl::OnError,
+                       weak_ptr_factory_.GetWeakPtr(), error_callback));
+  }
+
+  void AbortWrite(const dbus::ObjectPath& object_path,
+                  const base::Closure& callback,
+                  const ErrorCallback& error_callback) override {
+    dbus::MethodCall method_call(bluetooth_device::kBluetoothDeviceInterface,
+                                 bluetooth_device::kExecuteWrite);
+
+    dbus::ObjectProxy* object_proxy =
+        object_manager_->GetObjectProxy(object_path);
+    if (!object_proxy) {
+      error_callback.Run(kUnknownDeviceError, "");
+      return;
+    }
+
+    dbus::MessageWriter writer(&method_call);
+    writer.AppendBool(false);
+    object_proxy->CallMethodWithErrorCallback(
+        &method_call, dbus::ObjectProxy::TIMEOUT_USE_DEFAULT,
+        base::BindOnce(&BluetoothDeviceClientImpl::OnSuccess,
+                       weak_ptr_factory_.GetWeakPtr(), callback),
+        base::BindOnce(&BluetoothDeviceClientImpl::OnError,
+                       weak_ptr_factory_.GetWeakPtr(), error_callback));
+  }
+
  protected:
   void Init(dbus::Bus* bus,
             const std::string& bluetooth_service_name) override {
@@ -603,7 +649,7 @@ class BluetoothDeviceClientImpl : public BluetoothDeviceClient,
   dbus::ObjectManager* object_manager_;
 
   // List of observers interested in event notifications from us.
-  base::ObserverList<BluetoothDeviceClient::Observer> observers_;
+  base::ObserverList<BluetoothDeviceClient::Observer>::Unchecked observers_;
 
   // Weak pointer factory for generating 'this' pointers that might live longer
   // than we do.

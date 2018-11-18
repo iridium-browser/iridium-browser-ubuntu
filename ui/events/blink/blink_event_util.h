@@ -85,6 +85,8 @@ void SetWebPointerPropertiesFromMotionEventData(
     float orientation_rad,
     float tilt_x,
     float tilt_y,
+    float twist,
+    float tangential_pressure,
     int android_buttons_changed,
     MotionEvent::ToolType tool_type);
 
@@ -93,7 +95,9 @@ int WebEventModifiersToEventFlags(int modifiers);
 blink::WebInputEvent::Modifiers DomCodeToWebInputEventModifiers(
     ui::DomCode code);
 
-bool IsGestureScrollOrFlingOrPinch(blink::WebInputEvent::Type);
+bool IsGestureScrollOrPinch(blink::WebInputEvent::Type);
+
+bool IsGestureScroll(blink::WebInputEvent::Type);
 
 bool IsContinuousGestureEvent(blink::WebInputEvent::Type);
 

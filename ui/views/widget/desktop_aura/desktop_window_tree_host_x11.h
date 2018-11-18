@@ -30,6 +30,7 @@ class ImageSkiaRep;
 }
 
 namespace ui {
+enum class DomCode;
 class EventHandler;
 class KeyboardHook;
 class XScopedEventSelector;
@@ -85,7 +86,10 @@ class VIEWS_EXPORT DesktopWindowTreeHostX11
   static void CleanUpWindowList(void (*func)(aura::Window* window));
 
   // Disables event listening to make |dialog| modal.
-  std::unique_ptr<base::Closure> DisableEventListening();
+  std::unique_ptr<base::OnceClosure> DisableEventListening();
+
+  // Returns a map of KeyboardEvent code to KeyboardEvent key values.
+  base::flat_map<std::string, std::string> GetKeyboardLayoutMap() override;
 
  protected:
   // Overridden from DesktopWindowTreeHost:
@@ -99,8 +103,8 @@ class VIEWS_EXPORT DesktopWindowTreeHostX11
   void Close() override;
   void CloseNow() override;
   aura::WindowTreeHost* AsWindowTreeHost() override;
-  void ShowWindowWithState(ui::WindowShowState show_state) override;
-  void ShowMaximizedWithBounds(const gfx::Rect& restored_bounds) override;
+  void Show(ui::WindowShowState show_state,
+            const gfx::Rect& restore_bounds) override;
   bool IsVisible() const override;
   void SetSize(const gfx::Size& requested_size) override;
   void StackAbove(aura::Window* window) override;
@@ -142,6 +146,7 @@ class VIEWS_EXPORT DesktopWindowTreeHostX11
   void SetFullscreen(bool fullscreen) override;
   bool IsFullscreen() const override;
   void SetOpacity(float opacity) override;
+  void SetAspectRatio(const gfx::SizeF& aspect_ratio) override;
   void SetWindowIcons(const gfx::ImageSkia& window_icon,
                       const gfx::ImageSkia& app_icon) override;
   void InitModalType(ui::ModalType modal_type) override;
@@ -160,14 +165,16 @@ class VIEWS_EXPORT DesktopWindowTreeHostX11
   void ShowImpl() override;
   void HideImpl() override;
   gfx::Rect GetBoundsInPixels() const override;
-  void SetBoundsInPixels(const gfx::Rect& requested_bounds_in_pixels) override;
+  void SetBoundsInPixels(const gfx::Rect& requested_bounds_in_pixels,
+                         const viz::LocalSurfaceId& local_surface_id =
+                             viz::LocalSurfaceId()) override;
   gfx::Point GetLocationOnScreenInPixels() const override;
   void SetCapture() override;
   void ReleaseCapture() override;
   bool CaptureSystemKeyEventsImpl(
-      base::Optional<base::flat_set<int>> keys_codes) override;
+      base::Optional<base::flat_set<ui::DomCode>> dom_codes) override;
   void ReleaseSystemKeyEventCapture() override;
-  bool IsKeyLocked(int native_key_code) override;
+  bool IsKeyLocked(ui::DomCode dom_code) override;
   void SetCursorNative(gfx::NativeCursor cursor) override;
   void MoveCursorToScreenLocationInPixels(
       const gfx::Point& location_in_pixels) override;
@@ -177,14 +184,9 @@ class VIEWS_EXPORT DesktopWindowTreeHostX11
   void OnDisplayMetricsChanged(const display::Display& display,
                                uint32_t changed_metrics) override;
 
-  // Called after the window is maximized or restored.
-  virtual void OnMaximizedStateChanged();
-
-  // Called after the window is fullscreened or unfullscreened.
-  virtual void OnFullscreenStateChanged();
-
  private:
   friend class DesktopWindowTreeHostX11HighDPITest;
+
   // Initializes our X11 surface to draw on. This method performs all
   // initialization related to talking to the X11 server.
   void InitX11Window(const Widget::InitParams& params);
@@ -198,8 +200,22 @@ class VIEWS_EXPORT DesktopWindowTreeHostX11
   // fullscreen.
   gfx::Size AdjustSize(const gfx::Size& requested_size);
 
+  // If mapped, sends a message to the window manager to enable or disable the
+  // states |state1| and |state2|.  Otherwise, the states will be enabled or
+  // disabled on the next map.  It's the caller's responsibility to make sure
+  // atoms are set and unset in the appropriate pairs.  For example, if a caller
+  // sets (_NET_WM_STATE_MAXIMIZED_VERT, _NET_WM_STATE_MAXIMIZED_HORZ), it would
+  // be invalid to unset the maximized state by making two calls like
+  // (_NET_WM_STATE_MAXIMIZED_VERT, x11::None), (_NET_WM_STATE_MAXIMIZED_HORZ,
+  // x11::None).
+  void SetWMSpecState(bool enabled, XAtom state1, XAtom state2);
+
   // Called when |xwindow_|'s _NET_WM_STATE property is updated.
   void OnWMStateUpdated();
+
+  // Updates |window_properties_| with |new_window_properties|.
+  void UpdateWindowProperties(
+      const base::flat_set<XAtom>& new_window_properties);
 
   // Called when |xwindow_|'s _NET_FRAME_EXTENTS property is updated.
   void OnFrameExtentsUpdated();
@@ -222,8 +238,8 @@ class VIEWS_EXPORT DesktopWindowTreeHostX11
   void OnFocusEvent(bool focus_in, int mode, int detail);
 
   // Makes a round trip to the X server to get the enclosing workspace for this
-  // window.  Returns true iff |workspace_| was changed.
-  bool UpdateWorkspace();
+  // window.
+  void UpdateWorkspace();
 
   // Updates |xwindow_|'s minimum and maximum size.
   void UpdateMinAndMaxSize();
@@ -272,7 +288,6 @@ class VIEWS_EXPORT DesktopWindowTreeHostX11
   void DelayedResize(const gfx::Size& size_in_pixels);
   void DelayedChangeFrameType(Widget::FrameType new_type);
 
-  gfx::Rect GetWorkAreaBoundsInPixels() const;
   gfx::Rect ToDIPRect(const gfx::Rect& rect_in_pixels) const;
   gfx::Rect ToPixelRect(const gfx::Rect& rect_in_dip) const;
 
@@ -327,11 +342,12 @@ class VIEWS_EXPORT DesktopWindowTreeHostX11
   // |xwindow_|'s maximum size.
   gfx::Size max_size_in_pixels_;
 
-  // The workspace containing |xwindow_|.
-  std::string workspace_;
+  // The workspace containing |xwindow_|.  This will be base::nullopt when
+  // _NET_WM_DESKTOP is unset.
+  base::Optional<int> workspace_;
 
   // The window manager state bits.
-  base::flat_set<::Atom> window_properties_;
+  base::flat_set<XAtom> window_properties_;
 
   // Whether |xwindow_| was requested to be fullscreen via SetFullscreen().
   bool is_fullscreen_;
@@ -364,7 +380,8 @@ class VIEWS_EXPORT DesktopWindowTreeHostX11
   DesktopWindowTreeHostX11* window_parent_;
   std::set<DesktopWindowTreeHostX11*> window_children_;
 
-  base::ObserverList<DesktopWindowTreeHostObserverX11> observer_list_;
+  base::ObserverList<DesktopWindowTreeHostObserverX11>::Unchecked
+      observer_list_;
 
   // The window shape if the window is non-rectangular.
   gfx::XScopedPtr<_XRegion, gfx::XObjectDeleter<_XRegion, int, XDestroyRegion>>

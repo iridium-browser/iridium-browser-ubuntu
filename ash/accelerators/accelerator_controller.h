@@ -12,6 +12,7 @@
 #include <set>
 #include <vector>
 
+#include "ash/accelerators/accelerator_confirmation_dialog.h"
 #include "ash/accelerators/accelerator_table.h"
 #include "ash/accelerators/exit_warning_handler.h"
 #include "ash/ash_export.h"
@@ -25,7 +26,6 @@
 
 namespace ui {
 class AcceleratorManager;
-class AcceleratorManagerDelegate;
 }
 
 namespace ash {
@@ -33,8 +33,10 @@ namespace ash {
 struct AcceleratorData;
 class ExitWarningHandler;
 
-// Identifier for the high contrast toggle accelerator notification.
+// Identifiers for toggling accelerator notifications.
 ASH_EXPORT extern const char kHighContrastToggleAccelNotificationId[];
+ASH_EXPORT extern const char kDockedMagnifierToggleAccelNotificationId[];
+ASH_EXPORT extern const char kFullscreenMagnifierToggleAccelNotificationId[];
 
 // AcceleratorController provides functions for registering or unregistering
 // global keyboard accelerators, which are handled earlier than any windows. It
@@ -42,8 +44,7 @@ ASH_EXPORT extern const char kHighContrastToggleAccelNotificationId[];
 class ASH_EXPORT AcceleratorController : public ui::AcceleratorTarget,
                                          public mojom::AcceleratorController {
  public:
-  explicit AcceleratorController(
-      ui::AcceleratorManagerDelegate* manager_delegate);
+  AcceleratorController();
   ~AcceleratorController() override;
 
   // A list of possible ways in which an accelerator should be restricted before
@@ -130,6 +131,22 @@ class ASH_EXPORT AcceleratorController : public ui::AcceleratorTarget,
 
   // mojom::AcceleratorController:
   void SetVolumeController(mojom::VolumeControllerPtr controller) override;
+
+  // A confirmation dialog will be shown the first time an accessibility feature
+  // is enabled using the specified accelerator key sequence. Only one dialog
+  // will be shown at a time, and will not be shown again if the user has
+  // selected "accept" on a given dialog. The dialog was added to ensure that
+  // users would be aware of the shortcut they have just enabled, and to prevent
+  // users from accidentally triggering the feature. The dialog is currently
+  // shown when enabling the following features: high contrast, full screen
+  // magnifier and docked magnifier. The shown dialog is stored as a weak
+  // pointer in the variable |confirmation_dialog_| below.
+  void MaybeShowConfirmationDialog(int window_title_text_id,
+                                   int dialog_text_id,
+                                   base::OnceClosure on_accept_callback);
+
+  // Accessor to accelerator confirmation dialog.
+  AcceleratorConfirmationDialog* confirmation_dialog_for_testing();
 
  private:
   FRIEND_TEST_ALL_PREFIXES(AcceleratorControllerTest, GlobalAccelerators);
@@ -223,6 +240,9 @@ class ASH_EXPORT AcceleratorController : public ui::AcceleratorTarget,
   std::set<int> actions_needing_window_;
   // Actions that can be performed without closing the menu (if one is present).
   std::set<int> actions_keeping_menu_open_;
+
+  // Holds a weak pointer to the accelerator confirmation dialog.
+  base::WeakPtr<AcceleratorConfirmationDialog> confirmation_dialog_;
 
   DISALLOW_COPY_AND_ASSIGN(AcceleratorController);
 };

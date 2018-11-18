@@ -12,6 +12,7 @@ static_library("service") {
     "variations_field_trial_creator.h",
     "variations_service.cc",
     "variations_service.h",
+    "variations_service_client.cc",
     "variations_service_client.h",
   ]
 
@@ -19,6 +20,7 @@ static_library("service") {
     "//base",
     "//components/data_use_measurement/core",
     "//components/encrypted_messages",
+    "//components/language/core/browser",
     "//components/metrics",
     "//components/network_time",
     "//components/pref_registry",
@@ -29,6 +31,7 @@ static_library("service") {
     "//components/version_info",
     "//components/web_resource",
     "//net",
+    "//services/network/public/cpp",
     "//ui/base",
   ]
 }
@@ -54,6 +57,8 @@ source_set("unit_tests") {
     "//components/web_resource:test_support",
     "//net",
     "//net:test_support",
+    "//services/network:test_support",
+    "//services/network/public/cpp",
     "//testing/gtest",
   ]
 }

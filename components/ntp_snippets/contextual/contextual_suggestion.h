@@ -5,9 +5,11 @@
 #ifndef COMPONENTS_NTP_SNIPPETS_CONTEXTUAL_CONTEXTUAL_SUGGESTION_H_
 #define COMPONENTS_NTP_SNIPPETS_CONTEXTUAL_CONTEXTUAL_SUGGESTION_H_
 
+#include <string>
+
 #include "url/gurl.h"
 
-namespace ntp_snippets {
+namespace contextual_suggestions {
 
 // Struct containing the data for a single contextual content suggestion.
 struct ContextualSuggestion {
@@ -15,6 +17,8 @@ struct ContextualSuggestion {
   ContextualSuggestion(const ContextualSuggestion&);
   ContextualSuggestion(ContextualSuggestion&&) noexcept;
   ~ContextualSuggestion();
+
+  ContextualSuggestion& operator=(const ContextualSuggestion&);
 
   // The ID identifying the suggestion.
   std::string id;
@@ -38,6 +42,9 @@ struct ContextualSuggestion {
   // As above, but for identifying the favicon for the site the suggestion
   // resides on.
   std::string favicon_image_id;
+
+  // The favicon URL for the suggestion.
+  std::string favicon_image_url;
 };
 
 // Allows compact, precise construction of a ContextualSuggestion. Its main
@@ -45,19 +52,20 @@ struct ContextualSuggestion {
 // order has to be guessed at.
 class SuggestionBuilder {
  public:
-  SuggestionBuilder(const GURL& url);
+  explicit SuggestionBuilder(const GURL& url);
 
   SuggestionBuilder& Title(const std::string& title);
   SuggestionBuilder& PublisherName(const std::string& publisher_name);
   SuggestionBuilder& Snippet(const std::string& snippet);
   SuggestionBuilder& ImageId(const std::string& image_id);
   SuggestionBuilder& FaviconImageId(const std::string& favicon_image_id);
+  SuggestionBuilder& FaviconImageUrl(const std::string& favicon_image_url);
   ContextualSuggestion Build();
 
  private:
   ContextualSuggestion suggestion_;
 };
 
-}  // namespace ntp_snippets
+}  // namespace contextual_suggestions
 
 #endif  // COMPONENTS_NTP_SNIPPETS_CONTEXTUAL_CONTEXTUAL_SUGGESTION_H_

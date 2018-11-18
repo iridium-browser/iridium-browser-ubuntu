@@ -268,6 +268,7 @@ def create_suite_table(results_dict):
 
 
 def feedback_url(result_details_link):
+  # pylint: disable=redefined-variable-type
   url_args = [
       ('labels', 'Pri-2,Type-Bug,Restrict-View-Google'),
       ('summary', 'Result Details Feedback:'),
@@ -276,6 +277,7 @@ def feedback_url(result_details_link):
   if result_details_link:
     url_args.append(('comment', 'Please check out: %s' % result_details_link))
   url_args = urllib.urlencode(url_args)
+  # pylint: enable=redefined-variable-type
   return 'https://bugs.chromium.org/p/chromium/issues/entry?%s' % url_args
 
 
@@ -370,6 +372,7 @@ def ui_screenshot_set(json_path):
     # This will be reported as an error by result_details, no need to duplicate.
     return None
   ui_screenshots = []
+  # pylint: disable=too-many-nested-blocks
   for testsuite_run in json_object['per_iteration_data']:
     for _, test_runs in testsuite_run.iteritems():
       for test_run in test_runs:
@@ -388,6 +391,7 @@ def ui_screenshot_set(json_path):
             test_screenshots = json.loads(
                 screenshot_string)
           ui_screenshots.extend(test_screenshots)
+  # pylint: enable=too-many-nested-blocks
 
   if ui_screenshots:
     return json.dumps(ui_screenshots)
@@ -507,9 +511,14 @@ def main():
       'Result details link do not match. The link returned by get_url_link'
       ' should be the same as that returned by upload.')
 
-  ui_screenshot_link = upload_screenshot_set(json_file, args.test_name,
+  ui_screenshot_set_link = upload_screenshot_set(json_file, args.test_name,
       args.bucket, builder_name, build_number)
 
+  if ui_screenshot_set_link:
+    ui_catalog_url = 'https://chrome-ui-catalog.appspot.com/'
+    ui_catalog_query = urllib.urlencode(
+        {'screenshot_source': ui_screenshot_set_link})
+    ui_screenshot_link = '%s?%s' % (ui_catalog_url, ui_catalog_query)
 
   if args.output_json:
     with open(json_file) as original_json_file:
@@ -518,7 +527,7 @@ def main():
           'result_details (logcats, flakiness links)': result_details_link
       }
 
-      if ui_screenshot_link:
+      if ui_screenshot_set_link:
         json_object['links']['ui screenshots'] = ui_screenshot_link
 
       with open(args.output_json, 'w') as f:
@@ -526,7 +535,7 @@ def main():
   else:
     print 'Result Details: %s' % result_details_link
 
-    if ui_screenshot_link:
+    if ui_screenshot_set_link:
       print 'UI Screenshots %s' % ui_screenshot_link
 
 

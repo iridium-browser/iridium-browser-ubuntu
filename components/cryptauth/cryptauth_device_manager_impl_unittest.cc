@@ -19,7 +19,10 @@
 #include "components/cryptauth/fake_cryptauth_gcm_manager.h"
 #include "components/cryptauth/mock_cryptauth_client.h"
 #include "components/cryptauth/mock_sync_scheduler.h"
+#include "components/cryptauth/network_request_error.h"
 #include "components/cryptauth/pref_names.h"
+#include "components/cryptauth/proto/enum_util.h"
+#include "components/cryptauth/software_feature_state.h"
 #include "components/prefs/scoped_user_pref_update.h"
 #include "components/prefs/testing_pref_service.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
@@ -45,20 +48,16 @@ const double kLaterTimeNowSeconds = kInitialTimeNowSeconds + 30;
 const double kLastSyncTimeSeconds = kInitialTimeNowSeconds - (60 * 60 * 5);
 
 // Unlock key fields originally stored in the user prefs.
-const char kStoredPublicKey[] = "AAPL";
-const char kStoredDeviceName[] = "iPhone 6";
+const char kStoredPublicKey[] = "storedPublicKey";
+const char kStoredDeviceName[] = "Pixel 2";
 const char kStoredBluetoothAddress[] = "12:34:56:78:90:AB";
-const bool kStoredUnlockKey = true;
 const bool kStoredUnlockable = false;
-const bool kStoredMobileHotspotSupported = true;
 
 // ExternalDeviceInfo fields for the synced unlock key.
 const char kPublicKey1[] = "GOOG";
 const char kDeviceName1[] = "Pixel XL";
 const char kBluetoothAddress1[] = "aa:bb:cc:ee:dd:ff";
-const bool kUnlockKey1 = true;
 const bool kUnlockable1 = false;
-const bool kMobileHotspotSupported1 = true;
 const char kBeaconSeed1Data[] = "beaconSeed1Data";
 const int64_t kBeaconSeed1StartTime = 123456;
 const int64_t kBeaconSeed1EndTime = 123457;
@@ -69,11 +68,9 @@ const bool kArcPlusPlus1 = true;
 const bool kPixelPhone1 = true;
 
 // ExternalDeviceInfo fields for a non-synced unlockable device.
-const char kPublicKey2[] = "MSFT";
-const char kDeviceName2[] = "Surface Pro 3";
-const bool kUnlockKey2 = false;
+const char kPublicKey2[] = "CROS";
+const char kDeviceName2[] = "Pixelbook";
 const bool kUnlockable2 = true;
-const bool kMobileHotspotSupported2 = false;
 const char kBeaconSeed3Data[] = "beaconSeed3Data";
 const int64_t kBeaconSeed3StartTime = 123456;
 const int64_t kBeaconSeed3EndTime = 123457;
@@ -140,6 +137,28 @@ void ExpectSyncedDevicesAreEqual(
       EXPECT_TRUE(expected_seed.has_end_time_millis());
       EXPECT_TRUE(seed.has_end_time_millis());
       EXPECT_EQ(expected_seed.end_time_millis(), seed.end_time_millis());
+    }
+
+    EXPECT_EQ(expected_device.has_arc_plus_plus(), device.has_arc_plus_plus());
+    EXPECT_EQ(expected_device.arc_plus_plus(), device.arc_plus_plus());
+
+    EXPECT_EQ(expected_device.has_pixel_phone(), device.has_pixel_phone());
+    EXPECT_EQ(expected_device.pixel_phone(), device.pixel_phone());
+
+    EXPECT_EQ(expected_device.supported_software_features_size(),
+              device.supported_software_features_size());
+    for (const auto& software_feature :
+         expected_device.supported_software_features()) {
+      EXPECT_TRUE(base::ContainsValue(device.supported_software_features(),
+                                      software_feature));
+    }
+
+    EXPECT_EQ(expected_device.enabled_software_features_size(),
+              device.enabled_software_features_size());
+    for (const auto& software_feature :
+         expected_device.enabled_software_features()) {
+      EXPECT_TRUE(base::ContainsValue(device.enabled_software_features(),
+                                      software_feature));
     }
   }
 }
@@ -243,7 +262,7 @@ void ExpectSyncedDevicesAndPrefAreEqual(
 
     const base::ListValue* beacon_seeds_from_prefs;
     if (device_dictionary->GetList("beacon_seeds", &beacon_seeds_from_prefs)) {
-      ASSERT_EQ((size_t)expected_device.beacon_seeds_size(),
+      ASSERT_EQ(static_cast<size_t>(expected_device.beacon_seeds_size()),
                 beacon_seeds_from_prefs->GetSize());
       for (size_t i = 0; i < beacon_seeds_from_prefs->GetSize(); i++) {
         const base::DictionaryValue* seed;
@@ -271,19 +290,81 @@ void ExpectSyncedDevicesAndPrefAreEqual(
     } else {
       EXPECT_FALSE(expected_device.beacon_seeds_size());
     }
+
+    bool arc_plus_plus;
+    if (device_dictionary->GetBoolean("arc_plus_plus", &arc_plus_plus)) {
+      EXPECT_TRUE(expected_device.has_arc_plus_plus());
+      EXPECT_EQ(expected_device.arc_plus_plus(), arc_plus_plus);
+    } else {
+      EXPECT_FALSE(expected_device.has_arc_plus_plus());
+    }
+
+    bool pixel_phone;
+    if (device_dictionary->GetBoolean("pixel_phone", &pixel_phone)) {
+      EXPECT_TRUE(expected_device.has_pixel_phone());
+      EXPECT_EQ(expected_device.pixel_phone(), pixel_phone);
+    } else {
+      EXPECT_FALSE(expected_device.has_pixel_phone());
+    }
+
+    const base::DictionaryValue* software_features_from_prefs;
+    if (device_dictionary->GetDictionary("software_features",
+                                         &software_features_from_prefs)) {
+      std::vector<SoftwareFeature> supported_software_features;
+      std::vector<SoftwareFeature> enabled_software_features;
+
+      for (const auto& it : software_features_from_prefs->DictItems()) {
+        int software_feature_state;
+        ASSERT_TRUE(it.second.GetAsInteger(&software_feature_state));
+
+        SoftwareFeature software_feature =
+            SoftwareFeatureStringToEnum(it.first);
+        switch (static_cast<SoftwareFeatureState>(software_feature_state)) {
+          case SoftwareFeatureState::kEnabled:
+            enabled_software_features.push_back(software_feature);
+            FALLTHROUGH;
+          case SoftwareFeatureState::kSupported:
+            supported_software_features.push_back(software_feature);
+            break;
+          default:
+            break;
+        }
+      }
+
+      ASSERT_EQ(static_cast<size_t>(
+                    expected_device.supported_software_features_size()),
+                supported_software_features.size());
+      ASSERT_EQ(
+          static_cast<size_t>(expected_device.enabled_software_features_size()),
+          enabled_software_features.size());
+      for (auto supported_software_feature :
+           expected_device.supported_software_features()) {
+        EXPECT_TRUE(base::ContainsValue(
+            supported_software_features,
+            SoftwareFeatureStringToEnum(supported_software_feature)));
+      }
+      for (auto enabled_software_feature :
+           expected_device.enabled_software_features()) {
+        EXPECT_TRUE(base::ContainsValue(
+            enabled_software_features,
+            SoftwareFeatureStringToEnum(enabled_software_feature)));
+      }
+    } else {
+      EXPECT_FALSE(expected_device.supported_software_features_size());
+      EXPECT_FALSE(expected_device.enabled_software_features_size());
+    }
   }
 }
 
 // Harness for testing CryptAuthDeviceManager.
 class TestCryptAuthDeviceManager : public CryptAuthDeviceManagerImpl {
  public:
-  TestCryptAuthDeviceManager(
-      base::Clock* clock,
-      std::unique_ptr<CryptAuthClientFactory> client_factory,
-      CryptAuthGCMManager* gcm_manager,
-      PrefService* pref_service)
+  TestCryptAuthDeviceManager(base::Clock* clock,
+                             CryptAuthClientFactory* client_factory,
+                             CryptAuthGCMManager* gcm_manager,
+                             PrefService* pref_service)
       : CryptAuthDeviceManagerImpl(clock,
-                                   std::move(client_factory),
+                                   client_factory,
                                    gcm_manager,
                                    pref_service),
         scoped_sync_scheduler_(new NiceMock<MockSyncScheduler>()),
@@ -319,7 +400,7 @@ class CryptAuthDeviceManagerImplTest
       public MockCryptAuthClientFactory::Observer {
  protected:
   CryptAuthDeviceManagerImplTest()
-      : client_factory_(new MockCryptAuthClientFactory(
+      : client_factory_(std::make_unique<MockCryptAuthClientFactory>(
             MockCryptAuthClientFactory::MockType::MAKE_STRICT_MOCKS)),
         gcm_manager_("existing gcm registration id") {
     client_factory_->AddObserver(this);
@@ -328,9 +409,7 @@ class CryptAuthDeviceManagerImplTest
     unlock_key.set_public_key(kPublicKey1);
     unlock_key.set_friendly_device_name(kDeviceName1);
     unlock_key.set_bluetooth_address(kBluetoothAddress1);
-    unlock_key.set_unlock_key(kUnlockKey1);
     unlock_key.set_unlockable(kUnlockable1);
-    unlock_key.set_mobile_hotspot_supported(kMobileHotspotSupported1);
     BeaconSeed* seed1 = unlock_key.add_beacon_seeds();
     seed1->set_data(kBeaconSeed1Data);
     seed1->set_start_time_millis(kBeaconSeed1StartTime);
@@ -341,14 +420,22 @@ class CryptAuthDeviceManagerImplTest
     seed2->set_end_time_millis(kBeaconSeed2EndTime);
     unlock_key.set_arc_plus_plus(kArcPlusPlus1);
     unlock_key.set_pixel_phone(kPixelPhone1);
+    unlock_key.add_supported_software_features(
+        SoftwareFeatureEnumToString(SoftwareFeature::EASY_UNLOCK_HOST));
+    unlock_key.add_enabled_software_features(
+        SoftwareFeatureEnumToString(SoftwareFeature::EASY_UNLOCK_HOST));
+    unlock_key.add_supported_software_features(
+        SoftwareFeatureEnumToString(SoftwareFeature::BETTER_TOGETHER_HOST));
+    unlock_key.add_supported_software_features(
+        SoftwareFeatureEnumToString(SoftwareFeature::BETTER_TOGETHER_CLIENT));
+    unlock_key.add_enabled_software_features(
+        SoftwareFeatureEnumToString(SoftwareFeature::BETTER_TOGETHER_HOST));
     devices_in_response_.push_back(unlock_key);
 
     ExternalDeviceInfo unlockable_device;
     unlockable_device.set_public_key(kPublicKey2);
     unlockable_device.set_friendly_device_name(kDeviceName2);
-    unlockable_device.set_unlock_key(kUnlockKey2);
     unlockable_device.set_unlockable(kUnlockable2);
-    unlockable_device.set_mobile_hotspot_supported(kMobileHotspotSupported2);
     BeaconSeed* seed3 = unlockable_device.add_beacon_seeds();
     seed3->set_data(kBeaconSeed3Data);
     seed3->set_start_time_millis(kBeaconSeed3StartTime);
@@ -359,6 +446,12 @@ class CryptAuthDeviceManagerImplTest
     seed4->set_end_time_millis(kBeaconSeed4EndTime);
     unlockable_device.set_arc_plus_plus(kArcPlusPlus2);
     unlockable_device.set_pixel_phone(kPixelPhone2);
+    unlockable_device.add_supported_software_features(
+        SoftwareFeatureEnumToString(SoftwareFeature::MAGIC_TETHER_HOST));
+    unlockable_device.add_supported_software_features(
+        SoftwareFeatureEnumToString(SoftwareFeature::MAGIC_TETHER_CLIENT));
+    unlockable_device.add_enabled_software_features(
+        SoftwareFeatureEnumToString(SoftwareFeature::MAGIC_TETHER_HOST));
     devices_in_response_.push_back(unlockable_device);
   }
 
@@ -396,11 +489,11 @@ class CryptAuthDeviceManagerImplTest
     device_dictionary->SetString("public_key", public_key_b64);
     device_dictionary->SetString("device_name", device_name_b64);
     device_dictionary->SetString("bluetooth_address", bluetooth_address_b64);
-    device_dictionary->SetBoolean("unlock_key", kStoredUnlockKey);
     device_dictionary->SetBoolean("unlockable", kStoredUnlockable);
     device_dictionary->Set("beacon_seeds", std::make_unique<base::ListValue>());
-    device_dictionary->SetBoolean("mobile_hotspot_supported",
-                                  kStoredMobileHotspotSupported);
+    device_dictionary->Set("software_features",
+                           std::make_unique<base::DictionaryValue>());
+
     {
       ListPrefUpdate update(&pref_service_,
                             prefs::kCryptAuthDeviceSyncUnlockKeys);
@@ -408,8 +501,7 @@ class CryptAuthDeviceManagerImplTest
     }
 
     device_manager_.reset(new TestCryptAuthDeviceManager(
-        &clock_, base::WrapUnique(client_factory_), &gcm_manager_,
-        &pref_service_));
+        &clock_, client_factory_.get(), &gcm_manager_, &pref_service_));
     device_manager_->AddObserver(this);
 
     get_my_devices_response_.add_devices()->CopyFrom(devices_in_response_[0]);
@@ -470,8 +562,7 @@ class CryptAuthDeviceManagerImplTest
 
   base::SimpleTestClock clock_;
 
-  // Owned by |device_manager_|.
-  MockCryptAuthClientFactory* client_factory_;
+  std::unique_ptr<MockCryptAuthClientFactory> client_factory_;
 
   TestingPrefServiceSimple pref_service_;
 
@@ -537,11 +628,8 @@ TEST_F(CryptAuthDeviceManagerImplTest, InitWithDefaultPrefs) {
   TestingPrefServiceSimple pref_service;
   CryptAuthDeviceManager::RegisterPrefs(pref_service.registry());
 
-  TestCryptAuthDeviceManager device_manager(
-      &clock,
-      std::make_unique<MockCryptAuthClientFactory>(
-          MockCryptAuthClientFactory::MockType::MAKE_STRICT_MOCKS),
-      &gcm_manager_, &pref_service);
+  TestCryptAuthDeviceManager device_manager(&clock, client_factory_.get(),
+                                            &gcm_manager_, &pref_service);
 
   EXPECT_CALL(
       *(device_manager.GetSyncScheduler()),
@@ -566,8 +654,59 @@ TEST_F(CryptAuthDeviceManagerImplTest, InitWithExistingPrefs) {
   EXPECT_EQ(kStoredPublicKey, synced_devices[0].public_key());
   EXPECT_EQ(kStoredDeviceName, synced_devices[0].friendly_device_name());
   EXPECT_EQ(kStoredBluetoothAddress, synced_devices[0].bluetooth_address());
-  EXPECT_EQ(kStoredUnlockKey, synced_devices[0].unlock_key());
   EXPECT_EQ(kStoredUnlockable, synced_devices[0].unlockable());
+}
+
+// ExternalDeviceInfos's |unlock_key| and |mobile_hotspot_supported| fields
+// are deprecated, but it may be the case that after an update to Chrome, the
+// prefs reflect the old style of using these deprecated fields, instead of
+// software features. This test ensures the CryptAuthDeviceManager considers
+// these deprecated booleans, and populates the correct software features.
+TEST_F(
+    CryptAuthDeviceManagerImplTest,
+    InitWithExistingPrefs_MigrateDeprecateBooleansFromPrefsToSoftwareFeature) {
+  ListPrefUpdate update_clear(&pref_service_,
+                              prefs::kCryptAuthDeviceSyncUnlockKeys);
+  update_clear.Get()->Clear();
+
+  // Simulate a deprecated device being persisted to prefs.
+  auto device_dictionary = std::make_unique<base::DictionaryValue>();
+  std::string public_key_b64;
+  base::Base64UrlEncode(kStoredPublicKey,
+                        base::Base64UrlEncodePolicy::INCLUDE_PADDING,
+                        &public_key_b64);
+  device_dictionary->SetString("public_key", public_key_b64);
+  device_dictionary->SetBoolean("unlock_key", true);
+  device_dictionary->SetBoolean("mobile_hotspot_supported", true);
+  device_dictionary->Set("software_features",
+                         std::make_unique<base::DictionaryValue>());
+
+  ListPrefUpdate update(&pref_service_, prefs::kCryptAuthDeviceSyncUnlockKeys);
+  update.Get()->Append(std::move(device_dictionary));
+
+  device_manager_.reset(new TestCryptAuthDeviceManager(
+      &clock_, client_factory_.get(), &gcm_manager_, &pref_service_));
+  device_manager_->Start();
+
+  // Ensure that the deprecated booleans are not exposed in the final
+  // ExternalDeviceInfo, but rather in the correct software features.
+  auto synced_devices = device_manager_->GetSyncedDevices();
+  ASSERT_EQ(1u, synced_devices.size());
+  EXPECT_EQ(kStoredPublicKey, synced_devices[0].public_key());
+  EXPECT_FALSE(synced_devices[0].unlock_key());
+  EXPECT_FALSE(synced_devices[0].mobile_hotspot_supported());
+
+  EXPECT_EQ(2, synced_devices[0].supported_software_features().size());
+  EXPECT_TRUE(base::ContainsValue(
+      synced_devices[0].supported_software_features(),
+      SoftwareFeatureEnumToString(SoftwareFeature::EASY_UNLOCK_HOST)));
+  EXPECT_TRUE(base::ContainsValue(
+      synced_devices[0].supported_software_features(),
+      SoftwareFeatureEnumToString(SoftwareFeature::MAGIC_TETHER_HOST)));
+  EXPECT_EQ(1, synced_devices[0].enabled_software_features().size());
+  EXPECT_TRUE(base::ContainsValue(
+      synced_devices[0].enabled_software_features(),
+      SoftwareFeatureEnumToString(SoftwareFeature::EASY_UNLOCK_HOST)));
 }
 
 TEST_F(CryptAuthDeviceManagerImplTest, SyncSucceedsForFirstTime) {
@@ -623,7 +762,7 @@ TEST_F(CryptAuthDeviceManagerImplTest, ForceSyncFailsThenSucceeds) {
               OnSyncFinishedProxy(
                   CryptAuthDeviceManager::SyncResult::FAILURE,
                   CryptAuthDeviceManager::DeviceChangeResult::UNCHANGED));
-  error_callback_.Run("404");
+  error_callback_.Run(NetworkRequestError::kEndpointNotFound);
   EXPECT_EQ(old_sync_time, device_manager_->GetLastSyncTime());
   EXPECT_TRUE(pref_service_.GetBoolean(
       prefs::kCryptAuthDeviceSyncIsRecoveringFromFailure));
@@ -664,7 +803,7 @@ TEST_F(CryptAuthDeviceManagerImplTest, PeriodicSyncFailsThenSucceeds) {
               OnSyncFinishedProxy(
                   CryptAuthDeviceManager::SyncResult::FAILURE,
                   CryptAuthDeviceManager::DeviceChangeResult::UNCHANGED));
-  error_callback_.Run("401");
+  error_callback_.Run(NetworkRequestError::kAuthenticationError);
   EXPECT_EQ(old_sync_time, device_manager_->GetLastSyncTime());
   EXPECT_TRUE(pref_service_.GetBoolean(
       prefs::kCryptAuthDeviceSyncIsRecoveringFromFailure));
@@ -707,9 +846,7 @@ TEST_F(CryptAuthDeviceManagerImplTest, SyncSameDevice) {
   synced_device.set_public_key(kStoredPublicKey);
   synced_device.set_friendly_device_name(kStoredDeviceName);
   synced_device.set_bluetooth_address(kStoredBluetoothAddress);
-  synced_device.set_unlock_key(kStoredUnlockKey);
   synced_device.set_unlockable(kStoredUnlockable);
-  synced_device.set_mobile_hotspot_supported(kStoredMobileHotspotSupported);
   GetMyDevicesResponse get_my_devices_response;
   get_my_devices_response.add_devices()->CopyFrom(synced_device);
   success_callback_.Run(get_my_devices_response);
@@ -743,7 +880,11 @@ TEST_F(CryptAuthDeviceManagerImplTest, SyncThreeDevices) {
   synced_device2.set_public_key("new public key");
   synced_device2.set_friendly_device_name("new device name");
   synced_device2.set_bluetooth_address("aa:bb:cc:dd:ee:ff");
-  synced_device2.set_unlock_key(true);
+  synced_device2.add_supported_software_features(
+      SoftwareFeatureEnumToString(SoftwareFeature::EASY_UNLOCK_HOST));
+  synced_device2.add_enabled_software_features(
+      SoftwareFeatureEnumToString(SoftwareFeature::EASY_UNLOCK_HOST));
+
   response.add_devices()->CopyFrom(synced_device2);
 
   std::vector<ExternalDeviceInfo> expected_devices;
@@ -803,19 +944,15 @@ TEST_F(CryptAuthDeviceManagerImplTest, SyncDeviceWithNoContents) {
 }
 
 TEST_F(CryptAuthDeviceManagerImplTest, SyncFullyDetailedExternalDeviceInfos) {
-  GetMyDevicesResponse response;
-
   // First, use a device with only a public key (a public key is the only
   // required field). This ensures devices work properly when they do not have
   // all fields filled out.
   ExternalDeviceInfo device_with_only_public_key;
   device_with_only_public_key.set_public_key("publicKey1");
-  // Currently, CryptAuthDeviceManager only stores devices which are unlock
-  // keys, so set_unlock_key(true) must be called here for storage to work.
-  // TODO(khorimoto): Remove this when support for storing all types of devices
-  // is added.
-  device_with_only_public_key.set_unlock_key(true);
-  response.add_devices()->CopyFrom(device_with_only_public_key);
+  device_with_only_public_key.add_supported_software_features(
+      SoftwareFeatureEnumToString(SoftwareFeature::EASY_UNLOCK_HOST));
+  device_with_only_public_key.add_enabled_software_features(
+      SoftwareFeatureEnumToString(SoftwareFeature::EASY_UNLOCK_HOST));
 
   // Second, use a device with all fields filled out. This ensures that all
   // device details are properly saved.
@@ -823,22 +960,32 @@ TEST_F(CryptAuthDeviceManagerImplTest, SyncFullyDetailedExternalDeviceInfos) {
   device_with_all_fields.set_public_key("publicKey2");
   device_with_all_fields.set_friendly_device_name("deviceName");
   device_with_all_fields.set_bluetooth_address("aa:bb:cc:dd:ee:ff");
-  device_with_all_fields.set_unlock_key(true);
   device_with_all_fields.set_unlockable(true);
   device_with_all_fields.set_last_update_time_millis(123456789L);
-  device_with_all_fields.set_mobile_hotspot_supported(true);
   device_with_all_fields.set_device_type(DeviceType::ANDROIDOS);
+
   BeaconSeed seed1;
   seed1.set_data(kBeaconSeed1Data);
   seed1.set_start_time_millis(kBeaconSeed1StartTime);
   seed1.set_end_time_millis(kBeaconSeed1EndTime);
   device_with_all_fields.add_beacon_seeds()->CopyFrom(seed1);
+
   BeaconSeed seed2;
   seed2.set_data(kBeaconSeed2Data);
   seed2.set_start_time_millis(kBeaconSeed2StartTime);
   seed2.set_end_time_millis(kBeaconSeed2EndTime);
   device_with_all_fields.add_beacon_seeds()->CopyFrom(seed2);
-  response.add_devices()->CopyFrom(device_with_all_fields);
+
+  device_with_all_fields.set_arc_plus_plus(true);
+  device_with_all_fields.set_pixel_phone(true);
+
+  device_with_all_fields.add_supported_software_features(
+      SoftwareFeatureEnumToString(SoftwareFeature::EASY_UNLOCK_HOST));
+  device_with_all_fields.add_supported_software_features(
+      SoftwareFeatureEnumToString(SoftwareFeature::MAGIC_TETHER_HOST));
+
+  device_with_all_fields.add_enabled_software_features(
+      SoftwareFeatureEnumToString(SoftwareFeature::EASY_UNLOCK_HOST));
 
   std::vector<ExternalDeviceInfo> expected_devices;
   expected_devices.push_back(device_with_only_public_key);
@@ -850,6 +997,10 @@ TEST_F(CryptAuthDeviceManagerImplTest, SyncFullyDetailedExternalDeviceInfos) {
   EXPECT_CALL(*this, OnSyncFinishedProxy(
                          CryptAuthDeviceManager::SyncResult::SUCCESS,
                          CryptAuthDeviceManager::DeviceChangeResult::CHANGED));
+
+  GetMyDevicesResponse response;
+  response.add_devices()->CopyFrom(device_with_only_public_key);
+  response.add_devices()->CopyFrom(device_with_all_fields);
   success_callback_.Run(response);
 
   ExpectSyncedDevicesAndPrefAreEqual(
@@ -877,8 +1028,138 @@ TEST_F(CryptAuthDeviceManagerImplTest, SubsetsOfSyncedDevices) {
 
   // Only tether hosts.
   ExpectSyncedDevicesAreEqual(
-      std::vector<ExternalDeviceInfo>(1, devices_in_response_[0]),
+      std::vector<ExternalDeviceInfo>(1, devices_in_response_[1]),
       device_manager_->GetTetherHosts());
+}
+
+TEST_F(CryptAuthDeviceManagerImplTest,
+       TestDeprecatedBooleansArePersistedOnlyAsSoftwareFeatures) {
+  device_manager_->Start();
+
+  ExternalDeviceInfo device;
+  device.set_public_key("public key");
+  device.set_friendly_device_name("deprecated device");
+  device.set_unlock_key(true);
+  device.set_mobile_hotspot_supported(true);
+
+  devices_in_response_.push_back(device);
+  get_my_devices_response_.add_devices()->CopyFrom(device);
+
+  FireSchedulerForSync(INVOCATION_REASON_PERIODIC);
+  ASSERT_FALSE(success_callback_.is_null());
+  EXPECT_CALL(*this, OnSyncFinishedProxy(
+                         CryptAuthDeviceManager::SyncResult::SUCCESS,
+                         CryptAuthDeviceManager::DeviceChangeResult::CHANGED));
+  success_callback_.Run(get_my_devices_response_);
+
+  ExternalDeviceInfo synced_device = device_manager_->GetSyncedDevices()[2];
+
+  EXPECT_FALSE(synced_device.unlock_key());
+  EXPECT_FALSE(synced_device.mobile_hotspot_supported());
+
+  EXPECT_TRUE(base::ContainsValue(
+      synced_device.supported_software_features(),
+      SoftwareFeatureEnumToString(SoftwareFeature::EASY_UNLOCK_HOST)));
+  EXPECT_TRUE(base::ContainsValue(
+      synced_device.enabled_software_features(),
+      SoftwareFeatureEnumToString(SoftwareFeature::EASY_UNLOCK_HOST)));
+  EXPECT_TRUE(base::ContainsValue(
+      synced_device.supported_software_features(),
+      SoftwareFeatureEnumToString(SoftwareFeature::MAGIC_TETHER_HOST)));
+  EXPECT_FALSE(base::ContainsValue(
+      synced_device.enabled_software_features(),
+      SoftwareFeatureEnumToString(SoftwareFeature::MAGIC_TETHER_HOST)));
+}
+
+TEST_F(CryptAuthDeviceManagerImplTest,
+       TestIgnoreDeprecatedBooleansIfSoftwareFeaturesArePresent) {
+  device_manager_->Start();
+
+  ExternalDeviceInfo device;
+  device.set_public_key("public key");
+  device.set_friendly_device_name("deprecated device");
+  device.set_unlock_key(false);
+  device.set_mobile_hotspot_supported(false);
+
+  device.add_supported_software_features(
+      SoftwareFeatureEnumToString(SoftwareFeature::EASY_UNLOCK_HOST));
+  device.add_enabled_software_features(
+      SoftwareFeatureEnumToString(SoftwareFeature::EASY_UNLOCK_HOST));
+  device.add_supported_software_features(
+      SoftwareFeatureEnumToString(SoftwareFeature::MAGIC_TETHER_HOST));
+
+  devices_in_response_.push_back(device);
+  get_my_devices_response_.add_devices()->CopyFrom(device);
+
+  FireSchedulerForSync(INVOCATION_REASON_PERIODIC);
+  ASSERT_FALSE(success_callback_.is_null());
+  EXPECT_CALL(*this, OnSyncFinishedProxy(
+                         CryptAuthDeviceManager::SyncResult::SUCCESS,
+                         CryptAuthDeviceManager::DeviceChangeResult::CHANGED));
+  success_callback_.Run(get_my_devices_response_);
+
+  ExternalDeviceInfo synced_device = device_manager_->GetSyncedDevices()[2];
+
+  EXPECT_FALSE(synced_device.unlock_key());
+  EXPECT_FALSE(synced_device.mobile_hotspot_supported());
+
+  EXPECT_TRUE(base::ContainsValue(
+      synced_device.supported_software_features(),
+      SoftwareFeatureEnumToString(SoftwareFeature::EASY_UNLOCK_HOST)));
+  EXPECT_TRUE(base::ContainsValue(
+      synced_device.enabled_software_features(),
+      SoftwareFeatureEnumToString(SoftwareFeature::EASY_UNLOCK_HOST)));
+  EXPECT_TRUE(base::ContainsValue(
+      synced_device.supported_software_features(),
+      SoftwareFeatureEnumToString(SoftwareFeature::MAGIC_TETHER_HOST)));
+  EXPECT_FALSE(base::ContainsValue(
+      synced_device.enabled_software_features(),
+      SoftwareFeatureEnumToString(SoftwareFeature::MAGIC_TETHER_HOST)));
+}
+
+// Regression test for crbug.com/888031.
+TEST_F(CryptAuthDeviceManagerImplTest,
+       TestMigrateFromIntToStringSoftwareFeaturePrefRepresentation) {
+  device_manager_->Start();
+
+  ExternalDeviceInfo device;
+  device.set_public_key("public key");
+  device.set_friendly_device_name("deprecated device");
+
+  // Simulate how older client versions persisted SoftwareFeatures as ints.
+  device.add_supported_software_features(
+      std::to_string(SoftwareFeature::EASY_UNLOCK_HOST));
+  device.add_enabled_software_features(
+      std::to_string(SoftwareFeature::EASY_UNLOCK_HOST));
+  device.add_supported_software_features(
+      std::to_string(SoftwareFeature::MAGIC_TETHER_HOST));
+
+  devices_in_response_.push_back(device);
+  get_my_devices_response_.add_devices()->CopyFrom(device);
+
+  FireSchedulerForSync(INVOCATION_REASON_PERIODIC);
+  ASSERT_FALSE(success_callback_.is_null());
+  EXPECT_CALL(*this, OnSyncFinishedProxy(
+                         CryptAuthDeviceManager::SyncResult::SUCCESS,
+                         CryptAuthDeviceManager::DeviceChangeResult::CHANGED));
+  success_callback_.Run(get_my_devices_response_);
+
+  ExternalDeviceInfo synced_device = device_manager_->GetSyncedDevices()[2];
+
+  // CryptAuthDeviceManager should recognize that the SoftwareFeature prefs had
+  // been stored as refs, and convert them to their full string representations.
+  EXPECT_TRUE(base::ContainsValue(
+      synced_device.supported_software_features(),
+      SoftwareFeatureEnumToString(SoftwareFeature::EASY_UNLOCK_HOST)));
+  EXPECT_TRUE(base::ContainsValue(
+      synced_device.enabled_software_features(),
+      SoftwareFeatureEnumToString(SoftwareFeature::EASY_UNLOCK_HOST)));
+  EXPECT_TRUE(base::ContainsValue(
+      synced_device.supported_software_features(),
+      SoftwareFeatureEnumToString(SoftwareFeature::MAGIC_TETHER_HOST)));
+  EXPECT_FALSE(base::ContainsValue(
+      synced_device.enabled_software_features(),
+      SoftwareFeatureEnumToString(SoftwareFeature::MAGIC_TETHER_HOST)));
 }
 
 }  // namespace cryptauth

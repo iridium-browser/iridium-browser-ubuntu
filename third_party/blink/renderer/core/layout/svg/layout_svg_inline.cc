@@ -25,6 +25,7 @@
 #include "third_party/blink/renderer/core/layout/svg/layout_svg_text.h"
 #include "third_party/blink/renderer/core/layout/svg/line/svg_inline_flow_box.h"
 #include "third_party/blink/renderer/core/layout/svg/svg_layout_support.h"
+#include "third_party/blink/renderer/core/layout/svg/svg_resources.h"
 #include "third_party/blink/renderer/core/layout/svg/svg_resources_cache.h"
 #include "third_party/blink/renderer/core/svg/svg_a_element.h"
 
@@ -82,7 +83,7 @@ FloatRect LayoutSVGInline::VisualRectInLocalSVGCoordinates() const {
   return FloatRect();
 }
 
-LayoutRect LayoutSVGInline::AbsoluteVisualRect() const {
+LayoutRect LayoutSVGInline::VisualRectInDocument() const {
   return SVGLayoutSupport::VisualRectInAncestorSpace(*this, *View());
 }
 
@@ -119,15 +120,25 @@ void LayoutSVGInline::AbsoluteQuads(Vector<FloatQuad>& quads,
 
 void LayoutSVGInline::WillBeDestroyed() {
   SVGResourcesCache::ClientDestroyed(*this);
+  SVGResources::ClearClipPathFilterMask(ToSVGElement(*GetNode()), Style());
+  SVGResources::ClearPaints(ToSVGElement(*GetNode()), Style());
   LayoutInline::WillBeDestroyed();
 }
 
 void LayoutSVGInline::StyleDidChange(StyleDifference diff,
                                      const ComputedStyle* old_style) {
+  // Since layout depends on the bounds of the filter, we need to force layout
+  // when the filter changes.
+  if (diff.FilterChanged())
+    SetNeedsLayout(LayoutInvalidationReason::kStyleChange);
+
   if (diff.NeedsFullLayout())
     SetNeedsBoundariesUpdate();
 
   LayoutInline::StyleDidChange(diff, old_style);
+  SVGResources::UpdateClipPathFilterMask(ToSVGElement(*GetNode()), old_style,
+                                         StyleRef());
+  SVGResources::UpdatePaints(ToSVGElement(*GetNode()), old_style, StyleRef());
   SVGResourcesCache::ClientStyleChanged(*this, diff, StyleRef());
 }
 

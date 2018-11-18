@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "ash/public/cpp/ash_pref_names.h"
+#include "ash/public/cpp/stylus_utils.h"
 #include "base/memory/ptr_util.h"
 #include "base/sys_info.h"
 #include "base/values.h"
@@ -22,6 +23,7 @@
 #include "chrome/browser/chromeos/system/timezone_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
+#include "chromeos/chromeos_switches.h"
 #include "chromeos/network/device_state.h"
 #include "chromeos/network/network_handler.h"
 #include "chromeos/network/network_state_handler.h"
@@ -108,6 +110,9 @@ const char kPropertySwitchAccessEnabled[] = "a11ySwitchAccessEnabled";
 // Key which corresponds to the send-function-keys property in JS.
 const char kPropertySendFunctionsKeys[] = "sendFunctionKeys";
 
+// Key which corresponds to the camera-media-consolidated property in JS.
+const char kPropertyCameraMediaConsolidated[] = "cameraMediaConsolidated";
+
 // Property not found error message.
 const char kPropertyNotFound[] = "Property '*' does not exist.";
 
@@ -166,6 +171,32 @@ const char kDeviceTypeChromebox[] = "chromebox";
 // Value to which deviceType property is set when the specific type is unknown.
 const char kDeviceTypeChromedevice[] = "chromedevice";
 
+// Key which corresponds to the stylusStatus property in JS.
+const char kPropertyStylusStatus[] = "stylusStatus";
+
+// Value to which stylusStatus property is set when the device does not support
+// stylus input.
+const char kStylusStatusUnsupported[] = "unsupported";
+
+// Value to which stylusStatus property is set when the device supports stylus
+// input, but no stylus has been seen before.
+const char kStylusStatusSupported[] = "supported";
+
+// Value to which stylusStatus property is set when the device has a built-in
+// stylus or a stylus has been seen before.
+const char kStylusStatusSeen[] = "seen";
+
+// Key which corresponds to the assistantStatus property in JS.
+const char kPropertyAssistantStatus[] = "assistantStatus";
+
+// Value to which assistantStatus property is set when the device does not
+// support Assistant.
+const char kAssistantStatusUnsupported[] = "unsupported";
+
+// Value to which assistantStatus property is set when the device supports
+// Assistant.
+const char kAssistantStatusSupported[] = "supported";
+
 const struct {
   const char* api_name;
   const char* preference_name;
@@ -191,7 +222,8 @@ const struct {
      ash::prefs::kAccessibilitySelectToSpeakEnabled},
     {kPropertySwitchAccessEnabled,
      ash::prefs::kAccessibilitySwitchAccessEnabled},
-    {kPropertySendFunctionsKeys, prefs::kLanguageSendFunctionKeys}};
+    {kPropertySendFunctionsKeys, prefs::kLanguageSendFunctionKeys},
+    {kPropertyCameraMediaConsolidated, prefs::kCameraMediaConsolidated}};
 
 const char* GetBoolPrefNameForApiProperty(const char* api_name) {
   for (size_t i = 0;
@@ -329,6 +361,23 @@ std::unique_ptr<base::Value> ChromeosInfoPrivateGetFunction::GetValue(
       default:
         return std::make_unique<base::Value>(kDeviceTypeChromedevice);
     }
+  }
+
+  if (property_name == kPropertyStylusStatus) {
+    if (!ash::stylus_utils::HasStylusInput()) {
+      return std::make_unique<base::Value>(kStylusStatusUnsupported);
+    }
+
+    bool seen = g_browser_process->local_state()->HasPrefPath(
+        ash::prefs::kHasSeenStylus);
+    return std::make_unique<base::Value>(seen ? kStylusStatusSeen
+                                              : kStylusStatusSupported);
+  }
+
+  if (property_name == kPropertyAssistantStatus) {
+    return std::make_unique<base::Value>(
+        chromeos::switches::IsAssistantEnabled() ? kAssistantStatusSupported
+                                                 : kAssistantStatusUnsupported);
   }
 
   if (property_name == kPropertyClientId) {

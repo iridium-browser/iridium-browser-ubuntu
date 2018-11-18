@@ -11,6 +11,7 @@
 #include "base/callback.h"
 #include "base/files/file_path.h"
 #include "base/macros.h"
+#include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/safe_browsing/chrome_cleaner/chrome_cleaner_scanner_results.h"
 #include "chrome/browser/safe_browsing/chrome_cleaner/reporter_runner_win.h"
 #include "components/chrome_cleaner/public/interfaces/chrome_prompt.mojom.h"
@@ -116,9 +117,6 @@ class ChromeCleanerController {
   // Returns the global controller object.
   static ChromeCleanerController* GetInstance();
 
-  // Returns whether the Cleanup card in settings should be displayed.
-  virtual bool ShouldShowCleanupInSettingsUI() = 0;
-
   virtual State state() const = 0;
   virtual IdleReason idle_reason() const = 0;
 
@@ -193,8 +191,10 @@ class ChromeCleanerController {
   // in the kInfected state. This gracefully handles cases where multiple user
   // responses are received, for example if a user manages to click on a
   // "Cleanup" button multiple times.
-  virtual void ReplyWithUserResponse(Profile* profile,
-                                     UserResponse user_response) = 0;
+  virtual void ReplyWithUserResponse(
+      Profile* profile,
+      extensions::ExtensionService* extension_service,
+      UserResponse user_response) = 0;
 
   // If the controller is in the kRebootRequired state, initiates a reboot of
   // the computer. Call this after obtaining permission from the user to
@@ -206,6 +206,15 @@ class ChromeCleanerController {
   // Note that there are no guarantees that the reboot will in fact happen even
   // if the system calls to initiate a reboot return success.
   virtual void Reboot() = 0;
+
+  // Returns true if the cleaner is allowed to run by enterprise policy.
+  virtual bool IsAllowedByPolicy() = 0;
+
+  // Returns true if cleaner reporting is allowed to run by enterprise policy.
+  virtual bool IsReportingAllowedByPolicy() = 0;
+
+  // Returns true if cleaner reporting is managed by enterprise policy.
+  virtual bool IsReportingManagedByPolicy() = 0;
 
  protected:
   ChromeCleanerController();

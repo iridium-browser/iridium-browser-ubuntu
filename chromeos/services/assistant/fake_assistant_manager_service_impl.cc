@@ -11,8 +11,16 @@ FakeAssistantManagerServiceImpl::FakeAssistantManagerServiceImpl() = default;
 
 FakeAssistantManagerServiceImpl::~FakeAssistantManagerServiceImpl() = default;
 
-void FakeAssistantManagerServiceImpl::Start(const std::string& access_token) {
-  running_ = true;
+void FakeAssistantManagerServiceImpl::Start(const std::string& access_token,
+                                            base::OnceClosure callback) {
+  state_ = State::RUNNING;
+
+  if (callback)
+    std::move(callback).Run();
+}
+
+void FakeAssistantManagerServiceImpl::Stop() {
+  state_ = State::STOPPED;
 }
 
 void FakeAssistantManagerServiceImpl::SetAccessToken(
@@ -20,8 +28,9 @@ void FakeAssistantManagerServiceImpl::SetAccessToken(
 
 void FakeAssistantManagerServiceImpl::EnableListening(bool enable) {}
 
-bool FakeAssistantManagerServiceImpl::IsRunning() const {
-  return running_;
+AssistantManagerService::State FakeAssistantManagerServiceImpl::GetState()
+    const {
+  return state_;
 }
 
 AssistantSettingsManager*
@@ -33,10 +42,40 @@ void FakeAssistantManagerServiceImpl::SendGetSettingsUiRequest(
     const std::string& selector,
     GetSettingsUiResponseCallback callback) {}
 
+void FakeAssistantManagerServiceImpl::SendUpdateSettingsUiRequest(
+    const std::string& update,
+    UpdateSettingsUiResponseCallback callback) {}
+
+void FakeAssistantManagerServiceImpl::StartCachedScreenContextInteraction() {}
+
+void FakeAssistantManagerServiceImpl::StartMetalayerInteraction(
+    const gfx::Rect& region) {}
+
+void FakeAssistantManagerServiceImpl::StartVoiceInteraction() {}
+
+void FakeAssistantManagerServiceImpl::StopActiveInteraction(
+    bool cancel_conversation) {}
+
 void FakeAssistantManagerServiceImpl::SendTextQuery(const std::string& query) {}
 
-void FakeAssistantManagerServiceImpl::AddAssistantEventSubscriber(
-    mojom::AssistantEventSubscriberPtr subscriber) {}
+void FakeAssistantManagerServiceImpl::AddAssistantInteractionSubscriber(
+    mojom::AssistantInteractionSubscriberPtr subscriber) {}
+
+void FakeAssistantManagerServiceImpl::AddAssistantNotificationSubscriber(
+    mojom::AssistantNotificationSubscriberPtr subscriber) {}
+
+void FakeAssistantManagerServiceImpl::RetrieveNotification(
+    mojom::AssistantNotificationPtr notification,
+    int action_index) {}
+
+void FakeAssistantManagerServiceImpl::DismissNotification(
+    mojom::AssistantNotificationPtr notification) {}
+
+void FakeAssistantManagerServiceImpl::CacheScreenContext(
+    CacheScreenContextCallback callback) {}
+
+void FakeAssistantManagerServiceImpl::OnAccessibilityStatusChanged(
+    bool spoken_feedback_enabled) {}
 
 }  // namespace assistant
 }  // namespace chromeos

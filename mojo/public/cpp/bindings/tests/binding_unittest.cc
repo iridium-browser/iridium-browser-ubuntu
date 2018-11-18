@@ -13,9 +13,8 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
-#include "mojo/edk/embedder/embedder.h"
+#include "mojo/core/embedder/embedder.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
 #include "mojo/public/cpp/bindings/tests/bindings_test_base.h"
 #include "mojo/public/interfaces/bindings/tests/ping_service.mojom.h"
@@ -40,8 +39,8 @@ class ServiceImpl : public sample::Service {
   void Frobinate(sample::FooPtr foo,
                  BazOptions options,
                  sample::PortPtr port,
-                 const FrobinateCallback& callback) override {
-    callback.Run(1);
+                 FrobinateCallback callback) override {
+    std::move(callback).Run(1);
   }
   void GetPort(InterfaceRequest<sample::Port> port) override {}
 
@@ -243,8 +242,8 @@ class IntegerAccessorImpl : public sample::IntegerAccessor {
 
  private:
   // sample::IntegerAccessor implementation.
-  void GetInteger(const GetIntegerCallback& callback) override {
-    callback.Run(1, sample::Enum::VALUE);
+  void GetInteger(GetIntegerCallback callback) override {
+    std::move(callback).Run(1, sample::Enum::VALUE);
   }
   void SetInteger(int64_t data, sample::Enum type) override {}
 
@@ -302,10 +301,10 @@ class PingServiceImpl : public test::PingService {
   ~PingServiceImpl() override {}
 
   // test::PingService:
-  void Ping(const PingCallback& callback) override {
+  void Ping(PingCallback callback) override {
     if (!ping_handler_.is_null())
       ping_handler_.Run();
-    callback.Run();
+    std::move(callback).Run();
   }
 
   void set_ping_handler(const base::Closure& handler) {
@@ -483,7 +482,7 @@ TEST_P(BindingTest, ReportBadMessage) {
       &binding));
 
   std::string received_error;
-  edk::SetDefaultProcessErrorCallback(
+  core::SetDefaultProcessErrorCallback(
       base::Bind([](std::string* out_error,
                     const std::string& error) { *out_error = error; },
                  &received_error));
@@ -494,7 +493,7 @@ TEST_P(BindingTest, ReportBadMessage) {
   EXPECT_TRUE(called);
   EXPECT_EQ("received bad message", received_error);
 
-  edk::SetDefaultProcessErrorCallback(mojo::edk::ProcessErrorCallback());
+  core::SetDefaultProcessErrorCallback(mojo::core::ProcessErrorCallback());
 }
 
 TEST_P(BindingTest, GetBadMessageCallback) {
@@ -505,7 +504,7 @@ TEST_P(BindingTest, GetBadMessageCallback) {
   ReportBadMessageCallback bad_message_callback;
 
   std::string received_error;
-  edk::SetDefaultProcessErrorCallback(
+  core::SetDefaultProcessErrorCallback(
       base::Bind([](std::string* out_error,
                     const std::string& error) { *out_error = error; },
                  &received_error));
@@ -527,7 +526,7 @@ TEST_P(BindingTest, GetBadMessageCallback) {
   std::move(bad_message_callback).Run("delayed bad message");
   EXPECT_EQ("delayed bad message", received_error);
 
-  edk::SetDefaultProcessErrorCallback(mojo::edk::ProcessErrorCallback());
+  core::SetDefaultProcessErrorCallback(mojo::core::ProcessErrorCallback());
 }
 
 // StrongBindingTest -----------------------------------------------------------

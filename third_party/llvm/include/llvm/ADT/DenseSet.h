@@ -17,7 +17,7 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseMapInfo.h"
 #include "llvm/Support/type_traits.h"
-#include <algorithm> 
+#include <algorithm>
 #include <cstddef>
 #include <initializer_list>
 #include <iterator>
@@ -136,8 +136,8 @@ public:
   public:
     using difference_type = typename MapTy::const_iterator::difference_type;
     using value_type = ValueT;
-    using pointer = value_type *;
-    using reference = value_type &;
+    using pointer = const value_type *;
+    using reference = const value_type &;
     using iterator_category = std::forward_iterator_tag;
 
     ConstIterator() = default;

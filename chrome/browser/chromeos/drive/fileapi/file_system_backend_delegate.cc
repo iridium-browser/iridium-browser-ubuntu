@@ -8,6 +8,7 @@
 
 #include "base/bind.h"
 #include "base/files/file_path.h"
+#include "base/task/post_task.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
 #include "chrome/browser/chromeos/drive/fileapi/async_file_util.h"
 #include "chrome/browser/chromeos/drive/fileapi/fileapi_worker.h"
@@ -15,6 +16,7 @@
 #include "chrome/browser/chromeos/drive/fileapi/webkit_file_stream_writer_impl.h"
 #include "components/drive/chromeos/file_system_interface.h"
 #include "components/drive/drive_api_util.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "storage/browser/fileapi/async_file_util.h"
 #include "storage/browser/fileapi/file_stream_reader.h"
@@ -36,10 +38,10 @@ void GetRedirectURLForContentsOnUIThreadWithResourceEntry(
   GURL url;
   if (error == FILE_ERROR_OK && entry->has_file_specific_info() &&
       entry->file_specific_info().is_hosted_document()) {
-    url = GURL(entry->file_specific_info().alternate_url());
+    url = GURL(entry->alternate_url());
   }
-  BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
-                          base::BindOnce(callback, url));
+  base::PostTaskWithTraits(FROM_HERE, {BrowserThread::IO},
+                           base::BindOnce(callback, url));
 }
 
 // Called on the UI thread after
@@ -52,21 +54,21 @@ void GetRedirectURLForContentsOnUIThread(
   FileSystemInterface* const file_system =
       fileapi_internal::GetFileSystemFromUrl(url);
   if (!file_system) {
-    BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
-                            base::BindOnce(callback, GURL()));
+    base::PostTaskWithTraits(FROM_HERE, {BrowserThread::IO},
+                             base::BindOnce(callback, GURL()));
     return;
   }
   const base::FilePath file_path = util::ExtractDrivePathFromFileSystemUrl(url);
   if (file_path.empty()) {
-    BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
-                            base::BindOnce(callback, GURL()));
+    base::PostTaskWithTraits(FROM_HERE, {BrowserThread::IO},
+                             base::BindOnce(callback, GURL()));
     return;
   }
 
   file_system->GetResourceEntry(
       file_path,
-      base::Bind(&GetRedirectURLForContentsOnUIThreadWithResourceEntry,
-                 callback));
+      base::BindOnce(&GetRedirectURLForContentsOnUIThreadWithResourceEntry,
+                     callback));
 }
 
 }  // namespace
@@ -75,8 +77,7 @@ FileSystemBackendDelegate::FileSystemBackendDelegate()
     : async_file_util_(new internal::AsyncFileUtil) {
 }
 
-FileSystemBackendDelegate::~FileSystemBackendDelegate() {
-}
+FileSystemBackendDelegate::~FileSystemBackendDelegate() = default;
 
 storage::AsyncFileUtil* FileSystemBackendDelegate::GetAsyncFileUtil(
     storage::FileSystemType type) {
@@ -128,15 +129,15 @@ FileSystemBackendDelegate::CreateFileStreamWriter(
 storage::WatcherManager* FileSystemBackendDelegate::GetWatcherManager(
     storage::FileSystemType type) {
   NOTIMPLEMENTED();
-  return NULL;
+  return nullptr;
 }
 
 void FileSystemBackendDelegate::GetRedirectURLForContents(
     const storage::FileSystemURL& url,
     const storage::URLCallback& callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::UI},
       base::BindOnce(&GetRedirectURLForContentsOnUIThread, url, callback));
 }
 

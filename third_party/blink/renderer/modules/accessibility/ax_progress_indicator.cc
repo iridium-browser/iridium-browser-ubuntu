@@ -20,7 +20,7 @@
 
 #include "third_party/blink/renderer/modules/accessibility/ax_progress_indicator.h"
 
-#include "third_party/blink/renderer/core/dom/accessible_node.h"
+#include "third_party/blink/renderer/core/aom/accessible_node.h"
 #include "third_party/blink/renderer/core/html/html_progress_element.h"
 #include "third_party/blink/renderer/core/layout/layout_progress.h"
 #include "third_party/blink/renderer/modules/accessibility/ax_object_cache_impl.h"
@@ -40,10 +40,10 @@ AXProgressIndicator* AXProgressIndicator::Create(
   return new AXProgressIndicator(layout_object, ax_object_cache);
 }
 
-AccessibilityRole AXProgressIndicator::DetermineAccessibilityRole() {
-  if ((aria_role_ = DetermineAriaRoleAttribute()) != kUnknownRole)
+ax::mojom::Role AXProgressIndicator::DetermineAccessibilityRole() {
+  if ((aria_role_ = DetermineAriaRoleAttribute()) != ax::mojom::Role::kUnknown)
     return aria_role_;
-  return kProgressIndicatorRole;
+  return ax::mojom::Role::kProgressIndicator;
 }
 
 bool AXProgressIndicator::ComputeAccessibilityIsIgnored(

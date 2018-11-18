@@ -9,8 +9,10 @@
 #include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "base/strings/string_piece.h"
+#include "base/task/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/storage_partition.h"
 #include "crypto/ec_private_key.h"
@@ -40,8 +42,8 @@ void MessagePropertyProvider::GetChannelID(
 
   scoped_refptr<net::URLRequestContextGetter> request_context_getter =
       storage_partition->GetURLRequestContext();
-  content::BrowserThread::PostTask(
-      content::BrowserThread::IO, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {content::BrowserThread::IO},
       base::BindOnce(&MessagePropertyProvider::GetChannelIDOnIOThread,
                      base::ThreadTaskRunnerHandle::Get(),
                      request_context_getter, source_url.host(), reply));
@@ -62,12 +64,18 @@ void MessagePropertyProvider::GetChannelIDOnIOThread(
     const std::string& host,
     const ChannelIDCallback& reply) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
-  net::ChannelIDService* channel_id_service =
-      request_context_getter->GetURLRequestContext()->channel_id_service();
+  const net::HttpNetworkSession::Params* network_params =
+      request_context_getter->GetURLRequestContext()->GetNetworkSessionParams();
   GetChannelIDOutput* output = new GetChannelIDOutput();
   net::CompletionCallback net_completion_callback =
       base::Bind(&MessagePropertyProvider::GotChannelID, original_task_runner,
                  base::Owned(output), reply);
+  if (!network_params->enable_channel_id) {
+    GotChannelID(original_task_runner, output, reply, net::ERR_FILE_NOT_FOUND);
+    return;
+  }
+  net::ChannelIDService* channel_id_service =
+      request_context_getter->GetURLRequestContext()->channel_id_service();
   int status = channel_id_service->GetChannelID(
       host, &output->channel_id_key, net_completion_callback, &output->request);
   if (status == net::ERR_IO_PENDING)

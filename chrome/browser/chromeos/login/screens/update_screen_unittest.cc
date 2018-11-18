@@ -4,7 +4,6 @@
 
 #include "chrome/browser/chromeos/login/screens/update_screen.h"
 #include "base/command_line.h"
-#include "base/message_loop/message_loop.h"
 #include "base/test/scoped_mock_time_message_loop_task_runner.h"
 #include "chrome/browser/chromeos/login/screens/mock_base_screen_delegate.h"
 #include "chrome/browser/chromeos/login/screens/mock_error_screen.h"
@@ -122,7 +121,7 @@ TEST_F(UpdateScreenUnitTest, HandlesNoUpdate) {
   // Set expectation that UpdateScreen will exit successfully
   // with code UPDATE_NOUPDATE.
   EXPECT_CALL(mock_base_screen_delegate_,
-              OnExit(_, ScreenExitCode::UPDATE_NOUPDATE, _))
+              OnExit(ScreenExitCode::UPDATE_NOUPDATE))
       .Times(1);
 
   // DUT reaches UpdateScreen.
@@ -144,7 +143,7 @@ TEST_F(UpdateScreenUnitTest, HandlesNonCriticalUpdate) {
   // UPDATE_NOUPDATE means that either there was no update
   // or there was a non-critical update.
   EXPECT_CALL(mock_base_screen_delegate_,
-              OnExit(_, ScreenExitCode::UPDATE_NOUPDATE, _))
+              OnExit(ScreenExitCode::UPDATE_NOUPDATE))
       .Times(1);
 
   // DUT reaches UpdateScreen.
@@ -163,7 +162,7 @@ TEST_F(UpdateScreenUnitTest, HandlesNonCriticalUpdate) {
 TEST_F(UpdateScreenUnitTest, HandlesCriticalUpdate) {
   // Set expectation that UpdateScreen does not exit.
   // This is the case because a critical update mandates reboot.
-  EXPECT_CALL(mock_base_screen_delegate_, OnExit(_, _, _)).Times(0);
+  EXPECT_CALL(mock_base_screen_delegate_, OnExit(_)).Times(0);
 
   // DUT reaches UpdateScreen.
   update_screen_.reset(new UpdateScreen(&mock_base_screen_delegate_,

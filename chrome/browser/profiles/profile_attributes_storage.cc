@@ -5,6 +5,7 @@
 #include "chrome/browser/profiles/profile_attributes_storage.h"
 
 #include <algorithm>
+#include <utility>
 
 #include "base/bind.h"
 #include "base/files/file_util.h"
@@ -13,12 +14,13 @@
 #include "base/rand_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task_scheduler/post_task.h"
-#include "base/threading/thread_restrictions.h"
+#include "base/task/post_task.h"
+#include "base/threading/scoped_blocking_call.h"
 #include "build/build_config.h"
 #include "chrome/browser/profiles/profile_avatar_downloader.h"
 #include "chrome/browser/profiles/profile_avatar_icon_util.h"
 #include "chrome/grit/generated_resources.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "third_party/icu/source/i18n/unicode/coll.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -55,7 +57,7 @@ const int kDefaultNames[] = {
 // from disk the then |out_image| will contain the bitmap image, otherwise it
 // will be NULL.
 void ReadBitmap(const base::FilePath& image_path, gfx::Image** out_image) {
-  base::AssertBlockingAllowed();
+  base::ScopedBlockingCall scoped_blocking_call(base::BlockingType::MAY_BLOCK);
   *out_image = nullptr;
 
   // If the path doesn't exist, don't even try reading it.
@@ -83,7 +85,7 @@ void ReadBitmap(const base::FilePath& image_path, gfx::Image** out_image) {
 void SaveBitmap(std::unique_ptr<ImageData> data,
                 const base::FilePath& image_path,
                 const base::Closure& callback) {
-  base::AssertBlockingAllowed();
+  base::ScopedBlockingCall scoped_blocking_call(base::BlockingType::MAY_BLOCK);
 
   // Make sure the destination directory exists.
   base::FilePath dir = image_path.DirName();
@@ -98,16 +100,14 @@ void SaveBitmap(std::unique_ptr<ImageData> data,
     return;
   }
 
-  content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
-                                   callback);
+  base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI}, callback);
 }
 
 void RunCallbackIfFileMissing(const base::FilePath& file_path,
                               const base::Closure& callback) {
-  base::AssertBlockingAllowed();
+  base::ScopedBlockingCall scoped_blocking_call(base::BlockingType::MAY_BLOCK);
   if (!base::PathExists(file_path))
-    content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
-                                     callback);
+    base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI}, callback);
 }
 
 // Compares two ProfileAttributesEntry using locale-sensitive comparison of
@@ -161,12 +161,8 @@ bool GetRandomAvatarIconIndex(
 
 }  // namespace
 
-ProfileAttributesStorage::ProfileAttributesStorage(
-    PrefService* prefs,
-    const base::FilePath& user_data_dir)
+ProfileAttributesStorage::ProfileAttributesStorage(PrefService* prefs)
     : prefs_(prefs),
-      user_data_dir_(user_data_dir),
-      disable_avatar_download_for_testing_(false),
       file_task_runner_(base::CreateSequencedTaskRunnerWithTraits(
           {base::MayBlock(), base::TaskPriority::USER_VISIBLE,
            base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN})) {}

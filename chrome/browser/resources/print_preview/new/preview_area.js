@@ -3,45 +3,22 @@
 // found in the LICENSE file.
 
 cr.exportPath('print_preview_new');
-/**
- * @typedef {{accessibility: Function,
- *            documentLoadComplete: Function,
- *            getHeight: Function,
- *            getHorizontalScrollbarThickness: Function,
- *            getPageLocationNormalized: Function,
- *            getVerticalScrollbarThickness: Function,
- *            getWidth: Function,
- *            getZoomLevel: Function,
- *            goToPage: Function,
- *            grayscale: Function,
- *            loadPreviewPage: Function,
- *            onload: Function,
- *            onPluginSizeChanged: Function,
- *            onScroll: Function,
- *            pageXOffset: Function,
- *            pageYOffset: Function,
- *            reload: Function,
- *            resetPrintPreviewMode: Function,
- *            sendKeyEvent: Function,
- *            setPageNumbers: Function,
- *            setPageXOffset: Function,
- *            setPageYOffset: Function,
- *            setZoomLevel: Function,
- *            fitToHeight: Function,
- *            fitToWidth: Function,
- *            zoomIn: Function,
- *            zoomOut: Function}}
- */
-print_preview_new.PDFPlugin;
 
-(function() {
-'use strict';
+/**
+ * @typedef {{
+ *   width_microns: number,
+ *   height_microns: number,
+ * }}
+ */
+print_preview_new.MediaSizeValue;
 
 /** @enum {string} */
-const PreviewAreaState_ = {
+print_preview_new.PreviewAreaState = {
+  NO_PLUGIN: 'no-plugin',
   LOADING: 'loading',
   DISPLAY_PREVIEW: 'display-preview',
-  OPEN_IN_PREVIEW: 'open-in-preview',
+  OPEN_IN_PREVIEW_LOADING: 'open-in-preview-loading',
+  OPEN_IN_PREVIEW_LOADED: 'open-in-preview-loaded',
   INVALID_SETTINGS: 'invalid-settings',
   PREVIEW_FAILED: 'preview-failed',
   UNSUPPORTED_CLOUD_PRINTER: 'unsupported-cloud-printer',
@@ -80,19 +57,18 @@ Polymer({
       value: false,
     },
 
-    /** @private {string} */
-    previewState_: {
+    /** @type {!print_preview_new.PreviewAreaState} */
+    previewState: {
       type: String,
       notify: true,
-      value: PreviewAreaState_.LOADING,
+      value: print_preview_new.PreviewAreaState.LOADING,
     },
 
     /** @private {boolean} */
     previewLoaded_: {
       type: Boolean,
       notify: true,
-      computed: 'computePreviewLoaded_(' +
-          'previewState_, pluginLoaded_, documentReady_)',
+      computed: 'computePreviewLoaded_(documentReady_, pluginLoaded_)',
     },
   },
 
@@ -104,15 +80,28 @@ Polymer({
   observers: [
     'onSettingsChanged_(settings.color.value, settings.cssBackground.value, ' +
         'settings.fitToPage.value, settings.headerFooter.value, ' +
-        'settings.layout.value, settings.margins.value, ' +
-        'settings.customMargins.value, settings.mediaSize.value, ' +
-        'settings.ranges.value, settings.selectionOnly.value, ' +
-        'settings.scaling.value, settings.rasterize.value, destination.id, ' +
-        'destination.capabilities)',
+        'settings.layout.value, settings.ranges.value, ' +
+        'settings.selectionOnly.value, settings.scaling.value, ' +
+        'settings.rasterize.value, destination)',
+    'onMarginsChanged_(settings.margins.value)',
+    'onCustomMarginsChanged_(settings.customMargins.value)',
+    'onMediaSizeChanged_(settings.mediaSize.value)',
+    'onPagesPerSheetChanged_(settings.pagesPerSheet.value)',
+    'pluginOrDocumentStatusChanged_(pluginLoaded_, documentReady_)',
   ],
 
-  /** @private {print_preview.NativeLayer} */
+  /** @private {?print_preview.NativeLayer} */
   nativeLayer_: null,
+
+  /**
+   * @private {?print_preview.MarginsSetting}
+   */
+  lastCustomMargins_: null,
+
+  /**
+   * @private {?print_preview_new.MediaSizeValue}
+   */
+  lastMediaSize_: null,
 
   /** @private {number} */
   inFlightRequestId_: -1,
@@ -120,8 +109,8 @@ Polymer({
   /** @private {boolean} */
   requestPreviewWhenReady_: false,
 
-  /** @private {HTMLEmbedElement|print_preview_new.PDFPlugin} */
-  plugin_: null,
+  /** @private {?print_preview_new.PluginProxy} */
+  pluginProxy_: null,
 
   /** @private {?function(!KeyboardEvent)} */
   keyEventCallback_: null,
@@ -136,24 +125,20 @@ Polymer({
     this.addWebUIListener(
         'page-preview-ready', this.onPagePreviewReady_.bind(this));
 
-    const oopCompatObj =
-        this.$$('.preview-area-compatibility-object-out-of-process');
-    const isOOPCompatible = oopCompatObj.postMessage;
-    oopCompatObj.parentElement.removeChild(oopCompatObj);
-    if (!isOOPCompatible) {
-      this.previewState_ = PreviewAreaState_.PREVIEW_FAILED;
-      this.fire('preview-failed');
+    this.pluginProxy_ = print_preview_new.PluginProxy.getInstance();
+    if (!this.pluginProxy_.checkPluginCompatibility(assert(
+            this.$$('.preview-area-compatibility-object-out-of-process')))) {
+      this.previewState = print_preview_new.PreviewAreaState.NO_PLUGIN;
     }
   },
+
 
   /**
    * @return {boolean} Whether the preview is loaded.
    * @private
    */
   computePreviewLoaded_: function() {
-    return this.previewState_ == PreviewAreaState_.DISPLAY_PREVIEW ||
-        (this.documentReady_ && this.pluginLoaded_ &&
-         this.previewState_ == PreviewAreaState_.OPEN_IN_PREVIEW);
+    return this.documentReady_ && this.pluginLoaded_;
   },
 
   /** @return {boolean} Whether the preview is loaded. */
@@ -206,12 +191,40 @@ Polymer({
     this.requestPreviewWhenReady_ = true;
   },
 
+  /** @private */
+  pluginOrDocumentStatusChanged_: function() {
+    if (!this.pluginLoaded_ || !this.documentReady_)
+      return;
+
+    this.previewState = this.previewState ==
+            print_preview_new.PreviewAreaState.OPEN_IN_PREVIEW_LOADING ?
+        print_preview_new.PreviewAreaState.OPEN_IN_PREVIEW_LOADED :
+        print_preview_new.PreviewAreaState.DISPLAY_PREVIEW;
+  },
+
   /**
    * @return {string} 'invisible' if overlay is invisible, '' otherwise.
    * @private
    */
   getInvisible_: function() {
-    return this.previewLoaded() ? 'invisible' : '';
+    return this.isInDisplayPreviewState_() ? 'invisible' : '';
+  },
+
+  /**
+   * @return {string} 'true' if overlay is aria-hidden, 'false' otherwise.
+   * @private
+   */
+  getAriaHidden_: function() {
+    return this.isInDisplayPreviewState_().toString();
+  },
+
+  /**
+   * @return {boolean} Whether the preview area is in DISPLAY_PREVIEW state.
+   * @private
+   */
+  isInDisplayPreviewState_: function() {
+    return this.previewState ==
+        print_preview_new.PreviewAreaState.DISPLAY_PREVIEW;
   },
 
   /**
@@ -219,7 +232,7 @@ Polymer({
    * @private
    */
   isPreviewLoading_: function() {
-    return this.previewState_ == PreviewAreaState_.LOADING;
+    return this.previewState == print_preview_new.PreviewAreaState.LOADING;
   },
 
   /**
@@ -231,21 +244,13 @@ Polymer({
   },
 
   /**
-   * @return {boolean} Whether the system dialog button should be shown.
-   * @private
-   */
-  displaySystemDialogButton_: function() {
-    return this.previewState_ == PreviewAreaState_.INVALID_SETTINGS ||
-        this.previewState_ == PreviewAreaState_.OPEN_IN_PREVIEW;
-  },
-
-  /**
    * @return {boolean} Whether the "learn more" link to the cloud print help
    *     page should be shown.
    * @private
    */
   shouldShowLearnMoreLink_: function() {
-    return this.previewState_ == PreviewAreaState_.UNSUPPORTED_CLOUD_PRINTER;
+    return this.previewState ==
+        print_preview_new.PreviewAreaState.UNSUPPORTED_CLOUD_PRINTER;
   },
 
   /**
@@ -253,65 +258,62 @@ Polymer({
    * @private
    */
   currentMessage_: function() {
-    if (this.previewState_ == PreviewAreaState_.LOADING)
-      return this.i18n('loading');
-    if (this.previewState_ == PreviewAreaState_.OPEN_IN_PREVIEW)
-      return this.i18n('openingPDFInPreview');
-    if (this.previewState_ == PreviewAreaState_.INVALID_SETTINGS)
-      return this.i18n('invalidPrinterSettings');
-    if (this.previewState_ == PreviewAreaState_.PREVIEW_FAILED)
-      return this.i18n('previewFailed');
-    if (this.previewState_ == PreviewAreaState_.UNSUPPORTED_CLOUD_PRINTER)
-      return this.i18n('unsupportedCloudPrinter');
-    return '';
+    switch (this.previewState) {
+      case print_preview_new.PreviewAreaState.NO_PLUGIN:
+        return this.i18nAdvanced('noPlugin');
+      case print_preview_new.PreviewAreaState.LOADING:
+        return this.i18nAdvanced('loading');
+      case print_preview_new.PreviewAreaState.DISPLAY_PREVIEW:
+        return '';
+      // <if expr="is_macosx">
+      case print_preview_new.PreviewAreaState.OPEN_IN_PREVIEW_LOADING:
+      case print_preview_new.PreviewAreaState.OPEN_IN_PREVIEW_LOADED:
+        return this.i18nAdvanced('openingPDFInPreview');
+      // </if>
+      case print_preview_new.PreviewAreaState.INVALID_SETTINGS:
+        return this.i18nAdvanced('invalidPrinterSettings', {
+          substitutions: [],
+          tags: ['BR'],
+        });
+      case print_preview_new.PreviewAreaState.PREVIEW_FAILED:
+        return this.i18nAdvanced('previewFailed');
+      case print_preview_new.PreviewAreaState.UNSUPPORTED_CLOUD_PRINTER:
+        return this.i18nAdvanced('unsupportedCloudPrinter', {
+          substitutions: [],
+          tags: ['BR'],
+        });
+      default:
+        return '';
+    }
   },
 
   /** @private */
   startPreview_: function() {
-    this.previewState_ = PreviewAreaState_.LOADING;
+    this.previewState = print_preview_new.PreviewAreaState.LOADING;
     this.documentReady_ = false;
     this.getPreview_().then(
         previewUid => {
           if (!this.documentInfo.isModifiable)
             this.onPreviewStart_(previewUid, -1);
           this.documentReady_ = true;
-          if (this.pluginLoaded_) {
-            if (this.previewState_ != PreviewAreaState_.OPEN_IN_PREVIEW)
-              this.previewState_ = PreviewAreaState_.DISPLAY_PREVIEW;
-            this.fire('preview-loaded');
-          }
         },
         type => {
           if (/** @type{string} */ (type) == 'SETTINGS_INVALID') {
-            this.previewState_ = PreviewAreaState_.INVALID_SETTINGS;
-            this.fire('invalid-printer');
+            this.previewState =
+                print_preview_new.PreviewAreaState.INVALID_SETTINGS;
           } else if (/** @type{string} */ (type) != 'CANCELLED') {
-            this.previewState_ = PreviewAreaState_.PREVIEW_FAILED;
-            this.fire('preview-failed');
+            this.previewState =
+                print_preview_new.PreviewAreaState.PREVIEW_FAILED;
           }
         });
   },
 
   /** @private */
   onStateChanged_: function() {
-    switch (this.state) {
-      case (print_preview_new.State.NOT_READY):
-        // Resetting the destination clears the invalid settings error.
-        this.previewState_ = PreviewAreaState_.LOADING;
-        break;
-      case (print_preview_new.State.READY):
-        // Request a new preview.
-        if (this.requestPreviewWhenReady_) {
-          this.startPreview_();
-          this.requestPreviewWhenReady_ = false;
-        }
-        break;
-      case (print_preview_new.State.INVALID_PRINTER):
-        if (this.previewState_ != PreviewAreaState_.INVALID_SETTINGS)
-          this.previewState_ = PreviewAreaState_.UNSUPPORTED_CLOUD_PRINTER;
-        break;
-      default:
-        break;
+    if (this.state == print_preview_new.State.READY &&
+        this.requestPreviewWhenReady_) {
+      this.startPreview_();
+      this.requestPreviewWhenReady_ = false;
     }
   },
 
@@ -319,7 +321,10 @@ Polymer({
   /** Set the preview state to display the "opening in preview" message. */
   setOpeningPdfInPreview: function() {
     assert(cr.isMac);
-    this.previewState_ = PreviewAreaState_.OPEN_IN_PREVIEW;
+    this.previewState =
+        this.previewState == print_preview_new.PreviewAreaState.LOADING ?
+        print_preview_new.PreviewAreaState.OPEN_IN_PREVIEW_LOADING :
+        print_preview_new.PreviewAreaState.OPEN_IN_PREVIEW_LOADED;
   },
   // </if>
 
@@ -329,12 +334,22 @@ Polymer({
    * @private
    */
   onPreviewStart_: function(previewUid, index) {
-    if (!this.plugin_)
-      this.createPlugin_(previewUid, index);
+    if (!this.pluginProxy_.pluginReady()) {
+      const plugin = this.pluginProxy_.createPlugin(previewUid, index);
+      plugin.setKeyEventCallback(this.keyEventCallback_);
+      this.$$('.preview-area-plugin-wrapper')
+          .appendChild(
+              /** @type {Node} */ (plugin));
+      plugin.setLoadCallback(this.onPluginLoad_.bind(this));
+      plugin.setViewportChangedCallback(
+          this.onPreviewVisualStateChange_.bind(this));
+    }
+
     this.pluginLoaded_ = false;
-    this.plugin_.resetPrintPreviewMode(
-        this.getPreviewUrl_(previewUid, index), !this.getSettingValue('color'),
-        this.getSetting('pages').value, this.documentInfo.isModifiable);
+    this.pluginProxy_.resetPrintPreviewMode(
+        previewUid, index, !this.getSettingValue('color'),
+        /** @type {!Array<number>} */ (this.getSettingValue('pages')),
+        this.documentInfo.isModifiable);
   },
 
   /**
@@ -401,14 +416,14 @@ Polymer({
    * Called when the plugin loads. This is a consequence of calling
    * plugin.reload(). Certain plugin state can only be set after the plugin
    * has loaded.
+   * @param {boolean} success Whether the plugin load succeeded or not.
    * @private
    */
-  onPluginLoad_: function() {
-    this.pluginLoaded_ = true;
-    if (this.documentReady_) {
-      if (this.previewState_ != PreviewAreaState_.OPEN_IN_PREVIEW)
-        this.previewState_ = PreviewAreaState_.DISPLAY_PREVIEW;
-      this.fire('preview-loaded');
+  onPluginLoad_: function(success) {
+    if (success) {
+      this.pluginLoaded_ = true;
+    } else {
+      this.previewState = print_preview_new.PreviewAreaState.PREVIEW_FAILED;
     }
   },
 
@@ -434,17 +449,6 @@ Polymer({
   },
 
   /**
-   * Get the URL for the plugin.
-   * @param {number} previewUid Unique identifier of preview.
-   * @param {number} index Page index for plugin.
-   * @return {string} The URL
-   * @private
-   */
-  getPreviewUrl_: function(previewUid, index) {
-    return `chrome://print/${previewUid}/${index}/print.pdf`;
-  },
-
-  /**
    * Called when a page's preview has been generated.
    * @param {number} pageIndex The index of the page whose preview is ready.
    * @param {number} previewUid The unique ID of the print preview UI.
@@ -456,13 +460,17 @@ Polymer({
     if (this.inFlightRequestId_ != previewResponseId)
       return;
     const pageNumber = pageIndex + 1;
-    const index = this.getSettingValue('pages').indexOf(pageNumber);
+    let index = this.getSettingValue('pages').indexOf(pageNumber);
+    // When pagesPerSheet > 1, the backend will always return page indices 0 to
+    // N-1, where N is the total page count of the N-upped document.
+    const pagesPerSheet =
+        /** @type {number} */ (this.getSettingValue('pagesPerSheet'));
+    if (pagesPerSheet > 1)
+      index = pageIndex;
     if (index == 0)
       this.onPreviewStart_(previewUid, pageIndex);
-    if (index != -1) {
-      this.plugin_.loadPreviewPage(
-          this.getPreviewUrl_(previewUid, pageIndex), index);
-    }
+    if (index != -1)
+      this.pluginProxy_.loadPreviewPage(previewUid, pageIndex, index);
   },
 
   /**
@@ -474,19 +482,16 @@ Polymer({
     // Make sure the PDF plugin is there.
     // We only care about: PageUp, PageDown, Left, Up, Right, Down.
     // If the user is holding a modifier key, ignore.
-    if (!this.plugin_ ||
-        !arrayContains(
-            [
-              'PageUp', 'PageDown', 'ArrowLeft', 'ArrowRight', 'ArrowUp',
-              'ArrowDown'
-            ],
-            e.code) ||
+    if (!this.pluginProxy_.pluginReady() ||
+        !['PageUp', 'PageDown', 'ArrowLeft', 'ArrowRight', 'ArrowUp',
+          'ArrowDown']
+             .includes(e.code) ||
         hasKeyModifiers(e)) {
       return;
     }
 
     // Don't handle the key event for these elements.
-    const tagName = e.path[0].tagName;
+    const tagName = e.composedPath()[0].tagName;
     if (['INPUT', 'SELECT', 'EMBED'].includes(tagName))
       return;
 
@@ -495,18 +500,18 @@ Polymer({
     // element, and work up the DOM tree to see if any element has a
     // scrollbar. If there exists a scrollbar, do not handle the key event
     // here.
-    let element = e.target;
-    while (element) {
-      if (element.scrollHeight > element.clientHeight ||
-          element.scrollWidth > element.clientWidth) {
+    const isEventHorizontal = ['ArrowLeft', 'ArrowRight'].includes(e.code);
+    for (let i = 0; i < e.composedPath().length; i++) {
+      const element = e.composedPath()[i];
+      if (element.scrollHeight > element.clientHeight && !isEventHorizontal ||
+          element.scrollWidth > element.clientWidth && isEventHorizontal) {
         return;
       }
-      element = element.parentElement;
     }
 
     // No scroll bar anywhere, or the active element is something else, like a
     // button. Note: buttons have a bigger scrollHeight than clientHeight.
-    this.plugin_.sendKeyEvent(e);
+    this.pluginProxy_.sendKeyEvent(e);
     e.preventDefault();
   },
 
@@ -521,46 +526,17 @@ Polymer({
   },
 
   /**
-   * Creates a preview plugin and adds it to the DOM.
-   * @param {number} previewUid The unique ID of the preview. Used to determine
-   *     the URL for the plugin.
-   * @param {number} index The index of the page to load. Used to determine the
-   *     URL for the plugin.
-   * @private
-   */
-  createPlugin_: function(previewUid, index) {
-    assert(!this.plugin_);
-    const srcUrl = this.getPreviewUrl_(previewUid, index);
-    this.plugin_ = /** @type {print_preview_new.PDFPlugin} */ (
-        PDFCreateOutOfProcessPlugin(srcUrl, 'chrome://print/pdf'));
-    this.plugin_.setKeyEventCallback(this.keyEventCallback_);
-    this.plugin_.classList.add('preview-area-plugin');
-    this.plugin_.setAttribute('aria-live', 'polite');
-    this.plugin_.setAttribute('aria-atomic', 'true');
-    // NOTE: The plugin's 'id' field must be set to 'pdf-viewer' since
-    // chrome/renderer/printing/print_render_frame_helper.cc actually
-    // references it.
-    this.plugin_.setAttribute('id', 'pdf-viewer');
-    this.$$('.preview-area-plugin-wrapper')
-        .appendChild(/** @type {Node} */ (this.plugin_));
-
-    this.plugin_.setLoadCallback(this.onPluginLoad_.bind(this));
-    this.plugin_.setViewportChangedCallback(
-        this.onPreviewVisualStateChange_.bind(this));
-  },
-
-  /**
    * Called when dragging margins starts or stops.
    */
   onMarginDragChanged_: function(e) {
-    if (!this.plugin_)
+    if (!this.pluginProxy_.pluginReady())
       return;
 
     // When hovering over the plugin (which may be in a separate iframe)
     // pointer events will be sent to the frame. When dragging the margins,
     // we don't want this to happen as it can cause the margin to stop
     // being draggable.
-    this.plugin_.style.pointerEvents = e.detail ? 'none' : 'auto';
+    this.pluginProxy_.setPointerEvents(!e.detail);
   },
 
   /**
@@ -572,6 +548,81 @@ Polymer({
   onGcpErrorLearnMoreClick_: function() {
     this.nativeLayer_.forceOpenNewTab(
         this.i18n('gcpCertificateErrorLearnMoreURL'));
+  },
+
+  /** @private */
+  onMarginsChanged_: function() {
+    if (this.getSettingValue('margins') !=
+        print_preview.ticket_items.MarginsTypeValue.CUSTOM) {
+      this.onSettingsChanged_();
+    } else {
+      const customMargins =
+          /** @type {!print_preview.MarginsSetting} */ (
+              this.getSettingValue('customMargins'));
+
+      for (let side of Object.values(
+               print_preview.ticket_items.CustomMarginsOrientation)) {
+        const key = print_preview_new.MARGIN_KEY_MAP.get(side);
+        // If custom margins are undefined, return and wait for them to be set.
+        if (customMargins[key] === undefined || !this.documentInfo ||
+            !this.documentInfo.margins) {
+          return;
+        }
+
+        // Start a preview request if the margins actually changed.
+        if (this.documentInfo.margins.get(side) != customMargins[key]) {
+          this.onSettingsChanged_();
+          break;
+        }
+      }
+      this.lastCustomMargins_ = customMargins;
+    }
+  },
+
+  /** @private */
+  onCustomMarginsChanged_: function() {
+    const newValue =
+        /** @type {!print_preview.MarginsSetting} */ (
+            this.getSettingValue('customMargins'));
+    if (!!this.lastCustomMargins_ &&
+        this.lastCustomMargins_.marginTop !== undefined &&
+        this.getSettingValue('margins') ==
+            print_preview.ticket_items.MarginsTypeValue.CUSTOM &&
+        (this.lastCustomMargins_.marginTop != newValue.marginTop ||
+         this.lastCustomMargins_.marginLeft != newValue.marginLeft ||
+         this.lastCustomMargins_.marginRight != newValue.marginRight ||
+         this.lastCustomMargins_.marginBottom != newValue.marginBottom)) {
+      this.onSettingsChanged_();
+    }
+    this.lastCustomMargins_ = newValue;
+  },
+
+  /** @private */
+  onMediaSizeChanged_: function() {
+    const newValue =
+        /** @type {!print_preview_new.MediaSizeValue} */ (
+            this.getSettingValue('mediaSize'));
+    if (!!this.lastMediaSize_ &&
+        (newValue.height_microns != this.lastMediaSize_.height_microns ||
+         newValue.width_microns != this.lastMediaSize_.width_microns)) {
+      this.onSettingsChanged_();
+    }
+    this.lastMediaSize_ = newValue;
+  },
+
+  /** @private */
+  onPagesPerSheetChanged_: function() {
+    const pagesPerSheet =
+        /** @type {number} */ (this.getSettingValue('pagesPerSheet'));
+
+    if (pagesPerSheet == 1 ||
+        this.getSettingValue('margins') ==
+            print_preview.ticket_items.MarginsTypeValue.DEFAULT) {
+      this.onSettingsChanged_();
+    } else {
+      this.setSetting(
+          'margins', print_preview.ticket_items.MarginsTypeValue.DEFAULT);
+    }
   },
 
   /**
@@ -593,10 +644,10 @@ Polymer({
           /** @type {boolean} */ (this.getSettingValue('color'))),
       headerFooterEnabled: this.getSettingValue('headerFooter'),
       marginsType: this.getSettingValue('margins'),
+      pagesPerSheet: this.getSettingValue('pagesPerSheet'),
       isFirstRequest: this.inFlightRequestId_ == 0,
       requestID: this.inFlightRequestId_,
       previewModifiable: this.documentInfo.isModifiable,
-      generateDraftData: this.documentInfo.isModifiable,
       fitToPageEnabled: this.getSettingValue('fitToPage'),
       scaleFactor: parseInt(this.getSettingValue('scaling'), 10),
       shouldPrintBackgrounds: this.getSettingValue('cssBackground'),
@@ -629,12 +680,6 @@ Polymer({
         print_preview.ticket_items.MarginsTypeValue.CUSTOM) {
       ticket.marginsCustom = this.getSettingValue('customMargins');
     }
-    let pageCount = -1;
-    if (this.inFlightRequestId_ > 0) {
-      pageCount = this.documentInfo.isModifiable ?
-          this.documentInfo.pageCount : 0;
-    }
-    return this.nativeLayer_.getPreview(JSON.stringify(ticket), pageCount);
+    return this.nativeLayer_.getPreview(JSON.stringify(ticket));
   },
 });
-})();

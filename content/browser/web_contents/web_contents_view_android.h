@@ -15,10 +15,12 @@
 #include "content/public/common/drop_data.h"
 #include "ui/android/overscroll_refresh.h"
 #include "ui/android/view_android.h"
-#include "ui/android/view_client.h"
+#include "ui/android/view_android_observer.h"
+#include "ui/events/android/event_handler_android.h"
 #include "ui/gfx/geometry/rect_f.h"
 
 namespace content {
+class ContentUiEventHandler;
 class RenderWidgetHostViewAndroid;
 class SelectPopup;
 class SelectionPopupController;
@@ -28,14 +30,13 @@ class WebContentsImpl;
 // Android-specific implementation of the WebContentsView.
 class WebContentsViewAndroid : public WebContentsView,
                                public RenderViewHostDelegateView,
-                               public ui::ViewClient {
+                               public ui::EventHandlerAndroid {
  public:
   WebContentsViewAndroid(WebContentsImpl* web_contents,
                          WebContentsViewDelegate* delegate);
   ~WebContentsViewAndroid() override;
 
-  // Sets the object that show/hide popup view for <select> tag.
-  void SetSelectPopup(std::unique_ptr<SelectPopup> select_popup);
+  void SetContentUiEventHandler(std::unique_ptr<ContentUiEventHandler> handler);
 
   void set_synchronous_compositor_client(SynchronousCompositorClient* client) {
     synchronous_compositor_client_ = client;
@@ -72,11 +73,13 @@ class WebContentsViewAndroid : public WebContentsView,
   RenderWidgetHostViewBase* CreateViewForWidget(
       RenderWidgetHost* render_widget_host,
       bool is_guest_view_hack) override;
-  RenderWidgetHostViewBase* CreateViewForPopupWidget(
+  RenderWidgetHostViewBase* CreateViewForChildWidget(
       RenderWidgetHost* render_widget_host) override;
   void SetPageTitle(const base::string16& title) override;
   void RenderViewCreated(RenderViewHost* host) override;
-  void RenderViewSwappedIn(RenderViewHost* host) override;
+  void RenderViewReady() override;
+  void RenderViewHostChanged(RenderViewHost* old_host,
+                             RenderViewHost* new_host) override;
   void SetOverscrollControllerEnabled(bool enabled) override;
 
   // Backend implementation of RenderViewHostDelegateView.
@@ -104,14 +107,24 @@ class WebContentsViewAndroid : public WebContentsView,
   void TakeFocus(bool reverse) override;
   int GetTopControlsHeight() const override;
   int GetBottomControlsHeight() const override;
-  bool DoBrowserControlsShrinkBlinkSize() const override;
+  bool DoBrowserControlsShrinkRendererSize() const override;
 
-  // ui::ViewClient implementation.
+  // ui::EventHandlerAndroid implementation.
   bool OnTouchEvent(const ui::MotionEventAndroid& event) override;
   bool OnMouseEvent(const ui::MotionEventAndroid& event) override;
   bool OnDragEvent(const ui::DragEventAndroid& event) override;
+  bool OnGenericMotionEvent(const ui::MotionEventAndroid& event) override;
+  bool OnKeyUp(const ui::KeyEventAndroid& event) override;
+  bool DispatchKeyEvent(const ui::KeyEventAndroid& event) override;
+  bool ScrollBy(float delta_x, float delta_y) override;
+  bool ScrollTo(float x, float y) override;
   void OnSizeChanged() override;
   void OnPhysicalBackingSizeChanged() override;
+
+  void SetFocus(bool focused);
+  void set_device_orientation(int orientation) {
+    device_orientation_ = orientation;
+  }
 
  private:
   void OnDragEntered(const std::vector<DropData::Metadata>& metadata,
@@ -126,8 +139,13 @@ class WebContentsViewAndroid : public WebContentsView,
   void OnDragEnded();
   void OnSystemDragEnded();
 
+  SelectPopup* GetSelectPopup();
+
   // The WebContents whose contents we display.
   WebContentsImpl* web_contents_;
+
+  // Handles UI events in Java layer when necessary.
+  std::unique_ptr<ContentUiEventHandler> content_ui_event_handler_;
 
   // Handles "overscroll to refresh" events
   std::unique_ptr<ui::OverscrollRefreshHandler> overscroll_refresh_handler_;
@@ -142,6 +160,8 @@ class WebContentsViewAndroid : public WebContentsView,
   SynchronousCompositorClient* synchronous_compositor_client_;
 
   SelectionPopupController* selection_popup_controller_ = nullptr;
+
+  int device_orientation_ = 0;
 
   // Show/hide popup UI for <select> tag.
   std::unique_ptr<SelectPopup> select_popup_;

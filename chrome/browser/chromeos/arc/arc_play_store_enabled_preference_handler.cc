@@ -10,15 +10,22 @@
 #include "chrome/browser/chromeos/arc/arc_optin_uma.h"
 #include "chrome/browser/chromeos/arc/arc_session_manager.h"
 #include "chrome/browser/chromeos/arc/arc_util.h"
+#include "chrome/browser/consent_auditor/consent_auditor_factory.h"
 #include "chrome/browser/prefs/pref_service_syncable_util.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_utils.h"
 #include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
+#include "chrome/grit/generated_resources.h"
 #include "chromeos/chromeos_switches.h"
 #include "components/arc/arc_prefs.h"
 #include "components/arc/arc_util.h"
+#include "components/consent_auditor/consent_auditor.h"
+#include "components/signin/core/browser/signin_manager_base.h"
 #include "components/sync_preferences/pref_service_syncable.h"
 #include "content/public/browser/browser_thread.h"
+
+using sync_pb::UserConsentTypes;
 
 namespace arc {
 
@@ -49,6 +56,12 @@ void ArcPlayStoreEnabledPreferenceHandler::Start() {
   const bool is_play_store_enabled = IsArcPlayStoreEnabledForProfile(profile_);
   VLOG(1) << "Start observing Google Play Store enabled preference. "
           << "Initial value: " << is_play_store_enabled;
+
+  // Force data clean if needed.
+  if (IsArcDataCleanupOnStartRequested()) {
+    VLOG(1) << "Request to cleanup data on start.";
+    arc_session_manager_->RequestArcDataRemoval();
+  }
 
   // If the OOBE or Assistant Wizard screen is shown, don't kill the
   // mini-container. We'll do it if and when the user declines the TOS. We need
@@ -103,6 +116,29 @@ void ArcPlayStoreEnabledPreferenceHandler::OnPreferenceChanged() {
       auto* chrome_launcher_controller = ChromeLauncherController::instance();
       if (chrome_launcher_controller)
         chrome_launcher_controller->UnpinAppWithID(kPlayStoreAppId);
+
+      // Tell Consent Auditor that the Play Store consent was revoked.
+      SigninManagerBase* signin_manager =
+          SigninManagerFactory::GetForProfile(profile_);
+      // TODO(crbug.com/850297): Fix unrelated tests that are not properly
+      // setting up the state of signin_manager and enable the DCHECK instead of
+      // the conditional below.
+      // DCHECK(signin_manager->IsAuthenticated());
+      if (signin_manager->IsAuthenticated()) {
+        const std::string account_id =
+            signin_manager->GetAuthenticatedAccountId();
+
+        UserConsentTypes::ArcPlayTermsOfServiceConsent play_consent;
+        play_consent.set_status(UserConsentTypes::NOT_GIVEN);
+        play_consent.set_confirmation_grd_id(
+            IDS_SETTINGS_ANDROID_APPS_DISABLE_DIALOG_REMOVE);
+        play_consent.add_description_grd_ids(
+            IDS_SETTINGS_ANDROID_APPS_DISABLE_DIALOG_MESSAGE);
+        play_consent.set_consent_flow(
+            UserConsentTypes::ArcPlayTermsOfServiceConsent::SETTING_CHANGE);
+        ConsentAuditorFactory::GetForProfile(profile_)->RecordArcPlayConsent(
+            account_id, play_consent);
+      }
     }
   }
 

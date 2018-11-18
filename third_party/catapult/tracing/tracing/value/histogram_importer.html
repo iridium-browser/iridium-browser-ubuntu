@@ -35,7 +35,12 @@ tr.exportTo('tr.v', function() {
      */
     async update_(message) {
       this.loadingEl_.textContent = message;
-      await tr.b.animationFrame();
+      // Use rAF callbacks only if the document is visible. If the document is
+      // hidden, then the user-agent can stop triggering the rAF callbacks. So
+      // avoid rAF callbacks when hidden.
+      if (window.document.visibilityState === 'visible') {
+        await tr.b.animationFrame();
+      }
     }
 
     /**
@@ -86,7 +91,7 @@ tr.exportTo('tr.v', function() {
         stopIndex = Math.min(
             this.jsonDivIndex_ + 100, this.jsonEls_.length);
         for (; this.jsonDivIndex_ < stopIndex; ++this.jsonDivIndex_) {
-          const dict = JSON.parse(this.jsonEls_[this.jsonDivIndex_].innerHTML);
+          const dict = JSON.parse(this.jsonEls_[this.jsonDivIndex_].innerText);
           this.histograms_.importDicts([dict]);
         }
       } while (new Date() - start < 50);
@@ -99,7 +104,7 @@ tr.exportTo('tr.v', function() {
     }
 
     async displayHistograms_() {
-      this.view_.addEventListener('display-ready', async () => {
+      this.view_.addEventListener('display-ready', async() => {
         this.loadingEl_.style.display = 'none';
         this.view_.style.display = 'block';
         await tr.b.animationFrame();

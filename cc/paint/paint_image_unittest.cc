@@ -52,13 +52,13 @@ TEST(PaintImageTest, DecodesCorrectFrames) {
   PaintImage image = PaintImageBuilder::WithDefault()
                          .set_id(PaintImage::GetNextId())
                          .set_paint_image_generator(generator)
-                         .set_frame_index(0u)
                          .TakePaintImage();
 
   // The recorded index is 0u but ask for 1u frame.
   SkImageInfo info = SkImageInfo::MakeN32Premul(10, 10);
   std::vector<size_t> memory(info.computeMinByteSize());
-  image.Decode(memory.data(), &info, nullptr, 1u);
+  image.Decode(memory.data(), &info, nullptr, 1u,
+               PaintImage::kDefaultGeneratorClientId);
   ASSERT_EQ(generator->frames_decoded().size(), 1u);
   EXPECT_EQ(generator->frames_decoded().count(1u), 1u);
   generator->reset_frames_decoded();
@@ -68,7 +68,8 @@ TEST(PaintImageTest, DecodesCorrectFrames) {
                                 .make_subset(gfx::Rect(0, 0, 5, 5))
                                 .TakePaintImage();
   SkImageInfo subset_info = info.makeWH(5, 5);
-  subset_image.Decode(memory.data(), &subset_info, nullptr, 1u);
+  subset_image.Decode(memory.data(), &subset_info, nullptr, 1u,
+                      PaintImage::kDefaultGeneratorClientId);
   ASSERT_EQ(generator->frames_decoded().size(), 1u);
   EXPECT_EQ(generator->frames_decoded().count(1u), 1u);
   generator->reset_frames_decoded();
@@ -76,10 +77,40 @@ TEST(PaintImageTest, DecodesCorrectFrames) {
   // Not N32 color type.
   info.makeColorType(kRGB_565_SkColorType);
   memory = std::vector<size_t>(info.computeMinByteSize());
-  image.Decode(memory.data(), &info, nullptr, 1u);
+  image.Decode(memory.data(), &info, nullptr, 1u,
+               PaintImage::kDefaultGeneratorClientId);
   ASSERT_EQ(generator->frames_decoded().size(), 1u);
   EXPECT_EQ(generator->frames_decoded().count(1u), 1u);
   generator->reset_frames_decoded();
+}
+
+TEST(PaintImageTest, SupportedDecodeSize) {
+  SkISize full_size = SkISize::Make(10, 10);
+  std::vector<SkISize> supported_sizes = {SkISize::Make(5, 5)};
+  std::vector<FrameMetadata> frames = {FrameMetadata()};
+  sk_sp<FakePaintImageGenerator> generator =
+      sk_make_sp<FakePaintImageGenerator>(
+          SkImageInfo::MakeN32Premul(full_size.width(), full_size.height()),
+          frames, true, supported_sizes);
+  PaintImage image = PaintImageBuilder::WithDefault()
+                         .set_id(PaintImage::GetNextId())
+                         .set_paint_image_generator(generator)
+                         .TakePaintImage();
+  EXPECT_EQ(image.GetSupportedDecodeSize(supported_sizes[0]),
+            supported_sizes[0]);
+
+  PaintImage subset = PaintImageBuilder::WithCopy(image)
+                          .make_subset(gfx::Rect(8, 8))
+                          .TakePaintImage();
+  EXPECT_EQ(subset.GetSupportedDecodeSize(supported_sizes[0]),
+            SkISize::Make(8, 8));
+}
+
+TEST(PaintImageTest, GetSkImageForFrameNotGeneratorBacked) {
+  PaintImage image = CreateBitmapImage(gfx::Size(10, 10));
+  EXPECT_EQ(image.GetSkImage(),
+            image.GetSkImageForFrame(PaintImage::kDefaultFrameIndex,
+                                     PaintImage::GetNextGeneratorClientId()));
 }
 
 }  // namespace cc

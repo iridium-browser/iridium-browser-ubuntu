@@ -12,6 +12,7 @@
 #include <string>
 #include <vector>
 
+#include "base/callback_forward.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
@@ -91,6 +92,11 @@ class ArcPolicyBridge : public KeyedService,
   static ArcPolicyBridge* GetForBrowserContext(
       content::BrowserContext* context);
 
+  static ArcPolicyBridge* GetForBrowserContextForTesting(
+      content::BrowserContext* context);
+
+  base::WeakPtr<ArcPolicyBridge> GetWeakPtr();
+
   ArcPolicyBridge(content::BrowserContext* context,
                   ArcBridgeService* bridge_service);
   ArcPolicyBridge(content::BrowserContext* context,
@@ -127,6 +133,10 @@ class ArcPolicyBridge : public KeyedService,
   void OnPolicyUpdated(const policy::PolicyNamespace& ns,
                        const policy::PolicyMap& previous,
                        const policy::PolicyMap& current) override;
+
+  void OnCommandReceived(
+      const std::string& command,
+      mojom::PolicyInstance::OnCommandReceivedCallback callback);
 
  private:
   void InitializePolicyService();
@@ -166,7 +176,10 @@ class ArcPolicyBridge : public KeyedService,
   // since the most recent policy update notificaton was already reported.
   bool compliance_since_update_timing_reported_ = false;
 
-  base::ObserverList<Observer, true /* check_empty */> observers_;
+  base::ObserverList<Observer, true /* check_empty */>::Unchecked observers_;
+
+  // Called when the ARC connection is ready.
+  base::OnceClosure on_arc_instance_ready_callback_;
 
   // Must be the last member.
   base::WeakPtrFactory<ArcPolicyBridge> weak_ptr_factory_;

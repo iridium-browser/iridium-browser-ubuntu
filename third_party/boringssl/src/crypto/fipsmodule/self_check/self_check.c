@@ -37,18 +37,19 @@
 
 static void hexdump(const uint8_t *in, size_t len) {
   for (size_t i = 0; i < len; i++) {
-    printf("%02x", in[i]);
+    fprintf(stderr, "%02x", in[i]);
   }
 }
 
 static int check_test(const void *expected, const void *actual,
                       size_t expected_len, const char *name) {
   if (OPENSSL_memcmp(actual, expected, expected_len) != 0) {
-    printf("%s failed.\nExpected: ", name);
+    fprintf(stderr, "%s failed.\nExpected: ", name);
     hexdump(expected, expected_len);
-    printf("\nCalculated: ");
+    fprintf(stderr, "\nCalculated: ");
     hexdump(actual, expected_len);
-    printf("\n");
+    fprintf(stderr, "\n");
+    fflush(stderr);
     return 0;
   }
   return 1;
@@ -393,6 +394,7 @@ int BORINGSSL_self_test(void) {
   // AES-CBC Encryption KAT
   memcpy(aes_iv, kAESIV, sizeof(kAESIV));
   if (AES_set_encrypt_key(kAESKey, 8 * sizeof(kAESKey), &aes_key) != 0) {
+    fprintf(stderr, "AES_set_encrypt_key failed.\n");
     goto err;
   }
   AES_cbc_encrypt(kPlaintext, output, sizeof(kPlaintext), &aes_key, aes_iv,
@@ -405,6 +407,7 @@ int BORINGSSL_self_test(void) {
   // AES-CBC Decryption KAT
   memcpy(aes_iv, kAESIV, sizeof(kAESIV));
   if (AES_set_decrypt_key(kAESKey, 8 * sizeof(kAESKey), &aes_key) != 0) {
+    fprintf(stderr, "AES_set_decrypt_key failed.\n");
     goto err;
   }
   AES_cbc_encrypt(kAESCBCCiphertext, output, sizeof(kAESCBCCiphertext),
@@ -419,6 +422,7 @@ int BORINGSSL_self_test(void) {
   OPENSSL_memset(nonce, 0, sizeof(nonce));
   if (!EVP_AEAD_CTX_init(&aead_ctx, EVP_aead_aes_128_gcm(), kAESKey,
                          sizeof(kAESKey), 0, NULL)) {
+    fprintf(stderr, "EVP_AEAD_CTX_init for AES-128-GCM failed.\n");
     goto err;
   }
 
@@ -428,6 +432,7 @@ int BORINGSSL_self_test(void) {
                          kPlaintext, sizeof(kPlaintext), NULL, 0) ||
       !check_test(kAESGCMCiphertext, output, sizeof(kAESGCMCiphertext),
                   "AES-GCM Encryption KAT")) {
+    fprintf(stderr, "EVP_AEAD_CTX_seal for AES-128-GCM failed.\n");
     goto err;
   }
 
@@ -438,6 +443,7 @@ int BORINGSSL_self_test(void) {
                          0) ||
       !check_test(kPlaintext, output, sizeof(kPlaintext),
                   "AES-GCM Decryption KAT")) {
+    fprintf(stderr, "EVP_AEAD_CTX_open for AES-128-GCM failed.\n");
     goto err;
   }
 
@@ -488,7 +494,7 @@ int BORINGSSL_self_test(void) {
 
   rsa_key = self_test_rsa_key();
   if (rsa_key == NULL) {
-    printf("RSA KeyGen failed\n");
+    fprintf(stderr, "RSA KeyGen failed\n");
     goto err;
   }
 
@@ -503,19 +509,20 @@ int BORINGSSL_self_test(void) {
                 &sig_len, rsa_key) ||
       !check_test(kRSASignature, output, sizeof(kRSASignature),
                   "RSA Sign KAT")) {
+    fprintf(stderr, "RSA signing test failed.\n");
     goto err;
   }
 
   // RSA Verify KAT
   if (!RSA_verify(NID_sha256, kPlaintextSHA256, sizeof(kPlaintextSHA256),
                   kRSASignature, sizeof(kRSASignature), rsa_key)) {
-    printf("RSA Verify KAT failed.\n");
+    fprintf(stderr, "RSA Verify KAT failed.\n");
     goto err;
   }
 
   ec_key = self_test_ecdsa_key();
   if (ec_key == NULL) {
-    printf("ECDSA KeyGen failed\n");
+    fprintf(stderr, "ECDSA KeyGen failed\n");
     goto err;
   }
 
@@ -525,7 +532,7 @@ int BORINGSSL_self_test(void) {
   ec_key->fixed_k = BN_new();
   if (ec_key->fixed_k == NULL ||
       !BN_set_word(ec_key->fixed_k, 42)) {
-    printf("Out of memory\n");
+    fprintf(stderr, "Out of memory\n");
     goto err;
   }
 
@@ -540,7 +547,7 @@ int BORINGSSL_self_test(void) {
       !BN_bn2bin(sig->s, ecdsa_s_bytes) ||
       !check_test(kECDSASigR, ecdsa_r_bytes, sizeof(kECDSASigR), "ECDSA R") ||
       !check_test(kECDSASigS, ecdsa_s_bytes, sizeof(kECDSASigS), "ECDSA S")) {
-    printf("ECDSA KAT failed.\n");
+    fprintf(stderr, "ECDSA KAT failed.\n");
     goto err;
   }
 
@@ -557,6 +564,7 @@ int BORINGSSL_self_test(void) {
                          sizeof(kDRBGAD)) ||
       !check_test(kDRBGReseedOutput, output, sizeof(kDRBGReseedOutput),
                   "DRBG Reseed KAT")) {
+    fprintf(stderr, "CTR-DRBG failed.\n");
     goto err;
   }
   CTR_DRBG_clear(&drbg);

@@ -15,12 +15,21 @@ tr.exportTo('tr.e.blink', function() {
       if (this.title.startsWith('FrameScheduler.')) {
         return 'Frame' + this.id;
       }
-      // Deprecated (renamed in newer versions of Chrome).
-      // TODO(#4364): Remove after 30 May 2018.
-      if (this.title.startsWith('WebFrameScheduler.')) {
-        return 'WebFrame' + this.id;
+      if (this.title.startsWith('Scheduler.')) {
+        return 'Renderer Scheduler';
       }
       return undefined;
+    }
+
+    get viewSubGroupTitle() {
+      // NOTE: Be careful with hardcoded (for performance) string length.
+      if (this.title.startsWith('FrameScheduler.')) {
+        return this.title.substring(15);
+      }
+      if (this.title.startsWith('Scheduler.')) {
+        return this.title.substring(10);
+      }
+      return this.title;
     }
   }
 
@@ -28,6 +37,7 @@ tr.exportTo('tr.e.blink', function() {
     categoryParts: [
       'renderer.scheduler',
       'disabled-by-default-renderer.scheduler',
+      'disabled-by-default-renderer.scheduler.debug',
     ]
   });
 

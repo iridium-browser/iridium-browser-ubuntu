@@ -22,9 +22,11 @@ struct AutocompleteMatch;
 class AutocompleteClassifier;
 class AutocompleteSchemeClassifier;
 class ContextualSuggestionsService;
+class DocumentSuggestionsService;
 class GURL;
 class InMemoryURLIndex;
 class KeywordProvider;
+class OmniboxPedalProvider;
 class PrefService;
 class ShortcutsBackend;
 
@@ -37,22 +39,18 @@ class HistoryService;
 class URLDatabase;
 }
 
-namespace net {
-class URLRequestContextGetter;
+namespace network {
+class SharedURLLoaderFactory;
 }
 
-namespace physical_web {
-class PhysicalWebDataSource;
-}
-
-class SearchTermsData;
 class TemplateURLService;
 
 class AutocompleteProviderClient {
  public:
   virtual ~AutocompleteProviderClient() {}
 
-  virtual net::URLRequestContextGetter* GetRequestContext() = 0;
+  virtual scoped_refptr<network::SharedURLLoaderFactory>
+  GetURLLoaderFactory() = 0;
   virtual PrefService* GetPrefs() = 0;
   virtual const AutocompleteSchemeClassifier& GetSchemeClassifier() const = 0;
   virtual AutocompleteClassifier* GetAutocompleteClassifier() = 0;
@@ -65,12 +63,13 @@ class AutocompleteProviderClient {
   virtual const TemplateURLService* GetTemplateURLService() const = 0;
   virtual ContextualSuggestionsService* GetContextualSuggestionsService(
       bool create_if_necessary) const = 0;
-  virtual const SearchTermsData& GetSearchTermsData() const = 0;
+  virtual DocumentSuggestionsService* GetDocumentSuggestionsService(
+      bool create_if_necessary) const = 0;
+  virtual OmniboxPedalProvider* GetPedalProvider() const = 0;
   virtual scoped_refptr<ShortcutsBackend> GetShortcutsBackend() = 0;
   virtual scoped_refptr<ShortcutsBackend> GetShortcutsBackendIfExists() = 0;
   virtual std::unique_ptr<KeywordExtensionsDelegate>
   GetKeywordExtensionsDelegate(KeywordProvider* keyword_provider) = 0;
-  virtual physical_web::PhysicalWebDataSource* GetPhysicalWebDataSource() = 0;
 
   // The value to use for Accept-Languages HTTP header when making an HTTP
   // request.
@@ -78,7 +77,7 @@ class AutocompleteProviderClient {
 
   // The embedder's representation of the |about| URL scheme for builtin URLs
   // (e.g., |chrome| for Chrome).
-  virtual std::string GetEmbedderRepresentationOfAboutScheme() = 0;
+  virtual std::string GetEmbedderRepresentationOfAboutScheme() const = 0;
 
   // The set of built-in URLs considered worth suggesting as autocomplete
   // suggestions to the user.  Some built-in URLs, e.g. hidden URLs that
@@ -99,17 +98,24 @@ class AutocompleteProviderClient {
   virtual bool IsOffTheRecord() const = 0;
   virtual bool SearchSuggestEnabled() const = 0;
 
-  // Returns whether tab sync meets all of the criteria to be considered in an
-  // active upload to Google state. This means that the user is logged in, sync
-  // is running and in a good auth state, the user has tab sync enabled, and
-  // they do not have their sync data protected by a secondary passphrase.
+  // Returns whether personalized URL data collection is enabled.  I.e.,
+  // the user has consented to have URLs recorded keyed by their Google account.
   // In this case, the user has agreed to share browsing data with Google and so
-  // this state can be used to govern similar features (e.g. sending the current
-  // page URL with omnibox suggest requests).
-  virtual bool IsTabUploadToGoogleActive() const = 0;
+  // this state can be used to govern features such as sending the current page
+  // URL with omnibox suggest requests.
+  virtual bool IsPersonalizedUrlDataCollectionActive() const = 0;
 
   // This function returns true if the user is signed in.
   virtual bool IsAuthenticated() const = 0;
+
+  // Determines whether Unified Consent is on as a feature, and the user has
+  // accepted the bit. Note this is a subset of
+  // IsPersonalizedUrlDataCollectionActive() in that the user has not
+  // necessarily consented to share browsing data with Google.
+  virtual bool IsUnifiedConsentGiven() const = 0;
+
+  // Determines whether sync is enabled.
+  virtual bool IsSyncActive() const = 0;
 
   // Given some string |text| that the user wants to use for navigation,
   // determines how it should be interpreted.

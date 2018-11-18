@@ -42,10 +42,12 @@ class DummyInputMethod : public InputMethod {
   int GetTextInputFlags() const override;
   bool CanComposeInline() const override;
   bool IsCandidatePopupOpen() const override;
-  void ShowImeIfNeeded() override;
+  bool GetClientShouldDoLearning() override;
+  void ShowVirtualKeyboardIfEnabled() override;
 
   void AddObserver(InputMethodObserver* observer) override;
   void RemoveObserver(InputMethodObserver* observer) override;
+  InputMethodKeyboardController* GetInputMethodKeyboardController() override;
 
   const std::vector<std::unique_ptr<KeyEvent>>& GetKeyEventsForTesting()
       override;

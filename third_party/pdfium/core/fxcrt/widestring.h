@@ -17,12 +17,13 @@
 #include "core/fxcrt/string_data_template.h"
 #include "core/fxcrt/string_view_template.h"
 #include "third_party/base/optional.h"
-
+#include "third_party/base/span.h"
 
 namespace fxcrt {
 
 class ByteString;
 class StringPool_WideString_Test;
+class WideString_Assign_Test;
 class WideString_ConcatInPlace_Test;
 
 // A mutable string with shared buffers using copy-on-write semantics that
@@ -60,9 +61,6 @@ class WideString {
   ~WideString();
 
   static WideString FromLocal(const ByteStringView& str) WARN_UNUSED_RESULT;
-  static WideString FromCodePage(const ByteStringView& str,
-                                 uint16_t codepage) WARN_UNUSED_RESULT;
-
   static WideString FromUTF8(const ByteStringView& str) WARN_UNUSED_RESULT;
   static WideString FromUTF16LE(const unsigned short* str,
                                 size_t len) WARN_UNUSED_RESULT;
@@ -77,6 +75,13 @@ class WideString {
   // Note: Any subsequent modification of |this| will invalidate the result.
   WideStringView AsStringView() const {
     return WideStringView(c_str(), GetLength());
+  }
+
+  // Explicit conversion to span.
+  // Note: Any subsequent modification of |this| will invalidate the result.
+  pdfium::span<const wchar_t> AsSpan() const {
+    return pdfium::make_span(m_pData ? m_pData->m_String : nullptr,
+                             GetLength());
   }
 
   // Note: Any subsequent modification of |this| will invalidate iterators.
@@ -104,8 +109,9 @@ class WideString {
   bool IsValidLength(size_t length) const { return length <= GetLength(); }
 
   const WideString& operator=(const wchar_t* str);
-  const WideString& operator=(const WideString& stringSrc);
   const WideString& operator=(const WideStringView& stringSrc);
+  const WideString& operator=(const WideString& that);
+  const WideString& operator=(WideString&& that);
 
   const WideString& operator+=(const wchar_t* str);
   const WideString& operator+=(wchar_t ch);
@@ -163,11 +169,13 @@ class WideString {
   void TrimRight(const WideStringView& targets);
 
   void Reserve(size_t len);
-  wchar_t* GetBuffer(size_t len);
+
+  // Note: any modification of the string (including ReleaseBuffer()) may
+  // invalidate the span, which must not outlive its buffer.
+  pdfium::span<wchar_t> GetBuffer(size_t len);
   void ReleaseBuffer(size_t len);
 
   int GetInteger() const;
-  float GetFloat() const;
 
   Optional<size_t> Find(const WideStringView& pSub, size_t start = 0) const;
   Optional<size_t> Find(wchar_t ch, size_t start = 0) const;
@@ -183,6 +191,7 @@ class WideString {
   size_t Replace(const WideStringView& pOld, const WideStringView& pNew);
   size_t Remove(wchar_t ch);
 
+  ByteString ToDefANSI() const;
   ByteString UTF8Encode() const;
 
   // This method will add \0\0 to the end of the string to represent the
@@ -198,10 +207,12 @@ class WideString {
   void AllocCopy(WideString& dest, size_t nCopyLen, size_t nCopyIndex) const;
   void AssignCopy(const wchar_t* pSrcData, size_t nSrcLen);
   void Concat(const wchar_t* lpszSrcData, size_t nSrcLen);
+  intptr_t ReferenceCountForTesting() const;
 
   RetainPtr<StringData> m_pData;
 
   friend WideString_ConcatInPlace_Test;
+  friend WideString_Assign_Test;
   friend StringPool_WideString_Test;
 };
 

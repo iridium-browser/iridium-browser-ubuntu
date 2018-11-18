@@ -58,7 +58,7 @@ public class NetworkMonitorTest {
    * Listens for alerts fired by the NetworkMonitor when network status changes.
    */
   private static class NetworkMonitorTestObserver implements NetworkMonitor.NetworkObserver {
-    private boolean receivedNotification = false;
+    private boolean receivedNotification;
 
     @Override
     public void onConnectionTypeChanged(ConnectionType connectionType) {
@@ -81,10 +81,13 @@ public class NetworkMonitorTest {
     private boolean activeNetworkExists;
     private int networkType;
     private int networkSubtype;
+    private int underlyingNetworkTypeForVpn;
+    private int underlyingNetworkSubtypeForVpn;
 
     @Override
     public NetworkState getNetworkState() {
-      return new NetworkState(activeNetworkExists, networkType, networkSubtype);
+      return new NetworkState(activeNetworkExists, networkType, networkSubtype,
+          underlyingNetworkTypeForVpn, underlyingNetworkSubtypeForVpn);
     }
 
     // Dummy implementations to avoid NullPointerExceptions in default implementations:
@@ -101,7 +104,7 @@ public class NetworkMonitorTest {
 
     @Override
     public NetworkState getNetworkState(Network network) {
-      return new NetworkState(false, -1, -1);
+      return new NetworkState(false, -1, -1, -1, -1);
     }
 
     public void setActiveNetworkExists(boolean networkExists) {
@@ -114,6 +117,14 @@ public class NetworkMonitorTest {
 
     public void setNetworkSubtype(int networkSubtype) {
       this.networkSubtype = networkSubtype;
+    }
+
+    public void setUnderlyingNetworkType(int underlyingNetworkTypeForVpn) {
+      this.underlyingNetworkTypeForVpn = underlyingNetworkTypeForVpn;
+    }
+
+    public void setUnderlyingNetworkSubype(int underlyingNetworkSubtypeForVpn) {
+      this.underlyingNetworkSubtypeForVpn = underlyingNetworkSubtypeForVpn;
     }
   }
 
@@ -148,7 +159,7 @@ public class NetworkMonitorTest {
   }
 
   private static final Object lock = new Object();
-  private static @Nullable Handler uiThreadHandler = null;
+  private static @Nullable Handler uiThreadHandler;
 
   private NetworkMonitorAutoDetect receiver;
   private MockConnectivityManagerDelegate connectivityDelegate;

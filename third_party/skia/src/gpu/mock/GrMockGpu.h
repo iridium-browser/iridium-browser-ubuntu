@@ -24,12 +24,12 @@ public:
 
     ~GrMockGpu() override {}
 
-    GrGpuRTCommandBuffer* createCommandBuffer(
+    GrGpuRTCommandBuffer* getCommandBuffer(
                                     GrRenderTarget*, GrSurfaceOrigin,
                                     const GrGpuRTCommandBuffer::LoadAndStoreInfo&,
                                     const GrGpuRTCommandBuffer::StencilLoadAndStoreInfo&) override;
 
-    GrGpuTextureCommandBuffer* createCommandBuffer(GrTexture*, GrSurfaceOrigin) override;
+    GrGpuTextureCommandBuffer* getCommandBuffer(GrTexture*, GrSurfaceOrigin) override;
 
     GrFence SK_WARN_UNUSED_RESULT insertFence() override { return 0; }
     bool waitFence(GrFence, uint64_t) override { return true; }
@@ -45,10 +45,12 @@ public:
     void waitSemaphore(sk_sp<GrSemaphore> semaphore) override {}
     sk_sp<GrSemaphore> prepareTextureForCrossContextUsage(GrTexture*) override { return nullptr; }
 
-    void submitCommandBuffer(const GrMockGpuRTCommandBuffer*);
+    void submit(GrGpuCommandBuffer* buffer) override;
 
 private:
     GrMockGpu(GrContext* context, const GrMockOptions&, const GrContextOptions&);
+
+    void submitCommandBuffer(const GrMockGpuRTCommandBuffer*);
 
     void onResetContext(uint32_t resetBits) override {}
 
@@ -71,24 +73,13 @@ private:
     GrBuffer* onCreateBuffer(size_t sizeInBytes, GrBufferType, GrAccessPattern,
                              const void*) override;
 
-    bool onGetReadPixelsInfo(GrSurface*, GrSurfaceOrigin, int width, int height, size_t rowBytes,
-                             GrColorType, DrawPreference*, ReadPixelTempDrawInfo*) override {
+    bool onReadPixels(GrSurface* surface, int left, int top, int width, int height, GrColorType,
+                      void* buffer, size_t rowBytes) override {
         return true;
     }
 
-    bool onGetWritePixelsInfo(GrSurface* dstSurface, GrSurfaceOrigin, int width, int height,
-                              GrColorType, DrawPreference*, WritePixelTempDrawInfo*) override {
-        return true;
-    }
-
-    bool onReadPixels(GrSurface* surface, GrSurfaceOrigin, int left, int top, int width, int height,
-                      GrColorType, void* buffer, size_t rowBytes) override {
-        return true;
-    }
-
-    bool onWritePixels(GrSurface* surface, GrSurfaceOrigin, int left, int top, int width,
-                       int height, GrColorType, const GrMipLevel texels[],
-                       int mipLevelCount) override {
+    bool onWritePixels(GrSurface* surface, int left, int top, int width, int height, GrColorType,
+                       const GrMipLevel texels[], int mipLevelCount) override {
         return true;
     }
 
@@ -103,6 +94,8 @@ private:
         return true;
     }
 
+    bool onRegenerateMipMapLevels(GrTexture*) override { return true; }
+
     void onResolveRenderTarget(GrRenderTarget* target) override { return; }
 
     void onFinishFlush(bool insertedSemaphores) override {}
@@ -110,21 +103,20 @@ private:
     GrStencilAttachment* createStencilAttachmentForRenderTarget(const GrRenderTarget*,
                                                                 int width,
                                                                 int height) override;
-    void clearStencil(GrRenderTarget*, int clearValue) override  {}
-
 #if GR_TEST_UTILS
     GrBackendTexture createTestingOnlyBackendTexture(const void* pixels, int w, int h,
-                                                     GrPixelConfig, bool isRT,
-                                                     GrMipMapped) override;
+                                                     GrColorType, bool isRT,
+                                                     GrMipMapped, size_t rowBytes = 0) override;
     bool isTestingOnlyBackendTexture(const GrBackendTexture&) const override;
     void deleteTestingOnlyBackendTexture(const GrBackendTexture&) override;
 
-    GrBackendRenderTarget createTestingOnlyBackendRenderTarget(int w, int h, GrColorType,
-                                                               GrSRGBEncoded) override;
+    GrBackendRenderTarget createTestingOnlyBackendRenderTarget(int w, int h, GrColorType) override;
     void deleteTestingOnlyBackendRenderTarget(const GrBackendRenderTarget&) override;
 
     void testingOnly_flushGpuAndSync() override {}
 #endif
+
+    const GrMockOptions fMockOptions;
 
     static int NextInternalTextureID();
     static int NextExternalTextureID();

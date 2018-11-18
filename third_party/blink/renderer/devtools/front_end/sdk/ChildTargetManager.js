@@ -66,8 +66,10 @@ SDK.ChildTargetManager = class extends SDK.SDKModel {
    * @return {number}
    */
   _capabilitiesForType(type) {
-    if (type === 'worker')
-      return SDK.Target.Capability.JS | SDK.Target.Capability.Log | SDK.Target.Capability.Network;
+    if (type === 'worker') {
+      return SDK.Target.Capability.JS | SDK.Target.Capability.Log | SDK.Target.Capability.Network |
+          SDK.Target.Capability.Target;
+    }
     if (type === 'service_worker')
       return SDK.Target.Capability.Log | SDK.Target.Capability.Network | SDK.Target.Capability.Target;
     if (type === 'iframe') {
@@ -105,6 +107,15 @@ SDK.ChildTargetManager = class extends SDK.SDKModel {
     this._fireAvailableTargetsChanged();
   }
 
+  /**
+   * @override
+   * @param {string} targetId
+   * @param {string} status
+   * @param {number} errorCode
+   */
+  targetCrashed(targetId, status, errorCode) {
+  }
+
   _fireAvailableTargetsChanged() {
     SDK.targetManager.dispatchEventToListeners(
         SDK.TargetManager.Events.AvailableTargetsChanged, this._targetInfos.valuesArray());
@@ -125,7 +136,7 @@ SDK.ChildTargetManager = class extends SDK.SDKModel {
     }
     const target = this._targetManager.createTarget(
         targetInfo.targetId, targetName, this._capabilitiesForType(targetInfo.type),
-        this._createChildConnection.bind(this, this._targetAgent, sessionId), this._parentTarget);
+        this._createChildConnection.bind(this, this._targetAgent, sessionId), this._parentTarget, false /* isNodeJS */);
 
     if (SDK.ChildTargetManager._attachCallback)
       SDK.ChildTargetManager._attachCallback({target, waitingForDebugger});

@@ -22,8 +22,8 @@ namespace {
 
 bool RemoveStreamDeviceFromArray(const MediaStreamDevice& device,
                                  MediaStreamDevices* devices) {
-  for (MediaStreamDevices::iterator device_it = devices->begin();
-       device_it != devices->end(); ++device_it) {
+  for (auto device_it = devices->begin(); device_it != devices->end();
+       ++device_it) {
     if (device_it->IsSameDevice(device)) {
       devices->erase(device_it);
       return true;
@@ -133,7 +133,7 @@ void MediaStreamDeviceObserver::AddStream(const std::string& label,
   Stream stream;
   if (IsAudioInputMediaType(device.type))
     stream.audio_devices.push_back(device);
-  else if (IsVideoMediaType(device.type))
+  else if (IsVideoInputMediaType(device.type))
     stream.video_devices.push_back(device);
   else
     NOTREACHED();

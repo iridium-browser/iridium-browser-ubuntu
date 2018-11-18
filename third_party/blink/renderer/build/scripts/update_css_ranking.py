@@ -16,9 +16,9 @@ import math
 
 
 CSS_RANKING_API = "http://www.chromestatus.com/data/csspopularity"
-CSS_RANKING_FILE = "../../core/css/CSSPropertiesRanking.json5"
-CSS_PROPERTIES = "../../core/css/CSSProperties.json5"
-CONFIG_FILE = "../../core/css/CSSGroupConfig.json5"
+CSS_RANKING_FILE = "../../core/css/css_properties_ranking.json5"
+CSS_PROPERTIES = "../../core/css/css_properties.json5"
+CONFIG_FILE = "../../core/css/css_group_config.json5"
 
 
 def reformat_properties_name(css_properties):
@@ -30,10 +30,10 @@ def reformat_properties_name(css_properties):
 
 
 def update_css_ranking(css_ranking_file, css_ranking_api):
-    """Create the CSSPropertiesRanking.json5 for uses in Computed Style grouping
+    """Create the css_properties_ranking.json5 for uses in Computed Style grouping
 
     Args:
-        css_ranking_file: file directory to CSSPropertiesRanking.json5
+        css_ranking_file: file directory to css_properties_ranking.json5
         css_ranking_api: url to CSS ranking api
 
     """
@@ -85,17 +85,17 @@ def produce_partition_rule(config_file, css_ranking_api):
                                [float(i) / total_css_properties for i in range(total_css_properties)]))
     css_properties = json5_generator.Json5File.load_from_files([CSS_PROPERTIES]).name_dictionaries
 
-    rare_non_inherited_properties = sorted([(x["name"], css_ranking_dictionary[x["name"]])
+    rare_non_inherited_properties = sorted([(x["name"].original, css_ranking_dictionary[x["name"].original])
                                             for x in css_properties if not x["inherited"]
                                             and x["field_group"] is not None
                                             and "*" in x["field_group"]
-                                            and x["name"] in css_ranking_dictionary],
+                                            and x["name"].original in css_ranking_dictionary],
                                            key=lambda x: -x[1])
-    rare_inherited_properties = sorted([(x["name"], css_ranking_dictionary[x["name"]])
+    rare_inherited_properties = sorted([(x["name"].original, css_ranking_dictionary[x["name"].original])
                                         for x in css_properties if x["inherited"]
                                         and x["field_group"] is not None
                                         and "*" in x["field_group"]
-                                        and x["name"] in css_ranking_dictionary],
+                                        and x["name"].original in css_ranking_dictionary],
                                        key=lambda x: -x[1])
 
     rni_properties_rule = find_partition_rule(rare_non_inherited_properties,

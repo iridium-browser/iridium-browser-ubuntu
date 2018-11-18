@@ -7,22 +7,19 @@
 #include "ash/public/cpp/app_list/internal_app_id_constants.h"
 #include "ash/public/cpp/shelf_item.h"
 #include "ash/public/cpp/window_properties.h"
-#include "ash/resources/grit/ash_resources.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/settings_window_manager_chromeos.h"
 #include "components/strings/grit/components_strings.h"
-#include "services/ui/public/interfaces/window_manager.mojom.h"
-#include "ui/aura/client/aura_constants.h"
+#include "services/ws/public/mojom/window_manager.mojom.h"
 #include "ui/aura/window.h"
 #include "ui/base/class_property.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image_skia.h"
 
 namespace {
 
-// This class is only used in classic ash to rename the Settings window.
+// A helper class that updates the title of Chrome OS Settings browser windows.
 class AuraWindowSettingsTitleTracker : public aura::WindowTracker {
  public:
   AuraWindowSettingsTitleTracker() {}
@@ -54,12 +51,6 @@ void SettingsWindowObserver::OnNewSettingsWindow(Browser* settings_browser) {
   window->SetTitle(l10n_util::GetStringUTF16(IDS_SETTINGS_TITLE));
   const ash::ShelfID shelf_id(app_list::kInternalAppIdSettings);
   window->SetProperty(ash::kShelfIDKey, new std::string(shelf_id.Serialize()));
-  window->SetProperty<int>(ash::kShelfItemTypeKey, ash::TYPE_DIALOG);
-  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-  // The new gfx::ImageSkia instance is owned by the window itself.
-  window->SetProperty(
-      aura::client::kWindowIconKey,
-      new gfx::ImageSkia(*rb.GetImageSkiaNamed(IDR_SETTINGS_LOGO_192)));
-  window->SetProperty(aura::client::kHasOverviewIcon, true);
+  window->SetProperty<int>(ash::kShelfItemTypeKey, ash::TYPE_APP);
   aura_window_tracker_->Add(window);
 }

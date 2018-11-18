@@ -22,15 +22,26 @@ struct NGLineHeightMetrics {
       : ascent(LayoutUnit::Min()), descent(LayoutUnit::Min()) {}
   NGLineHeightMetrics(LayoutUnit initial_ascent, LayoutUnit initial_descent)
       : ascent(initial_ascent), descent(initial_descent) {}
+  static NGLineHeightMetrics Zero() {
+    return NGLineHeightMetrics(LayoutUnit(), LayoutUnit());
+  }
 
   // Compute from ComputedStyle, using the font metrics of the prikmary font.
   // The leading is not included.
+  NGLineHeightMetrics(const ComputedStyle&);
   NGLineHeightMetrics(const ComputedStyle&, FontBaseline);
 
   // Compute from FontMetrics. The leading is not included.
   NGLineHeightMetrics(const FontMetrics&, FontBaseline);
 
   bool IsEmpty() const { return ascent == LayoutUnit::Min(); }
+
+  bool operator==(const NGLineHeightMetrics& other) const {
+    return ascent == other.ascent && descent == other.descent;
+  }
+  bool operator!=(const NGLineHeightMetrics& other) const {
+    return !operator==(other);
+  }
 
   // Add the leading. Half the leading is added to ascent and descent each.
   // https://drafts.csswg.org/css2/visudet.html#leading
@@ -42,6 +53,8 @@ struct NGLineHeightMetrics {
   // Unite a metrics for an inline box to a metrics for a line box.
   void Unite(const NGLineHeightMetrics&);
 
+  void operator+=(const NGLineHeightMetrics&);
+
   // Ascent and descent of glyphs, or synthesized for replaced elements.
   // Then united to compute 'text-top' and 'text-bottom' of line boxes.
   LayoutUnit ascent;
@@ -52,6 +65,8 @@ struct NGLineHeightMetrics {
  private:
   void Initialize(const FontMetrics&, FontBaseline);
 };
+
+std::ostream& operator<<(std::ostream&, const NGLineHeightMetrics&);
 
 }  // namespace blink
 

@@ -26,6 +26,7 @@
 #include "google_apis/gcm/base/mcs_util.h"
 #include "google_apis/gcm/protocol/mcs.pb.h"
 #include "third_party/leveldatabase/env_chromium.h"
+#include "third_party/leveldatabase/leveldb_chrome.h"
 #include "third_party/leveldatabase/src/include/leveldb/db.h"
 #include "third_party/leveldatabase/src/include/leveldb/write_batch.h"
 
@@ -176,13 +177,6 @@ leveldb::Slice MakeSlice(const base::StringPiece& s) {
   return leveldb::Slice(s.begin(), s.size());
 }
 
-bool DatabaseExists(const base::FilePath& path) {
-  // It's not enough to check that the directory exists, since DestroyDB
-  // sometimes leaves behind an empty directory
-  // (https://github.com/google/leveldb/issues/215).
-  return base::PathExists(path.Append(FILE_PATH_LITERAL("CURRENT")));
-}
-
 }  // namespace
 
 class GCMStoreImpl::Backend
@@ -292,7 +286,8 @@ LoadStatus GCMStoreImpl::Backend::OpenStoreAndLoadData(StoreOpenMode open_mode,
 
   // Checks if the store exists or not. Opening a db with create_if_missing
   // not set will still create a new directory if the store does not exist.
-  if (open_mode == DO_NOT_CREATE && !DatabaseExists(path_)) {
+  if (open_mode == DO_NOT_CREATE &&
+      !leveldb_chrome::PossiblyValidDB(path_, leveldb::Env::Default())) {
     DVLOG(2) << "Database " << path_.value() << " does not exist";
     return STORE_DOES_NOT_EXIST;
   }
@@ -371,20 +366,21 @@ void GCMStoreImpl::Backend::Load(StoreOpenMode open_mode,
   if (result->device_android_id != 0 && result->device_security_token != 0) {
     int64_t file_size = 0;
     if (base::GetFileSize(path_, &file_size)) {
-      UMA_HISTOGRAM_COUNTS("GCM.StoreSizeKB",
-                           static_cast<int>(file_size / 1024));
+      UMA_HISTOGRAM_COUNTS_1M("GCM.StoreSizeKB",
+                              static_cast<int>(file_size / 1024));
     }
 
-    UMA_HISTOGRAM_COUNTS("GCM.RestoredRegistrations", gcm_registration_count);
-    UMA_HISTOGRAM_COUNTS("GCM.RestoredOutgoingMessages",
-                         result->outgoing_messages.size());
-    UMA_HISTOGRAM_COUNTS("GCM.RestoredIncomingMessages",
-                         result->incoming_messages.size());
+    UMA_HISTOGRAM_COUNTS_1M("GCM.RestoredRegistrations",
+                            gcm_registration_count);
+    UMA_HISTOGRAM_COUNTS_1M("GCM.RestoredOutgoingMessages",
+                            result->outgoing_messages.size());
+    UMA_HISTOGRAM_COUNTS_1M("GCM.RestoredIncomingMessages",
+                            result->incoming_messages.size());
 
-    UMA_HISTOGRAM_COUNTS("InstanceID.RestoredTokenCount",
-                         instance_id_token_count);
-    UMA_HISTOGRAM_COUNTS("InstanceID.RestoredIDCount",
-                         result->instance_id_data.size());
+    UMA_HISTOGRAM_COUNTS_1M("InstanceID.RestoredTokenCount",
+                            instance_id_token_count);
+    UMA_HISTOGRAM_COUNTS_1M("InstanceID.RestoredIDCount",
+                            result->instance_id_data.size());
   }
 
   DVLOG(1) << "Succeeded in loading "
@@ -1445,7 +1441,7 @@ void GCMStoreImpl::LoadContinuation(const LoadCallback& callback,
     if (app_message_counts_[data_message->category()] == kMessagesPerAppLimit)
       num_throttled_apps++;
   }
-  UMA_HISTOGRAM_COUNTS("GCM.NumThrottledApps", num_throttled_apps);
+  UMA_HISTOGRAM_COUNTS_1M("GCM.NumThrottledApps", num_throttled_apps);
   callback.Run(std::move(result));
 }
 

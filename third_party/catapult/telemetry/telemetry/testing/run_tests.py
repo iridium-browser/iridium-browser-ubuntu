@@ -183,9 +183,10 @@ class RunTestsCommand(command_line.OptparseCommand):
 
     runner.args.path.append(util.GetUnittestDataDir())
 
-    # Always print out these info for the ease of debugging.
-    runner.args.timing = True
-    runner.args.verbose = 3
+    # Standard verbosity will only emit output on test failure. Higher verbosity
+    # levels spam the output with logging, making it very difficult to figure
+    # out what's going on when digging into test failures.
+    runner.args.verbose = 1
 
     runner.classifier = GetClassifier(args, possible_browser)
     runner.context = args
@@ -254,7 +255,7 @@ def _MatchesSelectedTest(name, selected_tests, selected_tests_are_exact):
   if not selected_tests:
     return False
   if selected_tests_are_exact:
-    return any(name in selected_tests)
+    return name in selected_tests
   else:
     return any(test in name for test in selected_tests)
 

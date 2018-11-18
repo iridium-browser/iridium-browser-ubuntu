@@ -12,6 +12,8 @@
 #include "base/macros.h"
 #include "ui/events/event_handler.h"
 #include "ui/events/events_export.h"
+#include "ui/gfx/geometry/point.h"
+#include "ui/gfx/geometry/point_f.h"
 
 namespace ui {
 
@@ -54,6 +56,10 @@ class EVENTS_EXPORT EventTarget {
   virtual void ConvertEventToTarget(EventTarget* target,
                                     LocatedEvent* event);
 
+  // Get |event|'s screen location, using the EventTarget's screen location.
+  virtual gfx::PointF GetScreenLocationF(const LocatedEvent& event) const;
+  gfx::Point GetScreenLocation(const LocatedEvent& event) const;
+
   // Priority levels for PreTargetHandlers.
   enum class Priority {
     // The Accessibility level is the highest, and gets events before
@@ -88,6 +94,8 @@ class EVENTS_EXPORT EventTarget {
   // Sets |target_handler| as |target_handler_| and returns the old handler.
   EventHandler* SetTargetHandler(EventHandler* target_handler);
 
+  bool HasTargetHandler() const { return target_handler_ != nullptr; }
+
  protected:
   EventHandler* target_handler() { return target_handler_; }
 
@@ -118,7 +126,7 @@ class EVENTS_EXPORT EventTarget {
 
   EventHandlerPriorityList pre_target_list_;
   EventHandlerList post_target_list_;
-  EventHandler* target_handler_;
+  EventHandler* target_handler_ = nullptr;
 
   DISALLOW_COPY_AND_ASSIGN(EventTarget);
 };

@@ -22,7 +22,6 @@ goog.require('cvox.BrailleOverlayWidget');
 goog.require('cvox.ChromeVox');
 goog.require('cvox.ChromeVoxKbHandler');
 goog.require('cvox.CommandStore');
-goog.require('cvox.ConsoleTts');
 goog.require('cvox.ContextMenuWidget');
 goog.require('cvox.DomPredicates');
 goog.require('cvox.DomUtil');
@@ -572,9 +571,6 @@ cvox.ChromeVoxUserCommands.doCommand_ = function(cmdStruct) {
     case 'stopHistoryRecording':
       cvox.History.getInstance().stopRecording();
       break;
-    case 'enableConsoleTts':
-      cvox.ConsoleTts.getInstance().setEnabled(true);
-      break;
     case 'toggleBrailleCaptions':
       cvox.ChromeVox.host.sendToBackgroundPage({
         'target': 'Prefs',
@@ -705,17 +701,6 @@ cvox.ChromeVoxUserCommands.doCommand_ = function(cmdStruct) {
       var audios = document.getElementsByTagName('AUDIO');
       for (var i = 0, mediaElem; mediaElem = audios[i]; i++) {
         mediaElem.pause();
-      }
-      break;
-
-    // Math specific commands.
-    case 'toggleSemantics':
-      if (cvox.TraverseMath.toggleSemantic()) {
-        cvox.ChromeVox.tts.speak(
-            Msgs.getMsg('semantics_on'), cvox.QueueMode.QUEUE);
-      } else {
-        cvox.ChromeVox.tts.speak(
-            Msgs.getMsg('semantics_off'), cvox.QueueMode.QUEUE);
       }
       break;
 

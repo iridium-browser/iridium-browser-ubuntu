@@ -27,9 +27,11 @@
 #include "ui/events/event.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/sequential_id_generator.h"
+#include "ui/gfx/win/msg_util.h"
 #include "ui/gfx/win/window_impl.h"
 #include "ui/views/views_export.h"
 #include "ui/views/win/pen_event_processor.h"
+#include "ui/views/window/window_resize_utils.h"
 
 namespace gfx {
 class ImageSkia;
@@ -64,54 +66,6 @@ const int WM_NCUAHDRAWFRAME = 0xAF;
 // WM_WINDOWPOSCHANGING. It's used to inform the client if a
 // WM_WINDOWPOSCHANGED won't be received.
 const int WM_WINDOWSIZINGFINISHED = WM_USER;
-
-// IsMsgHandled() and BEGIN_SAFE_MSG_MAP_EX are a modified version of
-// BEGIN_MSG_MAP_EX. The main difference is it uses a WeakPtrFactory member
-// (|weak_factory|) that is used in _ProcessWindowMessage() and changing
-// IsMsgHandled() from a member function to a define that checks if the weak
-// factory is still valid in addition to the member. Together these allow for
-// |this| to be deleted during dispatch.
-#define IsMsgHandled() !ref.get() || msg_handled_
-
-#define BEGIN_SAFE_MSG_MAP_EX(weak_factory) \
- private: \
-  BOOL msg_handled_; \
-\
- public: \
-  /* "handled" management for cracked handlers */ \
-  void SetMsgHandled(BOOL handled) { \
-    msg_handled_ = handled; \
-  } \
-  BOOL ProcessWindowMessage(HWND hwnd, \
-                            UINT msg, \
-                            WPARAM w_param, \
-                            LPARAM l_param, \
-                            LRESULT& l_result, \
-                            DWORD msg_map_id = 0) override { \
-    base::WeakPtr<HWNDMessageHandler> ref(weak_factory.GetWeakPtr()); \
-    BOOL old_msg_handled = msg_handled_; \
-    BOOL ret = _ProcessWindowMessage(hwnd, msg, w_param, l_param, l_result, \
-                                     msg_map_id); \
-    if (ref.get()) \
-      msg_handled_ = old_msg_handled; \
-    return ret; \
-  } \
-  BOOL _ProcessWindowMessage(HWND hWnd, \
-                             UINT uMsg, \
-                             WPARAM wParam, \
-                             LPARAM lParam, \
-                             LRESULT& lResult, \
-                             DWORD dwMsgMapID) { \
-    base::WeakPtr<HWNDMessageHandler> ref(weak_factory.GetWeakPtr()); \
-    BOOL bHandled = TRUE; \
-    hWnd; \
-    uMsg; \
-    wParam; \
-    lParam; \
-    lResult; \
-    bHandled; \
-    switch(dwMsgMapID) { \
-      case 0:
 
 // An object that handles messages for a HWND that implements the views
 // "Custom Frame" look. The purpose of this class is to isolate the windows-
@@ -153,9 +107,10 @@ class VIEWS_EXPORT HWNDMessageHandler : public gfx::WindowImpl,
   void StackAbove(HWND other_hwnd);
   void StackAtTop();
 
-  void Show();
-  void ShowWindowWithState(ui::WindowShowState show_state);
-  void ShowMaximizedWithBounds(const gfx::Rect& bounds);
+  // Shows the window. If |show_state| is maximized, |pixel_restore_bounds| is
+  // the bounds to restore the window to when going back to normal.
+  void Show(ui::WindowShowState show_state,
+            const gfx::Rect& pixel_restore_bounds);
   void Hide();
 
   void Maximize();
@@ -208,6 +163,9 @@ class VIEWS_EXPORT HWNDMessageHandler : public gfx::WindowImpl,
 
   void SetFullscreen(bool fullscreen);
 
+  // Updates the aspect ratio of the window.
+  void SetAspectRatio(float aspect_ratio);
+
   // Updates the window style to reflect whether it can be resized or maximized.
   void SizeConstraintsChanged();
 
@@ -235,7 +193,7 @@ class VIEWS_EXPORT HWNDMessageHandler : public gfx::WindowImpl,
   void OnCaretBoundsChanged(const ui::TextInputClient* client) override;
   void OnTextInputStateChanged(const ui::TextInputClient* client) override;
   void OnInputMethodDestroyed(const ui::InputMethod* input_method) override;
-  void OnShowImeIfNeeded() override;
+  void OnShowVirtualKeyboardIfEnabled() override;
 
   // Overridden from WindowEventTarget
   LRESULT HandleMouseMessage(unsigned int message,
@@ -313,9 +271,14 @@ class VIEWS_EXPORT HWNDMessageHandler : public gfx::WindowImpl,
   // or subsequently.
   void ClientAreaSizeChanged();
 
-  // Returns the insets of the client area relative to the non-client area of
-  // the window.
-  bool GetClientAreaInsets(gfx::Insets* insets) const;
+  // Returns true if |insets| was modified to define a custom client area for
+  // the window, false if the default client area should be used. If false is
+  // returned, |insets| is not modified.  |monitor| is the monitor this
+  // window is on.  Normally that would be determined from the HWND, but
+  // during WM_NCCALCSIZE Windows does not return the correct monitor for the
+  // HWND, so it must be passed in explicitly (see HWNDMessageHandler::
+  // OnNCCalcSize for more details).
+  bool GetClientAreaInsets(gfx::Insets* insets, HMONITOR monitor) const;
 
   // Resets the window region for the current widget bounds if necessary.
   // If |force| is true, the window region is reset to NULL even for native
@@ -360,11 +323,10 @@ class VIEWS_EXPORT HWNDMessageHandler : public gfx::WindowImpl,
 
   // Message Handlers ----------------------------------------------------------
 
-  BEGIN_SAFE_MSG_MAP_EX(weak_factory_)
+  CR_BEGIN_MSG_MAP_EX(HWNDMessageHandler)
     // Range handlers must go first!
     CR_MESSAGE_RANGE_HANDLER_EX(WM_MOUSEFIRST, WM_MOUSELAST, OnMouseRange)
-    CR_MESSAGE_RANGE_HANDLER_EX(WM_NCMOUSEMOVE,
-                                WM_NCXBUTTONDBLCLK,
+    CR_MESSAGE_RANGE_HANDLER_EX(WM_NCMOUSEMOVE, WM_NCXBUTTONDBLCLK,
                                 OnMouseRange)
 
     // CustomFrameWindow hacks
@@ -456,6 +418,7 @@ class VIEWS_EXPORT HWNDMessageHandler : public gfx::WindowImpl,
     CR_MSG_WM_SETTEXT(OnSetText)
     CR_MSG_WM_SETTINGCHANGE(OnSettingChange)
     CR_MSG_WM_SIZE(OnSize)
+    CR_MSG_WM_SIZING(OnSizing)
     CR_MSG_WM_SYSCOMMAND(OnSysCommand)
     CR_MSG_WM_THEMECHANGED(OnThemeChanged)
     CR_MSG_WM_TIMECHANGE(OnTimeChange)
@@ -515,6 +478,7 @@ class VIEWS_EXPORT HWNDMessageHandler : public gfx::WindowImpl,
   LRESULT OnSetText(const wchar_t* text);
   void OnSettingChange(UINT flags, const wchar_t* section);
   void OnSize(UINT param, const gfx::Size& size);
+  void OnSizing(UINT param, RECT* rect);
   void OnSysCommand(UINT notification_code, const gfx::Point& point);
   void OnThemeChanged();
   void OnTimeChange();
@@ -608,6 +572,10 @@ class VIEWS_EXPORT HWNDMessageHandler : public gfx::WindowImpl,
   // if they request its location.
   void DestroyAXSystemCaret();
 
+  // Updates |rect| to adhere to the |aspect_ratio| of the window. |param|
+  // refers to the edge of the window being sized.
+  void SizeRectToAspectRatio(UINT param, gfx::Rect* rect);
+
   HWNDMessageHandlerDelegate* delegate_;
 
   std::unique_ptr<FullscreenHandler> fullscreen_handler_;
@@ -633,6 +601,10 @@ class VIEWS_EXPORT HWNDMessageHandler : public gfx::WindowImpl,
 
   // The icon created from the bitmap image of the app icon.
   base::win::ScopedHICON app_icon_;
+
+  // The aspect ratio for the window. This is only used for sizing operations
+  // for the non-client area.
+  base::Optional<float> aspect_ratio_;
 
   // The current DPI.
   int dpi_;
@@ -771,14 +743,14 @@ class VIEWS_EXPORT HWNDMessageHandler : public gfx::WindowImpl,
   static base::LazyInstance<FullscreenWindowMonitorMap>::DestructorAtExit
       fullscreen_monitor_map_;
 
-  // The WeakPtrFactories below must occur last in the class definition so they
-  // get destroyed last.
+  // The WeakPtrFactories below (one inside the
+  // CR_MSG_MAP_CLASS_DECLARATIONS macro and autohide_factory_) must
+  // occur last in the class definition so they get destroyed last.
+
+  CR_MSG_MAP_CLASS_DECLARATIONS(HWNDMessageHandler)
 
   // The factory used to lookup appbar autohide edges.
   base::WeakPtrFactory<HWNDMessageHandler> autohide_factory_;
-
-  // The factory used with BEGIN_SAFE_MSG_MAP_EX.
-  base::WeakPtrFactory<HWNDMessageHandler> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(HWNDMessageHandler);
 };

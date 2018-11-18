@@ -32,20 +32,11 @@ interface StandaloneApp {
   ConnectToClassInterface() => (string class_interface_response, string title);
 };
 
-interface UserIdTest {
-  // Attempts to connect to mojo:connect_test_class_app as |user_id|.
+interface IdentityTest {
+  // Attempts to connect to mojo:connect_test_class_app as |target|.
   // The callback takes the connection response result, and the identity
-  // mojo:connect_test_class_app was run as, which should match |user_id|.
-  ConnectToClassAppAsDifferentUser(service_manager.mojom.Identity target) =>
-      (int32 connection_result, service_manager.mojom.Identity target);
-};
-
-interface ClientProcessTest {
-  // Attempts to launch a bare exe and connect to it using the
-  // ClientProcessConnection param to Connector::Connect(). The callback takes
-  // the result of the connection, and the identity of the app that the caller
-  // can use to connect to this app as well.
-  LaunchAndConnectToProcess() =>
+  // mojo:connect_test_class_app was run as, which should match |target|.
+  ConnectToClassAppWithIdentity(service_manager.mojom.Identity target) =>
       (int32 connection_result, service_manager.mojom.Identity target);
 };
 

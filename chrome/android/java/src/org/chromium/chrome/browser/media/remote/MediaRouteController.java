@@ -54,7 +54,7 @@ public interface MediaRouteController {
          * Called when the playback state changes (e.g. from Playing to Paused)
          * @param newState the new playback state
          */
-        void onPlaybackStateChanged(PlayerState newState);
+        void onPlaybackStateChanged(@PlayerState int newState);
 
         String getTitle();
 
@@ -152,7 +152,7 @@ public interface MediaRouteController {
          * Called when the Playback state has changed (e.g. from playing to paused)
          * @param newState the new state
          */
-        void onPlaybackStateChanged(PlayerState newState);
+        void onPlaybackStateChanged(@PlayerState int newState);
 
         /**
          * Called when the duration of the currently playing video changes.
@@ -314,7 +314,8 @@ public interface MediaRouteController {
     MediaStateListener getMediaStateListener();
 
     @VisibleForTesting
-    PlayerState getDisplayedPlayerState();
+    @PlayerState
+    int getDisplayedPlayerState();
 
     /**
      * Remove an existing media state listener
@@ -333,6 +334,14 @@ public interface MediaRouteController {
      * @return the poster bitmap, or Null.
      */
     Bitmap getPoster();
+
+    /**
+     * Used to filter out routes in the MediaRouteChooserDialog.
+     * Overridden in some downstream code.
+     * @param route the route to be filtered.
+     * @return true if the route should be excluded, false if it should be shown to the user.
+     */
+    boolean shouldFilterOutRoute(MediaRouter.RouteInfo route);
 
     /**
      * Called when a new route has been selected

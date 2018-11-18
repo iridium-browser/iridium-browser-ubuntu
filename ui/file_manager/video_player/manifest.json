@@ -8,13 +8,10 @@
   "display_in_launcher": false,
   "incognito" : "split",
   "icons": {
-    "16": "images/icon/video-player-favicon-16.png",
-    "32": "images/icon/video-player-32.png",
+    "16": "images/icon/video-player-16.png",
     "48": "images/icon/video-player-48.png",
-    "64": "images/icon/video-player-64.png",
-    "96": "images/icon/video-player-96.png",
     "128": "images/icon/video-player-128.png",
-    "256": "images/icon/video-player-256.png"
+    "192": "images/icon/video-player-192.png"
   },
   "permissions": [
     "commandLinePrivate",
@@ -67,6 +64,7 @@
       ]
     },
     // enhhojjnijigcajfphajepfemndkmdlo is the Media Router component extension ID.
-    "content_security_policy": "default-src 'none'; script-src 'self' blob: filesystem: chrome://resources chrome-extension://hhaomjibdihmijegdhdafkllkbggdgoj chrome-extension://enhhojjnijigcajfphajepfemndkmdlo; style-src 'self' blob: filesystem: chrome://resources 'unsafe-inline'; img-src 'self' blob: filesystem: chrome://theme chrome://resources data: https://www.googledrive.com; media-src 'self' blob: filesystem:; object-src 'self' blob: filesystem:; font-src chrome://resources;"
+    // ljoplibgfehghmibaoaepfagnmbbfiga is the ui/file_manager/integration_tests component extension ID.
+    "content_security_policy": "default-src 'none'; script-src 'self' blob: filesystem: chrome://resources chrome-extension://hhaomjibdihmijegdhdafkllkbggdgoj chrome-extension://enhhojjnijigcajfphajepfemndkmdlo chrome-extension://ljoplibgfehghmibaoaepfagnmbbfiga; style-src 'self' blob: filesystem: chrome://resources 'unsafe-inline'; img-src 'self' blob: filesystem: chrome://theme chrome://resources data: https://www.googledrive.com; media-src 'self' blob: filesystem:; object-src 'self' blob: filesystem:; font-src chrome://resources;"
   }
 }

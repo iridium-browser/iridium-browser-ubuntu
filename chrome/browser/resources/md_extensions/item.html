@@ -3,6 +3,7 @@
 <link rel="import" href="chrome://resources/cr_elements/cr_icons_css.html">
 <link rel="import" href="chrome://resources/cr_elements/cr_toggle/cr_toggle.html">
 <link rel="import" href="chrome://resources/cr_elements/hidden_style_css.html">
+<link rel="import" href="chrome://resources/cr_elements/icons.html">
 <link rel="import" href="chrome://resources/cr_elements/paper_button_style_css.html">
 <link rel="import" href="chrome://resources/cr_elements/shared_vars_css.html">
 <link rel="import" href="chrome://resources/html/action_link.html">
@@ -10,15 +11,13 @@
 <link rel="import" href="chrome://resources/html/assert.html">
 <link rel="import" href="chrome://resources/html/cr.html">
 <link rel="import" href="chrome://resources/html/i18n_behavior.html">
-<link rel="import" href="item_behavior.html">
 <link rel="import" href="icons.html">
+<link rel="import" href="item_behavior.html">
 <link rel="import" href="item_util.html">
 <link rel="import" href="strings.html">
-<link rel="import" href="chrome://resources/polymer/v1_0/iron-icons/iron-icons.html">
-<link rel="import" href="chrome://resources/polymer/v1_0/iron-icons/communication-icons.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/iron-flex-layout/iron-flex-layout-classes.html">
+<link rel="import" href="chrome://resources/polymer/v1_0/iron-icon/iron-icon.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-icon-button/paper-icon-button-light.html">
-<link rel="import" href="chrome://resources/polymer/v1_0/paper-styles/shadow.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-tooltip/paper-tooltip.html">
 <link rel="import" href="navigation_helper.html">
 
@@ -60,15 +59,14 @@
       }
 
       #card {
-        @apply --shadow-elevation-2dp;
+        @apply --cr-card-elevation;
         background: white;
-        border-radius: 2px;
+        border-radius: var(--cr-card-border-radius);
         display: flex;
         flex-direction: column;
         height: 160px;
         /* Duration matches --drawer-transition from toolbar.html. */
         transition: height 300ms cubic-bezier(.25, .1, .25, 1);
-        width: var(--extensions-card-width, 400px);
       }
 
       #card.dev-mode {
@@ -78,14 +76,14 @@
       #main {
         display: flex;
         flex: 1;
-        padding: 16px 20px 17px;
+        padding: 16px 20px;
       }
 
       #content {
-        -webkit-margin-start: 24px;
         display: flex;
         flex: 1;
         flex-direction: column;
+        margin-inline-start: 24px;
         overflow: hidden;
       }
 
@@ -95,7 +93,7 @@
       }
 
       #name {
-        -webkit-margin-end: 8px;
+        margin-inline-end: 8px;
       }
 
       #description {
@@ -110,8 +108,8 @@
 
       #error-icon {
         --iron-icon-fill-color: var(--google-red-700);
-        -webkit-margin-end: 4px;
         height: 18px;
+        margin-inline-end: 4px;
         width: 18px;
       }
 
@@ -120,9 +118,7 @@
       #extension-id,
       #inspect-views,
       #button-strip {
-        /* TODO(dschuyler): use --cr-secondary-text. */
-        color: var(--paper-grey-600);
-        font-weight: 400;
+        @apply --cr-secondary-text;
       }
 
       #extension-id {
@@ -135,22 +131,20 @@
       }
 
       #inspect-views > span {
-        -webkit-margin-end: 4px;
+        margin-inline-end: 4px;
       }
 
       #button-strip {
-        /* Avoid ripple from overlapping container. */
-        -webkit-margin-end: 20px;
-        border-top: var(--cr-separator-line);
         box-sizing: border-box;
         flex-shrink: 0;
         height: var(--cr-section-min-height);
         padding-bottom: 8px;
+        padding-inline-end: 20px;
         padding-top: 8px;
       }
 
       #button-strip paper-button {
-        -webkit-margin-start: 8px;
+        margin-inline-start: 8px;
       }
 
       #learn-more-link {
@@ -159,7 +153,7 @@
       }
 
       #source-indicator {
-        -webkit-margin-start: 24px;
+        margin-inline-start: 24px;
         margin-top: 24px;
         position: absolute;
       }
@@ -198,7 +192,7 @@
       }
 
       #dev-reload-button-container {
-        -webkit-margin-end: 12px;
+        margin-inline-end: 12px;
       }
 
       #blacklisted-warning:empty {
@@ -259,12 +253,13 @@
             </div>
           </div>
           <div id="description" class="multiline-clippable-text"
-              hidden$="[[hasWarnings_(data.*)]]">
+              hidden$="[[hasWarnings_(data.disableReasons.*, data.*)]]">
             [[data.description]]
           </div>
-          <template is="dom-if" if="[[hasWarnings_(data.*)]]">
+          <template is="dom-if"
+              if="[[hasWarnings_(data.disableReasons.*, data.*)]]">
             <div id="warnings">
-              <iron-icon id="error-icon" icon="error"></iron-icon>
+              <iron-icon id="error-icon" icon="cr:error"></iron-icon>
               <span id="runtime-warnings" aria-describedby="a11yAssociation"
                   hidden$="[[!data.runtimeWarnings.length]]">
                 <template is="dom-repeat" items="[[data.runtimeWarnings]]">
@@ -317,14 +312,14 @@
       </div>
       <div id="button-strip" class="layout horizontal center">
         <div class="layout flex horizontal center">
-          <paper-button id="details-button" on-click="onDetailsTap_"
+          <paper-button id="detailsButton" on-click="onDetailsTap_"
               aria-describedby="a11yAssociation">
             $i18n{itemDetails}
           </paper-button>
           <paper-button id="remove-button" on-click="onRemoveTap_"
               aria-describedby="a11yAssociation"
               hidden="[[isControlled_(data.controlledInfo)]]">
-            $i18n{itemRemove}
+            $i18n{remove}
           </paper-button>
           <template is="dom-if" if="[[shouldShowErrorsButton_(data.*)]]">
             <paper-button id="errors-button" on-click="onErrorsTap_"

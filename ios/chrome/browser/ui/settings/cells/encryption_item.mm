@@ -5,6 +5,9 @@
 #import "ios/chrome/browser/ui/settings/cells/encryption_item.h"
 
 #import "ios/chrome/browser/ui/collection_view/cells/MDCCollectionViewCell+Chrome.h"
+#include "ios/chrome/browser/ui/collection_view/cells/collection_view_cell_constants.h"
+#import "ios/chrome/browser/ui/uikit_ui_util.h"
+#import "ios/chrome/common/ui_util/constraints_ui_util.h"
 #import "ios/third_party/material_components_ios/src/components/Palettes/src/MaterialPalettes.h"
 #import "ios/third_party/material_components_ios/src/components/Typography/src/MaterialTypography.h"
 
@@ -69,10 +72,10 @@ const CGFloat kVerticalPadding = 16;
 
     _textLabel = [[UILabel alloc] init];
     _textLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.contentView addSubview:_textLabel];
-
-    _textLabel.font = [[MDCTypography fontLoader] mediumFontOfSize:14];
     _textLabel.numberOfLines = 0;
+    _textLabel.font = [UIFont systemFontOfSize:kUIKitMainFontSize];
+    _textLabel.textColor = UIColorFromRGB(kUIKitMainTextColor);
+    [self.contentView addSubview:_textLabel];
 
     // Set up the constraints.
     [NSLayoutConstraint activateConstraints:@[
@@ -82,12 +85,8 @@ const CGFloat kVerticalPadding = 16;
       [_textLabel.trailingAnchor
           constraintEqualToAnchor:self.contentView.trailingAnchor
                          constant:-kHorizontalPadding],
-      [_textLabel.topAnchor constraintEqualToAnchor:self.contentView.topAnchor
-                                           constant:kVerticalPadding],
-      [_textLabel.bottomAnchor
-          constraintEqualToAnchor:self.contentView.bottomAnchor
-                         constant:-kVerticalPadding],
     ]];
+    AddOptionalVerticalPadding(self.contentView, _textLabel, kVerticalPadding);
   }
   return self;
 }

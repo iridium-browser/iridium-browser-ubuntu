@@ -23,14 +23,15 @@
  * DAMAGE.
  */
 
-#include "third_party/blink/renderer/bindings/core/v8/exception_messages.h"
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
+#include "third_party/blink/renderer/modules/webaudio/dynamics_compressor_node.h"
+
 #include "third_party/blink/renderer/modules/webaudio/audio_node_input.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_node_output.h"
-#include "third_party/blink/renderer/modules/webaudio/dynamics_compressor_node.h"
 #include "third_party/blink/renderer/modules/webaudio/dynamics_compressor_options.h"
 #include "third_party/blink/renderer/platform/audio/audio_utilities.h"
 #include "third_party/blink/renderer/platform/audio/dynamics_compressor.h"
+#include "third_party/blink/renderer/platform/bindings/exception_messages.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 
 // Set output to stereo by default.
 static const unsigned defaultNumberOfOutputChannels = 2;
@@ -54,6 +55,9 @@ DynamicsCompressorHandler::DynamicsCompressorHandler(
       release_(&release) {
   AddInput();
   AddOutput(defaultNumberOfOutputChannels);
+
+  SetInternalChannelCountMode(kClampedMax);
+
   Initialize();
 }
 
@@ -95,8 +99,9 @@ void DynamicsCompressorHandler::Process(size_t frames_to_process) {
 
   dynamics_compressor_->Process(Input(0).Bus(), output_bus, frames_to_process);
 
-  reduction_ =
+  float reduction =
       dynamics_compressor_->ParameterValue(DynamicsCompressor::kParamReduction);
+  NoBarrierStore(&reduction_, reduction);
 }
 
 void DynamicsCompressorHandler::ProcessOnlyAudioParams(
@@ -150,10 +155,11 @@ void DynamicsCompressorHandler::SetChannelCount(
     }
   } else {
     exception_state.ThrowDOMException(
-        kNotSupportedError, ExceptionMessages::IndexOutsideRange<unsigned long>(
-                                "channelCount", channel_count, 1,
-                                ExceptionMessages::kInclusiveBound, 2,
-                                ExceptionMessages::kInclusiveBound));
+        DOMExceptionCode::kNotSupportedError,
+        ExceptionMessages::IndexOutsideRange<unsigned long>(
+            "channelCount", channel_count, 1,
+            ExceptionMessages::kInclusiveBound, 2,
+            ExceptionMessages::kInclusiveBound));
   }
 }
 
@@ -172,7 +178,7 @@ void DynamicsCompressorHandler::SetChannelCountMode(
   } else if (mode == "max") {
     // This is not supported for a DynamicsCompressorNode, which can
     // only handle 1 or 2 channels.
-    exception_state.ThrowDOMException(kNotSupportedError,
+    exception_state.ThrowDOMException(DOMExceptionCode::kNotSupportedError,
                                       "The provided value 'max' is not an "
                                       "allowed value for ChannelCountMode");
     new_channel_count_mode_ = old_mode;
@@ -188,34 +194,40 @@ void DynamicsCompressorHandler::SetChannelCountMode(
 
 DynamicsCompressorNode::DynamicsCompressorNode(BaseAudioContext& context)
     : AudioNode(context),
-      threshold_(AudioParam::Create(context,
-                                    kParamTypeDynamicsCompressorThreshold,
-                                    "DynamicsCompressor.threshold",
-                                    -24,
-                                    -100,
-                                    0)),
+      threshold_(
+          AudioParam::Create(context,
+                             kParamTypeDynamicsCompressorThreshold,
+                             -24,
+                             AudioParamHandler::AutomationRate::kControl,
+                             AudioParamHandler::AutomationRateMode::kFixed,
+                             -100,
+                             0)),
       knee_(AudioParam::Create(context,
                                kParamTypeDynamicsCompressorKnee,
-                               "DynamicsCompressor.knee",
                                30,
+                               AudioParamHandler::AutomationRate::kControl,
+                               AudioParamHandler::AutomationRateMode::kFixed,
                                0,
                                40)),
       ratio_(AudioParam::Create(context,
                                 kParamTypeDynamicsCompressorRatio,
-                                "DynamicsCompressor.ratio",
                                 12,
+                                AudioParamHandler::AutomationRate::kControl,
+                                AudioParamHandler::AutomationRateMode::kFixed,
                                 1,
                                 20)),
       attack_(AudioParam::Create(context,
                                  kParamTypeDynamicsCompressorAttack,
-                                 "DynamicsCompressor.attack",
                                  0.003,
+                                 AudioParamHandler::AutomationRate::kControl,
+                                 AudioParamHandler::AutomationRateMode::kFixed,
                                  0,
                                  1)),
       release_(AudioParam::Create(context,
                                   kParamTypeDynamicsCompressorRelease,
-                                  "DynamicsCompressor.release",
                                   0.250,
+                                  AudioParamHandler::AutomationRate::kControl,
+                                  AudioParamHandler::AutomationRateMode::kFixed,
                                   0,
                                   1)) {
   SetHandler(DynamicsCompressorHandler::Create(

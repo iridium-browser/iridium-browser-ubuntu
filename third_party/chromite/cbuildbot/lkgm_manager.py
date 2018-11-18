@@ -17,15 +17,11 @@ from xml.parsers import expat
 from chromite.lib import config_lib
 from chromite.lib import constants
 from chromite.cbuildbot import manifest_version
-from chromite.cbuildbot import repository
 from chromite.cbuildbot import trybot_patch_pool
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_logging as logging
 from chromite.lib import git
 from chromite.lib import osutils
-
-
-site_config = config_lib.GetConfig()
 
 
 # Paladin constants for manifest names.
@@ -116,6 +112,8 @@ class LKGMManager(manifest_version.BuildSpecsManager):
   ANDROID_PFQ_SUBDIR = 'android-LKGM-candidates'
   COMMIT_QUEUE_SUBDIR = 'paladin'
   TOOLCHAIN_SUBDIR = 'toolchain'
+  FULL_SUBDIR = 'full'
+  INCREMENTAL_SUBDIR = 'incremental'
 
   def __init__(self, source_repo, manifest_repo, build_names, build_type,
                incr_type, force, branch, manifest=constants.DEFAULT_MANIFEST,
@@ -160,6 +158,10 @@ class LKGMManager(manifest_version.BuildSpecsManager):
       self.rel_working_dir = self.ANDROID_PFQ_SUBDIR
     elif self.build_type == constants.TOOLCHAIN_TYPE:
       self.rel_working_dir = self.TOOLCHAIN_SUBDIR
+    elif self.build_type == constants.FULL_TYPE:
+      self.rel_working_dir = self.FULL_SUBDIR
+    elif self.build_type == constants.INCREMENTAL_TYPE:
+      self.rel_working_dir = self.INCREMENTAL_SUBDIR
     elif config_lib.IsCQType(self.build_type):
       self.rel_working_dir = self.COMMIT_QUEUE_SUBDIR
     else:
@@ -293,7 +295,7 @@ class LKGMManager(manifest_version.BuildSpecsManager):
     logging.info('Cloning manifest repository from %s to %s.',
                  manifest_path, tmp_manifest_repo)
 
-    repository.CloneGitRepo(tmp_manifest_repo, manifest_path)
+    git.Clone(tmp_manifest_repo, manifest_path)
     git.CreateBranch(tmp_manifest_repo, self.cros_source.branch or 'master')
 
     logging.info('Switching to local patched manifest repository:')
@@ -446,7 +448,8 @@ class LKGMManager(manifest_version.BuildSpecsManager):
     """
     last_error = None
     new_manifest = manifest_version.FilterManifest(
-        manifest, whitelisted_remotes=site_config.params.EXTERNAL_REMOTES)
+        manifest,
+        whitelisted_remotes=config_lib.GetSiteParams().EXTERNAL_REMOTES)
     version_info = self.GetCurrentVersionInfo()
     for _attempt in range(0, retries + 1):
       try:
@@ -551,7 +554,7 @@ def GenerateBlameList(source_repo, lkgm_path, only_print_chumps=False):
     # Additional case in case the repo has been removed from the manifest.
     src_path = source_repo.GetRelativePath(rel_src_path)
     if not os.path.exists(src_path):
-      logging.info('Detected repo removed from manifest %s' % project)
+      logging.info('Detected repo removed from manifest %s', project)
       continue
 
     revision = checkout['revision']

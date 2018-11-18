@@ -18,57 +18,35 @@
 
 namespace ui {
 
-class MojoWebUIControllerBase : public content::WebUIController {
- public:
-  explicit MojoWebUIControllerBase(content::WebUI* contents);
-  ~MojoWebUIControllerBase() override;
-
-  // content::WebUIController overrides:
-  void RenderFrameCreated(content::RenderFrameHost* render_frame_host) override;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(MojoWebUIControllerBase);
-};
-
-// MojoWebUIController is intended for web ui pages that use mojo. It is
+// MojoWebUIController is intended for WebUI pages that use Mojo. It is
 // expected that subclasses will do two things:
 // . In the constructor invoke AddMojoResourcePath() to register the bindings
 //   files, eg:
-//     AddMojoResourcePath("chrome/browser/ui/webui/omnibox/omnibox.mojom",
-//                         IDR_OMNIBOX_MOJO_JS);
-// . Override BindUIHandler() to create and bind the implementation of the
-//   bindings.
-template <typename Interface>
-class MojoWebUIController : public MojoWebUIControllerBase,
+//     AddResourcePath("chrome/browser/ui/webui/omnibox/omnibox.mojom",
+//                     IDR_OMNIBOX_MOJO_JS);
+// . Call AddHandlerToRegistry for all Mojo Interfaces it wishes to handle.
+class MojoWebUIController : public content::WebUIController,
                             public content::WebContentsObserver {
  public:
-  explicit MojoWebUIController(content::WebUI* contents)
-      : MojoWebUIControllerBase(contents),
-        content::WebContentsObserver(contents->GetWebContents()),
-        weak_factory_(this) {
-    registry_.AddInterface<Interface>(base::Bind(
-        &MojoWebUIController::BindUIHandler, base::Unretained(this)));
-  }
-  ~MojoWebUIController() override {}
+  // By default MojoWebUIControllers do not have normal WebUI bindings. Pass
+  // |enable_chrome_send| as true if these are needed.
+  explicit MojoWebUIController(content::WebUI* contents,
+                               bool enable_chrome_send = false);
+  ~MojoWebUIController() override;
 
   // content::WebContentsObserver implementation.
   void OnInterfaceRequestFromFrame(
       content::RenderFrameHost* render_frame_host,
       const std::string& interface_name,
-      mojo::ScopedMessagePipeHandle* interface_pipe) override {
-    // Right now, this is expected to be called only for main frames.
-    DCHECK(!render_frame_host->GetParent());
-    registry_.TryBindInterface(interface_name, interface_pipe);
-  }
+      mojo::ScopedMessagePipeHandle* interface_pipe) override;
 
- protected:
-  // Invoked to create the specific bindings implementation.
-  virtual void BindUIHandler(mojo::InterfaceRequest<Interface> request) = 0;
+  template <typename Binder>
+  void AddHandlerToRegistry(Binder binder) {
+    registry_.AddInterface(std::move(binder));
+  }
 
  private:
   service_manager::BinderRegistry registry_;
-
-  base::WeakPtrFactory<MojoWebUIController> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(MojoWebUIController);
 };

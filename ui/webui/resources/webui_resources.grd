@@ -200,15 +200,13 @@ without changes to the corresponding grd file. -->
                file="images/trash.png" type="BINDATA" />
 
       <if expr="not is_android">
+        <part file="cr_components/cr_components_images.grdp" />
         <part file="cr_elements_images.grdp" />
       </if>
     </includes>
     <structures>
       <structure name="IDR_WEBUI_CSS_ACTION_LINK"
                  file="css/action_link.css" type="chrome_html"
-                 compress="gzip" />
-      <structure name="IDR_WEBUI_CSS_ALERT_OVERLAY"
-                 file="css/alert_overlay.css" type="chrome_html"
                  compress="gzip" />
       <structure name="IDR_WEBUI_CSS_APPS_COMMON"
                  file="css/apps/common.css" type="chrome_html"
@@ -284,9 +282,6 @@ without changes to the corresponding grd file. -->
                  compress="gzip" />
       <structure name="IDR_WEBUI_HTML_CR_UI"
                  file="html/cr/ui.html" type="chrome_html" compress="gzip" />
-      <structure name="IDR_WEBUI_HTML_CR_UI_ALERT_OVERLAY"
-                 file="html/cr/ui/alert_overlay.html" type="chrome_html"
-                 compress="gzip" />
       <structure name="IDR_WEBUI_HTML_CR_UI_ARRAY_DATA_MODEL"
                  file="html/cr/ui/array_data_model.html" type="chrome_html"
                  compress="gzip" />
@@ -340,7 +335,7 @@ without changes to the corresponding grd file. -->
                  compress="gzip" />
       <structure name="IDR_WEBUI_HTML_CR_UI_PAGE_MANAGER_PAGE"
                  file="html/cr/ui/page_manager/page.html" type="chrome_html"
-                 compress="gzip" flattenhtml="true" />
+                 compress="gzip" />
       <structure name="IDR_WEBUI_HTML_CR_UI_PAGE_MANAGER_PAGE_MANAGER"
                  file="html/cr/ui/page_manager/page_manager.html"
                  type="chrome_html" compress="gzip" />
@@ -387,9 +382,6 @@ without changes to the corresponding grd file. -->
                  compress="gzip" />
       <structure name="IDR_WEBUI_JS_CR_UI"
                  file="js/cr/ui.js" type="chrome_html" compress="gzip" />
-      <structure name="IDR_WEBUI_JS_CR_UI_ALERT_OVERLAY"
-                 file="js/cr/ui/alert_overlay.js" type="chrome_html"
-                 compress="gzip" />
       <structure name="IDR_WEBUI_JS_CR_UI_ARRAY_DATA_MODEL"
                  file="js/cr/ui/array_data_model.js"
                  type="chrome_html" compress="gzip" flattenhtml="true" />

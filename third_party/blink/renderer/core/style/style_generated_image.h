@@ -61,10 +61,12 @@ class CORE_EXPORT StyleGeneratedImage final : public StyleImage {
                                 const FloatSize& target_size) const override;
   bool KnownToBeOpaque(const Document&, const ComputedStyle&) const override;
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  private:
   StyleGeneratedImage(const CSSImageGeneratorValue&);
+
+  bool IsEqual(const StyleImage&) const override;
 
   // TODO(sashab): Replace this with <const CSSImageGeneratorValue> once
   // Member<> supports const types.

@@ -16,7 +16,7 @@
 #include "chromeos/cryptohome/cryptohome_parameters.h"
 #include "chromeos/cryptohome/mock_async_method_caller.h"
 #include "chromeos/dbus/fake_cryptohome_client.h"
-#include "components/signin/core/account_id/account_id.h"
+#include "components/account_id/account_id.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -619,7 +619,7 @@ TEST_F(AttestationFlowTest, GetCertificate_AlreadyExists) {
   StrictMock<cryptohome::MockAsyncMethodCaller> async_caller;
 
   chromeos::FakeCryptohomeClient client;
-  client.SetTpmAttestationUserCertificate(cryptohome::Identification(),
+  client.SetTpmAttestationUserCertificate(cryptohome::AccountIdentifier(),
                                           kEnterpriseUserKey, "fake_cert");
 
   // We're not expecting any server calls in this case; StrictMock will verify.

@@ -5,13 +5,14 @@
 
 """A tool to extract size information for chrome, executed by buildbot.
 
-  When this is run, the current directory (cwd) should be the outer build
-  directory (e.g., chrome-release/build/).
+When this is run, the current directory (cwd) should be the outer build
+directory (e.g., chrome-release/build/).
 
-  For a list of command-line options, call this script with '--help'.
+For a list of command-line options, call this script with '--help'.
 """
 
 import errno
+import glob
 import json
 import platform
 import optparse
@@ -28,10 +29,19 @@ from slave import build_directory
 SRC_DIR = os.path.abspath(
     os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', '..', '..'))
 
+EXPECTED_LINUX_SI_COUNTS = {
+  'chrome': 8,
+  'nacl_helper': 6,
+  'nacl_helper_bootstrap': 0,
+}
+
+EXPECTED_MAC_SI_COUNT = 1
+
 
 class ResultsCollector(object):
   def __init__(self):
     self.results = {}
+    self.failures = []
 
   def add_result(self, name, identifier, value, units):
     assert name not in self.results
@@ -43,6 +53,9 @@ class ResultsCollector(object):
 
     # Legacy printing, previously used for parsing the text logs.
     print 'RESULT %s: %s= %s %s' % (name, identifier, value, units)
+
+  def add_failure(self, failure):
+    self.failures.append(failure)
 
 
 def get_size(filename):
@@ -148,28 +161,26 @@ def main_mac(options, args, results_collector):
       print_dict['app_bundle_size'] = (int(du_s) * 1024)
 
       # Count the number of files with at least one static initializer.
-      pipes = [['otool', '-l', chromium_framework_executable],
-               ['grep', '__mod_init_func', '-C', '5'],
-               ['grep', 'size']]
-      last_stdout = None
-      for pipe in pipes:
-        p = subprocess.Popen(pipe, stdin=last_stdout, stdout=subprocess.PIPE)
-        last_stdout = p.stdout
-      stdout = p.communicate()[0]
-      initializers = re.search('0x([0-9a-f]+)', stdout)
-      if initializers:
-        initializers_s = initializers.group(1)
-        if result == 0:
-          result = p.returncode
-      else:
-        initializers_s = '0'
-      word_size = 4  # Assume 32 bit
-      si_count = int(initializers_s, 16) / word_size
+      si_count = 0
+      # Find the __DATA,__mod_init_func section.
+      result, stdout = run_process(result,
+          ['otool', '-l', chromium_framework_executable])
+      section_index = stdout.find('sectname __mod_init_func')
+      if section_index != -1:
+        # If the section exists, the "size" line must follow it.
+        initializers_s = re.search('size 0x([0-9a-f]+)',
+                                   stdout[section_index:]).group(1)
+        word_size = 8  # Assume 64 bit
+        si_count = int(initializers_s, 16) / word_size
       print_dict['initializers'] = si_count
 
       # For Release builds only, use dump-static-initializers.py to print the
       # list of static initializers.
-      if si_count > 0 and options.target == 'Release':
+      if si_count > EXPECTED_MAC_SI_COUNT and options.target == 'Release':
+        result = 125
+        results_collector.add_failure(
+            'Expected 0 static initializers in %s, but found %d' %
+            (chromium_framework_executable, si_count))
         print '\n# Static initializers in %s:' % chromium_framework_executable
 
         # First look for a dSYM to get information about the initializers. If
@@ -235,7 +246,7 @@ def main_mac(options, args, results_collector):
   return 66
 
 
-def check_linux_binary(target_dir, binary_name, options):
+def check_linux_binary(target_dir, binary_name, options, results_collector):
   """Collect appropriate size information about the built Linux binary given.
 
   Returns a tuple (result, sizes).  result is the first non-zero exit
@@ -301,23 +312,29 @@ def check_linux_binary(target_dir, binary_name, options):
     # In newer versions of gcc crtbegin.o inserts frame_dummy into .init_array
     # but we don't want to count this entry, since its alwasys present and not
     # related to our code.
-    assert(si_count > 0)
     si_count -= 1
-
+  si_count = max(si_count, 0)
   sizes.append((binary_name + '-si', 'initializers', '', si_count, 'files'))
 
   # For Release builds only, use dump-static-initializers.py to print the list
   # of static initializers.
-  if si_count > 0 and options.target == 'Release':
-    build_dir = os.path.dirname(target_dir)
-    dump_static_initializers = os.path.join(os.path.dirname(build_dir),
-                                            'tools', 'linux',
-                                            'dump-static-initializers.py')
-    result, stdout = run_process(result, [dump_static_initializers,
-                                          '-d', binary_file])
-    print '\n# Static initializers in %s:' % binary_file
-    print_si_fail_hint('tools/linux/dump-static-initializers.py')
-    print stdout
+  if options.target == 'Release':
+    if (binary_name in EXPECTED_LINUX_SI_COUNTS and
+        si_count > EXPECTED_LINUX_SI_COUNTS[binary_name]):
+      result = 125
+      results_collector.add_failure(
+          'Expected <= %d static initializers in %s, but found %d' %
+          (EXPECTED_LINUX_SI_COUNTS[binary_name], binary_name, si_count))
+    if si_count > 0:
+      build_dir = os.path.dirname(target_dir)
+      dump_static_initializers = os.path.join(os.path.dirname(build_dir),
+                                              'tools', 'linux',
+                                              'dump-static-initializers.py')
+      result, stdout = run_process(result, [dump_static_initializers,
+                                            '-d', binary_file])
+      print '\n# Static initializers in %s:' % binary_file
+      print_si_fail_hint('tools/linux/dump-static-initializers.py')
+      print stdout
 
   # Determine if the binary has the DT_TEXTREL marker.
   result, stdout = run_process(result, ['readelf', '-Wd', binary_file])
@@ -356,7 +373,8 @@ def main_linux(options, args, results_collector):
   totals = {}
 
   for binary in binaries:
-    this_result, this_sizes = check_linux_binary(target_dir, binary, options)
+    this_result, this_sizes = check_linux_binary(target_dir, binary, options,
+                                                 results_collector)
     if result == 0:
       result = this_result
     for name, identifier, totals_id, value, units in this_sizes:
@@ -390,18 +408,29 @@ def main_linux(options, args, results_collector):
   return result
 
 
-def check_android_binaries(binaries, target_dir, options):
+def check_android_binaries(binaries, target_dir, options, results_collector,
+                           binaries_to_print=None):
   """Common method for printing size information for Android targets.
+
+  Prints size information for each element of binaries in target_dir.
+  If binaries_to_print is specified, the name of each binary from
+  binaries is replaced with corresponding element of binaries_to_print
+  in output. Returns the first non-zero exit status of any command it
+  executes, or zero on success.
   """
   result = 0
+  if not binaries_to_print:
+    binaries_to_print = binaries
 
-  for binary in binaries:
-    this_result, this_sizes = check_linux_binary(target_dir, binary, options)
+  for (binary, binary_to_print) in zip(binaries, binaries_to_print):
+    this_result, this_sizes = check_linux_binary(target_dir, binary, options,
+                                                 results_collector)
     if result == 0:
       result = this_result
     for name, identifier, _, value, units in this_sizes:
-      print 'RESULT %s: %s= %s %s' % (name.replace('/', '_'), identifier, value,
-                                      units)
+      name = name.replace('/', '_').replace(binary, binary_to_print)
+      identifier = identifier.replace(binary, binary_to_print)
+      results_collector.add_result(name, identifier, value, units)
 
   return result
 
@@ -418,9 +447,11 @@ def main_android(options, args, results_collector):
   binaries = [
       'chrome_public_apk/libs/armeabi-v7a/libchrome.so',
       'lib/libchrome.so',
+      'libchrome.so',
   ]
 
-  return check_android_binaries(binaries, target_dir, options)
+  return check_android_binaries(binaries, target_dir, options,
+                                results_collector)
 
 
 def main_android_webview(options, args, results_collector):
@@ -432,9 +463,11 @@ def main_android_webview(options, args, results_collector):
   target_dir = os.path.join(build_directory.GetBuildOutputDirectory(SRC_DIR),
                             options.target)
 
-  binaries = ['lib/libwebviewchromium.so']
+  binaries = ['lib/libwebviewchromium.so',
+              'libwebviewchromium.so']
 
-  return check_android_binaries(binaries, target_dir, options)
+  return check_android_binaries(binaries, target_dir, options,
+                                results_collector)
 
 
 def main_android_cronet(options, args, results_collector):
@@ -445,15 +478,15 @@ def main_android_cronet(options, args, results_collector):
   """
   target_dir = os.path.join(build_directory.GetBuildOutputDirectory(SRC_DIR),
                             options.target)
+  # Use version in binary file name, but not in printed output.
+  binaries_with_paths = glob.glob(os.path.join(target_dir,'libcronet.*.so'))
+  num_binaries = len(binaries_with_paths)
+  assert num_binaries == 1, "Got %d binaries" % (num_binaries,)
+  binaries = [os.path.basename(binaries_with_paths[0])]
+  binaries_to_print = ['libcronet.so']
 
-  binaries = ['cronet_sample_apk/libs/arm64-v8a/libcronet.so',
-              'cronet_sample_apk/libs/armeabi-v7a/libcronet.so',
-              'cronet_sample_apk/libs/armeabi/libcronet.so',
-              'cronet_sample_apk/libs/mips/libcronet.so',
-              'cronet_sample_apk/libs/x86_64/libcronet.so',
-              'cronet_sample_apk/libs/x86/libcronet.so']
-
-  return check_android_binaries(binaries, target_dir, options)
+  return check_android_binaries(binaries, target_dir, options,
+                                results_collector, binaries_to_print)
 
 
 def main_win(options, args, results_collector):
@@ -462,32 +495,36 @@ def main_win(options, args, results_collector):
   Returns the first non-zero exit status of any command it executes,
   or zero on success.
   """
+  files = [
+    'chrome.dll',
+    'chrome.dll.pdb',
+    'chrome.exe',
+    'chrome_child.dll',
+    'chrome_child.dll.pdb',
+    'chrome_elf.dll',
+    'chrome_watcher.dll',
+    'libEGL.dll',
+    'libGLESv2.dll',
+    'mini_installer.exe',
+    'resources.pak',
+    'setup.exe',
+    'swiftshader\\libEGL.dll',
+    'swiftshader\\libGLESv2.dll',
+    'WidevineCdm\\_platform_specific\\win_x64\\widevinecdm.dll',
+    'WidevineCdm\\_platform_specific\\win_x64\\widevinecdmadapter.dll',
+    'WidevineCdm\\_platform_specific\\win_x86\\widevinecdm.dll',
+    'WidevineCdm\\_platform_specific\\win_x86\\widevinecdmadapter.dll',
+  ]
+
   build_dir = build_directory.GetBuildOutputDirectory(SRC_DIR)
   target_dir = os.path.join(build_dir, options.target)
-  chrome_dll = os.path.join(target_dir, 'chrome.dll')
-  chrome_child_dll = os.path.join(target_dir, 'chrome_child.dll')
-  chrome_exe = os.path.join(target_dir, 'chrome.exe')
-  mini_installer_exe = os.path.join(target_dir, 'mini_installer.exe')
-  setup_exe = os.path.join(target_dir, 'setup.exe')
 
-  result = 0
+  for f in files:
+    p = os.path.join(target_dir, f)
+    if os.path.isfile(p):
+      results_collector.add_result(f, f, get_size(p), 'bytes')
 
-  print 'RESULT chrome.dll: chrome.dll= %s bytes' % get_size(chrome_dll)
-
-  if os.path.exists(chrome_child_dll):
-    fmt = 'RESULT chrome_child.dll: chrome_child.dll= %s bytes'
-    print fmt % get_size(chrome_child_dll)
-
-  print 'RESULT chrome.exe: chrome.exe= %s bytes' % get_size(chrome_exe)
-
-  if os.path.exists(mini_installer_exe):
-    fmt = 'RESULT mini_installer.exe: mini_installer.exe= %s bytes'
-    print fmt % get_size(mini_installer_exe)
-
-  if os.path.exists(setup_exe):
-    print 'RESULT setup.exe: setup.exe= %s bytes' % get_size(setup_exe)
-
-  return result
+  return 0
 
 
 def main():
@@ -522,6 +559,8 @@ def main():
                            help='specify platform (%s) [default: %%default]'
                                 % ', '.join(platforms))
   option_parser.add_option('--json', help='Path to JSON output file')
+  option_parser.add_option('--failures',
+                           help='Path to JSON output file for failures')
 
   options, args = option_parser.parse_args()
 
@@ -541,6 +580,10 @@ def main():
   if options.json:
     with open(options.json, 'w') as f:
       json.dump(results_collector.results, f)
+
+  if options.failures:
+    with open(options.failures, 'w') as f:
+      json.dump(results_collector.failures, f)
 
   return rc
 

@@ -6,6 +6,7 @@
 #define COMPONENTS_CAST_CHANNEL_KEEP_ALIVE_DELEGATE_H_
 
 #include "base/macros.h"
+#include "base/memory/weak_ptr.h"
 #include "base/threading/thread_checker.h"
 #include "base/timer/timer.h"
 #include "components/cast_channel/cast_message_util.h"
@@ -40,8 +41,9 @@ class KeepAliveDelegate : public CastTransport::Delegate {
 
   ~KeepAliveDelegate() override;
 
-  void SetTimersForTest(std::unique_ptr<base::Timer> injected_ping_timer,
-                        std::unique_ptr<base::Timer> injected_liveness_timer);
+  void SetTimersForTest(
+      std::unique_ptr<base::RetainingOneShotTimer> injected_ping_timer,
+      std::unique_ptr<base::RetainingOneShotTimer> injected_liveness_timer);
 
   // CastTransport::Delegate implementation.
   void Start() override;
@@ -87,10 +89,10 @@ class KeepAliveDelegate : public CastTransport::Delegate {
   base::TimeDelta ping_interval_;
 
   // Fired when |ping_interval_| is exceeded or when triggered by test code.
-  std::unique_ptr<base::Timer> ping_timer_;
+  std::unique_ptr<base::RetainingOneShotTimer> ping_timer_;
 
   // Fired when |liveness_timer_| is exceeded.
-  std::unique_ptr<base::Timer> liveness_timer_;
+  std::unique_ptr<base::RetainingOneShotTimer> liveness_timer_;
 
   // The PING message to send over the wire.
   const CastMessage ping_message_;
@@ -99,6 +101,8 @@ class KeepAliveDelegate : public CastTransport::Delegate {
   const CastMessage pong_message_;
 
   THREAD_CHECKER(thread_checker_);
+
+  base::WeakPtrFactory<KeepAliveDelegate> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(KeepAliveDelegate);
 };

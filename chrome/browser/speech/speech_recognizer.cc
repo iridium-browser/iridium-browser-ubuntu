@@ -12,8 +12,10 @@
 #include "base/bind.h"
 #include "base/macros.h"
 #include "base/strings/string16.h"
+#include "base/task/post_task.h"
 #include "base/timer/timer.h"
 #include "chrome/browser/speech/speech_recognizer_delegate.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/speech_recognition_event_listener.h"
@@ -21,8 +23,8 @@
 #include "content/public/browser/speech_recognition_session_config.h"
 #include "content/public/browser/speech_recognition_session_preamble.h"
 #include "content/public/common/child_process_host.h"
-#include "content/public/common/speech_recognition_error.h"
-#include "net/url_request/url_request_context_getter.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
+#include "third_party/blink/public/mojom/speech/speech_recognition_error.mojom.h"
 
 // Length of timeout to cancel recognition if there's no speech heard.
 static const int kNoSpeechTimeoutInSeconds = 5;
@@ -45,7 +47,9 @@ class SpeechRecognizer::EventListener
       public content::SpeechRecognitionEventListener {
  public:
   EventListener(const base::WeakPtr<SpeechRecognizerDelegate>& delegate,
-                net::URLRequestContextGetter* url_request_context_getter,
+                std::unique_ptr<network::SharedURLLoaderFactoryInfo>
+                    shared_url_loader_factory_info,
+                const std::string& accept_language,
                 const std::string& locale);
 
   void StartOnIOThread(
@@ -72,10 +76,11 @@ class SpeechRecognizer::EventListener
   void OnRecognitionEnd(int session_id) override;
   void OnRecognitionResults(
       int session_id,
-      const content::SpeechRecognitionResults& results) override;
+      const std::vector<blink::mojom::SpeechRecognitionResultPtr>& results)
+      override;
   void OnRecognitionError(
       int session_id,
-      const content::SpeechRecognitionError& error) override;
+      const blink::mojom::SpeechRecognitionError& error) override;
   void OnSoundStart(int session_id) override;
   void OnSoundEnd(int session_id) override;
   void OnAudioLevelsChange(int session_id,
@@ -89,9 +94,13 @@ class SpeechRecognizer::EventListener
   base::WeakPtr<SpeechRecognizerDelegate> delegate_;
 
   // All remaining members only accessed from the IO thread.
-  scoped_refptr<net::URLRequestContextGetter> url_request_context_getter_;
+  std::unique_ptr<network::SharedURLLoaderFactoryInfo>
+      shared_url_loader_factory_info_;
+  // Initialized from |shared_url_loader_factory_info_| on first use.
+  scoped_refptr<network::SharedURLLoaderFactory> shared_url_loader_factory_;
+  const std::string accept_language_;
   std::string locale_;
-  base::Timer speech_timeout_;
+  base::OneShotTimer speech_timeout_;
   int session_;
   base::string16 last_result_str_;
 
@@ -102,12 +111,15 @@ class SpeechRecognizer::EventListener
 
 SpeechRecognizer::EventListener::EventListener(
     const base::WeakPtr<SpeechRecognizerDelegate>& delegate,
-    net::URLRequestContextGetter* url_request_context_getter,
+    std::unique_ptr<network::SharedURLLoaderFactoryInfo>
+        shared_url_loader_factory_info,
+    const std::string& accept_language,
     const std::string& locale)
     : delegate_(delegate),
-      url_request_context_getter_(url_request_context_getter),
+      shared_url_loader_factory_info_(
+          std::move(shared_url_loader_factory_info)),
+      accept_language_(accept_language),
       locale_(locale),
-      speech_timeout_(false, false),
       session_(kInvalidSessionId),
       weak_factory_(this) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
@@ -131,7 +143,13 @@ void SpeechRecognizer::EventListener::StartOnIOThread(
   config.interim_results = true;
   config.max_hypotheses = 1;
   config.filter_profanities = true;
-  config.url_request_context_getter = url_request_context_getter_;
+  config.accept_language = accept_language_;
+  if (!shared_url_loader_factory_) {
+    DCHECK(shared_url_loader_factory_info_);
+    shared_url_loader_factory_ = network::SharedURLLoaderFactory::Create(
+        std::move(shared_url_loader_factory_info_));
+  }
+  config.shared_url_loader_factory = shared_url_loader_factory_;
   config.event_listener = weak_factory_.GetWeakPtr();
   // kInvalidUniqueID is not a valid render process, so the speech permission
   // check allows the request through.
@@ -162,8 +180,8 @@ void SpeechRecognizer::EventListener::StopOnIOThread() {
 
 void SpeechRecognizer::EventListener::NotifyRecognitionStateChanged(
     SpeechRecognizerStatus new_state) {
-  content::BrowserThread::PostTask(
-      content::BrowserThread::UI, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {content::BrowserThread::UI},
       base::Bind(&SpeechRecognizerDelegate::OnSpeechRecognitionStateChanged,
                  delegate_, new_state));
 }
@@ -196,19 +214,19 @@ void SpeechRecognizer::EventListener::OnRecognitionEnd(int session_id) {
 
 void SpeechRecognizer::EventListener::OnRecognitionResults(
     int session_id,
-    const content::SpeechRecognitionResults& results) {
+    const std::vector<blink::mojom::SpeechRecognitionResultPtr>& results) {
   base::string16 result_str;
   size_t final_count = 0;
   // The number of results with |is_provisional| false. If |final_count| ==
   // results.size(), then all results are non-provisional and the recognition is
   // complete.
   for (const auto& result : results) {
-    if (!result.is_provisional)
+    if (!result->is_provisional)
       final_count++;
-    result_str += result.hypotheses[0].utterance;
+    result_str += result->hypotheses[0]->utterance;
   }
-  content::BrowserThread::PostTask(
-      content::BrowserThread::UI, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {content::BrowserThread::UI},
       base::Bind(&SpeechRecognizerDelegate::OnSpeechResult, delegate_,
                  result_str, final_count == results.size()));
 
@@ -225,9 +243,9 @@ void SpeechRecognizer::EventListener::OnRecognitionResults(
 
 void SpeechRecognizer::EventListener::OnRecognitionError(
     int session_id,
-    const content::SpeechRecognitionError& error) {
+    const blink::mojom::SpeechRecognitionError& error) {
   StopOnIOThread();
-  if (error.code == content::SPEECH_RECOGNITION_ERROR_NETWORK) {
+  if (error.code == blink::mojom::SpeechRecognitionErrorCode::kNetwork) {
     NotifyRecognitionStateChanged(SPEECH_RECOGNIZER_NETWORK_ERROR);
   }
   NotifyRecognitionStateChanged(SPEECH_RECOGNIZER_READY);
@@ -254,8 +272,8 @@ void SpeechRecognizer::EventListener::OnAudioLevelsChange(int session_id,
   // Both |volume| and |noise_volume| are defined to be in the range [0.0, 1.0].
   // See: content/public/browser/speech_recognition_event_listener.h
   int16_t sound_level = static_cast<int16_t>(INT16_MAX * volume);
-  content::BrowserThread::PostTask(
-      content::BrowserThread::UI, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {content::BrowserThread::UI},
       base::Bind(&SpeechRecognizerDelegate::OnSpeechSoundLevelChanged,
                  delegate_, sound_level));
 }
@@ -269,11 +287,16 @@ void SpeechRecognizer::EventListener::OnAudioEnd(int session_id) {}
 
 SpeechRecognizer::SpeechRecognizer(
     const base::WeakPtr<SpeechRecognizerDelegate>& delegate,
-    net::URLRequestContextGetter* url_request_context_getter,
+    std::unique_ptr<network::SharedURLLoaderFactoryInfo>
+        shared_url_loader_factory_info,
+    const std::string& accept_language,
     const std::string& locale)
     : delegate_(delegate),
       speech_event_listener_(
-          new EventListener(delegate, url_request_context_getter, locale)) {
+          new EventListener(delegate,
+                            std::move(shared_url_loader_factory_info),
+                            accept_language,
+                            locale)) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 }
 
@@ -289,16 +312,16 @@ void SpeechRecognizer::Start(
   std::string auth_token;
   delegate_->GetSpeechAuthParameters(&auth_scope, &auth_token);
 
-  content::BrowserThread::PostTask(
-      content::BrowserThread::IO, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {content::BrowserThread::IO},
       base::Bind(&SpeechRecognizer::EventListener::StartOnIOThread,
                  speech_event_listener_, auth_scope, auth_token, preamble));
 }
 
 void SpeechRecognizer::Stop() {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  content::BrowserThread::PostTask(
-      content::BrowserThread::IO, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {content::BrowserThread::IO},
       base::Bind(&SpeechRecognizer::EventListener::StopOnIOThread,
                  speech_event_listener_));
 }

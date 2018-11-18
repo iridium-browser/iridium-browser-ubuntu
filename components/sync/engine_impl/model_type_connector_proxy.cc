@@ -8,8 +8,7 @@
 
 #include "base/bind.h"
 #include "base/location.h"
-#include "base/single_thread_task_runner.h"
-#include "components/sync/engine/activation_context.h"
+#include "components/sync/engine/data_type_activation_response.h"
 
 namespace syncer {
 
@@ -22,30 +21,30 @@ ModelTypeConnectorProxy::~ModelTypeConnectorProxy() {}
 
 void ModelTypeConnectorProxy::ConnectNonBlockingType(
     ModelType type,
-    std::unique_ptr<ActivationContext> activation_context) {
+    std::unique_ptr<DataTypeActivationResponse> activation_response) {
   task_runner_->PostTask(
       FROM_HERE, base::BindOnce(&ModelTypeConnector::ConnectNonBlockingType,
                                 model_type_connector_, type,
-                                std::move(activation_context)));
+                                std::move(activation_response)));
 }
 
 void ModelTypeConnectorProxy::DisconnectNonBlockingType(ModelType type) {
   task_runner_->PostTask(
-      FROM_HERE, base::Bind(&ModelTypeConnector::DisconnectNonBlockingType,
-                            model_type_connector_, type));
+      FROM_HERE, base::BindOnce(&ModelTypeConnector::DisconnectNonBlockingType,
+                                model_type_connector_, type));
 }
 
 void ModelTypeConnectorProxy::RegisterDirectoryType(ModelType type,
                                                     ModelSafeGroup group) {
-  task_runner_->PostTask(FROM_HERE,
-                         base::Bind(&ModelTypeConnector::RegisterDirectoryType,
-                                    model_type_connector_, type, group));
+  task_runner_->PostTask(
+      FROM_HERE, base::BindOnce(&ModelTypeConnector::RegisterDirectoryType,
+                                model_type_connector_, type, group));
 }
 
 void ModelTypeConnectorProxy::UnregisterDirectoryType(ModelType type) {
   task_runner_->PostTask(
-      FROM_HERE, base::Bind(&ModelTypeConnector::UnregisterDirectoryType,
-                            model_type_connector_, type));
+      FROM_HERE, base::BindOnce(&ModelTypeConnector::UnregisterDirectoryType,
+                                model_type_connector_, type));
 }
 
 }  // namespace syncer

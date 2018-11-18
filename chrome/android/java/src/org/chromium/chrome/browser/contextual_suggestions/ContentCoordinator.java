@@ -12,10 +12,7 @@ import android.view.View;
 import android.view.ViewGroup;
 
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.contextual_suggestions.ContextualSuggestionsModel.ClusterListObservable;
-import org.chromium.chrome.browser.modelutil.RecyclerViewModelChangeProcessor;
-import org.chromium.chrome.browser.ntp.ContextMenuManager;
-import org.chromium.chrome.browser.ntp.cards.NewTabPageViewHolder;
+import org.chromium.chrome.browser.native_page.ContextMenuManager;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.suggestions.SuggestionsRecyclerView;
 import org.chromium.chrome.browser.suggestions.SuggestionsUiDelegate;
@@ -27,13 +24,13 @@ import org.chromium.ui.base.WindowAndroid;
  * {@link ContextualSuggestionsCoordinator} and lifecycle of sub-component objects.
  */
 class ContentCoordinator {
+    private static final String CONTEXT_MENU_USER_ACTION_PREFIX = "ContextualSuggestions";
     private final SuggestionsRecyclerView mRecyclerView;
 
     private ContextualSuggestionsModel mModel;
     private WindowAndroid mWindowAndroid;
     private ContextMenuManager mContextMenuManager;
-    private RecyclerViewModelChangeProcessor<ClusterListObservable, NewTabPageViewHolder>
-            mModelChangeProcessor;
+    private ContextualSuggestionsAdapter mAdapter;
 
     /**
      * Construct a new {@link ContentCoordinator}.
@@ -73,15 +70,14 @@ class ContentCoordinator {
         mWindowAndroid = windowAndroid;
 
         mContextMenuManager = new ContextMenuManager(uiDelegate.getNavigationDelegate(),
-                mRecyclerView::setTouchEnabled, closeContextMenuCallback);
+                mRecyclerView::setTouchEnabled, closeContextMenuCallback,
+                CONTEXT_MENU_USER_ACTION_PREFIX);
         mWindowAndroid.addContextMenuCloseListener(mContextMenuManager);
 
-        ContextualSuggestionsAdapter adapter = new ContextualSuggestionsAdapter(context, profile,
-                new UiConfig(mRecyclerView), uiDelegate, mModel, mContextMenuManager);
-        mRecyclerView.setAdapter(adapter);
-
-        mModelChangeProcessor = new RecyclerViewModelChangeProcessor<>(adapter);
-        mModel.mClusterListObservable.addObserver(mModelChangeProcessor);
+        ClusterList clusterList = mModel.getClusterList();
+        mAdapter = new ContextualSuggestionsAdapter(
+                profile, new UiConfig(mRecyclerView), uiDelegate, mContextMenuManager, clusterList);
+        mRecyclerView.setAdapter(mAdapter);
 
         // TODO(twellington): Should this be a proper model property, set by the mediator and bound
         // to the RecyclerView?
@@ -97,8 +93,8 @@ class ContentCoordinator {
     void destroy() {
         // The model outlives the content sub-component. Remove the observer so that this object
         // can be garbage collected.
-        if (mModelChangeProcessor != null) {
-            mModel.mClusterListObservable.removeObserver(mModelChangeProcessor);
+        if (mAdapter != null) {
+            mModel.getClusterList().removeObserver(mAdapter);
         }
         if (mWindowAndroid != null) {
             mWindowAndroid.removeContextMenuCloseListener(mContextMenuManager);

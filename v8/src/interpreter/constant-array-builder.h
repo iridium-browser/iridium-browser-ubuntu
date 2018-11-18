@@ -21,21 +21,22 @@ class AstValue;
 namespace interpreter {
 
 // Constant array entries that represent singletons.
-#define SINGLETON_CONSTANT_ENTRY_TYPES(V)                       \
-  V(AsyncIteratorSymbol, async_iterator_symbol)                 \
-  V(ClassFieldsSymbol, class_fields_symbol)                     \
-  V(EmptyBoilerplateDescription, empty_boilerplate_description) \
-  V(EmptyFixedArray, empty_fixed_array)                         \
-  V(HomeObjectSymbol, home_object_symbol)                       \
-  V(IteratorSymbol, iterator_symbol)                            \
-  V(InterpreterTrampolineSymbol, interpreter_trampoline_symbol) \
+#define SINGLETON_CONSTANT_ENTRY_TYPES(V)                                    \
+  V(AsyncIteratorSymbol, async_iterator_symbol)                              \
+  V(ClassFieldsSymbol, class_fields_symbol)                                  \
+  V(EmptyObjectBoilerplateDescription, empty_object_boilerplate_description) \
+  V(EmptyArrayBoilerplateDescription, empty_array_boilerplate_description)   \
+  V(EmptyFixedArray, empty_fixed_array)                                      \
+  V(HomeObjectSymbol, home_object_symbol)                                    \
+  V(IteratorSymbol, iterator_symbol)                                         \
+  V(InterpreterTrampolineSymbol, interpreter_trampoline_symbol)              \
   V(NaN, nan_value)
 
 // A helper class for constructing constant arrays for the
 // interpreter. Each instance of this class is intended to be used to
 // generate exactly one FixedArray of constants via the ToFixedArray
 // method.
-class V8_EXPORT_PRIVATE ConstantArrayBuilder final BASE_EMBEDDED {
+class V8_EXPORT_PRIVATE ConstantArrayBuilder final {
  public:
   // Capacity of the 8-bit operand slice.
   static const size_t k8BitCapacity = 1u << kBitsPerByte;

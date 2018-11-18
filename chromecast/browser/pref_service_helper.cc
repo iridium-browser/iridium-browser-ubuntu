@@ -19,9 +19,9 @@
 #include "components/prefs/pref_service_factory.h"
 #include "components/prefs/pref_store.h"
 
-#if defined(OS_ANDROID) && !BUILDFLAG(IS_CAST_USING_CMA_BACKEND)
+#if defined(OS_ANDROID) && !BUILDFLAG(USE_CHROMECAST_CDMS)
 #include "components/cdm/browser/media_drm_storage_impl.h"
-#endif  // defined(OS_ANDROID) && !BUILDFLAG(IS_CAST_USING_CMA_BACKEND)
+#endif  // defined(OS_ANDROID) && !BUILDFLAG(USE_CHROMECAST_CDMS)
 
 namespace chromecast {
 namespace shell {
@@ -36,7 +36,7 @@ void UserPrefsLoadError(PersistentPrefStore::PrefReadError* error_val,
 
 base::FilePath GetConfigPath() {
   base::FilePath config_path;
-  CHECK(PathService::Get(FILE_CAST_CONFIG, &config_path));
+  CHECK(base::PathService::Get(FILE_CAST_CONFIG, &config_path));
   return config_path;
 }
 
@@ -60,9 +60,9 @@ std::unique_ptr<PrefService> PrefServiceHelper::CreatePrefService(
   registry->RegisterListPref(prefs::kActiveDCSExperiments);
   registry->RegisterDictionaryPref(prefs::kLatestDCSFeatures);
 
-#if defined(OS_ANDROID) && !BUILDFLAG(IS_CAST_USING_CMA_BACKEND)
+#if defined(OS_ANDROID) && !BUILDFLAG(USE_CHROMECAST_CDMS)
   cdm::MediaDrmStorageImpl::RegisterProfilePrefs(registry);
-#endif  // defined(OS_ANDROID) && !BUILDFLAG(IS_CAST_USING_CMA_BACKEND)
+#endif  // defined(OS_ANDROID) && !BUILDFLAG(USE_CHROMECAST_CDMS)
 
   RegisterPlatformPrefs(registry);
 

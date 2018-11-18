@@ -15,11 +15,11 @@
 #include "components/omnibox/browser/in_memory_url_index.h"
 #include "components/omnibox/browser/in_memory_url_index_test_util.h"
 #include "components/omnibox/browser/shortcuts_backend.h"
+#include "components/search_engines/search_terms_data.h"
 #include "components/search_engines/template_url_service.h"
 
 FakeAutocompleteProviderClient::FakeAutocompleteProviderClient(
-    bool create_history_db)
-    : is_tab_open_with_url_(false) {
+    bool create_history_db) {
   set_template_url_service(std::make_unique<TemplateURLService>(nullptr, 0));
 
   bookmark_model_ = bookmarks::TestBookmarkClient::CreateModel();
@@ -66,11 +66,6 @@ InMemoryURLIndex* FakeAutocompleteProviderClient::GetInMemoryURLIndex() {
   return in_memory_url_index_.get();
 }
 
-const SearchTermsData& FakeAutocompleteProviderClient::GetSearchTermsData()
-    const {
-  return search_terms_data_;
-}
-
 scoped_refptr<ShortcutsBackend>
 FakeAutocompleteProviderClient::GetShortcutsBackend() {
   return shortcuts_backend_;
@@ -84,5 +79,6 @@ FakeAutocompleteProviderClient::GetShortcutsBackendIfExists() {
 bool FakeAutocompleteProviderClient::IsTabOpenWithURL(
     const GURL& url,
     const AutocompleteInput* input) {
-  return is_tab_open_with_url_;
+  return !substring_to_match_.empty() &&
+         url.spec().find(substring_to_match_) != std::string::npos;
 }

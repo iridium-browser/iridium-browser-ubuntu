@@ -36,13 +36,15 @@ class CORE_EXPORT HTMLFrameElement final : public HTMLFrameElementBase {
  public:
   DECLARE_NODE_FACTORY(HTMLFrameElement);
 
+  // Returns attributes that should be checked against Trusted Types
+  const HashSet<AtomicString>& GetCheckedAttributeNames() const override;
+
   bool HasFrameBorder() const { return frame_border_; }
 
   bool NoResize() const;
 
   ParsedFeaturePolicy ConstructContainerPolicy(
-      Vector<String>* /* messages */,
-      bool* /* old_syntax */) const override;
+      Vector<String>* /* messages */) const override;
 
  private:
   explicit HTMLFrameElement(Document&);

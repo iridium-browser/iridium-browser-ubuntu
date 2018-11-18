@@ -7,8 +7,10 @@
 #include <iterator>
 #include <memory>
 #include <string>
+#include <utility>
 
 #include "base/memory/ptr_util.h"
+#include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
@@ -65,10 +67,8 @@ const BluetoothDevice::UUIDSet& BluetoothDevice::DeviceUUIDs::GetUUIDs() const {
 }
 
 void BluetoothDevice::DeviceUUIDs::UpdateDeviceUUIDs() {
-  device_uuids_.clear();
-  std::set_union(advertised_uuids_.begin(), advertised_uuids_.end(),
-                 service_uuids_.begin(), service_uuids_.end(),
-                 std::inserter(device_uuids_, device_uuids_.begin()));
+  device_uuids_ = base::STLSetUnion<BluetoothDevice::UUIDSet>(advertised_uuids_,
+                                                              service_uuids_);
 }
 
 BluetoothDevice::BluetoothDevice(BluetoothAdapter* adapter)
@@ -332,12 +332,12 @@ base::Optional<int8_t> BluetoothDevice::GetInquiryRSSI() const {
   return inquiry_rssi_;
 }
 
-base::Optional<int8_t> BluetoothDevice::GetInquiryTxPower() const {
-  return inquiry_tx_power_;
-}
-
 base::Optional<uint8_t> BluetoothDevice::GetAdvertisingDataFlags() const {
   return advertising_data_flags_;
+}
+
+base::Optional<int8_t> BluetoothDevice::GetInquiryTxPower() const {
+  return inquiry_tx_power_;
 }
 
 void BluetoothDevice::CreateGattConnection(
@@ -415,31 +415,28 @@ std::string BluetoothDevice::GetIdentifier() const { return GetAddress(); }
 
 void BluetoothDevice::UpdateAdvertisementData(
     int8_t rssi,
+    base::Optional<uint8_t> flags,
     UUIDList advertised_uuids,
+    base::Optional<int8_t> tx_power,
     ServiceDataMap service_data,
-    ManufacturerDataMap manufacturer_data,
-    const int8_t* tx_power) {
+    ManufacturerDataMap manufacturer_data) {
   UpdateTimestamp();
 
   inquiry_rssi_ = rssi;
-
+  advertising_data_flags_ = std::move(flags);
   device_uuids_.ReplaceAdvertisedUUIDs(std::move(advertised_uuids));
+  inquiry_tx_power_ = std::move(tx_power);
   service_data_ = std::move(service_data);
   manufacturer_data_ = std::move(manufacturer_data);
-
-  if (tx_power != nullptr) {
-    inquiry_tx_power_ = *tx_power;
-  } else {
-    inquiry_tx_power_ = base::nullopt;
-  }
 }
 
 void BluetoothDevice::ClearAdvertisementData() {
-  inquiry_rssi_ = base::nullopt;
+  inquiry_rssi_.reset();
+  advertising_data_flags_.reset();
+  inquiry_tx_power_.reset();
   device_uuids_.ClearAdvertisedUUIDs();
   service_data_.clear();
   manufacturer_data_.clear();
-  inquiry_tx_power_ = base::nullopt;
   GetAdapter()->NotifyDeviceChanged(this);
 }
 

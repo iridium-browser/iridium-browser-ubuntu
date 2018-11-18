@@ -4,7 +4,8 @@
 
 #include "chrome/browser/ui/ash/system_tray_client.h"
 
-#include "ash/ash_view_ids.h"
+#include "ash/public/cpp/ash_features.h"
+#include "ash/public/cpp/ash_view_ids.h"
 #include "ash/public/interfaces/constants.mojom.h"
 #include "ash/public/interfaces/system_tray_test_api.mojom.h"
 #include "base/i18n/time_formatting.h"
@@ -14,15 +15,14 @@
 #include "chrome/browser/chromeos/login/ui/user_adding_screen.h"
 #include "chrome/browser/chromeos/policy/device_policy_cros_browser_test.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
-#include "chrome/browser/chromeos/upgrade_detector_chromeos.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/upgrade_detector.h"
+#include "chrome/browser/upgrade_detector/upgrade_detector.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/fake_update_engine_client.h"
+#include "components/account_id/account_id.h"
 #include "components/prefs/pref_service.h"
-#include "components/signin/core/account_id/account_id.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/common/service_manager_connection.h"
 #include "content/public/test/test_utils.h"
@@ -65,6 +65,12 @@ class SystemTrayClientTest : public InProcessBrowserTest {
 
 // Test that a chrome update shows the update icon in the system menu.
 IN_PROC_BROWSER_TEST_F(SystemTrayClientTest, UpdateTrayIcon) {
+  // The tray icon is removed in UnifiedSystemTray.
+  // TODO(tetsui): Remove the test after UnifiedSystemTray launch.
+  // https://crbug.com/847104
+  if (ash::features::IsSystemTrayUnifiedEnabled())
+    return;
+
   ash::mojom::SystemTrayTestApiAsyncWaiter wait_for(tray_test_api_.get());
 
   // When no update is pending, the icon isn't visible.
@@ -89,6 +95,12 @@ IN_PROC_BROWSER_TEST_F(SystemTrayClientTest, UpdateTrayIcon) {
 // after user's one time permission on the update is set successfully in Update
 // Engine.
 IN_PROC_BROWSER_TEST_F(SystemTrayClientTest, UpdateOverCellularTrayIcon) {
+  // The tray icon is removed in UnifiedSystemTray.
+  // TODO(tetsui): Remove the test after UnifiedSystemTray launch.
+  // https://crbug.com/847104
+  if (ash::features::IsSystemTrayUnifiedEnabled())
+    return;
+
   ash::mojom::SystemTrayTestApiAsyncWaiter wait_for(tray_test_api_.get());
   wait_for.DisableAnimations();
 
@@ -126,6 +138,12 @@ IN_PROC_BROWSER_TEST_F(SystemTrayClientTest, UpdateOverCellularTrayIcon) {
 
 // Test that a flash update causes the update UI to show in the system menu.
 IN_PROC_BROWSER_TEST_F(SystemTrayClientTest, FlashUpdateTrayIcon) {
+  // The tray icon is removed in UnifiedSystemTray.
+  // TODO(tetsui): Remove the test after UnifiedSystemTray launch.
+  // https://crbug.com/847104
+  if (ash::features::IsSystemTrayUnifiedEnabled())
+    return;
+
   ash::mojom::SystemTrayTestApiAsyncWaiter wait_for(tray_test_api_.get());
 
   // When no update is pending, the icon isn't visible.
@@ -168,7 +186,8 @@ IN_PROC_BROWSER_TEST_F(SystemTrayClientEnterpriseTest, TrayEnterprise) {
 class SystemTrayClientClockTest : public chromeos::LoginManagerTest {
  public:
   SystemTrayClientClockTest()
-      : LoginManagerTest(false /* should_launch_browser */),
+      : LoginManagerTest(false /* should_launch_browser */,
+                         true /* should_initialize_webui */),
         // Use consumer emails to avoid having to fake a policy fetch.
         account_id1_(
             AccountId::FromUserEmailGaiaId("user1@gmail.com", "1111111111")),

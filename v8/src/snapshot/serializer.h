@@ -20,16 +20,16 @@ namespace internal {
 
 class CodeAddressMap : public CodeEventLogger {
  public:
-  explicit CodeAddressMap(Isolate* isolate) : isolate_(isolate) {
-    isolate->logger()->addCodeEventListener(this);
+  explicit CodeAddressMap(Isolate* isolate) : CodeEventLogger(isolate) {
+    isolate->logger()->AddCodeEventListener(this);
   }
 
   ~CodeAddressMap() override {
-    isolate_->logger()->removeCodeEventListener(this);
+    isolate_->logger()->RemoveCodeEventListener(this);
   }
 
-  void CodeMoveEvent(AbstractCode* from, Address to) override {
-    address_to_name_map_.Move(from->address(), to);
+  void CodeMoveEvent(AbstractCode* from, AbstractCode* to) override {
+    address_to_name_map_.Move(from->address(), to->address());
   }
 
   void CodeDisableOptEvent(AbstractCode* code,
@@ -96,12 +96,13 @@ class CodeAddressMap : public CodeEventLogger {
     }
 
     base::HashMap::Entry* FindOrCreateEntry(Address code_address) {
-      return impl_.LookupOrInsert(code_address,
-                                  ComputePointerHash(code_address));
+      return impl_.LookupOrInsert(reinterpret_cast<void*>(code_address),
+                                  ComputeAddressHash(code_address));
     }
 
     base::HashMap::Entry* FindEntry(Address code_address) {
-      return impl_.Lookup(code_address, ComputePointerHash(code_address));
+      return impl_.Lookup(reinterpret_cast<void*>(code_address),
+                          ComputeAddressHash(code_address));
     }
 
     void RemoveEntry(base::HashMap::Entry* entry) {
@@ -124,7 +125,6 @@ class CodeAddressMap : public CodeEventLogger {
   }
 
   NameMap address_to_name_map_;
-  Isolate* isolate_;
 };
 
 template <class AllocatorT = DefaultSerializerAllocator>
@@ -140,7 +140,7 @@ class Serializer : public SerializerDeserializer {
   const std::vector<byte>* Payload() const { return sink_.data(); }
 
   bool ReferenceMapContains(HeapObject* o) {
-    return reference_map()->Lookup(o).is_valid();
+    return reference_map()->LookupReference(o).is_valid();
   }
 
   Isolate* isolate() const { return isolate_; }
@@ -170,9 +170,10 @@ class Serializer : public SerializerDeserializer {
 
   void VisitRootPointers(Root root, const char* description, Object** start,
                          Object** end) override;
+  void SerializeRootObject(Object* object);
 
-  void PutRoot(int index, HeapObject* object, HowToCode how, WhereToPoint where,
-               int skip);
+  void PutRoot(RootIndex root_index, HeapObject* object, HowToCode how,
+               WhereToPoint where, int skip);
   void PutSmi(Smi* smi);
   void PutBackReference(HeapObject* object, SerializerReference reference);
   void PutAttachedReference(SerializerReference reference,
@@ -209,7 +210,8 @@ class Serializer : public SerializerDeserializer {
   }
 
   // GetInt reads 4 bytes at once, requiring padding at the end.
-  void Pad();
+  // Use padding_offset to specify the space you want to use after padding.
+  void Pad(int padding_offset = 0);
 
   // We may not need the code address map for logging for every instance
   // of the serializer.  Initialize it on demand.
@@ -218,14 +220,14 @@ class Serializer : public SerializerDeserializer {
   Code* CopyCode(Code* code);
 
   void QueueDeferredObject(HeapObject* obj) {
-    DCHECK(reference_map_.Lookup(obj).is_back_reference());
+    DCHECK(reference_map_.LookupReference(obj).is_back_reference());
     deferred_objects_.push_back(obj);
   }
 
   void OutputStatistics(const char* name);
 
 #ifdef OBJECT_PRINT
-  void CountInstanceType(Map* map, int size);
+  void CountInstanceType(Map* map, int size, AllocationSpace space);
 #endif  // OBJECT_PRINT
 
 #ifdef DEBUG
@@ -253,8 +255,8 @@ class Serializer : public SerializerDeserializer {
 
 #ifdef OBJECT_PRINT
   static const int kInstanceTypes = LAST_TYPE + 1;
-  int* instance_type_count_;
-  size_t* instance_type_size_;
+  int* instance_type_count_[LAST_SPACE];
+  size_t* instance_type_size_[LAST_SPACE];
 #endif  // OBJECT_PRINT
 
 #ifdef DEBUG
@@ -265,6 +267,8 @@ class Serializer : public SerializerDeserializer {
 
   DISALLOW_COPY_AND_ASSIGN(Serializer);
 };
+
+class RelocInfoIterator;
 
 template <class AllocatorT>
 class Serializer<AllocatorT>::ObjectSerializer : public ObjectVisitor {
@@ -281,6 +285,7 @@ class Serializer<AllocatorT>::ObjectSerializer : public ObjectVisitor {
     serializer_->PushStack(obj);
 #endif  // DEBUG
   }
+  // NOLINTNEXTLINE (modernize-use-equals-default)
   ~ObjectSerializer() override {
 #ifdef DEBUG
     serializer_->PopStack();
@@ -299,6 +304,8 @@ class Serializer<AllocatorT>::ObjectSerializer : public ObjectVisitor {
   void VisitCodeTarget(Code* host, RelocInfo* target) override;
   void VisitRuntimeEntry(Code* host, RelocInfo* reloc) override;
   void VisitOffHeapTarget(Code* host, RelocInfo* target) override;
+  // Relocation info needs to be visited sorted by target_address_address.
+  void VisitRelocInfo(RelocIterator* it) override;
 
  private:
   void SerializePrologue(AllocationSpace space, int size, Map* map);

@@ -5,6 +5,7 @@
 #include "chrome/browser/metrics/tab_stats_data_store.h"
 
 #include "chrome/browser/metrics/tab_stats_tracker.h"
+#include "chrome/browser/ui/recently_audible_helper.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/testing_pref_service.h"
@@ -23,6 +24,13 @@ class TabStatsDataStoreTest : public ChromeRenderViewHostTestHarness {
   TabStatsDataStoreTest() {
     TabStatsTracker::RegisterPrefs(pref_service_.registry());
     data_store_ = std::make_unique<TabStatsDataStore>(&pref_service_);
+  }
+
+  std::unique_ptr<content::WebContents> CreateTestWebContents() {
+    std::unique_ptr<content::WebContents> contents =
+        ChromeRenderViewHostTestHarness::CreateTestWebContents();
+    RecentlyAudibleHelper::CreateForWebContents(contents.get());
+    return contents;
   }
 
   TestingPrefServiceSimple pref_service_;
@@ -69,7 +77,7 @@ TEST_F(TabStatsDataStoreTest, TabStatsGetsReloadedFromLocalState) {
 TEST_F(TabStatsDataStoreTest, TrackTabUsageDuringInterval) {
   std::vector<std::unique_ptr<content::WebContents>> web_contents_vec;
   for (size_t i = 0; i < 3; ++i) {
-    web_contents_vec.emplace_back(base::WrapUnique(CreateTestWebContents()));
+    web_contents_vec.emplace_back(CreateTestWebContents());
     // Make sure that these WebContents are initially not visible.
     web_contents_vec.back()->WasHidden();
   }
@@ -128,8 +136,9 @@ TEST_F(TabStatsDataStoreTest, TrackTabUsageDuringInterval) {
                    ->second.visible_or_audible_during_interval);
 
   // Make one of the WebContents audible.
-  content::WebContentsTester::For(web_contents_vec[2].get())
-      ->SetWasRecentlyAudible(true);
+  auto* audible_helper_2 =
+      RecentlyAudibleHelper::FromWebContents(web_contents_vec[2].get());
+  audible_helper_2->SetRecentlyAudibleForTesting();
   data_store_->ResetIntervalData(interval_map);
   data_store_->OnTabAudible(web_contents_vec[2].get());
   EXPECT_TRUE(interval_map->find(web_contents_id_vec[0])
@@ -142,12 +151,12 @@ TEST_F(TabStatsDataStoreTest, TrackTabUsageDuringInterval) {
   // Make sure that the tab stats get properly copied when a tab is replaced.
   TabStatsDataStore::TabStateDuringInterval tab_stats_copy =
       interval_map->find(web_contents_id_vec[1])->second;
-  content::WebContents* new_contents = CreateTestWebContents();
+  std::unique_ptr<content::WebContents> new_contents = CreateTestWebContents();
   content::WebContents* old_contents = web_contents_vec[1].get();
-  data_store_->OnTabReplaced(old_contents, new_contents);
-  EXPECT_EQ(data_store_->GetTabIDForTesting(new_contents).value(),
+  data_store_->OnTabReplaced(old_contents, new_contents.get());
+  EXPECT_EQ(data_store_->GetTabIDForTesting(new_contents.get()).value(),
             web_contents_id_vec[1]);
-  web_contents_vec[1].reset(new_contents);
+  web_contents_vec[1] = std::move(new_contents);
   // |old_contents| is invalid starting from here.
   EXPECT_FALSE(data_store_->GetTabIDForTesting(old_contents));
   auto iter = interval_map->find(web_contents_id_vec[1]);
@@ -191,8 +200,9 @@ TEST_F(TabStatsDataStoreTest, OnTabReplaced) {
   EXPECT_TRUE(interval_map->find(tab_id)->second.interacted_during_interval);
 
   // Mark the tab as audible and verify that the corresponding bit is set.
-  content::WebContentsTester::For(web_contents_2.get())
-      ->SetWasRecentlyAudible(true);
+  auto* audible_helper_2 =
+      RecentlyAudibleHelper::FromWebContents(web_contents_2.get());
+  audible_helper_2->SetNotRecentlyAudibleForTesting();
   data_store_->OnTabAudible(web_contents_2.get());
   EXPECT_TRUE(
       interval_map->find(tab_id)->second.visible_or_audible_during_interval);

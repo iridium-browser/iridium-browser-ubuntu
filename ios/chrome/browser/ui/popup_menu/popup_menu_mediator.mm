@@ -9,6 +9,7 @@
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/feature_engagement/public/feature_constants.h"
 #include "components/feature_engagement/public/tracker.h"
+#include "ios/chrome/browser/chrome_url_constants.h"
 #import "ios/chrome/browser/find_in_page/find_tab_helper.h"
 #import "ios/chrome/browser/ui/activity_services/canonical_url_retriever.h"
 #include "ios/chrome/browser/ui/bookmarks/bookmark_model_bridge_observer.h"
@@ -19,9 +20,9 @@
 #import "ios/chrome/browser/ui/popup_menu/cells/popup_menu_tools_item.h"
 #import "ios/chrome/browser/ui/popup_menu/popup_menu_constants.h"
 #import "ios/chrome/browser/ui/popup_menu/popup_menu_table_view_controller.h"
+#import "ios/chrome/browser/ui/popup_menu/popup_menu_table_view_controller_commands.h"
 #import "ios/chrome/browser/ui/reading_list/reading_list_menu_notification_delegate.h"
 #import "ios/chrome/browser/ui/reading_list/reading_list_menu_notifier.h"
-#include "ios/chrome/browser/ui/tools_menu/public/tools_menu_constants.h"
 #import "ios/chrome/browser/ui/uikit_ui_util.h"
 #import "ios/chrome/browser/web_state_list/web_state_list.h"
 #import "ios/chrome/browser/web_state_list/web_state_list_observer_bridge.h"
@@ -63,7 +64,7 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
 
 @interface PopupMenuMediator ()<BookmarkModelBridgeObserver,
                                 CRWWebStateObserver,
-                                PopupMenuTableViewControllerCommand,
+                                PopupMenuTableViewControllerCommands,
                                 ReadingListMenuNotificationDelegate,
                                 WebStateListObserving> {
   std::unique_ptr<web::WebStateObserverBridge> _webStateObserver;
@@ -88,8 +89,12 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
 // Items notifying this items of changes happening to the ReadingList model.
 @property(nonatomic, strong) ReadingListMenuNotifier* readingListMenuNotifier;
 
+// Whether the hint for the "New Incognito Tab" item should be triggered.
+@property(nonatomic, assign) BOOL triggerNewIncognitoTabTip;
+
 #pragma mark*** Specific Items ***
 
+@property(nonatomic, strong) PopupMenuToolsItem* openNewIncognitoTabItem;
 @property(nonatomic, strong) PopupMenuToolsItem* reloadStopItem;
 @property(nonatomic, strong) PopupMenuToolsItem* readLaterItem;
 @property(nonatomic, strong) PopupMenuToolsItem* bookmarkItem;
@@ -99,7 +104,8 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
 @property(nonatomic, strong) PopupMenuToolsItem* requestMobileSiteItem;
 @property(nonatomic, strong) PopupMenuToolsItem* readingListItem;
 // Array containing all the nonnull items/
-@property(nonatomic, strong) NSArray<TableViewItem*>* specificItems;
+@property(nonatomic, strong)
+    NSArray<TableViewItem<PopupMenuItem>*>* specificItems;
 
 @end
 
@@ -112,9 +118,11 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
 @synthesize dispatcher = _dispatcher;
 @synthesize engagementTracker = _engagementTracker;
 @synthesize readingListMenuNotifier = _readingListMenuNotifier;
+@synthesize triggerNewIncognitoTabTip = _triggerNewIncognitoTabTip;
 @synthesize type = _type;
 @synthesize webState = _webState;
 @synthesize webStateList = _webStateList;
+@synthesize openNewIncognitoTabItem = _openNewIncognitoTabItem;
 @synthesize reloadStopItem = _reloadStopItem;
 @synthesize readLaterItem = _readLaterItem;
 @synthesize bookmarkItem = _bookmarkItem;
@@ -128,8 +136,9 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
 #pragma mark - Public
 
 - (instancetype)initWithType:(PopupMenuType)type
-                 isIncognito:(BOOL)isIncognito
-            readingListModel:(ReadingListModel*)readingListModel {
+                  isIncognito:(BOOL)isIncognito
+             readingListModel:(ReadingListModel*)readingListModel
+    triggerNewIncognitoTabTip:(BOOL)triggerNewIncognitoTabTip {
   self = [super init];
   if (self) {
     _isIncognito = isIncognito;
@@ -138,6 +147,7 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
         [[ReadingListMenuNotifier alloc] initWithReadingList:readingListModel];
     _webStateObserver = std::make_unique<web::WebStateObserverBridge>(self);
     _webStateListObserver = std::make_unique<WebStateListObserverBridge>(self);
+    _triggerNewIncognitoTabTip = triggerNewIncognitoTabTip;
   }
   return self;
 }
@@ -297,16 +307,11 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
 - (void)setPopupMenu:(PopupMenuTableViewController*)popupMenu {
   _popupMenu = popupMenu;
 
-  if (self.type == PopupMenuTypeToolsMenu) {
-    _popupMenu.tableView.accessibilityIdentifier =
-        kPopupMenuToolsMenuTableViewId;
-  } else if (self.type == PopupMenuTypeNavigationBackward ||
-             self.type == PopupMenuTypeNavigationForward) {
-    _popupMenu.tableView.accessibilityIdentifier =
-        kPopupMenuNavigationTableViewId;
-  }
-
   [_popupMenu setPopupMenuItems:self.items];
+  if (self.triggerNewIncognitoTabTip) {
+    _popupMenu.itemToHighlight = self.openNewIncognitoTabItem;
+    self.triggerNewIncognitoTabTip = NO;
+  }
   _popupMenu.commandHandler = self;
   if (self.webState) {
     [self updatePopupMenu];
@@ -321,7 +326,7 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
           feature_engagement::kIPHBadgedReadingListFeature)) {
     self.readingListItem.badgeText = l10n_util::GetNSStringWithFixup(
         IDS_IOS_READING_LIST_CELL_NEW_FEATURE_BADGE);
-    [self.popupMenu reconfigureCellsForItems:@[ self.readingListItem ]];
+    [self.popupMenu itemsHaveChanged:@[ self.readingListItem ]];
   }
 }
 
@@ -353,7 +358,11 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
       case PopupMenuTypeTabGrid:
         [self createTabGridMenuItems];
         break;
+      case PopupMenuTypeTabStripTabGrid:
+        [self createTabGridMenuItems];
+        break;
       case PopupMenuTypeSearch:
+        [self createSearchMenuItems];
         break;
     }
     NSMutableArray* specificItems = [NSMutableArray array];
@@ -378,7 +387,7 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
   return _items;
 }
 
-#pragma mark - PopupMenuTableViewControllerCommand
+#pragma mark - PopupMenuTableViewControllerCommands
 
 - (void)readPageLater {
   if (!self.webState)
@@ -400,9 +409,15 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
 }
 
 - (void)navigateToPageForItem:(TableViewItem<PopupMenuItem>*)item {
-  PopupMenuNavigationItem* navigationItem =
-      base::mac::ObjCCastStrict<PopupMenuNavigationItem>(item);
-  [self.dispatcher navigateToHistoryItem:navigationItem.navigationItem];
+  if (!self.webState)
+    return;
+
+  web::NavigationItem* navigationItem =
+      base::mac::ObjCCastStrict<PopupMenuNavigationItem>(item).navigationItem;
+  int index =
+      self.webState->GetNavigationManager()->GetIndexOfItem(navigationItem);
+  DCHECK_NE(index, -1);
+  self.webState->GetNavigationManager()->GoToIndex(index);
 }
 
 #pragma mark - ReadingListMenuNotificationDelegate Implementation
@@ -412,12 +427,7 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
     return;
 
   self.readingListItem.badgeNumber = unreadCount;
-  [self.popupMenu reconfigureCellsForItems:@[ self.readingListItem ]];
-}
-
-- (void)unseenStateChanged:(BOOL)unseenItemsExist {
-  // TODO(crbug.com/828367): Implement this once the "unseen items effect" is
-  // defined.
+  [self.popupMenu itemsHaveChanged:@[ self.readingListItem ]];
 }
 
 #pragma mark - Popup updates (Private)
@@ -429,14 +439,14 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
   self.readLaterItem.enabled = [self isCurrentURLWebURL];
   [self updateBookmarkItem];
   self.findInPageItem.enabled = [self isFindInPageEnabled];
-  self.siteInformationItem.enabled = [self isCurrentURLWebURL];
+  self.siteInformationItem.enabled = [self currentWebPageSupportsSiteInfo];
   self.requestDesktopSiteItem.enabled =
       [self userAgentType] == web::UserAgentType::MOBILE;
   self.requestMobileSiteItem.enabled =
       [self userAgentType] == web::UserAgentType::DESKTOP;
 
   // Reload the items.
-  [self.popupMenu reconfigureCellsForItems:self.specificItems];
+  [self.popupMenu itemsHaveChanged:self.specificItems];
 }
 
 // Updates the |bookmark| item to match the bookmarked status of the page.
@@ -451,7 +461,7 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
     self.bookmarkItem.title =
         l10n_util::GetNSString(IDS_IOS_TOOLS_MENU_EDIT_BOOKMARK);
     self.bookmarkItem.accessibilityIdentifier = kToolsMenuEditBookmark;
-    self.bookmarkItem.image = [[UIImage imageNamed:@"popup_menu_add_bookmark"]
+    self.bookmarkItem.image = [[UIImage imageNamed:@"popup_menu_edit_bookmark"]
         imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
   } else {
     self.bookmarkItem.title =
@@ -461,7 +471,7 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
         imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
   }
 
-  [self.popupMenu reconfigureCellsForItems:@[ self.bookmarkItem ]];
+  [self.popupMenu itemsHaveChanged:@[ self.bookmarkItem ]];
 }
 
 // Updates the |reloadStopItem| item to match the current behavior.
@@ -482,6 +492,23 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
     self.reloadStopItem.image = [[UIImage imageNamed:@"popup_menu_reload"]
         imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
   }
+}
+
+// Whether the current web page has available site info.
+- (BOOL)currentWebPageSupportsSiteInfo {
+  if (!self.webState)
+    return NO;
+  web::NavigationItem* navItem =
+      self.webState->GetNavigationManager()->GetVisibleItem();
+  if (!navItem) {
+    return NO;
+  }
+  const GURL& URL = navItem->GetURL();
+  // Show site info for offline pages.
+  if (URL.SchemeIs(kChromeUIScheme) && URL.host() == kChromeUIOfflineHost) {
+    return YES;
+  }
+  return URL.is_valid() && !web::GetWebClient()->IsAppSpecificURL(URL);
 }
 
 // Whether the current page is a web page.
@@ -542,17 +569,32 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
 
 // Creates the menu items for the tab grid menu.
 - (void)createTabGridMenuItems {
-  NSMutableArray* items = [NSMutableArray arrayWithArray:[self itemsForNewTab]];
-  if (self.isIncognito) {
-    [items addObject:CreateTableViewItem(
-                         IDS_IOS_TOOLS_MENU_CLOSE_ALL_INCOGNITO_TABS,
-                         PopupMenuActionCloseAllIncognitoTabs, nil,
-                         kToolsMenuCloseAllIncognitoTabsId)];
+  PopupMenuToolsItem* closeTab =
+      CreateTableViewItem(IDS_IOS_TOOLS_MENU_CLOSE_TAB, PopupMenuActionCloseTab,
+                          @"popup_menu_close_tab", kToolsMenuCloseTabId);
+  closeTab.destructiveAction = YES;
+  self.items = @[ [self itemsForNewTab], @[ closeTab ] ];
+}
+
+// Creates the menu items for the search menu.
+- (void)createSearchMenuItems {
+  NSMutableArray* items = [NSMutableArray array];
+  NSString* pasteboardString = [UIPasteboard generalPasteboard].string;
+  if (pasteboardString) {
+    PopupMenuToolsItem* pasteAndGo = CreateTableViewItem(
+        IDS_IOS_TOOLS_MENU_PASTE_AND_GO, PopupMenuActionPasteAndGo,
+        @"popup_menu_paste_and_go", kToolsMenuPasteAndGo);
+    [items addObject:pasteAndGo];
   }
 
-  [items addObject:CreateTableViewItem(IDS_IOS_TOOLS_MENU_CLOSE_TAB,
-                                       PopupMenuActionCloseTab, nil,
-                                       kToolsMenuCloseTabId)];
+  PopupMenuToolsItem* QRCodeSearch = CreateTableViewItem(
+      IDS_IOS_TOOLS_MENU_QR_SCANNER, PopupMenuActionQRCodeSearch,
+      @"popup_menu_qr_scanner", kToolsMenuQRCodeSearch);
+  [items addObject:QRCodeSearch];
+  PopupMenuToolsItem* voiceSearch = CreateTableViewItem(
+      IDS_IOS_TOOLS_MENU_VOICE_SEARCH, PopupMenuActionVoiceSearch,
+      @"popup_menu_voice_search", kToolsMenuVoiceSearch);
+  [items addObject:voiceSearch];
 
   self.items = @[ items ];
 }
@@ -571,7 +613,7 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
 
   NSArray* collectionActions = [self collectionItems];
 
-  self.items = @[ tabActions, browserActions, collectionActions ];
+  self.items = @[ tabActions, collectionActions, browserActions ];
 }
 
 - (NSArray<TableViewItem*>*)itemsForNewTab {
@@ -581,11 +623,11 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
                           @"popup_menu_new_tab", kToolsMenuNewTabId);
 
   // Open New Incognito Tab.
-  TableViewItem* openNewIncognitoTabItem = CreateTableViewItem(
+  self.openNewIncognitoTabItem = CreateTableViewItem(
       IDS_IOS_TOOLS_MENU_NEW_INCOGNITO_TAB, PopupMenuActionOpenNewIncognitoTab,
       @"popup_menu_new_incognito_tab", kToolsMenuNewIncognitoTabId);
 
-  return @[ openNewTabItem, openNewIncognitoTabItem ];
+  return @[ openNewTabItem, self.openNewIncognitoTabItem ];
 }
 
 - (NSArray<TableViewItem*>*)actionItems {
@@ -647,6 +689,20 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
                           @"popup_menu_help", kToolsMenuHelpId);
   [actionsArray addObject:help];
 
+#if !defined(NDEBUG)
+  NSUserDefaults* standardDefaults = [NSUserDefaults standardUserDefaults];
+  if ([standardDefaults boolForKey:@"DevViewSource"]) {
+    PopupMenuToolsItem* item =
+        [[PopupMenuToolsItem alloc] initWithType:kItemTypeEnumZero];
+    item.title = @"View Source";
+    item.actionIdentifier = PopupMenuActionViewSource;
+    item.accessibilityIdentifier = @"View Source";
+
+    // Debug menu, not localized, only visible if turned on by a default.
+    [actionsArray addObject:item];
+  }
+#endif  // !defined(NDEBUG)
+
   return actionsArray;
 }
 
@@ -668,9 +724,6 @@ PopupMenuToolsItem* CreateTableViewItem(int titleID,
     self.readingListItem.badgeText = l10n_util::GetNSStringWithFixup(
         IDS_IOS_READING_LIST_CELL_NEW_FEATURE_BADGE);
   }
-
-  // TODO(crbug.com/828367): Once the "unseen items effect" is defined,
-  // implement it.
 
   // Recent Tabs.
   TableViewItem* recentTabs = CreateTableViewItem(

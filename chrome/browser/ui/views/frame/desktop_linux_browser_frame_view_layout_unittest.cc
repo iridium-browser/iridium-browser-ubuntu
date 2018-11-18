@@ -7,11 +7,11 @@
 #include <memory>
 
 #include "base/macros.h"
+#include "chrome/browser/ui/layout_constants.h"
 #include "chrome/browser/ui/views/nav_button_provider.h"
-#include "chrome/browser/ui/views/tabs/tab.h"
+#include "chrome/test/views/chrome_views_test_base.h"
 #include "ui/views/background.h"
 #include "ui/views/controls/button/image_button.h"
-#include "ui/views/test/views_test_base.h"
 
 namespace {
 
@@ -41,7 +41,6 @@ class TestLayoutDelegate : public OpaqueBrowserFrameViewLayoutDelegate {
   ~TestLayoutDelegate() override {}
 
   // OpaqueBrowserFrameViewLayoutDelegate:
-  bool IsIncognito() const override { return false; }
   bool ShouldShowWindowIcon() const override { return false; }
   bool ShouldShowWindowTitle() const override { return false; }
   base::string16 GetWindowTitle() const override { return base::string16(); }
@@ -51,15 +50,11 @@ class TestLayoutDelegate : public OpaqueBrowserFrameViewLayoutDelegate {
   }
   bool ShouldShowCaptionButtons() const override { return true; }
   bool IsRegularOrGuestSession() const override { return true; }
-  gfx::ImageSkia GetIncognitoAvatarIcon() const override {
-    return gfx::ImageSkia();
-  }
   bool IsMaximized() const override { return false; }
   bool IsMinimized() const override { return false; }
-  bool IsFullscreen() const override { return false; }
   bool IsTabStripVisible() const override { return true; }
   int GetTabStripHeight() const override {
-    return Tab::GetMinimumInactiveSize().height();
+    return GetLayoutConstant(TAB_HEIGHT);
   }
   bool IsToolbarVisible() const override { return true; }
   gfx::Size GetTabstripPreferredSize() const override {
@@ -67,6 +62,8 @@ class TestLayoutDelegate : public OpaqueBrowserFrameViewLayoutDelegate {
   }
   int GetTopAreaHeight() const override { return 0; }
   bool UseCustomFrame() const override { return true; }
+  bool IsFrameCondensed() const override { return false; }
+  bool EverHasVisibleBackgroundTabShapes() const override { return false; }
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TestLayoutDelegate);
@@ -117,28 +114,17 @@ class TestNavButtonProvider : public views::NavButtonProvider {
   int GetInterNavButtonSpacing() const override {
     return kInterNavButtonSpacing;
   }
-
-  std::unique_ptr<views::Background> CreateAvatarButtonBackground(
-      const views::Button* avatar_button) const override {
-    return nullptr;
-  }
-
-  void CalculateCaptionButtonLayout(
-      const gfx::Size& content_size,
-      int top_area_height,
-      gfx::Size* caption_button_size,
-      gfx::Insets* caption_button_spacing) const override {}
 };
 
 }  // namespace
 
-class DesktopLinuxBrowserFrameViewLayoutTest : public views::ViewsTestBase {
+class DesktopLinuxBrowserFrameViewLayoutTest : public ChromeViewsTestBase {
  public:
   DesktopLinuxBrowserFrameViewLayoutTest() {}
   ~DesktopLinuxBrowserFrameViewLayoutTest() override {}
 
   void SetUp() override {
-    views::ViewsTestBase::SetUp();
+    ChromeViewsTestBase::SetUp();
 
     delegate_.reset(new TestLayoutDelegate);
     nav_button_provider_ = std::make_unique<::TestNavButtonProvider>();
@@ -162,7 +148,7 @@ class DesktopLinuxBrowserFrameViewLayoutTest : public views::ViewsTestBase {
   void TearDown() override {
     widget_->CloseNow();
 
-    views::ViewsTestBase::TearDown();
+    ChromeViewsTestBase::TearDown();
   }
 
  protected:

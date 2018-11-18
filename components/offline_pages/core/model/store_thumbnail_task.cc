@@ -4,9 +4,9 @@
 
 #include "components/offline_pages/core/model/store_thumbnail_task.h"
 
-#include "components/offline_pages/core/offline_page_metadata_store_sql.h"
+#include "components/offline_pages/core/offline_page_metadata_store.h"
 #include "components/offline_pages/core/offline_store_utils.h"
-#include "sql/connection.h"
+#include "sql/database.h"
 #include "sql/statement.h"
 #include "sql/transaction.h"
 
@@ -15,7 +15,7 @@ namespace offline_pages {
 namespace {
 
 bool StoreThumbnailSync(const OfflinePageThumbnail& thumbnail,
-                        sql::Connection* db) {
+                        sql::Database* db) {
   static const char kSql[] =
       "INSERT OR REPLACE INTO page_thumbnails (offline_id, expiration, "
       "thumbnail) VALUES (?, ?, ?)";
@@ -29,7 +29,7 @@ bool StoreThumbnailSync(const OfflinePageThumbnail& thumbnail,
 }  // namespace
 
 StoreThumbnailTask::StoreThumbnailTask(
-    OfflinePageMetadataStoreSQL* store,
+    OfflinePageMetadataStore* store,
     OfflinePageThumbnail thumbnail,
     base::OnceCallback<void(bool)> complete_callback)
     : store_(store),
@@ -42,7 +42,8 @@ StoreThumbnailTask::~StoreThumbnailTask() = default;
 void StoreThumbnailTask::Run() {
   store_->Execute(base::BindOnce(StoreThumbnailSync, std::move(thumbnail_)),
                   base::BindOnce(&StoreThumbnailTask::Complete,
-                                 weak_ptr_factory_.GetWeakPtr()));
+                                 weak_ptr_factory_.GetWeakPtr()),
+                  false);
 }
 
 void StoreThumbnailTask::Complete(bool success) {

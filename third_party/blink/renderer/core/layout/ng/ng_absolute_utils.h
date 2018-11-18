@@ -5,24 +5,33 @@
 #ifndef NGAbsoluteUtils_h
 #define NGAbsoluteUtils_h
 
+#include "base/optional.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/layout/min_max_size.h"
 #include "third_party/blink/renderer/core/layout/ng/geometry/ng_logical_size.h"
 #include "third_party/blink/renderer/core/layout/ng/geometry/ng_physical_size.h"
 #include "third_party/blink/renderer/platform/layout_unit.h"
-#include "third_party/blink/renderer/platform/wtf/optional.h"
 
 namespace blink {
 
 class ComputedStyle;
+class LayoutObject;
 class NGConstraintSpace;
 struct NGStaticPosition;
 
 struct CORE_EXPORT NGAbsolutePhysicalPosition {
   NGPhysicalBoxStrut inset;
   NGPhysicalSize size;
+  NGPhysicalBoxStrut margins;
   String ToString() const;
 };
+
+// Implements <dialog> special case abspos static positining.
+// Returns new dialog top position if layout_dialog requires
+// <dialog> abspos centering.
+CORE_EXPORT base::Optional<LayoutUnit> ComputeAbsoluteDialogYPosition(
+    const LayoutObject& layout_dialog,
+    LayoutUnit height);
 
 // The following routines implement absolute size resolution algorithm.
 // https://www.w3.org/TR/css-position-3/#abs-non-replaced-width
@@ -54,8 +63,8 @@ ComputePartialAbsoluteWithChildInlineSize(
     const NGConstraintSpace& space,
     const ComputedStyle& style,
     const NGStaticPosition&,
-    const Optional<MinMaxSize>& child_minmax,
-    const Optional<NGLogicalSize>& replaced_size,
+    const base::Optional<MinMaxSize>& child_minmax,
+    const base::Optional<NGLogicalSize>& replaced_size,
     const WritingMode container_writing_mode,
     const TextDirection container_direction);
 
@@ -64,8 +73,8 @@ CORE_EXPORT void ComputeFullAbsoluteWithChildBlockSize(
     const NGConstraintSpace& space,
     const ComputedStyle& style,
     const NGStaticPosition&,
-    const Optional<LayoutUnit>& child_block_size,
-    const Optional<NGLogicalSize>& replaced_size,
+    const base::Optional<LayoutUnit>& child_block_size,
+    const base::Optional<NGLogicalSize>& replaced_size,
     const WritingMode container_writing_mode,
     const TextDirection container_direction,
     NGAbsolutePhysicalPosition* position);

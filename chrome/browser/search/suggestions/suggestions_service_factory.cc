@@ -8,7 +8,7 @@
 #include <utility>
 
 #include "base/sequenced_task_runner.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "base/time/default_tick_clock.h"
 #include "chrome/browser/profiles/incognito_helpers.h"
 #include "chrome/browser/profiles/profile.h"
@@ -30,6 +30,7 @@
 #include "components/suggestions/suggestions_store.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/storage_partition.h"
 #include "services/identity/public/cpp/identity_manager.h"
 
 using content::BrowserThread;
@@ -82,13 +83,16 @@ KeyedService* SuggestionsServiceFactory::BuildServiceInstanceFor(
   base::FilePath database_dir(
       profile->GetPath().Append(FILE_PATH_LITERAL("Thumbnails")));
 
-  std::unique_ptr<ImageFetcherImpl> image_fetcher(
-      new ImageFetcherImpl(std::make_unique<suggestions::ImageDecoderImpl>(),
-                           profile->GetRequestContext()));
+  std::unique_ptr<ImageFetcherImpl> image_fetcher(new ImageFetcherImpl(
+      std::make_unique<suggestions::ImageDecoderImpl>(),
+      content::BrowserContext::GetDefaultStoragePartition(profile)
+          ->GetURLLoaderFactoryForBrowserProcess()));
   std::unique_ptr<ImageManager> thumbnail_manager(
       new ImageManager(std::move(image_fetcher), std::move(db), database_dir));
   return new SuggestionsServiceImpl(
-      identity_manager, sync_service, profile->GetRequestContext(),
+      identity_manager, sync_service,
+      content::BrowserContext::GetDefaultStoragePartition(profile)
+          ->GetURLLoaderFactoryForBrowserProcess(),
       std::move(suggestions_store), std::move(thumbnail_manager),
       std::move(blacklist_store), base::DefaultTickClock::GetInstance());
 }

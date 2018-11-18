@@ -11,8 +11,8 @@
 #include "base/macros.h"
 #include "base/trace_event/trace_event.h"
 #include "base/trace_event/trace_event_argument.h"
-#include "cc/resources/layer_tree_resource_provider.h"
 #include "cc/resources/resource_pool.h"
+#include "components/viz/client/client_resource_provider.h"
 #include "components/viz/common/gpu/context_provider.h"
 #include "components/viz/common/resources/platform_color.h"
 #include "components/viz/common/resources/resource_format_utils.h"
@@ -41,17 +41,15 @@ class ZeroCopyGpuBacking : public ResourcePool::GpuBacking {
       gl->DestroyImageCHROMIUM(image_id);
   }
 
-  base::trace_event::MemoryAllocatorDumpGuid MemoryDumpGuid(
-      uint64_t tracing_process_id) override {
+  void OnMemoryDump(
+      base::trace_event::ProcessMemoryDump* pmd,
+      const base::trace_event::MemoryAllocatorDumpGuid& buffer_dump_guid,
+      uint64_t tracing_process_id,
+      int importance) const override {
     if (!gpu_memory_buffer)
-      return {};
-    return gpu_memory_buffer->GetGUIDForTracing(tracing_process_id);
-  }
-
-  base::UnguessableToken SharedMemoryGuid() override {
-    if (!gpu_memory_buffer)
-      return {};
-    return gpu_memory_buffer->GetHandle().handle.GetGUID();
+      return;
+    gpu_memory_buffer->OnMemoryDump(pmd, buffer_dump_guid, tracing_process_id,
+                                    importance);
   }
 
   // The ContextProvider used to clean up the texture and image ids.
@@ -104,7 +102,6 @@ class ZeroCopyRasterBufferImpl : public RasterBuffer {
       gl->GenTextures(1, &backing_->texture_id);
       backing_->texture_target = gpu::GetBufferTextureTarget(
           kBufferUsage, viz::BufferFormat(resource_format_), caps);
-      backing_->mailbox = gpu::Mailbox::Generate();
       gl->ProduceTextureDirectCHROMIUM(backing_->texture_id,
                                        backing_->mailbox.name);
       backing_->overlay_candidate = true;
@@ -131,7 +128,9 @@ class ZeroCopyRasterBufferImpl : public RasterBuffer {
       // If GpuMemoryBuffer allocation failed (https://crbug.com/554541), then
       // we don't have anything to give to the display compositor, but also no
       // way to report an error, so we just make a texture but don't bind
-      // anything to it..
+      // anything to it. Many blink layout tests on macOS fail to have no
+      // |gpu_memory_buffer_| here, so any error reporting will spam console
+      // logs (https://crbug.com/871031).
       if (gpu_memory_buffer_) {
         backing_->image_id = gl->CreateImageCHROMIUM(
             gpu_memory_buffer_->AsClientBuffer(), resource_size_.width(),
@@ -144,31 +143,36 @@ class ZeroCopyRasterBufferImpl : public RasterBuffer {
                                     backing_->image_id);
       gl->BindTexImage2DCHROMIUM(backing_->texture_target, backing_->image_id);
     }
+    if (backing_->image_id && resource_color_space_.IsValid()) {
+      gl->SetColorSpaceMetadataCHROMIUM(
+          backing_->texture_id,
+          reinterpret_cast<GLColorSpace>(&resource_color_space_));
+    }
     gl->BindTexture(backing_->texture_target, 0);
 
     backing_->mailbox_sync_token =
-        LayerTreeResourceProvider::GenerateSyncTokenHelper(gl);
+        viz::ClientResourceProvider::GenerateSyncTokenHelper(gl);
     backing_->gpu_memory_buffer = std::move(gpu_memory_buffer_);
   }
 
   // Overridden from RasterBuffer:
-  void Playback(
-      const RasterSource* raster_source,
-      const gfx::Rect& raster_full_rect,
-      const gfx::Rect& raster_dirty_rect,
-      uint64_t new_content_id,
-      const gfx::AxisTransform2d& transform,
-      const RasterSource::PlaybackSettings& playback_settings) override {
+  void Playback(const RasterSource* raster_source,
+                const gfx::Rect& raster_full_rect,
+                const gfx::Rect& raster_dirty_rect,
+                uint64_t new_content_id,
+                const gfx::AxisTransform2d& transform,
+                const RasterSource::PlaybackSettings& playback_settings,
+                const GURL& url) override {
     TRACE_EVENT0("cc", "ZeroCopyRasterBuffer::Playback");
 
     if (!gpu_memory_buffer_) {
       gpu_memory_buffer_ = gpu_memory_buffer_manager_->CreateGpuMemoryBuffer(
           resource_size_, viz::BufferFormat(resource_format_), kBufferUsage,
           gpu::kNullSurfaceHandle);
-      // GpuMemoryBuffer allocation can fail (https://crbug.com/554541).
+      // Note that GpuMemoryBuffer allocation can fail.
+      // https://crbug.com/554541
       if (!gpu_memory_buffer_)
         return;
-      gpu_memory_buffer_->SetColorSpace(resource_color_space_);
     }
 
     DCHECK_EQ(1u, gfx::NumberOfPlanesForBufferFormat(
@@ -183,7 +187,8 @@ class ZeroCopyRasterBufferImpl : public RasterBuffer {
     RasterBufferProvider::PlaybackToMemory(
         gpu_memory_buffer_->memory(0), resource_format_, resource_size_,
         gpu_memory_buffer_->stride(0), raster_source, raster_full_rect,
-        raster_full_rect, transform, resource_color_space_, playback_settings);
+        raster_full_rect, transform, resource_color_space_,
+        /*gpu_compositing=*/true, playback_settings);
     gpu_memory_buffer_->Unmap();
   }
 
@@ -204,14 +209,12 @@ class ZeroCopyRasterBufferImpl : public RasterBuffer {
 }  // namespace
 
 ZeroCopyRasterBufferProvider::ZeroCopyRasterBufferProvider(
-    LayerTreeResourceProvider* resource_provider,
     gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
     viz::ContextProvider* compositor_context_provider,
-    viz::ResourceFormat preferred_tile_format)
-    : resource_provider_(resource_provider),
-      gpu_memory_buffer_manager_(gpu_memory_buffer_manager),
+    viz::ResourceFormat tile_format)
+    : gpu_memory_buffer_manager_(gpu_memory_buffer_manager),
       compositor_context_provider_(compositor_context_provider),
-      preferred_tile_format_(preferred_tile_format) {}
+      tile_format_(tile_format) {}
 
 ZeroCopyRasterBufferProvider::~ZeroCopyRasterBufferProvider() = default;
 
@@ -235,24 +238,15 @@ ZeroCopyRasterBufferProvider::AcquireBufferForRaster(
 
 void ZeroCopyRasterBufferProvider::Flush() {}
 
-viz::ResourceFormat ZeroCopyRasterBufferProvider::GetResourceFormat(
-    bool must_support_alpha) const {
-  if (resource_provider_->IsTextureFormatSupported(preferred_tile_format_)) {
-    if (!must_support_alpha)
-      return preferred_tile_format_;
-    if (DoesResourceFormatSupportAlpha(preferred_tile_format_))
-      return preferred_tile_format_;
-  }
-  return resource_provider_->best_texture_format();
+viz::ResourceFormat ZeroCopyRasterBufferProvider::GetResourceFormat() const {
+  return tile_format_;
 }
 
-bool ZeroCopyRasterBufferProvider::IsResourceSwizzleRequired(
-    bool must_support_alpha) const {
-  return ResourceFormatRequiresSwizzle(GetResourceFormat(must_support_alpha));
+bool ZeroCopyRasterBufferProvider::IsResourceSwizzleRequired() const {
+  return !viz::PlatformColor::SameComponentOrder(GetResourceFormat());
 }
 
-bool ZeroCopyRasterBufferProvider::IsResourcePremultiplied(
-    bool must_support_alpha) const {
+bool ZeroCopyRasterBufferProvider::IsResourcePremultiplied() const {
   return true;
 }
 
@@ -276,5 +270,9 @@ uint64_t ZeroCopyRasterBufferProvider::SetReadyToDrawCallback(
 }
 
 void ZeroCopyRasterBufferProvider::Shutdown() {}
+
+bool ZeroCopyRasterBufferProvider::CheckRasterFinishedQueries() {
+  return false;
+}
 
 }  // namespace cc

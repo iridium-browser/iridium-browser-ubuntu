@@ -210,7 +210,7 @@ class LocalFileSyncContext
   void OnWriteEnabled(const storage::FileSystemURL& url) override;
 
  private:
-  using StatusCallback = base::Callback<void(base::File::Error result)>;
+  using StatusCallback = base::OnceCallback<void(base::File::Error result)>;
   using StatusCallbackQueue = base::circular_deque<SyncStatusCallback>;
   using FileSystemURLQueue = base::circular_deque<storage::FileSystemURL>;
   friend class base::RefCountedThreadSafe<LocalFileSyncContext>;
@@ -324,7 +324,7 @@ class LocalFileSyncContext
       storage::FileSystemContext* file_system_context,
       const base::FilePath& local_file_path,
       const storage::FileSystemURL& dest_url,
-      const StatusCallback& callback,
+      StatusCallback callback,
       base::File::Error error);
 
   const base::FilePath local_base_path_;
@@ -368,7 +368,8 @@ class LocalFileSyncContext
   // ApplyRemoteChange(). Modified only on IO thread.
   std::unique_ptr<RootDeleteHelper> root_delete_helper_;
 
-  base::ObserverList<LocalOriginChangeObserver> origin_change_observers_;
+  base::ObserverList<LocalOriginChangeObserver>::Unchecked
+      origin_change_observers_;
 
   int mock_notify_changes_duration_in_sec_;
 

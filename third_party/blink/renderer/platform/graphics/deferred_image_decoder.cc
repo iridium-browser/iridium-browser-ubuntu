@@ -28,6 +28,7 @@
 #include <memory>
 #include <utility>
 
+#include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "third_party/blink/renderer/platform/graphics/decoding_image_generator.h"
 #include "third_party/blink/renderer/platform/graphics/image_decoding_store.h"
@@ -41,8 +42,7 @@
 namespace blink {
 
 struct DeferredFrameData {
-  DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
-  WTF_MAKE_NONCOPYABLE(DeferredFrameData);
+  DISALLOW_NEW();
 
  public:
   DeferredFrameData()
@@ -52,6 +52,9 @@ struct DeferredFrameData {
   ImageOrientation orientation_;
   TimeDelta duration_;
   bool is_received_;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(DeferredFrameData);
 };
 
 std::unique_ptr<DeferredImageDecoder> DeferredImageDecoder::Create(
@@ -60,7 +63,8 @@ std::unique_ptr<DeferredImageDecoder> DeferredImageDecoder::Create(
     ImageDecoder::AlphaOption alpha_option,
     const ColorBehavior& color_behavior) {
   std::unique_ptr<ImageDecoder> metadata_decoder =
-      ImageDecoder::Create(data, data_complete, alpha_option, color_behavior);
+      ImageDecoder::Create(data, data_complete, alpha_option,
+                           ImageDecoder::kDefaultBitDepth, color_behavior);
   if (!metadata_decoder)
     return nullptr;
 
@@ -87,6 +91,7 @@ DeferredImageDecoder::DeferredImageDecoder(
       all_data_received_(false),
       can_yuv_decode_(false),
       has_hot_spot_(false),
+      image_is_high_bit_depth_(false),
       complete_frame_content_id_(PaintImage::GetNextContentId()) {}
 
 DeferredImageDecoder::~DeferredImageDecoder() = default;
@@ -124,6 +129,8 @@ sk_sp<PaintImageGenerator> DeferredImageDecoder::CreateGenerator(size_t index) {
   SkImageInfo info =
       SkImageInfo::MakeN32(decoded_size.width(), decoded_size.height(),
                            alpha_type, color_space_for_sk_images_);
+  if (image_is_high_bit_depth_)
+    info = info.makeColorType(kRGBA_F16_SkColorType);
 
   std::vector<FrameMetadata> frames(frame_data_.size());
   for (size_t i = 0; i < frame_data_.size(); ++i) {
@@ -170,12 +177,11 @@ void DeferredImageDecoder::SetDataInternal(scoped_refptr<SharedBuffer> data,
     if (!rw_buffer_)
       rw_buffer_ = std::make_unique<SkRWBuffer>(data->size());
 
-    const char* segment = nullptr;
-    for (size_t length = data->GetSomeData(segment, rw_buffer_->size()); length;
-         length = data->GetSomeData(segment, rw_buffer_->size())) {
-      DCHECK_GE(data->size(), rw_buffer_->size() + length);
-      const size_t remaining = data->size() - rw_buffer_->size() - length;
-      rw_buffer_->append(segment, length, remaining);
+    for (auto it = data->GetIteratorAt(rw_buffer_->size()); it != data->cend();
+         ++it) {
+      DCHECK_GE(data->size(), rw_buffer_->size() + it->size());
+      const size_t remaining = data->size() - rw_buffer_->size() - it->size();
+      rw_buffer_->append(it->data(), it->size(), remaining);
     }
   }
 }
@@ -186,9 +192,9 @@ bool DeferredImageDecoder::IsSizeAvailable() {
   return metadata_decoder_ ? metadata_decoder_->IsSizeAvailable() : true;
 }
 
-bool DeferredImageDecoder::HasEmbeddedColorSpace() const {
-  return metadata_decoder_ ? metadata_decoder_->HasEmbeddedColorSpace()
-                           : has_embedded_color_space_;
+bool DeferredImageDecoder::HasEmbeddedColorProfile() const {
+  return metadata_decoder_ ? metadata_decoder_->HasEmbeddedColorProfile()
+                           : has_embedded_color_profile_;
 }
 
 IntSize DeferredImageDecoder::Size() const {
@@ -262,13 +268,14 @@ void DeferredImageDecoder::ActivateLazyDecoding() {
     return;
 
   size_ = metadata_decoder_->Size();
+  image_is_high_bit_depth_ = metadata_decoder_->ImageIsHighBitDepth();
   has_hot_spot_ = metadata_decoder_->HotSpot(hot_spot_);
   filename_extension_ = metadata_decoder_->FilenameExtension();
   // JPEG images support YUV decoding; other decoders do not. (WebP could in the
   // future.)
   can_yuv_decode_ = RuntimeEnabledFeatures::DecodeToYUVEnabled() &&
                     (filename_extension_ == "jpg");
-  has_embedded_color_space_ = metadata_decoder_->HasEmbeddedColorSpace();
+  has_embedded_color_profile_ = metadata_decoder_->HasEmbeddedColorProfile();
   color_space_for_sk_images_ = metadata_decoder_->ColorSpaceForSkImages();
 
   const bool is_single_frame =

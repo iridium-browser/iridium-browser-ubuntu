@@ -11,13 +11,10 @@
 #include "base/memory/ref_counted.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry.h"
 #include "chrome/browser/net/chrome_url_request_context_getter.h"
-#include "chrome/browser/net/reporting_permissions_checker.h"
 #include "chrome/browser/profiles/profile_io_data.h"
 #include "components/prefs/pref_store.h"
 
-namespace chrome_browser_net {
-class Predictor;
-}  // namespace chrome_browser_net
+class ReportingPermissionsChecker;
 
 namespace domain_reliability {
 class DomainReliabilityMonitor;
@@ -47,8 +44,9 @@ class ProfileImplIOData : public ProfileIOData {
               int media_cache_max_size,
               const base::FilePath& extensions_cookie_path,
               const base::FilePath& profile_path,
-              chrome_browser_net::Predictor* predictor,
               storage::SpecialStoragePolicy* special_storage_policy,
+              std::unique_ptr<ReportingPermissionsChecker>
+                  reporting_permissions_checker,
               std::unique_ptr<domain_reliability::DomainReliabilityMonitor>
                   domain_reliability_monitor);
 
@@ -74,8 +72,6 @@ class ProfileImplIOData : public ProfileIOData {
     content::ResourceContext* GetResourceContextNoInit() const;
     scoped_refptr<ChromeURLRequestContextGetter>
         GetMediaRequestContextGetter() const;
-    scoped_refptr<ChromeURLRequestContextGetter>
-        GetExtensionsRequestContextGetter() const;
     scoped_refptr<ChromeURLRequestContextGetter>
         GetIsolatedMediaRequestContextGetter(
             const base::FilePath& partition_path,
@@ -105,8 +101,6 @@ class ProfileImplIOData : public ProfileIOData {
         main_request_context_getter_;
     mutable scoped_refptr<ChromeURLRequestContextGetter>
         media_request_context_getter_;
-    mutable scoped_refptr<ChromeURLRequestContextGetter>
-        extensions_request_context_getter_;
     mutable ChromeURLRequestContextGetterMap app_request_context_getter_map_;
     mutable ChromeURLRequestContextGetterMap
         isolated_media_request_context_getter_map_;
@@ -131,9 +125,9 @@ class ProfileImplIOData : public ProfileIOData {
     bool restore_old_session_cookies;
     bool persist_session_cookies;
     scoped_refptr<storage::SpecialStoragePolicy> special_storage_policy;
+    std::unique_ptr<ReportingPermissionsChecker> reporting_permissions_checker;
     std::unique_ptr<domain_reliability::DomainReliabilityMonitor>
         domain_reliability_monitor;
-    std::unique_ptr<ReportingPermissionsChecker> reporting_permissions_checker;
   };
 
   ProfileImplIOData();
@@ -151,33 +145,17 @@ class ProfileImplIOData : public ProfileIOData {
                               request_interceptors) const override;
   void OnMainRequestContextCreated(
       ProfileParams* profile_params) const override;
-  void InitializeExtensionsRequestContext(
+  void InitializeExtensionsCookieStore(
       ProfileParams* profile_params) const override;
-  net::URLRequestContext* InitializeAppRequestContext(
-      net::URLRequestContext* main_context,
-      const StoragePartitionDescriptor& partition_descriptor,
-      std::unique_ptr<ProtocolHandlerRegistry::JobInterceptorFactory>
-          protocol_handler_interceptor,
-      content::ProtocolHandlerMap* protocol_handlers,
-      content::URLRequestInterceptorScopedVector request_interceptors)
-      const override;
   net::URLRequestContext* InitializeMediaRequestContext(
       net::URLRequestContext* original_context,
       const StoragePartitionDescriptor& partition_descriptor,
       const char* name) const override;
   net::URLRequestContext* AcquireMediaRequestContext() const override;
-  net::URLRequestContext* AcquireIsolatedAppRequestContext(
-      net::URLRequestContext* main_context,
-      const StoragePartitionDescriptor& partition_descriptor,
-      std::unique_ptr<ProtocolHandlerRegistry::JobInterceptorFactory>
-          protocol_handler_interceptor,
-      content::ProtocolHandlerMap* protocol_handlers,
-      content::URLRequestInterceptorScopedVector request_interceptors)
-      const override;
   net::URLRequestContext* AcquireIsolatedMediaRequestContext(
       net::URLRequestContext* app_context,
       const StoragePartitionDescriptor& partition_descriptor) const override;
-  chrome_browser_net::Predictor* GetPredictor() override;
+  net::CookieStore* GetExtensionsCookieStore() const override;
 
   // Returns a net::ReportingService, if reporting should be enabled. Otherwise,
   // returns nullptr.
@@ -195,13 +173,10 @@ class ProfileImplIOData : public ProfileIOData {
 
   mutable std::unique_ptr<net::CookieStore> extensions_cookie_store_;
 
-  mutable std::unique_ptr<chrome_browser_net::Predictor> predictor_;
-
   mutable std::unique_ptr<net::URLRequestContext> media_request_context_;
 
   // Parameters needed for isolated apps.
   base::FilePath profile_path_;
-  int app_cache_max_size_;
   int app_media_cache_max_size_;
 
   DISALLOW_COPY_AND_ASSIGN(ProfileImplIOData);

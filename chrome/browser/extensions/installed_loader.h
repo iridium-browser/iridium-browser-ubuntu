@@ -9,12 +9,11 @@
 
 #include "base/files/file_path.h"
 
-class ExtensionService;
-
 namespace extensions {
 
 class ExtensionPrefs;
 class ExtensionRegistry;
+class ExtensionService;
 struct ExtensionInfo;
 
 // Loads installed extensions from the prefs.
@@ -28,6 +27,10 @@ class InstalledLoader {
 
   // Loads all installed extensions (used by startup and testing code).
   void LoadAllExtensions();
+
+  // Allows tests to verify metrics without needing to go through
+  // LoadAllExtensions().
+  void RecordExtensionsMetricsForTesting();
 
  private:
   // Returns the flags that should be used with Extension::Create() for an

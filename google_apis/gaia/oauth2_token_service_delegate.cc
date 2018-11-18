@@ -5,6 +5,11 @@
 #include "google_apis/gaia/oauth2_token_service_delegate.h"
 
 #include "google_apis/gaia/oauth2_token_service.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
+
+// static
+const char OAuth2TokenServiceDelegate::kInvalidRefreshToken[] =
+    "invalid_refresh_token";
 
 OAuth2TokenServiceDelegate::ScopedBatchChange::ScopedBatchChange(
     OAuth2TokenServiceDelegate* delegate)
@@ -92,8 +97,8 @@ void OAuth2TokenServiceDelegate::FireAuthErrorChanged(
     observer.OnAuthErrorChanged(account_id, error);
 }
 
-net::URLRequestContextGetter* OAuth2TokenServiceDelegate::GetRequestContext()
-    const {
+scoped_refptr<network::SharedURLLoaderFactory>
+OAuth2TokenServiceDelegate::GetURLLoaderFactory() const {
   return nullptr;
 }
 
@@ -110,7 +115,9 @@ const net::BackoffEntry* OAuth2TokenServiceDelegate::BackoffEntry() const {
   return nullptr;
 }
 
-OAuth2TokenServiceDelegate::LoadCredentialsState
-OAuth2TokenServiceDelegate::GetLoadCredentialsState() const {
-  return LOAD_CREDENTIALS_UNKNOWN;
+void OAuth2TokenServiceDelegate::LoadCredentials(
+    const std::string& primary_account_id) {
+  NOTREACHED() << "OAuth2TokenServiceDelegate does not load credentials. "
+                  "Subclasses that need to load credentials must provide "
+                  "an implemenation of this method";
 }

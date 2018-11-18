@@ -15,7 +15,7 @@ function JSProxyGetTarget(proxy) { };
 function JSProxyGetHandler(proxy) { };
 
 try {
-  isProxy = Function(['object'], 'return %_IsJSProxy(object)');
+  isProxy = Function(['object'], 'return %IsJSProxy(object)');
   JSProxyGetTarget = Function(['proxy'],
     'return %JSProxyGetTarget(proxy)');
   JSProxyGetHandler = Function(['proxy'],
@@ -42,8 +42,7 @@ function Stringify(x, depth) {
     case "string":
       return "\"" + x.toString() + "\"";
     case "bigint":
-      // TODO(neis): Use x.toString() once we have it.
-      return String(x) + "n";
+      return x.toString() + "n";
     case "object":
       if (IS_NULL(x)) return "null";
       if (x.constructor && x.constructor.name === "Array") {

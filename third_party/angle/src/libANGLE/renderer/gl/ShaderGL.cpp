@@ -10,6 +10,7 @@
 
 #include "common/debug.h"
 #include "libANGLE/Compiler.h"
+#include "libANGLE/Context.h"
 #include "libANGLE/renderer/gl/FunctionsGL.h"
 #include "libANGLE/renderer/gl/RendererGL.h"
 #include "libANGLE/renderer/gl/WorkaroundsGL.h"
@@ -20,116 +21,116 @@ namespace rx
 {
 
 ShaderGL::ShaderGL(const gl::ShaderState &data,
-                   const FunctionsGL *functions,
-                   const WorkaroundsGL &workarounds,
-                   bool isWebGL,
-                   MultiviewImplementationTypeGL multiviewImplementationType)
+                   GLuint shaderID,
+                   MultiviewImplementationTypeGL multiviewImplementationType,
+                   const FunctionsGL *functions)
     : ShaderImpl(data),
-      mFunctions(functions),
-      mWorkarounds(workarounds),
-      mShaderID(0),
-      mIsWebGL(isWebGL),
-      mMultiviewImplementationType(multiviewImplementationType)
+      mShaderID(shaderID),
+      mMultiviewImplementationType(multiviewImplementationType),
+      mFunctions(functions)
 {
-    ASSERT(mFunctions);
 }
 
 ShaderGL::~ShaderGL()
 {
-    if (mShaderID != 0)
-    {
-        mFunctions->deleteShader(mShaderID);
-        mShaderID = 0;
-    }
+    ASSERT(mShaderID == 0);
 }
 
-ShCompileOptions ShaderGL::prepareSourceAndReturnOptions(std::stringstream *sourceStream,
+void ShaderGL::destroy()
+{
+    mFunctions->deleteShader(mShaderID);
+    mShaderID = 0;
+}
+
+ShCompileOptions ShaderGL::prepareSourceAndReturnOptions(const gl::Context *context,
+                                                         std::stringstream *sourceStream,
                                                          std::string * /*sourcePath*/)
 {
-    // Reset the previous state
-    if (mShaderID != 0)
-    {
-        mFunctions->deleteShader(mShaderID);
-        mShaderID = 0;
-    }
-
     *sourceStream << mData.getSource();
 
     ShCompileOptions options = SH_INIT_GL_POSITION;
 
-    if (mIsWebGL)
+    bool isWebGL = context->getExtensions().webglCompatibility;
+    if (isWebGL && (mData.getShaderType() != gl::ShaderType::Compute))
     {
         options |= SH_INIT_OUTPUT_VARIABLES;
     }
 
-    if (mWorkarounds.doWhileGLSLCausesGPUHang)
+    const WorkaroundsGL &workarounds = GetWorkaroundsGL(context);
+
+    if (workarounds.doWhileGLSLCausesGPUHang)
     {
         options |= SH_REWRITE_DO_WHILE_LOOPS;
     }
 
-    if (mWorkarounds.emulateAbsIntFunction)
+    if (workarounds.emulateAbsIntFunction)
     {
         options |= SH_EMULATE_ABS_INT_FUNCTION;
     }
 
-    if (mWorkarounds.addAndTrueToLoopCondition)
+    if (workarounds.addAndTrueToLoopCondition)
     {
         options |= SH_ADD_AND_TRUE_TO_LOOP_CONDITION;
     }
 
-    if (mWorkarounds.emulateIsnanFloat)
+    if (workarounds.emulateIsnanFloat)
     {
         options |= SH_EMULATE_ISNAN_FLOAT_FUNCTION;
     }
 
-    if (mWorkarounds.emulateAtan2Float)
+    if (workarounds.emulateAtan2Float)
     {
         options |= SH_EMULATE_ATAN2_FLOAT_FUNCTION;
     }
 
-    if (mWorkarounds.useUnusedBlocksWithStandardOrSharedLayout)
+    if (workarounds.useUnusedBlocksWithStandardOrSharedLayout)
     {
         options |= SH_USE_UNUSED_STANDARD_SHARED_BLOCKS;
     }
 
-    if (mWorkarounds.dontRemoveInvariantForFragmentInput)
+    if (workarounds.dontRemoveInvariantForFragmentInput)
     {
         options |= SH_DONT_REMOVE_INVARIANT_FOR_FRAGMENT_INPUT;
     }
 
-    if (mWorkarounds.removeInvariantAndCentroidForESSL3)
+    if (workarounds.removeInvariantAndCentroidForESSL3)
     {
         options |= SH_REMOVE_INVARIANT_AND_CENTROID_FOR_ESSL3;
     }
 
-    if (mWorkarounds.rewriteFloatUnaryMinusOperator)
+    if (workarounds.rewriteFloatUnaryMinusOperator)
     {
         options |= SH_REWRITE_FLOAT_UNARY_MINUS_OPERATOR;
     }
 
-    if (!mWorkarounds.dontInitializeUninitializedLocals)
+    if (!workarounds.dontInitializeUninitializedLocals)
     {
         options |= SH_INITIALIZE_UNINITIALIZED_LOCALS;
     }
 
-    if (mWorkarounds.clampPointSize)
+    if (workarounds.clampPointSize)
     {
         options |= SH_CLAMP_POINT_SIZE;
     }
 
-    if (mWorkarounds.rewriteVectorScalarArithmetic)
+    if (workarounds.rewriteVectorScalarArithmetic)
     {
         options |= SH_REWRITE_VECTOR_SCALAR_ARITHMETIC;
     }
 
-    if (mWorkarounds.dontUseLoopsToInitializeVariables)
+    if (workarounds.dontUseLoopsToInitializeVariables)
     {
         options |= SH_DONT_USE_LOOPS_TO_INITIALIZE_VARIABLES;
     }
 
-    if (mWorkarounds.clampFragDepth)
+    if (workarounds.clampFragDepth)
     {
         options |= SH_CLAMP_FRAG_DEPTH;
+    }
+
+    if (workarounds.rewriteRepeatedAssignToSwizzled)
+    {
+        options |= SH_REWRITE_REPEATED_ASSIGN_TO_SWIZZLED;
     }
 
     if (mMultiviewImplementationType == MultiviewImplementationTypeGL::NV_VIEWPORT_ARRAY2)
@@ -141,13 +142,12 @@ ShCompileOptions ShaderGL::prepareSourceAndReturnOptions(std::stringstream *sour
     return options;
 }
 
-bool ShaderGL::postTranslateCompile(gl::Compiler *compiler, std::string *infoLog)
+bool ShaderGL::postTranslateCompile(gl::ShCompilerInstance *compiler, std::string *infoLog)
 {
     // Translate the ESSL into GLSL
     const char *translatedSourceCString = mData.getTranslatedSource().c_str();
 
-    // Generate a shader object and set the source
-    mShaderID = mFunctions->createShader(ToGLenum(mData.getShaderType()));
+    // Set the source
     mFunctions->shaderSource(mShaderID, 1, &translatedSourceCString, nullptr);
     mFunctions->compileShader(mShaderID);
 
@@ -166,9 +166,6 @@ bool ShaderGL::postTranslateCompile(gl::Compiler *compiler, std::string *infoLog
         {
             std::vector<char> buf(infoLogLength);
             mFunctions->getShaderInfoLog(mShaderID, infoLogLength, nullptr, &buf[0]);
-
-            mFunctions->deleteShader(mShaderID);
-            mShaderID = 0;
 
             *infoLog = &buf[0];
             WARN() << std::endl << *infoLog;

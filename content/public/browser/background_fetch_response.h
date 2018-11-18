@@ -8,9 +8,11 @@
 #include <vector>
 
 #include "base/files/file_path.h"
+#include "base/optional.h"
 #include "base/time/time.h"
 #include "content/common/content_export.h"
 #include "net/http/http_response_headers.h"
+#include "storage/browser/blob/blob_data_handle.h"
 #include "url/gurl.h"
 
 namespace content {
@@ -50,22 +52,29 @@ struct CONTENT_EXPORT BackgroundFetchResult {
     // Used when the download was cancelled by the user.
     CANCELLED,
 
-    // Used when the failure reason is unknown.
-    UNKNOWN,
+    // Catch-all error. Used when the failure reason is unknown or not exposed
+    // to the developer.
+    FETCH_ERROR,
   };
 
   // Constructor for failed downloads.
-  BackgroundFetchResult(base::Time response_time, FailureReason failure_reason);
+  BackgroundFetchResult(std::unique_ptr<BackgroundFetchResponse> response,
+                        base::Time response_time,
+                        FailureReason failure_reason);
 
   // Constructor for successful downloads.
-  BackgroundFetchResult(base::Time response_time,
+  BackgroundFetchResult(std::unique_ptr<BackgroundFetchResponse> response,
+                        base::Time response_time,
                         const base::FilePath& path,
+                        base::Optional<storage::BlobDataHandle> blob_handle,
                         uint64_t file_size);
 
   ~BackgroundFetchResult();
 
+  std::unique_ptr<BackgroundFetchResponse> response;
   const base::Time response_time;
   const base::FilePath file_path;
+  base::Optional<storage::BlobDataHandle> blob_handle;
   const uint64_t file_size = 0;
   FailureReason failure_reason;
 

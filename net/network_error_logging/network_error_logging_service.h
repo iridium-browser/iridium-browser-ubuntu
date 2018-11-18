@@ -20,6 +20,10 @@
 #include "url/gurl.h"
 #include "url/origin.h"
 
+namespace base {
+class Value;
+}  // namespace base
+
 namespace net {
 class ReportingService;
 }  // namespace net
@@ -49,8 +53,10 @@ class NET_EXPORT NetworkErrorLoggingService {
 
     GURL uri;
     GURL referrer;
+    std::string user_agent;
     IPAddress server_ip;
     std::string protocol;
+    std::string method;
     int status_code;
     base::TimeDelta elapsed_time;
     Error type;
@@ -73,18 +79,20 @@ class NET_EXPORT NetworkErrorLoggingService {
 
   // Keys for data included in report bodies. Exposed for tests.
 
-  static const char kUriKey[];
   static const char kReferrerKey[];
   static const char kSamplingFractionKey[];
   static const char kServerIpKey[];
   static const char kProtocolKey[];
+  static const char kMethodKey[];
   static const char kStatusCodeKey[];
   static const char kElapsedTimeKey[];
+  static const char kPhaseKey[];
   static const char kTypeKey[];
 
   static void RecordHeaderDiscardedForNoNetworkErrorLoggingService();
   static void RecordHeaderDiscardedForInvalidSSLInfo();
   static void RecordHeaderDiscardedForCertStatusError();
+  static void RecordHeaderDiscardedForMissingRemoteEndpoint();
 
   static void RecordRequestDiscardedForNoNetworkErrorLoggingService();
 
@@ -93,22 +101,33 @@ class NET_EXPORT NetworkErrorLoggingService {
 
   virtual ~NetworkErrorLoggingService();
 
-  // Ingests a "NEL:" header received from |orogin| with normalized value
-  // |value|. May or may not actually set a policy for that origin.
+  // Ingests a "NEL:" header received for |origin| from |received_ip_address|
+  // with normalized value |value|. May or may not actually set a policy for
+  // that origin.
   virtual void OnHeader(const url::Origin& origin,
+                        const IPAddress& received_ip_address,
                         const std::string& value) = 0;
 
   // Considers queueing a network error report for the request described in
-  // |details|. Note that Network Error Logging can report a fraction of
-  // successful requests as well (to calculate error rates), so this should be
-  // called on *all* requests.
-  virtual void OnRequest(const RequestDetails& details) = 0;
+  // |details|.  The contents of |details| might be changed, depending on the
+  // NEL policy associated with the request's origin.  Note that |details| is
+  // passed by value, so that it doesn't need to be copied in this function if
+  // it needs to be changed.  Consider using std::move to pass this parameter if
+  // the caller doesn't need to access it after this method call.
+  //
+  // Note that Network Error Logging can report a fraction of successful
+  // requests as well (to calculate error rates), so this should be called on
+  // *all* requests.
+  virtual void OnRequest(RequestDetails details) = 0;
 
   // Removes browsing data (origin policies) associated with any origin for
-  // which |origin_filter| returns true, or for all origins if
-  // |origin_filter.is_null()|.
+  // which |origin_filter| returns true.
   virtual void RemoveBrowsingData(
       const base::RepeatingCallback<bool(const GURL&)>& origin_filter) = 0;
+
+  // Removes browsing data (origin policies) for all origins. Allows slight
+  // optimization over passing an always-true filter to RemoveBrowsingData.
+  virtual void RemoveAllBrowsingData() = 0;
 
   // Sets the ReportingService that will be used to queue network error reports.
   // If |nullptr| is passed, reports will be queued locally or discarded.
@@ -119,6 +138,10 @@ class NET_EXPORT NetworkErrorLoggingService {
   // |tick_clock| must outlive the NetworkErrorLoggingService, and cannot be
   // nullptr.
   void SetTickClockForTesting(const base::TickClock* tick_clock);
+
+  virtual base::Value StatusAsValue() const;
+
+  virtual std::set<url::Origin> GetPolicyOriginsForTesting();
 
  protected:
   NetworkErrorLoggingService();

@@ -4,7 +4,6 @@
 
 package org.chromium.chrome.browser.ntp;
 
-import android.accounts.Account;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.support.annotation.IntDef;
@@ -18,17 +17,16 @@ import org.chromium.chrome.browser.favicon.FaviconHelper;
 import org.chromium.chrome.browser.favicon.FaviconHelper.FaviconImageCallback;
 import org.chromium.chrome.browser.history.HistoryManagerUtils;
 import org.chromium.chrome.browser.invalidation.InvalidationController;
-import org.chromium.chrome.browser.metrics.StartupMetrics;
 import org.chromium.chrome.browser.ntp.ForeignSessionHelper.ForeignSession;
 import org.chromium.chrome.browser.ntp.ForeignSessionHelper.ForeignSessionTab;
 import org.chromium.chrome.browser.profiles.Profile;
-import org.chromium.chrome.browser.signin.DisplayableProfileData;
 import org.chromium.chrome.browser.signin.PersonalizedSigninPromoView;
 import org.chromium.chrome.browser.signin.ProfileDataCache;
 import org.chromium.chrome.browser.signin.SigninAccessPoint;
 import org.chromium.chrome.browser.signin.SigninManager;
 import org.chromium.chrome.browser.signin.SigninManager.SignInStateObserver;
 import org.chromium.chrome.browser.signin.SigninPromoController;
+import org.chromium.chrome.browser.signin.SigninPromoUtil;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.components.signin.AccountManagerFacade;
 import org.chromium.components.signin.AccountsChangeObserver;
@@ -118,7 +116,7 @@ public class RecentTabsManager implements AndroidSyncSettingsObserver, SignInSta
         mForeignSessionHelper.triggerSessionSync();
         registerObservers();
 
-        InvalidationController.get(mContext).onRecentTabsPageOpened();
+        InvalidationController.get().onRecentTabsPageOpened();
     }
 
     /**
@@ -126,7 +124,7 @@ public class RecentTabsManager implements AndroidSyncSettingsObserver, SignInSta
      */
     public void destroy() {
         mIsDestroyed = true;
-        AndroidSyncSettings.unregisterObserver(mContext, this);
+        AndroidSyncSettings.unregisterObserver(this);
 
         mSignInManager.removeSignInStateObserver(this);
         mSignInManager = null;
@@ -148,7 +146,7 @@ public class RecentTabsManager implements AndroidSyncSettingsObserver, SignInSta
         mPrefs.destroy();
         mPrefs = null;
 
-        InvalidationController.get(mContext).onRecentTabsPageClosed();
+        InvalidationController.get().onRecentTabsPageClosed();
     }
 
     private void registerForForeignSessionUpdates() {
@@ -159,7 +157,7 @@ public class RecentTabsManager implements AndroidSyncSettingsObserver, SignInSta
     }
 
     private void registerObservers() {
-        AndroidSyncSettings.registerObserver(mContext, this);
+        AndroidSyncSettings.registerObserver(this);
         mSignInManager.addSignInStateObserver(this);
 
         mProfileDataCache.addObserver(this);
@@ -225,7 +223,6 @@ public class RecentTabsManager implements AndroidSyncSettingsObserver, SignInSta
     public void openHistoryPage() {
         if (mIsDestroyed) return;
         HistoryManagerUtils.showHistoryManager(mTab.getActivity(), mTab);
-        StartupMetrics.getInstance().recordOpenedHistory();
     }
 
     /**
@@ -354,8 +351,7 @@ public class RecentTabsManager implements AndroidSyncSettingsObserver, SignInSta
             return PromoState.PROMO_SIGNIN_PERSONALIZED;
         }
 
-        if (AndroidSyncSettings.isSyncEnabled(mContext)
-                && AndroidSyncSettings.isChromeSyncEnabled(mContext)
+        if (AndroidSyncSettings.isSyncEnabled() && AndroidSyncSettings.isChromeSyncEnabled()
                 && !mForeignSessions.isEmpty()) {
             return PromoState.PROMO_NONE;
         }
@@ -383,15 +379,8 @@ public class RecentTabsManager implements AndroidSyncSettingsObserver, SignInSta
      * @param view The view to be configured.
      */
     void setupPersonalizedSigninPromo(PersonalizedSigninPromoView view) {
-        DisplayableProfileData profileData = null;
-        Account[] accounts = AccountManagerFacade.get().tryGetGoogleAccounts();
-        if (accounts.length > 0) {
-            String defaultAccountName = accounts[0].name;
-            mProfileDataCache.update(Collections.singletonList(defaultAccountName));
-            profileData = mProfileDataCache.getProfileDataOrDefault(defaultAccountName);
-        }
-        mSigninPromoController.detach();
-        mSigninPromoController.setupPromoView(mContext, view, profileData, null);
+        SigninPromoUtil.setupPromoViewFromCache(
+                mSigninPromoController, mProfileDataCache, view, null);
     }
 
     // SignInStateObserver implementation.

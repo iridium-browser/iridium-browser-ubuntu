@@ -30,10 +30,14 @@ import os
 import re
 import sys
 
+SCRIPT_PATH = os.path.abspath(os.path.dirname(__file__))
+
+
 class StreamLenState:
   START = 1
   FIND_STREAM = 2
   FIND_ENDSTREAM = 3
+
 
 class TemplateProcessor:
   HEADER_TOKEN = '{{header}}'
@@ -45,10 +49,10 @@ class TemplateProcessor:
   XREF_REPLACEMENT_N = '%010d %05d n \n'
   XREF_REPLACEMENT_F = '0000000000 65535 f \n'
   # XREF rows must be exactly 20 bytes - space required.
-  assert(len(XREF_REPLACEMENT_F) == 20)
+  assert len(XREF_REPLACEMENT_F) == 20
 
   TRAILER_TOKEN = '{{trailer}}'
-  TRAILER_REPLACEMENT = 'trailer<< /Root 1 0 R /Size %d >>'
+  TRAILER_REPLACEMENT = 'trailer <<\n  /Root 1 0 R\n  /Size %d\n>>'
 
   STARTXREF_TOKEN = '{{startxref}}'
   STARTXREF_REPLACEMENT = 'startxref\n%d'
@@ -230,7 +234,7 @@ class TemplateProcessor:
 
   def preprocess_line(self, line):
     if self.STREAMLEN_TOKEN in line:
-      assert(self.streamlen_state == StreamLenState.START)
+      assert self.streamlen_state == StreamLenState.START
       self.streamlen_state = StreamLenState.FIND_STREAM
       self.streamlens.append(0)
       return

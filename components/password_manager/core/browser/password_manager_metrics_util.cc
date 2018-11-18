@@ -149,7 +149,8 @@ void LogCredentialManagerGetResult(CredentialManagerGetResult result,
 void LogPasswordReuse(int password_length,
                       int saved_passwords,
                       int number_matches,
-                      bool password_field_detected) {
+                      bool password_field_detected,
+                      PasswordType reused_password_type) {
   UMA_HISTOGRAM_COUNTS_100("PasswordManager.PasswordReuse.PasswordLength",
                            password_length);
   UMA_HISTOGRAM_COUNTS_1000("PasswordManager.PasswordReuse.TotalPasswords",
@@ -160,19 +161,9 @@ void LogPasswordReuse(int password_length,
       "PasswordManager.PasswordReuse.PasswordFieldDetected",
       password_field_detected ? HAS_PASSWORD_FIELD : NO_PASSWORD_FIELD,
       PASSWORD_REUSE_PASSWORD_FIELD_DETECTED_COUNT);
-}
-
-void LogShowedHttpNotSecureExplanation() {
-  base::RecordAction(base::UserMetricsAction(
-      "PasswordManager_ShowedHttpNotSecureExplanation"));
-}
-
-void LogShowedFormNotSecureWarningOnCurrentNavigation() {
-  // Always record 'true': this is a counter of the number of times the warning
-  // is shown, to gather metrics such as the number of times the warning is
-  // shown per million page loads.
-  UMA_HISTOGRAM_BOOLEAN(
-      "PasswordManager.ShowedFormNotSecureWarningOnCurrentNavigation", true);
+  UMA_HISTOGRAM_ENUMERATION("PasswordManager.ReusedPasswordType",
+                            reused_password_type,
+                            PasswordType::PASSWORD_TYPE_COUNT);
 }
 
 void LogContextOfShowAllSavedPasswordsShown(
@@ -209,6 +200,17 @@ void LogSubmittedFormFrame(SubmittedFormFrame frame) {
                             SubmittedFormFrame::SUBMITTED_FORM_FRAME_COUNT);
 }
 
+void LogDeleteUndecryptableLoginsReturnValue(
+    DeleteCorruptedPasswordsResult result) {
+  UMA_HISTOGRAM_ENUMERATION(
+      "PasswordManager.DeleteUndecryptableLoginsReturnValue", result);
+}
+
+void LogDeleteCorruptedPasswordsResult(DeleteCorruptedPasswordsResult result) {
+  UMA_HISTOGRAM_ENUMERATION("PasswordManager.DeleteCorruptedPasswordsResult",
+                            result);
+}
+
 #if defined(SYNC_PASSWORD_REUSE_DETECTION_ENABLED)
 void LogSyncPasswordHashChange(SyncPasswordHashChange event) {
   UMA_HISTOGRAM_ENUMERATION(
@@ -216,11 +218,27 @@ void LogSyncPasswordHashChange(SyncPasswordHashChange event) {
       SyncPasswordHashChange::SAVED_SYNC_PASSWORD_CHANGE_COUNT);
 }
 
-void LogIsSyncPasswordHashSaved(IsSyncPasswordHashSaved state) {
+void LogIsSyncPasswordHashSaved(IsSyncPasswordHashSaved state,
+                                bool is_under_advanced_protection) {
   UMA_HISTOGRAM_ENUMERATION(
       "PasswordManager.IsSyncPasswordHashSaved", state,
       IsSyncPasswordHashSaved::IS_SYNC_PASSWORD_HASH_SAVED_COUNT);
+  if (is_under_advanced_protection) {
+    UMA_HISTOGRAM_ENUMERATION(
+        "PasswordManager.IsSyncPasswordHashSavedForAdvancedProtectionUser",
+        state, IsSyncPasswordHashSaved::IS_SYNC_PASSWORD_HASH_SAVED_COUNT);
+  }
 }
+
+void LogProtectedPasswordHashCounts(size_t gaia_hash_count,
+                                    size_t enterprise_hash_count) {
+  UMA_HISTOGRAM_COUNTS_100("PasswordManager.SavedGaiaPasswordHashCount",
+                           static_cast<int>(gaia_hash_count));
+  UMA_HISTOGRAM_COUNTS_100("PasswordManager.SavedEnterprisePasswordHashCount",
+                           static_cast<int>(enterprise_hash_count));
+}
+
+void LogProtectedPasswordReuse(PasswordType reused_password_type) {}
 #endif
 
 }  // namespace metrics_util

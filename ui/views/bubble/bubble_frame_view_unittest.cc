@@ -8,15 +8,19 @@
 
 #include "base/macros.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/time/time.h"
 #include "build/build_config.h"
-#include "ui/base/material_design/material_design_controller.h"
+#include "ui/events/base_event_utils.h"
+#include "ui/events/event.h"
 #include "ui/gfx/geometry/insets.h"
+#include "ui/gfx/geometry/point.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/text_utils.h"
 #include "ui/views/bubble/bubble_border.h"
-#include "ui/views/bubble/bubble_dialog_delegate.h"
+#include "ui/views/bubble/bubble_dialog_delegate_view.h"
 #include "ui/views/controls/button/label_button.h"
+#include "ui/views/metrics.h"
 #include "ui/views/test/test_layout_provider.h"
 #include "ui/views/test/test_views.h"
 #include "ui/views/test/views_test_base.h"
@@ -28,10 +32,6 @@ namespace views {
 typedef ViewsTestBase BubbleFrameViewTest;
 
 namespace {
-
-bool UseMd() {
-  return ui::MaterialDesignController::IsSecondaryUiMaterial();
-}
 
 const BubbleBorder::Arrow kArrow = BubbleBorder::TOP_LEFT;
 const SkColor kColor = SK_ColorRED;
@@ -50,7 +50,8 @@ const int kExpectedAdditionalHeight = 12;
 
 class TestBubbleFrameViewWidgetDelegate : public WidgetDelegate {
  public:
-  TestBubbleFrameViewWidgetDelegate(Widget* widget) : widget_(widget) {}
+  explicit TestBubbleFrameViewWidgetDelegate(Widget* widget)
+      : widget_(widget) {}
 
   ~TestBubbleFrameViewWidgetDelegate() override {}
 
@@ -77,35 +78,31 @@ class TestBubbleFrameViewWidgetDelegate : public WidgetDelegate {
   }
 
  private:
-  Widget* widget_;
+  Widget* const widget_;
   View* contents_view_ = nullptr;  // Owned by |widget_|.
   bool should_show_close_ = false;
 };
 
 class TestBubbleFrameView : public BubbleFrameView {
  public:
-  TestBubbleFrameView(ViewsTestBase* test_base)
+  explicit TestBubbleFrameView(ViewsTestBase* test_base)
       : BubbleFrameView(gfx::Insets(), gfx::Insets(kMargin)),
-        test_base_(test_base),
         available_bounds_(gfx::Rect(0, 0, 1000, 1000)) {
-    SetBubbleBorder(std::unique_ptr<BubbleBorder>(
-        new BubbleBorder(kArrow, BubbleBorder::NO_SHADOW, kColor)));
+    SetBubbleBorder(std::make_unique<BubbleBorder>(
+        kArrow, BubbleBorder::BIG_SHADOW, kColor));
+    widget_ = std::make_unique<Widget>();
+    widget_delegate_ =
+        std::make_unique<TestBubbleFrameViewWidgetDelegate>(widget_.get());
+    Widget::InitParams params =
+        test_base->CreateParams(Widget::InitParams::TYPE_BUBBLE);
+    params.delegate = widget_delegate_.get();
+    params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+    widget_->Init(params);
   }
   ~TestBubbleFrameView() override {}
 
   // View overrides:
   const Widget* GetWidget() const override {
-    if (!widget_) {
-      widget_.reset(new Widget);
-      widget_delegate_.reset(
-          new TestBubbleFrameViewWidgetDelegate(widget_.get()));
-      Widget::InitParams params =
-          test_base_->CreateParams(Widget::InitParams::TYPE_BUBBLE);
-      params.delegate = widget_delegate_.get();
-      params.ownership = Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
-      widget_->Init(params);
-    }
-
     return widget_.get();
   }
 
@@ -119,13 +116,10 @@ class TestBubbleFrameView : public BubbleFrameView {
   }
 
  private:
-  ViewsTestBase* test_base_;
+  const gfx::Rect available_bounds_;
 
-  gfx::Rect available_bounds_;
-
-  // Widget returned by GetWidget(). Only created if GetWidget() is called.
-  mutable std::unique_ptr<TestBubbleFrameViewWidgetDelegate> widget_delegate_;
-  mutable std::unique_ptr<Widget> widget_;
+  std::unique_ptr<TestBubbleFrameViewWidgetDelegate> widget_delegate_;
+  std::unique_ptr<Widget> widget_;
 
   DISALLOW_COPY_AND_ASSIGN(TestBubbleFrameView);
 };
@@ -159,9 +153,6 @@ TEST_F(BubbleFrameViewTest, RemoveFootnoteView) {
 
 TEST_F(BubbleFrameViewTest, GetBoundsForClientViewWithClose) {
   TestBubbleFrameView frame(this);
-  // TestBubbleFrameView::GetWidget() is responsible for creating the widget and
-  // widget delegate at first call, so it is called here for that side-effect.
-  ignore_result(frame.GetWidget());
   frame.widget_delegate()->SetShouldShowCloseButton(true);
   frame.ResetWindowControls();
   EXPECT_EQ(kArrow, frame.bubble_border()->arrow());
@@ -368,7 +359,7 @@ TEST_F(BubbleFrameViewTest, GetUpdatedWindowBoundsCenterArrows) {
   gfx::Rect window_bounds;
   // Bubbles have a thicker shadow on the bottom in MD.
   // Match definition of kLargeShadowVerticalOffset in bubble_border.cc.
-  const int kLargeShadowVerticalOffset = UseMd() ? 2 : 0;
+  constexpr int kLargeShadowVerticalOffset = 2;
 
   // Some of these tests may go away once --secondary-ui-md becomes the
   // default. Under Material Design mode, the BubbleBorder doesn't support all
@@ -376,16 +367,6 @@ TEST_F(BubbleFrameViewTest, GetUpdatedWindowBoundsCenterArrows) {
   // added for MD mode.
 
   // Test that the bubble displays normally when it fits.
-  if (!UseMd()) {  // TOP_CENTER isn't supported by the bubble_border() in MD.
-    frame.bubble_border()->set_arrow(BubbleBorder::TOP_CENTER);
-    window_bounds = frame.GetUpdatedWindowBounds(
-        gfx::Rect(500, 100, 50, 50),  // |anchor_rect|
-        gfx::Size(500, 500),          // |client_size|
-        true);                        // |adjust_if_offscreen|
-    EXPECT_EQ(BubbleBorder::TOP_CENTER, frame.bubble_border()->arrow());
-    EXPECT_EQ(window_bounds.x() + window_bounds.width() / 2, 525);
-  }
-
   frame.bubble_border()->set_arrow(BubbleBorder::BOTTOM_CENTER);
   window_bounds = frame.GetUpdatedWindowBounds(
       gfx::Rect(500, 900, 50, 50),  // |anchor_rect|
@@ -413,19 +394,6 @@ TEST_F(BubbleFrameViewTest, GetUpdatedWindowBoundsCenterArrows) {
             425 + kLargeShadowVerticalOffset);
 
   // Test bubble not fitting left screen edge.
-  if (!UseMd()) {  // TOP_CENTER isn't supported by the bubble_border() in MD.
-    frame.bubble_border()->set_arrow(BubbleBorder::TOP_CENTER);
-    window_bounds = frame.GetUpdatedWindowBounds(
-        gfx::Rect(100, 100, 50, 50),  // |anchor_rect|
-        gfx::Size(500, 500),          // |client_size|
-        true);                        // |adjust_if_offscreen|
-    EXPECT_EQ(BubbleBorder::TOP_CENTER, frame.bubble_border()->arrow());
-    EXPECT_EQ(window_bounds.x(), 0);
-    EXPECT_EQ(window_bounds.x() +
-                  frame.bubble_border()->GetArrowOffset(window_bounds.size()),
-              125);
-  }
-
   frame.bubble_border()->set_arrow(BubbleBorder::BOTTOM_CENTER);
   window_bounds = frame.GetUpdatedWindowBounds(
       gfx::Rect(100, 900, 50, 50),  // |anchor_rect|
@@ -433,26 +401,8 @@ TEST_F(BubbleFrameViewTest, GetUpdatedWindowBoundsCenterArrows) {
       true);                        // |adjust_if_offscreen|
   EXPECT_EQ(BubbleBorder::BOTTOM_CENTER, frame.bubble_border()->arrow());
   EXPECT_EQ(window_bounds.x(), 0);
-  if (!UseMd()) {  // There is no arrow offset in MD mode.
-    EXPECT_EQ(window_bounds.x() +
-                  frame.bubble_border()->GetArrowOffset(window_bounds.size()),
-              125);
-  }
 
   // Test bubble not fitting right screen edge.
-  if (!UseMd()) {  // TOP_CENTER isn't supported by the bubble_border() in MD.
-    frame.bubble_border()->set_arrow(BubbleBorder::TOP_CENTER);
-    window_bounds = frame.GetUpdatedWindowBounds(
-        gfx::Rect(900, 100, 50, 50),  // |anchor_rect|
-        gfx::Size(500, 500),          // |client_size|
-        true);                        // |adjust_if_offscreen|
-    EXPECT_EQ(BubbleBorder::TOP_CENTER, frame.bubble_border()->arrow());
-    EXPECT_EQ(window_bounds.right(), 1000);
-    EXPECT_EQ(window_bounds.x() +
-                  frame.bubble_border()->GetArrowOffset(window_bounds.size()),
-              925);
-  }
-
   frame.bubble_border()->set_arrow(BubbleBorder::BOTTOM_CENTER);
   window_bounds = frame.GetUpdatedWindowBounds(
       gfx::Rect(900, 900, 50, 50),  // |anchor_rect|
@@ -460,60 +410,6 @@ TEST_F(BubbleFrameViewTest, GetUpdatedWindowBoundsCenterArrows) {
       true);                        // |adjust_if_offscreen|
   EXPECT_EQ(BubbleBorder::BOTTOM_CENTER, frame.bubble_border()->arrow());
   EXPECT_EQ(window_bounds.right(), 1000);
-  if (!UseMd()) {  // There is no arrow offset in MD mode.
-    EXPECT_EQ(window_bounds.x() +
-                  frame.bubble_border()->GetArrowOffset(window_bounds.size()),
-              925);
-  }
-
-  // Test bubble not fitting top screen edge.
-  if (!UseMd()) {  // Moving the bubble by setting the arrow offset doesn't work
-                   // in MD mode since there is no arrow displayed.
-    frame.bubble_border()->set_arrow(BubbleBorder::LEFT_CENTER);
-    window_bounds = frame.GetUpdatedWindowBounds(
-        gfx::Rect(100, 100, 50, 50),  // |anchor_rect|
-        gfx::Size(500, 500),          // |client_size|
-        true);                        // |adjust_if_offscreen|
-    EXPECT_EQ(BubbleBorder::LEFT_CENTER, frame.bubble_border()->arrow());
-    EXPECT_EQ(window_bounds.y(), 0);
-    EXPECT_EQ(window_bounds.y() +
-                  frame.bubble_border()->GetArrowOffset(window_bounds.size()),
-              125);
-
-    frame.bubble_border()->set_arrow(BubbleBorder::RIGHT_CENTER);
-    window_bounds = frame.GetUpdatedWindowBounds(
-        gfx::Rect(900, 100, 50, 50),  // |anchor_rect|
-        gfx::Size(500, 500),          // |client_size|
-        true);                        // |adjust_if_offscreen|
-    EXPECT_EQ(BubbleBorder::RIGHT_CENTER, frame.bubble_border()->arrow());
-    EXPECT_EQ(window_bounds.y(), 0);
-    EXPECT_EQ(window_bounds.y() +
-                  frame.bubble_border()->GetArrowOffset(window_bounds.size()),
-              125);
-
-    // Test bubble not fitting bottom screen edge.
-    frame.bubble_border()->set_arrow(BubbleBorder::LEFT_CENTER);
-    window_bounds = frame.GetUpdatedWindowBounds(
-        gfx::Rect(100, 900, 50, 50),  // |anchor_rect|
-        gfx::Size(500, 500),          // |client_size|
-        true);                        // |adjust_if_offscreen|
-    EXPECT_EQ(BubbleBorder::LEFT_CENTER, frame.bubble_border()->arrow());
-    EXPECT_EQ(window_bounds.bottom(), 1000);
-    EXPECT_EQ(window_bounds.y() +
-                  frame.bubble_border()->GetArrowOffset(window_bounds.size()),
-              925);
-
-    frame.bubble_border()->set_arrow(BubbleBorder::RIGHT_CENTER);
-    window_bounds = frame.GetUpdatedWindowBounds(
-        gfx::Rect(900, 900, 50, 50),  // |anchor_rect|
-        gfx::Size(500, 500),          // |client_size|
-        true);                        // |adjust_if_offscreen|
-    EXPECT_EQ(BubbleBorder::RIGHT_CENTER, frame.bubble_border()->arrow());
-    EXPECT_EQ(window_bounds.bottom(), 1000);
-    EXPECT_EQ(window_bounds.y() +
-                  frame.bubble_border()->GetArrowOffset(window_bounds.size()),
-              925);
-  }
 }
 
 TEST_F(BubbleFrameViewTest, GetPreferredSize) {
@@ -615,7 +511,6 @@ class TestBubbleDialogDelegateView : public BubbleDialogDelegateView {
     destroyed_ = true;
   }
   int GetDialogButtons() const override { return ui::DIALOG_BUTTON_OK; }
-  gfx::Size GetMinimumSize() const override { return gfx::Size(); }
   gfx::Size CalculatePreferredSize() const override {
     return gfx::Size(200, 200);
   }
@@ -790,6 +685,7 @@ TEST_F(BubbleFrameViewTest, LayoutWithIcon) {
   delegate.SetAnchorView(anchor.widget().GetContentsView());
   SkBitmap bitmap;
   bitmap.allocN32Pixels(20, 80);
+  bitmap.eraseColor(SK_ColorYELLOW);
   delegate.set_icon(gfx::ImageSkia::CreateFrom1xBitmap(bitmap));
 
   Widget* widget = BubbleDialogDelegateView::CreateBubble(&delegate);
@@ -858,6 +754,30 @@ TEST_F(BubbleFrameViewTest, NoElideTitle) {
   EXPECT_LE(title_label->GetPreferredSize().width(),
             title_label->size().width());
   EXPECT_EQ(title, title_label->GetDisplayTextForTesting());
+}
+
+// Ensures that clicks are ignored for short time after view has been shown.
+TEST_F(BubbleFrameViewTest, IgnorePossiblyUnintendedClicks) {
+  TestBubbleDialogDelegateView delegate;
+  TestAnchor anchor(CreateParams(Widget::InitParams::TYPE_WINDOW));
+  delegate.SetAnchorView(anchor.widget().GetContentsView());
+  Widget* bubble = BubbleDialogDelegateView::CreateBubble(&delegate);
+  bubble->Show();
+
+  BubbleFrameView* frame = delegate.GetBubbleFrameView();
+  frame->ButtonPressed(
+      frame->close_,
+      ui::MouseEvent(ui::ET_MOUSE_PRESSED, gfx::Point(), gfx::Point(),
+                     ui::EventTimeForNow(), ui::EF_NONE, ui::EF_NONE));
+  EXPECT_FALSE(bubble->IsClosed());
+
+  frame->ButtonPressed(
+      frame->close_,
+      ui::MouseEvent(ui::ET_MOUSE_PRESSED, gfx::Point(), gfx::Point(),
+                     ui::EventTimeForNow() + base::TimeDelta::FromMilliseconds(
+                                                 GetDoubleClickInterval()),
+                     ui::EF_NONE, ui::EF_NONE));
+  EXPECT_TRUE(bubble->IsClosed());
 }
 
 }  // namespace views

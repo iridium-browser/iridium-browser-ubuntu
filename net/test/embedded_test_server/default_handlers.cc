@@ -41,12 +41,6 @@ namespace net {
 namespace test_server {
 namespace {
 
-const UnescapeRule::Type kUnescapeAll =
-    UnescapeRule::SPACES | UnescapeRule::PATH_SEPARATORS |
-    UnescapeRule::URL_SPECIAL_CHARS_EXCEPT_PATH_SEPARATORS |
-    UnescapeRule::SPOOFING_AND_CONTROL_CHARS |
-    UnescapeRule::REPLACE_PLUS_WITH_SPACE;
-
 const char kDefaultRealm[] = "testrealm";
 const char kDefaultPassword[] = "secret";
 const char kEtag[] = "abc";
@@ -146,6 +140,9 @@ std::unique_ptr<HttpResponse> HandleEchoTitle(const HttpRequest& request) {
 
 // /echoall?QUERY
 // Responds with the list of QUERY and the request headers.
+//
+// Alternative form:
+// /echoall/nocache?QUERY prevents caching of the response.
 std::unique_ptr<HttpResponse> HandleEchoAll(const HttpRequest& request) {
   std::unique_ptr<BasicHttpResponse> http_response(new BasicHttpResponse);
 
@@ -173,6 +170,13 @@ std::unique_ptr<HttpResponse> HandleEchoAll(const HttpRequest& request) {
 
   http_response->set_content_type("text/html");
   http_response->set_content(body);
+
+  if (base::EndsWith(request.GetURL().path_piece(), "/nocache",
+                     base::CompareCase::SENSITIVE)) {
+    http_response->AddCustomHeader("Cache-Control",
+                                   "no-cache, no-store, must-revalidate");
+  }
+
   return std::move(http_response);
 }
 
@@ -253,8 +257,10 @@ std::unique_ptr<HttpResponse> HandleExpectAndSetCookie(
   http_response->set_content_type("text/html");
   if (got_all_expected) {
     for (const auto& cookie : query_list.at("set")) {
-      http_response->AddCustomHeader(
-          "Set-Cookie", net::UnescapeURLComponent(cookie, kUnescapeAll));
+      std::string unescaped_cookie;
+      UnescapeBinaryURLComponent(cookie, UnescapeRule::REPLACE_PLUS_WITH_SPACE,
+                                 &unescaped_cookie);
+      http_response->AddCustomHeader("Set-Cookie", unescaped_cookie);
     }
   }
 
@@ -380,7 +386,7 @@ std::unique_ptr<HttpResponse> HandleAuthBasic(const HttpRequest& request) {
       base::FilePath().AppendASCII(request.relative_url.substr(1));
   if (file_path.FinalExtension() == FILE_PATH_LITERAL("gif")) {
     base::FilePath server_root;
-    PathService::Get(base::DIR_SOURCE_ROOT, &server_root);
+    base::PathService::Get(base::DIR_SOURCE_ROOT, &server_root);
     base::FilePath gif_path = server_root.AppendASCII(kLogoPath);
     std::string gif_data;
     base::ReadFileToString(gif_path, &gif_data);
@@ -503,8 +509,8 @@ std::unique_ptr<HttpResponse> HandleAuthDigest(const HttpRequest& request) {
 std::unique_ptr<HttpResponse> HandleServerRedirect(HttpStatusCode redirect_code,
                                                    const HttpRequest& request) {
   GURL request_url = request.GetURL();
-  std::string dest =
-      net::UnescapeURLComponent(request_url.query(), kUnescapeAll);
+  std::string dest;
+  UnescapeBinaryURLComponent(request_url.query(), &dest);
 
   std::unique_ptr<BasicHttpResponse> http_response(new BasicHttpResponse);
   http_response->set_code(redirect_code);
@@ -524,9 +530,11 @@ std::unique_ptr<HttpResponse> HandleCrossSiteRedirect(
   if (!ShouldHandle(request, "/cross-site"))
     return nullptr;
 
-  std::string dest_all = net::UnescapeURLComponent(
+  std::string dest_all;
+  UnescapeBinaryURLComponent(
+
       request.relative_url.substr(std::string("/cross-site").size() + 1),
-      kUnescapeAll);
+      &dest_all);
 
   std::string dest;
   size_t delimiter = dest_all.find("/");
@@ -550,8 +558,8 @@ std::unique_ptr<HttpResponse> HandleCrossSiteRedirect(
 // Returns a meta redirect to URL.
 std::unique_ptr<HttpResponse> HandleClientRedirect(const HttpRequest& request) {
   GURL request_url = request.GetURL();
-  std::string dest =
-      net::UnescapeURLComponent(request_url.query(), kUnescapeAll);
+  std::string dest;
+  UnescapeBinaryURLComponent(request_url.query(), &dest);
 
   std::unique_ptr<BasicHttpResponse> http_response(new BasicHttpResponse);
   http_response->set_content_type("text/html");
@@ -573,24 +581,6 @@ std::unique_ptr<HttpResponse> HandleDefaultResponse(
   return std::move(http_response);
 }
 
-// Delays |delay| seconds before sending a response to the client.
-class DelayedHttpResponse : public BasicHttpResponse {
- public:
-  explicit DelayedHttpResponse(double delay) : delay_(delay) {}
-
-  void SendResponse(const SendBytesCallback& send,
-                    const SendCompleteCallback& done) override {
-    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-        FROM_HERE, base::BindOnce(send, ToResponseString(), done),
-        base::TimeDelta::FromSecondsD(delay_));
-  }
-
- private:
-  const double delay_;
-
-  DISALLOW_COPY_AND_ASSIGN(DelayedHttpResponse);
-};
-
 // /slow?N
 // Returns a response to the server delayed by N seconds.
 std::unique_ptr<HttpResponse> HandleSlowServer(const HttpRequest& request) {
@@ -601,7 +591,7 @@ std::unique_ptr<HttpResponse> HandleSlowServer(const HttpRequest& request) {
     delay = std::atof(request_url.query().c_str());
 
   std::unique_ptr<BasicHttpResponse> http_response(
-      new DelayedHttpResponse(delay));
+      new DelayedHttpResponse(base::TimeDelta::FromSecondsD(delay)));
   http_response->set_content_type("text/plain");
   http_response->set_content(base::StringPrintf("waited %.1f seconds", delay));
   return std::move(http_response);

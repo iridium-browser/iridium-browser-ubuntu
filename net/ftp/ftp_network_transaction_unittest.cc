@@ -16,6 +16,7 @@
 #include "net/ftp/ftp_request_info.h"
 #include "net/socket/socket_test_util.h"
 #include "net/test/gtest_util.h"
+#include "net/test/test_with_scoped_task_environment.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -756,9 +757,9 @@ class FtpSocketDataProviderEvilLogin
   DISALLOW_COPY_AND_ASSIGN(FtpSocketDataProviderEvilLogin);
 };
 
-class FtpNetworkTransactionTest
-    : public PlatformTest,
-      public ::testing::WithParamInterface<int> {
+class FtpNetworkTransactionTest : public PlatformTest,
+                                  public ::testing::WithParamInterface<int>,
+                                  public WithScopedTaskEnvironment {
  public:
   FtpNetworkTransactionTest() : host_resolver_(new MockHostResolver) {
     SetUpTransaction();
@@ -815,8 +816,8 @@ class FtpNetworkTransactionTest
     };
 
     std::unique_ptr<StaticSocketDataProvider> data_socket =
-        std::make_unique<StaticSocketDataProvider>(
-            data_reads, arraysize(data_reads), nullptr, 0);
+        std::make_unique<StaticSocketDataProvider>(data_reads,
+                                                   base::span<MockWrite>());
     mock_socket_factory_->AddSocketDataProvider(data_socket.get());
     FtpRequestInfo request_info = GetRequestInfo(request);
     EXPECT_EQ(LOAD_STATE_IDLE, transaction_->GetLoadState());
@@ -827,7 +828,8 @@ class FtpNetworkTransactionTest
     EXPECT_NE(LOAD_STATE_IDLE, transaction_->GetLoadState());
     ASSERT_EQ(expected_result, callback_.WaitForResult());
     if (expected_result == OK) {
-      scoped_refptr<IOBuffer> io_buffer(new IOBuffer(kBufferSize));
+      scoped_refptr<IOBuffer> io_buffer =
+          base::MakeRefCounted<IOBuffer>(kBufferSize);
       memset(io_buffer->data(), 0, kBufferSize);
       ASSERT_EQ(ERR_IO_PENDING, transaction_->Read(io_buffer.get(), kBufferSize,
                                                    callback_.callback()));
@@ -1136,8 +1138,7 @@ TEST_P(FtpNetworkTransactionTest, DownloadTransactionEvilPasvUnsafeHost) {
     MockRead(mock_data.c_str()),
   };
   StaticSocketDataProvider data_socket1;
-  StaticSocketDataProvider data_socket2(data_reads, arraysize(data_reads),
-                                        nullptr, 0);
+  StaticSocketDataProvider data_socket2(data_reads, base::span<MockWrite>());
   mock_socket_factory_->AddSocketDataProvider(&ctrl_socket);
   mock_socket_factory_->AddSocketDataProvider(&data_socket1);
   mock_socket_factory_->AddSocketDataProvider(&data_socket2);
@@ -1160,8 +1161,8 @@ TEST_P(FtpNetworkTransactionTest, DownloadTransactionEvilPasvUnsafeHost) {
   // Even if the PASV response specified some other address, we connect
   // to the address we used for control connection (which could be 127.0.0.1
   // or ::1 depending on whether we use IPv6).
-  for (AddressList::const_iterator it = data_socket->addresses().begin();
-      it != data_socket->addresses().end(); ++it) {
+  for (auto it = data_socket->addresses().begin();
+       it != data_socket->addresses().end(); ++it) {
     EXPECT_NE("10.1.2.3", it->ToStringWithoutPort());
   }
 }
@@ -1354,8 +1355,7 @@ TEST_P(FtpNetworkTransactionTest, EvilRestartUser) {
   MockWrite ctrl_writes[] = {
     MockWrite("QUIT\r\n"),
   };
-  StaticSocketDataProvider ctrl_socket2(ctrl_reads, arraysize(ctrl_reads),
-                                        ctrl_writes, arraysize(ctrl_writes));
+  StaticSocketDataProvider ctrl_socket2(ctrl_reads, ctrl_writes);
   mock_socket_factory_->AddSocketDataProvider(&ctrl_socket2);
   ASSERT_EQ(ERR_IO_PENDING,
             transaction_->RestartWithAuth(
@@ -1390,8 +1390,7 @@ TEST_P(FtpNetworkTransactionTest, EvilRestartPassword) {
     MockWrite("USER innocent\r\n"),
     MockWrite("QUIT\r\n"),
   };
-  StaticSocketDataProvider ctrl_socket2(ctrl_reads, arraysize(ctrl_reads),
-                                        ctrl_writes, arraysize(ctrl_writes));
+  StaticSocketDataProvider ctrl_socket2(ctrl_reads, ctrl_writes);
   mock_socket_factory_->AddSocketDataProvider(&ctrl_socket2);
   ASSERT_EQ(ERR_IO_PENDING,
             transaction_->RestartWithAuth(

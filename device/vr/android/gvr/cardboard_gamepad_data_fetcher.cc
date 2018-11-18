@@ -26,7 +26,7 @@ void CopyToUString(UChar* dest, size_t dest_length, base::string16 src) {
 
 CardboardGamepadDataFetcher::Factory::Factory(
     CardboardGamepadDataProvider* data_provider,
-    unsigned int display_id)
+    device::mojom::XRDeviceId display_id)
     : data_provider_(data_provider), display_id_(display_id) {
   DVLOG(1) << __FUNCTION__ << "=" << this;
 }
@@ -47,7 +47,7 @@ GamepadSource CardboardGamepadDataFetcher::Factory::source() {
 
 CardboardGamepadDataFetcher::CardboardGamepadDataFetcher(
     CardboardGamepadDataProvider* data_provider,
-    unsigned int display_id)
+    device::mojom::XRDeviceId display_id)
     : display_id_(display_id) {
   // Called on UI thread.
   DVLOG(1) << __FUNCTION__ << "=" << this;
@@ -93,12 +93,12 @@ void CardboardGamepadDataFetcher::GetGamepadData(bool devices_changed_hint) {
     pad.buttons_length = 1;
     pad.axes_length = 0;
 
-    pad.display_id = display_id_;
+    pad.display_id = static_cast<unsigned int>(display_id_);
 
     pad.hand = GamepadHand::kNone;
   }
 
-  pad.timestamp = provided_data.timestamp;
+  pad.timestamp = CurrentTimeInMicroseconds();
 
   bool pressed = provided_data.is_screen_touching;
   pad.buttons[0].touched = pressed;

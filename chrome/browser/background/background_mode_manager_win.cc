@@ -7,8 +7,9 @@
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
+#include "base/sequenced_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "base/win/registry.h"
 #include "chrome/browser/background/background_mode_manager.h"
 #include "chrome/common/chrome_switches.h"
@@ -50,13 +51,9 @@ void BackgroundModeManager::DisplayClientInstalledNotification(
                                  kAppInstalledNotifierId));
 }
 
-base::string16 BackgroundModeManager::GetPreferencesMenuLabel() {
-  return l10n_util::GetStringUTF16(IDS_OPTIONS);
-}
-
 scoped_refptr<base::SequencedTaskRunner>
 BackgroundModeManager::CreateTaskRunner() {
   return base::CreateSequencedTaskRunnerWithTraits(
-      {base::MayBlock(), base::TaskPriority::BACKGROUND,
+      {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
        base::TaskShutdownBehavior::BLOCK_SHUTDOWN});
 }

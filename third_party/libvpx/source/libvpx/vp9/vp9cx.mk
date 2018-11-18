@@ -64,6 +64,7 @@ VP9_CX_SRCS-yes += encoder/vp9_ratectrl.c
 VP9_CX_SRCS-yes += encoder/vp9_rd.c
 VP9_CX_SRCS-yes += encoder/vp9_rdopt.c
 VP9_CX_SRCS-yes += encoder/vp9_pickmode.c
+VP9_CX_SRCS-yes += encoder/vp9_partition_models.h
 VP9_CX_SRCS-yes += encoder/vp9_segmentation.c
 VP9_CX_SRCS-yes += encoder/vp9_segmentation.h
 VP9_CX_SRCS-yes += encoder/vp9_speed_features.c
@@ -139,6 +140,8 @@ VP9_CX_SRCS-$(HAVE_MSA) += encoder/mips/msa/vp9_fdct4x4_msa.c
 VP9_CX_SRCS-$(HAVE_MSA) += encoder/mips/msa/vp9_fdct8x8_msa.c
 VP9_CX_SRCS-$(HAVE_MSA) += encoder/mips/msa/vp9_fdct16x16_msa.c
 VP9_CX_SRCS-$(HAVE_MSA) += encoder/mips/msa/vp9_fdct_msa.h
+
+VP9_CX_SRCS-$(HAVE_VSX) += encoder/ppc/vp9_quantize_vsx.c
 
 # Strip unnecessary files with CONFIG_REALTIME_ONLY
 VP9_CX_SRCS_REMOVE-$(CONFIG_REALTIME_ONLY) += encoder/vp9_firstpass.c

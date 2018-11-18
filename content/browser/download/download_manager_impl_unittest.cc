@@ -72,7 +72,7 @@ namespace {
 class MockDownloadManagerDelegate : public DownloadManagerDelegate {
  public:
   MockDownloadManagerDelegate();
-  virtual ~MockDownloadManagerDelegate();
+  ~MockDownloadManagerDelegate() override;
 
   MOCK_METHOD0(Shutdown, void());
   MOCK_METHOD1(GetNextId, void(const DownloadIdCallback&));
@@ -119,10 +119,6 @@ class MockDownloadItemFactory
   // we don't keep dangling pointers.
   void RemoveItem(int id);
 
-  // Sets |has_observer_calls_| to reflect whether we expect to add/remove
-  // observers during the CreateActiveItem.
-  void SetHasObserverCalls(bool observer_calls);
-
   // Overridden methods from DownloadItemFactory.
   download::DownloadItemImpl* CreatePersistedItem(
       download::DownloadItemImplDelegate* delegate,
@@ -165,16 +161,20 @@ class MockDownloadItemFactory
       std::unique_ptr<download::DownloadRequestHandleInterface> request_handle)
       override;
 
+  void set_is_download_started(bool is_download_started) {
+    is_download_started_ = is_download_started;
+  }
+
  private:
   std::map<uint32_t, download::MockDownloadItemImpl*> items_;
   download::DownloadItemImplDelegate item_delegate_;
-  bool has_observer_calls_;
+  bool is_download_started_;
 
   DISALLOW_COPY_AND_ASSIGN(MockDownloadItemFactory);
 };
 
 MockDownloadItemFactory::MockDownloadItemFactory()
-    : has_observer_calls_(false) {}
+    : is_download_started_(false) {}
 
 MockDownloadItemFactory::~MockDownloadItemFactory() {}
 
@@ -188,8 +188,7 @@ download::MockDownloadItemImpl* MockDownloadItemFactory::PopItem() {
   if (items_.empty())
     return nullptr;
 
-  std::map<uint32_t, download::MockDownloadItemImpl*>::iterator first_item =
-      items_.begin();
+  auto first_item = items_.begin();
   download::MockDownloadItemImpl* result = first_item->second;
   items_.erase(first_item);
   return result;
@@ -198,10 +197,6 @@ download::MockDownloadItemImpl* MockDownloadItemFactory::PopItem() {
 void MockDownloadItemFactory::RemoveItem(int id) {
   DCHECK(items_.find(id) != items_.end());
   items_.erase(id);
-}
-
-void MockDownloadItemFactory::SetHasObserverCalls(bool has_observer_calls) {
-  has_observer_calls_ = has_observer_calls;
 }
 
 download::DownloadItemImpl* MockDownloadItemFactory::CreatePersistedItem(
@@ -253,17 +248,15 @@ download::DownloadItemImpl* MockDownloadItemFactory::CreateActiveItem(
       .WillRepeatedly(Return(download_id));
   EXPECT_CALL(*result, GetGuid())
       .WillRepeatedly(ReturnRefOfCopy(base::GenerateGUID()));
+  if (is_download_started_) {
+    EXPECT_CALL(*result, RemoveObserver(_));
+    EXPECT_CALL(*result, AddObserver(_));
+  }
   items_[download_id] = result;
 
   // Active items are created and then immediately are called to start
   // the download.
   EXPECT_CALL(*result, MockStart(_, _));
-
-  // In the StartDownload case, expect the remove/add observer calls.
-  if (has_observer_calls_) {
-    EXPECT_CALL(*result, RemoveObserver(_));
-    EXPECT_CALL(*result, AddObserver(_));
-  }
 
   return result;
 }
@@ -291,7 +284,7 @@ class MockDownloadFileFactory
       public base::SupportsWeakPtr<MockDownloadFileFactory> {
  public:
   MockDownloadFileFactory() {}
-  virtual ~MockDownloadFileFactory() {}
+  ~MockDownloadFileFactory() override {}
 
   // Overridden method from DownloadFileFactory
   MOCK_METHOD2(MockCreateFile,
@@ -311,7 +304,7 @@ class MockDownloadFileFactory
 class MockDownloadManagerObserver : public DownloadManager::Observer {
  public:
   MockDownloadManagerObserver() {}
-  ~MockDownloadManagerObserver() {}
+  ~MockDownloadManagerObserver() override {}
   MOCK_METHOD2(OnDownloadCreated,
                void(DownloadManager*, download::DownloadItem*));
   MOCK_METHOD1(ManagerGoingDown, void(DownloadManager*));
@@ -320,11 +313,41 @@ class MockDownloadManagerObserver : public DownloadManager::Observer {
 
 class MockByteStreamReader : public ByteStreamReader {
  public:
-  virtual ~MockByteStreamReader() {}
+  ~MockByteStreamReader() override {}
   MOCK_METHOD2(Read, StreamState(scoped_refptr<net::IOBuffer>*, size_t*));
   MOCK_CONST_METHOD0(GetStatus, int());
   MOCK_METHOD1(RegisterCallback, void(const base::Closure&));
 };
+
+class TestInProgressManager : public download::InProgressDownloadManager {
+ public:
+  TestInProgressManager();
+  ~TestInProgressManager() override = default;
+
+  std::vector<std::unique_ptr<download::DownloadItemImpl>>
+  TakeInProgressDownloads() override;
+
+  void AddDownloadItem(std::unique_ptr<download::DownloadItemImpl> item);
+
+ private:
+  std::vector<std::unique_ptr<download::DownloadItemImpl>> download_items_;
+};
+
+TestInProgressManager::TestInProgressManager()
+    : download::InProgressDownloadManager(
+          nullptr,
+          base::FilePath(),
+          download::InProgressDownloadManager::IsOriginSecureCallback()) {}
+
+void TestInProgressManager::AddDownloadItem(
+    std::unique_ptr<download::DownloadItemImpl> item) {
+  download_items_.emplace_back(std::move(item));
+}
+
+std::vector<std::unique_ptr<download::DownloadItemImpl>>
+TestInProgressManager::TakeInProgressDownloads() {
+  return std::move(download_items_);
+}
 
 }  // namespace
 
@@ -456,14 +479,20 @@ class DownloadManagerTest : public testing::Test {
             base::Unretained(this)));
   }
 
-  void SetHasObserverCalls(bool has_observer_calls) {
-    mock_download_item_factory_->SetHasObserverCalls(has_observer_calls);
+  void OnInProgressDownloadManagerInitialized() {
+    download_manager_->OnInProgressDownloadManagerInitialized();
+  }
+
+  void SetInProgressDownloadManager(
+      std::unique_ptr<download::InProgressDownloadManager> manager) {
+    download_manager_->in_progress_manager_ = std::move(manager);
   }
 
  protected:
   // Key test variable; we'll keep it available to sub-classes.
   std::unique_ptr<DownloadManagerImpl> download_manager_;
   base::WeakPtr<MockDownloadFileFactory> mock_download_file_factory_;
+  base::WeakPtr<MockDownloadItemFactory> mock_download_item_factory_;
 
   // Target detetermined callback.
   bool callback_called_;
@@ -477,7 +506,6 @@ class DownloadManagerTest : public testing::Test {
 
  private:
   TestBrowserThreadBundle thread_bundle_;
-  base::WeakPtr<MockDownloadItemFactory> mock_download_item_factory_;
   std::unique_ptr<MockDownloadManagerDelegate> mock_download_manager_delegate_;
   std::unique_ptr<MockDownloadManagerObserver> observer_;
   std::unique_ptr<TestBrowserContext> browser_context_;
@@ -488,13 +516,12 @@ class DownloadManagerTest : public testing::Test {
 
 // Confirm the appropriate invocations occur when you start a download.
 TEST_F(DownloadManagerTest, StartDownload) {
-  SetHasObserverCalls(true);
-
   std::unique_ptr<download::DownloadCreateInfo> info(
       new download::DownloadCreateInfo);
   std::unique_ptr<ByteStreamReader> stream(new MockByteStreamReader);
   uint32_t local_id(5);  // Random value
   base::FilePath download_path(FILE_PATH_LITERAL("download/path"));
+  OnInProgressDownloadManagerInitialized();
 
   EXPECT_FALSE(download_manager_->GetDownload(local_id));
 
@@ -517,12 +544,11 @@ TEST_F(DownloadManagerTest, StartDownload) {
               MockCreateFile(Ref(*info->save_info.get()), input_stream.get()))
       .WillOnce(Return(mock_file));
 
+  mock_download_item_factory_->set_is_download_started(true);
   download_manager_->StartDownload(
       std::move(info), std::move(input_stream), nullptr,
       download::DownloadUrlParameters::OnStartedCallback());
   EXPECT_TRUE(download_manager_->GetDownload(local_id));
-
-  SetHasObserverCalls(false);
 }
 
 // Confirm that calling DetermineDownloadTarget behaves properly if the delegate
@@ -620,6 +646,36 @@ TEST_F(DownloadManagerTest, RemoveDownloadsByURL) {
   int remove_count = download_manager_->RemoveDownloadsByURLAndTime(
       std::move(url_filter), base::Time(), base::Time::Max());
   EXPECT_EQ(remove_count, 1);
+}
+
+// Confirm that in-progress downloads will be taken and managed by
+// DownloadManager.
+TEST_F(DownloadManagerTest, OnInProgressDownloadsLoaded) {
+  auto in_progress_manager = std::make_unique<TestInProgressManager>();
+  const char kGuid[] = "8DF158E8-C980-4618-BB03-EBA3242EB48B";
+  auto in_progress_item = std::make_unique<download::DownloadItemImpl>(
+      in_progress_manager.get(), kGuid, 10, base::FilePath(), base::FilePath(),
+      std::vector<GURL>(), GURL("http://example.com/a"),
+      GURL("http://example.com/a"), GURL("http://example.com/a"),
+      GURL("http://example.com/a"), "application/octet-stream",
+      "application/octet-stream", base::Time::Now(), base::Time::Now(),
+      std::string(), std::string(), 10, 10, std::string(),
+      download::DownloadItem::INTERRUPTED,
+      download::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS,
+      download::DOWNLOAD_INTERRUPT_REASON_SERVER_FAILED, false,
+      base::Time::Now(), true,
+      std::vector<download::DownloadItem::ReceivedSlice>());
+  in_progress_manager->AddDownloadItem(std::move(in_progress_item));
+  SetInProgressDownloadManager(std::move(in_progress_manager));
+  EXPECT_CALL(GetMockObserver(), OnDownloadCreated(download_manager_.get(), _))
+      .WillOnce(Return());
+  OnInProgressDownloadManagerInitialized();
+  ASSERT_TRUE(download_manager_->GetDownloadByGuid(kGuid));
+
+  download::DownloadItem* download =
+      download_manager_->GetDownloadByGuid(kGuid);
+  download->Remove();
+  ASSERT_FALSE(download_manager_->GetDownloadByGuid(kGuid));
 }
 
 }  // namespace content

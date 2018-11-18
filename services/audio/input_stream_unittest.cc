@@ -12,7 +12,7 @@
 #include "media/audio/audio_io.h"
 #include "media/audio/mock_audio_manager.h"
 #include "media/audio/test_audio_thread.h"
-#include "mojo/edk/embedder/embedder.h"
+#include "mojo/core/embedder/embedder.h"
 #include "mojo/public/cpp/bindings/associated_binding.h"
 #include "services/audio/stream_factory.h"
 #include "services/audio/test/mock_log.h"
@@ -103,6 +103,7 @@ class MockStream : public media::AudioInputStream {
   MOCK_METHOD1(SetAutomaticGainControl, bool(bool));
   MOCK_METHOD0(GetAutomaticGainControl, bool());
   MOCK_METHOD0(IsMuted, bool());
+  MOCK_METHOD1(SetOutputDeviceForAec, void(const std::string&));
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockStream);
@@ -118,17 +119,17 @@ class AudioServiceInputStreamTest : public testing::Test {
         stream_factory_binding_(&stream_factory_,
                                 mojo::MakeRequest(&stream_factory_ptr_)) {}
 
-  ~AudioServiceInputStreamTest() { audio_manager_.Shutdown(); }
+  ~AudioServiceInputStreamTest() override { audio_manager_.Shutdown(); }
 
   void SetUp() override {
-    mojo::edk::SetDefaultProcessErrorCallback(
+    mojo::core::SetDefaultProcessErrorCallback(
         base::BindRepeating(&AudioServiceInputStreamTest::BadMessageCallback,
                             base::Unretained(this)));
   }
 
   void TearDown() override {
-    mojo::edk::SetDefaultProcessErrorCallback(
-        mojo::edk::ProcessErrorCallback());
+    mojo::core::SetDefaultProcessErrorCallback(
+        mojo::core::ProcessErrorCallback());
   }
 
   media::mojom::AudioInputStreamPtr CreateStream(bool enable_agc) {
@@ -137,7 +138,34 @@ class AudioServiceInputStreamTest : public testing::Test {
         mojo::MakeRequest(&stream_ptr), client_.MakePtr(), observer_.MakePtr(),
         log_.MakePtr(), kDefaultDeviceId,
         media::AudioParameters::UnavailableDeviceParams(),
-        kDefaultSharedMemoryCount, enable_agc,
+        kDefaultSharedMemoryCount, enable_agc, mojo::ScopedSharedBufferHandle(),
+        nullptr,
+        base::BindOnce(&AudioServiceInputStreamTest::OnCreated,
+                       base::Unretained(this)));
+    return stream_ptr;
+  }
+
+  media::mojom::AudioInputStreamPtr CreateStreamWithNullptrLog() {
+    media::mojom::AudioInputStreamPtr stream_ptr;
+    stream_factory_ptr_->CreateInputStream(
+        mojo::MakeRequest(&stream_ptr), client_.MakePtr(), observer_.MakePtr(),
+        nullptr, kDefaultDeviceId,
+        media::AudioParameters::UnavailableDeviceParams(),
+        kDefaultSharedMemoryCount, false, mojo::ScopedSharedBufferHandle(),
+        nullptr,
+        base::BindOnce(&AudioServiceInputStreamTest::OnCreated,
+                       base::Unretained(this)));
+    return stream_ptr;
+  }
+
+  media::mojom::AudioInputStreamPtr CreateStreamWithNullptrObserver() {
+    media::mojom::AudioInputStreamPtr stream_ptr;
+    stream_factory_ptr_->CreateInputStream(
+        mojo::MakeRequest(&stream_ptr), client_.MakePtr(), nullptr,
+        log_.MakePtr(), kDefaultDeviceId,
+        media::AudioParameters::UnavailableDeviceParams(),
+        kDefaultSharedMemoryCount, false, mojo::ScopedSharedBufferHandle(),
+        nullptr,
         base::BindOnce(&AudioServiceInputStreamTest::OnCreated,
                        base::Unretained(this)));
     return stream_ptr;
@@ -151,7 +179,10 @@ class AudioServiceInputStreamTest : public testing::Test {
 
   MockLog& log() { return log_; }
 
-  void OnCreated(media::mojom::AudioDataPipePtr ptr, bool initially_muted) {
+  void OnCreated(media::mojom::ReadOnlyAudioDataPipePtr ptr,
+                 bool initially_muted,
+                 const base::Optional<base::UnguessableToken>& stream_id) {
+    EXPECT_EQ(stream_id.has_value(), !!ptr);
     CreatedCallback(!!ptr, initially_muted);
   }
 
@@ -189,6 +220,48 @@ TEST_F(AudioServiceInputStreamTest, ConstructDestruct) {
   EXPECT_CALL(log(), OnClosed());
   EXPECT_CALL(client(), BindingConnectionError());
   EXPECT_CALL(observer(), BindingConnectionError());
+  stream_ptr.reset();
+  base::RunLoop().RunUntilIdle();
+}
+
+TEST_F(AudioServiceInputStreamTest, ConstructDestructNullptrLog) {
+  NiceMock<MockStream> mock_stream;
+  audio_manager().SetMakeInputStreamCB(base::BindRepeating(
+      [](media::AudioInputStream* stream, const media::AudioParameters& params,
+         const std::string& device_id) { return stream; },
+      &mock_stream));
+
+  EXPECT_CALL(mock_stream, Open()).WillOnce(Return(true));
+  EXPECT_CALL(mock_stream, IsMuted()).WillOnce(Return(kNotMuted));
+  EXPECT_CALL(*this, CreatedCallback(kValidStream, kNotMuted));
+  media::mojom::AudioInputStreamPtr stream_ptr = CreateStreamWithNullptrLog();
+  base::RunLoop().RunUntilIdle();
+
+  EXPECT_CALL(mock_stream, Close());
+  EXPECT_CALL(client(), BindingConnectionError());
+  EXPECT_CALL(observer(), BindingConnectionError());
+  stream_ptr.reset();
+  base::RunLoop().RunUntilIdle();
+}
+
+TEST_F(AudioServiceInputStreamTest, ConstructDestructNullptrObserver) {
+  NiceMock<MockStream> mock_stream;
+  audio_manager().SetMakeInputStreamCB(base::BindRepeating(
+      [](media::AudioInputStream* stream, const media::AudioParameters& params,
+         const std::string& device_id) { return stream; },
+      &mock_stream));
+
+  EXPECT_CALL(mock_stream, Open()).WillOnce(Return(true));
+  EXPECT_CALL(mock_stream, IsMuted()).WillOnce(Return(kNotMuted));
+  EXPECT_CALL(log(), OnCreated(_, _));
+  EXPECT_CALL(*this, CreatedCallback(kValidStream, kNotMuted));
+  media::mojom::AudioInputStreamPtr stream_ptr =
+      CreateStreamWithNullptrObserver();
+  base::RunLoop().RunUntilIdle();
+
+  EXPECT_CALL(mock_stream, Close());
+  EXPECT_CALL(log(), OnClosed());
+  EXPECT_CALL(client(), BindingConnectionError());
   stream_ptr.reset();
   base::RunLoop().RunUntilIdle();
 }

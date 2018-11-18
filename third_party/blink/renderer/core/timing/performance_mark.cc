@@ -3,21 +3,31 @@
 // found in the LICENSE file.
 #include "third_party/blink/renderer/core/timing/performance_mark.h"
 
+#include "third_party/blink/renderer/bindings/core/v8/script_value.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/serialized_script_value.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/serialized_script_value_factory.h"
+#include "third_party/blink/renderer/core/performance_entry_names.h"
 
 namespace blink {
 
 PerformanceMark::PerformanceMark(ScriptState* script_state,
-                                 const String& name,
+                                 const AtomicString& name,
                                  double start_time,
                                  const ScriptValue& detail)
-    : PerformanceEntry(name, "mark", start_time, start_time) {
+    : PerformanceEntry(name, start_time, start_time) {
   world_ = WrapRefCounted(&script_state->World());
   if (detail.IsEmpty() || detail.IsNull() || detail.IsUndefined()) {
     return;
   }
   detail_.Set(detail.GetIsolate(), detail.V8Value());
+}
+
+AtomicString PerformanceMark::entryType() const {
+  return PerformanceEntryNames::mark;
+}
+
+PerformanceEntryType PerformanceMark::EntryTypeEnum() const {
+  return PerformanceEntry::EntryType::kMark;
 }
 
 ScriptValue PerformanceMark::detail(ScriptState* script_state) const {
@@ -36,13 +46,8 @@ ScriptValue PerformanceMark::detail(ScriptState* script_state) const {
 }
 
 void PerformanceMark::Trace(blink::Visitor* visitor) {
+  visitor->Trace(detail_);
   PerformanceEntry::Trace(visitor);
-}
-
-void PerformanceMark::TraceWrappers(
-    const ScriptWrappableVisitor* visitor) const {
-  visitor->TraceWrappers(detail_);
-  PerformanceEntry::TraceWrappers(visitor);
 }
 
 }  // namespace blink

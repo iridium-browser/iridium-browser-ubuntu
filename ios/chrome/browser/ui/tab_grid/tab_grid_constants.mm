@@ -24,6 +24,7 @@ NSString* const kTabGridIncognitoTabsEmptyStateIdentifier =
     @"TabGridIncognitoTabsEmptyStateIdentifier";
 NSString* const kTabGridRegularTabsEmptyStateIdentifier =
     @"TabGridRegularTabsEmptyStateIdentifier";
+NSString* const kTabGridScrollViewIdentifier = @"kTabGridScrollViewIdentifier";
 
 // The color of the text buttons in the toolbars.
 const int kTabGridToolbarTextButtonColor = 0xFFFFFF;
@@ -43,9 +44,14 @@ extern const CGFloat kTabGridEmptyStateVerticalInset = 17.0f;
 extern const CGFloat kTabGridEmptyStateHorizontalInset = 80.0f;
 
 // The insets from the edges for the floating button.
-const CGFloat kTabGridFloatingButtonVerticalInset = 10.0f;
-const CGFloat kTabGridFloatingButtonHorizontalInset = 10.0f;
+const CGFloat kTabGridFloatingButtonVerticalInsetSmall = 28.0f;
+const CGFloat kTabGridFloatingButtonVerticalInsetLarge = 56.0f;
+const CGFloat kTabGridFloatingButtonHorizontalInset = 20.0f;
 
 // Intrinsic heights of the tab grid toolbars.
 const CGFloat kTabGridTopToolbarHeight = 52.0f;
 const CGFloat kTabGridBottomToolbarHeight = 44.0f;
+
+// The delay (in milliseconds) after closing the last incognito tab and before
+// automatically scrolling to the regular tabs panel.
+const int64_t kTabGridScrollAnimationDelayInMilliseconds = 300;

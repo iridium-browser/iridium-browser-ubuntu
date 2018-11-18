@@ -116,6 +116,12 @@ base::android::ScopedJavaLocalRef<jobject> CompositorView::GetResourceManager(
   return compositor_->GetResourceManager().GetJavaObject();
 }
 
+void CompositorView::RecreateSurface() {
+  JNIEnv* env = base::android::AttachCurrentThread();
+  compositor_->SetSurface(nullptr);
+  Java_CompositorView_recreateSurface(env, obj_);
+}
+
 void CompositorView::UpdateLayerTreeHost() {
   JNIEnv* env = base::android::AttachCurrentThread();
   // TODO(wkorman): Rename JNI interface to onCompositorUpdateLayerTreeHost.
@@ -127,9 +133,11 @@ void CompositorView::DidSwapFrame(int pending_frames) {
   Java_CompositorView_didSwapFrame(env, obj_, pending_frames);
 }
 
-void CompositorView::DidSwapBuffers() {
+void CompositorView::DidSwapBuffers(const gfx::Size& swap_size) {
   JNIEnv* env = base::android::AttachCurrentThread();
-  Java_CompositorView_didSwapBuffers(env, obj_);
+  bool swapped_current_size =
+      swap_size == gfx::Size(content_width_, content_height_);
+  Java_CompositorView_didSwapBuffers(env, obj_, swapped_current_size);
 }
 
 ui::UIResourceProvider* CompositorView::GetUIResourceProvider() {
@@ -249,25 +257,18 @@ void CompositorView::SetNeedsComposite(JNIEnv* env,
   compositor_->SetNeedsComposite();
 }
 
-void CompositorView::BrowserChildProcessHostDisconnected(
-    const content::ChildProcessData& data) {
-  LOG(WARNING) << "Child process disconnected (type=" << data.process_type
-               << ") pid=" << data.handle << ")";
+void CompositorView::BrowserChildProcessKilled(
+    const content::ChildProcessData& data,
+    const content::ChildProcessTerminationInfo& info) {
+  LOG(WARNING) << "Child process died (type=" << data.process_type
+               << ") pid=" << data.GetHandle() << ")";
   if (base::android::BuildInfo::GetInstance()->sdk_int() <=
           base::android::SDK_VERSION_JELLY_BEAN_MR2 &&
       data.process_type == content::PROCESS_TYPE_GPU) {
     JNIEnv* env = base::android::AttachCurrentThread();
     compositor_->SetSurface(nullptr);
-    Java_CompositorView_onJellyBeanSurfaceDisconnectWorkaround(
-        env, obj_, overlay_video_mode_);
+    Java_CompositorView_recreateSurface(env, obj_);
   }
-}
-
-void CompositorView::BrowserChildProcessCrashed(
-    const content::ChildProcessData& data,
-    int exit_code) {
-  // The Android TERMINATION_STATUS_OOM_PROTECTED hack causes us to never go
-  // through here but through BrowserChildProcessHostDisconnected() instead.
 }
 
 void CompositorView::SetCompositorWindow(

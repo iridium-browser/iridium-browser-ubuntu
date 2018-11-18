@@ -22,6 +22,7 @@ from pylib.utils import dexdump
 from pylib.utils import instrumentation_tracing
 from pylib.utils import proguard
 from pylib.utils import shared_preference_utils
+from pylib.utils import test_filter
 
 
 with host_paths.SysPath(host_paths.BUILD_COMMON_PATH):
@@ -35,8 +36,8 @@ _COMMAND_LINE_PARAMETER = 'cmdlinearg-parameter'
 _DEFAULT_ANNOTATIONS = [
     'SmallTest', 'MediumTest', 'LargeTest', 'EnormousTest', 'IntegrationTest']
 _EXCLUDE_UNLESS_REQUESTED_ANNOTATIONS = [
-    'DisabledTest', 'FlakyTest']
-_VALID_ANNOTATIONS = set(['Manual'] + _DEFAULT_ANNOTATIONS +
+    'DisabledTest', 'FlakyTest', 'Manual']
+_VALID_ANNOTATIONS = set(_DEFAULT_ANNOTATIONS +
                          _EXCLUDE_UNLESS_REQUESTED_ANNOTATIONS)
 
 # These test methods are inherited from android.test base test class and
@@ -62,8 +63,6 @@ _TEST_LIST_JUNIT4_RUNNERS = [
 _SKIP_PARAMETERIZATION = 'SkipCommandLineParameterization'
 _COMMANDLINE_PARAMETERIZATION = 'CommandLineParameter'
 _NATIVE_CRASH_RE = re.compile('(process|native) crash', re.IGNORECASE)
-_CMDLINE_NAME_SEGMENT_RE = re.compile(
-    r' with(?:out)? \{[^\}]*\}')
 _PICKLE_FORMAT_VERSION = 12
 
 
@@ -181,7 +180,7 @@ def GenerateTestResults(
   return results
 
 
-def FilterTests(tests, test_filter=None, annotations=None,
+def FilterTests(tests, filter_str=None, annotations=None,
                 excluded_annotations=None):
   """Filter a list of tests
 
@@ -189,7 +188,7 @@ def FilterTests(tests, test_filter=None, annotations=None,
     tests: a list of tests. e.g. [
            {'annotations": {}, 'class': 'com.example.TestA', 'method':'test1'},
            {'annotations": {}, 'class': 'com.example.TestB', 'method':'test2'}]
-    test_filter: googletest-style filter string.
+    filter_str: googletest-style filter string.
     annotations: a dict of wanted annotations for test methods.
     exclude_annotations: a dict of annotations to exclude.
 
@@ -197,7 +196,7 @@ def FilterTests(tests, test_filter=None, annotations=None,
     A list of filtered tests
   """
   def gtest_filter(t):
-    if not test_filter:
+    if not filter_str:
       return True
     # Allow fully-qualified name as well as an omitted package.
     unqualified_class_test = {
@@ -216,7 +215,7 @@ def FilterTests(tests, test_filter=None, annotations=None,
           GetTestNameWithoutParameterPostfix(unqualified_class_test, sep='.')
       ]
 
-    pattern_groups = test_filter.split('-')
+    pattern_groups = filter_str.split('-')
     if len(pattern_groups) > 1:
       negative_filter = pattern_groups[1]
       if unittest_util.FilterTestNames(names, negative_filter):
@@ -385,9 +384,9 @@ class MissingJUnit4RunnerException(test_exception.TestException):
 class UnmatchedFilterException(test_exception.TestException):
   """Raised when a user specifies a filter that doesn't match any tests."""
 
-  def __init__(self, test_filter):
+  def __init__(self, filter_str):
     super(UnmatchedFilterException, self).__init__(
-        'Test filter "%s" matched no tests.' % test_filter)
+        'Test filter "%s" matched no tests.' % filter_str)
 
 
 def GetTestName(test, sep='#'):
@@ -568,15 +567,15 @@ class InstrumentationTestInstance(test_instance.TestInstance):
     self._test_package = self._test_apk.GetPackageName()
     all_instrumentations = self._test_apk.GetAllInstrumentations()
     all_junit3_runner_classes = [
-        x for x in all_instrumentations if ('0xffffffff' not in x.get(
-            'chromium-junit4', ''))]
-    all_junit4_test_runner_classes = [
         x for x in all_instrumentations if ('0xffffffff' in x.get(
-            'chromium-junit4', ''))]
+            'chromium-junit3', ''))]
+    all_junit4_runner_classes = [
+        x for x in all_instrumentations if ('0xffffffff' not in x.get(
+            'chromium-junit3', ''))]
 
     if len(all_junit3_runner_classes) > 1:
       logging.warning('This test apk has more than one JUnit3 instrumentation')
-    if len(all_junit4_test_runner_classes) > 1:
+    if len(all_junit4_runner_classes) > 1:
       logging.warning('This test apk has more than one JUnit4 instrumentation')
 
     self._junit3_runner_class = (
@@ -584,8 +583,8 @@ class InstrumentationTestInstance(test_instance.TestInstance):
       if all_junit3_runner_classes else self.test_apk.GetInstrumentationName())
 
     self._junit4_runner_class = (
-      all_junit4_test_runner_classes[0]['android:name']
-      if all_junit4_test_runner_classes else None)
+      all_junit4_runner_classes[0]['android:name']
+      if all_junit4_runner_classes else None)
 
     if self._junit4_runner_class:
       if self._test_apk_incremental_install_json:
@@ -622,9 +621,7 @@ class InstrumentationTestInstance(test_instance.TestInstance):
       logging.warning('No data dependencies will be pushed.')
 
   def _initializeTestFilterAttributes(self, args):
-    if args.test_filter:
-      self._test_filter = _CMDLINE_NAME_SEGMENT_RE.sub(
-          '', args.test_filter.replace('#', '.'))
+    self._test_filter = test_filter.InitializeFilterFromArgs(args)
 
     def annotation_element(a):
       a = a.split('=', 1)
@@ -685,8 +682,7 @@ class InstrumentationTestInstance(test_instance.TestInstance):
     self._enable_java_deobfuscation = args.enable_java_deobfuscation
     self._store_tombstones = args.store_tombstones
     self._symbolizer = stack_symbolizer.Symbolizer(
-        self.apk_under_test.path if self.apk_under_test else None,
-        args.non_native_packed_relocations)
+        self.apk_under_test.path if self.apk_under_test else None)
 
   def _initializeEditPrefsAttributes(self, args):
     if not hasattr(args, 'shared_prefs_file') or not args.shared_prefs_file:

@@ -7,9 +7,6 @@
 
 namespace switches {
 
-// Enable scroll prediction for scroll update events.
-const char kEnableScrollPrediction[] = "enable-scroll-prediction";
-
 // Enable compensation for unstable pinch zoom. Some touch screens display
 // significant amount of wobble when moving a finger in a straight line. This
 // makes two finger scroll trigger an oscillating pinch zoom. See
@@ -39,6 +36,10 @@ const char kTouchCalibration[] = "touch-calibration";
 
 // Tells Chrome to do edge touch filtering. Useful for convertible tablet.
 const char kEdgeTouchFiltering[] = "edge-touch-filtering";
+
+// Tells Chrome to do filter out low pressure touches, as from a pencil. Should
+// only be used if the driver level filtering is insufficient.
+const char kLowPressureTouchFiltering[] = "low-pressure-touch-filtering";
 #endif
 
 }  // namespace switches

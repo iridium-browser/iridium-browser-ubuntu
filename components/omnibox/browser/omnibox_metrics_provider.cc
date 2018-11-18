@@ -56,7 +56,7 @@ OmniboxEventProto::Suggestion::ResultType AsOmniboxEventResultType(
       return OmniboxEventProto::Suggestion::CALCULATOR;
     case AutocompleteMatchType::SEARCH_OTHER_ENGINE:
       return OmniboxEventProto::Suggestion::SEARCH_OTHER_ENGINE;
-    case AutocompleteMatchType::EXTENSION_APP:
+    case AutocompleteMatchType::EXTENSION_APP_DEPRECATED:
       return OmniboxEventProto::Suggestion::EXTENSION_APP;
     case AutocompleteMatchType::BOOKMARK_TITLE:
       return OmniboxEventProto::Suggestion::BOOKMARK_TITLE;
@@ -64,14 +64,18 @@ OmniboxEventProto::Suggestion::ResultType AsOmniboxEventResultType(
       return OmniboxEventProto::Suggestion::NAVSUGGEST_PERSONALIZED;
     case AutocompleteMatchType::CLIPBOARD:
       return OmniboxEventProto::Suggestion::CLIPBOARD;
-    case AutocompleteMatchType::PHYSICAL_WEB:
-      return OmniboxEventProto::Suggestion::PHYSICAL_WEB;
-    case AutocompleteMatchType::PHYSICAL_WEB_OVERFLOW:
-      return OmniboxEventProto::Suggestion::PHYSICAL_WEB_OVERFLOW;
+    case AutocompleteMatchType::DOCUMENT_SUGGESTION:
+      return OmniboxEventProto::Suggestion::DOCUMENT;
+    case AutocompleteMatchType::PEDAL:
+      // TODO(orinj): Add a new OmniboxEventProto type for Pedals.
+      // return OmniboxEventProto::Suggestion::PEDAL;
+      return OmniboxEventProto::Suggestion::NAVSUGGEST;
     case AutocompleteMatchType::VOICE_SUGGEST:
       // VOICE_SUGGEST matches are only used in Java and are not logged,
       // so we should never reach this case.
     case AutocompleteMatchType::CONTACT_DEPRECATED:
+    case AutocompleteMatchType::PHYSICAL_WEB_DEPRECATED:
+    case AutocompleteMatchType::PHYSICAL_WEB_OVERFLOW_DEPRECATED:
     case AutocompleteMatchType::TAB_SEARCH_DEPRECATED:
     case AutocompleteMatchType::NUM_TYPES:
       break;
@@ -154,8 +158,7 @@ void OmniboxMetricsProvider::RecordOmniboxOpenedURL(const OmniboxLog& log) {
   omnibox_event->set_is_popup_open(log.is_popup_open && !log.is_paste_and_go);
   omnibox_event->set_is_paste_and_go(log.is_paste_and_go);
 
-  for (AutocompleteResult::const_iterator i(log.result.begin());
-       i != log.result.end(); ++i) {
+  for (auto i(log.result.begin()); i != log.result.end(); ++i) {
     OmniboxEventProto::Suggestion* suggestion = omnibox_event->add_suggestion();
     const auto provider_type = i->provider->AsOmniboxEventProviderType();
     suggestion->set_provider(provider_type);
@@ -167,8 +170,7 @@ void OmniboxMetricsProvider::RecordOmniboxOpenedURL(const OmniboxLog& log) {
       suggestion->set_result_subtype_identifier(i->subtype_identifier);
     suggestion->set_has_tab_match(i->has_tab_match);
   }
-  for (ProvidersInfo::const_iterator i(log.providers_info.begin());
-       i != log.providers_info.end(); ++i) {
+  for (auto i(log.providers_info.begin()); i != log.providers_info.end(); ++i) {
     OmniboxEventProto::ProviderInfo* provider_info =
         omnibox_event->add_provider_info();
     provider_info->CopyFrom(*i);

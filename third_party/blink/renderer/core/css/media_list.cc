@@ -20,10 +20,10 @@
 #include "third_party/blink/renderer/core/css/media_list.h"
 
 #include <memory>
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
 #include "third_party/blink/renderer/core/css/css_style_sheet.h"
 #include "third_party/blink/renderer/core/css/media_query_exp.h"
 #include "third_party/blink/renderer/core/css/parser/media_query_parser.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
 namespace blink {
@@ -90,7 +90,7 @@ bool MediaQuerySet::Add(const String& query_string) {
 
   // If comparing with any of the media queries in the collection of media
   // queries returns true terminate these steps.
-  for (size_t i = 0; i < queries_.size(); ++i) {
+  for (wtf_size_t i = 0; i < queries_.size(); ++i) {
     MediaQuery& query = *queries_[i];
     if (query == *new_query)
       return false;
@@ -117,7 +117,7 @@ bool MediaQuerySet::Remove(const String& query_string_to_remove) {
   // Remove any media query from the collection of media queries for which
   // comparing with the media query returns true.
   bool found = false;
-  for (size_t i = 0; i < queries_.size(); ++i) {
+  for (wtf_size_t i = 0; i < queries_.size(); ++i) {
     MediaQuery& query = *queries_[i];
     if (query == *new_query) {
       queries_.EraseAt(i);
@@ -139,7 +139,7 @@ String MediaQuerySet::MediaText() const {
   StringBuilder text;
 
   bool first = true;
-  for (size_t i = 0; i < queries_.size(); ++i) {
+  for (wtf_size_t i = 0; i < queries_.size(); ++i) {
     if (!first)
       text.Append(", ");
     else
@@ -184,7 +184,7 @@ void MediaList::deleteMedium(const String& medium,
 
   bool success = media_queries_->Remove(medium);
   if (!success) {
-    exception_state.ThrowDOMException(kNotFoundError,
+    exception_state.ThrowDOMException(DOMExceptionCode::kNotFoundError,
                                       "Failed to delete '" + medium + "'.");
     return;
   }

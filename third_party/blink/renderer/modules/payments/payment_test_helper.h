@@ -6,7 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_PAYMENTS_PAYMENT_TEST_HELPER_H_
 
 #include "testing/gmock/include/gmock/gmock.h"
-#include "third_party/blink/public/platform/modules/payments/payment_request.mojom-blink.h"
+#include "third_party/blink/public/mojom/payments/payment_request.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_function.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_dom_exception.h"
 #include "third_party/blink/renderer/modules/payments/payment_details_init.h"
@@ -42,7 +42,6 @@ enum PaymentTestDataToChange {
   kPaymentTestDataLabel,
   kPaymentTestDataAmount,
   kPaymentTestDataCurrencyCode,
-  kPaymentTestDataCurrencySystem,
   kPaymentTestDataValue,
 };
 
@@ -109,7 +108,7 @@ class PaymentRequestMockFunctionScope {
     String* value_;
   };
 
-  ScriptState* script_state_;
+  Member<ScriptState> script_state_;
   Vector<Persistent<MockFunction>> mock_functions_;
 };
 

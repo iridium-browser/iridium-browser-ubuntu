@@ -7,12 +7,14 @@
 
 #include "base/callback.h"
 #include "base/containers/flat_map.h"
+#include "base/gtest_prod_util.h"
 #include "base/macros.h"
+#include "base/no_destructor.h"
 #include "base/observer_list.h"
+#include "base/process/kill.h"
 #include "base/sequence_checker.h"
 #include "base/strings/string16.h"
-
-class ResourceCoordinatorWebContentsObserver;
+#include "chrome/browser/resource_coordinator/lifecycle_unit_state.mojom.h"
 
 namespace content {
 class WebContents;
@@ -20,6 +22,7 @@ class WebContents;
 
 namespace resource_coordinator {
 
+class ResourceCoordinatorTabHelper;
 class TabManagerResourceCoordinatorSignalObserverHelper;
 
 // This class has the sole purpose of tracking the state of all tab-related
@@ -33,13 +36,12 @@ class TabManagerResourceCoordinatorSignalObserverHelper;
 // thread.
 //
 // This class is intended to be created in early startup and persists as a
-// singleton in the browser process, owned by the TabManager. It is deliberately
-// leaked at shutdown.
+// singleton in the browser process. It is deliberately leaked at shutdown.
 //
 // This class isn't directly an observer of anything. An external source must
 // invoke the callbacks in the protected section of the class. In the case of
 // the TabManager this is done by a combination of the
-// ResourceCoordinatorWebContentsObserver and the
+// ResourceCoordinatorTabHelper and the
 // TabManagerResourceCoordinatorSignalObserver.
 class TabLoadTracker {
  public:
@@ -47,35 +49,33 @@ class TabLoadTracker {
   // state changes.
   class Observer;
 
-  // Indicates the loading state of a WebContents.
-  enum LoadingState {
-    // An initially constructed WebContents with no loaded content is UNLOADED.
-    // A WebContents that started loading but that errored out before receiving
-    // sufficient content to render is also considered UNLOADED.
-    // Can only transition from here to LOADING.
-    UNLOADED,
-    // A WebContents with an ongoing main-frame navigation (to a new document)
-    // is in a loading state. More precisely, it is considered loading once
-    // network data has started to be transmitted, and not simply when the
-    // navigation has started. This considers throttled navigations as not yet
-    // loading, and will only transition to loading once the throttle has been
-    // removed.
-    // Can transition from here to UNLOADED or LOADED.
-    LOADING,
-    // A WebContents with a committed navigation whose
-    // DidStopLoading/PageAlmostIdle event (depending on mode) or DidFailLoad
-    // event has fired is no longer considered to be LOADING. If any content has
-    // been rendered prior to the failure the document is considered LOADED,
-    // otherwise it is considered UNLOADED.
-    // Can transition from here to LOADING.
-    LOADED,
+  using LoadingState = ::mojom::LifecycleUnitLoadingState;
 
-    // This must be last.
-    LOADING_STATE_MAX
-  };
+  // A brief note around loading states specifically as they are defined in the
+  // context of a WebContents:
+  //
+  // An initially constructed WebContents with no loaded content is UNLOADED.
+  // A WebContents that started loading but that errored out before receiving
+  // sufficient content to render is also considered UNLOADED. Can only
+  // transition from UNLOADED to LOADING.
+  //
+  // A WebContents with an ongoing main-frame navigation (to a new document)
+  // is in a loading state. More precisely, it is considered loading once
+  // network data has started to be transmitted, and not simply when the
+  // navigation has started. This considers throttled navigations as not yet
+  // loading, and will only transition to loading once the throttle has been
+  // removed. Can transition from LOADING to UNLOADED or LOADED.
+  //
+  // A WebContents with a committed navigation whose DidStopLoading/
+  // PageAlmostIdle event (depending on mode) or DidFailLoad event has fired is
+  // no longer considered to be LOADING. If any content has been rendered prior
+  // to the failure the document is considered LOADED, otherwise it is
+  // considered UNLOADED. Can transition from LOADED to LOADING.
 
-  TabLoadTracker();
   ~TabLoadTracker();
+
+  // Returns the singleton TabLoadTracker instance.
+  static TabLoadTracker* Get();
 
   // Allows querying the state of a tab. The provided |web_contents| must be
   // actively tracked.
@@ -90,17 +90,49 @@ class TabLoadTracker {
   size_t GetLoadingTabCount() const;
   size_t GetLoadedTabCount() const;
 
+  // Returns the total number of UI tabs that are being tracked by this class.
+  // Some WebContents being tracked by this class may not yet be associated with
+  // a UI tab, e.g. prerender contents. To exclude these tabs from counts, use
+  // the Get*UiTabCount() methods.
+  size_t GetUiTabCount() const;
+
+  // Returns the number of UI tabs in each state.
+  size_t GetUiTabCount(LoadingState loading_state) const;
+  size_t GetUnloadedUiTabCount() const;
+  size_t GetLoadingUiTabCount() const;
+  size_t GetLoadedUiTabCount() const;
+
   // Adds/removes an observer. It is up to the observer to ensure their lifetime
   // exceeds that of the TabLoadTracker, as is removed prior to its destruction.
   void AddObserver(Observer* observer);
   void RemoveObserver(Observer* observer);
 
+  // Exposed so that state transitions can be simulated in tests.
+  void TransitionStateForTesting(content::WebContents* web_contents,
+                                 LoadingState loading_state);
+
+  // Called from CoreTabHelperDelegates when |new_contents| is replacing
+  // |old_contents| in a tab.
+  void SwapTabContents(content::WebContents* old_contents,
+                       content::WebContents* new_contents);
+
  protected:
-  // This allows the various bits of TabManager plubming to forward
-  // notifications to the TabLoadTracker.
-  friend class ::ResourceCoordinatorWebContentsObserver;
+  // This allows the singleton constructor access to the protected constructor.
+  friend class base::NoDestructor<TabLoadTracker>;
+
+  // For unittesting.
+  friend class LocalSiteCharacteristicsWebContentsObserverTest;
+
+  // These declarations allows the various bits of TabManager plumbing to
+  // forward notifications to the TabLoadTracker.
+  friend class resource_coordinator::ResourceCoordinatorTabHelper;
   friend class ::resource_coordinator::
       TabManagerResourceCoordinatorSignalObserverHelper;
+
+  FRIEND_TEST_ALL_PREFIXES(TabLifecycleUnitTest, CannotFreezeAFrozenTab);
+
+  // This class is a singleton so the constructor is protected.
+  TabLoadTracker();
 
   // Initiates tracking of a WebContents. This is fully able to determine the
   // initial state of the WebContents, even if it was created long ago
@@ -118,11 +150,21 @@ class TabLoadTracker {
   void DidReceiveResponse(content::WebContents* web_contents);
   void DidStopLoading(content::WebContents* web_contents);
   void DidFailLoad(content::WebContents* web_contents);
+  void RenderProcessGone(content::WebContents* web_contents,
+                         base::TerminationStatus status);
 
   // This is an analog of a PageSignalObserver function. This class is not
   // actually a PageSignalObserver, but these notifications are forwarded to it
   // from the TabManager.
   void OnPageAlmostIdle(content::WebContents* web_contents);
+
+  // Returns true if |web_contents| is a UI tab and false otherwise. This is
+  // used to filter out cases where tab helpers are attached to a non-UI tab
+  // WebContents, e.g prerender contents.
+  //
+  // This is virtual and protected for unittesting to control when web
+  // contentses are considered ui tabs.
+  virtual bool IsUiTab(content::WebContents* web_contents);
 
  private:
   // For unittesting.
@@ -130,8 +172,9 @@ class TabLoadTracker {
 
   // Some metadata used to track the current state of the WebContents.
   struct WebContentsData {
-    LoadingState loading_state = UNLOADED;
+    LoadingState loading_state = LoadingState::UNLOADED;
     bool did_start_loading_seen = false;
+    bool is_ui_tab = false;
   };
 
   using TabMap = base::flat_map<content::WebContents*, WebContentsData>;
@@ -144,16 +187,25 @@ class TabLoadTracker {
   void MaybeTransitionToLoaded(content::WebContents* web_contents);
 
   // Transitions a web contents to the given state. This updates the various
-  // |state_counts_| and |tabs_| data.
-  void TransitionState(TabMap::iterator it, LoadingState loading_state);
+  // |state_counts_| and |tabs_| data. Setting |validate_transition| to false
+  // means that valid state machine transitions aren't enforced via checks; this
+  // is only used by state transitions forced via TransitionStateForTesting.
+  void TransitionState(TabMap::iterator it,
+                       LoadingState loading_state,
+                       bool validate_transition);
 
-  // The list of known WebContents and their states.
+  // The list of known WebContents and their states. This includes both UI and
+  // non-UI tabs.
   TabMap tabs_;
 
   // The counts of tabs in each state.
-  size_t state_counts_[LOADING_STATE_MAX] = {0};
+  size_t state_counts_[static_cast<size_t>(LoadingState::kMaxValue) + 1] = {0};
 
-  base::ObserverList<Observer> observers_;
+  // The counts of UI tabs in each state.
+  size_t ui_tab_state_counts_[static_cast<size_t>(LoadingState::kMaxValue) +
+                              1] = {0};
+
+  base::ObserverList<Observer>::Unchecked observers_;
 
   SEQUENCE_CHECKER(sequence_checker_);
 
@@ -176,7 +228,8 @@ class TabLoadTracker::Observer {
 
   // Called for every loading state change observed on a |web_contents|.
   virtual void OnLoadingStateChange(content::WebContents* web_contents,
-                                    LoadingState loading_state) {}
+                                    LoadingState old_loading_state,
+                                    LoadingState new_loading_state) {}
 
   // Called when a |web_contents| is no longer being tracked.
   virtual void OnStopTracking(content::WebContents* web_contents,

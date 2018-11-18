@@ -6,10 +6,13 @@
 
 #include <utility>
 
+#include "base/bind.h"
 #include "base/callback.h"
 #include "base/critical_closure.h"
-#import "base/mac/bind_objc_block.h"
+#include "base/mac/bundle_locations.h"
+#include "base/mac/foundation_util.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/task/post_task.h"
 #include "components/feature_engagement/public/event_constants.h"
 #include "components/feature_engagement/public/tracker.h"
 #include "components/metrics/metrics_service.h"
@@ -36,16 +39,19 @@
 #import "ios/chrome/browser/ui/authentication/signed_in_accounts_view_controller.h"
 #include "ios/chrome/browser/ui/background_generator.h"
 #import "ios/chrome/browser/ui/browser_view_controller.h"
+#import "ios/chrome/browser/ui/commands/application_commands.h"
 #import "ios/chrome/browser/ui/commands/browser_commands.h"
 #import "ios/chrome/browser/ui/commands/open_new_tab_command.h"
 #import "ios/chrome/browser/ui/main/browser_view_information.h"
 #import "ios/chrome/browser/ui/safe_mode/safe_mode_coordinator.h"
+#include "ios/chrome/browser/ui/ui_util.h"
 #include "ios/net/cookies/cookie_store_ios.h"
 #include "ios/net/cookies/system_cookie_util.h"
 #include "ios/public/provider/chrome/browser/chrome_browser_provider.h"
 #include "ios/public/provider/chrome/browser/distribution/app_distribution_provider.h"
 #import "ios/public/provider/chrome/browser/user_feedback/user_feedback_provider.h"
 #include "ios/web/net/request_tracker_impl.h"
+#include "ios/web/public/web_task_traits.h"
 #include "net/url_request/url_request_context.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -55,7 +61,7 @@
 namespace {
 // Helper method to post |closure| on the UI thread.
 void PostTaskOnUIThread(base::OnceClosure closure) {
-  web::WebThread::PostTask(web::WebThread::UI, FROM_HERE, std::move(closure));
+  base::PostTaskWithTraits(FROM_HERE, {web::WebThread::UI}, std::move(closure));
 }
 NSString* const kStartupAttemptReset = @"StartupAttempReset";
 }  // namespace
@@ -77,9 +83,6 @@ NSString* const kStartupAttemptReset = @"StartupAttempReset";
   base::TimeTicks _sessionStartTime;
   // YES if the app is currently in the process of terminating.
   BOOL _appIsTerminating;
-  // Indicates if an NTP tab should be opened once the application has become
-  // active.
-  BOOL _shouldOpenNTPTabOnActive;
   // Interstitial view used to block any incognito tabs after backgrounding.
   UIView* _incognitoBlocker;
   // Whether the application is currently in the background.
@@ -151,7 +154,7 @@ initWithBrowserLauncher:(id<BrowserLauncher>)browserLauncher
 
 - (void)applicationDidEnterBackground:(UIApplication*)application
                          memoryHelper:(MemoryWarningHelper*)memoryHelper
-                  tabSwitcherIsActive:(BOOL)tabSwitcherIsActive {
+              incognitoContentVisible:(BOOL)incognitoContentVisible {
   if ([self isInSafeMode]) {
     // Force a crash when backgrounding and in safe mode, so users don't get
     // stuck in safe mode.
@@ -189,19 +192,24 @@ initWithBrowserLauncher:(id<BrowserLauncher>)browserLauncher
   // If the current BVC is incognito, or if we are in the tab switcher and there
   // are incognito tabs visible, place a full screen view containing the
   // switcher background to hide any incognito content.
-  if (([[_browserLauncher browserViewInformation] currentBrowserState] &&
-       [[_browserLauncher browserViewInformation] currentBrowserState]
-           ->IsOffTheRecord()) ||
-      (tabSwitcherIsActive &&
-       ![[[_browserLauncher browserViewInformation] otrTabModel] isEmpty])) {
-    // Cover the largest area potentially shown in the app switcher, in case the
-    // screenshot is reused in a different orientation or size class.
+  if (incognitoContentVisible) {
+    // Cover the largest area potentially shown in the app switcher, in case
+    // the screenshot is reused in a different orientation or size class.
     CGRect screenBounds = [[UIScreen mainScreen] bounds];
     CGFloat maxDimension =
         std::max(CGRectGetWidth(screenBounds), CGRectGetHeight(screenBounds));
     _incognitoBlocker = [[UIView alloc]
         initWithFrame:CGRectMake(0, 0, maxDimension, maxDimension)];
-    InstallBackgroundInView(_incognitoBlocker);
+    NSBundle* mainBundle = base::mac::FrameworkBundle();
+    NSArray* topObjects =
+        [mainBundle loadNibNamed:@"LaunchScreen" owner:self options:nil];
+    UIViewController* launchScreenController =
+        base::mac::ObjCCastStrict<UIViewController>([topObjects lastObject]);
+    [_incognitoBlocker addSubview:[launchScreenController view]];
+    [launchScreenController view].autoresizingMask =
+        UIViewAutoresizingFlexibleHeight | UIViewAutoresizingFlexibleWidth;
+    _incognitoBlocker.autoresizingMask =
+        UIViewAutoresizingFlexibleHeight | UIViewAutoresizingFlexibleWidth;
     [_window addSubview:_incognitoBlocker];
   }
 
@@ -214,19 +222,18 @@ initWithBrowserLauncher:(id<BrowserLauncher>)browserLauncher
         [[_browserLauncher browserViewInformation] currentBVC]
             .browserState->GetRequestContext();
     _savingCookies = YES;
-    base::OnceClosure criticalClosure =
-        base::MakeCriticalClosure(base::BindBlockArc(^{
+    __block base::OnceClosure criticalClosure =
+        base::MakeCriticalClosure(base::BindOnce(^{
           DCHECK_CURRENTLY_ON(web::WebThread::UI);
           _savingCookies = NO;
         }));
-    base::Closure post_back_to_ui =
-        base::Bind(&PostTaskOnUIThread, base::Passed(&criticalClosure));
-    web::WebThread::PostTask(
-        web::WebThread::IO, FROM_HERE, base::BindBlockArc(^{
+    base::PostTaskWithTraits(
+        FROM_HERE, {web::WebThread::IO}, base::BindOnce(^{
           net::CookieStoreIOS* store = static_cast<net::CookieStoreIOS*>(
               getter->GetURLRequestContext()->cookie_store());
           // FlushStore() runs its callback on any thread. Jump back to UI.
-          store->FlushStore(post_back_to_ui);
+          store->FlushStore(
+              base::BindOnce(&PostTaskOnUIThread, std::move(criticalClosure)));
         }));
   }
 
@@ -283,17 +290,6 @@ initWithBrowserLauncher:(id<BrowserLauncher>)browserLauncher
                                                  browserViewInformation]];
   [memoryHelper resetForegroundMemoryWarningCount];
 
-  // Check if a NTP tab should be opened; the tab will actually be opened in
-  // |applicationDidBecomeActive| after the application gets prepared to
-  // record user actions.
-  // TODO(crbug.com/623491): opening a tab when the application is launched
-  // without a tab should not be counted as a user action. Revisit the way tab
-  // creation is counted.
-  _shouldOpenNTPTabOnActive = [tabOpener
-      shouldOpenNTPTabOnActivationOfTabModel:[[_browserLauncher
-                                                 browserViewInformation]
-                                                 currentTabModel]];
-
   ios::ChromeBrowserState* currentBrowserState =
       [[_browserLauncher browserViewInformation] currentBrowserState];
   if ([SignedInAccountsViewController
@@ -346,20 +342,25 @@ initWithBrowserLauncher:(id<BrowserLauncher>)browserLauncher
                           startupInformation:_startupInformation
                       browserViewInformation:[_browserLauncher
                                                  browserViewInformation]];
-  } else if (_shouldOpenNTPTabOnActive) {
+  } else if ([tabOpener shouldOpenNTPTabOnActivationOfTabModel:
+                            [[_browserLauncher browserViewInformation]
+                                currentTabModel]]) {
+    // Opens an NTP if needed.
+    // TODO(crbug.com/623491): opening a tab when the application is launched
+    // without a tab should not be counted as a user action. Revisit the way tab
+    // creation is counted.
     if (![tabSwitcher openNewTabFromTabSwitcher]) {
       BrowserViewController* bvc =
           [[_browserLauncher browserViewInformation] currentBVC];
       BOOL incognito =
           bvc == [[_browserLauncher browserViewInformation] otrBVC];
       [bvc.dispatcher
-          openNewTab:[OpenNewTabCommand commandWithIncognito:incognito]];
+          openURLInNewTab:[OpenNewTabCommand commandWithIncognito:incognito]];
     }
   } else {
     [[[_browserLauncher browserViewInformation] currentBVC]
         presentBubblesIfEligible];
   }
-  _shouldOpenNTPTabOnActive = NO;
 
   [MetricsMediator logStartupDuration:_startupInformation];
 }
@@ -396,15 +397,7 @@ initWithBrowserLauncher:(id<BrowserLauncher>)browserLauncher
   // closing the tabs. Set the BVC to inactive to cancel all the dialogs.
   if ([_browserLauncher browserInitializationStage] >=
       INITIALIZATION_STAGE_FOREGROUND) {
-    [[_browserLauncher browserViewInformation].mainTabModel haltAllTabs];
-
-    // Application termination flow is only triggered on a shutdown deliberately
-    // triggered by a user. In this case, close all incognito tabs.
-    TabModel* OTRTabModel =
-        [_browserLauncher browserViewInformation].otrTabModel;
-    [OTRTabModel closeAllTabs];
-    [OTRTabModel saveSessionImmediately:YES];
-
+    [[_browserLauncher browserViewInformation] haltAllTabs];
     [_browserLauncher browserViewInformation].currentBVC.active = NO;
   }
 
@@ -503,25 +496,6 @@ initWithBrowserLauncher:(id<BrowserLauncher>)browserLauncher
 
   // Start recording info about this session.
   [[PreviousSessionInfo sharedInstance] beginRecordingCurrentSession];
-}
-
-@end
-
-@implementation AppState (Testing)
-
-- (instancetype)
-initWithBrowserLauncher:(id<BrowserLauncher>)browserLauncher
-     startupInformation:(id<StartupInformation>)startupInformation
-    applicationDelegate:(MainApplicationDelegate*)applicationDelegate
-                 window:(UIWindow*)window
-          shouldOpenNTP:(BOOL)shouldOpenNTP {
-  self = [self initWithBrowserLauncher:browserLauncher
-                    startupInformation:startupInformation
-                   applicationDelegate:applicationDelegate];
-  if (self) {
-    _shouldOpenNTPTabOnActive = shouldOpenNTP;
-  }
-  return self;
 }
 
 @end

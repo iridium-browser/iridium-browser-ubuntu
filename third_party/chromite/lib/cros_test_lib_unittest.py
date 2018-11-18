@@ -15,13 +15,10 @@ import unittest
 
 from chromite.lib import cros_test_lib
 from chromite.lib import cros_build_lib
-from chromite.lib import cros_build_lib_unittest
 from chromite.lib import osutils
 from chromite.lib import partial_mock
 from chromite.lib import timeout_util
 
-
-# pylint: disable=W0212,W0233
 
 # Convenience alias
 Dir = cros_test_lib.Directory
@@ -133,7 +130,7 @@ class VerifyTarballTest(cros_test_lib.MockTempDirTestCase):
   TARBALL = 'fake_tarball'
 
   def setUp(self):
-    self.rc_mock = self.StartPatcher(cros_build_lib_unittest.RunCommandMock())
+    self.rc_mock = self.StartPatcher(cros_test_lib.RunCommandMock())
 
   def _MockTarList(self, files):
     """Mock out tarball content list call.

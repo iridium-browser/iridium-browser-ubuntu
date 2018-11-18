@@ -14,14 +14,11 @@
 #include "fpdfsdk/pwl/cpwl_scroll_bar.h"
 #include "fpdfsdk/pwl/cpwl_wnd.h"
 #include "public/fpdf_fwlevent.h"
+#include "third_party/base/ptr_util.h"
 
-CPWL_EditCtrl::CPWL_EditCtrl()
-    : m_pEdit(new CPWL_EditImpl),
-      m_pEditCaret(nullptr),
-      m_bMouseDown(false),
-      m_nCharSet(FX_CHARSET_Default) {}
+CPWL_EditCtrl::CPWL_EditCtrl() : m_pEdit(pdfium::MakeUnique<CPWL_EditImpl>()) {}
 
-CPWL_EditCtrl::~CPWL_EditCtrl() {}
+CPWL_EditCtrl::~CPWL_EditCtrl() = default;
 
 void CPWL_EditCtrl::OnCreate(CreateParams* pParamsToAdjust) {
   pParamsToAdjust->eCursorType = FXCT_VBEAM;
@@ -29,7 +26,6 @@ void CPWL_EditCtrl::OnCreate(CreateParams* pParamsToAdjust) {
 
 void CPWL_EditCtrl::OnCreated() {
   SetFontSize(GetCreationParams().fFontSize);
-
   m_pEdit->SetFontMap(GetFontMap());
   m_pEdit->SetNotify(this);
   m_pEdit->Initialize();
@@ -52,16 +48,10 @@ void CPWL_EditCtrl::SetCursor() {
 }
 
 WideString CPWL_EditCtrl::GetSelectedText() {
-  if (m_pEdit)
-    return m_pEdit->GetSelectedText();
-
-  return WideString();
+  return m_pEdit->GetSelectedText();
 }
 
 void CPWL_EditCtrl::ReplaceSelection(const WideString& text) {
-  if (!m_pEdit)
-    return;
-
   m_pEdit->ClearSelection();
   m_pEdit->InsertText(text, FX_CHARSET_Default);
 }
@@ -346,7 +336,7 @@ bool CPWL_EditCtrl::SetCaret(bool bVisible,
   return true;
 }
 
-WideString CPWL_EditCtrl::GetText() const {
+WideString CPWL_EditCtrl::GetText() {
   return m_pEdit->GetText();
 }
 
@@ -401,22 +391,20 @@ void CPWL_EditCtrl::Backspace() {
     m_pEdit->Backspace();
 }
 
-bool CPWL_EditCtrl::CanUndo() const {
+bool CPWL_EditCtrl::CanUndo() {
   return !IsReadOnly() && m_pEdit->CanUndo();
 }
 
-bool CPWL_EditCtrl::CanRedo() const {
+bool CPWL_EditCtrl::CanRedo() {
   return !IsReadOnly() && m_pEdit->CanRedo();
 }
 
-void CPWL_EditCtrl::Redo() {
-  if (CanRedo())
-    m_pEdit->Redo();
+bool CPWL_EditCtrl::Undo() {
+  return CanUndo() && m_pEdit->Undo();
 }
 
-void CPWL_EditCtrl::Undo() {
-  if (CanUndo())
-    m_pEdit->Undo();
+bool CPWL_EditCtrl::Redo() {
+  return CanRedo() && m_pEdit->Redo();
 }
 
 int32_t CPWL_EditCtrl::GetCharSet() const {

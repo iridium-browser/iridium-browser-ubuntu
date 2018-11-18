@@ -12,6 +12,7 @@ import sys
 
 from py_utils import cloud_storage  # pylint: disable=import-error
 
+from telemetry import compact_mode_options
 from telemetry.core import platform
 from telemetry.core import util
 from telemetry.internal.browser import browser_finder
@@ -19,7 +20,6 @@ from telemetry.internal.browser import browser_finder_exceptions
 from telemetry.internal.browser import profile_types
 from telemetry.internal.platform import device_finder
 from telemetry.internal.platform import remote_platform_options
-from telemetry.internal.platform.profiler import profiler_finder
 from telemetry.internal.util import binary_manager
 from telemetry.internal.util import global_hooks
 from telemetry.util import wpr_modes
@@ -40,7 +40,6 @@ class BrowserFinderOptions(optparse.Values):
 
     self.cros_remote = None
 
-    self.profiler = None
     self.verbosity = 0
 
     self.browser_options = BrowserOptions()
@@ -52,6 +51,10 @@ class BrowserFinderOptions(optparse.Values):
 
     # TODO(crbug.com/798703): remove this
     self.no_performance_mode = False
+
+    self.interval_profiling_target = ''
+    self.interval_profiling_periods = []
+    self.interval_profiling_frequency = 1000
 
   def __repr__(self):
     return str(sorted(self.__dict__.items()))
@@ -70,7 +73,7 @@ class BrowserFinderOptions(optparse.Values):
         default=None,
         help='Browser type to run, '
         'in order of priority. Supported values: list,%s' %
-        ','.join(browser_finder.FindAllBrowserTypes(self)))
+        ', '.join(browser_finder.FindAllBrowserTypes(self)))
     group.add_option(
         '--browser-executable',
         dest='browser_executable',
@@ -96,6 +99,20 @@ class BrowserFinderOptions(optparse.Values):
         default=socket.getservbyname('ssh'),
         dest='cros_remote_ssh_port',
         help='The SSH port of the remote ChromeOS device (requires --remote).')
+    compact_mode_options_list = [
+        compact_mode_options.NO_FIELD_TRIALS,
+        compact_mode_options.IGNORE_CERTIFICATE_ERROR,
+        compact_mode_options.LEGACY_COMMAND_LINE_PATH,
+        compact_mode_options.GPU_BENCHMARKING_FALLBACKS]
+    parser.add_option(
+        '--compatibility-mode',
+        action='append',
+        dest='compatibility_mode',
+        choices=compact_mode_options_list,
+        default=[],
+        help='Select the compatibility change that you want to enforce when '
+             'running benchmarks. The options are: %s' % ', '.join(
+                 compact_mode_options_list))
     identity = None
     testing_rsa = os.path.join(
         util.GetTelemetryThirdPartyDir(), 'chromite', 'ssh_keys', 'testing_rsa')
@@ -110,13 +127,6 @@ class BrowserFinderOptions(optparse.Values):
 
     # Debugging options
     group = optparse.OptionGroup(parser, 'When things go wrong')
-    profiler_choices = profiler_finder.GetAllAvailableProfilers()
-    group.add_option(
-        '--profiler', default=None, type='choice',
-        choices=profiler_choices,
-        help='Record profiling data using this tool. Supported values: %s. '
-             '(Notice: this flag cannot be used for Timeline Based Measurement '
-             'benchmarks.)' % ', '.join(profiler_choices))
     group.add_option(
         '-v', '--verbose', action='count', dest='verbosity',
         help='Increase verbosity level (repeat as needed)')
@@ -153,7 +163,6 @@ class BrowserFinderOptions(optparse.Values):
         ' be installed. The apk running the test is said to embed webview.')
     parser.add_option_group(group)
 
-
     # Remote platform options
     group = optparse.OptionGroup(parser, 'Remote platform options')
     group.add_option('--android-blacklist-file',
@@ -166,6 +175,32 @@ class BrowserFinderOptions(optparse.Values):
         'used.')
     parser.add_option_group(group)
 
+    # CPU profiling on Android.
+    group = optparse.OptionGroup(parser, (
+        'CPU profiling over intervals of interest, '
+        'Android and Linux only'))
+    group.add_option(
+        '--interval-profiling-target', dest='interval_profiling_target',
+        default='renderer:main', metavar='PROCESS_NAME[:THREAD_NAME]',
+        help='Run the CPU profiler on this process/thread (default=%default).')
+    group.add_option(
+        '--interval-profiling-period', dest='interval_profiling_periods',
+        type='choice', choices=('navigation', 'interactions'), action='append',
+        default=[], metavar='PERIOD',
+        help='Run the CPU profiler during this test period. '
+        'May be specified multiple times; available choices '
+        'are ["navigation", "interactions"]. Profile data will be written to'
+        'artifacts/*.perf.data (Android) or artifacts/*.profile.pb (Linux) '
+        'files in the output directory. See '
+        'https://developer.android.com/ndk/guides/simpleperf for more info on '
+        'Android profiling via simpleperf.')
+    group.add_option(
+        '--interval-profiling-frequency', default=1000, metavar='FREQUENCY',
+        type=int,
+        help='Frequency of CPU profiling samples, in samples per second '
+        '(default=%default).')
+    parser.add_option_group(group)
+
     # Browser options.
     self.browser_options.AddCommandLineArgs(parser)
 
@@ -176,7 +211,7 @@ class BrowserFinderOptions(optparse.Values):
         if k in self.__dict__ and self.__dict__[k] != None:
           continue
         self.__dict__[k] = v
-      ret = real_parse(args, self) # pylint: disable=E1121
+      ret = real_parse(args, self)  # pylint: disable=E1121
 
       if self.verbosity >= 2:
         global_hooks.InstallSpyOnPopenArgs()
@@ -226,6 +261,8 @@ class BrowserFinderOptions(optparse.Values):
           print '  ', device_name
           for browser_type in browser_types[device_name]:
             print '    ', browser_type
+          if len(browser_types[device_name]) == 0:
+            print '     No browsers found for this device'
         sys.exit(0)
 
       # Parse browser options.
@@ -258,6 +295,7 @@ class BrowserFinderOptions(optparse.Values):
   def MergeDefaultValues(self, defaults):
     for k, v in defaults.__dict__.items():
       self.ensure_value(k, v)
+
 
 class BrowserOptions(object):
   """Options to be used for launching a browser."""
@@ -327,6 +365,16 @@ class BrowserOptions(object):
     # Whether to take screen shot for failed page & put them in telemetry's
     # profiling results.
     self.take_screenshot_for_failed_page = False
+
+    # A list of tuples where the first element is path to an existing file,
+    # and the second argument is a path (relative to the user-data-dir) to copy
+    # the file to. Uses recursive directory creation if directories do not
+    # already exist.
+    self.profile_files_to_copy = []
+
+    # The list of compatibility change that you want to enforce, mainly for
+    # earlier versions of Chrome
+    self.compatibility_mode = []
 
   def __repr__(self):
     # This works around the infinite loop caused by the introduction of a
@@ -401,13 +449,14 @@ class BrowserOptions(object):
     parser.add_option_group(group)
 
   def UpdateFromParseResults(self, finder_options):
-    """Copies our options from finder_options"""
+    """Copies our options from finder_options."""
     browser_options_list = [
         'extra_browser_args_as_string',
         'extra_wpr_args_as_string',
         'profile_dir',
         'profile_type',
         'show_stdout',
+        'compatibility_mode'
         ]
     for o in browser_options_list:
       a = getattr(finder_options, o, None)

@@ -111,14 +111,15 @@ void MarkupFormatter::AppendCharactersReplacingEntities(
     return;
 
   DCHECK_LE(offset + length, source.length());
-  if (source.Is8Bit())
+  if (source.Is8Bit()) {
     AppendCharactersReplacingEntitiesInternal(
         result, source.Characters8() + offset, length, kEntityMaps,
-        WTF_ARRAY_LENGTH(kEntityMaps), entity_mask);
-  else
+        arraysize(kEntityMaps), entity_mask);
+  } else {
     AppendCharactersReplacingEntitiesInternal(
         result, source.Characters16() + offset, length, kEntityMaps,
-        WTF_ARRAY_LENGTH(kEntityMaps), entity_mask);
+        arraysize(kEntityMaps), entity_mask);
+  }
 }
 
 MarkupFormatter::MarkupFormatter(EAbsoluteURLs resolve_urls_method,
@@ -156,7 +157,7 @@ void MarkupFormatter::AppendStartMarkup(StringBuilder& result,
       AppendComment(result, ToComment(node).data());
       break;
     case Node::kDocumentNode:
-      AppendXMLDeclaration(result, ToDocument(node));
+      AppendXMLDeclaration(result, To<Document>(node));
       break;
     case Node::kDocumentFragmentNode:
       break;
@@ -389,7 +390,7 @@ void MarkupFormatter::AppendAttribute(StringBuilder& result,
           // This behavior is in process of being standardized. See
           // crbug.com/248044 and
           // https://www.w3.org/Bugs/Public/show_bug.cgi?id=24208
-          String prefix_prefix("ns", 2);
+          String prefix_prefix("ns", 2u);
           for (unsigned i = attribute.NamespaceURI().Impl()->ExistingHash();;
                ++i) {
             AtomicString new_prefix(String(prefix_prefix + String::Number(i)));

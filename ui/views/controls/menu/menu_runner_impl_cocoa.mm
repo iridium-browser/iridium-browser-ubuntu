@@ -123,6 +123,10 @@ MenuRunnerImplInterface* MenuRunnerImplInterface::Create(
     ui::MenuModel* menu_model,
     int32_t run_types,
     const base::Closure& on_menu_closed_callback) {
+  if ((run_types & MenuRunner::CONTEXT_MENU) &&
+      !(run_types & MenuRunner::IS_NESTED)) {
+    return new MenuRunnerImplCocoa(menu_model, on_menu_closed_callback);
+  }
   return new MenuRunnerImplAdapter(menu_model, on_menu_closed_callback);
 }
 
@@ -148,7 +152,12 @@ void MenuRunnerImplCocoa::Release() {
       return;  // We already canceled.
 
     delete_after_run_ = true;
-    [menu_controller_ cancel];
+
+    // Reset |menu_controller_| to ensure it clears itself as a delegate to
+    // prevent NSMenu attempting to access the weak pointer to the ui::MenuModel
+    // it holds (which is not owned by |this|). Toolkit-views menus use
+    // MenuRunnerImpl::empty_delegate_ to handle this case.
+    menu_controller_.reset();
   } else {
     delete this;
   }
@@ -209,8 +218,7 @@ base::TimeTicks MenuRunnerImplCocoa::GetClosingEventTime() const {
   return closing_event_time_;
 }
 
-MenuRunnerImplCocoa::~MenuRunnerImplCocoa() {
-}
+MenuRunnerImplCocoa::~MenuRunnerImplCocoa() {}
 
 }  // namespace internal
 }  // namespace views

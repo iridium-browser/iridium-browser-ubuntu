@@ -2,6 +2,39 @@ Entries are sorted chronologically from oldest to youngest within each release,
 releases are sorted from youngest to oldest.
 
 version <next>:
+- deblock filter
+- tmix filter
+- amplify filter
+- fftdnoiz filter
+- aderivative and aintegral audio filters
+- pal75bars and pal100bars video filter sources
+- support mbedTLS based TLS
+- adeclick filter
+- adeclip filter
+- libtensorflow backend for DNN based filters like srcnn
+- vc1 decoder is now bit-exact
+- ATRAC9 decoder
+- lensfun wrapper filter
+- colorconstancy filter
+- AVS2 video decoder via libdavs2
+- IMM4 video decoder
+- Brooktree ProSumer video decoder
+- MatchWare Screen Capture Codec decoder
+- WinCam Motion Video decoder
+- 1D LUT filter (lut1d)
+- RemotelyAnywhere Screen Capture decoder
+- cue and acue filters
+- support for AV1 in MP4
+- transpose_npp filter
+- AVS2 video encoder via libxavs2
+- amultiply filter
+- Block-Matching 3d (bm3d) denoising filter
+- acrossover filter
+- ilbc decoder
+- audio denoiser as afftdn filter
+
+
+version 4.0:
 - Bitstream filters for editing metadata in H.264, HEVC and MPEG-2 streams
 - Dropped support for OpenJPEG versions 2.0 and below. Using OpenJPEG now
   requires 2.1 (or later) and pkg-config.
@@ -46,6 +79,15 @@ version <next>:
   They can be found at http://git.videolan.org/?p=ffmpeg/nv-codec-headers.git
 - native SBC encoder and decoder
 - drmeter audio filter
+- hapqa_extract bitstream filter
+- filter_units bitstream filter
+- AV1 Support through libaom
+- E-AC-3 dependent frames support
+- bitstream filter for extracting E-AC-3 core
+- Haivision SRT protocol via libsrt
+- segafilm muxer
+- vfrdet filter
+- SRCNN filter
 
 
 version 3.4:

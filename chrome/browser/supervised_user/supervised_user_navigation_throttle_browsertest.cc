@@ -32,6 +32,10 @@
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 
+#if defined(OS_CHROMEOS)
+#include "chromeos/chromeos_switches.h"
+#endif
+
 using content::NavigationController;
 using content::WebContents;
 
@@ -83,7 +87,7 @@ bool SupervisedUserNavigationThrottleTest::IsInterstitialBeingShown(
   if (AreCommittedInterstitialsEnabled()) {
     base::string16 title;
     ui_test_utils::GetCurrentTabTitle(browser, &title);
-    return tab->GetController().GetActiveEntry()->GetPageType() ==
+    return tab->GetController().GetLastCommittedEntry()->GetPageType() ==
                content::PAGE_TYPE_ERROR &&
            title == base::ASCIIToUTF16("Site blocked");
   }
@@ -107,7 +111,13 @@ void SupervisedUserNavigationThrottleTest::SetUpOnMainThread() {
 
 void SupervisedUserNavigationThrottleTest::SetUpCommandLine(
     base::CommandLine* command_line) {
-  command_line->AppendSwitchASCII(switches::kSupervisedUserId, "asdf");
+  command_line->AppendSwitchASCII(switches::kSupervisedUserId,
+                                  supervised_users::kChildAccountSUID);
+#if defined(OS_CHROMEOS)
+  command_line->AppendSwitchASCII(chromeos::switches::kLoginUser,
+                                  "supervised_user@locally-managed.localhost");
+  command_line->AppendSwitchASCII(chromeos::switches::kLoginProfile, "hash");
+#endif
 }
 
 INSTANTIATE_TEST_CASE_P(,
@@ -133,7 +143,7 @@ IN_PROC_BROWSER_TEST_P(SupervisedUserNavigationThrottleTest,
   controller.LoadURL(GURL("http://www.example.com"), content::Referrer(),
                      ui::PAGE_TRANSITION_TYPED, std::string());
   observer.Wait();
-  content::NavigationEntry* entry = controller.GetActiveEntry();
+  content::NavigationEntry* entry = controller.GetVisibleEntry();
   ASSERT_TRUE(entry);
   EXPECT_EQ(content::PAGE_TYPE_NORMAL, entry->GetPageType());
   EXPECT_FALSE(observer.last_navigation_succeeded());

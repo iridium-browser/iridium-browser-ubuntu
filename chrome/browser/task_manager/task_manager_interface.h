@@ -275,7 +275,7 @@ class TaskManagerInterface {
 
   int64_t enabled_resources_flags() const { return enabled_resources_flags_; }
 
-  void set_timer_for_testing(std::unique_ptr<base::Timer> timer) {
+  void set_timer_for_testing(std::unique_ptr<base::RepeatingTimer> timer) {
     refresh_timer_ = std::move(timer);
   }
 
@@ -297,10 +297,10 @@ class TaskManagerInterface {
   void ScheduleRefresh(base::TimeDelta refresh_time);
 
   // The list of observers.
-  base::ObserverList<TaskManagerObserver> observers_;
+  base::ObserverList<TaskManagerObserver>::Unchecked observers_;
 
   // The timer that will be used to schedule the successive refreshes.
-  std::unique_ptr<base::Timer> refresh_timer_;
+  std::unique_ptr<base::RepeatingTimer> refresh_timer_;
 
   // The flags containing the enabled resources types calculations.
   int64_t enabled_resources_flags_;

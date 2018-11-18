@@ -13,7 +13,10 @@
 #include "content/shell/test_runner/web_test_runner.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_registry.h"
 #include "third_party/blink/public/platform/scheduler/test/renderer_scheduler_test_support.h"
+#include "third_party/blink/public/web/web_frame_widget.h"
 #include "third_party/blink/public/web/web_local_frame.h"
+#include "third_party/blink/public/web/web_page_popup.h"
+#include "third_party/blink/public/web/web_view.h"
 
 namespace content {
 
@@ -47,6 +50,17 @@ void LayoutTestRenderFrameObserver::OnDestruct() {
 void LayoutTestRenderFrameObserver::CaptureDump(CaptureDumpCallback callback) {
   BlinkTestRunner::Get(render_frame()->GetRenderView())
       ->CaptureDump(std::move(callback));
+}
+
+void LayoutTestRenderFrameObserver::CompositeWithRaster(
+    CompositeWithRasterCallback callback) {
+  blink::WebWidget* widget = render_frame()->GetWebFrame()->FrameWidget();
+  if (widget) {
+    widget->UpdateAllLifecyclePhasesAndCompositeForTesting(/*do_raster=*/true);
+    if (blink::WebPagePopup* popup = widget->GetPagePopup())
+      popup->UpdateAllLifecyclePhasesAndCompositeForTesting(/*do_raster=*/true);
+  }
+  std::move(callback).Run();
 }
 
 void LayoutTestRenderFrameObserver::DumpFrameLayout(

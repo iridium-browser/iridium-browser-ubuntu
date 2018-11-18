@@ -83,7 +83,10 @@ void SymbolCast::dumpToStream(raw_ostream &os) const {
 }
 
 void SymbolConjured::dumpToStream(raw_ostream &os) const {
-  os << "conj_$" << getSymbolID() << '{' << T.getAsString() << '}';
+  os << "conj_$" << getSymbolID() << '{' << T.getAsString()
+    << ", LC" << LCtx->getID() << ", S" << S->getID(
+      LCtx->getDecl()->getASTContext()) << ", #" << Count
+    << '}';
 }
 
 void SymbolDerived::dumpToStream(raw_ostream &os) const {
@@ -157,13 +160,6 @@ void SymExpr::symbol_iterator::expand() {
     }
   }
   llvm_unreachable("unhandled expansion case");
-}
-
-unsigned SymExpr::computeComplexity() const {
-  unsigned R = 0;
-  for (symbol_iterator I = symbol_begin(), E = symbol_end(); I != E; ++I)
-    R++;
-  return R;
 }
 
 const SymbolRegionValue*
@@ -542,7 +538,7 @@ bool SymbolReaper::isLive(const VarRegion *VR, bool includeStoreBindings) const{
 
   if (!LCtx)
     return false;
-  const StackFrameContext *CurrentContext = LCtx->getCurrentStackFrame();
+  const StackFrameContext *CurrentContext = LCtx->getStackFrame();
 
   if (VarContext == CurrentContext) {
     // If no statement is provided, everything is live.

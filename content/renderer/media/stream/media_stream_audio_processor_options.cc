@@ -28,190 +28,77 @@
 
 namespace content {
 
-namespace {
-
-// Used to log echo quality based on delay estimates.
-enum DelayBasedEchoQuality {
-  DELAY_BASED_ECHO_QUALITY_GOOD = 0,
-  DELAY_BASED_ECHO_QUALITY_SPURIOUS,
-  DELAY_BASED_ECHO_QUALITY_BAD,
-  DELAY_BASED_ECHO_QUALITY_INVALID,
-  DELAY_BASED_ECHO_QUALITY_MAX
-};
-
-DelayBasedEchoQuality EchoDelayFrequencyToQuality(float delay_frequency) {
-  const float kEchoDelayFrequencyLowerLimit = 0.1f;
-  const float kEchoDelayFrequencyUpperLimit = 0.8f;
-  // DELAY_BASED_ECHO_QUALITY_GOOD
-  //   delay is out of bounds during at most 10 % of the time.
-  // DELAY_BASED_ECHO_QUALITY_SPURIOUS
-  //   delay is out of bounds 10-80 % of the time.
-  // DELAY_BASED_ECHO_QUALITY_BAD
-  //   delay is mostly out of bounds >= 80 % of the time.
-  // DELAY_BASED_ECHO_QUALITY_INVALID
-  //   delay_frequency is negative which happens if we have insufficient data.
-  if (delay_frequency < 0)
-    return DELAY_BASED_ECHO_QUALITY_INVALID;
-  else if (delay_frequency <= kEchoDelayFrequencyLowerLimit)
-    return DELAY_BASED_ECHO_QUALITY_GOOD;
-  else if (delay_frequency < kEchoDelayFrequencyUpperLimit)
-    return DELAY_BASED_ECHO_QUALITY_SPURIOUS;
-  else
-    return DELAY_BASED_ECHO_QUALITY_BAD;
-}
-
-}  // namespace
-
 AudioProcessingProperties::AudioProcessingProperties() = default;
 AudioProcessingProperties::AudioProcessingProperties(
     const AudioProcessingProperties& other) = default;
 AudioProcessingProperties& AudioProcessingProperties::operator=(
     const AudioProcessingProperties& other) = default;
-AudioProcessingProperties::AudioProcessingProperties(
-    AudioProcessingProperties&& other) = default;
-AudioProcessingProperties& AudioProcessingProperties::operator=(
-    AudioProcessingProperties&& other) = default;
-AudioProcessingProperties::~AudioProcessingProperties() = default;
 
 void AudioProcessingProperties::DisableDefaultProperties() {
-  enable_sw_echo_cancellation = false;
+  echo_cancellation_type = EchoCancellationType::kEchoCancellationDisabled;
   goog_auto_gain_control = false;
   goog_experimental_echo_cancellation = false;
   goog_typing_noise_detection = false;
   goog_noise_suppression = false;
   goog_experimental_noise_suppression = false;
-  goog_beamforming = false;
   goog_highpass_filter = false;
   goog_experimental_auto_gain_control = false;
 }
 
-EchoInformation::EchoInformation()
-    : delay_stats_time_ms_(0),
-      echo_frames_received_(false),
-      divergent_filter_stats_time_ms_(0),
-      num_divergent_filter_fraction_(0),
-      num_non_zero_divergent_filter_fraction_(0) {}
-
-EchoInformation::~EchoInformation() {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  ReportAndResetAecDivergentFilterStats();
+bool AudioProcessingProperties::EchoCancellationEnabled() const {
+  return echo_cancellation_type !=
+         EchoCancellationType::kEchoCancellationDisabled;
 }
 
-void EchoInformation::UpdateAecStats(
-    webrtc::EchoCancellation* echo_cancellation) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-
-  if (!echo_cancellation->is_enabled())
-    return;
-
-  UpdateAecDelayStats(echo_cancellation);
-  UpdateAecDivergentFilterStats(echo_cancellation);
+bool AudioProcessingProperties::EchoCancellationIsWebRtcProvided() const {
+  return echo_cancellation_type ==
+             EchoCancellationType::kEchoCancellationAec2 ||
+         echo_cancellation_type == EchoCancellationType::kEchoCancellationAec3;
 }
 
-void EchoInformation::UpdateAecDelayStats(
-    webrtc::EchoCancellation* echo_cancellation) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-
-  // Only start collecting stats if we know echo cancellation has measured an
-  // echo. Otherwise we clutter the stats with for example cases where only the
-  // microphone is used.
-  if (!echo_frames_received_ & !echo_cancellation->stream_has_echo())
-    return;
-
-  echo_frames_received_ = true;
-
-  // In WebRTC, three echo delay metrics are calculated and updated every
-  // five seconds. We use one of them, |fraction_poor_delays| to log in a UMA
-  // histogram an Echo Cancellation quality metric. The stat in WebRTC has a
-  // fixed aggregation window of five seconds, so we use the same query
-  // frequency to avoid logging old values.
-  if (!echo_cancellation->is_delay_logging_enabled())
-    return;
-
-  delay_stats_time_ms_ += webrtc::AudioProcessing::kChunkSizeMs;
-  if (delay_stats_time_ms_ <
-      500 * webrtc::AudioProcessing::kChunkSizeMs) {  // 5 seconds
-    return;
-  }
-
-  int dummy_median = 0, dummy_std = 0;
-  float fraction_poor_delays = 0;
-  if (echo_cancellation->GetDelayMetrics(
-          &dummy_median, &dummy_std, &fraction_poor_delays) ==
-      webrtc::AudioProcessing::kNoError) {
-    delay_stats_time_ms_ = 0;
-    // Map |fraction_poor_delays| to an Echo Cancellation quality and log in UMA
-    // histogram. See DelayBasedEchoQuality for information on histogram
-    // buckets.
-    UMA_HISTOGRAM_ENUMERATION("WebRTC.AecDelayBasedQuality",
-                              EchoDelayFrequencyToQuality(fraction_poor_delays),
-                              DELAY_BASED_ECHO_QUALITY_MAX);
-  }
-}
-
-void EchoInformation::UpdateAecDivergentFilterStats(
-    webrtc::EchoCancellation* echo_cancellation) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-
-  if (!echo_cancellation->are_metrics_enabled())
-    return;
-
-  divergent_filter_stats_time_ms_ += webrtc::AudioProcessing::kChunkSizeMs;
-  if (divergent_filter_stats_time_ms_ <
-      100 * webrtc::AudioProcessing::kChunkSizeMs) {  // 1 second
-    return;
-  }
-
-  webrtc::EchoCancellation::Metrics metrics;
-  if (echo_cancellation->GetMetrics(&metrics) ==
-      webrtc::AudioProcessing::kNoError) {
-    // If not yet calculated, |metrics.divergent_filter_fraction| is -1.0. After
-    // being calculated the first time, it is updated periodically.
-    if (metrics.divergent_filter_fraction < 0.0f) {
-      DCHECK_EQ(num_divergent_filter_fraction_, 0);
-      return;
+media::AudioProcessingSettings
+AudioProcessingProperties::ToAudioProcessingSettings() const {
+  media::AudioProcessingSettings out;
+  auto convert_type =
+      [](EchoCancellationType type) -> media::EchoCancellationType {
+    switch (type) {
+      case EchoCancellationType::kEchoCancellationDisabled:
+        return media::EchoCancellationType::kDisabled;
+      case EchoCancellationType::kEchoCancellationAec2:
+        return media::EchoCancellationType::kAec2;
+      case EchoCancellationType::kEchoCancellationAec3:
+        return media::EchoCancellationType::kAec3;
+      case EchoCancellationType::kEchoCancellationSystem:
+        return media::EchoCancellationType::kSystemAec;
     }
-    if (metrics.divergent_filter_fraction > 0.0f) {
-      ++num_non_zero_divergent_filter_fraction_;
-    }
-  } else {
-    DLOG(WARNING) << "Get echo cancellation metrics failed.";
-  }
-  ++num_divergent_filter_fraction_;
-  divergent_filter_stats_time_ms_ = 0;
-}
+  };
 
-void EchoInformation::ReportAndResetAecDivergentFilterStats() {
-  DCHECK(thread_checker_.CalledOnValidThread());
-
-  if (num_divergent_filter_fraction_ == 0)
-    return;
-
-  int non_zero_percent = 100 * num_non_zero_divergent_filter_fraction_ /
-                         num_divergent_filter_fraction_;
-  UMA_HISTOGRAM_PERCENTAGE("WebRTC.AecFilterHasDivergence", non_zero_percent);
-
-  divergent_filter_stats_time_ms_ = 0;
-  num_non_zero_divergent_filter_fraction_ = 0;
-  num_divergent_filter_fraction_ = 0;
+  out.echo_cancellation = convert_type(echo_cancellation_type);
+  out.noise_suppression =
+      goog_noise_suppression ? (goog_experimental_noise_suppression
+                                    ? media::NoiseSuppressionType::kExperimental
+                                    : media::NoiseSuppressionType::kDefault)
+                             : media::NoiseSuppressionType::kDisabled;
+  out.automatic_gain_control =
+      goog_auto_gain_control
+          ? (goog_experimental_auto_gain_control
+                 ? media::AutomaticGainControlType::kExperimental
+                 : media::AutomaticGainControlType::kDefault)
+          : media::AutomaticGainControlType::kDisabled;
+  out.high_pass_filter = goog_highpass_filter;
+  out.typing_detection = goog_typing_noise_detection;
+  return out;
 }
 
 void EnableEchoCancellation(AudioProcessing* audio_processing) {
+  webrtc::AudioProcessing::Config apm_config = audio_processing->GetConfig();
+  apm_config.echo_canceller.enabled = true;
 #if defined(OS_ANDROID)
-  // Mobile devices are using AECM.
-  CHECK_EQ(0, audio_processing->echo_control_mobile()->set_routing_mode(
-                  webrtc::EchoControlMobile::kSpeakerphone));
-  CHECK_EQ(0, audio_processing->echo_control_mobile()->Enable(true));
-  return;
+  apm_config.echo_canceller.mobile_mode = true;
+#else
+  apm_config.echo_canceller.mobile_mode = false;
 #endif
-  int err = audio_processing->echo_cancellation()->set_suppression_level(
-      webrtc::EchoCancellation::kHighSuppression);
-
-  // Enable the metrics for AEC.
-  err |= audio_processing->echo_cancellation()->enable_metrics(true);
-  err |= audio_processing->echo_cancellation()->enable_delay_logging(true);
-  err |= audio_processing->echo_cancellation()->Enable(true);
-  CHECK_EQ(err, 0);
+  audio_processing->ApplyConfig(apm_config);
 }
 
 void EnableNoiseSuppression(AudioProcessing* audio_processing,
@@ -270,8 +157,7 @@ void EnableAutomaticGainControl(AudioProcessing* audio_processing) {
 void GetAudioProcessingStats(
     AudioProcessing* audio_processing,
     webrtc::AudioProcessorInterface::AudioProcessorStats* stats) {
-  // TODO(ivoc): Change the APM stats to use rtc::Optional instead of default
-  //             values.
+  // TODO(ivoc): Change the APM stats to use optional instead of default values.
   auto apm_stats = audio_processing->GetStatistics();
   stats->echo_return_loss = apm_stats.echo_return_loss.instant();
   stats->echo_return_loss_enhancement =

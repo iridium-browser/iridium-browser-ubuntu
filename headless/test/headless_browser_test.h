@@ -13,6 +13,7 @@
 #include "headless/public/devtools/domains/page.h"
 #include "headless/public/headless_browser.h"
 #include "headless/public/headless_web_contents.h"
+#include "headless/test/test_network_interceptor.h"
 
 namespace base {
 class RunLoop;
@@ -73,6 +74,9 @@ class HeadlessBrowserTest : public content::BrowserTestBase {
 
   // Synchronously waits for a tab to finish loading.
   bool WaitForLoad(HeadlessWebContents* web_contents);
+
+  // Synchronously waits for a tab to finish loading and to gain focus.
+  void WaitForLoadAndGainFocus(HeadlessWebContents* web_contents);
 
   // Synchronously evaluates a script and returns the result.
   std::unique_ptr<runtime::EvaluateResult> EvaluateScript(
@@ -137,13 +141,6 @@ class HeadlessAsyncDevTooledBrowserTest : public HeadlessBrowserTest,
   // are processed (e.g. in a callback).
   virtual void RunDevTooledTest() = 0;
 
-  // Returns the protocol handlers to construct the browser with.  By default
-  // the map returned is empty.
-  virtual ProtocolHandlerMap GetProtocolHandlers();
-
-  // Whether to allow TabSockets when creating |web_contents_|.
-  virtual bool GetAllowTabSockets();
-
   // Whether to enable BeginFrameControl when creating |web_contents_|.
   virtual bool GetEnableBeginFrameControl();
 
@@ -163,6 +160,7 @@ class HeadlessAsyncDevTooledBrowserTest : public HeadlessBrowserTest,
   std::unique_ptr<HeadlessDevToolsClient> devtools_client_;
   std::unique_ptr<HeadlessDevToolsClient> browser_devtools_client_;
   bool render_process_exited_;
+  std::unique_ptr<TestNetworkInterceptor> interceptor_;
 };
 
 }  // namespace headless

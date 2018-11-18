@@ -33,7 +33,8 @@ CLANK_MILESTONES = {
     63: (1507887190, 1512141580),
     64: (1512154460, 1516341121),
     65: (1516353162, 1519951206),
-    66: (1519963059, None),
+    66: (1519963059, 1523653340),
+    67: (1523629648, None),
 }
 
 CHROMIUM_MILESTONES = {
@@ -49,7 +50,8 @@ CHROMIUM_MILESTONES = {
     63: (508578, 520719),
     64: (520917, 530282),
     65: (530373, 540240),
-    66: (540302, None),
+    66: (540302, 550534),
+    67: (554148, None),
 }
 
 CURRENT_MILESTONE = max(CHROMIUM_MILESTONES.keys())
@@ -416,15 +418,14 @@ def _FetchAnomalies(table_entity, rev_a, rev_b):
   anomalies_futures = []
   for benchmark in benchmark_list:
     for master in master_list:
-      query = anomaly.Anomaly.query()
-      query = (query.filter(anomaly.Anomaly.end_revision >= rev_a)
-               .filter(anomaly.Anomaly.end_revision <= rev_b)
-               .filter(anomaly.Anomaly.benchmark_name == benchmark)
-               .filter(anomaly.Anomaly.master_name == master))
-      anomalies_futures.append(query.fetch_async())
+      anomalies_futures.append(anomaly.Anomaly.QueryAsync(
+          min_end_revision=rev_a,
+          max_end_revision=rev_b,
+          test_suite_name=benchmark,
+          master_name=master))
 
   ndb.Future.wait_all(anomalies_futures)
-  all_anomalies = [future.get_result() for future in anomalies_futures]
+  all_anomalies = [future.get_result()[0] for future in anomalies_futures]
   # Flatten list of lists.
   all_anomalies = [a for future_list in all_anomalies for a in future_list]
 

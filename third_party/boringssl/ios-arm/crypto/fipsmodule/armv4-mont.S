@@ -1,3 +1,13 @@
+#if defined(__has_feature)
+#if __has_feature(memory_sanitizer) && !defined(OPENSSL_NO_ASM)
+#define OPENSSL_NO_ASM
+#endif
+#endif
+
+#if !defined(OPENSSL_NO_ASM)
+#if defined(BORINGSSL_PREFIX)
+#include <boringssl_prefix_symbols_asm.h>
+#endif
 #include <openssl/arm_arch.h>
 
 @ Silence ARMv8 deprecated IT instruction warnings. This file is used by both
@@ -172,14 +182,15 @@ Lsub:	ldr	r7,[r4],#4
 	mov	r4,sp			@ "rewind" r4
 	sub	r2,r2,r5		@ "rewind" r2
 
-	and	r1,r4,r14
-	bic	r3,r2,r14
-	orr	r1,r1,r3		@ ap=borrow?tp:rp
-
-Lcopy:	ldr	r7,[r1],#4		@ copy or in-place refresh
+Lcopy:	ldr	r7,[r4]		@ conditional copy
+	ldr	r5,[r2]
 	str	sp,[r4],#4		@ zap tp
-	str	r7,[r2],#4
-	cmp	r4,r0
+#ifdef	__thumb2__
+	it	cc
+#endif
+	movcc	r5,r7
+	str	r5,[r2],#4
+	teq	r4,r0		@ preserve carry
 	bne	Lcopy
 
 	mov	sp,r0
@@ -964,3 +975,4 @@ OPENSSL_armcap_P:
 .long	0
 .private_extern	_OPENSSL_armcap_P
 #endif
+#endif  // !OPENSSL_NO_ASM

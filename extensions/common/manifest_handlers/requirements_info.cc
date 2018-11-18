@@ -41,8 +41,9 @@ RequirementsHandler::RequirementsHandler() {
 RequirementsHandler::~RequirementsHandler() {
 }
 
-const std::vector<std::string> RequirementsHandler::Keys() const {
-  return SingleKey(keys::kRequirements);
+base::span<const char* const> RequirementsHandler::Keys() const {
+  static constexpr const char* kKeys[] = {keys::kRequirements};
+  return kKeys;
 }
 
 bool RequirementsHandler::AlwaysParseForType(Manifest::Type type) const {
@@ -97,7 +98,7 @@ bool RequirementsHandler::Parse(Extension* extension, base::string16* error) {
         return false;
       }
 
-      for (base::ListValue::const_iterator feature_iter = features->begin();
+      for (auto feature_iter = features->begin();
            feature_iter != features->end(); ++feature_iter) {
         std::string feature;
         if (feature_iter->GetAsString(&feature)) {

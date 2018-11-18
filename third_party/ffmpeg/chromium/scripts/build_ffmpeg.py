@@ -8,7 +8,6 @@ from __future__ import print_function
 
 import collections
 import functools
-import multiprocessing
 import optparse
 import os
 import platform
@@ -24,6 +23,9 @@ CHROMIUM_ROOT_DIR = os.path.abspath(os.path.join(FFMPEG_DIR, '..', '..'))
 NDK_ROOT_DIR = os.path.abspath(
     os.path.join(CHROMIUM_ROOT_DIR, 'third_party', 'android_ndk'))
 
+sys.path.append(os.path.join(CHROMIUM_ROOT_DIR, 'build'))
+import gn_helpers
+
 BRANDINGS = [
     'Chrome',
     'ChromeOS',
@@ -32,7 +34,10 @@ BRANDINGS = [
 
 ARCH_MAP = {
     'android': ['ia32', 'x64', 'mipsel', 'mips64el', 'arm-neon', 'arm64'],
-    'linux': ['ia32', 'x64', 'mipsel', 'mips64el', 'noasm-x64', 'arm', 'arm-neon', 'arm64'],
+    'linux': [
+        'ia32', 'x64', 'mipsel', 'mips64el', 'noasm-x64', 'arm', 'arm-neon',
+        'arm64'
+    ],
     'mac': ['x64'],
     'win': ['ia32', 'x64'],
 }
@@ -67,9 +72,17 @@ Platform specific build notes:
     src/third_party/llvm-build/Release+Asserts/bin
 
   win:
-    Script must be run on Windows with VS2015 or higher under Cygwin (or MinGW,
-    but as of 1.0.11, it has serious performance issues with make which makes
-    building take hours).
+    Script may be run unders Linux or Windows; if cross-compiling you will need
+    to follow the Chromium instruction for Cross-compiling Chrome/win:
+    https://chromium.googlesource.com/chromium/src/+/master/docs/win_cross.md
+
+    Once you have a working Chromium build that can cross-compile, you'll also
+    need to run $chrome_dir/tools/clang/scripts/download_objdump.py to pick up
+    the llvm-ar and llvm-nm tools. You can then build as normal.
+
+    If not cross-compiling, script must be run on Windows with VS2015 or higher
+    under Cygwin (or MinGW, but as of 1.0.11, it has serious performance issues
+    with make which makes building take hours).
 
     Additionally, ensure you have the correct toolchain environment for building.
     The x86 toolchain environment is required for ia32 builds and the x64 one
@@ -132,11 +145,13 @@ def GetDsoName(target_os, dso_name, dso_version):
     raise ValueError('Unexpected target_os %s' % target_os)
 
 
-def RewriteFile(path, search, replace):
+def RewriteFile(path, search_replace):
   with open(path) as f:
     contents = f.read()
   with open(path, 'w') as f:
-    f.write(re.sub(search, replace, contents))
+    for search, replace in search_replace:
+      contents = re.sub(search, replace, contents)
+    f.write(contents)
 
 
 # Extracts the Android toolchain version and api level from the Android
@@ -205,13 +220,112 @@ def SetupAndroidToolchain(target_arch):
       # correct tree.
       '--extra-cflags=-I' + NDK_ROOT_DIR + '/sysroot/usr/include',
       '--extra-cflags=-I' + NDK_ROOT_DIR + '/sysroot/usr/include/' +
-          toolchain_bin_prefix,
-
+      toolchain_bin_prefix,
       '--extra-cflags=--target=' + toolchain_bin_prefix,
       '--extra-ldflags=--target=' + toolchain_bin_prefix,
       '--extra-ldflags=--gcc-toolchain=' + gcc_toolchain,
       '--target-os=android',
   ]
+
+
+def SetupWindowsCrossCompileToolchain(target_arch):
+  # First retrieve various MSVC and Windows SDK paths.
+  output = subprocess.check_output([
+      os.path.join(CHROMIUM_ROOT_DIR, 'build', 'vs_toolchain.py'),
+      'get_toolchain_dir'
+  ])
+
+  new_args = [
+      '--enable-cross-compile',
+      '--cc=clang-cl',
+      '--ld=lld-link',
+      '--nm=llvm-nm',
+      '--ar=llvm-ar',
+
+      # Separate from optflags because configure strips it from msvc builds...
+      '--extra-cflags=-O2',
+  ]
+
+  if target_arch == 'ia32':
+    new_args += ['--extra-cflags=-m32']
+  if target_arch == 'ia32':
+    target_arch = 'x86'
+
+  # Turn this into a dictionary.
+  win_dirs = gn_helpers.FromGNArgs(output)
+
+  # Use those paths with a second script which will tell us the proper include
+  # and lib paths to specify for cflags and ldflags respectively.
+  output = subprocess.check_output([
+      'python',
+      os.path.join(CHROMIUM_ROOT_DIR, 'build', 'toolchain', 'win',
+                   'setup_toolchain.py'), win_dirs['vs_path'],
+      win_dirs['sdk_path'], win_dirs['runtime_dirs'], 'win', target_arch, 'none'
+  ])
+
+  flags = gn_helpers.FromGNArgs(output)
+  cwd = os.getcwd()
+  for cflag in flags['include_flags_imsvc'].split(' '):
+    # Apparently setup_toolchain prefers relative include paths, which
+    # may work for chrome, but it does not work for ffmpeg, so let's make
+    # them asbolute again.
+    cflag = cflag.strip('"')
+    if cflag.startswith("-imsvc"):
+      cflag = "-imsvc" + os.path.join(cwd, cflag[6:])
+    new_args += ['--extra-cflags=' + cflag]
+
+  # TODO(dalecurtis): Why isn't the ucrt path printed?
+  flags['vc_lib_ucrt_path'] = flags['vc_lib_um_path'].replace('/um/', '/ucrt/')
+
+  # Unlike the cflags, the lib include paths are each in a separate variable.
+  for k in flags:
+    if 'lib' in k:
+      new_args += ['--extra-ldflags=-libpath:' + flags[k]]
+  return new_args
+
+def SetupMacCrossCompileToolchain():
+  # First compute the various SDK paths.
+  mac_min_ver = '10.10'
+  developer_dir =  os.path.join(CHROMIUM_ROOT_DIR, 'build', 'win_files',
+          'Xcode.app', 'Contents', 'Developer')
+  sdk_dir = os.path.join(developer_dir, 'Platforms', 'MacOSX.platform',
+          'Developer', 'SDKs', 'MacOSX' + mac_min_ver + '.sdk')
+
+  # We're guessing about the right sdk path, so warn if we don't find it.
+  if not os.path.exists(sdk_dir):
+      raise Exception("Can't find the mac sdk.  Please see crbug.com/841826")
+
+  frameworks_dir = os.path.join(sdk_dir, "System", "Library", "Frameworks")
+  libs_dir = os.path.join(sdk_dir, "usr", "lib")
+
+  # ld64.lld is a symlink to clang's ld
+  new_args = [
+      '--enable-cross-compile',
+      '--cc=clang',
+      '--ld=ld64.lld',
+      '--nm=llvm-nm',
+      '--ar=llvm-ar',
+      '--target-os=darwin',
+
+      '--extra-cflags=--target=i686-apple-darwin-macho',
+      '--extra-cflags=-F' + frameworks_dir,
+      '--extra-cflags=-mmacosx-version-min=' + mac_min_ver
+  ]
+
+  new_args += [
+      '--extra-cflags=-fblocks',
+      '--extra-cflags=-nostdinc',
+      '--extra-cflags=-isystem%s/usr/include' % sdk_dir,
+      '--extra-cflags=-isystem%s/usr/include/c++/4.2.1' % sdk_dir,
+      '--extra-cflags=-isystem%s/Toolchains/XcodeDefault.xctoolchain'
+      '/usr/lib/clang/8.1.0/include/' % developer_dir,
+      '--extra-ldflags=-syslibroot', '--extra-ldflags=' + sdk_dir,
+      '--extra-ldflags=' + '-L' + libs_dir,
+      '--extra-ldflags=-lSystem',
+      '--extra-ldflags=-macosx_version_min', '--extra-ldflags=' + mac_min_ver,
+      '--extra-ldflags=-sdk_version', '--extra-ldflags=' + mac_min_ver]
+
+  return new_args
 
 
 def BuildFFmpeg(target_os, target_arch, host_os, host_arch, parallel_jobs,
@@ -223,26 +337,47 @@ def BuildFFmpeg(target_os, target_arch, host_os, host_arch, parallel_jobs,
   PrintAndCheckCall(
       [os.path.join(FFMPEG_DIR, 'configure')] + configure_flags, cwd=config_dir)
 
-  RewriteFile(
-      os.path.join(config_dir,
-                   'config.h'), r'(#define HAVE_VALGRIND_VALGRIND_H [01])',
-      (r'#define HAVE_VALGRIND_VALGRIND_H 0 /* \1 -- forced to 0. See https://crbug.com/590440 */'
-      ))
+  # These rewrites force disable various features and should be applied before
+  # attempting the standalone ffmpeg build to make sure compilation succeeds.
+  pre_make_rewrites = [
+      (r'(#define HAVE_VALGRIND_VALGRIND_H [01])',
+       r'#define HAVE_VALGRIND_VALGRIND_H 0 /* \1 -- forced to 0. See '
+       r'https://crbug.com/590440 */')
+  ]
 
   if target_os == 'android':
-    RewriteFile(
-        os.path.join(config_dir,
-                     'config.h'), r'(#define HAVE_POSIX_MEMALIGN [01])',
-        (r'#define HAVE_POSIX_MEMALIGN 0 /* \1 -- forced to 0. See https://crbug.com/604451 */'
-        ))
+    pre_make_rewrites += [
+        (r'(#define HAVE_POSIX_MEMALIGN [01])',
+         r'#define HAVE_POSIX_MEMALIGN 0 /* \1 -- forced to 0. See '
+         r'https://crbug.com/604451 */')
+    ]
 
   # Linux configs is also used on Fuchsia. They are mostly compatible with
   # Fuchsia except that Fuchsia doesn't support sysctl(). On Linux sysctl()
   # isn't actually used, so it's safe to set HAVE_SYSCTL to 0.
   if target_os == 'linux':
-    RewriteFile(
-        os.path.join(config_dir, 'config.h'), r'(#define HAVE_SYSCTL [01])',
-        (r'#define HAVE_SYSCTL 0 /* \1 -- forced to 0 for Fuchsia */'))
+    pre_make_rewrites += [
+        (r'(#define HAVE_SYSCTL [01])',
+         r'#define HAVE_SYSCTL 0 /* \1 -- forced to 0 for Fuchsia */')
+    ]
+
+  # Turn off bcrypt, since we don't have it on Windows builders, but it does
+  # get detected when cross-compiling.
+  if target_os == 'win':
+    pre_make_rewrites += [
+        (r'(#define HAVE_BCRYPT [01])',
+         r'#define HAVE_BCRYPT 0')
+    ]
+
+  # Sanitizers can't compile the h264 code when EBP is used.
+  # Pre-make as ffmpeg fails to compile otherwise.
+  if target_arch == 'ia32':
+    pre_make_rewrites += [
+        (r'(#define HAVE_EBP_AVAILABLE [01])',
+         r'/* \1 -- ebp selection is done by the chrome build */')
+    ]
+
+  RewriteFile(os.path.join(config_dir, 'config.h'), pre_make_rewrites)
 
   # Windows linking resolves external symbols. Since generate_gn.py does not
   # need a functioning set of libraries, ignore unresolved symbols here.
@@ -251,10 +386,19 @@ def BuildFFmpeg(target_os, target_arch, host_os, host_arch, parallel_jobs,
   # triggering mis-detection during configure execution.
   if target_os == 'win':
     RewriteFile(
-        os.path.join(config_dir, 'ffbuild/config.mak'), r'(LDFLAGS=.*)',
-        (r'\1 -FORCE:UNRESOLVED'))
+        os.path.join(config_dir, 'ffbuild/config.mak'), [(r'(LDFLAGS=.*)',
+        r'\1 -FORCE:UNRESOLVED')])
 
-  if target_os in (host_os, host_os + '-noasm', 'android') and not config_only:
+  # TODO(https://crbug.com/840976): Linking when targetting mac on linux is
+  # currently broken.
+  # Replace the linker step with something that just creates the target.
+  if target_os == 'mac' and host_os == 'linux':
+    RewriteFile(
+        os.path.join(config_dir, 'ffbuild/config.mak'), [(r'LD=ld64.lld',
+        r'LD=' + os.path.join(SCRIPTS_DIR, 'fake_linker.py'))])
+
+  if target_os in (host_os, host_os + '-noasm', 'android',
+                   'win', 'mac') and not config_only:
     libraries = [
         os.path.join('libavcodec', GetDsoName(target_os, 'avcodec', 58)),
         os.path.join('libavformat', GetDsoName(target_os, 'avformat', 58)),
@@ -276,20 +420,19 @@ def BuildFFmpeg(target_os, target_arch, host_os, host_arch, parallel_jobs,
           'Host arch : %s\n'
           'Target arch : %s\n' % (host_os, target_os, host_arch, target_arch))
 
-  # Sanitizers can't compile the h264 code when EBP is used.
-  if target_os != 'win' and target_arch == 'ia32':
-    RewriteFile(
-        os.path.join(config_dir, 'config.h'), r'(#define HAVE_EBP_AVAILABLE [01])',
-        (r'/* \1 -- ebp selection is done by the chrome build */'))
+  # These rewrites are necessary to faciliate various Chrome build options.
+  post_make_rewrites = [
+      (r'(#define FFMPEG_CONFIGURATION .*)',
+       r'/* \1 -- elide long configuration string from binary */')
+  ]
 
   if target_arch in ('arm', 'arm-neon', 'arm64'):
-    RewriteFile(
-        os.path.join(config_dir, 'config.h'), r'(#define HAVE_VFP_ARGS [01])',
-        (r'/* \1 -- softfp/hardfp selection is done by the chrome build */'))
-  if target_os == 'win':
-    RewriteFile(
-        os.path.join(config_dir, 'config.h'), r'(#define HAVE_INLINE_ASM [01])',
-        (r'/* \1 -- inline asm selection is done by the chrome build */'))
+    post_make_rewrites += [
+        (r'(#define HAVE_VFP_ARGS [01])',
+         r'/* \1 -- softfp/hardfp selection is done by the chrome build */')
+    ]
+
+  RewriteFile(os.path.join(config_dir, 'config.h'), post_make_rewrites)
 
 
 def main(argv):
@@ -319,7 +462,8 @@ def main(argv):
     target_arch = args[1]
   configure_args = args[2:]
 
-  if target_os not in ('android', 'linux', 'linux-noasm', 'mac', 'win'):
+
+  if target_os not in ('android', 'linux', 'linux-noasm', 'mac', 'win', 'all'):
     parser.print_help()
     return 1
 
@@ -329,56 +473,33 @@ def main(argv):
     return 1
 
   host_os, host_arch = host_tuple
-  parallel_jobs = multiprocessing.cpu_count()
+  parallel_jobs = 8
 
-  if target_os == 'android' and host_os != 'linux' and host_arch != 'x64':
-    print('Android cross compilation can only be done from a linux x64 host.')
+  if target_os.split('-', 1)[0] != host_os and (host_os != 'linux' or
+                                                host_arch != 'x64'):
+    print('Cross compilation can only be done from a linux x64 host.')
     return 1
 
-  if target_arch:
-    print('System information:\n'
-          'Host OS       : %s\n'
-          'Target OS     : %s\n'
-          'Host arch     : %s\n'
-          'Target arch   : %s\n'
-          'Parallel jobs : %d\n' % (host_os, target_os, host_arch, target_arch,
-                                    parallel_jobs))
-    ConfigureAndBuild(target_arch, target_os, host_os, host_arch, parallel_jobs,
-                      configure_args, options=options)
-    return
+  for os in ARCH_MAP.keys():
+    if os != target_os and target_os != 'all':
+      continue
+    for arch in ARCH_MAP[os]:
+      if target_arch and arch != target_arch:
+        continue
 
-  pool_size = len(ARCH_MAP[target_os])
-  parallel_jobs = parallel_jobs / pool_size
-  print('System information:\n'
-        'Host OS       : %s\n'
-        'Target OS     : %s\n'
-        'Host arch     : %s\n'
-        'Target arch   : %s\n'
-        'Parallel jobs : %d\n' % (host_os, target_os, host_arch,
-                                  ARCH_MAP[target_os], parallel_jobs))
-
-  # Setup signal handles such that Ctrl+C works to terminate; will still result
-  # in triggering a bunch of Python2 bugs and log spam, but will exit versus
-  # hanging indefinitely.
-  original_sigint_handler = signal.signal(signal.SIGINT, signal.SIG_IGN)
-  p = multiprocessing.Pool(pool_size)
-  signal.signal(signal.SIGINT, original_sigint_handler)
-  try:
-    result = p.map_async(
-        functools.partial(
-            ConfigureAndBuild,
-            target_os=target_os,
-            host_os=host_os,
-            host_arch=host_arch,
-            parallel_jobs=parallel_jobs,
-            configure_args=configure_args,
-            options=options), ARCH_MAP[target_os])
-    # Timeout required or Ctrl+C is ignored; choose a ridiculous value so that
-    # it doesn't trigger accidentally.
-    result.get(1000)
-  except Exception as e:
-    p.terminate()
-
+      print('System information:\n'
+            'Host OS       : %s\n'
+            'Target OS     : %s\n'
+            'Host arch     : %s\n'
+            'Target arch   : %s\n' % (host_os, os, host_arch, arch))
+      ConfigureAndBuild(
+          arch,
+          os,
+          host_os,
+          host_arch,
+          parallel_jobs,
+          configure_args,
+          options=options)
 
 def ConfigureAndBuild(target_arch, target_os, host_os, host_arch, parallel_jobs,
                       configure_args, options):
@@ -408,6 +529,7 @@ def ConfigureAndBuild(target_arch, target_os, host_os, host_arch, parallel_jobs,
       '--enable-libopus',
 
       # Disable features.
+      '--disable-debug',
       '--disable-bzlib',
       '--disable-error-resilience',
       '--disable-iconv',
@@ -436,8 +558,8 @@ def ConfigureAndBuild(target_arch, target_os, host_os, host_arch, parallel_jobs,
       '--enable-parser=opus,vorbis,flac,mpegaudio',
 
       # Setup include path so Chromium's libopus can be used.
-      '--extra-cflags=-I' +
-      os.path.join(CHROMIUM_ROOT_DIR, 'third_party/opus/src/include'),
+      '--extra-cflags=-I' + os.path.join(CHROMIUM_ROOT_DIR,
+                                         'third_party/opus/src/include'),
 
       # Disable usage of Linux Performance API. Not used in production code, but
       # missing system headers break some Android builds.
@@ -482,7 +604,7 @@ def ConfigureAndBuild(target_arch, target_os, host_os, host_arch, parallel_jobs,
       # them.  http://crbug.com/559379
       if target_os == 'android':
         configure_flags['Common'].extend([
-          '--disable-x86asm',
+            '--disable-x86asm',
         ])
     elif target_arch == 'arm' or target_arch == 'arm-neon':
       # TODO(ihf): ARM compile flags are tricky. The final options
@@ -533,8 +655,8 @@ def ConfigureAndBuild(target_arch, target_os, host_os, host_arch, parallel_jobs,
               '--target-os=linux',
               '--extra-cflags=--target=arm-linux-gnueabihf',
               '--extra-ldflags=--target=arm-linux-gnueabihf',
-              '--sysroot=' + os.path.join(
-                  CHROMIUM_ROOT_DIR, 'build/linux/debian_sid_arm-sysroot'),
+              '--sysroot=' + os.path.join(CHROMIUM_ROOT_DIR,
+                                          'build/linux/debian_sid_arm-sysroot'),
               '--extra-cflags=-mtune=cortex-a8',
               # NOTE: we don't need softfp for this hardware.
               '--extra-cflags=-mfloat-abi=hard',
@@ -560,8 +682,8 @@ def ConfigureAndBuild(target_arch, target_os, host_os, host_arch, parallel_jobs,
             '--target-os=linux',
             '--extra-cflags=--target=aarch64-linux-gnu',
             '--extra-ldflags=--target=aarch64-linux-gnu',
-            '--sysroot=' + os.path.join(
-                CHROMIUM_ROOT_DIR, 'build/linux/debian_sid_arm64-sysroot'),
+            '--sysroot=' + os.path.join(CHROMIUM_ROOT_DIR,
+                                        'build/linux/debian_sid_arm64-sysroot'),
         ])
       configure_flags['Common'].extend([
           '--arch=aarch64',
@@ -571,25 +693,25 @@ def ConfigureAndBuild(target_arch, target_os, host_os, host_arch, parallel_jobs,
     elif target_arch == 'mipsel':
       # These flags taken from android chrome build with target_cpu='mipsel'
       configure_flags['Common'].extend([
-        '--arch=mipsel',
-        '--disable-mips32r6',
-        '--disable-mips32r5',
-        '--disable-mips32r2',
-        '--disable-mipsdsp',
-        '--disable-mipsdspr2',
-        '--disable-msa',
-        '--enable-mipsfpu',
-        '--extra-cflags=-march=mipsel',
-        '--extra-cflags=-mcpu=mips32',
-        # Required to avoid errors about dynamic relocation w/o -fPIC.
-        '--extra-ldflags=-z notext',
+          '--arch=mipsel',
+          '--disable-mips32r6',
+          '--disable-mips32r5',
+          '--disable-mips32r2',
+          '--disable-mipsdsp',
+          '--disable-mipsdspr2',
+          '--disable-msa',
+          '--enable-mipsfpu',
+          '--extra-cflags=-march=mipsel',
+          '--extra-cflags=-mcpu=mips32',
+          # Required to avoid errors about dynamic relocation w/o -fPIC.
+          '--extra-ldflags=-z notext',
       ])
       if target_os == 'linux':
         configure_flags['Common'].extend([
             '--enable-cross-compile',
             '--target-os=linux',
-            '--sysroot=' + os.path.join(
-                CHROMIUM_ROOT_DIR, 'build/linux/debian_sid_mips-sysroot'),
+            '--sysroot=' + os.path.join(CHROMIUM_ROOT_DIR,
+                                        'build/linux/debian_sid_mips-sysroot'),
             '--extra-cflags=--target=mipsel-linux-gnu',
             '--extra-ldflags=--target=mipsel-linux-gnu',
         ])
@@ -652,22 +774,24 @@ def ConfigureAndBuild(target_arch, target_os, host_os, host_arch, parallel_jobs,
     if target_arch not in ['arm64', 'ia32', 'mipsel'] and target_os != 'mac':
       configure_flags['Common'].append('--extra-ldflags=-fuse-ld=lld')
 
-  # Should be run on Mac.
+  # Should be run on Mac, unless we're cross-compiling on Linux.
   if target_os == 'mac':
-    if host_os != 'mac':
+    if host_os != 'mac' and host_os != 'linux':
       print(
-          'Script should be run on a Mac host. If this is not possible\n'
-          'try a merge of config files with new linux ia32 config.h\n'
-          'by hand.\n',
+          'Script should be run on a Mac or Linux host.\n',
           file=sys.stderr)
       return 1
 
-    # Mac dylib building resolves external symbols. We need to explicitly
-    # include -lopus to point to the system libopus so we can build
-    # libavcodec.XX.dylib.
-    configure_flags['Common'].extend([
-        '--extra-libs=-lopus',
-    ])
+    if host_os != 'mac':
+      configure_flags['Common'].extend(SetupMacCrossCompileToolchain())
+    else:
+      # Mac dylib building resolves external symbols. We need to explicitly
+      # include -lopus to point to the system libopus so we can build
+      # libavcodec.XX.dylib.A
+      # For cross-compiling, this doesn't work, and doesn't seem to be needed.
+      configure_flags['Common'].extend([
+          '--extra-libs=-lopus',
+      ])
 
     if target_arch == 'x64':
       configure_flags['Common'].extend([
@@ -683,14 +807,19 @@ def ConfigureAndBuild(target_arch, target_os, host_os, host_arch, parallel_jobs,
 
   # Should be run on Windows.
   if target_os == 'win':
-    if host_os != 'win':
-      print('Script should be run on a Windows host.\n', file=sys.stderr)
-      return 1
-
     configure_flags['Common'].extend([
         '--toolchain=msvc',
         '--extra-cflags=-I' + os.path.join(FFMPEG_DIR, 'chromium/include/win'),
     ])
+
+    if target_arch == 'x64':
+      configure_flags['Common'].extend(['--target-os=win64'])
+    else:
+      configure_flags['Common'].extend(['--target-os=win32'])
+
+    if host_os != 'win':
+      configure_flags['Common'].extend(
+          SetupWindowsCrossCompileToolchain(target_arch))
 
     if 'CYGWIN_NT' in platform.system():
       configure_flags['Common'].extend([
@@ -742,15 +871,17 @@ def ConfigureAndBuild(target_arch, target_os, host_os, host_arch, parallel_jobs,
 
   # Only build Chromium, Chrome for ia32, x86 non-android platforms.
   if target_os != 'android':
-    do_build_ffmpeg('Chromium', configure_flags['Common'] +
-                    configure_flags['Chromium'] + configure_args)
+    do_build_ffmpeg(
+        'Chromium', configure_flags['Common'] + configure_flags['Chromium'] +
+        configure_args)
     do_build_ffmpeg(
         'Chrome',
         configure_flags['Common'] + configure_flags['Chrome'] + configure_args)
   else:
     do_build_ffmpeg('Chromium', configure_flags['Common'] + configure_args)
-    do_build_ffmpeg('Chrome', configure_flags['Common'] +
-                    configure_flags['ChromeAndroid'] + configure_args)
+    do_build_ffmpeg(
+        'Chrome', configure_flags['Common'] + configure_flags['ChromeAndroid'] +
+        configure_args)
 
   if target_os in ['linux', 'linux-noasm']:
     # ChromeOS enables MPEG4 which requires error resilience :(

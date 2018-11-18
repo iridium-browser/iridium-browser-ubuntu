@@ -7,6 +7,7 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "base/callback.h"
 #include "base/macros.h"
@@ -17,6 +18,8 @@
 #include "services/network/public/cpp/simple_url_loader.h"
 #include "services/network/public/cpp/simple_url_loader_stream_consumer.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
+
+class GURL;
 
 namespace net {
 struct NetworkTrafficAnnotationTag;
@@ -41,6 +44,7 @@ class InMemoryDownload {
   // Report download progress with in-memory download backend.
   class Delegate {
    public:
+    virtual void OnDownloadStarted(InMemoryDownload* download) = 0;
     virtual void OnDownloadProgress(InMemoryDownload* download) = 0;
     virtual void OnDownloadComplete(InMemoryDownload* download) = 0;
 
@@ -102,6 +106,7 @@ class InMemoryDownload {
   State state() const { return state_; }
   bool paused() const { return paused_; }
   const base::Time& completion_time() const { return completion_time_; }
+  const std::vector<GURL>& url_chain() const { return url_chain_; }
   scoped_refptr<const net::HttpResponseHeaders> response_headers() const {
     return response_headers_;
   }
@@ -119,6 +124,9 @@ class InMemoryDownload {
 
   // Completion time of download when data is saved as blob.
   base::Time completion_time_;
+
+  // The URL request chain of this download.
+  std::vector<GURL> url_chain_;
 
   // HTTP response headers.
   scoped_refptr<const net::HttpResponseHeaders> response_headers_;
@@ -179,6 +187,15 @@ class InMemoryDownloadImpl : public network::SimpleURLLoaderStreamConsumer,
   // Sends a new network request.
   void SendRequest();
 
+  // Called when the server redirects to another URL.
+  void OnRedirect(const net::RedirectInfo& redirect_info,
+                  const network::ResourceResponseHead& response_head,
+                  std::vector<std::string>* to_be_removed_headers);
+
+  // Called when the response of the final URL is received.
+  void OnResponseStarted(const GURL& final_url,
+                         const network::ResourceResponseHead& response_head);
+
   // Resets local states.
   void Reset();
 
@@ -214,6 +231,9 @@ class InMemoryDownloadImpl : public network::SimpleURLLoaderStreamConsumer,
 
   // Ensures Delegate::OnDownloadComplete is only called once.
   bool completion_notified_;
+
+  // If |OnResponseStarted| is called.
+  bool started_;
 
   // Bounded to main thread task runner.
   base::WeakPtrFactory<InMemoryDownloadImpl> weak_ptr_factory_;

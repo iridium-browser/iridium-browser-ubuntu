@@ -38,6 +38,7 @@ _NAMED_TYPE_INFO = {
     'valid': [
       'GL_QUERY_RESULT_EXT',
       'GL_QUERY_RESULT_AVAILABLE_EXT',
+      'GL_QUERY_RESULT_AVAILABLE_NO_FLUSH_CHROMIUM_EXT',
     ],
   },
   'QueryTarget': {
@@ -109,11 +110,11 @@ _NAMED_TYPE_INFO = {
     ],
     'invalid': [
       'gfx::BufferUsage::SCANOUT_CAMERA_READ_WRITE',
+      'gfx::BufferUsage::CAMERA_AND_CPU_READ_WRITE',
     ],
   },
   'viz::ResourceFormat': {
     'type': 'viz::ResourceFormat',
-    'is_complete': True,
     'valid': [
       'viz::ResourceFormat::RGBA_8888',
       'viz::ResourceFormat::RGBA_4444',
@@ -121,11 +122,23 @@ _NAMED_TYPE_INFO = {
       'viz::ResourceFormat::ALPHA_8',
       'viz::ResourceFormat::LUMINANCE_8',
       'viz::ResourceFormat::RGB_565',
-      'viz::ResourceFormat::ETC1',
+      'viz::ResourceFormat::BGR_565',
       'viz::ResourceFormat::RED_8',
+      'viz::ResourceFormat::RG_88',
       'viz::ResourceFormat::LUMINANCE_F16',
       'viz::ResourceFormat::RGBA_F16',
       'viz::ResourceFormat::R16_EXT',
+      'viz::ResourceFormat::RGBX_8888',
+      'viz::ResourceFormat::BGRX_8888',
+      'viz::ResourceFormat::RGBX_1010102',
+      'viz::ResourceFormat::BGRX_1010102',
+      'viz::ResourceFormat::YVU_420',
+      'viz::ResourceFormat::YUV_420_BIPLANAR',
+      'viz::ResourceFormat::UYVY_422',
+
+    ],
+    'invalid': [
+      'viz::ResourceFormat::ETC1',
     ],
   },
 }
@@ -213,9 +226,6 @@ _FUNCTION_INFO = {
     'decoder_func': 'DoFlush',
     'trace_level': 1,
   },
-  'GenMailbox': {
-    'type': 'NoCommand',
-  },
   'GetError': {
     'type': 'Is',
     'decoder_func': 'GetErrorState()->GetGLError',
@@ -260,10 +270,6 @@ _FUNCTION_INFO = {
     'impl_func': False,
     'client_test': False,
     'trace_level': 1,
-  },
-  'CompressedCopyTextureCHROMIUM': {
-    'decoder_func': 'DoCompressedCopyTextureCHROMIUM',
-    'unit_test': False,
   },
   'GenQueriesEXT': {
     'type': 'GENn',
@@ -311,6 +317,32 @@ _FUNCTION_INFO = {
   },
   'OrderingBarrierCHROMIUM': {
     'type': 'NoCommand',
+  },
+  'TraceBeginCHROMIUM': {
+    'type': 'Custom',
+    'impl_func': False,
+    'client_test': False,
+    'cmd_args': 'GLuint category_bucket_id, GLuint name_bucket_id',
+    'extension': 'CHROMIUM_trace_marker',
+  },
+  'TraceEndCHROMIUM': {
+    'impl_func': False,
+    'client_test': False,
+    'decoder_func': 'DoTraceEndCHROMIUM',
+    'unit_test': False,
+    'extension': 'CHROMIUM_trace_marker',
+  },
+  'SetActiveURLCHROMIUM': {
+    'type': 'Custom',
+    'impl_func': False,
+    'client_test': False,
+    'cmd_args': 'GLuint url_bucket_id',
+  },
+  'ResetActiveURLCHROMIUM': {
+    'impl_func': False,
+    'client_test': False,
+    'decoder_func': 'DoResetActiveURLCHROMIUM',
+    'unit_test': False,
   },
   'InsertFenceSyncCHROMIUM': {
     'type': 'Custom',
@@ -362,20 +394,27 @@ _FUNCTION_INFO = {
   },
   'BeginRasterCHROMIUM': {
     'decoder_func': 'DoBeginRasterCHROMIUM',
+    'type': 'PUT',
+    'count': 16,  # GL_MAILBOX_SIZE_CHROMIUM
     'internal': True,
     'impl_func': False,
     'unit_test': False,
   },
   'RasterCHROMIUM': {
-    'type': 'Data',
-    'internal': True,
     'decoder_func': 'DoRasterCHROMIUM',
-    'data_transfer_methods': ['shm'],
+    'internal': True,
+    'impl_func': True,
+    'cmd_args': 'GLuint raster_shm_id, GLuint raster_shm_offset,'
+                'GLsizeiptr raster_shm_size, GLuint font_shm_id,'
+                'GLuint font_shm_offset, GLsizeiptr font_shm_size',
+    'extension': 'CHROMIUM_raster_transport',
+    'extension_flag': 'chromium_raster_transport',
   },
   'EndRasterCHROMIUM': {
     'decoder_func': 'DoEndRasterCHROMIUM',
-    'impl_func': True,
+    'impl_func': False,
     'unit_test': False,
+    'client_test': False,
   },
   'CreateTransferCacheEntryINTERNAL': {
     'decoder_func': 'DoCreateTransferCacheEntryINTERNAL',
@@ -456,38 +495,24 @@ def main(argv):
 
   os.chdir(base_dir)
 
-  # TODO(backer): Uncomment once the output looks good.
   gen.WriteCommandIds("gpu/command_buffer/common/raster_cmd_ids_autogen.h")
   gen.WriteFormat("gpu/command_buffer/common/raster_cmd_format_autogen.h")
   gen.WriteFormatTest(
     "gpu/command_buffer/common/raster_cmd_format_test_autogen.h")
   gen.WriteGLES2InterfaceHeader(
     "gpu/command_buffer/client/raster_interface_autogen.h")
-  # gen.WriteGLES2InterfaceStub(
-  #   "gpu/command_buffer/client/raster_interface_stub_autogen.h")
-  # gen.WriteGLES2InterfaceStubImpl(
-  #     "gpu/command_buffer/client/raster_interface_stub_impl_autogen.h")
   gen.WriteGLES2ImplementationHeader(
     "gpu/command_buffer/client/raster_implementation_autogen.h")
   gen.WriteGLES2Implementation(
     "gpu/command_buffer/client/raster_implementation_impl_autogen.h")
   gen.WriteGLES2ImplementationUnitTests(
     "gpu/command_buffer/client/raster_implementation_unittest_autogen.h")
-  # gen.WriteGLES2TraceImplementationHeader(
-  #     "gpu/command_buffer/client/raster_trace_implementation_autogen.h")
-  # gen.WriteGLES2TraceImplementation(
-  #     "gpu/command_buffer/client/raster_trace_implementation_impl_autogen.h")
-  # gen.WriteGLES2CLibImplementation(
-  #   "gpu/command_buffer/client/raster_c_lib_autogen.h")
   gen.WriteCmdHelperHeader(
      "gpu/command_buffer/client/raster_cmd_helper_autogen.h")
   gen.WriteServiceImplementation(
     "gpu/command_buffer/service/raster_decoder_autogen.h")
   gen.WriteServiceUnitTests(
     "gpu/command_buffer/service/raster_decoder_unittest_%d_autogen.h")
-  # gen.WriteServiceUnitTestsForExtensions(
-  #   "gpu/command_buffer/service/"
-  #   "raster_cmd_decoder_unittest_extensions_autogen.h")
   gen.WriteServiceUtilsHeader(
     "gpu/command_buffer/service/raster_cmd_validation_autogen.h")
   gen.WriteServiceUtilsImplementation(

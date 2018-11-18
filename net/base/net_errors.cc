@@ -4,11 +4,9 @@
 
 #include "net/base/net_errors.h"
 
-#include "net/quic/core/quic_error_codes.h"
+#include "net/third_party/quic/core/quic_error_codes.h"
 
 namespace net {
-
-const char kErrorDomain[] = "net";
 
 std::string ErrorToString(int error) {
   return "net::" + ErrorToShortString(error);
@@ -18,7 +16,7 @@ std::string ExtendedErrorToString(int error, int extended_error_code) {
   if (error == ERR_QUIC_PROTOCOL_ERROR && extended_error_code != 0) {
     return std::string("net::ERR_QUIC_PROTOCOL_ERROR.") +
            QuicErrorCodeToString(
-               static_cast<QuicErrorCode>(extended_error_code));
+               static_cast<quic::QuicErrorCode>(extended_error_code));
   }
   return ErrorToString(error);
 }

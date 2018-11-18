@@ -11,12 +11,12 @@
 #include "base/win/windows_version.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/app/chrome_dll_resource.h"
-#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/themes/theme_properties.h"
-#include "chrome/browser/ui/layout_constants.h"
+#include "chrome/browser/ui/extensions/hosted_app_browser_controller.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
-#include "chrome/browser/ui/views/profiles/profile_indicator_icon.h"
+#include "chrome/browser/ui/views/frame/hosted_app_button_container.h"
+#include "chrome/browser/ui/views/tabs/new_tab_button.h"
 #include "chrome/browser/ui/views/tabs/tab.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
@@ -26,6 +26,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle_win.h"
 #include "ui/base/theme_provider.h"
+#include "ui/base/win/hwnd_metrics.h"
 #include "ui/display/win/dpi.h"
 #include "ui/display/win/screen_win.h"
 #include "ui/gfx/canvas.h"
@@ -34,37 +35,14 @@
 #include "ui/gfx/image/image.h"
 #include "ui/gfx/scoped_canvas.h"
 #include "ui/strings/grit/ui_strings.h"
-#include "ui/views/resources/grit/views_resources.h"
 #include "ui/views/win/hwnd_util.h"
 #include "ui/views/window/client_view.h"
+#include "ui/views/window/hit_test_utils.h"
 
 HICON GlassBrowserFrameView::throbber_icons_[
     GlassBrowserFrameView::kThrobberIconCount];
 
 namespace {
-// Thickness of the frame edge between the non-client area and the web content.
-const int kClientBorderThickness = 3;
-// Besides the frame border, there's empty space atop the window in restored
-// mode, to use to drag the window around.
-const int kNonClientRestoredExtraThickness = 11;
-// At the window corners the resize area is not actually bigger, but the 16
-// pixels at the end of the top and bottom edges trigger diagonal resizing.
-const int kResizeCornerWidth = 16;
-// How far the profile switcher button is from the left of the minimize button.
-const int kProfileSwitcherButtonOffset = 1;
-// The content edge images have a shadow built into them.
-const int kContentEdgeShadowThickness = 2;
-// In restored mode, the New Tab button isn't at the same height as the caption
-// buttons, but the space will look cluttered if it actually slides under them,
-// so we stop it when the gap between the two is down to 5 px.
-const int kNewTabCaptionRestoredSpacing = 5;
-// In tablet mode, where the New Tab button and the caption buttons are at
-// similar vertical coordinates, we need to reserve a larger, 16 px gap to avoid
-// looking too cluttered.
-const int kNewTabCaptionMaximizedSpacing = 16;
-// There is a small one-pixel strip right above the caption buttons in which the
-// resize border "peeks" through.
-const int kCaptionButtonTopInset = 1;
 
 // Converts the |image| to a Windows icon and returns the corresponding HICON
 // handle. |image| is resized to desired |width| and |height| if needed.
@@ -85,6 +63,19 @@ base::win::ScopedHICON CreateHICONFromSkBitmapSizedTo(
 ///////////////////////////////////////////////////////////////////////////////
 // GlassBrowserFrameView, public:
 
+constexpr char GlassBrowserFrameView::kClassName[];
+
+SkColor GlassBrowserFrameView::GetReadableFeatureColor(
+    SkColor background_color) {
+  // BlendTowardOppositeLuma or IsDark isn't used here because those functions
+  // may use a different value for the dark/light threshold or the upper/lower
+  // bounds to which the color is blended. This will ensure the results of this
+  // function remain unchanged should those other functions behave differently.
+  // This algorithm matches the behaviour for native Windows caption buttons.
+  return color_utils::GetLuma(background_color) < 128 ? SK_ColorWHITE
+                                                      : SK_ColorBLACK;
+}
+
 GlassBrowserFrameView::GlassBrowserFrameView(BrowserFrame* frame,
                                              BrowserView* browser_view)
     : BrowserNonClientFrameView(frame, browser_view),
@@ -95,8 +86,7 @@ GlassBrowserFrameView::GlassBrowserFrameView(BrowserFrame* frame,
       restore_button_(nullptr),
       close_button_(nullptr),
       throbber_running_(false),
-      throbber_frame_(0),
-      tab_strip_observer_(this) {
+      throbber_frame_(0) {
   // We initialize all fields despite some of them being unused in some modes,
   // since it's possible for modes to flip dynamically (e.g. if the user enables
   // a high-contrast theme). Throbber icons are only used when ShowSystemIcon()
@@ -109,17 +99,31 @@ GlassBrowserFrameView::GlassBrowserFrameView(BrowserFrame* frame,
     window_icon_ = new TabIconView(this, nullptr);
     window_icon_->set_is_light(true);
     window_icon_->set_id(VIEW_ID_WINDOW_ICON);
+    // Stop the icon from intercepting clicks intended for the HTSYSMENU region
+    // of the window. Even though it does nothing on click, it will still
+    // prevent us from giving the event back to Windows to handle properly.
+    window_icon_->set_can_process_events_within_subtree(false);
     AddChildView(window_icon_);
   }
 
   if (browser_view->ShouldShowWindowTitle()) {
-    window_title_ =
-        new views::Label(browser_view->GetWindowTitle(),
-                         {gfx::FontList(BrowserFrame::GetTitleFontList())});
+    window_title_ = new views::Label(browser_view->GetWindowTitle());
     window_title_->SetSubpixelRenderingEnabled(false);
     window_title_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
     window_title_->set_id(VIEW_ID_WINDOW_TITLE);
     AddChildView(window_title_);
+  }
+
+  if (extensions::HostedAppBrowserController::IsForExperimentalHostedAppBrowser(
+          browser_view->browser())) {
+    // TODO(alancutter): Avoid snapshotting GetTitlebarFeatureColor() values
+    // here and call it on demand in
+    // HostedAppButtonContainer::UpdateIconsColor() via a delegate interface.
+    SkColor active_color = GetTitlebarFeatureColor(kActive);
+    SkColor inactive_color = GetTitlebarFeatureColor(kInactive);
+    hosted_app_button_container_ = new HostedAppButtonContainer(
+        frame, browser_view, active_color, inactive_color);
+    AddChildView(hosted_app_button_container_);
   }
 
   minimize_button_ =
@@ -138,45 +142,51 @@ GlassBrowserFrameView::~GlassBrowserFrameView() {
 ///////////////////////////////////////////////////////////////////////////////
 // GlassBrowserFrameView, BrowserNonClientFrameView implementation:
 
+bool GlassBrowserFrameView::CaptionButtonsOnLeadingEdge() const {
+  // Because we don't set WS_EX_LAYOUTRTL (which would conflict with Chrome's
+  // own RTL layout logic), Windows always draws the caption buttons on the
+  // right, even when we want to be RTL. See crbug.com/560619.
+  return !ShouldCustomDrawSystemTitlebar() && base::i18n::IsRTL();
+}
+
 gfx::Rect GlassBrowserFrameView::GetBoundsForTabStrip(
     views::View* tabstrip) const {
-  const int x = GetTabStripLeftInset();
-  int end_x = width() - ClientBorderThickness(false);
-  if (!CaptionButtonsOnLeadingEdge()) {
-    end_x = std::min(MinimizeButtonX(), end_x) -
-            (IsMaximized() ? kNewTabCaptionMaximizedSpacing
-                           : kNewTabCaptionRestoredSpacing);
-
-    // The profile switcher button is optionally displayed to the left of the
-    // minimize button.
-    views::View* profile_switcher = GetProfileSwitcherButton();
-    if (profile_switcher) {
-      const int old_end_x = end_x;
-      end_x -= profile_switcher->width() + kProfileSwitcherButtonOffset;
-
-      // In non-tablet mode, allow the new tab button to slide completely
-      // under the profile switcher button.
-      if (!IsMaximized()) {
-        const int new_tab_button_width =
-            GetLayoutSize(NEW_TAB_BUTTON,
-                          browser_view()->tabstrip()->IsIncognito())
-                .width();
-        end_x = std::min(
-            end_x + new_tab_button_width + kNewTabCaptionRestoredSpacing,
-            old_end_x);
-      }
-    }
-  }
+  const int x = CaptionButtonsOnLeadingEdge()
+                    ? (width() - frame()->GetMinimizeButtonOffset())
+                    : 0;
+  int end_x = width();
+  if (!CaptionButtonsOnLeadingEdge())
+    end_x = std::min(MinimizeButtonX(), end_x);
   return gfx::Rect(x, TopAreaHeight(false), std::max(0, end_x - x),
                    tabstrip->GetPreferredSize().height());
 }
 
 int GlassBrowserFrameView::GetTopInset(bool restored) const {
-  return GetClientAreaInsets(restored).top();
+  if (browser_view()->IsTabStripVisible())
+    return TopAreaHeight(restored);
+  return ShouldCustomDrawSystemTitlebar() ? TitlebarHeight(restored) : 0;
 }
 
 int GlassBrowserFrameView::GetThemeBackgroundXInset() const {
   return 0;
+}
+
+bool GlassBrowserFrameView::HasVisibleBackgroundTabShapes(
+    ActiveState active_state) const {
+  // Pre-Win 8, tabs never match the glass frame appearance.
+  if (base::win::GetVersion() < base::win::VERSION_WIN8)
+    return true;
+
+  // Enabling high contrast mode disables the custom-drawn titlebar (so the
+  // system-drawn frame will respect the native frame colors) and enables the
+  // IncreasedContrastThemeSupplier (which does not respect the native frame
+  // colors).
+  // TODO(pkasting): https://crbug.com/831769  Change the architecture of the
+  // high contrast support to respect system colors, then remove this.
+  if (ui::NativeTheme::GetInstanceForNativeUi()->UsesHighContrastColors())
+    return true;
+
+  return BrowserNonClientFrameView::HasVisibleBackgroundTabShapes(active_state);
 }
 
 void GlassBrowserFrameView::UpdateThrobber(bool running) {
@@ -199,15 +209,9 @@ void GlassBrowserFrameView::UpdateThrobber(bool running) {
 
 gfx::Size GlassBrowserFrameView::GetMinimumSize() const {
   gfx::Size min_size(browser_view()->GetMinimumSize());
+  min_size.Enlarge(0, GetTopInset(false));
 
-  // Account for the client area insets.
-  gfx::Insets insets = GetClientAreaInsets(false);
-  min_size.Enlarge(insets.width(), insets.height());
-  // Client area insets do not include the shadow thickness.
-  min_size.Enlarge(2 * kContentEdgeShadowThickness, 0);
-
-  // Ensure that the minimum width is enough to hold a tab strip with minimum
-  // width at its usual insets.
+  // Ensure that the minimum width is enough to hold a min-width tab strip.
   if (browser_view()->IsTabStripVisible()) {
     TabStrip* tabstrip = browser_view()->tabstrip();
     int min_tabstrip_width = tabstrip->GetMinimumSize().width();
@@ -219,15 +223,20 @@ gfx::Size GlassBrowserFrameView::GetMinimumSize() const {
   return min_size;
 }
 
-int GlassBrowserFrameView::GetTabStripLeftInset() const {
-  return incognito_bounds_.right() + GetAvatarIconPadding();
+bool GlassBrowserFrameView::IsSingleTabModeAvailable() const {
+  // We can't paint the special single-tab appearance unless we're
+  // custom-drawing the titlebar.
+  return ShouldCustomDrawSystemTitlebar() &&
+         BrowserNonClientFrameView::IsSingleTabModeAvailable();
 }
 
-void GlassBrowserFrameView::OnBrowserViewInitViewsComplete() {
-  if (browser_view()->tabstrip()) {
-    DCHECK(!tab_strip_observer_.IsObserving(browser_view()->tabstrip()));
-    tab_strip_observer_.Add(browser_view()->tabstrip());
-  }
+bool GlassBrowserFrameView::ShouldDrawStrokes() const {
+  // On Win 7, the tabs are drawn as flat shapes against the glass frame, so
+  // the active tab always has a visible shape and strokes are unnecessary.
+  if (base::win::GetVersion() < base::win::VERSION_WIN8)
+    return false;
+
+  return BrowserNonClientFrameView::ShouldDrawStrokes();
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -251,11 +260,10 @@ gfx::Rect GlassBrowserFrameView::GetWindowBoundsForClientBounds(
     return gfx::Rect(rect);
   }
 
-  gfx::Insets insets = GetClientAreaInsets(false);
-  return gfx::Rect(std::max(0, client_bounds.x() - insets.left()),
-                   std::max(0, client_bounds.y() - insets.top()),
-                   client_bounds.width() + insets.width(),
-                   client_bounds.height() + insets.height());
+  const int top_inset = GetTopInset(false);
+  return gfx::Rect(client_bounds.x(),
+                   std::max(0, client_bounds.y() - top_inset),
+                   client_bounds.width(), client_bounds.height() + top_inset);
 }
 
 namespace {
@@ -280,27 +288,27 @@ int GlassBrowserFrameView::NonClientHitTest(const gfx::Point& point) {
   if (!bounds().Contains(point))
     return HTNOWHERE;
 
-  // See if the point is within the incognito icon or the profile switcher menu.
-  views::View* profile_switcher_view = GetProfileSwitcherButton();
-  if ((profile_indicator_icon() &&
-       profile_indicator_icon()->GetMirroredBounds().Contains(point)) ||
-      (profile_switcher_view &&
-       profile_switcher_view->GetMirroredBounds().Contains(point))) {
-    return HTCLIENT;
+  if (hosted_app_button_container_) {
+    // TODO(alancutter): Assign hit test components to all children and refactor
+    // this entire function call to just be GetHitTestComponent(this, point).
+    int hosted_app_component =
+        views::GetHitTestComponent(hosted_app_button_container_, point);
+    if (hosted_app_component != HTNOWHERE)
+      return hosted_app_component;
   }
 
   int frame_component = frame()->client_view()->NonClientHitTest(point);
 
   // See if we're in the sysmenu region.  We still have to check the tabstrip
   // first so that clicks in a tab don't get treated as sysmenu clicks.
-  int client_border_thickness = ClientBorderThickness(false);
-  gfx::Rect sys_menu_region(
-      client_border_thickness,
-      display::win::ScreenWin::GetSystemMetricsInDIP(SM_CYSIZEFRAME),
-      display::win::ScreenWin::GetSystemMetricsInDIP(SM_CXSMICON),
-      display::win::ScreenWin::GetSystemMetricsInDIP(SM_CYSMICON));
-  if (sys_menu_region.Contains(point))
-    return (frame_component == HTCLIENT) ? HTCLIENT : HTSYSMENU;
+  if (browser_view()->ShouldShowWindowIcon() && frame_component != HTCLIENT) {
+    gfx::Rect sys_menu_region(
+        0, display::win::ScreenWin::GetSystemMetricsInDIP(SM_CYSIZEFRAME),
+        display::win::ScreenWin::GetSystemMetricsInDIP(SM_CXSMICON),
+        display::win::ScreenWin::GetSystemMetricsInDIP(SM_CYSMICON));
+    if (sys_menu_region.Contains(point))
+      return HTSYSMENU;
+  }
 
   if (frame_component != HTNOWHERE)
     return frame_component;
@@ -327,6 +335,10 @@ int GlassBrowserFrameView::NonClientHitTest(const gfx::Point& point) {
                                         sizeof(button_bounds)))) {
       gfx::Rect buttons = gfx::ConvertRectToDIP(display::win::GetDPIScale(),
                                                 gfx::Rect(button_bounds));
+
+      // There is a small one-pixel strip right above the caption buttons in
+      // which the resize border "peeks" through.
+      constexpr int kCaptionButtonTopInset = 1;
       // The sizing region at the window edge above the caption buttons is
       // 1 px regardless of scale factor. If we inset by 1 before converting
       // to DIPs, the precision loss might eliminate this region entirely. The
@@ -341,16 +353,12 @@ int GlassBrowserFrameView::NonClientHitTest(const gfx::Point& point) {
   }
 
   int top_border_thickness = FrameTopBorderThickness(false);
-  // We want the resize corner behavior to apply to the kResizeCornerWidth
-  // pixels at each end of the top and bottom edges.  Because |point|'s x
-  // coordinate is based on the DWM-inset portion of the window (so, it's 0 at
-  // the first pixel inside the left DWM margin), we need to subtract the DWM
-  // margin thickness, which we calculate as the total frame border thickness
-  // minus the nonclient border thickness.
-  const int dwm_margin = FrameBorderThickness() - client_border_thickness;
+  // At the window corners the resize area is not actually bigger, but the 16
+  // pixels at the end of the top and bottom edges trigger diagonal resizing.
+  constexpr int kResizeCornerWidth = 16;
   int window_component = GetHTComponentForFrame(
-      point, top_border_thickness, client_border_thickness,
-      top_border_thickness, kResizeCornerWidth - dwm_margin,
+      point, top_border_thickness, 0, top_border_thickness,
+      kResizeCornerWidth - FrameBorderThickness(),
       frame()->widget_delegate()->CanResize());
   // Fall back to the caption if no other component matches.
   return (window_component == HTNOWHERE) ? HTCAPTION : window_component;
@@ -362,8 +370,19 @@ void GlassBrowserFrameView::UpdateWindowIcon() {
 }
 
 void GlassBrowserFrameView::UpdateWindowTitle() {
-  if (ShowCustomTitle() && !frame()->IsFullscreen())
+  if (ShowCustomTitle() && !frame()->IsFullscreen()) {
+    LayoutTitleBar();
     window_title_->SchedulePaint();
+  }
+}
+
+void GlassBrowserFrameView::ResetWindowControls() {
+  minimize_button_->SetState(views::Button::STATE_NORMAL);
+  maximize_button_->SetState(views::Button::STATE_NORMAL);
+  restore_button_->SetState(views::Button::STATE_NORMAL);
+  close_button_->SetState(views::Button::STATE_NORMAL);
+  if (hosted_app_button_container_)
+    hosted_app_button_container_->UpdateContentSettingViewsVisibility();
 }
 
 void GlassBrowserFrameView::ButtonPressed(views::Button* sender,
@@ -390,28 +409,6 @@ gfx::ImageSkia GlassBrowserFrameView::GetFaviconForTabIconView() {
   return frame()->widget_delegate()->GetWindowIcon();
 }
 
-void GlassBrowserFrameView::TabStripMaxXChanged(TabStrip* tab_strip) {
-  // The profile switcher button's height depends on the position of the new
-  // tab button.
-  if (browser_view()->IsRegularOrGuestSession())
-    LayoutProfileSwitcher();
-}
-
-void GlassBrowserFrameView::TabStripRemovedTabAt(TabStrip* tab_strip,
-                                                 int index) {
-  // The profile switcher button may need to change height here, too.
-  // TabStripMaxXChanged is not enough when a tab other than the last tab is
-  // closed.
-  if (browser_view()->IsRegularOrGuestSession())
-    LayoutProfileSwitcher();
-}
-
-void GlassBrowserFrameView::TabStripDeleted(TabStrip* tab_strip) {
-  // The tab strip is currently never deleted before the frame. If that changes
-  // tab_strip_observer_.Remove(tab_strip) may be needed here.
-  NOTREACHED();
-}
-
 bool GlassBrowserFrameView::IsMaximized() const {
   return frame()->IsMaximized();
 }
@@ -419,32 +416,25 @@ bool GlassBrowserFrameView::IsMaximized() const {
 ///////////////////////////////////////////////////////////////////////////////
 // GlassBrowserFrameView, views::View overrides:
 
+const char* GlassBrowserFrameView::GetClassName() const {
+  return kClassName;
+}
+
+void GlassBrowserFrameView::ChildPreferredSizeChanged(views::View* child) {
+  if (browser_view()->initialized() && child == hosted_app_button_container_)
+    Layout();
+}
+
 void GlassBrowserFrameView::OnPaint(gfx::Canvas* canvas) {
   TRACE_EVENT0("views.frame", "GlassBrowserFrameView::OnPaint");
   if (ShouldCustomDrawSystemTitlebar())
     PaintTitlebar(canvas);
-  if (!browser_view()->IsTabStripVisible())
-    return;
-  if (IsToolbarVisible())
-    PaintToolbarBackground(canvas);
-  if (ClientBorderThickness(false) > 0)
-    PaintClientEdge(canvas);
 }
 
 void GlassBrowserFrameView::Layout() {
   TRACE_EVENT0("views.frame", "GlassBrowserFrameView::Layout");
-  // The profile switcher and incognito icon depends on the caption button
-  // layout, so always call it first.
   if (ShouldCustomDrawSystemTitlebar())
     LayoutCaptionButtons();
-
-  if (browser_view()->IsRegularOrGuestSession())
-    LayoutProfileSwitcher();
-
-  // The incognito area must be laid out even if we're not in incognito as
-  // tab-strip insets depend on it. When not in incognito the bounds will be
-  // zero-width but positioned correctly for the titlebar to start after it.
-  LayoutIncognitoIcon();
 
   if (ShouldCustomDrawSystemTitlebar())
     LayoutTitleBar();
@@ -453,46 +443,13 @@ void GlassBrowserFrameView::Layout() {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// GlassBrowserFrameView, protected:
-
-// BrowserNonClientFrameView:
-AvatarButtonStyle GlassBrowserFrameView::GetAvatarButtonStyle() const {
-  return AvatarButtonStyle::NATIVE;
-}
-
-///////////////////////////////////////////////////////////////////////////////
 // GlassBrowserFrameView, private:
 
-// views::NonClientFrameView:
-bool GlassBrowserFrameView::DoesIntersectRect(const views::View* target,
-                                              const gfx::Rect& rect) const {
-  if (ShouldCustomDrawSystemTitlebar())
-    return BrowserNonClientFrameView::DoesIntersectRect(target, rect);
+void GlassBrowserFrameView::ActivationChanged(bool active) {
+  BrowserNonClientFrameView::ActivationChanged(active);
 
-  // TODO(bsep): This override has "dead zones" where you can't click on the
-  // custom titlebar buttons. It's not clear why it's necessary at all.
-  // Investigate tearing this out.
-  CHECK_EQ(target, this);
-  bool hit_incognito_icon =
-      profile_indicator_icon() &&
-      profile_indicator_icon()->GetMirroredBounds().Intersects(rect);
-  views::View* profile_switcher_view = GetProfileSwitcherButton();
-  bool hit_profile_switcher_button =
-      profile_switcher_view &&
-      profile_switcher_view->GetMirroredBounds().Intersects(rect);
-  return hit_incognito_icon || hit_profile_switcher_button ||
-         !frame()->client_view()->bounds().Intersects(rect);
-}
-
-int GlassBrowserFrameView::ClientBorderThickness(bool restored) const {
-  // The frame ends abruptly at the 1 pixel window border drawn by Windows 10.
-  if (!browser_view()->HasClientEdge())
-    return 0;
-
-  if ((IsMaximized() || frame()->IsFullscreen()) && !restored)
-    return 0;
-
-  return kClientBorderThickness;
+  if (hosted_app_button_container_)
+    hosted_app_button_container_->SetPaintAsActive(active);
 }
 
 int GlassBrowserFrameView::FrameBorderThickness() const {
@@ -502,52 +459,91 @@ int GlassBrowserFrameView::FrameBorderThickness() const {
 }
 
 int GlassBrowserFrameView::FrameTopBorderThickness(bool restored) const {
+  // Restored windows have a smaller top resize handle than the system default.
+  // When maximized, the OS sizes the window such that the border extends beyond
+  // the screen edges. In that case, we must return the default value.
+  if ((!frame()->IsFullscreen() && !IsMaximized()) || restored) {
+    constexpr int kTopResizeFrameArea = 5;
+    return kTopResizeFrameArea;
+  }
+
   // Mouse and touch locations are floored but GetSystemMetricsInDIP is rounded,
   // so we need to floor instead or else the difference will cause the hittest
   // to fail when it ought to succeed.
-  // TODO(robliao): Resolve this GetSystemMetrics call.
-  return std::floor(FrameTopBorderThicknessPx(restored) /
-                    display::win::GetDPIScale());
+  return std::floor(
+      FrameTopBorderThicknessPx(restored) /
+      display::win::ScreenWin::GetScaleFactorForHWND(HWNDForView(this)));
 }
 
 int GlassBrowserFrameView::FrameTopBorderThicknessPx(bool restored) const {
   // Distinct from FrameBorderThickness() because Windows gives maximized
-  // windows an offscreen CYSIZEFRAME-thick region around the edges. The
-  // left/right/bottom edges don't worry about this because we cancel them out
-  // in BrowserDesktopWindowTreeHostWin::GetClientAreaInsets() so the offscreen
+  // windows an offscreen region around the edges. The left/right/bottom edges
+  // don't worry about this because we cancel them out in
+  // BrowserDesktopWindowTreeHostWin::GetClientAreaInsets() so the offscreen
   // area is non-client as far as Windows is concerned. However we can't do this
   // with the top inset because otherwise Windows will give us a standard
   // titlebar. Thus we must compensate here to avoid having UI elements drift
   // off the top of the screen.
   if (frame()->IsFullscreen() && !restored)
     return 0;
-  return GetSystemMetrics(SM_CYSIZEFRAME);
+
+  // Note that this method assumes an equal resize handle thickness on all
+  // sides of the window.
+  // TODO(dfried): Consider having it return a gfx::Insets object instead.
+  return ui::GetFrameThickness(
+      MonitorFromWindow(HWNDForView(this), MONITOR_DEFAULTTONEAREST));
 }
 
 int GlassBrowserFrameView::TopAreaHeight(bool restored) const {
   if (frame()->IsFullscreen() && !restored)
     return 0;
 
-  const int top = FrameTopBorderThickness(restored);
-  // The tab top inset is equal to the height of any shadow region above the
-  // tabs, plus a 1 px top stroke.  In tablet mode, we want to push the
-  // shadow region off the top of the screen but leave the top stroke.
-  return (IsMaximized() && !restored)
-             ? (top - GetLayoutInsets(TAB).top() + 1)
-             : (top + kNonClientRestoredExtraThickness);
+  int top = FrameTopBorderThickness(restored);
+  if (IsMaximized() && !restored)
+    return top;
+
+  // Besides the frame border, there's empty space atop the window in restored
+  // mode, to use to drag the window around.
+  constexpr int kNonClientRestoredExtraThickness = 4;
+  int thickness = kNonClientRestoredExtraThickness;
+  if (EverHasVisibleBackgroundTabShapes()) {
+    thickness =
+        std::max(thickness, BrowserNonClientFrameView::kMinimumDragHeight);
+  }
+  return top + thickness;
 }
 
 int GlassBrowserFrameView::TitlebarMaximizedVisualHeight() const {
-  return display::win::ScreenWin::GetSystemMetricsInDIP(SM_CYCAPTION);
+  int maximized_height =
+      display::win::ScreenWin::GetSystemMetricsInDIP(SM_CYCAPTION);
+  if (hosted_app_button_container_) {
+    // Adding 2px of vertical padding puts at least 1 px of space on the top and
+    // bottom of the element.
+    constexpr int kVerticalPadding = 2;
+    maximized_height =
+        std::max(maximized_height,
+                 hosted_app_button_container_->GetPreferredSize().height() +
+                     kVerticalPadding);
+  }
+  return maximized_height;
 }
 
 int GlassBrowserFrameView::TitlebarHeight(bool restored) const {
   if (frame()->IsFullscreen() && !restored)
     return 0;
   // The titlebar's actual height is the same in restored and maximized, but
-  // some of it is above the screen in tablet mode. See the comment in
+  // some of it is above the screen in maximized mode. See the comment in
   // FrameTopBorderThicknessPx().
   return TitlebarMaximizedVisualHeight() + FrameTopBorderThickness(false);
+}
+
+SkColor GlassBrowserFrameView::GetTitlebarFeatureColor(
+    ActiveState active_state) const {
+  const SkAlpha title_alpha = ShouldPaintAsActive(active_state)
+                                  ? SK_AlphaOPAQUE
+                                  : kInactiveTitlebarFeatureAlpha;
+  return SkColorSetA(GetReadableFeatureColor(GetFrameColor(active_state)),
+                     title_alpha);
 }
 
 int GlassBrowserFrameView::WindowTopY() const {
@@ -576,17 +572,9 @@ bool GlassBrowserFrameView::IsToolbarVisible() const {
       !browser_view()->toolbar()->GetPreferredSize().IsEmpty();
 }
 
-bool GlassBrowserFrameView::CaptionButtonsOnLeadingEdge() const {
-  // Because we don't set WS_EX_LAYOUTRTL (which would conflict with Chrome's
-  // own RTL layout logic), Windows always draws the caption buttons on the
-  // right, even when we want to be RTL. See crbug.com/560619.
-  return !ShouldCustomDrawSystemTitlebar() && base::i18n::IsRTL();
-}
-
 bool GlassBrowserFrameView::ShowCustomIcon() const {
-  // Don't show the window icon when the incognito badge is visible, since
-  // they're competing for the same space.
-  return !profile_indicator_icon() && ShouldCustomDrawSystemTitlebar() &&
+  // Hosted app windows don't include the window icon as per UI mocks.
+  return !hosted_app_button_container_ && ShouldCustomDrawSystemTitlebar() &&
          browser_view()->ShouldShowWindowIcon();
 }
 
@@ -601,10 +589,7 @@ bool GlassBrowserFrameView::ShowSystemIcon() const {
 }
 
 SkColor GlassBrowserFrameView::GetTitlebarColor() const {
-  const ui::ThemeProvider* tp = GetThemeProvider();
-  return ShouldPaintAsActive()
-             ? tp->GetColor(ThemeProperties::COLOR_FRAME)
-             : tp->GetColor(ThemeProperties::COLOR_FRAME_INACTIVE);
+  return GetFrameColor();
 }
 
 Windows10CaptionButton* GlassBrowserFrameView::CreateCaptionButton(
@@ -619,7 +604,6 @@ Windows10CaptionButton* GlassBrowserFrameView::CreateCaptionButton(
 
 void GlassBrowserFrameView::PaintTitlebar(gfx::Canvas* canvas) const {
   TRACE_EVENT0("views.frame", "GlassBrowserFrameView::PaintTitlebar");
-  gfx::Rect tabstrip_bounds = GetBoundsForTabStrip(browser_view()->tabstrip());
 
   cc::PaintFlags flags;
   gfx::ScopedCanvas scoped_canvas(canvas);
@@ -663,17 +647,25 @@ void GlassBrowserFrameView::PaintTitlebar(gfx::Canvas* canvas) const {
           : inactive_border_color);
   canvas->DrawRect(gfx::RectF(0, 0, width() * scale, y), flags);
 
+  const int titlebar_height =
+      browser_view()->IsTabStripVisible()
+          ? GetBoundsForTabStrip(browser_view()->tabstrip()).bottom()
+          : TitlebarHeight(false);
   const gfx::Rect titlebar_rect = gfx::ToEnclosingRect(
-      gfx::RectF(0, y, width() * scale, tabstrip_bounds.bottom() * scale - y));
+      gfx::RectF(0, y, width() * scale, titlebar_height * scale - y));
   // Paint the titlebar first so we have a background if an area isn't covered
   // by the theme image.
   flags.setColor(titlebar_color);
   canvas->DrawRect(titlebar_rect, flags);
   const gfx::ImageSkia frame_image = GetFrameImage();
   if (!frame_image.isNull()) {
-    canvas->TileImageInt(frame_image, 0, 0, titlebar_rect.x(),
-                         titlebar_rect.y(), titlebar_rect.width(),
-                         titlebar_rect.height(), scale);
+    canvas->TileImageInt(frame_image, 0,
+                         ThemeProperties::kFrameHeightAboveTabs -
+                             GetTopInset(false) + titlebar_rect.y(),
+                         titlebar_rect.x(), titlebar_rect.y(),
+                         titlebar_rect.width(), titlebar_rect.height(), scale,
+                         SkShader::kRepeat_TileMode,
+                         SkShader::kMirror_TileMode);
   }
   const gfx::ImageSkia frame_overlay_image = GetFrameOverlayImage();
   if (!frame_overlay_image.isNull()) {
@@ -683,117 +675,8 @@ void GlassBrowserFrameView::PaintTitlebar(gfx::Canvas* canvas) const {
                          frame_overlay_image.height() * scale, true);
   }
 
-  if (ShowCustomTitle()) {
-    const SkAlpha title_alpha =
-        ShouldPaintAsActive() ? SK_AlphaOPAQUE : kInactiveTitlebarFeatureAlpha;
-    const SkColor title_color = SkColorSetA(
-        color_utils::BlendTowardOppositeLuma(titlebar_color, SK_AlphaOPAQUE),
-        title_alpha);
-    window_title_->SetEnabledColor(title_color);
-  }
-}
-
-void GlassBrowserFrameView::PaintClientEdge(gfx::Canvas* canvas) const {
-  // Draw the client edge images.
-  gfx::Rect client_bounds = CalculateClientAreaBounds();
-  const int x = client_bounds.x();
-  const int y = client_bounds.y() + browser_view()->GetToolbarBounds().y();
-  const int right = client_bounds.right();
-  const int bottom = std::max(y, height() - ClientBorderThickness(false));
-
-  const ui::ThemeProvider* tp = GetThemeProvider();
-  if (base::win::GetVersion() < base::win::VERSION_WIN10) {
-    const gfx::ImageSkia* const right_image =
-        tp->GetImageSkiaNamed(IDR_CONTENT_RIGHT_SIDE);
-    const int img_w = right_image->width();
-    const int height = bottom - y;
-    canvas->TileImageInt(*right_image, right, y, img_w, height);
-    canvas->DrawImageInt(
-        *tp->GetImageSkiaNamed(IDR_CONTENT_BOTTOM_RIGHT_CORNER), right, bottom);
-    const gfx::ImageSkia* const bottom_image =
-        tp->GetImageSkiaNamed(IDR_CONTENT_BOTTOM_CENTER);
-    canvas->TileImageInt(*bottom_image, x, bottom, client_bounds.width(),
-                         bottom_image->height());
-    canvas->DrawImageInt(*tp->GetImageSkiaNamed(IDR_CONTENT_BOTTOM_LEFT_CORNER),
-                         x - img_w, bottom);
-    canvas->TileImageInt(*tp->GetImageSkiaNamed(IDR_CONTENT_LEFT_SIDE),
-                         x - img_w, y, img_w, height);
-  }
-  FillClientEdgeRects(x, y, right, bottom,
-                      tp->GetColor(ThemeProperties::COLOR_TOOLBAR), canvas);
-}
-
-void GlassBrowserFrameView::FillClientEdgeRects(int x,
-                                                int y,
-                                                int right,
-                                                int bottom,
-                                                SkColor color,
-                                                gfx::Canvas* canvas) const {
-  gfx::Rect side(x - kClientEdgeThickness, y, kClientEdgeThickness,
-                 bottom + kClientEdgeThickness - y);
-  canvas->FillRect(side, color);
-  canvas->FillRect(gfx::Rect(x, bottom, right - x, kClientEdgeThickness),
-                   color);
-  side.set_x(right);
-  canvas->FillRect(side, color);
-}
-
-void GlassBrowserFrameView::LayoutProfileSwitcher() {
-  DCHECK(browser_view()->IsRegularOrGuestSession());
-
-  View* profile_switcher = GetProfileSwitcherButton();
-  if (!profile_switcher)
-    return;
-
-  gfx::Size button_size = profile_switcher->GetPreferredSize();
-  int button_width = button_size.width();
-  int button_height = button_size.height();
-
-  int button_x;
-  if (CaptionButtonsOnLeadingEdge()) {
-    button_x = width() - frame()->GetMinimizeButtonOffset() +
-               kProfileSwitcherButtonOffset;
-  } else {
-    button_x = MinimizeButtonX() - kProfileSwitcherButtonOffset - button_width;
-  }
-
-  int button_y = WindowTopY();
-  if (IsMaximized()) {
-    // In tablet mode the caption buttons appear only 19 pixels high, but
-    // their contents are aligned as if they were 20 pixels high and extended
-    // 1 pixel off the top of the screen. We position the profile switcher
-    // button the same way to match.
-    button_y -= 1;
-  }
-
-  // Shrink the button height when it's atop part of the tabstrip. In RTL the
-  // new tab button is on the left, so it can never slide under the avatar
-  // button, which is still on the right [http://crbug.com/560619].
-  TabStrip* tabstrip = browser_view()->tabstrip();
-  if (tabstrip && !base::i18n::IsRTL() && tabstrip->GetMaxX() >= button_x)
-    button_height = profile_switcher->GetMinimumSize().height();
-
-  profile_switcher->SetBounds(button_x, button_y, button_width, button_height);
-}
-
-void GlassBrowserFrameView::LayoutIncognitoIcon() {
-  const gfx::Size size(GetIncognitoAvatarIcon().size());
-  int x = ClientBorderThickness(false);
-  // In RTL, the icon needs to start after the caption buttons.
-  if (CaptionButtonsOnLeadingEdge()) {
-    x = width() - frame()->GetMinimizeButtonOffset() +
-        (GetProfileSwitcherButton() ? (GetProfileSwitcherButton()->width() +
-                                       kProfileSwitcherButtonOffset)
-                                    : 0);
-  }
-  const int bottom = GetTopInset(false) + browser_view()->GetTabStripHeight() -
-                     GetAvatarIconPadding();
-  incognito_bounds_.SetRect(
-      x + (profile_indicator_icon() ? GetAvatarIconPadding() : 0),
-      bottom - size.height(), profile_indicator_icon() ? size.width() : 0,
-      size.height());
-  if (profile_indicator_icon())
-    profile_indicator_icon()->SetBoundsRect(incognito_bounds_);
+  if (ShowCustomTitle())
+    window_title_->SetEnabledColor(GetTitlebarFeatureColor(kUseCurrent));
 }
 
 void GlassBrowserFrameView::LayoutTitleBar() {
@@ -804,32 +687,43 @@ void GlassBrowserFrameView::LayoutTitleBar() {
   gfx::Rect window_icon_bounds;
   const int icon_size =
       display::win::ScreenWin::GetSystemMetricsInDIP(SM_CYSMICON);
-  constexpr int kIconMaximizedLeftMargin = 2;
   const int titlebar_visual_height =
       IsMaximized() ? TitlebarMaximizedVisualHeight() : TitlebarHeight(false);
   // Don't include the area above the screen when maximized. However it only
   // looks centered if we start from y=0 when restored.
   const int window_top = IsMaximized() ? WindowTopY() : 0;
-  int x = IsMaximized()
-              ? kIconMaximizedLeftMargin
-              : display::win::ScreenWin::GetSystemMetricsInDIP(SM_CXSIZEFRAME);
+  int next_leading_x =
+      display::win::ScreenWin::GetSystemMetricsInDIP(SM_CXSIZEFRAME);
+  constexpr int kMaximizedLeftMargin = 2;
+  if (IsMaximized())
+    next_leading_x += kMaximizedLeftMargin;
+  int next_trailing_x = MinimizeButtonX();
 
   const int y = window_top + (titlebar_visual_height - icon_size) / 2;
-  window_icon_bounds = gfx::Rect(x, y, icon_size, icon_size);
+  window_icon_bounds = gfx::Rect(next_leading_x, y, icon_size, icon_size);
 
   constexpr int kIconTitleSpacing = 5;
   if (ShowCustomIcon()) {
     window_icon_->SetBoundsRect(window_icon_bounds);
-    x = window_icon_bounds.right() + kIconTitleSpacing;
-  } else if (profile_indicator_icon()) {
-    x = profile_indicator_icon()->bounds().right() + kIconTitleSpacing;
+    next_leading_x = window_icon_bounds.right() + kIconTitleSpacing;
+  }
+
+  if (hosted_app_button_container_) {
+    next_trailing_x = hosted_app_button_container_->LayoutInContainer(
+        next_leading_x, next_trailing_x, window_top, titlebar_visual_height);
   }
 
   if (ShowCustomTitle()) {
+    if (!ShowCustomIcon()) {
+      // This matches native Windows 10 UWP apps that don't have window icons.
+      constexpr int kMinimumTitleLeftBorderMargin = 11;
+      DCHECK_LE(next_leading_x, kMinimumTitleLeftBorderMargin);
+      next_leading_x = kMinimumTitleLeftBorderMargin;
+    }
     window_title_->SetText(browser_view()->GetWindowTitle());
-    const int max_text_width = std::max(0, MinimizeButtonX() - x);
-    window_title_->SetBounds(x, window_icon_bounds.y(), max_text_width,
-                             window_icon_bounds.height());
+    const int max_text_width = std::max(0, next_trailing_x - next_leading_x);
+    window_title_->SetBounds(next_leading_x, window_icon_bounds.y(),
+                             max_text_width, window_icon_bounds.height());
     window_title_->SetAutoColorReadabilityEnabled(false);
   }
 }
@@ -856,28 +750,8 @@ void GlassBrowserFrameView::LayoutCaptionButtons() {
 }
 
 void GlassBrowserFrameView::LayoutClientView() {
-  client_view_bounds_ = CalculateClientAreaBounds();
-}
-
-gfx::Insets GlassBrowserFrameView::GetClientAreaInsets(bool restored) const {
-  if (!browser_view()->IsTabStripVisible()) {
-    const int top =
-        ShouldCustomDrawSystemTitlebar() ? TitlebarHeight(restored) : 0;
-    return gfx::Insets(top, 0, 0, 0);
-  }
-
-  const int top_height = TopAreaHeight(restored);
-  const int border_thickness = ClientBorderThickness(restored);
-  return gfx::Insets(top_height,
-                     border_thickness,
-                     border_thickness,
-                     border_thickness);
-}
-
-gfx::Rect GlassBrowserFrameView::CalculateClientAreaBounds() const {
-  gfx::Rect bounds(GetLocalBounds());
-  bounds.Inset(GetClientAreaInsets(false));
-  return bounds;
+  client_view_bounds_ = GetLocalBounds();
+  client_view_bounds_.Inset(0, GetTopInset(false), 0, 0);
 }
 
 void GlassBrowserFrameView::StartThrobber() {

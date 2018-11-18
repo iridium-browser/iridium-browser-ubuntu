@@ -5,6 +5,7 @@
 #include "components/drive/drive_uploader.h"
 
 #include <algorithm>
+#include <memory>
 #include <utility>
 
 #include "base/bind.h"
@@ -111,8 +112,7 @@ struct DriveUploader::UploadFileInfo {
     }
   }
 
-  ~UploadFileInfo() {
-  }
+  ~UploadFileInfo() = default;
 
   // Useful for printf debugging.
   std::string DebugString() const {
@@ -181,7 +181,7 @@ DriveUploader::DriveUploader(
       wake_lock_provider_(std::move(wake_lock_provider)),
       weak_ptr_factory_(this) {}
 
-DriveUploader::~DriveUploader() {}
+DriveUploader::~DriveUploader() = default;
 
 CancelCallback DriveUploader::UploadNewFile(
     const std::string& parent_resource_id,
@@ -199,9 +199,9 @@ CancelCallback DriveUploader::UploadNewFile(
   DCHECK(!callback.is_null());
 
   return StartUploadFile(
-      std::unique_ptr<UploadFileInfo>(
-          new UploadFileInfo(local_file_path, content_type, callback,
-                             progress_callback, wake_lock_provider_.get())),
+      std::make_unique<UploadFileInfo>(local_file_path, content_type, callback,
+                                       progress_callback,
+                                       wake_lock_provider_.get()),
       base::Bind(&DriveUploader::CallUploadServiceAPINewFile,
                  weak_ptr_factory_.GetWeakPtr(), parent_resource_id, title,
                  options, current_batch_request_));
@@ -231,9 +231,9 @@ CancelCallback DriveUploader::UploadExistingFile(
   DCHECK(!callback.is_null());
 
   return StartUploadFile(
-      std::unique_ptr<UploadFileInfo>(
-          new UploadFileInfo(local_file_path, content_type, callback,
-                             progress_callback, wake_lock_provider_.get())),
+      std::make_unique<UploadFileInfo>(local_file_path, content_type, callback,
+                                       progress_callback,
+                                       wake_lock_provider_.get()),
       base::Bind(&DriveUploader::CallUploadServiceAPIExistingFile,
                  weak_ptr_factory_.GetWeakPtr(), resource_id, options,
                  current_batch_request_));
@@ -309,7 +309,7 @@ void DriveUploader::CallUploadServiceAPINewFile(
   if (info_ptr->content_length <= kMaxMultipartUploadSize) {
     DriveServiceBatchOperationsInterface* service;
     // If this is a batched request, calls the API on the request instead.
-    if (batch_request.get()) {
+    if (batch_request) {
       service = batch_request->configurator();
       RecordDriveUploadProtocol(UPLOAD_METHOD_BATCH);
     } else {
@@ -344,7 +344,7 @@ void DriveUploader::CallUploadServiceAPIExistingFile(
   if (info_ptr->content_length <= kMaxMultipartUploadSize) {
     DriveServiceBatchOperationsInterface* service;
     // If this is a batched request, calls the API on the request instead.
-    if (batch_request.get()) {
+    if (batch_request) {
       service = batch_request->configurator();
       RecordDriveUploadProtocol(UPLOAD_METHOD_BATCH);
     } else {

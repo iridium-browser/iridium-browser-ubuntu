@@ -12,6 +12,8 @@ source_set("tab_grid") {
     "tab_grid_coordinator.mm",
     "tab_grid_mediator.h",
     "tab_grid_mediator.mm",
+    "tab_grid_url_loader.h",
+    "tab_grid_url_loader.mm",
   ]
 
   configs += [ "//build/config/compiler:enable_arc" ]
@@ -21,16 +23,25 @@ source_set("tab_grid") {
     "grid:grid_ui",
     "//base",
     "//components/favicon/ios",
+    "//components/sessions",
     "//ios/chrome/browser",
     "//ios/chrome/browser/browser_state",
+    "//ios/chrome/browser/sessions",
+    "//ios/chrome/browser/sessions:serialisation",
     "//ios/chrome/browser/snapshots",
     "//ios/chrome/browser/tabs",
+    "//ios/chrome/browser/ui",
     "//ios/chrome/browser/ui/commands",
     "//ios/chrome/browser/ui/coordinators:chrome_coordinators",
+    "//ios/chrome/browser/ui/history",
+    "//ios/chrome/browser/ui/history/public",
     "//ios/chrome/browser/ui/main",
-    "//ios/chrome/browser/ui/tab_switcher",
+    "//ios/chrome/browser/ui/main:tab_switcher",
+    "//ios/chrome/browser/ui/recent_tabs",
+    "//ios/chrome/browser/ui/recent_tabs:recent_tabs_ui",
     "//ios/chrome/browser/web",
     "//ios/chrome/browser/web_state_list",
+    "//ios/chrome/browser/web_state_list/web_usage_enabler",
     "//ios/web",
     "//ui/gfx",
   ]
@@ -67,11 +78,17 @@ source_set("tab_grid_ui") {
     "resources:new_tab_toolbar_button_incognito",
     "resources:page_control_assets",
     "//base",
+    "//base:i18n",
     "//ios/chrome/app/strings",
     "//ios/chrome/browser",
+    "//ios/chrome/browser/crash_report",
     "//ios/chrome/browser/ui:ui_util",
+    "//ios/chrome/browser/ui/commands",
+    "//ios/chrome/browser/ui/recent_tabs:recent_tabs_ui",
     "//ios/chrome/browser/ui/tab_grid/transitions",
-    "//ios/chrome/browser/ui/util:constraints_ui",
+    "//ios/chrome/browser/ui/table_view:styler",
+    "//ios/chrome/common/ui_util",
+    "//ios/web/public",
     "//ui/base",
   ]
 }
@@ -92,7 +109,7 @@ source_set("unit_tests") {
     "//ios/chrome/browser",
     "//ios/chrome/browser/browser_state:test_support",
     "//ios/chrome/browser/tabs",
-    "//ios/chrome/browser/ui/tab_switcher",
+    "//ios/chrome/browser/ui/main:tab_switcher",
     "//ios/chrome/browser/web",
     "//ios/chrome/browser/web:test_support",
     "//ios/chrome/browser/web_state_list",
@@ -117,12 +134,12 @@ source_set("egtest_support") {
     ":tab_grid_ui",
     "grid:grid_ui",
     "//base",
+    "//base/test:test_support",
     "//ios/chrome/app/strings",
     "//ios/chrome/browser/ui:ui_util",
-    "//ios/chrome/browser/ui/tools_menu/public",
+    "//ios/chrome/browser/ui/recent_tabs:recent_tabs_ui",
     "//ios/chrome/test/app:test_support",
     "//ios/chrome/test/earl_grey:test_support",
-    "//ios/testing:ios_test_support",
     "//ios/third_party/earl_grey:earl_grey+link",
     "//ui/base",
   ]
@@ -133,11 +150,18 @@ source_set("eg_tests") {
   testonly = true
   sources = [
     "tab_grid_egtest.mm",
+    "tab_grid_transition_egtest.mm",
   ]
 
   deps = [
     ":egtest_support",
+    "//ios/chrome/app:app_internal",
+    "//ios/chrome/app/strings:ios_strings_grit",
+    "//ios/chrome/browser/tabs:tabs",
+    "//ios/chrome/browser/ui/tab_grid:tab_grid_ui",
+    "//ios/chrome/test/app:test_support",
     "//ios/chrome/test/earl_grey:test_support",
+    "//ios/web/public/test/http_server",
   ]
   libs = [ "XCTest.framework" ]
 }

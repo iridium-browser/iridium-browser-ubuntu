@@ -40,8 +40,9 @@
 #include "components/url_formatter/url_formatter.h"
 #include "components/variations/net/variations_http_headers.h"
 #include "net/base/escape.h"
-#include "net/url_request/url_fetcher.h"
-#include "net/url_request/url_request_status.h"
+#include "services/network/public/cpp/resource_response.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
+#include "services/network/public/cpp/simple_url_loader.h"
 #include "third_party/metrics_proto/omnibox_event.pb.h"
 #include "third_party/metrics_proto/omnibox_input_type.pb.h"
 #include "url/gurl.h"
@@ -129,8 +130,14 @@ void ZeroSuggestProvider::Start(const AutocompleteInput& input,
   TRACE_EVENT0("omnibox", "ZeroSuggestProvider::Start");
   matches_.clear();
   Stop(true, false);
-  if (!input.from_omnibox_focus() || client()->IsOffTheRecord() ||
-      input.type() == metrics::OmniboxInputType::INVALID)
+  if (!input.from_omnibox_focus() || client()->IsOffTheRecord())
+    return;
+
+  // Zero suggest is allowed to run in the Chrome OS app_list context
+  // with invalid (empty) input.
+  if (input.type() == metrics::OmniboxInputType::INVALID &&
+      input.current_page_classification() !=
+          metrics::OmniboxEventProto::CHROMEOS_APP_LIST)
     return;
 
   result_type_running_ = NONE;
@@ -143,7 +150,7 @@ void ZeroSuggestProvider::Start(const AutocompleteInput& input,
   current_url_match_ = MatchForCurrentURL();
 
   GURL suggest_url = ContextualSuggestionsService::ContextualSuggestionsUrl(
-      /*current_url=*/"", client()->GetTemplateURLService());
+      /*current_url=*/"", input, client()->GetTemplateURLService());
   if (!suggest_url.is_valid())
     return;
 
@@ -153,9 +160,6 @@ void ZeroSuggestProvider::Start(const AutocompleteInput& input,
 
   done_ = false;
 
-  // TODO(jered): Consider adding locally-sourced zero-suggestions here too.
-  // These may be useful on the NTP or more relevant to the user than server
-  // suggestions, if based on local browsing history.
   MaybeUseCachedSuggestions();
 
   if (result_type_running_ == MOST_VISITED) {
@@ -177,23 +181,26 @@ void ZeroSuggestProvider::Start(const AutocompleteInput& input,
   const std::string current_url = result_type_running_ == DEFAULT_SERP_FOR_URL
                                       ? current_query_
                                       : std::string();
-  // Create a request for suggestions with |this| as the fetcher delegate.
+  // Create a request for suggestions, routing completion to
+  // OnContextualSuggestionsLoaderAvailable.
   client()
       ->GetContextualSuggestionsService(/*create_if_necessary=*/true)
       ->CreateContextualSuggestionsRequest(
-          current_url, client()->GetCurrentVisitTimestamp(),
+          current_url, client()->GetCurrentVisitTimestamp(), input,
           client()->GetTemplateURLService(),
-          /*fetcher_delegate=*/this,
           base::BindOnce(
-              &ZeroSuggestProvider::OnContextualSuggestionsFetcherAvailable,
-              weak_ptr_factory_.GetWeakPtr()));
+              &ZeroSuggestProvider::OnContextualSuggestionsLoaderAvailable,
+              weak_ptr_factory_.GetWeakPtr()),
+          base::BindOnce(
+              &ZeroSuggestProvider::OnURLLoadComplete,
+              base::Unretained(this) /* this owns SimpleURLLoader */));
 }
 
 void ZeroSuggestProvider::Stop(bool clear_cached_results,
                                bool due_to_user_inactivity) {
-  if (fetcher_)
+  if (loader_)
     LogOmniboxZeroSuggestRequest(ZERO_SUGGEST_REQUEST_INVALIDATED);
-  fetcher_.reset();
+  loader_.reset();
   auto* contextual_suggestions_service =
       client()->GetContextualSuggestionsService(/*create_if_necessary=*/false);
   // contextual_suggestions_service can be null if in incognito mode.
@@ -258,8 +265,9 @@ ZeroSuggestProvider::ZeroSuggestProvider(
       client->GetTemplateURLService();
   // Template URL service can be null in tests.
   if (template_url_service != nullptr) {
+    AutocompleteInput empty_input;
     GURL suggest_url = ContextualSuggestionsService::ContextualSuggestionsUrl(
-        /*current_url=*/"", template_url_service);
+        /*current_url=*/"", /*empty input*/ empty_input, template_url_service);
     // To check whether this is allowed, use an arbitrary insecure (http) URL
     // as the URL we'd want suggestions for.  The value of OTHER as the current
     // page classification is to correspond with that URL.
@@ -310,16 +318,21 @@ void ZeroSuggestProvider::RecordDeletionResult(bool success) {
   }
 }
 
-void ZeroSuggestProvider::OnURLFetchComplete(const net::URLFetcher* source) {
+void ZeroSuggestProvider::OnURLLoadComplete(
+    const network::SimpleURLLoader* source,
+    std::unique_ptr<std::string> response_body) {
   DCHECK(!done_);
-  DCHECK_EQ(fetcher_.get(), source);
+  DCHECK_EQ(loader_.get(), source);
 
   LogOmniboxZeroSuggestRequest(ZERO_SUGGEST_REPLY_RECEIVED);
 
   const bool results_updated =
-      source->GetStatus().is_success() && source->GetResponseCode() == 200 &&
-      UpdateResults(SearchSuggestionParser::ExtractJsonData(source));
-  fetcher_.reset();
+      response_body && source->NetError() == net::OK &&
+      (source->ResponseInfo() && source->ResponseInfo()->headers &&
+       source->ResponseInfo()->headers->response_code() == 200) &&
+      UpdateResults(SearchSuggestionParser::ExtractJsonData(
+          source, std::move(response_body)));
+  loader_.reset();
   done_ = true;
   result_type_running_ = NONE;
   ++most_visited_request_num_;
@@ -407,10 +420,12 @@ void ZeroSuggestProvider::OnMostVisitedUrlsAvailable(
   listener_->OnProviderUpdate(true);
 }
 
-void ZeroSuggestProvider::OnContextualSuggestionsFetcherAvailable(
-    std::unique_ptr<net::URLFetcher> fetcher) {
-  fetcher_ = std::move(fetcher);
-  fetcher_->Start();
+void ZeroSuggestProvider::OnContextualSuggestionsLoaderAvailable(
+    std::unique_ptr<network::SimpleURLLoader> loader) {
+  // ContextualSuggestionsService has already started |loader|, so here it's
+  // only neccessary to grab its ownership until results come in to
+  // OnURLLoadComplete().
+  loader_ = std::move(loader);
   LogOmniboxZeroSuggestRequest(ZERO_SUGGEST_REQUEST_SENT);
 }
 
@@ -433,9 +448,9 @@ void ZeroSuggestProvider::ConvertResultsToAutocompleteMatches() {
   const int num_query_results = map.size();
   const int num_nav_results = results_.navigation_results.size();
   const int num_results = num_query_results + num_nav_results;
-  UMA_HISTOGRAM_COUNTS("ZeroSuggest.QueryResults", num_query_results);
-  UMA_HISTOGRAM_COUNTS("ZeroSuggest.URLResults", num_nav_results);
-  UMA_HISTOGRAM_COUNTS("ZeroSuggest.AllResults", num_results);
+  UMA_HISTOGRAM_COUNTS_1M("ZeroSuggest.QueryResults", num_query_results);
+  UMA_HISTOGRAM_COUNTS_1M("ZeroSuggest.URLResults", num_nav_results);
+  UMA_HISTOGRAM_COUNTS_1M("ZeroSuggest.AllResults", num_results);
 
   // Show Most Visited results after ZeroSuggest response is received.
   if (result_type_running_ == MOST_VISITED) {
@@ -444,7 +459,7 @@ void ZeroSuggestProvider::ConvertResultsToAutocompleteMatches() {
     matches_.push_back(current_url_match_);
     int relevance = 600;
     if (num_results > 0) {
-      UMA_HISTOGRAM_COUNTS(
+      UMA_HISTOGRAM_COUNTS_1M(
           "Omnibox.ZeroSuggest.MostVisitedResultsCounterfactual",
           most_visited_urls_.size());
     }
@@ -465,18 +480,19 @@ void ZeroSuggestProvider::ConvertResultsToAutocompleteMatches() {
   if (num_results == 0)
     return;
 
-  // TODO(jered): Rip this out once the first match is decoupled from the
-  // current typing in the omnibox.
-  matches_.push_back(current_url_match_);
-
+  // Normally |current_url_match_.destination_url| should be valid unless it is
+  // under particular page context.
+  DCHECK(current_page_classification_ ==
+             metrics::OmniboxEventProto::CHROMEOS_APP_LIST ||
+         current_url_match_.destination_url.is_valid());
+  if (current_url_match_.destination_url.is_valid())
+    matches_.push_back(current_url_match_);
   for (MatchMap::const_iterator it(map.begin()); it != map.end(); ++it)
     matches_.push_back(it->second);
 
   const SearchSuggestionParser::NavigationResults& nav_results(
       results_.navigation_results);
-  for (SearchSuggestionParser::NavigationResults::const_iterator it(
-           nav_results.begin());
-       it != nav_results.end(); ++it) {
+  for (auto it = nav_results.begin(); it != nav_results.end(); ++it) {
     matches_.push_back(NavigationToMatch(*it));
   }
 }
@@ -508,13 +524,27 @@ bool ZeroSuggestProvider::AllowZeroSuggestSuggestions(
   if (client()->IsOffTheRecord())
     return false;
 
-  // Only show zero suggest for HTTP[S] pages.
-  // TODO(mariakhomenko): We may be able to expand this set to include pages
-  // with other schemes (e.g. chrome://). That may require improvements to
-  // the formatting of the verbatim result returned by MatchForCurrentURL().
-  if (!current_page_url.is_valid() ||
-      ((current_page_url.scheme() != url::kHttpScheme) &&
-      (current_page_url.scheme() != url::kHttpsScheme)))
+  if (base::FeatureList::IsEnabled(
+          omnibox::kOmniboxPopupShortcutIconsInZeroState)) {
+    return false;
+  }
+
+  // Only show zero suggest for pages with URLs the user will recognize
+  // if it is not running in ChromeOS app_list context.
+  // This list intentionally does not include items such as ftp: and file:
+  // because (a) these do not work on Android and iOS, where non-contextual
+  // zero suggest is launched and (b) on desktop, where contextual zero suggest
+  // is running, these types of schemes aren't eligible to be sent to the
+  // server to ask for suggestions (and thus in practice we won't display zero
+  // suggest for them).
+  if (current_page_classification_ !=
+          metrics::OmniboxEventProto::CHROMEOS_APP_LIST &&
+      (!current_page_url.is_valid() ||
+       ((current_page_url.scheme() != url::kHttpScheme) &&
+        (current_page_url.scheme() != url::kHttpsScheme) &&
+        (current_page_url.scheme() != url::kAboutScheme) &&
+        (current_page_url.scheme() !=
+         client()->GetEmbedderRepresentationOfAboutScheme()))))
     return false;
 
   return true;
@@ -538,10 +568,6 @@ void ZeroSuggestProvider::MaybeUseCachedSuggestions() {
 ZeroSuggestProvider::ResultType ZeroSuggestProvider::TypeOfResultToRun(
     const GURL& current_url,
     const GURL& suggest_url) {
-  // TODO(jered): Consider adding locally-sourced zero-suggestions here too.
-  // These may be useful on the NTP or more relevant to the user than server
-  // suggestions, if based on local browsing history.
-
   // Check if the URL can be sent in any suggest request.
   const TemplateURLService* template_url_service =
       client()->GetTemplateURLService();
@@ -571,6 +597,11 @@ ZeroSuggestProvider::ResultType ZeroSuggestProvider::TypeOfResultToRun(
   // Check if zero suggestions are allowed in the current context.
   if (!AllowZeroSuggestSuggestions(current_url))
     return NONE;
+
+  if (current_page_classification_ ==
+      metrics::OmniboxEventProto::CHROMEOS_APP_LIST) {
+    return DEFAULT_SERP;
+  }
 
   if (OmniboxFieldTrial::InZeroSuggestPersonalizedFieldTrial())
     return PersonalizedServiceShouldFallBackToMostVisited(

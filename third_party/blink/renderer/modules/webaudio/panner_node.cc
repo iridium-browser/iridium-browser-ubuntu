@@ -23,17 +23,17 @@
  * DAMAGE.
  */
 
-#include "third_party/blink/renderer/bindings/core/v8/exception_messages.h"
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
+#include "third_party/blink/renderer/modules/webaudio/panner_node.h"
+
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_buffer_source_node.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_node_input.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_node_output.h"
 #include "third_party/blink/renderer/modules/webaudio/base_audio_context.h"
-#include "third_party/blink/renderer/modules/webaudio/panner_node.h"
 #include "third_party/blink/renderer/modules/webaudio/panner_options.h"
 #include "third_party/blink/renderer/platform/audio/hrtf_panner.h"
+#include "third_party/blink/renderer/platform/bindings/exception_messages.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/histogram.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
 
@@ -591,10 +591,11 @@ void PannerHandler::SetChannelCount(unsigned long channel_count,
     }
   } else {
     exception_state.ThrowDOMException(
-        kNotSupportedError, ExceptionMessages::IndexOutsideRange<unsigned long>(
-                                "channelCount", channel_count, 1,
-                                ExceptionMessages::kInclusiveBound, 2,
-                                ExceptionMessages::kInclusiveBound));
+        DOMExceptionCode::kNotSupportedError,
+        ExceptionMessages::IndexOutsideRange<unsigned long>(
+            "channelCount", channel_count, 1,
+            ExceptionMessages::kInclusiveBound, 2,
+            ExceptionMessages::kInclusiveBound));
   }
 }
 
@@ -612,7 +613,7 @@ void PannerHandler::SetChannelCountMode(const String& mode,
   } else if (mode == "max") {
     // This is not supported for a PannerNode, which can only handle 1 or 2
     // channels.
-    exception_state.ThrowDOMException(kNotSupportedError,
+    exception_state.ThrowDOMException(DOMExceptionCode::kNotSupportedError,
                                       "Panner: 'max' is not allowed");
     new_channel_count_mode_ = old_mode;
   } else {
@@ -662,30 +663,42 @@ bool PannerHandler::RequiresTailProcessing() const {
 
 PannerNode::PannerNode(BaseAudioContext& context)
     : AudioNode(context),
-      position_x_(AudioParam::Create(context,
-                                     kParamTypePannerPositionX,
-                                     "Panner.positionX",
-                                     0.0)),
-      position_y_(AudioParam::Create(context,
-                                     kParamTypePannerPositionY,
-                                     "Panner.positionY",
-                                     0.0)),
-      position_z_(AudioParam::Create(context,
-                                     kParamTypePannerPositionZ,
-                                     "Panner.positionZ",
-                                     0.0)),
-      orientation_x_(AudioParam::Create(context,
-                                        kParamTypePannerOrientationX,
-                                        "Panner.orientationX",
-                                        1.0)),
-      orientation_y_(AudioParam::Create(context,
-                                        kParamTypePannerOrientationY,
-                                        "Panner.orientationY",
-                                        0.0)),
-      orientation_z_(AudioParam::Create(context,
-                                        kParamTypePannerOrientationZ,
-                                        "Panner.orientationZ",
-                                        0.0)) {
+      position_x_(
+          AudioParam::Create(context,
+                             kParamTypePannerPositionX,
+                             0.0,
+                             AudioParamHandler::AutomationRate::kAudio,
+                             AudioParamHandler::AutomationRateMode::kVariable)),
+      position_y_(
+          AudioParam::Create(context,
+                             kParamTypePannerPositionY,
+                             0.0,
+                             AudioParamHandler::AutomationRate::kAudio,
+                             AudioParamHandler::AutomationRateMode::kVariable)),
+      position_z_(
+          AudioParam::Create(context,
+                             kParamTypePannerPositionZ,
+                             0.0,
+                             AudioParamHandler::AutomationRate::kAudio,
+                             AudioParamHandler::AutomationRateMode::kVariable)),
+      orientation_x_(
+          AudioParam::Create(context,
+                             kParamTypePannerOrientationX,
+                             1.0,
+                             AudioParamHandler::AutomationRate::kAudio,
+                             AudioParamHandler::AutomationRateMode::kVariable)),
+      orientation_y_(
+          AudioParam::Create(context,
+                             kParamTypePannerOrientationY,
+                             0.0,
+                             AudioParamHandler::AutomationRate::kAudio,
+                             AudioParamHandler::AutomationRateMode::kVariable)),
+      orientation_z_(AudioParam::Create(
+          context,
+          kParamTypePannerOrientationZ,
+          0.0,
+          AudioParamHandler::AutomationRate::kAudio,
+          AudioParamHandler::AutomationRateMode::kVariable)) {
   SetHandler(PannerHandler::Create(
       *this, context.sampleRate(), position_x_->Handler(),
       position_y_->Handler(), position_z_->Handler(), orientation_x_->Handler(),
@@ -727,10 +740,10 @@ PannerNode* PannerNode::Create(BaseAudioContext* context,
 
   node->setRefDistance(options.refDistance(), exception_state);
   node->setMaxDistance(options.maxDistance(), exception_state);
-  node->setRolloffFactor(options.rolloffFactor());
+  node->setRolloffFactor(options.rolloffFactor(), exception_state);
   node->setConeInnerAngle(options.coneInnerAngle());
   node->setConeOuterAngle(options.coneOuterAngle());
-  node->setConeOuterGain(options.coneOuterGain());
+  node->setConeOuterGain(options.coneOuterGain(), exception_state);
 
   return node;
 }
@@ -776,9 +789,9 @@ double PannerNode::refDistance() const {
 void PannerNode::setRefDistance(double distance,
                                 ExceptionState& exception_state) {
   if (distance < 0) {
-    exception_state.ThrowDOMException(
-        kV8RangeError, ExceptionMessages::IndexExceedsMinimumBound<double>(
-                           "refDistance", distance, 0));
+    exception_state.ThrowRangeError(
+        ExceptionMessages::IndexExceedsMinimumBound<double>("refDistance",
+                                                            distance, 0));
     return;
   }
 
@@ -792,9 +805,9 @@ double PannerNode::maxDistance() const {
 void PannerNode::setMaxDistance(double distance,
                                 ExceptionState& exception_state) {
   if (distance <= 0) {
-    exception_state.ThrowDOMException(
-        kV8RangeError, ExceptionMessages::IndexExceedsMinimumBound<double>(
-                           "maxDistance", distance, 0));
+    exception_state.ThrowRangeError(
+        ExceptionMessages::IndexExceedsMinimumBound<double>("maxDistance",
+                                                            distance, 0));
     return;
   }
 
@@ -805,7 +818,15 @@ double PannerNode::rolloffFactor() const {
   return GetPannerHandler().RolloffFactor();
 }
 
-void PannerNode::setRolloffFactor(double factor) {
+void PannerNode::setRolloffFactor(double factor,
+                                  ExceptionState& exception_state) {
+  if (factor < 0) {
+    exception_state.ThrowRangeError(
+        ExceptionMessages::IndexExceedsMinimumBound<double>("rolloffFactor",
+                                                            factor, 0));
+    return;
+  }
+
   GetPannerHandler().SetRolloffFactor(factor);
 }
 
@@ -829,7 +850,17 @@ double PannerNode::coneOuterGain() const {
   return GetPannerHandler().ConeOuterGain();
 }
 
-void PannerNode::setConeOuterGain(double gain) {
+void PannerNode::setConeOuterGain(double gain,
+                                  ExceptionState& exception_state) {
+  if (gain < 0 || gain > 1) {
+    exception_state.ThrowDOMException(
+        DOMExceptionCode::kInvalidStateError,
+        ExceptionMessages::IndexOutsideRange<double>(
+            "coneOuterGain", gain, 0, ExceptionMessages::kInclusiveBound, 1,
+            ExceptionMessages::kInclusiveBound));
+    return;
+  }
+
   GetPannerHandler().SetConeOuterGain(gain);
 }
 

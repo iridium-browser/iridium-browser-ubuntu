@@ -41,8 +41,8 @@ import template_expander
 class StylePropertyShorthandWriter(json5_generator.Writer):
     class_name = 'StylePropertyShorthand'
 
-    def __init__(self, json5_file_paths):
-        super(StylePropertyShorthandWriter, self).__init__([])
+    def __init__(self, json5_file_paths, output_dir):
+        super(StylePropertyShorthandWriter, self).__init__([], output_dir)
         self._input_files = json5_file_paths
         self._outputs = {
             'style_property_shorthand.cc':
@@ -65,7 +65,7 @@ class StylePropertyShorthandWriter(json5_generator.Writer):
             # alphabetically
             longhands.sort(
                 key=lambda property_: (
-                    -len(property_['longhand_property_ids']), property_['name'])
+                    -len(property_['longhand_property_ids']), property_['name'].original)
             )
 
     @template_expander.use_jinja(

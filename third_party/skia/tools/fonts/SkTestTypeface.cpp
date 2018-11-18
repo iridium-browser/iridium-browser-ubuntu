@@ -19,8 +19,9 @@
 #include "SkRect.h"
 #include "SkScalerContext.h"
 #include "SkString.h"
-#include "SkTestTypeface.h"
 #include "SkTDArray.h"
+#include "SkTestTypeface.h"
+#include "SkTo.h"
 #include "SkUtils.h"
 
 #include <utility>
@@ -46,10 +47,10 @@ SkTestFont::~SkTestFont() {
     delete[] fPaths;
 }
 
-int SkTestFont::codeToIndex(SkUnichar charCode) const {
-    for (unsigned index = 0; index < fCharCodesCount; ++index) {
-        if (fCharCodes[index] == (unsigned) charCode) {
-            return (int) index;
+SkGlyphID SkTestFont::glyphForUnichar(SkUnichar charCode) const {
+    for (size_t index = 0; index < fCharCodesCount; ++index) {
+        if (fCharCodes[index] == charCode) {
+            return SkTo<SkGlyphID>(index);
         }
     }
     return 0;
@@ -119,17 +120,16 @@ void SkTestTypeface::onFilterRec(SkScalerContextRec* rec) const {
     rec->setHinting(SkPaint::kNo_Hinting);
 }
 
+void SkTestTypeface::getGlyphToUnicodeMap(SkUnichar* glyphToUnicode) const {
+    unsigned glyphCount = fTestFont->fCharCodesCount;
+    for (unsigned gid = 0; gid < glyphCount; ++gid) {
+        glyphToUnicode[gid] = SkTo<SkUnichar>(fTestFont->fCharCodes[gid]);
+    }
+}
+
 std::unique_ptr<SkAdvancedTypefaceMetrics> SkTestTypeface::onGetAdvancedMetrics() const { // pdf only
     std::unique_ptr<SkAdvancedTypefaceMetrics> info(new SkAdvancedTypefaceMetrics);
     info->fFontName.set(fTestFont->fName);
-    int glyphCount = this->onCountGlyphs();
-
-    SkTDArray<SkUnichar>& toUnicode = info->fGlyphToUnicode;
-    toUnicode.setCount(glyphCount);
-    SkASSERT(glyphCount == SkToInt(fTestFont->fCharCodesCount));
-    for (int gid = 0; gid < glyphCount; ++gid) {
-        toUnicode[gid] = SkToS32(fTestFont->fCharCodes[gid]);
-    }
     return info;
 }
 
@@ -140,12 +140,12 @@ void SkTestTypeface::onGetFontDescriptor(SkFontDescriptor* desc, bool* isLocal) 
 }
 
 int SkTestTypeface::onCharsToGlyphs(const void* chars, Encoding encoding,
-                                    uint16_t glyphs[], int glyphCount) const {
+                                    SkGlyphID glyphs[], int glyphCount) const {
     auto utf8  = (const      char*)chars;
     auto utf16 = (const  uint16_t*)chars;
     auto utf32 = (const SkUnichar*)chars;
 
-    for (int i = 0; i < glyphCount; i++) {
+    for (int i = 0; i < glyphCount; ++i) {
         SkUnichar ch;
         switch (encoding) {
             case kUTF8_Encoding:  ch =  SkUTF8_NextUnichar(&utf8 ); break;
@@ -153,7 +153,7 @@ int SkTestTypeface::onCharsToGlyphs(const void* chars, Encoding encoding,
             case kUTF32_Encoding: ch =                    *utf32++; break;
         }
         if (glyphs) {
-            glyphs[i] = fTestFont->codeToIndex(ch);
+            glyphs[i] = fTestFont->glyphForUnichar(ch);
         }
     }
     return glyphCount;
@@ -195,13 +195,14 @@ protected:
         return glyph;
     }
 
-    void generateAdvance(SkGlyph* glyph) override {
+    bool generateAdvance(SkGlyph* glyph) override {
         this->getTestTypeface()->getAdvance(glyph);
 
         const SkVector advance = fMatrix.mapXY(SkFloatToScalar(glyph->fAdvanceX),
                                                SkFloatToScalar(glyph->fAdvanceY));
         glyph->fAdvanceX = SkScalarToFloat(advance.fX);
         glyph->fAdvanceY = SkScalarToFloat(advance.fY);
+        return true;
     }
 
     void generateMetrics(SkGlyph* glyph) override {

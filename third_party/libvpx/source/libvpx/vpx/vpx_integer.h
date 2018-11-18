@@ -8,8 +8,8 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef VPX_VPX_INTEGER_H_
-#define VPX_VPX_INTEGER_H_
+#ifndef VPX_VPX_VPX_INTEGER_H_
+#define VPX_VPX_VPX_INTEGER_H_
 
 /* get ptrdiff_t, size_t, wchar_t, NULL */
 #include <stddef.h>
@@ -18,7 +18,7 @@
 #define VPX_FORCE_INLINE __forceinline
 #define VPX_INLINE __inline
 #else
-#define VPX_FORCE_INLINE __inline__ __attribute__(always_inline)
+#define VPX_FORCE_INLINE __inline__ __attribute__((always_inline))
 // TODO(jbb): Allow a way to force inline off for older compilers.
 #define VPX_INLINE inline
 #endif
@@ -60,4 +60,4 @@ typedef size_t uintptr_t;
 #include <inttypes.h>
 #endif
 
-#endif  // VPX_VPX_INTEGER_H_
+#endif  // VPX_VPX_VPX_INTEGER_H_

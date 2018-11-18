@@ -167,8 +167,8 @@ class AlertsTest(testing_common.TestCase):
         id='Sheriff2', email='sullivan@google.com').put()
     mean_frame_time = utils.TestKey(
         'ChromiumGPU/linux-release/scrolling-benchmark/mean_frame_time')
-    anomalies = anomaly.Anomaly.query(
-        anomaly.Anomaly.test == mean_frame_time).fetch()
+    anomalies, _, _ = anomaly.Anomaly.QueryAsync(
+        test=mean_frame_time).get_result()
     for anomaly_entity in anomalies:
       anomaly_entity.sheriff = sheriff2_key
       anomaly_entity.put()
@@ -197,13 +197,14 @@ class AlertsTest(testing_common.TestCase):
 
   def testPost_AnomalyCursorSet_ReturnsNextCursorAndShowMore(self):
     self._AddAlertsToDataStore()
-    alerts._MAX_ANOMALIES_TO_SHOW = 5  # So we can test paging.
     # Need to post to the app once to get the initial cursor.
-    response = self.testapp.post('/alerts', {})
+    response = self.testapp.post('/alerts', {'max_anomalies_to_show': 5})
     anomaly_list = self.GetJsonValue(response, 'anomaly_list')
     anomaly_cursor = self.GetJsonValue(response, 'anomaly_cursor')
 
-    response = self.testapp.post('/alerts', {'anomaly_cursor': anomaly_cursor})
+    response = self.testapp.post(
+        '/alerts',
+        {'anomaly_cursor': anomaly_cursor, 'max_anomalies_to_show': 5})
     anomaly_list2 = self.GetJsonValue(response, 'anomaly_list')
     anomalies_show_more = self.GetJsonValue(response, 'show_more_anomalies')
     anomaly_cursor = self.GetJsonValue(response, 'anomaly_cursor')

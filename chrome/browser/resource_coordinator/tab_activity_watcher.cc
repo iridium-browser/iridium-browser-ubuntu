@@ -5,8 +5,12 @@
 #include "chrome/browser/resource_coordinator/tab_activity_watcher.h"
 
 #include "base/metrics/histogram_macros.h"
+#include "base/no_destructor.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/resource_coordinator/tab_metrics_logger.h"
+#include "chrome/browser/resource_coordinator/tab_ranker/mru_features.h"
+#include "chrome/browser/resource_coordinator/tab_ranker/tab_features.h"
+#include "chrome/browser/resource_coordinator/tab_ranker/window_features.h"
 #include "chrome/browser/resource_coordinator/time.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -24,9 +28,6 @@
 #include "content/public/browser/web_contents_user_data.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
 #include "third_party/blink/public/platform/web_input_event.h"
-
-DEFINE_WEB_CONTENTS_USER_DATA_KEY(
-    resource_coordinator::TabActivityWatcher::WebContentsData);
 
 // Use a 1-day max for tab visibility histograms since it's not uncommon to keep
 // a tab in the same visibility state for a very long time (see Tab.VisibleTime
@@ -48,6 +49,31 @@ class TabActivityWatcher::WebContentsData
  public:
   ~WebContentsData() override = default;
 
+  // Calculates the tab reactivation score for a background tab. Returns nullopt
+  // if the score could not be calculated, e.g. because the tab is in the
+  // foreground.
+  base::Optional<float> CalculateReactivationScore() {
+    if (web_contents()->IsBeingDestroyed() || backgrounded_time_.is_null())
+      return base::nullopt;
+
+    const Browser* browser = chrome::FindBrowserWithWebContents(web_contents());
+    if (!browser)
+      return base::nullopt;
+
+    tab_ranker::TabFeatures tab = TabMetricsLogger::GetTabFeatures(
+        browser, tab_metrics_, NowTicks() - backgrounded_time_);
+    tab_ranker::WindowFeatures window =
+        WindowActivityWatcher::CreateWindowFeatures(browser);
+
+    float score;
+    tab_ranker::TabRankerResult result =
+        TabActivityWatcher::GetInstance()->predictor_.ScoreTab(
+            tab, window, GetMRUFeatures(), &score);
+    if (result == tab_ranker::TabRankerResult::kSuccess)
+      return score;
+    return base::nullopt;
+  }
+
   // Call when the associated WebContents has been replaced.
   void WasReplaced() { was_replaced_ = true; }
 
@@ -66,6 +92,9 @@ class TabActivityWatcher::WebContentsData
     // Copy the replaced tab's stats.
     tab_metrics_.page_metrics = replaced_tab.tab_metrics_.page_metrics;
     tab_metrics_.page_transition = replaced_tab.tab_metrics_.page_transition;
+
+    // Record previous ukm_source_id from the |replaced_tab|.
+    previous_ukm_source_id_ = replaced_tab.ukm_source_id_;
   }
 
   // Call when the WebContents is detached from its tab. If the tab is later
@@ -110,6 +139,7 @@ class TabActivityWatcher::WebContentsData
 
  private:
   friend class content::WebContentsUserData<WebContentsData>;
+  friend class TabActivityWatcher;
 
   explicit WebContentsData(content::WebContents* web_contents)
       : WebContentsObserver(web_contents) {
@@ -121,6 +151,11 @@ class TabActivityWatcher::WebContentsData
 
     // A navigation may already have completed if this is a replacement tab.
     ukm_source_id_ = ukm::GetSourceIdForWebContentsDocument(web_contents);
+
+    // When a tab is discarded, a new null_web_contents will be created (with
+    // WasDiscarded set as true) applied as a replacement of the discarded tab.
+    // We want to record this discarded state for later logging.
+    discarded_since_backgrounded_ = web_contents->WasDiscarded();
   }
 
   void WasHidden() {
@@ -143,6 +178,7 @@ class TabActivityWatcher::WebContentsData
     }
 
     backgrounded_time_ = NowTicks();
+    discarded_since_backgrounded_ = false;
     LogTabIfBackgrounded();
   }
 
@@ -155,13 +191,19 @@ class TabActivityWatcher::WebContentsData
       return;
 
     // Log the event before updating times.
+    const ukm::SourceId source_id = discarded_since_backgrounded_
+                                        ? previous_ukm_source_id_
+                                        : ukm_source_id_;
     TabActivityWatcher::GetInstance()
         ->tab_metrics_logger_->LogBackgroundTabShown(
-            ukm_source_id_, NowTicks() - backgrounded_time_, GetMRUMetrics());
+            source_id, NowTicks() - backgrounded_time_, GetMRUFeatures(),
+            discarded_since_backgrounded_);
 
     backgrounded_time_ = base::TimeTicks();
     foregrounded_time_ = NowTicks();
     creation_time_ = NowTicks();
+
+    tab_metrics_.page_metrics.num_reactivations++;
   }
 
   // content::WebContentsObserver:
@@ -254,19 +296,8 @@ class TabActivityWatcher::WebContentsData
     if (was_replaced_)
       return;
 
-    TabActivityWatcher::GetInstance()->tab_metrics_logger_->LogTabLifetime(
-        ukm_source_id_, NowTicks() - navigation_time_);
-
-    if (!backgrounded_time_.is_null()) {
-      // TODO(michaelpg): When closing multiple tabs, log the tab metrics as
-      // they were before any tabs started to close. Currently, we log each tab
-      // one by one as the tabstrip closes, so metrics like MRUIndex are
-      // different than what they were when the close event started.
-      // See https://crbug.com/817174.
-      TabActivityWatcher::GetInstance()
-          ->tab_metrics_logger_->LogBackgroundTabClosed(
-              ukm_source_id_, NowTicks() - backgrounded_time_, GetMRUMetrics());
-    }
+    // Log necessary metrics.
+    TabActivityWatcher::GetInstance()->OnTabClosed(this);
   }
 
   // content::RenderWidgetHost::InputEventObserver:
@@ -282,38 +313,57 @@ class TabActivityWatcher::WebContentsData
   // Iterates through tabstrips to determine the index of |contents| in
   // most-recently-used order out of all non-incognito tabs.
   // Linear in the number of tabs (most users have <10 tabs open).
-  TabMetricsLogger::MRUMetrics GetMRUMetrics() {
-    TabMetricsLogger::MRUMetrics mru_metrics;
+  tab_ranker::MRUFeatures GetMRUFeatures() {
+    const auto& all_closing_tabs =
+        TabActivityWatcher::GetInstance()->all_closing_tabs_;
+    // If in closing_all mode, directly returns current |mru_features_|.
+    if (all_closing_tabs.find(this) != all_closing_tabs.end()) {
+      return mru_features_;
+    }
+
+    // If not in closing_all mode, calculate |mru_features_|.
+    mru_features_.index = 0;
+    mru_features_.total = 0;
     for (Browser* browser : *BrowserList::GetInstance()) {
       // Ignore incognito browsers.
       if (browser->profile()->IsOffTheRecord())
         continue;
 
       int count = browser->tab_strip_model()->count();
-      mru_metrics.total += count;
+      mru_features_.total += count;
 
       // Increment the MRU index for each WebContents that was foregrounded more
       // recently than this one.
       for (int i = 0; i < count; i++) {
         auto* other = WebContentsData::FromWebContents(
             browser->tab_strip_model()->GetWebContentsAt(i));
-        if (this == other)
+        if (!other || this == other)
           continue;
 
-        // Sort by foregrounded time, then creation time. Both tabs will have a
-        // foregrounded time of 0 if they were never foregrounded.
-        if (foregrounded_time_ < other->foregrounded_time_ ||
-            (foregrounded_time_ == other->foregrounded_time_ &&
-             creation_time_ < other->creation_time_)) {
-          mru_metrics.index++;
-        }
+        if (!MoreRecentlyUsed(this, other))
+          mru_features_.index++;
       }
     }
-    return mru_metrics;
+    return mru_features_;
+  }
+
+  // Returns whether |webcontents_a| is more recently used than |webcontents_b|.
+  // A webcontents is more recently used iff it has larger (later)
+  // |foregrounded_time_|; or |creation_time_| if they were never foregrounded.
+  static bool MoreRecentlyUsed(
+      TabActivityWatcher::WebContentsData* webcontents_a,
+      TabActivityWatcher::WebContentsData* const webcontents_b) {
+    return webcontents_a->foregrounded_time_ >
+               webcontents_b->foregrounded_time_ ||
+           (webcontents_a->foregrounded_time_ ==
+                webcontents_b->foregrounded_time_ &&
+            webcontents_a->creation_time_ > webcontents_b->creation_time_);
   }
 
   // Updated when a navigation is finished.
   ukm::SourceId ukm_source_id_ = 0;
+  // Recorded when a WebContents is replaced by another.
+  ukm::SourceId previous_ukm_source_id_ = 0;
 
   // When the tab was created.
   base::TimeTicks creation_time_;
@@ -345,6 +395,13 @@ class TabActivityWatcher::WebContentsData
   // The last time at which |visibility_| changed.
   base::TimeTicks last_visibility_change_time_ = NowTicks();
 
+  // MRUFeatures of this WebContents, updated only before ForegroundedOrClosed
+  // event is logged.
+  tab_ranker::MRUFeatures mru_features_;
+
+  // Whether this tab is currently in discarded state.
+  bool discarded_since_backgrounded_ = false;
+
   DISALLOW_COPY_AND_ASSIGN(WebContentsData);
 };
 
@@ -359,6 +416,15 @@ TabActivityWatcher::TabActivityWatcher()
 }
 
 TabActivityWatcher::~TabActivityWatcher() = default;
+
+base::Optional<float> TabActivityWatcher::CalculateReactivationScore(
+    content::WebContents* web_contents) {
+  WebContentsData* web_contents_data =
+      WebContentsData::FromWebContents(web_contents);
+  if (!web_contents_data)
+    return base::nullopt;
+  return web_contents_data->CalculateReactivationScore();
+}
 
 void TabActivityWatcher::OnBrowserSetLastActive(Browser* browser) {
   if (browser->tab_strip_model()->closing_all())
@@ -377,35 +443,45 @@ void TabActivityWatcher::OnBrowserSetLastActive(Browser* browser) {
     web_contents_data->TabWindowActivated();
 }
 
-void TabActivityWatcher::TabInsertedAt(TabStripModel* tab_strip_model,
-                                       content::WebContents* contents,
-                                       int index,
-                                       bool foreground) {
-  // Ensure the WebContentsData is created to observe this WebContents since it
-  // may represent a newly created tab.
-  WebContentsData::CreateForWebContents(contents);
-  WebContentsData::FromWebContents(contents)->TabInserted(foreground);
-}
+void TabActivityWatcher::OnTabStripModelChanged(
+    TabStripModel* tab_strip_model,
+    const TabStripModelChange& change,
+    const TabStripSelectionChange& selection) {
+  switch (change.type()) {
+    case TabStripModelChange::kInserted: {
+      for (const auto& delta : change.deltas()) {
+        // Ensure the WebContentsData is created to observe this WebContents
+        // since it may represent a newly created tab.
+        WebContentsData::CreateForWebContents(delta.insert.contents);
+        WebContentsData::FromWebContents(delta.insert.contents)
+            ->TabInserted(selection.new_contents == delta.insert.contents);
+      }
+      break;
+    }
+    case TabStripModelChange::kRemoved: {
+      for (const auto& delta : change.deltas())
+        WebContentsData::FromWebContents(delta.remove.contents)->TabDetached();
+      break;
+    }
+    case TabStripModelChange::kReplaced: {
+      for (const auto& delta : change.deltas()) {
+        WebContentsData* old_web_contents_data =
+            WebContentsData::FromWebContents(delta.replace.old_contents);
+        old_web_contents_data->WasReplaced();
 
-void TabActivityWatcher::TabDetachedAt(content::WebContents* contents,
-                                       int index) {
-  WebContentsData::FromWebContents(contents)->TabDetached();
-}
+        // Ensure the WebContentsData is created to observe this WebContents
+        // since it likely hasn't been inserted into a tabstrip before.
+        WebContentsData::CreateForWebContents(delta.replace.new_contents);
 
-void TabActivityWatcher::TabReplacedAt(TabStripModel* tab_strip_model,
-                                       content::WebContents* old_contents,
-                                       content::WebContents* new_contents,
-                                       int index) {
-  WebContentsData* old_web_contents_data =
-      WebContentsData::FromWebContents(old_contents);
-  old_web_contents_data->WasReplaced();
-
-  // Ensure the WebContentsData is created to observe this WebContents since it
-  // likely hasn't been inserted into a tabstrip before.
-  WebContentsData::CreateForWebContents(new_contents);
-
-  WebContentsData::FromWebContents(new_contents)
-      ->DidReplace(*old_web_contents_data);
+        WebContentsData::FromWebContents(delta.replace.new_contents)
+            ->DidReplace(*old_web_contents_data);
+      }
+      break;
+    }
+    case TabStripModelChange::kMoved:
+    case TabStripModelChange::kSelectionOnly:
+      break;
+  }
 }
 
 void TabActivityWatcher::TabPinnedStateChanged(TabStripModel* tab_strip_model,
@@ -416,6 +492,9 @@ void TabActivityWatcher::TabPinnedStateChanged(TabStripModel* tab_strip_model,
 
 bool TabActivityWatcher::ShouldTrackBrowser(Browser* browser) {
   // Don't track incognito browsers. This is also enforced by UKM.
+  // TODO(michaelpg): Keep counters for incognito browsers so we can score them
+  // using the TabScorePredictor. We should be able to do this without logging
+  // these values.
   return !browser->profile()->IsOffTheRecord();
 }
 
@@ -425,8 +504,79 @@ void TabActivityWatcher::ResetForTesting() {
 
 // static
 TabActivityWatcher* TabActivityWatcher::GetInstance() {
-  CR_DEFINE_STATIC_LOCAL(TabActivityWatcher, instance, ());
-  return &instance;
+  static base::NoDestructor<TabActivityWatcher> instance;
+  return instance.get();
+}
+
+// When a WillCloseAllTabs is invoked, all MRU index of that tab_strip_model
+// is calculated and saved at that point.
+void TabActivityWatcher::WillCloseAllTabs(TabStripModel* tab_strip_model) {
+  if (tab_strip_model) {
+    // Put all web_contents_data into a vector.
+    std::vector<WebContentsData*> web_contents_data;
+    for (Browser* browser : *BrowserList::GetInstance()) {
+      // Ignore incognito browsers.
+      if (browser->profile()->IsOffTheRecord())
+        continue;
+
+      const int count = browser->tab_strip_model()->count();
+
+      for (int i = 0; i < count; i++) {
+        auto* other = WebContentsData::FromWebContents(
+            browser->tab_strip_model()->GetWebContentsAt(i));
+        if (other)
+          web_contents_data.push_back(other);
+      }
+    }
+
+    // Sort all web_contents_data by MoreRecentlyUsed.
+    std::sort(web_contents_data.begin(), web_contents_data.end(),
+              WebContentsData::MoreRecentlyUsed);
+
+    // Assign index for each web_contents_data.
+    const std::size_t total_tabs = web_contents_data.size();
+    for (std::size_t i = 0; i < total_tabs; ++i) {
+      WebContentsData* const contents_i = web_contents_data[i];
+      contents_i->mru_features_.index = i;
+      contents_i->mru_features_.total = total_tabs;
+    }
+
+    // Add will_be_closed tabs to |all_closing_tabs_| set.
+    int count = tab_strip_model->count();
+    for (int i = 0; i < count; i++) {
+      auto* other = WebContentsData::FromWebContents(
+          tab_strip_model->GetWebContentsAt(i));
+      all_closing_tabs_.insert(other);
+    }
+  }
+}
+
+// Clears all_closing_tabs_ if CloseAllTabs is canceled or completed.
+void TabActivityWatcher::CloseAllTabsStopped(TabStripModel* tab_strip_model,
+                                             CloseAllStoppedReason reason) {
+  all_closing_tabs_.clear();
+}
+
+void TabActivityWatcher::OnTabClosed(WebContentsData* web_contents_data) {
+  // Log TabLifetime event.
+  tab_metrics_logger_->LogTabLifetime(
+      web_contents_data->ukm_source_id_,
+      NowTicks() - web_contents_data->navigation_time_);
+
+  // Log ForegroundedOrClosed event.
+  if (!web_contents_data->backgrounded_time_.is_null()) {
+    const ukm::SourceId source_id =
+        web_contents_data->discarded_since_backgrounded_
+            ? web_contents_data->previous_ukm_source_id_
+            : web_contents_data->ukm_source_id_;
+
+    tab_metrics_logger_->LogBackgroundTabClosed(
+        source_id, NowTicks() - web_contents_data->backgrounded_time_,
+        web_contents_data->GetMRUFeatures(),
+        web_contents_data->discarded_since_backgrounded_);
+  }
+  // Erase the pointer in |all_closing_tabs_| only when all logging finished.
+  all_closing_tabs_.erase(web_contents_data);
 }
 
 }  // namespace resource_coordinator

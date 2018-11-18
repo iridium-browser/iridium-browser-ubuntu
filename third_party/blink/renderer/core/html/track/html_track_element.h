@@ -44,6 +44,9 @@ class HTMLTrackElement final : public HTMLElement,
  public:
   DECLARE_NODE_FACTORY(HTMLTrackElement);
 
+  // Returns attributes that should be checked against Trusted Types
+  const HashSet<AtomicString>& GetCheckedAttributeNames() const override;
+
   const AtomicString& kind();
   void setKind(const AtomicString&);
 
@@ -53,7 +56,7 @@ class HTMLTrackElement final : public HTMLElement,
 
   TextTrack* track();
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  private:
   explicit HTMLTrackElement(Document&);
@@ -61,9 +64,9 @@ class HTMLTrackElement final : public HTMLElement,
 
   void ParseAttribute(const AttributeModificationParams&) override;
 
-  InsertionNotificationRequest InsertedInto(ContainerNode*) override;
+  InsertionNotificationRequest InsertedInto(ContainerNode&) override;
 
-  void RemovedFrom(ContainerNode*) override;
+  void RemovedFrom(ContainerNode&) override;
   bool IsURLAttribute(const Attribute&) const override;
 
   // TextTrackLoaderClient

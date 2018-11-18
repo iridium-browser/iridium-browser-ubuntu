@@ -31,65 +31,83 @@
 #include "third_party/blink/renderer/core/editing/visible_units.h"
 
 #include "third_party/blink/renderer/core/editing/editing_utilities.h"
+#include "third_party/blink/renderer/core/editing/ephemeral_range.h"
+#include "third_party/blink/renderer/core/editing/text_segments.h"
 #include "third_party/blink/renderer/core/editing/visible_position.h"
+#include "third_party/blink/renderer/core/layout/layout_block_flow.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/blink/renderer/platform/text/text_boundaries.h"
+#include "third_party/blink/renderer/platform/text/text_break_iterator.h"
 
 namespace blink {
 
 namespace {
 
-unsigned EndWordBoundary(
-    const UChar* characters,
-    unsigned length,
-    unsigned offset,
-    BoundarySearchContextAvailability may_have_more_context,
-    bool& need_more_context) {
-  DCHECK_LE(offset, length);
-  if (may_have_more_context &&
-      EndOfFirstWordBoundaryContext(characters + offset, length - offset) ==
-          static_cast<int>(length - offset)) {
-    need_more_context = true;
-    return length;
-  }
-  need_more_context = false;
-  return FindWordEndBoundary(characters, length, offset);
+PositionInFlatTree EndOfWordPositionInternal(const PositionInFlatTree& position,
+                                             EWordSide side) {
+  class Finder final : public TextSegments::Finder {
+    STACK_ALLOCATED();
+
+   public:
+    Finder(EWordSide side) : side_(side) {}
+
+   private:
+    Position Find(const String text, unsigned offset) final {
+      DCHECK_LE(offset, text.length());
+      if (!is_first_time_)
+        return FindInternal(text, offset);
+      is_first_time_ = false;
+      if (side_ == kPreviousWordIfOnBoundary) {
+        if (offset == 0)
+          return Position::Before(0);
+        return FindInternal(text, offset - 1);
+      }
+      if (offset == text.length())
+        return Position::After(offset);
+      return FindInternal(text, offset);
+    }
+
+    static Position FindInternal(const String text, unsigned offset) {
+      DCHECK_LE(offset, text.length());
+      TextBreakIterator* it =
+          WordBreakIterator(text.Characters16(), text.length());
+      const int result = it->following(offset);
+      if (result == kTextBreakDone || result == 0)
+        return Position();
+      return Position::After(result - 1);
+    }
+
+    const EWordSide side_;
+    bool is_first_time_ = true;
+  } finder(side);
+  return TextSegments::FindBoundaryForward(position, &finder);
 }
 
-template <typename Strategy>
-PositionTemplate<Strategy> EndOfWordAlgorithm(
-    const VisiblePositionTemplate<Strategy>& c,
-    EWordSide side) {
-  DCHECK(c.IsValid()) << c;
-  VisiblePositionTemplate<Strategy> p = c;
-  if (side == kPreviousWordIfOnBoundary) {
-    if (IsStartOfParagraph(c))
-      return c.DeepEquivalent();
+PositionInFlatTree NextWordPositionInternal(
+    const PositionInFlatTree& position) {
+  class Finder final : public TextSegments::Finder {
+    STACK_ALLOCATED();
 
-    p = PreviousPositionOf(c);
-    if (p.IsNull())
-      return c.DeepEquivalent();
-  } else if (IsEndOfParagraph(c)) {
-    return c.DeepEquivalent();
-  }
-
-  return NextBoundary(p, EndWordBoundary);
-}
-
-unsigned NextWordPositionBoundary(
-    const UChar* characters,
-    unsigned length,
-    unsigned offset,
-    BoundarySearchContextAvailability may_have_more_context,
-    bool& need_more_context) {
-  if (may_have_more_context &&
-      EndOfFirstWordBoundaryContext(characters + offset, length - offset) ==
-          static_cast<int>(length - offset)) {
-    need_more_context = true;
-    return length;
-  }
-  need_more_context = false;
-  return FindNextWordForward(characters, length, offset);
+   private:
+    Position Find(const String text, unsigned offset) final {
+      DCHECK_LE(offset, text.length());
+      if (offset == text.length() || text.length() == 0)
+        return Position();
+      TextBreakIterator* it =
+          WordBreakIterator(text.Characters16(), text.length());
+      for (int runner = it->following(offset); runner != kTextBreakDone;
+           runner = it->following(runner)) {
+        // We stop searching when the character preceding the break is
+        // alphanumeric or underscore.
+        if (static_cast<unsigned>(runner) < text.length() &&
+            (WTF::Unicode::IsAlphanumeric(text[runner - 1]) ||
+             text[runner - 1] == kLowLineCharacter))
+          return Position::After(runner - 1);
+      }
+      return Position::After(text.length() - 1);
+    }
+  } finder;
+  return TextSegments::FindBoundaryForward(position, &finder);
 }
 
 unsigned PreviousWordPositionBoundary(
@@ -147,33 +165,58 @@ PositionTemplate<Strategy> StartOfWordAlgorithm(
 
 }  // namespace
 
-Position EndOfWordPosition(const VisiblePosition& position, EWordSide side) {
-  return EndOfWordAlgorithm<EditingStrategy>(position, side);
+PositionInFlatTree EndOfWordPosition(const PositionInFlatTree& start,
+                                     EWordSide side) {
+  return AdjustForwardPositionToAvoidCrossingEditingBoundaries(
+             PositionInFlatTreeWithAffinity(
+                 EndOfWordPositionInternal(start, side)),
+             start)
+      .GetPosition();
+}
+
+Position EndOfWordPosition(const Position& position, EWordSide side) {
+  return ToPositionInDOMTree(
+      EndOfWordPosition(ToPositionInFlatTree(position), side));
 }
 
 VisiblePosition EndOfWord(const VisiblePosition& position, EWordSide side) {
-  return CreateVisiblePosition(EndOfWordPosition(position, side),
-                               TextAffinity::kUpstreamIfPossible);
-}
-
-PositionInFlatTree EndOfWordPosition(const VisiblePositionInFlatTree& position,
-                                     EWordSide side) {
-  return EndOfWordAlgorithm<EditingInFlatTreeStrategy>(position, side);
+  return CreateVisiblePosition(
+      EndOfWordPosition(position.DeepEquivalent(), side),
+      TextAffinity::kUpstreamIfPossible);
 }
 
 VisiblePositionInFlatTree EndOfWord(const VisiblePositionInFlatTree& position,
                                     EWordSide side) {
-  return CreateVisiblePosition(EndOfWordPosition(position, side),
-                               TextAffinity::kUpstreamIfPossible);
+  return CreateVisiblePosition(
+      EndOfWordPosition(position.DeepEquivalent(), side),
+      TextAffinity::kUpstreamIfPossible);
 }
 
+// ----
+// TODO(editing-dev): Because of word boundary can not be an upstream position,
+// we should make this function to return |PositionInFlatTree|.
+PositionInFlatTreeWithAffinity NextWordPosition(
+    const PositionInFlatTree& start) {
+  const PositionInFlatTree next = NextWordPositionInternal(start);
+  // Note: The word boundary can not be upstream position.
+  const PositionInFlatTreeWithAffinity adjusted =
+      AdjustForwardPositionToAvoidCrossingEditingBoundaries(
+          PositionInFlatTreeWithAffinity(next), start);
+  DCHECK_EQ(adjusted.Affinity(), TextAffinity::kDownstream);
+  return adjusted;
+}
+
+PositionWithAffinity NextWordPosition(const Position& start) {
+  const PositionInFlatTreeWithAffinity& next =
+      NextWordPosition(ToPositionInFlatTree(start));
+  return ToPositionInDOMTreeWithAffinity(next);
+}
+
+// TODO(yosin): This function will be removed by replacing call sites to use
+// |Position| version. since there are only two call sites, one is in test.
 VisiblePosition NextWordPosition(const VisiblePosition& c) {
   DCHECK(c.IsValid()) << c;
-  VisiblePosition next =
-      CreateVisiblePosition(NextBoundary(c, NextWordPositionBoundary),
-                            TextAffinity::kUpstreamIfPossible);
-  return AdjustForwardPositionToAvoidCrossingEditingBoundaries(
-      next, c.DeepEquivalent());
+  return CreateVisiblePosition(NextWordPosition(c.DeepEquivalent()));
 }
 
 VisiblePosition PreviousWordPosition(const VisiblePosition& c) {

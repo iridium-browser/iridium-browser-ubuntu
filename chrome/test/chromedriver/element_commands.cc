@@ -289,6 +289,21 @@ Status ExecuteClearElement(Session* session,
                            const std::string& element_id,
                            const base::DictionaryValue& params,
                            std::unique_ptr<base::Value>* value) {
+  // Scrolling to element is done by webdriver::atoms::CLEAR
+  bool is_displayed = false;
+  base::TimeTicks start_time = base::TimeTicks::Now();
+  while (true) {
+    Status status = IsElementDisplayed(
+      session, web_view, element_id, true, &is_displayed);
+    if (status.IsError())
+      return status;
+    if (is_displayed)
+      break;
+    if (base::TimeTicks::Now() - start_time >= session->implicit_wait) {
+      return Status(kElementNotVisible);
+    }
+    base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(50));
+  }
   base::ListValue args;
   args.Append(CreateElement(element_id));
   std::unique_ptr<base::Value> result;
@@ -327,15 +342,20 @@ Status ExecuteSendKeysToElement(Session* session,
       paths_string.append(path_part);
     }
 
+    ChromeDesktopImpl* chrome_desktop = nullptr;
+    bool is_desktop = session->chrome->GetAsDesktop(&chrome_desktop).IsOk();
+
     // Separate the string into separate paths, delimited by '\n'.
     std::vector<base::FilePath> paths;
     for (const auto& path_piece : base::SplitStringPiece(
              paths_string, base::FilePath::StringType(1, '\n'),
              base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL)) {
-      if (!base::PathExists(base::FilePath(path_piece))) {
+      // For local desktop browser, verify that the file exists.
+      // No easy way to do that for remote or mobile browser.
+      if (is_desktop && !base::PathExists(base::FilePath(path_piece))) {
         return Status(
             kInvalidArgument,
-            base::StringPrintf("File not found : %" PRIsFP,
+            base::StringPrintf("File not found : %" PRFilePath,
                                base::FilePath(path_piece).value().c_str()));
       }
       paths.push_back(base::FilePath(path_piece));
@@ -395,6 +415,26 @@ Status ExecuteGetElementValue(Session* session,
   return web_view->CallFunction(
       session->GetCurrentFrameId(),
       "function(elem) { return elem['value'] }",
+      args,
+      value);
+}
+
+Status ExecuteGetElementProperty(Session* session,
+                              WebView* web_view,
+                              const std::string& element_id,
+                              const base::DictionaryValue& params,
+                              std::unique_ptr<base::Value>* value) {
+  base::ListValue args;
+  args.Append(CreateElement(element_id));
+
+  std::string name;
+  if (!params.GetString("name", &name))
+    return Status(kUnknownError, "missing 'name'");
+  args.AppendString(name);
+
+  return web_view->CallFunction(
+      session->GetCurrentFrameId(),
+      "function(elem, name) { return elem[name] }",
       args,
       value);
 }
@@ -499,24 +539,24 @@ Status ExecuteGetElementRect(Session* session,
     return Status(kUnknownError, "could not convert to DictionaryValue");
 
   // grab values
-  int x, y, width, height;
-  if (!location_dict->GetInteger("x", &x))
-    return Status(kUnknownError, "getting size failed to return x");
+  double x, y, width, height;
+  if (!location_dict->GetDouble("x", &x))
+    return Status(kUnknownError, "x coordinate is missing in element location");
 
-  if (!location_dict->GetInteger("y", &y))
-    return Status(kUnknownError, "getting size failed to return y");
+  if (!location_dict->GetDouble("y", &y))
+    return Status(kUnknownError, "y coordinate is missing in element location");
 
-  if (!size_dict->GetInteger("height", &height))
-    return Status(kUnknownError, "getting location failed to return height");
+  if (!size_dict->GetDouble("height", &height))
+    return Status(kUnknownError, "height is missing in element size");
 
-  if (!size_dict->GetInteger("width", &width))
-    return Status(kUnknownError, "getting location failed to return width");
+  if (!size_dict->GetDouble("width", &width))
+    return Status(kUnknownError, "width is missing in element size");
 
   base::DictionaryValue ret;
-  ret.SetInteger("x", x);
-  ret.SetInteger("y", y);
-  ret.SetInteger("width", width);
-  ret.SetInteger("height", height);
+  ret.SetDouble("x", x);
+  ret.SetDouble("y", y);
+  ret.SetDouble("width", width);
+  ret.SetDouble("height", height);
   value->reset(ret.DeepCopy());
   return Status(kOk);
 }
@@ -589,5 +629,68 @@ Status ExecuteElementEquals(Session* session,
   if (!params.GetString("other", &other_element_id))
     return Status(kUnknownError, "'other' must be a string");
   value->reset(new base::Value(element_id == other_element_id));
+  return Status(kOk);
+}
+
+Status ExecuteElementScreenshot(Session* session,
+                                WebView* web_view,
+                                const std::string& element_id,
+                                const base::DictionaryValue& params,
+                                std::unique_ptr<base::Value>* value) {
+  Status status = session->chrome->ActivateWebView(web_view->GetId());
+  if (status.IsError())
+    return status;
+
+  WebPoint offset(0, 0);
+  WebPoint location;
+  status =
+      ScrollElementIntoView(session, web_view, element_id, &offset, &location);
+  if (status.IsError())
+    return status;
+
+  std::unique_ptr<base::Value> clip;
+  status = ExecuteGetElementRect(session, web_view, element_id, params, &clip);
+  if (status.IsError())
+    return status;
+
+  // |location| returned by ScrollElementIntoView is relative to the current
+  // view port. However, CaptureScreenshot expects a location relative to the
+  // document origin. We make the adjustment using the scroll amount of the top
+  // level window. Scrolling of frames has already been included in |location|.
+  // Scroll information can be in either document.documentElement or
+  // document.body, depending on document compatibility mode. The parentheses
+  // around the JavaScript code below is needed because JavaScript syntax
+  // doesn't allow a statement to start with an object literal.
+  std::unique_ptr<base::Value> scroll;
+  status = web_view->EvaluateScript(
+      std::string(),
+      "({x: document.documentElement.scrollLeft || document.body.scrollLeft,"
+      "  y: document.documentElement.scrollTop || document.body.scrollTop})",
+      &scroll);
+  if (status.IsError())
+    return status;
+  int scroll_left = scroll->FindKey("x")->GetInt();
+  int scroll_top = scroll->FindKey("y")->GetInt();
+
+  std::unique_ptr<base::DictionaryValue> clip_dict =
+      base::DictionaryValue::From(std::move(clip));
+  if (!clip_dict)
+    return Status(kUnknownError, "Element Rect is not a dictionary");
+  // |clip_dict| already contains the right width and height of the target
+  // element, but its x and y are relative to containing frame. We replace them
+  // with the x and y relative to top-level document origin, as expected by
+  // CaptureScreenshot.
+  clip_dict->SetInteger("x", location.x + scroll_left);
+  clip_dict->SetInteger("y", location.y + scroll_top);
+  clip_dict->SetDouble("scale", 1.0);
+  base::DictionaryValue screenshot_params;
+  screenshot_params.SetDictionary("clip", std::move(clip_dict));
+
+  std::string screenshot;
+  status = web_view->CaptureScreenshot(&screenshot, screenshot_params);
+  if (status.IsError())
+    return status;
+
+  value->reset(new base::Value(screenshot));
   return Status(kOk);
 }

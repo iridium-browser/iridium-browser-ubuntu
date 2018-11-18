@@ -13,14 +13,20 @@
 namespace invalidation {
 
 ProfileInvalidationProvider::ProfileInvalidationProvider(
-    std::unique_ptr<InvalidationService> invalidation_service)
-    : invalidation_service_(std::move(invalidation_service)) {}
+    std::unique_ptr<InvalidationService> invalidation_service,
+    std::unique_ptr<IdentityProvider> identity_provider)
+    : identity_provider_(std::move(identity_provider)),
+      invalidation_service_(std::move(invalidation_service)) {}
 
 ProfileInvalidationProvider::~ProfileInvalidationProvider() {
 }
 
 InvalidationService* ProfileInvalidationProvider::GetInvalidationService() {
   return invalidation_service_.get();
+}
+
+IdentityProvider* ProfileInvalidationProvider::GetIdentityProvider() {
+  return identity_provider_.get();
 }
 
 void ProfileInvalidationProvider::Shutdown() {
@@ -33,6 +39,9 @@ void ProfileInvalidationProvider::RegisterProfilePrefs(
   registry->RegisterBooleanPref(
       prefs::kInvalidationServiceUseGCMChannel,
       true);  // if no value in prefs, use GCM channel.
+
+  registry->RegisterStringPref(prefs::kFCMInvalidationClientIDCache,
+                               /*default_value=*/std::string());
 }
 
 }  // namespace invalidation

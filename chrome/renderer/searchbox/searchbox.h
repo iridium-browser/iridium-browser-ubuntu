@@ -119,28 +119,69 @@ class SearchBox : public content::RenderFrameObserver,
   // Sends UndoMostVisitedDeletion to the browser.
   void UndoMostVisitedDeletion(InstantRestrictedID most_visited_item_id);
 
+  // Returns true if the most visited items are custom links.
+  bool IsCustomLinks() const;
+
+  // Sends AddCustomLink to the browser.
+  void AddCustomLink(const GURL& url, const std::string& title);
+
+  // Sends UpdateCustomLink to the browser.
+  void UpdateCustomLink(InstantRestrictedID link_id,
+                        const GURL& new_url,
+                        const std::string& new_title);
+
+  // Sends DeleteCustomLink to the browser.
+  void DeleteCustomLink(InstantRestrictedID most_visited_item_id);
+
+  // Sends UndoCustomLinkAction to the browser.
+  void UndoCustomLinkAction();
+
+  // Sends ResetCustomLinks to the browser.
+  void ResetCustomLinks();
+
+  // Attempts to fix obviously invalid URLs. Uses the "https" scheme unless
+  // otherwise specified and, if so, checks if the default scheme can resolve.
+  // Returns the fixed URL if valid, otherwise returns an empty string.
+  std::string FixupAndValidateUrl(const std::string& url);
+
+  // Updates the NTP custom background preferences, sometimes this includes
+  // image attributions.
+  void SetCustomBackgroundURL(const GURL& background_url);
+  void SetCustomBackgroundURLWithAttributions(
+      const GURL& background_url,
+      const std::string& attribution_line_1,
+      const std::string& attribution_line_2,
+      const GURL& action_url);
+
+  // Let the user select a local file for the NTP background.
+  void SelectLocalBackgroundImage();
+
   bool is_focused() const { return is_focused_; }
   bool is_input_in_progress() const { return is_input_in_progress_; }
   bool is_key_capture_enabled() const { return is_key_capture_enabled_; }
 
  private:
   // Overridden from content::RenderFrameObserver:
-  void DidCommitProvisionalLoad(bool is_new_navigation,
-                                bool is_same_document_navigation) override;
+  void DidCommitProvisionalLoad(bool is_same_document_navigation,
+                                ui::PageTransition transition) override;
   void OnDestruct() override;
 
   // Overridden from chrome::mojom::EmbeddedSearchClient:
   void SetPageSequenceNumber(int page_seq_no) override;
   void FocusChanged(OmniboxFocusState new_focus_state,
                     OmniboxFocusChangeReason reason) override;
-  void MostVisitedChanged(
-      const std::vector<InstantMostVisitedItem>& items) override;
+  void MostVisitedChanged(const std::vector<InstantMostVisitedItem>& items,
+                          bool is_custom_links) override;
   void SetInputInProgress(bool input_in_progress) override;
   void ThemeChanged(const ThemeBackgroundInfo& theme_info) override;
 
   void HistorySyncCheckResult(bool sync_history);
   void ChromeIdentityCheckResult(const base::string16& identity,
                                  bool identity_match);
+  void AddCustomLinkResult(bool success);
+  void UpdateCustomLinkResult(bool success);
+  void DeleteCustomLinkResult(bool success);
+  void DoesUrlResolveResult(bool resolves, bool timeout) const;
 
   // Returns the URL of the Most Visited item specified by the |item_id|.
   GURL GetURLForMostVisitedItem(InstantRestrictedID item_id) const;
@@ -168,6 +209,8 @@ class SearchBox : public content::RenderFrameObserver,
   bool is_key_capture_enabled_;
   InstantRestrictedIDCache<InstantMostVisitedItem> most_visited_items_cache_;
   bool has_received_most_visited_;
+  // True if the most visited items are custom links.
+  bool is_custom_links_ = false;
   ThemeBackgroundInfo theme_info_;
 
   base::WeakPtrFactory<SearchBox> weak_ptr_factory_;

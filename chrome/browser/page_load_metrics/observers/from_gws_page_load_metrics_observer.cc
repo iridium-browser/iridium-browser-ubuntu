@@ -10,6 +10,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/page_load_metrics/page_load_metrics_util.h"
 #include "chrome/common/page_load_metrics/page_load_timing.h"
+#include "services/metrics/public/cpp/ukm_builders.h"
 #include "services/metrics/public/cpp/ukm_recorder.h"
 
 using page_load_metrics::PageAbortReason;
@@ -38,6 +39,8 @@ const char kHistogramFromGWSParseDuration[] =
     "PageLoad.Clients.FromGoogleSearch.ParseTiming.ParseDuration";
 const char kHistogramFromGWSParseStart[] =
     "PageLoad.Clients.FromGoogleSearch.ParseTiming.NavigationToParseStart";
+const char kHistogramFromGWSFirstInputDelay[] =
+    "PageLoad.Clients.FromGoogleSearch.InteractiveTiming.FirstInputDelay";
 
 const char kHistogramFromGWSAbortNewNavigationBeforeCommit[] =
     "PageLoad.Clients.FromGoogleSearch.Experimental.AbortTiming.NewNavigation."
@@ -110,8 +113,6 @@ const char kHistogramFromGWSForegroundDurationWithoutPaint[] =
     "WithoutPaint";
 const char kHistogramFromGWSForegroundDurationNoCommit[] =
     "PageLoad.Clients.FromGoogleSearch.PageTiming.ForegroundDuration.NoCommit";
-
-const char kUkmFromGoogleSearchName[] = "PageLoad.FromGoogleSearch";
 
 }  // namespace internal
 
@@ -411,6 +412,12 @@ void FromGWSPageLoadMetricsObserver::OnFirstContentfulPaintInPage(
   logger_.OnFirstContentfulPaintInPage(timing, extra_info);
 }
 
+void FromGWSPageLoadMetricsObserver::OnFirstInputInPage(
+    const page_load_metrics::mojom::PageLoadTiming& timing,
+    const page_load_metrics::PageLoadExtraInfo& extra_info) {
+  logger_.OnFirstInputInPage(timing, extra_info);
+}
+
 void FromGWSPageLoadMetricsObserver::OnParseStart(
     const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& extra_info) {
@@ -445,11 +452,8 @@ void FromGWSPageLoadMetricsLogger::OnCommit(
     ukm::SourceId source_id) {
   if (!ShouldLogPostCommitMetrics(navigation_handle->GetURL()))
     return;
-  ukm::UkmRecorder* ukm_recorder = ukm::UkmRecorder::Get();
-  if (ukm_recorder) {
-    ukm_recorder->GetEntryBuilder(source_id,
-                                  internal::kUkmFromGoogleSearchName);
-  }
+  ukm::builders::PageLoad_FromGoogleSearch(source_id).Record(
+      ukm::UkmRecorder::Get());
 }
 
 void FromGWSPageLoadMetricsLogger::OnComplete(
@@ -617,6 +621,16 @@ void FromGWSPageLoadMetricsLogger::OnFirstContentfulPaintInPage(
         internal::kHistogramFromGWSParseStartToFirstContentfulPaint,
         timing.paint_timing->first_contentful_paint.value() -
             timing.parse_timing->parse_start.value());
+  }
+}
+
+void FromGWSPageLoadMetricsLogger::OnFirstInputInPage(
+    const page_load_metrics::mojom::PageLoadTiming& timing,
+    const page_load_metrics::PageLoadExtraInfo& extra_info) {
+  if (ShouldLogForegroundEventAfterCommit(
+          timing.interactive_timing->first_input_delay, extra_info)) {
+    PAGE_LOAD_HISTOGRAM(internal::kHistogramFromGWSFirstInputDelay,
+                        timing.interactive_timing->first_input_delay.value());
   }
 }
 

@@ -8,7 +8,6 @@
 #include <unordered_map>
 #include <vector>
 
-#include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/singleton.h"
 #include "base/observer_list.h"
@@ -92,12 +91,10 @@ class KeepAliveRegistry {
   // Number of registered keep alives that have KeepAliveRestartOption::ENABLED.
   int restart_allowed_count_;
 
-#if DCHECK_IS_ON()
   // Used to guard against registering during shutdown.
   bool is_shutting_down_ = false;
-#endif
 
-  base::ObserverList<KeepAliveStateObserver> observers_;
+  base::ObserverList<KeepAliveStateObserver>::Unchecked observers_;
 
   DISALLOW_COPY_AND_ASSIGN(KeepAliveRegistry);
 };

@@ -283,6 +283,7 @@ class TraceEventTimelineImporter(importer.TimelineImporter):
     self._CreateFlowSlices()
     self._SetBrowserProcess()
     self._SetGpuProcess()
+    self._SetSurfaceFlingerProcess()
     self._CreateExplicitObjects()
     self._CreateImplicitObjects()
     self._CreateMemoryDumps()
@@ -296,6 +297,7 @@ class TraceEventTimelineImporter(importer.TimelineImporter):
     async_event_states_by_name_then_id = {}
 
     all_async_events = self._all_async_events
+    # pylint: disable=too-many-nested-blocks
     for async_event_state in all_async_events:
       event = async_event_state['event']
       name = event.get('name', None)
@@ -469,3 +471,8 @@ class TraceEventTimelineImporter(importer.TimelineImporter):
     for thread in self._model.GetAllThreads():
       if thread.name in gpu_thread_names:
         self._model.gpu_process = thread.parent
+
+  def _SetSurfaceFlingerProcess(self):
+    for process in self._model.GetAllProcesses():
+      if process.name == 'SurfaceFlinger':
+        self._model.surface_flinger_process = process

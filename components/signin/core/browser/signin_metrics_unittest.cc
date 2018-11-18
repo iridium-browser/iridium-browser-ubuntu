@@ -7,7 +7,8 @@
 #include <string>
 #include <vector>
 
-#include "base/test/user_action_tester.h"
+#include "base/stl_util.h"
+#include "base/test/metrics/user_action_tester.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace signin_metrics {
@@ -32,7 +33,9 @@ const AccessPoint kAccessPointsThatSupportImpression[] = {
     AccessPoint::ACCESS_POINT_AUTOFILL_DROPDOWN,
     AccessPoint::ACCESS_POINT_NTP_CONTENT_SUGGESTIONS,
     AccessPoint::ACCESS_POINT_RESIGNIN_INFOBAR,
-    AccessPoint::ACCESS_POINT_TAB_SWITCHER};
+    AccessPoint::ACCESS_POINT_TAB_SWITCHER,
+    AccessPoint::ACCESS_POINT_SAVE_CARD_BUBBLE,
+    AccessPoint::ACCESS_POINT_MANAGE_CARDS_BUBBLE};
 
 const AccessPoint kAccessPointsThatSupportPersonalizedPromos[] = {
     AccessPoint::ACCESS_POINT_BOOKMARK_MANAGER,
@@ -43,7 +46,9 @@ const AccessPoint kAccessPointsThatSupportPersonalizedPromos[] = {
     AccessPoint::ACCESS_POINT_AVATAR_BUBBLE_SIGN_IN,
     AccessPoint::ACCESS_POINT_PASSWORD_BUBBLE,
     AccessPoint::ACCESS_POINT_BOOKMARK_BUBBLE,
-    AccessPoint::ACCESS_POINT_NTP_CONTENT_SUGGESTIONS};
+    AccessPoint::ACCESS_POINT_NTP_CONTENT_SUGGESTIONS,
+    AccessPoint::ACCESS_POINT_SAVE_CARD_BUBBLE,
+    AccessPoint::ACCESS_POINT_MANAGE_CARDS_BUBBLE};
 
 class SigninMetricsTest : public ::testing::Test {
  public:
@@ -97,6 +102,10 @@ class SigninMetricsTest : public ::testing::Test {
         return "TabSwitcher";
       case AccessPoint::ACCESS_POINT_FORCE_SIGNIN_WARNING:
         return "ForceSigninWarning";
+      case AccessPoint::ACCESS_POINT_SAVE_CARD_BUBBLE:
+        return "SaveCardBubble";
+      case AccessPoint::ACCESS_POINT_MANAGE_CARDS_BUBBLE:
+        return "ManageCardsBubble";
       case AccessPoint::ACCESS_POINT_MAX:
         NOTREACHED();
         return "";
@@ -112,6 +121,11 @@ class SigninMetricsTest : public ::testing::Test {
       access_points.push_back(static_cast<AccessPoint>(ap));
     }
     return access_points;
+  }
+
+  static bool AccessPointSupportsPersonalizedPromo(AccessPoint access_point) {
+    return base::ContainsValue(kAccessPointsThatSupportPersonalizedPromos,
+                               access_point);
   }
 };
 
@@ -145,14 +159,59 @@ TEST_F(SigninMetricsTest, RecordSigninUserActionWithPromoAction) {
           1, user_action_tester.GetActionCount("Signin_SigninNotDefault_From" +
                                                GetAccessPointDescription(ap)));
     }
-    {
-      // PROMO_ACTION_NEW_ACCOUNT promo action
-      base::UserActionTester user_action_tester;
-      RecordSigninUserActionForAccessPoint(
-          ap, signin_metrics::PromoAction::PROMO_ACTION_NEW_ACCOUNT);
-      EXPECT_EQ(
-          1, user_action_tester.GetActionCount("Signin_SigninNewAccount_From" +
-                                               GetAccessPointDescription(ap)));
+  }
+}
+
+TEST_F(SigninMetricsTest, RecordSigninUserActionWithNewPreDicePromoAction) {
+  for (const AccessPoint& ap : GetAllAccessPoints()) {
+    base::UserActionTester user_action_tester;
+    RecordSigninUserActionForAccessPoint(
+        ap, signin_metrics::PromoAction::PROMO_ACTION_NEW_ACCOUNT_PRE_DICE);
+    if (AccessPointSupportsPersonalizedPromo(ap)) {
+      EXPECT_EQ(1, user_action_tester.GetActionCount(
+                       "Signin_SigninNewAccountPreDice_From" +
+                       GetAccessPointDescription(ap)));
+    } else {
+      EXPECT_EQ(0, user_action_tester.GetActionCount(
+                       "Signin_SigninNewAccountPreDice_From" +
+                       GetAccessPointDescription(ap)));
+    }
+  }
+}
+
+TEST_F(SigninMetricsTest, RecordSigninUserActionWithNewNoExistingPromoAction) {
+  for (const AccessPoint& ap : GetAllAccessPoints()) {
+    base::UserActionTester user_action_tester;
+    RecordSigninUserActionForAccessPoint(
+        ap, signin_metrics::PromoAction::
+                PROMO_ACTION_NEW_ACCOUNT_NO_EXISTING_ACCOUNT);
+    if (AccessPointSupportsPersonalizedPromo(ap)) {
+      EXPECT_EQ(1, user_action_tester.GetActionCount(
+                       "Signin_SigninNewAccountNoExistingAccount_From" +
+                       GetAccessPointDescription(ap)));
+    } else {
+      EXPECT_EQ(0, user_action_tester.GetActionCount(
+                       "Signin_SigninNewAccountNoExistingAccount_From" +
+                       GetAccessPointDescription(ap)));
+    }
+  }
+}
+
+TEST_F(SigninMetricsTest,
+       RecordSigninUserActionWithNewWithExistingPromoAction) {
+  for (const AccessPoint& ap : GetAllAccessPoints()) {
+    base::UserActionTester user_action_tester;
+    RecordSigninUserActionForAccessPoint(
+        ap,
+        signin_metrics::PromoAction::PROMO_ACTION_NEW_ACCOUNT_EXISTING_ACCOUNT);
+    if (AccessPointSupportsPersonalizedPromo(ap)) {
+      EXPECT_EQ(1, user_action_tester.GetActionCount(
+                       "Signin_SigninNewAccountExistingAccount_From" +
+                       GetAccessPointDescription(ap)));
+    } else {
+      EXPECT_EQ(0, user_action_tester.GetActionCount(
+                       "Signin_SigninNewAccountExistingAccount_From" +
+                       GetAccessPointDescription(ap)));
     }
   }
 }

@@ -16,11 +16,12 @@
 #include "base/process/kill.h"
 #include "base/process/launch.h"
 #include "base/sequenced_task_runner.h"
-#include "base/task_scheduler/lazy_task_runner.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/lazy_task_runner.h"
+#include "base/task/post_task.h"
 #include "chrome/common/logging_chrome.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/debug_daemon_client.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 
 namespace chromeos {
@@ -36,7 +37,7 @@ const char kTarCommand[] = "/bin/tar";
 base::LazySequencedTaskRunner g_sequenced_task_runner =
     LAZY_SEQUENCED_TASK_RUNNER_INITIALIZER(
         base::TaskTraits(base::MayBlock(),
-                         base::TaskPriority::BACKGROUND,
+                         base::TaskPriority::BEST_EFFORT,
                          base::TaskShutdownBehavior::BLOCK_SHUTDOWN));
 
 // Called upon completion of |WriteDebugLogToFile|. Closes file
@@ -118,19 +119,15 @@ void OnCompressArchiveCompleted(
     bool compression_command_success) {
   if (!compression_command_success) {
     LOG(ERROR) << "Failed compressing " << compressed_output_path.value();
-    content::BrowserThread::PostTask(
-        content::BrowserThread::UI,
-        FROM_HERE,
-        base::Bind(callback, base::FilePath(), false));
+    base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI},
+                             base::Bind(callback, base::FilePath(), false));
     base::DeleteFile(tar_file_path, false);
     base::DeleteFile(compressed_output_path, false);
     return;
   }
 
-  content::BrowserThread::PostTask(
-      content::BrowserThread::UI,
-      FROM_HERE,
-      base::Bind(callback, compressed_output_path, true));
+  base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI},
+                           base::Bind(callback, compressed_output_path, true));
 }
 
 // Gzips |tar_file_path| and stores results in |compressed_output_path|.
@@ -140,10 +137,8 @@ void CompressArchive(const base::FilePath& tar_file_path,
                      bool add_user_logs_command_success) {
   if (!add_user_logs_command_success) {
     LOG(ERROR) << "Failed adding user logs to " << tar_file_path.value();
-    content::BrowserThread::PostTask(
-        content::BrowserThread::UI,
-        FROM_HERE,
-        base::Bind(callback, base::FilePath(), false));
+    base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI},
+                             base::Bind(callback, base::FilePath(), false));
     base::DeleteFile(tar_file_path, false);
     return;
   }
@@ -193,7 +188,7 @@ void OnSystemLogsAdded(const DebugLogWriter::StoreLogsCallback& callback,
       logging::GetSessionLogDir(*base::CommandLine::ForCurrentProcess());
 
   base::PostTaskWithTraits(
-      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
       base::Bind(&AddUserLogsToArchive, user_log_dir, tar_file_path,
                  compressed_output_path, callback));
 }

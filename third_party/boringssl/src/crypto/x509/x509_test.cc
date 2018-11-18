@@ -20,8 +20,8 @@
 
 #include <openssl/bio.h>
 #include <openssl/bytestring.h>
-#include <openssl/curve25519.h>
 #include <openssl/crypto.h>
+#include <openssl/curve25519.h>
 #include <openssl/digest.h>
 #include <openssl/err.h>
 #include <openssl/pem.h>
@@ -30,6 +30,7 @@
 #include <openssl/x509v3.h>
 
 #include "../internal.h"
+#include "../test/test_util.h"
 
 
 std::string GetTestData(const char *path);
@@ -494,6 +495,169 @@ static const char kSANTypesRoot[] =
 // /JKuuFGmzkG+rUbXFmo/Zg2ozVplw71NnQJ4znPsf7A=
 // -----END RSA PRIVATE KEY-----
 
+// The following four certificates were generated with this Go program, varying
+// |includeNetscapeExtension| and defining rootKeyPEM and rootCertPEM to be
+// strings containing the kSANTypesRoot, above.
+
+// package main
+
+// import (
+//     "crypto/ecdsa"
+//     "crypto/elliptic"
+//     "crypto/rand"
+//     "crypto/x509"
+//     "crypto/x509/pkix"
+//     "encoding/asn1"
+//     "encoding/pem"
+//     "math/big"
+//     "os"
+//     "time"
+// )
+
+// const includeNetscapeExtension = true
+
+// func main() {
+//     block, _ := pem.Decode([]byte(rootKeyPEM))
+//     rootPriv, _ := x509.ParsePKCS1PrivateKey(block.Bytes)
+//     block, _ = pem.Decode([]byte(rootCertPEM))
+//     root, _ := x509.ParseCertificate(block.Bytes)
+
+//     interTemplate := &x509.Certificate{
+//         SerialNumber: big.NewInt(2),
+//         Subject: pkix.Name{
+//             CommonName: "No Basic Constraints (Netscape)",
+//         },
+//         NotBefore: time.Date(2000, time.January, 1, 0, 0, 0, 0, time.UTC),
+//         NotAfter:  time.Date(2099, time.January, 1, 0, 0, 0, 0, time.UTC),
+//     }
+
+//     if includeNetscapeExtension {
+//         interTemplate.ExtraExtensions = []pkix.Extension{
+//             pkix.Extension{
+//                 Id:    asn1.ObjectIdentifier([]int{2, 16, 840, 1, 113730, 1, 1}),
+//                 Value: []byte{0x03, 0x02, 2, 0x04},
+//             },
+//         }
+//     } else {
+//         interTemplate.KeyUsage = x509.KeyUsageCertSign
+//     }
+
+//     interKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+
+//     interDER, err := x509.CreateCertificate(rand.Reader, interTemplate, root, &interKey.PublicKey, rootPriv)
+//     if err != nil {
+//         panic(err)
+//     }
+
+//     pem.Encode(os.Stdout, &pem.Block{Type: "CERTIFICATE", Bytes: interDER})
+
+//     inter, _ := x509.ParseCertificate(interDER)
+
+//     leafTemplate := &x509.Certificate{
+//         SerialNumber: big.NewInt(3),
+//         Subject: pkix.Name{
+//             CommonName: "Leaf from CA with no Basic Constraints",
+//         },
+//         NotBefore:             time.Date(2000, time.January, 1, 0, 0, 0, 0, time.UTC),
+//         NotAfter:              time.Date(2099, time.January, 1, 0, 0, 0, 0, time.UTC),
+//         BasicConstraintsValid: true,
+//     }
+//     leafKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+
+//     leafDER, err := x509.CreateCertificate(rand.Reader, leafTemplate, inter, &leafKey.PublicKey, interKey)
+//     if err != nil {
+//         panic(err)
+//     }
+
+//     pem.Encode(os.Stdout, &pem.Block{Type: "CERTIFICATE", Bytes: leafDER})
+// }
+
+// kNoBasicConstraintsCertSignIntermediate doesn't have isCA set, but contains
+// certSign in the keyUsage.
+static const char kNoBasicConstraintsCertSignIntermediate[] =
+    "-----BEGIN CERTIFICATE-----\n"
+    "MIIBqjCCAROgAwIBAgIBAjANBgkqhkiG9w0BAQsFADArMRcwFQYDVQQKEw5Cb3Jp\n"
+    "bmdTU0wgVGVzdDEQMA4GA1UEAxMHUm9vdCBDQTAgFw0wMDAxMDEwMDAwMDBaGA8y\n"
+    "MDk5MDEwMTAwMDAwMFowHzEdMBsGA1UEAxMUTm8gQmFzaWMgQ29uc3RyYWludHMw\n"
+    "WTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAASEFMblfxIEDO8My7wHtHWTuDzNyID1\n"
+    "OsPkMGkn32O/pSyXxXuAqDeFoMVffUMTyfm8JcYugSEbrv2qEXXM4bZRoy8wLTAO\n"
+    "BgNVHQ8BAf8EBAMCAgQwGwYDVR0jBBQwEoAQQDfXAftAL7gcflQEJ4xZATANBgkq\n"
+    "hkiG9w0BAQsFAAOBgQC1Lh6hIAm3K5kRh5iIydU0YAEm7eV6ZSskERDUq3DLJyl9\n"
+    "ZUZCHUzvb464dkwZjeNzaUVS1pdElJslwX3DtGgeJLJGCnk8zUjBjaNrrDm0kzPW\n"
+    "xKt/6oif1ci/KCKqKNXJAIFbc4e+IiBpenwpxHk3If4NM+Ek0nKoO8Uj0NkgTQ==\n"
+    "-----END CERTIFICATE-----\n";
+
+static const char kNoBasicConstraintsCertSignLeaf[] =
+    "-----BEGIN CERTIFICATE-----\n"
+    "MIIBUDCB96ADAgECAgEDMAoGCCqGSM49BAMCMB8xHTAbBgNVBAMTFE5vIEJhc2lj\n"
+    "IENvbnN0cmFpbnRzMCAXDTAwMDEwMTAwMDAwMFoYDzIwOTkwMTAxMDAwMDAwWjAx\n"
+    "MS8wLQYDVQQDEyZMZWFmIGZyb20gQ0Egd2l0aCBubyBCYXNpYyBDb25zdHJhaW50\n"
+    "czBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABEsYPMwzdJKjB+2gpC90ib2ilHoB\n"
+    "w/arQ6ikUX0CNUDDaKaOu/jF39ogzVlg4lDFrjCKShSfCCcrwgONv70IZGijEDAO\n"
+    "MAwGA1UdEwEB/wQCMAAwCgYIKoZIzj0EAwIDSAAwRQIgbV7R99yM+okXSIs6Fp3o\n"
+    "eCOXiDL60IBxaTOcLS44ywcCIQDbn87Gj5cFgHBYAkzdHqDsyGXkxQTHDq9jmX24\n"
+    "Djy3Zw==\n"
+    "-----END CERTIFICATE-----\n";
+
+// kNoBasicConstraintsNetscapeCAIntermediate doesn't have isCA set, but contains
+// a Netscape certificate-type extension that asserts a type of "SSL CA".
+static const char kNoBasicConstraintsNetscapeCAIntermediate[] =
+    "-----BEGIN CERTIFICATE-----\n"
+    "MIIBuDCCASGgAwIBAgIBAjANBgkqhkiG9w0BAQsFADArMRcwFQYDVQQKEw5Cb3Jp\n"
+    "bmdTU0wgVGVzdDEQMA4GA1UEAxMHUm9vdCBDQTAgFw0wMDAxMDEwMDAwMDBaGA8y\n"
+    "MDk5MDEwMTAwMDAwMFowKjEoMCYGA1UEAxMfTm8gQmFzaWMgQ29uc3RyYWludHMg\n"
+    "KE5ldHNjYXBlKTBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABCeMbmCaOtMzXBqi\n"
+    "PrCdNOH23CkaawUA+pAezitAN4RXS1O2CGK5sJjGPVVeogROU8G7/b+mU+ciZIzH\n"
+    "1PP8FJKjMjAwMBsGA1UdIwQUMBKAEEA31wH7QC+4HH5UBCeMWQEwEQYJYIZIAYb4\n"
+    "QgEBBAQDAgIEMA0GCSqGSIb3DQEBCwUAA4GBAAgNWjh7cfBTClTAk+Ml//5xb9Ju\n"
+    "tkBhG6Rm+kkMD+qiSMO6t7xS7CsA0+jIBjkdEYaLZ3oxtQCBdZsVNxUvRxZ0AUfF\n"
+    "G3DtRFTsrI1f7IQhpMuqEMF4shPW+5x54hrq0Fo6xMs6XoinJZcTUaaB8EeXRF6M\n"
+    "P9p6HuyLrmn0c/F0\n"
+    "-----END CERTIFICATE-----\n";
+
+static const char kNoBasicConstraintsNetscapeCALeaf[] =
+    "-----BEGIN CERTIFICATE-----\n"
+    "MIIBXDCCAQKgAwIBAgIBAzAKBggqhkjOPQQDAjAqMSgwJgYDVQQDEx9ObyBCYXNp\n"
+    "YyBDb25zdHJhaW50cyAoTmV0c2NhcGUpMCAXDTAwMDEwMTAwMDAwMFoYDzIwOTkw\n"
+    "MTAxMDAwMDAwWjAxMS8wLQYDVQQDEyZMZWFmIGZyb20gQ0Egd2l0aCBubyBCYXNp\n"
+    "YyBDb25zdHJhaW50czBZMBMGByqGSM49AgEGCCqGSM49AwEHA0IABDlJKolDu3R2\n"
+    "tPqSDycr0QJcWhxdBv76V0EEVflcHRxED6vAioTEcnQszt1OfKtBZvjlo0yp6i6Q\n"
+    "DaYit0ZInmWjEDAOMAwGA1UdEwEB/wQCMAAwCgYIKoZIzj0EAwIDSAAwRQIhAJsh\n"
+    "aZL6BHeEfoUBj1oZ2Ln91qzj3UCVMJ+vrmwAFdYyAiA3wp2JphgchvmoUFuzPXwj\n"
+    "XyPwWPbymSTpzKhB4xB7qQ==\n"
+    "-----END CERTIFICATE-----\n";
+
+static const char kSelfSignedMismatchAlgorithms[] =
+    "-----BEGIN CERTIFICATE-----\n"
+    "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\n"
+    "-----END CERTIFICATE-----\n";
 
 // CertFromPEM parses the given, NUL-terminated pem block and returns an
 // |X509*|.
@@ -529,10 +693,9 @@ static bssl::UniquePtr<STACK_OF(X509)> CertsToStack(
     return nullptr;
   }
   for (auto cert : certs) {
-    if (!sk_X509_push(stack.get(), cert)) {
+    if (!bssl::PushToStack(stack.get(), bssl::UpRef(cert))) {
       return nullptr;
     }
-    X509_up_ref(cert);
   }
 
   return stack;
@@ -547,10 +710,9 @@ static bssl::UniquePtr<STACK_OF(X509_CRL)> CRLsToStack(
     return nullptr;
   }
   for (auto crl : crls) {
-    if (!sk_X509_CRL_push(stack.get(), crl)) {
+    if (!bssl::PushToStack(stack.get(), bssl::UpRef(crl))) {
       return nullptr;
     }
-    X509_CRL_up_ref(crl);
   }
 
   return stack;
@@ -709,7 +871,7 @@ TEST(X509Test, ZeroLengthsWithX509PARAM) {
 
   std::vector<X509_CRL *> empty_crls;
 
-  struct Test {
+  struct X509Test {
     const char *correct_value;
     size_t correct_value_len;
     const char *incorrect_value;
@@ -717,7 +879,7 @@ TEST(X509Test, ZeroLengthsWithX509PARAM) {
     int (*func)(X509_VERIFY_PARAM *, const char *, size_t);
     int mismatch_error;
   };
-  const std::vector<Test> kTests = {
+  const std::vector<X509Test> kTests = {
       {kHostname, strlen(kHostname), kWrongHostname, strlen(kWrongHostname),
        X509_VERIFY_PARAM_set1_host, X509_V_ERR_HOSTNAME_MISMATCH},
       {kEmail, strlen(kEmail), kWrongEmail, strlen(kWrongEmail),
@@ -726,7 +888,7 @@ TEST(X509Test, ZeroLengthsWithX509PARAM) {
 
   for (size_t i = 0; i < kTests.size(); i++) {
     SCOPED_TRACE(i);
-    const Test &test = kTests[i];
+    const X509Test &test = kTests[i];
 
     // The correct value should work.
     ASSERT_EQ(X509_V_OK,
@@ -1258,4 +1420,254 @@ TEST(X509Test, PrettyPrintIntegers) {
       EXPECT_STREQ(in, out.get());
     }
   }
+}
+
+TEST(X509Test, X509NameSet) {
+  bssl::UniquePtr<X509_NAME> name(X509_NAME_new());
+  EXPECT_TRUE(X509_NAME_add_entry_by_txt(
+      name.get(), "C", MBSTRING_ASC, reinterpret_cast<const uint8_t *>("US"),
+      -1, -1, 0));
+  EXPECT_EQ(X509_NAME_entry_count(name.get()), 1);
+  EXPECT_TRUE(X509_NAME_add_entry_by_txt(
+      name.get(), "C", MBSTRING_ASC, reinterpret_cast<const uint8_t *>("CA"),
+      -1, -1, 0));
+  EXPECT_EQ(X509_NAME_entry_count(name.get()), 2);
+  EXPECT_TRUE(X509_NAME_add_entry_by_txt(
+      name.get(), "C", MBSTRING_ASC, reinterpret_cast<const uint8_t *>("UK"),
+      -1, -1, 0));
+  EXPECT_EQ(X509_NAME_entry_count(name.get()), 3);
+  EXPECT_TRUE(X509_NAME_add_entry_by_txt(
+      name.get(), "C", MBSTRING_ASC, reinterpret_cast<const uint8_t *>("JP"),
+      -1, 1, 0));
+  EXPECT_EQ(X509_NAME_entry_count(name.get()), 4);
+
+  // Check that the correct entries get incremented when inserting new entry.
+  EXPECT_EQ(X509_NAME_ENTRY_set(X509_NAME_get_entry(name.get(), 1)), 1);
+  EXPECT_EQ(X509_NAME_ENTRY_set(X509_NAME_get_entry(name.get(), 2)), 2);
+}
+
+TEST(X509Test, StringDecoding) {
+  static const struct {
+    std::vector<uint8_t> in;
+    int type;
+    const char *expected;
+  } kTests[] = {
+      // Non-minimal, two-byte UTF-8.
+      {{0xc0, 0x81}, V_ASN1_UTF8STRING, nullptr},
+      // Non-minimal, three-byte UTF-8.
+      {{0xe0, 0x80, 0x81}, V_ASN1_UTF8STRING, nullptr},
+      // Non-minimal, four-byte UTF-8.
+      {{0xf0, 0x80, 0x80, 0x81}, V_ASN1_UTF8STRING, nullptr},
+      // Truncated, four-byte UTF-8.
+      {{0xf0, 0x80, 0x80}, V_ASN1_UTF8STRING, nullptr},
+      // Low-surrogate value.
+      {{0xed, 0xa0, 0x80}, V_ASN1_UTF8STRING, nullptr},
+      // High-surrogate value.
+      {{0xed, 0xb0, 0x81}, V_ASN1_UTF8STRING, nullptr},
+      // Initial BOMs should be rejected from UCS-2 and UCS-4.
+      {{0xfe, 0xff, 0, 88}, V_ASN1_BMPSTRING, nullptr},
+      {{0, 0, 0xfe, 0xff, 0, 0, 0, 88}, V_ASN1_UNIVERSALSTRING, nullptr},
+      // Otherwise, BOMs should pass through.
+      {{0, 88, 0xfe, 0xff}, V_ASN1_BMPSTRING, "X\xef\xbb\xbf"},
+      {{0, 0, 0, 88, 0, 0, 0xfe, 0xff}, V_ASN1_UNIVERSALSTRING,
+       "X\xef\xbb\xbf"},
+      // The maximum code-point should pass though.
+      {{0, 16, 0xff, 0xfd}, V_ASN1_UNIVERSALSTRING, "\xf4\x8f\xbf\xbd"},
+      // Values outside the Unicode space should not.
+      {{0, 17, 0, 0}, V_ASN1_UNIVERSALSTRING, nullptr},
+      // Non-characters should be rejected.
+      {{0, 1, 0xff, 0xff}, V_ASN1_UNIVERSALSTRING, nullptr},
+      {{0, 1, 0xff, 0xfe}, V_ASN1_UNIVERSALSTRING, nullptr},
+      {{0, 0, 0xfd, 0xd5}, V_ASN1_UNIVERSALSTRING, nullptr},
+      // BMPString is UCS-2, not UTF-16, so surrogate pairs are invalid.
+      {{0xd8, 0, 0xdc, 1}, V_ASN1_BMPSTRING, nullptr},
+  };
+
+  for (size_t i = 0; i < OPENSSL_ARRAY_SIZE(kTests); i++) {
+    SCOPED_TRACE(i);
+    const auto& test = kTests[i];
+    ASN1_STRING s;
+    s.type = test.type;
+    s.data = const_cast<uint8_t*>(test.in.data());
+    s.length = test.in.size();
+
+    uint8_t *utf8;
+    const int utf8_len = ASN1_STRING_to_UTF8(&utf8, &s);
+    EXPECT_EQ(utf8_len < 0, test.expected == nullptr);
+    if (utf8_len >= 0) {
+      if (test.expected != nullptr) {
+        EXPECT_EQ(Bytes(test.expected), Bytes(utf8, utf8_len));
+      }
+      OPENSSL_free(utf8);
+    } else {
+      ERR_clear_error();
+    }
+  }
+}
+
+TEST(X509Test, NoBasicConstraintsCertSign) {
+  bssl::UniquePtr<X509> root(CertFromPEM(kSANTypesRoot));
+  bssl::UniquePtr<X509> intermediate(
+      CertFromPEM(kNoBasicConstraintsCertSignIntermediate));
+  bssl::UniquePtr<X509> leaf(CertFromPEM(kNoBasicConstraintsCertSignLeaf));
+
+  ASSERT_TRUE(root);
+  ASSERT_TRUE(intermediate);
+  ASSERT_TRUE(leaf);
+
+  // The intermediate has keyUsage certSign, but is not marked as a CA in the
+  // basicConstraints.
+  EXPECT_EQ(X509_V_ERR_INVALID_CA,
+            Verify(leaf.get(), {root.get()}, {intermediate.get()}, {}, 0));
+}
+
+TEST(X509Test, NoBasicConstraintsNetscapeCA) {
+  bssl::UniquePtr<X509> root(CertFromPEM(kSANTypesRoot));
+  bssl::UniquePtr<X509> intermediate(
+      CertFromPEM(kNoBasicConstraintsNetscapeCAIntermediate));
+  bssl::UniquePtr<X509> leaf(CertFromPEM(kNoBasicConstraintsNetscapeCALeaf));
+
+  ASSERT_TRUE(root);
+  ASSERT_TRUE(intermediate);
+  ASSERT_TRUE(leaf);
+
+  // The intermediate has a Netscape certificate type of "SSL CA", but is not
+  // marked as a CA in the basicConstraints.
+  EXPECT_EQ(X509_V_ERR_INVALID_CA,
+            Verify(leaf.get(), {root.get()}, {intermediate.get()}, {}, 0));
+}
+
+TEST(X509Test, MismatchAlgorithms) {
+  bssl::UniquePtr<X509> cert(CertFromPEM(kSelfSignedMismatchAlgorithms));
+  ASSERT_TRUE(cert);
+
+  bssl::UniquePtr<EVP_PKEY> pkey(X509_get_pubkey(cert.get()));
+  ASSERT_TRUE(pkey);
+
+  EXPECT_FALSE(X509_verify(cert.get(), pkey.get()));
+  uint32_t err = ERR_get_error();
+  EXPECT_EQ(ERR_LIB_X509, ERR_GET_LIB(err));
+  EXPECT_EQ(X509_R_SIGNATURE_ALGORITHM_MISMATCH, ERR_GET_REASON(err));
+}
+
+TEST(X509Test, PEMX509Info) {
+  std::string cert = kRootCAPEM;
+  auto cert_obj = CertFromPEM(kRootCAPEM);
+  ASSERT_TRUE(cert_obj);
+
+  std::string rsa = kRSAKey;
+  auto rsa_obj = PrivateKeyFromPEM(kRSAKey);
+  ASSERT_TRUE(rsa_obj);
+
+  std::string crl = kBasicCRL;
+  auto crl_obj = CRLFromPEM(kBasicCRL);
+  ASSERT_TRUE(crl_obj);
+
+  std::string unknown =
+      "-----BEGIN UNKNOWN-----\n"
+      "AAAA\n"
+      "-----END UNKNOWN-----\n";
+
+  std::string invalid =
+      "-----BEGIN CERTIFICATE-----\n"
+      "AAAA\n"
+      "-----END CERTIFICATE-----\n";
+
+  // Each X509_INFO contains at most one certificate, CRL, etc. The format
+  // creates a new X509_INFO when a repeated type is seen.
+  std::string pem =
+      // The first few entries have one of everything in different orders.
+      cert + rsa + crl +
+      rsa + crl + cert +
+      // Unknown types are ignored.
+      crl + unknown + cert + rsa +
+      // Seeing a new certificate starts a new entry, so now we have a bunch of
+      // certificate-only entries.
+      cert + cert + cert +
+      // The key folds into the certificate's entry.
+      cert + rsa +
+      // Doubled keys also start new entries.
+      rsa + rsa + rsa + rsa + crl +
+      // As do CRLs.
+      crl + crl;
+
+  const struct ExpectedInfo {
+    const X509 *cert;
+    const EVP_PKEY *key;
+    const X509_CRL *crl;
+  } kExpected[] = {
+    {cert_obj.get(), rsa_obj.get(), crl_obj.get()},
+    {cert_obj.get(), rsa_obj.get(), crl_obj.get()},
+    {cert_obj.get(), rsa_obj.get(), crl_obj.get()},
+    {cert_obj.get(), nullptr, nullptr},
+    {cert_obj.get(), nullptr, nullptr},
+    {cert_obj.get(), nullptr, nullptr},
+    {cert_obj.get(), rsa_obj.get(), nullptr},
+    {nullptr, rsa_obj.get(), nullptr},
+    {nullptr, rsa_obj.get(), nullptr},
+    {nullptr, rsa_obj.get(), nullptr},
+    {nullptr, rsa_obj.get(), crl_obj.get()},
+    {nullptr, nullptr, crl_obj.get()},
+    {nullptr, nullptr, crl_obj.get()},
+  };
+
+  auto check_info = [](const ExpectedInfo *expected, const X509_INFO *info) {
+    if (expected->cert != nullptr) {
+      EXPECT_EQ(0, X509_cmp(expected->cert, info->x509));
+    } else {
+      EXPECT_EQ(nullptr, info->x509);
+    }
+    if (expected->crl != nullptr) {
+      EXPECT_EQ(0, X509_CRL_cmp(expected->crl, info->crl));
+    } else {
+      EXPECT_EQ(nullptr, info->crl);
+    }
+    if (expected->key != nullptr) {
+      ASSERT_NE(nullptr, info->x_pkey);
+      // EVP_PKEY_cmp returns one if the keys are equal.
+      EXPECT_EQ(1, EVP_PKEY_cmp(expected->key, info->x_pkey->dec_pkey));
+    } else {
+      EXPECT_EQ(nullptr, info->x_pkey);
+    }
+  };
+
+  bssl::UniquePtr<BIO> bio(BIO_new_mem_buf(pem.data(), pem.size()));
+  ASSERT_TRUE(bio);
+  bssl::UniquePtr<STACK_OF(X509_INFO)> infos(
+      PEM_X509_INFO_read_bio(bio.get(), nullptr, nullptr, nullptr));
+  ASSERT_TRUE(infos);
+  ASSERT_EQ(OPENSSL_ARRAY_SIZE(kExpected), sk_X509_INFO_num(infos.get()));
+  for (size_t i = 0; i < OPENSSL_ARRAY_SIZE(kExpected); i++) {
+    SCOPED_TRACE(i);
+    check_info(&kExpected[i], sk_X509_INFO_value(infos.get(), i));
+  }
+
+  // Passing an existing stack appends to it.
+  bio.reset(BIO_new_mem_buf(pem.data(), pem.size()));
+  ASSERT_TRUE(bio);
+  ASSERT_EQ(infos.get(),
+            PEM_X509_INFO_read_bio(bio.get(), infos.get(), nullptr, nullptr));
+  ASSERT_EQ(2 * OPENSSL_ARRAY_SIZE(kExpected), sk_X509_INFO_num(infos.get()));
+  for (size_t i = 0; i < OPENSSL_ARRAY_SIZE(kExpected); i++) {
+    SCOPED_TRACE(i);
+    check_info(&kExpected[i], sk_X509_INFO_value(infos.get(), i));
+    check_info(
+        &kExpected[i],
+        sk_X509_INFO_value(infos.get(), i + OPENSSL_ARRAY_SIZE(kExpected)));
+  }
+
+  // Gracefully handle errors in both the append and fresh cases.
+  std::string bad_pem = cert + cert + invalid;
+
+  bio.reset(BIO_new_mem_buf(bad_pem.data(), bad_pem.size()));
+  ASSERT_TRUE(bio);
+  bssl::UniquePtr<STACK_OF(X509_INFO)> infos2(
+      PEM_X509_INFO_read_bio(bio.get(), nullptr, nullptr, nullptr));
+  EXPECT_FALSE(infos2);
+
+  bio.reset(BIO_new_mem_buf(bad_pem.data(), bad_pem.size()));
+  ASSERT_TRUE(bio);
+  EXPECT_FALSE(
+      PEM_X509_INFO_read_bio(bio.get(), infos.get(), nullptr, nullptr));
+  EXPECT_EQ(2 * OPENSSL_ARRAY_SIZE(kExpected), sk_X509_INFO_num(infos.get()));
 }

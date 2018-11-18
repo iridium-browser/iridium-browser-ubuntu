@@ -6,10 +6,12 @@
 
 #include "base/memory/singleton.h"
 #include "base/single_thread_task_runner.h"
-#include "base/task_scheduler/post_task.h"
-#include "base/task_scheduler/task_traits.h"
+#include "base/task/post_task.h"
+#include "base/task/task_traits.h"
 #include "components/feedback/feedback_uploader.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
+#include "content/public/browser/browser_context.h"
+#include "content/public/browser/storage_partition.h"
 
 namespace feedback {
 
@@ -31,7 +33,7 @@ FeedbackUploaderFactory::CreateUploaderTaskRunner() {
   // Uses a BLOCK_SHUTDOWN file task runner because we really don't want to
   // lose reports or corrupt their files.
   return base::CreateSingleThreadTaskRunnerWithTraits(
-      {base::MayBlock(), base::TaskPriority::BACKGROUND,
+      {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
        base::TaskShutdownBehavior::BLOCK_SHUTDOWN});
 }
 
@@ -51,7 +53,10 @@ FeedbackUploaderFactory::~FeedbackUploaderFactory() {}
 
 KeyedService* FeedbackUploaderFactory::BuildServiceInstanceFor(
     content::BrowserContext* context) const {
-  return new FeedbackUploader(context, task_runner_);
+  return new FeedbackUploader(
+      content::BrowserContext::GetDefaultStoragePartition(context)
+          ->GetURLLoaderFactoryForBrowserProcess(),
+      context, task_runner_);
 }
 
 content::BrowserContext* FeedbackUploaderFactory::GetBrowserContextToUse(

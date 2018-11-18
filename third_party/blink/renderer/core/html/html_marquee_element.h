@@ -33,12 +33,12 @@ class HTMLMarqueeElement final : public HTMLElement {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
   static HTMLMarqueeElement* Create(Document&);
 
-  InsertionNotificationRequest InsertedInto(ContainerNode*) final;
-  void RemovedFrom(ContainerNode*) final;
+  InsertionNotificationRequest InsertedInto(ContainerNode&) final;
+  void RemovedFrom(ContainerNode&) final;
 
   bool IsHorizontal() const;
 

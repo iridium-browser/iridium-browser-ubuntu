@@ -224,8 +224,6 @@ struct sqlite3_value {
 ** If the MEM_Null flag is set, then the value is an SQL NULL value.
 ** For a pointer type created using sqlite3_bind_pointer() or
 ** sqlite3_result_pointer() the MEM_Term and MEM_Subtype flags are also set.
-** If both MEM_Null and MEM_Zero are set, that means that the value is
-** an unchanging column value from VColumn.
 **
 ** If the MEM_Str flag is set then Mem.z points at a string representation.
 ** Usually this is encoded in the same unicode encoding as the main
@@ -319,7 +317,6 @@ struct sqlite3_context {
   int iOp;                /* Instruction number of OP_Function */
   int isError;            /* Error code returned by the function. */
   u8 skipFlag;            /* Skip accumulator loading if true */
-  u8 fErrorOrAux;         /* isError!=0 or pVdbe->pAuxData modified */
   u8 argc;                /* Number of arguments */
   sqlite3_value *argv[1]; /* Argument set */
 };
@@ -382,6 +379,7 @@ struct Vdbe {
   int nOp;                /* Number of instructions in the program */
 #ifdef SQLITE_DEBUG
   int rcApp;              /* errcode set by sqlite3_result_error_code() */
+  u32 nWrite;             /* Number of write operations that have occurred */
 #endif
   u16 nResColumn;         /* Number of columns in one row of the result set */
   u8 errorAction;         /* Recovery action to do in case of an error */
@@ -489,6 +487,7 @@ int sqlite3VdbeMemStringify(Mem*, u8, u8);
 i64 sqlite3VdbeIntValue(Mem*);
 int sqlite3VdbeMemIntegerify(Mem*);
 double sqlite3VdbeRealValue(Mem*);
+int sqlite3VdbeBooleanValue(Mem*, int ifNull);
 void sqlite3VdbeIntegerAffinity(Mem*);
 int sqlite3VdbeMemRealify(Mem*);
 int sqlite3VdbeMemNumerify(Mem*);
@@ -515,6 +514,14 @@ int sqlite3VdbeSorterNext(sqlite3 *, const VdbeCursor *);
 int sqlite3VdbeSorterRewind(const VdbeCursor *, int *);
 int sqlite3VdbeSorterWrite(const VdbeCursor *, Mem *);
 int sqlite3VdbeSorterCompare(const VdbeCursor *, Mem *, int, int *);
+
+#ifdef SQLITE_DEBUG
+  void sqlite3VdbeIncrWriteCounter(Vdbe*, VdbeCursor*);
+  void sqlite3VdbeAssertAbortable(Vdbe*);
+#else
+# define sqlite3VdbeIncrWriteCounter(V,C)
+# define sqlite3VdbeAssertAbortable(V)
+#endif
 
 #if !defined(SQLITE_OMIT_SHARED_CACHE)
   void sqlite3VdbeEnter(Vdbe*);

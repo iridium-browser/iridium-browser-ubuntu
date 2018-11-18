@@ -16,8 +16,10 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
+#include "base/task/post_task.h"
 #include "base/task_runner_util.h"
 #include "base/values.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
@@ -96,7 +98,7 @@ void ConvertBinaryDictionaryValuesToBase64(base::Value* dict);
 // Encodes |binary| as base64 and returns a new StringValue populated with the
 // encoded string.
 base::Value ConvertBinaryToBase64(const base::Value& binary) {
-  std::string binary_data(binary.GetBlob().data(), binary.GetBlob().size());
+  std::string binary_data(binary.GetBlob().begin(), binary.GetBlob().end());
   std::string data64;
   base::Base64Encode(binary_data, &data64);
   return base::Value(std::move(data64));
@@ -187,8 +189,8 @@ ExtensionFunction::ResponseAction RulesFunction::Run() {
     return RespondNow(RunAsyncOnCorrectThread());
 
   scoped_refptr<base::SingleThreadTaskRunner> thread_task_runner =
-      content::BrowserThread::GetTaskRunnerForThread(
-          rules_registry_->owner_thread());
+      base::CreateSingleThreadTaskRunnerWithTraits(
+          {rules_registry_->owner_thread()});
   base::PostTaskAndReplyWithResult(
       thread_task_runner.get(), FROM_HERE,
       base::BindOnce(&RulesFunction::RunAsyncOnCorrectThread, this),

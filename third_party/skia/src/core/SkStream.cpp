@@ -6,60 +6,59 @@
  */
 
 #include "SkStream.h"
-#include "SkStreamPriv.h"
+
 #include "SkData.h"
 #include "SkFixed.h"
 #include "SkMakeUnique.h"
-#include "SkString.h"
 #include "SkOSFile.h"
+#include "SkSafeMath.h"
+#include "SkStreamPriv.h"
+#include "SkString.h"
+#include "SkTFitsIn.h"
+#include "SkTo.h"
 #include "SkTypes.h"
+
+#include <limits>
 
 ///////////////////////////////////////////////////////////////////////////////
 
-int8_t SkStream::readS8() {
-    int8_t value;
-    SkDEBUGCODE(size_t len =) this->read(&value, 1);
-    SkASSERT(1 == len);
-    return value;
+bool SkStream::readS8(int8_t* i) {
+    return this->read(i, sizeof(*i)) == sizeof(*i);
 }
 
-int16_t SkStream::readS16() {
-    int16_t value;
-    SkDEBUGCODE(size_t len =) this->read(&value, 2);
-    SkASSERT(2 == len);
-    return value;
+bool SkStream::readS16(int16_t* i) {
+    return this->read(i, sizeof(*i)) == sizeof(*i);
 }
 
-int32_t SkStream::readS32() {
-    int32_t value;
-    SkDEBUGCODE(size_t len =) this->read(&value, 4);
-    SkASSERT(4 == len);
-    return value;
+bool SkStream::readS32(int32_t* i) {
+    return this->read(i, sizeof(*i)) == sizeof(*i);
 }
 
-SkScalar SkStream::readScalar() {
-    SkScalar value;
-    SkDEBUGCODE(size_t len =) this->read(&value, sizeof(SkScalar));
-    SkASSERT(sizeof(SkScalar) == len);
-    return value;
+bool SkStream::readScalar(SkScalar* i) {
+    return this->read(i, sizeof(*i)) == sizeof(*i);
 }
 
 #define SK_MAX_BYTE_FOR_U8          0xFD
 #define SK_BYTE_SENTINEL_FOR_U16    0xFE
 #define SK_BYTE_SENTINEL_FOR_U32    0xFF
 
-size_t SkStream::readPackedUInt() {
+bool SkStream::readPackedUInt(size_t* i) {
     uint8_t byte;
     if (!this->read(&byte, 1)) {
-        return 0;
+        return false;
     }
     if (SK_BYTE_SENTINEL_FOR_U16 == byte) {
-        return this->readU16();
+        uint16_t i16;
+        if (!this->readU16(&i16)) { return false; }
+        *i = i16;
     } else if (SK_BYTE_SENTINEL_FOR_U32 == byte) {
-        return this->readU32();
+        uint32_t i32;
+        if (!this->readU32(&i32)) { return false; }
+        *i = i32;
     } else {
-        return byte;
+        *i = byte;
     }
+    return true;
 }
 
 //////////////////////////////////////////////////////////////////////////////////////
@@ -209,27 +208,41 @@ bool SkFILEStream::isAtEnd() const {
 }
 
 bool SkFILEStream::rewind() {
-    // TODO: fOriginalOffset instead of 0.
-    fOffset = 0;
+    fOffset = fOriginalOffset;
     return true;
 }
 
 SkStreamAsset* SkFILEStream::onDuplicate() const {
-    // TODO: fOriginalOffset instead of 0.
-    return new SkFILEStream(fFILE, fSize, 0, fOriginalOffset);
+    return new SkFILEStream(fFILE, fSize, fOriginalOffset, fOriginalOffset);
 }
 
 size_t SkFILEStream::getPosition() const {
-    return fOffset;
+    SkASSERT(fOffset >= fOriginalOffset);
+    return fOffset - fOriginalOffset;
 }
 
 bool SkFILEStream::seek(size_t position) {
-    fOffset = position > fSize ? fSize : position;
+    fOffset = SkTMin(SkSafeMath::Add(position, fOriginalOffset), fSize);
     return true;
 }
 
 bool SkFILEStream::move(long offset) {
-    return this->seek(fOffset + offset);
+    if (offset < 0) {
+        if (offset == std::numeric_limits<long>::min()
+                || !SkTFitsIn<size_t>(-offset)
+                || (size_t) (-offset) >= this->getPosition()) {
+            fOffset = fOriginalOffset;
+        } else {
+            fOffset += offset;
+        }
+    } else if (!SkTFitsIn<size_t>(offset)) {
+        fOffset = fSize;
+    } else {
+        fOffset = SkTMin(SkSafeMath::Add(fOffset, (size_t) offset), fSize);
+    }
+
+    SkASSERT(fOffset >= fOriginalOffset && fOffset <= fSize);
+    return true;
 }
 
 SkStreamAsset* SkFILEStream::onFork() const {
@@ -237,7 +250,7 @@ SkStreamAsset* SkFILEStream::onFork() const {
 }
 
 size_t SkFILEStream::getLength() const {
-    return fSize;
+    return fSize - fOriginalOffset;
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -463,9 +476,23 @@ struct SkDynamicMemoryWStream::Block {
     }
 };
 
-SkDynamicMemoryWStream::SkDynamicMemoryWStream()
-    : fHead(nullptr), fTail(nullptr), fBytesWrittenBeforeTail(0)
-{}
+SkDynamicMemoryWStream::SkDynamicMemoryWStream(SkDynamicMemoryWStream&& other)
+    : fHead(other.fHead)
+    , fTail(other.fTail)
+    , fBytesWrittenBeforeTail(other.fBytesWrittenBeforeTail)
+{
+    other.fHead = nullptr;
+    other.fTail = nullptr;
+    other.fBytesWrittenBeforeTail = 0;
+}
+
+SkDynamicMemoryWStream& SkDynamicMemoryWStream::operator=(SkDynamicMemoryWStream&& other) {
+    if (this != &other) {
+        this->~SkDynamicMemoryWStream();
+        new (this) SkDynamicMemoryWStream(std::move(other));
+    }
+    return *this;
+}
 
 SkDynamicMemoryWStream::~SkDynamicMemoryWStream() {
     this->reset();
@@ -527,6 +554,43 @@ bool SkDynamicMemoryWStream::write(const void* buffer, size_t count) {
     }
     return true;
 }
+
+bool SkDynamicMemoryWStream::writeToAndReset(SkDynamicMemoryWStream* dst) {
+    SkASSERT(dst);
+    SkASSERT(dst != this);
+    if (0 == this->bytesWritten()) {
+        return true;
+    }
+    if (0 == dst->bytesWritten()) {
+        *dst = std::move(*this);
+        return true;
+    }
+    dst->fTail->fNext = fHead;
+    dst->fBytesWrittenBeforeTail += fBytesWrittenBeforeTail + dst->fTail->written();
+    dst->fTail = fTail;
+    fHead = fTail = nullptr;
+    fBytesWrittenBeforeTail = 0;
+    return true;
+}
+
+void SkDynamicMemoryWStream::prependToAndReset(SkDynamicMemoryWStream* dst) {
+    SkASSERT(dst);
+    SkASSERT(dst != this);
+    if (0 == this->bytesWritten()) {
+        return;
+    }
+    if (0 == dst->bytesWritten()) {
+        *dst = std::move(*this);
+        return;
+    }
+    fTail->fNext = dst->fHead;
+    dst->fHead = fHead;
+    dst->fBytesWrittenBeforeTail += fBytesWrittenBeforeTail + fTail->written();
+    fHead = fTail = nullptr;
+    fBytesWrittenBeforeTail = 0;
+    return;
+}
+
 
 bool SkDynamicMemoryWStream::read(void* buffer, size_t offset, size_t count) {
     if (offset + count > this->bytesWritten()) {
@@ -649,9 +713,7 @@ void SkDynamicMemoryWStream::validate() const {
     const Block* block = fHead;
     while (block) {
         if (block->fNext) {
-            SkASSERT(block->avail() == 0);
             bytes += block->written();
-            SkASSERT(bytes == SkAlign4(bytes)); // see padToAlign4()
         }
         block = block->fNext;
     }

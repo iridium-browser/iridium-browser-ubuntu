@@ -13,6 +13,7 @@
 #include <memory>
 #include <utility>
 
+#include "absl/memory/memory.h"
 #include "media/base/fakertp.h"
 #include "p2p/base/dtlstransportinternal.h"
 #include "p2p/base/fakedtlstransport.h"
@@ -22,7 +23,6 @@
 #include "pc/rtptransporttestutil.h"
 #include "rtc_base/asyncpacketsocket.h"
 #include "rtc_base/gunit.h"
-#include "rtc_base/ptr_util.h"
 #include "rtc_base/sslstreamadapter.h"
 
 using cricket::FakeDtlsTransport;
@@ -33,58 +33,26 @@ using webrtc::RtpTransport;
 
 const int kRtpAuthTagLen = 10;
 
-class TransportObserver : public sigslot::has_slots<> {
- public:
-  void OnPacketReceived(bool rtcp,
-                        rtc::CopyOnWriteBuffer* packet,
-                        const rtc::PacketTime& packet_time) {
-    if (rtcp) {
-      last_recv_rtcp_packet_ = *packet;
-      ++rtcp_count_;
-    } else {
-      last_recv_rtp_packet_ = *packet;
-      ++rtp_count_;
-    }
-  }
-
-  void OnReadyToSend(bool ready) { ready_to_send_ = ready; }
-
-  int rtp_count() const { return rtp_count_; }
-  int rtcp_count() const { return rtcp_count_; }
-
-  rtc::CopyOnWriteBuffer last_recv_rtp_packet() {
-    return last_recv_rtp_packet_;
-  }
-
-  rtc::CopyOnWriteBuffer last_recv_rtcp_packet() {
-    return last_recv_rtcp_packet_;
-  }
-
-  bool ready_to_send() { return ready_to_send_; }
-
- private:
-  rtc::CopyOnWriteBuffer last_recv_rtp_packet_;
-  rtc::CopyOnWriteBuffer last_recv_rtcp_packet_;
-  bool ready_to_send_ = false;
-  int rtp_count_ = 0;
-  int rtcp_count_ = 0;
-};
-
 class DtlsSrtpTransportTest : public testing::Test,
                               public sigslot::has_slots<> {
  protected:
   DtlsSrtpTransportTest() {}
 
+  ~DtlsSrtpTransportTest() {
+    if (dtls_srtp_transport1_) {
+      dtls_srtp_transport1_->UnregisterRtpDemuxerSink(&transport_observer1_);
+    }
+    if (dtls_srtp_transport2_) {
+      dtls_srtp_transport2_->UnregisterRtpDemuxerSink(&transport_observer2_);
+    }
+  }
+
   std::unique_ptr<DtlsSrtpTransport> MakeDtlsSrtpTransport(
       FakeDtlsTransport* rtp_dtls,
       FakeDtlsTransport* rtcp_dtls,
       bool rtcp_mux_enabled) {
-    auto rtp_transport = rtc::MakeUnique<RtpTransport>(rtcp_mux_enabled);
-
-    auto srtp_transport =
-        rtc::MakeUnique<SrtpTransport>(std::move(rtp_transport));
     auto dtls_srtp_transport =
-        rtc::MakeUnique<DtlsSrtpTransport>(std::move(srtp_transport));
+        absl::make_unique<DtlsSrtpTransport>(rtcp_mux_enabled);
 
     dtls_srtp_transport->SetDtlsTransports(rtp_dtls, rtcp_dtls);
 
@@ -101,15 +69,24 @@ class DtlsSrtpTransportTest : public testing::Test,
     dtls_srtp_transport2_ =
         MakeDtlsSrtpTransport(rtp_dtls2, rtcp_dtls2, rtcp_mux_enabled);
 
-    dtls_srtp_transport1_->SignalPacketReceived.connect(
-        &transport_observer1_, &TransportObserver::OnPacketReceived);
+    dtls_srtp_transport1_->SignalRtcpPacketReceived.connect(
+        &transport_observer1_,
+        &webrtc::TransportObserver::OnRtcpPacketReceived);
     dtls_srtp_transport1_->SignalReadyToSend.connect(
-        &transport_observer1_, &TransportObserver::OnReadyToSend);
+        &transport_observer1_, &webrtc::TransportObserver::OnReadyToSend);
 
-    dtls_srtp_transport2_->SignalPacketReceived.connect(
-        &transport_observer2_, &TransportObserver::OnPacketReceived);
+    dtls_srtp_transport2_->SignalRtcpPacketReceived.connect(
+        &transport_observer2_,
+        &webrtc::TransportObserver::OnRtcpPacketReceived);
     dtls_srtp_transport2_->SignalReadyToSend.connect(
-        &transport_observer2_, &TransportObserver::OnReadyToSend);
+        &transport_observer2_, &webrtc::TransportObserver::OnReadyToSend);
+    webrtc::RtpDemuxerCriteria demuxer_criteria;
+    // 0x00 is the payload type used in kPcmuFrame.
+    demuxer_criteria.payload_types = {0x00};
+    dtls_srtp_transport1_->RegisterRtpDemuxerSink(demuxer_criteria,
+                                                  &transport_observer1_);
+    dtls_srtp_transport2_->RegisterRtpDemuxerSink(demuxer_criteria,
+                                                  &transport_observer2_);
   }
 
   void CompleteDtlsHandshake(FakeDtlsTransport* fake_dtls1,
@@ -268,8 +245,8 @@ class DtlsSrtpTransportTest : public testing::Test,
 
   std::unique_ptr<DtlsSrtpTransport> dtls_srtp_transport1_;
   std::unique_ptr<DtlsSrtpTransport> dtls_srtp_transport2_;
-  TransportObserver transport_observer1_;
-  TransportObserver transport_observer2_;
+  webrtc::TransportObserver transport_observer1_;
+  webrtc::TransportObserver transport_observer2_;
 
   int sequence_number_ = 0;
 };
@@ -277,17 +254,17 @@ class DtlsSrtpTransportTest : public testing::Test,
 // Tests that if RTCP muxing is enabled and transports are set after RTP
 // transport finished the handshake, SRTP is set up.
 TEST_F(DtlsSrtpTransportTest, SetTransportsAfterHandshakeCompleteWithRtcpMux) {
-  auto rtp_dtls1 = rtc::MakeUnique<FakeDtlsTransport>(
+  auto rtp_dtls1 = absl::make_unique<FakeDtlsTransport>(
       "video", cricket::ICE_CANDIDATE_COMPONENT_RTP);
-  auto rtp_dtls2 = rtc::MakeUnique<FakeDtlsTransport>(
+  auto rtp_dtls2 = absl::make_unique<FakeDtlsTransport>(
       "video", cricket::ICE_CANDIDATE_COMPONENT_RTP);
 
   MakeDtlsSrtpTransports(rtp_dtls1.get(), nullptr, rtp_dtls2.get(), nullptr,
                          /*rtcp_mux_enabled=*/true);
 
-  auto rtp_dtls3 = rtc::MakeUnique<FakeDtlsTransport>(
+  auto rtp_dtls3 = absl::make_unique<FakeDtlsTransport>(
       "audio", cricket::ICE_CANDIDATE_COMPONENT_RTP);
-  auto rtp_dtls4 = rtc::MakeUnique<FakeDtlsTransport>(
+  auto rtp_dtls4 = absl::make_unique<FakeDtlsTransport>(
       "audio", cricket::ICE_CANDIDATE_COMPONENT_RTP);
 
   CompleteDtlsHandshake(rtp_dtls3.get(), rtp_dtls4.get());
@@ -302,25 +279,25 @@ TEST_F(DtlsSrtpTransportTest, SetTransportsAfterHandshakeCompleteWithRtcpMux) {
 // RTP and RTCP transports finished the handshake, SRTP is set up.
 TEST_F(DtlsSrtpTransportTest,
        SetTransportsAfterHandshakeCompleteWithoutRtcpMux) {
-  auto rtp_dtls1 = rtc::MakeUnique<FakeDtlsTransport>(
+  auto rtp_dtls1 = absl::make_unique<FakeDtlsTransport>(
       "video", cricket::ICE_CANDIDATE_COMPONENT_RTP);
-  auto rtcp_dtls1 = rtc::MakeUnique<FakeDtlsTransport>(
+  auto rtcp_dtls1 = absl::make_unique<FakeDtlsTransport>(
       "video", cricket::ICE_CANDIDATE_COMPONENT_RTCP);
-  auto rtp_dtls2 = rtc::MakeUnique<FakeDtlsTransport>(
+  auto rtp_dtls2 = absl::make_unique<FakeDtlsTransport>(
       "video", cricket::ICE_CANDIDATE_COMPONENT_RTP);
-  auto rtcp_dtls2 = rtc::MakeUnique<FakeDtlsTransport>(
+  auto rtcp_dtls2 = absl::make_unique<FakeDtlsTransport>(
       "video", cricket::ICE_CANDIDATE_COMPONENT_RTCP);
 
   MakeDtlsSrtpTransports(rtp_dtls1.get(), rtcp_dtls1.get(), rtp_dtls2.get(),
                          rtcp_dtls2.get(), /*rtcp_mux_enabled=*/false);
 
-  auto rtp_dtls3 = rtc::MakeUnique<FakeDtlsTransport>(
+  auto rtp_dtls3 = absl::make_unique<FakeDtlsTransport>(
       "audio", cricket::ICE_CANDIDATE_COMPONENT_RTP);
-  auto rtcp_dtls3 = rtc::MakeUnique<FakeDtlsTransport>(
+  auto rtcp_dtls3 = absl::make_unique<FakeDtlsTransport>(
       "audio", cricket::ICE_CANDIDATE_COMPONENT_RTCP);
-  auto rtp_dtls4 = rtc::MakeUnique<FakeDtlsTransport>(
+  auto rtp_dtls4 = absl::make_unique<FakeDtlsTransport>(
       "audio", cricket::ICE_CANDIDATE_COMPONENT_RTP);
-  auto rtcp_dtls4 = rtc::MakeUnique<FakeDtlsTransport>(
+  auto rtcp_dtls4 = absl::make_unique<FakeDtlsTransport>(
       "audio", cricket::ICE_CANDIDATE_COMPONENT_RTCP);
   CompleteDtlsHandshake(rtp_dtls3.get(), rtp_dtls4.get());
   CompleteDtlsHandshake(rtcp_dtls3.get(), rtcp_dtls4.get());
@@ -334,13 +311,13 @@ TEST_F(DtlsSrtpTransportTest,
 // Tests if RTCP muxing is enabled, SRTP is set up as soon as the RTP DTLS
 // handshake is finished.
 TEST_F(DtlsSrtpTransportTest, SetTransportsBeforeHandshakeCompleteWithRtcpMux) {
-  auto rtp_dtls1 = rtc::MakeUnique<FakeDtlsTransport>(
+  auto rtp_dtls1 = absl::make_unique<FakeDtlsTransport>(
       "audio", cricket::ICE_CANDIDATE_COMPONENT_RTP);
-  auto rtcp_dtls1 = rtc::MakeUnique<FakeDtlsTransport>(
+  auto rtcp_dtls1 = absl::make_unique<FakeDtlsTransport>(
       "audio", cricket::ICE_CANDIDATE_COMPONENT_RTCP);
-  auto rtp_dtls2 = rtc::MakeUnique<FakeDtlsTransport>(
+  auto rtp_dtls2 = absl::make_unique<FakeDtlsTransport>(
       "audio", cricket::ICE_CANDIDATE_COMPONENT_RTP);
-  auto rtcp_dtls2 = rtc::MakeUnique<FakeDtlsTransport>(
+  auto rtcp_dtls2 = absl::make_unique<FakeDtlsTransport>(
       "audio", cricket::ICE_CANDIDATE_COMPONENT_RTCP);
 
   MakeDtlsSrtpTransports(rtp_dtls1.get(), rtcp_dtls1.get(), rtp_dtls2.get(),
@@ -357,13 +334,13 @@ TEST_F(DtlsSrtpTransportTest, SetTransportsBeforeHandshakeCompleteWithRtcpMux) {
 // RTCP DTLS handshake are finished.
 TEST_F(DtlsSrtpTransportTest,
        SetTransportsBeforeHandshakeCompleteWithoutRtcpMux) {
-  auto rtp_dtls1 = rtc::MakeUnique<FakeDtlsTransport>(
+  auto rtp_dtls1 = absl::make_unique<FakeDtlsTransport>(
       "audio", cricket::ICE_CANDIDATE_COMPONENT_RTP);
-  auto rtcp_dtls1 = rtc::MakeUnique<FakeDtlsTransport>(
+  auto rtcp_dtls1 = absl::make_unique<FakeDtlsTransport>(
       "audio", cricket::ICE_CANDIDATE_COMPONENT_RTCP);
-  auto rtp_dtls2 = rtc::MakeUnique<FakeDtlsTransport>(
+  auto rtp_dtls2 = absl::make_unique<FakeDtlsTransport>(
       "audio", cricket::ICE_CANDIDATE_COMPONENT_RTP);
-  auto rtcp_dtls2 = rtc::MakeUnique<FakeDtlsTransport>(
+  auto rtcp_dtls2 = absl::make_unique<FakeDtlsTransport>(
       "audio", cricket::ICE_CANDIDATE_COMPONENT_RTCP);
 
   MakeDtlsSrtpTransports(rtp_dtls1.get(), rtcp_dtls1.get(), rtp_dtls2.get(),
@@ -380,9 +357,9 @@ TEST_F(DtlsSrtpTransportTest,
 // context will be reset and will be re-setup once the new transports' handshake
 // complete.
 TEST_F(DtlsSrtpTransportTest, DtlsSrtpResetAfterDtlsTransportChange) {
-  auto rtp_dtls1 = rtc::MakeUnique<FakeDtlsTransport>(
+  auto rtp_dtls1 = absl::make_unique<FakeDtlsTransport>(
       "audio", cricket::ICE_CANDIDATE_COMPONENT_RTP);
-  auto rtp_dtls2 = rtc::MakeUnique<FakeDtlsTransport>(
+  auto rtp_dtls2 = absl::make_unique<FakeDtlsTransport>(
       "audio", cricket::ICE_CANDIDATE_COMPONENT_RTP);
 
   MakeDtlsSrtpTransports(rtp_dtls1.get(), nullptr, rtp_dtls2.get(), nullptr,
@@ -392,9 +369,9 @@ TEST_F(DtlsSrtpTransportTest, DtlsSrtpResetAfterDtlsTransportChange) {
   EXPECT_TRUE(dtls_srtp_transport1_->IsSrtpActive());
   EXPECT_TRUE(dtls_srtp_transport2_->IsSrtpActive());
 
-  auto rtp_dtls3 = rtc::MakeUnique<FakeDtlsTransport>(
+  auto rtp_dtls3 = absl::make_unique<FakeDtlsTransport>(
       "audio", cricket::ICE_CANDIDATE_COMPONENT_RTP);
-  auto rtp_dtls4 = rtc::MakeUnique<FakeDtlsTransport>(
+  auto rtp_dtls4 = absl::make_unique<FakeDtlsTransport>(
       "audio", cricket::ICE_CANDIDATE_COMPONENT_RTP);
 
   // The previous context is reset.
@@ -412,13 +389,13 @@ TEST_F(DtlsSrtpTransportTest, DtlsSrtpResetAfterDtlsTransportChange) {
 // enabled, SRTP is set up.
 TEST_F(DtlsSrtpTransportTest,
        RtcpMuxEnabledAfterRtpTransportHandshakeComplete) {
-  auto rtp_dtls1 = rtc::MakeUnique<FakeDtlsTransport>(
+  auto rtp_dtls1 = absl::make_unique<FakeDtlsTransport>(
       "audio", cricket::ICE_CANDIDATE_COMPONENT_RTP);
-  auto rtcp_dtls1 = rtc::MakeUnique<FakeDtlsTransport>(
+  auto rtcp_dtls1 = absl::make_unique<FakeDtlsTransport>(
       "audio", cricket::ICE_CANDIDATE_COMPONENT_RTCP);
-  auto rtp_dtls2 = rtc::MakeUnique<FakeDtlsTransport>(
+  auto rtp_dtls2 = absl::make_unique<FakeDtlsTransport>(
       "audio", cricket::ICE_CANDIDATE_COMPONENT_RTP);
-  auto rtcp_dtls2 = rtc::MakeUnique<FakeDtlsTransport>(
+  auto rtcp_dtls2 = absl::make_unique<FakeDtlsTransport>(
       "audio", cricket::ICE_CANDIDATE_COMPONENT_RTCP);
 
   MakeDtlsSrtpTransports(rtp_dtls1.get(), rtcp_dtls1.get(), rtp_dtls2.get(),
@@ -439,9 +416,9 @@ TEST_F(DtlsSrtpTransportTest,
 // Tests that when SetSend/RecvEncryptedHeaderExtensionIds is called, the SRTP
 // sessions are updated with new encryped header extension IDs immediately.
 TEST_F(DtlsSrtpTransportTest, EncryptedHeaderExtensionIdUpdated) {
-  auto rtp_dtls1 = rtc::MakeUnique<FakeDtlsTransport>(
+  auto rtp_dtls1 = absl::make_unique<FakeDtlsTransport>(
       "audio", cricket::ICE_CANDIDATE_COMPONENT_RTP);
-  auto rtp_dtls2 = rtc::MakeUnique<FakeDtlsTransport>(
+  auto rtp_dtls2 = absl::make_unique<FakeDtlsTransport>(
       "audio", cricket::ICE_CANDIDATE_COMPONENT_RTP);
 
   MakeDtlsSrtpTransports(rtp_dtls1.get(), nullptr, rtp_dtls2.get(), nullptr,
@@ -465,9 +442,9 @@ TEST_F(DtlsSrtpTransportTest, EncryptedHeaderExtensionIdUpdated) {
 // Tests if RTCP muxing is enabled. DtlsSrtpTransport is ready to send once the
 // RTP DtlsTransport is ready.
 TEST_F(DtlsSrtpTransportTest, SignalReadyToSendFiredWithRtcpMux) {
-  auto rtp_dtls1 = rtc::MakeUnique<FakeDtlsTransport>(
+  auto rtp_dtls1 = absl::make_unique<FakeDtlsTransport>(
       "audio", cricket::ICE_CANDIDATE_COMPONENT_RTP);
-  auto rtp_dtls2 = rtc::MakeUnique<FakeDtlsTransport>(
+  auto rtp_dtls2 = absl::make_unique<FakeDtlsTransport>(
       "audio", cricket::ICE_CANDIDATE_COMPONENT_RTP);
 
   MakeDtlsSrtpTransports(rtp_dtls1.get(), nullptr, rtp_dtls2.get(), nullptr,
@@ -481,13 +458,13 @@ TEST_F(DtlsSrtpTransportTest, SignalReadyToSendFiredWithRtcpMux) {
 // Tests if RTCP muxing is not enabled. DtlsSrtpTransport is ready to send once
 // both the RTP and RTCP DtlsTransport are ready.
 TEST_F(DtlsSrtpTransportTest, SignalReadyToSendFiredWithoutRtcpMux) {
-  auto rtp_dtls1 = rtc::MakeUnique<FakeDtlsTransport>(
+  auto rtp_dtls1 = absl::make_unique<FakeDtlsTransport>(
       "audio", cricket::ICE_CANDIDATE_COMPONENT_RTP);
-  auto rtcp_dtls1 = rtc::MakeUnique<FakeDtlsTransport>(
+  auto rtcp_dtls1 = absl::make_unique<FakeDtlsTransport>(
       "audio", cricket::ICE_CANDIDATE_COMPONENT_RTCP);
-  auto rtp_dtls2 = rtc::MakeUnique<FakeDtlsTransport>(
+  auto rtp_dtls2 = absl::make_unique<FakeDtlsTransport>(
       "audio", cricket::ICE_CANDIDATE_COMPONENT_RTP);
-  auto rtcp_dtls2 = rtc::MakeUnique<FakeDtlsTransport>(
+  auto rtcp_dtls2 = absl::make_unique<FakeDtlsTransport>(
       "audio", cricket::ICE_CANDIDATE_COMPONENT_RTCP);
 
   MakeDtlsSrtpTransports(rtp_dtls1.get(), rtcp_dtls1.get(), rtp_dtls2.get(),
@@ -508,13 +485,13 @@ TEST_F(DtlsSrtpTransportTest, SignalReadyToSendFiredWithoutRtcpMux) {
 // when attempting to unprotect packets.
 // Regression test for bugs.webrtc.org/8996
 TEST_F(DtlsSrtpTransportTest, SrtpSessionNotResetWhenRtcpTransportRemoved) {
-  auto rtp_dtls1 = rtc::MakeUnique<FakeDtlsTransport>(
+  auto rtp_dtls1 = absl::make_unique<FakeDtlsTransport>(
       "audio", cricket::ICE_CANDIDATE_COMPONENT_RTP);
-  auto rtcp_dtls1 = rtc::MakeUnique<FakeDtlsTransport>(
+  auto rtcp_dtls1 = absl::make_unique<FakeDtlsTransport>(
       "audio", cricket::ICE_CANDIDATE_COMPONENT_RTCP);
-  auto rtp_dtls2 = rtc::MakeUnique<FakeDtlsTransport>(
+  auto rtp_dtls2 = absl::make_unique<FakeDtlsTransport>(
       "audio", cricket::ICE_CANDIDATE_COMPONENT_RTP);
-  auto rtcp_dtls2 = rtc::MakeUnique<FakeDtlsTransport>(
+  auto rtcp_dtls2 = absl::make_unique<FakeDtlsTransport>(
       "audio", cricket::ICE_CANDIDATE_COMPONENT_RTCP);
 
   MakeDtlsSrtpTransports(rtp_dtls1.get(), rtcp_dtls1.get(), rtp_dtls2.get(),
@@ -531,5 +508,53 @@ TEST_F(DtlsSrtpTransportTest, SrtpSessionNotResetWhenRtcpTransportRemoved) {
   // Attempt to send more RTCP packets. If the issue occurred, one side would
   // reset its context while the other would not, causing replay detection
   // errors when a packet with a duplicate SRTCP index is received.
+  SendRecvRtcpPackets();
+}
+
+// Tests that RTCP packets can be sent and received if both sides actively reset
+// the SRTP parameters with the |active_reset_srtp_params_| flag.
+TEST_F(DtlsSrtpTransportTest, ActivelyResetSrtpParams) {
+  auto rtp_dtls1 = absl::make_unique<FakeDtlsTransport>(
+      "audio", cricket::ICE_CANDIDATE_COMPONENT_RTP);
+  auto rtcp_dtls1 = absl::make_unique<FakeDtlsTransport>(
+      "audio", cricket::ICE_CANDIDATE_COMPONENT_RTCP);
+  auto rtp_dtls2 = absl::make_unique<FakeDtlsTransport>(
+      "audio", cricket::ICE_CANDIDATE_COMPONENT_RTP);
+  auto rtcp_dtls2 = absl::make_unique<FakeDtlsTransport>(
+      "audio", cricket::ICE_CANDIDATE_COMPONENT_RTCP);
+
+  MakeDtlsSrtpTransports(rtp_dtls1.get(), rtcp_dtls1.get(), rtp_dtls2.get(),
+                         rtcp_dtls2.get(), /*rtcp_mux_enabled=*/true);
+  CompleteDtlsHandshake(rtp_dtls1.get(), rtp_dtls2.get());
+  CompleteDtlsHandshake(rtcp_dtls1.get(), rtcp_dtls2.get());
+
+  // Send some RTCP packets, causing the SRTCP index to be incremented.
+  SendRecvRtcpPackets();
+
+  // Only set the |active_reset_srtp_params_| flag to be true one side.
+  dtls_srtp_transport1_->SetActiveResetSrtpParams(true);
+  // Set RTCP transport to null to trigger the SRTP parameters update.
+  dtls_srtp_transport1_->SetDtlsTransports(rtp_dtls1.get(), nullptr);
+  dtls_srtp_transport2_->SetDtlsTransports(rtp_dtls2.get(), nullptr);
+
+  // Sending some RTCP packets.
+  size_t rtcp_len = sizeof(kRtcpReport);
+  size_t packet_size = rtcp_len + 4 + kRtpAuthTagLen;
+  rtc::Buffer rtcp_packet_buffer(packet_size);
+  rtc::CopyOnWriteBuffer rtcp_packet(kRtcpReport, rtcp_len, packet_size);
+  int prev_received_packets = transport_observer2_.rtcp_count();
+  ASSERT_TRUE(dtls_srtp_transport1_->SendRtcpPacket(
+      &rtcp_packet, rtc::PacketOptions(), cricket::PF_SRTP_BYPASS));
+  // The RTCP packet is not exepected to be received because the SRTP parameters
+  // are only reset on one side and the SRTCP index is out of sync.
+  EXPECT_EQ(prev_received_packets, transport_observer2_.rtcp_count());
+
+  // Set the flag to be true on the other side.
+  dtls_srtp_transport2_->SetActiveResetSrtpParams(true);
+  // Set RTCP transport to null to trigger the SRTP parameters update.
+  dtls_srtp_transport1_->SetDtlsTransports(rtp_dtls1.get(), nullptr);
+  dtls_srtp_transport2_->SetDtlsTransports(rtp_dtls2.get(), nullptr);
+
+  // RTCP packets flow is expected to work just fine.
   SendRecvRtcpPackets();
 }

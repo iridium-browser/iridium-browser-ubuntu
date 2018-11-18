@@ -61,7 +61,7 @@ public class CronetUrlRequestContext extends CronetEngineBase {
     private final AtomicInteger mActiveRequestCount = new AtomicInteger(0);
 
     @GuardedBy("mLock")
-    private long mUrlRequestContextAdapter = 0;
+    private long mUrlRequestContextAdapter;
     /**
      * This field is accessed without synchronization, but only for the purposes of reference
      * equality comparison with other threads. If such a comparison is performed on the network
@@ -72,7 +72,6 @@ public class CronetUrlRequestContext extends CronetEngineBase {
     private Thread mNetworkThread;
 
     private final boolean mNetworkQualityEstimatorEnabled;
-    private final int mNetworkThreadPriority;
 
     /**
      * Locks operations on network quality listeners, because listener
@@ -132,14 +131,6 @@ public class CronetUrlRequestContext extends CronetEngineBase {
             new HashMap<RequestFinishedInfo.Listener,
                     VersionSafeCallbacks.RequestFinishedInfoListener>();
 
-    /**
-     * Synchronize access to mCertVerifierData.
-     */
-    private ConditionVariable mWaitGetCertVerifierDataComplete = new ConditionVariable();
-
-    /** Holds CertVerifier data. */
-    private String mCertVerifierData;
-
     private volatile ConditionVariable mStopNetLogCompleted;
 
     /** Set of storage paths currently in use. */
@@ -158,9 +149,10 @@ public class CronetUrlRequestContext extends CronetEngineBase {
     @UsedByReflection("CronetEngine.java")
     public CronetUrlRequestContext(final CronetEngineBuilderImpl builder) {
         mNetworkQualityEstimatorEnabled = builder.networkQualityEstimatorEnabled();
-        mNetworkThreadPriority = builder.threadPriority(Process.THREAD_PRIORITY_BACKGROUND);
         CronetLibraryLoader.ensureInitialized(builder.getContext(), builder);
-        nativeSetMinLogLevel(getLoggingLevel());
+        if (!IntegratedModeState.INTEGRATED_MODE_ENABLED) {
+            nativeSetMinLogLevel(getLoggingLevel());
+        }
         if (builder.httpCacheMode() == HttpCacheType.DISK) {
             mInUseStoragePath = builder.storagePath();
             synchronized (sInUseStoragePaths) {
@@ -203,7 +195,7 @@ public class CronetUrlRequestContext extends CronetEngineBase {
                 builder.httpCacheMaxSize(), builder.experimentalOptions(),
                 builder.mockCertVerifier(), builder.networkQualityEstimatorEnabled(),
                 builder.publicKeyPinningBypassForLocalTrustAnchorsEnabled(),
-                builder.certVerifierData());
+                builder.threadPriority(Process.THREAD_PRIORITY_BACKGROUND));
         for (CronetEngineBuilderImpl.QuicHint quicHint : builder.quicHints()) {
             nativeAddQuicHint(urlRequestContextConfig, quicHint.mHost, quicHint.mPort,
                     quicHint.mAlternatePort);
@@ -329,22 +321,6 @@ public class CronetUrlRequestContext extends CronetEngineBase {
     @CalledByNative
     public void stopNetLogCompleted() {
         mStopNetLogCompleted.open();
-    }
-
-    @Override
-    public String getCertVerifierData(long timeout) {
-        if (timeout < 0) {
-            throw new IllegalArgumentException("timeout must be a positive value");
-        } else if (timeout == 0) {
-            timeout = 100;
-        }
-        mWaitGetCertVerifierDataComplete.close();
-        synchronized (mLock) {
-            checkHaveAdapter();
-            nativeGetCertVerifierData(mUrlRequestContextAdapter);
-        }
-        mWaitGetCertVerifierDataComplete.block(timeout);
-        return mCertVerifierData;
     }
 
     // This method is intentionally non-static to ensure Cronet native library
@@ -605,8 +581,11 @@ public class CronetUrlRequestContext extends CronetEngineBase {
     private void initNetworkThread() {
         mNetworkThread = Thread.currentThread();
         mInitCompleted.open();
-        Thread.currentThread().setName("ChromiumNet");
-        Process.setThreadPriority(mNetworkThreadPriority);
+        if (!IntegratedModeState.INTEGRATED_MODE_ENABLED) {
+            // In integrated mode, network thread is shared from the host.
+            // Cronet shouldn't change the property of the thread.
+            Thread.currentThread().setName("ChromiumNet");
+        }
     }
 
     @SuppressWarnings("unused")
@@ -665,13 +644,6 @@ public class CronetUrlRequestContext extends CronetEngineBase {
         }
     }
 
-    @SuppressWarnings("unused")
-    @CalledByNative
-    private void onGetCertVerifierData(String certVerifierData) {
-        mCertVerifierData = certVerifierData;
-        mWaitGetCertVerifierDataComplete.open();
-    }
-
     void reportFinished(final RequestFinishedInfo requestInfo) {
         ArrayList<VersionSafeCallbacks.RequestFinishedInfoListener> currentListeners;
         synchronized (mFinishedListenerLock) {
@@ -705,7 +677,7 @@ public class CronetUrlRequestContext extends CronetEngineBase {
             boolean brotliEnabled, boolean disableCache, int httpCacheMode, long httpCacheMaxSize,
             String experimentalOptions, long mockCertVerifier,
             boolean enableNetworkQualityEstimator,
-            boolean bypassPublicKeyPinningForLocalTrustAnchors, String certVerifierData);
+            boolean bypassPublicKeyPinningForLocalTrustAnchors, int networkThreadPriority);
 
     private static native void nativeAddQuicHint(
             long urlRequestContextConfig, String host, int port, int alternatePort);
@@ -731,9 +703,6 @@ public class CronetUrlRequestContext extends CronetEngineBase {
 
     @NativeClassQualifiedName("CronetURLRequestContextAdapter")
     private native void nativeStopNetLog(long nativePtr);
-
-    @NativeClassQualifiedName("CronetURLRequestContextAdapter")
-    private native void nativeGetCertVerifierData(long nativePtr);
 
     @NativeClassQualifiedName("CronetURLRequestContextAdapter")
     private native void nativeInitRequestContextOnInitThread(long nativePtr);

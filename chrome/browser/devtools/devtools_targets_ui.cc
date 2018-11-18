@@ -17,6 +17,7 @@
 #include "base/values.h"
 #include "base/version.h"
 #include "chrome/browser/devtools/device/devtools_android_bridge.h"
+#include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/devtools/serialize_host_descriptions.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/devtools_agent_host.h"
@@ -152,6 +153,8 @@ void LocalTargetsUIHandler::UpdateTargets() {
   for (const scoped_refptr<DevToolsAgentHost>& host : targets) {
     if (Profile::FromBrowserContext(host->GetBrowserContext()) != profile_)
       continue;
+    if (!DevToolsWindow::AllowDevToolsFor(profile_, host->GetWebContents()))
+      continue;
     targets_[host->GetId()] = host;
     hosts.push_back({host->GetId(), host->GetParentId(),
                      std::move(*Serialize(host.get()))});
@@ -207,7 +210,7 @@ AdbTargetsUIHandler::~AdbTargetsUIHandler() {
 
 void AdbTargetsUIHandler::Open(const std::string& browser_id,
                                const std::string& url) {
-  RemoteBrowsers::iterator it = remote_browsers_.find(browser_id);
+  auto it = remote_browsers_.find(browser_id);
   if (it != remote_browsers_.end() && android_bridge_)
     android_bridge_->OpenRemotePage(it->second, url);
 }
@@ -215,7 +218,7 @@ void AdbTargetsUIHandler::Open(const std::string& browser_id,
 scoped_refptr<DevToolsAgentHost>
 AdbTargetsUIHandler::GetBrowserAgentHost(
     const std::string& browser_id) {
-  RemoteBrowsers::iterator it = remote_browsers_.find(browser_id);
+  auto it = remote_browsers_.find(browser_id);
   if (it == remote_browsers_.end() || !android_bridge_)
     return nullptr;
 
@@ -230,8 +233,7 @@ void AdbTargetsUIHandler::DeviceListChanged(
     return;
 
   base::ListValue device_list;
-  for (DevToolsAndroidBridge::RemoteDevices::const_iterator dit =
-      devices.begin(); dit != devices.end(); ++dit) {
+  for (auto dit = devices.begin(); dit != devices.end(); ++dit) {
     DevToolsAndroidBridge::RemoteDevice* device = dit->get();
     std::unique_ptr<base::DictionaryValue> device_data(
         new base::DictionaryValue());
@@ -245,8 +247,7 @@ void AdbTargetsUIHandler::DeviceListChanged(
     auto browser_list = std::make_unique<base::ListValue>();
 
     DevToolsAndroidBridge::RemoteBrowsers& browsers = device->browsers();
-    for (DevToolsAndroidBridge::RemoteBrowsers::iterator bit =
-        browsers.begin(); bit != browsers.end(); ++bit) {
+    for (auto bit = browsers.begin(); bit != browsers.end(); ++bit) {
       DevToolsAndroidBridge::RemoteBrowser* browser = bit->get();
       std::unique_ptr<base::DictionaryValue> browser_data(
           new base::DictionaryValue());
@@ -321,7 +322,7 @@ DevToolsTargetsUIHandler::CreateForAdb(
 
 scoped_refptr<DevToolsAgentHost> DevToolsTargetsUIHandler::GetTarget(
     const std::string& target_id) {
-  TargetMap::iterator it = targets_.find(target_id);
+  auto it = targets_.find(target_id);
   if (it != targets_.end())
     return it->second;
   return NULL;
@@ -380,12 +381,10 @@ PortForwardingStatusSerializer::~PortForwardingStatusSerializer() {
 void PortForwardingStatusSerializer::PortStatusChanged(
     const ForwardingStatus& status) {
   base::DictionaryValue result;
-  for (ForwardingStatus::const_iterator sit = status.begin();
-      sit != status.end(); ++sit) {
+  for (auto sit = status.begin(); sit != status.end(); ++sit) {
     auto port_status_dict = std::make_unique<base::DictionaryValue>();
     const PortStatusMap& port_status_map = sit->second;
-    for (PortStatusMap::const_iterator it = port_status_map.begin();
-         it != port_status_map.end(); ++it) {
+    for (auto it = port_status_map.begin(); it != port_status_map.end(); ++it) {
       port_status_dict->SetInteger(base::IntToString(it->first), it->second);
     }
 

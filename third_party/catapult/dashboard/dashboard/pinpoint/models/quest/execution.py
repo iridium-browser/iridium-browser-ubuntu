@@ -50,14 +50,13 @@ class Execution(object):
 
   @property
   def result_values(self):
-    """Data used by auto_explore to determine if two Execution results differ.
+    """Data used to determine if two Execution results differ.
 
     Currently it's just a list of integers or floats. In the future, it will be
     a Catapult Value. For a Build or Test Execution, this is a list containing 0
     or 1 representing success or failure. For a ReadValue Execution, this is a
     list of numbers with the values.
     """
-    assert self.completed
     return self._result_values
 
   @property
@@ -67,7 +66,6 @@ class Execution(object):
     For example, the Build Execution passes the isolate hash to the Test
     Execution.
     """
-    assert self.completed
     return self._result_arguments
 
   def AsDict(self):
@@ -75,8 +73,6 @@ class Execution(object):
         'completed': self._completed,
         'exception': self._exception,
         'details': self._AsDict(),
-        'result_arguments': self._result_arguments,
-        'result_values': self._result_values,
     }
     return d
 

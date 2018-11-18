@@ -40,11 +40,6 @@ class CONTENT_EXPORT NavigatorImpl : public Navigator {
   // Navigator implementation.
   NavigatorDelegate* GetDelegate() override;
   NavigationController* GetController() override;
-  void DidStartProvisionalLoad(
-      RenderFrameHostImpl* render_frame_host,
-      const GURL& url,
-      const std::vector<GURL>& redirect_chain,
-      const base::TimeTicks& navigation_start) override;
   void DidFailProvisionalLoadWithError(
       RenderFrameHostImpl* render_frame_host,
       const FrameHostMsg_DidFailProvisionalLoadWithError_Params& params)
@@ -57,47 +52,46 @@ class CONTENT_EXPORT NavigatorImpl : public Navigator {
                    const FrameHostMsg_DidCommitProvisionalLoad_Params& params,
                    std::unique_ptr<NavigationHandleImpl> navigation_handle,
                    bool was_within_same_document) override;
-  bool NavigateToPendingEntry(
-      FrameTreeNode* frame_tree_node,
-      const FrameNavigationEntry& frame_entry,
-      ReloadType reload_type,
-      bool is_same_document_history_load,
-      std::unique_ptr<NavigationUIData> navigation_ui_data) override;
-  bool NavigateNewChildFrame(RenderFrameHostImpl* render_frame_host,
-                             const GURL& default_url) override;
-  void RequestOpenURL(
+  bool StartHistoryNavigationInNewSubframe(
       RenderFrameHostImpl* render_frame_host,
-      const GURL& url,
-      bool uses_post,
-      const scoped_refptr<network::ResourceRequestBody>& body,
-      const std::string& extra_headers,
-      const Referrer& referrer,
-      WindowOpenDisposition disposition,
-      bool should_replace_current_entry,
-      bool user_gesture,
-      blink::WebTriggeringEventInfo triggering_event_info,
-      const base::Optional<std::string>& suggested_filename) override;
-  void RequestTransferURL(
+      const GURL& default_url) override;
+  void Navigate(std::unique_ptr<NavigationRequest> request,
+                ReloadType reload_type,
+                RestoreType restore_type) override;
+  void RequestOpenURL(RenderFrameHostImpl* render_frame_host,
+                      const GURL& url,
+                      bool uses_post,
+                      const scoped_refptr<network::ResourceRequestBody>& body,
+                      const std::string& extra_headers,
+                      const Referrer& referrer,
+                      WindowOpenDisposition disposition,
+                      bool should_replace_current_entry,
+                      bool user_gesture,
+                      blink::WebTriggeringEventInfo triggering_event_info,
+                      scoped_refptr<network::SharedURLLoaderFactory>
+                          blob_url_loader_factory) override;
+  void NavigateFromFrameProxy(
       RenderFrameHostImpl* render_frame_host,
       const GURL& url,
       SiteInstance* source_site_instance,
-      const std::vector<GURL>& redirect_chain,
       const Referrer& referrer,
       ui::PageTransition page_transition,
-      const GlobalRequestID& transferred_global_request_id,
       bool should_replace_current_entry,
       const std::string& method,
       scoped_refptr<network::ResourceRequestBody> post_body,
       const std::string& extra_headers,
-      const base::Optional<std::string>& suggested_filename) override;
+      scoped_refptr<network::SharedURLLoaderFactory> blob_url_loader_factory)
+      override;
   void OnBeforeUnloadACK(FrameTreeNode* frame_tree_node,
                          bool proceed,
                          const base::TimeTicks& proceed_time) override;
-  void OnBeginNavigation(FrameTreeNode* frame_tree_node,
-                         const CommonNavigationParams& common_params,
-                         mojom::BeginNavigationParamsPtr begin_params,
-                         scoped_refptr<network::SharedURLLoaderFactory>
-                             blob_url_loader_factory) override;
+  void OnBeginNavigation(
+      FrameTreeNode* frame_tree_node,
+      const CommonNavigationParams& common_params,
+      mojom::BeginNavigationParamsPtr begin_params,
+      scoped_refptr<network::SharedURLLoaderFactory> blob_url_loader_factory,
+      mojom::NavigationClientAssociatedPtrInfo navigation_client,
+      blink::mojom::NavigationInitiatorPtr navigation_initiator) override;
   void RestartNavigationAsCrossDocument(
       std::unique_ptr<NavigationRequest> navigation_request) override;
   void OnAbortNavigation(FrameTreeNode* frame_tree_node) override;
@@ -108,8 +102,7 @@ class CONTENT_EXPORT NavigatorImpl : public Navigator {
       const base::TimeTicks& renderer_before_unload_end_time) override;
   void CancelNavigation(FrameTreeNode* frame_tree_node,
                         bool inform_renderer) override;
-  void DiscardPendingEntryIfNeeded(int expected_pending_entry_id,
-                                   bool is_download) override;
+  void DiscardPendingEntryIfNeeded(int expected_pending_entry_id) override;
 
  private:
   // Holds data used to track browser side navigation metrics.
@@ -117,36 +110,6 @@ class CONTENT_EXPORT NavigatorImpl : public Navigator {
 
   friend class NavigatorTestWithBrowserSideNavigation;
   ~NavigatorImpl() override;
-
-  // Navigates to the given entry, which might be the pending entry (if
-  // |is_pending_entry| is true).  Private because all callers should use either
-  // NavigateToPendingEntry or NavigateToNewChildFrame.
-  bool NavigateToEntry(
-      FrameTreeNode* frame_tree_node,
-      const FrameNavigationEntry& frame_entry,
-      const NavigationEntryImpl& entry,
-      ReloadType reload_type,
-      bool is_same_document_history_load,
-      bool is_history_navigation_in_new_child,
-      bool is_pending_entry,
-      const scoped_refptr<network::ResourceRequestBody>& post_body,
-      std::unique_ptr<NavigationUIData> navigation_ui_data);
-
-  // If needed, sends a BeforeUnload IPC to the renderer to ask it to execute
-  // the beforeUnload event. Otherwise, the navigation request will be started.
-  void RequestNavigation(
-      FrameTreeNode* frame_tree_node,
-      const GURL& dest_url,
-      const Referrer& dest_referrer,
-      const FrameNavigationEntry& frame_entry,
-      const NavigationEntryImpl& entry,
-      ReloadType reload_type,
-      PreviewsState previews_state,
-      bool is_same_document_history_load,
-      bool is_history_navigation_in_new_child,
-      const scoped_refptr<network::ResourceRequestBody>& post_body,
-      base::TimeTicks navigation_start,
-      std::unique_ptr<NavigationUIData> navigation_ui_data);
 
   void RecordNavigationMetrics(
       const LoadCommittedDetails& details,

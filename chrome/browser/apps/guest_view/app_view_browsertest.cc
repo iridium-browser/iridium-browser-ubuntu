@@ -6,10 +6,12 @@
 
 #include "base/macros.h"
 #include "base/strings/stringprintf.h"
-#include "chrome/browser/apps/app_browsertest_util.h"
+#include "build/build_config.h"
+#include "chrome/browser/apps/platform_apps/app_browsertest_util.h"
 #include "components/guest_view/browser/guest_view_manager.h"
 #include "components/guest_view/browser/guest_view_manager_factory.h"
 #include "components/guest_view/browser/test_guest_view_manager.h"
+#include "content/public/browser/child_process_termination_info.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
@@ -57,12 +59,12 @@ class RenderProcessHostObserverForExit
   base::TerminationStatus termination_status() const { return status_; }
 
  private:
-  void RenderProcessExited(content::RenderProcessHost* host,
-                           base::TerminationStatus status,
-                           int exit_code) override {
+  void RenderProcessExited(
+      content::RenderProcessHost* host,
+      const content::ChildProcessTerminationInfo& info) override {
     DCHECK(observed_host_ == host);
     render_process_host_exited_ = true;
-    status_ = status;
+    status_ = info.status;
     observed_host_->RemoveObserver(this);
     if (message_loop_runner_.get()) {
       message_loop_runner_->Quit();
@@ -160,7 +162,14 @@ IN_PROC_BROWSER_TEST_F(AppViewTest, TestAppViewWithUndefinedDataShouldSucceed) {
 }
 
 // Tests that <appview> correctly processes parameters passed on connect.
-IN_PROC_BROWSER_TEST_F(AppViewTest, TestAppViewRefusedDataShouldFail) {
+// Flaky on Windows, Linux and Mac. See https://crbug.com/875908
+#if defined(OS_WIN) || defined(OS_LINUX) || defined(OS_MACOSX)
+#define MAYBE_TestAppViewRefusedDataShouldFail \
+  DISABLED_TestAppViewRefusedDataShouldFail
+#else
+#define MAYBE_TestAppViewRefusedDataShouldFail TestAppViewRefusedDataShouldFail
+#endif
+IN_PROC_BROWSER_TEST_F(AppViewTest, MAYBE_TestAppViewRefusedDataShouldFail) {
   const extensions::Extension* skeleton_app =
       InstallPlatformApp("app_view/shim/skeleton");
   TestHelper("testAppViewRefusedDataShouldFail",

@@ -16,19 +16,18 @@
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/threading/thread_restrictions.h"
-#include "base/threading/thread_task_runner_handle.h"
+#include "components/autofill/core/common/autofill_features.h"
 #include "components/browser_sync/browser_sync_switches.h"
+#include "components/browser_sync/sync_auth_manager.h"
 #include "components/invalidation/impl/invalidation_prefs.h"
 #include "components/invalidation/public/invalidation_service.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/reading_list/features/reading_list_buildflags.h"
-#include "components/signin/core/browser/profile_oauth2_token_service.h"
-#include "components/signin/core/browser/signin_manager.h"
+#include "components/signin/core/browser/account_info.h"
 #include "components/signin/core/browser/signin_metrics.h"
 #include "components/sync/base/bind_to_task_runner.h"
 #include "components/sync/base/cryptographer.h"
-#include "components/sync/base/passphrase_type.h"
+#include "components/sync/base/passphrase_enums.h"
 #include "components/sync/base/report_unrecoverable_error.h"
 #include "components/sync/base/stop_source.h"
 #include "components/sync/base/system_encryptor.h"
@@ -36,100 +35,125 @@
 #include "components/sync/device_info/device_info_sync_bridge.h"
 #include "components/sync/device_info/device_info_tracker.h"
 #include "components/sync/driver/backend_migrator.h"
+#include "components/sync/driver/clear_server_data_events.h"
+#include "components/sync/driver/configure_context.h"
 #include "components/sync/driver/directory_data_type_controller.h"
-#include "components/sync/driver/glue/sync_backend_host_impl.h"
-#include "components/sync/driver/signin_manager_wrapper.h"
 #include "components/sync/driver/sync_api_component_factory.h"
 #include "components/sync/driver/sync_driver_switches.h"
-#include "components/sync/driver/sync_error_controller.h"
 #include "components/sync/driver/sync_type_preference_provider.h"
 #include "components/sync/driver/sync_util.h"
 #include "components/sync/driver/user_selectable_sync_type.h"
 #include "components/sync/engine/configure_reason.h"
-#include "components/sync/engine/cycle/model_neutral_state.h"
 #include "components/sync/engine/cycle/type_debug_info_observer.h"
+#include "components/sync/engine/engine_components_factory_impl.h"
 #include "components/sync/engine/net/http_bridge_network_resources.h"
 #include "components/sync/engine/net/network_resources.h"
+#include "components/sync/engine/polling_constants.h"
 #include "components/sync/engine/sync_encryption_handler.h"
 #include "components/sync/engine/sync_string_conversions.h"
-#include "components/sync/js/js_event_details.h"
 #include "components/sync/model/change_processor.h"
 #include "components/sync/model/model_type_change_processor.h"
+#include "components/sync/model/model_type_store_service.h"
 #include "components/sync/model/sync_error.h"
 #include "components/sync/model_impl/client_tag_based_model_type_processor.h"
-#include "components/sync/protocol/sync.pb.h"
 #include "components/sync/syncable/directory.h"
-#include "components/sync/syncable/sync_db_util.h"
 #include "components/sync/syncable/syncable_read_transaction.h"
 #include "components/sync_preferences/pref_service_syncable.h"
-#include "components/sync_sessions/favicon_cache.h"
-#include "components/sync_sessions/session_data_type_controller.h"
-#include "components/sync_sessions/sessions_sync_manager.h"
-#include "components/sync_sessions/sync_sessions_client.h"
+#include "components/sync_sessions/session_sync_service.h"
 #include "components/version_info/version_info_values.h"
-#include "net/cookies/cookie_monster.h"
-#include "net/url_request/url_request_context_getter.h"
+#include "services/identity/public/cpp/identity_manager.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 
-#if defined(OS_ANDROID)
-#include "components/sync/syncable/read_transaction.h"
-#endif
-
-using sync_sessions::SessionsSyncManager;
-using syncer::BackendMigrator;
-using syncer::ChangeProcessor;
-using syncer::ClientTagBasedModelTypeProcessor;
 using syncer::DataTypeController;
 using syncer::DataTypeManager;
-using syncer::DataTypeStatusTable;
-using syncer::DeviceInfoSyncBridge;
-using syncer::JsBackend;
-using syncer::JsController;
-using syncer::JsEventDetails;
-using syncer::JsEventHandler;
-using syncer::ModelSafeRoutingInfo;
-using syncer::ModelType;
-using syncer::ModelTypeChangeProcessor;
-using syncer::ModelTypeSet;
-using syncer::ModelTypeStore;
-using syncer::ProtocolEventObserver;
-using syncer::SyncEngine;
-using syncer::SyncCredentials;
-using syncer::SyncProtocolError;
-using syncer::WeakHandle;
+using syncer::EngineComponentsFactory;
+using syncer::EngineComponentsFactoryImpl;
 
 namespace browser_sync {
 
 namespace {
 
-const char kSyncUnrecoverableErrorHistogram[] = "Sync.UnrecoverableErrors";
-
-const net::BackoffEntry::Policy kRequestAccessTokenBackoffPolicy = {
-    // Number of initial errors (in sequence) to ignore before applying
-    // exponential back-off rules.
-    0,
-
-    // Initial delay for exponential back-off in ms.
-    2000,
-
-    // Factor by which the waiting time will be multiplied.
-    2,
-
-    // Fuzzing percentage. ex: 10% will spread requests randomly
-    // between 90%-100% of the calculated time.
-    0.2,  // 20%
-
-    // Maximum amount of time we are willing to delay our request in ms.
-    // TODO(pavely): crbug.com/246686 ProfileSyncService should retry
-    // RequestAccessToken on connection state change after backoff
-    1000 * 3600 * 4,  // 4 hours.
-
-    // Time to keep an entry from being discarded even when it
-    // has no significant state, -1 to never discard.
-    -1,
-
-    // Don't use initial delay unless the last request was an error.
-    false,
+// The initial state of sync, for the Sync.InitialState histogram. Even if
+// this value is CAN_START, sync startup might fail for reasons that we may
+// want to consider logging in the future, such as a passphrase needed for
+// decryption, or the version of Chrome being too old. This enum is used to
+// back a UMA histogram, and should therefore be treated as append-only.
+enum SyncInitialState {
+  CAN_START,                // Sync can attempt to start up.
+  NOT_SIGNED_IN,            // There is no signed in user.
+  NOT_REQUESTED,            // The user turned off sync.
+  NOT_REQUESTED_NOT_SETUP,  // The user turned off sync and setup completed
+                            // is false. Might indicate a stop-and-clear.
+  NEEDS_CONFIRMATION,       // The user must confirm sync settings.
+  NOT_ALLOWED_BY_POLICY,    // Sync is disallowed by enterprise policy.
+  NOT_ALLOWED_BY_PLATFORM,  // Sync is disallowed by the platform.
+  SYNC_INITIAL_STATE_LIMIT
 };
+
+void RecordSyncInitialState(int disable_reasons, bool first_setup_complete) {
+  SyncInitialState sync_state = CAN_START;
+  if (disable_reasons & ProfileSyncService::DISABLE_REASON_NOT_SIGNED_IN) {
+    sync_state = NOT_SIGNED_IN;
+  } else if (disable_reasons &
+             ProfileSyncService::DISABLE_REASON_ENTERPRISE_POLICY) {
+    sync_state = NOT_ALLOWED_BY_POLICY;
+  } else if (disable_reasons &
+             ProfileSyncService::DISABLE_REASON_PLATFORM_OVERRIDE) {
+    // This case means Android's "MasterSync" toggle. However, that is not
+    // plumbed into ProfileSyncService until after this method, so we never get
+    // here. See http://crbug.com/568771.
+    sync_state = NOT_ALLOWED_BY_PLATFORM;
+  } else if (disable_reasons & ProfileSyncService::DISABLE_REASON_USER_CHOICE) {
+    if (first_setup_complete) {
+      sync_state = NOT_REQUESTED;
+    } else {
+      sync_state = NOT_REQUESTED_NOT_SETUP;
+    }
+  } else if (!first_setup_complete) {
+    sync_state = NEEDS_CONFIRMATION;
+  }
+  UMA_HISTOGRAM_ENUMERATION("Sync.InitialState", sync_state,
+                            SYNC_INITIAL_STATE_LIMIT);
+}
+
+constexpr char kSyncUnrecoverableErrorHistogram[] = "Sync.UnrecoverableErrors";
+
+EngineComponentsFactory::Switches EngineSwitchesFromCommandLine() {
+  EngineComponentsFactory::Switches factory_switches = {
+      EngineComponentsFactory::ENCRYPTION_KEYSTORE,
+      EngineComponentsFactory::BACKOFF_NORMAL};
+
+  base::CommandLine* cl = base::CommandLine::ForCurrentProcess();
+  if (cl->HasSwitch(switches::kSyncShortInitialRetryOverride)) {
+    factory_switches.backoff_override =
+        EngineComponentsFactory::BACKOFF_SHORT_INITIAL_RETRY_OVERRIDE;
+  }
+  if (cl->HasSwitch(switches::kSyncEnableGetUpdateAvoidance)) {
+    factory_switches.pre_commit_updates_policy =
+        EngineComponentsFactory::FORCE_ENABLE_PRE_COMMIT_UPDATE_AVOIDANCE;
+  }
+  if (cl->HasSwitch(switches::kSyncShortNudgeDelayForTest)) {
+    factory_switches.nudge_delay =
+        EngineComponentsFactory::NudgeDelay::SHORT_NUDGE_DELAY;
+  }
+  return factory_switches;
+}
+
+DataTypeController::TypeMap BuildDataTypeControllerMap(
+    DataTypeController::TypeVector controllers) {
+  DataTypeController::TypeMap type_map;
+  for (std::unique_ptr<DataTypeController>& controller : controllers) {
+    DCHECK(controller);
+    syncer::ModelType type = controller->type();
+    DCHECK_EQ(0U, type_map.count(type));
+    type_map[type] = std::move(controller);
+  }
+  return type_map;
+}
+
+bool IsStandaloneTransportEnabled() {
+  return base::FeatureList::IsEnabled(switches::kSyncStandaloneTransport);
+}
 
 }  // namespace
 
@@ -138,41 +162,53 @@ ProfileSyncService::InitParams::InitParams(InitParams&& other) = default;
 ProfileSyncService::InitParams::~InitParams() = default;
 
 ProfileSyncService::ProfileSyncService(InitParams init_params)
-    : SyncServiceBase(std::move(init_params.sync_client),
-                      std::move(init_params.signin_wrapper),
-                      init_params.channel,
-                      init_params.base_directory,
-                      init_params.debug_identifier),
-      OAuth2TokenService::Consumer("sync"),
-      signin_scoped_device_id_callback_(
-          init_params.signin_scoped_device_id_callback),
-      last_auth_error_(GoogleServiceAuthError::AuthErrorNone()),
+    : sync_client_(std::move(init_params.sync_client)),
+      sync_prefs_(sync_client_->GetPrefService()),
+      identity_manager_(init_params.identity_manager),
+      auth_manager_(std::make_unique<SyncAuthManager>(
+          &sync_prefs_,
+          identity_manager_,
+          base::BindRepeating(&ProfileSyncService::AccountStateChanged,
+                              base::Unretained(this)),
+          base::BindRepeating(&ProfileSyncService::CredentialsChanged,
+                              base::Unretained(this)))),
+      channel_(init_params.channel),
+      debug_identifier_(init_params.debug_identifier),
       sync_service_url_(
           syncer::GetSyncServiceURL(*base::CommandLine::ForCurrentProcess(),
                                     init_params.channel)),
+      user_events_separate_pref_group_(
+          init_params.user_events_separate_pref_group),
+      signin_scoped_device_id_callback_(
+          init_params.signin_scoped_device_id_callback),
       network_time_update_callback_(
           std::move(init_params.network_time_update_callback)),
-      url_request_context_(init_params.url_request_context),
+      url_loader_factory_(std::move(init_params.url_loader_factory)),
+      network_connection_tracker_(init_params.network_connection_tracker),
       is_first_time_sync_configure_(false),
       engine_initialized_(false),
       sync_disabled_by_admin_(false),
-      is_auth_in_progress_(false),
       unrecoverable_error_reason_(ERROR_REASON_UNSET),
       expect_sync_configuration_aborted_(false),
-      configure_status_(DataTypeManager::UNKNOWN),
-      oauth2_token_service_(init_params.oauth2_token_service),
-      request_access_token_backoff_(&kRequestAccessTokenBackoffPolicy),
-      connection_status_(syncer::CONNECTION_NOT_ATTEMPTED),
-      last_get_token_error_(GoogleServiceAuthError::AuthErrorNone()),
       gaia_cookie_manager_service_(init_params.gaia_cookie_manager_service),
-      network_resources_(new syncer::HttpBridgeNetworkResources),
+      invalidations_identity_providers_(
+          init_params.invalidations_identity_providers),
+      network_resources_(
+          std::make_unique<syncer::HttpBridgeNetworkResources>()),
       start_behavior_(init_params.start_behavior),
       passphrase_prompt_triggered_by_version_(false),
       sync_enabled_weak_factory_(this),
       weak_factory_(this) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(signin_scoped_device_id_callback_);
   DCHECK(sync_client_);
+
+  // If Sync is disabled via command line flag, then ProfileSyncService
+  // shouldn't be instantiated.
+  DCHECK(IsSyncAllowedByFlag());
+
+  ResetCryptoState();
+
   std::string last_version = sync_prefs_.GetLastRunVersion();
   std::string current_version = PRODUCT_VERSION;
   sync_prefs_.SetLastRunVersion(current_version);
@@ -183,16 +219,10 @@ ProfileSyncService::ProfileSyncService(InitParams init_params)
       current_version.substr(0, current_version.find('.'))) {
     passphrase_prompt_triggered_by_version_ = true;
   }
-
-  if (init_params.model_type_store_factory.is_null()) {
-    model_type_store_factory_ = GetModelTypeStoreFactory(base_directory_);
-  } else {
-    model_type_store_factory_ = init_params.model_type_store_factory;
-  }
 }
 
 ProfileSyncService::~ProfileSyncService() {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (gaia_cookie_manager_service_)
     gaia_cookie_manager_service_->RemoveObserver(this);
   sync_prefs_.RemoveSyncPrefObserver(this);
@@ -200,86 +230,61 @@ ProfileSyncService::~ProfileSyncService() {
   DCHECK(!engine_initialized_);
 }
 
-bool ProfileSyncService::CanSyncStart() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  return (IsSyncAllowed() && IsSyncRequested() &&
-          (IsLocalSyncEnabled() || IsSignedIn()));
-}
-
 void ProfileSyncService::Initialize() {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  sync_client_->Initialize();
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
-  // We don't pass StartupController an Unretained reference to future-proof
-  // against the controller impl changing to post tasks.
+  syncer::ModelTypeStoreService* model_type_store_service =
+      sync_client_->GetModelTypeStoreService();
+  DCHECK(model_type_store_service);
+  syncer::RepeatingModelTypeStoreFactory model_type_store_factory =
+      model_type_store_service->GetStoreFactory();
+
   startup_controller_ = std::make_unique<syncer::StartupController>(
-      &sync_prefs_,
-      base::Bind(&ProfileSyncService::CanEngineStart, base::Unretained(this)),
-      base::Bind(&ProfileSyncService::StartUpSlowEngineComponents,
-                 weak_factory_.GetWeakPtr()));
+      base::BindRepeating(&ProfileSyncService::GetPreferredDataTypes,
+                          base::Unretained(this)),
+      base::BindRepeating(&ProfileSyncService::ShouldStartEngine,
+                          base::Unretained(this)),
+      base::BindRepeating(&ProfileSyncService::StartUpSlowEngineComponents,
+                          base::Unretained(this)));
   local_device_ = sync_client_->GetSyncApiComponentFactory()
                       ->CreateLocalDeviceInfoProvider();
+  DCHECK(local_device_);
   sync_stopped_reporter_ = std::make_unique<syncer::SyncStoppedReporter>(
-      sync_service_url_, local_device_->GetSyncUserAgent(),
-      url_request_context_, syncer::SyncStoppedReporter::ResultCallback());
-  sessions_sync_manager_ = std::make_unique<SessionsSyncManager>(
-      sync_client_->GetSyncSessionsClient(), &sync_prefs_, local_device_.get(),
-      base::Bind(&ProfileSyncService::NotifyForeignSessionUpdated,
-                 sync_enabled_weak_factory_.GetWeakPtr()));
+      sync_service_url_, local_device_->GetSyncUserAgent(), url_loader_factory_,
+      syncer::SyncStoppedReporter::ResultCallback());
 
-  device_info_sync_bridge_ = std::make_unique<DeviceInfoSyncBridge>(
-      local_device_.get(), model_type_store_factory_,
-      std::make_unique<ClientTagBasedModelTypeProcessor>(
+  device_info_sync_bridge_ = std::make_unique<syncer::DeviceInfoSyncBridge>(
+      local_device_.get(), model_type_store_factory,
+      std::make_unique<syncer::ClientTagBasedModelTypeProcessor>(
           syncer::DEVICE_INFO,
           /*dump_stack=*/base::BindRepeating(&syncer::ReportUnrecoverableError,
                                              channel_)));
 
-  syncer::SyncApiComponentFactory::RegisterDataTypesMethod
-      register_platform_types_callback =
-          sync_client_->GetRegisterPlatformTypesCallback();
-  sync_client_->GetSyncApiComponentFactory()->RegisterDataTypes(
-      this, register_platform_types_callback);
+  data_type_controllers_ = BuildDataTypeControllerMap(
+      sync_client_->CreateDataTypeControllers(local_device_.get()));
 
   if (gaia_cookie_manager_service_)
     gaia_cookie_manager_service_->AddObserver(this);
 
-  // We clear this here (vs Shutdown) because we want to remember that an error
-  // happened on shutdown so we can display details (message, location) about it
-  // in about:sync.
-  ClearStaleErrors();
-
   sync_prefs_.AddSyncPrefObserver(this);
 
-  SyncInitialState sync_state = CAN_START;
-  if (!IsLocalSyncEnabled() && !IsSignedIn()) {
-    sync_state = NOT_SIGNED_IN;
-  } else if (IsManaged()) {
-    sync_state = IS_MANAGED;
-  } else if (!IsSyncAllowedByPlatform()) {
-    // This case should currently never be hit, as Android's master sync isn't
-    // plumbed into PSS until after this function. See http://crbug.com/568771.
-    sync_state = NOT_ALLOWED_BY_PLATFORM;
-  } else if (!IsSyncRequested()) {
-    if (IsFirstSetupComplete()) {
-      sync_state = NOT_REQUESTED;
-    } else {
-      sync_state = NOT_REQUESTED_NOT_SETUP;
-    }
-  } else if (!IsFirstSetupComplete()) {
-    sync_state = NEEDS_CONFIRMATION;
-  }
-  UMA_HISTOGRAM_ENUMERATION("Sync.InitialState", sync_state,
-                            SYNC_INITIAL_STATE_LIMIT);
+  int disable_reasons = GetDisableReasons();
+  RecordSyncInitialState(disable_reasons, IsFirstSetupComplete());
 
-  // If sync isn't allowed, the only thing to do is to turn it off.
-  if (!IsSyncAllowed()) {
-    // Only clear data if disallowed by policy.
-    RequestStop(IsManaged() ? CLEAR_DATA : KEEP_DATA);
-    return;
+  // If sync is disallowed by policy, clean up.
+  if (disable_reasons & DISABLE_REASON_ENTERPRISE_POLICY) {
+    // Note that this won't actually clear data, since neither |engine_| nor
+    // |sync_thread_| exist at this point. Bug or feature?
+    StopImpl(CLEAR_DATA);
   }
 
   if (!IsLocalSyncEnabled()) {
-    RegisterAuthNotifications();
+    auth_manager_->RegisterForAuthNotifications();
+    for (auto* provider : invalidations_identity_providers_) {
+      if (provider) {
+        provider->SetActiveAccountId(GetAuthenticatedAccountInfo().account_id);
+      }
+    }
 
     if (!IsSignedIn()) {
       // Clean up in case of previous crash during signout.
@@ -295,32 +300,23 @@ void ProfileSyncService::Initialize() {
   }
 #endif
 
-#if !defined(OS_ANDROID)
-  DCHECK(sync_error_controller_ == nullptr)
-      << "Initialize() called more than once.";
-  sync_error_controller_ = std::make_unique<syncer::SyncErrorController>(this);
-  AddObserver(sync_error_controller_.get());
-#endif
-
   memory_pressure_listener_ = std::make_unique<base::MemoryPressureListener>(
-      base::Bind(&ProfileSyncService::OnMemoryPressure,
-                 sync_enabled_weak_factory_.GetWeakPtr()));
-  startup_controller_->Reset(GetRegisteredDataTypes());
+      base::BindRepeating(&ProfileSyncService::OnMemoryPressure,
+                          sync_enabled_weak_factory_.GetWeakPtr()));
 
   // Auto-start means the first time the profile starts up, sync should start up
   // immediately.
-  if (start_behavior_ == AUTO_START && IsSyncRequested() &&
-      !IsFirstSetupComplete()) {
-    startup_controller_->TryStartImmediately();
-  } else {
-    startup_controller_->TryStart();
-  }
+  bool force_immediate = (start_behavior_ == AUTO_START &&
+                          !HasDisableReason(DISABLE_REASON_USER_CHOICE) &&
+                          !IsFirstSetupComplete());
+  startup_controller_->TryStart(force_immediate);
 }
 
 void ProfileSyncService::StartSyncingWithServer() {
   if (base::FeatureList::IsEnabled(
           switches::kSyncClearDataOnPassphraseEncryption) &&
       sync_prefs_.GetPassphraseEncryptionTransitionInProgress()) {
+    DCHECK(CanConfigureDataTypes());
     // We are restarting catchup configuration after browser restart.
     UMA_HISTOGRAM_ENUMERATION("Sync.ClearServerDataEvents",
                               syncer::CLEAR_SERVER_DATA_RETRIED,
@@ -332,36 +328,17 @@ void ProfileSyncService::StartSyncingWithServer() {
 
   if (engine_)
     engine_->StartSyncingWithServer();
-}
 
-void ProfileSyncService::RegisterAuthNotifications() {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  oauth2_token_service_->AddObserver(this);
-  if (signin_)
-    signin_->GetSigninManager()->AddObserver(this);
-}
-
-void ProfileSyncService::UnregisterAuthNotifications() {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  if (signin_)
-    signin_->GetSigninManager()->RemoveObserver(this);
-  if (oauth2_token_service_)
-    oauth2_token_service_->RemoveObserver(this);
-}
-
-void ProfileSyncService::RegisterDataTypeController(
-    std::unique_ptr<syncer::DataTypeController> data_type_controller) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK_EQ(data_type_controllers_.count(data_type_controller->type()), 0U);
-  data_type_controllers_[data_type_controller->type()] =
-      std::move(data_type_controller);
+  if (IsLocalSyncEnabled()) {
+    TriggerRefresh(
+        syncer::Intersection(GetActiveDataTypes(), syncer::ProtocolTypes()));
+  }
 }
 
 bool ProfileSyncService::IsDataTypeControllerRunning(
     syncer::ModelType type) const {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  DataTypeController::TypeMap::const_iterator iter =
-      data_type_controllers_.find(type);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  auto iter = data_type_controllers_.find(type);
   if (iter == data_type_controllers_.end()) {
     return false;
   }
@@ -369,73 +346,19 @@ bool ProfileSyncService::IsDataTypeControllerRunning(
 }
 
 sync_sessions::OpenTabsUIDelegate* ProfileSyncService::GetOpenTabsUIDelegate() {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   // Although the backing data actually is of type |SESSIONS|, the desire to use
   // open tabs functionality is tracked by the state of the |PROXY_TABS| type.
   if (!IsDataTypeControllerRunning(syncer::PROXY_TABS)) {
     return nullptr;
   }
 
-  DCHECK(sessions_sync_manager_);
-  return sessions_sync_manager_->GetOpenTabsUIDelegate();
-}
-
-sync_sessions::FaviconCache* ProfileSyncService::GetFaviconCache() {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  return sessions_sync_manager_->GetFaviconCache();
+  return sync_client_->GetSessionSyncService()->GetRawOpenTabsUIDelegate();
 }
 
 syncer::DeviceInfoTracker* ProfileSyncService::GetDeviceInfoTracker() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return device_info_sync_bridge_.get();
-}
-
-syncer::LocalDeviceInfoProvider*
-ProfileSyncService::GetLocalDeviceInfoProvider() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  return local_device_.get();
-}
-
-void ProfileSyncService::GetDataTypeControllerStates(
-    DataTypeController::StateMap* state_map) const {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  for (DataTypeController::TypeMap::const_iterator iter =
-           data_type_controllers_.begin();
-       iter != data_type_controllers_.end(); ++iter)
-    (*state_map)[iter->first] = iter->second.get()->state();
-}
-
-void ProfileSyncService::OnSessionRestoreComplete() {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  DataTypeController::TypeMap::const_iterator iter =
-      data_type_controllers_.find(syncer::SESSIONS);
-  if (iter == data_type_controllers_.end()) {
-    return;
-  }
-  DCHECK(iter->second);
-
-  static_cast<sync_sessions::SessionDataTypeController*>(iter->second.get())
-      ->OnSessionRestoreComplete();
-}
-
-SyncCredentials ProfileSyncService::GetCredentials() {
-  SyncCredentials credentials;
-
-  // No credentials exist or are needed for the local sync backend.
-  if (IsLocalSyncEnabled())
-    return credentials;
-
-  credentials.account_id = signin_->GetAccountIdToUse();
-  DCHECK(!credentials.account_id.empty());
-  credentials.email = signin_->GetEffectiveUsername();
-  credentials.sync_token = access_token_;
-
-  if (credentials.sync_token.empty())
-    credentials.sync_token = "credentials_lost";
-
-  credentials.scope_set.insert(signin_->GetSyncScopeToUse());
-
-  return credentials;
 }
 
 syncer::WeakHandle<syncer::JsEventHandler>
@@ -445,14 +368,96 @@ ProfileSyncService::GetJsEventHandler() {
 
 syncer::SyncEngine::HttpPostProviderFactoryGetter
 ProfileSyncService::MakeHttpPostProviderFactoryGetter() {
-  return base::Bind(&syncer::NetworkResources::GetHttpPostProviderFactory,
-                    base::Unretained(network_resources_.get()),
-                    url_request_context_, network_time_update_callback_);
+  return base::BindOnce(&syncer::NetworkResources::GetHttpPostProviderFactory,
+                        base::Unretained(network_resources_.get()),
+                        url_loader_factory_->Clone(),
+                        network_time_update_callback_);
 }
 
 syncer::WeakHandle<syncer::UnrecoverableErrorHandler>
 ProfileSyncService::GetUnrecoverableErrorHandler() {
   return syncer::MakeWeakHandle(sync_enabled_weak_factory_.GetWeakPtr());
+}
+
+void ProfileSyncService::AccountStateChanged() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  if (!IsSignedIn()) {
+    sync_disabled_by_admin_ = false;
+    StopImpl(CLEAR_DATA);
+    DCHECK(!engine_);
+  } else {
+#if !defined(OS_CHROMEOS)
+    // TODO(crbug.com/814787): SyncAuthManager shouldn't call us again if we
+    // already have the signed-in account, and hence we shouldn't have an engine
+    // here, but some tests on ChromeOS set the account without notifying, which
+    // get us into an inconsistent state. Since calling TryStart() again in that
+    // case isn't harmful, skip the DCHECK on ChromeOS for now.
+    DCHECK(!engine_);
+#endif
+    startup_controller_->TryStart(/*force_immediate=*/IsSetupInProgress());
+  }
+  for (auto* provider : invalidations_identity_providers_) {
+    if (provider) {
+      provider->SetActiveAccountId(GetAuthenticatedAccountInfo().account_id);
+    }
+  }
+}
+
+void ProfileSyncService::CredentialsChanged() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  syncer::SyncCredentials credentials = auth_manager_->GetCredentials();
+
+  if (engine_) {
+    if (credentials.sync_token.empty()) {
+      engine_->InvalidateCredentials();
+    } else {
+      engine_->UpdateCredentials(credentials);
+    }
+  }
+
+  NotifyObservers();
+}
+
+bool ProfileSyncService::IsEngineAllowedToStart() const {
+  int disable_reasons = GetDisableReasons();
+  if (IsStandaloneTransportEnabled()) {
+    // USER_CHOICE (i.e. the Sync feature toggle) and PLATFORM_OVERRIDE (i.e.
+    // Android's "MasterSync" toggle) do not prevent starting up the Sync
+    // transport.
+    const int kDisableReasonMask =
+        ~(DISABLE_REASON_USER_CHOICE | DISABLE_REASON_PLATFORM_OVERRIDE);
+    disable_reasons &= kDisableReasonMask;
+  }
+  return disable_reasons == DISABLE_REASON_NONE;
+}
+
+bool ProfileSyncService::ShouldStartEngine(
+    bool bypass_first_setup_check) const {
+  if (!IsEngineAllowedToStart()) {
+    return false;
+  }
+  // If standalone transport is enabled, we always start the engine as soon as
+  // we can.
+  if (IsStandaloneTransportEnabled()) {
+    return true;
+  }
+  // Without standalone transport, we generally wait for first-time setup to be
+  // complete before starting the engine (because if it isn't, we can't
+  // configure the DataTypeManager anyway). Note that if a setup is currently in
+  // progress (which requires the engine to be initialized), then
+  // |bypass_first_setup_check| will be set to true.
+  return bypass_first_setup_check || IsFirstSetupComplete();
+}
+
+void ProfileSyncService::ResetCryptoState() {
+  crypto_ = std::make_unique<syncer::SyncServiceCrypto>(
+      base::BindRepeating(&ProfileSyncService::NotifyObservers,
+                          base::Unretained(this)),
+      base::BindRepeating(&ProfileSyncService::ReconfigureDueToPassphrase,
+                          base::Unretained(this)),
+      &sync_prefs_);
 }
 
 bool ProfileSyncService::IsEncryptedDatatypeEnabled() const {
@@ -465,7 +470,7 @@ bool ProfileSyncService::IsEncryptedDatatypeEnabled() const {
 }
 
 void ProfileSyncService::OnProtocolEvent(const syncer::ProtocolEvent& event) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   for (auto& observer : protocol_event_observers_)
     observer.OnProtocolEvent(event);
 }
@@ -473,7 +478,7 @@ void ProfileSyncService::OnProtocolEvent(const syncer::ProtocolEvent& event) {
 void ProfileSyncService::OnDirectoryTypeCommitCounterUpdated(
     syncer::ModelType type,
     const syncer::CommitCounters& counters) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   for (auto& observer : type_debug_info_observers_)
     observer.OnCommitCountersUpdated(type, counters);
 }
@@ -481,7 +486,7 @@ void ProfileSyncService::OnDirectoryTypeCommitCounterUpdated(
 void ProfileSyncService::OnDirectoryTypeUpdateCounterUpdated(
     syncer::ModelType type,
     const syncer::UpdateCounters& counters) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   for (auto& observer : type_debug_info_observers_)
     observer.OnUpdateCountersUpdated(type, counters);
 }
@@ -489,13 +494,13 @@ void ProfileSyncService::OnDirectoryTypeUpdateCounterUpdated(
 void ProfileSyncService::OnDatatypeStatusCounterUpdated(
     syncer::ModelType type,
     const syncer::StatusCounters& counters) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   for (auto& observer : type_debug_info_observers_)
     observer.OnStatusCountersUpdated(type, counters);
 }
 
 void ProfileSyncService::OnDataTypeRequestsSyncStartup(syncer::ModelType type) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(syncer::UserTypes().Has(type));
 
   if (!GetPreferredDataTypes().Has(type)) {
@@ -526,155 +531,102 @@ void ProfileSyncService::OnDataTypeRequestsSyncStartup(syncer::ModelType type) {
 }
 
 void ProfileSyncService::StartUpSlowEngineComponents() {
-  invalidation::InvalidationService* invalidator =
-      sync_client_->GetInvalidationService();
+  DCHECK(IsEngineAllowedToStart());
 
-  engine_.reset(sync_client_->GetSyncApiComponentFactory()->CreateSyncEngine(
-      debug_identifier_, invalidator, sync_prefs_.AsWeakPtr(),
-      FormatSyncDataPath(base_directory_)));
+  engine_ = sync_client_->GetSyncApiComponentFactory()->CreateSyncEngine(
+      debug_identifier_, sync_client_->GetInvalidationService(),
+      sync_prefs_.AsWeakPtr(),
+      sync_client_->GetModelTypeStoreService()->GetSyncDataPath());
 
   // Clear any old errors the first time sync starts.
   if (!IsFirstSetupComplete())
     ClearStaleErrors();
 
-  InitializeEngine();
+  if (!sync_thread_) {
+    sync_thread_ = std::make_unique<base::Thread>("Chrome_SyncThread");
+    base::Thread::Options options;
+    options.timer_slack = base::TIMER_SLACK_MAXIMUM;
+    bool success = sync_thread_->StartWithOptions(options);
+    DCHECK(success);
+  }
+
+  syncer::SyncEngine::InitParams params;
+  params.sync_task_runner = sync_thread_->task_runner();
+  params.host = this;
+  params.registrar = std::make_unique<syncer::SyncBackendRegistrar>(
+      debug_identifier_,
+      base::BindRepeating(&syncer::SyncClient::CreateModelWorkerForGroup,
+                          base::Unretained(sync_client_.get())));
+  params.encryption_observer_proxy = crypto_->GetEncryptionObserverProxy();
+  params.extensions_activity = sync_client_->GetExtensionsActivity();
+  params.event_handler = GetJsEventHandler();
+  params.service_url = sync_service_url();
+  params.sync_user_agent = GetLocalDeviceInfoProvider()->GetSyncUserAgent();
+  params.http_factory_getter = MakeHttpPostProviderFactoryGetter();
+  params.credentials = auth_manager_->GetCredentials();
+  DCHECK(!params.credentials.account_id.empty() || IsLocalSyncEnabled());
+  invalidation::InvalidationService* invalidator =
+      sync_client_->GetInvalidationService();
+  params.invalidator_client_id =
+      invalidator ? invalidator->GetInvalidatorClientId() : "",
+  params.sync_manager_factory =
+      std::make_unique<syncer::SyncManagerFactory>(network_connection_tracker_);
+  // The first time we start up the engine we want to ensure we have a clean
+  // directory, so delete any old one that might be there.
+  params.delete_sync_data_folder = !IsFirstSetupComplete();
+  params.enable_local_sync_backend = sync_prefs_.IsLocalSyncEnabled();
+  params.local_sync_backend_folder = sync_client_->GetLocalSyncBackendFolder();
+  params.restored_key_for_bootstrapping =
+      sync_prefs_.GetEncryptionBootstrapToken();
+  params.restored_keystore_key_for_bootstrapping =
+      sync_prefs_.GetKeystoreEncryptionBootstrapToken();
+  params.engine_components_factory =
+      std::make_unique<EngineComponentsFactoryImpl>(
+          EngineSwitchesFromCommandLine());
+  params.unrecoverable_error_handler = GetUnrecoverableErrorHandler();
+  params.report_unrecoverable_error_function =
+      base::BindRepeating(syncer::ReportUnrecoverableError, channel_);
+  params.saved_nigori_state = crypto_->TakeSavedNigoriState();
+  sync_prefs_.GetInvalidationVersions(&params.invalidation_versions);
+  params.short_poll_interval = sync_prefs_.GetShortPollInterval();
+  if (params.short_poll_interval.is_zero()) {
+    params.short_poll_interval =
+        base::TimeDelta::FromSeconds(syncer::kDefaultShortPollIntervalSeconds);
+  }
+  params.long_poll_interval = sync_prefs_.GetLongPollInterval();
+  if (params.long_poll_interval.is_zero()) {
+    params.long_poll_interval =
+        base::TimeDelta::FromSeconds(syncer::kDefaultLongPollIntervalSeconds);
+  }
+
+  engine_->Initialize(std::move(params));
 
   UpdateFirstSyncTimePref();
 
   ReportPreviousSessionMemoryWarningCount();
-}
 
-void ProfileSyncService::OnGetTokenSuccess(
-    const OAuth2TokenService::Request* request,
-    const std::string& access_token,
-    const base::Time& expiration_time) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK_EQ(access_token_request_.get(), request);
-  access_token_request_.reset();
-  access_token_ = access_token;
-  token_receive_time_ = base::Time::Now();
-  last_get_token_error_ = GoogleServiceAuthError::AuthErrorNone();
-
-  if (sync_prefs_.SyncHasAuthError()) {
-    sync_prefs_.SetSyncAuthError(false);
-  }
-
-  if (HasSyncingEngine())
-    engine_->UpdateCredentials(GetCredentials());
-  else
-    startup_controller_->TryStart();
-
-  UpdateAuthErrorState(GoogleServiceAuthError(GoogleServiceAuthError::NONE));
-}
-
-void ProfileSyncService::OnGetTokenFailure(
-    const OAuth2TokenService::Request* request,
-    const GoogleServiceAuthError& error) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK_EQ(access_token_request_.get(), request);
-  DCHECK_NE(error.state(), GoogleServiceAuthError::NONE);
-  access_token_request_.reset();
-  last_get_token_error_ = error;
-  switch (error.state()) {
-    case GoogleServiceAuthError::CONNECTION_FAILED:
-    case GoogleServiceAuthError::REQUEST_CANCELED:
-    case GoogleServiceAuthError::SERVICE_ERROR:
-    case GoogleServiceAuthError::SERVICE_UNAVAILABLE: {
-      // Transient error. Retry after some time.
-      request_access_token_backoff_.InformOfRequest(false);
-      next_token_request_time_ =
-          base::Time::Now() +
-          request_access_token_backoff_.GetTimeUntilRelease();
-      request_access_token_retry_timer_.Start(
-          FROM_HERE, request_access_token_backoff_.GetTimeUntilRelease(),
-          base::Bind(&ProfileSyncService::RequestAccessToken,
-                     sync_enabled_weak_factory_.GetWeakPtr()));
-      NotifyObservers();
-      break;
-    }
-    case GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS: {
-      if (!sync_prefs_.SyncHasAuthError()) {
-        sync_prefs_.SetSyncAuthError(true);
-        UMA_HISTOGRAM_ENUMERATION("Sync.SyncAuthError", AUTH_ERROR_ENCOUNTERED,
-                                  AUTH_ERROR_LIMIT);
-      }
-      FALLTHROUGH;
-    }
-    default: {
-      if (error.state() != GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS) {
-        LOG(ERROR) << "Unexpected persistent error: " << error.ToString();
-      }
-      // Show error to user.
-      UpdateAuthErrorState(error);
-    }
-  }
-}
-
-void ProfileSyncService::OnRefreshTokenAvailable(
-    const std::string& account_id) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  if (account_id == signin_->GetAccountIdToUse())
-    OnRefreshTokensLoaded();
-}
-
-void ProfileSyncService::OnRefreshTokenRevoked(const std::string& account_id) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  if (account_id == signin_->GetAccountIdToUse()) {
-    access_token_.clear();
-    UpdateAuthErrorState(
-        GoogleServiceAuthError(GoogleServiceAuthError::REQUEST_CANCELED));
-  }
-}
-
-void ProfileSyncService::OnRefreshTokensLoaded() {
-  DCHECK(thread_checker_.CalledOnValidThread());
-
-  GoogleServiceAuthError token_error =
-      oauth2_token_service_->GetAuthError(signin_->GetAccountIdToUse());
-  if (token_error == GoogleServiceAuthError::FromInvalidGaiaCredentialsReason(
-                         GoogleServiceAuthError::InvalidGaiaCredentialsReason::
-                             CREDENTIALS_REJECTED_BY_CLIENT)) {
-    // When the refresh token is replaced by a new token with a
-    // CREDENTIALS_REJECTED_BY_CLIENT error, Sync must be stopped immediately,
-    // even if the current access token is still valid. This happens e.g. when
-    // the user signs out of the web with Dice enabled.
-    // It is not necessary to do this when the refresh token is
-    // CREDENTIALS_REJECTED_BY_SERVER, because in that case the access token
-    // will be rejected by the server too.
-    // We only do this in OnRefreshTokensLoaded(), as opposed to
-    // OAuth2TokenService::Observer::OnAuthErrorChanged(), because
-    // CREDENTIALS_REJECTED_BY_CLIENT is only set by the signin component when
-    // the refresh token is created.
-    access_token_.clear();
-    request_access_token_retry_timer_.Stop();
-    access_token_request_.reset();
-    is_auth_in_progress_ = false;
-    if (HasSyncingEngine())
-      engine_->InvalidateCredentials();
-  }
-
-  // This notification gets fired when OAuth2TokenService loads the tokens from
-  // storage. Initialize the engine if sync is enabled. If the sync token was
-  // not loaded, GetCredentials() will generate invalid credentials to cause the
-  // engine to generate an auth error (crbug.com/121755).
-  if (HasSyncingEngine()) {
-    RequestAccessToken();
-  } else {
-    startup_controller_->TryStart();
-  }
+  // TODO(treib): Consider kicking off an access token fetch here. Currently,
+  // the flow goes as follows: The SyncEngine tries to connect to the server,
+  // but has no access token, so it ends up calling OnConnectionStatusChange(
+  // syncer::CONNECTION_AUTH_ERROR) which in turn causes SyncAuthManager to
+  // request a new access token. That seems needlessly convoluted.
 }
 
 void ProfileSyncService::Shutdown() {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  UnregisterAuthNotifications();
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   ShutdownImpl(syncer::BROWSER_SHUTDOWN);
   NotifyShutdown();
-  if (sync_error_controller_) {
-    // Destroy the SyncErrorController when the service shuts down for good.
-    RemoveObserver(sync_error_controller_.get());
-    sync_error_controller_.reset();
-  }
+
+  // All observers must be gone now: All KeyedServices should have unregistered
+  // their observers already before, in their own Shutdown(), and all others
+  // should have done it now when they got the shutdown notification.
+  // Note: "might_have_observers" sounds like it might be inaccurate, but it can
+  // only return false positives while an iteration over the ObserverList is
+  // ongoing.
+  DCHECK(!observers_.might_have_observers());
+
+  auth_manager_.reset();
 
   signin_scoped_device_id_callback_.Reset();
 
@@ -689,8 +641,9 @@ void ProfileSyncService::ShutdownImpl(syncer::ShutdownReason reason) {
       // the data directory needs to be cleaned up here.
       sync_thread_->task_runner()->PostTask(
           FROM_HERE,
-          base::Bind(&syncer::syncable::Directory::DeleteDirectoryFiles,
-                     FormatSyncDataPath(base_directory_)));
+          base::BindOnce(
+              &syncer::syncable::Directory::DeleteDirectoryFiles,
+              sync_client_->GetModelTypeStoreService()->GetSyncDataPath()));
     }
     return;
   }
@@ -715,7 +668,7 @@ void ProfileSyncService::ShutdownImpl(syncer::ShutdownReason reason) {
       // When aborting as part of shutdown, we should expect an aborted sync
       // configure result, else we'll dcheck when we try to read the sync error.
       expect_sync_configuration_aborted_ = true;
-      data_type_manager_->Stop();
+      data_type_manager_->Stop(reason);
     }
     data_type_manager_.reset();
   }
@@ -723,7 +676,7 @@ void ProfileSyncService::ShutdownImpl(syncer::ShutdownReason reason) {
   // Shutdown the migrator before the engine to ensure it doesn't pull a null
   // snapshot.
   migrator_.reset();
-  sync_js_controller_.AttachJsBackend(WeakHandle<syncer::JsBackend>());
+  sync_js_controller_.AttachJsBackend(syncer::WeakHandle<syncer::JsBackend>());
 
   engine_->Shutdown(reason);
   engine_.reset();
@@ -733,7 +686,7 @@ void ProfileSyncService::ShutdownImpl(syncer::ShutdownReason reason) {
 
   sync_enabled_weak_factory_.InvalidateWeakPtrs();
 
-  startup_controller_->Reset(GetRegisteredDataTypes());
+  startup_controller_->Reset();
 
   // If the sync DB is getting destroyed, the local DeviceInfo is no longer
   // valid and should be cleared from the cache.
@@ -744,14 +697,9 @@ void ProfileSyncService::ShutdownImpl(syncer::ShutdownReason reason) {
   // Clear various state.
   ResetCryptoState();
   expect_sync_configuration_aborted_ = false;
-  is_auth_in_progress_ = false;
   engine_initialized_ = false;
-  access_token_.clear();
-  request_access_token_retry_timer_.Stop();
   last_snapshot_ = syncer::SyncCycleSnapshot();
-  // Revert to "no auth error".
-  if (last_auth_error_.state() != GoogleServiceAuthError::NONE)
-    UpdateAuthErrorState(GoogleServiceAuthError::AuthErrorNone());
+  auth_manager_->Clear();
 
   NotifyObservers();
 
@@ -774,37 +722,127 @@ void ProfileSyncService::StopImpl(SyncStopDataFate data_fate) {
   }
 }
 
+int ProfileSyncService::GetDisableReasons() const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  // If Sync is disabled via command line flag, then ProfileSyncService
+  // shouldn't even be instantiated.
+  DCHECK(IsSyncAllowedByFlag());
+
+  int result = DISABLE_REASON_NONE;
+  if (!IsSyncAllowedByPlatform()) {
+    result = result | DISABLE_REASON_PLATFORM_OVERRIDE;
+  }
+  if (sync_prefs_.IsManaged() || sync_disabled_by_admin_) {
+    result = result | DISABLE_REASON_ENTERPRISE_POLICY;
+  }
+  // Local sync doesn't require sign-in.
+  if (!IsSignedIn() && !IsLocalSyncEnabled()) {
+    result = result | DISABLE_REASON_NOT_SIGNED_IN;
+  }
+  // When local sync is on sync should be considered requsted or otherwise it
+  // will not resume after the policy or the flag has been removed.
+  if (!sync_prefs_.IsSyncRequested() && !IsLocalSyncEnabled()) {
+    result = result | DISABLE_REASON_USER_CHOICE;
+  }
+  if (unrecoverable_error_reason_ != ERROR_REASON_UNSET) {
+    result = result | DISABLE_REASON_UNRECOVERABLE_ERROR;
+  }
+  return result;
+}
+
+syncer::SyncService::TransportState ProfileSyncService::GetTransportState()
+    const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  if (!IsEngineAllowedToStart()) {
+    // We shouldn't have an engine while in a disabled state.
+    DCHECK(!engine_);
+    return TransportState::DISABLED;
+  }
+
+  // Typically, Sync won't start until the initial setup is at least in
+  // progress. StartupController::TryStartImmediately bypasses the first setup
+  // check though, so we first have to check whether the engine is initialized.
+  if (!engine_initialized_) {
+    switch (startup_controller_->GetState()) {
+      case syncer::StartupController::State::NOT_STARTED:
+        DCHECK(!engine_);
+        return TransportState::WAITING_FOR_START_REQUEST;
+      case syncer::StartupController::State::STARTING_DEFERRED:
+        DCHECK(!engine_);
+        return TransportState::START_DEFERRED;
+      case syncer::StartupController::State::STARTED:
+        DCHECK(engine_);
+        return TransportState::INITIALIZING;
+    }
+    NOTREACHED();
+  }
+  DCHECK(engine_);
+  // The DataTypeManager gets created once the engine is initialized.
+  DCHECK(data_type_manager_);
+
+  // At this point we should usually be able to configure our data types (and
+  // once the data types can be configured, they must actually get configured).
+  // However, if the initial setup hasn't been completed, then we can't
+  // configure the data types. Also if a later (non-initial) setup happens to be
+  // in progress, we won't configure them right now.
+  if (data_type_manager_->state() == DataTypeManager::STOPPED) {
+    DCHECK(!CanConfigureDataTypes());
+    return TransportState::PENDING_DESIRED_CONFIGURATION;
+  }
+
+  // Unless standalone transport is enabled, the DataTypeManager shouldn't get
+  // configured (i.e. leave the STOPPED state) before the initial setup is
+  // complete.
+  DCHECK(IsStandaloneTransportEnabled() || IsFirstSetupComplete());
+
+  // Note that if a setup is started after the data types have been configured,
+  // then they'll stay configured even though CanConfigureDataTypes will be
+  // false.
+  DCHECK(CanConfigureDataTypes() || IsSetupInProgress());
+
+  if (data_type_manager_->state() != DataTypeManager::CONFIGURED) {
+    return TransportState::CONFIGURING;
+  }
+
+  return TransportState::ACTIVE;
+}
+
 bool ProfileSyncService::IsFirstSetupComplete() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return sync_prefs_.IsFirstSetupComplete();
 }
 
 void ProfileSyncService::SetFirstSetupComplete() {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   sync_prefs_.SetFirstSetupComplete();
-  if (IsEngineInitialized()) {
+  if (engine_initialized_) {
     ReconfigureDatatypeManager();
   }
 }
 
 bool ProfileSyncService::IsSyncConfirmationNeeded() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  return (!IsLocalSyncEnabled() && IsSignedIn()) && !IsFirstSetupInProgress() &&
-         !IsFirstSetupComplete() && IsSyncRequested();
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  return (!IsLocalSyncEnabled() && IsSignedIn()) && !IsSetupInProgress() &&
+         !IsFirstSetupComplete() &&
+         !HasDisableReason(DISABLE_REASON_USER_CHOICE) &&
+         IsAuthenticatedAccountPrimary();
 }
 
 void ProfileSyncService::UpdateLastSyncedTime() {
   sync_prefs_.SetLastSyncedTime(base::Time::Now());
 }
 
+void ProfileSyncService::NotifyObservers() {
+  for (auto& observer : observers_) {
+    observer.OnStateChanged(this);
+  }
+}
+
 void ProfileSyncService::NotifySyncCycleCompleted() {
   for (auto& observer : observers_)
     observer.OnSyncCycleCompleted(this);
-}
-
-void ProfileSyncService::NotifyForeignSessionUpdated() {
-  for (auto& observer : observers_)
-    observer.OnForeignSessionUpdated(this);
 }
 
 void ProfileSyncService::NotifyShutdown() {
@@ -814,9 +852,9 @@ void ProfileSyncService::NotifyShutdown() {
 
 void ProfileSyncService::ClearStaleErrors() {
   ClearUnrecoverableError();
-  last_actionable_error_ = SyncProtocolError();
+  last_actionable_error_ = syncer::SyncProtocolError();
   // Clear the data type errors as well.
-  if (data_type_manager_.get())
+  if (data_type_manager_)
     data_type_manager_->ResetDataTypeErrors();
 }
 
@@ -830,18 +868,21 @@ void ProfileSyncService::ClearUnrecoverableError() {
 // to do as little work as possible, to avoid further corruption or crashes.
 void ProfileSyncService::OnUnrecoverableError(const base::Location& from_here,
                                               const std::string& message) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  // TODO(crbug.com/840720): Get rid of the UnrecoverableErrorHandler interface
+  // and instead pass a callback.
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   // Unrecoverable errors that arrive via the syncer::UnrecoverableErrorHandler
   // interface are assumed to originate within the syncer.
-  unrecoverable_error_reason_ = ERROR_REASON_SYNCER;
-  OnUnrecoverableErrorImpl(from_here, message, true);
+  OnUnrecoverableErrorImpl(from_here, message, ERROR_REASON_SYNCER);
 }
 
 void ProfileSyncService::OnUnrecoverableErrorImpl(
     const base::Location& from_here,
     const std::string& message,
-    bool delete_sync_database) {
-  DCHECK(HasUnrecoverableError());
+    UnrecoverableErrorReason reason) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK_NE(reason, ERROR_REASON_UNSET);
+  unrecoverable_error_reason_ = reason;
   unrecoverable_error_message_ = message;
   unrecoverable_error_location_ = from_here;
 
@@ -851,23 +892,24 @@ void ProfileSyncService::OnUnrecoverableErrorImpl(
              << " -- ProfileSyncService unusable: " << message;
 
   // Shut all data types down.
-  base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::Bind(&ProfileSyncService::ShutdownImpl,
-                            sync_enabled_weak_factory_.GetWeakPtr(),
-                            delete_sync_database ? syncer::DISABLE_SYNC
-                                                 : syncer::STOP_SYNC));
+  ShutdownImpl(syncer::DISABLE_SYNC);
 }
 
 void ProfileSyncService::ReenableDatatype(syncer::ModelType type) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (!engine_initialized_ || !data_type_manager_)
     return;
   data_type_manager_->ReenableType(type);
 }
 
-void ProfileSyncService::UpdateEngineInitUMA(bool success) {
-  is_first_time_sync_configure_ = !IsFirstSetupComplete();
+void ProfileSyncService::ReadyForStartChanged(syncer::ModelType type) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  if (!engine_initialized_ || !data_type_manager_)
+    return;
+  data_type_manager_->ReadyForStartChanged(type);
+}
 
+void ProfileSyncService::UpdateEngineInitUMA(bool success) const {
   if (is_first_time_sync_configure_) {
     UMA_HISTOGRAM_BOOLEAN("Sync.BackendInitializeFirstTimeSuccess", success);
   } else {
@@ -885,40 +927,41 @@ void ProfileSyncService::UpdateEngineInitUMA(bool success) {
 }
 
 void ProfileSyncService::OnEngineInitialized(
-    ModelTypeSet initial_types,
+    syncer::ModelTypeSet initial_types,
     const syncer::WeakHandle<syncer::JsBackend>& js_backend,
     const syncer::WeakHandle<syncer::DataTypeDebugInfoListener>&
         debug_info_listener,
     const std::string& cache_guid,
+    const std::string& session_name,
     bool success) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  // TODO(treib): Based on some crash reports, it seems like the user could have
+  // signed out already at this point, so many of the steps below, including
+  // datatype reconfiguration, should not be triggered.
+  DCHECK(IsEngineAllowedToStart());
+
+  // The very first time the backend initializes is effectively the first time
+  // we can say we successfully "synced".  LastSyncedTime will only be null in
+  // this case, because the pref wasn't restored on StartUp.
+  is_first_time_sync_configure_ = sync_prefs_.GetLastSyncedTime().is_null();
+
   UpdateEngineInitUMA(success);
 
   if (!success) {
     // Something went unexpectedly wrong.  Play it safe: stop syncing at once
     // and surface error UI to alert the user sync has stopped.
-    // Keep the directory around for now so that on restart we will retry
-    // again and potentially succeed in presence of transient file IO failures
-    // or permissions issues, etc.
-    //
-    // TODO(rlarocque): Consider making this UnrecoverableError less special.
-    // Unlike every other UnrecoverableError, it does not delete our sync data.
-    // This exception made sense at the time it was implemented, but our new
-    // directory corruption recovery mechanism makes it obsolete.  By the time
-    // we get here, we will have already tried and failed to delete the
-    // directory.  It would be no big deal if we tried to delete it again.
-    OnInternalUnrecoverableError(FROM_HERE, "BackendInitialize failure", false,
-                                 ERROR_REASON_ENGINE_INIT_FAILURE);
+    OnUnrecoverableErrorImpl(FROM_HERE, "BackendInitialize failure",
+                             ERROR_REASON_ENGINE_INIT_FAILURE);
     return;
   }
 
   engine_initialized_ = true;
 
   sync_js_controller_.AttachJsBackend(js_backend);
-  debug_info_listener_ = debug_info_listener;
 
   // Initialize local device info.
-  local_device_->Initialize(cache_guid,
+  local_device_->Initialize(cache_guid, session_name,
                             signin_scoped_device_id_callback_.Run());
 
   if (protocol_event_observers_.might_have_observers()) {
@@ -929,27 +972,28 @@ void ProfileSyncService::OnEngineInitialized(
     engine_->EnableDirectoryTypeDebugInfoForwarding();
   }
 
-  // The very first time the backend initializes is effectively the first time
-  // we can say we successfully "synced".  LastSyncedTime will only be null in
-  // this case, because the pref wasn't restored on StartUp.
-  if (sync_prefs_.GetLastSyncedTime().is_null()) {
+  if (is_first_time_sync_configure_) {
     UpdateLastSyncedTime();
   }
 
-  data_type_manager_.reset(
+  data_type_manager_ =
       sync_client_->GetSyncApiComponentFactory()->CreateDataTypeManager(
-          initial_types, debug_info_listener_, &data_type_controllers_, this,
-          engine_.get(), this));
+          initial_types, debug_info_listener, &data_type_controllers_, this,
+          engine_.get(), this);
 
   crypto_->SetSyncEngine(engine_.get());
-  crypto_->SetDataTypeManager(data_type_manager_.get());
 
   // Auto-start means IsFirstSetupComplete gets set automatically.
   if (start_behavior_ == AUTO_START && !IsFirstSetupComplete()) {
     // This will trigger a configure if it completes setup.
     SetFirstSetupComplete();
   } else if (CanConfigureDataTypes()) {
-    ConfigureDataTypeManager();
+    // Datatype downloads on restart are generally due to newly supported
+    // datatypes (although it's also possible we're picking up where a failed
+    // previous configuration left off).
+    // TODO(sync): consider detecting configuration recovery and setting
+    // the reason here appropriately.
+    ConfigureDataTypeManager(syncer::CONFIGURE_REASON_NEWLY_ENABLED_DATA_TYPE);
   }
 
   // Check for a cookie jar mismatch.
@@ -971,13 +1015,18 @@ void ProfileSyncService::OnEngineInitialized(
 
 void ProfileSyncService::OnSyncCycleCompleted(
     const syncer::SyncCycleSnapshot& snapshot) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   last_snapshot_ = snapshot;
 
   UpdateLastSyncedTime();
   if (!snapshot.poll_finish_time().is_null())
     sync_prefs_.SetLastPollTime(snapshot.poll_finish_time());
+  DCHECK(!snapshot.short_poll_interval().is_zero());
+  sync_prefs_.SetShortPollInterval(snapshot.short_poll_interval());
+
+  DCHECK(!snapshot.long_poll_interval().is_zero());
+  sync_prefs_.SetLongPollInterval(snapshot.long_poll_interval());
 
   if (IsDataTypeControllerRunning(syncer::SESSIONS) &&
       snapshot.model_neutral_state().get_updates_request_types.Has(
@@ -985,9 +1034,7 @@ void ProfileSyncService::OnSyncCycleCompleted(
       !syncer::HasSyncerError(snapshot.model_neutral_state())) {
     // Trigger garbage collection of old sessions now that we've downloaded
     // any new session data.
-    base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::Bind(&SessionsSyncManager::DoGarbageCollection,
-                              base::AsWeakPtr(sessions_sync_manager_.get())));
+    sync_client_->GetSessionSyncService()->ScheduleGarbageCollection();
   }
   DVLOG(2) << "Notifying observers sync cycle completed";
   NotifySyncCycleCompleted();
@@ -995,7 +1042,7 @@ void ProfileSyncService::OnSyncCycleCompleted(
 
 void ProfileSyncService::OnExperimentsChanged(
     const syncer::Experiments& experiments) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (current_experiments_.Matches(experiments))
     return;
 
@@ -1006,102 +1053,15 @@ void ProfileSyncService::OnExperimentsChanged(
       experiments.gcm_invalidations_enabled);
 }
 
-void ProfileSyncService::UpdateAuthErrorState(
-    const GoogleServiceAuthError& error) {
-  is_auth_in_progress_ = false;
-  last_auth_error_ = error;
-
+void ProfileSyncService::OnConnectionStatusChange(
+    syncer::ConnectionStatus status) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  auth_manager_->ConnectionStatusChanged(status);
   NotifyObservers();
 }
 
-namespace {
-
-GoogleServiceAuthError ConnectionStatusToAuthError(
-    syncer::ConnectionStatus status) {
-  switch (status) {
-    case syncer::CONNECTION_OK:
-      return GoogleServiceAuthError::AuthErrorNone();
-      break;
-    case syncer::CONNECTION_AUTH_ERROR:
-      return GoogleServiceAuthError::FromInvalidGaiaCredentialsReason(
-          GoogleServiceAuthError::InvalidGaiaCredentialsReason::
-              CREDENTIALS_REJECTED_BY_SERVER);
-      break;
-    case syncer::CONNECTION_SERVER_ERROR:
-      return GoogleServiceAuthError(GoogleServiceAuthError::CONNECTION_FAILED);
-      break;
-    default:
-      NOTREACHED();
-      return GoogleServiceAuthError(GoogleServiceAuthError::CONNECTION_FAILED);
-  }
-}
-
-}  // namespace
-
-void ProfileSyncService::OnConnectionStatusChange(
-    syncer::ConnectionStatus status) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  connection_status_update_time_ = base::Time::Now();
-  connection_status_ = status;
-  if (status == syncer::CONNECTION_AUTH_ERROR) {
-    // Sync server returned error indicating that access token is invalid. It
-    // could be either expired or access is revoked. Let's request another
-    // access token and if access is revoked then request for token will fail
-    // with corresponding error. If access token is repeatedly reported
-    // invalid, there may be some issues with server, e.g. authentication
-    // state is inconsistent on sync and token server. In that case, we
-    // backoff token requests exponentially to avoid hammering token server
-    // too much and to avoid getting same token due to token server's caching
-    // policy. |request_access_token_retry_timer_| is used to backoff request
-    // triggered by both auth error and failure talking to GAIA server.
-    // Therefore, we're likely to reach the backoff ceiling more quickly than
-    // you would expect from looking at the BackoffPolicy if both types of
-    // errors happen. We shouldn't receive two errors back-to-back without
-    // attempting a token/sync request in between, thus crank up request delay
-    // unnecessary. This is because we won't make a sync request if we hit an
-    // error until GAIA succeeds at sending a new token, and we won't request
-    // a new token unless sync reports a token failure. But to be safe, don't
-    // schedule request if this happens.
-    if (request_access_token_retry_timer_.IsRunning()) {
-      // The timer to perform a request later is already running; nothing
-      // further needs to be done at this point.
-    } else if (request_access_token_backoff_.failure_count() == 0) {
-      // First time request without delay. Currently invalid token is used
-      // to initialize sync engine and we'll always end up here. We don't
-      // want to delay initialization.
-      request_access_token_backoff_.InformOfRequest(false);
-      RequestAccessToken();
-    } else {
-      request_access_token_backoff_.InformOfRequest(false);
-      request_access_token_retry_timer_.Start(
-          FROM_HERE, request_access_token_backoff_.GetTimeUntilRelease(),
-          base::Bind(&ProfileSyncService::RequestAccessToken,
-                     sync_enabled_weak_factory_.GetWeakPtr()));
-    }
-    // Make observers aware of the change. This call is unnecessary in the
-    // block below because UpdateAuthErrorState() will notify observers.
-    NotifyObservers();
-  } else {
-    // Reset backoff time after successful connection.
-    if (status == syncer::CONNECTION_OK) {
-      // Request shouldn't be scheduled at this time. But if it is, it's
-      // possible that sync flips between OK and auth error states rapidly,
-      // thus hammers token server. To be safe, only reset backoff delay when
-      // no scheduled request.
-      if (!request_access_token_retry_timer_.IsRunning()) {
-        request_access_token_backoff_.Reset();
-      }
-    }
-
-    const GoogleServiceAuthError auth_error =
-        ConnectionStatusToAuthError(status);
-    DVLOG(1) << "Connection status change: " << auth_error.ToString();
-    UpdateAuthErrorState(auth_error);
-  }
-}
-
 void ProfileSyncService::OnMigrationNeededForTypes(syncer::ModelTypeSet types) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(engine_initialized_);
   DCHECK(data_type_manager_);
 
@@ -1110,8 +1070,9 @@ void ProfileSyncService::OnMigrationNeededForTypes(syncer::ModelTypeSet types) {
   migrator_->MigrateTypes(types);
 }
 
-void ProfileSyncService::OnActionableError(const SyncProtocolError& error) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+void ProfileSyncService::OnActionableError(
+    const syncer::SyncProtocolError& error) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   last_actionable_error_ = error;
   DCHECK_NE(last_actionable_error_.action, syncer::UNKNOWN_ACTION);
   switch (error.action) {
@@ -1122,28 +1083,32 @@ void ProfileSyncService::OnActionableError(const SyncProtocolError& error) {
       // TODO(lipalani) : if setup in progress we want to display these
       // actions in the popup. The current experience might not be optimal for
       // the user. We just dismiss the dialog.
-      if (startup_controller_->IsSetupInProgress()) {
-        RequestStop(CLEAR_DATA);
+      if (IsSetupInProgress()) {
+        StopImpl(CLEAR_DATA);
         expect_sync_configuration_aborted_ = true;
       }
       // Trigger an unrecoverable error to stop syncing.
-      OnInternalUnrecoverableError(FROM_HERE,
-                                   last_actionable_error_.error_description,
-                                   true, ERROR_REASON_ACTIONABLE_ERROR);
+      OnUnrecoverableErrorImpl(FROM_HERE,
+                               last_actionable_error_.error_description,
+                               ERROR_REASON_ACTIONABLE_ERROR);
       break;
     case syncer::DISABLE_SYNC_ON_CLIENT:
       if (error.error_type == syncer::NOT_MY_BIRTHDAY) {
         UMA_HISTOGRAM_ENUMERATION("Sync.StopSource", syncer::BIRTHDAY_ERROR,
                                   syncer::STOP_SOURCE_LIMIT);
       }
+      // Note: Here we explicitly want RequestStop (rather than StopImpl), so
+      // that IsSyncRequested gets set to false, and Sync won't start again on
+      // the next browser startup.
       RequestStop(CLEAR_DATA);
 #if !defined(OS_CHROMEOS)
       // On every platform except ChromeOS, sign out the user after a dashboard
       // clear.
       if (!IsLocalSyncEnabled()) {
-        SigninManager::FromSigninManagerBase(signin_->GetSigninManager())
-            ->SignOut(signin_metrics::SERVER_FORCED_DISABLE,
-                      signin_metrics::SignoutDelete::IGNORE_METRIC);
+        identity_manager_->ClearPrimaryAccount(
+            identity::IdentityManager::ClearAccountTokensAction::kDefault,
+            signin_metrics::SERVER_FORCED_DISABLE,
+            signin_metrics::SignoutDelete::IGNORE_METRIC);
       }
 #endif
       break;
@@ -1155,23 +1120,23 @@ void ProfileSyncService::OnActionableError(const SyncProtocolError& error) {
       break;
     case syncer::RESET_LOCAL_SYNC_DATA:
       ShutdownImpl(syncer::DISABLE_SYNC);
-      startup_controller_->TryStart();
+      startup_controller_->TryStart(IsSetupInProgress());
       UMA_HISTOGRAM_ENUMERATION(
           "Sync.ClearServerDataEvents",
           syncer::CLEAR_SERVER_DATA_RESET_LOCAL_DATA_RECEIVED,
           syncer::CLEAR_SERVER_DATA_MAX);
       break;
-    default:
+    case syncer::UNKNOWN_ACTION:
       NOTREACHED();
   }
   NotifyObservers();
 }
 
 void ProfileSyncService::ClearAndRestartSyncForPassphraseEncryption() {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   engine_->ClearServerData(
-      base::Bind(&ProfileSyncService::OnClearServerDataDone,
-                 sync_enabled_weak_factory_.GetWeakPtr()));
+      base::BindRepeating(&ProfileSyncService::OnClearServerDataDone,
+                          sync_enabled_weak_factory_.GetWeakPtr()));
 }
 
 void ProfileSyncService::OnClearServerDataDone() {
@@ -1185,14 +1150,14 @@ void ProfileSyncService::OnClearServerDataDone() {
   // Shutdown sync, delete the Directory, then restart, restoring the cached
   // nigori state.
   ShutdownImpl(syncer::DISABLE_SYNC);
-  startup_controller_->TryStart();
+  startup_controller_->TryStart(IsSetupInProgress());
   UMA_HISTOGRAM_ENUMERATION("Sync.ClearServerDataEvents",
                             syncer::CLEAR_SERVER_DATA_SUCCEEDED,
                             syncer::CLEAR_SERVER_DATA_MAX);
 }
 
 void ProfileSyncService::ClearServerDataForTest(const base::Closure& callback) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   // Sync has a restriction that the engine must be in configuration mode
   // in order to run clear server data.
   engine_->StartConfiguration();
@@ -1201,12 +1166,11 @@ void ProfileSyncService::ClearServerDataForTest(const base::Closure& callback) {
 
 void ProfileSyncService::OnConfigureDone(
     const DataTypeManager::ConfigureResult& result) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  configure_status_ = result.status;
-  data_type_status_table_ = result.data_type_status_table;
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  data_type_error_map_ = result.data_type_status_table.GetAllErrors();
 
   if (!sync_configure_start_time_.is_null()) {
-    if (configure_status_ == DataTypeManager::OK) {
+    if (result.status == DataTypeManager::OK) {
       base::Time sync_configure_stop_time = base::Time::Now();
       base::TimeDelta delta =
           sync_configure_stop_time - sync_configure_start_time_;
@@ -1219,11 +1183,7 @@ void ProfileSyncService::OnConfigureDone(
     sync_configure_start_time_ = base::Time();
   }
 
-  // Notify listeners that configuration is done.
-  for (auto& observer : observers_)
-    observer.OnSyncConfigurationCompleted(this);
-
-  DVLOG(1) << "PSS OnConfigureDone called with status: " << configure_status_;
+  DVLOG(1) << "PSS OnConfigureDone called with status: " << result.status;
   // The possible status values:
   //    ABORT - Configuration was aborted. This is not an error, if
   //            initiated by user.
@@ -1231,7 +1191,7 @@ void ProfileSyncService::OnConfigureDone(
   //    Everything else is an UnrecoverableError. So treat it as such.
 
   // First handle the abort case.
-  if (configure_status_ == DataTypeManager::ABORTED &&
+  if (result.status == DataTypeManager::ABORTED &&
       expect_sync_configuration_aborted_) {
     DVLOG(0) << "ProfileSyncService::Observe Sync Configure aborted";
     expect_sync_configuration_aborted_ = false;
@@ -1239,7 +1199,7 @@ void ProfileSyncService::OnConfigureDone(
   }
 
   // Handle unrecoverable error.
-  if (configure_status_ != DataTypeManager::OK) {
+  if (result.status != DataTypeManager::OK) {
     if (result.was_catch_up_configure) {
       // Record catchup configuration failure.
       UMA_HISTOGRAM_ENUMERATION("Sync.ClearServerDataEvents",
@@ -1248,27 +1208,31 @@ void ProfileSyncService::OnConfigureDone(
     }
     // Something catastrophic had happened. We should only have one
     // error representing it.
-    syncer::SyncError error = data_type_status_table_.GetUnrecoverableError();
+    syncer::SyncError error =
+        result.data_type_status_table.GetUnrecoverableError();
     DCHECK(error.IsSet());
     std::string message =
         "Sync configuration failed with status " +
-        DataTypeManager::ConfigureStatusToString(configure_status_) +
+        DataTypeManager::ConfigureStatusToString(result.status) +
         " caused by " +
         syncer::ModelTypeSetToString(
-            data_type_status_table_.GetUnrecoverableErrorTypes()) +
+            result.data_type_status_table.GetUnrecoverableErrorTypes()) +
         ": " + error.message();
     LOG(ERROR) << "ProfileSyncService error: " << message;
-    OnInternalUnrecoverableError(error.location(), message, true,
-                                 ERROR_REASON_CONFIGURATION_FAILURE);
+    OnUnrecoverableErrorImpl(error.location(), message,
+                             ERROR_REASON_CONFIGURATION_FAILURE);
     return;
   }
 
-  DCHECK_EQ(DataTypeManager::OK, configure_status_);
+  DCHECK_EQ(DataTypeManager::OK, result.status);
 
   // We should never get in a state where we have no encrypted datatypes
   // enabled, and yet we still think we require a passphrase for decryption.
-  DCHECK(
-      !(IsPassphraseRequiredForDecryption() && !IsEncryptedDatatypeEnabled()));
+  DCHECK(!IsPassphraseRequiredForDecryption() || IsEncryptedDatatypeEnabled());
+
+  // Notify listeners that configuration is done.
+  for (auto& observer : observers_)
+    observer.OnSyncConfigurationCompleted(this);
 
   // This must be done before we start syncing with the server to avoid
   // sending unencrypted data up on a first time sync.
@@ -1276,7 +1240,7 @@ void ProfileSyncService::OnConfigureDone(
     engine_->EnableEncryptEverything();
   NotifyObservers();
 
-  if (migrator_.get() && migrator_->state() != BackendMigrator::IDLE) {
+  if (migrator_.get() && migrator_->state() != syncer::BackendMigrator::IDLE) {
     // Migration in progress.  Let the migrator know we just finished
     // configuring something.  It will be up to the migrator to call
     // StartSyncingWithServer() if migration is now finished.
@@ -1295,177 +1259,84 @@ void ProfileSyncService::OnConfigureDone(
 }
 
 void ProfileSyncService::OnConfigureStart() {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   sync_configure_start_time_ = base::Time::Now();
   engine_->StartConfiguration();
   NotifyObservers();
 }
 
-ProfileSyncService::SyncStatusSummary
-ProfileSyncService::QuerySyncStatusSummary() {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  if (HasUnrecoverableError())
-    return UNRECOVERABLE_ERROR;
-  if (!engine_)
-    return NOT_ENABLED;
-  if (engine_ && !IsFirstSetupComplete())
-    return SETUP_INCOMPLETE;
-  if (engine_ && IsFirstSetupComplete() && data_type_manager_ &&
-      data_type_manager_->state() == DataTypeManager::STOPPED) {
-    return DATATYPES_NOT_INITIALIZED;
-  }
-  if (IsSyncActive())
-    return INITIALIZED;
-  return UNKNOWN_ERROR;
-}
-
-std::string ProfileSyncService::QuerySyncStatusSummaryString() {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  SyncStatusSummary status = QuerySyncStatusSummary();
-
-  std::string config_status_str =
-      configure_status_ != DataTypeManager::UNKNOWN
-          ? DataTypeManager::ConfigureStatusToString(configure_status_)
-          : "";
-
-  switch (status) {
-    case UNRECOVERABLE_ERROR:
-      return "Unrecoverable error detected";
-    case NOT_ENABLED:
-      return "Syncing not enabled";
-    case SETUP_INCOMPLETE:
-      return "First time sync setup incomplete";
-    case DATATYPES_NOT_INITIALIZED:
-      return "Datatypes not fully initialized";
-    case INITIALIZED:
-      return "Sync service initialized";
-    default:
-      return "Status unknown: Internal error?";
-  }
-}
-
-std::string ProfileSyncService::GetEngineInitializationStateString() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  return startup_controller_->GetEngineInitializationStateString();
-}
-
 bool ProfileSyncService::IsSetupInProgress() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  return startup_controller_->IsSetupInProgress();
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  return outstanding_setup_in_progress_handles_ > 0;
 }
 
-bool ProfileSyncService::QueryDetailedSyncStatus(SyncEngine::Status* result) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+bool ProfileSyncService::QueryDetailedSyncStatus(
+    syncer::SyncEngine::Status* result) const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (engine_ && engine_initialized_) {
     *result = engine_->GetDetailedStatus();
     return true;
   }
-  SyncEngine::Status status;
+  syncer::SyncEngine::Status status;
   status.sync_protocol_error = last_actionable_error_;
   *result = status;
   return false;
 }
 
 const GoogleServiceAuthError& ProfileSyncService::GetAuthError() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  return last_auth_error_;
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  return auth_manager_->GetLastAuthError();
 }
 
 bool ProfileSyncService::CanConfigureDataTypes() const {
-  return IsFirstSetupComplete() && !IsSetupInProgress();
-}
-
-bool ProfileSyncService::IsFirstSetupInProgress() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  return !IsFirstSetupComplete() && startup_controller_->IsSetupInProgress();
+  // TODO(crbug.com/856179): Arguably, IsSetupInProgress() shouldn't prevent
+  // configuring data types in transport mode, but at least for now, it's
+  // easier to keep it like this. Changing this will likely require changes to
+  // the setup UI flow.
+  return data_type_manager_ &&
+         (IsFirstSetupComplete() || IsStandaloneTransportEnabled()) &&
+         !IsSetupInProgress();
 }
 
 std::unique_ptr<syncer::SyncSetupInProgressHandle>
 ProfileSyncService::GetSetupInProgressHandle() {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   if (++outstanding_setup_in_progress_handles_ == 1) {
-    DCHECK(!startup_controller_->IsSetupInProgress());
-    startup_controller_->SetSetupInProgress(true);
+    startup_controller_->TryStart(/*force_immediate=*/true);
 
     NotifyObservers();
   }
 
-  return std::unique_ptr<syncer::SyncSetupInProgressHandle>(
-      new syncer::SyncSetupInProgressHandle(
-          base::Bind(&ProfileSyncService::OnSetupInProgressHandleDestroyed,
-                     weak_factory_.GetWeakPtr())));
-}
-
-bool ProfileSyncService::IsSyncAllowed() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  return IsSyncAllowedByFlag() && !IsManaged() && IsSyncAllowedByPlatform();
-}
-
-bool ProfileSyncService::IsSyncActive() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  return engine_initialized_ && data_type_manager_ &&
-         data_type_manager_->state() != DataTypeManager::STOPPED;
+  return std::make_unique<syncer::SyncSetupInProgressHandle>(
+      base::BindRepeating(&ProfileSyncService::OnSetupInProgressHandleDestroyed,
+                          weak_factory_.GetWeakPtr()));
 }
 
 bool ProfileSyncService::IsLocalSyncEnabled() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return sync_prefs_.IsLocalSyncEnabled();
 }
 
 void ProfileSyncService::TriggerRefresh(const syncer::ModelTypeSet& types) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (engine_initialized_)
     engine_->TriggerRefresh(types);
 }
 
 bool ProfileSyncService::IsSignedIn() const {
-  // Sync is logged in if there is a non-empty effective account id.
-  return !signin_->GetAccountIdToUse().empty();
-}
-
-bool ProfileSyncService::CanEngineStart() const {
-  if (IsLocalSyncEnabled())
-    return true;
-  return CanSyncStart() && oauth2_token_service_ &&
-         oauth2_token_service_->RefreshTokenIsAvailable(
-             signin_->GetAccountIdToUse());
-}
-
-bool ProfileSyncService::IsEngineInitialized() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  return engine_initialized_;
-}
-
-bool ProfileSyncService::ConfigurationDone() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  return data_type_manager_ &&
-         data_type_manager_->state() == DataTypeManager::CONFIGURED;
-}
-
-bool ProfileSyncService::waiting_for_auth() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  return is_auth_in_progress_;
-}
-
-const syncer::Experiments& ProfileSyncService::current_experiments() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  return current_experiments_;
-}
-
-bool ProfileSyncService::HasUnrecoverableError() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  return unrecoverable_error_reason_ != ERROR_REASON_UNSET;
+  // Sync is logged in if there is a non-empty account id.
+  return !GetAuthenticatedAccountInfo().account_id.empty();
 }
 
 bool ProfileSyncService::IsPassphraseRequired() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return crypto_->passphrase_required_reason() !=
          syncer::REASON_PASSPHRASE_NOT_REQUIRED;
 }
 
 bool ProfileSyncService::IsPassphraseRequiredForDecryption() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   // If there is an encrypted datatype enabled and we don't have the proper
   // passphrase, we must prompt the user for a passphrase. The only way for the
   // user to avoid entering their passphrase is to disable the encrypted types.
@@ -1500,25 +1371,30 @@ void ProfileSyncService::UpdateSelectedTypesHistogram(
 #if BUILDFLAG(ENABLE_READING_LIST)
         syncer::user_selectable_type::READING_LIST,
 #endif
+        syncer::user_selectable_type::USER_EVENTS,
         syncer::user_selectable_type::PROXY_TABS,
       };
 
-  static_assert(40 == syncer::MODEL_TYPE_COUNT,
-                "If adding a user selectable type, update "
-                "UserSelectableSyncType in user_selectable_sync_type.h and "
-                "histograms.xml.");
+  static_assert(42 == syncer::MODEL_TYPE_COUNT,
+                "If adding a user selectable type (that is exposed to the user "
+                "via the sync preferences UI), update "
+                "1) The user_selectable_types[] above;"
+                "2) UserSelectableSyncType in user_selectable_sync_type.h and "
+                "histograms.xml; "
+                "3) UserSelectableTypes() in sync/syncable/model_type.h.");
 
   if (!sync_everything) {
     const syncer::ModelTypeSet current_types = GetPreferredDataTypes();
 
     syncer::ModelTypeSet type_set = syncer::UserSelectableTypes();
-    syncer::ModelTypeSet::Iterator it = type_set.First();
+    syncer::ModelTypeSet::Iterator it = type_set.begin();
 
-    DCHECK_EQ(arraysize(user_selectable_types), type_set.Size());
+    DCHECK_EQ(base::size(user_selectable_types), type_set.Size());
 
-    for (size_t i = 0; i < arraysize(user_selectable_types) && it.Good();
-         ++i, it.Inc()) {
-      const syncer::ModelType type = it.Get();
+    for (size_t i = 0;
+         i < base::size(user_selectable_types) && it != type_set.end();
+         ++i, ++it) {
+      const syncer::ModelType type = *it;
       if (chosen_types.Has(type) &&
           (!IsFirstSetupComplete() || !current_types.Has(type))) {
         // Selected type has changed - log it.
@@ -1533,10 +1409,10 @@ void ProfileSyncService::UpdateSelectedTypesHistogram(
 void ProfileSyncService::OnUserChoseDatatypes(
     bool sync_everything,
     syncer::ModelTypeSet chosen_types) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(syncer::UserSelectableTypes().HasAll(chosen_types));
 
-  if (!engine_ && !HasUnrecoverableError()) {
+  if (!engine_ && !HasDisableReason(DISABLE_REASON_UNRECOVERABLE_ERROR)) {
     NOTREACHED();
     return;
   }
@@ -1546,60 +1422,63 @@ void ProfileSyncService::OnUserChoseDatatypes(
 
   if (data_type_manager_)
     data_type_manager_->ResetDataTypeErrors();
-  ChangePreferredDataTypes(chosen_types);
-}
 
-void ProfileSyncService::OnUserChangedSyncEverythingOnly(bool sync_everything) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  if (!engine_ && !HasUnrecoverableError()) {
-    NOTREACHED();
-    return;
-  }
-
-  sync_prefs_.SetKeepEverythingSynced(sync_everything);
-  UpdateSelectedTypesHistogram(sync_everything, GetPreferredDataTypes());
-  if (data_type_manager_)
-    data_type_manager_->ResetDataTypeErrors();
-  ReconfigureDatatypeManager();
-}
-
-void ProfileSyncService::ChangePreferredDataTypes(
-    syncer::ModelTypeSet preferred_types) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  DVLOG(1) << "ChangePreferredDataTypes invoked";
   const syncer::ModelTypeSet registered_types = GetRegisteredDataTypes();
   // Will only enable those types that are registered and preferred.
-  sync_prefs_.SetPreferredDataTypes(registered_types, preferred_types);
+  sync_prefs_.SetPreferredDataTypes(registered_types, chosen_types,
+                                    user_events_separate_pref_group_);
 
   // Now reconfigure the DTM.
   ReconfigureDatatypeManager();
 }
 
 syncer::ModelTypeSet ProfileSyncService::GetActiveDataTypes() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (!data_type_manager_)
     return syncer::ModelTypeSet();
   return data_type_manager_->GetActiveDataTypes();
 }
 
 syncer::SyncClient* ProfileSyncService::GetSyncClient() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return sync_client_.get();
 }
 
+void ProfileSyncService::AddObserver(syncer::SyncServiceObserver* observer) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  observers_.AddObserver(observer);
+}
+
+void ProfileSyncService::RemoveObserver(syncer::SyncServiceObserver* observer) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  observers_.RemoveObserver(observer);
+}
+
+bool ProfileSyncService::HasObserver(
+    const syncer::SyncServiceObserver* observer) const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  return observers_.HasObserver(observer);
+}
+
 syncer::ModelTypeSet ProfileSyncService::GetPreferredDataTypes() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   const syncer::ModelTypeSet registered_types = GetRegisteredDataTypes();
-  const syncer::ModelTypeSet preferred_types =
-      Union(sync_prefs_.GetPreferredDataTypes(registered_types),
+  syncer::ModelTypeSet preferred_types =
+      Union(sync_prefs_.GetPreferredDataTypes(registered_types,
+                                              user_events_separate_pref_group_),
             syncer::ControlTypes());
+  if (IsLocalSyncEnabled()) {
+    preferred_types.Remove(syncer::APP_LIST);
+    preferred_types.Remove(syncer::USER_CONSENTS);
+    preferred_types.Remove(syncer::USER_EVENTS);
+  }
   const syncer::ModelTypeSet enforced_types =
       Intersection(GetDataTypesFromPreferenceProviders(), registered_types);
   return Union(preferred_types, enforced_types);
 }
 
 syncer::ModelTypeSet ProfileSyncService::GetForcedDataTypes() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   // TODO(treib,zea): When SyncPrefs also implements SyncTypePreferenceProvider,
   // we'll need another way to distinguish user-choosable types from
   // programmatically-enabled types.
@@ -1607,25 +1486,25 @@ syncer::ModelTypeSet ProfileSyncService::GetForcedDataTypes() const {
 }
 
 syncer::ModelTypeSet ProfileSyncService::GetRegisteredDataTypes() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   syncer::ModelTypeSet registered_types;
   // The data_type_controllers_ are determined by command-line flags;
   // that's effectively what controls the values returned here.
-  for (DataTypeController::TypeMap::const_iterator it =
-           data_type_controllers_.begin();
-       it != data_type_controllers_.end(); ++it) {
-    registered_types.Put(it->first);
+  for (const std::pair<const syncer::ModelType,
+                       std::unique_ptr<DataTypeController>>&
+           type_and_controller : data_type_controllers_) {
+    registered_types.Put(type_and_controller.first);
   }
   return registered_types;
 }
 
 bool ProfileSyncService::IsUsingSecondaryPassphrase() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return crypto_->IsUsingSecondaryPassphrase();
 }
 
 std::string ProfileSyncService::GetCustomPassphraseKey() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   syncer::SystemEncryptor encryptor;
   syncer::Cryptographer cryptographer(&encryptor);
   cryptographer.Bootstrap(sync_prefs_.GetEncryptionBootstrapToken());
@@ -1633,81 +1512,104 @@ std::string ProfileSyncService::GetCustomPassphraseKey() const {
 }
 
 syncer::PassphraseType ProfileSyncService::GetPassphraseType() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return crypto_->GetPassphraseType();
 }
 
 base::Time ProfileSyncService::GetExplicitPassphraseTime() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return crypto_->GetExplicitPassphraseTime();
 }
 
 bool ProfileSyncService::IsCryptographerReady(
     const syncer::BaseTransaction* trans) const {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return engine_ && engine_->IsCryptographerReady(trans);
 }
 
 void ProfileSyncService::SetPlatformSyncAllowedProvider(
     const PlatformSyncAllowedProvider& platform_sync_allowed_provider) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   platform_sync_allowed_provider_ = platform_sync_allowed_provider;
 }
 
-// static
-syncer::RepeatingModelTypeStoreFactory
-ProfileSyncService::GetModelTypeStoreFactory(const base::FilePath& base_path) {
-  // TODO(skym): Verify using AsUTF8Unsafe is okay here. Should work as long
-  // as the Local State file is guaranteed to be UTF-8.
-  const std::string path =
-      FormatSharedModelTypeStorePath(base_path).AsUTF8Unsafe();
-  return base::BindRepeating(&ModelTypeStore::CreateStore, path);
-}
+void ProfileSyncService::ConfigureDataTypeManager(
+    syncer::ConfigureReason reason) {
+  DCHECK(CanConfigureDataTypes() ||
+         reason == syncer::CONFIGURE_REASON_MIGRATION);
 
-void ProfileSyncService::ConfigureDataTypeManager() {
-  // Don't configure datatypes if the setup UI is still on the screen - this
-  // is to help multi-screen setting UIs (like iOS) where they don't want to
-  // start syncing data until the user is done configuring encryption options,
-  // etc. ReconfigureDatatypeManager() will get called again once the UI calls
-  // SetSetupInProgress(false).
-  if (!CanConfigureDataTypes()) {
-    // If we can't configure the data type manager yet, we should still notify
-    // observers. This is to support multiple setup UIs being open at once.
-    NotifyObservers();
-    return;
-  }
+  syncer::ConfigureContext configure_context;
+  configure_context.authenticated_account_id =
+      GetAuthenticatedAccountInfo().account_id;
+  configure_context.cache_guid = local_device_->GetLocalSyncCacheGUID();
+  configure_context.storage_option = syncer::ConfigureContext::STORAGE_ON_DISK;
+  configure_context.reason = reason;
 
-  bool restart = false;
   if (!migrator_) {
-    restart = true;
-
     // We create the migrator at the same time.
-    migrator_ = std::make_unique<BackendMigrator>(
-        debug_identifier_, GetUserShare(), this, data_type_manager_.get(),
-        base::Bind(&ProfileSyncService::StartSyncingWithServer,
-                   base::Unretained(this)));
+    migrator_ = std::make_unique<syncer::BackendMigrator>(
+        debug_identifier_, GetUserShare(), data_type_manager_.get(),
+        base::BindRepeating(&ProfileSyncService::ConfigureDataTypeManager,
+                            base::Unretained(this),
+                            syncer::CONFIGURE_REASON_MIGRATION),
+        base::BindRepeating(&ProfileSyncService::StartSyncingWithServer,
+                            base::Unretained(this)));
+
+    // Override reason if no configuration has completed ever.
+    if (is_first_time_sync_configure_ &&
+        reason != syncer::CONFIGURE_REASON_CATCH_UP) {
+      configure_context.reason = syncer::CONFIGURE_REASON_NEW_CLIENT;
+    }
   }
 
-  syncer::ModelTypeSet types;
-  syncer::ConfigureReason reason = syncer::CONFIGURE_REASON_UNKNOWN;
-  types = GetPreferredDataTypes();
-  if (restart) {
-    // Datatype downloads on restart are generally due to newly supported
-    // datatypes (although it's also possible we're picking up where a failed
-    // previous configuration left off).
-    // TODO(sync): consider detecting configuration recovery and setting
-    // the reason here appropriately.
-    reason = syncer::CONFIGURE_REASON_NEWLY_ENABLED_DATA_TYPE;
-  } else {
-    // The user initiated a reconfiguration (either to add or remove types).
-    reason = syncer::CONFIGURE_REASON_RECONFIGURATION;
-  }
+  DCHECK(!configure_context.authenticated_account_id.empty() ||
+         IsLocalSyncEnabled());
+  DCHECK(!configure_context.cache_guid.empty());
+  DCHECK_NE(configure_context.reason, syncer::CONFIGURE_REASON_UNKNOWN);
 
-  data_type_manager_->Configure(types, reason);
+  // Note: When local Sync is enabled, then we want full-sync mode (not just
+  // transport), even though Sync-the-feature is not considered enabled.
+  bool use_transport_only_mode =
+      !IsSyncFeatureEnabled() && !IsLocalSyncEnabled();
+
+  syncer::ModelTypeSet types = GetPreferredDataTypes();
+  // In transport-only mode, only a subset of data types is supported.
+  if (use_transport_only_mode) {
+    DCHECK(IsStandaloneTransportEnabled());
+    syncer::ModelTypeSet allowed_types = {syncer::USER_CONSENTS};
+
+    if (base::FeatureList::IsEnabled(
+            autofill::features::kAutofillEnableAccountWalletStorage) &&
+        base::FeatureList::IsEnabled(switches::kSyncUSSAutofillWalletData)) {
+      if (!IsUsingSecondaryPassphrase() ||
+          base::FeatureList::IsEnabled(
+              switches::
+                  kSyncAllowWalletDataInTransportModeWithCustomPassphrase)) {
+        allowed_types.Put(syncer::AUTOFILL_WALLET_DATA);
+      }
+    }
+
+    types = Intersection(types, allowed_types);
+    configure_context.storage_option =
+        syncer::ConfigureContext::STORAGE_IN_MEMORY;
+  }
+  data_type_manager_->Configure(types, configure_context);
+
+  // Record in UMA whether we're configuring the full Sync feature or only the
+  // transport.
+  enum class ConfigureDataTypeManagerOption {
+    kFeature = 0,
+    kTransport = 1,
+    kMaxValue = kTransport
+  };
+  UMA_HISTOGRAM_ENUMERATION("Sync.ConfigureDataTypeManagerOption",
+                            use_transport_only_mode
+                                ? ConfigureDataTypeManagerOption::kTransport
+                                : ConfigureDataTypeManagerOption::kFeature);
 }
 
 syncer::UserShare* ProfileSyncService::GetUserShare() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (engine_ && engine_initialized_) {
     return engine_->GetUserShare();
   }
@@ -1716,45 +1618,35 @@ syncer::UserShare* ProfileSyncService::GetUserShare() const {
 }
 
 syncer::SyncCycleSnapshot ProfileSyncService::GetLastCycleSnapshot() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return last_snapshot_;
 }
 
-bool ProfileSyncService::HasUnsyncedItems() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  if (HasSyncingEngine() && engine_initialized_) {
-    return engine_->HasUnsyncedItems();
-  }
-  NOTREACHED();
-  return false;
+void ProfileSyncService::HasUnsyncedItemsForTest(
+    base::OnceCallback<void(bool)> cb) const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK(engine_);
+  DCHECK(engine_initialized_);
+  engine_->HasUnsyncedItemsForTest(std::move(cb));
 }
 
-BackendMigrator* ProfileSyncService::GetBackendMigratorForTest() {
-  DCHECK(thread_checker_.CalledOnValidThread());
+syncer::BackendMigrator* ProfileSyncService::GetBackendMigratorForTest() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return migrator_.get();
 }
 
-void ProfileSyncService::GetModelSafeRoutingInfo(
-    syncer::ModelSafeRoutingInfo* out) const {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  if (engine_ && engine_initialized_) {
-    engine_->GetModelSafeRoutingInfo(out);
-  } else {
-    NOTREACHED();
-  }
-}
-
 std::unique_ptr<base::Value> ProfileSyncService::GetTypeStatusMap() {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   auto result = std::make_unique<base::ListValue>();
 
   if (!engine_ || !engine_initialized_) {
     return std::move(result);
   }
 
-  SyncEngine::Status detailed_status = engine_->GetDetailedStatus();
-  const ModelTypeSet& throttled_types(detailed_status.throttled_types);
-  const ModelTypeSet& backed_off_types(detailed_status.backed_off_types);
+  syncer::SyncEngine::Status detailed_status = engine_->GetDetailedStatus();
+  const syncer::ModelTypeSet& throttled_types(detailed_status.throttled_types);
+  const syncer::ModelTypeSet& backed_off_types(
+      detailed_status.backed_off_types);
 
   std::unique_ptr<base::DictionaryValue> type_status_header(
       new base::DictionaryValue());
@@ -1767,21 +1659,17 @@ std::unique_ptr<base::Value> ProfileSyncService::GetTypeStatusMap() {
   type_status_header->SetString("group_type", "Group Type");
   result->Append(std::move(type_status_header));
 
-  const DataTypeStatusTable::TypeErrorMap error_map =
-      data_type_status_table_.GetAllErrors();
-  ModelSafeRoutingInfo routing_info;
+  syncer::ModelSafeRoutingInfo routing_info;
   engine_->GetModelSafeRoutingInfo(&routing_info);
-  const ModelTypeSet registered = GetRegisteredDataTypes();
-  for (ModelTypeSet::Iterator it = registered.First(); it.Good(); it.Inc()) {
-    ModelType type = it.Get();
-
+  const syncer::ModelTypeSet registered = GetRegisteredDataTypes();
+  for (syncer::ModelType type : registered) {
     auto type_status = std::make_unique<base::DictionaryValue>();
     type_status->SetString("name", ModelTypeToString(type));
     type_status->SetString("group_type",
                            ModelSafeGroupToString(routing_info[type]));
 
-    if (error_map.find(type) != error_map.end()) {
-      const syncer::SyncError& error = error_map.find(type)->second;
+    if (data_type_error_map_.find(type) != data_type_error_map_.end()) {
+      const syncer::SyncError& error = data_type_error_map_.find(type)->second;
       DCHECK(error.IsSet());
       switch (error.GetSeverity()) {
         case syncer::SyncError::SYNC_ERROR_SEVERITY_ERROR:
@@ -1811,14 +1699,18 @@ std::unique_ptr<base::Value> ProfileSyncService::GetTypeStatusMap() {
 
     const auto& dtc_iter = data_type_controllers_.find(type);
     if (dtc_iter != data_type_controllers_.end()) {
-      // OnDatatypeStatusCounterUpdated that posts back to the UI thread so that
-      // real results can't get overwritten by the empty counters set at the end
-      // of this method.
-      dtc_iter->second->GetStatusCounters(BindToCurrentThread(
-          base::Bind(&ProfileSyncService::OnDatatypeStatusCounterUpdated,
-                     base::Unretained(this))));
       type_status->SetString("state", DataTypeController::StateToString(
                                           dtc_iter->second->state()));
+      if (dtc_iter->second->state() !=
+          syncer::DataTypeController::NOT_RUNNING) {
+        // We use BindToCurrentSequence() to make sure observers (i.e.
+        // |type_debug_info_observers_|) are not notified synchronously, which
+        // the UI code (chrome://sync-internals) doesn't handle well.
+        dtc_iter->second->GetStatusCounters(
+            BindToCurrentSequence(base::BindRepeating(
+                &ProfileSyncService::OnDatatypeStatusCounterUpdated,
+                base::Unretained(this))));
+      }
     }
 
     result->Append(std::move(type_status));
@@ -1826,42 +1718,23 @@ std::unique_ptr<base::Value> ProfileSyncService::GetTypeStatusMap() {
   return std::move(result);
 }
 
-void ProfileSyncService::RequestAccessToken() {
-  // Only one active request at a time.
-  if (access_token_request_ != nullptr)
-    return;
-  request_access_token_retry_timer_.Stop();
-  OAuth2TokenService::ScopeSet oauth2_scopes;
-  oauth2_scopes.insert(signin_->GetSyncScopeToUse());
-
-  // Invalidate previous token, otherwise token service will return the same
-  // token again.
-  const std::string& account_id = signin_->GetAccountIdToUse();
-  if (!access_token_.empty()) {
-    oauth2_token_service_->InvalidateAccessToken(account_id, oauth2_scopes,
-                                                 access_token_);
-  }
-
-  access_token_.clear();
-
-  token_request_time_ = base::Time::Now();
-  token_receive_time_ = base::Time();
-  next_token_request_time_ = base::Time();
-  access_token_request_ =
-      oauth2_token_service_->StartRequest(account_id, oauth2_scopes, this);
-}
-
 void ProfileSyncService::SetEncryptionPassphrase(const std::string& passphrase,
                                                  PassphraseType type) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK(data_type_manager_);
+  DCHECK(data_type_manager_->IsNigoriEnabled());
   crypto_->SetEncryptionPassphrase(passphrase, type == EXPLICIT);
 }
 
 bool ProfileSyncService::SetDecryptionPassphrase(
     const std::string& passphrase) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (IsPassphraseRequired()) {
+    DCHECK(data_type_manager_);
+    DCHECK(data_type_manager_->IsNigoriEnabled());
+
     DVLOG(1) << "Setting passphrase for decryption.";
+
     bool result = crypto_->SetDecryptionPassphrase(passphrase);
     UMA_HISTOGRAM_BOOLEAN("Sync.PassphraseDecryptionSucceeded", result);
     return result;
@@ -1872,22 +1745,22 @@ bool ProfileSyncService::SetDecryptionPassphrase(
 }
 
 bool ProfileSyncService::IsEncryptEverythingAllowed() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return crypto_->IsEncryptEverythingAllowed();
 }
 
 void ProfileSyncService::SetEncryptEverythingAllowed(bool allowed) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   crypto_->SetEncryptEverythingAllowed(allowed);
 }
 
 void ProfileSyncService::EnableEncryptEverything() {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   crypto_->EnableEncryptEverything();
 }
 
 bool ProfileSyncService::encryption_pending() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   // We may be called during the setup process before we're
   // initialized (via IsEncryptedDatatypeEnabled and
   // IsPassphraseRequiredForDecryption).
@@ -1895,45 +1768,24 @@ bool ProfileSyncService::encryption_pending() const {
 }
 
 bool ProfileSyncService::IsEncryptEverythingEnabled() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return crypto_->IsEncryptEverythingEnabled();
 }
 
 syncer::ModelTypeSet ProfileSyncService::GetEncryptedDataTypes() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return crypto_->GetEncryptedDataTypes();
 }
 
 void ProfileSyncService::OnSyncManagedPrefChange(bool is_sync_managed) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (is_sync_managed) {
     StopImpl(CLEAR_DATA);
   } else {
     // Sync is no longer disabled by policy. Try starting it up if appropriate.
-    startup_controller_->TryStart();
+    DCHECK(!engine_);
+    startup_controller_->TryStart(IsSetupInProgress());
   }
-}
-
-void ProfileSyncService::GoogleSigninSucceeded(const std::string& account_id,
-                                               const std::string& username) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  if (!IsEngineInitialized() ||
-      GetAuthError().state() != GoogleServiceAuthError::NONE) {
-    // Track the fact that we're still waiting for auth to complete.
-    is_auth_in_progress_ = true;
-  }
-
-  if (oauth2_token_service_->RefreshTokenIsAvailable(account_id))
-    OnRefreshTokenAvailable(account_id);
-}
-
-void ProfileSyncService::GoogleSignedOut(const std::string& account_id,
-                                         const std::string& username) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  sync_disabled_by_admin_ = false;
-  UMA_HISTOGRAM_ENUMERATION("Sync.StopSource", syncer::SIGN_OUT,
-                            syncer::STOP_SOURCE_LIMIT);
-  RequestStop(CLEAR_DATA);
 }
 
 void ProfileSyncService::OnGaiaAccountsInCookieUpdated(
@@ -1946,8 +1798,8 @@ void ProfileSyncService::OnGaiaAccountsInCookieUpdated(
 void ProfileSyncService::OnGaiaAccountsInCookieUpdatedWithCallback(
     const std::vector<gaia::ListedAccount>& accounts,
     const base::Closure& callback) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  if (!IsEngineInitialized())
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  if (!engine_initialized_)
     return;
 
   bool cookie_jar_mismatch = HasCookieJarMismatch(accounts);
@@ -1960,7 +1812,7 @@ void ProfileSyncService::OnGaiaAccountsInCookieUpdatedWithCallback(
 
 bool ProfileSyncService::HasCookieJarMismatch(
     const std::vector<gaia::ListedAccount>& cookie_jar_accounts) {
-  std::string account_id = signin_->GetAccountIdToUse();
+  std::string account_id = GetAuthenticatedAccountInfo().account_id;
   // Iterate through list of accounts, looking for current sync account.
   for (const auto& account : cookie_jar_accounts) {
     if (account.id == account_id)
@@ -1970,26 +1822,26 @@ bool ProfileSyncService::HasCookieJarMismatch(
 }
 
 void ProfileSyncService::AddProtocolEventObserver(
-    ProtocolEventObserver* observer) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+    syncer::ProtocolEventObserver* observer) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   protocol_event_observers_.AddObserver(observer);
-  if (HasSyncingEngine()) {
+  if (engine_) {
     engine_->RequestBufferedProtocolEventsAndEnableForwarding();
   }
 }
 
 void ProfileSyncService::RemoveProtocolEventObserver(
-    ProtocolEventObserver* observer) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+    syncer::ProtocolEventObserver* observer) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   protocol_event_observers_.RemoveObserver(observer);
-  if (HasSyncingEngine() && !protocol_event_observers_.might_have_observers()) {
+  if (engine_ && !protocol_event_observers_.might_have_observers()) {
     engine_->DisableProtocolEventForwarding();
   }
 }
 
 void ProfileSyncService::AddTypeDebugInfoObserver(
     syncer::TypeDebugInfoObserver* type_debug_info_observer) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   type_debug_info_observers_.AddObserver(type_debug_info_observer);
   if (type_debug_info_observers_.might_have_observers() &&
       engine_initialized_) {
@@ -1999,7 +1851,7 @@ void ProfileSyncService::AddTypeDebugInfoObserver(
 
 void ProfileSyncService::RemoveTypeDebugInfoObserver(
     syncer::TypeDebugInfoObserver* type_debug_info_observer) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   type_debug_info_observers_.RemoveObserver(type_debug_info_observer);
   if (!type_debug_info_observers_.might_have_observers() &&
       engine_initialized_) {
@@ -2009,7 +1861,7 @@ void ProfileSyncService::RemoveTypeDebugInfoObserver(
 
 void ProfileSyncService::AddPreferenceProvider(
     syncer::SyncTypePreferenceProvider* provider) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(!HasPreferenceProvider(provider))
       << "Providers may only be added once!";
   preference_providers_.insert(provider);
@@ -2017,7 +1869,7 @@ void ProfileSyncService::AddPreferenceProvider(
 
 void ProfileSyncService::RemovePreferenceProvider(
     syncer::SyncTypePreferenceProvider* provider) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(HasPreferenceProvider(provider))
       << "Only providers that have been added before can be removed!";
   preference_providers_.erase(provider);
@@ -2025,8 +1877,19 @@ void ProfileSyncService::RemovePreferenceProvider(
 
 bool ProfileSyncService::HasPreferenceProvider(
     syncer::SyncTypePreferenceProvider* provider) const {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return preference_providers_.count(provider) > 0;
+}
+
+const syncer::LocalDeviceInfoProvider*
+ProfileSyncService::GetLocalDeviceInfoProvider() const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  return local_device_.get();
+}
+
+void ProfileSyncService::SetLocalDeviceInfoProviderForTest(
+    std::unique_ptr<syncer::LocalDeviceInfoProvider> provider) {
+  local_device_ = std::move(provider);
 }
 
 namespace {
@@ -2036,7 +1899,7 @@ class GetAllNodesRequestHelper
  public:
   GetAllNodesRequestHelper(
       syncer::ModelTypeSet requested_types,
-      const base::Callback<void(std::unique_ptr<base::ListValue>)>& callback);
+      base::OnceCallback<void(std::unique_ptr<base::ListValue>)> callback);
 
   void OnReceivedNodesForType(const syncer::ModelType type,
                               std::unique_ptr<base::ListValue> node_list);
@@ -2047,18 +1910,18 @@ class GetAllNodesRequestHelper
 
   std::unique_ptr<base::ListValue> result_accumulator_;
   syncer::ModelTypeSet awaiting_types_;
-  base::Callback<void(std::unique_ptr<base::ListValue>)> callback_;
-  base::ThreadChecker thread_checker_;
+  base::OnceCallback<void(std::unique_ptr<base::ListValue>)> callback_;
+  SEQUENCE_CHECKER(sequence_checker_);
 
   DISALLOW_COPY_AND_ASSIGN(GetAllNodesRequestHelper);
 };
 
 GetAllNodesRequestHelper::GetAllNodesRequestHelper(
     syncer::ModelTypeSet requested_types,
-    const base::Callback<void(std::unique_ptr<base::ListValue>)>& callback)
-    : result_accumulator_(new base::ListValue()),
+    base::OnceCallback<void(std::unique_ptr<base::ListValue>)> callback)
+    : result_accumulator_(std::make_unique<base::ListValue>()),
       awaiting_types_(requested_types),
-      callback_(callback) {}
+      callback_(std::move(callback)) {}
 
 GetAllNodesRequestHelper::~GetAllNodesRequestHelper() {
   if (!awaiting_types_.Empty()) {
@@ -2073,20 +1936,20 @@ GetAllNodesRequestHelper::~GetAllNodesRequestHelper() {
 void GetAllNodesRequestHelper::OnReceivedNodesForType(
     const syncer::ModelType type,
     std::unique_ptr<base::ListValue> node_list) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   // Add these results to our list.
-  std::unique_ptr<base::DictionaryValue> type_dict(new base::DictionaryValue());
-  type_dict->SetString("type", ModelTypeToString(type));
-  type_dict->Set("nodes", std::move(node_list));
-  result_accumulator_->Append(std::move(type_dict));
+  base::DictionaryValue type_dict;
+  type_dict.SetKey("type", base::Value(ModelTypeToString(type)));
+  type_dict.SetKey("nodes",
+                   base::Value::FromUniquePtrValue(std::move(node_list)));
+  result_accumulator_->GetList().push_back(std::move(type_dict));
 
   // Remember that this part of the request is satisfied.
   awaiting_types_.Remove(type);
 
   if (awaiting_types_.Empty()) {
-    callback_.Run(std::move(result_accumulator_));
-    callback_.Reset();
+    std::move(callback_).Run(std::move(result_accumulator_));
   }
 }
 
@@ -2094,42 +1957,57 @@ void GetAllNodesRequestHelper::OnReceivedNodesForType(
 
 void ProfileSyncService::GetAllNodes(
     const base::Callback<void(std::unique_ptr<base::ListValue>)>& callback) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  ModelTypeSet all_types = GetActiveDataTypes();
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  // If the engine isn't initialized yet, then there are no nodes to return.
+  if (!engine_initialized_) {
+    callback.Run(std::make_unique<base::ListValue>());
+    return;
+  }
+
+  syncer::ModelTypeSet all_types = GetActiveDataTypes();
   all_types.PutAll(syncer::ControlTypes());
   scoped_refptr<GetAllNodesRequestHelper> helper =
       new GetAllNodesRequestHelper(all_types, callback);
 
-  if (!engine_initialized_) {
-    // If there's no engine available to fulfill the request, handle it here.
-    for (ModelTypeSet::Iterator it = all_types.First(); it.Good(); it.Inc()) {
-      helper->OnReceivedNodesForType(it.Get(),
-                                     std::make_unique<base::ListValue>());
-    }
-    return;
-  }
-
-  for (ModelTypeSet::Iterator it = all_types.First(); it.Good(); it.Inc()) {
-    const auto& dtc_iter = data_type_controllers_.find(it.Get());
+  for (syncer::ModelType type : all_types) {
+    const auto dtc_iter = data_type_controllers_.find(type);
     if (dtc_iter != data_type_controllers_.end()) {
-      dtc_iter->second->GetAllNodes(base::Bind(
-          &GetAllNodesRequestHelper::OnReceivedNodesForType, helper));
+      if (dtc_iter->second->state() ==
+          syncer::DataTypeController::NOT_RUNNING) {
+        // In the NOT_RUNNING state it's not allowed to call GetAllNodes on the
+        // DataTypeController, so just return an empty result.
+        // This can happen e.g. if we're waiting for a custom passphrase to be
+        // entered - the data types are already considered active in this case,
+        // but their DataTypeControllers are still NOT_RUNNING.
+        helper->OnReceivedNodesForType(type,
+                                       std::make_unique<base::ListValue>());
+      } else {
+        dtc_iter->second->GetAllNodes(base::BindRepeating(
+            &GetAllNodesRequestHelper::OnReceivedNodesForType, helper));
+      }
     } else {
-      // Control Types
+      // Control Types.
       helper->OnReceivedNodesForType(
-          it.Get(),
+          type,
           syncer::DirectoryDataTypeController::GetAllNodesForTypeFromDirectory(
-              it.Get(), GetUserShare()->directory.get()));
+              type, GetUserShare()->directory.get()));
     }
   }
 }
 
-syncer::GlobalIdMapper* ProfileSyncService::GetGlobalIdMapper() const {
-  return sessions_sync_manager_->GetGlobalIdMapper();
+AccountInfo ProfileSyncService::GetAuthenticatedAccountInfo() const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  return auth_manager_->GetActiveAccountInfo().account_info;
+}
+
+bool ProfileSyncService::IsAuthenticatedAccountPrimary() const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  return auth_manager_->GetActiveAccountInfo().is_primary;
 }
 
 base::WeakPtr<syncer::JsController> ProfileSyncService::GetJsController() {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return sync_js_controller_.AsWeakPtr();
 }
 
@@ -2145,51 +2023,66 @@ bool ProfileSyncService::IsSyncAllowedByFlag() {
 }
 
 bool ProfileSyncService::IsSyncAllowedByPlatform() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return platform_sync_allowed_provider_.is_null() ||
          platform_sync_allowed_provider_.Run();
 }
 
-bool ProfileSyncService::IsManaged() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  return sync_prefs_.IsManaged() || sync_disabled_by_admin_;
-}
-
 void ProfileSyncService::RequestStop(SyncStopDataFate data_fate) {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   sync_prefs_.SetSyncRequested(false);
   StopImpl(data_fate);
-}
 
-bool ProfileSyncService::IsSyncRequested() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  // When local sync is on sync should be considered requsted or otherwise it
-  // will not resume after the policy or the flag has been removed.
-  return sync_prefs_.IsSyncRequested() || sync_prefs_.IsLocalSyncEnabled();
+  // TODO(crbug.com/856179): Evaluate whether we can get away without a full
+  // restart (i.e. just reconfigure plus whatever cleanup is necessary).
+  // Especially in the CLEAR_DATA case, StopImpl does a lot of cleanup that
+  // might still be required.
+  if (IsStandaloneTransportEnabled()) {
+    startup_controller_->TryStart(/*force_immediate=*/false);
+  }
 }
 
 void ProfileSyncService::RequestStart() {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  if (!IsSyncAllowed()) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  if (HasDisableReason(DISABLE_REASON_PLATFORM_OVERRIDE) ||
+      HasDisableReason(DISABLE_REASON_ENTERPRISE_POLICY)) {
     // Sync cannot be requested if it's not allowed.
     return;
   }
   DCHECK(sync_client_);
-  if (!IsSyncRequested()) {
+  if (!sync_prefs_.IsSyncRequested()) {
     sync_prefs_.SetSyncRequested(true);
     NotifyObservers();
   }
-  startup_controller_->TryStartImmediately();
+  // If Sync-the-transport was already running, just reconfigure.
+  if (IsStandaloneTransportEnabled() && engine_initialized_) {
+    ReconfigureDatatypeManager();
+  } else {
+    startup_controller_->TryStart(/*force_immediate=*/true);
+  }
 }
 
 void ProfileSyncService::ReconfigureDatatypeManager() {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   // If we haven't initialized yet, don't configure the DTM as it could cause
   // association to start before a Directory has even been created.
   if (engine_initialized_) {
     DCHECK(engine_);
-    ConfigureDataTypeManager();
-  } else if (HasUnrecoverableError()) {
+    // Don't configure datatypes if the setup UI is still on the screen - this
+    // is to help multi-screen setting UIs (like iOS) where they don't want to
+    // start syncing data until the user is done configuring encryption options,
+    // etc. ReconfigureDatatypeManager() will get called again once the last
+    // SyncSetupInProgressHandle is released.
+    if (CanConfigureDataTypes()) {
+      ConfigureDataTypeManager(syncer::CONFIGURE_REASON_RECONFIGURATION);
+    } else {
+      DVLOG(0) << "ConfigureDataTypeManager not invoked because datatypes "
+               << "cannot be configured now";
+      // If we can't configure the data type manager yet, we should still notify
+      // observers. This is to support multiple setup UIs being open at once.
+      NotifyObservers();
+    }
+  } else if (HasDisableReason(DISABLE_REASON_UNRECOVERABLE_ERROR)) {
     // There is nothing more to configure. So inform the listeners,
     NotifyObservers();
 
@@ -2204,71 +2097,60 @@ void ProfileSyncService::ReconfigureDatatypeManager() {
 syncer::ModelTypeSet ProfileSyncService::GetDataTypesFromPreferenceProviders()
     const {
   syncer::ModelTypeSet types;
-  for (std::set<syncer::SyncTypePreferenceProvider*>::const_iterator it =
-           preference_providers_.begin();
-       it != preference_providers_.end(); ++it) {
-    types.PutAll((*it)->GetPreferredDataTypes());
+  for (const syncer::SyncTypePreferenceProvider* provider :
+       preference_providers_) {
+    types.PutAll(provider->GetPreferredDataTypes());
   }
   return types;
 }
 
-const DataTypeStatusTable& ProfileSyncService::data_type_status_table() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  return data_type_status_table_;
-}
-
-void ProfileSyncService::OnInternalUnrecoverableError(
-    const base::Location& from_here,
-    const std::string& message,
-    bool delete_sync_database,
-    UnrecoverableErrorReason reason) {
-  DCHECK(!HasUnrecoverableError());
-  unrecoverable_error_reason_ = reason;
-  OnUnrecoverableErrorImpl(from_here, message, delete_sync_database);
-}
-
 bool ProfileSyncService::IsRetryingAccessTokenFetchForTest() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  return request_access_token_retry_timer_.IsRunning();
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  return auth_manager_->IsRetryingAccessTokenFetchForTest();
 }
 
 std::string ProfileSyncService::GetAccessTokenForTest() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  return access_token_;
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  return auth_manager_->access_token();
 }
 
-syncer::SyncableService* ProfileSyncService::GetSessionsSyncableService() {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  return sessions_sync_manager_.get();
+base::WeakPtr<syncer::ModelTypeControllerDelegate>
+ProfileSyncService::GetDeviceInfoSyncControllerDelegate() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  return device_info_sync_bridge_->change_processor()->GetControllerDelegate();
 }
 
-syncer::ModelTypeSyncBridge* ProfileSyncService::GetDeviceInfoSyncBridge() {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  return device_info_sync_bridge_.get();
-}
-
-syncer::SyncService::SyncTokenStatus ProfileSyncService::GetSyncTokenStatus()
-    const {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  SyncTokenStatus status;
-  status.connection_status_update_time = connection_status_update_time_;
-  status.connection_status = connection_status_;
-  status.token_request_time = token_request_time_;
-  status.token_receive_time = token_receive_time_;
-  status.last_get_token_error = last_get_token_error_;
-  if (request_access_token_retry_timer_.IsRunning())
-    status.next_token_request_time = next_token_request_time_;
-  return status;
+syncer::SyncTokenStatus ProfileSyncService::GetSyncTokenStatus() const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  return auth_manager_->GetSyncTokenStatus();
 }
 
 void ProfileSyncService::OverrideNetworkResourcesForTest(
     std::unique_ptr<syncer::NetworkResources> network_resources) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  network_resources_ = std::move(network_resources);
-}
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  // If the engine has already been created, then it holds a pointer to the
+  // previous |network_resources_| which will become invalid. In that case, shut
+  // down and recreate the engine, so that it gets the correct (overridden)
+  // NetworkResources.
+  // This is a horrible hack; the proper fix would be to inject the
+  // NetworkResources in the ctor instead of adding them retroactively.
+  bool restart = false;
+  if (engine_) {
+    StopImpl(KEEP_DATA);
+    restart = true;
+  }
+  DCHECK(!engine_);
 
-bool ProfileSyncService::HasSyncingEngine() const {
-  return engine_ != nullptr;
+  // If a previous request (with the wrong network resources) already failed,
+  // the next one would be backed off, which breaks tests. So reset the backoff.
+  auth_manager_->ResetRequestAccessTokenBackoffForTest();
+
+  network_resources_ = std::move(network_resources);
+
+  if (restart) {
+    RequestStart();
+    DCHECK(engine_);
+  }
 }
 
 void ProfileSyncService::UpdateFirstSyncTimePref() {
@@ -2281,20 +2163,21 @@ void ProfileSyncService::UpdateFirstSyncTimePref() {
 }
 
 void ProfileSyncService::FlushDirectory() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   // engine_initialized_ implies engine_ isn't null and the manager exists.
   // If sync is not initialized yet, we fail silently.
   if (engine_initialized_)
     engine_->FlushDirectory();
 }
 
-base::FilePath ProfileSyncService::GetDirectoryPathForTest() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  return FormatSyncDataPath(base_directory_);
+void ProfileSyncService::NotifyForeignSessionUpdated() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  for (auto& observer : observers_)
+    observer.OnForeignSessionUpdated(this);
 }
 
 base::MessageLoop* ProfileSyncService::GetSyncLoopForTest() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return sync_thread_ ? sync_thread_->message_loop() : nullptr;
 }
 
@@ -2312,8 +2195,9 @@ void ProfileSyncService::RemoveClientFromServer() const {
   if (user_share && user_share->directory.get()) {
     birthday = user_share->directory->store_birthday();
   }
-  if (!access_token_.empty() && !cache_guid.empty() && !birthday.empty()) {
-    sync_stopped_reporter_->ReportSyncStopped(access_token_, cache_guid,
+  const std::string& access_token = auth_manager_->access_token();
+  if (!access_token.empty() && !cache_guid.empty() && !birthday.empty()) {
+    sync_stopped_reporter_->ReportSyncStopped(access_token, cache_guid,
                                               birthday);
   }
 }
@@ -2333,11 +2217,11 @@ void ProfileSyncService::ReportPreviousSessionMemoryWarningCount() {
   if (-1 != warning_received) {
     // -1 means it is new client.
     if (!sync_prefs_.DidSyncShutdownCleanly()) {
-      UMA_HISTOGRAM_COUNTS("Sync.MemoryPressureWarningBeforeUncleanShutdown",
-                           warning_received);
+      UMA_HISTOGRAM_COUNTS_1M("Sync.MemoryPressureWarningBeforeUncleanShutdown",
+                              warning_received);
     } else {
-      UMA_HISTOGRAM_COUNTS("Sync.MemoryPressureWarningBeforeCleanShutdown",
-                           warning_received);
+      UMA_HISTOGRAM_COUNTS_1M("Sync.MemoryPressureWarningBeforeCleanShutdown",
+                              warning_received);
     }
   }
   sync_prefs_.SetMemoryPressureWarningCount(0);
@@ -2347,27 +2231,31 @@ void ProfileSyncService::ReportPreviousSessionMemoryWarningCount() {
 }
 
 void ProfileSyncService::RecordMemoryUsageHistograms() {
-  ModelTypeSet active_types = GetActiveDataTypes();
-  for (ModelTypeSet::Iterator type_it = active_types.First(); type_it.Good();
-       type_it.Inc()) {
-    auto dtc_it = data_type_controllers_.find(type_it.Get());
-    if (dtc_it != data_type_controllers_.end())
-      dtc_it->second->RecordMemoryUsageHistogram();
+  syncer::ModelTypeSet active_types = GetActiveDataTypes();
+  for (syncer::ModelType type : active_types) {
+    auto dtc_it = data_type_controllers_.find(type);
+    if (dtc_it != data_type_controllers_.end() &&
+        dtc_it->second->state() != syncer::DataTypeController::NOT_RUNNING) {
+      // It's possible that a data type is considered active, but its
+      // DataTypeController is still NOT_RUNNING, in the case where we're
+      // waiting for a custom passphrase.
+      dtc_it->second->RecordMemoryUsageAndCountsHistograms();
+    }
   }
 }
 
 const GURL& ProfileSyncService::sync_service_url() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return sync_service_url_;
 }
 
 std::string ProfileSyncService::unrecoverable_error_message() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return unrecoverable_error_message_;
 }
 
 base::Location ProfileSyncService::unrecoverable_error_location() const {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return unrecoverable_error_location_;
 }
 
@@ -2378,11 +2266,22 @@ void ProfileSyncService::OnSetupInProgressHandleDestroyed() {
   if (--outstanding_setup_in_progress_handles_ != 0)
     return;
 
-  DCHECK(startup_controller_->IsSetupInProgress());
-  startup_controller_->SetSetupInProgress(false);
-
-  if (IsEngineInitialized())
+  if (engine_initialized_)
     ReconfigureDatatypeManager();
+
+  NotifyObservers();
+}
+
+void ProfileSyncService::ReconfigureDueToPassphrase(
+    syncer::ConfigureReason reason) {
+  if (CanConfigureDataTypes()) {
+    DCHECK(data_type_manager_->IsNigoriEnabled());
+    ConfigureDataTypeManager(reason);
+  }
+  // Notify observers that the passphrase status may have changed, regardless of
+  // whether we triggered configuration or not. This is needed for the
+  // IsSetupInProgress() case where the UI needs to be updated to reflect that
+  // the passphrase was accepted (https://crbug.com/870256).
   NotifyObservers();
 }
 

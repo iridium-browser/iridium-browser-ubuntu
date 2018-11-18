@@ -46,7 +46,7 @@ void AppBindings::GetInstallState(
     const v8::FunctionCallbackInfo<v8::Value>& args) {
   CHECK_EQ(1, args.Length());
   CHECK(args[0]->IsInt32());
-  int callback_id = args[0]->Int32Value();
+  int callback_id = args[0].As<v8::Int32>()->Value();
 
   app_core_.GetInstallState(
       context(), base::BindOnce(&AppBindings::OnAppInstallStateResponse,
@@ -55,8 +55,11 @@ void AppBindings::GetInstallState(
 
 void AppBindings::GetRunningState(
     const v8::FunctionCallbackInfo<v8::Value>& args) {
-  args.GetReturnValue().Set(v8::String::NewFromUtf8(
-      context()->isolate(), app_core_.GetRunningState(context())));
+  args.GetReturnValue().Set(
+      v8::String::NewFromUtf8(context()->isolate(),
+                              app_core_.GetRunningState(context()),
+                              v8::NewStringType::kInternalized)
+          .ToLocalChecked());
 }
 
 void AppBindings::OnAppInstallStateResponse(int callback_id,
@@ -68,9 +71,10 @@ void AppBindings::OnAppInstallStateResponse(int callback_id,
   v8::HandleScope handle_scope(isolate);
   v8::Context::Scope context_scope(context()->v8_context());
   v8::Local<v8::Value> argv[] = {
-    v8::String::NewFromUtf8(isolate, state.c_str()),
-    v8::Integer::New(isolate, callback_id)
-  };
+      v8::String::NewFromUtf8(isolate, state.c_str(),
+                              v8::NewStringType::kNormal)
+          .ToLocalChecked(),
+      v8::Integer::New(isolate, callback_id)};
   context()->module_system()->CallModuleMethodSafe(
       "app", "onInstallStateResponse", arraysize(argv), argv);
 }

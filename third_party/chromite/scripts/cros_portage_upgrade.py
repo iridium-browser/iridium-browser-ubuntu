@@ -10,7 +10,6 @@ from __future__ import print_function
 import filecmp
 import fnmatch
 import os
-import parallel_emerge
 import portage  # pylint: disable=import-error
 import re
 import shutil
@@ -22,11 +21,10 @@ from chromite.lib import commandline
 from chromite.lib import cros_build_lib
 from chromite.lib import osutils
 from chromite.lib import operation
+from chromite.lib import portage_util
 from chromite.lib import upgrade_table as utable
 from chromite.scripts import merge_package_status as mps
-
-
-site_config = config_lib.GetConfig()
+from chromite.scripts import parallel_emerge
 
 
 oper = operation.Operation('cros_portage_upgrade')
@@ -36,7 +34,7 @@ WORLD_TARGET = 'world'
 UPGRADED = 'Upgraded'
 
 # Arches we care about -- we actively develop/support/ship.
-STANDARD_BOARD_ARCHS = set(('amd64', 'arm', 'x86'))
+STANDARD_BOARD_ARCHS = set(('amd64', 'arm'))
 
 # Files we do not include in our upgrades by convention.
 BLACKLISTED_FILES = set(['Manifest', 'ChangeLog*'])
@@ -81,8 +79,7 @@ class PInfo(object):
 
   def __eq__(self, other):
     """Equality support.  Used in unittests."""
-
-    if type(self) != type(other):
+    if not isinstance(other, type(self)):
       return False
 
     no_attr = object()
@@ -101,7 +98,7 @@ class Upgrader(object):
   """A class to perform various tasks related to updating Portage packages."""
 
   PORTAGE_GIT_URL = '%s/external/github.com/gentoo/gentoo.git' % (
-      site_config.params.EXTERNAL_GOB_URL)
+      config_lib.GetSiteParams().EXTERNAL_GOB_URL)
   GIT_REMOTE = 'origin'
   GIT_BRANCH = 'master'
   GIT_REMOTE_BRANCH = '%s/%s' % (GIT_REMOTE, GIT_BRANCH)
@@ -283,13 +280,8 @@ class Upgrader(object):
       return 'amd64'
 
     # Leverage Portage 'portageq' tool to do this.
-    cmd = ['portageq-%s' % board, 'envvar', 'ARCH']
-    cmd_result = cros_build_lib.RunCommand(
-        cmd, print_cmd=False, redirect_stdout=True)
-    if cmd_result.returncode == 0:
-      return cmd_result.output.strip()
-    else:
-      return None
+    return portage_util.PortageqEnvvar('ARCH', board=board,
+                                       allow_undefined=True)
 
   @staticmethod
   def _GetPreOrderDepGraphPackage(deps_graph, package, pkglist, visited):
@@ -539,7 +531,7 @@ class Upgrader(object):
     for line in output.split('\n'):
       mask = line.split('|')[0]
       if len(mask) == 2:
-        pinfo.upgraded_unmasked = 'M' != mask[0]
+        pinfo.upgraded_unmasked = mask[0] != 'M'
         return
 
     raise RuntimeError('Unable to determine whether %s is stable from equery:\n'
@@ -671,10 +663,7 @@ class Upgrader(object):
     """Return True if package upgrade is already staged."""
     ebuild_path = Upgrader._GetEbuildPathFromCpv(upstream_cpv)
     status = self._stable_repo_status.get(ebuild_path, None)
-    if status and 'A' == status:
-      return True
-
-    return False
+    return status == 'A'
 
   def _AnyChangesStaged(self):
     """Return True if any local changes are staged in stable repo."""
@@ -1396,7 +1385,7 @@ class Upgrader(object):
       dbapi = self._GetPortageDBAPI()
       ebuild_path = dbapi.findname2(pinfo.cpv)[0]
       if not ebuild_path:
-        # This has only happened once.  See crosbug.com/26385.
+        # This has only happened once.  See https://crbug.com/209254.
         # In that case, this meant the package, while in the deps graph,
         # was actually to be uninstalled.  How is that possible?  The
         # package was newly added to package.provided.  So skip it.

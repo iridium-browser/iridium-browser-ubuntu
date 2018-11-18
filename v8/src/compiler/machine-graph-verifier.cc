@@ -65,6 +65,16 @@ class MachineRepresentationInferrer {
         auto call_descriptor = CallDescriptorOf(input->op());
         return call_descriptor->GetReturnType(index).representation();
       }
+      case IrOpcode::kWord32AtomicPairLoad:
+      case IrOpcode::kWord32AtomicPairAdd:
+      case IrOpcode::kWord32AtomicPairSub:
+      case IrOpcode::kWord32AtomicPairAnd:
+      case IrOpcode::kWord32AtomicPairOr:
+      case IrOpcode::kWord32AtomicPairXor:
+      case IrOpcode::kWord32AtomicPairExchange:
+      case IrOpcode::kWord32AtomicPairCompareExchange:
+        CHECK_LE(index, static_cast<size_t>(1));
+        return MachineRepresentation::kWord32;
       default:
         return MachineRepresentation::kNone;
     }
@@ -111,6 +121,7 @@ class MachineRepresentationInferrer {
             representation_vector_[node->id()] = MachineRepresentation::kNone;
             break;
           case IrOpcode::kWord32AtomicLoad:
+          case IrOpcode::kWord64AtomicLoad:
           case IrOpcode::kLoad:
           case IrOpcode::kProtectedLoad:
           case IrOpcode::kPoisonedLoad:
@@ -120,7 +131,6 @@ class MachineRepresentationInferrer {
           case IrOpcode::kLoadStackPointer:
           case IrOpcode::kLoadFramePointer:
           case IrOpcode::kLoadParentFramePointer:
-          case IrOpcode::kLoadRootsPointer:
             representation_vector_[node->id()] =
                 MachineType::PointerRepresentation();
             break;
@@ -145,8 +155,20 @@ class MachineRepresentationInferrer {
             break;
           }
           case IrOpcode::kWord32AtomicStore:
+          case IrOpcode::kWord64AtomicStore:
             representation_vector_[node->id()] =
                 PromoteRepresentation(AtomicStoreRepresentationOf(node->op()));
+            break;
+          case IrOpcode::kWord32AtomicPairLoad:
+          case IrOpcode::kWord32AtomicPairStore:
+          case IrOpcode::kWord32AtomicPairAdd:
+          case IrOpcode::kWord32AtomicPairSub:
+          case IrOpcode::kWord32AtomicPairAnd:
+          case IrOpcode::kWord32AtomicPairOr:
+          case IrOpcode::kWord32AtomicPairXor:
+          case IrOpcode::kWord32AtomicPairExchange:
+          case IrOpcode::kWord32AtomicPairCompareExchange:
+            representation_vector_[node->id()] = MachineRepresentation::kWord32;
             break;
           case IrOpcode::kWord32AtomicExchange:
           case IrOpcode::kWord32AtomicCompareExchange:
@@ -155,8 +177,15 @@ class MachineRepresentationInferrer {
           case IrOpcode::kWord32AtomicAnd:
           case IrOpcode::kWord32AtomicOr:
           case IrOpcode::kWord32AtomicXor:
+          case IrOpcode::kWord64AtomicExchange:
+          case IrOpcode::kWord64AtomicCompareExchange:
+          case IrOpcode::kWord64AtomicAdd:
+          case IrOpcode::kWord64AtomicSub:
+          case IrOpcode::kWord64AtomicAnd:
+          case IrOpcode::kWord64AtomicOr:
+          case IrOpcode::kWord64AtomicXor:
             representation_vector_[node->id()] = PromoteRepresentation(
-                AtomicOpRepresentationOf(node->op()).representation());
+                AtomicOpType(node->op()).representation());
             break;
           case IrOpcode::kStore:
           case IrOpcode::kProtectedStore:
@@ -169,21 +198,27 @@ class MachineRepresentationInferrer {
             break;
           case IrOpcode::kHeapConstant:
           case IrOpcode::kNumberConstant:
+          case IrOpcode::kDelayedStringConstant:
           case IrOpcode::kChangeBitToTagged:
           case IrOpcode::kIfException:
           case IrOpcode::kOsrValue:
           case IrOpcode::kChangeInt32ToTagged:
           case IrOpcode::kChangeUint32ToTagged:
           case IrOpcode::kBitcastWordToTagged:
-          case IrOpcode::kPoisonOnSpeculationTagged:
+          case IrOpcode::kTaggedPoisonOnSpeculation:
             representation_vector_[node->id()] = MachineRepresentation::kTagged;
+            break;
+          case IrOpcode::kWord32PoisonOnSpeculation:
+            representation_vector_[node->id()] = MachineRepresentation::kWord32;
+            break;
+          case IrOpcode::kWord64PoisonOnSpeculation:
+            representation_vector_[node->id()] = MachineRepresentation::kWord64;
             break;
           case IrOpcode::kExternalConstant:
             representation_vector_[node->id()] =
                 MachineType::PointerRepresentation();
             break;
           case IrOpcode::kBitcastTaggedToWord:
-          case IrOpcode::kPoisonOnSpeculationWord:
             representation_vector_[node->id()] =
                 MachineType::PointerRepresentation();
             break;
@@ -248,6 +283,7 @@ class MachineRepresentationInferrer {
           case IrOpcode::kRoundUint32ToFloat32:
           case IrOpcode::kRoundInt64ToFloat32:
           case IrOpcode::kRoundUint64ToFloat32:
+          case IrOpcode::kBitcastInt32ToFloat32:
           case IrOpcode::kFloat32Constant:
           case IrOpcode::kTruncateFloat64ToFloat32:
             MACHINE_FLOAT32_BINOP_LIST(LABEL)
@@ -261,6 +297,8 @@ class MachineRepresentationInferrer {
           case IrOpcode::kChangeFloat32ToFloat64:
           case IrOpcode::kChangeInt32ToFloat64:
           case IrOpcode::kChangeUint32ToFloat64:
+          case IrOpcode::kFloat64InsertLowWord32:
+          case IrOpcode::kFloat64InsertHighWord32:
           case IrOpcode::kFloat64Constant:
           case IrOpcode::kFloat64SilenceNaN:
             MACHINE_FLOAT64_BINOP_LIST(LABEL)
@@ -334,12 +372,19 @@ class MachineRepresentationChecker {
             break;
           case IrOpcode::kBitcastWordToTagged:
           case IrOpcode::kBitcastWordToTaggedSigned:
-          case IrOpcode::kPoisonOnSpeculationWord:
             CheckValueInputRepresentationIs(
                 node, 0, MachineType::PointerRepresentation());
             break;
+          case IrOpcode::kWord32PoisonOnSpeculation:
+            CheckValueInputRepresentationIs(node, 0,
+                                            MachineRepresentation::kWord32);
+            break;
+          case IrOpcode::kWord64PoisonOnSpeculation:
+            CheckValueInputRepresentationIs(node, 0,
+                                            MachineRepresentation::kWord64);
+            break;
           case IrOpcode::kBitcastTaggedToWord:
-          case IrOpcode::kPoisonOnSpeculationTagged:
+          case IrOpcode::kTaggedPoisonOnSpeculation:
             CheckValueInputIsTagged(node, 0);
             break;
           case IrOpcode::kTruncateFloat64ToWord32:
@@ -395,6 +440,7 @@ class MachineRepresentationChecker {
           case IrOpcode::kChangeUint32ToFloat64:
           case IrOpcode::kRoundInt32ToFloat32:
           case IrOpcode::kRoundUint32ToFloat32:
+          case IrOpcode::kBitcastInt32ToFloat32:
           case IrOpcode::kChangeInt32ToInt64:
           case IrOpcode::kChangeUint32ToUint64:
             MACHINE_UNOP_32_LIST(LABEL) { CheckValueInputForInt32Op(node, 0); }
@@ -458,6 +504,11 @@ class MachineRepresentationChecker {
             }
             break;
 #undef LABEL
+          case IrOpcode::kFloat64InsertLowWord32:
+          case IrOpcode::kFloat64InsertHighWord32:
+            CheckValueInputForFloat64Op(node, 0);
+            CheckValueInputForInt32Op(node, 1);
+            break;
           case IrOpcode::kParameter:
           case IrOpcode::kProjection:
             break;
@@ -466,11 +517,23 @@ class MachineRepresentationChecker {
             break;
           case IrOpcode::kLoad:
           case IrOpcode::kWord32AtomicLoad:
+          case IrOpcode::kWord32AtomicPairLoad:
+          case IrOpcode::kWord64AtomicLoad:
           case IrOpcode::kPoisonedLoad:
             CheckValueInputIsTaggedOrPointer(node, 0);
             CheckValueInputRepresentationIs(
                 node, 1, MachineType::PointerRepresentation());
             break;
+          case IrOpcode::kWord32AtomicPairAdd:
+          case IrOpcode::kWord32AtomicPairSub:
+          case IrOpcode::kWord32AtomicPairAnd:
+          case IrOpcode::kWord32AtomicPairOr:
+          case IrOpcode::kWord32AtomicPairXor:
+          case IrOpcode::kWord32AtomicPairStore:
+          case IrOpcode::kWord32AtomicPairExchange:
+            CheckValueInputRepresentationIs(node, 3,
+                                            MachineRepresentation::kWord32);
+            V8_FALLTHROUGH;
           case IrOpcode::kStore:
           case IrOpcode::kWord32AtomicStore:
           case IrOpcode::kWord32AtomicExchange:
@@ -479,6 +542,13 @@ class MachineRepresentationChecker {
           case IrOpcode::kWord32AtomicAnd:
           case IrOpcode::kWord32AtomicOr:
           case IrOpcode::kWord32AtomicXor:
+          case IrOpcode::kWord64AtomicStore:
+          case IrOpcode::kWord64AtomicExchange:
+          case IrOpcode::kWord64AtomicAdd:
+          case IrOpcode::kWord64AtomicSub:
+          case IrOpcode::kWord64AtomicAnd:
+          case IrOpcode::kWord64AtomicOr:
+          case IrOpcode::kWord64AtomicXor:
             CheckValueInputIsTaggedOrPointer(node, 0);
             CheckValueInputRepresentationIs(
                 node, 1, MachineType::PointerRepresentation());
@@ -493,7 +563,14 @@ class MachineRepresentationChecker {
                     node, 2, inferrer_->GetRepresentation(node));
             }
             break;
+          case IrOpcode::kWord32AtomicPairCompareExchange:
+            CheckValueInputRepresentationIs(node, 4,
+                                            MachineRepresentation::kWord32);
+            CheckValueInputRepresentationIs(node, 5,
+                                            MachineRepresentation::kWord32);
+            V8_FALLTHROUGH;
           case IrOpcode::kWord32AtomicCompareExchange:
+          case IrOpcode::kWord64AtomicCompareExchange:
             CheckValueInputIsTaggedOrPointer(node, 0);
             CheckValueInputRepresentationIs(
                 node, 1, MachineType::PointerRepresentation());
@@ -762,7 +839,8 @@ class MachineRepresentationChecker {
           str << std::endl;
         }
         str << " * input " << i << " (" << input->id() << ":" << *input->op()
-            << ") doesn't have a " << expected_input_type << " representation.";
+            << ") has a " << input_type
+            << " representation (expected: " << expected_input_type << ").";
       }
     }
     if (should_log_error) {

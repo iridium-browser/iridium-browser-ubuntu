@@ -10,9 +10,9 @@
 #include <vector>
 
 #include "build/build_config.h"
-#include "components/viz/common/quads/shared_bitmap.h"
 #include "components/viz/common/resources/resource_format.h"
 #include "components/viz/common/resources/resource_id.h"
+#include "components/viz/common/resources/shared_bitmap.h"
 #include "components/viz/common/viz_common_export.h"
 #include "gpu/command_buffer/common/mailbox_holder.h"
 #include "ui/gfx/buffer_types.h"
@@ -35,13 +35,11 @@ struct VIZ_COMMON_EXPORT TransferableResource {
       const std::vector<TransferableResource>& input);
 
   static TransferableResource MakeSoftware(const SharedBitmapId& id,
-                                           uint32_t sequence_number,
                                            const gfx::Size& size,
                                            ResourceFormat format) {
     TransferableResource r;
     r.is_software = true;
     r.mailbox_holder.mailbox = id;
-    r.shared_bitmap_sequence_number = sequence_number;
     r.size = size;
     r.format = format;
     return r;
@@ -99,11 +97,6 @@ struct VIZ_COMMON_EXPORT TransferableResource {
   // and must be RGBA_8888 always for software resources.
   ResourceFormat format = RGBA_8888;
 
-  // Normally derrived from the |format|, but may differ for some resource
-  // producers. This is the format of the underlying texture backing for gpu
-  // resources, needed for using the backing as an overlay.
-  gfx::BufferFormat buffer_format = gfx::BufferFormat::RGBA_8888;
-
   // The |mailbox| inside here holds the gpu::Mailbox when this is a gpu
   // resource, or the SharedBitmapId when it is a software resource.
   // The |texture_target| and sync_token| inside here only apply for gpu
@@ -112,10 +105,6 @@ struct VIZ_COMMON_EXPORT TransferableResource {
 
   // The color space of the pixels in the resource.
   gfx::ColorSpace color_space;
-
-  // Sequence number for the shared bitmap in software resources, used for
-  // synchronization to not display the bitmap before it is ready.
-  uint32_t shared_bitmap_sequence_number = 0;
 
   // A gpu resource may be possible to use directly in an overlay if this is
   // true.
@@ -145,12 +134,11 @@ struct VIZ_COMMON_EXPORT TransferableResource {
 
   bool operator==(const TransferableResource& o) const {
     return id == o.id && is_software == o.is_software && size == o.size &&
-           format == o.format && buffer_format == o.buffer_format &&
+           format == o.format &&
            mailbox_holder.mailbox == o.mailbox_holder.mailbox &&
            mailbox_holder.sync_token == o.mailbox_holder.sync_token &&
            mailbox_holder.texture_target == o.mailbox_holder.texture_target &&
            color_space == o.color_space &&
-           shared_bitmap_sequence_number == o.shared_bitmap_sequence_number &&
            is_overlay_candidate == o.is_overlay_candidate &&
            filter == o.filter &&
 #if defined(OS_ANDROID)

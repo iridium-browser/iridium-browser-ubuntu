@@ -7,7 +7,6 @@
 #include <map>
 #include <utility>
 
-#include "ash/public/cpp/config.h"
 #include "ash/root_window_controller.h"
 #include "ash/session/session_controller.h"
 #include "ash/shell.h"
@@ -26,7 +25,7 @@
 #include "ui/base/user_activity/user_activity_detector.h"
 #include "ui/compositor/compositor.h"
 #include "ui/compositor/compositor_observer.h"
-#include "ui/display/manager/chromeos/display_configurator.h"
+#include "ui/display/manager/display_configurator.h"
 
 namespace ash {
 
@@ -109,7 +108,6 @@ class CompositorWatcher : public ui::CompositorObserver {
 
     RunCallbackIfAllCompositingEnded();
   }
-  void OnCompositingLockStateChanged(ui::Compositor* compositor) override {}
   void OnCompositingChildResizing(ui::Compositor* compositor) override {}
   void OnCompositingShuttingDown(ui::Compositor* compositor) override {
     compositor_observer_.Remove(compositor);
@@ -159,7 +157,7 @@ class CompositorWatcher : public ui::CompositorObserver {
           RootWindowController::ForWindow(window)
               ->wallpaper_widget_controller();
       if (wallpaper_widget_controller->IsAnimating()) {
-        wallpaper_widget_controller->AddPendingAnimationEndCallback(
+        wallpaper_widget_controller->AddAnimationEndCallback(
             base::BindOnce(&CompositorWatcher::StartObservingCompositing,
                            weak_ptr_factory_.GetWeakPtr(), compositor));
       } else {
@@ -283,10 +281,7 @@ void PowerEventObserver::SuspendImminent(
 void PowerEventObserver::SuspendDone(const base::TimeDelta& sleep_duration) {
   suspend_in_progress_ = false;
 
-  // TODO(derat): After mus exposes a method for resuming displays, call it
-  // here: http://crbug.com/692193
-  if (Shell::GetAshConfig() != Config::MASH)
-    Shell::Get()->display_configurator()->ResumeDisplays();
+  Shell::Get()->display_configurator()->ResumeDisplays();
   Shell::Get()->system_tray_model()->clock()->NotifyRefreshClock();
 
   // If the suspend request was being blocked while waiting for the lock
@@ -348,15 +343,9 @@ void PowerEventObserver::StopCompositingAndSuspendDisplays() {
 
   ui::UserActivityDetector::Get()->OnDisplayPowerChanging();
 
-  // TODO(derat): After mus exposes a method for suspending displays, call it
-  // here: http://crbug.com/692193
-  if (Shell::GetAshConfig() != Config::MASH) {
-    Shell::Get()->display_configurator()->SuspendDisplays(
-        base::Bind(&OnSuspendDisplaysCompleted,
-                   base::Passed(&displays_suspended_callback_)));
-  } else {
-    std::move(displays_suspended_callback_).Run();
-  }
+  Shell::Get()->display_configurator()->SuspendDisplays(
+      base::Bind(&OnSuspendDisplaysCompleted,
+                 base::Passed(&displays_suspended_callback_)));
 }
 
 void PowerEventObserver::EndPendingWallpaperAnimations() {

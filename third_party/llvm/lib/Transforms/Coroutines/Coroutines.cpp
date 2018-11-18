@@ -12,13 +12,14 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Transforms/Coroutines.h"
+#include "llvm-c/Transforms/Coroutines.h"
 #include "CoroInstr.h"
 #include "CoroInternal.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Analysis/CallGraph.h"
 #include "llvm/Analysis/CallGraphSCCPass.h"
-#include "llvm/Analysis/Utils/Local.h"
+#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/CallSite.h"
 #include "llvm/IR/Constants.h"
@@ -125,9 +126,10 @@ static bool isCoroutineIntrinsicName(StringRef Name) {
   static const char *const CoroIntrinsics[] = {
       "llvm.coro.alloc",   "llvm.coro.begin",   "llvm.coro.destroy",
       "llvm.coro.done",    "llvm.coro.end",     "llvm.coro.frame",
-      "llvm.coro.free",    "llvm.coro.id",      "llvm.coro.param",
-      "llvm.coro.promise", "llvm.coro.resume",  "llvm.coro.save",
-      "llvm.coro.size",    "llvm.coro.subfn.addr", "llvm.coro.suspend",
+      "llvm.coro.free",    "llvm.coro.id",      "llvm.coro.noop",
+      "llvm.coro.param",   "llvm.coro.promise", "llvm.coro.resume",
+      "llvm.coro.save",    "llvm.coro.size",    "llvm.coro.subfn.addr",
+      "llvm.coro.suspend",
   };
   return Intrinsic::lookupLLVMIntrinsicByName(CoroIntrinsics, Name) != -1;
 }
@@ -342,4 +344,20 @@ void coro::Shape::buildFrom(Function &F) {
   // Remove orphaned coro.saves.
   for (CoroSaveInst *CoroSave : UnusedCoroSaves)
     CoroSave->eraseFromParent();
+}
+
+void LLVMAddCoroEarlyPass(LLVMPassManagerRef PM) {
+  unwrap(PM)->add(createCoroEarlyPass());
+}
+
+void LLVMAddCoroSplitPass(LLVMPassManagerRef PM) {
+  unwrap(PM)->add(createCoroSplitPass());
+}
+
+void LLVMAddCoroElidePass(LLVMPassManagerRef PM) {
+  unwrap(PM)->add(createCoroElidePass());
+}
+
+void LLVMAddCoroCleanupPass(LLVMPassManagerRef PM) {
+  unwrap(PM)->add(createCoroCleanupPass());
 }

@@ -14,9 +14,10 @@ source_set("internal") {
 
   sources = [
     "base_file.cc",
-    "base_file_posix.cc",
     "base_file_win.cc",
     "download_create_info.cc",
+    "download_db_cache.cc",
+    "download_db_cache.h",
     "download_file_factory.cc",
     "download_file_impl.cc",
     "download_interrupt_reasons_impl.cc",
@@ -32,19 +33,23 @@ source_set("internal") {
     "download_task_runner.cc",
     "download_ukm_helper.cc",
     "download_url_loader_factory_getter.cc",
+    "download_url_loader_factory_getter_impl.cc",
     "download_utils.cc",
     "download_worker.cc",
     "download_worker.h",
+    "in_progress_download_manager.cc",
     "parallel_download_job.cc",
     "parallel_download_job.h",
     "parallel_download_utils.cc",
     "parallel_download_utils.h",
     "rate_estimator.cc",
     "resource_downloader.cc",
+    "resource_downloader.h",
     "save_package_download_job.cc",
     "save_package_download_job.h",
     "stream_handle_input_stream.cc",
     "url_download_handler_factory.cc",
+    "url_download_request_handle.cc",
   ]
 
   public_deps = [
@@ -53,14 +58,19 @@ source_set("internal") {
 
   deps = [
     "//base",
-    "//components/download/downloader/in_progress",
+    "//components/download/database",
     "//components/download/public/common:interfaces",
     "//components/download/quarantine",
+    "//components/leveldb_proto",
     "//mojo/public/c/system",
     "//net",
     "//services/metrics/public/cpp:ukm_builders",
     "//services/network/public/cpp",
   ]
+
+  if (is_posix || is_fuchsia) {
+    sources += [ "base_file_posix.cc" ]
+  }
 }
 
 # tests need to access both public and internal sources. So in the component
@@ -85,6 +95,7 @@ source_set("unit_tests") {
   sources = [
     "base_file_unittest.cc",
     "base_file_win_unittest.cc",
+    "download_db_cache_unittest.cc",
     "download_file_unittest.cc",
     "download_item_impl_unittest.cc",
     "download_stats_unittest.cc",
@@ -97,7 +108,10 @@ source_set("unit_tests") {
   deps = [
     ":for_tests",
     "//base/test:test_support",
+    "//components/download/database",
     "//components/download/public/common:test_support",
+    "//components/leveldb_proto",
+    "//components/leveldb_proto:test_support",
     "//components/ukm:test_support",
     "//crypto",
     "//net",

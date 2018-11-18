@@ -14,6 +14,7 @@
 
 #include <utility>
 
+#include "absl/memory/memory.h"
 #include "common_types.h"  // NOLINT(build/include)
 #include "logging/rtc_event_log/events/rtc_event_rtcp_packet_outgoing.h"
 #include "logging/rtc_event_log/rtc_event_log.h"
@@ -38,45 +39,15 @@
 #include "rtc_base/constructormagic.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/numerics/safe_conversions.h"
-#include "rtc_base/ptr_util.h"
 #include "rtc_base/trace_event.h"
 
 namespace webrtc {
 
 namespace {
-const uint32_t kRtcpAnyExtendedReports =
-    kRtcpXrVoipMetric | kRtcpXrReceiverReferenceTime | kRtcpXrDlrrReportBlock |
-    kRtcpXrTargetBitrate;
+const uint32_t kRtcpAnyExtendedReports = kRtcpXrReceiverReferenceTime |
+                                         kRtcpXrDlrrReportBlock |
+                                         kRtcpXrTargetBitrate;
 }  // namespace
-
-NACKStringBuilder::NACKStringBuilder()
-    : stream_(""), count_(0), prevNack_(0), consecutive_(false) {}
-
-NACKStringBuilder::~NACKStringBuilder() {}
-
-void NACKStringBuilder::PushNACK(uint16_t nack) {
-  if (count_ == 0) {
-    stream_ << nack;
-  } else if (nack == prevNack_ + 1) {
-    consecutive_ = true;
-  } else {
-    if (consecutive_) {
-      stream_ << "-" << prevNack_;
-      consecutive_ = false;
-    }
-    stream_ << "," << nack;
-  }
-  count_++;
-  prevNack_ = nack;
-}
-
-std::string NACKStringBuilder::GetResult() {
-  if (consecutive_) {
-    stream_ << "-" << prevNack_;
-    consecutive_ = false;
-  }
-  return stream_.str();
-}
 
 RTCPSender::FeedbackState::FeedbackState()
     : packets_sent(0),
@@ -85,8 +56,13 @@ RTCPSender::FeedbackState::FeedbackState()
       last_rr_ntp_secs(0),
       last_rr_ntp_frac(0),
       remote_sr(0),
-      has_last_xr_rr(false),
       module(nullptr) {}
+
+RTCPSender::FeedbackState::FeedbackState(const FeedbackState&) = default;
+
+RTCPSender::FeedbackState::FeedbackState(FeedbackState&&) = default;
+
+RTCPSender::FeedbackState::~FeedbackState() = default;
 
 class PacketContainer : public rtcp::CompoundPacket {
  public:
@@ -103,7 +79,8 @@ class PacketContainer : public rtcp::CompoundPacket {
       if (transport_->SendRtcp(packet.data(), packet.size())) {
         bytes_sent += packet.size();
         if (event_log_) {
-          event_log_->Log(rtc::MakeUnique<RtcEventRtcpPacketOutgoing>(packet));
+          event_log_->Log(
+              absl::make_unique<RtcEventRtcpPacketOutgoing>(packet));
         }
       }
     });
@@ -173,7 +150,8 @@ RTCPSender::RTCPSender(
       app_length_(0),
 
       xr_send_receiver_reference_time_enabled_(false),
-      packet_type_counter_observer_(packet_type_counter_observer) {
+      packet_type_counter_observer_(packet_type_counter_observer),
+      send_video_bitrate_allocation_(false) {
   RTC_DCHECK(transport_ != nullptr);
 
   builders_[kRtcpSr] = &RTCPSender::BuildSR;
@@ -477,11 +455,7 @@ std::unique_ptr<rtcp::RtcpPacket> RTCPSender::BuildPLI(const RtcpContext& ctx) {
   pli->SetSenderSsrc(ssrc_);
   pli->SetMediaSsrc(remote_ssrc_);
 
-  TRACE_EVENT_INSTANT0(TRACE_DISABLED_BY_DEFAULT("webrtc_rtp"),
-                       "RTCPSender::PLI");
   ++packet_type_counter_.pli_packets;
-  TRACE_COUNTER_ID1(TRACE_DISABLED_BY_DEFAULT("webrtc_rtp"), "RTCP_PLICount",
-                    ssrc_, packet_type_counter_.pli_packets);
 
   return std::unique_ptr<rtcp::RtcpPacket>(pli);
 }
@@ -493,11 +467,7 @@ std::unique_ptr<rtcp::RtcpPacket> RTCPSender::BuildFIR(const RtcpContext& ctx) {
   fir->SetSenderSsrc(ssrc_);
   fir->AddRequestTo(remote_ssrc_, sequence_number_fir_);
 
-  TRACE_EVENT_INSTANT0(TRACE_DISABLED_BY_DEFAULT("webrtc_rtp"),
-                       "RTCPSender::FIR");
   ++packet_type_counter_.fir_packets;
-  TRACE_COUNTER_ID1(TRACE_DISABLED_BY_DEFAULT("webrtc_rtp"), "RTCP_FIRCount",
-                    ssrc_, packet_type_counter_.fir_packets);
 
   return std::unique_ptr<rtcp::RtcpPacket>(fir);
 }
@@ -508,9 +478,6 @@ std::unique_ptr<rtcp::RtcpPacket> RTCPSender::BuildREMB(
   remb->SetSenderSsrc(ssrc_);
   remb->SetBitrateBps(remb_bitrate_);
   remb->SetSsrcs(remb_ssrcs_);
-
-  TRACE_EVENT_INSTANT0(TRACE_DISABLED_BY_DEFAULT("webrtc_rtp"),
-                       "RTCPSender::REMB");
 
   return std::unique_ptr<rtcp::RtcpPacket>(remb);
 }
@@ -607,20 +574,13 @@ std::unique_ptr<rtcp::RtcpPacket> RTCPSender::BuildNACK(
   nack->SetPacketIds(ctx.nack_list_, ctx.nack_size_);
 
   // Report stats.
-  NACKStringBuilder stringBuilder;
   for (int idx = 0; idx < ctx.nack_size_; ++idx) {
-    stringBuilder.PushNACK(ctx.nack_list_[idx]);
     nack_stats_.ReportRequest(ctx.nack_list_[idx]);
   }
   packet_type_counter_.nack_requests = nack_stats_.requests();
   packet_type_counter_.unique_nack_requests = nack_stats_.unique_requests();
 
-  TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("webrtc_rtp"),
-                       "RTCPSender::NACK", "nacks",
-                       TRACE_STR_COPY(stringBuilder.GetResult().c_str()));
   ++packet_type_counter_.nack_packets;
-  TRACE_COUNTER_ID1(TRACE_DISABLED_BY_DEFAULT("webrtc_rtp"), "RTCP_NACKCount",
-                    ssrc_, packet_type_counter_.nack_packets);
 
   return std::unique_ptr<rtcp::RtcpPacket>(nack);
 }
@@ -644,33 +604,24 @@ std::unique_ptr<rtcp::RtcpPacket> RTCPSender::BuildExtendedReports(
     xr->SetRrtr(rrtr);
   }
 
-  if (ctx.feedback_state_.has_last_xr_rr) {
-    xr->AddDlrrItem(ctx.feedback_state_.last_xr_rr);
+  for (const rtcp::ReceiveTimeInfo& rti : ctx.feedback_state_.last_xr_rtis) {
+    xr->AddDlrrItem(rti);
   }
 
-  if (video_bitrate_allocation_) {
+  if (send_video_bitrate_allocation_) {
     rtcp::TargetBitrate target_bitrate;
 
     for (int sl = 0; sl < kMaxSpatialLayers; ++sl) {
       for (int tl = 0; tl < kMaxTemporalStreams; ++tl) {
-        if (video_bitrate_allocation_->HasBitrate(sl, tl)) {
+        if (video_bitrate_allocation_.HasBitrate(sl, tl)) {
           target_bitrate.AddTargetBitrate(
-              sl, tl, video_bitrate_allocation_->GetBitrate(sl, tl) / 1000);
+              sl, tl, video_bitrate_allocation_.GetBitrate(sl, tl) / 1000);
         }
       }
     }
 
     xr->SetTargetBitrate(target_bitrate);
-    video_bitrate_allocation_.reset();
-  }
-
-  if (xr_voip_metric_) {
-    rtcp::VoipMetric voip;
-    voip.SetMediaSsrc(remote_ssrc_);
-    voip.SetVoipMetric(*xr_voip_metric_);
-    xr_voip_metric_.reset();
-
-    xr->SetVoipMetric(voip);
+    send_video_bitrate_allocation_ = false;
   }
 
   return std::move(xr);
@@ -791,7 +742,8 @@ void RTCPSender::PrepareReport(const FeedbackState& feedback_state) {
 
   if (generate_report) {
     if ((!sending_ && xr_send_receiver_reference_time_enabled_) ||
-        feedback_state.has_last_xr_rr || video_bitrate_allocation_) {
+        !feedback_state.last_xr_rtis.empty() ||
+        send_video_bitrate_allocation_) {
       SetFlag(kRtcpAnyExtendedReports, true);
     }
 
@@ -882,15 +834,6 @@ int32_t RTCPSender::SetApplicationSpecificData(uint8_t subType,
   return 0;
 }
 
-// TODO(sprang): Remove support for VoIP metrics? (Not used in receiver.)
-int32_t RTCPSender::SetRTCPVoIPMetrics(const RTCPVoIPMetric* VoIPMetric) {
-  rtc::CritScope lock(&critical_section_rtcp_sender_);
-  xr_voip_metric_.emplace(*VoIPMetric);
-
-  SetFlag(kRtcpAnyExtendedReports, true);
-  return 0;
-}
-
 void RTCPSender::SendRtcpXrReceiverReferenceTime(bool enable) {
   rtc::CritScope lock(&critical_section_rtcp_sender_);
   xr_send_receiver_reference_time_enabled_ = enable;
@@ -942,10 +885,46 @@ bool RTCPSender::AllVolatileFlagsConsumed() const {
   return true;
 }
 
-void RTCPSender::SetVideoBitrateAllocation(const BitrateAllocation& bitrate) {
+void RTCPSender::SetVideoBitrateAllocation(
+    const VideoBitrateAllocation& bitrate) {
   rtc::CritScope lock(&critical_section_rtcp_sender_);
-  video_bitrate_allocation_.emplace(bitrate);
+  // Check if this allocation is first ever, or has a different set of
+  // spatial/temporal layers signaled and enabled, if so trigger an rtcp report
+  // as soon as possible.
+  absl::optional<VideoBitrateAllocation> new_bitrate =
+      CheckAndUpdateLayerStructure(bitrate);
+  if (new_bitrate) {
+    video_bitrate_allocation_ = *new_bitrate;
+    next_time_to_send_rtcp_ = clock_->TimeInMilliseconds();
+  } else {
+    video_bitrate_allocation_ = bitrate;
+  }
+
+  send_video_bitrate_allocation_ = true;
   SetFlag(kRtcpAnyExtendedReports, true);
+}
+
+absl::optional<VideoBitrateAllocation> RTCPSender::CheckAndUpdateLayerStructure(
+    const VideoBitrateAllocation& bitrate) const {
+  absl::optional<VideoBitrateAllocation> updated_bitrate;
+  for (size_t si = 0; si < kMaxSpatialLayers; ++si) {
+    for (size_t ti = 0; ti < kMaxTemporalStreams; ++ti) {
+      if (!updated_bitrate &&
+          (bitrate.HasBitrate(si, ti) !=
+               video_bitrate_allocation_.HasBitrate(si, ti) ||
+           (bitrate.GetBitrate(si, ti) == 0) !=
+               (video_bitrate_allocation_.GetBitrate(si, ti) == 0))) {
+        updated_bitrate = bitrate;
+      }
+      if (video_bitrate_allocation_.GetBitrate(si, ti) > 0 &&
+          bitrate.GetBitrate(si, ti) == 0) {
+        // Make sure this stream disabling is explicitly signaled.
+        updated_bitrate->SetBitrate(si, ti, 0);
+      }
+    }
+  }
+
+  return updated_bitrate;
 }
 
 bool RTCPSender::SendFeedbackPacket(const rtcp::TransportFeedback& packet) {
@@ -962,7 +941,7 @@ bool RTCPSender::SendFeedbackPacket(const rtcp::TransportFeedback& packet) {
   auto callback = [&](rtc::ArrayView<const uint8_t> packet) {
     if (transport_->SendRtcp(packet.data(), packet.size())) {
       if (event_log_)
-        event_log_->Log(rtc::MakeUnique<RtcEventRtcpPacketOutgoing>(packet));
+        event_log_->Log(absl::make_unique<RtcEventRtcpPacketOutgoing>(packet));
     } else {
       send_failure = true;
     }

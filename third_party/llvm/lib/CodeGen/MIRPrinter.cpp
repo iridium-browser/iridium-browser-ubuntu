@@ -50,6 +50,7 @@
 #include "llvm/IR/ModuleSlotTracker.h"
 #include "llvm/IR/Value.h"
 #include "llvm/MC/LaneBitmask.h"
+#include "llvm/MC/MCContext.h"
 #include "llvm/MC/MCDwarf.h"
 #include "llvm/MC/MCSymbol.h"
 #include "llvm/Support/AtomicOrdering.h"
@@ -256,6 +257,21 @@ static void printRegClassOrBank(unsigned Reg, yaml::StringValue &Dest,
   OS << printRegClassOrBank(Reg, RegInfo, TRI);
 }
 
+template <typename T>
+static void
+printStackObjectDbgInfo(const MachineFunction::VariableDbgInfo &DebugVar,
+                        T &Object, ModuleSlotTracker &MST) {
+  std::array<std::string *, 3> Outputs{{&Object.DebugVar.Value,
+                                        &Object.DebugExpr.Value,
+                                        &Object.DebugLoc.Value}};
+  std::array<const Metadata *, 3> Metas{{DebugVar.Var,
+                                        DebugVar.Expr,
+                                        DebugVar.Loc}};
+  for (unsigned i = 0; i < 3; ++i) {
+    raw_string_ostream StrOS(*Outputs[i]);
+    Metas[i]->printAsOperand(StrOS, MST);
+  }
+}
 
 void MIRPrinter::convert(yaml::MachineFunction &MF,
                          const MachineRegisterInfo &RegInfo,
@@ -267,6 +283,8 @@ void MIRPrinter::convert(yaml::MachineFunction &MF,
     unsigned Reg = TargetRegisterInfo::index2VirtReg(I);
     yaml::VirtualRegisterDefinition VReg;
     VReg.ID = I;
+    if (RegInfo.getVRegName(Reg) != "")
+      continue;
     ::printRegClassOrBank(Reg, VReg.Class, RegInfo, TRI);
     unsigned PreferredReg = RegInfo.getSimpleHint(Reg);
     if (PreferredReg)
@@ -310,9 +328,12 @@ void MIRPrinter::convert(ModuleSlotTracker &MST,
   YamlMFI.HasCalls = MFI.hasCalls();
   YamlMFI.MaxCallFrameSize = MFI.isMaxCallFrameSizeComputed()
     ? MFI.getMaxCallFrameSize() : ~0u;
+  YamlMFI.CVBytesOfCalleeSavedRegisters =
+      MFI.getCVBytesOfCalleeSavedRegisters();
   YamlMFI.HasOpaqueSPAdjustment = MFI.hasOpaqueSPAdjustment();
   YamlMFI.HasVAStart = MFI.hasVAStart();
   YamlMFI.HasMustTailInVarArgFunc = MFI.hasMustTailInVarArgFunc();
+  YamlMFI.LocalFrameSize = MFI.getLocalFrameSize();
   if (MFI.getSavePoint()) {
     raw_string_ostream StrOS(YamlMFI.SavePoint.Value);
     StrOS << printMBBReference(*MFI.getSavePoint());
@@ -418,19 +439,12 @@ void MIRPrinter::convertStackObjects(yaml::MachineFunction &YMF,
     assert(StackObjectInfo != StackObjectOperandMapping.end() &&
            "Invalid stack object index");
     const FrameIndexOperand &StackObject = StackObjectInfo->second;
-    assert(!StackObject.IsFixed && "Expected a non-fixed stack object");
-    auto &Object = YMF.StackObjects[StackObject.ID];
-    {
-      raw_string_ostream StrOS(Object.DebugVar.Value);
-      DebugVar.Var->printAsOperand(StrOS, MST);
-    }
-    {
-      raw_string_ostream StrOS(Object.DebugExpr.Value);
-      DebugVar.Expr->printAsOperand(StrOS, MST);
-    }
-    {
-      raw_string_ostream StrOS(Object.DebugLoc.Value);
-      DebugVar.Loc->printAsOperand(StrOS, MST);
+    if (StackObject.IsFixed) {
+      auto &Object = YMF.FixedStackObjects[StackObject.ID];
+      printStackObjectDbgInfo(DebugVar, Object, MST);
+    } else {
+      auto &Object = YMF.StackObjects[StackObject.ID];
+      printStackObjectDbgInfo(DebugVar, Object, MST);
     }
   }
 }
@@ -669,6 +683,26 @@ void MIPrinter::print(const MachineInstr &MI) {
     OS << "frame-setup ";
   if (MI.getFlag(MachineInstr::FrameDestroy))
     OS << "frame-destroy ";
+  if (MI.getFlag(MachineInstr::FmNoNans))
+    OS << "nnan ";
+  if (MI.getFlag(MachineInstr::FmNoInfs))
+    OS << "ninf ";
+  if (MI.getFlag(MachineInstr::FmNsz))
+    OS << "nsz ";
+  if (MI.getFlag(MachineInstr::FmArcp))
+    OS << "arcp ";
+  if (MI.getFlag(MachineInstr::FmContract))
+    OS << "contract ";
+  if (MI.getFlag(MachineInstr::FmAfn))
+    OS << "afn ";
+  if (MI.getFlag(MachineInstr::FmReassoc))
+    OS << "reassoc ";
+  if (MI.getFlag(MachineInstr::NoUWrap))
+    OS << "nuw ";
+  if (MI.getFlag(MachineInstr::NoSWrap))
+    OS << "nsw ";
+  if (MI.getFlag(MachineInstr::IsExact))
+    OS << "exact ";
 
   OS << TII->getName(MI.getOpcode());
   if (I < E)
@@ -680,6 +714,23 @@ void MIPrinter::print(const MachineInstr &MI) {
       OS << ", ";
     print(MI, I, TRI, ShouldPrintRegisterTies,
           MI.getTypeToPrint(I, PrintedTypes, MRI));
+    NeedComma = true;
+  }
+
+  // Print any optional symbols attached to this instruction as-if they were
+  // operands.
+  if (MCSymbol *PreInstrSymbol = MI.getPreInstrSymbol()) {
+    if (NeedComma)
+      OS << ',';
+    OS << " pre-instr-symbol ";
+    MachineOperand::printSymbol(OS, *PreInstrSymbol);
+    NeedComma = true;
+  }
+  if (MCSymbol *PostInstrSymbol = MI.getPostInstrSymbol()) {
+    if (NeedComma)
+      OS << ',';
+    OS << " post-instr-symbol ";
+    MachineOperand::printSymbol(OS, *PostInstrSymbol);
     NeedComma = true;
   }
 

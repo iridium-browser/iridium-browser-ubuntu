@@ -8,23 +8,24 @@
 // DO NOT MODIFY!
 
 // clang-format off
-#include "v8_test_interface_2.h"
+#include "third_party/blink/renderer/bindings/tests/results/core/v8_test_interface_2.h"
 
 #include "base/memory/scoped_refptr.h"
-#include "bindings/core/v8/exception_state.h"
-#include "bindings/core/v8/idl_types.h"
-#include "bindings/core/v8/native_value_traits_impl.h"
-#include "bindings/core/v8/script_value.h"
-#include "bindings/core/v8/v8_dom_configuration.h"
-#include "bindings/core/v8/v8_iterator.h"
-#include "bindings/core/v8/v8_test_interface_empty.h"
-#include "core/execution_context/execution_context.h"
-#include "core/frame/local_dom_window.h"
-#include "platform/bindings/runtime_call_stats.h"
-#include "platform/bindings/script_state.h"
-#include "platform/bindings/v8_object_constructor.h"
-#include "platform/runtime_enabled_features.h"
-#include "platform/wtf/get_ptr.h"
+#include "third_party/blink/renderer/bindings/core/v8/idl_types.h"
+#include "third_party/blink/renderer/bindings/core/v8/native_value_traits_impl.h"
+#include "third_party/blink/renderer/bindings/core/v8/script_value.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_dom_configuration.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_iterator.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_test_interface_empty.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
+#include "third_party/blink/renderer/platform/bindings/exception_messages.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
+#include "third_party/blink/renderer/platform/bindings/runtime_call_stats.h"
+#include "third_party/blink/renderer/platform/bindings/script_state.h"
+#include "third_party/blink/renderer/platform/bindings/v8_object_constructor.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
+#include "third_party/blink/renderer/platform/wtf/get_ptr.h"
 
 namespace blink {
 
@@ -653,7 +654,7 @@ void V8TestInterface2::indexedPropertyDefinerCallback(
 }
 
 static const V8DOMConfiguration::AccessorConfiguration V8TestInterface2Accessors[] = {
-    { "size", V8TestInterface2::sizeAttributeGetterCallback, nullptr, V8PrivateProperty::kNoCachedAccessor, static_cast<v8::PropertyAttribute>(v8::DontEnum | v8::ReadOnly), V8DOMConfiguration::kOnPrototype, V8DOMConfiguration::kCheckHolder, V8DOMConfiguration::kHasSideEffect, V8DOMConfiguration::kAllWorlds },
+    { "size", V8TestInterface2::sizeAttributeGetterCallback, nullptr, V8PrivateProperty::kNoCachedAccessor, static_cast<v8::PropertyAttribute>(v8::DontEnum | v8::ReadOnly), V8DOMConfiguration::kOnPrototype, V8DOMConfiguration::kCheckHolder, V8DOMConfiguration::kHasSideEffect, V8DOMConfiguration::kAlwaysCallGetter, V8DOMConfiguration::kAllWorlds },
 };
 
 static const V8DOMConfiguration::MethodConfiguration V8TestInterface2Methods[] = {
@@ -707,10 +708,10 @@ void V8TestInterface2::installV8TestInterface2Template(
   static_assert(1 == TestInterface2::kConstValue1, "the value of TestInterface2_kConstValue1 does not match with implementation");
   V8DOMConfiguration::InstallAccessors(
       isolate, world, instanceTemplate, prototypeTemplate, interfaceTemplate,
-      signature, V8TestInterface2Accessors, WTF_ARRAY_LENGTH(V8TestInterface2Accessors));
+      signature, V8TestInterface2Accessors, base::size(V8TestInterface2Accessors));
   V8DOMConfiguration::InstallMethods(
       isolate, world, instanceTemplate, prototypeTemplate, interfaceTemplate,
-      signature, V8TestInterface2Methods, WTF_ARRAY_LENGTH(V8TestInterface2Methods));
+      signature, V8TestInterface2Methods, base::size(V8TestInterface2Methods));
 
   // Indexed properties
   v8::IndexedPropertyHandlerConfiguration indexedPropertyHandlerConfig(
@@ -763,7 +764,7 @@ void V8TestInterface2::InstallRuntimeEnabledFeaturesOnTemplate(
     };
     V8DOMConfiguration::InstallConstants(
         isolate, interface_template, prototype_template,
-        constant_configurations, WTF_ARRAY_LENGTH(constant_configurations));
+        constant_configurations, base::size(constant_configurations));
   }
 
   // Custom signature

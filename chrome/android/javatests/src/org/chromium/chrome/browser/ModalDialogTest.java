@@ -21,21 +21,20 @@ import org.junit.runner.RunWith;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.CallbackHelper;
-import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.base.test.util.CommandLineFlags.Add;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.chrome.R;
 import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
-import org.chromium.content.browser.test.util.Criteria;
-import org.chromium.content.browser.test.util.CriteriaHelper;
-import org.chromium.content.browser.test.util.TestCallbackHelperContainer;
-import org.chromium.content.browser.test.util.TestCallbackHelperContainer
-        .OnEvaluateJavaScriptResultHelper;
-import org.chromium.content.browser.test.util.TouchCommon;
-import org.chromium.content_public.browser.GestureListenerManager;
 import org.chromium.content_public.browser.GestureStateListener;
+import org.chromium.content_public.browser.test.util.Criteria;
+import org.chromium.content_public.browser.test.util.CriteriaHelper;
+import org.chromium.content_public.browser.test.util.TestCallbackHelperContainer;
+import org.chromium.content_public.browser.test.util.TestCallbackHelperContainer.OnEvaluateJavaScriptResultHelper;
+import org.chromium.content_public.browser.test.util.TouchCommon;
+import org.chromium.content_public.browser.test.util.WebContentsUtils;
 
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeoutException;
@@ -45,7 +44,7 @@ import java.util.concurrent.TimeoutException;
  */
 @RunWith(ChromeJUnit4ClassRunner.class)
 @RetryOnFailure
-@CommandLineFlags.Add({ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
+@Add({"disable-features=TabModalJsDialog", ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE})
 public class ModalDialogTest {
     @Rule
     public ChromeActivityTestRule<ChromeActivity> mActivityTestRule =
@@ -242,18 +241,14 @@ public class ModalDialogTest {
         }
     }
 
-    private GestureListenerManager getGestureListenerManager() {
-        return GestureListenerManager.fromWebContents(
-                mActivityTestRule.getActivity().getCurrentContentViewCore().getWebContents());
-    }
-
     /**
      * Taps on a view and waits for a callback.
      */
     private void tapViewAndWait() throws InterruptedException, TimeoutException {
         final TapGestureStateListener tapGestureStateListener = new TapGestureStateListener();
         int callCount = tapGestureStateListener.getCallCount();
-        getGestureListenerManager().addListener(tapGestureStateListener);
+        WebContentsUtils.getGestureListenerManager(mActivityTestRule.getWebContents())
+                .addListener(tapGestureStateListener);
 
         TouchCommon.singleClickView(mActivityTestRule.getActivity().getActivityTab().getView());
         tapGestureStateListener.waitForTap(callCount);
@@ -279,10 +274,7 @@ public class ModalDialogTest {
         clickCancel(jsDialog);
 
         Assert.assertEquals(BEFORE_UNLOAD_URL,
-                mActivityTestRule.getActivity()
-                        .getCurrentContentViewCore()
-                        .getWebContents()
-                        .getLastCommittedUrl());
+                mActivityTestRule.getActivity().getCurrentWebContents().getLastCommittedUrl());
         executeJavaScriptAndWaitForDialog("history.back();");
 
         jsDialog = getCurrentDialog();
@@ -295,10 +287,7 @@ public class ModalDialogTest {
         clickOk(jsDialog);
         onPageLoaded.waitForCallback(callCount);
         Assert.assertEquals(EMPTY_PAGE,
-                mActivityTestRule.getActivity()
-                        .getCurrentContentViewCore()
-                        .getWebContents()
-                        .getLastCommittedUrl());
+                mActivityTestRule.getActivity().getCurrentWebContents().getLastCommittedUrl());
     }
 
     /**
@@ -361,8 +350,7 @@ public class ModalDialogTest {
         scriptEvent.waitUntilHasValue();
 
         scriptEvent.evaluateJavaScriptForTests(
-                mActivityTestRule.getActivity().getCurrentContentViewCore().getWebContents(),
-                "alert('Android');");
+                mActivityTestRule.getActivity().getCurrentWebContents(), "alert('Android');");
         Assert.assertTrue(
                 "No further dialog boxes should be shown.", scriptEvent.waitUntilHasValue());
     }
@@ -403,8 +391,7 @@ public class ModalDialogTest {
     private OnEvaluateJavaScriptResultHelper executeJavaScriptAndWaitForDialog(
             final OnEvaluateJavaScriptResultHelper helper, String script) {
         helper.evaluateJavaScriptForTests(
-                mActivityTestRule.getActivity().getCurrentContentViewCore().getWebContents(),
-                script);
+                mActivityTestRule.getActivity().getCurrentWebContents(), script);
         CriteriaHelper.pollInstrumentationThread(new JavascriptAppModalDialogShownCriteria(
                 "Could not spawn or locate a modal dialog.", true));
         return helper;
@@ -489,7 +476,6 @@ public class ModalDialogTest {
     }
 
     private TestCallbackHelperContainer getActiveTabTestCallbackHelperContainer() {
-        return new TestCallbackHelperContainer(
-                mActivityTestRule.getActivity().getCurrentContentViewCore());
+        return new TestCallbackHelperContainer(mActivityTestRule.getWebContents());
     }
 }

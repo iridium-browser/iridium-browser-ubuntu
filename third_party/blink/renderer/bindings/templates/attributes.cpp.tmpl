@@ -386,6 +386,9 @@ v8::Local<v8::Value> v8Value, const v8::FunctionCallbackInfo<v8::Value>& info
   {% if attribute.has_setter_exception_state %}
   {{define_exception_state}}
   {% endif %}
+  {% if attribute.is_ce_reactions %}
+  CEReactionsScope ce_reactions_scope;
+  {% endif %}
 
   // Prepare the value to be set.
   {% if attribute.idl_type != 'EventHandler' %}
@@ -405,7 +408,7 @@ v8::Local<v8::Value> v8Value, const v8::FunctionCallbackInfo<v8::Value>& info
   // Returns undefined without setting the value if the value is invalid.
   DummyExceptionStateForTesting dummyExceptionState;
   {{declare_enum_validation_variable(attribute.enum_values) | trim | indent(2)}}
-  if (!IsValidEnum(cppValue, validValues, WTF_ARRAY_LENGTH(validValues), "{{attribute.enum_type}}", dummyExceptionState)) {
+  if (!IsValidEnum(cppValue, validValues, base::size(validValues), "{{attribute.enum_type}}", dummyExceptionState)) {
     ExecutionContext::ForCurrentRealm(info)->AddConsoleMessage(
         ConsoleMessage::Create(kJSMessageSource, kWarningMessageLevel,
                                dummyExceptionState.Message()));
@@ -422,7 +425,8 @@ v8::Local<v8::Value> v8Value, const v8::FunctionCallbackInfo<v8::Value>& info
   {% endif %}
   {% endif %}
 
-  {% if attribute.is_call_with_script_state %}
+  {% if attribute.is_call_with_script_state or
+  	attribute.is_setter_call_with_script_state %}
   {% if attribute.is_static %}
   ScriptState* scriptState = ScriptState::ForCurrentRealm(info);
   {% else %}
@@ -446,8 +450,8 @@ v8::Local<v8::Value> v8Value, const v8::FunctionCallbackInfo<v8::Value>& info
       .DeleteProperty(holder, v8::Undefined(isolate));
   {% endif %}
   {% endif %}{# attribute.is_put_forwards #}
+  {% endfilter %}{# format_remove_duplicates #}
 }
-{% endfilter %}{# format_remove_duplicates #}
 {% endmacro %}
 
 
@@ -459,6 +463,9 @@ v8::Local<v8::Name>, v8::Local<v8::Value> v8Value, const v8::PropertyCallbackInf
 {%- else %}
 const v8::FunctionCallbackInfo<v8::Value>& info
 {%- endif %}) {
+  {% if attribute.is_lenient_setter %}
+  // Setter for {{attribute.name}} is no-op because [LenientSetter] is specified.
+  {% else %}
   {% if attribute.runtime_call_stats.extended_attribute_defined %}
   {{ runtime_timer_scope(attribute.runtime_call_stats.setter_counter) | trim | indent(2) }}
   {% else %}
@@ -493,10 +500,6 @@ const v8::FunctionCallbackInfo<v8::Value>& info
   }
   {% endif %}
 
-  {% if attribute.is_ce_reactions %}
-  CEReactionsScope ceReactionsScope;
-  {% endif %}
-
   {% if attribute.has_custom_setter %}
   {{v8_class}}::{{attribute.name}}AttributeSetterCustom(v8Value, info);
   {% elif attribute.has_cross_origin_setter %}
@@ -504,6 +507,7 @@ const v8::FunctionCallbackInfo<v8::Value>& info
   {% else %}
   {{cpp_class_or_partial}}V8Internal::{{attribute.name}}AttributeSetter{{world_suffix}}(v8Value, info);
   {% endif %}
+  {% endif %}{# attribute.is_lenient_setter #}
 }
 {% endmacro %}
 
@@ -530,6 +534,8 @@ const v8::FunctionCallbackInfo<v8::Value>& info
     else 'V8DOMConfiguration::kCheckHolder' %}
 {% set getter_side_effect_type = 'V8DOMConfiguration::kHasNoSideEffect'
     if attribute.getter_has_no_side_effect else 'V8DOMConfiguration::kHasSideEffect' %}
+{% set getter_behavior = 'V8DOMConfiguration::kAlwaysCallGetter'
+    if not attribute.is_lazy_data_attribute else 'V8DOMConfiguration::kReplaceWithDataProperty' %}
 {% if attribute.is_per_world_bindings %}
   {% set getter_callback_for_main_world = '%sForMainWorld' % getter_callback %}
   {% set setter_callback_for_main_world =
@@ -553,6 +559,7 @@ const v8::FunctionCallbackInfo<v8::Value>& info
     property_location(attribute),
     holder_check,
     getter_side_effect_type,
+    getter_behavior,
 ] %}
 
 {% if attribute.is_per_world_bindings %}
@@ -601,7 +608,7 @@ static const V8DOMConfiguration::AccessorConfiguration accessor_configurations[]
 V8DOMConfiguration::InstallAccessors(
     isolate, world, instanceObject, prototypeObject, interfaceObject,
     signature, accessor_configurations,
-    WTF_ARRAY_LENGTH(accessor_configurations));
+    base::size(accessor_configurations));
 {% endfilter %}{# runtime_enabled #}
 {% endfor %}{# secure_context_attribute_list grouped by runtime_enabled #}
 {% endfilter %}{# secure_context #}
@@ -626,7 +633,7 @@ static const V8DOMConfiguration::AttributeConfiguration attribute_configurations
 };
 V8DOMConfiguration::InstallAttributes(
     isolate, world, instanceObject, prototypeObject,
-    attribute_configurations, WTF_ARRAY_LENGTH(attribute_configurations));
+    attribute_configurations, base::size(attribute_configurations));
 {% endfilter %}{# runtime_enabled #}
 {% endfor %}{# secure_context_attribute_list grouped by runtime_enabled #}
 {% endfilter %}{# secure_context #}

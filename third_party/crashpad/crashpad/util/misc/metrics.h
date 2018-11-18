@@ -77,6 +77,10 @@ class Metrics {
     //!     server.
     kUploadFailed = 4,
 
+    //! \brief There was an error between accessing the report from the database
+    //!     and uploading it to the crash server.
+    kPrepareForUploadFailed = 5,
+
     //! \brief The number of values in this enumeration; not a valid value.
     kMaxValue
   };
@@ -128,6 +132,12 @@ class Metrics {
     //!
     //! This value is only used on Linux/Android.
     kBrokeredPtraceFailed = 9,
+
+    //! \brief Sanitization was requested but could not be initialized.
+    kSanitizationInitializationFailed = 10,
+
+    //! \brief Sanitization caused this crash dump to be skipped.
+    kSkippedDueToSanitization = 11,
 
     //! \brief The number of values in this enumeration; not a valid value.
     kMaxValue

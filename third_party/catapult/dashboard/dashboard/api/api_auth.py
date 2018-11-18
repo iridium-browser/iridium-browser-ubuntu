@@ -1,7 +1,7 @@
 # Copyright 2017 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
-import functools
+
 import logging
 
 from google.appengine.api import oauth
@@ -30,12 +30,15 @@ OAUTH_CLIENT_ID_WHITELIST = [
     'garnet-ci-builder-dev@fuchsia-infra.iam.gserviceaccount.com',
     # This oauth client id is used from Fuchsia Garnet builders.
     'garnet-ci-builder@fuchsia-infra.iam.gserviceaccount.com',
+    # These are more fuschia builders.
+    'peridot-ci-builder@fuchsia-infra.iam.gserviceaccount.com',
+    'topaz-ci-builder@fuchsia-infra.iam.gserviceaccount.com',
+    'vendor-google-ci-builder@fuchsia-infra.iam.gserviceaccount.com',
     # This oauth client id used to upload histograms from cronet bots.
-    '113172445342431053212'
+    '113172445342431053212',
+    # Used by luci builders to upload perf data.
+    'chrome-ci-builder@chops-service-accounts.iam.gserviceaccount.com',
 ]
-OAUTH_SCOPES = (
-    'https://www.googleapis.com/auth/userinfo.email',
-)
 
 
 class ApiAuthException(Exception):
@@ -57,45 +60,31 @@ class InternalOnlyError(ApiAuthException):
     super(InternalOnlyError, self).__init__('User does not have access')
 
 
-def _AuthorizeOauthUser():
+def Authorize():
   try:
-    user = oauth.get_current_user(OAUTH_SCOPES)
-    if user and not user.email().endswith('.gserviceaccount.com'):
-      # For non-service account, need to verify that the OAuth client ID
-      # is in our whitelist.
-      client_id = oauth.get_client_id(OAUTH_SCOPES)
-      if client_id not in OAUTH_CLIENT_ID_WHITELIST:
-        logging.info('OAuth client id %s for user %s not in whitelist',
-                     client_id, user.email())
-        user = None
-        raise OAuthError
-  except oauth.Error:
+    email = utils.GetEmail()
+  except oauth.OAuthRequestError:
     raise OAuthError
 
-  if not user:
+  if not email:
     raise NotLoggedInError
 
-  logging.info('OAuth user logged in as: %s', user.email())
-  if utils.IsGroupMember(user.email(), 'chromeperf-access'):
-    datastore_hooks.SetPrivilegedRequest()
-
-
-def Authorize(function_to_wrap):
-  @functools.wraps(function_to_wrap)
-  def Wrapper(*args, **kwargs):
-    _AuthorizeOauthUser()
-
-    return function_to_wrap(*args, **kwargs)
-  return Wrapper
-
-
-def Email():
-  """Retrieves the email address of the logged-in user.
-
-  Returns:
-    The email address, as a string or None if there is no user logged in.
-  """
   try:
-    return oauth.get_current_user(OAUTH_SCOPES).email()
-  except oauth.InvalidOAuthParametersError:
-    return None
+    if not email.endswith('.gserviceaccount.com'):
+      # For non-service account, need to verify that the OAuth client ID
+      # is in our whitelist.
+      client_id = oauth.get_client_id(utils.OAUTH_SCOPES)
+      if client_id not in OAUTH_CLIENT_ID_WHITELIST:
+        logging.error('OAuth client id %s for user %s not in whitelist',
+                      client_id, email)
+        email = None
+        raise OAuthError
+  except oauth.OAuthRequestError:
+    # Transient errors when checking the token result should result in HTTP 500,
+    # so catch oauth.OAuthRequestError here, not oauth.Error (which would catch
+    # both fatal and transient errors).
+    raise OAuthError
+
+  logging.info('OAuth user logged in as: %s', email)
+  if utils.IsInternalUser():
+    datastore_hooks.SetPrivilegedRequest()

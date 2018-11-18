@@ -58,13 +58,13 @@ class DataConsumerHandleTestUtil {
       kWithExecutionContext,
     };
 
-    Thread(const WebThreadCreationParams&,
+    Thread(const ThreadCreationParams&,
            InitializationPolicy = kGarbageCollection);
     ~Thread();
 
     WebThreadSupportingGC* GetThread() { return thread_.get(); }
     ExecutionContext* GetExecutionContext() { return execution_context_.Get(); }
-    ScriptState* GetScriptState() { return script_state_.get(); }
+    ScriptState* GetScriptState() { return script_state_; }
     v8::Isolate* GetIsolate() { return isolate_holder_->isolate(); }
 
    private:
@@ -76,7 +76,7 @@ class DataConsumerHandleTestUtil {
     std::unique_ptr<WaitableEvent> waitable_event_;
     Persistent<NullExecutionContext> execution_context_;
     std::unique_ptr<gin::IsolateHolder> isolate_holder_;
-    scoped_refptr<ScriptState> script_state_;
+    Persistent<ScriptState> script_state_;
   };
 
   class ThreadingTestBase : public ThreadSafeRefCounted<ThreadingTestBase> {
@@ -167,10 +167,10 @@ class DataConsumerHandleTestUtil {
       ThreadHolder(ThreadingTestBase* test)
           : context_(test->context_),
             reading_thread_(std::make_unique<Thread>(
-                WebThreadCreationParams(WebThreadType::kTestThread)
+                ThreadCreationParams(WebThreadType::kTestThread)
                     .SetThreadNameForTest("reading thread"))),
             updating_thread_(std::make_unique<Thread>(
-                WebThreadCreationParams(WebThreadType::kTestThread)
+                ThreadCreationParams(WebThreadType::kTestThread)
                     .SetThreadNameForTest("updating thread"))) {
         context_->RegisterThreadHolder(this);
       }
@@ -335,7 +335,7 @@ class DataConsumerHandleTestUtil {
   };
 
   class Command final {
-    DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
+    DISALLOW_NEW();
 
    public:
     enum Name {
@@ -401,7 +401,7 @@ class DataConsumerHandleTestUtil {
 
       Deque<Command> commands_;
       size_t offset_;
-      WebThread* reader_thread_;
+      blink::Thread* reader_thread_;
       Client* client_;
       Result result_;
       bool is_handle_attached_;

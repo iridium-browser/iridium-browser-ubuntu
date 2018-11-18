@@ -15,8 +15,6 @@
 #include "llvm/ADT/StringSwitch.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/IR/LLVMContext.h"
-#include "llvm/ToolDrivers/llvm-dlltool/DlltoolDriver.h"
-#include "llvm/ToolDrivers/llvm-lib/LibDriver.h"
 #include "llvm/Object/Archive.h"
 #include "llvm/Object/ArchiveWriter.h"
 #include "llvm/Object/MachO.h"
@@ -26,17 +24,18 @@
 #include "llvm/Support/Errc.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Format.h"
+#include "llvm/Support/FormatVariadic.h"
+#include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/LineIterator.h"
-#include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
-#include "llvm/Support/PrettyStackTrace.h"
 #include "llvm/Support/Process.h"
-#include "llvm/Support/Signals.h"
 #include "llvm/Support/StringSaver.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/ToolOutputFile.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/ToolDrivers/llvm-dlltool/DlltoolDriver.h"
+#include "llvm/ToolDrivers/llvm-lib/LibDriver.h"
 
 #if !defined(_MSC_VER) && !defined(__MINGW32__)
 #include <unistd.h>
@@ -65,53 +64,51 @@ OPTIONS:
 )";
 
 const char ArHelp[] = R"(
-OVERVIEW: LLVM Archiver (llvm-ar)
+OVERVIEW: LLVM Archiver
 
-  This program archives bitcode files into single libraries
-
-USAGE: llvm-ar [options] [relpos] [count] <archive-file> [members]...
+USAGE: llvm-ar [options] [-]<operation>[modifiers] [relpos] <archive> [files]
+       llvm-ar -M [<mri-script]
 
 OPTIONS:
-  -M                                -
-  -format                           - Archive format to create
-    =default                        -   default
-    =gnu                            -   gnu
-    =darwin                         -   darwin
-    =bsd                            -   bsd
-  -plugin=<string>                  - plugin (ignored for compatibility
-  -help                             - Display available options
-  -version                          - Display the version of this program
+  --format              - Archive format to create
+    =default            -   default
+    =gnu                -   gnu
+    =darwin             -   darwin
+    =bsd                -   bsd
+  --plugin=<string>     - Ignored for compatibility
+  --help                - Display available options
+  --version             - Display the version of this program
 
 OPERATIONS:
-  d[NsS]       - delete file(s) from the archive
-  m[abiSs]     - move file(s) in the archive
-  p[kN]        - print file(s) found in the archive
-  q[ufsS]      - quick append file(s) to the archive
-  r[abfiuRsS]  - replace or insert file(s) into the archive
-  t            - display contents of archive
-  x[No]        - extract file(s) from the archive
+  d - delete [files] from the archive
+  m - move [files] in the archive
+  p - print [files] found in the archive
+  q - quick append [files] to the archive
+  r - replace or insert [files] into the archive
+  s - act as ranlib
+  t - display contents of archive
+  x - extract [files] from the archive
 
-MODIFIERS (operation specific):
-  [a] - put file(s) after [relpos]
-  [b] - put file(s) before [relpos] (same as [i])
+MODIFIERS:
+  [a] - put [files] after [relpos]
+  [b] - put [files] before [relpos] (same as [i])
+  [c] - do not warn if archive had to be created
   [D] - use zero for timestamps and uids/gids (default)
-  [i] - put file(s) before [relpos] (same as [b])
+  [i] - put [files] before [relpos] (same as [b])
+  [l] - ignored for compatibility
   [o] - preserve original dates
   [s] - create an archive index (cf. ranlib)
   [S] - do not build a symbol table
   [T] - create a thin archive
-  [u] - update only files newer than archive contents
+  [u] - update only [files] newer than archive contents
   [U] - use actual timestamps and uids/gids
-
-MODIFIERS (generic):
-  [c] - do not warn if the library had to be created
   [v] - be verbose about actions taken
 )";
 
 void printHelpMessage() {
-  if (Stem.find("ranlib") != StringRef::npos)
+  if (Stem.contains_lower("ranlib"))
     outs() << RanlibHelp;
-  else if (Stem.find("ar") != StringRef::npos)
+  else if (Stem.contains_lower("ar"))
     outs() << ArHelp;
 }
 
@@ -144,7 +141,7 @@ static void failIfError(Error E, Twine Context = "") {
   });
 }
 
-SmallVector<const char *, 256> PositionalArgs;
+static SmallVector<const char *, 256> PositionalArgs;
 
 static bool MRI;
 
@@ -371,7 +368,11 @@ static void doDisplayTable(StringRef Name, const object::Archive::Child &C) {
     outs() << ' ' << format("%6llu", Size.get());
     auto ModTimeOrErr = C.getLastModified();
     failIfError(ModTimeOrErr.takeError());
-    outs() << ' ' << ModTimeOrErr.get();
+    // Note: formatv() only handles the default TimePoint<>, which is in
+    // nanoseconds.
+    // TODO: fix format_provider<TimePoint<>> to allow other units.
+    sys::TimePoint<> ModTimeInNs = ModTimeOrErr.get();
+    outs() << ' ' << formatv("{0:%b %e %H:%M %Y}", ModTimeInNs);
     outs() << ' ';
   }
 
@@ -392,6 +393,7 @@ static void doExtract(StringRef Name, const object::Archive::Child &C) {
 
   int FD;
   failIfError(sys::fs::openFileForWrite(sys::path::filename(Name), FD,
+                                        sys::fs::CD_CreateAlways,
                                         sys::fs::F_None, Mode),
               Name);
 
@@ -413,7 +415,7 @@ static void doExtract(StringRef Name, const object::Archive::Child &C) {
     auto ModTimeOrErr = C.getLastModified();
     failIfError(ModTimeOrErr.takeError());
     failIfError(
-        sys::fs::setLastModificationAndAccessTime(FD, ModTimeOrErr.get()));
+        sys::fs::setLastAccessAndModificationTime(FD, ModTimeOrErr.get()));
   }
 
   if (close(FD))
@@ -792,8 +794,13 @@ static void runMRIScript() {
   std::vector<std::unique_ptr<MemoryBuffer>> ArchiveBuffers;
   std::vector<std::unique_ptr<object::Archive>> Archives;
 
-  for (line_iterator I(Ref, /*SkipBlanks*/ true, ';'), E; I != E; ++I) {
+  for (line_iterator I(Ref, /*SkipBlanks*/ false), E; I != E; ++I) {
     StringRef Line = *I;
+    Line = Line.split(';').first;
+    Line = Line.split('*').first;
+    Line = Line.trim();
+    if (Line.empty())
+      continue;
     StringRef CommandStr, Rest;
     std::tie(CommandStr, Rest) = Line.split(' ');
     Rest = Rest.trim();
@@ -949,27 +956,24 @@ static int ranlib_main(int argc, char **argv) {
 }
 
 int main(int argc, char **argv) {
+  InitLLVM X(argc, argv);
   ToolName = argv[0];
-  // Print a stack trace if we signal out.
-  sys::PrintStackTraceOnErrorSignal(argv[0]);
-  PrettyStackTraceProgram X(argc, argv);
-  llvm_shutdown_obj Y;  // Call llvm_shutdown() on exit.
 
   llvm::InitializeAllTargetInfos();
   llvm::InitializeAllTargetMCs();
   llvm::InitializeAllAsmParsers();
 
   Stem = sys::path::stem(ToolName);
-  if (Stem.find("dlltool") != StringRef::npos)
+  if (Stem.contains_lower("dlltool"))
     return dlltoolDriverMain(makeArrayRef(argv, argc));
 
-  if (Stem.find("ranlib") != StringRef::npos)
+  if (Stem.contains_lower("ranlib"))
     return ranlib_main(argc, argv);
 
-  if (Stem.find("lib") != StringRef::npos)
+  if (Stem.contains_lower("lib"))
     return libDriverMain(makeArrayRef(argv, argc));
 
-  if (Stem.find("ar") != StringRef::npos)
+  if (Stem.contains_lower("ar"))
     return ar_main(argc, argv);
   fail("Not ranlib, ar, lib or dlltool!");
 }

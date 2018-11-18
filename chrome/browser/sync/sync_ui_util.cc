@@ -4,25 +4,10 @@
 
 #include "chrome/browser/sync/sync_ui_util.h"
 
-#include <stdint.h>
-
-#include <string>
-
-#include "base/i18n/number_formatting.h"
-#include "base/i18n/time_formatting.h"
-#include "base/metrics/field_trial.h"
-#include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/signin_error_controller_factory.h"
-#include "chrome/browser/signin/signin_ui_util.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
-#include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/webui/signin/login_ui_service.h"
-#include "chrome/browser/ui/webui/signin/login_ui_service_factory.h"
-#include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
@@ -31,50 +16,39 @@
 #include "components/signin/core/browser/signin_error_controller.h"
 #include "components/signin/core/browser/signin_manager_base.h"
 #include "components/strings/grit/components_strings.h"
-#include "components/sync/base/model_type.h"
 #include "components/sync/base/sync_prefs.h"
-#include "components/sync/engine/cycle/sync_cycle_snapshot.h"
-#include "components/sync/protocol/proto_enum_conversions.h"
 #include "components/sync/protocol/sync_protocol_error.h"
 #include "google_apis/gaia/google_service_auth_error.h"
 #include "ui/base/l10n/l10n_util.h"
 
-#if defined(OS_CHROMEOS)
-#include "components/signin/core/account_id/account_id.h"
-#include "components/user_manager/user_manager.h"
-#else
-#include "chrome/browser/signin/signin_manager_factory.h"
-#include "components/sync/driver/sync_error_controller.h"
+#if !defined(OS_CHROMEOS)
+#include "chrome/browser/signin/signin_util.h"
 #endif  // defined(OS_CHROMEOS)
 
 using browser_sync::ProfileSyncService;
-
-using AuthError = GoogleServiceAuthError;
 
 namespace sync_ui_util {
 
 namespace {
 
-bool IsChromeDashboardEnabled() {
-  const std::string group_name =
-      base::FieldTrialList::FindFullName("ChromeDashboard");
-  return group_name == "Enabled";
-}
-
 // Returns the message that should be displayed when the user is authenticated
 // and can connect to the sync server. If the user hasn't yet authenticated, an
 // empty string is returned.
-base::string16 GetSyncedStateStatusLabel(ProfileSyncService* service,
+base::string16 GetSyncedStateStatusLabel(const ProfileSyncService* service,
                                          const SigninManagerBase& signin,
                                          StatusLabelStyle style,
                                          bool sync_everything) {
-  if (!service || service->IsManaged()) {
+  if (!service || service->HasDisableReason(
+                      syncer::SyncService::DISABLE_REASON_ENTERPRISE_POLICY)) {
     // User is signed in, but sync is disabled.
     return l10n_util::GetStringUTF16(IDS_SIGNED_IN_WITH_SYNC_DISABLED);
-  } else if (!service->IsSyncRequested()) {
+  }
+  if (service->HasDisableReason(
+          syncer::SyncService::DISABLE_REASON_USER_CHOICE)) {
     // User is signed in, but sync has been stopped.
     return l10n_util::GetStringUTF16(IDS_SIGNED_IN_WITH_SYNC_SUPPRESSED);
-  } else if (!service->IsSyncActive()) {
+  }
+  if (!service->IsSyncFeatureActive()) {
     // User is not signed in, or sync is still initializing.
     return base::string16();
   }
@@ -86,11 +60,6 @@ base::string16 GetSyncedStateStatusLabel(ProfileSyncService* service,
           sync_everything ? IDS_SYNC_ACCOUNT_SYNCING
                           : IDS_SYNC_ACCOUNT_SYNCING_CUSTOM_DATA_TYPES);
     case WITH_HTML:
-      if (IsChromeDashboardEnabled()) {
-        return l10n_util::GetStringFUTF16(
-            IDS_SYNC_ACCOUNT_SYNCING_WITH_MANAGE_LINK_NEW,
-            base::ASCIIToUTF16(chrome::kSyncGoogleDashboardURL));
-      }
       return l10n_util::GetStringFUTF16(
           IDS_SYNC_ACCOUNT_SYNCING_WITH_MANAGE_LINK,
           base::ASCIIToUTF16(chrome::kSyncGoogleDashboardURL));
@@ -124,14 +93,14 @@ void GetStatusForActionableError(const syncer::SyncProtocolError& error,
 }
 
 void GetStatusForUnrecoverableError(Profile* profile,
-                                    ProfileSyncService* service,
+                                    const ProfileSyncService* service,
                                     base::string16* status_label,
                                     base::string16* link_label,
                                     ActionType* action_type) {
   // Unrecoverable error is sometimes accompanied by actionable error.
   // If status message is set display that message, otherwise show generic
   // unrecoverable error message.
-  ProfileSyncService::Status status;
+  syncer::SyncStatus status;
   service->QueryDetailedSyncStatus(&status);
   GetStatusForActionableError(status.sync_protocol_error, status_label,
                               link_label, action_type);
@@ -144,7 +113,7 @@ void GetStatusForUnrecoverableError(Profile* profile,
     status_label->assign(l10n_util::GetStringUTF16(
         IDS_SYNC_STATUS_UNRECOVERABLE_ERROR));
     // The message for managed accounts is the same as that of the cros.
-    if (SigninManagerFactory::GetForProfile(profile)->IsSignoutProhibited()) {
+    if (!signin_util::IsUserSignoutAllowedForProfile(profile)) {
       status_label->assign(l10n_util::GetStringUTF16(
           IDS_SYNC_STATUS_UNRECOVERABLE_ERROR_NEEDS_SIGNOUT));
     }
@@ -196,7 +165,7 @@ void GetStatusForAuthError(Profile* profile,
 
 // status_label and link_label must either be both null or both non-null.
 MessageType GetStatusInfo(Profile* profile,
-                          ProfileSyncService* service,
+                          const ProfileSyncService* service,
                           const SigninManagerBase& signin,
                           StatusLabelStyle style,
                           base::string16* status_label,
@@ -209,8 +178,11 @@ MessageType GetStatusInfo(Profile* profile,
   if (!signin.IsAuthenticated())
     return PRE_SYNCED;
 
-  if (!service || service->IsManaged() || service->IsFirstSetupComplete() ||
-      !service->IsSyncRequested()) {
+  if (!service || service->IsFirstSetupComplete() ||
+      service->HasDisableReason(
+          syncer::SyncService::DISABLE_REASON_ENTERPRISE_POLICY) ||
+      service->HasDisableReason(
+          syncer::SyncService::DISABLE_REASON_USER_CHOICE)) {
     // The order or priority is going to be: 1. Unrecoverable errors.
     // 2. Auth errors. 3. Protocol errors. 4. Passphrase errors.
 
@@ -238,9 +210,9 @@ MessageType GetStatusInfo(Profile* profile,
     // Check for sync errors if the sync service is enabled.
     if (service) {
       // Since there is no auth in progress, check for an auth error first.
-      AuthError auth_error =
+      GoogleServiceAuthError auth_error =
           SigninErrorControllerFactory::GetForProfile(profile)->auth_error();
-      if (auth_error.state() != AuthError::NONE) {
+      if (auth_error.state() != GoogleServiceAuthError::NONE) {
         if (status_label && link_label) {
           GetStatusForAuthError(profile, signin, status_label, link_label,
                                 action_type);
@@ -249,7 +221,7 @@ MessageType GetStatusInfo(Profile* profile,
       }
 
       // We don't have an auth error. Check for an actionable error.
-      ProfileSyncService::Status status;
+      syncer::SyncStatus status;
       service->QueryDetailedSyncStatus(&status);
       if (status_label && link_label) {
         GetStatusForActionableError(status.sync_protocol_error, status_label,
@@ -274,7 +246,8 @@ MessageType GetStatusInfo(Profile* profile,
 
       // Check to see if sync has been disabled via the dasboard and needs to be
       // set up once again.
-      if (!service->IsSyncRequested() &&
+      if (service->HasDisableReason(
+              syncer::SyncService::DISABLE_REASON_USER_CHOICE) &&
           status.sync_protocol_error.error_type == syncer::NOT_MY_BIRTHDAY) {
         if (status_label) {
           status_label->assign(GetSyncedStateStatusLabel(service, signin, style,
@@ -295,9 +268,9 @@ MessageType GetStatusInfo(Profile* profile,
     // or provide a link to continue with setup.
     if (service->IsFirstSetupInProgress()) {
       result_type = PRE_SYNCED;
-      ProfileSyncService::Status status;
+      syncer::SyncStatus status;
       service->QueryDetailedSyncStatus(&status);
-      AuthError auth_error =
+      GoogleServiceAuthError auth_error =
           SigninErrorControllerFactory::GetForProfile(profile)->auth_error();
       if (status_label) {
         status_label->assign(
@@ -308,8 +281,8 @@ MessageType GetStatusInfo(Profile* profile,
           status_label->assign(
               l10n_util::GetStringUTF16(IDS_SYNC_AUTHENTICATING_LABEL));
         }
-      } else if (auth_error.state() != AuthError::NONE &&
-                 auth_error.state() != AuthError::TWO_FACTOR) {
+      } else if (auth_error.state() != GoogleServiceAuthError::NONE &&
+                 auth_error.state() != GoogleServiceAuthError::TWO_FACTOR) {
         if (status_label && link_label) {
           GetStatusForAuthError(profile, signin, status_label, link_label,
                                 action_type);
@@ -348,16 +321,15 @@ MessageType GetStatusInfo(Profile* profile,
 }  // namespace
 
 MessageType GetStatusLabels(Profile* profile,
-                            ProfileSyncService* service,
+                            const ProfileSyncService* service,
                             const SigninManagerBase& signin,
-                            StatusLabelStyle style,
                             base::string16* status_label,
                             base::string16* link_label,
                             ActionType* action_type) {
   DCHECK(status_label);
   DCHECK(link_label);
-  return sync_ui_util::GetStatusInfo(profile, service, signin, style,
-                                     status_label, link_label, action_type);
+  return GetStatusInfo(profile, service, signin, PLAIN_TEXT, status_label,
+                       link_label, action_type);
 }
 
 #if !defined(OS_CHROMEOS)
@@ -366,7 +338,7 @@ AvatarSyncErrorType GetMessagesForAvatarSyncError(
     const SigninManagerBase& signin,
     int* content_string_id,
     int* button_string_id) {
-  ProfileSyncService* service =
+  const ProfileSyncService* service =
       ProfileSyncServiceFactory::GetForProfile(profile);
 
   // The order or priority is going to be: 1. Unrecoverable errors.
@@ -375,11 +347,11 @@ AvatarSyncErrorType GetMessagesForAvatarSyncError(
     // An unrecoverable error is sometimes accompanied by an actionable error.
     // If an actionable error is not set to be UPGRADE_CLIENT, then show a
     // generic unrecoverable error message.
-    ProfileSyncService::Status status;
+    syncer::SyncStatus status;
     service->QueryDetailedSyncStatus(&status);
     if (status.sync_protocol_error.action != syncer::UPGRADE_CLIENT) {
       // Display different messages and buttons for managed accounts.
-      if (SigninManagerFactory::GetForProfile(profile)->IsSignoutProhibited()) {
+      if (!signin_util::IsUserSignoutAllowedForProfile(profile)) {
         // For a managed user, the user is directed to the signout
         // confirmation dialogue in the settings page.
         *content_string_id = IDS_SYNC_ERROR_USER_MENU_SIGNOUT_MESSAGE;
@@ -415,7 +387,7 @@ AvatarSyncErrorType GetMessagesForAvatarSyncError(
   // Check for sync errors if the sync service is enabled.
   if (service) {
     // Check for an actionable UPGRADE_CLIENT error.
-    ProfileSyncService::Status status;
+    syncer::SyncStatus status;
     service->QueryDetailedSyncStatus(&status);
     if (status.sync_protocol_error.action == syncer::UPGRADE_CLIENT) {
       *content_string_id = IDS_SYNC_ERROR_USER_MENU_UPGRADE_MESSAGE;
@@ -424,9 +396,7 @@ AvatarSyncErrorType GetMessagesForAvatarSyncError(
     }
 
     // Check for a sync passphrase error.
-    syncer::SyncErrorController* sync_error_controller =
-        service->sync_error_controller();
-    if (sync_error_controller && sync_error_controller->HasError()) {
+    if (ShouldShowPassphraseError(service)) {
       *content_string_id = IDS_SYNC_ERROR_USER_MENU_PASSPHRASE_MESSAGE;
       *button_string_id = IDS_SYNC_ERROR_USER_MENU_PASSPHRASE_BUTTON;
       return PASSPHRASE_ERROR;
@@ -446,20 +416,16 @@ AvatarSyncErrorType GetMessagesForAvatarSyncError(
 #endif
 
 MessageType GetStatus(Profile* profile,
-                      ProfileSyncService* service,
+                      const ProfileSyncService* service,
                       const SigninManagerBase& signin) {
   ActionType action_type = NO_ACTION;
-  return sync_ui_util::GetStatusInfo(profile, service, signin, WITH_HTML,
-                                     nullptr, nullptr, &action_type);
+  return GetStatusInfo(profile, service, signin, WITH_HTML, nullptr, nullptr,
+                       &action_type);
 }
 
-base::string16 ConstructTime(int64_t time_in_int) {
-  base::Time time = base::Time::FromInternalValue(time_in_int);
-
-  // If time is null the format function returns a time in 1969.
-  if (time.is_null())
-    return base::string16();
-  return base::TimeFormatFriendlyDateAndTime(time);
+bool ShouldShowPassphraseError(const ProfileSyncService* service) {
+  return service->IsFirstSetupComplete() && service->IsPassphraseRequired() &&
+         service->IsPassphraseRequiredForDecryption();
 }
 
 }  // namespace sync_ui_util

@@ -26,12 +26,12 @@
 
 #include "third_party/blink/renderer/core/page/drag_data.h"
 
+#include "third_party/blink/renderer/core/clipboard/clipboard_mime_types.h"
 #include "third_party/blink/renderer/core/clipboard/data_object.h"
 #include "third_party/blink/renderer/core/dom/document_fragment.h"
 #include "third_party/blink/renderer/core/dom/range.h"
 #include "third_party/blink/renderer/core/editing/serializers/serialization.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
-#include "third_party/blink/renderer/platform/clipboard/clipboard_mime_types.h"
 #include "third_party/blink/renderer/platform/file_metadata.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
@@ -79,7 +79,7 @@ int DragData::GetModifiers() const {
 
 void DragData::AsFilePaths(Vector<String>& result) const {
   const Vector<String>& filenames = platform_drag_data_->Filenames();
-  for (size_t i = 0; i < filenames.size(); ++i) {
+  for (wtf_size_t i = 0; i < filenames.size(); ++i) {
     if (!filenames[i].IsEmpty())
       result.push_back(filenames[i]);
   }

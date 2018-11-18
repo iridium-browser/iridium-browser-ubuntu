@@ -25,11 +25,6 @@
 - (CGFloat)nativeContentHeaderHeightForContainerView:
     (CRWWebControllerContainerView*)containerView;
 
-// Returns the footers for any toolbars that overlap the bottom of native
-// content.
-- (CGFloat)nativeContentFooterHeightForContainerView:
-    (CRWWebControllerContainerView*)containerView;
-
 @end
 
 // Container view class that manages the display of content within
@@ -75,21 +70,6 @@
 
 // Removes the transient content view, if one is displayed.
 - (void)clearTransientContentView;
-
-#pragma mark Toolbars
-
-// |toolbar| will be resized to the container width, bottom-aligned, and added
-// as the topmost subview.
-- (void)addToolbar:(UIView*)toolbar;
-
-// Adds each toolbar in |toolbars|.
-- (void)addToolbars:(NSArray*)toolbars;
-
-// Removes |toolbar| as a subview.
-- (void)removeToolbar:(UIView*)toolbar;
-
-// Removes all toolbars added via |-addToolbar:|.
-- (void)removeAllToolbars;
 
 @end
 

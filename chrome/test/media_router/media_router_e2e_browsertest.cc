@@ -10,7 +10,6 @@
 #include "base/stl_util.h"
 #include "chrome/browser/media/router/media_router.h"
 #include "chrome/browser/media/router/media_router_factory.h"
-#include "chrome/browser/media/router/media_router_feature.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -55,7 +54,6 @@ MediaRouterE2EBrowserTest::~MediaRouterE2EBrowserTest() {
 
 void MediaRouterE2EBrowserTest::SetUpOnMainThread() {
   MediaRouterBaseBrowserTest::SetUpOnMainThread();
-  scoped_feature_list_.InitAndEnableFeature(kEnableCastLocalMedia);
   media_router_ =
       MediaRouterFactory::GetApiForBrowserContext(browser()->profile());
   DCHECK(media_router_);
@@ -69,6 +67,7 @@ void MediaRouterE2EBrowserTest::TearDownOnMainThread() {
 }
 
 void MediaRouterE2EBrowserTest::OnRouteResponseReceived(
+    mojom::RoutePresentationConnectionPtr,
     const RouteRequestResult& result) {
   ASSERT_TRUE(result.route());
   route_id_ = result.route()->media_route_id();
@@ -94,13 +93,11 @@ void MediaRouterE2EBrowserTest::CreateMediaRoute(
   const MediaSink& sink = it->second;
 
   // The callback will set route_id_ when invoked.
-  std::vector<MediaRouteResponseCallback> route_response_callbacks;
-  route_response_callbacks.push_back(
-      base::Bind(&MediaRouterE2EBrowserTest::OnRouteResponseReceived,
-                 base::Unretained(this)));
-  media_router_->CreateRoute(source.id(), sink.id(), origin, web_contents,
-                             std::move(route_response_callbacks),
-                             base::TimeDelta(), is_incognito());
+  media_router_->CreateRoute(
+      source.id(), sink.id(), origin, web_contents,
+      base::BindOnce(&MediaRouterE2EBrowserTest::OnRouteResponseReceived,
+                     base::Unretained(this)),
+      base::TimeDelta(), is_incognito());
 
   // Wait for the route request to be fulfilled (and route to be started).
   ASSERT_TRUE(ConditionalWait(

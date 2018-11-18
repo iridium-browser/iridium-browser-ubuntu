@@ -171,7 +171,8 @@
 
     <p>
         Before using the WebGL API, the author must obtain a <code>WebGLRenderingContext</code>
-        object for a given HTMLCanvasElement <a href="#refsCANVAS">[CANVAS]</a> as described
+        object for a given HTMLCanvasElement <a href="#refsCANVAS">[CANVAS]</a> or
+        OffscreenCanvas <a href="#refsOFFSCREENCANVAS">[OFFSCREENCANVAS]</a> as described
         below. This object is used to manage OpenGL state and render to the drawing buffer, which
         must be created at the time of context creation.
     </p>
@@ -183,7 +184,8 @@
     <p>
         Each <code>WebGLRenderingContext</code> has an
         associated <b><a name="context-canvas">canvas</a></b>, set upon creation, which is
-        a <em>canvas</em> <a href="#refsCANVAS">[CANVAS]</a>.
+        a <em>canvas</em> <a href="#refsCANVAS">[CANVAS]</a> or <em>offscreen
+        canvas</em> <a href="#refsOFFSCREENCANVAS">[OFFSCREENCANVAS]</a>.
     </p>
     <p>
         Each <code>WebGLRenderingContext</code> has <b><a name="context-creation-parameters">context
@@ -200,8 +202,8 @@
         context lost flag</a></b>, which is initially unset.
     </p>
     <p>
-        When the <code>getContext()</code> method of a <code>canvas</code> element is to return a
-        new object for
+        When the <code>getContext()</code> method of a <code>canvas</code> element
+        or <code>offscreen canvas</code> object is to return a new object for
         the <em>contextId</em> <code>webgl</code> <a href="#refsCANVASCONTEXTS">[CANVASCONTEXTS]</a>,
         the user agent must perform the following steps:
 
@@ -209,8 +211,8 @@
 
         <li> Create a new <code>WebGLRenderingContext</code> object, <em>context</em>.
 
-        <li> Let <em>context's</em> <a href="#context-canvas">canvas</a> be the canvas
-             the <code>getContext()</code> method is associated with.
+        <li> Let <em>context's</em> <a href="#context-canvas">canvas</a> be the canvas or offscreen
+             canvas the <code>getContext()</code> method is associated with.
 
         <li> Create a new <code>WebGLContextAttributes</code> object, <em>contextAttributes</em>.
 
@@ -273,9 +275,10 @@
         The table below shows all the buffers which make up the drawing buffer, along with their
         minimum sizes and whether they are defined or not by default. The size of this drawing
         buffer shall be determined by the <code>width</code> and <code>height</code> attributes of
-        the HTMLCanvasElement. The table below also shows the value to which these buffers shall be
-        cleared when first created, when the size is changed, or after presentation when
-        the <code>preserveDrawingBuffer</code> context creation attribute is <code>false</code>.
+        the HTMLCanvasElement or OffscreenCanvas. The table below also shows the value to which
+        these buffers shall be cleared when first created, when the size is changed, or after
+        presentation when the <code>preserveDrawingBuffer</code> context creation attribute
+        is <code>false</code>.
     </p>
     <table class="foo">
         <tr><th>Buffer</th><th>Clear value</th><th>Minimum size</th><th>Defined by default?</th></tr>
@@ -287,11 +290,11 @@
     <p>
         If the requested width or height cannot be satisfied, either when the drawing buffer is first
         created or when the <code>width</code> and <code>height</code> attributes of the
-        <code>HTMLCanvasElement</code> are changed, a drawing buffer with smaller dimensions shall
-        be created. The dimensions actually used are implementation dependent and there is no
-        guarantee that a buffer with the same aspect ratio will be created. The actual drawing
-        buffer size can be obtained from the <code>drawingBufferWidth</code> and
-        <code>drawingBufferHeight</code> attributes.
+        <code>HTMLCanvasElement</code> or <code>OffscreenCanvas</code> are changed, a drawing buffer
+        with smaller dimensions shall be created. The dimensions actually used are implementation
+        dependent and there is no guarantee that a buffer with the same aspect ratio will be
+        created. The actual drawing buffer size can be obtained from
+        the <code>drawingBufferWidth</code> and <code>drawingBufferHeight</code> attributes.
     </p>
     <p>
         A WebGL implementation must not perform any automatic scaling of the size of the drawing
@@ -899,7 +902,8 @@ var context = canvas.getContext('webgl',
         Each <code>WebGLObject</code> has
         an <b><a name="webgl-object-invalidated-flag">invalidated</a></b> flag, which is initially unset.
     </p>
-    <pre class="idl">interface <dfn id="WebGLObject">WebGLObject</dfn> {
+    <pre class="idl">[Exposed=(Window,Worker)]
+interface <dfn id="WebGLObject">WebGLObject</dfn> {
 };</pre>
 
 <!-- ======================================================================================================= -->
@@ -916,7 +920,8 @@ var context = canvas.getContext('webgl',
         <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-2.9">OpenGL ES 2.0 &sect;2.9</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glDeleteBuffers.xml">man page</a>)</span>
         .
     </p>
-    <pre class="idl">interface <dfn id="WebGLBuffer">WebGLBuffer</dfn> : WebGLObject {
+    <pre class="idl">[Exposed=(Window,Worker)]
+interface <dfn id="WebGLBuffer">WebGLBuffer</dfn> : WebGLObject {
 };</pre>
 
 <!-- ======================================================================================================= -->
@@ -933,7 +938,8 @@ var context = canvas.getContext('webgl',
         <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-4.4.1">OpenGL ES 2.0 &sect;4.4.1</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glDeleteFramebuffers.xml">man page</a>)</span>
         .
     </p>
-    <pre class="idl">interface <dfn id="WebGLFramebuffer">WebGLFramebuffer</dfn> : WebGLObject {
+    <pre class="idl">[Exposed=(Window,Worker)]
+interface <dfn id="WebGLFramebuffer">WebGLFramebuffer</dfn> : WebGLObject {
 };</pre>
 
 <!-- ======================================================================================================= -->
@@ -950,7 +956,8 @@ var context = canvas.getContext('webgl',
         <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-2.10.3">OpenGL ES 2.0 &sect;2.10.3</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glDeleteProgram.xml">man page</a>)</span>
         .
     </p>
-    <pre class="idl">interface <dfn id="WebGLProgram">WebGLProgram</dfn> : WebGLObject {
+    <pre class="idl">[Exposed=(Window,Worker)]
+interface <dfn id="WebGLProgram">WebGLProgram</dfn> : WebGLObject {
 };</pre>
 
 <!-- ======================================================================================================= -->
@@ -967,7 +974,8 @@ var context = canvas.getContext('webgl',
         <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-4.4.3">OpenGL ES 2.0 &sect;4.4.3</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glDeleteRenderbuffers.xml">man page</a>)</span>
         .
     </p>
-    <pre class="idl">interface <dfn id="WebGLRenderbuffer">WebGLRenderbuffer</dfn> : WebGLObject {
+    <pre class="idl">[Exposed=(Window,Worker)]
+interface <dfn id="WebGLRenderbuffer">WebGLRenderbuffer</dfn> : WebGLObject {
 };</pre>
 
 <!-- ======================================================================================================= -->
@@ -984,7 +992,8 @@ var context = canvas.getContext('webgl',
         <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-2.10.1">OpenGL ES 2.0 &sect;2.10.1</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glDeleteShader.xml">man page</a>)</span>
         .
     </p>
-    <pre class="idl">interface <dfn id="WebGLShader">WebGLShader</dfn> : WebGLObject {
+    <pre class="idl">[Exposed=(Window,Worker)]
+interface <dfn id="WebGLShader">WebGLShader</dfn> : WebGLObject {
 };</pre>
 
 <!-- ======================================================================================================= -->
@@ -1001,7 +1010,8 @@ var context = canvas.getContext('webgl',
         <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-3.7.13">OpenGL ES 2.0 &sect;3.7.13</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glDeleteTextures.xml">man page</a>)</span>
         .
     </p>
-    <pre class="idl">interface <dfn id="WebGLTexture">WebGLTexture</dfn> : WebGLObject {
+    <pre class="idl">[Exposed=(Window,Worker)]
+interface <dfn id="WebGLTexture">WebGLTexture</dfn> : WebGLObject {
 };</pre>
 
 <!-- ======================================================================================================= -->
@@ -1012,7 +1022,8 @@ var context = canvas.getContext('webgl',
         The <code>WebGLUniformLocation</code> interface represents the location of a uniform variable
         in a shader program.
     </p>
-    <pre class="idl">interface <dfn id="WebGLUniformLocation">WebGLUniformLocation</dfn> {
+    <pre class="idl">[Exposed=(Window,Worker)]
+interface <dfn id="WebGLUniformLocation">WebGLUniformLocation</dfn> {
 };</pre>
 
 <!-- ======================================================================================================= -->
@@ -1023,7 +1034,8 @@ var context = canvas.getContext('webgl',
         The <code>WebGLActiveInfo</code> interface represents the information returned
         from the getActiveAttrib and getActiveUniform calls.
     </p>
-    <pre class="idl">interface <dfn id="WebGLActiveInfo">WebGLActiveInfo</dfn> {
+    <pre class="idl">[Exposed=(Window,Worker)]
+interface <dfn id="WebGLActiveInfo">WebGLActiveInfo</dfn> {
     readonly attribute GLint size;
     readonly attribute GLenum type;
     readonly attribute DOMString name;
@@ -1073,7 +1085,8 @@ var context = canvas.getContext('webgl',
         The <code>WebGLShaderPrecisionFormat</code> interface represents the information returned
         from the getShaderPrecisionFormat call.
     </p>
-    <pre class="idl">interface <dfn id="WebGLShaderPrecisionFormat">WebGLShaderPrecisionFormat</dfn> {
+    <pre class="idl">[Exposed=(Window,Worker)]
+interface <dfn id="WebGLShaderPrecisionFormat">WebGLShaderPrecisionFormat</dfn> {
     readonly attribute GLint rangeMin;
     readonly attribute GLint rangeMax;
     readonly attribute GLint precision;
@@ -1235,7 +1248,8 @@ typedef (ImageBitmap or
          ImageData or
          HTMLImageElement or
          HTMLCanvasElement or
-         HTMLVideoElement) TexImageSource;
+         HTMLVideoElement or
+         OffscreenCanvas) TexImageSource;
 
 typedef ([AllowShared] Float32Array or sequence&lt;GLfloat&gt;) Float32List;
 typedef ([AllowShared] Int32Array or sequence&lt;GLint&gt;) Int32List;
@@ -1661,7 +1675,8 @@ interface mixin <dfn id="WebGLRenderingContextBase">WebGLRenderingContextBase</d
     const GLenum UNPACK_COLORSPACE_CONVERSION_WEBGL = 0x9243;
     const GLenum BROWSER_DEFAULT_WEBGL          = 0x9244;
 
-    readonly attribute HTMLCanvasElement canvas;
+    [Exposed=Window] readonly attribute (HTMLCanvasElement or OffscreenCanvas) canvas;
+    [Exposed=Worker] readonly attribute OffscreenCanvas canvas;
     readonly attribute GLsizei drawingBufferWidth;
     readonly attribute GLsizei drawingBufferHeight;
 
@@ -1869,6 +1884,7 @@ interface mixin <dfn id="WebGLRenderingContextBase">WebGLRenderingContextBase</d
     void viewport(GLint x, GLint y, GLsizei width, GLsizei height);
 };
 
+[Exposed=(Window,Worker)]
 interface <dfn id="WebGLRenderingContext">WebGLRenderingContext</dfn>
 {
 };
@@ -1890,9 +1906,9 @@ WebGLRenderingContext includes WebGLRenderingContextBase;
                     canvas
                 </a>
             </code>
-            of type <code>HTMLCanvasElement</code>
+            of type <code>(HTMLCanvasElement or OffscreenCanvas)</code>
         <dd>
-            A reference to the canvas element which created this context.
+            A reference to the canvas element or OffscreenCanvas object which created this context.
 
         <dt>
             <code class=attribute-name>
@@ -2204,6 +2220,9 @@ WebGLRenderingContext includes WebGLRenderingContextBase;
         <dt class="idl-code">void bindBuffer(GLenum target, WebGLBuffer? buffer)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-2.9">OpenGL ES 2.0 &sect;2.9</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glBindBuffer.xml">man page</a>)</span>
         <dd>
+            If <code>buffer</code> was generated by a different <code>WebGLRenderingContext</code>
+            than this one, generates an <code>INVALID_OPERATION</code> error. <br><br>
+
             Binds the given WebGLBuffer object to the given binding point (target), either
             ARRAY_BUFFER or ELEMENT_ARRAY_BUFFER. If the buffer is null then any buffer currently
             bound to this target is unbound. A given WebGLBuffer object may only be bound to one of
@@ -2243,6 +2262,8 @@ WebGLRenderingContext includes WebGLRenderingContextBase;
         <dt class="idl-code">void deleteBuffer(WebGLBuffer? buffer)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-2.9">OpenGL ES 2.0 &sect;2.9</a>, similar to <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glDeleteBuffers.xml">glDeleteBuffers</a>)</span>
         <dd>
+            If <code>buffer</code> was generated by a different <code>WebGLRenderingContext</code>
+            than this one, generates an <code>INVALID_OPERATION</code> error. <br><br>
             Mark for deletion the buffer object contained in the passed WebGLBuffer, as if by
             calling glDeleteBuffers.
             If the object has already been marked for deletion, the call has no effect. Note that
@@ -2266,6 +2287,9 @@ WebGLRenderingContext includes WebGLRenderingContextBase;
         <dd>
             Return true if the passed WebGLBuffer is valid and false otherwise. <br><br>
 
+            Returns false if the buffer was generated by a
+            different <code>WebGLRenderingContext</code> than this one. <br><br>
+
             Returns false if the buffer's <a href="#webgl-object-invalidated-flag">invalidated
             flag</a> is set.
     </dl>
@@ -2284,6 +2308,10 @@ WebGLRenderingContext includes WebGLRenderingContextBase;
         <dt class="idl-code">void bindFramebuffer(GLenum target, WebGLFramebuffer? framebuffer)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-4.4.1">OpenGL ES 2.0 &sect;4.4.1</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glBindFramebuffer.xml">man page</a>)</span>
         <dd>
+            If <code>framebuffer</code> was generated by a
+            different <code>WebGLRenderingContext</code> than this one, generates
+            an <code>INVALID_OPERATION</code> error. <br><br>
+
             Bind the given <code class="interface">WebGLFramebuffer</code> object to the given binding point
             (<code class="param">target</code>), which must be <code class="enum">FRAMEBUFFER</code>.
             If <code class="param">framebuffer</code> is null, the default framebuffer provided by the context
@@ -2307,6 +2335,9 @@ WebGLRenderingContext includes WebGLRenderingContextBase;
         <dt class="idl-code">void deleteFramebuffer(WebGLFramebuffer? buffer)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-4.4.1">OpenGL ES 2.0 &sect;4.4.1</a>, similar to <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glDeleteFramebuffers.xml">glDeleteFramebuffers</a>)</span>
         <dd>
+            If <code>framebuffer</code> was generated by a different <code>WebGLRenderingContext</code>
+            than this one, generates an <code>INVALID_OPERATION</code> error. <br><br>
+
             Mark for deletion the framebuffer object contained in the passed WebGLFramebuffer, as if
             by calling glDeleteFramebuffers.
             If the object has already been marked for deletion, the call has no effect. Note that
@@ -2317,9 +2348,15 @@ WebGLRenderingContext includes WebGLRenderingContextBase;
                                  GLenum renderbuffertarget,
                                  WebGLRenderbuffer? renderbuffer)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-4.4.3">OpenGL ES 2.0 &sect;4.4.3</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glFramebufferRenderbuffer.xml">man page</a>)</span></dt>
+        <dd>
+            If <code>renderbuffer</code> was generated by a different <code>WebGLRenderingContext</code>
+            than this one, generates an <code>INVALID_OPERATION</code> error. <br><br>
         <dt class="idl-code">void framebufferTexture2D(GLenum target, GLenum attachment, GLenum textarget,
                               WebGLTexture? texture, GLint level)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-4.4.3">OpenGL ES 2.0 &sect;4.4.3</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glFramebufferTexture2D.xml">man page</a>)</span>
+        <dd>
+            If <code>texture</code> was generated by a different <code>WebGLRenderingContext</code>
+            than this one, generates an <code>INVALID_OPERATION</code> error. <br><br>
         <dt class="idl-code">any getFramebufferAttachmentParameter(GLenum target, GLenum attachment,
                                           GLenum pname)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-6.1.3">OpenGL ES 2.0 &sect;6.1.3</a>, similar to <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glGetFramebufferAttachmentParameteriv.xml">glGetFramebufferAttachmentParameteriv</a>)</span>
@@ -2340,6 +2377,9 @@ WebGLRenderingContext includes WebGLRenderingContextBase;
         <dd>
             Return true if the passed WebGLFramebuffer is valid and false otherwise. <br><br>
 
+            Returns false if the framebuffer was generated by a
+            different <code>WebGLRenderingContext</code> than this one. <br><br>
+
             Returns false if the framebuffer's <a href="#webgl-object-invalidated-flag">invalidated
             flag</a> is set.
     </dl>
@@ -2357,6 +2397,10 @@ WebGLRenderingContext includes WebGLRenderingContextBase;
         <dt class="idl-code">void bindRenderbuffer(GLenum target, WebGLRenderbuffer? renderbuffer)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-4.4.3">OpenGL ES 2.0 &sect;4.4.3</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glBindRenderbuffer.xml">man page</a>)</span>
         <dd>
+            If <code>renderbuffer</code> was generated by a
+            different <code>WebGLRenderingContext</code> than this one, generates
+            an <code>INVALID_OPERATION</code> error. <br><br>
+
             Bind the given <code class="interface">WebGLRenderbuffer</code> object to the given binding point
             (<code class="param">target</code>), which must be <code class="enum">RENDERBUFFER</code>.
             If <code class="param">renderbuffer</code> is null the renderbuffer object currently bound to
@@ -2373,6 +2417,8 @@ WebGLRenderingContext includes WebGLRenderingContextBase;
         <dt class="idl-code">void deleteRenderbuffer(WebGLRenderbuffer? renderbuffer)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-4.4.3">OpenGL ES 2.0 &sect;4.4.3</a>, similar to <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glDeleteRenderbuffers.xml">glDeleteRenderbuffers</a>)</span>
         <dd>
+            If <code>renderbuffer</code> was generated by a different <code>WebGLRenderingContext</code>
+            than this one, generates an <code>INVALID_OPERATION</code> error. <br><br>
             Mark for deletion the renderbuffer object contained in the passed WebGLRenderbuffer, as
             if by calling glDeleteRenderbuffers.
             If the object has already been marked for deletion, the call has no effect. Note that
@@ -2403,6 +2449,9 @@ WebGLRenderingContext includes WebGLRenderingContextBase;
         <dd>
             Return true if the passed WebGLRenderbuffer is valid and false otherwise. <br><br>
 
+            Returns false if the renderbuffer was generated by a
+            different <code>WebGLRenderingContext</code> than this one. <br><br>
+
             Returns false if the renderbuffer's <a href="#webgl-object-invalidated-flag">invalidated
             flag</a> is set.
         <dt class="idl-code">void renderbufferStorage(GLenum target, GLenum internalformat,
@@ -2424,6 +2473,9 @@ WebGLRenderingContext includes WebGLRenderingContextBase;
         <dt class="idl-code">void bindTexture(GLenum target, WebGLTexture? texture)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-3.7.13">OpenGL ES 2.0 &sect;3.7.13</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glBindTexture.xml">man page</a>)</span>
         <dd>
+            If <code>texture</code> was generated by a different <code>WebGLRenderingContext</code>
+            than this one, generates an <code>INVALID_OPERATION</code> error. <br><br>
+
             An attempt to bind an object marked for deletion will generate an
             <code>INVALID_OPERATION</code> error, and the current binding will remain untouched.
 
@@ -2478,6 +2530,8 @@ WebGLRenderingContext includes WebGLRenderingContextBase;
         <dt class="idl-code">void deleteTexture(WebGLTexture? texture)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-3.7.13">OpenGL ES 2.0 &sect;3.7.13</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glDeleteTextures.xml">man page</a>)</span>
         <dd>
+            If <code>texture</code> was generated by a different <code>WebGLRenderingContext</code>
+            than this one, generates an <code>INVALID_OPERATION</code> error. <br><br>
             Mark for deletion the texture object contained in the passed WebGLTexture, as if by
             calling glDeleteTextures.
             If the object has already been marked for deletion, the call has no effect. Note that
@@ -2509,6 +2563,9 @@ WebGLRenderingContext includes WebGLRenderingContextBase;
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-6.1.4">OpenGL ES 2.0 &sect;6.1.4</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glIsTexture.xml">man page</a>)</span>
         <dd>
             Return true if the passed WebGLTexture is valid and false otherwise. <br><br>
+
+            Returns false if the texture was generated by a
+            different <code>WebGLRenderingContext</code> than this one. <br><br>
 
             Returns false if the texture's <a href="#webgl-object-invalidated-flag">invalidated
             flag</a> is set.
@@ -2570,12 +2627,13 @@ WebGLRenderingContext includes WebGLRenderingContextBase;
 
             <div class="note">
 
-            Some implementations of HTMLCanvasElement's CanvasRenderingContext2D store color values
-            internally in premultiplied form. If such a canvas is uploaded to a WebGL texture with
-            the <code>UNPACK_PREMULTIPLY_ALPHA_WEBGL</code> pixel storage parameter set to false,
-            the color channels will have to be un-multiplied by the alpha channel, which is a lossy
-            operation. The WebGL implementation therefore can not guarantee that colors with alpha <
-            1.0 will be preserved losslessly when first drawn to a canvas via
+            Some implementations of HTMLCanvasElement's or OffscreenCanvas's
+            CanvasRenderingContext2D store color values internally in premultiplied form. If such a
+            canvas is uploaded to a WebGL texture with the
+            <code>UNPACK_PREMULTIPLY_ALPHA_WEBGL</code> pixel storage parameter set to false, the
+            color channels will have to be un-multiplied by the alpha channel, which is a lossy
+            operation. The WebGL implementation therefore can not guarantee that colors with alpha
+            &lt; 1.0 will be preserved losslessly when first drawn to a canvas via
             CanvasRenderingContext2D and then uploaded to a WebGL texture when
             the <code>UNPACK_PREMULTIPLY_ALPHA_WEBGL</code> pixel storage parameter is set to false.
 
@@ -2592,9 +2650,10 @@ WebGLRenderingContext includes WebGLRenderingContextBase;
 
             If this function is called with an <code>HTMLImageElement</code>
             or <code>HTMLVideoElement</code> whose origin differs from the origin of the containing
-            Document, or with an <code>HTMLCanvasElement</code> or <code>ImageBitmap</code> whose
-            bitmap's <i>origin-clean</i> flag is set to false, a <code>SECURITY_ERR</code> exception
-            must be thrown. See <a href="#ORIGIN_RESTRICTIONS">Origin Restrictions</a>.<br><br>
+            Document, or with an <code>HTMLCanvasElement</code>, <code>ImageBitmap</code>
+            or <code>OffscreenCanvas</code> whose bitmap's <i>origin-clean</i> flag is set to false,
+            a <code>SECURITY_ERR</code> exception must be
+            thrown. See <a href="#ORIGIN_RESTRICTIONS">Origin Restrictions</a>.<br><br>
 
             If <code>source</code> is null then an <code>INVALID_VALUE</code> error is
             generated. <br><br>
@@ -2667,9 +2726,10 @@ WebGLRenderingContext includes WebGLRenderingContextBase;
 
             If this function is called with an <code>HTMLImageElement</code>
             or <code>HTMLVideoElement</code> whose origin differs from the origin of the containing
-            Document, or with an <code>HTMLCanvasElement</code> or <code>ImageBitmap</code> whose
-            bitmap's <i>origin-clean</i> flag is set to false, a <code>SECURITY_ERR</code> exception
-            must be thrown. See <a href="#ORIGIN_RESTRICTIONS">Origin Restrictions</a>.<br><br>
+            Document, or with an <code>HTMLCanvasElement</code>, <code>ImageBitmap</code>,
+            or <code>OffscreenCanvas</code> whose bitmap's <i>origin-clean</i> flag is set to false,
+            a <code>SECURITY_ERR</code> exception must be thrown. See
+            <a href="#ORIGIN_RESTRICTIONS">Origin Restrictions</a>.<br><br>
 
             If <code>source</code> is null then an <code>INVALID_VALUE</code> error is
             generated. <br><br>
@@ -2689,9 +2749,16 @@ WebGLRenderingContext includes WebGLRenderingContextBase;
     <dl class="methods">
         <dt class="idl-code">void attachShader(WebGLProgram program, WebGLShader shader)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-2.10.3">OpenGL ES 2.0 &sect;2.10.3</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glAttachShader.xml">man page</a>)</span>
+        <dd>
+            If either <code>program</code> or <code>shader</code> were generated by a different
+            <code>WebGLRenderingContext</code> than this one, generates
+            an <code>INVALID_OPERATION</code> error.
         <dt class="idl-code">void bindAttribLocation(WebGLProgram program, GLuint index, DOMString name)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-2.10.4">OpenGL ES 2.0 &sect;2.10.4</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glBindAttribLocation.xml">man page</a>)</span>
         <dd>
+            If <code>program</code> was generated by a different <code>WebGLRenderingContext</code>
+            than this one, generates an <code>INVALID_OPERATION</code> error. <br><br>
+
             If the passed name is longer than the restriction defined
             in <a href="#MAX_LOCATION_LENGTHS">Maximum Uniform and Attribute Location Lengths</a>,
             generates an <code>INVALID_VALUE</code> error. <br><br>
@@ -2705,6 +2772,9 @@ WebGLRenderingContext includes WebGLRenderingContextBase;
         <dt class="idl-code">void compileShader(WebGLShader shader)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-2.10.1">OpenGL ES 2.0 &sect;2.10.1</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glCompileShader.xml">man page</a>)</span>
         <dd>
+            If <code>shader</code> was generated by a different <code>WebGLRenderingContext</code>
+            than this one, generates an <code>INVALID_OPERATION</code> error. <br><br>
+
             See <a href="#SUPPORTED_GLSL_CONSTRUCTS">Supported GLSL
             Constructs</a>, <a href="#MAX_GLSL_TOKEN_SIZE">Maximum GLSL Token
             Size</a>, <a href="#CHARACTERS_OUTSIDE_VALID_SET">Characters Outside the GLSL Source
@@ -2727,6 +2797,9 @@ WebGLRenderingContext includes WebGLRenderingContextBase;
         <dt class="idl-code">void deleteProgram(WebGLProgram? program)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-2.10.3">OpenGL ES 2.0 &sect;2.10.3</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glDeleteProgram.xml">man page</a>)</span>
         <dd>
+            If <code>program</code> was generated by a different <code>WebGLRenderingContext</code>
+            than this one, generates an <code>INVALID_OPERATION</code> error. <br><br>
+
             Mark for deletion the program object contained in the passed WebGLProgram, as if by
             calling glDeleteProgram.
             If the object has already been marked for deletion, the call has no effect. Note that
@@ -2736,6 +2809,9 @@ WebGLRenderingContext includes WebGLRenderingContextBase;
         <dt class="idl-code">void deleteShader(WebGLShader? shader)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-2.10.1">OpenGL ES 2.0 &sect;2.10.1</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glDeleteShader.xml">man page</a>)</span>
         <dd>
+            If <code>shader</code> was generated by a different <code>WebGLRenderingContext</code>
+            than this one, generates an <code>INVALID_OPERATION</code> error. <br><br>
+
             Mark for deletion the shader object contained in the passed WebGLShader, as if by
             calling glDeleteShader.
             If the object has already been marked for deletion, the call has no effect. Note that
@@ -2744,9 +2820,16 @@ WebGLRenderingContext includes WebGLRenderingContextBase;
 
         <dt class="idl-code">void detachShader(WebGLProgram program, WebGLShader shader)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-2.10.3">OpenGL ES 2.0 &sect;2.10.3</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glDetachShader.xml">man page</a>)</span>
+        <dd>
+            If either <code>program</code> or <code>shader</code> were generated by a different
+            <code>WebGLRenderingContext</code> than this one, generates
+            an <code>INVALID_OPERATION</code> error.
         <dt class="idl-code">sequence&lt;WebGLShader&gt;? getAttachedShaders(WebGLProgram program)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-6.1.8">OpenGL ES 2.0 &sect;6.1.8</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glGetAttachedShaders.xml">man page</a>)</span>
         <dd>
+            If <code>program</code> was generated by a different <code>WebGLRenderingContext</code>
+            than this one, generates an <code>INVALID_OPERATION</code> error. <br><br>
+
             <p>Returns a new object representing the list of shaders attached to the passed program.</p>
 
             <p>Returns null if any OpenGL errors are generated during the execution of this
@@ -2754,6 +2837,9 @@ WebGLRenderingContext includes WebGLRenderingContextBase;
         <dt class="idl-code">any getProgramParameter(WebGLProgram program, GLenum pname)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-6.1.8">OpenGL ES 2.0 &sect;6.1.8</a>, similar to <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glGetProgramiv.xml">man page</a>)</span>
         <dd>
+            If <code>program</code> was generated by a different <code>WebGLRenderingContext</code>
+            than this one, generates an <code>INVALID_OPERATION</code> error. <br><br>
+
             Return the value for the passed pname given the passed program. The type returned is the natural
             type for the requested pname, as given in the following table:
             <table class="foo">
@@ -2771,11 +2857,17 @@ WebGLRenderingContext includes WebGLRenderingContextBase;
         <dt class="idl-code">DOMString? getProgramInfoLog(WebGLProgram program)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-6.1.8">OpenGL ES 2.0 &sect;6.1.8</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glGetProgramInfoLog.xml">man page</a>)</span>
         <dd>
+            If <code>program</code> was generated by a different <code>WebGLRenderingContext</code>
+            than this one, generates an <code>INVALID_OPERATION</code> error. <br><br>
+
             <p>Returns null if any OpenGL errors are generated during the execution of this
             function.</p>
         <dt class="idl-code">any getShaderParameter(WebGLShader shader, GLenum pname)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-6.1.8">OpenGL ES 2.0 &sect;6.1.8</a>, similar to <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glGetShaderiv.xml">man page</a>)</span>
         <dd>
+            If <code>shader</code> was generated by a different <code>WebGLRenderingContext</code>
+            than this one, generates an <code>INVALID_OPERATION</code> error. <br><br>
+
             Return the value for the passed pname given the passed shader. The type returned is the natural
             type for the requested pname, as given in the following table:
             <table class="foo">
@@ -2800,11 +2892,17 @@ WebGLRenderingContext includes WebGLRenderingContextBase;
         <dt class="idl-code">DOMString? getShaderInfoLog(WebGLShader shader)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-6.1.8">OpenGL ES 2.0 &sect;6.1.8</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glGetShaderInfoLog.xml">man page</a>)</span>
         <dd>
+            If <code>shader</code> was generated by a different <code>WebGLRenderingContext</code>
+            than this one, generates an <code>INVALID_OPERATION</code> error. <br><br>
+
             <p>Returns null if any OpenGL errors are generated during the execution of this
             function.</p>
         <dt class="idl-code">DOMString? getShaderSource(WebGLShader shader)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-6.1.8">OpenGL ES 2.0 &sect;6.1.8</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glGetShaderSource.xml">man page</a>)</span>
         <dd>
+            If <code>shader</code> was generated by a different <code>WebGLRenderingContext</code>
+            than this one, generates an <code>INVALID_OPERATION</code> error. <br><br>
+
             <p>Returns null if any OpenGL errors are generated during the execution of this
             function.</p>
         <dt class="idl-code">[WebGLHandlesContextLoss] GLboolean isProgram(WebGLProgram? program)
@@ -2812,6 +2910,8 @@ WebGLRenderingContext includes WebGLRenderingContextBase;
         <dd>
             Return true if the passed WebGLProgram is valid and false otherwise. <br><br>
 
+            Returns false if the program was generated by a
+            different <code>WebGLRenderingContext</code> than this one. <br><br>
             Returns false if the program's <a href="#webgl-object-invalidated-flag">invalidated
             flag</a> is set.
         <dt class="idl-code">[WebGLHandlesContextLoss] GLboolean isShader(WebGLShader? shader)
@@ -2819,11 +2919,17 @@ WebGLRenderingContext includes WebGLRenderingContextBase;
         <dd>
             Return true if the passed WebGLShader is valid and false otherwise. <br><br>
 
+            Returns false if the shader was generated by a
+            different <code>WebGLRenderingContext</code> than this one. <br><br>
+
             Returns false if the shader's <a href="#webgl-object-invalidated-flag">invalidated
             flag</a> is set.
         <dt class="idl-code">void linkProgram(WebGLProgram program)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-2.10.3">OpenGL ES 2.0 &sect;2.10.3</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glLinkProgram.xml">man page</a>)</span>
         <dd>
+            If <code>program</code> was generated by a different <code>WebGLRenderingContext</code>
+            than this one, generates an <code>INVALID_OPERATION</code> error. <br><br>
+
             Links the passed program object. Details of the behavior are defined in the OpenGL ES
             2.0 specification, with the following clarifications: linkProgram is the only API in
             this group which affects the passed program's link status, and the internal executable
@@ -2844,6 +2950,9 @@ WebGLRenderingContext includes WebGLRenderingContextBase;
         <dt class="idl-code">void shaderSource(WebGLShader shader, DOMString source)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-2.10.1">OpenGL ES 2.0 &sect;2.10.1</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glShaderSource.xml">man page</a>)</span>
         <dd>
+            If <code>shader</code> was generated by a different <code>WebGLRenderingContext</code>
+            than this one, generates an <code>INVALID_OPERATION</code> error. <br><br>
+
             See <a href="#SUPPORTED_GLSL_CONSTRUCTS">Supported GLSL
             Constructs</a>, <a href="#MAX_GLSL_TOKEN_SIZE">Maximum GLSL Token
             Size</a>, <a href="#CHARACTERS_OUTSIDE_VALID_SET">Characters Outside the GLSL Source
@@ -2853,8 +2962,14 @@ WebGLRenderingContext includes WebGLRenderingContextBase;
             and additional validation performed by WebGL implementations.
         <dt class="idl-code">void useProgram(WebGLProgram? program)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-2.10.3">OpenGL ES 2.0 &sect;2.10.3</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glUseProgram.xml">man page</a>)</span>
+        <dd>
+            If <code>program</code> was generated by a different <code>WebGLRenderingContext</code>
+            than this one, generates an <code>INVALID_OPERATION</code> error. <br><br>
         <dt class="idl-code">void validateProgram(WebGLProgram program)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-2.10.5">OpenGL ES 2.0 &sect;2.10.5</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glValidateProgram.xml">man page</a>)</span>
+        <dd>
+            If <code>program</code> was generated by a different <code>WebGLRenderingContext</code>
+            than this one, generates an <code>INVALID_OPERATION</code> error. <br><br>
     </dl>
 
 <!-- ======================================================================================================= -->
@@ -2878,6 +2993,9 @@ WebGLRenderingContext includes WebGLRenderingContextBase;
         <dt class="idl-code">WebGLActiveInfo? getActiveAttrib(WebGLProgram program, GLuint index)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-2.10.4">OpenGL ES 2.0 &sect;2.10.4</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glGetActiveAttrib.xml">man page</a>)</span>
         <dd>
+            If <code>program</code> was generated by a different <code>WebGLRenderingContext</code>
+            than this one, generates an <code>INVALID_OPERATION</code> error. <br><br>
+
             Returns a new <code>WebGLActiveInfo</code> object describing the size, type and name of
             the vertex attribute at the passed index of the passed program object. If the passed
             index is out of range, generates an <code>INVALID_VALUE</code> error and returns null.
@@ -2886,6 +3004,9 @@ WebGLRenderingContext includes WebGLRenderingContextBase;
         <dt class="idl-code">WebGLActiveInfo? getActiveUniform(WebGLProgram program, GLuint index)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-2.10.4">OpenGL ES 2.0 &sect;2.10.4</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glGetActiveUniform.xml">man page</a>)</span>
         <dd>
+            If <code>program</code> was generated by a different <code>WebGLRenderingContext</code>
+            than this one, generates an <code>INVALID_OPERATION</code> error. <br><br>
+
             Returns a new <code>WebGLActiveInfo</code> object describing the size, type and name of
             the uniform at the passed index of the passed program object. If the passed index is out
             of range, generates an <code>INVALID_VALUE</code> error and returns null.
@@ -2894,6 +3015,9 @@ WebGLRenderingContext includes WebGLRenderingContextBase;
         <dt class="idl-code">[WebGLHandlesContextLoss] GLint getAttribLocation(WebGLProgram program, DOMString name)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-2.10.4">OpenGL ES 2.0 &sect;2.10.4</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glGetAttribLocation.xml">man page</a>)</span>
         <dd>
+            If <code>program</code> was generated by a different <code>WebGLRenderingContext</code>
+            than this one, generates an <code>INVALID_OPERATION</code> error and returns -1. <br><br>
+
             If the passed name is longer than the restriction defined
             in <a href="#MAX_LOCATION_LENGTHS">Maximum Uniform and Attribute Location Lengths</a>,
             generates an <code>INVALID_VALUE</code> error and returns -1. <br><br>
@@ -2913,6 +3037,10 @@ WebGLRenderingContext includes WebGLRenderingContextBase;
         <dt class="idl-code">any getUniform(WebGLProgram program, WebGLUniformLocation location)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-6.1.8">OpenGL ES 2.0 &sect;6.1.8</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glGetUniform.xml">man page</a>)</span>
         <dd>
+            If either <code>program</code> or <code>location</code> were generated by a
+            different <code>WebGLRenderingContext</code> than this one, generates
+            an <code>INVALID_OPERATION</code> error. <br><br>
+
             Return the uniform value at the passed location in the passed program. The type returned is
             dependent on the uniform type, as shown in the following table:
             <table class="foo">
@@ -2941,6 +3069,9 @@ WebGLRenderingContext includes WebGLRenderingContextBase;
         <dt class="idl-code">WebGLUniformLocation? getUniformLocation(WebGLProgram program, DOMString name)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-2.10.4">OpenGL ES 2.0 &sect;2.10.4</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glGetUniformLocation.xml">man page</a>)</span>
         <dd>
+            If <code>program</code> was generated by a different <code>WebGLRenderingContext</code>
+            than this one, generates an <code>INVALID_OPERATION</code> error. <br><br>
+
             <p>Return a new <code>WebGLUniformLocation</code> that represents the location of a
             specific uniform variable within a program object. The return value is null if name does
             not correspond to an active uniform variable in the passed program.</p>
@@ -3009,6 +3140,10 @@ WebGLRenderingContext includes WebGLRenderingContextBase;
            <code>vertexAttrib</code> are guaranteed to be returned from the <code>getVertexAttrib</code> function
            with the <code>CURRENT_VERTEX_ATTRIB</code> param, even if there have been intervening calls to
            <code>drawArrays</code> or <code>drawElements</code>.
+           <br><br>
+           If the array passed to any of the vector forms (those ending in <code>v</code>) is too
+           short, an <code>INVALID_VALUE</code> error will be generated.
+
        <dt class="idl-code">void vertexAttribPointer(GLuint index, GLint size, GLenum type,
                             GLboolean normalized, GLsizei stride, GLintptr offset)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/2.0/es_full_spec_2.0.25.pdf#nameddest=section-2.8">OpenGL ES 2.0 &sect;2.8</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/2.0/docs/man/xhtml/glVertexAttribPointer.xml">man page</a>)</span>
@@ -3203,7 +3338,7 @@ WebGLRenderingContext includes WebGLRenderingContextBase;
     <p>
         WebGL generates a <code>WebGLContextEvent</code> event in response to important changes in status of a
         WebGL rendering context. Events are sent using the DOM Event System <a href="#refsDOM3EVENTS">[DOM3EVENTS]</a>,
-        and are dispatched to the HTMLCanvasElement associated with the WebGL rendering context.
+        and are dispatched to the HTMLCanvasElement or OffscreenCanvas associated with the WebGL rendering context.
         The types of status changes that can trigger a <code>WebGLContextEvent</code> event are <a href="#CONTEXT_LOST">
         the loss of the context</a>, <a href="#CONTEXT_RESTORED">the restoration of the context</a>, and
         <a href="#CONTEXT_CREATION_ERROR"> the inability to create a context</a>.
@@ -3221,7 +3356,9 @@ WebGLRenderingContext includes WebGLRenderingContextBase;
         given object.
     </p>
     <pre class="idl">
-[Constructor(DOMString type, optional WebGLContextEventInit eventInit)]
+[Exposed=(Window,Worker),
+ Constructor(DOMString type,
+ optional WebGLContextEventInit eventInit)]
 interface <dfn id="WebGLContextLostEvent">WebGLContextEvent</dfn> : <a href="http://www.w3.org/TR/domcore/#event">Event</a> {
     readonly attribute DOMString statusMessage;
 };
@@ -3462,12 +3599,22 @@ the state of the binding point will remain untouched.
     <h3>No Client Side Arrays</h3>
 
 <p>
+The WebGL API does not support client-side arrays.
 
-The WebGL API does not support client-side arrays. If <code>vertexAttribPointer</code> is called
-without a <code>WebGLBuffer</code> bound to the <code>ARRAY_BUFFER</code> binding point, and
-<code>offset</code> is non-zero, an <code>INVALID_OPERATION</code> error is generated. If
-<code>drawElements</code> is called with a <code>count</code> greater than zero, and no
-<code>WebGLBuffer</code> is bound to the <code>ELEMENT_ARRAY_BUFFER</code> binding point, an
+<p>
+If a vertex attribute is enabled as an array via <code>enableVertexAttribArray</code> but no buffer
+is bound to that attribute (generally via <code>bindBuffer</code> and
+<code>vertexAttribPointer</code>), then draw commands (<code>drawArrays</code> or
+<code>drawElements</code>) will generate an <code>INVALID_OPERATION</code> error.
+
+<p>
+If an indexed draw command (<code>drawElements</code>) is called and no <code>WebGLBuffer</code> is
+bound to the <code>ELEMENT_ARRAY_BUFFER</code> binding point, an <code>INVALID_OPERATION</code>
+error is generated.
+
+<p>
+If <code>vertexAttribPointer</code> is called without a <code>WebGLBuffer</code> bound to the
+<code>ARRAY_BUFFER</code> binding point, and <code>offset</code> is non-zero, an
 <code>INVALID_OPERATION</code> error is generated.
 
 <div class="note rationale">
@@ -3479,8 +3626,6 @@ without a <code>WebGLBuffer</code> bound to the <code>ARRAY_BUFFER</code> bindin
     This also matches the behavior in OpenGL ES 3.0.5 <a href="#refsGLES30">[GLES30]</a> p25 for
     non-default VAO objects.
 </div>
-
-</p>
 
     <h3>No Default Textures</h3>
 
@@ -3540,20 +3685,11 @@ an <code>INVALID_VALUE</code> error is generated.
     <h3><a name="ATTRIBS_AND_RANGE_CHECKING">Enabled Vertex Attributes and Range Checking</a></h3>
 
 <p>
-
-If a vertex attribute is enabled as an array via <code>enableVertexAttribArray</code> but no buffer
-is bound to that attribute via <code>bindBuffer</code> and <code>vertexAttribPointer</code>, then
-calls to <code>drawArrays</code> or <code>drawElements</code> will generate an
-<code>INVALID_OPERATION</code> error.
-
-</p>
-<p>
-
-If a vertex attribute is enabled as an array, a buffer is bound to that attribute, and the attribute
-is consumed by the current program, then it is possible that the range specified by a call
-to <code>drawArrays</code>, or any referenced index in a call to <code>drawElements</code>, may
-reference vertices outside the storage of the bound buffer. If this occurs, then one of the
-following behaviors will result:
+It is possible for draw commands to request data outside the bounds of a WebGLBuffer by calling a
+drawing command that requires fetching data for an active vertex attribute, when it is enabled as an
+array, either directly (<code>drawArrays</code>), or indirectly from an indexed draw
+(<code>drawElements</code>).
+If this occurs, then one of the following behaviors will result:
 
 <ol>
 
@@ -3590,7 +3726,11 @@ is not consumed by the current program, then regardless of the size of the bound
 cause any error to be generated during a call to <code>drawArrays</code>
 or <code>drawElements</code>.
 
-</p>
+    <h3>Out-of-bounds fetches from the index buffer</h3>
+
+<p>
+Calling an indexed drawing command (<code>drawElements</code>) that fetches index elements outside
+the bounds of ELEMENT_ARRAY_BUFFER will result in an INVALID_OPERATION error.
 
     <h3><a name="FBO_ATTACHMENTS">Framebuffer Object Attachments</a></h3>
 
@@ -3672,10 +3812,12 @@ sub-rectangle updated by <code>texSubImage2D</code> are determined based on the 
             height of the uploaded bitmap in pixels. If an SVG image is uploaded, the width and
             height of the texture are set to the current values of the width and height properties
             of the <code>HTMLImageElement</code> object.
-        <dt><code>source</code> of type <code>HTMLCanvasElement</code>
+        <dt><code>source</code> of type <code>HTMLCanvasElement</code> or
+          <code>OffscreenCanvas</code>
         <dd>
             The width and height of the texture are set to the current values of the width and
-            height properties of the <code>HTMLCanvasElement</code> object.
+            height properties of the <code>HTMLCanvasElement</code> or <code>OffscreenCanvas</code>
+            object.
         <dt><code>source</code> of type <code>HTMLVideoElement</code>
         <dd>
             The width and height of the texture are set to the width and height of the uploaded
@@ -4174,6 +4316,12 @@ extensions.
         <dd><cite><a href="https://www.w3.org/TR/html5/scripting-1.html#the-canvas-element">
             HTML5: The Canvas Element</a></cite>,
             World Wide Web Consortium (W3C).
+        </dd>
+
+        <dt id="refsOFFSCREENCANVAS">[OFFSCREENCANVAS]</dt>
+        <dd><cite><a href="https://html.spec.whatwg.org/multipage/canvas.html#the-offscreencanvas-interface">
+            HTML Living Standard - The OffscreenCanvas interface</a></cite>,
+            WHATWG.
         </dd>
 
         <dt id="refsCANVASCONTEXTS">[CANVASCONTEXTS]</dt>

@@ -11,10 +11,10 @@
 
 #include "base/macros.h"
 #include "base/strings/stringprintf.h"
+#include "base/trace_event/process_memory_dump.h"
 #include "base/trace_event/trace_event.h"
 #include "base/trace_event/trace_event_argument.h"
 #include "cc/raster/raster_source.h"
-#include "cc/resources/resource.h"
 #include "cc/trees/layer_tree_frame_sink.h"
 #include "components/viz/common/resources/bitmap_allocation.h"
 #include "components/viz/common/resources/platform_color.h"
@@ -28,8 +28,13 @@ class BitmapSoftwareBacking : public ResourcePool::SoftwareBacking {
     frame_sink->DidDeleteSharedBitmap(shared_bitmap_id);
   }
 
-  base::UnguessableToken SharedMemoryGuid() override {
-    return shared_memory->mapped_id();
+  void OnMemoryDump(
+      base::trace_event::ProcessMemoryDump* pmd,
+      const base::trace_event::MemoryAllocatorDumpGuid& buffer_dump_guid,
+      uint64_t tracing_process_id,
+      int importance) const override {
+    pmd->CreateSharedMemoryOwnershipEdge(
+        buffer_dump_guid, shared_memory->mapped_id(), importance);
   }
 
   LayerTreeFrameSink* frame_sink;
@@ -51,13 +56,13 @@ class BitmapRasterBufferImpl : public RasterBuffer {
   }
 
   // Overridden from RasterBuffer:
-  void Playback(
-      const RasterSource* raster_source,
-      const gfx::Rect& raster_full_rect,
-      const gfx::Rect& raster_dirty_rect,
-      uint64_t new_content_id,
-      const gfx::AxisTransform2d& transform,
-      const RasterSource::PlaybackSettings& playback_settings) override {
+  void Playback(const RasterSource* raster_source,
+                const gfx::Rect& raster_full_rect,
+                const gfx::Rect& raster_dirty_rect,
+                uint64_t new_content_id,
+                const gfx::AxisTransform2d& transform,
+                const RasterSource::PlaybackSettings& playback_settings,
+                const GURL& url) override {
     TRACE_EVENT0("cc", "BitmapRasterBuffer::Playback");
     gfx::Rect playback_rect = raster_full_rect;
     if (resource_has_previous_content_) {
@@ -70,7 +75,7 @@ class BitmapRasterBufferImpl : public RasterBuffer {
     RasterBufferProvider::PlaybackToMemory(
         pixels_, viz::RGBA_8888, resource_size_, stride, raster_source,
         raster_full_rect, playback_rect, transform, color_space_,
-        playback_settings);
+        /*gpu_compositing=*/false, playback_settings);
   }
 
  private:
@@ -124,19 +129,18 @@ BitmapRasterBufferProvider::AcquireBufferForRaster(
 
 void BitmapRasterBufferProvider::Flush() {}
 
-viz::ResourceFormat BitmapRasterBufferProvider::GetResourceFormat(
-    bool must_support_alpha) const {
+viz::ResourceFormat BitmapRasterBufferProvider::GetResourceFormat() const {
   return viz::RGBA_8888;
 }
 
-bool BitmapRasterBufferProvider::IsResourceSwizzleRequired(
-    bool must_support_alpha) const {
-  // GetResourceFormat() returns a constant so use it directly.
-  return ResourceFormatRequiresSwizzle(viz::RGBA_8888);
+bool BitmapRasterBufferProvider::IsResourceSwizzleRequired() const {
+  // This value only used by gpu compositing. Software compositing resources
+  // are all in the native skia byte ordering, and the display compositor will
+  // do its drawing in the same order.
+  return false;
 }
 
-bool BitmapRasterBufferProvider::IsResourcePremultiplied(
-    bool must_support_alpha) const {
+bool BitmapRasterBufferProvider::IsResourcePremultiplied() const {
   return true;
 }
 
@@ -159,5 +163,9 @@ uint64_t BitmapRasterBufferProvider::SetReadyToDrawCallback(
 }
 
 void BitmapRasterBufferProvider::Shutdown() {}
+
+bool BitmapRasterBufferProvider::CheckRasterFinishedQueries() {
+  return false;
+}
 
 }  // namespace cc

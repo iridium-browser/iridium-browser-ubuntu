@@ -57,6 +57,10 @@ bool OmniboxClient::IsHomePage(const GURL& url) const {
   return false;
 }
 
+bool OmniboxClient::IsDefaultSearchProviderEnabled() const {
+  return true;
+}
+
 bookmarks::BookmarkModel* OmniboxClient::GetBookmarkModel() {
   return nullptr;
 }
@@ -66,6 +70,10 @@ TemplateURLService* OmniboxClient::GetTemplateURLService() {
 }
 
 AutocompleteClassifier* OmniboxClient::GetAutocompleteClassifier() {
+  return nullptr;
+}
+
+QueryInOmnibox* OmniboxClient::GetQueryInOmnibox() {
   return nullptr;
 }
 
@@ -79,6 +87,10 @@ gfx::Image OmniboxClient::GetSizedIcon(const gfx::VectorIcon& vector_icon_type,
   return gfx::Image();
 }
 
+gfx::Image OmniboxClient::GetSizedIcon(const gfx::Image& icon) const {
+  return gfx::Image();
+}
+
 bool OmniboxClient::ProcessExtensionKeyword(
     const TemplateURL* template_url,
     const AutocompleteMatch& match,
@@ -89,6 +101,11 @@ bool OmniboxClient::ProcessExtensionKeyword(
 
 gfx::Image OmniboxClient::GetFaviconForPageUrl(
     const GURL& page_url,
+    FaviconFetchedCallback on_favicon_fetched) {
+  return gfx::Image();
+}
+
+gfx::Image OmniboxClient::GetFaviconForDefaultSearchProvider(
     FaviconFetchedCallback on_favicon_fetched) {
   return gfx::Image();
 }

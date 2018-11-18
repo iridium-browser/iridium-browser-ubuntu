@@ -9,6 +9,8 @@
 #include <string>
 #include <utility>
 
+#include "ash/public/cpp/app_list/app_list_features.h"
+#include "base/bind.h"
 #include "base/macros.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/field_trial_params.h"
@@ -25,7 +27,6 @@
 #include "components/search_engines/template_url_service.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/app_list/app_list_features.h"
 
 using ::testing::_;
 using ::testing::Return;
@@ -63,6 +64,7 @@ class MockAnswerCardContents : public AnswerCardContents {
   // AnswerCardContents overrides:
   MOCK_METHOD1(LoadURL, void(const GURL& url));
   MOCK_CONST_METHOD0(GetToken, const base::UnguessableToken&());
+  MOCK_CONST_METHOD0(GetPreferredSize, gfx::Size());
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockAnswerCardContents);
@@ -149,7 +151,7 @@ class AnswerCardSearchProviderTest : public AppListTestBase {
     std::unique_ptr<base::FeatureList> feature_list =
         std::make_unique<base::FeatureList>();
     feature_list->RegisterFieldTrialOverride(
-        features::kEnableAnswerCard.name,
+        app_list_features::kEnableAnswerCard.name,
         base::FeatureList::OVERRIDE_ENABLE_FEATURE, trial.get());
     scoped_feature_list_.InitWithFeatureList(std::move(feature_list));
 
@@ -158,7 +160,7 @@ class AnswerCardSearchProviderTest : public AppListTestBase {
     std::unique_ptr<AnswerCardContents> contents0(contents0_);
     std::unique_ptr<AnswerCardContents> contents1(contents1_);
     TemplateURLServiceFactory::GetInstance()->SetTestingFactory(
-        profile_.get(), CreateTemplateURLService);
+        profile_.get(), base::BindRepeating(&CreateTemplateURLService));
     // Provider will own the MockAnswerCardContents instance.
     provider_ = std::make_unique<AnswerCardSearchProvider>(
         profile_.get(), model_updater_.get(), nullptr, std::move(contents0),

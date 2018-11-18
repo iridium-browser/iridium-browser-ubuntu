@@ -4,6 +4,8 @@
 
 module blink.mojom;
 
+import "mojo/public/mojom/base/shared_memory.mojom";
+
 // There are two phases to estimate a near-OOM situation. First phase takes
 // place in the browser process. When the browser detects a high memory
 // pressure it starts the second phase in the foreground renderer process,
@@ -15,16 +17,38 @@ module blink.mojom;
 // Browser side interface for OOM intervention. This interface is used to check
 // high memory usage in a renderer.
 interface OomInterventionHost {
-  // Called when a renderer detects high memory usage. |intervention_triggered|
-  // is set to true when the OOM intervention is activated in the renderer.
-  OnHighMemoryUsage(bool intervention_triggered);
+  // Called when a renderer detects high memory usage.
+  OnHighMemoryUsage();
+};
+
+// Arguments set by field trials to configure various thresholds for detecting
+// OOM. Setting a threshold to 0 means that OOM detection will not consider
+// that threshold.
+struct DetectionArgs {
+  // Limit on V8 + BlinkGC + PartitionAlloc.
+  uint64 blink_workload_threshold;
+
+  // Limit on total private footprint of the process.
+  uint64 private_footprint_threshold;
+
+  // Limit on total swap footprint of the process.
+  uint64 swap_threshold;
+
+  // Limit on total virtual memory used by the process.
+  uint64 virtual_memory_thresold;
 };
 
 // Renderer side interface for OOM intervention. An instance of this interface
 // will be created when the browser gets a high memory pressure signal.
 // It monitors memory usage in renderer side to detect near-OOM situation.
 interface OomIntervention {
-  // Starts monitoring memory usage in renderer side.
+  // Starts monitoring memory usage in renderer side. When the renderer's
+  // memory usage exceeds |detection_args| memory thresholds (pmf, swap, virtual
+  // memory usage and blink memory usage), the renderer calls
+  // host->OnHighMemoryUsage(). The renderer also triggers OOM intervention when
+  // |renderer_pause_enabled| or |navigate_ads_enabled| is true.
   StartDetection(OomInterventionHost host,
-                 bool trigger_intervention);
+                 DetectionArgs detection_args,
+                 bool renderer_pause_enabled,
+                 bool navigate_ads_enabled);
 };

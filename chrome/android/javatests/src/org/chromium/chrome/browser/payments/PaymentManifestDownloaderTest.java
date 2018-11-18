@@ -22,8 +22,8 @@ import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.components.payments.PaymentManifestDownloader;
 import org.chromium.components.payments.PaymentManifestDownloader.ManifestDownloadCallback;
-import org.chromium.content.browser.test.util.Criteria;
-import org.chromium.content.browser.test.util.CriteriaHelper;
+import org.chromium.content_public.browser.test.util.Criteria;
+import org.chromium.content_public.browser.test.util.CriteriaHelper;
 import org.chromium.net.test.EmbeddedTestServer;
 
 import java.net.URI;
@@ -90,8 +90,7 @@ public class PaymentManifestDownloaderTest implements ManifestDownloadCallback {
         mRule.startMainActivityOnBlankPage();
         mServer = EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
         mRule.runOnUiThread((Runnable) () -> {
-            mDownloader.initialize(
-                    mRule.getActivity().getCurrentContentViewCore().getWebContents());
+            mDownloader.initialize(mRule.getActivity().getCurrentWebContents());
         });
         mDownloadComplete = false;
         mDownloadPaymentMethodManifestSuccess = false;

@@ -16,6 +16,8 @@
 #include "chrome/browser/media/router/mojo/media_route_controller.h"
 #endif  // !defined(OS_ANDROID)
 
+using blink::mojom::PresentationConnectionState;
+
 namespace media_router {
 
 // A MediaRoutesObserver that maintains state about the current set of media
@@ -84,8 +86,8 @@ std::vector<MediaRoute> MediaRouterBase::GetCurrentRoutes() const {
   return internal_routes_observer_->current_routes;
 }
 
-std::unique_ptr<content::MediaController> MediaRouterBase::GetMediaController(
-    const MediaRoute::Id& route_id) {
+std::unique_ptr<media::FlingingController>
+MediaRouterBase::GetFlingingController(const MediaRoute::Id& route_id) {
   return nullptr;
 }
 
@@ -105,9 +107,9 @@ std::string MediaRouterBase::CreatePresentationId() {
 
 void MediaRouterBase::NotifyPresentationConnectionStateChange(
     const MediaRoute::Id& route_id,
-    content::PresentationConnectionState state) {
+    PresentationConnectionState state) {
   // We should call NotifyPresentationConnectionClose() for the CLOSED state.
-  DCHECK_NE(state, content::PRESENTATION_CONNECTION_STATE_CLOSED);
+  DCHECK_NE(state, PresentationConnectionState::CLOSED);
 
   auto it = presentation_connection_state_callbacks_.find(route_id);
   if (it == presentation_connection_state_callbacks_.end())
@@ -118,14 +120,14 @@ void MediaRouterBase::NotifyPresentationConnectionStateChange(
 
 void MediaRouterBase::NotifyPresentationConnectionClose(
     const MediaRoute::Id& route_id,
-    content::PresentationConnectionCloseReason reason,
+    blink::mojom::PresentationConnectionCloseReason reason,
     const std::string& message) {
   auto it = presentation_connection_state_callbacks_.find(route_id);
   if (it == presentation_connection_state_callbacks_.end())
     return;
 
   content::PresentationConnectionStateChangeInfo info(
-      content::PRESENTATION_CONNECTION_STATE_CLOSED);
+      PresentationConnectionState::CLOSED);
   info.close_reason = reason;
   info.message = message;
   it->second->Notify(info);

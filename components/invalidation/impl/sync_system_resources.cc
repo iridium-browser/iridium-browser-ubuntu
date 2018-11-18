@@ -26,6 +26,7 @@
 #include "google/cacheinvalidation/deps/callback.h"
 #include "google/cacheinvalidation/include/types.h"
 #include "jingle/notifier/listener/push_client.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 
 namespace syncer {
 
@@ -109,8 +110,9 @@ void SyncInvalidationScheduler::Schedule(invalidation::TimeDelta delay,
 
   posted_tasks_.insert(base::WrapUnique(task));
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-      FROM_HERE, base::Bind(&SyncInvalidationScheduler::RunPostedTask,
-                            weak_factory_.GetWeakPtr(), task),
+      FROM_HERE,
+      base::BindOnce(&SyncInvalidationScheduler::RunPostedTask,
+                     weak_factory_.GetWeakPtr(), task),
       delay);
 }
 
@@ -179,10 +181,15 @@ std::unique_ptr<SyncNetworkChannel> SyncNetworkChannel::CreatePushClientChannel(
 }
 
 std::unique_ptr<SyncNetworkChannel> SyncNetworkChannel::CreateGCMNetworkChannel(
-    scoped_refptr<net::URLRequestContextGetter> request_context_getter,
+    std::unique_ptr<network::SharedURLLoaderFactoryInfo>
+        url_loader_factory_info,
+    network::NetworkConnectionTracker* network_connection_tracker,
     std::unique_ptr<GCMNetworkChannelDelegate> delegate) {
-  return std::make_unique<GCMNetworkChannel>(request_context_getter,
-                                             std::move(delegate));
+  DCHECK(url_loader_factory_info);
+  return std::make_unique<GCMNetworkChannel>(
+      network::SharedURLLoaderFactory::Create(
+          std::move(url_loader_factory_info)),
+      network_connection_tracker, std::move(delegate));
 }
 
 void SyncNetworkChannel::NotifyNetworkStatusChange(bool online) {
@@ -287,9 +294,10 @@ SyncSystemResources::SyncSystemResources(
       logger_(new SyncLogger()),
       internal_scheduler_(new SyncInvalidationScheduler()),
       listener_scheduler_(new SyncInvalidationScheduler()),
-      storage_(new SyncStorage(state_writer, internal_scheduler_.get())),
-      sync_network_channel_(sync_network_channel) {
-}
+      storage_(state_writer
+                   ? new SyncStorage(state_writer, internal_scheduler_.get())
+                   : nullptr),
+      sync_network_channel_(sync_network_channel) {}
 
 SyncSystemResources::~SyncSystemResources() {
   Stop();
@@ -323,7 +331,7 @@ SyncLogger* SyncSystemResources::logger() {
 }
 
 SyncStorage* SyncSystemResources::storage() {
-  return storage_.get();
+  return storage_ ? storage_.get() : nullptr;
 }
 
 SyncNetworkChannel* SyncSystemResources::network() {

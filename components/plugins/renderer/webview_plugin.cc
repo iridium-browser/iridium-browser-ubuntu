@@ -28,12 +28,10 @@
 #include "third_party/blink/public/web/web_plugin_container.h"
 #include "third_party/blink/public/web/web_view.h"
 
-using blink::WebCanvas;
 using blink::WebCursorInfo;
 using blink::WebDragData;
 using blink::WebDragOperationsMask;
 using blink::WebFrameWidget;
-using blink::WebImage;
 using blink::WebLocalFrame;
 using blink::WebMouseEvent;
 using blink::WebPlugin;
@@ -81,10 +79,8 @@ void WebViewPlugin::ReplayReceivedData(WebPlugin* plugin) {
   if (!response_.IsNull()) {
     plugin->DidReceiveResponse(response_);
     size_t total_bytes = 0;
-    for (std::list<std::string>::iterator it = data_.begin(); it != data_.end();
-         ++it) {
-      plugin->DidReceiveData(it->c_str(),
-                             base::checked_cast<int>(it->length()));
+    for (auto it = data_.begin(); it != data_.end(); ++it) {
+      plugin->DidReceiveData(it->c_str(), it->length());
       total_bytes += it->length();
     }
   }
@@ -154,7 +150,7 @@ bool WebViewPlugin::IsErrorPlaceholder() {
   return delegate_->IsErrorPlaceholder();
 }
 
-void WebViewPlugin::Paint(WebCanvas* canvas, const WebRect& rect) {
+void WebViewPlugin::Paint(cc::PaintCanvas* canvas, const WebRect& rect) {
   gfx::Rect paint_rect = gfx::IntersectRects(rect_, rect);
   if (paint_rect.IsEmpty())
     return;
@@ -173,7 +169,7 @@ void WebViewPlugin::Paint(WebCanvas* canvas, const WebRect& rect) {
       SkFloatToScalar(1.0 / container_->DeviceScaleFactor());
   canvas->scale(inverse_scale, inverse_scale);
 
-  web_view()->Paint(canvas, paint_rect);
+  web_view()->PaintContent(canvas, paint_rect);
 
   canvas->restore();
 }
@@ -196,8 +192,8 @@ void WebViewPlugin::UpdateGeometry(const WebRect& window_rect,
   // UpdatePluginForNewGeometry must be posted to a task to run asynchronously.
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
-      base::Bind(&WebViewPlugin::UpdatePluginForNewGeometry,
-                 weak_factory_.GetWeakPtr(), window_rect, unobscured_rect));
+      base::BindOnce(&WebViewPlugin::UpdatePluginForNewGeometry,
+                     weak_factory_.GetWeakPtr(), window_rect, unobscured_rect));
 }
 
 void WebViewPlugin::UpdateFocus(bool focused, blink::WebFocusType focus_type) {
@@ -239,7 +235,7 @@ void WebViewPlugin::DidReceiveResponse(const WebURLResponse& response) {
   response_ = response;
 }
 
-void WebViewPlugin::DidReceiveData(const char* data, int data_length) {
+void WebViewPlugin::DidReceiveData(const char* data, size_t data_length) {
   data_.push_back(std::string(data, data_length));
 }
 
@@ -249,22 +245,23 @@ void WebViewPlugin::DidFinishLoading() {
 }
 
 void WebViewPlugin::DidFailLoading(const WebURLError& error) {
-  DCHECK(!error_.get());
+  DCHECK(!error_);
   error_.reset(new WebURLError(error));
 }
 
 WebViewPlugin::WebViewHelper::WebViewHelper(WebViewPlugin* plugin,
                                             const WebPreferences& preferences)
     : plugin_(plugin) {
-  web_view_ = WebView::Create(/* client = */ this,
+  web_view_ = WebView::Create(/*client=*/this,
+                              /*widget_client=*/this,
                               blink::mojom::PageVisibilityState::kVisible,
-                              /* opener = */ nullptr);
+                              /*opener=*/nullptr);
   // ApplyWebPreferences before making a WebLocalFrame so that the frame sees a
   // consistent view of our preferences.
   content::RenderView::ApplyWebPreferences(preferences, web_view_);
   WebLocalFrame* web_frame =
       WebLocalFrame::CreateMainFrame(web_view_, this, nullptr, nullptr);
-  WebFrameWidget::Create(this, web_frame);
+  WebFrameWidget::CreateForMainFrame(this, web_frame);
 }
 
 WebViewPlugin::WebViewHelper::~WebViewHelper() {
@@ -290,6 +287,10 @@ bool WebViewPlugin::WebViewHelper::CanUpdateLayout() {
   return true;
 }
 
+blink::WebWidgetClient* WebViewPlugin::WebViewHelper::WidgetClient() {
+  return this;
+}
+
 void WebViewPlugin::WebViewHelper::SetToolTipText(
     const WebString& text,
     blink::WebTextDirection hint) {
@@ -300,7 +301,7 @@ void WebViewPlugin::WebViewHelper::SetToolTipText(
 void WebViewPlugin::WebViewHelper::StartDragging(blink::WebReferrerPolicy,
                                                  const WebDragData&,
                                                  WebDragOperationsMask,
-                                                 const WebImage&,
+                                                 const SkBitmap&,
                                                  const WebPoint&) {
   // Immediately stop dragging.
   main_frame()->FrameWidget()->DragSourceSystemDragEnded();

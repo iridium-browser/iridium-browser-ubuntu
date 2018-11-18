@@ -9,14 +9,14 @@
 #include "base/macros.h"
 #include "base/run_loop.h"
 #import "chrome/browser/app_controller_mac.h"
-#include "chrome/browser/apps/app_browsertest_util.h"
-#include "chrome/browser/apps/app_window_registry_util.h"
+#include "chrome/browser/apps/platform_apps/app_browsertest_util.h"
+#include "chrome/browser/apps/platform_apps/app_window_registry_util.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/chrome_browser_application_mac.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
+#include "chrome/browser/lifetime/browser_shutdown.h"
 #include "chrome/browser/notifications/notification_display_service_tester.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -33,17 +33,13 @@ namespace {
 // The param selects whether to use ChromeNativeAppWindowViewsMac, otherwise it
 // will use NativeAppWindowCocoa.
 class QuitWithAppsControllerInteractiveTest
-    : public testing::WithParamInterface<bool>,
-      public extensions::PlatformAppBrowserTest {
+    : public extensions::PlatformAppBrowserTest {
  protected:
   QuitWithAppsControllerInteractiveTest() : app_(NULL) {}
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
     PlatformAppBrowserTest::SetUpCommandLine(command_line);
     command_line->AppendSwitch(switches::kAppsKeepChromeAliveInTests);
-    command_line->AppendSwitch(
-        GetParam() ? switches::kEnableMacViewsNativeAppWindows
-                   : switches::kDisableMacViewsNativeAppWindows);
   }
 
   const extensions::Extension* app_;
@@ -55,7 +51,7 @@ class QuitWithAppsControllerInteractiveTest
 }  // namespace
 
 // Test that quitting while apps are open shows a notification instead.
-IN_PROC_BROWSER_TEST_P(QuitWithAppsControllerInteractiveTest, QuitBehavior) {
+IN_PROC_BROWSER_TEST_F(QuitWithAppsControllerInteractiveTest, QuitBehavior) {
   scoped_refptr<QuitWithAppsController> controller =
       new QuitWithAppsController();
 
@@ -150,7 +146,7 @@ IN_PROC_BROWSER_TEST_P(QuitWithAppsControllerInteractiveTest, QuitBehavior) {
 }
 
 // Test that, when powering off, Chrome will quit even if there are apps open.
-IN_PROC_BROWSER_TEST_P(QuitWithAppsControllerInteractiveTest, QuitOnPowerOff) {
+IN_PROC_BROWSER_TEST_F(QuitWithAppsControllerInteractiveTest, QuitOnPowerOff) {
   // Open an app window.
   app_ = LoadAndLaunchPlatformApp("minimal_id", "Launched");
 
@@ -171,7 +167,3 @@ IN_PROC_BROWSER_TEST_P(QuitWithAppsControllerInteractiveTest, QuitOnPowerOff) {
   [NSApp terminate:nil];
   EXPECT_TRUE(browser_shutdown::IsTryingToQuit());
 }
-
-INSTANTIATE_TEST_CASE_P(QuitWithAppsControllerInteractiveTestInstance,
-                        QuitWithAppsControllerInteractiveTest,
-                        ::testing::Bool());

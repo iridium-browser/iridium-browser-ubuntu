@@ -10,8 +10,10 @@
 #include "build/build_config.h"
 #include "chrome/browser/android/contextual_suggestions/contextual_suggestions_prefs.h"
 #include "chrome/common/pref_names.h"
+#include "components/autofill/core/common/autofill_prefs.h"
 #include "components/dom_distiller/core/pref_names.h"
 #include "components/ntp_snippets/pref_names.h"
+#include "components/payments/core/payment_prefs.h"
 
 // A preference exposed to Java.
 // A Java counterpart will be generated for this enum.
@@ -24,6 +26,11 @@ enum Pref {
   NTP_ARTICLES_LIST_VISIBLE,
   READER_FOR_ACCESSIBILITY_ENABLED,
   PROMPT_FOR_DOWNLOAD_ANDROID,
+  SHOW_MISSING_SD_CARD_ERROR_ANDROID,
+  CAN_MAKE_PAYMENT_ENABLED,
+  CONTEXTUAL_SEARCH_ENABLED,
+  AUTOFILL_PROFILE_ENABLED,
+  AUTOFILL_CREDIT_CARD_ENABLED,
   // PREF_NUM_PREFS must be the last entry.
   PREF_NUM_PREFS
 };
@@ -37,6 +44,11 @@ const char* const kPrefsExposedToJava[] = {
     ntp_snippets::prefs::kEnableSnippets,
     ntp_snippets::prefs::kArticlesListVisible,
     dom_distiller::prefs::kReaderForAccessibility,
-    prefs::kPromptForDownloadAndroid};
+    prefs::kPromptForDownloadAndroid,
+    prefs::kShowMissingSdCardErrorAndroid,
+    payments::kCanMakePaymentEnabled,
+    prefs::kContextualSearchEnabled,
+    autofill::prefs::kAutofillProfileEnabled,
+    autofill::prefs::kAutofillCreditCardEnabled};
 
 #endif  // CHROME_BROWSER_ANDROID_PREFERENCES_PREFS_H_

@@ -9,6 +9,7 @@
 
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "base/single_thread_task_runner.h"
 #include "media/capture/video/chromeos/mojo/camera3.mojom.h"
 #include "media/capture/video/chromeos/mojo/camera_common.mojom.h"
 #include "media/capture/video/video_capture_device.h"
@@ -16,9 +17,20 @@
 
 namespace media {
 
-class CameraHalDelegate;
+class Camera3AController;
 class CameraDeviceContext;
+class CameraHalDelegate;
 class StreamBufferManager;
+
+enum class StreamType : uint64_t {
+  kPreview = 0,
+  kStillCapture = 1,
+  kUnknown,
+};
+
+std::string StreamTypeToString(StreamType stream_type);
+
+std::ostream& operator<<(std::ostream& os, StreamType stream_type);
 
 // The interface to register buffer with and send capture request to the
 // camera HAL.
@@ -48,6 +60,9 @@ class CAPTURE_EXPORT StreamCaptureInterface {
   virtual void ProcessCaptureRequest(
       cros::mojom::Camera3CaptureRequestPtr request,
       base::OnceCallback<void(int32_t)> callback) = 0;
+
+  // Send flush to cancel all pending requests to the camera HAL.
+  virtual void Flush(base::OnceCallback<void(int32_t)> callback) = 0;
 };
 
 // CameraDeviceDelegate is instantiated on the capture thread where
@@ -87,6 +102,9 @@ class CAPTURE_EXPORT CameraDeviceDelegate final {
   // Mojo connection error handler.
   void OnMojoConnectionError();
 
+  // Reconfigure streams for picture taking.
+  void OnFlushed(int32_t result);
+
   // Callback method for the Close Mojo IPC call.  This method resets the Mojo
   // connection and closes the camera device.
   void OnClosed(int32_t result);
@@ -112,7 +130,7 @@ class CAPTURE_EXPORT CameraDeviceDelegate final {
   // indicates.  If there's no error OnConfiguredStreams notifies
   // |client_| the capture has started by calling OnStarted, and proceeds to
   // ConstructDefaultRequestSettings.
-  void ConfigureStreams();
+  void ConfigureStreams(bool require_photo);
   void OnConfiguredStreams(
       int32_t result,
       cros::mojom::Camera3StreamConfigurationPtr updated_config);
@@ -121,10 +139,14 @@ class CAPTURE_EXPORT CameraDeviceDelegate final {
   // settings of the stream in |stream_context_|.
   // OnConstructedDefaultRequestSettings sets the request settings in
   // |streams_context_|.  If there's no error
-  // OnConstructedDefaultRequestSettings calls StartCapture to start the video
-  // capture loop.
-  void ConstructDefaultRequestSettings();
-  void OnConstructedDefaultRequestSettings(
+  // OnConstructedDefaultPreviewRequestSettings calls StartPreview to start the
+  // video capture loop.
+  // OnConstructDefaultStillCaptureRequestSettings triggers
+  // |stream_buffer_manager_| to request a still capture.
+  void ConstructDefaultRequestSettings(StreamType stream_type);
+  void OnConstructedDefaultPreviewRequestSettings(
+      cros::mojom::CameraMetadataPtr settings);
+  void OnConstructedDefaultStillCaptureRequestSettings(
       cros::mojom::CameraMetadataPtr settings);
 
   // StreamCaptureInterface implementations.  These methods are called by
@@ -139,6 +161,10 @@ class CAPTURE_EXPORT CameraDeviceDelegate final {
                       base::OnceCallback<void(int32_t)> callback);
   void ProcessCaptureRequest(cros::mojom::Camera3CaptureRequestPtr request,
                              base::OnceCallback<void(int32_t)> callback);
+  void Flush(base::OnceCallback<void(int32_t)> callback);
+
+  bool SetPointsOfInterest(
+      const std::vector<mojom::Point2DPtr>& points_of_interest);
 
   const VideoCaptureDeviceDescriptor device_descriptor_;
 
@@ -150,7 +176,11 @@ class CAPTURE_EXPORT CameraDeviceDelegate final {
 
   CameraDeviceContext* device_context_;
 
+  std::queue<VideoCaptureDevice::TakePhotoCallback> take_photo_callbacks_;
+
   std::unique_ptr<StreamBufferManager> stream_buffer_manager_;
+
+  std::unique_ptr<Camera3AController> camera_3a_controller_;
 
   // Stores the static camera characteristics of the camera device. E.g. the
   // supported formats and resolution, various available exposure and apeture
@@ -163,6 +193,8 @@ class CAPTURE_EXPORT CameraDeviceDelegate final {
   const scoped_refptr<base::SingleThreadTaskRunner> ipc_task_runner_;
 
   base::OnceClosure device_close_callback_;
+
+  VideoCaptureDevice::SetPhotoOptionsCallback set_photo_option_callback_;
 
   base::WeakPtrFactory<CameraDeviceDelegate> weak_ptr_factory_;
 

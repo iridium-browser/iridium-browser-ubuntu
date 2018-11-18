@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "base/macros.h"
+#include "build/build_config.h"
 #include "chrome/browser/chrome_content_browser_client.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -115,17 +116,9 @@ class IsolateOriginsPolicyBrowserTest : public SiteIsolationPolicyBrowserTest {
 class WebDriverSitePerProcessPolicyBrowserTest
     : public SitePerProcessPolicyBrowserTestEnabled {
  protected:
-  WebDriverSitePerProcessPolicyBrowserTest()
-      : are_sites_isolated_for_testing_(false) {}
+  WebDriverSitePerProcessPolicyBrowserTest() = default;
 
   void SetUpInProcessBrowserTestFixture() override {
-    // First take note if tests are running in site isolated environment as this
-    // will change the outcome of the test. We can't just call this method after
-    // the call to the base setup method because setting the Site Isolation
-    // policy is indistinguishable from setting the the command line flag
-    // directly.
-    are_sites_isolated_for_testing_ = content::AreAllSitesIsolatedForTesting();
-
     // We setup the policy here, because the policy must be 'live' before the
     // renderer is created, since the value for this policy is passed to the
     // renderer via a command-line. Setting the policy in the test itself or in
@@ -140,8 +133,6 @@ class WebDriverSitePerProcessPolicyBrowserTest
                nullptr);
     provider_.UpdateChromePolicy(values);
   }
-
-  bool are_sites_isolated_for_testing_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(WebDriverSitePerProcessPolicyBrowserTest);
@@ -185,8 +176,8 @@ IN_PROC_BROWSER_TEST_F(IsolateOriginsPolicyBrowserTest, Simple) {
 
 IN_PROC_BROWSER_TEST_F(WebDriverSitePerProcessPolicyBrowserTest, Simple) {
   Expectations expectations[] = {
-      {"https://foo.com/noodles.html", are_sites_isolated_for_testing_},
-      {"http://example.org/pumpkins.html", are_sites_isolated_for_testing_},
+      {"https://foo.com/noodles.html", true},
+      {"http://example.org/pumpkins.html", true},
   };
   CheckExpectations(expectations, arraysize(expectations));
 }
@@ -226,7 +217,15 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessPolicyBrowserTestFieldTrialTest, Simple) {
   CheckExpectations(expectations, arraysize(expectations));
 }
 
-IN_PROC_BROWSER_TEST_F(SiteIsolationPolicyBrowserTest, NoPolicyNoTrialsFlags) {
+// https://crbug.com/833423: The test is incompatible with the
+// not_site_per_process_browser_tests step on the trybots.
+#if defined(OS_LINUX)
+#define MAYBE_NoPolicyNoTrialsFlags DISABLED_NoPolicyNoTrialsFlags
+#else
+#define MAYBE_NoPolicyNoTrialsFlags NoPolicyNoTrialsFlags
+#endif
+IN_PROC_BROWSER_TEST_F(SiteIsolationPolicyBrowserTest,
+                       MAYBE_NoPolicyNoTrialsFlags) {
   ASSERT_FALSE(base::CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kDisableSiteIsolationTrials));
 }

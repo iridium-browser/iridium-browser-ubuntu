@@ -7,15 +7,14 @@
 #include <utility>
 
 #include "base/files/file_util.h"
-#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
-#include "base/test/scoped_task_environment.h"
 #include "base/threading/platform_thread.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
+#include "net/base/request_priority.h"
 #include "net/base/test_completion_callback.h"
 #include "net/disk_cache/backend_cleanup_tracker.h"
 #include "net/disk_cache/blockfile/backend_impl.h"
@@ -27,7 +26,6 @@
 #include "net/disk_cache/simple/simple_file_tracker.h"
 #include "net/disk_cache/simple/simple_index.h"
 #include "net/test/gtest_util.h"
-#include "net/test/net_test_suite.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -42,7 +40,7 @@ DiskCacheTest::~DiskCacheTest() = default;
 
 bool DiskCacheTest::CopyTestCache(const std::string& name) {
   base::FilePath path;
-  PathService::Get(base::DIR_SOURCE_ROOT, &path);
+  base::PathService::Get(base::DIR_SOURCE_ROOT, &path);
   path = path.AppendASCII("net");
   path = path.AppendASCII("data");
   path = path.AppendASCII("cache_tests");
@@ -75,10 +73,6 @@ int DiskCacheTestWithCache::TestIterator::OpenNextEntry(
 }
 
 DiskCacheTestWithCache::DiskCacheTestWithCache()
-    : DiskCacheTestWithCache(NetTestSuite::GetScopedTaskEnvironment()) {}
-
-DiskCacheTestWithCache::DiskCacheTestWithCache(
-    base::test::ScopedTaskEnvironment* scoped_task_env)
     : cache_impl_(NULL),
       simple_cache_impl_(NULL),
       mem_cache_(NULL),
@@ -92,8 +86,7 @@ DiskCacheTestWithCache::DiskCacheTestWithCache(
       new_eviction_(false),
       first_cleanup_(true),
       integrity_(true),
-      use_current_thread_(false),
-      scoped_task_env_(scoped_task_env) {}
+      use_current_thread_(false) {}
 
 DiskCacheTestWithCache::~DiskCacheTestWithCache() = default;
 
@@ -127,35 +120,49 @@ void DiskCacheTestWithCache::SetTestMode() {
   cache_impl_->SetUnitTestMode();
 }
 
-void DiskCacheTestWithCache::SetMaxSize(int size) {
+void DiskCacheTestWithCache::SetMaxSize(int64_t size, bool should_succeed) {
   size_ = size;
   if (simple_cache_impl_)
-    EXPECT_TRUE(simple_cache_impl_->SetMaxSize(size));
+    EXPECT_EQ(should_succeed, simple_cache_impl_->SetMaxSize(size));
 
   if (cache_impl_)
-    EXPECT_TRUE(cache_impl_->SetMaxSize(size));
+    EXPECT_EQ(should_succeed, cache_impl_->SetMaxSize(size));
 
   if (mem_cache_)
-    EXPECT_TRUE(mem_cache_->SetMaxSize(size));
+    EXPECT_EQ(should_succeed, mem_cache_->SetMaxSize(size));
 }
 
 int DiskCacheTestWithCache::OpenEntry(const std::string& key,
                                       disk_cache::Entry** entry) {
+  return OpenEntryWithPriority(key, net::HIGHEST, entry);
+}
+
+int DiskCacheTestWithCache::OpenEntryWithPriority(
+    const std::string& key,
+    net::RequestPriority request_priority,
+    disk_cache::Entry** entry) {
   net::TestCompletionCallback cb;
-  int rv = cache_->OpenEntry(key, entry, cb.callback());
+  int rv = cache_->OpenEntry(key, request_priority, entry, cb.callback());
   return cb.GetResult(rv);
 }
 
 int DiskCacheTestWithCache::CreateEntry(const std::string& key,
                                         disk_cache::Entry** entry) {
+  return CreateEntryWithPriority(key, net::HIGHEST, entry);
+}
+
+int DiskCacheTestWithCache::CreateEntryWithPriority(
+    const std::string& key,
+    net::RequestPriority request_priority,
+    disk_cache::Entry** entry) {
   net::TestCompletionCallback cb;
-  int rv = cache_->CreateEntry(key, entry, cb.callback());
+  int rv = cache_->CreateEntry(key, request_priority, entry, cb.callback());
   return cb.GetResult(rv);
 }
 
 int DiskCacheTestWithCache::DoomEntry(const std::string& key) {
   net::TestCompletionCallback cb;
-  int rv = cache_->DoomEntry(key, cb.callback());
+  int rv = cache_->DoomEntry(key, net::HIGHEST, cb.callback());
   return cb.GetResult(rv);
 }
 
@@ -178,18 +185,18 @@ int DiskCacheTestWithCache::DoomEntriesSince(const base::Time initial_time) {
   return cb.GetResult(rv);
 }
 
-int DiskCacheTestWithCache::CalculateSizeOfAllEntries() {
-  net::TestCompletionCallback cb;
-  int rv = cache_->CalculateSizeOfAllEntries(cb.callback());
+int64_t DiskCacheTestWithCache::CalculateSizeOfAllEntries() {
+  net::TestInt64CompletionCallback cb;
+  int64_t rv = cache_->CalculateSizeOfAllEntries(cb.callback());
   return cb.GetResult(rv);
 }
 
-int DiskCacheTestWithCache::CalculateSizeOfEntriesBetween(
+int64_t DiskCacheTestWithCache::CalculateSizeOfEntriesBetween(
     const base::Time initial_time,
     const base::Time end_time) {
-  net::TestCompletionCallback cb;
-  int rv = cache_->CalculateSizeOfEntriesBetween(initial_time, end_time,
-                                                 cb.callback());
+  net::TestInt64CompletionCallback cb;
+  int64_t rv = cache_->CalculateSizeOfEntriesBetween(initial_time, end_time,
+                                                     cb.callback());
   return cb.GetResult(rv);
 }
 
@@ -283,21 +290,17 @@ void DiskCacheTestWithCache::AddDelay() {
 }
 
 void DiskCacheTestWithCache::TearDown() {
-  scoped_task_env_->RunUntilIdle();
+  RunUntilIdle();
   cache_.reset();
 
   if (!memory_only_ && !simple_cache_mode_ && integrity_) {
     EXPECT_TRUE(CheckCacheIntegrity(cache_path_, new_eviction_, size_, mask_));
   }
-  scoped_task_env_->RunUntilIdle();
+  RunUntilIdle();
   if (simple_cache_mode_ && simple_file_tracker_)
     EXPECT_TRUE(simple_file_tracker_->IsEmptyForTesting());
 
   DiskCacheTest::TearDown();
-
-  // We are documented as not keeping this past TearDown, and net_perftests
-  // is written under this assumption.
-  scoped_task_env_ = nullptr;
 }
 
 void DiskCacheTestWithCache::InitMemoryCache() {

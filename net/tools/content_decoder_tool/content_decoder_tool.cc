@@ -9,6 +9,7 @@
 
 #include "base/logging.h"
 #include "base/strings/string_util.h"
+#include "net/base/completion_once_callback.h"
 #include "net/base/io_buffer.h"
 #include "net/base/test_completion_callback.h"
 #include "net/filter/brotli_source_stream.h"
@@ -35,7 +36,7 @@ class StdinSourceStream : public SourceStream {
   // SourceStream implementation.
   int Read(IOBuffer* dest_buffer,
            int buffer_size,
-           const CompletionCallback& callback) override {
+           CompletionOnceCallback callback) override {
     if (input_stream_->eof())
       return OK;
     if (input_stream_) {
@@ -90,7 +91,8 @@ bool ContentDecoderToolProcessInput(std::vector<std::string> content_encodings,
     LOG(ERROR) << "Couldn't create the decoder.";
     return false;
   }
-  scoped_refptr<IOBuffer> read_buffer = new IOBufferWithSize(kBufferLen);
+  scoped_refptr<IOBuffer> read_buffer =
+      base::MakeRefCounted<IOBufferWithSize>(kBufferLen);
   while (true) {
     TestCompletionCallback callback;
     int bytes_read =

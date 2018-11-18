@@ -27,7 +27,7 @@ class WebUIResourceBrowserTest : public ContentBrowserTest {
   // Runs all test functions in |file|, waiting for them to complete.
   void RunTest(const base::FilePath& file) {
     {
-      base::ThreadRestrictions::ScopedAllowIO allow_io_for_file_existence_check;
+      base::ScopedAllowBlockingForTesting allow_blocking;
       ASSERT_TRUE(PathExists(file));
     }
 
@@ -39,6 +39,7 @@ class WebUIResourceBrowserTest : public ContentBrowserTest {
   }
 
   void RunMediaInternalsTest(const base::FilePath::CharType* file) {
+    AddLibrary(IDR_WEBUI_JS_UTIL);
     AddLibrary(IDR_WEBUI_JS_CR);
     AddLibrary(IDR_MEDIA_INTERNALS_JS);
     RunTest(GetTestFilePath("media", "webui").Append(file));

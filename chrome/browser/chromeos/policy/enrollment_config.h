@@ -7,6 +7,8 @@
 
 #include <string>
 
+#include "base/files/file_path.h"
+
 namespace policy {
 
 // A container keeping all parameters relevant to whether and how enterprise
@@ -45,6 +47,9 @@ struct EnrollmentConfig {
     // Forced enrollment triggered as a fallback to attestation enrollment,
     // user can't skip.
     MODE_ATTESTATION_MANUAL_FALLBACK,
+
+    // Enrollment for offline demo mode with locally stored policy data.
+    MODE_OFFLINE_DEMO,
   };
 
   // An enumeration of authentication mechanisms that can be used for
@@ -58,6 +63,10 @@ struct EnrollmentConfig {
     // that requires the least user interaction).
     AUTH_MECHANISM_BEST_AVAILABLE,
   };
+
+  EnrollmentConfig();
+  EnrollmentConfig(const EnrollmentConfig& config);
+  ~EnrollmentConfig();
 
   // Whether enrollment should be triggered.
   bool should_enroll() const {
@@ -97,6 +106,12 @@ struct EnrollmentConfig {
     return mode != MODE_NONE && !is_mode_attestation();
   }
 
+  // Whether state keys request should be skipped.
+  // Skipping the request is allowed only for offline demo mode. Offline demo
+  // mode setup ensures that online validation of state keys is not required in
+  // that case.
+  bool skip_state_keys_request() const { return mode == MODE_OFFLINE_DEMO; }
+
   // Indicates the enrollment flow variant to trigger during OOBE.
   Mode mode = MODE_NONE;
 
@@ -115,6 +130,10 @@ struct EnrollmentConfig {
   // The authentication mechanism to use.
   // TODO(drcrash): Change to best available once ZTE is everywhere.
   AuthMechanism auth_mechanism = AUTH_MECHANISM_INTERACTIVE;
+
+  // The path for the device policy blob data for the offline demo mode. This
+  // should be empty and never used for other modes.
+  base::FilePath offline_policy_path;
 };
 
 }  // namespace policy

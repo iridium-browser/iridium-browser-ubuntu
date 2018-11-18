@@ -64,10 +64,8 @@ AutofillPopupControllerImpl::AutofillPopupControllerImpl(
     const gfx::RectF& element_bounds,
     base::i18n::TextDirection text_direction)
     : controller_common_(element_bounds, text_direction, container_view),
-      view_(NULL),
-      layout_model_(this, delegate->IsCreditCardPopup()),
-      delegate_(delegate),
-      weak_ptr_factory_(this) {
+      layout_model_(this, delegate->GetPopupType() == PopupType::kCreditCards),
+      delegate_(delegate) {
   ClearState();
   delegate->RegisterDeletionCallback(base::BindOnce(
       &AutofillPopupControllerImpl::HideViewAndDie, GetWeakPtr()));
@@ -76,7 +74,8 @@ AutofillPopupControllerImpl::AutofillPopupControllerImpl(
 AutofillPopupControllerImpl::~AutofillPopupControllerImpl() {}
 
 void AutofillPopupControllerImpl::Show(
-    const std::vector<autofill::Suggestion>& suggestions) {
+    const std::vector<autofill::Suggestion>& suggestions,
+    bool autoselect_first_suggestion) {
   SetValues(suggestions);
   DCHECK_EQ(suggestions_.size(), elided_values_.size());
   DCHECK_EQ(suggestions_.size(), elided_labels_.size());
@@ -110,6 +109,8 @@ void AutofillPopupControllerImpl::Show(
 
   if (just_created) {
     view_->Show();
+    if (autoselect_first_suggestion)
+      SetSelectedLine(0);
   } else {
     if (selected_line_ && *selected_line_ >= GetLineCount())
       selected_line_.reset();
@@ -281,6 +282,10 @@ void AutofillPopupControllerImpl::SelectionCleared() {
   SetSelectedLine(base::nullopt);
 }
 
+bool AutofillPopupControllerImpl::HasSelection() const {
+  return selected_line_.has_value();
+}
+
 void AutofillPopupControllerImpl::AcceptSuggestion(int index) {
   const autofill::Suggestion& suggestion = suggestions_[index];
   delegate_->DidAcceptSuggestion(suggestion.value, suggestion.frontend_id,
@@ -291,7 +296,7 @@ gfx::Rect AutofillPopupControllerImpl::popup_bounds() const {
   return layout_model_.popup_bounds();
 }
 
-gfx::NativeView AutofillPopupControllerImpl::container_view() {
+gfx::NativeView AutofillPopupControllerImpl::container_view() const {
   return controller_common_.container_view;
 }
 

@@ -201,8 +201,7 @@ TEST_P(ParameterizedLocalCaretRectTest, UnderflowTextRtl) {
                 Position(text, 2), TextAffinity::kDownstream)));
 }
 
-// TODO(xiaochengh): Fix NG LocalCaretText computation for vertical text.
-TEST_F(LocalCaretRectTest, VerticalRLText) {
+TEST_P(ParameterizedLocalCaretRectTest, VerticalRLText) {
   // This test only records the current behavior. Future changes are allowed.
 
   LoadAhem();
@@ -210,11 +209,6 @@ TEST_F(LocalCaretRectTest, VerticalRLText) {
       "<div id=div style='writing-mode: vertical-rl; word-break: break-all; "
       "font: 10px/10px Ahem; width: 30px; height: 30px'>XXXYYYZZZ</div>");
   const Node* foo = GetElementById("div")->firstChild();
-
-  // TODO(xiaochengh): In vertical-rl writing mode, the |X| property of
-  // LocalCaretRect's LayoutRect seems to refer to the distance to the right
-  // edge of the inline formatting context instead. Figure out if this is
-  // correct.
 
   EXPECT_EQ(LocalCaretRect(foo->GetLayoutObject(), LayoutRect(0, 0, 10, 1)),
             LocalCaretRectOfPosition(PositionWithAffinity(
@@ -685,9 +679,7 @@ TEST_P(ParameterizedLocalCaretRectTest, FloatFirstLetter) {
                            LayoutRect(LayoutNGEnabled() ? 10 : 20, 0, 1, 10)),
             LocalCaretRectOfPosition(PositionWithAffinity(
                 Position(foo, 2), TextAffinity::kDownstream)));
-  EXPECT_EQ(LocalCaretRect(remaining_text, LayoutNGEnabled()
-                                               ? LayoutRect(20, 0, 1, 10)
-                                               : LayoutRect()),
+  EXPECT_EQ(LocalCaretRect(remaining_text, LayoutRect(20, 0, 1, 10)),
             LocalCaretRectOfPosition(PositionWithAffinity(
                 Position(foo, 3), TextAffinity::kDownstream)));
 }
@@ -706,11 +698,10 @@ TEST_P(ParameterizedLocalCaretRectTest, AfterLineBreak) {
       LocalCaretRect(second_br->GetLayoutObject(), LayoutRect(0, 10, 1, 10)),
       LocalCaretRectOfPosition(PositionWithAffinity(
           Position::AfterNode(*first_br), TextAffinity::kDownstream)));
-  EXPECT_EQ(LocalCaretRect(second_br->GetLayoutObject(),
-                           LayoutNGEnabled() ? LayoutRect(0, 10, 1, 10)
-                                             : LayoutRect(0, 0, 0, 0)),
-            LocalCaretRectOfPosition(PositionWithAffinity(
-                Position::AfterNode(*second_br), TextAffinity::kDownstream)));
+  EXPECT_EQ(
+      LocalCaretRect(second_br->GetLayoutObject(), LayoutRect(0, 10, 1, 10)),
+      LocalCaretRectOfPosition(PositionWithAffinity(
+          Position::AfterNode(*second_br), TextAffinity::kDownstream)));
 }
 
 TEST_P(ParameterizedLocalCaretRectTest, AfterLineBreakInPre) {
@@ -724,10 +715,7 @@ TEST_P(ParameterizedLocalCaretRectTest, AfterLineBreakInPre) {
   EXPECT_EQ(LocalCaretRect(foo->GetLayoutObject(), LayoutRect(0, 10, 1, 10)),
             LocalCaretRectOfPosition(PositionWithAffinity(
                 Position(foo, 4), TextAffinity::kDownstream)));
-  // TODO(yoichio): Legacy should return valid rect: crbug.com/812535.
-  EXPECT_EQ(LocalCaretRect(foo->GetLayoutObject(),
-                           LayoutNGEnabled() ? LayoutRect(0, 10, 1, 10)
-                                             : LayoutRect(0, 0, 0, 0)),
+  EXPECT_EQ(LocalCaretRect(foo->GetLayoutObject(), LayoutRect(0, 10, 1, 10)),
             LocalCaretRectOfPosition(PositionWithAffinity(
                 Position(foo, 5), TextAffinity::kDownstream)));
 }
@@ -746,9 +734,7 @@ TEST_P(ParameterizedLocalCaretRectTest, AfterLineBreakInPre2) {
   EXPECT_EQ(LocalCaretRect(br->GetLayoutObject(), LayoutRect(0, 10, 1, 10)),
             LocalCaretRectOfPosition(PositionWithAffinity(
                 Position(foo, 4), TextAffinity::kDownstream)));
-  EXPECT_EQ(LocalCaretRect(br->GetLayoutObject(), LayoutNGEnabled()
-                                                      ? LayoutRect(0, 10, 1, 10)
-                                                      : LayoutRect(0, 0, 0, 0)),
+  EXPECT_EQ(LocalCaretRect(br->GetLayoutObject(), LayoutRect(0, 10, 1, 10)),
             LocalCaretRectOfPosition(PositionWithAffinity(
                 Position::AfterNode(*br), TextAffinity::kDownstream)));
 }
@@ -863,10 +849,7 @@ TEST_P(ParameterizedLocalCaretRectTest, AfterLineBreakInPreBlockLTRLineLTR) {
       SetCaretTextToBody("<pre dir='ltr'>foo\n|<bdo dir='ltr'>abc</bdo></pre>");
   LayoutRect position_rect, visible_position_rect;
   std::tie(position_rect, visible_position_rect) = GetLayoutRects(caret);
-  // TODO(xiaochengh): Should return the same result for legacy and LayoutNG.
-  EXPECT_EQ(
-      LayoutNGEnabled() ? LayoutRect(30, 0, 1, 10) : LayoutRect(0, 10, 1, 10),
-      position_rect);
+  EXPECT_EQ(LayoutRect(0, 10, 1, 10), position_rect);
   EXPECT_EQ(LayoutRect(0, 10, 1, 10), visible_position_rect);
 };
 
@@ -877,13 +860,8 @@ TEST_P(ParameterizedLocalCaretRectTest, AfterLineBreakInPreBlockLTRLineRTL) {
       SetCaretTextToBody("<pre dir='ltr'>foo\n|<bdo dir='rtl'>abc</bdo></pre>");
   LayoutRect position_rect, visible_position_rect;
   std::tie(position_rect, visible_position_rect) = GetLayoutRects(caret);
-  // TODO(xiaochengh): Should return the same result for legacy and LayoutNG.
-  EXPECT_EQ(
-      LayoutNGEnabled() ? LayoutRect(30, 0, 1, 10) : LayoutRect(0, 10, 1, 10),
-      position_rect);
-  EXPECT_EQ(
-      LayoutNGEnabled() ? LayoutRect(30, 10, 1, 10) : LayoutRect(0, 10, 1, 10),
-      visible_position_rect);
+  EXPECT_EQ(LayoutRect(0, 10, 1, 10), position_rect);
+  EXPECT_EQ(LayoutRect(0, 10, 1, 10), visible_position_rect);
 };
 
 TEST_P(ParameterizedLocalCaretRectTest, AfterLineBreakInPreBlockRTLLineLTR) {
@@ -893,13 +871,8 @@ TEST_P(ParameterizedLocalCaretRectTest, AfterLineBreakInPreBlockRTLLineLTR) {
       SetCaretTextToBody("<pre dir='rtl'>foo\n|<bdo dir='ltr'>abc</bdo></pre>");
   LayoutRect position_rect, visible_position_rect;
   std::tie(position_rect, visible_position_rect) = GetLayoutRects(caret);
-  // TODO(xiaochengh): Should return the same result for legacy and LayoutNG.
-  EXPECT_EQ(LayoutNGEnabled() ? LayoutRect(270, 0, 1, 10)
-                              : LayoutRect(299, 10, 1, 10),
-            position_rect);
-  EXPECT_EQ(LayoutNGEnabled() ? LayoutRect(270, 10, 1, 10)
-                              : LayoutRect(299, 10, 1, 10),
-            visible_position_rect);
+  EXPECT_EQ(LayoutRect(299, 10, 1, 10), position_rect);
+  EXPECT_EQ(LayoutRect(299, 10, 1, 10), visible_position_rect);
 };
 
 TEST_P(ParameterizedLocalCaretRectTest, AfterLineBreakInPreBlockRTLLineRTL) {
@@ -909,11 +882,19 @@ TEST_P(ParameterizedLocalCaretRectTest, AfterLineBreakInPreBlockRTLLineRTL) {
       SetCaretTextToBody("<pre dir='rtl'>foo\n|<bdo dir='rtl'>abc</bdo></pre>");
   LayoutRect position_rect, visible_position_rect;
   std::tie(position_rect, visible_position_rect) = GetLayoutRects(caret);
-  // TODO(xiaochengh): Should return the same result for legacy and LayoutNG.
-  EXPECT_EQ(LayoutNGEnabled() ? LayoutRect(270, 0, 1, 10)
-                              : LayoutRect(299, 10, 1, 10),
-            position_rect);
+  EXPECT_EQ(LayoutRect(299, 10, 1, 10), position_rect);
   EXPECT_EQ(LayoutRect(299, 10, 1, 10), visible_position_rect);
+};
+
+// crbug.com/834686
+TEST_P(ParameterizedLocalCaretRectTest, AfterTrimedLineBreak) {
+  LoadAhem();
+  InsertStyleElement("body { font: 10px/10px Ahem; width: 300px }");
+  const Position& caret = SetCaretTextToBody("<div>foo\n|</div>");
+  LayoutRect position_rect, visible_position_rect;
+  std::tie(position_rect, visible_position_rect) = GetLayoutRects(caret);
+  EXPECT_EQ(LayoutRect(30, 0, 1, 10), position_rect);
+  EXPECT_EQ(LayoutRect(30, 0, 1, 10), visible_position_rect);
 };
 
 TEST_P(ParameterizedLocalCaretRectTest,
@@ -944,6 +925,50 @@ TEST_P(ParameterizedLocalCaretRectTest, NextLineWithoutLeafChild) {
       LayoutNGEnabled() ? LayoutRect(50, 10, 1, 10) : LayoutRect(0, 20, 1, 10),
       LocalCaretRectOfPosition(PositionWithAffinity(Position::AfterNode(br)))
           .rect);
+}
+
+TEST_P(ParameterizedLocalCaretRectTest, BidiTextWithImage) {
+  LoadAhem();
+  InsertStyleElement(
+      "div { font: 10px/10px Ahem; width: 30px }"
+      "img { width: 10px; height: 10px; vertical-align: bottom }");
+  SetBodyContent("<div dir=rtl>X<img id=image>Y</div>");
+  const Element& image = *GetElementById("image");
+  const LayoutObject* image_layout = image.GetLayoutObject();
+  const LayoutObject* text_before = image.previousSibling()->GetLayoutObject();
+  // TODO(xiaochengh): Should return the same result for legacy and NG
+  EXPECT_EQ(LayoutNGEnabled()
+                ? LocalCaretRect(text_before, LayoutRect(10, 0, 1, 10))
+                : LocalCaretRect(image_layout, LayoutRect(0, 0, 1, 10)),
+            LocalCaretRectOfPosition(
+                PositionWithAffinity(Position::BeforeNode(image))));
+  EXPECT_EQ(LocalCaretRect(image_layout, LayoutRect(9, 0, 1, 10)),
+            LocalCaretRectOfPosition(
+                PositionWithAffinity(Position::AfterNode(image))));
+}
+
+// https://crbug.com/876044
+TEST_P(ParameterizedLocalCaretRectTest, RtlMeterNoCrash) {
+  SetBodyContent("foo<meter dir=rtl></meter>");
+  const Position position = Position::LastPositionInNode(*GetDocument().body());
+  // Shouldn't crash inside
+  const LocalCaretRect local_caret_rect =
+      LocalCaretRectOfPosition(PositionWithAffinity(position));
+  EXPECT_EQ(GetDocument().QuerySelector("meter")->GetLayoutObject(),
+            local_caret_rect.layout_object);
+}
+
+// https://crbug.com/883044
+TEST_P(ParameterizedLocalCaretRectTest, AfterCollapsedWhiteSpaceInRTLText) {
+  LoadAhem();
+  InsertStyleElement(
+      "bdo { display: block; font: 10px/10px Ahem; width: 100px }");
+  const Position position =
+      SetCaretTextToBody("<bdo dir=rtl>AAA  |BBB<span>CCC</span></bdo>");
+  const Node* text = position.AnchorNode();
+  EXPECT_EQ(LocalCaretRect(text->GetLayoutObject(), LayoutRect(60, 0, 1, 10)),
+            LocalCaretRectOfPosition(
+                PositionWithAffinity(position, TextAffinity::kDownstream)));
 }
 
 }  // namespace blink

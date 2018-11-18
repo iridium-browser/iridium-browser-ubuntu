@@ -10,7 +10,6 @@
 #include "ash/accessibility/accessibility_controller.h"
 #include "ash/accessibility/test_accessibility_controller_client.h"
 #include "ash/public/cpp/ash_switches.h"
-#include "ash/public/cpp/config.h"
 #include "ash/session/session_controller.h"
 #include "ash/shell.h"
 #include "ash/shutdown_controller.h"
@@ -27,7 +26,7 @@
 #include "base/time/time.h"
 #include "chromeos/dbus/fake_power_manager_client.h"
 #include "chromeos/dbus/fake_session_manager_client.h"
-#include "ui/display/manager/chromeos/display_configurator.h"
+#include "ui/display/manager/display_configurator.h"
 #include "ui/display/manager/fake_display_snapshot.h"
 #include "ui/display/types/display_constants.h"
 #include "ui/gfx/geometry/size.h"
@@ -342,9 +341,7 @@ TEST_F(LockStateControllerTest, LegacyLockAndShutDown) {
   EXPECT_EQ(0, NumShutdownRequests());
   // Make sure a mouse move event won't show the cursor.
   GenerateMouseMoveEvent();
-  // TODO: CursorManager not created in mash. http://crbug.com/631103.
-  if (Shell::GetAshConfig() != Config::MASH)
-    EXPECT_FALSE(cursor_visible());
+  EXPECT_FALSE(cursor_visible());
 
   ShutdownSoundPlayed();
   EXPECT_TRUE(lock_state_test_api_->real_shutdown_timer_is_running());
@@ -533,9 +530,7 @@ TEST_F(LockStateControllerTest, ShutdownWithoutButton) {
       SessionStateAnimator::kAllNonRootContainersMask,
       SessionStateAnimator::ANIMATION_HIDE_IMMEDIATELY));
   GenerateMouseMoveEvent();
-  // TODO: CursorManager not created in mash. http://crbug.com/631103.
-  if (Shell::GetAshConfig() != Config::MASH)
-    EXPECT_FALSE(cursor_visible());
+  EXPECT_FALSE(cursor_visible());
 }
 
 // Test that we display the fast-close animation and shut down when we get an
@@ -550,9 +545,7 @@ TEST_F(LockStateControllerTest, RequestShutdownFromLoginScreen) {
   Advance(SessionStateAnimator::ANIMATION_SPEED_SHUTDOWN);
 
   GenerateMouseMoveEvent();
-  // TODO: CursorManager not created in mash. http://crbug.com/631103.
-  if (Shell::GetAshConfig() != Config::MASH)
-    EXPECT_FALSE(cursor_visible());
+  EXPECT_FALSE(cursor_visible());
 
   EXPECT_EQ(0, NumShutdownRequests());
   ShutdownSoundPlayed();
@@ -576,9 +569,7 @@ TEST_F(LockStateControllerTest, RequestShutdownFromLockScreen) {
   Advance(SessionStateAnimator::ANIMATION_SPEED_SHUTDOWN);
 
   GenerateMouseMoveEvent();
-  // TODO: CursorManager not created in mash. http://crbug.com/631103.
-  if (Shell::GetAshConfig() != Config::MASH)
-    EXPECT_FALSE(cursor_visible());
+  EXPECT_FALSE(cursor_visible());
 
   EXPECT_EQ(0, NumShutdownRequests());
   ShutdownSoundPlayed();

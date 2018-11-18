@@ -15,7 +15,7 @@
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/signin/signin_manager_factory.h"
+#include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/browser/ui/webui/browsing_history_handler.h"
 #include "chrome/browser/ui/webui/foreign_session_handler.h"
 #include "chrome/browser/ui/webui/history_login_handler.h"
@@ -27,10 +27,11 @@
 #include "chrome/grit/locale_settings.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
-#include "components/signin/core/browser/signin_manager.h"
 #include "components/strings/grit/components_strings.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
+#include "content/public/common/content_features.h"
+#include "services/identity/public/cpp/identity_manager.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace {
@@ -39,9 +40,9 @@ constexpr char kIsUserSignedInKey[] = "isUserSignedIn";
 constexpr char kShowMenuPromoKey[] = "showMenuPromo";
 
 bool IsUserSignedIn(Profile* profile) {
-  SigninManagerBase* signin_manager =
-      SigninManagerFactory::GetForProfile(profile);
-  return signin_manager && signin_manager->IsAuthenticated();
+  identity::IdentityManager* identity_manager =
+      IdentityManagerFactory::GetForProfile(profile);
+  return identity_manager && identity_manager->HasPrimaryAccount();
 }
 
 bool MenuPromoShown(Profile* profile) {
@@ -174,12 +175,16 @@ content::WebUIDataSource* CreateMdHistoryUIHTMLSource(Profile* profile,
   source->UseGzip(exclude_from_gzip);
 
 #if BUILDFLAG(OPTIMIZE_WEBUI)
+  const bool use_polymer_2 =
+      base::FeatureList::IsEnabled(features::kWebUIPolymer2);
   source->AddResourcePath("app.html",
-                          IDR_MD_HISTORY_APP_VULCANIZED_HTML);
-  source->AddResourcePath("app.crisper.js",
-                          IDR_MD_HISTORY_APP_CRISPER_JS);
+                          use_polymer_2 ? IDR_MD_HISTORY_APP_VULCANIZED_P2_HTML
+                                        : IDR_MD_HISTORY_APP_VULCANIZED_HTML);
+  source->AddResourcePath("app.crisper.js", IDR_MD_HISTORY_APP_CRISPER_JS);
   source->AddResourcePath("lazy_load.html",
-                          IDR_MD_HISTORY_LAZY_LOAD_VULCANIZED_HTML);
+                          use_polymer_2
+                              ? IDR_MD_HISTORY_LAZY_LOAD_VULCANIZED_P2_HTML
+                              : IDR_MD_HISTORY_LAZY_LOAD_VULCANIZED_HTML);
   source->AddResourcePath("lazy_load.crisper.js",
                           IDR_MD_HISTORY_LAZY_LOAD_CRISPER_JS);
 #endif
@@ -217,7 +222,8 @@ MdHistoryUI::~MdHistoryUI() {}
 
 void MdHistoryUI::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
-  registry->RegisterBooleanPref(prefs::kMdHistoryMenuPromoShown, false,
+  registry->RegisterBooleanPref(
+      prefs::kMdHistoryMenuPromoShown, false,
       user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
 }
 

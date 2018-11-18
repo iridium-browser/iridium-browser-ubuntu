@@ -5,6 +5,7 @@
 #include "third_party/blink/renderer/core/editing/testing/selection_sample.h"
 
 #include "third_party/blink/renderer/core/dom/processing_instruction.h"
+#include "third_party/blink/renderer/core/dom/text.h"
 #include "third_party/blink/renderer/core/editing/selection_template.h"
 #include "third_party/blink/renderer/core/editing/testing/editing_test_base.h"
 
@@ -28,7 +29,7 @@ TEST_F(SelectionSampleTest, GetSelectionTextFlatTree) {
       "  </template>"
       "  <b slot=two>tw|o</b><b slot=one>one</b>"
       "</p>");
-  GetDocument().body()->UpdateDistribution();
+  GetDocument().body()->UpdateDistributionForFlatTreeTraversal();
   EXPECT_EQ(
       "<p>"
       "    ze^ro <slot name=\"one\"><b slot=\"one\">one</b></slot> <slot "

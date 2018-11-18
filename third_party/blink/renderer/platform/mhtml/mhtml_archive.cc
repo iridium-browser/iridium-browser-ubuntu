@@ -40,7 +40,6 @@
 #include "third_party/blink/renderer/platform/text/quoted_printable.h"
 #include "third_party/blink/renderer/platform/weborigin/scheme_registry.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
-#include "third_party/blink/renderer/platform/wtf/cryptographically_random_number.h"
 #include "third_party/blink/renderer/platform/wtf/date_math.h"
 #include "third_party/blink/renderer/platform/wtf/text/base64.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
@@ -50,7 +49,7 @@ namespace blink {
 
 namespace {
 
-const size_t kMaximumLineLength = 76;
+const wtf_size_t kMaximumLineLength = 76;
 
 const char kRFC2047EncodingPrefix[] = "=?utf-8?Q?";
 const size_t kRFC2047EncodingPrefixLength = 10;
@@ -123,7 +122,7 @@ class QuotedPrintableEncodeHeaderDelegate
 static String ConvertToPrintableCharacters(const String& text) {
   // If the text contains all printable ASCII characters, no need for encoding.
   bool found_non_printable_char = false;
-  for (size_t i = 0; i < text.length(); ++i) {
+  for (wtf_size_t i = 0; i < text.length(); ++i) {
     if (!IsASCIIPrintable(text[i])) {
       found_non_printable_char = true;
       break;
@@ -149,6 +148,10 @@ MHTMLArchive::MHTMLArchive() = default;
 
 MHTMLArchive* MHTMLArchive::Create(const KURL& url,
                                    scoped_refptr<const SharedBuffer> data) {
+  // |data| may be null if archive file is empty.
+  if (!data)
+    return nullptr;
+
   // MHTML pages can only be loaded from local URLs, http/https URLs, and
   // content URLs(Android specific).  The latter is now allowed due to full
   // sandboxing enforcement on MHTML pages.
@@ -165,13 +168,13 @@ MHTMLArchive* MHTMLArchive::Create(const KURL& url,
 
   size_t resources_count = resources.size();
   // The first document suitable resource is the main resource of the top frame.
-  for (size_t i = 0; i < resources_count; ++i) {
+  for (ArchiveResource* resource : resources) {
     if (archive->MainResource()) {
-      archive->AddSubresource(resources[i].Get());
+      archive->AddSubresource(resource);
       continue;
     }
 
-    const AtomicString& mime_type = resources[i]->MimeType();
+    const AtomicString& mime_type = resource->MimeType();
     bool is_mime_type_suitable_for_main_resource =
         MIMETypeRegistry::IsSupportedNonImageMIMEType(mime_type);
     // Want to allow image-only MHTML archives, but retain behavior for other
@@ -187,11 +190,13 @@ MHTMLArchive* MHTMLArchive::Create(const KURL& url,
       is_mime_type_suitable_for_main_resource = false;
 
     if (is_mime_type_suitable_for_main_resource)
-      archive->SetMainResource(resources[i].Get());
+      archive->SetMainResource(resource);
     else
-      archive->AddSubresource(resources[i].Get());
+      archive->AddSubresource(resource);
   }
-  return archive;
+  if (archive->MainResource())
+    return archive;
+  return nullptr;
 }
 
 bool MHTMLArchive::CanLoadArchive(const KURL& url) {
@@ -218,14 +223,7 @@ void MHTMLArchive::GenerateMHTMLHeader(const String& boundary,
   DCHECK(!boundary.IsEmpty());
   DCHECK(!mime_type.IsEmpty());
 
-  // TODO(lukasza): Passing individual date/time components seems fragile.
-  base::Time::Exploded date_components;
-  date.UTCExplode(&date_components);
-  String date_string = MakeRFC2822DateString(
-      date_components.day_of_week, date_components.day_of_month,
-      // |month| is 1-based in Exploded, but 0-based in MakeRFC2822DateString.
-      date_components.month - 1, date_components.year, date_components.hour,
-      date_components.minute, date_components.second, 0);
+  String date_string = MakeRFC2822DateString(date, 0);
 
   StringBuilder string_builder;
   string_builder.Append("From: <Saved by Blink>\r\n");
@@ -306,12 +304,8 @@ void MHTMLArchive::GenerateMHTMLPart(const String& boundary,
   output_buffer.Append(ascii_string.data(), ascii_string.length());
 
   if (!strcmp(content_encoding, kBinary)) {
-    const char* data;
-    size_t position = 0;
-    while (size_t length = resource.data->GetSomeData(data, position)) {
-      output_buffer.Append(data, length);
-      position += length;
-    }
+    for (const auto& span : *resource.data)
+      output_buffer.Append(span.data(), SafeCast<wtf_size_t>(span.size()));
   } else {
     // FIXME: ideally we would encode the content as a stream without having to
     // fetch it all.
@@ -321,17 +315,18 @@ void MHTMLArchive::GenerateMHTMLPart(const String& boundary,
     Vector<char> encoded_data;
     if (!strcmp(content_encoding, kQuotedPrintable)) {
       QuotedPrintableEncodeBodyDelegate body_delegate;
-      QuotedPrintableEncode(data, data_length, &body_delegate, encoded_data);
+      QuotedPrintableEncode(data, SafeCast<wtf_size_t>(data_length),
+                            &body_delegate, encoded_data);
       output_buffer.Append(encoded_data.data(), encoded_data.size());
     } else {
       DCHECK(!strcmp(content_encoding, kBase64));
       // We are not specifying insertLFs = true below as it would cut the lines
       // with LFs and MHTML requires CRLFs.
-      Base64Encode(data, data_length, encoded_data);
-      size_t index = 0;
-      size_t encoded_data_length = encoded_data.size();
+      Base64Encode(data, SafeCast<wtf_size_t>(data_length), encoded_data);
+      wtf_size_t index = 0;
+      wtf_size_t encoded_data_length = encoded_data.size();
       do {
-        size_t line_length =
+        wtf_size_t line_length =
             std::min(encoded_data_length - index, kMaximumLineLength);
         output_buffer.Append(encoded_data.data() + index, line_length);
         output_buffer.Append("\r\n", 2u);

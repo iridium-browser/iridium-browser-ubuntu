@@ -7,6 +7,7 @@
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/modules/presentation/presentation_availability_observer.h"
 #include "third_party/blink/renderer/modules/presentation/presentation_controller.h"
+#include "third_party/blink/renderer/platform/scheduler/public/thread.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 
 namespace blink {

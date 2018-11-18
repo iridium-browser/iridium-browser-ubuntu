@@ -93,15 +93,15 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterCast
   void AddDiscoverySession(
       BluetoothDiscoveryFilter* discovery_filter,
       const base::Closure& callback,
-      const DiscoverySessionErrorCallback& error_callback) override;
+      DiscoverySessionErrorCallback error_callback) override;
   void RemoveDiscoverySession(
       BluetoothDiscoveryFilter* discovery_filter,
       const base::Closure& callback,
-      const DiscoverySessionErrorCallback& error_callback) override;
+      DiscoverySessionErrorCallback error_callback) override;
   void SetDiscoveryFilter(
       std::unique_ptr<BluetoothDiscoveryFilter> discovery_filter,
       const base::Closure& callback,
-      const DiscoverySessionErrorCallback& error_callback) override;
+      DiscoverySessionErrorCallback error_callback) override;
   void RemovePairingDelegateInternal(
       BluetoothDevice::PairingDelegate* pairing_delegate) override;
 
@@ -137,10 +137,6 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterCast
       bool connected) override;
   void OnMtuChanged(scoped_refptr<chromecast::bluetooth::RemoteDevice> device,
                     int mtu) override;
-  void OnServicesUpdated(
-      scoped_refptr<chromecast::bluetooth::RemoteDevice> device,
-      std::vector<scoped_refptr<chromecast::bluetooth::RemoteService>> services)
-      override;
   void OnCharacteristicNotification(
       scoped_refptr<chromecast::bluetooth::RemoteDevice> device,
       scoped_refptr<chromecast::bluetooth::RemoteCharacteristic> characteristic,
@@ -163,8 +159,9 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterCast
       scoped_refptr<chromecast::bluetooth::RemoteDevice> remote_device);
 
   // Called when the scanner has enabled scanning.
-  void OnScanEnabled(bool success);
-  void OnScanDisabled(bool success);
+  void OnScanEnabled(
+      std::unique_ptr<chromecast::bluetooth::LeScanManager::ScanHandle>
+          scan_handle);
   void OnGetDevice(scoped_refptr<chromecast::bluetooth::RemoteDevice> device);
   void OnGetScanResults(
       std::vector<chromecast::bluetooth::LeScanResult> results);
@@ -173,7 +170,8 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterCast
     DiscoveryParams(device::BluetoothDiscoveryFilter* filter,
                     base::Closure success_callback,
                     DiscoverySessionErrorCallback error_callback);
-    DiscoveryParams(const DiscoveryParams&);
+    DiscoveryParams(DiscoveryParams&& params) noexcept;
+    DiscoveryParams& operator=(DiscoveryParams&& params);
     ~DiscoveryParams();
     device::BluetoothDiscoveryFilter* filter = nullptr;
     base::Closure success_callback;
@@ -181,7 +179,6 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterCast
   };
 
   std::queue<DiscoveryParams> pending_discovery_requests_;
-  base::Optional<DiscoveryParams> pending_disable_discovery_request_;
 
   int num_discovery_sessions_ = 0;
 
@@ -191,6 +188,9 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothAdapterCast
 
   chromecast::bluetooth::GattClientManager* const gatt_client_manager_;
   chromecast::bluetooth::LeScanManager* const le_scan_manager_;
+
+  std::unique_ptr<chromecast::bluetooth::LeScanManager::ScanHandle>
+      scan_handle_;
 
   bool powered_ = true;
   bool initialized_ = false;

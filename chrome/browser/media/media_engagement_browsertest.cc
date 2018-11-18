@@ -25,6 +25,7 @@
 #include "chrome/browser/sessions/session_restore_test_helper.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
+#include "chrome/browser/ui/recently_audible_helper.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
@@ -50,18 +51,20 @@ const base::string16 kReadyTitle = base::ASCIIToUTF16("Ready");
 // Watches WasRecentlyAudible changes on a WebContents, blocking until the
 // tab is audible. The audio stream monitor runs at 15Hz so we need have
 // a slight delay to ensure it has run.
+// TODO: Clean this up to use the callbacks available on
+// RecentlyAudibleHelper rather than busy-looping.
 class WasRecentlyAudibleWatcher {
  public:
   // |web_contents| must be non-NULL and needs to stay alive for the
   // entire lifetime of |this|.
   explicit WasRecentlyAudibleWatcher(content::WebContents* web_contents)
-      : web_contents_(web_contents), timer_(new base::Timer(true, true)) {}
+      : audible_helper_(RecentlyAudibleHelper::FromWebContents(web_contents)) {}
   ~WasRecentlyAudibleWatcher() = default;
 
   // Waits until WasRecentlyAudible is true.
   void WaitForWasRecentlyAudible() {
-    if (!web_contents_->WasRecentlyAudible()) {
-      timer_->Start(
+    if (!audible_helper_->WasRecentlyAudible()) {
+      timer_.Start(
           FROM_HERE, base::TimeDelta::FromMicroseconds(100),
           base::Bind(&WasRecentlyAudibleWatcher::TestWasRecentlyAudible,
                      base::Unretained(this)));
@@ -72,15 +75,15 @@ class WasRecentlyAudibleWatcher {
 
  private:
   void TestWasRecentlyAudible() {
-    if (web_contents_->WasRecentlyAudible()) {
+    if (audible_helper_->WasRecentlyAudible()) {
       run_loop_->Quit();
-      timer_->Stop();
+      timer_.Stop();
     }
   }
 
-  content::WebContents* web_contents_;
+  RecentlyAudibleHelper* const audible_helper_;
 
-  std::unique_ptr<base::Timer> timer_;
+  base::RepeatingTimer timer_;
   std::unique_ptr<base::RunLoop> run_loop_;
 
   DISALLOW_COPY_AND_ASSIGN(WasRecentlyAudibleWatcher);
@@ -154,8 +157,8 @@ class MediaEngagementBrowserTest : public InProcessBrowserTest {
     Navigate(&params);
 
     InjectTimerTaskRunner();
-    params.target_contents->SetAudioMuted(false);
-    content::WaitForLoadStop(params.target_contents);
+    params.navigated_or_inserted_contents->SetAudioMuted(false);
+    content::WaitForLoadStop(params.navigated_or_inserted_contents);
   }
 
   void OpenTabAsLink(const GURL& url) {
@@ -254,7 +257,8 @@ class MediaEngagementBrowserTest : public InProcessBrowserTest {
   void EraseHistory() {
     history::URLRows urls;
     urls.push_back(history::URLRow(http_server_.GetURL("/")));
-    GetService()->OnURLsDeleted(nullptr, false, false, urls, std::set<GURL>());
+    GetService()->OnURLsDeleted(
+        nullptr, history::DeletionInfo::ForUrls(urls, std::set<GURL>()));
   }
 
   void LoadNewOriginPage() {
@@ -333,7 +337,7 @@ class MediaEngagementPreloadBrowserTest : public InProcessBrowserTest {
 IN_PROC_BROWSER_TEST_F(MediaEngagementBrowserTest, RecordEngagement) {
   LoadTestPageAndWaitForPlayAndAudible("engagement_test.html", false);
   AdvanceMeaningfulPlaybackTime();
-  ExpectScores(1, 1, 0, 0);
+  ExpectScores(0, 0, 0, 0);
   CloseTab();
   ExpectScores(1, 1, 1, 1);
 }
@@ -672,7 +676,7 @@ class MediaEngagementPrerenderBrowserTest : public MediaEngagementBrowserTest {
   void SetUpOnMainThread() override {
     MediaEngagementBrowserTest::SetUpOnMainThread();
 
-    prerender::PrerenderManager::SetOmniboxMode(
+    prerender::PrerenderManager::SetMode(
         prerender::PrerenderManager::PRERENDER_MODE_NOSTATE_PREFETCH);
   }
 };

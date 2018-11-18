@@ -34,26 +34,48 @@ def ParseDepList(dep):
           lines[externs_start+1:])
 
 
-def CrawlDepsTree(deps, sources, externs):
+# Cache, to avoid reading the same file twice in the dependency tree and
+# processing its dependencies again.
+depcache = {}
+
+def AppendUnique(items, new_items):
+  """Append items in |new_items| to |items|, avoiding duplicates."""
+  # Note this is O(n*n), and assumes |new_items| is already unique, but this is
+  # not a bottleneck overall.
+  items += [i for i in new_items if i not in items]
+
+def CrawlDepsTree(deps):
   """Parses the dependency tree creating a post-order listing of sources."""
+  global depcache
+
+  if len(deps) == 0:
+    return ([], [])
+
+  new_sources = []
+  new_externs = []
   for dep in deps:
-    cur_sources, cur_deps, cur_externs = ParseDepList(dep)
-
-    child_sources, child_externs = CrawlDepsTree(
-      cur_deps, cur_sources, cur_externs)
-
-    # Add child dependencies of this node first.
-    new_sources = child_sources
+    if dep in depcache:
+      cur_sources, cur_externs = depcache[dep]
+    else:
+      dep_sources, dep_deps, dep_externs = ParseDepList(dep)
+      cur_sources, cur_externs = CrawlDepsTree(dep_deps)
+      # Add child dependencies of this node before the current node, then cache.
+      AppendUnique(cur_sources, dep_sources)
+      AppendUnique(cur_externs, dep_externs)
+      depcache[dep] = (cur_sources, cur_externs)
 
     # Add the current node's sources and dedupe.
-    new_sources += [s for s in cur_sources if s not in new_sources]
+    AppendUnique(new_sources, cur_sources)
+    AppendUnique(new_externs, cur_externs)
 
-    # Add the original sources, none of which will be dependencies of this node,
-    # and dedupe.
-    new_sources += [s for s in sources if s not in new_sources]
-    sources = new_sources
+  return new_sources, new_externs
 
-    externs += [e for e in cur_externs if e not in externs]
+
+def CrawlRootDepsTree(deps, target_sources, target_externs):
+  """Parses the dependency tree and adds target sources."""
+  sources, externs = CrawlDepsTree(deps)
+  AppendUnique(sources, target_sources)
+  AppendUnique(externs, target_externs)
   return sources, externs
 
 
@@ -77,12 +99,14 @@ def main():
                       'Do not include leading dashes')
   parser.add_argument('-e', '--externs', nargs='*', default=[],
                       help='A list of extern files to pass to the compiler')
+  parser.add_argument('-co', '--checks-only', action='store_true',
+                      help='Only performs checks and writes an empty output')
 
   args = parser.parse_args()
-  sources, externs = CrawlDepsTree(args.deps, args.sources, args.externs)
+  sources, externs = CrawlRootDepsTree(args.deps, args.sources, args.externs)
 
   compiler_args = ['--%s' % flag for flag in args.flags]
-  compiler_args += ['--externs=%s' % e for e in args.externs]
+  compiler_args += ['--externs=%s' % e for e in externs]
   compiler_args += [
       '--js_output_file',
       args.output,
@@ -92,6 +116,10 @@ def main():
     compiler_args += [args.bootstrap]
   compiler_args += args.config
   compiler_args += sources
+
+  if args.checks_only:
+    compiler_args += ['--checks-only']
+    open(args.output, 'w').close()
 
   returncode, errors = compile2.Checker().run_jar(args.compiler, compiler_args)
   if returncode != 0:

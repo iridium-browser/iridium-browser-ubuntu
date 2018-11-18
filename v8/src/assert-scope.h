@@ -77,7 +77,9 @@ class PerThreadAssertScopeDebugOnly : public
 #else
 class PerThreadAssertScopeDebugOnly {
  public:
-  PerThreadAssertScopeDebugOnly() { }
+  PerThreadAssertScopeDebugOnly() {  // NOLINT (modernize-use-equals-default)
+    // Define a constructor to avoid unused variable warnings.
+  }
   void Release() {}
 #endif
 };
@@ -139,6 +141,12 @@ typedef PerThreadAssertScopeDebugOnly<CODE_DEPENDENCY_CHANGE_ASSERT, false>
 typedef PerThreadAssertScopeDebugOnly<CODE_DEPENDENCY_CHANGE_ASSERT, true>
     AllowCodeDependencyChange;
 
+class DisallowHeapAccess {
+  DisallowHeapAllocation no_heap_allocation_;
+  DisallowHandleAllocation no_handle_allocation_;
+  DisallowHandleDereference no_handle_dereference_;
+  DisallowCodeDependencyChange no_dependency_change_;
+};
 
 // Per-isolate assert scopes.
 

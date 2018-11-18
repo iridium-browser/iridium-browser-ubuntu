@@ -27,6 +27,8 @@ blink_modules_sources("webgl") {
     "ext_texture_filter_anisotropic.cc",
     "ext_texture_filter_anisotropic.h",
     "gl_string_query.h",
+    "khr_parallel_shader_compile.cc",
+    "khr_parallel_shader_compile.h",
     "oes_element_index_uint.cc",
     "oes_element_index_uint.h",
     "oes_standard_derivatives.cc",
@@ -52,8 +54,6 @@ blink_modules_sources("webgl") {
     "webgl_color_buffer_float.h",
     "webgl_compressed_texture_astc.cc",
     "webgl_compressed_texture_astc.h",
-    "webgl_compressed_texture_atc.cc",
-    "webgl_compressed_texture_atc.h",
     "webgl_compressed_texture_etc.cc",
     "webgl_compressed_texture_etc.h",
     "webgl_compressed_texture_etc1.cc",
@@ -87,10 +87,10 @@ blink_modules_sources("webgl") {
     "webgl_fence_sync.h",
     "webgl_framebuffer.cc",
     "webgl_framebuffer.h",
-    "webgl_get_buffer_sub_data_async.cc",
-    "webgl_get_buffer_sub_data_async.h",
     "webgl_lose_context.cc",
     "webgl_lose_context.h",
+    "webgl_multiview.cc",
+    "webgl_multiview.h",
     "webgl_object.cc",
     "webgl_object.h",
     "webgl_program.cc",
@@ -130,6 +130,15 @@ blink_modules_sources("webgl") {
     "webgl_vertex_array_object_oes.cc",
     "webgl_vertex_array_object_oes.h",
   ]
+
+  if (support_webgl2_compute_context) {
+    sources += [
+      "webgl2_compute_rendering_context.cc",
+      "webgl2_compute_rendering_context.h",
+      "webgl2_compute_rendering_context_base.cc",
+      "webgl2_compute_rendering_context_base.h",
+    ]
+  }
 
   # The modules/webgl/ directly is a larger module, and
   # the implementation depends on a fair chunk of core/ --

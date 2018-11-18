@@ -71,7 +71,7 @@ public class ChromeBackupAgentTest {
      */
     @Implements(BackupManager.class)
     public static class BackupManagerShadow {
-        private static int sDataChangedCalls = 0;
+        private static int sDataChangedCalls;
 
         public static int getDataChangedCalls() {
             return sDataChangedCalls;
@@ -383,7 +383,7 @@ public class ChromeBackupAgentTest {
         byte[] unameBytes = ApiCompatibilityUtils.getBytesUtf8("user1");
         final byte[][] values = {{0}, {1}, {1}, {23, 42}, unameBytes};
         when(backupData.getKey()).thenAnswer(new Answer<String>() {
-            private int mPos = 0;
+            private int mPos;
 
             @Override
             public String answer(InvocationOnMock invocation) throws Throwable {
@@ -392,7 +392,7 @@ public class ChromeBackupAgentTest {
         });
 
         when(backupData.getDataSize()).thenAnswer(new Answer<Integer>() {
-            private int mPos = 0;
+            private int mPos;
 
             @Override
             public Integer answer(InvocationOnMock invocation) throws Throwable {
@@ -402,7 +402,7 @@ public class ChromeBackupAgentTest {
 
         when(backupData.readEntityData(any(byte[].class), anyInt(), anyInt()))
                 .thenAnswer(new Answer<Integer>() {
-                    private int mPos = 0;
+                    private int mPos;
 
                     @Override
                     public Integer answer(InvocationOnMock invocation) throws Throwable {
@@ -415,7 +415,7 @@ public class ChromeBackupAgentTest {
                 });
 
         when(backupData.readNextHeader()).thenAnswer(new Answer<Boolean>() {
-            private int mPos = 0;
+            private int mPos;
 
             @Override
             public Boolean answer(InvocationOnMock invocation) throws Throwable {
@@ -456,8 +456,8 @@ public class ChromeBackupAgentTest {
                         false /* allocateChildConnection */, true /* initVariationSeed */);
 
         // Test that the status of the restore has been recorded.
-        assertThat(
-                ChromeBackupAgent.getRestoreStatus(), equalTo(ChromeBackupAgent.RESTORE_COMPLETED));
+        assertThat(ChromeBackupAgent.getRestoreStatus(),
+                equalTo(ChromeBackupAgent.RestoreStatus.RESTORE_COMPLETED));
 
         // The test mocks out everything that forces the AsyncTask used by PathUtils setup to
         // complete. If it isn't completed before the test exits Robolectric crashes with a null
@@ -494,7 +494,8 @@ public class ChromeBackupAgentTest {
                         false /* allocateChildConnection */, true /* initVariationSeed */);
 
         // Test that the status of the restore has been recorded.
-        assertThat(ChromeBackupAgent.getRestoreStatus(), equalTo(ChromeBackupAgent.NOT_SIGNED_IN));
+        assertThat(ChromeBackupAgent.getRestoreStatus(),
+                equalTo(ChromeBackupAgent.RestoreStatus.NOT_SIGNED_IN));
 
         // The test mocks out everything that forces the AsyncTask used by PathUtils setup to
         // complete. If it isn't completed before the test exits Robolectric crashes with a null
@@ -527,7 +528,7 @@ public class ChromeBackupAgentTest {
 
         // Test that the status of the restore has been recorded.
         assertThat(ChromeBackupAgent.getRestoreStatus(),
-                equalTo(ChromeBackupAgent.BROWSER_STARTUP_FAILED));
+                equalTo(ChromeBackupAgent.RestoreStatus.BROWSER_STARTUP_FAILED));
 
         // The test mocks out everything that forces the AsyncTask used by PathUtils setup to
         // complete. If it isn't completed before the test exits Robolectric crashes with a null
@@ -560,7 +561,7 @@ public class ChromeBackupAgentTest {
 
         // Test that the status of the restore has been recorded.
         assertThat(ChromeBackupAgent.getRestoreStatus(),
-                equalTo(ChromeBackupAgent.RESTORE_AFTER_FIRST_RUN));
+                equalTo(ChromeBackupAgent.RestoreStatus.RESTORE_AFTER_FIRST_RUN));
 
         // The test mocks out everything that forces the AsyncTask used by PathUtils setup to
         // complete. If it isn't completed before the test exits Robolectric crashes with a null
@@ -574,32 +575,35 @@ public class ChromeBackupAgentTest {
     @Test
     public void testGetRestoreStatus() {
         // Test default value
-        assertThat(ChromeBackupAgent.getRestoreStatus(), equalTo(ChromeBackupAgent.NO_RESTORE));
+        assertThat(ChromeBackupAgent.getRestoreStatus(),
+                equalTo(ChromeBackupAgent.RestoreStatus.NO_RESTORE));
 
         // Test that the value can be changed
-        ChromeBackupAgent.setRestoreStatus(ChromeBackupAgent.RESTORE_AFTER_FIRST_RUN);
+        ChromeBackupAgent.setRestoreStatus(ChromeBackupAgent.RestoreStatus.RESTORE_AFTER_FIRST_RUN);
         assertThat(ChromeBackupAgent.getRestoreStatus(),
-                equalTo(ChromeBackupAgent.RESTORE_AFTER_FIRST_RUN));
+                equalTo(ChromeBackupAgent.RestoreStatus.RESTORE_AFTER_FIRST_RUN));
 
         // Prove that the value equalTo held in the app preferences (and not, for example, in a
         // static).
         clearPrefs();
-        assertThat(ChromeBackupAgent.getRestoreStatus(), equalTo(ChromeBackupAgent.NO_RESTORE));
+        assertThat(ChromeBackupAgent.getRestoreStatus(),
+                equalTo(ChromeBackupAgent.RestoreStatus.NO_RESTORE));
 
         // Test that ChromeBackupAgent.setRestoreStatus really looks at the argument.
-        ChromeBackupAgent.setRestoreStatus(ChromeBackupAgent.BROWSER_STARTUP_FAILED);
+        ChromeBackupAgent.setRestoreStatus(ChromeBackupAgent.RestoreStatus.BROWSER_STARTUP_FAILED);
         assertThat(ChromeBackupAgent.getRestoreStatus(),
-                equalTo(ChromeBackupAgent.BROWSER_STARTUP_FAILED));
+                equalTo(ChromeBackupAgent.RestoreStatus.BROWSER_STARTUP_FAILED));
 
         // Test the remaining values are implemented
-        ChromeBackupAgent.setRestoreStatus(ChromeBackupAgent.NOT_SIGNED_IN);
-        assertThat(ChromeBackupAgent.getRestoreStatus(), equalTo(ChromeBackupAgent.NOT_SIGNED_IN));
-        ChromeBackupAgent.setRestoreStatus(ChromeBackupAgent.RESTORE_COMPLETED);
-        assertThat(
-                ChromeBackupAgent.getRestoreStatus(), equalTo(ChromeBackupAgent.RESTORE_COMPLETED));
-        ChromeBackupAgent.setRestoreStatus(ChromeBackupAgent.RESTORE_STATUS_RECORDED);
+        ChromeBackupAgent.setRestoreStatus(ChromeBackupAgent.RestoreStatus.NOT_SIGNED_IN);
         assertThat(ChromeBackupAgent.getRestoreStatus(),
-                equalTo(ChromeBackupAgent.RESTORE_STATUS_RECORDED));
+                equalTo(ChromeBackupAgent.RestoreStatus.NOT_SIGNED_IN));
+        ChromeBackupAgent.setRestoreStatus(ChromeBackupAgent.RestoreStatus.RESTORE_COMPLETED);
+        assertThat(ChromeBackupAgent.getRestoreStatus(),
+                equalTo(ChromeBackupAgent.RestoreStatus.RESTORE_COMPLETED));
+        ChromeBackupAgent.setRestoreStatus(ChromeBackupAgent.RestoreStatus.RESTORE_STATUS_RECORDED);
+        assertThat(ChromeBackupAgent.getRestoreStatus(),
+                equalTo(ChromeBackupAgent.RestoreStatus.RESTORE_STATUS_RECORDED));
     }
 
     /**

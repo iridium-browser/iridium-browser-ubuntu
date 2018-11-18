@@ -24,7 +24,7 @@ class PrefService;
 
 namespace metrics {
 class MetricsServiceClient;
-class UkmBrowserTest;
+class UkmBrowserTestBase;
 class UkmEGTestHelper;
 }
 
@@ -81,17 +81,10 @@ class UkmService : public UkmRecorderImpl {
   int32_t report_count() const { return report_count_; }
 
  private:
-  friend ::metrics::UkmBrowserTest;
+  friend ::metrics::UkmBrowserTestBase;
   friend ::metrics::UkmEGTestHelper;
   friend ::ukm::debug::UkmDebugDataExtractor;
-
-  FRIEND_TEST_ALL_PREFIXES(UkmServiceTest, AddEntryWithEmptyMetrics);
-  FRIEND_TEST_ALL_PREFIXES(UkmServiceTest, EntryBuilderAndSerialization);
-  FRIEND_TEST_ALL_PREFIXES(UkmServiceTest,
-                           LogsUploadedOnlyWhenHavingSourcesOrEntries);
-  FRIEND_TEST_ALL_PREFIXES(UkmServiceTest, MetricsProviderTest);
-  FRIEND_TEST_ALL_PREFIXES(UkmServiceTest, PersistAndPurge);
-  FRIEND_TEST_ALL_PREFIXES(UkmServiceTest, WhitelistEntryTest);
+  friend ::ukm::UkmUtilsForTest;
 
   // Starts metrics client initialization.
   void StartInitTask();

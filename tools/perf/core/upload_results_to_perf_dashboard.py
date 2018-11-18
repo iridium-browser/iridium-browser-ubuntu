@@ -12,6 +12,7 @@ import json
 import optparse
 import re
 import sys
+import time
 import urllib
 
 from core import results_dashboard
@@ -41,8 +42,9 @@ def _GetDashboardJson(options):
   with open(options.results_file) as f:
     results = json.load(f)
   dashboard_json = {}
-  if not 'charts' in results:
+  if 'charts' not in results:
     # These are legacy results.
+    # pylint: disable=redefined-variable-type
     dashboard_json = results_dashboard.MakeListOfPoints(
       results, options.configuration_name, stripped_test_name,
       options.buildername, options.buildnumber, {},
@@ -71,24 +73,31 @@ def _GetDashboardHistogramData(options):
   is_reference_build = 'reference' in options.name
   stripped_test_name = options.name.replace('.reference', '')
 
-  return results_dashboard.MakeHistogramSetWithDiagnostics(
-      options.results_file, stripped_test_name,
-      options.configuration_name, options.buildername, options.buildnumber,
-      revisions, is_reference_build,
+  begin_time = time.time()
+  hs = results_dashboard.MakeHistogramSetWithDiagnostics(
+      histograms_file=options.results_file, test_name=stripped_test_name,
+      bot=options.configuration_name, buildername=options.buildername,
+      buildnumber=options.buildnumber,
+      project=options.project, buildbucket=options.buildbucket,
+      revisions_dict=revisions, is_reference_build=is_reference_build,
       perf_dashboard_machine_group=options.perf_dashboard_machine_group)
-
+  end_time = time.time()
+  print 'Duration of adding diagnostics for %s: %d seconds' % (
+      stripped_test_name, end_time - begin_time)
+  return hs
 
 def _CreateParser():
   # Parse options
   parser = optparse.OptionParser()
   parser.add_option('--name')
   parser.add_option('--results-file')
-  parser.add_option('--tmp-dir')
   parser.add_option('--output-json-file')
   parser.add_option('--got-revision-cp')
   parser.add_option('--configuration-name')
   parser.add_option('--results-url')
   parser.add_option('--perf-dashboard-machine-group')
+  parser.add_option('--project')
+  parser.add_option('--buildbucket')
   parser.add_option('--buildername')
   parser.add_option('--buildnumber')
   parser.add_option('--got-webrtc-revision')
@@ -96,7 +105,7 @@ def _CreateParser():
   parser.add_option('--git-revision')
   parser.add_option('--output-json-dashboard-url')
   parser.add_option('--send-as-histograms', action='store_true')
-  parser.add_option('--oauth-token-file')
+  parser.add_option('--service-account-file', default=None)
   return parser
 
 
@@ -110,11 +119,7 @@ def main(args):
   if not options.configuration_name or not options.results_url:
     parser.error('configuration_name and results_url are required.')
 
-  if options.oauth_token_file:
-    with open(options.oauth_token_file) as f:
-      oauth_token = f.readline()
-  else:
-    oauth_token = None
+  service_account_file = options.service_account_file
 
   if not options.perf_dashboard_machine_group:
     print 'Error: Invalid perf dashboard machine group'
@@ -125,11 +130,11 @@ def main(args):
   else:
     dashboard_json = _GetDashboardHistogramData(options)
 
-  if dashboard_json:
-    if options.output_json_file:
-      json.dump(dashboard_json, options.output_json_file,
-          indent=4, separators=(',', ': '))
+  if options.output_json_file:
+    json.dump(dashboard_json, options.output_json_file,
+        indent=4, separators=(',', ': '))
 
+  if dashboard_json:
     if options.output_json_dashboard_url:
       # Dump dashboard url to file.
       dashboard_url = GetDashboardUrl(options.name,
@@ -141,15 +146,14 @@ def main(args):
 
     if not results_dashboard.SendResults(
         dashboard_json,
+        options.name,
         options.results_url,
-        options.tmp_dir,
         send_as_histograms=options.send_as_histograms,
-        oauth_token=oauth_token):
+        service_account_file=service_account_file):
       return 1
   else:
-    print 'Error: No perf dashboard JSON was produced.'
-    print '@@@STEP_FAILURE@@@'
-    return 1
+    # The upload didn't fail since there was no data to upload.
+    print 'Warning: No perf dashboard JSON was produced.'
   return 0
 
 if __name__ == '__main__':

@@ -35,6 +35,20 @@ UI.ShortcutRegistry = class {
   }
 
   /**
+   * @return {!Array<number>}
+   */
+  globalShortcutKeys() {
+    const keys = [];
+    for (const key of this._defaultKeyToActions.keysArray()) {
+      const actions = this._defaultKeyToActions.get(key).valuesArray();
+      const applicableActions = this._actionRegistry.applicableActions(actions, new UI.Context());
+      if (applicableActions.length)
+        keys.push(Number(key));
+    }
+    return keys;
+  }
+
+  /**
    * @param {string} actionId
    * @return {!Array.<!UI.KeyboardShortcut.Descriptor>}
    */
@@ -147,6 +161,21 @@ UI.ShortcutRegistry = class {
         return true;
 
       const modifiers = UI.KeyboardShortcut.Modifiers;
+      // Undo/Redo will also cause input, so textual undo should take precedence over DevTools undo when editing.
+      if (Host.isMac()) {
+        if (UI.KeyboardShortcut.makeKey('z', modifiers.Meta) === key)
+          return true;
+        if (UI.KeyboardShortcut.makeKey('z', modifiers.Meta | modifiers.Shift) === key)
+          return true;
+      } else {
+        if (UI.KeyboardShortcut.makeKey('z', modifiers.Ctrl) === key)
+          return true;
+        if (UI.KeyboardShortcut.makeKey('y', modifiers.Ctrl) === key)
+          return true;
+        if (!Host.isWin() && UI.KeyboardShortcut.makeKey('z', modifiers.Ctrl | modifiers.Shift) === key)
+          return true;
+      }
+
       if ((keyModifiers & (modifiers.Ctrl | modifiers.Alt)) === (modifiers.Ctrl | modifiers.Alt))
         return Host.isWin();
 

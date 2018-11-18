@@ -6,6 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_INSPECTOR_DEV_TOOLS_EMULATOR_H_
 
 #include <memory>
+#include "base/optional.h"
 #include "third_party/blink/public/platform/pointer_properties.h"
 #include "third_party/blink/public/platform/web_float_point.h"
 #include "third_party/blink/public/platform/web_viewport_style.h"
@@ -13,14 +14,11 @@
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
-#include "third_party/blink/renderer/platform/wtf/optional.h"
 
 namespace blink {
 
-class IntPoint;
 class IntRect;
 class TransformationMatrix;
-class WebInputEvent;
 class WebViewImpl;
 
 class CORE_EXPORT DevToolsEmulator final
@@ -37,6 +35,8 @@ class CORE_EXPORT DevToolsEmulator final
   void SetViewportStyle(WebViewportStyle);
   void SetPluginsEnabled(bool);
   void SetScriptEnabled(bool);
+  void SetHideScrollbars(bool);
+  void SetCookieEnabled(bool);
   void SetDoubleTapToZoomEnabled(bool);
   bool DoubleTapToZoomEnabled() const;
   void SetAvailablePointerTypes(int);
@@ -53,8 +53,9 @@ class CORE_EXPORT DevToolsEmulator final
   void ResetViewport();
   bool ResizeIsDeviceSizeChange();
   void SetTouchEventEmulationEnabled(bool, int max_touch_points);
-  bool HandleInputEvent(const WebInputEvent&);
   void SetScriptExecutionDisabled(bool);
+  void SetScrollbarsHidden(bool);
+  void SetDocumentCookieDisabled(bool);
 
   // Notify the DevToolsEmulator about a scroll or scale change of the main
   // frame. Updates the transform for a viewport override.
@@ -62,7 +63,7 @@ class CORE_EXPORT DevToolsEmulator final
 
   // Returns a custom visible content rect if a viewport override is active.
   // This ensures that all content inside the forced viewport is painted.
-  WTF::Optional<IntRect> VisibleContentRectForPainting() const;
+  base::Optional<IntRect> VisibleContentRectForPainting() const;
 
  private:
   explicit DevToolsEmulator(WebViewImpl*);
@@ -89,7 +90,7 @@ class CORE_EXPORT DevToolsEmulator final
     double scale;
     bool original_visual_viewport_masking;
   };
-  WTF::Optional<ViewportOverride> viewport_override_;
+  base::Optional<ViewportOverride> viewport_override_;
 
   bool is_overlay_scrollbars_enabled_;
   bool is_orientation_event_enabled_;
@@ -112,11 +113,15 @@ class CORE_EXPORT DevToolsEmulator final
   bool double_tap_to_zoom_enabled_;
   bool original_device_supports_touch_;
   int original_max_touch_points_;
-  std::unique_ptr<IntPoint> last_pinch_anchor_css_;
-  std::unique_ptr<IntPoint> last_pinch_anchor_dip_;
 
   bool embedder_script_enabled_;
   bool script_execution_disabled_;
+
+  bool embedder_hide_scrollbars_;
+  bool scrollbars_hidden_;
+
+  bool embedder_cookie_enabled_;
+  bool document_cookie_disabled_;
 };
 
 }  // namespace blink

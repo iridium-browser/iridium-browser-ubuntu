@@ -115,12 +115,12 @@ DeviceImpl *DisplayNULL::createDevice()
     return new DeviceNULL();
 }
 
-egl::Error DisplayNULL::waitClient(const gl::Context *context) const
+egl::Error DisplayNULL::waitClient(const gl::Context *context)
 {
     return egl::NoError();
 }
 
-egl::Error DisplayNULL::waitNative(const gl::Context *context, EGLint engine) const
+egl::Error DisplayNULL::waitNative(const gl::Context *context, EGLint engine)
 {
     return egl::NoError();
 }
@@ -159,13 +159,17 @@ SurfaceImpl *DisplayNULL::createPixmapSurface(const egl::SurfaceState &state,
 }
 
 ImageImpl *DisplayNULL::createImage(const egl::ImageState &state,
+                                    const gl::Context *context,
                                     EGLenum target,
                                     const egl::AttributeMap &attribs)
 {
     return new ImageNULL(state);
 }
 
-ContextImpl *DisplayNULL::createContext(const gl::ContextState &state)
+ContextImpl *DisplayNULL::createContext(const gl::ContextState &state,
+                                        const egl::Config *configuration,
+                                        const gl::Context *shareContext,
+                                        const egl::AttributeMap &attribs)
 {
     return new ContextNULL(state, mAllocationTracker.get());
 }

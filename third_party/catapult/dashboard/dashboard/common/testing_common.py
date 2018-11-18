@@ -11,17 +11,28 @@ import os
 import re
 import unittest
 import urllib
+import webapp2
+import webtest
 
+from google.appengine.api import oauth
 from google.appengine.api import users
 from google.appengine.ext import deferred
 from google.appengine.ext import ndb
 from google.appengine.ext import testbed
 
+from dashboard.common import datastore_hooks
 from dashboard.common import stored_object
 from dashboard.common import utils
 from dashboard.models import graph_data
 
 _QUEUE_YAML_DIR = os.path.join(os.path.dirname(__file__), '..', '..')
+
+SERVICE_ACCOUNT_USER = users.User(
+    email='fake@foo.gserviceaccount.com', _auth_domain='google.com')
+INTERNAL_USER = users.User(
+    email='internal@example.com', _auth_domain='google.com')
+EXTERNAL_USER = users.User(
+    email='external@example.com', _auth_domain='example.com')
 
 
 class FakeRequestObject(object):
@@ -46,29 +57,64 @@ class TestCase(unittest.TestCase):
   def setUp(self):
     self.testbed = testbed.Testbed()
     self.testbed.activate()
+    self.addCleanup(self.testbed.deactivate)
+
     self.testbed.init_datastore_v3_stub()
     self.testbed.init_mail_stub()
-    self.mail_stub = self.testbed.get_stub(testbed.MAIL_SERVICE_NAME)
     self.testbed.init_memcache_stub()
-    ndb.get_context().clear_cache()
     self.testbed.init_taskqueue_stub(root_path=_QUEUE_YAML_DIR)
     self.testbed.init_user_stub()
     self.testbed.init_urlfetch_stub()
+    ndb.get_context().clear_cache()
+
+    self.mail_stub = self.testbed.get_stub(testbed.MAIL_SERVICE_NAME)
     self.mock_get_request = None
     self._PatchIsInternalUser()
+    datastore_hooks.InstallHooks()
+    SetIsInternalUser(INTERNAL_USER, True)
+    SetIsInternalUser(EXTERNAL_USER, False)
+    self.testapp = None
 
-  def tearDown(self):
-    self.testbed.deactivate()
+  def SetUpApp(self, handlers):
+    self.testapp = webtest.TestApp(webapp2.WSGIApplication(handlers))
 
-  def ExecuteTaskQueueTasks(self, handler_name, task_queue_name):
+  def PatchEnviron(self, path):
+    environ_patch = {'REQUEST_URI': path}
+    try:
+      if oauth.get_current_user(utils.OAUTH_SCOPES):
+        # SetCurrentUserOAuth mocks oauth.get_current_user() directly. That
+        # function would normally parse this header. If the header doesn't
+        # exist (which happens in production when the user isn't signed in), it
+        # would normally raise an error that would be difficult to distinguish
+        # from when the header exists but is invalid (which should return HTTP
+        # 401), so utils.GetEmail() checks for this header and returns
+        # None early if it doesn't exist.  If this function's caller has called
+        # SetCurrentUserOAuth, then fake this header so that GetEmail
+        # proceeds to call oauth.get_current_user().
+        environ_patch['HTTP_AUTHORIZATION'] = ''
+    except oauth.Error:
+      pass
+    return mock.patch.dict(os.environ, environ_patch)
+
+  def Post(self, path, *args, **kwargs):
+    with self.PatchEnviron(path):
+      return self.testapp.post(path, *args, **kwargs)
+
+  def ExecuteTaskQueueTasks(self, handler_name, task_queue_name, recurse=True):
     """Executes all of the tasks on the queue until there are none left."""
     tasks = self.GetTaskQueueTasks(task_queue_name)
     task_queue = self.testbed.get_stub(testbed.TASKQUEUE_SERVICE_NAME)
     task_queue.FlushQueue(task_queue_name)
+    responses = []
     for task in tasks:
-      self.testapp.post(
-          handler_name, urllib.unquote_plus(base64.b64decode(task['body'])))
-      self.ExecuteTaskQueueTasks(handler_name, task_queue_name)
+      responses.append(
+          self.Post(
+              handler_name,
+              urllib.unquote_plus(base64.b64decode(task['body']))))
+      if recurse:
+        responses.extend(
+            self.ExecuteTaskQueueTasks(handler_name, task_queue_name))
+    return responses
 
   def ExecuteDeferredTasks(self, task_queue_name):
     task_queue = self.testbed.get_stub(testbed.TASKQUEUE_SERVICE_NAME)
@@ -89,6 +135,18 @@ class TestCase(unittest.TestCase):
         user_email=email,
         user_id=user_id,
         overwrite=True)
+
+  def SetCurrentUserOAuth(self, user):
+    patch = mock.patch.object(oauth, 'get_current_user', mock.Mock(
+        return_value=user))
+    patch.start()
+    self.addCleanup(patch.stop)
+
+  def SetCurrentClientIdOAuth(self, client_id):
+    patch = mock.patch.object(oauth, 'get_client_id',
+                              mock.Mock(return_value=client_id))
+    patch.start()
+    self.addCleanup(patch.stop)
 
   def UnsetCurrentUser(self):
     """Sets the user in the environment to have no email and be non-admin."""
@@ -148,8 +206,7 @@ class TestCase(unittest.TestCase):
     if nothing is found.
     """
     def IsInternalUser():
-      username = users.get_current_user()
-      return bool(utils.GetCachedIsInternalUser(username))
+      return bool(utils.GetCachedIsInternalUser(utils.GetEmail()))
 
     is_internal_user_patcher = mock.patch.object(
         utils, 'IsInternalUser', IsInternalUser)
@@ -172,7 +229,9 @@ def AddTests(masters, bots, tests_dict):
       graph_data.Bot(id=bot_name, parent=master_key).put()
       for test_name in tests_dict:
         test_path = '%s/%s/%s' % (master_name, bot_name, test_name)
-        graph_data.TestMetadata(id=test_path).put()
+        t = graph_data.TestMetadata(id=test_path)
+        t.UpdateSheriff()
+        t.put()
         _AddSubtest(test_path, tests_dict[test_name])
 
 
@@ -185,7 +244,9 @@ def _AddSubtest(parent_test_path, subtests_dict):
   """
   for test_name in subtests_dict:
     test_path = '%s/%s' % (parent_test_path, test_name)
-    graph_data.TestMetadata(id=test_path).put()
+    t = graph_data.TestMetadata(id=test_path)
+    t.UpdateSheriff()
+    t.put()
     _AddSubtest(test_path, subtests_dict[test_name])
 
 
@@ -212,7 +273,8 @@ def _AddRowsFromDict(container_key, row_dict):
   for int_id in sorted(row_dict):
     rows.append(
         graph_data.Row(id=int_id, parent=container_key, **row_dict[int_id]))
-  ndb.put_multi(rows)
+  ndb.Future.wait_all(
+      [r.put_async() for r in rows] + [rows[0].UpdateParentAsync()])
   return rows
 
 
@@ -221,7 +283,8 @@ def _AddRowsFromIterable(container_key, row_ids):
   rows = []
   for int_id in sorted(row_ids):
     rows.append(graph_data.Row(id=int_id, parent=container_key, value=int_id))
-  ndb.put_multi(rows)
+  ndb.Future.wait_all(
+      [r.put_async() for r in rows] + [rows[0].UpdateParentAsync()])
   return rows
 
 

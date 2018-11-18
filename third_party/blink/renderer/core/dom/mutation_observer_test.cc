@@ -22,7 +22,7 @@ class EmptyMutationCallback : public MutationObserver::Delegate {
 
   void Deliver(const MutationRecordVector&, MutationObserver&) override {}
 
-  virtual void Trace(blink::Visitor* visitor) {
+  void Trace(blink::Visitor* visitor) override {
     visitor->Trace(document_);
     MutationObserver::Delegate::Trace(visitor);
   }
@@ -53,7 +53,7 @@ TEST(MutationObserverTest, DisconnectCrash) {
   // MutationObserverRegistration for |head|.
   ThreadState::Current()->CollectGarbage(
       BlinkGC::kNoHeapPointersOnStack, BlinkGC::kAtomicMarking,
-      BlinkGC::kLazySweeping, BlinkGC::kForcedGC);
+      BlinkGC::kLazySweeping, BlinkGC::GCReason::kForcedGC);
   observer->disconnect();
   // The test passes if disconnect() didn't crash.  crbug.com/657613.
 }

@@ -5,7 +5,6 @@
 #include "third_party/blink/renderer/core/paint/table_cell_painter.h"
 
 #include "third_party/blink/renderer/core/layout/layout_table_cell.h"
-#include "third_party/blink/renderer/core/paint/adjust_paint_offset_scope.h"
 #include "third_party/blink/renderer/core/paint/background_image_geometry.h"
 #include "third_party/blink/renderer/core/paint/block_painter.h"
 #include "third_party/blink/renderer/core/paint/box_model_object_painter.h"
@@ -13,36 +12,30 @@
 #include "third_party/blink/renderer/core/paint/box_painter_base.h"
 #include "third_party/blink/renderer/core/paint/object_painter.h"
 #include "third_party/blink/renderer/core/paint/paint_info.h"
+#include "third_party/blink/renderer/core/paint/scoped_paint_state.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context_state_saver.h"
 #include "third_party/blink/renderer/platform/graphics/paint/drawing_recorder.h"
 
 namespace blink {
 
-void TableCellPainter::Paint(const PaintInfo& paint_info,
-                             const LayoutPoint& paint_offset) {
-  BlockPainter(layout_table_cell_).Paint(paint_info, paint_offset);
-}
-
 void TableCellPainter::PaintContainerBackgroundBehindCell(
     const PaintInfo& paint_info,
-    const LayoutPoint& paint_offset,
     const LayoutObject& background_object) {
   DCHECK(background_object != layout_table_cell_);
 
-  if (layout_table_cell_.Style()->Visibility() != EVisibility::kVisible)
+  if (layout_table_cell_.StyleRef().Visibility() != EVisibility::kVisible)
     return;
 
   LayoutTable* table = layout_table_cell_.Table();
   if (!table->ShouldCollapseBorders() &&
-      layout_table_cell_.Style()->EmptyCells() == EEmptyCells::kHide &&
+      layout_table_cell_.StyleRef().EmptyCells() == EEmptyCells::kHide &&
       !layout_table_cell_.FirstChild())
     return;
 
-  AdjustPaintOffsetScope adjustment(layout_table_cell_, paint_info,
-                                    paint_offset);
+  ScopedPaintState paint_state(layout_table_cell_, paint_info);
   auto paint_rect =
-      PaintRectNotIncludingVisualOverflow(adjustment.AdjustedPaintOffset());
-  PaintBackground(adjustment.GetPaintInfo(), paint_rect, background_object);
+      PaintRectNotIncludingVisualOverflow(paint_state.PaintOffset());
+  PaintBackground(paint_state.GetPaintInfo(), paint_rect, background_object);
 }
 
 void TableCellPainter::PaintBackground(const PaintInfo& paint_info,
@@ -130,13 +123,13 @@ void TableCellPainter::PaintBoxDecorationBackground(
 
 void TableCellPainter::PaintMask(const PaintInfo& paint_info,
                                  const LayoutPoint& paint_offset) {
-  if (layout_table_cell_.Style()->Visibility() != EVisibility::kVisible ||
+  if (layout_table_cell_.StyleRef().Visibility() != EVisibility::kVisible ||
       paint_info.phase != PaintPhase::kMask)
     return;
 
   LayoutTable* table_elt = layout_table_cell_.Table();
   if (!table_elt->ShouldCollapseBorders() &&
-      layout_table_cell_.Style()->EmptyCells() == EEmptyCells::kHide &&
+      layout_table_cell_.StyleRef().EmptyCells() == EEmptyCells::kHide &&
       !layout_table_cell_.FirstChild())
     return;
 
@@ -150,6 +143,9 @@ void TableCellPainter::PaintMask(const PaintInfo& paint_info,
   BoxPainter(layout_table_cell_).PaintMaskImages(paint_info, paint_rect);
 }
 
+// TODO(crbug.com/377847): When table cells fully support subpixel layout, we
+// should not snap the size to pixels here. We should remove this function and
+// snap to pixels for the rect with paint offset applied.
 LayoutRect TableCellPainter::PaintRectNotIncludingVisualOverflow(
     const LayoutPoint& paint_offset) {
   return LayoutRect(paint_offset,

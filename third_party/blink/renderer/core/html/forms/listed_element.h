@@ -97,8 +97,8 @@ class CORE_EXPORT ListedElement : public GarbageCollectedMixin {
  protected:
   ListedElement();
 
-  void InsertedInto(ContainerNode*);
-  void RemovedFrom(ContainerNode*);
+  void InsertedInto(ContainerNode&);
+  void RemovedFrom(ContainerNode&);
   void DidMoveToNewDocument(Document& old_document);
 
   // FIXME: Remove usage of setForm. resetFormOwner should be enough, and
@@ -123,7 +123,7 @@ class CORE_EXPORT ListedElement : public GarbageCollectedMixin {
   Member<HTMLFormElement> form_;
   Member<ValidityState> validity_state_;
   String custom_validation_message_;
-  // If m_formWasSetByParser is true, m_form is always non-null.
+  // If form_was_set_by_parser_ is true, form_ is always non-null.
   bool form_was_set_by_parser_;
 };
 

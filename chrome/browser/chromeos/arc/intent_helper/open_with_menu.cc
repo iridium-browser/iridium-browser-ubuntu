@@ -5,15 +5,12 @@
 #include "chrome/browser/chromeos/arc/intent_helper/open_with_menu.h"
 
 #include <algorithm>
-#include <memory>
-#include <unordered_map>
-#include <utility>
-#include <vector>
 
 #include "base/strings/string_util.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/renderer_context_menu/render_view_context_menu_proxy.h"
+#include "content/public/browser/browser_context.h"
 #include "content/public/common/context_menu_params.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -45,6 +42,10 @@ OpenWithMenu::OpenWithMenu(content::BrowserContext* context,
 OpenWithMenu::~OpenWithMenu() = default;
 
 void OpenWithMenu::InitMenu(const content::ContextMenuParams& params) {
+  // Enforcing no items are added to the context menu during incognito mode.
+  if (context_->IsOffTheRecord())
+    return;
+
   menu_model_ = LinkHandlerModel::Create(context_, params.link_url);
   if (!menu_model_)
     return;

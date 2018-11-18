@@ -5,6 +5,8 @@
 #ifndef CHROME_BROWSER_UI_WEBUI_POLICY_TOOL_UI_HANDLER_H_
 #define CHROME_BROWSER_UI_WEBUI_POLICY_TOOL_UI_HANDLER_H_
 
+#include <string>
+
 #include "base/files/file_path.h"
 #include "chrome/browser/ui/webui/policy_ui_handler.h"
 
@@ -47,10 +49,12 @@ class PolicyToolUIHandler : public PolicyUIHandler {
 
   void HandleExportLinux(const base::ListValue* args);
 
+  void HandleExportMac(const base::ListValue* args);
+
   void OnSessionDeleted(bool is_successful);
 
   std::string ReadOrCreateFileCallback();
-  void OnFileRead(const std::string& contents);
+  void OnSessionContentReceived(const std::string& contents);
 
   static SessionErrors DoRenameSession(const base::FilePath& old_session_path,
                                        const base::FilePath& new_session_path);
@@ -81,6 +85,9 @@ class PolicyToolUIHandler : public PolicyUIHandler {
   void ExportSessionToFile(const base::FilePath::StringType& file_extension);
 
   bool is_saving_enabled_ = true;
+
+  // Parses and checks policy types for all sources.
+  void ParsePolicyTypes(base::DictionaryValue* values);
 
   // This string is filled when an export action occurs, it contains the current
   // session dictionary in a specific format. This format will be JSON, PLIST,

@@ -64,11 +64,10 @@ AnimationEffect::AnimationEffect(const Timing& timing,
   timing_.AssertValid();
 }
 
-double AnimationEffect::IterationDuration() const {
-  double result = std::isnan(timing_.iteration_duration)
-                      ? IntrinsicIterationDuration()
-                      : timing_.iteration_duration;
-  DCHECK_GE(result, 0);
+AnimationTimeDelta AnimationEffect::IterationDuration() const {
+  AnimationTimeDelta result =
+      timing_.iteration_duration.value_or(IntrinsicIterationDuration());
+  DCHECK_GE(result, AnimationTimeDelta());
   return result;
 }
 
@@ -79,28 +78,17 @@ double AnimationEffect::RepeatedDuration() const {
   return result;
 }
 
-double AnimationEffect::ActiveDurationInternal() const {
-  const double result =
-      timing_.playback_rate
-          ? RepeatedDuration() / std::abs(timing_.playback_rate)
-          : std::numeric_limits<double>::infinity();
-  DCHECK_GE(result, 0);
-  return result;
-}
-
 double AnimationEffect::EndTimeInternal() const {
   // Per the spec, the end time has a lower bound of 0.0:
   // https://drafts.csswg.org/web-animations-1/#end-time
-  return std::max(
-      timing_.start_delay + ActiveDurationInternal() + timing_.end_delay, 0.0);
+  return std::max(timing_.start_delay + RepeatedDuration() + timing_.end_delay,
+                  0.0);
 }
 
 void AnimationEffect::UpdateSpecifiedTiming(const Timing& timing) {
   // FIXME: Test whether the timing is actually different?
   timing_ = timing;
-  Invalidate();
-  if (owner_)
-    owner_->SpecifiedTimingChanged();
+  InvalidateAndNotifyOwner();
 }
 
 void AnimationEffect::getTiming(EffectTiming& effect_timing) const {
@@ -110,10 +98,11 @@ void AnimationEffect::getTiming(EffectTiming& effect_timing) const {
   effect_timing.setIterationStart(SpecifiedTiming().iteration_start);
   effect_timing.setIterations(SpecifiedTiming().iteration_count);
   UnrestrictedDoubleOrString duration;
-  if (IsNull(SpecifiedTiming().iteration_duration)) {
-    duration.SetString("auto");
+  if (SpecifiedTiming().iteration_duration) {
+    duration.SetUnrestrictedDouble(
+        SpecifiedTiming().iteration_duration->InMillisecondsF());
   } else {
-    duration.SetUnrestrictedDouble(SpecifiedTiming().iteration_duration * 1000);
+    duration.SetString("auto");
   }
   effect_timing.setDuration(duration);
   effect_timing.setDirection(
@@ -131,7 +120,7 @@ void AnimationEffect::getComputedTiming(
     ComputedEffectTiming& computed_timing) const {
   // ComputedEffectTiming members.
   computed_timing.setEndTime(EndTimeInternal() * 1000);
-  computed_timing.setActiveDuration(ActiveDurationInternal() * 1000);
+  computed_timing.setActiveDuration(RepeatedDuration() * 1000);
 
   if (IsNull(EnsureCalculated().local_time)) {
     computed_timing.setLocalTimeToNull();
@@ -159,7 +148,7 @@ void AnimationEffect::getComputedTiming(
   computed_timing.setIterations(SpecifiedTiming().iteration_count);
 
   UnrestrictedDoubleOrString duration;
-  duration.SetUnrestrictedDouble(IterationDuration() * 1000);
+  duration.SetUnrestrictedDouble(IterationDuration().InMillisecondsF());
   computed_timing.setDuration(duration);
 
   computed_timing.setDirection(
@@ -179,9 +168,7 @@ void AnimationEffect::updateTiming(OptionalEffectTiming& optional_timing,
   // (and which) to resolve the CSS secure/insecure context against.
   if (!TimingInput::Update(timing_, optional_timing, nullptr, exception_state))
     return;
-  Invalidate();
-  if (owner_)
-    owner_->SpecifiedTimingChanged();
+  InvalidateAndNotifyOwner();
 }
 
 void AnimationEffect::UpdateInheritedTime(double inherited_time,
@@ -197,7 +184,7 @@ void AnimationEffect::UpdateInheritedTime(double inherited_time,
   const double local_time = inherited_time;
   double time_to_next_iteration = std::numeric_limits<double>::infinity();
   if (needs_update) {
-    const double active_duration = this->ActiveDurationInternal();
+    const double active_duration = RepeatedDuration();
 
     const Phase current_phase =
         CalculatePhase(active_duration, local_time, timing_);
@@ -209,20 +196,21 @@ void AnimationEffect::UpdateInheritedTime(double inherited_time,
         kParentPhase, current_phase, timing_);
 
     double current_iteration;
-    WTF::Optional<double> progress;
-    if (const double iteration_duration = this->IterationDuration()) {
+    base::Optional<double> progress;
+    if (!IterationDuration().is_zero()) {
+      const double iteration_duration = IterationDuration().InSecondsF();
       const double start_offset = MultiplyZeroAlwaysGivesZero(
           timing_.iteration_start, iteration_duration);
       DCHECK_GE(start_offset, 0);
-      const double scaled_active_time = CalculateScaledActiveTime(
-          active_duration, active_time, start_offset, timing_);
+      const double offset_active_time =
+          CalculateOffsetActiveTime(active_duration, active_time, start_offset);
       const double iteration_time = CalculateIterationTime(
-          iteration_duration, RepeatedDuration(), scaled_active_time,
-          start_offset, current_phase, timing_);
+          iteration_duration, active_duration, offset_active_time, start_offset,
+          current_phase, timing_);
 
       current_iteration = CalculateCurrentIteration(
-          iteration_duration, iteration_time, scaled_active_time, timing_);
-      const WTF::Optional<double> transformed_time = CalculateTransformedTime(
+          iteration_duration, iteration_time, offset_active_time, timing_);
+      const base::Optional<double> transformed_time = CalculateTransformedTime(
           current_iteration, iteration_duration, iteration_time, timing_);
 
       // The infinite iterationDuration case here is a workaround because
@@ -235,20 +223,14 @@ void AnimationEffect::UpdateInheritedTime(double inherited_time,
         progress = transformed_time.value() / iteration_duration;
 
       if (!IsNull(iteration_time)) {
-        time_to_next_iteration = (iteration_duration - iteration_time) /
-                                 std::abs(timing_.playback_rate);
+        time_to_next_iteration = iteration_duration - iteration_time;
         if (active_duration - active_time < time_to_next_iteration)
           time_to_next_iteration = std::numeric_limits<double>::infinity();
       }
     } else {
       const double kLocalIterationDuration = 1;
-      const double local_repeated_duration =
-          kLocalIterationDuration * timing_.iteration_count;
-      DCHECK_GE(local_repeated_duration, 0);
       const double local_active_duration =
-          timing_.playback_rate
-              ? local_repeated_duration / std::abs(timing_.playback_rate)
-              : std::numeric_limits<double>::infinity();
+          kLocalIterationDuration * timing_.iteration_count;
       DCHECK_GE(local_active_duration, 0);
       const double local_local_time =
           local_time < timing_.start_delay
@@ -263,14 +245,14 @@ void AnimationEffect::UpdateInheritedTime(double inherited_time,
       const double start_offset =
           timing_.iteration_start * kLocalIterationDuration;
       DCHECK_GE(start_offset, 0);
-      const double scaled_active_time = CalculateScaledActiveTime(
-          local_active_duration, local_active_time, start_offset, timing_);
+      const double offset_active_time = CalculateOffsetActiveTime(
+          local_active_duration, local_active_time, start_offset);
       const double iteration_time = CalculateIterationTime(
-          kLocalIterationDuration, local_repeated_duration, scaled_active_time,
+          kLocalIterationDuration, local_active_duration, offset_active_time,
           start_offset, current_phase, timing_);
 
       current_iteration = CalculateCurrentIteration(
-          kLocalIterationDuration, iteration_time, scaled_active_time, timing_);
+          kLocalIterationDuration, iteration_time, offset_active_time, timing_);
       progress = CalculateTransformedTime(
           current_iteration, kLocalIterationDuration, iteration_time, timing_);
     }
@@ -303,6 +285,12 @@ void AnimationEffect::UpdateInheritedTime(double inherited_time,
     calculated_.time_to_reverse_effect_change =
         CalculateTimeToEffectChange(false, local_time, time_to_next_iteration);
   }
+}
+
+void AnimationEffect::InvalidateAndNotifyOwner() const {
+  Invalidate();
+  if (owner_)
+    owner_->EffectInvalidated();
 }
 
 const AnimationEffect::CalculatedTiming& AnimationEffect::EnsureCalculated()

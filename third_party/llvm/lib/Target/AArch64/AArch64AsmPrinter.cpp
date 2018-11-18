@@ -71,7 +71,7 @@ public:
 
   StringRef getPassName() const override { return "AArch64 Assembly Printer"; }
 
-  /// \brief Wrapper for MCInstLowering.lowerOperand() for the
+  /// Wrapper for MCInstLowering.lowerOperand() for the
   /// tblgen'erated pseudo lowering.
   bool lowerOperand(const MachineOperand &MO, MCOperand &MCOp) const {
     return MCInstLowering.lowerOperand(MO, MCOp);
@@ -88,7 +88,7 @@ public:
 
   void EmitSled(const MachineInstr &MI, SledKind Kind);
 
-  /// \brief tblgen'erated driver function for lowering simple MI->MC
+  /// tblgen'erated driver function for lowering simple MI->MC
   /// pseudo instructions.
   bool emitPseudoExpansionLowering(MCStreamer &OutStreamer,
                                    const MachineInstr *MI);
@@ -131,7 +131,7 @@ private:
 
   AArch64FunctionInfo *AArch64FI = nullptr;
 
-  /// \brief Emit the LOHs contained in AArch64FI.
+  /// Emit the LOHs contained in AArch64FI.
   void EmitLOHs();
 
   /// Emit instruction to set float register to zero.
@@ -242,9 +242,7 @@ MCSymbol *AArch64AsmPrinter::GetCPISymbol(unsigned CPID) const {
         Twine(getDataLayout().getLinkerPrivateGlobalPrefix()) + "CPI" +
         Twine(getFunctionNumber()) + "_" + Twine(CPID));
 
-  return OutContext.getOrCreateSymbol(
-      Twine(getDataLayout().getPrivateGlobalPrefix()) + "CPI" +
-      Twine(getFunctionNumber()) + "_" + Twine(CPID));
+  return AsmPrinter::GetCPISymbol(CPID);
 }
 
 void AArch64AsmPrinter::printOperand(const MachineInstr *MI, unsigned OpNum,
@@ -274,6 +272,11 @@ void AArch64AsmPrinter::printOperand(const MachineInstr *MI, unsigned OpNum,
 
     Sym->print(O, MAI);
     printOffset(MO.getOffset(), O);
+    break;
+  }
+  case MachineOperand::MO_BlockAddress: {
+    MCSymbol *Sym = GetBlockAddressSymbol(MO.getBlockAddress());
+    Sym->print(O, MAI);
     break;
   }
   }
@@ -500,7 +503,7 @@ void AArch64AsmPrinter::LowerPATCHPOINT(MCStreamer &OutStreamer, StackMaps &SM,
 
 void AArch64AsmPrinter::EmitFMov0(const MachineInstr &MI) {
   unsigned DestReg = MI.getOperand(0).getReg();
-  if (STI->hasZeroCycleZeroing() && !STI->hasZeroCycleZeroingFPWorkaround()) {
+  if (STI->hasZeroCycleZeroingFP() && !STI->hasZeroCycleZeroingFPWorkaround()) {
     // Convert H/S/D register to corresponding Q register
     if (AArch64::H0 <= DestReg && DestReg <= AArch64::H31)
       DestReg = AArch64::Q0 + (DestReg - AArch64::H0);
@@ -587,7 +590,9 @@ void AArch64AsmPrinter::EmitInstruction(const MachineInstr *MI) {
   // Tail calls use pseudo instructions so they have the proper code-gen
   // attributes (isCall, isReturn, etc.). We lower them to the real
   // instruction here.
-  case AArch64::TCRETURNri: {
+  case AArch64::TCRETURNri:
+  case AArch64::TCRETURNriBTI:
+  case AArch64::TCRETURNriALL: {
     MCInst TmpInst;
     TmpInst.setOpcode(AArch64::BR);
     TmpInst.addOperand(MCOperand::createReg(MI->getOperand(0).getReg()));

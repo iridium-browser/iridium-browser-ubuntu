@@ -10,24 +10,45 @@
 #include "third_party/blink/renderer/core/fileapi/file_list.h"
 #include "third_party/blink/renderer/core/html/forms/html_input_element.h"
 #include "third_party/blink/renderer/core/html_names.h"
+#include "third_party/blink/renderer/core/loader/empty_clients.h"
 #include "third_party/blink/renderer/core/page/drag_data.h"
+#include "third_party/blink/renderer/core/testing/dummy_page_holder.h"
+#include "third_party/blink/renderer/platform/file_metadata.h"
 #include "third_party/blink/renderer/platform/wtf/date_math.h"
 
 namespace blink {
 
+namespace {
+
+class WebKitDirectoryChromeClient : public EmptyChromeClient {
+ public:
+  void EnumerateChosenDirectory(FileChooser* chooser) override {
+    chooser->AddRef();  // Do same as ChromeClientImpl
+    static_cast<WebFileChooserCompletion*>(chooser)->DidChooseFile(
+        WebVector<WebString>());
+  }
+
+  void RegisterPopupOpeningObserver(PopupOpeningObserver*) override {
+    NOTREACHED() << "RegisterPopupOpeningObserver should not be called.";
+  }
+  void UnregisterPopupOpeningObserver(PopupOpeningObserver*) override {
+    NOTREACHED() << "UnregisterPopupOpeningObserver should not be called.";
+  }
+};
+
+}  // namespace
+
 TEST(FileInputTypeTest, createFileList) {
-  Vector<FileChooserFileInfo> files;
+  FileChooserFileInfoList files;
 
   // Native file.
-  files.push_back(
-      FileChooserFileInfo("/native/path/native-file", "display-name"));
+  files.push_back(CreateFileChooserFileInfoNative("/native/path/native-file",
+                                                  "display-name"));
 
   // Non-native file.
   KURL url("filesystem:http://example.com/isolated/hash/non-native-file");
-  FileMetadata metadata;
-  metadata.length = 64;
-  metadata.modification_time = 1.0 * kMsPerDay + 3;
-  files.push_back(FileChooserFileInfo(url, metadata));
+  files.push_back(CreateFileChooserFileInfoFileSystem(
+      url, base::Time::FromJsTime(1.0 * kMsPerDay + 3), 64));
 
   FileList* list = FileInputType::CreateFileList(files, false);
   ASSERT_TRUE(list);
@@ -50,8 +71,8 @@ TEST(FileInputTypeTest, ignoreDroppedNonNativeFiles) {
   InputType* file_input = FileInputType::Create(*input);
 
   DataObject* native_file_raw_drag_data = DataObject::Create();
-  const DragData native_file_drag_data(native_file_raw_drag_data, IntPoint(),
-                                       IntPoint(), kDragOperationCopy);
+  const DragData native_file_drag_data(native_file_raw_drag_data, FloatPoint(),
+                                       FloatPoint(), kDragOperationCopy);
   native_file_drag_data.PlatformData()->Add(File::Create("/native/path"));
   native_file_drag_data.PlatformData()->SetFilesystemId("fileSystemId");
   file_input->ReceiveDroppedFiles(&native_file_drag_data);
@@ -61,7 +82,7 @@ TEST(FileInputTypeTest, ignoreDroppedNonNativeFiles) {
 
   DataObject* non_native_file_raw_drag_data = DataObject::Create();
   const DragData non_native_file_drag_data(non_native_file_raw_drag_data,
-                                           IntPoint(), IntPoint(),
+                                           FloatPoint(), FloatPoint(),
                                            kDragOperationCopy);
   FileMetadata metadata;
   metadata.length = 1234;
@@ -106,6 +127,26 @@ TEST(FileInputTypeTest, setFilesFromPaths) {
             file_input->Files()->item(0)->GetPath());
   EXPECT_EQ(String("/native/real/path2"),
             file_input->Files()->item(1)->GetPath());
+}
+
+TEST(FileInputTypeTest, DropTouchesNoPopupOpeningObserver) {
+  Page::PageClients page_clients;
+  FillWithEmptyClients(page_clients);
+  auto* chrome_client = new WebKitDirectoryChromeClient;
+  page_clients.chrome_client = chrome_client;
+  auto page_holder = DummyPageHolder::Create(IntSize(), &page_clients);
+  Document& doc = page_holder->GetDocument();
+
+  doc.body()->SetInnerHTMLFromString("<input type=file webkitdirectory>");
+  auto& input = *ToHTMLInputElement(doc.body()->firstChild());
+
+  DragData drag_data(DataObject::Create(), FloatPoint(), FloatPoint(),
+                     kDragOperationCopy);
+  drag_data.PlatformData()->Add(File::Create("/foo/bar"));
+  input.ReceiveDroppedFiles(&drag_data);
+
+  // The test passes if WebKitDirectoryChromeClient::
+  // UnregisterPopupOpeningObserver() was not called.
 }
 
 }  // namespace blink

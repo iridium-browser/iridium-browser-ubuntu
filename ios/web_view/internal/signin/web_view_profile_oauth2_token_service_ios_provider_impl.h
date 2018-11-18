@@ -17,14 +17,14 @@ class IOSWebViewSigninClient;
 class WebViewProfileOAuth2TokenServiceIOSProviderImpl
     : public ProfileOAuth2TokenServiceIOSProvider {
  public:
-  WebViewProfileOAuth2TokenServiceIOSProviderImpl(
+  // |signin_client| used to fetch access tokens.
+  explicit WebViewProfileOAuth2TokenServiceIOSProviderImpl(
       IOSWebViewSigninClient* signin_client);
   ~WebViewProfileOAuth2TokenServiceIOSProviderImpl() override;
 
   // ios::ProfileOAuth2TokenServiceIOSProvider
   void GetAccessToken(const std::string& gaia_id,
                       const std::string& client_id,
-                      const std::string& client_secret,
                       const std::set<std::string>& scopes,
                       const AccessTokenCallback& callback) override;
   std::vector<AccountInfo> GetAllAccounts() const override;
@@ -33,7 +33,8 @@ class WebViewProfileOAuth2TokenServiceIOSProviderImpl
       NSError* error) const override;
 
  private:
-  IOSWebViewSigninClient* signin_client_;
+  // Used to obtain access tokens in |GetAccessToken|.
+  IOSWebViewSigninClient* const signin_client_ = nullptr;
 
   DISALLOW_COPY_AND_ASSIGN(WebViewProfileOAuth2TokenServiceIOSProviderImpl);
 };

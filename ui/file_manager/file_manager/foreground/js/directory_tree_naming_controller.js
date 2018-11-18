@@ -149,7 +149,7 @@ DirectoryTreeNamingController.prototype.commitRename_ = function() {
         .then(function(parentEntry) {
           return util.validateFileName(
               parentEntry, newName,
-              this.directoryModel_.getFileFilter().isFilterHiddenOn());
+              !this.directoryModel_.getFileFilter().isHiddenFilesVisible());
         }.bind(this))
         .then(
             this.performRename_.bind(this, entry, newName),
@@ -185,6 +185,8 @@ DirectoryTreeNamingController.prototype.performRename_ = function(
             label.textContent = newName;
 
             this.currentDirectoryItem_.entry = newEntry;
+            this.currentDirectoryItem_.updateSubDirectories(
+                true /* recursive */);
 
             this.detach_();
 

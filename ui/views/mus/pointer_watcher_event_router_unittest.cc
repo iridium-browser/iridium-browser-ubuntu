@@ -7,12 +7,11 @@
 #include <memory>
 
 #include "base/test/scoped_task_environment.h"
-#include "testing/gtest/include/gtest/gtest.h"
 #include "ui/aura/test/mus/window_tree_client_private.h"
 #include "ui/events/event.h"
 #include "ui/views/mus/mus_client.h"
 #include "ui/views/pointer_watcher.h"
-#include "ui/views/test/scoped_views_test_helper.h"
+#include "ui/views/test/views_test_base.h"
 
 namespace views {
 namespace {
@@ -23,32 +22,38 @@ class TestPointerWatcher : public PointerWatcher {
   ~TestPointerWatcher() override {}
 
   ui::PointerEvent* last_event_observed() { return last_event_observed_.get(); }
+  gfx::Point last_location_in_screen() { return last_location_in_screen_; }
 
-  void Reset() { last_event_observed_.reset(); }
+  void Reset() {
+    last_event_observed_.reset();
+    last_location_in_screen_ = gfx::Point();
+  }
 
   // PointerWatcher:
   void OnPointerEventObserved(const ui::PointerEvent& event,
                               const gfx::Point& location_in_screen,
                               gfx::NativeView target) override {
     last_event_observed_ = std::make_unique<ui::PointerEvent>(event);
+    last_location_in_screen_ = location_in_screen;
   }
 
  private:
   std::unique_ptr<ui::PointerEvent> last_event_observed_;
+  gfx::Point last_location_in_screen_;
 
   DISALLOW_COPY_AND_ASSIGN(TestPointerWatcher);
 };
 
 }  // namespace
 
-class PointerWatcherEventRouterTest : public testing::Test {
+class PointerWatcherEventRouterTest : public views::ViewsTestBase {
  public:
-  PointerWatcherEventRouterTest() {}
-  ~PointerWatcherEventRouterTest() override {}
+  PointerWatcherEventRouterTest() = default;
+  ~PointerWatcherEventRouterTest() override = default;
 
   void OnPointerEventObserved(const ui::PointerEvent& event) {
     MusClient::Get()->pointer_watcher_event_router()->OnPointerEventObserved(
-        event, nullptr);
+        event, event.root_location(), nullptr);
   }
 
   PointerWatcherEventRouter::EventTypes event_types() const {
@@ -60,9 +65,6 @@ class PointerWatcherEventRouterTest : public testing::Test {
 };
 
 TEST_F(PointerWatcherEventRouterTest, EventTypes) {
-  base::test::ScopedTaskEnvironment scoped_task_environment(
-      base::test::ScopedTaskEnvironment::MainThreadType::UI);
-  ScopedViewsTestHelper helper;
   TestPointerWatcher pointer_watcher1, pointer_watcher2;
   PointerWatcherEventRouter* pointer_watcher_event_router =
       MusClient::Get()->pointer_watcher_event_router();
@@ -114,9 +116,6 @@ TEST_F(PointerWatcherEventRouterTest, EventTypes) {
 }
 
 TEST_F(PointerWatcherEventRouterTest, PointerWatcherNoMove) {
-  base::test::ScopedTaskEnvironment scoped_task_environment(
-      base::test::ScopedTaskEnvironment::MainThreadType::UI);
-  ScopedViewsTestHelper helper;
   ASSERT_TRUE(MusClient::Get());
   PointerWatcherEventRouter* pointer_watcher_event_router =
       MusClient::Get()->pointer_watcher_event_router();
@@ -188,9 +187,6 @@ TEST_F(PointerWatcherEventRouterTest, PointerWatcherNoMove) {
 }
 
 TEST_F(PointerWatcherEventRouterTest, PointerWatcherMove) {
-  base::test::ScopedTaskEnvironment scoped_task_environment(
-      base::test::ScopedTaskEnvironment::MainThreadType::UI);
-  ScopedViewsTestHelper helper;
   ASSERT_TRUE(MusClient::Get());
   PointerWatcherEventRouter* pointer_watcher_event_router =
       MusClient::Get()->pointer_watcher_event_router();

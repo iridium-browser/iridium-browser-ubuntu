@@ -2,12 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <memory>
+#include <utility>
+#include <vector>
 
-#include "base/message_loop/message_loop.h"
+#include "base/memory/read_only_shared_memory_region.h"
+#include "base/test/scoped_task_environment.h"
 #include "content/browser/devtools/devtools_video_consumer.h"
 #include "content/public/test/test_utils.h"
 #include "media/base/limits.h"
+#include "mojo/public/cpp/base/shared_memory_utils.h"
+#include "mojo/public/cpp/bindings/binding.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 using testing::_;
@@ -18,7 +22,6 @@ namespace {
 // Capture parameters.
 constexpr gfx::Size kResolution = gfx::Size(320, 180);  // Arbitrarily chosen.
 constexpr media::VideoPixelFormat kFormat = media::PIXEL_FORMAT_I420;
-constexpr media::VideoPixelStorage kStorage = media::VideoPixelStorage::CPU;
 
 // A non-zero FrameSinkId to prevent validation errors when
 // DevToolsVideoConsumer::ChangeTarget(viz::FrameSinkId) is called
@@ -39,10 +42,15 @@ class MockFrameSinkVideoCapturer : public viz::mojom::FrameSinkVideoCapturer {
     binding_.Bind(std::move(request));
   }
 
+  void Reset() {
+    binding_.Close();
+    consumer_.reset();
+  }
+
   // This is never called.
   MOCK_METHOD2(SetFormat,
                void(media::VideoPixelFormat format,
-                    media::ColorSpace color_space));
+                    const gfx::ColorSpace& color_space));
   void SetMinCapturePeriod(base::TimeDelta min_capture_period) final {
     min_capture_period_ = min_capture_period;
     MockSetMinCapturePeriod(min_capture_period_);
@@ -67,8 +75,9 @@ class MockFrameSinkVideoCapturer : public viz::mojom::FrameSinkVideoCapturer {
                     bool use_fixed_aspect_ratio));
   // This is never called.
   MOCK_METHOD1(SetAutoThrottlingEnabled, void(bool));
-  void ChangeTarget(const viz::FrameSinkId& frame_sink_id) final {
-    frame_sink_id_ = frame_sink_id;
+  void ChangeTarget(
+      const base::Optional<viz::FrameSinkId>& frame_sink_id) final {
+    frame_sink_id_ = frame_sink_id ? *frame_sink_id : viz::FrameSinkId();
     MockChangeTarget(frame_sink_id_);
   }
   MOCK_METHOD1(MockChangeTarget, void(const viz::FrameSinkId& frame_sink_id));
@@ -85,6 +94,9 @@ class MockFrameSinkVideoCapturer : public viz::mojom::FrameSinkVideoCapturer {
   }
   MOCK_METHOD0(MockStop, void());
   MOCK_METHOD0(RequestRefreshFrame, void());
+  MOCK_METHOD2(CreateOverlay,
+               void(int32_t stacking_index,
+                    viz::mojom::FrameSinkVideoCaptureOverlayRequest request));
 
   // Const accessors to get the cached variables.
   base::TimeDelta min_capture_period() const { return min_capture_period_; }
@@ -163,22 +175,22 @@ class DevToolsVideoConsumerTest : public testing::Test {
     consumer_->SetFrameSinkId(kInitialFrameSinkId);
   }
 
-  void SimulateFrameCapture(mojo::ScopedSharedBufferHandle buffer,
-                            uint32_t buffer_size) {
+  void SimulateFrameCapture(base::ReadOnlySharedMemoryRegion data) {
     viz::mojom::FrameSinkVideoConsumerFrameCallbacksPtr callbacks_ptr;
     callbacks.Bind(mojo::MakeRequest(&callbacks_ptr));
 
     media::mojom::VideoFrameInfoPtr info = media::mojom::VideoFrameInfo::New(
         base::TimeDelta(), base::Value(base::Value::Type::DICTIONARY), kFormat,
-        kStorage, kResolution, gfx::Rect(kResolution));
+        kResolution, gfx::Rect(kResolution), gfx::ColorSpace::CreateREC709(),
+        nullptr);
 
-    consumer_->OnFrameCaptured(std::move(buffer), buffer_size, std::move(info),
+    consumer_->OnFrameCaptured(std::move(data), std::move(info),
                                gfx::Rect(kResolution), gfx::Rect(kResolution),
                                std::move(callbacks_ptr));
   }
 
   void StartCaptureWithMockCapturer() {
-    consumer_->InnerStartCapture(BindMockCapturer());
+    consumer_->InnerStartCapture(CreateMockCapturer());
   }
 
   bool IsValidMinAndMaxFrameSize(gfx::Size min_frame_size,
@@ -209,61 +221,57 @@ class DevToolsVideoConsumerTest : public testing::Test {
   std::unique_ptr<DevToolsVideoConsumer> consumer_;
 
  private:
-  viz::mojom::FrameSinkVideoCapturerPtrInfo BindMockCapturer() {
-    viz::mojom::FrameSinkVideoCapturerPtr capturer_ptr;
-    capturer_.Bind(mojo::MakeRequest(&capturer_ptr));
-    return capturer_ptr.PassInterface();
+  std::unique_ptr<viz::ClientFrameSinkVideoCapturer> CreateMockCapturer() {
+    return std::make_unique<viz::ClientFrameSinkVideoCapturer>(
+        base::BindRepeating(
+            [](base::WeakPtr<DevToolsVideoConsumerTest> self,
+               viz::mojom::FrameSinkVideoCapturerRequest request) {
+              self->capturer_.Bind(std::move(request));
+            },
+            weak_factory_.GetWeakPtr()));
   }
 
-  base::MessageLoop message_loop_;
+  base::test::ScopedTaskEnvironment task_environment_;
   base::WeakPtrFactory<DevToolsVideoConsumerTest> weak_factory_;
 };
 
 // Tests that the OnFrameFromVideoConsumer callbacks is called when
 // OnFrameCaptured is passed a valid buffer with valid mapping.
 TEST_F(DevToolsVideoConsumerTest, CallbacksAreCalledWhenBufferValid) {
-  // Create a valid buffer.
-  const size_t buffer_size =
-      media::VideoFrame::AllocationSize(kFormat, kResolution);
-  mojo::ScopedSharedBufferHandle buffer =
-      mojo::SharedBufferHandle::Create(buffer_size);
-
   // On valid buffer the |receiver_| gets a frame via OnFrameFromVideoConsumer.
   EXPECT_CALL(receiver_, OnFrameFromVideoConsumerMock(_)).Times(1);
 
-  SimulateFrameCapture(std::move(buffer), buffer_size);
+  auto region = mojo::CreateReadOnlySharedMemoryRegion(
+                    media::VideoFrame::AllocationSize(kFormat, kResolution))
+                    .region;
+  ASSERT_TRUE(region.IsValid());
+  SimulateFrameCapture(std::move(region));
   base::RunLoop().RunUntilIdle();
 }
 
 // Tests that only the OnFrameFromVideoConsumer callback is not called when
 // OnFrameCaptured is passed an invalid buffer.
-TEST_F(DevToolsVideoConsumerTest, OnFrameCapturedExitEarlyOnInvalidBuffer) {
-  // Create an invalid buffer.
-  const size_t buffer_size = 0;
-  mojo::ScopedSharedBufferHandle buffer =
-      mojo::SharedBufferHandle::Create(buffer_size);
-
+TEST_F(DevToolsVideoConsumerTest, CallbackIsNotCalledWhenBufferIsNotValid) {
   // On invalid buffer, the |receiver_| doesn't get a frame.
   EXPECT_CALL(receiver_, OnFrameFromVideoConsumerMock(_)).Times(0);
 
-  SimulateFrameCapture(std::move(buffer), buffer_size);
+  SimulateFrameCapture(base::ReadOnlySharedMemoryRegion());
   base::RunLoop().RunUntilIdle();
 }
 
 // Tests that the OnFrameFromVideoConsumer callback is not called when
-// OnFrameCaptured is passed a buffer with invalid mapping.
-TEST_F(DevToolsVideoConsumerTest, OnFrameCapturedExitsOnInvalidMapping) {
-  // Create a valid buffer, but change buffer_size to simulate an invalid
-  // mapping.
-  size_t buffer_size = media::VideoFrame::AllocationSize(kFormat, kResolution);
-  mojo::ScopedSharedBufferHandle buffer =
-      mojo::SharedBufferHandle::Create(buffer_size);
-  buffer_size = 0;
-
+// OnFrameCaptured is passed a buffer with less-than-expected size.
+TEST_F(DevToolsVideoConsumerTest, CallbackIsNotCalledWhenBufferIsTooSmall) {
   // On invalid mapping, the |receiver_| doesn't get a frame.
   EXPECT_CALL(receiver_, OnFrameFromVideoConsumerMock(_)).Times(0);
 
-  SimulateFrameCapture(std::move(buffer), buffer_size);
+  constexpr size_t too_few_number_of_bytes = 4;
+  ASSERT_LT(too_few_number_of_bytes,
+            media::VideoFrame::AllocationSize(kFormat, kResolution));
+  auto region =
+      mojo::CreateReadOnlySharedMemoryRegion(too_few_number_of_bytes).region;
+  ASSERT_TRUE(region.IsValid());
+  SimulateFrameCapture(std::move(region));
   base::RunLoop().RunUntilIdle();
 }
 
@@ -282,9 +290,10 @@ TEST_F(DevToolsVideoConsumerTest, StartCaptureCallsSetFunctions) {
   base::RunLoop().RunUntilIdle();
 
   // Stop capturing.
-  EXPECT_CALL(capturer_, MockStop());
   consumer_->StopCapture();
-  base::RunLoop().RunUntilIdle();
+
+  // Reset the mock to allow the next consumer to connect.
+  capturer_.Reset();
 
   // Start capturing again, and expect that these |capturer_| functions are
   // called once. This will re-bind the |capturer_| and ensures that destroyed

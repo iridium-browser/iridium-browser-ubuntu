@@ -12,9 +12,12 @@
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/feature_engagement/tracker_factory.h"
 #include "ios/chrome/browser/reading_list/reading_list_model_factory.h"
+#import "ios/chrome/browser/ui/bubble/bubble_presenter.h"
+#import "ios/chrome/browser/ui/bubble/bubble_view_controller_presenter.h"
 #import "ios/chrome/browser/ui/commands/browser_commands.h"
 #import "ios/chrome/browser/ui/commands/command_dispatcher.h"
 #import "ios/chrome/browser/ui/commands/popup_menu_commands.h"
+#import "ios/chrome/browser/ui/popup_menu/popup_menu_constants.h"
 #import "ios/chrome/browser/ui/popup_menu/popup_menu_mediator.h"
 #import "ios/chrome/browser/ui/popup_menu/popup_menu_presenter.h"
 #import "ios/chrome/browser/ui/popup_menu/popup_menu_table_view_controller.h"
@@ -41,6 +44,8 @@ PopupMenuCommandType CommandTypeFromPopupType(PopupMenuType type) {
 @property(nonatomic, strong) PopupMenuPresenter* presenter;
 // Mediator for the popup menu.
 @property(nonatomic, strong) PopupMenuMediator* mediator;
+// ViewController for this mediator.
+@property(nonatomic, strong) PopupMenuTableViewController* viewController;
 // Time when the presentation of the popup menu is requested.
 @property(nonatomic, assign) NSTimeInterval requestStartTime;
 
@@ -52,7 +57,10 @@ PopupMenuCommandType CommandTypeFromPopupType(PopupMenuType type) {
 @synthesize mediator = _mediator;
 @synthesize presenter = _presenter;
 @synthesize requestStartTime = _requestStartTime;
+@synthesize UIUpdater = _UIUpdater;
 @synthesize webStateList = _webStateList;
+@synthesize bubblePresenter = _bubblePresenter;
+@synthesize viewController = _viewController;
 
 #pragma mark - ChromeCoordinator
 
@@ -70,6 +78,7 @@ PopupMenuCommandType CommandTypeFromPopupType(PopupMenuType type) {
   [self.dispatcher stopDispatchingToTarget:self];
   [self.mediator disconnect];
   self.mediator = nil;
+  self.viewController = nil;
 }
 
 #pragma mark - Public
@@ -106,22 +115,43 @@ PopupMenuCommandType CommandTypeFromPopupType(PopupMenuType type) {
             fromNamedGuide:kTabSwitcherGuide];
 }
 
-- (void)searchButtonPopup {
+- (void)showSearchButtonPopup {
   base::RecordAction(base::UserMetricsAction("MobileToolbarShowSearchMenu"));
-  [self presentPopupOfType:PopupMenuTypeSearch fromNamedGuide:nil];
+  [self presentPopupOfType:PopupMenuTypeSearch
+            fromNamedGuide:kSearchButtonGuide];
 }
 
-- (void)dismissPopupMenu {
-  [self.presenter dismissAnimated:YES];
+- (void)showTabStripTabGridButtonPopup {
+  base::RecordAction(base::UserMetricsAction("MobileTabStripShowTabGridMenu"));
+  [self presentPopupOfType:PopupMenuTypeTabStripTabGrid
+            fromNamedGuide:kTabStripTabSwitcherGuide];
+}
+
+- (void)dismissPopupMenuAnimated:(BOOL)animated {
+  [self.UIUpdater updateUIForMenuDismissed];
+  [self.presenter dismissAnimated:animated];
   self.presenter = nil;
   [self.mediator disconnect];
   self.mediator = nil;
+  self.viewController = nil;
+}
+
+#pragma mark - PopupMenuLongPressDelegate
+
+- (void)longPressFocusPointChangedTo:(CGPoint)point {
+  [self.viewController focusRowAtPoint:point];
+}
+
+- (void)longPressEndedAtPoint:(CGPoint)point {
+  [self.viewController selectRowAtPoint:point];
 }
 
 #pragma mark - ContainedPresenterDelegate
 
 - (void)containedPresenterDidPresent:(id<ContainedPresenter>)presenter {
-  DCHECK(presenter == self.presenter);
+  if (presenter != self.presenter)
+    return;
+
   if (self.requestStartTime != 0) {
     base::TimeDelta elapsed = base::TimeDelta::FromSecondsD(
         [NSDate timeIntervalSinceReferenceDate] - self.requestStartTime);
@@ -139,7 +169,7 @@ PopupMenuCommandType CommandTypeFromPopupType(PopupMenuType type) {
 #pragma mark - Notification callback
 
 - (void)applicationDidEnterBackground:(NSNotification*)note {
-  [self dismissPopupMenu];
+  [self dismissPopupMenuAnimated:NO];
 }
 
 #pragma mark - Private
@@ -148,7 +178,9 @@ PopupMenuCommandType CommandTypeFromPopupType(PopupMenuType type) {
 // |guideName|.
 - (void)presentPopupOfType:(PopupMenuType)type
             fromNamedGuide:(GuideName*)guideName {
-  DCHECK(!self.presenter);
+  if (self.presenter)
+    [self dismissPopupMenuAnimated:YES];
+
   id<BrowserCommands> callableDispatcher =
       static_cast<id<BrowserCommands>>(self.dispatcher);
   [callableDispatcher
@@ -157,17 +189,37 @@ PopupMenuCommandType CommandTypeFromPopupType(PopupMenuType type) {
   self.requestStartTime = [NSDate timeIntervalSinceReferenceDate];
 
   PopupMenuTableViewController* tableViewController =
-      [[PopupMenuTableViewController alloc]
-          initWithStyle:UITableViewStyleGrouped];
+      [[PopupMenuTableViewController alloc] init];
   tableViewController.dispatcher =
-      static_cast<id<ApplicationCommands, BrowserCommands>>(self.dispatcher);
+      static_cast<id<ApplicationCommands, BrowserCommands, LoadQueryCommands>>(
+          self.dispatcher);
   tableViewController.baseViewController = self.baseViewController;
+  if (type == PopupMenuTypeToolsMenu) {
+    tableViewController.tableView.accessibilityIdentifier =
+        kPopupMenuToolsMenuTableViewId;
+  } else if (type == PopupMenuTypeNavigationBackward ||
+             type == PopupMenuTypeNavigationForward) {
+    tableViewController.tableView.accessibilityIdentifier =
+        kPopupMenuNavigationTableViewId;
+  }
+
+  self.viewController = tableViewController;
+
+  BOOL triggerNewIncognitoTabTip = NO;
+  if (type == PopupMenuTypeToolsMenu) {
+    triggerNewIncognitoTabTip =
+        self.bubblePresenter.incognitoTabTipBubblePresenter
+            .triggerFollowUpAction;
+    self.bubblePresenter.incognitoTabTipBubblePresenter.triggerFollowUpAction =
+        NO;
+  }
 
   self.mediator = [[PopupMenuMediator alloc]
-          initWithType:type
-           isIncognito:self.browserState->IsOffTheRecord()
-      readingListModel:ReadingListModelFactory::GetForBrowserState(
-                           self.browserState)];
+                   initWithType:type
+                    isIncognito:self.browserState->IsOffTheRecord()
+               readingListModel:ReadingListModelFactory::GetForBrowserState(
+                                    self.browserState)
+      triggerNewIncognitoTabTip:triggerNewIncognitoTabTip];
   self.mediator.engagementTracker =
       feature_engagement::TrackerFactory::GetForBrowserState(self.browserState);
   self.mediator.webStateList = self.webStateList;
@@ -182,6 +234,8 @@ PopupMenuCommandType CommandTypeFromPopupType(PopupMenuType type) {
   self.presenter.presentedViewController = tableViewController;
   self.presenter.guideName = guideName;
   self.presenter.delegate = self;
+
+  [self.UIUpdater updateUIForMenuDisplayed:type];
 
   [self.presenter prepareForPresentation];
   [self.presenter presentAnimated:YES];

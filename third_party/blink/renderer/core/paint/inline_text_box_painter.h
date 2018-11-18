@@ -34,7 +34,7 @@ class InlineTextBoxPainter {
   InlineTextBoxPainter(const InlineTextBox& inline_text_box)
       : inline_text_box_(inline_text_box) {}
 
-  void Paint(const PaintInfo&, const LayoutPoint&);
+  void Paint(const PaintInfo&, const LayoutPoint& paint_offset);
 
   // We don't paint composition or spelling markers that overlap a suggestion
   // marker (to match the native Android behavior). This method lets us throw
@@ -65,8 +65,6 @@ class InlineTextBoxPainter {
                                       const ComputedStyle&,
                                       const Font&);
 
-  static bool PaintsMarkerHighlights(const LayoutObject&);
-
  private:
   enum class PaintOptions { kNormal, kCombinedText };
 
@@ -84,6 +82,13 @@ class InlineTextBoxPainter {
                       const Font&,
                       Color text_color,
                       LayoutTextCombine* = nullptr);
+
+  template <PaintOptions>
+  LayoutRect GetSelectionRect(GraphicsContext&,
+                              const LayoutRect& box_rect,
+                              const ComputedStyle&,
+                              const Font&,
+                              LayoutTextCombine* = nullptr);
 
   void PaintStyleableMarkerUnderline(GraphicsContext&,
                                      const LayoutPoint& box_origin,

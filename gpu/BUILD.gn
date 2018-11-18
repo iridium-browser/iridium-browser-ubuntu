@@ -2,25 +2,35 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/config/jumbo.gni")
+import("//build/config/ui.gni")
 import("//testing/libfuzzer/fuzzer_test.gni")
 import("//testing/test.gni")
-import("//build/config/ui.gni")
 import("//ui/gl/features.gni")
 
 config("gpu_implementation") {
   defines = [ "GPU_IMPLEMENTATION" ]
+  configs = [ "//build/config/compiler:wexit_time_destructors" ]
 }
 
 config("gpu_gles2_implementation") {
   defines = [ "GPU_GLES2_IMPLEMENTATION" ]
+  configs = [ "//build/config/compiler:wexit_time_destructors" ]
 }
 
 config("gpu_util_implementation") {
   defines = [ "GPU_UTIL_IMPLEMENTATION" ]
+  configs = [ "//build/config/compiler:wexit_time_destructors" ]
 }
 
 config("raster_implementation") {
   defines = [ "RASTER_IMPLEMENTATION" ]
+  configs = [ "//build/config/compiler:wexit_time_destructors" ]
+}
+
+config("webgpu_implementation") {
+  defines = [ "WEBGPU_IMPLEMENTATION" ]
+  configs = [ "//build/config/compiler:wexit_time_destructors" ]
 }
 
 component("gpu") {
@@ -49,9 +59,9 @@ component("raster") {
   ]
 }
 
-component("gpu_util") {
+component("webgpu") {
   public_deps = [
-    "//gpu/ipc/common:gpu_preferences_util_sources",
+    "//gpu/command_buffer/client:webgpu_sources",
   ]
 }
 
@@ -77,7 +87,6 @@ if (!use_static_angle) {
     deps = [
       ":gpu",
       "//base",
-      "//build/config:exe_and_shlib_deps",
       "//gpu/command_buffer/client:gles2_c_lib",
       "//gpu/command_buffer/client:gles2_cmd_helper",
       "//gpu/command_buffer/client:gles2_implementation",
@@ -137,7 +146,7 @@ if (!use_static_angle) {
   }
 }  # if (!use_static_angle)
 
-static_library("test_support") {
+jumbo_static_library("test_support") {
   testonly = true
   sources = [
     "command_buffer/client/client_test_helper.cc",
@@ -152,20 +161,30 @@ static_library("test_support") {
     "command_buffer/service/gles2_cmd_decoder_mock.h",
     "command_buffer/service/raster_decoder_mock.cc",
     "command_buffer/service/raster_decoder_mock.h",
+    "ipc/raster_in_process_context.cc",
+    "ipc/raster_in_process_context.h",
     "ipc/service/gpu_memory_buffer_factory_test_template.h",
+    "ipc/webgpu_in_process_context.cc",
+    "ipc/webgpu_in_process_context.h",
   ]
 
   public_deps = [
     ":gles2",
     ":gpu",
+    ":webgpu",
     "//gpu/command_buffer/client:gles2_interface",
   ]
   deps = [
+    "//base/test:test_support",
+    "//gpu/command_buffer/client:raster",
     "//gpu/command_buffer/common",
+    "//gpu/ipc:gl_in_process_context",
     "//gpu/ipc/common",
     "//gpu/ipc/service",
+    "//gpu/skia_bindings:skia_bindings",
     "//testing/gmock",
     "//testing/gtest",
+    "//ui/gfx:test_support",
     "//ui/gl:gl_unittest_utils",
     "//ui/gl:test_support",
   ]
@@ -173,6 +192,8 @@ static_library("test_support") {
 
 test("gl_tests") {
   sources = [
+    "command_buffer/service/shared_image_backing_factory_gl_texture_unittest.cc",
+    "command_buffer/service/shared_image_factory_unittest.cc",
     "command_buffer/tests/compressed_texture_test.cc",
     "command_buffer/tests/es3_misc_functions_unittest.cc",
     "command_buffer/tests/gl_apply_screen_space_antialiasing_CHROMIUM_unittest.cc",
@@ -182,7 +203,6 @@ test("gl_tests") {
     "command_buffer/tests/gl_chromium_framebuffer_multisample_unittest.cc",
     "command_buffer/tests/gl_chromium_path_rendering_unittest.cc",
     "command_buffer/tests/gl_clear_framebuffer_unittest.cc",
-    "command_buffer/tests/gl_compressed_copy_texture_CHROMIUM_unittest.cc",
     "command_buffer/tests/gl_copy_tex_image_2d_workaround_unittest.cc",
     "command_buffer/tests/gl_copy_texture_CHROMIUM_unittest.cc",
     "command_buffer/tests/gl_cube_map_texture_unittest.cc",
@@ -227,6 +247,8 @@ test("gl_tests") {
     "command_buffer/tests/texture_image_factory.h",
     "ipc/client/gpu_context_tests.h",
     "ipc/client/gpu_in_process_context_tests.cc",
+    "ipc/client/raster_in_process_context_tests.cc",
+    "ipc/client/webgpu_in_process_context_tests.cc",
     "ipc/service/direct_composition_surface_win_unittest.cc",
   ]
 
@@ -241,11 +263,15 @@ test("gl_tests") {
     "//base",
     "//base/test:test_support",
     "//base/third_party/dynamic_annotations",
+    "//cc/paint",
     "//components/viz/test:test_support",
     "//gpu/command_buffer/client:gles2_c_lib",
     "//gpu/command_buffer/client:gles2_implementation",
+    "//gpu/command_buffer/client:raster",
+    "//gpu/command_buffer/client:webgpu",
     "//gpu/command_buffer/common:gles2_utils",
     "//gpu/ipc:gl_in_process_context",
+    "//gpu/ipc/host",
     "//gpu/ipc/service",
     "//testing/gmock",
     "//testing/gtest",
@@ -281,6 +307,7 @@ test("gpu_unittests") {
     "command_buffer/client/command_buffer_direct_locked.h",
     "command_buffer/client/fenced_allocator_test.cc",
     "command_buffer/client/gles2_implementation_unittest.cc",
+    "command_buffer/client/gles2_implementation_unittest_autogen.h",
     "command_buffer/client/mapped_memory_unittest.cc",
     "command_buffer/client/mock_transfer_buffer.cc",
     "command_buffer/client/mock_transfer_buffer.h",
@@ -288,9 +315,12 @@ test("gpu_unittests") {
     "command_buffer/client/query_tracker_unittest.cc",
     "command_buffer/client/raster_implementation_gles_unittest.cc",
     "command_buffer/client/raster_implementation_unittest.cc",
+    "command_buffer/client/raster_implementation_unittest_autogen.h",
     "command_buffer/client/ring_buffer_test.cc",
     "command_buffer/client/transfer_buffer_unittest.cc",
     "command_buffer/client/vertex_array_object_manager_unittest.cc",
+    "command_buffer/client/webgpu_implementation_unittest.cc",
+    "command_buffer/client/webgpu_implementation_unittest_autogen.h",
     "command_buffer/common/activity_flags_unittest.cc",
     "command_buffer/common/bitfield_helpers_test.cc",
     "command_buffer/common/buffer_unittest.cc",
@@ -305,6 +335,8 @@ test("gpu_unittests") {
     "command_buffer/common/raster_cmd_format_test.cc",
     "command_buffer/common/raster_cmd_format_test_autogen.h",
     "command_buffer/common/unittest_main.cc",
+    "command_buffer/common/webgpu_cmd_format_test.cc",
+    "command_buffer/common/webgpu_cmd_format_test_autogen.h",
     "command_buffer/service/buffer_manager_unittest.cc",
     "command_buffer/service/client_service_map_unittest.cc",
     "command_buffer/service/command_buffer_service_unittest.cc",
@@ -316,6 +348,8 @@ test("gpu_unittests") {
     "command_buffer/service/gl_context_mock.cc",
     "command_buffer/service/gl_context_mock.h",
     "command_buffer/service/gl_context_virtual_unittest.cc",
+    "command_buffer/service/gl_stream_texture_image_stub.cc",
+    "command_buffer/service/gl_stream_texture_image_stub.h",
     "command_buffer/service/gl_surface_mock.cc",
     "command_buffer/service/gl_surface_mock.h",
     "command_buffer/service/gles2_cmd_decoder_unittest.cc",
@@ -343,12 +377,15 @@ test("gpu_unittests") {
     "command_buffer/service/gpu_service_test.cc",
     "command_buffer/service/gpu_service_test.h",
     "command_buffer/service/gpu_tracer_unittest.cc",
+    "command_buffer/service/gr_cache_controller_unittest.cc",
+    "command_buffer/service/gr_shader_cache_unittest.cc",
     "command_buffer/service/id_manager_unittest.cc",
     "command_buffer/service/indexed_buffer_binding_host_unittest.cc",
     "command_buffer/service/mailbox_manager_unittest.cc",
     "command_buffer/service/memory_program_cache_unittest.cc",
     "command_buffer/service/mocks.cc",
     "command_buffer/service/mocks.h",
+    "command_buffer/service/passthrough_program_cache_unittest.cc",
     "command_buffer/service/path_manager_unittest.cc",
     "command_buffer/service/program_cache_unittest.cc",
     "command_buffer/service/program_manager_unittest.cc",
@@ -357,9 +394,11 @@ test("gpu_unittests") {
     "command_buffer/service/raster_decoder_unittest_1.cc",
     "command_buffer/service/raster_decoder_unittest_base.cc",
     "command_buffer/service/raster_decoder_unittest_base.h",
+    "command_buffer/service/raster_decoder_unittest_context_lost.cc",
     "command_buffer/service/renderbuffer_manager_unittest.cc",
     "command_buffer/service/scheduler_unittest.cc",
     "command_buffer/service/service_discardable_manager_unittest.cc",
+    "command_buffer/service/service_transfer_cache_unittest.cc",
     "command_buffer/service/shader_manager_unittest.cc",
     "command_buffer/service/shader_translator_cache_unittest.cc",
     "command_buffer/service/shader_translator_unittest.cc",
@@ -371,6 +410,7 @@ test("gpu_unittests") {
     "command_buffer/service/transform_feedback_manager_unittest.cc",
     "command_buffer/service/vertex_array_manager_unittest.cc",
     "command_buffer/service/vertex_attrib_manager_unittest.cc",
+    "command_buffer/service/webgpu_decoder_unittest.cc",
     "config/gpu_blacklist_unittest.cc",
     "config/gpu_control_list_entry_unittest.cc",
     "config/gpu_control_list_testing_arrays_and_structs_autogen.h",
@@ -383,14 +423,13 @@ test("gpu_unittests") {
     "config/gpu_control_list_version_unittest.cc",
     "config/gpu_driver_bug_list_unittest.cc",
     "config/gpu_info_collector_unittest.cc",
-    "config/gpu_info_unittest.cc",
+    "config/gpu_preferences_unittest.cc",
     "config/gpu_test_config_unittest.cc",
     "config/gpu_test_expectations_parser_unittest.cc",
     "config/gpu_util_unittest.cc",
     "ipc/client/command_buffer_proxy_impl_unittest.cc",
     "ipc/common/gpu_memory_buffer_impl_shared_memory_unittest.cc",
     "ipc/common/gpu_memory_buffer_impl_test_template.h",
-    "ipc/common/gpu_preferences_util_unittest.cc",
     "ipc/common/struct_traits_unittest.cc",
     "ipc/host/shader_disk_cache_unittest.cc",
     "ipc/service/gpu_channel_manager_unittest.cc",
@@ -417,7 +456,6 @@ test("gpu_unittests") {
     sources += [
       "ipc/common/gpu_memory_buffer_impl_dxgi_unittest.cc",
       "ipc/service/gpu_memory_buffer_factory_dxgi_unittest.cc",
-      "ipc/service/gpu_vsync_provider_unittest_win.cc",
     ]
   }
 
@@ -456,25 +494,25 @@ test("gpu_unittests") {
     "//gpu/command_buffer/client:gles2_c_lib",
     "//gpu/command_buffer/client:gles2_implementation",
     "//gpu/command_buffer/client:raster",
+    "//gpu/command_buffer/client:webgpu",
     "//gpu/command_buffer/common",
     "//gpu/command_buffer/common:gles2_utils",
     "//gpu/command_buffer/service",
     "//gpu/ipc:gl_in_process_context",
     "//gpu/ipc/client",
     "//gpu/ipc/common",
-    "//gpu/ipc/common:gpu_preferences_util",
     "//gpu/ipc/common:test_interfaces",
     "//gpu/ipc/host",
     "//gpu/ipc/service",
     "//ipc:test_support",
-    "//mojo/edk",
+    "//mojo/core/embedder",
     "//mojo/public/cpp/bindings",
     "//net:test_support",
     "//skia",
     "//testing/gmock",
     "//testing/gtest",
     "//third_party/angle:translator",
-    "//third_party/mesa:mesa_headers",
+    "//third_party/mesa_headers",
     "//ui/gfx",
     "//ui/gfx:test_support",
     "//ui/gfx/geometry",
@@ -517,12 +555,10 @@ test("gpu_perftests") {
     "//ui/gl/init",
   ]
 
-  data = [
+  data_deps = [
     # Needed for isolate script to execute.
-    "//testing/scripts/common.py",
-    "//testing/xvfb.py",
-    "//testing/scripts/run_gtest_perf_test.py",
-    "//tools/perf/generate_legacy_perf_dashboard_json.py",
+    "//testing:run_perf_test",
+    "//third_party/mesa_headers",
   ]
 
   # This target should not require the Chrome executable to run.
@@ -549,12 +585,9 @@ test("command_buffer_perftests") {
     "//ui/gl/init",
   ]
 
-  data = [
+  data_deps = [
     # Needed for isolate script to execute.
-    "//testing/scripts/common.py",
-    "//testing/xvfb.py",
-    "//testing/scripts/run_gtest_perf_test.py",
-    "//tools/perf/generate_legacy_perf_dashboard_json.py",
+    "//testing:run_perf_test",
   ]
 
   # This target should not require the Chrome executable to run.
@@ -629,6 +662,72 @@ if (is_linux) {
     ]
 
     defines = [ "GPU_FUZZER_USE_SWIFTSHADER" ]
+
+    deps = [
+      ":gles2",
+      ":gpu",
+      "//base",
+      "//base/third_party/dynamic_annotations",
+      "//ui/gfx/geometry",
+      "//ui/gl",
+      "//ui/gl:test_support",
+    ]
+
+    libfuzzer_options = [ "max_len=16384" ]
+  }
+
+  fuzzer_test("gpu_raster_fuzzer") {
+    sources = [
+      "command_buffer/tests/fuzzer_main.cc",
+    ]
+
+    defines = [ "GPU_FUZZER_USE_RASTER_DECODER" ]
+
+    deps = [
+      ":gles2",
+      ":gpu",
+      "//base",
+      "//base/third_party/dynamic_annotations",
+      "//ui/gfx/geometry",
+      "//ui/gl",
+      "//ui/gl:test_support",
+    ]
+
+    libfuzzer_options = [ "max_len=16384" ]
+  }
+
+  fuzzer_test("gpu_raster_swiftshader_fuzzer") {
+    sources = [
+      "command_buffer/tests/fuzzer_main.cc",
+    ]
+
+    defines = [
+      "GPU_FUZZER_USE_RASTER_DECODER",
+      "GPU_FUZZER_USE_SWIFTSHADER",
+    ]
+
+    deps = [
+      ":gles2",
+      ":gpu",
+      "//base",
+      "//base/third_party/dynamic_annotations",
+      "//ui/gfx/geometry",
+      "//ui/gl",
+      "//ui/gl:test_support",
+    ]
+
+    libfuzzer_options = [ "max_len=16384" ]
+  }
+
+  fuzzer_test("gpu_raster_angle_fuzzer") {
+    sources = [
+      "command_buffer/tests/fuzzer_main.cc",
+    ]
+
+    defines = [
+      "GPU_FUZZER_USE_RASTER_DECODER",
+      "GPU_FUZZER_USE_ANGLE",
+    ]
 
     deps = [
       ":gles2",

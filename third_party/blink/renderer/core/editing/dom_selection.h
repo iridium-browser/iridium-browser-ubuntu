@@ -30,9 +30,9 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_DOM_SELECTION_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_DOM_SELECTION_H_
 
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
 #include "third_party/blink/renderer/core/dom/context_lifecycle_observer.h"
 #include "third_party/blink/renderer/core/editing/forward.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
@@ -102,7 +102,7 @@ class CORE_EXPORT DOMSelection final : public ScriptWrappable,
   // Microsoft Selection Object API
   void empty();
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  private:
   explicit DOMSelection(const TreeScope*);
@@ -112,7 +112,7 @@ class CORE_EXPORT DOMSelection final : public ScriptWrappable,
   void UpdateFrameSelection(const SelectionInDOMTree&,
                             Range*,
                             const SetSelectionOptions&) const;
-  // Convenience methods for accessors, does not check m_frame present.
+  // Convenience methods for accessors, does not check owner Frame presence.
   VisibleSelection GetVisibleSelection() const;
   bool IsBaseFirstInSelection() const;
   const Position& AnchorPosition() const;

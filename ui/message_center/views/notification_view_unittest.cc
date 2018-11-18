@@ -128,8 +128,8 @@ class NotificationViewTest : public views::ViewsTestBase {
     std::copy(notification_view()->action_buttons_.begin(),
               notification_view()->action_buttons_.end(),
               std::back_inserter(vertical_order));
-    std::vector<views::View*>::iterator current = vertical_order.begin();
-    std::vector<views::View*>::iterator last = current++;
+    auto current = vertical_order.begin();
+    auto last = current++;
     while (current != vertical_order.end()) {
       gfx::Point last_point = (*last)->origin();
       views::View::ConvertPointToTarget(
@@ -644,7 +644,6 @@ TEST_F(NotificationViewTest, SlideOutNested) {
       ui::ScopedAnimationDurationScaleMode::ZERO_DURATION);
 
   UpdateNotificationViews();
-  notification_view()->SetIsNested();
   std::string notification_id = notification()->id();
 
   BeginScroll();

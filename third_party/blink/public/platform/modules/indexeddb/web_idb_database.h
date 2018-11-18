@@ -26,9 +26,9 @@
 #ifndef THIRD_PARTY_BLINK_PUBLIC_PLATFORM_MODULES_INDEXEDDB_WEB_IDB_DATABASE_H_
 #define THIRD_PARTY_BLINK_PUBLIC_PLATFORM_MODULES_INDEXEDDB_WEB_IDB_DATABASE_H_
 
+#include "third_party/blink/public/common/indexeddb/web_idb_types.h"
 #include "third_party/blink/public/platform/modules/indexeddb/web_idb_cursor.h"
 #include "third_party/blink/public/platform/modules/indexeddb/web_idb_metadata.h"
-#include "third_party/blink/public/platform/modules/indexeddb/web_idb_types.h"
 #include "third_party/blink/public/platform/web_blob_info.h"
 #include "third_party/blink/public/platform/web_common.h"
 
@@ -38,7 +38,6 @@ namespace blink {
 
 class WebData;
 class WebIDBCallbacks;
-class WebIDBKey;
 class WebIDBKeyPath;
 class WebIDBKeyRange;
 
@@ -82,8 +81,6 @@ class WebIDBDatabase {
 
   static const long long kMinimumIndexId = 30;
 
-  typedef WebVector<WebIDBKey> WebIndexKeys;
-
   virtual void AddObserver(
       long long transaction_id,
       int32_t observer_id,
@@ -113,13 +110,11 @@ class WebIDBDatabase {
                    WebIDBKeyView primary_key,
                    WebIDBPutMode,
                    WebIDBCallbacks*,
-                   const WebVector<long long>& index_ids,
-                   WebVector<WebIndexKeys>) = 0;
+                   const WebVector<WebIDBIndexKeys>&) = 0;
   virtual void SetIndexKeys(long long transaction_id,
                             long long object_store_id,
                             WebIDBKeyView primary_key,
-                            const WebVector<long long>& index_ids,
-                            const WebVector<WebIndexKeys>&) = 0;
+                            const WebVector<WebIDBIndexKeys>&) = 0;
   virtual void SetIndexesReady(long long transaction_id,
                                long long object_store_id,
                                const WebVector<long long>& index_ids) = 0;

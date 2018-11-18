@@ -7,14 +7,81 @@
 #include <string>
 
 #include "base/logging.h"
+#include "base/optional.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/time/time.h"
 #include "content/public/common/url_loader_throttle.h"
+#include "content/renderer/loader/navigation_response_override_parameters.h"
 #include "content/renderer/loader/sync_load_response.h"
 #include "net/url_request/redirect_info.h"
 #include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/resource_response_info.h"
 
 namespace content {
+
+// An inner helper class to manage the SyncLoadContext's events and timeouts,
+// so that we can stop or resumse all of them at once.
+class SyncLoadContext::SignalHelper final {
+ public:
+  SignalHelper(SyncLoadContext* context,
+               base::WaitableEvent* redirect_or_response_event,
+               base::WaitableEvent* abort_event,
+               base::TimeDelta timeout)
+      : context_(context),
+        redirect_or_response_event_(redirect_or_response_event),
+        abort_event_(abort_event) {
+    // base::TimeDelta::Max() means no timeout.
+    if (timeout != base::TimeDelta::Max()) {
+      // Instantiate a base::OneShotTimer instance.
+      timeout_timer_.emplace();
+    }
+    Start(timeout);
+  }
+
+  void SignalRedirectOrResponseComplete() {
+    abort_watcher_.StopWatching();
+    if (timeout_timer_)
+      timeout_timer_->AbandonAndStop();
+    redirect_or_response_event_->Signal();
+  }
+
+  bool RestartAfterRedirect() {
+    if (abort_event_ && abort_event_->IsSignaled())
+      return false;
+
+    base::TimeDelta timeout_remainder = base::TimeDelta::Max();
+    if (timeout_timer_) {
+      timeout_remainder =
+          timeout_timer_->desired_run_time() - base::TimeTicks::Now();
+      if (timeout_remainder <= base::TimeDelta())
+        return false;
+    }
+    Start(timeout_remainder);
+    return true;
+  }
+
+ private:
+  void Start(base::TimeDelta timeout) {
+    DCHECK(!redirect_or_response_event_->IsSignaled());
+    if (abort_event_) {
+      abort_watcher_.StartWatching(
+          abort_event_,
+          base::BindOnce(&SyncLoadContext::OnAbort, base::Unretained(context_)),
+          context_->task_runner_);
+    }
+    if (timeout_timer_) {
+      DCHECK_NE(base::TimeDelta::Max(), timeout);
+      timeout_timer_->Start(FROM_HERE, timeout, context_,
+                            &SyncLoadContext::OnTimeout);
+    }
+  }
+
+  SyncLoadContext* context_;
+  base::WaitableEvent* redirect_or_response_event_;
+  base::WaitableEvent* abort_event_;
+  base::WaitableEventWatcher abort_watcher_;
+  base::Optional<base::OneShotTimer> timeout_timer_;
+};
 
 // static
 void SyncLoadContext::StartAsyncWithWaitableEvent(
@@ -26,21 +93,21 @@ void SyncLoadContext::StartAsyncWithWaitableEvent(
         url_loader_factory_info,
     std::vector<std::unique_ptr<URLLoaderThrottle>> throttles,
     SyncLoadResponse* response,
-    base::WaitableEvent* completed_event,
+    base::WaitableEvent* redirect_or_response_event,
     base::WaitableEvent* abort_event,
-    double timeout,
+    base::TimeDelta timeout,
     blink::mojom::BlobRegistryPtrInfo download_to_blob_registry) {
   bool download_to_blob = download_to_blob_registry.is_valid();
   auto* context = new SyncLoadContext(
       request.get(), std::move(url_loader_factory_info), response,
-      completed_event, abort_event, timeout,
+      redirect_or_response_event, abort_event, timeout,
       std::move(download_to_blob_registry), loading_task_runner);
   context->request_id_ = context->resource_dispatcher_->StartAsync(
       std::move(request), routing_id, std::move(loading_task_runner),
       traffic_annotation, true /* is_sync */,
       download_to_blob /* pass_response_pipe_to_peer */,
       base::WrapUnique(context), context->url_loader_factory_,
-      std::move(throttles), network::mojom::URLLoaderClientEndpointsPtr(),
+      std::move(throttles), nullptr /* navigation_response_override_params */,
       nullptr /* continue_for_navigation */);
 }
 
@@ -48,27 +115,20 @@ SyncLoadContext::SyncLoadContext(
     network::ResourceRequest* request,
     std::unique_ptr<network::SharedURLLoaderFactoryInfo> url_loader_factory,
     SyncLoadResponse* response,
-    base::WaitableEvent* completed_event,
+    base::WaitableEvent* redirect_or_response_event,
     base::WaitableEvent* abort_event,
-    double timeout,
+    base::TimeDelta timeout,
     blink::mojom::BlobRegistryPtrInfo download_to_blob_registry,
     scoped_refptr<base::SingleThreadTaskRunner> task_runner)
     : response_(response),
-      completed_event_(completed_event),
       download_to_blob_registry_(std::move(download_to_blob_registry)),
-      task_runner_(std::move(task_runner)) {
+      task_runner_(std::move(task_runner)),
+      signals_(std::make_unique<SignalHelper>(this,
+                                              redirect_or_response_event,
+                                              abort_event,
+                                              timeout)) {
   url_loader_factory_ =
       network::SharedURLLoaderFactory::Create(std::move(url_loader_factory));
-  if (abort_event) {
-    abort_watcher_.StartWatching(
-        abort_event,
-        base::BindOnce(&SyncLoadContext::OnAbort, base::Unretained(this)),
-        task_runner_);
-  }
-  if (timeout) {
-    timeout_timer_.Start(FROM_HERE, base::TimeDelta::FromSecondsD(timeout),
-                         this, &SyncLoadContext::OnTimeout);
-  }
 
   // Constructs a new ResourceDispatcher specifically for this request.
   resource_dispatcher_ = std::make_unique<ResourceDispatcher>();
@@ -86,19 +146,32 @@ bool SyncLoadContext::OnReceivedRedirect(
     const net::RedirectInfo& redirect_info,
     const network::ResourceResponseInfo& info) {
   DCHECK(!Completed());
-  if (redirect_info.new_url.GetOrigin() != response_->url.GetOrigin()) {
-    LOG(ERROR) << "Cross origin redirect denied";
-    response_->error_code = net::ERR_ABORTED;
+  response_->url = redirect_info.new_url;
+  response_->info = info;
+  response_->redirect_info = redirect_info;
+  response_->context_for_redirect = this;
+  resource_dispatcher_->SetDefersLoading(request_id_, true);
+  signals_->SignalRedirectOrResponseComplete();
+  return true;
+}
 
-    CompleteRequest(false /* remove_pending_request */);
-
-    // Returning false here will cause the request to be cancelled and this
-    // object deleted.
-    return false;
+void SyncLoadContext::FollowRedirect() {
+  if (!signals_->RestartAfterRedirect()) {
+    CancelRedirect();
+    return;
   }
 
-  response_->url = redirect_info.new_url;
-  return true;
+  response_->redirect_info = net::RedirectInfo();
+  response_->context_for_redirect = nullptr;
+
+  resource_dispatcher_->SetDefersLoading(request_id_, false);
+}
+
+void SyncLoadContext::CancelRedirect() {
+  response_->redirect_info = net::RedirectInfo();
+  response_->context_for_redirect = nullptr;
+  response_->error_code = net::ERR_ABORTED;
+  CompleteRequest(true);
 }
 
 void SyncLoadContext::OnReceivedResponse(
@@ -122,11 +195,6 @@ void SyncLoadContext::OnStartLoadingResponseBody(
                      base::Unretained(this)));
 }
 
-void SyncLoadContext::OnDownloadedData(int len, int encoded_data_length) {
-  downloaded_file_length_ =
-      (downloaded_file_length_ ? *downloaded_file_length_ : 0) + len;
-}
-
 void SyncLoadContext::OnReceivedData(std::unique_ptr<ReceivedData> data) {
   DCHECK(!Completed());
   response_->data.append(data->payload(), data->length());
@@ -139,17 +207,9 @@ void SyncLoadContext::OnCompletedRequest(
   DCHECK(!Completed());
   response_->error_code = status.error_code;
   response_->extended_error_code = status.extended_error_code;
-  if (status.cors_error_status)
-    response_->cors_error = status.cors_error_status->cors_error;
+  response_->cors_error = status.cors_error_status;
   response_->info.encoded_data_length = status.encoded_data_length;
   response_->info.encoded_body_length = status.encoded_body_length;
-  response_->downloaded_file_length = downloaded_file_length_;
-  // Need to pass |downloaded_tmp_file| to the caller thread. Otherwise the blob
-  // creation in ResourceResponse::SetDownloadedFilePath() fails.
-  response_->downloaded_tmp_file =
-      resource_dispatcher_->TakeDownloadedTempFile(request_id_);
-  DCHECK_EQ(!response_->downloaded_file_length,
-            !response_->downloaded_tmp_file);
   if (blob_response_started_ && !blob_finished_) {
     request_completed_ = true;
     return;
@@ -181,12 +241,8 @@ void SyncLoadContext::OnTimeout() {
 }
 
 void SyncLoadContext::CompleteRequest(bool remove_pending_request) {
-  abort_watcher_.StopWatching();
-  timeout_timer_.AbandonAndStop();
-
-  completed_event_->Signal();
-
-  completed_event_ = nullptr;
+  signals_->SignalRedirectOrResponseComplete();
+  signals_ = nullptr;
   response_ = nullptr;
 
   if (remove_pending_request) {
@@ -196,7 +252,7 @@ void SyncLoadContext::CompleteRequest(bool remove_pending_request) {
 }
 
 bool SyncLoadContext::Completed() const {
-  DCHECK_EQ(!completed_event_, !response_);
+  DCHECK_EQ(!signals_, !response_);
   return !response_;
 }
 

@@ -22,7 +22,7 @@
 #include "SkScanPriv.h"
 #include "SkTSort.h"
 #include "SkTemplates.h"
-#include "SkUtils.h"
+#include "SkUTF.h"
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -182,8 +182,9 @@ void gen_alpha_deltas(const SkPath& path, const SkIRect& clippedIR, const SkIRec
             }
 
             SkAnalyticEdge l, r;
-            l.setLine(lb->fP0, lb->fP1);
-            r.setLine(rb->fP0, rb->fP1);
+            if (!l.setLine(lb->fP0, lb->fP1) || !r.setLine(rb->fP0, rb->fP1)) {
+                continue;
+            }
 
             SkFixed xorUpperY = l.fUpperY ^ r.fUpperY;
             SkFixed xorLowerY = l.fLowerY ^ r.fLowerY;
@@ -367,7 +368,7 @@ void SkScan::DAAFillPath(const SkPath& path, SkBlitter* blitter, const SkIRect& 
         } else {
             record->fType = SkDAARecord::Type::kList;
             SkCoverageDeltaList* deltaList = alloc->make<SkCoverageDeltaList>(
-                    alloc, clippedIR.fTop, clippedIR.fBottom, forceRLE);
+                    alloc, clippedIR, forceRLE);
             gen_alpha_deltas(path, clippedIR, clipBounds, *deltaList, blitter, skipRect,
                              containedInClip);
             record->fList = deltaList;
@@ -379,8 +380,7 @@ void SkScan::DAAFillPath(const SkPath& path, SkBlitter* blitter, const SkIRect& 
         if (record->fType == SkDAARecord::Type::kMask) {
             blitter->blitMask(record->fMask, clippedIR);
         } else {
-            blitter->blitCoverageDeltas(record->fList,
-                                        clipBounds, isEvenOdd, isInverse, isConvex, alloc);
+            blitter->blitCoverageDeltas(record->fList, clipBounds, isEvenOdd, isInverse, isConvex);
         }
     }
 }

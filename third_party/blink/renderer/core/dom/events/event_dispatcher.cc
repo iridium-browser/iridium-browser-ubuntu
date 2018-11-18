@@ -28,10 +28,12 @@
 #include "third_party/blink/renderer/core/dom/events/event_dispatcher.h"
 
 #include "base/memory/scoped_refptr.h"
-#include "third_party/blink/renderer/core/dom/ax_object_cache.h"
+#include "third_party/blink/renderer/core/accessibility/ax_object_cache.h"
 #include "third_party/blink/renderer/core/dom/container_node.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
+#include "third_party/blink/renderer/core/dom/events/event_dispatch_forbidden_scope.h"
+#include "third_party/blink/renderer/core/dom/events/event_path.h"
 #include "third_party/blink/renderer/core/dom/events/scoped_event_queue.h"
 #include "third_party/blink/renderer/core/dom/events/window_event_context.h"
 #include "third_party/blink/renderer/core/events/mouse_event.h"
@@ -41,33 +43,33 @@
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/frame/use_counter.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
-#include "third_party/blink/renderer/core/inspector/InspectorTraceEvents.h"
-#include "third_party/blink/renderer/platform/event_dispatch_forbidden_scope.h"
+#include "third_party/blink/renderer/core/inspector/inspector_trace_events.h"
+#include "third_party/blink/renderer/core/origin_trials/origin_trials.h"
+#include "third_party/blink/renderer/core/timing/event_timing.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 
 namespace blink {
 
-DispatchEventResult EventDispatcher::DispatchEvent(Node& node, Event* event) {
+DispatchEventResult EventDispatcher::DispatchEvent(Node& node, Event& event) {
   TRACE_EVENT0(TRACE_DISABLED_BY_DEFAULT("blink.debug"),
                "EventDispatcher::dispatchEvent");
 #if DCHECK_IS_ON()
   DCHECK(!EventDispatchForbiddenScope::IsEventDispatchForbidden());
 #endif
   EventDispatcher dispatcher(node, event);
-  return event->DispatchEvent(dispatcher);
+  return event.DispatchEvent(dispatcher);
 }
 
-EventDispatcher::EventDispatcher(Node& node, Event* event)
+EventDispatcher::EventDispatcher(Node& node, Event& event)
     : node_(node), event_(event) {
-  DCHECK(event_.Get());
   view_ = node.GetDocument().View();
   event_->InitEventPath(*node_);
 }
 
-void EventDispatcher::DispatchScopedEvent(Node& node, Event* event) {
+void EventDispatcher::DispatchScopedEvent(Node& node, Event& event) {
   // We need to set the target here because it can go away by the time we
   // actually fire the event.
-  event->SetTarget(EventPath::EventTargetRespectingTargetRules(node));
+  event.SetTarget(EventPath::EventTargetRespectingTargetRules(node));
   ScopedEventQueue::Instance()->EnqueueEvent(event);
 }
 
@@ -80,33 +82,33 @@ void EventDispatcher::DispatchSimulatedClick(
   // before dispatchSimulatedClick() returns. This vector is here just to
   // prevent the code from running into an infinite recursion of
   // dispatchSimulatedClick().
-  DEFINE_STATIC_LOCAL(HeapHashSet<Member<Node>>,
+  DEFINE_STATIC_LOCAL(Persistent<HeapHashSet<Member<Node>>>,
                       nodes_dispatching_simulated_clicks,
                       (new HeapHashSet<Member<Node>>));
 
   if (IsDisabledFormControl(&node))
     return;
 
-  if (nodes_dispatching_simulated_clicks.Contains(&node))
+  if (nodes_dispatching_simulated_clicks->Contains(&node))
     return;
 
-  nodes_dispatching_simulated_clicks.insert(&node);
+  nodes_dispatching_simulated_clicks->insert(&node);
 
   if (mouse_event_options == kSendMouseOverUpDownEvents)
-    EventDispatcher(node, MouseEvent::Create(EventTypeNames::mouseover,
-                                             node.GetDocument().domWindow(),
-                                             underlying_event, creation_scope))
+    EventDispatcher(node, *MouseEvent::Create(EventTypeNames::mouseover,
+                                              node.GetDocument().domWindow(),
+                                              underlying_event, creation_scope))
         .Dispatch();
 
   if (mouse_event_options != kSendNoEvents) {
-    EventDispatcher(node, MouseEvent::Create(EventTypeNames::mousedown,
-                                             node.GetDocument().domWindow(),
-                                             underlying_event, creation_scope))
+    EventDispatcher(node, *MouseEvent::Create(EventTypeNames::mousedown,
+                                              node.GetDocument().domWindow(),
+                                              underlying_event, creation_scope))
         .Dispatch();
     node.SetActive(true);
-    EventDispatcher(node, MouseEvent::Create(EventTypeNames::mouseup,
-                                             node.GetDocument().domWindow(),
-                                             underlying_event, creation_scope))
+    EventDispatcher(node, *MouseEvent::Create(EventTypeNames::mouseup,
+                                              node.GetDocument().domWindow(),
+                                              underlying_event, creation_scope))
         .Dispatch();
   }
   // Some elements (e.g. the color picker) may set active state to true before
@@ -114,12 +116,12 @@ void EventDispatcher::DispatchSimulatedClick(
   node.SetActive(false);
 
   // always send click
-  EventDispatcher(node, MouseEvent::Create(EventTypeNames::click,
-                                           node.GetDocument().domWindow(),
-                                           underlying_event, creation_scope))
+  EventDispatcher(node, *MouseEvent::Create(EventTypeNames::click,
+                                            node.GetDocument().domWindow(),
+                                            underlying_event, creation_scope))
       .Dispatch();
 
-  nodes_dispatching_simulated_clicks.erase(&node);
+  nodes_dispatching_simulated_clicks->erase(&node);
 }
 
 // https://dom.spec.whatwg.org/#dispatching-events
@@ -135,6 +137,16 @@ DispatchEventResult EventDispatcher::Dispatch() {
     // eventPath() can be empty if event path is shrinked by relataedTarget
     // retargeting.
     return DispatchEventResult::kNotCanceled;
+  }
+  std::unique_ptr<EventTiming> eventTiming;
+  if (OriginTrials::EventTimingEnabled(&node_->GetDocument())) {
+    LocalFrame* frame = node_->GetDocument().GetFrame();
+    if (frame && frame->DomWindow()) {
+      UseCounter::Count(node_->GetDocument(),
+                        WebFeature::kPerformanceEventTimingConstructor);
+      eventTiming = std::make_unique<EventTiming>(frame->DomWindow());
+      eventTiming->WillDispatchEvent(*event_);
+    }
   }
   event_->GetEventPath().EnsureWindowEventContext();
 
@@ -153,8 +165,8 @@ DispatchEventResult EventDispatcher::Dispatch() {
 
   // A part of step 9 loop.
   if (is_activation_event && !activation_target && event_->bubbles()) {
-    size_t size = event_->GetEventPath().size();
-    for (size_t i = 1; i < size; ++i) {
+    wtf_size_t size = event_->GetEventPath().size();
+    for (wtf_size_t i = 1; i < size; ++i) {
       Node* target = event_->GetEventPath()[i].GetNode();
       if (target->HasActivationBehavior()) {
         activation_target = target;
@@ -175,12 +187,18 @@ DispatchEventResult EventDispatcher::Dispatch() {
                               pre_dispatch_event_handler_result) ==
       kContinueDispatching) {
     if (DispatchEventAtCapturing() == kContinueDispatching) {
+      // TODO(crbug/882574): Remove these.
+      CHECK(event_->HasEventPath());
+      CHECK(!event_->GetEventPath().IsEmpty());
       if (DispatchEventAtTarget() == kContinueDispatching)
         DispatchEventAtBubbling();
     }
   }
   DispatchEventPostProcess(activation_target,
                            pre_dispatch_event_handler_result);
+  if (eventTiming)
+    eventTiming->DidDispatchEvent(*event_);
+
   return EventTarget::GetDispatchEventResult(*event_);
 }
 
@@ -192,7 +210,7 @@ inline EventDispatchContinuation EventDispatcher::DispatchEventPreProcess(
   // legacy-pre-activation behavior.
   if (activation_target) {
     pre_dispatch_event_handler_result =
-        activation_target->PreDispatchEventHandler(event_.Get());
+        activation_target->PreDispatchEventHandler(*event_);
   }
   return (event_->GetEventPath().IsEmpty() || event_->PropagationStopped())
              ? kDoneDispatching
@@ -209,11 +227,20 @@ inline EventDispatchContinuation EventDispatcher::DispatchEventAtCapturing() {
       event_->PropagationStopped())
     return kDoneDispatching;
 
-  for (size_t i = event_->GetEventPath().size() - 1; i > 0; --i) {
+  for (wtf_size_t i = event_->GetEventPath().size() - 1; i > 0; --i) {
     const NodeEventContext& event_context = event_->GetEventPath()[i];
-    if (event_context.CurrentTargetSameAsTarget())
-      continue;
-    event_context.HandleLocalEvents(*event_);
+    if (event_context.CurrentTargetSameAsTarget()) {
+      if (!RuntimeEnabledFeatures::
+              CallCaptureListenersAtCapturePhaseAtShadowHostsEnabled())
+        continue;
+      event_->SetEventPhase(Event::kAtTarget);
+      event_->SetFireOnlyCaptureListenersAtTarget(true);
+      event_context.HandleLocalEvents(*event_);
+      event_->SetFireOnlyCaptureListenersAtTarget(false);
+    } else {
+      event_->SetEventPhase(Event::kCapturingPhase);
+      event_context.HandleLocalEvents(*event_);
+    }
     if (event_->PropagationStopped())
       return kDoneDispatching;
   }
@@ -230,17 +257,26 @@ inline EventDispatchContinuation EventDispatcher::DispatchEventAtTarget() {
 inline void EventDispatcher::DispatchEventAtBubbling() {
   // Trigger bubbling event handlers, starting at the bottom and working our way
   // up.
-  size_t size = event_->GetEventPath().size();
-  for (size_t i = 1; i < size; ++i) {
+  wtf_size_t size = event_->GetEventPath().size();
+  for (wtf_size_t i = 1; i < size; ++i) {
     const NodeEventContext& event_context = event_->GetEventPath()[i];
     if (event_context.CurrentTargetSameAsTarget()) {
+      // TODO(hayato): Need to check cancelBubble() also here?
       event_->SetEventPhase(Event::kAtTarget);
+      if (RuntimeEnabledFeatures::
+              CallCaptureListenersAtCapturePhaseAtShadowHostsEnabled()) {
+        event_->SetFireOnlyNonCaptureListenersAtTarget(true);
+        event_context.HandleLocalEvents(*event_);
+        event_->SetFireOnlyNonCaptureListenersAtTarget(false);
+      } else {
+        event_context.HandleLocalEvents(*event_);
+      }
     } else if (event_->bubbles() && !event_->cancelBubble()) {
       event_->SetEventPhase(Event::kBubblingPhase);
+      event_context.HandleLocalEvents(*event_);
     } else {
       continue;
     }
-    event_context.HandleLocalEvents(*event_);
     if (event_->PropagationStopped())
       return;
   }
@@ -269,7 +305,7 @@ inline void EventDispatcher::DispatchEventPostProcess(
                   ToMouseEvent(*event_).type() == EventTypeNames::click;
   if (is_click) {
     // Fire an accessibility event indicating a node was clicked on.  This is
-    // safe if m_event->target()->toNode() returns null.
+    // safe if event_->target()->ToNode() returns null.
     if (AXObjectCache* cache = node_->GetDocument().ExistingAXObjectCache())
       cache->HandleClicked(event_->target()->ToNode());
 
@@ -278,7 +314,7 @@ inline void EventDispatcher::DispatchEventPostProcess(
     // This may dispatch an event, and node_ and event_ might be altered.
     if (activation_target) {
       activation_target->PostDispatchEventHandler(
-          event_.Get(), pre_dispatch_event_handler_result);
+          *event_, pre_dispatch_event_handler_result);
     }
     // TODO(tkent): Is it safe to kick DefaultEventHandler() with such altered
     // event_?
@@ -310,16 +346,16 @@ inline void EventDispatcher::DispatchEventPostProcess(
     // Non-bubbling events call only one default event handler, the one for the
     // target.
     node_->WillCallDefaultEventHandler(*event_);
-    node_->DefaultEventHandler(event_.Get());
+    node_->DefaultEventHandler(*event_);
     DCHECK(!event_->defaultPrevented());
     // For bubbling events, call default event handlers on the same targets in
     // the same order as the bubbling phase.
     if (!event_->DefaultHandled() && event_->bubbles()) {
-      size_t size = event_->GetEventPath().size();
-      for (size_t i = 1; i < size; ++i) {
+      wtf_size_t size = event_->GetEventPath().size();
+      for (wtf_size_t i = 1; i < size; ++i) {
         event_->GetEventPath()[i].GetNode()->WillCallDefaultEventHandler(
             *event_);
-        event_->GetEventPath()[i].GetNode()->DefaultEventHandler(event_.Get());
+        event_->GetEventPath()[i].GetNode()->DefaultEventHandler(*event_);
         DCHECK(!event_->defaultPrevented());
         if (event_->DefaultHandled())
           break;

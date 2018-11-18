@@ -6,43 +6,32 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LOADER_MODULESCRIPT_MODULE_TREE_LINKER_REGISTRY_H_
 
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
+#include "third_party/blink/renderer/platform/bindings/name_client.h"
 #include "third_party/blink/renderer/platform/bindings/trace_wrapper_member.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 
 namespace blink {
 
-class Modulator;
-class ModuleScriptFetchRequest;
-class ModuleTreeClient;
 class ModuleTreeLinker;
-class ModuleScript;
 
 // ModuleTreeLinkerRegistry keeps active ModuleTreeLinkers alive.
 class CORE_EXPORT ModuleTreeLinkerRegistry
     : public GarbageCollected<ModuleTreeLinkerRegistry>,
-      public TraceWrapperBase {
+      public NameClient {
  public:
   static ModuleTreeLinkerRegistry* Create() {
     return new ModuleTreeLinkerRegistry;
   }
   void Trace(blink::Visitor*);
-  void TraceWrappers(const ScriptWrappableVisitor*) const override;
   const char* NameInHeapSnapshot() const override {
     return "ModuleTreeLinkerRegistry";
   }
-
-  ModuleTreeLinker* Fetch(const ModuleScriptFetchRequest&,
-                          Modulator*,
-                          ModuleTreeClient*);
-  ModuleTreeLinker* FetchDescendantsForInlineScript(ModuleScript*,
-                                                    Modulator*,
-                                                    ModuleTreeClient*);
 
  private:
   ModuleTreeLinkerRegistry() = default;
 
   friend class ModuleTreeLinker;
+  void AddFetcher(ModuleTreeLinker*);
   void ReleaseFinishedFetcher(ModuleTreeLinker*);
 
   HeapHashSet<TraceWrapperMember<ModuleTreeLinker>> active_tree_linkers_;

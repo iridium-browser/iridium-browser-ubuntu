@@ -5,15 +5,16 @@
 #ifndef CHROME_BROWSER_VR_TESTAPP_VR_TEST_CONTEXT_H_
 #define CHROME_BROWSER_VR_TESTAPP_VR_TEST_CONTEXT_H_
 
+#include <memory>
+#include <queue>
+
 #include "base/macros.h"
-
-#include <cstdint>
-
 #include "base/time/time.h"
 #include "chrome/browser/vr/content_input_delegate.h"
 #include "chrome/browser/vr/model/controller_model.h"
 #include "chrome/browser/vr/ui_browser_interface.h"
-#include "chrome/browser/vr/ui_renderer.h"
+#include "chrome/browser/vr/ui_interface.h"
+#include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/transform.h"
 
 namespace ui {
@@ -22,7 +23,7 @@ class Event;
 
 namespace vr {
 
-class TextInputDelegate;
+class GraphicsDelegate;
 class TestKeyboardDelegate;
 class Ui;
 struct Model;
@@ -31,12 +32,10 @@ struct Model;
 // manipulates the UI according to user input.
 class VrTestContext : public vr::UiBrowserInterface {
  public:
-  VrTestContext();
+  explicit VrTestContext(GraphicsDelegate* compositor_delgate);
   ~VrTestContext() override;
 
-  void OnGlInitialized();
-  // TODO(vollick): we should refactor VrShellGl's rendering logic and use it
-  // directly. crbug.com/767282
+  // TODO(acondor): Make use of BrowserRenderer (http://crbug.com/767282).
   void DrawFrame();
   void HandleInput(ui::Event* event);
 
@@ -47,8 +46,17 @@ class VrTestContext : public vr::UiBrowserInterface {
   void NavigateForward() override;
   void ReloadTab() override;
   void OpenNewTab(bool incognito) override;
+  void SelectTab(int id, bool incognito) override;
+  void OpenBookmarks() override;
+  void OpenRecentTabs() override;
+  void OpenHistory() override;
+  void OpenDownloads() override;
+  void OpenShare() override;
+  void OpenSettings() override;
+  void CloseTab(int id, bool incognito) override;
+  void CloseAllTabs() override;
   void CloseAllIncognitoTabs() override;
-  void ExitCct() override;
+  void OpenFeedback() override;
   void CloseHostedDialog() override;
   void OnUnsupportedMode(vr::UiUnsupportedMode mode) override;
   void OnExitVrPromptResult(vr::ExitVrPromptChoice choice,
@@ -63,7 +71,8 @@ class VrTestContext : public vr::UiBrowserInterface {
   void set_window_size(const gfx::Size& size) { window_size_ = size; }
 
  private:
-  unsigned int CreateFakeContentTexture();
+  void InitializeGl();
+  unsigned int CreateTexture(SkColor color);
   void CreateFakeVoiceSearchResult();
   void CycleWebVrModes();
   void ToggleSplashScreen();
@@ -77,7 +86,8 @@ class VrTestContext : public vr::UiBrowserInterface {
   gfx::Point3F LaserOrigin() const;
   void LoadAssets();
 
-  std::unique_ptr<Ui> ui_;
+  std::unique_ptr<Ui> ui_instance_;
+  UiInterface* ui_;
   gfx::Size window_size_;
 
   gfx::Transform head_pose_;
@@ -101,12 +111,17 @@ class VrTestContext : public vr::UiBrowserInterface {
   bool show_web_vr_splash_screen_ = false;
   bool voice_search_enabled_ = false;
   bool touching_touchpad_ = false;
+  bool recentered_ = false;
   base::TimeTicks page_load_start_;
+  int tab_id_ = 0;
+  bool hosted_ui_enabled_ = false;
 
-  std::unique_ptr<TextInputDelegate> text_input_delegate_;
-  std::unique_ptr<TestKeyboardDelegate> keyboard_delegate_;
+  GraphicsDelegate* graphics_delegate_;
+  TestKeyboardDelegate* keyboard_delegate_;
 
-  PlatformController::Handedness handedness_ = PlatformController::kRightHanded;
+  ControllerModel::Handedness handedness_ = ControllerModel::kRightHanded;
+
+  std::queue<InputEventList> input_event_lists_;
 
   DISALLOW_COPY_AND_ASSIGN(VrTestContext);
 };

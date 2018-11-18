@@ -152,15 +152,15 @@ void LocalToRemoteSyncer::RunPreflight(std::unique_ptr<SyncTaskToken> token) {
     if (!active_ancestor_path.AppendRelativePath(path, &missing_entries)) {
       NOTREACHED();
       token->RecordLog(
-          base::StringPrintf("Detected invalid ancestor: %" PRIsFP,
+          base::StringPrintf("Detected invalid ancestor: %" PRFilePath,
                              active_ancestor_path.value().c_str()));
       SyncTaskManager::NotifyTaskDone(std::move(token), SYNC_STATUS_FAILED);
       return;
     }
   }
 
-  std::vector<base::FilePath::StringType> missing_components;
-  storage::VirtualPath::GetComponents(missing_entries, &missing_components);
+  std::vector<base::FilePath::StringType> missing_components =
+      storage::VirtualPath::GetComponents(missing_entries);
 
   if (!missing_components.empty()) {
     if (local_is_missing_) {

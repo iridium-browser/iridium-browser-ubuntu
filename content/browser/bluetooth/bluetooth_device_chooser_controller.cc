@@ -281,8 +281,7 @@ BluetoothDeviceChooserController::BluetoothDeviceChooserController(
           base::Bind(&BluetoothDeviceChooserController::StopDeviceDiscovery,
                      // base::Timer guarantees it won't call back after its
                      // destructor starts.
-                     base::Unretained(this)),
-          /*is_repeating=*/false),
+                     base::Unretained(this))),
       weak_ptr_factory_(this) {
   CHECK(adapter_);
 }
@@ -345,9 +344,9 @@ void BluetoothDeviceChooserController::GetDevice(
                           REQUEST_DEVICE_FROM_CROSS_ORIGIN_IFRAME);
     return;
   }
-  // The above also excludes unique origins, which are not even same-origin with
+  // The above also excludes opaque origins, which are not even same-origin with
   // themselves.
-  DCHECK(!requesting_origin.unique());
+  DCHECK(!requesting_origin.opaque());
 
   if (!adapter_->IsPresent()) {
     DVLOG(1) << "Bluetooth Adapter not present. Can't serve requestDevice.";

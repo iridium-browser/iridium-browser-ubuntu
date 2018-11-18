@@ -28,7 +28,7 @@
 
 #include <memory>
 
-#include "third_party/blink/public/platform/modules/indexeddb/web_idb_types.h"
+#include "third_party/blink/public/common/indexeddb/web_idb_types.h"
 #include "third_party/blink/public/platform/web_common.h"
 #include "third_party/blink/public/platform/web_data.h"
 #include "third_party/blink/public/platform/web_private_ptr.h"
@@ -155,6 +155,8 @@ class WebIDBKey {
 
   std::unique_ptr<IDBKey> private_;
 };
+
+using WebIDBIndexKeys = std::pair<int64_t, WebVector<WebIDBKey>>;
 
 }  // namespace blink
 

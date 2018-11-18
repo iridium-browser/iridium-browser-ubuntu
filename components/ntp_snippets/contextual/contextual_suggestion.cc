@@ -2,9 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <string>
+#include <utility>
+
 #include "components/ntp_snippets/contextual/contextual_suggestion.h"
 
-namespace ntp_snippets {
+namespace contextual_suggestions {
 
 ContextualSuggestion::ContextualSuggestion() = default;
 
@@ -21,9 +24,13 @@ ContextualSuggestion::ContextualSuggestion(
       publisher_name(std::move(other.publisher_name)),
       snippet(std::move(other.snippet)),
       image_id(std::move(other.image_id)),
-      favicon_image_id(std::move(other.favicon_image_id)) {}
+      favicon_image_id(std::move(other.favicon_image_id)),
+      favicon_image_url(std::move(other.favicon_image_url)) {}
 
 ContextualSuggestion::~ContextualSuggestion() = default;
+
+ContextualSuggestion& ContextualSuggestion::operator=(
+    const ContextualSuggestion&) = default;
 
 SuggestionBuilder::SuggestionBuilder(const GURL& url) {
   suggestion_.url = url;
@@ -57,8 +64,14 @@ SuggestionBuilder& SuggestionBuilder::FaviconImageId(
   return *this;
 }
 
+SuggestionBuilder& SuggestionBuilder::FaviconImageUrl(
+    const std::string& favicon_image_url) {
+  suggestion_.favicon_image_url = favicon_image_url;
+  return *this;
+}
+
 ContextualSuggestion SuggestionBuilder::Build() {
   return std::move(suggestion_);
 }
 
-}  // namespace ntp_snippets
+}  // namespace contextual_suggestions

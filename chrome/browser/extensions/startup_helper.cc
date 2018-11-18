@@ -8,14 +8,14 @@
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/extensions/chrome_extensions_client.h"
+#include "chrome/common/initialize_extensions_client.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/service_manager_connection.h"
 #include "extensions/browser/extension_file_task_runner.h"
@@ -36,7 +36,7 @@ void PrintPackExtensionMessage(const std::string& message) {
 }  // namespace
 
 StartupHelper::StartupHelper() : pack_job_succeeded_(false) {
-  ExtensionsClient::Set(ChromeExtensionsClient::GetInstance());
+  EnsureExtensionsClientInitialized();
 }
 
 void StartupHelper::OnPackSuccess(
@@ -55,15 +55,16 @@ void StartupHelper::OnPackFailure(const std::string& error_message,
 }
 
 bool StartupHelper::PackExtension(const base::CommandLine& cmd_line) {
-  if (!cmd_line.HasSwitch(switches::kPackExtension))
+  if (!cmd_line.HasSwitch(::switches::kPackExtension))
     return false;
 
   // Input Paths.
   base::FilePath src_dir =
-      cmd_line.GetSwitchValuePath(switches::kPackExtension);
+      cmd_line.GetSwitchValuePath(::switches::kPackExtension);
   base::FilePath private_key_path;
-  if (cmd_line.HasSwitch(switches::kPackExtensionKey)) {
-    private_key_path = cmd_line.GetSwitchValuePath(switches::kPackExtensionKey);
+  if (cmd_line.HasSwitch(::switches::kPackExtensionKey)) {
+    private_key_path =
+        cmd_line.GetSwitchValuePath(::switches::kPackExtensionKey);
   }
 
   // Launch a job to perform the packing on the blocking thread.  Ignore
@@ -113,8 +114,8 @@ class ValidateCrxHelper : public SandboxedUnpackerClient {
       const base::Optional<int>& dnr_ruleset_checksum) override {
     DCHECK(GetExtensionFileTaskRunner()->RunsTasksInCurrentSequence());
     success_ = true;
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, {BrowserThread::UI},
         base::BindOnce(&ValidateCrxHelper::FinishOnUIThread, this));
   }
 
@@ -122,8 +123,8 @@ class ValidateCrxHelper : public SandboxedUnpackerClient {
     DCHECK(GetExtensionFileTaskRunner()->RunsTasksInCurrentSequence());
     success_ = false;
     error_ = error.message();
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, {BrowserThread::UI},
         base::BindOnce(&ValidateCrxHelper::FinishOnUIThread, this));
   }
 
@@ -166,10 +167,10 @@ class ValidateCrxHelper : public SandboxedUnpackerClient {
 bool StartupHelper::ValidateCrx(const base::CommandLine& cmd_line,
                                 std::string* error) {
   CHECK(error);
-  base::FilePath path = cmd_line.GetSwitchValuePath(switches::kValidateCrx);
+  base::FilePath path = cmd_line.GetSwitchValuePath(::switches::kValidateCrx);
   if (path.empty()) {
     *error = base::StringPrintf("Empty path passed for %s",
-                                switches::kValidateCrx);
+                                ::switches::kValidateCrx);
     return false;
   }
   base::ScopedTempDir temp_dir;

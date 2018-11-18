@@ -15,8 +15,9 @@
 #include "chrome/browser/extensions/extension_management_test_util.h"
 #include "chrome/browser/extensions/external_policy_loader.h"
 #include "chrome/browser/extensions/standard_management_policy_provider.h"
-#include "components/prefs/pref_registry_simple.h"
-#include "components/prefs/testing_pref_service.h"
+#include "chrome/test/base/testing_profile.h"
+#include "components/sync_preferences/testing_pref_service_syncable.h"
+#include "content/public/test/test_browser_thread_bundle.h"
 #include "extensions/browser/pref_names.h"
 #include "extensions/common/manifest.h"
 #include "extensions/common/manifest_constants.h"
@@ -92,7 +93,9 @@ const char kExampleDictNoCustomError[] =
 
 class ExtensionManagementServiceTest : public testing::Test {
  public:
-  typedef ExtensionManagementPrefUpdater<TestingPrefServiceSimple> PrefUpdater;
+  typedef ExtensionManagementPrefUpdater<
+      sync_preferences::TestingPrefServiceSyncable>
+      PrefUpdater;
 
   ExtensionManagementServiceTest() {}
   ~ExtensionManagementServiceTest() override {}
@@ -102,18 +105,10 @@ class ExtensionManagementServiceTest : public testing::Test {
 
   void InitPrefService() {
     extension_management_.reset();
-    pref_service_.reset(new TestingPrefServiceSimple());
-    pref_service_->registry()->RegisterListPref(
-        pref_names::kAllowedInstallSites);
-    pref_service_->registry()->RegisterListPref(pref_names::kAllowedTypes);
-    pref_service_->registry()->RegisterListPref(pref_names::kInstallDenyList);
-    pref_service_->registry()->RegisterListPref(pref_names::kInstallAllowList);
-    pref_service_->registry()->RegisterDictionaryPref(
-        pref_names::kInstallForceList);
-    pref_service_->registry()->RegisterDictionaryPref(
-        pref_names::kExtensionManagement);
-    extension_management_.reset(
-        new ExtensionManagement(pref_service_.get(), false));
+    profile_ = std::make_unique<TestingProfile>();
+    pref_service_ = profile_->GetTestingPrefService();
+    extension_management_ =
+        std::make_unique<ExtensionManagement>(profile_.get());
   }
 
   void SetPref(bool managed,
@@ -185,12 +180,12 @@ class ExtensionManagementServiceTest : public testing::Test {
     return extension_management_->GetInstallationMode(extension.get());
   }
 
-  // Wrapper of ExtensionManagement::GetRuntimeBlockedHosts, |id| is used
+  // Wrapper of ExtensionManagement::GetPolicyBlockedHosts, |id| is used
   // to construct an Extension for testing.
-  URLPatternSet GetRuntimeBlockedHosts(const std::string& id) {
+  URLPatternSet GetPolicyBlockedHosts(const std::string& id) {
     scoped_refptr<const Extension> extension =
         CreateExtension(Manifest::UNPACKED, "0.1", id, kNonExistingUpdateUrl);
-    return extension_management_->GetRuntimeBlockedHosts(extension.get());
+    return extension_management_->GetPolicyBlockedHosts(extension.get());
   }
 
   // Wrapper of ExtensionManagement::BlockedInstallMessage, |id| is used
@@ -223,7 +218,10 @@ class ExtensionManagementServiceTest : public testing::Test {
   }
 
  protected:
-  std::unique_ptr<TestingPrefServiceSimple> pref_service_;
+  content::TestBrowserThreadBundle test_browser_thread_bundle_;
+
+  std::unique_ptr<TestingProfile> profile_;
+  sync_preferences::TestingPrefServiceSyncable* pref_service_;
   std::unique_ptr<ExtensionManagement> extension_management_;
 
  private:
@@ -292,6 +290,9 @@ class ExtensionAdminPolicyTest : public ExtensionManagementServiceTest {
                    const Extension* extension,
                    base::string16* error);
   bool UserMayModifySettings(const Extension* extension, base::string16* error);
+  bool ExtensionMayModifySettings(const Extension* source_extension,
+                                  const Extension* extension,
+                                  base::string16* error);
   bool MustRemainEnabled(const Extension* extension, base::string16* error);
 
  protected:
@@ -330,6 +331,15 @@ bool ExtensionAdminPolicyTest::UserMayModifySettings(const Extension* extension,
                                                      base::string16* error) {
   SetUpPolicyProvider();
   return provider_->UserMayModifySettings(extension, error);
+}
+
+bool ExtensionAdminPolicyTest::ExtensionMayModifySettings(
+    const Extension* source_extension,
+    const Extension* extension,
+    base::string16* error) {
+  SetUpPolicyProvider();
+  return provider_->ExtensionMayModifySettings(source_extension, extension,
+                                               error);
 }
 
 bool ExtensionAdminPolicyTest::MustRemainEnabled(const Extension* extension,
@@ -454,10 +464,10 @@ TEST_F(ExtensionManagementServiceTest, PreferenceParsing) {
             ExtensionManagement::INSTALLATION_BLOCKED);
   EXPECT_EQ(GetInstallationModeByUpdateUrl(kExampleUpdateUrl),
             ExtensionManagement::INSTALLATION_ALLOWED);
-  EXPECT_TRUE(GetRuntimeBlockedHosts(kTargetExtension).is_empty());
-  EXPECT_TRUE(GetRuntimeBlockedHosts(kTargetExtension4)
+  EXPECT_TRUE(GetPolicyBlockedHosts(kTargetExtension).is_empty());
+  EXPECT_TRUE(GetPolicyBlockedHosts(kTargetExtension4)
                   .MatchesURL(GURL("http://test.foo.com/test")));
-  EXPECT_TRUE(GetRuntimeBlockedHosts(kTargetExtension4)
+  EXPECT_TRUE(GetPolicyBlockedHosts(kTargetExtension4)
                   .MatchesURL(GURL("https://bar.org/test")));
   EXPECT_TRUE(GetBlockedInstallMessage(kTargetExtension).empty());
   EXPECT_EQ("Custom Error Extension4",
@@ -471,7 +481,7 @@ TEST_F(ExtensionManagementServiceTest, PreferenceParsing) {
   EXPECT_EQ(allowed_sites.size(), 1u);
   EXPECT_TRUE(allowed_sites.MatchesURL(GURL("http://foo.com/entry")));
   EXPECT_FALSE(allowed_sites.MatchesURL(GURL("http://bar.com/entry")));
-  EXPECT_TRUE(GetRuntimeBlockedHosts(kNonExistingExtension)
+  EXPECT_TRUE(GetPolicyBlockedHosts(kNonExistingExtension)
                   .MatchesURL(GURL("http://example.com/default")));
 
   EXPECT_TRUE(ReadGlobalSettings()->has_restricted_allowed_types);
@@ -576,7 +586,7 @@ TEST_F(ExtensionManagementServiceTest, kMinimumVersionRequired) {
   EXPECT_TRUE(CheckMinimumVersion(kTargetExtension, "9999.0"));
 
   {
-    PrefUpdater pref(pref_service_.get());
+    PrefUpdater pref(pref_service_);
     pref.SetMinimumVersionRequired(kTargetExtension, "3.0");
   }
 
@@ -601,7 +611,7 @@ TEST_F(ExtensionManagementServiceTest, NewInstallSources) {
 
   // Set the new dictionary preference.
   {
-    PrefUpdater updater(pref_service_.get());
+    PrefUpdater updater(pref_service_);
     updater.ClearInstallSources();
   }
   // Verifies that the new one overrides the legacy ones.
@@ -611,7 +621,7 @@ TEST_F(ExtensionManagementServiceTest, NewInstallSources) {
 
   // Updates the new dictionary preference.
   {
-    PrefUpdater updater(pref_service_.get());
+    PrefUpdater updater(pref_service_);
     updater.AddInstallSource("https://corp.mycompany.com/*");
   }
   EXPECT_TRUE(ReadGlobalSettings()->has_restricted_install_sources);
@@ -632,7 +642,7 @@ TEST_F(ExtensionManagementServiceTest, NewAllowedTypes) {
 
   // Set the new dictionary preference.
   {
-    PrefUpdater updater(pref_service_.get());
+    PrefUpdater updater(pref_service_);
     updater.ClearAllowedTypes();
   }
   // Verifies that the new one overrides the legacy ones.
@@ -641,7 +651,7 @@ TEST_F(ExtensionManagementServiceTest, NewAllowedTypes) {
 
   // Updates the new dictionary preference.
   {
-    PrefUpdater updater(pref_service_.get());
+    PrefUpdater updater(pref_service_);
     updater.AddAllowedType("theme");
   }
   EXPECT_TRUE(ReadGlobalSettings()->has_restricted_allowed_types);
@@ -654,7 +664,7 @@ TEST_F(ExtensionManagementServiceTest, NewAllowedTypes) {
 TEST_F(ExtensionManagementServiceTest, NewInstallBlacklist) {
   // Set the new dictionary preference.
   {
-    PrefUpdater updater(pref_service_.get());
+    PrefUpdater updater(pref_service_);
     updater.SetBlacklistedByDefault(false);  // Allowed by default.
     updater.SetIndividualExtensionInstallationAllowed(kTargetExtension, false);
     updater.ClearPerExtensionSettings(kTargetExtension2);
@@ -692,7 +702,7 @@ TEST_F(ExtensionManagementServiceTest, NewInstallBlacklist) {
 TEST_F(ExtensionManagementServiceTest, NewInstallWhitelist) {
   // Set the new dictionary preference.
   {
-    PrefUpdater updater(pref_service_.get());
+    PrefUpdater updater(pref_service_);
     updater.SetBlacklistedByDefault(true);  // Disallowed by default.
     updater.SetIndividualExtensionInstallationAllowed(kTargetExtension, true);
     updater.ClearPerExtensionSettings(kTargetExtension2);
@@ -736,7 +746,7 @@ TEST_F(ExtensionManagementServiceTest, NewInstallForcelist) {
 
   // Set the new dictionary preference.
   {
-    PrefUpdater updater(pref_service_.get());
+    PrefUpdater updater(pref_service_);
     updater.SetIndividualExtensionAutoInstalled(
         kTargetExtension, kExampleUpdateUrl, true);
   }
@@ -770,7 +780,7 @@ TEST_F(ExtensionManagementServiceTest, IsInstallationExplicitlyAllowed) {
 
   {
     // Set BlacklistedByDefault() to false.
-    PrefUpdater pref(pref_service_.get());
+    PrefUpdater pref(pref_service_);
     pref.SetBlacklistedByDefault(false);
   }
 
@@ -916,6 +926,36 @@ TEST_F(ExtensionAdminPolicyTest, UserMayModifySettings) {
   EXPECT_FALSE(UserMayModifySettings(extension_.get(), NULL));
   EXPECT_FALSE(UserMayModifySettings(extension_.get(), &error));
   EXPECT_FALSE(error.empty());
+}
+
+TEST_F(ExtensionAdminPolicyTest, ExtensionMayModifySettings) {
+  CreateExtension(Manifest::EXTERNAL_POLICY_DOWNLOAD);
+  auto external_policy_download = extension_;
+  CreateExtension(Manifest::EXTERNAL_POLICY);
+  auto external_policy = extension_;
+  CreateExtension(Manifest::EXTERNAL_PREF);
+  auto external_pref = extension_;
+  CreateExtension(Manifest::COMPONENT);
+  auto component = extension_;
+  CreateExtension(Manifest::COMPONENT);
+  auto component2 = extension_;
+  // Make sure that component/policy/external extensions cannot modify component
+  // extensions (no extension may modify a component extension).
+  EXPECT_FALSE(ExtensionMayModifySettings(external_policy_download.get(),
+                                          component.get(), nullptr));
+  EXPECT_FALSE(
+      ExtensionMayModifySettings(component2.get(), component.get(), nullptr));
+  EXPECT_FALSE(ExtensionMayModifySettings(external_pref.get(), component.get(),
+                                          nullptr));
+
+  // Only component/policy extensions *can* modify policy extensions, and eg.
+  // external cannot.
+  EXPECT_TRUE(ExtensionMayModifySettings(
+      external_policy.get(), external_policy_download.get(), nullptr));
+  EXPECT_TRUE(ExtensionMayModifySettings(
+      component.get(), external_policy_download.get(), nullptr));
+  EXPECT_FALSE(ExtensionMayModifySettings(
+      external_pref.get(), external_policy_download.get(), nullptr));
 }
 
 TEST_F(ExtensionAdminPolicyTest, MustRemainEnabled) {

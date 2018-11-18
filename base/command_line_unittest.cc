@@ -84,7 +84,7 @@ TEST(CommandLineTest, CommandLineConstructor) {
   const CommandLine::StringVector& args = cl.GetArgs();
   ASSERT_EQ(8U, args.size());
 
-  std::vector<CommandLine::StringType>::const_iterator iter = args.begin();
+  auto iter = args.begin();
   EXPECT_EQ(FILE_PATH_LITERAL("flim"), *iter);
   ++iter;
   EXPECT_EQ(FILE_PATH_LITERAL("-"), *iter);
@@ -208,7 +208,7 @@ TEST(CommandLineTest, GetArgumentsString) {
   CommandLine::StringType expected_third_arg(UTF8ToUTF16(kThirdArgName));
   CommandLine::StringType expected_fourth_arg(UTF8ToUTF16(kFourthArgName));
   CommandLine::StringType expected_fifth_arg(UTF8ToUTF16(kFifthArgName));
-#elif defined(OS_POSIX)
+#elif defined(OS_POSIX) || defined(OS_FUCHSIA)
   CommandLine::StringType expected_first_arg(kFirstArgName);
   CommandLine::StringType expected_second_arg(kSecondArgName);
   CommandLine::StringType expected_third_arg(kThirdArgName);

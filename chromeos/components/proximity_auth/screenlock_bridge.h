@@ -14,7 +14,7 @@
 #include "base/strings/string16.h"
 #include "base/values.h"
 #include "chromeos/components/proximity_auth/public/interfaces/auth_type.mojom.h"
-#include "components/signin/core/account_id/account_id.h"
+#include "components/account_id/account_id.h"
 
 namespace proximity_auth {
 
@@ -188,7 +188,7 @@ class ScreenlockBridge {
 
   // The last focused user's id.
   AccountId focused_account_id_;
-  base::ObserverList<Observer, true> observers_;
+  base::ObserverList<Observer, true>::Unchecked observers_;
 
   DISALLOW_COPY_AND_ASSIGN(ScreenlockBridge);
 };

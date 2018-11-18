@@ -18,6 +18,7 @@
 #include "content/public/browser/background_tracing_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/base/network_change_notifier.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "url/gurl.h"
 
 namespace tracing {
@@ -30,21 +31,22 @@ const char kBackgroundTracingUploadUrl[] = "upload_url";
 
 ConfigTextFilterForTesting g_config_text_filter_for_testing = nullptr;
 
-void OnBackgroundTracingUploadComplete(TraceCrashServiceUploader* uploader,
-                                       const base::Closure& done_callback,
-                                       bool success,
-                                       const std::string& feedback) {
+void OnBackgroundTracingUploadComplete(
+    TraceCrashServiceUploader* uploader,
+    content::BackgroundTracingManager::FinishedProcessingCallback done_callback,
+    bool success,
+    const std::string& feedback) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-  done_callback.Run();
+  std::move(done_callback).Run(success);
 }
 
 void BackgroundTracingUploadCallback(
     const std::string& upload_url,
     const scoped_refptr<base::RefCountedString>& file_contents,
     std::unique_ptr<const base::DictionaryValue> metadata,
-    base::Closure callback) {
+    content::BackgroundTracingManager::FinishedProcessingCallback callback) {
   TraceCrashServiceUploader* uploader = new TraceCrashServiceUploader(
-      g_browser_process->system_request_context());
+      g_browser_process->shared_url_loader_factory());
 
   if (GURL(upload_url).is_valid())
     uploader->SetUploadURL(upload_url);
@@ -62,8 +64,29 @@ void BackgroundTracingUploadCallback(
   uploader->DoUpload(
       file_contents->data(), content::TraceUploader::UNCOMPRESSED_UPLOAD,
       std::move(metadata), content::TraceUploader::UploadProgressCallback(),
-      base::Bind(&OnBackgroundTracingUploadComplete, base::Owned(uploader),
-                 callback));
+      base::BindOnce(&OnBackgroundTracingUploadComplete, base::Owned(uploader),
+                     std::move(callback)));
+}
+
+std::unique_ptr<content::BackgroundTracingConfig> GetBackgroundTracingConfig() {
+  std::string config_text = variations::GetVariationParamValue(
+      kBackgroundTracingFieldTrial, kBackgroundTracingConfig);
+
+  if (config_text.empty())
+    return nullptr;
+
+  if (g_config_text_filter_for_testing)
+    (*g_config_text_filter_for_testing)(&config_text);
+
+  std::unique_ptr<base::Value> value = base::JSONReader::Read(config_text);
+  if (!value)
+    return nullptr;
+
+  const base::DictionaryValue* dict = nullptr;
+  if (!value->GetAsDictionary(&dict))
+    return nullptr;
+
+  return content::BackgroundTracingConfig::FromDict(dict);
 }
 
 }  // namespace
@@ -73,36 +96,14 @@ void SetConfigTextFilterForTesting(ConfigTextFilterForTesting predicate) {
 }
 
 void SetupBackgroundTracingFieldTrial() {
-  if (base::trace_event::TraceLog::GetInstance()->IsEnabled())
-    return;
+  std::unique_ptr<content::BackgroundTracingConfig> config =
+      GetBackgroundTracingConfig();
 
-  std::string config_text = variations::GetVariationParamValue(
-      kBackgroundTracingFieldTrial, kBackgroundTracingConfig);
   std::string upload_url = variations::GetVariationParamValue(
       kBackgroundTracingFieldTrial, kBackgroundTracingUploadUrl);
-
-  if (config_text.empty())
-    return;
-
-  if (g_config_text_filter_for_testing)
-    (*g_config_text_filter_for_testing)(&config_text);
-
-  std::unique_ptr<base::Value> value = base::JSONReader::Read(config_text);
-  if (!value)
-    return;
-
-  const base::DictionaryValue* dict = nullptr;
-  if (!value->GetAsDictionary(&dict))
-    return;
-
-  std::unique_ptr<content::BackgroundTracingConfig> config =
-      content::BackgroundTracingConfig::FromDict(dict);
-  if (!config)
-    return;
-
   content::BackgroundTracingManager::GetInstance()->SetActiveScenario(
       std::move(config),
-      base::Bind(&BackgroundTracingUploadCallback, upload_url),
+      base::BindRepeating(&BackgroundTracingUploadCallback, upload_url),
       content::BackgroundTracingManager::ANONYMIZE_DATA);
 }
 

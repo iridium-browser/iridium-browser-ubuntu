@@ -23,6 +23,7 @@
 #include "GrTextureProxy.h"
 #include "GrFragmentProcessor.h"
 #include "effects/GrXfermodeFragmentProcessor.h"
+#include "text/GrSDFMaskFilter.h"
 #endif
 
 SkMaskFilterBase::NinePatch::~NinePatch() {
@@ -32,11 +33,6 @@ SkMaskFilterBase::NinePatch::~NinePatch() {
     } else {
         SkMask::FreeImage(fMask.fImage);
     }
-}
-
-bool SkMaskFilterBase::filterMask(SkMask*, const SkMask&, const SkMatrix&,
-                              SkIPoint*) const {
-    return false;
 }
 
 bool SkMaskFilterBase::asABlur(BlurRec*) const {
@@ -327,31 +323,20 @@ SkMaskFilterBase::onAsFragmentProcessor(const GrFPArgs&) const {
 }
 bool SkMaskFilterBase::onHasFragmentProcessor() const { return false; }
 
-bool SkMaskFilterBase::canFilterMaskGPU(const SkRRect& devRRect,
+bool SkMaskFilterBase::canFilterMaskGPU(const GrShape& shape,
+                                        const SkIRect& devSpaceShapeBounds,
                                         const SkIRect& clipBounds,
                                         const SkMatrix& ctm,
-                                        SkRect* maskRect) const {
+                                        SkIRect* maskRect) const {
     return false;
 }
 
 bool SkMaskFilterBase::directFilterMaskGPU(GrContext*,
-                                           GrRenderTargetContext* renderTargetContext,
+                                           GrRenderTargetContext*,
                                            GrPaint&&,
                                            const GrClip&,
                                            const SkMatrix& viewMatrix,
-                                           const SkStrokeRec& strokeRec,
-                                           const SkPath& path) const {
-    return false;
-}
-
-bool SkMaskFilterBase::directFilterRRectMaskGPU(GrContext*,
-                                                GrRenderTargetContext* renderTargetContext,
-                                                GrPaint&&,
-                                                const GrClip&,
-                                                const SkMatrix& viewMatrix,
-                                                const SkStrokeRec& strokeRec,
-                                                const SkRRect& rrect,
-                                                const SkRRect& devRRect) const {
+                                           const GrShape&) const {
     return false;
 }
 
@@ -409,7 +394,6 @@ public:
     }
 
     SkMask::Format getFormat() const override { return SkMask::kA8_Format; }
-    void toString(SkString* str) const override;
     SK_DECLARE_PUBLIC_FLATTENABLE_DESERIALIZATION_PROCS(SkComposeMF)
 
 protected:
@@ -474,10 +458,6 @@ sk_sp<SkFlattenable> SkComposeMF::CreateProc(SkReadBuffer& buffer) {
     return SkMaskFilter::MakeCompose(std::move(outer), std::move(inner));
 }
 
-void SkComposeMF::toString(SkString* str) const {
-    str->set("SkComposeMF:");
-}
-
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 class SkCombineMF : public SkMaskFilterBase {
@@ -502,7 +482,6 @@ public:
 
     SkMask::Format getFormat() const override { return SkMask::kA8_Format; }
 
-    void toString(SkString* str) const override;
     SK_DECLARE_PUBLIC_FLATTENABLE_DESERIALIZATION_PROCS(SkCombineMF)
 
 protected:
@@ -629,10 +608,6 @@ sk_sp<SkFlattenable> SkCombineMF::CreateProc(SkReadBuffer& buffer) {
     return SkMaskFilter::MakeCombine(std::move(dst), std::move(src), mode);
 }
 
-void SkCombineMF::toString(SkString* str) const {
-    str->set("SkCombineMF:");
-}
-
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
 class SkMatrixMF : public SkMaskFilterBase {
@@ -655,10 +630,6 @@ public:
     }
 
     SkMask::Format getFormat() const override { return as_MFB(fFilter)->getFormat(); }
-
-    void toString(SkString* str) const override {
-        str->set("SkMatrixMF:");
-    }
 
     SK_DECLARE_PUBLIC_FLATTENABLE_DESERIALIZATION_PROCS(SkLocalMatrixMF)
 
@@ -739,5 +710,7 @@ void SkMaskFilter::InitializeFlattenables() {
     SK_DEFINE_FLATTENABLE_REGISTRAR_ENTRY(SkComposeMF)
     SK_DEFINE_FLATTENABLE_REGISTRAR_ENTRY(SkCombineMF)
     sk_register_blur_maskfilter_createproc();
+#if SK_SUPPORT_GPU
+    gr_register_sdf_maskfilter_createproc();
+#endif
 }
-

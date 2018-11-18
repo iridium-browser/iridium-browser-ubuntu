@@ -59,18 +59,31 @@ TranslateScript::TranslateScript()
 TranslateScript::~TranslateScript() {
 }
 
-void TranslateScript::Request(const RequestCallback& callback) {
+void TranslateScript::Request(const RequestCallback& callback,
+                              bool is_incognito) {
   script_fetch_start_time_ = base::Time::Now().ToJsTime();
 
   DCHECK(data_.empty()) << "Do not fetch the script if it is already fetched";
   callback_list_.push_back(callback);
 
-  if (fetcher_.get() != nullptr) {
+  if (fetcher_) {
     // If there is already a request in progress, do nothing. |callback| will be
     // run on completion.
     return;
   }
 
+  GURL translate_script_url = GetTranslateScriptURL();
+
+  fetcher_ = std::make_unique<TranslateURLFetcher>();
+  fetcher_->set_extra_request_header(kRequestHeader);
+  fetcher_->Request(translate_script_url,
+                    base::BindOnce(&TranslateScript::OnScriptFetchComplete,
+                                   base::Unretained(this)),
+                    is_incognito);
+}
+
+// static
+GURL TranslateScript::GetTranslateScriptURL() {
   GURL translate_script_url;
   // Check if command-line contains an alternative URL for translate service.
   const base::CommandLine& command_line =
@@ -100,8 +113,6 @@ void TranslateScript::Request(const RequestCallback& callback) {
       translate_script_url,
       kAlwaysUseSslQueryName,
       kAlwaysUseSslQueryValue);
-#if !defined(OS_IOS)
-  // iOS doesn't need to use specific loaders for the isolated world.
   translate_script_url = net::AppendQueryParameter(
       translate_script_url,
       kCssLoaderCallbackQueryName,
@@ -110,24 +121,15 @@ void TranslateScript::Request(const RequestCallback& callback) {
       translate_script_url,
       kJavascriptLoaderCallbackQueryName,
       kJavascriptLoaderCallbackQueryValue);
-#endif  // !defined(OS_IOS)
 
   translate_script_url = AddHostLocaleToUrl(translate_script_url);
   translate_script_url = AddApiKeyToUrl(translate_script_url);
 
-  fetcher_.reset(new TranslateURLFetcher(kFetcherId));
-  fetcher_->set_extra_request_header(kRequestHeader);
-  fetcher_->Request(
-      translate_script_url,
-      base::Bind(&TranslateScript::OnScriptFetchComplete,
-                 base::Unretained(this)));
+  return translate_script_url;
 }
 
-
-void TranslateScript::OnScriptFetchComplete(
-    int id, bool success, const std::string& data) {
-  DCHECK_EQ(kFetcherId, id);
-
+void TranslateScript::OnScriptFetchComplete(bool success,
+                                            const std::string& data) {
   std::unique_ptr<const TranslateURLFetcher> delete_ptr(fetcher_.release());
 
   if (success) {
@@ -153,25 +155,41 @@ void TranslateScript::OnScriptFetchComplete(
     base::StringAppendF(
         &data_, "var securityOrigin = '%s';", security_origin.spec().c_str());
 
-    // Append embedded translate.js and a remote element library.
+    // Load embedded translate.js.
     base::StringPiece str =
         ui::ResourceBundle::GetSharedInstance().GetRawDataResource(
             IDR_TRANSLATE_JS);
     str.AppendToString(&data_);
-    data_ += data;
+
+#if defined(OS_IOS)
+    // Append snippet to install callbacks on translate.js if available.
+    const char* install_callbacks =
+        "if (installTranslateCallbacks) {"
+        "  installTranslateCallbacks();"
+        "}";
+    base::StringPiece(install_callbacks).AppendToString(&data_);
+#endif  // defined(OS_IOS)
+
+    // Wrap |data| in try/catch block to handle unexpected script errors.
+    const char* format =
+        "try {"
+        "  %s;"
+        "} catch (error) {"
+        "  cr.googleTranslate.onTranslateElementError(error);"
+        "};";
+    base::StringAppendF(&data_, format, data.c_str());
 
     // We'll expire the cached script after some time, to make sure long
     // running browsers still get fixes that might get pushed with newer
     // scripts.
     base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE,
-        base::Bind(&TranslateScript::Clear, weak_method_factory_.GetWeakPtr()),
+        base::BindOnce(&TranslateScript::Clear,
+                       weak_method_factory_.GetWeakPtr()),
         expiration_delay_);
   }
 
-  for (RequestCallbackList::iterator it = callback_list_.begin();
-       it != callback_list_.end();
-       ++it) {
+  for (auto it = callback_list_.begin(); it != callback_list_.end(); ++it) {
     it->Run(success, data);
   }
   callback_list_.clear();

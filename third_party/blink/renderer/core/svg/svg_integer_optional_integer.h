@@ -53,6 +53,8 @@ class SVGIntegerOptionalInteger final : public SVGPropertyBase {
 
   String ValueAsString() const override;
   SVGParsingError SetValueAsString(const String&);
+  void SetInitial(unsigned);
+  static constexpr int kInitialValueBits = SVGInteger::kInitialValueBits;
 
   void Add(SVGPropertyBase*, SVGElement*) override;
   void CalculateAnimatedValue(SVGAnimationElement*,
@@ -73,7 +75,7 @@ class SVGIntegerOptionalInteger final : public SVGPropertyBase {
   SVGInteger* FirstInteger() const { return first_integer_; }
   SVGInteger* SecondInteger() const { return second_integer_; }
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  protected:
   SVGIntegerOptionalInteger(SVGInteger* first_integer,

@@ -483,7 +483,7 @@ Elements.ElementsPanel = class extends UI.Panel {
         const node = this.selectedDOMNode();
         if (!node)
           return false;
-        const preview = await BrowserComponents.ImagePreview.build(
+        const preview = await Components.ImagePreview.build(
             node.domModel().target(), link[Elements.ElementsTreeElement.HrefSymbol], true);
         if (preview)
           popover.contentElement.appendChild(preview);
@@ -612,44 +612,6 @@ Elements.ElementsPanel = class extends UI.Panel {
   _crumbNodeSelected(event) {
     const node = /** @type {!SDK.DOMNode} */ (event.data);
     this.selectDOMNode(node, true);
-  }
-
-  /**
-   * @override
-   * @param {!KeyboardEvent} event
-   */
-  handleShortcut(event) {
-    if (this._treeOutlines.find(to => to.editing()))
-      return;
-
-    const treeOutline = this._treeOutlines.find(to => !!to.selectedDOMNode());
-    if (!treeOutline)
-      return;
-
-    if (UI.KeyboardShortcut.eventHasCtrlOrMeta(event) && !event.shiftKey &&
-        (event.key === 'Z' || event.key === 'z')) {  // Z key
-      SDK.domModelUndoStack.undo();
-      event.handled = true;
-    }
-
-    const isRedoKey = Host.isMac() ?
-        event.metaKey && event.shiftKey && (event.key === 'Z' || event.key === 'z') :  // Z key
-        event.ctrlKey && (event.key === 'Y' || event.key === 'y');                     // Y key
-    if (isRedoKey) {
-      SDK.domModelUndoStack.redo();
-      event.handled = true;
-    }
-
-    if (event.handled) {
-      this._stylesWidget.forceUpdate();
-      return;
-    }
-
-    treeOutline.handleShortcut(event);
-    if (event.handled)
-      return;
-
-    super.handleShortcut(event);
   }
 
   /**
@@ -968,6 +930,18 @@ Elements.ElementsActionDelegate = class {
         return true;
       case 'elements.edit-as-html':
         treeOutline.toggleEditAsHTML(node);
+        return true;
+      case 'elements.undo':
+        if (UI.isEditing())
+          return false;
+        SDK.domModelUndoStack.undo();
+        Elements.ElementsPanel.instance()._stylesWidget.forceUpdate();
+        return true;
+      case 'elements.redo':
+        if (UI.isEditing())
+          return false;
+        SDK.domModelUndoStack.redo();
+        Elements.ElementsPanel.instance()._stylesWidget.forceUpdate();
         return true;
     }
     return false;

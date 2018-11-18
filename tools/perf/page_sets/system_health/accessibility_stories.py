@@ -2,8 +2,6 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-from page_sets.login_helpers import google_login
-
 from page_sets.system_health import platforms
 from page_sets.system_health import story_tags
 from page_sets.system_health import system_health_story
@@ -29,7 +27,7 @@ class AccessibilityScrollingCodeSearchStory(_AccessibilityStory):
   """Tests scrolling an element within a page."""
   NAME = 'browse_accessibility:tech:codesearch'
   URL = 'https://cs.chromium.org/chromium/src/ui/accessibility/platform/ax_platform_node_mac.mm'
-  TAGS = [story_tags.ACCESSIBILITY, story_tags.SCROLL]
+  TAGS = [story_tags.ACCESSIBILITY, story_tags.SCROLL, story_tags.YEAR_2016]
 
   def RunNavigateSteps(self, action_runner):
     super(AccessibilityScrollingCodeSearchStory, self).RunNavigateSteps(
@@ -38,60 +36,65 @@ class AccessibilityScrollingCodeSearchStory(_AccessibilityStory):
     action_runner.ScrollElement(selector='#file_scroller', distance=1000)
 
 
+class AccessibilityScrollingCodeSearchStory2018(_AccessibilityStory):
+  """Tests scrolling an element within a page."""
+  NAME = 'browse_accessibility:tech:codesearch:2018'
+  URL = 'https://cs.chromium.org/chromium/src/ui/accessibility/platform/ax_platform_node_mac.mm'
+  TAGS = [story_tags.ACCESSIBILITY, story_tags.SCROLL, story_tags.YEAR_2018]
+
+  def RunNavigateSteps(self, action_runner):
+    super(AccessibilityScrollingCodeSearchStory2018, self).RunNavigateSteps(
+        action_runner)
+    action_runner.WaitForElement(text='// namespace ui')
+    for _ in range(6):
+      action_runner.ScrollElement(selector='#file_scroller', distance=1000)
+
+
 class AccessibilityWikipediaStory(_AccessibilityStory):
   """Wikipedia page on Accessibility. Long, but very simple, clean layout."""
   NAME = 'load_accessibility:media:wikipedia'
   URL = 'https://en.wikipedia.org/wiki/Accessibility'
-  TAGS = [story_tags.ACCESSIBILITY]
+  TAGS = [story_tags.ACCESSIBILITY, story_tags.YEAR_2016]
 
+class AccessibilityWikipediaStory2018(_AccessibilityStory):
+  """Wikipedia page on Accessibility. Long, but very simple, clean layout."""
+  NAME = 'load_accessibility:media:wikipedia:2018'
+  URL = 'https://en.wikipedia.org/wiki/Accessibility'
+  TAGS = [story_tags.ACCESSIBILITY, story_tags.YEAR_2018]
 
 class AccessibilityAmazonStory(_AccessibilityStory):
   """Amazon results page. Good example of a site with a data table."""
   NAME = 'load_accessibility:shopping:amazon'
   URL = 'https://www.amazon.com/gp/offer-listing/B01IENFJ14'
-  TAGS = [story_tags.ACCESSIBILITY]
+  TAGS = [story_tags.ACCESSIBILITY, story_tags.YEAR_2016]
 
+class AccessibilityAmazonStory2018(_AccessibilityStory):
+  """Amazon results page. Good example of a site with a data table."""
+  NAME = 'load_accessibility:shopping:amazon:2018'
+  URL = 'https://www.amazon.com/gp/offer-listing/B01IENFJ14'
+  TAGS = [story_tags.ACCESSIBILITY, story_tags.YEAR_2018]
 
-class AccessibilityGmailComposeStory(_AccessibilityStory):
-  """Tests typing a lot of text into a Gmail compose window."""
-  NAME = 'browse_accessibility:tools:gmail_compose'
-  URL = 'https://mail.google.com/mail/#inbox?compose=new'
-  TAGS = [story_tags.ACCESSIBILITY, story_tags.KEYBOARD_INPUT]
+class AccessibilityYouTubeHomepageStory(_AccessibilityStory):
+  """Tests interacting with the YouTube home page."""
+  NAME = 'browse_accessibility:media:youtube'
+  URL = 'https://www.youtube.com/'
+  TAGS = [story_tags.ACCESSIBILITY, story_tags.KEYBOARD_INPUT,
+          story_tags.YEAR_2016]
 
   def RunNavigateSteps(self, action_runner):
-    google_login.LoginGoogleAccount(action_runner, 'googletest')
-
-    # Navigating to https://mail.google.com immediately leads to an infinite
-    # redirection loop due to a bug in WPR (see
-    # https://github.com/chromium/web-page-replay/issues/70). We therefore first
-    # navigate to a sub-URL to set up the session and hit the resulting
-    # redirection loop. Afterwards, we can safely navigate to
-    # https://mail.google.com.
-    action_runner.tab.WaitForDocumentReadyStateToBeComplete()
-    action_runner.Navigate(
-        'https://mail.google.com/mail/mu/mp/872/trigger_redirection_loop')
+    action_runner.Navigate('https://www.youtube.com/')
     action_runner.tab.WaitForDocumentReadyStateToBeComplete()
 
-    super(AccessibilityGmailComposeStory, self).RunNavigateSteps(
-        action_runner)
+    # Open and close the sidebar.
+    action_runner.ClickElement(selector='[aria-label="Guide"]')
+    action_runner.Wait(1)
+    action_runner.ClickElement(selector='[aria-label="Guide"]')
+    action_runner.Wait(1)
 
-    action_runner.WaitForJavaScriptCondition(
-        'document.getElementById("loading").style.display === "none"')
+    # Open the apps menu.
+    action_runner.ClickElement(selector='[aria-label="YouTube apps"]')
+    action_runner.Wait(1)
 
-    # Tab from the To field to the message body.
-    action_runner.WaitForElement(selector='#\\:gr')
-    action_runner.PressKey('Tab')
-    action_runner.PressKey('Tab')
-
-    # EnterText doesn't handle newlines for some reason.
-    long_text = LONG_TEXT.replace('\n', ' ')
-
-    # Enter some text
-    action_runner.EnterText(long_text, character_delay_ms=1)
-
-    # Move up a couple of lines and then enter it again, this causes
-    # a huge amount of wrapping and re-layout
-    action_runner.PressKey('Home')
-    action_runner.PressKey('ArrowUp')
-    action_runner.PressKey('ArrowUp')
-    action_runner.EnterText(long_text, character_delay_ms=1)
+    # Navigate through the items in the apps menu.
+    for _ in range(6):
+      action_runner.PressKey('Tab')

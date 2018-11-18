@@ -8,8 +8,13 @@
 #include "compiler/preprocessor/Input.h"
 #include "compiler/preprocessor/Token.h"
 
+namespace angle
+{
+
 class InitTest : public PreprocessorTest
 {
+  public:
+    InitTest() : PreprocessorTest(SH_GLES2_SPEC) {}
 };
 
 TEST_F(InitTest, ZeroCount)
@@ -176,3 +181,5 @@ TEST(InputTest, ReadStringsWithLineContinuation)
     EXPECT_EQ(2, lineNo);
     EXPECT_STREQ("foobar", buf);
 }
+
+}  // namespace angle

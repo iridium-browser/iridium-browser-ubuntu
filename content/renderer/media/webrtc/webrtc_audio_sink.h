@@ -8,6 +8,8 @@
 #include <stdint.h>
 
 #include <memory>
+#include <string>
+#include <utility>
 #include <vector>
 
 #include "base/macros.h"
@@ -20,6 +22,7 @@
 #include "content/renderer/media/stream/media_stream_audio_processor.h"
 #include "media/base/audio_parameters.h"
 #include "media/base/audio_push_fifo.h"
+#include "third_party/webrtc/api/mediastreaminterface.h"
 #include "third_party/webrtc/pc/mediastreamtrack.h"
 
 namespace content {
@@ -37,7 +40,8 @@ class CONTENT_EXPORT WebRtcAudioSink : public MediaStreamAudioSink {
   WebRtcAudioSink(
       const std::string& label,
       scoped_refptr<webrtc::AudioSourceInterface> track_source,
-      scoped_refptr<base::SingleThreadTaskRunner> signaling_task_runner);
+      scoped_refptr<base::SingleThreadTaskRunner> signaling_task_runner,
+      scoped_refptr<base::SingleThreadTaskRunner> main_task_runner);
 
   ~WebRtcAudioSink() override;
 
@@ -55,7 +59,8 @@ class CONTENT_EXPORT WebRtcAudioSink : public MediaStreamAudioSink {
   // source. This is passed via the Adapter to libjingle. This method may only
   // be called once, before the audio data flow starts, and before any calls to
   // GetAudioProcessor() might be made.
-  void SetAudioProcessor(scoped_refptr<MediaStreamAudioProcessor> processor);
+  void SetAudioProcessor(
+      scoped_refptr<webrtc::AudioProcessorInterface> processor);
 
   // MediaStreamSink override.
   void OnEnabledChanged(bool enabled) override;
@@ -68,7 +73,8 @@ class CONTENT_EXPORT WebRtcAudioSink : public MediaStreamAudioSink {
    public:
     Adapter(const std::string& label,
             scoped_refptr<webrtc::AudioSourceInterface> source,
-            scoped_refptr<base::SingleThreadTaskRunner> signaling_task_runner);
+            scoped_refptr<base::SingleThreadTaskRunner> signaling_task_runner,
+            scoped_refptr<base::SingleThreadTaskRunner> main_task_runner);
 
     base::SingleThreadTaskRunner* signaling_task_runner() const {
       return signaling_task_runner_.get();
@@ -76,7 +82,8 @@ class CONTENT_EXPORT WebRtcAudioSink : public MediaStreamAudioSink {
 
     // These setters are called before the audio data flow starts, and before
     // any methods called on the signaling thread reference these objects.
-    void set_processor(scoped_refptr<MediaStreamAudioProcessor> processor) {
+    void set_processor(
+        scoped_refptr<webrtc::AudioProcessorInterface> processor) {
       audio_processor_ = std::move(processor);
     }
     void set_level(
@@ -122,7 +129,7 @@ class CONTENT_EXPORT WebRtcAudioSink : public MediaStreamAudioSink {
     // The audio processsor that applies audio post-processing on the source
     // audio. This is null if there is no audio processing taking place
     // upstream. This must be set before calls to GetAudioProcessor() are made.
-    scoped_refptr<MediaStreamAudioProcessor> audio_processor_;
+    scoped_refptr<webrtc::AudioProcessorInterface> audio_processor_;
 
     // Thread-safe accessor to current audio signal level. This may be null, if
     // not applicable to the current use case. This must be set before calls to
@@ -166,11 +173,7 @@ class CONTENT_EXPORT WebRtcAudioSink : public MediaStreamAudioSink {
 
   // In debug builds, check that WebRtcAudioSink's public methods are all being
   // called on the main render thread.
-  base::ThreadChecker thread_checker_;
-
-  // Used to DCHECK that OnSetFormat() and OnData() are called on the same
-  // thread.
-  base::ThreadChecker audio_thread_checker_;
+  THREAD_CHECKER(thread_checker_);
 
   DISALLOW_COPY_AND_ASSIGN(WebRtcAudioSink);
 };

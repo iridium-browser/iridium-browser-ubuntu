@@ -7,11 +7,11 @@
 
 from __future__ import print_function
 
+import base64
 import glob
 import os
 
 from chromite.cbuildbot import cbuildbot_run
-from chromite.cbuildbot import chroot_lib
 from chromite.cbuildbot import commands
 from chromite.cbuildbot import goma_util
 from chromite.cbuildbot import repository
@@ -20,16 +20,18 @@ from chromite.cbuildbot.stages import generic_stages
 from chromite.cbuildbot.stages import test_stages
 from chromite.lib import buildbucket_lib
 from chromite.lib import builder_status_lib
-from chromite.lib import config_lib
+from chromite.lib import build_summary
 from chromite.lib import constants
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_logging as logging
+from chromite.lib import cros_sdk_lib
 from chromite.lib import failures_lib
 from chromite.lib import git
 from chromite.lib import osutils
 from chromite.lib import parallel
 from chromite.lib import portage_util
 from chromite.lib import path_util
+from chromite.lib import request_build
 
 
 class CleanUpStage(generic_stages.BuilderStage):
@@ -40,6 +42,7 @@ class CleanUpStage(generic_stages.BuilderStage):
   """
 
   option_name = 'clean'
+  category = constants.CI_INFRA_STAGE
 
   def _CleanChroot(self):
     logging.info('Cleaning chroot.')
@@ -60,6 +63,29 @@ class CleanUpStage(generic_stages.BuilderStage):
       d = os.path.join(chroot_dir, 'build', board, cache_dir)
       osutils.RmDir(d, ignore_missing=True, sudo=True)
 
+  def _RevertChrootToCleanSnapshot(self):
+    try:
+      logging.info('Attempting to revert chroot to %s snapshot',
+                   constants.CHROOT_SNAPSHOT_CLEAN)
+      snapshots = commands.ListChrootSnapshots(self._build_root)
+      if constants.CHROOT_SNAPSHOT_CLEAN not in snapshots:
+        logging.error(
+            "Can't find %s snapshot.", constants.CHROOT_SNAPSHOT_CLEAN)
+        return False
+
+      return commands.RevertChrootToSnapshot(self._build_root,
+                                             constants.CHROOT_SNAPSHOT_CLEAN)
+    except failures_lib.BuildScriptFailure as e:
+      logging.error('Failed to revert chroot to snapshot: %s', e)
+      return False
+
+  def _CreateCleanSnapshot(self):
+    for snapshot in commands.ListChrootSnapshots(self._build_root):
+      if not commands.DeleteChrootSnapshot(self._build_root, snapshot):
+        logging.warning("Couldn't delete old snapshot %s", snapshot)
+    commands.CreateChrootSnapshot(self._build_root,
+                                  constants.CHROOT_SNAPSHOT_CLEAN)
+
   def _DeleteChroot(self):
     logging.info('Deleting chroot.')
     chroot = os.path.join(self._build_root, constants.DEFAULT_CHROOT_DIR)
@@ -68,8 +94,7 @@ class CleanUpStage(generic_stages.BuilderStage):
       # itself because we haven't sync'd yet, and the version of the chromite
       # in there might be broken. Since we've already unmounted everything in
       # there, we can just remove it using rm -rf.
-      cros_build_lib.CleanupChrootMount(chroot, delete_image=True)
-      osutils.RmDir(chroot, ignore_missing=True, sudo=True)
+      cros_sdk_lib.CleanupChrootMount(chroot, delete=True)
 
   def _DeleteArchivedTrybotImages(self):
     """Clear all previous archive images to save space."""
@@ -111,57 +136,178 @@ class CleanUpStage(generic_stages.BuilderStage):
     logging.info('Wiping old output.')
     commands.WipeOldOutput(self._build_root)
 
-  def _GetBuildbucketBucketsForSlaves(self):
-    """Get Buildbucket buckets for slaves of current build.
+  def _GetPreviousBuildStatus(self):
+    """Extract the status of the previous build from command-line arguments.
 
     Returns:
-      A list of Buildbucket buckets (strings) serving the slaves.
+      A BuildSummary object representing the previous build.
     """
-    slave_config_map = self._GetSlaveConfigMap(important_only=False)
+    previous_state = build_summary.BuildSummary()
+    if self._run.options.previous_build_state:
+      try:
+        state_json = base64.b64decode(
+            self._run.options.previous_build_state)
+        previous_state.from_json(state_json)
+        logging.info('Previous local build %s finished in state %s.',
+                     previous_state.build_description(), previous_state.status)
+      except ValueError as e:
+        logging.error('Failed to decode previous build state: %s', e)
+    return previous_state
 
-    bucket_set = set(
-        buildbucket_lib.WATERFALL_BUCKET_MAP[slave_config.active_waterfall]
-        for slave_config in slave_config_map.values()
-        if slave_config.active_waterfall)
+  def _GetPreviousMasterStatus(self, previous_state):
+    """Get the state of the previous master build from CIDB.
 
-    return list(bucket_set)
+    Args:
+      previous_state: A BuildSummary object representing the previous build.
+
+    Returns:
+      A tuple containing the master build number and status, or None, None
+      if there isn't one.
+    """
+    if not previous_state.master_build_id:
+      return None, None
+
+    _, db = self._run.GetCIDBHandle()
+    if not db:
+      return None, None
+
+    master_status = db.GetBuildStatus(previous_state.master_build_id)
+    if not master_status:
+      logging.warning('Previous master build id %s not found.',
+                      previous_state.master_build_id)
+      return None, None
+    logging.info('Previous master build %s finished in state %s',
+                 master_status['build_number'],
+                 master_status['status'])
+
+    return master_status['build_number'], master_status['status']
 
   def CancelObsoleteSlaveBuilds(self):
     """Cancel the obsolete slave builds scheduled by the previous master."""
     logging.info('Cancelling obsolete slave builds.')
 
     buildbucket_client = self.GetBuildbucketClient()
+    if not buildbucket_client:
+      logging.info('No buildbucket_client, not cancelling slaves.')
+      return
 
-    if buildbucket_client is not None:
+    # Find the 3 most recent master buildbucket ids.
+    master_builds = buildbucket_client.SearchAllBuilds(
+        self._run.options.debug,
+        buckets=constants.ACTIVE_BUCKETS,
+        limit=3,
+        tags=['cbb_config:%s' % self._run.config.name,
+              'cbb_branch:%s' % self._run.manifest_branch],
+        status=constants.BUILDBUCKET_BUILDER_STATUS_COMPLETED)
 
-      slave_buildbucket_buckets = self._GetBuildbucketBucketsForSlaves()
-      if not slave_buildbucket_buckets:
-        logging.info('No Buildbucket buckets to search for slave builds.')
-        return
+    slave_ids = []
 
-      buildbucket_ids = []
-      # Search for scheduled/started slave builds in chromiumos waterfall
-      # and chromeos waterfall.
+    # Find the scheduled or started slaves for those master builds.
+    master_ids = buildbucket_lib.ExtractBuildIds(master_builds)
+    logging.info('Found Previous Master builds: %s', ', '.join(master_ids))
+    for master_id in master_ids:
       for status in [constants.BUILDBUCKET_BUILDER_STATUS_SCHEDULED,
                      constants.BUILDBUCKET_BUILDER_STATUS_STARTED]:
         builds = buildbucket_client.SearchAllBuilds(
             self._run.options.debug,
-            buckets=slave_buildbucket_buckets,
-            tags=['build_type:%s' % self._run.config.build_type,
-                  'cbb_branch:%s' % self._run.manifest_branch,
-                  'master:False',
-                  'master_config:%s' % self._run.config.name],
+            tags=['buildset:%s' % request_build.SlaveBuildSet(master_id)],
             status=status)
 
         ids = buildbucket_lib.ExtractBuildIds(builds)
         if ids:
-          logging.info('Found builds %s in status %s.', ids, status)
-          buildbucket_ids.extend(ids)
+          logging.info('Found builds %s in status %s from master %s.',
+                       ids, status, master_id)
+          slave_ids.extend(ids)
 
-      builder_status_lib.CancelBuilds(buildbucket_ids,
+    if slave_ids:
+      builder_status_lib.CancelBuilds(slave_ids,
                                       buildbucket_client,
                                       self._run.options.debug,
                                       self._run.config)
+
+  def CanReuseChroot(self, chroot_path):
+    """Determine if the chroot can be reused.
+
+    A chroot can be reused if all of the following are true:
+        1.  The existence of chroot.img matches what is requested in the config,
+            i.e. exists when chroot_use_image is True or vice versa.
+        2.  The build config doesn't request chroot_replace.
+        3.  The previous local build succeeded.
+        4.  If there was a previous master build, that build also succeeded.
+
+    Args:
+      chroot_path: Path to the chroot we want to reuse.
+
+    Returns:
+      True if the chroot at |chroot_path| can be reused, False if not.
+    """
+
+    chroot_img = chroot_path + '.img'
+    chroot_img_exists = os.path.exists(chroot_img)
+    if self._run.config.chroot_use_image != chroot_img_exists:
+      logging.info('chroot image at %s %s but chroot_use_image=%s.  '
+                   'Cannot reuse chroot.', chroot_img,
+                   'exists' if chroot_img_exists else "doesn't exist",
+                   self._run.config.chroot_use_image)
+      return False
+
+    if self._run.config.chroot_replace and self._run.options.build:
+      logging.info('Build config has chroot_replace=True. Cannot reuse chroot.')
+      return False
+
+    previous_state = self._GetPreviousBuildStatus()
+    if previous_state.status != constants.BUILDER_STATUS_PASSED:
+      logging.info('Previous local build %s did not pass. Cannot reuse chroot.',
+                   previous_state.build_number)
+      return False
+
+    if previous_state.master_build_id:
+      build_number, status = self._GetPreviousMasterStatus(previous_state)
+      if status != constants.BUILDER_STATUS_PASSED:
+        logging.info('Previous master build %s did not pass (%s).  '
+                     'Cannot reuse chroot.', build_number, status)
+        return False
+
+    return True
+
+  def CanUseChrootSnapshotToDelete(self, chroot_path):
+    """Determine if the chroot can be "deleted" by reverting to a snapshot.
+
+    A chroot can be reverted instead of deleting if all of the following are
+    true:
+        1. The builder isn't being clobbered.
+        2. The config allows chroot reuse, i.e. chroot_replace=False.
+        3. The chroot actually supports snapshots, i.e. chroot_use_image is
+           True and chroot.img exists.
+    Note that the chroot might not contain any snapshots. This means that even
+    if this function returns True, the chroot isn't guaranteed to be able to be
+    reverted.
+
+    Args:
+      chroot_path: Path to the chroot we want to revert.
+
+    Returns:
+      True if it is safe to revert |chroot| to a snapshot instead of deleting.
+    """
+    if self._run.options.clobber:
+      logging.info('Clobber is set.  Cannot revert to snapshot.')
+      return False
+
+    if self._run.config.chroot_replace:
+      logging.info('Chroot will be replaced. Cannot revert to snapshot.')
+      return False
+
+    if not self._run.config.chroot_use_image:
+      logging.info('chroot_use_image=false. Cannot revert to snapshot.')
+      return False
+
+    chroot_img = chroot_path + '.img'
+    if not os.path.exists(chroot_img):
+      logging.info('Chroot image %s does not exist. Cannot revert to snapshot.',
+                   chroot_img)
+      return False
+
+    return True
 
   @failures_lib.SetFailureType(failures_lib.InfrastructureFailure)
   def PerformStage(self):
@@ -173,6 +319,7 @@ class CleanUpStage(generic_stages.BuilderStage):
     # If we can't get a manifest out of it, then it's not usable and must be
     # clobbered.
     manifest = None
+    delete_chroot = False
     if not self._run.options.clobber:
       try:
         manifest = git.ManifestCheckout.Cached(self._build_root, search=False)
@@ -186,34 +333,30 @@ class CleanUpStage(generic_stages.BuilderStage):
         if os.path.exists(self._build_root):
           logging.warning("ManifestCheckout at %s is unusable: %s",
                           self._build_root, e)
+        delete_chroot = True
 
     # Clean mount points first to be safe about deleting.
     chroot_path = os.path.join(self._build_root, constants.DEFAULT_CHROOT_DIR)
-    cros_build_lib.CleanupChrootMount(chroot=chroot_path)
+    cros_sdk_lib.CleanupChrootMount(chroot=chroot_path)
     osutils.UmountTree(self._build_root)
 
-    # If our chroot.img status doesn't match what is requested in the config
-    # (exists when chroot_use_image is False or vice versa), delete the chroot
-    # and let it be recreated correctly.  This could happen if a config with a
-    # different value of chroot_use_image ran on this machine previously.
-    chroot_img = chroot_path + '.img'
-    chroot_img_exists = os.path.exists(chroot_img)
-    if self._run.config.chroot_use_image != chroot_img_exists:
-      logging.info('chroot image at %s %s but chroot_use_image=%s.  '
-                   'Deleting chroot.', chroot_img,
-                   'exists' if chroot_img_exists else "doesn't exist",
-                   self._run.config.chroot_use_image)
-      self._DeleteChroot()
+    if not delete_chroot:
+      delete_chroot = not self.CanReuseChroot(chroot_path)
+
+    # If we're going to delete the chroot and we can use a snapshot instead,
+    # try to revert.  If the revert succeeds, we don't need to delete after all.
+    if delete_chroot and self.CanUseChrootSnapshotToDelete(chroot_path):
+      delete_chroot = not self._RevertChrootToCleanSnapshot()
 
     # Re-mount chroot image if it exists so that subsequent steps can clean up
     # inside.
-    if self._run.config.chroot_use_image and chroot_img_exists:
+    if not delete_chroot and self._run.config.chroot_use_image:
       try:
-        cros_build_lib.MountChroot(chroot=chroot_path, create=False)
+        cros_sdk_lib.MountChroot(chroot=chroot_path, create=False)
       except cros_build_lib.RunCommandError as e:
         logging.error('Unable to mount chroot under %s.  Deleting chroot.  '
                       'Error: %s', self._build_root, e)
-        self._DeleteChroot()
+        delete_chroot = True
 
     if manifest is None:
       self._DeleteChroot()
@@ -227,25 +370,34 @@ class CleanUpStage(generic_stages.BuilderStage):
                self._DeleteAutotestSitePackages]
       if self._run.options.chrome_root:
         tasks.append(self._DeleteChromeBuildOutput)
-      if self._run.config.chroot_replace and self._run.options.build:
+      if delete_chroot:
         tasks.append(self._DeleteChroot)
       else:
         tasks.append(self._CleanChroot)
 
-      # Only enable CancelObsoleteSlaveBuilds on the master builds
-      # which use the Buildbucket scheduler, it checks for builds in
-      # ChromiumOs and ChromeOs waterfalls.
-      if (config_lib.UseBuildbucketScheduler(self._run.config) and
-          config_lib.IsMasterBuild(self._run.config)):
+      # CancelObsoleteSlaveBuilds, if there are slave builds to cancel.
+      if self._run.config.slave_configs:
         tasks.append(self.CancelObsoleteSlaveBuilds)
 
       parallel.RunParallelSteps(tasks)
+
+    # If chroot.img still exists after everything is cleaned up, it means we're
+    # planning to reuse it. This chroot was created by the previous run, so its
+    # creation isn't affected by any potential changes in the current run.
+    # Therefore, if this run fails, having the subsequent run revert to this
+    # snapshot will still produce a clean chroot.  If this run succeeds, the
+    # next run will reuse the chroot without needing to revert it.  Thus, taking
+    # a snapshot now should be correct regardless of whether this run will
+    # ultimately succeed or not.
+    if os.path.exists(chroot_path + '.img'):
+      self._CreateCleanSnapshot()
 
 
 class InitSDKStage(generic_stages.BuilderStage):
   """Stage that is responsible for initializing the SDK."""
 
   option_name = 'build'
+  category = constants.CI_INFRA_STAGE
 
   def __init__(self, builder_run, chroot_replace=False, **kwargs):
     """InitSDK constructor.
@@ -257,35 +409,28 @@ class InitSDKStage(generic_stages.BuilderStage):
     super(InitSDKStage, self).__init__(builder_run, **kwargs)
     self.force_chroot_replace = chroot_replace
 
-  def DepotToolsEnsureBootstrap(self):
-    """Ensure that depot_tools binaries are populated."""
-    depot_tools_path = constants.DEPOT_TOOLS_DIR
-    ensure_bootstrap_script = os.path.join(depot_tools_path, 'ensure_bootstrap')
-    cros_build_lib.RunCommand([ensure_bootstrap_script], cwd=depot_tools_path)
-
   def PerformStage(self):
-    # This prepares depot_tools in the source tree, in advance.
-    self.DepotToolsEnsureBootstrap()
-
     chroot_path = os.path.join(self._build_root, constants.DEFAULT_CHROOT_DIR)
+    chroot_exists = os.path.isdir(self._build_root)
     replace = self._run.config.chroot_replace or self.force_chroot_replace
-    pre_ver = post_ver = None
-    if os.path.isdir(self._build_root) and not replace:
-      try:
-        pre_ver = cros_build_lib.GetChrootVersion(chroot=chroot_path)
-        if pre_ver is not None:
-          commands.RunChrootUpgradeHooks(
-              self._build_root, chrome_root=self._run.options.chrome_root,
-              extra_env=self._portage_extra_env)
-      except failures_lib.BuildScriptFailure:
+    pre_ver = None
+
+    if chroot_exists and not replace:
+      # Make sure the chroot has a valid version before we update it.
+      pre_ver = cros_sdk_lib.GetChrootVersion(chroot_path)
+      if pre_ver is None:
         logging.PrintBuildbotStepText('Replacing broken chroot')
         logging.PrintBuildbotStepWarnings()
-      else:
-        # Clear the chroot manifest version as we are in the middle of building.
-        chroot_manager = chroot_lib.ChrootManager(self._build_root)
-        chroot_manager.ClearChrootVersion()
+        replace = True
 
-    if not os.path.isdir(chroot_path) or replace:
+    if chroot_exists and not replace:
+      # The chroot exists, we are not replacing it, and it is valid.
+      # Update the chroot.
+      usepkg_toolchain = (self._run.config.usepkg_toolchain and
+                          not self._latest_toolchain)
+      commands.UpdateChroot(self._build_root, usepkg=usepkg_toolchain,
+                            extra_env=self._portage_extra_env)
+    else:
       use_sdk = (self._run.config.use_sdk and not self._run.options.nosdk)
       pre_ver = None
       commands.MakeChroot(
@@ -296,27 +441,26 @@ class InitSDKStage(generic_stages.BuilderStage):
           extra_env=self._portage_extra_env,
           use_image=self._run.config.chroot_use_image)
 
-    post_ver = cros_build_lib.GetChrootVersion(chroot=chroot_path)
+    post_ver = cros_sdk_lib.GetChrootVersion(chroot_path)
     if pre_ver is not None and pre_ver != post_ver:
       logging.PrintBuildbotStepText('%s->%s' % (pre_ver, post_ver))
     else:
       logging.PrintBuildbotStepText(post_ver)
-
-    commands.SetSharedUserPassword(
-        self._build_root,
-        password=self._run.config.shared_user_password)
 
 
 class SetupBoardStage(generic_stages.BoardSpecificBuilderStage, InitSDKStage):
   """Stage that is responsible for building host pkgs and setting up a board."""
 
   option_name = 'build'
+  category = constants.CI_INFRA_STAGE
 
   def PerformStage(self):
+    _, _ = self._run.GetCIDBHandle()
+
     # We need to run chroot updates on most builders because they uprev after
     # the InitSDK stage. For the SDK builder, we can skip updates because uprev
     # is run prior to InitSDK. This is not just an optimization: It helps
-    # workaround http://crbug.com/225509
+    # workaround https://crbug.com/225509
     if self._run.config.build_type != constants.CHROOT_BUILDER_TYPE:
       usepkg_toolchain = (self._run.config.usepkg_toolchain and
                           not self._latest_toolchain)
@@ -328,7 +472,6 @@ class SetupBoardStage(generic_stages.BoardSpecificBuilderStage, InitSDKStage):
     usepkg = self._run.config.usepkg_build_packages
     commands.SetupBoard(
         self._build_root, board=self._current_board, usepkg=usepkg,
-        chrome_binhost_only=self._run.config.chrome_binhost_only,
         force=self._run.config.board_replace,
         extra_env=self._portage_extra_env, chroot_upgrade=False,
         profile=self._run.options.profile or self._run.config.profile)
@@ -338,6 +481,7 @@ class BuildPackagesStage(generic_stages.BoardSpecificBuilderStage,
                          generic_stages.ArchivingStageMixin):
   """Build Chromium OS packages."""
 
+  category = constants.PRODUCT_OS_STAGE
   option_name = 'build'
   def __init__(self, builder_run, board, suffix=None, afdo_generate_min=False,
                afdo_use=False, update_metadata=False, **kwargs):
@@ -454,11 +598,12 @@ class BuildPackagesStage(generic_stages.BoardSpecificBuilderStage,
 
     # Set up goma. Use goma iff chrome needs to be built.
     chroot_args = self._SetupGomaIfNecessary()
+
+    build_id, _ = self._run.GetCIDBHandle()
     commands.Build(self._build_root,
                    self._current_board,
                    build_autotest=self._run.ShouldBuildAutotest(),
                    usepkg=self._run.config.usepkg_build_packages,
-                   chrome_binhost_only=self._run.config.chrome_binhost_only,
                    packages=packages,
                    skip_chroot_upgrade=True,
                    chrome_root=self._run.options.chrome_root,
@@ -546,6 +691,7 @@ class BuildImageStage(BuildPackagesStage):
 
   option_name = 'build'
   config_name = 'images'
+  category = constants.PRODUCT_OS_STAGE
 
   def _BuildImages(self):
     # We only build base, dev, and test images from this stage.
@@ -582,9 +728,7 @@ class BuildImageStage(BuildPackagesStage):
 
     self.board_runattrs.SetParallel('images_generated', True)
 
-    parallel.RunParallelSteps(
-        [self._BuildVMImage, lambda: self._GenerateAuZip(cbuildbot_image_link),
-         self._BuildGceTarballs])
+    parallel.RunParallelSteps([self._BuildVMImage, self._BuildGceTarballs])
 
   def _BuildVMImage(self):
     if self._run.config.vm_tests and not self._afdo_generate_min:
@@ -593,13 +737,6 @@ class BuildImageStage(BuildPackagesStage):
           self._current_board,
           extra_env=self._portage_extra_env,
           disk_layout=self._run.config.disk_layout)
-
-  def _GenerateAuZip(self, image_dir):
-    """Create au-generator.zip."""
-    if not self._afdo_generate_min:
-      commands.GenerateAuZip(self._build_root,
-                             image_dir,
-                             extra_env=self._portage_extra_env)
 
   def _BuildGceTarballs(self):
     """Creates .tar.gz files that can be converted to GCE images.
@@ -675,6 +812,7 @@ class UprevStage(generic_stages.BuilderStage):
 
   config_name = 'uprev'
   option_name = 'uprev'
+  category = constants.CI_INFRA_STAGE
 
   def __init__(self, builder_run, boards=None, **kwargs):
     super(UprevStage, self).__init__(builder_run, **kwargs)
@@ -683,10 +821,9 @@ class UprevStage(generic_stages.BuilderStage):
 
   def PerformStage(self):
     # Perform other uprevs.
-    overlays, _ = self._ExtractOverlays()
     commands.UprevPackages(self._build_root,
                            self._boards,
-                           overlays)
+                           overlay_type=self._run.config.overlays)
 
 
 class RegenPortageCacheStage(generic_stages.BuilderStage):
@@ -694,7 +831,9 @@ class RegenPortageCacheStage(generic_stages.BuilderStage):
 
   # We only need to run this if we're pushing at least one overlay.
   config_name = 'push_overlays'
+  category = constants.CI_INFRA_STAGE
 
   def PerformStage(self):
-    _, push_overlays = self._ExtractOverlays()
+    push_overlays = portage_util.FindOverlays(
+        self._run.config.push_overlays, buildroot=self._build_root)
     commands.RegenPortageCache(push_overlays)

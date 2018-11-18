@@ -6,13 +6,14 @@
 #define GOOGLE_APIS_GAIA_OAUTH2_TOKEN_SERVICE_DELEGATE_H_
 
 #include "base/macros.h"
+#include "base/memory/ref_counted.h"
 #include "base/observer_list.h"
 #include "google_apis/gaia/gaia_auth_util.h"
 #include "google_apis/gaia/oauth2_token_service.h"
 #include "net/base/backoff_entry.h"
 
-namespace net {
-class URLRequestContextGetter;
+namespace network {
+class SharedURLLoaderFactory;
 }
 
 // Abstract base class to fetch and maintain refresh tokens from various
@@ -20,8 +21,11 @@ class URLRequestContextGetter;
 // CreateAccessTokenFetcher properly.
 class OAuth2TokenServiceDelegate {
  public:
+  // Refresh token guaranteed to be invalid. Can be passed to
+  // UpdateCredentials() to force an authentication error.
+  static const char kInvalidRefreshToken[];
+
   enum LoadCredentialsState {
-    LOAD_CREDENTIALS_UNKNOWN,
     LOAD_CREDENTIALS_NOT_STARTED,
     LOAD_CREDENTIALS_IN_PROGRESS,
     LOAD_CREDENTIALS_FINISHED_WITH_SUCCESS,
@@ -36,7 +40,7 @@ class OAuth2TokenServiceDelegate {
 
   virtual OAuth2AccessTokenFetcher* CreateAccessTokenFetcher(
       const std::string& account_id,
-      net::URLRequestContextGetter* getter,
+      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
       OAuth2AccessTokenConsumer* consumer) = 0;
 
   virtual bool RefreshTokenIsAvailable(const std::string& account_id) const = 0;
@@ -54,11 +58,11 @@ class OAuth2TokenServiceDelegate {
                                      const std::string& access_token) {}
 
   virtual void Shutdown() {}
-  virtual void LoadCredentials(const std::string& primary_account_id) {}
   virtual void UpdateCredentials(const std::string& account_id,
                                  const std::string& refresh_token) {}
   virtual void RevokeCredentials(const std::string& account_id) {}
-  virtual net::URLRequestContextGetter* GetRequestContext() const;
+  virtual scoped_refptr<network::SharedURLLoaderFactory> GetURLLoaderFactory()
+      const;
 
   bool ValidateAccountId(const std::string& account_id) const;
 
@@ -70,12 +74,30 @@ class OAuth2TokenServiceDelegate {
   // a nullptr otherwise.
   virtual const net::BackoffEntry* BackoffEntry() const;
 
-  // Diagnostic methods
+  // -----------------------------------------------------------------------
+  // Methods that are only used by ProfileOAuth2TokenService.
+  // -----------------------------------------------------------------------
+
+  // Loads the credentials from disk. Called only once when the token service
+  // is initialized. Default implementation is NOTREACHED - subsclasses that
+  // are used by the ProfileOAuth2TokenService must provide an implementation
+  // for this method.
+  virtual void LoadCredentials(const std::string& primary_account_id);
 
   // Returns the state of the load credentials operation.
-  virtual LoadCredentialsState GetLoadCredentialsState() const;
+  LoadCredentialsState load_credentials_state() const {
+    return load_credentials_state_;
+  }
+
+  // -----------------------------------------------------------------------
+  // End of methods that are only used by ProfileOAuth2TokenService
+  // -----------------------------------------------------------------------
 
  protected:
+  void set_load_credentials_state(LoadCredentialsState state) {
+    load_credentials_state_ = state;
+  }
+
   // Called by subclasses to notify observers. Some are virtual to allow Android
   // to broadcast the notifications to Java code.
   virtual void FireRefreshTokenAvailable(const std::string& account_id);
@@ -98,7 +120,11 @@ class OAuth2TokenServiceDelegate {
  private:
   // List of observers to notify when refresh token availability changes.
   // Makes sure list is empty on destruction.
-  base::ObserverList<OAuth2TokenService::Observer, true> observer_list_;
+  base::ObserverList<OAuth2TokenService::Observer, true>::Unchecked
+      observer_list_;
+
+  // The state of the load credentials operation.
+  LoadCredentialsState load_credentials_state_ = LOAD_CREDENTIALS_NOT_STARTED;
 
   void StartBatchChanges();
   void EndBatchChanges();

@@ -8,6 +8,37 @@
 
 namespace blink {
 
+TEST(FormDataTest, append) {
+  FormData* fd = FormData::Create(UTF8Encoding());
+  fd->append("test\n1", "value\n1");
+  fd->append("test\r2", nullptr, "filename");
+
+  const FormData::Entry& entry1 = *fd->Entries()[0];
+  EXPECT_EQ("test\n1", entry1.name());
+  EXPECT_EQ("value\n1", entry1.Value());
+
+  const FormData::Entry& entry2 = *fd->Entries()[1];
+  EXPECT_EQ("test\r2", entry2.name());
+}
+
+TEST(FormDataTest, AppendFromElement) {
+  FormData* fd = FormData::Create(UTF8Encoding());
+  fd->AppendFromElement("Atomic\nNumber", 1);
+  fd->AppendFromElement("Periodic\nTable", nullptr);
+  fd->AppendFromElement("Noble\nGas", "He\rNe\nAr\r\nKr");
+
+  const FormData::Entry& entry1 = *fd->Entries()[0];
+  EXPECT_EQ("Atomic\r\nNumber", entry1.name());
+  EXPECT_EQ("1", entry1.Value());
+
+  const FormData::Entry& entry2 = *fd->Entries()[1];
+  EXPECT_EQ("Periodic\r\nTable", entry2.name());
+
+  const FormData::Entry& entry3 = *fd->Entries()[2];
+  EXPECT_EQ("Noble\r\nGas", entry3.name());
+  EXPECT_EQ("He\r\nNe\r\nAr\r\nKr", entry3.Value());
+}
+
 TEST(FormDataTest, get) {
   FormData* fd = FormData::Create(UTF8Encoding());
   fd->append("name1", "value1");
@@ -18,8 +49,8 @@ TEST(FormDataTest, get) {
   EXPECT_EQ("value1", result.GetAsUSVString());
 
   const FormData::Entry& entry = *fd->Entries()[0];
-  EXPECT_STREQ("name1", entry.name().data());
-  EXPECT_STREQ("value1", entry.Value().data());
+  EXPECT_EQ("name1", entry.name());
+  EXPECT_EQ("value1", entry.Value());
 }
 
 TEST(FormDataTest, getAll) {

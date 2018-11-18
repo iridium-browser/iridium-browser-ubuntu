@@ -42,10 +42,10 @@ Stream::Stream(StreamRegistry* registry,
                    &writer_, &reader_);
 
   // Setup callback for writing.
-  writer_->RegisterCallback(base::Bind(&Stream::OnSpaceAvailable,
-                                       weak_ptr_factory_.GetWeakPtr()));
-  reader_->RegisterCallback(base::Bind(&Stream::OnDataAvailable,
-                                       weak_ptr_factory_.GetWeakPtr()));
+  writer_->RegisterCallback(base::BindRepeating(
+      &Stream::OnSpaceAvailable, weak_ptr_factory_.GetWeakPtr()));
+  reader_->RegisterCallback(base::BindRepeating(
+      &Stream::OnDataAvailable, weak_ptr_factory_.GetWeakPtr()));
 
   registry_->RegisterStream(this);
 }
@@ -118,7 +118,8 @@ void Stream::AddData(const char* data, size_t size) {
   if (!writer_.get())
     return;
 
-  scoped_refptr<net::IOBuffer> io_buffer(new net::IOBuffer(size));
+  scoped_refptr<net::IOBuffer> io_buffer =
+      base::MakeRefCounted<net::IOBuffer>(size);
   memcpy(io_buffer->data(), data, size);
   AddData(io_buffer, size);
 }

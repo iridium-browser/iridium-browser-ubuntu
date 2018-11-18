@@ -10,6 +10,7 @@
 #include "ash/shell.h"
 #include "ash/shell_test_api.h"
 #include "ash/test/ash_test_base.h"
+#include "ash/window_factory.h"
 #include "ash/wm/window_positioning_utils.h"
 #include "ash/wm/window_state.h"
 #include "base/time/time.h"
@@ -306,7 +307,7 @@ TEST_F(SystemGestureEventFilterTest,
   EXPECT_EQ(HTLEFT, toplevel->GetNonClientComponent(points[0]));
   EXPECT_EQ(HTRIGHT, toplevel->GetNonClientComponent(points[1]));
 
-  GetEventGenerator().GestureMultiFingerScrollWithDelays(
+  GetEventGenerator()->GestureMultiFingerScrollWithDelays(
       kTouchPoints, points, delays, 15, kSteps, 0, 40);
 
   // The window bounds should not have changed because neither of the fingers
@@ -456,26 +457,26 @@ TEST_F(SystemGestureEventFilterTest,
 
   aura::test::EventCountDelegate delegate;
   delegate.set_window_component(HTCLIENT);
-  std::unique_ptr<aura::Window> child(new aura::Window(&delegate));
-  child->SetType(aura::client::WINDOW_TYPE_CONTROL);
+  std::unique_ptr<aura::Window> child =
+      window_factory::NewWindow(&delegate, aura::client::WINDOW_TYPE_CONTROL);
   child->Init(ui::LAYER_TEXTURED);
   parent->AddChild(child.get());
   child->SetBounds(gfx::Rect(100, 100));
   child->Show();
 
   ui::test::TestEventHandler event_handler;
-  aura::Env::GetInstance()->AddPreTargetHandler(
+  Shell::Get()->aura_env()->AddPreTargetHandler(
       &event_handler, ui::EventTarget::Priority::kSystem);
 
-  GetEventGenerator().MoveMouseTo(0, 0);
+  GetEventGenerator()->MoveMouseTo(0, 0);
   for (int i = 1; i <= 3; ++i)
-    GetEventGenerator().PressTouchId(i);
+    GetEventGenerator()->PressTouchId(i);
   for (int i = 1; i <= 3; ++i)
-    GetEventGenerator().ReleaseTouchId(i);
+    GetEventGenerator()->ReleaseTouchId(i);
   EXPECT_EQ(event_handler.num_gesture_events(),
             delegate.GetGestureCountAndReset());
 
-  aura::Env::GetInstance()->RemovePreTargetHandler(&event_handler);
+  Shell::Get()->aura_env()->RemovePreTargetHandler(&event_handler);
 }
 
 }  // namespace ash

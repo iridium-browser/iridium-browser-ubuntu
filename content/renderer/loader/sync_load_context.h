@@ -7,6 +7,7 @@
 
 #include "base/macros.h"
 #include "base/optional.h"
+#include "base/single_thread_task_runner.h"
 #include "base/synchronization/waitable_event_watcher.h"
 #include "base/timer/timer.h"
 #include "content/public/renderer/request_peer.h"
@@ -49,10 +50,13 @@ class SyncLoadContext : public RequestPeer {
       SyncLoadResponse* response,
       base::WaitableEvent* completed_event,
       base::WaitableEvent* abort_event,
-      double timeout,
+      base::TimeDelta timeout,
       blink::mojom::BlobRegistryPtrInfo download_to_blob_registry);
 
   ~SyncLoadContext() override;
+
+  void FollowRedirect();
+  void CancelRedirect();
 
  private:
   SyncLoadContext(
@@ -61,7 +65,7 @@ class SyncLoadContext : public RequestPeer {
       SyncLoadResponse* response,
       base::WaitableEvent* completed_event,
       base::WaitableEvent* abort_event,
-      double timeout,
+      base::TimeDelta timeout,
       blink::mojom::BlobRegistryPtrInfo download_to_blob_registry,
       scoped_refptr<base::SingleThreadTaskRunner> task_runner);
   // RequestPeer implementation:
@@ -71,7 +75,6 @@ class SyncLoadContext : public RequestPeer {
   void OnReceivedResponse(const network::ResourceResponseInfo& info) override;
   void OnStartLoadingResponseBody(
       mojo::ScopedDataPipeConsumerHandle body) override;
-  void OnDownloadedData(int len, int encoded_data_length) override;
   void OnReceivedData(std::unique_ptr<ReceivedData> data) override;
   void OnTransferSizeUpdated(int transfer_size_diff) override;
   void OnCompletedRequest(
@@ -90,10 +93,6 @@ class SyncLoadContext : public RequestPeer {
   // Set to null after CompleteRequest() is called.
   SyncLoadResponse* response_;
 
-  // This event is signaled when the request is complete.
-  // Set to null after CompleteRequest() is called.
-  base::WaitableEvent* completed_event_;
-
   // State necessary to run a request on an independent thread.
   scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory_;
   std::unique_ptr<ResourceDispatcher> resource_dispatcher_;
@@ -108,10 +107,8 @@ class SyncLoadContext : public RequestPeer {
 
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
 
-  base::Optional<int64_t> downloaded_file_length_;
-
-  base::WaitableEventWatcher abort_watcher_;
-  base::OneShotTimer timeout_timer_;
+  class SignalHelper;
+  std::unique_ptr<SignalHelper> signals_;
 
   DISALLOW_COPY_AND_ASSIGN(SyncLoadContext);
 };

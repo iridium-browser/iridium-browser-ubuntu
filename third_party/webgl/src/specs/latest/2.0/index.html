@@ -164,7 +164,8 @@
 
     <p>
         Before using the WebGL API, the author must obtain a <code>WebGLRenderingContext</code>
-        object for a given HTMLCanvasElement <a href="#refsCANVAS">[CANVAS]</a> as described
+        object for a given HTMLCanvasElement <a href="#refsCANVAS">[CANVAS]</a> or
+        OffscreenCanvas <a href="#refsOFFSCREENCANVAS">[OFFSCREENCANVAS]</a> as described
         below. This object is used to manage OpenGL state and render to the drawing buffer, which
         must be created at the time of context creation.
     </p>
@@ -176,7 +177,8 @@
     <p>
         Each <code>WebGLRenderingContext</code> and <code>WebGL2RenderingContext</code> has an
         associated <b><a name="context-canvas">canvas</a></b>, set upon creation, which is
-        a <em>canvas</em> <a href="#refsCANVAS">[CANVAS]</a>.
+        a <em>canvas</em> <a href="#refsCANVAS">[CANVAS]</a> or <em>offscreen
+        canvas</em> <a href="#refsOFFSCREENCANVAS">[OFFSCREENCANVAS]</a>.
     </p>
     <p>
         Each <code>WebGLRenderingContext</code> and <code>WebGL2RenderingContext</code> has <b><a name="context-creation-parameters">context
@@ -202,8 +204,8 @@
 
         <li> Create a new <code>WebGL2RenderingContext</code> object, <em>context</em>.
 
-        <li> Let <em>context's</em> <a href="#context-canvas">canvas</a> be the canvas
-             the <code>getContext()</code> method is associated with.
+        <li> Let <em>context's</em> <a href="#context-canvas">canvas</a> be the canvas or offscreen
+             canvas the <code>getContext()</code> method is associated with.
 
         <li> Create a new <code>WebGLContextAttributes</code> object, <em>contextAttributes</em>.
 
@@ -297,7 +299,8 @@ typedef unsigned long long GLuint64;
           <a class="nonnormative" href="https://www.khronos.org/opengles/sdk/docs/man3/html/glDeleteQueries.xhtml">man page</a>)
         </span>.
     </p>
-    <pre class="idl">interface <dfn id="WebGLQuery">WebGLQuery</dfn> : WebGLObject {
+    <pre class="idl">[Exposed=(Window,Worker)]
+interface <dfn id="WebGLQuery">WebGLQuery</dfn> : WebGLObject {
 };</pre>
 
 <!-- ======================================================================================================= -->
@@ -322,7 +325,8 @@ typedef unsigned long long GLuint64;
           <a class="nonnormative" href="https://www.khronos.org/opengles/sdk/docs/man3/html/glDeleteSamplers.xhtml">man page</a>)
         </span>.
     </p>
-    <pre class="idl">interface <dfn id="WebGLSampler">WebGLSampler</dfn> : WebGLObject {
+    <pre class="idl">[Exposed=(Window,Worker)]
+interface <dfn id="WebGLSampler">WebGLSampler</dfn> : WebGLObject {
 };</pre>
 
 <!-- ======================================================================================================= -->
@@ -359,7 +363,8 @@ typedef unsigned long long GLuint64;
     </p>
     <p>
     </p>
-    <pre class="idl">interface <dfn id="WebGLSync">WebGLSync</dfn> : WebGLObject {
+    <pre class="idl">[Exposed=(Window,Worker)]
+interface <dfn id="WebGLSync">WebGLSync</dfn> : WebGLObject {
 };</pre>
 
 <!-- ======================================================================================================= -->
@@ -384,7 +389,8 @@ typedef unsigned long long GLuint64;
           <a class="nonnormative" href="https://www.khronos.org/opengles/sdk/docs/man3/html/glDeleteTransformFeedbacks.xhtml">man page</a>)
         </span>.
     </p>
-    <pre class="idl">interface <dfn id="WebGLTransformFeedback">WebGLTransformFeedback</dfn> : WebGLObject {
+    <pre class="idl">[Exposed=(Window,Worker)]
+interface <dfn id="WebGLTransformFeedback">WebGLTransformFeedback</dfn> : WebGLObject {
 };</pre>
 
 <!-- ======================================================================================================= -->
@@ -409,7 +415,8 @@ typedef unsigned long long GLuint64;
           <a class="nonnormative" href="https://www.khronos.org/opengles/sdk/docs/man3/html/glDeleteVertexArrays.xhtml">man page</a>)
         </span>.
     </p>
-    <pre class="idl">interface <dfn id="WebGLVertexArrayObject">WebGLVertexArrayObject</dfn> : WebGLObject {
+    <pre class="idl">[Exposed=(Window,Worker)]
+interface <dfn id="WebGLVertexArrayObject">WebGLVertexArrayObject</dfn> : WebGLObject {
 };</pre>
 
 <!-- ======================================================================================================= -->
@@ -968,6 +975,7 @@ interface mixin <dfn id="WebGL2RenderingContextBase">WebGL2RenderingContextBase<
   void bindVertexArray(WebGLVertexArrayObject? array);
 };
 
+[Exposed=(Window,Worker)]
 interface <dfn id="WebGL2RenderingContext">WebGL2RenderingContext</dfn>
 {
 };
@@ -1311,6 +1319,29 @@ WebGL2RenderingContext includes WebGL2RenderingContextBase;
         If the buffer is written and read sequentially by other operations and <code>getBufferSubData</code>,
         it is the responsibility of the WebGL API to ensure that data are accessed consistently. This applies
         even if the buffer is currently bound to a transform feedback binding point.
+
+        <div class="note">
+          <p>
+            This is a blocking operation, as WebGL must completely finish all
+            previous writes into the source buffer in order to return a result.
+            In multi-process WebGL implementations, <code>getBufferSubData</code>
+            can also incur an expensive inter-process round-trip to fetch the
+            result from the remote process.
+          </p>
+          <p>
+            The user may be able to avoid these costs by signalling intent to
+            read back from the buffer:
+          </p>
+          <ul>
+            <li>Insert a <code>fenceSync</code> after writing to the source
+              buffer, and wait for it to pass before performing the
+              <code>getBufferSubData</code> operation.
+            <li>Allocate buffers with a <code>_READ</code> usage hint if they are
+              to be used as a readback source. (Avoid overuse of buffers
+              allocated with <code>_READ</code> usage hints, as they may incur
+              overhead in maintaining a shadow copy of the buffer data.)
+          </ul>
+        </div>
       </dd>
     </dl>
 
@@ -1395,6 +1426,10 @@ WebGL2RenderingContext includes WebGL2RenderingContextBase;
           </span>
         </p>
       </dt>
+      <dd>
+          If <code>texture</code> was generated by a different <code>WebGL2RenderingContext</code>
+          than this one, generates an <code>INVALID_OPERATION</code> error.
+      </dd>
       <dt>
         <p class="idl-code">void invalidateFramebuffer(GLenum target, sequence&lt;GLenum&gt; attachments)
           <span class="gl-spec">
@@ -1694,7 +1729,7 @@ WebGL2RenderingContext includes WebGL2RenderingContextBase;
         <tr><td>RGBA32F</td><td>RGBA</td><td>FLOAT</td></tr>
         <tr><td>RGBA8UI</td><td>RGBA_INTEGER</td><td>UNSIGNED_BYTE</td></tr>
         </table>
-        <div class="note rationale">When the data source is a DOM element (<code>HTMLImageElement</code>, <code>HTMLCanvasElement</code>, or <code>HTMLVideoElement</code>), or is an <code>ImageBitmap</code> or <code>ImageData</code> object, commonly each channel's representation is an unsigned integer type of at least 8 bits. Converting such representation to signed integers or unsigned integers with more bits is not clearly defined. For example, when converting RGBA8 to RGBA16UI,  it is unclear whether or not the intention is to scale up values to the full range of a 16-bit unsigned integer. Therefore, only converting to unsigned integer of at most 8 bits, half float, or float is allowed.</div>
+        <div class="note rationale">When the data source is a DOM element (<code>HTMLImageElement</code>, <code>HTMLCanvasElement</code>, or <code>HTMLVideoElement</code>), or is an <code>ImageBitmap</code>, <code>ImageData</code>, or <code>OffscreenCanvas</code> object, commonly each channel's representation is an unsigned integer type of at least 8 bits. Converting such representation to signed integers or unsigned integers with more bits is not clearly defined. For example, when converting RGBA8 to RGBA16UI,  it is unclear whether or not the intention is to scale up values to the full range of a 16-bit unsigned integer. Therefore, only converting to unsigned integer of at most 8 bits, half float, or float is allowed.</div>
       </dd>
 
       <dt class="idl-code"><a name="TEXIMAGE2D_SERVER_SIDE">void texImage2D</a>(GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLint border, GLenum format, GLenum type, GLintptr offset) <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/3.0/es_spec_3.0.4.pdf#nameddest=section-3.8.3">OpenGL ES 3.0.4 &sect;3.8.4</a>, <a class="nonnormative" href="https://www.khronos.org/opengles/sdk/docs/man3/html/glTexImage2D.xhtml">man page</a>)</span>
@@ -1822,7 +1857,7 @@ WebGL2RenderingContext includes WebGL2RenderingContextBase;
         <p>If a WebGLBuffer is bound to the <code>PIXEL_UNPACK_BUFFER</code> target, generates an <code>INVALID_OPERATION</code> error.</p>
         <p>If this function is called with an <code>ImageData</code> whose <code>data</code> attribute has been neutered, an <code>INVALID_VALUE</code> error is generated. </p>
         <p>If this function is called with an <code>ImageBitmap</code> that has been neutered, an <code>INVALID_VALUE</code> error is generated. </p>
-        <p>If this function is called with an <code>HTMLImageElement</code> or <code>HTMLVideoElement</code> whose origin differs from the origin of the containing Document, or with an <code>HTMLCanvasElement</code> or <code>ImageBitmap</code> whose bitmap's <i>origin-clean</i> flag is set to false, a <code>SECURITY_ERR</code> exception must be thrown. See <a href="../1.0/index.html#ORIGIN_RESTRICTIONS">Origin Restrictions</a>.</p>
+        <p>If this function is called with an <code>HTMLImageElement</code> or <code>HTMLVideoElement</code> whose origin differs from the origin of the containing Document, or with an <code>HTMLCanvasElement</code>, <code>ImageBitmap</code>, or <code>OffscreenCanvas</code> whose bitmap's <i>origin-clean</i> flag is set to false, a <code>SECURITY_ERR</code> exception must be thrown. See <a href="../1.0/index.html#ORIGIN_RESTRICTIONS">Origin Restrictions</a>.</p>
       </dd>
 
       <dt class="idl-code"><a name="TEXIMAGE3D_SERVER_SIDE">void texImage3D</a>(GLenum target, GLint level, GLint internalformat, GLsizei width, GLsizei height, GLsizei depth, GLint border, GLenum format, GLenum type, GLintptr offset)
@@ -1895,7 +1930,7 @@ WebGL2RenderingContext includes WebGL2RenderingContextBase;
         <p>If a WebGLBuffer is bound to the <code>PIXEL_UNPACK_BUFFER</code> target, generates an <code>INVALID_OPERATION</code> error.</p>
         <p>If this function is called with an <code>ImageData</code> whose <code>data</code> attribute has been neutered, an <code>INVALID_VALUE</code> error is generated. </p>
         <p>If this function is called with an <code>ImageBitmap</code> that has been neutered, an <code>INVALID_VALUE</code> error is generated. </p>
-        <p>If this function is called with an <code>HTMLImageElement</code> or <code>HTMLVideoElement</code> whose origin differs from the origin of the containing Document, or with an <code>HTMLCanvasElement</code> or <code>ImageBitmap</code> whose bitmap's <i>origin-clean</i> flag is set to false, a <code>SECURITY_ERR</code> exception must be thrown. See <a href="../1.0/index.html#ORIGIN_RESTRICTIONS">Origin Restrictions</a>.</p>
+        <p>If this function is called with an <code>HTMLImageElement</code> or <code>HTMLVideoElement</code> whose origin differs from the origin of the containing Document, or with an <code>HTMLCanvasElement</code>, <code>ImageBitmap</code>, or <code>OffscreenCanvas</code> whose bitmap's <i>origin-clean</i> flag is set to false, a <code>SECURITY_ERR</code> exception must be thrown. See <a href="../1.0/index.html#ORIGIN_RESTRICTIONS">Origin Restrictions</a>.</p>
       </dd>
 
       <dt>
@@ -2088,10 +2123,17 @@ WebGL2RenderingContext includes WebGL2RenderingContextBase;
           </span>
         </p>
       </dt>
+      <dd>
+          If <code>program</code> was generated by a different <code>WebGL2RenderingContext</code>
+          than this one, generates an <code>INVALID_OPERATION</code> error and returns -1.
+      </dd>
       <dt class="idl-code">any getProgramParameter(WebGLProgram? program, GLenum pname)
           <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/3.0/es_spec_3.0.4.pdf#nameddest=section-6.1.12">OpenGL ES 3.0.4 &sect;6.1.12</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/docs/man3/html/glGetProgramiv.xhtml">man page</a>)</span>
       </dt>
       <dd>
+          If <code>program</code> was generated by a different <code>WebGL2RenderingContext</code>
+          than this one, generates an <code>INVALID_OPERATION</code> error and returns null. <br><br>
+
           Return the value for the passed pname given the passed program. The type returned is the natural
           type for the requested pname, as given in the following table:
           <table>
@@ -2125,6 +2167,10 @@ WebGL2RenderingContext includes WebGL2RenderingContextBase;
           </span>
       </dt>
       <dd>
+        If either <code>program</code> or <code>location</code> were generated by a
+        different <code>WebGL2RenderingContext</code> than this one, generates
+        an <code>INVALID_OPERATION</code> error. <br><br>
+
         Return the uniform value at the passed location in the passed program. The type returned is dependent
         on the uniform type. The types returned for the new uniform types in WebGL 2.0 are given in the
         following table:
@@ -2186,6 +2232,9 @@ WebGL2RenderingContext includes WebGL2RenderingContextBase;
         <code>vertexAttrib</code> are guaranteed to be returned from the <code>getVertexAttrib</code> function
         with the <code>CURRENT_VERTEX_ATTRIB</code> param, even if there have been intervening calls to
         <code>drawArrays</code> or <code>drawElements</code>.
+        <br><br>
+        If the array passed to any of the vector forms (those ending in <code>v</code>) is too
+        short, an <code>INVALID_VALUE</code> error will be generated.
       </dd>
       <dt>
         <p class="idl-code">void vertexAttribIPointer(GLuint index, GLint size, GLenum type, GLsizei stride, GLintptr offset)
@@ -2329,7 +2378,6 @@ WebGL2RenderingContext includes WebGL2RenderingContextBase;
         <ul>
           <li>If the <code>CURRENT_PROGRAM</code> is null, an <code>INVALID_OPERATION</code> error will be generated;</li>
           <li><a href="#RANGE_CHECKING">Range Checking</a>;</li>
-          <li><a href="#ENABLED_ATTRIBUTE">Enabled Attribute</a>;</li>
           <li><a href="#ACTIVE_UNIFORM_BLOCK_BACKING">Active Uniform Block Backing</a>;</li>
           <li><a href="#ATTRIBUTE_TYPE_MATCH">VertexAttrib function must match shader attribute type</a>.</li>
         </ul>
@@ -2356,6 +2404,23 @@ WebGL2RenderingContext includes WebGL2RenderingContextBase;
           </p>
           <p>If <code>dstData</code> doesn't have enough space for the read operation starting at
              <code>dstOffset</code>, generate <code>INVALID_OPERATION</code>.
+
+          <div class="note">
+            <p>
+              This is a blocking operation, as WebGL must completely finish all
+              previous rendering operations into the source framebuffer in order
+              to return a result. In multi-process WebGL implementations, it also
+              incurs an expensive inter-process round-trip to fetch the result
+              from the remote process.
+            </p>
+            <p>
+              Consider instead using <code>readPixels</code> into a
+              <code>PIXEL_PACK_BUFFER</code>. Use <code>getBufferSubData</code>
+              to read the data from that buffer.
+              (See <code>getBufferSubData</code> for how to avoid blocking in
+              that call.)
+            </p>
+          </div>
         </dd>
 
         <dt class="idl-code">void readPixels(GLint x, GLint y, GLsizei width, GLsizei height, GLenum format, GLenum type, GLintptr offset)
@@ -2457,6 +2522,8 @@ WebGL2RenderingContext includes WebGL2RenderingContextBase;
         </p>
       </dt>
       <dd>
+        If <code>query</code> was generated by a different <code>WebGL2RenderingContext</code>
+        than this one, generates an <code>INVALID_OPERATION</code> error. <br><br>
         Mark for deletion the query object contained in the passed
         <code class="interface">WebGLQuery</code>, as if by calling glDeleteQueries.
         If the object has already been marked for deletion, the call has no effect. Note that
@@ -2474,6 +2541,9 @@ WebGL2RenderingContext includes WebGL2RenderingContextBase;
       <dd>
         Return true if the passed <code class="interface">WebGLQuery</code> is valid and false otherwise.<br><br>
 
+        Returns false if the query was generated by a different <code>WebGL2RenderingContext</code>
+        than this one. <br><br>
+
         Returns false if the query's <a href="../1.0/index.html#webgl-object-invalidated-flag">invalidated
         flag</a> is set.
       </dd>
@@ -2486,6 +2556,8 @@ WebGL2RenderingContext includes WebGL2RenderingContextBase;
         </p>
       </dt>
       <dd>
+        If <code>query</code> was generated by a different <code>WebGL2RenderingContext</code>
+        than this one, generates an <code>INVALID_OPERATION</code> error. <br><br>
         Begin an asynchronous query. <em>Target</em> indicates the type of query to be performed.
       </dd>
       <dt>
@@ -2532,6 +2604,8 @@ WebGL2RenderingContext includes WebGL2RenderingContextBase;
         </p>
       </dt>
       <dd>
+          If <code>query</code> was generated by a different <code>WebGL2RenderingContext</code>
+          than this one, generates an <code>INVALID_OPERATION</code> error. <br><br>
           <p>Returns a parameter <em>pname</em> of a query object. <code>QUERY_RESULT</code> returns
           the value of the query object's passed samples counter.
           <code>QUERY_RESULT_AVAILABLE</code> returns whether the samples counter is immediately
@@ -2607,6 +2681,8 @@ WebGL2RenderingContext includes WebGL2RenderingContextBase;
         </p>
       </dt>
       <dd>
+        If <code>sampler</code> was generated by a different <code>WebGL2RenderingContext</code>
+        than this one, generates an <code>INVALID_OPERATION</code> error. <br><br>
         Mark for deletion the sampler object contained in the passed
         <code class="interface">WebGLSampler</code>, as if by calling glDeleteSamplers.
         If the object has already been marked for deletion, the call has no effect. Note that
@@ -2624,6 +2700,9 @@ WebGL2RenderingContext includes WebGL2RenderingContextBase;
       <dd>
         Return true if the passed <code class="interface">WebGLSampler</code> is valid and false otherwise. <br><br>
 
+        Returns false if the sampler was generated by a
+        different <code>WebGL2RenderingContext</code> than this one. <br><br>
+
         Returns false if the sampler's <a href="../1.0/index.html#webgl-object-invalidated-flag">invalidated
         flag</a> is set.
       </dd>
@@ -2636,6 +2715,9 @@ WebGL2RenderingContext includes WebGL2RenderingContextBase;
         </p>
       </dt>
       <dd>
+        If <code>sampler</code> was generated by a different <code>WebGL2RenderingContext</code>
+        than this one, generates an <code>INVALID_OPERATION</code> error. <br><br>
+
         Bind the sampler object contained in the passed <code>WebGLSampler</code> to the texture unit at the
         passed index. If a sampler is bound to a texture unit, the sampler's state supersedes the sampling
         state of the texture bound to that texture unit. If <code class="param">sampler</code> is null, the
@@ -2655,6 +2737,9 @@ WebGL2RenderingContext includes WebGL2RenderingContextBase;
         </p>
       </dt>
       <dd>
+        If <code>sampler</code> was generated by a different <code>WebGL2RenderingContext</code>
+        than this one, generates an <code>INVALID_OPERATION</code> error. <br><br>
+
         Set the value for the passed pname given the passed sampler. <em>pname</em> is given in the following table:
         <table>
             <tr><th>pname</th></tr>
@@ -2675,6 +2760,8 @@ WebGL2RenderingContext includes WebGL2RenderingContextBase;
           <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/3.0/es_spec_3.0.4.pdf#nameddest=section-6.1.5">OpenGL ES 3.0.4 &sect;6.1.5</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/docs/man3/html/glGetSamplerParameter.xhtml">man page</a>)</span>
       </dt>
       <dd>
+          If <code>sampler</code> was generated by a different <code>WebGL2RenderingContext</code>
+          than this one, generates an <code>INVALID_OPERATION</code> error. <br><br>
           Return the information requested in pname about the given WebGLSampler, passed as <em>sampler</em>. The
           type returned is dependent on the information requested, as shown in the following table:
           <table>
@@ -2726,6 +2813,9 @@ WebGL2RenderingContext includes WebGL2RenderingContextBase;
       <dd>
           Return true if the passed <code class="interface">WebGLSync</code> is valid and false otherwise. <br><br>
 
+          Returns false if the sync was generated by a different <code>WebGL2RenderingContext</code>
+          than this one. <br><br>
+
           Returns false if the sync's <a href="../1.0/index.html#webgl-object-invalidated-flag">invalidated
           flag</a> is set.
       </dd>
@@ -2738,6 +2828,8 @@ WebGL2RenderingContext includes WebGL2RenderingContextBase;
         </p>
       </dt>
       <dd>
+          If <code>sync</code> was generated by a different <code>WebGL2RenderingContext</code>
+          than this one, generates an <code>INVALID_OPERATION</code> error. <br><br>
           Mark for deletion the sync object contained in the passed
           <code class="interface">WebGLSync</code>, as if by calling glDeleteSync.
           If the object has already been marked for deletion, the call has no effect. Note that
@@ -2753,6 +2845,8 @@ WebGL2RenderingContext includes WebGL2RenderingContextBase;
         </p>
       </dt>
       <dd>
+        If <code>sync</code> was generated by a different <code>WebGL2RenderingContext</code>
+        than this one, generates an <code>INVALID_OPERATION</code> error. <br><br>
         <p>
         Block execution until the passed sync object is signaled or the specified timeout has
         passed. <code>timeout</code> is in units of nanoseconds.
@@ -2813,6 +2907,8 @@ WebGL2RenderingContext includes WebGL2RenderingContextBase;
         </p>
       </dt>
       <dd>
+        If <code>sync</code> was generated by a different <code>WebGL2RenderingContext</code>
+        than this one, generates an <code>INVALID_OPERATION</code> error. <br><br>
         Return immediately, but wait on the GL server until the passed sync object is signaled or an
         implementation-dependent timeout has passed. The passed <em>timeout</em> must be set to
         <code>TIMEOUT_IGNORED</code>.
@@ -2825,6 +2921,8 @@ WebGL2RenderingContext includes WebGL2RenderingContextBase;
           <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/3.0/es_spec_3.0.4.pdf#nameddest=section-6.1.8">OpenGL ES 3.0.4 &sect;6.1.8</a>, <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/docs/man3/html/glGetSynciv.xhtml">man page</a>)</span>
       </dt>
       <dd>
+          If <code>sync</code> was generated by a different <code>WebGL2RenderingContext</code>
+          than this one, generates an <code>INVALID_OPERATION</code> error. <br><br>
           Return the value for the passed pname given the passed WebGLSync object. The type returned is the natural
           type for the requested pname, as given in the following table:
           <table>
@@ -2882,6 +2980,9 @@ WebGL2RenderingContext includes WebGL2RenderingContextBase;
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/3.0/es_spec_3.0.4.pdf#nameddest=section-2.14.1">OpenGL ES 3.0.4 &sect;2.14.1</a>,
             similar to <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/docs/man3/html/glDeleteTransformFeedbacks.xhtml">glDeleteTransformFeedbacks</a>)</span>
         <dd>
+            If <code>transformFeedback</code> was generated by a different <code>WebGL2RenderingContext</code>
+            than this one, generates an <code>INVALID_OPERATION</code> error. <br><br>
+
             Mark for deletion the transform feedback object contained in the passed
             <code class="interface">WebGLTransformFeedback</code>, as if by calling
             glDeleteTransformFeedbacks.
@@ -2895,6 +2996,9 @@ WebGL2RenderingContext includes WebGL2RenderingContextBase;
         <dd>
             Return true if the passed <code class="interface">WebGLTransformFeedback</code> is valid and false otherwise. <br><br>
 
+            Returns false if the transform feedback was generated by a
+            different <code>WebGL2RenderingContext</code> than this one. <br><br>
+
             Returns false if the transform feedback's <a href="../1.0/index.html#webgl-object-invalidated-flag">invalidated
             flag</a> is set.
 
@@ -2902,6 +3006,10 @@ WebGL2RenderingContext includes WebGL2RenderingContextBase;
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/3.0/es_spec_3.0.4.pdf#nameddest=section-2.14.1">OpenGL ES 3.0.4 &sect;2.14.1</a>,
             <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/docs/man3/html/glBindTransformFeedback.xhtml">man page</a>)</span>
         <dd>
+            If <code>transformFeedback</code> was generated by a
+            different <code>WebGL2RenderingContext</code> than this one, generates
+            an <code>INVALID_OPERATION</code> error. <br><br>
+
             Bind the given <code class="interface">WebGLTransformFeedback</code> object.
             If <code class="param">transformFeedback</code> is null, the default transform feedback object provided by the context
             is bound.
@@ -2932,11 +3040,16 @@ WebGL2RenderingContext includes WebGL2RenderingContextBase;
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/3.0/es_spec_3.0.4.pdf#nameddest=section-2.11.8">OpenGL ES 3.0.4 &sect;2.11.8</a>,
             <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/docs/man3/html/glTransformFeedbackVaryings.xhtml">man page</a>)</span>
         <dd>
+            If <code>program</code> was generated by a different <code>WebGL2RenderingContext</code>
+            than this one, generates an <code>INVALID_OPERATION</code> error. <br><br>
 
         <dt class="idl-code">WebGLActiveInfo? getTransformFeedbackVarying(WebGLProgram program, GLuint index)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/3.0/es_spec_3.0.4.pdf#nameddest=section-2.11.8">OpenGL ES 3.0.4 &sect;2.11.8</a>,
             <a class="nonnormative" href="http://www.khronos.org/opengles/sdk/docs/man3/html/glGetTransformFeedbackVarying.xhtml">man page</a>)</span>
         <dd>
+            If <code>program</code> was generated by a different <code>WebGL2RenderingContext</code>
+            than this one, generates an <code>INVALID_OPERATION</code> error and returns null. <br><br>
+
     </dl>
 
 <!-- ======================================================================================================= -->
@@ -2953,6 +3066,9 @@ WebGL2RenderingContext includes WebGL2RenderingContextBase;
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/3.0/es_spec_3.0.4.pdf#nameddest=section-2.9.1">OpenGL ES 3.0.4 &sect;2.9.1</a>,
             <a class="nonnormative" href="https://www.khronos.org/opengles/sdk/docs/man3/html/glBindBufferBase.xhtml">man page</a>)</span>
         <dd>
+            If <code>buffer</code> was generated by a different <code>WebGL2RenderingContext</code>
+            than this one, generates an <code>INVALID_OPERATION</code> error. <br><br>
+
             Binds the given <code class="interface">WebGLBuffer</code> object to the binding point at <code class="param">index</code> of the array of targets
             specified by <code class="param">target</code>.
 
@@ -2960,6 +3076,9 @@ WebGL2RenderingContext includes WebGL2RenderingContextBase;
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/3.0/es_spec_3.0.4.pdf#nameddest=section-2.9.1">OpenGL ES 3.0.4 &sect;2.9.1</a>,
             <a class="nonnormative" href="https://www.khronos.org/opengles/sdk/docs/man3/html/glBindBufferRange.xhtml">man page</a>)</span>
         <dd>
+            If <code>buffer</code> was generated by a different <code>WebGL2RenderingContext</code>
+            than this one, generates an <code>INVALID_OPERATION</code> error. <br><br>
+
             Binds a range of the <code class="interface">WebGLBuffer</code> object buffer represented by <code class="param">offset</code> and <code class="param">size</code>
             to the binding point at <code class="param">index</code> of the array of targets specified by <code class="param">target</code>.
 
@@ -2967,12 +3086,22 @@ WebGL2RenderingContext includes WebGL2RenderingContextBase;
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/3.0/es_spec_3.0.4.pdf#nameddest=section-2.11.6">OpenGL ES 3.0.4 &sect;2.11.6</a>,
             <a class="nonnormative" href="https://www.khronos.org/opengles/sdk/docs/man3/html/glGetUniformIndices.xhtml">man page</a>)</span>
         <dd>
-            Retrieves the indices of a number of uniforms within <code class="param">program</code>.
+            If <code>program</code> was generated by a different
+            <code>WebGL2RenderingContext</code> than this one, generates
+            an <code>INVALID_OPERATION</code> error. <br><br>
+
+            Retrieves the indices of a number of uniforms within <code class="param">program</code>. <br><br>
+
+            Returns null if any OpenGL errors are generated during the execution of this
+            function.
 
         <dt class="idl-code">any getActiveUniforms(WebGLProgram program, sequence&lt;GLuint&gt; uniformIndices, GLenum pname)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/3.0/es_spec_3.0.4.pdf#nameddest=section-2.11.6">OpenGL ES 3.0.4 &sect;2.11.6</a>,
             <a class="nonnormative" href="https://www.khronos.org/opengles/sdk/docs/man3/html/glGetActiveUniformsiv.xhtml">man page</a>)</span>
         <dd>
+            If <code>program</code> was generated by a different <code>WebGL2RenderingContext</code>
+            than this one, generates an <code>INVALID_OPERATION</code> error. <br><br>
+
             Queries the value of the parameter named <code class="param">pname</code> for each of the uniforms within <code class="param">program</code> whose indices
             are specified in the array of <code class="param">uniformIndices</code>. The type returned is the natural type for the requested
             <code class="param">pname</code>, as given in the following table:
@@ -2988,16 +3117,25 @@ WebGL2RenderingContext includes WebGL2RenderingContextBase;
             </table><br>
             <p>If <code class="param">pname</code> is not in the table above, generates an <code>INVALID_ENUM</code> error.</p>
 
+            <p>Returns null if any OpenGL errors are generated during the execution of this
+            function.</p>
+
         <dt class="idl-code">GLuint getUniformBlockIndex(WebGLProgram program, DOMString uniformBlockName)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/3.0/es_spec_3.0.4.pdf#nameddest=section-2.11.6">OpenGL ES 3.0.4 &sect;2.11.6</a>,
             <a class="nonnormative" href="https://www.khronos.org/opengles/sdk/docs/man3/html/glGetUniformBlockIndex.xhtml">man page</a>)</span>
         <dd>
+            If <code>program</code> was generated by a different <code>WebGL2RenderingContext</code>
+            than this one, generates an <code>INVALID_OPERATION</code> error. <br><br>
+
             Retrieves the index of a uniform block within <code class="param">program</code>.
 
         <dt class="idl-code">any getActiveUniformBlockParameter(WebGLProgram program, GLuint uniformBlockIndex, GLenum pname)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/3.0/es_spec_3.0.4.pdf#nameddest=section-2.11.6">OpenGL ES 3.0.4 &sect;2.11.6</a>,
             <a class="nonnormative" href="https://www.khronos.org/opengles/sdk/docs/man3/html/glGetActiveUniformBlockiv.xhtml">man page</a>)</span>
         <dd>
+            If <code>program</code> was generated by a different <code>WebGL2RenderingContext</code>
+            than this one, generates an <code>INVALID_OPERATION</code> error. <br><br>
+
             Retrieves information about an active uniform block within <code class="param">program</code>. The type returned is the natural type for the requested
             <code class="param">pname</code>, as given in the following table:
             <table class="foo">
@@ -3018,12 +3156,18 @@ WebGL2RenderingContext includes WebGL2RenderingContextBase;
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/3.0/es_spec_3.0.4.pdf#nameddest=section-2.11.6">OpenGL ES 3.0.4 &sect;2.11.6</a>,
             <a class="nonnormative" href="https://www.khronos.org/opengles/sdk/docs/man3/html/glGetActiveUniformBlockName.xhtml">man page</a>)</span>
         <dd>
+            If <code>program</code> was generated by a different <code>WebGL2RenderingContext</code>
+            than this one, generates an <code>INVALID_OPERATION</code> error. <br><br>
+
             Retrieves the name of the active uniform block at <code class="param">uniformBlockIndex</code> within <code class="param">program</code>.
 
         <dt class="idl-code">void uniformBlockBinding(WebGLProgram program, GLuint uniformBlockIndex, GLuint uniformBlockBinding)
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/3.0/es_spec_3.0.4.pdf#nameddest=section-2.11.6">OpenGL ES 3.0.4 &sect;2.11.6</a>,
             <a class="nonnormative" href="https://www.khronos.org/opengles/sdk/docs/man3/html/glUniformBlockBinding.xhtml">man page</a>)</span>
         <dd>
+            If <code>program</code> was generated by a different <code>WebGL2RenderingContext</code>
+            than this one, generates an <code>INVALID_OPERATION</code> error. <br><br>
+
             Assigns binding points for active uniform blocks.
     </dl>
 
@@ -3041,6 +3185,10 @@ WebGL2RenderingContext includes WebGL2RenderingContextBase;
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/3.0/es_spec_3.0.4.pdf#nameddest=section-2.10">OpenGL ES 3.0.4 &sect;2.10</a>,
             <a class="nonnormative" href="https://www.khronos.org/opengles/sdk/docs/man3/html/glBindVertexArray.xhtml">man page</a>)</span>
         <dd>
+            If <code>vertexArray</code> was generated by a
+            different <code>WebGL2RenderingContext</code> than this one, generates
+            an <code>INVALID_OPERATION</code> error. <br><br>
+
             Bind the given <code class="interface">WebGLVertexArrayObject</code> object.
             If <code class="param">vertexArray</code> is null, the default vertex array provided by the context
             is bound.
@@ -3058,6 +3206,10 @@ WebGL2RenderingContext includes WebGL2RenderingContextBase;
             <span class="gl-spec">(<a href="http://www.khronos.org/registry/gles/specs/3.0/es_spec_3.0.4.pdf#nameddest=section-2.10">OpenGL ES 3.0.4 &sect;2.10</a>,
             similar to <a class="nonnormative" href="https://www.khronos.org/opengles/sdk/docs/man3/html/glDeleteVertexArrays.xhtml">glDeleteVertexArrays</a>)</span>
         <dd>
+            If <code>vertexArray</code> was generated by a
+            different <code>WebGL2RenderingContext</code> than this one, generates
+            an <code>INVALID_OPERATION</code> error. <br><br>
+
             Mark for deletion the vertex array object contained in the passed
             <code class="interface">WebGLVertexArrayObject</code>, as if by calling
             glDeleteVertexArrays.
@@ -3070,6 +3222,9 @@ WebGL2RenderingContext includes WebGL2RenderingContextBase;
             <a class="nonnormative" href="https://www.khronos.org/opengles/sdk/docs/man3/html/glIsVertexArray.xhtml">man page</a>)</span>
         <dd>
             Return true if the passed <code class="interface">WebGLVertexArrayObject</code> is valid and false otherwise. <br><br>
+
+            Returns false if the vertex array was generated by a different <code>WebGL2RenderingContext</code>
+            than this one. <br><br>
 
             Returns false if the vertex array's <a href="../1.0/index.html#webgl-object-invalidated-flag">invalidated
             flag</a> is set.
@@ -3338,6 +3493,20 @@ WebGL2RenderingContext includes WebGL2RenderingContextBase;
         OpenGL ES 3.0.5 &sect;2.15.2</a>)</span>
     </div>
 
+    <p>
+        In case the same buffer is bound to more than one binding point in the active transform feedback,
+        <code>beginTransformFeedback</code> generates an <code>INVALID_OPERATION</code> error.
+    </p>
+
+    <div class="note">
+        This can happen only in <code>SEPARATE_ATTRIBS</code> mode.
+    </div>
+
+    <div class="note rationale">
+        This is a restriction from D3D11, where writing two different streams to the same buffer is not
+        allowed.
+    </div>
+
     <h3>Draw Buffers</h3>
 
     <p>
@@ -3396,19 +3565,6 @@ WebGL2RenderingContext includes WebGL2RenderingContextBase;
         The OpenGL robustness extensions do not specify what happens if indices above MAX_ELEMENT_INDEX are
         used, so passing them to the driver is risky. On platforms where MAX_ELEMENT_INDEX is the same as
         the maximum unsigned integer value this section will have no effect.
-    </div>
-
-    <h3><a name="ENABLED_ATTRIBUTE">Enabled Attribute</a></h3>
-
-    <p>
-        In the WebGL 2.0 API, attempting to draw with <code>drawArrays</code>, <code>drawElements</code>,
-        <code>drawRangeElements</code> or their instanced variants generates an <code>INVALID_OPERATION</code>
-        error if there is not at least one enabled vertex attribute array that has a divisor of zero and is
-        bound to an active generic attribute value in the program used for the draw command.
-    </p>
-    <div class="note rationale">
-        The removed functionality is an exotic corner case, and Direct3D based implementations of WebGL would
-        need to add complex workarounds to support it.
     </div>
 
     <h3><a name="ACTIVE_UNIFORM_BLOCK_BACKING">Active Uniform Block Backing</a></h3>
@@ -3954,6 +4110,22 @@ WebGL2RenderingContext includes WebGL2RenderingContextBase;
         and <a href="#CLIENT_WAIT_SYNC">clientWaitSync</a> for discussion and rationale.
     </p>
 
+    <h3>blitFramebuffer rectangle width/height limitations</h3>
+
+    <p>
+        <code>blitFramebuffer()</code> src* and dst* parameters must be set so that the resulting
+        width and height of the source and destination rectangles are less than or equal to the
+        maximum value that can be stored in a GLint. In case computing any of the width or height
+        values as a GLint results in integer overflow, <code>blitFramebuffer()</code> generates an
+        <code>INVALID_VALUE</code> error.
+    </p>
+
+    <div class="note rationale">
+        Using larger than max 32-bit int sized rectangles for blitFramebuffer triggers issues on
+        most desktop OpenGL drivers, and there is no general workaround for cases where
+        blitFramebuffer is used to scale the framebuffer.
+    </div>
+
 <!-- ======================================================================================================= -->
 
     <h2>References</h2>
@@ -3968,6 +4140,11 @@ WebGL2RenderingContext includes WebGL2RenderingContextBase;
         <dd><cite><a href="http://www.w3.org/TR/html5/scripting-1.html#the-canvas-element">
             HTML5: The Canvas Element</a></cite>,
             World Wide Web Consortium (W3C).
+        </dd>
+        <dt id="refsOFFSCREENCANVAS">[OFFSCREENCANVAS]</dt>
+        <dd><cite><a href="https://html.spec.whatwg.org/multipage/canvas.html#the-offscreencanvas-interface">
+            HTML Living Standard - The OffscreenCanvas interface</a></cite>,
+            WHATWG.
         </dd>
         <dt id="refsCANVASCONTEXTS">[CANVASCONTEXTS]</dt>
         <dd><cite><a href="http://wiki.whatwg.org/wiki/CanvasContexts">

@@ -13,13 +13,19 @@
 #include "base/files/file_path.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted_delete_on_sequence.h"
+#include "base/optional.h"
 #include "base/sequence_checker.h"
 #include "base/time/time.h"
 #include "components/download/public/common/download_item.h"
 #include "content/browser/background_fetch/background_fetch_constants.h"
 #include "content/common/content_export.h"
 #include "content/common/service_worker/service_worker_types.h"
+#include "content/public/browser/background_fetch_response.h"
 #include "url/gurl.h"
+
+namespace storage {
+class BlobDataHandle;
+}
 
 namespace content {
 
@@ -43,10 +49,12 @@ class CONTENT_EXPORT BackgroundFetchRequestInfo
   // retrieved from storage). Can only be used if no GUID is already set.
   void SetDownloadGuid(const std::string& download_guid);
 
-  // Populates the cached state for the in-progress download.
-  void PopulateWithResponse(std::unique_ptr<BackgroundFetchResponse> response);
-
   void SetResult(std::unique_ptr<BackgroundFetchResult> result);
+
+  // Creates an empty result, with no response, and assigns |failure_reason|
+  // as its failure_reason.
+  void SetEmptyResultWithFailureReason(
+      BackgroundFetchResult::FailureReason failure_reason);
 
   // Returns the index of this request within a Background Fetch registration.
   int request_index() const { return request_index_; }
@@ -75,6 +83,10 @@ class CONTENT_EXPORT BackgroundFetchRequestInfo
   // Returns the URL chain for the response, including redirects.
   const std::vector<GURL>& GetURLChain() const;
 
+  // Returns the blob data handle for the response. Only available when dealing
+  // with in-memory downloads.
+  const base::Optional<storage::BlobDataHandle>& GetBlobDataHandle() const;
+
   // Returns the absolute path to the file in which the response is stored.
   const base::FilePath& GetFilePath() const;
 
@@ -84,10 +96,16 @@ class CONTENT_EXPORT BackgroundFetchRequestInfo
   // Returns the time at which the response was completed.
   const base::Time& GetResponseTime() const;
 
+  // Whether the BackgroundFetchResult was successful.
+  bool IsResultSuccess() const;
+
  private:
   friend class base::RefCountedDeleteOnSequence<BackgroundFetchRequestInfo>;
   friend class base::DeleteHelper<BackgroundFetchRequestInfo>;
   friend class BackgroundFetchCrossOriginFilterTest;
+
+  // Extracts the headers and the status code.
+  void PopulateWithResponse(std::unique_ptr<BackgroundFetchResponse> response);
 
   ~BackgroundFetchRequestInfo();
 

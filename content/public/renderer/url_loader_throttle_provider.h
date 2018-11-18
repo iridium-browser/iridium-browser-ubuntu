@@ -28,6 +28,9 @@ class CONTENT_EXPORT URLLoaderThrottleProvider {
  public:
   virtual ~URLLoaderThrottleProvider() {}
 
+  // Used to copy a URLLoaderThrottleProvider between worker threads.
+  virtual std::unique_ptr<URLLoaderThrottleProvider> Clone() = 0;
+
   // For requests from frames and dedicated workers, |render_frame_id| should be
   // set to the corresponding frame. For requests from shared or
   // service workers, |render_frame_id| should be set to MSG_ROUTING_NONE.
@@ -35,6 +38,9 @@ class CONTENT_EXPORT URLLoaderThrottleProvider {
       int render_frame_id,
       const blink::WebURLRequest& request,
       ResourceType resource_type) = 0;
+
+  // Set the network status online state as specified in |is_online|.
+  virtual void SetOnline(bool is_online) = 0;
 };
 
 }  // namespace content

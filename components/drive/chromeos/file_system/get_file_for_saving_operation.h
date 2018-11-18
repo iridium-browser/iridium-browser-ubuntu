@@ -58,7 +58,7 @@ class GetFileForSavingOperation {
   // watched and is automatically notified to the delegate. If the entry is not
   // present in the file system, it is created.
   void GetFileForSaving(const base::FilePath& file_path,
-                        const GetFileCallback& callback);
+                        GetFileCallback callback);
 
   internal::FileWriteWatcher* file_write_watcher_for_testing() {
     return file_write_watcher_.get();
@@ -66,19 +66,19 @@ class GetFileForSavingOperation {
 
  private:
   void GetFileForSavingAfterCreate(const base::FilePath& file_path,
-                                   const GetFileCallback& callback,
+                                   GetFileCallback callback,
                                    FileError error);
-  void GetFileForSavingAfterDownload(const GetFileCallback& callback,
+  void GetFileForSavingAfterDownload(GetFileCallback callback,
                                      FileError error,
                                      const base::FilePath& cache_path,
                                      std::unique_ptr<ResourceEntry> entry);
   void GetFileForSavingAfterOpenForWrite(
-      const GetFileCallback& callback,
+      GetFileCallback callback,
       const base::FilePath& cache_path,
       std::unique_ptr<ResourceEntry> entry,
       std::unique_ptr<base::ScopedClosureRunner>* file_closer,
       FileError error);
-  void GetFileForSavingAfterWatch(const GetFileCallback& callback,
+  void GetFileForSavingAfterWatch(GetFileCallback callback,
                                   const base::FilePath& cache_path,
                                   std::unique_ptr<ResourceEntry> entry,
                                   bool success);
@@ -95,7 +95,7 @@ class GetFileForSavingOperation {
   internal::ResourceMetadata* metadata_;
   internal::FileCache* cache_;
 
-  base::ThreadChecker thread_checker_;
+  THREAD_CHECKER(thread_checker_);
 
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate the weak pointers before any other members are destroyed.

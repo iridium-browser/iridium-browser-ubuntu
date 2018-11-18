@@ -29,8 +29,8 @@ TEST(WebProcessMemoryDumpTest, IntegrationTest) {
       new base::trace_event::TracedValue());
 
   std::unique_ptr<WebProcessMemoryDump> wpmd1(new WebProcessMemoryDump());
-  auto wmad1 = wpmd1->CreateMemoryAllocatorDump("1/1");
-  auto wmad2 = wpmd1->CreateMemoryAllocatorDump("1/2");
+  auto* wmad1 = wpmd1->CreateMemoryAllocatorDump("1/1");
+  auto* wmad2 = wpmd1->CreateMemoryAllocatorDump("1/2");
   ASSERT_EQ(wmad1, wpmd1->GetMemoryAllocatorDump("1/1"));
   ASSERT_EQ(wmad2, wpmd1->GetMemoryAllocatorDump("1/2"));
 
@@ -48,10 +48,10 @@ TEST(WebProcessMemoryDumpTest, IntegrationTest) {
   ASSERT_TRUE(wpmd2->process_memory_dump()->allocator_dumps().empty());
 
   // Make sure that wpmd2 is still usable after it has been emptied.
-  auto wmad = wpmd2->CreateMemoryAllocatorDump("2/new");
+  auto* wmad = wpmd2->CreateMemoryAllocatorDump("2/new");
   wmad->AddScalar("attr_name", "bytes", 42);
   ASSERT_EQ(1u, wpmd2->process_memory_dump()->allocator_dumps().size());
-  auto mad = wpmd2->process_memory_dump()->GetAllocatorDump("2/new");
+  auto* mad = wpmd2->process_memory_dump()->GetAllocatorDump("2/new");
   ASSERT_NE(static_cast<MemoryAllocatorDump*>(nullptr), mad);
   ASSERT_EQ(wmad, wpmd2->GetMemoryAllocatorDump("2/new"));
 
@@ -61,8 +61,6 @@ TEST(WebProcessMemoryDumpTest, IntegrationTest) {
 
   // Check that calling serialization routines doesn't cause a crash.
   wpmd2->process_memory_dump()->SerializeAllocatorDumpsInto(traced_value.get());
-  wpmd2->process_memory_dump()->SerializeHeapProfilerDumpsInto(
-      traced_value.get());
 
   // Free the |wpmd2| to check that the memory ownership of the two MAD(s)
   // has been transferred to |wpmd1|.
@@ -85,8 +83,6 @@ TEST(WebProcessMemoryDumpTest, IntegrationTest) {
   // Check that calling serialization routines doesn't cause a crash.
   traced_value.reset(new base::trace_event::TracedValue);
   wpmd1->process_memory_dump()->SerializeAllocatorDumpsInto(traced_value.get());
-  wpmd1->process_memory_dump()->SerializeHeapProfilerDumpsInto(
-      traced_value.get());
 
   // Check that clear() actually works.
   wpmd1->Clear();
@@ -97,18 +93,16 @@ TEST(WebProcessMemoryDumpTest, IntegrationTest) {
   // Check that calling serialization routines doesn't cause a crash.
   traced_value.reset(new base::trace_event::TracedValue);
   wpmd1->process_memory_dump()->SerializeAllocatorDumpsInto(traced_value.get());
-  wpmd1->process_memory_dump()->SerializeHeapProfilerDumpsInto(
-      traced_value.get());
 
   // Check if a WebMemoryAllocatorDump created with guid, has correct guid.
   blink::WebMemoryAllocatorDumpGuid guid =
       base::trace_event::MemoryAllocatorDumpGuid("id_1").ToUint64();
-  auto wmad3 = wpmd1->CreateMemoryAllocatorDump("1/3", guid);
+  auto* wmad3 = wpmd1->CreateMemoryAllocatorDump("1/3", guid);
   ASSERT_EQ(wmad3->Guid(), guid);
   ASSERT_EQ(wmad3, wpmd1->GetMemoryAllocatorDump("1/3"));
 
   // Check that AddOwnershipEdge is propagated correctly.
-  auto wmad4 = wpmd1->CreateMemoryAllocatorDump("1/4");
+  auto* wmad4 = wpmd1->CreateMemoryAllocatorDump("1/4");
   wpmd1->AddOwnershipEdge(wmad4->Guid(), guid);
   auto allocator_dumps_edges =
       wpmd1->process_memory_dump()->allocator_dumps_edges();
@@ -119,7 +113,7 @@ TEST(WebProcessMemoryDumpTest, IntegrationTest) {
   ASSERT_EQ(guid, it->second.target.ToUint64());
 
   // Check that createDumpAdapterForSkia() works.
-  auto skia_trace_memory_dump = wpmd1->CreateDumpAdapterForSkia("1/skia");
+  auto* skia_trace_memory_dump = wpmd1->CreateDumpAdapterForSkia("1/skia");
   ASSERT_TRUE(skia_trace_memory_dump);
 
   // Check that createDiscardableMemoryAllocatorDump() works.

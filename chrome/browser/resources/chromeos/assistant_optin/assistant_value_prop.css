@@ -4,71 +4,78 @@
 
 #value-prop-view {
   display: block;
-  height: 372px;
+  height: 256px;
   margin: auto;
-  padding: 0;
 }
 
-.value-prop-loading #retry-button,
-.value-prop-loaded #retry-button,
-.value-prop-error #next-button {
-  display: none;
+#intro-text {
+  padding: 0 8px 16px 0;
 }
 
-#loading-container,
-#error-container,
-#view-container {
-  position: absolute;
-  visibility: hidden;
-  width: 480px;
+#value-prop-container {
+  border-right: 1px solid rgb(218, 220, 224);
+  width: 50%;
 }
 
-.value-prop-loading-animation #loading-container,
-.value-prop-loaded #view-container,
-.value-prop-error #error-container {
-  visibility: visible;
+#consents-container {
+  padding-left: 24px;
+  width: 50%;
 }
 
-.value-prop-loading #retry-button,
-.value-prop-loading #next-button,
-.value-prop-loading #skip-button {
-  pointer-events: none;
+#user-name {
+  color: #757575;
+  padding-left: 8px;
 }
 
-.title {
-  font-size: 18px;
+#footer-text {
+  color: #757575;
+  padding-top: 16px;
 }
 
-#subtitle {
-  font-size: 12px;
-  padding: 14px 0 0 0;
+#user-image {
+  border-radius: 50%;
+  height: 20px;
 }
 
-#loading-message {
-  color: rgba(0, 0, 0, .54);
-  font-size: 12px;
-  line: 17px;
-  padding: 168px 0 0 0;
+.oobe-popup {
+  border-radius: 8px;
+  box-shadow: unset;
+  width: 512px;
 }
 
-paper-progress {
-  --paper-progress-active-color: rgb(66, 133, 244);
-  --paper-progress-container-color: #CEE0FC;
-  --paper-progress-secondary-color: rgb(66, 133, 244);
-  display: block;
-  height: 3px;
-  padding: 4px 0 0 0;
+#overlay-text {
+  box-sizing: border-box;
+  font-size: 13px;
+  margin: auto;
+  min-height: 200px;
+  padding: 16px;
   width: 100%;
 }
 
-#skip-button {
-  color: rgb(66, 133, 244);
+#overlay-title-text {
+  font-size: 15px;
 }
 
-#retry-button {
-  -webkit-margin-end: 18px;
+#overlay-additional-info-text {
+  color: rgb(128, 134, 139);
+  line-height: 20px;
+  padding-top: 20px;
 }
 
-#next-button {
-  -webkit-margin-end: 18px;
+#overlay-close-button {
+  margin-right: 0;
+}
+
+#close-button-text {
+  padding: 0 16px 0 16px;
+}
+
+.button-strip {
+  display: flex;
+  justify-content: flex-end;
+  margin: 16px;
+}
+
+oobe-text-button[disabled] {
+  pointer-events: none;
 }

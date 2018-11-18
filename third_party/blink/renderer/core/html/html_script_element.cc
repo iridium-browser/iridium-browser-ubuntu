@@ -23,7 +23,6 @@
 
 #include "third_party/blink/renderer/core/html/html_script_element.h"
 
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
 #include "third_party/blink/renderer/bindings/core/v8/html_script_element_or_svg_script_element.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_event_listener.h"
 #include "third_party/blink/renderer/core/dom/attribute.h"
@@ -35,6 +34,7 @@
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/script/script_loader.h"
 #include "third_party/blink/renderer/core/script/script_runner.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 
 namespace blink {
 
@@ -44,12 +44,17 @@ inline HTMLScriptElement::HTMLScriptElement(Document& document,
                                             const CreateElementFlags flags)
     : HTMLElement(scriptTag, document),
       loader_(InitializeScriptLoader(flags.IsCreatedByParser(),
-                                     flags.WasAlreadyStarted(),
-                                     flags.IsCreatedDuringDocumentWrite())) {}
+                                     flags.WasAlreadyStarted())) {}
 
 HTMLScriptElement* HTMLScriptElement::Create(Document& document,
                                              const CreateElementFlags flags) {
   return new HTMLScriptElement(document, flags);
+}
+
+const HashSet<AtomicString>& HTMLScriptElement::GetCheckedAttributeNames()
+    const {
+  DEFINE_STATIC_LOCAL(HashSet<AtomicString>, attribute_set, ({"src", "text"}));
+  return attribute_set;
 }
 
 bool HTMLScriptElement::IsURLAttribute(const Attribute& attribute) const {
@@ -89,10 +94,11 @@ void HTMLScriptElement::ParseAttribute(
 }
 
 Node::InsertionNotificationRequest HTMLScriptElement::InsertedInto(
-    ContainerNode* insertion_point) {
+    ContainerNode& insertion_point) {
   ScriptType script_type = ScriptType::kClassic;
-  if (insertion_point->isConnected() && HasSourceAttribute() &&
-      !Loader()->IsScriptTypeSupported(
+  if (insertion_point.isConnected() && HasSourceAttribute() &&
+      !ScriptLoader::IsValidScriptTypeAndLanguage(
+          TypeAttributeValue(), LanguageAttributeValue(),
           ScriptLoader::kDisallowLegacyTypeInTypeAttribute, script_type)) {
     UseCounter::Count(GetDocument(),
                       WebFeature::kScriptElementWithInvalidTypeHasSrc);
@@ -160,6 +166,10 @@ String HTMLScriptElement::IntegrityAttributeValue() const {
   return getAttribute(integrityAttr);
 }
 
+String HTMLScriptElement::ReferrerPolicyAttributeValue() const {
+  return getAttribute(referrerpolicyAttr);
+}
+
 String HTMLScriptElement::TextFromChildren() {
   return Element::TextFromChildren();
 }
@@ -204,12 +214,11 @@ Document& HTMLScriptElement::GetDocument() const {
 }
 
 void HTMLScriptElement::DispatchLoadEvent() {
-  DCHECK(!loader_->HaveFiredLoadEvent());
-  DispatchEvent(Event::Create(EventTypeNames::load));
+  DispatchEvent(*Event::Create(EventTypeNames::load));
 }
 
 void HTMLScriptElement::DispatchErrorEvent() {
-  DispatchEvent(Event::Create(EventTypeNames::error));
+  DispatchEvent(*Event::Create(EventTypeNames::error));
 }
 
 void HTMLScriptElement::SetScriptElementForBinding(
@@ -230,12 +239,6 @@ void HTMLScriptElement::Trace(blink::Visitor* visitor) {
   visitor->Trace(loader_);
   HTMLElement::Trace(visitor);
   ScriptElementBase::Trace(visitor);
-}
-
-void HTMLScriptElement::TraceWrappers(
-    const ScriptWrappableVisitor* visitor) const {
-  visitor->TraceWrappers(loader_);
-  HTMLElement::TraceWrappers(visitor);
 }
 
 }  // namespace blink

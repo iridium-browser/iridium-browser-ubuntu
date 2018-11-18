@@ -23,11 +23,10 @@ from chromite.lib import cros_build_lib
 from chromite.lib import cros_logging as logging
 from chromite.lib import namespaces
 from chromite.lib import osutils
-from chromite.lib import parallel
+from chromite.lib import path_util
 from chromite.lib import qemu
 from chromite.lib import remote_access
 from chromite.lib import retry_util
-from chromite.lib import timeout_util
 from chromite.lib import toolchain
 
 class GdbException(Exception):
@@ -69,14 +68,19 @@ class GdbEarlyExitError(GdbException):
 class GdbCannotDetectBoardError(GdbException):
   """Raised when board isn't specified and can't be automatically determined."""
 
+class GdbSimpleChromeBinaryError(GdbException):
+  """Raised when none or multiple chrome binaries are under out_${board} dir."""
 
 class BoardSpecificGdb(object):
   """Framework for running gdb."""
 
   _BIND_MOUNT_PATHS = ('dev', 'dev/pts', 'proc', 'mnt/host/source', 'sys')
   _GDB = '/usr/bin/gdb'
-  _EXTRA_SSH_SETTINGS = {'CheckHostIP': 'no',
-                         'BatchMode': 'yes'}
+  _EXTRA_SSH_SETTINGS = {
+      'CheckHostIP': 'no',
+      'BatchMode': 'yes',
+      'LogLevel': 'QUIET'
+  }
   _MISSING_DEBUG_INFO_MSG = """
 %(inf_cmd)s is stripped and %(debug_file)s does not exist on your local machine.
   The debug symbols for that package may not be installed.  To install the debug
@@ -89,7 +93,7 @@ To install the debug symbols for all available packages, run:
    cros_install_debug_syms --board=%(board)s --all"""
 
   def __init__(self, board, gdb_args, inf_cmd, inf_args, remote, pid,
-               remote_process_name, cgdb_flag, ping):
+               remote_process_name, cgdb_flag, ping, binary):
     self.board = board
     self.sysroot = None
     self.prompt = '(gdb) '
@@ -112,6 +116,58 @@ To install the debug symbols for all available packages, run:
     self.device = None
     self.cross_gdb = None
     self.ping = ping
+    self.binary = binary
+    self.in_chroot = None
+    self.chrome_path = None
+    self.sdk_path = None
+
+  def IsInChroot(self):
+    """Decide whether we are in chroot or chrome-sdk."""
+    return os.path.exists("/mnt/host/source/chromite/")
+
+  def SimpleChromeGdb(self):
+    """Get the name of the cross gdb based on board name."""
+    bin_path = self.board + '+' + os.environ['SDK_VERSION'] + '+' + \
+               'target_toolchain'
+    bin_path = os.path.join(self.sdk_path, bin_path, 'bin')
+    for f in os.listdir(bin_path):
+      if f.endswith('gdb'):
+        return os.path.join(bin_path, f)
+    raise GdbMissingDebuggerError('Cannot find cros gdb for %s.'
+                                  % self.board)
+
+  def SimpleChromeSysroot(self):
+    """Get the sysroot in simple chrome."""
+    sysroot = self.board + '+' + os.environ['SDK_VERSION'] + \
+              '+' + 'sysroot_chromeos-base_chromeos-chrome.tar.xz'
+    sysroot = os.path.join(self.sdk_path, sysroot)
+    if not os.path.isdir(sysroot):
+      raise GdbMissingSysrootError('Cannot find sysroot for %s at.'
+                                   ' %s' % self.board, sysroot)
+    return sysroot
+
+  def GetSimpleChromeBinary(self):
+    """Get path to the  binary in simple chrome."""
+    if self.binary:
+      return self.binary
+
+    output_dir = os.path.join(self.chrome_path, 'src',
+                              'out_{}'.format(self.board))
+    target_binary = None
+    binary_name = os.path.basename(self.inf_cmd)
+    for root, _, files in os.walk(output_dir):
+      for f in files:
+        if f == binary_name:
+          if target_binary is None:
+            target_binary = os.path.join(root, f)
+          else:
+            raise GdbSimpleChromeBinaryError(
+                'There are multiple %s under %s. Please specify the path to '
+                'the binary via --binary'% binary_name, output_dir)
+    if target_binary is None:
+      raise GdbSimpleChromeBinaryError('There is no %s under %s.'
+                                       % binary_name, output_dir)
+    return target_binary
 
   def VerifyAndFinishInitialization(self, device):
     """Verify files/processes exist and flags are correct."""
@@ -122,11 +178,19 @@ To install the debug symbols for all available packages, run:
       else:
         raise GdbCannotDetectBoardError('Cannot determine which board to use. '
                                         'Please specify the with --board flag.')
-
-    self.sysroot = cros_build_lib.GetSysroot(board=self.board)
+    self.in_chroot = self.IsInChroot()
     self.prompt = '(%s-gdb) ' % self.board
-    self.inf_cmd = self.RemoveSysrootPrefix(self.inf_cmd)
-    self.cross_gdb = self.GetCrossGdb()
+    if self.in_chroot:
+      self.sysroot = cros_build_lib.GetSysroot(board=self.board)
+      self.inf_cmd = self.RemoveSysrootPrefix(self.inf_cmd)
+      self.cross_gdb = self.GetCrossGdb()
+    else:
+      self.chrome_path = os.path.realpath(os.path.join(os.path.dirname(
+          os.path.realpath(__file__)), "../../../.."))
+      self.sdk_path = os.path.join(
+          path_util.FindCacheDir(), 'chrome-sdk/tarballs/')
+      self.sysroot = self.SimpleChromeSysroot()
+      self.cross_gdb = self.SimpleChromeGdb()
 
     if self.remote:
 
@@ -140,6 +204,9 @@ To install the debug symbols for all available packages, run:
                                      self.sysroot)
 
     self.device = device
+    if not self.in_chroot:
+      return
+
     sysroot_inf_cmd = ''
     if self.inf_cmd:
       sysroot_inf_cmd = os.path.join(self.sysroot,
@@ -156,7 +223,7 @@ To install the debug symbols for all available packages, run:
     if sysroot_inf_cmd:
       stripped_info = cros_build_lib.RunCommand(['file', sysroot_inf_cmd],
                                                 capture_output=True).output
-      if not ' not stripped' in stripped_info:
+      if ' not stripped' not in stripped_info:
         debug_file = os.path.join(self.sysroot, 'usr/lib/debug',
                                   self.inf_cmd.lstrip('/'))
         debug_file += '.debug'
@@ -165,6 +232,7 @@ To install the debug symbols for all available packages, run:
           package = cros_build_lib.RunCommand([equery, '-q', 'b',
                                                self.inf_cmd],
                                               capture_output=True).output
+          # pylint: disable=logging-not-lazy
           logging.info(self._MISSING_DEBUG_INFO_MSG % {
               'board': self.board,
               'inf_cmd': self.inf_cmd,
@@ -341,30 +409,7 @@ To install the debug symbols for all available packages, run:
                                     'setup_board?' % cross_gdb)
     return cross_gdb
 
-  def StartGdbserver(self, inf_cmd, device):
-    """Set up and start gdbserver running on remote."""
-
-    # Generate appropriate gdbserver command.
-    command = ['gdbserver']
-    if self.pid:
-      # Attach to an existing process.
-      command += [
-          '--attach',
-          'localhost:%s' % self.gdbserver_port,
-          '%s' % self.pid,
-      ]
-    elif inf_cmd:
-      # Start executing a new process.
-      command += ['localhost:%s' % self.gdbserver_port, inf_cmd] + self.inf_args
-
-    self.ssh_settings.append('-n')
-    self.ssh_settings.append('-L%s:localhost:%s' %
-                             (self.gdbserver_port, self.gdbserver_port))
-    return device.RunCommand(command,
-                             connect_settings=self.ssh_settings,
-                             input=open('/dev/null')).returncode
-
-  def GetGdbInitCommands(self, inferior_cmd):
+  def GetGdbInitCommands(self, inferior_cmd, device=None):
     """Generate list of commands with which to initialize the gdb session."""
     gdb_init_commands = []
 
@@ -375,20 +420,46 @@ To install the debug symbols for all available packages, run:
 
     gdb_init_commands = [
         'set sysroot %s' % sysroot_var,
-        'set solib-absolute-prefix %s' % sysroot_var,
-        'set solib-search-path %s' % sysroot_var,
-        'set debug-file-directory %s/usr/lib/debug' % sysroot_var,
         'set prompt %s' % self.prompt,
     ]
+    if self.in_chroot:
+      gdb_init_commands += [
+          'set solib-absolute-prefix %s' % sysroot_var,
+          'set solib-search-path %s' % sysroot_var,
+          'set debug-file-directory %s/usr/lib/debug' % sysroot_var,
+      ]
 
-    if self.remote:
-      if inferior_cmd and not inferior_cmd.startswith(self.sysroot):
-        inferior_cmd = os.path.join(self.sysroot, inferior_cmd.lstrip('/'))
+    if device:
+      ssh_cmd = device.GetAgent().GetSSHCommand(self.ssh_settings)
 
-      if inferior_cmd:
-        gdb_init_commands.append('file %s' % inferior_cmd)
-      gdb_init_commands.append('target remote localhost:%s' %
-                               self.gdbserver_port)
+      ssh_cmd.extend(['--', 'gdbserver'])
+
+      if self.pid:
+        ssh_cmd.extend(['--attach', 'stdio', str(self.pid)])
+        target_type = 'remote'
+      elif inferior_cmd:
+        ssh_cmd.extend(['-', inferior_cmd])
+        ssh_cmd.extend(self.inf_args)
+        target_type = 'remote'
+      else:
+        ssh_cmd.extend(['--multi', 'stdio'])
+        target_type = 'extended-remote'
+
+      ssh_cmd = cros_build_lib.CmdToStr(ssh_cmd)
+
+      if self.in_chroot:
+        if inferior_cmd:
+          gdb_init_commands.append(
+              'file %s' % os.path.join(sysroot_var,
+                                       inferior_cmd.lstrip(os.sep)))
+      else:
+        binary = self.GetSimpleChromeBinary()
+        gdb_init_commands += [
+            'set debug-file-directory %s' % os.path.dirname(binary),
+            'file %s' % binary
+        ]
+
+      gdb_init_commands.append('target %s | %s' % (target_type, ssh_cmd))
     else:
       if inferior_cmd:
         gdb_init_commands.append('file %s ' % inferior_cmd)
@@ -398,39 +469,28 @@ To install the debug symbols for all available packages, run:
 
   def RunRemote(self):
     """Handle remote debugging, via gdbserver & cross debugger."""
-    device = None
-    try:
-      device = remote_access.ChromiumOSDeviceHandler(
-          self.remote,
-          port=self.remote_port,
-          connect_settings=self.ssh_settings,
-          ping=self.ping).device
-    except remote_access.DeviceNotPingableError:
-      raise GdbBadRemoteDeviceError('Remote device %s is not responding to '
-                                    'ping.' % self.remote)
+    with remote_access.ChromiumOSDeviceHandler(
+        self.remote,
+        port=self.remote_port,
+        connect_settings=self.ssh_settings,
+        ping=self.ping) as device:
 
-    self.VerifyAndFinishInitialization(device)
-    gdb_cmd = self.cross_gdb
+      self.VerifyAndFinishInitialization(device)
+      gdb_cmd = self.cross_gdb
 
-    gdb_commands = self.GetGdbInitCommands(self.inf_cmd)
-    gdb_args = [gdb_cmd, '--quiet'] + ['--eval-command=%s' % x
-                                       for x in gdb_commands]
-    if self.cgdb:
-      gdb_args = ['cgdb'] + gdb_args
+      gdb_commands = self.GetGdbInitCommands(self.inf_cmd, device)
+      gdb_args = ['--quiet'] + ['--eval-command=%s' % x for x in gdb_commands]
+      gdb_args += self.gdb_args
 
-    with parallel.BackgroundTaskRunner(self.StartGdbserver,
-                                       self.inf_cmd,
-                                       device) as task:
-      task.put([])
-      # Verify that gdbserver finished launching.
-      try:
-        timeout_util.WaitForSuccess(
-            lambda x: len(x) == 0, self.device.GetRunningPids,
-            4, func_args=('gdbserver',))
-      except timeout_util.TimeoutError:
-        raise GdbUnableToStartGdbserverError('gdbserver did not start on'
-                                             ' remote device.')
-      cros_build_lib.RunCommand(gdb_args)
+      if self.cgdb:
+        gdb_args = ['-d', gdb_cmd, '--'] + gdb_args
+        gdb_cmd = 'cgdb'
+
+      cros_build_lib.RunCommand(
+          [gdb_cmd] + gdb_args,
+          ignore_sigint=True,
+          print_cmd=True,
+          cwd=self.sysroot)
 
   def Run(self):
     """Runs the debugger in a proper environment (e.g. qemu)."""
@@ -475,7 +535,7 @@ To install the debug symbols for all available packages, run:
                                        for x in gdb_commands]
     gdb_args += self.gdb_args
 
-    sys.exit(os.execvp(gdb_cmd, gdb_args))
+    os.execvp(gdb_cmd, gdb_args)
 
 
 def _ReExecuteIfNeeded(argv, ns_net=False, ns_pid=False):
@@ -551,6 +611,10 @@ def main(argv):
                       ' debugged. These are positional and must come at the end'
                       ' of the command line.  This will not work if attaching'
                       ' to an already running program.')
+  parser.add_argument('--binary', default='',
+                      help='full path to the binary being debuged.'
+                      ' This is only useful for simple chrome.'
+                      ' An example is --bianry /home/out_falco/chrome.')
 
   options = parser.parse_args(argv)
   options.Freeze()
@@ -580,9 +644,6 @@ def main(argv):
                  ' running process (--remote-pid or --attach).')
 
   if options.remote:
-    if not options.pid and not inf_cmd and not options.attach_name:
-      parser.error('Must specify a program to start or a pid to attach '
-                   'to on the remote device.')
     if options.attach_name and options.attach_name == 'browser':
       inf_cmd = '/opt/google/chrome/chrome'
   else:
@@ -594,6 +655,9 @@ def main(argv):
     if options.attach_name:
       parser.error('Must specify remote device (--remote) when using'
                    ' --attach option.')
+  if options.binary:
+    if not os.path.exists(options.binary):
+      parser.error('%s does not exist.' % options.binary)
 
   # Once we've finished sanity checking args, make sure we're root.
   if not options.remote:
@@ -601,7 +665,7 @@ def main(argv):
 
   gdb = BoardSpecificGdb(options.board, gdb_args, inf_cmd, inf_args,
                          options.remote, options.pid, options.attach_name,
-                         options.cgdb, options.ping)
+                         options.cgdb, options.ping, options.binary)
 
   try:
     if options.remote:

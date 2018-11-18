@@ -15,6 +15,11 @@
 #include "ui/base/test/ui_controls.h"
 #include "ui/events/event_constants.h"
 
+namespace display {
+class Display;
+class Screen;
+}  // namespace display
+
 namespace gfx {
 class Point;
 }
@@ -136,7 +141,7 @@ bool SendKeyPressAndWait(const Browser* browser,
 // see it for details.
 bool SendMouseMoveSync(const gfx::Point& location) WARN_UNUSED_RESULT;
 bool SendMouseEventsSync(ui_controls::MouseButton type,
-                         int state) WARN_UNUSED_RESULT;
+                         int button_state) WARN_UNUSED_RESULT;
 
 // See SendKeyPressAndWait.  This function additionally performs a check on the
 // NotificationDetails using the provided Details<U>.
@@ -181,10 +186,12 @@ bool SendKeyPressAndWaitWithDetails(
 // SendMouseEvents. Only exposed for toolkit-views.
 // Alternatives: ClickOnView() and ui::test::EventGenerator.
 #if defined(TOOLKIT_VIEWS)
-void MoveMouseToCenterAndPress(views::View* view,
-                               ui_controls::MouseButton button,
-                               int state,
-                               const base::Closure& task);
+void MoveMouseToCenterAndPress(
+    views::View* view,
+    ui_controls::MouseButton button,
+    int button_state,
+    const base::RepeatingClosure& task,
+    int accelerator_state = ui_controls::kNoAccelerator);
 
 // Returns the center of |view| in screen coordinates.
 gfx::Point GetCenterInScreenCoordinates(const views::View* view);
@@ -207,10 +214,20 @@ namespace internal {
 // A utility function to send a mouse click event in a closure. It's shared by
 // ui_controls_linux.cc and ui_controls_mac.cc
 void ClickTask(ui_controls::MouseButton button,
-               int state,
-               base::OnceClosure followup);
+               int button_state,
+               base::OnceClosure followup,
+               int accelerator_state = ui_controls::kNoAccelerator);
 
 }  // namespace internal
+
+// Returns the secondary display from the screen. DCHECKs if there is no such
+// display.
+display::Display GetSecondaryDisplay(display::Screen* screen);
+
+// Returns the pair of displays -- the first one is the primary display and the
+// second one is the other display.
+std::pair<display::Display, display::Display> GetDisplays(
+    display::Screen* screen);
 
 }  // namespace ui_test_utils
 

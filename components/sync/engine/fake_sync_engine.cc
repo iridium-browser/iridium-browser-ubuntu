@@ -4,12 +4,16 @@
 
 #include "components/sync/engine/fake_sync_engine.h"
 
-#include "components/sync/engine/activation_context.h"
+#include "components/sync/engine/data_type_activation_response.h"
 #include "components/sync/engine/sync_engine_host.h"
 
 namespace syncer {
+namespace {
 
 const char kTestCacheGuid[] = "test-guid";
+const char kTestSessionName[] = "test-session-name";
+
+}  // namespace
 
 FakeSyncEngine::FakeSyncEngine() : fail_initial_download_(false) {}
 FakeSyncEngine::~FakeSyncEngine() {}
@@ -17,7 +21,8 @@ FakeSyncEngine::~FakeSyncEngine() {}
 void FakeSyncEngine::Initialize(InitParams params) {
   params.host->OnEngineInitialized(ModelTypeSet(), WeakHandle<JsBackend>(),
                                    WeakHandle<DataTypeDebugInfoListener>(),
-                                   kTestCacheGuid, !fail_initial_download_);
+                                   kTestCacheGuid, kTestSessionName,
+                                   !fail_initial_download_);
 }
 
 void FakeSyncEngine::TriggerRefresh(const ModelTypeSet& types) {}
@@ -56,7 +61,7 @@ void FakeSyncEngine::DeactivateDirectoryDataType(ModelType type) {}
 
 void FakeSyncEngine::ActivateNonBlockingDataType(
     ModelType type,
-    std::unique_ptr<ActivationContext> activation_context) {}
+    std::unique_ptr<DataTypeActivationResponse> activation_response) {}
 
 void FakeSyncEngine::DeactivateNonBlockingDataType(ModelType type) {}
 
@@ -68,9 +73,8 @@ SyncEngine::Status FakeSyncEngine::GetDetailedStatus() {
   return SyncEngine::Status();
 }
 
-bool FakeSyncEngine::HasUnsyncedItems() const {
-  return false;
-}
+void FakeSyncEngine::HasUnsyncedItemsForTest(
+    base::OnceCallback<void(bool)> cb) const {}
 
 bool FakeSyncEngine::IsCryptographerReady(const BaseTransaction* trans) const {
   return false;

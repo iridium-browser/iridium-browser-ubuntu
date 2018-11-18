@@ -39,14 +39,19 @@ class CORE_EXPORT HitTestLocation {
 
  public:
   // Note that all points are in contents (aka "page") coordinate space for the
-  // document that is being hit tested.
+  // document that is being hit tested. All points and size are in root frame
+  // coordinates (physical pixel scaled by page_scale when zoom for dsf is
+  // enabled; otherwise in dip scaled by page_scale), Which means the points
+  // should already applied page_scale_factor, but not page_zoom_factor and
+  // scroll offset. See:
+  // http://www.chromium.org/developers/design-documents/blink-coordinate-spaces
   HitTestLocation();
-  HitTestLocation(const LayoutPoint&);
-  HitTestLocation(const FloatPoint&);
-  HitTestLocation(const FloatPoint&, const FloatQuad&);
-  // Pass non-zero padding values to perform a rect-based hit test.
-  HitTestLocation(const LayoutPoint& center_point,
-                  const LayoutRectOutsets& padding);
+  explicit HitTestLocation(const LayoutPoint&);
+  explicit HitTestLocation(const IntPoint&);
+  explicit HitTestLocation(const FloatPoint&);
+  explicit HitTestLocation(const DoublePoint&);
+  explicit HitTestLocation(const FloatPoint&, const FloatQuad&);
+  explicit HitTestLocation(const LayoutRect&);
   HitTestLocation(const HitTestLocation&, const LayoutSize& offset);
   HitTestLocation(const HitTestLocation&);
   ~HitTestLocation();
@@ -64,24 +69,17 @@ class CORE_EXPORT HitTestLocation {
   }
 
   // Returns the 1px x 1px hit test rect for a point.
-  // TODO(pdr): Use a 0px x 0px rect for point-based tests and switch to
-  // inclusive intersection checks which work with empty rects. Rect-based hit
-  // testing is used even for point-based tests so a non-empty rect is currently
-  // needed for LayoutRect::Intersects (see |HitTestLocation::IntersectsRect|).
+  // TODO(pdr): Should we be using a one-layout-unit rect instead?
   static LayoutRect RectForPoint(const LayoutPoint& point) {
     return LayoutRect(FlooredIntPoint(point), IntSize(1, 1));
   }
-  static LayoutRect RectForPoint(const LayoutPoint& point,
-                                 const LayoutRectOutsets& padding) {
-    LayoutRect rect = RectForPoint(point);
-    rect.ExpandEdges(padding.Top(), padding.Right(), padding.Bottom(),
-                     padding.Left());
-    return rect;
-  }
 
   bool Intersects(const LayoutRect&) const;
+  // Uses floating-point intersection, which uses inclusive intersection
+  // (see LayoutRect::InclusiveIntersect for a definition)
   bool Intersects(const FloatRect&) const;
   bool Intersects(const FloatRoundedRect&) const;
+  bool Intersects(const FloatQuad&) const;
   bool ContainsPoint(const FloatPoint&) const;
 
   const FloatPoint& TransformedPoint() const { return transformed_point_; }

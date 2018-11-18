@@ -12,12 +12,14 @@
 #include "storage/common/fileapi/file_system_types.h"
 #include "third_party/blink/public/mojom/quota/quota_types.mojom.h"
 
-class GURL;
-
 namespace storage {
 class FileSystemContext;
 class FileSystemURL;
 class QuotaManager;
+}
+
+namespace url {
+class Origin;
 }
 
 namespace content {
@@ -25,9 +27,9 @@ namespace content {
 // A helper class to perform async file operations in a synchronous way.
 class AsyncFileTestHelper {
  public:
-  typedef storage::FileSystemOperation::FileEntryList FileEntryList;
-  typedef storage::FileSystemOperation::CopyProgressCallback
-      CopyProgressCallback;
+  using FileEntryList = storage::FileSystemOperation::FileEntryList;
+  using CopyProgressCallback =
+      storage::FileSystemOperation::CopyProgressCallback;
 
   static const int64_t kDontCheckSize;
 
@@ -99,10 +101,11 @@ class AsyncFileTestHelper {
   static bool DirectoryExists(storage::FileSystemContext* context,
                               const storage::FileSystemURL& url);
 
-  // Returns usage and quota. It's valid to pass NULL to |usage| and/or |quota|.
+  // Returns usage and quota. It's valid to pass nullptr to |usage| and/or
+  // |quota|.
   static blink::mojom::QuotaStatusCode GetUsageAndQuota(
       storage::QuotaManager* quota_manager,
-      const GURL& origin,
+      const url::Origin& origin,
       storage::FileSystemType type,
       int64_t* usage,
       int64_t* quota);

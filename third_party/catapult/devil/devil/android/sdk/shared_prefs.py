@@ -10,10 +10,10 @@ See e.g.:
 
 import logging
 import posixpath
+from xml.etree import ElementTree
 
 from devil.android import device_errors
 from devil.android.sdk import version_codes
-from xml.etree import ElementTree
 
 logger = logging.getLogger(__name__)
 
@@ -278,12 +278,17 @@ class SharedPrefs(object):
       self._xml = None
       self._changed = True
 
-  def Commit(self):
+  def Commit(self, force_commit=False):
     """Save the current set of preferences to the device.
 
-    Only actually saves if some preferences have been modified.
+    Only actually saves if some preferences have been modified or force_commit
+    is set to True.
+
+    Args:
+      force_commit: Commit even if no changes have been made to the SharedPrefs
+        instance.
     """
-    if not self.changed:
+    if not (self.changed or force_commit):
       return
     self._device.RunShellCommand(
         ['mkdir', '-p', posixpath.dirname(self.path)],
@@ -296,13 +301,11 @@ class SharedPrefs(object):
     if self._device.build_version_sdk >= version_codes.MARSHMALLOW:
       security_context = self._device.GetSecurityContextForPackage(self.package,
           encrypted=self._encrypted)
-      if security_context == None:
+      if security_context is None:
         raise device_errors.CommandFailedError(
             'Failed to get security context for %s' % self.package)
-      shared_prefs_directory = self.path.split(self.filename)[0]
-      self._device.RunShellCommand(
-          ['chcon', '-R', security_context, shared_prefs_directory],
-          as_root=True, check_return=True)
+      paths = [posixpath.dirname(self.path), self.path]
+      self._device.ChangeSecurityContext(security_context, paths)
 
     # Ensure that there isn't both an encrypted and unencrypted version of the
     # file on the device at the same time.

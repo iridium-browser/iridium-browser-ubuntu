@@ -23,7 +23,7 @@
 #include "content/browser/loader/resource_dispatcher_host_impl.h"
 #include "content/browser/loader/resource_request_info_impl.h"
 #include "content/browser/loader/stream_resource_handler.h"
-#include "content/browser/web_package/web_package_request_handler.h"
+#include "content/browser/web_package/signed_exchange_utils.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/plugin_service.h"
 #include "content/public/browser/resource_context.h"
@@ -41,6 +41,7 @@
 #include "services/network/loader_util.h"
 #include "services/network/public/cpp/resource_response.h"
 #include "third_party/blink/public/common/mime_util/mime_util.h"
+#include "third_party/blink/public/common/origin_trials/trial_token_validator.h"
 #include "url/origin.h"
 
 namespace content {
@@ -71,6 +72,14 @@ class MimeSniffingResourceHandler::Controller : public ResourceController {
   void Resume() override {
     MarkAsUsed();
     mime_handler_->ResumeInternal();
+  }
+
+  void ResumeForRedirect(const base::Optional<net::HttpRequestHeaders>&
+                             modified_request_headers) override {
+    DCHECK(!modified_request_headers.has_value())
+        << "Redirect with modified headers was not supported yet. "
+           "crbug.com/845683";
+    Resume();
   }
 
   void Cancel() override {
@@ -106,7 +115,7 @@ MimeSniffingResourceHandler::MimeSniffingResourceHandler(
     PluginService* plugin_service,
     InterceptingResourceHandler* intercepting_handler,
     net::URLRequest* request,
-    RequestContextType request_context_type)
+    blink::mojom::RequestContextType request_context_type)
     : LayeredResourceHandler(request, std::move(next_handler)),
       state_(STATE_STARTING),
       host_(host),
@@ -152,7 +161,7 @@ void MimeSniffingResourceHandler::OnResponseStarted(
   if (!(response_->head.headers.get() &&
         response_->head.headers->response_code() == 304)) {
     // MIME sniffing should be disabled for a request initiated by fetch().
-    if (request_context_type_ != REQUEST_CONTEXT_TYPE_FETCH &&
+    if (request_context_type_ != blink::mojom::RequestContextType::FETCH &&
         network::ShouldSniffContent(request(), response_.get())) {
       controller->Resume();
       return;
@@ -241,6 +250,7 @@ void MimeSniffingResourceHandler::OnReadCompleted(
   // the mime type. However, even if it returns false, it returns a new type
   // that is probably better than the current one.
   response_->head.mime_type.assign(new_type);
+  response_->head.did_mime_sniff = true;
 
   if (!made_final_decision && (bytes_read > 0)) {
     controller->Resume();
@@ -457,11 +467,10 @@ bool MimeSniffingResourceHandler::MaybeStartInterception() {
   if (!must_download) {
     if (blink::IsSupportedMimeType(mime_type))
       return true;
-    if (base::FeatureList::IsEnabled(features::kSignedHTTPExchange) &&
-        WebPackageRequestHandler::IsSupportedMimeType(mime_type)) {
+    if (signed_exchange_utils::ShouldHandleAsSignedHTTPExchange(
+            request()->url(), response_->head)) {
       return true;
     }
-
     bool handled_by_plugin;
     if (!CheckForPluginHandler(&handled_by_plugin))
       return false;
@@ -557,22 +566,10 @@ bool MimeSniffingResourceHandler::MustDownload() {
 
   must_download_is_set_ = true;
 
-  bool is_cross_origin =
-      (request()->initiator().has_value() &&
-       !request()->url_chain().back().SchemeIsBlob() &&
-       !request()->url_chain().back().SchemeIsFileSystem() &&
-       !request()->url_chain().back().SchemeIs(url::kAboutScheme) &&
-       !request()->url_chain().back().SchemeIs(url::kDataScheme) &&
-       request()->initiator()->GetURL() !=
-           request()->url_chain().back().GetOrigin());
-
   std::string disposition;
   request()->GetResponseHeaderByName("content-disposition", &disposition);
   if (!disposition.empty() &&
       net::HttpContentDisposition(disposition, std::string()).is_attachment()) {
-    must_download_ = true;
-  } else if (GetRequestInfo()->suggested_filename().has_value() &&
-             !is_cross_origin) {
     must_download_ = true;
   } else if (GetContentClient()->browser()->ShouldForceDownloadResource(
                  request()->url(), response_->head.mime_type)) {
@@ -590,11 +587,6 @@ bool MimeSniffingResourceHandler::MustDownload() {
             info->GetNavigationUIData());
   } else {
     must_download_ = false;
-  }
-
-  if (GetRequestInfo()->suggested_filename().has_value() && !must_download_) {
-    download::RecordDownloadCount(
-        download::CROSS_ORIGIN_DOWNLOAD_WITHOUT_CONTENT_DISPOSITION);
   }
 
   return must_download_;

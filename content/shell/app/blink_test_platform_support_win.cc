@@ -24,13 +24,12 @@ namespace content {
 namespace {
 
 bool SetupFonts() {
-  // Load Ahem font.
-  // AHEM____.TTF is copied to the directory of DumpRenderTree.exe by
-  // WebKit.gyp.
+  // Load Ahem font. Ahem.ttf is copied to the build directory by
+  // //third_party/test_fonts .
   base::FilePath base_path;
-  PathService::Get(base::DIR_MODULE, &base_path);
+  base::PathService::Get(base::DIR_MODULE, &base_path);
   base::FilePath font_path =
-      base_path.Append(FILE_PATH_LITERAL("/AHEM____.TTF"));
+      base_path.Append(FILE_PATH_LITERAL("/test_fonts/Ahem.ttf"));
 
   const char kRegisterFontFiles[] = "register-font-files";
   // DirectWrite sandbox registration.
@@ -55,7 +54,7 @@ bool CheckLayoutSystemDeps() {
   metrics.cbSize = sizeof(NONCLIENTMETRICS);
   bool success = !!::SystemParametersInfo(
       SPI_GETNONCLIENTMETRICS, metrics.cbSize, &metrics, 0);
-  CHECK(success);
+  PCHECK(success);
   LOGFONTW* system_fonts[] =
       {&metrics.lfStatusFont, &metrics.lfMenuFont, &metrics.lfSmCaptionFont};
   const wchar_t required_font[] = L"Segoe UI";

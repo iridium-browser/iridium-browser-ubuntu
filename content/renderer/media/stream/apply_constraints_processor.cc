@@ -247,6 +247,8 @@ VideoCaptureSettings ApplyConstraintsProcessor::SelectVideoSettings(
       blink::mojom::VideoInputDeviceCapabilities::New();
   device_capabilities->device_id =
       current_request_.Track().Source().Id().Ascii();
+  device_capabilities->group_id =
+      current_request_.Track().Source().GroupId().Ascii();
   device_capabilities->facing_mode =
       GetCurrentVideoSource() ? GetCurrentVideoSource()->device().video_facing
                               : media::MEDIA_VIDEO_FACING_NONE;
@@ -254,8 +256,6 @@ VideoCaptureSettings ApplyConstraintsProcessor::SelectVideoSettings(
 
   DCHECK(video_source_->GetCurrentCaptureParams());
   VideoDeviceCaptureCapabilities video_capabilities;
-  video_capabilities.power_line_capabilities.push_back(
-      video_source_->GetCurrentCaptureParams()->power_line_frequency);
   video_capabilities.noise_reduction_capabilities.push_back(
       GetCurrentVideoTrack()->noise_reduction());
   video_capabilities.device_capabilities.push_back(

@@ -30,12 +30,11 @@
 #include "components/autofill/core/browser/field_types.h"
 #include "components/autofill/core/browser/personal_data_manager.h"
 #include "components/autofill/core/browser/webdata/autofill_change.h"
-#include "components/autofill/core/browser/webdata/autofill_data_type_controller.h"
 #include "components/autofill/core/browser/webdata/autofill_profile_data_type_controller.h"
 #include "components/autofill/core/browser/webdata/autofill_profile_syncable_service.h"
 #include "components/autofill/core/browser/webdata/autofill_table.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
-#include "components/autofill/core/common/autofill_pref_names.h"
+#include "components/autofill/core/common/autofill_prefs.h"
 #include "components/browser_sync/abstract_profile_sync_service_test.h"
 #include "components/browser_sync/profile_sync_service.h"
 #include "components/browser_sync/test_profile_sync_service.h"
@@ -55,6 +54,7 @@
 #include "components/version_info/version_info.h"
 #include "components/webdata/common/web_database.h"
 #include "components/webdata_services/web_data_service_test_util.h"
+#include "services/identity/public/cpp/identity_test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -95,15 +95,24 @@ namespace {
 void RegisterAutofillPrefs(user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterBooleanPref(autofill::prefs::kAutofillCreditCardEnabled,
                                 true);
-  registry->RegisterBooleanPref(autofill::prefs::kAutofillEnabled, true);
+  registry->RegisterBooleanPref(autofill::prefs::kAutofillProfileEnabled, true);
   registry->RegisterBooleanPref(autofill::prefs::kAutofillWalletImportEnabled,
-                                true);
-  registry->RegisterBooleanPref(autofill::prefs::kAutofillProfileUseDatesFixed,
                                 true);
   registry->RegisterIntegerPref(autofill::prefs::kAutofillLastVersionDeduped,
                                 atoi(version_info::GetVersionNumber().c_str()));
   registry->RegisterDoublePref(autofill::prefs::kAutofillBillingCustomerNumber,
                                0.0);
+  registry->RegisterBooleanPref(
+      autofill::prefs::kAutofillJapanCityFieldMigrated, true);
+  registry->RegisterBooleanPref(autofill::prefs::kAutofillOrphanRowsRemoved,
+                                true);
+  registry->RegisterIntegerPref(
+      autofill::prefs::kAutofillLastVersionDisusedAddressesDeleted, 0);
+  registry->RegisterIntegerPref(
+      autofill::prefs::kAutofillLastVersionDisusedCreditCardsDeleted, 0);
+  registry->RegisterStringPref(
+      autofill::prefs::kAutofillProfileValidity, "",
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PRIORITY_PREF);
 }
 
 void RunAndSignal(base::OnceClosure cb, WaitableEvent* event) {
@@ -126,9 +135,9 @@ class AutofillTableMock : public AutofillTable {
                     Time* date_last_used));
   MOCK_METHOD1(GetAutofillProfiles,
                bool(std::vector<std::unique_ptr<AutofillProfile>>*));  // NOLINT
-  MOCK_METHOD1(UpdateAutofillProfile, bool(const AutofillProfile&));  // NOLINT
-  MOCK_METHOD1(AddAutofillProfile, bool(const AutofillProfile&));     // NOLINT
-  MOCK_METHOD1(RemoveAutofillProfile, bool(const std::string&));      // NOLINT
+  MOCK_METHOD1(UpdateAutofillProfile, bool(const AutofillProfile&));   // NOLINT
+  MOCK_METHOD1(AddAutofillProfile, bool(const AutofillProfile&));      // NOLINT
+  MOCK_METHOD1(RemoveAutofillProfile, bool(const std::string&));       // NOLINT
 };
 
 MATCHER_P(MatchProfiles, profile, "") {
@@ -148,9 +157,9 @@ class WebDatabaseFake : public WebDatabase {
   }
 };
 
-class MockAutofillBackend : public autofill::AutofillWebDataBackend {
+class FakeAutofillBackend : public autofill::AutofillWebDataBackend {
  public:
-  MockAutofillBackend(
+  FakeAutofillBackend(
       WebDatabase* web_database,
       const base::RepeatingClosure& on_changed,
       const base::RepeatingCallback<void(syncer::ModelType)>& on_sync_started,
@@ -160,7 +169,7 @@ class MockAutofillBackend : public autofill::AutofillWebDataBackend {
         on_sync_started_(on_sync_started),
         ui_task_runner_(ui_task_runner) {}
 
-  ~MockAutofillBackend() override {}
+  ~FakeAutofillBackend() override {}
   WebDatabase* GetDatabase() override { return web_database_; }
   void AddObserver(
       autofill::AutofillWebDataServiceObserverOnDBSequence* observer) override {
@@ -169,6 +178,11 @@ class MockAutofillBackend : public autofill::AutofillWebDataBackend {
       autofill::AutofillWebDataServiceObserverOnDBSequence* observer) override {
   }
   void RemoveExpiredFormElements() override {}
+
+  void NotifyOfAutofillProfileChanged(
+      const autofill::AutofillProfileChange& change) override {}
+  void NotifyOfCreditCardChanged(
+      const autofill::CreditCardChange& change) override {}
   void NotifyOfMultipleAutofillChanges() override {
     DCHECK(!ui_task_runner_->RunsTasksInCurrentSequence());
     ui_task_runner_->PostTask(FROM_HERE, on_changed_);
@@ -176,7 +190,7 @@ class MockAutofillBackend : public autofill::AutofillWebDataBackend {
   void NotifyThatSyncHasStarted(syncer::ModelType model_type) override {
     DCHECK(!ui_task_runner_->RunsTasksInCurrentSequence());
     ui_task_runner_->PostTask(FROM_HERE,
-                              base::Bind(on_sync_started_, model_type));
+                              base::BindOnce(on_sync_started_, model_type));
   }
 
  private:
@@ -242,9 +256,9 @@ class WebDataServiceFake : public AutofillWebDataService {
             &WebDataServiceFake::NotifySyncStartedOnUISequence, AsWeakPtr());
 
     db_task_runner_->PostTask(
-        FROM_HERE, base::Bind(&WebDataServiceFake::CreateSyncableService,
-                              base::Unretained(this), on_changed_callback,
-                              std::move(on_sync_started_callback)));
+        FROM_HERE, base::BindOnce(&WebDataServiceFake::CreateSyncableService,
+                                  base::Unretained(this), on_changed_callback,
+                                  std::move(on_sync_started_callback)));
     syncable_service_created_or_destroyed_.Wait();
   }
 
@@ -252,8 +266,8 @@ class WebDataServiceFake : public AutofillWebDataService {
     // The |autofill_profile_syncable_service_| must be destructed on the DB
     // sequence.
     db_task_runner_->PostTask(
-        FROM_HERE, base::Bind(&WebDataServiceFake::DestroySyncableService,
-                              base::Unretained(this)));
+        FROM_HERE, base::BindOnce(&WebDataServiceFake::DestroySyncableService,
+                                  base::Unretained(this)));
     syncable_service_created_or_destroyed_.Wait();
   }
 
@@ -281,7 +295,7 @@ class WebDataServiceFake : public AutofillWebDataService {
       const base::RepeatingCallback<void(syncer::ModelType)>& on_sync_started) {
     ASSERT_TRUE(db_task_runner_->RunsTasksInCurrentSequence());
     // These services are deleted in DestroySyncableService().
-    backend_ = std::make_unique<MockAutofillBackend>(
+    backend_ = std::make_unique<FakeAutofillBackend>(
         GetDatabase(), on_changed_callback, on_sync_started,
         ui_task_runner_.get());
     AutofillProfileSyncableService::CreateForWebDataServiceAndBackend(
@@ -315,8 +329,8 @@ class WebDataServiceFake : public AutofillWebDataService {
 ACTION_P2(ReturnNewDataTypeManagerWithDebugListener,
           sync_client,
           debug_listener) {
-  return new syncer::DataTypeManagerImpl(sync_client, arg0, debug_listener,
-                                         arg2, arg3, arg4, arg5);
+  return std::make_unique<syncer::DataTypeManagerImpl>(
+      sync_client, arg0, debug_listener, arg2, arg3, arg4, arg5);
 }
 
 class MockPersonalDataManager : public PersonalDataManager {
@@ -325,6 +339,7 @@ class MockPersonalDataManager : public PersonalDataManager {
   MOCK_CONST_METHOD0(IsDataLoaded, bool());
   MOCK_METHOD0(LoadProfiles, void());
   MOCK_METHOD0(LoadCreditCards, void());
+  MOCK_METHOD0(LoadPaymentsCustomerData, void());
   MOCK_METHOD0(Refresh, void());
 };
 
@@ -359,17 +374,21 @@ class ProfileSyncServiceAutofillTest
         new TokenWebDataServiceFake(base::ThreadTaskRunnerHandle::Get(),
                                     data_type_thread()->task_runner()));
     web_data_service_ = static_cast<WebDataServiceFake*>(
-        web_data_wrapper_->GetAutofillWebData().get());
+        web_data_wrapper_->GetProfileAutofillWebData().get());
     web_data_service_->SetDatabase(web_database_.get());
 
     personal_data_manager_ = std::make_unique<MockPersonalDataManager>();
 
     EXPECT_CALL(personal_data_manager(), LoadProfiles());
     EXPECT_CALL(personal_data_manager(), LoadCreditCards());
+    EXPECT_CALL(personal_data_manager(), LoadPaymentsCustomerData());
 
     personal_data_manager_->Init(web_data_service_,
+                                 /*account_database=*/nullptr,
                                  profile_sync_service_bundle()->pref_service(),
                                  /*identity_manager=*/nullptr,
+                                 /*client_profile_validator=*/nullptr,
+                                 /*history_service=*/nullptr,
                                  /*is_off_the_record=*/false);
 
     web_data_service_->StartSyncableService();
@@ -378,9 +397,9 @@ class ProfileSyncServiceAutofillTest
         profile_sync_service_bundle());
     builder.SetPersonalDataManager(personal_data_manager_.get());
     builder.SetSyncServiceCallback(GetSyncServiceCallback());
-    builder.SetSyncableServiceCallback(
-        base::Bind(&ProfileSyncServiceAutofillTest::GetSyncableServiceForType,
-                   base::Unretained(this)));
+    builder.SetSyncableServiceCallback(base::BindRepeating(
+        &ProfileSyncServiceAutofillTest::GetSyncableServiceForType,
+        base::Unretained(this)));
     builder.set_activate_model_creation();
     sync_client_owned_ = builder.Build();
     sync_client_ = sync_client_owned_.get();
@@ -407,10 +426,23 @@ class ProfileSyncServiceAutofillTest
   }
 
   void StartAutofillProfileSyncService(base::OnceClosure callback) {
-    SigninManagerBase* signin = profile_sync_service_bundle()->signin_manager();
-    signin->SetAuthenticatedAccountInfo("12345", "test_user@gmail.com");
+    identity::MakePrimaryAccountAvailable(
+        profile_sync_service_bundle()->signin_manager(),
+        profile_sync_service_bundle()->auth_service(),
+        profile_sync_service_bundle()->identity_manager(),
+        "test_user@gmail.com");
     CreateSyncService(std::move(sync_client_owned_), std::move(callback));
 
+    EXPECT_CALL(*profile_sync_service_bundle()->component_factory(),
+                CreateCommonDataTypeControllers(_, _))
+        .WillOnce(testing::InvokeWithoutArgs([=]() {
+          syncer::DataTypeController::TypeVector controllers;
+          controllers.push_back(
+              std::make_unique<AutofillProfileDataTypeController>(
+                  data_type_thread()->task_runner(), base::DoNothing(),
+                  sync_client_, web_data_service_));
+          return controllers;
+        }));
     EXPECT_CALL(*profile_sync_service_bundle()->component_factory(),
                 CreateDataTypeManager(_, _, _, _, _, _))
         .WillOnce(ReturnNewDataTypeManagerWithDebugListener(
@@ -420,20 +452,12 @@ class ProfileSyncServiceAutofillTest
     EXPECT_CALL(personal_data_manager(), IsDataLoaded())
         .WillRepeatedly(Return(true));
 
-    // We need tokens to get the tests going
-    profile_sync_service_bundle()->auth_service()->UpdateCredentials(
-        signin->GetAuthenticatedAccountId(), "oauth2_login_token");
-
-    sync_service()->RegisterDataTypeController(
-        std::make_unique<AutofillProfileDataTypeController>(
-            data_type_thread()->task_runner(), base::DoNothing(), sync_client_,
-            web_data_service_));
     sync_service()->Initialize();
     base::RunLoop().Run();
 
     // It's possible this test triggered an unrecoverable error, in which case
     // we can't get the sync count.
-    if (sync_service()->IsSyncActive()) {
+    if (sync_service()->IsSyncFeatureActive()) {
       EXPECT_EQ(GetSyncCount(),
                 association_stats_.num_sync_items_after_association);
     }
@@ -915,7 +939,6 @@ TEST_F(ProfileSyncServiceAutofillTest, MergeProfileWithDifferentGuid) {
   // Check that the sync profile use date was kept.
   EXPECT_EQ(base::Time::FromTimeT(1234), new_sync_profiles[0].use_date());
 }
-
 
 TEST_F(ProfileSyncServiceAutofillTest, ProcessUserChangeAddProfile) {
   EXPECT_CALL(autofill_table(), GetAutofillProfiles(_)).WillOnce(Return(true));

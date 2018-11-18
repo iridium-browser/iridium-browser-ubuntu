@@ -155,12 +155,13 @@ void DoSomething(const base::RepeatingCallback<double(double)>& callback) {
 
 If running a callback could result in its own destruction (e.g., if the callback
 recipient deletes the object the callback is a member of), the callback should
-be moved before it can be safely invoked. The `base::ResetAndReturn` method
-provides this functionality.
+be moved before it can be safely invoked. (Note that this is only an issue for
+RepeatingCallbacks, because a OnceCallback always has to be moved for
+execution.)
 
 ```cpp
 void Foo::RunCallback() {
-  base::ResetAndReturn(&foo_deleter_callback_).Run();
+  std::move(&foo_deleter_callback_).Run();
 }
 ```
 
@@ -513,7 +514,7 @@ These functions, along with a set of internal templates, are responsible for
  - Determining the number of parameters that are bound
  - Creating the BindState storing the bound parameters
  - Performing compile-time asserts to avoid error-prone behavior
- - Returning an `Callback<>` with an arity matching the number of unbound
+ - Returning a `Callback<>` with an arity matching the number of unbound
    parameters and that knows the correct refcounting semantics for the
    target object if we are binding a method.
 

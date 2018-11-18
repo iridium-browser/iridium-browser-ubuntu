@@ -33,7 +33,6 @@
 
 namespace blink {
 
-class CSSVariableData;
 class ExceptionState;
 class LayoutObject;
 class MutableCSSPropertyValueSet;
@@ -61,8 +60,7 @@ class CORE_EXPORT CSSComputedStyleDeclaration final
 
   const CSSValue* GetPropertyCSSValue(const CSSProperty&) const;
   const CSSValue* GetPropertyCSSValue(AtomicString custom_property_name) const;
-  std::unique_ptr<HashMap<AtomicString, scoped_refptr<CSSVariableData>>>
-  GetVariables() const;
+  HeapHashMap<AtomicString, Member<const CSSValue>> GetVariables() const;
 
   const CSSValue* GetFontSizeCSSValuePreferringKeyword() const;
   bool IsMonospaceFont() const;
@@ -74,7 +72,7 @@ class CORE_EXPORT CSSComputedStyleDeclaration final
   unsigned length() const override;
   String item(unsigned index) const override;
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  private:
   CSSComputedStyleDeclaration(Node*, bool allow_visited_style, const String&);

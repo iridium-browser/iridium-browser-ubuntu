@@ -7,12 +7,12 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "components/offline_pages/core/offline_page_item.h"
-#include "components/offline_pages/core/offline_page_metadata_store_sql.h"
+#include "components/offline_pages/core/offline_page_metadata_store.h"
 #include "components/offline_pages/core/offline_page_types.h"
 #include "components/offline_pages/core/offline_store_types.h"
 #include "components/offline_pages/core/offline_store_utils.h"
-#include "components/offline_pages/core/task.h"
-#include "sql/connection.h"
+#include "components/offline_pages/task/task.h"
+#include "sql/database.h"
 #include "sql/statement.h"
 
 namespace offline_pages {
@@ -36,10 +36,7 @@ AddPageResult ItemActionStatusToAddPageResult(ItemActionStatus status) {
 }
 
 ItemActionStatus AddOfflinePageSync(const OfflinePageItem& item,
-                                    sql::Connection* db) {
-  if (!db)
-    return ItemActionStatus::STORE_ERROR;
-
+                                    sql::Database* db) {
   static const char kSql[] =
       "INSERT OR IGNORE INTO offlinepages_v1"
       " (offline_id, online_url, client_namespace, client_id, file_path,"
@@ -76,7 +73,7 @@ ItemActionStatus AddOfflinePageSync(const OfflinePageItem& item,
 
 }  // namespace
 
-AddPageTask::AddPageTask(OfflinePageMetadataStoreSQL* store,
+AddPageTask::AddPageTask(OfflinePageMetadataStore* store,
                          const OfflinePageItem& offline_page,
                          AddPageTaskCallback callback)
     : store_(store),
@@ -95,7 +92,8 @@ void AddPageTask::Run() {
   }
   store_->Execute(base::BindOnce(&AddOfflinePageSync, offline_page_),
                   base::BindOnce(&AddPageTask::OnAddPageDone,
-                                 weak_ptr_factory_.GetWeakPtr()));
+                                 weak_ptr_factory_.GetWeakPtr()),
+                  ItemActionStatus::STORE_ERROR);
 }
 
 void AddPageTask::OnAddPageDone(ItemActionStatus status) {

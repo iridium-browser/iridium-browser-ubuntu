@@ -11,6 +11,7 @@
 #include "base/file_version_info_win.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
+#include "base/no_destructor.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/win/registry.h"
 
@@ -19,11 +20,8 @@
 #endif
 
 #if !defined(NTDDI_WIN10_RS2)
-// Windows 10 Creators Update SDK is required to build Chrome. It is important
-// to install the 10.0.15063.468 version, released June 2017, because earlier
-// versions had bugs and could not build Chrome. See this link for details:
-// https://developercommunity.visualstudio.com/content/problem/42961/15063-sdk-is-broken-bitsh-indirectly-references-no.html
-#error Creators Update SDK (10.0.15063.468) required.
+// Windows 10 April 2018 SDK is required to build Chrome.
+#error April 2018 SDK (10.0.17134.0) or higher required.
 #endif
 
 namespace {
@@ -77,28 +75,6 @@ Version MajorMinorBuildToVersion(int major, int minor, int build) {
   return VERSION_PRE_XP;
 }
 
-// Retrieve a version from kernel32. This is useful because when running in
-// compatibility mode for a down-level version of the OS, the file version of
-// kernel32 will still be the "real" version.
-Version GetVersionFromKernel32() {
-  std::unique_ptr<FileVersionInfoWin> file_version_info(
-      static_cast<FileVersionInfoWin*>(
-          FileVersionInfoWin::CreateFileVersionInfo(
-              base::FilePath(FILE_PATH_LITERAL("kernel32.dll")))));
-  if (file_version_info) {
-    const int major =
-        HIWORD(file_version_info->fixed_file_info()->dwFileVersionMS);
-    const int minor =
-        LOWORD(file_version_info->fixed_file_info()->dwFileVersionMS);
-    const int build =
-        HIWORD(file_version_info->fixed_file_info()->dwFileVersionLS);
-    return MajorMinorBuildToVersion(major, minor, build);
-  }
-
-  NOTREACHED();
-  return VERSION_WIN_LAST;
-}
-
 // Returns the the "UBR" value from the registry. Introduced in Windows 10,
 // this undocumented value appears to be similar to a patch number.
 // Returns 0 if the value does not exist or it could not be read.
@@ -123,29 +99,43 @@ int GetUBR() {
 }  // namespace
 
 // static
-OSInfo* OSInfo::GetInstance() {
+OSInfo** OSInfo::GetInstanceStorage() {
   // Note: we don't use the Singleton class because it depends on AtExitManager,
-  // and it's convenient for other modules to use this classs without it. This
-  // pattern is copied from gurl.cc.
-  static OSInfo* info;
-  if (!info) {
-    OSInfo* new_info = new OSInfo();
-    if (InterlockedCompareExchangePointer(
-        reinterpret_cast<PVOID*>(&info), new_info, NULL)) {
-      delete new_info;
+  // and it's convenient for other modules to use this class without it.
+  static OSInfo* info = []() {
+    _OSVERSIONINFOEXW version_info = {sizeof(version_info)};
+    ::GetVersionEx(reinterpret_cast<_OSVERSIONINFOW*>(&version_info));
+
+    _SYSTEM_INFO system_info = {};
+    ::GetNativeSystemInfo(&system_info);
+
+    DWORD os_type = 0;
+    if (version_info.dwMajorVersion == 6 || version_info.dwMajorVersion == 10) {
+      // Only present on Vista+.
+      GetProductInfoPtr get_product_info =
+          reinterpret_cast<GetProductInfoPtr>(::GetProcAddress(
+              ::GetModuleHandle(L"kernel32.dll"), "GetProductInfo"));
+      get_product_info(version_info.dwMajorVersion, version_info.dwMinorVersion,
+                       0, 0, &os_type);
     }
-  }
-  return info;
+
+    return new OSInfo(version_info, system_info, os_type);
+  }();
+
+  return &info;
 }
 
-OSInfo::OSInfo()
+// static
+OSInfo* OSInfo::GetInstance() {
+  return *GetInstanceStorage();
+}
+
+OSInfo::OSInfo(const _OSVERSIONINFOEXW& version_info,
+               const _SYSTEM_INFO& system_info,
+               int os_type)
     : version_(VERSION_PRE_XP),
-      kernel32_version_(VERSION_PRE_XP),
-      got_kernel32_version_(false),
       architecture_(OTHER_ARCHITECTURE),
       wow64_status_(GetWOW64StatusForProcess(GetCurrentProcess())) {
-  OSVERSIONINFOEX version_info = { sizeof version_info };
-  ::GetVersionEx(reinterpret_cast<OSVERSIONINFO*>(&version_info));
   version_number_.major = version_info.dwMajorVersion;
   version_number_.minor = version_info.dwMinorVersion;
   version_number_.build = version_info.dwBuildNumber;
@@ -156,8 +146,6 @@ OSInfo::OSInfo()
   service_pack_.minor = version_info.wServicePackMinor;
   service_pack_str_ = base::WideToUTF8(version_info.szCSDVersion);
 
-  SYSTEM_INFO system_info = {};
-  ::GetNativeSystemInfo(&system_info);
   switch (system_info.wProcessorArchitecture) {
     case PROCESSOR_ARCHITECTURE_INTEL: architecture_ = X86_ARCHITECTURE; break;
     case PROCESSOR_ARCHITECTURE_AMD64: architecture_ = X64_ARCHITECTURE; break;
@@ -166,16 +154,8 @@ OSInfo::OSInfo()
   processors_ = system_info.dwNumberOfProcessors;
   allocation_granularity_ = system_info.dwAllocationGranularity;
 
-  GetProductInfoPtr get_product_info;
-  DWORD os_type;
-
   if (version_info.dwMajorVersion == 6 || version_info.dwMajorVersion == 10) {
     // Only present on Vista+.
-    get_product_info = reinterpret_cast<GetProductInfoPtr>(
-        ::GetProcAddress(::GetModuleHandle(L"kernel32.dll"), "GetProductInfo"));
-
-    get_product_info(version_info.dwMajorVersion, version_info.dwMinorVersion,
-                     0, 0, &os_type);
     switch (os_type) {
       case PRODUCT_CLUSTER_SERVER:
       case PRODUCT_DATACENTER_SERVER:
@@ -244,11 +224,34 @@ OSInfo::~OSInfo() {
 }
 
 Version OSInfo::Kernel32Version() const {
-  if (!got_kernel32_version_) {
-    kernel32_version_ = GetVersionFromKernel32();
-    got_kernel32_version_ = true;
-  }
-  return kernel32_version_;
+  static const Version kernel32_version =
+      MajorMinorBuildToVersion(Kernel32BaseVersion().components()[0],
+                               Kernel32BaseVersion().components()[1],
+                               Kernel32BaseVersion().components()[2]);
+  return kernel32_version;
+}
+
+// Retrieve a version from kernel32. This is useful because when running in
+// compatibility mode for a down-level version of the OS, the file version of
+// kernel32 will still be the "real" version.
+base::Version OSInfo::Kernel32BaseVersion() const {
+  static const base::NoDestructor<base::Version> version([] {
+    std::unique_ptr<FileVersionInfoWin> file_version_info(
+        static_cast<FileVersionInfoWin*>(
+            FileVersionInfoWin::CreateFileVersionInfo(
+                base::FilePath(FILE_PATH_LITERAL("kernel32.dll")))));
+    DCHECK(file_version_info);
+    const int major =
+        HIWORD(file_version_info->fixed_file_info()->dwFileVersionMS);
+    const int minor =
+        LOWORD(file_version_info->fixed_file_info()->dwFileVersionMS);
+    const int build =
+        HIWORD(file_version_info->fixed_file_info()->dwFileVersionLS);
+    const int patch =
+        LOWORD(file_version_info->fixed_file_info()->dwFileVersionLS);
+    return base::Version(std::vector<uint32_t>{major, minor, build, patch});
+  }());
+  return *version;
 }
 
 std::string OSInfo::processor_model_name() {

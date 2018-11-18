@@ -58,7 +58,7 @@ class ChromeCommitter(object):
       sparse_checkout: List of file paths to fetch.
     """
     assert isinstance(sparse_checkout, list)
-    sparse_checkout += ['codereview.settings']
+    sparse_checkout += ['codereview.settings', 'WATCHLISTS']
     git.ShallowFetch(self._checkout_dir, constants.CHROMIUM_GOB_URL,
                      sparse_checkout=sparse_checkout)
     git.CreateBranch(self._checkout_dir, 'auto-commit-branch',
@@ -136,11 +136,19 @@ class ChromeCommitter(object):
     Returns:
       Dictionary of parsed command line args.
     """
+    # We need to use the account used by the builder to upload git CLs when
+    # generating CLs.
+    default_git_account = None
+    if cros_build_lib.HostIsCIBuilder(golo_only=True):
+      default_git_account = 'chromeos-commit-bot@chromium.org'
+    elif cros_build_lib.HostIsCIBuilder(gce_only=True):
+      default_git_account = '3su6n15k.default@developer.gserviceaccount.com'
+
     parser = commandline.ArgumentParser(usage=__doc__, add_help=False)
     parser.add_argument('--dryrun', action='store_true', default=False,
                         help='Don\'t commit changes or send out emails.')
     parser.add_argument('--user_email', required=False,
-                        default='chromeos-commit-bot@chromium.org',
+                        default=default_git_account,
                         help='Email address to use when comitting changes.')
     parser.add_argument('--workdir',
                         default=os.path.join(os.getcwd(), 'chrome_src'),

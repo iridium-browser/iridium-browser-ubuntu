@@ -8,6 +8,7 @@
 #include "base/android/jni_string.h"
 #include "base/bind.h"
 #include "base/logging.h"
+#include "base/task/post_task.h"
 #include "chrome/browser/android/bookmarks/partner_bookmarks_shim.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
@@ -15,10 +16,12 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "components/bookmarks/browser/bookmark_model.h"
+#include "components/favicon/core/favicon_server_fetcher_params.h"
 #include "components/favicon/core/favicon_service.h"
 #include "components/favicon/core/large_icon_service.h"
 #include "components/favicon_base/favicon_types.h"
 #include "components/image_fetcher/core/image_fetcher.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "jni/PartnerBookmarksReader_jni.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -89,8 +92,8 @@ void PrepareAndSetFavicon(jbyte* icon_bytes,
 
   base::WaitableEvent event(base::WaitableEvent::ResetPolicy::AUTOMATIC,
                             base::WaitableEvent::InitialState::NOT_SIGNALED);
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::UI},
       base::Bind(&SetFaviconCallback, profile, node->url(), fake_icon_url,
                  image_data, icon_type, &event));
   // TODO(aruslan): http://b/6397072 If possible - avoid using favicon service
@@ -218,8 +221,8 @@ void PartnerBookmarksReader::GetFavicon(const GURL& page_url,
                                         bool fallback_to_server,
                                         int desired_favicon_size_px,
                                         FaviconFetchedCallback callback) {
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::UI},
       base::BindOnce(&PartnerBookmarksReader::GetFaviconImpl,
                      base::Unretained(this), page_url, profile,
                      fallback_to_server, desired_favicon_size_px,
@@ -313,9 +316,10 @@ void PartnerBookmarksReader::OnGetFaviconFromCacheFinished(
         })");
   GetLargeIconService()
       ->GetLargeIconOrFallbackStyleFromGoogleServerSkippingLocalCache(
-          page_url, kPartnerBookmarksMinimumFaviconSizePx,
-          desired_favicon_size_px, false /* may_page_url_be_private */,
-          traffic_annotation,
+          favicon::FaviconServerFetcherParams::CreateForMobile(
+              page_url, kPartnerBookmarksMinimumFaviconSizePx,
+              desired_favicon_size_px),
+          false /* may_page_url_be_private */, traffic_annotation,
           base::Bind(&PartnerBookmarksReader::OnGetFaviconFromServerFinished,
                      base::Unretained(this), page_url, desired_favicon_size_px,
                      base::Passed(std::move(callback))));

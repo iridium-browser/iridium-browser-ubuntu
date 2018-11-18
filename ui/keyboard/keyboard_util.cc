@@ -7,28 +7,18 @@
 #include <string>
 
 #include "base/command_line.h"
-#include "base/feature_list.h"
-#include "base/lazy_instance.h"
-#include "base/logging.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/strings/string16.h"
-#include "ui/aura/client/aura_constants.h"
 #include "ui/aura/window_tree_host.h"
+#include "ui/base/ime/constants.h"
 #include "ui/base/ime/input_method.h"
-#include "ui/base/ime/input_method_base.h"
 #include "ui/base/ime/text_input_client.h"
-#include "ui/base/ime/text_input_flags.h"
-#include "ui/base/ui_base_features.h"
-#include "ui/base/ui_base_switches.h"
 #include "ui/events/event_sink.h"
 #include "ui/events/event_utils.h"
 #include "ui/events/keycodes/dom/dom_code.h"
 #include "ui/events/keycodes/dom/dom_key.h"
 #include "ui/events/keycodes/dom/keycode_converter.h"
 #include "ui/events/keycodes/keyboard_code_conversion.h"
-#include "ui/keyboard/keyboard_controller.h"
 #include "ui/keyboard/keyboard_switches.h"
-#include "ui/keyboard/keyboard_ui.h"
 
 namespace keyboard {
 
@@ -47,40 +37,17 @@ void SendProcessKeyEvent(ui::EventType type,
   CHECK(!details.dispatcher_destroyed);
 }
 
-bool g_keyboard_load_time_logged = false;
-base::LazyInstance<base::Time>::DestructorAtExit g_keyboard_load_time_start =
-    LAZY_INSTANCE_INITIALIZER;
-
-struct keyboard::KeyboardConfig g_keyboard_config;
-
 bool g_accessibility_keyboard_enabled = false;
 
-bool g_hotrod_keyboard_enabled = false;
+bool g_keyboard_enabled_from_shelf = false;
 
 bool g_touch_keyboard_enabled = false;
 
 KeyboardState g_requested_keyboard_state = KEYBOARD_STATE_AUTO;
 
-KeyboardOverscrolOverride g_keyboard_overscroll_override =
-    KEYBOARD_OVERSCROLL_OVERRIDE_NONE;
-
 KeyboardShowOverride g_keyboard_show_override = KEYBOARD_SHOW_OVERRIDE_NONE;
 
 }  // namespace
-
-bool UpdateKeyboardConfig(const KeyboardConfig& keyboard_config) {
-  if (g_keyboard_config == keyboard_config)
-    return false;
-  g_keyboard_config = keyboard_config;
-  keyboard::KeyboardController* controller = KeyboardController::GetInstance();
-  if (controller)
-    controller->NotifyKeyboardConfigChanged();
-  return true;
-}
-
-const KeyboardConfig& GetKeyboardConfig() {
-  return g_keyboard_config;
-}
 
 void SetAccessibilityKeyboardEnabled(bool enabled) {
   g_accessibility_keyboard_enabled = enabled;
@@ -90,12 +57,12 @@ bool GetAccessibilityKeyboardEnabled() {
   return g_accessibility_keyboard_enabled;
 }
 
-void SetHotrodKeyboardEnabled(bool enabled) {
-  g_hotrod_keyboard_enabled = enabled;
+void SetKeyboardEnabledFromShelf(bool enabled) {
+  g_keyboard_enabled_from_shelf = enabled;
 }
 
-bool GetHotrodKeyboardEnabled() {
-  return g_hotrod_keyboard_enabled;
+bool GetKeyboardEnabledFromShelf() {
+  return g_keyboard_enabled_from_shelf;
 }
 
 void SetTouchKeyboardEnabled(bool enabled) {
@@ -110,10 +77,6 @@ void SetRequestedKeyboardState(KeyboardState state) {
   g_requested_keyboard_state = state;
 }
 
-KeyboardState GetKeyboardRequestedState() {
-  return g_requested_keyboard_state;
-}
-
 std::string GetKeyboardLayout() {
   // TODO(bshe): layout string is currently hard coded. We should use more
   // standard keyboard layouts.
@@ -123,6 +86,9 @@ std::string GetKeyboardLayout() {
 bool IsKeyboardEnabled() {
   // Accessibility setting prioritized over policy setting.
   if (g_accessibility_keyboard_enabled)
+    return true;
+  // Keyboard can be enabled temporarily by the shelf.
+  if (g_keyboard_enabled_from_shelf)
     return true;
   // Policy strictly disables showing a virtual keyboard.
   if (g_keyboard_show_override == KEYBOARD_SHOW_OVERRIDE_DISABLED)
@@ -142,84 +108,8 @@ bool IsKeyboardEnabled() {
          g_requested_keyboard_state == KEYBOARD_STATE_ENABLED;
 }
 
-bool IsKeyboardVisible() {
-  auto* keyboard_controller = keyboard::KeyboardController::GetInstance();
-  return keyboard_controller && keyboard_controller->keyboard_visible();
-}
-
-bool IsKeyboardOverscrollEnabled() {
-  if (!IsKeyboardEnabled())
-    return false;
-
-  // Users of the sticky accessibility on-screen keyboard are likely to be using
-  // mouse input, which may interfere with overscrolling.
-  if (keyboard::KeyboardController::GetInstance() &&
-      !keyboard::KeyboardController::GetInstance()->IsOverscrollAllowed()) {
-    return false;
-  }
-
-  // If overscroll enabled override is set, use it instead. Currently
-  // login / out-of-box disable keyboard overscroll. http://crbug.com/363635
-  if (g_keyboard_overscroll_override != KEYBOARD_OVERSCROLL_OVERRIDE_NONE) {
-    return g_keyboard_overscroll_override ==
-        KEYBOARD_OVERSCROLL_OVERRIDE_ENABLED;
-  }
-
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableVirtualKeyboardOverscroll)) {
-    return false;
-  }
-  return true;
-}
-
-void SetKeyboardOverscrollOverride(KeyboardOverscrolOverride override) {
-  g_keyboard_overscroll_override = override;
-}
-
-void SetKeyboardShowOverride(KeyboardShowOverride override) {
-  g_keyboard_show_override = override;
-}
-
-bool IsInputViewEnabled() {
-  return !base::CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kDisableInputView);
-}
-
-bool IsExperimentalInputViewEnabled() {
-  return base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableExperimentalInputViewFeatures);
-}
-
-bool IsFloatingVirtualKeyboardEnabled() {
-  return base::FeatureList::IsEnabled(features::kEnableFloatingVirtualKeyboard);
-}
-
-bool IsGestureTypingEnabled() {
-  return !base::CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kDisableGestureTyping);
-}
-
-bool IsGestureEditingEnabled() {
-  return !base::CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kDisableGestureEditing);
-}
-
-bool InsertText(const base::string16& text) {
-  KeyboardController* controller = KeyboardController::GetInstance();
-  if (!controller)
-    return false;
-
-  ui::InputMethod* input_method = controller->ui()->GetInputMethod();
-  if (!input_method)
-    return false;
-
-  ui::TextInputClient* tic = input_method->GetTextInputClient();
-  if (!tic || tic->GetTextInputType() == ui::TEXT_INPUT_TYPE_NONE)
-    return false;
-
-  tic->InsertText(text);
-
-  return true;
+void SetKeyboardShowOverride(KeyboardShowOverride show_override) {
+  g_keyboard_show_override = show_override;
 }
 
 bool SendKeyEvent(const std::string type,
@@ -251,7 +141,7 @@ bool SendKeyEvent(const std::string type,
 
       SendProcessKeyEvent(ui::ET_KEY_PRESSED, host);
 
-      ui::KeyEvent char_event(key_value, code, ui::EF_NONE);
+      ui::KeyEvent char_event(key_value, code, ui::DomCode::NONE, ui::EF_NONE);
       if (tic)
         tic->InsertChar(char_event);
       SendProcessKeyEvent(ui::ET_KEY_RELEASED, host);
@@ -281,36 +171,17 @@ bool SendKeyEvent(const std::string type,
         code,
         dom_code,
         modifiers);
+
+    // Marks the simulated key event is from the Virtual Keyboard.
+    ui::Event::Properties properties;
+    properties[ui::kPropertyFromVK] = std::vector<uint8_t>();
+    event.SetProperties(properties);
+
     ui::EventDispatchDetails details =
         host->event_sink()->OnEventFromSource(&event);
     CHECK(!details.dispatcher_destroyed);
   }
   return true;
-}
-
-void MarkKeyboardLoadStarted() {
-  if (!g_keyboard_load_time_logged)
-    g_keyboard_load_time_start.Get() = base::Time::Now();
-}
-
-void MarkKeyboardLoadFinished() {
-  // Possible to get a load finished without a start if navigating directly to
-  // chrome://keyboard.
-  if (g_keyboard_load_time_start.Get().is_null())
-    return;
-
-  if (!g_keyboard_load_time_logged) {
-    // Log the delta only once.
-    UMA_HISTOGRAM_TIMES(
-        "VirtualKeyboard.InitLatency.FirstLoad",
-        base::Time::Now() - g_keyboard_load_time_start.Get());
-    g_keyboard_load_time_logged = true;
-  }
-}
-
-void LogKeyboardControlEvent(KeyboardControlEvent event) {
-  UMA_HISTOGRAM_ENUMERATION("VirtualKeyboard.KeyboardControlEvent", event,
-                            KEYBOARD_CONTROL_MAX);
 }
 
 }  // namespace keyboard

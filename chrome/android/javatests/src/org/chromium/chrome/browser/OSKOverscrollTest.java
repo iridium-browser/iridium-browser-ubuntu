@@ -19,14 +19,12 @@ import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
-import org.chromium.content.browser.test.util.Coordinates;
-import org.chromium.content.browser.test.util.Criteria;
-import org.chromium.content.browser.test.util.CriteriaHelper;
-import org.chromium.content.browser.test.util.DOMUtils;
-import org.chromium.content.browser.test.util.JavaScriptUtils;
-import org.chromium.content_public.browser.ContentViewCore;
 import org.chromium.content_public.browser.WebContents;
-import org.chromium.ui.UiUtils;
+import org.chromium.content_public.browser.test.util.Coordinates;
+import org.chromium.content_public.browser.test.util.Criteria;
+import org.chromium.content_public.browser.test.util.CriteriaHelper;
+import org.chromium.content_public.browser.test.util.DOMUtils;
+import org.chromium.content_public.browser.test.util.JavaScriptUtils;
 
 import java.util.Locale;
 import java.util.concurrent.ExecutionException;
@@ -82,10 +80,9 @@ public class OSKOverscrollTest {
         CriteriaHelper.pollUiThread(new Criteria("Keyboard was never shown.") {
             @Override
             public boolean isSatisfied() {
-                return UiUtils.isKeyboardShowing(mActivityTestRule.getActivity(),
-                        mActivityTestRule.getActivity()
-                                .getCurrentContentViewCore()
-                                .getContainerView());
+                return mActivityTestRule.getKeyboardDelegate().isKeyboardShowing(
+                        mActivityTestRule.getActivity(),
+                        mActivityTestRule.getActivity().getActivityTab().getContentView());
             }
         });
     }
@@ -122,12 +119,9 @@ public class OSKOverscrollTest {
             throws InterruptedException, TimeoutException, ExecutionException {
         mActivityTestRule.startMainActivityWithURL(FIXED_FOOTER_PAGE);
 
-        final AtomicReference<ContentViewCore> viewCoreRef = new AtomicReference<ContentViewCore>();
         final AtomicReference<WebContents> webContentsRef = new AtomicReference<WebContents>();
-        ThreadUtils.runOnUiThreadBlocking(() -> {
-            viewCoreRef.set(mActivityTestRule.getActivity().getCurrentContentViewCore());
-            webContentsRef.set(viewCoreRef.get().getWebContents());
-        });
+        ThreadUtils.runOnUiThreadBlocking(
+                () -> { webContentsRef.set(mActivityTestRule.getWebContents()); });
 
         DOMUtils.waitForNonZeroNodeBounds(webContentsRef.get(), "fn");
 
@@ -140,7 +134,7 @@ public class OSKOverscrollTest {
 
         // Click on the unfocused input element for the first time to focus on it. This brings up
         // the OSK.
-        DOMUtils.clickNode(viewCoreRef.get(), "fn");
+        DOMUtils.clickNode(webContentsRef.get(), "fn");
 
         waitForKeyboard();
 

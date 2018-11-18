@@ -26,6 +26,8 @@ import android.widget.LinearLayout;
 import android.widget.Spinner;
 
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.preferences.MainPreferences;
+import org.chromium.chrome.browser.preferences.PreferenceUtils;
 import org.chromium.chrome.browser.widget.FadingEdgeScrollView;
 import org.chromium.chrome.browser.widget.prefeditor.EditorDialog;
 
@@ -50,10 +52,10 @@ public abstract class AutofillEditorBase
         mContext = container.getContext();
 
         // We know which profile to edit based on the GUID stuffed in
-        // our extras by AutofillAndPaymentsPreferences.
+        // our extras by MainPreferences.
         Bundle extras = getArguments();
         if (extras != null) {
-            mGUID = extras.getString(AutofillAndPaymentsPreferences.AUTOFILL_GUID);
+            mGUID = extras.getString(MainPreferences.AUTOFILL_GUID);
         }
         if (mGUID == null) {
             mGUID = "";
@@ -63,18 +65,22 @@ public abstract class AutofillEditorBase
         }
         getActivity().setTitle(getTitleResourceId(mIsNewEntry));
 
-        // Hide the top shadow on the ScrollView because the toolbar draws one.
-        FadingEdgeScrollView scrollView = (FadingEdgeScrollView) inflater.inflate(
-                R.layout.autofill_editor_base, container, false);
-        scrollView.setEdgeVisibility(
-                FadingEdgeScrollView.DRAW_NO_EDGE, FadingEdgeScrollView.DRAW_FADING_EDGE);
+        View baseView = inflater.inflate(R.layout.autofill_editor_base, container, false);
 
+        // Hide the top shadow on the ScrollView because the toolbar draws one.
+        FadingEdgeScrollView scrollView =
+                (FadingEdgeScrollView) baseView.findViewById(R.id.scroll_view);
+        scrollView.setEdgeVisibility(
+                FadingEdgeScrollView.EdgeType.NONE, FadingEdgeScrollView.EdgeType.FADING);
+        scrollView.getViewTreeObserver().addOnScrollChangedListener(
+                PreferenceUtils.getShowShadowOnScrollListener(
+                        scrollView, baseView.findViewById(R.id.shadow)));
         // Inflate the editor and buttons into the "content" LinearLayout.
         LinearLayout contentLayout = (LinearLayout) scrollView.findViewById(R.id.content);
         inflater.inflate(getLayoutId(), contentLayout, true);
         inflater.inflate(R.layout.autofill_editor_base_buttons, contentLayout, true);
 
-        return scrollView;
+        return baseView;
     }
 
     @Override

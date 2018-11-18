@@ -27,7 +27,6 @@
 
 #include "base/macros.h"
 #include "third_party/blink/renderer/bindings/core/v8/add_event_listener_options_or_boolean.h"
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/dom/events/event_listener.h"
@@ -48,6 +47,7 @@
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/loader/document_loader.h"
 #include "third_party/blink/renderer/core/loader/frame_loader.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/keyboard_codes.h"
 
 namespace blink {
@@ -137,23 +137,23 @@ DocumentParser* MediaDocument::CreateParser() {
   return MediaDocumentParser::Create(this);
 }
 
-void MediaDocument::DefaultEventHandler(Event* event) {
-  Node* target_node = event->target()->ToNode();
+void MediaDocument::DefaultEventHandler(Event& event) {
+  Node* target_node = event.target()->ToNode();
   if (!target_node)
     return;
 
-  if (event->type() == EventTypeNames::keydown && event->IsKeyboardEvent()) {
+  if (event.type() == EventTypeNames::keydown && event.IsKeyboardEvent()) {
     HTMLVideoElement* video =
         Traversal<HTMLVideoElement>::FirstWithin(*target_node);
     if (!video)
       return;
 
-    KeyboardEvent* keyboard_event = ToKeyboardEvent(event);
-    if (keyboard_event->key() == " " ||
-        keyboard_event->keyCode() == VKEY_MEDIA_PLAY_PAUSE) {
+    auto& keyboard_event = ToKeyboardEvent(event);
+    if (keyboard_event.key() == " " ||
+        keyboard_event.keyCode() == VKEY_MEDIA_PLAY_PAUSE) {
       // space or media key (play/pause)
       video->TogglePlayState();
-      event->SetDefaultHandled();
+      event.SetDefaultHandled();
     }
   }
 }

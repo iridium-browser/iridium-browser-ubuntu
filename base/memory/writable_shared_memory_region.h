@@ -9,6 +9,7 @@
 #include "base/memory/platform_shared_memory_region.h"
 #include "base/memory/read_only_shared_memory_region.h"
 #include "base/memory/shared_memory_mapping.h"
+#include "base/memory/unsafe_shared_memory_region.h"
 
 namespace base {
 
@@ -27,6 +28,12 @@ class BASE_EXPORT WritableSharedMemoryRegion {
   // Creates a new WritableSharedMemoryRegion instance of a given
   // size that can be used for mapping writable shared memory into the virtual
   // address space.
+  //
+  // This call will fail if the process does not have sufficient permissions to
+  // create a shared memory region itself. See
+  // mojo::CreateWritableSharedMemoryRegion in
+  // mojo/public/cpp/base/shared_memory_utils.h for creating a shared memory
+  // region from a an unprivileged process where a broker must be used.
   static WritableSharedMemoryRegion Create(size_t size);
 
   // Returns a WritableSharedMemoryRegion built from a platform handle that was
@@ -48,6 +55,11 @@ class BASE_EXPORT WritableSharedMemoryRegion {
   // Makes the region read-only. No new writable mappings of the region can be
   // created after this call. Returns an invalid region on failure.
   static ReadOnlySharedMemoryRegion ConvertToReadOnly(
+      WritableSharedMemoryRegion region);
+
+  // Makes the region unsafe. The region cannot be converted to read-only after
+  // this call. Returns an invalid region on failure.
+  static UnsafeSharedMemoryRegion ConvertToUnsafe(
       WritableSharedMemoryRegion region);
 
   // Default constructor initializes an invalid instance.
@@ -81,6 +93,12 @@ class BASE_EXPORT WritableSharedMemoryRegion {
   size_t GetSize() const {
     DCHECK(IsValid());
     return handle_.GetSize();
+  }
+
+  // Returns 128-bit GUID of the region.
+  const UnguessableToken& GetGUID() const {
+    DCHECK(IsValid());
+    return handle_.GetGUID();
   }
 
  private:

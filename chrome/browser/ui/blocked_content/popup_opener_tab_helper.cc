@@ -15,8 +15,6 @@
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/web_contents.h"
 
-DEFINE_WEB_CONTENTS_USER_DATA_KEY(PopupOpenerTabHelper);
-
 // static
 void PopupOpenerTabHelper::CreateForWebContents(
     content::WebContents* contents,
@@ -81,4 +79,11 @@ void PopupOpenerTabHelper::OnVisibilityChanged(content::Visibility visibility) {
 void PopupOpenerTabHelper::DidGetUserInteraction(
     const blink::WebInputEvent::Type type) {
   has_opened_popup_since_last_user_gesture_ = false;
+}
+
+void PopupOpenerTabHelper::DidStartNavigation(
+    content::NavigationHandle* navigation_handle) {
+  // Treat browser-initiated navigations as user interactions.
+  if (!navigation_handle->IsRendererInitiated())
+    has_opened_popup_since_last_user_gesture_ = false;
 }

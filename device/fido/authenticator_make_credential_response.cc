@@ -7,21 +7,22 @@
 #include <utility>
 
 #include "device/fido/attestation_object.h"
+#include "device/fido/attestation_statement_formats.h"
 #include "device/fido/attested_credential_data.h"
 #include "device/fido/authenticator_data.h"
 #include "device/fido/ec_public_key.h"
-#include "device/fido/fido_attestation_statement.h"
-#include "device/fido/u2f_parsing_utils.h"
+#include "device/fido/fido_parsing_utils.h"
 
 namespace device {
 
 // static
 base::Optional<AuthenticatorMakeCredentialResponse>
 AuthenticatorMakeCredentialResponse::CreateFromU2fRegisterResponse(
-    const std::vector<uint8_t>& relying_party_id_hash,
+    FidoTransportProtocol transport_used,
+    base::span<const uint8_t, kRpIdHashLength> relying_party_id_hash,
     base::span<const uint8_t> u2f_data) {
   auto public_key = ECPublicKey::ExtractFromU2fRegistrationResponse(
-      u2f_parsing_utils::kEs256, u2f_data);
+      fido_parsing_utils::kEs256, u2f_data);
   if (!public_key)
     return base::nullopt;
 
@@ -37,13 +38,12 @@ AuthenticatorMakeCredentialResponse::CreateFromU2fRegisterResponse(
       attested_credential_data->credential_id();
 
   // The counter is zeroed out for Register requests.
-  std::vector<uint8_t> counter(4u);
+  std::array<uint8_t, 4> counter = {};
   constexpr uint8_t flags =
       static_cast<uint8_t>(AuthenticatorData::Flag::kTestOfUserPresence) |
       static_cast<uint8_t>(AuthenticatorData::Flag::kAttestation);
 
-  AuthenticatorData authenticator_data(std::move(relying_party_id_hash), flags,
-                                       std::move(counter),
+  AuthenticatorData authenticator_data(relying_party_id_hash, flags, counter,
                                        std::move(attested_credential_data));
 
   auto fido_attestation_statement =
@@ -52,14 +52,17 @@ AuthenticatorMakeCredentialResponse::CreateFromU2fRegisterResponse(
   if (!fido_attestation_statement)
     return base::nullopt;
 
-  return AuthenticatorMakeCredentialResponse(AttestationObject(
-      std::move(authenticator_data), std::move(fido_attestation_statement)));
+  return AuthenticatorMakeCredentialResponse(
+      transport_used, AttestationObject(std::move(authenticator_data),
+                                        std::move(fido_attestation_statement)));
 }
 
 AuthenticatorMakeCredentialResponse::AuthenticatorMakeCredentialResponse(
+    FidoTransportProtocol transport_used,
     AttestationObject attestation_object)
     : ResponseData(attestation_object.GetCredentialId()),
-      attestation_object_(std::move(attestation_object)) {}
+      attestation_object_(std::move(attestation_object)),
+      transport_used_(transport_used) {}
 
 AuthenticatorMakeCredentialResponse::AuthenticatorMakeCredentialResponse(
     AuthenticatorMakeCredentialResponse&& that) = default;
@@ -79,15 +82,24 @@ void AuthenticatorMakeCredentialResponse::EraseAttestationStatement() {
   attestation_object_.EraseAttestationStatement();
 }
 
+bool AuthenticatorMakeCredentialResponse::IsSelfAttestation() {
+  return attestation_object_.IsSelfAttestation();
+}
+
 bool AuthenticatorMakeCredentialResponse::
     IsAttestationCertificateInappropriatelyIdentifying() {
   return attestation_object_
       .IsAttestationCertificateInappropriatelyIdentifying();
 }
 
-const std::vector<uint8_t>& AuthenticatorMakeCredentialResponse::GetRpIdHash()
-    const {
+const std::array<uint8_t, kRpIdHashLength>&
+AuthenticatorMakeCredentialResponse::GetRpIdHash() const {
   return attestation_object_.rp_id_hash();
+}
+
+std::vector<uint8_t> GetSerializedCtapDeviceResponse(
+    const AuthenticatorMakeCredentialResponse& response) {
+  return SerializeToCtapStyleCborEncodedBytes(response.attestation_object());
 }
 
 }  // namespace device

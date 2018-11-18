@@ -6,7 +6,7 @@
 #define CHROME_BROWSER_ANDROID_TAB_WEB_CONTENTS_DELEGATE_ANDROID_H_
 
 #include "base/files/file_path.h"
-#include "components/web_contents_delegate_android/web_contents_delegate_android.h"
+#include "components/embedder_support/android/delegate/web_contents_delegate_android.h"
 #include "content/public/browser/bluetooth_chooser.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -36,7 +36,8 @@ class TabWebContentsDelegateAndroid
   ~TabWebContentsDelegateAndroid() override;
 
   void RunFileChooser(content::RenderFrameHost* render_frame_host,
-                      const content::FileChooserParams& params) override;
+                      std::unique_ptr<content::FileSelectListener> listener,
+                      const blink::mojom::FileChooserParams& params) override;
   std::unique_ptr<content::BluetoothChooser> RunBluetoothChooser(
       content::RenderFrameHost* frame,
       const content::BluetoothChooser::EventHandler& event_handler) override;
@@ -62,7 +63,7 @@ class TabWebContentsDelegateAndroid
   void RequestMediaAccessPermission(
       content::WebContents* web_contents,
       const content::MediaStreamRequest& request,
-      const content::MediaResponseCallback& callback) override;
+      content::MediaResponseCallback callback) override;
   bool CheckMediaAccessPermission(content::RenderFrameHost* render_frame_host,
                                   const GURL& security_origin,
                                   content::MediaStreamType type) override;
@@ -77,17 +78,25 @@ class TabWebContentsDelegateAndroid
       const content::OpenURLParams& params) override;
   bool ShouldResumeRequestsForCreatedWindow() override;
   void AddNewContents(content::WebContents* source,
-                      content::WebContents* new_contents,
+                      std::unique_ptr<content::WebContents> new_contents,
                       WindowOpenDisposition disposition,
                       const gfx::Rect& initial_rect,
                       bool user_gesture,
                       bool* was_blocked) override;
+  blink::WebSecurityStyle GetSecurityStyle(
+      content::WebContents* web_contents,
+      content::SecurityStyleExplanations* security_style_explanations) override;
   void RequestAppBannerFromDevTools(
       content::WebContents* web_contents) override;
-  void OnAudioStateChanged(content::WebContents* web_contents,
-                           bool audible) override;
   void OnDidBlockFramebust(content::WebContents* web_contents,
                            const GURL& url) override;
+  void UpdateUserGestureCarryoverInfo(
+      content::WebContents* web_contents) override;
+  std::unique_ptr<content::WebContents> SwapWebContents(
+      content::WebContents* old_contents,
+      std::unique_ptr<content::WebContents> new_contents,
+      bool did_start_load,
+      bool did_finish_load) override;
 
  private:
   // NotificationObserver implementation.

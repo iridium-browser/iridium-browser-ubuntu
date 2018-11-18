@@ -11,9 +11,9 @@
 
 #include "base/macros.h"
 #include "base/synchronization/cancellation_flag.h"
-#include "base/task_scheduler/post_task.h"
-#include "base/task_scheduler/task_traits.h"
-#include "base/threading/thread_restrictions.h"
+#include "base/task/post_task.h"
+#include "base/task/task_traits.h"
+#include "base/threading/scoped_blocking_call.h"
 #include "build/build_config.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
 #include "chrome/browser/browsing_data/chrome_browsing_data_remover_delegate.h"
@@ -26,7 +26,6 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/pref_names.h"
-#include "chrome/installer/util/browser_distribution.h"
 #include "components/content_settings/core/browser/content_settings_info.h"
 #include "components/content_settings/core/browser/content_settings_registry.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
@@ -37,6 +36,7 @@
 #include "components/search_engines/search_engines_pref_names.h"
 #include "components/search_engines/template_url_prepopulate_data.h"
 #include "components/search_engines/template_url_service.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/browsing_data_remover.h"
 #include "extensions/browser/extension_registry.h"
@@ -53,17 +53,16 @@
 namespace {
 
 void ResetShortcutsOnBlockingThread() {
-  base::AssertBlockingAllowed();
   // Get full path of chrome.
   base::FilePath chrome_exe;
-  if (!PathService::Get(base::FILE_EXE, &chrome_exe))
+  if (!base::PathService::Get(base::FILE_EXE, &chrome_exe))
     return;
-  BrowserDistribution* dist = BrowserDistribution::GetDistribution();
+
+  base::ScopedBlockingCall scoped_blocking_call(base::BlockingType::MAY_BLOCK);
   for (int location = ShellUtil::SHORTCUT_LOCATION_FIRST;
        location < ShellUtil::NUM_SHORTCUT_LOCATIONS; ++location) {
     ShellUtil::ShortcutListMaybeRemoveUnknownArgs(
         static_cast<ShellUtil::ShortcutLocation>(location),
-        dist,
         ShellUtil::CURRENT_USER,
         chrome_exe,
         true,
@@ -105,8 +104,7 @@ void ProfileResetter::Reset(
   CHECK_EQ(static_cast<ResettableFlags>(0), pending_reset_flags_);
 
   if (!resettable_flags) {
-    content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
-                                     callback);
+    base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI}, callback);
     return;
   }
 
@@ -155,8 +153,8 @@ void ProfileResetter::MarkAsDone(Resettable resettable) {
   pending_reset_flags_ &= ~resettable;
 
   if (!pending_reset_flags_) {
-    content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
-                                     callback_);
+    base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI},
+                             callback_);
     callback_.Reset();
     master_settings_.reset();
     template_url_service_sub_.reset();
@@ -261,7 +259,7 @@ void ProfileResetter::ResetExtensions() {
   std::vector<std::string> brandcode_extensions;
   master_settings_->GetExtensions(&brandcode_extensions);
 
-  ExtensionService* extension_service =
+  extensions::ExtensionService* extension_service =
       extensions::ExtensionSystem::Get(profile_)->extension_service();
   DCHECK(extension_service);
   extension_service->DisableUserExtensionsExcept(brandcode_extensions);
@@ -352,12 +350,11 @@ void ProfileResetter::OnBrowsingDataRemoverDone() {
 #if defined(OS_WIN)
 std::vector<ShortcutCommand> GetChromeLaunchShortcuts(
     const scoped_refptr<SharedCancellationFlag>& cancel) {
-  base::AssertBlockingAllowed();
+  base::ScopedBlockingCall scoped_blocking_call(base::BlockingType::MAY_BLOCK);
   // Get full path of chrome.
   base::FilePath chrome_exe;
-  if (!PathService::Get(base::FILE_EXE, &chrome_exe))
+  if (!base::PathService::Get(base::FILE_EXE, &chrome_exe))
     return std::vector<ShortcutCommand>();
-  BrowserDistribution* dist = BrowserDistribution::GetDistribution();
   std::vector<ShortcutCommand> shortcuts;
   for (int location = ShellUtil::SHORTCUT_LOCATION_FIRST;
        location < ShellUtil::NUM_SHORTCUT_LOCATIONS; ++location) {
@@ -365,7 +362,6 @@ std::vector<ShortcutCommand> GetChromeLaunchShortcuts(
       break;
     ShellUtil::ShortcutListMaybeRemoveUnknownArgs(
         static_cast<ShellUtil::ShortcutLocation>(location),
-        dist,
         ShellUtil::CURRENT_USER,
         chrome_exe,
         false,

@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 
+#include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/thread_checker.h"
@@ -26,12 +27,14 @@
 
 namespace message_center {
 
+class LockScreenController;
+
 // The default implementation of MessageCenter.
-class MESSAGE_CENTER_EXPORT MessageCenterImpl
-    : public MessageCenter,
-      public NotificationBlocker::Observer {
+class MessageCenterImpl : public MessageCenter,
+                          public NotificationBlocker::Observer {
  public:
-  MessageCenterImpl();
+  explicit MessageCenterImpl(
+      std::unique_ptr<LockScreenController> lock_screen_controller);
   ~MessageCenterImpl() override;
 
   // MessageCenter overrides:
@@ -41,10 +44,14 @@ class MESSAGE_CENTER_EXPORT MessageCenterImpl
   void RemoveNotificationBlocker(NotificationBlocker* blocker) override;
   void SetVisibility(Visibility visible) override;
   bool IsMessageCenterVisible() const override;
+  void SetHasMessageCenterView(bool has_message_center_view) override;
+  bool HasMessageCenterView() const override;
   size_t NotificationCount() const override;
   bool HasPopupNotifications() const override;
   bool IsQuietMode() const override;
   Notification* FindVisibleNotificationById(const std::string& id) override;
+  NotificationList::Notifications FindNotificationsByAppId(
+      const std::string& app_id) override;
   const NotificationList::Notifications& GetVisibleNotifications() override;
   NotificationList::PopupNotifications GetPopupNotifications() override;
   void AddNotification(std::unique_ptr<Notification> notification) override;
@@ -83,20 +90,34 @@ class MESSAGE_CENTER_EXPORT MessageCenterImpl
   // NotificationBlocker::Observer overrides:
   void OnBlockingStateChanged(NotificationBlocker* blocker) override;
 
+  LockScreenController* lock_screen_controller() {
+    return lock_screen_controller_.get();
+  }
+  const LockScreenController* lock_screen_controller() const {
+    return lock_screen_controller_.get();
+  }
+
  protected:
   void DisableTimersForTest() override;
 
  private:
   THREAD_CHECKER(thread_checker_);
 
+  void ClickOnNotificationUnlocked(const std::string& id,
+                                   const base::Optional<int>& button_index,
+                                   const base::Optional<base::string16>& reply);
+
+  const std::unique_ptr<LockScreenController> lock_screen_controller_;
+
   std::unique_ptr<NotificationList> notification_list_;
   NotificationList::Notifications visible_notifications_;
-  base::ObserverList<MessageCenterObserver> observer_list_;
+  base::ObserverList<MessageCenterObserver>::Unchecked observer_list_;
   std::unique_ptr<PopupTimersController> popup_timers_controller_;
   std::unique_ptr<base::OneShotTimer> quiet_mode_timer_;
   std::vector<NotificationBlocker*> blockers_;
 
   bool visible_ = false;
+  bool has_message_center_view_ = true;
 
   base::string16 system_notification_app_name_;
 

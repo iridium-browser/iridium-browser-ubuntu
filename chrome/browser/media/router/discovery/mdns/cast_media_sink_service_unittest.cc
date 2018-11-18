@@ -9,11 +9,14 @@
 #include "base/test/test_simple_task_runner.h"
 #include "base/timer/mock_timer.h"
 #include "chrome/browser/media/router/discovery/mdns/cast_media_sink_service_impl.h"
+#include "chrome/browser/media/router/discovery/mdns/media_sink_util.h"
 #include "chrome/browser/media/router/test/mock_dns_sd_registry.h"
 #include "chrome/browser/media/router/test/test_helper.h"
+#include "chrome/common/media_router/test/test_helper.h"
 #include "components/cast_channel/cast_socket.h"
 #include "components/cast_channel/cast_socket_service.h"
 #include "components/cast_channel/cast_test_util.h"
+#include "content/public/browser/network_service_instance.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "net/base/ip_address.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -38,8 +41,7 @@ media_router::DnsSdService CreateDnsService(int num, int capabilities) {
   net::IPEndPoint ip_endpoint = CreateIPEndPoint(num);
   media_router::DnsSdService service;
   service.service_name =
-      "_myDevice." +
-      std::string(media_router::CastMediaSinkService::kCastServiceType);
+      "_myDevice." + std::string(media_router::kCastServiceType);
   service.ip_address = ip_endpoint.address().ToString();
   service.service_host_port = net::HostPortPair::FromIPEndPoint(ip_endpoint);
   service.service_data.push_back(base::StringPrintf("id=service %d", num));
@@ -59,13 +61,13 @@ class MockCastMediaSinkServiceImpl : public CastMediaSinkServiceImpl {
  public:
   MockCastMediaSinkServiceImpl(
       const OnSinksDiscoveredCallback& callback,
-      CastMediaSinkServiceImpl::Observer* observer,
       cast_channel::CastSocketService* cast_socket_service,
-      DiscoveryNetworkMonitor* network_monitor)
+      DiscoveryNetworkMonitor* network_monitor,
+      MediaSinkServiceBase* dial_media_sink_service)
       : CastMediaSinkServiceImpl(callback,
-                                 observer,
                                  cast_socket_service,
                                  network_monitor,
+                                 dial_media_sink_service,
                                  /* allow_all_ips */ false),
         sinks_discovered_cb_(callback) {}
   ~MockCastMediaSinkServiceImpl() override {}
@@ -94,12 +96,12 @@ class TestCastMediaSinkService : public CastMediaSinkService {
 
   std::unique_ptr<CastMediaSinkServiceImpl, base::OnTaskRunnerDeleter>
   CreateImpl(const OnSinksDiscoveredCallback& sinks_discovered_cb,
-             CastMediaSinkServiceImpl::Observer* observer) override {
+             MediaSinkServiceBase* dial_media_sink_service) override {
     auto mock_impl = std::unique_ptr<MockCastMediaSinkServiceImpl,
                                      base::OnTaskRunnerDeleter>(
-        new MockCastMediaSinkServiceImpl(sinks_discovered_cb, observer,
-                                         cast_socket_service_,
-                                         network_monitor_),
+        new MockCastMediaSinkServiceImpl(sinks_discovered_cb,
+                                         cast_socket_service_, network_monitor_,
+                                         dial_media_sink_service),
         base::OnTaskRunnerDeleter(cast_socket_service_->task_runner()));
     mock_impl_ = mock_impl.get();
     return mock_impl;
@@ -108,8 +110,8 @@ class TestCastMediaSinkService : public CastMediaSinkService {
   MockCastMediaSinkServiceImpl* mock_impl() { return mock_impl_; }
 
  private:
-  cast_channel::CastSocketService* const cast_socket_service_ = nullptr;
-  DiscoveryNetworkMonitor* const network_monitor_ = nullptr;
+  cast_channel::CastSocketService* const cast_socket_service_;
+  DiscoveryNetworkMonitor* const network_monitor_;
   MockCastMediaSinkServiceImpl* mock_impl_ = nullptr;
 };
 
@@ -117,7 +119,6 @@ class CastMediaSinkServiceTest : public ::testing::Test {
  public:
   CastMediaSinkServiceTest()
       : task_runner_(new base::TestSimpleTaskRunner()),
-        network_change_notifier_(net::NetworkChangeNotifier::CreateMock()),
         mock_cast_socket_service_(
             new cast_channel::MockCastSocketService(task_runner_)),
         media_sink_service_(new TestCastMediaSinkService(
@@ -130,7 +131,7 @@ class CastMediaSinkServiceTest : public ::testing::Test {
     EXPECT_CALL(test_dns_sd_registry_, RegisterDnsSdListener(_));
     media_sink_service_->SetDnsSdRegistryForTest(&test_dns_sd_registry_);
     media_sink_service_->Start(mock_sink_discovered_ui_cb_.Get(),
-                               /* observer */ nullptr);
+                               &dial_media_sink_service_);
     mock_impl_ = media_sink_service_->mock_impl();
     ASSERT_TRUE(mock_impl_);
     EXPECT_CALL(*mock_impl_, DoStart()).WillOnce(InvokeWithoutArgs([this]() {
@@ -145,14 +146,15 @@ class CastMediaSinkServiceTest : public ::testing::Test {
     EXPECT_CALL(test_dns_sd_registry_, UnregisterDnsSdListener(_));
     media_sink_service_.reset();
     task_runner_->RunUntilIdle();
+    thread_bundle_.RunUntilIdle();
   }
 
  protected:
   content::TestBrowserThreadBundle thread_bundle_;
   scoped_refptr<base::TestSimpleTaskRunner> task_runner_;
-  std::unique_ptr<net::NetworkChangeNotifier> network_change_notifier_;
 
   base::MockCallback<OnSinksDiscoveredCallback> mock_sink_discovered_ui_cb_;
+  TestMediaSinkService dial_media_sink_service_;
   std::unique_ptr<cast_channel::MockCastSocketService>
       mock_cast_socket_service_;
 
@@ -164,7 +166,7 @@ class CastMediaSinkServiceTest : public ::testing::Test {
 };
 
 TEST_F(CastMediaSinkServiceTest, OnUserGesture) {
-  EXPECT_CALL(test_dns_sd_registry_, ForceDiscovery());
+  EXPECT_CALL(test_dns_sd_registry_, ResetAndDiscover());
   media_sink_service_->OnUserGesture();
 }
 
@@ -179,8 +181,7 @@ TEST_F(CastMediaSinkServiceTest, TestOnDnsSdEvent) {
   DnsSdRegistry::DnsSdServiceList service_list{service1, service2, service3};
 
   // Invoke CastSocketService::OpenSocket on the IO thread.
-  media_sink_service_->OnDnsSdEvent(CastMediaSinkService::kCastServiceType,
-                                    service_list);
+  media_sink_service_->OnDnsSdEvent(kCastServiceType, service_list);
 
   std::vector<MediaSinkInternal> sinks;
   EXPECT_CALL(*mock_impl_, OpenChannels(_, _)).WillOnce(SaveArg<0>(&sinks));

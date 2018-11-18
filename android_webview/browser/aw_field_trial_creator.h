@@ -5,11 +5,12 @@
 #ifndef ANDROID_WEBVIEW_BROWSER_AW_FIELD_TRIAL_CREATOR_H_
 #define ANDROID_WEBVIEW_BROWSER_AW_FIELD_TRIAL_CREATOR_H_
 
+#include <memory>
+
 #include "android_webview/browser/aw_field_trials.h"
 #include "android_webview/browser/aw_variations_service_client.h"
 #include "base/metrics/field_trial.h"
 #include "components/prefs/pref_service.h"
-#include "components/prefs/pref_service_factory.h"
 #include "components/variations/service/variations_field_trial_creator.h"
 
 namespace android_webview {
@@ -23,14 +24,14 @@ class AwFieldTrialCreator {
   AwFieldTrialCreator();
   ~AwFieldTrialCreator();
 
-  // Creates the PrefService object that stores the variations prefs needed by
-  // VariationsFieldTrialCreator.
-  std::unique_ptr<PrefService> CreateLocalState();
-
   // Sets up the field trials and related initialization.
-  void SetUpFieldTrials();
+  void SetUpFieldTrials(PrefService* pref_service);
 
  private:
+  // Stores the seed. VariationsSeedStore keeps a raw pointer to this, so it
+  // must persist for the process lifetime. Not persisted accross runs.
+  std::unique_ptr<PrefService> local_state_;
+
   // A/B testing infrastructure for the entire application. empty until
   // |SetupFieldTrials()| is called.
   std::unique_ptr<base::FieldTrialList> field_trial_list_;
@@ -43,9 +44,6 @@ class AwFieldTrialCreator {
       variations_field_trial_creator_;
 
   std::unique_ptr<AwVariationsServiceClient> client_;
-
-  // Used to create a PrefService for variations prefs.
-  PrefServiceFactory pref_service_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(AwFieldTrialCreator);
 };

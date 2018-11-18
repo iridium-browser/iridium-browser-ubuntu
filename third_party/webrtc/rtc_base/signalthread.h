@@ -14,10 +14,13 @@
 #include <string>
 
 #include "rtc_base/checks.h"
-#include "rtc_base/constructormagic.h"
-#include "rtc_base/nullsocketserver.h"
-#include "rtc_base/sigslot.h"
-#include "rtc_base/thread.h"
+#include "rtc_base/constructormagic.h"             // for RTC_DISALLOW_IMPLI...
+#include "rtc_base/criticalsection.h"              // for CriticalSection
+#include "rtc_base/messagehandler.h"               // for MessageHandler
+#include "rtc_base/messagequeue.h"                 // for Message
+#include "rtc_base/third_party/sigslot/sigslot.h"  // for has_slots, signal_...
+#include "rtc_base/thread.h"                       // for Thread
+#include "rtc_base/thread_annotations.h"           // for RTC_EXCLUSIVE_LOCK...
 
 namespace rtc {
 
@@ -38,9 +41,7 @@ namespace rtc {
 //   tasks in the context of the main thread.
 ///////////////////////////////////////////////////////////////////////////////
 
-class SignalThread
-    : public sigslot::has_slots<>,
-      protected MessageHandler {
+class SignalThread : public sigslot::has_slots<>, protected MessageHandler {
  public:
   SignalThread();
 
@@ -63,7 +64,7 @@ class SignalThread
   void Release();
 
   // Context: Main Thread.  Signalled when work is complete.
-  sigslot::signal1<SignalThread *> SignalWorkDone;
+  sigslot::signal1<SignalThread*> SignalWorkDone;
 
   enum { ST_MSG_WORKER_DONE, ST_MSG_FIRST_AVAILABLE };
 
@@ -73,7 +74,7 @@ class SignalThread
   Thread* worker() { return &worker_; }
 
   // Context: Main Thread.  Subclass should override to do pre-work setup.
-  virtual void OnWorkStart() { }
+  virtual void OnWorkStart() {}
 
   // Context: Worker Thread.  Subclass should override to do work.
   virtual void DoWork() = 0;
@@ -84,10 +85,10 @@ class SignalThread
 
   // Context: Worker Thread.  Subclass should override when extra work is
   // needed to abort the worker thread.
-  virtual void OnWorkStop() { }
+  virtual void OnWorkStop() {}
 
   // Context: Main Thread.  Subclass should override to do post-work cleanup.
-  virtual void OnWorkDone() { }
+  virtual void OnWorkDone() {}
 
   // Context: Any Thread.  If subclass overrides, be sure to call the base
   // implementation.  Do not use (message_id < ST_MSG_FIRST_AVAILABLE)
@@ -95,11 +96,11 @@ class SignalThread
 
  private:
   enum State {
-    kInit,            // Initialized, but not started
-    kRunning,         // Started and doing work
-    kReleasing,       // Same as running, but to be deleted when work is done
-    kComplete,        // Work is done
-    kStopping,        // Work is being interrupted
+    kInit,       // Initialized, but not started
+    kRunning,    // Started and doing work
+    kReleasing,  // Same as running, but to be deleted when work is done
+    kComplete,   // Work is done
+    kStopping,   // Work is being interrupted
   };
 
   class Worker : public Thread {
@@ -107,7 +108,7 @@ class SignalThread
     explicit Worker(SignalThread* parent);
     ~Worker() override;
     void Run() override;
-    bool IsProcessingMessages() override;
+    bool IsProcessingMessagesForTesting() override;
 
    private:
     SignalThread* parent_;

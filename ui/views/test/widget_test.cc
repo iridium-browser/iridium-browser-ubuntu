@@ -99,6 +99,9 @@ View* WidgetTest::GetGestureHandler(internal::RootView* root_view) {
 TestDesktopWidgetDelegate::TestDesktopWidgetDelegate() : widget_(new Widget) {
 }
 
+TestDesktopWidgetDelegate::TestDesktopWidgetDelegate(Widget* widget)
+    : widget_(widget) {}
+
 TestDesktopWidgetDelegate::~TestDesktopWidgetDelegate() {
   if (widget_)
     widget_->CloseNow();
@@ -201,6 +204,19 @@ void WidgetClosingObserver::OnWidgetClosing(Widget* widget) {
   widget_ = nullptr;
   if (run_loop_.running())
     run_loop_.Quit();
+}
+
+WidgetDestroyedWaiter::WidgetDestroyedWaiter(Widget* widget) {
+  widget->AddObserver(this);
+}
+
+void WidgetDestroyedWaiter::Wait() {
+  run_loop_.Run();
+}
+
+void WidgetDestroyedWaiter::OnWidgetDestroyed(Widget* widget) {
+  widget->RemoveObserver(this);
+  run_loop_.Quit();
 }
 
 }  // namespace test

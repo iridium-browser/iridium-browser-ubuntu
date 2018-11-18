@@ -292,7 +292,7 @@ ExtensionFunction::ExtensionFunction()
       profile_id_(NULL),
       name_(""),
       has_callback_(false),
-      include_incognito_(false),
+      include_incognito_information_(false),
       user_gesture_(false),
       bad_message_(false),
       histogram_value_(extensions::functions::UNKNOWN),
@@ -485,12 +485,13 @@ void ExtensionFunction::SendResponseImpl(bool success) {
 UIThreadExtensionFunction::UIThreadExtensionFunction()
     : context_(nullptr),
       render_frame_host_(nullptr),
-      service_worker_version_id_(extensions::kInvalidServiceWorkerVersionId) {}
+      service_worker_version_id_(blink::mojom::kInvalidServiceWorkerVersionId) {
+}
 
 UIThreadExtensionFunction::~UIThreadExtensionFunction() {
   if (dispatcher() && (render_frame_host() || is_from_service_worker())) {
-    dispatcher()->OnExtensionFunctionCompleted(extension(),
-                                               is_from_service_worker());
+    dispatcher()->OnExtensionFunctionCompleted(
+        extension(), is_from_service_worker(), name());
   }
 
   // The extension function should always respond to avoid leaks in the
@@ -562,14 +563,6 @@ void UIThreadExtensionFunction::SetRenderFrameHost(
   render_frame_host_ = render_frame_host;
   tracker_.reset(
       render_frame_host ? new RenderFrameHostTracker(this) : nullptr);
-}
-
-content::WebContents* UIThreadExtensionFunction::GetAssociatedWebContents() {
-  content::WebContents* web_contents = NULL;
-  if (dispatcher())
-    web_contents = dispatcher()->GetAssociatedWebContents();
-
-  return web_contents;
 }
 
 content::WebContents* UIThreadExtensionFunction::GetSenderWebContents() {

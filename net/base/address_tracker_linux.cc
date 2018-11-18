@@ -12,7 +12,10 @@
 #include "base/bind_helpers.h"
 #include "base/files/scoped_file.h"
 #include "base/logging.h"
+#include "base/message_loop/message_loop_current.h"
+#include "base/optional.h"
 #include "base/posix/eintr_wrapper.h"
+#include "base/threading/scoped_blocking_call.h"
 #include "base/threading/thread_restrictions.h"
 #include "net/base/network_interfaces_linux.h"
 
@@ -230,7 +233,7 @@ void AddressTrackerLinux::Init() {
   }
 
   if (tracking_) {
-    rv = base::MessageLoopForIO::current()->WatchFileDescriptor(
+    rv = base::MessageLoopCurrentForIO::Get()->WatchFileDescriptor(
         netlink_fd_, true, base::MessagePumpForIO::WATCH_READ, &watcher_, this);
     if (rv < 0) {
       PLOG(ERROR) << "Could not watch NETLINK socket";
@@ -289,24 +292,32 @@ void AddressTrackerLinux::ReadMessages(bool* address_changed,
   *tunnel_changed = false;
   char buffer[4096];
   bool first_loop = true;
-  for (;;) {
-    int rv = HANDLE_EINTR(recv(netlink_fd_,
-                               buffer,
-                               sizeof(buffer),
-                               // Block the first time through loop.
-                               first_loop ? 0 : MSG_DONTWAIT));
-    first_loop = false;
-    if (rv == 0) {
-      LOG(ERROR) << "Unexpected shutdown of NETLINK socket.";
-      return;
+  {
+    base::Optional<base::ScopedBlockingCall> blocking_call;
+    if (tracking_) {
+      // If the loop below takes a long time to run, a new thread should added
+      // to the current thread pool to ensure forward progress of all tasks.
+      base::AssertBlockingAllowed();
+      blocking_call.emplace(base::BlockingType::MAY_BLOCK);
     }
-    if (rv < 0) {
-      if ((errno == EAGAIN) || (errno == EWOULDBLOCK))
-        break;
-      PLOG(ERROR) << "Failed to recv from netlink socket";
-      return;
+
+    for (;;) {
+      int rv = HANDLE_EINTR(recv(netlink_fd_, buffer, sizeof(buffer),
+                                 // Block the first time through loop.
+                                 first_loop ? 0 : MSG_DONTWAIT));
+      first_loop = false;
+      if (rv == 0) {
+        LOG(ERROR) << "Unexpected shutdown of NETLINK socket.";
+        return;
+      }
+      if (rv < 0) {
+        if ((errno == EAGAIN) || (errno == EWOULDBLOCK))
+          break;
+        PLOG(ERROR) << "Failed to recv from netlink socket";
+        return;
+      }
+      HandleMessage(buffer, rv, address_changed, link_changed, tunnel_changed);
     }
-    HandleMessage(buffer, rv, address_changed, link_changed, tunnel_changed);
   }
   if (*link_changed || *address_changed)
     UpdateCurrentConnectionType();
@@ -349,7 +360,7 @@ void AddressTrackerLinux::HandleMessage(char* buffer,
             msg->ifa_flags |= IFA_F_DEPRECATED;
           // Only indicate change if the address is new or ifaddrmsg info has
           // changed.
-          AddressMap::iterator it = address_map_.find(address);
+          auto it = address_map_.find(address);
           if (it == address_map_.end()) {
             address_map_.insert(it, std::make_pair(address, *msg));
             *address_changed = true;
@@ -453,12 +464,9 @@ void AddressTrackerLinux::UpdateCurrentConnectionType() {
   std::unordered_set<int> online_links = GetOnlineLinks();
 
   // Strip out tunnel interfaces from online_links
-  for (std::unordered_set<int>::const_iterator it = online_links.begin();
-       it != online_links.end();) {
+  for (auto it = online_links.cbegin(); it != online_links.cend();) {
     if (IsTunnelInterface(*it)) {
-      std::unordered_set<int>::const_iterator tunnel_it = it;
-      ++it;
-      online_links.erase(*tunnel_it);
+      it = online_links.erase(it);
     } else {
       ++it;
     }

@@ -63,9 +63,6 @@ Polymer({
    */
   handledInPointerMove_: false,
 
-  /** @private {number} */
-  lastPointerUpTime_: 0,
-
   /** @override */
   attached: function() {
     let direction = this.matches(':host-context([dir=rtl]) cr-toggle') ? -1 : 1;
@@ -113,7 +110,6 @@ Polymer({
 
   /** @private */
   onPointerUp_: function(e) {
-    this.lastPointerUpTime_ = e.timeStamp;
     this.removeEventListener('pointermove', this.boundPointerMove_);
   },
 
@@ -141,6 +137,11 @@ Polymer({
     e.stopPropagation();
     e.preventDefault();
 
+    // Ignore case where 'click' handler is triggered while disabled. Can happen
+    // via calling the click() method.
+    if (this.disabled)
+      return;
+
     // User gesture has already been taken care of inside |pointermove|
     // handlers, Do nothing here.
     if (this.handledInPointerMove_)
@@ -149,23 +150,6 @@ Polymer({
     // If no pointermove event fired, then user just clicked on the
     // toggle button and therefore it should be toggled.
     this.toggleState_(false);
-  },
-
-  /**
-   * Whether the host of this element should handle a 'click' event it received,
-   * to be used when clicking on the parent is supposed to toggle the cr-toggle.
-   *
-   * This is necessary to avoid a corner case when pointerdown is initiated
-   * in cr-toggle, but pointerup happens outside the bounds of cr-toggle, which
-   * ends up firing a 'click' event on the parent (see context at
-   * crbug.com/689158 and crbug.com/768555).
-   * @param {!Event} e
-   * @return {boolean}
-   */
-  shouldIgnoreHostTap: function(e) {
-    let timeStamp =
-        e.detail.sourceEvent ? e.detail.sourceEvent.timeStamp : e.timeStamp;
-    return timeStamp == this.lastPointerUpTime_;
   },
 
   /**
@@ -188,15 +172,23 @@ Polymer({
    * @private
    */
   onKeyPress_: function(e) {
-    if (e.code == 'Space' || e.code == 'Enter') {
+    if (e.key == ' ' || e.key == 'Enter') {
       e.preventDefault();
       this.toggleState_(true);
     }
   },
 
+  /** @private */
+  onButtonFocus_: function() {
+    // Forward 'focus' to the enclosing element, so that a subsequent 'Space'
+    // keystroke does not trigger both 'keypress' and 'click' which would toggle
+    // the state twice erroneously.
+    this.focus();
+  },
+
   // customize the element's ripple
   _createRipple: function() {
-    this._rippleContainer = this.$.button;
+    this._rippleContainer = this.$.knob;
     let ripple = Polymer.PaperRippleBehavior._createRipple();
     ripple.id = 'ink';
     ripple.setAttribute('recenters', '');

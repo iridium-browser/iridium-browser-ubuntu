@@ -63,7 +63,6 @@ target(link_target_type, "gpu_sources") {
     "//content/public/common:common_sources",
     "//gpu:gpu",
     "//gpu/ipc/common:command_buffer_traits",
-    "//gpu/ipc/common:gpu_preferences_util",
     "//gpu/ipc/service",
     "//ipc",
     "//media:media_buildflags",
@@ -78,6 +77,7 @@ target(link_target_type, "gpu_sources") {
     "//media/mojo/clients:clients",
     "//services/service_manager/public/cpp",
     "//services/service_manager/public/mojom",
+    "//services/service_manager/sandbox:chromecast_sandbox_whitelist_buildflags",
     "//services/shape_detection:lib",
     "//services/shape_detection/public/mojom",
     "//services/viz/privileged/interfaces",
@@ -91,6 +91,10 @@ target(link_target_type, "gpu_sources") {
 
   if (is_android) {
     deps += [ "//media" ]
+  }
+
+  if (is_linux) {
+    deps += [ "//services/service_manager/zygote" ]
   }
 
   if (mojo_media_host == "gpu") {

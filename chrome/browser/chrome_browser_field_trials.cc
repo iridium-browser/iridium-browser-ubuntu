@@ -18,7 +18,7 @@
 #include "base/path_service.h"
 #include "base/strings/string_util.h"
 #include "base/sys_info.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/metrics/chrome_metrics_service_client.h"
@@ -28,12 +28,18 @@
 #include "chrome/common/chrome_switches.h"
 #include "components/metrics/metrics_pref_names.h"
 #include "components/metrics/persistent_system_profile.h"
+#include "components/ukm/ukm_recorder_impl.h"
 #include "components/variations/variations_associated_data.h"
+#include "components/version_info/version_info.h"
 
 #if defined(OS_ANDROID)
 #include "chrome/browser/chrome_browser_field_trials_mobile.h"
 #else
 #include "chrome/browser/chrome_browser_field_trials_desktop.h"
+#endif
+
+#if defined(OS_CHROMEOS)
+#include "chromeos/services/multidevice_setup/public/cpp/first_run_field_trial.h"
 #endif
 
 namespace {
@@ -81,17 +87,6 @@ void InstantiatePersistentHistograms() {
       metrics_dir, upload_dir, ChromeMetricsServiceClient::kBrowserMetricsName,
       &upload_file, &active_file, &spare_file);
 
-  // The "active" file isn't used any longer. Metics are stored directly into
-  // the "upload" file and a run-time filter prevents its upload as long as the
-  // process that created it still lives.
-  // TODO(bcwhite): Remove this in M65 or later.
-  base::PostTaskWithTraits(
-      FROM_HERE,
-      {base::MayBlock(), base::TaskPriority::BACKGROUND,
-       base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},
-      base::BindOnce(base::IgnoreResult(&base::DeleteFile),
-                     std::move(active_file), /*recursive=*/false));
-
   // This is used to report results to an UMA histogram.
   enum InitResult {
     LOCAL_MEMORY_SUCCESS,
@@ -107,9 +102,9 @@ void InstantiatePersistentHistograms() {
 
   // Create persistent/shared memory and allow histograms to be stored in
   // it. Memory that is not actualy used won't be physically mapped by the
-  // system. BrowserMetrics usage, as reported in UMA, has the 99.9 percentile
-  // around 4MiB as of 2017-02-16.
-  const size_t kAllocSize = 8 << 20;     // 8 MiB
+  // system. BrowserMetrics usage, as reported in UMA, has the 99.99
+  // percentile around 3MiB as of 2018-10-22.
+  const size_t kAllocSize = 4 << 20;     // 4 MiB
   const uint32_t kAllocId = 0x935DDD43;  // SHA1(BrowserMetrics)
   std::string storage = variations::GetVariationParamValueByFeature(
       base::kPersistentHistogramsFeature, "storage");
@@ -117,7 +112,7 @@ void InstantiatePersistentHistograms() {
   static const char kMappedFile[] = "MappedFile";
   static const char kLocalMemory[] = "LocalMemory";
 
-#if defined(OS_LINUX) && !defined(OS_ANDROID) && !defined(OS_CHROMEOS)
+#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
   // Linux kernel 4.4.0.* shows a huge number of SIGBUS crashes with persistent
   // histograms enabled using a mapped file.  Change this to use local memory.
   // https://bugs.chromium.org/p/chromium/issues/detail?id=753741
@@ -128,6 +123,12 @@ void InstantiatePersistentHistograms() {
       storage = kLocalMemory;
   }
 #endif
+
+  // Don't use mapped-file memory by default on low-end devices, especially
+  // on Android. The extra disk consumption and/or extra disk access could
+  // have a significant performance impact. https://crbug.com/896394
+  if (storage.empty() && base::SysInfo::IsLowEndDevice())
+    storage = kLocalMemory;
 
   if (storage.empty() || storage == kMappedFile) {
     if (!base::PathExists(upload_dir)) {
@@ -198,20 +199,18 @@ void InstantiatePersistentHistograms() {
 
 // Create a field trial to control metrics/crash sampling for Stable on
 // Windows/Android if no variations seed was applied.
-void CreateFallbackSamplingTrialIfNeeded(bool has_seed,
-                                         base::FeatureList* feature_list) {
+void CreateFallbackSamplingTrialIfNeeded(base::FeatureList* feature_list) {
 #if defined(OS_WIN) || defined(OS_ANDROID)
-  // Only create the fallback trial if there isn't already a variations seed
-  // being applied. This should occur during first run when first-run variations
-  // isn't supported. It's assumed that, if there is a seed, then it either
-  // contains the relavent study, or is intentionally omitted, so no fallback is
-  // needed.
-  if (has_seed)
-    return;
-
   ChromeMetricsServicesManagerClient::CreateFallbackSamplingTrial(
       chrome::GetChannel(), feature_list);
 #endif  // defined(OS_WIN) || defined(OS_ANDROID)
+}
+
+// Create a field trial to control UKM sampling for Stable if no variations
+// seed was applied.
+void CreateFallbackUkmSamplingTrialIfNeeded(base::FeatureList* feature_list) {
+  ukm::UkmRecorderImpl::CreateFallbackSamplingTrial(
+      chrome::GetChannel() == version_info::Channel::STABLE, feature_list);
 }
 
 }  // namespace
@@ -235,7 +234,18 @@ void ChromeBrowserFieldTrials::SetupFieldTrials() {
 void ChromeBrowserFieldTrials::SetupFeatureControllingFieldTrials(
     bool has_seed,
     base::FeatureList* feature_list) {
-  CreateFallbackSamplingTrialIfNeeded(has_seed, feature_list);
+  // Only create the fallback trials if there isn't already a variations seed
+  // being applied. This should occur during first run when first-run variations
+  // isn't supported. It's assumed that, if there is a seed, then it either
+  // contains the relavent studies, or is intentionally omitted, so no fallback
+  // is needed.
+  if (!has_seed) {
+    CreateFallbackSamplingTrialIfNeeded(feature_list);
+    CreateFallbackUkmSamplingTrialIfNeeded(feature_list);
+#if defined(OS_CHROMEOS)
+    chromeos::multidevice_setup::CreateFirstRunFieldTrial(feature_list);
+#endif
+  }
 }
 
 void ChromeBrowserFieldTrials::InstantiateDynamicTrials() {

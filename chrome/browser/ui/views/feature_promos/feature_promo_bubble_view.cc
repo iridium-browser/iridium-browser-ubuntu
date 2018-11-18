@@ -71,11 +71,9 @@ FeaturePromoBubbleView::FeaturePromoBubbleView(
   AddChildView(new views::Label(l10n_util::GetStringUTF16(string_specifier)));
   if (activation_action == ActivationAction::DO_NOT_ACTIVATE) {
     set_can_activate(activation_action == ActivationAction::ACTIVATE);
-    set_shadow(views::BubbleBorder::NO_SHADOW);
+    set_shadow(views::BubbleBorder::BIG_SHADOW);
   }
   views::Widget* widget = views::BubbleDialogDelegateView::CreateBubble(this);
-  if (activation_action == ActivationAction::DO_NOT_ACTIVATE)
-    SetArrowPaintType(views::BubbleBorder::PAINT_TRANSPARENT);
 
   widget->Show();
   if (activation_action == ActivationAction::ACTIVATE)

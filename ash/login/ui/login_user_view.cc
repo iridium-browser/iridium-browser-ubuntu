@@ -6,15 +6,15 @@
 
 #include <memory>
 
-#include "ash/ash_constants.h"
 #include "ash/login/ui/animated_rounded_image_view.h"
 #include "ash/login/ui/hover_notifier.h"
 #include "ash/login/ui/image_parser.h"
-#include "ash/login/ui/layout_util.h"
 #include "ash/login/ui/login_bubble.h"
 #include "ash/login/ui/login_button.h"
 #include "ash/login/ui/non_accessible_view.h"
 #include "ash/login/ui/user_switch_flip_animation.h"
+#include "ash/login/ui/views_utils.h"
+#include "ash/public/cpp/ash_constants.h"
 #include "ash/public/cpp/login_constants.h"
 #include "ash/public/interfaces/user_info.mojom.h"
 #include "ash/resources/vector_icons/vector_icons.h"
@@ -23,12 +23,12 @@
 #include "base/memory/weak_ptr.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/user_manager/user_type.h"
-#include "mojo/common/values_struct_traits.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/compositor/layer_animation_sequence.h"
 #include "ui/compositor/layer_animator.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/gfx/paint_vector_icon.h"
+#include "ui/gfx/text_elider.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
@@ -71,8 +71,7 @@ constexpr char kLoginUserLabelClassName[] = "LoginUserLabel";
 constexpr char kLoginUserDomainClassName[] = "LoginUserDomain";
 
 // Color of the user domain text.
-constexpr SkColor kDomainTextColor =
-    SkColorSetARGBMacro(0xAB, 0xFF, 0xFF, 0xFF);
+constexpr SkColor kDomainTextColor = SkColorSetARGB(0xAB, 0xFF, 0xFF, 0xFF);
 constexpr int kEnterpriseIconSizeDp = 12;
 constexpr int kBetweenEnterpriseIconAndDomainDp = 8;
 constexpr int kVerticalSpacingBetweenUserNameAndDomainDp = 14;
@@ -92,20 +91,31 @@ int GetImageSize(LoginDisplayStyle style) {
   return kLargeUserImageSizeDp;
 }
 
+// An animation decoder which does not rescale based on the current image_scale.
+class PassthroughAnimationDecoder
+    : public AnimatedRoundedImageView::AnimationDecoder {
+ public:
+  PassthroughAnimationDecoder(const AnimationFrames& frames)
+      : frames_(frames) {}
+  ~PassthroughAnimationDecoder() override = default;
+
+  // AnimatedRoundedImageView::AnimationDecoder:
+  AnimationFrames Decode(float image_scale) override { return frames_; }
+
+ private:
+  AnimationFrames frames_;
+  DISALLOW_COPY_AND_ASSIGN(PassthroughAnimationDecoder);
+};
+
 }  // namespace
 
 // Renders a user's profile icon.
 class LoginUserView::UserImage : public NonAccessibleView {
  public:
   UserImage(int size)
-      : NonAccessibleView(kLoginUserImageClassName),
-        size_(size),
-        weak_factory_(this) {
+      : NonAccessibleView(kLoginUserImageClassName), size_(size) {
     SetLayoutManager(std::make_unique<views::FillLayout>());
 
-    // TODO(jdufault): We need to render a black border. We will probably have
-    // to add support directly to AnimatedRoundedImageView, since the existing
-    // views::Border renders based on bounds (ie, a rectangle).
     image_ = new AnimatedRoundedImageView(gfx::Size(size_, size_), size_ / 2);
     AddChildView(image_);
   }
@@ -115,19 +125,25 @@ class LoginUserView::UserImage : public NonAccessibleView {
     // Set the initial image from |avatar| since we already have it available.
     // Then, decode the bytes via blink's PNG decoder and play any animated
     // frames if they are available.
-    if (!user->basic_user_info->avatar.isNull())
-      image_->SetImage(user->basic_user_info->avatar);
+    if (!user->basic_user_info->avatar->image.isNull())
+      image_->SetImage(user->basic_user_info->avatar->image);
 
     // Decode the avatar using blink, as blink's PNG decoder supports APNG,
     // which is the format used for the animated avators.
-    if (!user->basic_user_info->avatar_bytes.empty()) {
-      DecodeAnimation(user->basic_user_info->avatar_bytes,
+    if (!user->basic_user_info->avatar->bytes.empty()) {
+      DecodeAnimation(user->basic_user_info->avatar->bytes,
                       base::Bind(&LoginUserView::UserImage::OnImageDecoded,
                                  weak_factory_.GetWeakPtr()));
     }
   }
 
-  void SetAnimationEnabled(bool enable) { image_->SetAnimationEnabled(enable); }
+  void SetAnimationEnabled(bool enable) {
+    animation_enabled_ = enable;
+    image_->SetAnimationPlayback(
+        animation_enabled_
+            ? AnimatedRoundedImageView::Playback::kRepeat
+            : AnimatedRoundedImageView::Playback::kFirstFrameOnly);
+  }
 
  private:
   void OnImageDecoded(AnimationFrames animation) {
@@ -137,13 +153,18 @@ class LoginUserView::UserImage : public NonAccessibleView {
       return;
     }
 
-    image_->SetAnimation(animation);
+    image_->SetAnimationDecoder(
+        std::make_unique<PassthroughAnimationDecoder>(animation),
+        animation_enabled_
+            ? AnimatedRoundedImageView::Playback::kRepeat
+            : AnimatedRoundedImageView::Playback::kFirstFrameOnly);
   }
 
   AnimatedRoundedImageView* image_ = nullptr;
-  int size_;
+  int size_ = 0;
+  bool animation_enabled_ = false;
 
-  base::WeakPtrFactory<UserImage> weak_factory_;
+  base::WeakPtrFactory<UserImage> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(UserImage);
 };
@@ -151,8 +172,8 @@ class LoginUserView::UserImage : public NonAccessibleView {
 // Shows the user's name.
 class LoginUserView::UserLabel : public NonAccessibleView {
  public:
-  UserLabel(LoginDisplayStyle style)
-      : NonAccessibleView(kLoginUserLabelClassName) {
+  UserLabel(LoginDisplayStyle style, int label_width)
+      : NonAccessibleView(kLoginUserLabelClassName), label_width_(label_width) {
     SetLayoutManager(std::make_unique<views::FillLayout>());
 
     user_name_ = new views::Label();
@@ -188,13 +209,17 @@ class LoginUserView::UserLabel : public NonAccessibleView {
     // display_name can be empty in debug builds with stub users.
     if (display_name.empty())
       display_name = user->basic_user_info->display_email;
-    user_name_->SetText(base::UTF8ToUTF16(display_name));
+
+    user_name_->SetText(gfx::ElideText(base::UTF8ToUTF16(display_name),
+                                       user_name_->font_list(), label_width_,
+                                       gfx::ElideBehavior::ELIDE_TAIL));
   }
 
   const base::string16& displayed_name() const { return user_name_->text(); }
 
  private:
   views::Label* user_name_ = nullptr;
+  const int label_width_;
 
   DISALLOW_COPY_AND_ASSIGN(UserLabel);
 };
@@ -295,11 +320,15 @@ views::View* LoginUserView::TestApi::tap_button() const {
 }
 
 views::View* LoginUserView::TestApi::dropdown() const {
-  return view_->user_dropdown_;
+  return view_->dropdown_;
 }
 
 LoginBubble* LoginUserView::TestApi::menu() const {
-  return view_->user_menu_.get();
+  return view_->menu_.get();
+}
+
+views::View* LoginUserView::TestApi::user_domain() const {
+  return view_->user_domain_;
 }
 
 bool LoginUserView::TestApi::is_opaque() const {
@@ -342,16 +371,19 @@ LoginUserView::LoginUserView(
   DCHECK(show_dropdown == !!on_remove);
 
   user_image_ = new UserImage(GetImageSize(style));
-  user_label_ = new UserLabel(style);
+  int label_width =
+      WidthForLayoutStyle(style) -
+      2 * (kDistanceBetweenUsernameAndDropdownDp + kDropdownIconSizeDp);
+  user_label_ = new UserLabel(style, label_width);
   if (show_dropdown) {
-    user_dropdown_ = new LoginButton(this);
-    user_dropdown_->set_has_ink_drop_action_on_click(false);
-    user_dropdown_->SetPreferredSize(
+    dropdown_ = new LoginButton(this);
+    dropdown_->set_has_ink_drop_action_on_click(false);
+    dropdown_->SetPreferredSize(
         gfx::Size(kDropdownIconSizeDp, kDropdownIconSizeDp));
-    user_dropdown_->SetImage(
+    dropdown_->SetImage(
         views::Button::STATE_NORMAL,
         gfx::CreateVectorIcon(kLockScreenDropdownIcon, SK_ColorWHITE));
-    user_dropdown_->SetFocusBehavior(FocusBehavior::ALWAYS);
+    dropdown_->SetFocusBehavior(FocusBehavior::ALWAYS);
   }
   if (show_domain)
     user_domain_ = new UserDomainInfoView();
@@ -380,15 +412,15 @@ LoginUserView::LoginUserView(
   };
   setup_layer(user_image_);
   setup_layer(user_label_);
-  if (user_dropdown_)
-    setup_layer(user_dropdown_);
+  if (dropdown_)
+    setup_layer(dropdown_);
 
   if (user_domain_)
     setup_layer(user_domain_);
 
   hover_notifier_ = std::make_unique<HoverNotifier>(
       this, base::Bind(&LoginUserView::OnHover, base::Unretained(this)));
-  user_menu_ = std::make_unique<LoginBubble>();
+  menu_ = std::make_unique<LoginBubble>();
 }
 
 LoginUserView::~LoginUserView() = default;
@@ -437,8 +469,8 @@ void LoginUserView::UpdateForUser(const mojom::LoginUserInfoPtr& user,
         make_opacity_sequence());
     user_label_->layer()->GetAnimator()->StartAnimation(
         make_opacity_sequence());
-    if (user_dropdown_) {
-      user_dropdown_->layer()->GetAnimator()->StartAnimation(
+    if (dropdown_) {
+      dropdown_->layer()->GetAnimator()->StartAnimation(
           make_opacity_sequence());
     }
     if (user_domain_) {
@@ -484,21 +516,25 @@ void LoginUserView::Layout() {
   tap_button_->SetBoundsRect(GetLocalBounds());
 }
 
+void LoginUserView::RequestFocus() {
+  tap_button_->RequestFocus();
+}
+
 void LoginUserView::ButtonPressed(views::Button* sender,
                                   const ui::Event& event) {
   // Handle click on the dropdown arrow.
-  if (sender == user_dropdown_) {
-    DCHECK(user_dropdown_);
-    if (!user_menu_->IsVisible()) {
-      user_menu_->ShowUserMenu(
+  if (sender == dropdown_) {
+    DCHECK(dropdown_);
+    if (!menu_->IsVisible()) {
+      menu_->ShowUserMenu(
           base::UTF8ToUTF16(current_user_->basic_user_info->display_name),
           base::UTF8ToUTF16(current_user_->basic_user_info->display_email),
           current_user_->basic_user_info->type, current_user_->is_device_owner,
-          user_dropdown_ /*anchor_view*/, user_dropdown_ /*bubble_opener*/,
+          dropdown_ /*anchor_view*/, dropdown_ /*bubble_opener*/,
           current_user_->can_remove /*show_remove_user*/,
           on_remove_warning_shown_, on_remove_);
     } else {
-      user_menu_->Close();
+      menu_->Close();
     }
 
     return;
@@ -515,8 +551,8 @@ void LoginUserView::OnHover(bool has_hover) {
 void LoginUserView::UpdateCurrentUserState() {
   auto email = base::UTF8ToUTF16(current_user_->basic_user_info->display_email);
   tap_button_->SetAccessibleName(email);
-  if (user_dropdown_) {
-    user_dropdown_->SetAccessibleName(l10n_util::GetStringFUTF16(
+  if (dropdown_) {
+    dropdown_->SetAccessibleName(l10n_util::GetStringFUTF16(
         IDS_ASH_LOGIN_POD_MENU_BUTTON_ACCESSIBLE_NAME, email));
   }
 
@@ -561,10 +597,10 @@ void LoginUserView::UpdateOpacity() {
       is_opaque_ ? kOpaqueUserViewOpacity : kTransparentUserViewOpacity;
   user_image_->layer()->SetOpacity(target_opacity);
   user_label_->layer()->SetOpacity(target_opacity);
-  if (user_dropdown_) {
-    std::unique_ptr<ui::ScopedLayerAnimationSettings> user_dropdown_settings =
-        build_settings(user_dropdown_);
-    user_dropdown_->layer()->SetOpacity(target_opacity);
+  if (dropdown_) {
+    std::unique_ptr<ui::ScopedLayerAnimationSettings> dropdown_settings =
+        build_settings(dropdown_);
+    dropdown_->layer()->SetOpacity(target_opacity);
   }
 
   if (user_domain_) {
@@ -582,8 +618,8 @@ void LoginUserView::SetLargeLayout() {
   AddChildView(user_image_);
   AddChildView(user_label_);
   AddChildView(tap_button_);
-  if (user_dropdown_)
-    AddChildView(user_dropdown_);
+  if (dropdown_)
+    AddChildView(dropdown_);
   if (user_domain_)
     AddChildView(user_domain_);
 
@@ -607,16 +643,16 @@ void LoginUserView::SetLargeLayout() {
     views::ColumnSet* label_dropdown =
         layout->AddColumnSet(kLabelDropdownColumnId);
     label_dropdown->AddPaddingColumn(1.0f /*resize_percent*/, 0 /*width*/);
-    if (user_dropdown_) {
+    if (dropdown_) {
       label_dropdown->AddPaddingColumn(
-          0 /*resize_percent*/, user_dropdown_->GetPreferredSize().width() +
+          0 /*resize_percent*/, dropdown_->GetPreferredSize().width() +
                                     kDistanceBetweenUsernameAndDropdownDp);
     }
     label_dropdown->AddColumn(views::GridLayout::CENTER,
                               views::GridLayout::CENTER, 0 /*resize_percent*/,
                               views::GridLayout::USE_PREF, 0 /*fixed_width*/,
                               0 /*min_width*/);
-    if (user_dropdown_) {
+    if (dropdown_) {
       label_dropdown->AddPaddingColumn(0 /*resize_percent*/,
                                        kDistanceBetweenUsernameAndDropdownDp);
       label_dropdown->AddColumn(views::GridLayout::CENTER,
@@ -649,8 +685,8 @@ void LoginUserView::SetLargeLayout() {
   // Label/dropdown.
   layout->StartRow(0 /*vertical_resize*/, kLabelDropdownColumnId);
   layout->AddView(user_label_);
-  if (user_dropdown_)
-    layout->AddView(user_dropdown_);
+  if (dropdown_)
+    layout->AddView(dropdown_);
 
   if (user_domain_) {
     add_padding(kVerticalSpacingBetweenUserNameAndDomainDp);

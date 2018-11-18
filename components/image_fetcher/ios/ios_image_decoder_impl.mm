@@ -8,11 +8,11 @@
 
 #include <memory>
 
+#include "base/bind.h"
 #include "base/callback.h"
-#import "base/mac/bind_objc_block.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #import "components/image_fetcher/ios/webp_decoder.h"
 #include "ios/web/public/web_thread.h"
 #include "ui/gfx/geometry/size.h"
@@ -42,7 +42,7 @@ class IOSImageDecoderImpl : public ImageDecoder {
   // The task runner used to decode images if necessary.
   const scoped_refptr<base::TaskRunner> task_runner_ =
       base::CreateSequencedTaskRunnerWithTraits(
-          {base::MayBlock(), base::TaskPriority::BACKGROUND,
+          {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
            base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN});
   ;
 
@@ -81,9 +81,9 @@ void IOSImageDecoderImpl::DecodeImage(const std::string& image_data,
   }
 
   base::PostTaskAndReplyWithResult(
-      task_runner_.get(), FROM_HERE, base::BindBlockArc(decodeBlock),
-      base::Bind(&IOSImageDecoderImpl::CreateUIImageAndRunCallback,
-                 weak_factory_.GetWeakPtr(), callback));
+      task_runner_.get(), FROM_HERE, base::BindOnce(decodeBlock),
+      base::BindOnce(&IOSImageDecoderImpl::CreateUIImageAndRunCallback,
+                     weak_factory_.GetWeakPtr(), callback));
 }
 
 void IOSImageDecoderImpl::CreateUIImageAndRunCallback(

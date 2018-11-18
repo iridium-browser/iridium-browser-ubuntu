@@ -14,9 +14,12 @@
 #include "google_apis/gaia/oauth2_token_service_delegate.h"
 #include "net/base/backoff_entry.h"
 
-namespace user_prefs {
-class PrefRegistrySyncable;
+namespace identity {
+class IdentityManager;
 }
+
+class PrefService;
+class PrefRegistrySimple;
 
 // ProfileOAuth2TokenService is a KeyedService that retrieves
 // OAuth2 access tokens for a given set of scopes using the OAuth2 login
@@ -37,11 +40,12 @@ class ProfileOAuth2TokenService : public OAuth2TokenService,
                                   public KeyedService {
  public:
   ProfileOAuth2TokenService(
+      PrefService* user_prefs,
       std::unique_ptr<OAuth2TokenServiceDelegate> delegate);
   ~ProfileOAuth2TokenService() override;
 
   // Registers per-profile prefs.
-  static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
+  static void RegisterProfilePrefs(PrefRegistrySimple* registry);
 
   // KeyedService implementation.
   void Shutdown() override;
@@ -56,6 +60,9 @@ class ProfileOAuth2TokenService : public OAuth2TokenService,
 
   // Returns true iff all credentials have been loaded from disk.
   bool AreAllCredentialsLoaded();
+
+  // Returns true if LoadCredentials finished with no errors.
+  bool HasLoadCredentialsFinishedWithNoErrors();
 
   // Updates a |refresh_token| for an |account_id|. Credentials are persisted,
   // and available through |LoadCredentials| after service is restarted.
@@ -73,9 +80,17 @@ class ProfileOAuth2TokenService : public OAuth2TokenService,
   }
 
  private:
+  friend class identity::IdentityManager;
+
   void OnRefreshTokenAvailable(const std::string& account_id) override;
   void OnRefreshTokenRevoked(const std::string& account_id) override;
   void OnRefreshTokensLoaded() override;
+
+  // Creates a new device ID if there are no accounts, or if the current device
+  // ID is empty.
+  void RecreateDeviceIdIfNeeded();
+
+  PrefService* user_prefs_;
 
   // Whether all credentials have been loaded.
   bool all_credentials_loaded_;

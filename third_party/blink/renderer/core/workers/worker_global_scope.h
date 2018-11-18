@@ -34,12 +34,15 @@
 #include "third_party/blink/renderer/bindings/core/v8/active_script_wrappable.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_cache_options.h"
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/core/dom/frame_request_callback_collection.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/csp/content_security_policy.h"
 #include "third_party/blink/renderer/core/frame/dom_timer_coordinator.h"
 #include "third_party/blink/renderer/core/frame/dom_window_base64.h"
+#include "third_party/blink/renderer/core/messaging/blink_transferable_message.h"
+#include "third_party/blink/renderer/core/script/script.h"
+#include "third_party/blink/renderer/core/workers/worker_animation_frame_provider.h"
 #include "third_party/blink/renderer/core/workers/worker_or_worklet_global_scope.h"
-#include "third_party/blink/renderer/core/workers/worker_or_worklet_module_fetch_coordinator_proxy.h"
 #include "third_party/blink/renderer/core/workers/worker_settings.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/loader/fetch/cached_metadata_handler.h"
@@ -50,10 +53,12 @@ class InterfaceProvider;
 
 namespace blink {
 
-class FontFaceSet;
 class ConsoleMessage;
 class ExceptionState;
+class FetchClientSettingsObjectSnapshot;
+class FontFaceSet;
 class OffscreenFontSelector;
+class V8VoidFunction;
 class WorkerLocation;
 class WorkerNavigator;
 class WorkerThread;
@@ -109,6 +114,10 @@ class CORE_EXPORT WorkerGlobalScope
   bool IsContextThread() const final;
   const KURL& BaseURL() const final { return url_; }
   String UserAgent() const final { return user_agent_; }
+  HttpsState GetHttpsState() const override { return https_state_; }
+  const base::UnguessableToken& GetAgentClusterID() const final {
+    return agent_cluster_id_;
+  }
 
   DOMTimerCoordinator* Timers() final { return &timers_; }
   SecurityContext& GetSecurityContext() final { return *this; }
@@ -125,40 +134,68 @@ class CORE_EXPORT WorkerGlobalScope
 
   // EventTarget
   ExecutionContext* GetExecutionContext() const final;
+  bool IsWindowOrWorkerGlobalScope() const final { return true; }
 
-  WorkerOrWorkletModuleFetchCoordinatorProxy* ModuleFetchCoordinatorProxy()
-      const;
-
-  // Evaluates the given top-level classic script.
-  virtual void EvaluateClassicScript(
+  // The following methods implement PausbaleObject semantic
+  // so that WorkerGlobalScope can be paused.
+  void EvaluateClassicScriptPausable(
       const KURL& script_url,
+      AccessControlStatus access_control_status,
       String source_code,
-      std::unique_ptr<Vector<char>> cached_meta_data);
+      std::unique_ptr<Vector<char>> cached_meta_data,
+      const v8_inspector::V8StackTraceId& stack_id);
+  void ImportModuleScriptPausable(
+      const KURL& module_url_record,
+      FetchClientSettingsObjectSnapshot* outside_settings_object,
+      network::mojom::FetchCredentialsMode);
+  void ReceiveMessagePausable(BlinkTransferableMessage);
 
-  // Imports the top-level module script for |module_url_record|.
-  void ImportModuleScript(const KURL& module_url_record,
-                          network::mojom::FetchCredentialsMode);
-
-  double TimeOrigin() const { return time_origin_; }
+  base::TimeTicks TimeOrigin() const { return time_origin_; }
   WorkerSettings* GetWorkerSettings() const { return worker_settings_.get(); }
 
   void Trace(blink::Visitor*) override;
-  void TraceWrappers(const ScriptWrappableVisitor*) const override;
 
   // TODO(fserb): This can be removed once we WorkerGlobalScope implements
   // FontFaceSource on the IDL.
   FontFaceSet* fonts();
 
+  // https://html.spec.whatwg.org/#windoworworkerglobalscope-mixin
+  void queueMicrotask(V8VoidFunction*);
+
+  int requestAnimationFrame(V8FrameRequestCallback* callback, ExceptionState&);
+  void cancelAnimationFrame(int id);
+
+  WorkerAnimationFrameProvider* GetAnimationFrameProvider() {
+    return animation_frame_provider_;
+  }
+
  protected:
   WorkerGlobalScope(std::unique_ptr<GlobalScopeCreationParams>,
                     WorkerThread*,
-                    double time_origin);
+                    base::TimeTicks time_origin);
   void ApplyContentSecurityPolicyFromHeaders(
       const ContentSecurityPolicyResponseHeaders&);
 
   // ExecutionContext
   void ExceptionThrown(ErrorEvent*) override;
   void RemoveURLFromMemoryCache(const KURL&) final;
+
+  // Evaluates the given top-level classic script.
+  virtual void EvaluateClassicScript(
+      const KURL& script_url,
+      AccessControlStatus access_control_status,
+      String source_code,
+      std::unique_ptr<Vector<char>> cached_meta_data);
+
+  // Imports the top-level module script for |module_url_record|.
+  virtual void ImportModuleScript(
+      const KURL& module_url_record,
+      FetchClientSettingsObjectSnapshot* outside_settings_object,
+      network::mojom::FetchCredentialsMode) = 0;
+
+  void AddPausedCall(base::OnceClosure closure);
+
+  ScriptType GetScriptType() const { return script_type_; }
 
  private:
   void SetWorkerSettings(std::unique_ptr<WorkerSettings>);
@@ -192,13 +229,14 @@ class CORE_EXPORT WorkerGlobalScope
 
   // ExecutionContext
   EventTarget* ErrorEventTarget() final { return this; }
+  void TasksWereUnpaused() override;
 
   const KURL url_;
+  const ScriptType script_type_;
   const String user_agent_;
   const base::UnguessableToken parent_devtools_token_;
   const V8CacheOptions v8_cache_options_;
   std::unique_ptr<WorkerSettings> worker_settings_;
-  Member<WorkerOrWorkletModuleFetchCoordinatorProxy> fetch_coordinator_proxy_;
 
   mutable Member<WorkerLocation> location_;
   mutable TraceWrapperMember<WorkerNavigator> navigator_;
@@ -209,14 +247,21 @@ class CORE_EXPORT WorkerGlobalScope
 
   DOMTimerCoordinator timers_;
 
-  const double time_origin_;
+  const base::TimeTicks time_origin_;
 
   HeapHashMap<int, Member<ErrorEvent>> pending_error_events_;
   int last_pending_error_event_id_ = 0;
 
   Member<OffscreenFontSelector> font_selector_;
+  TraceWrapperMember<WorkerAnimationFrameProvider> animation_frame_provider_;
 
   service_manager::InterfaceProvider interface_provider_;
+
+  const base::UnguessableToken agent_cluster_id_;
+
+  HttpsState https_state_;
+
+  Vector<base::OnceClosure> paused_calls_;
 };
 
 DEFINE_TYPE_CASTS(WorkerGlobalScope,

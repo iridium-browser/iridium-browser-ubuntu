@@ -8,6 +8,7 @@ import android.annotation.TargetApi;
 import android.content.ClipData;
 import android.graphics.Bitmap;
 import android.os.Build;
+import android.support.v4.view.MarginLayoutParamsCompat;
 import android.view.MotionEvent;
 import android.view.PointerIcon;
 import android.view.View;
@@ -16,18 +17,91 @@ import android.widget.FrameLayout.LayoutParams;
 import android.widget.ImageView;
 
 import org.chromium.base.ApiCompatibilityUtils;
+import org.chromium.base.ObserverList;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.base.compat.ApiHelperForN;
 import org.chromium.blink_public.web.WebCursorInfoType;
 
 /**
  * Class to acquire, position, and remove anchor views from the implementing View.
  */
 @JNINamespace("ui")
-public abstract class ViewAndroidDelegate {
+public class ViewAndroidDelegate {
+    /**
+     * The current container view. This view can be updated with
+     * {@link #setContainerView()}.
+     */
+    protected ViewGroup mContainerView;
+
     // Temporary storage for use as a parameter of getLocationOnScreen().
     private int[] mTemporaryContainerLocation = new int[2];
+
+    /**
+     * Notifies the observer when container view is updated.
+     */
+    public interface ContainerViewObserver { void onUpdateContainerView(ViewGroup view); }
+
+    private ObserverList<ContainerViewObserver> mContainerViewObservers = new ObserverList<>();
+
+    /**
+     * Create and return a basic implementation of {@link ViewAndroidDelegate}.
+     * @param containerView {@link ViewGroup} to be used as a container view.
+     * @return a new instance of {@link ViewAndroidDelegate}.
+     */
+    public static ViewAndroidDelegate createBasicDelegate(ViewGroup containerView) {
+        return new ViewAndroidDelegate(containerView);
+    }
+
+    protected ViewAndroidDelegate(ViewGroup containerView) {
+        mContainerView = containerView;
+    }
+
+    /**
+     * Adds observer that needs notification when container view is updated. Note that
+     * there is no {@code removObserver} since the added observers are all supposed to
+     * go away with this object together.
+     * @param observer {@link ContainerViewObserver} object. The object should have
+     *        the lifetime same as this {@link ViewAndroidDelegate} to avoid gc issues.
+     */
+    public final void addObserver(ContainerViewObserver observer) {
+        mContainerViewObservers.addObserver(observer);
+    }
+
+    /**
+     * Updates the current container view to which this class delegates.
+     *
+     * <p>WARNING: This method can also be used to replace the existing container view,
+     * but you should only do it if you have a very good reason to. Replacing the
+     * container view has been designed to support fullscreen in the Webview so it
+     * might not be appropriate for other use cases.
+     *
+     * <p>This method only performs a small part of replacing the container view and
+     * embedders are responsible for:
+     * <ul>
+     *     <li>Disconnecting the old container view from all the references</li>
+     *     <li>Updating the InternalAccessDelegate</li>
+     *     <li>Reconciling the state with the new container view</li>
+     *     <li>Tearing down and recreating the native GL rendering where appropriate</li>
+     *     <li>etc.</li>
+     * </ul>
+     */
+    public final void setContainerView(ViewGroup containerView) {
+        ViewGroup oldContainerView = mContainerView;
+        mContainerView = containerView;
+        updateAnchorViews(oldContainerView);
+        for (ContainerViewObserver observer : mContainerViewObservers) {
+            observer.onUpdateContainerView(containerView);
+        }
+    }
+
+    /**
+     * Transfer existing anchor views from the old to the new container view. Called by
+     * {@link setContainerView} only.
+     * @param oldContainerView Old container view just replaced by a new one.
+     */
+    public void updateAnchorViews(ViewGroup oldContainerView) {}
 
     /**
      * @return An anchor view that can be used to anchor decoration views like Autofill popup.
@@ -79,7 +153,7 @@ public abstract class ViewAndroidDelegate {
             widthInt = containerView.getWidth() - startMargin;
         }
         LayoutParams lp = new LayoutParams(widthInt, heightInt);
-        ApiCompatibilityUtils.setMarginStart(lp, startMargin);
+        MarginLayoutParamsCompat.setMarginStart(lp, startMargin);
         lp.topMargin = topMargin;
         view.setLayoutParams(lp);
     }
@@ -102,7 +176,7 @@ public abstract class ViewAndroidDelegate {
         imageView.setImageBitmap(shadowImage);
         imageView.layout(0, 0, shadowImage.getWidth(), shadowImage.getHeight());
 
-        return containerView.startDragAndDrop(ClipData.newPlainText(null, text),
+        return ApiHelperForN.startDragAndDrop(containerView, ClipData.newPlainText(null, text),
                 new View.DragShadowBuilder(imageView), null, View.DRAG_FLAG_GLOBAL);
     }
 
@@ -110,8 +184,9 @@ public abstract class ViewAndroidDelegate {
     @CalledByNative
     public void onCursorChangedToCustom(Bitmap customCursorBitmap, int hotspotX, int hotspotY) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            PointerIcon icon = PointerIcon.create(customCursorBitmap, hotspotX, hotspotY);
-            getContainerView().setPointerIcon(icon);
+            PointerIcon icon =
+                    ApiHelperForN.createPointerIcon(customCursorBitmap, hotspotX, hotspotY);
+            ApiHelperForN.setPointerIcon(getContainerView(), icon);
         }
     }
 
@@ -243,7 +318,7 @@ public abstract class ViewAndroidDelegate {
         }
         ViewGroup containerView = getContainerView();
         PointerIcon icon = PointerIcon.getSystemIcon(containerView.getContext(), pointerIconType);
-        containerView.setPointerIcon(icon);
+        ApiHelperForN.setPointerIcon(containerView, icon);
     }
 
     /**
@@ -284,7 +359,9 @@ public abstract class ViewAndroidDelegate {
      * @return container view that the anchor views are added to. May be null.
      */
     @CalledByNative
-    public abstract ViewGroup getContainerView();
+    public final ViewGroup getContainerView() {
+        return mContainerView;
+    }
 
     /**
      * Return the X location of our container view.
@@ -357,27 +434,5 @@ public abstract class ViewAndroidDelegate {
     private void requestFocus() {
         ViewGroup containerView = getContainerView();
         if (containerView != null) ViewUtils.requestFocus(containerView);
-    }
-
-    /**
-     * Create and return a basic implementation of {@link ViewAndroidDelegate} where
-     * the container view is not allowed to be changed after initialization.
-     * @param containerView {@link ViewGroup} to be used as a container view.
-     * @return a new instance of {@link ViewAndroidDelegate}.
-     */
-    public static ViewAndroidDelegate createBasicDelegate(ViewGroup containerView) {
-        return new ViewAndroidDelegate() {
-            private ViewGroup mContainerView;
-
-            private ViewAndroidDelegate init(ViewGroup containerView) {
-                mContainerView = containerView;
-                return this;
-            }
-
-            @Override
-            public ViewGroup getContainerView() {
-                return mContainerView;
-            }
-        }.init(containerView);
     }
 }

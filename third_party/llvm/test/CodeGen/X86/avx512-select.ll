@@ -115,6 +115,7 @@ define <16 x double> @select04(<16 x double> %a, <16 x double> %b) {
 ; X86-NEXT:    vmovaps 8(%ebp), %zmm1
 ; X86-NEXT:    movl %ebp, %esp
 ; X86-NEXT:    popl %ebp
+; X86-NEXT:    .cfi_def_cfa %esp, 4
 ; X86-NEXT:    retl
 ;
 ; X64-LABEL: select04:
@@ -134,8 +135,9 @@ define i8 @select05(i8 %a.0, i8 %m) {
 ;
 ; X64-LABEL: select05:
 ; X64:       # %bb.0:
-; X64-NEXT:    orl %esi, %edi
 ; X64-NEXT:    movl %edi, %eax
+; X64-NEXT:    orl %esi, %eax
+; X64-NEXT:    # kill: def $al killed $al killed $eax
 ; X64-NEXT:    retq
   %mask = bitcast i8 %m to <8 x i1>
   %a = bitcast i8 %a.0 to <8 x i1>
@@ -184,8 +186,9 @@ define i8 @select06(i8 %a.0, i8 %m) {
 ;
 ; X64-LABEL: select06:
 ; X64:       # %bb.0:
-; X64-NEXT:    andl %esi, %edi
 ; X64-NEXT:    movl %edi, %eax
+; X64-NEXT:    andl %esi, %eax
+; X64-NEXT:    # kill: def $al killed $al killed $eax
 ; X64-NEXT:    retq
   %mask = bitcast i8 %m to <8 x i1>
   %a = bitcast i8 %a.0 to <8 x i1>

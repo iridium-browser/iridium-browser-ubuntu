@@ -12,10 +12,8 @@
 
 #include "base/callback.h"
 #include "content/common/content_export.h"
-#include "content/public/browser/media_controller.h"
-#include "content/public/common/presentation_connection_message.h"
-#include "content/public/common/presentation_info.h"
-#include "third_party/blink/public/platform/modules/presentation/presentation.mojom.h"
+#include "media/base/flinging_controller.h"
+#include "third_party/blink/public/mojom/presentation/presentation.mojom.h"
 
 namespace content {
 
@@ -23,23 +21,25 @@ struct PresentationRequest;
 class PresentationScreenAvailabilityListener;
 
 using PresentationConnectionCallback =
-    base::OnceCallback<void(const PresentationInfo&)>;
+    base::OnceCallback<void(blink::mojom::PresentationConnectionResultPtr)>;
 using PresentationConnectionErrorCallback =
-    base::OnceCallback<void(const PresentationError&)>;
-using DefaultPresentationConnectionCallback =
-    base::RepeatingCallback<void(const PresentationInfo&)>;
+    base::OnceCallback<void(const blink::mojom::PresentationError&)>;
+using DefaultPresentationConnectionCallback = base::RepeatingCallback<void(
+    blink::mojom::PresentationConnectionResultPtr)>;
 
 struct PresentationConnectionStateChangeInfo {
   explicit PresentationConnectionStateChangeInfo(
-      PresentationConnectionState state)
+      blink::mojom::PresentationConnectionState state)
       : state(state),
-        close_reason(PRESENTATION_CONNECTION_CLOSE_REASON_CONNECTION_ERROR) {}
+        close_reason(
+            blink::mojom::PresentationConnectionCloseReason::CONNECTION_ERROR) {
+  }
   ~PresentationConnectionStateChangeInfo() = default;
 
-  PresentationConnectionState state;
+  blink::mojom::PresentationConnectionState state;
 
   // |close_reason| and |messsage| are only used for state change to CLOSED.
-  PresentationConnectionCloseReason close_reason;
+  blink::mojom::PresentationConnectionCloseReason close_reason;
   std::string message;
 };
 
@@ -51,7 +51,7 @@ using PresentationConnectionRequest =
     blink::mojom::PresentationConnectionRequest;
 
 using ReceiverConnectionAvailableCallback =
-    base::RepeatingCallback<void(const content::PresentationInfo&,
+    base::RepeatingCallback<void(blink::mojom::PresentationInfoPtr,
                                  PresentationConnectionPtr,
                                  PresentationConnectionRequest)>;
 
@@ -121,7 +121,7 @@ class CONTENT_EXPORT ControllerPresentationServiceDelegate
 
   // Sets the default presentation URLs represented by |request|. When the
   // default presentation is started on this frame, |callback| will be invoked
-  // with the corresponding PresentationInfo object.
+  // with the corresponding blink::mojom::PresentationInfo object.
   // If |request.presentation_urls| is empty, the default presentation URLs will
   // be cleared and the previously registered callback (if any) will be removed.
   virtual void SetDefaultPresentationUrls(
@@ -169,11 +169,11 @@ class CONTENT_EXPORT ControllerPresentationServiceDelegate
                          int render_frame_id,
                          const std::string& presentation_id) = 0;
 
-  // Gets a MediaController for a given presentation ID.
+  // Gets a FlingingController for a given presentation ID.
   // |render_process_id|, |render_frame_id|: ID of originating frame.
   // |presentation_id|: The ID of the presentation for which we want a
   // Controller.
-  virtual std::unique_ptr<MediaController> GetMediaController(
+  virtual std::unique_ptr<media::FlingingController> GetFlingingController(
       int render_process_id,
       int render_frame_id,
       const std::string& presentation_id) = 0;
@@ -187,22 +187,8 @@ class CONTENT_EXPORT ControllerPresentationServiceDelegate
   virtual void ListenForConnectionStateChange(
       int render_process_id,
       int render_frame_id,
-      const PresentationInfo& connection,
+      const blink::mojom::PresentationInfo& connection,
       const PresentationConnectionStateChangedCallback& state_changed_cb) = 0;
-
-  // Connect |controller_connection| owned by the controlling frame to the
-  // local presentation represented by |presentation_info|.
-  // |render_process_id|, |render_frame_id|: ID of originating frame.
-  // |controller_connection|: Pointer to controller's presentation connection,
-  // ownership passed from controlling frame to the local presentation.
-  // |receiver_connection_request|: Mojo InterfaceRequest to be bind to receiver
-  // page's presentation connection.
-  virtual void ConnectToPresentation(
-      int render_process_id,
-      int render_frame_id,
-      const PresentationInfo& presentation_info,
-      PresentationConnectionPtr controller_connection_ptr,
-      PresentationConnectionRequest receiver_connection_request) = 0;
 };
 
 // An interface implemented by embedders to handle

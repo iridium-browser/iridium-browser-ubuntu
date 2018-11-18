@@ -15,7 +15,9 @@
 #include "base/scoped_observer.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
+#include "chrome/browser/search/background/ntp_background_service_observer.h"
 #include "chrome/browser/search/one_google_bar/one_google_bar_service_observer.h"
+#include "components/prefs/pref_registry_simple.h"
 #include "content/public/browser/url_data_source.h"
 
 #if defined(OS_ANDROID)
@@ -23,6 +25,7 @@
 #endif
 
 struct OneGoogleBarData;
+class NtpBackgroundService;
 class OneGoogleBarService;
 class Profile;
 
@@ -38,13 +41,26 @@ class LogoService;
 // To prevent accidental access, all methods that get called on the IO thread
 // are implemented as non-member functions.
 class LocalNtpSource : public content::URLDataSource,
+                       public NtpBackgroundServiceObserver,
                        public OneGoogleBarServiceObserver {
  public:
   explicit LocalNtpSource(Profile* profile);
+  ~LocalNtpSource() override;
 
  private:
-  class GoogleSearchProviderTracker;
+  class SearchConfigurationProvider;
   class DesktopLogoObserver;
+
+  struct NtpBackgroundRequest {
+    NtpBackgroundRequest(
+        base::TimeTicks start_time,
+        const content::URLDataSource::GotDataCallback& callback);
+    NtpBackgroundRequest(const NtpBackgroundRequest&);
+    ~NtpBackgroundRequest();
+
+    base::TimeTicks start_time;
+    content::URLDataSource::GotDataCallback callback;
+  };
 
   struct OneGoogleBarRequest {
     OneGoogleBarRequest(
@@ -57,8 +73,6 @@ class LocalNtpSource : public content::URLDataSource,
     content::URLDataSource::GotDataCallback callback;
   };
 
-  ~LocalNtpSource() override;
-
   // Overridden from content::URLDataSource:
   std::string GetSource() const override;
   void StartDataRequest(
@@ -70,8 +84,17 @@ class LocalNtpSource : public content::URLDataSource,
   bool ShouldServiceRequest(const GURL& url,
                             content::ResourceContext* resource_context,
                             int render_process_id) const override;
-  std::string GetContentSecurityPolicyScriptSrc() const override;
-  std::string GetContentSecurityPolicyChildSrc() const override;
+  bool ShouldAddContentSecurityPolicy() const override;
+
+  // The Content Security Policy for the Local NTP.
+  std::string GetContentSecurityPolicy() const;
+
+  // Overridden from NtpBackgroundServiceObserver:
+  void OnCollectionInfoAvailable() override;
+  void OnCollectionImagesAvailable() override;
+  void OnAlbumInfoAvailable() override;
+  void OnAlbumPhotosAvailable() override;
+  void OnNtpBackgroundServiceShuttingDown() override;
 
   // Overridden from OneGoogleBarServiceObserver:
   void OnOneGoogleBarDataUpdated() override;
@@ -81,6 +104,18 @@ class LocalNtpSource : public content::URLDataSource,
 
   Profile* const profile_;
 
+  std::vector<NtpBackgroundRequest> ntp_background_collections_requests_;
+  std::vector<NtpBackgroundRequest> ntp_background_image_info_requests_;
+  std::vector<NtpBackgroundRequest> ntp_background_albums_requests_;
+  std::vector<NtpBackgroundRequest> ntp_background_photos_requests_;
+
+  NtpBackgroundService* ntp_background_service_;
+
+  ScopedObserver<NtpBackgroundService, NtpBackgroundServiceObserver>
+      ntp_background_service_observer_;
+
+  std::vector<OneGoogleBarRequest> one_google_bar_requests_;
+
   OneGoogleBarService* one_google_bar_service_;
 
   ScopedObserver<OneGoogleBarService, OneGoogleBarServiceObserver>
@@ -89,9 +124,7 @@ class LocalNtpSource : public content::URLDataSource,
   search_provider_logos::LogoService* logo_service_;
   std::unique_ptr<DesktopLogoObserver> logo_observer_;
 
-  std::vector<OneGoogleBarRequest> one_google_bar_requests_;
-
-  std::unique_ptr<GoogleSearchProviderTracker> google_tracker_;
+  std::unique_ptr<SearchConfigurationProvider> search_config_provider_;
 
   base::WeakPtrFactory<LocalNtpSource> weak_ptr_factory_;
 

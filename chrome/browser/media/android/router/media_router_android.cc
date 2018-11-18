@@ -4,37 +4,99 @@
 
 #include "chrome/browser/media/android/router/media_router_android.h"
 
+#include <algorithm>
 #include <string>
 #include <utility>
 
+#include "base/bind_helpers.h"
 #include "base/guid.h"
 #include "base/logging.h"
+#include "base/stl_util.h"
 #include "chrome/browser/android/tab_android.h"
 #include "chrome/browser/media/router/media_routes_observer.h"
 #include "chrome/browser/media/router/media_sinks_observer.h"
 #include "chrome/browser/media/router/route_message_observer.h"
+#include "chrome/browser/media/router/route_message_util.h"
 #include "chrome/common/media_router/route_request_result.h"
 #include "content/public/browser/browser_context.h"
-#include "content/public/common/presentation_connection_message.h"
+#include "content/public/browser/web_contents.h"
 #include "url/gurl.h"
 
 namespace media_router {
 
+MediaRouterAndroid::PresentationConnectionProxy::PresentationConnectionProxy(
+    MediaRouterAndroid* media_router_android,
+    const MediaRoute::Id& route_id)
+    : binding_(this),
+      media_router_android_(media_router_android),
+      route_id_(route_id) {}
+
+MediaRouterAndroid::PresentationConnectionProxy::
+    ~PresentationConnectionProxy() = default;
+
+mojom::RoutePresentationConnectionPtr
+MediaRouterAndroid::PresentationConnectionProxy::Init() {
+  auto request = mojo::MakeRequest(&peer_);
+  peer_.set_connection_error_handler(
+      base::BindOnce(&MediaRouterAndroid::OnPresentationConnectionError,
+                     base::Unretained(media_router_android_), route_id_));
+  peer_->DidChangeState(blink::mojom::PresentationConnectionState::CONNECTED);
+  return mojom::RoutePresentationConnection::New(Bind(), std::move(request));
+}
+
+void MediaRouterAndroid::PresentationConnectionProxy::OnMessage(
+    blink::mojom::PresentationConnectionMessagePtr message) {
+  if (message->is_message())
+    media_router_android_->SendRouteMessage(route_id_, message->get_message());
+}
+
+void MediaRouterAndroid::PresentationConnectionProxy::Terminate() {
+  DCHECK(peer_);
+  peer_->DidChangeState(blink::mojom::PresentationConnectionState::TERMINATED);
+}
+
+void MediaRouterAndroid::PresentationConnectionProxy::DidClose(
+    blink::mojom::PresentationConnectionCloseReason reason) {
+  auto& route_connections =
+      media_router_android_->presentation_connections_[route_id_];
+  DCHECK(!route_connections.empty());
+  base::EraseIf(route_connections, [this](const auto& connection) {
+    return connection.get() == this;
+  });
+}
+
+blink::mojom::PresentationConnectionPtrInfo
+MediaRouterAndroid::PresentationConnectionProxy::Bind() {
+  blink::mojom::PresentationConnectionPtrInfo conn_info;
+  auto request = mojo::MakeRequest(&conn_info);
+  binding_.Bind(std::move(request));
+  binding_.set_connection_error_handler(
+      base::BindOnce(&MediaRouterAndroid::OnPresentationConnectionError,
+                     base::Unretained(media_router_android_), route_id_));
+  return conn_info;
+}
+
+void MediaRouterAndroid::PresentationConnectionProxy::SendMessage(
+    const std::string& message) {
+  DCHECK(peer_);
+  peer_->OnMessage(
+      blink::mojom::PresentationConnectionMessage::NewMessage(message));
+}
+
 MediaRouterAndroid::MediaRouteRequest::MediaRouteRequest(
     const MediaSource& source,
     const std::string& presentation_id,
-    std::vector<MediaRouteResponseCallback> callbacks)
+    MediaRouteResponseCallback callback)
     : media_source(source),
       presentation_id(presentation_id),
-      callbacks(std::move(callbacks)) {}
+      callback(std::move(callback)) {}
 
 MediaRouterAndroid::MediaRouteRequest::~MediaRouteRequest() {}
 
 MediaRouterAndroid::MediaRouterAndroid(content::BrowserContext*)
     : bridge_(new MediaRouterAndroidBridge(this)) {}
 
-MediaRouterAndroid::~MediaRouterAndroid() {
-}
+MediaRouterAndroid::~MediaRouterAndroid() {}
 
 const MediaRoute* MediaRouterAndroid::FindRouteBySource(
     const MediaSource::Id& source_id) const {
@@ -45,29 +107,29 @@ const MediaRoute* MediaRouterAndroid::FindRouteBySource(
   return nullptr;
 }
 
-void MediaRouterAndroid::CreateRoute(
-    const MediaSource::Id& source_id,
-    const MediaSink::Id& sink_id,
-    const url::Origin& origin,
-    content::WebContents* web_contents,
-    std::vector<MediaRouteResponseCallback> callbacks,
-    base::TimeDelta timeout,
-    bool incognito) {
+void MediaRouterAndroid::CreateRoute(const MediaSource::Id& source_id,
+                                     const MediaSink::Id& sink_id,
+                                     const url::Origin& origin,
+                                     content::WebContents* web_contents,
+                                     MediaRouteResponseCallback callback,
+                                     base::TimeDelta timeout,
+                                     bool incognito) {
+  DCHECK(callback);
   // TODO(avayvod): Implement timeouts (crbug.com/583036).
   std::string presentation_id = MediaRouterBase::CreatePresentationId();
 
   int tab_id = -1;
-  TabAndroid* tab = web_contents
-      ? TabAndroid::FromWebContents(web_contents) : nullptr;
+  TabAndroid* tab =
+      web_contents ? TabAndroid::FromWebContents(web_contents) : nullptr;
   if (tab)
     tab_id = tab->GetAndroidId();
 
-  bool is_incognito = web_contents
-      && web_contents->GetBrowserContext()->IsOffTheRecord();
+  bool is_incognito =
+      web_contents && web_contents->GetBrowserContext()->IsOffTheRecord();
 
   int route_request_id =
       route_requests_.Add(std::make_unique<MediaRouteRequest>(
-          MediaSource(source_id), presentation_id, std::move(callbacks)));
+          MediaSource(source_id), presentation_id, std::move(callback)));
   bridge_->CreateRoute(source_id, sink_id, presentation_id, origin, tab_id,
                        is_incognito, route_request_id);
 }
@@ -77,24 +139,24 @@ void MediaRouterAndroid::ConnectRouteByRouteId(
     const MediaRoute::Id& route_id,
     const url::Origin& origin,
     content::WebContents* web_contents,
-    std::vector<MediaRouteResponseCallback> callbacks,
+    MediaRouteResponseCallback callback,
     base::TimeDelta timeout,
     bool incognito) {
   NOTIMPLEMENTED();
 }
 
-void MediaRouterAndroid::JoinRoute(
-    const MediaSource::Id& source_id,
-    const std::string& presentation_id,
-    const url::Origin& origin,
-    content::WebContents* web_contents,
-    std::vector<MediaRouteResponseCallback> callbacks,
-    base::TimeDelta timeout,
-    bool incognito) {
+void MediaRouterAndroid::JoinRoute(const MediaSource::Id& source_id,
+                                   const std::string& presentation_id,
+                                   const url::Origin& origin,
+                                   content::WebContents* web_contents,
+                                   MediaRouteResponseCallback callback,
+                                   base::TimeDelta timeout,
+                                   bool incognito) {
+  DCHECK(callback);
   // TODO(avayvod): Implement timeouts (crbug.com/583036).
   int tab_id = -1;
-  TabAndroid* tab = web_contents
-      ? TabAndroid::FromWebContents(web_contents) : nullptr;
+  TabAndroid* tab =
+      web_contents ? TabAndroid::FromWebContents(web_contents) : nullptr;
   if (tab)
     tab_id = tab->GetAndroidId();
 
@@ -102,7 +164,7 @@ void MediaRouterAndroid::JoinRoute(
            << origin.GetURL().spec() << ", " << tab_id;
 
   int request_id = route_requests_.Add(std::make_unique<MediaRouteRequest>(
-      MediaSource(source_id), presentation_id, std::move(callbacks)));
+      MediaSource(source_id), presentation_id, std::move(callback)));
   bridge_->JoinRoute(source_id, presentation_id, origin, tab_id, request_id);
 }
 
@@ -111,23 +173,17 @@ void MediaRouterAndroid::TerminateRoute(const MediaRoute::Id& route_id) {
 }
 
 void MediaRouterAndroid::SendRouteMessage(const MediaRoute::Id& route_id,
-                                          const std::string& message,
-                                          SendRouteMessageCallback callback) {
-  int callback_id = message_callbacks_.Add(
-      std::make_unique<SendRouteMessageCallback>(std::move(callback)));
-  bridge_->SendRouteMessage(route_id, message, callback_id);
+                                          const std::string& message) {
+  bridge_->SendRouteMessage(route_id, message);
 }
 
 void MediaRouterAndroid::SendRouteBinaryMessage(
     const MediaRoute::Id& route_id,
-    std::unique_ptr<std::vector<uint8_t>> data,
-    SendRouteMessageCallback callback) {
+    std::unique_ptr<std::vector<uint8_t>> data) {
   // Binary messaging is not supported on Android.
-  std::move(callback).Run(false);
 }
 
-void MediaRouterAndroid::OnUserGesture() {
-}
+void MediaRouterAndroid::OnUserGesture() {}
 
 void MediaRouterAndroid::SearchSinks(
     const MediaSink::Id& sink_id,
@@ -142,8 +198,8 @@ void MediaRouterAndroid::DetachRoute(const MediaRoute::Id& route_id) {
   bridge_->DetachRoute(route_id);
   RemoveRoute(route_id);
   NotifyPresentationConnectionClose(
-      route_id, content::PRESENTATION_CONNECTION_CLOSE_REASON_CLOSED,
-      "Remove route");
+      route_id, blink::mojom::PresentationConnectionCloseReason::CLOSED,
+      "Route closed normally");
 }
 
 bool MediaRouterAndroid::RegisterMediaSinksObserver(
@@ -151,7 +207,7 @@ bool MediaRouterAndroid::RegisterMediaSinksObserver(
   const std::string& source_id = observer->source().id();
   auto& observer_list = sinks_observers_[source_id];
   if (!observer_list) {
-    observer_list = std::make_unique<base::ObserverList<MediaSinksObserver>>();
+    observer_list = std::make_unique<MediaSinksObserverList>();
   } else {
     DCHECK(!observer_list->HasObserver(observer));
   }
@@ -196,27 +252,12 @@ void MediaRouterAndroid::UnregisterMediaRoutesObserver(
 
 void MediaRouterAndroid::RegisterRouteMessageObserver(
     RouteMessageObserver* observer) {
-  const MediaRoute::Id& route_id = observer->route_id();
-  auto& observer_list = message_observers_[route_id];
-  if (!observer_list) {
-    observer_list =
-        std::make_unique<base::ObserverList<RouteMessageObserver>>();
-  } else {
-    DCHECK(!observer_list->HasObserver(observer));
-  }
-
-  observer_list->AddObserver(observer);
+  NOTREACHED();
 }
 
 void MediaRouterAndroid::UnregisterRouteMessageObserver(
     RouteMessageObserver* observer) {
-  const MediaRoute::Id& route_id = observer->route_id();
-  auto* observer_list = message_observers_[route_id].get();
-  DCHECK(observer_list->HasObserver(observer));
-
-  observer_list->RemoveObserver(observer);
-  if (!observer_list->might_have_observers())
-    message_observers_.erase(route_id);
+  NOTREACHED();
 }
 
 void MediaRouterAndroid::OnSinksReceived(const std::string& source_urn,
@@ -242,8 +283,11 @@ void MediaRouterAndroid::OnRouteCreated(const MediaRoute::Id& route_id,
 
   std::unique_ptr<RouteRequestResult> result =
       RouteRequestResult::FromSuccess(route, request->presentation_id);
-  for (MediaRouteResponseCallback& callback : request->callbacks)
-    std::move(callback).Run(*result);
+  auto& presentation_connections = presentation_connections_[route_id];
+  presentation_connections.push_back(
+      std::make_unique<PresentationConnectionProxy>(this, route_id));
+  auto& presentation_connection = *presentation_connections.back();
+  std::move(request->callback).Run(presentation_connection.Init(), *result);
 
   route_requests_.Remove(route_request_id);
 
@@ -261,46 +305,64 @@ void MediaRouterAndroid::OnRouteRequestError(const std::string& error_text,
   // TODO(imcheng): Provide a more specific result code.
   std::unique_ptr<RouteRequestResult> result = RouteRequestResult::FromError(
       error_text, RouteRequestResult::UNKNOWN_ERROR);
-  for (MediaRouteResponseCallback& callback : request->callbacks)
-    std::move(callback).Run(*result);
+  std::move(request->callback).Run(nullptr, *result);
 
   route_requests_.Remove(route_request_id);
 }
 
-void MediaRouterAndroid::OnRouteClosed(const MediaRoute::Id& route_id) {
+void MediaRouterAndroid::OnRouteTerminated(const MediaRoute::Id& route_id) {
+  auto entry = presentation_connections_.find(route_id);
+  if (entry != presentation_connections_.end()) {
+    // Note: Route-ID-to-presentation-ID mapping is done by route providers.
+    // Although the messages API (being deprecated) is based on route IDs,
+    // providers may use the same route for each presentation connection.  This
+    // would result in broadcasting provider messages to all presentation
+    // connections.  So although this loop may seem strange in the context of
+    // the Presentation API, it can't be avoided at the moment.
+    for (auto& connection : entry->second) {
+      connection->Terminate();
+    }
+  }
   RemoveRoute(route_id);
-  NotifyPresentationConnectionStateChange(
-      route_id, content::PRESENTATION_CONNECTION_STATE_TERMINATED);
 }
 
-void MediaRouterAndroid::OnRouteClosedWithError(const MediaRoute::Id& route_id,
-                                                const std::string& message) {
+void MediaRouterAndroid::OnRouteClosed(
+    const MediaRoute::Id& route_id,
+    const base::Optional<std::string>& error) {
   RemoveRoute(route_id);
-  NotifyPresentationConnectionClose(
-      route_id,
-      content::PRESENTATION_CONNECTION_CLOSE_REASON_CONNECTION_ERROR,
-      message);
-}
-
-void MediaRouterAndroid::OnMessageSentResult(bool success, int callback_id) {
-  SendRouteMessageCallback* callback = message_callbacks_.Lookup(callback_id);
-  std::move(*callback).Run(success);
-  message_callbacks_.Remove(callback_id);
+  // TODO(crbug.com/882690): When the sending context is destroyed, tell MRP to
+  // clean up the connection.
+  if (error.has_value()) {
+    NotifyPresentationConnectionClose(
+        route_id,
+        blink::mojom::PresentationConnectionCloseReason::CONNECTION_ERROR,
+        error.value());
+  } else {
+    NotifyPresentationConnectionClose(
+        route_id, blink::mojom::PresentationConnectionCloseReason::CLOSED,
+        "Remove route");
+  }
 }
 
 void MediaRouterAndroid::OnMessage(const MediaRoute::Id& route_id,
                                    const std::string& message) {
-  auto it = message_observers_.find(route_id);
-  if (it == message_observers_.end())
-    return;
-
-  std::vector<content::PresentationConnectionMessage> messages;
-  messages.emplace_back(message);
-  for (auto& observer : *it->second.get())
-    observer.OnMessagesReceived(messages);
+  auto entry = presentation_connections_.find(route_id);
+  if (entry != presentation_connections_.end()) {
+    // Note: Route-ID-to-presentation-ID mapping is done by route providers.
+    // Although the messages API (being deprecated) is based on route IDs,
+    // providers may use the same route for each presentation connection.  This
+    // would result in broadcasting provider messages to all presentation
+    // connections.  So although this loop may seem strange in the context of
+    // the Presentation API, it can't be avoided at the moment.
+    DCHECK_EQ(1u, entry->second.size());
+    for (auto& connection : entry->second) {
+      connection->SendMessage(message);
+    }
+  }
 }
 
 void MediaRouterAndroid::RemoveRoute(const MediaRoute::Id& route_id) {
+  presentation_connections_.erase(route_id);
   for (auto it = active_routes_.begin(); it != active_routes_.end(); ++it)
     if (it->media_route_id() == route_id) {
       active_routes_.erase(it);
@@ -311,9 +373,14 @@ void MediaRouterAndroid::RemoveRoute(const MediaRoute::Id& route_id) {
     observer.OnRoutesUpdated(active_routes_, std::vector<MediaRoute::Id>());
 }
 
-std::unique_ptr<content::MediaController>
-MediaRouterAndroid::GetMediaController(const MediaRoute::Id& route_id) {
-  return bridge_->GetMediaController(route_id);
+std::unique_ptr<media::FlingingController>
+MediaRouterAndroid::GetFlingingController(const MediaRoute::Id& route_id) {
+  return bridge_->GetFlingingController(route_id);
+}
+
+void MediaRouterAndroid::OnPresentationConnectionError(
+    const std::string& route_id) {
+  presentation_connections_.erase(route_id);
 }
 
 }  // namespace media_router

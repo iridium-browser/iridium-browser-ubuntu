@@ -76,11 +76,12 @@ enum PropertyLocation { kField = 0, kDescriptor = 1 };
 
 // Order of modes is significant.
 // Must fit in the BitField PropertyDetails::ConstnessField.
-enum PropertyConstness { kMutable = 0, kConst = 1 };
+enum class PropertyConstness { kMutable = 0, kConst = 1 };
 
 // TODO(ishell): remove once constant field tracking is done.
 const PropertyConstness kDefaultFieldConstness =
-    FLAG_track_constant_fields ? kConst : kMutable;
+    FLAG_track_constant_fields ? PropertyConstness::kConst
+                               : PropertyConstness::kMutable;
 
 class Representation {
  public:
@@ -229,7 +230,7 @@ enum class PropertyCellConstantType {
 
 // PropertyDetails captures type and attributes for a property.
 // They are used both in property dictionaries and instance descriptors.
-class PropertyDetails BASE_EMBEDDED {
+class PropertyDetails {
  public:
   // Property details for dictionary mode properties/elements.
   PropertyDetails(PropertyKind kind, PropertyAttributes attributes,
@@ -410,15 +411,15 @@ inline bool IsGeneralizableTo(PropertyLocation a, PropertyLocation b) {
   return b == kField || a == kDescriptor;
 }
 
-// kMutable constness is more general than kConst, kConst generalizes only to
-// itself.
+// PropertyConstness::kMutable constness is more general than
+// VariableMode::kConst, VariableMode::kConst generalizes only to itself.
 inline bool IsGeneralizableTo(PropertyConstness a, PropertyConstness b) {
-  return b == kMutable || a == kConst;
+  return b == PropertyConstness::kMutable || a == PropertyConstness::kConst;
 }
 
 inline PropertyConstness GeneralizeConstness(PropertyConstness a,
                                              PropertyConstness b) {
-  return a == kMutable ? kMutable : b;
+  return a == PropertyConstness::kMutable ? PropertyConstness::kMutable : b;
 }
 
 std::ostream& operator<<(std::ostream& os,

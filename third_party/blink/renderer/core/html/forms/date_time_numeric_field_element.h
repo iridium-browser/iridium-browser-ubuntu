@@ -79,6 +79,7 @@ class DateTimeNumericFieldElement : public DateTimeFieldElement {
   bool HasValue() const final;
   void Initialize(const AtomicString& pseudo, const String& ax_help_text);
   int Maximum() const;
+  String Placeholder() const override;
   void SetEmptyValue(EventBehavior = kDispatchNoEvent) final;
   void SetValueAsInteger(int, EventBehavior = kDispatchNoEvent) override;
   int ValueAsInteger() const final;
@@ -86,7 +87,7 @@ class DateTimeNumericFieldElement : public DateTimeFieldElement {
 
  private:
   // DateTimeFieldElement functions.
-  void HandleKeyboardEvent(KeyboardEvent*) final;
+  void HandleKeyboardEvent(KeyboardEvent&) final;
   float MaximumWidth(const ComputedStyle&) override;
   void StepDown() final;
   void StepUp() final;

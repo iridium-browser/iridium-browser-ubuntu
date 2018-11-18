@@ -191,7 +191,8 @@ Polymer({
             (CrOnc.proxyMatches(jsonHttp, proxy.Manual.SecureHTTPProxy) &&
              CrOnc.proxyMatches(jsonHttp, proxy.Manual.FTPProxy) &&
              CrOnc.proxyMatches(jsonHttp, proxy.Manual.SOCKS)) ||
-            (!proxy.Manual.SecureHTTPProxy.Host &&
+            (!proxy.Manual.HTTPProxy.Host &&
+             !proxy.Manual.SecureHTTPProxy.Host &&
              !proxy.Manual.FTPProxy.Host && !proxy.Manual.SOCKS.Host);
       }
       if (proxySettings.ExcludeDomains) {
@@ -344,12 +345,8 @@ Polymer({
     this.proxyIsUserModified_ = true;
   },
 
-  /**
-   * Event triggered when a proxy exclusion is added.
-   * @param {!Event} event The add proxy exclusion event.
-   * @private
-   */
-  onAddProxyExclusionTap_: function(event) {
+  /** @private */
+  onAddProxyExclusionTap_: function() {
     var value = this.$.proxyExclusion.value;
     if (!value)
       return;
@@ -357,6 +354,17 @@ Polymer({
     // Clear input.
     this.$.proxyExclusion.value = '';
     this.proxyIsUserModified_ = true;
+  },
+
+  /**
+   * @param {!Event} event
+   * @private
+   */
+  onAddProxyExclusionKeypress_: function(event) {
+    if (event.key != 'Enter')
+      return;
+    event.stopPropagation();
+    this.onAddProxyExclusionTap_();
   },
 
   /**

@@ -44,6 +44,16 @@ UI.InspectorView = class extends UI.VBox {
     this._drawerSplitWidget.enableShowModeSaving();
     this._drawerSplitWidget.show(this.element);
 
+    if (Runtime.experiments.isEnabled('splitInDrawer')) {
+      this._innerDrawerSplitWidget = new UI.SplitWidget(true, true, 'Inspector.drawerSidebarSplitViewState', 200, 200);
+      this._drawerSplitWidget.setSidebarWidget(this._innerDrawerSplitWidget);
+      this._drawerSidebarTabbedLocation =
+          UI.viewManager.createTabbedLocation(this._showDrawer.bind(this, false), 'drawer-sidebar', true, true);
+      this._drawerSidebarTabbedPane = this._drawerSidebarTabbedLocation.tabbedPane();
+      this._drawerSidebarTabbedPane.addEventListener(UI.TabbedPane.Events.TabSelected, this._drawerTabSelected, this);
+      this._innerDrawerSplitWidget.setSidebarWidget(this._drawerSidebarTabbedPane);
+    }
+
     // Create drawer tabbed pane.
     this._drawerTabbedLocation =
         UI.viewManager.createTabbedLocation(this._showDrawer.bind(this, false), 'drawer-view', true, true);
@@ -52,10 +62,17 @@ UI.InspectorView = class extends UI.VBox {
     this._drawerTabbedPane.setMinimumSize(0, 27);
     const closeDrawerButton = new UI.ToolbarButton(Common.UIString('Close drawer'), 'largeicon-delete');
     closeDrawerButton.addEventListener(UI.ToolbarButton.Events.Click, this._closeDrawer, this);
-    this._drawerTabbedPane.rightToolbar().appendToolbarItem(closeDrawerButton);
     this._drawerSplitWidget.installResizer(this._drawerTabbedPane.headerElement());
-    this._drawerSplitWidget.setSidebarWidget(this._drawerTabbedPane);
     this._drawerTabbedPane.addEventListener(UI.TabbedPane.Events.TabSelected, this._drawerTabSelected, this);
+
+    if (this._drawerSidebarTabbedPane) {
+      this._innerDrawerSplitWidget.setMainWidget(this._drawerTabbedPane);
+      this._drawerSidebarTabbedPane.rightToolbar().appendToolbarItem(closeDrawerButton);
+      this._drawerSplitWidget.installResizer(this._drawerSidebarTabbedPane.headerElement());
+    } else {
+      this._drawerSplitWidget.setSidebarWidget(this._drawerTabbedPane);
+      this._drawerTabbedPane.rightToolbar().appendToolbarItem(closeDrawerButton);
+    }
 
     // Create main area tabbed pane.
     this._tabbedLocation = UI.viewManager.createTabbedLocation(
@@ -115,6 +132,8 @@ UI.InspectorView = class extends UI.VBox {
       return this._drawerTabbedLocation;
     if (locationName === 'panel')
       return this._tabbedLocation;
+    if (locationName === 'drawer-sidebar')
+      return this._drawerSidebarTabbedLocation;
     return null;
   }
 
@@ -265,16 +284,6 @@ UI.InspectorView = class extends UI.VBox {
         }
       }
     }
-
-    if (event.key === '[') {
-      this._tabbedPane.selectPrevTab();
-      event.consume(true);
-    }
-
-    if (event.key === ']') {
-      this._tabbedPane.selectNextTab();
-      event.consume(true);
-    }
   }
 
   /**
@@ -339,7 +348,7 @@ UI.inspectorView;
  * @implements {UI.ActionDelegate}
  * @unrestricted
  */
-UI.InspectorView.DrawerToggleActionDelegate = class {
+UI.InspectorView.ActionDelegate = class {
   /**
    * @override
    * @param {!UI.Context} context
@@ -347,10 +356,22 @@ UI.InspectorView.DrawerToggleActionDelegate = class {
    * @return {boolean}
    */
   handleAction(context, actionId) {
-    if (UI.inspectorView.drawerVisible())
-      UI.inspectorView._closeDrawer();
-    else
-      UI.inspectorView._showDrawer(true);
-    return true;
+    switch (actionId) {
+      case 'main.toggle-drawer':
+        if (UI.inspectorView.drawerVisible())
+          UI.inspectorView._closeDrawer();
+        else
+          UI.inspectorView._showDrawer(true);
+        return true;
+      case 'main.next-tab':
+        UI.inspectorView._tabbedPane.selectNextTab();
+        UI.inspectorView._tabbedPane.focus();
+        return true;
+      case 'main.previous-tab':
+        UI.inspectorView._tabbedPane.selectPrevTab();
+        UI.inspectorView._tabbedPane.focus();
+        return true;
+    }
+    return false;
   }
 };

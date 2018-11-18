@@ -12,8 +12,6 @@ namespace chrome_pdf {
 
 PreviewModeClient::PreviewModeClient(Client* client) : client_(client) {}
 
-void PreviewModeClient::DocumentSizeUpdated(const pp::Size& size) {}
-
 void PreviewModeClient::Invalidate(const pp::Rect& rect) {
   NOTREACHED();
 }
@@ -63,9 +61,6 @@ void PreviewModeClient::NotifySelectedFindResultChanged(
   NOTREACHED();
 }
 
-void PreviewModeClient::NotifyPageBecameVisible(
-    const PDFEngine::PageFeatures* page_features) {}
-
 void PreviewModeClient::GetDocumentPassword(
     pp::CompletionCallbackWithOutput<pp::Var> callback) {
   callback.Run(PP_ERROR_FAILED);
@@ -114,15 +109,6 @@ pp::URLLoader PreviewModeClient::CreateURLLoader() {
   return pp::URLLoader();
 }
 
-void PreviewModeClient::ScheduleCallback(int id, base::TimeDelta delay) {
-  NOTREACHED();
-}
-
-void PreviewModeClient::ScheduleTouchTimerCallback(int id,
-                                                   base::TimeDelta delay) {
-  NOTREACHED();
-}
-
 std::vector<PDFEngine::Client::SearchStringResult>
 PreviewModeClient::SearchString(const base::char16* string,
                                 const base::char16* term,
@@ -158,9 +144,6 @@ void PreviewModeClient::FontSubstituted() {
   NOTREACHED();
 }
 
-void PreviewModeClient::DocumentLoadProgress(uint32_t available,
-                                             uint32_t doc_size) {}
-
 void PreviewModeClient::FormTextFieldFocusChange(bool in_focus) {
   NOTREACHED();
 }
@@ -169,8 +152,6 @@ bool PreviewModeClient::IsPrintPreview() {
   NOTREACHED();
   return false;
 }
-
-void PreviewModeClient::CancelBrowserDownload() {}
 
 float PreviewModeClient::GetToolbarHeightInScreenCoords() {
   return 0.0f;

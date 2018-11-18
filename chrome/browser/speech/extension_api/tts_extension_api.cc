@@ -11,6 +11,8 @@
 #include <utility>
 
 #include "base/lazy_instance.h"
+#include "base/metrics/histogram_macros.h"
+#include "base/metrics/user_metrics.h"
 #include "base/values.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/speech/extension_api/tts_engine_extension_api.h"
@@ -19,6 +21,7 @@
 #include "chrome/browser/speech/tts_controller.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_function_registry.h"
+#include "third_party/blink/public/platform/web_speech_synthesis_constants.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace constants = tts_extension_api_constants;
@@ -179,23 +182,16 @@ bool TtsSpeakFunction::RunAsync() {
     return false;
   }
 
+  // TODO(katie): Remove this after M73. This is just used to track how the
+  // gender deprecation is progressing.
   std::string gender_str;
-  TtsGenderType gender;
   if (options->HasKey(constants::kGenderKey))
     EXTENSION_FUNCTION_VALIDATE(
         options->GetString(constants::kGenderKey, &gender_str));
-  if (gender_str == constants::kGenderMale) {
-    gender = TTS_GENDER_MALE;
-  } else if (gender_str == constants::kGenderFemale) {
-    gender = TTS_GENDER_FEMALE;
-  } else if (gender_str.empty()) {
-    gender = TTS_GENDER_NONE;
-  } else {
-    error_ = constants::kErrorInvalidGender;
-    return false;
-  }
+  UMA_HISTOGRAM_BOOLEAN("TextToSpeech.Utterance.HasGender",
+                        !gender_str.empty());
 
-  double rate = 1.0;
+  double rate = blink::SpeechSynthesisConstants::kDoublePrefNotSet;
   if (options->HasKey(constants::kRateKey)) {
     EXTENSION_FUNCTION_VALIDATE(
         options->GetDouble(constants::kRateKey, &rate));
@@ -205,7 +201,7 @@ bool TtsSpeakFunction::RunAsync() {
     }
   }
 
-  double pitch = 1.0;
+  double pitch = blink::SpeechSynthesisConstants::kDoublePrefNotSet;
   if (options->HasKey(constants::kPitchKey)) {
     EXTENSION_FUNCTION_VALIDATE(
         options->GetDouble(constants::kPitchKey, &pitch));
@@ -215,7 +211,7 @@ bool TtsSpeakFunction::RunAsync() {
     }
   }
 
-  double volume = 1.0;
+  double volume = blink::SpeechSynthesisConstants::kDoublePrefNotSet;
   if (options->HasKey(constants::kVolumeKey)) {
     EXTENSION_FUNCTION_VALIDATE(
         options->GetDouble(constants::kVolumeKey, &volume));
@@ -279,7 +275,6 @@ bool TtsSpeakFunction::RunAsync() {
   utterance->set_src_id(src_id);
   utterance->set_src_url(source_url());
   utterance->set_lang(lang);
-  utterance->set_gender(gender);
   utterance->set_continuous_parameters(rate, pitch, volume);
   utterance->set_can_enqueue(can_enqueue);
   utterance->set_required_event_types(required_event_types);
@@ -326,16 +321,11 @@ ExtensionFunction::ResponseAction TtsGetVoicesFunction::Run() {
     result_voice->SetBoolean(constants::kRemoteKey, voice.remote);
     if (!voice.lang.empty())
       result_voice->SetString(constants::kLangKey, voice.lang);
-    if (voice.gender == TTS_GENDER_MALE)
-      result_voice->SetString(constants::kGenderKey, constants::kGenderMale);
-    else if (voice.gender == TTS_GENDER_FEMALE)
-      result_voice->SetString(constants::kGenderKey, constants::kGenderFemale);
     if (!voice.extension_id.empty())
       result_voice->SetString(constants::kExtensionIdKey, voice.extension_id);
 
     auto event_types = std::make_unique<base::ListValue>();
-    for (std::set<TtsEventType>::iterator iter = voice.events.begin();
-         iter != voice.events.end(); ++iter) {
+    for (auto iter = voice.events.begin(); iter != voice.events.end(); ++iter) {
       const char* event_name_constant = TtsEventTypeToString(*iter);
       event_types->AppendString(event_name_constant);
     }

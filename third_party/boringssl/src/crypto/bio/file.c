@@ -73,6 +73,8 @@
 
 #include <openssl/bio.h>
 
+#if !defined(OPENSSL_TRUSTY)
+
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
@@ -105,13 +107,12 @@ BIO *BIO_new_file(const char *filename, const char *mode) {
     return NULL;
   }
 
-  ret = BIO_new(BIO_s_file());
+  ret = BIO_new_fp(file, BIO_CLOSE);
   if (ret == NULL) {
     fclose(file);
     return NULL;
   }
 
-  BIO_set_fp(ret, file, BIO_CLOSE);
   return ret;
 }
 
@@ -313,3 +314,5 @@ int BIO_rw_filename(BIO *bio, const char *filename) {
   return BIO_ctrl(bio, BIO_C_SET_FILENAME,
                   BIO_CLOSE | BIO_FP_READ | BIO_FP_WRITE, (char *)filename);
 }
+
+#endif  // OPENSSL_TRUSTY

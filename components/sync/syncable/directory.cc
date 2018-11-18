@@ -46,10 +46,9 @@ const base::FilePath::CharType Directory::kSyncDatabaseFilename[] =
 
 Directory::PersistedKernelInfo::PersistedKernelInfo() {
   ModelTypeSet protocol_types = ProtocolTypes();
-  for (ModelTypeSet::Iterator iter = protocol_types.First(); iter.Good();
-       iter.Inc()) {
-    ResetDownloadProgress(iter.Get());
-    transaction_version[iter.Get()] = 0;
+  for (ModelType type : protocol_types) {
+    ResetDownloadProgress(type);
+    transaction_version[type] = 0;
   }
 }
 
@@ -159,13 +158,13 @@ void Directory::InitializeIndices(MetahandlesMap* handles_map) {
     if (!entry->ref(UNIQUE_SERVER_TAG).empty()) {
       DCHECK(kernel_->server_tags_map.find(entry->ref(UNIQUE_SERVER_TAG)) ==
              kernel_->server_tags_map.end())
-          << "Unexpected duplicate use of client tag";
+          << "Unexpected duplicate use of server tag";
       kernel_->server_tags_map[entry->ref(UNIQUE_SERVER_TAG)] = entry;
     }
     if (!entry->ref(UNIQUE_CLIENT_TAG).empty()) {
-      DCHECK(kernel_->server_tags_map.find(entry->ref(UNIQUE_SERVER_TAG)) ==
-             kernel_->server_tags_map.end())
-          << "Unexpected duplicate use of server tag";
+      DCHECK(kernel_->client_tags_map.find(entry->ref(UNIQUE_CLIENT_TAG)) ==
+             kernel_->client_tags_map.end())
+          << "Unexpected duplicate use of client tag";
       kernel_->client_tags_map[entry->ref(UNIQUE_CLIENT_TAG)] = entry;
     }
     DCHECK(kernel_->ids_map.find(entry->ref(ID).value()) ==
@@ -215,7 +214,7 @@ DirOpenResult Directory::OpenImpl(
 }
 
 DeleteJournal* Directory::delete_journal() {
-  DCHECK(delete_journal_.get());
+  DCHECK(delete_journal_);
   return delete_journal_.get();
 }
 
@@ -243,7 +242,7 @@ EntryKernel* Directory::GetEntryById(const ScopedKernelLock& lock,
                                      const Id& id) {
   DCHECK(kernel_);
   // Find it in the in memory ID index.
-  IdsMap::iterator id_found = kernel_->ids_map.find(id.value());
+  auto id_found = kernel_->ids_map.find(id.value());
   if (id_found != kernel_->ids_map.end()) {
     return id_found->second;
   }
@@ -254,7 +253,7 @@ EntryKernel* Directory::GetEntryByClientTag(const string& tag) {
   ScopedKernelLock lock(this);
   DCHECK(kernel_);
 
-  TagsMap::iterator it = kernel_->client_tags_map.find(tag);
+  auto it = kernel_->client_tags_map.find(tag);
   if (it != kernel_->client_tags_map.end()) {
     return it->second;
   }
@@ -264,7 +263,7 @@ EntryKernel* Directory::GetEntryByClientTag(const string& tag) {
 EntryKernel* Directory::GetEntryByServerTag(const string& tag) {
   ScopedKernelLock lock(this);
   DCHECK(kernel_);
-  TagsMap::iterator it = kernel_->server_tags_map.find(tag);
+  auto it = kernel_->server_tags_map.find(tag);
   if (it != kernel_->server_tags_map.end()) {
     return it->second;
   }
@@ -279,7 +278,7 @@ EntryKernel* Directory::GetEntryByHandle(int64_t metahandle) {
 EntryKernel* Directory::GetEntryByHandle(const ScopedKernelLock& lock,
                                          int64_t metahandle) {
   // Look up in memory
-  MetahandlesMap::iterator found = kernel_->metahandles_map.find(metahandle);
+  auto found = kernel_->metahandles_map.find(metahandle);
   if (found != kernel_->metahandles_map.end()) {
     // Found it in memory.  Easy.
     return found->second.get();
@@ -313,8 +312,7 @@ int Directory::GetTotalNodeCount(BaseTransaction* trans,
   while (!child_sets.empty()) {
     const OrderedChildSet* set = child_sets.front();
     child_sets.pop_front();
-    for (OrderedChildSet::const_iterator it = set->begin(); it != set->end();
-         ++it) {
+    for (auto it = set->begin(); it != set->end(); ++it) {
       count++;
       GetChildSetForKernel(trans, *it, &child_sets);
     }
@@ -344,7 +342,7 @@ int Directory::GetPositionIndex(BaseTransaction* trans,
   const OrderedChildSet* siblings =
       kernel_->parent_child_index.GetSiblings(kernel);
 
-  OrderedChildSet::const_iterator it = siblings->find(kernel);
+  auto it = siblings->find(kernel);
   return std::distance(siblings->begin(), it);
 }
 
@@ -456,11 +454,15 @@ void Directory::ClearDirtyMetahandles(const ScopedKernelLock& lock) {
   kernel_->dirty_metahandles.clear();
 }
 
-bool Directory::SafeToPurgeFromMemory(WriteTransaction* trans,
-                                      const EntryKernel* const entry) const {
-  bool safe = entry->ref(IS_DEL) && !entry->is_dirty() &&
-              !entry->ref(SYNCING) && !entry->ref(IS_UNAPPLIED_UPDATE) &&
-              !entry->ref(IS_UNSYNCED);
+bool Directory::SafeToPurgeFromMemory(const EntryKernel& entry) const {
+  return entry.ref(IS_DEL) && !entry.is_dirty() && !entry.ref(SYNCING) &&
+         !entry.ref(IS_UNAPPLIED_UPDATE) && !entry.ref(IS_UNSYNCED);
+}
+
+bool Directory::SafeToPurgeFromMemoryForTransaction(
+    WriteTransaction* trans,
+    const EntryKernel* const entry) const {
+  bool safe = SafeToPurgeFromMemory(*entry);
 
   if (safe) {
     int64_t handle = entry->ref(META_HANDLE);
@@ -490,7 +492,7 @@ void Directory::TakeSnapshotForSaveChanges(SaveChangesSnapshot* snapshot) {
 
   // Deep copy dirty entries from kernel_->metahandles_index into snapshot and
   // clear dirty flags.
-  for (MetahandleSet::const_iterator i = kernel_->dirty_metahandles.begin();
+  for (auto i = kernel_->dirty_metahandles.begin();
        i != kernel_->dirty_metahandles.end(); ++i) {
     EntryKernel* entry = GetEntryByHandle(lock, *i);
     if (!entry)
@@ -549,10 +551,9 @@ bool Directory::VacuumAfterSaveChanges(const SaveChangesSnapshot& snapshot) {
   // Now drop everything we can out of memory.
   for (auto i = snapshot.dirty_metas.begin(); i != snapshot.dirty_metas.end();
        ++i) {
-    MetahandlesMap::iterator found =
-        kernel_->metahandles_map.find((*i)->ref(META_HANDLE));
+    auto found = kernel_->metahandles_map.find((*i)->ref(META_HANDLE));
     if (found != kernel_->metahandles_map.end() &&
-        SafeToPurgeFromMemory(&trans, found->second.get())) {
+        SafeToPurgeFromMemoryForTransaction(&trans, found->second.get())) {
       // We now drop deleted metahandles that are up to date on both the client
       // and the server.
       std::unique_ptr<EntryKernel> entry = std::move(found->second);
@@ -692,9 +693,8 @@ void Directory::PurgeEntriesWithTypeIn(ModelTypeSet disabled_types,
     ScopedKernelLock lock(this);
 
     bool found_progress = false;
-    for (ModelTypeSet::Iterator iter = disabled_types.First(); iter.Good();
-         iter.Inc()) {
-      if (!kernel_->persisted_info.HasEmptyDownloadProgress(iter.Get()))
+    for (ModelType type : disabled_types) {
+      if (!kernel_->persisted_info.HasEmptyDownloadProgress(type))
         found_progress = true;
     }
 
@@ -703,7 +703,7 @@ void Directory::PurgeEntriesWithTypeIn(ModelTypeSet disabled_types,
     if (!found_progress)
       return;
 
-    for (MetahandlesMap::iterator it = kernel_->metahandles_map.begin();
+    for (auto it = kernel_->metahandles_map.begin();
          it != kernel_->metahandles_map.end();) {
       EntryKernel* entry = it->second.get();
       const sync_pb::EntitySpecifics& local_specifics = entry->ref(SPECIFICS);
@@ -735,14 +735,13 @@ void Directory::PurgeEntriesWithTypeIn(ModelTypeSet disabled_types,
     delete_journal_->AddJournalBatch(&trans, entries_to_journal);
 
     // Ensure meta tracking for these data types reflects the purged state.
-    for (ModelTypeSet::Iterator it = disabled_types.First(); it.Good();
-         it.Inc()) {
-      kernel_->persisted_info.transaction_version[it.Get()] = 0;
+    for (ModelType type : disabled_types) {
+      kernel_->persisted_info.transaction_version[type] = 0;
 
       // Don't discard progress markers or context for unapplied types.
-      if (!types_to_unapply.Has(it.Get())) {
-        kernel_->persisted_info.ResetDownloadProgress(it.Get());
-        kernel_->persisted_info.datatype_context[it.Get()].Clear();
+      if (!types_to_unapply.Has(type)) {
+        kernel_->persisted_info.ResetDownloadProgress(type);
+        kernel_->persisted_info.datatype_context[type].Clear();
       }
     }
 
@@ -765,8 +764,7 @@ bool Directory::ResetVersionsForType(BaseWriteTransaction* trans,
   Directory::Metahandles children;
   AppendChildHandles(lock, type_root_id, &children);
 
-  for (Metahandles::iterator it = children.begin(); it != children.end();
-       ++it) {
+  for (auto it = children.begin(); it != children.end(); ++it) {
     EntryKernel* entry = GetEntryByHandle(lock, *it);
     if (!entry)
       continue;
@@ -796,8 +794,7 @@ void Directory::HandleSaveChangesFailure(const SaveChangesSnapshot& snapshot) {
   // that SaveChanges will at least try again later.
   for (auto i = snapshot.dirty_metas.begin(); i != snapshot.dirty_metas.end();
        ++i) {
-    MetahandlesMap::iterator found =
-        kernel_->metahandles_map.find((*i)->ref(META_HANDLE));
+    auto found = kernel_->metahandles_map.find((*i)->ref(META_HANDLE));
     if (found != kernel_->metahandles_map.end()) {
       found->second->mark_dirty(&kernel_->dirty_metahandles);
     }
@@ -818,13 +815,6 @@ void Directory::GetDownloadProgress(
   ScopedKernelLock lock(this);
   return value_out->CopyFrom(
       kernel_->persisted_info.download_progress[model_type]);
-}
-
-void Directory::GetDownloadProgressAsString(ModelType model_type,
-                                            std::string* value_out) const {
-  ScopedKernelLock lock(this);
-  kernel_->persisted_info.download_progress[model_type].SerializeToString(
-      value_out);
 }
 
 size_t Directory::GetEntriesCount() const {
@@ -942,6 +932,22 @@ size_t Directory::EstimateMemoryUsageByType(ModelType model_type) {
   return memory_usage;
 }
 
+size_t Directory::CountEntriesByType(ModelType model_type) const {
+  ScopedKernelLock lock(this);
+  int count = 0;
+  for (const auto& handle_and_kernel : kernel_->metahandles_map) {
+    EntryKernel* entry = handle_and_kernel.second.get();
+    if (GetModelTypeFromSpecifics(entry->ref(SPECIFICS)) != model_type) {
+      continue;
+    }
+    if (SafeToPurgeFromMemory(*entry)) {
+      continue;
+    }
+    ++count;
+  }
+  return count;
+}
+
 void Directory::SetDownloadProgress(
     ModelType model_type,
     const sync_pb::DataTypeProgressMarker& new_progress) {
@@ -986,9 +992,9 @@ ModelTypeSet Directory::InitialSyncEndedTypes() {
   syncable::ReadTransaction trans(FROM_HERE, this);
   ModelTypeSet protocol_types = ProtocolTypes();
   ModelTypeSet initial_sync_ended_types;
-  for (ModelTypeSet::Iterator i = protocol_types.First(); i.Good(); i.Inc()) {
-    if (InitialSyncEndedForType(&trans, i.Get())) {
-      initial_sync_ended_types.Put(i.Get());
+  for (ModelType type : protocol_types) {
+    if (InitialSyncEndedForType(&trans, type)) {
+      initial_sync_ended_types.Put(type);
     }
   }
   return initial_sync_ended_types;
@@ -1078,7 +1084,7 @@ void Directory::GetAllMetaHandles(BaseTransaction* trans,
                                   MetahandleSet* result) {
   result->clear();
   ScopedKernelLock lock(this);
-  for (MetahandlesMap::iterator i = kernel_->metahandles_map.begin();
+  for (auto i = kernel_->metahandles_map.begin();
        i != kernel_->metahandles_map.end(); ++i) {
     result->insert(i->first);
   }
@@ -1144,7 +1150,7 @@ void Directory::CollectMetaHandleCounts(
   syncable::ReadTransaction trans(FROM_HERE, this);
   ScopedKernelLock lock(this);
 
-  for (MetahandlesMap::iterator it = kernel_->metahandles_map.begin();
+  for (auto it = kernel_->metahandles_map.begin();
        it != kernel_->metahandles_map.end(); ++it) {
     EntryKernel* entry = it->second.get();
     const ModelType type = GetModelTypeFromSpecifics(entry->ref(SPECIFICS));
@@ -1160,7 +1166,7 @@ std::unique_ptr<base::ListValue> Directory::GetNodeDetailsForType(
   std::unique_ptr<base::ListValue> nodes(new base::ListValue());
 
   ScopedKernelLock lock(this);
-  for (MetahandlesMap::iterator it = kernel_->metahandles_map.begin();
+  for (auto it = kernel_->metahandles_map.begin();
        it != kernel_->metahandles_map.end(); ++it) {
     if (GetModelTypeFromSpecifics(it->second->ref(SPECIFICS)) != type) {
       continue;
@@ -1392,7 +1398,7 @@ syncable::Id Directory::GetPredecessorId(EntryKernel* e) {
 
   DCHECK(ParentChildIndex::ShouldInclude(e));
   const OrderedChildSet* siblings = kernel_->parent_child_index.GetSiblings(e);
-  OrderedChildSet::const_iterator i = siblings->find(e);
+  auto i = siblings->find(e);
   DCHECK(i != siblings->end());
 
   if (i == siblings->begin()) {
@@ -1408,7 +1414,7 @@ syncable::Id Directory::GetSuccessorId(EntryKernel* e) {
 
   DCHECK(ParentChildIndex::ShouldInclude(e));
   const OrderedChildSet* siblings = kernel_->parent_child_index.GetSiblings(e);
-  OrderedChildSet::const_iterator i = siblings->find(e);
+  auto i = siblings->find(e);
   DCHECK(i != siblings->end());
 
   i++;
@@ -1474,7 +1480,7 @@ void Directory::PutPredecessor(EntryKernel* e, EntryKernel* predecessor) {
   // siblings with invalid positions at all.  See TODO above.
   DCHECK(predecessor->ref(UNIQUE_POSITION).IsValid());
 
-  OrderedChildSet::const_iterator neighbour = siblings->find(predecessor);
+  auto neighbour = siblings->find(predecessor);
   DCHECK(neighbour != siblings->end());
 
   ++neighbour;

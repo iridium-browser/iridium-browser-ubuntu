@@ -5,7 +5,7 @@
 #include "chrome/browser/metrics/desktop_session_duration/desktop_profile_session_durations_service.h"
 
 #include "base/metrics/histogram_macros.h"
-#include "components/signin/core/browser/profile_oauth2_token_service.h"
+#include "chrome/browser/signin/identity_manager_factory.h"
 #include "components/sync/driver/sync_service.h"
 #include "content/public/browser/browser_context.h"
 
@@ -13,9 +13,13 @@ namespace metrics {
 
 DesktopProfileSessionDurationsService::DesktopProfileSessionDurationsService(
     browser_sync::ProfileSyncService* sync_service,
+    identity::IdentityManager* identity_manager,
     GaiaCookieManagerService* cookie_manager,
     DesktopSessionDurationTracker* tracker)
-    : sync_observer_(this),
+    : sync_service_(sync_service),
+      identity_manager_(identity_manager),
+      sync_observer_(this),
+      identity_manager_observer_(this),
       gaia_cookie_observer_(this),
       session_duration_observer_(this) {
   gaia_cookie_observer_.Add(cookie_manager);
@@ -28,13 +32,14 @@ DesktopProfileSessionDurationsService::DesktopProfileSessionDurationsService(
   }
 
   // sync_service can be null if sync is disabled by a command line flag.
-  if (sync_service != nullptr) {
-    sync_observer_.Add(sync_service);
+  if (sync_service) {
+    sync_observer_.Add(sync_service_);
   }
+  identity_manager_observer_.Add(identity_manager_);
 
   // Since this is created after the profile itself is created, we need to
   // handle the initial state.
-  OnStateChanged(sync_service);
+  HandleSyncAndAccountChange();
 
   // Check if we already know the signed in cookies. This will trigger a fetch
   // if we don't have them yet.
@@ -57,7 +62,7 @@ void DesktopProfileSessionDurationsService::OnSessionStarted(
   DVLOG(1) << "Session start";
   total_session_timer_ = std::make_unique<base::ElapsedTimer>();
   signin_session_timer_ = std::make_unique<base::ElapsedTimer>();
-  sync_session_timer_ = std::make_unique<base::ElapsedTimer>();
+  sync_account_session_timer_ = std::make_unique<base::ElapsedTimer>();
 }
 
 namespace {
@@ -87,11 +92,11 @@ void DesktopProfileSessionDurationsService::OnSessionEnded(
       total_session_timer_->Elapsed() - session_length;
   LogSigninDuration(SubtractInactiveTime(signin_session_timer_->Elapsed(),
                                          inactivity_at_session_end));
-  LogSyncDuration(SubtractInactiveTime(sync_session_timer_->Elapsed(),
-                                       inactivity_at_session_end));
+  LogSyncAndAccountDuration(SubtractInactiveTime(
+      sync_account_session_timer_->Elapsed(), inactivity_at_session_end));
   total_session_timer_.reset();
   signin_session_timer_.reset();
-  sync_session_timer_.reset();
+  sync_account_session_timer_.reset();
 }
 
 void DesktopProfileSessionDurationsService::OnGaiaAccountsInCookieUpdated(
@@ -129,21 +134,76 @@ void DesktopProfileSessionDurationsService::OnGaiaAccountsInCookieUpdated(
 void DesktopProfileSessionDurationsService::OnStateChanged(
     syncer::SyncService* sync) {
   DVLOG(1) << "Sync state change";
-  if (sync == nullptr || !sync->CanSyncStart() ||
-      sync->GetAuthError().state() ==
-          GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS) {
-    if (sync_status_ == FeatureState::ON && sync_session_timer_) {
-      LogSyncDuration(sync_session_timer_->Elapsed());
-      sync_session_timer_ = std::make_unique<base::ElapsedTimer>();
+  HandleSyncAndAccountChange();
+}
+
+void DesktopProfileSessionDurationsService::OnRefreshTokenUpdatedForAccount(
+    const AccountInfo& account_info,
+    bool is_valid) {
+  DVLOG(1) << __func__;
+  HandleSyncAndAccountChange();
+}
+
+void DesktopProfileSessionDurationsService::OnRefreshTokenRemovedForAccount(
+    const std::string& account_id) {
+  DVLOG(1) << __func__;
+  HandleSyncAndAccountChange();
+}
+
+void DesktopProfileSessionDurationsService::OnRefreshTokensLoaded() {
+  DVLOG(1) << __func__;
+  HandleSyncAndAccountChange();
+}
+
+bool DesktopProfileSessionDurationsService::ShouldLogUpdate(
+    FeatureState new_sync_status,
+    FeatureState new_account_status) {
+  bool status_change = (new_sync_status != sync_status_ ||
+                        new_account_status != account_status_);
+  bool was_unknown = sync_status_ == FeatureState::UNKNOWN ||
+                     account_status_ == FeatureState::UNKNOWN;
+  return sync_account_session_timer_ && status_change && !was_unknown;
+}
+
+void DesktopProfileSessionDurationsService::UpdateSyncAndAccountStatus(
+    FeatureState new_sync_status,
+    FeatureState new_account_status) {
+  if (ShouldLogUpdate(new_sync_status, new_account_status)) {
+    LogSyncAndAccountDuration(sync_account_session_timer_->Elapsed());
+    sync_account_session_timer_ = std::make_unique<base::ElapsedTimer>();
+  }
+  sync_status_ = new_sync_status;
+  account_status_ = new_account_status;
+}
+
+void DesktopProfileSessionDurationsService::HandleSyncAndAccountChange() {
+  // If sync is off, we can tell whether the user is signed in by just checking
+  // if the token service has accounts, because the reconcilor will take care of
+  // removing accounts in error state from that list.
+  FeatureState non_sync_account_status =
+      identity_manager_->GetAccountsWithRefreshTokens().empty()
+          ? FeatureState::OFF
+          : FeatureState::ON;
+  if (sync_service_ && sync_service_->CanSyncFeatureStart()) {
+    // Sync has potential to turn on, or get into account error state.
+    if (sync_service_->GetAuthError().state() ==
+        GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS) {
+      // Sync is enabled, but we have an account issue.
+      UpdateSyncAndAccountStatus(FeatureState::ON, FeatureState::OFF);
+    } else if (sync_service_->IsSyncFeatureActive() &&
+               sync_service_->GetLastCycleSnapshot().is_initialized()) {
+      // Sync is on and running, we must have an account too.
+      UpdateSyncAndAccountStatus(FeatureState::ON, FeatureState::ON);
+    } else {
+      // We don't know yet if sync is going to work.
+      // At least update the signin status, so that if we never learn
+      // what the sync state is, we know the signin state.
+      account_status_ = non_sync_account_status;
     }
-    sync_status_ = FeatureState::OFF;
-  } else if (sync->IsSyncActive() &&
-             sync->GetLastCycleSnapshot().is_initialized()) {
-    if (sync_status_ == FeatureState::OFF && sync_session_timer_) {
-      LogSyncDuration(sync_session_timer_->Elapsed());
-      sync_session_timer_ = std::make_unique<base::ElapsedTimer>();
-    }
-    sync_status_ = FeatureState::ON;
+  } else {
+    // We know for sure that sync is off, so we just need to find out about the
+    // account status.
+    UpdateSyncAndAccountStatus(FeatureState::OFF, non_sync_account_status);
   }
 }
 
@@ -167,25 +227,38 @@ void DesktopProfileSessionDurationsService::LogSigninDuration(
   }
 }
 
-void DesktopProfileSessionDurationsService::LogSyncDuration(
+void DesktopProfileSessionDurationsService::LogSyncAndAccountDuration(
     base::TimeDelta session_length) {
   // TODO(feuunk): Distinguish between being NotOptedInToSync and
   // OptedInToSyncPaused.
-  switch (sync_status_) {
-    case FeatureState::ON:
+  if (sync_status_ == FeatureState::ON) {
+    if (account_status_ == FeatureState::ON) {
       DVLOG(1) << "Logging Session.TotalDuration.OptedInToSyncWithAccount of "
                << session_length;
       UMA_HISTOGRAM_LONG_TIMES("Session.TotalDuration.OptedInToSyncWithAccount",
                                session_length);
-      break;
-    case FeatureState::OFF:
-    // Since the feature wasn't working for the user if we didn't know its
-    // state, log the status as off.
-    case FeatureState::UNKNOWN:
-      DVLOG(1) << "Logging Session.TotalDuration.NotOptedInToSync of "
-               << session_length;
-      UMA_HISTOGRAM_LONG_TIMES("Session.TotalDuration.NotOptedInToSync",
-                               session_length);
+    } else {
+      DVLOG(1)
+          << "Logging Session.TotalDuration.OptedInToSyncWithoutAccount of "
+          << session_length;
+      UMA_HISTOGRAM_LONG_TIMES(
+          "Session.TotalDuration.OptedInToSyncWithoutAccount", session_length);
+    }
+  } else {
+    if (account_status_ == FeatureState::ON) {
+      DVLOG(1)
+          << "Logging Session.TotalDuration.NotOptedInToSyncWithAccount of "
+          << session_length;
+      UMA_HISTOGRAM_LONG_TIMES(
+          "Session.TotalDuration.NotOptedInToSyncWithAccount", session_length);
+    } else {
+      DVLOG(1)
+          << "Logging Session.TotalDuration.NotOptedInToSyncWithoutAccount of "
+          << session_length;
+      UMA_HISTOGRAM_LONG_TIMES(
+          "Session.TotalDuration.NotOptedInToSyncWithoutAccount",
+          session_length);
+    }
   }
 }
 
@@ -193,6 +266,7 @@ void DesktopProfileSessionDurationsService::Shutdown() {
   session_duration_observer_.RemoveAll();
   gaia_cookie_observer_.RemoveAll();
   sync_observer_.RemoveAll();
+  identity_manager_observer_.RemoveAll();
 }
 
 }  // namespace metrics

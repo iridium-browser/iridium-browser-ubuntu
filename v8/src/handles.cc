@@ -8,6 +8,7 @@
 #include "src/api.h"
 #include "src/base/logging.h"
 #include "src/identity-map.h"
+#include "src/maybe-handles.h"
 #include "src/objects-inl.h"
 
 namespace v8 {
@@ -26,12 +27,12 @@ bool HandleBase::IsDereferenceAllowed(DereferenceCheckMode mode) const {
   Object* object = *location_;
   if (object->IsSmi()) return true;
   HeapObject* heap_object = HeapObject::cast(object);
-  Heap* heap = heap_object->GetHeap();
-  Object** roots_array_start = heap->roots_array_start();
-  if (roots_array_start <= location_ &&
-      location_ < roots_array_start + Heap::kStrongRootListLength &&
-      heap->RootCanBeTreatedAsConstant(
-          static_cast<Heap::RootListIndex>(location_ - roots_array_start))) {
+  Isolate* isolate;
+  if (!Isolate::FromWritableHeapObject(heap_object, &isolate)) return true;
+  Heap* heap = isolate->heap();
+  RootIndex root_index;
+  if (heap->IsRootHandleLocation(location_, &root_index) &&
+      heap->RootCanBeTreatedAsConstant(root_index)) {
     return true;
   }
   if (!AllowHandleDereference::IsAllowed()) return false;
@@ -41,7 +42,7 @@ bool HandleBase::IsDereferenceAllowed(DereferenceCheckMode mode) const {
     if (heap_object->IsCell()) return true;
     if (heap_object->IsMap()) return true;
     if (heap_object->IsInternalizedString()) return true;
-    return !heap->isolate()->IsDeferredHandle(location_);
+    return !isolate->IsDeferredHandle(location_);
   }
   return true;
 }
@@ -107,7 +108,7 @@ void HandleScope::DeleteExtensions(Isolate* isolate) {
 void HandleScope::ZapRange(Object** start, Object** end) {
   DCHECK_LE(end - start, kHandleBlockSize);
   for (Object** p = start; p != end; p++) {
-    *reinterpret_cast<Address*>(p) = reinterpret_cast<Address>(kHandleZapValue);
+    *reinterpret_cast<Address*>(p) = static_cast<Address>(kHandleZapValue);
   }
 }
 #endif
@@ -154,11 +155,9 @@ Object** CanonicalHandleScope::Lookup(Object* object) {
     return HandleScope::CreateHandle(isolate_, object);
   }
   if (object->IsHeapObject()) {
-    int index = root_index_map_->Lookup(HeapObject::cast(object));
-    if (index != RootIndexMap::kInvalidRootIndex) {
-      return isolate_->heap()
-          ->root_handle(static_cast<Heap::RootListIndex>(index))
-          .location();
+    RootIndex root_index;
+    if (root_index_map_->Lookup(HeapObject::cast(object), &root_index)) {
+      return isolate_->heap()->root_handle(root_index).location();
     }
   }
   Object*** entry = identity_map_->Get(object);
@@ -176,7 +175,8 @@ DeferredHandleScope::DeferredHandleScope(Isolate* isolate)
   HandleScopeData* data = impl_->isolate()->handle_scope_data();
   Object** new_next = impl_->GetSpareOrNewBlock();
   Object** new_limit = &new_next[kHandleBlockSize];
-  // Check that at least one HandleScope exists, see the class description.
+  // Check that at least one HandleScope with at least one Handle in it exists,
+  // see the class description.
   DCHECK(!impl_->blocks()->empty());
   // Check that we are not in a SealedHandleScope.
   DCHECK(data->limit == &impl_->blocks()->back()[kHandleBlockSize]);

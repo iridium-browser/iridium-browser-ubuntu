@@ -13,7 +13,6 @@
 #include "glsl/GrGLSLProgramBuilder.h"
 #include "glsl/GrGLSLUniformHandler.h"
 #include "glsl/GrGLSLVarying.h"
-#include "../private/GrGLSL.h"
 
 const char* GrGLSLFragmentShaderBuilder::kDstColorName = "_dstColor";
 
@@ -106,7 +105,7 @@ const char* GrGLSLFragmentShaderBuilder::dstColor() {
                          shaderCaps->fbFetchExtensionString());
 
         // Some versions of this extension string require declaring custom color output on ES 3.0+
-        const char* fbFetchColorName = shaderCaps->fbFetchColorName();
+        const char* fbFetchColorName = "sk_LastFragColor";
         if (shaderCaps->fbFetchNeedsCustomOutput()) {
             this->enableCustomOutput();
             fOutputs[fCustomColorOutputIndex].setTypeModifier(GrShaderVar::kInOut_TypeModifier);

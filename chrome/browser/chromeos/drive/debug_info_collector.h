@@ -35,7 +35,7 @@ class DebugInfoCollector {
   // Finds a locally stored entry (a file or a directory) by |file_path|.
   // |callback| must not be null.
   void GetResourceEntry(const base::FilePath& file_path,
-                        const GetResourceEntryCallback& callback);
+                        GetResourceEntryCallback callback);
 
   // Finds and reads a directory by |file_path|.
   // |callback| must not be null.
@@ -51,14 +51,14 @@ class DebugInfoCollector {
 
   // Returns miscellaneous metadata of the file system like the largest
   // timestamp. |callback| must not be null.
-  void GetMetadata(const GetFilesystemMetadataCallback& callback);
+  void GetMetadata(GetFilesystemMetadataCallback callback);
 
  private:
   internal::ResourceMetadata* metadata_;  // No owned.
   FileSystemInterface* file_system_;  // Not owned.
   scoped_refptr<base::SequencedTaskRunner> blocking_task_runner_;
 
-  base::ThreadChecker thread_checker_;
+  THREAD_CHECKER(thread_checker_);
 
   DISALLOW_COPY_AND_ASSIGN(DebugInfoCollector);
 };

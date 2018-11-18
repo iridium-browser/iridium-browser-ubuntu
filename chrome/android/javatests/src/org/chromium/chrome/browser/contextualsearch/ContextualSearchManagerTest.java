@@ -7,7 +7,7 @@ package org.chromium.chrome.browser.contextualsearch;
 import static org.chromium.base.test.util.Restriction.RESTRICTION_TYPE_NON_LOW_END_DEVICE;
 import static org.chromium.chrome.browser.multiwindow.MultiWindowTestHelper.waitForSecondChromeTabbedActivity;
 import static org.chromium.chrome.browser.multiwindow.MultiWindowTestHelper.waitForTabs;
-import static org.chromium.content.browser.test.util.CriteriaHelper.DEFAULT_POLLING_INTERVAL;
+import static org.chromium.content_public.browser.test.util.CriteriaHelper.DEFAULT_POLLING_INTERVAL;
 
 import android.app.Activity;
 import android.app.Instrumentation;
@@ -76,16 +76,17 @@ import org.chromium.chrome.test.util.ChromeTabUtils;
 import org.chromium.chrome.test.util.FullscreenTestUtils;
 import org.chromium.chrome.test.util.MenuUtils;
 import org.chromium.chrome.test.util.OmniboxTestUtils;
+import org.chromium.chrome.test.util.browser.Features;
 import org.chromium.components.navigation_interception.NavigationParams;
-import org.chromium.content.browser.test.util.Criteria;
-import org.chromium.content.browser.test.util.CriteriaHelper;
-import org.chromium.content.browser.test.util.DOMUtils;
-import org.chromium.content.browser.test.util.KeyUtils;
-import org.chromium.content.browser.test.util.TestSelectionPopupController;
-import org.chromium.content.browser.test.util.TouchCommon;
-import org.chromium.content_public.browser.ContentViewCore;
 import org.chromium.content_public.browser.SelectionClient;
 import org.chromium.content_public.browser.SelectionPopupController;
+import org.chromium.content_public.browser.WebContents;
+import org.chromium.content_public.browser.test.util.Criteria;
+import org.chromium.content_public.browser.test.util.CriteriaHelper;
+import org.chromium.content_public.browser.test.util.DOMUtils;
+import org.chromium.content_public.browser.test.util.KeyUtils;
+import org.chromium.content_public.browser.test.util.TestSelectionPopupController;
+import org.chromium.content_public.browser.test.util.TouchCommon;
 import org.chromium.net.test.EmbeddedTestServer;
 import org.chromium.ui.base.PageTransition;
 import org.chromium.ui.test.util.UiDisableIf;
@@ -139,28 +140,32 @@ public class ContextualSearchManagerTest {
     private static final int ACTIVITY_STARTUP_DELAY_MS = 1000;
 
     // Ranker data that's expected to be logged.
-    private static final Set<ContextualSearchRankerLogger.Feature> EXPECTED_RANKER_OUTCOMES;
+    // Integer values should contain @Feature values only.
+    private static final Set<Integer> EXPECTED_RANKER_OUTCOMES;
     static {
-        Set<ContextualSearchRankerLogger.Feature> expectedOutcomes =
-                new HashSet<ContextualSearchRankerLogger.Feature>(
-                        ContextualSearchRankerLoggerImpl.OUTCOMES.keySet());
+        // Integer values should contain @Feature values only.
+        Set<Integer> expectedOutcomes =
+                new HashSet<Integer>(ContextualSearchRankerLoggerImpl.OUTCOMES.keySet());
         // We don't log whether the quick action was clicked unless we actually have a quick action.
         expectedOutcomes.remove(
-                ContextualSearchRankerLogger.Feature.OUTCOME_WAS_QUICK_ACTION_CLICKED);
+                ContextualSearchInteractionRecorder.Feature.OUTCOME_WAS_QUICK_ACTION_CLICKED);
         EXPECTED_RANKER_OUTCOMES = Collections.unmodifiableSet(expectedOutcomes);
     }
-    private static final Set<ContextualSearchRankerLogger.Feature> EXPECTED_RANKER_FEATURES;
+    // Integer values should contain @Feature values only.
+    private static final Set<Integer> EXPECTED_RANKER_FEATURES;
     static {
-        Set<ContextualSearchRankerLogger.Feature> expectedFeatures =
-                new HashSet<ContextualSearchRankerLogger.Feature>(
-                        ContextualSearchRankerLoggerImpl.FEATURES.keySet());
+        // Integer values should contain @Feature values only.
+        Set<Integer> expectedFeatures =
+                new HashSet<Integer>(ContextualSearchRankerLoggerImpl.FEATURES.keySet());
         // We don't log previous user impressions and CTR if not available for the current user.
-        expectedFeatures.remove(ContextualSearchRankerLogger.Feature.PREVIOUS_WEEK_CTR_PERCENT);
         expectedFeatures.remove(
-                ContextualSearchRankerLogger.Feature.PREVIOUS_WEEK_IMPRESSIONS_COUNT);
-        expectedFeatures.remove(ContextualSearchRankerLogger.Feature.PREVIOUS_28DAY_CTR_PERCENT);
+                ContextualSearchInteractionRecorder.Feature.PREVIOUS_WEEK_CTR_PERCENT);
         expectedFeatures.remove(
-                ContextualSearchRankerLogger.Feature.PREVIOUS_28DAY_IMPRESSIONS_COUNT);
+                ContextualSearchInteractionRecorder.Feature.PREVIOUS_WEEK_IMPRESSIONS_COUNT);
+        expectedFeatures.remove(
+                ContextualSearchInteractionRecorder.Feature.PREVIOUS_28DAY_CTR_PERCENT);
+        expectedFeatures.remove(
+                ContextualSearchInteractionRecorder.Feature.PREVIOUS_28DAY_IMPRESSIONS_COUNT);
         EXPECTED_RANKER_FEATURES = Collections.unmodifiableSet(expectedFeatures);
     }
 
@@ -171,7 +176,6 @@ public class ContextualSearchManagerTest {
     private ContextualSearchPolicy mPolicy;
     private ContextualSearchSelectionController mSelectionController;
     private EmbeddedTestServer mTestServer;
-    private boolean mPollInstrumentationThread;
 
     private float mDpToPx;
 
@@ -232,6 +236,7 @@ public class ContextualSearchManagerTest {
 
     @After
     public void tearDown() throws Exception {
+        clearUnifiedConsentMetadata();
         mTestServer.stopAndDestroyServer();
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
@@ -269,6 +274,12 @@ public class ContextualSearchManagerTest {
         ChromeTabUtils.waitForTabPageLoaded(tab, testUrl);
     }
 
+    /** Clears stored metadata about preference state before Unified Consent became active. */
+    private void clearUnifiedConsentMetadata() {
+        mPolicy.applyUnifiedConsentGivenMetadata(
+                ContextualSearchPreviousPreferenceMetadata.UNKNOWN);
+    }
+
     //============================================================================================
     // Public API
     //============================================================================================
@@ -280,7 +291,7 @@ public class ContextualSearchManagerTest {
     public void longPressNodeWithoutWaiting(String nodeId)
             throws InterruptedException, TimeoutException {
         Tab tab = mActivityTestRule.getActivity().getActivityTab();
-        DOMUtils.longPressNode(tab.getContentViewCore(), nodeId);
+        DOMUtils.longPressNode(tab.getWebContents(), nodeId);
     }
 
     /**
@@ -298,7 +309,7 @@ public class ContextualSearchManagerTest {
      */
     public void clickNode(String nodeId) throws InterruptedException, TimeoutException {
         Tab tab = mActivityTestRule.getActivity().getActivityTab();
-        DOMUtils.clickNode(tab.getContentViewCore(), nodeId);
+        DOMUtils.clickNode(tab.getWebContents(), nodeId);
     }
 
     /**
@@ -522,38 +533,38 @@ public class ContextualSearchManagerTest {
     //============================================================================================
 
     /**
-     * @return The Panel's ContentViewCore.
+     * @return The Panel's WebContents.
      */
-    private ContentViewCore getPanelContentViewCore() {
-        return mPanel.getContentViewCore();
+    private WebContents getPanelWebContents() {
+        return mPanel.getWebContents();
     }
 
     /**
-     * @return Whether the Panel's ContentViewCore is visible.
+     * @return Whether the Panel's WebContents is visible.
      */
-    private boolean isContentViewCoreVisible() {
+    private boolean isWebContentsVisible() {
         return mFakeServer.isContentVisible();
     }
 
     /**
-     * Asserts that the Panel's ContentViewCore is created.
+     * Asserts that the Panel's WebContents is created.
      */
-    private void assertContentViewCoreCreated() {
-        Assert.assertNotNull(getPanelContentViewCore());
+    private void assertWebContentsCreated() {
+        Assert.assertNotNull(getPanelWebContents());
     }
 
     /**
-     * Asserts that the Panel's ContentViewCore is not created.
+     * Asserts that the Panel's WebContents is not created.
      */
-    private void assertNoContentViewCore() {
-        Assert.assertNull(getPanelContentViewCore());
+    private void assertNoWebContents() {
+        Assert.assertNull(getPanelWebContents());
     }
 
     /**
-     * Asserts that the Panel's ContentViewCore is visible.
+     * Asserts that the Panel's WebContents is visible.
      */
-    private void assertContentViewCoreVisible() {
-        Assert.assertTrue(isContentViewCoreVisible());
+    private void assertWebContentsVisible() {
+        Assert.assertTrue(isWebContentsVisible());
     }
 
     /**
@@ -564,11 +575,11 @@ public class ContextualSearchManagerTest {
     }
 
     /**
-     * Asserts that the Panel's ContentViewCore is created
+     * Asserts that the Panel's WebContents is created
      */
-    private void assertContentViewCoreCreatedButNeverMadeVisible() {
-        assertContentViewCoreCreated();
-        Assert.assertFalse(isContentViewCoreVisible());
+    private void assertWebContentsCreatedButNeverMadeVisible() {
+        assertWebContentsCreated();
+        Assert.assertFalse(isWebContentsVisible());
         assertNeverCalledWebContentsOnShow();
     }
 
@@ -802,11 +813,10 @@ public class ContextualSearchManagerTest {
 
     /**
      * Waits for the Search Panel to enter the given {@code PanelState} and assert.
-     * Waits on the UI thread unless mPollInstrumentationThread is set.
      * @param state The {@link PanelState} to wait for.
      */
     private void waitForPanelToEnterState(final PanelState state) {
-        final Criteria panelStateCriteria = new Criteria() {
+        CriteriaHelper.pollUiThread(new Criteria() {
             @Override
             public boolean isSatisfied() {
                 if (mPanel == null) return false;
@@ -814,12 +824,7 @@ public class ContextualSearchManagerTest {
                         + "Instead, the current state is " + mPanel.getPanelState() + ".");
                 return mPanel.getPanelState() == state && !mPanel.isHeightAnimationRunning();
             }
-        };
-        if (mPollInstrumentationThread) {
-            CriteriaHelper.pollInstrumentationThread(panelStateCriteria);
-        } else {
-            CriteriaHelper.pollUiThread(panelStateCriteria);
-        }
+        });
     }
 
     /**
@@ -861,24 +866,18 @@ public class ContextualSearchManagerTest {
 
     /**
      * Waits for the selection to be empty.
-     * Waits on the UI thread unless mPollInstrumentationThread is set.
      * Use this method any time a test repeatedly establishes and dissolves a selection to ensure
      * that the selection has been completely dissolved before simulating the next selection event.
      * This is needed because the renderer's notification of a selection going away is async,
      * and a subsequent tap may think there's a current selection until it has been dissolved.
      */
     private void waitForSelectionEmpty() {
-        final Criteria selectionEmptyCriteria = new Criteria("Selection never empty.") {
+        CriteriaHelper.pollUiThread(new Criteria("Selection never empty.") {
             @Override
             public boolean isSatisfied() {
                 return mSelectionController.isSelectionEmpty();
             }
-        };
-        if (mPollInstrumentationThread) {
-            CriteriaHelper.pollInstrumentationThread(selectionEmptyCriteria);
-        } else {
-            CriteriaHelper.pollUiThread(selectionEmptyCriteria);
-        }
+        });
     }
 
     /**
@@ -895,7 +894,12 @@ public class ContextualSearchManagerTest {
         // longpress, in turn showing the pins and preventing contextual tap
         // refinement from nearby taps. The double-tap timeout is sufficiently
         // short that this shouldn't conflict with tap refinement by the user.
-        Thread.sleep(ViewConfiguration.getDoubleTapTimeout());
+        int doubleTapTimeout = ViewConfiguration.getDoubleTapTimeout();
+        if (Build.VERSION.SDK_INT == Build.VERSION_CODES.KITKAT) {
+            // Some tests are flaky on KitKat.  See https://crbug.com/878517.
+            doubleTapTimeout *= 2;
+        }
+        Thread.sleep(doubleTapTimeout);
     }
 
     /**
@@ -1122,20 +1126,22 @@ public class ContextualSearchManagerTest {
     }
 
     /** @return The value of the given logged feature, or {@code null} if not logged. */
-    private Object loggedToRanker(ContextualSearchRankerLogger.Feature feature) {
+    private Object loggedToRanker(@ContextualSearchInteractionRecorder.Feature int feature) {
         return getRankerLogger().getFeaturesLogged().get(feature);
     }
 
     /** Asserts that all the expected features have been logged to Ranker. **/
     private void assertLoggedAllExpectedFeaturesToRanker() {
-        for (ContextualSearchRankerLogger.Feature feature : EXPECTED_RANKER_FEATURES) {
+        for (@ContextualSearchInteractionRecorder.Feature Integer feature :
+                EXPECTED_RANKER_FEATURES) {
             Assert.assertNotNull(loggedToRanker(feature));
         }
     }
 
     /** Asserts that all the expected outcomes have been logged to Ranker. **/
     private void assertLoggedAllExpectedOutcomesToRanker() {
-        for (ContextualSearchRankerLogger.Feature feature : EXPECTED_RANKER_OUTCOMES) {
+        for (@ContextualSearchInteractionRecorder.Feature Integer feature :
+                EXPECTED_RANKER_OUTCOMES) {
             Assert.assertNotNull("Expected this outcome to be logged: " + feature,
                     getRankerLogger().getOutcomesLogged().get(feature));
         }
@@ -1217,7 +1223,7 @@ public class ContextualSearchManagerTest {
 
         assertLoggedAllExpectedFeaturesToRanker();
         Assert.assertEquals(
-                true, loggedToRanker(ContextualSearchRankerLogger.Feature.IS_LONG_WORD));
+                true, loggedToRanker(ContextualSearchInteractionRecorder.Feature.IS_LONG_WORD));
         // The panel must be closed for outcomes to be logged.
         // Close the panel by clicking far away in order to make sure the outcomes get logged by
         // the hideContextualSearchUi call to writeRankerLoggerOutcomesAndReset.
@@ -1238,7 +1244,7 @@ public class ContextualSearchManagerTest {
         Assert.assertNull(mFakeServer.getSearchTermRequested());
         waitForPanelToPeek();
         assertLoadedNoUrl();
-        assertNoContentViewCore();
+        assertNoWebContents();
     }
 
     /**
@@ -1271,7 +1277,7 @@ public class ContextualSearchManagerTest {
     /**
      * Tests swiping the overlay open, after an initial long-press that activates the peeking card,
      * followed by closing the panel.
-     * This test also verifies that we don't create any {@link ContentViewCore} or load any URL
+     * This test also verifies that we don't create any {@link WebContents} or load any URL
      * until the panel is opened.
      */
     @Test
@@ -1280,18 +1286,18 @@ public class ContextualSearchManagerTest {
     @Restriction(UiRestriction.RESTRICTION_TYPE_PHONE)
     public void testLongPressSwipeExpand() throws InterruptedException, TimeoutException {
         simulateLongPressSearch("search");
-        assertNoContentViewCore();
+        assertNoWebContents();
         assertLoadedNoUrl();
 
         tapPeekingBarToExpandAndAssert();
-        assertContentViewCoreCreated();
+        assertWebContentsCreated();
         assertLoadedNormalPriorityUrl();
         Assert.assertEquals(1, mFakeServer.getLoadedUrlCount());
 
         // tap the base page to close.
         closePanel();
         Assert.assertEquals(1, mFakeServer.getLoadedUrlCount());
-        assertNoContentViewCore();
+        assertNoWebContents();
     }
 
     /**
@@ -1456,6 +1462,8 @@ public class ContextualSearchManagerTest {
      * Tests that a Tap gesture followed by scrolling clears the selection.
      */
     @Test
+    @DisableIf.
+    Build(sdk_is_greater_than = Build.VERSION_CODES.LOLLIPOP, message = "crbug.com/841017")
     @SmallTest
     @Feature({"ContextualSearch"})
     public void testTapGestureFollowedByScrollClearsSelection()
@@ -1570,8 +1578,8 @@ public class ContextualSearchManagerTest {
      */
     @Test
     @SmallTest
+    @DisableIf.Build(sdk_is_less_than = Build.VERSION_CODES.LOLLIPOP, message = "crbug.com/837998")
     @Feature({"ContextualSearch"})
-    @DisableIf.Build(sdk_is_less_than = Build.VERSION_CODES.LOLLIPOP, message = "crbug.com/818897")
     public void testLongPressGestureFollowedByTapDoesntSelect()
             throws InterruptedException, TimeoutException {
         longPressNode("intelligence");
@@ -1587,6 +1595,7 @@ public class ContextualSearchManagerTest {
     @Test
     @SmallTest
     @Feature({"ContextualSearch"})
+    @DisabledTest
     public void testContextualSearchDismissedOnForegroundTabCrash()
             throws InterruptedException, TimeoutException {
         clickWordNode("states");
@@ -1596,8 +1605,8 @@ public class ContextualSearchManagerTest {
         ThreadUtils.runOnUiThread(new Runnable() {
             @Override
             public void run() {
-                mActivityTestRule.getActivity().getActivityTab().simulateRendererKilledForTesting(
-                        true);
+                ChromeTabUtils.simulateRendererKilledForTesting(
+                        mActivityTestRule.getActivity().getActivityTab(), true);
             }
         });
 
@@ -1642,7 +1651,7 @@ public class ContextualSearchManagerTest {
         ThreadUtils.runOnUiThread(new Runnable() {
             @Override
             public void run() {
-                tab2.simulateRendererKilledForTesting(false);
+                ChromeTabUtils.simulateRendererKilledForTesting(tab2, false);
             }
         });
 
@@ -1744,7 +1753,7 @@ public class ContextualSearchManagerTest {
     public void testExpandBeforeSearchTermResolution()
             throws InterruptedException, TimeoutException {
         clickWordNode("states");
-        assertNoContentViewCore();
+        assertNoWebContents();
 
         // Expanding before the search term resolves should not load anything.
         tapPeekingBarToExpandAndAssert();
@@ -1754,8 +1763,8 @@ public class ContextualSearchManagerTest {
         fakeResponse(false, 200, "states", "United States Intelligence", "alternate-term", false);
         assertContainsParameters("states", "alternate-term");
         assertLoadedNormalPriorityUrl();
-        assertContentViewCoreCreated();
-        assertContentViewCoreVisible();
+        assertWebContentsCreated();
+        assertWebContentsVisible();
     }
 
     /**
@@ -1829,6 +1838,78 @@ public class ContextualSearchManagerTest {
         mPolicy.overrideDecidedStateForTesting(true);
 
         clickToResolveAndAssertPrefetch();
+    }
+
+    // --------------------------------------------------------------------------------------------
+    // Unified Consent throttling tests.
+    // --------------------------------------------------------------------------------------------
+
+    /**
+     * Sets up state to simulate Unified Consent switched on for this user.
+     * @param wasPreviouslyUndecided Whether the user was "undecided" before Unified Consent.
+     */
+    void setupUnifiedConsentState(boolean wasPreviouslyUndecided)
+            throws InterruptedException, TimeoutException {
+        mFakeServer.reset();
+        // User is now decided, either due to Unified Consent enabling or because they already were.
+        mPolicy.overrideDecidedStateForTesting(true);
+        @ContextualSearchPreviousPreferenceMetadata
+        int previousMetadata =
+                wasPreviouslyUndecided ? ContextualSearchPreviousPreferenceMetadata.WAS_UNDECIDED
+                                       : ContextualSearchPreviousPreferenceMetadata.WAS_DECIDED;
+        mPolicy.applyUnifiedConsentGivenMetadata(previousMetadata);
+        // Throttling is done by not resolving HTTPS requests.
+        mFakeServer.setShouldUseHttps(true);
+        // Tap on a word.  We may or may not request the search term.
+        clickWordNode("states");
+    }
+
+    @Test
+    @SmallTest
+    @Feature({"ContextualSearch"})
+    // Throttling is OFF (see the very end of this field-trial settings set):
+    @CommandLineFlags.Add({"enable-features=ContextualSearchUnityIntegration<FakeStudyName",
+            "force-fieldtrials=FakeStudyName/FakeGroup",
+            "force-fieldtrial-params=FakeStudyName.FakeGroup:throttle/false"})
+    public void
+    testPreviouslyUndecidedsResolveAfterUnifiedConsent()
+            throws InterruptedException, TimeoutException {
+        boolean previouslyUndecided = true;
+        setupUnifiedConsentState(previouslyUndecided);
+
+        assertSearchTermRequested();
+    }
+
+    @Test
+    @SmallTest
+    @Feature({"ContextualSearch"})
+    // Throttling is ON (see the very end of this field-trial settings set):
+    @CommandLineFlags.Add({"enable-features=ContextualSearchUnityIntegration<FakeStudyName",
+            "force-fieldtrials=FakeStudyName/FakeGroup",
+            "force-fieldtrial-params=FakeStudyName.FakeGroup:throttle/true"})
+    public void
+    testPreviouslyUndecidedsCanThrottleAfterUnifiedConsent()
+            throws InterruptedException, TimeoutException {
+        boolean previouslyUndecided = true;
+        setupUnifiedConsentState(previouslyUndecided);
+
+        assertSearchTermNotRequested();
+    }
+
+    @Test
+    @SmallTest
+    @Feature({"ContextualSearch"})
+    // Throttling is ON (see the very end of this field-trial settings set):
+    @CommandLineFlags.Add({"enable-features=ContextualSearchUnityIntegration<FakeStudyName",
+            "force-fieldtrials=FakeStudyName/FakeGroup",
+            "force-fieldtrial-params=FakeStudyName.FakeGroup:throttle/true"})
+    public void
+    testPreviouslyDecidedsCannotThrottleAfterUnifiedConsent()
+            throws InterruptedException, TimeoutException {
+        boolean previouslyUndecided = false;
+        setupUnifiedConsentState(previouslyUndecided);
+
+        assertSearchTermRequested();
     }
 
     // --------------------------------------------------------------------------------------------
@@ -2123,8 +2204,7 @@ public class ContextualSearchManagerTest {
     }
 
     private SelectionPopupController getSelectionPopupController() {
-        return SelectionPopupController.fromWebContents(
-                mActivityTestRule.getActivity().getActivityTab().getWebContents());
+        return SelectionPopupController.fromWebContents(mActivityTestRule.getWebContents());
     }
 
     /**
@@ -2197,29 +2277,13 @@ public class ContextualSearchManagerTest {
      * of selection bounds, so this helps prevent a regression with that.
      */
     @Test
-    @DisabledTest(message = "crbug.com/828780")
     @LargeTest
     @Feature({"ContextualSearch"})
-    @DisableIf.Build(sdk_is_less_than = Build.VERSION_CODES.LOLLIPOP, message = "crbug.com/818897")
     public void testTapALot() throws InterruptedException, TimeoutException {
         for (int i = 0; i < 50; i++) {
             clickToTriggerPrefetch();
             assertSearchTermRequested();
         }
-    }
-
-    /**
-     * Tests a bunch of taps in a row, with the variation that we wait on the instrumentation
-     * thread instead of the UI thread for some wait sequences.
-     */
-    @Test
-    @DisabledTest(message = "crbug.com/828780")
-    @LargeTest
-    @Feature({"ContextualSearch"})
-    @DisableIf.Build(sdk_is_less_than = Build.VERSION_CODES.LOLLIPOP, message = "crbug.com/818897")
-    public void testTapALotInstrumentation() throws InterruptedException, TimeoutException {
-        mPollInstrumentationThread = true;
-        testTapALot();
     }
 
     /**
@@ -2236,7 +2300,7 @@ public class ContextualSearchManagerTest {
                 "intent://test/#Intent;scheme=test;package=com.chrome.test;end", "",
                 false /* isPost */, true /* hasUserGesture */, PageTransition.LINK,
                 false /* isRedirect */, true /* isExternalProtocol */, true /* isMainFrame */,
-                null /* suggestedFilename */, false /* hasUserGestureCarryover */);
+                true /* isRendererInitiated */, false /* hasUserGestureCarryover */);
         InstrumentationRegistry.getInstrumentation().runOnMainSync(new Runnable() {
             @Override
             public void run() {
@@ -2261,12 +2325,12 @@ public class ContextualSearchManagerTest {
         final NavigationParams initialNavigationParams = new NavigationParams("http://test.com", "",
                 false /* isPost */, true /* hasUserGesture */, PageTransition.LINK,
                 false /* isRedirect */, false /* isExternalProtocol */, true /* isMainFrame */,
-                null /* suggestedFilename */, false /* hasUserGestureCarryover */);
+                true /* isRendererInitiated */, false /* hasUserGestureCarryover */);
         final NavigationParams redirectedNavigationParams = new NavigationParams(
                 "intent://test/#Intent;scheme=test;package=com.chrome.test;end", "",
                 false /* isPost */, false /* hasUserGesture */, PageTransition.LINK,
                 true /* isRedirect */, true /* isExternalProtocol */, true /* isMainFrame */,
-                null /* suggestedFilename */, false /* hasUserGestureCarryover */);
+                true /* isRendererInitiated */, false /* hasUserGestureCarryover */);
 
         InstrumentationRegistry.getInstrumentation().runOnMainSync(new Runnable() {
             @Override
@@ -2295,7 +2359,7 @@ public class ContextualSearchManagerTest {
                 "intent://test/#Intent;scheme=test;package=com.chrome.test;end", "",
                 false /* isPost */, false /* hasUserGesture */, PageTransition.LINK,
                 false /* isRedirect */, true /* isExternalProtocol */, true /* isMainFrame */,
-                null /* suggestedFilename */, false /* hasUserGestureCarryover */);
+                true /* isRendererInitiated */, false /* hasUserGestureCarryover */);
         InstrumentationRegistry.getInstrumentation().runOnMainSync(new Runnable() {
             @Override
             public void run() {
@@ -2334,15 +2398,15 @@ public class ContextualSearchManagerTest {
     public void testTapContentVisibility() throws InterruptedException, TimeoutException {
         // Simulate a tap and make sure Content is not visible.
         simulateTapSearch("search");
-        assertContentViewCoreCreatedButNeverMadeVisible();
+        assertWebContentsCreatedButNeverMadeVisible();
 
         // Expanding the Panel should make the Content visible.
         tapPeekingBarToExpandAndAssert();
-        assertContentViewCoreVisible();
+        assertWebContentsVisible();
 
         // Closing the Panel should destroy the Content.
         tapBasePageToClosePanel();
-        assertNoContentViewCore();
+        assertNoWebContents();
     }
 
     /**
@@ -2356,17 +2420,17 @@ public class ContextualSearchManagerTest {
     public void testLongPressContentVisibility() throws InterruptedException, TimeoutException {
         // Simulate a long press and make sure no Content is created.
         simulateLongPressSearch("search");
-        assertNoContentViewCore();
+        assertNoWebContents();
         assertNoSearchesLoaded();
 
         // Expanding the Panel should make the Content visible.
         tapPeekingBarToExpandAndAssert();
-        assertContentViewCoreCreated();
-        assertContentViewCoreVisible();
+        assertWebContentsCreated();
+        assertWebContentsVisible();
 
         // Closing the Panel should destroy the Content.
         tapBasePageToClosePanel();
-        assertNoContentViewCore();
+        assertNoWebContents();
     }
 
     /**
@@ -2380,28 +2444,28 @@ public class ContextualSearchManagerTest {
             throws InterruptedException, TimeoutException {
         // Simulate a tap and make sure Content is not visible.
         simulateTapSearch("search");
-        assertContentViewCoreCreatedButNeverMadeVisible();
+        assertWebContentsCreatedButNeverMadeVisible();
         Assert.assertEquals(1, mFakeServer.getLoadedUrlCount());
 
         // Expanding the Panel should make the Content visible.
         tapPeekingBarToExpandAndAssert();
-        assertContentViewCoreVisible();
+        assertWebContentsVisible();
         Assert.assertEquals(1, mFakeServer.getLoadedUrlCount());
 
         // Swiping the Panel down should not change the visibility or load content again.
         swipePanelDown();
         waitForPanelToPeek();
-        assertContentViewCoreVisible();
+        assertWebContentsVisible();
         Assert.assertEquals(1, mFakeServer.getLoadedUrlCount());
 
         // Expanding the Panel should not change the visibility or load content again.
         tapPeekingBarToExpandAndAssert();
-        assertContentViewCoreVisible();
+        assertWebContentsVisible();
         Assert.assertEquals(1, mFakeServer.getLoadedUrlCount());
 
         // Closing the Panel should destroy the Content.
         tapBasePageToClosePanel();
-        assertNoContentViewCore();
+        assertNoWebContents();
         Assert.assertEquals(1, mFakeServer.getLoadedUrlCount());
     }
 
@@ -2416,29 +2480,29 @@ public class ContextualSearchManagerTest {
             throws InterruptedException, TimeoutException {
         // Simulate a long press and make sure no Content is created.
         simulateLongPressSearch("search");
-        assertNoContentViewCore();
+        assertNoWebContents();
         assertNoSearchesLoaded();
 
         // Expanding the Panel should load the URL and make the Content visible.
         tapPeekingBarToExpandAndAssert();
-        assertContentViewCoreCreated();
-        assertContentViewCoreVisible();
+        assertWebContentsCreated();
+        assertWebContentsVisible();
         Assert.assertEquals(1, mFakeServer.getLoadedUrlCount());
 
         // Swiping the Panel down should not change the visibility or load content again.
         swipePanelDown();
         waitForPanelToPeek();
-        assertContentViewCoreVisible();
+        assertWebContentsVisible();
         Assert.assertEquals(1, mFakeServer.getLoadedUrlCount());
 
         // Expanding the Panel should not change the visibility or load content again.
         tapPeekingBarToExpandAndAssert();
-        assertContentViewCoreVisible();
+        assertWebContentsVisible();
         Assert.assertEquals(1, mFakeServer.getLoadedUrlCount());
 
         // Closing the Panel should destroy the Content.
         tapBasePageToClosePanel();
-        assertNoContentViewCore();
+        assertNoWebContents();
         Assert.assertEquals(1, mFakeServer.getLoadedUrlCount());
     }
 
@@ -2451,31 +2515,31 @@ public class ContextualSearchManagerTest {
     public void testChainedSearchCreatesNewContent() throws InterruptedException, TimeoutException {
         // Simulate a tap and make sure Content is not visible.
         simulateTapSearch("search");
-        assertContentViewCoreCreatedButNeverMadeVisible();
+        assertWebContentsCreatedButNeverMadeVisible();
         Assert.assertEquals(1, mFakeServer.getLoadedUrlCount());
-        ContentViewCore cvc1 = getPanelContentViewCore();
+        WebContents wc1 = getPanelWebContents();
 
         waitToPreventDoubleTapRecognition();
 
-        // Simulate a new tap and make sure a new Content is created.
+        // Simulate a new tap and make sure new Content is created.
         simulateTapSearch("term");
-        assertContentViewCoreCreatedButNeverMadeVisible();
+        assertWebContentsCreatedButNeverMadeVisible();
         Assert.assertEquals(2, mFakeServer.getLoadedUrlCount());
-        ContentViewCore cvc2 = getPanelContentViewCore();
-        Assert.assertNotSame(cvc1, cvc2);
+        WebContents wc2 = getPanelWebContents();
+        Assert.assertNotSame(wc1, wc2);
 
         waitToPreventDoubleTapRecognition();
 
-        // Simulate a new tap and make sure a new Content is created.
+        // Simulate a new tap and make sure new Content is created.
         simulateTapSearch("resolution");
-        assertContentViewCoreCreatedButNeverMadeVisible();
+        assertWebContentsCreatedButNeverMadeVisible();
         Assert.assertEquals(3, mFakeServer.getLoadedUrlCount());
-        ContentViewCore cvc3 = getPanelContentViewCore();
-        Assert.assertNotSame(cvc2, cvc3);
+        WebContents wc3 = getPanelWebContents();
+        Assert.assertNotSame(wc2, wc3);
 
         // Closing the Panel should destroy the Content.
         closePanel();
-        assertNoContentViewCore();
+        assertNoWebContents();
         Assert.assertEquals(3, mFakeServer.getLoadedUrlCount());
     }
 
@@ -2491,19 +2555,19 @@ public class ContextualSearchManagerTest {
             throws InterruptedException, TimeoutException {
         // Simulate a tap and make sure Content is not visible.
         simulateTapSearch("search");
-        assertContentViewCoreCreatedButNeverMadeVisible();
+        assertWebContentsCreatedButNeverMadeVisible();
         Assert.assertEquals(1, mFakeServer.getLoadedUrlCount());
-        ContentViewCore cvc1 = getPanelContentViewCore();
+        WebContents wc1 = getPanelWebContents();
 
         // Expanding the Panel should make the Content visible.
         tapPeekingBarToExpandAndAssert();
-        assertContentViewCoreVisible();
+        assertWebContentsVisible();
         Assert.assertEquals(1, mFakeServer.getLoadedUrlCount());
 
         // Swiping the Panel down should not change the visibility or load content again.
         swipePanelDown();
         waitForPanelToPeek();
-        assertContentViewCoreVisible();
+        assertWebContentsVisible();
         Assert.assertEquals(1, mFakeServer.getLoadedUrlCount());
 
         waitToPreventDoubleTapRecognition();
@@ -2513,16 +2577,16 @@ public class ContextualSearchManagerTest {
 
         // Expanding the Panel should load and display the new search.
         tapPeekingBarToExpandAndAssert();
-        assertContentViewCoreCreated();
-        assertContentViewCoreVisible();
+        assertWebContentsCreated();
+        assertWebContentsVisible();
         Assert.assertEquals(2, mFakeServer.getLoadedUrlCount());
         assertLoadedSearchTermMatches("Resolution");
-        ContentViewCore cvc2 = getPanelContentViewCore();
-        Assert.assertNotSame(cvc1, cvc2);
+        WebContents wc2 = getPanelWebContents();
+        Assert.assertNotSame(wc1, wc2);
 
         // Closing the Panel should destroy the Content.
         tapBasePageToClosePanel();
-        assertNoContentViewCore();
+        assertNoWebContents();
         Assert.assertEquals(2, mFakeServer.getLoadedUrlCount());
     }
 
@@ -2535,9 +2599,9 @@ public class ContextualSearchManagerTest {
     public void testChainedSearchContentVisibility() throws InterruptedException, TimeoutException {
         // Simulate a tap and make sure Content is not visible.
         simulateTapSearch("search");
-        assertContentViewCoreCreatedButNeverMadeVisible();
+        assertWebContentsCreatedButNeverMadeVisible();
         Assert.assertEquals(1, mFakeServer.getLoadedUrlCount());
-        ContentViewCore cvc1 = getPanelContentViewCore();
+        WebContents wc1 = getPanelWebContents();
 
         waitToPreventDoubleTapRecognition();
 
@@ -2548,12 +2612,12 @@ public class ContextualSearchManagerTest {
 
         // Expanding the Panel should load and display the new search.
         tapPeekingBarToExpandAndAssert();
-        assertContentViewCoreCreated();
-        assertContentViewCoreVisible();
+        assertWebContentsCreated();
+        assertWebContentsVisible();
         Assert.assertEquals(2, mFakeServer.getLoadedUrlCount());
         assertLoadedSearchTermMatches("Resolution");
-        ContentViewCore cvc2 = getPanelContentViewCore();
-        Assert.assertNotSame(cvc1, cvc2);
+        WebContents wc2 = getPanelWebContents();
+        Assert.assertNotSame(wc1, wc2);
     }
 
     //============================================================================================
@@ -2876,10 +2940,13 @@ public class ContextualSearchManagerTest {
     /**
      * Tests that the quick action caption is set correctly when one is available. Also tests that
      * the caption gets changed when the panel is expanded and reset when the panel is closed.
+     * TODO(https://crbug.com/831783): Remove the DisableFeatures block turning off contextual
+     * suggestions.
      */
     @Test
     @SmallTest
     @Feature({"ContextualSearch"})
+    @Features.DisableFeatures({ChromeFeatureList.CONTEXTUAL_SUGGESTIONS_BUTTON})
     public void testQuickActionCaptionAndImage() throws InterruptedException, TimeoutException {
         mPanel.getAnimationHandler().enableTestingMode();
 
@@ -3007,12 +3074,12 @@ public class ContextualSearchManagerTest {
 
         // Simulate a tap that resolves to show the Bar.
         clickNode("intelligence");
-        assertNoContentViewCore();
+        assertNoWebContents();
         assertNoSearchesLoaded();
 
         // Simulate a Long-press.
         longPressNodeWithoutWaiting("states");
-        assertNoContentViewCore();
+        assertNoWebContents();
         assertNoSearchesLoaded();
     }
 
@@ -3133,6 +3200,9 @@ public class ContextualSearchManagerTest {
         assertPanelClosedOrUndefined();
         Assert.assertEquals(1, observer.getShowRedactedCount());
         Assert.assertEquals(1, observer.getShowCount());
+        // Note that this test is flawed because it doesn't wait until the selection is cleared
+        // and verify that a Hide notification is sent.  This is a bug because no hide is ever
+        // sent in this case, but should be.  Details in https://crbug.com/878006.
         Assert.assertEquals(0, observer.getHideCount());
         mManager.removeObserver(observer);
     }
@@ -3241,7 +3311,7 @@ public class ContextualSearchManagerTest {
         waitForTabs("CTA2", activity2, 1, testTabId);
 
         // Tap on a word and wait for the selection to be established.
-        DOMUtils.clickNode(activity2.getActivityTab().getContentViewCore(), "search");
+        DOMUtils.clickNode(activity2.getActivityTab().getWebContents(), "search");
         CriteriaHelper.pollUiThread(new Criteria() {
             @Override
             public boolean isSatisfied() {

@@ -11,6 +11,7 @@
 #include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
 #include "base/macros.h"
+#include "base/no_destructor.h"
 #include "base/path_service.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -54,14 +55,13 @@ const std::set<base::FilePath::StringType>& GetFailingTestNames() {
 }
 
 const base::FilePath& GetTestDataDir() {
-  CR_DEFINE_STATIC_LOCAL(base::FilePath, dir, ());
-  if (dir.empty()) {
-    PathService::Get(base::DIR_SOURCE_ROOT, &dir);
-    dir = dir.AppendASCII("components");
-    dir = dir.AppendASCII("test");
-    dir = dir.AppendASCII("data");
-  }
-  return dir;
+  static base::NoDestructor<base::FilePath> dir([]() {
+    base::FilePath dir;
+    base::PathService::Get(base::DIR_SOURCE_ROOT, &dir);
+    dir = dir.AppendASCII("components").AppendASCII("test").AppendASCII("data");
+    return dir;
+  }());
+  return *dir;
 }
 
 const base::FilePath GetInputDir() {
@@ -90,15 +90,23 @@ std::vector<base::FilePath> GetTestFiles() {
 }
 
 std::string FormStructuresToString(
-    const std::vector<std::unique_ptr<FormStructure>>& forms) {
+    const AutofillManager::FormStructureMap& forms) {
+  std::map<base::TimeTicks, const FormStructure*> sorted_forms;
+  for (const auto& form_kv : forms) {
+    const auto* form = form_kv.second.get();
+    EXPECT_TRUE(
+        sorted_forms.emplace(form->form_parsed_timestamp(), form).second);
+  }
+
   std::string forms_string;
-  for (const auto& form : forms) {
+  for (const auto& kv : sorted_forms) {
+    const auto* form = kv.second;
     for (const auto& field : *form) {
       forms_string += field->Type().ToString();
       forms_string += " | " + base::UTF16ToUTF8(field->name);
       forms_string += " | " + base::UTF16ToUTF8(field->label);
       forms_string += " | " + base::UTF16ToUTF8(field->value);
-      forms_string += " | " + field->section();
+      forms_string += " | " + field->section;
       forms_string += "\n";
     }
   }
@@ -146,7 +154,9 @@ FormStructureBrowserTest::FormStructureBrowserTest()
       // Enabled
       {},
       // Disabled
-      {autofill::features::kAutofillEnforceMinRequiredFieldsForUpload,
+      {autofill::features::kAutofillEnforceMinRequiredFieldsForHeuristics,
+       autofill::features::kAutofillEnforceMinRequiredFieldsForQuery,
+       autofill::features::kAutofillEnforceMinRequiredFieldsForUpload,
        autofill::features::kAutofillRestrictUnownedFieldsToFormlessCheckout});
 }
 
@@ -197,9 +207,7 @@ void FormStructureBrowserTest::GenerateResults(const std::string& input,
   ASSERT_NE(nullptr, autofill_driver);
   AutofillManager* autofill_manager = autofill_driver->autofill_manager();
   ASSERT_NE(nullptr, autofill_manager);
-  const std::vector<std::unique_ptr<FormStructure>>& forms =
-      autofill_manager->form_structures_;
-  *output = FormStructuresToString(forms);
+  *output = FormStructuresToString(autofill_manager->form_structures());
 }
 
 std::unique_ptr<HttpResponse> FormStructureBrowserTest::HandleRequest(

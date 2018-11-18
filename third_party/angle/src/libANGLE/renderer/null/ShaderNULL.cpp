@@ -22,14 +22,15 @@ ShaderNULL::~ShaderNULL()
 {
 }
 
-ShCompileOptions ShaderNULL::prepareSourceAndReturnOptions(std::stringstream *sourceStream,
+ShCompileOptions ShaderNULL::prepareSourceAndReturnOptions(const gl::Context *context,
+                                                           std::stringstream *sourceStream,
                                                            std::string *sourcePath)
 {
     *sourceStream << mData.getSource();
     return 0;
 }
 
-bool ShaderNULL::postTranslateCompile(gl::Compiler *compiler, std::string *infoLog)
+bool ShaderNULL::postTranslateCompile(gl::ShCompilerInstance *compiler, std::string *infoLog)
 {
     return true;
 }

@@ -22,7 +22,6 @@
 #include "chrome/grit/generated_resources.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/interactive_test_utils.h"
-#include "chrome/test/views/scoped_macviews_browser_mode.h"
 #include "components/omnibox/browser/omnibox_popup_model.h"
 #include "components/omnibox/browser/test_scheme_classifier.h"
 #include "content/public/browser/web_contents.h"
@@ -116,8 +115,6 @@ class OmniboxViewViewsTest : public InProcessBrowserTest {
     chrome::FocusLocationBar(browser());
     ASSERT_TRUE(ui_test_utils::IsViewFocused(browser(), VIEW_ID_OMNIBOX));
   }
-
-  test::ScopedMacViewsBrowserMode views_mode_{true};
 
   DISALLOW_COPY_AND_ASSIGN(OmniboxViewViewsTest);
 };
@@ -250,6 +247,10 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewViewsTest, SelectionClipboard) {
   EXPECT_EQ(base::ASCIIToUTF16("http://www.goo123gle.com/"),
             omnibox_view->GetText());
   EXPECT_EQ(17U, omnibox_view_views->GetCursorPosition());
+
+  // The omnibox can move when it gains focus, so refresh the click location.
+  click_location.set_x(omnibox_view_views->GetBoundsInScreen().origin().x() +
+                       cursor_x + render_text->display_rect().x());
 
   // Middle clicking again, with focus, pastes and updates the cursor.
   SetClipboardText(ui::CLIPBOARD_TYPE_SELECTION, "4567");
@@ -510,10 +511,9 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewViewsTest, FragmentUnescapedForDisplay) {
   OmniboxView* view = nullptr;
   ASSERT_NO_FATAL_FAILURE(GetOmniboxViewForBrowser(browser(), &view));
   ui_test_utils::NavigateToURL(browser(),
-                               GURL("https://www.google.com/#%E2%98%83"));
+                               GURL("http://example.com/#%E2%98%83"));
 
-  EXPECT_EQ(view->GetText(),
-            base::UTF8ToUTF16("https://www.google.com/#\u2603"));
+  EXPECT_EQ(view->GetText(), base::UTF8ToUTF16("example.com/#\u2603"));
 }
 
 // Ensure that when the user navigates between suggestions, that the accessible
@@ -532,6 +532,9 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewViewsTest, FriendlyAccessibleLabel) {
   match.destination_url = GURL(match_url);
   match.description = base::ASCIIToUTF16("Google");
   match.allowed_to_be_default_match = true;
+
+  // Enter user input mode to prevent spurious unelision.
+  omnibox_view->model()->SetInputInProgress(true);
 
   // Populate suggestions for the omnibox popup.
   AutocompleteController* autocomplete_controller =
@@ -557,6 +560,8 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewViewsTest, FriendlyAccessibleLabel) {
   omnibox_view_views->OnTemporaryTextMaybeChanged(match_url, match, false,
                                                   false);
   omnibox_view->SelectAll(true);
+  EXPECT_EQ(base::ASCIIToUTF16("https://google.com"),
+            omnibox_view_views->GetText());
 
   // Test friendly label.
   const int kFriendlyPrefixLength = match.description.size() + 1;
@@ -584,6 +589,9 @@ IN_PROC_BROWSER_TEST_F(OmniboxViewViewsTest, FriendlyAccessibleLabel) {
   set_selection_action_data.focus_offset = kFriendlyPrefixLength + 1;
   set_selection_action_data.anchor_offset = kFriendlyPrefixLength + 3;
   omnibox_view_views->HandleAccessibleAction(set_selection_action_data);
+
+  EXPECT_EQ(base::ASCIIToUTF16("https://google.com"),
+            omnibox_view_views->GetText());
 
   // Type "x" to replace the selected "tt" with that character.
   ASSERT_TRUE(ui_test_utils::SendKeyPressSync(browser(), ui::VKEY_X, false,

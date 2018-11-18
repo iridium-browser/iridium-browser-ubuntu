@@ -5,7 +5,6 @@
 
 <org.chromium.chrome.browser.preferences.datareduction.DataReductionSiteBreakdownView
     xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:settings="http://schemas.android.com/apk/res-auto"
     android:id="@+id/breakdown"
     android:layout_height="wrap_content"
     android:layout_width="match_parent"
@@ -37,10 +36,14 @@
             android:layout_width="match_parent">
 
             <TextView
+                android:id="@+id/data_reduction_breakdown_site_title"
                 android:text="@string/data_reduction_breakdown_site_title"
                 android:layout_width="0dp"
                 android:layout_weight="0"
                 android:layout_gravity="start"
+                android:contentDescription="@string/data_reduction_breakdown_site_header_content_description"
+                android:drawablePadding="3dp"
+                android:drawableEnd="@drawable/data_reduction_breakdown_sort_arrow"
                 style="@style/DataUsageBreakdownColumnLabel" />
 
             <TextView
@@ -48,6 +51,7 @@
                 android:text="@string/data_reduction_breakdown_used_title"
                 android:layout_width="wrap_content"
                 android:layout_marginStart="24dp"
+                android:contentDescription="@string/data_reduction_breakdown_used_header_content_description"
                 android:drawablePadding="3dp"
                 android:drawableStart="@drawable/data_reduction_breakdown_sort_arrow"
                 android:gravity="end"
@@ -58,6 +62,7 @@
                 android:text="@string/data_reduction_breakdown_saved_title"
                 android:layout_width="wrap_content"
                 android:layout_marginStart="24dp"
+                android:contentDescription="@string/data_reduction_breakdown_saved_header_content_description"
                 android:drawablePadding="3dp"
                 android:drawableStart="@drawable/data_reduction_breakdown_sort_arrow"
                 android:gravity="end"

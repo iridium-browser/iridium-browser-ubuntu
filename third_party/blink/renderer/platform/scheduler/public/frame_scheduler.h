@@ -9,61 +9,40 @@
 
 #include "base/memory/scoped_refptr.h"
 #include "base/single_thread_task_runner.h"
+#include "services/metrics/public/cpp/ukm_source_id.h"
+#include "third_party/blink/public/mojom/loader/pause_subresource_loading_handle.mojom-blink.h"
+#include "third_party/blink/public/platform/scheduler/web_resource_loading_task_runner_handle.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/public/platform/web_scoped_virtual_time_pauser.h"
-#include "third_party/blink/renderer/platform/scheduler/public/frame_or_worker_global_scope_scheduler.h"
+#include "third_party/blink/renderer/platform/platform_export.h"
+#include "third_party/blink/renderer/platform/scheduler/public/frame_or_worker_scheduler.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
+
+namespace ukm {
+class UkmRecorder;
+}
 
 namespace blink {
 
 class PageScheduler;
 
-class FrameScheduler : public FrameOrWorkerGlobalScopeScheduler {
+class FrameScheduler : public FrameOrWorkerScheduler {
  public:
-  virtual ~FrameScheduler() = default;
+  class PLATFORM_EXPORT Delegate {
+   public:
+    virtual ~Delegate() = default;
 
-  // Observer type that regulates conditions to invoke callbacks.
-  enum class ObserverType { kLoader, kWorkerScheduler };
-
-  // Represents throttling state.
-  enum class ThrottlingState {
-    kThrottled,
-    kNotThrottled,
-    kStopped,
+    virtual ukm::UkmRecorder* GetUkmRecorder() = 0;
+    virtual ukm::SourceId GetUkmSourceId() = 0;
   };
+
+  ~FrameScheduler() override = default;
 
   // Represents the type of frame: main (top-level) vs not.
   enum class FrameType {
     kMainFrame,
     kSubframe,
   };
-
-  // Observer interface to receive scheduling policy change events.
-  class Observer {
-   public:
-    virtual ~Observer() = default;
-
-    // Notified when throttling state is changed.
-    virtual void OnThrottlingStateChanged(ThrottlingState) = 0;
-  };
-
-  class ThrottlingObserverHandle {
-   public:
-    ThrottlingObserverHandle() = default;
-    virtual ~ThrottlingObserverHandle() = default;
-
-   private:
-    DISALLOW_COPY_AND_ASSIGN(ThrottlingObserverHandle);
-  };
-
-  // Adds an Observer instance to be notified on scheduling policy changed.
-  // When an Observer is added, the initial state will be notified synchronously
-  // through the Observer interface.
-  // A RAII handle is returned and observer is unregistered when the handle is
-  // destroyed.
-  virtual std::unique_ptr<ThrottlingObserverHandle> AddThrottlingObserver(
-      ObserverType,
-      Observer*) = 0;
 
   // The scheduler may throttle tasks associated with offscreen frames.
   virtual void SetFrameVisible(bool) = 0;
@@ -72,26 +51,22 @@ class FrameScheduler : public FrameOrWorkerGlobalScopeScheduler {
   // Query the page visibility state for the page associated with this frame.
   // The scheduler may throttle tasks associated with pages that are not
   // visible.
+  // TODO(altimin): Remove this method.
   virtual bool IsPageVisible() const = 0;
 
   // Set whether this frame is suspended. Only unthrottledTaskRunner tasks are
   // allowed to run on a suspended frame.
   virtual void SetPaused(bool) = 0;
 
-  // Notifies observers of transitioning to and from FROZEN state in
-  // background.
-  virtual void SetPageFrozen(bool) {}
-
-  // Tells the scheduler about "keep-alive" state which can be due to:
-  // service workers, shared workers, or fetch keep-alive.
-  // If true, then the scheduler should not freeze relevant task queues.
-  virtual void SetKeepActive(bool) {}
-
   // Set whether this frame is cross origin w.r.t. the top level frame. Cross
   // origin frames may use a different scheduling policy from same origin
   // frames.
   virtual void SetCrossOrigin(bool) = 0;
   virtual bool IsCrossOrigin() const = 0;
+
+  virtual void SetIsAdFrame() = 0;
+  virtual bool IsAdFrame() const = 0;
+
   virtual void TraceUrlChange(const String&) = 0;
 
   // Returns the frame type, which currently determines whether this frame is
@@ -130,6 +105,13 @@ class FrameScheduler : public FrameOrWorkerGlobalScopeScheduler {
   virtual scoped_refptr<base::SingleThreadTaskRunner> GetTaskRunner(
       TaskType) = 0;
 
+  // Returns a WebResourceLoadingTaskRunnerHandle which is intended to be used
+  // by the loading stack to post resource loading tasks to the renderer's main
+  // thread and to notify the main thread of any change in the resource's fetch
+  // (net) priority.
+  virtual std::unique_ptr<scheduler::WebResourceLoadingTaskRunnerHandle>
+  CreateResourceLoadingTaskRunnerHandle() = 0;
+
   // Returns the parent PageScheduler.
   virtual PageScheduler* GetPageScheduler() const = 0;
 
@@ -165,6 +147,16 @@ class FrameScheduler : public FrameOrWorkerGlobalScopeScheduler {
   // use GetPageScheduler()->IsExemptFromBudgetBasedThrottling for the status
   // of the page.
   virtual bool IsExemptFromBudgetBasedThrottling() const = 0;
+
+  // Returns UKM source id for recording metrics associated with this frame.
+  virtual ukm::SourceId GetUkmSourceId() = 0;
+
+  FrameScheduler* ToFrameScheduler() override { return this; }
+
+  // Returns a handle that prevents resource loading as long as the handle
+  // exists.
+  virtual std::unique_ptr<blink::mojom::blink::PauseSubresourceLoadingHandle>
+  GetPauseSubresourceLoadingHandle() = 0;
 };
 
 }  // namespace blink

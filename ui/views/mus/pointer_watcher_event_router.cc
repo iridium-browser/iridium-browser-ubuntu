@@ -5,6 +5,7 @@
 #include "ui/views/mus/pointer_watcher_event_router.h"
 
 #include "ui/aura/client/capture_client.h"
+#include "ui/aura/client/screen_position_client.h"
 #include "ui/aura/mus/window_tree_client.h"
 #include "ui/aura/window.h"
 #include "ui/display/screen.h"
@@ -17,7 +18,7 @@ namespace views {
 namespace {
 
 bool HasPointerWatcher(
-    base::ObserverList<views::PointerWatcher, true>* observer_list) {
+    base::ObserverList<views::PointerWatcher, true>::Unchecked* observer_list) {
   return observer_list->begin() != observer_list->end();
 }
 
@@ -85,6 +86,7 @@ void PointerWatcherEventRouter::RemovePointerWatcher(PointerWatcher* watcher) {
 
 void PointerWatcherEventRouter::OnPointerEventObserved(
     const ui::PointerEvent& event,
+    const gfx::Point& location_in_screen,
     aura::Window* target) {
   Widget* target_widget = nullptr;
   ui::PointerEvent updated_event(event);
@@ -113,10 +115,6 @@ void PointerWatcherEventRouter::OnPointerEventObserved(
     }
   }
 
-  // The mojo input events type converter uses the event root_location field
-  // to store screen coordinates. Screen coordinates really should be returned
-  // separately. See http://crbug.com/608547
-  gfx::Point location_in_screen = event.root_location();
   for (PointerWatcher& observer : move_watchers_) {
     observer.OnPointerEventObserved(
         updated_event, location_in_screen,

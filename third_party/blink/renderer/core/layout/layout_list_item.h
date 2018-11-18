@@ -58,18 +58,20 @@ class LayoutListItem final : public LayoutBlockFlow {
   void InsertedIntoTree() override;
   void WillBeRemovedFromTree() override;
 
-  void Paint(const PaintInfo&, const LayoutPoint&) const override;
+  void Paint(const PaintInfo&) const override;
 
   void SubtreeDidChange() final;
 
   // Returns true if we re-attached and updated the location of the marker.
   bool UpdateMarkerLocation();
 
-  void PositionListMarker();
+  enum OverflowType { Layout, Visual };
+  void UpdateOverflow(OverflowType);
 
   void StyleDidChange(StyleDifference, const ComputedStyle* old_style) override;
 
-  void AddOverflowFromChildren() override;
+  void AddVisualOverflowFromChildren() override;
+  void AddLayoutOverflowFromChildren() override;
 
   void AlignMarkerInBlockDirection();
 

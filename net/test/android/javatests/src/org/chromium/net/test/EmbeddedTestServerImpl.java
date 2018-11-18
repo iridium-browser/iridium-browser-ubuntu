@@ -70,7 +70,7 @@ public class EmbeddedTestServerImpl extends IEmbeddedTestServerImpl.Stub {
         // using it, so it needs to initialize its own application context.
         ContextUtils.initApplicationContext(mContext.getApplicationContext());
         try {
-            LibraryLoader.get(LibraryProcessType.PROCESS_BROWSER).ensureInitialized();
+            LibraryLoader.getInstance().ensureInitialized(LibraryProcessType.PROCESS_BROWSER);
         } catch (ProcessInitException e) {
             Log.e(TAG, "Failed to load native libraries.", e);
             return false;
@@ -98,14 +98,16 @@ public class EmbeddedTestServerImpl extends IEmbeddedTestServerImpl.Stub {
      *  Note that this should be called after handlers are set up, including any relevant calls
      *  serveFilesFromDirectory.
      *
+     *  @param port The port to use for the server, 0 to auto-select an unused port.
+     *
      *  @return Whether the server was successfully started.
      */
     @Override
-    public boolean start() {
+    public boolean start(int port) {
         return runOnHandlerThread(new Callable<Boolean>() {
             @Override
             public Boolean call() {
-                return nativeStart(mNativeEmbeddedTestServer);
+                return nativeStart(mNativeEmbeddedTestServer, port);
             }
         });
     }
@@ -314,7 +316,7 @@ public class EmbeddedTestServerImpl extends IEmbeddedTestServerImpl.Stub {
 
     private native void nativeInit(String testDataDir, boolean https);
     private native void nativeDestroy(long nativeEmbeddedTestServerAndroid);
-    private native boolean nativeStart(long nativeEmbeddedTestServerAndroid);
+    private native boolean nativeStart(long nativeEmbeddedTestServerAndroid, int port);
     private native String nativeGetRootCertPemPath(long nativeEmbeddedTestServerAndroid);
     private native boolean nativeShutdownAndWaitUntilComplete(long nativeEmbeddedTestServerAndroid);
     private native void nativeAddDefaultHandlers(

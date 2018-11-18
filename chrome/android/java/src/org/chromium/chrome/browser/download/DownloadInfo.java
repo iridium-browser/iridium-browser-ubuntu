@@ -7,11 +7,14 @@ package org.chromium.chrome.browser.download;
 import android.graphics.Bitmap;
 
 import org.chromium.base.annotations.CalledByNative;
+import org.chromium.chrome.browser.download.ui.DownloadFilter;
 import org.chromium.components.download.DownloadState;
 import org.chromium.components.offline_items_collection.ContentId;
+import org.chromium.components.offline_items_collection.FailState;
 import org.chromium.components.offline_items_collection.LegacyHelpers;
 import org.chromium.components.offline_items_collection.OfflineItem;
 import org.chromium.components.offline_items_collection.OfflineItem.Progress;
+import org.chromium.components.offline_items_collection.OfflineItemFilter;
 import org.chromium.components.offline_items_collection.OfflineItemProgressUnit;
 import org.chromium.components.offline_items_collection.OfflineItemState;
 import org.chromium.components.offline_items_collection.OfflineItemVisuals;
@@ -31,6 +34,7 @@ public final class DownloadInfo {
     private final String mReferrer;
     private final String mOriginalUrl;
     private final long mBytesReceived;
+    private final long mBytesTotalSize;
     private final String mDownloadGuid;
     private final boolean mHasUserGesture;
     private final String mContentDisposition;
@@ -43,14 +47,19 @@ public final class DownloadInfo {
     private final boolean mIsOfflinePage;
     private final int mState;
     private final long mLastAccessTime;
+    private final boolean mIsDangerous;
 
     // New variables to assist with the migration to OfflineItems.
     private final ContentId mContentId;
     private final boolean mIsOpenable;
     private final boolean mIsTransient;
+    private final boolean mIsParallelDownload;
     private final Bitmap mIcon;
     @PendingState
     private final int mPendingState;
+    @FailState
+    private final int mFailState;
+    private final boolean mShouldPromoteOrigin;
 
     private DownloadInfo(Builder builder) {
         mUrl = builder.mUrl;
@@ -63,6 +72,7 @@ public final class DownloadInfo {
         mReferrer = builder.mReferrer;
         mOriginalUrl = builder.mOriginalUrl;
         mBytesReceived = builder.mBytesReceived;
+        mBytesTotalSize = builder.mBytesTotalSize;
         mDownloadGuid = builder.mDownloadGuid;
         mHasUserGesture = builder.mHasUserGesture;
         mIsGETRequest = builder.mIsGETRequest;
@@ -75,6 +85,7 @@ public final class DownloadInfo {
         mIsOfflinePage = builder.mIsOfflinePage;
         mState = builder.mState;
         mLastAccessTime = builder.mLastAccessTime;
+        mIsDangerous = builder.mIsDangerous;
 
         if (builder.mContentId != null) {
             mContentId = builder.mContentId;
@@ -83,8 +94,11 @@ public final class DownloadInfo {
         }
         mIsOpenable = builder.mIsOpenable;
         mIsTransient = builder.mIsTransient;
+        mIsParallelDownload = builder.mIsParallelDownload;
         mIcon = builder.mIcon;
         mPendingState = builder.mPendingState;
+        mFailState = builder.mFailState;
+        mShouldPromoteOrigin = builder.mShouldPromoteOrigin;
     }
 
     public String getUrl() {
@@ -125,6 +139,10 @@ public final class DownloadInfo {
 
     public long getBytesReceived() {
         return mBytesReceived;
+    }
+
+    public long getBytesTotalSize() {
+        return mBytesTotalSize;
     }
 
     public boolean isGETRequest() {
@@ -178,6 +196,10 @@ public final class DownloadInfo {
         return mLastAccessTime;
     }
 
+    public boolean getIsDangerous() {
+        return mIsDangerous;
+    }
+
     public ContentId getContentId() {
         return mContentId;
     }
@@ -190,6 +212,10 @@ public final class DownloadInfo {
         return mIsTransient;
     }
 
+    public boolean getIsParallelDownload() {
+        return mIsParallelDownload;
+    }
+
     public Bitmap getIcon() {
         return mIcon;
     }
@@ -198,12 +224,33 @@ public final class DownloadInfo {
         return mPendingState;
     }
 
+    public @FailState int getFailState() {
+        return mFailState;
+    }
+
+    public boolean getShouldPromoteOrigin() {
+        return mShouldPromoteOrigin;
+    }
+
     /**
      * Helper method to build a {@link DownloadInfo} from an {@link OfflineItem}.
-     * @param item The {@link OfflineItem} to mimic.
-     * @return     A {@link DownloadInfo} containing the relevant fields from {@code item}.
+     * @param item    The {@link OfflineItem} to mimic.
+     * @param visuals The {@link OfflineItemVisuals} to mimic.
+     * @return        A {@link DownloadInfo} containing the relevant fields from {@code item}.
      */
     public static DownloadInfo fromOfflineItem(OfflineItem item, OfflineItemVisuals visuals) {
+        return builderFromOfflineItem(item, visuals).build();
+    }
+
+    /**
+     * Helper method to build a {@link DownloadInfo.Builder} from an {@link OfflineItem}.
+     * @param item    The {@link OfflineItem} to mimic.
+     * @param visuals The {@link OfflineItemVisuals} to mimic.
+     * @return        A {@link DownloadInfo.Builder} containing the relevant fields from
+     *                {@code item}.
+     */
+    public static DownloadInfo.Builder builderFromOfflineItem(
+            OfflineItem item, OfflineItemVisuals visuals) {
         int state;
         switch (item.state) {
             case OfflineItemState.COMPLETE:
@@ -228,11 +275,14 @@ public final class DownloadInfo {
 
         return new DownloadInfo.Builder()
                 .setContentId(item.id)
+                .setDownloadGuid(item.id.id)
                 .setFileName(item.title)
+                .setFilePath(item.filePath)
                 .setDescription(item.description)
                 .setIsTransient(item.isTransient)
                 .setLastAccessTime(item.lastAccessedTimeMs)
                 .setIsOpenable(item.isOpenable)
+                .setMimeType(item.mimeType)
                 .setUrl(item.pageUrl)
                 .setOriginalUrl(item.originalUrl)
                 .setIsOffTheRecord(item.isOffTheRecord)
@@ -240,11 +290,97 @@ public final class DownloadInfo {
                 .setIsPaused(item.state == OfflineItemState.PAUSED)
                 .setIsResumable(item.isResumable)
                 .setBytesReceived(item.receivedBytes)
+                .setBytesTotalSize(item.totalSizeBytes)
                 .setProgress(item.progress)
                 .setTimeRemainingInMillis(item.timeRemainingMs)
+                .setIsDangerous(item.isDangerous)
+                .setIsParallelDownload(item.isAccelerated)
                 .setIcon(visuals == null ? null : visuals.icon)
                 .setPendingState(item.pendingState)
-                .build();
+                .setFailState(item.failState)
+                .setShouldPromoteOrigin(item.promoteOrigin);
+    }
+
+    /**
+     * Helper method to build an {@link OfflineItem} from a {@link DownloadInfo}.
+     * @param item The {@link DownloadInfo} to mimic.
+     * @return     A {@link OfflineItem} containing the relevant fields from {@code item}.
+     */
+    public static OfflineItem createOfflineItem(DownloadInfo downloadInfo) {
+        OfflineItem offlineItem = new OfflineItem();
+        offlineItem.id = downloadInfo.getContentId();
+        offlineItem.filePath = downloadInfo.getFilePath();
+        offlineItem.title = downloadInfo.getFileName();
+        offlineItem.description = downloadInfo.getDescription();
+        offlineItem.isTransient = downloadInfo.getIsTransient();
+        offlineItem.isAccelerated = downloadInfo.getIsParallelDownload();
+        offlineItem.isSuggested = false;
+        offlineItem.totalSizeBytes = downloadInfo.getBytesTotalSize();
+        offlineItem.receivedBytes = downloadInfo.getBytesReceived();
+        offlineItem.isResumable = downloadInfo.isResumable();
+        offlineItem.pageUrl = downloadInfo.getUrl();
+        offlineItem.originalUrl = downloadInfo.getOriginalUrl();
+        offlineItem.isOffTheRecord = downloadInfo.isOffTheRecord();
+        offlineItem.mimeType = downloadInfo.getMimeType();
+        offlineItem.progress = downloadInfo.getProgress();
+        offlineItem.timeRemainingMs = downloadInfo.getTimeRemainingInMillis();
+        offlineItem.isDangerous = downloadInfo.getIsDangerous();
+        offlineItem.pendingState = downloadInfo.getPendingState();
+        offlineItem.failState = downloadInfo.getFailState();
+        offlineItem.promoteOrigin = downloadInfo.getShouldPromoteOrigin();
+
+        switch (downloadInfo.state()) {
+            case DownloadState.IN_PROGRESS:
+                offlineItem.state = downloadInfo.isPaused() ? OfflineItemState.PAUSED
+                                                            : OfflineItemState.IN_PROGRESS;
+                break;
+            case DownloadState.COMPLETE:
+                offlineItem.state = downloadInfo.getBytesReceived() == 0
+                        ? OfflineItemState.FAILED
+                        : OfflineItemState.COMPLETE;
+                break;
+            case DownloadState.CANCELLED:
+                offlineItem.state = OfflineItemState.CANCELLED;
+                break;
+            case DownloadState.INTERRUPTED:
+                DownloadItem downloadItem = new DownloadItem(false, downloadInfo);
+                if (DownloadUtils.isDownloadPaused(downloadItem)) {
+                    offlineItem.state = OfflineItemState.PAUSED;
+                } else if (DownloadUtils.isDownloadPending(downloadItem)) {
+                    offlineItem.state = OfflineItemState.PENDING;
+                } else if (downloadInfo.isResumable()) {
+                    offlineItem.state = OfflineItemState.INTERRUPTED;
+                } else {
+                    offlineItem.state = OfflineItemState.FAILED;
+                }
+                break;
+            default:
+                assert false;
+        }
+
+        switch (DownloadFilter.fromMimeType(downloadInfo.getMimeType())) {
+            case DownloadFilter.Type.PAGE:
+                offlineItem.filter = OfflineItemFilter.FILTER_PAGE;
+                break;
+            case DownloadFilter.Type.VIDEO:
+                offlineItem.filter = OfflineItemFilter.FILTER_VIDEO;
+                break;
+            case DownloadFilter.Type.AUDIO:
+                offlineItem.filter = OfflineItemFilter.FILTER_AUDIO;
+                break;
+            case DownloadFilter.Type.IMAGE:
+                offlineItem.filter = OfflineItemFilter.FILTER_IMAGE;
+                break;
+            case DownloadFilter.Type.DOCUMENT:
+                offlineItem.filter = OfflineItemFilter.FILTER_DOCUMENT;
+                break;
+            case DownloadFilter.Type.OTHER:
+            default:
+                offlineItem.filter = OfflineItemFilter.FILTER_OTHER;
+                break;
+        }
+
+        return offlineItem;
     }
 
     /**
@@ -261,6 +397,7 @@ public final class DownloadInfo {
         private String mReferrer;
         private String mOriginalUrl;
         private long mBytesReceived;
+        private long mBytesTotalSize;
         private boolean mIsGETRequest;
         private String mDownloadGuid;
         private boolean mHasUserGesture;
@@ -273,12 +410,17 @@ public final class DownloadInfo {
         private boolean mIsOfflinePage;
         private int mState = DownloadState.IN_PROGRESS;
         private long mLastAccessTime;
+        private boolean mIsDangerous;
         private ContentId mContentId;
         private boolean mIsOpenable = true;
         private boolean mIsTransient;
+        private boolean mIsParallelDownload;
         private Bitmap mIcon;
         @PendingState
         private int mPendingState;
+        @FailState
+        private int mFailState;
+        private boolean mShouldPromoteOrigin;
 
         public Builder setUrl(String url) {
             mUrl = url;
@@ -327,6 +469,11 @@ public final class DownloadInfo {
 
         public Builder setBytesReceived(long bytesReceived) {
             mBytesReceived = bytesReceived;
+            return this;
+        }
+
+        public Builder setBytesTotalSize(long bytesTotalSize) {
+            mBytesTotalSize = bytesTotalSize;
             return this;
         }
 
@@ -390,6 +537,11 @@ public final class DownloadInfo {
             return this;
         }
 
+        public Builder setIsDangerous(boolean isDangerous) {
+            mIsDangerous = isDangerous;
+            return this;
+        }
+
         public Builder setContentId(ContentId contentId) {
             mContentId = contentId;
             return this;
@@ -405,6 +557,11 @@ public final class DownloadInfo {
             return this;
         }
 
+        public Builder setIsParallelDownload(boolean isParallelDownload) {
+            mIsParallelDownload = isParallelDownload;
+            return this;
+        }
+
         public Builder setIcon(Bitmap icon) {
             mIcon = icon;
             return this;
@@ -412,6 +569,16 @@ public final class DownloadInfo {
 
         public Builder setPendingState(@PendingState int pendingState) {
             mPendingState = pendingState;
+            return this;
+        }
+
+        public Builder setFailState(@FailState int failState) {
+            mFailState = failState;
+            return this;
+        }
+
+        public Builder setShouldPromoteOrigin(boolean shouldPromoteOrigin) {
+            mShouldPromoteOrigin = shouldPromoteOrigin;
             return this;
         }
 
@@ -436,44 +603,46 @@ public final class DownloadInfo {
                     .setReferrer(downloadInfo.getReferrer())
                     .setOriginalUrl(downloadInfo.getOriginalUrl())
                     .setBytesReceived(downloadInfo.getBytesReceived())
+                    .setBytesTotalSize(downloadInfo.getBytesTotalSize())
                     .setDownloadGuid(downloadInfo.getDownloadGuid())
                     .setHasUserGesture(downloadInfo.hasUserGesture())
                     .setContentDisposition(downloadInfo.getContentDisposition())
                     .setIsGETRequest(downloadInfo.isGETRequest())
                     .setProgress(downloadInfo.getProgress())
                     .setTimeRemainingInMillis(downloadInfo.getTimeRemainingInMillis())
+                    .setIsDangerous(downloadInfo.getIsDangerous())
                     .setIsResumable(downloadInfo.isResumable())
                     .setIsPaused(downloadInfo.isPaused())
                     .setIsOffTheRecord(downloadInfo.isOffTheRecord())
                     .setIsOfflinePage(downloadInfo.isOfflinePage())
                     .setState(downloadInfo.state())
                     .setLastAccessTime(downloadInfo.getLastAccessTime())
+                    .setIsTransient(downloadInfo.getIsTransient())
+                    .setIsParallelDownload(downloadInfo.getIsParallelDownload())
                     .setIcon(downloadInfo.getIcon())
-                    .setPendingState(downloadInfo.getPendingState());
+                    .setPendingState(downloadInfo.getPendingState())
+                    .setFailState(downloadInfo.getFailState())
+                    .setShouldPromoteOrigin(downloadInfo.getShouldPromoteOrigin());
             return builder;
         }
     }
 
     @CalledByNative
     private static DownloadInfo createDownloadInfo(String downloadGuid, String fileName,
-            String filePath, String url, String mimeType, long bytesReceived, boolean isIncognito,
-            int state, int percentCompleted, boolean isPaused, boolean hasUserGesture,
-            boolean isResumable, String originalUrl, String referrerUrl, long timeRemainingInMs,
-            long lastAccessTime) {
+            String filePath, String url, String mimeType, long bytesReceived, long bytesTotalSize,
+            boolean isIncognito, int state, int percentCompleted, boolean isPaused,
+            boolean hasUserGesture, boolean isResumable, boolean isParallelDownload,
+            String originalUrl, String referrerUrl, long timeRemainingInMs, long lastAccessTime,
+            boolean isDangerous, @FailState int failState) {
         String remappedMimeType = ChromeDownloadDelegate.remapGenericMimeType(
                 mimeType, url, fileName);
 
-        Progress progress = null;
-        if (percentCompleted == -1) {
-            // Indeterminate.  Use byte counter.
-            progress = new Progress(bytesReceived, null, OfflineItemProgressUnit.BYTES);
-        } else {
-            // Determinate.  Use percent.
-            progress = new Progress(percentCompleted, 100L, OfflineItemProgressUnit.PERCENTAGE);
-        }
+        Progress progress = new Progress(bytesReceived,
+                percentCompleted == -1 ? null : bytesTotalSize, OfflineItemProgressUnit.BYTES);
 
         return new DownloadInfo.Builder()
                 .setBytesReceived(bytesReceived)
+                .setBytesTotalSize(bytesTotalSize)
                 .setDescription(fileName)
                 .setDownloadGuid(downloadGuid)
                 .setFileName(fileName)
@@ -482,6 +651,7 @@ public final class DownloadInfo {
                 .setIsOffTheRecord(isIncognito)
                 .setIsPaused(isPaused)
                 .setIsResumable(isResumable)
+                .setIsParallelDownload(isParallelDownload)
                 .setMimeType(remappedMimeType)
                 .setOriginalUrl(originalUrl)
                 .setProgress(progress)
@@ -489,7 +659,9 @@ public final class DownloadInfo {
                 .setState(state)
                 .setTimeRemainingInMillis(timeRemainingInMs)
                 .setLastAccessTime(lastAccessTime)
+                .setIsDangerous(isDangerous)
                 .setUrl(url)
+                .setFailState(failState)
                 .build();
     }
 }

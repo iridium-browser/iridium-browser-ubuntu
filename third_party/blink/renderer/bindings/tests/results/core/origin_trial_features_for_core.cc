@@ -11,14 +11,15 @@
 
 #include "third_party/blink/renderer/bindings/core/v8/origin_trial_features_for_core.h"
 
-#include "bindings/core/v8/v8_test_object.h"
-#include "bindings/core/v8/v8_window.h"
-#include "core/context_features/context_feature_settings.h"
-#include "core/execution_context/execution_context.h"
-#include "core/frame/frame.h"
-#include "core/origin_trials/origin_trials.h"
-#include "platform/bindings/origin_trial_features.h"
-#include "platform/bindings/script_state.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_test_object.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_window.h"
+#include "third_party/blink/renderer/core/context_features/context_feature_settings.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
+#include "third_party/blink/renderer/core/frame/frame.h"
+#include "third_party/blink/renderer/core/origin_trials/origin_trials.h"
+#include "third_party/blink/renderer/platform/bindings/origin_trial_features.h"
+#include "third_party/blink/renderer/platform/bindings/script_state.h"
+#include "third_party/blink/renderer/platform/bindings/v8_per_context_data.h"
 
 namespace blink {
 
@@ -57,7 +58,7 @@ void InstallOriginTrialFeaturesForCore(
   // TODO(iclelland): Extract this common code out of OriginTrialFeaturesForCore
   // and OriginTrialFeaturesForModules into a block.
   if (wrapper_type_info == &V8TestObject::wrapperTypeInfo) {
-    if (OriginTrials::featureNameEnabled(execution_context)) {
+    if (OriginTrials::FeatureNameEnabled(execution_context)) {
       V8TestObject::installFeatureName(
           isolate, world, v8::Local<v8::Object>(), prototype_object, interface_object);
     }

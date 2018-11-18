@@ -39,6 +39,7 @@
 #include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/core/workers/worker_global_scope.h"
 #include "third_party/blink/renderer/core/workers/worker_thread.h"
+#include "third_party/blink/renderer/platform/loader/fetch/fetch_client_settings_object_snapshot.h"
 #include "third_party/blink/renderer/platform/loader/fetch/memory_cache.h"
 #include "third_party/blink/renderer/platform/weborigin/security_policy.h"
 
@@ -116,9 +117,7 @@ bool ExecutionContext::ShouldSanitizeScriptError(
   if (cors_status == kOpaqueResource)
     return true;
   const KURL& url = CompleteURL(source_url);
-  if (url.ProtocolIsData())
-    return false;
-  return !(GetSecurityOrigin()->CanRequest(url) ||
+  return !(GetSecurityOrigin()->CanReadContent(url) ||
            cors_status == kSharableCrossOrigin);
 }
 
@@ -152,7 +151,7 @@ bool ExecutionContext::DispatchErrorEventInternal(
 
   DCHECK(!in_dispatch_error_event_);
   in_dispatch_error_event_ = true;
-  target->DispatchEvent(error_event);
+  target->DispatchEvent(*error_event);
   in_dispatch_error_event_ = false;
   return error_event->defaultPrevented();
 }
@@ -202,8 +201,19 @@ bool ExecutionContext::IsSecureContext() const {
   return IsSecureContext(unused_error_message);
 }
 
+// https://w3c.github.io/webappsec-referrer-policy/#determine-requests-referrer
 String ExecutionContext::OutgoingReferrer() const {
+  // Step 3.1: "If environment's global object is a Window object, then"
+  // This case is implemented in Document::OutgoingReferrer().
+
+  // Step 3.2: "Otherwise, let referrerSource be environment's creation URL."
   return Url().StrippedForUseAsReferrer();
+}
+
+FetchClientSettingsObjectSnapshot*
+ExecutionContext::CreateFetchClientSettingsObjectSnapshot() {
+  return new FetchClientSettingsObjectSnapshot(
+      BaseURL(), GetSecurityOrigin(), GetReferrerPolicy(), OutgoingReferrer());
 }
 
 void ExecutionContext::ParseAndSetReferrerPolicy(const String& policies,
@@ -252,6 +262,16 @@ void ExecutionContext::Trace(blink::Visitor* visitor) {
   visitor->Trace(pending_exceptions_);
   ContextLifecycleNotifier::Trace(visitor);
   Supplementable<ExecutionContext>::Trace(visitor);
+}
+
+bool ExecutionContext::IsSameAgentCluster(
+    const base::UnguessableToken& other_id) const {
+  base::UnguessableToken this_id = GetAgentClusterID();
+  // If the AgentClusterID is empty then it should never be the same (e.g.
+  // currently for worklets).
+  if (this_id.is_empty() || other_id.is_empty())
+    return false;
+  return this_id == other_id;
 }
 
 }  // namespace blink

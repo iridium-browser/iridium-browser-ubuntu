@@ -26,13 +26,38 @@
 
 #include "third_party/blink/renderer/core/layout/layout_object_child_list.h"
 
-#include "third_party/blink/renderer/core/dom/ax_object_cache.h"
+#include "third_party/blink/renderer/core/accessibility/ax_object_cache.h"
 #include "third_party/blink/renderer/core/layout/layout_counter.h"
+#include "third_party/blink/renderer/core/layout/layout_inline.h"
 #include "third_party/blink/renderer/core/layout/layout_object.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
+#include "third_party/blink/renderer/core/layout/ng/inline/layout_ng_text.h"
 #include "third_party/blink/renderer/core/paint/object_paint_invalidator.h"
 
 namespace blink {
+
+namespace {
+
+// Invalidate InineItems() in LayoutNGText.
+//
+// They need to be invalidated when moving across inline formatting context
+// (i.e., to a different LayoutBlockFlow.)
+void InvalidateInlineItems(LayoutObject* object) {
+  if (object->IsInLayoutNGInlineFormattingContext())
+    object->SetFirstInlineFragment(nullptr);
+  if (object->IsLayoutNGText()) {
+    ToLayoutNGText(object)->InvalidateInlineItems();
+  } else if (object->IsLayoutInline()) {
+    // When moving without |notify_layout_object|, only top-level objects are
+    // moved. Ensure to invalidate all LayoutNGText in this inline formatting
+    // context.
+    for (LayoutObject* curr = object->SlowFirstChild(); curr;
+         curr = curr->NextSibling())
+      InvalidateInlineItems(curr);
+  }
+}
+
+}  // namespace
 
 void LayoutObjectChildList::DestroyLeftoverChildren() {
   while (FirstChild()) {
@@ -78,13 +103,6 @@ LayoutObject* LayoutObjectChildList::RemoveChildNode(
     ToLayoutBox(old_child)->DeleteLineBoxWrapper();
 
   if (!owner->DocumentBeingDestroyed()) {
-    // If oldChild is the start or end of the selection, then clear the
-    // selection to avoid problems of invalid pointers.
-    // FIXME: The FrameSelection should be responsible for this when it
-    // is notified of DOM mutations.
-    if (old_child->IsSelectionBorder() && owner->View())
-      owner->View()->ClearSelection();
-
     owner->NotifyOfSubtreeChange();
 
     if (notify_layout_object) {
@@ -167,9 +185,16 @@ void LayoutObjectChildList::InsertChildNode(LayoutObject* owner,
     last_child_ = new_child;
   }
 
-  if (!owner->DocumentBeingDestroyed() && notify_layout_object) {
-    new_child->InsertedIntoTree();
-    LayoutCounter::LayoutObjectSubtreeAttached(new_child);
+  if (!owner->DocumentBeingDestroyed()) {
+    if (notify_layout_object) {
+      new_child->InsertedIntoTree();
+      LayoutCounter::LayoutObjectSubtreeAttached(new_child);
+    } else if (RuntimeEnabledFeatures::LayoutNGEnabled()) {
+      // |notify_layout_object| is an optimization to skip notifications when
+      // moving within the same tree. Inline items need to be invalidated even
+      // when moving.
+      InvalidateInlineItems(new_child);
+    }
   }
 
   // Propagate the need to notify ancestors down into any
@@ -190,7 +215,8 @@ void LayoutObjectChildList::InsertChildNode(LayoutObject* owner,
       LayoutInvalidationReason::kAddedToLayout);
   new_child->SetShouldDoFullPaintInvalidation(
       PaintInvalidationReason::kAppeared);
-  new_child->SetSubtreeNeedsPaintPropertyUpdate();
+  new_child->AddSubtreePaintPropertyUpdateReason(
+      SubtreePaintPropertyUpdateReason::kContainerChainMayChange);
   if (!owner->NormalChildNeedsLayout()) {
     owner->SetChildNeedsLayout();  // We may supply the static position for an
                                    // absolute positioned child.
@@ -201,7 +227,7 @@ void LayoutObjectChildList::InsertChildNode(LayoutObject* owner,
   if (!owner->DocumentBeingDestroyed())
     owner->NotifyOfSubtreeChange();
 
-  if (AXObjectCache* cache = owner->GetDocument().GetOrCreateAXObjectCache())
+  if (AXObjectCache* cache = owner->GetDocument().ExistingAXObjectCache())
     cache->ChildrenChanged(owner);
 }
 
@@ -212,14 +238,6 @@ void LayoutObjectChildList::InvalidatePaintOnRemoval(LayoutObject& old_child) {
     old_child.View()->SetShouldDoFullPaintInvalidation();
   ObjectPaintInvalidator paint_invalidator(old_child);
   paint_invalidator.SlowSetPaintingLayerNeedsRepaint();
-
-  // For SPv175 raster invalidation will be done in PaintController.
-  if (RuntimeEnabledFeatures::SlimmingPaintV175Enabled())
-    return;
-
-  paint_invalidator.InvalidatePaintOfPreviousVisualRect(
-      old_child.ContainerForPaintInvalidation(),
-      PaintInvalidationReason::kDisappeared);
 }
 
 }  // namespace blink

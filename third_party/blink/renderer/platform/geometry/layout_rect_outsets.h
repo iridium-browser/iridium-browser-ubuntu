@@ -33,9 +33,9 @@
 
 #include "third_party/blink/renderer/platform/geometry/float_rect_outsets.h"
 #include "third_party/blink/renderer/platform/geometry/int_rect_outsets.h"
+#include "third_party/blink/renderer/platform/geometry/layout_size.h"
 #include "third_party/blink/renderer/platform/layout_unit.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
-#include "third_party/blink/renderer/platform/text/writing_mode.h"
 #include "third_party/blink/renderer/platform/wtf/allocator.h"
 
 namespace blink {
@@ -49,11 +49,11 @@ class PLATFORM_EXPORT LayoutRectOutsets {
   DISALLOW_NEW();
 
  public:
-  LayoutRectOutsets() = default;
-  LayoutRectOutsets(LayoutUnit top,
-                    LayoutUnit right,
-                    LayoutUnit bottom,
-                    LayoutUnit left)
+  constexpr LayoutRectOutsets() = default;
+  constexpr LayoutRectOutsets(LayoutUnit top,
+                              LayoutUnit right,
+                              LayoutUnit bottom,
+                              LayoutUnit left)
       : top_(top), right_(right), bottom_(bottom), left_(left) {}
   LayoutRectOutsets(int top, int right, int bottom, int left)
       : top_(LayoutUnit(top)),
@@ -73,17 +73,20 @@ class PLATFORM_EXPORT LayoutRectOutsets {
         bottom_(LayoutUnit(outsets.Bottom())),
         left_(LayoutUnit(outsets.Left())) {}
 
-  LayoutUnit Top() const { return top_; }
-  LayoutUnit Right() const { return right_; }
-  LayoutUnit Bottom() const { return bottom_; }
-  LayoutUnit Left() const { return left_; }
+  constexpr LayoutUnit Top() const { return top_; }
+  constexpr LayoutUnit Right() const { return right_; }
+  constexpr LayoutUnit Bottom() const { return bottom_; }
+  constexpr LayoutUnit Left() const { return left_; }
 
   void SetTop(LayoutUnit value) { top_ = value; }
   void SetRight(LayoutUnit value) { right_ = value; }
   void SetBottom(LayoutUnit value) { bottom_ = value; }
   void SetLeft(LayoutUnit value) { left_ = value; }
 
-  bool IsZero() const { return !top_ && !right_ && !bottom_ && !left_; }
+  LayoutSize Size() const { return LayoutSize(left_ + right_, top_ + bottom_); }
+  constexpr bool IsZero() const {
+    return !top_ && !right_ && !bottom_ && !left_;
+  }
 
   void ClampNegativeToZero();
 
@@ -91,21 +94,12 @@ class PLATFORM_EXPORT LayoutRectOutsets {
 
   void FlipHorizontally() { std::swap(left_, right_); }
 
-  // Produces a new LayoutRectOutsets in line orientation
-  // (https://www.w3.org/TR/css-writing-modes-3/#line-orientation), whose
-  // - |top| is the logical 'over',
-  // - |right| is the logical 'line right',
-  // - |bottom| is the logical 'under',
-  // - |left| is the logical 'line left'.
-  LayoutRectOutsets LineOrientationOutsets(WritingMode) const;
-
-  // The same as |logicalOutsets|, but also adjusting for flipped lines.
-  LayoutRectOutsets LineOrientationOutsetsWithFlippedLines(WritingMode) const;
-
-  bool operator==(const LayoutRectOutsets other) const {
+  constexpr bool operator==(const LayoutRectOutsets other) const {
     return Top() == other.Top() && Right() == other.Right() &&
            Bottom() == other.Bottom() && Left() == other.Left();
   }
+
+  String ToString() const;
 
  private:
   LayoutUnit top_;
@@ -154,6 +148,9 @@ inline LayoutRectOutsets EnclosingLayoutRectOutsets(
                            LayoutUnit::FromFloatCeil(rect.Bottom()),
                            LayoutUnit::FromFloatCeil(rect.Left()));
 }
+
+PLATFORM_EXPORT std::ostream& operator<<(std::ostream&,
+                                         const LayoutRectOutsets&);
 
 }  // namespace blink
 

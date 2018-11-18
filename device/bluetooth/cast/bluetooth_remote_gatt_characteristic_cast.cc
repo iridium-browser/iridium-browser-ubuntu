@@ -4,6 +4,8 @@
 
 #include "device/bluetooth/cast/bluetooth_remote_gatt_characteristic_cast.h"
 
+#include <memory>
+
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/callback_forward.h"
@@ -94,7 +96,7 @@ BluetoothRemoteGattCharacteristicCast::BluetoothRemoteGattCharacteristicCast(
   auto descriptors = remote_characteristic_->GetDescriptors();
   descriptors_.reserve(descriptors.size());
   for (const auto& descriptor : descriptors) {
-    descriptors_.push_back(
+    AddDescriptor(
         std::make_unique<BluetoothRemoteGattDescriptorCast>(this, descriptor));
   }
 }
@@ -130,27 +132,6 @@ BluetoothRemoteGattService* BluetoothRemoteGattCharacteristicCast::GetService()
   return service_;
 }
 
-std::vector<BluetoothRemoteGattDescriptor*>
-BluetoothRemoteGattCharacteristicCast::GetDescriptors() const {
-  std::vector<BluetoothRemoteGattDescriptor*> descriptors;
-  descriptors.reserve(descriptors_.size());
-  for (auto& descriptor : descriptors_) {
-    descriptors.push_back(descriptor.get());
-  }
-  return descriptors;
-}
-
-BluetoothRemoteGattDescriptor*
-BluetoothRemoteGattCharacteristicCast::GetDescriptor(
-    const std::string& identifier) const {
-  for (auto& descriptor : descriptors_) {
-    if (descriptor->GetIdentifier() == identifier) {
-      return descriptor.get();
-    }
-  }
-  return nullptr;
-}
-
 void BluetoothRemoteGattCharacteristicCast::ReadRemoteCharacteristic(
     const ValueCallback& callback,
     const ErrorCallback& error_callback) {
@@ -164,7 +145,6 @@ void BluetoothRemoteGattCharacteristicCast::WriteRemoteCharacteristic(
     const base::Closure& callback,
     const ErrorCallback& error_callback) {
   remote_characteristic_->Write(
-      chromecast::bluetooth_v2_shlib::Gatt::WriteType::WRITE_TYPE_DEFAULT,
       value,
       base::BindOnce(
           &BluetoothRemoteGattCharacteristicCast::OnWriteRemoteCharacteristic,

@@ -12,11 +12,13 @@
 #include "base/sequenced_task_runner.h"
 #include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/post_task.h"
 #include "content/browser/indexed_db/indexed_db_callbacks.h"
 #include "content/browser/indexed_db/indexed_db_connection.h"
 #include "content/browser/indexed_db/indexed_db_context_impl.h"
 #include "content/browser/indexed_db/indexed_db_database_callbacks.h"
 #include "content/browser/indexed_db/indexed_db_pending_connection.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "storage/browser/blob/blob_storage_context.h"
 #include "storage/browser/database/database_util.h"
@@ -29,22 +31,22 @@ namespace {
 const char kInvalidOrigin[] = "Origin is invalid";
 
 bool IsValidOrigin(const url::Origin& origin) {
-  return !origin.unique();
+  return !origin.opaque();
 }
 
-::indexed_db::mojom::Status GetIndexedDBStatus(leveldb::Status status) {
+blink::mojom::IDBStatus GetIndexedDBStatus(leveldb::Status status) {
   if (status.ok())
-    return ::indexed_db::mojom::Status::OK;
+    return blink::mojom::IDBStatus::OK;
   else if (status.IsNotFound())
-    return ::indexed_db::mojom::Status::NotFound;
+    return blink::mojom::IDBStatus::NotFound;
   else if (status.IsCorruption())
-    return ::indexed_db::mojom::Status::Corruption;
+    return blink::mojom::IDBStatus::Corruption;
   else if (status.IsNotSupportedError())
-    return ::indexed_db::mojom::Status::NotSupported;
+    return blink::mojom::IDBStatus::NotSupported;
   else if (status.IsInvalidArgument())
-    return ::indexed_db::mojom::Status::InvalidArgument;
+    return blink::mojom::IDBStatus::InvalidArgument;
   else
-    return ::indexed_db::mojom::Status::IOError;
+    return blink::mojom::IDBStatus::IOError;
 }
 
 void DoCallCompactionStatusCallback(
@@ -87,10 +89,8 @@ class IndexedDBDispatcherHost::IDBSequenceHelper {
  public:
   IDBSequenceHelper(
       int ipc_process_id,
-      scoped_refptr<net::URLRequestContextGetter> request_context_getter,
       scoped_refptr<IndexedDBContextImpl> indexed_db_context)
       : ipc_process_id_(ipc_process_id),
-        request_context_getter_(std::move(request_context_getter)),
         indexed_db_context_(std::move(indexed_db_context)) {}
   ~IDBSequenceHelper() {}
 
@@ -116,7 +116,6 @@ class IndexedDBDispatcherHost::IDBSequenceHelper {
 
  private:
   const int ipc_process_id_;
-  scoped_refptr<net::URLRequestContextGetter> request_context_getter_;
   scoped_refptr<IndexedDBContextImpl> indexed_db_context_;
 
   DISALLOW_COPY_AND_ASSIGN(IDBSequenceHelper);
@@ -124,14 +123,12 @@ class IndexedDBDispatcherHost::IDBSequenceHelper {
 
 IndexedDBDispatcherHost::IndexedDBDispatcherHost(
     int ipc_process_id,
-    scoped_refptr<net::URLRequestContextGetter> request_context_getter,
     scoped_refptr<IndexedDBContextImpl> indexed_db_context,
     scoped_refptr<ChromeBlobStorageContext> blob_storage_context)
     : indexed_db_context_(std::move(indexed_db_context)),
       blob_storage_context_(std::move(blob_storage_context)),
       ipc_process_id_(ipc_process_id),
       idb_helper_(new IDBSequenceHelper(ipc_process_id_,
-                                        std::move(request_context_getter),
                                         indexed_db_context_)),
       weak_factory_(this) {
   DCHECK(indexed_db_context_.get());
@@ -142,35 +139,34 @@ IndexedDBDispatcherHost::~IndexedDBDispatcherHost() {
 }
 
 void IndexedDBDispatcherHost::AddBinding(
-    ::indexed_db::mojom::FactoryAssociatedRequest request) {
+    blink::mojom::IDBFactoryRequest request) {
   bindings_.AddBinding(this, std::move(request));
 }
 
 void IndexedDBDispatcherHost::AddDatabaseBinding(
-    std::unique_ptr<::indexed_db::mojom::Database> database,
-    ::indexed_db::mojom::DatabaseAssociatedRequest request) {
+    std::unique_ptr<blink::mojom::IDBDatabase> database,
+    blink::mojom::IDBDatabaseAssociatedRequest request) {
   database_bindings_.AddBinding(std::move(database), std::move(request));
 }
 
 void IndexedDBDispatcherHost::AddCursorBinding(
-    std::unique_ptr<::indexed_db::mojom::Cursor> cursor,
-    ::indexed_db::mojom::CursorAssociatedRequest request) {
+    std::unique_ptr<blink::mojom::IDBCursor> cursor,
+    blink::mojom::IDBCursorAssociatedRequest request) {
   cursor_bindings_.AddBinding(std::move(cursor), std::move(request));
 }
 
 void IndexedDBDispatcherHost::RenderProcessExited(
     RenderProcessHost* host,
-    base::TerminationStatus status,
-    int exit_code) {
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
+    const ChildProcessTerminationInfo& info) {
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::IO},
       base::BindOnce(
           &IndexedDBDispatcherHost::InvalidateWeakPtrsAndClearBindings,
           base::Unretained(this)));
 }
 
 void IndexedDBDispatcherHost::GetDatabaseNames(
-    ::indexed_db::mojom::CallbacksAssociatedPtrInfo callbacks_info,
+    blink::mojom::IDBCallbacksAssociatedPtrInfo callbacks_info,
     const url::Origin& origin) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
@@ -188,9 +184,8 @@ void IndexedDBDispatcherHost::GetDatabaseNames(
 }
 
 void IndexedDBDispatcherHost::Open(
-    ::indexed_db::mojom::CallbacksAssociatedPtrInfo callbacks_info,
-    ::indexed_db::mojom::DatabaseCallbacksAssociatedPtrInfo
-        database_callbacks_info,
+    blink::mojom::IDBCallbacksAssociatedPtrInfo callbacks_info,
+    blink::mojom::IDBDatabaseCallbacksAssociatedPtrInfo database_callbacks_info,
     const url::Origin& origin,
     const base::string16& name,
     int64_t version,
@@ -216,7 +211,7 @@ void IndexedDBDispatcherHost::Open(
 }
 
 void IndexedDBDispatcherHost::DeleteDatabase(
-    ::indexed_db::mojom::CallbacksAssociatedPtrInfo callbacks_info,
+    blink::mojom::IDBCallbacksAssociatedPtrInfo callbacks_info,
     const url::Origin& origin,
     const base::string16& name,
     bool force_close) {
@@ -292,8 +287,8 @@ void IndexedDBDispatcherHost::IDBSequenceHelper::GetDatabaseNamesOnIDBThread(
   DCHECK(indexed_db_context_->TaskRunner()->RunsTasksInCurrentSequence());
 
   base::FilePath indexed_db_path = indexed_db_context_->data_path();
-  indexed_db_context_->GetIDBFactory()->GetDatabaseNames(
-      callbacks, origin, indexed_db_path, request_context_getter_);
+  indexed_db_context_->GetIDBFactory()->GetDatabaseNames(callbacks, origin,
+                                                         indexed_db_path);
 }
 
 void IndexedDBDispatcherHost::IDBSequenceHelper::OpenOnIDBThread(
@@ -315,10 +310,8 @@ void IndexedDBDispatcherHost::IDBSequenceHelper::OpenOnIDBThread(
       std::make_unique<IndexedDBPendingConnection>(
           callbacks, database_callbacks, ipc_process_id_, transaction_id,
           version);
-  DCHECK(request_context_getter_);
   indexed_db_context_->GetIDBFactory()->Open(name, std::move(connection),
-                                             request_context_getter_, origin,
-                                             indexed_db_path);
+                                             origin, indexed_db_path);
 }
 
 void IndexedDBDispatcherHost::IDBSequenceHelper::DeleteDatabaseOnIDBThread(
@@ -329,10 +322,8 @@ void IndexedDBDispatcherHost::IDBSequenceHelper::DeleteDatabaseOnIDBThread(
   DCHECK(indexed_db_context_->TaskRunner()->RunsTasksInCurrentSequence());
 
   base::FilePath indexed_db_path = indexed_db_context_->data_path();
-  DCHECK(request_context_getter_);
   indexed_db_context_->GetIDBFactory()->DeleteDatabase(
-      name, request_context_getter_, callbacks, origin, indexed_db_path,
-      force_close);
+      name, callbacks, origin, indexed_db_path, force_close);
 }
 
 void IndexedDBDispatcherHost::IDBSequenceHelper::

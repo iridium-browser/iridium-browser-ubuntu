@@ -5,19 +5,22 @@
  * found in the LICENSE file.
  */
 
-#include "SkScanPriv.h"
 #include "SkBlitter.h"
 #include "SkEdge.h"
 #include "SkEdgeBuilder.h"
 #include "SkGeometry.h"
+#include "SkMacros.h"
 #include "SkPath.h"
 #include "SkQuadClipper.h"
 #include "SkRasterClip.h"
 #include "SkRectPriv.h"
 #include "SkRegion.h"
 #include "SkSafe32.h"
-#include "SkTemplates.h"
+#include "SkScanPriv.h"
 #include "SkTSort.h"
+#include "SkTemplates.h"
+
+#include <utility>
 
 #define kEDGE_HEAD_Y    SK_MinS32
 #define kEDGE_TAIL_Y    SK_MaxS32
@@ -232,7 +235,8 @@ static void walk_convex_edges(SkEdge* prevHead, SkPath::FillType,
 
         if (leftE->fX > riteE->fX || (leftE->fX == riteE->fX &&
                                       leftE->fDX > riteE->fDX)) {
-            SkTSwap(leftE, riteE);
+            using std::swap;
+            swap(leftE, riteE);
         }
 
         int local_bot = SkMin32(leftE->fLastY, riteE->fLastY);
@@ -550,7 +554,9 @@ SkScanClipper::SkScanClipper(SkBlitter* blitter, const SkRegion* clip,
 ///////////////////////////////////////////////////////////////////////////////
 
 static bool clip_to_limit(const SkRegion& orig, SkRegion* reduced) {
-    const int32_t limit = 32767;
+    // need to limit coordinates such that the width/height of our rect can be represented
+    // in SkFixed (16.16). See skbug.com/7998
+    const int32_t limit = 32767 >> 1;
 
     SkIRect limitR;
     limitR.set(-limit, -limit, limit, limit);
@@ -564,7 +570,12 @@ static bool clip_to_limit(const SkRegion& orig, SkRegion* reduced) {
 // Bias used for conservative rounding of float rects to int rects, to nudge the irects a little
 // larger, so we don't "think" a path's bounds are inside a clip, when (due to numeric drift in
 // the scan-converter) we might walk beyond the predicted limits.
-static const double kConservativeRoundBias = 0.5 + 0.5 / SK_FDot6One;
+//
+// This value has been determined trial and error: pick the smallest value (after the 0.5) that
+// fixes any problematic cases (e.g. crbug.com/844457)
+// NOTE: cubics appear to be the main reason for needing this slop. If we could (perhaps) have a
+// more accurate walker for cubics, we may be able to reduce this fudge factor.
+static const double kConservativeRoundBias = 0.5 + 1.5 / SK_FDot6One;
 
 /**
  *  Round the value down. This is used to round the top and left of a rectangle,
@@ -750,7 +761,7 @@ void SkScan::FillTriangle(const SkPoint pts[], const SkRasterClip& clip,
         return;
     }
 
-    SkIRect ir = r.round();
+    SkIRect ir = conservative_round_to_int(r);
     if (ir.isEmpty() || !SkIRect::Intersects(ir, clip.getBounds())) {
         return;
     }

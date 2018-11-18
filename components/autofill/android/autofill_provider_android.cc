@@ -53,7 +53,8 @@ void AutofillProviderAndroid::OnQueryFormFieldAutofill(
     int32_t id,
     const FormData& form,
     const FormFieldData& field,
-    const gfx::RectF& bounding_box) {
+    const gfx::RectF& bounding_box,
+    bool /*unused_autoselect_first_suggestion*/) {
   // The id isn't passed to Java side because Android API guarantees the
   // response is always for current session, so we just use the current id
   // in response, see OnAutofillAvailable.
@@ -86,12 +87,20 @@ void AutofillProviderAndroid::StartNewSession(AutofillHandlerProxy* handler,
   form_ = std::make_unique<FormDataAndroid>(form);
 
   size_t index;
-  if (!form_->GetFieldIndex(field, &index))
+  if (!form_->GetFieldIndex(field, &index)) {
+    form_.reset();
     return;
+  }
 
+  FormStructure* form_structure = nullptr;
+  AutofillField* autofill_field = nullptr;
+  if (!handler->GetCachedFormAndField(form, field, &form_structure,
+                                      &autofill_field)) {
+    form_structure = nullptr;
+  }
   gfx::RectF transformed_bounding = ToClientAreaBound(bounding_box);
 
-  ScopedJavaLocalRef<jobject> form_obj = form_->GetJavaPeer();
+  ScopedJavaLocalRef<jobject> form_obj = form_->GetJavaPeer(form_structure);
   handler_ = handler->GetWeakPtr();
   Java_AutofillProvider_startAutofillSession(
       env, obj, form_obj, index, transformed_bounding.x(),
@@ -157,26 +166,27 @@ void AutofillProviderAndroid::FireSuccessfulSubmission(
   ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
   if (obj.is_null())
     return;
+
   Java_AutofillProvider_onFormSubmitted(env, obj, (int)source);
   Reset();
 }
 
-bool AutofillProviderAndroid::OnFormSubmitted(AutofillHandlerProxy* handler,
+void AutofillProviderAndroid::OnFormSubmitted(AutofillHandlerProxy* handler,
                                               const FormData& form,
                                               bool known_success,
                                               SubmissionSource source,
                                               base::TimeTicks timestamp) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (!IsCurrentlyLinkedHandler(handler) || !IsCurrentlyLinkedForm(form))
-    return false;
+    return;
 
   if (known_success || source == SubmissionSource::FORM_SUBMISSION) {
     FireSuccessfulSubmission(source);
-  } else {
-    check_submission_ = true;
-    pending_submission_source_ = source;
+    return;
   }
-  return true;
+
+  check_submission_ = true;
+  pending_submission_source_ = source;
 }
 
 void AutofillProviderAndroid::OnFocusNoLongerOnForm(

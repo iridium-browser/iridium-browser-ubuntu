@@ -178,6 +178,9 @@ class MESSAGE_CENTER_PUBLIC_EXPORT RichNotificationData {
   // crbug.com/780342
   SettingsButtonHandler settings_button_handler = SettingsButtonHandler::NONE;
 
+  // Controls whether a snooze button should appear on the notification.
+  bool should_show_snooze_button = false;
+
   FullscreenVisibility fullscreen_visibility = FullscreenVisibility::NONE;
 };
 
@@ -401,6 +404,10 @@ class MESSAGE_CENTER_PUBLIC_EXPORT Notification {
            SettingsButtonHandler::NONE;
   }
 
+  bool should_show_snooze_button() const {
+    return optional_fields_.should_show_snooze_button;
+  }
+
   FullscreenVisibility fullscreen_visibility() const {
     return optional_fields_.fullscreen_visibility;
   }
@@ -436,7 +443,6 @@ class MESSAGE_CENTER_PUBLIC_EXPORT Notification {
       const std::string& notification_id,
       const base::string16& title,
       const base::string16& message,
-      const gfx::Image& icon,
       const std::string& system_component_id,
       const base::RepeatingClosure& click_callback);
 
@@ -450,7 +456,6 @@ class MESSAGE_CENTER_PUBLIC_EXPORT Notification {
       const std::string& id,
       const base::string16& title,
       const base::string16& message,
-      const gfx::Image& icon,
       const base::string16& display_source,
       const GURL& origin_url,
       const NotifierId& notifier_id,

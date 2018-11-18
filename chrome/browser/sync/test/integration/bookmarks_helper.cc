@@ -14,7 +14,6 @@
 #include "base/containers/stack.h"
 #include "base/files/file_util.h"
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/rand_util.h"
 #include "base/run_loop.h"
@@ -368,10 +367,8 @@ bool FaviconsMatch(BookmarkModel* model_a,
     return false;
 
   // Compare only the 1x bitmaps as only those are synced.
-  SkBitmap bitmap_a = image_a.AsImageSkia().GetRepresentation(
-      1.0f).sk_bitmap();
-  SkBitmap bitmap_b = image_b.AsImageSkia().GetRepresentation(
-      1.0f).sk_bitmap();
+  SkBitmap bitmap_a = image_a.AsImageSkia().GetRepresentation(1.0f).GetBitmap();
+  SkBitmap bitmap_b = image_b.AsImageSkia().GetRepresentation(1.0f).GetBitmap();
   return FaviconRawBitmapsMatch(bitmap_a, bitmap_b);
 }
 
@@ -930,7 +927,7 @@ gfx::Image Create1xFaviconFromPNGFile(const std::string& path) {
     return gfx::Image();
 
   base::FilePath full_path;
-  if (!PathService::Get(chrome::DIR_TEST_DATA, &full_path))
+  if (!base::PathService::Get(chrome::DIR_TEST_DATA, &full_path))
     return gfx::Image();
 
   full_path = full_path.AppendASCII("sync").AppendASCII(path);

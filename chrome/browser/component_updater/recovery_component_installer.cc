@@ -18,7 +18,8 @@
 #include "base/files/file_util.h"
 #include "base/json/json_file_value_serializer.h"
 #include "base/logging.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
+#include "content/public/browser/browser_task_traits.h"
 #if defined(OS_MACOSX)
 #include "base/mac/authorization_util.h"
 #include "base/mac/scoped_authorizationref.h"
@@ -34,6 +35,7 @@
 #include "components/component_updater/component_updater_paths.h"
 #include "components/component_updater/component_updater_service.h"
 #include "components/component_updater/pref_names.h"
+#include "components/crx_file/crx_verifier.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
 #include "components/update_client/update_client.h"
@@ -230,7 +232,7 @@ void DoElevatedInstallRecoveryComponent(const base::FilePath& path) {
   // This task joins a process, hence .WithBaseSyncPrimitives().
   base::PostTaskWithTraits(
       FROM_HERE,
-      {base::WithBaseSyncPrimitives(), base::TaskPriority::BACKGROUND,
+      {base::WithBaseSyncPrimitives(), base::TaskPriority::BEST_EFFORT,
        base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
       base::BindOnce(&WaitForElevatedInstallToComplete,
                      base::Passed(&process)));
@@ -239,7 +241,7 @@ void DoElevatedInstallRecoveryComponent(const base::FilePath& path) {
 void ElevatedInstallRecoveryComponent(const base::FilePath& installer_path) {
   base::PostTaskWithTraits(
       FROM_HERE,
-      {base::MayBlock(), base::TaskPriority::BACKGROUND,
+      {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
        base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
       base::BindOnce(&DoElevatedInstallRecoveryComponent, installer_path));
 }
@@ -302,6 +304,8 @@ void RecoveryRegisterHelper(ComponentUpdateService* cus, PrefService* prefs) {
                           &kRecoverySha2Hash[sizeof(kRecoverySha2Hash)]);
   recovery.supports_group_policy_enable_component_updates = true;
   recovery.requires_network_encryption = false;
+  recovery.crx_format_requirement =
+      crx_file::VerifierFormat::CRX3_WITH_PUBLISHER_PROOF;
   if (!cus->RegisterComponent(recovery)) {
     NOTREACHED() << "Recovery component registration failed.";
   }
@@ -340,8 +344,8 @@ void WaitForInstallToComplete(base::Process process,
     if (installer_exit_code == EXIT_CODE_ELEVATION_NEEDED) {
       RecordRecoveryComponentUMAEvent(RCE_ELEVATION_NEEDED);
 
-      BrowserThread::PostTask(
-          BrowserThread::UI, FROM_HERE,
+      base::PostTaskWithTraits(
+          FROM_HERE, {BrowserThread::UI},
           base::BindOnce(&SetPrefsForElevatedRecoveryInstall, installer_folder,
                          prefs));
     } else if (installer_exit_code == EXIT_CODE_RECOVERY_SUCCEEDED) {
@@ -371,7 +375,7 @@ bool RecoveryComponentInstaller::RunInstallCommand(
   // This task joins a process, hence .WithBaseSyncPrimitives().
   base::PostTaskWithTraits(
       FROM_HERE,
-      {base::WithBaseSyncPrimitives(), base::TaskPriority::BACKGROUND,
+      {base::WithBaseSyncPrimitives(), base::TaskPriority::BEST_EFFORT,
        base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
       base::BindOnce(&WaitForInstallToComplete, base::Passed(&process),
                      installer_folder, prefs_));
@@ -426,7 +430,7 @@ bool RecoveryComponentInstaller::DoInstall(
 
   // Passed the basic tests. Copy the installation to a permanent directory.
   base::FilePath path;
-  if (!PathService::Get(DIR_RECOVERY_BASE, &path))
+  if (!base::PathService::Get(DIR_RECOVERY_BASE, &path))
     return false;
   if (!base::PathExists(path) && !base::CreateDirectory(path))
     return false;
@@ -464,8 +468,8 @@ bool RecoveryComponentInstaller::DoInstall(
 
   current_version_ = version;
   if (prefs_) {
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, {BrowserThread::UI},
         base::BindOnce(&RecoveryUpdateVersionHelper, version, prefs_));
   }
   return true;
@@ -489,15 +493,15 @@ void RegisterRecoveryComponent(ComponentUpdateService* cus,
 #if defined(GOOGLE_CHROME_BUILD)
 #if defined(OS_WIN) || defined(OS_MACOSX)
   if (SimulatingElevatedRecovery()) {
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, {BrowserThread::UI},
         base::BindOnce(&SimulateElevatedRecoveryHelper, prefs));
   }
 
   // We delay execute the registration because we are not required in
   // the critical path during browser startup.
-  BrowserThread::PostDelayedTask(
-      BrowserThread::UI, FROM_HERE,
+  base::PostDelayedTaskWithTraits(
+      FROM_HERE, {BrowserThread::UI},
       base::BindOnce(&RecoveryRegisterHelper, cus, prefs),
       base::TimeDelta::FromSeconds(6));
 #endif

@@ -5,10 +5,11 @@
 #include "chrome/browser/ssl/ssl_error_navigation_throttle.h"
 
 #include "base/bind.h"
+#include "base/feature_list.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "chrome/browser/ssl/ssl_error_tab_helper.h"
-#include "chrome/common/chrome_switches.h"
+#include "chrome/common/chrome_features.h"
 #include "components/security_interstitials/content/security_interstitial_page.h"
+#include "components/security_interstitials/content/security_interstitial_tab_helper.h"
 #include "content/public/browser/navigation_handle.h"
 #include "net/cert/cert_status_flags.h"
 
@@ -33,8 +34,7 @@ SSLErrorNavigationThrottle::~SSLErrorNavigationThrottle() {}
 
 content::NavigationThrottle::ThrottleCheckResult
 SSLErrorNavigationThrottle::WillFailRequest() {
-  DCHECK(base::CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kCommittedInterstitials));
+  DCHECK(base::FeatureList::IsEnabled(features::kSSLCommittedInterstitials));
   content::NavigationHandle* handle = navigation_handle();
   // If there was no certificate error, SSLInfo will be empty.
   int cert_status = handle->GetSSLInfo().cert_status;
@@ -59,8 +59,7 @@ SSLErrorNavigationThrottle::WillFailRequest() {
 
 content::NavigationThrottle::ThrottleCheckResult
 SSLErrorNavigationThrottle::WillProcessResponse() {
-  DCHECK(base::CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kCommittedInterstitials));
+  DCHECK(base::FeatureList::IsEnabled(features::kSSLCommittedInterstitials));
   content::NavigationHandle* handle = navigation_handle();
   // If there was no certificate error, SSLInfo will be empty.
   int cert_status = handle->GetSSLInfo().cert_status;
@@ -134,9 +133,9 @@ void SSLErrorNavigationThrottle::ShowInterstitial(
   // Get the error page content before giving up ownership of |blocking_page|.
   std::string error_page_content = blocking_page->GetHTMLContents();
 
-  SSLErrorTabHelper::AssociateBlockingPage(handle->GetWebContents(),
-                                           handle->GetNavigationId(),
-                                           std::move(blocking_page));
+  security_interstitials::SecurityInterstitialTabHelper::AssociateBlockingPage(
+      handle->GetWebContents(), handle->GetNavigationId(),
+      std::move(blocking_page));
 
   CancelDeferredNavigation(content::NavigationThrottle::ThrottleCheckResult(
       content::NavigationThrottle::CANCEL, static_cast<net::Error>(net_error),

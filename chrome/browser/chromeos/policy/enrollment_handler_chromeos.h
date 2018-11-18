@@ -17,7 +17,7 @@
 #include "chrome/browser/chromeos/policy/device_cloud_policy_validator.h"
 #include "chrome/browser/chromeos/policy/enrollment_config.h"
 #include "chrome/browser/chromeos/settings/install_attributes.h"
-#include "chromeos/attestation/attestation_constants.h"
+#include "chromeos/dbus/attestation_constants.h"
 #include "chromeos/dbus/auth_policy_client.h"
 #include "components/policy/core/common/cloud/cloud_policy_client.h"
 #include "components/policy/core/common/cloud/cloud_policy_constants.h"
@@ -41,6 +41,7 @@ class AttestationFlow;
 namespace policy {
 
 class DeviceCloudPolicyStoreChromeOS;
+class DMAuth;
 class DMTokenStorage;
 class ServerBackedStateKeysBroker;
 
@@ -74,7 +75,7 @@ class EnrollmentHandlerChromeOS : public CloudPolicyClient::Observer,
       scoped_refptr<base::SequencedTaskRunner> background_task_runner,
       chromeos::ActiveDirectoryJoinDelegate* ad_join_delegate,
       const EnrollmentConfig& enrollment_config,
-      const std::string& auth_token,
+      std::unique_ptr<DMAuth> dm_auth,
       const std::string& client_id,
       const std::string& requisition,
       const EnrollmentCallback& completion_callback);
@@ -99,7 +100,6 @@ class EnrollmentHandlerChromeOS : public CloudPolicyClient::Observer,
   // CloudPolicyClient::Observer:
   void OnPolicyFetched(CloudPolicyClient* client) override;
   void OnRegistrationStateChanged(CloudPolicyClient* client) override;
-  void OnRobotAuthCodesFetched(CloudPolicyClient* client) override;
   void OnClientError(CloudPolicyClient* client) override;
 
   // CloudPolicyStore::Observer:
@@ -149,6 +149,9 @@ class EnrollmentHandlerChromeOS : public CloudPolicyClient::Observer,
       chromeos::attestation::AttestationStatus status,
       const std::string& pem_certificate_chain);
 
+  // Starts the enrollment flow for the offline demo mode.
+  void StartOfflineDemoEnrollmentFlow();
+
   // Starts registration if the store is initialized.
   void StartRegistration();
 
@@ -183,7 +186,7 @@ class EnrollmentHandlerChromeOS : public CloudPolicyClient::Observer,
 
   // Handles the available licenses request.
   void HandleAvailableLicensesResult(
-      bool success,
+      DeviceManagementStatus status,
       const CloudPolicyClient::LicenseMap& license_map);
 
   // Initiates storing DM token. For Active Directory devices only.
@@ -200,6 +203,20 @@ class EnrollmentHandlerChromeOS : public CloudPolicyClient::Observer,
 
   // Handles result from device policy refresh via authpolicyd.
   void HandleActiveDirectoryPolicyRefreshed(authpolicy::ErrorType error);
+
+  // Handles the blob for the device policy for the offline demo mode.
+  void OnOfflinePolicyBlobLoaded(base::Optional<std::string> blob);
+
+  // Handles the policy validation result for the offline demo mode.
+  void OnOfflinePolicyValidated(DeviceCloudPolicyValidator* validator);
+
+  // Handles the fetching auth codes for robot accounts during enrollment.
+  void OnRobotAuthCodesFetched(DeviceManagementStatus status,
+                               const std::string& auth_code);
+
+  std::unique_ptr<DeviceCloudPolicyValidator> CreateValidator(
+      std::unique_ptr<enterprise_management::PolicyFetchResponse> policy,
+      const std::string& domain);
 
   // Drops any ongoing actions.
   void Stop();
@@ -221,7 +238,7 @@ class EnrollmentHandlerChromeOS : public CloudPolicyClient::Observer,
   std::unique_ptr<policy::DMTokenStorage> dm_token_storage_;
 
   EnrollmentConfig enrollment_config_;
-  std::string auth_token_;
+  std::unique_ptr<policy::DMAuth> dm_auth_;
   std::string client_id_;
   std::string requisition_;
   EnrollmentCallback completion_callback_;

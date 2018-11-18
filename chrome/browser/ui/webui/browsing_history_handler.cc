@@ -245,7 +245,8 @@ void BrowsingHistoryHandler::RegisterMessages() {
       this, local_history, sync_service);
 
   // Create our favicon data source.
-  content::URLDataSource::Add(profile, new FaviconSource(profile));
+  content::URLDataSource::Add(profile,
+                              std::make_unique<FaviconSource>(profile));
 
   web_ui()->RegisterMessageCallback(
       "queryHistory",
@@ -299,8 +300,7 @@ void BrowsingHistoryHandler::HandleQueryHistoryContinuation(
 void BrowsingHistoryHandler::HandleRemoveVisits(const base::ListValue* args) {
   std::vector<BrowsingHistoryService::HistoryEntry> items_to_remove;
   items_to_remove.reserve(args->GetSize());
-  for (base::ListValue::const_iterator it = args->begin();
-       it != args->end(); ++it) {
+  for (auto it = args->begin(); it != args->end(); ++it) {
     const base::DictionaryValue* deletion = NULL;
     base::string16 url;
     const base::ListValue* timestamps = NULL;
@@ -316,7 +316,7 @@ void BrowsingHistoryHandler::HandleRemoveVisits(const base::ListValue* args) {
     entry.url = GURL(url);
 
     double timestamp;
-    for (base::ListValue::const_iterator ts_iterator = timestamps->begin();
+    for (auto ts_iterator = timestamps->begin();
          ts_iterator != timestamps->end(); ++ts_iterator) {
       if (!ts_iterator->GetAsDouble(&timestamp)) {
         NOTREACHED() << "Unable to extract visit timestamp.";

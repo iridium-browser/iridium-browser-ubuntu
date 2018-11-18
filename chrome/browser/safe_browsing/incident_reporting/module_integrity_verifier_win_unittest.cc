@@ -20,6 +20,7 @@
 #include "base/scoped_native_library.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/win/pe_image.h"
+#include "build/build_config.h"
 #include "chrome/browser/safe_browsing/incident_reporting/module_integrity_unittest_util_win.h"
 #include "components/safe_browsing/proto/csd.pb.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -186,7 +187,13 @@ TEST_F(SafeBrowsingModuleVerifierWinTest, VerifyModuleUnmodified) {
   ASSERT_EQ(0, num_bytes_different);
 }
 
-TEST_F(SafeBrowsingModuleVerifierWinTest, VerifyModuleModified) {
+// Flaky in debug builds; see https://crbug.com/877815.
+#if !defined(NDEBUG)
+#define MAYBE_VerifyModuleModified DISABLED_VerifyModuleModified
+#else
+#define MAYBE_VerifyModuleModified VerifyModuleModified
+#endif
+TEST_F(SafeBrowsingModuleVerifierWinTest, MAYBE_VerifyModuleModified) {
   int num_bytes_different = 0;
   ModuleState state;
 
@@ -234,7 +241,14 @@ TEST_F(SafeBrowsingModuleVerifierWinTest, VerifyModuleModified) {
             (uint8_t)state.modification(1).modified_bytes()[0]);
 }
 
-TEST_F(SafeBrowsingModuleVerifierWinTest, VerifyModuleLongModification) {
+// TODO(crbug.com/838124) The test is flaky on Win7 debug.
+#if !defined(NDEBUG)
+#define MAYBE_VerifyModuleLongModification DISABLED_VerifyModuleLongModification
+#else
+#define MAYBE_VerifyModuleLongModification VerifyModuleLongModification
+#endif
+
+TEST_F(SafeBrowsingModuleVerifierWinTest, MAYBE_VerifyModuleLongModification) {
   ModuleState state;
   int num_bytes_different = 0;
 
@@ -320,7 +334,13 @@ TEST_F(SafeBrowsingModuleVerifierWinTest, VerifyModuleRelocOverlap) {
             state.modification(0).modified_bytes());
 }
 
-TEST_F(SafeBrowsingModuleVerifierWinTest, VerifyModuleExportModified) {
+// Flaky in debug builds; see https://crbug.com/877815.
+#if !defined(NDEBUG)
+#define MAYBE_VerifyModuleExportModified DISABLED_VerifyModuleExportModified
+#else
+#define MAYBE_VerifyModuleExportModified VerifyModuleExportModified
+#endif
+TEST_F(SafeBrowsingModuleVerifierWinTest, MAYBE_VerifyModuleExportModified) {
   ModuleState state;
   int num_bytes_different = 0;
   // Confirm the module is identical in memory as on disk before we begin.

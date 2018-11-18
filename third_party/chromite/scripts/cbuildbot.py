@@ -106,7 +106,7 @@ def _IsDistributedBuilder(options, chrome_rev, build_config):
 
 def _RunBuildStagesWrapper(options, site_config, build_config):
   """Helper function that wraps RunBuildStages()."""
-  logging.info('cbuildbot was executed with args %s' %
+  logging.info('cbuildbot was executed with args %s',
                cros_build_lib.CmdToStr(sys.argv))
 
   chrome_rev = build_config['chrome_rev']
@@ -249,6 +249,9 @@ def _CreateParser():
                          'where the build occurs. For external build configs, '
                          "defaults to 'trybot' directory at top level of your "
                          'repo-managed checkout.')
+  parser.add_option('--workspace', type='path',
+                    api=constants.REEXEC_API_WORKSPACE,
+                    help='Root directory for a secondary checkout .')
   parser.add_option('--bootstrap-dir', type='path',
                     help='Bootstrapping cbuildbot may involve checking out '
                          'multiple copies of chromite. All these checkouts '
@@ -555,6 +558,10 @@ def _CreateParser():
                                'method of MasterSlaveSyncCompletionStage, by '
                                'specifying a file with a pickle of the result '
                                'to be returned.')
+  group.add_option('--previous-build-state', type='string', default='',
+                   api=constants.REEXEC_API_PREVIOUS_BUILD_STATE,
+                   help='A base64-encoded BuildSummary object describing the '
+                        'previous build run on the same build machine.')
 
   parser.add_argument_group(group)
 
@@ -562,7 +569,7 @@ def _CreateParser():
   # Debug options
   #
   # Temporary hack; in place till --dry-run replaces --debug.
-  # pylint: disable=W0212
+  # pylint: disable=protected-access
   group = parser.debug_group
   debug = [x for x in group.option_list if x._long_opts == ['--debug']][0]
   debug.help += '  Currently functions as --dry-run in addition.'
@@ -645,7 +652,7 @@ def _FinishParsing(options):
     exclusive_opts = {'--version': options.force_version,
                       '--delete-branch': options.delete_branch,
                       '--rename-to': options.rename_to}
-    if 1 != sum(1 for x in exclusive_opts.values() if x):
+    if sum(1 for x in exclusive_opts.values() if x) != 1:
       cros_build_lib.Die('When using the %s config, you must'
                          ' specifiy one and only one of the following'
                          ' options: %s.', constants.BRANCH_UTIL_CONFIG,
@@ -670,7 +677,7 @@ def _FinishParsing(options):
         'running the %s config', constants.BRANCH_UTIL_CONFIG)
 
 
-# pylint: disable=W0613
+# pylint: disable=unused-argument
 def _PostParseCheck(parser, options, site_config):
   """Perform some usage validation after we've parsed the arguments
 
@@ -933,7 +940,8 @@ def main(argv):
     _BackupPreviousLog(log_file)
 
   with cros_build_lib.ContextManagerStack() as stack:
-    options.preserve_paths = set()
+    # Preserve chromite; we might be running from there!
+    options.preserve_paths = set(['chromite'])
     if log_file is not None:
       # We don't want the critical section to try to clean up the tee process,
       # so we run Tee (forked off) outside of it. This prevents a deadlock
@@ -959,10 +967,6 @@ def main(argv):
     # ensures that sudo bits cannot outlive cbuildbot, that anything
     # cgroups would kill gets killed, etc.
     stack.Add(critical_section.ForkWatchdog)
-
-    if not options.buildbot:
-      build_config = config_lib.OverrideConfigForTrybot(
-          build_config, options)
 
     if options.mock_tree_status is not None:
       stack.Add(_ObjectMethodPatcher, tree_status, '_GetStatus',

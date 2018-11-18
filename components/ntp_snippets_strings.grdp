@@ -18,7 +18,7 @@
   </if>
 
   <if expr="not use_titlecase">
-    <message name="IDS_NTP_ARTICLE_SUGGESTIONS_SECTION_HEADER" desc="Header of the articles section, which is a list of news articles displayed as cards on the New Tab Page.">
+    <message name="IDS_NTP_ARTICLE_SUGGESTIONS_SECTION_HEADER" desc="Header of the articles section, which is a list of news articles displayed as cards on the New Tab Page." formatter_data="android_java">
       Articles for you
     </message>
   </if>
@@ -33,14 +33,6 @@
 
   <message name="IDS_NTP_BOOKMARK_SUGGESTIONS_SECTION_EMPTY" desc="On the New Tab Page, text of the card explaining to the user that they can expect to see bookmarks in this area in the future.">
     Your recently visited bookmarks appear here
-  </message>
-
-  <message name="IDS_NTP_FOREIGN_SESSIONS_SUGGESTIONS_SECTION_HEADER" desc="Header of the foreign sessions, which is a list of the user's most recently visited tabs on other devices displayed as cards on the New Tab Page.">
-    Tabs from other devices
-  </message>
-
-  <message name="IDS_NTP_FOREIGN_SESSIONS_SUGGESTIONS_SECTION_EMPTY" desc="On the New Tab Page, text of the card explaining to the user that they can expect to see tabs from other devices in this area in the future.">
-    Your recent tabs from other devices appear here
   </message>
 
   <!-- When you change this string, please change IDS_NTP_PHYSICAL_WEB_PAGE_SUGGESTIONS_SECTION_EMPTY description accordingly. -->

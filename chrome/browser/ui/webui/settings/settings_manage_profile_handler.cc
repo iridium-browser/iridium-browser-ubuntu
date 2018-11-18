@@ -24,7 +24,6 @@
 #include "chrome/browser/profiles/profile_shortcut_manager.h"
 #include "chrome/browser/profiles/profile_window.h"
 #include "chrome/browser/profiles/profiles_state.h"
-#include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
@@ -32,7 +31,6 @@
 #include "components/prefs/pref_service.h"
 #include "components/prefs/scoped_user_pref_update.h"
 #include "components/signin/core/browser/profile_management_switches.h"
-#include "components/signin/core/browser/signin_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_ui.h"
@@ -194,6 +192,7 @@ void ManageProfileHandler::HandleSetProfileIconToDefaultAvatar(
 
   PrefService* pref_service = profile_->GetPrefs();
   pref_service->SetInteger(prefs::kProfileAvatarIndex, new_icon_index);
+  pref_service->SetInteger(prefs::kProfileLocalAvatarIndex, new_icon_index);
   pref_service->SetBoolean(prefs::kProfileUsingDefaultAvatar, false);
   pref_service->SetBoolean(prefs::kProfileUsingGAIAAvatar, false);
 

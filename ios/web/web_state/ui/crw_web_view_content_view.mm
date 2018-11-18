@@ -9,6 +9,7 @@
 #include <limits>
 
 #include "base/logging.h"
+#import "ios/web/public/features.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -25,16 +26,8 @@ const CGFloat kBackgroundRGBComponents[] = {0.75f, 0.74f, 0.76f};
 
 }  // namespace
 
-@interface CRWWebViewContentView ()
-
-// Changes web view frame to match |self.bounds| and optionally accommodates for
-// |contentInset|.
-- (void)updateWebViewFrame;
-
-@end
-
 @implementation CRWWebViewContentView
-
+@synthesize contentOffset = _contentOffset;
 @synthesize contentInset = _contentInset;
 @synthesize shouldUseViewContentInset = _shouldUseViewContentInset;
 @synthesize scrollView = _scrollView;
@@ -84,29 +77,28 @@ const CGFloat kBackgroundRGBComponents[] = {0.75f, 0.74f, 0.76f};
   return [_webView becomeFirstResponder];
 }
 
-- (void)setFrame:(CGRect)frame {
-  if (CGRectEqualToRect(self.frame, frame))
-    return;
-  [super setFrame:frame];
-  [self updateWebViewFrame];
-}
-
-- (void)setBounds:(CGRect)bounds {
-  if (CGRectEqualToRect(self.bounds, bounds))
-    return;
-  [super setBounds:bounds];
-  [self updateWebViewFrame];
-}
-
 #pragma mark Layout
 
 - (void)layoutSubviews {
   [super layoutSubviews];
-  [self updateWebViewFrame];
+
+  if (!base::FeatureList::IsEnabled(web::features::kOutOfWebFullscreen)) {
+    CGRect frame = self.bounds;
+    frame = UIEdgeInsetsInsetRect(frame, _contentInset);
+    frame = CGRectOffset(frame, _contentOffset.x, _contentOffset.y);
+    self.webView.frame = frame;
+  }
 }
 
 - (BOOL)isViewAlive {
   return YES;
+}
+
+- (void)setContentOffset:(CGPoint)contentOffset {
+  if (CGPointEqualToPoint(_contentOffset, contentOffset))
+    return;
+  _contentOffset = contentOffset;
+  [self setNeedsLayout];
 }
 
 - (UIEdgeInsets)contentInset {
@@ -115,31 +107,18 @@ const CGFloat kBackgroundRGBComponents[] = {0.75f, 0.74f, 0.76f};
 }
 
 - (void)setContentInset:(UIEdgeInsets)contentInset {
-  CGFloat delta = std::fabs(_contentInset.top - contentInset.top) +
-                  std::fabs(_contentInset.left - contentInset.left) +
-                  std::fabs(_contentInset.bottom - contentInset.bottom) +
-                  std::fabs(_contentInset.right - contentInset.right);
+  UIEdgeInsets oldInsets = self.contentInset;
+  CGFloat delta = std::fabs(oldInsets.top - contentInset.top) +
+                  std::fabs(oldInsets.left - contentInset.left) +
+                  std::fabs(oldInsets.bottom - contentInset.bottom) +
+                  std::fabs(oldInsets.right - contentInset.right);
   if (delta <= std::numeric_limits<CGFloat>::epsilon())
     return;
+  _contentInset = contentInset;
   if (self.shouldUseViewContentInset) {
     [_scrollView setContentInset:contentInset];
   } else {
-    // Update the content offset of the scroll view to match the padding
-    // that will be included in the frame.
-    CGFloat topPaddingChange = contentInset.top - _contentInset.top;
-    CGPoint contentOffset = [_scrollView contentOffset];
-    contentOffset.y += topPaddingChange;
-    [_scrollView setContentOffset:contentOffset];
-    _contentInset = contentInset;
-    // Update web view frame immediately to make |contentInset| animatable.
-    [self updateWebViewFrame];
-    // Setting WKWebView frame can mistakenly reset contentOffset. Change it
-    // back to the initial value if necessary.
-    // TODO(crbug.com/645857): Remove this workaround once WebKit bug is
-    // fixed.
-    if ([_scrollView contentOffset].y != contentOffset.y) {
-      [_scrollView setContentOffset:contentOffset];
-    }
+    [self resizeViewportForContentInsetChangeFromInsets:oldInsets];
   }
 }
 
@@ -154,14 +133,28 @@ const CGFloat kBackgroundRGBComponents[] = {0.75f, 0.74f, 0.76f};
 
 #pragma mark Private methods
 
-- (void)updateWebViewFrame {
-  CGRect webViewFrame = self.bounds;
-  webViewFrame.size.height -= _contentInset.top + _contentInset.bottom;
-  webViewFrame.origin.y += _contentInset.top;
-  webViewFrame.size.width -= _contentInset.right + _contentInset.left;
-  webViewFrame.origin.x += _contentInset.left;
+// Updates the viewport by updating the web view frame after self.contentInset
+// is changed to a new value from |oldInsets|.
+- (void)resizeViewportForContentInsetChangeFromInsets:(UIEdgeInsets)oldInsets {
+  if (base::FeatureList::IsEnabled(web::features::kOutOfWebFullscreen))
+    return;
 
-  self.webView.frame = webViewFrame;
+  // Update the content offset of the scroll view to match the padding
+  // that will be included in the frame.
+  CGFloat topPaddingChange = self.contentInset.top - oldInsets.top;
+  CGPoint contentOffset = [_scrollView contentOffset];
+  contentOffset.y += topPaddingChange;
+  [_scrollView setContentOffset:contentOffset];
+  // Update web view frame immediately to make |contentInset| animatable.
+  [self setNeedsLayout];
+  [self layoutIfNeeded];
+  // Setting WKWebView frame can mistakenly reset contentOffset. Change it
+  // back to the initial value if necessary.
+  // TODO(crbug.com/645857): Remove this workaround once WebKit bug is
+  // fixed.
+  if ([_scrollView contentOffset].y != contentOffset.y) {
+    [_scrollView setContentOffset:contentOffset];
+  }
 }
 
 @end

@@ -121,7 +121,7 @@ void AXPositionTest::SetUp() {
   root_.location = gfx::RectF(0, 0, 800, 600);
 
   button_.role = ax::mojom::Role::kButton;
-  button_.AddState(ax::mojom::State::kHaspopup);
+  button_.SetHasPopup(ax::mojom::HasPopup::kMenu);
   button_.SetName("Button");
   button_.location = gfx::RectF(20, 20, 200, 30);
   button_.AddIntListAttribute(ax::mojom::IntListAttribute::kWordStarts,
@@ -201,7 +201,7 @@ void AXPositionTest::SetUp() {
   initial_state.nodes.push_back(static_text2_);
   initial_state.nodes.push_back(inline_box2_);
   initial_state.has_tree_data = true;
-  initial_state.tree_data.tree_id = 0;
+  initial_state.tree_data.tree_id = AXTreeID::FromString("0");
   initial_state.tree_data.title = "Dialog title";
   AXSerializableTree src_tree(initial_state);
 
@@ -627,6 +627,10 @@ TEST_F(AXPositionTest, AsTextPositionWithTreePosition) {
   EXPECT_EQ(6, test_position->text_offset());
   // But its child index should be unchanged.
   EXPECT_EQ(1, test_position->child_index());
+  // And the affinity cannot be anything other than downstream because we
+  // haven't moved up the tree and so there was no opportunity to introduce any
+  // ambiguity regarding the new position.
+  EXPECT_EQ(ax::mojom::TextAffinity::kDownstream, test_position->affinity());
 
   // Test for a "before text" position.
   tree_position = AXNodePosition::CreateTreePosition(
@@ -639,6 +643,7 @@ TEST_F(AXPositionTest, AsTextPositionWithTreePosition) {
   EXPECT_EQ(inline_box1_.id, test_position->anchor_id());
   EXPECT_EQ(0, test_position->text_offset());
   EXPECT_EQ(AXNodePosition::BEFORE_TEXT, test_position->child_index());
+  EXPECT_EQ(ax::mojom::TextAffinity::kDownstream, test_position->affinity());
 
   // Test for an "after text" position.
   tree_position = AXNodePosition::CreateTreePosition(
@@ -651,6 +656,7 @@ TEST_F(AXPositionTest, AsTextPositionWithTreePosition) {
   EXPECT_EQ(inline_box1_.id, test_position->anchor_id());
   EXPECT_EQ(6, test_position->text_offset());
   EXPECT_EQ(0, test_position->child_index());
+  EXPECT_EQ(ax::mojom::TextAffinity::kDownstream, test_position->affinity());
 }
 
 TEST_F(AXPositionTest, AsTextPositionWithTextPosition) {
@@ -1021,6 +1027,7 @@ TEST_F(AXPositionTest, CreateParentPositionWithTreePosition) {
   EXPECT_EQ(root_.id, test_position->anchor_id());
   // |child_index| should point to the check box node.
   EXPECT_EQ(1, test_position->child_index());
+  EXPECT_EQ(ax::mojom::TextAffinity::kDownstream, test_position->affinity());
 
   tree_position = AXNodePosition::CreateTreePosition(
       tree_.data().tree_id, root_.id, 1 /* child_index */);
@@ -1031,15 +1038,32 @@ TEST_F(AXPositionTest, CreateParentPositionWithTreePosition) {
 }
 
 TEST_F(AXPositionTest, CreateParentPositionWithTextPosition) {
+  // Create a position that points at the end of the first line, right after the
+  // check box.
   TestPositionType text_position = AXNodePosition::CreateTextPosition(
-      tree_.data().tree_id, inline_box2_.id, 5 /* text_offset */,
+      tree_.data().tree_id, check_box_.id, 9 /* text_offset */,
       ax::mojom::TextAffinity::kDownstream);
   ASSERT_NE(nullptr, text_position);
   TestPositionType test_position = text_position->CreateParentPosition();
   EXPECT_NE(nullptr, test_position);
   EXPECT_TRUE(test_position->IsTextPosition());
+  EXPECT_EQ(root_.id, test_position->anchor_id());
+  EXPECT_EQ(15, test_position->text_offset());
+  // Since the same text offset in the root could be used to point to the
+  // beginning of the second line, affinity should have been adjusted to
+  // upstream.
+  EXPECT_EQ(ax::mojom::TextAffinity::kUpstream, test_position->affinity());
+
+  text_position = AXNodePosition::CreateTextPosition(
+      tree_.data().tree_id, inline_box2_.id, 5 /* text_offset */,
+      ax::mojom::TextAffinity::kDownstream);
+  ASSERT_NE(nullptr, text_position);
+  test_position = text_position->CreateParentPosition();
+  EXPECT_NE(nullptr, test_position);
+  EXPECT_TRUE(test_position->IsTextPosition());
   EXPECT_EQ(static_text2_.id, test_position->anchor_id());
   EXPECT_EQ(5, test_position->text_offset());
+  EXPECT_EQ(ax::mojom::TextAffinity::kDownstream, test_position->affinity());
 
   test_position = test_position->CreateParentPosition();
   EXPECT_NE(nullptr, test_position);
@@ -1048,6 +1072,7 @@ TEST_F(AXPositionTest, CreateParentPositionWithTextPosition) {
   // |text_offset| should point to the same offset on the second line where the
   // static text node position was pointing at.
   EXPECT_EQ(12, test_position->text_offset());
+  EXPECT_EQ(ax::mojom::TextAffinity::kDownstream, test_position->affinity());
 }
 
 TEST_F(AXPositionTest,
@@ -1508,6 +1533,18 @@ TEST_F(AXPositionTest, OperatorEquals) {
       ax::mojom::TextAffinity::kUpstream);
   ASSERT_NE(nullptr, text_position2);
   EXPECT_EQ(*text_position1, *text_position2);
+
+  // Two text positions that are consequtive, one "before text" and one "after
+  // text".
+  text_position1 = AXNodePosition::CreateTextPosition(
+      tree_.data().tree_id, inline_box2_.id, 0 /* text_offset */,
+      ax::mojom::TextAffinity::kDownstream);
+  ASSERT_NE(nullptr, text_position1);
+  text_position2 = AXNodePosition::CreateTextPosition(
+      tree_.data().tree_id, line_break_.id, 1 /* text_offset */,
+      ax::mojom::TextAffinity::kDownstream);
+  ASSERT_NE(nullptr, text_position2);
+  EXPECT_NE(*text_position1, *text_position2);
 }
 
 TEST_F(AXPositionTest, OperatorsLessThanAndGreaterThan) {
@@ -1548,6 +1585,7 @@ TEST_F(AXPositionTest, OperatorsLessThanAndGreaterThan) {
   EXPECT_LT(*tree_position1, *tree_position2);
   EXPECT_GT(*tree_position2, *tree_position1);
 
+  // Two text positions that share a common anchor.
   TestPositionType text_position1 = AXNodePosition::CreateTextPosition(
       tree_.data().tree_id, inline_box1_.id, 2 /* text_offset */,
       ax::mojom::TextAffinity::kDownstream);
@@ -1576,6 +1614,38 @@ TEST_F(AXPositionTest, OperatorsLessThanAndGreaterThan) {
   text_position2 = AXNodePosition::CreateTextPosition(
       tree_.data().tree_id, line_break_.id, 0 /* text_offset */,
       ax::mojom::TextAffinity::kUpstream);
+  ASSERT_NE(nullptr, text_position2);
+  EXPECT_GT(*text_position1, *text_position2);
+  EXPECT_LT(*text_position2, *text_position1);
+
+  // A text position that is an ancestor of another.
+  text_position1 = AXNodePosition::CreateTextPosition(
+      tree_.data().tree_id, text_field_.id, 6 /* text_offset */,
+      ax::mojom::TextAffinity::kDownstream);
+  ASSERT_NE(nullptr, text_position1);
+  text_position2 = AXNodePosition::CreateTextPosition(
+      tree_.data().tree_id, inline_box1_.id, 5 /* text_offset */,
+      ax::mojom::TextAffinity::kDownstream);
+  ASSERT_NE(nullptr, text_position2);
+  EXPECT_GT(*text_position1, *text_position2);
+  EXPECT_LT(*text_position2, *text_position1);
+
+  // Two text positions that share a common ancestor.
+  text_position1 = AXNodePosition::CreateTextPosition(
+      tree_.data().tree_id, inline_box2_.id, 0 /* text_offset */,
+      ax::mojom::TextAffinity::kDownstream);
+  ASSERT_NE(nullptr, text_position1);
+  text_position2 = AXNodePosition::CreateTextPosition(
+      tree_.data().tree_id, line_break_.id, 0 /* text_offset */,
+      ax::mojom::TextAffinity::kDownstream);
+  ASSERT_NE(nullptr, text_position2);
+  EXPECT_GT(*text_position1, *text_position2);
+  EXPECT_LT(*text_position2, *text_position1);
+
+  // Two consequtive positions. One "before text" and one "after text".
+  text_position2 = AXNodePosition::CreateTextPosition(
+      tree_.data().tree_id, line_break_.id, 1 /* text_offset */,
+      ax::mojom::TextAffinity::kDownstream);
   ASSERT_NE(nullptr, text_position2);
   EXPECT_GT(*text_position1, *text_position2);
   EXPECT_LT(*text_position2, *text_position1);
@@ -2010,7 +2080,7 @@ INSTANTIATE_TEST_CASE_P(
                    "affinity=downstream annotated_text=ButtonCheck< >boxLine "
                    "1\nLine 2",
                    "TextPosition tree_id=0 anchor_id=1 text_offset=15 "
-                   "affinity=downstream annotated_text=ButtonCheck box<L>ine "
+                   "affinity=upstream annotated_text=ButtonCheck box<L>ine "
                    "1\nLine 2",
                    "TextPosition tree_id=0 anchor_id=1 text_offset=19 "
                    "affinity=downstream annotated_text=ButtonCheck boxLine< "
@@ -2082,7 +2152,7 @@ INSTANTIATE_TEST_CASE_P(
                    "affinity=downstream annotated_text=ButtonCheck< >boxLine "
                    "1\nLine 2",
                    "TextPosition tree_id=0 anchor_id=1 text_offset=15 "
-                   "affinity=downstream annotated_text=ButtonCheck box<L>ine "
+                   "affinity=upstream annotated_text=ButtonCheck box<L>ine "
                    "1\nLine 2",
                    "TextPosition tree_id=0 anchor_id=1 text_offset=19 "
                    "affinity=downstream annotated_text=ButtonCheck boxLine< "
@@ -2203,7 +2273,7 @@ INSTANTIATE_TEST_CASE_P(
                    "affinity=downstream annotated_text=ButtonCheck boxLine< "
                    ">1\nLine 2",
                    "TextPosition tree_id=0 anchor_id=1 text_offset=15 "
-                   "affinity=downstream annotated_text=ButtonCheck box<L>ine "
+                   "affinity=upstream annotated_text=ButtonCheck box<L>ine "
                    "1\nLine 2",
                    "TextPosition tree_id=0 anchor_id=1 text_offset=11 "
                    "affinity=downstream annotated_text=ButtonCheck< >boxLine "
@@ -2284,7 +2354,7 @@ INSTANTIATE_TEST_CASE_P(
                    "affinity=downstream annotated_text=ButtonCheck boxLine< "
                    ">1\nLine 2",
                    "TextPosition tree_id=0 anchor_id=1 text_offset=15 "
-                   "affinity=downstream annotated_text=ButtonCheck box<L>ine "
+                   "affinity=upstream annotated_text=ButtonCheck box<L>ine "
                    "1\nLine 2",
                    "TextPosition tree_id=0 anchor_id=1 text_offset=11 "
                    "affinity=downstream annotated_text=ButtonCheck< >boxLine "
@@ -2667,7 +2737,7 @@ INSTANTIATE_TEST_CASE_P(
                   ROOT_ID,
                   0 /* text_offset */,
                   {"TextPosition tree_id=0 anchor_id=1 text_offset=15 "
-                   "affinity=downstream annotated_text=ButtonCheck box<L>ine "
+                   "affinity=upstream annotated_text=ButtonCheck box<L>ine "
                    "1\nLine 2",
                    "TextPosition tree_id=0 anchor_id=1 text_offset=21 "
                    "affinity=downstream annotated_text=ButtonCheck boxLine 1"
@@ -2719,7 +2789,7 @@ INSTANTIATE_TEST_CASE_P(
                   ROOT_ID,
                   0 /* text_offset */,
                   {"TextPosition tree_id=0 anchor_id=1 text_offset=15 "
-                   "affinity=downstream annotated_text=ButtonCheck box<L>ine "
+                   "affinity=upstream annotated_text=ButtonCheck box<L>ine "
                    "1\nLine 2",
                    "TextPosition tree_id=0 anchor_id=1 text_offset=21 "
                    "affinity=downstream annotated_text=ButtonCheck boxLine 1"
@@ -2774,14 +2844,11 @@ INSTANTIATE_TEST_CASE_P(
                   ROOT_ID,
                   0 /* text_offset */,
                   {"TextPosition tree_id=0 anchor_id=1 text_offset=15 "
-                   "affinity=downstream annotated_text=ButtonCheck box<L>ine "
+                   "affinity=upstream annotated_text=ButtonCheck box<L>ine "
                    "1\nLine 2",
-                   "TextPosition tree_id=0 anchor_id=1 text_offset=21 "
-                   "affinity=downstream annotated_text=ButtonCheck boxLine "
-                   "1<\n>Line 2",
-                   "TextPosition tree_id=0 anchor_id=1 text_offset=21 "
-                   "affinity=downstream annotated_text=ButtonCheck boxLine "
-                   "1<\n>Line 2"}},
+                   "TextPosition tree_id=0 anchor_id=1 text_offset=15 "
+                   "affinity=upstream annotated_text=ButtonCheck box<L>ine "
+                   "1\nLine 2"}},
         TestParam{base::BindRepeating([](const TestPositionType& position) {
                     return position->CreateNextLineEndPosition(
                         AXBoundaryBehavior::StopIfAlreadyAtBoundary);
@@ -2850,11 +2917,9 @@ INSTANTIATE_TEST_CASE_P(
                   ROOT_ID,
                   20 /* text_offset on the last character of "line 1". */,
                   {"TextPosition tree_id=0 anchor_id=1 text_offset=15 "
-                   "affinity=downstream annotated_text=ButtonCheck box<L>ine "
+                   "affinity=upstream annotated_text=ButtonCheck box<L>ine "
                    "1\nLine 2",
-                   "TextPosition tree_id=0 anchor_id=1 text_offset=15 "
-                   "affinity=downstream annotated_text=ButtonCheck box<L>ine "
-                   "1\nLine 2"}},
+                   "NullPosition"}},
         TestParam{base::BindRepeating([](const TestPositionType& position) {
                     return position->CreatePreviousLineEndPosition(
                         AXBoundaryBehavior::CrossBoundary);
@@ -2928,10 +2993,10 @@ INSTANTIATE_TEST_CASE_P(
                   ROOT_ID,
                   20 /* text_offset on the last character of "line 1". */,
                   {"TextPosition tree_id=0 anchor_id=1 text_offset=15 "
-                   "affinity=downstream annotated_text=ButtonCheck box<L>ine "
+                   "affinity=upstream annotated_text=ButtonCheck box<L>ine "
                    "1\nLine 2",
-                   "TextPosition tree_id=0 anchor_id=1 text_offset=15 "
-                   "affinity=downstream annotated_text=ButtonCheck box<L>ine "
+                   "TextPosition tree_id=0 anchor_id=1 text_offset=0 "
+                   "affinity=downstream annotated_text=<B>uttonCheck boxLine "
                    "1\nLine 2"}},
         TestParam{base::BindRepeating([](const TestPositionType& position) {
                     return position->CreatePreviousLineEndPosition(

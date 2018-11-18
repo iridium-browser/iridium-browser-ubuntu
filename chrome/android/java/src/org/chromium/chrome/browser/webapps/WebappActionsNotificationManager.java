@@ -57,31 +57,40 @@ class WebappActionsNotificationManager {
             return;
         }
 
+        Notification notification = createNotification();
         NotificationManager nm = (NotificationManager) mWebappActivity.getSystemService(
                 Context.NOTIFICATION_SERVICE);
-        nm.notify(NotificationConstants.NOTIFICATION_ID_WEBAPP_ACTIONS, createNotification());
+        nm.notify(NotificationConstants.NOTIFICATION_ID_WEBAPP_ACTIONS, notification);
+
         NotificationUmaTracker.getInstance().onNotificationShown(
-                NotificationUmaTracker.WEBAPP_ACTIONS,
-                ChannelDefinitions.CHANNEL_ID_WEBAPP_ACTIONS);
+                NotificationUmaTracker.SystemNotificationType.WEBAPP_ACTIONS, notification);
     }
 
     private Notification createNotification() {
+        int intentFlags = WebappLauncherActivity.getWebappActivityIntentFlags();
+        int pendingIntentFlags = PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_ONE_SHOT;
+
         PendingIntent focusIntent = PendingIntent.getActivity(mWebappActivity, 0,
-                new Intent(mWebappActivity, mWebappActivity.getClass()).setAction(ACTION_FOCUS),
-                PendingIntent.FLAG_UPDATE_CURRENT);
+                new Intent(mWebappActivity, mWebappActivity.getClass())
+                        .setAction(ACTION_FOCUS)
+                        .setFlags(intentFlags),
+                pendingIntentFlags);
 
         PendingIntent openInChromeIntent = PendingIntent.getActivity(mWebappActivity, 0,
                 new Intent(mWebappActivity, mWebappActivity.getClass())
-                        .setAction(ACTION_OPEN_IN_CHROME),
-                PendingIntent.FLAG_UPDATE_CURRENT);
+                        .setAction(ACTION_OPEN_IN_CHROME)
+                        .setFlags(intentFlags),
+                pendingIntentFlags);
 
         PendingIntent shareIntent = PendingIntent.getActivity(mWebappActivity, 0,
-                new Intent(mWebappActivity, mWebappActivity.getClass()).setAction(ACTION_SHARE),
-                PendingIntent.FLAG_UPDATE_CURRENT);
+                new Intent(mWebappActivity, mWebappActivity.getClass())
+                        .setAction(ACTION_SHARE)
+                        .setFlags(intentFlags),
+                pendingIntentFlags);
 
         return NotificationBuilderFactory
                 .createChromeNotificationBuilder(
-                        true /* prefer compat */, ChannelDefinitions.CHANNEL_ID_WEBAPP_ACTIONS)
+                        true /* prefer compat */, ChannelDefinitions.ChannelId.WEBAPP_ACTIONS)
                 .setSmallIcon(R.drawable.ic_chrome)
                 .setContentTitle(mWebappActivity.getWebappInfo().shortName())
                 .setContentText(mWebappActivity.getString(R.string.webapp_tap_to_copy_url))

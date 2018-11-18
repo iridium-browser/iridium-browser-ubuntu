@@ -8,6 +8,7 @@
 #include <set>
 #include <vector>
 
+#include "base/callback_forward.h"
 #include "base/macros.h"
 #include "base/memory/singleton.h"
 #include "chrome/common/extensions/api/automation_internal.h"
@@ -15,6 +16,7 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "extensions/common/extension_id.h"
+#include "ui/accessibility/ax_tree_id.h"
 
 class Profile;
 
@@ -26,7 +28,7 @@ namespace ui {
 struct AXActionData;
 }  // namespace ui
 
-struct ExtensionMsg_AccessibilityEventParams;
+struct ExtensionMsg_AccessibilityEventBundleParams;
 struct ExtensionMsg_AccessibilityLocationChangeParams;
 
 namespace extensions {
@@ -42,7 +44,7 @@ class AutomationEventRouter : public content::NotificationObserver {
   // listener process dies.
   void RegisterListenerForOneTree(const ExtensionId& extension_id,
                                   int listener_process_id,
-                                  int source_ax_tree_id);
+                                  ui::AXTreeID source_ax_tree_id);
 
   // Indicates that the listener at |listener_process_id| wants to receive
   // automation events from all accessibility trees because it has Desktop
@@ -51,19 +53,21 @@ class AutomationEventRouter : public content::NotificationObserver {
                                              int listener_process_id);
 
   void DispatchAccessibilityEvents(
-      const std::vector<ExtensionMsg_AccessibilityEventParams>& events);
+      const ExtensionMsg_AccessibilityEventBundleParams& events);
 
   void DispatchAccessibilityLocationChange(
       const ExtensionMsg_AccessibilityLocationChangeParams& params);
 
   // Notify all automation extensions that an accessibility tree was
   // destroyed. If |browser_context| is null,
-  void DispatchTreeDestroyedEvent(
-      int tree_id,
-      content::BrowserContext* browser_context);
+  void DispatchTreeDestroyedEvent(ui::AXTreeID tree_id,
+                                  content::BrowserContext* browser_context);
 
   // Notify the source extension of the action of an action result.
   void DispatchActionResult(const ui::AXActionData& data, bool result);
+
+  void SetTreeDestroyedCallbackForTest(
+      base::RepeatingCallback<void(ui::AXTreeID)> cb);
 
  private:
   struct AutomationListener {
@@ -74,18 +78,17 @@ class AutomationEventRouter : public content::NotificationObserver {
     ExtensionId extension_id;
     int process_id;
     bool desktop;
-    std::set<int> tree_ids;
+    std::set<ui::AXTreeID> tree_ids;
     bool is_active_profile;
   };
 
   AutomationEventRouter();
   ~AutomationEventRouter() override;
 
-  void Register(
-      const ExtensionId& extension_id,
-      int listener_process_id,
-      int source_ax_tree_id,
-      bool desktop);
+  void Register(const ExtensionId& extension_id,
+                int listener_process_id,
+                ui::AXTreeID source_ax_tree_id,
+                bool desktop);
 
   // content::NotificationObserver interface.
   void Observe(int type,
@@ -108,6 +111,8 @@ class AutomationEventRouter : public content::NotificationObserver {
   std::vector<AutomationListener> listeners_;
 
   Profile* active_profile_;
+
+  base::RepeatingCallback<void(ui::AXTreeID)> tree_destroyed_callback_for_test_;
 
   friend struct base::DefaultSingletonTraits<AutomationEventRouter>;
 

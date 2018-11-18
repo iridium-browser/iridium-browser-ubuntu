@@ -25,10 +25,11 @@
 #include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/layout/svg/layout_svg_root.h"
 #include "third_party/blink/renderer/core/layout/svg/svg_layout_support.h"
+#include "third_party/blink/renderer/core/layout/svg/svg_resources.h"
 #include "third_party/blink/renderer/core/layout/svg/svg_resources_cache.h"
 #include "third_party/blink/renderer/core/style/shadow_list.h"
 #include "third_party/blink/renderer/core/svg/svg_element.h"
-#include "third_party/blink/renderer/platform/geometry/transform_state.h"
+#include "third_party/blink/renderer/platform/transforms/transform_state.h"
 
 namespace blink {
 
@@ -47,6 +48,7 @@ void LayoutSVGBlock::AbsoluteRects(Vector<IntRect>&, const LayoutPoint&) const {
 
 void LayoutSVGBlock::WillBeDestroyed() {
   SVGResourcesCache::ClientDestroyed(*this);
+  SVGResources::ClearClipPathFilterMask(*GetElement(), Style());
   LayoutBlockFlow::WillBeDestroyed();
 }
 
@@ -57,6 +59,11 @@ void LayoutSVGBlock::UpdateFromStyle() {
 
 void LayoutSVGBlock::StyleDidChange(StyleDifference diff,
                                     const ComputedStyle* old_style) {
+  // Since layout depends on the bounds of the filter, we need to force layout
+  // when the filter changes.
+  if (diff.FilterChanged())
+    SetNeedsLayout(LayoutInvalidationReason::kStyleChange);
+
   if (diff.NeedsFullLayout()) {
     SetNeedsBoundariesUpdate();
     if (diff.TransformChanged())
@@ -65,14 +72,16 @@ void LayoutSVGBlock::StyleDidChange(StyleDifference diff,
 
   if (IsBlendingAllowed()) {
     bool has_blend_mode_changed =
-        (old_style && old_style->HasBlendMode()) == !Style()->HasBlendMode();
-    if (Parent() && has_blend_mode_changed)
+        (old_style && old_style->HasBlendMode()) == !StyleRef().HasBlendMode();
+    if (Parent() && has_blend_mode_changed) {
       Parent()->DescendantIsolationRequirementsChanged(
-          Style()->HasBlendMode() ? kDescendantIsolationRequired
-                                  : kDescendantIsolationNeedsUpdate);
+          StyleRef().HasBlendMode() ? kDescendantIsolationRequired
+                                    : kDescendantIsolationNeedsUpdate);
+    }
   }
 
   LayoutBlock::StyleDidChange(diff, old_style);
+  SVGResources::UpdateClipPathFilterMask(*GetElement(), old_style, StyleRef());
   SVGResourcesCache::ClientStyleChanged(*this, diff, StyleRef());
 }
 
@@ -107,7 +116,7 @@ const LayoutObject* LayoutSVGBlock::PushMappingToContainer(
                                                   geometry_map);
 }
 
-LayoutRect LayoutSVGBlock::AbsoluteVisualRect() const {
+LayoutRect LayoutSVGBlock::VisualRectInDocument() const {
   return SVGLayoutSupport::VisualRectInAncestorSpace(*this, *View());
 }
 

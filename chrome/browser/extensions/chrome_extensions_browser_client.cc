@@ -15,13 +15,12 @@
 #include "chrome/browser/extensions/activity_log/activity_log.h"
 #include "chrome/browser/extensions/api/chrome_extensions_api_client.h"
 #include "chrome/browser/extensions/api/content_settings/content_settings_service.h"
-#include "chrome/browser/extensions/api/generated_api_registration.h"
-#include "chrome/browser/extensions/api/preference/preference_api.h"
 #include "chrome/browser/extensions/api/runtime/chrome_runtime_api_delegate.h"
 #include "chrome/browser/extensions/chrome_component_extension_resource_manager.h"
 #include "chrome/browser/extensions/chrome_extension_api_frame_id_map_helper.h"
 #include "chrome/browser/extensions/chrome_extension_host_delegate.h"
 #include "chrome/browser/extensions/chrome_extension_web_contents_observer.h"
+#include "chrome/browser/extensions/chrome_extensions_browser_api_provider.h"
 #include "chrome/browser/extensions/chrome_extensions_interface_registration.h"
 #include "chrome/browser/extensions/chrome_kiosk_delegate.h"
 #include "chrome/browser/extensions/chrome_process_manager_delegate.h"
@@ -33,13 +32,16 @@
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/menu_manager.h"
 #include "chrome/browser/extensions/updater/chrome_update_client_config.h"
+#include "chrome/browser/extensions/user_script_listener.h"
 #include "chrome/browser/external_protocol/external_protocol_handler.h"
+#include "chrome/browser/net/system_network_context_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/renderer_host/chrome_navigation_ui_data.h"
 #include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/task_manager/web_contents_tags.h"
 #include "chrome/browser/ui/bluetooth/chrome_extension_bluetooth_chooser.h"
+#include "chrome/browser/ui/webui/chrome_web_ui_controller_factory.h"
 #include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -47,11 +49,11 @@
 #include "components/net_log/chrome_net_log.h"
 #include "components/update_client/update_client.h"
 #include "components/version_info/version_info.h"
+#include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/resource_request_info.h"
 #include "content/public/common/content_switches.h"
-#include "extensions/browser/api/generated_api_registration.h"
-#include "extensions/browser/extension_function_registry.h"
+#include "extensions/browser/core_extensions_browser_api_provider.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/extension_util.h"
@@ -61,6 +63,7 @@
 #include "extensions/common/features/feature_channel.h"
 
 #if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/login/demo_mode/demo_session.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/extensions/updater/chromeos_extension_cache_delegate.h"
 #include "chrome/browser/extensions/updater/extension_cache_impl.h"
@@ -79,13 +82,16 @@ namespace {
 bool g_did_chrome_update_for_testing = false;
 
 bool ExtensionsDisabled(const base::CommandLine& command_line) {
-  return command_line.HasSwitch(switches::kDisableExtensions) ||
-         command_line.HasSwitch(switches::kDisableExtensionsExcept);
+  return command_line.HasSwitch(::switches::kDisableExtensions) ||
+         command_line.HasSwitch(::switches::kDisableExtensionsExcept);
 }
 
 }  // namespace
 
 ChromeExtensionsBrowserClient::ChromeExtensionsBrowserClient() {
+  AddAPIProvider(std::make_unique<CoreExtensionsBrowserAPIProvider>());
+  AddAPIProvider(std::make_unique<ChromeExtensionsBrowserAPIProvider>());
+
   process_manager_delegate_.reset(new ChromeProcessManagerDelegate);
   api_client_.reset(new ChromeExtensionsAPIClient);
   SetCurrentChannel(chrome::GetChannel());
@@ -261,7 +267,7 @@ bool ChromeExtensionsBrowserClient::DidVersionUpdate(
     return true;
 
   // If we're inside a browser test, then assume prefs are all up to date.
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kTestType))
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(::switches::kTestType))
     return false;
 
   PrefService* pref_service = extension_prefs->pref_service();
@@ -290,6 +296,25 @@ void ChromeExtensionsBrowserClient::PermitExternalProtocolHandler() {
   ExternalProtocolHandler::PermitLaunchUrl();
 }
 
+bool ChromeExtensionsBrowserClient::IsInDemoMode() {
+#if defined(OS_CHROMEOS)
+  const chromeos::DemoSession* const demo_session =
+      chromeos::DemoSession::Get();
+  return demo_session && demo_session->started();
+#else
+  return false;
+#endif
+}
+
+bool ChromeExtensionsBrowserClient::IsScreensaverInDemoMode(
+    const std::string& app_id) {
+#if defined(OS_CHROMEOS)
+  return app_id == chromeos::DemoSession::GetScreensaverAppId() &&
+         IsInDemoMode();
+#endif
+  return false;
+}
+
 bool ChromeExtensionsBrowserClient::IsRunningInForcedAppMode() {
   return chrome::IsRunningInForcedAppMode();
 }
@@ -310,20 +335,6 @@ bool ChromeExtensionsBrowserClient::IsLoggedInAsPublicAccount() {
 ExtensionSystemProvider*
 ChromeExtensionsBrowserClient::GetExtensionSystemFactory() {
   return ExtensionSystemFactory::GetInstance();
-}
-
-void ChromeExtensionsBrowserClient::RegisterExtensionFunctions(
-    ExtensionFunctionRegistry* registry) const {
-  // Preferences.
-  registry->RegisterFunction<GetPreferenceFunction>();
-  registry->RegisterFunction<SetPreferenceFunction>();
-  registry->RegisterFunction<ClearPreferenceFunction>();
-
-  // Generated APIs from lower-level modules.
-  api::GeneratedFunctionRegistry::RegisterAll(registry);
-
-  // Generated APIs from Chrome.
-  api::ChromeGeneratedFunctionRegistry::RegisterAll(registry);
 }
 
 void ChromeExtensionsBrowserClient::RegisterExtensionInterfaces(
@@ -374,7 +385,7 @@ ExtensionCache* ChromeExtensionsBrowserClient::GetExtensionCache() {
 
 bool ChromeExtensionsBrowserClient::IsBackgroundUpdateAllowed() {
   return !base::CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kDisableBackgroundNetworking);
+      ::switches::kDisableBackgroundNetworking);
 }
 
 bool ChromeExtensionsBrowserClient::IsMinBrowserVersionSupported(
@@ -424,7 +435,6 @@ void ChromeExtensionsBrowserClient::AttachExtensionTaskManagerTag(
 
     case VIEW_TYPE_BACKGROUND_CONTENTS:
     case VIEW_TYPE_EXTENSION_GUEST:
-    case VIEW_TYPE_PANEL:
     case VIEW_TYPE_TAB_CONTENTS:
       // Those types are tracked by other tags:
       // BACKGROUND_CONTENTS --> task_manager::BackgroundContentsTag.
@@ -445,7 +455,7 @@ scoped_refptr<update_client::UpdateClient>
 ChromeExtensionsBrowserClient::CreateUpdateClient(
     content::BrowserContext* context) {
   return update_client::UpdateClientFactory(
-      base::MakeRefCounted<ChromeUpdateClientConfig>(context));
+      ChromeUpdateClientConfig::Create(context));
 }
 
 std::unique_ptr<ExtensionApiFrameIdMapHelper>
@@ -522,6 +532,26 @@ bool ChromeExtensionsBrowserClient::IsExtensionEnabled(
     content::BrowserContext* context) const {
   return ExtensionSystem::Get(context)->extension_service()->IsExtensionEnabled(
       extension_id);
+}
+
+bool ChromeExtensionsBrowserClient::IsWebUIAllowedToMakeNetworkRequests(
+    const url::Origin& origin) {
+  return ChromeWebUIControllerFactory::IsWebUIAllowedToMakeNetworkRequests(
+      origin);
+}
+
+network::mojom::NetworkContext*
+ChromeExtensionsBrowserClient::GetSystemNetworkContext() {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  return g_browser_process->system_network_context_manager()->GetContext();
+}
+
+UserScriptListener* ChromeExtensionsBrowserClient::GetUserScriptListener() {
+  // Create lazily since this accesses g_browser_process which may not be set up
+  // when ChromeExtensionsBrowserClient is created.
+  if (!user_script_listener_)
+    user_script_listener_ = std::make_unique<UserScriptListener>();
+  return user_script_listener_.get();
 }
 
 // static

@@ -18,7 +18,68 @@
 
 // Note: unit-testing support files are in crazy_linker_files_mock.cpp
 
-#ifndef UNIT_TESTS
+namespace crazy {
+
+String MakeDirectoryPath(const char* parent) {
+  return MakeDirectoryPath(parent, ::strlen(parent));
+}
+
+String MakeDirectoryPath(const char* parent, size_t parent_len) {
+  if (parent_len == 0) {
+    // Special case for empty inputs.
+    return String("./");
+  }
+  String result(parent);
+  if (parent_len > 0 && parent[parent_len - 1] != '/') {
+    result += '/';
+  }
+  return result;
+}
+
+String MakeAbsolutePathFrom(const char* path) {
+  return MakeAbsolutePathFrom(path, ::strlen(path));
+}
+
+String MakeAbsolutePathFrom(const char* path, size_t path_len) {
+  if (path[0] == '/') {
+    return String(path, path_len);
+  } else {
+    String cur_dir = GetCurrentDirectory();
+    String result = MakeDirectoryPath(cur_dir.c_str(), cur_dir.size());
+    result.Append(path, path_len);
+    return result;
+  }
+}
+
+bool IsSystemLibraryPath(const char* lib_path) {
+  static const char* kSystemPrefixes[] = {
+#ifdef __ANDROID__
+      // From recent Android linker sources ($AOSP/bionic/linker/linker.cpp).
+      "/system/lib64/", "/odm/lib64/", "/vendor/lib64/",
+      "/data/asan/system/lib64/", "/data/asan/odm/lib64/",
+      "/data/asan/vendor/lib64/",
+      // It's ok to mix 32-bit and 64-bit paths in the same list here.
+      "/system/lib/", "/odm/lib/", "/vendor/lib/", "/data/asan/system/lib/",
+      "/data/asan/odm/lib/", "/data/asan/vendor/lib/",
+#else
+      // Typical system library directories for Linux systems.
+      "/lib/",       "/lib32/",      "/lib64/",
+      "/libx32/",    "/usr/lib/",    "/usr/lib32/",
+      "/usr/lib64/", "/usr/libx32/", "/usr/local/lib/",
+#endif
+  };
+  size_t lib_path_len = ::strlen(lib_path);
+  for (const char* prefix : kSystemPrefixes) {
+    size_t prefix_len = ::strlen(prefix);
+    if (prefix_len < lib_path_len && !::memcmp(prefix, lib_path, prefix_len))
+      return true;
+  }
+  return false;
+}
+
+}  // namespace crazy
+
+#ifndef UNIT_TEST
 
 namespace crazy {
 
@@ -106,6 +167,8 @@ bool PathIsFile(const char* path) {
 
 }  // namespace crazy
 
+#if !defined(CRAZY_LINKER_ENABLE_FUZZING)
+
 // Custom implementation of new and malloc, this prevents dragging
 // the libc++ implementation, which drags exception-related machine
 // code that is not needed here. This helps reduce the size of the
@@ -180,4 +243,6 @@ void operator delete[](void* ptr) {
   ::free(ptr);
 }
 
-#endif  // !UNIT_TESTS
+#endif  // !CRAZY_LINKER_ENABLE_FUZZING
+
+#endif  // !UNIT_TEST

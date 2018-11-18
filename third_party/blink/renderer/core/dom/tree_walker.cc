@@ -24,17 +24,17 @@
 
 #include "third_party/blink/renderer/core/dom/tree_walker.h"
 
-#include "third_party/blink/renderer/bindings/core/v8/exception_messages.h"
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_node_filter.h"
 #include "third_party/blink/renderer/core/dom/container_node.h"
 #include "third_party/blink/renderer/core/dom/node_traversal.h"
 #include "third_party/blink/renderer/core/dom/node_traversal_strategy.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 
 namespace blink {
 
 TreeWalker::TreeWalker(Node* root_node,
                        unsigned what_to_show,
-                       V8NodeFilterCondition* filter)
+                       V8NodeFilter* filter)
     : NodeIteratorBase(root_node, what_to_show, filter), current_(root()) {}
 
 void TreeWalker::setCurrentNode(Node* node) {
@@ -56,7 +56,7 @@ Node* TreeWalker::parentNode(ExceptionState& exception_state) {
     unsigned accept_node_result = AcceptNode(node, exception_state);
     if (exception_state.HadException())
       return nullptr;
-    if (accept_node_result == NodeFilter::kFilterAccept)
+    if (accept_node_result == V8NodeFilter::FILTER_ACCEPT)
       return SetCurrent(node);
   }
   return nullptr;
@@ -68,16 +68,16 @@ Node* TreeWalker::firstChild(ExceptionState& exception_state) {
     if (exception_state.HadException())
       return nullptr;
     switch (accept_node_result) {
-      case NodeFilter::kFilterAccept:
+      case V8NodeFilter::FILTER_ACCEPT:
         current_ = node;
         return current_.Get();
-      case NodeFilter::kFilterSkip:
+      case V8NodeFilter::FILTER_SKIP:
         if (node->hasChildren()) {
           node = node->firstChild();
           continue;
         }
         break;
-      case NodeFilter::kFilterReject:
+      case V8NodeFilter::FILTER_REJECT:
         break;
     }
     do {
@@ -100,16 +100,16 @@ Node* TreeWalker::lastChild(ExceptionState& exception_state) {
     if (exception_state.HadException())
       return nullptr;
     switch (accept_node_result) {
-      case NodeFilter::kFilterAccept:
+      case V8NodeFilter::FILTER_ACCEPT:
         current_ = node;
         return current_.Get();
-      case NodeFilter::kFilterSkip:
+      case V8NodeFilter::FILTER_SKIP:
         if (node->lastChild()) {
           node = node->lastChild();
           continue;
         }
         break;
-      case NodeFilter::kFilterReject:
+      case V8NodeFilter::FILTER_REJECT:
         break;
     }
     do {
@@ -149,7 +149,7 @@ Node* TreeWalker::TraverseSiblings(ExceptionState& exception_state) {
         return nullptr;
       // 3. If result is FILTER_ACCEPT, then set the currentNode attribute to
       // node and return node.
-      if (result == NodeFilter::kFilterAccept)
+      if (result == V8NodeFilter::FILTER_ACCEPT)
         return SetCurrent(node);
       // 4. Set sibling to node's first child if type is next, and node's last
       // child if type is previous.
@@ -157,7 +157,7 @@ Node* TreeWalker::TraverseSiblings(ExceptionState& exception_state) {
       // 5. If result is FILTER_REJECT or sibling is null, then set sibling to
       // node's next sibling if type is next, and node's previous sibling if
       // type is previous.
-      if (result == NodeFilter::kFilterReject || !sibling)
+      if (result == V8NodeFilter::FILTER_REJECT || !sibling)
         sibling = Strategy::NextNode(*node);
     }
     // 3. Set node to its parent.
@@ -170,7 +170,7 @@ Node* TreeWalker::TraverseSiblings(ExceptionState& exception_state) {
     unsigned result = AcceptNode(node, exception_state);
     if (exception_state.HadException())
       return nullptr;
-    if (result == NodeFilter::kFilterAccept)
+    if (result == V8NodeFilter::FILTER_ACCEPT)
       return nullptr;
   }
 }
@@ -191,17 +191,17 @@ Node* TreeWalker::previousNode(ExceptionState& exception_state) {
       unsigned accept_node_result = AcceptNode(node, exception_state);
       if (exception_state.HadException())
         return nullptr;
-      if (accept_node_result == NodeFilter::kFilterReject)
+      if (accept_node_result == V8NodeFilter::FILTER_REJECT)
         continue;
       while (Node* last_child = node->lastChild()) {
         node = last_child;
         accept_node_result = AcceptNode(node, exception_state);
         if (exception_state.HadException())
           return nullptr;
-        if (accept_node_result == NodeFilter::kFilterReject)
+        if (accept_node_result == V8NodeFilter::FILTER_REJECT)
           break;
       }
-      if (accept_node_result == NodeFilter::kFilterAccept) {
+      if (accept_node_result == V8NodeFilter::FILTER_ACCEPT) {
         current_ = node;
         return current_.Get();
       }
@@ -215,7 +215,7 @@ Node* TreeWalker::previousNode(ExceptionState& exception_state) {
     unsigned accept_node_result = AcceptNode(node, exception_state);
     if (exception_state.HadException())
       return nullptr;
-    if (accept_node_result == NodeFilter::kFilterAccept)
+    if (accept_node_result == V8NodeFilter::FILTER_ACCEPT)
       return SetCurrent(node);
   }
   return nullptr;
@@ -229,9 +229,9 @@ Children:
     unsigned accept_node_result = AcceptNode(node, exception_state);
     if (exception_state.HadException())
       return nullptr;
-    if (accept_node_result == NodeFilter::kFilterAccept)
+    if (accept_node_result == V8NodeFilter::FILTER_ACCEPT)
       return SetCurrent(node);
-    if (accept_node_result == NodeFilter::kFilterReject)
+    if (accept_node_result == V8NodeFilter::FILTER_REJECT)
       break;
   }
   while (Node* next_sibling =
@@ -240,9 +240,9 @@ Children:
     unsigned accept_node_result = AcceptNode(node, exception_state);
     if (exception_state.HadException())
       return nullptr;
-    if (accept_node_result == NodeFilter::kFilterAccept)
+    if (accept_node_result == V8NodeFilter::FILTER_ACCEPT)
       return SetCurrent(node);
-    if (accept_node_result == NodeFilter::kFilterSkip)
+    if (accept_node_result == V8NodeFilter::FILTER_SKIP)
       goto Children;
   }
   return nullptr;
@@ -252,11 +252,6 @@ void TreeWalker::Trace(blink::Visitor* visitor) {
   visitor->Trace(current_);
   ScriptWrappable::Trace(visitor);
   NodeIteratorBase::Trace(visitor);
-}
-
-void TreeWalker::TraceWrappers(const ScriptWrappableVisitor* visitor) const {
-  ScriptWrappable::TraceWrappers(visitor);
-  NodeIteratorBase::TraceWrappers(visitor);
 }
 
 }  // namespace blink

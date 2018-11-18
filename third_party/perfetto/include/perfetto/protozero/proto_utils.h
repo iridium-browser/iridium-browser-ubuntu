@@ -22,6 +22,9 @@
 
 #include <type_traits>
 
+#include "perfetto/base/logging.h"
+#include "perfetto/base/utils.h"
+
 namespace protozero {
 namespace proto_utils {
 
@@ -107,23 +110,26 @@ void StaticAssertSingleBytePreamble() {
 // Parses a VarInt from the encoded buffer [start, end). |end| is STL-style and
 // points one byte past the end of buffer.
 // The parsed int value is stored in the output arg |value|. Returns a pointer
-// to the next unconsumed byte (so start < retval <= end).
-const uint8_t* ParseVarInt(const uint8_t* start,
-                           const uint8_t* end,
-                           uint64_t* value);
-
-// Parses a protobuf field and computes its id, type and value.
-// Returns a pointer to the next unconsumed byte (|start| < retval <= end) that
-// is either the beginning of the next field or the end of the parent message.
-// In the case of a kFieldTypeLengthDelimited field, |field_intvalue| will
-// store the length of the payload (either a string or a nested message). In
-// this case, the start of the payload will be at (return value) -
-// |field_intvalue|.
-const uint8_t* ParseField(const uint8_t* start,
-                          const uint8_t* end,
-                          uint32_t* field_id,
-                          FieldType* field_type,
-                          uint64_t* field_intvalue);
+// to the next unconsumed byte (so start < retval <= end) or |start| if the
+// VarInt could not be fully parsed because there was not enough space in the
+// buffer.
+inline const uint8_t* ParseVarInt(const uint8_t* start,
+                                  const uint8_t* end,
+                                  uint64_t* value) {
+  const uint8_t* pos = start;
+  uint64_t shift = 0;
+  *value = 0;
+  do {
+    if (PERFETTO_UNLIKELY(pos >= end)) {
+      *value = 0;
+      return start;
+    }
+    PERFETTO_DCHECK(shift < 64ull);
+    *value |= static_cast<uint64_t>(*pos & 0x7f) << shift;
+    shift += 7;
+  } while (*pos++ & 0x80);
+  return pos;
+}
 
 }  // namespace proto_utils
 }  // namespace protozero

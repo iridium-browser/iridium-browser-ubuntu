@@ -27,7 +27,7 @@
 
 namespace {
 
-const size_t kMaximumMessageSize = 4096;  // in bytes.
+const size_t kMaximumGcmMessageSize = 4096;  // in bytes.
 const char kCollapseKey[] = "collapse_key";
 const char kGoogDotRestrictedPrefix[] = "goog.";
 const char kGoogleRestrictedPrefix[] = "google";
@@ -203,14 +203,13 @@ void GcmSendFunction::CompleteFunctionWithResult(
 
 bool GcmSendFunction::ValidateMessageData(const gcm::MessageData& data) const {
   size_t total_size = 0u;
-  for (std::map<std::string, std::string>::const_iterator iter = data.begin();
-       iter != data.end(); ++iter) {
+  for (auto iter = data.cbegin(); iter != data.cend(); ++iter) {
     total_size += iter->first.size() + iter->second.size();
 
     if (!IsMessageKeyValid(iter->first) ||
-        kMaximumMessageSize < iter->first.size() ||
-        kMaximumMessageSize < iter->second.size() ||
-        kMaximumMessageSize < total_size)
+        kMaximumGcmMessageSize < iter->first.size() ||
+        kMaximumGcmMessageSize < iter->second.size() ||
+        kMaximumGcmMessageSize < total_size)
       return false;
   }
 

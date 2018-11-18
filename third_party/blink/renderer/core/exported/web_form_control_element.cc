@@ -68,12 +68,37 @@ WebString WebFormControlElement::FormControlTypeForAutofill() const {
   return ConstUnwrap<HTMLFormControlElement>()->type();
 }
 
+WebAutofillState WebFormControlElement::GetAutofillState() const {
+  return ConstUnwrap<HTMLFormControlElement>()->GetAutofillState();
+}
+
 bool WebFormControlElement::IsAutofilled() const {
   return ConstUnwrap<HTMLFormControlElement>()->IsAutofilled();
 }
 
-void WebFormControlElement::SetAutofilled(bool autofilled) {
-  Unwrap<HTMLFormControlElement>()->SetAutofilled(autofilled);
+bool WebFormControlElement::UserHasEditedTheField() const {
+  if (auto* input = ToHTMLInputElementOrNull(*private_))
+    return input->UserHasEditedTheField();
+  if (auto* select_element = ToHTMLSelectElementOrNull(*private_))
+    return select_element->UserHasEditedTheField();
+  return true;
+}
+
+void WebFormControlElement::SetUserHasEditedTheFieldForTest() {
+  if (auto* input = ToHTMLInputElementOrNull(*private_))
+    input->SetUserHasEditedTheFieldForTest();
+}
+
+void WebFormControlElement::SetAutofillState(WebAutofillState autofill_state) {
+  Unwrap<HTMLFormControlElement>()->SetAutofillState(autofill_state);
+}
+
+WebString WebFormControlElement::AutofillSection() const {
+  return ConstUnwrap<HTMLFormControlElement>()->AutofillSection();
+}
+
+void WebFormControlElement::SetAutofillSection(const WebString& section) {
+  Unwrap<HTMLFormControlElement>()->SetAutofillSection(section);
 }
 
 WebString WebFormControlElement::NameForAutofill() const {
@@ -110,10 +135,10 @@ void WebFormControlElement::SetAutofillValue(const WebString& value) {
                                             nullptr);
     }
     Unwrap<Element>()->DispatchScopedEvent(
-        Event::CreateBubble(EventTypeNames::keydown));
+        *Event::CreateBubble(EventTypeNames::keydown));
     Unwrap<TextControlElement>()->SetAutofillValue(value);
     Unwrap<Element>()->DispatchScopedEvent(
-        Event::CreateBubble(EventTypeNames::keyup));
+        *Event::CreateBubble(EventTypeNames::keyup));
     if (!Focused()) {
       Unwrap<Element>()->DispatchBlurEvent(nullptr, kWebFocusTypeForward,
                                            nullptr);
@@ -213,6 +238,10 @@ WebString WebFormControlElement::DirectionForFormData() const {
 
 WebFormElement WebFormControlElement::Form() const {
   return WebFormElement(ConstUnwrap<HTMLFormControlElement>()->Form());
+}
+
+unsigned WebFormControlElement::UniqueRendererFormControlId() const {
+  return ConstUnwrap<HTMLFormControlElement>()->UniqueRendererFormControlId();
 }
 
 WebFormControlElement::WebFormControlElement(HTMLFormControlElement* elem)

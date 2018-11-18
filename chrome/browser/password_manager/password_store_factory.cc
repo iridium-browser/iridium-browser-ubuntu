@@ -12,8 +12,10 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/rand_util.h"
 #include "build/build_config.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/incognito_helpers.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/glue/sync_start_util.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
@@ -24,19 +26,22 @@
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/os_crypt/os_crypt_switches.h"
 #include "components/password_manager/core/browser/login_database.h"
+#include "components/password_manager/core/browser/password_manager_constants.h"
 #include "components/password_manager/core/browser/password_manager_util.h"
-#include "components/password_manager/core/browser/password_reuse_defines.h"
 #include "components/password_manager/core/browser/password_store.h"
 #include "components/password_manager/core/browser/password_store_default.h"
 #include "components/password_manager/core/browser/password_store_factory_util.h"
 #include "components/password_manager/core/common/password_manager_pref_names.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
+#include "components/signin/core/browser/signin_manager.h"
+#include "content/public/browser/browser_context.h"
+#include "content/public/browser/network_service_instance.h"
+#include "content/public/browser/storage_partition.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 
 #if defined(OS_WIN)
 #include "chrome/browser/password_manager/password_manager_util_win.h"
-#include "chrome/browser/password_manager/password_store_win.h"
-#include "components/password_manager/core/browser/webdata/password_web_data_service_win.h"
 #elif defined(OS_MACOSX)
 #include "chrome/browser/password_manager/password_store_mac.h"
 #elif defined(OS_CHROMEOS) || defined(OS_ANDROID)
@@ -62,8 +67,19 @@ using password_manager::PasswordStore;
 namespace {
 
 #if defined(USE_X11)
-const LocalProfileId kInvalidLocalProfileId =
+constexpr LocalProfileId kInvalidLocalProfileId =
     static_cast<LocalProfileId>(0);
+constexpr PasswordStoreX::MigrationToLoginDBStep
+    kMigrationToLoginDBNotAttempted = PasswordStoreX::NOT_ATTEMPTED;
+#endif
+
+#if defined(SYNC_PASSWORD_REUSE_DETECTION_ENABLED)
+std::string GetSyncUsername(Profile* profile) {
+  SigninManagerBase* signin_manager =
+      SigninManagerFactory::GetForProfileIfExists(profile);
+  return signin_manager ? signin_manager->GetAuthenticatedAccountInfo().email
+                        : std::string();
+}
 #endif
 
 }  // namespace
@@ -96,12 +112,12 @@ void PasswordStoreFactory::OnPasswordsSyncedStatePotentiallyChanged(
     return;
   syncer::SyncService* sync_service =
       ProfileSyncServiceFactory::GetInstance()->GetForProfile(profile);
-  net::URLRequestContextGetter* request_context_getter =
-      profile->GetRequestContext();
 
   password_manager::ToggleAffiliationBasedMatchingBasedOnPasswordSyncedState(
-      password_store.get(), sync_service, request_context_getter,
-      profile->GetPath());
+      password_store.get(), sync_service,
+      content::BrowserContext::GetDefaultStoragePartition(profile)
+          ->GetURLLoaderFactoryForBrowserProcess(),
+      content::GetNetworkConnectionTracker(), profile->GetPath());
 }
 
 PasswordStoreFactory::PasswordStoreFactory()
@@ -150,12 +166,17 @@ PasswordStoreFactory::BuildServiceInstanceFor(
 
   std::unique_ptr<password_manager::LoginDatabase> login_db(
       password_manager::CreateLoginDatabase(profile->GetPath()));
+#if defined(OS_MACOSX)
+  PrefService* local_state = g_browser_process->local_state();
+  DCHECK(local_state);
+  login_db->InitPasswordRecoveryUtil(
+      std::make_unique<password_manager::PasswordRecoveryUtilMac>(
+          local_state, base::ThreadTaskRunnerHandle::Get()));
+#endif
 
   scoped_refptr<PasswordStore> ps;
 #if defined(OS_WIN)
-  ps = new PasswordStoreWin(std::move(login_db),
-                            WebDataServiceFactory::GetPasswordWebDataForProfile(
-                                profile, ServiceAccessType::EXPLICIT_ACCESS));
+  ps = new password_manager::PasswordStoreDefault(std::move(login_db));
 #elif defined(OS_MACOSX)
   ps = new PasswordStoreMac(std::move(login_db), profile->GetPrefs());
 #elif defined(OS_CHROMEOS) || defined(OS_ANDROID)
@@ -243,7 +264,11 @@ PasswordStoreFactory::BuildServiceInstanceFor(
         " for more information about password storage options.";
   }
 
-  ps = new PasswordStoreX(std::move(login_db), std::move(backend));
+  ps = new PasswordStoreX(
+      std::move(login_db),
+      profile->GetPath().Append(password_manager::kLoginDataFileName),
+      profile->GetPath().Append(password_manager::kSecondLoginDataFileName),
+      std::move(backend), prefs);
   RecordBackendStatistics(desktop_env, store_type, used_backend);
 #elif defined(USE_OZONE)
   ps = new password_manager::PasswordStoreDefault(std::move(login_db));
@@ -259,10 +284,21 @@ PasswordStoreFactory::BuildServiceInstanceFor(
     return nullptr;
   }
 
-  // TODO(https://crbug.com/817754): remove the code once majority of the users
-  // executed it.
-  password_manager_util::CleanUserDataInBlacklistedCredentials(
-      ps.get(), profile->GetPrefs(), 60);
+#if defined(SYNC_PASSWORD_REUSE_DETECTION_ENABLED)
+  // Prepare password hash data for reuse detection.
+  ps->PreparePasswordHashData(GetSyncUsername(profile));
+#endif
+
+  auto network_context_getter = base::BindRepeating(
+      [](Profile* profile) -> network::mojom::NetworkContext* {
+        if (!g_browser_process->profile_manager()->IsValidProfile(profile))
+          return nullptr;
+        return content::BrowserContext::GetDefaultStoragePartition(profile)
+            ->GetNetworkContext();
+      },
+      profile);
+  password_manager_util::RemoveUselessCredentials(ps, profile->GetPrefs(), 60,
+                                                  network_context_getter);
 
 #if defined(OS_WIN) || defined(OS_MACOSX) || \
     (defined(OS_LINUX) && !defined(OS_CHROMEOS))
@@ -282,6 +318,9 @@ void PasswordStoreFactory::RegisterProfilePrefs(
   // result in using PasswordStoreX in BuildServiceInstanceFor().
   registry->RegisterIntegerPref(password_manager::prefs::kLocalProfileId,
                                 kInvalidLocalProfileId);
+  registry->RegisterIntegerPref(
+      password_manager::prefs::kMigrationToLoginDBStep,
+      kMigrationToLoginDBNotAttempted);
 #endif
 }
 

@@ -18,9 +18,8 @@ class DummyFontFaceSource : public CSSFontFaceSource {
   scoped_refptr<SimpleFontData> CreateFontData(
       const FontDescription&,
       const FontSelectionCapabilities&) override {
-    return SimpleFontData::Create(FontPlatformData(
-        PaintTypeface::FromSkTypeface(SkTypeface::MakeDefault()), CString(), 0,
-        false, false));
+    return SimpleFontData::Create(FontPlatformData(SkTypeface::MakeDefault(),
+                                                   CString(), 0, false, false));
   }
 
   DummyFontFaceSource() = default;
@@ -51,9 +50,9 @@ TEST(CSSFontFaceSourceTest, HashCollision) {
   DummyFontFaceSource font_face_source;
   // Even if the hash value collide, fontface cache should return different
   // value for different fonts.
-  EXPECT_EQ(SimulateHashCalculation(2), SimulateHashCalculation(4925));
-  EXPECT_NE(font_face_source.GetFontDataForSize(2),
-            font_face_source.GetFontDataForSize(4925));
+  EXPECT_EQ(SimulateHashCalculation(527), SimulateHashCalculation(3099));
+  EXPECT_NE(font_face_source.GetFontDataForSize(527),
+            font_face_source.GetFontDataForSize(3099));
 }
 
 // Exercises the size font_data_table_ assertions in CSSFontFaceSource.

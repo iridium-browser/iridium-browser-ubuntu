@@ -57,6 +57,7 @@ static void sectionMapping(IO &IO, WasmYAML::NameSection &Section) {
 static void sectionMapping(IO &IO, WasmYAML::LinkingSection &Section) {
   commonSectionMapping(IO, Section);
   IO.mapRequired("Name", Section.Name);
+  IO.mapRequired("Version", Section.Version);
   IO.mapOptional("SymbolTable", Section.SymbolTable);
   IO.mapOptional("SegmentInfo", Section.SegmentInfos);
   IO.mapOptional("InitFunctions", Section.InitFunctions);
@@ -308,7 +309,7 @@ void MappingTraits<WasmYAML::Import>::mapping(IO &IO,
     IO.mapRequired("GlobalMutable", Import.GlobalImport.Mutable);
   } else if (Import.Kind == wasm::WASM_EXTERNAL_TABLE) {
     IO.mapRequired("Table", Import.TableImport);
-  } else if (Import.Kind == wasm::WASM_EXTERNAL_MEMORY ) {
+  } else if (Import.Kind == wasm::WASM_EXTERNAL_MEMORY) {
     IO.mapRequired("Memory", Import.Memory);
   } else {
     llvm_unreachable("unhandled import type");
@@ -382,8 +383,8 @@ void MappingTraits<WasmYAML::ComdatEntry>::mapping(
   IO.mapRequired("Index", ComdatEntry.Index);
 }
 
-void MappingTraits<WasmYAML::Comdat>::mapping(
-    IO &IO, WasmYAML::Comdat &Comdat) {
+void MappingTraits<WasmYAML::Comdat>::mapping(IO &IO,
+                                              WasmYAML::Comdat &Comdat) {
   IO.mapRequired("Name", Comdat.Name);
   IO.mapRequired("Entries", Comdat.Entries);
 }
@@ -404,6 +405,8 @@ void MappingTraits<WasmYAML::SymbolInfo>::mapping(IO &IO,
       IO.mapOptional("Offset", Info.DataRef.Offset, 0u);
       IO.mapRequired("Size", Info.DataRef.Size);
     }
+  } else if (Info.Kind == wasm::WASM_SYMBOL_TYPE_SECTION) {
+    IO.mapRequired("Section", Info.ElementIndex);
   } else {
     llvm_unreachable("unsupported symbol kind");
   }
@@ -417,16 +420,16 @@ void ScalarBitSetTraits<WasmYAML::LimitFlags>::bitset(
 }
 
 void ScalarBitSetTraits<WasmYAML::SegmentFlags>::bitset(
-    IO &IO, WasmYAML::SegmentFlags &Value) {
-}
+    IO &IO, WasmYAML::SegmentFlags &Value) {}
 
 void ScalarBitSetTraits<WasmYAML::SymbolFlags>::bitset(
     IO &IO, WasmYAML::SymbolFlags &Value) {
-#define BCaseMask(M, X) IO.maskedBitSetCase(Value, #X, wasm::WASM_SYMBOL_##X, wasm::WASM_SYMBOL_##M)
-  //BCaseMask(BINDING_MASK, BINDING_GLOBAL);
+#define BCaseMask(M, X)                                                        \
+  IO.maskedBitSetCase(Value, #X, wasm::WASM_SYMBOL_##X, wasm::WASM_SYMBOL_##M)
+  // BCaseMask(BINDING_MASK, BINDING_GLOBAL);
   BCaseMask(BINDING_MASK, BINDING_WEAK);
   BCaseMask(BINDING_MASK, BINDING_LOCAL);
-  //BCaseMask(VISIBILITY_MASK, VISIBILITY_DEFAULT);
+  // BCaseMask(VISIBILITY_MASK, VISIBILITY_DEFAULT);
   BCaseMask(VISIBILITY_MASK, VISIBILITY_HIDDEN);
   BCaseMask(UNDEFINED, UNDEFINED);
 #undef BCaseMask
@@ -438,6 +441,7 @@ void ScalarEnumerationTraits<WasmYAML::SymbolKind>::enumeration(
   ECase(FUNCTION);
   ECase(DATA);
   ECase(GLOBAL);
+  ECase(SECTION);
 #undef ECase
 }
 
@@ -448,6 +452,7 @@ void ScalarEnumerationTraits<WasmYAML::ValueType>::enumeration(
   ECase(I64);
   ECase(F32);
   ECase(F64);
+  ECase(V128);
   ECase(ANYFUNC);
   ECase(FUNC);
   ECase(NORESULT);

@@ -26,7 +26,7 @@
 #include "base/feature_list.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "base/time/time.h"
 #include "base/win/win_util.h"
 #include "chrome/browser/browser_process.h"
@@ -34,6 +34,7 @@
 #include "components/password_manager/core/browser/password_manager.h"
 #include "components/password_manager/core/common/password_manager_pref_names.h"
 #include "components/prefs/pref_service.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
@@ -333,7 +334,7 @@ void GetOsPasswordStatus() {
   OsPasswordStatus* status_weak = status.get();
   // This task calls ::LogonUser(), hence MayBlock().
   base::PostTaskWithTraitsAndReply(
-      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
       base::Bind(&GetOsPasswordStatusInternal, prefs_weak, status_weak),
       base::Bind(&ReplyOsPasswordStatus, base::Passed(&prefs),
                  base::Passed(&status)));
@@ -524,9 +525,9 @@ bool AuthenticateUserNew(gfx::NativeWindow window,
 }  // namespace
 
 void DelayReportOsPassword() {
-  content::BrowserThread::PostDelayedTask(content::BrowserThread::UI, FROM_HERE,
-                                          base::Bind(&GetOsPasswordStatus),
-                                          base::TimeDelta::FromSeconds(40));
+  base::PostDelayedTaskWithTraits(FROM_HERE, {content::BrowserThread::UI},
+                                  base::Bind(&GetOsPasswordStatus),
+                                  base::TimeDelta::FromSeconds(40));
 }
 
 bool AuthenticateUser(gfx::NativeWindow window,

@@ -33,7 +33,7 @@
 #include <hb-ot.h>
 #endif
 
-struct supported_font_funcs_t {
+static struct supported_font_funcs_t {
 	char name[4];
 	void (*func) (hb_font_t *);
 } supported_font_funcs[] =
@@ -64,8 +64,6 @@ fail (hb_bool_t suggest_help, const char *format, ...)
   exit (1);
 }
 
-
-hb_bool_t debug = false;
 
 static gchar *
 shapers_to_string (void)
@@ -107,7 +105,6 @@ option_parser_t::add_main_options (void)
   {
     {"version",		0, G_OPTION_FLAG_NO_ARG,
 			      G_OPTION_ARG_CALLBACK,	(gpointer) &show_version,	"Show version numbers",			nullptr},
-    {"debug",		0, 0, G_OPTION_ARG_NONE,	&debug,				"Free all resources before exit",	nullptr},
     {nullptr}
   };
   g_option_context_add_main_entries (context, entries, nullptr);
@@ -175,9 +172,9 @@ parse_margin (const char *name G_GNUC_UNUSED,
   view_options_t *view_opts = (view_options_t *) data;
   view_options_t::margin_t &m = view_opts->margin;
   switch (sscanf (arg, "%lf%*[ ,]%lf%*[ ,]%lf%*[ ,]%lf", &m.t, &m.r, &m.b, &m.l)) {
-    case 1: m.r = m.t;
-    case 2: m.b = m.t;
-    case 3: m.l = m.r;
+    case 1: m.r = m.t; HB_FALLTHROUGH;
+    case 2: m.b = m.t; HB_FALLTHROUGH;
+    case 3: m.l = m.r; HB_FALLTHROUGH;
     case 4: return true;
     default:
       g_set_error (error, G_OPTION_ERROR, G_OPTION_ERROR_BAD_VALUE,
@@ -192,11 +189,29 @@ static gboolean
 parse_shapers (const char *name G_GNUC_UNUSED,
 	       const char *arg,
 	       gpointer    data,
-	       GError    **error G_GNUC_UNUSED)
+	       GError    **error)
 {
   shape_options_t *shape_opts = (shape_options_t *) data;
+  char **shapers = g_strsplit (arg, ",", 0);
+
+  for (char **shaper = shapers; *shaper; shaper++) {
+    bool found = false;
+    for (const char **hb_shaper = hb_shape_list_shapers (); *hb_shaper; hb_shaper++) {
+      if (strcmp (*shaper, *hb_shaper) == 0) {
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      g_set_error (error, G_OPTION_ERROR, G_OPTION_ERROR_BAD_VALUE,
+		   "Unknown or unsupported shaper: %s", *shaper);
+      g_strfreev (shapers);
+      return false;
+    }
+  }
+
   g_strfreev (shape_opts->shapers);
-  shape_opts->shapers = g_strsplit (arg, ",", 0);
+  shape_opts->shapers = shapers;
   return true;
 }
 
@@ -340,8 +355,10 @@ parse_unicodes (const char *name G_GNUC_UNUSED,
 
   while (s && *s)
   {
-    while (*s && strchr ("<+>{},;&#\\xXuUnNiI\n\t", *s))
+    while (*s && strchr ("<+>{},;&#\\xXuUnNiI\n\t\v\f\r ", *s))
       s++;
+    if (!*s)
+      break;
 
     errno = 0;
     hb_codepoint_t u = strtoul (s, &p, 16);
@@ -402,7 +419,7 @@ shape_options_t::add_options (option_parser_t *parser)
     {"cluster-level",	0, 0, G_OPTION_ARG_INT,		&this->cluster_level,		"Cluster merging level (default: 0)",	"0/1/2"},
     {"normalize-glyphs",0, 0, G_OPTION_ARG_NONE,	&this->normalize_glyphs,	"Rearrange glyph clusters in nominal order",	nullptr},
     {"verify",		0, 0, G_OPTION_ARG_NONE,	&this->verify,			"Perform sanity checks on shaping results",	nullptr},
-    {"num-iterations",	0, 0, G_OPTION_ARG_INT,		&this->num_iterations,		"Run shaper N times (default: 1)",	"N"},
+    {"num-iterations", 'n', 0, G_OPTION_ARG_INT,		&this->num_iterations,		"Run shaper N times (default: 1)",	"N"},
     {nullptr}
   };
   parser->add_group (entries,
@@ -472,7 +489,7 @@ parse_font_size (const char *name G_GNUC_UNUSED,
     return true;
   }
   switch (sscanf (arg, "%lf%*[ ,]%lf", &font_opts->font_size_x, &font_opts->font_size_y)) {
-    case 1: font_opts->font_size_y = font_opts->font_size_x;
+    case 1: font_opts->font_size_y = font_opts->font_size_x; HB_FALLTHROUGH;
     case 2: return true;
     default:
       g_set_error (error, G_OPTION_ERROR, G_OPTION_ERROR_BAD_VALUE,
@@ -490,7 +507,7 @@ parse_font_ppem (const char *name G_GNUC_UNUSED,
 {
   font_options_t *font_opts = (font_options_t *) data;
   switch (sscanf (arg, "%d%*[ ,]%d", &font_opts->x_ppem, &font_opts->y_ppem)) {
-    case 1: font_opts->y_ppem = font_opts->x_ppem;
+    case 1: font_opts->y_ppem = font_opts->x_ppem; HB_FALLTHROUGH;
     case 2: return true;
     default:
       g_set_error (error, G_OPTION_ERROR, G_OPTION_ERROR_BAD_VALUE,
@@ -539,6 +556,7 @@ font_options_t::add_options (option_parser_t *parser)
     {"font-ppem",	0, 0, G_OPTION_ARG_CALLBACK,	(gpointer) &parse_font_ppem,	"Set x,y pixels per EM (default: 0; disabled)",	"1/2 integers"},
     {"font-ptem",	0, 0, G_OPTION_ARG_DOUBLE,	&this->ptem,			"Set font point-size (default: 0; disabled)",	"point-size"},
     {"font-funcs",	0, 0, G_OPTION_ARG_STRING,	&this->font_funcs,		text,						"impl"},
+    {"ft-load-flags",	0, 0, G_OPTION_ARG_INT,		&this->ft_load_flags,		"Set FreeType load-flags (default: 2)",		"integer"},
     {nullptr}
   };
   parser->add_group (entries,
@@ -626,78 +644,26 @@ font_options_t::get_font (void) const
   if (font)
     return font;
 
-  hb_blob_t *blob = nullptr;
-
   /* Create the blob */
+  if (!font_file)
+    fail (true, "No font file set");
+
+  const char *font_path = font_file;
+
+  if (0 == strcmp (font_path, "-"))
   {
-    char *font_data;
-    unsigned int len = 0;
-    hb_destroy_func_t destroy;
-    void *user_data;
-    hb_memory_mode_t mm;
-
-    /* This is a hell of a lot of code for just reading a file! */
-    if (!font_file)
-      fail (true, "No font file set");
-
-    if (0 == strcmp (font_file, "-")) {
-      /* read it */
-      GString *gs = g_string_new (nullptr);
-      char buf[BUFSIZ];
 #if defined(_WIN32) || defined(__CYGWIN__)
-      setmode (fileno (stdin), O_BINARY);
+    setmode (fileno (stdin), O_BINARY);
+    font_path = "STDIN";
+#else
+    font_path = "/dev/stdin";
 #endif
-      while (!feof (stdin)) {
-	size_t ret = fread (buf, 1, sizeof (buf), stdin);
-	if (ferror (stdin))
-	  fail (false, "Failed reading font from standard input: %s",
-		strerror (errno));
-	g_string_append_len (gs, buf, ret);
-      }
-      len = gs->len;
-      font_data = g_string_free (gs, false);
-      user_data = font_data;
-      destroy = (hb_destroy_func_t) g_free;
-      mm = HB_MEMORY_MODE_WRITABLE;
-    } else {
-      GError *error = nullptr;
-      GMappedFile *mf = g_mapped_file_new (font_file, false, &error);
-      if (mf) {
-	font_data = g_mapped_file_get_contents (mf);
-	len = g_mapped_file_get_length (mf);
-	if (len) {
-	  destroy = (hb_destroy_func_t) g_mapped_file_unref;
-	  user_data = (void *) mf;
-	  mm = HB_MEMORY_MODE_READONLY_MAY_MAKE_WRITABLE;
-	} else
-	  g_mapped_file_unref (mf);
-      } else {
-	fail (false, "%s", error->message);
-	//g_error_free (error);
-      }
-      if (!len) {
-	/* GMappedFile is buggy, it doesn't fail if file isn't regular.
-	 * Try reading.
-	 * https://bugzilla.gnome.org/show_bug.cgi?id=659212 */
-        GError *error = nullptr;
-	gsize l;
-	if (g_file_get_contents (font_file, &font_data, &l, &error)) {
-	  len = l;
-	  destroy = (hb_destroy_func_t) g_free;
-	  user_data = (void *) font_data;
-	  mm = HB_MEMORY_MODE_WRITABLE;
-	} else {
-	  fail (false, "%s", error->message);
-	  //g_error_free (error);
-	}
-      }
-    }
-
-    if (debug)
-      mm = HB_MEMORY_MODE_DUPLICATE;
-
-    blob = hb_blob_create (font_data, len, mm, user_data, destroy);
   }
+
+  blob = hb_blob_create_from_file (font_path);
+
+  if (blob == hb_blob_get_empty ())
+    fail (false, "No such file or directory");
 
   /* Create the face */
   hb_face_t *face = hb_face_create (blob, face_index);
@@ -752,6 +718,9 @@ font_options_t::get_font (void) const
     }
   }
   set_font_funcs (font);
+#ifdef HAVE_FREETYPE
+  hb_ft_font_set_load_flags (font, ft_load_flags);
+#endif
 
   return font;
 }

@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <limits>
 
+#include "third_party/base/ptr_util.h"
 #include "xfa/fde/cfde_textout.h"
 #include "xfa/fde/cfde_wordbreak_data.h"
 #include "xfa/fgas/font/cfgas_gefont.h"
@@ -19,7 +20,7 @@ constexpr size_t kMaxEditOperations = 128;
 constexpr size_t kGapSize = 128;
 constexpr size_t kPageWidthMax = 0xffff;
 
-class InsertOperation : public CFDE_TextEditEngine::Operation {
+class InsertOperation final : public CFDE_TextEditEngine::Operation {
  public:
   InsertOperation(CFDE_TextEditEngine* engine,
                   size_t start_idx,
@@ -44,7 +45,7 @@ class InsertOperation : public CFDE_TextEditEngine::Operation {
   WideString added_text_;
 };
 
-class DeleteOperation : public CFDE_TextEditEngine::Operation {
+class DeleteOperation final : public CFDE_TextEditEngine::Operation {
  public:
   DeleteOperation(CFDE_TextEditEngine* engine,
                   size_t start_idx,
@@ -69,7 +70,7 @@ class DeleteOperation : public CFDE_TextEditEngine::Operation {
   WideString removed_text_;
 };
 
-class ReplaceOperation : public CFDE_TextEditEngine::Operation {
+class ReplaceOperation final : public CFDE_TextEditEngine::Operation {
  public:
   ReplaceOperation(CFDE_TextEditEngine* engine,
                    size_t start_idx,
@@ -238,7 +239,7 @@ size_t CFDE_TextEditEngine::CountCharsExceedingSize(const WideString& text,
   text_out->SetStyles(style);
 
   size_t length = text.GetLength();
-  WideStringView temp(text.c_str(), length);
+  WideStringView temp = text.AsStringView();
 
   float vertical_height = line_spacing_ * visible_line_count_;
   size_t chars_exceeding_size = 0;
@@ -246,7 +247,7 @@ size_t CFDE_TextEditEngine::CountCharsExceedingSize(const WideString& text,
   for (size_t i = 0; i < num_to_check; i++) {
     // This does a lot of string copying ....
     // TODO(dsinclair): make CalcLogicSize take a WideStringC instead.
-    text_out->CalcLogicSize(WideString(temp), text_rect);
+    text_out->CalcLogicSize(WideString(temp), &text_rect);
 
     if (limit_horizontal_area_ && text_rect.width <= available_width_)
       break;
@@ -262,10 +263,34 @@ size_t CFDE_TextEditEngine::CountCharsExceedingSize(const WideString& text,
 }
 
 void CFDE_TextEditEngine::Insert(size_t idx,
-                                 const WideString& text,
+                                 const WideString& request_text,
                                  RecordOperation add_operation) {
+  WideString text = request_text;
+  if (text.GetLength() == 0)
+    return;
   if (idx > text_length_)
     idx = text_length_;
+
+  TextChange change;
+  change.selection_start = idx;
+  change.selection_end = idx;
+  change.text = text;
+  change.previous_text = GetText();
+  change.cancelled = false;
+
+  if (delegate_ && (add_operation != RecordOperation::kSkipRecord &&
+                    add_operation != RecordOperation::kSkipNotify)) {
+    delegate_->OnTextWillChange(&change);
+    if (change.cancelled)
+      return;
+
+    text = change.text;
+    idx = change.selection_start;
+
+    // JS extended the selection, so delete it before we insert.
+    if (change.selection_end != change.selection_start)
+      DeleteSelectedText(RecordOperation::kSkipRecord);
+  }
 
   size_t length = text.GetLength();
   if (length == 0)
@@ -274,7 +299,14 @@ void CFDE_TextEditEngine::Insert(size_t idx,
   // If we're going to be too big we insert what we can and notify the
   // delegate we've filled the text after the insert is done.
   bool exceeded_limit = false;
-  if (has_character_limit_ && text_length_ + length > character_limit_) {
+
+  // Currently we allow inserting a number of characters over the text limit if
+  // we're skipping notify. This means we're setting the formatted text into the
+  // engine. Otherwise, if you enter 123456789 for an SSN into a field
+  // with a 9 character limit and we reformat to 123-45-6789 we'll truncate
+  // the 89 when inserting into the text edit. See https://crbug.com/pdfium/1089
+  if (has_character_limit_ && add_operation != RecordOperation::kSkipNotify &&
+      text_length_ + length > character_limit_) {
     exceeded_limit = true;
     length = character_limit_ - text_length_;
   }
@@ -341,7 +373,7 @@ void CFDE_TextEditEngine::Insert(size_t idx,
     if (exceeded_limit)
       delegate_->NotifyTextFull();
 
-    delegate_->OnTextChanged(previous_text);
+    delegate_->OnTextChanged();
   }
 }
 
@@ -408,10 +440,9 @@ size_t CFDE_TextEditEngine::GetIndexLeft(size_t pos) const {
     return 0;
   --pos;
 
-  wchar_t ch = GetChar(pos);
   while (pos != 0) {
     // We want to be on the location just before the \r or \n
-    ch = GetChar(pos - 1);
+    wchar_t ch = GetChar(pos - 1);
     if (ch != '\r' && ch != '\n')
       break;
 
@@ -804,6 +835,23 @@ WideString CFDE_TextEditEngine::Delete(size_t start_idx,
   if (start_idx >= text_length_)
     return L"";
 
+  TextChange change;
+  change.text = L"";
+  change.cancelled = false;
+  if (delegate_ && (add_operation != RecordOperation::kSkipRecord &&
+                    add_operation != RecordOperation::kSkipNotify)) {
+    change.previous_text = GetText();
+    change.selection_start = start_idx;
+    change.selection_end = start_idx + length;
+
+    delegate_->OnTextWillChange(&change);
+    if (change.cancelled)
+      return L"";
+
+    start_idx = change.selection_start;
+    length = change.selection_end - change.selection_start;
+  }
+
   length = std::min(length, text_length_ - start_idx);
   AdjustGap(start_idx + length, 0);
 
@@ -821,17 +869,40 @@ WideString CFDE_TextEditEngine::Delete(size_t start_idx,
   gap_size_ += length;
 
   text_length_ -= length;
+  is_dirty_ = true;
   ClearSelection();
 
+  // The JS requested the insertion of text instead of just a deletion.
+  if (change.text != L"")
+    Insert(start_idx, change.text, RecordOperation::kSkipRecord);
+
   if (delegate_)
-    delegate_->OnTextChanged(previous_text);
+    delegate_->OnTextChanged();
 
   return ret;
 }
 
-void CFDE_TextEditEngine::ReplaceSelectedText(const WideString& rep) {
-  size_t start_idx = selection_.start_idx;
+void CFDE_TextEditEngine::ReplaceSelectedText(const WideString& requested_rep) {
+  WideString rep = requested_rep;
 
+  if (delegate_) {
+    TextChange change;
+    change.selection_start = selection_.start_idx;
+    change.selection_end = selection_.start_idx + selection_.count;
+    change.text = rep;
+    change.previous_text = GetText();
+    change.cancelled = false;
+
+    delegate_->OnTextWillChange(&change);
+    if (change.cancelled)
+      return;
+
+    rep = change.text;
+    selection_.start_idx = change.selection_start;
+    selection_.count = change.selection_end - change.selection_start;
+  }
+
+  size_t start_idx = selection_.start_idx;
   WideString txt = DeleteSelectedText(RecordOperation::kSkipRecord);
   Insert(gap_position_, rep, RecordOperation::kSkipRecord);
 
@@ -899,14 +970,26 @@ size_t CFDE_TextEditEngine::GetIndexForPoint(const CFX_PointF& point) {
 
   size_t start_it_idx = start_it->nStart;
   for (; start_it <= end_it; ++start_it) {
-    if (!start_it->rtPiece.Contains(point))
+    bool piece_contains_point_vertically =
+        (point.y >= start_it->rtPiece.top &&
+         point.y < start_it->rtPiece.bottom());
+    if (!piece_contains_point_vertically)
       continue;
 
     std::vector<CFX_RectF> rects = GetCharRects(*start_it);
     for (size_t i = 0; i < rects.size(); ++i) {
-      if (!rects[i].Contains(point))
+      bool character_contains_point_horizontally =
+          (point.x >= rects[i].left && point.x < rects[i].right());
+      if (!character_contains_point_horizontally)
         continue;
-      size_t pos = start_it->nStart + i;
+
+      // When clicking on the left half of a character, the cursor should be
+      // moved before it. If the click was on the right half of that character,
+      // move the cursor after it.
+      bool closer_to_left =
+          (point.x - rects[i].left < rects[i].right() - point.x);
+      int caret_pos = (closer_to_left ? i : i + 1);
+      size_t pos = start_it->nStart + caret_pos;
       if (pos >= text_length_)
         return text_length_;
 
@@ -920,6 +1003,28 @@ size_t CFDE_TextEditEngine::GetIndexForPoint(const CFX_PointF& point) {
       // TODO(dsinclair): Old code had a before flag set based on bidi?
       return pos;
     }
+
+    // Point is not within the horizontal range of any characters, it's
+    // afterwards. Return the position after the the last character.
+    // The last line has nCount equal to the number of characters + 1 (sentinel
+    // character maybe?). Restrict to the text_length_ to account for that.
+    size_t pos = std::min(
+        static_cast<size_t>(start_it->nStart + start_it->nCount), text_length_);
+
+    // If the line is not the last one and it was broken right after a breaking
+    // whitespace (space or line break), the cursor should not be placed after
+    // the whitespace, but before it. If the cursor is moved after the
+    // whitespace, it goes to the beginning of the next line.
+    bool is_last_line = (std::next(start_it) == text_piece_info_.end());
+    if (!is_last_line && pos > 0) {
+      wchar_t previous_char = GetChar(pos - 1);
+      if (previous_char == L' ' || previous_char == L'\n' ||
+          previous_char == L'\r') {
+        --pos;
+      }
+    }
+
+    return pos;
   }
 
   if (start_it == text_piece_info_.end())
@@ -939,6 +1044,7 @@ std::vector<CFX_RectF> CFDE_TextEditEngine::GetCharRects(
 
   FX_TXTRUN tr;
   tr.pEdtEngine = this;
+  tr.iStart = piece.nStart;
   tr.iLength = piece.nCount;
   tr.pFont = font_;
   tr.fFontSize = font_size_;
@@ -955,6 +1061,7 @@ std::vector<FXTEXT_CHARPOS> CFDE_TextEditEngine::GetDisplayPos(
 
   FX_TXTRUN tr;
   tr.pEdtEngine = this;
+  tr.iStart = piece.nStart;
   tr.iLength = piece.nCount;
   tr.pFont = font_;
   tr.fFontSize = font_size_;
@@ -1035,13 +1142,7 @@ void CFDE_TextEditEngine::RebuildPieces() {
   if (IsAlignedRight() && bounds_smaller) {
     delta = available_width_ - contents_bounding_box_.width;
   } else if (IsAlignedCenter() && bounds_smaller) {
-    // TODO(dsinclair): Old code used CombText here and set the space to
-    // something unrelated to the available width .... Figure out if this is
-    // needed and what it should do.
-    // if (is_comb_text_) {
-    // } else {
     delta = (available_width_ - contents_bounding_box_.width) / 2.0f;
-    // }
   }
 
   if (delta != 0.0) {

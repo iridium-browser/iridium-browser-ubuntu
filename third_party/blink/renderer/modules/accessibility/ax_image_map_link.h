@@ -45,13 +45,13 @@ class AXImageMapLink final : public AXNodeObject {
  public:
   static AXImageMapLink* Create(HTMLAreaElement*, AXObjectCacheImpl&);
   ~AXImageMapLink() override;
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
   HTMLAreaElement* AreaElement() const { return ToHTMLAreaElement(GetNode()); }
 
   HTMLMapElement* MapElement() const;
 
-  AccessibilityRole RoleValue() const override;
+  ax::mojom::Role RoleValue() const override;
   bool ComputeAccessibilityIsIgnored(IgnoredReasons* = nullptr) const override;
 
   Element* AnchorElement() const override;

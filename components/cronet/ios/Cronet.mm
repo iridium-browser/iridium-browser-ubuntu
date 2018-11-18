@@ -76,9 +76,8 @@ dispatch_once_t gSwizzleOnceToken;
 // CertVerifier, which allows any certificates for testing.
 class TestCertVerifier : public net::CertVerifier {
   int Verify(const RequestParams& params,
-             net::CRLSet* crl_set,
              net::CertVerifyResult* verify_result,
-             const net::CompletionCallback& callback,
+             net::CompletionOnceCallback callback,
              std::unique_ptr<Request>* out_req,
              const net::NetLogWithSource& net_log) override {
     net::Error result = net::OK;
@@ -86,6 +85,7 @@ class TestCertVerifier : public net::CertVerifier {
     verify_result->cert_status = net::MapNetErrorToCertStatus(result);
     return result;
   }
+  void SetConfig(const Config& config) override {}
 };
 
 // net::HTTPProtocolHandlerDelegate for Cronet.
@@ -198,8 +198,12 @@ class CronetHttpProtocolHandlerDelegate
 }
 
 + (void)setMetricsEnabled:(BOOL)metricsEnabled {
-  [self checkNotStarted];
-  gMetricsEnabled = metricsEnabled;
+  // https://crbug.com/878589
+  // Don't collect NSURLSessionTaskMetrics until iOS 10.2 to avoid crash in iOS.
+  if (@available(iOS 10.2, *)) {
+    [self checkNotStarted];
+    gMetricsEnabled = metricsEnabled;
+  }
 }
 
 + (BOOL)addQuicHint:(NSString*)host port:(int)port altPort:(int)altPort {
@@ -533,6 +537,12 @@ class CronetHttpProtocolHandlerDelegate
   return [NSError errorWithDomain:CRNCronetErrorDomain
                              code:errorCode
                          userInfo:userInfo];
+}
+
+// Used by tests to query the size of the map that contains metrics for
+// individual NSURLSession tasks.
++ (size_t)getMetricsMapSize {
+  return cronet::CronetMetricsDelegate::GetMetricsMapSize();
 }
 
 // Static class initializer.

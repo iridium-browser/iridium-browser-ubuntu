@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "components/cronet/android/cronet_library_loader.h"
-
 #include <jni.h>
 #include <memory>
 #include <string>
@@ -11,6 +9,7 @@
 #include <vector>
 
 #include "base/android/base_jni_onload.h"
+#include "base/android/build_info.h"
 #include "base/android/jni_android.h"
 #include "base/android/jni_registrar.h"
 #include "base/android/jni_string.h"
@@ -21,8 +20,9 @@
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/task_scheduler/task_scheduler.h"
-#include "components/cronet/android/cronet_jni_registration.h"
+#include "base/task/task_scheduler/task_scheduler.h"
+#include "build/build_config.h"
+#include "components/cronet/android/buildflags.h"
 #include "components/cronet/cronet_global_state.h"
 #include "components/cronet/version.h"
 #include "jni/CronetLibraryLoader_jni.h"
@@ -30,11 +30,17 @@
 #include "net/base/network_change_notifier.h"
 #include "net/proxy_resolution/proxy_config_service_android.h"
 #include "net/proxy_resolution/proxy_resolution_service.h"
+#include "third_party/zlib/zlib.h"
 #include "url/url_features.h"
 #include "url/url_util.h"
 
 #if !BUILDFLAG(USE_PLATFORM_ICU_ALTERNATIVES)
 #include "base/i18n/icu_util.h"  // nogncheck
+#endif
+
+#if !BUILDFLAG(INTEGRATED_MODE)
+#include "components/cronet/android/cronet_jni_registration.h"
+#include "components/cronet/android/cronet_library_loader.h"
 #endif
 
 using base::android::JavaParamRef;
@@ -47,7 +53,9 @@ namespace {
 // notifications generally live.
 base::MessageLoop* g_init_message_loop = nullptr;
 
+#if !BUILDFLAG(INTEGRATED_MODE)
 net::NetworkChangeNotifier* g_network_change_notifier = nullptr;
+#endif
 
 base::WaitableEvent g_init_thread_init_done(
     base::WaitableEvent::ResetPolicy::MANUAL,
@@ -66,6 +74,9 @@ bool OnInitThread() {
   return g_init_message_loop == base::MessageLoop::current();
 }
 
+// In integrated mode, Cronet native library is built and loaded together with
+// the native library of the host app.
+#if !BUILDFLAG(INTEGRATED_MODE)
 // Checks the available version of JNI. Also, caches Java reflection artifacts.
 jint CronetOnLoad(JavaVM* vm, void* reserved) {
   base::android::InitVM(vm);
@@ -85,33 +96,51 @@ void CronetOnUnLoad(JavaVM* jvm, void* reserved) {
 
   base::android::LibraryLoaderExitHook();
 }
+#endif
 
 void JNI_CronetLibraryLoader_CronetInitOnInitThread(
     JNIEnv* env,
     const JavaParamRef<jclass>& jcaller) {
+// In integrated mode, ICU and FeatureList has been initialized by the host.
+#if !BUILDFLAG(INTEGRATED_MODE)
 #if !BUILDFLAG(USE_PLATFORM_ICU_ALTERNATIVES)
   base::i18n::InitializeICU();
 #endif
-
   base::FeatureList::InitializeInstance(std::string(), std::string());
+#endif
+
+  // Initialize message loop for init thread.
   DCHECK(!base::MessageLoop::current());
   DCHECK(!g_init_message_loop);
   g_init_message_loop =
       new base::MessageLoop(base::MessageLoop::Type::TYPE_JAVA);
-  static_cast<base::MessageLoopForUI*>(g_init_message_loop)->Start();
-  DCHECK(!g_network_change_notifier);
 
+// In integrated mode, NetworkChangeNotifier has been initialized by the host.
+#if BUILDFLAG(INTEGRATED_MODE)
+  CHECK(net::NetworkChangeNotifier::HasNetworkChangeNotifier());
+#else
+  DCHECK(!g_network_change_notifier);
   if (!net::NetworkChangeNotifier::GetFactory()) {
     net::NetworkChangeNotifier::SetFactory(
         new net::NetworkChangeNotifierFactoryAndroid());
   }
   g_network_change_notifier = net::NetworkChangeNotifier::Create();
+#endif
+
   g_init_thread_init_done.Signal();
 }
 
 ScopedJavaLocalRef<jstring> JNI_CronetLibraryLoader_GetCronetVersion(
     JNIEnv* env,
     const JavaParamRef<jclass>& jcaller) {
+#if defined(ARCH_CPU_ARM64)
+  // Attempt to avoid crashes on some ARM64 Marshmallow devices by
+  // prompting zlib ARM feature detection early on. https://crbug.com/853725
+  if (base::android::BuildInfo::GetInstance()->sdk_int() ==
+      base::android::SDK_VERSION_MARSHMALLOW) {
+    crc32(0, Z_NULL, 0);
+  }
+#endif
   return base::android::ConvertUTF8ToJavaString(env, CRONET_VERSION);
 }
 
@@ -179,6 +208,17 @@ std::string CreateDefaultUserAgent(const std::string& partial_user_agent) {
   if (!partial_user_agent.empty())
     user_agent.insert(user_agent.size() - 1, "; " + partial_user_agent);
   return user_agent;
+}
+
+void SetNetworkThreadPriorityOnNetworkThread(double priority) {
+  int priority_int = priority;
+  DCHECK_LE(priority_int, 19);
+  DCHECK_GE(priority_int, -20);
+  if (priority_int >= -20 && priority_int <= 19) {
+    JNIEnv* env = base::android::AttachCurrentThread();
+    cronet::Java_CronetLibraryLoader_setNetworkThreadPriorityOnNetworkThread(
+        env, priority_int);
+  }
 }
 
 }  // namespace cronet

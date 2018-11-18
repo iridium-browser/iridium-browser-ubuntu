@@ -60,6 +60,11 @@ class BLINK_EXPORT WebUserMediaRequest {
     kKillSwitchOn
   };
 
+  enum class MediaType {
+    kUserMedia,
+    kDisplayMedia,
+  };
+
   WebUserMediaRequest() = default;
   WebUserMediaRequest(const WebUserMediaRequest& request) { Assign(request); }
   ~WebUserMediaRequest() { Reset(); }
@@ -74,6 +79,7 @@ class BLINK_EXPORT WebUserMediaRequest {
   bool Equals(const WebUserMediaRequest&) const;
   void Assign(const WebUserMediaRequest&);
 
+  MediaType MediaRequestType() const;
   bool Audio() const;
   bool Video() const;
   WebMediaConstraints AudioConstraints() const;
@@ -82,9 +88,6 @@ class BLINK_EXPORT WebUserMediaRequest {
   // Flag tied to whether or not the similarly named Origin Trial is
   // enabled. Will be removed at end of trial. See: http://crbug.com/789152.
   bool ShouldDisableHardwareNoiseSuppression() const;
-
-  // TODO(ossu): Explain this and link to bug.
-  bool ShouldEnableExperimentalHardwareEchoCancellation() const;
 
   WebSecurityOrigin GetSecurityOrigin() const;
   WebDocument OwnerDocument() const;

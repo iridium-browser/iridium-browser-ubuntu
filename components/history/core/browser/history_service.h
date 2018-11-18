@@ -32,10 +32,9 @@
 #include "build/build_config.h"
 #include "components/favicon_base/favicon_callback.h"
 #include "components/favicon_base/favicon_usage_data.h"
-#include "components/history/core/browser/delete_directive_handler.h"
 #include "components/history/core/browser/history_types.h"
 #include "components/history/core/browser/keyword_id.h"
-#include "components/history/core/browser/typed_url_sync_bridge.h"
+#include "components/history/core/browser/sync/delete_directive_handler.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/sync/model/syncable_service.h"
 #include "sql/init_status.h"
@@ -56,6 +55,10 @@ class Thread;
 
 namespace favicon {
 class FaviconServiceImpl;
+}
+
+namespace syncer {
+class ModelTypeControllerDelegate;
 }
 
 namespace history {
@@ -131,11 +134,6 @@ class HistoryService : public syncer::SyncableService, public KeyedService {
   // They return false if database is not available (e.g. not loaded yet) or the
   // URL does not exist.
 
-  // Returns a pointer to the TypedURLSyncBridge owned by HistoryBackend.
-  // This method should only be called from the history thread, because the
-  // returned bridge is intended to be accessed only via the history thread.
-  TypedURLSyncBridge* GetTypedURLSyncBridge() const;
-
   // KeyedService:
   void Shutdown() override;
 
@@ -161,7 +159,7 @@ class HistoryService : public syncer::SyncableService, public KeyedService {
 
   // Gets the counts and most recent visit date of URLs that belong to |origins|
   // in the history database.
-  void GetCountsAndLastVisitForOrigins(
+  void GetCountsAndLastVisitForOriginsForTesting(
       const std::set<GURL>& origins,
       const GetCountsAndLastVisitForOriginsCallback& callback) const;
 
@@ -188,6 +186,10 @@ class HistoryService : public syncer::SyncableService, public KeyedService {
   // information that can be performed on the given URL. The 'nav_entry_id'
   // should be the unique ID of the current navigation entry in the given
   // process.
+  //
+  // TODO(avi): This is no longer true. 'page id' was removed years ago, and
+  // their uses replaced by globally-unique nav_entry_ids. Is ContextID still
+  // needed? https://crbug.com/859902
   //
   // 'redirects' is an array of redirect URLs leading to this page, with the
   // page itself as the last item (so when there is no redirect, it will have
@@ -340,6 +342,10 @@ class HistoryService : public syncer::SyncableService, public KeyedService {
       const GetHistoryCountCallback& callback,
       base::CancelableTaskTracker* tracker);
 
+  // Returns, via a callback, the number of Hosts visited in the last month.
+  void CountUniqueHostsVisitedLastMonth(const GetHistoryCountCallback& callback,
+                                        base::CancelableTaskTracker* tracker);
+
   // Database management operations --------------------------------------------
 
   // Delete all the information related to a single url.
@@ -370,6 +376,12 @@ class HistoryService : public syncer::SyncableService, public KeyedService {
   void ExpireHistory(const std::vector<ExpireHistoryArgs>& expire_list,
                      const base::Closure& callback,
                      base::CancelableTaskTracker* tracker);
+
+  // Expires all visits before and including the given time, updating the URLs
+  // accordingly.
+  void ExpireHistoryBeforeForTesting(base::Time end_time,
+                                     base::OnceClosure callback,
+                                     base::CancelableTaskTracker* tracker);
 
   // Removes all visits to the given URLs in the specified time range. Calls
   // ExpireHistoryBetween() to delete local visits, and handles deletion of
@@ -535,6 +547,11 @@ class HistoryService : public syncer::SyncableService, public KeyedService {
       const base::Location& from_here,
       const syncer::SyncChangeList& change_list) override;
 
+  // For sync codebase only: instantiates a controller delegate to interact with
+  // TypedURLSyncBridge. Must be called from the UI thread.
+  std::unique_ptr<syncer::ModelTypeControllerDelegate>
+  GetTypedURLSyncControllerDelegate();
+
  protected:
   // These are not currently used, hopefully we can do something in the future
   // to ensure that the most important things happen first.
@@ -605,16 +622,8 @@ class HistoryService : public syncer::SyncableService, public KeyedService {
   void NotifyURLsModified(const URLRows& changed_urls);
 
   // Notify all HistoryServiceObservers registered that URLs have been deleted.
-  // |all_history| is set to true, if all the URLs are deleted.
-  //               When set to true, |deleted_rows| and |favicon_urls| are
-  //               undefined.
-  // |expired| is set to true, if the URL deletion is due to expiration.
-  // |deleted_rows| list of the deleted URLs.
-  // |favicon_urls| list of favicon URLs that correspond to the deleted URLs.
-  void NotifyURLsDeleted(const DeletionTimeRange& time_range,
-                         bool expired,
-                         const URLRows& deleted_rows,
-                         const std::set<GURL>& favicon_urls);
+  // |deletion_info| describes the urls that have been removed from history.
+  void NotifyURLsDeleted(const DeletionInfo& deletion_info);
 
   // Notify all HistoryServiceObservers registered that the
   // HistoryService has finished loading.
@@ -874,7 +883,7 @@ class HistoryService : public syncer::SyncableService, public KeyedService {
   // completed.
   bool backend_loaded_;
 
-  base::ObserverList<HistoryServiceObserver> observers_;
+  base::ObserverList<HistoryServiceObserver>::Unchecked observers_;
   base::CallbackList<void(const std::set<GURL>&, const GURL&)>
       favicon_changed_callback_list_;
 

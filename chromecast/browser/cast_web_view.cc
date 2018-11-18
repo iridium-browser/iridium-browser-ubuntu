@@ -6,6 +6,13 @@
 
 namespace chromecast {
 
+std::unique_ptr<content::BluetoothChooser>
+CastWebView::Delegate::RunBluetoothChooser(
+    content::RenderFrameHost* frame,
+    const content::BluetoothChooser::EventHandler& event_handler) {
+  return nullptr;
+}
+
 CastWebView::CastWebView() {}
 
 CastWebView::~CastWebView() {
@@ -21,5 +28,7 @@ void CastWebView::AddObserver(CastWebView::Observer* observer) {
 void CastWebView::RemoveObserver(CastWebView::Observer* observer) {
   observer_list_.RemoveObserver(observer);
 }
+
+CastWebView::CreateParams::CreateParams() {}
 
 }  // namespace chromecast

@@ -34,7 +34,7 @@ class EntryTest : public testing::Test {
 
   std::unique_ptr<base::Value> ReadManifest(const std::string& manifest) {
     base::FilePath manifest_path;
-    PathService::Get(base::DIR_SOURCE_ROOT, &manifest_path);
+    base::PathService::Get(base::DIR_SOURCE_ROOT, &manifest_path);
     manifest_path =
         manifest_path.AppendASCII("services/catalog/test_data/" + manifest);
 
@@ -65,6 +65,21 @@ TEST_F(EntryTest, Instance) {
   std::unique_ptr<Entry> entry = ReadEntry("instance", nullptr);
   EXPECT_EQ("foo", entry->name());
   EXPECT_EQ("Foo", entry->display_name());
+  EXPECT_EQ("", entry->sandbox_type());
+}
+
+TEST_F(EntryTest, Options) {
+  std::unique_ptr<Entry> entry = ReadEntry("options", nullptr);
+  EXPECT_EQ("foo", entry->name());
+  EXPECT_EQ("Foo", entry->display_name());
+
+  EXPECT_EQ(ServiceOptions::InstanceSharingType::SINGLETON,
+            entry->options().instance_sharing);
+  EXPECT_TRUE(entry->options().can_connect_to_other_services_as_any_user);
+  EXPECT_TRUE(
+      entry->options().can_connect_to_other_services_with_any_instance_name);
+  EXPECT_TRUE(entry->options().can_create_other_service_instances);
+
   EXPECT_EQ("", entry->sandbox_type());
 }
 

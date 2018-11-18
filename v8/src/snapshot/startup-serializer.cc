@@ -5,6 +5,7 @@
 #include "src/snapshot/startup-serializer.h"
 
 #include "src/api.h"
+#include "src/code-tracer.h"
 #include "src/global-handles.h"
 #include "src/objects-inl.h"
 #include "src/v8threads.h"
@@ -33,10 +34,10 @@ void StartupSerializer::SerializeObject(HeapObject* obj, HowToCode how_to_code,
   }
   if (SerializeHotObject(obj, how_to_code, where_to_point, skip)) return;
 
-  int root_index = root_index_map()->Lookup(obj);
+  RootIndex root_index;
   // We can only encode roots as such if it has already been serialized.
   // That applies to root indices below the wave front.
-  if (root_index != RootIndexMap::kInvalidRootIndex) {
+  if (root_index_map()->Lookup(obj, &root_index)) {
     if (root_has_been_serialized(root_index)) {
       PutRoot(root_index, obj, how_to_code, where_to_point, skip);
       return;
@@ -46,15 +47,18 @@ void StartupSerializer::SerializeObject(HeapObject* obj, HowToCode how_to_code,
   if (SerializeBackReference(obj, how_to_code, where_to_point, skip)) return;
 
   FlushSkip(skip);
+  bool use_simulator = false;
+#ifdef USE_SIMULATOR
+  use_simulator = true;
+#endif
 
-  if (isolate()->external_reference_redirector() && obj->IsAccessorInfo()) {
+  if (use_simulator && obj->IsAccessorInfo()) {
     // Wipe external reference redirects in the accessor info.
     AccessorInfo* info = AccessorInfo::cast(obj);
     Address original_address = Foreign::cast(info->getter())->foreign_address();
     Foreign::cast(info->js_getter())->set_foreign_address(original_address);
     accessor_infos_.push_back(info);
-  } else if (isolate()->external_reference_redirector() &&
-             obj->IsCallHandlerInfo()) {
+  } else if (use_simulator && obj->IsCallHandlerInfo()) {
     CallHandlerInfo* info = CallHandlerInfo::cast(obj);
     Address original_address =
         Foreign::cast(info->callback())->foreign_address();
@@ -62,12 +66,13 @@ void StartupSerializer::SerializeObject(HeapObject* obj, HowToCode how_to_code,
     call_handler_infos_.push_back(info);
   } else if (obj->IsScript() && Script::cast(obj)->IsUserJavaScript()) {
     Script::cast(obj)->set_context_data(
-        isolate()->heap()->uninitialized_symbol());
+        ReadOnlyRoots(isolate()).uninitialized_symbol());
   } else if (obj->IsSharedFunctionInfo()) {
     // Clear inferred name for native functions.
     SharedFunctionInfo* shared = SharedFunctionInfo::cast(obj);
-    if (!shared->IsSubjectToDebugging() && shared->HasInferredName()) {
-      shared->set_inferred_name(isolate()->heap()->empty_string());
+    if (!shared->IsSubjectToDebugging() && shared->HasUncompiledData()) {
+      shared->uncompiled_data()->set_inferred_name(
+          ReadOnlyRoots(isolate()).empty_string());
     }
   }
 
@@ -83,7 +88,7 @@ void StartupSerializer::SerializeWeakReferencesAndDeferred() {
   // This comes right after serialization of the partial snapshot, where we
   // add entries to the partial snapshot cache of the startup snapshot. Add
   // one entry with 'undefined' to terminate the partial snapshot cache.
-  Object* undefined = isolate()->heap()->undefined_value();
+  Object* undefined = ReadOnlyRoots(isolate()).undefined_value();
   VisitRootPointer(Root::kPartialSnapshotCache, nullptr, &undefined);
   isolate()->heap()->IterateWeakRoots(this, VISIT_FOR_SERIALIZATION);
   SerializeDeferredObjects();
@@ -127,24 +132,13 @@ void StartupSerializer::VisitRootPointers(Root root, const char* description,
                                           Object** start, Object** end) {
   if (start == isolate()->heap()->roots_array_start()) {
     // Serializing the root list needs special handling:
-    // - The first pass over the root list only serializes immortal immovables.
-    // - The second pass over the root list serializes the rest.
     // - Only root list elements that have been fully serialized can be
-    //   referenced via as root by using kRootArray bytecodes.
-    int skip = 0;
+    //   referenced using kRootArray bytecodes.
     for (Object** current = start; current < end; current++) {
-      int root_index = static_cast<int>(current - start);
-      if ((*current)->IsSmi()) {
-        FlushSkip(skip);
-        PutSmi(Smi::cast(*current));
-      } else {
-        SerializeObject(HeapObject::cast(*current), kPlain, kStartOfObject,
-                        skip);
-      }
+      SerializeRootObject(*current);
+      size_t root_index = static_cast<size_t>(current - start);
       root_has_been_serialized_.set(root_index);
-      skip = 0;
     }
-    FlushSkip(skip);
   } else {
     Serializer::VisitRootPointers(root, description, start, end);
   }
@@ -158,9 +152,9 @@ void StartupSerializer::CheckRehashability(HeapObject* obj) {
 }
 
 bool StartupSerializer::MustBeDeferred(HeapObject* object) {
-  if (root_has_been_serialized_.test(Heap::kFreeSpaceMapRootIndex) &&
-      root_has_been_serialized_.test(Heap::kOnePointerFillerMapRootIndex) &&
-      root_has_been_serialized_.test(Heap::kTwoPointerFillerMapRootIndex)) {
+  if (root_has_been_serialized(RootIndex::kFreeSpaceMap) &&
+      root_has_been_serialized(RootIndex::kOnePointerFillerMap) &&
+      root_has_been_serialized(RootIndex::kTwoPointerFillerMap)) {
     // All required root objects are serialized, so any aligned objects can
     // be saved without problems.
     return false;

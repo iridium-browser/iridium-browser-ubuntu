@@ -24,11 +24,11 @@
 #include "net/log/net_log_capture_mode.h"
 #include "net/log/net_log_event_type.h"
 #include "net/log/net_log_source_type.h"
-#include "net/spdy/chromium/spdy_http_utils.h"
-#include "net/spdy/chromium/spdy_log_util.h"
-#include "net/spdy/core/spdy_header_block.h"
+#include "net/spdy/spdy_http_utils.h"
+#include "net/spdy/spdy_log_util.h"
 #include "net/ssl/ssl_cert_request_info.h"
 #include "net/ssl/ssl_config.h"
+#include "net/third_party/spdy/core/spdy_header_block.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "url/gurl.h"
 
@@ -37,7 +37,7 @@ namespace net {
 namespace {
 
 std::unique_ptr<base::Value> NetLogHeadersCallback(
-    const SpdyHeaderBlock* headers,
+    const spdy::SpdyHeaderBlock* headers,
     NetLogCaptureMode capture_mode) {
   auto dict = std::make_unique<base::DictionaryValue>();
   dict->Set("headers", ElideSpdyHeaderBlockForNetLog(*headers, capture_mode));
@@ -73,14 +73,14 @@ BidirectionalStream::BidirectionalStream(
                           session,
                           send_request_headers_automatically,
                           delegate,
-                          std::make_unique<base::Timer>(false, false)) {}
+                          std::make_unique<base::OneShotTimer>()) {}
 
 BidirectionalStream::BidirectionalStream(
     std::unique_ptr<BidirectionalStreamRequestInfo> request_info,
     HttpNetworkSession* session,
     bool send_request_headers_automatically,
     Delegate* delegate,
-    std::unique_ptr<base::Timer> timer)
+    std::unique_ptr<base::OneShotTimer> timer)
     : request_info_(std::move(request_info)),
       net_log_(NetLogWithSource::Make(session->net_log(),
                                       NetLogSourceType::BIDIRECTIONAL_STREAM)),
@@ -238,7 +238,7 @@ void BidirectionalStream::OnStreamReady(bool request_headers_sent) {
 }
 
 void BidirectionalStream::OnHeadersReceived(
-    const SpdyHeaderBlock& response_headers) {
+    const spdy::SpdyHeaderBlock& response_headers) {
   HttpResponseInfo response_info;
   if (!SpdyHeadersToHttpResponse(response_headers, &response_info)) {
     DLOG(WARNING) << "Invalid headers";
@@ -306,7 +306,8 @@ void BidirectionalStream::OnDataSent() {
   delegate_->OnDataSent();
 }
 
-void BidirectionalStream::OnTrailersReceived(const SpdyHeaderBlock& trailers) {
+void BidirectionalStream::OnTrailersReceived(
+    const spdy::SpdyHeaderBlock& trailers) {
   if (net_log_.IsCapturing()) {
     net_log_.AddEvent(NetLogEventType::BIDIRECTIONAL_STREAM_RECV_TRAILERS,
                       base::Bind(&NetLogHeadersCallback, &trailers));

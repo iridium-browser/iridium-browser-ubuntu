@@ -22,6 +22,7 @@ print_preview.PreviewSettings;
  *   printerDescription: (string | undefined),
  *   cupsEnterprisePrinter: (boolean | undefined),
  *   printerOptions: (Object | undefined),
+ *   policies: (print_preview.Policies | undefined),
  * }}
  */
 print_preview.LocalDestinationInfo;
@@ -38,6 +39,8 @@ print_preview.LocalDestinationInfo;
  *   documentHasSelection: boolean,
  *   shouldPrintSelectionOnly: boolean,
  *   printerName: string,
+ *   headerFooter: ?boolean,
+ *   isHeaderFooterManaged: boolean,
  *   serializedAppStateStr: ?string,
  *   serializedDefaultDestinationSelectionRulesStr: ?string,
  * }}
@@ -71,7 +74,8 @@ print_preview.CapabilitiesResponse;
  * @typedef {{
  *   printerId: string,
  *   success: boolean,
- *   capabilities: Object,
+ *   capabilities: !print_preview.Cdd,
+ *   policies: (print_preview.Policies | undefined),
  * }}
  */
 print_preview.PrinterSetupResponse;
@@ -97,6 +101,7 @@ print_preview.PrinterType = {
   EXTENSION_PRINTER: 1,
   PDF_PRINTER: 2,
   LOCAL_PRINTER: 3,
+  CLOUD_PRINTER: 4
 };
 
 cr.define('print_preview', function() {
@@ -197,13 +202,11 @@ cr.define('print_preview', function() {
      *   'page-layout-ready',
      *   'page-preview-ready'
      * @param {string} printTicket JSON print ticket for the request.
-     * @param {number} pageCount Page count for the preview request, or -1 if
-     *     unknown (first request).
      * @return {!Promise<number>} Promise that resolves with the unique ID of
      *     the preview UI when the preview has been generated.
      */
-    getPreview(printTicket, pageCount) {
-      return cr.sendWithPromise('getPreview', printTicket, pageCount);
+    getPreview(printTicket) {
+      return cr.sendWithPromise('getPreview', printTicket);
     }
 
     /**

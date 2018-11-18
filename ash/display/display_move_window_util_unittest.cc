@@ -8,7 +8,6 @@
 #include "ash/accelerators/accelerator_table.h"
 #include "ash/accessibility/accessibility_controller.h"
 #include "ash/accessibility/test_accessibility_controller_client.h"
-#include "ash/public/cpp/ash_features.h"
 #include "ash/root_window_controller.h"
 #include "ash/screen_util.h"
 #include "ash/shelf/shelf_constants.h"
@@ -20,7 +19,6 @@
 #include "ash/wm/wm_event.h"
 #include "base/command_line.h"
 #include "base/macros.h"
-#include "base/test/scoped_feature_list.h"
 #include "ui/aura/test/test_windows.h"
 #include "ui/display/display.h"
 #include "ui/display/display_layout.h"
@@ -69,24 +67,7 @@ void PerformMoveWindowAccel() {
 
 }  // namespace
 
-class DisplayMoveWindowUtilTest : public AshTestBase {
- protected:
-  DisplayMoveWindowUtilTest() = default;
-  ~DisplayMoveWindowUtilTest() override = default;
-
-  // AshTestBase:
-  void SetUp() override {
-    // Explicitly enable the display move window accels feature for the tests.
-    scoped_feature_list_.InitAndEnableFeature(
-        features::kDisplayMoveWindowAccels);
-    AshTestBase::SetUp();
-  }
-
- private:
-  base::test::ScopedFeatureList scoped_feature_list_;
-
-  DISALLOW_COPY_AND_ASSIGN(DisplayMoveWindowUtilTest);
-};
+using DisplayMoveWindowUtilTest = AshTestBase;
 
 TEST_F(DisplayMoveWindowUtilTest, SingleDisplay) {
   aura::Window* window =
@@ -268,6 +249,7 @@ TEST_F(DisplayMoveWindowUtilTest, KeepWindowBoundsIfNotChangedByUser) {
   //     |   |
   //     +---+
   UpdateDisplay("400x300,400x600");
+  const int shelf_inset = 300 - ShelfConstants::shelf_size();
   // Create and activate window on display [1].
   aura::Window* window =
       CreateTestWindowInShellWithBounds(gfx::Rect(410, 20, 200, 400));
@@ -280,7 +262,7 @@ TEST_F(DisplayMoveWindowUtilTest, KeepWindowBoundsIfNotChangedByUser) {
   PerformMoveWindowAccel();
   EXPECT_EQ(display_manager()->GetDisplayAt(0).id(),
             screen->GetDisplayNearestWindow(window).id());
-  EXPECT_EQ(gfx::Rect(10, 20, 200, 252), window->GetBoundsInScreen());
+  EXPECT_EQ(gfx::Rect(10, 20, 200, shelf_inset), window->GetBoundsInScreen());
   // Move window back to display [1]. Its window bounds should be restored.
   PerformMoveWindowAccel();
   EXPECT_EQ(display_manager()->GetDisplayAt(1).id(),
@@ -296,7 +278,7 @@ TEST_F(DisplayMoveWindowUtilTest, KeepWindowBoundsIfNotChangedByUser) {
   PerformMoveWindowAccel();
   EXPECT_EQ(display_manager()->GetDisplayAt(1).id(),
             screen->GetDisplayNearestWindow(window).id());
-  EXPECT_EQ(gfx::Rect(410, 20, 200, 252), window->GetBoundsInScreen());
+  EXPECT_EQ(gfx::Rect(410, 20, 200, shelf_inset), window->GetBoundsInScreen());
 }
 
 // Tests auto window management on moving window between displays.
@@ -459,10 +441,12 @@ TEST_F(DisplayMoveWindowUtilTest, RestoreMaximizedWindowAfterMovement) {
 
   wm::WindowState* window_state = wm::GetWindowState(w);
   window_state->Maximize();
-  EXPECT_EQ(gfx::Rect(0, 0, 400, 300 - kShelfSize), w->GetBoundsInScreen());
+  EXPECT_EQ(gfx::Rect(0, 0, 400, 300 - ShelfConstants::shelf_size()),
+            w->GetBoundsInScreen());
 
   PerformMoveWindowAccel();
-  EXPECT_EQ(gfx::Rect(400, 0, 400, 300 - kShelfSize), w->GetBoundsInScreen());
+  EXPECT_EQ(gfx::Rect(400, 0, 400, 300 - ShelfConstants::shelf_size()),
+            w->GetBoundsInScreen());
   window_state->Restore();
   EXPECT_EQ(gfx::Rect(410, 20, 200, 100), w->GetBoundsInScreen());
 }

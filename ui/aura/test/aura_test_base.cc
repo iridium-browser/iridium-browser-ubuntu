@@ -5,13 +5,13 @@
 #include "ui/aura/test/aura_test_base.h"
 
 #include "base/command_line.h"
-#include "base/test/scoped_feature_list.h"
 #include "ui/aura/client/window_parenting_client.h"
 #include "ui/aura/mus/property_utils.h"
 #include "ui/aura/mus/window_tree_client.h"
 #include "ui/aura/mus/window_tree_host_mus.h"
 #include "ui/aura/test/aura_test_context_factory.h"
 #include "ui/aura/test/test_window_delegate.h"
+#include "ui/aura/test/test_windows.h"
 #include "ui/aura/window.h"
 #include "ui/base/ime/input_method_initializer.h"
 #include "ui/base/material_design/material_design_controller.h"
@@ -30,7 +30,6 @@ namespace test {
 AuraTestBase::AuraTestBase()
     : scoped_task_environment_(
           base::test::ScopedTaskEnvironment::MainThreadType::UI),
-      window_manager_delegate_(this),
       window_tree_client_delegate_(this) {}
 
 AuraTestBase::~AuraTestBase() {
@@ -84,7 +83,7 @@ void AuraTestBase::SetUp() {
   // The ContextFactory must exist before any Compositors are created.
   ui::ContextFactory* context_factory = nullptr;
   ui::ContextFactoryPrivate* context_factory_private = nullptr;
-  if (use_mus_ && base::FeatureList::IsEnabled(features::kMash)) {
+  if (env_mode_ == Env::Mode::MUS) {
     mus_context_factory_ = std::make_unique<AuraTestContextFactory>();
     context_factory = mus_context_factory_.get();
   } else {
@@ -94,10 +93,8 @@ void AuraTestBase::SetUp() {
   }
 
   helper_ = std::make_unique<AuraTestHelper>();
-  if (use_mus_) {
-    helper_->EnableMusWithTestWindowTree(window_tree_client_delegate_,
-                                         window_manager_delegate_);
-  }
+  if (env_mode_ == Env::Mode::MUS)
+    helper_->EnableMusWithTestWindowTree(window_tree_client_delegate_);
   helper_->SetUp(context_factory, context_factory_private);
 }
 
@@ -108,18 +105,7 @@ void AuraTestBase::TearDown() {
   // and these tasks if un-executed would upset Valgrind.
   RunAllPendingInMessageLoop();
 
-  // AuraTestHelper may own a WindowTreeHost, don't delete it here else
-  // AuraTestHelper will have use after frees.
-  for (size_t i = window_tree_hosts_.size(); i > 0; --i) {
-    if (window_tree_hosts_[i - 1].get() == helper_->host()) {
-      window_tree_hosts_[i - 1].release();
-      window_tree_hosts_.erase(window_tree_hosts_.begin() + i - 1);
-      break;
-    }
-  }
-
   helper_->TearDown();
-  window_tree_hosts_.clear();
   ui::TerminateContextFactoryForTests();
   ui::ShutdownInputMethodForTesting();
   testing::Test::TearDown();
@@ -127,34 +113,26 @@ void AuraTestBase::TearDown() {
 
 Window* AuraTestBase::CreateNormalWindow(int id, Window* parent,
                                          WindowDelegate* delegate) {
-  Window* window = new Window(
-      delegate ? delegate :
-      test::TestWindowDelegate::CreateSelfDestroyingDelegate());
-  window->set_id(id);
-  window->Init(ui::LAYER_TEXTURED);
-  parent->AddChild(window);
-  window->SetBounds(gfx::Rect(0, 0, 100, 100));
-  window->Show();
-  return window;
+  return CreateTestWindowWithDelegateAndType(
+      delegate ? delegate
+               : test::TestWindowDelegate::CreateSelfDestroyingDelegate(),
+      client::WINDOW_TYPE_UNKNOWN, id, gfx::Rect(0, 0, 100, 100), parent,
+      /* show_on_creation */ true);
 }
 
 void AuraTestBase::EnableMusWithTestWindowTree() {
   DCHECK(!setup_called_);
-  use_mus_ = true;
+  env_mode_ = Env::Mode::MUS;
 }
 
 void AuraTestBase::DeleteWindowTreeClient() {
-  DCHECK(use_mus_);
+  DCHECK_EQ(env_mode_, Env::Mode::MUS);
   helper_->DeleteWindowTreeClient();
 }
 
-void AuraTestBase::ConfigureBackend(BackendType type) {
-  if (type != BackendType::CLASSIC)
-    EnableMusWithTestWindowTree();
-  if (type == BackendType::MASH) {
-    feature_list_ = std::make_unique<base::test::ScopedFeatureList>();
-    feature_list_->InitAndEnableFeature(features::kMash);
-  }
+void AuraTestBase::ConfigureEnvMode(Env::Mode mode) {
+  DCHECK(!setup_called_);
+  env_mode_ = mode;
 }
 
 void AuraTestBase::RunAllPendingInMessageLoop() {
@@ -171,7 +149,7 @@ bool AuraTestBase::DispatchEventUsingWindowDispatcher(ui::Event* event) {
   return event->handled();
 }
 
-ui::mojom::WindowTreeClient* AuraTestBase::window_tree_client() {
+ws::mojom::WindowTreeClient* AuraTestBase::window_tree_client() {
   return helper_->window_tree_client();
 }
 
@@ -185,88 +163,11 @@ void AuraTestBase::OnEmbedRootDestroyed(WindowTreeHostMus* window_tree_host) {}
 void AuraTestBase::OnLostConnection(WindowTreeClient* client) {}
 
 void AuraTestBase::OnPointerEventObserved(const ui::PointerEvent& event,
+                                          const gfx::Point& location_in_screen,
                                           Window* target) {
   observed_pointer_events_.push_back(std::unique_ptr<ui::PointerEvent>(
       static_cast<ui::PointerEvent*>(ui::Event::Clone(event).release())));
 }
-
-void AuraTestBase::SetWindowManagerClient(WindowManagerClient* client) {}
-
-void AuraTestBase::OnWmConnected() {}
-
-void AuraTestBase::OnWmSetBounds(Window* window, const gfx::Rect& bounds) {}
-
-bool AuraTestBase::OnWmSetProperty(
-    Window* window,
-    const std::string& name,
-    std::unique_ptr<std::vector<uint8_t>>* new_data) {
-  return true;
-}
-
-void AuraTestBase::OnWmSetModalType(Window* window, ui::ModalType type) {}
-
-void AuraTestBase::OnWmSetCanFocus(Window* window, bool can_focus) {}
-
-Window* AuraTestBase::OnWmCreateTopLevelWindow(
-    ui::mojom::WindowType window_type,
-    std::map<std::string, std::vector<uint8_t>>* properties) {
-  Window* window = new Window(nullptr);
-  SetWindowType(window, window_type);
-  window->Init(ui::LAYER_NOT_DRAWN);
-  return window;
-}
-
-void AuraTestBase::OnWmClientJankinessChanged(
-    const std::set<Window*>& client_windows,
-    bool janky) {}
-
-void AuraTestBase::OnWmWillCreateDisplay(const display::Display& display) {}
-
-void AuraTestBase::OnWmNewDisplay(
-    std::unique_ptr<WindowTreeHostMus> window_tree_host,
-    const display::Display& display) {
-  // Take ownership of the WindowTreeHost.
-  window_tree_hosts_.push_back(std::move(window_tree_host));
-}
-
-void AuraTestBase::OnWmDisplayRemoved(WindowTreeHostMus* window_tree_host) {
-  for (auto iter = window_tree_hosts_.begin(); iter != window_tree_hosts_.end();
-       ++iter) {
-    if (iter->get() == window_tree_host) {
-      window_tree_hosts_.erase(iter);
-      return;
-    }
-  }
-  NOTREACHED();
-}
-
-void AuraTestBase::OnWmDisplayModified(const display::Display& display) {}
-
-ui::mojom::EventResult AuraTestBase::OnAccelerator(
-    uint32_t id,
-    const ui::Event& event,
-    std::unordered_map<std::string, std::vector<uint8_t>>* properties) {
-  return ui::mojom::EventResult::HANDLED;
-}
-
-void AuraTestBase::OnCursorTouchVisibleChanged(bool enabled) {}
-
-void AuraTestBase::OnWmPerformMoveLoop(
-    Window* window,
-    ui::mojom::MoveLoopSource source,
-    const gfx::Point& cursor_location,
-    const base::Callback<void(bool)>& on_done) {}
-
-void AuraTestBase::OnWmCancelMoveLoop(Window* window) {}
-
-void AuraTestBase::OnWmSetClientArea(
-    Window* window,
-    const gfx::Insets& insets,
-    const std::vector<gfx::Rect>& additional_client_areas) {}
-
-bool AuraTestBase::IsWindowActive(aura::Window* window) { return false; }
-
-void AuraTestBase::OnWmDeactivateWindow(Window* window) {}
 
 PropertyConverter* AuraTestBase::GetPropertyConverter() {
   return &property_converter_;
@@ -281,7 +182,7 @@ AuraTestBaseWithType::~AuraTestBaseWithType() {
 void AuraTestBaseWithType::SetUp() {
   DCHECK(!setup_called_);
   setup_called_ = true;
-  ConfigureBackend(GetParam());
+  ConfigureEnvMode(GetParam());
   AuraTestBase::SetUp();
 }
 
@@ -290,7 +191,7 @@ AuraTestBaseMus::AuraTestBaseMus() {}
 AuraTestBaseMus::~AuraTestBaseMus() {}
 
 void AuraTestBaseMus::SetUp() {
-  ConfigureBackend(test::BackendType::MUS);
+  ConfigureEnvMode(Env::Mode::MUS);
   AuraTestBase::SetUp();
 }
 

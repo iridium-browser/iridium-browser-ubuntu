@@ -19,9 +19,11 @@ ParseInfo& ParseInfo::operator=(const ParseInfo&) = default;
 
 std::string ParseInfo::GetErrorDescription(
     const base::StringPiece json_rules_filename) const {
-  // Every error except ERROR_PERSISTING_RULESET requires |rule_index_|.
+  // Every error except ERROR_PERSISTING_RULESET and ERROR_LIST_NOT_PASSED
+  // requires |rule_index_|.
   DCHECK_EQ(!rule_index_.has_value(),
-            result_ == ParseResult::ERROR_PERSISTING_RULESET);
+            result_ == ParseResult::ERROR_PERSISTING_RULESET ||
+                result_ == ParseResult::ERROR_LIST_NOT_PASSED);
 
   std::string error;
   switch (result_) {
@@ -87,6 +89,25 @@ std::string ParseInfo::GetErrorDescription(
     case ParseResult::ERROR_PERSISTING_RULESET:
       error =
           ErrorUtils::FormatErrorMessage(kErrorPersisting, json_rules_filename);
+      break;
+    case ParseResult::ERROR_LIST_NOT_PASSED:
+      error = ErrorUtils::FormatErrorMessage(kErrorListNotPassed,
+                                             json_rules_filename);
+      break;
+    case ParseResult::ERROR_NON_ASCII_URL_FILTER:
+      error = ErrorUtils::FormatErrorMessage(
+          kErrorNonAscii, json_rules_filename, std::to_string(*rule_index_),
+          kUrlFilterKey);
+      break;
+    case ParseResult::ERROR_NON_ASCII_DOMAIN:
+      error = ErrorUtils::FormatErrorMessage(
+          kErrorNonAscii, json_rules_filename, std::to_string(*rule_index_),
+          kDomainsKey);
+      break;
+    case ParseResult::ERROR_NON_ASCII_EXCLUDED_DOMAIN:
+      error = ErrorUtils::FormatErrorMessage(
+          kErrorNonAscii, json_rules_filename, std::to_string(*rule_index_),
+          kExcludedDomainsKey);
       break;
   }
   return error;

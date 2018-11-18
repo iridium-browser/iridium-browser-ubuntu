@@ -4,9 +4,10 @@
 
 #include "extensions/shell/browser/shell_app_delegate.h"
 
+#include "content/public/browser/file_select_listener.h"
 #include "content/public/browser/web_contents.h"
+#include "extensions/browser/media_capture_util.h"
 #include "extensions/common/constants.h"
-#include "extensions/shell/browser/media_capture_util.h"
 #include "extensions/shell/browser/shell_extension_web_contents_observer.h"
 
 namespace extensions {
@@ -41,11 +42,12 @@ content::WebContents* ShellAppDelegate::OpenURLFromTab(
   return NULL;
 }
 
-void ShellAppDelegate::AddNewContents(content::BrowserContext* context,
-                                      content::WebContents* new_contents,
-                                      WindowOpenDisposition disposition,
-                                      const gfx::Rect& initial_rect,
-                                      bool user_gesture) {
+void ShellAppDelegate::AddNewContents(
+    content::BrowserContext* context,
+    std::unique_ptr<content::WebContents> new_contents,
+    WindowOpenDisposition disposition,
+    const gfx::Rect& initial_rect,
+    bool user_gesture) {
   NOTIMPLEMENTED();
 }
 
@@ -58,17 +60,19 @@ content::ColorChooser* ShellAppDelegate::ShowColorChooser(
 
 void ShellAppDelegate::RunFileChooser(
     content::RenderFrameHost* render_frame_host,
-    const content::FileChooserParams& params) {
+    std::unique_ptr<content::FileSelectListener> listener,
+    const blink::mojom::FileChooserParams& params) {
   NOTIMPLEMENTED();
+  listener->FileSelectionCanceled();
 }
 
 void ShellAppDelegate::RequestMediaAccessPermission(
     content::WebContents* web_contents,
     const content::MediaStreamRequest& request,
-    const content::MediaResponseCallback& callback,
+    content::MediaResponseCallback callback,
     const extensions::Extension* extension) {
-  media_capture_util::GrantMediaStreamRequest(
-      web_contents, request, callback, extension);
+  media_capture_util::GrantMediaStreamRequest(web_contents, request,
+                                              std::move(callback), extension);
 }
 
 bool ShellAppDelegate::CheckMediaAccessPermission(
@@ -103,6 +107,18 @@ void ShellAppDelegate::SetTerminatingCallback(const base::Closure& callback) {
 bool ShellAppDelegate::TakeFocus(content::WebContents* web_contents,
                                  bool reverse) {
   return false;
+}
+
+gfx::Size ShellAppDelegate::EnterPictureInPicture(
+    content::WebContents* web_contents,
+    const viz::SurfaceId& surface_id,
+    const gfx::Size& natural_size) {
+  NOTREACHED();
+  return gfx::Size();
+}
+
+void ShellAppDelegate::ExitPictureInPicture() {
+  NOTREACHED();
 }
 
 }  // namespace extensions

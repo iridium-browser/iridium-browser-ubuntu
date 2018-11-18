@@ -62,6 +62,9 @@ class CONTENT_EXPORT RenderWidgetHostViewGuest
   // Called when this RenderWidgetHostViewGuest is attached.
   void OnAttached();
 
+  // RenderWidgetHostViewChildFrame implementation.
+  RenderWidgetHostViewBase* GetParentView() override;
+
   // RenderWidgetHostView implementation.
   bool OnMessageReceived(const IPC::Message& msg) override;
   void InitAsChild(gfx::NativeView parent_view) override;
@@ -77,18 +80,23 @@ class CONTENT_EXPORT RenderWidgetHostViewGuest
   gfx::Rect GetBoundsInRootWindow() override;
   gfx::Size GetCompositorViewportPixelSize() const override;
   base::string16 GetSelectedText() override;
+  base::string16 GetSurroundingText() override;
+  gfx::Range GetSelectedRange() override;
+  size_t GetOffsetForSurroundingText() override;
   void SetNeedsBeginFrames(bool needs_begin_frames) override;
   TouchSelectionControllerClientManager*
   GetTouchSelectionControllerClientManager() override;
   gfx::PointF TransformPointToRootCoordSpaceF(
       const gfx::PointF& point) override;
-  bool TransformPointToLocalCoordSpace(const gfx::PointF& point,
-                                       const viz::SurfaceId& original_surface,
-                                       gfx::PointF* transformed_point) override;
+  bool TransformPointToLocalCoordSpaceLegacy(
+      const gfx::PointF& point,
+      const viz::SurfaceId& original_surface,
+      gfx::PointF* transformed_point) override;
   gfx::PointF TransformRootPointToViewCoordSpace(
       const gfx::PointF& point) override;
 
   // RenderWidgetHostViewBase implementation.
+  RenderWidgetHostViewBase* GetRootView() override;
   void InitAsPopup(RenderWidgetHostView* parent_host_view,
                    const gfx::Rect& bounds) override;
   void InitAsFullscreen(RenderWidgetHostView* reference_host_view) override;
@@ -110,18 +118,15 @@ class CONTENT_EXPORT RenderWidgetHostViewGuest
                         size_t offset,
                         const gfx::Range& range) override;
   void SelectionBoundsChanged(
-      const ViewHostMsg_SelectionBounds_Params& params) override;
-#if defined(USE_AURA)
-  void ProcessAckedTouchEvent(const TouchEventWithLatencyInfo& touch,
-                              InputEventAckState ack_result) override;
-#endif
+      const WidgetHostMsg_SelectionBounds_Params& params) override;
   void PreProcessMouseEvent(const blink::WebMouseEvent& event) override;
   void PreProcessTouchEvent(const blink::WebTouchEvent& event) override;
 
   void DidStopFlinging() override;
   bool LockMouse() override;
   void UnlockMouse() override;
-  viz::LocalSurfaceId GetLocalSurfaceId() const override;
+  viz::FrameSinkId GetRootFrameSinkId() override;
+  const viz::LocalSurfaceId& GetLocalSurfaceId() const override;
   void DidCreateNewRendererCompositorFrameSink(
       viz::mojom::CompositorFrameSinkClient* renderer_compositor_frame_sink)
       override;
@@ -151,16 +156,18 @@ class CONTENT_EXPORT RenderWidgetHostViewGuest
                         const gfx::Size& max_size) override;
   void DisableAutoResize(const gfx::Size& new_size) override;
 
-  viz::ScopedSurfaceIdAllocator ResizeDueToAutoResize(
-      const gfx::Size& new_size,
-      uint64_t sequence_number,
-      const viz::LocalSurfaceId& local_surface_id) override;
+  viz::ScopedSurfaceIdAllocator DidUpdateVisualProperties(
+      const cc::RenderFrameMetadata& metadata) override;
+
+  void MaybeSendSyntheticTapGestureForTest(
+      const blink::WebFloatPoint& position,
+      const blink::WebFloatPoint& screen_position) const;
 
  private:
   friend class RenderWidgetHostView;
 
-  void SendSurfaceInfoToEmbedderImpl(
-      const viz::SurfaceInfo& surface_info) override;
+  void OnDidUpdateVisualPropertiesComplete(
+      const cc::RenderFrameMetadata& metadata);
 
   RenderWidgetHostViewGuest(
       RenderWidgetHost* widget,
@@ -175,13 +182,14 @@ class CONTENT_EXPORT RenderWidgetHostViewGuest
   // http://crbug.com/533069
   void MaybeSendSyntheticTapGesture(
       const blink::WebFloatPoint& position,
-      const blink::WebFloatPoint& screenPosition) const;
+      const blink::WebFloatPoint& screen_position) const;
 
   void OnHandleInputEvent(RenderWidgetHostImpl* embedder,
                           int browser_plugin_instance_id,
                           const blink::WebInputEvent* event);
 
-  bool HasEmbedderChanged() override;
+  void ProcessTouchpadPinchAckInRoot(const blink::WebGestureEvent& event,
+                                     InputEventAckState ack_result);
 
 #if defined(USE_AURA)
   void OnGotEmbedToken(const base::UnguessableToken& token);

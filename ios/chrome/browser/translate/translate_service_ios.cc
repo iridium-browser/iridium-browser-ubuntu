@@ -19,8 +19,10 @@ TranslateServiceIOS* g_translate_service = nullptr;
 TranslateServiceIOS::TranslateServiceIOS()
     : resource_request_allowed_notifier_(
           GetApplicationContext()->GetLocalState(),
-          nullptr) {
-  resource_request_allowed_notifier_.Init(this);
+          nullptr,
+          base::BindOnce(&ApplicationContext::GetNetworkConnectionTracker,
+                         base::Unretained(GetApplicationContext()))) {
+  resource_request_allowed_notifier_.Init(this, true /* leaky */);
 }
 
 TranslateServiceIOS::~TranslateServiceIOS() {
@@ -36,8 +38,8 @@ void TranslateServiceIOS::Initialize() {
   g_translate_service->OnResourceRequestsAllowed();
   translate::TranslateDownloadManager* download_manager =
       translate::TranslateDownloadManager::GetInstance();
-  download_manager->set_request_context(
-      GetApplicationContext()->GetSystemURLRequestContext());
+  download_manager->set_url_loader_factory(
+      GetApplicationContext()->GetSharedURLLoaderFactory());
   download_manager->set_application_locale(
       GetApplicationContext()->GetApplicationLocale());
 }

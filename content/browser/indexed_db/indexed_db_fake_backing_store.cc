@@ -5,25 +5,29 @@
 #include "content/browser/indexed_db/indexed_db_fake_backing_store.h"
 
 #include "base/files/file_path.h"
-#include "net/url_request/url_request_context_getter.h"
+#include "base/threading/sequenced_task_runner_handle.h"
 
 namespace content {
+namespace {
+
+using blink::IndexedDBKey;
+using blink::IndexedDBKeyRange;
+
+}  // namespace
 
 IndexedDBFakeBackingStore::IndexedDBFakeBackingStore()
     : IndexedDBBackingStore(nullptr /* indexed_db_factory */,
                             url::Origin::Create(GURL("http://localhost:81")),
                             base::FilePath(),
-                            scoped_refptr<net::URLRequestContextGetter>(),
                             std::unique_ptr<LevelDBDatabase>(),
                             std::unique_ptr<LevelDBComparator>(),
-                            nullptr /* task_runner */) {}
+                            base::SequencedTaskRunnerHandle::Get().get()) {}
 IndexedDBFakeBackingStore::IndexedDBFakeBackingStore(
     IndexedDBFactory* factory,
     base::SequencedTaskRunner* task_runner)
     : IndexedDBBackingStore(factory,
                             url::Origin::Create(GURL("http://localhost:81")),
                             base::FilePath(),
-                            nullptr /* request_context */,
                             std::unique_ptr<LevelDBDatabase>(),
                             std::unique_ptr<LevelDBComparator>(),
                             task_runner) {}
@@ -40,7 +44,6 @@ leveldb::Status IndexedDBFakeBackingStore::PutRecord(
     int64_t object_store_id,
     const IndexedDBKey& key,
     IndexedDBValue* value,
-    std::vector<std::unique_ptr<storage::BlobDataHandle>>* handles,
     RecordIdentifier* record) {
   return leveldb::Status::OK();
 }

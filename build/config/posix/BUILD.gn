@@ -5,6 +5,7 @@
 import("//buildtools/deps_revisions.gni")
 import("//build/config/c++/c++.gni")
 import("//build/config/clang/clang.gni")
+import("//build/config/compiler/compiler.gni")
 import("//build/config/sanitizers/sanitizers.gni")
 import("//build/config/sysroot.gni")
 import("//build/toolchain/toolchain.gni")
@@ -34,12 +35,12 @@ config("runtime_library") {
   libs = []
 
   if (use_custom_libcxx) {
-    if (libcpp_is_static) {
+    if (!is_component_build) {
       # Don't leak any symbols on a static build.
-      defines += [
-        "_LIBCPP_DISABLE_VISIBILITY_ANNOTATIONS",
-        "_LIBCXXABI_DISABLE_VISIBILITY_ANNOTATIONS",
-      ]
+      defines += [ "_LIBCPP_DISABLE_VISIBILITY_ANNOTATIONS" ]
+      if (!export_libcxxabi_from_executables) {
+        defines += [ "_LIBCXXABI_DISABLE_VISIBILITY_ANNOTATIONS" ]
+      }
     }
     if (!is_clang) {
       # Gcc has a built-in abs() definition with default visibility.
@@ -59,7 +60,12 @@ config("runtime_library") {
 
     # Make sure we don't link against libc++ or libstdc++.
     if (is_clang) {
-      ldflags += [ "-nostdlib++" ]
+      # //build/config/android:runtime_library adds -nostdlib, which suppresses
+      # linking against all system libraries.  -nostdlib++ would be redundant,
+      # and would generate an unused warning in this case.
+      if (!is_android) {
+        ldflags += [ "-nostdlib++" ]
+      }
     } else {
       ldflags += [ "-nodefaultlibs" ]
 

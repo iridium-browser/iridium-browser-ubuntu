@@ -10,22 +10,20 @@
 #include "base/files/file_path.h"
 #include "base/macros.h"
 #include "base/process/process.h"
+#include "base/task/post_task.h"
 #include "build/build_config.h"
+#include "chrome/browser/hang_monitor/hang_crash_dump.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/plugins/hung_plugin_infobar_delegate.h"
 #include "chrome/common/channel_info.h"
 #include "components/infobars/core/infobar.h"
 #include "content/public/browser/browser_child_process_host_iterator.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_data.h"
 #include "content/public/browser/plugin_service.h"
 #include "content/public/common/process_type.h"
 #include "content/public/common/result_codes.h"
-
-#if defined(OS_WIN)
-#include "chrome/browser/hang_monitor/hang_crash_dump_win.h"
-#endif
-
 
 namespace {
 
@@ -42,13 +40,10 @@ void KillPluginOnIOThread(int child_id) {
   while (!iter.Done()) {
     const content::ChildProcessData& data = iter.GetData();
     if (data.id == child_id) {
-#if defined(OS_WIN)
-      CrashDumpAndTerminateHungChildProcess(data.handle);
-#else
+      CrashDumpHungChildProcess(data.GetHandle());
       base::Process process =
-          base::Process::DeprecatedGetProcessFromHandle(data.handle);
+          base::Process::DeprecatedGetProcessFromHandle(data.GetHandle());
       process.Terminate(content::RESULT_CODE_HUNG, false);
-#endif
       break;
     }
     ++iter;
@@ -82,7 +77,7 @@ struct HungPluginTabHelper::PluginState {
   base::TimeDelta next_reshow_delay;
 
   // Handles calling the helper when the infobar should be re-shown.
-  base::Timer timer;
+  base::OneShotTimer timer;
 
  private:
   // Initial delay in seconds before re-showing the hung plugin message.
@@ -101,17 +96,13 @@ HungPluginTabHelper::PluginState::PluginState(const base::FilePath& p,
     : path(p),
       name(n),
       infobar(NULL),
-      next_reshow_delay(base::TimeDelta::FromSeconds(kInitialReshowDelaySec)),
-      timer(false, false) {
-}
+      next_reshow_delay(base::TimeDelta::FromSeconds(kInitialReshowDelaySec)) {}
 
 HungPluginTabHelper::PluginState::~PluginState() {
 }
 
 
 // HungPluginTabHelper --------------------------------------------------------
-
-DEFINE_WEB_CONTENTS_USER_DATA_KEY(HungPluginTabHelper);
 
 HungPluginTabHelper::HungPluginTabHelper(content::WebContents* contents)
     : content::WebContentsObserver(contents), infobar_observer_(this) {}
@@ -131,8 +122,7 @@ void HungPluginTabHelper::PluginCrashed(const base::FilePath& plugin_path,
 
   // For now, just do a brute-force search to see if we have this plugin. Since
   // we'll normally have 0 or 1, this is fast.
-  for (PluginStateMap::iterator i = hung_plugins_.begin();
-       i != hung_plugins_.end(); ++i) {
+  for (auto i = hung_plugins_.begin(); i != hung_plugins_.end(); ++i) {
     if (i->second->path == plugin_path) {
       if (i->second->infobar)
         infobar_service->RemoveInfoBar(i->second->infobar);
@@ -153,7 +143,7 @@ void HungPluginTabHelper::PluginHungStatusChanged(
   if (!infobar_observer_.IsObserving(infobar_service))
     infobar_observer_.Add(infobar_service);
 
-  PluginStateMap::iterator found = hung_plugins_.find(plugin_child_id);
+  auto found = hung_plugins_.find(plugin_child_id);
   if (found != hung_plugins_.end()) {
     if (!is_hung) {
       // Hung plugin became un-hung, close the infobar and delete our info.
@@ -200,19 +190,18 @@ void HungPluginTabHelper::OnManagerShuttingDown(
 }
 
 void HungPluginTabHelper::KillPlugin(int child_id) {
-  PluginStateMap::iterator found = hung_plugins_.find(child_id);
+  auto found = hung_plugins_.find(child_id);
   DCHECK(found != hung_plugins_.end());
 
-  content::BrowserThread::PostTask(
-      content::BrowserThread::IO, FROM_HERE,
-      base::BindOnce(&KillPluginOnIOThread, child_id));
+  base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::IO},
+                           base::BindOnce(&KillPluginOnIOThread, child_id));
   CloseBar(found->second.get());
 }
 
 void HungPluginTabHelper::OnReshowTimer(int child_id) {
   // The timer should have been cancelled if the record isn't in our map
   // anymore.
-  PluginStateMap::iterator found = hung_plugins_.find(child_id);
+  auto found = hung_plugins_.find(child_id);
   DCHECK(found != hung_plugins_.end());
   DCHECK(!found->second->infobar);
   ShowBar(child_id, found->second.get());

@@ -9,11 +9,11 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "build/build_config.h"
-#include "components/sync/device_info/local_device_info_provider_mock.h"
-#include "components/sync/driver/fake_sync_client.h"
-#include "components/sync/driver/sync_api_component_factory.h"
+#include "components/prefs/testing_pref_service.h"
+#include "components/sync/model/sync_change_processor.h"
 #include "components/sync/model/sync_error_factory_mock.h"
 #include "components/sync_sessions/mock_sync_sessions_client.h"
+#include "components/sync_sessions/session_sync_prefs.h"
 #include "components/sync_sessions/session_sync_test_helper.h"
 #include "components/sync_sessions/sync_sessions_client.h"
 #include "components/sync_sessions/test_synced_window_delegates_getter.h"
@@ -21,8 +21,6 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 using syncer::DeviceInfo;
-using syncer::LocalDeviceInfoProvider;
-using syncer::LocalDeviceInfoProviderMock;
 using syncer::SyncChange;
 using syncer::SyncChangeList;
 using syncer::SyncData;
@@ -43,7 +41,6 @@ const char kFoo2[] = "http://foo2/";
 const char kBar1[] = "http://bar1/";
 const char kBar2[] = "http://bar2/";
 const char kBaz1[] = "http://baz1/";
-const char kBaz2[] = "http://baz2/";
 const char kTag1[] = "tag1";
 const char kTag2[] = "tag2";
 
@@ -117,21 +114,6 @@ testing::AssertionResult ChangeTypeMatches(
   return testing::AssertionSuccess();
 }
 
-class SessionNotificationObserver {
- public:
-  SessionNotificationObserver() : notified_of_update_(false) {}
-  void NotifyOfUpdate() { notified_of_update_ = true; }
-
-  bool notified_of_update() const { return notified_of_update_; }
-
-  void Reset() {
-    notified_of_update_ = false;
-  }
-
- private:
-  bool notified_of_update_;
-};
-
 class TestSyncChangeProcessor : public syncer::SyncChangeProcessor {
  public:
   explicit TestSyncChangeProcessor(SyncChangeList* output) : output_(output) {}
@@ -173,7 +155,8 @@ class TestSyncChangeProcessor : public syncer::SyncChangeProcessor {
  private:
   SyncError error_;
   SyncChangeList* output_;
-  base::ObserverList<syncer::LocalChangeObserver> local_change_observers_;
+  base::ObserverList<syncer::LocalChangeObserver>::Unchecked
+      local_change_observers_;
 };
 
 }  // namespace
@@ -185,44 +168,44 @@ class SessionsSyncManagerTest : public testing::Test {
   const std::vector<SessionID> kTabIds1 = SessionIDs({5, 10, 13, 17});
   const std::vector<SessionID> kTabIds2 = SessionIDs({7, 15, 18, 20});
 
+  SessionsSyncManagerTest()
+      : local_device_info_(kCacheGuid,
+                           "Wayne Gretzky's Hacking Box",
+                           "Chromium 10k",
+                           "Chrome 10k",
+                           sync_pb::SyncEnums_DeviceType_TYPE_LINUX,
+                           "device_id"),
+        session_sync_prefs_(&pref_service_) {}
+
   void SetUp() override {
+    SessionSyncPrefs::RegisterProfilePrefs(pref_service_.registry());
+
+    ON_CALL(mock_sync_sessions_client_, GetSessionSyncPrefs())
+        .WillByDefault(testing::Return(&session_sync_prefs_));
+    ON_CALL(mock_sync_sessions_client_, GetLocalDeviceInfo())
+        .WillByDefault(testing::Return(&local_device_info_));
     ON_CALL(mock_sync_sessions_client_, GetSyncedWindowDelegatesGetter())
         .WillByDefault(testing::Return(&window_getter_));
     ON_CALL(mock_sync_sessions_client_, GetLocalSessionEventRouter())
         .WillByDefault(testing::Return(window_getter_.router()));
 
-    local_device_ = std::make_unique<LocalDeviceInfoProviderMock>(
-        kCacheGuid, "Wayne Gretzky's Hacking Box", "Chromium 10k", "Chrome 10k",
-        sync_pb::SyncEnums_DeviceType_TYPE_LINUX, "device_id");
-    sync_client_ = std::make_unique<syncer::FakeSyncClient>();
-    sync_prefs_ =
-        std::make_unique<syncer::SyncPrefs>(sync_client_->GetPrefService());
-    manager_ = std::make_unique<SessionsSyncManager>(
-        &mock_sync_sessions_client_, sync_prefs_.get(), local_device_.get(),
-        base::Bind(&SessionNotificationObserver::NotifyOfUpdate,
-                   base::Unretained(&observer_)));
+    manager_ =
+        std::make_unique<SessionsSyncManager>(&mock_sync_sessions_client_);
   }
 
   void TearDown() override {
     test_processor_ = nullptr;
     helper()->Reset();
-    sync_prefs_.reset();
     manager_.reset();
   }
 
-  const DeviceInfo* GetLocalDeviceInfo() {
-    return local_device_->GetLocalDeviceInfo();
-  }
-
-  TabNodePool* GetTabPool() {
-    return &manager()->session_tracker_.local_tab_pool_;
-  }
+  const DeviceInfo* GetLocalDeviceInfo() { return &local_device_info_; }
 
   SessionsSyncManager* manager() { return manager_.get(); }
   SessionSyncTestHelper* helper() { return &helper_; }
-  LocalDeviceInfoProviderMock* local_device() { return local_device_.get(); }
-  SessionNotificationObserver* observer() { return &observer_; }
-  syncer::SyncPrefs* sync_prefs() { return sync_prefs_.get(); }
+  MockSyncSessionsClient* mock_sync_sessions_client() {
+    return &mock_sync_sessions_client_;
+  }
 
   void InitWithSyncDataTakeOutput(const SyncDataList& initial_data,
                                   SyncChangeList* output) {
@@ -284,7 +267,7 @@ class SessionsSyncManagerTest : public testing::Test {
   }
 
   SyncChangeList* FilterOutLocalHeaderChanges(SyncChangeList* list) {
-    SyncChangeList::iterator it = list->begin();
+    auto it = list->begin();
     bool found = false;
     while (it != list->end()) {
       if (it->sync_data().IsLocal() &&
@@ -387,15 +370,14 @@ class SessionsSyncManagerTest : public testing::Test {
   }
 
  private:
-  std::unique_ptr<syncer::FakeSyncClient> sync_client_;
+  const syncer::DeviceInfo local_device_info_;
+  TestingPrefServiceSimple pref_service_;
+  SessionSyncPrefs session_sync_prefs_;
   testing::NiceMock<MockSyncSessionsClient> mock_sync_sessions_client_;
-  std::unique_ptr<syncer::SyncPrefs> sync_prefs_;
-  SessionNotificationObserver observer_;
   std::unique_ptr<SessionsSyncManager> manager_;
   SessionSyncTestHelper helper_;
   TestSyncChangeProcessor* test_processor_ = nullptr;
   TestSyncedWindowDelegatesGetter window_getter_;
-  std::unique_ptr<LocalDeviceInfoProviderMock> local_device_;
 };
 
 // Tests that the local session header objects is created properly in
@@ -448,21 +430,14 @@ TEST_F(SessionsSyncManagerTest, PreserveTabbedDataNoWindows) {
   ResetWindows();
   InitWithSyncDataTakeOutput(ConvertToRemote(in), &out);
 
-  // There should be two changes: the rewritten tab (to update the tab id), and
-  // the rewritten header.
-  ASSERT_TRUE(ChangeTypeMatches(
-      out, {SyncChange::ACTION_UPDATE, SyncChange::ACTION_UPDATE}));
-  VerifyLocalTabChange(out[0], 2, kFoo2);
-  VerifyLocalHeaderChange(out[1], 1, 1);
+  // There should be one change to the rewritten header.
+  ASSERT_TRUE(ChangeTypeMatches(out, {SyncChange::ACTION_UPDATE}));
+  VerifyLocalHeaderChange(out[0], 1, 1);
 
-  // Verify the tab id of the restored tab is updated and consistent.
+  // SessionId should not be rewritten on restore.
   int restored_tab_id =
-      out[0].sync_data().GetSpecifics().session().tab().tab_id();
-  // SessionId should be rewritten on restore.
-  ASSERT_NE(tab->GetSessionId().id(), restored_tab_id);
-  ASSERT_EQ(
-      restored_tab_id,
-      out[1].sync_data().GetSpecifics().session().header().window(0).tab(0));
+      out[0].sync_data().GetSpecifics().session().header().window(0).tab(0);
+  EXPECT_EQ(tab->GetSessionId().id(), restored_tab_id);
   out.clear();
 
   // Now actually resurrect the native data, which will end up having different
@@ -497,118 +472,14 @@ TEST_F(SessionsSyncManagerTest, PreserveTabbedDataCustomTab) {
   manager()->StopSyncing(syncer::SESSIONS);
   ResetWindows();
   window = AddWindow(sync_pb::SessionWindow_BrowserType_TYPE_CUSTOM_TAB);
-  TestSyncedTabDelegate* custom_tab = AddTab(window->GetSessionId(), kBar1);
+  AddTab(window->GetSessionId(), kBar1);
   InitWithSyncDataTakeOutput(ConvertToRemote(in), &out);
 
-  // The previous session should be preserved. The transient window cannot be
-  // synced because we do not have enough local data to ensure that we wouldn't
-  // vend the same sync id if our persistent storage didn't match upon the last
-  // shutdown.
-  ASSERT_TRUE(ChangeTypeMatches(
-      out, {SyncChange::ACTION_UPDATE, SyncChange::ACTION_UPDATE}));
-  VerifyLocalTabChange(out[0], 2, kFoo2);
-  VerifyLocalHeaderChange(out[1], 1, 1);
-  out.clear();
-
-  // Now re-create local data and modify it.
-  TestSyncedWindowDelegate* alive_again = AddWindow();
-  alive_again->OverrideTabAt(0, tab);
-  tab->Navigate(kBaz1);
-
-  // The local change should be created and tracked correctly. This doesn't
-  // actually start syncing the custom tab yet, because the tab itself isn't
-  // associated yet.
-  ASSERT_TRUE(ChangeTypeMatches(
-      out, {SyncChange::ACTION_UPDATE, SyncChange::ACTION_UPDATE}));
-  VerifyLocalTabChange(out[0], 3, kBaz1);
-  VerifyLocalHeaderChange(out[1], 1, 1);
-  out.clear();
-
-  // Now trigger OnLocalTabModified() for the custom tab again, it should sync.
-  custom_tab->Navigate(kBar2);
-  ASSERT_TRUE(ChangeTypeMatches(
-      out, {SyncChange::ACTION_ADD, SyncChange::ACTION_UPDATE}));
-  VerifyLocalTabChange(out[0], 2, kBar2);
-  VerifyLocalHeaderChange(out[1], 2, 2);
-}
-
-// Create a placeholder and a non-placeholder that have the same sync ids. Only
-// the non-placeholder should survive. This state should be impossible for up
-// to date clients to enter.
-TEST_F(SessionsSyncManagerTest, ConflictingSyncIdsWithPlaceholder) {
-  syncer::SyncDataList in;
-  syncer::SyncChangeList out;
-
-  // First sync with one tab and one window.
-  TestSyncedWindowDelegate* window = AddWindow();
-  AddTab(window->GetSessionId(), kFoo1);
-  InitWithSyncDataTakeOutput(in, &out);
-
-  in = GetDataFromChanges(out);
-  int conflicting_sync_id =
-      out[1].sync_data().GetSpecifics().session().tab_node_id();
-  out.clear();
-  // There should be two entities, a header and a tab.
-  ASSERT_EQ(2U, in.size());
-
-  manager()->StopSyncing(syncer::SESSIONS);
-
-  // The main window's tab is now a placeholder, and we have a conflicting id
-  // for the custom tab. They should both have their tab ids reset, but the
-  // placeholder cannot be fixed, and will be dropped. Only the custom tab will
-  // show up now.
-  PlaceholderTabDelegate tab2(SessionID::NewUnique(), conflicting_sync_id);
-  window->OverrideTabAt(0, &tab2);
-
-  TestSyncedWindowDelegate* window2 =
-      AddWindow(sync_pb::SessionWindow_BrowserType_TYPE_CUSTOM_TAB);
-  TestSyncedTabDelegate* tab3 = AddTab(window2->GetSessionId(), kBar1);
-  tab3->SetSyncId(conflicting_sync_id);
-  window2->OverrideTabAt(0, tab3);
-
-  InitWithSyncDataTakeOutput(ConvertToRemote(in), &out);
-
+  // The previous session should be preserved, together with the new custom tab.
   ASSERT_TRUE(ChangeTypeMatches(
       out, {SyncChange::ACTION_ADD, SyncChange::ACTION_UPDATE}));
   VerifyLocalTabChange(out[0], 1, kBar1);
-  VerifyLocalHeaderChange(out[1], 1, 1);
-}
-
-// Create two tabs with the same sync id, which is an invalid state. The manager
-// should strip both of the sync ids, and then new ones should be generated.
-// This state should be impossible for up to date clients to enter.
-TEST_F(SessionsSyncManagerTest, ConflictingSyncIdsBothReal) {
-  syncer::SyncDataList in;
-  syncer::SyncChangeList out;
-
-  TestSyncedWindowDelegate* window = AddWindow();
-  TestSyncedTabDelegate* tab1 = AddTab(window->GetSessionId(), kFoo1);
-  TestSyncedTabDelegate* tab2 = AddTab(window->GetSessionId(), kBar1);
-
-  // The pool wants to start vending numbers 0, 1, 2, ... etc. So we're
-  // guaranteed that when the manager clears the sync ids, it will be replaced
-  // with smaller values.
-  int dupe_sync_id = 13;
-  tab1->SetSyncId(dupe_sync_id);
-  tab2->SetSyncId(dupe_sync_id);
-
-  InitWithSyncDataTakeOutput(in, &out);
-  // Header creation, two tab creations, and header update.
-  ASSERT_TRUE(ChangeTypeMatches(
-      out, {SyncChange::ACTION_ADD, SyncChange::ACTION_ADD,
-            SyncChange::ACTION_ADD, SyncChange::ACTION_UPDATE}));
-  VerifyLocalHeaderChange(out[0], 0, 0);
-  VerifyLocalTabChange(out[1], 1, kFoo1);
-  VerifyLocalTabChange(out[2], 1, kBar1);
-  VerifyLocalHeaderChange(out[3], 1, 2);
-
-  // The sync ids should have been fixed.
-  EXPECT_NE(dupe_sync_id,
-            out[1].sync_data().GetSpecifics().session().tab_node_id());
-  EXPECT_NE(dupe_sync_id,
-            out[2].sync_data().GetSpecifics().session().tab_node_id());
-  EXPECT_NE(out[1].sync_data().GetSpecifics().session().tab_node_id(),
-            out[2].sync_data().GetSpecifics().session().tab_node_id());
+  VerifyLocalHeaderChange(out[1], 2, 2);
 }
 
 // Tests MergeDataAndStartSyncing with sync data but no local data.
@@ -674,10 +545,6 @@ TEST_F(SessionsSyncManagerTest, MergeLocalSessionExistingTabs) {
   VerifyLocalTabChange(out[1], tab->GetEntryCount(), kBaz1);
   VerifyLocalTabChange(out[2], tab2->GetEntryCount(), kBar2);
   VerifyLocalHeaderChange(out[3], 1, 2);
-
-  // Verify tab delegates have Sync ids.
-  EXPECT_EQ(0, window->GetTabAt(0)->GetSyncId());
-  EXPECT_EQ(1, window->GetTabAt(1)->GetSyncId());
 }
 
 // Ensure that the last known device name is reported.
@@ -691,9 +558,11 @@ TEST_F(SessionsSyncManagerTest, MergeLocalSessionName) {
   ASSERT_EQ(1U, initial_data.size());
 
   // Change local device name to |kModifiedDeviceName|.
-  local_device()->Initialize(std::make_unique<DeviceInfo>(
+  const DeviceInfo new_device_info(
       kCacheGuid, kModifiedDeviceName, "Chromium 10k", "Chrome 10k",
-      sync_pb::SyncEnums_DeviceType_TYPE_LINUX, "device_id"));
+      sync_pb::SyncEnums_DeviceType_TYPE_LINUX, "device_id");
+  ON_CALL(*mock_sync_sessions_client(), GetLocalDeviceInfo())
+      .WillByDefault(testing::Return(&new_device_info));
 
   // Restart the manager, now that the local device name has changed.
   manager()->StopSyncing(syncer::SESSIONS);
@@ -832,8 +701,7 @@ TEST_F(SessionsSyncManagerTest, UpdatesAfterMixedMerge) {
   meta1_reference[0].pop_back();
   sync_pb::SessionWindow* win = meta1.mutable_header()->mutable_window(0);
   win->clear_tab();
-  for (std::vector<SessionID>::const_iterator iter = kTabIds1.begin();
-       iter + 1 != kTabIds1.end(); ++iter) {
+  for (auto iter = kTabIds1.begin(); iter + 1 != kTabIds1.end(); ++iter) {
     win->add_tab(iter->id());
   }
   SyncChangeList removal;
@@ -871,8 +739,7 @@ TEST_F(SessionsSyncManagerTest, DeleteForeignSession) {
 
   // Update associator with the session's meta node, window, and tabs.
   UpdateTrackerWithSpecifics(meta, base::Time(), &manager()->session_tracker_);
-  for (std::vector<sync_pb::SessionSpecifics>::iterator iter = tabs.begin();
-       iter != tabs.end(); ++iter) {
+  for (auto iter = tabs.begin(); iter != tabs.end(); ++iter) {
     UpdateTrackerWithSpecifics(*iter, base::Time(),
                                &manager()->session_tracker_);
   }
@@ -1016,11 +883,13 @@ TEST_F(SessionsSyncManagerTest, ProcessRemoteDeleteOfLocalSession) {
   VerifyLocalHeaderChange(out[3], 1, 1);
 
   // Verify TabLinks.
-  EXPECT_EQ(1U, GetTabPool()->Capacity());
-  EXPECT_TRUE(GetTabPool()->Empty());
   int tab_node_id = out[2].sync_data().GetSpecifics().session().tab_node_id();
   int tab_id = out[2].sync_data().GetSpecifics().session().tab().tab_id();
-  EXPECT_EQ(tab_id, GetTabPool()->GetTabIdFromTabNodeId(tab_node_id).id());
+  EXPECT_EQ(tab_id, manager()
+                        ->session_tracker_
+                        .LookupTabIdFromTabNodeId(
+                            manager()->current_machine_tag(), tab_node_id)
+                        .id());
 }
 
 // Test that receiving a session delete from sync removes the session
@@ -1242,12 +1111,13 @@ TEST_F(SessionsSyncManagerTest, AssociationReusesNodes) {
       changes[1].sync_data().GetSpecifics().session().tab_node_id();
 
   // Pass back the previous tab and header nodes at association, along with a
-  // second tab node (with a rewritten tab node id).
+  // second tab node (with rewritten tab IDs).
   SyncDataList in;
   in.push_back(
       CreateRemoteData(changes[2].sync_data().GetSpecifics()));  // Header node.
   sync_pb::SessionSpecifics new_tab(
       changes[1].sync_data().GetSpecifics().session());
+  new_tab.mutable_tab()->set_tab_id(new_tab.tab().tab_id() + 1);
   new_tab.set_tab_node_id(tab_node_id + 1);
   in.push_back(CreateRemoteData(
       changes[1].sync_data().GetSpecifics()));  // Old tab node.
@@ -1449,10 +1319,6 @@ TEST_F(SessionsSyncManagerTest, OnLocalTabModified) {
       VerifyLocalHeaderChange(out[index++], 1, i + 1);
     }
   }
-
-  // Verify tab delegates have Sync ids.
-  EXPECT_EQ(0, window->GetTabAt(0)->GetSyncId());
-  EXPECT_EQ(1, window->GetTabAt(1)->GetSyncId());
 }
 
 TEST_F(SessionsSyncManagerTest, ForeignSessionModifiedTime) {
@@ -1663,7 +1529,6 @@ TEST_F(SessionsSyncManagerTest, GarbageCollectionHonoursUpdate) {
 // Test that NOTIFICATION_FOREIGN_SESSION_UPDATED is sent when processing
 // sync changes.
 TEST_F(SessionsSyncManagerTest, NotifiedOfUpdates) {
-  ASSERT_FALSE(observer()->notified_of_update());
   InitWithNoSyncData();
 
   std::vector<sync_pb::SessionSpecifics> tabs1;
@@ -1672,20 +1537,18 @@ TEST_F(SessionsSyncManagerTest, NotifiedOfUpdates) {
 
   SyncChangeList changes;
   changes.push_back(MakeRemoteChange(meta, SyncChange::ACTION_ADD));
+  EXPECT_CALL(*mock_sync_sessions_client(), NotifyForeignSessionUpdated());
   manager()->ProcessSyncChanges(FROM_HERE, changes);
-  EXPECT_TRUE(observer()->notified_of_update());
 
   changes.clear();
-  observer()->Reset();
   AddTabsToChangeList(tabs1, SyncChange::ACTION_ADD, &changes);
+  EXPECT_CALL(*mock_sync_sessions_client(), NotifyForeignSessionUpdated());
   manager()->ProcessSyncChanges(FROM_HERE, changes);
-  EXPECT_TRUE(observer()->notified_of_update());
 
   changes.clear();
-  observer()->Reset();
   changes.push_back(MakeRemoteChange(meta, SyncChange::ACTION_DELETE));
+  EXPECT_CALL(*mock_sync_sessions_client(), NotifyForeignSessionUpdated());
   manager()->ProcessSyncChanges(FROM_HERE, changes);
-  EXPECT_TRUE(observer()->notified_of_update());
 }
 
 // Test that NOTIFICATION_FOREIGN_SESSION_UPDATED is sent when handling
@@ -1701,10 +1564,8 @@ TEST_F(SessionsSyncManagerTest, NotifiedOfLocalRemovalOfForeignSession) {
   changes.push_back(MakeRemoteChange(meta, SyncChange::ACTION_ADD));
   manager()->ProcessSyncChanges(FROM_HERE, changes);
 
-  observer()->Reset();
-  ASSERT_FALSE(observer()->notified_of_update());
+  EXPECT_CALL(*mock_sync_sessions_client(), NotifyForeignSessionUpdated());
   manager()->GetOpenTabsUIDelegate()->DeleteForeignSession(tag);
-  ASSERT_TRUE(observer()->notified_of_update());
 }
 
 // Tests receipt of duplicate tab IDs in the same window.  This should never
@@ -1897,63 +1758,53 @@ TEST_F(SessionsSyncManagerTest, GetForeignSessionTabs) {
 
 // Ensure model association associates the pre-existing tabs.
 TEST_F(SessionsSyncManagerTest, SwappedOutOnRestore) {
-  const int kRestoredTabId = 1337;
-  const SessionID kNewTabId = SessionID::FromSerializedValue(2468);
-
   // Start with three tabs in a window.
   TestSyncedWindowDelegate* window = AddWindow();
   TestSyncedTabDelegate* tab1 = AddTab(window->GetSessionId(), kFoo1);
   tab1->Navigate(kFoo2);
   TestSyncedTabDelegate* tab2 = AddTab(window->GetSessionId(), kBar1);
   tab2->Navigate(kBar2);
-  TestSyncedTabDelegate* tab3 = AddTab(window->GetSessionId(), kBaz1);
-  tab3->Navigate(kBaz2);
 
   SyncDataList in;
   SyncChangeList out;
   InitWithSyncDataTakeOutput(in, &out);
 
-  // Should be one header add, 3 tab adds/updates, one header update.
-  ASSERT_EQ(5U, out.size());
+  // Should be one header add, 2 tab adds/updates, one header update.
+  ASSERT_EQ(4U, out.size());
 
   // Now update the sync data to be:
   // * one "normal" fully loaded tab
-  // * one placeholder tab with no WebContents and a tab_id change
   // * one placeholder tab with no WebContents and no tab_id change
   sync_pb::EntitySpecifics t0_entity = out[1].sync_data().GetSpecifics();
   sync_pb::EntitySpecifics t1_entity = out[2].sync_data().GetSpecifics();
-  t1_entity.mutable_session()->mutable_tab()->set_tab_id(kRestoredTabId);
-  sync_pb::EntitySpecifics t2_entity = out[3].sync_data().GetSpecifics();
   in.push_back(CreateRemoteData(t0_entity));
   in.push_back(CreateRemoteData(t1_entity));
-  in.push_back(CreateRemoteData(t2_entity));
   out.clear();
   manager()->StopSyncing(syncer::SESSIONS);
+  ResetWindows();
 
-  PlaceholderTabDelegate t1_override(kNewTabId, 1);
-  PlaceholderTabDelegate t2_override(
-      SessionID::FromSerializedValue(t2_entity.session().tab().tab_id()), 2);
+  PlaceholderTabDelegate t1_override(
+      SessionID::FromSerializedValue(t1_entity.session().tab().tab_id()));
+  window = AddWindow();
+  window->OverrideTabAt(0, tab1);
   window->OverrideTabAt(1, &t1_override);
-  window->OverrideTabAt(2, &t2_override);
   InitWithSyncDataTakeOutput(in, &out);
 
   // The last change should be the final header update, reflecting 1 window
-  // and 3 tabs.
-  VerifyLocalHeaderChange(out.back(), 1, 3);
+  // and 2 tabs.
+  VerifyLocalHeaderChange(out.back(), 1, 2);
 
-  // There should be three changes, one for the fully associated tab, and
-  // one each for the tab_id updates to t1 and t2.
+  // There should be one tab change, for the fully associated tab. The
+  // window-ID change for the placeholder tab is not reported to avoid traffic,
+  // since nothing relies on it.
   ASSERT_TRUE(AllOfChangesAreType(*FilterOutLocalHeaderChanges(&out),
                                   SyncChange::ACTION_UPDATE));
-  ASSERT_EQ(3U, out.size());
+  ASSERT_EQ(1U, out.size());
   VerifyLocalTabChange(out[0], 2, kFoo2);
-  VerifyLocalTabChange(out[1], 2, kBar2);
-  VerifyLocalTabChange(out[2], 2, kBaz2);
 }
 
-// Ensure model association updates the window ID for tabs whose window's ID has
-// changed.
-TEST_F(SessionsSyncManagerTest, WindowIdUpdatedOnRestore) {
+// Ensure model association does not update the window ID for placeholder tabs.
+TEST_F(SessionsSyncManagerTest, WindowIdNotUpdatedOnRestoreForPlaceholderTab) {
   SyncDataList in;
   SyncChangeList out;
 
@@ -1974,19 +1825,15 @@ TEST_F(SessionsSyncManagerTest, WindowIdUpdatedOnRestore) {
 
   // Override the tab with a placeholder tab delegate.
   PlaceholderTabDelegate t0_override(
-      SessionID::FromSerializedValue(t0_entity.session().tab().tab_id()),
-      t0_entity.session().tab_node_id());
+      SessionID::FromSerializedValue(t0_entity.session().tab().tab_id()));
 
   // Set up the window with the new window ID and placeholder tab.
   window = AddWindow();
   window->OverrideTabAt(0, &t0_override);
   InitWithSyncDataTakeOutput(in, &out);
 
-  // There should be one change for t0's window ID update.
-  ASSERT_EQ(1U, FilterOutLocalHeaderChanges(&out)->size());
-  VerifyLocalTabChange(out[0], 1, kFoo1);
-  EXPECT_EQ(window->GetSessionId().id(),
-            out[0].sync_data().GetSpecifics().session().tab().window_id());
+  // There should be no change other than the header update.
+  ASSERT_EQ(0U, FilterOutLocalHeaderChanges(&out)->size());
 }
 
 // Ensure that the manager properly ignores a restored placeholder that refers
@@ -2010,8 +1857,7 @@ TEST_F(SessionsSyncManagerTest, RestoredPlacholderTabNodeDeleted) {
 
   // Override the tab with a placeholder tab delegate.
   PlaceholderTabDelegate t0_override(
-      SessionID::FromSerializedValue(t0_entity.session().tab().tab_id()),
-      t0_entity.session().tab_node_id());
+      SessionID::FromSerializedValue(t0_entity.session().tab().tab_id()));
 
   // Override the tab with a placeholder whose sync entity won't exist.
   window->OverrideTabAt(0, &t0_override);
@@ -2020,49 +1866,6 @@ TEST_F(SessionsSyncManagerTest, RestoredPlacholderTabNodeDeleted) {
   // Because no entities were passed in at associate time, there should be no
   // tab changes.
   ASSERT_EQ(0U, FilterOutLocalHeaderChanges(&out)->size());
-}
-
-// Check the behavior for a placeholder tab in one window being mapped to the
-// same sync entity as a tab in another window. The order should not matter.
-// Instead, they both should have their sync data discarded, sync ids reset, and
-// then re-created where possible (not possible for the placeholder). Assuming a
-// well behaved client, this should never happen.
-TEST_F(SessionsSyncManagerTest, PlaceholderConflictAcrossWindows) {
-  syncer::SyncDataList in;
-  syncer::SyncChangeList out;
-
-  // First sync with one tab and one window.
-  TestSyncedWindowDelegate* window = AddWindow();
-  TestSyncedTabDelegate* tab1 = AddTab(window->GetSessionId(), kFoo1);
-  InitWithSyncDataTakeOutput(in, &out);
-  ASSERT_TRUE(out[1].sync_data().GetSpecifics().session().has_tab());
-  manager()->StopSyncing(syncer::SESSIONS);
-
-  // Now create a second window with a placeholder that has the same sync id,
-  // but a different tab id.
-  TestSyncedWindowDelegate* window2 = AddWindow();
-  int sync_id = out[1].sync_data().GetSpecifics().session().tab_node_id();
-  PlaceholderTabDelegate tab2(SessionID::NewUnique(), sync_id);
-  window2->OverrideTabAt(0, &tab2);
-
-  // Resync, reusing the old sync data.
-  in.push_back(CreateRemoteData(out[0].sync_data().GetSpecifics()));
-  in.push_back(CreateRemoteData(out[1].sync_data().GetSpecifics()));
-  out.clear();
-  InitWithSyncDataTakeOutput(in, &out);
-
-  // The two tabs have the same sync id, which is not allowed. They will have
-  // their ids stripped and re-generated. But the placeholder cannot survive
-  // this and will not show up in results. Because we have potentially new sync
-  // ids, the essentially re-created tab will be an ADD.
-  ASSERT_TRUE(ChangeTypeMatches(
-      out, {SyncChange::ACTION_ADD, SyncChange::ACTION_UPDATE}));
-  VerifyLocalHeaderChange(out[1], 1, 1);
-  VerifyLocalTabChange(out[0], 1, kFoo1);
-  EXPECT_EQ(tab1->GetSessionId().id(),
-            out[0].sync_data().GetSpecifics().session().tab().tab_id());
-  EXPECT_EQ(tab1->GetSyncId(),
-            out[0].sync_data().GetSpecifics().session().tab_node_id());
 }
 
 // Tests that task ids are generated for navigations on local tabs.

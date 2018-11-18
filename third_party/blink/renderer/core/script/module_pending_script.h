@@ -26,14 +26,13 @@ class ModulePendingScriptTreeClient final : public ModuleTreeClient {
   static ModulePendingScriptTreeClient* Create() {
     return new ModulePendingScriptTreeClient();
   }
-  virtual ~ModulePendingScriptTreeClient() = default;
+  ~ModulePendingScriptTreeClient() override = default;
 
   void SetPendingScript(ModulePendingScript* client);
 
   ModuleScript* GetModuleScript() const { return module_script_; }
 
-  void Trace(blink::Visitor*);
-  void TraceWrappers(const ScriptWrappableVisitor*) const;
+  void Trace(blink::Visitor*) override;
 
  private:
   ModulePendingScriptTreeClient();
@@ -64,8 +63,7 @@ class CORE_EXPORT ModulePendingScript : public PendingScript {
     return module_tree_client_->GetModuleScript();
   }
 
-  void Trace(blink::Visitor*);
-  void TraceWrappers(const ScriptWrappableVisitor*) const;
+  void Trace(blink::Visitor*) override;
 
  private:
   ModulePendingScript(ScriptElementBase*,
@@ -74,18 +72,12 @@ class CORE_EXPORT ModulePendingScript : public PendingScript {
 
   // PendingScript
   ScriptType GetScriptType() const override { return ScriptType::kModule; }
-  bool CheckMIMETypeBeforeRunScript(Document* context_document) const override;
-  Script* GetSource(const KURL& document_url,
-                    bool& error_occurred) const override;
+  Script* GetSource(const KURL& document_url) const override;
   bool IsReady() const override { return ready_; }
   bool IsExternal() const override { return is_external_; }
-  bool ErrorOccurred() const override;
   bool WasCanceled() const override { return false; }
 
-  bool StartStreamingIfPossible(ScriptStreamer::Type,
-                                base::OnceClosure) override {
-    return false;
-  }
+  bool StartStreamingIfPossible(base::OnceClosure) override { return false; }
   bool IsCurrentlyStreaming() const override { return false; }
 
   KURL UrlForTracing() const override { return NullURL(); }

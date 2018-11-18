@@ -13,7 +13,6 @@
 #include "gpu/ipc/service/gpu_channel.h"
 #include "gpu/ipc/service/gpu_channel_manager.h"
 #include "gpu/ipc/service/gpu_channel_manager_delegate.h"
-#include "ipc/ipc_test_sink.h"
 #include "ui/gl/init/gl_factory.h"
 #include "ui/gl/test/gl_surface_test_support.h"
 #include "url/gurl.h"
@@ -37,38 +36,14 @@ class TestGpuChannelManagerDelegate : public GpuChannelManagerDelegate {
   void StoreShaderToDisk(int32_t client_id,
                          const std::string& key,
                          const std::string& shader) override {}
+  void ExitProcess() override {}
 #if defined(OS_WIN)
-  void SendAcceleratedSurfaceCreatedChildWindow(
-      SurfaceHandle parent_window,
-      SurfaceHandle child_window) override {}
+  void SendCreatedChildWindow(SurfaceHandle parent_window,
+                              SurfaceHandle child_window) override {}
 #endif
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TestGpuChannelManagerDelegate);
-};
-
-class TestSinkFilteredSender : public FilteredSender {
- public:
-  TestSinkFilteredSender() : sink_(std::make_unique<IPC::TestSink>()) {}
-  ~TestSinkFilteredSender() override = default;
-
-  IPC::TestSink* sink() const { return sink_.get(); }
-
-  bool Send(IPC::Message* msg) override { return sink_->Send(msg); }
-
-  void AddFilter(IPC::MessageFilter* filter) override {
-    // Needed to appease DCHECKs.
-    filter->OnFilterAdded(sink_.get());
-  }
-
-  void RemoveFilter(IPC::MessageFilter* filter) override {
-    filter->OnFilterRemoved();
-  }
-
- private:
-  std::unique_ptr<IPC::TestSink> sink_;
-
-  DISALLOW_COPY_AND_ASSIGN(TestSinkFilteredSender);
 };
 
 GpuChannelTestCommon::GpuChannelTestCommon()
@@ -76,20 +51,16 @@ GpuChannelTestCommon::GpuChannelTestCommon()
       io_task_runner_(new base::TestSimpleTaskRunner),
       sync_point_manager_(new SyncPointManager()),
       scheduler_(new Scheduler(task_runner_, sync_point_manager_.get())),
-      channel_manager_delegate_(new TestGpuChannelManagerDelegate()),
-      channel_manager_(
-          new GpuChannelManager(GpuPreferences(),
-                                channel_manager_delegate_.get(),
-                                nullptr, /* watchdog */
-                                task_runner_.get(),
-                                io_task_runner_.get(),
-                                scheduler_.get(),
-                                sync_point_manager_.get(),
-                                nullptr, /* gpu_memory_buffer_factory */
-                                GpuFeatureInfo(),
-                                GpuProcessActivityFlags())) {
+      channel_manager_delegate_(new TestGpuChannelManagerDelegate()) {
   // We need GL bindings to actually initialize command buffers.
   gl::GLSurfaceTestSupport::InitializeOneOffWithStubBindings();
+
+  channel_manager_.reset(new GpuChannelManager(
+      GpuPreferences(), channel_manager_delegate_.get(), nullptr, /* watchdog */
+      task_runner_.get(), io_task_runner_.get(), scheduler_.get(),
+      sync_point_manager_.get(), nullptr, /* gpu_memory_buffer_factory */
+      GpuFeatureInfo(), GpuProcessActivityFlags(),
+      gl::init::CreateOffscreenGLSurface(gfx::Size())));
 }
 
 GpuChannelTestCommon::~GpuChannelTestCommon() {
@@ -107,8 +78,8 @@ GpuChannel* GpuChannelTestCommon::CreateChannel(int32_t client_id,
                                                 bool is_gpu_host) {
   uint64_t kClientTracingId = 1;
   GpuChannel* channel = channel_manager()->EstablishChannel(
-      client_id, kClientTracingId, is_gpu_host);
-  channel->Init(std::make_unique<TestSinkFilteredSender>());
+      client_id, kClientTracingId, is_gpu_host, true);
+  channel->InitForTesting(&sink_);
   base::ProcessId kProcessId = 1;
   channel->OnChannelConnected(kProcessId);
   return channel;
@@ -116,13 +87,9 @@ GpuChannel* GpuChannelTestCommon::CreateChannel(int32_t client_id,
 
 void GpuChannelTestCommon::HandleMessage(GpuChannel* channel,
                                          IPC::Message* msg) {
-  IPC::TestSink* sink =
-      static_cast<TestSinkFilteredSender*>(channel->channel_for_testing())
-          ->sink();
-
   // Some IPCs (such as GpuCommandBufferMsg_Initialize) will generate more
   // delayed responses, drop those if they exist.
-  sink->ClearMessages();
+  sink_.ClearMessages();
 
   // Needed to appease DCHECKs.
   msg->set_unblock(false);
@@ -135,7 +102,7 @@ void GpuChannelTestCommon::HandleMessage(GpuChannel* channel,
 
   // Replies are sent to the sink.
   if (msg->is_sync()) {
-    const IPC::Message* reply_msg = sink->GetMessageAt(0);
+    const IPC::Message* reply_msg = sink_.GetMessageAt(0);
     ASSERT_TRUE(reply_msg);
     EXPECT_TRUE(!reply_msg->is_reply_error());
 
@@ -150,15 +117,14 @@ void GpuChannelTestCommon::HandleMessage(GpuChannel* channel,
     delete deserializer;
   }
 
-  sink->ClearMessages();
+  sink_.ClearMessages();
 
   delete msg;
 }
 
-base::SharedMemoryHandle GpuChannelTestCommon::GetSharedHandle() {
-  base::SharedMemory shared_memory;
-  shared_memory.CreateAnonymous(10);
-  return shared_memory.handle().Duplicate();
+base::UnsafeSharedMemoryRegion GpuChannelTestCommon::GetSharedMemoryRegion() {
+  return base::UnsafeSharedMemoryRegion::Create(
+      sizeof(CommandBufferSharedState));
 }
 
 }  // namespace gpu

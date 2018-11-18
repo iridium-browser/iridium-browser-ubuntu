@@ -17,11 +17,11 @@
 #include "content/renderer/render_frame_impl.h"
 #include "content/renderer/service_worker/web_service_worker_registration_impl.h"
 #include "services/service_manager/public/cpp/connector.h"
-#include "third_party/blink/public/platform/modules/manifest/manifest_manager.mojom.h"
+#include "third_party/blink/public/mojom/manifest/manifest_manager.mojom.h"
 #include "third_party/blink/public/platform/modules/push_messaging/web_push_error.h"
 #include "third_party/blink/public/platform/modules/push_messaging/web_push_subscription.h"
 #include "third_party/blink/public/platform/modules/push_messaging/web_push_subscription_options.h"
-#include "third_party/blink/public/platform/modules/serviceworker/web_service_worker_registration.h"
+#include "third_party/blink/public/platform/modules/service_worker/web_service_worker_registration.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/web/web_console_message.h"
 #include "third_party/blink/public/web/web_local_frame.h"
@@ -78,7 +78,7 @@ void PushMessagingClient::DidGetManifest(
     bool user_gesture,
     std::unique_ptr<blink::WebPushSubscriptionCallbacks> callbacks,
     const GURL& manifest_url,
-    const Manifest& manifest) {
+    const blink::Manifest& manifest) {
   // Get the sender_info from the manifest since it wasn't provided by
   // the caller.
   if (manifest.IsEmpty()) {

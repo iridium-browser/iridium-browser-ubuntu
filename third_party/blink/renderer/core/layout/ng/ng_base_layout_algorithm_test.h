@@ -7,10 +7,8 @@
 
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/core/layout/ng/geometry/ng_logical_size.h"
-#include "third_party/blink/renderer/core/layout/ng/layout_ng_block_flow.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_constraint_space.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_layout_test.h"
-#include "third_party/blink/renderer/core/layout/ng/ng_physical_box_fragment.h"
 #include "third_party/blink/renderer/core/testing/core_unit_test_helper.h"
 #include "third_party/blink/renderer/platform/text/text_direction.h"
 #include "third_party/blink/renderer/platform/text/writing_mode.h"
@@ -19,6 +17,8 @@
 namespace blink {
 
 class Element;
+class LayoutNGBlockFlow;
+class NGPhysicalBoxFragment;
 
 // Base class for all LayoutNG Algorithms unit test classes.
 typedef bool TestParamLayoutNG;
@@ -28,8 +28,11 @@ class NGBaseLayoutAlgorithmTest
  protected:
   void SetUp() override;
 
-  std::pair<scoped_refptr<NGPhysicalBoxFragment>,
-            scoped_refptr<NGConstraintSpace>>
+  // Should be called before calling Layout(), if you're not using
+  // RunBlockLayoutAlgorithmForElement.
+  void AdvanceToLayoutPhase();
+
+  std::pair<scoped_refptr<const NGPhysicalBoxFragment>, NGConstraintSpace>
   RunBlockLayoutAlgorithmForElement(Element* element);
 
   scoped_refptr<const NGPhysicalBoxFragment> GetBoxFragmentByElementId(
@@ -51,14 +54,15 @@ class FragmentChildIterator {
     index_ = 0;
   }
 
-  const NGPhysicalBoxFragment* NextChild();
+  const NGPhysicalBoxFragment* NextChild(
+      NGPhysicalOffset* fragment_offset = nullptr);
 
  private:
   const NGPhysicalBoxFragment* parent_;
   unsigned index_;
 };
 
-scoped_refptr<NGConstraintSpace> ConstructBlockLayoutTestConstraintSpace(
+NGConstraintSpace ConstructBlockLayoutTestConstraintSpace(
     WritingMode writing_mode,
     TextDirection direction,
     NGLogicalSize size,

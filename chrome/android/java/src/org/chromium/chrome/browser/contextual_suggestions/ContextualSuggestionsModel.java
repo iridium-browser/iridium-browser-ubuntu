@@ -4,91 +4,58 @@
 
 package org.chromium.chrome.browser.contextual_suggestions;
 
-import android.support.annotation.Nullable;
 import android.view.View.OnClickListener;
 
-import org.chromium.chrome.browser.modelutil.ListObservable;
+import org.chromium.chrome.browser.dependency_injection.ActivityScope;
 import org.chromium.chrome.browser.modelutil.PropertyObservable;
-import org.chromium.chrome.browser.ntp.cards.NewTabPageViewHolder;
-import org.chromium.chrome.browser.ntp.cards.NodeParent;
-import org.chromium.chrome.browser.ntp.cards.TreeNode;
+import org.chromium.chrome.browser.widget.ListMenuButton;
 
-import java.util.Collections;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.List;
+
+import javax.inject.Inject;
 
 /** A model for the contextual suggestions UI component. */
+@ActivityScope
 class ContextualSuggestionsModel
         extends PropertyObservable<ContextualSuggestionsModel.PropertyKey> {
     /** Keys uniquely identifying model properties. */
     static class PropertyKey {
         static final PropertyKey CLOSE_BUTTON_ON_CLICK_LISTENER = new PropertyKey();
+        static final PropertyKey MENU_BUTTON_DELEGATE = new PropertyKey();
         static final PropertyKey TITLE = new PropertyKey();
         static final PropertyKey TOOLBAR_SHADOW_VISIBILITY = new PropertyKey();
-        static final PropertyKey DEFAULT_TOOLBAR_ON_CLICK_LISTENER = new PropertyKey();
 
         private PropertyKey() {}
     }
 
-    /** A {@link ListObservable} containing the current cluster list. */
-    class ClusterListObservable extends ListObservable implements NodeParent {
-        ClusterList mClusterList = new ClusterList(Collections.emptyList());
+    private final ClusterList mClusterList = new ClusterList();
 
-        /** Constructor to initialize parent of cluster list. */
-        ClusterListObservable() {
-            mClusterList.setParent(this);
-        }
-
-        private void setClusterList(ClusterList clusterList) {
-            assert clusterList != null;
-
-            // Destroy the old cluster list.
-            mClusterList.destroy();
-
-            mClusterList = clusterList;
-            mClusterList.setParent(this);
-
-            if (getItemCount() != 0) notifyItemRangeInserted(0, getItemCount());
-        }
-
-        @Override
-        public int getItemCount() {
-            return mClusterList.getItemCount();
-        }
-
-        // NodeParent implementations.
-        @Override
-        public void onItemRangeChanged(TreeNode child, int index, int count,
-                @Nullable NewTabPageViewHolder.PartialBindCallback callback) {
-            assert child == mClusterList;
-            notifyItemRangeChanged(index, count, callback);
-        }
-
-        @Override
-        public void onItemRangeInserted(TreeNode child, int index, int count) {
-            assert child == mClusterList;
-            notifyItemRangeInserted(index, count);
-        }
-
-        @Override
-        public void onItemRangeRemoved(TreeNode child, int index, int count) {
-            assert child == mClusterList;
-            notifyItemRangeRemoved(index, count);
-        }
-    }
-
-    ClusterListObservable mClusterListObservable = new ClusterListObservable();
     private OnClickListener mCloseButtonOnClickListener;
-    private OnClickListener mDefaultToolbarOnClickListener;
+    private ListMenuButton.Delegate mMenuButtonDelegate;
     private String mTitle;
     private boolean mToolbarShadowVisibility;
+    @Inject
+    ContextualSuggestionsModel() {}
 
-    /** @param clusterList The current list of clusters. */
-    void setClusterList(ClusterList clusterList) {
-        mClusterListObservable.setClusterList(clusterList);
+    @Override
+    public Collection<PropertyKey> getAllSetProperties() {
+        // This is only the list of initially set properties and doesn't reflect changes after the
+        // object has been created. but currently this method is only called initially.
+        // Once this model is migrated to PropertyModel, the implementation will be correct.
+        return Arrays.asList(PropertyKey.CLOSE_BUTTON_ON_CLICK_LISTENER,
+                PropertyKey.MENU_BUTTON_DELEGATE, PropertyKey.TITLE);
+    }
+
+    /** @param clusters The current list of clusters. */
+    void setClusterList(List<ContextualSuggestionsCluster> clusters) {
+        mClusterList.setClusters(clusters);
     }
 
     /** @return The current list of clusters. */
     ClusterList getClusterList() {
-        return mClusterListObservable.mClusterList;
+        return mClusterList;
     }
 
     /** @param listener The {@link OnClickListener} for the close button. */
@@ -100,6 +67,17 @@ class ContextualSuggestionsModel
     /** @return The {@link OnClickListener} for the close button. */
     OnClickListener getCloseButtonOnClickListener() {
         return mCloseButtonOnClickListener;
+    }
+
+    /** @param delegate The delegate for handles actions for the menu. */
+    void setMenuButtonDelegate(ListMenuButton.Delegate delegate) {
+        mMenuButtonDelegate = delegate;
+        notifyPropertyChanged(PropertyKey.MENU_BUTTON_DELEGATE);
+    }
+
+    /** @return The delegate that handles actions for the menu. */
+    ListMenuButton.Delegate getMenuButtonDelegate() {
+        return mMenuButtonDelegate;
     }
 
     /** @param title The title to display in the toolbar. */
@@ -129,20 +107,5 @@ class ContextualSuggestionsModel
     /** @return Whether the toolbar shadow should be visible. */
     boolean getToolbarShadowVisibility() {
         return mToolbarShadowVisibility;
-    }
-
-    /**
-     * @param listener The default toolbar {@link OnClickListener}.
-     */
-    void setDefaultToolbarClickListener(OnClickListener listener) {
-        mDefaultToolbarOnClickListener = listener;
-        notifyPropertyChanged(PropertyKey.DEFAULT_TOOLBAR_ON_CLICK_LISTENER);
-    }
-
-    /**
-     * @return The default toolbar {@link OnClickListener}.
-     */
-    OnClickListener getDefaultToolbarClickListener() {
-        return mDefaultToolbarOnClickListener;
     }
 }

@@ -10,6 +10,7 @@
 #include "base/optional.h"
 #include "base/strings/string16.h"
 #include "build/build_config.h"
+#include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/login_delegate.h"
 
 #if defined(OS_MACOSX)
@@ -22,7 +23,6 @@ class ShellLoginDialogHelper;
 
 namespace net {
 class AuthChallengeInfo;
-class AuthCredentials;
 }
 
 namespace content {
@@ -31,11 +31,9 @@ namespace content {
 // ResourceDispatcherHostDelegate::CreateLoginDelegate.
 class ShellLoginDialog : public LoginDelegate {
  public:
-  // Threading: IO thread.
-  ShellLoginDialog(
+  static scoped_refptr<ShellLoginDialog> Create(
       net::AuthChallengeInfo* auth_info,
-      base::Callback<void(const base::Optional<net::AuthCredentials>&)>
-          auth_required_callback);
+      LoginAuthRequiredCallback auth_required_callback);
 
   // LoginDelegate implementation:
   // Threading: IO thread.
@@ -50,8 +48,15 @@ class ShellLoginDialog : public LoginDelegate {
   void UserCancelledAuth();
 
  protected:
+  // Threading: IO thread.
+  ShellLoginDialog(
+      base::OnceCallback<void(const base::Optional<net::AuthCredentials>&)>
+          auth_required_callback);
+
   // Threading: any
   ~ShellLoginDialog() override;
+
+  void Init(net::AuthChallengeInfo* auth_info);
 
  private:
   // All the methods that begin with Platform need to be implemented by the
@@ -76,8 +81,7 @@ class ShellLoginDialog : public LoginDelegate {
                            const base::string16& username,
                            const base::string16& password);
 
-  base::Callback<void(const base::Optional<net::AuthCredentials>&)>
-      auth_required_callback_;
+  LoginAuthRequiredCallback auth_required_callback_;
 
 #if defined(OS_MACOSX)
   // Threading: UI thread.

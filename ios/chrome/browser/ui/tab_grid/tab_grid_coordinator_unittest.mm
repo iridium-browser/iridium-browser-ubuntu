@@ -7,9 +7,10 @@
 #import <UIKit/UIKit.h>
 
 #import "base/test/ios/wait_util.h"
-#import "ios/chrome/browser/ui/tab_switcher/tab_switcher.h"
+#import "ios/chrome/browser/ui/main/tab_switcher.h"
 #import "ios/chrome/test/block_cleanup_test.h"
 #include "testing/gtest_mac.h"
+#include "third_party/ocmock/OCMock/OCMock.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -22,16 +23,13 @@
 @implementation TestTabSwitcherDelegate
 @synthesize didEndCalled = _didEndCalled;
 - (void)tabSwitcher:(id<TabSwitcher>)tabSwitcher
-    shouldFinishWithActiveModel:(TabModel*)tabModel {
+    shouldFinishWithActiveModel:(TabModel*)tabModel
+                   focusOmnibox:(BOOL)focusOmnibox {
   // No-op.
 }
 
 - (void)tabSwitcherDismissTransitionDidEnd:(id<TabSwitcher>)tabSwitcher {
   self.didEndCalled = YES;
-}
-
-- (id<ToolbarOwner>)tabSwitcherTransitionToolbarOwner {
-  return nil;
 }
 @end
 
@@ -41,8 +39,10 @@ class TabGridCoordinatorTest : public BlockCleanupTest {
  public:
   TabGridCoordinatorTest() {
     UIWindow* window = [UIApplication sharedApplication].keyWindow;
-    coordinator_ = [[TabGridCoordinator alloc] initWithWindow:window
-                                   applicationCommandEndpoint:nil];
+    coordinator_ = [[TabGridCoordinator alloc]
+                    initWithWindow:window
+        applicationCommandEndpoint:OCMProtocolMock(
+                                       @protocol(ApplicationCommands))];
     coordinator_.animationsDisabledForTesting = YES;
     // TabGirdCoordinator will make its view controller the root, so stash the
     // original root view controller before starting |coordinator_|.
@@ -92,7 +92,7 @@ class TabGridCoordinatorTest : public BlockCleanupTest {
 // Tests that the tab grid view controller is the initial active view
 // controller.
 TEST_F(TabGridCoordinatorTest, InitialActiveViewController) {
-  EXPECT_EQ(coordinator_.mainViewController, coordinator_.activeViewController);
+  EXPECT_EQ(coordinator_.baseViewController, coordinator_.activeViewController);
 }
 
 // Tests that it is possible to set a TabViewController without first setting a
@@ -206,7 +206,7 @@ TEST_F(TabGridCoordinatorTest, SizeTabGridCoordinatorViewController) {
   CGRect rect = [UIScreen mainScreen].bounds;
   [coordinator_ start];
   EXPECT_TRUE(
-      CGRectEqualToRect(rect, coordinator_.mainViewController.view.frame));
+      CGRectEqualToRect(rect, coordinator_.baseViewController.view.frame));
 }
 
 }  // namespace

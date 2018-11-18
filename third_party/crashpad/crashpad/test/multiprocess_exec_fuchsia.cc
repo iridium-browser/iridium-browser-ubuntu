@@ -14,17 +14,33 @@
 
 #include "test/multiprocess_exec.h"
 
-#include <launchpad/launchpad.h>
-#include <zircon/process.h>
-#include <zircon/syscalls.h>
+#include <lib/fdio/io.h>
+#include <lib/fdio/spawn.h>
+#include <lib/zx/process.h>
+#include <lib/zx/time.h>
+#include <zircon/processargs.h>
 
 #include "base/files/scoped_file.h"
 #include "base/fuchsia/fuchsia_logging.h"
-#include "base/fuchsia/scoped_zx_handle.h"
 #include "gtest/gtest.h"
 
 namespace crashpad {
 namespace test {
+
+namespace {
+
+void AddPipe(fdio_spawn_action_t* action, int target_fd, int* fd_out) {
+  zx_handle_t handle;
+  uint32_t id;
+  zx_status_t status = fdio_pipe_half(&handle, &id);
+  ZX_CHECK(status >= 0, status) << "fdio_pipe_half";
+  action->action = FDIO_SPAWN_ACTION_ADD_HANDLE;
+  action->h.id = PA_HND(PA_HND_TYPE(id), target_fd);
+  action->h.handle = handle;
+  *fd_out = status;
+}
+
+}  // namespace
 
 namespace internal {
 
@@ -32,16 +48,13 @@ struct MultiprocessInfo {
   MultiprocessInfo() {}
   base::ScopedFD stdin_write;
   base::ScopedFD stdout_read;
-  base::ScopedZxHandle child;
+  zx::process child;
 };
 
 }  // namespace internal
 
 Multiprocess::Multiprocess()
-    : info_(nullptr),
-      code_(EXIT_SUCCESS),
-      reason_(kTerminationNormal) {
-}
+    : info_(nullptr), code_(EXIT_SUCCESS), reason_(kTerminationNormal) {}
 
 void Multiprocess::Run() {
   // Set up and spawn the child process.
@@ -54,19 +67,14 @@ void Multiprocess::Run() {
   // Wait until the child exits.
   zx_signals_t signals;
   ASSERT_EQ(
-      zx_object_wait_one(
-          info_->child.get(), ZX_TASK_TERMINATED, ZX_TIME_INFINITE, &signals),
+      info_->child.wait_one(ZX_TASK_TERMINATED, zx::time::infinite(), &signals),
       ZX_OK);
   ASSERT_EQ(signals, ZX_TASK_TERMINATED);
 
   // Get the child's exit code.
   zx_info_process_t proc_info;
-  zx_status_t status = zx_object_get_info(info_->child.get(),
-                                          ZX_INFO_PROCESS,
-                                          &proc_info,
-                                          sizeof(proc_info),
-                                          nullptr,
-                                          nullptr);
+  zx_status_t status = info_->child.get_info(
+      ZX_INFO_PROCESS, &proc_info, sizeof(proc_info), nullptr, nullptr);
   if (status != ZX_OK) {
     ZX_LOG(ERROR, status) << "zx_object_get_info";
     ADD_FAILURE() << "Unable to get exit code of child";
@@ -122,8 +130,7 @@ void Multiprocess::RunChild() {
 }
 
 MultiprocessExec::MultiprocessExec()
-    : Multiprocess(), command_(), arguments_(), argv_() {
-}
+    : Multiprocess(), command_(), arguments_(), argv_() {}
 
 void MultiprocessExec::SetChildCommand(
     const base::FilePath& command,
@@ -147,42 +154,50 @@ void MultiprocessExec::PreFork() {
   for (const std::string& argument : arguments_) {
     argv_.push_back(argument.c_str());
   }
+  argv_.push_back(nullptr);
 
   ASSERT_EQ(info(), nullptr);
   set_info(new internal::MultiprocessInfo());
 }
 
 void MultiprocessExec::MultiprocessChild() {
-  launchpad_t* lp;
-  launchpad_create(zx_job_default(), command_.value().c_str(), &lp);
-  launchpad_load_from_file(lp, command_.value().c_str());
-  launchpad_set_args(lp, argv_.size(), &argv_[0]);
+  constexpr size_t kActionCount = 3;
+  fdio_spawn_action_t actions[kActionCount];
+
+  int stdin_parent_side = -1;
+  AddPipe(&actions[0], STDIN_FILENO, &stdin_parent_side);
+  info()->stdin_write.reset(stdin_parent_side);
+
+  int stdout_parent_side = -1;
+  AddPipe(&actions[1], STDOUT_FILENO, &stdout_parent_side);
+  info()->stdout_read.reset(stdout_parent_side);
+
+  actions[2].action = FDIO_SPAWN_ACTION_CLONE_FD;
+  actions[2].fd.local_fd = STDERR_FILENO;
+  actions[2].fd.target_fd = STDERR_FILENO;
 
   // Pass the filesystem namespace, parent environment, and default job to the
   // child, but don't include any other file handles, preferring to set them
   // up explicitly below.
-  launchpad_clone(
-      lp, LP_CLONE_FDIO_NAMESPACE | LP_CLONE_ENVIRON | LP_CLONE_DEFAULT_JOB);
+  uint32_t flags = FDIO_SPAWN_CLONE_ALL & ~FDIO_SPAWN_CLONE_STDIO;
 
-  int stdin_parent_side;
-  launchpad_add_pipe(lp, &stdin_parent_side, STDIN_FILENO);
-  info()->stdin_write.reset(stdin_parent_side);
-
-  int stdout_parent_side;
-  launchpad_add_pipe(lp, &stdout_parent_side, STDOUT_FILENO);
-  info()->stdout_read.reset(stdout_parent_side);
-
-  launchpad_clone_fd(lp, STDERR_FILENO, STDERR_FILENO);
-
-  const char* error_message;
-  zx_handle_t child;
-  zx_status_t status = launchpad_go(lp, &child, &error_message);
-  ZX_CHECK(status == ZX_OK, status) << "launchpad_go: " << error_message;
-  info()->child.reset(child);
+  char error_message[FDIO_SPAWN_ERR_MSG_MAX_LENGTH];
+  zx::process child;
+  zx_status_t status = fdio_spawn_etc(ZX_HANDLE_INVALID,
+                                      flags,
+                                      command_.value().c_str(),
+                                      argv_.data(),
+                                      nullptr,
+                                      kActionCount,
+                                      actions,
+                                      child.reset_and_get_address(),
+                                      error_message);
+  ZX_CHECK(status == ZX_OK, status) << "fdio_spawn_etc: " << error_message;
+  info()->child = std::move(child);
 }
 
 ProcessType MultiprocessExec::ChildProcess() {
-  return info()->child.get();
+  return zx::unowned_process(info()->child);
 }
 
 }  // namespace test

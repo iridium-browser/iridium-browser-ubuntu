@@ -4,10 +4,14 @@
 
 #include "chrome/browser/chromeos/drive/fileapi/webkit_file_stream_writer_impl.h"
 
+#include <utility>
+
 #include "base/bind.h"
 #include "base/callback_helpers.h"
+#include "base/task/post_task.h"
 #include "chrome/browser/chromeos/drive/fileapi/fileapi_worker.h"
 #include "components/drive/file_system_core_util.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "google_apis/drive/task_util.h"
 #include "net/base/io_buffer.h"
@@ -27,8 +31,8 @@ void CreateWritableSnapshotFile(
     const fileapi_internal::CreateWritableSnapshotFileCallback& callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::UI},
       base::BindOnce(
           &fileapi_internal::RunFileSystemCallback, file_system_getter,
           base::Bind(&fileapi_internal::CreateWritableSnapshotFile, drive_path,
@@ -57,28 +61,27 @@ WebkitFileStreamWriterImpl::~WebkitFileStreamWriterImpl() {
     // It is necessary to close the local file in advance.
     local_file_writer_.reset();
     DCHECK(!close_callback_on_ui_thread_.is_null());
-    BrowserThread::PostTask(BrowserThread::UI,
-                            FROM_HERE,
-                            close_callback_on_ui_thread_);
+    base::PostTaskWithTraits(FROM_HERE, {BrowserThread::UI},
+                             close_callback_on_ui_thread_);
   }
 }
 
 int WebkitFileStreamWriterImpl::Write(net::IOBuffer* buf,
                                       int buf_len,
-                                      const net::CompletionCallback& callback) {
+                                      net::CompletionOnceCallback callback) {
   DCHECK(pending_write_callback_.is_null());
   DCHECK(pending_cancel_callback_.is_null());
-  DCHECK(!callback.is_null());
+  DCHECK(callback);
 
   // If the local file is already available, just delegate to it.
   if (local_file_writer_)
-    return local_file_writer_->Write(buf, buf_len, callback);
+    return local_file_writer_->Write(buf, buf_len, std::move(callback));
 
   // The local file is not yet ready. Create the writable snapshot.
   if (file_path_.empty())
     return net::ERR_FILE_NOT_FOUND;
 
-  pending_write_callback_ = callback;
+  pending_write_callback_ = std::move(callback);
   CreateWritableSnapshotFile(
       file_system_getter_, file_path_,
       base::Bind(
@@ -87,21 +90,20 @@ int WebkitFileStreamWriterImpl::Write(net::IOBuffer* buf,
   return net::ERR_IO_PENDING;
 }
 
-int WebkitFileStreamWriterImpl::Cancel(
-    const net::CompletionCallback& callback) {
+int WebkitFileStreamWriterImpl::Cancel(net::CompletionOnceCallback callback) {
   DCHECK(pending_cancel_callback_.is_null());
-  DCHECK(!callback.is_null());
+  DCHECK(callback);
 
   // If LocalFileWriter is already created, just delegate the cancel to it.
   if (local_file_writer_)
-    return local_file_writer_->Cancel(callback);
+    return local_file_writer_->Cancel(std::move(callback));
 
   // If file open operation is in-flight, wait for its completion and cancel
   // further write operation in WriteAfterCreateWritableSnapshotFile.
   if (!pending_write_callback_.is_null()) {
     // Dismiss pending write callback immediately.
     pending_write_callback_.Reset();
-    pending_cancel_callback_ = callback;
+    pending_cancel_callback_ = std::move(callback);
     return net::ERR_IO_PENDING;
   }
 
@@ -109,13 +111,13 @@ int WebkitFileStreamWriterImpl::Cancel(
   return net::ERR_UNEXPECTED;
 }
 
-int WebkitFileStreamWriterImpl::Flush(const net::CompletionCallback& callback) {
+int WebkitFileStreamWriterImpl::Flush(net::CompletionOnceCallback callback) {
   DCHECK(pending_cancel_callback_.is_null());
-  DCHECK(!callback.is_null());
+  DCHECK(callback);
 
   // If LocalFileWriter is already created, just delegate to it.
   if (local_file_writer_)
-    return local_file_writer_->Flush(callback);
+    return local_file_writer_->Flush(std::move(callback));
 
   // There shouldn't be in-flight Write operation.
   DCHECK(pending_write_callback_.is_null());
@@ -142,9 +144,8 @@ void WebkitFileStreamWriterImpl::WriteAfterCreateWritableSnapshotFile(
       // Here the file is internally created. To revert the operation, close
       // the file.
       DCHECK(!close_callback_on_ui_thread.is_null());
-      BrowserThread::PostTask(BrowserThread::UI,
-                              FROM_HERE,
-                              close_callback_on_ui_thread);
+      base::PostTaskWithTraits(FROM_HERE, {BrowserThread::UI},
+                               close_callback_on_ui_thread);
     }
 
     base::ResetAndReturn(&pending_cancel_callback_).Run(net::OK);
@@ -153,12 +154,10 @@ void WebkitFileStreamWriterImpl::WriteAfterCreateWritableSnapshotFile(
 
   DCHECK(!pending_write_callback_.is_null());
 
-  const net::CompletionCallback callback =
-      base::ResetAndReturn(&pending_write_callback_);
   if (open_result != base::File::FILE_OK) {
     DCHECK(close_callback_on_ui_thread.is_null());
-    callback.Run(
-        net::FileErrorToNetError(open_result));
+    std::move(pending_write_callback_)
+        .Run(net::FileErrorToNetError(open_result));
     return;
   }
 
@@ -170,9 +169,16 @@ void WebkitFileStreamWriterImpl::WriteAfterCreateWritableSnapshotFile(
       local_path,
       offset_,
       storage::FileStreamWriter::OPEN_EXISTING_FILE));
-  int result = local_file_writer_->Write(buf, buf_len, callback);
+  int result = local_file_writer_->Write(
+      buf, buf_len,
+      base::BindOnce(&WebkitFileStreamWriterImpl::OnWrite,
+                     weak_ptr_factory_.GetWeakPtr()));
   if (result != net::ERR_IO_PENDING)
-    callback.Run(result);
+    OnWrite(result);
+}
+
+void WebkitFileStreamWriterImpl::OnWrite(int result) {
+  std::move(pending_write_callback_).Run(result);
 }
 
 }  // namespace internal

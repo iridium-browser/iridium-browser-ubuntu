@@ -109,6 +109,10 @@ LEVELDB_EXPORT int GetNumCorruptionCodes();
 LEVELDB_EXPORT std::string GetCorruptionMessage(const leveldb::Status& status);
 LEVELDB_EXPORT bool IndicatesDiskFull(const leveldb::Status& status);
 
+// Returns the name for a temporary database copy during RewriteDB().
+LEVELDB_EXPORT std::string DatabaseNameForRewriteDB(
+    const std::string& original_name);
+
 // Determine the appropriate leveldb write buffer size to use. The default size
 // (4MB) may result in a log file too large to be compacted given the available
 // storage space. This function will return smaller values for smaller disks,
@@ -145,34 +149,35 @@ class LEVELDB_EXPORT ChromiumEnv : public leveldb::Env,
 
   virtual ~ChromiumEnv();
 
-  virtual bool FileExists(const std::string& fname);
-  virtual leveldb::Status GetChildren(const std::string& dir,
-                                      std::vector<std::string>* result);
-  virtual leveldb::Status DeleteFile(const std::string& fname);
-  virtual leveldb::Status CreateDir(const std::string& name);
-  virtual leveldb::Status DeleteDir(const std::string& name);
-  virtual leveldb::Status GetFileSize(const std::string& fname, uint64_t* size);
-  virtual leveldb::Status RenameFile(const std::string& src,
-                                     const std::string& dst);
-  virtual leveldb::Status LockFile(const std::string& fname,
-                                   leveldb::FileLock** lock);
-  virtual leveldb::Status UnlockFile(leveldb::FileLock* lock);
-  virtual void Schedule(ScheduleFunc*, void* arg);
-  virtual void StartThread(void (*function)(void* arg), void* arg);
-  virtual leveldb::Status GetTestDirectory(std::string* path);
-  virtual uint64_t NowMicros();
-  virtual void SleepForMicroseconds(int micros);
-  virtual leveldb::Status NewSequentialFile(const std::string& fname,
-                                            leveldb::SequentialFile** result);
-  virtual leveldb::Status NewRandomAccessFile(
+  bool FileExists(const std::string& fname) override;
+  leveldb::Status GetChildren(const std::string& dir,
+                              std::vector<std::string>* result) override;
+  leveldb::Status DeleteFile(const std::string& fname) override;
+  leveldb::Status CreateDir(const std::string& name) override;
+  leveldb::Status DeleteDir(const std::string& name) override;
+  leveldb::Status GetFileSize(const std::string& fname,
+                              uint64_t* size) override;
+  leveldb::Status RenameFile(const std::string& src,
+                             const std::string& dst) override;
+  leveldb::Status LockFile(const std::string& fname,
+                           leveldb::FileLock** lock) override;
+  leveldb::Status UnlockFile(leveldb::FileLock* lock) override;
+  void Schedule(ScheduleFunc*, void* arg) override;
+  void StartThread(void (*function)(void* arg), void* arg) override;
+  leveldb::Status GetTestDirectory(std::string* path) override;
+  uint64_t NowMicros() override;
+  void SleepForMicroseconds(int micros) override;
+  leveldb::Status NewSequentialFile(const std::string& fname,
+                                    leveldb::SequentialFile** result) override;
+  leveldb::Status NewRandomAccessFile(
       const std::string& fname,
-      leveldb::RandomAccessFile** result);
-  virtual leveldb::Status NewWritableFile(const std::string& fname,
-                                          leveldb::WritableFile** result);
-  virtual leveldb::Status NewAppendableFile(const std::string& fname,
-                                            leveldb::WritableFile** result);
-  virtual leveldb::Status NewLogger(const std::string& fname,
-                                    leveldb::Logger** result);
+      leveldb::RandomAccessFile** result) override;
+  leveldb::Status NewWritableFile(const std::string& fname,
+                                  leveldb::WritableFile** result) override;
+  leveldb::Status NewAppendableFile(const std::string& fname,
+                                    leveldb::WritableFile** result) override;
+  leveldb::Status NewLogger(const std::string& fname,
+                            leveldb::Logger** result) override;
   void SetReadOnlyFileLimitForTesting(int max_open_files);
 
  protected:
@@ -217,10 +222,10 @@ class LEVELDB_EXPORT ChromiumEnv : public leveldb::Env,
   base::HistogramBase* GetLockFileAncestorHistogram() const;
 
   // RetrierProvider implementation.
-  virtual int MaxRetryTimeMillis() const { return kMaxRetryTimeMillis; }
-  virtual base::HistogramBase* GetRetryTimeHistogram(MethodID method) const;
-  virtual base::HistogramBase* GetRecoveredFromErrorHistogram(
-      MethodID method) const;
+  int MaxRetryTimeMillis() const override { return kMaxRetryTimeMillis; }
+  base::HistogramBase* GetRetryTimeHistogram(MethodID method) const override;
+  base::HistogramBase* GetRecoveredFromErrorHistogram(
+      MethodID method) const override;
 
   base::FilePath test_directory_;
 
@@ -269,6 +274,15 @@ class LEVELDB_EXPORT DBTracker {
       base::trace_event::ProcessMemoryDump* pmd,
       leveldb::DB* tracked_db);
 
+  // Returns the memory-infra dump for |tracked_memenv|. Can be used to attach
+  // additional info to the database dump, or to properly attribute memory
+  // usage in memory dump providers that also dump |tracked_memenv|.
+  // Note that |tracked_memenv| should be a live Env instance produced by
+  // leveldb_chrome::NewMemEnv().
+  static base::trace_event::MemoryAllocatorDump* GetOrCreateAllocatorDump(
+      base::trace_event::ProcessMemoryDump* pmd,
+      leveldb::Env* tracked_memenv);
+
   // Report counts to UMA.
   void UpdateHistograms();
 
@@ -300,6 +314,7 @@ class LEVELDB_EXPORT DBTracker {
   friend class ChromiumEnvDBTrackerTest;
   FRIEND_TEST_ALL_PREFIXES(ChromiumEnvDBTrackerTest, IsTrackedDB);
   FRIEND_TEST_ALL_PREFIXES(ChromiumEnvDBTrackerTest, MemoryDumpCreation);
+  FRIEND_TEST_ALL_PREFIXES(ChromiumEnvDBTrackerTest, MemEnvMemoryDumpCreation);
 
   DBTracker();
   ~DBTracker();
@@ -338,6 +353,16 @@ class LEVELDB_EXPORT DBTracker {
 LEVELDB_EXPORT leveldb::Status OpenDB(const leveldb_env::Options& options,
                                       const std::string& name,
                                       std::unique_ptr<leveldb::DB>* dbptr);
+
+// Copies the content of |dbptr| into a fresh database to remove traces of
+// deleted data. |options| and |name| of the old database are required to create
+// an identical copy. |dbptr| will be replaced with the new database on success.
+// If the rewrite fails e.g. because we can't write to the temporary location,
+// the old db is returned if possible, otherwise |*dbptr| can become NULL.
+// The rewrite will only be performed if |kLevelDBRewriteFeature| is enabled.
+LEVELDB_EXPORT leveldb::Status RewriteDB(const leveldb_env::Options& options,
+                                         const std::string& name,
+                                         std::unique_ptr<leveldb::DB>* dbptr);
 
 LEVELDB_EXPORT base::StringPiece MakeStringPiece(const leveldb::Slice& s);
 LEVELDB_EXPORT leveldb::Slice MakeSlice(const base::StringPiece& s);

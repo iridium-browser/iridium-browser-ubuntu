@@ -3,10 +3,9 @@ sergeyu@chromium.org
 wez@chromium.org
 
 # For WebRTC desktop capturer
-per-file desktop_capture_device.*=zijiehe@chromium.org
-per-file desktop_capture_device_unittest.cc=zijiehe@chromium.org
+per-file desktop*=braveyao@chromium.org
+per-file screen_capture*=braveyao@chromium.org
 
 per-file image_capture*=mcasas@chromium.org
 
-# TEAM: media-capture-and-streams@grotations.appspotmail.com
-# COMPONENT: Blink>GetUserMedia
+# COMPONENT: Internals>Media>ScreenCapture

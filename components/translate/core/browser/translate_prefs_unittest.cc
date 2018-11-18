@@ -11,6 +11,7 @@
 
 #include "base/json/json_reader.h"
 #include "base/test/scoped_feature_list.h"
+#include "base/test/test_timeouts.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "components/prefs/scoped_user_pref_update.h"
@@ -45,9 +46,9 @@ class TranslatePrefsTest : public testing::Test {
  protected:
   TranslatePrefsTest()
       : prefs_(new sync_preferences::TestingPrefServiceSyncable()) {
+    TranslatePrefs::RegisterProfilePrefs(prefs_->registry());
     translate_prefs_.reset(new translate::TranslatePrefs(
         prefs_.get(), kAcceptLanguagesPref, kPreferredLanguagesPref));
-    TranslatePrefs::RegisterProfilePrefs(prefs_->registry());
     now_ = base::Time::Now();
     two_days_ago_ = now_ - base::TimeDelta::FromDays(2);
   }
@@ -751,6 +752,25 @@ TEST_F(TranslatePrefsTest, RemoveFromLanguageListFeatureEnabled) {
   ExpectBlockedLanguageListContent({"en", "es"});
 }
 
+TEST_F(TranslatePrefsTest, RemoveFromLanguageListClearsRecentLanguage) {
+  std::vector<std::string> languages;
+
+  // Unblock last language of a family.
+  languages = {"en-US", "es-AR"};
+  translate_prefs_->UpdateLanguageList(languages);
+  translate_prefs_->SetRecentTargetLanguage("en-US");
+  EXPECT_EQ("en-US", translate_prefs_->GetRecentTargetLanguage());
+
+  translate_prefs_->RemoveFromLanguageList("es-AR");
+  EXPECT_EQ("en-US", translate_prefs_->GetRecentTargetLanguage());
+
+  translate_prefs_->UpdateLanguageList(languages);
+  EXPECT_EQ("en-US", translate_prefs_->GetRecentTargetLanguage());
+
+  translate_prefs_->RemoveFromLanguageList("en-US");
+  EXPECT_EQ("", translate_prefs_->GetRecentTargetLanguage());
+}
+
 TEST_F(TranslatePrefsTest, MoveLanguageToTheTop) {
   std::vector<std::string> languages;
   std::string enabled;
@@ -1112,6 +1132,30 @@ TEST_F(TranslatePrefsTest, MoveLanguageDown) {
   translate_prefs_->RearrangeLanguage("fr", TranslatePrefs::kDown, 6,
                                       {"en", "fr", "it", "es", "zh"});
   ExpectLanguagePrefs("en,it,es,zh,fr");
+}
+
+TEST_F(TranslatePrefsTest, SiteBlacklist) {
+  translate_prefs_->BlacklistSite("a.com");
+  base::Time t = base::Time::Now();
+  base::PlatformThread::Sleep(TestTimeouts::tiny_timeout());
+  translate_prefs_->BlacklistSite("b.com");
+  EXPECT_TRUE(translate_prefs_->IsSiteBlacklisted("a.com"));
+  EXPECT_TRUE(translate_prefs_->IsSiteBlacklisted("b.com"));
+
+  EXPECT_EQ(std::vector<std::string>({"a.com"}),
+            translate_prefs_->GetBlacklistedSitesBetween(base::Time(), t));
+  EXPECT_EQ(std::vector<std::string>({"a.com", "b.com"}),
+            translate_prefs_->GetBlacklistedSitesBetween(base::Time(),
+                                                         base::Time::Max()));
+
+  translate_prefs_->DeleteBlacklistedSitesBetween(t, base::Time::Max());
+  EXPECT_TRUE(translate_prefs_->IsSiteBlacklisted("a.com"));
+  EXPECT_FALSE(translate_prefs_->IsSiteBlacklisted("b.com"));
+
+  translate_prefs_->DeleteBlacklistedSitesBetween(base::Time(),
+                                                  base::Time::Max());
+  EXPECT_FALSE(translate_prefs_->IsSiteBlacklisted("a.com"));
+  EXPECT_FALSE(translate_prefs_->IsSiteBlacklisted("b.com"));
 }
 
 }  // namespace translate

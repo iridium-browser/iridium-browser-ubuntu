@@ -26,7 +26,7 @@
 #include "base/feature_list.h"
 #include "base/memory/ptr_util.h"
 #include "base/sys_info.h"
-#include "base/task_scheduler/initialization_util.h"
+#include "base/task/task_scheduler/initialization_util.h"
 #include "base/time/time.h"
 #include "content/common/task_scheduler.h"
 #include "content/public/common/bindings_policy.h"
@@ -115,7 +115,6 @@ RenderProcessImpl::RenderProcessImpl(
     // closer to V8s normal performance and behavior.
     constexpr char kDisabledFlags[] =
         "--noturbo_verify "
-        "--noverify_csa "
         "--noturbo_verify_allocation "
         "--nodebug_code";
 
@@ -132,29 +131,41 @@ RenderProcessImpl::RenderProcessImpl(
   SetV8FlagIfHasSwitch(switches::kDisableJavaScriptHarmonyShipping,
                        "--noharmony-shipping");
   SetV8FlagIfHasSwitch(switches::kJavaScriptHarmony, "--harmony");
-  SetV8FlagIfFeature(features::kModuleScriptsDynamicImport,
-                     "--harmony-dynamic-import");
-  SetV8FlagIfFeature(features::kModuleScriptsImportMetaUrl,
-                     "--harmony-import-meta");
-  SetV8FlagIfFeature(features::kAsmJsToWebAssembly, "--validate-asm");
-  SetV8FlagIfNotFeature(features::kAsmJsToWebAssembly, "--no-validate-asm");
-  SetV8FlagIfNotFeature(features::kWebAssembly,
-                        "--wasm-disable-structured-cloning");
+
+  constexpr char kModuleFlags[] =
+      "--harmony-dynamic-import --harmony-import-meta";
+  v8::V8::SetFlagsFromString(kModuleFlags, sizeof(kModuleFlags));
+
+  SetV8FlagIfFeature(features::kV8Orinoco, "--no-single-threaded-gc");
+  SetV8FlagIfNotFeature(features::kV8Orinoco, "--single-threaded-gc");
 
   SetV8FlagIfFeature(features::kV8VmFuture, "--future");
   SetV8FlagIfNotFeature(features::kV8VmFuture, "--no-future");
-  SetV8FlagIfFeature(features::kSharedArrayBuffer,
-                     "--harmony-sharedarraybuffer");
-  SetV8FlagIfNotFeature(features::kSharedArrayBuffer,
-                        "--no-harmony-sharedarraybuffer");
+
+  SetV8FlagIfFeature(features::kWebAssemblyBaseline,
+                     "--liftoff --wasm-tier-up");
+  SetV8FlagIfNotFeature(features::kWebAssemblyBaseline,
+                        "--no-liftoff --no-wasm-tier-up");
+
+  if (base::FeatureList::IsEnabled(features::kWebAssemblyThreads)) {
+    constexpr char kFlags[] =
+        "--harmony-sharedarraybuffer "
+        "--no-wasm-disable-structured-cloning "
+        "--experimental-wasm-threads";
+
+    v8::V8::SetFlagsFromString(kFlags, sizeof(kFlags));
+  } else {
+    SetV8FlagIfNotFeature(features::kWebAssembly,
+                          "--wasm-disable-structured-cloning");
+    SetV8FlagIfFeature(features::kSharedArrayBuffer,
+                       "--harmony-sharedarraybuffer");
+    SetV8FlagIfNotFeature(features::kSharedArrayBuffer,
+                          "--no-harmony-sharedarraybuffer");
+  }
 
   SetV8FlagIfNotFeature(features::kWebAssemblyTrapHandler,
                         "--no-wasm-trap-handler");
-  SetV8FlagIfFeature(features::kArrayPrototypeValues,
-                     "--harmony-array-prototype-values");
-  SetV8FlagIfNotFeature(features::kArrayPrototypeValues,
-                        "--no-harmony-array-prototype-values");
-#if defined(OS_LINUX) && defined(ARCH_CPU_X86_64) && !defined(OS_ANDROID)
+#if defined(OS_LINUX) && defined(ARCH_CPU_X86_64)
   if (base::FeatureList::IsEnabled(features::kWebAssemblyTrapHandler)) {
     bool use_v8_signal_handler = false;
     base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
@@ -177,6 +188,12 @@ RenderProcessImpl::RenderProcessImpl(
 
   const base::CommandLine& command_line =
       *base::CommandLine::ForCurrentProcess();
+
+  if (command_line.HasSwitch(switches::kNoV8UntrustedCodeMitigations)) {
+    const char* disable_mitigations = "--no-untrusted-code-mitigations";
+    v8::V8::SetFlagsFromString(disable_mitigations,
+                               strlen(disable_mitigations));
+  }
 
   if (command_line.HasSwitch(switches::kJavaScriptFlags)) {
     std::string flags(
@@ -216,6 +233,14 @@ void RenderProcessImpl::AddBindings(int bindings) {
 
 int RenderProcessImpl::GetEnabledBindings() const {
   return enabled_bindings_;
+}
+
+void RenderProcessImpl::AddRefProcess() {
+  NOTREACHED();
+}
+
+void RenderProcessImpl::ReleaseProcess() {
+  NOTREACHED();
 }
 
 }  // namespace content

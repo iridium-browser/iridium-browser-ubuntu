@@ -36,22 +36,30 @@ class FakeBaseTabStripController : public TabStripController {
   void ToggleSelected(int index) override;
   void AddSelectionFromAnchorTo(int index) override;
   void CloseTab(int index, CloseTabSource source) override;
-  void ToggleTabAudioMute(int index) override;
   void ShowContextMenuForTab(Tab* tab,
                              const gfx::Point& p,
                              ui::MenuSourceType source_type) override;
   int HasAvailableDragActions() const override;
   void OnDropIndexUpdate(int index, bool drop_before) override;
-  void PerformDrop(bool drop_before, int index, const GURL& url) override;
   bool IsCompatibleWith(TabStrip* other) const override;
+  NewTabButtonPosition GetNewTabButtonPosition() const override;
   void CreateNewTab() override;
   void CreateNewTabWithLocation(const base::string16& loc) override;
-  bool IsIncognito() override;
   void StackedLayoutMaybeChanged() override;
+  bool IsSingleTabModeAvailable() override;
+  bool ShouldDrawStrokes() const override;
   void OnStartedDraggingTabs() override;
   void OnStoppedDraggingTabs() override;
-  void CheckFileSupported(const GURL& url) override;
+  bool IsFrameCondensed() const override;
+  bool HasVisibleBackgroundTabShapes() const override;
+  bool EverHasVisibleBackgroundTabShapes() const override;
+  SkColor GetFrameColor() const override;
   SkColor GetToolbarTopSeparatorColor() const override;
+  SkColor GetTabBackgroundColor(TabState state) const override;
+  SkColor GetTabForegroundColor(TabState state) const override;
+  int GetTabBackgroundResourceId(
+      BrowserNonClientFrameView::ActiveState active_state,
+      bool* has_custom_image) const override;
   base::string16 GetAccessibleTabName(const Tab* tab) const override;
   Profile* GetProfile() const override;
 

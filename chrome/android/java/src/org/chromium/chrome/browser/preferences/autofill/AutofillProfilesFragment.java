@@ -8,6 +8,7 @@ import android.graphics.PorterDuff;
 import android.graphics.drawable.Drawable;
 import android.os.Bundle;
 import android.preference.Preference;
+import android.preference.Preference.OnPreferenceChangeListener;
 import android.preference.PreferenceFragment;
 import android.support.annotation.VisibleForTesting;
 
@@ -16,6 +17,9 @@ import org.chromium.base.StrictModeContext;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.autofill.PersonalDataManager;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.AutofillProfile;
+import org.chromium.chrome.browser.preferences.ChromeSwitchPreference;
+import org.chromium.chrome.browser.preferences.MainPreferences;
+import org.chromium.chrome.browser.preferences.ManagedPreferenceDelegate;
 import org.chromium.chrome.browser.preferences.PreferenceUtils;
 import org.chromium.chrome.browser.widget.prefeditor.EditorObserverForTest;
 
@@ -32,7 +36,7 @@ public class AutofillProfilesFragment
         super.onCreate(savedInstanceState);
         PreferenceUtils.addPreferencesFromResource(
                 this, R.xml.autofill_and_payments_preference_fragment_screen);
-        getActivity().setTitle(R.string.autofill_profiles_title);
+        getActivity().setTitle(R.string.autofill_addresses_settings_title);
     }
 
     @Override
@@ -48,6 +52,31 @@ public class AutofillProfilesFragment
     private void rebuildProfileList() {
         getPreferenceScreen().removeAll();
         getPreferenceScreen().setOrderingAsAdded(true);
+
+        ChromeSwitchPreference autofillSwitch = new ChromeSwitchPreference(getActivity(), null);
+        autofillSwitch.setTitle(R.string.autofill_enable_profiles_toggle_label);
+        autofillSwitch.setSummary(R.string.autofill_enable_profiles_toggle_sublabel);
+        autofillSwitch.setChecked(PersonalDataManager.isAutofillProfileEnabled());
+        autofillSwitch.setOnPreferenceChangeListener(new OnPreferenceChangeListener() {
+            @Override
+            public boolean onPreferenceChange(Preference preference, Object newValue) {
+                PersonalDataManager.setAutofillProfileEnabled((boolean) newValue);
+                return true;
+            }
+        });
+        autofillSwitch.setManagedPreferenceDelegate(new ManagedPreferenceDelegate() {
+            @Override
+            public boolean isPreferenceControlledByPolicy(Preference preference) {
+                return PersonalDataManager.isAutofillProfileManaged();
+            }
+
+            @Override
+            public boolean isPreferenceClickDisabledByPolicy(Preference preference) {
+                return PersonalDataManager.isAutofillProfileManaged()
+                        && !PersonalDataManager.isAutofillProfileEnabled();
+            }
+        });
+        getPreferenceScreen().addPreference(autofillSwitch);
 
         for (AutofillProfile profile : PersonalDataManager.getInstance().getProfilesForSettings()) {
             // Add a preference for the profile.
@@ -65,7 +94,7 @@ public class AutofillProfilesFragment
                 pref.setFragment(AutofillServerProfilePreferences.class.getName());
             }
             Bundle args = pref.getExtras();
-            args.putString(AutofillAndPaymentsPreferences.AUTOFILL_GUID, profile.getGUID());
+            args.putString(MainPreferences.AUTOFILL_GUID, profile.getGUID());
             try (StrictModeContext unused = StrictModeContext.allowDiskWrites()) {
                 getPreferenceScreen().addPreference(pref);
             }
@@ -73,19 +102,21 @@ public class AutofillProfilesFragment
 
         // Add 'Add address' button. Tap of it brings up address editor which allows users type in
         // new addresses.
-        AutofillProfileEditorPreference pref =
-                new AutofillProfileEditorPreference(getActivity(), sObserverForTest);
-        Drawable plusIcon = ApiCompatibilityUtils.getDrawable(getResources(), R.drawable.plus);
-        plusIcon.mutate();
-        plusIcon.setColorFilter(
-                ApiCompatibilityUtils.getColor(getResources(), R.color.pref_accent_color),
-                PorterDuff.Mode.SRC_IN);
-        pref.setIcon(plusIcon);
-        pref.setTitle(R.string.autofill_create_profile);
-        pref.setKey(PREF_NEW_PROFILE); // For testing.
+        if (PersonalDataManager.isAutofillProfileEnabled()) {
+            AutofillProfileEditorPreference pref =
+                    new AutofillProfileEditorPreference(getActivity(), sObserverForTest);
+            Drawable plusIcon = ApiCompatibilityUtils.getDrawable(getResources(), R.drawable.plus);
+            plusIcon.mutate();
+            plusIcon.setColorFilter(
+                    ApiCompatibilityUtils.getColor(getResources(), R.color.pref_accent_color),
+                    PorterDuff.Mode.SRC_IN);
+            pref.setIcon(plusIcon);
+            pref.setTitle(R.string.autofill_create_profile);
+            pref.setKey(PREF_NEW_PROFILE); // For testing.
 
-        try (StrictModeContext unused = StrictModeContext.allowDiskWrites()) {
-            getPreferenceScreen().addPreference(pref);
+            try (StrictModeContext unused = StrictModeContext.allowDiskWrites()) {
+                getPreferenceScreen().addPreference(pref);
+            }
         }
     }
 

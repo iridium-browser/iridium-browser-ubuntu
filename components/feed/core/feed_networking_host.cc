@@ -4,8 +4,11 @@
 
 #include "components/feed/core/feed_networking_host.h"
 
+#include <utility>
+
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/strings/stringprintf.h"
 #include "base/values.h"
 #include "components/variations/net/variations_http_headers.h"
 #include "google_apis/gaia/google_service_auth_error.h"
@@ -26,13 +29,14 @@ using IdentityManager = identity::IdentityManager;
 
 namespace {
 
-static constexpr char kApiKeyQueryParam[] = "key";
-// todo(pnoland, https://crbug.com/808131): Decide on the correct auth scope and
-// change the below constant to that value.
-static constexpr char kAuthenticationScope[] = "ntp_snippets;";
-static constexpr char kContentEncoding[] = "Content-Encoding";
-static constexpr char kContentType[] = "application/octet-stream";
-static constexpr char kGzip[] = "gzip";
+constexpr char kApiKeyQueryParam[] = "key";
+constexpr char kAuthenticationScope[] =
+    "https://www.googleapis.com/auth/googlenow";
+constexpr char kAuthorizationRequestHeaderFormat[] = "Bearer %s";
+
+constexpr char kContentEncoding[] = "Content-Encoding";
+constexpr char kContentType[] = "application/octet-stream";
+constexpr char kGzip[] = "gzip";
 
 }  // namespace
 
@@ -45,60 +49,57 @@ namespace feed {
 // second to the specified url.
 class NetworkFetch {
  public:
-  NetworkFetch(
-      const GURL& url,
-      const std::string& request_type,
-      std::vector<uint8_t> request_body,
-      IdentityManager* identity_manager,
-      std::unique_ptr<network::SharedURLLoaderFactoryInfo> loader_factory_info,
-      const std::string& api_key);
+  NetworkFetch(const GURL& url,
+               const std::string& request_type,
+               std::vector<uint8_t> request_body,
+               IdentityManager* identity_manager,
+               network::SharedURLLoaderFactory* loader_factory,
+               const std::string& api_key);
 
-  void Start(FeedNetworkingHost::ResponseCallback done);
+  void Start(FeedNetworkingHost::ResponseCallback done_callback);
 
  private:
   void StartAccessTokenFetch();
-  void AccessTokenFetchFinished(const GoogleServiceAuthError& error,
-                                const std::string& access_token);
-  void StartLoader(const std::string& access_token);
-  std::unique_ptr<network::SimpleURLLoader> MakeLoader(
-      const std::string& access_token);
+  void AccessTokenFetchFinished(GoogleServiceAuthError error,
+                                identity::AccessTokenInfo access_token_info);
+  void StartLoader();
+  std::unique_ptr<network::SimpleURLLoader> MakeLoader();
   net::HttpRequestHeaders MakeHeaders(const std::string& auth_header) const;
   void PopulateRequestBody(network::SimpleURLLoader* loader);
-  void OnSimpleLoaderComplete(std::unique_ptr<std::string> response_body);
+  void OnSimpleLoaderComplete(std::unique_ptr<std::string> response);
 
   const GURL url_;
   const std::string request_type_;
+  std::string access_token_;
   const std::vector<uint8_t> request_body_;
   IdentityManager* const identity_manager_;
   std::unique_ptr<identity::PrimaryAccountAccessTokenFetcher> token_fetcher_;
-  std::unique_ptr<network::SharedURLLoaderFactoryInfo> loader_factory_info_;
   std::unique_ptr<network::SimpleURLLoader> simple_loader_;
   FeedNetworkingHost::ResponseCallback done_callback_;
-  scoped_refptr<network::SharedURLLoaderFactory> loader_factory_ = nullptr;
+  network::SharedURLLoaderFactory* loader_factory_;
   const std::string api_key_;
 
   DISALLOW_COPY_AND_ASSIGN(NetworkFetch);
 };
 
-NetworkFetch::NetworkFetch(
-    const GURL& url,
-    const std::string& request_type,
-    std::vector<uint8_t> request_body,
-    IdentityManager* identity_manager,
-    std::unique_ptr<network::SharedURLLoaderFactoryInfo> loader_factory_info,
-    const std::string& api_key)
+NetworkFetch::NetworkFetch(const GURL& url,
+                           const std::string& request_type,
+                           std::vector<uint8_t> request_body,
+                           IdentityManager* identity_manager,
+                           network::SharedURLLoaderFactory* loader_factory,
+                           const std::string& api_key)
     : url_(url),
       request_type_(request_type),
       request_body_(std::move(request_body)),
       identity_manager_(identity_manager),
-      loader_factory_info_(std::move(loader_factory_info)),
+      loader_factory_(loader_factory),
       api_key_(api_key) {}
 
 void NetworkFetch::Start(FeedNetworkingHost::ResponseCallback done_callback) {
   done_callback_ = std::move(done_callback);
 
   if (!identity_manager_->HasPrimaryAccount()) {
-    StartLoader(std::string());
+    StartLoader();
     return;
   }
 
@@ -109,33 +110,36 @@ void NetworkFetch::StartAccessTokenFetch() {
   OAuth2TokenService::ScopeSet scopes{kAuthenticationScope};
   // It's safe to pass base::Unretained(this) since deleting the token fetcher
   // will prevent the callback from being completed.
-  token_fetcher_ = identity_manager_->CreateAccessTokenFetcherForPrimaryAccount(
-      "feed", scopes,
+  token_fetcher_ = std::make_unique<identity::PrimaryAccountAccessTokenFetcher>(
+      "feed", identity_manager_, scopes,
       base::BindOnce(&NetworkFetch::AccessTokenFetchFinished,
                      base::Unretained(this)),
       identity::PrimaryAccountAccessTokenFetcher::Mode::kWaitUntilAvailable);
 }
 
-void NetworkFetch::AccessTokenFetchFinished(const GoogleServiceAuthError& error,
-                                            const std::string& access_token) {
-  UMA_HISTOGRAM_ENUMERATION("ContentSuggestions.Feed.TokenFetchStatus",
+void NetworkFetch::AccessTokenFetchFinished(
+    GoogleServiceAuthError error,
+    identity::AccessTokenInfo access_token_info) {
+  UMA_HISTOGRAM_ENUMERATION("ContentSuggestions.Feed.Network.TokenFetchStatus",
                             error.state(), GoogleServiceAuthError::NUM_STATES);
-  StartLoader(access_token);
+  access_token_ = access_token_info.token;
+  StartLoader();
 }
 
-void NetworkFetch::StartLoader(const std::string& access_token) {
-  simple_loader_ = MakeLoader(access_token);
-  loader_factory_ =
-      network::SharedURLLoaderFactory::Create(std::move(loader_factory_info_));
+void NetworkFetch::StartLoader() {
+  simple_loader_ = MakeLoader();
   simple_loader_->DownloadToStringOfUnboundedSizeUntilCrashAndDie(
-      loader_factory_.get(),
-      base::BindOnce(&NetworkFetch::OnSimpleLoaderComplete,
-                     base::Unretained(this)));
+      loader_factory_, base::BindOnce(&NetworkFetch::OnSimpleLoaderComplete,
+                                      base::Unretained(this)));
 }
 
-std::unique_ptr<network::SimpleURLLoader> NetworkFetch::MakeLoader(
-    const std::string& access_token) {
-  net::HttpRequestHeaders headers = MakeHeaders(access_token);
+std::unique_ptr<network::SimpleURLLoader> NetworkFetch::MakeLoader() {
+  std::string auth_header =
+      access_token_.empty()
+          ? std::string()
+          : base::StringPrintf(kAuthorizationRequestHeaderFormat,
+                               access_token_.c_str());
+  net::HttpRequestHeaders headers = MakeHeaders(auth_header);
   // TODO(pnoland): Add data use measurement once it's supported for simple
   // url loader.
   net::NetworkTrafficAnnotationTag traffic_annotation =
@@ -163,17 +167,15 @@ std::unique_ptr<network::SimpleURLLoader> NetworkFetch::MakeLoader(
             }
           }
         })");
-
   GURL url(url_);
-  if (access_token.empty() && !api_key_.empty())
+  if (access_token_.empty() && !api_key_.empty())
     url = net::AppendQueryParameter(url_, kApiKeyQueryParam, api_key_);
 
   auto resource_request = std::make_unique<network::ResourceRequest>();
   resource_request->url = url;
 
-  resource_request->load_flags =
-      net::LOAD_BYPASS_CACHE | net::LOAD_DO_NOT_SAVE_COOKIES |
-      net::LOAD_DO_NOT_SEND_COOKIES | net::LOAD_DO_NOT_SEND_AUTH_DATA;
+  resource_request->load_flags = net::LOAD_BYPASS_CACHE;
+  resource_request->allow_credentials = false;
   resource_request->headers = headers;
   resource_request->method = request_type_;
 
@@ -204,7 +206,7 @@ net::HttpRequestHeaders NetworkFetch::MakeHeaders(
 
 void NetworkFetch::PopulateRequestBody(network::SimpleURLLoader* loader) {
   std::string compressed_request_body;
-  if (request_body_.size() > 0) {
+  if (!request_body_.empty()) {
     std::string uncompressed_request_body(
         reinterpret_cast<const char*>(request_body_.data()),
         request_body_.size());
@@ -216,32 +218,37 @@ void NetworkFetch::PopulateRequestBody(network::SimpleURLLoader* loader) {
   }
 
   UMA_HISTOGRAM_COUNTS_1M(
-      "ContentSuggestions.Feed.RequestSizeKB.Compressed",
+      "ContentSuggestions.Feed.Network.RequestSizeKB.Compressed",
       static_cast<int>(compressed_request_body.size() / 1024));
 }
 
 void NetworkFetch::OnSimpleLoaderComplete(
     std::unique_ptr<std::string> response) {
   int32_t status_code = simple_loader_->NetError();
-  net::HttpResponseHeaders* headers = nullptr;
   std::vector<uint8_t> response_body;
 
   if (response) {
-    headers = simple_loader_->ResponseInfo()->headers.get();
     status_code = simple_loader_->ResponseInfo()->headers->response_code();
+
+    if (status_code == net::HTTP_UNAUTHORIZED) {
+      OAuth2TokenService::ScopeSet scopes{kAuthenticationScope};
+      std::string account_id = identity_manager_->GetPrimaryAccountId();
+      identity_manager_->RemoveAccessTokenFromCache(account_id, scopes,
+                                                    access_token_);
+    }
 
     const uint8_t* begin = reinterpret_cast<const uint8_t*>(response->data());
     const uint8_t* end = begin + response->size();
     response_body.assign(begin, end);
   }
 
-  base::UmaHistogramSparse("ContentSuggestions.Feed.NetworkRequestStatusCode",
+  base::UmaHistogramSparse("ContentSuggestions.Feed.Network.RequestStatusCode",
                            status_code);
 
   // The below is true even if there is a protocol error, so this will
   // record response size as long as the request completed.
   if (status_code >= 200) {
-    UMA_HISTOGRAM_COUNTS_1M("ContentSuggestions.Feed.ResponseSizeKB",
+    UMA_HISTOGRAM_COUNTS_1M("ContentSuggestions.Feed.Network.ResponseSizeKB",
                             static_cast<int>(response_body.size() / 1024));
   }
 
@@ -250,8 +257,11 @@ void NetworkFetch::OnSimpleLoaderComplete(
 
 FeedNetworkingHost::FeedNetworkingHost(
     identity::IdentityManager* identity_manager,
-    const std::string& api_key)
-    : identity_manager_(identity_manager), api_key_(api_key) {}
+    const std::string& api_key,
+    scoped_refptr<network::SharedURLLoaderFactory> loader_factory)
+    : identity_manager_(identity_manager),
+      api_key_(api_key),
+      loader_factory_(std::move(loader_factory)) {}
 
 FeedNetworkingHost::~FeedNetworkingHost() = default;
 
@@ -260,14 +270,13 @@ void FeedNetworkingHost::CancelRequests() {
 }
 
 void FeedNetworkingHost::Send(
-    std::unique_ptr<network::SharedURLLoaderFactoryInfo> loader_factory_info,
     const GURL& url,
     const std::string& request_type,
     std::vector<uint8_t> request_body,
     ResponseCallback callback) {
   auto fetch = std::make_unique<NetworkFetch>(
       url, request_type, std::move(request_body), identity_manager_,
-      std::move(loader_factory_info), api_key_);
+      loader_factory_.get(), api_key_);
   NetworkFetch* fetch_unowned = fetch.get();
   pending_requests_.emplace(std::move(fetch));
 

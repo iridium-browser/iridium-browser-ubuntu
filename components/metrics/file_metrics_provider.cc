@@ -8,6 +8,7 @@
 
 #include "base/command_line.h"
 #include "base/containers/flat_map.h"
+#include "base/feature_list.h"
 #include "base/files/file.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_util.h"
@@ -18,9 +19,9 @@
 #include "base/metrics/persistent_histogram_allocator.h"
 #include "base/metrics/persistent_memory_allocator.h"
 #include "base/strings/string_piece.h"
+#include "base/task/post_task.h"
+#include "base/task/task_traits.h"
 #include "base/task_runner.h"
-#include "base/task_scheduler/post_task.h"
-#include "base/task_scheduler/task_traits.h"
 #include "base/time/time.h"
 #include "components/metrics/metrics_pref_names.h"
 #include "components/metrics/metrics_service.h"
@@ -31,6 +32,9 @@
 namespace metrics {
 
 namespace {
+
+const base::Feature kCacheFileMetricData = {"CacheFileMetricData",
+                                            base::FEATURE_ENABLED_BY_DEFAULT};
 
 // These structures provide values used to define how files are opened and
 // accessed. It obviates the need for multiple code-paths within several of
@@ -107,7 +111,7 @@ scoped_refptr<base::TaskRunner> CreateBackgroundTaskRunner() {
     return scoped_refptr<base::TaskRunner>(g_task_runner_for_testing);
 
   return base::CreateTaskRunnerWithTraits(
-      {base::MayBlock(), base::TaskPriority::BACKGROUND,
+      {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
        base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN});
 }
 
@@ -490,13 +494,20 @@ FileMetricsProvider::AccessResult FileMetricsProvider::CheckAndMapMetricSource(
   }
 
   // Map the file and validate it.
-  std::unique_ptr<base::PersistentMemoryAllocator> memory_allocator =
+  std::unique_ptr<base::FilePersistentMemoryAllocator> memory_allocator =
       std::make_unique<base::FilePersistentMemoryAllocator>(
           std::move(mapped), 0, 0, base::StringPiece(), read_only);
   if (memory_allocator->GetMemoryState() ==
       base::PersistentMemoryAllocator::MEMORY_DELETED) {
     return ACCESS_RESULT_MEMORY_DELETED;
   }
+  if (memory_allocator->IsCorrupt())
+    return ACCESS_RESULT_DATA_CORRUPTION;
+
+  // Cache the file data while running in a background thread so that there
+  // shouldn't be any I/O when the data is accessed from the main thread.
+  if (base::FeatureList::IsEnabled(kCacheFileMetricData))
+    memory_allocator->Cache();
 
   // Create an allocator for the mapped file. Ownership passes to the allocator.
   source->allocator = std::make_unique<base::PersistentHistogramAllocator>(
@@ -627,10 +638,11 @@ void FileMetricsProvider::ScheduleSourcesCheck() {
   std::swap(sources_to_check_, *check_list);
   task_runner_->PostTaskAndReply(
       FROM_HERE,
-      base::Bind(&FileMetricsProvider::CheckAndMergeMetricSourcesOnTaskRunner,
-                 base::Unretained(check_list)),
-      base::Bind(&FileMetricsProvider::RecordSourcesChecked,
-                 weak_factory_.GetWeakPtr(), base::Owned(check_list)));
+      base::BindOnce(
+          &FileMetricsProvider::CheckAndMergeMetricSourcesOnTaskRunner,
+          base::Unretained(check_list)),
+      base::BindOnce(&FileMetricsProvider::RecordSourcesChecked,
+                     weak_factory_.GetWeakPtr(), base::Owned(check_list)));
 }
 
 void FileMetricsProvider::RecordSourcesChecked(SourceInfoList* checked) {
@@ -671,7 +683,8 @@ void FileMetricsProvider::RecordSourcesChecked(SourceInfoList* checked) {
 }
 
 void FileMetricsProvider::DeleteFileAsync(const base::FilePath& path) {
-  task_runner_->PostTask(FROM_HERE, base::Bind(DeleteFileWhenPossible, path));
+  task_runner_->PostTask(FROM_HERE,
+                         base::BindOnce(DeleteFileWhenPossible, path));
 }
 
 void FileMetricsProvider::RecordSourceAsRead(SourceInfo* source) {
@@ -716,9 +729,12 @@ bool FileMetricsProvider::ProvideIndependentMetrics(
 
     bool success = false;
     RecordEmbeddedProfileResult(EMBEDDED_PROFILE_ATTEMPT);
+    base::Time start_time = base::Time::Now();
     if (PersistentSystemProfile::GetSystemProfile(
             *source->allocator->memory_allocator(), system_profile_proto)) {
       RecordHistogramSnapshotsFromSource(snapshot_manager, source);
+      UMA_HISTOGRAM_TIMES("UMA.FileMetricsProvider.EmbeddedProfile.RecordTime",
+                          base::Time::Now() - start_time);
       success = true;
       RecordEmbeddedProfileResult(EMBEDDED_PROFILE_FOUND);
     } else {
@@ -745,8 +761,10 @@ bool FileMetricsProvider::ProvideIndependentMetrics(
                              sources_with_profile_.begin());
     ScheduleSourcesCheck();
 
-    if (success)
+    if (success) {
+      system_profile_proto->mutable_stability()->set_from_previous_run(true);
       return true;
+    }
   }
 
   return false;

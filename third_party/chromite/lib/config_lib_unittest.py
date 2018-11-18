@@ -10,11 +10,8 @@ from __future__ import print_function
 import copy
 import cPickle
 import json
-import mock
 
-from chromite.lib.const import waterfall
 from chromite.lib import config_lib
-from chromite.lib import constants
 from chromite.lib import cros_test_lib
 
 # pylint: disable=protected-access
@@ -49,7 +46,6 @@ def MockSiteConfig():
       important=True,
       manifest_version=True,
       prebuilts='public',
-      trybot_list=True,
       upload_standalone_images=False,
       vm_tests=[config_lib.VMTestConfig('smoke_suite')],
   )
@@ -242,6 +238,7 @@ class BuildConfigClassTest(cros_test_lib.TestCase):
 
     if isinstance(obj1, (tuple, list)):
       # Copy tuples and lists item by item.
+      # pylint: disable=consider-using-enumerate
       for i in range(len(obj1)):
         self.AssertDeepCopy(obj1[i], obj2[i], obj3[i])
     elif isinstance(obj1, set):
@@ -289,6 +286,13 @@ class BuildConfigClassTest(cros_test_lib.TestCase):
       if not isinstance(x, set):
         self.assertRaises(AssertionError, self.AssertDeepCopy, x,
                           copy_x, copy.copy(x))
+
+  def testPickle(self):
+    bc1 = MockBuildConfig()
+    bc2 = cPickle.loads(cPickle.dumps(bc1))
+
+    self.assertEquals(bc1.boards, bc2.boards)
+    self.assertEquals(bc1.name, bc2.name)
 
 
 class SiteParametersClassTest(cros_test_lib.TestCase):
@@ -400,7 +404,7 @@ class SiteConfigTest(cros_test_lib.TestCase):
     site_config.Add(
         'tast_vm_tests',
         tast_vm_tests=[config_lib.TastVMTestConfig('tast_vm_suite',
-                                                   ['(bvt)'])])
+                                                   ['(!disabled)'])])
 
     site_config.AddGroup(
         'parent',
@@ -483,7 +487,7 @@ class SiteConfigTest(cros_test_lib.TestCase):
             '_template': None,
             'name': 'tast_vm_tests',
             'tast_vm_tests': [
-                config_lib.TastVMTestConfig('tast_vm_suite', ['(bvt)'])],
+                config_lib.TastVMTestConfig('tast_vm_suite', ['(!disabled)'])],
         },
         'parent': {
             '_template': None,
@@ -794,109 +798,6 @@ class SiteConfigFindTests(cros_test_lib.TestCase):
     self.assertItemsEqual(results_slaves, [slave_a])
 
 
-class OverrideForTrybotTest(cros_test_lib.TestCase):
-  """Test config override functionality."""
-
-  # TODO(dgarrett): Test other override behaviors.
-
-  def setUp(self):
-    self.base_vmtests = [config_lib.VMTestConfig('base')]
-    self.override_vmtests = [config_lib.VMTestConfig('override')]
-    self.base_hwtests = [config_lib.HWTestConfig('base')]
-    self.override_hwtests = [config_lib.HWTestConfig('override')]
-
-    self.all_configs = MockSiteConfig()
-    self.all_configs.Add(
-        'no_tests_without_override',
-        vm_tests=[],
-    )
-    self.all_configs.Add(
-        'no_tests_with_override',
-        vm_tests=[],
-        vm_tests_override=self.override_vmtests,
-        hw_tests_override=self.override_hwtests,
-    )
-    self.all_configs.Add(
-        'tests_without_override',
-        vm_tests=self.base_vmtests,
-        hw_tests=self.base_hwtests,
-    )
-    self.all_configs.Add(
-        'tests_with_override',
-        vm_tests=self.base_vmtests,
-        vm_tests_override=self.override_vmtests,
-        hw_tests=self.base_hwtests,
-        hw_tests_override=self.override_hwtests,
-    )
-
-  def _createMockOptions(self, **kwargs):
-    mock_options = mock.Mock()
-    for k, v in kwargs.iteritems():
-      mock_options.__setattr__(k, v)
-
-    return mock_options
-
-  def testVmTestOverride(self):
-    """Verify that vm_tests override for trybots reference original config."""
-    mock_options = self._createMockOptions(hwtest=False, remote_trybot=False)
-
-    result = config_lib.OverrideConfigForTrybot(
-        self.all_configs['no_tests_without_override'], mock_options)
-    self.assertEqual(result.vm_tests, [])
-
-    result = config_lib.OverrideConfigForTrybot(
-        self.all_configs['no_tests_with_override'], mock_options)
-    self.assertEqual(result.vm_tests, self.override_vmtests)
-
-    result = config_lib.OverrideConfigForTrybot(
-        self.all_configs['tests_without_override'], mock_options)
-    self.assertEqual(result.vm_tests, self.base_vmtests)
-
-    result = config_lib.OverrideConfigForTrybot(
-        self.all_configs['tests_with_override'], mock_options)
-    self.assertEqual(result.vm_tests, self.override_vmtests)
-
-  def testHwTestOverrideDisabled(self):
-    """Verify that hw_tests_override is not used without --hwtest."""
-    mock_options = self._createMockOptions(hwtest=False, remote_trybot=False)
-
-    result = config_lib.OverrideConfigForTrybot(
-        self.all_configs['no_tests_without_override'], mock_options)
-    self.assertEqual(result.hw_tests, [])
-
-    result = config_lib.OverrideConfigForTrybot(
-        self.all_configs['no_tests_with_override'], mock_options)
-    self.assertEqual(result.hw_tests, [])
-
-    result = config_lib.OverrideConfigForTrybot(
-        self.all_configs['tests_without_override'], mock_options)
-    self.assertEqual(result.hw_tests, self.base_hwtests)
-
-    result = config_lib.OverrideConfigForTrybot(
-        self.all_configs['tests_with_override'], mock_options)
-    self.assertEqual(result.hw_tests, self.base_hwtests)
-
-  def testHwTestOverrideEnabled(self):
-    """Verify that hw_tests_override is not used without --hwtest."""
-    mock_options = self._createMockOptions(hwtest=True, remote_trybot=False)
-
-    result = config_lib.OverrideConfigForTrybot(
-        self.all_configs['no_tests_without_override'], mock_options)
-    self.assertEqual(result.hw_tests, [])
-
-    result = config_lib.OverrideConfigForTrybot(
-        self.all_configs['no_tests_with_override'], mock_options)
-    self.assertEqual(result.hw_tests, self.override_hwtests)
-
-    result = config_lib.OverrideConfigForTrybot(
-        self.all_configs['tests_without_override'], mock_options)
-    self.assertEqual(result.hw_tests, self.base_hwtests)
-
-    result = config_lib.OverrideConfigForTrybot(
-        self.all_configs['tests_with_override'], mock_options)
-    self.assertEqual(result.hw_tests, self.override_hwtests)
-
-
 class GetConfigTests(cros_test_lib.TestCase):
   """Tests related to SiteConfig.GetConfig()."""
 
@@ -908,81 +809,6 @@ class GetConfigTests(cros_test_lib.TestCase):
     # Ensure that we get a SiteConfig, and that the result is cached.
     self.assertIsInstance(config_a, config_lib.SiteConfig)
     self.assertIs(config_a, config_b)
-
-    # Clear our cache.
-    config_lib.ClearConfigCache()
-    config_c = config_lib.GetConfig()
-    config_d = config_lib.GetConfig()
-
-    # Ensure that this gives us a new instance of the SiteConfig.
-    self.assertIsNot(config_a, config_c)
-
-    # But also that it's cached going forward.
-    self.assertIsInstance(config_c, config_lib.SiteConfig)
-    self.assertIs(config_c, config_d)
-
-
-class ConfigLibHelperTests(cros_test_lib.TestCase):
-  """Tests related to helper methods in config_lib."""
-
-  def testUseBuildbucketScheduler(self):
-    """Test UseBuildbucketScheduler."""
-    cq_master_config = config_lib.BuildConfig(
-        name=constants.CQ_MASTER,
-        active_waterfall=waterfall.WATERFALL_INTERNAL)
-    self.assertTrue(config_lib.UseBuildbucketScheduler(
-        cq_master_config))
-
-    pre_cq_config = config_lib.BuildConfig(
-        name=constants.PRE_CQ_LAUNCHER_NAME,
-        active_waterfall=waterfall.WATERFALL_INTERNAL)
-    self.assertTrue(config_lib.UseBuildbucketScheduler(
-        pre_cq_config))
-
-    pfq_master_config = config_lib.BuildConfig(
-        name=constants.PFQ_MASTER,
-        active_waterfall=waterfall.WATERFALL_INTERNAL)
-    self.assertTrue(config_lib.UseBuildbucketScheduler(
-        pfq_master_config))
-
-    toolchain_master = config_lib.BuildConfig(
-        name=constants.TOOLCHAIN_MASTTER,
-        active_waterfall=waterfall.WATERFALL_INTERNAL)
-    self.assertTrue(config_lib.UseBuildbucketScheduler(
-        toolchain_master))
-
-    pre_cq_config = config_lib.BuildConfig(
-        name=constants.BINHOST_PRE_CQ,
-        active_waterfall=waterfall.WATERFALL_TRYBOT)
-    self.assertFalse(config_lib.UseBuildbucketScheduler(
-        pre_cq_config))
-
-    release_branch_config = config_lib.BuildConfig(
-        name=constants.CANARY_MASTER,
-        active_waterfall=waterfall.WATERFALL_RELEASE)
-    self.assertTrue(config_lib.UseBuildbucketScheduler(
-        release_branch_config))
-
-  def testScheduledByBuildbucket(self):
-    """Test ScheduledByBuildbucket."""
-    cq_master_config = config_lib.BuildConfig(
-        name=constants.CQ_MASTER,
-        build_type=constants.PALADIN_TYPE)
-    self.assertFalse(config_lib.ScheduledByBuildbucket(
-        cq_master_config))
-
-    cq_slave_config = config_lib.BuildConfig(
-        name='slave-paladin',
-        build_type=constants.PALADIN_TYPE)
-    self.assertTrue(config_lib.ScheduledByBuildbucket(
-        cq_slave_config))
-
-    pfq_master_config = config_lib.BuildConfig(
-        name=constants.PFQ_MASTER,
-        build_type=constants.PFQ_TYPE)
-
-    self.assertFalse(config_lib.ScheduledByBuildbucket(
-        pfq_master_config))
 
 
 class GEBuildConfigTests(cros_test_lib.TestCase):

@@ -4,9 +4,11 @@
 
 #include "chrome/browser/media/webrtc/permission_bubble_media_access_handler.h"
 
+#include <memory>
 #include <utility>
 
 #include "base/metrics/field_trial.h"
+#include "base/task/post_task.h"
 #include "chrome/browser/media/webrtc/media_stream_device_permissions.h"
 #include "chrome/browser/media/webrtc/media_stream_devices_controller.h"
 #include "chrome/browser/permissions/permission_manager.h"
@@ -14,6 +16,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
@@ -28,20 +31,26 @@
 #include "chrome/browser/media/webrtc/screen_capture_infobar_delegate_android.h"
 #include "chrome/browser/permissions/permission_uma_util.h"
 #include "chrome/browser/permissions/permission_util.h"
+
 #endif  // defined(OS_ANDROID)
 
 using content::BrowserThread;
 
+using RepeatingMediaResponseCallback =
+    base::RepeatingCallback<void(const content::MediaStreamDevices& devices,
+                                 content::MediaStreamRequestResult result,
+                                 std::unique_ptr<content::MediaStreamUI> ui)>;
+
 struct PermissionBubbleMediaAccessHandler::PendingAccessRequest {
   PendingAccessRequest(const content::MediaStreamRequest& request,
-                       const content::MediaResponseCallback& callback)
+                       RepeatingMediaResponseCallback callback)
       : request(request), callback(callback) {}
   ~PendingAccessRequest() {}
 
   // TODO(gbillock): make the MediaStreamDevicesController owned by
   // this object when we're using bubbles.
   content::MediaStreamRequest request;
-  content::MediaResponseCallback callback;
+  RepeatingMediaResponseCallback callback;
 };
 
 PermissionBubbleMediaAccessHandler::PermissionBubbleMediaAccessHandler() {
@@ -64,7 +73,8 @@ bool PermissionBubbleMediaAccessHandler::SupportsStreamType(
 #if defined(OS_ANDROID)
   return type == content::MEDIA_DEVICE_VIDEO_CAPTURE ||
          type == content::MEDIA_DEVICE_AUDIO_CAPTURE ||
-         type == content::MEDIA_DESKTOP_VIDEO_CAPTURE;
+         type == content::MEDIA_GUM_DESKTOP_VIDEO_CAPTURE ||
+         type == content::MEDIA_DISPLAY_VIDEO_CAPTURE;
 #else
   return type == content::MEDIA_DEVICE_VIDEO_CAPTURE ||
          type == content::MEDIA_DEVICE_AUDIO_CAPTURE;
@@ -97,24 +107,25 @@ bool PermissionBubbleMediaAccessHandler::CheckMediaAccessPermission(
 void PermissionBubbleMediaAccessHandler::HandleRequest(
     content::WebContents* web_contents,
     const content::MediaStreamRequest& request,
-    const content::MediaResponseCallback& callback,
+    content::MediaResponseCallback callback,
     const extensions::Extension* extension) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
 #if defined(OS_ANDROID)
-  if (request.video_type == content::MEDIA_DESKTOP_VIDEO_CAPTURE &&
+  if (IsScreenCaptureMediaType(request.video_type) &&
       !base::FeatureList::IsEnabled(
           chrome::android::kUserMediaScreenCapturing)) {
     // If screen capturing isn't enabled on Android, we'll use "invalid state"
     // as result, same as on desktop.
-    callback.Run(content::MediaStreamDevices(),
-                 content::MEDIA_DEVICE_INVALID_STATE, nullptr);
+    std::move(callback).Run(content::MediaStreamDevices(),
+                            content::MEDIA_DEVICE_INVALID_STATE, nullptr);
     return;
   }
 #endif  // defined(OS_ANDROID)
 
   RequestsQueue& queue = pending_requests_[web_contents];
-  queue.push_back(PendingAccessRequest(request, callback));
+  queue.push_back(PendingAccessRequest(
+      request, base::AdaptCallbackForRepeating(std::move(callback))));
 
   // If this is the only request then show the infobar.
   if (queue.size() == 1)
@@ -125,8 +136,7 @@ void PermissionBubbleMediaAccessHandler::ProcessQueuedAccessRequest(
     content::WebContents* web_contents) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  std::map<content::WebContents*, RequestsQueue>::iterator it =
-      pending_requests_.find(web_contents);
+  auto it = pending_requests_.find(web_contents);
 
   if (it == pending_requests_.end() || it->second.empty()) {
     // Don't do anything if the tab was closed.
@@ -137,7 +147,7 @@ void PermissionBubbleMediaAccessHandler::ProcessQueuedAccessRequest(
 
   const content::MediaStreamRequest request = it->second.front().request;
 #if defined(OS_ANDROID)
-  if (request.video_type == content::MEDIA_DESKTOP_VIDEO_CAPTURE) {
+  if (IsScreenCaptureMediaType(request.video_type)) {
     ScreenCaptureInfoBarDelegateAndroid::Create(
         web_contents, request,
         base::Bind(&PermissionBubbleMediaAccessHandler::OnAccessRequestResponse,
@@ -163,7 +173,7 @@ void PermissionBubbleMediaAccessHandler::UpdateMediaRequestState(
     return;
 
   bool found = false;
-  for (RequestsQueues::iterator rqs_it = pending_requests_.begin();
+  for (auto rqs_it = pending_requests_.begin();
        rqs_it != pending_requests_.end(); ++rqs_it) {
     RequestsQueue& queue = rqs_it->second;
     for (RequestsQueue::iterator it = queue.begin(); it != queue.end(); ++it) {
@@ -187,8 +197,7 @@ void PermissionBubbleMediaAccessHandler::OnAccessRequestResponse(
     std::unique_ptr<content::MediaStreamUI> ui) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  std::map<content::WebContents*, RequestsQueue>::iterator it =
-      pending_requests_.find(web_contents);
+  auto it = pending_requests_.find(web_contents);
   if (it == pending_requests_.end()) {
     // WebContents has been destroyed. Don't need to do anything.
     return;
@@ -198,15 +207,15 @@ void PermissionBubbleMediaAccessHandler::OnAccessRequestResponse(
   if (queue.empty())
     return;
 
-  content::MediaResponseCallback callback = queue.front().callback;
+  RepeatingMediaResponseCallback callback = queue.front().callback;
   queue.pop_front();
 
   if (!queue.empty()) {
     // Post a task to process next queued request. It has to be done
     // asynchronously to make sure that calling infobar is not destroyed until
     // after this function returns.
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, {BrowserThread::UI},
         base::BindOnce(
             &PermissionBubbleMediaAccessHandler::ProcessQueuedAccessRequest,
             base::Unretained(this), web_contents));

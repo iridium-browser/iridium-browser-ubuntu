@@ -6,10 +6,11 @@ package org.chromium.chrome.browser.ntp.snippets;
 
 import android.support.annotation.LayoutRes;
 
+import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.metrics.ImpressionTracker;
-import org.chromium.chrome.browser.ntp.ContextMenuManager;
-import org.chromium.chrome.browser.ntp.ContextMenuManager.ContextMenuItemId;
+import org.chromium.chrome.browser.native_page.ContextMenuManager;
+import org.chromium.chrome.browser.native_page.ContextMenuManager.ContextMenuItemId;
 import org.chromium.chrome.browser.ntp.NewTabPageUma;
 import org.chromium.chrome.browser.ntp.cards.CardViewHolder;
 import org.chromium.chrome.browser.ntp.cards.NewTabPageViewHolder;
@@ -17,7 +18,6 @@ import org.chromium.chrome.browser.ntp.cards.SectionList;
 import org.chromium.chrome.browser.ntp.cards.SuggestionsCategoryInfo;
 import org.chromium.chrome.browser.offlinepages.OfflinePageBridge;
 import org.chromium.chrome.browser.suggestions.SuggestionsBinder;
-import org.chromium.chrome.browser.suggestions.SuggestionsConfig;
 import org.chromium.chrome.browser.suggestions.SuggestionsMetrics;
 import org.chromium.chrome.browser.suggestions.SuggestionsOfflineModelObserver;
 import org.chromium.chrome.browser.suggestions.SuggestionsRecyclerView;
@@ -38,6 +38,7 @@ public class SnippetArticleViewHolder extends CardViewHolder {
 
     private final DisplayStyleObserverAdapter mDisplayStyleObserver;
     private final ImpressionTracker mExposureTracker;
+
     /**
      * Constructs a {@link SnippetArticleViewHolder} item used to display snippets.
      * @param parent The SuggestionsRecyclerView that is going to contain the newly created view.
@@ -49,10 +50,25 @@ public class SnippetArticleViewHolder extends CardViewHolder {
     public SnippetArticleViewHolder(SuggestionsRecyclerView parent,
             ContextMenuManager contextMenuManager, SuggestionsUiDelegate uiDelegate,
             UiConfig uiConfig, OfflinePageBridge offlinePageBridge) {
-        super(getLayout(), parent, uiConfig, contextMenuManager);
+        this(parent, contextMenuManager, uiDelegate, uiConfig, offlinePageBridge, getLayout());
+    }
+
+    /**
+     * Constructs a {@link SnippetArticleViewHolder} item used to display snippets.
+     * @param parent The SuggestionsRecyclerView that is going to contain the newly created view.
+     * @param contextMenuManager The manager responsible for the context menu.
+     * @param uiDelegate The delegate object used to open an article, fetch thumbnails, etc.
+     * @param uiConfig The NTP UI configuration object used to adjust the article UI.
+     * @param offlinePageBridge used to determine if article is prefetched.
+     * @param layoutId The layout resource reference for this card.
+     */
+    protected SnippetArticleViewHolder(SuggestionsRecyclerView parent,
+            ContextMenuManager contextMenuManager, SuggestionsUiDelegate uiDelegate,
+            UiConfig uiConfig, OfflinePageBridge offlinePageBridge, int layoutId) {
+        super(layoutId, parent, uiConfig, contextMenuManager);
 
         mUiDelegate = uiDelegate;
-        mSuggestionsBinder = new SuggestionsBinder(itemView, uiDelegate);
+        mSuggestionsBinder = createBinder(uiDelegate);
         mDisplayStyleObserver = new DisplayStyleObserverAdapter(
                 itemView, uiConfig, newDisplayStyle -> updateLayout());
 
@@ -64,7 +80,7 @@ public class SnippetArticleViewHolder extends CardViewHolder {
 
     @Override
     public void onCardTapped() {
-        SuggestionsMetrics.recordCardTapped();
+        if (!mArticle.isContextual()) SuggestionsMetrics.recordCardTapped();
         int windowDisposition = WindowOpenDisposition.CURRENT_TAB;
         mUiDelegate.getEventReporter().onSuggestionOpened(
                 mArticle, windowDisposition, mUiDelegate.getSuggestionsRanker());
@@ -134,6 +150,10 @@ public class SnippetArticleViewHolder extends CardViewHolder {
         ((SnippetArticleViewHolder) holder).refreshOfflineBadgeVisibility();
     }
 
+    protected SuggestionsBinder createBinder(SuggestionsUiDelegate uiDelegate) {
+        return new SuggestionsBinder(itemView, uiDelegate, false);
+    }
+
     /**
      * Updates the layout taking into account screen dimensions and the type of snippet displayed.
      */
@@ -143,9 +163,10 @@ public class SnippetArticleViewHolder extends CardViewHolder {
         boolean showHeadline = shouldShowHeadline();
         boolean showThumbnail = shouldShowThumbnail(layout);
         boolean showThumbnailVideoBadge = shouldShowThumbnailVideoBadge(showThumbnail);
+        boolean showSnippet = shouldShowSnippet();
 
         mSuggestionsBinder.updateFieldsVisibility(
-                showHeadline, showThumbnail, showThumbnailVideoBadge);
+                showHeadline, showThumbnail, showThumbnailVideoBadge, showSnippet);
     }
 
     /** If the title is empty (or contains only whitespace characters), we do not show it. */
@@ -153,17 +174,18 @@ public class SnippetArticleViewHolder extends CardViewHolder {
         return !mArticle.mTitle.trim().isEmpty();
     }
 
+    /**
+     * @return Whether a thumbnail should be shown for this suggestion.
+     */
     private boolean shouldShowThumbnail(int layout) {
         // Minimal cards don't have a thumbnail
         if (layout == ContentSuggestionsCardLayout.MINIMAL_CARD) return false;
 
-        return true;
+        return mArticle.mHasThumbnail;
     }
 
     private boolean shouldShowThumbnailVideoBadge(boolean showThumbnail) {
-        if (!showThumbnail) return false;
-        if (!mArticle.mIsVideoSuggestion) return false;
-        return SuggestionsConfig.useModernLayout();
+        return showThumbnail && mArticle.mIsVideoSuggestion;
     }
 
     /** Updates the visibility of the card's offline badge by checking the bound article's info. */
@@ -173,14 +195,18 @@ public class SnippetArticleViewHolder extends CardViewHolder {
     }
 
     /**
+     * @return Whether a snippet should be shown for this suggestion.
+     */
+    private boolean shouldShowSnippet() {
+        return mArticle.mSnippet.length() > 0;
+    }
+
+    /**
      * @return The layout resource reference for this card.
      */
     @LayoutRes
     private static int getLayout() {
-        if (SuggestionsConfig.useModernLayout()) {
-            return R.layout.content_suggestions_card_modern;
-        }
-        return R.layout.new_tab_page_snippets_card_large_thumbnail;
+        return R.layout.content_suggestions_card_modern_reversed;
     }
 
     private void onExposure() {
@@ -212,6 +238,10 @@ public class SnippetArticleViewHolder extends CardViewHolder {
         }
 
         mUiDelegate.getEventReporter().onSuggestionShown(mArticle);
-        mRecyclerView.onSnippetImpression();
+    }
+
+    @VisibleForTesting
+    public void setOfflineBadgeVisibilityForTesting(boolean visible) {
+        mSuggestionsBinder.updateOfflineBadgeVisibility(visible);
     }
 }

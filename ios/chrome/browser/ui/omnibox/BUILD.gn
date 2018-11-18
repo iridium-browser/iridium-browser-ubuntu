@@ -6,9 +6,8 @@ source_set("omnibox") {
   configs += [ "//build/config/compiler:enable_arc" ]
 
   sources = [
-    "location_bar_controller.cc",
-    "location_bar_controller.h",
     "location_bar_delegate.h",
+    "omnibox_left_image_consumer.h",
     "web_omnibox_edit_controller.cc",
     "web_omnibox_edit_controller.h",
   ]
@@ -35,9 +34,11 @@ source_set("omnibox_popup_shared") {
 }
 
 source_set("omnibox_util") {
+  configs += [ "//build/config/compiler:enable_arc" ]
+
   sources = [
-    "omnibox_util.cc",
     "omnibox_util.h",
+    "omnibox_util.mm",
   ]
   deps = [
     "//base",
@@ -58,22 +59,21 @@ source_set("omnibox_internal") {
     "autocomplete_suggestion.h",
     "chrome_omnibox_client_ios.h",
     "chrome_omnibox_client_ios.mm",
-    "clipping_mask_view.h",
-    "clipping_mask_view.mm",
-    "clipping_textfield.h",
-    "clipping_textfield.mm",
-    "clipping_textfield_container.h",
-    "clipping_textfield_container.mm",
     "image_retriever.h",
-    "location_bar_controller_impl.h",
-    "location_bar_controller_impl.mm",
+    "omnibox_consumer.h",
+    "omnibox_container_view.h",
+    "omnibox_container_view.mm",
     "omnibox_coordinator.h",
     "omnibox_coordinator.mm",
+    "omnibox_mediator.h",
+    "omnibox_mediator.mm",
     "omnibox_text_field_delegate.h",
     "omnibox_text_field_ios.h",
     "omnibox_text_field_ios.mm",
     "omnibox_text_field_paste_delegate.h",
     "omnibox_text_field_paste_delegate.mm",
+    "omnibox_view_controller.h",
+    "omnibox_view_controller.mm",
     "omnibox_view_ios.h",
     "omnibox_view_ios.mm",
     "web_omnibox_edit_controller_impl.h",
@@ -84,6 +84,12 @@ source_set("omnibox_internal") {
     ":omnibox_popup_shared",
     ":omnibox_util",
     "resources:omnibox_background",
+    "resources:omnibox_clear_icon",
+    "resources:omnibox_completion_bookmark",
+    "resources:omnibox_completion_calculator",
+    "resources:omnibox_completion_default_favicon",
+    "resources:omnibox_completion_history",
+    "resources:omnibox_completion_search",
     "resources:omnibox_transparent_background",
     "//base",
     "//components/favicon/ios",
@@ -108,9 +114,10 @@ source_set("omnibox_internal") {
     "//ios/chrome/browser/ui/fullscreen",
     "//ios/chrome/browser/ui/location_bar:constants",
     "//ios/chrome/browser/ui/omnibox/popup",
+    "//ios/chrome/browser/ui/orchestrator:orchestrator",
     "//ios/chrome/browser/ui/toolbar/buttons",
     "//ios/chrome/browser/ui/toolbar/public",
-    "//ios/chrome/browser/ui/toolbar/public:toolbar_base_feature",
+    "//ios/chrome/browser/ui/toolbar/public:feature_flags",
     "//ios/chrome/browser/ui/util",
     "//ios/chrome/common",
     "//ios/public/provider/chrome/browser",
@@ -145,7 +152,6 @@ source_set("unit_tests") {
   configs += [ "//build/config/compiler:enable_arc" ]
   testonly = true
   sources = [
-    "clipping_textfield_container_unittest.mm",
     "omnibox_text_field_ios_unittest.mm",
   ]
   deps = [

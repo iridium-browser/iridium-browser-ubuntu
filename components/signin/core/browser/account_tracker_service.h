@@ -21,15 +21,11 @@
 #include "google_apis/gaia/gaia_auth_util.h"
 #include "ui/gfx/image/image.h"
 
+class PrefRegistrySimple;
 class PrefService;
-class SigninClient;
 
 namespace base {
 class DictionaryValue;
-}
-
-namespace user_prefs {
-class PrefRegistrySyncable;
 }
 
 // AccountTrackerService is a KeyedService that retrieves and caches GAIA
@@ -40,9 +36,8 @@ class AccountTrackerService : public KeyedService {
   // tracked by this service.
   static const char kAccountInfoPref[];
 
-  // TODO(mlerman): Remove all references to Profile::kNoHostedDomainFound in
-  // favour of this.
-  // Value representing no hosted domain in the kProfileHostedDomain preference.
+  // Value representing no hosted domain in the kGoogleServicesHostedDomain
+  // preference.
   static const char kNoHostedDomainFound[];
 
   // Value representing no picture URL associated with an account.
@@ -52,10 +47,6 @@ class AccountTrackerService : public KeyedService {
   // have been migrated from preferences.
   // Child account service flag name.
   static const char kChildAccountServiceFlag[];
-
-  // Account folders used for storing account related data at disk.
-  static const char kAccountsFolder[];
-  static const char kAvatarImagesFolder[];
 
   // Clients of AccountTrackerService can implement this interface and register
   // with AddObserver() to learn about account information changes.
@@ -70,11 +61,13 @@ class AccountTrackerService : public KeyedService {
   };
 
   // Possible values for the kAccountIdMigrationState preference.
+  // Keep in sync with OAuth2LoginAccountRevokedMigrationState histogram enum.
+  // These values are persisted to logs. Entries should not be renumbered and
+  // numeric values should never be reused.
   enum AccountIdMigrationState {
-    MIGRATION_NOT_STARTED,
-    MIGRATION_IN_PROGRESS,
-    MIGRATION_DONE,
-    // Keep in sync with OAuth2LoginAccountRevokedMigrationState histogram enum.
+    MIGRATION_NOT_STARTED = 0,
+    MIGRATION_IN_PROGRESS = 1,
+    MIGRATION_DONE = 2,
     NUM_MIGRATION_STATES
   };
 
@@ -82,7 +75,7 @@ class AccountTrackerService : public KeyedService {
   ~AccountTrackerService() override;
 
   // Registers the preferences used by AccountTrackerService.
-  static void RegisterPrefs(user_prefs::PrefRegistrySyncable* registry);
+  static void RegisterPrefs(PrefRegistrySimple* registry);
 
   // KeyedService implementation.
   void Shutdown() override;
@@ -90,13 +83,10 @@ class AccountTrackerService : public KeyedService {
   void AddObserver(Observer* observer);
   void RemoveObserver(Observer* observer);
 
-  // Take a SigninClient rather than a PrefService and a URLRequestContextGetter
-  // since RequestContext cannot be created at startup.
-  // (see http://crbug.com/171406)
-  // If |user_data_dir| is empty, images will not be saved to or loaded from
-  // disk.
-  void Initialize(SigninClient* signin_client,
-                  const base::FilePath& user_data_dir = base::FilePath());
+  // Initializes the list of accounts from |pref_service| and load images from
+  // |user_data_dir|. If |user_data_dir| is empty, images will not be saved to
+  // nor loaded from disk.
+  void Initialize(PrefService* pref_service, base::FilePath user_data_dir);
 
   // Returns the list of known accounts and for which gaia IDs
   // have been fetched.
@@ -129,15 +119,20 @@ class AccountTrackerService : public KeyedService {
   std::string SeedAccountInfo(AccountInfo info);
 
   // Sets whether the account is a Unicorn account.
-  void SetIsChildAccount(const std::string& account_id,
-                         const bool& is_child_account);
+  void SetIsChildAccount(const std::string& account_id, bool is_child_account);
+
+  // Sets whether the account is under advanced protection.
+  void SetIsAdvancedProtectionAccount(const std::string& account_id,
+                                      bool is_under_advanced_protection);
 
   void RemoveAccount(const std::string& account_id);
 
+  // Is migration of the account id from normalized email to gaia id supported
+  // on the current platform?
+  static bool IsMigrationSupported();
+
   AccountIdMigrationState GetMigrationState() const;
   void SetMigrationDone();
-  static AccountIdMigrationState GetMigrationState(
-      const PrefService* pref_service);
 
  protected:
   // Available to be called in tests.
@@ -178,14 +173,29 @@ class AccountTrackerService : public KeyedService {
                               const gfx::Image& image);
   void RemoveAccountImageFromDisk(const std::string& account_id);
 
-  // Gaia id migration.
-  bool IsMigratable() const;
+  // Migrate accounts to be keyed by gaia id instead of normalized email.
+  // Requires that the migration state is set to MIGRATION_IN_PROGRESS.
   void MigrateToGaiaId();
+
+  // Returns whether the accounts are all keyed by gaia id. This should
+  // be the case when the migration state is set to MIGRATION_DONE.
+  bool IsMigrationDone() const;
+
+  // Computes the new migration state. The state is saved to preference
+  // before performing the migration in order to support resuming the
+  // migration if necessary during the next load.
+  AccountIdMigrationState ComputeNewMigrationState() const;
+
+  // Updates the migration state in the preferences.
   void SetMigrationState(AccountIdMigrationState state);
 
-  SigninClient* signin_client_;  // Not owned.
+  // Returns the saved migration state in the preferences.
+  static AccountIdMigrationState GetMigrationState(
+      const PrefService* pref_service);
+
+  PrefService* pref_service_ = nullptr;  // Not owned.
   std::map<std::string, AccountState> accounts_;
-  base::ObserverList<Observer> observer_list_;
+  base::ObserverList<Observer>::Unchecked observer_list_;
 
   base::FilePath user_data_dir_;
 

@@ -12,7 +12,6 @@
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "content/renderer/media/webrtc/peer_connection_dependency_factory.h"
-#include "content/renderer/media/webrtc/rtc_certificate.h"
 #include "content/renderer/render_thread_impl.h"
 #include "media/media_buildflags.h"
 #include "third_party/webrtc/rtc_base/rtccertificate.h"
@@ -39,7 +38,7 @@ rtc::KeyParams WebRTCKeyParamsToKeyParams(
 }
 
 // A certificate generation request spawned by
-// |RTCCertificateGenerator::generateCertificateWithOptionalExpiration|. This
+// |GenerateCertificateWithOptionalExpiration|. This
 // is handled by a separate class so that reference counting can keep the
 // request alive independently of the |RTCCertificateGenerator| that spawned it.
 class RTCCertificateGeneratorRequest
@@ -60,7 +59,7 @@ class RTCCertificateGeneratorRequest
 
   void GenerateCertificateAsync(
       const blink::WebRTCKeyParams& key_params,
-      const rtc::Optional<uint64_t>& expires_ms,
+      const absl::optional<uint64_t>& expires_ms,
       std::unique_ptr<blink::WebRTCCertificateCallback> observer) {
     DCHECK(main_thread_->BelongsToCurrentThread());
     DCHECK(observer);
@@ -80,7 +79,7 @@ class RTCCertificateGeneratorRequest
 
   void GenerateCertificateOnWorkerThread(
       const blink::WebRTCKeyParams key_params,
-      const rtc::Optional<uint64_t> expires_ms,
+      const absl::optional<uint64_t> expires_ms,
       CertificateCallbackPtr observer) {
     DCHECK(worker_thread_->BelongsToCurrentThread());
 
@@ -91,15 +90,12 @@ class RTCCertificateGeneratorRequest
     main_thread_->PostTask(
         FROM_HERE,
         base::BindOnce(&RTCCertificateGeneratorRequest::DoCallbackOnMainThread,
-                       this, std::move(observer),
-                       certificate
-                           ? std::make_unique<RTCCertificate>(certificate)
-                           : nullptr));
+                       this, std::move(observer), certificate));
   }
 
   void DoCallbackOnMainThread(
       CertificateCallbackPtr observer,
-      std::unique_ptr<blink::WebRTCCertificate> certificate) {
+      rtc::scoped_refptr<rtc::RTCCertificate> certificate) {
     DCHECK(main_thread_->BelongsToCurrentThread());
     DCHECK(observer);
     if (certificate)
@@ -114,33 +110,12 @@ class RTCCertificateGeneratorRequest
   const scoped_refptr<base::SingleThreadTaskRunner> worker_thread_;
 };
 
-}  // namespace
-
-void RTCCertificateGenerator::GenerateCertificate(
+void GenerateCertificateWithOptionalExpiration(
     const blink::WebRTCKeyParams& key_params,
+    const absl::optional<uint64_t>& expires_ms,
     std::unique_ptr<blink::WebRTCCertificateCallback> observer,
     scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
-  generateCertificateWithOptionalExpiration(
-      key_params, rtc::Optional<uint64_t>(), std::move(observer), task_runner);
-}
-
-void RTCCertificateGenerator::GenerateCertificateWithExpiration(
-    const blink::WebRTCKeyParams& key_params,
-    uint64_t expires_ms,
-    std::unique_ptr<blink::WebRTCCertificateCallback> observer,
-    scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
-  generateCertificateWithOptionalExpiration(key_params,
-                                            rtc::Optional<uint64_t>(expires_ms),
-                                            std::move(observer), task_runner);
-}
-
-void RTCCertificateGenerator::generateCertificateWithOptionalExpiration(
-    const blink::WebRTCKeyParams& key_params,
-    const rtc::Optional<uint64_t>& expires_ms,
-    std::unique_ptr<blink::WebRTCCertificateCallback> observer,
-    scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
-  DCHECK(IsSupportedKeyParams(key_params));
-#if BUILDFLAG(ENABLE_WEBRTC)
+  DCHECK(WebRTCKeyParamsToKeyParams(key_params).IsValid());
   PeerConnectionDependencyFactory* pc_dependency_factory =
       RenderThreadImpl::current()->GetPeerConnectionDependencyFactory();
   pc_dependency_factory->EnsureInitialized();
@@ -148,11 +123,27 @@ void RTCCertificateGenerator::generateCertificateWithOptionalExpiration(
   scoped_refptr<RTCCertificateGeneratorRequest> request =
       new RTCCertificateGeneratorRequest(
           task_runner, pc_dependency_factory->GetWebRtcWorkerThread());
-  request->GenerateCertificateAsync(
-      key_params, expires_ms, std::move(observer));
-#else
-  observer->onError();
-#endif
+  request->GenerateCertificateAsync(key_params, expires_ms,
+                                    std::move(observer));
+}
+
+}  // namespace
+
+void RTCCertificateGenerator::GenerateCertificate(
+    const blink::WebRTCKeyParams& key_params,
+    std::unique_ptr<blink::WebRTCCertificateCallback> observer,
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
+  GenerateCertificateWithOptionalExpiration(key_params, absl::nullopt,
+                                            std::move(observer), task_runner);
+}
+
+void RTCCertificateGenerator::GenerateCertificateWithExpiration(
+    const blink::WebRTCKeyParams& key_params,
+    uint64_t expires_ms,
+    std::unique_ptr<blink::WebRTCCertificateCallback> observer,
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
+  GenerateCertificateWithOptionalExpiration(key_params, expires_ms,
+                                            std::move(observer), task_runner);
 }
 
 bool RTCCertificateGenerator::IsSupportedKeyParams(
@@ -160,7 +151,7 @@ bool RTCCertificateGenerator::IsSupportedKeyParams(
   return WebRTCKeyParamsToKeyParams(key_params).IsValid();
 }
 
-std::unique_ptr<blink::WebRTCCertificate> RTCCertificateGenerator::FromPEM(
+rtc::scoped_refptr<rtc::RTCCertificate> RTCCertificateGenerator::FromPEM(
     blink::WebString pem_private_key,
     blink::WebString pem_certificate) {
   rtc::scoped_refptr<rtc::RTCCertificate> certificate =
@@ -168,7 +159,7 @@ std::unique_ptr<blink::WebRTCCertificate> RTCCertificateGenerator::FromPEM(
           pem_private_key.Utf8(), pem_certificate.Utf8()));
   if (!certificate)
     return nullptr;
-  return std::make_unique<RTCCertificate>(certificate);
+  return certificate;
 }
 
 }  // namespace content

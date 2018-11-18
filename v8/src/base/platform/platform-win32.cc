@@ -27,6 +27,8 @@
 #include "src/base/timezone-cache.h"
 #include "src/base/utils/random-number-generator.h"
 
+#include <VersionHelpers.h>
+
 #if defined(_MSC_VER)
 #include <crtdbg.h>  // NOLINT
 #endif               // defined(_MSC_VER)
@@ -758,11 +760,17 @@ DWORD GetProtectionFromMemoryPermission(OS::MemoryPermission access) {
   switch (access) {
     case OS::MemoryPermission::kNoAccess:
       return PAGE_NOACCESS;
+    case OS::MemoryPermission::kRead:
+      return PAGE_READONLY;
     case OS::MemoryPermission::kReadWrite:
       return PAGE_READWRITE;
     case OS::MemoryPermission::kReadWriteExecute:
+      if (IsWindows10OrGreater())
+        return PAGE_EXECUTE_READWRITE | PAGE_TARGETS_INVALID;
       return PAGE_EXECUTE_READWRITE;
     case OS::MemoryPermission::kReadExecute:
+      if (IsWindows10OrGreater())
+        return PAGE_EXECUTE_READ | PAGE_TARGETS_INVALID;
       return PAGE_EXECUTE_READ;
   }
   UNREACHABLE();
@@ -814,7 +822,8 @@ void* OS::Allocate(void* address, size_t size, size_t alignment,
   if (base == nullptr) return nullptr;  // Can't allocate, we're OOM.
 
   // If address is suitably aligned, we're done.
-  uint8_t* aligned_base = RoundUp(base, alignment);
+  uint8_t* aligned_base = reinterpret_cast<uint8_t*>(
+      RoundUp(reinterpret_cast<uintptr_t>(base), alignment));
   if (base == aligned_base) return reinterpret_cast<void*>(base);
 
   // Otherwise, free it and try a larger allocation.
@@ -835,7 +844,8 @@ void* OS::Allocate(void* address, size_t size, size_t alignment,
     // Try to trim the allocation by freeing the padded allocation and then
     // calling VirtualAlloc at the aligned base.
     CHECK(Free(base, padded_size));
-    aligned_base = RoundUp(base, alignment);
+    aligned_base = reinterpret_cast<uint8_t*>(
+        RoundUp(reinterpret_cast<uintptr_t>(base), alignment));
     base = reinterpret_cast<uint8_t*>(
         VirtualAlloc(aligned_base, size, flags, protect));
     // We might not get the reduced allocation due to a race. In that case,

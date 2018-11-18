@@ -10,8 +10,9 @@
 #include "base/callback_forward.h"
 #include "base/optional.h"
 #include "components/signin/core/browser/account_info.h"
-#include "ui/base/models/simple_menu_model.h"
 #include "ui/gfx/image/image.h"
+#include "ui/views/controls/menu/menu_delegate.h"
+#include "ui/views/controls/menu/menu_item_view.h"
 #include "ui/views/controls/menu/menu_runner.h"
 
 namespace views {
@@ -20,7 +21,7 @@ class View;
 
 // Menu allowing the user to select an account for enabling Sync when desktop
 // identity consistency (aka DICE) is enabled.
-class DiceAccountsMenu : public ui::SimpleMenuModel::Delegate {
+class DiceAccountsMenu : public views::MenuDelegate {
  public:
   // Callback to enable Sync for |account| if available. |account| corresponds
   // to the account that was selected or |nullopt| if the "Use another account"
@@ -41,18 +42,27 @@ class DiceAccountsMenu : public ui::SimpleMenuModel::Delegate {
   // given. This method can only be called once.
   void Show(views::View* anchor_view, views::MenuButton* menu_button = nullptr);
 
- private:
-  // Overridden from ui::SimpleMenuModel::Delegate:
-  bool IsCommandIdChecked(int command_id) const override;
-  bool IsCommandIdEnabled(int command_id) const override;
-  void ExecuteCommand(int command_id, int event_flags) override;
+  // A sign-out button is only added to the menu when this function is called.
+  void SetSignOutButtonCallback(base::OnceClosure signout_callback);
 
-  ui::SimpleMenuModel menu_;
+ private:
+  views::MenuItemView* BuildMenu();
+
+  // Overridden from views::MenuDelegate:
+  void ExecuteCommand(int id) override;
+  void GetHorizontalIconMargins(int command_id,
+                                int icon_size,
+                                int* left_margin,
+                                int* right_margin) const override;
+  void GetLabelStyle(int id, LabelStyle* style) const override;
+
   std::unique_ptr<views::MenuRunner> runner_;
 
   std::vector<AccountInfo> accounts_;
+  std::vector<gfx::Image> icons_;
 
   Callback account_selected_callback_;
+  base::OnceClosure signout_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(DiceAccountsMenu);
 };

@@ -7,12 +7,10 @@
 #include <cmath>
 #include <memory>
 
-#include "ash/public/cpp/config.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/root_window_controller.h"
 #include "ash/session/session_controller.h"
 #include "ash/shell.h"
-#include "ash/shell_port.h"
 #include "ash/wm/window_dimmer.h"
 #include "ash/wm/window_util.h"
 #include "base/stl_util.h"
@@ -50,8 +48,9 @@ SystemModalContainerLayoutManager::SystemModalContainerLayoutManager(
     : container_(container) {}
 
 SystemModalContainerLayoutManager::~SystemModalContainerLayoutManager() {
-  if (keyboard::KeyboardController::GetInstance())
-    keyboard::KeyboardController::GetInstance()->RemoveObserver(this);
+  auto* keyboard_controller = keyboard::KeyboardController::Get();
+  if (keyboard_controller->HasObserver(this))
+    keyboard_controller->RemoveObserver(this);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -160,9 +159,9 @@ void SystemModalContainerLayoutManager::CreateModalBackground() {
     window_dimmer_ = std::make_unique<WindowDimmer>(container_);
     window_dimmer_->window()->SetName(
         "SystemModalContainerLayoutManager.ModalBackground");
-    // There isn't always a keyboard controller.
-    if (keyboard::KeyboardController::GetInstance())
-      keyboard::KeyboardController::GetInstance()->AddObserver(this);
+    // The keyboard isn't always enabled.
+    if (keyboard::KeyboardController::Get()->IsEnabled())
+      keyboard::KeyboardController::Get()->AddObserver(this);
   }
   window_dimmer_->window()->Show();
 }
@@ -171,8 +170,9 @@ void SystemModalContainerLayoutManager::DestroyModalBackground() {
   if (!window_dimmer_)
     return;
 
-  if (keyboard::KeyboardController::GetInstance())
-    keyboard::KeyboardController::GetInstance()->RemoveObserver(this);
+  auto* keyboard_controller = keyboard::KeyboardController::Get();
+  if (keyboard_controller->HasObserver(this))
+    keyboard_controller->RemoveObserver(this);
   window_dimmer_.reset();
 }
 
@@ -256,9 +256,9 @@ gfx::Rect SystemModalContainerLayoutManager::GetUsableDialogArea() const {
   // keyboard will not fill left to right, the background is still covered.
   gfx::Rect valid_bounds = container_->bounds();
   keyboard::KeyboardController* keyboard_controller =
-      keyboard::KeyboardController::GetInstance();
-  if (keyboard_controller) {
-    gfx::Rect bounds = keyboard_controller->GetWorkspaceObscuringBounds();
+      keyboard::KeyboardController::Get();
+  if (keyboard_controller->IsEnabled()) {
+    gfx::Rect bounds = keyboard_controller->GetWorkspaceOccludedBounds();
     valid_bounds.set_height(
         std::max(0, valid_bounds.height() - bounds.height()));
   }

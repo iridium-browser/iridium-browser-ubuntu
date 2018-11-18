@@ -348,8 +348,7 @@ bool ToolbarActionsModelUnitTest::ModelHasActionForId(
 
 testing::AssertionResult ToolbarActionsModelUnitTest::AddAndVerifyExtensions(
     const extensions::ExtensionList& extensions) {
-  for (extensions::ExtensionList::const_iterator iter = extensions.begin();
-       iter != extensions.end(); ++iter) {
+  for (auto iter = extensions.begin(); iter != extensions.end(); ++iter) {
     if (!AddExtension(*iter)) {
       return testing::AssertionFailure() << "Failed to install extension: "
                                          << (*iter)->name();
@@ -1428,7 +1427,7 @@ TEST_F(ToolbarActionsModelUnitTest, AddUserScriptExtension) {
       extensions::ExtensionBuilder("a")
           .SetLocation(extensions::Manifest::INTERNAL)
           .MergeManifest(extensions::DictionaryBuilder()
-                             .SetBoolean("converted_from_user_script", true)
+                             .Set("converted_from_user_script", true)
                              .Build())
           .Build();
 

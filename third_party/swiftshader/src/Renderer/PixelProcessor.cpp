@@ -537,6 +537,15 @@ namespace sw
 		else ASSERT(false);
 	}
 
+	void PixelProcessor::setSyncRequired(unsigned int sampler, bool isSincRequired)
+	{
+		if(sampler < TEXTURE_IMAGE_UNITS)
+		{
+			context->sampler[sampler].setSyncRequired(isSincRequired);
+		}
+		else ASSERT(false);
+	}
+
 	void PixelProcessor::setWriteSRGB(bool sRGB)
 	{
 		context->setWriteSRGB(sRGB);
@@ -577,9 +586,10 @@ namespace sw
 		context->alphaTestEnable = alphaTestEnable;
 	}
 
-	void PixelProcessor::setCullMode(CullMode cullMode)
+	void PixelProcessor::setCullMode(CullMode cullMode, bool frontFacingCCW)
 	{
 		context->cullMode = cullMode;
+		context->frontFacingCCW = frontFacingCCW;
 	}
 
 	void PixelProcessor::setColorWriteMask(int index, int rgbaMask)
@@ -1031,6 +1041,8 @@ namespace sw
 		{
 			state.centroid = context->pixelShader->containsCentroid();
 		}
+
+		state.frontFaceCCW = context->frontFacingCCW;
 
 		if(!context->pixelShader)
 		{

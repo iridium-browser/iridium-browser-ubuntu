@@ -9,12 +9,13 @@
 #include "base/optional.h"
 #include "base/threading/thread_checker.h"
 #include "base/timer/elapsed_timer.h"
-#include "gpu/command_buffer/service/gpu_preferences.h"
+#include "gpu/config/gpu_feature_info.h"
+#include "gpu/config/gpu_preferences.h"
 #include "media/base/android_overlay_mojo_factory.h"
 #include "media/base/overlay_info.h"
 #include "media/base/video_decoder.h"
 #include "media/gpu/android/android_video_surface_chooser.h"
-#include "media/gpu/android/avda_codec_allocator.h"
+#include "media/gpu/android/codec_allocator.h"
 #include "media/gpu/android/codec_wrapper.h"
 #include "media/gpu/android/device_info.h"
 #include "media/gpu/android/surface_chooser_helper.h"
@@ -44,18 +45,18 @@ struct PendingDecode {
 // first Decode() (see StartLazyInit()). We do this because there are cases in
 // our media pipeline where we'll initialize a decoder but never use it
 // (e.g., MSE with no media data appended), and if we eagerly allocator decoder
-// resources, like MediaCodecs and SurfaceTextures, we will block other
+// resources, like MediaCodecs and TextureOwners, we will block other
 // playbacks that need them.
 // TODO: Lazy initialization should be handled at a higher layer of the media
 // stack for both simplicity and cross platform support.
-class MEDIA_GPU_EXPORT MediaCodecVideoDecoder
-    : public VideoDecoder,
-      public AVDACodecAllocatorClient {
+class MEDIA_GPU_EXPORT MediaCodecVideoDecoder : public VideoDecoder,
+                                                public CodecAllocatorClient {
  public:
   MediaCodecVideoDecoder(
       const gpu::GpuPreferences& gpu_preferences,
+      const gpu::GpuFeatureInfo& gpu_feature_info,
       DeviceInfo* device_info,
-      AVDACodecAllocator* codec_allocator,
+      CodecAllocator* codec_allocator,
       std::unique_ptr<AndroidVideoSurfaceChooser> surface_chooser,
       AndroidOverlayMojoFactoryCB overlay_factory_cb,
       RequestOverlayInfoCB request_overlay_info_cb,
@@ -120,7 +121,7 @@ class MEDIA_GPU_EXPORT MediaCodecVideoDecoder
   // Finishes initialization.
   void StartLazyInit();
   void OnVideoFrameFactoryInitialized(
-      scoped_refptr<SurfaceTextureGLOwner> surface_texture);
+      scoped_refptr<TextureOwner> texture_owner);
 
   // Resets |waiting_for_key_| to false, indicating that MediaCodec might now
   // accept buffers.
@@ -141,7 +142,7 @@ class MEDIA_GPU_EXPORT MediaCodecVideoDecoder
   // Creates a codec asynchronously.
   void CreateCodec();
 
-  // AVDACodecAllocatorClient implementation.
+  // CodecAllocatorClient implementation.
   void OnCodecConfigured(
       std::unique_ptr<MediaCodecBridge> media_codec,
       scoped_refptr<AVDASurfaceBundle> surface_bundle) override;
@@ -151,13 +152,13 @@ class MEDIA_GPU_EXPORT MediaCodecVideoDecoder
   void FlushCodec();
 
   // Attempts to queue input and dequeue output from the codec. Calls
-  // StartTimer() even if the codec is idle when |force_start_timer|.
+  // StartTimerOrPumpCodec() even if the codec is idle when |force_start_timer|.
   void PumpCodec(bool force_start_timer);
   bool QueueInput();
   bool DequeueOutput();
 
   // Starts |pump_codec_timer_| if it's not started and resets the idle timeout.
-  void StartTimer();
+  void StartTimerOrPumpCodec();
   void StopTimerIfIdle();
 
   // Runs |eos_decode_cb_| if it's valid and |reset_generation| matches
@@ -234,7 +235,7 @@ class MEDIA_GPU_EXPORT MediaCodecVideoDecoder
   std::unique_ptr<CodecWrapper> codec_;
   base::ElapsedTimer idle_timer_;
   base::RepeatingTimer pump_codec_timer_;
-  AVDACodecAllocator* codec_allocator_;
+  CodecAllocator* codec_allocator_;
 
   // The current target surface that |codec_| should be rendering to. It
   // reflects the latest surface choice by |surface_chooser_|. If the codec is
@@ -242,15 +243,18 @@ class MEDIA_GPU_EXPORT MediaCodecVideoDecoder
   // non-null from the first surface choice.
   scoped_refptr<AVDASurfaceBundle> target_surface_bundle_;
 
-  // A SurfaceTexture bundle that is kept for the lifetime of MCVD so that if we
+  // A TextureOwner bundle that is kept for the lifetime of MCVD so that if we
   // have to synchronously switch surfaces we always have one available.
-  scoped_refptr<AVDASurfaceBundle> surface_texture_bundle_;
+  scoped_refptr<AVDASurfaceBundle> texture_owner_bundle_;
 
   // A callback for requesting overlay info updates.
   RequestOverlayInfoCB request_overlay_info_cb_;
 
   // The current overlay info, which possibly specifies an overlay to render to.
   OverlayInfo overlay_info_;
+
+  // Set to true if the display compositor swap is done using SurfaceControl.
+  const bool is_surface_control_enabled_;
 
   // The helper which manages our surface chooser for us.
   SurfaceChooserHelper surface_chooser_helper_;
@@ -267,7 +271,7 @@ class MEDIA_GPU_EXPORT MediaCodecVideoDecoder
   // Most recently cached frame information, so that we can dispatch it without
   // recomputing it on every frame.  It changes very rarely.
   SurfaceChooserHelper::FrameInformation cached_frame_information_ =
-      SurfaceChooserHelper::FrameInformation::SURFACETEXTURE_INSECURE;
+      SurfaceChooserHelper::FrameInformation::NON_OVERLAY_INSECURE;
 
   // CDM related stuff.
 
@@ -280,6 +284,14 @@ class MEDIA_GPU_EXPORT MediaCodecVideoDecoder
 
   // Do we need a hw-secure codec?
   bool requires_secure_codec_ = false;
+
+  bool using_async_api_ = false;
+
+  // Should we flush the codec on the next decode, and pretend that it is
+  // drained currently?  Note that we'll automatically flush if the codec is
+  // drained; this flag indicates that we also elided the drain, so the codec is
+  // in some random state, possibly with output buffers pending.
+  bool deferred_flush_pending_ = false;
 
   // Optional crypto object from the Cdm.
   base::android::ScopedJavaGlobalRef<jobject> media_crypto_;

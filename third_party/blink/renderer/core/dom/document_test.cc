@@ -31,10 +31,12 @@
 #include "third_party/blink/renderer/core/dom/document.h"
 
 #include <memory>
+
 #include "build/build_config.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/platform/web_application_cache_host.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_testing.h"
 #include "third_party/blink/renderer/core/dom/document_fragment.h"
 #include "third_party/blink/renderer/core/dom/node_with_index.h"
@@ -43,6 +45,7 @@
 #include "third_party/blink/renderer/core/dom/text.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
+#include "third_party/blink/renderer/core/frame/viewport_data.h"
 #include "third_party/blink/renderer/core/html/forms/html_input_element.h"
 #include "third_party/blink/renderer/core/html/html_head_element.h"
 #include "third_party/blink/renderer/core/html/html_link_element.h"
@@ -56,6 +59,7 @@
 #include "third_party/blink/renderer/platform/weborigin/referrer_policy.h"
 #include "third_party/blink/renderer/platform/weborigin/scheme_registry.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
+#include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
 namespace blink {
 
@@ -154,7 +158,7 @@ class TestSynchronousMutationObserver
     return updated_character_data_records_;
   }
 
-  void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  private:
   // Implement |SynchronousMutationObserver| member functions.
@@ -255,7 +259,7 @@ class TestDocumentShutdownObserver
     return context_destroyed_called_counter_;
   }
 
-  void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  private:
   // Implement |DocumentShutdownObserver| member functions.
@@ -337,7 +341,8 @@ TEST_F(DocumentTest, CreateRangeAdjustedToTreeScopeWithPositionInShadowTree) {
       "<div><select><option>012</option></div>");
   Element* const select_element = GetDocument().QuerySelector("select");
   const Position& position =
-      Position::AfterNode(*select_element->UserAgentShadowRoot());
+      Position(*select_element->UserAgentShadowRoot(),
+               select_element->UserAgentShadowRoot()->CountChildren());
   Range* const range =
       Document::CreateRangeAdjustedToTreeScope(GetDocument(), position);
   EXPECT_EQ(range->startContainer(), select_element->parentNode());
@@ -536,7 +541,7 @@ TEST_F(DocumentTest, OutgoingReferrer) {
 
 TEST_F(DocumentTest, OutgoingReferrerWithUniqueOrigin) {
   GetDocument().SetURL(KURL("https://www.example.com/hoge#fuga?piyo"));
-  GetDocument().SetSecurityOrigin(SecurityOrigin::CreateUnique());
+  GetDocument().SetSecurityOrigin(SecurityOrigin::CreateUniqueOpaque());
   EXPECT_EQ(String(), GetDocument().OutgoingReferrer());
 }
 
@@ -580,30 +585,32 @@ TEST_F(DocumentTest, EnforceSandboxFlags) {
 
   mask |= kSandboxOrigin;
   GetDocument().EnforceSandboxFlags(mask);
-  EXPECT_TRUE(GetDocument().GetSecurityOrigin()->IsUnique());
+  EXPECT_TRUE(GetDocument().GetSecurityOrigin()->IsOpaque());
   EXPECT_FALSE(GetDocument().GetSecurityOrigin()->IsPotentiallyTrustworthy());
 
   // A unique origin does not bypass secure context checks unless it
   // is also potentially trustworthy.
+  url::AddStandardScheme("very-special-scheme",
+                         url::SchemeType::SCHEME_WITH_HOST);
   SchemeRegistry::RegisterURLSchemeBypassingSecureContextCheck(
       "very-special-scheme");
   origin =
       SecurityOrigin::CreateFromString("very-special-scheme://example.test");
   GetDocument().SetSecurityOrigin(origin);
   GetDocument().EnforceSandboxFlags(mask);
-  EXPECT_TRUE(GetDocument().GetSecurityOrigin()->IsUnique());
+  EXPECT_TRUE(GetDocument().GetSecurityOrigin()->IsOpaque());
   EXPECT_FALSE(GetDocument().GetSecurityOrigin()->IsPotentiallyTrustworthy());
 
   SchemeRegistry::RegisterURLSchemeAsSecure("very-special-scheme");
   GetDocument().SetSecurityOrigin(origin);
   GetDocument().EnforceSandboxFlags(mask);
-  EXPECT_TRUE(GetDocument().GetSecurityOrigin()->IsUnique());
+  EXPECT_TRUE(GetDocument().GetSecurityOrigin()->IsOpaque());
   EXPECT_TRUE(GetDocument().GetSecurityOrigin()->IsPotentiallyTrustworthy());
 
   origin = SecurityOrigin::CreateFromString("https://example.test");
   GetDocument().SetSecurityOrigin(origin);
   GetDocument().EnforceSandboxFlags(mask);
-  EXPECT_TRUE(GetDocument().GetSecurityOrigin()->IsUnique());
+  EXPECT_TRUE(GetDocument().GetSecurityOrigin()->IsOpaque());
   EXPECT_TRUE(GetDocument().GetSecurityOrigin()->IsPotentiallyTrustworthy());
 }
 
@@ -808,7 +815,7 @@ TEST_F(DocumentTest, ValidationMessageCleanup) {
   MockDocumentValidationMessageClient* mock_client =
       new MockDocumentValidationMessageClient();
   GetDocument().GetSettings()->SetScriptEnabled(true);
-  GetPage().SetValidationMessageClient(mock_client);
+  GetPage().SetValidationMessageClientForTesting(mock_client);
   // ImplicitOpen()-CancelParsing() makes Document.loadEventFinished()
   // true. It's necessary to kick unload process.
   GetDocument().ImplicitOpen(kForceSynchronousParsing);
@@ -835,7 +842,7 @@ TEST_F(DocumentTest, ValidationMessageCleanup) {
   // Unload handler tried to show a validation message, but it should fail.
   EXPECT_FALSE(mock_client->show_validation_message_was_called);
 
-  GetPage().SetValidationMessageClient(original_client);
+  GetPage().SetValidationMessageClientForTesting(original_client);
 }
 
 TEST_F(DocumentTest, SandboxDisablesAppCache) {
@@ -870,6 +877,7 @@ TEST_F(DocumentTest,
       <div id='nonSticky'></div>
     </div>
   )HTML");
+  GetDocument().UpdateStyleAndLayoutTree();
   EXPECT_EQ(DocumentLifecycle::kStyleClean,
             GetDocument().Lifecycle().GetState());
 
@@ -926,7 +934,7 @@ TEST_F(DocumentTest, ViewportPropagationNoRecalc) {
 
 class InvalidatorObserver : public InterfaceInvalidator::Observer {
  public:
-  void OnInvalidate() { ++invalidate_called_counter_; }
+  void OnInvalidate() override { ++invalidate_called_counter_; }
 
   int CountInvalidateCalled() const { return invalidate_called_counter_; }
 
@@ -945,20 +953,56 @@ TEST_F(DocumentTest, InterfaceInvalidatorDestruction) {
   EXPECT_EQ(1, obs.CountInvalidateCalled());
 }
 
-typedef bool TestParamRootLayerScrolling;
-class ParameterizedDocumentTest
-    : public testing::WithParamInterface<TestParamRootLayerScrolling>,
-      private ScopedRootLayerScrollingForTest,
-      public DocumentTest {
- public:
-  ParameterizedDocumentTest() : ScopedRootLayerScrollingForTest(GetParam()) {}
-};
+TEST_F(DocumentTest, CanExecuteScriptsWithSandboxAndIsolatedWorld) {
+  constexpr SandboxFlags kSandboxMask = kSandboxScripts;
+  GetDocument().EnforceSandboxFlags(kSandboxMask);
 
-INSTANTIATE_TEST_CASE_P(All, ParameterizedDocumentTest, testing::Bool());
+  LocalFrame* frame = GetDocument().GetFrame();
+  frame->GetSettings()->SetScriptEnabled(true);
+  ScriptState* main_world_script_state = ToScriptStateForMainWorld(frame);
+  v8::Isolate* isolate = main_world_script_state->GetIsolate();
+
+  constexpr int kIsolatedWorldWithoutCSPId = 1;
+  scoped_refptr<DOMWrapperWorld> world_without_csp =
+      DOMWrapperWorld::EnsureIsolatedWorld(isolate, kIsolatedWorldWithoutCSPId);
+  ScriptState* isolated_world_without_csp_script_state =
+      ToScriptState(frame, *world_without_csp);
+  ASSERT_TRUE(world_without_csp->IsIsolatedWorld());
+  EXPECT_FALSE(world_without_csp->IsolatedWorldHasContentSecurityPolicy());
+
+  constexpr int kIsolatedWorldWithCSPId = 2;
+  scoped_refptr<DOMWrapperWorld> world_with_csp =
+      DOMWrapperWorld::EnsureIsolatedWorld(isolate, kIsolatedWorldWithCSPId);
+  DOMWrapperWorld::SetIsolatedWorldContentSecurityPolicy(
+      kIsolatedWorldWithCSPId, String::FromUTF8("script-src *"));
+  ScriptState* isolated_world_with_csp_script_state =
+      ToScriptState(frame, *world_with_csp);
+  ASSERT_TRUE(world_with_csp->IsIsolatedWorld());
+  EXPECT_TRUE(world_with_csp->IsolatedWorldHasContentSecurityPolicy());
+
+  {
+    // Since the page is sandboxed, main world script execution shouldn't be
+    // allowed.
+    ScriptState::Scope scope(main_world_script_state);
+    EXPECT_FALSE(GetDocument().CanExecuteScripts(kAboutToExecuteScript));
+  }
+  {
+    // Isolated worlds without a dedicated CSP should also not be allowed to
+    // run scripts.
+    ScriptState::Scope scope(isolated_world_without_csp_script_state);
+    EXPECT_FALSE(GetDocument().CanExecuteScripts(kAboutToExecuteScript));
+  }
+  {
+    // An isolated world with a CSP should bypass the main world CSP, and be
+    // able to run scripts.
+    ScriptState::Scope scope(isolated_world_with_csp_script_state);
+    EXPECT_TRUE(GetDocument().CanExecuteScripts(kAboutToExecuteScript));
+  }
+}
 
 // Android does not support non-overlay top-level scrollbars.
 #if !defined(OS_ANDROID)
-TEST_P(ParameterizedDocumentTest, ElementFromPointOnScrollbar) {
+TEST_F(DocumentTest, ElementFromPointOnScrollbar) {
   GetDocument().SetCompatibilityMode(Document::kQuirksMode);
   // This test requires that scrollbars take up space.
   ScopedOverlayScrollbarsForTest no_overlay_scrollbars(false);
@@ -986,7 +1030,7 @@ TEST_P(ParameterizedDocumentTest, ElementFromPointOnScrollbar) {
 }
 #endif  // defined(OS_ANDROID)
 
-TEST_P(ParameterizedDocumentTest, ElementFromPointWithPageZoom) {
+TEST_F(DocumentTest, ElementFromPointWithPageZoom) {
   GetDocument().SetCompatibilityMode(Document::kQuirksMode);
   // This test requires that scrollbars take up space.
   ScopedOverlayScrollbarsForTest no_overlay_scrollbars(false);
@@ -1012,5 +1056,120 @@ TEST_P(ParameterizedDocumentTest, ElementFromPointWithPageZoom) {
   // A hit test below the content div should not hit it.
   EXPECT_EQ(GetDocument().ElementFromPoint(1, 12), GetDocument().body());
 }
+
+/**
+ * Tests for viewport-fit propagation.
+ */
+
+class ViewportFitDocumentTest : public DocumentTest {
+ public:
+  void SetUp() override {
+    DocumentTest::SetUp();
+
+    RuntimeEnabledFeatures::SetDisplayCutoutAPIEnabled(true);
+    GetDocument().GetSettings()->SetViewportMetaEnabled(true);
+  }
+
+  mojom::ViewportFit GetViewportFit() const {
+    return GetDocument().GetViewportData().GetCurrentViewportFitForTests();
+  }
+};
+
+// Test both meta and @viewport present but no viewport-fit.
+TEST_F(ViewportFitDocumentTest, MetaCSSViewportButNoFit) {
+  SetHtmlInnerHTML(
+      "<style>@viewport { min-width: 100px; }</style>"
+      "<meta name='viewport' content='initial-scale=1'>");
+
+  EXPECT_EQ(mojom::ViewportFit::kAuto, GetViewportFit());
+}
+
+// Test @viewport present but no viewport-fit.
+TEST_F(ViewportFitDocumentTest, CSSViewportButNoFit) {
+  SetHtmlInnerHTML("<style>@viewport { min-width: 100px; }</style>");
+
+  EXPECT_EQ(mojom::ViewportFit::kAuto, GetViewportFit());
+}
+
+// Test meta viewport present but no viewport-fit.
+TEST_F(ViewportFitDocumentTest, MetaViewportButNoFit) {
+  SetHtmlInnerHTML("<meta name='viewport' content='initial-scale=1'>");
+
+  EXPECT_EQ(mojom::ViewportFit::kAuto, GetViewportFit());
+}
+
+// Test overriding the viewport fit using SetExpandIntoDisplayCutout.
+TEST_F(ViewportFitDocumentTest, ForceExpandIntoCutout) {
+  SetHtmlInnerHTML("<meta name='viewport' content='viewport-fit=contain'>");
+  EXPECT_EQ(mojom::ViewportFit::kContain, GetViewportFit());
+
+  // Now override the viewport fit value and expect it to be kCover.
+  GetDocument().GetViewportData().SetExpandIntoDisplayCutout(true);
+  EXPECT_EQ(mojom::ViewportFit::kCoverForcedByUserAgent, GetViewportFit());
+
+  // Test that even if we change the value we ignore it.
+  SetHtmlInnerHTML("<meta name='viewport' content='viewport-fit=auto'>");
+  EXPECT_EQ(mojom::ViewportFit::kCoverForcedByUserAgent, GetViewportFit());
+
+  // Now remove the override and check that it went back to the previous value.
+  GetDocument().GetViewportData().SetExpandIntoDisplayCutout(false);
+  EXPECT_EQ(mojom::ViewportFit::kAuto, GetViewportFit());
+}
+
+// This is a test case for testing a combination of viewport-fit meta value,
+// viewport CSS value and the expected outcome.
+using ViewportTestCase =
+    std::tuple<const char*, const char*, mojom::ViewportFit>;
+
+class ParameterizedViewportFitDocumentTest
+    : public ViewportFitDocumentTest,
+      public testing::WithParamInterface<ViewportTestCase> {
+ protected:
+  void LoadTestHTML() {
+    const char* kMetaValue = std::get<0>(GetParam());
+    const char* kCSSValue = std::get<1>(GetParam());
+    StringBuilder html;
+
+    if (kCSSValue) {
+      html.Append("<style>@viewport { viewport-fit: ");
+      html.Append(kCSSValue);
+      html.Append("; }</style>");
+    }
+
+    if (kMetaValue) {
+      html.Append("<meta name='viewport' content='viewport-fit=");
+      html.Append(kMetaValue);
+      html.Append("'>");
+    }
+
+    GetDocument().documentElement()->SetInnerHTMLFromString(html.ToString());
+    GetDocument().View()->UpdateAllLifecyclePhases();
+  }
+};
+
+TEST_P(ParameterizedViewportFitDocumentTest, EffectiveViewportFit) {
+  LoadTestHTML();
+  EXPECT_EQ(std::get<2>(GetParam()), GetViewportFit());
+}
+
+INSTANTIATE_TEST_CASE_P(
+    All,
+    ParameterizedViewportFitDocumentTest,
+    testing::Values(
+        // Test the default case.
+        ViewportTestCase(nullptr, nullptr, mojom::ViewportFit::kAuto),
+        // Test the different values set through CSS.
+        ViewportTestCase(nullptr, "auto", mojom::ViewportFit::kAuto),
+        ViewportTestCase(nullptr, "contain", mojom::ViewportFit::kContain),
+        ViewportTestCase(nullptr, "cover", mojom::ViewportFit::kCover),
+        ViewportTestCase(nullptr, "invalid", mojom::ViewportFit::kAuto),
+        // Test the different values set through the meta tag.
+        ViewportTestCase("auto", nullptr, mojom::ViewportFit::kAuto),
+        ViewportTestCase("contain", nullptr, mojom::ViewportFit::kContain),
+        ViewportTestCase("cover", nullptr, mojom::ViewportFit::kCover),
+        ViewportTestCase("invalid", nullptr, mojom::ViewportFit::kAuto),
+        // Test that the CSS should override the meta tag.
+        ViewportTestCase("cover", "auto", mojom::ViewportFit::kAuto),
+        ViewportTestCase("cover", "contain", mojom::ViewportFit::kContain)));
 
 }  // namespace blink

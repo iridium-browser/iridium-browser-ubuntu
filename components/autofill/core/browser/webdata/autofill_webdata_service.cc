@@ -67,7 +67,7 @@ void AutofillWebDataService::ShutdownOnUISequence() {
   weak_ptr_factory_.InvalidateWeakPtrs();
   db_task_runner_->PostTask(
       FROM_HERE,
-      Bind(&AutofillWebDataBackendImpl::ResetUserData, autofill_backend_));
+      BindOnce(&AutofillWebDataBackendImpl::ResetUserData, autofill_backend_));
   WebDataServiceBase::ShutdownOnUISequence();
 }
 
@@ -213,11 +213,26 @@ void AutofillWebDataService::MaskServerCreditCard(const std::string& id) {
            autofill_backend_, id));
 }
 
+WebDataServiceBase::Handle AutofillWebDataService::GetPaymentsCustomerData(
+    WebDataServiceConsumer* consumer) {
+  return wdbs_->ScheduleDBTaskWithResult(
+      FROM_HERE,
+      Bind(&AutofillWebDataBackendImpl::GetPaymentsCustomerData,
+           autofill_backend_),
+      consumer);
+}
+
 void AutofillWebDataService::ClearAllServerData() {
   wdbs_->ScheduleDBTask(
       FROM_HERE,
       Bind(&AutofillWebDataBackendImpl::ClearAllServerData,
            autofill_backend_));
+}
+
+void AutofillWebDataService::ClearAllLocalData() {
+  wdbs_->ScheduleDBTask(
+      FROM_HERE,
+      Bind(&AutofillWebDataBackendImpl::ClearAllLocalData, autofill_backend_));
 }
 
 void AutofillWebDataService::UpdateServerCardMetadata(
@@ -251,17 +266,24 @@ void AutofillWebDataService::RemoveOriginURLsModifiedBetween(
            autofill_backend_, delete_begin, delete_end));
 }
 
+void AutofillWebDataService::RemoveOrphanAutofillTableRows() {
+  wdbs_->ScheduleDBTask(
+      FROM_HERE,
+      Bind(&AutofillWebDataBackendImpl::RemoveOrphanAutofillTableRows,
+           autofill_backend_));
+}
+
 void AutofillWebDataService::AddObserver(
     AutofillWebDataServiceObserverOnDBSequence* observer) {
   DCHECK(db_task_runner_->RunsTasksInCurrentSequence());
-  if (autofill_backend_.get())
+  if (autofill_backend_)
     autofill_backend_->AddObserver(observer);
 }
 
 void AutofillWebDataService::RemoveObserver(
     AutofillWebDataServiceObserverOnDBSequence* observer) {
   DCHECK(db_task_runner_->RunsTasksInCurrentSequence());
-  if (autofill_backend_.get())
+  if (autofill_backend_)
     autofill_backend_->RemoveObserver(observer);
 }
 
@@ -285,7 +307,8 @@ base::SupportsUserData* AutofillWebDataService::GetDBUserData() {
 void AutofillWebDataService::GetAutofillBackend(
     const base::Callback<void(AutofillWebDataBackend*)>& callback) {
   db_task_runner_->PostTask(
-      FROM_HERE, base::Bind(callback, base::RetainedRef(autofill_backend_)));
+      FROM_HERE,
+      base::BindOnce(callback, base::RetainedRef(autofill_backend_)));
 }
 
 base::SingleThreadTaskRunner* AutofillWebDataService::GetDBTaskRunner() {

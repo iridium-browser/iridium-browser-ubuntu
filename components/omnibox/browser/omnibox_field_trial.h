@@ -25,30 +25,30 @@ class TimeDelta;
 
 namespace omnibox {
 
-extern const base::Feature kOmniboxEntitySuggestions;
 extern const base::Feature kOmniboxRichEntitySuggestions;
+extern const base::Feature kOmniboxNewAnswerLayout;
+extern const base::Feature kOmniboxReverseAnswers;
 extern const base::Feature kOmniboxTailSuggestions;
-extern const char kOmniboxTabSwitchSuggestionsFlag[];
-extern const char kOmniboxTabSwitchWithButton[];
+extern const base::Feature kOmniboxTabSwitchSuggestions;
+extern const base::Feature kExperimentalKeywordMode;
+extern const base::Feature kOmniboxPedalSuggestions;
 extern const base::Feature kEnableClipboardProvider;
 extern const base::Feature kSearchProviderWarmUpOnFocus;
 extern const base::Feature kZeroSuggestRedirectToChrome;
 extern const base::Feature kZeroSuggestSwapTitleAndUrl;
 extern const base::Feature kDisplayTitleForCurrentUrl;
+extern const base::Feature kQueryInOmnibox;
 extern const base::Feature kUIExperimentElideSuggestionUrlAfterHost;
-extern const base::Feature kUIExperimentHideSteadyStateUrlSchemeAndSubdomains;
+extern const base::Feature kUIExperimentJogTextfieldOnPopup;
 extern const base::Feature kUIExperimentMaxAutocompleteMatches;
-extern const base::Feature kUIExperimentNarrowDropdown;
 extern const base::Feature kUIExperimentShowSuggestionFavicons;
 extern const base::Feature kUIExperimentSwapTitleAndUrl;
-extern const base::Feature kUIExperimentVerticalLayout;
 extern const base::Feature kUIExperimentVerticalMargin;
 extern const base::Feature kSpeculativeServiceWorkerStartOnQueryInput;
 extern const base::Feature kBreakWordsAtUnderscores;
+extern const base::Feature kDocumentProvider;
+extern const base::Feature kOmniboxPopupShortcutIconsInZeroState;
 
-#if defined(OS_IOS)
-extern const base::Feature kZeroSuggestProviderIOS;
-#endif
 }  // namespace omnibox
 
 // The set of parameters customizing the HUP scoring.
@@ -155,6 +155,13 @@ class OmniboxFieldTrial {
     EMPHASIZE_WHEN_TITLE_MATCHES = 1,
     EMPHASIZE_WHEN_ONLY_TITLE_MATCHES = 2,
     EMPHASIZE_NEVER = 3
+  };
+
+  // These are the discrete possibilities for Pedal behavior.
+  enum class PedalSuggestionMode {
+    NONE,
+    IN_SUGGESTION,
+    DEDICATED,
   };
 
   // ---------------------------------------------------------
@@ -382,11 +389,15 @@ class OmniboxFieldTrial {
   // For the aggressive keyword matching experiment that's part of the bundled
   // omnibox field trial.
 
-  // Returns whether KeywordProvider should consider the registry portion
+  // One function is missing from here to avoid a cyclic dependency
+  // between search_engine and omnibox. In the search_engine component
+  // there is a OmniboxFieldTrialKeywordRequiresRegistry function
+  // that logically should be here.
+  //
+  // It returns whether KeywordProvider should consider the registry portion
   // (e.g., co.uk) of keywords that look like hostnames as an important part of
   // the keyword name for matching purposes.  Returns true if the experiment
   // isn't active.
-  static bool KeywordRequiresRegistry();
 
   // For keywords that look like hostnames, returns whether KeywordProvider
   // should require users to type a prefix of the hostname to match against
@@ -412,34 +423,35 @@ class OmniboxFieldTrial {
       const AutocompleteInput& input);
 
   // ---------------------------------------------------------
-  // For PhysicalWebProvider related experiments.
-
-  // Returns whether the user is in a Physical Web field trial where the
-  // PhysicalWebProvider should be used to get suggestions when the user clicks
-  // on the omnibox but has not typed anything yet.
-  static bool InPhysicalWebZeroSuggestFieldTrial();
-
-  // Returns whether the user is in a Physical Web field trial and URL-based
-  // suggestions can continue to appear after the user has started typing.
-  static bool InPhysicalWebAfterTypingFieldTrial();
-
-  // Returns the base relevance score for Physical Web omnibox suggestions when
-  // the user has clicked on the omnibox but has not typed anything yet.
-  static int GetPhysicalWebZeroSuggestBaseRelevance();
-
-  // Returns the base relevance score for Physical Web omnibox suggestions when
-  // the user has started typing in the omnibox.
-  static int GetPhysicalWebAfterTypingBaseRelevance();
-
-  // ---------------------------------------------------------
   // For tab switch suggestions related experiments.
 
-  // Returns whether the tab switch suggestion experiment is enabled.
-  static bool InTabSwitchSuggestionTrial();
+  // Returns true if the rich entities flag is enabled.
+  static bool IsRichEntitySuggestionsEnabled();
 
-  // Returns whether the tab switch suggestion experiment using
-  // a button is selected.
-  static bool InTabSwitchSuggestionWithButtonTrial();
+  // Returns true if either the new answer layout flag or the
+  // #upcoming-ui-features flag is enabled.
+  static bool IsNewAnswerLayoutEnabled();
+
+  // Returns true if either the reverse answers flag or the
+  // #upcoming-ui-features flag is enabled.
+  static bool IsReverseAnswersEnabled();
+
+  // Returns true if either the tab switch suggestions flag or the
+  // #upcoming-ui-features flag is enabled.
+  static bool IsTabSwitchSuggestionsEnabled();
+
+  // Returns the #omnibox-pedal-suggestions feature's mode parameter as enum.
+  static PedalSuggestionMode GetPedalSuggestionMode();
+
+  // Returns true if the jog textfield flag is enabled.
+  static bool IsJogTextfieldOnPopupEnabled();
+
+  // Returns true if either the show suggestion favicons flag or the
+  // #upcoming-ui-features flag is enabled.
+  static bool IsShowSuggestionFaviconsEnabled();
+
+  // Returns true if the experimental keyword mode is enabled.
+  static bool IsExperimentalKeywordModeEnabled();
 
   // ---------------------------------------------------------
   // Clipboard URL suggestions:
@@ -478,8 +490,6 @@ class OmniboxFieldTrial {
   static const char kKeywordScoreForSufficientlyCompleteMatchRule[];
   static const char kHQPAllowDupMatchesForScoringRule[];
   static const char kEmphasizeTitlesRule[];
-  static const char kPhysicalWebZeroSuggestRule[];
-  static const char kPhysicalWebAfterTypingRule[];
 
   // Parameter names used by the HUP new scoring experiments.
   static const char kHUPNewScoringTypedCountRelevanceCapParam[];
@@ -500,13 +510,10 @@ class OmniboxFieldTrial {
   static const char kMaxNumHQPUrlsIndexedAtStartupOnLowEndDevicesParam[];
   static const char kMaxNumHQPUrlsIndexedAtStartupOnNonLowEndDevicesParam[];
 
-  // Parameter names used by the Physical Web experimental scoring experiments.
-  static const char kPhysicalWebZeroSuggestBaseRelevanceParam[];
-  static const char kPhysicalWebAfterTypingBaseRelevanceParam[];
-
   // Parameter names used by UI experiments.
   static const char kUIMaxAutocompleteMatchesParam[];
   static const char kUIVerticalMarginParam[];
+  static const char kPedalSuggestionModeParam[];
 
   // Parameter names used by Zero Suggest Redirect to Chrome.
   static const char kZeroSuggestRedirectToChromeExperimentIdParam[];

@@ -8,17 +8,19 @@
   // fixed.
   "sandbox_type": "none",
   "display_name": "Visuals Service",
+  "options" : {
+    "instance_sharing" : "shared_instance_across_users"
+  },
   "interface_provider_specs": {
     "service_manager:connector": {
       "provides": {
         "viz_host": [
-          "viz::mojom::VizMain"
+          "viz.mojom.VizMain"
         ]
       },
       "requires": {
         "*": [ "app" ],
         "catalog": [ "directory" ],
-        "service_manager": [ "service_manager:all_users" ],
         "ui": [ "ozone" ]
       }
     }

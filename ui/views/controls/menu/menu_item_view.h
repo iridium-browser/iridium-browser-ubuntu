@@ -17,7 +17,6 @@
 #include "build/build_config.h"
 #include "ui/base/models/menu_separator_types.h"
 #include "ui/gfx/image/image_skia.h"
-#include "ui/views/controls/menu/menu_config.h"
 #include "ui/views/controls/menu/menu_controller.h"
 #include "ui/views/controls/menu/menu_types.h"
 #include "ui/views/view.h"
@@ -29,7 +28,6 @@
 #endif
 
 namespace gfx {
-class FontList;
 struct VectorIcon;
 }
 
@@ -41,10 +39,12 @@ class MenuRunnerImpl;
 
 namespace test {
 class TestMenuItemViewShown;
+class TestMenuItemViewNotShown;
 }
 
 class MenuController;
 class MenuDelegate;
+class Separator;
 class TestMenuItemView;
 class SubmenuView;
 
@@ -83,15 +83,16 @@ class VIEWS_EXPORT MenuItemView : public View {
   // ID used to identify empty menu items.
   static const int kEmptyMenuItemViewID;
 
-  // Different types of menu items.  EMPTY is a special type for empty
-  // menus that is only used internally.
+  // Different types of menu items.
   enum Type {
-    NORMAL,
-    SUBMENU,
-    CHECKBOX,
-    RADIO,
-    SEPARATOR,
-    EMPTY
+    NORMAL,              // Performs an action when selected.
+    SUBMENU,             // Presents a submenu within another menu.
+    ACTIONABLE_SUBMENU,  // A SUBMENU that is also a COMMAND.
+    CHECKBOX,            // Can be selected/checked to toggle a boolean state.
+    RADIO,               // Can be selected/checked among a group of choices.
+    SEPARATOR,           // Shows a horizontal line separator.
+    EMPTY,  // EMPTY is a special type for empty menus that is only used
+            // internally.
   };
 
   // Where the menu should be drawn, above or below the bounds (when
@@ -200,6 +201,9 @@ class VIEWS_EXPORT MenuItemView : public View {
   // Adds a separator to this menu
   void AppendSeparator();
 
+  // Adds a separator to this menu at the specified position.
+  void AddSeparatorAt(int index);
+
   // Appends a menu item with an icon. This is for the menu item which
   // needs an icon. Calling this function forces the Menu class to draw
   // the menu, instead of relying on Windows.
@@ -257,6 +261,15 @@ class VIEWS_EXPORT MenuItemView : public View {
   // Returns true if the item is selected.
   bool IsSelected() const { return selected_; }
 
+  // Sets whether the submenu area of an ACTIONABLE_SUBMENU is selected.
+  void SetSelectionOfActionableSubmenu(
+      bool submenu_area_of_actionable_submenu_selected);
+
+  // Whether the submenu area of an ACTIONABLE_SUBMENU is selected.
+  bool IsSubmenuAreaOfActionableSubmenuSelected() const {
+    return submenu_area_of_actionable_submenu_selected_;
+  }
+
   // Sets the |tooltip| for a menu item view with |item_id| identifier.
   void SetTooltip(const base::string16& tooltip, int item_id);
 
@@ -287,6 +300,9 @@ class VIEWS_EXPORT MenuItemView : public View {
   // from GetPreferredSize().width() if the item has a child view with flexible
   // dimensions.
   int GetHeightForWidth(int width) const override;
+
+  // Returns the bounds of the submenu part of the ACTIONABLE_SUBMENU.
+  gfx::Rect GetSubmenuAreaOfActionableSubmenu() const;
 
   // Return the preferred dimensions of the item in pixel.
   const MenuItemDimensions& GetDimensions() const;
@@ -364,6 +380,7 @@ class VIEWS_EXPORT MenuItemView : public View {
  private:
   friend class internal::MenuRunnerImpl;  // For access to ~MenuItemView.
   friend class test::TestMenuItemViewShown;  // for access to |submenu_|;
+  friend class test::TestMenuItemViewNotShown;  // for access to |submenu_|;
   friend class TestMenuItemView;             // For access to AddEmptyMenus();
 
   enum PaintButtonMode { PB_NORMAL, PB_FOR_DRAG };
@@ -388,8 +405,8 @@ class VIEWS_EXPORT MenuItemView : public View {
   // Returns the flags passed to DrawStringRect.
   int GetDrawStringFlags();
 
-  // Returns the font list to use for menu text.
-  const gfx::FontList& GetFontList() const;
+  // Returns the style for the menu text.
+  void GetLabelStyle(MenuDelegate::LabelStyle* style) const;
 
   // If this menu item has no children a child is added showing it has no
   // children. Otherwise AddEmtpyMenus is recursively invoked on child menu
@@ -408,7 +425,8 @@ class VIEWS_EXPORT MenuItemView : public View {
   void PaintButton(gfx::Canvas* canvas, PaintButtonMode mode);
 
   // Paints the right-side icon and text.
-  void PaintMinorIconAndText(gfx::Canvas* canvas, SkColor color);
+  void PaintMinorIconAndText(gfx::Canvas* canvas,
+                             const MenuDelegate::LabelStyle& style);
 
   // Destroys the window used to display this menu and recursively destroys
   // the windows used to display all descendants.
@@ -423,12 +441,18 @@ class VIEWS_EXPORT MenuItemView : public View {
 
   // Returns the text color for the current state.  |minor| specifies if the
   // minor text or the normal text is desired.
-  SkColor GetTextColor(bool minor,
-                       bool render_selection,
-                       bool emphasized) const;
+  SkColor GetTextColor(bool minor, bool render_selection) const;
 
   // Calculates and returns the MenuItemDimensions.
   MenuItemDimensions CalculateDimensions() const;
+
+  // Imposes MenuConfig's minimum sizes, if any, on the supplied
+  // dimensions and returns the new dimensions. It is guaranteed that:
+  //    ApplyMinimumDimensions(x).standard_width >= x.standard_width
+  //    ApplyMinimumDimensions(x).children_width == x.children_width
+  //    ApplyMinimumDimensions(x).minor_text_width == x.minor_text_width
+  //    ApplyMinimumDimensions(x).height >= x.height
+  void ApplyMinimumDimensions(MenuItemDimensions* dims) const;
 
   // Get the horizontal position at which to draw the menu item's label.
   int GetLabelStartForThisItem() const;
@@ -483,6 +507,9 @@ class VIEWS_EXPORT MenuItemView : public View {
 
   // Whether we're selected.
   bool selected_;
+
+  // Whether the submenu area of an ACTIONABLE_SUBMENU is selected.
+  bool submenu_area_of_actionable_submenu_selected_;
 
   // Command id.
   int command_;
@@ -564,6 +591,10 @@ class VIEWS_EXPORT MenuItemView : public View {
 
   // The forced visual selection state of this item, if any.
   base::Optional<bool> forced_visual_selection_;
+
+  // The vertical separator that separates the actionable and submenu regions of
+  // an ACTIONABLE_SUBMENU.
+  Separator* vertical_separator_;
 
   DISALLOW_COPY_AND_ASSIGN(MenuItemView);
 };

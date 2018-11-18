@@ -12,10 +12,14 @@
 #include <unordered_map>
 
 #include "base/gtest_prod_util.h"
+#include "base/memory/weak_ptr.h"
 #include "base/sequence_checker.h"
 #include "base/time/time.h"
+#include "chrome/browser/resource_coordinator/decision_details.h"
+#include "chrome/browser/resource_coordinator/lifecycle_unit.h"
 #include "chrome/browser/resource_coordinator/time.h"
 #include "chrome/browser/sessions/session_restore_observer.h"
+#include "services/metrics/public/cpp/ukm_source_id.h"
 
 namespace content {
 class SwapMetricsDriver;
@@ -171,6 +175,7 @@ class TabManagerStatsCollector final : public SessionRestoreObserver {
                            HistogramsTabCount);
   FRIEND_TEST_ALL_PREFIXES(TabManagerStatsCollectorTest,
                            HistogramsSessionOverlap);
+  FRIEND_TEST_ALL_PREFIXES(TabManagerStatsCollectorTest, PeriodicSamplingWorks);
 
   // Returns true if the browser is currently in more than one session with
   // different types. We do not want to report metrics in this situation to have
@@ -190,6 +195,21 @@ class TabManagerStatsCollector final : public SessionRestoreObserver {
   // Update session and sequence information for UKM recording.
   void UpdateSessionAndSequence();
 
+  // This is called sometime after startup, and initiates periodic CanFreeze/
+  // CanDiscard metric sampling. It posts a delayed task to
+  // PerformPeriodicSample.
+  void StartPeriodicSampling();
+
+  // This is called when a sample should be taken. First call is via
+  // StartPeriodicSampling and then it posts a delayed task to call itself.
+  void PerformPeriodicSample();
+
+  // Helper function for RecordSampledTabData. Records a single UKM entry for
+  // the provided DecisionDetails and destination lifecycle state.
+  static void RecordDecisionDetails(LifecycleUnit* lifecycle_unit,
+                                    const DecisionDetails& decision_details,
+                                    LifecycleUnitState new_state);
+
   static const char
       kHistogramSessionRestoreForegroundTabExpectedTaskQueueingDuration[];
   static const char
@@ -205,6 +225,11 @@ class TabManagerStatsCollector final : public SessionRestoreObserver {
   static const char kHistogramBackgroundTabOpeningTabLoadTimeout[];
   static const char kHistogramSessionOverlapSessionRestore[];
   static const char kHistogramSessionOverlapBackgroundTabOpening[];
+
+  // The rough sampling interval for low-frequency sampled stats. This should
+  // be O(minutes).
+  static constexpr base::TimeDelta kLowFrequencySamplingInterval =
+      base::TimeDelta::FromMinutes(5);
 
   // TabManagerStatsCollector should be used from a single sequence.
   SEQUENCE_CHECKER(sequence_checker_);
@@ -239,6 +264,11 @@ class TabManagerStatsCollector final : public SessionRestoreObserver {
       foreground_contents_switched_to_times_;
 
   BackgroundTabCountStats background_tab_count_stats_;
+
+  // The start time of an ongoing periodic sample.
+  base::TimeTicks sample_start_time_;
+
+  base::WeakPtrFactory<TabManagerStatsCollector> weak_factory_;
 };
 
 }  // namespace resource_coordinator

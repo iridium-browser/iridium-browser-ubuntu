@@ -12,12 +12,11 @@ import android.widget.Button;
 
 import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.ntp.ContextMenuManager;
+import org.chromium.chrome.browser.native_page.ContextMenuManager;
 import org.chromium.chrome.browser.ntp.snippets.CategoryInt;
 import org.chromium.chrome.browser.snackbar.Snackbar;
 import org.chromium.chrome.browser.snackbar.SnackbarManager;
 import org.chromium.chrome.browser.suggestions.ContentSuggestionsAdditionalAction;
-import org.chromium.chrome.browser.suggestions.SuggestionsConfig;
 import org.chromium.chrome.browser.suggestions.SuggestionsMetrics;
 import org.chromium.chrome.browser.suggestions.SuggestionsRanker;
 import org.chromium.chrome.browser.suggestions.SuggestionsRecyclerView;
@@ -26,6 +25,7 @@ import org.chromium.chrome.browser.widget.displaystyle.UiConfig;
 
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
+import java.util.Locale;
 
 /**
  * Item that allows the user to perform an action on the NTP. Depending on its state, it can also
@@ -69,14 +69,12 @@ public class ActionItem extends OptionalLeaf {
     }
 
     @Override
-    public void visitOptionalItem(NodeVisitor visitor) {
+    public String describeForTesting() {
         switch (mState) {
             case State.BUTTON:
-                visitor.visitActionItem(mCategoryInfo.getAdditionalAction());
-                break;
+                return String.format(Locale.US, "ACTION(%d)", mCategoryInfo.getAdditionalAction());
             case State.LOADING:
-                visitor.visitProgressItem();
-                break;
+                return "PROGRESS";
             case State.HIDDEN:
                 // If state is HIDDEN, itemCount should be 0 and this method should not be called.
             default:
@@ -122,6 +120,12 @@ public class ActionItem extends OptionalLeaf {
 
     public @State int getState() {
         return mState;
+    }
+
+    public void maybeResetForDismiss() {
+        if (isVisible()) {
+            notifyItemChanged(0, NewTabPageRecyclerView::resetForDismissCallback);
+        }
     }
 
     /**
@@ -202,9 +206,7 @@ public class ActionItem extends OptionalLeaf {
 
         @LayoutRes
         private static int getLayout() {
-            return SuggestionsConfig.useModernLayout()
-                    ? R.layout.content_suggestions_action_card_modern
-                    : R.layout.new_tab_page_action_card;
+            return R.layout.content_suggestions_action_card_modern;
         }
 
         private void setState(@State int state) {

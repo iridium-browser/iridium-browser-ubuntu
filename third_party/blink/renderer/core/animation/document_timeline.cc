@@ -32,7 +32,6 @@
 
 #include <algorithm>
 #include "third_party/blink/public/platform/platform.h"
-#include "third_party/blink/public/platform/web_compositor_support.h"
 #include "third_party/blink/renderer/core/animation/animation.h"
 #include "third_party/blink/renderer/core/animation/animation_clock.h"
 #include "third_party/blink/renderer/core/animation/animation_effect.h"
@@ -44,6 +43,7 @@
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/platform/animation/compositor_animation_timeline.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
+#include "third_party/blink/renderer/platform/wtf/time.h"
 
 namespace blink {
 
@@ -60,24 +60,25 @@ bool CompareAnimations(const Member<Animation>& left,
 const double DocumentTimeline::kMinimumDelay = 0.04;
 
 DocumentTimeline* DocumentTimeline::Create(Document* document,
-                                           double origin_time_in_milliseconds,
+                                           TimeDelta origin_time,
                                            PlatformTiming* timing) {
-  return new DocumentTimeline(document, origin_time_in_milliseconds, timing);
+  return new DocumentTimeline(document, origin_time, timing);
 }
 
 DocumentTimeline* DocumentTimeline::Create(
     ExecutionContext* execution_context,
     const DocumentTimelineOptions& options) {
-  Document* document = ToDocument(execution_context);
-  return new DocumentTimeline(document, options.originTime(), nullptr);
+  Document* document = To<Document>(execution_context);
+  return new DocumentTimeline(
+      document, TimeDelta::FromMillisecondsD(options.originTime()), nullptr);
 }
 
 DocumentTimeline::DocumentTimeline(Document* document,
-                                   double origin_time_in_milliseconds,
+                                   TimeDelta origin_time,
                                    PlatformTiming* timing)
     : document_(document),
-      origin_time_(origin_time_in_milliseconds / 1000),
-      zero_time_(origin_time_),
+      origin_time_(origin_time),
+      zero_time_(TimeTicks() + origin_time_),
       zero_time_initialized_(false),
       outdated_animation_count_(0),
       playback_rate_(1),
@@ -94,7 +95,7 @@ DocumentTimeline::DocumentTimeline(Document* document,
 }
 
 bool DocumentTimeline::IsActive() {
-  return document_ && document_->GetPage();
+  return document_->GetPage();
 }
 
 void DocumentTimeline::AnimationAttached(Animation& animation) {
@@ -104,9 +105,6 @@ void DocumentTimeline::AnimationAttached(Animation& animation) {
 }
 
 Animation* DocumentTimeline::Play(AnimationEffect* child) {
-  if (!document_)
-    return nullptr;
-
   Animation* animation = Animation::Create(child, this);
   DCHECK(animations_.Contains(animation));
 
@@ -189,13 +187,14 @@ void DocumentTimeline::ScheduleNextService() {
 }
 
 void DocumentTimeline::DocumentTimelineTiming::WakeAfter(double duration) {
-  if (timer_.IsActive() && timer_.NextFireInterval() < duration)
+  TimeDelta duration_delta = TimeDelta::FromSecondsD(duration);
+  if (timer_.IsActive() && timer_.NextFireInterval() < duration_delta)
     return;
-  timer_.StartOneShot(duration, FROM_HERE);
+  timer_.StartOneShot(duration_delta, FROM_HERE);
 }
 
 void DocumentTimeline::DocumentTimelineTiming::ServiceOnNextFrame() {
-  if (timeline_->document_ && timeline_->document_->View())
+  if (timeline_->document_->View())
     timeline_->document_->View()->ScheduleAnimation();
 }
 
@@ -204,29 +203,17 @@ void DocumentTimeline::DocumentTimelineTiming::Trace(blink::Visitor* visitor) {
   DocumentTimeline::PlatformTiming::Trace(visitor);
 }
 
-size_t DocumentTimeline::MainThreadCompositableAnimationsCount() const {
-  size_t main_thread_compositable_animations_count = 0;
-  for (Animation* animation : animations_needing_update_) {
-    if (animation->IsNonCompositedCompositable() &&
-        animation->PlayStateInternal() != Animation::kFinished)
-      main_thread_compositable_animations_count++;
-  }
-  return main_thread_compositable_animations_count;
-}
-
-double DocumentTimeline::ZeroTime() {
-  if (!zero_time_initialized_ && document_ && document_->Loader()) {
-    zero_time_ =
-        TimeTicksInSeconds(
-            document_->Loader()->GetTiming().ReferenceMonotonicTime()) +
-        origin_time_;
+TimeTicks DocumentTimeline::ZeroTime() {
+  if (!zero_time_initialized_ && document_->Loader()) {
+    zero_time_ = document_->Loader()->GetTiming().ReferenceMonotonicTime() +
+                 origin_time_;
     zero_time_initialized_ = true;
   }
   return zero_time_;
 }
 
 void DocumentTimeline::ResetForTesting() {
-  zero_time_ = origin_time_;
+  zero_time_ = TimeTicks() + origin_time_;
   zero_time_initialized_ = true;
   playback_rate_ = 1;
   last_current_time_internal_ = 0;
@@ -236,17 +223,20 @@ double DocumentTimeline::currentTime(bool& is_null) {
   return CurrentTimeInternal(is_null) * 1000;
 }
 
+// TODO(npm): change the return type to base::Optional<TimeTicks>.
 double DocumentTimeline::CurrentTimeInternal(bool& is_null) {
   if (!IsActive()) {
     is_null = true;
     return std::numeric_limits<double>::quiet_NaN();
   }
-  double result =
-      playback_rate_ == 0
-          ? ZeroTime()
-          : (GetDocument()->GetAnimationClock().CurrentTime() - ZeroTime()) *
-                playback_rate_;
+  double result = playback_rate_ == 0
+                      ? TimeTicksInSeconds(ZeroTime())
+                      : (GetDocument()->GetAnimationClock().CurrentTime() -
+                         TimeTicksInSeconds(ZeroTime())) *
+                            playback_rate_;
   is_null = std::isnan(result);
+  // This looks like it could never be NaN here.
+  DCHECK(!is_null);
   return result;
 }
 
@@ -305,10 +295,10 @@ void DocumentTimeline::SetPlaybackRate(double playback_rate) {
     return;
   double current_time = CurrentTimeInternal();
   playback_rate_ = playback_rate;
-  zero_time_ = playback_rate == 0
-                   ? current_time
-                   : GetDocument()->GetAnimationClock().CurrentTime() -
-                         current_time / playback_rate;
+  zero_time_ = TimeTicksFromSeconds(
+      playback_rate == 0 ? current_time
+                         : GetDocument()->GetAnimationClock().CurrentTime() -
+                               current_time / playback_rate);
   zero_time_initialized_ = true;
 
   // Corresponding compositor animation may need to be restarted to pick up

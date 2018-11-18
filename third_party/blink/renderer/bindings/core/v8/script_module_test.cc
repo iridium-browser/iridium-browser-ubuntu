@@ -8,12 +8,14 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_controller.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_source_code.h"
+#include "third_party/blink/renderer/bindings/core/v8/script_value.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_testing.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/script/script_module_resolver.h"
 #include "third_party/blink/renderer/core/testing/dummy_modulator.h"
 #include "third_party/blink/renderer/platform/bindings/v8_binding.h"
 #include "third_party/blink/renderer/platform/bindings/v8_per_context_data.h"
+#include "third_party/blink/renderer/platform/loader/fetch/access_control_status.h"
 #include "v8/include/v8.h"
 
 namespace blink {
@@ -23,7 +25,7 @@ namespace {
 class TestScriptModuleResolver final : public ScriptModuleResolver {
  public:
   TestScriptModuleResolver() = default;
-  virtual ~TestScriptModuleResolver() = default;
+  ~TestScriptModuleResolver() override = default;
 
   size_t ResolveCount() const { return specifiers_.size(); }
   const Vector<String>& Specifiers() const { return specifiers_; }
@@ -55,9 +57,9 @@ class TestScriptModuleResolver final : public ScriptModuleResolver {
 class ScriptModuleTestModulator final : public DummyModulator {
  public:
   ScriptModuleTestModulator();
-  virtual ~ScriptModuleTestModulator() = default;
+  ~ScriptModuleTestModulator() override = default;
 
-  void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
   TestScriptModuleResolver* GetTestScriptModuleResolver() {
     return resolver_.Get();
@@ -168,8 +170,8 @@ TEST(ScriptModuleTest, moduleRequests) {
 TEST(ScriptModuleTest, instantiateNoDeps) {
   V8TestingScope scope;
 
-  auto modulator = new ScriptModuleTestModulator();
-  auto resolver = modulator->GetTestScriptModuleResolver();
+  auto* modulator = new ScriptModuleTestModulator();
+  auto* resolver = modulator->GetTestScriptModuleResolver();
 
   Modulator::SetModulator(scope.GetScriptState(), modulator);
 
@@ -188,8 +190,8 @@ TEST(ScriptModuleTest, instantiateNoDeps) {
 TEST(ScriptModuleTest, instantiateWithDeps) {
   V8TestingScope scope;
 
-  auto modulator = new ScriptModuleTestModulator();
-  auto resolver = modulator->GetTestScriptModuleResolver();
+  auto* modulator = new ScriptModuleTestModulator();
+  auto* resolver = modulator->GetTestScriptModuleResolver();
 
   Modulator::SetModulator(scope.GetScriptState(), modulator);
 
@@ -226,8 +228,8 @@ TEST(ScriptModuleTest, instantiateWithDeps) {
 TEST(ScriptModuleTest, EvaluationErrrorIsRemembered) {
   V8TestingScope scope;
 
-  auto modulator = new ScriptModuleTestModulator();
-  auto resolver = modulator->GetTestScriptModuleResolver();
+  auto* modulator = new ScriptModuleTestModulator();
+  auto* resolver = modulator->GetTestScriptModuleResolver();
 
   Modulator::SetModulator(scope.GetScriptState(), modulator);
 
@@ -263,7 +265,7 @@ TEST(ScriptModuleTest, EvaluationErrrorIsRemembered) {
 TEST(ScriptModuleTest, Evaluate) {
   V8TestingScope scope;
 
-  auto modulator = new ScriptModuleTestModulator();
+  auto* modulator = new ScriptModuleTestModulator();
   Modulator::SetModulator(scope.GetScriptState(), modulator);
 
   const KURL js_url("https://example.com/foo.js");
@@ -276,10 +278,11 @@ TEST(ScriptModuleTest, Evaluate) {
   ASSERT_TRUE(exception.IsEmpty());
 
   EXPECT_TRUE(module.Evaluate(scope.GetScriptState()).IsEmpty());
-  v8::Local<v8::Value> value = scope.GetFrame()
-                                   .GetScriptController()
-                                   .ExecuteScriptInMainWorldAndReturnValue(
-                                       ScriptSourceCode("window.foo"));
+  v8::Local<v8::Value> value =
+      scope.GetFrame()
+          .GetScriptController()
+          .ExecuteScriptInMainWorldAndReturnValue(
+              ScriptSourceCode("window.foo"), KURL(), kOpaqueResource);
   ASSERT_TRUE(value->IsString());
   EXPECT_EQ("bar", ToCoreString(v8::Local<v8::String>::Cast(value)));
 
@@ -296,7 +299,7 @@ TEST(ScriptModuleTest, Evaluate) {
 TEST(ScriptModuleTest, EvaluateCaptureError) {
   V8TestingScope scope;
 
-  auto modulator = new ScriptModuleTestModulator();
+  auto* modulator = new ScriptModuleTestModulator();
   Modulator::SetModulator(scope.GetScriptState(), modulator);
 
   const KURL js_url("https://example.com/foo.js");

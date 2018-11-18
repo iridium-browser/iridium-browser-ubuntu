@@ -84,10 +84,6 @@ IOSChromePasswordManagerDriver::GetPasswordAutofillManager() {
   return nullptr;
 }
 
-void IOSChromePasswordManagerDriver::ForceSavePassword() {
-  NOTIMPLEMENTED();
-}
-
 autofill::AutofillDriver* IOSChromePasswordManagerDriver::GetAutofillDriver() {
   NOTIMPLEMENTED();
   return nullptr;
@@ -96,12 +92,4 @@ autofill::AutofillDriver* IOSChromePasswordManagerDriver::GetAutofillDriver() {
 bool IOSChromePasswordManagerDriver::IsMainFrame() const {
   // On IOS only processing of password forms in main frame is implemented.
   return true;
-}
-
-void IOSChromePasswordManagerDriver::MatchingBlacklistedFormFound() {
-  NOTIMPLEMENTED();
-}
-
-void IOSChromePasswordManagerDriver::UserSelectedManualGenerationOption() {
-  NOTIMPLEMENTED();
 }

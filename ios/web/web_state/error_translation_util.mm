@@ -5,9 +5,14 @@
 #import "ios/web/web_state/error_translation_util.h"
 
 #include <CFNetwork/CFNetwork.h>
+#include <Foundation/Foundation.h>
 
 #import "base/ios/ns_error_util.h"
+#import "ios/net/protocol_handler_util.h"
+#import "ios/web/public/web_client.h"
+#import "net/base/mac/url_conversions.h"
 #include "net/base/net_errors.h"
+#include "url/gurl.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -16,7 +21,8 @@
 namespace web {
 
 bool GetNetErrorFromIOSErrorCode(NSInteger ios_error_code,
-                                 int* net_error_code) {
+                                 int* net_error_code,
+                                 NSURL* url) {
   DCHECK(net_error_code);
   bool translation_success = true;
   switch (ios_error_code) {
@@ -39,7 +45,13 @@ bool GetNetErrorFromIOSErrorCode(NSInteger ios_error_code,
       *net_error_code = net::ERR_CONNECTION_TIMED_OUT;
       break;
     case kCFURLErrorUnsupportedURL:
-      *net_error_code = net::ERR_UNKNOWN_URL_SCHEME;
+      if (GetWebClient()->IsAppSpecificURL(net::GURLWithNSURL(url))) {
+        // Scheme is valid, but URL is not supported.
+        *net_error_code = net::ERR_INVALID_URL;
+      } else {
+        // Scheme is not app-specific and not supported by WebState.
+        *net_error_code = net::ERR_UNKNOWN_URL_SCHEME;
+      }
       break;
     case kCFURLErrorCannotFindHost:
       *net_error_code = net::ERR_NAME_NOT_RESOLVED;
@@ -48,7 +60,11 @@ bool GetNetErrorFromIOSErrorCode(NSInteger ios_error_code,
       *net_error_code = net::ERR_CONNECTION_FAILED;
       break;
     case kCFURLErrorNetworkConnectionLost:
-      *net_error_code = net::ERR_INTERNET_DISCONNECTED;
+      // This looks like catch-all code for errors like ERR_CONNECTION_CLOSED,
+      // ERR_EMPTY_RESPONSE, ERR_NETWORK_CHANGED or ERR_CONNECTION_RESET.
+      // ERR_CONNECTION_CLOSED is too specific for this case, but there is no
+      // better cross platform analogue.
+      *net_error_code = net::ERR_CONNECTION_CLOSED;
       break;
     case kCFURLErrorDNSLookupFailed:
       *net_error_code = net::ERR_NAME_RESOLUTION_FAILED;
@@ -72,10 +88,7 @@ bool GetNetErrorFromIOSErrorCode(NSInteger ios_error_code,
       *net_error_code = net::ERR_ABORTED;
       break;
     case kCFURLErrorUserAuthenticationRequired:
-      // TODO(crbug.com/546159): ERR_SSL_RENEGOTIATION_REQUESTED is more
-      // specific than the kCFURLErrorUserAuthenticationRequired.  Consider
-      // adding a new net error for this scenario.
-      *net_error_code = net::ERR_SSL_RENEGOTIATION_REQUESTED;
+      *net_error_code = net::ERR_FAILED;
       break;
     case kCFURLErrorZeroByteResource:
       *net_error_code = net::ERR_EMPTY_RESPONSE;
@@ -90,14 +103,12 @@ bool GetNetErrorFromIOSErrorCode(NSInteger ios_error_code,
       *net_error_code = net::ERR_INVALID_RESPONSE;
       break;
     case kCFURLErrorInternationalRoamingOff:
-      // TODO(crbug.com/546165): Create new net error for disabled intl roaming.
       *net_error_code = net::ERR_INTERNET_DISCONNECTED;
       break;
     case kCFURLErrorCallIsActive:
       *net_error_code = net::ERR_CONNECTION_FAILED;
       break;
     case kCFURLErrorDataNotAllowed:
-      // TODO(crbug.com/546167): Create new net error for disabled data usage.
       *net_error_code = net::ERR_INTERNET_DISCONNECTED;
       break;
     case kCFURLErrorRequestBodyStreamExhausted:
@@ -154,17 +165,17 @@ NSError* NetErrorFromError(NSError* error) {
           isEqualToString:static_cast<NSString*>(kCFErrorDomainCFNetwork)]) {
     // Attempt to translate NSURL and CFNetwork error codes into their
     // corresponding net error codes.
-    GetNetErrorFromIOSErrorCode(underlying_error.code, &net_error_code);
+    NSString* url_spec = error.userInfo[NSURLErrorFailingURLStringErrorKey];
+    NSURL* url = url_spec ? [NSURL URLWithString:url_spec] : nil;
+    GetNetErrorFromIOSErrorCode(underlying_error.code, &net_error_code, url);
   }
   return NetErrorFromError(error, net_error_code);
 }
 
 NSError* NetErrorFromError(NSError* error, int net_error_code) {
   DCHECK(error);
-  NSString* net_error_domain =
-      [NSString stringWithUTF8String:net::kErrorDomain];
   NSError* net_error =
-      [NSError errorWithDomain:net_error_domain
+      [NSError errorWithDomain:net::kNSErrorDomain
                           code:static_cast<NSInteger>(net_error_code)
                       userInfo:nil];
   return base::ios::ErrorWithAppendedUnderlyingError(error, net_error);

@@ -16,12 +16,18 @@ using namespace llvm::orc;
 
 namespace {
 
-class DummyCallbackManager : public orc::JITCompileCallbackManager {
+class DummyTrampolinePool : public orc::TrampolinePool {
 public:
-  DummyCallbackManager() : JITCompileCallbackManager(0) {}
+  Expected<JITTargetAddress> getTrampoline() {
+    llvm_unreachable("Unimplemented");
+  }
+};
 
+class DummyCallbackManager : public JITCompileCallbackManager {
 public:
-  Error grow() override { llvm_unreachable("not implemented"); }
+  DummyCallbackManager(ExecutionSession &ES)
+      : JITCompileCallbackManager(llvm::make_unique<DummyTrampolinePool>(), ES,
+                                  0) {}
 };
 
 class DummyStubsManager : public orc::IndirectStubsManager {
@@ -35,11 +41,11 @@ public:
     llvm_unreachable("Not implemented");
   }
 
-  JITSymbol findStub(StringRef Name, bool ExportedStubsOnly) override {
+  JITEvaluatedSymbol findStub(StringRef Name, bool ExportedStubsOnly) override {
     llvm_unreachable("Not implemented");
   }
 
-  JITSymbol findPointer(StringRef Name) override {
+  JITEvaluatedSymbol findPointer(StringRef Name) override {
     llvm_unreachable("Not implemented");
   }
 
@@ -57,10 +63,9 @@ TEST(CompileOnDemandLayerTest, FindSymbol) {
       return JITSymbol(nullptr);
     };
 
-  DummyCallbackManager CallbackMgr;
 
-  SymbolStringPool SSP;
-  ExecutionSession ES(SSP);
+  ExecutionSession ES(std::make_shared<SymbolStringPool>());
+  DummyCallbackManager CallbackMgr(ES);
 
   auto GetResolver =
       [](orc::VModuleKey) -> std::shared_ptr<llvm::orc::SymbolResolver> {

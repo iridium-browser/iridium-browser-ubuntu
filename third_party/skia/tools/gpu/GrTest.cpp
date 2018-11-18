@@ -5,15 +5,15 @@
  * found in the LICENSE file.
  */
 
-#include "GrTest.h"
-#include <algorithm>
 #include "GrBackendSurface.h"
+#include "GrClip.h"
 #include "GrContextOptions.h"
 #include "GrContextPriv.h"
 #include "GrDrawOpAtlas.h"
 #include "GrDrawingManager.h"
 #include "GrGpu.h"
 #include "GrGpuResourceCacheAccess.h"
+#include "GrMemoryPool.h"
 #include "GrRenderTargetContext.h"
 #include "GrRenderTargetContextPriv.h"
 #include "GrRenderTargetProxy.h"
@@ -25,60 +25,13 @@
 #include "SkImage_Gpu.h"
 #include "SkMathPriv.h"
 #include "SkString.h"
+#include "SkTo.h"
+#include "ccpr/GrCoverageCountingPathRenderer.h"
 #include "ops/GrMeshDrawOp.h"
 #include "text/GrGlyphCache.h"
 #include "text/GrTextBlobCache.h"
 
-namespace GrTest {
-
-void SetupAlwaysEvictAtlas(GrContext* context, int dim) {
-    // These sizes were selected because they allow each atlas to hold a single plot and will thus
-    // stress the atlas
-    GrDrawOpAtlasConfig configs[3];
-    configs[kA8_GrMaskFormat].fWidth = dim;
-    configs[kA8_GrMaskFormat].fHeight = dim;
-    configs[kA8_GrMaskFormat].fPlotWidth = dim;
-    configs[kA8_GrMaskFormat].fPlotHeight = dim;
-
-    configs[kA565_GrMaskFormat].fWidth = dim;
-    configs[kA565_GrMaskFormat].fHeight = dim;
-    configs[kA565_GrMaskFormat].fPlotWidth = dim;
-    configs[kA565_GrMaskFormat].fPlotHeight = dim;
-
-    configs[kARGB_GrMaskFormat].fWidth = dim;
-    configs[kARGB_GrMaskFormat].fHeight = dim;
-    configs[kARGB_GrMaskFormat].fPlotWidth = dim;
-    configs[kARGB_GrMaskFormat].fPlotHeight = dim;
-
-    context->contextPriv().setTextContextAtlasSizes_ForTesting(configs);
-}
-
-GrBackendTexture CreateBackendTexture(GrBackend backend, int width, int height,
-                                      GrPixelConfig config, GrMipMapped mipMapped,
-                                      GrBackendObject handle) {
-    switch (backend) {
-#ifdef SK_VULKAN
-        case kVulkan_GrBackend: {
-            GrVkImageInfo* vkInfo = (GrVkImageInfo*)(handle);
-            SkASSERT((GrMipMapped::kYes == mipMapped) == (vkInfo->fLevelCount > 1));
-            return GrBackendTexture(width, height, *vkInfo);
-        }
-#endif
-        case kOpenGL_GrBackend: {
-            GrGLTextureInfo* glInfo = (GrGLTextureInfo*)(handle);
-            SkASSERT(glInfo->fFormat);
-            return GrBackendTexture(width, height, mipMapped, *glInfo);
-        }
-        case kMock_GrBackend: {
-            GrMockTextureInfo* mockInfo = (GrMockTextureInfo*)(handle);
-            return GrBackendTexture(width, height, mipMapped, *mockInfo);
-        }
-        default:
-            return GrBackendTexture();
-    }
-}
-
-}  // namespace GrTest
+#include <algorithm>
 
 bool GrSurfaceProxy::isWrapped_ForTesting() const {
     return SkToBool(fTarget);
@@ -90,13 +43,6 @@ bool GrRenderTargetContext::isWrapped_ForTesting() const {
 
 void GrContextPriv::setTextBlobCacheLimit_ForTesting(size_t bytes) {
     fContext->fTextBlobCache->setBudget(bytes);
-}
-
-void GrContextPriv::setTextContextAtlasSizes_ForTesting(const GrDrawOpAtlasConfig* configs) {
-    GrAtlasManager* atlasManager = this->getAtlasManager();
-    if (atlasManager) {
-        atlasManager->setAtlasSizes_ForTesting(configs);
-    }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -155,15 +101,16 @@ sk_sp<SkImage> GrContextPriv::getFontAtlasImage_ForTesting(GrMaskFormat format, 
         return nullptr;
     }
 
-    unsigned int numProxies;
-    const sk_sp<GrTextureProxy>* proxies = atlasManager->getProxies(format, &numProxies);
-    if (index >= numProxies || !proxies[index]) {
+    unsigned int numActiveProxies;
+    const sk_sp<GrTextureProxy>* proxies = atlasManager->getProxies(format, &numActiveProxies);
+    if (index >= numActiveProxies || !proxies || !proxies[index]) {
         return nullptr;
     }
 
     SkASSERT(proxies[index]->priv().isExact());
-    sk_sp<SkImage> image(new SkImage_Gpu(fContext, kNeedNewImageUniqueID, kPremul_SkAlphaType,
-                                         proxies[index], nullptr, SkBudgeted::kNo));
+    sk_sp<SkImage> image(new SkImage_Gpu(sk_ref_sp(fContext), kNeedNewImageUniqueID,
+                                         kPremul_SkAlphaType, proxies[index], nullptr,
+                                         SkBudgeted::kNo));
     return image;
 }
 
@@ -187,16 +134,6 @@ void GrGpu::Stats::dumpKeyValuePairs(SkTArray<SkString>* keys, SkTArray<double>*
 }
 
 #endif
-
-GrBackendTexture GrGpu::createTestingOnlyBackendTexture(const void* pixels, int w, int h,
-                                                        SkColorType colorType, bool isRenderTarget,
-                                                        GrMipMapped mipMapped) {
-    GrPixelConfig config = SkImageInfo2GrPixelConfig(colorType, nullptr, *this->caps());
-    if (kUnknown_GrPixelConfig == config) {
-        return GrBackendTexture();
-    }
-    return this->createTestingOnlyBackendTexture(pixels, w, h, config, isRenderTarget, mipMapped);
-}
 
 #if GR_CACHE_STATS
 void GrResourceCache::getStats(Stats* stats) const {
@@ -266,6 +203,24 @@ int GrResourceCache::countUniqueKeysWithTag(const char* tag) const {
 
 ///////////////////////////////////////////////////////////////////////////////
 
+sk_sp<GrTextureProxy> GrProxyProvider::testingOnly_createInstantiatedProxy(
+        const GrSurfaceDesc& desc, GrSurfaceOrigin origin, SkBackingFit fit, SkBudgeted budgeted) {
+    sk_sp<GrTexture> tex;
+
+    if (SkBackingFit::kApprox == fit) {
+        tex = fResourceProvider->createApproxTexture(desc, GrResourceProvider::Flags::kNone);
+    } else {
+        tex = fResourceProvider->createTexture(desc, budgeted, GrResourceProvider::Flags::kNone);
+    }
+    if (!tex) {
+        return nullptr;
+    }
+
+    return this->createWrapped(std::move(tex), origin);
+}
+
+///////////////////////////////////////////////////////////////////////////////
+
 #define ASSERT_SINGLE_OWNER \
     SkDEBUGCODE(GrSingleOwner::AutoEnforce debug_SingleOwner(fRenderTargetContext->singleOwner());)
 
@@ -282,6 +237,7 @@ uint32_t GrRenderTargetContextPriv::testingOnly_addDrawOp(const GrClip& clip,
                                                           std::unique_ptr<GrDrawOp> op) {
     ASSERT_SINGLE_OWNER
     if (fRenderTargetContext->drawingManager()->wasAbandoned()) {
+        fRenderTargetContext->fContext->contextPriv().opMemoryPool()->release(std::move(op));
         return SK_InvalidUniqueID;
     }
     SkDEBUGCODE(fRenderTargetContext->validate());
@@ -314,12 +270,15 @@ void GrDrawingManager::testingOnly_removeOnFlushCallbackObject(GrOnFlushCallback
 
 //////////////////////////////////////////////////////////////////////////////
 
-GrPixelConfig GrBackendTexture::testingOnly_getPixelConfig() const {
-    return fConfig;
+void GrCoverageCountingPathRenderer::testingOnly_drawPathDirectly(const DrawPathArgs& args) {
+    // Call onDrawPath() directly: We want to test paths that might fail onCanDrawPath() simply for
+    // performance reasons, and GrPathRenderer::drawPath() assert that this call returns true.
+    // The test is responsible to not draw any paths that CCPR is not actually capable of.
+    this->onDrawPath(args);
 }
 
-GrPixelConfig GrBackendRenderTarget::testingOnly_getPixelConfig() const {
-    return fConfig;
+const GrUniqueKey& GrCoverageCountingPathRenderer::testingOnly_getStashedAtlasKey() const {
+    return fStashedAtlasKey;
 }
 
 //////////////////////////////////////////////////////////////////////////////

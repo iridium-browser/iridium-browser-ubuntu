@@ -8,6 +8,7 @@
 
 #include "base/logging.h"
 #include "base/memory/singleton.h"
+#include "base/task/post_task.h"
 #include "chrome/browser/chromeos/arc/fileapi/chrome_content_provider_url_util.h"
 #include "chrome/browser/chromeos/arc/fileapi/file_stream_forwarder.h"
 #include "chrome/browser/chromeos/file_manager/fileapi_util.h"
@@ -17,12 +18,13 @@
 #include "chromeos/dbus/virtual_file_provider_client.h"
 #include "components/arc/arc_bridge_service.h"
 #include "components/arc/arc_browser_context_keyed_service_factory_base.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/url_constants.h"
 #include "extensions/browser/api/file_handlers/mime_util.h"
-#include "mojo/edk/embedder/embedder.h"
-#include "mojo/edk/embedder/scoped_platform_handle.h"
+#include "mojo/public/cpp/platform/platform_handle.h"
+#include "mojo/public/cpp/system/platform_handle.h"
 #include "net/base/escape.h"
 #include "storage/browser/fileapi/file_system_context.h"
 
@@ -74,9 +76,8 @@ void GetFileSizeOnIOThread(scoped_refptr<storage::FileSystemContext> context,
                 file_info.size >= 0) {
               size = file_info.size;
             }
-            content::BrowserThread::PostTask(
-                content::BrowserThread::UI, FROM_HERE,
-                base::BindOnce(std::move(callback), size));
+            base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI},
+                                     base::BindOnce(std::move(callback), size));
           },
           base::Passed(&callback)));
 }
@@ -170,8 +171,8 @@ void ArcFileSystemBridge::GetFileSize(const std::string& url,
   }
   scoped_refptr<storage::FileSystemContext> context =
       GetFileSystemContext(profile_, url_decoded);
-  content::BrowserThread::PostTask(
-      content::BrowserThread::IO, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {content::BrowserThread::IO},
       base::BindOnce(&GetFileSizeOnIOThread, context,
                      GetFileSystemURL(context, url_decoded),
                      std::move(callback)));
@@ -253,17 +254,14 @@ void ArcFileSystemBridge::OnOpenFile(const GURL& url_decoded,
   DCHECK_EQ(id_to_url_.count(id), 0u);
   id_to_url_[id] = url_decoded;
 
-  mojo::edk::ScopedPlatformHandle platform_handle{
-      mojo::edk::PlatformHandle(fd.release())};
-  MojoHandle wrapped_handle = MOJO_HANDLE_INVALID;
-  MojoResult result = mojo::edk::CreatePlatformHandleWrapper(
-      std::move(platform_handle), &wrapped_handle);
-  if (result != MOJO_RESULT_OK) {
-    LOG(ERROR) << "Failed to wrap handle: " << result;
+  mojo::ScopedHandle wrapped_handle =
+      mojo::WrapPlatformHandle(mojo::PlatformHandle(std::move(fd)));
+  if (!wrapped_handle.is_valid()) {
+    LOG(ERROR) << "Failed to wrap handle";
     std::move(callback).Run(mojo::ScopedHandle());
     return;
   }
-  std::move(callback).Run(mojo::ScopedHandle(mojo::Handle(wrapped_handle)));
+  std::move(callback).Run(std::move(wrapped_handle));
 }
 
 bool ArcFileSystemBridge::HandleReadRequest(const std::string& id,

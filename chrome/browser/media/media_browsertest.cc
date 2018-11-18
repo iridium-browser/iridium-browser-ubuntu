@@ -4,6 +4,7 @@
 
 #include "chrome/browser/media/media_browsertest.h"
 
+#include "base/command_line.h"
 #include "base/i18n/time_formatting.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
@@ -14,12 +15,22 @@
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test_utils.h"
+#include "media/base/media_switches.h"
 #include "media/base/test_data_util.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 
-MediaBrowserTest::MediaBrowserTest() : ignore_plugin_crash_(false) {}
+MediaBrowserTest::MediaBrowserTest() {}
 
 MediaBrowserTest::~MediaBrowserTest() {}
+
+void MediaBrowserTest::SetUpCommandLine(base::CommandLine* command_line) {
+  command_line->AppendSwitchASCII(
+      switches::kAutoplayPolicy,
+      switches::autoplay::kNoUserGestureRequiredPolicy);
+  // Disable fallback after decode error to avoid unexpected test pass on the
+  // fallback path.
+  scoped_feature_list_.InitAndDisableFeature(media::kFallbackAfterDecodeError);
+}
 
 void MediaBrowserTest::RunMediaTestPage(const std::string& html_page,
                                         const base::StringPairs& query_params,
@@ -47,8 +58,7 @@ std::string MediaBrowserTest::RunTest(const GURL& gurl,
                                       const std::string& expected_title) {
   DVLOG(0) << base::TimeFormatTimeOfDayWithMilliseconds(base::Time::Now())
            << " Running test URL: " << gurl;
-  // Observe the web contents for plugin crashes.
-  Observe(browser()->tab_strip_model()->GetActiveWebContents());
+
   content::TitleWatcher title_watcher(
       browser()->tab_strip_model()->GetActiveWebContents(),
       base::ASCIIToUTF16(expected_title));
@@ -62,16 +72,4 @@ void MediaBrowserTest::AddWaitForTitles(content::TitleWatcher* title_watcher) {
   title_watcher->AlsoWaitForTitle(base::ASCIIToUTF16(media::kEnded));
   title_watcher->AlsoWaitForTitle(base::ASCIIToUTF16(media::kError));
   title_watcher->AlsoWaitForTitle(base::ASCIIToUTF16(media::kFailed));
-}
-
-void MediaBrowserTest::PluginCrashed(const base::FilePath& plugin_path,
-                                     base::ProcessId plugin_pid) {
-  DVLOG(0) << "Plugin crashed: " << plugin_path.value();
-  if (ignore_plugin_crash_)
-    return;
-  ADD_FAILURE() << "Failing test due to plugin crash.";
-}
-
-void MediaBrowserTest::IgnorePluginCrash() {
-  ignore_plugin_crash_ = true;
 }

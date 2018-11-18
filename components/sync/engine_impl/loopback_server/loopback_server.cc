@@ -133,7 +133,8 @@ class UpdateSieve {
 }  // namespace
 
 LoopbackServer::LoopbackServer(const base::FilePath& persistent_file)
-    : version_(0),
+    : strong_consistency_model_enabled_(false),
+      version_(0),
       store_birthday_(0),
       persistent_file_(persistent_file),
       observer_for_tests_(nullptr) {
@@ -178,10 +179,7 @@ bool LoopbackServer::CreateDefaultPermanentItems() {
   ModelTypeSet permanent_folder_types =
       ModelTypeSet(syncer::BOOKMARKS, syncer::NIGORI);
 
-  for (ModelTypeSet::Iterator it = permanent_folder_types.First(); it.Good();
-       it.Inc()) {
-    ModelType model_type = it.Get();
-
+  for (ModelType model_type : permanent_folder_types) {
     std::unique_ptr<LoopbackServerEntity> top_level_entity =
         PersistentPermanentEntity::CreateTopLevel(model_type);
     if (!top_level_entity) {
@@ -274,6 +272,10 @@ void LoopbackServer::HandleCommand(
   SaveStateToFile(persistent_file_);
 }
 
+void LoopbackServer::EnableStrongConsistencyWithConflictDetectionModel() {
+  strong_consistency_model_enabled_ = true;
+}
+
 bool LoopbackServer::HandleGetUpdatesRequest(
     const sync_pb::GetUpdatesMessage& get_updates,
     sync_pb::GetUpdatesResponse* response) {
@@ -324,6 +326,20 @@ string LoopbackServer::CommitEntity(
     const string& parent_id) {
   if (client_entity.version() == 0 && client_entity.deleted()) {
     return string();
+  }
+
+  // If strong consistency model is enabled (usually on a per-datatype level,
+  // but implemented here as a global state), the server detects version
+  // mismatches and responds with CONFLICT.
+  if (strong_consistency_model_enabled_) {
+    EntityMap::const_iterator iter = entities_.find(client_entity.id_string());
+    if (iter != entities_.end()) {
+      const LoopbackServerEntity* server_entity = iter->second.get();
+      if (server_entity->GetVersion() != client_entity.version()) {
+        entry_response->set_response_type(sync_pb::CommitResponse::CONFLICT);
+        return client_entity.id_string();
+      }
+    }
   }
 
   std::unique_ptr<LoopbackServerEntity> entity;
@@ -498,8 +514,8 @@ LoopbackServer::GetEntitiesAsDictionaryValue() {
 
   // Initialize an empty ListValue for all ModelTypes.
   ModelTypeSet all_types = ModelTypeSet::All();
-  for (ModelTypeSet::Iterator it = all_types.First(); it.Good(); it.Inc()) {
-    dictionary->Set(ModelTypeToString(it.Get()),
+  for (ModelType type : all_types) {
+    dictionary->Set(ModelTypeToString(type),
                     std::make_unique<base::ListValue>());
   }
 

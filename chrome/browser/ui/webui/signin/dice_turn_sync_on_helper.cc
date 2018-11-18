@@ -25,6 +25,7 @@
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/ui/webui/signin/dice_turn_sync_on_helper_delegate_impl.h"
 #include "chrome/browser/ui/webui/signin/signin_utils_desktop.h"
+#include "chrome/browser/unified_consent/unified_consent_service_factory.h"
 #include "components/browser_sync/profile_sync_service.h"
 #include "components/policy/core/browser/browser_policy_connector.h"
 #include "components/prefs/pref_service.h"
@@ -35,7 +36,9 @@
 #include "components/signin/core/browser/signin_metrics.h"
 #include "components/signin/core/browser/signin_pref_names.h"
 #include "components/sync/base/sync_prefs.h"
-#include "net/url_request/url_request_context_getter.h"
+#include "components/unified_consent/feature.h"
+#include "components/unified_consent/unified_consent_service.h"
+#include "content/public/browser/storage_partition.h"
 
 namespace {
 
@@ -65,7 +68,6 @@ DiceTurnSyncOnHelper::DiceTurnSyncOnHelper(
       account_info_(GetAccountInfo(profile, account_id)),
       weak_pointer_factory_(this) {
   DCHECK(delegate_);
-  DCHECK(signin::IsDicePrepareMigrationEnabled());
   DCHECK(profile_);
   // Should not start syncing if the profile is already authenticated
   DCHECK(!signin_manager_->IsAuthenticated());
@@ -251,7 +253,9 @@ void DiceTurnSyncOnHelper::LoadPolicyWithCachedCredentials() {
   policy::UserPolicySigninService* policy_service =
       policy::UserPolicySigninServiceFactory::GetForProfile(profile_);
   policy_service->FetchPolicyForSignedInUser(
-      account_info_.email, dm_token_, client_id_, profile_->GetRequestContext(),
+      AccountIdFromAccountInfo(account_info_), dm_token_, client_id_,
+      content::BrowserContext::GetDefaultStoragePartition(profile_)
+          ->GetURLLoaderFactoryForBrowserProcess(),
       base::Bind(&DiceTurnSyncOnHelper::OnPolicyFetchComplete,
                  weak_pointer_factory_.GetWeakPtr()));
 }
@@ -275,8 +279,7 @@ void DiceTurnSyncOnHelper::CreateNewSignedInProfile() {
       base::UTF8ToUTF16(account_info_.email),
       profiles::GetDefaultAvatarIconUrl(icon_index),
       base::BindRepeating(&DiceTurnSyncOnHelper::CompleteInitForNewProfile,
-                          weak_pointer_factory_.GetWeakPtr()),
-      std::string());
+                          weak_pointer_factory_.GetWeakPtr()));
 }
 
 void DiceTurnSyncOnHelper::CompleteInitForNewProfile(
@@ -373,12 +376,15 @@ void DiceTurnSyncOnHelper::FinishSyncSetupAndDelete(
     LoginUIService::SyncConfirmationUIClosedResult result) {
   switch (result) {
     case LoginUIService::CONFIGURE_SYNC_FIRST:
+      EnableUnifiedConsentIfNeeded();
       delegate_->ShowSyncSettings();
       break;
     case LoginUIService::SYNC_WITH_DEFAULT_SETTINGS: {
       browser_sync::ProfileSyncService* sync_service = GetProfileSyncService();
-      if (sync_service)
+      if (sync_service) {
         sync_service->SetFirstSetupComplete();
+        EnableUnifiedConsentIfNeeded();
+      }
       break;
     }
     case LoginUIService::ABORT_SIGNIN:
@@ -398,4 +404,11 @@ void DiceTurnSyncOnHelper::AbortAndDelete() {
     token_service_->RevokeCredentials(account_info_.account_id);
   }
   delete this;
+}
+
+void DiceTurnSyncOnHelper::EnableUnifiedConsentIfNeeded() {
+  if (unified_consent::IsUnifiedConsentFeatureEnabled()) {
+    UnifiedConsentServiceFactory::GetForProfile(profile_)
+        ->SetUnifiedConsentGiven(true);
+  }
 }

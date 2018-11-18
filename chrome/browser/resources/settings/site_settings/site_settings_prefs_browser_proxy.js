@@ -19,6 +19,25 @@ const ContentSettingProvider = {
 };
 
 /**
+ * Stores origin information.
+ * @typedef {{origin: string,
+ *            engagement: number,
+ *            usage: number}}
+ */
+let OriginInfo;
+
+/**
+ * Represents a list of sites, grouped under the same eTLD+1. For example, an
+ * origin "https://www.example.com" would be grouped together with
+ * "https://login.example.com" and "http://example.com" under a common eTLD+1 of
+ * "example.com".
+ * @typedef {{etldPlus1: string,
+ *            numCookies: number,
+ *            origins: Array<OriginInfo>}}
+ */
+let SiteGroup;
+
+/**
  * The site exception information passed from the C++ handler.
  * See also: SiteException.
  * @typedef {{embeddingOrigin: string,
@@ -40,7 +59,8 @@ let RawSiteException;
  *            displayName: string,
  *            setting: !settings.ContentSetting,
  *            enforcement: ?chrome.settingsPrivate.Enforcement,
- *            controlledBy: !chrome.settingsPrivate.ControlledBy}}
+ *            controlledBy: !chrome.settingsPrivate.ControlledBy,
+ *            showAndroidSmsNote: (boolean|undefined)}}
  */
 let SiteException;
 
@@ -104,6 +124,23 @@ cr.define('settings', function() {
      * @return {!Promise<!DefaultContentSetting>}
      */
     getDefaultValueForContentType(contentType) {}
+
+    /**
+     * Gets a list of sites, grouped by eTLD+1, affected by any of the content
+     * settings specified by |contentTypes|.
+     * @param {!Array<!settings.ContentSettingsTypes>} contentTypes A list of
+     *     the content types to retrieve sites for.
+     * @return {!Promise<!Array<!SiteGroup>>}
+     */
+    getAllSites(contentTypes) {}
+
+    /**
+     * Converts a given number of bytes into a human-readable format, with data
+     * units.
+     * @param {number} numBytes The number of bytes to convert.
+     * @return {!Promise<string>}
+     */
+    getFormattedBytes(numBytes) {}
 
     /**
      * Gets the exceptions (site list) for a particular category.
@@ -281,6 +318,12 @@ cr.define('settings', function() {
      */
     showAndroidManageAppLinks() {}
     // </if>
+
+    /**
+     * Fetches the current block autoplay state. Returns the results via
+     * onBlockAutoplayStatusChanged.
+     */
+    fetchBlockAutoplayStatus() {}
   }
 
   /**
@@ -295,6 +338,16 @@ cr.define('settings', function() {
     /** @override */
     getDefaultValueForContentType(contentType) {
       return cr.sendWithPromise('getDefaultValueForContentType', contentType);
+    }
+
+    /** @override */
+    getAllSites(contentTypes) {
+      return cr.sendWithPromise('getAllSites', contentTypes);
+    }
+
+    /** @override */
+    getFormattedBytes(numBytes) {
+      return cr.sendWithPromise('getFormattedBytes', numBytes);
     }
 
     /** @override */
@@ -413,6 +466,11 @@ cr.define('settings', function() {
       chrome.send('showAndroidManageAppLinks');
     }
     // </if>
+
+    /** @override */
+    fetchBlockAutoplayStatus() {
+      chrome.send('fetchBlockAutoplayStatus');
+    }
   }
 
   // The singleton instance_ is replaced with a test version of this wrapper

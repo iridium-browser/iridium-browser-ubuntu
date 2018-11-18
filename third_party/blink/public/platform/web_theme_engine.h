@@ -31,11 +31,15 @@
 #ifndef THIRD_PARTY_BLINK_PUBLIC_PLATFORM_WEB_THEME_ENGINE_H_
 #define THIRD_PARTY_BLINK_PUBLIC_PLATFORM_WEB_THEME_ENGINE_H_
 
-#include "third_party/blink/public/platform/web_canvas.h"
-#include "third_party/blink/public/platform/web_color.h"
+#include "base/time/time.h"
 #include "third_party/blink/public/platform/web_rect.h"
 #include "third_party/blink/public/platform/web_scrollbar_overlay_color_theme.h"
 #include "third_party/blink/public/platform/web_size.h"
+#include "third_party/skia/include/core/SkColor.h"
+
+namespace cc {
+class PaintCanvas;
+}
 
 namespace blink {
 
@@ -94,14 +98,14 @@ class WebThemeEngine {
     bool indeterminate;  // Whether the button state is indeterminate.
     bool is_default;     // Whether the button is default button.
     bool has_border;
-    WebColor background_color;
+    SkColor background_color;
   };
 
   // Extra parameters for PartTextField
   struct TextFieldExtraParams {
     bool is_text_area;
     bool is_listbox;
-    WebColor background_color;
+    SkColor background_color;
   };
 
   // Extra parameters for PartMenuList
@@ -111,8 +115,8 @@ class WebThemeEngine {
     int arrow_x;
     int arrow_y;
     int arrow_size;
-    WebColor arrow_color;
-    WebColor background_color;
+    SkColor arrow_color;
+    SkColor background_color;
     bool fill_content_area;
   };
 
@@ -165,9 +169,9 @@ class WebThemeEngine {
   struct ScrollbarStyle {
     int thumb_thickness;
     int scrollbar_margin;
-    WebColor color;
-    double fade_out_delay_seconds;
-    double fade_out_duration_seconds;
+    SkColor color;
+    base::TimeDelta fade_out_delay;
+    base::TimeDelta fade_out_duration;
   };
 
   // Gets the overlay scrollbar style. Not used on Mac.
@@ -175,15 +179,15 @@ class WebThemeEngine {
     // Disable overlay scrollbar fade out (for non-composited scrollers) unless
     // explicitly enabled by the implementing child class. NOTE: these values
     // aren't used to control Mac fade out - that happens in ScrollAnimatorMac.
-    style->fade_out_delay_seconds = 0.0;
-    style->fade_out_duration_seconds = 0.0;
+    style->fade_out_delay = base::TimeDelta();
+    style->fade_out_duration = base::TimeDelta();
     // The other fields in this struct are used only on Android to draw solid
     // color scrollbars. On other platforms the scrollbars are painted in
     // NativeTheme so these fields are unused in non-Android WebThemeEngines.
   }
 
   // Paint the given the given theme part.
-  virtual void Paint(WebCanvas*,
+  virtual void Paint(cc::PaintCanvas*,
                      Part,
                      State,
                      const WebRect&,

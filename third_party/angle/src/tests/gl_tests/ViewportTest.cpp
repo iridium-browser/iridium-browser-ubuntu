@@ -5,6 +5,7 @@
 //
 
 #include "test_utils/ANGLETest.h"
+#include "test_utils/gl_raii.h"
 
 using namespace angle;
 
@@ -59,7 +60,7 @@ class ViewportTest : public ANGLETest
         glClear(GL_COLOR_BUFFER_BIT);
 
         // Draw a red quad centered in the middle of the viewport, with dimensions 25% of the size of the viewport.
-        drawQuad(mProgram, "position", 0.5f, 0.25f);
+        drawQuad(mProgram, essl1_shaders::PositionAttrib(), 0.5f, 0.25f);
 
         GLint centerViewportX = viewportSize[0] + (viewportSize[2] / 2);
         GLint centerViewportY = viewportSize[1] + (viewportSize[3] / 2);
@@ -122,21 +123,7 @@ class ViewportTest : public ANGLETest
     {
         ANGLETest::SetUp();
 
-        const std::string testVertexShaderSource =
-            R"(attribute highp vec4 position;
-
-            void main(void)
-            {
-                gl_Position = position;
-            })";
-
-        const std::string testFragmentShaderSource =
-            R"(void main(void)
-            {
-                gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);
-            })";
-
-        mProgram = CompileProgram(testVertexShaderSource, testFragmentShaderSource);
+        mProgram = CompileProgram(essl1_shaders::vs::Simple(), essl1_shaders::fs::Red());
         if (mProgram == 0)
         {
             FAIL() << "shader compilation failed.";
@@ -255,6 +242,86 @@ TEST_P(ViewportTest, TripleWindowOffCenter)
     runScissoredTest();
 }
 
+// Test line rendering with a non-standard viewport.
+TEST_P(ViewportTest, DrawLineWithViewport)
+{
+    // We assume in the test the width and height are equal and we are tracing
+    // the line from bottom left to top right. Verify that all pixels along that line
+    // have been traced with green.
+    ASSERT_EQ(getWindowWidth(), getWindowHeight());
+
+    ANGLE_GL_PROGRAM(program, essl1_shaders::vs::Simple(), essl1_shaders::fs::Green());
+    glUseProgram(program);
+
+    std::vector<Vector3> vertices = {{-1.0f, -1.0f, 0.0f}, {1.0f, 1.0f, 0.0f}};
+
+    const GLint positionLocation = glGetAttribLocation(program, essl1_shaders::PositionAttrib());
+    ASSERT_NE(-1, positionLocation);
+
+    GLBuffer vertexBuffer;
+    glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices[0]) * vertices.size(), vertices.data(),
+                 GL_STATIC_DRAW);
+    glVertexAttribPointer(positionLocation, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
+    glEnableVertexAttribArray(positionLocation);
+
+    // Set the viewport.
+    GLint quarterWidth  = getWindowWidth() / 4;
+    GLint quarterHeight = getWindowHeight() / 4;
+    glViewport(quarterWidth, quarterHeight, quarterWidth, quarterHeight);
+
+    glClear(GL_COLOR_BUFFER_BIT);
+    glDrawArrays(GL_LINES, 0, static_cast<GLsizei>(vertices.size()));
+
+    glDisableVertexAttribArray(positionLocation);
+
+    ASSERT_GL_NO_ERROR();
+
+    for (GLint x = quarterWidth; x < getWindowWidth() / 2; x++)
+    {
+        EXPECT_PIXEL_COLOR_EQ(x, x, GLColor::green);
+    }
+}
+
+// Test line rendering with an overly large viewport.
+TEST_P(ViewportTest, DrawLineWithLargeViewport)
+{
+    // We assume in the test the width and height are equal and we are tracing
+    // the line from bottom left to top right. Verify that all pixels along that line
+    // have been traced with green.
+    ASSERT_EQ(getWindowWidth(), getWindowHeight());
+
+    ANGLE_GL_PROGRAM(program, essl1_shaders::vs::Simple(), essl1_shaders::fs::Green());
+    glUseProgram(program);
+
+    std::vector<Vector3> vertices = {{-1.0f, -1.0f, 0.0f}, {1.0f, 1.0f, 0.0f}};
+
+    const GLint positionLocation = glGetAttribLocation(program, essl1_shaders::PositionAttrib());
+    ASSERT_NE(-1, positionLocation);
+
+    GLBuffer vertexBuffer;
+    glBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(vertices[0]) * vertices.size(), vertices.data(),
+                 GL_STATIC_DRAW);
+    glVertexAttribPointer(positionLocation, 3, GL_FLOAT, GL_FALSE, 0, nullptr);
+    glEnableVertexAttribArray(positionLocation);
+
+    // Set the viewport.
+    glViewport(0, 0, getWindowWidth() * 2, getWindowHeight() * 2);
+
+    glClear(GL_COLOR_BUFFER_BIT);
+    glDrawArrays(GL_LINES, 0, static_cast<GLsizei>(vertices.size()));
+
+    glDisableVertexAttribArray(positionLocation);
+
+    ASSERT_GL_NO_ERROR();
+
+    for (GLint x = 0; x < getWindowWidth(); x++)
+    {
+        EXPECT_PIXEL_COLOR_EQ(x, x, GLColor::green);
+    }
+}
+
 // Use this to select which configurations (e.g. which renderer, which GLES major version) these tests should be run against.
 // D3D11 Feature Level 9 and D3D9 emulate large and negative viewports in the vertex shader. We should test both of these as well as D3D11 Feature Level 10_0+.
 ANGLE_INSTANTIATE_TEST(ViewportTest,
@@ -263,6 +330,7 @@ ANGLE_INSTANTIATE_TEST(ViewportTest,
                        ES2_D3D11(EGL_EXPERIMENTAL_PRESENT_PATH_FAST_ANGLE),
                        ES2_D3D11_FL9_3(),
                        ES2_OPENGLES(),
-                       ES3_OPENGLES());
+                       ES3_OPENGLES(),
+                       ES2_VULKAN());
 
 } // namespace

@@ -6,6 +6,8 @@ import("//testing/test.gni")
 
 static_library("arc") {
   sources = [
+    "appfuse/arc_appfuse_bridge.cc",
+    "appfuse/arc_appfuse_bridge.h",
     "audio/arc_audio_bridge.cc",
     "audio/arc_audio_bridge.h",
     "bluetooth/bluetooth_type_converters.cc",
@@ -14,6 +16,8 @@ static_library("arc") {
     "clipboard/arc_clipboard_bridge.h",
     "crash_collector/arc_crash_collector_bridge.cc",
     "crash_collector/arc_crash_collector_bridge.h",
+    "disk_quota/arc_disk_quota_bridge.cc",
+    "disk_quota/arc_disk_quota_bridge.h",
     "ime/arc_ime_bridge.h",
     "ime/arc_ime_bridge_impl.cc",
     "ime/arc_ime_bridge_impl.h",
@@ -32,30 +36,29 @@ static_library("arc") {
     "intent_helper/intent_filter.h",
     "intent_helper/link_handler_model.cc",
     "intent_helper/link_handler_model.h",
-    "intent_helper/page_transition_util.cc",
-    "intent_helper/page_transition_util.h",
+    "intent_helper/open_url_delegate.h",
     "lock_screen/arc_lock_screen_bridge.cc",
     "lock_screen/arc_lock_screen_bridge.h",
     "metrics/arc_metrics_service.cc",
     "metrics/arc_metrics_service.h",
     "midis/arc_midis_bridge.cc",
     "midis/arc_midis_bridge.h",
+    "net/always_on_vpn_manager.cc",
+    "net/always_on_vpn_manager.h",
     "net/arc_net_host_impl.cc",
     "net/arc_net_host_impl.h",
     "obb_mounter/arc_obb_mounter_bridge.cc",
     "obb_mounter/arc_obb_mounter_bridge.h",
     "power/arc_power_bridge.cc",
     "power/arc_power_bridge.h",
+    "property/arc_property_bridge.cc",
+    "property/arc_property_bridge.h",
     "rotation_lock/arc_rotation_lock_bridge.cc",
     "rotation_lock/arc_rotation_lock_bridge.h",
     "storage_manager/arc_storage_manager.cc",
     "storage_manager/arc_storage_manager.h",
-    "timer/arc_timer.cc",
-    "timer/arc_timer.h",
     "timer/arc_timer_bridge.cc",
     "timer/arc_timer_bridge.h",
-    "timer/create_timer_request.cc",
-    "timer/create_timer_request.h",
     "usb/usb_host_bridge.cc",
     "usb/usb_host_bridge.h",
     "usb/usb_host_ui_delegate.h",
@@ -67,6 +70,7 @@ static_library("arc") {
 
   public_deps = [
     ":arc_base",
+    ":arc_metrics_constants",
     ":prefs",
   ]
 
@@ -77,12 +81,12 @@ static_library("arc") {
     "//chromeos",
     "//chromeos:login_manager_proto",
     "//chromeos:power_manager_proto",
+    "//components/account_id",
     "//components/exo",
     "//components/google/core/browser",
     "//components/onc",
     "//components/prefs",
     "//components/session_manager/core",
-    "//components/signin/core/account_id",
     "//components/timers",
     "//components/url_formatter",
     "//components/user_manager",
@@ -93,7 +97,6 @@ static_library("arc") {
     "//device/usb/mojo",
     "//device/usb/public/mojom",
     "//google_apis",
-    "//mojo/edk",
     "//services/device/public/mojom",
     "//skia",
     "//third_party/re2:re2",
@@ -118,7 +121,23 @@ static_library("prefs") {
   defines = [ "ARC_IMPLEMENTATION" ]
 
   deps = [
+    ":arc_base_enums",
     "//components/prefs",
+  ]
+}
+
+static_library("arc_base_enums") {
+  sources = [
+    "arc_instance_mode.cc",
+    "arc_instance_mode.h",
+    "arc_stop_reason.cc",
+    "arc_stop_reason.h",
+    "arc_supervision_transition.cc",
+    "arc_supervision_transition.h",
+  ]
+
+  deps = [
+    "//base",
   ]
 }
 
@@ -135,8 +154,8 @@ static_library("arc_base") {
     "arc_data_remover.h",
     "arc_features.cc",
     "arc_features.h",
-    "arc_instance_mode.cc",
-    "arc_instance_mode.h",
+    "arc_features_parser.cc",
+    "arc_features_parser.h",
     "arc_service_manager.cc",
     "arc_service_manager.h",
     "arc_session.cc",
@@ -145,14 +164,8 @@ static_library("arc_base") {
     "arc_session_impl.h",
     "arc_session_runner.cc",
     "arc_session_runner.h",
-    "arc_stop_reason.cc",
-    "arc_stop_reason.h",
     "arc_util.cc",
     "arc_util.h",
-    "connection_holder.h",
-    "connection_notifier.cc",
-    "connection_notifier.h",
-    "connection_observer.h",
   ]
 
   deps = [
@@ -160,24 +173,56 @@ static_library("arc_base") {
     "//base",
     "//chromeos",
     "//chromeos:login_manager_proto",
+    "//components/account_id",
     "//components/keyed_service/content",
     "//components/prefs",
-    "//components/signin/core/account_id",
     "//components/user_manager",
-    "//mojo/edk",
+    "//content/public/common",
+    "//mojo/public/cpp/platform",
+    "//mojo/public/cpp/system",
     "//ui/aura",
   ]
 
   public_deps = [
+    ":arc_base_enums",
+    ":connection_holder",
     ":prefs",
     "//components/arc/common",
+  ]
+}
+
+source_set("connection_holder") {
+  sources = [
+    "connection_holder.h",
+    "connection_notifier.cc",
+    "connection_notifier.h",
+    "connection_observer.h",
+    "mojo_channel.h",
+  ]
+
+  deps = [
+    "//base",
+    "//mojo/public/cpp/bindings",
+  ]
+}
+
+static_library("notification_test_support") {
+  testonly = true
+  sources = [
+    "test/connection_holder_util.h",
+    "test/fake_notifications_instance.cc",
+    "test/fake_notifications_instance.h",
+  ]
+
+  public_deps = [
+    ":connection_holder",
+    "//components/arc/common:notifications",
   ]
 }
 
 static_library("arc_test_support") {
   testonly = true
   sources = [
-    "test/connection_holder_util.h",
     "test/fake_accessibility_helper_instance.cc",
     "test/fake_accessibility_helper_instance.h",
     "test/fake_app_instance.cc",
@@ -194,8 +239,8 @@ static_library("arc_test_support") {
     "test/fake_file_system_instance.h",
     "test/fake_intent_helper_instance.cc",
     "test/fake_intent_helper_instance.h",
-    "test/fake_notifications_instance.cc",
-    "test/fake_notifications_instance.h",
+    "test/fake_pip_instance.cc",
+    "test/fake_pip_instance.h",
     "test/fake_policy_instance.cc",
     "test/fake_policy_instance.h",
     "test/fake_power_instance.cc",
@@ -214,6 +259,7 @@ static_library("arc_test_support") {
 
   public_deps = [
     ":arc",
+    ":notification_test_support",
   ]
 
   deps = [
@@ -222,8 +268,14 @@ static_library("arc_test_support") {
     "//components/prefs:test_support",
     "//components/user_prefs",
     "//content/test:test_support",
-    "//mojo/edk",
+    "//mojo/public/cpp/platform",
     "//mojo/public/cpp/system",
+  ]
+}
+
+source_set("arc_metrics_constants") {
+  sources = [
+    "metrics/arc_metrics_constants.h",
   ]
 }
 
@@ -231,6 +283,7 @@ source_set("unit_tests") {
   testonly = true
   sources = [
     "arc_data_remover_unittest.cc",
+    "arc_features_parser_unittest.cc",
     "arc_session_impl_unittest.cc",
     "arc_session_runner_unittest.cc",
     "arc_util_unittest.cc",
@@ -242,8 +295,9 @@ source_set("unit_tests") {
     "intent_helper/font_size_util_unittest.cc",
     "intent_helper/intent_filter_unittest.cc",
     "intent_helper/link_handler_model_unittest.cc",
-    "intent_helper/page_transition_util_unittest.cc",
     "metrics/arc_metrics_service_unittest.cc",
+    "net/always_on_vpn_manager_unittest.cc",
+    "net/arc_net_host_impl_unittest.cc",
     "power/arc_power_bridge_unittest.cc",
     "timer/arc_timer_bridge_unittest.cc",
     "wake_lock/arc_wake_lock_bridge_unittest.cc",
@@ -257,9 +311,9 @@ source_set("unit_tests") {
     "//chromeos",
     "//chromeos:power_manager_proto",
     "//chromeos:test_support_without_gmock",
+    "//components/account_id",
     "//components/keyed_service/content",
     "//components/prefs:test_support",
-    "//components/signin/core/account_id",
     "//components/user_manager",
     "//components/user_manager:test_support",
     "//content/public/common",
@@ -277,6 +331,7 @@ source_set("unit_tests") {
     "//ui/base/ime",
     "//ui/events",
     "//ui/events:dom_keycode_converter",
+    "//ui/keyboard:keyboard",
     "//url:url",
   ]
 }

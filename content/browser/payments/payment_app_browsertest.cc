@@ -17,8 +17,8 @@
 #include "content/shell/browser/shell.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/mojom/payments/payment_app.mojom.h"
 #include "third_party/blink/public/mojom/service_worker/service_worker_registration.mojom.h"
-#include "third_party/blink/public/platform/modules/payments/payment_app.mojom.h"
 
 namespace content {
 namespace {
@@ -178,12 +178,12 @@ class PaymentAppBrowserTest : public ContentBrowserTest {
       const std::string& supported_method) {
     CanMakePaymentEventDataPtr event_data = CanMakePaymentEventData::New();
 
-    event_data->top_level_origin = GURL("https://example.com");
+    event_data->top_origin = GURL("https://example.com");
 
     event_data->payment_request_origin = GURL("https://example.com");
 
     event_data->method_data.push_back(PaymentMethodData::New());
-    event_data->method_data[0]->supported_methods = {supported_method};
+    event_data->method_data[0]->supported_method = supported_method;
 
     PaymentDetailsModifierPtr modifier = PaymentDetailsModifier::New();
     modifier->total = PaymentItem::New();
@@ -191,7 +191,7 @@ class PaymentAppBrowserTest : public ContentBrowserTest {
     modifier->total->amount->currency = "USD";
     modifier->total->amount->value = "55";
     modifier->method_data = PaymentMethodData::New();
-    modifier->method_data->supported_methods = {supported_method};
+    modifier->method_data->supported_method = supported_method;
     event_data->modifiers.push_back(std::move(modifier));
 
     return event_data;
@@ -202,14 +202,14 @@ class PaymentAppBrowserTest : public ContentBrowserTest {
       const std::string& instrument_key) {
     PaymentRequestEventDataPtr event_data = PaymentRequestEventData::New();
 
-    event_data->top_level_origin = GURL("https://example.com");
+    event_data->top_origin = GURL("https://example.com");
 
     event_data->payment_request_origin = GURL("https://example.com");
 
     event_data->payment_request_id = "payment-request-id";
 
     event_data->method_data.push_back(PaymentMethodData::New());
-    event_data->method_data[0]->supported_methods = {supported_method};
+    event_data->method_data[0]->supported_method = supported_method;
 
     event_data->total = PaymentCurrencyAmount::New();
     event_data->total->currency = "USD";
@@ -221,7 +221,7 @@ class PaymentAppBrowserTest : public ContentBrowserTest {
     modifier->total->amount->currency = "USD";
     modifier->total->amount->value = "55";
     modifier->method_data = PaymentMethodData::New();
-    modifier->method_data->supported_methods = {supported_method};
+    modifier->method_data->supported_method = supported_method;
     event_data->modifiers.push_back(std::move(modifier));
 
     event_data->instrument_key = instrument_key;
@@ -234,8 +234,16 @@ class PaymentAppBrowserTest : public ContentBrowserTest {
   DISALLOW_COPY_AND_ASSIGN(PaymentAppBrowserTest);
 };
 
+// TODO(crbug.com/869790) Flakes on linux-chromeos-dbg
+#if defined(OS_CHROMEOS) && !defined(NDEBUG)
+#define MAYBE_AbortPaymentWithInvalidRegistrationId \
+  DISABLED_AbortPaymentWithInvalidRegistrationId
+#else
+#define MAYBE_AbortPaymentWithInvalidRegistrationId \
+  AbortPaymentWithInvalidRegistrationId
+#endif
 IN_PROC_BROWSER_TEST_F(PaymentAppBrowserTest,
-                       AbortPaymentWithInvalidRegistrationId) {
+                       MAYBE_AbortPaymentWithInvalidRegistrationId) {
   RegisterPaymentApp();
 
   std::vector<int64_t> registrationIds = GetAllPaymentAppRegistrationIDs();
@@ -248,7 +256,13 @@ IN_PROC_BROWSER_TEST_F(PaymentAppBrowserTest,
   ClearStoragePartitionData();
 }
 
-IN_PROC_BROWSER_TEST_F(PaymentAppBrowserTest, AbortPayment) {
+// TODO(crbug.com/869790) Flakes on linux-chromeos-dbg
+#if defined(OS_CHROMEOS) && !defined(NDEBUG)
+#define MAYBE_AbortPayment DISABLED_AbortPayment
+#else
+#define MAYBE_AbortPayment AbortPayment
+#endif
+IN_PROC_BROWSER_TEST_F(PaymentAppBrowserTest, MAYBE_AbortPayment) {
   RegisterPaymentApp();
 
   std::vector<int64_t> registrationIds = GetAllPaymentAppRegistrationIDs();
@@ -260,7 +274,13 @@ IN_PROC_BROWSER_TEST_F(PaymentAppBrowserTest, AbortPayment) {
   ClearStoragePartitionData();
 }
 
-IN_PROC_BROWSER_TEST_F(PaymentAppBrowserTest, CanMakePayment) {
+// TODO(crbug.com/869790) Flakes on linux-chromeos-dbg
+#if defined(OS_CHROMEOS) && !defined(NDEBUG)
+#define MAYBE_CanMakePayment DISABLED_CanMakePayment
+#else
+#define MAYBE_CanMakePayment CanMakePayment
+#endif
+IN_PROC_BROWSER_TEST_F(PaymentAppBrowserTest, MAYBE_CanMakePayment) {
   RegisterPaymentApp();
 
   std::vector<int64_t> registrationIds = GetAllPaymentAppRegistrationIDs();
@@ -272,20 +292,28 @@ IN_PROC_BROWSER_TEST_F(PaymentAppBrowserTest, CanMakePayment) {
 
   ClearStoragePartitionData();
 
-  EXPECT_EQ("https://example.com/", PopConsoleString() /* topLevelOrigin */);
+  EXPECT_EQ("https://example.com/", PopConsoleString() /* topOrigin */);
   EXPECT_EQ("https://example.com/",
             PopConsoleString() /* paymentRequestOrigin */);
-  EXPECT_EQ("[{\"supportedMethods\":[\"basic-card\"]}]",
+  EXPECT_EQ("[{\"supportedMethods\":\"basic-card\"}]",
             PopConsoleString() /* methodData */);
   EXPECT_EQ(
-      "[{\"additionalDisplayItems\":[],\"supportedMethods\":[\"basic-card\"],"
-      "\"total\":{\"amount\":{\"currency\":\"USD\",\"currencySystem\":\"urn:"
-      "iso:std:iso:4217\",\"value\":\"55\"},\"label\":\"\",\"pending\":false}}"
+      "[{\"additionalDisplayItems\":[],\"supportedMethods\":\"basic-card\","
+      "\"total\":{\"amount\":{\"currency\":\"USD\","
+      "\"value\":\"55\"},\"label\":\"\",\"pending\":false}}"
       "]",
       PopConsoleString() /* modifiers */);
 }
 
-IN_PROC_BROWSER_TEST_F(PaymentAppBrowserTest, PaymentAppInvocationAndFailed) {
+// TODO(crbug.com/869790) Flakes on linux-chromeos-dbg
+#if defined(OS_CHROMEOS) && !defined(NDEBUG)
+#define MAYBE_PaymentAppInvocationAndFailed \
+  DISABLED_PaymentAppInvocationAndFailed
+#else
+#define MAYBE_PaymentAppInvocationAndFailed PaymentAppInvocationAndFailed
+#endif
+IN_PROC_BROWSER_TEST_F(PaymentAppBrowserTest,
+                       MAYBE_PaymentAppInvocationAndFailed) {
   RegisterPaymentApp();
 
   std::vector<int64_t> registrationIds = GetAllPaymentAppRegistrationIDs();
@@ -301,7 +329,13 @@ IN_PROC_BROWSER_TEST_F(PaymentAppBrowserTest, PaymentAppInvocationAndFailed) {
   ClearStoragePartitionData();
 }
 
-IN_PROC_BROWSER_TEST_F(PaymentAppBrowserTest, PaymentAppInvocation) {
+// TODO(crbug.com/869790) Flakes on linux-chromeos-dbg
+#if defined(OS_CHROMEOS) && !defined(NDEBUG)
+#define MAYBE_PaymentAppInvocation DISABLED_PaymentAppInvocation
+#else
+#define MAYBE_PaymentAppInvocation PaymentAppInvocation
+#endif
+IN_PROC_BROWSER_TEST_F(PaymentAppBrowserTest, MAYBE_PaymentAppInvocation) {
   RegisterPaymentApp();
 
   std::vector<int64_t> registrationIds = GetAllPaymentAppRegistrationIDs();
@@ -316,27 +350,34 @@ IN_PROC_BROWSER_TEST_F(PaymentAppBrowserTest, PaymentAppInvocation) {
   registrationIds = GetAllPaymentAppRegistrationIDs();
   ASSERT_EQ(0U, registrationIds.size());
 
-  EXPECT_EQ("https://example.com/", PopConsoleString() /* topLevelOrigin */);
+  EXPECT_EQ("https://example.com/", PopConsoleString() /* topOrigin */);
   EXPECT_EQ("https://example.com/",
             PopConsoleString() /* paymentRequestOrigin */);
   EXPECT_EQ("payment-request-id", PopConsoleString() /* paymentRequestId */);
-  EXPECT_EQ("[{\"supportedMethods\":[\"basic-card\"]}]",
+  EXPECT_EQ("[{\"supportedMethods\":\"basic-card\"}]",
             PopConsoleString() /* methodData */);
   EXPECT_EQ(
-      "{\"currency\":\"USD\",\"currencySystem\":\"urn:iso:std:iso:4217\","
+      "{\"currency\":\"USD\","
       "\"value\":\"55\"}",
       PopConsoleString() /* total */);
   EXPECT_EQ(
-      "[{\"additionalDisplayItems\":[],\"supportedMethods\":[\"basic-card\"],"
-      "\"total\":{\"amount\":{\"currency\":\"USD\",\"currencySystem\":\"urn:"
-      "iso:std:iso:4217\",\"value\":\"55\"},\"label\":\"\",\"pending\":false}}"
+      "[{\"additionalDisplayItems\":[],\"supportedMethods\":\"basic-card\","
+      "\"total\":{\"amount\":{\"currency\":\"USD\","
+      "\"value\":\"55\"},\"label\":\"\",\"pending\":false}}"
       "]",
       PopConsoleString() /* modifiers */);
   EXPECT_EQ("basic-card-payment-app-id",
             PopConsoleString() /* instrumentKey */);
 }
 
-IN_PROC_BROWSER_TEST_F(PaymentAppBrowserTest, PaymentAppOpenWindowFailed) {
+// TODO(crbug.com/869790) Flakes on linux-chromeos-dbg
+#if defined(OS_CHROMEOS) && !defined(NDEBUG)
+#define MAYBE_PaymentAppOpenWindowFailed DISABLED_PaymentAppOpenWindowFailed
+#else
+#define MAYBE_PaymentAppOpenWindowFailed PaymentAppOpenWindowFailed
+#endif
+IN_PROC_BROWSER_TEST_F(PaymentAppBrowserTest,
+                       MAYBE_PaymentAppOpenWindowFailed) {
   RegisterPaymentApp();
 
   std::vector<int64_t> registrationIds = GetAllPaymentAppRegistrationIDs();
@@ -353,21 +394,19 @@ IN_PROC_BROWSER_TEST_F(PaymentAppBrowserTest, PaymentAppOpenWindowFailed) {
   registrationIds = GetAllPaymentAppRegistrationIDs();
   ASSERT_EQ(0U, registrationIds.size());
 
-  EXPECT_EQ("https://example.com/", PopConsoleString() /* topLevelOrigin */);
+  EXPECT_EQ("https://example.com/", PopConsoleString() /* topOrigin */);
   EXPECT_EQ("https://example.com/",
             PopConsoleString() /* paymentRequestOrigin */);
   EXPECT_EQ("payment-request-id", PopConsoleString() /* paymentRequestId */);
-  EXPECT_EQ("[{\"supportedMethods\":[\"https://bobpay.com\"]}]",
+  EXPECT_EQ("[{\"supportedMethods\":\"https://bobpay.com\"}]",
             PopConsoleString() /* methodData */);
+  EXPECT_EQ("{\"currency\":\"USD\",\"value\":\"55\"}",
+            PopConsoleString() /* total */);
   EXPECT_EQ(
-      "{\"currency\":\"USD\",\"currencySystem\":\"urn:iso:std:iso:4217\","
-      "\"value\":\"55\"}",
-      PopConsoleString() /* total */);
-  EXPECT_EQ(
-      "[{\"additionalDisplayItems\":[],\"supportedMethods\":[\"https://"
-      "bobpay.com\"],"
-      "\"total\":{\"amount\":{\"currency\":\"USD\",\"currencySystem\":\"urn:"
-      "iso:std:iso:4217\",\"value\":\"55\"},\"label\":\"\",\"pending\":false}}"
+      "[{\"additionalDisplayItems\":[],\"supportedMethods\":\"https://"
+      "bobpay.com\","
+      "\"total\":{\"amount\":{\"currency\":\"USD\","
+      "\"value\":\"55\"},\"label\":\"\",\"pending\":false}}"
       "]",
       PopConsoleString() /* modifiers */);
   EXPECT_EQ("bobpay-payment-app-id", PopConsoleString() /* instrumentKey */);

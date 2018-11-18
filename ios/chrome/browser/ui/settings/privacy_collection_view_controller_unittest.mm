@@ -9,7 +9,9 @@
 #include "base/memory/ptr_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "components/handoff/pref_names_ios.h"
+#include "components/payments/core/payment_prefs.h"
 #include "components/prefs/pref_service.h"
+#include "components/strings/grit/components_strings.h"
 #include "components/sync_preferences/pref_service_mock_factory.h"
 #include "components/sync_preferences/pref_service_syncable.h"
 #include "ios/chrome/browser/application_context.h"
@@ -23,7 +25,6 @@
 #include "ios/chrome/grit/ios_strings.h"
 #include "ios/chrome/test/ios_chrome_scoped_testing_local_state.h"
 #include "ios/web/public/test/test_web_thread_bundle.h"
-#include "ios/web/public/web_capabilities.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/l10n/l10n_util.h"
 
@@ -43,6 +44,10 @@ class PrivacyCollectionViewControllerTest
     TestChromeBrowserState::Builder test_cbs_builder;
     test_cbs_builder.SetPrefService(CreatePrefService());
     chrome_browser_state_ = test_cbs_builder.Build();
+
+    // Toggle off payments::kCanMakePaymentEnabled.
+    chrome_browser_state_->GetPrefs()->SetBoolean(
+        payments::kCanMakePaymentEnabled, false);
 
     NSUserDefaults* defaults = [NSUserDefaults standardUserDefaults];
     initialValueForSpdyProxyEnabled_ =
@@ -87,7 +92,7 @@ class PrivacyCollectionViewControllerTest
 // and sections.
 TEST_F(PrivacyCollectionViewControllerTest, TestModel) {
   CheckController();
-  EXPECT_EQ(4, NumberOfSections());
+  EXPECT_EQ(5, NumberOfSections());
 
   int sectionIndex = 0;
   EXPECT_EQ(1, NumberOfItemsInSection(sectionIndex));
@@ -103,8 +108,6 @@ TEST_F(PrivacyCollectionViewControllerTest, TestModel) {
   ++sectionIndex;
   NSInteger expectedRows = 2;
 
-  if (web::IsDoNotTrackSupported())
-    expectedRows++;
   EXPECT_EQ(expectedRows, NumberOfItemsInSection(sectionIndex));
 
   CheckSectionHeaderWithId(IDS_IOS_OPTIONS_WEB_SERVICES_LABEL, sectionIndex);
@@ -117,19 +120,15 @@ TEST_F(PrivacyCollectionViewControllerTest, TestModel) {
                              IDS_IOS_OPTIONS_DATA_USAGE_NEVER, sectionIndex,
                              row++);
 
-  if (web::IsDoNotTrackSupported()) {
-    NSString* doNotTrackSubtitle =
-        chrome_browser_state_->GetPrefs()->GetBoolean(prefs::kEnableDoNotTrack)
-            ? l10n_util::GetNSString(IDS_IOS_SETTING_ON)
-            : l10n_util::GetNSString(IDS_IOS_SETTING_OFF);
-    CheckTextCellTitleAndSubtitle(
-        l10n_util::GetNSString(IDS_IOS_OPTIONS_DO_NOT_TRACK_MOBILE),
-        doNotTrackSubtitle, sectionIndex, row++);
-  }
-
   sectionIndex++;
   EXPECT_EQ(1, NumberOfItemsInSection(sectionIndex));
   CheckSectionFooterWithId(IDS_IOS_OPTIONS_PRIVACY_FOOTER, sectionIndex);
+
+  sectionIndex++;
+  EXPECT_EQ(1, NumberOfItemsInSection(sectionIndex));
+  CheckSwitchCellStateAndTitle(
+      NO, l10n_util::GetNSString(IDS_SETTINGS_CAN_MAKE_PAYMENT_TOGGLE_LABEL),
+      sectionIndex, 0);
 
   sectionIndex++;
   EXPECT_EQ(1, NumberOfItemsInSection(sectionIndex));

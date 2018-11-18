@@ -13,8 +13,10 @@ import argparse
 import sys
 
 from git_common import current_branch, branches, upstream, run, hash_one
+import metrics
 
 
+@metrics.collector.collect_metrics('git nav-downstream')
 def main(args):
   parser = argparse.ArgumentParser()
   parser.add_argument('--pick',
@@ -60,8 +62,5 @@ def main(args):
 
 
 if __name__ == '__main__':
-  try:
+  with metrics.collector.print_notice_and_exit():
     sys.exit(main(sys.argv[1:]))
-  except KeyboardInterrupt:
-    sys.stderr.write('interrupted\n')
-    sys.exit(1)

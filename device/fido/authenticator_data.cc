@@ -7,52 +7,44 @@
 #include <utility>
 
 #include "device/fido/attested_credential_data.h"
-#include "device/fido/u2f_parsing_utils.h"
+#include "device/fido/fido_parsing_utils.h"
 
 namespace device {
 
 namespace {
 
-constexpr size_t kApplicationParameterLength = 32;
-constexpr size_t kAuthDataCounterLength = 4;
-constexpr size_t kAaguidOffset =
-    32 /* RP ID hash */ + 1 /* flags */ + 4 /* signature counter */;
+constexpr size_t kAttestedCredentialDataOffset =
+    kRpIdHashLength + kFlagsLength + kSignCounterLength;
 
 }  // namespace
 
 // static
 base::Optional<AuthenticatorData> AuthenticatorData::DecodeAuthenticatorData(
     base::span<const uint8_t> auth_data) {
-  if (auth_data.size() < kAaguidOffset)
+  if (auth_data.size() < kAttestedCredentialDataOffset)
     return base::nullopt;
-  std::vector<uint8_t> application_parameter(
-      auth_data.data(), auth_data.data() + kApplicationParameterLength);
-  uint8_t flag_byte = auth_data[kApplicationParameterLength];
-  std::vector<uint8_t> counter(
-      auth_data.data() + kApplicationParameterLength + 1,
-      auth_data.data() + kApplicationParameterLength + 1 +
-          kAuthDataCounterLength);
+  auto application_parameter = auth_data.first<kRpIdHashLength>();
+  uint8_t flag_byte = auth_data[kRpIdHashLength];
+  auto counter =
+      auth_data.subspan<kRpIdHashLength + kFlagsLength, kSignCounterLength>();
   auto attested_credential_data =
       AttestedCredentialData::DecodeFromCtapResponse(
-          auth_data.subspan(kAaguidOffset));
+          auth_data.subspan(kAttestedCredentialDataOffset));
 
-  return AuthenticatorData(std::move(application_parameter), flag_byte,
-                           std::move(counter),
+  return AuthenticatorData(application_parameter, flag_byte, counter,
                            std::move(attested_credential_data));
 }
 
 AuthenticatorData::AuthenticatorData(
-    std::vector<uint8_t> application_parameter,
+    base::span<const uint8_t, kRpIdHashLength> application_parameter,
     uint8_t flags,
-    std::vector<uint8_t> counter,
+    base::span<const uint8_t, kSignCounterLength> counter,
     base::Optional<AttestedCredentialData> data)
-    : application_parameter_(std::move(application_parameter)),
+    : application_parameter_(
+          fido_parsing_utils::Materialize(application_parameter)),
       flags_(flags),
-      counter_(std::move(counter)),
-      attested_data_(std::move(data)) {
-  // TODO(kpaulhamus): use std::array for these small, fixed-sized vectors.
-  CHECK_EQ(counter_.size(), 4u);
-}
+      counter_(fido_parsing_utils::Materialize(counter)),
+      attested_data_(std::move(data)) {}
 
 AuthenticatorData::AuthenticatorData(AuthenticatorData&& other) = default;
 AuthenticatorData& AuthenticatorData::operator=(AuthenticatorData&& other) =
@@ -69,14 +61,14 @@ void AuthenticatorData::DeleteDeviceAaguid() {
 
 std::vector<uint8_t> AuthenticatorData::SerializeToByteArray() const {
   std::vector<uint8_t> authenticator_data;
-  u2f_parsing_utils::Append(&authenticator_data, application_parameter_);
+  fido_parsing_utils::Append(&authenticator_data, application_parameter_);
   authenticator_data.insert(authenticator_data.end(), flags_);
-  u2f_parsing_utils::Append(&authenticator_data, counter_);
+  fido_parsing_utils::Append(&authenticator_data, counter_);
   if (attested_data_) {
     // Attestations are returned in registration responses but not in assertion
     // responses.
-    u2f_parsing_utils::Append(&authenticator_data,
-                              attested_data_->SerializeAsBytes());
+    fido_parsing_utils::Append(&authenticator_data,
+                               attested_data_->SerializeAsBytes());
   }
   return authenticator_data;
 }

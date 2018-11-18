@@ -38,26 +38,26 @@ class IOSChromeSyncClient : public syncer::SyncClient {
   ~IOSChromeSyncClient() override;
 
   // SyncClient implementation.
-  void Initialize() override;
   syncer::SyncService* GetSyncService() override;
   PrefService* GetPrefService() override;
   base::FilePath GetLocalSyncBackendFolder() override;
+  syncer::ModelTypeStoreService* GetModelTypeStoreService() override;
   bookmarks::BookmarkModel* GetBookmarkModel() override;
   favicon::FaviconService* GetFaviconService() override;
   history::HistoryService* GetHistoryService() override;
+  sync_sessions::SessionSyncService* GetSessionSyncService() override;
   bool HasPasswordStore() override;
   base::Closure GetPasswordStateChangedCallback() override;
-  syncer::SyncApiComponentFactory::RegisterDataTypesMethod
-  GetRegisterPlatformTypesCallback() override;
+  syncer::DataTypeController::TypeVector CreateDataTypeControllers(
+      syncer::LocalDeviceInfoProvider* local_device_info_provider) override;
   autofill::PersonalDataManager* GetPersonalDataManager() override;
   invalidation::InvalidationService* GetInvalidationService() override;
   BookmarkUndoService* GetBookmarkUndoServiceIfExists() override;
   scoped_refptr<syncer::ExtensionsActivity> GetExtensionsActivity() override;
-  sync_sessions::SyncSessionsClient* GetSyncSessionsClient() override;
   base::WeakPtr<syncer::SyncableService> GetSyncableServiceForType(
       syncer::ModelType type) override;
-  base::WeakPtr<syncer::ModelTypeSyncBridge> GetSyncBridgeForModelType(
-      syncer::ModelType type) override;
+  base::WeakPtr<syncer::ModelTypeControllerDelegate>
+  GetControllerDelegateForModelType(syncer::ModelType type) override;
   scoped_refptr<syncer::ModelSafeWorker> CreateModelWorkerForGroup(
       syncer::ModelSafeGroup group) override;
   syncer::SyncApiComponentFactory* GetSyncApiComponentFactory() override;
@@ -77,15 +77,12 @@ class IOSChromeSyncClient : public syncer::SyncClient {
 
   // Members that must be fetched on the UI thread but accessed on their
   // respective backend threads.
-  scoped_refptr<autofill::AutofillWebDataService> web_data_service_;
+  scoped_refptr<autofill::AutofillWebDataService> profile_web_data_service_;
+  scoped_refptr<autofill::AutofillWebDataService> account_web_data_service_;
   scoped_refptr<password_manager::PasswordStore> password_store_;
 
   // The task runner for the |web_data_service_|, if any.
   scoped_refptr<base::SingleThreadTaskRunner> db_thread_;
-
-  std::unique_ptr<sync_sessions::SyncSessionsClient> sync_sessions_client_;
-
-  base::WeakPtrFactory<IOSChromeSyncClient> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(IOSChromeSyncClient);
 };

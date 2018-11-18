@@ -19,7 +19,6 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
-#include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/win/windows_version.h"
@@ -92,15 +91,23 @@ AudioManagerWin::AudioManagerWin(std::unique_ptr<AudioThread> audio_thread,
 
   SetMaxOutputStreamsAllowed(kMaxOutputStreams);
 
-  // WARNING: This is executed on the UI loop, do not add any code here which
-  // loads libraries or attempts to call out into the OS.  Instead add such code
-  // to the InitializeOnAudioThread() method below.
+  // WARNING: This may be executed on the UI loop, do not add any code here
+  // which loads libraries or attempts to call out into the OS.  Instead add
+  // such code to the InitializeOnAudioThread() method below.
+
+  // In case we are already on the audio thread (i.e. when running out of
+  // process audio), don't post.
+  if (GetTaskRunner()->BelongsToCurrentThread()) {
+    this->InitializeOnAudioThread();
+    return;
+  }
 
   // Task must be posted last to avoid races from handing out "this" to the
-  // audio thread.
+  // audio thread. Unretained is safe since we join the audio thread before
+  // destructing |this|.
   GetTaskRunner()->PostTask(
-      FROM_HERE, base::Bind(&AudioManagerWin::InitializeOnAudioThread,
-                            base::Unretained(this)));
+      FROM_HERE, base::BindOnce(&AudioManagerWin::InitializeOnAudioThread,
+                                base::Unretained(this)));
 }
 
 AudioManagerWin::~AudioManagerWin() = default;
@@ -172,7 +179,7 @@ AudioParameters AudioManagerWin::GetInputStreamParameters(
     // code path somehow for a configuration - e.g. tab capture).
     parameters =
         AudioParameters(AudioParameters::AUDIO_PCM_LINEAR,
-                        CHANNEL_LAYOUT_STEREO, 48000, 16, kFallbackBufferSize);
+                        CHANNEL_LAYOUT_STEREO, 48000, kFallbackBufferSize);
   }
 
   int user_buffer_size = GetUserBufferSize();
@@ -275,7 +282,6 @@ AudioParameters AudioManagerWin::GetPreferredOutputStreamParameters(
   ChannelLayout channel_layout = CHANNEL_LAYOUT_STEREO;
   int sample_rate = 48000;
   int buffer_size = kFallbackBufferSize;
-  int bits_per_sample = 16;
   int effects = AudioParameters::NO_EFFECTS;
 
   // TODO(henrika): Remove kEnableExclusiveAudio and related code. It doesn't
@@ -307,7 +313,6 @@ AudioParameters AudioManagerWin::GetPreferredOutputStreamParameters(
       return AudioParameters();
     }
 
-    bits_per_sample = params.bits_per_sample();
     buffer_size = params.frames_per_buffer();
     channel_layout = params.channel_layout();
     sample_rate = params.sample_rate();
@@ -350,7 +355,7 @@ AudioParameters AudioManagerWin::GetPreferredOutputStreamParameters(
     buffer_size = user_buffer_size;
 
   AudioParameters params(AudioParameters::AUDIO_PCM_LOW_LATENCY, channel_layout,
-                         sample_rate, bits_per_sample, buffer_size);
+                         sample_rate, buffer_size);
   params.set_effects(effects);
   return params;
 }

@@ -5,104 +5,67 @@
 import json
 
 import mock
-import webapp2
-import webtest
 
-from dashboard.common import testing_common
 from dashboard.pinpoint.handlers import migrate
 from dashboard.pinpoint.models import job
 from dashboard.pinpoint.models import job_state
+from dashboard.pinpoint import test
 
 
-class MigrateTest(testing_common.TestCase):
+class MigrateTest(test.TestCase):
 
   def setUp(self):
     super(MigrateTest, self).setUp()
-
-    app = webapp2.WSGIApplication([
-        webapp2.Route(r'/migrate', migrate.Migrate),
-    ])
-    self.testapp = webtest.TestApp(app)
 
     patcher = mock.patch.object(migrate, 'datetime', _DatetimeStub())
     self.addCleanup(patcher.stop)
     patcher.start()
 
     for _ in xrange(20):
-      job.Job.New({}, [], False).put()
+      job.Job.New((), ())
 
-  def testNoMigration(self):
-    response = self.testapp.get('/migrate', status=200)
+  def testGet_NoMigration(self):
+    response = self.testapp.get('/api/migrate', status=200)
     self.assertEqual(response.normal_body, '{}')
 
-  def testStart(self):
-    expected = json.dumps({
+  def testGet_MigrationInProgress(self):
+    expected = {
         'count': 0,
         'started': 'Date Time',
         'total': 20,
-    })
+    }
 
-    response = self.testapp.post('/migrate', status=200)
-    self.assertEqual(response.normal_body, expected)
+    response = self.testapp.post('/api/migrate', status=200)
+    self.assertEqual(response.normal_body, json.dumps(expected))
 
-    response = self.testapp.get('/migrate', status=200)
-    self.assertEqual(response.normal_body, expected)
+    response = self.testapp.get('/api/migrate', status=200)
+    self.assertEqual(response.normal_body, json.dumps(expected))
 
-    tasks = self.GetTaskQueueTasks('default')
-    self.assertEqual(len(tasks), 1)
+  def testPost_EndToEnd(self):
+    expected = {
+        'count': 0,
+        'started': 'Date Time',
+        'total': 20,
+    }
 
-    task = tasks.pop()
-    self.assertEqual(task['url'], '/api/migrate')
-    self.assertEqual(task['method'], 'POST')
-    self.assertFalse(task['body'])
+    job_state.JobState.__setstate__ = _JobStateSetState
 
-  def testContinue(self):
-    expected = json.dumps({
+    response = self.testapp.post('/api/migrate', status=200)
+    self.assertEqual(response.normal_body, json.dumps(expected))
+
+    expected = {
         'count': 10,
         'started': 'Date Time',
         'total': 20,
-    })
+    }
 
-    self.testapp.post('/migrate', status=200)
-    response = self.testapp.post('/migrate', status=200)
-    self.assertEqual(response.normal_body, expected)
+    task_responses = self.ExecuteTaskQueueTasks(
+        '/api/migrate', 'default', recurse=False)
+    self.assertEqual(task_responses[0].normal_body, json.dumps(expected))
 
-    response = self.testapp.get('/migrate', status=200)
-    self.assertEqual(response.normal_body, expected)
-
-    tasks = self.GetTaskQueueTasks('default')
-    self.assertEqual(len(tasks), 2)
-
-    task = tasks.pop()
-    self.assertEqual(task['url'], '/api/migrate')
-    self.assertEqual(task['method'], 'POST')
-    self.assertTrue(task['body'])
-
-  def testComplete(self):
-    self.testapp.post('/migrate', status=200)
-    self.testapp.post('/migrate', status=200)
-    params = {'cursor': 'Ch8SGWoMdGVzdGJlZC10ZXN0cgkLEgNKb2IYCgwYACAA'}
-    response = self.testapp.post('/migrate', params, status=200)
-    self.assertEqual(response.normal_body, '{}')
-
-    response = self.testapp.get('/migrate', status=200)
-    self.assertEqual(response.normal_body, '{}')
-
-    tasks = self.GetTaskQueueTasks('default')
-    self.assertEqual(len(tasks), 2)
-
-    task = tasks.pop()
-    self.assertEqual(task['url'], '/api/migrate')
-    self.assertEqual(task['method'], 'POST')
-    self.assertTrue(task['body'])
-
-  def testJobsMigrated(self):
-    job_state.JobState.__setstate__ = _JobStateSetState
-
-    self.testapp.post('/migrate', status=200)
-    self.testapp.post('/migrate', status=200)
-    params = {'cursor': 'Ch8SGWoMdGVzdGJlZC10ZXN0cgkLEgNKb2IYCgwYACAA'}
-    self.testapp.post('/migrate', params, status=200)
+    task_responses = self.ExecuteTaskQueueTasks(
+        '/api/migrate', 'default', recurse=False)
+    self.assertEqual(task_responses[0].normal_body, '{}')
 
     del job_state.JobState.__setstate__
 

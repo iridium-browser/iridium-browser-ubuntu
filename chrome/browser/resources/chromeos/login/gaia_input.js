@@ -9,7 +9,6 @@ Polymer((function() {
     is: 'gaia-input',
 
     properties: {
-      label: String,
       value: {notify: true, observer: 'updateDomainVisibility_', type: String},
 
       type: {observer: 'typeChanged_', type: String},
@@ -20,9 +19,9 @@ Polymer((function() {
 
       required: Boolean,
 
-      error: String,
+      isInvalid: {type: Boolean, notify: true},
 
-      isInvalid: Boolean
+      pattern: String
     },
 
     attached: function() {
@@ -47,7 +46,7 @@ Polymer((function() {
     },
 
     checkValidity: function() {
-      var valid = this.$.input.validate();
+      var valid = this.$.ironInput.validate();
       this.isInvalid = !valid;
       return valid;
     },
@@ -57,10 +56,14 @@ Polymer((function() {
         this.$.input.pattern = INPUT_EMAIL_PATTERN;
         this.$.input.type = 'text';
       } else {
-        this.$.input.removeAttribute('pattern');
         this.$.input.type = this.type;
+        if (this.pattern) {
+          this.$.input.pattern = this.pattern;
+        } else {
+          this.$.input.removeAttribute('pattern');
+        }
       }
       this.updateDomainVisibility_();
-    }
+    },
   };
 })());

@@ -11,16 +11,14 @@ import gperf
 import json5_generator
 import template_expander
 
-from name_utilities import upper_camel_case
-
 
 class AtRuleNamesWriter(json5_generator.Writer):
     """
     Generates AtRuleNames. This class provides utility methods for parsing
     @rules (e.g. @font-face, @viewport, etc)
     """
-    def __init__(self, json5_file_paths):
-        super(AtRuleNamesWriter, self).__init__(json5_file_paths)
+    def __init__(self, json5_file_paths, output_dir):
+        super(AtRuleNamesWriter, self).__init__(json5_file_paths, output_dir)
 
         self._outputs = {
             'at_rule_descriptors.h': self.generate_header,
@@ -38,13 +36,11 @@ class AtRuleNamesWriter(json5_generator.Writer):
         chars_used = 0
         self._longest_name_length = 0
         for offset, descriptor in enumerate(self._descriptors):
-            descriptor['upper_camel_name'] = upper_camel_case(
-                descriptor['name'])
             descriptor['enum_value'] = first_descriptor_id + offset
             self._character_offsets.append(chars_used)
-            chars_used += len(descriptor['name'])
+            chars_used += len(descriptor['name'].original)
             self._longest_name_length = max(
-                len(descriptor['name']),
+                len(descriptor['name'].original),
                 len(descriptor['alias']),
                 self._longest_name_length)
 

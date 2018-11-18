@@ -37,6 +37,9 @@ public class CastWebContentsComponent {
      */
     public interface OnKeyDownHandler { void onKeyDown(int keyCode); }
 
+    /**
+     * Callback interface for when UI events occur.
+     */
     public interface SurfaceEventHandler {
         void onVisibilityChange(int visibilityType);
         boolean consumeGesture(int gestureType);
@@ -65,40 +68,38 @@ public class CastWebContentsComponent {
         void stop(Context context);
     }
 
-    private class ActivityDelegate implements Delegate {
+    @VisibleForTesting
+    class ActivityDelegate implements Delegate {
         private static final String TAG = "cr_CastWebContent_AD";
-        private boolean mEnableTouchInput;
-
-        public ActivityDelegate(boolean enableTouchInput) {
-            mEnableTouchInput = enableTouchInput;
-        }
+        private boolean mStarted;
 
         @Override
         public void start(StartParams params) {
+            if (mStarted) return; // No-op if already started.
             if (DEBUG) Log.d(TAG, "start: SHOW_WEB_CONTENT in activity");
-            startCastActivity(params.context, params.webContents, mEnableTouchInput);
+            startCastActivity(params.context, params.webContents, mEnableTouchInput,
+                    mIsRemoteControlMode, mTurnOnScreen);
+            mStarted = true;
         }
 
         @Override
         public void stop(Context context) {
             sendStopWebContentEvent();
+            mStarted = false;
         }
     }
 
     private class FragmentDelegate implements Delegate {
         private static final String TAG = "cr_CastWebContent_FD";
-        private boolean mEnableTouchInput;
-
-        public FragmentDelegate(boolean enableTouchInput) {
-            mEnableTouchInput = enableTouchInput;
-        }
 
         @Override
         public void start(StartParams params) {
             if (!sendIntent(CastWebContentsIntentUtils.requestStartCastFragment(params.webContents,
-                        params.appId, params.visibilityPriority, mEnableTouchInput, mInstanceId))) {
+                        params.appId, params.visibilityPriority, mEnableTouchInput, mInstanceId,
+                        mIsRemoteControlMode, mTurnOnScreen))) {
                 // No intent receiver to handle SHOW_WEB_CONTENT in fragment
-                startCastActivity(params.context, params.webContents, mEnableTouchInput);
+                startCastActivity(params.context, params.webContents, mEnableTouchInput,
+                        mIsRemoteControlMode, mTurnOnScreen);
             }
         }
 
@@ -108,9 +109,10 @@ public class CastWebContentsComponent {
         }
     }
 
-    private void startCastActivity(Context context, WebContents webContents, boolean enableTouch) {
+    private void startCastActivity(Context context, WebContents webContents, boolean enableTouch,
+            boolean isRemoteControlMode, boolean turnOnScreen) {
         Intent intent = CastWebContentsIntentUtils.requestStartCastActivity(
-                context, webContents, enableTouch, mInstanceId);
+                context, webContents, enableTouch, isRemoteControlMode, turnOnScreen, mInstanceId);
         if (DEBUG) Log.d(TAG, "start activity by intent: " + intent);
         context.startActivity(intent);
     }
@@ -161,31 +163,41 @@ public class CastWebContentsComponent {
     private final Controller<WebContents> mHasWebContentsState = new Controller<>();
     private Delegate mDelegate;
     private boolean mStarted;
+    private boolean mEnableTouchInput;
+    private final boolean mIsRemoteControlMode;
+    private final boolean mTurnOnScreen;
 
     public CastWebContentsComponent(String instanceId,
             OnComponentClosedHandler onComponentClosedHandler, OnKeyDownHandler onKeyDownHandler,
-            SurfaceEventHandler surfaceEventHandler, boolean isHeadless, boolean enableTouchInput) {
+            SurfaceEventHandler surfaceEventHandler, boolean isHeadless, boolean enableTouchInput,
+            boolean isRemoteControlMode, boolean turnOnScreen) {
         if (DEBUG) {
             Log.d(TAG,
                     "New CastWebContentsComponent. Instance ID: " + instanceId + "; isHeadless: "
-                            + isHeadless + "; enableTouchInput:" + enableTouchInput);
+                            + isHeadless + "; enableTouchInput:" + enableTouchInput
+                            + "; isRemoteControlMode:" + isRemoteControlMode);
         }
+
         mComponentClosedHandler = onComponentClosedHandler;
+        mEnableTouchInput = enableTouchInput;
         mKeyDownHandler = onKeyDownHandler;
         mInstanceId = instanceId;
         mSurfaceEventHandler = surfaceEventHandler;
+        mIsRemoteControlMode = isRemoteControlMode;
+        mTurnOnScreen = turnOnScreen;
+
         if (BuildConfig.DISPLAY_WEB_CONTENTS_IN_SERVICE || isHeadless) {
             if (DEBUG) Log.d(TAG, "Creating service delegate...");
             mDelegate = new ServiceDelegate();
         } else if (BuildConfig.ENABLE_CAST_FRAGMENT) {
             if (DEBUG) Log.d(TAG, "Creating fragment delegate...");
-            mDelegate = new FragmentDelegate(enableTouchInput);
+            mDelegate = new FragmentDelegate();
         } else {
             if (DEBUG) Log.d(TAG, "Creating activity delegate...");
-            mDelegate = new ActivityDelegate(enableTouchInput);
+            mDelegate = new ActivityDelegate();
         }
 
-        mHasWebContentsState.watch(() -> {
+        mHasWebContentsState.subscribe(x -> {
             final IntentFilter filter = new IntentFilter();
             Uri instanceUri = CastWebContentsIntentUtils.getInstanceUri(instanceId);
             filter.addDataScheme(instanceUri.getScheme());
@@ -289,8 +301,9 @@ public class CastWebContentsComponent {
         sendIntentSync(CastWebContentsIntentUtils.requestMoveOut(mInstanceId));
     }
 
-    public void enableTouchInput(String instanceId, boolean enabled) {
-        if (DEBUG) Log.d(TAG, "enableTouchInput");
+    public void enableTouchInput(boolean enabled) {
+        if (DEBUG) Log.d(TAG, "enableTouchInput enabled:" + enabled);
+        mEnableTouchInput = enabled;
         sendIntentSync(CastWebContentsIntentUtils.enableTouchInput(mInstanceId, enabled));
     }
 

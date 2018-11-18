@@ -318,7 +318,7 @@ void HistoryURLProviderTest::RunTest(
   matches_ = autocomplete_->matches();
   if (sort_matches_) {
     TemplateURLService* service = client_->GetTemplateURLService();
-    for (ACMatches::iterator i = matches_.begin(); i != matches_.end(); ++i) {
+    for (auto i = matches_.begin(); i != matches_.end(); ++i) {
       i->ComputeStrippedDestinationURL(input, service);
     }
     AutocompleteResult::SortAndDedupMatches(input.current_page_classification(),
@@ -1236,7 +1236,7 @@ std::unique_ptr<HistoryURLProviderParams> BuildHistoryURLProviderParams(
   history_match.url_info.set_url(GURL(url_text));
   history_match.match_in_scheme = match_in_scheme;
   auto params = std::make_unique<HistoryURLProviderParams>(
-      input, true, AutocompleteMatch(), nullptr, SearchTermsData());
+      input, true, AutocompleteMatch(), nullptr, nullptr);
   params->matches.push_back(history_match);
 
   return params;

@@ -19,8 +19,8 @@ import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.UrlUtils;
 import org.chromium.blink_public.web.WebCursorInfoType;
-import org.chromium.content.browser.test.ContentJUnit4ClassRunner;
-import org.chromium.content.browser.test.util.DOMUtils;
+import org.chromium.content_public.browser.test.ContentJUnit4ClassRunner;
+import org.chromium.content_public.browser.test.util.DOMUtils;
 import org.chromium.content_shell.ShellViewAndroidDelegate;
 import org.chromium.content_shell.ShellViewAndroidDelegate.OnCursorUpdateHelper;
 import org.chromium.content_shell_apk.ContentShellActivity;
@@ -84,8 +84,10 @@ public class ContentViewPointerTypeTest {
                 SystemClock.uptimeMillis() + 1, MotionEvent.ACTION_HOVER_MOVE, 1, pointerProperties,
                 pointerCoords, 0, 0, 1.0f, 1.0f, 0, 0, InputDevice.SOURCE_MOUSE, 0);
         cursorMoveEvent.setSource(InputDevice.SOURCE_MOUSE);
-        mActivityTestRule.getContentViewCore().getContainerView().dispatchGenericMotionEvent(
-                cursorMoveEvent);
+        mActivityTestRule.getWebContents()
+                .getViewAndroidDelegate()
+                .getContainerView()
+                .dispatchGenericMotionEvent(cursorMoveEvent);
     }
 
     private void checkPointerTypeForNode(final String nodeId, final int type) throws Throwable {
@@ -96,7 +98,7 @@ public class ContentViewPointerTypeTest {
         mActivityTestRule.runOnUiThread(new Runnable() {
             @Override
             public void run() {
-                RenderCoordinates coord = mActivityTestRule.getRenderCoordinates();
+                RenderCoordinatesImpl coord = mActivityTestRule.getRenderCoordinates();
                 float x = coord.fromLocalCssToPix((float) (rect.left + rect.right) / 2.0f);
                 float y = coord.fromLocalCssToPix((float) (rect.top + rect.bottom) / 2.0f);
                 moveCursor(x, y);

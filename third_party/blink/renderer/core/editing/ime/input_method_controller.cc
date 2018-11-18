@@ -28,6 +28,7 @@
 
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
+#include "third_party/blink/renderer/core/dom/events/event_dispatcher.h"
 #include "third_party/blink/renderer/core/dom/events/scoped_event_queue.h"
 #include "third_party/blink/renderer/core/dom/range.h"
 #include "third_party/blink/renderer/core/dom/text.h"
@@ -46,6 +47,7 @@
 #include "third_party/blink/renderer/core/editing/state_machines/backward_code_point_state_machine.h"
 #include "third_party/blink/renderer/core/editing/state_machines/forward_code_point_state_machine.h"
 #include "third_party/blink/renderer/core/events/composition_event.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/html/forms/html_input_element.h"
 #include "third_party/blink/renderer/core/html/forms/html_text_area_element.h"
@@ -68,7 +70,7 @@ void DispatchCompositionUpdateEvent(LocalFrame& frame, const String& text) {
 
   CompositionEvent* event = CompositionEvent::Create(
       EventTypeNames::compositionupdate, frame.DomWindow(), text);
-  target->DispatchEvent(event);
+  target->DispatchEvent(*event);
 }
 
 void DispatchCompositionEndEvent(LocalFrame& frame, const String& text) {
@@ -83,7 +85,7 @@ void DispatchCompositionEndEvent(LocalFrame& frame, const String& text) {
 
   CompositionEvent* event = CompositionEvent::Create(
       EventTypeNames::compositionend, frame.DomWindow(), text);
-  EventDispatcher::DispatchScopedEvent(*target, event);
+  EventDispatcher::DispatchScopedEvent(*target, *event);
 }
 
 bool NeedsIncrementalInsertion(const LocalFrame& frame,
@@ -105,19 +107,19 @@ void DispatchBeforeInputFromComposition(EventTarget* target,
                                         const String& data) {
   if (!target)
     return;
-  // TODO(chongz): Pass appropriate |ranges| after it's defined on spec.
+  // TODO(editing-dev): Pass appropriate |ranges| after it's defined on spec.
   // http://w3c.github.io/editing/input-events.html#dom-inputevent-inputtype
   InputEvent* before_input_event = InputEvent::CreateBeforeInput(
       input_type, data, InputEvent::kNotCancelable,
       InputEvent::EventIsComposing::kIsComposing, nullptr);
-  target->DispatchEvent(before_input_event);
+  target->DispatchEvent(*before_input_event);
 }
 
 // Used to insert/replace text during composition update and confirm
 // composition.
 // Procedure:
-//   1. Fire 'beforeinput' event for (TODO(chongz): deleted composed text) and
-//      inserted text
+//   1. Fire 'beforeinput' event for (TODO(editing-dev): deleted composed text)
+//      and inserted text
 //   2. Fire 'compositionupdate' event
 //   3. Fire TextEvent and modify DOM
 //   4. Fire 'input' event; dispatched by Editor::AppliedEditing()
@@ -177,9 +179,9 @@ void InsertTextDuringCompositionWithEvents(
                                 composition_type, is_incremental_insertion);
       break;
     case TypingCommand::TextCompositionType::kTextCompositionCancel:
-      // TODO(chongz): Use TypingCommand::insertText after TextEvent was
+      // TODO(editing-dev): Use TypingCommand::insertText after TextEvent was
       // removed. (Removed from spec since 2012)
-      // See TextEvent.idl.
+      // See text_event.idl.
       frame.GetEventHandler().HandleTextInputEvent(text, nullptr,
                                                    kTextEventInputComposition);
       break;
@@ -396,7 +398,8 @@ void InputMethodController::Clear() {
     composition_range_->setStart(&GetDocument(), 0);
     composition_range_->collapse(true);
   }
-  GetDocument().Markers().RemoveMarkersOfTypes(DocumentMarker::kComposition);
+  GetDocument().Markers().RemoveMarkersOfTypes(
+      DocumentMarker::MarkerTypes::Composition());
 }
 
 void InputMethodController::ContextDestroyed(Document*) {
@@ -564,8 +567,8 @@ bool InputMethodController::ReplaceComposition(const String& text) {
 }
 
 // relativeCaretPosition is relative to the end of the text.
-static int ComputeAbsoluteCaretPosition(size_t text_start,
-                                        size_t text_length,
+static int ComputeAbsoluteCaretPosition(int text_start,
+                                        int text_length,
                                         int relative_caret_position) {
   return text_start + text_length + relative_caret_position;
 }
@@ -734,7 +737,7 @@ bool InputMethodController::DispatchCompositionStartEvent(const String& text) {
 
   CompositionEvent* event = CompositionEvent::Create(
       EventTypeNames::compositionstart, GetFrame().DomWindow(), text);
-  target->DispatchEvent(event);
+  target->DispatchEvent(*event);
 
   return IsAvailable();
 }
@@ -905,7 +908,7 @@ void InputMethodController::SetComposition(
   if (ime_text_spans.IsEmpty()) {
     GetDocument().Markers().AddCompositionMarker(
         CompositionEphemeralRange(), Color::kTransparent,
-        ui::mojom::ImeTextSpanThickness::kThin,
+        ws::mojom::ImeTextSpanThickness::kThin,
         LayoutTheme::GetTheme().PlatformDefaultCompositionBackgroundColor());
     return;
   }
@@ -1153,7 +1156,7 @@ void InputMethodController::ExtendSelectionAndDelete(int before, int after) {
                                    .ComputeVisibleSelectionInDOMTreeDeprecated()
                                    .End() &&
            before <= static_cast<int>(selection_offsets.Start()));
-  // TODO(chongz): Find a way to distinguish Forward and Backward.
+  // TODO(editing-dev): Find a way to distinguish Forward and Backward.
   ignore_result(DeleteSelection());
 }
 
@@ -1389,9 +1392,6 @@ int InputMethodController::ComputeWebTextInputNextPreviousFlags() const {
 }
 
 WebTextInputMode InputMethodController::InputModeOfFocusedElement() const {
-  if (!RuntimeEnabledFeatures::InputModeAttributeEnabled())
-    return kWebTextInputModeDefault;
-
   AtomicString mode = GetInputModeAttribute(GetDocument().FocusedElement());
 
   if (mode.IsEmpty())

@@ -9,7 +9,7 @@
 #include "base/test/launcher/unit_test_launcher.h"
 #include "base/test/test_suite.h"
 #include "build/build_config.h"
-#include "mojo/edk/embedder/embedder.h"
+#include "mojo/core/embedder/embedder.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_paths.h"
 
@@ -51,7 +51,7 @@ void UIBaseTestSuite::Initialize() {
 
 #if defined(OS_MACOSX) && !defined(OS_IOS)
   base::FilePath exe_path;
-  PathService::Get(base::DIR_EXE, &exe_path);
+  base::PathService::Get(base::DIR_EXE, &exe_path);
 
   mock_cr_app::RegisterMockCrApp();
 
@@ -74,13 +74,13 @@ void UIBaseTestSuite::Initialize() {
   // locale.pak get populated by later build steps. To avoid clobbering them,
   // load the test .pak files directly.
   base::FilePath assets_path;
-  PathService::Get(base::DIR_ASSETS, &assets_path);
+  base::PathService::Get(base::DIR_ASSETS, &assets_path);
   ui::ResourceBundle::InitSharedInstanceWithPakPath(
       assets_path.AppendASCII("ui_test.pak"));
 
   // ui_base_unittests can't depend on the locales folder which Chrome will make
   // later, so use the path created by ui_test_pak.
-  PathService::Override(ui::DIR_LOCALES, assets_path.AppendASCII("ui"));
+  base::PathService::Override(ui::DIR_LOCALES, assets_path.AppendASCII("ui"));
 #endif
 }
 
@@ -98,7 +98,7 @@ void UIBaseTestSuite::Shutdown() {
 int main(int argc, char** argv) {
   UIBaseTestSuite test_suite(argc, argv);
 
-  mojo::edk::Init();
+  mojo::core::Init();
   return base::LaunchUnitTests(
       argc, argv,
       base::BindOnce(&UIBaseTestSuite::Run, base::Unretained(&test_suite)));

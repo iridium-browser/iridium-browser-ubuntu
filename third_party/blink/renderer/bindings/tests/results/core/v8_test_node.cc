@@ -8,18 +8,19 @@
 // DO NOT MODIFY!
 
 // clang-format off
-#include "v8_test_node.h"
+#include "third_party/blink/renderer/bindings/tests/results/core/v8_test_node.h"
 
 #include "base/memory/scoped_refptr.h"
-#include "bindings/core/v8/exception_state.h"
-#include "bindings/core/v8/idl_types.h"
-#include "bindings/core/v8/native_value_traits_impl.h"
-#include "bindings/core/v8/v8_dom_configuration.h"
-#include "core/execution_context/execution_context.h"
-#include "core/frame/local_dom_window.h"
-#include "platform/bindings/runtime_call_stats.h"
-#include "platform/bindings/v8_object_constructor.h"
-#include "platform/wtf/get_ptr.h"
+#include "third_party/blink/renderer/bindings/core/v8/idl_types.h"
+#include "third_party/blink/renderer/bindings/core/v8/native_value_traits_impl.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_dom_configuration.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
+#include "third_party/blink/renderer/platform/bindings/exception_messages.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
+#include "third_party/blink/renderer/platform/bindings/runtime_call_stats.h"
+#include "third_party/blink/renderer/platform/bindings/v8_object_constructor.h"
+#include "third_party/blink/renderer/platform/wtf/get_ptr.h"
 
 namespace blink {
 
@@ -237,10 +238,10 @@ void V8TestNode::hrefByteStringAttributeSetterCallback(const v8::FunctionCallbac
 }
 
 static const V8DOMConfiguration::AccessorConfiguration V8TestNodeAccessors[] = {
-    { "href", V8TestNode::hrefAttributeGetterCallback, V8TestNode::hrefAttributeSetterCallback, V8PrivateProperty::kNoCachedAccessor, static_cast<v8::PropertyAttribute>(v8::None), V8DOMConfiguration::kOnPrototype, V8DOMConfiguration::kCheckHolder, V8DOMConfiguration::kHasSideEffect, V8DOMConfiguration::kAllWorlds },
-    { "hrefThrows", V8TestNode::hrefThrowsAttributeGetterCallback, V8TestNode::hrefThrowsAttributeSetterCallback, V8PrivateProperty::kNoCachedAccessor, static_cast<v8::PropertyAttribute>(v8::None), V8DOMConfiguration::kOnPrototype, V8DOMConfiguration::kCheckHolder, V8DOMConfiguration::kHasSideEffect, V8DOMConfiguration::kAllWorlds },
-    { "hrefCallWith", V8TestNode::hrefCallWithAttributeGetterCallback, V8TestNode::hrefCallWithAttributeSetterCallback, V8PrivateProperty::kNoCachedAccessor, static_cast<v8::PropertyAttribute>(v8::None), V8DOMConfiguration::kOnPrototype, V8DOMConfiguration::kCheckHolder, V8DOMConfiguration::kHasSideEffect, V8DOMConfiguration::kAllWorlds },
-    { "hrefByteString", V8TestNode::hrefByteStringAttributeGetterCallback, V8TestNode::hrefByteStringAttributeSetterCallback, V8PrivateProperty::kNoCachedAccessor, static_cast<v8::PropertyAttribute>(v8::None), V8DOMConfiguration::kOnPrototype, V8DOMConfiguration::kCheckHolder, V8DOMConfiguration::kHasSideEffect, V8DOMConfiguration::kAllWorlds },
+    { "href", V8TestNode::hrefAttributeGetterCallback, V8TestNode::hrefAttributeSetterCallback, V8PrivateProperty::kNoCachedAccessor, static_cast<v8::PropertyAttribute>(v8::None), V8DOMConfiguration::kOnPrototype, V8DOMConfiguration::kCheckHolder, V8DOMConfiguration::kHasSideEffect, V8DOMConfiguration::kAlwaysCallGetter, V8DOMConfiguration::kAllWorlds },
+    { "hrefThrows", V8TestNode::hrefThrowsAttributeGetterCallback, V8TestNode::hrefThrowsAttributeSetterCallback, V8PrivateProperty::kNoCachedAccessor, static_cast<v8::PropertyAttribute>(v8::None), V8DOMConfiguration::kOnPrototype, V8DOMConfiguration::kCheckHolder, V8DOMConfiguration::kHasSideEffect, V8DOMConfiguration::kAlwaysCallGetter, V8DOMConfiguration::kAllWorlds },
+    { "hrefCallWith", V8TestNode::hrefCallWithAttributeGetterCallback, V8TestNode::hrefCallWithAttributeSetterCallback, V8PrivateProperty::kNoCachedAccessor, static_cast<v8::PropertyAttribute>(v8::None), V8DOMConfiguration::kOnPrototype, V8DOMConfiguration::kCheckHolder, V8DOMConfiguration::kHasSideEffect, V8DOMConfiguration::kAlwaysCallGetter, V8DOMConfiguration::kAllWorlds },
+    { "hrefByteString", V8TestNode::hrefByteStringAttributeGetterCallback, V8TestNode::hrefByteStringAttributeSetterCallback, V8PrivateProperty::kNoCachedAccessor, static_cast<v8::PropertyAttribute>(v8::None), V8DOMConfiguration::kOnPrototype, V8DOMConfiguration::kCheckHolder, V8DOMConfiguration::kHasSideEffect, V8DOMConfiguration::kAlwaysCallGetter, V8DOMConfiguration::kAllWorlds },
 };
 
 void V8TestNode::constructorCallback(const v8::FunctionCallbackInfo<v8::Value>& info) {
@@ -278,7 +279,7 @@ static void installV8TestNodeTemplate(
   // Register IDL constants, attributes and operations.
   V8DOMConfiguration::InstallAccessors(
       isolate, world, instanceTemplate, prototypeTemplate, interfaceTemplate,
-      signature, V8TestNodeAccessors, WTF_ARRAY_LENGTH(V8TestNodeAccessors));
+      signature, V8TestNodeAccessors, base::size(V8TestNodeAccessors));
 
   // Custom signature
 

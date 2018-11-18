@@ -32,6 +32,9 @@ config("icu_config") {
     # We don't use ICU plugins and dyload is only necessary for them.
     # NaCl-related builds also fail looking for dlfcn.h when it's enabled.
     "U_ENABLE_DYLOAD=0",
+
+    # v8/Blink need to know whether Chromium's copy of ICU is used or not.
+    "USE_CHROMIUM_ICU=1",
   ]
 
   if (!is_component_build) {
@@ -80,8 +83,6 @@ config("icu_code") {
       "/wd4005",  # Macro redefinition.
       "/wd4068",  # Unknown pragmas.
       "/wd4267",  # Conversion from size_t on 64-bits.
-      # http://bugs.icu-project.org/trac/ticket/12821
-      "/wd4333",  # Right shift by too large amount.
       "/utf-8",   # ICU source files are in UTF-8.
     ]
   } else if (is_linux || is_android) {
@@ -98,6 +99,8 @@ config("icu_code") {
       # certain preprocessor defines are set.
       # unistr.cpp also has an unused function for non-component builds.
       "-Wno-unused-function",
+      # putil.cpp contains unused variables when building for iOS simulators.
+      "-Wno-unused-variable",
     ]
   }
   if (is_clang || is_linux || is_android) {
@@ -112,8 +115,7 @@ component("icui18n") {
   # find  source/i18n -maxdepth 1  ! -type d  | egrep  '\.(c|cpp|h)$' |\
   # sort | sed 's/^\(.*\)$/    "\1",/'
   sources = [
-    "source/i18n/affixpatternparser.cpp",
-    "source/i18n/affixpatternparser.h",
+    # I18N_SRC_START
     "source/i18n/alphaindex.cpp",
     "source/i18n/anytrans.cpp",
     "source/i18n/anytrans.h",
@@ -206,33 +208,29 @@ component("icui18n") {
     "source/i18n/datefmt.cpp",
     "source/i18n/dayperiodrules.cpp",
     "source/i18n/dayperiodrules.h",
-    "source/i18n/dcfmtimp.h",
     "source/i18n/dcfmtsym.cpp",
     "source/i18n/decContext.cpp",
     "source/i18n/decContext.h",
-    "source/i18n/decfmtst.cpp",
-    "source/i18n/decfmtst.h",
-    "source/i18n/decimalformatpattern.cpp",
-    "source/i18n/decimalformatpattern.h",
-    "source/i18n/decimalformatpatternimpl.h",
     "source/i18n/decimfmt.cpp",
-    "source/i18n/decimfmtimpl.cpp",
-    "source/i18n/decimfmtimpl.h",
     "source/i18n/decNumber.cpp",
     "source/i18n/decNumber.h",
     "source/i18n/decNumberLocal.h",
-    "source/i18n/digitaffix.cpp",
-    "source/i18n/digitaffixesandpadding.cpp",
-    "source/i18n/digitaffixesandpadding.h",
-    "source/i18n/digitaffix.h",
-    "source/i18n/digitformatter.cpp",
-    "source/i18n/digitformatter.h",
-    "source/i18n/digitgrouping.cpp",
-    "source/i18n/digitgrouping.h",
-    "source/i18n/digitinterval.cpp",
-    "source/i18n/digitinterval.h",
-    "source/i18n/digitlst.cpp",
-    "source/i18n/digitlst.h",
+    "source/i18n/double-conversion-bignum.cpp",
+    "source/i18n/double-conversion-bignum-dtoa.cpp",
+    "source/i18n/double-conversion-bignum-dtoa.h",
+    "source/i18n/double-conversion-bignum.h",
+    "source/i18n/double-conversion-cached-powers.cpp",
+    "source/i18n/double-conversion-cached-powers.h",
+    "source/i18n/double-conversion.cpp",
+    "source/i18n/double-conversion-diy-fp.cpp",
+    "source/i18n/double-conversion-diy-fp.h",
+    "source/i18n/double-conversion-fast-dtoa.cpp",
+    "source/i18n/double-conversion-fast-dtoa.h",
+    "source/i18n/double-conversion.h",
+    "source/i18n/double-conversion-ieee.h",
+    "source/i18n/double-conversion-strtod.cpp",
+    "source/i18n/double-conversion-strtod.h",
+    "source/i18n/double-conversion-utils.h",
     "source/i18n/dtfmtsym.cpp",
     "source/i18n/dt_impl.h",
     "source/i18n/dtitvfmt.cpp",
@@ -289,12 +287,18 @@ component("icui18n") {
     "source/i18n/nultrans.h",
     "source/i18n/number_affixutils.cpp",
     "source/i18n/number_affixutils.h",
+    "source/i18n/number_asformat.cpp",
+    "source/i18n/number_asformat.h",
+    "source/i18n/number_capi.cpp",
     "source/i18n/number_compact.cpp",
     "source/i18n/number_compact.h",
+    "source/i18n/number_currencysymbols.cpp",
+    "source/i18n/number_currencysymbols.h",
     "source/i18n/number_decimalquantity.cpp",
     "source/i18n/number_decimalquantity.h",
     "source/i18n/number_decimfmtprops.cpp",
     "source/i18n/number_decimfmtprops.h",
+    "source/i18n/number_decnum.h",
     "source/i18n/number_fluent.cpp",
     "source/i18n/number_formatimpl.cpp",
     "source/i18n/number_formatimpl.h",
@@ -302,8 +306,13 @@ component("icui18n") {
     "source/i18n/number_integerwidth.cpp",
     "source/i18n/number_longnames.cpp",
     "source/i18n/number_longnames.h",
+    "source/i18n/number_mapper.cpp",
+    "source/i18n/number_mapper.h",
+    "source/i18n/number_microprops.h",
     "source/i18n/number_modifiers.cpp",
     "source/i18n/number_modifiers.h",
+    "source/i18n/number_multiplier.cpp",
+    "source/i18n/number_multiplier.h",
     "source/i18n/number_notation.cpp",
     "source/i18n/number_padding.cpp",
     "source/i18n/number_patternmodifier.cpp",
@@ -314,24 +323,45 @@ component("icui18n") {
     "source/i18n/number_roundingutils.h",
     "source/i18n/number_scientific.cpp",
     "source/i18n/number_scientific.h",
+    "source/i18n/number_skeletons.cpp",
+    "source/i18n/number_skeletons.h",
     "source/i18n/number_stringbuilder.cpp",
     "source/i18n/number_stringbuilder.h",
     "source/i18n/number_types.h",
+    "source/i18n/number_utils.cpp",
     "source/i18n/number_utils.h",
+    "source/i18n/number_utypes.h",
     "source/i18n/numfmt.cpp",
+    "source/i18n/numparse_affixes.cpp",
+    "source/i18n/numparse_affixes.h",
+    "source/i18n/numparse_compositions.cpp",
+    "source/i18n/numparse_compositions.h",
+    "source/i18n/numparse_currency.cpp",
+    "source/i18n/numparse_currency.h",
+    "source/i18n/numparse_decimal.cpp",
+    "source/i18n/numparse_decimal.h",
+    "source/i18n/numparse_impl.cpp",
+    "source/i18n/numparse_impl.h",
+    "source/i18n/numparse_parsednumber.cpp",
+    "source/i18n/numparse_scientific.cpp",
+    "source/i18n/numparse_scientific.h",
+    "source/i18n/numparse_stringsegment.cpp",
+    "source/i18n/numparse_stringsegment.h",
+    "source/i18n/numparse_symbols.cpp",
+    "source/i18n/numparse_symbols.h",
+    "source/i18n/numparse_types.h",
+    "source/i18n/numparse_utils.h",
+    "source/i18n/numparse_validators.cpp",
+    "source/i18n/numparse_validators.h",
     "source/i18n/numsys.cpp",
     "source/i18n/numsys_impl.h",
     "source/i18n/olsontz.cpp",
     "source/i18n/olsontz.h",
     "source/i18n/persncal.cpp",
     "source/i18n/persncal.h",
-    "source/i18n/pluralaffix.cpp",
-    "source/i18n/pluralaffix.h",
     "source/i18n/plurfmt.cpp",
     "source/i18n/plurrule.cpp",
     "source/i18n/plurrule_impl.h",
-    "source/i18n/precision.cpp",
-    "source/i18n/precision.h",
     "source/i18n/quant.cpp",
     "source/i18n/quant.h",
     "source/i18n/quantityformatter.cpp",
@@ -379,10 +409,7 @@ component("icui18n") {
     "source/i18n/shareddateformatsymbols.h",
     "source/i18n/sharednumberformat.h",
     "source/i18n/sharedpluralrules.h",
-    "source/i18n/significantdigitinterval.h",
     "source/i18n/simpletz.cpp",
-    "source/i18n/smallintformatter.cpp",
-    "source/i18n/smallintformatter.h",
     "source/i18n/smpdtfmt.cpp",
     "source/i18n/smpdtfst.cpp",
     "source/i18n/smpdtfst.h",
@@ -461,10 +488,6 @@ component("icui18n") {
     "source/i18n/utf8collationiterator.h",
     "source/i18n/utmscale.cpp",
     "source/i18n/utrans.cpp",
-    "source/i18n/valueformatter.cpp",
-    "source/i18n/valueformatter.h",
-    "source/i18n/visibledigits.cpp",
-    "source/i18n/visibledigits.h",
     "source/i18n/vtzone.cpp",
     "source/i18n/vzone.cpp",
     "source/i18n/vzone.h",
@@ -480,11 +503,13 @@ component("icui18n") {
     "source/i18n/zrule.h",
     "source/i18n/ztrans.cpp",
     "source/i18n/ztrans.h",
+    # I18N_SRC_END
   ]
   # ls source/i18n/unicode/*h | sort | sed 's/^\(.*\)$/    "\1",/'
   public = [
     # crbug.com/726654: Make astro.h public until the upstream adds an API.
     "source/i18n/astro.h",
+    # I18N_HDR_START
     "source/i18n/unicode/alphaindex.h",
     "source/i18n/unicode/basictz.h",
     "source/i18n/unicode/calendar.h",
@@ -554,6 +579,7 @@ component("icui18n") {
     "source/i18n/unicode/ulocdata.h",
     "source/i18n/unicode/umsg.h",
     "source/i18n/unicode/unirepl.h",
+    "source/i18n/unicode/unumberformatter.h",
     "source/i18n/unicode/unum.h",
     "source/i18n/unicode/unumsys.h",
     "source/i18n/unicode/upluralrules.h",
@@ -565,6 +591,7 @@ component("icui18n") {
     "source/i18n/unicode/utmscale.h",
     "source/i18n/unicode/utrans.h",
     "source/i18n/unicode/vtzone.h",
+    # I18N_HDR_END
   ]
 
   defines = [ "U_I18N_IMPLEMENTATION" ]
@@ -596,6 +623,7 @@ component("icuuc") {
   # find  source/common -maxdepth 1  ! -type d  | egrep  '\.(c|cpp|h)$' |\
   # sort | sed 's/^\(.*\)$/    "\1",/'
   sources = [
+    # COMMON_SRC_START
     "source/common/appendable.cpp",
     "source/common/bmpset.cpp",
     "source/common/bmpset.h",
@@ -711,6 +739,8 @@ component("icuuc") {
     "source/common/sharedobject.h",
     "source/common/simpleformatter.cpp",
     "source/common/sprpimpl.h",
+    "source/common/static_unicode_sets.cpp",
+    "source/common/static_unicode_sets.h",
     "source/common/stringpiece.cpp",
     "source/common/stringtriebuilder.cpp",
     "source/common/uarrsort.cpp",
@@ -885,10 +915,12 @@ component("icuuc") {
     "source/common/uvectr64.h",
     "source/common/wintz.cpp",
     "source/common/wintz.h",
+    # COMMON_SRC_END
   ]
 
   # ls  source/common/unicode/*h | sort | sed 's/^\(.*\)$/    "\1",/'
   public = [
+    # COMMON_HDR_START
     "source/common/unicode/appendable.h",
     "source/common/unicode/brkiter.h",
     "source/common/unicode/bytestream.h",
@@ -985,6 +1017,7 @@ component("icuuc") {
     "source/common/unicode/utypes.h",
     "source/common/unicode/uvernum.h",
     "source/common/unicode/uversion.h",
+    # COMMON_HDR_END
   ]
   defines = [ "U_COMMON_IMPLEMENTATION" ]
   deps = [

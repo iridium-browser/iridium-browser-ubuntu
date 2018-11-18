@@ -59,7 +59,7 @@ class JsLanguageDetectionManagerTest : public ChromeWebTest {
   // Injects JS, waits for the completion handler and verifies if the result
   // was what was expected.
   void InjectJsAndVerify(NSString* js, id expected_result) {
-    EXPECT_NSEQ(expected_result, web::ExecuteJavaScript(manager_, js));
+    EXPECT_NSEQ(expected_result, web::test::ExecuteJavaScript(manager_, js));
   }
 
   // Injects JS, and spins the run loop until |condition| block returns true
@@ -232,7 +232,7 @@ TEST_F(JsLanguageDetectionManagerTest, LongTextContent) {
       initWithFormat:
           @"__gCrWeb.languageDetection.getTextContent(document.body, %lu);",
           language_detection::kMaxIndexChars];
-  NSString* result = web::ExecuteJavaScript(manager_, script);
+  NSString* result = web::test::ExecuteJavaScript(manager_, script);
   EXPECT_EQ(language_detection::kMaxIndexChars, [result length]);
 }
 
@@ -272,8 +272,10 @@ class JsLanguageDetectionManagerDetectLanguageTest
   }
   // Called when "languageDetection" command is received.
   bool CommandReceived(const base::DictionaryValue& command,
-                       const GURL&,
-                       bool) {
+                       const GURL& url,
+                       bool interacting,
+                       bool is_main_frame,
+                       web::WebFrame* sender_frame) {
     commands_received_.push_back(command.CreateDeepCopy());
     return true;
   }

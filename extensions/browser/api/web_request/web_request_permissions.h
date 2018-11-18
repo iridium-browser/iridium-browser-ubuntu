@@ -20,13 +20,8 @@ class InfoMap;
 struct WebRequestInfo;
 }
 
-// Exposed for unit testing.
-bool IsSensitiveURL(const GURL& url,
-                    base::Optional<url::Origin> initiator,
-                    bool is_request_from_browser,
-                    bool is_request_from_webui_renderer);
-
-// This class is used to test whether extensions may modify web requests.
+// This class is used to test whether extensions may modify web requests. It
+// should be used on the IO thread.
 class WebRequestPermissions {
  public:
   // Different host permission checking modes for CanExtensionAccessURL.
@@ -50,7 +45,7 @@ class WebRequestPermissions {
 
   // |host_permission_check| controls how permissions are checked with regard to
   // |url| and |initiator| if an initiator exists.
-  static extensions::PermissionsData::AccessType CanExtensionAccessURL(
+  static extensions::PermissionsData::PageAccess CanExtensionAccessURL(
       const extensions::InfoMap* extension_info_map,
       const std::string& extension_id,
       const GURL& url,
@@ -66,7 +61,6 @@ class WebRequestPermissions {
       int tab_id,
       bool crosses_incognito);
 
- private:
   DISALLOW_IMPLICIT_CONSTRUCTORS(WebRequestPermissions);
 };
 

@@ -24,15 +24,16 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_XMLHTTPREQUEST_XML_HTTP_REQUEST_H_
 
 #include <memory>
+
 #include "base/memory/scoped_refptr.h"
 #include "services/network/public/mojom/url_loader_factory.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/active_script_wrappable.h"
 #include "third_party/blink/renderer/core/dom/document_parser_client.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
 #include "third_party/blink/renderer/core/dom/pausable_object.h"
 #include "third_party/blink/renderer/core/loader/threadable_loader_client.h"
 #include "third_party/blink/renderer/core/xmlhttprequest/xml_http_request_event_target.h"
 #include "third_party/blink/renderer/core/xmlhttprequest/xml_http_request_progress_event_throttle.h"
+#include "third_party/blink/renderer/platform/bindings/exception_code.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/bindings/trace_wrapper_member.h"
 #include "third_party/blink/renderer/platform/bindings/trace_wrapper_v8_string.h"
@@ -40,6 +41,7 @@
 #include "third_party/blink/renderer/platform/loader/fetch/resource_response.h"
 #include "third_party/blink/renderer/platform/network/encoded_form_data.h"
 #include "third_party/blink/renderer/platform/network/http_header_map.h"
+#include "third_party/blink/renderer/platform/web_task_runner.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
@@ -150,7 +152,7 @@ class XMLHttpRequest final : public XMLHttpRequestEventTarget,
   Document* responseXML(ExceptionState&);
   Blob* ResponseBlob();
   DOMArrayBuffer* ResponseArrayBuffer();
-  unsigned timeout() const { return timeout_milliseconds_; }
+  unsigned timeout() const { return timeout_.InMilliseconds(); }
   void setTimeout(unsigned timeout, ExceptionState&);
   ResponseTypeCode GetResponseTypeCode() const { return response_type_code_; }
   String responseType();
@@ -166,8 +168,7 @@ class XMLHttpRequest final : public XMLHttpRequestEventTarget,
 
   DEFINE_ATTRIBUTE_EVENT_LISTENER(readystatechange);
 
-  virtual void Trace(blink::Visitor*);
-  void TraceWrappers(const ScriptWrappableVisitor*) const override;
+  void Trace(blink::Visitor*) override;
   const char* NameInHeapSnapshot() const override { return "XMLHttpRequest"; }
 
  private:
@@ -195,7 +196,7 @@ class XMLHttpRequest final : public XMLHttpRequestEventTarget,
   // of didReceiveData().
   void DidDownloadData(int data_length) override;
   void DidDownloadToBlob(scoped_refptr<BlobDataHandle>) override;
-  void DidFinishLoading(unsigned long identifier, double finish_time) override;
+  void DidFinishLoading(unsigned long identifier) override;
   void DidFail(const ResourceError&) override;
   void DidFailRedirectCheck() override;
 
@@ -281,7 +282,7 @@ class XMLHttpRequest final : public XMLHttpRequestEventTarget,
   // Handles didFail() call for timeout.
   void HandleDidTimeout();
 
-  void HandleRequestError(ExceptionCode,
+  void HandleRequestError(DOMExceptionCode,
                           const AtomicString&,
                           long long,
                           long long);
@@ -311,8 +312,10 @@ class XMLHttpRequest final : public XMLHttpRequestEventTarget,
   // Not converted to ASCII lowercase. Must be lowered later or compared
   // using case insensitive comparison functions if needed.
   AtomicString mime_type_override_;
-  unsigned long timeout_milliseconds_ = 0;
+  TimeDelta timeout_;
   TraceWrapperMember<Blob> response_blob_;
+
+  TaskHandle pending_abort_event_;
 
   Member<ThreadableLoader> loader_;
   State state_ = kUnsent;
@@ -323,7 +326,7 @@ class XMLHttpRequest final : public XMLHttpRequestEventTarget,
 
   // Avoid using a flat WTF::String here and rather use a traced v8::String
   // which internally builds a string rope.
-  TraceWrapperV8String response_text_;
+  GC_PLUGIN_IGNORE("crbug.com/841830") TraceWrapperV8String response_text_;
   TraceWrapperMember<Document> response_document_;
   Member<DocumentParser> response_document_parser_;
 
@@ -340,7 +343,7 @@ class XMLHttpRequest final : public XMLHttpRequestEventTarget,
   // An exception to throw in synchronous mode. It's set when failure
   // notification is received from m_loader and thrown at the end of send() if
   // any.
-  ExceptionCode exception_code_ = 0;
+  DOMExceptionCode exception_code_ = DOMExceptionCode::kNoError;
 
   Member<XMLHttpRequestProgressEventThrottle> progress_event_throttle_;
 

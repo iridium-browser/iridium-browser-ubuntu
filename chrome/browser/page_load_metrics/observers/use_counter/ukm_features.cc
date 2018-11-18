@@ -3,16 +3,17 @@
 // found in the LICENSE file.
 
 #include "chrome/browser/page_load_metrics/observers/use_counter/ukm_features.h"
+
 #include "base/containers/flat_set.h"
+#include "base/no_destructor.h"
 
 using WebFeature = blink::mojom::WebFeature;
 
 // UKM-based UseCounter features (WebFeature) should be defined in
 // opt_in_features list.
 bool IsAllowedUkmFeature(blink::mojom::WebFeature feature) {
-  CR_DEFINE_STATIC_LOCAL(
-      const base::flat_set<WebFeature>, opt_in_features,
-      ({
+  static base::NoDestructor<base::flat_set<WebFeature>> opt_in_features(
+      base::flat_set<WebFeature>({
           WebFeature::kNavigatorVibrate, WebFeature::kNavigatorVibrateSubFrame,
           WebFeature::kTouchEventPreventedNoTouchAction,
           WebFeature::kTouchEventPreventedForcedDocumentPassiveNoTouchAction,
@@ -27,6 +28,38 @@ bool IsAllowedUkmFeature(blink::mojom::WebFeature feature) {
           WebFeature::kUsbRequestDevice, WebFeature::kXMLHttpRequestSynchronous,
           WebFeature::kPaymentHandler,
           WebFeature::kPaymentRequestShowWithoutGesture,
+          WebFeature::kHTMLImports, WebFeature::kHTMLImportsHasStyleSheets,
+          WebFeature::kElementCreateShadowRoot,
+          WebFeature::kDocumentRegisterElement,
+          WebFeature::kCredentialManagerCreatePublicKeyCredential,
+          WebFeature::kCredentialManagerGetPublicKeyCredential,
+          WebFeature::kCredentialManagerMakePublicKeyCredentialSuccess,
+          WebFeature::kCredentialManagerGetPublicKeyCredentialSuccess,
+          WebFeature::kV8AudioContext_Constructor,
+          WebFeature::kElementAttachShadow,
+          WebFeature::kElementAttachShadowOpen,
+          WebFeature::kElementAttachShadowClosed,
+          WebFeature::kCustomElementRegistryDefine,
+          WebFeature::kTextToSpeech_Speak,
+          WebFeature::kTextToSpeech_SpeakDisallowedByAutoplay,
+          WebFeature::kCSSEnvironmentVariable,
+          WebFeature::kCSSEnvironmentVariable_SafeAreaInsetTop,
+          WebFeature::kCSSEnvironmentVariable_SafeAreaInsetLeft,
+          WebFeature::kCSSEnvironmentVariable_SafeAreaInsetRight,
+          WebFeature::kCSSEnvironmentVariable_SafeAreaInsetBottom,
+          WebFeature::kMediaControlsDisplayCutoutGesture,
+          WebFeature::kPolymerV1Detected, WebFeature::kPolymerV2Detected,
+          WebFeature::kFullscreenSecureOrigin,
+          WebFeature::kFullscreenInsecureOrigin,
+          WebFeature::kPrefixedVideoEnterFullscreen,
+          WebFeature::kPrefixedVideoExitFullscreen,
+          WebFeature::kPrefixedVideoEnterFullScreen,
+          WebFeature::kPrefixedVideoExitFullScreen,
+          WebFeature::kDocumentLevelPassiveDefaultEventListenerPreventedWheel,
+          WebFeature::kDocumentDomainBlockedCrossOriginAccess,
+          WebFeature::kDocumentDomainEnabledCrossOriginAccess,
+          WebFeature::kSuppressHistoryEntryWithoutUserGesture,
+          WebFeature::kCursorImageGT32x32, WebFeature::kCursorImageLE32x32,
       }));
-  return opt_in_features.count(feature);
+  return opt_in_features->count(feature);
 }

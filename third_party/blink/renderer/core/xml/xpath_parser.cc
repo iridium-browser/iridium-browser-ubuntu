@@ -28,18 +28,17 @@
 #include "third_party/blink/renderer/core/xml/xpath_parser.h"
 
 #include "base/memory/ptr_util.h"
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
 #include "third_party/blink/renderer/core/xml/xpath_evaluator.h"
 #include "third_party/blink/renderer/core/xml/xpath_ns_resolver.h"
 #include "third_party/blink/renderer/core/xml/xpath_path.h"
 #include "third_party/blink/renderer/core/xpath_grammar.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_hash.h"
 
 namespace blink {
 
-using namespace XPath;
+using namespace xpath;
 
 Parser* Parser::current_parser_ = nullptr;
 
@@ -456,7 +455,7 @@ int Parser::Lex(void* data) {
 bool Parser::ExpandQName(const String& q_name,
                          AtomicString& local_name,
                          AtomicString& namespace_uri) {
-  size_t colon = q_name.find(':');
+  wtf_size_t colon = q_name.find(':');
   if (colon != kNotFound) {
     if (!resolver_)
       return false;
@@ -490,11 +489,11 @@ Expression* Parser::ParseStatement(const String& statement,
 
     if (got_namespace_error_)
       exception_state.ThrowDOMException(
-          kNamespaceError,
+          DOMExceptionCode::kNamespaceError,
           "The string '" + statement + "' contains unresolvable namespaces.");
     else
       exception_state.ThrowDOMException(
-          kSyntaxError,
+          DOMExceptionCode::kSyntaxError,
           "The string '" + statement + "' is not a valid XPath expression.");
     return nullptr;
   }

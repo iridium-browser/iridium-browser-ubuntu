@@ -4,14 +4,12 @@
 
 #include "content/public/browser/ax_event_notification_details.h"
 
+#include "ui/accessibility/ax_event.h"
+
 namespace content {
 
 AXEventNotificationDetails::AXEventNotificationDetails()
-    : event_type(ax::mojom::Event::kNone),
-      id(-1),
-      ax_tree_id(-1),
-      event_from(ax::mojom::EventFrom::kNone),
-      action_request_id(-1) {}
+    : ax_tree_id(ui::AXTreeIDUnknown()) {}
 
 AXEventNotificationDetails::AXEventNotificationDetails(
     const AXEventNotificationDetails& other) = default;
@@ -19,9 +17,7 @@ AXEventNotificationDetails::AXEventNotificationDetails(
 AXEventNotificationDetails::~AXEventNotificationDetails() {}
 
 AXLocationChangeNotificationDetails::AXLocationChangeNotificationDetails()
-    : id(-1),
-      ax_tree_id(-1) {
-}
+    : id(-1), ax_tree_id(ui::AXTreeIDUnknown()) {}
 
 AXLocationChangeNotificationDetails::AXLocationChangeNotificationDetails(
     const AXLocationChangeNotificationDetails& other) = default;

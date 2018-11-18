@@ -21,14 +21,13 @@ import org.junit.runner.RunWith;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.content.R;
-import org.chromium.content.browser.test.ContentJUnit4ClassRunner;
-import org.chromium.content.browser.test.util.Criteria;
-import org.chromium.content.browser.test.util.CriteriaHelper;
-import org.chromium.content.browser.test.util.DOMUtils;
-import org.chromium.content.browser.test.util.JavaScriptUtils;
-import org.chromium.content.browser.test.util.TouchCommon;
-import org.chromium.content_public.browser.ContentViewCore;
 import org.chromium.content_public.browser.WebContents;
+import org.chromium.content_public.browser.test.ContentJUnit4ClassRunner;
+import org.chromium.content_public.browser.test.util.Criteria;
+import org.chromium.content_public.browser.test.util.CriteriaHelper;
+import org.chromium.content_public.browser.test.util.DOMUtils;
+import org.chromium.content_public.browser.test.util.JavaScriptUtils;
+import org.chromium.content_public.browser.test.util.TouchCommon;
 
 import java.util.concurrent.TimeoutException;
 
@@ -54,18 +53,17 @@ public class TextSuggestionMenuTest {
     @LargeTest
     public void testDeleteWordMarkedWithSuggestionMarker()
             throws InterruptedException, Throwable, TimeoutException {
-        final ContentViewCore cvc = mRule.getContentViewCore();
         WebContents webContents = mRule.getWebContents();
 
         DOMUtils.focusNode(webContents, "div");
 
         SpannableString textToCommit = new SpannableString("hello");
-        SuggestionSpan suggestionSpan = new SuggestionSpan(mRule.getContentViewCore().getContext(),
-                new String[] {"goodbye"}, SuggestionSpan.FLAG_EASY_CORRECT);
+        SuggestionSpan suggestionSpan = new SuggestionSpan(
+                mRule.getActivity(), new String[] {"goodbye"}, SuggestionSpan.FLAG_EASY_CORRECT);
         textToCommit.setSpan(suggestionSpan, 0, 5, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         mRule.commitText(textToCommit, 1);
 
-        DOMUtils.clickNode(cvc, "div");
+        DOMUtils.clickNode(webContents, "div");
         waitForMenuToShow(webContents);
 
         TouchCommon.singleClickView(getDeleteButton(webContents));
@@ -88,7 +86,6 @@ public class TextSuggestionMenuTest {
     @LargeTest
     public void testDeleteWordMarkedWithSpellingMarker()
             throws InterruptedException, Throwable, TimeoutException {
-        final ContentViewCore cvc = mRule.getContentViewCore();
         WebContents webContents = mRule.getWebContents();
 
         DOMUtils.focusNode(webContents, "div");
@@ -120,7 +117,7 @@ public class TextSuggestionMenuTest {
                         + "range.setEnd(text, 5);"
                         + "internals.setMarker(document, range, 'spelling');");
 
-        DOMUtils.clickNode(cvc, "div");
+        DOMUtils.clickNode(webContents, "div");
         waitForMenuToShow(webContents);
 
         TouchCommon.singleClickView(getDeleteButton(webContents));
@@ -142,7 +139,6 @@ public class TextSuggestionMenuTest {
     @Test
     @LargeTest
     public void testApplySuggestion() throws InterruptedException, Throwable, TimeoutException {
-        final ContentViewCore cvc = mRule.getContentViewCore();
         WebContents webContents = mRule.getWebContents();
 
         DOMUtils.focusNode(webContents, "div");
@@ -160,15 +156,15 @@ public class TextSuggestionMenuTest {
 
         SpannableString textToCommit = new SpannableString("hello world");
 
-        SuggestionSpan suggestionSpan1 = new SuggestionSpan(mRule.getContentViewCore().getContext(),
+        SuggestionSpan suggestionSpan1 = new SuggestionSpan(mRule.getActivity(),
                 new String[] {"invalid_suggestion"}, SuggestionSpan.FLAG_EASY_CORRECT);
         textToCommit.setSpan(suggestionSpan1, 0, 5, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
 
-        SuggestionSpan suggestionSpan2 = new SuggestionSpan(mRule.getContentViewCore().getContext(),
+        SuggestionSpan suggestionSpan2 = new SuggestionSpan(mRule.getActivity(),
                 new String[] {"suggestion3", "suggestion4"}, SuggestionSpan.FLAG_EASY_CORRECT);
         textToCommit.setSpan(suggestionSpan2, 0, 11, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
 
-        SuggestionSpan suggestionSpan3 = new SuggestionSpan(mRule.getContentViewCore().getContext(),
+        SuggestionSpan suggestionSpan3 = new SuggestionSpan(mRule.getActivity(),
                 new String[] {"suggestion1", "suggestion2"}, SuggestionSpan.FLAG_EASY_CORRECT);
         textToCommit.setSpan(suggestionSpan3, 6, 11, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
 
@@ -186,7 +182,7 @@ public class TextSuggestionMenuTest {
             }
         });
 
-        DOMUtils.clickNode(cvc, "span");
+        DOMUtils.clickNode(webContents, "span");
         waitForMenuToShow(webContents);
 
         // There should be 5 child views: 4 suggestions plus the list footer.
@@ -222,21 +218,20 @@ public class TextSuggestionMenuTest {
     @LargeTest
     public void testApplyMisspellingSuggestion()
             throws InterruptedException, Throwable, TimeoutException {
-        final ContentViewCore cvc = mRule.getContentViewCore();
         WebContents webContents = mRule.getWebContents();
 
         DOMUtils.focusNode(webContents, "div");
 
         SpannableString textToCommit = new SpannableString("word");
 
-        SuggestionSpan suggestionSpan = new SuggestionSpan(mRule.getContentViewCore().getContext(),
-                new String[] {"replacement"},
-                SuggestionSpan.FLAG_EASY_CORRECT | SuggestionSpan.FLAG_MISSPELLED);
+        SuggestionSpan suggestionSpan =
+                new SuggestionSpan(mRule.getActivity(), new String[] {"replacement"},
+                        SuggestionSpan.FLAG_EASY_CORRECT | SuggestionSpan.FLAG_MISSPELLED);
         textToCommit.setSpan(suggestionSpan, 0, 4, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
 
         mRule.commitText(textToCommit, 1);
 
-        DOMUtils.clickNode(cvc, "span");
+        DOMUtils.clickNode(webContents, "span");
         waitForMenuToShow(webContents);
 
         // There should be 2 child views: 1 suggestion plus the list footer.
@@ -271,24 +266,23 @@ public class TextSuggestionMenuTest {
     @Test
     @LargeTest
     public void suggestionMenuDismissal() throws InterruptedException, Throwable, TimeoutException {
-        final ContentViewCore cvc = mRule.getContentViewCore();
         WebContents webContents = mRule.getWebContents();
 
         DOMUtils.focusNode(webContents, "div");
 
         SpannableString textToCommit = new SpannableString("hello");
-        SuggestionSpan suggestionSpan = new SuggestionSpan(mRule.getContentViewCore().getContext(),
-                new String[] {"goodbye"}, SuggestionSpan.FLAG_EASY_CORRECT);
+        SuggestionSpan suggestionSpan = new SuggestionSpan(
+                mRule.getActivity(), new String[] {"goodbye"}, SuggestionSpan.FLAG_EASY_CORRECT);
         textToCommit.setSpan(suggestionSpan, 0, 5, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         mRule.commitText(textToCommit, 1);
 
-        DOMUtils.clickNode(cvc, "div");
+        DOMUtils.clickNode(webContents, "div");
         waitForMenuToShow(webContents);
 
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
             public void run() {
-                TextSuggestionHost.fromWebContents(webContents)
+                getTextSuggestionHost(webContents)
                         .getTextSuggestionsPopupWindowForTesting()
                         .dismiss();
             }
@@ -319,12 +313,11 @@ public class TextSuggestionMenuTest {
             @Override
             public boolean isSatisfied() {
                 SuggestionsPopupWindow suggestionsPopupWindow =
-                        TextSuggestionHost.fromWebContents(webContents)
+                        getTextSuggestionHost(webContents)
                                 .getTextSuggestionsPopupWindowForTesting();
 
                 SuggestionsPopupWindow spellCheckPopupWindow =
-                        TextSuggestionHost.fromWebContents(webContents)
-                                .getSpellCheckPopupWindowForTesting();
+                        getTextSuggestionHost(webContents).getSpellCheckPopupWindowForTesting();
 
                 return suggestionsPopupWindow == null && spellCheckPopupWindow == null;
             }
@@ -333,22 +326,25 @@ public class TextSuggestionMenuTest {
 
     private View getContentView(WebContents webContents) {
         SuggestionsPopupWindow suggestionsPopupWindow =
-                TextSuggestionHost.fromWebContents(webContents)
-                        .getTextSuggestionsPopupWindowForTesting();
+                getTextSuggestionHost(webContents).getTextSuggestionsPopupWindowForTesting();
 
         if (suggestionsPopupWindow != null) {
             return suggestionsPopupWindow.getContentViewForTesting();
         }
 
         SuggestionsPopupWindow spellCheckPopupWindow =
-                TextSuggestionHost.fromWebContents(webContents)
-                        .getSpellCheckPopupWindowForTesting();
+                getTextSuggestionHost(webContents).getSpellCheckPopupWindowForTesting();
 
         if (spellCheckPopupWindow != null) {
             return spellCheckPopupWindow.getContentViewForTesting();
         }
 
         return null;
+    }
+
+    private TextSuggestionHost getTextSuggestionHost(WebContents webContents) {
+        return ThreadUtils.runOnUiThreadBlockingNoException(
+                () -> TextSuggestionHost.fromWebContents(webContents));
     }
 
     private ListView getSuggestionList(WebContents webContents) {

@@ -16,10 +16,14 @@
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "build/build_config.h"
+#include "chrome/common/search.mojom.h"
 #include "components/history/core/browser/history_types.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/ntp_tiles/most_visited_sites.h"
 #include "components/ntp_tiles/ntp_tile.h"
+#include "components/prefs/pref_change_registrar.h"
+#include "components/prefs/pref_registry_simple.h"
+#include "components/search/url_validity_checker.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "url/gurl.h"
@@ -36,7 +40,7 @@ struct ThemeBackgroundInfo;
 
 namespace content {
 class RenderProcessHost;
-}
+}  // namespace content
 
 // Tracks render process host IDs that are associated with Instant, i.e.
 // processes that are used to render an NTP. Also responsible for keeping
@@ -58,6 +62,9 @@ class InstantService : public KeyedService,
   void AddObserver(InstantServiceObserver* observer);
   void RemoveObserver(InstantServiceObserver* observer);
 
+  // Register prefs associated with the NTP.
+  static void RegisterProfilePrefs(PrefRegistrySimple* registry);
+
 #if defined(UNIT_TEST)
   int GetInstantProcessCount() const {
     return process_ids_.size();
@@ -76,6 +83,31 @@ class InstantService : public KeyedService,
   void UndoMostVisitedDeletion(const GURL& url);
   // Invoked when the Instant page wants to undo all Most Visited deletions.
   void UndoAllMostVisitedDeletions();
+  // Invoked when the Instant page wants to add a custom link.
+  bool AddCustomLink(const GURL& url, const std::string& title);
+  // Invoked when the Instant page wants to update a custom link.
+  bool UpdateCustomLink(const GURL& url,
+                        const GURL& new_url,
+                        const std::string& new_title);
+  // Invoked when the Instant page wants to delete a custom link.
+  bool DeleteCustomLink(const GURL& url);
+  // Invoked when the Instant page wants to undo the previous custom link
+  // action. Returns false and does nothing if the profile is using a non-Google
+  // search provider.
+  bool UndoCustomLinkAction();
+  // Invoked when the Instant page wants to delete all custom links and use Most
+  // Visited sites instead. Returns false and does nothing if the profile is
+  // using a non-Google search provider.
+  bool ResetCustomLinks();
+
+  // Invoked during the add/update a custom link flow. Creates a request to
+  // check if |url| resolves to an existing page and notifies the frontend of
+  // the result. This will be used to determine if we need to use "http" instead
+  // of the default "https" scheme for the link's URL. Custom links must be
+  // enabled.
+  void DoesUrlResolve(
+      const GURL& url,
+      chrome::mojom::EmbeddedSearch::DoesUrlResolveCallback callback);
 
   // Invoked by the InstantController to update theme information for NTP.
   //
@@ -90,7 +122,30 @@ class InstantService : public KeyedService,
   // Sends the current NTP URL to a renderer process.
   void SendNewTabPageURLToRenderer(content::RenderProcessHost* rph);
 
+  // Invoked when a custom background is selected on the NTP.
+  void SetCustomBackgroundURL(const GURL& url);
+
+  // Invoked when a custom background with attributions is selected on the NTP.
+  void SetCustomBackgroundURLWithAttributions(
+      const GURL& background_url,
+      const std::string& attribution_line_1,
+      const std::string& attribution_line_2,
+      const GURL& action_url);
+
+  // Invoked when a user selected the "Upload an image" option on the NTP.
+  void SelectLocalBackgroundImage(const base::FilePath& path);
+
+  // Used for testing.
+  ThemeBackgroundInfo* GetThemeInfoForTesting() { return theme_info_.get(); }
+
+  // Used for testing.
+  void SetUrlValidityCheckerForTesting(UrlValidityChecker* url_checker) {
+    url_checker_for_testing_ = url_checker;
+  }
+
  private:
+  class SearchProviderObserver;
+
   friend class InstantExtendedTest;
   friend class InstantUnitTestBase;
 
@@ -100,6 +155,18 @@ class InstantService : public KeyedService,
   // KeyedService:
   void Shutdown() override;
 
+  // Called when the request from |DoesUrlResolve| finishes. Invokes the
+  // associated callback with the request status.
+  //
+  // If the request exceeded the UI dialog timeout and the URL did not resolve,
+  // calls |UpdateCustomLink| to internally update the link's default "https"
+  // scheme to "http".
+  void OnDoesUrlResolveComplete(
+      const GURL& url,
+      chrome::mojom::EmbeddedSearch::DoesUrlResolveCallback callback,
+      bool resolves,
+      base::TimeDelta duration);
+
   // content::NotificationObserver:
   void Observe(int type,
                const content::NotificationSource& source,
@@ -107,6 +174,10 @@ class InstantService : public KeyedService,
 
   // Called when a renderer process is terminated.
   void OnRendererProcessTerminated(int process_id);
+
+  // Called when the search provider changes. Disables custom links if the
+  // search provider is not Google.
+  void OnSearchProviderChanged(bool is_google);
 
   // ntp_tiles::MostVisitedSites::Observer implementation.
   void OnURLsAvailable(
@@ -119,6 +190,23 @@ class InstantService : public KeyedService,
 
   void BuildThemeInfo();
 
+  void ApplyOrResetCustomBackgroundThemeInfo();
+
+  void ApplyCustomBackgroundThemeInfo();
+  void ApplyCustomBackgroundThemeInfoFromLocalFile(bool file_exists);
+
+  void ResetCustomBackgroundThemeInfo();
+
+  void FallbackToDefaultThemeInfo();
+
+  // Update the background pref to point to
+  // chrome-search://local-ntp/background.jpg
+  void SetBackgroundToLocalResource();
+
+  // Returns UrlValidityCheckerFactory::GetInstance() or
+  // |url_checker_for_testing_| if not null.
+  UrlValidityChecker* GetUrlValidityChecker();
+
   Profile* const profile_;
 
   // The process ids associated with Instant processes.
@@ -130,7 +218,7 @@ class InstantService : public KeyedService,
   // Theme-related data for NTP overlay to adopt themes.
   std::unique_ptr<ThemeBackgroundInfo> theme_info_;
 
-  base::ObserverList<InstantServiceObserver> observers_;
+  base::ObserverList<InstantServiceObserver>::Unchecked observers_;
 
   content::NotificationRegistrar registrar_;
 
@@ -138,6 +226,18 @@ class InstantService : public KeyedService,
 
   // Data source for NTP tiles (aka Most Visited tiles). May be null.
   std::unique_ptr<ntp_tiles::MostVisitedSites> most_visited_sites_;
+
+  // Keeps track of any changes in search engine provider. May be null.
+  std::unique_ptr<SearchProviderObserver> search_provider_observer_;
+
+  // Test UrlValidityChecker used for testing.
+  UrlValidityChecker* url_checker_for_testing_ = nullptr;
+
+  PrefChangeRegistrar pref_change_registrar_;
+
+  PrefService* pref_service_;
+
+  base::WeakPtrFactory<InstantService> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(InstantService);
 };

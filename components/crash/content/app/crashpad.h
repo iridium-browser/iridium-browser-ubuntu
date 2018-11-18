@@ -23,6 +23,7 @@
 
 namespace crashpad {
 class CrashpadClient;
+class CrashReportDatabase;
 }
 
 namespace crash_reporter {
@@ -127,6 +128,12 @@ void RequestSingleCrashUploadImpl(const std::string& local_id);
 // The implementation function for GetCrashpadDatabasePath.
 base::FilePath::StringType::const_pointer GetCrashpadDatabasePathImpl();
 
+#if defined(OS_MACOSX)
+// Captures a minidump for the process named by its |task_port| and stores it
+// in the current crash report database.
+void DumpProcessWithoutCrashing(task_t task_port);
+#endif
+
 namespace internal {
 
 #if defined(OS_WIN)
@@ -148,14 +155,9 @@ void UnregisterNonABICompliantCodeRangeImpl(void* start);
 #endif  // defined(OS_WIN)
 
 #if defined(OS_LINUX) || defined(OS_ANDROID)
-// Sets parameters to appropriate values to launch Crashpad's handler process.
-// Returns true on success, otherwise false.
-bool BuildHandlerArgs(base::FilePath* handler_path,
-                      base::FilePath* database_path,
-                      base::FilePath* metrics_path,
-                      std::string* url,
-                      std::map<std::string, std::string>* process_annotations,
-                      std::vector<std::string>* arguments);
+// Starts the handler process with an initial client connected on fd.
+// Returns `true` on success.
+bool StartHandlerForClient(int fd);
 #endif  // OS_LINUX || OS_ANDROID
 
 // The platform-specific portion of InitializeCrashpad(). On Windows, if
@@ -168,6 +170,10 @@ base::FilePath PlatformCrashpadInitialization(bool initial_client,
                                               bool embedded_handler,
                                               const std::string& user_data_dir,
                                               const base::FilePath& exe_path);
+
+// Returns the current crash report database object, or null if it has not
+// been initialized yet.
+crashpad::CrashReportDatabase* GetCrashReportDatabase();
 
 }  // namespace internal
 

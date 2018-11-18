@@ -73,8 +73,8 @@ class CC_PAINT_EXPORT PaintImageBuilder {
     paint_image_.is_multipart_ = is_multipart;
     return std::move(*this);
   }
-  PaintImageBuilder&& set_frame_index(size_t frame_index) {
-    paint_image_.frame_index_ = frame_index;
+  PaintImageBuilder&& set_is_high_bit_depth(bool is_high_bit_depth) {
+    paint_image_.is_high_bit_depth_ = is_high_bit_depth;
     return std::move(*this);
   }
   PaintImageBuilder&& set_repetition_count(int count) {

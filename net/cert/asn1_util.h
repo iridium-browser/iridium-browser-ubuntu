@@ -41,6 +41,13 @@ NET_EXPORT_PRIVATE bool ExtractSubjectPublicKeyFromSPKI(
 // present or if there was a parsing failure.
 NET_EXPORT_PRIVATE bool HasTLSFeatureExtension(base::StringPiece cert);
 
+// HasCanSignHttpExchangesDraftExtension parses the DER encoded certificate
+// in |cert| and extracts the canSignHttpExchangesDraft extension
+// (https://wicg.github.io/webpackage/draft-yasskin-http-origin-signed-responses.html)
+// if present. Returns true if the extension was present, and false if
+// the extension was not present or if there was a parsing failure.
+NET_EXPORT bool HasCanSignHttpExchangesDraftExtension(base::StringPiece cert);
+
 // Extracts the two (SEQUENCE) tag-length-values for the signature
 // AlgorithmIdentifiers in a DER encoded certificate. Does not use strict
 // parsing or validate the resulting AlgorithmIdentifiers.
@@ -57,6 +64,20 @@ NET_EXPORT_PRIVATE bool ExtractSignatureAlgorithmsFromDERCert(
     base::StringPiece cert,
     base::StringPiece* cert_signature_algorithm_sequence,
     base::StringPiece* tbs_signature_algorithm_sequence);
+
+// Extracts the contents of the extension (if any) with OID |extension_oid| from
+// the DER-encoded, X.509 certificate in |cert|.
+//
+// Returns false on parse error or true if the parse was successful. Sets
+// |*out_extension_present| to whether or not the extension was found. If found,
+// sets |*out_extension_critical| to match the extension's "critical" flag, and
+// sets |*out_contents| to the contents of the extension (after unwrapping the
+// OCTET STRING).
+NET_EXPORT bool ExtractExtensionFromDERCert(base::StringPiece cert,
+                                            base::StringPiece extension_oid,
+                                            bool* out_extension_present,
+                                            bool* out_extension_critical,
+                                            base::StringPiece* out_contents);
 
 } // namespace asn1
 

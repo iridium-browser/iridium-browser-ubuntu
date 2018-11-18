@@ -28,7 +28,6 @@ class AudioRendererAlgorithm;
 
 namespace chromecast {
 namespace media {
-class AvSync;
 class DecoderBufferBase;
 class MediaPipelineBackendForMixer;
 
@@ -42,11 +41,13 @@ class AudioDecoderForMixer : public MediaPipelineBackend::AudioDecoder,
   ~AudioDecoderForMixer() override;
 
   virtual void Initialize();
-  virtual bool Start(int64_t start_pts);
+  virtual bool Start(int64_t pts, bool start_playback_asap);
+  void StartPlaybackAt(int64_t timestamp);
   virtual void Stop();
   virtual bool Pause();
   virtual bool Resume();
-  virtual bool SetPlaybackRate(float rate);
+  virtual float SetPlaybackRate(float rate);
+  virtual bool GetTimestampedPts(int64_t* timestamp, int64_t* pts) const;
   virtual int64_t GetCurrentPts() const;
 
   // MediaPipelineBackend::AudioDecoder implementation:
@@ -56,6 +57,11 @@ class AudioDecoderForMixer : public MediaPipelineBackend::AudioDecoder,
   bool SetConfig(const AudioConfig& config) override;
   bool SetVolume(float multiplier) override;
   RenderingDelay GetRenderingDelay() override;
+
+  // This allows for very small changes in the rate of audio playback that are
+  // (supposedly) imperceptible.
+  float SetAvSyncPlaybackRate(float rate);
+  void RestartPlaybackAt(int64_t pts, int64_t timestamp);
 
  private:
   friend class MockAudioDecoderForMixer;
@@ -67,20 +73,25 @@ class AudioDecoderForMixer : public MediaPipelineBackend::AudioDecoder,
     double rate;
     double input_frames;
     int64_t output_frames;
+    int64_t base_pts;
   };
 
   // BufferingMixerSource::Delegate implementation:
   void OnWritePcmCompletion(RenderingDelay delay) override;
   void OnMixerError(MixerError error) override;
   void OnEos() override;
+  void OnAudioReadyForPlayback() override;
 
   void CleanUpPcm();
+  void ResetMixerInputForNewSampleRate(int sample_rate);
   void CreateDecoder();
   void CreateRateShifter(int samples_per_second);
+
   void OnDecoderInitialized(bool success);
   void OnBufferDecoded(uint64_t input_bytes,
                        CastAudioDecoder::Status status,
-                       const scoped_refptr<DecoderBufferBase>& decoded);
+                       const AudioConfig& config,
+                       scoped_refptr<DecoderBufferBase> decoded);
   void CheckBufferComplete();
   void PushRateShifted();
   void PushMorePcm();
@@ -88,7 +99,6 @@ class AudioDecoderForMixer : public MediaPipelineBackend::AudioDecoder,
   bool BypassDecoder() const;
   bool ShouldStartClock() const;
   void UpdateStatistics(Statistics delta);
-  void WritePcmWrapper(const scoped_refptr<DecoderBufferBase>& buffer);
 
   MediaPipelineBackendForMixer* const backend_;
   const scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
@@ -122,7 +132,8 @@ class AudioDecoderForMixer : public MediaPipelineBackend::AudioDecoder,
 
   scoped_refptr<::media::AudioBufferMemoryPool> pool_;
 
-  std::unique_ptr<AvSync> av_sync_;
+  int64_t playback_start_pts_ = 0;
+  bool start_playback_asap_ = false;
 
   base::WeakPtrFactory<AudioDecoderForMixer> weak_factory_;
 

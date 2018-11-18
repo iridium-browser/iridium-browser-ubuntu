@@ -5,7 +5,6 @@
 #include "chrome/app/main_dll_loader_win.h"
 
 #include <windows.h>  // NOLINT
-#include <shlwapi.h>  // NOLINT
 #include <stddef.h>
 #include <stdint.h>
 #include <userenv.h>  // NOLINT
@@ -28,6 +27,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/trace_event/trace_event.h"
 #include "base/win/scoped_handle.h"
+#include "base/win/shlwapi.h"
 #include "base/win/windows_version.h"
 #include "chrome/app/chrome_watcher_client_win.h"
 #include "chrome/app/chrome_watcher_command_line_win.h"
@@ -44,6 +44,7 @@
 #include "content/public/app/sandbox_helper_win.h"
 #include "content/public/common/content_switches.h"
 #include "sandbox/win/src/sandbox.h"
+#include "services/service_manager/sandbox/switches.h"
 
 namespace {
 // The entry point signature of chrome.dll.
@@ -85,17 +86,17 @@ base::FilePath GetModulePath(base::StringPiece16 module_name) {
   const bool has_path = base::PathService::Get(base::DIR_EXE, &exe_dir);
   DCHECK(has_path);
 
-  // Look for the module in the current executable's directory and return the
-  // path if it can be read. This is the expected location of modules for dev
-  // builds.
-  const base::FilePath module_path = exe_dir.Append(module_name);
+  // Look for the module in a versioned sub-directory of the current
+  // executable's directory and return the path if it can be read. This is the
+  // expected location of modules for proper installs.
+  const base::FilePath module_path =
+      exe_dir.AppendASCII(chrome::kChromeVersion).Append(module_name);
   if (ModuleCanBeRead(module_path))
     return module_path;
 
-  // Othwerwise, return the path to the module in a versioned sub-directory of
-  // the current executable's directory. This is the expected location of
-  // modules for proper installs.
-  return exe_dir.AppendASCII(chrome::kChromeVersion).Append(module_name);
+  // Othwerwise, return the path to the module in the current executable's
+  // directory. This is the expected location of modules for dev builds.
+  return exe_dir.Append(module_name);
 }
 
 }  // namespace
@@ -160,7 +161,8 @@ int MainDllLoader::Launch(HINSTANCE instance,
     }
 
     base::FilePath watcher_data_directory;
-    if (!PathService::Get(chrome::DIR_WATCHER_DATA, &watcher_data_directory))
+    if (!base::PathService::Get(chrome::DIR_WATCHER_DATA,
+                                &watcher_data_directory))
       return chrome::RESULT_CODE_MISSING_DATA;
 
     // Intentionally leaked.
@@ -180,7 +182,8 @@ int MainDllLoader::Launch(HINSTANCE instance,
   // Initialize the sandbox services.
   sandbox::SandboxInterfaceInfo sandbox_info = {0};
   const bool is_browser = process_type_.empty();
-  const bool is_sandboxed = !cmd_line.HasSwitch(switches::kNoSandbox);
+  const bool is_sandboxed =
+      !cmd_line.HasSwitch(service_manager::switches::kNoSandbox);
   if (is_browser || is_sandboxed) {
     // For child processes that are running as --no-sandbox, don't initialize
     // the sandbox info, otherwise they'll be treated as brokers (as if they
@@ -241,7 +244,7 @@ void ChromeDllLoader::OnBeforeLaunch(const base::CommandLine& cmd_line,
 
     // Launch the watcher process.
     base::FilePath exe_path;
-    if (PathService::Get(base::FILE_EXE, &exe_path)) {
+    if (base::PathService::Get(base::FILE_EXE, &exe_path)) {
       chrome_watcher_client_.reset(new ChromeWatcherClient(
           base::Bind(&GenerateChromeWatcherCommandLine, exe_path)));
       chrome_watcher_client_->LaunchWatcher();

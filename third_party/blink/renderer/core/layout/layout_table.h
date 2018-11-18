@@ -145,7 +145,7 @@ class CORE_EXPORT LayoutTable final : public LayoutBlock {
   int VBorderSpacing() const { return v_spacing_; }
 
   bool ShouldCollapseBorders() const {
-    return Style()->BorderCollapse() == EBorderCollapse::kCollapse;
+    return StyleRef().BorderCollapse() == EBorderCollapse::kCollapse;
   }
 
   LayoutUnit BorderLeft() const override;
@@ -157,7 +157,7 @@ class CORE_EXPORT LayoutTable final : public LayoutBlock {
                 LayoutObject* before_child = nullptr) override;
 
   struct ColumnStruct {
-    DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
+    DISALLOW_NEW();
     explicit ColumnStruct(unsigned initial_span = 1) : span(initial_span) {}
 
     unsigned span;
@@ -387,10 +387,11 @@ class CORE_EXPORT LayoutTable final : public LayoutBlock {
   void AddColumn(const LayoutTableCol*);
   void RemoveColumn(const LayoutTableCol*);
 
-  void PaintBoxDecorationBackground(const PaintInfo&,
-                                    const LayoutPoint&) const final;
+  void PaintBoxDecorationBackground(
+      const PaintInfo&,
+      const LayoutPoint& paint_offset) const final;
 
-  void PaintMask(const PaintInfo&, const LayoutPoint&) const final;
+  void PaintMask(const PaintInfo&, const LayoutPoint& paint_offset) const final;
 
   void SubtractCaptionRect(LayoutRect&) const;
 
@@ -422,24 +423,22 @@ class CORE_EXPORT LayoutTable final : public LayoutBlock {
     return is_any_column_ever_collapsed_;
   }
 
-  // Expose for LayoutTableCol::LocalVisualRectIgnoringVisibility().
-  using LayoutBlock::LocalVisualRectIgnoringVisibility;
-
  protected:
   void StyleDidChange(StyleDifference, const ComputedStyle* old_style) override;
   void SimplifiedNormalFlowLayout() override;
-  bool RecalcOverflowAfterStyleChange() override;
+  bool RecalcOverflow() override;
   void EnsureIsReadyForPaintInvalidation() override;
-  PaintInvalidationReason InvalidatePaint(
-      const PaintInvalidatorContext&) const override;
+  void InvalidatePaint(const PaintInvalidatorContext&) const override;
   bool PaintedOutputOfObjectHasNoEffectRegardlessOfSize() const override;
+  void ColumnStructureChanged();
 
  private:
   bool IsOfType(LayoutObjectType type) const override {
     return type == kLayoutObjectTable || LayoutBlock::IsOfType(type);
   }
 
-  void PaintObject(const PaintInfo&, const LayoutPoint&) const override;
+  void PaintObject(const PaintInfo&,
+                   const LayoutPoint& paint_offset) const override;
   void UpdateLayout() override;
   void ComputeIntrinsicLogicalWidths(LayoutUnit& min_width,
                                      LayoutUnit& max_width) const override;
@@ -475,7 +474,8 @@ class CORE_EXPORT LayoutTable final : public LayoutBlock {
       OverlayScrollbarClipBehavior =
           kIgnorePlatformOverlayScrollbarSize) const override;
 
-  void AddOverflowFromChildren() override;
+  void AddVisualOverflowFromChildren() override;
+  void AddLayoutOverflowFromChildren() override;
 
   void RecalcSections() const;
 
@@ -563,6 +563,12 @@ class CORE_EXPORT LayoutTable final : public LayoutBlock {
   mutable bool needs_section_recalc_ : 1;
 
   bool column_logical_width_changed_ : 1;
+  // This flag indicates whether any columns (with or without fixed widths) have
+  // been added or removed since the last layout. If they have, then the true
+  // size of the cell contents needs to be determined with a full layout before
+  // the layout cache is updated. The layout cache can be invalid when layout is
+  // valid (e.g. if the table is being painted for the first time).
+  mutable bool column_structure_changed_ : 1;
   mutable bool column_layout_objects_valid_ : 1;
   mutable unsigned no_cell_colspan_at_least_;
   unsigned CalcNoCellColspanAtLeast() const {

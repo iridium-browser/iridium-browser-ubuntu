@@ -33,7 +33,7 @@ bool HasAnyButtonFlag(int flags) {
 
 WaylandPointer::WaylandPointer(wl_pointer* pointer,
                                const EventDispatchCallback& callback)
-    : obj_(pointer), callback_(callback) {
+    : obj_(pointer), callback_(callback), weak_ptr_factory_(this) {
   static const wl_pointer_listener listener = {
       &WaylandPointer::Enter,  &WaylandPointer::Leave, &WaylandPointer::Motion,
       &WaylandPointer::Button, &WaylandPointer::Axis,
@@ -94,8 +94,8 @@ void WaylandPointer::Motion(void* data,
   pointer->location_.SetPoint(wl_fixed_to_double(surface_x),
                               wl_fixed_to_double(surface_y));
   MouseEvent event(ET_MOUSE_MOVED, gfx::Point(), gfx::Point(),
-                   base::TimeTicks() + base::TimeDelta::FromMilliseconds(time),
-                   pointer->GetFlagsWithKeyboardModifiers(), 0);
+                   EventTimeForNow(), pointer->GetFlagsWithKeyboardModifiers(),
+                   0);
   event.set_location_f(pointer->location_);
   event.set_root_location_f(pointer->location_);
   pointer->callback_.Run(&event);
@@ -140,20 +140,27 @@ void WaylandPointer::Button(void* data,
     pointer->flags_ &= ~changed_button;
   }
 
-  if (pointer->window_with_pointer_focus_) {
-    pointer->window_with_pointer_focus_->set_has_implicit_grab(
-        HasAnyButtonFlag(pointer->flags_));
-  }
+  // See comment bellow.
+  if (type == ET_MOUSE_PRESSED)
+    pointer->MaybeSetOrResetImplicitGrab();
 
   // MouseEvent's flags should contain the button that was released too.
   const int flags = pointer->GetFlagsWithKeyboardModifiers() | changed_button;
-  MouseEvent event(type, gfx::Point(), gfx::Point(),
-                   base::TimeTicks() + base::TimeDelta::FromMilliseconds(time),
-                   flags, changed_button);
-
+  MouseEvent event(type, gfx::Point(), gfx::Point(), EventTimeForNow(), flags,
+                   changed_button);
   event.set_location_f(pointer->location_);
   event.set_root_location_f(pointer->location_);
+
+  auto weak_ptr = pointer->weak_ptr_factory_.GetWeakPtr();
   pointer->callback_.Run(&event);
+
+  // Reset implicit grab only after the event has been sent. Otherwise,
+  // we may end up in a situation, when a target checks for a pointer grab on
+  // the MouseRelease event type, and fails to release capture due to early
+  // pointer focus reset. Setting implicit grab is done normally before the
+  // event has been sent.
+  if (weak_ptr && type == ET_MOUSE_RELEASED)
+    pointer->MaybeSetOrResetImplicitGrab();
 }
 
 // static
@@ -178,13 +185,18 @@ void WaylandPointer::Axis(void* data,
                  MouseWheelEvent::kWheelDelta);
   else
     return;
-  MouseWheelEvent event(
-      offset, gfx::Point(), gfx::Point(),
-      base::TimeTicks() + base::TimeDelta::FromMilliseconds(time),
-      pointer->GetFlagsWithKeyboardModifiers(), 0);
+  MouseWheelEvent event(offset, gfx::Point(), gfx::Point(), EventTimeForNow(),
+                        pointer->GetFlagsWithKeyboardModifiers(), 0);
   event.set_location_f(pointer->location_);
   event.set_root_location_f(pointer->location_);
   pointer->callback_.Run(&event);
+}
+
+void WaylandPointer::MaybeSetOrResetImplicitGrab() {
+  if (!window_with_pointer_focus_)
+    return;
+
+  window_with_pointer_focus_->set_has_implicit_grab(HasAnyButtonFlag(flags_));
 }
 
 int WaylandPointer::GetFlagsWithKeyboardModifiers() {
@@ -198,6 +210,11 @@ int WaylandPointer::GetFlagsWithKeyboardModifiers() {
   flags_ |= keyboard_modifiers_;
   DCHECK(VerifyFlagsAfterMasking(flags_, old_flags, keyboard_modifiers_));
   return flags_;
+}
+
+void WaylandPointer::ResetFlags() {
+  flags_ = 0;
+  keyboard_modifiers_ = 0;
 }
 
 }  // namespace ui

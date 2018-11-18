@@ -9,17 +9,22 @@
 
 namespace ash {
 
+class UnifiedVolumeView;
+
 // Controller of a slider that can change audio volume.
 class UnifiedVolumeSliderController : public UnifiedSliderListener {
  public:
-  UnifiedVolumeSliderController();
+  class Delegate {
+   public:
+    virtual ~Delegate() = default;
+    virtual void OnAudioSettingsButtonClicked() = 0;
+  };
+
+  explicit UnifiedVolumeSliderController(Delegate* delegate);
   ~UnifiedVolumeSliderController() override;
 
-  // Instantiates UnifiedSliderView. The view will be onwed by views hierarchy.
-  // The view should be always deleted after the controller is destructed.
-  views::View* CreateView();
-
   // UnifiedSliderListener:
+  views::View* CreateView() override;
   void ButtonPressed(views::Button* sender, const ui::Event& event) override;
   void SliderValueChanged(views::Slider* sender,
                           float value,
@@ -27,7 +32,8 @@ class UnifiedVolumeSliderController : public UnifiedSliderListener {
                           views::SliderChangeReason reason) override;
 
  private:
-  UnifiedSliderView* slider_;
+  Delegate* const delegate_;
+  UnifiedVolumeView* slider_ = nullptr;
 
   DISALLOW_COPY_AND_ASSIGN(UnifiedVolumeSliderController);
 };

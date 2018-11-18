@@ -5,7 +5,6 @@
 #include <math.h>
 #include <objbase.h>
 #include <sapi.h>
-#include <sphelper.h>
 #include <stdint.h>
 #include <wrl/client.h>
 
@@ -16,6 +15,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "base/win/scoped_co_mem.h"
+#include "base/win/sphelper.h"
 #include "chrome/browser/speech/tts_controller.h"
 #include "chrome/browser/speech/tts_platform.h"
 
@@ -23,7 +23,6 @@ namespace {
 
 // ISpObjectToken key and value names.
 const wchar_t kAttributesKey[] = L"Attributes";
-const wchar_t kGenderValue[] = L"Gender";
 const wchar_t kLanguageValue[] = L"Language";
 
 }  // anonymous namespace.
@@ -213,14 +212,6 @@ void TtsPlatformImplWin::GetVoices(
     Microsoft::WRL::ComPtr<ISpDataKey> attributes;
     if (S_OK != voice_token->OpenKey(kAttributesKey, attributes.GetAddressOf()))
       continue;
-
-    base::win::ScopedCoMem<WCHAR> gender;
-    if (S_OK == attributes->GetStringValue(kGenderValue, &gender)) {
-      if (0 == _wcsicmp(gender.get(), L"male"))
-        voice.gender = TTS_GENDER_MALE;
-      else if (0 == _wcsicmp(gender.get(), L"female"))
-        voice.gender = TTS_GENDER_FEMALE;
-    }
 
     base::win::ScopedCoMem<WCHAR> language;
     if (S_OK == attributes->GetStringValue(kLanguageValue, &language)) {

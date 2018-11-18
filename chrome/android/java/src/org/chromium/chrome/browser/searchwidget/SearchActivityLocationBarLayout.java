@@ -6,21 +6,20 @@ package org.chromium.chrome.browser.searchwidget;
 
 import android.content.Context;
 import android.os.Handler;
+import android.support.annotation.Nullable;
 import android.text.TextUtils;
 import android.util.AttributeSet;
 import android.view.View;
 
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.WindowDelegate;
 import org.chromium.chrome.browser.locale.LocaleManager;
 import org.chromium.chrome.browser.omnibox.LocationBarLayout;
 import org.chromium.chrome.browser.omnibox.LocationBarVoiceRecognitionHandler;
-import org.chromium.chrome.browser.omnibox.OmniboxSuggestion;
+import org.chromium.chrome.browser.omnibox.UrlBar;
+import org.chromium.chrome.browser.omnibox.UrlBarCoordinator.SelectionState;
+import org.chromium.chrome.browser.omnibox.UrlBarData;
 import org.chromium.chrome.browser.profiles.Profile;
-import org.chromium.ui.UiUtils;
-import org.chromium.ui.base.WindowAndroid;
-
-import java.util.List;
+import org.chromium.chrome.browser.toolbar.ToolbarPhone;
 
 /** Implementation of the {@link LocationBarLayout} that is displayed for widget searches. */
 public class SearchActivityLocationBarLayout extends LocationBarLayout {
@@ -40,7 +39,11 @@ public class SearchActivityLocationBarLayout extends LocationBarLayout {
     public SearchActivityLocationBarLayout(Context context, AttributeSet attrs) {
         super(context, attrs, R.layout.location_bar_base);
         setUrlBarFocusable(true);
+        setBackground(ToolbarPhone.createModernLocationBarBackground(getResources()));
+
         mPendingSearchPromoDecision = LocaleManager.getInstance().needToCheckForSearchEnginePromo();
+        getAutocompleteCoordinator().setShouldPreventOmniboxAutocomplete(
+                mPendingSearchPromoDecision);
     }
 
     /** Set the {@link Delegate}. */
@@ -49,7 +52,7 @@ public class SearchActivityLocationBarLayout extends LocationBarLayout {
     }
 
     @Override
-    protected void loadUrl(String url, int transition) {
+    public void loadUrl(String url, int transition, long inputStart) {
         mDelegate.loadUrl(url);
         LocaleManager.getInstance().recordLocaleBasedSearchMetrics(true, url, transition);
     }
@@ -60,19 +63,8 @@ public class SearchActivityLocationBarLayout extends LocationBarLayout {
     }
 
     @Override
-    public boolean mustQueryUrlBarLocationForSuggestions() {
-        return true;
-    }
-
-    @Override
     public void setUrlToPageUrl() {
         // Explicitly do nothing.  The tab is invisible, so showing its URL would be confusing.
-    }
-
-    @Override
-    public void initializeControls(WindowDelegate windowDelegate, WindowAndroid windowAndroid) {
-        super.initializeControls(windowDelegate, windowAndroid);
-        setShowCachedZeroSuggestResults(true);
     }
 
     @Override
@@ -81,13 +73,8 @@ public class SearchActivityLocationBarLayout extends LocationBarLayout {
         setAutocompleteProfile(Profile.getLastUsedProfile().getOriginalProfile());
 
         mPendingSearchPromoDecision = LocaleManager.getInstance().needToCheckForSearchEnginePromo();
-    }
-
-    @Override
-    public void onSuggestionsReceived(
-            List<OmniboxSuggestion> newSuggestions, String inlineAutocompleteText) {
-        if (mPendingSearchPromoDecision) return;
-        super.onSuggestionsReceived(newSuggestions, inlineAutocompleteText);
+        getAutocompleteCoordinator().setShouldPreventOmniboxAutocomplete(
+                mPendingSearchPromoDecision);
     }
 
     /** Called when the SearchActivity has finished initialization. */
@@ -97,10 +84,14 @@ public class SearchActivityLocationBarLayout extends LocationBarLayout {
                     mVoiceRecognitionHandler.isVoiceSearchEnabled());
         }
         if (isVoiceSearchIntent && mUrlBar.isFocused()) onUrlFocusChange(true);
-        if (!TextUtils.isEmpty(mUrlBar.getText())) onTextChangedForAutocomplete();
 
         assert !LocaleManager.getInstance().needToCheckForSearchEnginePromo();
         mPendingSearchPromoDecision = false;
+        getAutocompleteCoordinator().setShouldPreventOmniboxAutocomplete(
+                mPendingSearchPromoDecision);
+        if (!TextUtils.isEmpty(mUrlCoordinator.getTextWithAutocomplete())) {
+            mAutocompleteCoordinator.onTextChangedForAutocomplete();
+        }
 
         if (mPendingBeginQuery) {
             beginQueryInternal(isVoiceSearchIntent);
@@ -113,16 +104,13 @@ public class SearchActivityLocationBarLayout extends LocationBarLayout {
      * @param isVoiceSearchIntent Whether this is a voice search.
      * @param optionalText Prepopulate with a query, this may be null.
      * */
-    void beginQuery(boolean isVoiceSearchIntent, String optionalText) {
+    void beginQuery(boolean isVoiceSearchIntent, @Nullable String optionalText) {
         // Clear the text regardless of the promo decision.  This allows the user to enter text
         // before native has been initialized and have it not be cleared one the delayed beginQuery
         // logic is performed.
-        mUrlBar.setIgnoreTextChangesForAutocomplete(true);
-        mUrlBar.setUrl(optionalText == null ? "" : optionalText, null);
-        mUrlBar.setIgnoreTextChangesForAutocomplete(false);
-
-        mUrlBar.setCursorVisible(true);
-        mUrlBar.setSelection(0, mUrlBar.getText().length());
+        mUrlCoordinator.setUrlBarData(
+                UrlBarData.forNonUrlText(optionalText == null ? "" : optionalText),
+                UrlBar.ScrollType.NO_SCROLL, SelectionState.SELECT_ALL);
 
         if (mPendingSearchPromoDecision) {
             mPendingBeginQuery = true;
@@ -151,19 +139,18 @@ public class SearchActivityLocationBarLayout extends LocationBarLayout {
         findViewById(R.id.url_action_container).setVisibility(View.VISIBLE);
     }
 
+    // TODO(tedchoc): Investigate focusing regardless of the search promo state and just ensure
+    //                we don't start processing non-cached suggestion requests until that state
+    //                is finalized after native has been initialized.
     private void focusTextBox() {
         if (!mUrlBar.hasFocus()) mUrlBar.requestFocus();
+        getAutocompleteCoordinator().setShowCachedZeroSuggestResults(true);
 
         new Handler().post(new Runnable() {
             @Override
             public void run() {
-                UiUtils.showKeyboard(mUrlBar);
+                getWindowAndroid().getKeyboardDelegate().showKeyboard(mUrlBar);
             }
         });
-    }
-
-    @Override
-    public boolean useModernDesign() {
-        return false;
     }
 }

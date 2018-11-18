@@ -35,6 +35,7 @@ using CompositingReasons = uint64_t;
   V(WillChangeCompositingHint)                                                \
   V(BackdropFilter)                                                           \
   V(RootScroller)                                                             \
+  V(ScrollTimelineTarget)                                                     \
                                                                               \
   /* Overlap reasons that require knowing what's behind you in paint-order    \
      before knowing the answer. */                                            \
@@ -123,11 +124,16 @@ class PLATFORM_EXPORT CompositingReason {
         k3DTransform | kBackfaceVisibilityHidden | kComboActiveAnimation |
         kTransitionProperty | kWillChangeCompositingHint | kBackdropFilter,
 
-    kComboAllDirectReasons =
-        kComboAllDirectStyleDeterminedReasons | kVideo | kCanvas | kPlugin |
-        kIFrame | kScrollDependentPosition | kOverflowScrollingTouch |
-        kOverflowScrollingParent | kOutOfFlowClipping | kVideoOverlay |
-        kRootScroller,
+    kComboAllDirectNonStyleDeterminedReasons =
+        kVideo | kCanvas | kPlugin | kIFrame | kOverflowScrollingParent |
+        kOutOfFlowClipping | kVideoOverlay | kRoot | kRootScroller |
+        kScrollDependentPosition | kScrollTimelineTarget,
+
+    kComboAllDirectReasons = kComboAllDirectStyleDeterminedReasons |
+                             kComboAllDirectNonStyleDeterminedReasons,
+
+    kComboAllCompositedScrollingDeterminedReasons =
+        kScrollDependentPosition | kOverflowScrollingTouch,
 
     kComboCompositedDescendants =
         kTransformWithCompositedDescendants | kIsolateCompositedDescendants |

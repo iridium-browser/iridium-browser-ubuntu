@@ -9,6 +9,7 @@
 
 #include <memory>
 #include <set>
+#include <vector>
 
 class CPDF_ExpIntFunc;
 class CPDF_Object;
@@ -25,7 +26,7 @@ class CPDF_Function {
     kType4PostScript = 4,
   };
 
-  static std::unique_ptr<CPDF_Function> Load(CPDF_Object* pFuncObj);
+  static std::unique_ptr<CPDF_Function> Load(const CPDF_Object* pFuncObj);
   static Type IntegerToFunctionType(int iType);
 
   virtual ~CPDF_Function();
@@ -36,8 +37,8 @@ class CPDF_Function {
             int* nresults) const;
   uint32_t CountInputs() const { return m_nInputs; }
   uint32_t CountOutputs() const { return m_nOutputs; }
-  float GetDomain(int i) const { return m_pDomains[i]; }
-  float GetRange(int i) const { return m_pRanges[i]; }
+  float GetDomain(int i) const { return m_Domains[i]; }
+  float GetRange(int i) const { return m_Ranges[i]; }
   float Interpolate(float x,
                     float xmin,
                     float xmax,
@@ -51,17 +52,19 @@ class CPDF_Function {
  protected:
   explicit CPDF_Function(Type type);
 
-  static std::unique_ptr<CPDF_Function> Load(CPDF_Object* pFuncObj,
-                                             std::set<CPDF_Object*>* pVisited);
-  bool Init(CPDF_Object* pObj, std::set<CPDF_Object*>* pVisited);
-  virtual bool v_Init(CPDF_Object* pObj, std::set<CPDF_Object*>* pVisited) = 0;
-  virtual bool v_Call(float* inputs, float* results) const = 0;
+  static std::unique_ptr<CPDF_Function> Load(
+      const CPDF_Object* pFuncObj,
+      std::set<const CPDF_Object*>* pVisited);
+  bool Init(const CPDF_Object* pObj, std::set<const CPDF_Object*>* pVisited);
+  virtual bool v_Init(const CPDF_Object* pObj,
+                      std::set<const CPDF_Object*>* pVisited) = 0;
+  virtual bool v_Call(const float* inputs, float* results) const = 0;
 
+  const Type m_Type;
   uint32_t m_nInputs;
   uint32_t m_nOutputs;
-  float* m_pDomains;
-  float* m_pRanges;
-  const Type m_Type;
+  std::vector<float> m_Domains;
+  std::vector<float> m_Ranges;
 };
 
 #endif  // CORE_FPDFAPI_PAGE_CPDF_FUNCTION_H_

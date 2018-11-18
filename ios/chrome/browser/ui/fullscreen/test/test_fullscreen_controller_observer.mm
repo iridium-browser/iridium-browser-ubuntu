@@ -4,7 +4,8 @@
 
 #import "ios/chrome/browser/ui/fullscreen/test/test_fullscreen_controller_observer.h"
 
-#import "ios/chrome/browser/ui/fullscreen/fullscreen_scroll_end_animator.h"
+#import "ios/chrome/browser/ui/fullscreen/fullscreen_animator.h"
+#import "ios/chrome/browser/ui/fullscreen/fullscreen_controller.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -15,17 +16,21 @@ void TestFullscreenControllerObserver::FullscreenProgressUpdated(
     CGFloat progress) {
   progress_ = progress;
 }
+
 void TestFullscreenControllerObserver::FullscreenEnabledStateChanged(
     FullscreenController* controller,
     bool enabled) {
   enabled_ = enabled;
 }
-void TestFullscreenControllerObserver::FullscreenScrollEventEnded(
+
+void TestFullscreenControllerObserver::FullscreenWillAnimate(
     FullscreenController* controller,
-    FullscreenScrollEndAnimator* animator) {
+    FullscreenAnimator* animator) {
   animator_ = animator;
-  // An animator must have at least one animation block when started, so insert
-  // a no-op block.
-  [animator_ addAnimations:^{
-  }];
+}
+
+void TestFullscreenControllerObserver::FullscreenControllerWillShutDown(
+    FullscreenController* controller) {
+  is_shut_down_ = true;
+  controller->RemoveObserver(this);
 }

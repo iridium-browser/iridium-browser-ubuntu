@@ -22,15 +22,9 @@ Test support code (TestFooDelegate, FooControllerTestApi, etc.) lives in the
 same directory as the class under test (e.g. //ash/foo rather than //ash/test).
 Test code uses namespace ash; there is no special "test" namespace.
 
-Mustash
+Mash
 ----------
-Ash is transitioning to use the mus window server and gpu process, found in
-//services/ui. Ash continues to use aura, but aura is backed by mus. Code to
-support mus is found in the ash directory. There should be relatively few
-differences between the pure aura and the aura-mus versions of ash. Ash can by
-run in mus mode by passing the --enable-features=Mus command line flag.
-
-Ash is also transitioning to run as a mojo service in its own process. This
+Ash is transitioning to run as a mojo service in its own process. This change
 means that code in chrome cannot call into ash directly, but must use the mojo
 interfaces in //ash/public/interfaces.
 
@@ -43,18 +37,47 @@ will only ever run in classic ash) the #include lines have "// mash-ok"
 appended. This makes it easier to use grep to determine which parts of chrome
 have not yet been adapted to mash.
 
-Mustash Tests
+Ash used to support a "mus" mode that ran the mojo window service from
+//services/ui on a background thread in the browser process. This configuration
+was deprecated in April 2018.
+
+SingleProcessMash
+-----------------
+
+Before launching Mash we plan to launch SingleProcessMash. SingleProcessMash is
+similar to "classic ash" in that ash and the browser still live in the same
+process and on the same thread, but all non-ash UI code (such as browser
+windows) will use the WindowService over mojo. This results in exercising much
+of the same code as in mash, but everything is still in the process.
+
+In SingleProcessMash mode there are two aura::Envs. Ash (Shell) creates one and
+the browser creates one. In order to ensure the right one is used do the
+following:
+
+. When creating a Widget set the parent and/or context. If you don't need a
+  specific parent (container), more often than not using a context of
+  Shell::GetRootWindowForNewWindows() is what you want.
+. If you are creating aura::Windows directly, use the ash::window_factory.
+. If you need access to aura::Env, get it from Shell. Shell always returns the
+  right one, regardless of mode.
+
+See https://docs.google.com/document/d/11ha_KioDdXe4iZS2AML1foKnCJlNKm7Q1hFr6VW8dV4/edit for more details.
+
+Mash Tests
 -----
-ash_unittests --enable-features=Mus runs the test suite in mus mode.
-ash_unittests --enable-features=Mash runs in mash mode. Some tests will fail
-because the underlying code has not yet been ported to work with mash. We use
-filter files to skip these tests, because it makes it easier to run the entire
-suite without the filter to see what passes.
+ash_unittests has some tests specific to Mash, but in general Ash code should
+not need to do anything special for Mash. AshTestBase offers functions that
+simulate a remote client (such as the browser) creating a window.
+
+To enable browser_tests to run in Mash use "--enable-features=Mash". As
+Mash is still a work in progress not all tests pass. A filter file is used on
+the bots to exclude failing tests 
+(testing/buildbot/filters/mash.browser_tests.filter).
 
 To simulate what the bots run (e.g. to check if you broke an existing test that
 works under mash) you can run:
 
-`ash_unittests --enable-features=Mash --test-launcher-filter-file=testing/buildbot/filters/mash.ash_unittests.filter`
+`browser_tests --enable-features=Mash --test-launcher-filter-file=testing/buildbot/filters/mash.browser_tests.filter`
 
 Any new feature you add (and its tests) should work under mash. If your test
 cannot pass under mash due to some dependency being broken you may add the test

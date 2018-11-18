@@ -6,7 +6,6 @@
 
 #include <utility>
 
-#include "ash/resources/grit/ash_resources.h"
 #include "ash/resources/vector_icons/vector_icons.h"
 #include "ash/shell.h"
 #include "ash/strings/grit/ash_strings.h"
@@ -16,7 +15,7 @@
 namespace ash {
 
 ScreenShareTrayItem::ScreenShareTrayItem(SystemTray* system_tray)
-    : ScreenTrayItem(system_tray, UMA_SCREEN_SHARE) {
+    : ScreenTrayItem(system_tray, SystemTrayItemUmaType::UMA_SCREEN_SHARE) {
   Shell::Get()->system_tray_notifier()->AddScreenShareObserver(this);
 }
 

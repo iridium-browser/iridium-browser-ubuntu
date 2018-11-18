@@ -14,6 +14,7 @@ scripts_for_json5_files = [
   # dependency for whole jinja2 package
   "//third_party/jinja2/__init__.py",
   "//third_party/markupsafe/__init__.py",  # jinja2 dep
+  "$_scripts_dir/blinkbuild/name_style_converter.py",
   "$_scripts_dir/hasher.py",
   "$_scripts_dir/json5_generator.py",
   "$_scripts_dir/license.py",
@@ -186,8 +187,8 @@ template("css_properties") {
   process_json5_files(target_name) {
     script = invoker.script
     in_files = [
-      "css/CSSProperties.json5",
-      "css/ComputedStyleFieldAliases.json5",
+      "css/css_properties.json5",
+      "css/computed_style_field_aliases.json5",
     ]
     if (defined(invoker.in_files)) {
       in_files += invoker.in_files

@@ -61,7 +61,7 @@ TEST_F(QuerySyncManagerTest, Basic) {
 
   for (size_t ii = 0; ii < arraysize(infos); ++ii) {
     EXPECT_TRUE(sync_manager_->Alloc(&infos[ii]));
-    ASSERT_TRUE(infos[ii].sync != NULL);
+    ASSERT_TRUE(infos[ii].sync != nullptr);
     EXPECT_EQ(0, infos[ii].sync->process_count);
     EXPECT_EQ(0u, infos[ii].sync->result);
     EXPECT_EQ(0, infos[ii].submit_count);
@@ -252,15 +252,15 @@ TEST_F(QueryTrackerTest, Basic) {
   // Check we can create a Query.
   QueryTracker::Query* query = query_tracker_->CreateQuery(
       kId1, GL_ANY_SAMPLES_PASSED_EXT);
-  ASSERT_TRUE(query != NULL);
+  ASSERT_TRUE(query != nullptr);
   // Check we can get the same Query.
   EXPECT_EQ(query, query_tracker_->GetQuery(kId1));
   // Check we get nothing for a non-existent query.
-  EXPECT_TRUE(query_tracker_->GetQuery(kId2) == NULL);
+  EXPECT_TRUE(query_tracker_->GetQuery(kId2) == nullptr);
   // Check we can delete the query.
   query_tracker_->RemoveQuery(kId1);
   // Check we get nothing for a non-existent query.
-  EXPECT_TRUE(query_tracker_->GetQuery(kId1) == NULL);
+  EXPECT_TRUE(query_tracker_->GetQuery(kId1) == nullptr);
 }
 
 TEST_F(QueryTrackerTest, Query) {
@@ -271,7 +271,7 @@ TEST_F(QueryTrackerTest, Query) {
   // Create a Query.
   QueryTracker::Query* query = query_tracker_->CreateQuery(
       kId1, GL_ANY_SAMPLES_PASSED_EXT);
-  ASSERT_TRUE(query != NULL);
+  ASSERT_TRUE(query != nullptr);
   EXPECT_TRUE(query->NeverUsed());
   EXPECT_FALSE(query->Pending());
   EXPECT_EQ(0, query->token());
@@ -301,19 +301,30 @@ TEST_F(QueryTrackerTest, Query) {
   // Store FlushGeneration count after EndQuery is called
   uint32_t gen1 = GetFlushGeneration();
 
-  // Check CheckResultsAvailable.
-  EXPECT_FALSE(query->CheckResultsAvailable(helper_.get()));
+  bool flush_if_pending = false;
+  EXPECT_FALSE(query->CheckResultsAvailable(helper_.get(), flush_if_pending));
   EXPECT_FALSE(query->NeverUsed());
   EXPECT_TRUE(query->Pending());
 
+  // No flush should happen if |flush_if_pending| is false.
   uint32_t gen2 = GetFlushGeneration();
+  EXPECT_EQ(gen1, gen2);
+
+  flush_if_pending = true;
+
+  // Check CheckResultsAvailable.
+  EXPECT_FALSE(query->CheckResultsAvailable(helper_.get(), flush_if_pending));
+  EXPECT_FALSE(query->NeverUsed());
+  EXPECT_TRUE(query->Pending());
+
+  gen2 = GetFlushGeneration();
   EXPECT_NE(gen1, gen2);
 
   // Repeated calls to CheckResultsAvailable should not flush unnecessarily
-  EXPECT_FALSE(query->CheckResultsAvailable(helper_.get()));
+  EXPECT_FALSE(query->CheckResultsAvailable(helper_.get(), flush_if_pending));
   gen1 = GetFlushGeneration();
   EXPECT_EQ(gen1, gen2);
-  EXPECT_FALSE(query->CheckResultsAvailable(helper_.get()));
+  EXPECT_FALSE(query->CheckResultsAvailable(helper_.get(), flush_if_pending));
   gen1 = GetFlushGeneration();
   EXPECT_EQ(gen1, gen2);
 
@@ -323,7 +334,7 @@ TEST_F(QueryTrackerTest, Query) {
   sync->result = kResult;
 
   // Check CheckResultsAvailable.
-  EXPECT_TRUE(query->CheckResultsAvailable(helper_.get()));
+  EXPECT_TRUE(query->CheckResultsAvailable(helper_.get(), flush_if_pending));
   EXPECT_EQ(kResult, query->GetResult());
   EXPECT_FALSE(query->NeverUsed());
   EXPECT_FALSE(query->Pending());
@@ -337,7 +348,7 @@ TEST_F(QueryTrackerTest, Remove) {
   // Create a Query.
   QueryTracker::Query* query = query_tracker_->CreateQuery(
       kId1, GL_ANY_SAMPLES_PASSED_EXT);
-  ASSERT_TRUE(query != NULL);
+  ASSERT_TRUE(query != nullptr);
 
   QuerySyncManager::Bucket* bucket = GetBucket(query);
   EXPECT_EQ(1u, GetBucketUsedCount(bucket));
@@ -349,7 +360,7 @@ TEST_F(QueryTrackerTest, Remove) {
 
   query_tracker_->RemoveQuery(kId1);
   // Check we get nothing for a non-existent query.
-  EXPECT_TRUE(query_tracker_->GetQuery(kId1) == NULL);
+  EXPECT_TRUE(query_tracker_->GetQuery(kId1) == nullptr);
 
   // Check that memory was not freed.
   EXPECT_EQ(1u, GetBucketUsedCount(bucket));
@@ -370,7 +381,7 @@ TEST_F(QueryTrackerTest, RemoveActive) {
   // Create a Query.
   QueryTracker::Query* query =
       query_tracker_->CreateQuery(kId1, GL_ANY_SAMPLES_PASSED_EXT);
-  ASSERT_TRUE(query != NULL);
+  ASSERT_TRUE(query != nullptr);
 
   QuerySyncManager::Bucket* bucket = GetBucket(query);
   EXPECT_EQ(1u, GetBucketUsedCount(bucket));
@@ -379,7 +390,7 @@ TEST_F(QueryTrackerTest, RemoveActive) {
 
   query_tracker_->RemoveQuery(kId1);
   // Check we get nothing for a non-existent query.
-  EXPECT_TRUE(query_tracker_->GetQuery(kId1) == NULL);
+  EXPECT_TRUE(query_tracker_->GetQuery(kId1) == nullptr);
 
   // Check that memory was freed.
   EXPECT_EQ(0u, GetBucketUsedCount(bucket));
@@ -399,7 +410,7 @@ TEST_F(QueryTrackerTest, ManyQueries) {
   for (size_t i = 0; i < kTestSize; i++) {
     QueryTracker::Query* query =
         query_tracker_->CreateQuery(kId1 + i, GL_ANY_SAMPLES_PASSED_EXT);
-    ASSERT_TRUE(query != NULL);
+    ASSERT_TRUE(query != nullptr);
     queries.push_back(query);
     QuerySyncManager::Bucket* bucket = GetBucket(query);
     EXPECT_LE(1u, GetBucketUsedCount(bucket));
@@ -425,7 +436,7 @@ TEST_F(QueryTrackerTest, ManyQueries) {
     EXPECT_EQ(use_count_before_remove, GetBucketUsedCount(bucket));
     query_tracker_->RemoveQuery(query_id);
     // Check we get nothing for a non-existent query.
-    EXPECT_TRUE(query_tracker_->GetQuery(query_id) == NULL);
+    EXPECT_TRUE(query_tracker_->GetQuery(query_id) == nullptr);
 
     // Check that memory was not freed since it was not completed.
     EXPECT_EQ(use_count_before_remove, GetBucketUsedCount(bucket));

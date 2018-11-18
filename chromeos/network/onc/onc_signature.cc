@@ -239,6 +239,7 @@ const OncFieldSignature wifi_with_state_fields[] = {
     {::onc::wifi::kFrequency, &kIntegerSignature},
     {::onc::wifi::kFrequencyList, &kIntegerListSignature},
     {::onc::wifi::kSignalStrength, &kIntegerSignature},
+    {::onc::wifi::kTetheringState, &kStringSignature},
     {NULL}};
 
 const OncFieldSignature wimax_fields[] = {
@@ -268,6 +269,7 @@ const OncFieldSignature cellular_apn_fields[] = {
     {::onc::cellular_apn::kName, &kStringSignature},
     {::onc::cellular_apn::kUsername, &kStringSignature},
     {::onc::cellular_apn::kPassword, &kStringSignature},
+    {::onc::cellular_apn::kAuthentication, &kStringSignature},
     {::onc::cellular_apn::kLocalizedName, &kStringSignature},
     {::onc::cellular_apn::kLanguage, &kStringSignature},
     {NULL}};
@@ -365,6 +367,9 @@ const OncFieldSignature global_network_configuration_fields[] = {
      &kBoolSignature},
     {::onc::global_network_config::kAllowOnlyPolicyNetworksToConnect,
      &kBoolSignature},
+    {::onc::global_network_config::kAllowOnlyPolicyNetworksToConnectIfAvailable,
+     &kBoolSignature},
+    {::onc::global_network_config::kBlacklistedHexSSIDs, &kStringListSignature},
     {::onc::global_network_config::kDisableNetworkTypes, &kStringListSignature},
     {NULL}};
 

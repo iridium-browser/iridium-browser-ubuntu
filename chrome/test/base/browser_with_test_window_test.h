@@ -7,7 +7,6 @@
 
 #include "base/at_exit.h"
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
 #include "build/build_config.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/test/base/test_browser_window.h"
@@ -21,8 +20,7 @@
 #include "ash/test/ash_test_helper.h"
 #include "ash/test/ash_test_views_delegate.h"
 #include "chrome/browser/chromeos/login/users/scoped_test_user_manager.h"
-#include "chrome/browser/chromeos/settings/cros_settings.h"
-#include "chrome/browser/chromeos/settings/device_settings_service.h"
+#include "chrome/browser/chromeos/settings/scoped_cros_settings_test_helper.h"
 #else
 #include "ui/views/test/scoped_views_test_helper.h"
 #endif
@@ -85,6 +83,19 @@ class BrowserWithTestWindowTest : public testing::Test {
   // the specified type.
   BrowserWithTestWindowTest(Browser::Type browser_type, bool hosted_app);
 
+  // Creates a BrowserWithTestWindowTest with the specified options for the
+  // TestBrowserThreadBundle.
+  explicit BrowserWithTestWindowTest(
+      content::TestBrowserThreadBundle::Options thread_bundle_options);
+
+  // Creates a BrowserWithTestWindowTest for which the initial window will be
+  // the specified type and with the specified options for the
+  // TestBrowserThreadBundle.
+  BrowserWithTestWindowTest(
+      Browser::Type browser_type,
+      bool hosted_app,
+      content::TestBrowserThreadBundle::Options thread_bundle_options);
+
   ~BrowserWithTestWindowTest() override;
 
   void SetUp() override;
@@ -106,6 +117,8 @@ class BrowserWithTestWindowTest : public testing::Test {
   TestingProfile* GetProfile() { return profile_; }
 
   TestingProfileManager* profile_manager() { return profile_manager_.get(); }
+
+  content::TestBrowserThreadBundle* thread_bundle() { return &thread_bundle_; }
 
   BrowserWindow* release_browser_window() WARN_UNUSED_RESULT {
     return window_.release();
@@ -176,8 +189,7 @@ class BrowserWithTestWindowTest : public testing::Test {
   base::ShadowingAtExitManager at_exit_manager_;
 
 #if defined(OS_CHROMEOS)
-  chromeos::ScopedTestDeviceSettingsService test_device_settings_service_;
-  chromeos::ScopedTestCrosSettings test_cros_settings_;
+  chromeos::ScopedCrosSettingsTestHelper cros_settings_test_helper_;
   chromeos::ScopedTestUserManager test_user_manager_;
 #endif
 

@@ -129,53 +129,6 @@ class HTTPHeaderNameListParser {
 
 }  // namespace
 
-base::Optional<CORSError> HandleRedirect(
-    WebSecurityOrigin& current_security_origin,
-    WebURLRequest& new_request,
-    const WebURL redirect_response_url,
-    const int redirect_response_status_code,
-    const WebHTTPHeaderMap& redirect_response_header,
-    network::mojom::FetchCredentialsMode credentials_mode,
-    ResourceLoaderOptions& options) {
-  const KURL& last_url = redirect_response_url;
-  const KURL& new_url = new_request.Url();
-
-  WebSecurityOrigin& new_security_origin = current_security_origin;
-
-  // TODO(tyoshino): This should be fixed to check not only the last one but
-  // all redirect responses.
-  if (!current_security_origin.CanRequest(last_url)) {
-    base::Optional<CORSError> redirect_error =
-        CORS::CheckRedirectLocation(new_url);
-    if (redirect_error)
-      return redirect_error;
-
-    KURL redirect_response_kurl = redirect_response_url;
-    base::Optional<CORSError> access_error =
-        CORS::CheckAccess(redirect_response_kurl, redirect_response_status_code,
-                          redirect_response_header.GetHTTPHeaderMap(),
-                          credentials_mode, *current_security_origin.Get());
-    if (access_error)
-      return access_error;
-
-    scoped_refptr<const SecurityOrigin> last_origin =
-        SecurityOrigin::Create(last_url);
-    // Set request's origin to a globally unique identifier as specified in
-    // the step 10 in https://fetch.spec.whatwg.org/#http-redirect-fetch.
-    if (!last_origin->CanRequest(new_url)) {
-      options.security_origin = SecurityOrigin::CreateUnique();
-      new_security_origin = options.security_origin;
-    }
-  }
-
-  if (!current_security_origin.CanRequest(new_url)) {
-    new_request.SetHTTPHeaderField(WebString(HTTPNames::Origin),
-                                   new_security_origin.ToString());
-    options.cors_flag = true;
-  }
-  return base::nullopt;
-}
-
 WebHTTPHeaderSet ExtractCorsExposedHeaderNamesList(
     network::mojom::FetchCredentialsMode credentials_mode,
     const WebURLResponse& response) {
@@ -218,31 +171,22 @@ bool IsOnAccessControlResponseHeaderWhitelist(const WebString& name) {
          allowed_cross_origin_response_headers.end();
 }
 
-WebString ListOfCORSEnabledURLSchemes() {
-  return SchemeRegistry::ListOfCORSEnabledURLSchemes();
-}
-
-bool ContainsOnlyCORSSafelistedOrForbiddenHeaders(const WebHTTPHeaderMap& map) {
-  return FetchUtils::ContainsOnlyCORSSafelistedOrForbiddenHeaders(
-      map.GetHTTPHeaderMap());
-}
-
 // In the spec, https://fetch.spec.whatwg.org/#ref-for-concept-request-mode,
 // No-CORS mode is highly discouraged from using it for new features. Only
 // legacy usages for backward compatibility are allowed except for well-designed
 // usages over the fetch API.
-bool IsNoCORSAllowedContext(WebURLRequest::RequestContext context) {
+bool IsNoCORSAllowedContext(mojom::RequestContextType context) {
   switch (context) {
-    case WebURLRequest::kRequestContextAudio:
-    case WebURLRequest::kRequestContextFavicon:
-    case WebURLRequest::kRequestContextFetch:
-    case WebURLRequest::kRequestContextImage:
-    case WebURLRequest::kRequestContextObject:
-    case WebURLRequest::kRequestContextPlugin:
-    case WebURLRequest::kRequestContextScript:
-    case WebURLRequest::kRequestContextSharedWorker:
-    case WebURLRequest::kRequestContextVideo:
-    case WebURLRequest::kRequestContextWorker:
+    case mojom::RequestContextType::AUDIO:
+    case mojom::RequestContextType::FAVICON:
+    case mojom::RequestContextType::FETCH:
+    case mojom::RequestContextType::IMAGE:
+    case mojom::RequestContextType::OBJECT:
+    case mojom::RequestContextType::PLUGIN:
+    case mojom::RequestContextType::SCRIPT:
+    case mojom::RequestContextType::SHARED_WORKER:
+    case mojom::RequestContextType::VIDEO:
+    case mojom::RequestContextType::WORKER:
       return true;
     default:
       return false;

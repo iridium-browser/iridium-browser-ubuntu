@@ -40,7 +40,7 @@ ServiceWorkerInstalledScriptLoader::~ServiceWorkerInstalledScriptLoader() =
 
 void ServiceWorkerInstalledScriptLoader::OnStarted(
     std::string encoding,
-    std::unordered_map<std::string, std::string> headers,
+    base::flat_map<std::string, std::string> headers,
     mojo::ScopedDataPipeConsumerHandle body_handle,
     uint64_t body_size,
     mojo::ScopedDataPipeConsumerHandle metadata_handle,
@@ -81,7 +81,15 @@ void ServiceWorkerInstalledScriptLoader::OnHttpInfoRead(
   if (options_ & network::mojom::kURLLoadOptionSendSSLInfoWithResponse)
     head.ssl_info = info->ssl_info;
 
-  client_->OnReceiveResponse(head, nullptr /* downloaded_file */);
+  client_->OnReceiveResponse(head);
+
+  if (info->metadata) {
+    const uint8_t* data =
+        reinterpret_cast<const uint8_t*>(info->metadata->data());
+    client_->OnReceiveCachedMetadata(
+        std::vector<uint8_t>(data, data + info->metadata->size()));
+  }
+
   client_->OnStartLoadingResponseBody(std::move(body_handle_));
   // We continue in OnFinished().
 }
@@ -110,7 +118,10 @@ void ServiceWorkerInstalledScriptLoader::OnFinished(FinishedReason reason) {
   client_->OnComplete(network::URLLoaderCompletionStatus(net_error));
 }
 
-void ServiceWorkerInstalledScriptLoader::FollowRedirect() {
+void ServiceWorkerInstalledScriptLoader::FollowRedirect(
+    const base::Optional<std::vector<std::string>>&
+        to_be_removed_request_headers,
+    const base::Optional<net::HttpRequestHeaders>& modified_request_headers) {
   // This class never returns a redirect response to its client, so should never
   // be asked to follow one.
   NOTREACHED();

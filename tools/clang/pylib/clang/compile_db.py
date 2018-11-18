@@ -17,15 +17,14 @@ _debugging = False
 
 def _ProcessEntry(entry):
   """Transforms one entry in the compile database to be clang-tool friendly."""
-  # Escape backslashes to prevent shlex from interpreting them.
-  escaped_command = entry['command'].replace('\\', '\\\\')
-  split_command = shlex.split(escaped_command)
+  split_command = shlex.split(entry['command'], posix=(sys.platform != 'win32'))
+
   # Drop gomacc.exe from the front, if present.
   if split_command[0].endswith('gomacc.exe'):
     split_command = split_command[1:]
   # Insert --driver-mode=cl as the first argument.
   split_command = split_command[:1] + ['--driver-mode=cl'] + split_command[1:]
-  entry['command'] = ' '.join(split_command)
+  entry['command'] = subprocess.list2cmdline(split_command)
 
   # Expand the contents of the response file, if any.
   # http://llvm.org/bugs/show_bug.cgi?id=21634
@@ -85,11 +84,12 @@ def GetNinjaPath():
 
 
 # FIXME: This really should be a build target, rather than generated at runtime.
-def GenerateWithNinja(path):
+def GenerateWithNinja(path, targets=[]):
   """Generates a compile database using ninja.
 
   Args:
     path: The build directory to generate a compile database for.
+    targets: Additional targets to pass to ninja.
 
   Returns:
     List of the contents of the compile database.
@@ -97,9 +97,9 @@ def GenerateWithNinja(path):
   # TODO(dcheng): Ensure that clang is enabled somehow.
 
   # First, generate the compile database.
-  json_compile_db = subprocess.check_output([
-      GetNinjaPath(), '-C', path, '-t', 'compdb', 'cc', 'cxx', 'objc',
-      'objcxx'])
+  json_compile_db = subprocess.check_output(
+      [GetNinjaPath(), '-C', path] + targets +
+      ['-t', 'compdb', 'cc', 'cxx', 'objc', 'objcxx'])
   return json.loads(json_compile_db)
 
 

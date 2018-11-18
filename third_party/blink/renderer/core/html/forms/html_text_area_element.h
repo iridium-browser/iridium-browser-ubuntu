@@ -95,7 +95,7 @@ class CORE_EXPORT HTMLTextAreaElement final : public TextControlElement {
   }
   bool IsRequiredFormControl() const override { return IsRequired(); }
 
-  void DefaultEventHandler(Event*) override;
+  void DefaultEventHandler(Event&) override;
 
   void SubtreeHasChanged() override;
 
@@ -122,7 +122,7 @@ class CORE_EXPORT HTMLTextAreaElement final : public TextControlElement {
   void AppendToFormData(FormData&) override;
   void ResetImpl() override;
   bool HasCustomFocusLogic() const override;
-  bool ShouldShowFocusRingOnMouseFocus() const override;
+  bool MayTriggerVirtualKeyboard() const override;
   bool IsKeyboardFocusable() const override;
   void UpdateFocusAppearanceWithOptions(SelectionBehaviorOnFocus,
                                         const FocusOptions&) override;

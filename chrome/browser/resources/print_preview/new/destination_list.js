@@ -8,14 +8,14 @@
 Polymer({
   is: 'print-preview-destination-list',
 
-  behaviors: [I18nBehavior],
+  behaviors: [I18nBehavior, ListPropertyUpdateBehavior],
 
   properties: {
     /** @type {Array<!print_preview.Destination>} */
-    destinations: {
-      type: Array,
-      observer: 'destinationsChanged_',
-    },
+    destinations: Array,
+
+    /** @type {?RegExp} */
+    searchQuery: Object,
 
     /** @type {boolean} */
     hasActionLink: {
@@ -29,94 +29,87 @@ Polymer({
       value: false,
     },
 
-    /** @type {?RegExp} */
-    searchQuery: {
-      type: Object,
-      observer: 'update_',
-    },
+    listName: String,
 
-    /** @type {boolean} */
-    title: String,
-
-    /** @private {number} */
-    matchingDestinationsCount_: {
-      type: Number,
-      value: 0,
+    /** @private {!Array<!print_preview.Destination>} */
+    matchingDestinations_: {
+      type: Array,
+      value: () => [],
     },
 
     /** @private {boolean} */
     hasDestinations_: {
       type: Boolean,
-      computed: 'computeHasDestinations_(matchingDestinationsCount_)',
+      value: true,
     },
 
     /** @private {boolean} */
     showDestinationsTotal_: {
       type: Boolean,
-      computed: 'computeShowDestinationsTotal_(matchingDestinationsCount_)',
+      value: false,
     },
   },
 
-  /** @private {boolean} */
-  newDestinations_: false,
+  observers: [
+    'updateMatchingDestinations_(destinations.*, searchQuery)',
+    'matchingDestinationsChanged_(matchingDestinations_.*)',
+  ],
 
-  /**
-   * @param {!Array<!print_preview.Destination>} current
-   * @param {?Array<!print_preview.Destination>} previous
-   * @private
-   */
-  destinationsChanged_: function(current, previous) {
-    if (previous == undefined) {
-      this.matchingDestinationsCount_ = this.destinations.length;
-    } else {
-      this.newDestinations_ = true;
+  /** @private {?ResizeObserver} */
+  resizeObserver_: null,
+
+  attached: function() {
+    this.resizeObserver_ = new ResizeObserver(entries => {
+      if (entries === null)
+        return;
+
+      const entry = assert(entries[0]);
+      // Don't set maxHeight below the minimum height.
+      const fullHeight = Math.max(entry.contentRect.height, 64);
+      this.$.list.style.maxHeight = `${fullHeight}px`;
+      this.forceIronResize();
+    });
+    this.resizeObserver_.observe(this.$.listContainer);
+  },
+
+  detached: function() {
+    if (this.resizeObserver_) {
+      this.resizeObserver_.disconnect();
+      this.resizeObserver_ = null;
     }
   },
 
-  /** @private */
-  updateIfNeeded_: function() {
-    if (!this.newDestinations_)
-      return;
-    this.newDestinations_ = false;
-    this.update_();
+  // This is a workaround to ensure that the iron-list correctly updates the
+  // displayed destination information when the elements in the
+  // |matchingDestinations_| array change, instead of using stale information
+  // (a known iron-list issue). The event needs to be fired while the list is
+  // visible, so firing it immediately when the change occurs does not always
+  // work.
+  forceIronResize: function() {
+    this.$.list.fire('iron-resize');
   },
 
   /** @private */
-  update_: function() {
-    if (!this.destinations)
+  updateMatchingDestinations_: function() {
+    if (this.destinations === undefined)
       return;
 
-    const listItems =
-        this.shadowRoot.querySelectorAll('print-preview-destination-list-item');
-
-    let matchCount = 0;
-    listItems.forEach(item => {
-      item.hidden =
-          !!this.searchQuery && !item.destination.matches(this.searchQuery);
-      if (!item.hidden) {
-        matchCount++;
-        item.update();
-      }
-    });
-
-    this.matchingDestinationsCount_ =
-        !this.searchQuery ? listItems.length : matchCount;
+    this.updateList(
+        'matchingDestinations_',
+        destination => destination.origin + '/' + destination.id + '/' +
+            destination.connectionStatusText,
+        this.searchQuery ?
+            this.destinations.filter(
+                d => d.matches(/** @type {!RegExp} */ (this.searchQuery))) :
+            this.destinations.slice());
+    this.forceIronResize();
   },
 
-  /**
-   * @return {boolean}
-   * @private
-   */
-  computeHasDestinations_: function() {
-    return !this.destinations || this.matchingDestinationsCount_ > 0;
-  },
-
-  /**
-   * @return {boolean}
-   * @private
-   */
-  computeShowDestinationsTotal_: function() {
-    return this.matchingDestinationsCount_ > 4;
+  /** @private */
+  matchingDestinationsChanged_: function() {
+    const count = this.matchingDestinations_.length;
+    this.hasDestinations_ = count > 0;
+    this.showDestinationsTotal_ = count > 4;
   },
 
   /** @private */
@@ -125,14 +118,22 @@ Polymer({
   },
 
   /**
+   * @param {!KeyboardEvent} e Event containing the destination and key.
+   * @private
+   */
+  onKeydown_: function(e) {
+    if (e.key === 'Enter') {
+      this.onDestinationSelected_(e);
+      e.stopPropagation();
+    }
+  },
+
+  /**
    * @param {!Event} e Event containing the destination that was selected.
    * @private
    */
   onDestinationSelected_: function(e) {
-    this.fire(
-        'destination-selected',
-        /** @type {PrintPreviewDestinationListItemElement} */
-        (e.target).destination);
+    this.fire('destination-selected', e.target);
   },
 });
 })();

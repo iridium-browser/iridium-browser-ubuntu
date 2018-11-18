@@ -15,14 +15,15 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop/message_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/task/post_task.h"
 #include "base/trace_event/trace_event.h"
 #include "ios/web/public/browser_state.h"
 #import "ios/web/public/web_client.h"
+#include "ios/web/public/web_task_traits.h"
 #include "ios/web/public/web_thread.h"
 #include "ios/web/webui/shared_resources_data_source_ios.h"
 #include "ios/web/webui/url_data_source_ios_impl.h"
@@ -136,8 +137,8 @@ class URLRequestChromeJob : public net::URLRequestJob {
 
   void set_is_gzipped(bool is_gzipped) { is_gzipped_ = is_gzipped; }
 
-  void set_replacements(const ui::TemplateReplacements* replacements) {
-    replacements_ = replacements;
+  void set_source(scoped_refptr<URLDataSourceIOSImpl> source) {
+    source_ = source;
   }
 
   void set_send_content_type_header(bool send_content_type_header) {
@@ -185,9 +186,10 @@ class URLRequestChromeJob : public net::URLRequestJob {
   // resources in resources.pak use compress="gzip".
   bool is_gzipped_;
 
-  // Replacement dictionary for i18n. Owned by |backend_| and so guaranteed to
-  // outlive us.
-  const ui::TemplateReplacements* replacements_;
+  // The URLDataSourceIOSImpl that is servicing this request. This is a shared
+  // pointer so that the request can continue to be served even if the source is
+  // detached from the backend that initially owned it.
+  scoped_refptr<URLDataSourceIOSImpl> source_;
 
   // If true, sets the "Content-Type: <mime-type>" header.
   bool send_content_type_header_;
@@ -220,7 +222,6 @@ URLRequestChromeJob::URLRequestChromeJob(net::URLRequest* request,
       content_security_policy_frame_source_("frame-src 'none';"),
       deny_xframe_options_(true),
       is_gzipped_(false),
-      replacements_(nullptr),
       send_content_type_header_(false),
       is_incognito_(is_incognito),
       browser_state_(browser_state),
@@ -309,9 +310,20 @@ std::unique_ptr<net::SourceStream> URLRequestChromeJob::SetUpSourceStream() {
                                                   net::SourceStream::TYPE_GZIP);
   }
 
-  if (replacements_) {
+  // The URLRequestJob and the SourceStreams we are creating are owned by the
+  // same parent URLRequest, thus it is safe to pass the replacements via a raw
+  // pointer.
+  const ui::TemplateReplacements* replacements = nullptr;
+  if (source_)
+    replacements = source_->GetReplacements();
+  if (replacements) {
+    // It is safe to pass the raw replacements directly to the source stream, as
+    // both this URLRequestChromeJob and the I18nSourceStream are owned by the
+    // same root URLRequest. The replacements are owned by the URLDataSourceImpl
+    // which we keep alive via |source_|, ensuring its lifetime is also bound
+    // to the safe URLRequest.
     source_stream = ui::I18nSourceStream::Create(
-        std::move(source_stream), net::SourceStream::TYPE_NONE, replacements_);
+        std::move(source_stream), net::SourceStream::TYPE_NONE, replacements);
   }
 
   return source_stream;
@@ -322,7 +334,7 @@ void URLRequestChromeJob::MimeTypeAvailable(URLDataSourceIOSImpl* source,
   set_mime_type(mime_type);
 
   if (mime_type == "text/html")
-    set_replacements(source->GetReplacements());
+    set_source(source);
 
   NotifyHeadersComplete();
 }
@@ -383,9 +395,10 @@ void GetMimeTypeOnUI(URLDataSourceIOSImpl* source,
                      const base::WeakPtr<URLRequestChromeJob>& job) {
   DCHECK_CURRENTLY_ON(WebThread::UI);
   std::string mime_type = source->source()->GetMimeType(path);
-  WebThread::PostTask(WebThread::IO, FROM_HERE,
-                      base::Bind(&URLRequestChromeJob::MimeTypeAvailable, job,
-                                 base::RetainedRef(source), mime_type));
+  base::PostTaskWithTraits(
+      FROM_HERE, {WebThread::IO},
+      base::Bind(&URLRequestChromeJob::MimeTypeAvailable, job,
+                 base::RetainedRef(source), mime_type));
 }
 
 }  // namespace
@@ -502,7 +515,7 @@ bool URLDataManagerIOSBackend::StartRequest(const net::URLRequest* request,
   // message loop before request for data. And correspondingly their
   // replies are put on the IO thread in the same order.
   scoped_refptr<base::SingleThreadTaskRunner> target_runner =
-      web::WebThread::GetTaskRunnerForThread(web::WebThread::UI);
+      base::CreateSingleThreadTaskRunnerWithTraits({web::WebThread::UI});
   target_runner->PostTask(
       FROM_HERE, base::Bind(&GetMimeTypeOnUI, base::RetainedRef(source), path,
                             job->weak_factory_.GetWeakPtr()));

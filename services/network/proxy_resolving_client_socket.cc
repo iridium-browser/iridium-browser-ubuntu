@@ -6,6 +6,7 @@
 
 #include <stdint.h>
 #include <string>
+#include <utility>
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
@@ -36,7 +37,6 @@ ProxyResolvingClientSocket::ProxyResolvingClientSocket(
     : network_session_(network_session),
       socket_handle_(std::make_unique<net::ClientSocketHandle>()),
       ssl_config_(ssl_config),
-      proxy_resolve_request_(nullptr),
       url_(url),
       use_tls_(use_tls),
       net_log_(net::NetLogWithSource::Make(network_session_->net_log(),
@@ -54,20 +54,39 @@ ProxyResolvingClientSocket::~ProxyResolvingClientSocket() {
 
 int ProxyResolvingClientSocket::Read(net::IOBuffer* buf,
                                      int buf_len,
-                                     const net::CompletionCallback& callback) {
+                                     net::CompletionOnceCallback callback) {
   if (socket_handle_->socket())
-    return socket_handle_->socket()->Read(buf, buf_len, callback);
+    return socket_handle_->socket()->Read(buf, buf_len, std::move(callback));
   return net::ERR_SOCKET_NOT_CONNECTED;
+}
+
+int ProxyResolvingClientSocket::ReadIfReady(
+    net::IOBuffer* buf,
+    int buf_len,
+    net::CompletionOnceCallback callback) {
+  if (socket_handle_->socket()) {
+    return socket_handle_->socket()->ReadIfReady(buf, buf_len,
+                                                 std::move(callback));
+  }
+  return net::ERR_SOCKET_NOT_CONNECTED;
+}
+
+int ProxyResolvingClientSocket::CancelReadIfReady() {
+  if (socket_handle_->socket())
+    return socket_handle_->socket()->CancelReadIfReady();
+  // Return net::OK as ReadIfReady() is canceled when socket is disconnected.
+  return net::OK;
 }
 
 int ProxyResolvingClientSocket::Write(
     net::IOBuffer* buf,
     int buf_len,
-    const net::CompletionCallback& callback,
+    net::CompletionOnceCallback callback,
     const net::NetworkTrafficAnnotationTag& traffic_annotation) {
-  if (socket_handle_->socket())
-    return socket_handle_->socket()->Write(buf, buf_len, callback,
+  if (socket_handle_->socket()) {
+    return socket_handle_->socket()->Write(buf, buf_len, std::move(callback),
                                            traffic_annotation);
+  }
   return net::ERR_SOCKET_NOT_CONNECTED;
 }
 
@@ -83,14 +102,14 @@ int ProxyResolvingClientSocket::SetSendBufferSize(int32_t size) {
   return net::ERR_SOCKET_NOT_CONNECTED;
 }
 
-int ProxyResolvingClientSocket::Connect(
-    const net::CompletionCallback& callback) {
+int ProxyResolvingClientSocket::Connect(net::CompletionOnceCallback callback) {
   DCHECK(user_connect_callback_.is_null());
+  DCHECK(!socket_handle_->socket());
 
   next_state_ = STATE_PROXY_RESOLVE;
   int result = DoLoop(net::OK);
   if (result == net::ERR_IO_PENDING) {
-    user_connect_callback_ = callback;
+    user_connect_callback_ = std::move(callback);
   }
   return result;
 }
@@ -98,9 +117,7 @@ int ProxyResolvingClientSocket::Connect(
 void ProxyResolvingClientSocket::Disconnect() {
   CloseSocket(true /*close_connection*/);
   if (proxy_resolve_request_) {
-    network_session_->proxy_resolution_service()->CancelRequest(
-        proxy_resolve_request_);
-    proxy_resolve_request_ = nullptr;
+    proxy_resolve_request_.reset();
   }
   user_connect_callback_.Reset();
 }
@@ -148,16 +165,6 @@ const net::NetLogWithSource& ProxyResolvingClientSocket::NetLog() const {
   return net_log_;
 }
 
-void ProxyResolvingClientSocket::SetSubresourceSpeculation() {
-  if (socket_handle_->socket())
-    socket_handle_->socket()->SetSubresourceSpeculation();
-}
-
-void ProxyResolvingClientSocket::SetOmniboxSpeculation() {
-  if (socket_handle_->socket())
-    socket_handle_->socket()->SetOmniboxSpeculation();
-}
-
 bool ProxyResolvingClientSocket::WasEverUsed() const {
   if (socket_handle_->socket())
     return socket_handle_->socket()->WasEverUsed();
@@ -200,7 +207,7 @@ void ProxyResolvingClientSocket::OnIOComplete(int result) {
   DCHECK_NE(net::ERR_IO_PENDING, result);
   int net_error = DoLoop(result);
   if (net_error != net::ERR_IO_PENDING)
-    base::ResetAndReturn(&user_connect_callback_).Run(net_error);
+    std::move(user_connect_callback_).Run(net_error);
 }
 
 int ProxyResolvingClientSocket::DoLoop(int result) {
@@ -241,25 +248,22 @@ int ProxyResolvingClientSocket::DoLoop(int result) {
 
 int ProxyResolvingClientSocket::DoProxyResolve() {
   next_state_ = STATE_PROXY_RESOLVE_COMPLETE;
-  // TODO(xunjieli): Having a null ProxyDelegate is bad. Figure out how to
-  // interact with the new interface for proxy delegate.
-  // https://crbug.com/793071.
   // base::Unretained(this) is safe because resolution request is canceled when
   // |proxy_resolve_request_| is destroyed.
   return network_session_->proxy_resolution_service()->ResolveProxy(
       url_, "POST", &proxy_info_,
       base::BindRepeating(&ProxyResolvingClientSocket::OnIOComplete,
                           base::Unretained(this)),
-      &proxy_resolve_request_, nullptr /*proxy_delegate*/, net_log_);
+      &proxy_resolve_request_, net_log_);
 }
 
 int ProxyResolvingClientSocket::DoProxyResolveComplete(int result) {
   proxy_resolve_request_ = nullptr;
   if (result == net::OK) {
-    next_state_ = STATE_INIT_CONNECTION;
     // Removes unsupported proxies from the list. Currently, this removes
-    // just the SCHEME_QUIC proxy, which doesn't yet support tunneling.
-    // TODO(xunjieli): Allow QUIC proxy once it supports tunneling.
+    // just the SCHEME_QUIC proxy.
+    // TODO(crbug.com/876885): Allow QUIC proxy once net::QuicProxyClientSocket
+    // supports ReadIfReady() and CancelReadIfReady().
     proxy_info_.RemoveProxiesWithoutScheme(
         net::ProxyServer::SCHEME_DIRECT | net::ProxyServer::SCHEME_HTTP |
         net::ProxyServer::SCHEME_HTTPS | net::ProxyServer::SCHEME_SOCKS4 |
@@ -268,8 +272,10 @@ int ProxyResolvingClientSocket::DoProxyResolveComplete(int result) {
     if (proxy_info_.is_empty()) {
       // No proxies/direct to choose from. This happens when we don't support
       // any of the proxies in the returned list.
-      result = net::ERR_NO_SUPPORTED_PROXIES;
+      return net::ERR_NO_SUPPORTED_PROXIES;
     }
+    next_state_ = STATE_INIT_CONNECTION;
+    return net::OK;
   }
   return result;
 }
@@ -325,8 +331,7 @@ int ProxyResolvingClientSocket::DoInitConnectionComplete(int result) {
     return ReconsiderProxyAfterError(result);
   }
 
-  network_session_->proxy_resolution_service()->ReportSuccess(proxy_info_,
-                                                              nullptr);
+  network_session_->proxy_resolution_service()->ReportSuccess(proxy_info_);
   return net::OK;
 }
 
@@ -381,7 +386,7 @@ int ProxyResolvingClientSocket::ReconsiderProxyAfterError(int error) {
   DCHECK_NE(error, net::ERR_IO_PENDING);
 
   // Check if the error was a proxy failure.
-  if (!net::CanFalloverToNextProxy(&error))
+  if (!net::CanFalloverToNextProxy(proxy_info_.proxy_server(), error, &error))
     return error;
 
   if (proxy_info_.is_https() && ssl_config_.send_client_cert) {

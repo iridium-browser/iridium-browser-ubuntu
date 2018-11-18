@@ -21,6 +21,8 @@
 #include "content/common/frame_owner_properties.h"
 #include "content/common/frame_replication_state.h"
 #include "third_party/blink/public/common/frame/frame_policy.h"
+#include "third_party/blink/public/common/frame/user_activation_state.h"
+#include "third_party/blink/public/common/frame/user_activation_update_type.h"
 #include "third_party/blink/public/platform/web_insecure_request_policy.h"
 #include "url/gurl.h"
 #include "url/origin.h"
@@ -37,6 +39,14 @@ struct ContentSecurityPolicyHeader;
 // of those frames. We are mirroring this tree in the browser process. This
 // class represents a node in this tree and is a wrapper for all objects that
 // are frame-specific (as opposed to page-specific).
+//
+// Each FrameTreeNode has a current RenderFrameHost, which can change over
+// time as the frame is navigated. Any immediate subframes of the current
+// document are tracked using FrameTreeNodes owned by the current
+// RenderFrameHost, rather than as children of FrameTreeNode itself. This
+// allows subframe FrameTreeNodes to stay alive while a RenderFrameHost is
+// still alive - for example while pending deletion, after a new current
+// RenderFrameHost has replaced it.
 class CONTENT_EXPORT FrameTreeNode {
  public:
   class Observer {
@@ -60,9 +70,6 @@ class CONTENT_EXPORT FrameTreeNode {
   // calling the constructor.
   FrameTreeNode(FrameTree* frame_tree,
                 Navigator* navigator,
-                RenderFrameHostDelegate* render_frame_delegate,
-                RenderWidgetHostDelegate* render_widget_delegate,
-                RenderFrameHostManager::Delegate* manager_delegate,
                 FrameTreeNode* parent,
                 blink::WebTreeScopeType scope,
                 const std::string& name,
@@ -77,11 +84,6 @@ class CONTENT_EXPORT FrameTreeNode {
   void RemoveObserver(Observer* observer);
 
   bool IsMainFrame() const;
-
-  FrameTreeNode* AddChild(std::unique_ptr<FrameTreeNode> child,
-                          int process_id,
-                          int frame_routing_id);
-  void RemoveChild(FrameTreeNode* child);
 
   // Clears process specific-state in this node to prepare for a new process.
   void ResetForNewProcess();
@@ -122,9 +124,7 @@ class CONTENT_EXPORT FrameTreeNode {
     return devtools_frame_token_;
   }
 
-  size_t child_count() const {
-    return children_.size();
-  }
+  size_t child_count() const { return current_frame_host()->child_count(); }
 
   unsigned int depth() const { return depth_; }
 
@@ -147,7 +147,7 @@ class CONTENT_EXPORT FrameTreeNode {
   void SetOriginalOpener(FrameTreeNode* opener);
 
   FrameTreeNode* child_at(size_t index) const {
-    return children_[index].get();
+    return current_frame_host()->child_at(index);
   }
 
   // Returns the URL of the last committed page in the current frame.
@@ -267,8 +267,6 @@ class CONTENT_EXPORT FrameTreeNode {
     return render_manager_.current_frame_host();
   }
 
-  bool IsDescendantOf(FrameTreeNode* other) const;
-
   // Return the node immediately preceding this node in its parent's
   // |children_|, or nullptr if there is no such node.
   FrameTreeNode* PreviousSibling() const;
@@ -342,7 +340,13 @@ class CONTENT_EXPORT FrameTreeNode {
   // Returns the BlameContext associated with this node.
   FrameTreeNodeBlameContext& blame_context() { return blame_context_; }
 
-  void OnSetHasReceivedUserGesture();
+  // Updates the user activation state in the browser frame tree and in the
+  // frame trees in all renderer processes except the renderer for this node
+  // (which initiated the update).  Returns |false| if the update tries to
+  // consume an already consumed/expired transient state, |true| otherwise.  See
+  // the comment on user_activation_state_ below.
+  bool UpdateUserActivationState(blink::UserActivationUpdateType update_type);
+
   void OnSetHasReceivedUserGestureBeforeNavigation(bool value);
 
   // Returns the sandbox flags currently in effect for this frame. This includes
@@ -372,6 +376,12 @@ class CONTENT_EXPORT FrameTreeNode {
     return replication_state_.has_received_user_gesture;
   }
 
+  // Returns whether the frame received a user gesture on a previous navigation
+  // on the same eTLD+1.
+  bool has_received_user_gesture_before_nav() const {
+    return replication_state_.has_received_user_gesture_before_nav;
+  }
+
   // When a tab is discarded, WebContents sets was_discarded on its
   // root FrameTreeNode.
   // In addition, when a child frame is created, this bit is passed on from
@@ -379,6 +389,19 @@ class CONTENT_EXPORT FrameTreeNode {
   // When a navigation request is created, was_discarded is passed on to the
   // request and reset to false in FrameTreeNode.
   void set_was_discarded() { was_discarded_ = true; }
+  bool was_discarded() const { return was_discarded_; }
+
+  // Returns the sticky bit of the User Activation v2 state of the
+  // |FrameTreeNode|.
+  bool HasBeenActivated() const {
+    return user_activation_state_.HasBeenActive();
+  }
+
+  // Returns the transient bit of the User Activation v2 state of the
+  // |FrameTreeNode|.
+  bool HasTransientUserActivation() {
+    return user_activation_state_.IsActive();
+  }
 
  private:
   FRIEND_TEST_ALL_PREFIXES(SitePerProcessFeaturePolicyBrowserTest,
@@ -389,6 +412,10 @@ class CONTENT_EXPORT FrameTreeNode {
   class OpenerDestroyedObserver;
 
   FrameTreeNode* GetSibling(int relative_offset) const;
+
+  bool NotifyUserActivation();
+
+  bool ConsumeTransientUserActivation();
 
   // The next available browser-global FrameTreeNode ID.
   static int next_frame_tree_node_id_;
@@ -435,9 +462,6 @@ class CONTENT_EXPORT FrameTreeNode {
   // An observer that clears this node's |original_opener_| if the opener is
   // destroyed.
   std::unique_ptr<OpenerDestroyedObserver> original_opener_observer_;
-
-  // The immediate children of this specific frame.
-  std::vector<std::unique_ptr<FrameTreeNode>> children_;
 
   // Whether this frame has committed any real load, replacing its initial
   // about:blank page.
@@ -486,11 +510,39 @@ class CONTENT_EXPORT FrameTreeNode {
   std::unique_ptr<NavigationRequest> navigation_request_;
 
   // List of objects observing this FrameTreeNode.
-  base::ObserverList<Observer> observers_;
+  base::ObserverList<Observer>::Unchecked observers_;
 
   base::TimeTicks last_focus_time_;
 
   bool was_discarded_;
+
+  // The user activation state of the current frame.
+  //
+  // Changes to this state update other FrameTreeNodes as follows: for
+  // notification updates (on user inputs) all ancestor nodes are updated; for
+  // activation consumption calls, the whole frame tree is updated (w/o such
+  // exhaustive consumption, a rouge iframe can cause multiple consumptions per
+  // user activation).
+  //
+  // The user activation state is replicated in the browser process (in
+  // FrameTreeNode) and in the renderer processes (in LocalFrame and
+  // RemoteFrames).  The replicated states across the browser and renderer
+  // processes are kept in sync as follows:
+  //
+  // [A] Consumption of activation state for popups starts in the frame tree of
+  // the browser process and propagate to the renderer trees through direct IPCs
+  // (one IPC sent to each renderer).
+  //
+  // [B] Consumption calls from JS/blink side (e.g. video picture-in-picture)
+  // update the originating renderer's local frame tree and send an IPC to the
+  // browser; the browser updates its frame tree and sends IPCs to all other
+  // renderers each of which then updates its local frame tree.
+  //
+  // [B'] Notification updates on user inputs still follow [B] but they should
+  // really follow [A].  TODO(mustaq): fix through https://crbug.com/848778.
+  //
+  // [C] Expiration of an active state is tracked independently in each process.
+  blink::UserActivationState user_activation_state_;
 
   // A helper for tracing the snapshots of this FrameTreeNode and attributing
   // browser process activities to this node (when possible).  It is unrelated

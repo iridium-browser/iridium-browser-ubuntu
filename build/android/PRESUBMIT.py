@@ -58,6 +58,7 @@ def CommonChecks(input_api, output_api):
       output_api,
       unit_tests=[
           J('.', 'emma_coverage_stats_test.py'),
+          J('.', 'list_class_verification_failures_test.py'),
           J('gyp', 'util', 'build_utils_test.py'),
           J('gyp', 'util', 'md5_check_test.py'),
           J('play_services', 'update_test.py'),
@@ -72,11 +73,15 @@ def CommonChecks(input_api, output_api):
           J('pylib', 'output', 'noop_output_manager_test.py'),
           J('pylib', 'output', 'remote_output_manager_test.py'),
           J('pylib', 'results', 'json_results_test.py'),
+          J('pylib', 'symbols', 'apk_native_libs_unittest.py'),
           J('pylib', 'symbols', 'elf_symbolizer_unittest.py'),
+          J('pylib', 'symbols', 'symbol_utils_unittest.py'),
           J('pylib', 'utils', 'decorators_test.py'),
           J('pylib', 'utils', 'device_dependencies_test.py'),
           J('pylib', 'utils', 'dexdump_test.py'),
           J('pylib', 'utils', 'proguard_test.py'),
+          J('pylib', 'utils', 'test_filter_test.py'),
+          J('.', 'convert_dex_profile_tests.py'),
       ],
       env=pylib_test_env))
 

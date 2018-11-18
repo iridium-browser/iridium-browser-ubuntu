@@ -31,12 +31,10 @@ GCC_TEST_FLAGS = [
     "-Wno-unused-private-field",
 ]
 
-
 # Docs on single flags is preceded by a comment.
 # Docs on groups of flags is preceded by ###.
 
 LLVM_FLAGS = [
-    # All warnings are treated as errors by implicit -Werror flag
     "-Wall",
     "-Wextra",
     "-Weverything",
@@ -117,7 +115,6 @@ LLVM_TEST_FLAGS = [
 
 MSVC_FLAGS = [
     "/W3",
-    "/WX",
     "/wd4005",  # macro-redefinition
     "/wd4068",  # unknown pragma
     "/wd4244",  # conversion from 'type1' to 'type2', possible loss of data
@@ -152,4 +149,8 @@ ABSL_TEST_COPTS = ABSL_DEFAULT_COPTS + select({
 ABSL_EXCEPTIONS_FLAG = select({
     "//absl:windows": ["/U_HAS_EXCEPTIONS", "/D_HAS_EXCEPTIONS=1", "/EHsc"],
     "//conditions:default": ["-fexceptions"],
+})
+
+ABSL_EXCEPTIONS_FLAG_LINKOPTS = select({
+    "//conditions:default": [],
 })

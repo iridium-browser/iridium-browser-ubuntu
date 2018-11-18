@@ -2,16 +2,25 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include <algorithm>
 #include <memory>
+#include <utility>
+#include <vector>
 
 #include "core/fxcrt/fx_memory.h"
+#include "core/fxge/fx_font.h"
+#include "public/cpp/fpdf_scopers.h"
 #include "public/fpdf_text.h"
+#include "public/fpdf_transformpage.h"
 #include "public/fpdfview.h"
 #include "testing/embedder_test.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/test_support.h"
 
 namespace {
+
+constexpr char kHelloGoodbyeText[] = "Hello, world!\r\nGoodbye, world!";
+constexpr int kHelloGoodbyeTextSize = FX_ArraySize(kHelloGoodbyeText);
 
 bool check_unsigned_shorts(const char* expected,
                            const unsigned short* actual,
@@ -38,7 +47,6 @@ TEST_F(FPDFTextEmbeddertest, Text) {
   FPDF_TEXTPAGE textpage = FPDFText_LoadPage(page);
   ASSERT_TRUE(textpage);
 
-  static const char kExpected[] = "Hello, world!\r\nGoodbye, world!";
   unsigned short buffer[128];
   memset(buffer, 0xbd, sizeof(buffer));
 
@@ -52,20 +60,19 @@ TEST_F(FPDFTextEmbeddertest, Text) {
   // Keep going and check the next case.
   memset(buffer, 0xbd, sizeof(buffer));
   EXPECT_EQ(2, FPDFText_GetText(textpage, 0, 1, buffer));
-  EXPECT_EQ(kExpected[0], buffer[0]);
+  EXPECT_EQ(kHelloGoodbyeText[0], buffer[0]);
   EXPECT_EQ(0, buffer[1]);
 
   // Check includes the terminating NUL that is provided.
   int num_chars = FPDFText_GetText(textpage, 0, 128, buffer);
-  ASSERT_GE(num_chars, 0);
-  EXPECT_EQ(sizeof(kExpected), static_cast<size_t>(num_chars));
-  EXPECT_TRUE(check_unsigned_shorts(kExpected, buffer, sizeof(kExpected)));
+  ASSERT_EQ(kHelloGoodbyeTextSize, num_chars);
+  EXPECT_TRUE(
+      check_unsigned_shorts(kHelloGoodbyeText, buffer, kHelloGoodbyeTextSize));
 
   // Count does not include the terminating NUL in the string literal.
-  EXPECT_EQ(sizeof(kExpected) - 1,
-            static_cast<size_t>(FPDFText_CountChars(textpage)));
-  for (size_t i = 0; i < sizeof(kExpected) - 1; ++i) {
-    EXPECT_EQ(static_cast<unsigned int>(kExpected[i]),
+  EXPECT_EQ(kHelloGoodbyeTextSize - 1, FPDFText_CountChars(textpage));
+  for (size_t i = 0; i < kHelloGoodbyeTextSize - 1; ++i) {
+    EXPECT_EQ(static_cast<unsigned int>(kHelloGoodbyeText[i]),
               FPDFText_GetUnicode(textpage, i))
         << " at " << i;
   }
@@ -125,7 +132,7 @@ TEST_F(FPDFTextEmbeddertest, Text) {
   EXPECT_EQ(-1, FPDFText_GetCharIndexAtPos(textpage, -1.0, 50.0, 1.0, 1.0));
 
   // Count does not include the terminating NUL in the string literal.
-  EXPECT_EQ(2, FPDFText_CountRects(textpage, 0, sizeof(kExpected) - 1));
+  EXPECT_EQ(2, FPDFText_CountRects(textpage, 0, kHelloGoodbyeTextSize - 1));
 
   left = 0.0;
   right = 0.0;
@@ -158,25 +165,26 @@ TEST_F(FPDFTextEmbeddertest, Text) {
   EXPECT_EQ(0.0, bottom);
   EXPECT_EQ(0.0, top);
 
-  EXPECT_EQ(9, FPDFText_GetBoundedText(textpage, 41.0, 56.0, 82.0, 48.0, 0, 0));
+  EXPECT_EQ(
+      9, FPDFText_GetBoundedText(textpage, 41.0, 56.0, 82.0, 48.0, nullptr, 0));
 
   // Extract starting at character 4 as above.
   memset(buffer, 0xbd, sizeof(buffer));
   EXPECT_EQ(
       1, FPDFText_GetBoundedText(textpage, 41.0, 56.0, 82.0, 48.0, buffer, 1));
-  EXPECT_TRUE(check_unsigned_shorts(kExpected + 4, buffer, 1));
+  EXPECT_TRUE(check_unsigned_shorts(kHelloGoodbyeText + 4, buffer, 1));
   EXPECT_EQ(0xbdbd, buffer[1]);
 
   memset(buffer, 0xbd, sizeof(buffer));
   EXPECT_EQ(
       9, FPDFText_GetBoundedText(textpage, 41.0, 56.0, 82.0, 48.0, buffer, 9));
-  EXPECT_TRUE(check_unsigned_shorts(kExpected + 4, buffer, 9));
+  EXPECT_TRUE(check_unsigned_shorts(kHelloGoodbyeText + 4, buffer, 9));
   EXPECT_EQ(0xbdbd, buffer[9]);
 
   memset(buffer, 0xbd, sizeof(buffer));
   EXPECT_EQ(10, FPDFText_GetBoundedText(textpage, 41.0, 56.0, 82.0, 48.0,
                                         buffer, 128));
-  EXPECT_TRUE(check_unsigned_shorts(kExpected + 4, buffer, 9));
+  EXPECT_TRUE(check_unsigned_shorts(kHelloGoodbyeText + 4, buffer, 9));
   EXPECT_EQ(0u, buffer[9]);
   EXPECT_EQ(0xbdbd, buffer[10]);
 
@@ -316,16 +324,21 @@ TEST_F(FPDFTextEmbeddertest, WebLinks) {
   FPDF_TEXTPAGE textpage = FPDFText_LoadPage(page);
   ASSERT_TRUE(textpage);
 
+  {
+    ScopedFPDFPageLink pagelink(FPDFLink_LoadWebLinks(textpage));
+    EXPECT_TRUE(pagelink);
+
+    // Page contains two HTTP-style URLs.
+    EXPECT_EQ(2, FPDFLink_CountWebLinks(pagelink.get()));
+
+    // Only a terminating NUL required for bogus links.
+    EXPECT_EQ(1, FPDFLink_GetURL(pagelink.get(), 2, nullptr, 0));
+    EXPECT_EQ(1, FPDFLink_GetURL(pagelink.get(), 1400, nullptr, 0));
+    EXPECT_EQ(1, FPDFLink_GetURL(pagelink.get(), -1, nullptr, 0));
+  }
+
   FPDF_PAGELINK pagelink = FPDFLink_LoadWebLinks(textpage);
   EXPECT_TRUE(pagelink);
-
-  // Page contains two HTTP-style URLs.
-  EXPECT_EQ(2, FPDFLink_CountWebLinks(pagelink));
-
-  // Only a terminating NUL required for bogus links.
-  EXPECT_EQ(1, FPDFLink_GetURL(pagelink, 2, nullptr, 0));
-  EXPECT_EQ(1, FPDFLink_GetURL(pagelink, 1400, nullptr, 0));
-  EXPECT_EQ(1, FPDFLink_GetURL(pagelink, -1, nullptr, 0));
 
   // Query the number of characters required for each link (incl NUL).
   EXPECT_EQ(25, FPDFLink_GetURL(pagelink, 0, nullptr, 0));
@@ -500,6 +513,88 @@ TEST_F(FPDFTextEmbeddertest, GetFontSize) {
   UnloadPage(page);
 }
 
+TEST_F(FPDFTextEmbeddertest, GetFontInfo) {
+  ASSERT_TRUE(OpenDocument("hello_world.pdf"));
+  FPDF_PAGE page = LoadPage(0);
+  ASSERT_TRUE(page);
+
+  FPDF_TEXTPAGE textpage = FPDFText_LoadPage(page);
+  ASSERT_TRUE(textpage);
+  std::vector<char> font_name;
+  size_t num_chars1 = strlen("Hello, world!");
+  const char kExpectedFontName1[] = "Times-Roman";
+
+  for (size_t i = 0; i < num_chars1; i++) {
+    int flags = -1;
+    unsigned long length =
+        FPDFText_GetFontInfo(textpage, i, nullptr, 0, &flags);
+    static constexpr unsigned long expected_length = sizeof(kExpectedFontName1);
+    ASSERT_EQ(expected_length, length);
+    EXPECT_EQ(FXFONT_NONSYMBOLIC, flags);
+    font_name.resize(length);
+    std::fill(font_name.begin(), font_name.end(), 'a');
+    flags = -1;
+    EXPECT_EQ(expected_length,
+              FPDFText_GetFontInfo(textpage, i, font_name.data(),
+                                   font_name.size(), &flags));
+    EXPECT_STREQ(kExpectedFontName1, font_name.data());
+    EXPECT_EQ(FXFONT_NONSYMBOLIC, flags);
+  }
+  // If the size of the buffer is not large enough, the buffer should remain
+  // unchanged.
+  font_name.pop_back();
+  std::fill(font_name.begin(), font_name.end(), 'a');
+  EXPECT_EQ(sizeof(kExpectedFontName1),
+            FPDFText_GetFontInfo(textpage, 0, font_name.data(),
+                                 font_name.size(), nullptr));
+  for (char a : font_name)
+    EXPECT_EQ('a', a);
+
+  // The text is "Hello, world!\r\nGoodbye, world!", so the next two characters
+  // do not have any font information.
+  EXPECT_EQ(0u, FPDFText_GetFontInfo(textpage, num_chars1, font_name.data(),
+                                     font_name.size(), nullptr));
+  EXPECT_EQ(0u, FPDFText_GetFontInfo(textpage, num_chars1 + 1, font_name.data(),
+                                     font_name.size(), nullptr));
+
+  size_t num_chars2 = strlen("Goodbye, world!");
+  const char kExpectedFontName2[] = "Helvetica";
+  for (size_t i = num_chars1 + 2; i < num_chars1 + num_chars2 + 2; i++) {
+    int flags = -1;
+    unsigned long length =
+        FPDFText_GetFontInfo(textpage, i, nullptr, 0, &flags);
+    static constexpr unsigned long expected_length = sizeof(kExpectedFontName2);
+    ASSERT_EQ(expected_length, length);
+    EXPECT_EQ(FXFONT_NONSYMBOLIC, flags);
+    font_name.resize(length);
+    std::fill(font_name.begin(), font_name.end(), 'a');
+    flags = -1;
+    EXPECT_EQ(expected_length,
+              FPDFText_GetFontInfo(textpage, i, font_name.data(),
+                                   font_name.size(), &flags));
+    EXPECT_STREQ(kExpectedFontName2, font_name.data());
+    EXPECT_EQ(FXFONT_NONSYMBOLIC, flags);
+  }
+
+  // Now try some out of bounds indices and null pointers to make sure we do not
+  // crash.
+  // No textpage.
+  EXPECT_EQ(0u, FPDFText_GetFontInfo(nullptr, 0, font_name.data(),
+                                     font_name.size(), nullptr));
+  // No buffer.
+  EXPECT_EQ(sizeof(kExpectedFontName1),
+            FPDFText_GetFontInfo(textpage, 0, nullptr, 0, nullptr));
+  // Negative index.
+  EXPECT_EQ(0u, FPDFText_GetFontInfo(textpage, -1, font_name.data(),
+                                     font_name.size(), nullptr));
+  // Out of bounds index.
+  EXPECT_EQ(0u, FPDFText_GetFontInfo(textpage, 1000, font_name.data(),
+                                     font_name.size(), nullptr));
+
+  FPDFText_ClosePage(textpage);
+  UnloadPage(page);
+}
+
 TEST_F(FPDFTextEmbeddertest, ToUnicode) {
   ASSERT_TRUE(OpenDocument("bug_583.pdf"));
   FPDF_PAGE page = LoadPage(0);
@@ -509,7 +604,7 @@ TEST_F(FPDFTextEmbeddertest, ToUnicode) {
   ASSERT_TRUE(textpage);
 
   ASSERT_EQ(1, FPDFText_CountChars(textpage));
-  EXPECT_EQ(static_cast<unsigned int>(0), FPDFText_GetUnicode(textpage, 0));
+  EXPECT_EQ(0U, FPDFText_GetUnicode(textpage, 0));
 
   FPDFText_ClosePage(textpage);
   UnloadPage(page);
@@ -613,14 +708,12 @@ TEST_F(FPDFTextEmbeddertest, ControlCharacters) {
   ASSERT_TRUE(textpage);
 
   // Should not include the control characters in the output
-  static const char expected[] = "Hello, world!\r\nGoodbye, world!";
   unsigned short buffer[128];
   memset(buffer, 0xbd, sizeof(buffer));
   int num_chars = FPDFText_GetText(textpage, 0, 128, buffer);
-
-  ASSERT_GE(num_chars, 0);
-  EXPECT_EQ(sizeof(expected), static_cast<size_t>(num_chars));
-  EXPECT_TRUE(check_unsigned_shorts(expected, buffer, sizeof(expected)));
+  ASSERT_EQ(kHelloGoodbyeTextSize, num_chars);
+  EXPECT_TRUE(
+      check_unsigned_shorts(kHelloGoodbyeText, buffer, kHelloGoodbyeTextSize));
 
   // Attempting to get a chunk of text after the control characters
   static const char expected_substring[] = "Goodbye, world!";
@@ -691,13 +784,12 @@ TEST_F(FPDFTextEmbeddertest, CountRects) {
 
   // Sanity check hello_world.pdf.
   // |num_chars| check includes the terminating NUL that is provided.
-  static const char kExpected[] = "Hello, world!\r\nGoodbye, world!";
   {
     unsigned short buffer[128];
     int num_chars = FPDFText_GetText(textpage, 0, 128, buffer);
-    ASSERT_GE(num_chars, 0);
-    EXPECT_EQ(sizeof(kExpected), static_cast<size_t>(num_chars));
-    EXPECT_TRUE(check_unsigned_shorts(kExpected, buffer, sizeof(kExpected)));
+    ASSERT_EQ(kHelloGoodbyeTextSize, num_chars);
+    EXPECT_TRUE(check_unsigned_shorts(kHelloGoodbyeText, buffer,
+                                      kHelloGoodbyeTextSize));
   }
 
   // Now test FPDFText_CountRects().
@@ -732,7 +824,7 @@ TEST_F(FPDFTextEmbeddertest, CountRects) {
   }
 
   // Now test larger start values.
-  const int kExpectedLength = strlen(kExpected);
+  const int kExpectedLength = strlen(kHelloGoodbyeText);
   for (int start = kGoodbyeWorldStart + 1; start < kExpectedLength; ++start) {
     EXPECT_EQ(1, FPDFText_CountRects(textpage, start, -1));
     EXPECT_EQ(0, FPDFText_CountRects(textpage, start, 0));
@@ -741,7 +833,6 @@ TEST_F(FPDFTextEmbeddertest, CountRects) {
     EXPECT_EQ(1, FPDFText_CountRects(textpage, start, 500));
   }
 
-  // TODO(thestig): This crashes. Fix and enable.
   // Now test start values that starts beyond the end of the text.
   for (int start = kExpectedLength; start < 100; ++start) {
     EXPECT_EQ(0, FPDFText_CountRects(textpage, start, -1));
@@ -752,5 +843,127 @@ TEST_F(FPDFTextEmbeddertest, CountRects) {
   }
 
   FPDFText_ClosePage(textpage);
+  UnloadPage(page);
+}
+
+TEST_F(FPDFTextEmbeddertest, GetText) {
+  ASSERT_TRUE(OpenDocument("hello_world.pdf"));
+  FPDF_PAGE page = LoadPage(0);
+  ASSERT_TRUE(page);
+
+  FPDF_TEXTPAGE text_page = FPDFText_LoadPage(page);
+  ASSERT_TRUE(text_page);
+
+  EXPECT_EQ(2, FPDFPage_CountObjects(page));
+  FPDF_PAGEOBJECT text_object = FPDFPage_GetObject(page, 0);
+  ASSERT_TRUE(text_object);
+
+  // Positive testing.
+  constexpr char kHelloText[] = "Hello, world!";
+  // Return value includes the terminating NUL that is provided.
+  constexpr unsigned long kHelloUTF16Size = FX_ArraySize(kHelloText) * 2;
+  constexpr wchar_t kHelloWideText[] = L"Hello, world!";
+  unsigned long size = FPDFTextObj_GetText(text_object, text_page, nullptr, 0);
+  ASSERT_EQ(kHelloUTF16Size, size);
+
+  std::vector<unsigned short> buffer(size);
+  ASSERT_EQ(size,
+            FPDFTextObj_GetText(text_object, text_page, buffer.data(), size));
+  ASSERT_EQ(kHelloWideText, GetPlatformWString(buffer.data()));
+
+  // Negative testing.
+  ASSERT_EQ(0U, FPDFTextObj_GetText(nullptr, text_page, nullptr, 0));
+  ASSERT_EQ(0U, FPDFTextObj_GetText(text_object, nullptr, nullptr, 0));
+  ASSERT_EQ(0U, FPDFTextObj_GetText(nullptr, nullptr, nullptr, 0));
+
+  // Buffer is too small, ensure it's not modified.
+  buffer.resize(2);
+  buffer[0] = 'x';
+  buffer[1] = '\0';
+  size =
+      FPDFTextObj_GetText(text_object, text_page, buffer.data(), buffer.size());
+  ASSERT_EQ(kHelloUTF16Size, size);
+  ASSERT_EQ('x', buffer[0]);
+  ASSERT_EQ('\0', buffer[1]);
+
+  FPDFText_ClosePage(text_page);
+  UnloadPage(page);
+}
+
+TEST_F(FPDFTextEmbeddertest, CroppedText) {
+  static constexpr int kPageCount = 4;
+  static constexpr FS_RECTF kBoxes[kPageCount] = {
+      {50.0f, 150.0f, 150.0f, 50.0f},
+      {50.0f, 150.0f, 150.0f, 50.0f},
+      {60.0f, 150.0f, 150.0f, 60.0f},
+      {60.0f, 150.0f, 150.0f, 60.0f},
+  };
+  static constexpr const char* kExpectedText[kPageCount] = {
+      " world!\r\ndbye, world!", " world!\r\ndbye, world!", "bye, world!",
+      "bye, world!",
+  };
+
+  ASSERT_TRUE(OpenDocument("cropped_text.pdf"));
+  ASSERT_EQ(kPageCount, FPDF_GetPageCount(document()));
+
+  for (int i = 0; i < kPageCount; ++i) {
+    FPDF_PAGE page = LoadPage(i);
+    ASSERT_TRUE(page);
+
+    FS_RECTF box;
+    EXPECT_TRUE(FPDF_GetPageBoundingBox(page, &box));
+    EXPECT_EQ(kBoxes[i].left, box.left);
+    EXPECT_EQ(kBoxes[i].top, box.top);
+    EXPECT_EQ(kBoxes[i].right, box.right);
+    EXPECT_EQ(kBoxes[i].bottom, box.bottom);
+
+    {
+      ScopedFPDFTextPage textpage(FPDFText_LoadPage(page));
+      ASSERT_TRUE(textpage);
+
+      unsigned short buffer[128];
+      memset(buffer, 0xbd, sizeof(buffer));
+      int num_chars = FPDFText_GetText(textpage.get(), 0, 128, buffer);
+      ASSERT_EQ(kHelloGoodbyeTextSize, num_chars);
+      EXPECT_TRUE(check_unsigned_shorts(kHelloGoodbyeText, buffer,
+                                        kHelloGoodbyeTextSize));
+
+      int expected_char_count = strlen(kExpectedText[i]);
+      ASSERT_EQ(expected_char_count,
+                FPDFText_GetBoundedText(textpage.get(), box.left, box.top,
+                                        box.right, box.bottom, nullptr, 0));
+
+      memset(buffer, 0xbd, sizeof(buffer));
+      ASSERT_EQ(expected_char_count + 1,
+                FPDFText_GetBoundedText(textpage.get(), box.left, box.top,
+                                        box.right, box.bottom, buffer, 128));
+      EXPECT_TRUE(
+          check_unsigned_shorts(kExpectedText[i], buffer, expected_char_count));
+    }
+
+    UnloadPage(page);
+  }
+}
+
+TEST_F(FPDFTextEmbeddertest, Bug_1139) {
+  ASSERT_TRUE(OpenDocument("bug_1139.pdf"));
+  FPDF_PAGE page = LoadPage(0);
+  ASSERT_TRUE(page);
+
+  FPDF_TEXTPAGE text_page = FPDFText_LoadPage(page);
+  ASSERT_TRUE(text_page);
+
+  // -1 for CountChars not including the \0, but +1 for the extra control
+  // character.
+  EXPECT_EQ(kHelloGoodbyeTextSize, FPDFText_CountChars(text_page));
+
+  // There is an extra control character at the beginning of the string, but it
+  // should not appear in the output nor prevent extracting the text.
+  unsigned short buffer[128];
+  int num_chars = FPDFText_GetText(text_page, 0, 128, buffer);
+  ASSERT_EQ(kHelloGoodbyeTextSize, num_chars);
+  EXPECT_TRUE(
+      check_unsigned_shorts(kHelloGoodbyeText, buffer, kHelloGoodbyeTextSize));
+  FPDFText_ClosePage(text_page);
   UnloadPage(page);
 }

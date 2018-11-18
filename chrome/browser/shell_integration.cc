@@ -7,21 +7,23 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/files/file_util.h"
+#include "base/i18n/file_util_icu.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task_scheduler/lazy_task_runner.h"
-#include "base/task_scheduler/post_task.h"
-#include "base/task_scheduler/single_thread_task_runner_thread_mode.h"
-#include "base/task_scheduler/task_traits.h"
-#include "base/threading/thread_restrictions.h"
+#include "base/task/lazy_task_runner.h"
+#include "base/task/post_task.h"
+#include "base/task/single_thread_task_runner_thread_mode.h"
+#include "base/task/task_traits.h"
+#include "base/threading/scoped_blocking_call.h"
 #include "build/build_config.h"
 #include "chrome/browser/policy/policy_path_parser.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "components/prefs/pref_service.h"
 #include "components/version_info/version_info.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 
 #if defined(OS_CHROMEOS)
@@ -88,7 +90,7 @@ base::CommandLine CommandLineArgsForLauncher(
     const GURL& url,
     const std::string& extension_app_id,
     const base::FilePath& profile_path) {
-  base::AssertBlockingAllowed();
+  base::ScopedBlockingCall scoped_blocking_call(base::BlockingType::MAY_BLOCK);
   base::CommandLine new_cmd_line(base::CommandLine::NO_PROGRAM);
 
   AppendProfileArgs(
@@ -186,17 +188,17 @@ void DefaultWebClientWorker::OnCheckIsDefaultComplete(
 // DefaultWebClientWorker, private:
 
 void DefaultWebClientWorker::CheckIsDefault(bool is_following_set_as_default) {
-  base::AssertBlockingAllowed();
+  base::ScopedBlockingCall scoped_blocking_call(base::BlockingType::MAY_BLOCK);
 
   DefaultWebClientState state = CheckIsDefaultImpl();
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::UI},
       base::Bind(&DefaultBrowserWorker::OnCheckIsDefaultComplete, this, state,
                  is_following_set_as_default));
 }
 
 void DefaultWebClientWorker::SetAsDefault() {
-  base::AssertBlockingAllowed();
+  base::ScopedBlockingCall scoped_blocking_call(base::BlockingType::MAY_BLOCK);
 
   // SetAsDefaultImpl will make sure the callback is executed exactly once.
   SetAsDefaultImpl(

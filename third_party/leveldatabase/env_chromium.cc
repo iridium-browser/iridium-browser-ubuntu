@@ -8,7 +8,7 @@
 #include <limits>
 #include <utility>
 
-#if defined(OS_POSIX)
+#if defined(OS_POSIX) || defined(OS_FUCHSIA)
 #include <dirent.h>
 #include <sys/types.h>
 #endif
@@ -28,6 +28,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/sys_info.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/trace_event/memory_dump_manager.h"
 #include "base/trace_event/memory_dump_provider.h"
@@ -36,6 +37,7 @@
 #include "build/build_config.h"
 #include "third_party/leveldatabase/chromium_logger.h"
 #include "third_party/leveldatabase/leveldb_chrome.h"
+#include "third_party/leveldatabase/leveldb_features.h"
 #include "third_party/leveldatabase/src/include/leveldb/options.h"
 #include "third_party/re2/src/re2/re2.h"
 
@@ -61,6 +63,10 @@ const FilePath::CharType table_extension[] = FILE_PATH_LITERAL(".ldb");
 
 static const FilePath::CharType kLevelDBTestDirectoryPrefix[] =
     FILE_PATH_LITERAL("leveldb-test-");
+
+// This name should not be changed or users involved in a crash might not be
+// able to recover data.
+static const char kDatabaseNameSuffixForRebuildDB[] = "__tmp_for_rebuild";
 
 // Making direct platform in lieu of using base::FileEnumerator because the
 // latter can fail quietly without return an error result.
@@ -396,7 +402,7 @@ ChromiumWritableFile::ChromiumWritableFile(const std::string& fname,
 
 Status ChromiumWritableFile::SyncParent() {
   TRACE_EVENT0("leveldb", "SyncParent");
-#if defined(OS_POSIX)
+#if defined(OS_POSIX) || defined(OS_FUCHSIA)
   FilePath path = FilePath::FromUTF8Unsafe(parent_dir_);
   base::File f(path, base::File::FLAG_OPEN | base::File::FLAG_READ);
   if (!f.IsValid()) {
@@ -544,7 +550,12 @@ Options::Options() {
   // https://crbug.com/460568
   reuse_logs = false;
 #else
-  reuse_logs = true;
+  // Low end devices have limited RAM. Reusing logs will prevent the database
+  // from being compacted on open and instead load the log file back into the
+  // memory buffer which won't be written until it hits the maximum size
+  // (leveldb::Options::write_buffer_size - 4MB by default). The downside here
+  // is that databases opens take longer as the open is blocked on compaction.
+  reuse_logs = !base::SysInfo::IsLowEndDevice();
 #endif
   // By default use a single shared block cache to conserve memory. The owner of
   // this object can create their own, or set to NULL to have leveldb create a
@@ -729,6 +740,10 @@ bool IndicatesDiskFull(const leveldb::Status& status) {
   return (result == leveldb_env::METHOD_AND_BFE &&
           static_cast<base::File::Error>(error) ==
               base::File::FILE_ERROR_NO_SPACE);
+}
+
+std::string DatabaseNameForRewriteDB(const std::string& original_name) {
+  return original_name + kDatabaseNameSuffixForRebuildDB;
 }
 
 // Given the size of the disk, identified by |disk_size| in bytes, determine the
@@ -1381,8 +1396,8 @@ class DBTracker::TrackedDBImpl : public base::LinkNode<TrackedDBImpl>,
   DISALLOW_COPY_AND_ASSIGN(TrackedDBImpl);
 };
 
-// Reports live databases to memory-infra. For each live database the following
-// information is reported:
+// Reports live databases and in-memory env's to memory-infra. For each live
+// database the following information is reported:
 // 1. Instance pointer (to disambiguate databases).
 // 2. Memory taken by the database, with the shared cache being attributed
 // equally to each database sharing 3. The name of the database (when not in
@@ -1404,6 +1419,8 @@ class DBTracker::TrackedDBImpl : public base::LinkNode<TrackedDBImpl>,
 //   block_cache              0 KiB           100 KiB
 //     browser                0 KiB           40 KiB
 //     web                    0 KiB           60 KiB
+//   memenv_0x7FE80F2040A0    4 KiB           4 KiB
+//   memenv_0x7FE80F3040A0    4 KiB           4 KiB
 //
 class DBTracker::MemoryDumpProvider
     : public base::trace_event::MemoryDumpProvider {
@@ -1453,6 +1470,7 @@ void DBTracker::MemoryDumpProvider::DumpAllDatabases(ProcessMemoryDump* pmd) {
   DBTracker::GetInstance()->VisitDatabases(
       base::BindRepeating(&DBTracker::MemoryDumpProvider::DumpVisitor,
                           base::Unretained(this), base::Unretained(pmd)));
+  leveldb_chrome::DumpAllTrackedEnvs(pmd);
 }
 
 void DBTracker::MemoryDumpProvider::DumpVisitor(ProcessMemoryDump* pmd,
@@ -1515,6 +1533,14 @@ MemoryAllocatorDump* DBTracker::GetOrCreateAllocatorDump(
   // attributed to each database sharing it.
   GetInstance()->mdp_->DumpAllDatabases(pmd);
   return pmd->GetAllocatorDump(GetDumpNameForDB(tracked_db));
+}
+
+// static
+MemoryAllocatorDump* DBTracker::GetOrCreateAllocatorDump(
+    ProcessMemoryDump* pmd,
+    leveldb::Env* tracked_memenv) {
+  GetInstance()->mdp_->DumpAllDatabases(pmd);
+  return leveldb_chrome::GetEnvAllocatorDump(pmd, tracked_memenv);
 }
 
 void DBTracker::UpdateHistograms() {
@@ -1594,11 +1620,82 @@ leveldb::Status OpenDB(const leveldb_env::Options& options,
     mem_options.write_buffer_size = 0;  // minimum size.
     s = DBTracker::GetInstance()->OpenDatabase(mem_options, name, &tracked_db);
   } else {
+    std::string tmp_name = DatabaseNameForRewriteDB(name);
+    // If Chrome crashes during rewrite, there might be a temporary db but
+    // no actual db.
+    if (options.env->FileExists(tmp_name) &&
+        !options.env->FileExists(name + "/CURRENT")) {
+      s = leveldb::DestroyDB(name, options);
+      if (!s.ok())
+        return s;
+      s = options.env->RenameFile(tmp_name, name);
+      if (!s.ok())
+        return s;
+    }
     s = DBTracker::GetInstance()->OpenDatabase(options, name, &tracked_db);
+    // It is possible that the database was partially deleted during a
+    // rewrite and can't be opened anymore.
+    if (!s.ok() && options.env->FileExists(tmp_name)) {
+      s = leveldb::DestroyDB(name, options);
+      if (!s.ok())
+        return s;
+      s = options.env->RenameFile(tmp_name, name);
+      if (!s.ok())
+        return s;
+      s = DBTracker::GetInstance()->OpenDatabase(options, name, &tracked_db);
+    }
+    // There might be a temporary database that needs to be cleaned up.
+    if (options.env->FileExists(tmp_name)) {
+      leveldb::DestroyDB(tmp_name, options);
+    }
   }
   if (s.ok())
     dbptr->reset(tracked_db);
   return s;
+}
+
+leveldb::Status RewriteDB(const leveldb_env::Options& options,
+                          const std::string& name,
+                          std::unique_ptr<leveldb::DB>* dbptr) {
+  if (!base::FeatureList::IsEnabled(leveldb::kLevelDBRewriteFeature))
+    return Status::OK();
+  if (leveldb_chrome::IsMemEnv(options.env))
+    return Status::OK();
+  TRACE_EVENT0("leveldb", "ChromiumEnv::RewriteDB");
+  leveldb::Status s;
+  std::string tmp_name = DatabaseNameForRewriteDB(name);
+  if (options.env->FileExists(tmp_name)) {
+    s = leveldb::DestroyDB(tmp_name, options);
+    if (!s.ok())
+      return s;
+  }
+  // Copy all data from *dbptr to a temporary db.
+  std::unique_ptr<leveldb::DB> tmp_db;
+  s = leveldb_env::OpenDB(options, tmp_name, &tmp_db);
+  if (!s.ok())
+    return s;
+  std::unique_ptr<leveldb::Iterator> it(
+      (*dbptr)->NewIterator(leveldb::ReadOptions()));
+  for (it->SeekToFirst(); it->Valid(); it->Next()) {
+    s = tmp_db->Put(leveldb::WriteOptions(), it->key(), it->value());
+    if (!s.ok())
+      break;
+  }
+  it.reset();
+  tmp_db.reset();
+  if (!s.ok()) {
+    leveldb::DestroyDB(tmp_name, options);
+    return s;
+  }
+  // Replace the old database with tmp_db.
+  (*dbptr).reset();
+  s = leveldb::DestroyDB(name, options);
+  if (!s.ok())
+    return s;
+  s = options.env->RenameFile(tmp_name, name);
+  if (!s.ok())
+    return s;
+  return leveldb_env::OpenDB(options, name, dbptr);
 }
 
 base::StringPiece MakeStringPiece(const leveldb::Slice& s) {

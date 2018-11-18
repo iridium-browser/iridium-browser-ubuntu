@@ -15,20 +15,21 @@
 #include "third_party/blink/renderer/core/fetch/request.h"
 #include "third_party/blink/renderer/core/frame/use_counter.h"
 #include "third_party/blink/renderer/core/workers/worklet_pending_tasks.h"
+#include "third_party/blink/renderer/platform/loader/fetch/fetch_client_settings_object_snapshot.h"
 #include "third_party/blink/renderer/platform/wtf/wtf.h"
 
 namespace blink {
 
 Worklet::Worklet(Document* document)
     : ContextLifecycleObserver(document),
-      module_responses_map_(
-          new WorkletModuleResponsesMap(document->Fetcher())) {
+      module_responses_map_(new WorkletModuleResponsesMap) {
   DCHECK(IsMainThread());
 }
 
 Worklet::~Worklet() {
   for (const auto& proxy : proxies_)
     proxy->WorkletObjectDestroyed();
+  DCHECK(!HasPendingTasks());
 }
 
 // Implementation of the first half of the "addModule(moduleURL, options)"
@@ -40,7 +41,7 @@ ScriptPromise Worklet::addModule(ScriptState* script_state,
   DCHECK(IsMainThread());
   if (!GetExecutionContext()) {
     return ScriptPromise::RejectWithDOMException(
-        script_state, DOMException::Create(kInvalidStateError,
+        script_state, DOMException::Create(DOMExceptionCode::kInvalidStateError,
                                            "This frame is already detached"));
   }
   UseCounter::Count(GetExecutionContext(),
@@ -60,20 +61,25 @@ ScriptPromise Worklet::addModule(ScriptState* script_state,
   // Step 4: "If moduleURLRecord is failure, then reject promise with a
   // "SyntaxError" DOMException and return promise."
   if (!module_url_record.IsValid()) {
-    resolver->Reject(DOMException::Create(
-        kSyntaxError, "'" + module_url + "' is not a valid URL."));
+    resolver->Reject(
+        DOMException::Create(DOMExceptionCode::kSyntaxError,
+                             "'" + module_url + "' is not a valid URL."));
     return promise;
   }
+
+  WorkletPendingTasks* pending_tasks =  new WorkletPendingTasks(this, resolver);
+  pending_tasks_set_.insert(pending_tasks);
 
   // Step 5: "Return promise, and then continue running this algorithm in
   // parallel."
   // |kInternalLoading| is used here because this is a part of script module
   // loading.
-  ExecutionContext::From(script_state)
+  GetExecutionContext()
       ->GetTaskRunner(TaskType::kInternalLoading)
-      ->PostTask(FROM_HERE, WTF::Bind(&Worklet::FetchAndInvokeScript,
-                                      WrapPersistent(this), module_url_record,
-                                      options, WrapPersistent(resolver)));
+      ->PostTask(FROM_HERE,
+                 WTF::Bind(&Worklet::FetchAndInvokeScript, WrapPersistent(this),
+                           module_url_record, options.credentials(),
+                           WrapPersistent(pending_tasks)));
   return promise;
 }
 
@@ -82,6 +88,16 @@ void Worklet::ContextDestroyed(ExecutionContext* execution_context) {
   module_responses_map_->Dispose();
   for (const auto& proxy : proxies_)
     proxy->TerminateWorkletGlobalScope();
+}
+
+bool Worklet::HasPendingTasks() const {
+  return pending_tasks_set_.size() > 0;
+}
+
+void Worklet::FinishPendingTasks(WorkletPendingTasks* pending_tasks) {
+  DCHECK(IsMainThread());
+  DCHECK(pending_tasks_set_.Contains(pending_tasks));
+  pending_tasks_set_.erase(pending_tasks);
 }
 
 WorkletGlobalScopeProxy* Worklet::FindAvailableGlobalScope() {
@@ -93,23 +109,22 @@ WorkletGlobalScopeProxy* Worklet::FindAvailableGlobalScope() {
 // algorithm:
 // https://drafts.css-houdini.org/worklets/#dom-worklet-addmodule
 void Worklet::FetchAndInvokeScript(const KURL& module_url_record,
-                                   const WorkletOptions& options,
-                                   ScriptPromiseResolver* resolver) {
+                                   const String& credentials,
+                                   WorkletPendingTasks* pending_tasks) {
   DCHECK(IsMainThread());
   if (!GetExecutionContext())
     return;
 
   // Step 6: "Let credentialOptions be the credentials member of options."
   network::mojom::FetchCredentialsMode credentials_mode;
-  bool result =
-      Request::ParseCredentialsMode(options.credentials(), &credentials_mode);
+  bool result = Request::ParseCredentialsMode(credentials, &credentials_mode);
   DCHECK(result);
 
   // Step 7: "Let outsideSettings be the relevant settings object of this."
-  // In the specification, outsideSettings is used for posting a task to the
-  // document's responsible event loop. In our implementation, we use the
-  // document's UnspecedLoading task runner as that is what we commonly use for
-  // module loading.
+  auto* outside_settings_object =
+      GetExecutionContext()->CreateFetchClientSettingsObjectSnapshot();
+  // Specify TaskType::kInternalLoading because it's commonly used for module
+  // loading.
   scoped_refptr<base::SingleThreadTaskRunner> outside_settings_task_runner =
       GetExecutionContext()->GetTaskRunner(TaskType::kInternalLoading);
 
@@ -133,8 +148,7 @@ void Worklet::FetchAndInvokeScript(const KURL& module_url_record,
 
   // Step 11: "Let pendingTaskStruct be a new pending tasks struct with counter
   // initialized to the length of worklet's WorkletGlobalScopes."
-  WorkletPendingTasks* pending_tasks =
-      new WorkletPendingTasks(GetNumberOfGlobalScopes(), resolver);
+  pending_tasks->InitializeCounter(GetNumberOfGlobalScopes());
 
   // Step 12: "For each workletGlobalScope in the worklet's
   // WorkletGlobalScopes, queue a task on the workletGlobalScope to fetch and
@@ -145,6 +159,7 @@ void Worklet::FetchAndInvokeScript(const KURL& module_url_record,
   // TODO(nhiroki): Queue a task instead of executing this here.
   for (const auto& proxy : proxies_) {
     proxy->FetchAndInvokeScript(module_url_record, credentials_mode,
+                                outside_settings_object,
                                 outside_settings_task_runner, pending_tasks);
   }
 }
@@ -157,6 +172,7 @@ size_t Worklet::SelectGlobalScope() {
 void Worklet::Trace(blink::Visitor* visitor) {
   visitor->Trace(proxies_);
   visitor->Trace(module_responses_map_);
+  visitor->Trace(pending_tasks_set_);
   ScriptWrappable::Trace(visitor);
   ContextLifecycleObserver::Trace(visitor);
 }

@@ -20,22 +20,13 @@ namespace ash {
 
 class ImmersiveFullscreenController;
 
-// ImmersiveFullscreenController is used in four distinct environments: ash,
-// mash, chrome in ash and chrome in mash. All of these have slightly different
-// restrictions. ImmersiveContext enables ImmersiveFullscreenController to be
-// used in these different environments. ImmersiveContext abstracts away all the
-// windowing related calls so that ImmersiveFullscreenController does not
-// depend upon aura, mus or ash.
-//
-// ImmersiveContext is a singleton.
+// ImmersiveContext abstracts away all the windowing related calls so that
+// ImmersiveFullscreenController does not depend upon aura, mus or ash. In Ash,
+// the browser and Ash will share one implementation. In Mash, the client will
+// have its own.
 class ASH_PUBLIC_EXPORT ImmersiveContext {
  public:
-  static ImmersiveContext* Get() { return instance_; }
-
-  // Mirrors that of ShellPort::InstallResizeHandleWindowTargeter(), see it
-  // for details
-  virtual void InstallResizeHandleWindowTargeter(
-      ImmersiveFullscreenController* controller) = 0;
+  virtual ~ImmersiveContext() = default;
 
   // Used to setup state necessary for entering or existing immersive mode. It
   // is expected this interacts with the shelf, and installs any other necessary
@@ -47,7 +38,7 @@ class ASH_PUBLIC_EXPORT ImmersiveContext {
   // Returns the bounds of the display the widget is on, in screen coordinates.
   virtual gfx::Rect GetDisplayBoundsInScreen(views::Widget* widget) = 0;
 
-  // See ShellPort::AddPointerWatcher for details.
+  // See Shell::AddPointerWatcher for details.
   virtual void AddPointerWatcher(views::PointerWatcher* watcher,
                                  views::PointerWatcherEventTypes events) = 0;
   virtual void RemovePointerWatcher(views::PointerWatcher* watcher) = 0;
@@ -55,15 +46,8 @@ class ASH_PUBLIC_EXPORT ImmersiveContext {
   // Returns true if any window has capture.
   virtual bool DoesAnyWindowHaveCapture() = 0;
 
-  // See ShellPort::IsMouseEventsEnabled() for details.
+  // See Shell::IsMouseEventsEnabled() for details.
   virtual bool IsMouseEventsEnabled() = 0;
-
- protected:
-  ImmersiveContext();
-  virtual ~ImmersiveContext();
-
- private:
-  static ImmersiveContext* instance_;
 };
 
 }  // namespace ash

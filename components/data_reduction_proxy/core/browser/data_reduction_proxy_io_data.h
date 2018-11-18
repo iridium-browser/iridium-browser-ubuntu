@@ -25,6 +25,8 @@
 #include "components/data_reduction_proxy/core/common/lofi_decider.h"
 #include "components/data_reduction_proxy/core/common/lofi_ui_service.h"
 #include "components/data_reduction_proxy/core/common/resource_type_provider.h"
+#include "components/data_use_measurement/core/data_use_user_data.h"
+#include "services/network/public/mojom/network_context.mojom.h"
 
 namespace base {
 class Value;
@@ -36,8 +38,9 @@ class URLRequestContextGetter;
 class URLRequestInterceptor;
 }
 
-namespace previews {
-class PreviewsDecider;
+namespace network {
+class NetworkConnectionTracker;
+class SharedURLLoaderFactoryInfo;
 }
 
 namespace data_reduction_proxy {
@@ -60,6 +63,7 @@ class DataReductionProxyIOData : public DataReductionProxyEventStorageDelegate {
       Client client,
       PrefService* prefs,
       net::NetLog* net_log,
+      network::NetworkConnectionTracker* network_connection_tracker,
       scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
       scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner,
       bool enabled,
@@ -78,8 +82,6 @@ class DataReductionProxyIOData : public DataReductionProxyEventStorageDelegate {
   // Virtual for testing.
   virtual void SetDataReductionProxyService(
       base::WeakPtr<DataReductionProxyService> data_reduction_proxy_service);
-
-  void SetPreviewsDecider(previews::PreviewsDecider* previews_decider);
 
   // Creates an interceptor suitable for following the Data Reduction Proxy
   // bypass protocol.
@@ -103,12 +105,10 @@ class DataReductionProxyIOData : public DataReductionProxyEventStorageDelegate {
   // Applies a serialized Data Reduction Proxy configuration.
   void SetDataReductionProxyConfiguration(const std::string& serialized_config);
 
-  // Returns true when server previews should be activated. When server previews
-  // are active, URL requests are modified to request low fidelity versions of
-  // the resources.|previews_decider| is a non-null object that determines
-  // eligibility of showing the preview based on past opt outs.
-  bool ShouldAcceptServerPreview(const net::URLRequest& request,
-                                 previews::PreviewsDecider* previews_decider);
+  // When triggering previews, prevent long term black list rules. Overridden in
+  // testing.
+  virtual void SetIgnoreLongTermBlackListRules(
+      bool ignore_long_term_black_list_rules);
 
   // Bridge methods to safely call to the UI thread objects.
   void UpdateDataUseForHost(int64_t network_bytes,
@@ -119,7 +119,10 @@ class DataReductionProxyIOData : public DataReductionProxyEventStorageDelegate {
       int64_t original_size,
       bool data_reduction_proxy_enabled,
       DataReductionProxyRequestType request_type,
-      const std::string& mime_type);
+      const std::string& mime_type,
+      bool is_user_traffic,
+      data_use_measurement::DataUseUserData::DataUseContentType content_type,
+      int32_t service_hash_code);
 
   // Overrides of DataReductionProxyEventStorageDelegate. Bridges to the UI
   // thread objects.
@@ -145,6 +148,26 @@ class DataReductionProxyIOData : public DataReductionProxyEventStorageDelegate {
   // cache. This method is not called if only a subset of site entries are
   // cleared.
   void OnCacheCleared(const base::Time start, const base::Time end);
+
+  // Forwards proxy authentication headers to the UI thread.
+  void UpdateProxyRequestHeaders(const net::HttpRequestHeaders& headers);
+
+  void OnProxyConfigUpdated();
+
+  // Notifies |this| that there there is a change in the effective connection
+  // type.
+  void OnEffectiveConnectionTypeChanged(net::EffectiveConnectionType type);
+
+  // Notifies |this| that there there is a change in the HTTP RTT estimate.
+  void OnRTTOrThroughputEstimatesComputed(base::TimeDelta http_rtt);
+
+  // Returns the current estimate of the effective connection type.
+  net::EffectiveConnectionType GetEffectiveConnectionType() const;
+
+  // Binds to a config client that can be used to update Data Reduction Proxy
+  // settings when the network service is enabled.
+  void SetCustomProxyConfigClient(
+      network::mojom::CustomProxyConfigClientPtrInfo config_client_info);
 
   // Various accessor methods.
   DataReductionProxyConfigurator* configurator() const {
@@ -205,10 +228,6 @@ class DataReductionProxyIOData : public DataReductionProxyEventStorageDelegate {
   void set_resource_type_provider(
       std::unique_ptr<ResourceTypeProvider> resource_type_provider) {
     resource_type_provider_ = std::move(resource_type_provider);
-  }
-
-  previews::PreviewsDecider* previews_decider() const {
-    return previews_decider_;
   }
 
   // The production channel of this build.
@@ -287,16 +306,15 @@ class DataReductionProxyIOData : public DataReductionProxyEventStorageDelegate {
   // A net log.
   net::NetLog* net_log_;
 
+  // Watches for network connection changes.
+  network::NetworkConnectionTracker* network_connection_tracker_;
+
   // IO and UI task runners, respectively.
   scoped_refptr<base::SingleThreadTaskRunner> io_task_runner_;
   scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner_;
 
   // Observes pageload events and records per host data use.
   std::unique_ptr<DataReductionProxyDataUseObserver> data_use_observer_;
-
-  // Previews IO data that is owned by Profile IO data. Deleted at the same time
-  // as |this|.
-  previews::PreviewsDecider* previews_decider_;
 
   // Whether the Data Reduction Proxy has been enabled or not by the user. In
   // practice, this can be overridden by the command line.
@@ -309,6 +327,9 @@ class DataReductionProxyIOData : public DataReductionProxyEventStorageDelegate {
   // does not use alternate protocols.
   scoped_refptr<net::URLRequestContextGetter> basic_url_request_context_getter_;
 
+  // The network::SharedURLLoaderFactoryInfo used for making URL requests.
+  std::unique_ptr<network::SharedURLLoaderFactoryInfo> url_loader_factory_info_;
+
   // The production channel of this build.
   const std::string channel_;
 
@@ -316,6 +337,11 @@ class DataReductionProxyIOData : public DataReductionProxyEventStorageDelegate {
   // IO thread is still available at the time of destruction. If the IO thread
   // is unavailable, then the destruction will happen on the UI thread.
   std::unique_ptr<NetworkPropertiesManager> network_properties_manager_;
+
+  // Current estimate of the effective connection type.
+  net::EffectiveConnectionType effective_connection_type_;
+
+  network::mojom::CustomProxyConfigClientPtr proxy_config_client_;
 
   base::WeakPtrFactory<DataReductionProxyIOData> weak_factory_;
 

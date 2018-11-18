@@ -6,7 +6,6 @@
 set(
   CRYPTO_TEST_DATA
 
-  crypto/cipher_extra/test/aes_128_cbc_sha1_ssl3_tests.txt
   crypto/cipher_extra/test/aes_128_cbc_sha1_tls_implicit_iv_tests.txt
   crypto/cipher_extra/test/aes_128_cbc_sha1_tls_tests.txt
   crypto/cipher_extra/test/aes_128_cbc_sha256_tls_tests.txt
@@ -15,7 +14,6 @@ set(
   crypto/cipher_extra/test/aes_128_ctr_hmac_sha256.txt
   crypto/cipher_extra/test/aes_128_gcm_siv_tests.txt
   crypto/cipher_extra/test/aes_128_gcm_tests.txt
-  crypto/cipher_extra/test/aes_256_cbc_sha1_ssl3_tests.txt
   crypto/cipher_extra/test/aes_256_cbc_sha1_tls_implicit_iv_tests.txt
   crypto/cipher_extra/test/aes_256_cbc_sha1_tls_tests.txt
   crypto/cipher_extra/test/aes_256_cbc_sha256_tls_tests.txt
@@ -24,8 +22,8 @@ set(
   crypto/cipher_extra/test/aes_256_gcm_siv_tests.txt
   crypto/cipher_extra/test/aes_256_gcm_tests.txt
   crypto/cipher_extra/test/chacha20_poly1305_tests.txt
+  crypto/cipher_extra/test/xchacha20_poly1305_tests.txt
   crypto/cipher_extra/test/cipher_tests.txt
-  crypto/cipher_extra/test/des_ede3_cbc_sha1_ssl3_tests.txt
   crypto/cipher_extra/test/des_ede3_cbc_sha1_tls_implicit_iv_tests.txt
   crypto/cipher_extra/test/des_ede3_cbc_sha1_tls_tests.txt
   crypto/cipher_extra/test/nist_cavp/aes_128_cbc.txt
@@ -39,7 +37,11 @@ set(
   crypto/cipher_extra/test/nist_cavp/tdes_cbc.txt
   crypto/cipher_extra/test/nist_cavp/tdes_ecb.txt
   crypto/curve25519/ed25519_tests.txt
-  crypto/ecdh/ecdh_tests.txt
+  crypto/cmac/cavp_3des_cmac_tests.txt
+  crypto/cmac/cavp_aes128_cmac_tests.txt
+  crypto/cmac/cavp_aes192_cmac_tests.txt
+  crypto/cmac/cavp_aes256_cmac_tests.txt
+  crypto/ecdh_extra/ecdh_tests.txt
   crypto/evp/evp_tests.txt
   crypto/evp/scrypt_tests.txt
   crypto/fipsmodule/aes/aes_tests.txt
@@ -59,4 +61,33 @@ set(
   crypto/x509/some_names1.pem
   crypto/x509/some_names2.pem
   crypto/x509/some_names3.pem
+  third_party/wycheproof_testvectors/aes_cbc_pkcs5_test.txt
+  third_party/wycheproof_testvectors/aes_cmac_test.txt
+  third_party/wycheproof_testvectors/aes_gcm_siv_test.txt
+  third_party/wycheproof_testvectors/aes_gcm_test.txt
+  third_party/wycheproof_testvectors/chacha20_poly1305_test.txt
+  third_party/wycheproof_testvectors/dsa_test.txt
+  third_party/wycheproof_testvectors/ecdh_secp224r1_test.txt
+  third_party/wycheproof_testvectors/ecdh_secp256r1_test.txt
+  third_party/wycheproof_testvectors/ecdh_secp384r1_test.txt
+  third_party/wycheproof_testvectors/ecdh_secp521r1_test.txt
+  third_party/wycheproof_testvectors/ecdsa_secp224r1_sha224_test.txt
+  third_party/wycheproof_testvectors/ecdsa_secp224r1_sha256_test.txt
+  third_party/wycheproof_testvectors/ecdsa_secp224r1_sha512_test.txt
+  third_party/wycheproof_testvectors/ecdsa_secp256r1_sha256_test.txt
+  third_party/wycheproof_testvectors/ecdsa_secp256r1_sha512_test.txt
+  third_party/wycheproof_testvectors/ecdsa_secp384r1_sha384_test.txt
+  third_party/wycheproof_testvectors/ecdsa_secp384r1_sha512_test.txt
+  third_party/wycheproof_testvectors/ecdsa_secp521r1_sha512_test.txt
+  third_party/wycheproof_testvectors/eddsa_test.txt
+  third_party/wycheproof_testvectors/kw_test.txt
+  third_party/wycheproof_testvectors/rsa_pss_2048_sha1_mgf1_20_test.txt
+  third_party/wycheproof_testvectors/rsa_pss_2048_sha256_mgf1_0_test.txt
+  third_party/wycheproof_testvectors/rsa_pss_2048_sha256_mgf1_32_test.txt
+  third_party/wycheproof_testvectors/rsa_pss_3072_sha256_mgf1_32_test.txt
+  third_party/wycheproof_testvectors/rsa_pss_4096_sha256_mgf1_32_test.txt
+  third_party/wycheproof_testvectors/rsa_pss_4096_sha512_mgf1_32_test.txt
+  third_party/wycheproof_testvectors/rsa_pss_misc_test.txt
+  third_party/wycheproof_testvectors/rsa_signature_test.txt
+  third_party/wycheproof_testvectors/x25519_test.txt
 )

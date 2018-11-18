@@ -37,7 +37,9 @@ class PrintTabHelper : public web::WebStateObserver,
   bool OnPrintCommand(web::WebState* web_state,
                       const base::DictionaryValue& command,
                       const GURL& page_url,
-                      bool user_initiated);
+                      bool user_initiated,
+                      bool is_main_frame,
+                      web::WebFrame* sender_frame);
 
   __weak id<WebStatePrinter> printer_;
 

@@ -4,6 +4,7 @@
 
 #import <Foundation/Foundation.h>
 #include <launch.h>
+#include <sys/un.h>
 
 #include <memory>
 #include <vector>
@@ -20,14 +21,13 @@
 #include "base/path_service.h"
 #include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
-#include "base/threading/thread_restrictions.h"
+#include "base/threading/scoped_blocking_call.h"
 #include "base/version.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/mac/launchd.h"
 #include "chrome/common/service_process_util_posix.h"
 #include "components/version_info/version_info.h"
-#include "mojo/edk/embedder/named_platform_handle_utils.h"
 
 using ::base::FilePathWatcher;
 
@@ -47,7 +47,7 @@ NSString* GetServiceProcessLaunchDLabel() {
       base::mac::CFToNSCast(CopyServiceProcessLaunchDName()));
   NSString* label = [name stringByAppendingString:@".service_process"];
   base::FilePath user_data_dir;
-  PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
+  base::PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
   std::string user_data_dir_path = user_data_dir.value();
   NSString* ns_path = base::SysUTF8ToNSString(user_data_dir_path);
   ns_path = [ns_path stringByReplacingOccurrencesOfString:@" "
@@ -62,7 +62,7 @@ NSString* GetServiceProcessLaunchDSocketKey() {
 
 bool RemoveFromLaunchd() {
   // We're killing a file.
-  base::AssertBlockingAllowed();
+  base::ScopedBlockingCall scoped_blocking_call(base::BlockingType::MAY_BLOCK);
   base::ScopedCFTypeRef<CFStringRef> name(CopyServiceProcessLaunchDName());
   return Launchd::GetInstance()->DeletePlist(Launchd::User,
                                              Launchd::Agent,
@@ -83,19 +83,23 @@ class ExecFilePathWatcherCallback {
 
 base::FilePath GetServiceProcessSocketName() {
   base::FilePath socket_name;
-  PathService::Get(base::DIR_TEMP, &socket_name);
+  base::PathService::Get(base::DIR_TEMP, &socket_name);
   std::string pipe_name = GetServiceProcessScopedName("srv");
   socket_name = socket_name.Append(pipe_name);
-  CHECK_LT(socket_name.value().size(), mojo::edk::kMaxSocketNameLength);
+
+  // Max allowed on Mac.
+  constexpr size_t kMaxSocketNameLength = sizeof(sockaddr_un().sun_path);
+  CHECK_LT(socket_name.value().size(), kMaxSocketNameLength);
+
   return socket_name;
 }
 
 }  // namespace
 
-mojo::edk::NamedPlatformHandle GetServiceProcessChannel() {
+mojo::NamedPlatformChannel::ServerName GetServiceProcessServerName() {
   base::FilePath socket_name = GetServiceProcessSocketName();
   VLOG(1) << "ServiceProcessChannel: " << socket_name.value();
-  return mojo::edk::NamedPlatformHandle(socket_name.value());
+  return socket_name.value();
 }
 
 bool ForceServiceProcessShutdown(const std::string& /* version */,
@@ -173,8 +177,8 @@ bool ServiceProcessState::Initialize() {
   return true;
 }
 
-mojo::edk::ScopedPlatformHandle
-ServiceProcessState::GetServiceProcessChannel() {
+mojo::PlatformChannelServerEndpoint
+ServiceProcessState::GetServiceProcessServerEndpoint() {
   DCHECK(state_);
   NSDictionary* ns_launchd_conf = base::mac::CFToNSCast(state_->launchd_conf);
   NSDictionary* socket_dict =
@@ -183,7 +187,8 @@ ServiceProcessState::GetServiceProcessChannel() {
       [socket_dict objectForKey:GetServiceProcessLaunchDSocketKey()];
   DCHECK_EQ([sockets count], 1U);
   int socket = [[sockets objectAtIndex:0] intValue];
-  return mojo::edk::ScopedPlatformHandle(mojo::edk::PlatformHandle(socket));
+  return mojo::PlatformChannelServerEndpoint(
+      mojo::PlatformHandle(base::ScopedFD(socket)));
 }
 
 bool CheckServiceProcessReady() {
@@ -269,7 +274,7 @@ CFDictionaryRef CreateServiceProcessLaunchdPlist(base::CommandLine* cmd_line,
 // auto launched on the next user login.
 bool ServiceProcessState::AddToAutoRun() {
   // We're creating directories and writing a file.
-  base::AssertBlockingAllowed();
+  base::ScopedBlockingCall scoped_blocking_call(base::BlockingType::MAY_BLOCK);
   DCHECK(autorun_command_line_.get());
   base::ScopedCFTypeRef<CFStringRef> name(CopyServiceProcessLaunchDName());
   base::ScopedCFTypeRef<CFDictionaryRef> plist(

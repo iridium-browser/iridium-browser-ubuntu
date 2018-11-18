@@ -6,21 +6,19 @@
 
 import json
 
-from google.appengine.api import users
 from google.appengine.ext import ndb
 
 from dashboard import start_try_job
+from dashboard.common import descriptor
 from dashboard.common import request_handler
 from dashboard.common import utils
 from dashboard.services import crrev_service
 from dashboard.services import pinpoint_service
 
-_PINPOINT_REPOSITORIES = 'repositories'
 _ISOLATE_TARGETS = [
     'angle_perftests', 'cc_perftests', 'gpu_perftests',
     'load_library_perf_tests', 'media_perftests', 'net_perftests',
-    'performance_browser_tests', 'telemetry_perf_tests',
-    'telemetry_perf_webview_tests', 'tracing_perftests']
+    'performance_browser_tests', 'tracing_perftests']
 
 
 class InvalidParamsError(Exception):
@@ -110,6 +108,31 @@ def ResolveToGitHash(commit_position):
   return commit_position
 
 
+def _GetIsolateTarget(bot_name, suite, start_commit,
+                      end_commit, only_telemetry=False):
+  if suite in _ISOLATE_TARGETS:
+    if only_telemetry:
+      raise InvalidParamsError('Only telemetry is supported at the moment.')
+    return suite
+
+  try:
+    # TODO: Remove this code path in 2019.
+    average_commit = (int(start_commit) + int(end_commit)) / 2
+    if 'android' in bot_name and average_commit < 572268:
+      if 'webview' in bot_name.lower():
+        return 'telemetry_perf_webview_tests'
+      return 'telemetry_perf_tests'
+
+    if 'win' in bot_name and average_commit < 571917:
+      return 'telemetry_perf_tests'
+  except ValueError:
+    pass
+
+  if 'webview' in bot_name.lower():
+    return 'performance_webview_test_suite'
+  return 'performance_test_suite'
+
+
 def ParseTIRLabelChartNameAndTraceName(test_path_parts):
   """Returns tir_label, chart_name, trace_name from a test path."""
   test = ndb.Key('TestMetadata', '/'.join(test_path_parts)).get()
@@ -121,14 +144,10 @@ def ParseTIRLabelChartNameAndTraceName(test_path_parts):
 
 
 def ParseStatisticNameFromChart(chart_name):
-  statistic_types = [
-      'avg', 'min', 'max', 'sum', 'std', 'count'
-  ]
-
   chart_name_parts = chart_name.split('_')
   statistic_name = ''
 
-  if chart_name_parts[-1] in statistic_types:
+  if chart_name_parts[-1] in descriptor.STATISTICS:
     chart_name = '_'.join(chart_name_parts[:-1])
     statistic_name = chart_name_parts[-1]
   return chart_name, statistic_name
@@ -152,7 +171,7 @@ def PinpointParamsFromPerfTryParams(params):
     'error' field.
   """
   if not utils.IsValidSheriffUser():
-    user = users.get_current_user()
+    user = utils.GetEmail()
     raise InvalidParamsError('User "%s" not authorized.' % user)
 
   test_path = params['test_path']
@@ -160,24 +179,21 @@ def PinpointParamsFromPerfTryParams(params):
   bot_name = test_path_parts[1]
   suite = test_path_parts[2]
 
-  # Pinpoint also requires you specify which isolate target to run the
-  # test, so we derive that from the suite name. Eventually, this would
-  # ideally be stored in a SparesDiagnostic but for now we can guess.
-  target = 'telemetry_perf_tests'
-  if suite in _ISOLATE_TARGETS:
-    raise InvalidParamsError('Only telemetry is supported at the moment.')
-  elif 'webview' in bot_name:
-    target = 'telemetry_perf_webview_tests'
-
   start_commit = params['start_commit']
   end_commit = params['end_commit']
   start_git_hash = ResolveToGitHash(start_commit)
   end_git_hash = ResolveToGitHash(end_commit)
 
+  # Pinpoint also requires you specify which isolate target to run the
+  # test, so we derive that from the suite name. Eventually, this would
+  # ideally be stored in a SparesDiagnostic but for now we can guess.
+  target = _GetIsolateTarget(bot_name, suite, start_commit,
+                             end_commit, only_telemetry=True)
+
   extra_test_args = params['extra_test_args']
 
-  email = users.get_current_user().email()
-  job_name = 'Job on [%s/%s] for [%s]' % (bot_name, suite, email)
+  email = utils.GetEmail()
+  job_name = 'Try job on %s/%s' % (bot_name, suite)
 
   return {
       'configuration': bot_name,
@@ -185,7 +201,6 @@ def PinpointParamsFromPerfTryParams(params):
       'start_git_hash': start_git_hash,
       'end_git_hash': end_git_hash,
       'extra_test_args': extra_test_args,
-      'auto_explore': 'false',
       'target': target,
       'user': email,
       'name': job_name
@@ -210,7 +225,7 @@ def PinpointParamsFromBisectParams(params):
     'error' field.
   """
   if not utils.IsValidSheriffUser():
-    user = users.get_current_user()
+    user = utils.GetEmail()
     raise InvalidParamsError('User "%s" not authorized.' % user)
 
   test_path = params['test_path']
@@ -218,6 +233,7 @@ def PinpointParamsFromBisectParams(params):
   bot_name = test_path_parts[1]
   suite = test_path_parts[2]
   story_filter = params['story_filter']
+  pin = params.get('pin')
 
   # If functional bisects are speciied, Pinpoint expects these parameters to be
   # empty.
@@ -232,22 +248,18 @@ def PinpointParamsFromBisectParams(params):
     tir_label, chart_name, trace_name = ParseTIRLabelChartNameAndTraceName(
         test_path_parts)
 
-  # Pinpoint also requires you specify which isolate target to run the
-  # test, so we derive that from the suite name. Eventually, this would
-  # ideally be stored in a SparesDiagnostic but for now we can guess.
-  target = 'telemetry_perf_tests'
-  if suite in _ISOLATE_TARGETS:
-    target = suite
-  elif 'webview' in bot_name:
-    target = 'telemetry_perf_webview_tests'
-
   start_commit = params['start_commit']
   end_commit = params['end_commit']
   start_git_hash = ResolveToGitHash(start_commit)
   end_git_hash = ResolveToGitHash(end_commit)
 
-  email = users.get_current_user().email()
-  job_name = 'Job on [%s/%s/%s] for [%s]' % (bot_name, suite, chart_name, email)
+  # Pinpoint also requires you specify which isolate target to run the
+  # test, so we derive that from the suite name. Eventually, this would
+  # ideally be stored in a SparesDiagnostic but for now we can guess.
+  target = _GetIsolateTarget(bot_name, suite, start_commit, end_commit)
+
+  email = utils.GetEmail()
+  job_name = '%s bisect on %s/%s' % (bisect_mode.capitalize(), bot_name, suite)
 
   # Histogram names don't include the statistic, so split these
   chart_name, statistic_name = ParseStatisticNameFromChart(chart_name)
@@ -258,18 +270,18 @@ def PinpointParamsFromBisectParams(params):
     if alert_keys:
       alert_key = alert_keys[0]
 
-  return {
+  alert_magnitude = None
+  if alert_key:
+    alert = ndb.Key(urlsafe=alert_key).get()
+    alert_magnitude = alert.median_after_anomaly - alert.median_before_anomaly
+
+  pinpoint_params = {
       'configuration': bot_name,
       'benchmark': suite,
-      'trace': trace_name,
       'chart': chart_name,
-      'statistic': statistic_name,
-      'tir_label': tir_label,
-      'story': story_filter,
       'start_git_hash': start_git_hash,
       'end_git_hash': end_git_hash,
       'bug_id': params['bug_id'],
-      'auto_explore': 'true',
       'comparison_mode': bisect_mode,
       'target': target,
       'user': email,
@@ -279,3 +291,18 @@ def PinpointParamsFromBisectParams(params):
           'alert': alert_key
       }),
   }
+
+  if alert_magnitude:
+    pinpoint_params['comparison_magnitude'] = alert_magnitude
+  if pin:
+    pinpoint_params['pin'] = pin
+  if statistic_name:
+    pinpoint_params['statistic'] = statistic_name
+  if story_filter:
+    pinpoint_params['story'] = story_filter
+  if tir_label:
+    pinpoint_params['tir_label'] = tir_label
+  if trace_name:
+    pinpoint_params['trace'] = trace_name
+
+  return pinpoint_params

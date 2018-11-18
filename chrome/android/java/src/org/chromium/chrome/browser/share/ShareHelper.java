@@ -24,7 +24,6 @@ import android.content.pm.ResolveInfo;
 import android.graphics.Bitmap;
 import android.graphics.drawable.Drawable;
 import android.net.Uri;
-import android.os.AsyncTask;
 import android.os.Build;
 import android.support.annotation.Nullable;
 import android.support.v7.app.AlertDialog;
@@ -42,8 +41,10 @@ import org.chromium.base.Callback;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
 import org.chromium.base.StreamUtil;
+import org.chromium.base.StrictModeContext;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.metrics.CachedMetrics;
+import org.chromium.base.task.AsyncTask;
 import org.chromium.chrome.R;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.ui.UiUtils;
@@ -53,9 +54,6 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 
 /**
  * A helper class that helps to start an intent to share titles and URLs.
@@ -108,8 +106,7 @@ public class ShareHelper {
 
     private static void fireIntent(Activity activity, Intent intent) {
         if (sFakeIntentReceiverForTesting != null) {
-            Context context = activity.getApplicationContext();
-            sFakeIntentReceiverForTesting.fireIntent(context, intent);
+            sFakeIntentReceiverForTesting.fireIntent(ContextUtils.getApplicationContext(), intent);
         } else {
             activity.startActivity(intent);
         }
@@ -200,7 +197,7 @@ public class ShareHelper {
                     sTargetChosenReceiveAction = activity.getPackageName() + "/"
                             + TargetChosenReceiver.class.getName() + "_ACTION";
                 }
-                Context context = activity.getApplicationContext();
+                Context context = ContextUtils.getApplicationContext();
                 if (sLastRegisteredReceiver != null) {
                     context.unregisterReceiver(sLastRegisteredReceiver);
                     // Must cancel the callback (to satisfy guarantee that exactly one method of
@@ -233,7 +230,7 @@ public class ShareHelper {
         public void onReceive(Context context, Intent intent) {
             synchronized (LOCK) {
                 if (sLastRegisteredReceiver != this) return;
-                context.getApplicationContext().unregisterReceiver(sLastRegisteredReceiver);
+                ContextUtils.getApplicationContext().unregisterReceiver(sLastRegisteredReceiver);
                 sLastRegisteredReceiver = null;
             }
             if (!intent.hasExtra(EXTRA_RECEIVER_TOKEN)
@@ -262,19 +259,15 @@ public class ShareHelper {
      * Clears all shared image files.
      */
     public static void clearSharedImages() {
-        new AsyncTask<Void, Void, Void>() {
-            @Override
-            protected Void doInBackground(Void... params) {
-                try {
-                    File imagePath = UiUtils.getDirectoryForImageCapture(
-                            ContextUtils.getApplicationContext());
-                    deleteShareImageFiles(new File(imagePath, SHARE_IMAGES_DIRECTORY_NAME));
-                } catch (IOException ie) {
-                    // Ignore exception.
-                }
-                return null;
+        AsyncTask.SERIAL_EXECUTOR.execute(() -> {
+            try {
+                File imagePath =
+                        UiUtils.getDirectoryForImageCapture(ContextUtils.getApplicationContext());
+                deleteShareImageFiles(new File(imagePath, SHARE_IMAGES_DIRECTORY_NAME));
+            } catch (IOException ie) {
+                // Ignore exception.
             }
-        }.execute();
+        });
     }
 
     /**
@@ -315,9 +308,9 @@ public class ShareHelper {
             return;
         }
 
-        new AsyncTask<Void, Void, Uri>() {
+        new AsyncTask<Uri>() {
             @Override
-            protected Uri doInBackground(Void... params) {
+            protected Uri doInBackground() {
                 FileOutputStream fOut = null;
                 try {
                     File path = new File(UiUtils.getDirectoryForImageCapture(activity),
@@ -364,7 +357,8 @@ public class ShareHelper {
                     }
                 }
             }
-        }.execute();
+        }
+                .executeOnExecutor(AsyncTask.SERIAL_EXECUTOR);
     }
 
     private static class ExternallyVisibleUriCallback implements Callback<String> {
@@ -380,9 +374,9 @@ public class ShareHelper {
                 return;
             }
 
-            new AsyncTask<Void, Void, Uri>() {
+            new AsyncTask<Uri>() {
                 @Override
-                protected Uri doInBackground(Void... v) {
+                protected Uri doInBackground() {
                     return ApiCompatibilityUtils.getUriForImageCaptureFile(new File(path));
                 }
 
@@ -415,7 +409,7 @@ public class ShareHelper {
         try {
             String path = UiUtils.getDirectoryForImageCapture(ContextUtils.getApplicationContext())
                     + File.separator + SHARE_IMAGES_DIRECTORY_NAME;
-            contents.getContentBitmapAsync(
+            contents.writeContentBitmapToDiskAsync(
                     width, height, path, new ExternallyVisibleUriCallback(callback));
         } catch (IOException e) {
             Log.e(TAG, "Error getting content bitmap: ", e);
@@ -546,39 +540,17 @@ public class ShareHelper {
         }
         if (isComponentValid) {
             boolean retrieved = false;
+            final PackageManager pm = ContextUtils.getApplicationContext().getPackageManager();
             try {
-                final PackageManager pm = ContextUtils.getApplicationContext().getPackageManager();
-                AsyncTask<Void, Void, Pair<Drawable, CharSequence>> task =
-                        new AsyncTask<Void, Void, Pair<Drawable, CharSequence>>() {
-                            @Override
-                            protected Pair<Drawable, CharSequence> doInBackground(Void... params) {
-                                Drawable directShareIcon = null;
-                                CharSequence directShareTitle = null;
-                                try {
-                                    directShareIcon = pm.getActivityIcon(component);
-                                    ApplicationInfo ai =
-                                            pm.getApplicationInfo(component.getPackageName(), 0);
-                                    directShareTitle = pm.getApplicationLabel(ai);
-                                } catch (NameNotFoundException exception) {
-                                    // Use the default null values.
-                                }
-                                return new Pair<Drawable, CharSequence>(
-                                        directShareIcon, directShareTitle);
-                            }
-                        };
-                task.execute();
-                // TODO(ltian): Return nothing for the AsyncTask and have a callback to update the
-                // the menu.
-                Pair<Drawable, CharSequence> result =
-                        task.get(COMPONENT_INFO_READ_TIMEOUT_IN_MS, TimeUnit.MILLISECONDS);
-                directShareIcon = result.first;
-                directShareTitle = result.second;
+                // TODO(dtrainor): Make asynchronous and have a callback to update the menu.
+                // https://crbug.com/729737
+                try (StrictModeContext unused = StrictModeContext.allowDiskReads()) {
+                    directShareIcon = pm.getActivityIcon(component);
+                    ApplicationInfo ai = pm.getApplicationInfo(component.getPackageName(), 0);
+                    directShareTitle = pm.getApplicationLabel(ai);
+                }
                 retrieved = true;
-            } catch (InterruptedException ie) {
-                // Use the default null values.
-            } catch (ExecutionException ee) {
-                // Use the default null values.
-            } catch (TimeoutException te) {
+            } catch (NameNotFoundException exception) {
                 // Use the default null values.
             }
             CachedMetrics.BooleanHistogramSample isLastSharedAppInfoRetrieved =

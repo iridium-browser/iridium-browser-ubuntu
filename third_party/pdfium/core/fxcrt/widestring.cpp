@@ -12,7 +12,6 @@
 #include <cctype>
 #include <cwctype>
 
-#include "core/fxcrt/cfx_utf8decoder.h"
 #include "core/fxcrt/fx_codepage.h"
 #include "core/fxcrt/fx_extension.h"
 #include "core/fxcrt/fx_safe_types.h"
@@ -252,58 +251,29 @@ Optional<size_t> GuessSizeForVSWPrintf(const wchar_t* pFormat,
 Optional<WideString> TryVSWPrintf(size_t size,
                                   const wchar_t* pFormat,
                                   va_list argList) {
-  WideString str;
-  wchar_t* buffer = str.GetBuffer(size);
-
-  // In the following two calls, there's always space in the buffer for
-  // a terminating NUL that's not included in nMaxLen.
-  // For vswprintf(), MSAN won't untaint the buffer on a truncated write's
-  // -1 return code even though the buffer is written. Probably just as well
-  // not to trust the vendor's implementation to write anything anyways.
-  // See https://crbug.com/705912.
-  memset(buffer, 0, (size + 1) * sizeof(wchar_t));
-  int ret = vswprintf(buffer, size + 1, pFormat, argList);
-
-  bool bSufficientBuffer = ret >= 0 || buffer[size - 1] == 0;
-  if (!bSufficientBuffer)
+  if (!size)
     return {};
 
+  WideString str;
+  {
+    // Span's lifetime must end before ReleaseBuffer() below.
+    pdfium::span<wchar_t> buffer = str.GetBuffer(size);
+
+    // In the following two calls, there's always space in the WideString
+    // for a terminating NUL that's not included in the span.
+    // For vswprintf(), MSAN won't untaint the buffer on a truncated write's
+    // -1 return code even though the buffer is written. Probably just as well
+    // not to trust the vendor's implementation to write anything anyways.
+    // See https://crbug.com/705912.
+    memset(buffer.data(), 0, (size + 1) * sizeof(wchar_t));
+    int ret = vswprintf(buffer.data(), size + 1, pFormat, argList);
+
+    bool bSufficientBuffer = ret >= 0 || buffer[size - 1] == 0;
+    if (!bSufficientBuffer)
+      return {};
+  }
   str.ReleaseBuffer(str.GetStringLength());
   return {str};
-}
-
-#ifndef NDEBUG
-bool IsValidWideCodePage(uint16_t codepage) {
-  switch (codepage) {
-    case FX_CODEPAGE_DefANSI:
-    case FX_CODEPAGE_ShiftJIS:
-    case FX_CODEPAGE_ChineseSimplified:
-    case FX_CODEPAGE_Hangul:
-    case FX_CODEPAGE_ChineseTraditional:
-      return true;
-    default:
-      return false;
-  }
-}
-#endif
-
-WideString GetWideString(uint16_t codepage, const ByteStringView& bstr) {
-#ifndef NDEBUG
-  ASSERT(IsValidWideCodePage(codepage));
-#endif
-
-  int src_len = bstr.GetLength();
-  int dest_len = FXSYS_MultiByteToWideChar(
-      codepage, 0, bstr.unterminated_c_str(), src_len, nullptr, 0);
-  if (!dest_len)
-    return WideString();
-
-  WideString wstr;
-  wchar_t* dest_buf = wstr.GetBuffer(dest_len);
-  FXSYS_MultiByteToWideChar(codepage, 0, bstr.unterminated_c_str(), src_len,
-                            dest_buf, dest_len);
-  wstr.ReleaseBuffer(dest_len);
-  return wstr;
 }
 
 }  // namespace
@@ -433,9 +403,16 @@ const WideString& WideString::operator=(const WideStringView& stringSrc) {
   return *this;
 }
 
-const WideString& WideString::operator=(const WideString& stringSrc) {
-  if (m_pData != stringSrc.m_pData)
-    m_pData = stringSrc.m_pData;
+const WideString& WideString::operator=(const WideString& that) {
+  if (m_pData != that.m_pData)
+    m_pData = that.m_pData;
+
+  return *this;
+}
+
+const WideString& WideString::operator=(WideString&& that) {
+  if (m_pData != that.m_pData)
+    m_pData = std::move(that.m_pData);
 
   return *this;
 }
@@ -586,29 +563,29 @@ void WideString::Reserve(size_t len) {
   GetBuffer(len);
 }
 
-wchar_t* WideString::GetBuffer(size_t nMinBufLength) {
+pdfium::span<wchar_t> WideString::GetBuffer(size_t nMinBufLength) {
   if (!m_pData) {
     if (nMinBufLength == 0)
-      return nullptr;
+      return pdfium::span<wchar_t>();
 
     m_pData.Reset(StringData::Create(nMinBufLength));
     m_pData->m_nDataLength = 0;
     m_pData->m_String[0] = 0;
-    return m_pData->m_String;
+    return pdfium::span<wchar_t>(m_pData->m_String, m_pData->m_nAllocLength);
   }
 
   if (m_pData->CanOperateInPlace(nMinBufLength))
-    return m_pData->m_String;
+    return pdfium::span<wchar_t>(m_pData->m_String, m_pData->m_nAllocLength);
 
   nMinBufLength = std::max(nMinBufLength, m_pData->m_nDataLength);
   if (nMinBufLength == 0)
-    return nullptr;
+    return pdfium::span<wchar_t>();
 
   RetainPtr<StringData> pNewData(StringData::Create(nMinBufLength));
   pNewData->CopyContents(*m_pData);
   pNewData->m_nDataLength = m_pData->m_nDataLength;
   m_pData.Swap(pNewData);
-  return m_pData->m_String;
+  return pdfium::span<wchar_t>(m_pData->m_String, m_pData->m_nAllocLength);
 }
 
 size_t WideString::Delete(size_t index, size_t count) {
@@ -654,23 +631,49 @@ void WideString::Concat(const wchar_t* pSrcData, size_t nSrcLen) {
   m_pData.Swap(pNewData);
 }
 
+intptr_t WideString::ReferenceCountForTesting() const {
+  return m_pData ? m_pData->m_nRefs : 0;
+}
+
+// static
+ByteString WideString::ToDefANSI() const {
+  int src_len = GetLength();
+  int dest_len = FXSYS_WideCharToMultiByte(
+      FX_CODEPAGE_DefANSI, 0, c_str(), src_len, nullptr, 0, nullptr, nullptr);
+  if (!dest_len)
+    return ByteString();
+
+  ByteString bstr;
+  {
+    // Span's lifetime must end before ReleaseBuffer() below.
+    pdfium::span<char> dest_buf = bstr.GetBuffer(dest_len);
+    FXSYS_WideCharToMultiByte(FX_CODEPAGE_DefANSI, 0, c_str(), src_len,
+                              dest_buf.data(), dest_len, nullptr, nullptr);
+  }
+  bstr.ReleaseBuffer(dest_len);
+  return bstr;
+}
+
 ByteString WideString::UTF8Encode() const {
   return FX_UTF8Encode(AsStringView());
 }
 
 ByteString WideString::UTF16LE_Encode() const {
-  if (!m_pData) {
+  if (!m_pData)
     return ByteString("\0\0", 2);
-  }
-  int len = m_pData->m_nDataLength;
+
   ByteString result;
-  char* buffer = result.GetBuffer(len * 2 + 2);
-  for (int i = 0; i < len; i++) {
-    buffer[i * 2] = m_pData->m_String[i] & 0xff;
-    buffer[i * 2 + 1] = m_pData->m_String[i] >> 8;
+  int len = m_pData->m_nDataLength;
+  {
+    // Span's lifetime must end before ReleaseBuffer() below.
+    pdfium::span<char> buffer = result.GetBuffer(len * 2 + 2);
+    for (int i = 0; i < len; i++) {
+      buffer[i * 2] = m_pData->m_String[i] & 0xff;
+      buffer[i * 2 + 1] = m_pData->m_String[i] >> 8;
+    }
+    buffer[len * 2] = 0;
+    buffer[len * 2 + 1] = 0;
   }
-  buffer[len * 2] = 0;
-  buffer[len * 2 + 1] = 0;
   result.ReleaseBuffer(len * 2 + 2);
   return result;
 }
@@ -861,38 +864,40 @@ size_t WideString::Replace(const WideStringView& pOld,
 }
 
 // static
-WideString WideString::FromLocal(const ByteStringView& str) {
-  return FromCodePage(str, 0);
-}
+WideString WideString::FromLocal(const ByteStringView& bstr) {
+  int src_len = bstr.GetLength();
+  int dest_len = FXSYS_MultiByteToWideChar(
+      FX_CODEPAGE_DefANSI, 0, bstr.unterminated_c_str(), src_len, nullptr, 0);
+  if (!dest_len)
+    return WideString();
 
-// static
-WideString WideString::FromCodePage(const ByteStringView& str,
-                                    uint16_t codepage) {
-  return GetWideString(codepage, str);
+  WideString wstr;
+  {
+    // Span's lifetime must end before ReleaseBuffer() below.
+    pdfium::span<wchar_t> dest_buf = wstr.GetBuffer(dest_len);
+    FXSYS_MultiByteToWideChar(FX_CODEPAGE_DefANSI, 0, bstr.unterminated_c_str(),
+                              src_len, dest_buf.data(), dest_len);
+  }
+  wstr.ReleaseBuffer(dest_len);
+  return wstr;
 }
 
 // static
 WideString WideString::FromUTF8(const ByteStringView& str) {
-  if (str.IsEmpty())
-    return WideString();
-
-  CFX_UTF8Decoder decoder;
-  for (size_t i = 0; i < str.GetLength(); i++)
-    decoder.Input(str[i]);
-
-  return WideString(decoder.GetResult());
+  return FX_UTF8Decode(str);
 }
 
 // static
 WideString WideString::FromUTF16LE(const unsigned short* wstr, size_t wlen) {
-  if (!wstr || wlen == 0) {
+  if (!wstr || wlen == 0)
     return WideString();
-  }
 
   WideString result;
-  wchar_t* buf = result.GetBuffer(wlen);
-  for (size_t i = 0; i < wlen; i++) {
-    buf[i] = wstr[i];
+  {
+    // Span's lifetime must end before ReleaseBuffer() below.
+    pdfium::span<wchar_t> buf = result.GetBuffer(wlen);
+    for (size_t i = 0; i < wlen; i++)
+      buf[i] = wstr[i];
   }
   result.ReleaseBuffer(wlen);
   return result;
@@ -1019,46 +1024,8 @@ void WideString::TrimRight(const WideStringView& targets) {
   }
 }
 
-float FX_wtof(const wchar_t* str, int len) {
-  if (len == 0) {
-    return 0.0;
-  }
-  int cc = 0;
-  bool bNegative = false;
-  if (str[0] == '+') {
-    cc++;
-  } else if (str[0] == '-') {
-    bNegative = true;
-    cc++;
-  }
-  int integer = 0;
-  while (cc < len) {
-    if (str[cc] == '.') {
-      break;
-    }
-    integer = integer * 10 + FXSYS_DecimalCharToInt(str[cc]);
-    cc++;
-  }
-  float fraction = 0;
-  if (str[cc] == '.') {
-    cc++;
-    float scale = 0.1f;
-    while (cc < len) {
-      fraction += scale * FXSYS_DecimalCharToInt(str[cc]);
-      scale *= 0.1f;
-      cc++;
-    }
-  }
-  fraction += static_cast<float>(integer);
-  return bNegative ? -fraction : fraction;
-}
-
 int WideString::GetInteger() const {
   return m_pData ? FXSYS_wtoi(m_pData->m_String) : 0;
-}
-
-float WideString::GetFloat() const {
-  return m_pData ? FX_wtof(m_pData->m_String, m_pData->m_nDataLength) : 0.0f;
 }
 
 std::wostream& operator<<(std::wostream& os, const WideString& str) {

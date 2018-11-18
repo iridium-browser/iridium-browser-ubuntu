@@ -39,7 +39,7 @@ namespace sw
 		}
 
 		sw::Surface *color = sw::Surface::create(1, 1, 1, format, pixel, sw::Surface::bytes(format), sw::Surface::bytes(format));
-		SliceRectF sRect((float)dRect.x0, (float)dRect.y0, (float)dRect.x1, (float)dRect.y1, 0);
+		SliceRectF sRect(0.5f, 0.5f, 0.5f, 0.5f, 0);   // Sample from the middle.
 		blit(color, sRect, dest, dRect, {rgbaMask});
 		delete color;
 	}
@@ -163,28 +163,26 @@ namespace sw
 			swap(sRect.y0, sRect.y1);
 		}
 
-		source->lockInternal((int)sRect.x0, (int)sRect.y0, sRect.slice, sw::LOCK_READONLY, sw::PUBLIC);
-		dest->lockInternal(dRect.x0, dRect.y0, dRect.slice, sw::LOCK_WRITEONLY, sw::PUBLIC);
+		source->lockInternal(0, 0, sRect.slice, sw::LOCK_READONLY, sw::PUBLIC);
+		dest->lockInternal(0, 0, dRect.slice, sw::LOCK_WRITEONLY, sw::PUBLIC);
 
 		float w = sRect.width() / dRect.width();
 		float h = sRect.height() / dRect.height();
 
-		const float xStart = sRect.x0 + 0.5f * w;
-		float y = sRect.y0 + 0.5f * h;
+		float xStart = sRect.x0 + (0.5f - dRect.x0) * w;
+		float yStart = sRect.y0 + (0.5f - dRect.y0) * h;
 
 		for(int j = dRect.y0; j < dRect.y1; j++)
 		{
-			float x = xStart;
+			float y = yStart + j * h;
 
 			for(int i = dRect.x0; i < dRect.x1; i++)
 			{
+				float x = xStart + i * w;
+
 				// FIXME: Support RGBA mask
 				dest->copyInternal(source, i, j, x, y, options.filter);
-
-				x += w;
 			}
-
-			y += h;
 		}
 
 		source->unlockInternal();
@@ -200,21 +198,21 @@ namespace sw
 		float h = static_cast<float>(source->getHeight()) / static_cast<float>(dest->getHeight());
 		float d = static_cast<float>(source->getDepth())  / static_cast<float>(dest->getDepth());
 
-		float z = 0.5f * d;
 		for(int k = 0; k < dest->getDepth(); k++)
 		{
-			float y = 0.5f * h;
+			float z = (k + 0.5f) * d;
+
 			for(int j = 0; j < dest->getHeight(); j++)
 			{
-				float x = 0.5f * w;
+				float y = (j + 0.5f) * h;
+
 				for(int i = 0; i < dest->getWidth(); i++)
 				{
+					float x = (i + 0.5f) * w;
+
 					dest->copyInternal(source, i, j, k, x, y, z, true);
-					x += w;
 				}
-				y += h;
 			}
-			z += d;
 		}
 
 		source->unlockInternal();
@@ -391,7 +389,8 @@ namespace sw
 			c.x = Float(Int((*Pointer<UShort>(element))));
 			break;
 		case FORMAT_D24S8:
-			c.x = Float(Int((*Pointer<UInt>(element))));
+		case FORMAT_D24X8:
+			c.x = Float(Int((*Pointer<UInt>(element) & UInt(0xFFFFFF00)) >> 8));
 			break;
 		case FORMAT_D32:
 			c.x = Float(Int((*Pointer<UInt>(element))));
@@ -757,7 +756,8 @@ namespace sw
 			*Pointer<UShort>(element) = UShort(RoundInt(Float(c.x)));
 			break;
 		case FORMAT_D24S8:
-			*Pointer<UInt>(element) = UInt(RoundInt(Float(c.x)));
+		case FORMAT_D24X8:
+			*Pointer<UInt>(element) = UInt(RoundInt(Float(c.x)) << 8);
 			break;
 		case FORMAT_D32:
 			*Pointer<UInt>(element) = UInt(RoundInt(Float(c.x)));
@@ -1052,6 +1052,7 @@ namespace sw
 			scale = vector(0xFFFF, 0.0f, 0.0f, 0.0f);
 			break;
 		case FORMAT_D24S8:
+		case FORMAT_D24X8:
 			scale = vector(0xFFFFFF, 0.0f, 0.0f, 0.0f);
 			break;
 		case FORMAT_D32:
@@ -1237,15 +1238,14 @@ namespace sw
 				}
 			}
 
-			Float y = y0;
-
 			For(Int j = y0d, j < y1d, j++)
 			{
-				Float x = x0;
+				Float y = state.clearOperation ? RValue<Float>(y0) : y0 + Float(j) * h;
 				Pointer<Byte> destLine = dest + (dstQuadLayout ? j & Int(~1) : RValue<Int>(j)) * dPitchB;
 
 				For(Int i = x0d, i < x1d, i++)
 				{
+					Float x = state.clearOperation ? RValue<Float>(x0) : x0 + Float(i) * w;
 					Pointer<Byte> d = destLine + (dstQuadLayout ? (((j & Int(1)) << 1) + (i * 2) - (i & Int(1))) : RValue<Int>(i)) * dstBytes;
 
 					if(hasConstantColorI)
@@ -1379,11 +1379,7 @@ namespace sw
 							d += *Pointer<Int>(blit + OFFSET(BlitData,dSliceB));
 						}
 					}
-
-					if(!state.clearOperation) { x += w; }
 				}
-
-				if(!state.clearOperation) { y += h; }
 			}
 		}
 
@@ -1456,8 +1452,8 @@ namespace sw
 
 		data.w = sRect.width() / dRect.width();
 		data.h = sRect.height() / dRect.height();
-		data.x0 = sRect.x0 + 0.5f * data.w;
-		data.y0 = sRect.y0 + 0.5f * data.h;
+		data.x0 = sRect.x0 + (0.5f - dRect.x0) * data.w;
+		data.y0 = sRect.y0 + (0.5f - dRect.y0) * data.h;
 
 		data.x0d = dRect.x0;
 		data.x1d = dRect.x1;

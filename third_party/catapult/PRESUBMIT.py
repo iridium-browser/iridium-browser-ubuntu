@@ -29,6 +29,7 @@ _EXCLUDED_PATHS = (
     r'^dashboard[\\/]dashboard[\\/]templates[\\/].*',
     r'^experimental[\\/]heatmap[\\/].*',
     r'^experimental[\\/]trace_on_tap[\\/]third_party[\\/].*',
+    r'^experimental[\\/]perf_sheriffing_emailer[\\/].*.js',
     r'^perf_insights[\\/]test_data[\\/].*',
     r'^perf_insights[\\/]third_party[\\/].*',
     r'^telemetry[\\/]third_party[\\/].*',
@@ -46,7 +47,7 @@ _EXCLUDED_PATHS = (
 
 _GITHUB_BUG_ID_RE = re.compile(r'#[1-9]\d*')
 _MONORAIL_BUG_ID_RE = re.compile(r'[1-9]\d*')
-_MONORAIL_PROJECT_NAMES = frozenset({'chromium', 'v8', 'angleproject'})
+_MONORAIL_PROJECT_NAMES = frozenset({'chromium', 'v8', 'angleproject', 'skia'})
 
 def CheckChangeLogBug(input_api, output_api):
   if not input_api.change.issue:
@@ -122,8 +123,17 @@ def CheckChange(input_api, output_api):
 
 
 def CheckChangeOnUpload(input_api, output_api):
-  return CheckChange(input_api, output_api)
-
+  results = CheckChange(input_api, output_api)
+  cwd = input_api.PresubmitLocalPath()
+  exit_code = input_api.subprocess.call(
+      [input_api.python_executable, 'generate_telemetry_build.py', '--check'],
+      cwd=cwd)
+  if exit_code != 0:
+    results.append(output_api.PresubmitError(
+        'BUILD.gn needs to be re-generated. Please run '
+        '%s/generate_telemetry_build.py and include the changes in this CL' %
+        cwd))
+  return results
 
 def CheckChangeOnCommit(input_api, output_api):
   return CheckChange(input_api, output_api)

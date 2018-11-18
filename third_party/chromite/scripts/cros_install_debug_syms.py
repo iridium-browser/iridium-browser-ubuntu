@@ -33,6 +33,7 @@ from chromite.lib import path_util
 from chromite.lib import gs
 
 if cros_build_lib.IsInsideChroot():
+  # pylint: disable=import-error
   from portage import create_trees
 
 
@@ -209,7 +210,7 @@ def GetPackageIndex(binhost, binhost_cache=None):
     if urlparts.scheme not in ('file', ''):
       # Don't fail the build on network errors. Print a warning message and
       # continue.
-      logging.warning('Could not get package index %s' % binhost)
+      logging.warning('Could not get package index %s', binhost)
       return None
 
     binhost = urlparts.path
@@ -274,7 +275,7 @@ def main(argv):
   options = ParseArgs(argv)
 
   if not cros_build_lib.IsInsideChroot():
-    raise commandline.ChrootRequiredError()
+    raise commandline.ChrootRequiredError(argv)
 
   if os.geteuid() != 0:
     cros_build_lib.SudoRunCommand(sys.argv)

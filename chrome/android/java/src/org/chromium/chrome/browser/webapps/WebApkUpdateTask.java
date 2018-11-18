@@ -24,7 +24,7 @@ import java.util.List;
  */
 public class WebApkUpdateTask extends NativeBackgroundTask {
     /** The WebappDataStorage for the WebAPK to update. */
-    private WebappDataStorage mStorageToUpdate = null;
+    private WebappDataStorage mStorageToUpdate;
 
     /** Whether there are more WebAPKs to update than just {@link mStorageToUpdate}. */
     private boolean mMoreToUpdate;
@@ -45,10 +45,10 @@ public class WebApkUpdateTask extends NativeBackgroundTask {
             if (!isWebApkActivityRunning(storage.getWebApkPackageName())) {
                 mStorageToUpdate = storage;
                 mMoreToUpdate = ids.size() > 1;
-                return LOAD_NATIVE;
+                return StartBeforeNativeResult.LOAD_NATIVE;
             }
         }
-        return ids.isEmpty() ? DONE : RESCHEDULE;
+        return ids.isEmpty() ? StartBeforeNativeResult.DONE : StartBeforeNativeResult.RESCHEDULE;
     }
 
     @Override

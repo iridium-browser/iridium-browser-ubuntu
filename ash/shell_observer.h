@@ -28,9 +28,6 @@ class ASH_EXPORT ShellObserver {
   // Invoked after a non-primary root window is created.
   virtual void OnRootWindowAdded(aura::Window* root_window) {}
 
-  // Invoked after the shelf has been created for |root_window|.
-  virtual void OnShelfCreatedForRootWindow(aura::Window* root_window) {}
-
   // Invoked when the shelf alignment in |root_window| is changed.
   virtual void OnShelfAlignmentChanged(aura::Window* root_window) {}
 
@@ -48,6 +45,11 @@ class ASH_EXPORT ShellObserver {
   // get re-arranged).
   virtual void OnOverviewModeStarting() {}
 
+  // Called after the animations that happen when overview mode is started are
+  // complete. If |canceled| it means overview was quit before the start
+  // animations were finished.
+  virtual void OnOverviewModeStartingAnimationComplete(bool canceled) {}
+
   // Called when the overview mode is about to end (bofore the windows restore
   // themselves).
   virtual void OnOverviewModeEnding() {}
@@ -55,7 +57,12 @@ class ASH_EXPORT ShellObserver {
   // Called after overview mode has ended.
   virtual void OnOverviewModeEnded() {}
 
-  // Called when the split view mode is about to be started (before the window
+  // Called after the animations that happen when overview mode is ended are
+  // complete. If |canceled| it means overview was reentered before the exit
+  // animations were finished.
+  virtual void OnOverviewModeEndingAnimationComplete(bool canceled) {}
+
+  // Called when the split view mode is about to be started before the window
   // gets snapped and activated).
   virtual void OnSplitViewModeStarting() {}
 
@@ -65,12 +72,11 @@ class ASH_EXPORT ShellObserver {
   // Called after split view mode has ended.
   virtual void OnSplitViewModeEnded() {}
 
-  // Called when keyboard is activated/deactivated in |root_window|.
-  virtual void OnVirtualKeyboardStateChanged(bool activated,
-                                             aura::Window* root_window) {}
+  // Called when dictation is activated.
+  virtual void OnDictationStarted() {}
 
-  // Called when a new KeyboardController is created.
-  virtual void OnKeyboardControllerCreated() {}
+  // Called when dicatation is ended.
+  virtual void OnDictationEnded() {}
 
   // Called at the end of Shell::Init.
   virtual void OnShellInitialized() {}

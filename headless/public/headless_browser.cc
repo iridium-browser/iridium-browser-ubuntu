@@ -20,31 +20,21 @@ namespace headless {
 
 namespace {
 // Product name for building the default user agent string.
-const char kProductName[] = "HeadlessChrome";
+const char kHeadlessProductName[] = "HeadlessChrome";
 constexpr gfx::Size kDefaultWindowSize(800, 600);
 
 constexpr gfx::FontRenderParams::Hinting kDefaultFontRenderHinting =
     gfx::FontRenderParams::Hinting::HINTING_FULL;
 
 std::string GetProductNameAndVersion() {
-  return std::string(kProductName) + "/" + PRODUCT_VERSION;
+  return std::string(kHeadlessProductName) + "/" + PRODUCT_VERSION;
 }
 }  // namespace
 
 Options::Options(int argc, const char** argv)
     : argc(argc),
       argv(argv),
-#if defined(USE_OZONE)
-      // TODO(skyostil): Implement SwiftShader backend for headless ozone.
-      gl_implementation("osmesa"),
-#elif defined(OS_WIN)
-      // TODO(skyostil): Enable SwiftShader on Windows (crbug.com/729961).
-      gl_implementation("osmesa"),
-#elif !defined(OS_MACOSX)
       gl_implementation("swiftshader-webgl"),
-#else
-      gl_implementation("any"),
-#endif
       product_name_and_version(GetProductNameAndVersion()),
       user_agent(content::BuildUserAgentFromProduct(product_name_and_version)),
       window_size(kDefaultWindowSize),
@@ -109,11 +99,6 @@ Builder& Builder::SetProxyConfig(
   return *this;
 }
 
-Builder& Builder::SetHostResolverRules(const std::string& host_resolver_rules) {
-  options_.host_resolver_rules = host_resolver_rules;
-  return *this;
-}
-
 Builder& Builder::SetSingleProcessMode(bool single_process_mode) {
   options_.single_process_mode = single_process_mode;
   return *this;
@@ -131,11 +116,6 @@ Builder& Builder::SetEnableResourceScheduler(bool enable_resource_scheduler) {
 
 Builder& Builder::SetGLImplementation(const std::string& gl_implementation) {
   options_.gl_implementation = gl_implementation;
-  return *this;
-}
-
-Builder& Builder::AddMojoServiceName(const std::string& mojo_service_name) {
-  options_.mojo_service_names.insert(mojo_service_name);
   return *this;
 }
 
@@ -182,11 +162,6 @@ Builder& Builder::SetBlockNewWebContents(bool block_new_web_contents) {
   return *this;
 }
 
-Builder& Builder::SetInitialVirtualTime(base::Time initial_virtual_time) {
-  options_.initial_virtual_time = initial_virtual_time;
-  return *this;
-}
-
 Builder& Builder::SetOverrideWebPreferencesCallback(
     base::RepeatingCallback<void(WebPreferences*)> callback) {
   options_.override_web_preferences_callback = std::move(callback);
@@ -195,11 +170,6 @@ Builder& Builder::SetOverrideWebPreferencesCallback(
 
 Builder& Builder::SetCrashReporterEnabled(bool enabled) {
   options_.enable_crash_reporter = enabled;
-  return *this;
-}
-
-Builder& Builder::SetCaptureResourceMetadata(bool capture_resource_metadata) {
-  options_.capture_resource_metadata = capture_resource_metadata;
   return *this;
 }
 

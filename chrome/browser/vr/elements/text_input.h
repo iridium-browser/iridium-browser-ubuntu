@@ -7,11 +7,12 @@
 
 #include "base/callback.h"
 #include "base/macros.h"
-#include "chrome/browser/vr/elements/textured_element.h"
+#include "chrome/browser/vr/elements/ui_element.h"
 #include "chrome/browser/vr/elements/ui_texture.h"
 #include "chrome/browser/vr/model/color_scheme.h"
 #include "chrome/browser/vr/model/text_input_info.h"
 #include "chrome/browser/vr/text_input_delegate.h"
+#include "chrome/browser/vr/vr_ui_export.h"
 #include "third_party/skia/include/core/SkColor.h"
 
 namespace vr {
@@ -19,7 +20,7 @@ namespace vr {
 class Rect;
 class Text;
 
-class TextInput : public UiElement {
+class VR_UI_EXPORT TextInput : public UiElement {
  public:
   // Called when this element receives focus.
   typedef base::RepeatingCallback<void(bool)> OnFocusChangedCallback;
@@ -33,8 +34,12 @@ class TextInput : public UiElement {
             OnInputEditedCallback input_edit_callback);
   ~TextInput() override;
 
-  void OnButtonDown(const gfx::PointF& position) override;
-  void OnButtonUp(const gfx::PointF& position) override;
+  void OnButtonDown(const gfx::PointF& position,
+                    base::TimeTicks timestamp) override;
+  void OnTouchMove(const gfx::PointF& position,
+                   base::TimeTicks timestamp) override;
+  void OnButtonUp(const gfx::PointF& position,
+                  base::TimeTicks timestamp) override;
   void OnFocusChanged(bool focused) override;
   void OnInputEdited(const EditedText& info) override;
   void OnInputCommitted(const EditedText& info) override;
@@ -63,7 +68,7 @@ class TextInput : public UiElement {
   EditedText edited_text() const { return edited_text_; }
 
  private:
-  void LayOutChildren() final;
+  void LayOutNonContributingChildren() final;
   bool SetCursorBlinkState(const base::TimeTicks& time);
   void ResetCursorBlinkCycle();
 

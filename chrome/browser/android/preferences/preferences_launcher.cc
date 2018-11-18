@@ -12,9 +12,16 @@
 namespace chrome {
 namespace android {
 
-void PreferencesLauncher::ShowAutofillSettings() {
-  Java_PreferencesLauncher_showAutofillSettings(
-      base::android::AttachCurrentThread());
+void PreferencesLauncher::ShowAutofillProfileSettings(
+    content::WebContents* web_contents) {
+  Java_PreferencesLauncher_showAutofillProfileSettings(
+      base::android::AttachCurrentThread(), web_contents->GetJavaWebContents());
+}
+
+void PreferencesLauncher::ShowAutofillCreditCardSettings(
+    content::WebContents* web_contents) {
+  Java_PreferencesLauncher_showAutofillCreditCardSettings(
+      base::android::AttachCurrentThread(), web_contents->GetJavaWebContents());
 }
 
 void PreferencesLauncher::ShowPasswordSettings() {

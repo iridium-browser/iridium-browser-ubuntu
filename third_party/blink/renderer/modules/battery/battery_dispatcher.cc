@@ -13,9 +13,9 @@
 namespace blink {
 
 BatteryDispatcher& BatteryDispatcher::Instance() {
-  DEFINE_STATIC_LOCAL(BatteryDispatcher, battery_dispatcher,
+  DEFINE_STATIC_LOCAL(Persistent<BatteryDispatcher>, battery_dispatcher,
                       (new BatteryDispatcher));
-  return battery_dispatcher;
+  return *battery_dispatcher;
 }
 
 BatteryDispatcher::BatteryDispatcher() : has_latest_data_(false) {}
@@ -43,7 +43,7 @@ void BatteryDispatcher::UpdateBatteryStatus(
   NotifyControllers();
 }
 
-void BatteryDispatcher::StartListening() {
+void BatteryDispatcher::StartListening(LocalFrame* frame) {
   DCHECK(!monitor_.is_bound());
   Platform::Current()->GetInterfaceProvider()->GetInterface(
       mojo::MakeRequest(&monitor_));

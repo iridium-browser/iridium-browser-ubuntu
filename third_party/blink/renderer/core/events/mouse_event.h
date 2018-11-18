@@ -26,8 +26,11 @@
 
 #include "third_party/blink/public/platform/web_menu_source_type.h"
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/core/dom/events/simulated_click_options.h"
 #include "third_party/blink/renderer/core/events/mouse_event_init.h"
 #include "third_party/blink/renderer/core/events/ui_event_with_key_state.h"
+#include "third_party/blink/renderer/platform/geometry/double_point.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 
 namespace blink {
 class DataTransfer;
@@ -105,8 +108,8 @@ class CORE_EXPORT MouseEvent : public UIEventWithKeyState {
   }
   const String& region() const { return region_; }
 
-  Node* toElement() const;
-  Node* fromElement() const;
+  virtual Node* toElement() const;
+  virtual Node* fromElement() const;
 
   virtual DataTransfer* getDataTransfer() const { return nullptr; }
 
@@ -159,8 +162,8 @@ class CORE_EXPORT MouseEvent : public UIEventWithKeyState {
   int layerX();
   int layerY();
 
-  int offsetX();
-  int offsetY();
+  virtual double offsetX();
+  virtual double offsetY();
 
   virtual double pageX() const {
     return (RuntimeEnabledFeatures::FractionalMouseEventEnabled())
@@ -188,7 +191,7 @@ class CORE_EXPORT MouseEvent : public UIEventWithKeyState {
 
   DispatchEventResult DispatchEvent(EventDispatcher&) override;
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  protected:
   MouseEvent(const AtomicString& type,
@@ -206,11 +209,16 @@ class CORE_EXPORT MouseEvent : public UIEventWithKeyState {
 
   void ReceivedTarget() override;
 
-  // TODO(eirage): Move these coordinates back to private when MouseEvent
-  // fractional flag is removed.
+  // TODO(eirage): Move these coordinates related field back to private
+  // when MouseEvent fractional flag is removed.
+  void ComputeRelativePosition();
+
   DoublePoint screen_location_;
   DoublePoint client_location_;
   DoublePoint page_location_;  // zoomed CSS pixels
+  DoublePoint offset_location_;  // zoomed CSS pixels
+
+  bool has_cached_relative_position_ = false;
 
  private:
   void InitMouseEventInternal(const AtomicString& type,
@@ -231,15 +239,12 @@ class CORE_EXPORT MouseEvent : public UIEventWithKeyState {
   void InitCoordinates(const double client_x, const double client_y);
 
   void ComputePageLocation();
-  void ComputeRelativePosition();
 
   DoublePoint movement_delta_;
 
   DoublePoint layer_location_;     // zoomed CSS pixels
-  DoublePoint offset_location_;    // zoomed CSS pixels
   DoublePoint absolute_location_;  // (un-zoomed) FrameView content space
   PositionType position_type_;
-  bool has_cached_relative_position_;
   short button_;
   unsigned short buttons_;
   Member<EventTarget> related_target_;

@@ -15,7 +15,7 @@
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/heap/self_keep_alive.h"
-#include "third_party/blink/renderer/platform/timer.h"
+#include "third_party/blink/renderer/platform/web_task_runner.h"
 #include "v8/include/v8.h"
 
 namespace blink {
@@ -28,6 +28,9 @@ namespace blink {
 //    ExecutionContext state. When the ExecutionContext is suspended,
 //    resolve or reject will be delayed. When it is stopped, resolve or reject
 //    will be ignored.
+//
+// There are cases where promises cannot work (e.g., where the thread is being
+// terminated). In such cases operations will silently fail.
 class CORE_EXPORT ScriptPromiseResolver
     : public GarbageCollectedFinalized<ScriptPromiseResolver>,
       public PausableObject {
@@ -73,7 +76,10 @@ class CORE_EXPORT ScriptPromiseResolver
   void Resolve() { Resolve(ToV8UndefinedGenerator()); }
   void Reject() { Reject(ToV8UndefinedGenerator()); }
 
-  ScriptState* GetScriptState() { return script_state_.get(); }
+  // Reject with a given exception.
+  void Reject(ExceptionState&);
+
+  ScriptState* GetScriptState() const { return script_state_; }
 
   // Note that an empty ScriptPromise will be returned after resolve or
   // reject is called.
@@ -83,8 +89,6 @@ class CORE_EXPORT ScriptPromiseResolver
 #endif
     return resolver_.Promise();
   }
-
-  ScriptState* GetScriptState() const { return script_state_.get(); }
 
   // PausableObject implementation.
   void Pause() override;
@@ -101,7 +105,7 @@ class CORE_EXPORT ScriptPromiseResolver
   // promise is pending and the associated ExecutionContext isn't stopped.
   void KeepAliveWhilePending();
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  protected:
   // You need to call suspendIfNeeded after the construction because
@@ -125,7 +129,7 @@ class CORE_EXPORT ScriptPromiseResolver
     DCHECK(new_state == kResolving || new_state == kRejecting);
     state_ = new_state;
 
-    ScriptState::Scope scope(script_state_.get());
+    ScriptState::Scope scope(script_state_);
 
     // Calling ToV8 in a ScriptForbiddenScope will trigger a CHECK and
     // cause a crash. ToV8 just invokes a constructor for wrapper creation,
@@ -152,18 +156,19 @@ class CORE_EXPORT ScriptPromiseResolver
     // resolve.
     // See: http://crbug.com/663476
     if (ScriptForbiddenScope::IsScriptForbidden()) {
-      timer_.StartOneShot(TimeDelta(), FROM_HERE);
+      ScheduleResolveOrReject();
       return;
     }
     ResolveOrRejectImmediately();
   }
 
   void ResolveOrRejectImmediately();
-  void OnTimerFired(TimerBase*);
+  void ScheduleResolveOrReject();
+  void ResolveOrRejectDeferred();
 
   ResolutionState state_;
-  const scoped_refptr<ScriptState> script_state_;
-  TaskRunnerTimer<ScriptPromiseResolver> timer_;
+  const Member<ScriptState> script_state_;
+  TaskHandle deferred_resolve_task_;
   Resolver resolver_;
   ScopedPersistent<v8::Value> value_;
 

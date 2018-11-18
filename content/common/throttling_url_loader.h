@@ -50,8 +50,24 @@ class CONTENT_EXPORT ThrottlingURLLoader
 
   ~ThrottlingURLLoader() override;
 
-  void FollowRedirect();
+  void FollowRedirect(
+      const base::Optional<net::HttpRequestHeaders>& modified_request_headers);
+  // Follows a redirect, calling CreateLoaderAndStart() on the factory. This
+  // is useful if the factory uses different loaders for different URLs.
+  void FollowRedirectForcingRestart();
   void SetPriority(net::RequestPriority priority, int32_t intra_priority_value);
+
+  // Restarts the load immediately with |factory| and |url_loader_options|.
+  // It must only be called when the following conditions are met:
+  // 1. The request already started and the original factory decided to not
+  //    handle the request. This condition is required because throttles are not
+  //    consulted prior to restarting.
+  // 2. The original factory did not call URLLoaderClient callbacks (e.g.,
+  //    OnReceiveResponse).
+  // This function is useful in the case of service worker network fallback.
+  void RestartWithFactory(
+      scoped_refptr<network::SharedURLLoaderFactory> factory,
+      uint32_t url_loader_options);
 
   // Disconnect the forwarding URLLoaderClient and the URLLoader. Returns the
   // datapipe endpoints.
@@ -79,12 +95,7 @@ class CONTENT_EXPORT ThrottlingURLLoader
              network::ResourceRequest* url_request,
              scoped_refptr<base::SingleThreadTaskRunner> task_runner);
 
-  void StartNow(network::SharedURLLoaderFactory* factory,
-                int32_t routing_id,
-                int32_t request_id,
-                uint32_t options,
-                network::ResourceRequest* url_request,
-                scoped_refptr<base::SingleThreadTaskRunner> task_runner);
+  void StartNow();
 
   // Processes the result of a URLLoaderThrottle call, adding the throttle to
   // the blocking set if it deferred and updating |*should_defer| accordingly.
@@ -101,12 +112,10 @@ class CONTENT_EXPORT ThrottlingURLLoader
 
   // network::mojom::URLLoaderClient implementation:
   void OnReceiveResponse(
-      const network::ResourceResponseHead& response_head,
-      network::mojom::DownloadedTempFilePtr downloaded_file) override;
+      const network::ResourceResponseHead& response_head) override;
   void OnReceiveRedirect(
       const net::RedirectInfo& redirect_info,
       const network::ResourceResponseHead& response_head) override;
-  void OnDataDownloaded(int64_t data_len, int64_t encoded_data_len) override;
   void OnUploadProgress(int64_t current_position,
                         int64_t total_size,
                         OnUploadProgressCallback ack_callback) override;
@@ -121,6 +130,8 @@ class CONTENT_EXPORT ThrottlingURLLoader
   void CancelWithError(int error_code, base::StringPiece custom_reason);
   void Resume();
   void SetPriority(net::RequestPriority priority);
+  void UpdateDeferredResponseHead(
+      const network::ResourceResponseHead& new_response_head);
   void PauseReadingBodyFromNet(URLLoaderThrottle* throttle);
   void ResumeReadingBodyFromNet(URLLoaderThrottle* throttle);
   void InterceptResponse(
@@ -132,6 +143,9 @@ class CONTENT_EXPORT ThrottlingURLLoader
   // Disconnects the client connection and releases the URLLoader.
   void DisconnectClient(base::StringPiece custom_description);
 
+  // TODO(crbug.com/882661): Remove when the linked bug is fixed.
+  void Crash();
+
   enum DeferredStage {
     DEFERRED_NONE,
     DEFERRED_START,
@@ -139,8 +153,7 @@ class CONTENT_EXPORT ThrottlingURLLoader
     DEFERRED_RESPONSE
   };
   DeferredStage deferred_stage_ = DEFERRED_NONE;
-  bool loader_cancelled_ = false;
-  bool is_synchronous_ = false;
+  bool loader_completed_ = false;
 
   struct ThrottleEntry {
     ThrottleEntry(ThrottlingURLLoader* loader,
@@ -188,16 +201,16 @@ class CONTENT_EXPORT ThrottlingURLLoader
     // |task_runner_| is used to set up |client_binding_|.
     scoped_refptr<base::SingleThreadTaskRunner> task_runner;
   };
-  // Set if start is deferred.
+  // Holds any info needed to start or restart the request. Used when start is
+  // deferred or when FollowRedirectForcingRestart() is called.
   std::unique_ptr<StartInfo> start_info_;
 
   struct ResponseInfo {
-    ResponseInfo(const network::ResourceResponseHead& in_response_head,
-                 network::mojom::DownloadedTempFilePtr in_downloaded_file);
+    explicit ResponseInfo(
+        const network::ResourceResponseHead& in_response_head);
     ~ResponseInfo();
 
     network::ResourceResponseHead response_head;
-    network::mojom::DownloadedTempFilePtr downloaded_file;
   };
   // Set if response is deferred.
   std::unique_ptr<ResponseInfo> response_info_;
@@ -224,6 +237,9 @@ class CONTENT_EXPORT ThrottlingURLLoader
   // Set if request is deferred and SetPriority() is called.
   std::unique_ptr<PriorityInfo> priority_info_;
 
+  // Set if a throttle changed the URL in WillStartRequest.
+  GURL throttle_redirect_url_;
+
   const net::NetworkTrafficAnnotationTag traffic_annotation_;
 
   uint32_t inside_delegate_calls_ = 0;
@@ -232,6 +248,13 @@ class CONTENT_EXPORT ThrottlingURLLoader
   GURL response_url_;
 
   bool response_intercepted_ = false;
+
+  // TODO(crbug.com/882661): Remove these when the linked bug is fixed.
+  bool sent_on_receive_response_ = false;
+  std::vector<std::string> debug_log_;
+
+  base::Optional<std::vector<std::string>> to_be_removed_request_headers_;
+  base::Optional<net::HttpRequestHeaders> modified_request_headers_;
 
   base::WeakPtrFactory<ThrottlingURLLoader> weak_factory_;
 

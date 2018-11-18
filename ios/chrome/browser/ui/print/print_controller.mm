@@ -9,15 +9,15 @@
 
 #include <memory>
 
+#include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/mac/bind_objc_block.h"
 #include "base/mac/foundation_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/metrics/user_metrics.h"
 #include "base/metrics/user_metrics_action.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "components/strings/grit/components_strings.h"
 #import "ios/chrome/browser/ui/alert_coordinator/alert_coordinator.h"
 #import "ios/chrome/browser/ui/alert_coordinator/loading_alert_coordinator.h"
@@ -256,7 +256,7 @@ class PrintPDFFetcherDelegate : public URLFetcherDelegate {
 - (void)finishedDownloadingPDF:(UIViewController*)viewController {
   [self dismissPDFDownloadingDialog];
   DCHECK(_fetcher);
-  base::ScopedClosureRunner fetcherResetter(base::BindBlockArc(^{
+  base::ScopedClosureRunner fetcherResetter(base::BindOnce(^{
     _fetcher.reset();
   }));
   int responseCode = _fetcher->GetResponseCode();

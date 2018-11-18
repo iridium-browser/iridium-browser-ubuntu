@@ -6,8 +6,10 @@
 
 #include <sys/mman.h>
 
+#include "base/bits.h"
 #include "base/memory/shared_memory_tracker.h"
 #include "base/posix/eintr_wrapper.h"
+#include "base/process/process_metrics.h"
 #include "third_party/ashmem/ashmem.h"
 
 namespace base {
@@ -49,6 +51,20 @@ PlatformSharedMemoryRegion PlatformSharedMemoryRegion::Take(
   CHECK(CheckPlatformHandlePermissionsCorrespondToMode(fd.get(), mode, size));
 
   return PlatformSharedMemoryRegion(std::move(fd), mode, size, guid);
+}
+
+// static
+PlatformSharedMemoryRegion
+PlatformSharedMemoryRegion::TakeFromSharedMemoryHandle(
+    const SharedMemoryHandle& handle,
+    Mode mode) {
+  CHECK((mode == Mode::kReadOnly && handle.IsReadOnly()) ||
+        (mode == Mode::kUnsafe && !handle.IsReadOnly()));
+  if (!handle.IsValid())
+    return {};
+
+  return Take(ScopedFD(handle.GetHandle()), mode, handle.GetSize(),
+              handle.GetGUID());
 }
 
 int PlatformSharedMemoryRegion::GetPlatformHandle() const {
@@ -100,18 +116,21 @@ bool PlatformSharedMemoryRegion::ConvertToReadOnly() {
   return true;
 }
 
-bool PlatformSharedMemoryRegion::MapAt(off_t offset,
-                                       size_t size,
-                                       void** memory,
-                                       size_t* mapped_size) const {
+bool PlatformSharedMemoryRegion::ConvertToUnsafe() {
   if (!IsValid())
     return false;
 
-  size_t end_byte;
-  if (!CheckAdd(offset, size).AssignIfValid(&end_byte) || end_byte > size_) {
-    return false;
-  }
+  CHECK_EQ(mode_, Mode::kWritable)
+      << "Only writable shared memory region can be converted to unsafe";
 
+  mode_ = Mode::kUnsafe;
+  return true;
+}
+
+bool PlatformSharedMemoryRegion::MapAtInternal(off_t offset,
+                                               size_t size,
+                                               void** memory,
+                                               size_t* mapped_size) const {
   bool write_allowed = mode_ != Mode::kReadOnly;
   *memory = mmap(nullptr, size, PROT_READ | (write_allowed ? PROT_WRITE : 0),
                  MAP_SHARED, handle_.get(), offset);
@@ -123,8 +142,6 @@ bool PlatformSharedMemoryRegion::MapAt(off_t offset,
   }
 
   *mapped_size = size;
-  DCHECK_EQ(0U,
-            reinterpret_cast<uintptr_t>(*memory) & (kMapMinimumAlignment - 1));
   return true;
 }
 
@@ -134,7 +151,9 @@ PlatformSharedMemoryRegion PlatformSharedMemoryRegion::Create(Mode mode,
   if (size == 0)
     return {};
 
-  if (size > static_cast<size_t>(std::numeric_limits<int>::max()))
+  // Align size as required by ashmem_create_region() API documentation.
+  size_t rounded_size = bits::Align(size, GetPageSize());
+  if (rounded_size > static_cast<size_t>(std::numeric_limits<int>::max()))
     return {};
 
   CHECK_NE(mode, Mode::kReadOnly) << "Creating a region in read-only mode will "
@@ -143,7 +162,7 @@ PlatformSharedMemoryRegion PlatformSharedMemoryRegion::Create(Mode mode,
   UnguessableToken guid = UnguessableToken::Create();
 
   ScopedFD fd(ashmem_create_region(
-      SharedMemoryTracker::GetDumpNameForTracing(guid).c_str(), size));
+      SharedMemoryTracker::GetDumpNameForTracing(guid).c_str(), rounded_size));
   if (!fd.is_valid()) {
     DPLOG(ERROR) << "ashmem_create_region failed";
     return {};

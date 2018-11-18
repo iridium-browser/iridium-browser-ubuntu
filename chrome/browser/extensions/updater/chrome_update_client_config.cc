@@ -7,8 +7,11 @@
 #include <algorithm>
 
 #include "base/command_line.h"
+#include "base/containers/flat_map.h"
+#include "base/no_destructor.h"
 #include "base/version.h"
 #include "chrome/browser/component_updater/component_updater_utils.h"
+#include "chrome/browser/extensions/updater/extension_update_client_command_line_config_policy.h"
 #include "chrome/browser/google/google_brand.h"
 #include "chrome/browser/update_client/chrome_update_query_params_delegate.h"
 #include "chrome/common/channel_info.h"
@@ -25,6 +28,14 @@
 namespace extensions {
 
 namespace {
+
+using FactoryCallback = ChromeUpdateClientConfig::FactoryCallback;
+
+// static
+static FactoryCallback& GetFactoryCallback() {
+  static base::NoDestructor<FactoryCallback> factory;
+  return *factory;
+}
 
 class ExtensionActivityDataService final
     : public update_client::ActivityDataService {
@@ -84,7 +95,8 @@ void ExtensionActivityDataService::ClearActiveBit(const std::string& id) {
 ChromeUpdateClientConfig::ChromeUpdateClientConfig(
     content::BrowserContext* context)
     : context_(context),
-      impl_(base::CommandLine::ForCurrentProcess(),
+      impl_(ExtensionUpdateClientCommandLineConfigPolicy(
+                base::CommandLine::ForCurrentProcess()),
             /*require_encryption=*/true),
       pref_service_(ExtensionPrefs::Get(context)->pref_service()),
       activity_data_service_(std::make_unique<ExtensionActivityDataService>(
@@ -105,7 +117,7 @@ int ChromeUpdateClientConfig::OnDemandDelay() const {
 }
 
 int ChromeUpdateClientConfig::UpdateDelay() const {
-  return 0;
+  return impl_.UpdateDelay();
 }
 
 std::vector<GURL> ChromeUpdateClientConfig::UpdateUrl() const {
@@ -143,7 +155,8 @@ std::string ChromeUpdateClientConfig::GetOSLongName() const {
   return impl_.GetOSLongName();
 }
 
-std::string ChromeUpdateClientConfig::ExtraRequestParams() const {
+base::flat_map<std::string, std::string>
+ChromeUpdateClientConfig::ExtraRequestParams() const {
   return impl_.ExtraRequestParams();
 }
 
@@ -151,10 +164,10 @@ std::string ChromeUpdateClientConfig::GetDownloadPreference() const {
   return std::string();
 }
 
-scoped_refptr<net::URLRequestContextGetter>
-ChromeUpdateClientConfig::RequestContext() const {
+scoped_refptr<network::SharedURLLoaderFactory>
+ChromeUpdateClientConfig::URLLoaderFactory() const {
   return content::BrowserContext::GetDefaultStoragePartition(context_)
-      ->GetURLRequestContext();
+      ->GetURLLoaderFactoryForBrowserProcess();
 }
 
 std::unique_ptr<service_manager::Connector>
@@ -198,6 +211,26 @@ std::vector<uint8_t> ChromeUpdateClientConfig::GetRunActionKeyHash() const {
   return impl_.GetRunActionKeyHash();
 }
 
+std::string ChromeUpdateClientConfig::GetAppGuid() const {
+  return impl_.GetAppGuid();
+}
+
 ChromeUpdateClientConfig::~ChromeUpdateClientConfig() {}
+
+// static
+scoped_refptr<ChromeUpdateClientConfig> ChromeUpdateClientConfig::Create(
+    content::BrowserContext* context) {
+  FactoryCallback& factory = GetFactoryCallback();
+  return factory.is_null() ? scoped_refptr<ChromeUpdateClientConfig>(
+                                 new ChromeUpdateClientConfig(context))
+                           : factory.Run(context);
+}
+
+// static
+void ChromeUpdateClientConfig::SetChromeUpdateClientConfigFactoryForTesting(
+    FactoryCallback factory) {
+  DCHECK(!factory.is_null());
+  GetFactoryCallback() = factory;
+}
 
 }  // namespace extensions

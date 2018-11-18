@@ -60,6 +60,8 @@ test_common_source_files = [
   "tests/test_graphics_3d.h",
   "tests/test_host_resolver.cc",
   "tests/test_host_resolver.h",
+  "tests/test_host_resolver_crash.cc",
+  "tests/test_host_resolver_crash.h",
   "tests/test_host_resolver_private.cc",
   "tests/test_host_resolver_private.h",
   "tests/test_host_resolver_private_disallowed.cc",
@@ -104,6 +106,8 @@ test_common_source_files = [
   "tests/test_tcp_socket.h",
   "tests/test_tcp_socket_private.cc",
   "tests/test_tcp_socket_private.h",
+  "tests/test_tcp_socket_private_crash.cc",
+  "tests/test_tcp_socket_private_crash.h",
   "tests/test_test_internals.cc",
   "tests/test_test_internals.h",
   "tests/test_trace_event.cc",
@@ -127,12 +131,8 @@ test_common_source_files = [
   "tests/test_var_resource.h",
   "tests/test_video_decoder.cc",
   "tests/test_video_decoder.h",
-  "tests/test_video_destination.cc",
-  "tests/test_video_destination.h",
   "tests/test_video_encoder.cc",
   "tests/test_video_encoder.h",
-  "tests/test_video_source.cc",
-  "tests/test_video_source.h",
   "tests/test_view.cc",
   "tests/test_view.h",
   "tests/test_websocket.cc",
@@ -149,7 +149,11 @@ test_common_source_files = [
 copy("copy_test_files") {
   visibility = [ ":*" ]
   sources = [
-    # Keep "test_case.html.mock-http-headers" with "test_case.html".
+    # Keep "test_case.html.mock-http-headers" with "test_case.html"
+    # and "corb_eligible_resource.json.mock-http-headers" with
+    # "corb_eligible_resource.json".
+    "tests/corb_eligible_resource.json",
+    "tests/corb_eligible_resource.json.mock-http-headers",
     "tests/test_case.html",
     "tests/test_case.html.mock-http-headers",
     "tests/test_page.css",
@@ -231,7 +235,6 @@ source_set("ppapi_tests_sources") {
   deps = [
     ":copy_test_files",
     ":copy_test_files2",
-    "//build/config:exe_and_shlib_deps",
     "//ppapi/cpp",
     "//ppapi/shared_impl",
   ]
@@ -248,6 +251,8 @@ target(ppapi_tests_target_type, "ppapi_tests") {
   ]
 }
 
+# Test plugin for power saver tests.
+# See also ppapi::RegisterFlashTestPlugin.
 source_set("power_saver_test_plugin_sources") {
   sources = [
     "tests/power_saver_test_plugin.cc",
@@ -255,19 +260,42 @@ source_set("power_saver_test_plugin_sources") {
   ]
 
   deps = [
-    "//build/config:exe_and_shlib_deps",
+    "//ppapi/cpp",
+    "//ppapi/shared_impl",
+  ]
+}
+
+# Test plugin for Cross-Origin Read Blocking.
+# See also ppapi::RegisterCorbTestPlugin.
+source_set("corb_test_plugin_sources") {
+  sources = [
+    "tests/corb_test_plugin.cc",
+    "tests/test_utils.cc",
+  ]
+
+  deps = [
     "//ppapi/cpp",
     "//ppapi/shared_impl",
   ]
 }
 
 if (!is_mac) {
+  shared_library("corb_test_plugin") {
+    deps = [
+      ":corb_test_plugin_sources",
+    ]
+  }
   shared_library("power_saver_test_plugin") {
     deps = [
       ":power_saver_test_plugin_sources",
     ]
   }
 } else {
+  mac_plugin_bundle("corb_test_plugin") {
+    deps = [
+      ":corb_test_plugin_sources",
+    ]
+  }
   mac_plugin_bundle("power_saver_test_plugin") {
     deps = [
       ":power_saver_test_plugin_sources",
@@ -282,7 +310,6 @@ source_set("blink_deprecated_test_plugin_sources") {
 
   deps = [
     "//base",
-    "//build/config:exe_and_shlib_deps",
     "//ppapi/cpp",
     "//ppapi/shared_impl",
   ]
@@ -309,7 +336,6 @@ source_set("blink_test_plugin_sources") {
 
   deps = [
     "//base",
-    "//build/config:exe_and_shlib_deps",
     "//ppapi/cpp",
     "//ppapi/shared_impl",
   ]
@@ -393,7 +419,7 @@ test("ppapi_perftests") {
 
   deps = [
     "//base/test:test_support",
-    "//mojo/edk",
+    "//mojo/core/embedder",
     "//ppapi/proxy",
     "//ppapi/proxy:test_support",
     "//ppapi/shared_impl",
@@ -409,7 +435,6 @@ executable("pepper_hash_for_uma") {
 
   deps = [
     "//base",
-    "//build/config:exe_and_shlib_deps",
     "//build/win:default_exe_manifest",
   ]
 }

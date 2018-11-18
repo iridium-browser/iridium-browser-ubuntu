@@ -8,13 +8,11 @@
 
 #include "base/macros.h"
 #include "base/test/simple_test_tick_clock.h"
-#include "chrome/browser/browser_process.h"
 #include "chrome/browser/engagement/site_engagement_service.h"
 #include "chrome/browser/resource_coordinator/tab_activity_watcher.h"
-#include "chrome/browser/resource_coordinator/tab_manager.h"
-#include "chrome/browser/resource_coordinator/tab_metrics_event.pb.h"
 #include "chrome/browser/resource_coordinator/time.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/recently_audible_helper.h"
 #include "chrome/browser/ui/tabs/tab_activity_simulator.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tabs/tab_ukm_test_helper.h"
@@ -22,11 +20,11 @@
 #include "chrome/test/base/test_browser_window.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/ukm/content/source_url_recorder.h"
-#include "components/ukm/ukm_source.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/test/web_contents_tester.h"
 #include "services/metrics/public/cpp/ukm_builders.h"
+#include "services/metrics/public/cpp/ukm_source.h"
 #include "services/metrics/public/mojom/ukm_interface.mojom.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/platform/web_input_event.h"
@@ -34,7 +32,6 @@
 
 using blink::WebInputEvent;
 using content::WebContentsTester;
-using metrics::TabMetricsEvent;
 using ukm::builders::TabManager_TabMetrics;
 using ForegroundedOrClosed =
     ukm::builders::TabManager_Background_ForegroundedOrClosed;
@@ -50,18 +47,14 @@ const GURL kTestUrls[] = {
 
 // The default metric values for a tab.
 const UkmMetricMap kBasicMetricValues({
-    {TabManager_TabMetrics::kContentTypeName,
-     TabMetricsEvent::CONTENT_TYPE_TEXT_HTML},
     {TabManager_TabMetrics::kHasBeforeUnloadHandlerName, 0},
     {TabManager_TabMetrics::kHasFormEntryName, 0},
-    {TabManager_TabMetrics::kIsExtensionProtectedName, 0},
     {TabManager_TabMetrics::kIsPinnedName, 0},
     {TabManager_TabMetrics::kKeyEventCountName, 0},
     {TabManager_TabMetrics::kMouseEventCountName, 0},
     {TabManager_TabMetrics::kSiteEngagementScoreName, 0},
     {TabManager_TabMetrics::kTouchEventCountName, 0},
     {TabManager_TabMetrics::kWasRecentlyAudibleName, 0},
-    {TabManager_TabMetrics::kDefaultProtocolHandlerName, base::nullopt},
 });
 
 blink::WebMouseEvent CreateMouseEvent(WebInputEvent::Type event_type) {
@@ -108,14 +101,12 @@ class TabMetricsTest : public TabActivityWatcherTest {
     ukm_entry_checker_.ExpectNewEntry(kEntryName, source_url, expected_metrics);
 
     const size_t num_entries = ukm_entry_checker_.NumEntries(kEntryName);
-    const ukm::mojom::UkmEntry* last_entry =
-        ukm_entry_checker_.LastUkmEntry(kEntryName);
-    ukm::TestUkmRecorder::ExpectEntryMetric(
-        last_entry, TabManager_TabMetrics::kSequenceIdName, num_entries);
+    EXPECT_EQ(num_entries, ++num_previous_entries);
   }
 
  protected:
   const char* kEntryName = TabManager_TabMetrics::kEntryName;
+  size_t num_previous_entries = 0;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(TabMetricsTest);
@@ -248,16 +239,13 @@ TEST_F(TabMetricsTest, TabMetrics) {
     ExpectNewEntry(kTestUrls[1], expected_metrics);
   }
 
-  // Simulate an extension protecting the tab.
-  g_browser_process->GetTabManager()->SetTabAutoDiscardableState(
-      test_contents_2, false);
-  expected_metrics[TabManager_TabMetrics::kIsExtensionProtectedName] = 1;
-
   // Site engagement score should round down to the nearest 10.
   SiteEngagementService::Get(profile())->ResetBaseScoreForURL(kTestUrls[1], 45);
   expected_metrics[TabManager_TabMetrics::kSiteEngagementScoreName] = 40;
 
-  WebContentsTester::For(test_contents_2)->SetWasRecentlyAudible(true);
+  auto* audible_helper_2 =
+      RecentlyAudibleHelper::FromWebContents(test_contents_2);
+  audible_helper_2->SetRecentlyAudibleForTesting();
   expected_metrics[TabManager_TabMetrics::kWasRecentlyAudibleName] = 1;
 
   // Pin the background tab to log an event. (This moves it to index 0.)
@@ -270,7 +258,7 @@ TEST_F(TabMetricsTest, TabMetrics) {
 
   // Unset WasRecentlyAudible and navigate the background tab to a new domain.
   // Site engagement score for the new domain is 0.
-  WebContentsTester::For(test_contents_2)->SetWasRecentlyAudible(false);
+  audible_helper_2->SetNotRecentlyAudibleForTesting();
   expected_metrics[TabManager_TabMetrics::kWasRecentlyAudibleName] = 0;
   WebContentsTester::For(test_contents_2)->NavigateAndCommit(kTestUrls[2]);
   expected_metrics[TabManager_TabMetrics::kSiteEngagementScoreName] = 0;
@@ -550,8 +538,8 @@ TEST_F(TabMetricsTest, ReplaceForegroundTab) {
   WebContentsTester::For(new_contents.get())->TestSetIsLoading(false);
 
   // Replace and delete the old contents.
-  std::unique_ptr<content::WebContents> old_contents(
-      tab_strip_model->ReplaceWebContentsAt(0, new_contents.release()));
+  std::unique_ptr<content::WebContents> old_contents =
+      tab_strip_model->ReplaceWebContentsAt(0, std::move(new_contents));
   ASSERT_EQ(old_contents.get(), orig_contents);
   old_contents.reset();
   tab_strip_model->GetWebContentsAt(0)->WasShown();
@@ -626,7 +614,7 @@ TEST_F(ForegroundedOrClosedTest, MultipleTabs) {
                                                     GURL(kTestUrls[2]));
   AdvanceClock();
   // MRU ordering by tab indices:
-  // 0 (foreground), 1 (created first), 2 (created last)
+  // 0 (foreground), 2 (created last), 1 (created first),
 
   // Foreground a tab to log an event.
   tab_activity_simulator_.SwitchToTabAt(tab_strip_model, 2);
@@ -675,11 +663,7 @@ TEST_F(ForegroundedOrClosedTest, MultipleTabs) {
         kEntryName, kTestUrls[0],
         {
             {ForegroundedOrClosed::kIsForegroundedName, 0},
-            // TODO(michaelpg): The final tab has an MRU of 0 because the
-            // remaining tabs were closed first. It would be more accurate to
-            // use the MRUIndex this tab had when CloseAllTabs() was called.
-            // See https://crbug.com/817174.
-            {ForegroundedOrClosed::kMRUIndexName, 0},
+            {ForegroundedOrClosed::kMRUIndexName, 2},
         });
 
     // No event is logged for the middle tab, which was in the foreground.
@@ -840,14 +824,70 @@ TEST_F(ForegroundedOrClosedTest, MRUIndex) {
     SCOPED_TRACE("");
     // The rightmost tab was in the foreground, so only the leftmost tab is
     // logged.
-    // TODO(michaelpg): The last tab has an MRU of 0 because the remaining tabs
-    // were closed first. It would be more accurate to use the MRUIndex this tab
-    // had when CloseAllTabs() was called. See https://crbug.com/817174.
     ukm_entry_checker_.ExpectNewEntry(
         kEntryName, kTestUrls[0],
         {
             {ForegroundedOrClosed::kIsForegroundedName, 0},
-            {ForegroundedOrClosed::kMRUIndexName, 0},
+            {ForegroundedOrClosed::kMRUIndexName, 1},
+        });
+  }
+}
+
+// Tests the MRUIndex for ForegroundedOrClosed events on multiple browsers.
+TEST_F(ForegroundedOrClosedTest, MRUIndexMultipleBrowser) {
+  Browser::CreateParams params(profile(), true);
+  // Create the first browser.
+  std::unique_ptr<Browser> browser =
+      CreateBrowserWithTestWindowForParams(&params);
+
+  TabStripModel* tab_strip_model = browser->tab_strip_model();
+  tab_activity_simulator_.AddWebContentsAndNavigate(tab_strip_model,
+                                                    GURL(kTestUrls[0]));
+  tab_strip_model->ActivateTabAt(0, false);
+  AdvanceClock();
+
+  tab_activity_simulator_.AddWebContentsAndNavigate(tab_strip_model,
+                                                    GURL(kTestUrls[1]));
+  AdvanceClock();
+
+  // Create the second browser.
+  std::unique_ptr<Browser> browser2 =
+      CreateBrowserWithTestWindowForParams(&params);
+  TabStripModel* tab_strip_model2 = browser2->tab_strip_model();
+  tab_activity_simulator_.AddWebContentsAndNavigate(tab_strip_model2,
+                                                    GURL(kTestUrls[2]));
+  tab_strip_model2->ActivateTabAt(0, false);
+  AdvanceClock();
+
+  tab_activity_simulator_.AddWebContentsAndNavigate(tab_strip_model2,
+                                                    GURL(kTestUrls[3]));
+  AdvanceClock();
+
+  // Tabs in MRU order: [kTestUrls[2], kTestUrls[0], kTestUrls[3], kTestUrls[1]]
+
+  tab_strip_model->CloseAllTabs();
+  {
+    SCOPED_TRACE("");
+    // The kTestUrls[0] was in the foreground, so only kTestUrls[1] is
+    // logged.
+    ukm_entry_checker_.ExpectNewEntry(
+        kEntryName, kTestUrls[1],
+        {
+            {ForegroundedOrClosed::kIsForegroundedName, 0},
+            {ForegroundedOrClosed::kMRUIndexName, 3},
+        });
+  }
+
+  tab_strip_model2->CloseAllTabs();
+  {
+    SCOPED_TRACE("");
+    // The kTestUrls[2] was in the foreground, so only kTestUrls[3] is
+    // logged.
+    ukm_entry_checker_.ExpectNewEntry(
+        kEntryName, kTestUrls[3],
+        {
+            {ForegroundedOrClosed::kIsForegroundedName, 0},
+            {ForegroundedOrClosed::kMRUIndexName, 1},
         });
   }
 }

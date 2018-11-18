@@ -8,19 +8,20 @@
 // DO NOT MODIFY!
 
 // clang-format off
-#include "v8_array_buffer.h"
+#include "third_party/blink/renderer/bindings/tests/results/core/v8_array_buffer.h"
 
 #include "base/memory/scoped_refptr.h"
-#include "bindings/core/v8/exception_state.h"
-#include "bindings/core/v8/idl_types.h"
-#include "bindings/core/v8/native_value_traits_impl.h"
-#include "bindings/core/v8/v8_array_buffer.h"
-#include "bindings/core/v8/v8_dom_configuration.h"
-#include "bindings/core/v8/v8_shared_array_buffer.h"
-#include "core/execution_context/execution_context.h"
-#include "platform/bindings/runtime_call_stats.h"
-#include "platform/bindings/v8_object_constructor.h"
-#include "platform/wtf/get_ptr.h"
+#include "third_party/blink/renderer/bindings/core/v8/idl_types.h"
+#include "third_party/blink/renderer/bindings/core/v8/native_value_traits_impl.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_array_buffer.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_dom_configuration.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_shared_array_buffer.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
+#include "third_party/blink/renderer/platform/bindings/exception_messages.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
+#include "third_party/blink/renderer/platform/bindings/runtime_call_stats.h"
+#include "third_party/blink/renderer/platform/bindings/v8_object_constructor.h"
+#include "third_party/blink/renderer/platform/wtf/get_ptr.h"
 
 namespace blink {
 
@@ -75,23 +76,10 @@ TestArrayBuffer* V8ArrayBuffer::ToImpl(v8::Local<v8::Object> object) {
   // Transfer the ownership of the allocated memory to an ArrayBuffer without
   // copying.
   v8::ArrayBuffer::Contents v8Contents = v8buffer->Externalize();
-  WTF::ArrayBufferContents::AllocationKind kind = WTF::ArrayBufferContents::AllocationKind::kNormal;
-  switch (v8Contents.AllocationMode()) {
-    case v8::ArrayBuffer::Allocator::AllocationMode::kNormal:
-      kind = WTF::ArrayBufferContents::AllocationKind::kNormal;
-      break;
-    case v8::ArrayBuffer::Allocator::AllocationMode::kReservation:
-      kind = WTF::ArrayBufferContents::AllocationKind::kReservation;
-      break;
-    default:
-      NOTREACHED();
-  };
-  WTF::ArrayBufferContents::DataHandle data(v8Contents.AllocationBase(),
-                                            v8Contents.AllocationLength(),
-                                            v8Contents.Data(),
+  WTF::ArrayBufferContents::DataHandle data(v8Contents.Data(),
                                             v8Contents.ByteLength(),
-                                            kind,
-                                            WTF::ArrayBufferContents::FreeMemory);
+                                            v8Contents.Deleter(),
+                                            v8Contents.DeleterData());
   WTF::ArrayBufferContents contents(std::move(data), WTF::ArrayBufferContents::kNotShared);
   TestArrayBuffer* buffer = TestArrayBuffer::Create(contents);
   v8::Local<v8::Object> associatedWrapper = buffer->AssociateWithWrapper(v8::Isolate::GetCurrent(), buffer->GetWrapperTypeInfo(), object);

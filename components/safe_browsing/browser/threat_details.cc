@@ -15,14 +15,18 @@
 #include "base/bind.h"
 #include "base/lazy_instance.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/stl_util.h"
 #include "base/strings/string_util.h"
+#include "base/task/post_task.h"
 #include "components/history/core/browser/history_service.h"
 #include "components/safe_browsing/base_ui_manager.h"
+#include "components/safe_browsing/browser/referrer_chain_provider.h"
 #include "components/safe_browsing/browser/threat_details_cache.h"
 #include "components/safe_browsing/browser/threat_details_history.h"
 #include "components/safe_browsing/db/hit_report.h"
 #include "components/safe_browsing/features.h"
 #include "components/safe_browsing/web_ui/safe_browsing_ui.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
@@ -50,6 +54,9 @@ namespace {
 
 // An element ID indicating that an HTML Element has no parent.
 const int kElementIdNoParent = -1;
+
+// The number of user gestures to trace back for the referrer chain.
+const int kThreatDetailsUserGestureLimit = 2;
 
 typedef std::unordered_set<std::string> StringSet;
 // A set of HTTPS headers that are allowed to be collected. Contains both
@@ -87,7 +94,8 @@ ClientSafeBrowsingReportRequest::ReportType GetReportTypeFromSBThreatType(
       return ClientSafeBrowsingReportRequest::URL_CLIENT_SIDE_MALWARE;
     case SB_THREAT_TYPE_AD_SAMPLE:
       return ClientSafeBrowsingReportRequest::AD_SAMPLE;
-    case SB_THREAT_TYPE_PASSWORD_REUSE:
+    case SB_THREAT_TYPE_SIGN_IN_PASSWORD_REUSE:
+    case SB_THREAT_TYPE_ENTERPRISE_PASSWORD_REUSE:
       return ClientSafeBrowsingReportRequest::URL_PASSWORD_PROTECTION_PHISHING;
     case SB_THREAT_TYPE_SUSPICIOUS_SITE:
       return ClientSafeBrowsingReportRequest::URL_SUSPICIOUS;
@@ -247,8 +255,7 @@ void TrimElements(const std::set<int> target_ids,
     const HTMLElement& element = *element_iter->second;
 
     // Delete any elements that we do not want to keep.
-    if (std::find(ids_to_keep.begin(), ids_to_keep.end(), element.id()) ==
-        ids_to_keep.end()) {
+    if (!base::ContainsValue(ids_to_keep, element.id())) {
       if (element.has_resource_id()) {
         const std::string& resource_url =
             resource_id_to_url[element.resource_id()];
@@ -266,17 +273,24 @@ void TrimElements(const std::set<int> target_ids,
 // don't leak it.
 class ThreatDetailsFactoryImpl : public ThreatDetailsFactory {
  public:
-  ThreatDetails* CreateThreatDetails(
+  std::unique_ptr<ThreatDetails> CreateThreatDetails(
       BaseUIManager* ui_manager,
       WebContents* web_contents,
       const security_interstitials::UnsafeResource& unsafe_resource,
       scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
       history::HistoryService* history_service,
+      ReferrerChainProvider* referrer_chain_provider,
       bool trim_to_ad_tags,
       ThreatDetailsDoneCallback done_callback) override {
-    return new ThreatDetails(ui_manager, web_contents, unsafe_resource,
-                             url_loader_factory, history_service,
-                             trim_to_ad_tags, done_callback);
+    // We can't use make_unique due to the protected constructor. We can't
+    // directly use std::unique_ptr<ThreatDetails>(new ThreatDetails(...))
+    // due to presubmit errors. So we use base::WrapUnique:
+    auto threat_details = base::WrapUnique(new ThreatDetails(
+        ui_manager, web_contents, unsafe_resource, url_loader_factory,
+        history_service, referrer_chain_provider, trim_to_ad_tags,
+        done_callback));
+    threat_details->StartCollection();
+    return threat_details;
   }
 
  private:
@@ -292,21 +306,22 @@ static base::LazyInstance<ThreatDetailsFactoryImpl>::DestructorAtExit
 
 // Create a ThreatDetails for the given tab.
 /* static */
-ThreatDetails* ThreatDetails::NewThreatDetails(
+std::unique_ptr<ThreatDetails> ThreatDetails::NewThreatDetails(
     BaseUIManager* ui_manager,
     WebContents* web_contents,
     const UnsafeResource& resource,
     scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
     history::HistoryService* history_service,
+    ReferrerChainProvider* referrer_chain_provider,
     bool trim_to_ad_tags,
     ThreatDetailsDoneCallback done_callback) {
   // Set up the factory if this has not been done already (tests do that
   // before this method is called).
   if (!factory_)
     factory_ = g_threat_details_factory_impl.Pointer();
-  return factory_->CreateThreatDetails(ui_manager, web_contents, resource,
-                                       url_loader_factory, history_service,
-                                       trim_to_ad_tags, done_callback);
+  return factory_->CreateThreatDetails(
+      ui_manager, web_contents, resource, url_loader_factory, history_service,
+      referrer_chain_provider, trim_to_ad_tags, done_callback);
 }
 
 // Create a ThreatDetails for the given tab. Runs in the UI thread.
@@ -316,12 +331,14 @@ ThreatDetails::ThreatDetails(
     const UnsafeResource& resource,
     scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
     history::HistoryService* history_service,
+    ReferrerChainProvider* referrer_chain_provider,
     bool trim_to_ad_tags,
     ThreatDetailsDoneCallback done_callback)
     : content::WebContentsObserver(web_contents),
       url_loader_factory_(url_loader_factory),
       ui_manager_(ui_manager),
       resource_(resource),
+      referrer_chain_provider_(referrer_chain_provider),
       cache_result_(false),
       did_proceed_(false),
       num_visits_(0),
@@ -330,11 +347,11 @@ ThreatDetails::ThreatDetails(
       cache_collector_(new ThreatDetailsCacheCollector),
       done_callback_(done_callback),
       all_done_expected_(false),
-      is_all_done_(false) {
+      is_all_done_(false),
+      weak_factory_(this) {
   redirects_collector_ = new ThreatDetailsRedirectsCollector(
       history_service ? history_service->AsWeakPtr()
                       : base::WeakPtr<history::HistoryService>());
-  StartCollection();
 }
 
 // TODO(lpz): Consider making this constructor delegate to the parameterized one
@@ -345,9 +362,9 @@ ThreatDetails::ThreatDetails()
       num_visits_(0),
       ambiguous_dom_(false),
       trim_to_ad_tags_(false),
-      done_callback_(nullptr),
       all_done_expected_(false),
-      is_all_done_(false) {}
+      is_all_done_(false),
+      weak_factory_(this) {}
 
 ThreatDetails::~ThreatDetails() {
   DCHECK(all_done_expected_ == is_all_done_);
@@ -411,8 +428,7 @@ ClientSafeBrowsingReportRequest::Resource* ThreatDetails::AddUrl(
     url_resource->set_parent_id(parent_resource->id());
   }
   if (children) {
-    for (std::vector<GURL>::const_iterator it = children->begin();
-         it != children->end(); ++it) {
+    for (auto it = children->begin(); it != children->end(); ++it) {
       // TODO(lpz): Should this first check if the child URL is reportable
       // before creating the resource?
       ClientSafeBrowsingReportRequest::Resource* child_resource =
@@ -560,8 +576,8 @@ void ThreatDetails::StartCollection() {
     // OnReceivedThreatDOMDetails will be called when the renderer replies.
     // TODO(mattm): In theory, if the user proceeds through the warning DOM
     // detail collection could be started once the page loads.
-    web_contents()->ForEachFrame(
-        base::BindRepeating(&ThreatDetails::RequestThreatDOMDetails, this));
+    web_contents()->ForEachFrame(base::BindRepeating(
+        &ThreatDetails::RequestThreatDOMDetails, GetWeakPtr()));
   }
 }
 
@@ -570,9 +586,10 @@ void ThreatDetails::RequestThreatDOMDetails(content::RenderFrameHost* frame) {
   frame->GetRemoteInterfaces()->GetInterface(&threat_reporter);
   safe_browsing::mojom::ThreatReporter* raw_threat_report =
       threat_reporter.get();
+  pending_render_frame_hosts_.push_back(frame);
   raw_threat_report->GetThreatDOMDetails(
-      base::BindOnce(&ThreatDetails::OnReceivedThreatDOMDetails, this,
-                     base::Passed(&threat_reporter), frame));
+      base::BindOnce(&ThreatDetails::OnReceivedThreatDOMDetails, GetWeakPtr(),
+                     std::move(threat_reporter), frame));
 }
 
 // When the renderer is done, this is called.
@@ -580,6 +597,16 @@ void ThreatDetails::OnReceivedThreatDOMDetails(
     mojom::ThreatReporterPtr threat_reporter,
     content::RenderFrameHost* sender,
     std::vector<mojom::ThreatDOMDetailsNodePtr> params) {
+  // If the RenderFrameHost was closed between sending the IPC and this callback
+  // running, |sender| will be invalid.
+  const auto sender_it = std::find(pending_render_frame_hosts_.begin(),
+                                   pending_render_frame_hosts_.end(), sender);
+  if (sender_it == pending_render_frame_hosts_.end()) {
+    return;
+  }
+
+  pending_render_frame_hosts_.erase(sender_it);
+
   // Lookup the FrameTreeNode ID of any child frames in the list of DOM nodes.
   const int sender_process_id = sender->GetProcess()->GetID();
   const int sender_frame_tree_node_id = sender->GetFrameTreeNodeId();
@@ -675,10 +702,6 @@ void ThreatDetails::FinishCollection(bool did_proceed, int num_visit) {
     }
   }
 
-  if (trim_to_ad_tags_) {
-    TrimElements(trimmed_dom_element_ids_, &elements_, &resources_);
-  }
-
   did_proceed_ = did_proceed;
   num_visits_ = num_visit;
   std::vector<GURL> urls;
@@ -687,7 +710,8 @@ void ThreatDetails::FinishCollection(bool did_proceed, int num_visit) {
     urls.push_back(GURL(it->first));
   }
   redirects_collector_->StartHistoryCollection(
-      urls, base::Bind(&ThreatDetails::OnRedirectionCollectionReady, this));
+      urls,
+      base::Bind(&ThreatDetails::OnRedirectionCollectionReady, GetWeakPtr()));
 }
 
 void ThreatDetails::OnRedirectionCollectionReady() {
@@ -701,7 +725,7 @@ void ThreatDetails::OnRedirectionCollectionReady() {
   // Call the cache collector
   cache_collector_->StartCacheCollection(
       url_loader_factory_, &resources_, &cache_result_,
-      base::Bind(&ThreatDetails::OnCacheCollectionReady, this));
+      base::Bind(&ThreatDetails::OnCacheCollectionReady, GetWeakPtr()));
 }
 
 void ThreatDetails::AddRedirectUrlList(const std::vector<GURL>& urls) {
@@ -713,6 +737,18 @@ void ThreatDetails::AddRedirectUrlList(const std::vector<GURL>& urls) {
 
 void ThreatDetails::OnCacheCollectionReady() {
   DVLOG(1) << "OnCacheCollectionReady.";
+
+  // All URLs have been collected, trim the report if necessary.
+  if (trim_to_ad_tags_) {
+    TrimElements(trimmed_dom_element_ids_, &elements_, &resources_);
+    // If trimming the report removed all the elements then don't bother
+    // sending it.
+    if (elements_.empty()) {
+      AllDone();
+      return;
+    }
+  }
+
   // Add all the urls in our |resources_| maps to the |report_| protocol buffer.
   for (auto& resource_pair : resources_) {
     ClientSafeBrowsingReportRequest::Resource* pb_resource =
@@ -747,6 +783,9 @@ void ThreatDetails::OnCacheCollectionReady() {
   report_->mutable_client_properties()->set_url_api_type(
       GetUrlApiTypeForThreatSource(resource_.threat_source));
 
+  // Fill the referrer chain if applicable.
+  MaybeFillReferrerChain();
+
   // Send the report, using the SafeBrowsingService.
   std::string serialized;
   if (!report_->SerializeToString(&serialized)) {
@@ -755,17 +794,9 @@ void ThreatDetails::OnCacheCollectionReady() {
     return;
   }
 
-  // For measuring performance impact of ad sampling reports, we may want to
-  // do all the heavy lifting of creating the report but not actually send it.
-  if (report_->type() == ClientSafeBrowsingReportRequest::AD_SAMPLE &&
-      base::FeatureList::IsEnabled(kAdSamplerCollectButDontSendFeature)) {
-    AllDone();
-    return;
-  }
-
-  BrowserThread::PostTask(
-      content::BrowserThread::UI, FROM_HERE,
-      base::BindOnce(&WebUIInfoSingleton::AddToReportsSent,
+  base::PostTaskWithTraits(
+      FROM_HERE, {content::BrowserThread::UI},
+      base::BindOnce(&WebUIInfoSingleton::AddToCSBRRsSent,
                      base::Unretained(WebUIInfoSingleton::GetInstance()),
                      std::move(report_)));
 
@@ -774,10 +805,43 @@ void ThreatDetails::OnCacheCollectionReady() {
   AllDone();
 }
 
+void ThreatDetails::MaybeFillReferrerChain() {
+  if (!referrer_chain_provider_)
+    return;
+
+  if (!report_ ||
+      report_->type() != ClientSafeBrowsingReportRequest::URL_SUSPICIOUS) {
+    return;
+  }
+
+  referrer_chain_provider_->IdentifyReferrerChainByWebContents(
+      web_contents(), kThreatDetailsUserGestureLimit,
+      report_->mutable_referrer_chain());
+}
+
 void ThreatDetails::AllDone() {
   is_all_done_ = true;
-  BrowserThread::PostTask(
-      content::BrowserThread::UI, FROM_HERE,
-      base::Bind(done_callback_, base::Unretained(web_contents())));
+  base::PostTaskWithTraits(
+      FROM_HERE, {content::BrowserThread::UI},
+      base::BindOnce(done_callback_, base::Unretained(web_contents())));
 }
+
+void ThreatDetails::FrameDeleted(RenderFrameHost* render_frame_host) {
+  auto render_frame_host_it =
+      std::find(pending_render_frame_hosts_.begin(),
+                pending_render_frame_hosts_.end(), render_frame_host);
+  if (render_frame_host_it != pending_render_frame_hosts_.end()) {
+    pending_render_frame_hosts_.erase(render_frame_host_it);
+  }
+}
+
+void ThreatDetails::RenderFrameHostChanged(RenderFrameHost* old_host,
+                                           RenderFrameHost* new_host) {
+  FrameDeleted(old_host);
+}
+
+base::WeakPtr<ThreatDetails> ThreatDetails::GetWeakPtr() {
+  return weak_factory_.GetWeakPtr();
+}
+
 }  // namespace safe_browsing

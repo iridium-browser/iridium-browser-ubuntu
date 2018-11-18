@@ -101,7 +101,7 @@
 // Gy_-NOT: -ffunction-sections
 
 // RUN: %clang_cl /Gs -### -- %s 2>&1 | FileCheck -check-prefix=Gs %s
-// Gs: "-mstack-probe-size=0"
+// Gs: "-mstack-probe-size=4096"
 // RUN: %clang_cl /Gs0 -### -- %s 2>&1 | FileCheck -check-prefix=Gs0 %s
 // Gs0: "-mstack-probe-size=0"
 // RUN: %clang_cl /Gs4096 -### -- %s 2>&1 | FileCheck -check-prefix=Gs4096 %s
@@ -198,10 +198,8 @@
 // RUN: %clang_cl /E /showIncludes -### -- %s 2>&1 | FileCheck -check-prefix=showIncludes_E %s
 // RUN: %clang_cl /EP /showIncludes -### -- %s 2>&1 | FileCheck -check-prefix=showIncludes_E %s
 // RUN: %clang_cl /E /EP /showIncludes -### -- %s 2>&1 | FileCheck -check-prefix=showIncludes_E %s
-// showIncludes_E: warning: argument unused during compilation: '--show-includes'
-
-// RUN: %clang_cl /EP /P /showIncludes -### -- %s 2>&1 | FileCheck -check-prefix=showIncludes_E_And_P %s
-// showIncludes_E_And_P-NOT: warning: argument unused during compilation: '--show-includes'
+// RUN: %clang_cl /EP /P /showIncludes -### -- %s 2>&1 | FileCheck -check-prefix=showIncludes_E %s
+// showIncludes_E-NOT: warning: argument unused during compilation: '--show-includes'
 
 // /source-charset: should warn on everything except UTF-8.
 // RUN: %clang_cl /source-charset:utf-16 -### -- %s 2>&1 | FileCheck -check-prefix=source-charset-utf-16 %s
@@ -346,6 +344,7 @@
 // RUN:    /GS- \
 // RUN:    /kernel- \
 // RUN:    /nologo \
+// RUN:    /Og \
 // RUN:    /openmp- \
 // RUN:    /permissive- \
 // RUN:    /RTC1 \
@@ -357,6 +356,14 @@
 // RUN:    /volatile:iso \
 // RUN:    /w12345 \
 // RUN:    /wd1234 \
+// RUN:    /Zc:__cplusplus \
+// RUN:    /Zc:auto \
+// RUN:    /Zc:forScope \
+// RUN:    /Zc:inline \
+// RUN:    /Zc:rvalueCast \
+// RUN:    /Zc:ternary \
+// RUN:    /Zc:wchar_t \
+// RUN:    /Zm \
 // RUN:    /Zo \
 // RUN:    /Zo- \
 // RUN:    -### -- %s 2>&1 | FileCheck -check-prefix=IGNORED %s
@@ -413,8 +420,6 @@
 // RUN:     /Gr \
 // RUN:     /GS \
 // RUN:     /GT \
-// RUN:     /guard:cf \
-// RUN:     /guard:cf- \
 // RUN:     /GX \
 // RUN:     /Gv \
 // RUN:     /Gz \
@@ -422,6 +427,7 @@
 // RUN:     /H \
 // RUN:     /homeparams \
 // RUN:     /hotpatch \
+// RUN:     /JMC \
 // RUN:     /kernel \
 // RUN:     /LN \
 // RUN:     /MP \
@@ -554,12 +560,33 @@
 // RUN: %clang_cl -### -Fe%t.exe -entry:main -flto -- %s 2>&1 | FileCheck -check-prefix=LTO-WITHOUT-LLD %s
 // LTO-WITHOUT-LLD: LTO requires -fuse-ld=lld
 
+// RUN: %clang_cl  -### -- %s 2>&1 | FileCheck -check-prefix=NOCFGUARD %s
+// RUN: %clang_cl /guard:cf- -### -- %s 2>&1 | FileCheck -check-prefix=NOCFGUARD %s
+// NOCFGUARD-NOT: -cfguard
+
+// RUN: %clang_cl /guard:cf -### -- %s 2>&1 | FileCheck -check-prefix=CFGUARD %s
+// RUN: %clang_cl /guard:cf,nochecks -### -- %s 2>&1 | FileCheck -check-prefix=CFGUARD %s
+// RUN: %clang_cl /guard:nochecks -### -- %s 2>&1 | FileCheck -check-prefix=CFGUARD %s
+// CFGUARD: -cfguard
+
+// RUN: %clang_cl /guard:foo -### -- %s 2>&1 | FileCheck -check-prefix=CFGUARDINVALID %s
+// CFGUARDINVALID: invalid value 'foo' in '/guard:'
+
 // Accept "core" clang options.
 // (/Zs is for syntax-only, -Werror makes it fail hard on unknown options)
 // RUN: %clang_cl \
 // RUN:     --driver-mode=cl \
+// RUN:     -fblocks \
+// RUN:     -fcrash-diagnostics-dir=/foo \
+// RUN:     -fno-crash-diagnostics \
+// RUN:     -fno-blocks \
+// RUN:     -fbuiltin \
+// RUN:     -fno-builtin \
+// RUN:     -fno-builtin-strcpy \
 // RUN:     -fcolor-diagnostics \
 // RUN:     -fno-color-diagnostics \
+// RUN:     -fcoverage-mapping \
+// RUN:     -fno-coverage-mapping \
 // RUN:     -fdiagnostics-color \
 // RUN:     -fno-diagnostics-color \
 // RUN:     -fdiagnostics-parseable-fixits \
@@ -581,6 +608,9 @@
 // RUN:     -fstandalone-debug \
 // RUN:     -flimit-debug-info \
 // RUN:     -flto \
+// RUN:     -fmerge-all-constants \
+// RUN:     -no-canonical-prefixes \
+// RUN:     -march=skylake \
 // RUN:     --version \
 // RUN:     -Werror /Zs -- %s 2>&1
 

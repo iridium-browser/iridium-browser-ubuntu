@@ -4,19 +4,24 @@
 
 /**
  * Icon of the audio player.
- * TODO(yoshiki): Consider providing an exact size icon, instead of relying
- * on downsampling by ash.
+ * Use maximum size and let ash downsample the icon.
  *
- * @type {string}
+ * @type {!string}
  * @const
  */
-var AUDIO_PLAYER_ICON = 'icons/audio-player-64.png';
+var AUDIO_PLAYER_ICON = 'icons/audio-player-192.png';
 
+/**
+ * HTML source of the audio player.
+ * @type {!string}
+ * @const
+ */
 var AUDIO_PLAYER_APP_URL = 'audio_player.html';
 
 /**
  * Configuration of the audio player.
- * @type {Object}
+ * @type {!Object}
+ * @const
  */
 var audioPlayerCreateOptions = {
   id: 'audio-player',
@@ -40,7 +45,7 @@ function AudioPlayerBackground() {
 AudioPlayerBackground.prototype.__proto__ = BackgroundBase.prototype;
 
 /**
- * Called when an app is restarted.
+ * Called when an audio player app is restarted.
  */
 AudioPlayerBackground.prototype.onRestarted_ = function() {
   audioPlayer.reopen(function() {
@@ -51,22 +56,21 @@ AudioPlayerBackground.prototype.onRestarted_ = function() {
   });
 };
 
-
 /**
  * Backgound object. This is necessary for AppWindowWrapper.
- * @type {BackgroundBase}
+ * @type {!AudioPlayerBackground}
  */
 var background = new AudioPlayerBackground();
 
 /**
- * Wrapper of audio player window.
- * @type {SingletonAppWindowWrapper}
+ * Audio player app window wrapper.
+ * @type {!SingletonAppWindowWrapper}
  */
 var audioPlayer = new SingletonAppWindowWrapper(AUDIO_PLAYER_APP_URL,
                                                 audioPlayerCreateOptions);
 
 /**
- * Opens player window.
+ * Opens the audio player window.
  * @param {!Array<string>} urls List of audios to play and index to start
  *     playing.
  * @return {!Promise} Promise to be fulfilled on success, or rejected on error.

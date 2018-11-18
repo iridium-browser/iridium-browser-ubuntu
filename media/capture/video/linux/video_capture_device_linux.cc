@@ -6,8 +6,7 @@
 
 #include <stddef.h>
 
-#include <list>
-#include <memory>
+#include <utility>
 
 #include "base/bind.h"
 #include "base/single_thread_task_runner.h"
@@ -22,6 +21,22 @@
 
 namespace media {
 
+namespace {
+
+int TranslatePowerLineFrequencyToV4L2(PowerLineFrequency frequency) {
+  switch (frequency) {
+    case PowerLineFrequency::FREQUENCY_50HZ:
+      return V4L2_CID_POWER_LINE_FREQUENCY_50HZ;
+    case PowerLineFrequency::FREQUENCY_60HZ:
+      return V4L2_CID_POWER_LINE_FREQUENCY_60HZ;
+    default:
+      // If we have no idea of the frequency, at least try and set it to AUTO.
+      return V4L2_CID_POWER_LINE_FREQUENCY_AUTO;
+  }
+}
+
+}  // namespace
+
 // Translates Video4Linux pixel formats to Chromium pixel formats.
 // static
 VideoPixelFormat VideoCaptureDeviceLinux::V4l2FourCcToChromiumPixelFormat(
@@ -31,14 +46,16 @@ VideoPixelFormat VideoCaptureDeviceLinux::V4l2FourCcToChromiumPixelFormat(
 
 // Gets a list of usable Four CC formats prioritized.
 // static
-std::list<uint32_t> VideoCaptureDeviceLinux::GetListOfUsableFourCCs(
+std::vector<uint32_t> VideoCaptureDeviceLinux::GetListOfUsableFourCCs(
     bool favour_mjpeg) {
   return V4L2CaptureDelegate::GetListOfUsableFourCcs(favour_mjpeg);
 }
 
 VideoCaptureDeviceLinux::VideoCaptureDeviceLinux(
+    scoped_refptr<V4L2CaptureDevice> v4l2,
     const VideoCaptureDeviceDescriptor& device_descriptor)
     : device_descriptor_(device_descriptor),
+      v4l2_(std::move(v4l2)),
       v4l2_thread_("V4L2CaptureThread") {}
 
 VideoCaptureDeviceLinux::~VideoCaptureDeviceLinux() {
@@ -59,9 +76,12 @@ void VideoCaptureDeviceLinux::AllocateAndStart(
   const int line_frequency =
       TranslatePowerLineFrequencyToV4L2(GetPowerLineFrequency(params));
   capture_impl_ = std::make_unique<V4L2CaptureDelegate>(
-      device_descriptor_, v4l2_thread_.task_runner(), line_frequency);
+      v4l2_.get(), device_descriptor_, v4l2_thread_.task_runner(),
+      line_frequency);
   if (!capture_impl_) {
-    client->OnError(FROM_HERE, "Failed to create VideoCaptureDelegate");
+    client->OnError(VideoCaptureError::
+                        kDeviceCaptureLinuxFailedToCreateVideoCaptureDelegate,
+                    FROM_HERE, "Failed to create VideoCaptureDelegate");
     return;
   }
   v4l2_thread_.task_runner()->PostTask(
@@ -72,8 +92,8 @@ void VideoCaptureDeviceLinux::AllocateAndStart(
                  params.requested_format.frame_size.height(),
                  params.requested_format.frame_rate, base::Passed(&client)));
 
-  for (const auto& request : photo_requests_queue_)
-    v4l2_thread_.task_runner()->PostTask(FROM_HERE, request);
+  for (auto& request : photo_requests_queue_)
+    v4l2_thread_.task_runner()->PostTask(FROM_HERE, std::move(request));
   photo_requests_queue_.clear();
 }
 
@@ -81,8 +101,8 @@ void VideoCaptureDeviceLinux::StopAndDeAllocate() {
   if (!v4l2_thread_.IsRunning())
     return;  // Wrong state.
   v4l2_thread_.task_runner()->PostTask(
-      FROM_HERE, base::Bind(&V4L2CaptureDelegate::StopAndDeAllocate,
-                            capture_impl_->GetWeakPtr()));
+      FROM_HERE, base::BindOnce(&V4L2CaptureDelegate::StopAndDeAllocate,
+                                capture_impl_->GetWeakPtr()));
   v4l2_thread_.task_runner()->DeleteSoon(FROM_HERE, capture_impl_.release());
   v4l2_thread_.Stop();
 
@@ -92,8 +112,8 @@ void VideoCaptureDeviceLinux::StopAndDeAllocate() {
 void VideoCaptureDeviceLinux::TakePhoto(TakePhotoCallback callback) {
   DCHECK(capture_impl_);
   auto functor =
-      base::Bind(&V4L2CaptureDelegate::TakePhoto, capture_impl_->GetWeakPtr(),
-                 base::Passed(&callback));
+      base::BindOnce(&V4L2CaptureDelegate::TakePhoto,
+                     capture_impl_->GetWeakPtr(), base::Passed(&callback));
   if (!v4l2_thread_.IsRunning()) {
     // We have to wait until we get the device AllocateAndStart()ed.
     photo_requests_queue_.push_back(std::move(functor));
@@ -104,8 +124,8 @@ void VideoCaptureDeviceLinux::TakePhoto(TakePhotoCallback callback) {
 
 void VideoCaptureDeviceLinux::GetPhotoState(GetPhotoStateCallback callback) {
   auto functor =
-      base::Bind(&V4L2CaptureDelegate::GetPhotoState,
-                 capture_impl_->GetWeakPtr(), base::Passed(&callback));
+      base::BindOnce(&V4L2CaptureDelegate::GetPhotoState,
+                     capture_impl_->GetWeakPtr(), base::Passed(&callback));
   if (!v4l2_thread_.IsRunning()) {
     // We have to wait until we get the device AllocateAndStart()ed.
     photo_requests_queue_.push_back(std::move(functor));
@@ -117,9 +137,9 @@ void VideoCaptureDeviceLinux::GetPhotoState(GetPhotoStateCallback callback) {
 void VideoCaptureDeviceLinux::SetPhotoOptions(
     mojom::PhotoSettingsPtr settings,
     SetPhotoOptionsCallback callback) {
-  auto functor = base::Bind(&V4L2CaptureDelegate::SetPhotoOptions,
-                            capture_impl_->GetWeakPtr(),
-                            base::Passed(&settings), base::Passed(&callback));
+  auto functor = base::BindOnce(
+      &V4L2CaptureDelegate::SetPhotoOptions, capture_impl_->GetWeakPtr(),
+      base::Passed(&settings), base::Passed(&callback));
   if (!v4l2_thread_.IsRunning()) {
     // We have to wait until we get the device AllocateAndStart()ed.
     photo_requests_queue_.push_back(std::move(functor));
@@ -131,22 +151,8 @@ void VideoCaptureDeviceLinux::SetPhotoOptions(
 void VideoCaptureDeviceLinux::SetRotation(int rotation) {
   if (v4l2_thread_.IsRunning()) {
     v4l2_thread_.task_runner()->PostTask(
-        FROM_HERE, base::Bind(&V4L2CaptureDelegate::SetRotation,
-                              capture_impl_->GetWeakPtr(), rotation));
-  }
-}
-
-// static
-int VideoCaptureDeviceLinux::TranslatePowerLineFrequencyToV4L2(
-    PowerLineFrequency frequency) {
-  switch (frequency) {
-    case PowerLineFrequency::FREQUENCY_50HZ:
-      return V4L2_CID_POWER_LINE_FREQUENCY_50HZ;
-    case PowerLineFrequency::FREQUENCY_60HZ:
-      return V4L2_CID_POWER_LINE_FREQUENCY_60HZ;
-    default:
-      // If we have no idea of the frequency, at least try and set it to AUTO.
-      return V4L2_CID_POWER_LINE_FREQUENCY_AUTO;
+        FROM_HERE, base::BindOnce(&V4L2CaptureDelegate::SetRotation,
+                                  capture_impl_->GetWeakPtr(), rotation));
   }
 }
 

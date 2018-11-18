@@ -9,9 +9,10 @@
 #include <string>
 #include <vector>
 
+#include "base/optional.h"
 #include "content/browser/background_fetch/background_fetch.pb.h"
 #include "content/browser/background_fetch/storage/database_task.h"
-#include "content/common/service_worker/service_worker_status_code.h"
+#include "third_party/blink/public/common/service_worker/service_worker_status_code.h"
 
 namespace content {
 
@@ -23,9 +24,10 @@ class UpdateRegistrationUITask : public DatabaseTask {
   using UpdateRegistrationUICallback =
       base::OnceCallback<void(blink::mojom::BackgroundFetchError)>;
 
-  UpdateRegistrationUITask(BackgroundFetchDataManager* data_manager,
+  UpdateRegistrationUITask(DatabaseTaskHost* host,
                            const BackgroundFetchRegistrationId& registration_id,
-                           const std::string& updated_title,
+                           const base::Optional<std::string>& title,
+                           const base::Optional<SkBitmap>& icon,
                            UpdateRegistrationUICallback callback);
 
   ~UpdateRegistrationUITask() override;
@@ -33,15 +35,24 @@ class UpdateRegistrationUITask : public DatabaseTask {
   void Start() override;
 
  private:
-  void DidGetMetadata(const std::vector<std::string>& data,
-                      ServiceWorkerStatusCode status);
+  void DidGetUIOptions(const std::vector<std::string>& data,
+                       blink::ServiceWorkerStatusCode status);
 
-  void UpdateUI(const std::string& serialized_metadata_proto);
+  void DidSerializeIcon(std::string serialized_icon);
 
-  void DidUpdateUI(ServiceWorkerStatusCode status);
+  void StoreUIOptions();
+
+  void DidUpdateUIOptions(blink::ServiceWorkerStatusCode status);
+
+  void FinishWithError(blink::mojom::BackgroundFetchError error) override;
+
+  std::string HistogramName() const override;
 
   BackgroundFetchRegistrationId registration_id_;
-  std::string updated_title_;
+  base::Optional<std::string> title_;
+  base::Optional<SkBitmap> icon_;
+
+  proto::BackgroundFetchUIOptions ui_options_;
 
   UpdateRegistrationUICallback callback_;
 

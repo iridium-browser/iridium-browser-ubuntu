@@ -10,12 +10,13 @@ import webtest
 
 from google.appengine.ext import ndb
 
-from dashboard import layered_cache
 from dashboard import list_tests
 from dashboard.common import datastore_hooks
+from dashboard.common import layered_cache
 from dashboard.common import testing_common
 from dashboard.common import utils
 from dashboard.models import graph_data
+from dashboard.models import sheriff
 
 
 class ListTestsTest(testing_common.TestCase):
@@ -58,9 +59,6 @@ class ListTestsTest(testing_common.TestCase):
                 }
             },
         })
-
-  def tearDown(self):
-    self.testbed.deactivate()
 
   def testPost_GetTestsForTestPath_Selected_Invalid(self):
     self._AddSampleData()
@@ -473,16 +471,15 @@ class ListTestsTest(testing_common.TestCase):
     self.assertEqual(['Chromium/mac/dromaeo/dom'], json.loads(response.body))
 
   def testPost_GetTestsForTestPath_Selected_Core_MonitoredChildWithRows(self):
+    yahoo_path = 'Chromium/win7/scrolling/commit_time/www.yahoo.com'
+    sheriff.Sheriff(
+        id='my_sheriff1', email='a@chromium.org', patterns=[yahoo_path]).put()
+
     self._AddSampleData()
 
-    yahoo_path = 'Chromium/win7/scrolling/commit_time/www.yahoo.com'
     yahoo = graph_data.TestMetadata.get_by_id(yahoo_path)
     yahoo.has_rows = True
     yahoo.put()
-
-    suite = graph_data.TestMetadata.get_by_id('Chromium/win7/scrolling')
-    suite.monitored = [utils.TestKey(yahoo_path)]
-    suite.put()
 
     response = self.testapp.post('/list_tests', {
         'type': 'test_path_dict',
@@ -498,11 +495,6 @@ class ListTestsTest(testing_common.TestCase):
 
   def testPost_GetTestsForTestPath_Selected_Core_MonitoredChildNoRows(self):
     self._AddSampleData()
-
-    yahoo_path = 'Chromium/win7/scrolling/commit_time/www.yahoo.com'
-    suite = graph_data.TestMetadata.get_by_id('Chromium/win7/scrolling')
-    suite.monitored = [utils.TestKey(yahoo_path)]
-    suite.put()
 
     response = self.testapp.post('/list_tests', {
         'type': 'test_path_dict',
@@ -534,6 +526,10 @@ class ListTestsTest(testing_common.TestCase):
     self.assertEqual(expected, json.loads(response.body))
 
   def testPost_GetTestsForTestPath_Selected_Core_AllHaveRows(self):
+    yahoo_path = 'Chromium/win7/scrolling/commit_time/www.yahoo.com'
+    sheriff.Sheriff(
+        id='my_sheriff1', email='a@chromium.org', patterns=[yahoo_path]).put()
+
     self._AddSampleData()
 
     core = graph_data.TestMetadata.get_by_id(
@@ -541,14 +537,9 @@ class ListTestsTest(testing_common.TestCase):
     core.has_rows = True
     core.put()
 
-    yahoo_path = 'Chromium/win7/scrolling/commit_time/www.yahoo.com'
     yahoo = graph_data.TestMetadata.get_by_id(yahoo_path)
     yahoo.has_rows = True
     yahoo.put()
-
-    suite = graph_data.TestMetadata.get_by_id('Chromium/win7/scrolling')
-    suite.monitored = [utils.TestKey(yahoo_path)]
-    suite.put()
 
     response = self.testapp.post('/list_tests', {
         'type': 'test_path_dict',
@@ -673,6 +664,10 @@ class ListTestsTest(testing_common.TestCase):
     self.assertEqual(expected, json.loads(response.body))
 
   def testPost_GetTestsForTestPath_Unselected_Core_Unmonitored(self):
+    yahoo_path = 'Chromium/win7/scrolling/commit_time/www.yahoo.com'
+    sheriff.Sheriff(
+        id='my_sheriff1', email='a@chromium.org', patterns=[yahoo_path]).put()
+
     self._AddSampleData()
 
     cnn = graph_data.TestMetadata.get_by_id(
@@ -680,14 +675,9 @@ class ListTestsTest(testing_common.TestCase):
     cnn.has_rows = True
     cnn.put()
 
-    yahoo_path = 'Chromium/win7/scrolling/commit_time/www.yahoo.com'
     yahoo = graph_data.TestMetadata.get_by_id(yahoo_path)
     yahoo.has_rows = True
     yahoo.put()
-
-    suite = graph_data.TestMetadata.get_by_id('Chromium/win7/scrolling')
-    suite.monitored = [utils.TestKey(yahoo_path)]
-    suite.put()
 
     response = self.testapp.post('/list_tests', {
         'type': 'test_path_dict',

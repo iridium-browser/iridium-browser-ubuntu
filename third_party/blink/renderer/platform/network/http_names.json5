@@ -51,6 +51,7 @@
     "Pragma",
     "Purpose",
     "Range",
+    // TODO(domfarolino): Remove "Referer" as part of https://crbug.com/850813.
     "Referer",
     "Referrer-Policy",
     "Refresh",
@@ -65,7 +66,6 @@
     "Vary",
     "X-Content-Type-Options",
     "X-DNS-Prefetch-Control",
-    "X-DevTools-Emulate-Network-Conditions-Client-Id",
     "X-Frame-Options",
     "X-SourceMap",
     "X-XSS-Protection",

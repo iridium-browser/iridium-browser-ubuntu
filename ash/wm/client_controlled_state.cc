@@ -5,12 +5,12 @@
 #include "ash/wm/client_controlled_state.h"
 
 #include "ash/public/cpp/shell_window_ids.h"
+#include "ash/public/cpp/window_animation_types.h"
 #include "ash/public/cpp/window_state_type.h"
 #include "ash/root_window_controller.h"
 #include "ash/screen_util.h"
 #include "ash/shell.h"
 #include "ash/wm/screen_pinning_controller.h"
-#include "ash/wm/window_animation_types.h"
 #include "ash/wm/window_parenting_utils.h"
 #include "ash/wm/window_positioning_utils.h"
 #include "ash/wm/window_state.h"
@@ -35,11 +35,10 @@ constexpr int kClientControlledWindowMinimumOnScreenArea =
 
 // static
 void ClientControlledState::AdjustBoundsForMinimumWindowVisibility(
-    aura::Window* window,
+    const gfx::Rect& display_bounds,
     gfx::Rect* bounds) {
   AdjustBoundsToEnsureWindowVisibility(
-      window->GetRootWindow()->bounds(),
-      kClientControlledWindowMinimumOnScreenArea,
+      display_bounds, kClientControlledWindowMinimumOnScreenArea,
       kClientControlledWindowMinimumOnScreenArea, bounds);
 }
 
@@ -135,7 +134,8 @@ void ClientControlledState::HandleWorkspaceEvents(WindowState* window_state,
   if (event->type() == WM_EVENT_ADDED_TO_WORKSPACE) {
     aura::Window* window = window_state->window();
     gfx::Rect bounds = window->bounds();
-    AdjustBoundsForMinimumWindowVisibility(window, &bounds);
+    AdjustBoundsForMinimumWindowVisibility(window->GetRootWindow()->bounds(),
+                                           &bounds);
 
     if (window->bounds() != bounds)
       window_state->SetBoundsConstrained(bounds);
@@ -205,9 +205,8 @@ void ClientControlledState::HandleBoundsEvents(WindowState* window_state,
             break;
         }
         bounds_change_animation_type_ = kAnimationNone;
-      } else if (!window_state->IsMaximizedOrFullscreenOrPinned()) {
-        // In maximied, fullscreen, or pinned state, it should ignore
-        // the SetBounds from window manager or user.
+      } else if (!window_state->IsPinned()) {
+        // TODO(oshima): Define behavior for pinned app.
         delegate_->HandleBoundsRequest(window_state,
                                        window_state->GetStateType(), bounds);
       }

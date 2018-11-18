@@ -4,6 +4,7 @@
 <link rel="import" href="chrome://resources/cr_elements/cr_lazy_render/cr_lazy_render.html">
 <link rel="import" href="chrome://resources/cr_elements/cr_toolbar/cr_toolbar.html">
 <link rel="import" href="chrome://resources/cr_elements/hidden_style_css.html">
+<link rel="import" href="chrome://resources/cr_elements/cr_view_manager/cr_view_manager.html">
 <link rel="import" href="chrome://resources/html/assert.html">
 <link rel="import" href="chrome://resources/html/cr.html">
 <link rel="import" href="detail_view.html">
@@ -16,11 +17,9 @@
 <link rel="import" href="load_error.html">
 <link rel="import" href="navigation_helper.html">
 <link rel="import" href="options_dialog.html">
-<link rel="import" href="pack_dialog.html">
 <link rel="import" href="service.html">
 <link rel="import" href="sidebar.html">
 <link rel="import" href="toolbar.html">
-<link rel="import" href="view_manager.html">
 
 <if expr="chromeos">
 <link rel="import" href="kiosk_browser_proxy.html">
@@ -31,6 +30,7 @@
   <template>
     <style include="cr-hidden-style">
       :host {
+        color: var(--cr-primary-text-color);
         display: flex;
         flex-direction: column;
         height: 100%;
@@ -56,13 +56,11 @@
     </style>
     <extensions-drop-overlay drag-enabled="[[inDevMode]]">
     </extensions-drop-overlay>
-    <extensions-toolbar is-guest="[[isGuest_]]"
-        in-dev-mode="[[inDevMode]]"
+    <extensions-toolbar in-dev-mode="[[inDevMode]]"
         can-load-unpacked="[[canLoadUnpacked]]"
         is-supervised="[[isSupervised_]]"
         dev-mode-controlled-by-policy="[[devModeControlledByPolicy]]"
-        on-pack-tap="onPackTap_" delegate="[[delegate]]"
-        on-cr-toolbar-menu-tap="onMenuButtonTap_"
+        delegate="[[delegate]]" on-cr-toolbar-menu-tap="onMenuButtonTap_"
         on-search-changed="onFilterChanged_"
 <if expr="chromeos">
         on-kiosk-tap="onKioskTap_"
@@ -80,11 +78,11 @@
         </div>
       </cr-drawer>
     </template>
-    <extensions-view-manager id="viewManager" role="main">
-      <extensions-item-list id="items-list" is-guest="[[isGuest_]]"
-          delegate="[[delegate]]" in-dev-mode="[[inDevMode]]"
-          filter="[[filter]]" hidden$="[[!didInitPage_]]" slot="view"
-          apps="[[apps_]]" extensions="[[extensions_]]"
+    <cr-view-manager id="viewManager" role="main">
+      <extensions-item-list id="items-list" delegate="[[delegate]]"
+          in-dev-mode="[[inDevMode]]" filter="[[filter]]"
+          hidden$="[[!didInitPage_]]" slot="view" apps="[[apps_]]"
+          extensions="[[extensions_]]"
           on-show-install-warnings="onShowInstallWarnings_">
       </extensions-item-list>
       <cr-lazy-render id="details-view">
@@ -106,20 +104,15 @@
       <cr-lazy-render id="error-page">
         <template>
           <extensions-error-page data="[[errorPageItem_]]" slot="view"
-              delegate="[[delegate]]" slot="view">
+              delegate="[[delegate]]" in-dev-mode="[[inDevMode]]">
           </extensions-error-page>
         </template>
       </cr-lazy-render>
-    </extensions-view-manager>
+    </cr-view-manager>
     <template is="dom-if" if="[[showOptionsDialog_]]" restamp>
       <extensions-options-dialog id="options-dialog"
           on-close="onOptionsDialogClose_">
       </extensions-options-dialog>
-    </template>
-    <template is="dom-if" if="[[showPackDialog_]]" restamp>
-      <extensions-pack-dialog id="pack-dialog" delegate="[[delegate]]"
-          on-close="onPackDialogClose_">
-      </extensions-pack-dialog>
     </template>
     <template is="dom-if" if="[[showLoadErrorDialog_]]" restamp>
       <extensions-load-error id="load-error" delegate="[[delegate]]"

@@ -9,9 +9,11 @@
 
 #include "base/process/process_iterator.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/post_task.h"
 #include "base/time/time.h"
 #include "content/public/browser/browser_child_process_host.h"
 #include "content/public/browser/browser_child_process_host_iterator.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_data.h"
 #include "content/public/browser/render_process_host.h"
@@ -71,9 +73,9 @@ void GatherMetricsForRenderProcess(content::RenderProcessHost* host,
 
 }  // namespace
 
-PerformanceMonitor::PerformanceMonitor() {}
+PerformanceMonitor::PerformanceMonitor() = default;
 
-PerformanceMonitor::~PerformanceMonitor() {}
+PerformanceMonitor::~PerformanceMonitor() = default;
 
 // static
 PerformanceMonitor* PerformanceMonitor::GetInstance() {
@@ -102,14 +104,14 @@ void PerformanceMonitor::GatherMetricsMapOnUIThread() {
     content::RenderProcessHost* host = rph_iter.GetCurrentValue();
     ProcessMetricsMetadata data;
     data.process_type = content::PROCESS_TYPE_RENDERER;
-    data.handle = host->GetHandle();
+    data.handle = host->GetProcess().Handle();
 
     GatherMetricsForRenderProcess(host, &data);
     MarkProcessAsAlive(data, current_update_sequence);
   }
 
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::IO},
       base::BindOnce(&PerformanceMonitor::GatherMetricsMapOnIOThread,
                      base::Unretained(this), current_update_sequence));
 }
@@ -125,7 +127,7 @@ void PerformanceMonitor::MarkProcessAsAlive(
     return;
   }
 
-  MetricsMap::iterator process_metrics_iter = metrics_map_.find(handle);
+  auto process_metrics_iter = metrics_map_.find(handle);
   if (process_metrics_iter == metrics_map_.end()) {
     // If we're not already watching the process, let's initialize it.
     metrics_map_[handle] = std::make_unique<ProcessMetricsHistory>();
@@ -146,9 +148,11 @@ void PerformanceMonitor::GatherMetricsMapOnIOThread(
 
   // Find all child processes (does not include renderers), which has to be
   // done on the IO thread.
+  // This creates a race on usage of the child process handles on Windows.
+  // See https://crbug.com/821453.
   for (content::BrowserChildProcessHostIterator iter; !iter.Done(); ++iter) {
     ProcessMetricsMetadata child_process_data;
-    child_process_data.handle = iter.GetData().handle;
+    child_process_data.handle = iter.GetData().GetHandle();
     child_process_data.process_type = iter.GetData().process_type;
 
     if (iter.GetData().name == base::ASCIIToUTF16(content::kFlashPluginName)) {
@@ -164,8 +168,8 @@ void PerformanceMonitor::GatherMetricsMapOnIOThread(
   browser_process_data.handle = base::GetCurrentProcessHandle();
   process_data_list->push_back(browser_process_data);
 
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::UI},
       base::BindOnce(&PerformanceMonitor::MarkProcessesAsAliveOnUIThread,
                      base::Unretained(this), std::move(process_data_list),
                      current_update_sequence));
@@ -178,8 +182,8 @@ void PerformanceMonitor::MarkProcessesAsAliveOnUIThread(
   for (const ProcessMetricsMetadata& data : *process_data_list)
     MarkProcessAsAlive(data, current_update_sequence);
 
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::IO},
       base::BindOnce(&PerformanceMonitor::UpdateMetricsOnIOThread,
                      base::Unretained(this), current_update_sequence));
 }
@@ -187,7 +191,7 @@ void PerformanceMonitor::MarkProcessesAsAliveOnUIThread(
 void PerformanceMonitor::UpdateMetricsOnIOThread(int current_update_sequence) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   // Update metrics for all watched processes; remove dead entries from the map.
-  MetricsMap::iterator iter = metrics_map_.begin();
+  auto iter = metrics_map_.begin();
   while (iter != metrics_map_.end()) {
     ProcessMetricsHistory* process_metrics = iter->second.get();
     if (process_metrics->last_update_sequence() != current_update_sequence) {
@@ -199,8 +203,8 @@ void PerformanceMonitor::UpdateMetricsOnIOThread(int current_update_sequence) {
     }
   }
 
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::UI},
       base::BindOnce(&PerformanceMonitor::RunTriggersUIThread,
                      base::Unretained(this)));
 }

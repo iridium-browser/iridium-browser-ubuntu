@@ -26,12 +26,10 @@
 
 #include "third_party/blink/renderer/core/html/forms/html_text_area_element.h"
 
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
 #include "third_party/blink/renderer/core/css/style_change_reason.h"
 #include "third_party/blink/renderer/core/css_value_keywords.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/dom/text.h"
 #include "third_party/blink/renderer/core/editing/frame_selection.h"
@@ -48,6 +46,7 @@
 #include "third_party/blink/renderer/core/layout/layout_text_control_multi_line.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/page/page.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/text/platform_locale.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
@@ -131,12 +130,12 @@ void HTMLTextAreaElement::CollectStyleForPresentationAttribute(
     if (ShouldWrapText()) {
       AddPropertyToPresentationAttributeStyle(style, CSSPropertyWhiteSpace,
                                               CSSValuePreWrap);
-      AddPropertyToPresentationAttributeStyle(style, CSSPropertyWordWrap,
+      AddPropertyToPresentationAttributeStyle(style, CSSPropertyOverflowWrap,
                                               CSSValueBreakWord);
     } else {
       AddPropertyToPresentationAttributeStyle(style, CSSPropertyWhiteSpace,
                                               CSSValuePre);
-      AddPropertyToPresentationAttributeStyle(style, CSSPropertyWordWrap,
+      AddPropertyToPresentationAttributeStyle(style, CSSPropertyOverflowWrap,
                                               CSSValueNormal);
     }
   } else {
@@ -221,11 +220,11 @@ void HTMLTextAreaElement::AppendToFormData(FormData& form_data) {
 
   const String& text =
       (wrap_ == kHardWrap) ? ValueWithHardLineBreaks() : value();
-  form_data.append(GetName(), text);
+  form_data.AppendFromElement(GetName(), text);
 
   const AtomicString& dirname_attr_value = FastGetAttribute(dirnameAttr);
   if (!dirname_attr_value.IsNull())
-    form_data.append(dirname_attr_value, DirectionForFormData());
+    form_data.AppendFromElement(dirname_attr_value, DirectionForFormData());
 }
 
 void HTMLTextAreaElement::ResetImpl() {
@@ -242,7 +241,7 @@ bool HTMLTextAreaElement::IsKeyboardFocusable() const {
   return IsFocusable();
 }
 
-bool HTMLTextAreaElement::ShouldShowFocusRingOnMouseFocus() const {
+bool HTMLTextAreaElement::MayTriggerVirtualKeyboard() const {
   return true;
 }
 
@@ -263,13 +262,15 @@ void HTMLTextAreaElement::UpdateFocusAppearanceWithOptions(
   }
 }
 
-void HTMLTextAreaElement::DefaultEventHandler(Event* event) {
-  if (GetLayoutObject() && (event->IsMouseEvent() || event->IsDragEvent() ||
-                            event->HasInterface(EventNames::WheelEvent) ||
-                            event->type() == EventTypeNames::blur))
+void HTMLTextAreaElement::DefaultEventHandler(Event& event) {
+  if (GetLayoutObject() && (event.IsMouseEvent() || event.IsDragEvent() ||
+                            event.HasInterface(EventNames::WheelEvent) ||
+                            event.type() == EventTypeNames::blur)) {
     ForwardEvent(event);
-  else if (GetLayoutObject() && event->IsBeforeTextInsertedEvent())
-    HandleBeforeTextInsertedEvent(static_cast<BeforeTextInsertedEvent*>(event));
+  } else if (GetLayoutObject() && event.IsBeforeTextInsertedEvent()) {
+    HandleBeforeTextInsertedEvent(
+        static_cast<BeforeTextInsertedEvent*>(&event));
+  }
 
   TextControlElement::DefaultEventHandler(event);
 }
@@ -292,7 +293,7 @@ void HTMLTextAreaElement::SubtreeHasChanged() {
   UpdateValue();
   CheckIfValueWasReverted(value());
   SetNeedsValidityCheck();
-  SetAutofilled(false);
+  SetAutofillState(WebAutofillState::kNotFilled);
   UpdatePlaceholderVisibility();
 
   if (!IsFocused())
@@ -393,7 +394,7 @@ void HTMLTextAreaElement::SetValueCommon(
     TextControlSetValueSelection selection) {
   // Code elsewhere normalizes line endings added by the user via the keyboard
   // or pasting.  We normalize line endings coming from JavaScript here.
-  String normalized_value = new_value.IsNull() ? "" : new_value;
+  String normalized_value = new_value;
   normalized_value.Replace("\r\n", "\n");
   normalized_value.Replace('\r', '\n');
 

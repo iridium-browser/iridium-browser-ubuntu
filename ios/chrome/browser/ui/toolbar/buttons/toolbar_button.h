@@ -10,9 +10,15 @@
 #import "ios/chrome/browser/ui/toolbar/buttons/toolbar_component_options.h"
 #import "ios/chrome/browser/ui/util/named_guide.h"
 
+@class ToolbarConfiguration;
+
+const NSUInteger ControlStateSpotlighted = 0x00010000;
+
 // UIButton subclass used as a Toolbar component.
 @interface ToolbarButton : UIButton
 
+// Configuration object used to get colors.
+@property(nonatomic, weak) ToolbarConfiguration* configuration;
 // Bitmask used for SizeClass visibility.
 @property(nonatomic, assign) ToolbarComponentVisibility visibilityMask;
 // Returns true if the ToolbarButton should be hidden in the current SizeClass.
@@ -26,6 +32,14 @@
 // rotations. Any view constrained to them is expected to be dismissed on such
 // events.
 @property(nonatomic, strong) GuideName* guideName;
+// Whether this button is spotlighted, having a light gray background. This
+// state should not be used in the same time as the selected state.
+@property(nonatomic, assign) BOOL spotlighted;
+// View used to display the view used for the spotlight effect.
+@property(nonatomic, strong) UIView* spotlightView;
+// Whether this button is dimmed. When the button is dimmed, its tintColor is
+// changed to have a lower alpha.
+@property(nonatomic, assign) BOOL dimmed;
 
 // Returns a ToolbarButton using the three images parameters for their
 // respective state.
@@ -41,6 +55,11 @@
 // afterwards it calls setHiddenForCurrentStateAndSizeClass if needed.
 - (void)updateHiddenInCurrentSizeClass;
 
+@end
+
+@interface ToolbarButton (Subclassing)
+// Creates the view used for the spotlight effect.
+- (void)configureSpotlightView;
 @end
 
 #endif  // IOS_CHROME_BROWSER_UI_TOOLBAR_BUTTONS_TOOLBAR_BUTTON_H_

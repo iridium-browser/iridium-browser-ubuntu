@@ -72,6 +72,11 @@
 #include "../internal.h"
 #include "../test/test_util.h"
 
+#if defined(OPENSSL_THREADS)
+#include <thread>
+#include <vector>
+#endif
+
 
 // kPlaintext is a sample plaintext.
 static const uint8_t kPlaintext[] = "\x54\x85\x9b\x34\x2c\x49\xea\x2a";
@@ -501,12 +506,12 @@ TEST(RSATest, GenerateFIPS) {
   ERR_clear_error();
 
   // Test that we can generate 2048-bit and 3072-bit RSA keys.
-  EXPECT_TRUE(RSA_generate_key_fips(rsa.get(), 2048, nullptr));
+  ASSERT_TRUE(RSA_generate_key_fips(rsa.get(), 2048, nullptr));
   EXPECT_EQ(2048u, BN_num_bits(rsa->n));
 
   rsa.reset(RSA_new());
   ASSERT_TRUE(rsa);
-  EXPECT_TRUE(RSA_generate_key_fips(rsa.get(), 3072, nullptr));
+  ASSERT_TRUE(RSA_generate_key_fips(rsa.get(), 3072, nullptr));
   EXPECT_EQ(3072u, BN_num_bits(rsa->n));
 }
 
@@ -653,22 +658,22 @@ TEST(RSATest, RoundKeyLengths) {
 
   bssl::UniquePtr<RSA> rsa(RSA_new());
   ASSERT_TRUE(rsa);
-  EXPECT_TRUE(RSA_generate_key_ex(rsa.get(), 1025, e.get(), nullptr));
+  ASSERT_TRUE(RSA_generate_key_ex(rsa.get(), 1025, e.get(), nullptr));
   EXPECT_EQ(1024u, BN_num_bits(rsa->n));
 
   rsa.reset(RSA_new());
   ASSERT_TRUE(rsa);
-  EXPECT_TRUE(RSA_generate_key_ex(rsa.get(), 1027, e.get(), nullptr));
+  ASSERT_TRUE(RSA_generate_key_ex(rsa.get(), 1027, e.get(), nullptr));
   EXPECT_EQ(1024u, BN_num_bits(rsa->n));
 
   rsa.reset(RSA_new());
   ASSERT_TRUE(rsa);
-  EXPECT_TRUE(RSA_generate_key_ex(rsa.get(), 1151, e.get(), nullptr));
+  ASSERT_TRUE(RSA_generate_key_ex(rsa.get(), 1151, e.get(), nullptr));
   EXPECT_EQ(1024u, BN_num_bits(rsa->n));
 
   rsa.reset(RSA_new());
   ASSERT_TRUE(rsa);
-  EXPECT_TRUE(RSA_generate_key_ex(rsa.get(), 1152, e.get(), nullptr));
+  ASSERT_TRUE(RSA_generate_key_ex(rsa.get(), 1152, e.get(), nullptr));
   EXPECT_EQ(1152u, BN_num_bits(rsa->n));
 }
 
@@ -896,6 +901,123 @@ TEST(RSATest, CheckKey) {
   ASSERT_TRUE(BN_sub(rsa->iqmp, rsa->iqmp, rsa->p));
 }
 
+TEST(RSATest, KeygenFail) {
+  bssl::UniquePtr<RSA> rsa(RSA_new());
+  ASSERT_TRUE(rsa);
+
+  // Cause RSA key generation after a prime has been generated, to test that
+  // |rsa| is left alone.
+  BN_GENCB cb;
+  BN_GENCB_set(&cb,
+               [](int event, int, BN_GENCB *) -> int { return event != 3; },
+               nullptr);
+
+  bssl::UniquePtr<BIGNUM> e(BN_new());
+  ASSERT_TRUE(e);
+  ASSERT_TRUE(BN_set_word(e.get(), RSA_F4));
+
+  // Key generation should fail.
+  EXPECT_FALSE(RSA_generate_key_ex(rsa.get(), 2048, e.get(), &cb));
+
+  // Failed key generations do not leave garbage in |rsa|.
+  EXPECT_FALSE(rsa->n);
+  EXPECT_FALSE(rsa->e);
+  EXPECT_FALSE(rsa->d);
+  EXPECT_FALSE(rsa->p);
+  EXPECT_FALSE(rsa->q);
+  EXPECT_FALSE(rsa->dmp1);
+  EXPECT_FALSE(rsa->dmq1);
+  EXPECT_FALSE(rsa->iqmp);
+  EXPECT_FALSE(rsa->mont_n);
+  EXPECT_FALSE(rsa->mont_p);
+  EXPECT_FALSE(rsa->mont_q);
+  EXPECT_FALSE(rsa->d_fixed);
+  EXPECT_FALSE(rsa->dmp1_fixed);
+  EXPECT_FALSE(rsa->dmq1_fixed);
+  EXPECT_FALSE(rsa->inv_small_mod_large_mont);
+  EXPECT_FALSE(rsa->private_key_frozen);
+
+  // Failed key generations leave the previous contents alone.
+  EXPECT_TRUE(RSA_generate_key_ex(rsa.get(), 2048, e.get(), nullptr));
+  uint8_t *der;
+  size_t der_len;
+  ASSERT_TRUE(RSA_private_key_to_bytes(&der, &der_len, rsa.get()));
+  bssl::UniquePtr<uint8_t> delete_der(der);
+
+  EXPECT_FALSE(RSA_generate_key_ex(rsa.get(), 2048, e.get(), &cb));
+
+  uint8_t *der2;
+  size_t der2_len;
+  ASSERT_TRUE(RSA_private_key_to_bytes(&der2, &der2_len, rsa.get()));
+  bssl::UniquePtr<uint8_t> delete_der2(der2);
+  EXPECT_EQ(Bytes(der, der_len), Bytes(der2, der2_len));
+
+  // Generating a key over an existing key works, despite any cached state.
+  EXPECT_TRUE(RSA_generate_key_ex(rsa.get(), 2048, e.get(), nullptr));
+  EXPECT_TRUE(RSA_check_key(rsa.get()));
+  uint8_t *der3;
+  size_t der3_len;
+  ASSERT_TRUE(RSA_private_key_to_bytes(&der3, &der3_len, rsa.get()));
+  bssl::UniquePtr<uint8_t> delete_der3(der3);
+  EXPECT_NE(Bytes(der, der_len), Bytes(der3, der3_len));
+}
+
+TEST(RSATest, KeygenFailOnce) {
+  bssl::UniquePtr<RSA> rsa(RSA_new());
+  ASSERT_TRUE(rsa);
+
+  // Cause only the first iteration of RSA key generation to fail.
+  bool failed = false;
+  BN_GENCB cb;
+  BN_GENCB_set(&cb,
+               [](int event, int n, BN_GENCB *cb_ptr) -> int {
+                 bool *failed_ptr = static_cast<bool *>(cb_ptr->arg);
+                 if (*failed_ptr) {
+                   ADD_FAILURE() << "Callback called multiple times.";
+                   return 1;
+                 }
+                 *failed_ptr = true;
+                 return 0;
+               },
+               &failed);
+
+  // Although key generation internally retries, the external behavior of
+  // |BN_GENCB| is preserved.
+  bssl::UniquePtr<BIGNUM> e(BN_new());
+  ASSERT_TRUE(e);
+  ASSERT_TRUE(BN_set_word(e.get(), RSA_F4));
+  EXPECT_FALSE(RSA_generate_key_ex(rsa.get(), 2048, e.get(), &cb));
+}
+
+TEST(RSATest, KeygenInternalRetry) {
+  bssl::UniquePtr<RSA> rsa(RSA_new());
+  ASSERT_TRUE(rsa);
+
+  // Simulate one internal attempt at key generation failing.
+  bool failed = false;
+  BN_GENCB cb;
+  BN_GENCB_set(&cb,
+               [](int event, int n, BN_GENCB *cb_ptr) -> int {
+                 bool *failed_ptr = static_cast<bool *>(cb_ptr->arg);
+                 if (*failed_ptr) {
+                   return 1;
+                 }
+                 *failed_ptr = true;
+                 // This test does not test any public API behavior. It is just
+                 // a hack to exercise the retry codepath and make sure it
+                 // works.
+                 OPENSSL_PUT_ERROR(RSA, RSA_R_TOO_MANY_ITERATIONS);
+                 return 0;
+               },
+               &failed);
+
+  // Key generation internally retries on RSA_R_TOO_MANY_ITERATIONS.
+  bssl::UniquePtr<BIGNUM> e(BN_new());
+  ASSERT_TRUE(e);
+  ASSERT_TRUE(BN_set_word(e.get(), RSA_F4));
+  EXPECT_TRUE(RSA_generate_key_ex(rsa.get(), 2048, e.get(), &cb));
+}
+
 #if !defined(BORINGSSL_SHARED_LIBRARY)
 TEST(RSATest, SqrtTwo) {
   bssl::UniquePtr<BIGNUM> sqrt(BN_new()), pow2(BN_new());
@@ -925,3 +1047,73 @@ TEST(RSATest, SqrtTwo) {
   EXPECT_EQ(3072u / 2u, bits);
 }
 #endif  // !BORINGSSL_SHARED_LIBRARY
+
+#if defined(OPENSSL_THREADS)
+TEST(RSATest, Threads) {
+  bssl::UniquePtr<RSA> rsa_template(
+      RSA_private_key_from_bytes(kKey1, sizeof(kKey1) - 1));
+  ASSERT_TRUE(rsa_template);
+
+  const uint8_t kDummyHash[32] = {0};
+  uint8_t sig[256];
+  unsigned sig_len = sizeof(sig);
+  ASSERT_LE(RSA_size(rsa_template.get()), sizeof(sig));
+  EXPECT_TRUE(RSA_sign(NID_sha256, kDummyHash, sizeof(kDummyHash), sig,
+                       &sig_len, rsa_template.get()));
+
+  // RSA keys may be assembled piece-meal and then used in parallel between
+  // threads, which requires internal locking to create some derived properties.
+  bssl::UniquePtr<RSA> rsa(RSA_new());
+  rsa->n = BN_dup(rsa_template->n);
+  ASSERT_TRUE(rsa->n);
+  rsa->e = BN_dup(rsa_template->e);
+  ASSERT_TRUE(rsa->e);
+  rsa->d = BN_dup(rsa_template->d);
+  ASSERT_TRUE(rsa->d);
+  rsa->p = BN_dup(rsa_template->p);
+  ASSERT_TRUE(rsa->p);
+  rsa->q = BN_dup(rsa_template->q);
+  ASSERT_TRUE(rsa->q);
+  rsa->dmp1 = BN_dup(rsa_template->dmp1);
+  ASSERT_TRUE(rsa->dmp1);
+  rsa->dmq1 = BN_dup(rsa_template->dmq1);
+  ASSERT_TRUE(rsa->dmq1);
+  rsa->iqmp = BN_dup(rsa_template->iqmp);
+  ASSERT_TRUE(rsa->iqmp);
+
+  // Each of these operations must be safe to do concurrently on different
+  // threads.
+  auto raw_access = [&] { EXPECT_EQ(0, BN_cmp(rsa->d, rsa_template->d)); };
+  auto getter = [&] {
+    const BIGNUM *d;
+    RSA_get0_key(rsa.get(), nullptr, nullptr, &d);
+    EXPECT_EQ(0, BN_cmp(d, rsa_template->d));
+  };
+  auto sign = [&] {
+    uint8_t sig2[256];
+    unsigned sig2_len = sizeof(sig2);
+    ASSERT_LE(RSA_size(rsa.get()), sizeof(sig2));
+    EXPECT_TRUE(RSA_sign(NID_sha256, kDummyHash, sizeof(kDummyHash), sig2,
+                         &sig2_len, rsa.get()));
+    // RSASSA-PKCS1-v1_5 is deterministic.
+    EXPECT_EQ(Bytes(sig, sig_len), Bytes(sig2, sig2_len));
+  };
+  auto verify = [&] {
+    EXPECT_TRUE(RSA_verify(NID_sha256, kDummyHash, sizeof(kDummyHash), sig,
+                           sig_len, rsa.get()));
+  };
+
+  std::vector<std::thread> threads;
+  threads.emplace_back(raw_access);
+  threads.emplace_back(raw_access);
+  threads.emplace_back(getter);
+  threads.emplace_back(getter);
+  threads.emplace_back(sign);
+  threads.emplace_back(sign);
+  threads.emplace_back(verify);
+  threads.emplace_back(verify);
+  for (auto &thread : threads) {
+    thread.join();
+  }
+}
+#endif

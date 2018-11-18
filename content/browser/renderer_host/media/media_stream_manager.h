@@ -37,15 +37,19 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop/message_loop_current.h"
+#include "base/optional.h"
 #include "base/power_monitor/power_observer.h"
+#include "base/single_thread_task_runner.h"
 #include "base/threading/thread.h"
 #include "build/build_config.h"
+#include "content/browser/media/media_devices_util.h"
 #include "content/browser/renderer_host/media/media_devices_manager.h"
 #include "content/browser/renderer_host/media/media_stream_provider.h"
 #include "content/common/content_export.h"
 #include "content/common/media/media_devices.h"
 #include "content/common/media/media_stream_controls.h"
+#include "content/public/browser/desktop_media_id.h"
 #include "content/public/browser/media_request_state.h"
 #include "content/public/common/media_stream_request.h"
 #include "media/base/video_facing.h"
@@ -61,6 +65,7 @@ class Origin;
 namespace content {
 
 class AudioInputDeviceManager;
+class AudioServiceListener;
 class FakeMediaStreamUIProxy;
 class MediaStreamUIProxy;
 class VideoCaptureManager;
@@ -71,7 +76,7 @@ class VideoCaptureProvider;
 // using callbacks.
 class CONTENT_EXPORT MediaStreamManager
     : public MediaStreamProviderListener,
-      public base::MessageLoop::DestructionObserver,
+      public base::MessageLoopCurrent::DestructionObserver,
       public base::PowerObserver {
  public:
   // Callback to deliver the result of a media access request.
@@ -96,12 +101,15 @@ class CONTENT_EXPORT MediaStreamManager
 
   // Callback for testing.
   using GenerateStreamTestCallback =
-      base::Callback<bool(const StreamControls&)>;
+      base::OnceCallback<bool(const StreamControls&)>;
 
   // Adds |message| to native logs for outstanding device requests, for use by
   // render processes hosts whose corresponding render processes are requesting
   // logging from webrtcLoggingPrivate API. Safe to call from any thread.
   static void SendMessageToNativeLog(const std::string& message);
+
+  // |audio_task_runner| passed to constructors is the task runner used by audio
+  // system when it runs in-process; it's null if audio runs out of process.
 
   MediaStreamManager(
       media::AudioSystem* audio_system,
@@ -121,6 +129,9 @@ class CONTENT_EXPORT MediaStreamManager
 
   // Used to access AudioInputDeviceManager.
   AudioInputDeviceManager* audio_input_device_manager();
+
+  // Used to access AudioServiceListener, must be called on IO thread.
+  AudioServiceListener* audio_service_listener();
 
   // Used to access MediaDevicesManager.
   MediaDevicesManager* media_devices_manager();
@@ -158,27 +169,29 @@ class CONTENT_EXPORT MediaStreamManager
   // is set to receive device stopped notifications.
   void GenerateStream(int render_process_id,
                       int render_frame_id,
-                      const std::string& salt,
                       int page_request_id,
                       const StreamControls& controls,
-                      const url::Origin& security_origin,
+                      MediaDeviceSaltAndOrigin salt_and_origin,
                       bool user_gesture,
                       GenerateStreamCallback generate_stream_cb,
                       DeviceStoppedCallback device_stopped_cb);
 
+  // Cancel an open request identified by |page_request_id| for the given frame.
+  // Must be called on the IO thread.
   void CancelRequest(int render_process_id,
                      int render_frame_id,
                      int page_request_id);
 
-  // Cancel an open request identified by |label|.
+  // Cancel an open request identified by |label|. Must be called on the IO
+  // thread.
   void CancelRequest(const std::string& label);
 
   // Cancel all requests for the given |render_process_id| and
-  // |render_frame_id|.
+  // |render_frame_id|. Must be called on the IO thread.
   void CancelAllRequests(int render_process_id, int render_frame_id);
 
   // Closes the stream device for a certain render frame. The stream must have
-  // been opened by a call to GenerateStream.
+  // been opened by a call to GenerateStream. Must be called on the IO thread.
   void StopStreamDevice(int render_process_id,
                         int render_frame_id,
                         const std::string& device_id,
@@ -190,11 +203,10 @@ class CONTENT_EXPORT MediaStreamManager
   // request is identified using string returned to the caller.
   void OpenDevice(int render_process_id,
                   int render_frame_id,
-                  const std::string& salt,
                   int page_request_id,
                   const std::string& device_id,
                   MediaStreamType type,
-                  const url::Origin& security_origin,
+                  MediaDeviceSaltAndOrigin salt_and_origin,
                   OpenDeviceCallback open_device_cb,
                   DeviceStoppedCallback device_stopped_cb);
 
@@ -210,7 +222,7 @@ class CONTENT_EXPORT MediaStreamManager
                                    std::string* device_id) const;
 
   // Find |device_id| in the list of |requests_|, and returns its session id,
-  // or MediaStreamDevice::kNoId if not found.
+  // or MediaStreamDevice::kNoId if not found. Must be called on the IO thread.
   int VideoDeviceIdToSessionId(const std::string& device_id) const;
 
   // Called by UI to make sure the device monitor is started so that UI receive
@@ -228,12 +240,10 @@ class CONTENT_EXPORT MediaStreamManager
 
   // This object gets deleted on the UI thread after the IO thread has been
   // destroyed. So we need to know when IO thread is being destroyed so that
-  // we can delete VideoCaptureManager and AudioInputDeviceManager. Normally
-  // this is handled by
-  // base::MessageLoop::DestructionObserver::WillDestroyCurrentMessageLoop.
-  // But for some tests which use TestBrowserThreadBundle, we need to call
-  // WillDestroyCurrentMessageLoop explicitly because the notification happens
-  // too late. (see http://crbug.com/247525#c14).
+  // we can delete VideoCaptureManager and AudioInputDeviceManager.
+  // Note: In tests it is sometimes necessary to invoke this explicitly when
+  // using TestBrowserThreadBundle because the notification happens too late.
+  // (see http://crbug.com/247525#c14).
   void WillDestroyCurrentMessageLoop() override;
 
   // Sends log messages to the render process hosts whose corresponding render
@@ -277,6 +287,7 @@ class CONTENT_EXPORT MediaStreamManager
 
   // Set whether the capturing is secure for the capturing session with given
   // |session_id|, |render_process_id|, and the MediaStreamType |type|.
+  // Must be called on the IO thread.
   void SetCapturingLinkSecured(int render_process_id,
                                int session_id,
                                content::MediaStreamType type,
@@ -289,7 +300,7 @@ class CONTENT_EXPORT MediaStreamManager
 
   // This method is called when an audio or video device is removed. It makes
   // sure all MediaStreams that use a removed device are stopped and that the
-  // render process is notified.
+  // render process is notified. Must be called on the IO thread.
   void StopRemovedDevice(MediaDeviceType type,
                          const MediaDeviceInfo& media_device_info);
 
@@ -323,8 +334,7 @@ class CONTENT_EXPORT MediaStreamManager
   // Helpers.
   // Checks if all devices that was requested in the request identififed by
   // |label| has been opened and set the request state accordingly.
-  void HandleRequestDone(const std::string& label,
-                         DeviceRequest* request);
+  void HandleRequestDone(const std::string& label, DeviceRequest* request);
   // Stop the use of the device associated with |session_id| of type |type| in
   // all |requests_|. The device is removed from the request. If a request
   /// doesn't use any devices as a consequence, the request is deleted.
@@ -342,20 +352,32 @@ class CONTENT_EXPORT MediaStreamManager
   void DeleteRequest(const std::string& label);
   // Prepare the request with label |label| by starting device enumeration if
   // needed.
-  void SetupRequest(const std::string& label);
+  void SetUpRequest(const std::string& label);
   // Prepare |request| of type MEDIA_DEVICE_AUDIO_CAPTURE and/or
   // MEDIA_DEVICE_VIDEO_CAPTURE for being posted to the UI by parsing
   // StreamControls for requested device IDs.
-  bool SetupDeviceCaptureRequest(DeviceRequest* request,
+  bool SetUpDeviceCaptureRequest(DeviceRequest* request,
                                  const MediaDeviceEnumeration& enumeration);
-  // Prepare |request| of type MEDIA_TAB_AUDIO_CAPTURE and/or
-  // MEDIA_TAB_VIDEO_CAPTURE for being posted to the UI by parsing
-  // StreamControls for requested tab capture IDs.
-  bool SetupTabCaptureRequest(DeviceRequest* request);
-  // Prepare |request| of type MEDIA_DESKTOP_AUDIO_CAPTURE and/or
-  // MEDIA_DESKTOP_VIDEO_CAPTURE for being posted to the UI by parsing
+  // Prepare |request| of type MEDIA_DISPLAY_CAPTURE.
+  bool SetUpDisplayCaptureRequest(DeviceRequest* request);
+  // Prepare |request| of type MEDIA_GUM_DESKTOP_AUDIO_CAPTURE and/or
+  // MEDIA_GUM_DESKTOP_VIDEO_CAPTURE for being posted to the UI by parsing
   // StreamControls for the requested desktop ID.
-  bool SetupScreenCaptureRequest(DeviceRequest* request);
+  bool SetUpScreenCaptureRequest(DeviceRequest* request);
+  // Resolve the random device ID of tab capture on UI thread before proceeding
+  // with the tab capture UI request.
+  bool SetUpTabCaptureRequest(DeviceRequest* request, const std::string& label);
+  DesktopMediaID ResolveTabCaptureDeviceIdOnUIThread(
+      const std::string& capture_device_id,
+      int requesting_process_id,
+      int requesting_frame_id,
+      const GURL& origin);
+  // Prepare |request| of type MEDIA_GUM_TAB_AUDIO_CAPTURE and/or
+  // MEDIA_GUM_TAB_VIDEO_CAPTURE for being posted to the UI after the
+  // requested tab capture IDs are resolved from registry.
+  void FinishTabCaptureRequestSetupWithDeviceId(
+      const std::string& label,
+      const DesktopMediaID& device_id);
   // Called when a request has been setup and devices have been enumerated if
   // needed.
   void ReadOutputParamsAndPostRequestToUI(
@@ -365,7 +387,6 @@ class CONTENT_EXPORT MediaStreamManager
   // Called when audio output parameters have been read if needed.
   void PostRequestToUI(
       const std::string& label,
-      DeviceRequest* request,
       const MediaDeviceEnumeration& enumeration,
       const base::Optional<media::AudioParameters>& output_parameters);
   // Returns true if a device with |device_id| has already been requested with
@@ -395,8 +416,7 @@ class CONTENT_EXPORT MediaStreamManager
   // valid alternate device ID.
   // Returns false if the required device ID is present and invalid.
   // Otherwise, if no valid device is found, device_id is unchanged.
-  bool PickDeviceId(const std::string& salt,
-                    const url::Origin& security_origin,
+  bool PickDeviceId(const MediaDeviceSaltAndOrigin& salt_and_origin,
                     const TrackControls& controls,
                     const MediaDeviceInfoArray& devices,
                     std::string* device_id) const;
@@ -418,7 +438,8 @@ class CONTENT_EXPORT MediaStreamManager
                                gfx::NativeViewId window_id);
 
   // Runs on the IO thread and does the actual [un]registration of callbacks.
-  void DoNativeLogCallbackRegistration(int renderer_host_id,
+  void DoNativeLogCallbackRegistration(
+      int renderer_host_id,
       const base::Callback<void(const std::string&)>& callback);
   void DoNativeLogCallbackUnregistration(int renderer_host_id);
 
@@ -438,9 +459,12 @@ class CONTENT_EXPORT MediaStreamManager
   media::AudioSystem* const audio_system_;  // not owned
   scoped_refptr<AudioInputDeviceManager> audio_input_device_manager_;
   scoped_refptr<VideoCaptureManager> video_capture_manager_;
-#if defined(OS_WIN)
-  base::Thread video_capture_thread_;
-#endif
+
+  // Not initialized on Mac (if not in tests), since the main thread is used.
+  // Always initialized on Windows.
+  // On other platforms, initialized when no audio task runner is provided in
+  // the constructor.
+  base::Optional<base::Thread> video_capture_thread_;
 
   std::unique_ptr<MediaDevicesManager> media_devices_manager_;
 
@@ -452,6 +476,8 @@ class CONTENT_EXPORT MediaStreamManager
 
   // Maps render process hosts to log callbacks. Used on the IO thread.
   std::map<int, base::Callback<void(const std::string&)>> log_callbacks_;
+
+  std::unique_ptr<AudioServiceListener> audio_service_listener_;
 
   GenerateStreamTestCallback generate_stream_test_callback_;
 

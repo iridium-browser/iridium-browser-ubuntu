@@ -31,20 +31,23 @@ bool DecoderStreamTraits<DemuxerStream::AUDIO>::NeedsBitstreamConversion(
 
 // static
 scoped_refptr<DecoderStreamTraits<DemuxerStream::AUDIO>::OutputType>
-    DecoderStreamTraits<DemuxerStream::AUDIO>::CreateEOSOutput() {
+DecoderStreamTraits<DemuxerStream::AUDIO>::CreateEOSOutput() {
   return OutputType::CreateEOSBuffer();
 }
 
-// static
+DecoderStreamTraits<DemuxerStream::AUDIO>::DecoderStreamTraits(
+    MediaLog* media_log,
+    ChannelLayout initial_hw_layout)
+    : media_log_(media_log), initial_hw_layout_(initial_hw_layout) {}
+
 DecoderStreamTraits<DemuxerStream::AUDIO>::DecoderConfigType
 DecoderStreamTraits<DemuxerStream::AUDIO>::GetDecoderConfig(
     DemuxerStream* stream) {
-  return stream->audio_decoder_config();
+  auto config = stream->audio_decoder_config();
+  // Demuxer is not aware of hw layout, so we set it here.
+  config.set_target_output_channel_layout(initial_hw_layout_);
+  return config;
 }
-
-DecoderStreamTraits<DemuxerStream::AUDIO>::DecoderStreamTraits(
-    MediaLog* media_log)
-    : media_log_(media_log) {}
 
 void DecoderStreamTraits<DemuxerStream::AUDIO>::ReportStatistics(
     const StatisticsCB& statistics_cb,
@@ -63,6 +66,11 @@ void DecoderStreamTraits<DemuxerStream::AUDIO>::InitializeDecoder(
     const DecoderType::WaitingForDecryptionKeyCB&
         waiting_for_decryption_key_cb) {
   DCHECK(config.IsValidConfig());
+
+  if (config_.IsValidConfig() && !config_.Matches(config))
+    OnConfigChanged(config);
+  config_ = config;
+
   stats_.audio_decoder_name = decoder->GetDisplayName();
   decoder->Initialize(config, cdm_context, init_cb, output_cb,
                       waiting_for_decryption_key_cb);
@@ -114,17 +122,16 @@ DecoderStreamTraits<DemuxerStream::VIDEO>::CreateEOSOutput() {
   return OutputType::CreateEOSFrame();
 }
 
-// static
+DecoderStreamTraits<DemuxerStream::VIDEO>::DecoderStreamTraits(
+    MediaLog* media_log)
+    // Randomly selected number of samples to keep.
+    : keyframe_distance_average_(16) {}
+
 DecoderStreamTraits<DemuxerStream::VIDEO>::DecoderConfigType
 DecoderStreamTraits<DemuxerStream::VIDEO>::GetDecoderConfig(
     DemuxerStream* stream) {
   return stream->video_decoder_config();
 }
-
-DecoderStreamTraits<DemuxerStream::VIDEO>::DecoderStreamTraits(
-    MediaLog* media_log)
-    // Randomly selected number of samples to keep.
-    : keyframe_distance_average_(16) {}
 
 void DecoderStreamTraits<DemuxerStream::VIDEO>::ReportStatistics(
     const StatisticsCB& statistics_cb,
@@ -154,6 +161,7 @@ void DecoderStreamTraits<DemuxerStream::VIDEO>::InitializeDecoder(
         waiting_for_decryption_key_cb) {
   DCHECK(config.IsValidConfig());
   stats_.video_decoder_name = decoder->GetDisplayName();
+  DVLOG(2) << stats_.video_decoder_name;
   decoder->Initialize(config, low_delay, cdm_context, init_cb, output_cb,
                       waiting_for_decryption_key_cb);
 }

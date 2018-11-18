@@ -12,7 +12,8 @@
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/test/histogram_tester.h"
+#include "base/task/post_task.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
@@ -27,6 +28,7 @@
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/nacl/common/buildflags.h"
 #include "content/public/browser/browser_context.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/service_worker_context.h"
 #include "content/public/browser/storage_partition.h"
@@ -34,6 +36,7 @@
 #include "content/public/test/browser_test_utils.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "ppapi/shared_impl/ppapi_switches.h"
+#include "third_party/blink/public/common/messaging/string_message_codec.h"
 
 namespace {
 
@@ -115,7 +118,7 @@ IN_PROC_BROWSER_TEST_F(ChromeServiceWorkerTest,
 
   base::RunLoop run_loop;
   blink::mojom::ServiceWorkerRegistrationOptions options(
-      embedded_test_server()->GetURL("/"),
+      embedded_test_server()->GetURL("/"), blink::mojom::ScriptType::kClassic,
       blink::mojom::ServiceWorkerUpdateViaCache::kImports);
   GetServiceWorkerContext()->RegisterServiceWorker(
       embedded_test_server()->GetURL("/service_worker.js"), options,
@@ -141,7 +144,7 @@ IN_PROC_BROWSER_TEST_F(ChromeServiceWorkerTest,
 
   base::RunLoop run_loop;
   blink::mojom::ServiceWorkerRegistrationOptions options(
-      embedded_test_server()->GetURL("/"),
+      embedded_test_server()->GetURL("/"), blink::mojom::ScriptType::kClassic,
       blink::mojom::ServiceWorkerUpdateViaCache::kImports);
   GetServiceWorkerContext()->RegisterServiceWorker(
       embedded_test_server()->GetURL("/service_worker.js"), options,
@@ -167,7 +170,7 @@ IN_PROC_BROWSER_TEST_F(ChromeServiceWorkerTest,
 
   base::RunLoop run_loop;
   blink::mojom::ServiceWorkerRegistrationOptions options(
-      embedded_test_server()->GetURL("/"),
+      embedded_test_server()->GetURL("/"), blink::mojom::ScriptType::kClassic,
       blink::mojom::ServiceWorkerUpdateViaCache::kImports);
   GetServiceWorkerContext()->RegisterServiceWorker(
       embedded_test_server()->GetURL("/service_worker.js"), options,
@@ -206,6 +209,31 @@ IN_PROC_BROWSER_TEST_F(ChromeServiceWorkerTest,
       browser()->tab_strip_model()->GetActiveWebContents();
   EXPECT_TRUE(TabSpecificContentSettings::FromWebContents(web_contents)->
               IsContentBlocked(CONTENT_SETTINGS_TYPE_JAVASCRIPT));
+}
+
+IN_PROC_BROWSER_TEST_F(ChromeServiceWorkerTest,
+                       StartServiceWorkerForLongRunningMessage) {
+  base::RunLoop run_loop;
+  blink::TransferableMessage msg;
+  const base::string16 message_data = base::UTF8ToUTF16("testMessage");
+
+  WriteFile(FILE_PATH_LITERAL("sw.js"), "self.onfetch = function(e) {};");
+  WriteFile(FILE_PATH_LITERAL("test.html"), kInstallAndWaitForActivatedPage);
+  InitializeServer();
+  NavigateToPageAndWaitForReadyTitle("/test.html");
+  msg.owned_encoded_message = blink::EncodeStringMessage(message_data);
+  msg.encoded_message = msg.owned_encoded_message;
+
+  base::PostTaskWithTraits(
+      FROM_HERE, {content::BrowserThread::IO},
+      base::BindOnce(&content::ServiceWorkerContext::
+                         StartServiceWorkerAndDispatchLongRunningMessage,
+                     base::Unretained(GetServiceWorkerContext()),
+                     embedded_test_server()->GetURL("/scope/"), std::move(msg),
+                     base::BindRepeating(&ExpectResultAndRun<bool>, true,
+                                         run_loop.QuitClosure())));
+
+  run_loop.Run();
 }
 
 class ChromeServiceWorkerFetchTest : public ChromeServiceWorkerTest {
@@ -353,7 +381,7 @@ class ChromeServiceWorkerManifestFetchTest
 
   static void ManifestCallbackAndRun(const base::Closure& continuation,
                                      const GURL&,
-                                     const content::Manifest&) {
+                                     const blink::Manifest&) {
     continuation.Run();
   }
 
@@ -525,6 +553,7 @@ IN_PROC_BROWSER_TEST_F(ChromeServiceWorkerNavigationHintTest,
   base::RunLoop run_loop;
   blink::mojom::ServiceWorkerRegistrationOptions options(
       embedded_test_server()->GetURL("/scope/"),
+      blink::mojom::ScriptType::kClassic,
       blink::mojom::ServiceWorkerUpdateViaCache::kImports);
   GetServiceWorkerContext()->RegisterServiceWorker(
       embedded_test_server()->GetURL("/sw.js"), options,

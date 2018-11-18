@@ -40,8 +40,11 @@ class PermissionRequestManager
  public:
   class Observer {
    public:
-    virtual ~Observer();
-    virtual void OnBubbleAdded();
+    virtual void OnBubbleAdded() {}
+    virtual void OnBubbleRemoved() {}
+
+   protected:
+    virtual ~Observer() = default;
   };
 
   enum AutoResponseType {
@@ -154,6 +157,7 @@ class PermissionRequestManager
   void RequestFinishedIncludingDuplicates(PermissionRequest* request);
 
   void NotifyBubbleAdded();
+  void NotifyBubbleRemoved();
 
   void DoAutoResponseForTesting();
 
@@ -176,7 +180,7 @@ class PermissionRequestManager
   std::unordered_multimap<PermissionRequest*, PermissionRequest*>
       duplicate_requests_;
 
-  base::ObserverList<Observer> observer_list_;
+  base::ObserverList<Observer>::Unchecked observer_list_;
   AutoResponseType auto_response_for_test_;
 
   base::WeakPtrFactory<PermissionRequestManager> weak_factory_;

@@ -4,6 +4,7 @@
 
 #include "chrome/browser/media/media_access_handler.h"
 
+#include <memory>
 #include <utility>
 
 #include "chrome/browser/media/webrtc/media_capture_devices_dispatcher.h"
@@ -11,11 +12,16 @@
 #include "chrome/browser/profiles/profile.h"
 #include "content/public/browser/web_contents.h"
 
+bool MediaAccessHandler::IsInsecureCapturingInProgress(int render_process_id,
+                                                       int render_frame_id) {
+  return false;
+}
+
 // static
 void MediaAccessHandler::CheckDevicesAndRunCallback(
     content::WebContents* web_contents,
     const content::MediaStreamRequest& request,
-    const content::MediaResponseCallback& callback,
+    content::MediaResponseCallback callback,
     bool audio_allowed,
     bool video_allowed) {
   // TODO(vrk): This code is largely duplicated in
@@ -78,5 +84,5 @@ void MediaAccessHandler::CheckDevicesAndRunCallback(
              ->RegisterMediaStream(web_contents, devices);
   }
 
-  callback.Run(devices, result, std::move(ui));
+  std::move(callback).Run(devices, result, std::move(ui));
 }

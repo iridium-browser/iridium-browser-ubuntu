@@ -22,6 +22,10 @@ class _SystemHealthSharedState(shared_page_state.SharedPageState):
   """
 
   def CanRunOnBrowser(self, browser_info, story):
+    if (browser_info.browser_type.startswith('android-webview') and
+        story.WEBVIEW_NOT_SUPPORTED):
+      return False
+
     if story.TAGS and story_tags.WEBGL in story.TAGS:
       return browser_info.HasWebGLSupport()
     return True
@@ -45,23 +49,35 @@ class SystemHealthStory(page.Page):
   """Abstract base class for System Health user stories."""
   __metaclass__ = _MetaSystemHealthStory
 
-  # The full name of a single page story has the form CASE:GROUP:PAGE (e.g.
-  # 'load:search:google').
+  # The full name of a single page story has the form CASE:GROUP:PAGE:[VERSION]
+  # (e.g. 'load:search:google' or 'load:search:google:2018').
   NAME = NotImplemented
   URL = NotImplemented
   ABSTRACT_STORY = True
+  # TODO(crbug.com/862077): SKIP_LOGIN is a temporary hack to skip the login
+  # flow during replay. Switch this to False when recording.
+  SKIP_LOGIN = True
   SUPPORTED_PLATFORMS = platforms.ALL_PLATFORMS
-  TAGS = None
+  TAGS = []
   PLATFORM_SPECIFIC = False
+  WEBVIEW_NOT_SUPPORTED = False
 
   def __init__(self, story_set, take_memory_measurement,
       extra_browser_args=None):
-    case, group, _ = self.NAME.split(':')
+    case, group, _ = self.NAME.split(':', 2)
     tags = []
-    if self.TAGS:
-      for t in self.TAGS:
-        assert t in story_tags.ALL_TAGS
-        tags.append(t.name)
+    found_year_tag = False
+    for t in self.TAGS:  # pylint: disable=not-an-iterable
+      assert t in story_tags.ALL_TAGS
+      tags.append(t.name)
+      if t in story_tags.YEAR_TAGS:
+        # Assert that this is the first year tag.
+        assert not found_year_tag, (
+            "%s has more than one year tag found." % self.__class__.__name__)
+        found_year_tag = True
+    # Assert that there is one year tag.
+    assert found_year_tag, (
+        "%s needs exactly one year tag." % self.__class__.__name__)
     super(SystemHealthStory, self).__init__(
         shared_page_state_class=_SystemHealthSharedState,
         page_set=story_set, name=self.NAME, url=self.URL, tags=tags,
@@ -98,10 +114,12 @@ class SystemHealthStory(page.Page):
     pass
 
   def RunNavigateSteps(self, action_runner):
-    self._Login(action_runner)
+    if not self.SKIP_LOGIN:
+      self._Login(action_runner)
     super(SystemHealthStory, self).RunNavigateSteps(action_runner)
 
   def RunPageInteractions(self, action_runner):
     action_runner.tab.WaitForDocumentReadyStateToBeComplete()
     self._DidLoadDocument(action_runner)
     self._Measure(action_runner)
+

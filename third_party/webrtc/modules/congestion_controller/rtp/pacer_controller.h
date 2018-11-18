@@ -13,14 +13,12 @@
 
 #include <memory>
 
-#include "modules/congestion_controller/network_control/include/network_types.h"
+#include "api/transport/network_types.h"
 #include "modules/pacing/paced_sender.h"
 #include "rtc_base/sequenced_task_checker.h"
 
 namespace webrtc {
 class Clock;
-
-namespace webrtc_cc {
 
 // Wrapper class to control pacer using task queues. Note that this class is
 // only designed to be used from a single task queue and has no built in
@@ -30,10 +28,10 @@ class PacerController {
  public:
   explicit PacerController(PacedSender* pacer);
   ~PacerController();
-  void OnCongestionWindow(CongestionWindow msg);
+  void OnCongestionWindow(DataSize msg);
   void OnNetworkAvailability(NetworkAvailability msg);
   void OnNetworkRouteChange(NetworkRouteChange msg);
-  void OnOutstandingData(OutstandingData msg);
+  void OnOutstandingData(DataSize in_flight_data);
   void OnPacerConfig(PacerConfig msg);
   void OnProbeClusterConfig(ProbeClusterConfig msg);
 
@@ -41,13 +39,12 @@ class PacerController {
   void SetPacerState(bool paused);
   PacedSender* const pacer_;
 
-  rtc::Optional<PacerConfig> current_pacer_config_;
+  absl::optional<PacerConfig> current_pacer_config_;
   bool pacer_paused_ = false;
   bool network_available_ = true;
 
   rtc::SequencedTaskChecker sequenced_checker_;
   RTC_DISALLOW_IMPLICIT_CONSTRUCTORS(PacerController);
 };
-}  // namespace webrtc_cc
 }  // namespace webrtc
 #endif  // MODULES_CONGESTION_CONTROLLER_RTP_PACER_CONTROLLER_H_

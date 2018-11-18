@@ -12,6 +12,7 @@
 #include <string>
 
 #include "base/macros.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/memory/shared_memory.h"
 #include "base/memory/weak_ptr.h"
 #include "base/metrics/field_trial.h"
@@ -19,6 +20,7 @@
 #include "base/single_thread_task_runner.h"
 #include "build/build_config.h"
 #include "components/variations/child_process_field_trial_syncer.h"
+#include "content/child/memory/child_memory_coordinator_impl.h"
 #include "content/common/associated_interfaces.mojom.h"
 #include "content/common/child_control.mojom.h"
 #include "content/common/content_export.h"
@@ -29,17 +31,14 @@
 #include "ipc/message_router.h"
 #include "mojo/public/cpp/bindings/associated_binding.h"
 #include "mojo/public/cpp/bindings/associated_binding_set.h"
-#include "services/tracing/public/cpp/chrome_trace_event_agent.h"
+#include "services/tracing/public/cpp/trace_event_agent.h"
+#include "third_party/blink/public/mojom/associated_interfaces/associated_interfaces.mojom.h"
 
 #if defined(OS_WIN)
 #include "content/public/common/font_cache_win.mojom.h"
 #elif defined(OS_MACOSX)
 #include "content/common/font_loader_mac.mojom.h"
 #endif
-
-namespace base {
-class MessageLoop;
-}  // namespace base
 
 namespace IPC {
 class MessageFilter;
@@ -48,11 +47,10 @@ class SyncMessageFilter;
 }  // namespace IPC
 
 namespace mojo {
-namespace edk {
-class IncomingBrokerClientInvitation;
-class OutgoingBrokerClientInvitation;
+class OutgoingInvitation;
+namespace core {
 class ScopedIPCSupport;
-}  // namespace edk
+}  // namespace core
 }  // namespace mojo
 
 namespace content {
@@ -64,17 +62,18 @@ class CONTENT_EXPORT ChildThreadImpl
     : public IPC::Listener,
       virtual public ChildThread,
       private base::FieldTrialList::Observer,
+      public ChildMemoryCoordinatorDelegate,
       public mojom::RouteProvider,
-      public mojom::AssociatedInterfaceProvider,
+      public blink::mojom::AssociatedInterfaceProvider,
       public mojom::ChildControl {
  public:
   struct CONTENT_EXPORT Options;
 
   // Creates the thread.
-  ChildThreadImpl();
+  explicit ChildThreadImpl(base::RepeatingClosure quit_closure);
   // Allow to be used for single-process mode and for in process gpu mode via
   // options.
-  explicit ChildThreadImpl(const Options& options);
+  ChildThreadImpl(base::RepeatingClosure quit_closure, const Options& options);
   // ChildProcess::main_thread() is reset after Shutdown(), and before the
   // destructor, so any subsystem that relies on ChildProcess::main_thread()
   // must be terminated before Shutdown returns. In particular, if a subsystem
@@ -110,6 +109,9 @@ class CONTENT_EXPORT ChildThreadImpl
   void OnFieldTrialGroupFinalized(const std::string& trial_name,
                                   const std::string& group_name) override;
 
+  // ChildMemoryCoordinatorDelegate implementation.
+  void OnTrimMemoryImmediately() override {}
+
   IPC::SyncChannel* channel() { return channel_.get(); }
 
   IPC::MessageRouter* GetRouter();
@@ -132,7 +134,9 @@ class CONTENT_EXPORT ChildThreadImpl
     return thread_safe_sender_.get();
   }
 
-  base::MessageLoop* message_loop() const { return message_loop_; }
+  scoped_refptr<base::SingleThreadTaskRunner> main_thread_runner() const {
+    return main_thread_runner_;
+  }
 
   // Returns the one child thread. Can only be called on the main thread.
   static ChildThreadImpl* current();
@@ -199,32 +203,32 @@ class CONTENT_EXPORT ChildThreadImpl
 
   // We create the channel first without connecting it so we can add filters
   // prior to any messages being received, then connect it afterwards.
-  void ConnectChannel(mojo::edk::IncomingBrokerClientInvitation* invitation);
+  void ConnectChannel();
 
   // IPC message handlers.
 
   void EnsureConnected();
 
   // mojom::RouteProvider:
-  void GetRoute(
-      int32_t routing_id,
-      mojom::AssociatedInterfaceProviderAssociatedRequest request) override;
+  void GetRoute(int32_t routing_id,
+                blink::mojom::AssociatedInterfaceProviderAssociatedRequest
+                    request) override;
 
-  // mojom::AssociatedInterfaceProvider:
+  // blink::mojom::AssociatedInterfaceProvider:
   void GetAssociatedInterface(
       const std::string& name,
-      mojom::AssociatedInterfaceAssociatedRequest request) override;
+      blink::mojom::AssociatedInterfaceAssociatedRequest request) override;
 
 #if defined(OS_WIN)
   mojom::FontCacheWin* GetFontCacheWin();
 #endif
 
-  std::unique_ptr<mojo::edk::ScopedIPCSupport> mojo_ipc_support_;
+  std::unique_ptr<mojo::core::ScopedIPCSupport> mojo_ipc_support_;
   std::unique_ptr<ServiceManagerConnection> service_manager_connection_;
 
   mojo::BindingSet<mojom::ChildControl> child_control_bindings_;
   mojo::AssociatedBinding<mojom::RouteProvider> route_provider_binding_;
-  mojo::AssociatedBindingSet<mojom::AssociatedInterfaceProvider, int32_t>
+  mojo::AssociatedBindingSet<blink::mojom::AssociatedInterfaceProvider, int32_t>
       associated_interface_provider_bindings_;
   mojom::RouteProviderAssociatedPtr remote_route_provider_;
 #if defined(OS_WIN)
@@ -248,15 +252,21 @@ class CONTENT_EXPORT ChildThreadImpl
   // attempt to communicate.
   bool on_channel_error_called_;
 
-  base::MessageLoop* message_loop_;
+  // TaskRunner to post tasks to the main thread.
+  scoped_refptr<base::SingleThreadTaskRunner> main_thread_runner_;
+
+  // Used to quit the main thread.
+  base::RepeatingClosure quit_closure_;
 
   std::unique_ptr<base::PowerMonitor> power_monitor_;
 
   scoped_refptr<base::SingleThreadTaskRunner> browser_process_io_runner_;
 
-  std::unique_ptr<tracing::ChromeTraceEventAgent> chrome_trace_event_agent_;
+  std::unique_ptr<tracing::TraceEventAgent> trace_event_agent_;
 
   std::unique_ptr<variations::ChildProcessFieldTrialSyncer> field_trial_syncer_;
+
+  std::unique_ptr<ChildMemoryCoordinatorImpl> memory_coordinator_;
 
   std::unique_ptr<base::WeakPtrFactory<ChildThreadImpl>>
       channel_connected_factory_;
@@ -278,7 +288,7 @@ struct ChildThreadImpl::Options {
   bool connect_to_browser;
   scoped_refptr<base::SingleThreadTaskRunner> browser_process_io_runner;
   std::vector<IPC::MessageFilter*> startup_filters;
-  mojo::edk::OutgoingBrokerClientInvitation* broker_client_invitation;
+  mojo::OutgoingInvitation* mojo_invitation;
   std::string in_process_service_request_token;
   scoped_refptr<base::SingleThreadTaskRunner> ipc_task_runner;
 

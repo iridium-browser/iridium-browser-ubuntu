@@ -16,6 +16,8 @@
 
 #include "Optimizer.hpp"
 
+#include "Common/Memory.hpp"
+
 #include "src/IceTypes.h"
 #include "src/IceCfg.h"
 #include "src/IceELFStreamer.h"
@@ -26,6 +28,11 @@
 
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/raw_os_ostream.h"
+#include "llvm/Support/Compiler.h"
+
+#if __has_feature(memory_sanitizer)
+#include <sanitizer/msan_interface.h>
+#endif
 
 #if defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN
@@ -96,7 +103,7 @@ namespace
 
 		static bool detectARM()
 		{
-			#if defined(__arm__)
+			#if defined(__arm__) || defined(__aarch64__)
 				return true;
 			#elif defined(__i386__) || defined(__x86_64__)
 				return false;
@@ -365,6 +372,8 @@ namespace sw
 			assert(sizeof(void*) == 8 && elfHeader->e_machine == EM_X86_64);
 		#elif defined(__arm__)
 			assert(sizeof(void*) == 4 && elfHeader->e_machine == EM_ARM);
+		#elif defined(__aarch64__)
+			assert(sizeof(void*) == 8 && elfHeader->e_machine == EM_AARCH64);
 		#else
 			#error "Unsupported platform"
 		#endif
@@ -418,20 +427,12 @@ namespace sw
 
 		T *allocate(size_type n)
 		{
-			#if defined(_WIN32)
-				return (T*)VirtualAlloc(NULL, sizeof(T) * n, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-			#else
-				return (T*)mmap(nullptr, sizeof(T) * n, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-			#endif
+			return (T*)allocateExecutable(sizeof(T) * n);
 		}
 
 		void deallocate(T *p, size_type n)
 		{
-			#if defined(_WIN32)
-				VirtualFree(p, 0, MEM_RELEASE);
-			#else
-				munmap(p, sizeof(T) * n);
-			#endif
+			deallocateExecutable(p, sizeof(T) * n);
 		}
 	};
 
@@ -894,6 +895,17 @@ namespace sw
 
 	Value *Nucleus::createStore(Value *value, Value *ptr, Type *type, bool isVolatile, unsigned int align)
 	{
+		#if __has_feature(memory_sanitizer)
+			// Mark all (non-stack) memory writes as initialized by calling __msan_unpoison
+			if(align != 0)
+			{
+				auto call = Ice::InstCall::create(::function, 2, nullptr, ::context->getConstantInt64(reinterpret_cast<intptr_t>(__msan_unpoison)), false);
+				call->addArg(ptr);
+				call->addArg(::context->getConstantInt64(typeSize(type)));
+				::basicBlock->appendInst(call);
+			}
+		#endif
+
 		int valueType = (int)reinterpret_cast<intptr_t>(type);
 
 		if((valueType & EmulatedBits) && (align != 0))   // Narrow vector not stored on stack.

@@ -5,18 +5,22 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_REMOTE_FRAME_VIEW_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_REMOTE_FRAME_VIEW_H_
 
-#include "third_party/blink/public/platform/web_canvas.h"
+#include "cc/paint/paint_canvas.h"
 #include "third_party/blink/renderer/core/dom/document_lifecycle.h"
 #include "third_party/blink/renderer/core/frame/frame_view.h"
-#include "third_party/blink/renderer/core/frame/local_frame_view.h"
+#include "third_party/blink/renderer/core/layout/intrinsic_sizing_info.h"
 #include "third_party/blink/renderer/platform/geometry/int_rect.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 
-namespace blink {
+namespace cc {
+class PaintCanvas;
+}
 
+namespace blink {
 class CullRect;
 class ElementVisibilityObserver;
 class GraphicsContext;
+class LocalFrameView;
 class RemoteFrame;
 
 class RemoteFrameView final : public GarbageCollectedFinalized<RemoteFrameView>,
@@ -52,8 +56,7 @@ class RemoteFrameView final : public GarbageCollectedFinalized<RemoteFrameView>,
   void Show() override;
   void SetParentVisible(bool) override;
 
-  void UpdateViewportIntersectionsForSubtree(
-      DocumentLifecycle::LifecycleState) override;
+  void UpdateViewportIntersectionsForSubtree() override;
 
   bool GetIntrinsicSizingInfo(IntrinsicSizingInfo&) const override;
 
@@ -65,9 +68,9 @@ class RemoteFrameView final : public GarbageCollectedFinalized<RemoteFrameView>,
   // and reduce the number of paint-ops generated.
   IntRect GetCompositingRect();
 
-  uint32_t Print(const IntRect&, WebCanvas*) const;
+  uint32_t Print(const IntRect&, cc::PaintCanvas*) const;
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  private:
   explicit RemoteFrameView(RemoteFrame*);
@@ -85,6 +88,7 @@ class RemoteFrameView final : public GarbageCollectedFinalized<RemoteFrameView>,
   Member<RemoteFrame> remote_frame_;
   bool is_attached_;
   IntRect last_viewport_intersection_;
+  bool last_occluded_or_obscured_ = false;
   IntRect frame_rect_;
   bool self_visible_;
   bool parent_visible_;

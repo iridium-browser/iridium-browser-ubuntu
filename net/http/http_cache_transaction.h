@@ -18,7 +18,8 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
-#include "net/base/completion_callback.h"
+#include "net/base/completion_once_callback.h"
+#include "net/base/completion_repeating_callback.h"
 #include "net/base/io_buffer.h"
 #include "net/base/ip_endpoint.h"
 #include "net/base/load_states.h"
@@ -102,7 +103,7 @@ class NET_EXPORT_PRIVATE HttpCache::Transaction : public HttpTransaction {
   // method.
   int WriteMetadata(IOBuffer* buf,
                     int buf_len,
-                    const CompletionCallback& callback);
+                    CompletionOnceCallback callback);
 
   HttpCache::ActiveEntry* entry() { return entry_; }
 
@@ -112,7 +113,7 @@ class NET_EXPORT_PRIVATE HttpCache::Transaction : public HttpTransaction {
   // to the cache entry.
   LoadState GetWriterLoadState() const;
 
-  const CompletionCallback& io_callback() { return io_callback_; }
+  const CompletionRepeatingCallback& io_callback() { return io_callback_; }
 
   const NetLogWithSource& net_log() const;
 
@@ -132,18 +133,18 @@ class NET_EXPORT_PRIVATE HttpCache::Transaction : public HttpTransaction {
 
   // HttpTransaction methods:
   int Start(const HttpRequestInfo* request_info,
-            const CompletionCallback& callback,
+            CompletionOnceCallback callback,
             const NetLogWithSource& net_log) override;
-  int RestartIgnoringLastError(const CompletionCallback& callback) override;
+  int RestartIgnoringLastError(CompletionOnceCallback callback) override;
   int RestartWithCertificate(scoped_refptr<X509Certificate> client_cert,
                              scoped_refptr<SSLPrivateKey> client_private_key,
-                             const CompletionCallback& callback) override;
+                             CompletionOnceCallback callback) override;
   int RestartWithAuth(const AuthCredentials& credentials,
-                      const CompletionCallback& callback) override;
+                      CompletionOnceCallback callback) override;
   bool IsReadyToRestartForAuth() override;
   int Read(IOBuffer* buf,
            int buf_len,
-           const CompletionCallback& callback) override;
+           CompletionOnceCallback callback) override;
   void StopCaching() override;
   bool GetFullRequestHeaders(HttpRequestHeaders* headers) const override;
   int64_t GetTotalReceivedBytes() const override;
@@ -255,6 +256,9 @@ class NET_EXPORT_PRIVATE HttpCache::Transaction : public HttpTransaction {
     STATE_CACHE_QUERY_DATA_COMPLETE,
     STATE_START_PARTIAL_CACHE_VALIDATION,
     STATE_COMPLETE_PARTIAL_CACHE_VALIDATION,
+    STATE_CACHE_UPDATE_STALE_WHILE_REVALIDATE_TIMEOUT,
+    STATE_CACHE_UPDATE_STALE_WHILE_REVALIDATE_TIMEOUT_COMPLETE,
+    STATE_SETUP_ENTRY_FOR_READ,
     STATE_SEND_REQUEST,
     STATE_SEND_REQUEST_COMPLETE,
     STATE_SUCCESSFUL_SEND_REQUEST,
@@ -332,6 +336,9 @@ class NET_EXPORT_PRIVATE HttpCache::Transaction : public HttpTransaction {
   int DoCacheDispatchValidation();
   int DoCacheQueryData();
   int DoCacheQueryDataComplete(int result);
+  int DoCacheUpdateStaleWhileRevalidateTimeout();
+  int DoCacheUpdateStaleWhileRevalidateTimeoutComplete(int result);
+  int DoSetupEntryForRead();
   int DoStartPartialCacheValidation();
   int DoCompletePartialCacheValidation(int result);
   int DoSendRequest();
@@ -406,8 +413,9 @@ class NET_EXPORT_PRIVATE HttpCache::Transaction : public HttpTransaction {
   // Returns network error code.
   int RestartNetworkRequestWithAuth(const AuthCredentials& credentials);
 
-  // Called to determine if we need to validate the cache entry before using it.
-  bool RequiresValidation();
+  // Called to determine if we need to validate the cache entry before using it,
+  // and whether the validation should be synchronous or asynchronous.
+  ValidationType RequiresValidation();
 
   // Called to make the request conditional (to ask the server if the cached
   // copy is valid).  Returns true if able to make the request conditional.
@@ -442,14 +450,14 @@ class NET_EXPORT_PRIVATE HttpCache::Transaction : public HttpTransaction {
   // Fixes the response headers to match expectations for a HEAD request.
   void FixHeadersForHead();
 
-  // Setups the transaction for reading from the cache entry.
-  int SetupEntryForRead();
-
   // Called to write data to the cache entry.  If the write fails, then the
   // cache entry is destroyed.  Future calls to this function will just do
   // nothing without side-effect.  Returns a network error code.
-  int WriteToEntry(int index, int offset, IOBuffer* data, int data_len,
-                   const CompletionCallback& callback);
+  int WriteToEntry(int index,
+                   int offset,
+                   IOBuffer* data,
+                   int data_len,
+                   CompletionOnceCallback callback);
 
   // Called to write response_ to the cache entry. |truncated| indicates if the
   // entry should be marked as incomplete.
@@ -580,7 +588,7 @@ class NET_EXPORT_PRIVATE HttpCache::Transaction : public HttpTransaction {
   HttpCache::ActiveEntry* entry_;
   HttpCache::ActiveEntry* new_entry_;
   std::unique_ptr<HttpTransaction> network_trans_;
-  CompletionCallback callback_;  // Consumer's callback.
+  CompletionOnceCallback callback_;  // Consumer's callback.
   HttpResponseInfo response_;
   HttpResponseInfo auth_response_;
   const HttpResponseInfo* new_response_;
@@ -609,7 +617,7 @@ class NET_EXPORT_PRIVATE HttpCache::Transaction : public HttpTransaction {
   int read_offset_;
   int effective_load_flags_;
   std::unique_ptr<PartialData> partial_;  // We are dealing with range requests.
-  CompletionCallback io_callback_;
+  CompletionRepeatingCallback io_callback_;
 
   // Error code to be returned from a subsequent Read call if shared writing
   // failed in a separate transaction.

@@ -32,6 +32,8 @@
 
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/platform/websocket_handshake_throttle.h"
+#include "third_party/blink/renderer/core/script/fetch_client_settings_object_impl.h"
 #include "third_party/blink/renderer/core/testing/null_execution_context.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_initiator_type_names.h"
 #include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
@@ -41,20 +43,32 @@ namespace blink {
 class MockBaseFetchContext final : public BaseFetchContext {
  public:
   explicit MockBaseFetchContext(ExecutionContext* execution_context)
-      : execution_context_(execution_context) {}
+      : BaseFetchContext(
+            execution_context->GetTaskRunner(blink::TaskType::kInternalTest)),
+        execution_context_(execution_context),
+        fetch_client_settings_object_(
+            new FetchClientSettingsObjectImpl(*execution_context)) {}
   ~MockBaseFetchContext() override = default;
 
   // BaseFetchContext overrides:
+  const FetchClientSettingsObject* GetFetchClientSettingsObject()
+      const override {
+    return fetch_client_settings_object_.Get();
+  }
   KURL GetSiteForCookies() const override { return KURL(); }
   bool AllowScriptFromSource(const KURL&) const override { return false; }
   SubresourceFilter* GetSubresourceFilter() const override { return nullptr; }
+  PreviewsResourceLoadingHints* GetPreviewsResourceLoadingHints()
+      const override {
+    return nullptr;
+  }
   bool ShouldBlockRequestByInspector(const KURL&) const override {
     return false;
   }
   void DispatchDidBlockRequest(const ResourceRequest&,
                                const FetchInitiatorInfo&,
                                ResourceRequestBlockedReason,
-                               Resource::Type) const override {}
+                               ResourceType) const override {}
   bool ShouldBypassMainWorldCSP() const override { return false; }
   bool IsSVGImageChromeClient() const override { return false; }
   void CountUsage(WebFeature) const override {}
@@ -62,8 +76,12 @@ class MockBaseFetchContext final : public BaseFetchContext {
   bool ShouldBlockWebSocketByMixedContentCheck(const KURL&) const override {
     return false;
   }
+  std::unique_ptr<WebSocketHandshakeThrottle> CreateWebSocketHandshakeThrottle()
+      override {
+    return nullptr;
+  }
   bool ShouldBlockFetchByMixedContentCheck(
-      WebURLRequest::RequestContext,
+      mojom::RequestContextType,
       network::mojom::RequestContextFrameType,
       ResourceRequest::RedirectStatus,
       const KURL&,
@@ -74,22 +92,16 @@ class MockBaseFetchContext final : public BaseFetchContext {
                                                  const KURL&) const override {
     return false;
   }
-  ReferrerPolicy GetReferrerPolicy() const override {
-    return execution_context_->GetReferrerPolicy();
-  }
-  String GetOutgoingReferrer() const override {
-    return execution_context_->OutgoingReferrer();
-  }
   const KURL& Url() const override { return execution_context_->Url(); }
 
   const SecurityOrigin* GetSecurityOrigin() const override {
-    return execution_context_->GetSecurityOrigin();
+    return fetch_client_settings_object_->GetSecurityOrigin();
   }
   const SecurityOrigin* GetParentSecurityOrigin() const override {
     return nullptr;
   }
-  Optional<mojom::IPAddressSpace> GetAddressSpace() const override {
-    return WTF::make_optional(
+  base::Optional<mojom::IPAddressSpace> GetAddressSpace() const override {
+    return base::make_optional(
         execution_context_->GetSecurityContext().AddressSpace());
   }
   const ContentSecurityPolicy* GetContentSecurityPolicy() const override {
@@ -99,6 +111,7 @@ class MockBaseFetchContext final : public BaseFetchContext {
 
   void Trace(blink::Visitor* visitor) override {
     visitor->Trace(execution_context_);
+    visitor->Trace(fetch_client_settings_object_);
     BaseFetchContext::Trace(visitor);
   }
 
@@ -107,6 +120,7 @@ class MockBaseFetchContext final : public BaseFetchContext {
 
  private:
   Member<ExecutionContext> execution_context_;
+  Member<FetchClientSettingsObjectImpl> fetch_client_settings_object_;
   bool is_detached_ = false;
 };
 
@@ -288,7 +302,8 @@ TEST_F(BaseFetchContextTest, CanRequest) {
 
   KURL url(NullURL(), "http://baz.test");
   ResourceRequest resource_request(url);
-  resource_request.SetRequestContext(WebURLRequest::kRequestContextScript);
+  resource_request.SetRequestContext(mojom::RequestContextType::SCRIPT);
+  resource_request.SetRequestorOrigin(fetch_context_->GetSecurityOrigin());
   resource_request.SetFetchCredentialsMode(
       network::mojom::FetchCredentialsMode::kOmit);
 
@@ -296,9 +311,8 @@ TEST_F(BaseFetchContextTest, CanRequest) {
 
   EXPECT_EQ(ResourceRequestBlockedReason::kCSP,
             fetch_context_->CanRequest(
-                Resource::kScript, resource_request, url, options,
+                ResourceType::kScript, resource_request, url, options,
                 SecurityViolationReportingPolicy::kReport,
-                FetchParameters::kUseDefaultOriginRestrictionForType,
                 ResourceRequest::RedirectStatus::kFollowedRedirect));
   EXPECT_EQ(1u, policy->violation_reports_sent_.size());
 }
@@ -318,9 +332,9 @@ TEST_F(BaseFetchContextTest, CheckCSPForRequest) {
 
   ResourceLoaderOptions options;
 
-  EXPECT_EQ(ResourceRequestBlockedReason::kNone,
+  EXPECT_EQ(base::nullopt,
             fetch_context_->CheckCSPForRequest(
-                WebURLRequest::kRequestContextScript, url, options,
+                mojom::RequestContextType::SCRIPT, url, options,
                 SecurityViolationReportingPolicy::kReport,
                 ResourceRequest::RedirectStatus::kFollowedRedirect));
   EXPECT_EQ(1u, policy->violation_reports_sent_.size());
@@ -329,66 +343,64 @@ TEST_F(BaseFetchContextTest, CheckCSPForRequest) {
 TEST_F(BaseFetchContextTest, CanRequestWhenDetached) {
   KURL url(NullURL(), "http://www.example.com/");
   ResourceRequest request(url);
+  request.SetRequestorOrigin(fetch_context_->GetSecurityOrigin());
   ResourceRequest keepalive_request(url);
+  keepalive_request.SetRequestorOrigin(fetch_context_->GetSecurityOrigin());
   keepalive_request.SetKeepalive(true);
 
-  EXPECT_EQ(ResourceRequestBlockedReason::kNone,
+  EXPECT_EQ(base::nullopt,
             fetch_context_->CanRequest(
-                Resource::kRaw, request, url, ResourceLoaderOptions(),
+                ResourceType::kRaw, request, url, ResourceLoaderOptions(),
                 SecurityViolationReportingPolicy::kSuppressReporting,
-                FetchParameters::kNoOriginRestriction,
                 ResourceRequest::RedirectStatus::kNoRedirect));
 
-  EXPECT_EQ(ResourceRequestBlockedReason::kNone,
-            fetch_context_->CanRequest(
-                Resource::kRaw, keepalive_request, url, ResourceLoaderOptions(),
-                SecurityViolationReportingPolicy::kSuppressReporting,
-                FetchParameters::kNoOriginRestriction,
-                ResourceRequest::RedirectStatus::kNoRedirect));
+  EXPECT_EQ(
+      base::nullopt,
+      fetch_context_->CanRequest(
+          ResourceType::kRaw, keepalive_request, url, ResourceLoaderOptions(),
+          SecurityViolationReportingPolicy::kSuppressReporting,
+          ResourceRequest::RedirectStatus::kNoRedirect));
 
-  EXPECT_EQ(ResourceRequestBlockedReason::kNone,
+  EXPECT_EQ(base::nullopt,
             fetch_context_->CanRequest(
-                Resource::kRaw, request, url, ResourceLoaderOptions(),
+                ResourceType::kRaw, request, url, ResourceLoaderOptions(),
                 SecurityViolationReportingPolicy::kSuppressReporting,
-                FetchParameters::kNoOriginRestriction,
                 ResourceRequest::RedirectStatus::kFollowedRedirect));
 
-  EXPECT_EQ(ResourceRequestBlockedReason::kNone,
-            fetch_context_->CanRequest(
-                Resource::kRaw, keepalive_request, url, ResourceLoaderOptions(),
-                SecurityViolationReportingPolicy::kSuppressReporting,
-                FetchParameters::kNoOriginRestriction,
-                ResourceRequest::RedirectStatus::kFollowedRedirect));
+  EXPECT_EQ(
+      base::nullopt,
+      fetch_context_->CanRequest(
+          ResourceType::kRaw, keepalive_request, url, ResourceLoaderOptions(),
+          SecurityViolationReportingPolicy::kSuppressReporting,
+          ResourceRequest::RedirectStatus::kFollowedRedirect));
 
   fetch_context_->SetIsDetached(true);
 
   EXPECT_EQ(ResourceRequestBlockedReason::kOther,
             fetch_context_->CanRequest(
-                Resource::kRaw, request, url, ResourceLoaderOptions(),
+                ResourceType::kRaw, request, url, ResourceLoaderOptions(),
                 SecurityViolationReportingPolicy::kSuppressReporting,
-                FetchParameters::kNoOriginRestriction,
                 ResourceRequest::RedirectStatus::kNoRedirect));
+
+  EXPECT_EQ(
+      ResourceRequestBlockedReason::kOther,
+      fetch_context_->CanRequest(
+          ResourceType::kRaw, keepalive_request, url, ResourceLoaderOptions(),
+          SecurityViolationReportingPolicy::kSuppressReporting,
+          ResourceRequest::RedirectStatus::kNoRedirect));
 
   EXPECT_EQ(ResourceRequestBlockedReason::kOther,
             fetch_context_->CanRequest(
-                Resource::kRaw, keepalive_request, url, ResourceLoaderOptions(),
+                ResourceType::kRaw, request, url, ResourceLoaderOptions(),
                 SecurityViolationReportingPolicy::kSuppressReporting,
-                FetchParameters::kNoOriginRestriction,
-                ResourceRequest::RedirectStatus::kNoRedirect));
-
-  EXPECT_EQ(ResourceRequestBlockedReason::kOther,
-            fetch_context_->CanRequest(
-                Resource::kRaw, request, url, ResourceLoaderOptions(),
-                SecurityViolationReportingPolicy::kSuppressReporting,
-                FetchParameters::kNoOriginRestriction,
                 ResourceRequest::RedirectStatus::kFollowedRedirect));
 
-  EXPECT_EQ(ResourceRequestBlockedReason::kNone,
-            fetch_context_->CanRequest(
-                Resource::kRaw, keepalive_request, url, ResourceLoaderOptions(),
-                SecurityViolationReportingPolicy::kSuppressReporting,
-                FetchParameters::kNoOriginRestriction,
-                ResourceRequest::RedirectStatus::kFollowedRedirect));
+  EXPECT_EQ(
+      base::nullopt,
+      fetch_context_->CanRequest(
+          ResourceType::kRaw, keepalive_request, url, ResourceLoaderOptions(),
+          SecurityViolationReportingPolicy::kSuppressReporting,
+          ResourceRequest::RedirectStatus::kFollowedRedirect));
 }
 
 // Test that User Agent CSS can only load images with data urls.
@@ -397,28 +409,26 @@ TEST_F(BaseFetchContextTest, UACSSTest) {
   KURL data_url("data:image/png;base64,test");
 
   ResourceRequest resource_request(test_url);
+  resource_request.SetRequestorOrigin(fetch_context_->GetSecurityOrigin());
   ResourceLoaderOptions options;
   options.initiator_info.name = FetchInitiatorTypeNames::uacss;
 
   EXPECT_EQ(ResourceRequestBlockedReason::kOther,
             fetch_context_->CanRequest(
-                Resource::kScript, resource_request, test_url, options,
+                ResourceType::kScript, resource_request, test_url, options,
                 SecurityViolationReportingPolicy::kReport,
-                FetchParameters::kUseDefaultOriginRestrictionForType,
                 ResourceRequest::RedirectStatus::kFollowedRedirect));
 
   EXPECT_EQ(ResourceRequestBlockedReason::kOther,
             fetch_context_->CanRequest(
-                Resource::kImage, resource_request, test_url, options,
+                ResourceType::kImage, resource_request, test_url, options,
                 SecurityViolationReportingPolicy::kReport,
-                FetchParameters::kUseDefaultOriginRestrictionForType,
                 ResourceRequest::RedirectStatus::kFollowedRedirect));
 
-  EXPECT_EQ(ResourceRequestBlockedReason::kNone,
+  EXPECT_EQ(base::nullopt,
             fetch_context_->CanRequest(
-                Resource::kImage, resource_request, data_url, options,
+                ResourceType::kImage, resource_request, data_url, options,
                 SecurityViolationReportingPolicy::kReport,
-                FetchParameters::kUseDefaultOriginRestrictionForType,
                 ResourceRequest::RedirectStatus::kFollowedRedirect));
 }
 
@@ -433,14 +443,14 @@ TEST_F(BaseFetchContextTest, UACSSTest_BypassCSP) {
   KURL data_url("data:image/png;base64,test");
 
   ResourceRequest resource_request(data_url);
+  resource_request.SetRequestorOrigin(fetch_context_->GetSecurityOrigin());
   ResourceLoaderOptions options;
   options.initiator_info.name = FetchInitiatorTypeNames::uacss;
 
-  EXPECT_EQ(ResourceRequestBlockedReason::kNone,
+  EXPECT_EQ(base::nullopt,
             fetch_context_->CanRequest(
-                Resource::kImage, resource_request, data_url, options,
+                ResourceType::kImage, resource_request, data_url, options,
                 SecurityViolationReportingPolicy::kReport,
-                FetchParameters::kUseDefaultOriginRestrictionForType,
                 ResourceRequest::RedirectStatus::kFollowedRedirect));
 }
 

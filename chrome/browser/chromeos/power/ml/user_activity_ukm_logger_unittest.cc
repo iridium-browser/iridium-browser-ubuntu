@@ -45,6 +45,8 @@ class UserActivityUkmLoggerTest : public testing::Test {
     features->set_last_user_activity_time_sec(3800);
     features->set_key_events_in_last_hour(20000);
     features->set_recent_time_active_sec(10);
+    features->set_previous_negative_actions_count(2);
+    features->set_previous_positive_actions_count(1);
     features->set_video_playing_time_sec(800);
     features->set_on_to_dim_sec(100);
     features->set_dim_to_screen_off_sec(200);
@@ -57,13 +59,19 @@ class UserActivityUkmLoggerTest : public testing::Test {
     features->set_mouse_events_in_last_hour(89);
     features->set_touch_events_in_last_hour(1890);
 
+    UserActivityEvent::ModelPrediction* prediction =
+        user_activity_event_.mutable_model_prediction();
+    prediction->set_decision_threshold(50);
+    prediction->set_inactivity_score(60);
+    prediction->set_model_applied(true);
+    prediction->set_response(UserActivityEvent::ModelPrediction::NO_DIM);
+
     user_activity_logger_delegate_ukm_.ukm_recorder_ = &recorder_;
   }
 
  protected:
-  void LogActivity(const UserActivityEvent& event,
-                   const std::map<ukm::SourceId, TabProperty>& open_tabs) {
-    user_activity_logger_delegate_ukm_.LogActivity(event, open_tabs);
+  void LogActivity(const UserActivityEvent& event) {
+    user_activity_logger_delegate_ukm_.LogActivity(event);
   }
 
   void CheckUserActivityValues(const ukm::mojom::UkmEntry* entry) {
@@ -87,9 +95,20 @@ class UserActivityUkmLoggerTest : public testing::Test {
     recorder_.ExpectEntryMetric(entry, UserActivity::kLastActivityTimeName, 2);
     recorder_.ExpectEntryMetric(entry, UserActivity::kLastUserActivityTimeName,
                                 1);
+    recorder_.ExpectEntryMetric(entry, UserActivity::kModelAppliedName, 1);
+    recorder_.ExpectEntryMetric(entry,
+                                UserActivity::kModelDecisionThresholdName, 50);
+    recorder_.ExpectEntryMetric(entry, UserActivity::kModelInactivityScoreName,
+                                60);
+    recorder_.ExpectEntryMetric(entry, UserActivity::kModelResponseName, 1);
     recorder_.ExpectEntryMetric(entry, UserActivity::kMouseEventsInLastHourName,
                                 89);
     EXPECT_FALSE(recorder_.EntryHasMetric(entry, UserActivity::kOnBatteryName));
+    recorder_.ExpectEntryMetric(
+        entry, UserActivity::kPreviousNegativeActionsCountName, 2);
+    recorder_.ExpectEntryMetric(
+        entry, UserActivity::kPreviousPositiveActionsCountName, 1);
+
     recorder_.ExpectEntryMetric(entry, UserActivity::kRecentTimeActiveName, 10);
     recorder_.ExpectEntryMetric(entry,
                                 UserActivity::kRecentVideoPlayingTimeName, 600);
@@ -130,56 +149,17 @@ class UserActivityUkmLoggerTest : public testing::Test {
   DISALLOW_COPY_AND_ASSIGN(UserActivityUkmLoggerTest);
 };
 
-TEST_F(UserActivityUkmLoggerTest, BucketEveryFivePercents) {
-  const std::vector<int> original_values = {0, 14, 15, 100};
-  const std::vector<int> results = {0, 10, 15, 100};
-  constexpr UserActivityUkmLoggerImpl::Bucket buckets[] = {{100, 5}};
-
-  for (size_t i = 0; i < original_values.size(); ++i) {
-    EXPECT_EQ(results[i], UserActivityUkmLoggerImpl::Bucketize(
-                              original_values[i], buckets, arraysize(buckets)));
-  }
-}
-
-TEST_F(UserActivityUkmLoggerTest, Bucketize) {
-  const std::vector<int> original_values = {0,   18,  59,  60,  62,  69,  72,
-                                            299, 300, 306, 316, 599, 600, 602};
-  constexpr UserActivityUkmLoggerImpl::Bucket buckets[] = {
-      {60, 1}, {300, 10}, {600, 20}};
-  const std::vector<int> results = {0,   18,  59,  60,  60,  60,  70,
-                                    290, 300, 300, 300, 580, 600, 600};
-  for (size_t i = 0; i < original_values.size(); ++i) {
-    EXPECT_EQ(results[i], UserActivityUkmLoggerImpl::Bucketize(
-                              original_values[i], buckets, arraysize(buckets)));
-  }
-}
-
 TEST_F(UserActivityUkmLoggerTest, BasicLogging) {
-  TabProperty properties[2];
+  auto user_activity_event = user_activity_event_;
+  UserActivityEvent::Features* features =
+      user_activity_event.mutable_features();
+  features->set_source_id(recorder_.GetNewSourceID());
+  const GURL kUrl1 = GURL("https://example1.com/");
+  features->set_tab_domain(kUrl1.host());
+  features->set_engagement_score(90);
+  features->set_has_form_entry(false);
 
-  properties[0].is_active = true;
-  properties[0].is_browser_focused = false;
-  properties[0].is_browser_visible = true;
-  properties[0].is_topmost_browser = false;
-  properties[0].engagement_score = 90;
-  properties[0].content_type =
-      metrics::TabMetricsEvent::CONTENT_TYPE_APPLICATION;
-  properties[0].has_form_entry = false;
-
-  properties[1].is_active = false;
-  properties[1].is_browser_focused = true;
-  properties[1].is_browser_visible = false;
-  properties[1].is_topmost_browser = true;
-  properties[1].engagement_score = 0;
-  properties[1].content_type = metrics::TabMetricsEvent::CONTENT_TYPE_TEXT_HTML;
-  properties[1].has_form_entry = true;
-
-  ukm::SourceId source_ids[2];
-  for (int i = 0; i < 2; ++i)
-    source_ids[i] = recorder_.GetNewSourceID();
-  std::map<ukm::SourceId, TabProperty> source_properties(
-      {{source_ids[0], properties[0]}, {source_ids[1], properties[1]}});
-  LogActivity(user_activity_event_, source_properties);
+  LogActivity(user_activity_event);
 
   const auto& activity_entries =
       recorder_.GetEntriesByName(UserActivity::kEntryName);
@@ -190,40 +170,19 @@ TEST_F(UserActivityUkmLoggerTest, BasicLogging) {
   const ukm::SourceId kSourceId = activity_entry->source_id;
   const auto& activity_id_entries =
       recorder_.GetEntriesByName(UserActivityId::kEntryName);
-  EXPECT_EQ(2u, activity_id_entries.size());
+  EXPECT_EQ(1u, activity_id_entries.size());
 
-  const ukm::mojom::UkmEntry* entry0 = activity_id_entries[0];
-  recorder_.ExpectEntryMetric(entry0, UserActivityId::kActivityIdName,
+  const ukm::mojom::UkmEntry* entry = activity_id_entries[0];
+  recorder_.ExpectEntryMetric(entry, UserActivityId::kActivityIdName,
                               kSourceId);
-  recorder_.ExpectEntryMetric(entry0, UserActivityId::kIsActiveName, 1);
-  recorder_.ExpectEntryMetric(entry0, UserActivityId::kIsBrowserFocusedName, 0);
-  recorder_.ExpectEntryMetric(entry0, UserActivityId::kIsBrowserVisibleName, 1);
-  recorder_.ExpectEntryMetric(entry0, UserActivityId::kIsTopmostBrowserName, 0);
-  recorder_.ExpectEntryMetric(entry0, UserActivityId::kSiteEngagementScoreName,
+  recorder_.ExpectEntryMetric(entry, UserActivityId::kSiteEngagementScoreName,
                               90);
-  recorder_.ExpectEntryMetric(
-      entry0, UserActivityId::kContentTypeName,
-      metrics::TabMetricsEvent::CONTENT_TYPE_APPLICATION);
-  recorder_.ExpectEntryMetric(entry0, UserActivityId::kHasFormEntryName, 0);
-
-  const ukm::mojom::UkmEntry* entry1 = activity_id_entries[1];
-  recorder_.ExpectEntryMetric(entry1, UserActivityId::kActivityIdName,
-                              kSourceId);
-  recorder_.ExpectEntryMetric(entry1, UserActivityId::kIsActiveName, 0);
-  recorder_.ExpectEntryMetric(entry1, UserActivityId::kIsBrowserFocusedName, 1);
-  recorder_.ExpectEntryMetric(entry1, UserActivityId::kIsBrowserVisibleName, 0);
-  recorder_.ExpectEntryMetric(entry1, UserActivityId::kIsTopmostBrowserName, 1);
-  recorder_.ExpectEntryMetric(entry1, UserActivityId::kSiteEngagementScoreName,
-                              0);
-  recorder_.ExpectEntryMetric(entry1, UserActivityId::kContentTypeName,
-                              metrics::TabMetricsEvent::CONTENT_TYPE_TEXT_HTML);
-  recorder_.ExpectEntryMetric(entry1, UserActivityId::kHasFormEntryName, 1);
+  recorder_.ExpectEntryMetric(entry, UserActivityId::kHasFormEntryName, 0);
 }
 
 // Tests what would be logged in Incognito: when source IDs are not provided.
 TEST_F(UserActivityUkmLoggerTest, EmptySources) {
-  std::map<ukm::SourceId, TabProperty> empty_source_properties;
-  LogActivity(user_activity_event_, empty_source_properties);
+  LogActivity(user_activity_event_);
 
   const auto& activity_entries =
       recorder_.GetEntriesByName(UserActivity::kEntryName);
@@ -257,9 +216,13 @@ TEST_F(UserActivityUkmLoggerTest, TwoUserActivityEvents) {
   features->set_dim_to_screen_off_sec(20);
   features->set_time_since_last_mouse_sec(200);
 
-  std::map<ukm::SourceId, TabProperty> empty_source_properties;
-  LogActivity(user_activity_event_, empty_source_properties);
-  LogActivity(user_activity_event2, empty_source_properties);
+  UserActivityEvent::ModelPrediction* prediction =
+      user_activity_event2.mutable_model_prediction();
+  prediction->set_model_applied(false);
+  prediction->set_response(UserActivityEvent::ModelPrediction::MODEL_ERROR);
+
+  LogActivity(user_activity_event_);
+  LogActivity(user_activity_event2);
 
   const auto& activity_entries =
       recorder_.GetEntriesByName(UserActivity::kEntryName);
@@ -297,6 +260,12 @@ TEST_F(UserActivityUkmLoggerTest, TwoUserActivityEvents) {
       recorder_.EntryHasMetric(entry1, UserActivity::kTimeSinceLastKeyName));
   recorder_.ExpectEntryMetric(entry1, UserActivity::kTimeSinceLastMouseName,
                               200);
+  recorder_.ExpectEntryMetric(entry1, UserActivity::kModelResponseName, 2);
+  recorder_.ExpectEntryMetric(entry1, UserActivity::kModelAppliedName, 0);
+  EXPECT_FALSE(recorder_.EntryHasMetric(
+      entry1, UserActivity::kModelDecisionThresholdName));
+  EXPECT_FALSE(recorder_.EntryHasMetric(
+      entry1, UserActivity::kModelInactivityScoreName));
 
   EXPECT_EQ(0u, recorder_.GetEntriesByName(UserActivityId::kEntryName).size());
 }

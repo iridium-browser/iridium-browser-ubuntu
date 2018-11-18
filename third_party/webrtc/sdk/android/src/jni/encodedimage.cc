@@ -10,7 +10,7 @@
 
 #include "sdk/android/src/jni/encodedimage.h"
 
-#include "common_video/include/video_frame.h"
+#include "api/video/encoded_image.h"
 #include "rtc_base/timeutils.h"
 #include "sdk/android/generated_video_jni/jni/EncodedImage_jni.h"
 #include "sdk/android/native_api/jni/java_types.h"
@@ -35,7 +35,8 @@ ScopedJavaLocalRef<jobject> NativeToJavaEncodedImage(
   if (image.qp_ != -1)
     qp = NativeToJavaInteger(jni, image.qp_);
   return Java_EncodedImage_Constructor(
-      jni, buffer, image._encodedWidth, image._encodedHeight,
+      jni, buffer, static_cast<int>(image._encodedWidth),
+      static_cast<int>(image._encodedHeight),
       image.capture_time_ms_ * rtc::kNumNanosecsPerMillisec, frame_type,
       static_cast<jint>(image.rotation_), image._completeFrame, qp);
 }

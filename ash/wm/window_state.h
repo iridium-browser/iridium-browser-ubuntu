@@ -17,6 +17,8 @@
 #include "base/optional.h"
 #include "ui/aura/window_observer.h"
 #include "ui/base/ui_base_types.h"
+#include "ui/compositor/layer_owner.h"
+#include "ui/gfx/animation/tween.h"
 
 namespace gfx {
 class Rect;
@@ -114,6 +116,7 @@ class ASH_EXPORT WindowState : public aura::WindowObserver {
   bool IsSnapped() const;
   bool IsPinned() const;
   bool IsTrustedPinned() const;
+  bool IsPip() const;
 
   // True if the window's state type is WindowStateType::MAXIMIZED,
   // WindowStateType::FULLSCREEN or WindowStateType::PINNED.
@@ -228,16 +231,6 @@ class ASH_EXPORT WindowState : public aura::WindowObserver {
 
   void set_autohide_shelf_when_maximized_or_fullscreen(bool value) {
     autohide_shelf_when_maximized_or_fullscreen_ = value;
-  }
-
-  // If the minimum visibility is true, ash will try to keep a
-  // minimum amount of the window is always visible on the work area
-  // when shown.
-  // TODO(oshima): Consolidate this and GetWindowPositionManaged
-  // into single parameter to control the window placement.
-  bool minimum_visibility() const { return minimum_visibility_; }
-  void set_minimum_visibility(bool minimum_visibility) {
-    minimum_visibility_ = minimum_visibility;
   }
 
   // Gets/Sets the bounds of the window before it was moved by the auto window
@@ -363,6 +356,8 @@ class ASH_EXPORT WindowState : public aura::WindowObserver {
 
   WindowStateDelegate* delegate() { return delegate_.get(); }
 
+  bool HasMaximumWidthOrHeight() const;
+
   // Returns the window's current always_on_top state.
   bool GetAlwaysOnTop() const;
 
@@ -401,7 +396,13 @@ class ASH_EXPORT WindowState : public aura::WindowObserver {
 
   // Sets the window's |bounds| and transition to the new bounds with
   // a cross fade animation.
-  void SetBoundsDirectCrossFade(const gfx::Rect& bounds);
+  void SetBoundsDirectCrossFade(
+      const gfx::Rect& bounds,
+      gfx::Tween::Type animation_type = gfx::Tween::EASE_OUT);
+
+  // Updates rounded corners for PIP window states. Removes rounded corners
+  // for non-PIP window states.
+  void UpdatePipRoundedCorners();
 
   // aura::WindowObserver:
   void OnWindowPropertyChanged(aura::Window* window,
@@ -423,9 +424,11 @@ class ASH_EXPORT WindowState : public aura::WindowObserver {
   bool ignore_keyboard_bounds_change_ = false;
   bool hide_shelf_when_fullscreen_;
   bool autohide_shelf_when_maximized_or_fullscreen_;
-  bool minimum_visibility_;
   bool cached_always_on_top_;
   bool allow_set_bounds_direct_ = false;
+
+  // Mask layer for PIP windows.
+  std::unique_ptr<ui::LayerOwner> pip_mask_ = nullptr;
 
   // A property to save the ratio between snapped window width and display
   // workarea width. It is used to update snapped window width on
@@ -446,7 +449,7 @@ class ASH_EXPORT WindowState : public aura::WindowObserver {
   // displays are restored to their previous states.
   base::Optional<PersistentWindowInfo> persistent_window_info_;
 
-  base::ObserverList<WindowStateObserver> observer_list_;
+  base::ObserverList<WindowStateObserver>::Unchecked observer_list_;
 
   // True to ignore a property change event to avoid reentrance in
   // UpdateWindowStateType()

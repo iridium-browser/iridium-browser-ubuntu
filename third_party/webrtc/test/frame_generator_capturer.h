@@ -17,18 +17,15 @@
 #include "rtc_base/criticalsection.h"
 #include "rtc_base/task_queue.h"
 #include "test/frame_generator.h"
-#include "test/video_capturer.h"
-#include "typedefs.h"  // NOLINT(build/include)
+#include "test/test_video_capturer.h"
 
 namespace webrtc {
-
-class EventTimerWrapper;
 
 namespace test {
 
 class FrameGenerator;
 
-class FrameGeneratorCapturer : public VideoCapturer {
+class FrameGeneratorCapturer : public TestVideoCapturer {
  public:
   class SinkWantsObserver {
    public:
@@ -46,8 +43,8 @@ class FrameGeneratorCapturer : public VideoCapturer {
   static FrameGeneratorCapturer* Create(
       int width,
       int height,
-      rtc::Optional<FrameGenerator::OutputType> type,
-      rtc::Optional<int> num_squares,
+      absl::optional<FrameGenerator::OutputType> type,
+      absl::optional<int> num_squares,
       int target_fps,
       Clock* clock);
 
@@ -67,6 +64,7 @@ class FrameGeneratorCapturer : public VideoCapturer {
   void Start() override;
   void Stop() override;
   void ChangeResolution(size_t width, size_t height);
+  void ChangeFramerate(int target_framerate);
 
   void SetSinkWantsObserver(SinkWantsObserver* observer);
 
@@ -99,8 +97,9 @@ class FrameGeneratorCapturer : public VideoCapturer {
   rtc::CriticalSection lock_;
   std::unique_ptr<FrameGenerator> frame_generator_;
 
-  int target_fps_ RTC_GUARDED_BY(&lock_);
-  rtc::Optional<int> wanted_fps_ RTC_GUARDED_BY(&lock_);
+  int source_fps_ RTC_GUARDED_BY(&lock_);
+  int target_capture_fps_ RTC_GUARDED_BY(&lock_);
+  absl::optional<int> wanted_fps_ RTC_GUARDED_BY(&lock_);
   VideoRotation fake_rotation_ = kVideoRotation_0;
 
   int64_t first_frame_capture_time_;

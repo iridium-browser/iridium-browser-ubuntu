@@ -9,17 +9,12 @@
 
 namespace device {
 
-unsigned int VRDeviceBase::next_id_ = 1;
-
-VRDeviceBase::VRDeviceBase() : id_(next_id_) {
-  // Prevent wraparound. Devices with this ID will be treated as invalid.
-  if (next_id_ != VR_DEVICE_LAST_ID)
-    next_id_++;
-}
+VRDeviceBase::VRDeviceBase(mojom::XRDeviceId id)
+    : id_(id), runtime_binding_(this) {}
 
 VRDeviceBase::~VRDeviceBase() = default;
 
-unsigned int VRDeviceBase::GetId() const {
+mojom::XRDeviceId VRDeviceBase::GetId() const {
   return id_;
 }
 
@@ -27,134 +22,119 @@ void VRDeviceBase::PauseTracking() {}
 
 void VRDeviceBase::ResumeTracking() {}
 
-void VRDeviceBase::Blur() {
-  for (VRDisplayImpl* display : displays_)
-    display->OnBlur();
-}
-
-void VRDeviceBase::Focus() {
-  for (VRDisplayImpl* display : displays_)
-    display->OnFocus();
-}
-
-void VRDeviceBase::OnExitPresent() {
-  if (!presenting_display_)
-    return;
-  auto it = displays_.find(presenting_display_);
-  CHECK(it != displays_.end());
-  (*it)->OnExitPresent();
-  SetPresentingDisplay(nullptr);
-}
-
-bool VRDeviceBase::IsFallbackDevice() {
-  return false;
-};
-
 mojom::VRDisplayInfoPtr VRDeviceBase::GetVRDisplayInfo() {
-  DCHECK(display_info_);
   return display_info_.Clone();
 }
 
-void VRDeviceBase::RequestPresent(
-    VRDisplayImpl* display,
-    mojom::VRSubmitFrameClientPtr submit_client,
-    mojom::VRPresentationProviderRequest request,
-    mojom::VRRequestPresentOptionsPtr present_options,
-    mojom::VRDisplayHost::RequestPresentCallback callback) {
-  std::move(callback).Run(false, nullptr);
+void VRDeviceBase::OnExitPresent() {
+  if (listener_)
+    listener_->OnExitPresent();
+  presenting_ = false;
 }
 
-void VRDeviceBase::ExitPresent() {
-  NOTREACHED();
+void VRDeviceBase::OnStartPresenting() {
+  presenting_ = true;
+}
+
+bool VRDeviceBase::HasExclusiveSession() {
+  return presenting_;
 }
 
 void VRDeviceBase::SetMagicWindowEnabled(bool enabled) {
   magic_window_enabled_ = enabled;
 }
 
-void VRDeviceBase::GetMagicWindowPose(
-    mojom::VRMagicWindowProvider::GetPoseCallback callback) {
+void VRDeviceBase::ListenToDeviceChanges(
+    mojom::XRRuntimeEventListenerAssociatedPtrInfo listener_info,
+    mojom::XRRuntime::ListenToDeviceChangesCallback callback) {
+  listener_.Bind(std::move(listener_info));
+  std::move(callback).Run(display_info_.Clone());
+}
+
+void VRDeviceBase::GetFrameData(
+    mojom::XRFrameDataProvider::GetFrameDataCallback callback) {
   if (!magic_window_enabled_) {
     std::move(callback).Run(nullptr);
     return;
   }
 
-  OnMagicWindowPoseRequest(std::move(callback));
-}
-
-void VRDeviceBase::AddDisplay(VRDisplayImpl* display) {
-  displays_.insert(display);
-}
-
-void VRDeviceBase::RemoveDisplay(VRDisplayImpl* display) {
-  if (CheckPresentingDisplay(display))
-    ExitPresent();
-  displays_.erase(display);
-  if (listening_for_activate_diplay_ == display) {
-    listening_for_activate_diplay_ = nullptr;
-    OnListeningForActivate(false);
-  }
-}
-
-bool VRDeviceBase::IsAccessAllowed(VRDisplayImpl* display) {
-  return (!presenting_display_ || presenting_display_ == display);
-}
-
-bool VRDeviceBase::CheckPresentingDisplay(VRDisplayImpl* display) {
-  return (presenting_display_ && presenting_display_ == display);
-}
-
-void VRDeviceBase::OnListeningForActivateChanged(VRDisplayImpl* display) {
-  UpdateListeningForActivate(display);
-}
-
-void VRDeviceBase::OnFrameFocusChanged(VRDisplayImpl* display) {
-  UpdateListeningForActivate(display);
-}
-
-void VRDeviceBase::SetPresentingDisplay(VRDisplayImpl* display) {
-  presenting_display_ = display;
+  OnMagicWindowFrameDataRequest(std::move(callback));
 }
 
 void VRDeviceBase::SetVRDisplayInfo(mojom::VRDisplayInfoPtr display_info) {
   DCHECK(display_info);
-  DCHECK(display_info->index == id_);
-  bool initialized = !!display_info_;
+  DCHECK(display_info->id == id_);
   display_info_ = std::move(display_info);
 
-  // Don't notify when the VRDisplayInfo is initially set.
-  if (!initialized)
-    return;
-  for (VRDisplayImpl* display : displays_)
-    display->OnChanged(display_info_.Clone());
+  if (listener_)
+    listener_->OnDisplayInfoChanged(display_info_.Clone());
 }
 
 void VRDeviceBase::OnActivate(mojom::VRDisplayEventReason reason,
                               base::Callback<void(bool)> on_handled) {
-  if (listening_for_activate_diplay_) {
-    listening_for_activate_diplay_->OnActivate(reason, std::move(on_handled));
-  } else {
-    std::move(on_handled).Run(true /* will_not_present */);
-  }
+  if (listener_)
+    listener_->OnDeviceActivated(reason, std::move(on_handled));
+}
+
+mojom::XRRuntimePtr VRDeviceBase::BindXRRuntimePtr() {
+  mojom::XRRuntimePtr runtime;
+  runtime_binding_.Bind(mojo::MakeRequest(&runtime));
+  return runtime;
+}
+
+bool VRDeviceBase::ShouldPauseTrackingWhenFrameDataRestricted() {
+  return false;
 }
 
 void VRDeviceBase::OnListeningForActivate(bool listening) {}
 
-void VRDeviceBase::OnMagicWindowPoseRequest(
-    mojom::VRMagicWindowProvider::GetPoseCallback callback) {
+void VRDeviceBase::OnMagicWindowFrameDataRequest(
+    mojom::XRFrameDataProvider::GetFrameDataCallback callback) {
   std::move(callback).Run(nullptr);
 }
 
-void VRDeviceBase::UpdateListeningForActivate(VRDisplayImpl* display) {
-  if (display->ListeningForActivate() && display->InFocusedFrame()) {
-    bool was_listening = !!listening_for_activate_diplay_;
-    listening_for_activate_diplay_ = display;
-    if (!was_listening)
-      OnListeningForActivate(true);
-  } else if (listening_for_activate_diplay_ == display) {
-    listening_for_activate_diplay_ = nullptr;
-    OnListeningForActivate(false);
+void VRDeviceBase::SetListeningForActivate(bool is_listening) {
+  OnListeningForActivate(is_listening);
+}
+
+void VRDeviceBase::EnsureInitialized(EnsureInitializedCallback callback) {
+  std::move(callback).Run();
+}
+
+void VRDeviceBase::RequestHitTest(
+    mojom::XRRayPtr ray,
+    mojom::XREnvironmentIntegrationProvider::RequestHitTestCallback callback) {
+  NOTREACHED() << "Unexpected call to a device without hit-test support";
+  std::move(callback).Run(base::nullopt);
+}
+
+void VRDeviceBase::ReturnNonImmersiveSession(
+    mojom::XRRuntime::RequestSessionCallback callback) {
+  mojom::XRFrameDataProviderPtr data_provider;
+  mojom::XREnvironmentIntegrationProviderPtr environment_provider;
+  mojom::XRSessionControllerPtr controller;
+  magic_window_sessions_.push_back(
+      std::make_unique<VRDisplayImpl>(this, mojo::MakeRequest(&data_provider),
+                                      mojo::MakeRequest(&environment_provider),
+                                      mojo::MakeRequest(&controller)));
+
+  auto session = mojom::XRSession::New();
+  session->data_provider = data_provider.PassInterface();
+  // TODO(http://crbug.com/876135) Not all sessions want the environment
+  // provider. This should be refactored to only be passed when requested.
+  session->environment_provider = environment_provider.PassInterface();
+  if (display_info_) {
+    session->display_info = display_info_.Clone();
   }
+
+  std::move(callback).Run(std::move(session), std::move(controller));
+}
+
+void VRDeviceBase::EndMagicWindowSession(VRDisplayImpl* session) {
+  base::EraseIf(magic_window_sessions_,
+                [&](const std::unique_ptr<VRDisplayImpl>& item) {
+                  return item.get() == session;
+                });
 }
 
 }  // namespace device

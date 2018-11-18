@@ -12,7 +12,6 @@
 #include "base/hash.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
 #include "base/pickle.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
@@ -30,6 +29,7 @@
 #include "net/disk_cache/simple/simple_util.h"
 #include "net/disk_cache/simple/simple_version_upgrade.h"
 #include "net/test/gtest_util.h"
+#include "net/test/test_with_scoped_task_environment.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -170,7 +170,7 @@ class WrappedSimpleIndexFile : public SimpleIndexFile {
   }
 };
 
-class SimpleIndexFileTest : public testing::Test {
+class SimpleIndexFileTest : public net::TestWithScopedTaskEnvironment {
  public:
   bool CompareTwoEntryMetadata(const EntryMetadata& a, const EntryMetadata& b) {
     return a.last_used_time_seconds_since_epoch_ ==
@@ -215,7 +215,7 @@ TEST_F(SimpleIndexFileTest, Serialize) {
   EXPECT_EQ(entries.size(), new_entries.size());
 
   for (size_t i = 0; i < kNumHashes; ++i) {
-    SimpleIndex::EntrySet::const_iterator it = new_entries.find(kHashes[i]);
+    auto it = new_entries.find(kHashes[i]);
     EXPECT_TRUE(new_entries.end() != it);
     EXPECT_TRUE(CompareTwoEntryMetadata(it->second, metadata_entries[i]));
   }
@@ -257,7 +257,7 @@ TEST_F(SimpleIndexFileTest, ReadV7Format) {
   const SimpleIndex::EntrySet& new_entries = deserialize_result.entries;
   ASSERT_EQ(entries.size(), new_entries.size());
   for (size_t i = 0; i < kNumHashes; ++i) {
-    SimpleIndex::EntrySet::const_iterator it = new_entries.find(kHashes[i]);
+    auto it = new_entries.find(kHashes[i]);
     ASSERT_TRUE(new_entries.end() != it);
     EXPECT_EQ(RoundSize(kSizes[i]), it->second.GetEntrySize());
     EXPECT_EQ(0u, it->second.GetInMemoryData());
@@ -365,6 +365,38 @@ TEST_F(SimpleIndexFileTest, LoadCorruptIndex) {
   EXPECT_TRUE(load_index_result.flush_required);
 }
 
+TEST_F(SimpleIndexFileTest, LoadCorruptIndex2) {
+  // Variant where the index looks like a pickle, but not one with right
+  // header size --- that used to hit a DCHECK on debug builds.
+  base::ScopedTempDir cache_dir;
+  ASSERT_TRUE(cache_dir.CreateUniqueTempDir());
+
+  WrappedSimpleIndexFile simple_index_file(cache_dir.GetPath());
+  ASSERT_TRUE(simple_index_file.CreateIndexFileDirectory());
+  const base::FilePath& index_path = simple_index_file.GetIndexFilePath();
+  base::Pickle bad_payload;
+  bad_payload.WriteString("nothing to be seen here");
+
+  EXPECT_EQ(
+      static_cast<int>(bad_payload.size()),
+      base::WriteFile(index_path, static_cast<const char*>(bad_payload.data()),
+                      bad_payload.size()));
+  base::Time fake_cache_mtime;
+  ASSERT_TRUE(simple_util::GetMTime(simple_index_file.GetIndexFilePath(),
+                                    &fake_cache_mtime));
+  EXPECT_FALSE(WrappedSimpleIndexFile::LegacyIsIndexFileStale(fake_cache_mtime,
+                                                              index_path));
+  SimpleIndexLoadResult load_index_result;
+  net::TestClosure closure;
+  simple_index_file.LoadIndexEntries(fake_cache_mtime, closure.closure(),
+                                     &load_index_result);
+  closure.WaitForResult();
+
+  EXPECT_FALSE(base::PathExists(index_path));
+  EXPECT_TRUE(load_index_result.did_load);
+  EXPECT_TRUE(load_index_result.flush_required);
+}
+
 // Tests that after an upgrade the backend has the index file put in place.
 TEST_F(SimpleIndexFileTest, SimpleCacheUpgrade) {
   base::ScopedTempDir cache_dir;
@@ -393,8 +425,8 @@ TEST_F(SimpleIndexFileTest, SimpleCacheUpgrade) {
                             index_file_contents.size()));
 
   // Upgrade the cache.
-  ASSERT_TRUE(
-      disk_cache::UpgradeSimpleCacheOnDisk(cache_path, SimpleExperiment()));
+  ASSERT_EQ(disk_cache::UpgradeSimpleCacheOnDisk(cache_path),
+            SimpleCacheConsistencyResult::kOK);
 
   // Create the backend and initiate index flush by destroying the backend.
   scoped_refptr<disk_cache::BackendCleanupTracker> cleanup_tracker =

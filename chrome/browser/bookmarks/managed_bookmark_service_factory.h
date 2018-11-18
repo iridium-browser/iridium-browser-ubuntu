@@ -27,7 +27,9 @@ class ManagedBookmarkServiceFactory : public BrowserContextKeyedServiceFactory {
  public:
   static bookmarks::ManagedBookmarkService* GetForProfile(Profile* profile);
   static ManagedBookmarkServiceFactory* GetInstance();
-  static TestingFactoryFunction GetDefaultFactory();
+  static TestingFactory GetDefaultFactory();
+
+  static std::string GetManagedBookmarksDomain(Profile* profile);
 
  private:
   friend struct base::DefaultSingletonTraits<ManagedBookmarkServiceFactory>;

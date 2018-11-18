@@ -45,12 +45,13 @@ public final class OfflineItemBridge {
     private static OfflineItem createOfflineItemAndMaybeAddToList(ArrayList<OfflineItem> list,
             String nameSpace, String id, String title, String description,
             @OfflineItemFilter int filter, boolean isTransient, boolean isSuggested,
+            boolean isAccelerated, boolean refreshVisuals, boolean promoteOrigin,
             long totalSizeBytes, boolean externallyRemoved, long creationTimeMs,
-            long lastAccessedTimeMs, boolean isOpenable, String filePath, String mimeType,
-            String pageUrl, String originalUrl, boolean isOffTheRecord, @OfflineItemState int state,
-            @PendingState int pendingState, boolean isResumable, boolean allowMetered,
-            long receivedBytes, long progressValue, long progressMax,
-            @OfflineItemProgressUnit int progressUnit, long timeRemainingMs) {
+            long completionTimeMs, long lastAccessedTimeMs, boolean isOpenable, String filePath,
+            String mimeType, String pageUrl, String originalUrl, boolean isOffTheRecord,
+            @OfflineItemState int state, @PendingState int pendingState, boolean isResumable,
+            boolean allowMetered, long receivedBytes, long progressValue, long progressMax,
+            @OfflineItemProgressUnit int progressUnit, long timeRemainingMs, boolean isDangerous) {
         OfflineItem item = new OfflineItem();
         item.id.namespace = nameSpace;
         item.id.id = id;
@@ -59,9 +60,13 @@ public final class OfflineItemBridge {
         item.filter = filter;
         item.isTransient = isTransient;
         item.isSuggested = isSuggested;
+        item.isAccelerated = isAccelerated;
+        item.refreshVisuals = refreshVisuals;
+        item.promoteOrigin = promoteOrigin;
         item.totalSizeBytes = totalSizeBytes;
         item.externallyRemoved = externallyRemoved;
         item.creationTimeMs = creationTimeMs;
+        item.completionTimeMs = completionTimeMs;
         item.lastAccessedTimeMs = lastAccessedTimeMs;
         item.isOpenable = isOpenable;
         item.filePath = filePath;
@@ -77,6 +82,7 @@ public final class OfflineItemBridge {
         item.progress = new OfflineItem.Progress(
                 progressValue, progressMax == -1 ? null : progressMax, progressUnit);
         item.timeRemainingMs = timeRemainingMs;
+        item.isDangerous = isDangerous;
 
         if (list != null) list.add(item);
         return item;

@@ -10,8 +10,10 @@
 Polymer({
   is: 'settings-internet-page',
 
-  behaviors:
-      [I18nBehavior, settings.RouteObserverBehavior, WebUIListenerBehavior],
+  behaviors: [
+    I18nBehavior, settings.RouteObserverBehavior, WebUIListenerBehavior,
+    CrNetworkListenerBehavior
+  ],
 
   properties: {
     /**
@@ -37,6 +39,7 @@ Polymer({
     deviceStates: {
       type: Object,
       notify: true,
+      observer: 'onDeviceStatesChanged_',
     },
 
     /**
@@ -76,7 +79,40 @@ Polymer({
     },
 
     /** @private {!chrome.networkingPrivate.GlobalPolicy|undefined} */
-    globalPolicy_: Object,
+    globalPolicy_: {
+      type: Object,
+      value: null,
+    },
+
+    /**
+     * Whether a managed network is available in the visible network list.
+     * @private {boolean}
+     */
+    managedNetworkAvailable: {
+      type: Boolean,
+      value: false,
+    },
+
+    /** Overridden from NetworkListenerBehavior. */
+    networkListChangeSubscriberSelectors_: {
+      type: Array,
+      value: function() {
+        return [
+          'network-summary',
+          'settings-internet-detail-page',
+          'settings-internet-known-networks-page',
+          'settings-internet-subpage',
+        ];
+      }
+    },
+
+    /** Overridden from NetworkListenerBehavior. */
+    networksChangeSubscriberSelectors_: {
+      type: Array,
+      value: function() {
+        return ['network-summary', 'settings-internet-detail-page'];
+      }
+    },
 
     /**
      * List of third party VPN providers.
@@ -102,7 +138,7 @@ Polymer({
       }
     },
 
-    /** @private {!Map<string, string>} */
+    /** @private {!Map<string, Element>} */
     focusConfig_: {
       type: Object,
       value: function() {
@@ -123,13 +159,6 @@ Polymer({
     'show-known-networks': 'onShowKnownNetworks_',
     'show-networks': 'onShowNetworks_',
   },
-
-  // chrome.networkingPrivate listeners
-  /** @private {?function(!Array<string>)} */
-  networkListChangedListener_: null,
-
-  /** @private {?function(!Array<string>)} */
-  networksChangedListener_: null,
 
   // chrome.management listeners
   /** @private {Function} */
@@ -158,16 +187,6 @@ Polymer({
 
   /** @override */
   attached: function() {
-    this.networkListChangedListener_ = this.networkListChangedListener_ ||
-        this.onNetworkListChanged_.bind(this);
-    this.networkingPrivate.onNetworkListChanged.addListener(
-        this.networkListChangedListener_);
-
-    this.networksChangedListener_ =
-        this.networksChangedListener_ || this.onNetworksChanged_.bind(this);
-    this.networkingPrivate.onNetworksChanged.addListener(
-        this.networksChangedListener_);
-
     this.onExtensionAddedListener_ =
         this.onExtensionAddedListener_ || this.onExtensionAdded_.bind(this);
     chrome.management.onInstalled.addListener(this.onExtensionAddedListener_);
@@ -191,11 +210,6 @@ Polymer({
 
   /** @override */
   detached: function() {
-    this.networkingPrivate.onNetworkListChanged.removeListener(
-        assert(this.networkListChangedListener_));
-    this.networkingPrivate.onNetworksChanged.removeListener(
-        assert(this.networksChangedListener_));
-
     chrome.management.onInstalled.removeListener(
         assert(this.onExtensionAddedListener_));
     chrome.management.onEnabled.removeListener(
@@ -238,17 +252,21 @@ Polymer({
       return;
 
     // Focus the subpage arrow where appropriate.
-    let selector;
+    let element;
     if (route == settings.routes.INTERNET_NETWORKS) {
       // iron-list makes the correct timing to focus an item in the list
       // very complicated, and the item may not exist, so just focus the
       // entire list for now.
-      selector = '* /deep/ #networkList';
+      let subPage = this.$$('settings-internet-subpage');
+      if (subPage)
+        element = subPage.$$('#networkList');
     } else if (this.detailType_) {
-      selector = '* /deep/ #' + this.detailType_ + ' /deep/ .subpage-arrow';
+      element = this.$$('network-summary')
+                    .$$(`#${this.detailType_}`)
+                    .$$('.subpage-arrow button');
     }
-    if (selector && this.querySelector(selector))
-      this.focusConfig_.set(oldRoute.path, selector);
+    if (element)
+      this.focusConfig_.set(oldRoute.path, element);
     else
       this.focusConfig_.delete(oldRoute.path);
   },
@@ -272,10 +290,14 @@ Polymer({
    */
   onShowConfig_: function(event) {
     const properties = event.detail;
-    let configAndConnect = !properties.GUID;  // New configuration
-    this.showConfig_(
-        configAndConnect, properties.Type, properties.GUID,
-        CrOnc.getNetworkName(properties));
+    if (!properties.GUID) {
+      // New configuration
+      this.showConfig_(true /* configAndConnect */, properties.Type);
+    } else {
+      this.showConfig_(
+          false /* configAndConnect */, properties.Type, properties.GUID,
+          CrOnc.getNetworkName(properties));
+    }
   },
 
   /**
@@ -315,7 +337,7 @@ Polymer({
    * @private
    */
   onShowNetworks_: function(event) {
-    this.showNetworksSubpage_(event.detail.Type);
+    this.showNetworksSubpage_(event.detail.type);
   },
 
   /**
@@ -332,12 +354,7 @@ Polymer({
    * @private
    */
   getAddNetworkClass_: function(type) {
-    if (loadTimeData.getBoolean('networkSettingsConfig')) {
-      if (type == CrOnc.Type.WI_FI)
-        return 'icon-add-wifi';
-      return 'icon-add-circle';
-    }
-    return 'icon-external';
+    return type == CrOnc.Type.WI_FI ? 'icon-add-wifi' : 'icon-add-circle';
   },
 
   /**
@@ -357,13 +374,28 @@ Polymer({
   },
 
   /**
+   * @param {!CrOnc.DeviceStateProperties|undefined} newValue
+   * @param {!CrOnc.DeviceStateProperties|undefined} oldValue
+   * @private
+   */
+  onDeviceStatesChanged_: function(newValue, oldValue) {
+    let wifiDeviceState = this.getDeviceState_(CrOnc.Type.WI_FI, newValue);
+    let managedNetworkAvailable = false;
+    if (!!wifiDeviceState)
+      managedNetworkAvailable = !!wifiDeviceState.ManagedNetworkAvailable;
+
+    if (this.managedNetworkAvailable != managedNetworkAvailable)
+      this.managedNetworkAvailable = managedNetworkAvailable;
+  },
+
+  /**
    * @param {!{detail: {type: string}}} event
    * @private
    */
   onShowKnownNetworks_: function(event) {
-    this.detailType_ = event.detail.Type;
+    this.detailType_ = event.detail.type;
     const params = new URLSearchParams;
-    params.append('type', event.detail.Type);
+    params.append('type', event.detail.type);
     this.knownNetworksType_ = event.detail.type;
     settings.navigateTo(settings.routes.KNOWN_NETWORKS, params);
   },
@@ -381,18 +413,12 @@ Polymer({
 
   /** @private */
   onAddWiFiTap_: function() {
-    if (loadTimeData.getBoolean('networkSettingsConfig'))
-      this.showConfig_(true /* configAndConnect */, CrOnc.Type.WI_FI);
-    else
-      chrome.send('addNetwork', [CrOnc.Type.WI_FI]);
+    this.showConfig_(true /* configAndConnect */, CrOnc.Type.WI_FI);
   },
 
   /** @private */
   onAddVPNTap_: function() {
-    if (loadTimeData.getBoolean('networkSettingsConfig'))
-      this.showConfig_(true /* configAndConnect */, CrOnc.Type.VPN);
-    else
-      chrome.send('addNetwork', [CrOnc.Type.VPN]);
+    this.showConfig_(true /* configAndConnect */, CrOnc.Type.VPN);
   },
 
   /**
@@ -403,7 +429,7 @@ Polymer({
    */
   onAddThirdPartyVpnTap_: function(event) {
     const provider = event.model.item;
-    this.browserProxy_.addThirdPartyVpn(CrOnc.Type.VPN, provider.ExtensionID);
+    this.browserProxy_.addThirdPartyVpn(provider.ExtensionID);
   },
 
   /** @private */
@@ -457,45 +483,6 @@ Polymer({
       ProviderName: extension.name,
     };
     vpnProviders.push(newProvider);
-  },
-
-  /**
-   * This event is triggered when the list of networks changes.
-   * |networkIds| contains the ids for all visible or configured networks.
-   * networkingPrivate.onNetworkListChanged event callback.
-   * @param {!Array<string>} networkIds
-   * @private
-   */
-  onNetworkListChanged_: function(networkIds) {
-    const event = new CustomEvent('network-list-changed', {detail: networkIds});
-    this.maybeDispatchEvent_('network-summary', event);
-    this.maybeDispatchEvent_('settings-internet-detail-page', event);
-    this.maybeDispatchEvent_('settings-internet-known-networks-page', event);
-    this.maybeDispatchEvent_('settings-internet-subpage', event);
-  },
-
-  /**
-   * This event is triggered when interesting properties of a network change.
-   * |networkIds| contains the ids for networks whose properties have changed.
-   * networkingPrivate.onNetworksChanged event callback.
-   * @param {!Array<string>} networkIds
-   * @private
-   */
-  onNetworksChanged_: function(networkIds) {
-    const event = new CustomEvent('networks-changed', {detail: networkIds});
-    this.maybeDispatchEvent_('network-summary', event);
-    this.maybeDispatchEvent_('settings-internet-detail-page', event);
-  },
-
-  /**
-   * @param {!Event} event
-   * @private
-   */
-  maybeDispatchEvent_: function(identifier, event) {
-    const element = this.$$(identifier);
-    if (!element)
-      return;
-    element.dispatchEvent(event);
   },
 
   /**
@@ -565,10 +552,16 @@ Polymer({
 
   /**
    * @param {!chrome.networkingPrivate.GlobalPolicy} globalPolicy
+   * @param {boolean} managedNetworkAvailable
    * @return {boolean}
    */
-  allowAddConnection_: function(globalPolicy) {
-    return !globalPolicy.AllowOnlyPolicyNetworksToConnect;
+  allowAddConnection_: function(globalPolicy, managedNetworkAvailable) {
+    if (!globalPolicy)
+      return true;
+
+    return !globalPolicy.AllowOnlyPolicyNetworksToConnect &&
+        (!globalPolicy.AllowOnlyPolicyNetworksToConnectIfAvailable ||
+         !managedNetworkAvailable);
   },
 
   /**
@@ -576,7 +569,8 @@ Polymer({
    * @return {string}
    */
   getAddThirdPartyVpnLabel_: function(provider) {
-    return this.i18n('internetAddThirdPartyVPN', provider.ProviderName);
+    return this.i18n(
+        'internetAddThirdPartyVPN', provider.ProviderName || '');
   },
 
   /**

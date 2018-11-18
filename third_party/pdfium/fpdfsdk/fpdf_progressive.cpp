@@ -50,15 +50,15 @@ FPDF_EXPORT int FPDF_CALLCONV FPDF_RenderPageBitmap_Start(FPDF_BITMAP bitmap,
   CPDF_PageRenderContext* pContext = pOwnedContext.get();
   pPage->SetRenderContext(std::move(pOwnedContext));
 
-  RetainPtr<CFX_DIBitmap> pBitmap(CFXBitmapFromFPDFBitmap(bitmap));
+  RetainPtr<CFX_DIBitmap> pBitmap(CFXDIBitmapFromFPDFBitmap(bitmap));
   auto pOwnedDevice = pdfium::MakeUnique<CFX_DefaultRenderDevice>();
   CFX_DefaultRenderDevice* pDevice = pOwnedDevice.get();
   pContext->m_pDevice = std::move(pOwnedDevice);
   pDevice->Attach(pBitmap, !!(flags & FPDF_REVERSE_BYTE_ORDER), nullptr, false);
 
   IPDFSDK_PauseAdapter IPauseAdapter(pause);
-  FPDF_RenderPage_Retail(pContext, page, start_x, start_y, size_x, size_y,
-                         rotate, flags, false, &IPauseAdapter);
+  RenderPageWithContext(pContext, page, start_x, start_y, size_x, size_y,
+                        rotate, flags, false, &IPauseAdapter);
 
 #ifdef _SKIA_SUPPORT_PATHS_
   pDevice->Flush(false);

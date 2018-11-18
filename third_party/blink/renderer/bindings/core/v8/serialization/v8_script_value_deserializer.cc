@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/bindings/core/v8/serialization/v8_script_value_deserializer.h"
 
+#include "base/numerics/checked_math.h"
 #include "third_party/blink/public/platform/web_blob_info.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/unpacked_serialized_script_value.h"
 #include "third_party/blink/renderer/bindings/core/v8/to_v8_for_core.h"
@@ -22,10 +23,10 @@
 #include "third_party/blink/renderer/core/html/canvas/image_data.h"
 #include "third_party/blink/renderer/core/imagebitmap/image_bitmap.h"
 #include "third_party/blink/renderer/core/messaging/message_port.h"
+#include "third_party/blink/renderer/core/mojo/mojo_handle.h"
 #include "third_party/blink/renderer/core/offscreencanvas/offscreen_canvas.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_shared_array_buffer.h"
-#include "third_party/blink/renderer/platform/wtf/checked_numeric.h"
 #include "third_party/blink/renderer/platform/wtf/date_math.h"
 
 namespace blink {
@@ -85,19 +86,19 @@ size_t ReadVersionEnvelope(SerializedScriptValue* serialized_script_value,
 }  // namespace
 
 V8ScriptValueDeserializer::V8ScriptValueDeserializer(
-    scoped_refptr<ScriptState> script_state,
+    ScriptState* script_state,
     UnpackedSerializedScriptValue* unpacked_value,
     const Options& options)
-    : V8ScriptValueDeserializer(std::move(script_state),
+    : V8ScriptValueDeserializer(script_state,
                                 unpacked_value,
                                 unpacked_value->Value(),
                                 options) {}
 
 V8ScriptValueDeserializer::V8ScriptValueDeserializer(
-    scoped_refptr<ScriptState> script_state,
+    ScriptState* script_state,
     scoped_refptr<SerializedScriptValue> value,
     const Options& options)
-    : V8ScriptValueDeserializer(std::move(script_state),
+    : V8ScriptValueDeserializer(script_state,
                                 nullptr,
                                 std::move(value),
                                 options) {
@@ -108,11 +109,11 @@ V8ScriptValueDeserializer::V8ScriptValueDeserializer(
 }
 
 V8ScriptValueDeserializer::V8ScriptValueDeserializer(
-    scoped_refptr<ScriptState> script_state,
+    ScriptState* script_state,
     UnpackedSerializedScriptValue* unpacked_value,
     scoped_refptr<SerializedScriptValue> value,
     const Options& options)
-    : script_state_(std::move(script_state)),
+    : script_state_(script_state),
       unpacked_value_(unpacked_value),
       serialized_script_value_(value),
       deserializer_(script_state_->GetIsolate(),
@@ -325,7 +326,7 @@ ScriptWrappable* V8ScriptValueDeserializer::ReadDOMObject(
                                 canvas_opacity_mode,
                                 SerializedImageDataStorageFormat::kUint8Clamped)
               .GetCanvasColorParams();
-      CheckedNumeric<uint32_t> computed_byte_length = width;
+      base::CheckedNumeric<uint32_t> computed_byte_length = width;
       computed_byte_length *= height;
       computed_byte_length *= color_params.BytesPerPixel();
       if (!computed_byte_length.IsValid() ||
@@ -380,7 +381,7 @@ ScriptWrappable* V8ScriptValueDeserializer::ReadDOMObject(
           canvas_color_space, SerializedPixelFormat::kRGBA8,
           SerializedOpacityMode::kNonOpaque, image_data_storage_format);
       ImageDataStorageFormat storage_format = color_params.GetStorageFormat();
-      CheckedNumeric<uint32_t> computed_byte_length = width;
+      base::CheckedNumeric<uint32_t> computed_byte_length = width;
       computed_byte_length *= height;
       computed_byte_length *= 4;
       computed_byte_length *= ImageData::StorageFormatDataSize(storage_format);
@@ -418,11 +419,7 @@ ScriptWrappable* V8ScriptValueDeserializer::ReadDOMObject(
       return DOMRect::Create(x, y, width, height);
     }
     case kDOMRectReadOnlyTag: {
-      double x = 0, y = 0, width = 0, height = 0;
-      if (!ReadDouble(&x) || !ReadDouble(&y) || !ReadDouble(&width) ||
-          !ReadDouble(&height))
-        return nullptr;
-      return DOMRectReadOnly::Create(x, y, width, height);
+      return ReadDOMRectReadOnly();
     }
     case kDOMQuadTag: {
       DOMPointInit pointInits[4];
@@ -445,8 +442,7 @@ ScriptWrappable* V8ScriptValueDeserializer::ReadDOMObject(
         if (!ReadDouble(&d))
           return nullptr;
       }
-      return DOMMatrix::CreateForSerialization(values,
-                                               WTF_ARRAY_LENGTH(values));
+      return DOMMatrix::CreateForSerialization(values, base::size(values));
     }
     case kDOMMatrix2DReadOnlyTag: {
       double values[6];
@@ -454,8 +450,8 @@ ScriptWrappable* V8ScriptValueDeserializer::ReadDOMObject(
         if (!ReadDouble(&d))
           return nullptr;
       }
-      return DOMMatrixReadOnly::CreateForSerialization(
-          values, WTF_ARRAY_LENGTH(values));
+      return DOMMatrixReadOnly::CreateForSerialization(values,
+                                                       base::size(values));
     }
     case kDOMMatrixTag: {
       double values[16];
@@ -463,8 +459,7 @@ ScriptWrappable* V8ScriptValueDeserializer::ReadDOMObject(
         if (!ReadDouble(&d))
           return nullptr;
       }
-      return DOMMatrix::CreateForSerialization(values,
-                                               WTF_ARRAY_LENGTH(values));
+      return DOMMatrix::CreateForSerialization(values, base::size(values));
     }
     case kDOMMatrixReadOnlyTag: {
       double values[16];
@@ -472,8 +467,8 @@ ScriptWrappable* V8ScriptValueDeserializer::ReadDOMObject(
         if (!ReadDouble(&d))
           return nullptr;
       }
-      return DOMMatrixReadOnly::CreateForSerialization(
-          values, WTF_ARRAY_LENGTH(values));
+      return DOMMatrixReadOnly::CreateForSerialization(values,
+                                                       base::size(values));
     }
     case kMessagePortTag: {
       uint32_t index = 0;
@@ -481,6 +476,15 @@ ScriptWrappable* V8ScriptValueDeserializer::ReadDOMObject(
           index >= transferred_message_ports_->size())
         return nullptr;
       return (*transferred_message_ports_)[index].Get();
+    }
+    case kMojoHandleTag: {
+      uint32_t index = 0;
+      if (!RuntimeEnabledFeatures::MojoJSEnabled() || !ReadUint32(&index) ||
+          index >= serialized_script_value_->MojoHandles().size()) {
+        return nullptr;
+      }
+      return MojoHandle::Create(
+          std::move(serialized_script_value_->MojoHandles()[index]));
     }
     case kOffscreenCanvasTransferTag: {
       uint32_t width = 0, height = 0, canvas_id = 0, client_id = 0, sink_id = 0;
@@ -552,6 +556,14 @@ File* V8ScriptValueDeserializer::ReadFileIndex() {
                                               blob_handle);
 }
 
+DOMRectReadOnly* V8ScriptValueDeserializer::ReadDOMRectReadOnly() {
+  double x = 0, y = 0, width = 0, height = 0;
+  if (!ReadDouble(&x) || !ReadDouble(&y) || !ReadDouble(&width) ||
+      !ReadDouble(&height))
+    return nullptr;
+  return DOMRectReadOnly::Create(x, y, width, height);
+}
+
 scoped_refptr<BlobDataHandle>
 V8ScriptValueDeserializer::GetOrCreateBlobDataHandle(const String& uuid,
                                                      const String& type,
@@ -590,7 +602,7 @@ v8::MaybeLocal<v8::Object> V8ScriptValueDeserializer::ReadHostObject(
   if (ReadTag(&tag))
     wrappable = ReadDOMObject(tag);
   if (!wrappable) {
-    exception_state.ThrowDOMException(kDataCloneError,
+    exception_state.ThrowDOMException(DOMExceptionCode::kDataCloneError,
                                       "Unable to deserialize cloned data.");
     return v8::MaybeLocal<v8::Object>();
   }
@@ -630,7 +642,7 @@ V8ScriptValueDeserializer::GetSharedArrayBufferFromId(v8::Isolate* isolate,
   }
   ExceptionState exception_state(isolate, ExceptionState::kUnknownContext,
                                  nullptr, nullptr);
-  exception_state.ThrowDOMException(kDataCloneError,
+  exception_state.ThrowDOMException(DOMExceptionCode::kDataCloneError,
                                     "Unable to deserialize SharedArrayBuffer.");
   // If the id does not map to a valid index, it is expected that the
   // SerializedScriptValue emptied its shared ArrayBufferContents when crossing

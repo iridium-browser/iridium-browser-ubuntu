@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef PDFIUM_THIRD_PARTY_BASE_SPAN_H_
-#define PDFIUM_THIRD_PARTY_BASE_SPAN_H_
+#ifndef THIRD_PARTY_BASE_SPAN_H_
+#define THIRD_PARTY_BASE_SPAN_H_
 
 #include <stddef.h>
 
@@ -152,10 +152,6 @@ using EnableIfConstSpanCompatibleContainer =
 // Differences from [views.constants]:
 // - no dynamic_extent constant
 //
-// Differences from [span.objectrep]:
-// - no as_bytes()
-// - no as_writeable_bytes()
-//
 // Differences in constants and types:
 // - no element_type type alias
 // - no index_type type alias
@@ -173,7 +169,6 @@ using EnableIfConstSpanCompatibleContainer =
 // - using size_t instead of ptrdiff_t for indexing
 //
 // Differences from [span.obs]:
-// - no size_bytes()
 // - using size_t instead of ptrdiff_t to represent size()
 //
 // Differences from [span.elem]:
@@ -244,6 +239,7 @@ class span {
 
   // [span.obs], span observers
   constexpr size_t size() const noexcept { return size_; }
+  constexpr size_t size_bytes() const noexcept { return size() * sizeof(T); }
   constexpr bool empty() const noexcept { return size_ == 0; }
 
   // [span.elem], span element access
@@ -313,6 +309,18 @@ constexpr bool operator>=(span<T> lhs, span<T> rhs) noexcept {
   return !(lhs < rhs);
 }
 
+// [span.objectrep], views of object representation
+template <typename T>
+span<const uint8_t> as_bytes(span<T> s) noexcept {
+  return {reinterpret_cast<const uint8_t*>(s.data()), s.size_bytes()};
+}
+
+template <typename T,
+          typename U = typename std::enable_if<!std::is_const<T>::value>::type>
+span<uint8_t> as_writable_bytes(span<T> s) noexcept {
+  return {reinterpret_cast<uint8_t*>(s.data()), s.size_bytes()};
+}
+
 // Type-deducing helpers for constructing a span.
 template <typename T>
 constexpr span<T> make_span(T* data, size_t size) noexcept {
@@ -341,4 +349,4 @@ constexpr span<T> make_span(const Container& container) {
 
 }  // namespace pdfium
 
-#endif  // PDFIUM_THIRD_PARTY_BASE_SPAN_H_
+#endif  // THIRD_PARTY_BASE_SPAN_H_

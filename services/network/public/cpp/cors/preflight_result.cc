@@ -112,8 +112,7 @@ PreflightResult::PreflightResult(
 
 PreflightResult::~PreflightResult() = default;
 
-base::Optional<mojom::CORSError>
-PreflightResult::EnsureAllowedCrossOriginMethod(
+base::Optional<CORSErrorStatus> PreflightResult::EnsureAllowedCrossOriginMethod(
     const std::string& method) const {
   // Request method is normalized to upper case, and comparison is performed in
   // case-sensitive way, that means access control header should provide an
@@ -127,31 +126,28 @@ PreflightResult::EnsureAllowedCrossOriginMethod(
   if (!credentials_ && methods_.find("*") != methods_.end())
     return base::nullopt;
 
-  return mojom::CORSError::kMethodDisallowedByPreflightResponse;
+  return CORSErrorStatus(mojom::CORSError::kMethodDisallowedByPreflightResponse,
+                         method);
 }
 
-base::Optional<mojom::CORSError>
+base::Optional<CORSErrorStatus>
 PreflightResult::EnsureAllowedCrossOriginHeaders(
     const net::HttpRequestHeaders& headers,
-    std::string* detected_header) const {
+    bool is_revalidating) const {
   if (!credentials_ && headers_.find("*") != headers_.end())
     return base::nullopt;
 
-  for (const auto& header : headers.GetHeaderVector()) {
+  // Forbidden headers are forbidden to be used by JavaScript, and checked
+  // beforehand. But user-agents may add these headers internally, and it's
+  // fine.
+  for (const auto& name : CORSUnsafeNotForbiddenRequestHeaderNames(
+           headers.GetHeaderVector(), is_revalidating)) {
     // Header list check is performed in case-insensitive way. Here, we have a
     // parsed header list set in lower case, and search each header in lower
     // case.
-    const std::string key = base::ToLowerASCII(header.key);
-    if (headers_.find(key) == headers_.end() &&
-        !IsCORSSafelistedHeader(key, header.value)) {
-      // Forbidden headers are forbidden to be used by JavaScript, and checked
-      // beforehand. But user-agents may add these headers internally, and it's
-      // fine.
-      if (IsForbiddenHeader(key))
-        continue;
-      if (detected_header)
-        *detected_header = header.key;
-      return mojom::CORSError::kHeaderDisallowedByPreflightResponse;
+    if (headers_.find(name) == headers_.end()) {
+      return CORSErrorStatus(
+          mojom::CORSError::kHeaderDisallowedByPreflightResponse, name);
     }
   }
   return base::nullopt;
@@ -160,7 +156,8 @@ PreflightResult::EnsureAllowedCrossOriginHeaders(
 bool PreflightResult::EnsureAllowedRequest(
     mojom::FetchCredentialsMode credentials_mode,
     const std::string& method,
-    const net::HttpRequestHeaders& headers) const {
+    const net::HttpRequestHeaders& headers,
+    bool is_revalidating) const {
   if (absolute_expiry_time_ <= Now())
     return false;
 
@@ -172,7 +169,7 @@ bool PreflightResult::EnsureAllowedRequest(
   if (EnsureAllowedCrossOriginMethod(method))
     return false;
 
-  if (EnsureAllowedCrossOriginHeaders(headers, nullptr))
+  if (EnsureAllowedCrossOriginHeaders(headers, is_revalidating))
     return false;
 
   return true;

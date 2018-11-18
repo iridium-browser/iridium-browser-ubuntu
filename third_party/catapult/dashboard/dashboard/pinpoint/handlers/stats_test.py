@@ -3,49 +3,25 @@
 # found in the LICENSE file.
 
 import json
-import unittest
 
-import webapp2
-import webtest
-
-from google.appengine.ext import ndb
-from google.appengine.ext import testbed
-
-from dashboard.pinpoint.handlers import stats
 from dashboard.pinpoint.models import job as job_module
+from dashboard.pinpoint import test
 
 
-class StatsTest(unittest.TestCase):
-
-  def setUp(self):
-    app = webapp2.WSGIApplication([
-        webapp2.Route(r'/stats', stats.Stats),
-    ])
-    self.testapp = webtest.TestApp(app)
-    self.testapp.extra_environ.update({'REMOTE_ADDR': 'remote_ip'})
-
-    self.testbed = testbed.Testbed()
-    self.testbed.activate()
-    self.testbed.init_datastore_v3_stub()
-    self.testbed.init_memcache_stub()
-    ndb.get_context().clear_cache()
-
-  def tearDown(self):
-    self.testbed.deactivate()
+class StatsTest(test.TestCase):
 
   def testPost_ValidRequest(self):
     # Create job.
-    job = job_module.Job.New(
-        arguments={},
-        quests=(),
-        auto_explore=True)
-    job.put()
+    job = job_module.Job.New((), ())
 
-    data = json.loads(self.testapp.get('/stats').body)
+    data = json.loads(self.testapp.get('/api/stats').body)
 
     expected = [{
+        'comparison_mode': None,
+        'completed': True,
         'created': job.created.isoformat(),
-        'differences': 0,
-        'status': 'Completed',
+        'difference_count': None,
+        'failed': False,
+        'updated': job.updated.isoformat(),
     }]
     self.assertEqual(data, expected)

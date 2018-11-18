@@ -29,11 +29,9 @@ SurfaceDependencyDeadline::~SurfaceDependencyDeadline() {
 }
 
 bool SurfaceDependencyDeadline::Set(const FrameDeadline& frame_deadline) {
-  DCHECK_GT(frame_deadline.deadline_in_frames(), 0u);
   CancelInternal(false);
   start_time_ = frame_deadline.frame_start_time();
-  deadline_ = start_time_ + frame_deadline.deadline_in_frames() *
-                                frame_deadline.frame_interval();
+  deadline_ = frame_deadline.ToWallTime();
   begin_frame_source_->AddObserver(this);
   return has_deadline();
 }
@@ -59,7 +57,7 @@ void SurfaceDependencyDeadline::InheritFrom(
 }
 
 bool SurfaceDependencyDeadline::operator==(
-    const SurfaceDependencyDeadline& other) {
+    const SurfaceDependencyDeadline& other) const {
   return begin_frame_source_ == other.begin_frame_source_ &&
          deadline_ == other.deadline_;
 }

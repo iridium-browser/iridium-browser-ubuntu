@@ -60,7 +60,7 @@
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
-#include "llvm/Analysis/Utils/Local.h"
+#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/PatternMatch.h"
 #include "llvm/Support/Debug.h"
@@ -97,8 +97,12 @@ static void setConstantInArgument(CallSite CS, Value *Op,
                                   Constant *ConstValue) {
   unsigned ArgNo = 0;
   for (auto &I : CS.args()) {
-    if (&*I == Op)
+    if (&*I == Op) {
+      // It is possible we have already added the non-null attribute to the
+      // parameter by using an earlier constraining condition.
+      CS.removeParamAttr(ArgNo, Attribute::NonNull);
       CS.setArgument(ArgNo, ConstValue);
+    }
     ++ArgNo;
   }
 }
@@ -144,7 +148,7 @@ static void recordCondition(CallSite CS, BasicBlock *From, BasicBlock *To,
 }
 
 /// Record ICmp conditions relevant to any argument in CS following Pred's
-/// single successors. If there are conflicting conditions along a path, like
+/// single predecessors. If there are conflicting conditions along a path, like
 /// x == 1 and x == 0, the first condition will be used.
 static void recordConditions(CallSite CS, BasicBlock *Pred,
                              ConditionsTy &Conditions) {
@@ -187,6 +191,17 @@ static bool canSplitCallSite(CallSite CS, TargetTransformInfo &TTI) {
     return false;
 
   BasicBlock *CallSiteBB = Instr->getParent();
+  // Need 2 predecessors and cannot split an edge from an IndirectBrInst.
+  SmallVector<BasicBlock *, 2> Preds(predecessors(CallSiteBB));
+  if (Preds.size() != 2 || isa<IndirectBrInst>(Preds[0]->getTerminator()) ||
+      isa<IndirectBrInst>(Preds[1]->getTerminator()))
+    return false;
+
+  // BasicBlock::canSplitPredecessors is more agressive, so checking for
+  // BasicBlock::isEHPad as well.
+  if (!CallSiteBB->canSplitPredecessors() || CallSiteBB->isEHPad())
+    return false;
+
   // Allow splitting a call-site only when the CodeSize cost of the
   // instructions before the call is less then DuplicationThreshold. The
   // instructions before the call will be duplicated in the split blocks and
@@ -200,13 +215,7 @@ static bool canSplitCallSite(CallSite CS, TargetTransformInfo &TTI) {
       return false;
   }
 
-  // Need 2 predecessors and cannot split an edge from an IndirectBrInst.
-  SmallVector<BasicBlock *, 2> Preds(predecessors(CallSiteBB));
-  if (Preds.size() != 2 || isa<IndirectBrInst>(Preds[0]->getTerminator()) ||
-      isa<IndirectBrInst>(Preds[1]->getTerminator()))
-    return false;
-
-  return CallSiteBB->canSplitPredecessors();
+  return true;
 }
 
 static Instruction *cloneInstForMustTail(Instruction *I, Instruction *Before,
@@ -303,10 +312,12 @@ static void splitCallSite(
   // `musttail` calls must be followed by optional `bitcast`, and `ret`. The
   // split blocks will be terminated right after that so there're no users for
   // this phi in a `TailBB`.
-  if (!IsMustTailCall && !Instr->use_empty())
+  if (!IsMustTailCall && !Instr->use_empty()) {
     CallPN = PHINode::Create(Instr->getType(), Preds.size(), "phi.call");
+    CallPN->setDebugLoc(Instr->getDebugLoc());
+  }
 
-  DEBUG(dbgs() << "split call-site : " << *Instr << " into \n");
+  LLVM_DEBUG(dbgs() << "split call-site : " << *Instr << " into \n");
 
   assert(Preds.size() == 2 && "The ValueToValueMaps array has size 2.");
   // ValueToValueMapTy is neither copy nor moveable, so we use a simple array
@@ -334,8 +345,8 @@ static void splitCallSite(
         ++ArgNo;
       }
     }
-    DEBUG(dbgs() << "    " << *NewCI << " in " << SplitBlock->getName()
-                 << "\n");
+    LLVM_DEBUG(dbgs() << "    " << *NewCI << " in " << SplitBlock->getName()
+                      << "\n");
     if (CallPN)
       CallPN->addIncoming(NewCI, SplitBlock);
 
@@ -385,6 +396,7 @@ static void splitCallSite(
       if (isa<PHINode>(CurrentI))
         continue;
       PHINode *NewPN = PHINode::Create(CurrentI->getType(), Preds.size());
+      NewPN->setDebugLoc(CurrentI->getDebugLoc());
       for (auto &Mapping : ValueToValueMaps)
         NewPN->addIncoming(Mapping[CurrentI],
                            cast<Instruction>(Mapping[CurrentI])->getParent());

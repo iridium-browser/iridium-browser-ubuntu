@@ -2,15 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-/**
- * @implements {Sources.UISourceCodeFrame.Plugin}
- */
-Sources.SnippetsPlugin = class {
+Sources.SnippetsPlugin = class extends Sources.UISourceCodeFrame.Plugin {
   /**
    * @param {!SourceFrame.SourcesTextEditor} textEditor
    * @param {!Workspace.UISourceCode} uiSourceCode
    */
   constructor(textEditor, uiSourceCode) {
+    super();
     this._textEditor = textEditor;
     this._uiSourceCode = uiSourceCode;
   }
@@ -21,15 +19,7 @@ Sources.SnippetsPlugin = class {
    * @return {boolean}
    */
   static accepts(uiSourceCode) {
-    return uiSourceCode.project().type() === Workspace.projectTypes.Snippets;
-  }
-
-  /**
-   * @override
-   * @return {!Array<!UI.ToolbarItem>}
-   */
-  leftToolbarItems() {
-    return [];
+    return Snippets.isSnippetsUISourceCode(uiSourceCode);
   }
 
   /**
@@ -41,11 +31,5 @@ Sources.SnippetsPlugin = class {
     runSnippet.setText(Host.isMac() ? Common.UIString('\u2318+Enter') : Common.UIString('Ctrl+Enter'));
 
     return [runSnippet];
-  }
-
-  /**
-   * @override
-   */
-  dispose() {
   }
 };

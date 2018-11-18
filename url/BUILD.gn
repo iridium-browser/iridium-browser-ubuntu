@@ -66,6 +66,7 @@ component("url") {
   deps = [
     "//base",
     "//base/third_party/dynamic_annotations",
+    "//ipc:param_traits",
   ]
 
   if (is_win) {
@@ -76,7 +77,7 @@ component("url") {
   # ICU support.
   if (use_platform_icu_alternatives) {
     if (is_android) {
-      sources += [ "url_canon_icu_alternatives_android.cc" ]
+      sources += [ "url_idna_icu_alternatives_android.cc" ]
       deps += [
         ":url_features",
         ":url_java",
@@ -85,7 +86,7 @@ component("url") {
         "//base/third_party/dynamic_annotations",
       ]
     } else if (is_ios) {
-      sources += [ "url_canon_icu_alternatives_ios.mm" ]
+      sources += [ "url_idna_icu_alternatives_ios.mm" ]
     } else {
       assert(false,
              "ICU alternative is not implemented for platform: " + target_os)
@@ -95,6 +96,7 @@ component("url") {
     sources += [
       "url_canon_icu.cc",
       "url_canon_icu.h",
+      "url_idna_icu.cc",
     ]
     deps += [ "//third_party/icu" ]
   }
@@ -168,8 +170,7 @@ test("url_unittests") {
 
   if (!is_ios) {
     deps += [
-      "//mojo/edk",
-      "//mojo/edk/test:test_support",
+      "//mojo/core/embedder",
       "//url/mojom:test_url_mojom_gurl",
     ]
   }

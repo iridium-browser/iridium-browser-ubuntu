@@ -19,6 +19,7 @@
 #include "base/metrics/histogram_snapshot_manager.h"
 #include "base/metrics/metrics_hashes.h"
 #include "base/strings/string_piece.h"
+#include "base/strings/stringprintf.h"
 #include "base/sys_info.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
@@ -149,7 +150,9 @@ void MetricsLog::RecordCoreSystemProfile(MetricsServiceClient* client,
   system_profile->set_channel(client->GetChannel());
   system_profile->set_application_locale(client->GetApplicationLocale());
 
-#if defined(ADDRESS_SANITIZER)
+#if defined(ADDRESS_SANITIZER) || DCHECK_IS_ON()
+  // Set if a build is instrumented (e.g. built with ASAN, or with DCHECKs).
+  // TODO(889105): Field will be renamed to is_instrumented_build up-stream.
   system_profile->set_is_asan_build(true);
 #endif
 
@@ -170,9 +173,14 @@ void MetricsLog::RecordCoreSystemProfile(MetricsServiceClient* client,
   metrics::SystemProfileProto::OS* os = system_profile->mutable_os();
   os->set_name(base::SysInfo::OperatingSystemName());
   os->set_version(base::SysInfo::OperatingSystemVersion());
-#if defined(OS_ANDROID)
+#if defined(OS_CHROMEOS)
+  os->set_kernel_version(base::SysInfo::KernelVersion());
+#elif defined(OS_ANDROID)
   os->set_build_fingerprint(
       base::android::BuildInfo::GetInstance()->android_build_fp());
+  std::string package_name = client->GetAppPackageName();
+  if (!package_name.empty() && package_name != "com.android.chrome")
+    system_profile->set_app_package_name(package_name);
 #endif
 }
 

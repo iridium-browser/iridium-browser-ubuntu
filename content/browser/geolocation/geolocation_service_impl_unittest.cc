@@ -6,16 +6,16 @@
 
 #include "base/bind_helpers.h"
 #include "base/run_loop.h"
-#include "base/test/scoped_feature_list.h"
-#include "content/public/browser/permission_manager.h"
+#include "content/browser/permissions/permission_controller_impl.h"
+#include "content/public/browser/permission_controller.h"
 #include "content/public/browser/permission_type.h"
-#include "content/public/common/content_features.h"
 #include "content/public/common/service_manager_connection.h"
 #include "content/public/test/mock_permission_manager.h"
 #include "content/public/test/navigation_simulator.h"
+#include "content/public/test/test_browser_context.h"
 #include "content/public/test/test_service_manager_context.h"
 #include "content/test/test_render_frame_host.h"
-#include "device/geolocation/public/cpp/scoped_geolocation_overrider.h"
+#include "services/device/public/cpp/test/scoped_geolocation_overrider.h"
 #include "services/device/public/mojom/constants.mojom.h"
 #include "services/device/public/mojom/geolocation.mojom.h"
 #include "services/device/public/mojom/geolocation_context.mojom.h"
@@ -25,7 +25,6 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/mojom/feature_policy/feature_policy.mojom.h"
 
-using base::test::ScopedFeatureList;
 using blink::mojom::PermissionStatus;
 using device::mojom::GeolocationPtr;
 using device::mojom::GeopositionPtr;
@@ -45,7 +44,7 @@ GURL kEmbeddedUrl = GURL("https://embeddables.com/someframe");
 class TestPermissionManager : public MockPermissionManager {
  public:
   TestPermissionManager()
-      : request_id_(PermissionManager::kNoPendingOperation) {}
+      : request_id_(PermissionController::kNoPendingOperation) {}
   ~TestPermissionManager() override = default;
 
   int RequestPermission(PermissionType permissions,
@@ -81,7 +80,11 @@ class GeolocationServiceTest : public RenderViewHostImplTestHarness {
   void SetUp() override {
     RenderViewHostImplTestHarness::SetUp();
     NavigateAndCommit(kMainUrl);
-    permission_manager_.reset(new TestPermissionManager);
+    browser_context_.reset(new content::TestBrowserContext());
+    browser_context_->SetPermissionControllerDelegate(
+        std::make_unique<TestPermissionManager>());
+    permission_controller_.reset(
+        new PermissionControllerImpl(browser_context_.get()));
 
     service_manager_context_ = std::make_unique<TestServiceManagerContext>();
     geolocation_overrider_ =
@@ -97,6 +100,7 @@ class GeolocationServiceTest : public RenderViewHostImplTestHarness {
     context_ptr_.reset();
     geolocation_overrider_.reset();
     service_manager_context_.reset();
+    browser_context_.reset();
     RenderViewHostImplTestHarness::TearDown();
   }
 
@@ -116,7 +120,7 @@ class GeolocationServiceTest : public RenderViewHostImplTestHarness {
     embedded_rfh = navigation_simulator->GetFinalRenderFrameHost();
 
     service_.reset(new GeolocationServiceImpl(
-        context_ptr_.get(), permission_manager_.get(), embedded_rfh));
+        context_ptr_.get(), permission_controller_.get(), embedded_rfh));
     service_->Bind(mojo::MakeRequest(&service_ptr_));
   }
 
@@ -125,7 +129,8 @@ class GeolocationServiceTest : public RenderViewHostImplTestHarness {
   GeolocationService* service() { return &*service_ptr_; }
 
   TestPermissionManager* permission_manager() {
-    return permission_manager_.get();
+    return static_cast<TestPermissionManager*>(
+        browser_context_->GetPermissionControllerDelegate());
   }
 
  private:
@@ -134,7 +139,8 @@ class GeolocationServiceTest : public RenderViewHostImplTestHarness {
 
   // The |permission_manager_| needs to come before the |service_| since
   // GeolocationService calls PermissionManager in its destructor.
-  std::unique_ptr<TestPermissionManager> permission_manager_;
+  std::unique_ptr<TestBrowserContext> browser_context_;
+  std::unique_ptr<PermissionControllerImpl> permission_controller_;
   std::unique_ptr<GeolocationServiceImpl> service_;
   GeolocationServicePtr service_ptr_;
   device::mojom::GeolocationContextPtr context_ptr_;
@@ -146,9 +152,6 @@ class GeolocationServiceTest : public RenderViewHostImplTestHarness {
 
 TEST_F(GeolocationServiceTest, PermissionGrantedPolicyViolation) {
   // The embedded frame is not whitelisted.
-  ScopedFeatureList feature_list;
-  feature_list.InitFromCommandLine(
-      features::kUseFeaturePolicyForPermissions.name, std::string());
   CreateEmbeddedFrameAndGeolocationService(/*allow_via_feature_policy=*/false);
 
   permission_manager()->SetRequestCallback(
@@ -169,9 +172,6 @@ TEST_F(GeolocationServiceTest, PermissionGrantedPolicyViolation) {
 
 TEST_F(GeolocationServiceTest, PermissionGrantedNoPolicyViolation) {
   // Whitelist the embedded frame.
-  ScopedFeatureList feature_list;
-  feature_list.InitFromCommandLine(
-      features::kUseFeaturePolicyForPermissions.name, std::string());
   CreateEmbeddedFrameAndGeolocationService(/*allow_via_feature_policy=*/true);
 
   permission_manager()->SetRequestCallback(

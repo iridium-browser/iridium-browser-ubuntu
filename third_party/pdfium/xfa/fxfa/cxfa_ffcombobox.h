@@ -7,17 +7,18 @@
 #ifndef XFA_FXFA_CXFA_FFCOMBOBOX_H_
 #define XFA_FXFA_CXFA_FFCOMBOBOX_H_
 
+#include "core/fxcrt/unowned_ptr.h"
 #include "xfa/fxfa/cxfa_ffdropdown.h"
 
 class CXFA_EventParam;
 
-class CXFA_FFComboBox : public CXFA_FFDropDown {
+class CXFA_FFComboBox final : public CXFA_FFDropDown {
  public:
   explicit CXFA_FFComboBox(CXFA_Node* pNode);
   ~CXFA_FFComboBox() override;
 
   // CXFA_FFField
-  CFX_RectF GetBBox(uint32_t dwStatus, bool bDrawFocus = false) override;
+  CFX_RectF GetBBox(uint32_t dwStatus, FocusOption focus) override;
   bool LoadWidget() override;
   void UpdateWidgetProperty() override;
   bool OnRButtonUp(uint32_t dwFlags, const CFX_PointF& point) override;
@@ -37,6 +38,7 @@ class CXFA_FFComboBox : public CXFA_FFDropDown {
   void SelectAll() override;
   void Delete() override;
   void DeSelect() override;
+  WideString GetText() override;
   FormFieldType GetFormFieldType() override;
 
   // IFWL_WidgetDelegate
@@ -58,7 +60,7 @@ class CXFA_FFComboBox : public CXFA_FFDropDown {
   void SetItemState(int32_t nIndex, bool bSelected);
 
  private:
-  // CXFA_FFField
+  // CXFA_FFField:
   bool PtInActiveRect(const CFX_PointF& point) override;
   bool CommitData() override;
   bool UpdateFWLData() override;
@@ -66,9 +68,10 @@ class CXFA_FFComboBox : public CXFA_FFDropDown {
 
   uint32_t GetAlignment();
   void FWLEventSelChange(CXFA_EventParam* pParam);
+  WideString GetCurrentText() const;
 
   WideString m_wsNewValue;
-  IFWL_WidgetDelegate* m_pOldDelegate;
+  UnownedPtr<IFWL_WidgetDelegate> m_pOldDelegate;
 };
 
 #endif  // XFA_FXFA_CXFA_FFCOMBOBOX_H_

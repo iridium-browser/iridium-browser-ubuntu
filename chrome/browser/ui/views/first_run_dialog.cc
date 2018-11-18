@@ -13,7 +13,7 @@
 #include "chrome/browser/platform_util.h"
 #include "chrome/browser/shell_integration.h"
 #include "chrome/browser/ui/browser_dialogs.h"
-#include "chrome/browser/ui/views/harmony/chrome_layout_provider.h"
+#include "chrome/browser/ui/views/chrome_layout_provider.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
@@ -33,8 +33,6 @@
 #elif defined(OS_LINUX)
 #include "components/crash/content/app/breakpad_linux.h"
 #endif
-
-using views::GridLayout;
 
 namespace {
 
@@ -69,20 +67,22 @@ FirstRunDialog::FirstRunDialog(Profile* profile)
       report_crashes_(NULL) {
   set_margins(ChromeLayoutProvider::Get()->GetDialogInsetsForContentType(
       views::TEXT, views::TEXT));
-  GridLayout* layout =
+  views::GridLayout* layout =
       SetLayoutManager(std::make_unique<views::GridLayout>(this));
 
   views::ColumnSet* column_set = layout->AddColumnSet(0);
-  column_set->AddColumn(GridLayout::FILL, GridLayout::CENTER, 0,
-                        GridLayout::USE_PREF, 0, 0);
+  column_set->AddColumn(views::GridLayout::FILL, views::GridLayout::CENTER,
+                        views::GridLayout::kFixedSize,
+                        views::GridLayout::USE_PREF, 0, 0);
 
-  layout->StartRow(0, 0);
+  layout->StartRow(views::GridLayout::kFixedSize, 0);
   make_default_ = new views::Checkbox(l10n_util::GetStringUTF16(
       IDS_FR_CUSTOMIZE_DEFAULT_BROWSER));
   make_default_->SetChecked(true);
   layout->AddView(make_default_);
 
-  layout->StartRowWithPadding(0, 0, 0,
+  layout->StartRowWithPadding(views::GridLayout::kFixedSize, 0,
+                              views::GridLayout::kFixedSize,
                               ChromeLayoutProvider::Get()->GetDistanceMetric(
                                   views::DISTANCE_RELATED_CONTROL_VERTICAL));
   report_crashes_ = new views::Checkbox(

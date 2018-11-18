@@ -33,7 +33,8 @@
 #include "third_party/blink/renderer/platform/audio/audio_bus.h"
 #include "third_party/blink/renderer/platform/audio/audio_file_reader.h"
 #include "third_party/blink/renderer/platform/cross_thread_functional.h"
-#include "third_party/blink/renderer/platform/threading/background_task_runner.h"
+#include "third_party/blink/renderer/platform/scheduler/public/background_scheduler.h"
+#include "third_party/blink/renderer/platform/scheduler/public/thread.h"
 #include "third_party/blink/renderer/platform/web_task_runner.h"
 
 namespace blink {
@@ -50,14 +51,19 @@ void AsyncAudioDecoder::DecodeAsync(
   if (!audio_data)
     return;
 
-  BackgroundTaskRunner::PostOnBackgroundThread(
+  scoped_refptr<base::SingleThreadTaskRunner> task_runner =
+      context->GetExecutionContext()->GetTaskRunner(
+          blink::TaskType::kInternalMedia);
+
+  BackgroundScheduler::PostOnBackgroundThread(
       FROM_HERE,
       CrossThreadBind(&AsyncAudioDecoder::DecodeOnBackgroundThread,
                       WrapCrossThreadPersistent(audio_data), sample_rate,
                       WrapCrossThreadPersistent(success_callback),
                       WrapCrossThreadPersistent(error_callback),
                       WrapCrossThreadPersistent(resolver),
-                      WrapCrossThreadPersistent(context)));
+                      WrapCrossThreadPersistent(context),
+                      std::move(task_runner)));
 }
 
 void AsyncAudioDecoder::DecodeOnBackgroundThread(
@@ -66,7 +72,8 @@ void AsyncAudioDecoder::DecodeOnBackgroundThread(
     V8PersistentCallbackFunction<V8DecodeSuccessCallback>* success_callback,
     V8PersistentCallbackFunction<V8DecodeErrorCallback>* error_callback,
     ScriptPromiseResolver* resolver,
-    BaseAudioContext* context) {
+    BaseAudioContext* context,
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
   DCHECK(!IsMainThread());
   scoped_refptr<AudioBus> bus = CreateBusFromInMemoryAudioFile(
       audio_data->Data(), audio_data->ByteLength(), false, sample_rate);
@@ -79,7 +86,7 @@ void AsyncAudioDecoder::DecodeOnBackgroundThread(
   // exist any more.
   if (context) {
     PostCrossThreadTask(
-        *Platform::Current()->MainThread()->GetTaskRunner(), FROM_HERE,
+        *task_runner, FROM_HERE,
         CrossThreadBind(&AsyncAudioDecoder::NotifyComplete,
                         WrapCrossThreadPersistent(audio_data),
                         WrapCrossThreadPersistent(success_callback),

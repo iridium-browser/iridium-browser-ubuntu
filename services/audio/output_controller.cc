@@ -9,6 +9,8 @@
 #include <algorithm>
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
+#include "base/compiler_specific.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/stl_util.h"
@@ -17,6 +19,7 @@
 #include "base/threading/platform_thread.h"
 #include "base/trace_event/trace_event.h"
 #include "media/base/audio_timestamp_helper.h"
+#include "services/audio/stream_monitor.h"
 
 using base::TimeDelta;
 
@@ -48,6 +51,31 @@ void LogStreamCreationResult(bool for_device_change,
     UMA_HISTOGRAM_ENUMERATION(
         "Media.AudioOutputController.ProxyStreamCreationResult", result,
         STREAM_CREATION_RESULT_MAX + 1);
+  }
+}
+
+void SanitizeAudioBus(media::AudioBus* bus) {
+  size_t channel_size = bus->frames();
+  for (int i = 0; i < bus->channels(); ++i) {
+    float* channel = bus->channel(i);
+    for (size_t j = 0; j < channel_size; ++j) {
+      // First check for all the invalid cases with a single conditional to
+      // optimize for the typical (data ok) case. Different cases are handled
+      // inside of the conditional. The condition is written like this to catch
+      // NaN. It cannot be simplified to "channel[j] < -1.f || channel[j] >
+      // 1.f", which isn't equivalent.
+      if (UNLIKELY(!(channel[j] >= -1.f && channel[j] <= 1.f))) {
+        // Don't just set all bad values to 0. If a value like 1.0001 is
+        // produced due to floating-point shenanigans, 1 will sound better than
+        // 0.
+        if (channel[j] < -1.f) {
+          channel[j] = -1.f;
+        } else {
+          // channel[j] > 1 or NaN.
+          channel[j] = 1.f;
+        }
+      }
+    }
   }
 }
 
@@ -87,25 +115,28 @@ void OutputController::ErrorStatisticsTracker::WedgeCheck() {
                         on_more_io_data_called_.IsOne());
 }
 
-OutputController::OutputController(media::AudioManager* audio_manager,
-                                   EventHandler* handler,
-                                   const media::AudioParameters& params,
-                                   const std::string& output_device_id,
-                                   const base::UnguessableToken& group_id,
-                                   SyncReader* sync_reader)
+OutputController::OutputController(
+    media::AudioManager* audio_manager,
+    EventHandler* handler,
+    const media::AudioParameters& params,
+    const std::string& output_device_id,
+    SyncReader* sync_reader,
+    StreamMonitorCoordinator* stream_monitor_coordinator,
+    const base::UnguessableToken& processing_id)
     : audio_manager_(audio_manager),
       params_(params),
       handler_(handler),
       task_runner_(audio_manager->GetTaskRunner()),
+      construction_time_(base::TimeTicks::Now()),
       output_device_id_(output_device_id),
-      group_id_(group_id),
       stream_(NULL),
-      diverting_to_stream_(NULL),
       disable_local_output_(false),
       should_duplicate_(0),
       volume_(1.0),
       state_(kEmpty),
       sync_reader_(sync_reader),
+      stream_monitor_coordinator_(stream_monitor_coordinator),
+      processing_id_(processing_id),
       power_monitor_(
           params.sample_rate(),
           TimeDelta::FromMilliseconds(kPowerMeasurementTimeConstantMillis)),
@@ -114,15 +145,17 @@ OutputController::OutputController(media::AudioManager* audio_manager,
   DCHECK(handler_);
   DCHECK(sync_reader_);
   DCHECK(task_runner_.get());
+  DCHECK(stream_monitor_coordinator_ || processing_id.is_empty());
 }
 
 OutputController::~OutputController() {
   DCHECK(task_runner_->BelongsToCurrentThread());
   DCHECK_EQ(kClosed, state_);
   DCHECK_EQ(nullptr, stream_);
-  DCHECK(duplication_targets_.empty());
   DCHECK(snoopers_.empty());
   DCHECK(should_duplicate_.IsZero());
+  UMA_HISTOGRAM_LONG_TIMES("Media.AudioOutputController.LifeTime",
+                           base::TimeTicks::Now() - construction_time_);
 }
 
 bool OutputController::Create(bool is_for_device_change) {
@@ -140,18 +173,16 @@ bool OutputController::Create(bool is_for_device_change) {
   StopCloseAndClearStream();  // Calls RemoveOutputDeviceChangeListener().
   DCHECK_EQ(kEmpty, state_);
 
-  if (diverting_to_stream_) {
-    // TODO(crbug/824019): Remove this legacy functionality.
-    stream_ = diverting_to_stream_;
-  } else if (disable_local_output_) {
+  if (disable_local_output_) {
     // Create a fake AudioOutputStream that will continue pumping the audio
     // data, but does not play it out anywhere. Pumping the audio data is
     // necessary because video playback is synchronized to the audio stream and
     // will freeze otherwise.
     media::AudioParameters mute_params = params_;
     mute_params.set_format(media::AudioParameters::AUDIO_FAKE);
-    stream_ =
-        audio_manager_->MakeAudioOutputStreamProxy(mute_params, std::string());
+    stream_ = audio_manager_->MakeAudioOutputStream(
+        mute_params, std::string(),
+        /*log_callback, not used*/ base::DoNothing());
   } else {
     stream_ =
         audio_manager_->MakeAudioOutputStreamProxy(params_, output_device_id_);
@@ -176,10 +207,7 @@ bool OutputController::Create(bool is_for_device_change) {
 
   LogStreamCreationResult(is_for_device_change, STREAM_CREATION_OK);
 
-  // Everything started okay, so re-register for state change callbacks if
-  // stream_ was created via AudioManager.
-  if (stream_ != diverting_to_stream_)
-    audio_manager_->AddOutputDeviceChangeListener(this);
+  audio_manager_->AddOutputDeviceChangeListener(this);
 
   // We have successfully opened the stream. Set the initial volume.
   stream_->SetVolume(volume_);
@@ -187,11 +215,18 @@ bool OutputController::Create(bool is_for_device_change) {
   // Finally set the state to kCreated.
   state_ = kCreated;
 
-  // TODO(crbug/824019): This should be done much earlier. For now, just
-  // preserve the "legacy mirroring" order-of-operations until the new mirroring
-  // impl is in-place.
-  if (!diverter_)
-    diverter_.emplace(this);
+  if (processing_id_) {
+    // Ensure new monitors know that we're active.
+    stream_monitor_coordinator_->AddObserver(processing_id_, this);
+    // Ensure existing monitors do as well.
+    stream_monitor_coordinator_->ForEachMemberInGroup(
+        processing_id_,
+        base::BindRepeating(
+            [](OutputController* controller, StreamMonitor* monitor) {
+              monitor->OnStreamActive(controller);
+            },
+            this));
+  }
 
   return true;
 }
@@ -270,15 +305,6 @@ void OutputController::Close() {
     StopCloseAndClearStream();
     sync_reader_->Close();
 
-    // TODO(crbug/824019): Remove this legacy functionality.
-    diverter_ = base::nullopt;
-    for (media::AudioPushSink* sink : duplication_targets_)
-      sink->Close();
-    if (!duplication_targets_.empty()) {
-      duplication_targets_.clear();
-      should_duplicate_.Decrement();
-    }
-
     state_ = kClosed;
   }
 }
@@ -323,6 +349,18 @@ int OutputController::OnMoreData(base::TimeDelta delay,
 
   sync_reader_->Read(dest);
 
+  const base::TimeTicks reference_time = delay_timestamp + delay;
+
+  if (!dest->is_bitstream_format()) {
+    base::AutoLock lock(realtime_snooper_lock_);
+    if (!realtime_snoopers_.empty()) {
+      SanitizeAudioBus(dest);
+      for (Snooper* snooper : realtime_snoopers_) {
+        snooper->OnData(*dest, reference_time, volume_);
+      }
+    }
+  }
+
   const int frames =
       dest->is_bitstream_format() ? dest->GetBitstreamFrames() : dest->frames();
   delay +=
@@ -330,8 +368,7 @@ int OutputController::OnMoreData(base::TimeDelta delay,
 
   sync_reader_->RequestMoreData(delay, delay_timestamp, prior_frames_skipped);
 
-  if (!should_duplicate_.IsZero()) {
-    const base::TimeTicks reference_time = delay_timestamp + delay;
+  if (!should_duplicate_.IsZero() && !dest->is_bitstream_format()) {
     std::unique_ptr<media::AudioBus> copy(media::AudioBus::Create(params_));
     dest->CopyTo(copy.get());
     task_runner_->PostTask(
@@ -373,21 +410,6 @@ void OutputController::BroadcastDataToSnoopers(
 
   for (Snooper* snooper : snoopers_)
     snooper->OnData(*audio_bus, reference_time, volume_);
-
-  // TODO(crbug/824019): The rest of this method will be deleted.
-  if (duplication_targets_.empty())
-    return;
-
-  // Note: Do not need to acquire lock since this is running on the same thread
-  // as where the set is modified.
-  for (auto target = std::next(duplication_targets_.begin(), 1);
-       target != duplication_targets_.end(); ++target) {
-    std::unique_ptr<media::AudioBus> copy(media::AudioBus::Create(params_));
-    audio_bus->CopyTo(copy.get());
-    (*target)->OnData(std::move(copy), reference_time);
-  }
-
-  (*duplication_targets_.begin())->OnData(std::move(audio_bus), reference_time);
 }
 
 void OutputController::LogAudioPowerLevel(const char* call_name) {
@@ -418,47 +440,78 @@ void OutputController::StopCloseAndClearStream() {
 
     // De-register from state change callbacks if stream_ was created via
     // AudioManager.
-    if (stream_ != diverting_to_stream_)
-      audio_manager_->RemoveOutputDeviceChangeListener(this);
+    audio_manager_->RemoveOutputDeviceChangeListener(this);
+
+    // Only notify and remove ourselves if startup was successful.
+    if (processing_id_ && state_ != kEmpty) {
+      // Don't send out activation messages for now.
+      stream_monitor_coordinator_->RemoveObserver(processing_id_, this);
+      // Ensure everyone monitoring us knows we're no-longer active.
+      stream_monitor_coordinator_->ForEachMemberInGroup(
+          processing_id_,
+          base::BindRepeating(
+              [](OutputController* controller, StreamMonitor* monitor) {
+                monitor->OnStreamInactive(controller);
+              },
+              this));
+    }
 
     StopStream();
     stream_->Close();
     stats_tracker_.reset();
 
-    if (stream_ == diverting_to_stream_)
-      diverting_to_stream_ = NULL;
     stream_ = NULL;
   }
 
   state_ = kEmpty;
 }
 
-const base::UnguessableToken& OutputController::GetGroupId() {
-  return group_id_;
-}
-
-const media::AudioParameters& OutputController::GetAudioParameters() {
+const media::AudioParameters& OutputController::GetAudioParameters() const {
   return params_;
 }
 
-void OutputController::StartSnooping(Snooper* snooper) {
+std::string OutputController::GetDeviceId() const {
+  return output_device_id_.empty()
+             ? media::AudioDeviceDescription::kDefaultDeviceId
+             : output_device_id_;
+}
+
+void OutputController::StartSnooping(Snooper* snooper, SnoopingMode mode) {
   DCHECK(task_runner_->BelongsToCurrentThread());
   DCHECK(snooper);
 
-  if (snoopers_.empty())
-    should_duplicate_.Increment();
-  DCHECK(!base::ContainsValue(snoopers_, snooper));
-  snoopers_.push_back(snooper);
+  if (mode == SnoopingMode::kDeferred) {
+    if (snoopers_.empty())
+      should_duplicate_.Increment();
+    DCHECK(!base::ContainsValue(snoopers_, snooper));
+    snoopers_.push_back(snooper);
+  } else {  // SnoopingMode::kRealtime
+    // The list will only update on this thread, but may be read from another.
+    DCHECK(!base::ContainsValue(realtime_snoopers_, snooper));
+    base::AutoLock lock(realtime_snooper_lock_);
+    realtime_snoopers_.push_back(snooper);
+  }
 }
 
-void OutputController::StopSnooping(Snooper* snooper) {
+void OutputController::StopSnooping(Snooper* snooper, SnoopingMode mode) {
   DCHECK(task_runner_->BelongsToCurrentThread());
 
-  const auto it = std::find(snoopers_.begin(), snoopers_.end(), snooper);
-  DCHECK(it != snoopers_.end());
-  snoopers_.erase(it);
-  if (snoopers_.empty())
-    should_duplicate_.Decrement();
+  if (mode == SnoopingMode::kDeferred) {
+    const auto it = std::find(snoopers_.begin(), snoopers_.end(), snooper);
+    DCHECK(it != snoopers_.end());
+    snoopers_.erase(it);
+    if (snoopers_.empty())
+      should_duplicate_.Decrement();
+  } else {  // SnoopingMode::kRealtime
+    // The list will only update on this thread, but may be read from another.
+    const auto it = std::find(realtime_snoopers_.begin(),
+                              realtime_snoopers_.end(), snooper);
+    DCHECK(it != realtime_snoopers_.end());
+    // We also don't care about ordering, so swap and pop rather than erase.
+    base::AutoLock lock(realtime_snooper_lock_);
+    *it = realtime_snoopers_.back();
+    realtime_snoopers_.pop_back();
+  }
 }
 
 void OutputController::StartMuting() {
@@ -470,7 +523,7 @@ void OutputController::StartMuting() {
 
   // If there is an active |stream_| that plays out audio locally, invoke a
   // device change to switch to a fake AudioOutputStream for muting.
-  if (state_ != kClosed && stream_ && stream_ != diverting_to_stream_)
+  if (state_ != kClosed && stream_)
     OnDeviceChange();
 }
 
@@ -483,8 +536,17 @@ void OutputController::StopMuting() {
 
   // If there is an active |stream_| and it is the fake stream for muting,
   // invoke a device change to switch back to the normal AudioOutputStream.
-  if (state_ != kClosed && stream_ && stream_ != diverting_to_stream_)
+  if (state_ != kClosed && stream_)
     OnDeviceChange();
+}
+
+void OutputController::OnMemberJoinedGroup(StreamMonitor* monitor) {
+  // We're only observing the group when we're active.
+  monitor->OnStreamActive(this);
+}
+
+void OutputController::OnMemberLeftGroup(StreamMonitor* monitor) {
+  // Do nothing. The monitor will have already cleaned up.
 }
 
 void OutputController::OnDeviceChange() {
@@ -536,143 +598,6 @@ void OutputController::OnDeviceChange() {
       return;
     default:
       NOTREACHED() << "Invalid original state.";
-  }
-}
-
-OutputController::ThreadHoppingDiverter::ThreadHoppingDiverter(
-    OutputController* controller)
-    : controller_(controller), weak_this_(AsWeakPtr()) {
-  controller_->audio_manager_->AddDiverter(controller_->group_id_, this);
-}
-
-OutputController::ThreadHoppingDiverter::~ThreadHoppingDiverter() {
-  controller_->audio_manager_->RemoveDiverter(this);
-}
-
-const media::AudioParameters&
-OutputController::ThreadHoppingDiverter::GetAudioParameters() {
-  return controller_->params_;
-}
-
-void OutputController::ThreadHoppingDiverter::StartDiverting(
-    media::AudioOutputStream* to_stream) {
-  controller_->task_runner_->PostTask(
-      FROM_HERE, base::BindOnce(
-                     [](base::WeakPtr<ThreadHoppingDiverter> weak_self,
-                        media::AudioOutputStream* to_stream) {
-                       if (auto* self = weak_self.get()) {
-                         self->controller_->DoStartDiverting(to_stream);
-                       } else {
-                         // The OutputController went away. Close the stream
-                         // here to avoid leaks.
-                         to_stream->Close();
-                       }
-                     },
-                     weak_this_, to_stream));
-}
-
-void OutputController::ThreadHoppingDiverter::StopDiverting() {
-  controller_->task_runner_->PostTask(
-      FROM_HERE, base::BindOnce(
-                     [](base::WeakPtr<ThreadHoppingDiverter> weak_self) {
-                       if (auto* self = weak_self.get()) {
-                         self->controller_->DoStopDiverting();
-                       } else {
-                         // The OutputController went away, but it will have
-                         // closed the stream perforce.
-                       }
-                     },
-                     weak_this_));
-}
-
-void OutputController::ThreadHoppingDiverter::StartDuplicating(
-    media::AudioPushSink* sink) {
-  controller_->task_runner_->PostTask(
-      FROM_HERE, base::BindOnce(
-                     [](base::WeakPtr<ThreadHoppingDiverter> weak_self,
-                        media::AudioPushSink* sink) {
-                       if (auto* self = weak_self.get()) {
-                         self->controller_->DoStartDuplicating(sink);
-                       } else {
-                         // The OutputController went away. Close the sink here
-                         // to avoid leaks.
-                         sink->Close();
-                       }
-                     },
-                     weak_this_, sink));
-}
-
-void OutputController::ThreadHoppingDiverter::StopDuplicating(
-    media::AudioPushSink* sink) {
-  controller_->task_runner_->PostTask(
-      FROM_HERE, base::BindOnce(
-                     [](base::WeakPtr<ThreadHoppingDiverter> weak_self,
-                        media::AudioPushSink* sink) {
-                       if (auto* self = weak_self.get()) {
-                         self->controller_->DoStopDuplicating(sink);
-                       } else {
-                         // The OutputController went away, but it will have
-                         // closed the sink perforce.
-                       }
-                     },
-                     weak_this_, sink));
-}
-
-void OutputController::DoStartDiverting(media::AudioOutputStream* to_stream) {
-  DCHECK(task_runner_->BelongsToCurrentThread());
-
-  if (state_ == kClosed) {
-    to_stream->Close();
-    return;
-  }
-
-  DCHECK(!diverting_to_stream_);
-  diverting_to_stream_ = to_stream;
-  // Note: OnDeviceChange() will engage the "re-create" process, which will
-  // detect and use the alternate AudioOutputStream rather than create a new one
-  // via AudioManager.
-  OnDeviceChange();
-}
-
-void OutputController::DoStopDiverting() {
-  DCHECK(task_runner_->BelongsToCurrentThread());
-
-  if (state_ == kClosed)
-    return;
-
-  // Note: OnDeviceChange() will cause the existing stream (the consumer of the
-  // diverted audio data) to be closed, and diverting_to_stream_ will be set
-  // back to NULL.
-  OnDeviceChange();
-  DCHECK(!diverting_to_stream_);
-}
-
-void OutputController::DoStartDuplicating(media::AudioPushSink* sink) {
-  DCHECK(task_runner_->BelongsToCurrentThread());
-
-  if (state_ == kClosed) {
-    sink->Close();
-    return;
-  }
-
-  if (duplication_targets_.empty())
-    should_duplicate_.Increment();
-
-  duplication_targets_.insert(sink);
-}
-
-void OutputController::DoStopDuplicating(media::AudioPushSink* sink) {
-  DCHECK(task_runner_->BelongsToCurrentThread());
-
-  if (state_ == kClosed)
-    return;
-
-  sink->Close();
-
-  duplication_targets_.erase(sink);
-  if (duplication_targets_.empty()) {
-    const bool is_nonzero = should_duplicate_.Decrement();
-    DCHECK(!is_nonzero);
   }
 }
 

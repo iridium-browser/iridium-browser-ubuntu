@@ -21,8 +21,6 @@ class TouchSelectionControllerClientManagerAndroid
   explicit TouchSelectionControllerClientManagerAndroid(
       RenderWidgetHostViewAndroid* rwhv);
   ~TouchSelectionControllerClientManagerAndroid() override;
-  void SetPageScaleFactor(float page_scale_factor);
-  float page_scale_factor() { return page_scale_factor_; }
 
   // TouchSelectionControllerClientManager implementation.
   void DidStopFlinging() override;
@@ -52,10 +50,9 @@ class TouchSelectionControllerClientManagerAndroid
  private:
   RenderWidgetHostViewAndroid* rwhv_;
   TouchSelectionControllerClient* active_client_;
-  float page_scale_factor_;
   gfx::SelectionBound manager_selection_start_;
   gfx::SelectionBound manager_selection_end_;
-  base::ObserverList<TouchSelectionControllerClientManager::Observer>
+  base::ObserverList<TouchSelectionControllerClientManager::Observer>::Unchecked
       observers_;
 
   DISALLOW_COPY_AND_ASSIGN(TouchSelectionControllerClientManagerAndroid);

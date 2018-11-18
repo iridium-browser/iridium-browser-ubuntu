@@ -38,9 +38,11 @@ namespace blink {
 class Event;
 class HTMLVideoElement;
 class MediaControlsMediaEventListener;
+class MediaControlsDisplayCutoutDelegate;
 class MediaControlsOrientationLockDelegate;
 class MediaControlsRotateToFullscreenDelegate;
 class MediaControlsWindowEventListener;
+class MediaControlAnimatedArrowContainerElement;
 class MediaControlButtonPanelElement;
 class MediaControlCastButtonElement;
 class MediaControlCurrentTimeDisplayElement;
@@ -48,6 +50,7 @@ class MediaControlDownloadButtonElement;
 class MediaControlFullscreenButtonElement;
 class MediaControlLoadingPanelElement;
 class MediaControlMuteButtonElement;
+class MediaControlDisplayCutoutFullscreenButtonElement;
 class MediaControlOverflowMenuButtonElement;
 class MediaControlOverflowMenuListElement;
 class MediaControlOverlayEnclosureElement;
@@ -75,7 +78,7 @@ class MODULES_EXPORT MediaControlsImpl final : public HTMLDivElement,
 
  public:
   static MediaControlsImpl* Create(HTMLMediaElement&, ShadowRoot&);
-  ~MediaControlsImpl() = default;
+  ~MediaControlsImpl() override = default;
 
   // Returns whether the ModernMediaControlsEnabled runtime flag is on.
   static bool IsModern();
@@ -84,8 +87,8 @@ class MODULES_EXPORT MediaControlsImpl final : public HTMLDivElement,
   static bool IsTouchEvent(Event*);
 
   // Node override.
-  Node::InsertionNotificationRequest InsertedInto(ContainerNode*) override;
-  void RemovedFrom(ContainerNode*) override;
+  Node::InsertionNotificationRequest InsertedInto(ContainerNode&) override;
+  void RemovedFrom(ContainerNode&) override;
 
   // MediaControls implementation.
   void MaybeShow() override;
@@ -134,6 +137,9 @@ class MODULES_EXPORT MediaControlsImpl final : public HTMLDivElement,
   void ToggleOverflowMenu();
   bool OverflowMenuVisible();
 
+  void OpenVolumeSliderIfNecessary();
+  void CloseVolumeSliderIfNecessary();
+
   void ShowOverlayCastButtonIfNeeded();
 
   // Methods call by the scrubber.
@@ -148,13 +154,11 @@ class MODULES_EXPORT MediaControlsImpl final : public HTMLDivElement,
   void DidDismissDownloadInProductHelp();
   MediaDownloadInProductHelpManager* DownloadInProductHelp();
 
-  void MaybeRecordOverflowTimeToAction();
-
   // Accessors for UI elements.
   const MediaControlCurrentTimeDisplayElement& CurrentTimeDisplay() const;
   MediaControlToggleClosedCaptionsButtonElement& ToggleClosedCaptions();
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
   // Track the state of the controls.
   enum ControlsState {
@@ -189,6 +193,10 @@ class MODULES_EXPORT MediaControlsImpl final : public HTMLDivElement,
   // accessibility tool. This is meant to be replaced by AOM when the event will
   // be exposed to the platform.
   void OnAccessibleFocus();
+  void OnAccessibleBlur();
+
+  // Returns true/false based on which set of controls to display.
+  bool ShouldShowAudioControls() const;
 
  private:
   // MediaControlsMediaEventListener is a component that is listening to events
@@ -202,11 +210,13 @@ class MODULES_EXPORT MediaControlsImpl final : public HTMLDivElement,
   friend class MediaControlsWindowEventListener;
 
   // For tests.
+  friend class MediaControlsDisplayCutoutDelegateTest;
   friend class MediaControlsOrientationLockDelegateTest;
   friend class MediaControlsOrientationLockAndRotateToFullscreenDelegateTest;
   friend class MediaControlsRotateToFullscreenDelegateTest;
   friend class MediaControlsImplTest;
   friend class MediaControlsImplInProductHelpTest;
+  friend class MediaControlDisplayCutoutFullscreenButtonElementTest;
   friend class MediaControlTimelineElementTest;
 
   // Need to be members of MediaControls for private member access.
@@ -219,6 +229,9 @@ class MODULES_EXPORT MediaControlsImpl final : public HTMLDivElement,
 
   // Update the CSS class when we think the state has updated.
   void UpdateCSSClassFromState();
+
+  // Sets/removes a CSS class from this element based on |should_have_class|.
+  void SetClass(const AtomicString& class_name, bool should_have_class);
 
   // Get the HTMLVideoElement that the controls are attached to. The caller must
   // check that the element is a video element first.
@@ -257,9 +270,10 @@ class MODULES_EXPORT MediaControlsImpl final : public HTMLDivElement,
   void HideCursor();
   void ShowCursor();
 
-  void ElementSizeChangedTimerFired(TimerBase*);
+  bool ShouldOpenVolumeSlider() const;
+  bool ShouldCloseVolumeSlider() const;
 
-  void HideAllMenus();
+  void ElementSizeChangedTimerFired(TimerBase*);
 
   // Hide elements that don't fit, and show those things that we want which
   // do fit.  This requires that m_effectiveWidth and m_effectiveHeight are
@@ -268,6 +282,7 @@ class MODULES_EXPORT MediaControlsImpl final : public HTMLDivElement,
 
   void UpdateOverflowMenuWanted() const;
   void UpdateScrubbingMessageFits() const;
+  void UpdateSizingCSSClass();
   void MaybeRecordElementsDisplayed() const;
 
   // Takes a popup menu (caption, overflow) and position on the screen. This is
@@ -280,19 +295,25 @@ class MODULES_EXPORT MediaControlsImpl final : public HTMLDivElement,
   bool ShouldActAsAudioControls() const;
   void StartActingAsAudioControls();
   void StopActingAsAudioControls();
+  void UpdateActingAsAudioControls();
 
   // Returns true/false based on which set of controls to display.
-  bool ShouldShowAudioControls() const;
   bool ShouldShowVideoControls() const;
 
   // Node
   bool IsMediaControls() const override { return true; }
   bool WillRespondToMouseMoveEvents() override { return true; }
-  void DefaultEventHandler(Event*) override;
+  void DefaultEventHandler(Event&) override;
   bool ContainsRelatedTarget(Event*);
 
   void HandlePointerEvent(Event*);
+  void HandleClickEvent(Event*);
   void HandleTouchEvent(Event*);
+
+  void EnsureAnimatedArrowContainer();
+  void MaybeJump(int);
+  bool IsOnLeftSide(Event*);
+  void TapTimerFired(TimerBase*);
 
   // Internal cast related methods.
   void RemotePlaybackStateChanged();
@@ -313,8 +334,9 @@ class MODULES_EXPORT MediaControlsImpl final : public HTMLDivElement,
   void OnLoadedMetadata();
   void OnEnteredFullscreen();
   void OnExitedFullscreen();
+  void OnPictureInPictureChanged();
   void OnPanelKeypress();
-  void OnMediaKeyboardEvent(Event* event) { DefaultEventHandler(event); }
+  void OnMediaKeyboardEvent(Event* event) { DefaultEventHandler(*event); }
   void OnWaiting();
   void OnLoadingProgress();
   void OnLoadedData();
@@ -340,16 +362,20 @@ class MODULES_EXPORT MediaControlsImpl final : public HTMLDivElement,
   Member<MediaControlButtonPanelElement> media_button_panel_;
   Member<MediaControlLoadingPanelElement> loading_panel_;
   Member<MediaControlPictureInPictureButtonElement> picture_in_picture_button_;
+  Member<MediaControlAnimatedArrowContainerElement>
+      animated_arrow_container_element_;
 
   Member<MediaControlCastButtonElement> cast_button_;
   Member<MediaControlFullscreenButtonElement> fullscreen_button_;
+  Member<MediaControlDisplayCutoutFullscreenButtonElement>
+      display_cutout_fullscreen_button_;
   Member<MediaControlDownloadButtonElement> download_button_;
 
   Member<MediaControlsMediaEventListener> media_event_listener_;
-  Member<MediaControlsWindowEventListener> window_event_listener_;
   Member<MediaControlsOrientationLockDelegate> orientation_lock_delegate_;
   Member<MediaControlsRotateToFullscreenDelegate>
       rotate_to_fullscreen_delegate_;
+  Member<MediaControlsDisplayCutoutDelegate> display_cutout_delegate_;
 
   TaskRunnerTimer<MediaControlsImpl> hide_media_controls_timer_;
   unsigned hide_timer_behavior_flags_;
@@ -379,6 +405,9 @@ class MODULES_EXPORT MediaControlsImpl final : public HTMLDivElement,
   // certain pointer events. In particular, when the user is interacting via
   // touch events, we want to ignore pointerover/pointerout/pointermove events.
   bool is_touch_interaction_ = false;
+
+  // Timer for distinguishing double-taps.
+  TaskRunnerTimer<MediaControlsImpl> tap_timer_;
 
   bool is_test_mode_ = false;
 };

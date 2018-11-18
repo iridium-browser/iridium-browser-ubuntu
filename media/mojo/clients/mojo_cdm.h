@@ -21,6 +21,7 @@
 #include "media/base/cdm_session_tracker.h"
 #include "media/base/content_decryption_module.h"
 #include "media/mojo/interfaces/content_decryption_module.mojom.h"
+#include "mojo/public/cpp/bindings/associated_binding.h"
 #include "mojo/public/cpp/bindings/binding.h"
 
 namespace base {
@@ -32,6 +33,10 @@ class Origin;
 }
 
 namespace media {
+
+namespace mojom {
+class InterfaceFactory;
+}
 
 class MojoDecryptor;
 
@@ -49,6 +54,7 @@ class MojoCdm : public ContentDecryptionModule,
       const url::Origin& security_origin,
       const CdmConfig& cdm_config,
       mojom::ContentDecryptionModulePtr remote_cdm,
+      mojom::InterfaceFactory* interface_factory,
       const SessionMessageCB& session_message_cb,
       const SessionClosedCB& session_closed_cb,
       const SessionKeysChangeCB& session_keys_change_cb,
@@ -84,6 +90,7 @@ class MojoCdm : public ContentDecryptionModule,
 
  private:
   MojoCdm(mojom::ContentDecryptionModulePtr remote_cdm,
+          mojom::InterfaceFactory* interface_factory,
           const SessionMessageCB& session_message_cb,
           const SessionClosedCB& session_closed_cb,
           const SessionKeysChangeCB& session_keys_change_cb,
@@ -132,8 +139,8 @@ class MojoCdm : public ContentDecryptionModule,
   THREAD_CHECKER(thread_checker_);
 
   mojom::ContentDecryptionModulePtr remote_cdm_;
-  mojo::Binding<ContentDecryptionModuleClient> client_binding_;
-  scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
+  mojom::InterfaceFactory* interface_factory_;
+  mojo::AssociatedBinding<ContentDecryptionModuleClient> client_binding_;
 
   // Protects |cdm_id_|, |decryptor_ptr_|, |decryptor_| and
   // |decryptor_task_runner_| which could be accessed from other threads.

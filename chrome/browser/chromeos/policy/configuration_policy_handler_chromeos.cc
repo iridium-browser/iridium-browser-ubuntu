@@ -7,11 +7,9 @@
 #include <stdint.h>
 
 #include <memory>
-#include <string>
 #include <utility>
 #include <vector>
 
-#include "ash/public/cpp/accessibility_types.h"
 #include "ash/public/cpp/ash_pref_names.h"
 #include "base/callback.h"
 #include "base/json/json_reader.h"
@@ -20,6 +18,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
+#include "chrome/browser/chromeos/accessibility/magnifier_type.h"
 #include "chrome/browser/ui/ash/chrome_launcher_prefs.h"
 #include "chrome/common/pref_names.h"
 #include "chromeos/dbus/power_policy_controller.h"
@@ -201,10 +200,11 @@ bool NetworkConfigurationPolicyHandler::CheckPolicySettings(
   if (value) {
     std::string onc_blob;
     value->GetAsString(&onc_blob);
-    std::unique_ptr<base::DictionaryValue> root_dict =
+    std::unique_ptr<base::Value> root_dict =
         chromeos::onc::ReadDictionaryFromJson(onc_blob);
-    if (root_dict.get() == NULL) {
+    if (!root_dict) {
       errors->AddError(policy_name(), IDS_POLICY_NETWORK_CONFIG_PARSE_FAILED);
+      errors->SetDebugInfo(policy_name(), "ERROR: JSON parse error");
       return false;
     }
 
@@ -214,7 +214,8 @@ bool NetworkConfigurationPolicyHandler::CheckPolicySettings(
         false,  // Ignore unknown fields.
         false,  // Ignore invalid recommended field names.
         true,   // Fail on missing fields.
-        true);  // Validate for managed ONC
+        true,   // Validate for managed ONC.
+        true);  // Log warnings.
     validator.SetOncSource(onc_source_);
 
     // ONC policies are always unencrypted.
@@ -222,10 +223,31 @@ bool NetworkConfigurationPolicyHandler::CheckPolicySettings(
     root_dict = validator.ValidateAndRepairObject(
         &chromeos::onc::kToplevelConfigurationSignature, *root_dict,
         &validation_result);
+
+    // Pass error/warning message and non-localized debug_info to
+    // PolicyErrorMap.
+    std::vector<base::StringPiece> messages;
+    for (const chromeos::onc::Validator::ValidationIssue& issue :
+         validator.validation_issues()) {
+      messages.push_back(issue.message);
+    }
+    std::string debug_info = base::JoinString(messages, "\n");
+
     if (validation_result == chromeos::onc::Validator::VALID_WITH_WARNINGS)
-      errors->AddError(policy_name(), IDS_POLICY_NETWORK_CONFIG_IMPORT_PARTIAL);
+      errors->AddError(policy_name(), IDS_POLICY_NETWORK_CONFIG_IMPORT_PARTIAL,
+                       debug_info);
     else if (validation_result == chromeos::onc::Validator::INVALID)
-      errors->AddError(policy_name(), IDS_POLICY_NETWORK_CONFIG_IMPORT_FAILED);
+      errors->AddError(policy_name(), IDS_POLICY_NETWORK_CONFIG_IMPORT_FAILED,
+                       debug_info);
+
+    if (!validator.validation_issues().empty()) {
+      std::vector<std::string> messages;
+      for (const chromeos::onc::Validator::ValidationIssue& issue :
+           validator.validation_issues()) {
+        messages.push_back(issue.message);
+      }
+      errors->SetDebugInfo(policy_name(), base::JoinString(messages, "\n"));
+    }
 
     // In any case, don't reject the policy as some networks or certificates
     // could still be applied.
@@ -290,9 +312,10 @@ NetworkConfigurationPolicyHandler::SanitizeNetworkConfig(
     return NULL;
 
   std::unique_ptr<base::DictionaryValue> toplevel_dict =
-      chromeos::onc::ReadDictionaryFromJson(json_string);
+      base::DictionaryValue::From(
+          chromeos::onc::ReadDictionaryFromJson(json_string));
   if (!toplevel_dict)
-    return NULL;
+    return nullptr;
 
   // Placeholder to insert in place of the filtered setting.
   const char kPlaceholder[] = "********";
@@ -338,8 +361,8 @@ void PinnedLauncherAppsPolicyHandler::ApplyList(
 
 ScreenMagnifierPolicyHandler::ScreenMagnifierPolicyHandler()
     : IntRangePolicyHandlerBase(key::kScreenMagnifierType,
-                                ash::MAGNIFIER_DISABLED,
-                                ash::MAGNIFIER_FULL,
+                                chromeos::MAGNIFIER_DISABLED,
+                                chromeos::MAGNIFIER_FULL,
                                 false) {}
 
 ScreenMagnifierPolicyHandler::~ScreenMagnifierPolicyHandler() {
@@ -354,7 +377,7 @@ void ScreenMagnifierPolicyHandler::ApplyPolicySettings(
     // The "type" is only used to enable or disable the feature as a whole.
     // http://crbug.com/170850
     prefs->SetBoolean(ash::prefs::kAccessibilityScreenMagnifierEnabled,
-                      value_in_range != ash::MAGNIFIER_DISABLED);
+                      value_in_range != chromeos::MAGNIFIER_DISABLED);
   }
 }
 
@@ -492,6 +515,24 @@ void ScreenLockDelayPolicyHandler::ApplyPolicySettings(
   if (value)
     prefs->SetValue(ash::prefs::kPowerBatteryScreenLockDelayMs,
                     std::move(value));
+}
+
+ArcServicePolicyHandler::ArcServicePolicyHandler(const char* policy,
+                                                 const char* pref)
+    : IntRangePolicyHandlerBase(
+          policy,
+          static_cast<int>(ArcServicePolicyValue::kDisabled),
+          static_cast<int>(ArcServicePolicyValue::kUnderUserControl),
+          false /* clamp */),
+      pref_(pref) {}
+
+void ArcServicePolicyHandler::ApplyPolicySettings(const PolicyMap& policies,
+                                                  PrefValueMap* prefs) {
+  const base::Value* const value = policies.GetValue(policy_name());
+  if (value &&
+      value->GetInt() == static_cast<int>(ArcServicePolicyValue::kDisabled)) {
+    prefs->SetBoolean(pref_, false);
+  }
 }
 
 }  // namespace policy

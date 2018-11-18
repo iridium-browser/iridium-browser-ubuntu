@@ -7,6 +7,8 @@
 #include "third_party/blink/renderer/core/css/css_value_list.h"
 #include "third_party/blink/renderer/core/css/cssom/css_transform_component.h"
 #include "third_party/blink/renderer/core/geometry/dom_matrix.h"
+#include "third_party/blink/renderer/platform/bindings/exception_messages.h"
+#include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
 namespace blink {
 
@@ -52,7 +54,7 @@ bool CSSTransformValue::is2D() const {
 
 DOMMatrix* CSSTransformValue::toMatrix(ExceptionState& exception_state) const {
   DOMMatrix* matrix = DOMMatrix::Create();
-  for (size_t i = 0; i < transform_components_.size(); i++) {
+  for (wtf_size_t i = 0; i < transform_components_.size(); i++) {
     const DOMMatrix* matrixComponent =
         transform_components_[i]->toMatrix(exception_state);
     if (matrixComponent) {
@@ -64,7 +66,7 @@ DOMMatrix* CSSTransformValue::toMatrix(ExceptionState& exception_state) const {
 
 const CSSValue* CSSTransformValue::ToCSSValue() const {
   CSSValueList* transform_css_value = CSSValueList::CreateSpaceSeparated();
-  for (size_t i = 0; i < transform_components_.size(); i++) {
+  for (wtf_size_t i = 0; i < transform_components_.size(); i++) {
     const CSSValue* component = transform_components_[i]->ToCSSValue();
     // TODO(meade): Remove this check once numbers and lengths are rewritten.
     if (!component)

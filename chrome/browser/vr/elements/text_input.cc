@@ -24,11 +24,12 @@ TextInput::TextInput(float font_height_meters,
   text->SetType(kTypeTextInputHint);
   text->SetDrawPhase(kPhaseForeground);
   text->set_focusable(false);
+  text->set_contributes_to_parent_bounds(false);
   text->set_x_anchoring(LEFT);
   text->set_x_centering(LEFT);
   text->SetSize(1, 1);
   text->SetLayoutMode(TextLayoutMode::kSingleLineFixedWidth);
-  text->SetAlignment(UiTexture::kTextAlignmentLeft);
+  text->SetAlignment(kTextAlignmentLeft);
   hint_element_ = text.get();
   this->AddChild(std::move(text));
 
@@ -37,12 +38,13 @@ TextInput::TextInput(float font_height_meters,
   text->SetDrawPhase(kPhaseForeground);
   text->set_hit_testable(true);
   text->set_focusable(false);
+  text->set_contributes_to_parent_bounds(false);
   text->set_x_anchoring(LEFT);
   text->set_x_centering(LEFT);
   text->set_bubble_events(true);
   text->SetSize(1, 1);
   text->SetLayoutMode(TextLayoutMode::kSingleLineFixedWidth);
-  text->SetAlignment(UiTexture::kTextAlignmentLeft);
+  text->SetAlignment(kTextAlignmentLeft);
   text->SetCursorEnabled(true);
   text_element_ = text.get();
   this->AddChild(std::move(text));
@@ -52,6 +54,7 @@ TextInput::TextInput(float font_height_meters,
   cursor->SetType(kTypeTextInputCursor);
   cursor->SetDrawPhase(kPhaseForeground);
   cursor->set_focusable(false);
+  cursor->set_contributes_to_parent_bounds(false);
   cursor->set_x_anchoring(LEFT);
   cursor->set_y_anchoring(BOTTOM);
   cursor->SetColor(SK_ColorBLUE);
@@ -65,7 +68,8 @@ void TextInput::SetTextInputDelegate(TextInputDelegate* text_input_delegate) {
   delegate_ = text_input_delegate;
 }
 
-void TextInput::OnButtonDown(const gfx::PointF& position) {
+void TextInput::OnButtonDown(const gfx::PointF& position,
+                             base::TimeTicks timestamp) {
   // Reposition the cursor based on click position.
   int cursor_position = text_element_->GetCursorPositionFromPoint(position);
 
@@ -76,11 +80,33 @@ void TextInput::OnButtonDown(const gfx::PointF& position) {
     EditedText new_edited_text(edited_text_);
     new_edited_text.Update(new_info);
     UpdateInput(new_edited_text);
-    ResetCursorBlinkCycle();
   }
 }
 
-void TextInput::OnButtonUp(const gfx::PointF& position) {
+void TextInput::OnTouchMove(const gfx::PointF& position,
+                            base::TimeTicks timestamp) {
+  int cursor_position = text_element_->GetCursorPositionFromPoint(position);
+
+  TextInputInfo new_info(edited_text_.current);
+  new_info.selection_end = cursor_position;
+  if (new_info != edited_text_.current) {
+    EditedText new_edited_text(edited_text_);
+    new_edited_text.Update(new_info);
+    UpdateInput(new_edited_text);
+  }
+}
+
+void TextInput::OnButtonUp(const gfx::PointF& position,
+                           base::TimeTicks timestamp) {
+  if (edited_text_.current.selection_start >
+      edited_text_.current.selection_end) {
+    TextInputInfo new_info(edited_text_.current);
+    std::swap(new_info.selection_start, new_info.selection_end);
+    EditedText new_edited_text(edited_text_);
+    new_edited_text.Update(new_info);
+    UpdateInput(new_edited_text);
+  }
+  ResetCursorBlinkCycle();
   RequestFocus();
 }
 
@@ -169,7 +195,7 @@ void TextInput::OnSetName() {
   cursor_element_->set_owner_name_for_test(name());
 }
 
-void TextInput::LayOutChildren() {
+void TextInput::LayOutNonContributingChildren() {
   // To avoid re-rendering a texture when the cursor blinks, the texture is a
   // separate element. Once the text has been laid out, we can position the
   // cursor appropriately relative to the text field.

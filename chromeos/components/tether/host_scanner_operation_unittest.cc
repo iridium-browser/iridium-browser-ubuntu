@@ -10,9 +10,12 @@
 
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
-#include "base/test/histogram_tester.h"
+#include "base/test/metrics/histogram_tester.h"
+#include "base/test/scoped_feature_list.h"
+#include "base/test/scoped_task_environment.h"
 #include "base/test/simple_test_clock.h"
-#include "chromeos/components/tether/ble_constants.h"
+#include "base/test/test_simple_task_runner.h"
+#include "chromeos/chromeos_features.h"
 #include "chromeos/components/tether/fake_ble_connection_manager.h"
 #include "chromeos/components/tether/fake_connection_preserver.h"
 #include "chromeos/components/tether/host_scan_device_prioritizer.h"
@@ -20,6 +23,9 @@
 #include "chromeos/components/tether/mock_tether_host_response_recorder.h"
 #include "chromeos/components/tether/proto/tether.pb.h"
 #include "chromeos/components/tether/proto_test_util.h"
+#include "chromeos/services/device_sync/public/cpp/fake_device_sync_client.h"
+#include "chromeos/services/secure_channel/ble_constants.h"
+#include "chromeos/services/secure_channel/public/cpp/client/fake_secure_channel_client.h"
 #include "components/cryptauth/remote_device_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -44,7 +50,7 @@ class TestHostScanDevicePrioritizer : public HostScanDevicePrioritizer {
 
   // HostScanDevicePrioritizer:
   void SortByHostScanOrder(
-      std::vector<cryptauth::RemoteDevice>* remote_devices) const override {
+      cryptauth::RemoteDeviceRefList* remote_devices) const override {
     // Simply reverses the device order.
     for (size_t i = 0; i < remote_devices->size() / 2; ++i) {
       std::iter_swap(remote_devices->begin() + i,
@@ -53,9 +59,9 @@ class TestHostScanDevicePrioritizer : public HostScanDevicePrioritizer {
   }
 
   void VerifyHasBeenPrioritized(
-      const std::vector<cryptauth::RemoteDevice>& original,
-      const std::vector<cryptauth::RemoteDevice>& prioritized) {
-    std::vector<cryptauth::RemoteDevice> copy_of_original = original;
+      const cryptauth::RemoteDeviceRefList& original,
+      const cryptauth::RemoteDeviceRefList& prioritized) {
+    cryptauth::RemoteDeviceRefList copy_of_original = original;
     SortByHostScanOrder(&copy_of_original);
     EXPECT_EQ(copy_of_original, prioritized);
   }
@@ -77,7 +83,7 @@ class TestObserver final : public HostScannerOperation::Observer {
     return scanned_devices_so_far_;
   }
 
-  const std::vector<cryptauth::RemoteDevice>&
+  const cryptauth::RemoteDeviceRefList&
   gms_core_notifications_disabled_devices() {
     return gms_core_notifications_disabled_devices_;
   }
@@ -85,7 +91,7 @@ class TestObserver final : public HostScannerOperation::Observer {
   void OnTetherAvailabilityResponse(
       const std::vector<HostScannerOperation::ScannedDeviceInfo>&
           scanned_device_list_so_far,
-      const std::vector<cryptauth::RemoteDevice>&
+      const cryptauth::RemoteDeviceRefList&
           gms_core_notifications_disabled_devices,
       bool is_final_scan_result) override {
     has_received_update_ = true;
@@ -98,7 +104,7 @@ class TestObserver final : public HostScannerOperation::Observer {
  private:
   bool has_received_update_;
   std::vector<HostScannerOperation::ScannedDeviceInfo> scanned_devices_so_far_;
-  std::vector<cryptauth::RemoteDevice> gms_core_notifications_disabled_devices_;
+  cryptauth::RemoteDeviceRefList gms_core_notifications_disabled_devices_;
   bool has_final_scan_result_been_sent_;
 };
 
@@ -129,9 +135,15 @@ class HostScannerOperationTest : public testing::Test {
   HostScannerOperationTest()
       : tether_availability_request_string_(
             CreateTetherAvailabilityRequestString()),
-        test_devices_(cryptauth::GenerateTestRemoteDevices(5)) {}
+        test_devices_(cryptauth::CreateRemoteDeviceRefListForTest(5)) {}
 
   void SetUp() override {
+    scoped_feature_list_.InitAndDisableFeature(features::kMultiDeviceApi);
+
+    fake_device_sync_client_ =
+        std::make_unique<device_sync::FakeDeviceSyncClient>();
+    fake_secure_channel_client_ =
+        std::make_unique<secure_channel::FakeSecureChannelClient>();
     fake_ble_connection_manager_ = std::make_unique<FakeBleConnectionManager>();
     test_host_scan_device_prioritizer_ =
         std::make_unique<TestHostScanDevicePrioritizer>();
@@ -142,9 +154,10 @@ class HostScannerOperationTest : public testing::Test {
   }
 
   void ConstructOperation(
-      const std::vector<cryptauth::RemoteDevice>& remote_devices) {
+      const cryptauth::RemoteDeviceRefList& remote_devices) {
     operation_ = base::WrapUnique(new HostScannerOperation(
-        remote_devices, fake_ble_connection_manager_.get(),
+        remote_devices, fake_device_sync_client_.get(),
+        fake_secure_channel_client_.get(), fake_ble_connection_manager_.get(),
         test_host_scan_device_prioritizer_.get(),
         mock_tether_host_response_recorder_.get(),
         fake_connection_preserver_.get()));
@@ -155,7 +168,8 @@ class HostScannerOperationTest : public testing::Test {
         remote_devices, operation_->remote_devices());
 
     test_clock_.SetNow(base::Time::UnixEpoch());
-    operation_->SetClockForTest(&test_clock_);
+    test_task_runner_ = base::MakeRefCounted<base::TestSimpleTaskRunner>();
+    operation_->SetTestDoubles(&test_clock_, test_task_runner_);
 
     EXPECT_FALSE(test_observer_->has_received_update());
     operation_->Initialize();
@@ -165,7 +179,7 @@ class HostScannerOperationTest : public testing::Test {
   }
 
   void SimulateDeviceAuthenticationAndVerifyMessageSent(
-      const cryptauth::RemoteDevice& remote_device,
+      cryptauth::RemoteDeviceRef remote_device,
       size_t expected_num_messages_sent) {
     // Verify that before the authentication, one fewer than the expected number
     // of messages has been sent.
@@ -185,7 +199,7 @@ class HostScannerOperationTest : public testing::Test {
   }
 
   void SimulateResponseReceivedAndVerifyObserverCallbackInvoked(
-      const cryptauth::RemoteDevice& remote_device,
+      cryptauth::RemoteDeviceRef remote_device,
       TetherAvailabilityResponse_ResponseCode response_code,
       const std::string& cell_provider_name,
       bool expected_to_be_last_scan_result) {
@@ -197,6 +211,7 @@ class HostScannerOperationTest : public testing::Test {
     fake_ble_connection_manager_->ReceiveMessage(
         remote_device.GetDeviceId(), CreateTetherAvailabilityResponseString(
                                          response_code, cell_provider_name));
+    test_task_runner_->RunUntilIdle();
 
     bool tether_available =
         response_code ==
@@ -227,7 +242,7 @@ class HostScannerOperationTest : public testing::Test {
   void TestOperationWithOneDevice(
       TetherAvailabilityResponse_ResponseCode response_code,
       bool should_connection_be_preserved) {
-    ConstructOperation(std::vector<cryptauth::RemoteDevice>{test_devices_[0]});
+    ConstructOperation(cryptauth::RemoteDeviceRefList{test_devices_[0]});
     SimulateDeviceAuthenticationAndVerifyMessageSent(test_devices_[0], 1u);
     SimulateResponseReceivedAndVerifyObserverCallbackInvoked(
         test_devices_[0], response_code, std::string(kDefaultCarrier), true);
@@ -254,9 +269,15 @@ class HostScannerOperationTest : public testing::Test {
         "InstantTethering.Performance.TetherAvailabilityResponseDuration", 0);
   }
 
-  const std::string tether_availability_request_string_;
-  const std::vector<cryptauth::RemoteDevice> test_devices_;
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
 
+  const std::string tether_availability_request_string_;
+  const cryptauth::RemoteDeviceRefList test_devices_;
+  base::test::ScopedFeatureList scoped_feature_list_;
+
+  std::unique_ptr<device_sync::FakeDeviceSyncClient> fake_device_sync_client_;
+  std::unique_ptr<secure_channel::SecureChannelClient>
+      fake_secure_channel_client_;
   std::unique_ptr<FakeBleConnectionManager> fake_ble_connection_manager_;
   std::unique_ptr<TestHostScanDevicePrioritizer>
       test_host_scan_device_prioritizer_;
@@ -265,6 +286,7 @@ class HostScannerOperationTest : public testing::Test {
   std::unique_ptr<FakeConnectionPreserver> fake_connection_preserver_;
   std::unique_ptr<TestObserver> test_observer_;
   base::SimpleTestClock test_clock_;
+  scoped_refptr<base::TestSimpleTaskRunner> test_task_runner_;
   std::unique_ptr<HostScannerOperation> operation_;
 
   base::HistogramTester histogram_tester_;
@@ -343,7 +365,7 @@ TEST_F(HostScannerOperationTest,
       TetherAvailabilityResponse_ResponseCode ::
           TetherAvailabilityResponse_ResponseCode_NOTIFICATIONS_DISABLED_LEGACY,
       false /* should_connection_be_preserved */);
-  EXPECT_EQ(std::vector<cryptauth::RemoteDevice>{test_devices_[0]},
+  EXPECT_EQ(cryptauth::RemoteDeviceRefList{test_devices_[0]},
             test_observer_->gms_core_notifications_disabled_devices());
 }
 
@@ -357,7 +379,7 @@ TEST_F(HostScannerOperationTest,
       TetherAvailabilityResponse_ResponseCode ::
           TetherAvailabilityResponse_ResponseCode_NOTIFICATIONS_DISABLED_WITH_NOTIFICATION_CHANNEL,
       false /* should_connection_be_preserved */);
-  EXPECT_EQ(std::vector<cryptauth::RemoteDevice>{test_devices_[0]},
+  EXPECT_EQ(cryptauth::RemoteDeviceRefList{test_devices_[0]},
             test_observer_->gms_core_notifications_disabled_devices());
 }
 

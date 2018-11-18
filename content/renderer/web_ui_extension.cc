@@ -74,13 +74,16 @@ void WebUIExtension::Install(blink::WebLocalFrame* frame) {
 
   v8::Local<v8::Object> chrome = GetOrCreateChromeObject(isolate,
                                                           context->Global());
-  chrome->Set(gin::StringToSymbol(isolate, "send"),
-              gin::CreateFunctionTemplate(
-                  isolate, base::Bind(&WebUIExtension::Send))->GetFunction());
+  chrome->Set(
+      gin::StringToSymbol(isolate, "send"),
+      gin::CreateFunctionTemplate(isolate, base::Bind(&WebUIExtension::Send))
+          ->GetFunction(context)
+          .ToLocalChecked());
   chrome->Set(gin::StringToSymbol(isolate, "getVariableValue"),
               gin::CreateFunctionTemplate(
                   isolate, base::Bind(&WebUIExtension::GetVariableValue))
-                  ->GetFunction());
+                  ->GetFunction(context)
+                  .ToLocalChecked());
 }
 
 // static
@@ -122,7 +125,6 @@ void WebUIExtension::Send(gin::Arguments* args) {
 
   // Send the message up to the browser.
   render_frame->Send(new FrameHostMsg_WebUISend(render_frame->GetRoutingID(),
-                                                frame->GetDocument().Url(),
                                                 message, *content));
 }
 

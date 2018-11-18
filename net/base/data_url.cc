@@ -52,9 +52,8 @@ bool DataURL::Parse(const GURL& url,
     ++iter;
   }
 
-  static const char kBase64Tag[] = "base64";
-  static const char kCharsetTag[] = "charset=";
-  const size_t kCharsetTagLength = arraysize(kCharsetTag) - 1;
+  static constexpr base::StringPiece kBase64Tag("base64");
+  static constexpr base::StringPiece kCharsetTag("charset=");
 
   bool base64_encoded = false;
   for (; iter != meta_data.cend(); ++iter) {
@@ -63,7 +62,7 @@ bool DataURL::Parse(const GURL& url,
     } else if (charset->empty() &&
                base::StartsWith(*iter, kCharsetTag,
                                 base::CompareCase::SENSITIVE)) {
-      *charset = std::string(iter->substr(kCharsetTagLength));
+      *charset = std::string(iter->substr(kCharsetTag.size()));
       // The grammar for charset is not specially defined in RFC2045 and
       // RFC2397. It just needs to be a token.
       if (!HttpUtil::IsToken(*charset))
@@ -102,12 +101,8 @@ bool DataURL::Parse(const GURL& url,
   // For base64, we may have url-escaped whitespace which is not part
   // of the data, and should be stripped. Otherwise, the escaped whitespace
   // could be part of the payload, so don't strip it.
-  if (base64_encoded) {
-    temp_data = UnescapeURLComponent(
-        temp_data, UnescapeRule::SPACES | UnescapeRule::PATH_SEPARATORS |
-                       UnescapeRule::URL_SPECIAL_CHARS_EXCEPT_PATH_SEPARATORS |
-                       UnescapeRule::SPOOFING_AND_CONTROL_CHARS);
-  }
+  if (base64_encoded)
+    UnescapeBinaryURLComponent(temp_data, &temp_data);
 
   // Strip whitespace.
   if (base64_encoded || !(mime_type->compare(0, 5, "text/") == 0 ||
@@ -115,12 +110,8 @@ bool DataURL::Parse(const GURL& url,
     base::EraseIf(temp_data, base::IsAsciiWhitespace<wchar_t>);
   }
 
-  if (!base64_encoded) {
-    temp_data = UnescapeURLComponent(
-        temp_data, UnescapeRule::SPACES | UnescapeRule::PATH_SEPARATORS |
-                       UnescapeRule::URL_SPECIAL_CHARS_EXCEPT_PATH_SEPARATORS |
-                       UnescapeRule::SPOOFING_AND_CONTROL_CHARS);
-  }
+  if (!base64_encoded)
+    UnescapeBinaryURLComponent(temp_data, &temp_data);
 
   if (base64_encoded) {
     size_t length = temp_data.length();

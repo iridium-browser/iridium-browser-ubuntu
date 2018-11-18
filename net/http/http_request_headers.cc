@@ -40,8 +40,8 @@ const char HttpRequestHeaders::kProxyAuthorization[] = "Proxy-Authorization";
 const char HttpRequestHeaders::kProxyConnection[] = "Proxy-Connection";
 const char HttpRequestHeaders::kRange[] = "Range";
 const char HttpRequestHeaders::kReferer[] = "Referer";
+const char HttpRequestHeaders::kSecOriginPolicy[] = "Sec-Origin-Policy";
 const char HttpRequestHeaders::kTransferEncoding[] = "Transfer-Encoding";
-const char HttpRequestHeaders::kTokenBinding[] = "Sec-Token-Binding";
 const char HttpRequestHeaders::kUserAgent[] = "User-Agent";
 
 HttpRequestHeaders::HeaderKeyValuePair::HeaderKeyValuePair() = default;
@@ -75,11 +75,17 @@ bool HttpRequestHeaders::Iterator::GetNext() {
 HttpRequestHeaders::HttpRequestHeaders() = default;
 HttpRequestHeaders::HttpRequestHeaders(const HttpRequestHeaders& other) =
     default;
+HttpRequestHeaders::HttpRequestHeaders(HttpRequestHeaders&& other) = default;
 HttpRequestHeaders::~HttpRequestHeaders() = default;
+
+HttpRequestHeaders& HttpRequestHeaders::operator=(
+    const HttpRequestHeaders& other) = default;
+HttpRequestHeaders& HttpRequestHeaders::operator=(HttpRequestHeaders&& other) =
+    default;
 
 bool HttpRequestHeaders::GetHeader(const base::StringPiece& key,
                                    std::string* out) const {
-  HeaderVector::const_iterator it = FindHeader(key);
+  auto it = FindHeader(key);
   if (it == headers_.end())
     return false;
   out->assign(it->value);
@@ -101,13 +107,13 @@ void HttpRequestHeaders::SetHeaderIfMissing(const base::StringPiece& key,
                                             const base::StringPiece& value) {
   DCHECK(HttpUtil::IsValidHeaderName(key));
   DCHECK(HttpUtil::IsValidHeaderValue(value));
-  HeaderVector::iterator it = FindHeader(key);
+  auto it = FindHeader(key);
   if (it == headers_.end())
     headers_.push_back(HeaderKeyValuePair(key, value));
 }
 
 void HttpRequestHeaders::RemoveHeader(const base::StringPiece& key) {
-  HeaderVector::iterator it = FindHeader(key);
+  auto it = FindHeader(key);
   if (it != headers_.end())
     headers_.erase(it);
 }
@@ -161,22 +167,16 @@ void HttpRequestHeaders::AddHeadersFromString(
 }
 
 void HttpRequestHeaders::MergeFrom(const HttpRequestHeaders& other) {
-  for (HeaderVector::const_iterator it = other.headers_.begin();
-       it != other.headers_.end(); ++it ) {
+  for (auto it = other.headers_.begin(); it != other.headers_.end(); ++it) {
     SetHeader(it->key, it->value);
   }
 }
 
 std::string HttpRequestHeaders::ToString() const {
   std::string output;
-  for (HeaderVector::const_iterator it = headers_.begin();
-       it != headers_.end(); ++it) {
-    if (!it->value.empty()) {
-      base::StringAppendF(&output, "%s: %s\r\n",
-                          it->key.c_str(), it->value.c_str());
-    } else {
-      base::StringAppendF(&output, "%s:\r\n", it->key.c_str());
-    }
+  for (auto it = headers_.begin(); it != headers_.end(); ++it) {
+    base::StringAppendF(&output, "%s: %s\r\n", it->key.c_str(),
+                        it->value.c_str());
   }
   output.append("\r\n");
   return output;
@@ -188,8 +188,7 @@ std::unique_ptr<base::Value> HttpRequestHeaders::NetLogCallback(
   auto dict = std::make_unique<base::DictionaryValue>();
   dict->SetString("line", EscapeNonASCII(*request_line));
   auto headers = std::make_unique<base::ListValue>();
-  for (HeaderVector::const_iterator it = headers_.begin(); it != headers_.end();
-       ++it) {
+  for (auto it = headers_.begin(); it != headers_.end(); ++it) {
     std::string log_value =
         ElideHeaderValueForNetLog(capture_mode, it->key, it->value);
     std::string escaped_name = EscapeNonASCII(it->key);
@@ -203,8 +202,7 @@ std::unique_ptr<base::Value> HttpRequestHeaders::NetLogCallback(
 
 HttpRequestHeaders::HeaderVector::iterator
 HttpRequestHeaders::FindHeader(const base::StringPiece& key) {
-  for (HeaderVector::iterator it = headers_.begin();
-       it != headers_.end(); ++it) {
+  for (auto it = headers_.begin(); it != headers_.end(); ++it) {
     if (base::EqualsCaseInsensitiveASCII(key, it->key))
       return it;
   }
@@ -214,8 +212,7 @@ HttpRequestHeaders::FindHeader(const base::StringPiece& key) {
 
 HttpRequestHeaders::HeaderVector::const_iterator
 HttpRequestHeaders::FindHeader(const base::StringPiece& key) const {
-  for (HeaderVector::const_iterator it = headers_.begin();
-       it != headers_.end(); ++it) {
+  for (auto it = headers_.begin(); it != headers_.end(); ++it) {
     if (base::EqualsCaseInsensitiveASCII(key, it->key))
       return it;
   }
@@ -225,7 +222,7 @@ HttpRequestHeaders::FindHeader(const base::StringPiece& key) const {
 
 void HttpRequestHeaders::SetHeaderInternal(const base::StringPiece& key,
                                            const base::StringPiece& value) {
-  HeaderVector::iterator it = FindHeader(key);
+  auto it = FindHeader(key);
   if (it != headers_.end())
     it->value.assign(value.data(), value.size());
   else

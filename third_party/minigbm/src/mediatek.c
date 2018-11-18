@@ -18,25 +18,36 @@
 #include "helpers.h"
 #include "util.h"
 
+#define TILE_TYPE_LINEAR 0
+
 struct mediatek_private_map_data {
 	void *cached_addr;
 	void *gem_addr;
 };
 
 static const uint32_t render_target_formats[] = { DRM_FORMAT_ABGR8888, DRM_FORMAT_ARGB8888,
-						  DRM_FORMAT_RGB565, DRM_FORMAT_XBGR8888,
-						  DRM_FORMAT_XRGB8888 };
+						  DRM_FORMAT_BGR888,   DRM_FORMAT_RGB565,
+						  DRM_FORMAT_XBGR8888, DRM_FORMAT_XRGB8888 };
 
 static const uint32_t texture_source_formats[] = { DRM_FORMAT_R8, DRM_FORMAT_YVU420,
 						   DRM_FORMAT_YVU420_ANDROID };
 
 static int mediatek_init(struct driver *drv)
 {
+	struct format_metadata metadata;
+
 	drv_add_combinations(drv, render_target_formats, ARRAY_SIZE(render_target_formats),
 			     &LINEAR_METADATA, BO_USE_RENDER_MASK);
 
 	drv_add_combinations(drv, texture_source_formats, ARRAY_SIZE(texture_source_formats),
 			     &LINEAR_METADATA, BO_USE_TEXTURE_MASK);
+
+	/* Support BO_USE_HW_VIDEO_DECODER for protected content minigbm allocations. */
+	metadata.tiling = TILE_TYPE_LINEAR;
+	metadata.priority = 1;
+	metadata.modifier = DRM_FORMAT_MOD_LINEAR;
+	drv_modify_combination(drv, DRM_FORMAT_YVU420, &metadata, BO_USE_HW_VIDEO_DECODER);
+	drv_modify_combination(drv, DRM_FORMAT_YVU420_ANDROID, &metadata, BO_USE_HW_VIDEO_DECODER);
 
 	return drv_modify_linear_combinations(drv);
 }
@@ -62,8 +73,7 @@ static int mediatek_bo_create(struct bo *bo, uint32_t width, uint32_t height, ui
 
 	ret = drmIoctl(bo->drv->fd, DRM_IOCTL_MTK_GEM_CREATE, &gem_create);
 	if (ret) {
-		fprintf(stderr, "drv: DRM_IOCTL_MTK_GEM_CREATE failed (size=%llu)\n",
-			gem_create.size);
+		drv_log("DRM_IOCTL_MTK_GEM_CREATE failed (size=%llu)\n", gem_create.size);
 		return ret;
 	}
 
@@ -84,7 +94,7 @@ static void *mediatek_bo_map(struct bo *bo, struct vma *vma, size_t plane, uint3
 
 	ret = drmIoctl(bo->drv->fd, DRM_IOCTL_MTK_GEM_MAP_OFFSET, &gem_map);
 	if (ret) {
-		fprintf(stderr, "drv: DRM_IOCTL_MTK_GEM_MAP_OFFSET failed\n");
+		drv_log("DRM_IOCTL_MTK_GEM_MAP_OFFSET failed\n");
 		return MAP_FAILED;
 	}
 

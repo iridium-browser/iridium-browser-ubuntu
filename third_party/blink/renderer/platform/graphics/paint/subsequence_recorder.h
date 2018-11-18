@@ -5,11 +5,11 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_PAINT_SUBSEQUENCE_RECORDER_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_PAINT_SUBSEQUENCE_RECORDER_H_
 
+#include "base/macros.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context.h"
 #include "third_party/blink/renderer/platform/graphics/paint/display_item.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_controller.h"
 #include "third_party/blink/renderer/platform/wtf/allocator.h"
-#include "third_party/blink/renderer/platform/wtf/noncopyable.h"
 
 namespace blink {
 
@@ -27,8 +27,7 @@ class PaintController;
 // to the subsequence have been invalidated.
 //
 class SubsequenceRecorder final {
-  DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
-  WTF_MAKE_NONCOPYABLE(SubsequenceRecorder);
+  DISALLOW_NEW();
 
  public:
   static bool UseCachedSubsequenceIfPossible(GraphicsContext& context,
@@ -53,6 +52,8 @@ class SubsequenceRecorder final {
   PaintController& paint_controller_;
   const DisplayItemClient& client_;
   size_t start_;
+
+  DISALLOW_COPY_AND_ASSIGN(SubsequenceRecorder);
 };
 
 }  // namespace blink

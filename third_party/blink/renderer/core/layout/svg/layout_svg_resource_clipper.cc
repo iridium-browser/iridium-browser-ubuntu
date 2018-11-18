@@ -27,6 +27,7 @@
 #include "third_party/blink/renderer/core/layout/layout_box_model_object.h"
 #include "third_party/blink/renderer/core/layout/svg/svg_layout_support.h"
 #include "third_party/blink/renderer/core/paint/paint_info.h"
+#include "third_party/blink/renderer/core/svg/svg_clip_path_element.h"
 #include "third_party/blink/renderer/core/svg/svg_geometry_element.h"
 #include "third_party/blink/renderer/core/svg/svg_use_element.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_record.h"
@@ -120,21 +121,21 @@ void LayoutSVGResourceClipper::RemoveAllClientsFromCache(
                             : SVGResourceClient::kParentOnlyInvalidation);
 }
 
-Optional<Path> LayoutSVGResourceClipper::AsPath() {
+base::Optional<Path> LayoutSVGResourceClipper::AsPath() {
   if (clip_content_path_validity_ == kClipContentPathValid)
-    return Optional<Path>(clip_content_path_);
+    return base::Optional<Path>(clip_content_path_);
   if (clip_content_path_validity_ == kClipContentPathInvalid)
-    return WTF::nullopt;
+    return base::nullopt;
   DCHECK_EQ(clip_content_path_validity_, kClipContentPathUnknown);
 
   clip_content_path_validity_ = kClipContentPathInvalid;
   // If the current clip-path gets clipped itself, we have to fallback to
   // masking.
   if (StyleRef().ClipPath())
-    return WTF::nullopt;
+    return base::nullopt;
 
   unsigned op_count = 0;
-  Optional<SkOpBuilder> clip_path_builder;
+  base::Optional<SkOpBuilder> clip_path_builder;
   SkPath resolved_path;
   for (const SVGElement& child_element :
        Traversal<SVGElement>::ChildrenOf(*GetElement())) {
@@ -142,14 +143,14 @@ Optional<Path> LayoutSVGResourceClipper::AsPath() {
     if (strategy == ClipStrategy::kNone)
       continue;
     if (strategy == ClipStrategy::kMask)
-      return WTF::nullopt;
+      return base::nullopt;
 
     // Multiple shapes require PathOps. In some degenerate cases PathOps can
     // exhibit quadratic behavior, so we cap the number of ops to a reasonable
     // count.
     const unsigned kMaxOps = 42;
     if (++op_count > kMaxOps)
-      return WTF::nullopt;
+      return base::nullopt;
     if (clip_path_builder) {
       clip_path_builder->add(PathFromElement(child_element).GetSkPath(),
                              kUnion_SkPathOp);
@@ -167,7 +168,7 @@ Optional<Path> LayoutSVGResourceClipper::AsPath() {
     clip_path_builder->resolve(&resolved_path);
   clip_content_path_ = std::move(resolved_path);
   clip_content_path_validity_ = kClipContentPathValid;
-  return Optional<Path>(clip_content_path_);
+  return base::Optional<Path>(clip_content_path_);
 }
 
 sk_sp<const PaintRecord> LayoutSVGResourceClipper::CreatePaintRecord() {
@@ -194,7 +195,7 @@ sk_sp<const PaintRecord> LayoutSVGResourceClipper::CreatePaintRecord() {
     // Use the LayoutObject of the direct child even if it is a <use>. In that
     // case, we will paint the targeted element indirectly.
     const LayoutObject* layout_object = child_element.GetLayoutObject();
-    layout_object->Paint(info, IntPoint());
+    layout_object->Paint(info);
   }
 
   cached_paint_record_ = builder.EndRecording();
@@ -214,6 +215,25 @@ void LayoutSVGResourceClipper::CalculateLocalClipBounds() {
   }
 }
 
+SVGUnitTypes::SVGUnitType LayoutSVGResourceClipper::ClipPathUnits() const {
+  return ToSVGClipPathElement(GetElement())
+      ->clipPathUnits()
+      ->CurrentValue()
+      ->EnumValue();
+}
+
+AffineTransform LayoutSVGResourceClipper::CalculateClipTransform(
+    const FloatRect& reference_box) const {
+  AffineTransform transform =
+      ToSVGClipPathElement(GetElement())
+          ->CalculateTransform(SVGElement::kIncludeMotionTransform);
+  if (ClipPathUnits() == SVGUnitTypes::kSvgUnitTypeObjectboundingbox) {
+    transform.Translate(reference_box.X(), reference_box.Y());
+    transform.ScaleNonUniform(reference_box.Width(), reference_box.Height());
+  }
+  return transform;
+}
+
 bool LayoutSVGResourceClipper::HitTestClipContent(
     const FloatRect& object_bounding_box,
     const FloatPoint& node_at_point) {
@@ -221,35 +241,26 @@ bool LayoutSVGResourceClipper::HitTestClipContent(
   if (!SVGLayoutSupport::PointInClippingArea(*this, point))
     return false;
 
-  if (ClipPathUnits() == SVGUnitTypes::kSvgUnitTypeObjectboundingbox) {
-    AffineTransform transform;
-    transform.Translate(object_bounding_box.X(), object_bounding_box.Y());
-    transform.ScaleNonUniform(object_bounding_box.Width(),
-                              object_bounding_box.Height());
-    point = transform.Inverse().MapPoint(point);
-  }
-
-  AffineTransform animated_local_transform =
-      ToSVGClipPathElement(GetElement())
-          ->CalculateTransform(SVGElement::kIncludeMotionTransform);
-  if (!animated_local_transform.IsInvertible())
+  AffineTransform user_space_transform =
+      CalculateClipTransform(object_bounding_box);
+  if (!user_space_transform.IsInvertible())
     return false;
 
-  point = animated_local_transform.Inverse().MapPoint(point);
+  point = user_space_transform.Inverse().MapPoint(point);
 
   for (const SVGElement& child_element :
        Traversal<SVGElement>::ChildrenOf(*GetElement())) {
     if (!ContributesToClip(child_element))
       continue;
-    IntPoint hit_point;
-    HitTestResult result(HitTestRequest::kSVGClipContent, hit_point);
+    HitTestLocation location(point);
+    HitTestResult result(HitTestRequest::kSVGClipContent, location);
     LayoutObject* layout_object = child_element.GetLayoutObject();
 
-    if (layout_object->IsBoxModelObject() &&
-        ToLayoutBoxModelObject(layout_object)->HasSelfPaintingLayer())
-      continue;
+    DCHECK(!layout_object->IsBoxModelObject() ||
+           !ToLayoutBoxModelObject(layout_object)->HasSelfPaintingLayer());
 
-    if (layout_object->NodeAtFloatPoint(result, point, kHitTestForeground))
+    if (layout_object->NodeAtPoint(result, location, LayoutPoint(),
+                                   kHitTestForeground))
       return true;
   }
   return false;
@@ -264,14 +275,16 @@ FloatRect LayoutSVGResourceClipper::ResourceBoundingBox(
   if (local_clip_bounds_.IsEmpty())
     CalculateLocalClipBounds();
 
-  AffineTransform transform =
-      ToSVGClipPathElement(GetElement())
-          ->CalculateTransform(SVGElement::kIncludeMotionTransform);
-  if (ClipPathUnits() == SVGUnitTypes::kSvgUnitTypeObjectboundingbox) {
-    transform.Translate(reference_box.X(), reference_box.Y());
-    transform.ScaleNonUniform(reference_box.Width(), reference_box.Height());
+  return CalculateClipTransform(reference_box).MapRect(local_clip_bounds_);
+}
+
+void LayoutSVGResourceClipper::StyleDidChange(StyleDifference diff,
+                                              const ComputedStyle* old_style) {
+  LayoutSVGResourceContainer::StyleDidChange(diff, old_style);
+  if (diff.TransformChanged()) {
+    MarkAllClientsForInvalidation(SVGResourceClient::kBoundariesInvalidation |
+                                  SVGResourceClient::kPaintInvalidation);
   }
-  return transform.MapRect(local_clip_bounds_);
 }
 
 void LayoutSVGResourceClipper::WillBeDestroyed() {

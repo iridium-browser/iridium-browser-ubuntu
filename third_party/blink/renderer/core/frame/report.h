@@ -6,6 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_REPORT_H_
 
 #include "third_party/blink/renderer/core/frame/report_body.h"
+#include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
 
@@ -16,7 +17,7 @@ class CORE_EXPORT Report : public ScriptWrappable {
   Report(const String& type, const String& url, ReportBody* body)
       : type_(type), url_(url), body_(body) {}
 
-  virtual ~Report() = default;
+  ~Report() override = default;
 
   String type() const { return type_; }
   String url() const { return url_; }

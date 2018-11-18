@@ -11,6 +11,8 @@
 #include "content/public/browser/web_contents.h"
 #include "url/gurl.h"
 
+using blink::mojom::PresentationInfo;
+
 namespace media_router {
 
 // LocalPresentationManager implementation.
@@ -20,12 +22,12 @@ LocalPresentationManager::~LocalPresentationManager() {}
 
 LocalPresentationManager::LocalPresentation*
 LocalPresentationManager::GetOrCreateLocalPresentation(
-    const content::PresentationInfo& presentation_info) {
-  auto it = local_presentations_.find(presentation_info.presentation_id);
+    const PresentationInfo& presentation_info) {
+  auto it = local_presentations_.find(presentation_info.id);
   if (it == local_presentations_.end()) {
     it = local_presentations_
              .insert(std::make_pair(
-                 presentation_info.presentation_id,
+                 presentation_info.id,
                  std::make_unique<LocalPresentation>(presentation_info)))
              .first;
   }
@@ -33,14 +35,14 @@ LocalPresentationManager::GetOrCreateLocalPresentation(
 }
 
 void LocalPresentationManager::RegisterLocalPresentationController(
-    const content::PresentationInfo& presentation_info,
-    const RenderFrameHostId& render_frame_host_id,
+    const PresentationInfo& presentation_info,
+    const content::GlobalFrameRoutingId& render_frame_host_id,
     content::PresentationConnectionPtr controller_connection_ptr,
     content::PresentationConnectionRequest receiver_connection_request,
     const MediaRoute& route) {
-  DVLOG(2) << __func__
-           << " [presentation_id]: " << presentation_info.presentation_id
-           << ", [render_frame_host_id]: " << render_frame_host_id.second;
+  DVLOG(2) << __func__ << " [presentation_id]: " << presentation_info.id
+           << ", [render_frame_host_id]: "
+           << render_frame_host_id.frame_routing_id;
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   auto* presentation = GetOrCreateLocalPresentation(presentation_info);
@@ -51,9 +53,10 @@ void LocalPresentationManager::RegisterLocalPresentationController(
 
 void LocalPresentationManager::UnregisterLocalPresentationController(
     const std::string& presentation_id,
-    const RenderFrameHostId& render_frame_host_id) {
+    const content::GlobalFrameRoutingId& render_frame_host_id) {
   DVLOG(2) << __func__ << " [presentation_id]: " << presentation_id
-           << ", [render_frame_host_id]: " << render_frame_host_id.second;
+           << ", [render_frame_host_id]: "
+           << render_frame_host_id.frame_routing_id;
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
   auto it = local_presentations_.find(presentation_id);
@@ -70,10 +73,9 @@ void LocalPresentationManager::UnregisterLocalPresentationController(
 }
 
 void LocalPresentationManager::OnLocalPresentationReceiverCreated(
-    const content::PresentationInfo& presentation_info,
+    const PresentationInfo& presentation_info,
     const content::ReceiverConnectionAvailableCallback& receiver_callback) {
-  DVLOG(2) << __func__
-           << " [presentation_id]: " << presentation_info.presentation_id;
+  DVLOG(2) << __func__ << " [presentation_id]: " << presentation_info.id;
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   auto* presentation = GetOrCreateLocalPresentation(presentation_info);
   presentation->RegisterReceiver(receiver_callback);
@@ -102,18 +104,18 @@ const MediaRoute* LocalPresentationManager::GetRoute(
 
 // LocalPresentation implementation.
 LocalPresentationManager::LocalPresentation::LocalPresentation(
-    const content::PresentationInfo& presentation_info)
+    const PresentationInfo& presentation_info)
     : presentation_info_(presentation_info) {}
 
 LocalPresentationManager::LocalPresentation::~LocalPresentation() {}
 
 void LocalPresentationManager::LocalPresentation::RegisterController(
-    const RenderFrameHostId& render_frame_host_id,
+    const content::GlobalFrameRoutingId& render_frame_host_id,
     content::PresentationConnectionPtr controller_connection_ptr,
     content::PresentationConnectionRequest receiver_connection_request,
     const MediaRoute& route) {
   if (!receiver_callback_.is_null()) {
-    receiver_callback_.Run(presentation_info_,
+    receiver_callback_.Run(PresentationInfo::New(presentation_info_),
                            std::move(controller_connection_ptr),
                            std::move(receiver_connection_request));
   } else {
@@ -127,7 +129,7 @@ void LocalPresentationManager::LocalPresentation::RegisterController(
 }
 
 void LocalPresentationManager::LocalPresentation::UnregisterController(
-    const RenderFrameHostId& render_frame_host_id) {
+    const content::GlobalFrameRoutingId& render_frame_host_id) {
   pending_controllers_.erase(render_frame_host_id);
 }
 
@@ -137,7 +139,7 @@ void LocalPresentationManager::LocalPresentation::RegisterReceiver(
 
   for (auto& controller : pending_controllers_) {
     receiver_callback.Run(
-        presentation_info_,
+        PresentationInfo::New(presentation_info_),
         std::move(controller.second->controller_connection_ptr),
         std::move(controller.second->receiver_connection_request));
   }

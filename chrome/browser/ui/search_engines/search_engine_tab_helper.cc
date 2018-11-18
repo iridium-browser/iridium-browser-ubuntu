@@ -7,6 +7,7 @@
 #include <memory>
 
 #include "base/metrics/histogram_macros.h"
+#include "chrome/browser/favicon/favicon_utils.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search_engines/template_url_fetcher_factory.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
@@ -23,13 +24,11 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/url_fetcher.h"
+#include "content/public/common/resource_type.h"
 
 using content::NavigationController;
 using content::NavigationEntry;
 using content::WebContents;
-
-DEFINE_WEB_CONTENTS_USER_DATA_KEY(SearchEngineTabHelper);
 
 namespace {
 
@@ -70,14 +69,6 @@ base::string16 GenerateKeywordFromNavigationEntry(
   return TemplateURL::GenerateKeyword(url);
 }
 
-void AssociateURLFetcherWithWebContents(content::WebContents* web_contents,
-                                        net::URLFetcher* url_fetcher) {
-  content::AssociateURLFetcherWithRenderFrame(
-      url_fetcher, url::Origin::Create(web_contents->GetURL()),
-      web_contents->GetMainFrame()->GetProcess()->GetID(),
-      web_contents->GetMainFrame()->GetRoutingID());
-}
-
 }  // namespace
 
 SearchEngineTabHelper::~SearchEngineTabHelper() {
@@ -88,10 +79,18 @@ void SearchEngineTabHelper::DidFinishNavigation(
   GenerateKeywordIfNecessary(handle);
 }
 
+void SearchEngineTabHelper::WebContentsDestroyed() {
+  favicon_driver_observer_.RemoveAll();
+}
+
 SearchEngineTabHelper::SearchEngineTabHelper(WebContents* web_contents)
     : content::WebContentsObserver(web_contents),
       osdd_handler_bindings_(web_contents, this) {
   DCHECK(web_contents);
+
+  favicon::CreateContentFaviconDriverForWebContents(web_contents);
+  favicon_driver_observer_.Add(
+      favicon::ContentFaviconDriver::FromWebContents(web_contents));
 }
 
 void SearchEngineTabHelper::PageHasOpenSearchDescriptionDocument(
@@ -137,11 +136,31 @@ void SearchEngineTabHelper::PageHasOpenSearchDescriptionDocument(
   if (keyword.empty())
     return;
 
+  auto* frame = web_contents()->GetMainFrame();
+  network::mojom::URLLoaderFactoryPtr url_loader_factory;
+  frame->CreateNetworkServiceDefaultFactory(
+      mojo::MakeRequest(&url_loader_factory));
+
   // Download the OpenSearch description document. If this is successful, a
   // new keyword will be created when done.
   TemplateURLFetcherFactory::GetForProfile(profile)->ScheduleDownload(
       keyword, osdd_url, entry->GetFavicon().url,
-      base::Bind(&AssociateURLFetcherWithWebContents, web_contents()));
+      url::Origin::Create(web_contents()->GetURL()), url_loader_factory.get(),
+      frame->GetRoutingID(), content::RESOURCE_TYPE_SUB_RESOURCE);
+}
+
+void SearchEngineTabHelper::OnFaviconUpdated(
+    favicon::FaviconDriver* driver,
+    NotificationIconType notification_icon_type,
+    const GURL& icon_url,
+    bool icon_url_changed,
+    const gfx::Image& image) {
+  Profile* profile =
+      Profile::FromBrowserContext(web_contents()->GetBrowserContext());
+  TemplateURLService* url_service =
+      TemplateURLServiceFactory::GetForProfile(profile);
+  if (url_service && url_service->loaded())
+    url_service->UpdateProviderFavicons(driver->GetActiveURL(), icon_url);
 }
 
 void SearchEngineTabHelper::GenerateKeywordIfNecessary(

@@ -14,6 +14,7 @@
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/chromeos/policy/off_hours/device_off_hours_controller.h"
 #include "chrome/browser/supervised_user/supervised_user_service_observer.h"
+#include "chromeos/login/login_state.h"
 #include "components/session_manager/core/session_manager_observer.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/notification_observer.h"
@@ -40,6 +41,7 @@ class SessionControllerClient
       public user_manager::UserManager::Observer,
       public session_manager::SessionManagerObserver,
       public SupervisedUserServiceObserver,
+      public chromeos::LoginState::Observer,
       public content::NotificationObserver,
       public policy::off_hours::DeviceOffHoursController::Observer {
  public:
@@ -57,7 +59,7 @@ class SessionControllerClient
   // to indicate whether the lock is successful. If |locked| is true, the post
   // lock animation is finished and ash is fully locked. Otherwise, the lock
   // is failed somehow.
-  using StartLockCallback = base::Callback<void(bool locked)>;
+  using StartLockCallback = base::OnceCallback<void(bool locked)>;
   void StartLock(StartLockCallback callback);
 
   // Notifies SessionController that chrome lock animations are finished.
@@ -65,7 +67,7 @@ class SessionControllerClient
 
   // Calls ash SessionController to run unlock animation.
   // |animation_finished_callback| will be invoked when the animation finishes.
-  void RunUnlockAnimation(base::Closure animation_finished_callback);
+  void RunUnlockAnimation(base::OnceClosure animation_finished_callback);
 
   // Asks the session controller to show the window teleportation dialog.
   void ShowTeleportWarningDialog(
@@ -95,6 +97,9 @@ class SessionControllerClient
   // SupervisedUserServiceObserver:
   void OnCustodianInfoChanged() override;
 
+  // chromeos::LoginState::Observer:
+  void LoggedInStateChanged() override;
+
   // content::NotificationObserver:
   void Observe(int type,
                const content::NotificationSource& source,
@@ -120,6 +125,8 @@ class SessionControllerClient
   FRIEND_TEST_ALL_PREFIXES(SessionControllerClientTest, SupervisedUser);
   FRIEND_TEST_ALL_PREFIXES(SessionControllerClientTest, UserPrefsChange);
   FRIEND_TEST_ALL_PREFIXES(SessionControllerClientTest, SessionLengthLimit);
+  FRIEND_TEST_ALL_PREFIXES(SessionControllerClientTest, DeviceOwner);
+  FRIEND_TEST_ALL_PREFIXES(SessionControllerClientTest, UserBecomesDeviceOwner);
 
   // Called when the login profile is ready.
   void OnLoginUserProfilePrepared(Profile* profile);

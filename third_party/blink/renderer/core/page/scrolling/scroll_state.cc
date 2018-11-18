@@ -7,14 +7,13 @@
 #include <memory>
 #include "third_party/blink/renderer/core/dom/dom_node_ids.h"
 #include "third_party/blink/renderer/core/dom/element.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
 #include "third_party/blink/renderer/core/layout/layout_object.h"
 #include "third_party/blink/renderer/platform/graphics/compositor_element_id.h"
 
 namespace blink {
 
 namespace {
-Element* ElementForId(int element_id) {
+Element* ElementForId(DOMNodeId element_id) {
   Node* node = DOMNodeIds::NodeForId(element_id);
   DCHECK(node);
   if (!node)
@@ -61,12 +60,13 @@ void ScrollState::consumeDelta(double x,
   if ((data_->delta_x > 0 && 0 > x) || (data_->delta_x < 0 && 0 < x) ||
       (data_->delta_y > 0 && 0 > y) || (data_->delta_y < 0 && 0 < y)) {
     exception_state.ThrowDOMException(
-        kInvalidModificationError, "Can't increase delta using consumeDelta");
+        DOMExceptionCode::kInvalidModificationError,
+        "Can't increase delta using consumeDelta");
     return;
   }
   if (fabs(x) > fabs(data_->delta_x) || fabs(y) > fabs(data_->delta_y)) {
     exception_state.ThrowDOMException(
-        kInvalidModificationError,
+        DOMExceptionCode::kInvalidModificationError,
         "Can't change direction of delta using consumeDelta");
     return;
   }
@@ -75,7 +75,7 @@ void ScrollState::consumeDelta(double x,
 
 void ScrollState::distributeToScrollChainDescendant() {
   if (!scroll_chain_.empty()) {
-    int descendant_id = scroll_chain_.front();
+    DOMNodeId descendant_id = scroll_chain_.front();
     scroll_chain_.pop_front();
     ElementForId(descendant_id)->CallDistributeScroll(*this);
   }

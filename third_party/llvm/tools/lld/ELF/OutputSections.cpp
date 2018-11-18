@@ -31,8 +31,6 @@ using namespace lld;
 using namespace lld::elf;
 
 uint8_t Out::First;
-OutputSection *Out::Opd;
-uint8_t *Out::OpdBuf;
 PhdrEntry *Out::TlsPhdr;
 OutputSection *Out::DebugInfo;
 OutputSection *Out::ElfHeader;
@@ -123,7 +121,6 @@ void OutputSection::addSection(InputSection *IS) {
   Flags = AndFlags | OrFlags;
 
   Alignment = std::max(Alignment, IS->Alignment);
-  IS->OutSecOff = Size++;
 
   // If this section contains a table of fixed-size entries, sh_entsize
   // holds the element size. If it contains elements of different size we
@@ -142,7 +139,7 @@ void OutputSection::addSection(InputSection *IS) {
 }
 
 static void sortByOrder(MutableArrayRef<InputSection *> In,
-                        std::function<int(InputSectionBase *S)> Order) {
+                        llvm::function_ref<int(InputSectionBase *S)> Order) {
   typedef std::pair<int, InputSection *> Pair;
   auto Comp = [](const Pair &A, const Pair &B) { return A.first < B.first; };
 
@@ -165,7 +162,7 @@ bool OutputSection::classof(const BaseCommand *C) {
   return C->Kind == OutputSectionKind;
 }
 
-void OutputSection::sort(std::function<int(InputSectionBase *S)> Order) {
+void OutputSection::sort(llvm::function_ref<int(InputSectionBase *S)> Order) {
   assert(Live);
   for (BaseCommand *B : SectionCommands)
     if (auto *ISD = dyn_cast<InputSectionDescription>(B))
@@ -273,13 +270,13 @@ static void finalizeShtGroup(OutputSection *OS,
 
   // sh_link field for SHT_GROUP sections should contain the section index of
   // the symbol table.
-  OS->Link = InX::SymTab->getParent()->SectionIndex;
+  OS->Link = In.SymTab->getParent()->SectionIndex;
 
   // sh_info then contain index of an entry in symbol table section which
   // provides signature of the section group.
   ObjFile<ELFT> *Obj = Section->getFile<ELFT>();
   ArrayRef<Symbol *> Symbols = Obj->getSymbols();
-  OS->Info = InX::SymTab->getSymbolIndex(Symbols[Section->Info]);
+  OS->Info = In.SymTab->getSymbolIndex(Symbols[Section->Info]);
 }
 
 template <class ELFT> void OutputSection::finalize() {
@@ -311,7 +308,7 @@ template <class ELFT> void OutputSection::finalize() {
   if (isa<SyntheticSection>(First))
     return;
 
-  Link = InX::SymTab->getParent()->SectionIndex;
+  Link = In.SymTab->getParent()->SectionIndex;
   // sh_info for SHT_REL[A] sections should contain the section header index of
   // the section to which the relocation applies.
   InputSectionBase *S = First->getRelocatedSection();

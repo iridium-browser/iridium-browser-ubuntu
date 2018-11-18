@@ -25,14 +25,14 @@
 #include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
-#include "chrome/browser/apps/app_load_service.h"
+#include "chrome/browser/apps/platform_apps/app_load_service.h"
 #include "chrome/browser/autocomplete/autocomplete_classifier_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/custom_handlers/protocol_handler_registry_factory.h"
 #include "chrome/browser/devtools/devtools_window.h"
 #include "chrome/browser/download/download_stats.h"
 #include "chrome/browser/extensions/extension_util.h"
-#include "chrome/browser/language/language_model_factory.h"
+#include "chrome/browser/language/language_model_manager_factory.h"
 #include "chrome/browser/media/router/media_router_dialog_controller.h"
 #include "chrome/browser/media/router/media_router_feature.h"
 #include "chrome/browser/media/router/media_router_metrics.h"
@@ -53,7 +53,6 @@
 #include "chrome/browser/search/search.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
 #include "chrome/browser/spellchecker/spellcheck_service.h"
-#include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/translate/chrome_translate_client.h"
 #include "chrome/browser/translate/translate_service.h"
 #include "chrome/browser/ui/autofill/chrome_autofill_client.h"
@@ -61,9 +60,10 @@
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_navigator_params.h"
 #include "chrome/browser/ui/chrome_pages.h"
+#include "chrome/browser/ui/exclusive_access/keyboard_lock_controller.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/browser/web_applications/web_app.h"
+#include "chrome/browser/web_applications/components/web_app_helpers.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_render_frame.mojom.h"
@@ -74,16 +74,18 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/arc/arc_features.h"
 #include "components/autofill/core/browser/popup_item_ids.h"
 #include "components/autofill/core/common/password_generation_util.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_headers.h"
 #include "components/download/public/common/download_url_parameters.h"
-#include "components/google/core/browser/google_util.h"
+#include "components/google/core/common/google_util.h"
 #include "components/guest_view/browser/guest_view_base.h"
+#include "components/language/core/browser/language_model_manager.h"
 #include "components/omnibox/browser/autocomplete_classifier.h"
 #include "components/omnibox/browser/autocomplete_match.h"
+#include "components/password_manager/content/browser/content_password_manager_driver.h"
 #include "components/password_manager/core/browser/password_manager_util.h"
-#include "components/password_manager/core/common/experiments.h"
 #include "components/prefs/pref_member.h"
 #include "components/prefs/pref_service.h"
 #include "components/search_engines/template_url.h"
@@ -110,7 +112,6 @@
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/ssl_status.h"
-#include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/menu_item.h"
 #include "content/public/common/url_utils.h"
@@ -129,10 +130,12 @@
 #include "third_party/metrics_proto/omnibox_input_type.pb.h"
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/base/clipboard/scoped_clipboard_writer.h"
+#include "ui/base/emoji/emoji_panel_helper.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/favicon_size.h"
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/text_elider.h"
+#include "ui/strings/grit/ui_strings.h"
 
 #if !BUILDFLAG(USE_BROWSER_SPELLCHECKER)
 #include "chrome/browser/renderer_context_menu/spelling_options_submenu_observer.h"
@@ -170,7 +173,9 @@
 
 #if defined(OS_CHROMEOS)
 #include "ash/public/cpp/window_pin_type.h"
+#include "chrome/browser/chromeos/arc/arc_util.h"
 #include "chrome/browser/chromeos/arc/intent_helper/open_with_menu.h"
+#include "chrome/browser/chromeos/arc/intent_helper/start_smart_selection_action_menu.h"
 #endif
 
 using base::UserMetricsAction;
@@ -311,7 +316,6 @@ const struct UmaEnumCommandIdPair {
     {64, -1, IDC_WRITING_DIRECTION_LTR},
     {65, -1, IDC_WRITING_DIRECTION_RTL},
     {66, -1, IDC_CONTENT_CONTEXT_LOAD_ORIGINAL_IMAGE},
-    {67, -1, IDC_CONTENT_CONTEXT_FORCESAVEPASSWORD},
     {68, -1, IDC_ROUTE_MEDIA},
     {69, -1, IDC_CONTENT_CONTEXT_COPYLINKTEXT},
     {70, -1, IDC_CONTENT_CONTEXT_OPENLINKINPROFILE},
@@ -335,12 +339,18 @@ const struct UmaEnumCommandIdPair {
     {88, -1, IDC_CONTENT_CONTEXT_EXIT_FULLSCREEN},
     {89, -1, IDC_CONTENT_CONTEXT_OPENLINKBOOKMARKAPP},
     {90, -1, IDC_CONTENT_CONTEXT_SHOWALLSAVEDPASSWORDS},
-    {91, -1, IDC_CONTENT_CONTENT_PICTUREINPICTURE},
+    {91, -1, IDC_CONTENT_CONTEXT_PICTUREINPICTURE},
     {92, -1, IDC_CONTENT_CONTEXT_EMOJI},
+    {93, -1, IDC_CONTENT_CONTEXT_START_SMART_SELECTION_ACTION1},
+    {94, -1, IDC_CONTENT_CONTEXT_START_SMART_SELECTION_ACTION2},
+    {95, -1, IDC_CONTENT_CONTEXT_START_SMART_SELECTION_ACTION3},
+    {96, -1, IDC_CONTENT_CONTEXT_START_SMART_SELECTION_ACTION4},
+    {97, -1, IDC_CONTENT_CONTEXT_START_SMART_SELECTION_ACTION5},
+    {98, -1, IDC_CONTENT_CONTEXT_LOOK_UP},
     // Add new items here and use |enum_id| from the next line.
     // Also, add new items to RenderViewContextMenuItem enum in
     // tools/metrics/histograms/enums.xml.
-    {93, -1, 0},  // Must be the last. Increment |enum_id| when new IDC
+    {99, -1, 0},  // Must be the last. Increment |enum_id| when new IDC
                   // was added.
 };
 
@@ -509,6 +519,19 @@ void OnProfileCreated(const GURL& link_url,
   }
 }
 
+bool DoesInputFieldTypeSupportEmoji(
+    blink::WebContextMenuData::InputFieldType text_input_type) {
+  // Disable emoji for input types that definitely do not support emoji.
+  switch (text_input_type) {
+    case blink::WebContextMenuData::kInputFieldTypeNumber:
+    case blink::WebContextMenuData::kInputFieldTypeTelephone:
+    case blink::WebContextMenuData::kInputFieldTypeOther:
+      return false;
+    default:
+      return true;
+  }
+}
+
 }  // namespace
 
 // static
@@ -638,7 +661,7 @@ bool RenderViewContextMenu::MenuItemMatchesParams(
 
 void RenderViewContextMenu::AppendAllExtensionItems() {
   extension_items_.Clear();
-  ExtensionService* service =
+  extensions::ExtensionService* service =
       extensions::ExtensionSystem::Get(browser_context_)->extension_service();
   if (!service)
     return;  // In unit-tests, we may not have an ExtensionService.
@@ -656,9 +679,7 @@ void RenderViewContextMenu::AppendAllExtensionItems() {
   std::vector<base::string16> sorted_menu_titles;
   std::map<base::string16, std::vector<const Extension*>>
       title_to_extensions_map;
-  for (std::set<MenuItem::ExtensionKey>::iterator iter = ids.begin();
-       iter != ids.end();
-       ++iter) {
+  for (auto iter = ids.begin(); iter != ids.end(); ++iter) {
     const Extension* extension =
         service->GetExtensionById(iter->extension_id, false);
     // Platform apps have their context menus created directly in
@@ -806,6 +827,20 @@ void RenderViewContextMenu::InitMenu() {
     AppendRotationItems();
   }
 
+  bool supports_smart_text_selection = false;
+#if defined(OS_CHROMEOS)
+  supports_smart_text_selection =
+      base::FeatureList::IsEnabled(arc::kSmartTextSelectionFeature) &&
+      content_type_->SupportsGroup(
+          ContextMenuContentType::ITEM_GROUP_SMART_SELECTION) &&
+      arc::IsArcPlayStoreEnabledForProfile(GetProfile());
+#endif  // defined(OS_CHROMEOS)
+  if (supports_smart_text_selection)
+    AppendSmartSelectionActionItems();
+
+  extension_items_.set_smart_text_selection_enabled(
+      supports_smart_text_selection);
+
   if (content_type_->SupportsGroup(
           ContextMenuContentType::ITEM_GROUP_ALL_EXTENSION)) {
     DCHECK(!content_type_->SupportsGroup(
@@ -843,7 +878,7 @@ void RenderViewContextMenu::InitMenu() {
   }
 }
 
-Profile* RenderViewContextMenu::GetProfile() {
+Profile* RenderViewContextMenu::GetProfile() const {
   return Profile::FromBrowserContext(browser_context_);
 }
 
@@ -906,6 +941,16 @@ bool RenderViewContextMenu::IsHTML5Fullscreen() const {
   return controller->IsTabFullscreen();
 }
 
+bool RenderViewContextMenu::IsPressAndHoldEscRequiredToExitFullscreen() const {
+  Browser* browser = chrome::FindBrowserWithWebContents(source_web_contents_);
+  if (!browser)
+    return false;
+
+  KeyboardLockController* controller =
+      browser->exclusive_access_manager()->keyboard_lock_controller();
+  return controller->RequiresPressAndHoldEscToExit();
+}
+
 #if BUILDFLAG(ENABLE_PLUGINS)
 void RenderViewContextMenu::HandleAuthorizeAllPlugins() {
   ChromePluginServiceFilter::GetInstance()->AuthorizeAllPlugins(
@@ -933,7 +978,8 @@ std::string RenderViewContextMenu::GetTargetLanguage() const {
   std::unique_ptr<translate::TranslatePrefs> prefs(
       ChromeTranslateClient::CreateTranslatePrefs(GetPrefs(browser_context_)));
   language::LanguageModel* language_model =
-      LanguageModelFactory::GetForBrowserContext(browser_context_);
+      LanguageModelManagerFactory::GetForBrowserContext(browser_context_)
+          ->GetPrimaryModel();
   return translate::TranslateManager::GetTargetLanguage(prefs.get(),
                                                         language_model);
 }
@@ -982,13 +1028,16 @@ void RenderViewContextMenu::AppendDevtoolsForUnpackedExtensions() {
 void RenderViewContextMenu::AppendLinkItems() {
   if (!params_.link_url.is_empty()) {
     if (base::FeatureList::IsEnabled(features::kDesktopPWAWindowing)) {
+      const Browser* browser = GetBrowser();
+      const bool is_app = browser && browser->is_app();
+
       AppendOpenInBookmarkAppLinkItems();
 
       menu_model_.AddItemWithStringId(
           IDC_CONTENT_CONTEXT_OPENLINKNEWTAB,
-          GetBrowser()->is_app() ? IDS_CONTENT_CONTEXT_OPENLINKNEWTAB_INAPP
-                                 : IDS_CONTENT_CONTEXT_OPENLINKNEWTAB);
-      if (!GetBrowser()->is_app()) {
+          is_app ? IDS_CONTENT_CONTEXT_OPENLINKNEWTAB_INAPP
+                 : IDS_CONTENT_CONTEXT_OPENLINKNEWTAB);
+      if (!is_app) {
         menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_OPENLINKNEWWINDOW,
                                         IDS_CONTENT_CONTEXT_OPENLINKNEWWINDOW);
       }
@@ -999,9 +1048,8 @@ void RenderViewContextMenu::AppendLinkItems() {
 
       menu_model_.AddItemWithStringId(
           IDC_CONTENT_CONTEXT_OPENLINKOFFTHERECORD,
-          GetBrowser()->is_app()
-              ? IDS_CONTENT_CONTEXT_OPENLINKOFFTHERECORD_INAPP
-              : IDS_CONTENT_CONTEXT_OPENLINKOFFTHERECORD);
+          is_app ? IDS_CONTENT_CONTEXT_OPENLINKOFFTHERECORD_INAPP
+                 : IDS_CONTENT_CONTEXT_OPENLINKOFFTHERECORD);
 
     } else {
       menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_OPENLINKNEWTAB,
@@ -1124,6 +1172,18 @@ void RenderViewContextMenu::AppendOpenWithLinkItems() {
 #endif
 }
 
+void RenderViewContextMenu::AppendSmartSelectionActionItems() {
+#if defined(OS_CHROMEOS)
+  start_smart_selection_action_menu_observer_ =
+      std::make_unique<arc::StartSmartSelectionActionMenu>(this);
+  observers_.AddObserver(start_smart_selection_action_menu_observer_.get());
+
+  if (menu_model_.GetItemCount())
+    menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
+  start_smart_selection_action_menu_observer_->InitMenu(params_);
+#endif
+}
+
 void RenderViewContextMenu::AppendOpenInBookmarkAppLinkItems() {
   const Extension* pwa = extensions::util::GetInstalledPwaForUrl(
       browser_context_, params_.link_url);
@@ -1131,8 +1191,9 @@ void RenderViewContextMenu::AppendOpenInBookmarkAppLinkItems() {
     return;
 
   int open_in_app_string_id;
-  if (GetBrowser()->app_name() ==
-      web_app::GenerateApplicationNameFromExtensionId(pwa->id())) {
+  const Browser* browser = GetBrowser();
+  if (browser && browser->app_name() ==
+                     web_app::GenerateApplicationNameFromAppId(pwa->id())) {
     open_in_app_string_id = IDS_CONTENT_CONTEXT_OPENLINKBOOKMARKAPP_SAMEAPP;
   } else {
     open_in_app_string_id = IDS_CONTENT_CONTEXT_OPENLINKBOOKMARKAPP;
@@ -1278,7 +1339,8 @@ void RenderViewContextMenu::AppendPageItems() {
             GetPrefs(browser_context_)));
     if (prefs->IsTranslateAllowedByPolicy()) {
       language::LanguageModel* language_model =
-          LanguageModelFactory::GetForBrowserContext(browser_context_);
+          LanguageModelManagerFactory::GetForBrowserContext(browser_context_)
+              ->GetPrimaryModel();
       std::string locale = translate::TranslateManager::GetTargetLanguage(
           prefs.get(), language_model);
       base::string16 language =
@@ -1405,6 +1467,13 @@ void RenderViewContextMenu::AppendEditableItems() {
     AppendSearchProvider();
     menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
   }
+  if (params_.misspelled_word.empty() &&
+      DoesInputFieldTypeSupportEmoji(params_.input_field_type) &&
+      ui::IsEmojiPanelSupported()) {
+    menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_EMOJI,
+                                    IDS_CONTENT_CONTEXT_EMOJI);
+    menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
+  }
 
 // 'Undo' and 'Redo' for text input with no suggestions and no text selected.
 // We make an exception for OS X as context clicking will select the closest
@@ -1416,8 +1485,12 @@ void RenderViewContextMenu::AppendEditableItems() {
                                   IDS_CONTENT_CONTEXT_REDO);
   menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
 #else
-  if (!IsDevToolsURL(params_.page_url) && !menu_model_.GetItemCount() &&
-      !content_type_->SupportsGroup(ContextMenuContentType::ITEM_GROUP_PRINT)) {
+  // Also want to show 'Undo' and 'Redo' if 'Emoji' is the only item in the menu
+  // so far.
+  if (!IsDevToolsURL(params_.page_url) &&
+      !content_type_->SupportsGroup(ContextMenuContentType::ITEM_GROUP_PRINT) &&
+      (!menu_model_.GetItemCount() ||
+       menu_model_.GetIndexOfCommandId(IDC_CONTENT_CONTEXT_EMOJI) != -1)) {
     menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_UNDO,
                                     IDS_CONTENT_CONTEXT_UNDO);
     menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_REDO,
@@ -1498,22 +1571,17 @@ void RenderViewContextMenu::AppendProtocolHandlerSubMenu() {
 void RenderViewContextMenu::AppendPasswordItems() {
   bool add_separator = false;
 
-  // Don't offer saving or generating passwords in incognito profiles.
-  if (!browser_context_->IsOffTheRecord()) {
-    if (password_manager::ForceSavingExperimentEnabled()) {
-      menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_FORCESAVEPASSWORD,
-                                      IDS_CONTENT_CONTEXT_FORCESAVEPASSWORD);
-      add_separator = true;
-    }
-    if (password_manager_util::ManualPasswordGenerationEnabled(
-            ProfileSyncServiceFactory::GetSyncServiceForBrowserContext(
-                browser_context_))) {
-      menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_GENERATEPASSWORD,
-                                      IDS_CONTENT_CONTEXT_GENERATEPASSWORD);
-      add_separator = true;
-    }
+  password_manager::ContentPasswordManagerDriver* driver =
+      password_manager::ContentPasswordManagerDriver::GetForRenderFrameHost(
+          GetRenderFrameHost());
+  // Don't show the item for guest or incognito profiles and also when the
+  // automatic generation feature is disabled.
+  if (password_manager_util::ManualPasswordGenerationEnabled(driver)) {
+    menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_GENERATEPASSWORD,
+                                    IDS_CONTENT_CONTEXT_GENERATEPASSWORD);
+    add_separator = true;
   }
-  if (password_manager_util::ShowAllSavedPasswordsContextMenuEnabled()) {
+  if (password_manager_util::ShowAllSavedPasswordsContextMenuEnabled(driver)) {
     menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_SHOWALLSAVEDPASSWORDS,
                                     IDS_AUTOFILL_SHOW_ALL_SAVED_FALLBACK);
     add_separator = true;
@@ -1525,8 +1593,8 @@ void RenderViewContextMenu::AppendPasswordItems() {
 
 void RenderViewContextMenu::AppendPictureInPictureItem() {
   if (base::FeatureList::IsEnabled(media::kPictureInPicture))
-    menu_model_.AddItemWithStringId(IDC_CONTENT_CONTENT_PICTUREINPICTURE,
-                                    IDS_CONTENT_CONTENT_PICTUREINPICTURE);
+    menu_model_.AddCheckItemWithStringId(IDC_CONTENT_CONTEXT_PICTUREINPICTURE,
+                                         IDS_CONTENT_CONTEXT_PICTUREINPICTURE);
 }
 
 // Menu delegate functions -----------------------------------------------------
@@ -1720,7 +1788,6 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
     case IDC_SPELLCHECK_MENU:
     case IDC_CONTENT_CONTEXT_OPENLINKWITH:
     case IDC_CONTENT_CONTEXT_PROTOCOL_HANDLER_SETTINGS:
-    case IDC_CONTENT_CONTEXT_FORCESAVEPASSWORD:
     case IDC_CONTENT_CONTEXT_GENERATEPASSWORD:
     case IDC_CONTENT_CONTEXT_SHOWALLSAVEDPASSWORDS:
       return true;
@@ -1731,9 +1798,19 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
     case IDC_CONTENT_CONTEXT_EXIT_FULLSCREEN:
       return true;
 
-    case IDC_CONTENT_CONTENT_PICTUREINPICTURE:
+    case IDC_CONTENT_CONTEXT_PICTUREINPICTURE:
       return !!(params_.media_flags &
                 WebContextMenuData::kMediaCanPictureInPicture);
+
+    case IDC_CONTENT_CONTEXT_EMOJI:
+      return params_.is_editable;
+
+    case IDC_CONTENT_CONTEXT_START_SMART_SELECTION_ACTION1:
+    case IDC_CONTENT_CONTEXT_START_SMART_SELECTION_ACTION2:
+    case IDC_CONTENT_CONTEXT_START_SMART_SELECTION_ACTION3:
+    case IDC_CONTENT_CONTEXT_START_SMART_SELECTION_ACTION4:
+    case IDC_CONTENT_CONTEXT_START_SMART_SELECTION_ACTION5:
+      return true;
 
     default:
       NOTREACHED();
@@ -1751,6 +1828,13 @@ bool RenderViewContextMenu::IsCommandIdChecked(int id) const {
 
   if (id == IDC_CONTENT_CONTEXT_CONTROLS)
     return (params_.media_flags & WebContextMenuData::kMediaControls) != 0;
+
+  if (id == IDC_CONTENT_CONTEXT_PICTUREINPICTURE)
+    return (params_.media_flags & WebContextMenuData::kMediaPictureInPicture) !=
+           0;
+
+  if (id == IDC_CONTENT_CONTEXT_EMOJI)
+    return false;
 
   // Extension items.
   if (ContextMenuMatcher::IsExtensionsCustomCommandId(id))
@@ -2004,11 +2088,6 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
       ExecProtocolHandlerSettings(event_flags);
       break;
 
-    case IDC_CONTENT_CONTEXT_FORCESAVEPASSWORD:
-      ChromePasswordManagerClient::FromWebContents(source_web_contents_)->
-          ForceSavePassword();
-      break;
-
     case IDC_CONTENT_CONTEXT_GENERATEPASSWORD:
       password_manager_util::UserTriggeredManualGenerationFromContextMenu(
           ChromePasswordManagerClient::FromWebContents(source_web_contents_));
@@ -2020,8 +2099,12 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
               source_web_contents_));
       break;
 
-    case IDC_CONTENT_CONTENT_PICTUREINPICTURE:
+    case IDC_CONTENT_CONTEXT_PICTUREINPICTURE:
       ExecPictureInPicture();
+      break;
+
+    case IDC_CONTENT_CONTEXT_EMOJI:
+      ui::ShowEmojiPanel();
       break;
 
     default:
@@ -2096,7 +2179,7 @@ bool RenderViewContextMenu::IsDevCommandEnabled(int id) const {
 
     // Don't enable the web inspector if the developer tools are disabled via
     // the preference dev-tools-disabled.
-    if (prefs->GetBoolean(prefs::kDevToolsDisabled))
+    if (!DevToolsWindow::AllowDevToolsFor(GetProfile(), source_web_contents_))
       return false;
   }
 
@@ -2344,10 +2427,6 @@ void RenderViewContextMenu::ExecSaveLinkAs() {
   RecordDownloadSource(DOWNLOAD_INITIATED_BY_CONTEXT_MENU);
 
   const GURL& url = params_.link_url;
-  content::StoragePartition* storage_partition =
-      BrowserContext::GetStoragePartition(
-          source_web_contents_->GetBrowserContext(),
-          render_frame_host->GetSiteInstance());
 
   net::NetworkTrafficAnnotationTag traffic_annotation =
       net::DefineNetworkTrafficAnnotation("render_view_context_menu", R"(
@@ -2372,8 +2451,7 @@ void RenderViewContextMenu::ExecSaveLinkAs() {
   auto dl_params = std::make_unique<DownloadUrlParameters>(
       url, render_frame_host->GetProcess()->GetID(),
       render_frame_host->GetRenderViewHost()->GetRoutingID(),
-      render_frame_host->GetRoutingID(),
-      storage_partition->GetURLRequestContext(), traffic_annotation);
+      render_frame_host->GetRoutingID(), traffic_annotation);
   content::Referrer referrer = CreateReferrer(url, params_);
   dl_params->set_referrer(referrer.url);
   dl_params->set_referrer_policy(
@@ -2610,10 +2688,21 @@ void RenderViewContextMenu::ExecPictureInPicture() {
   if (!base::FeatureList::IsEnabled(media::kPictureInPicture))
     return;
 
-  // TODO(apacible): Re-enable contextual menu entry point for
-  // Picture-in-Picture after end to end flow through the media controls is
-  // stable. http://crbug/817613.
-  NOTIMPLEMENTED();
+  bool picture_in_picture_active =
+      IsCommandIdChecked(IDC_CONTENT_CONTEXT_PICTUREINPICTURE);
+
+  if (picture_in_picture_active) {
+    base::RecordAction(
+        UserMetricsAction("MediaContextMenu_ExitPictureInPicture"));
+  } else {
+    base::RecordAction(
+        UserMetricsAction("MediaContextMenu_EnterPictureInPicture"));
+  }
+
+  MediaPlayerActionAt(
+      gfx::Point(params_.x, params_.y),
+      WebMediaPlayerAction(WebMediaPlayerAction::kPictureInPicture,
+                           !picture_in_picture_active));
 }
 
 void RenderViewContextMenu::WriteURLToClipboard(const GURL& url) {
@@ -2623,8 +2712,9 @@ void RenderViewContextMenu::WriteURLToClipboard(const GURL& url) {
 void RenderViewContextMenu::MediaPlayerActionAt(
     const gfx::Point& location,
     const WebMediaPlayerAction& action) {
-  source_web_contents_->GetRenderViewHost()->
-      ExecuteMediaPlayerActionAtLocation(location, action);
+  RenderFrameHost* frame_host = GetRenderFrameHost();
+  if (frame_host)
+    frame_host->ExecuteMediaPlayerActionAtLocation(location, action);
 }
 
 void RenderViewContextMenu::PluginActionAt(

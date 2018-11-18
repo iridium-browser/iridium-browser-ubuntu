@@ -6,10 +6,10 @@
 #include <string>
 
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
+#include "base/test/scoped_task_environment.h"
 #include "build/build_config.h"
 #include "content/public/renderer/media_stream_audio_sink.h"
-#include "content/renderer/media/mock_audio_device_factory.h"
+#include "content/renderer/media/audio/mock_audio_device_factory.h"
 #include "content/renderer/media/stream/media_stream_audio_processor_options.h"
 #include "content/renderer/media/stream/media_stream_audio_track.h"
 #include "content/renderer/media/stream/processed_local_audio_source.h"
@@ -144,7 +144,8 @@ class ProcessedLocalAudioSourceTest : public testing::Test {
                             const blink::WebString& result_name) {}
 
  private:
-  base::MessageLoop main_thread_message_loop_;  // Needed for MSAudioProcessor.
+  base::test::ScopedTaskEnvironment
+      task_environment_;  // Needed for MSAudioProcessor.
   MockAudioDeviceFactory mock_audio_device_factory_;
   MockPeerConnectionDependencyFactory mock_dependency_factory_;
   blink::WebMediaStreamSource blink_audio_source_;
@@ -168,7 +169,7 @@ TEST_F(ProcessedLocalAudioSourceTest, VerifyAudioFlowWithoutAudioProcessing) {
   // Connect the track, and expect the MockCapturerSource to be initialized and
   // started by ProcessedLocalAudioSource.
   EXPECT_CALL(*mock_audio_device_factory()->mock_capturer_source(),
-              Initialize(_, capture_source_callback(), -1))
+              Initialize(_, capture_source_callback()))
       .WillOnce(WithArg<0>(Invoke(this, &ThisTest::CheckSourceFormatMatches)));
   EXPECT_CALL(*mock_audio_device_factory()->mock_capturer_source(),
               SetAutomaticGainControl(true));

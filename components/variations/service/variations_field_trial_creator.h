@@ -11,9 +11,12 @@
 #include <vector>
 
 #include "base/compiler_specific.h"
+#include "base/containers/hash_tables.h"
 #include "base/macros.h"
 #include "base/metrics/field_trial.h"
 #include "components/variations/client_filterable_state.h"
+#include "components/variations/proto/study.pb.h"
+#include "components/variations/seed_response.h"
 #include "components/variations/service/ui_string_overrider.h"
 #include "components/variations/variations_seed_store.h"
 
@@ -30,6 +33,7 @@ class VariationsFieldTrialCreator {
   // stay valid for the lifetime of this object.
   VariationsFieldTrialCreator(PrefService* local_state,
                               VariationsServiceClient* client,
+                              std::unique_ptr<VariationsSeedStore> seed_store,
                               const UIStringOverrider& ui_string_overrider);
   virtual ~VariationsFieldTrialCreator();
 
@@ -37,7 +41,7 @@ class VariationsFieldTrialCreator {
   // empty if it is not available.
   std::string GetLatestCountry() const;
 
-  VariationsSeedStore* seed_store() { return &seed_store_; }
+  VariationsSeedStore* seed_store() { return seed_store_.get(); }
 
   // Sets up field trials based on stored variations seed data. Returns whether
   // setup completed successfully.
@@ -90,6 +94,12 @@ class VariationsFieldTrialCreator {
   // overridden.
   void OverrideVariationsPlatform(Study::Platform platform_override);
 
+  // Overrides cached UI strings on the resource bundle once it is initialized.
+  void OverrideCachedUIStrings();
+
+  // Returns whether the map of the cached UI strings to override is empty.
+  bool IsOverrideResourceMapEmpty();
+
   // Returns the short hardware class value used to evaluate variations hardware
   // class filters. Only implemented on CrOS - returns empty string on other
   // platforms.
@@ -123,21 +133,33 @@ class VariationsFieldTrialCreator {
       base::FeatureList* feature_list,
       SafeSeedManager* safe_seed_manager);
 
+  // Overrides the string resource specified by |hash| with |str| in the
+  // resource bundle.
+  void OverrideUIString(uint32_t hash, const base::string16& str);
+
   // Returns the seed store. Virtual for testing.
   virtual VariationsSeedStore* GetSeedStore();
 
-  PrefService* local_state() { return seed_store_.local_state(); }
-  const PrefService* local_state() const { return seed_store_.local_state(); }
+  // Get the platform we're running on, respecting OverrideVariationsPlatform().
+  Study::Platform GetPlatform();
+
+  PrefService* local_state() { return seed_store_->local_state(); }
+  const PrefService* local_state() const { return seed_store_->local_state(); }
 
   VariationsServiceClient* client_;
 
   UIStringOverrider ui_string_overrider_;
 
-  VariationsSeedStore seed_store_;
+  std::unique_ptr<VariationsSeedStore> seed_store_;
 
   // Tracks whether |CreateTrialsFromSeed| has been called, to ensure that it is
   // called at most once.
   bool create_trials_from_seed_called_;
+
+  // The application locale won't change after the startup, so we cache the
+  // value the first time when GetApplicationLocale() is called in the
+  // constructor.
+  std::string application_locale_;
 
   // Indiciate if OverrideVariationsPlatform has been used to set
   // |platform_override_|.
@@ -146,6 +168,10 @@ class VariationsFieldTrialCreator {
   // Platform to be used for variations filtering, overridding the current
   // platform.
   Study::Platform platform_override_;
+
+  // Caches the UI strings which need to be overridden in the resource bundle.
+  // These strings are cached before the resource bundle is initialized.
+  base::hash_map<int, base::string16> overridden_strings_map_;
 
   SEQUENCE_CHECKER(sequence_checker_);
 

@@ -62,6 +62,7 @@
 #include <limits>
 #include <string>
 
+#include "absl/base/casts.h"
 #include "absl/numeric/int128.h"
 #include "absl/time/time.h"
 
@@ -165,14 +166,18 @@ inline Duration MakeDurationFromU128(uint128 u128, bool is_neg) {
   return time_internal::MakeDuration(rep_hi, rep_lo);
 }
 
-// Convert int64_t to uint64_t in twos-complement system.
-inline uint64_t EncodeTwosComp(int64_t v) { return static_cast<uint64_t>(v); }
-
-// Convert uint64_t to int64_t in twos-complement system.
-inline int64_t DecodeTwosComp(uint64_t v) {
-  if (v <= kint64max) return static_cast<int64_t>(v);
-  return static_cast<int64_t>(v - kint64max - 1) + kint64min;
+// Convert between int64_t and uint64_t, preserving representation. This
+// allows us to do arithmetic in the unsigned domain, where overflow has
+// well-defined behavior. See operator+=() and operator-=().
+//
+// C99 7.20.1.1.1, as referenced by C++11 18.4.1.2, says, "The typedef
+// name intN_t designates a signed integer type with width N, no padding
+// bits, and a two's complement representation." So, we can convert to
+// and from the corresponding uint64_t value using a bit cast.
+inline uint64_t EncodeTwosComp(int64_t v) {
+  return absl::bit_cast<uint64_t>(v);
 }
+inline int64_t DecodeTwosComp(uint64_t v) { return absl::bit_cast<int64_t>(v); }
 
 // Note: The overflow detection in this function is done using greater/less *or
 // equal* because kint64max/min is too large to be represented exactly in a
@@ -661,7 +666,7 @@ std::chrono::hours ToChronoHours(Duration d) {
 }
 
 //
-// To/From std::string formatting.
+// To/From string formatting.
 //
 
 namespace {
@@ -739,7 +744,7 @@ void AppendNumberUnit(std::string* out, double n, DisplayUnit unit) {
 }  // namespace
 
 // From Go's doc at http://golang.org/pkg/time/#Duration.String
-//   [FormatDuration] returns a std::string representing the duration in the
+//   [FormatDuration] returns a string representing the duration in the
 //   form "72h3m0.5s".  Leading zero units are omitted.  As a special
 //   case, durations less than one second format use a smaller unit
 //   (milli-, micro-, or nanoseconds) to ensure that the leading digit
@@ -782,8 +787,8 @@ std::string FormatDuration(Duration d) {
 namespace {
 
 // A helper for ParseDuration() that parses a leading number from the given
-// std::string and stores the result in *int_part/*frac_part/*frac_scale.  The
-// given std::string pointer is modified to point to the first unconsumed char.
+// string and stores the result in *int_part/*frac_part/*frac_scale.  The
+// given string pointer is modified to point to the first unconsumed char.
 bool ConsumeDurationNumber(const char** dpp, int64_t* int_part,
                            int64_t* frac_part, int64_t* frac_scale) {
   *int_part = 0;
@@ -811,8 +816,8 @@ bool ConsumeDurationNumber(const char** dpp, int64_t* int_part,
 }
 
 // A helper for ParseDuration() that parses a leading unit designator (e.g.,
-// ns, us, ms, s, m, h) from the given std::string and stores the resulting unit
-// in "*unit".  The given std::string pointer is modified to point to the first
+// ns, us, ms, s, m, h) from the given string and stores the resulting unit
+// in "*unit".  The given string pointer is modified to point to the first
 // unconsumed char.
 bool ConsumeDurationUnit(const char** start, Duration* unit) {
   const char *s = *start;
@@ -845,7 +850,7 @@ bool ConsumeDurationUnit(const char** start, Duration* unit) {
 }  // namespace
 
 // From Go's doc at http://golang.org/pkg/time/#ParseDuration
-//   [ParseDuration] parses a duration std::string.  A duration std::string is
+//   [ParseDuration] parses a duration string.  A duration string is
 //   a possibly signed sequence of decimal numbers, each with optional
 //   fraction and a unit suffix, such as "300ms", "-1.5h" or "2h45m".
 //   Valid time units are "ns", "us" "ms", "s", "m", "h".
@@ -890,14 +895,10 @@ bool ParseDuration(const std::string& dur_string, Duration* d) {
   *d = dur;
   return true;
 }
-
-// TODO(absl-team): Remove once dependencies are removed.
-bool ParseFlag(const std::string& text, Duration* dst, std::string* /* err */) {
+bool ParseFlag(const std::string& text, Duration* dst, std::string* ) {
   return ParseDuration(text, dst);
 }
 
-std::string UnparseFlag(Duration d) {
-  return FormatDuration(d);
-}
+std::string UnparseFlag(Duration d) { return FormatDuration(d); }
 
 }  // namespace absl

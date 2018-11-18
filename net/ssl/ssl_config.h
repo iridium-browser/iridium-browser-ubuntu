@@ -29,14 +29,9 @@ enum {
   SSL_PROTOCOL_VERSION_TLS1_3 = 0x0304,
 };
 
-enum TokenBindingParam {
-  TB_PARAM_RSA2048_PKCS15 = 0,
-  TB_PARAM_RSA2048_PSS = 1,
-  TB_PARAM_ECDSAP256 = 2,
-};
-
 enum TLS13Variant {
   kTLS13VariantDraft23,
+  kTLS13VariantFinal,
 };
 
 // Default minimum protocol version.
@@ -65,31 +60,6 @@ struct NET_EXPORT SSLConfig {
   // configuration.
   int GetCertVerifyFlags() const;
 
-  // rev_checking_enabled is true if online certificate revocation checking is
-  // enabled (i.e. OCSP and CRL fetching).
-  //
-  // Regardless of this flag, CRLSet checking is always enabled and locally
-  // cached revocation information will be considered.
-  bool rev_checking_enabled;
-
-  // rev_checking_required_local_anchors is true if revocation checking is
-  // required to succeed when certificates chain to local trust anchors (that
-  // is, non-public CAs). If revocation information cannot be obtained, such
-  // certificates will be treated as revoked ("hard-fail").
-  // Note: This is distinct from rev_checking_enabled. If true, it is
-  // equivalent to also setting rev_checking_enabled, but only when the
-  // certificate chain chains to a local (non-public) trust anchor.
-  bool rev_checking_required_local_anchors;
-
-  // sha1_local_anchors_enabled is true if SHA-1 signed certificates issued by a
-  // local (non-public) trust anchor should be allowed.
-  bool sha1_local_anchors_enabled;
-
-  // symantec_enforcement_disabled is true if the policies outlined in
-  // https://security.googleblog.com/2017/09/chromes-plan-to-distrust-symantec.html
-  // should not be enforced.
-  bool symantec_enforcement_disabled;
-
   // The minimum and maximum protocol versions that are enabled.
   // (Use the SSL_PROTOCOL_VERSION_xxx enumerators defined above.)
   // SSL 2.0 and SSL 3.0 are not supported. If version_max < version_min, it
@@ -100,6 +70,20 @@ struct NET_EXPORT SSLConfig {
   // The TLS 1.3 variant that is enabled. This only takes affect if TLS 1.3 is
   // also enabled via version_min and version_max.
   TLS13Variant tls13_variant;
+
+  // Whether early data is enabled on this connection. Note that early data has
+  // weaker security properties than normal data and changes the
+  // SSLClientSocket's behavior. The caller must only send replayable data prior
+  // to handshake confirmation. See StreamSocket::ConfirmHandshake for details.
+  //
+  // Additionally, early data may be rejected by the server, resulting in some
+  // socket operation failing with ERR_EARLY_DATA_REJECTED or
+  // ERR_WRONG_VERSION_ON_EARLY_DATA before any data is returned from the
+  // server. The caller must handle these cases, typically by retrying the
+  // high-level operation.
+  //
+  // If unsure, do not enable this option.
+  bool early_data_enabled;
 
   // Presorted list of cipher suites which should be explicitly prevented from
   // being used in addition to those disabled by the net built-in policy.
@@ -118,10 +102,6 @@ struct NET_EXPORT SSLConfig {
   bool version_interference_probe;
 
   bool channel_id_enabled;   // True if TLS channel ID extension is enabled.
-
-  // List of Token Binding key parameters supported by the client. If empty,
-  // Token Binding will be disabled, even if token_binding_enabled is true.
-  std::vector<TokenBindingParam> token_binding_params;
 
   bool false_start_enabled;  // True if we'll use TLS False Start.
 
@@ -146,6 +126,14 @@ struct NET_EXPORT SSLConfig {
   // calling SSLClientSocket::Connect.  This would normally be done in
   // response to the user explicitly accepting the bad certificate.
   std::vector<CertAndStatus> allowed_bad_certs;
+
+  // True if, for a single connection, any dependent network fetches should
+  // be disabled. This can be used to avoid triggering re-entrancy in the
+  // network layer. For example, fetching a PAC script over HTTPS may cause
+  // AIA, OCSP, or CRL fetches to block on retrieving the PAC script, while
+  // the PAC script fetch is waiting for those dependent fetches, creating a
+  // deadlock.
+  bool disable_cert_verification_network_fetches;
 
   // True if we should send client_cert to the server.
   bool send_client_cert;

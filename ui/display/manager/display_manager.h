@@ -28,14 +28,14 @@
 #include "ui/display/manager/display_manager_export.h"
 #include "ui/display/manager/display_manager_utilities.h"
 #include "ui/display/manager/managed_display_info.h"
-#include "ui/display/mojo/dev_display_controller.mojom.h"
 #include "ui/display/types/display_constants.h"
 #include "ui/display/unified_desktop_utils.h"
 
 #if defined(OS_CHROMEOS)
+#include "base/cancelable_callback.h"
 #include "base/optional.h"
-#include "ui/display/manager/chromeos/display_configurator.h"
-#include "ui/display/manager/chromeos/touch_device_manager.h"
+#include "ui/display/manager/display_configurator.h"
+#include "ui/display/manager/touch_device_manager.h"
 #endif
 
 namespace gfx {
@@ -147,11 +147,6 @@ class DISPLAY_MANAGER_EXPORT DisplayManager
     return current_unified_desktop_matrix_;
   }
 
-  // Sets controller used to add/remove fake displays. If this is set then
-  // AddRemoveDisplay() will delegate out to |dev_display_controller_| instead
-  // of adding/removing a ManagedDisplayInfo.
-  void SetDevDisplayController(mojom::DevDisplayControllerPtr controller);
-
   // Initializes displays using command line flag. Returns false if no command
   // line flag was provided.
   bool InitFromCommandLine();
@@ -203,10 +198,6 @@ class DISPLAY_MANAGER_EXPORT DisplayManager
                           Display::Rotation rotation,
                           Display::RotationSource source);
 
-  // Resets the UI scale of the display with |display_id| to the one defined in
-  // the default mode.
-  bool ResetDisplayToDefaultMode(int64_t display_id);
-
   // Sets the external display's configuration, including resolution change,
   // ui-scale change, and device scale factor change. Returns true if it changes
   // the display resolution so that the caller needs to show a notification in
@@ -218,6 +209,8 @@ class DISPLAY_MANAGER_EXPORT DisplayManager
   // |overscan_insets| is null if the display has no custom overscan insets.
   // |touch_calibration_data| is null if the display has no touch calibration
   // associated data.
+  // |ui_scale| will be negative if this is not the first boot with display zoom
+  // mode enabled.
   void RegisterDisplayProperty(int64_t display_id,
                                Display::Rotation rotation,
                                float ui_scale,
@@ -471,16 +464,10 @@ class DISPLAY_MANAGER_EXPORT DisplayManager
   // test scenario.
   void UpdateInternalManagedDisplayModeListForTest();
 
-  // Zoom the internal display.
-  bool ZoomInternalDisplay(bool up);
-
   // Zooms the display identified by |display_id| by increasing or decreasing
   // its zoom factor value by 1 unit. Zooming in will have no effect on the
   // display if it is already at its maximum zoom. Vice versa for zooming out.
   bool ZoomDisplay(int64_t display_id, bool up);
-
-  // Reset the internal display zoom.
-  void ResetInternalDisplayZoom();
 
   // Resets the zoom value to 1 for the display identified by |display_id|.
   void ResetDisplayZoom(int64_t display_id);
@@ -670,8 +657,6 @@ class DISPLAY_MANAGER_EXPORT DisplayManager
 
   base::ObserverList<DisplayObserver> observers_;
 
-  display::mojom::DevDisplayControllerPtr dev_display_controller_;
-
   // Not empty if mixed mirror mode should be turned on (the specified source
   // display is mirrored to the specified destination displays). Empty if mixed
   // mirror mode is disabled.
@@ -684,6 +669,13 @@ class DISPLAY_MANAGER_EXPORT DisplayManager
 
 #if defined(OS_CHROMEOS)
   std::unique_ptr<TouchDeviceManager> touch_device_manager_;
+
+  // A cancelable callback to trigger sending UMA metrics when display zoom is
+  // updated. The reason we need a cancelable callback is because we dont want
+  // to record UMA metrics for changes to the display zoom that are temporary.
+  // Temporary changes may include things like the user trying out different
+  // zoom levels before making the final decision.
+  base::CancelableCallback<void()> on_display_zoom_modify_timeout_;
 #endif
 
   // Whether mirroring across multiple displays is enabled.

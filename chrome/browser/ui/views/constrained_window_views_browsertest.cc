@@ -13,7 +13,6 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/interactive_test_utils.h"
 #include "chrome/test/base/ui_test_utils.h"
-#include "chrome/test/views/scoped_macviews_browser_mode.h"
 #include "components/constrained_window/constrained_window_views.h"
 #include "components/web_modal/web_contents_modal_dialog_host.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
@@ -59,8 +58,6 @@ class ConstrainedWindowViewTest : public InProcessBrowserTest {
   ~ConstrainedWindowViewTest() override = default;
 
  private:
-  test::ScopedMacViewsBrowserMode views_mode_{true};
-
   DISALLOW_COPY_AND_ASSIGN(ConstrainedWindowViewTest);
 };
 
@@ -168,10 +165,12 @@ IN_PROC_BROWSER_TEST_F(ConstrainedWindowViewTest, TabMoveTest) {
   // Move the tab to a second browser window; but first create another tab.
   // That prevents the first browser window from closing when its tab is moved.
   chrome::NewTab(browser());
-  browser()->tab_strip_model()->DetachWebContentsAt(
-      browser()->tab_strip_model()->GetIndexOfWebContents(web_contents));
+  std::unique_ptr<content::WebContents> owned_web_contents =
+      browser()->tab_strip_model()->DetachWebContentsAt(
+          browser()->tab_strip_model()->GetIndexOfWebContents(web_contents));
   Browser* browser2 = CreateBrowser(browser()->profile());
-  browser2->tab_strip_model()->AppendWebContents(web_contents, true);
+  browser2->tab_strip_model()->AppendWebContents(std::move(owned_web_contents),
+                                                 true);
   EXPECT_TRUE(dialog->GetWidget()->IsVisible());
 
   // Close the first browser.

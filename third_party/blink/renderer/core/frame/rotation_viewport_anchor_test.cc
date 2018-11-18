@@ -4,9 +4,10 @@
 
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/renderer/core/frame/local_frame_view.h"
+#include "third_party/blink/renderer/core/paint/paint_layer_scrollable_area.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_request.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_test.h"
-#include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
 #include "third_party/blink/renderer/platform/testing/testing_platform_support.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 #include "third_party/blink/renderer/platform/testing/url_test_helpers.h"
@@ -15,12 +16,8 @@ namespace blink {
 
 namespace {
 
-class RotationViewportAnchorTest : public testing::WithParamInterface<bool>,
-                                   private ScopedRootLayerScrollingForTest,
-                                   public SimTest {
+class RotationViewportAnchorTest : public SimTest {
  public:
-  RotationViewportAnchorTest() : ScopedRootLayerScrollingForTest(GetParam()) {}
-
   void SetUp() override {
     SimTest::SetUp();
     WebView().GetSettings()->SetViewportEnabled(true);
@@ -28,9 +25,7 @@ class RotationViewportAnchorTest : public testing::WithParamInterface<bool>,
   }
 };
 
-INSTANTIATE_TEST_CASE_P(All, RotationViewportAnchorTest, testing::Bool());
-
-TEST_P(RotationViewportAnchorTest, SimpleAbsolutePosition) {
+TEST_F(RotationViewportAnchorTest, SimpleAbsolutePosition) {
   WebView().Resize(WebSize(400, 600));
   SimRequest request("https://example.com/test.html", "text/html");
   LoadURL("https://example.com/test.html");
@@ -56,8 +51,7 @@ TEST_P(RotationViewportAnchorTest, SimpleAbsolutePosition) {
   Compositor().BeginFrame();
 
   Document& document = GetDocument();
-  ScrollableArea* layout_viewport =
-      document.View()->LayoutViewportScrollableArea();
+  ScrollableArea* layout_viewport = document.View()->LayoutViewport();
 
   // Place the target at the top-center of the viewport. This is where the
   // rotation anchor finds the node to anchor to.
@@ -71,7 +65,7 @@ TEST_P(RotationViewportAnchorTest, SimpleAbsolutePosition) {
   EXPECT_EQ(4050, layout_viewport->GetScrollOffset().Height());
 }
 
-TEST_P(RotationViewportAnchorTest, PositionRelativeToViewportSize) {
+TEST_F(RotationViewportAnchorTest, PositionRelativeToViewportSize) {
   WebView().Resize(WebSize(100, 600));
   SimRequest request("https://example.com/test.html", "text/html");
   LoadURL("https://example.com/test.html");
@@ -97,8 +91,7 @@ TEST_P(RotationViewportAnchorTest, PositionRelativeToViewportSize) {
   Compositor().BeginFrame();
 
   Document& document = GetDocument();
-  ScrollableArea* layout_viewport =
-      document.View()->LayoutViewportScrollableArea();
+  ScrollableArea* layout_viewport = document.View()->LayoutViewport();
 
   IntPoint target_position(5 * WebView().Size().width,
                            5 * WebView().Size().height);

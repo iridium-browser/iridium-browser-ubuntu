@@ -33,17 +33,17 @@ LayoutDetailsMarker::LayoutDetailsMarker(Element* element)
     : LayoutBlockFlow(element) {}
 
 LayoutDetailsMarker::Orientation LayoutDetailsMarker::GetOrientation() const {
-  switch (Style()->GetWritingMode()) {
+  switch (StyleRef().GetWritingMode()) {
     case WritingMode::kHorizontalTb:
-      if (Style()->IsLeftToRightDirection())
+      if (StyleRef().IsLeftToRightDirection())
         return IsOpen() ? kDown : kRight;
       return IsOpen() ? kDown : kLeft;
     case WritingMode::kVerticalRl:
-      if (Style()->IsLeftToRightDirection())
+      if (StyleRef().IsLeftToRightDirection())
         return IsOpen() ? kLeft : kDown;
       return IsOpen() ? kLeft : kUp;
     case WritingMode::kVerticalLr:
-      if (Style()->IsLeftToRightDirection())
+      if (StyleRef().IsLeftToRightDirection())
         return IsOpen() ? kRight : kDown;
       return IsOpen() ? kRight : kUp;
     // TODO(layout-dev): Sideways-lr and sideways-rl are not yet supported.
@@ -54,9 +54,8 @@ LayoutDetailsMarker::Orientation LayoutDetailsMarker::GetOrientation() const {
   return kRight;
 }
 
-void LayoutDetailsMarker::Paint(const PaintInfo& paint_info,
-                                const LayoutPoint& paint_offset) const {
-  DetailsMarkerPainter(*this).Paint(paint_info, paint_offset);
+void LayoutDetailsMarker::Paint(const PaintInfo& paint_info) const {
+  DetailsMarkerPainter(*this).Paint(paint_info);
 }
 
 bool LayoutDetailsMarker::IsOpen() const {

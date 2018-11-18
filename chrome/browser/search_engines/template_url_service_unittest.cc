@@ -19,7 +19,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/cancelable_task_tracker.h"
-#include "base/test/histogram_tester.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "base/test/simple_test_clock.h"
 #include "base/threading/thread.h"
 #include "base/time/time.h"
@@ -1610,6 +1610,33 @@ TEST_F(TemplateURLServiceTest, DefaultExtensionEngine) {
 
   test_util()->RemoveExtensionControlledTURL("extension_id");
   ExpectSimilar(user_dse, model()->GetDefaultSearchProvider());
+}
+
+TEST_F(TemplateURLServiceTest, SetDefaultExtensionEngineAndRemoveUserDSE) {
+  test_util()->VerifyLoad();
+  // Add third-party default search engine.
+  TemplateURL* user_dse =
+      AddKeywordWithDate("user", "user", "http://www.goo.com/s?q={searchTerms}",
+                         std::string(), std::string(), std::string(), true);
+  model()->SetUserSelectedDefaultSearchProvider(user_dse);
+  EXPECT_EQ(user_dse, model()->GetDefaultSearchProvider());
+
+  TemplateURL* ext_dse_ptr =
+      AddExtensionSearchEngine("extension_keyword", "extension_id", true);
+  EXPECT_EQ(ext_dse_ptr, model()->GetDefaultSearchProvider());
+  auto* prefs = test_util()->profile()->GetTestingPrefService();
+  std::string dse_guid =
+      prefs->GetString(prefs::kSyncedDefaultSearchProviderGUID);
+  EXPECT_EQ(user_dse->sync_guid(), dse_guid);
+
+  model()->Remove(user_dse);
+  EXPECT_EQ(ext_dse_ptr, model()->GetDefaultSearchProvider());
+
+  test_util()->RemoveExtensionControlledTURL("extension_id");
+  // The DSE is set to the fallback search engine.
+  EXPECT_TRUE(model()->GetDefaultSearchProvider());
+  EXPECT_NE(dse_guid,
+            prefs->GetString(prefs::kSyncedDefaultSearchProviderGUID));
 }
 
 TEST_F(TemplateURLServiceTest, DefaultExtensionEnginePersist) {

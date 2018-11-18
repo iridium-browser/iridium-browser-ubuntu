@@ -28,7 +28,8 @@ BufferState::BufferState()
       mMapOffset(0),
       mMapLength(0),
       mBindingCount(0),
-      mTransformFeedbackBindingCount(0)
+      mTransformFeedbackIndexedBindingCount(0),
+      mTransformFeedbackGenericBindingCount(0)
 {
 }
 
@@ -46,12 +47,11 @@ Buffer::~Buffer()
     SafeDelete(mImpl);
 }
 
-Error Buffer::onDestroy(const Context *context)
+void Buffer::onDestroy(const Context *context)
 {
     // In tests, mImpl might be null.
     if (mImpl)
         mImpl->destroy(context);
-    return NoError();
 }
 
 void Buffer::setLabel(const std::string &label)
@@ -64,7 +64,7 @@ const std::string &Buffer::getLabel() const
     return mState.mLabel;
 }
 
-Error Buffer::bufferData(const Context *context,
+Error Buffer::bufferData(Context *context,
                          BufferBinding target,
                          const void *data,
                          GLsizeiptr size,
@@ -78,7 +78,8 @@ Error Buffer::bufferData(const Context *context,
     if (context && context->getGLState().isRobustResourceInitEnabled() && !data && size > 0)
     {
         angle::MemoryBuffer *scratchBuffer = nullptr;
-        ANGLE_TRY(context->getZeroFilledBuffer(static_cast<size_t>(size), &scratchBuffer));
+        ANGLE_CHECK_GL_ALLOC(
+            context, context->getZeroFilledBuffer(static_cast<size_t>(size), &scratchBuffer));
         dataForImpl = scratchBuffer->data();
     }
 
@@ -88,8 +89,8 @@ Error Buffer::bufferData(const Context *context,
     mState.mUsage = usage;
     mState.mSize  = size;
 
-    // Notify when data changes.
-    mImpl->onStateChange(context, angle::SubjectMessage::CONTENTS_CHANGED);
+    // Notify when storage changes.
+    mImpl->onStateChange(context, angle::SubjectMessage::STORAGE_CHANGED);
 
     return NoError();
 }
@@ -143,6 +144,9 @@ Error Buffer::map(const Context *context, GLenum access)
     mState.mAccessFlags = GL_MAP_WRITE_BIT;
     mIndexRangeCache.clear();
 
+    // Notify when state changes.
+    mImpl->onStateChange(context, angle::SubjectMessage::RESOURCE_MAPPED);
+
     return NoError();
 }
 
@@ -173,6 +177,9 @@ Error Buffer::mapRange(const Context *context,
         mIndexRangeCache.invalidateRange(static_cast<unsigned int>(offset), static_cast<unsigned int>(length));
     }
 
+    // Notify when state changes.
+    mImpl->onStateChange(context, angle::SubjectMessage::RESOURCE_MAPPED);
+
     return NoError();
 }
 
@@ -191,7 +198,7 @@ Error Buffer::unmap(const Context *context, GLboolean *result)
     mState.mAccessFlags = 0;
 
     // Notify when data changes.
-    mImpl->onStateChange(context, angle::SubjectMessage::CONTENTS_CHANGED);
+    mImpl->onStateChange(context, angle::SubjectMessage::RESOURCE_UNMAPPED);
 
     return NoError();
 }
@@ -239,19 +246,29 @@ bool Buffer::isBound() const
 
 bool Buffer::isBoundForTransformFeedbackAndOtherUse() const
 {
-    return mState.mTransformFeedbackBindingCount > 0 &&
-           mState.mTransformFeedbackBindingCount != mState.mBindingCount;
+    // The transform feedback generic binding point is not an indexed binding point but it also does
+    // not count as a non-transform-feedback use of the buffer, so we subtract it from the binding
+    // count when checking if the buffer is bound to a non-transform-feedback location. See
+    // https://crbug.com/853978
+    return mState.mTransformFeedbackIndexedBindingCount > 0 &&
+           mState.mTransformFeedbackIndexedBindingCount !=
+               mState.mBindingCount - mState.mTransformFeedbackGenericBindingCount;
 }
 
-void Buffer::onBindingChanged(bool bound, BufferBinding target)
+void Buffer::onTFBindingChanged(const Context *context, bool bound, bool indexed)
 {
     ASSERT(bound || mState.mBindingCount > 0);
     mState.mBindingCount += bound ? 1 : -1;
-    if (target == BufferBinding::TransformFeedback)
+    if (indexed)
     {
-        ASSERT(bound || mState.mTransformFeedbackBindingCount > 0);
-        mState.mTransformFeedbackBindingCount += bound ? 1 : -1;
+        ASSERT(bound || mState.mTransformFeedbackIndexedBindingCount > 0);
+        mState.mTransformFeedbackIndexedBindingCount += bound ? 1 : -1;
+
+        mImpl->onStateChange(context, angle::SubjectMessage::BINDING_CHANGED);
+    }
+    else
+    {
+        mState.mTransformFeedbackGenericBindingCount += bound ? 1 : -1;
     }
 }
-
 }  // namespace gl

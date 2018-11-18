@@ -4,17 +4,25 @@
 
 #include "chrome/browser/media/router/media_router_feature.h"
 
+#include "base/base64.h"
 #include "base/feature_list.h"
+#include "base/strings/string_util.h"
 #include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
+#include "components/mirroring/service/features.h"
 #include "content/public/browser/browser_context.h"
+#include "content/public/common/content_features.h"
+#include "crypto/random.h"
 #include "extensions/buildflags/buildflags.h"
+#include "services/network/public/cpp/features.h"
 #include "ui/base/ui_features.h"
 
 #if defined(OS_ANDROID) || BUILDFLAG(ENABLE_EXTENSIONS)
+#include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
 #include "components/prefs/pref_service.h"
 #include "components/user_prefs/user_prefs.h"
+#include "ui/base/ui_base_features.h"
 #endif  // defined(OS_ANDROID) || BUILDFLAG(ENABLE_EXTENSIONS)
 
 #if !defined(OS_ANDROID)
@@ -24,9 +32,9 @@
 namespace media_router {
 
 #if !defined(OS_ANDROID)
-// Controls if browser side DIAL sink query is enabled.
-const base::Feature kEnableDialSinkQuery{"EnableDialSinkQuery",
-                                         base::FEATURE_DISABLED_BY_DEFAULT};
+// Controls if browser side DialMediaRouteProvider is enabled.
+const base::Feature kDialMediaRouteProvider{"DialMediaRouteProvider",
+                                            base::FEATURE_DISABLED_BY_DEFAULT};
 
 // Controls if browser side Cast device discovery is enabled.
 const base::Feature kEnableCastDiscovery{"EnableCastDiscovery",
@@ -35,9 +43,6 @@ const base::Feature kEnableCastDiscovery{"EnableCastDiscovery",
 const base::Feature kCastMediaRouteProvider{"CastMediaRouteProvider",
                                             base::FEATURE_DISABLED_BY_DEFAULT};
 
-// Controls if local media casting is enabled.
-const base::Feature kEnableCastLocalMedia{"EnableCastLocalMedia",
-                                          base::FEATURE_ENABLED_BY_DEFAULT};
 #endif
 
 #if defined(OS_ANDROID) || BUILDFLAG(ENABLE_EXTENSIONS)
@@ -74,6 +79,12 @@ void RegisterLocalStatePrefs(PrefRegistrySimple* registry) {
                                 PrefRegistry::PUBLIC);
 }
 
+void RegisterProfilePrefs(PrefRegistrySimple* registry) {
+  // TODO(imcheng): Migrate existing Media Router prefs to here.
+  registry->RegisterStringPref(prefs::kMediaRouterReceiverIdHashToken, "",
+                               PrefRegistry::PUBLIC);
+}
+
 const base::Feature kCastAllowAllIPsFeature{"CastAllowAllIPs",
                                             base::FEATURE_DISABLED_BY_DEFAULT};
 
@@ -91,12 +102,23 @@ bool GetCastAllowAllIPsPref(PrefService* pref_service) {
   return allow_all_ips;
 }
 
-// Returns true if browser side DIAL sink query is enabled.
-bool DialSinkQueryEnabled() {
-  return base::FeatureList::IsEnabled(kEnableDialSinkQuery);
+std::string GetReceiverIdHashToken(PrefService* pref_service) {
+  static constexpr size_t kHashTokenSize = 64;
+  std::string token =
+      pref_service->GetString(prefs::kMediaRouterReceiverIdHashToken);
+  if (token.empty()) {
+    crypto::RandBytes(base::WriteInto(&token, kHashTokenSize + 1),
+                      kHashTokenSize);
+    base::Base64Encode(token, &token);
+    pref_service->SetString(prefs::kMediaRouterReceiverIdHashToken, token);
+  }
+  return token;
 }
 
-// Returns true if browser side Cast discovery is enabled.
+bool DialMediaRouteProviderEnabled() {
+  return base::FeatureList::IsEnabled(kDialMediaRouteProvider);
+}
+
 bool CastDiscoveryEnabled() {
   return base::FeatureList::IsEnabled(kEnableCastDiscovery);
 }
@@ -105,20 +127,17 @@ bool CastMediaRouteProviderEnabled() {
   return base::FeatureList::IsEnabled(kCastMediaRouteProvider);
 }
 
-// Returns true if local media casting is enabled.
-bool CastLocalMediaEnabled() {
-  return base::FeatureList::IsEnabled(kEnableCastLocalMedia);
+bool ShouldUseViewsDialog() {
+  return base::FeatureList::IsEnabled(features::kViewsCastDialog) ||
+         base::FeatureList::IsEnabled(features::kExperimentalUi);
 }
 
-// Returns true if the presentation receiver window for local media casting is
-// available on the current platform.
-bool PresentationReceiverWindowEnabled() {
-#if defined(OS_MACOSX) && !BUILDFLAG(MAC_VIEWS_BROWSER)
-  return false;
-#else
-  return true;
-#endif
+bool ShouldUseMirroringService() {
+  return base::FeatureList::IsEnabled(mirroring::features::kMirroringService) &&
+         base::FeatureList::IsEnabled(features::kAudioServiceAudioStreams) &&
+         base::FeatureList::IsEnabled(network::features::kNetworkService);
 }
+
 #endif  // !defined(OS_ANDROID)
 
 }  // namespace media_router

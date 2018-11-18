@@ -23,15 +23,15 @@ class NavigatorContentUtilsClientMock final
 
   ~NavigatorContentUtilsClientMock() override = default;
 
-  virtual void RegisterProtocolHandler(const String& scheme,
-                                       const KURL&,
-                                       const String& title);
+  void RegisterProtocolHandler(const String& scheme,
+                               const KURL&,
+                               const String& title) override;
 
-  virtual void UnregisterProtocolHandler(const String& scheme, const KURL&);
+  void UnregisterProtocolHandler(const String& scheme, const KURL&) override;
 
  private:
   // TODO(sashab): Make NavigatorContentUtilsClientMock non-virtual and test it
-  // using a WebFrameClient mock.
+  // using a WebLocalFrameClient mock.
   NavigatorContentUtilsClientMock() : NavigatorContentUtilsClient(nullptr) {}
 
   typedef struct {

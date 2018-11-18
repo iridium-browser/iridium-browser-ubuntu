@@ -32,14 +32,15 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_LOADER_LINK_LOADER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LOADER_LINK_LOADER_H_
 
+#include "base/optional.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/html/link_rel_attribute.h"
 #include "third_party/blink/renderer/core/loader/link_loader_client.h"
 #include "third_party/blink/renderer/core/script/modulator.h"
 #include "third_party/blink/renderer/platform/cross_origin_attribute_value.h"
+#include "third_party/blink/renderer/platform/loader/fetch/fetch_parameters.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource.h"
 #include "third_party/blink/renderer/platform/prerender_client.h"
-#include "third_party/blink/renderer/platform/wtf/optional.h"
 
 namespace blink {
 
@@ -48,6 +49,8 @@ class LinkHeader;
 class LocalFrame;
 class NetworkHintsInterface;
 class PrerenderHandle;
+class Resource;
+enum class ResourceType : uint8_t;
 struct ViewportDescriptionWrapper;
 
 // The parameter object for LinkLoader::LoadLink().
@@ -59,6 +62,7 @@ struct LinkLoadParameters {
                      const String& media,
                      const String& nonce,
                      const String& integrity,
+                     const String& importance,
                      const ReferrerPolicy& referrer_policy,
                      const KURL& href,
                      const String& srcset,
@@ -70,6 +74,7 @@ struct LinkLoadParameters {
         media(media),
         nonce(nonce),
         integrity(integrity),
+        importance(importance),
         referrer_policy(referrer_policy),
         href(href),
         srcset(srcset),
@@ -83,6 +88,7 @@ struct LinkLoadParameters {
   String media;
   String nonce;
   String integrity;
+  String importance;
   ReferrerPolicy referrer_policy;
   KURL href;
   String srcset;
@@ -111,6 +117,12 @@ class CORE_EXPORT LinkLoader final : public SingleModuleClient,
   bool LoadLink(const LinkLoadParameters&,
                 Document&,
                 const NetworkHintsInterface&);
+  void LoadStylesheet(const LinkLoadParameters&,
+                      const AtomicString&,
+                      const WTF::TextEncoding&,
+                      FetchParameters::DeferOption,
+                      Document&,
+                      ResourceClient*);
   void DispatchLinkLoadingErroredAsync();
 
   enum CanLoadResources {
@@ -129,7 +141,7 @@ class CORE_EXPORT LinkLoader final : public SingleModuleClient,
                                   CanLoadResources,
                                   MediaPreloadPolicy,
                                   ViewportDescriptionWrapper*);
-  static WTF::Optional<Resource::Type> GetResourceTypeFromAsAttribute(
+  static base::Optional<ResourceType> GetResourceTypeFromAsAttribute(
       const String& as);
 
   Resource* GetResourceForTesting();

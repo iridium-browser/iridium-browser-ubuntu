@@ -214,6 +214,9 @@ class ToValueVisitor {
     if (proto.type() != sync_pb::AutofillWalletSpecifics::MASKED_CREDIT_CARD) {
       value->Remove("masked_card", nullptr);
     }
+    if (proto.type() != sync_pb::AutofillWalletSpecifics::CUSTOMER_DATA) {
+      value->Remove("customer_data", nullptr);
+    }
     return value;
   }
 
@@ -328,10 +331,12 @@ IMPLEMENT_PROTO_TO_VALUE(ManagedUserSettingSpecifics)
 IMPLEMENT_PROTO_TO_VALUE(ManagedUserSharedSettingSpecifics)
 IMPLEMENT_PROTO_TO_VALUE(ManagedUserSpecifics)
 IMPLEMENT_PROTO_TO_VALUE(ManagedUserWhitelistSpecifics)
+IMPLEMENT_PROTO_TO_VALUE(MountainShareSpecifics)
 IMPLEMENT_PROTO_TO_VALUE(NavigationRedirect)
 IMPLEMENT_PROTO_TO_VALUE(NigoriSpecifics)
 IMPLEMENT_PROTO_TO_VALUE(PasswordSpecifics)
 IMPLEMENT_PROTO_TO_VALUE(PasswordSpecificsData)
+IMPLEMENT_PROTO_TO_VALUE(PaymentsCustomerData)
 IMPLEMENT_PROTO_TO_VALUE(PreferenceSpecifics)
 IMPLEMENT_PROTO_TO_VALUE(PrinterPPDReference)
 IMPLEMENT_PROTO_TO_VALUE(PrinterSpecifics)
@@ -349,6 +354,7 @@ IMPLEMENT_PROTO_TO_VALUE(TabNavigation)
 IMPLEMENT_PROTO_TO_VALUE(ThemeSpecifics)
 IMPLEMENT_PROTO_TO_VALUE(TimeRangeDirective)
 IMPLEMENT_PROTO_TO_VALUE(TypedUrlSpecifics)
+IMPLEMENT_PROTO_TO_VALUE(UserConsentSpecifics)
 IMPLEMENT_PROTO_TO_VALUE(UserEventSpecifics)
 IMPLEMENT_PROTO_TO_VALUE(WalletMaskedCreditCard)
 IMPLEMENT_PROTO_TO_VALUE(WalletMetadataSpecifics)

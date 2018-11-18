@@ -9,11 +9,12 @@
 
 namespace blink {
 
-class GraphicsContext;
 struct PaintInfo;
+class GraphicsContext;
 class LayoutPoint;
 class LayoutRect;
 class LayoutImage;
+class PaintLayer;
 
 class ImagePainter {
   STACK_ALLOCATED();
@@ -21,7 +22,7 @@ class ImagePainter {
  public:
   ImagePainter(const LayoutImage& layout_image) : layout_image_(layout_image) {}
 
-  void Paint(const PaintInfo&, const LayoutPoint& paint_offset);
+  void Paint(const PaintInfo&);
   void PaintReplaced(const PaintInfo&, const LayoutPoint& paint_offset);
 
   // Paint the image into |destRect|, after clipping by |contentRect|. Both
@@ -29,11 +30,11 @@ class ImagePainter {
   // offset.
   void PaintIntoRect(GraphicsContext&,
                      const LayoutRect& dest_rect,
-                     const LayoutRect& content_rect);
+                     const LayoutRect& content_rect,
+                     const PaintLayer*);
 
  private:
-  void PaintAreaElementFocusRing(const PaintInfo&,
-                                 const LayoutPoint& paint_offset);
+  void PaintAreaElementFocusRing(const PaintInfo&);
 
   const LayoutImage& layout_image_;
 };

@@ -30,19 +30,18 @@
 
 #include "third_party/blink/renderer/core/fileapi/file_reader.h"
 
+#include "base/auto_reset.h"
 #include "third_party/blink/public/platform/task_type.h"
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
 #include "third_party/blink/renderer/bindings/core/v8/string_or_array_buffer.h"
 #include "third_party/blink/renderer/core/dom/document.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
 #include "third_party/blink/renderer/core/events/progress_event.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/fileapi/file.h"
 #include "third_party/blink/renderer/core/frame/use_counter.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
-#include "third_party/blink/renderer/platform/wtf/auto_reset.h"
 #include "third_party/blink/renderer/platform/wtf/deque.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
 #include "third_party/blink/renderer/platform/wtf/text/cstring.h"
@@ -120,7 +119,7 @@ class FileReader::ThrottlingController final
     probe::AsyncTaskCanceled(context, reader);
   }
 
-  void Trace(blink::Visitor* visitor) {
+  void Trace(blink::Visitor* visitor) override {
     visitor->Trace(pending_readers_);
     visitor->Trace(running_readers_);
     Supplement<ExecutionContext>::Trace(visitor);
@@ -166,6 +165,10 @@ class FileReader::ThrottlingController final
   }
 
   void ExecuteReaders() {
+    // Dont execute more readers if the context is already destroyed (or in the
+    // process of being destroyed).
+    if (GetSupplementable()->IsContextDestroyed())
+      return;
     while (running_readers_.size() < max_running_readers_) {
       if (pending_readers_.IsEmpty())
         return;
@@ -273,22 +276,24 @@ void FileReader::ReadInternal(Blob* blob,
   // InvalidStateError should be thrown when the state is kLoading.
   if (state_ == kLoading) {
     exception_state.ThrowDOMException(
-        kInvalidStateError, "The object is already busy reading Blobs.");
+        DOMExceptionCode::kInvalidStateError,
+        "The object is already busy reading Blobs.");
     return;
   }
 
   ExecutionContext* context = GetExecutionContext();
   if (!context) {
     exception_state.ThrowDOMException(
-        kAbortError, "Reading from a detached FileReader is not supported.");
+        DOMExceptionCode::kAbortError,
+        "Reading from a detached FileReader is not supported.");
     return;
   }
 
   // A document loader will not load new resources once the Document has
   // detached from its frame.
-  if (context->IsDocument() && !ToDocument(context)->GetFrame()) {
+  if (IsA<Document>(context) && !To<Document>(context)->GetFrame()) {
     exception_state.ThrowDOMException(
-        kAbortError,
+        DOMExceptionCode::kAbortError,
         "Reading from a Document-detached FileReader is not supported.");
     return;
   }
@@ -329,7 +334,7 @@ void FileReader::abort() {
   DCHECK_NE(kDone, state_);
   state_ = kDone;
 
-  AutoReset<bool> firing_events(&still_firing_events_, true);
+  base::AutoReset<bool> firing_events(&still_firing_events_, true);
 
   // Setting error implicitly makes |result| return null.
   error_ = FileError::CreateDOMException(FileError::kAbortErr);
@@ -344,14 +349,10 @@ void FileReader::abort() {
   // All possible events have fired and we're done, no more pending activity.
   ThrottlingController::FinishReader(GetExecutionContext(), this, final_step);
 
-  // ..but perform the loader cancellation asynchronously as abort() could be
-  // called from the event handler and we do not want the resource loading code
-  // to be on the stack when doing so. The persistent reference keeps the
-  // reader alive until the task has completed.
-  GetExecutionContext()
-      ->GetTaskRunner(TaskType::kFileReading)
-      ->PostTask(FROM_HERE,
-                 WTF::Bind(&FileReader::Terminate, WrapPersistent(this)));
+  // Also synchronously cancel the loader, as script might initiate a new load
+  // right after this method returns, in which case an async termination would
+  // terminate the wrong loader.
+  Terminate();
 }
 
 void FileReader::result(ScriptState* state,
@@ -380,7 +381,7 @@ void FileReader::Terminate() {
 }
 
 void FileReader::DidStartLoading() {
-  AutoReset<bool> firing_events(&still_firing_events_, true);
+  base::AutoReset<bool> firing_events(&still_firing_events_, true);
   FireEvent(EventTypeNames::loadstart);
 }
 
@@ -391,7 +392,7 @@ void FileReader::DidReceiveData() {
     last_progress_notification_time_ms_ = now;
   } else if (now - last_progress_notification_time_ms_ >
              kProgressNotificationIntervalMS) {
-    AutoReset<bool> firing_events(&still_firing_events_, true);
+    base::AutoReset<bool> firing_events(&still_firing_events_, true);
     FireEvent(EventTypeNames::progress);
     last_progress_notification_time_ms_ = now;
   }
@@ -407,7 +408,7 @@ void FileReader::DidFinishLoading() {
   // use this separate variable to keep the wrapper of this FileReader alive.
   // An alternative would be to keep any ActiveScriptWrappables alive that is on
   // the stack.
-  AutoReset<bool> firing_events(&still_firing_events_, true);
+  base::AutoReset<bool> firing_events(&still_firing_events_, true);
 
   // It's important that we change m_loadingState before firing any events
   // since any of the events could call abort(), which internally checks
@@ -434,7 +435,7 @@ void FileReader::DidFail(FileError::ErrorCode error_code) {
   if (loading_state_ == kLoadingStateAborted)
     return;
 
-  AutoReset<bool> firing_events(&still_firing_events_, true);
+  base::AutoReset<bool> firing_events(&still_firing_events_, true);
 
   DCHECK_EQ(kLoadingStateLoading, loading_state_);
   loading_state_ = kLoadingStateNone;
@@ -458,16 +459,16 @@ void FileReader::DidFail(FileError::ErrorCode error_code) {
 void FileReader::FireEvent(const AtomicString& type) {
   probe::AsyncTask async_task(GetExecutionContext(), this, "event");
   if (!loader_) {
-    DispatchEvent(ProgressEvent::Create(type, false, 0, 0));
+    DispatchEvent(*ProgressEvent::Create(type, false, 0, 0));
     return;
   }
 
   if (loader_->TotalBytes()) {
-    DispatchEvent(ProgressEvent::Create(type, true, loader_->BytesLoaded(),
-                                        *loader_->TotalBytes()));
+    DispatchEvent(*ProgressEvent::Create(type, true, loader_->BytesLoaded(),
+                                         *loader_->TotalBytes()));
   } else {
     DispatchEvent(
-        ProgressEvent::Create(type, false, loader_->BytesLoaded(), 0));
+        *ProgressEvent::Create(type, false, loader_->BytesLoaded(), 0));
   }
 }
 

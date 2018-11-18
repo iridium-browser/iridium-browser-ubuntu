@@ -60,8 +60,7 @@ import logging
 
 from google.appengine.ext import ndb
 
-from dashboard import layered_cache
-from dashboard.common import datastore_hooks
+from dashboard.common import layered_cache
 from dashboard.common import utils
 from dashboard.models import anomaly
 from dashboard.models import anomaly_config
@@ -77,7 +76,7 @@ LIST_TESTS_SUBTEST_CACHE_KEY = 'list_tests_get_tests_v2_%s_%s_%s'
 _MAX_STRING_LENGTH = 500
 
 
-class Master(internal_only_model.InternalOnlyModel):
+class Master(ndb.Model):
   """Information about the Buildbot master.
 
   Masters are keyed by name, e.g. 'ChromiumGPU' or 'ChromiumPerf'.
@@ -96,6 +95,23 @@ class Bot(internal_only_model.InternalOnlyModel):
   a Bot, check the bot_name and master_name properties of the TestMetadata.
   """
   internal_only = ndb.BooleanProperty(default=False, indexed=True)
+
+  @classmethod
+  @ndb.synctasklet
+  def GetInternalOnlySync(cls, master, bot):
+    try:
+      internal_only = yield cls.GetInternalOnlyAsync(master, bot)
+      raise ndb.Return(internal_only)
+    except AssertionError:
+      raise ndb.Return(True)
+
+  @staticmethod
+  @ndb.tasklet
+  def GetInternalOnlyAsync(master, bot):
+    bot_entity = yield ndb.Key('Master', master, 'Bot', bot).get_async()
+    if bot_entity is None:
+      raise ndb.Return(True)
+    raise ndb.Return(bot_entity.internal_only)
 
 
 class TestMetadata(internal_only_model.CreateHookInternalOnlyModel):
@@ -132,7 +148,7 @@ class TestMetadata(internal_only_model.CreateHookInternalOnlyModel):
   # There is a default anomaly threshold config (in anomaly.py), and it can
   # be overridden for a group of tests by using /edit_sheriffs.
   overridden_anomaly_config = ndb.KeyProperty(
-      kind=anomaly_config.AnomalyConfig, indexed=True)
+      kind=anomaly_config.AnomalyConfig, indexed=False)
 
   # Keep track of what direction is an improvement for this graph so we can
   # filter out alerts on regressions.
@@ -149,9 +165,6 @@ class TestMetadata(internal_only_model.CreateHookInternalOnlyModel):
   # Units of the child Rows of this test, or None if there are no child Rows.
   units = ndb.StringProperty(indexed=False)
 
-  # The last alerted revision is used to avoid duplicate alerts.
-  last_alerted_revision = ndb.IntegerProperty(indexed=False)
-
   # Whether or not the test has child rows. Set by hook on Row class put.
   has_rows = ndb.BooleanProperty(default=False, indexed=True)
 
@@ -159,18 +172,8 @@ class TestMetadata(internal_only_model.CreateHookInternalOnlyModel):
   # a long time; these tests should usually not be listed.
   deprecated = ndb.BooleanProperty(default=False, indexed=True)
 
-  # For top-level test entities, this is a list of sub-tests that are checked
-  # for alerts (i.e. they have a sheriff). For other tests, this is empty.
-  monitored = ndb.KeyProperty(repeated=True, indexed=True)
-
   # Description of what the test measures.
   description = ndb.TextProperty(indexed=True)
-
-  # Source code location of the test. Optional.
-  code = ndb.StringProperty(indexed=False, repeated=True)
-
-  # Command to run the test. Optional.
-  command_line = ndb.StringProperty(indexed=False)
 
   # Story names are escaped (slashes, colons). Store unescaped version
   # for story filter flag.
@@ -269,12 +272,16 @@ class TestMetadata(internal_only_model.CreateHookInternalOnlyModel):
     kwargs['description'] = description[:_MAX_STRING_LENGTH]
     super(TestMetadata, self).__init__(*args, **kwargs)
 
-  def _pre_put_hook(self):
+  @ndb.synctasklet
+  def UpdateSheriff(self):
+    yield self.UpdateSheriffAsync()
+
+  @ndb.tasklet
+  def UpdateSheriffAsync(self):
     """This method is called before a TestMetadata is put into the datastore.
 
     Here, we check the key to make sure it is valid and check the sheriffs and
-    anomaly configs to make sure they are current. We also update the monitored
-    list of the test suite.
+    anomaly configs to make sure they are current.
     """
     # Check to make sure the key is valid.
     # TestMetadata should not be an ancestor, so key.pairs() should have length
@@ -285,43 +292,21 @@ class TestMetadata(internal_only_model.CreateHookInternalOnlyModel):
 
     # Set the sheriff to the first sheriff (alphabetically by sheriff name)
     # that has a test pattern that matches this test.
-    old_sheriff = self.sheriff
+    sheriffs = yield sheriff_module.Sheriff.query().fetch_async()
     self.sheriff = None
-    for sheriff_entity in sheriff_module.Sheriff.query().fetch():
+    for sheriff_entity in sheriffs:
       for pattern in sheriff_entity.patterns:
         if utils.TestMatchesPattern(self, pattern):
           self.sheriff = sheriff_entity.key
       if self.sheriff:
         break
 
-    # TODO(simonhatch): Remove this logging. Trying to track down alerts being
-    # generated for tests that seemingly have no sheriff.
-    # https://github.com/catapult-project/catapult/issues/3903
-    if old_sheriff != self.sheriff:
-      logging.info('Sheriff Modified')
-      logging.info(' Test: %s', self.test_path)
-      logging.info(' Old Sheriff: %s', old_sheriff)
-      logging.info(' New Sheriff: %s', self.sheriff)
-
-
-    # If this test is monitored, add it to the monitored list of its test suite.
-    # A test is be monitored iff it has a sheriff, and monitored tests are
-    # tracked in the monitored list of a test suite TestMetadata entity.
-    test_suite = ndb.Key('TestMetadata', '/'.join(path_parts[:3])).get()
-    if self.sheriff:
-      if test_suite and self.key not in test_suite.monitored:
-        test_suite.monitored.append(self.key)
-        test_suite.put()
-    elif test_suite and self.key in test_suite.monitored:
-      test_suite.monitored.remove(self.key)
-      test_suite.put()
-
     # Set the anomaly threshold config to the first one that has a test pattern
     # that matches this test, if there is one. Anomaly configs with a pattern
     # that more specifically matches the test are given higher priority.
     # ie. */*/*/foo is chosen over */*/*/*
     self.overridden_anomaly_config = None
-    anomaly_configs = anomaly_config.AnomalyConfig.query().fetch()
+    anomaly_configs = yield anomaly_config.AnomalyConfig.query().fetch_async()
     anomaly_data_list = []
     for e in anomaly_configs:
       for p in e.patterns:
@@ -364,7 +349,7 @@ class LastAddedRevision(ndb.Model):
   revision = ndb.IntegerProperty(indexed=False)
 
 
-class Row(internal_only_model.InternalOnlyModel, ndb.Expando):
+class Row(ndb.Expando):
   """A Row represents one data point.
 
   A Row has a revision and a value, which are the X and Y values, respectively.
@@ -387,7 +372,6 @@ class Row(internal_only_model.InternalOnlyModel, ndb.Expando):
 
   # Don't index by default (only explicitly indexed properties are indexed).
   _default_indexed = False
-  internal_only = ndb.BooleanProperty(default=False, indexed=True)
 
   # The parent_test is the key of the TestMetadata entity that this Row belongs
   # to.
@@ -419,17 +403,11 @@ class Row(internal_only_model.InternalOnlyModel, ndb.Expando):
   # The standard deviation at this point. Optional.
   error = ndb.FloatProperty(indexed=False)
 
-  def _pre_put_hook(self):
-    """Sets the has_rows property of the parent test before putting this Row.
+  @ndb.tasklet
+  def UpdateParentAsync(self, **ctx_options):
+    parent_test = yield utils.TestMetadataKey(
+        self.key.parent().id()).get_async(**ctx_options)
 
-    This isn't atomic because the parent_test put() and Row put() don't happen
-    in the same transaction. But in practice it shouldn't be an issue because
-    the parent test will get more points as the test runs.
-    """
-    parent_test = utils.TestMetadataKey(self.key.parent().id()).get()
-
-    # If the TestMetadata pointed to by parent_test is not valid, that indicates
-    # that a TestMetadata entity was not properly created in add_point.
     if not parent_test:
       parent_key = self.key.parent()
       logging.warning(
@@ -438,14 +416,13 @@ class Row(internal_only_model.InternalOnlyModel, ndb.Expando):
 
     if not parent_test.has_rows:
       parent_test.has_rows = True
-      parent_test.put()
+      yield parent_test.UpdateSheriffAsync()
+      yield parent_test.put_async(**ctx_options)
 
 
-def GetRowsForTestInRange(test_key, start_rev, end_rev, privileged=False):
+def GetRowsForTestInRange(test_key, start_rev, end_rev):
   """Gets all the Row entities for a test between a given start and end."""
   test_key = utils.OldStyleTestKey(test_key)
-  if privileged:
-    datastore_hooks.SetSinglePrivilegedRequest()
   query = Row.query(
       Row.parent_test == test_key,
       Row.revision >= start_rev,
@@ -453,30 +430,26 @@ def GetRowsForTestInRange(test_key, start_rev, end_rev, privileged=False):
   return query.fetch(batch_size=100)
 
 
-def GetRowsForTestAroundRev(test_key, rev, num_points, privileged=False):
+def GetRowsForTestAroundRev(test_key, rev, num_points):
   """Gets up to |num_points| Row entities for a test centered on a revision."""
   test_key = utils.OldStyleTestKey(test_key)
   num_rows_before = int(num_points / 2) + 1
   num_rows_after = int(num_points / 2)
 
   return GetRowsForTestBeforeAfterRev(
-      test_key, rev, num_rows_before, num_rows_after, privileged)
+      test_key, rev, num_rows_before, num_rows_after)
 
 
 def GetRowsForTestBeforeAfterRev(
-    test_key, rev, num_rows_before, num_rows_after, privileged=False):
+    test_key, rev, num_rows_before, num_rows_after):
   """Gets up to |num_points| Row entities for a test centered on a revision."""
   test_key = utils.OldStyleTestKey(test_key)
 
-  if privileged:
-    datastore_hooks.SetSinglePrivilegedRequest()
   query_up_to_rev = Row.query(Row.parent_test == test_key, Row.revision <= rev)
   query_up_to_rev = query_up_to_rev.order(-Row.revision)
   rows_up_to_rev = list(reversed(
       query_up_to_rev.fetch(limit=num_rows_before, batch_size=100)))
 
-  if privileged:
-    datastore_hooks.SetSinglePrivilegedRequest()
   query_after_rev = Row.query(Row.parent_test == test_key, Row.revision > rev)
   query_after_rev = query_after_rev.order(Row.revision)
   rows_after_rev = query_after_rev.fetch(limit=num_rows_after, batch_size=100)
@@ -485,11 +458,9 @@ def GetRowsForTestBeforeAfterRev(
 
 
 def GetLatestRowsForTest(
-    test_key, num_points, keys_only=False, privileged=False):
+    test_key, num_points, keys_only=False):
   """Gets the latest num_points Row entities for a test."""
   test_key = utils.OldStyleTestKey(test_key)
-  if privileged:
-    datastore_hooks.SetSinglePrivilegedRequest()
   query = Row.query(Row.parent_test == test_key)
   query = query.order(-Row.revision)
 

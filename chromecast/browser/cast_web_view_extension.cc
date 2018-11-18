@@ -11,6 +11,7 @@
 #include "content/public/browser/web_contents_observer.h"
 #include "extensions/browser/extension_system.h"
 #include "net/base/net_errors.h"
+#include "ui/aura/window.h"
 
 namespace chromecast {
 
@@ -21,9 +22,7 @@ CastWebViewExtension::CastWebViewExtension(
     const extensions::Extension* extension,
     const GURL& initial_url)
     : delegate_(params.delegate),
-      window_(shell::CastContentWindow::Create(params.delegate,
-                                               params.is_headless,
-                                               params.enable_touch_input)),
+      window_(shell::CastContentWindow::Create(params.window_params)),
       extension_host_(std::make_unique<CastExtensionHost>(
           browser_context,
           params.delegate,
@@ -35,6 +34,7 @@ CastWebViewExtension::CastWebViewExtension(
           shell::CastBrowserProcess::GetInstance()->remote_debugging_server()) {
   DCHECK(delegate_);
   content::WebContentsObserver::Observe(web_contents());
+  web_contents()->GetNativeView()->SetName(params.activity_id);
   // If this CastWebView is enabled for development, start the remote debugger.
   if (params.enabled_for_dev) {
     LOG(INFO) << "Enabling dev console for " << web_contents()->GetVisibleURL();
@@ -62,12 +62,21 @@ void CastWebViewExtension::ClosePage(const base::TimeDelta& shutdown_delay) {}
 
 void CastWebViewExtension::InitializeWindow(
     CastWindowManager* window_manager,
-    bool is_visible,
     CastWindowManager::WindowId z_order,
     VisibilityPriority initial_priority) {
-  window_->CreateWindowForWebContents(web_contents(), window_manager,
-                                      is_visible, z_order, initial_priority);
+  window_->CreateWindowForWebContents(web_contents(), window_manager, z_order,
+                                      initial_priority);
   web_contents()->Focus();
+}
+
+void CastWebViewExtension::SetContext(base::Value context) {}
+
+void CastWebViewExtension::GrantScreenAccess() {
+  window_->GrantScreenAccess();
+}
+
+void CastWebViewExtension::RevokeScreenAccess() {
+  window_->RevokeScreenAccess();
 }
 
 void CastWebViewExtension::WebContentsDestroyed() {
@@ -81,6 +90,52 @@ void CastWebViewExtension::RenderViewCreated(
   if (view) {
     view->SetBackgroundColor(SK_ColorTRANSPARENT);
   }
+}
+
+void CastWebViewExtension::DidFinishNavigation(
+    content::NavigationHandle* navigation_handle) {
+  // If the navigation was not committed, it means either the page was a
+  // download or error 204/205, or the navigation never left the previous
+  // URL. Basically, this isn't a problem since we stayed at the existing URL.
+  if (!navigation_handle->HasCommitted())
+    return;
+
+  // The navigation committed. If we navigated to an error page then
+  // this is a bad state, and should be notified. Otherwise the navigation
+  // completed as intended.
+  if (!navigation_handle->IsErrorPage())
+    return;
+
+  net::Error error_code = navigation_handle->GetNetErrorCode();
+  // Ignore sub-frame errors.
+  if (!navigation_handle->IsInMainFrame()) {
+    LOG(ERROR) << "Got error on sub-frame: url=" << navigation_handle->GetURL()
+               << ", error=" << error_code
+               << ", description=" << net::ErrorToShortString(error_code);
+    return;
+  }
+
+  LOG(ERROR) << "Got error on navigation: url=" << navigation_handle->GetURL()
+             << ", error_code=" << error_code
+             << ", description= " << net::ErrorToShortString(error_code);
+  delegate_->OnPageStopped(error_code);
+}
+
+void CastWebViewExtension::DidFailLoad(
+    content::RenderFrameHost* render_frame_host,
+    const GURL& validated_url,
+    int error_code,
+    const base::string16& error_description) {
+  // Only report an error if we are the main frame.
+  if (render_frame_host->GetParent()) {
+    LOG(ERROR) << "Got error on sub-frame: url=" << validated_url.spec()
+               << ", error=" << error_code << ": " << error_description;
+    return;
+  }
+  LOG(ERROR) << "Got error on load: url=" << validated_url.spec()
+             << ", error_code=" << error_code << ": " << error_description;
+  ;
+  delegate_->OnPageStopped(error_code);
 }
 
 void CastWebViewExtension::RenderProcessGone(base::TerminationStatus status) {

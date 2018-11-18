@@ -67,7 +67,6 @@ rtc::scoped_refptr<PeerConnectionFactoryInterface> CreatePeerConnectionFactory(
       network_thread, worker_thread, signaling_thread, std::move(media_engine),
       std::move(call_factory), std::move(event_log_factory));
 }
-#endif
 
 rtc::scoped_refptr<PeerConnectionFactoryInterface> CreatePeerConnectionFactory(
     rtc::Thread* network_thread,
@@ -80,7 +79,9 @@ rtc::scoped_refptr<PeerConnectionFactoryInterface> CreatePeerConnectionFactory(
     cricket::WebRtcVideoDecoderFactory* video_decoder_factory,
     rtc::scoped_refptr<AudioMixer> audio_mixer,
     rtc::scoped_refptr<AudioProcessing> audio_processing,
-    std::unique_ptr<FecControllerFactoryInterface> fec_controller_factory) {
+    std::unique_ptr<FecControllerFactoryInterface> fec_controller_factory,
+    std::unique_ptr<NetworkControllerFactoryInterface>
+        network_controller_factory) {
   rtc::scoped_refptr<AudioProcessing> audio_processing_use = audio_processing;
   if (!audio_processing_use) {
     audio_processing_use = AudioProcessingBuilder().Create();
@@ -100,8 +101,9 @@ rtc::scoped_refptr<PeerConnectionFactoryInterface> CreatePeerConnectionFactory(
   return CreateModularPeerConnectionFactory(
       network_thread, worker_thread, signaling_thread, std::move(media_engine),
       std::move(call_factory), std::move(event_log_factory),
-      std::move(fec_controller_factory));
+      std::move(fec_controller_factory), std::move(network_controller_factory));
 }
+#endif
 
 rtc::scoped_refptr<PeerConnectionFactoryInterface> CreatePeerConnectionFactory(
     rtc::Thread* network_thread,
@@ -127,10 +129,14 @@ rtc::scoped_refptr<PeerConnectionFactoryInterface> CreatePeerConnectionFactory(
 
   std::unique_ptr<RtcEventLogFactoryInterface> event_log_factory =
       CreateRtcEventLogFactory();
-
-  return CreateModularPeerConnectionFactory(
-      network_thread, worker_thread, signaling_thread, std::move(media_engine),
-      std::move(call_factory), std::move(event_log_factory));
+  PeerConnectionFactoryDependencies dependencies;
+  dependencies.network_thread = network_thread;
+  dependencies.worker_thread = worker_thread;
+  dependencies.signaling_thread = signaling_thread;
+  dependencies.media_engine = std::move(media_engine);
+  dependencies.call_factory = std::move(call_factory);
+  dependencies.event_log_factory = std::move(event_log_factory);
+  return CreateModularPeerConnectionFactory(std::move(dependencies));
 }
 
 #if defined(USE_BUILTIN_SW_CODECS)

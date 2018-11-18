@@ -296,6 +296,12 @@ bool AnalyzerOptions::shouldSuppressFromCXXStandardLibrary() {
                           /* Default = */ true);
 }
 
+bool AnalyzerOptions::shouldCrosscheckWithZ3() {
+  return getBooleanOption(CrosscheckWithZ3,
+                          "crosscheck-with-z3",
+                          /* Default = */ false);
+}
+
 bool AnalyzerOptions::shouldReportIssuesInMainSourceFile() {
   return getBooleanOption(ReportIssuesInMainSourceFile,
                           "report-in-main-source-file",
@@ -313,6 +319,12 @@ bool AnalyzerOptions::shouldSerializeStats() {
   return getBooleanOption(SerializeStats,
                           "serialize-stats",
                           /* Default = */ false);
+}
+
+bool AnalyzerOptions::shouldElideConstructors() {
+  return getBooleanOption(ElideConstructors,
+                          "elide-constructors",
+                          /* Default = */ true);
 }
 
 int AnalyzerOptions::getOptionAsInteger(StringRef Name, int DefaultVal,
@@ -374,6 +386,12 @@ unsigned AnalyzerOptions::getGraphTrimInterval() {
   if (!GraphTrimInterval.hasValue())
     GraphTrimInterval = getOptionAsInteger("graph-trim-interval", 1000);
   return GraphTrimInterval.getValue();
+}
+
+unsigned AnalyzerOptions::getMaxSymbolComplexity() {
+  if (!MaxSymbolComplexity.hasValue())
+    MaxSymbolComplexity = getOptionAsInteger("max-symbol-complexity", 35);
+  return MaxSymbolComplexity.getValue();
 }
 
 unsigned AnalyzerOptions::getMaxTimesInlineLarge() {
@@ -443,6 +461,21 @@ bool AnalyzerOptions::shouldDisplayNotesAsEvents() {
     DisplayNotesAsEvents =
         getBooleanOption("notes-as-events", /*Default=*/false);
   return DisplayNotesAsEvents.getValue();
+}
+
+bool AnalyzerOptions::shouldAggressivelySimplifyBinaryOperation() {
+  if (!AggressiveBinaryOperationSimplification.hasValue())
+    AggressiveBinaryOperationSimplification =
+      getBooleanOption("aggressive-binary-operation-simplification",
+                       /*Default=*/false);
+  return AggressiveBinaryOperationSimplification.getValue();
+}
+
+bool AnalyzerOptions::shouldEagerlyAssume() {
+  if (!EagerlyAssumeBinOpBifurcation.hasValue())
+    EagerlyAssumeBinOpBifurcation =
+        getBooleanOption("eagerly-assume", true);
+  return EagerlyAssumeBinOpBifurcation.getValue();
 }
 
 StringRef AnalyzerOptions::getCTUDir() {

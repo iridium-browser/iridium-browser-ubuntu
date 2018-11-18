@@ -284,7 +284,7 @@ void CollectVariablesTraverser::recordBuiltInVaryingUsed(const TVariable &variab
         setBuiltInInfoFromSymbol(variable, &info);
         info.staticUse   = true;
         info.active      = true;
-        info.isInvariant = mSymbolTable->isVaryingInvariant(variable.name());
+        info.isInvariant = mSymbolTable->isVaryingInvariant(variable);
         varyings->push_back(info);
         (*addedFlag) = true;
     }
@@ -648,6 +648,7 @@ OutputVariable CollectVariablesTraverser::recordOutputVariable(const TIntermSymb
     setCommonVariableProperties(type, variable.variable(), &outputVariable);
 
     outputVariable.location = type.getLayoutQualifier().location;
+    outputVariable.index    = type.getLayoutQualifier().index;
     return outputVariable;
 }
 
@@ -668,7 +669,7 @@ Varying CollectVariablesTraverser::recordVarying(const TIntermSymbol &variable) 
         case EvqFlatOut:
         case EvqCentroidOut:
         case EvqGeometryOut:
-            if (mSymbolTable->isVaryingInvariant(variable.getName()) || type.isInvariant())
+            if (mSymbolTable->isVaryingInvariant(variable.variable()) || type.isInvariant())
             {
                 varying.isInvariant = true;
             }

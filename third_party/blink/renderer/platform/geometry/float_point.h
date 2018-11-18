@@ -33,6 +33,7 @@
 #include "third_party/blink/renderer/platform/geometry/int_point.h"
 #include "third_party/blink/renderer/platform/wtf/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
+#include "ui/gfx/geometry/point_f.h"
 
 #if defined(OS_MACOSX)
 typedef struct CGPoint CGPoint;
@@ -44,6 +45,13 @@ typedef struct CGPoint CGPoint;
 
 struct SkPoint;
 
+namespace gfx {
+class PointF;
+class Point3F;
+class ScrollOffset;
+class Vector2dF;
+}
+
 namespace blink {
 
 class DoublePoint;
@@ -53,27 +61,29 @@ class LayoutPoint;
 class LayoutSize;
 
 class PLATFORM_EXPORT FloatPoint {
-  DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
+  DISALLOW_NEW();
 
  public:
-  FloatPoint() : x_(0), y_(0) {}
-  FloatPoint(float x, float y) : x_(x), y_(y) {}
-  FloatPoint(const IntPoint&);
+  constexpr FloatPoint() : x_(0), y_(0) {}
+  constexpr FloatPoint(float x, float y) : x_(x), y_(y) {}
+  explicit FloatPoint(const IntPoint&);
   explicit FloatPoint(const SkPoint&);
   explicit FloatPoint(const DoublePoint&);
   explicit FloatPoint(const LayoutPoint&);
-  explicit FloatPoint(const FloatSize& size)
+  constexpr explicit FloatPoint(const FloatSize& size)
       : x_(size.Width()), y_(size.Height()) {}
   explicit FloatPoint(const LayoutSize&);
-  explicit FloatPoint(const IntSize& size)
+  constexpr explicit FloatPoint(const IntSize& size)
       : x_(size.Width()), y_(size.Height()) {}
+  explicit FloatPoint(const gfx::PointF& point)
+      : x_(point.x()), y_(point.y()) {}
 
-  static FloatPoint Zero() { return FloatPoint(); }
+  static constexpr FloatPoint Zero() { return FloatPoint(); }
 
   static FloatPoint NarrowPrecision(double x, double y);
 
-  float X() const { return x_; }
-  float Y() const { return y_; }
+  constexpr float X() const { return x_; }
+  constexpr float Y() const { return y_; }
 
   void SetX(float x) { x_ = x; }
   void SetY(float y) { y_ = y; }
@@ -128,10 +138,10 @@ class PLATFORM_EXPORT FloatPoint {
   operator CGPoint() const;
 #endif
 
-  // Can we remove this one?
-  SkPoint Data() const;
-
-  operator SkPoint() const;
+  operator gfx::PointF() const;
+  explicit operator gfx::ScrollOffset() const;
+  explicit operator gfx::Vector2dF() const;
+  operator gfx::Point3F() const;
 
   String ToString() const;
 
@@ -154,48 +164,48 @@ inline FloatPoint& operator-=(FloatPoint& a, const FloatSize& b) {
   return a;
 }
 
-inline FloatPoint operator+(const FloatPoint& a, const FloatSize& b) {
+constexpr FloatPoint operator+(const FloatPoint& a, const FloatSize& b) {
   return FloatPoint(a.X() + b.Width(), a.Y() + b.Height());
 }
 
-inline FloatPoint operator+(const FloatPoint& a, const IntSize& b) {
+constexpr FloatPoint operator+(const FloatPoint& a, const IntSize& b) {
   return FloatPoint(a.X() + b.Width(), a.Y() + b.Height());
 }
 
-inline FloatPoint operator+(const IntPoint& a, const FloatSize& b) {
+constexpr FloatPoint operator+(const IntPoint& a, const FloatSize& b) {
   return FloatPoint(a.X() + b.Width(), a.Y() + b.Height());
 }
 
-inline FloatPoint operator+(const FloatPoint& a, const FloatPoint& b) {
+constexpr FloatPoint operator+(const FloatPoint& a, const FloatPoint& b) {
   return FloatPoint(a.X() + b.X(), a.Y() + b.Y());
 }
 
-inline FloatPoint operator+(const FloatPoint& a, const IntPoint& b) {
+constexpr FloatPoint operator+(const FloatPoint& a, const IntPoint& b) {
   return FloatPoint(a.X() + b.X(), a.Y() + b.Y());
 }
 
-inline FloatSize operator-(const FloatPoint& a, const FloatPoint& b) {
+constexpr FloatSize operator-(const FloatPoint& a, const FloatPoint& b) {
   return FloatSize(a.X() - b.X(), a.Y() - b.Y());
 }
 
-inline FloatSize operator-(const FloatPoint& a, const IntPoint& b) {
+constexpr FloatSize operator-(const FloatPoint& a, const IntPoint& b) {
   return FloatSize(a.X() - b.X(), a.Y() - b.Y());
 }
 
-inline FloatPoint operator-(const FloatPoint& a, const FloatSize& b) {
+constexpr FloatPoint operator-(const FloatPoint& a, const FloatSize& b) {
   return FloatPoint(a.X() - b.Width(), a.Y() - b.Height());
 }
 
-inline FloatPoint operator-(const FloatPoint& a) {
+constexpr FloatPoint operator-(const FloatPoint& a) {
   return FloatPoint(-a.X(), -a.Y());
 }
 
-inline bool operator==(const FloatPoint& a, const FloatPoint& b) {
+constexpr bool operator==(const FloatPoint& a, const FloatPoint& b) {
   return a.X() == b.X() && a.Y() == b.Y();
 }
 
-inline bool operator!=(const FloatPoint& a, const FloatPoint& b) {
-  return a.X() != b.X() || a.Y() != b.Y();
+constexpr bool operator!=(const FloatPoint& a, const FloatPoint& b) {
+  return !(a == b);
 }
 
 inline float operator*(const FloatPoint& a, const FloatPoint& b) {
@@ -236,6 +246,8 @@ PLATFORM_EXPORT bool FindIntersection(const FloatPoint& p1,
                                       FloatPoint& intersection);
 
 PLATFORM_EXPORT std::ostream& operator<<(std::ostream&, const FloatPoint&);
+PLATFORM_EXPORT WTF::TextStream& operator<<(WTF::TextStream&,
+                                            const FloatPoint&);
 
 }  // namespace blink
 

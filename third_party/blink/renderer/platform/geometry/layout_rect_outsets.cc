@@ -32,6 +32,7 @@
 
 #include <algorithm>
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
+#include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
 
@@ -49,19 +50,16 @@ void LayoutRectOutsets::Unite(const LayoutRectOutsets& other) {
   left_ = std::max(left_, other.left_);
 }
 
-LayoutRectOutsets LayoutRectOutsets::LineOrientationOutsets(
-    WritingMode writing_mode) const {
-  if (!IsHorizontalWritingMode(writing_mode))
-    return LayoutRectOutsets(left_, bottom_, right_, top_);
-  return *this;
+std::ostream& operator<<(std::ostream& ostream,
+                         const LayoutRectOutsets& outsets) {
+  return ostream << outsets.ToString();
 }
 
-LayoutRectOutsets LayoutRectOutsets::LineOrientationOutsetsWithFlippedLines(
-    WritingMode writing_mode) const {
-  LayoutRectOutsets outsets = LineOrientationOutsets(writing_mode);
-  if (IsFlippedLinesWritingMode(writing_mode))
-    std::swap(outsets.top_, outsets.bottom_);
-  return outsets;
+String LayoutRectOutsets::ToString() const {
+  return String::Format(
+      "top %s; right %s; bottom %s; left %s", Top().ToString().Ascii().data(),
+      Right().ToString().Ascii().data(), Bottom().ToString().Ascii().data(),
+      Left().ToString().Ascii().data());
 }
 
 }  // namespace blink

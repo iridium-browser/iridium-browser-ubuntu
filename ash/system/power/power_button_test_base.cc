@@ -67,9 +67,7 @@ void PowerButtonTestBase::InitPowerButtonControllerMembers(
   if (initial_tablet_mode_switch_state !=
       chromeos::PowerManagerClient::TabletMode::UNSUPPORTED) {
     SetTabletModeSwitchState(initial_tablet_mode_switch_state);
-    screenshot_controller_ = power_button_test_api_->GetScreenshotController();
   } else {
-    power_button_test_api_->SetTurnScreenOffForTap(false);
     screenshot_controller_ = nullptr;
   }
 }
@@ -84,12 +82,6 @@ void PowerButtonTestBase::SetTabletModeSwitchState(
   screenshot_controller_ = power_button_test_api_->GetScreenshotController();
 }
 
-void PowerButtonTestBase::ForceClamshellPowerButton() {
-  base::CommandLine::ForCurrentProcess()->AppendSwitch(
-      switches::kForceClamshellPowerButton);
-  ResetPowerButtonController();
-}
-
 void PowerButtonTestBase::PressPowerButton() {
   power_button_controller_->PowerButtonEventReceived(true,
                                                      tick_clock_.NowTicks());
@@ -101,15 +93,15 @@ void PowerButtonTestBase::ReleasePowerButton() {
 }
 
 void PowerButtonTestBase::PressKey(ui::KeyboardCode key_code) {
-  GetEventGenerator().PressKey(key_code, ui::EF_NONE);
+  GetEventGenerator()->PressKey(key_code, ui::EF_NONE);
 }
 
 void PowerButtonTestBase::ReleaseKey(ui::KeyboardCode key_code) {
-  GetEventGenerator().ReleaseKey(key_code, ui::EF_NONE);
+  GetEventGenerator()->ReleaseKey(key_code, ui::EF_NONE);
 }
 
 void PowerButtonTestBase::GenerateMouseMoveEvent() {
-  GetEventGenerator().MoveMouseTo(10, 10);
+  GetEventGenerator()->MoveMouseTo(10, 10);
 }
 
 void PowerButtonTestBase::Initialize(

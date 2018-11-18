@@ -5,14 +5,12 @@
 // This module implements the shared functionality for different guestview
 // containers, such as web_view, app_view, etc.
 
-var DocumentNatives = requireNative('document_natives');
 var GuestView = require('guestView').GuestView;
 var GuestViewInternalNatives = requireNative('guest_view_internal');
 var IdGenerator = requireNative('id_generator');
 var MessagingNatives = requireNative('messaging_natives');
 
 function GuestViewContainer(element, viewType) {
-  privates(element).internal = this;
   this.attributes = {};
   this.element = element;
   this.elementAttached = false;
@@ -24,8 +22,7 @@ function GuestViewContainer(element, viewType) {
   this.setupAttributes();
 
   privates(this).internalElement = this.createInternalElement$();
-  this.setupFocusPropagation();
-  var shadowRoot = this.element.createShadowRoot();
+  var shadowRoot = this.element.attachShadow({mode: 'open'});
   shadowRoot.appendChild(privates(this).internalElement);
 
   GuestViewInternalNatives.RegisterView(this.viewInstanceId, this, viewType);
@@ -36,34 +33,6 @@ function GuestViewContainer(element, viewType) {
 // TODO(wjmaclean): Use utils.expose() here instead? Track down other issues
 // of Object inheritance. https://crbug.com/701034
 GuestViewContainer.prototype.__proto__ = null;
-
-// Forward public API methods from |proto| to their internal implementations.
-GuestViewContainer.forwardApiMethods = function(proto, apiMethods) {
-  var createProtoHandler = function(m) {
-    return function(var_args) {
-      var internal = privates(this).internal;
-      return $Function.apply(internal[m], internal, arguments);
-    };
-  };
-  for (var i = 0; apiMethods[i]; ++i) {
-    proto[apiMethods[i]] = createProtoHandler(apiMethods[i]);
-  }
-};
-
-// Registers the browserplugin and guestview as custom elements once the
-// document has loaded.
-GuestViewContainer.registerElement = function(guestViewContainerType) {
-  var useCapture = true;
-  window.addEventListener('readystatechange', function listener(event) {
-    if (document.readyState == 'loading')
-      return;
-
-    registerInternalElement(
-        $String.toLowerCase(guestViewContainerType.VIEW_TYPE));
-    registerGuestViewElement(guestViewContainerType);
-    window.removeEventListener(event.type, listener, useCapture);
-  }, useCapture);
-};
 
 // Create the 'guest' property to track new GuestViews and always listen for
 // their resizes.
@@ -101,16 +70,6 @@ GuestViewContainer.prototype.createInternalElement$ = function() {
 };
 
 GuestViewContainer.prototype.prepareForReattach_ = function() {};
-
-GuestViewContainer.prototype.setupFocusPropagation = function() {
-  if (!this.element.hasAttribute('tabIndex')) {
-    // GuestViewContainer needs a tabIndex in order to be focusable.
-    // TODO(fsamuel): It would be nice to avoid exposing a tabIndex attribute
-    // to allow GuestViewContainer to be focusable.
-    // See http://crbug.com/231664.
-    this.element.setAttribute('tabIndex', -1);
-  }
-};
 
 GuestViewContainer.prototype.focus = function() {
   // Focus the internal element when focus() is called on the GuestView element.
@@ -203,109 +162,6 @@ GuestViewContainer.prototype.willAttachElement = function() {};
 GuestViewContainer.prototype.onElementAttached = function() {};
 GuestViewContainer.prototype.onElementDetached = function() {};
 GuestViewContainer.prototype.setupAttributes = function() {};
-
-// Registers the browser plugin <object> custom element. |viewType| is the
-// name of the specific guestview container (e.g. 'webview').
-function registerInternalElement(viewType) {
-  var proto = $Object.create(HTMLElement.prototype);
-
-  proto.createdCallback = function() {
-    this.setAttribute('type', 'application/browser-plugin');
-    this.setAttribute('id', 'browser-plugin-' + IdGenerator.GetNextId());
-    this.style.width = '100%';
-    this.style.height = '100%';
-  };
-
-  proto.attachedCallback = function() {
-    // Load the plugin immediately.
-    var unused = this.nonExistentAttribute;
-  };
-
-  proto.attributeChangedCallback = function(name, oldValue, newValue) {
-    var internal = privates(this).internal;
-    if (!internal) {
-      return;
-    }
-    internal.handleInternalElementAttributeMutation(name, oldValue, newValue);
-  };
-
-  GuestViewContainer[viewType + 'BrowserPlugin'] =
-      DocumentNatives.RegisterElement(viewType + 'browserplugin',
-                                      {extends: 'object', prototype: proto});
-
-  delete proto.createdCallback;
-  delete proto.attachedCallback;
-  delete proto.detachedCallback;
-  delete proto.attributeChangedCallback;
-};
-
-// Registers the guestview container as a custom element.
-// |guestViewContainerType| is the type of guestview container
-// (e.g. WebViewImpl).
-function registerGuestViewElement(guestViewContainerType) {
-  var proto = $Object.create(HTMLElement.prototype);
-
-  proto.createdCallback = function() {
-    new guestViewContainerType(this);
-  };
-
-  proto.attachedCallback = function() {
-    var internal = privates(this).internal;
-    if (!internal) {
-      return;
-    }
-    internal.elementAttached = true;
-    internal.willAttachElement();
-    internal.onElementAttached();
-  };
-
-  proto.attributeChangedCallback = function(name, oldValue, newValue) {
-    var internal = privates(this).internal;
-    if (!internal || !internal.attributes[name]) {
-      return;
-    }
-
-    // Let the changed attribute handle its own mutation.
-    internal.attributes[name].maybeHandleMutation(oldValue, newValue);
-  };
-
-  proto.detachedCallback = function() {
-    var internal = privates(this).internal;
-    if (!internal) {
-      return;
-    }
-    internal.elementAttached = false;
-    internal.internalInstanceId = 0;
-    internal.guest.destroy();
-    internal.onElementDetached();
-  };
-
-  // Override |focus| to let |internal| handle it.
-  proto.focus = function() {
-    var internal = privates(this).internal;
-    if (!internal) {
-      return;
-    }
-    internal.focus();
-  };
-
-  // Let the specific view type add extra functionality to its custom element
-  // through |proto|.
-  if (guestViewContainerType.setupElement) {
-    guestViewContainerType.setupElement(proto);
-  }
-
-  window[guestViewContainerType.VIEW_TYPE] = DocumentNatives.RegisterElement(
-      $String.toLowerCase(guestViewContainerType.VIEW_TYPE),
-      {prototype: proto});
-
-  // Delete the callbacks so developers cannot call them and produce unexpected
-  // behavior.
-  delete proto.createdCallback;
-  delete proto.attachedCallback;
-  delete proto.detachedCallback;
-  delete proto.attributeChangedCallback;
-}
 
 // Exports.
 exports.$set('GuestViewContainer', GuestViewContainer);

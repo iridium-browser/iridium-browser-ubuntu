@@ -4,11 +4,19 @@
 
 'use strict';
 
-function setupZipArchiver() {
-  // Save the state before suspending the event page, so we can resume it
-  // once new events arrive.
-  chrome.runtime.onSuspend.addListener(unpacker.app.onSuspend);
+if (chrome.test) {
+  chrome.test.onMessage.addListener((msg) => {
+    if (msg.data != 'preloadZip')
+      return;
 
+    console.info('Preloading NaCl module');
+    unpacker.app.loadNaclModule(
+        unpacker.app.DEFAULT_MODULE_NMF, unpacker.app.DEFAULT_MODULE_TYPE);
+  });
+  chrome.test.sendMessage(JSON.stringify({name: 'zipArchiverLoaded'}));
+}
+
+function setupZipArchiver() {
   chrome.fileSystemProvider.onUnmountRequested.addListener(
       unpacker.app.onUnmountRequested);
   chrome.fileSystemProvider.onGetMetadataRequested.addListener(
@@ -21,9 +29,6 @@ function setupZipArchiver() {
       unpacker.app.onCloseFileRequested);
   chrome.fileSystemProvider.onReadFileRequested.addListener(
       unpacker.app.onReadFileRequested);
-
-  // Load the PNaCl module.
-  unpacker.app.loadNaclModule('module.nmf', 'application/x-pnacl');
 
   // Load translations
   unpacker.app.loadStringData();

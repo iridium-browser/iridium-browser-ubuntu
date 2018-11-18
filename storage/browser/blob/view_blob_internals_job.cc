@@ -159,12 +159,15 @@ void ViewBlobInternalsJob::Start() {
                                 weak_factory_.GetWeakPtr()));
 }
 
-bool ViewBlobInternalsJob::IsRedirectResponse(GURL* location,
-                                              int* http_status_code) {
+bool ViewBlobInternalsJob::IsRedirectResponse(
+    GURL* location,
+    int* http_status_code,
+    bool* insecure_scheme_was_upgraded) {
   if (request_->url().has_query()) {
     // Strip the query parameters.
     GURL::Replacements replacements;
     replacements.ClearQuery();
+    *insecure_scheme_was_upgraded = false;
     *location = request_->url().ReplaceComponents(replacements);
     *http_status_code = 307;
     return true;
@@ -177,11 +180,10 @@ void ViewBlobInternalsJob::Kill() {
   weak_factory_.InvalidateWeakPtrs();
 }
 
-int ViewBlobInternalsJob::GetData(
-    std::string* mime_type,
-    std::string* charset,
-    std::string* data,
-    const net::CompletionCallback& callback) const {
+int ViewBlobInternalsJob::GetData(std::string* mime_type,
+                                  std::string* charset,
+                                  std::string* data,
+                                  net::CompletionOnceCallback callback) const {
   mime_type->assign("text/html");
   charset->assign("UTF-8");
 
@@ -196,21 +198,21 @@ std::string ViewBlobInternalsJob::GenerateHTML(
   if (blob_storage_context->registry().blob_map_.empty()) {
     out.append(kEmptyBlobStorageMessage);
   } else {
-    for (auto iter = blob_storage_context->registry().blob_map_.begin();
-         iter != blob_storage_context->registry().blob_map_.end(); ++iter) {
-      AddHTMLBoldText(iter->first, &out);
-      GenerateHTMLForBlobData(*iter->second, iter->second->content_type(),
-                              iter->second->content_disposition(),
-                              iter->second->refcount(), &out);
+    for (const auto& uuid_entry_pair :
+         blob_storage_context->registry().blob_map_) {
+      AddHTMLBoldText(uuid_entry_pair.first, &out);
+      BlobEntry* entry = uuid_entry_pair.second.get();
+      GenerateHTMLForBlobData(*entry, entry->content_type(),
+                              entry->content_disposition(), entry->refcount(),
+                              &out);
     }
     if (!blob_storage_context->registry().url_to_uuid_.empty()) {
       AddHorizontalRule(&out);
-      for (auto iter = blob_storage_context->registry().url_to_uuid_.begin();
-           iter != blob_storage_context->registry().url_to_uuid_.end();
-           ++iter) {
-        AddHTMLBoldText(iter->first.spec(), &out);
+      for (const auto& url_uuid_pair :
+           blob_storage_context->registry().url_to_uuid_) {
+        AddHTMLBoldText(url_uuid_pair.first.spec(), &out);
         StartHTMLList(&out);
-        AddHTMLListItem(kUUID, iter->second, &out);
+        AddHTMLListItem(kUUID, url_uuid_pair.second, &out);
         EndHTMLList(&out);
       }
     }
@@ -273,7 +275,10 @@ void ViewBlobInternalsJob::GenerateHTMLForBlobData(
         break;
       case BlobDataItem::Type::kDiskCacheEntry:
         AddHTMLListItem(kType, "disk cache entry", out);
-        AddHTMLListItem(kURL, item.disk_cache_entry()->GetKey(), out);
+        if (item.disk_cache_entry())
+          AddHTMLListItem(kURL, item.disk_cache_entry()->GetKey(), out);
+        else
+          AddHTMLListItem(kURL, "Broken", out);
         break;
       case BlobDataItem::Type::kBytesDescription:
         AddHTMLListItem(kType, "pending data", out);

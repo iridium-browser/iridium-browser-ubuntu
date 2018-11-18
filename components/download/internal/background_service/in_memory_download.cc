@@ -41,6 +41,7 @@ InMemoryDownloadImpl::InMemoryDownloadImpl(
       io_task_runner_(io_task_runner),
       delegate_(delegate),
       completion_notified_(false),
+      started_(false),
       weak_ptr_factory_(this) {
   DCHECK(!guid_.empty());
 }
@@ -125,11 +126,22 @@ void InMemoryDownloadImpl::OnComplete(bool success) {
 
   // Release download data.
   data_.clear();
+
+  // OnComplete() called without OnResponseStarted(). This will happen when the
+  // request was aborted.
+  if (!started_)
+    OnResponseStarted(GURL(), network::ResourceResponseHead());
+
   NotifyDelegateDownloadComplete();
 }
 
 void InMemoryDownloadImpl::OnRetry(base::OnceClosure start_retry) {
   Reset();
+
+  // The original URL is recorded in this class instead of |loader_|, so when
+  // running retry closure from SimpleUrlLoader, add back the original URL.
+  url_chain_.push_back(request_params_.url);
+
   std::move(start_retry).Run();
 }
 
@@ -179,18 +191,45 @@ void InMemoryDownloadImpl::SendRequest() {
   request->headers = request_params_.request_headers;
   request->load_flags = net::LOAD_DISABLE_CACHE;
 
+  url_chain_.push_back(request_params_.url);
+
   loader_ =
       network::SimpleURLLoader::Create(std::move(request), traffic_annotation_);
+  loader_->SetOnRedirectCallback(base::BindRepeating(
+      &InMemoryDownloadImpl::OnRedirect, weak_ptr_factory_.GetWeakPtr()));
+  loader_->SetOnResponseStartedCallback(
+      base::BindRepeating(&InMemoryDownloadImpl::OnResponseStarted,
+                          weak_ptr_factory_.GetWeakPtr()));
 
   // TODO(xingliu): Use SimpleURLLoader's retry when it won't hit CHECK in
   // SharedURLLoaderFactory.
   loader_->DownloadAsStream(url_loader_factory_, this);
 }
 
+void InMemoryDownloadImpl::OnRedirect(
+    const net::RedirectInfo& redirect_info,
+    const network::ResourceResponseHead& response_head,
+    std::vector<std::string>* to_be_removed_headers) {
+  url_chain_.push_back(redirect_info.new_url);
+}
+
+void InMemoryDownloadImpl::OnResponseStarted(
+    const GURL& final_url,
+    const network::ResourceResponseHead& response_head) {
+  started_ = true;
+  response_headers_ = response_head.headers;
+
+  if (delegate_)
+    delegate_->OnDownloadStarted(this);
+}
+
 void InMemoryDownloadImpl::Reset() {
   data_.clear();
+  url_chain_.clear();
+  response_headers_.reset();
   bytes_downloaded_ = 0u;
   completion_notified_ = false;
+  started_ = false;
   resume_callback_.Reset();
 }
 

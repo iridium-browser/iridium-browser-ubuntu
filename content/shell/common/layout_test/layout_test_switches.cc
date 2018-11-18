@@ -4,9 +4,6 @@
 
 #include "content/shell/common/layout_test/layout_test_switches.h"
 
-#include "base/command_line.h"
-#include "base/strings/string_split.h"
-
 namespace switches {
 
 // Allow access to external pages during layout tests.
@@ -22,9 +19,6 @@ const char kAndroidStdinPort[] = "android-stdin-port";
 // Redirect stdout to the given port. Only supported on Android.
 const char kAndroidStdoutPort[] = "android-stdout-port";
 #endif // defined(OS_ANDROID)
-
-// Check whether all system dependencies for running layout tests are met.
-const char kCheckLayoutTestSysDeps[] = "check-layout-test-sys-deps";
 
 // When specified to "enable-leak-detection" command-line option,
 // causes the leak detector to cause immediate crash when found leak.
@@ -54,12 +48,22 @@ const char kEncodeBinary[] = "encode-binary";
 
 // Request the render trees of pages to be dumped as text once they have
 // finished loading.
-const char kRunLayoutTest[] = "run-layout-test";
+const char kRunWebTests[] = "run-web-tests";
 
 // This makes us disable some web-platform runtime features so that we test
 // content_shell as if it was a stable release. It is only followed when
 // kRunLayoutTest is set. For the features' level, see
 // http://dev.chromium.org/blink/runtime-enabled-features.
 const char kStableReleaseMode[] = "stable-release-mode";
+
+// Test files are in //third_party/blink/web_tests, not in
+// //third_party/WebKit/LayoutTests.
+// TODO(tkent): Remove this flag after the move.
+const char kTestsInBlink[] = "tests-in-blink";
+
+// Enable pixel dumps via "real" surface readbacks, instead of synchronously
+// compositing and reading back pixels.
+const char kEnableDisplayCompositorPixelDump[] =
+    "enable-display-compositor-pixel-dump";
 
 }  // namespace switches

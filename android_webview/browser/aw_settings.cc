@@ -35,9 +35,6 @@ namespace android_webview {
 namespace {
 
 void PopulateFixedRendererPreferences(RendererPreferences* prefs) {
-  prefs->tap_multiple_targets_strategy =
-      content::TAP_MULTIPLE_TARGETS_STRATEGY_NONE;
-
   // TODO(boliu): Deduplicate with chrome/ code.
   CR_DEFINE_STATIC_LOCAL(
       const gfx::FontRenderParams, params,
@@ -54,6 +51,7 @@ void PopulateFixedWebPreferences(WebPreferences* web_prefs) {
   web_prefs->shrinks_standalone_images_to_fit = false;
   web_prefs->should_clear_document_background = false;
   web_prefs->viewport_meta_enabled = true;
+  web_prefs->picture_in_picture_enabled = false;
 }
 
 const void* const kAwSettingsUserDataKey = &kAwSettingsUserDataKey;
@@ -365,8 +363,7 @@ void AwSettings::PopulateWebPreferencesLocked(JNIEnv* env,
   web_prefs->supports_multiple_windows =
       Java_AwSettings_getSupportMultipleWindowsLocked(env, obj);
 
-  web_prefs->plugins_enabled =
-      !Java_AwSettings_getPluginsDisabledLocked(env, obj);
+  web_prefs->plugins_enabled = false;
 
   web_prefs->application_cache_enabled =
       Java_AwSettings_getAppCacheEnabledLocked(env, obj);

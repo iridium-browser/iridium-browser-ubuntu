@@ -29,27 +29,44 @@
 
 #include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
-#include "third_party/blink/public/common/feature_policy/feature_policy.h"
-#include "third_party/blink/public/mojom/net/ip_address_space.mojom-blink.h"
 #include "third_party/blink/public/platform/web_insecure_request_policy.h"
-#include "third_party/blink/public/platform/web_url_request.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/frame/sandbox_flags.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
-#include "third_party/blink/renderer/platform/wtf/text/string_hash.h"
-#include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 #include <memory>
 
 namespace blink {
 
-class SecurityOrigin;
 class ContentSecurityPolicy;
+class FeaturePolicy;
+class SecurityOrigin;
+struct ParsedFeaturePolicyDeclaration;
 
+using ParsedFeaturePolicy = std::vector<ParsedFeaturePolicyDeclaration>;
+
+// Whether to report policy violations when checking whether a feature is
+// enabled.
+enum class ReportOptions { kReportOnFailure, kDoNotReport };
+
+namespace mojom {
+enum class FeaturePolicyFeature : int32_t;
+enum class IPAddressSpace : int32_t;
+}
+
+// Defines the security properties (such as the security origin, content
+// security policy, and other restrictions) of an environment in which
+// script execution or other activity may occur.
+//
+// Mostly 1:1 with ExecutionContext, except that while remote (i.e.,
+// out-of-process) environments do not have an ExecutionContext in the local
+// process (as execution cannot occur locally), they do have a SecurityContext
+// to allow those properties to be queried.
 class CORE_EXPORT SecurityContext : public GarbageCollectedMixin {
  public:
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
   using InsecureNavigationsSet = HashSet<unsigned, WTF::AlreadyHashed>;
   static std::vector<unsigned> SerializeInsecureNavigationSet(
@@ -71,7 +88,12 @@ class CORE_EXPORT SecurityContext : public GarbageCollectedMixin {
   virtual void DidUpdateSecurityOrigin() = 0;
 
   SandboxFlags GetSandboxFlags() const { return sandbox_flags_; }
-  bool IsSandboxed(SandboxFlags mask) const { return sandbox_flags_ & mask; }
+  bool IsSandboxed(SandboxFlags mask) const {
+    return IsSandboxed(mask, sandbox_flags_);
+  }
+  static bool IsSandboxed(SandboxFlags mask, SandboxFlags sandbox_flags) {
+    return sandbox_flags & mask;
+  }
   virtual void EnforceSandboxFlags(SandboxFlags mask);
 
   void SetAddressSpace(mojom::IPAddressSpace space) { address_space_ = space; }
@@ -101,13 +123,24 @@ class CORE_EXPORT SecurityContext : public GarbageCollectedMixin {
   }
 
   FeaturePolicy* GetFeaturePolicy() const { return feature_policy_.get(); }
+  void SetFeaturePolicy(std::unique_ptr<FeaturePolicy> feature_policy);
   void InitializeFeaturePolicy(const ParsedFeaturePolicy& parsed_header,
                                const ParsedFeaturePolicy& container_policy,
                                const FeaturePolicy* parent_feature_policy);
-  void UpdateFeaturePolicyOrigin();
 
-  // Apply the sandbox flag, and also maybe update the security origin
-  // to the newly created unique one with |is_potentially_trustworthy|.
+  // Tests whether the policy-controlled feature is enabled in this frame.
+  // Optionally sends a report to any registered reporting observers or
+  // Report-To endpoints, via ReportFeaturePolicyViolation(), if the feature is
+  // disabled.
+  bool IsFeatureEnabled(
+      mojom::FeaturePolicyFeature,
+      ReportOptions report_on_failure = ReportOptions::kDoNotReport) const;
+  virtual void ReportFeaturePolicyViolation(mojom::FeaturePolicyFeature) const {
+  }
+
+  // Apply the sandbox flag. In addition, if the origin is not already opaque,
+  // the origin is updated to a newly created unique opaque origin, setting the
+  // potentially trustworthy bit from |is_potentially_trustworthy|.
   void ApplySandboxFlags(SandboxFlags mask,
                          bool is_potentially_trustworthy = false);
 

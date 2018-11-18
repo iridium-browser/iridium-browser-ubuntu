@@ -29,25 +29,92 @@
 
 namespace content {
 
-// A holder of a memory-backed buffer and accessors to it.
-class VideoCaptureImpl::ClientBuffer
-    : public base::RefCountedThreadSafe<ClientBuffer> {
- public:
-  ClientBuffer(std::unique_ptr<base::SharedMemory> buffer, size_t buffer_size)
-      : buffer_(std::move(buffer)), buffer_size_(buffer_size) {}
+using VideoFrameBufferHandleType = media::mojom::VideoBufferHandle::Tag;
 
-  base::SharedMemory* buffer() const { return buffer_.get(); }
-  size_t buffer_size() const { return buffer_size_; }
+struct VideoCaptureImpl::BufferContext
+    : public base::RefCountedThreadSafe<BufferContext> {
+ public:
+  explicit BufferContext(media::mojom::VideoBufferHandlePtr buffer_handle)
+      : buffer_type_(buffer_handle->which()), shared_memory_size_(0u) {
+    switch (buffer_type_) {
+      case VideoFrameBufferHandleType::SHARED_BUFFER_HANDLE:
+        InitializeFromSharedMemory(
+            std::move(buffer_handle->get_shared_buffer_handle()));
+        break;
+      case VideoFrameBufferHandleType::READ_ONLY_SHMEM_REGION:
+        InitializeFromReadOnlyShmemRegion(
+            std::move(buffer_handle->get_read_only_shmem_region()));
+        break;
+      case VideoFrameBufferHandleType::SHARED_MEMORY_VIA_RAW_FILE_DESCRIPTOR:
+        NOTREACHED();
+        break;
+      case VideoFrameBufferHandleType::MAILBOX_HANDLES:
+        InitializeFromMailbox(std::move(buffer_handle->get_mailbox_handles()));
+        break;
+    }
+  }
+
+  VideoFrameBufferHandleType buffer_type() const { return buffer_type_; }
+  base::SharedMemory* shared_memory() const { return shared_memory_.get(); }
+  size_t shared_memory_size() const { return shared_memory_size_; }
+  const void* read_only_shmem() const { return read_only_mapping_.memory(); }
+  size_t read_only_shmem_size() const { return read_only_mapping_.size(); }
+  const std::vector<gpu::MailboxHolder>& mailbox_holders() const {
+    return mailbox_holders_;
+  }
 
  private:
-  friend class base::RefCountedThreadSafe<ClientBuffer>;
+  void InitializeFromSharedMemory(mojo::ScopedSharedBufferHandle handle) {
+    DCHECK(handle.is_valid());
+    base::SharedMemoryHandle memory_handle;
+    mojo::UnwrappedSharedMemoryHandleProtection protection;
+    const MojoResult result = mojo::UnwrapSharedMemoryHandle(
+        std::move(handle), &memory_handle, &shared_memory_size_, &protection);
+    DCHECK_EQ(MOJO_RESULT_OK, result);
+    DCHECK_GT(shared_memory_size_, 0u);
 
-  virtual ~ClientBuffer() {}
+    // TODO(https://crbug.com/803136): We should also be able to assert that
+    // the unwrapped handle was shared for read-only mapping. That condition
+    // is not currently guaranteed to be met.
 
-  const std::unique_ptr<base::SharedMemory> buffer_;
-  const size_t buffer_size_;
+    shared_memory_ = std::make_unique<base::SharedMemory>(memory_handle,
+                                                          true /* read_only */);
+    if (!shared_memory_->Map(shared_memory_size_)) {
+      DLOG(ERROR) << "Mapping shared memory failed.";
+      return;
+    }
+  }
 
-  DISALLOW_COPY_AND_ASSIGN(ClientBuffer);
+  void InitializeFromReadOnlyShmemRegion(
+      base::ReadOnlySharedMemoryRegion region) {
+    DCHECK(region.IsValid());
+    read_only_mapping_ = region.Map();
+    DCHECK(read_only_mapping_.IsValid());
+  }
+
+  void InitializeFromMailbox(
+      media::mojom::MailboxBufferHandleSetPtr mailbox_handles) {
+    DCHECK_EQ(media::VideoFrame::kMaxPlanes,
+              mailbox_handles->mailbox_holder.size());
+    mailbox_holders_ = std::move(mailbox_handles->mailbox_holder);
+  }
+
+  friend class base::RefCountedThreadSafe<BufferContext>;
+  virtual ~BufferContext() {}
+
+  VideoFrameBufferHandleType buffer_type_;
+
+  // Only valid for |buffer_type_ == SHARED_BUFFER_HANDLE|.
+  std::unique_ptr<base::SharedMemory> shared_memory_;
+  size_t shared_memory_size_;
+
+  // Only valid for |buffer_type_ == READ_ONLY_SHMEM_REGION|.
+  base::ReadOnlySharedMemoryMapping read_only_mapping_;
+
+  // Only valid for |buffer_type_ == MAILBOX_HANDLES|.
+  std::vector<gpu::MailboxHolder> mailbox_holders_;
+
+  DISALLOW_COPY_AND_ASSIGN(BufferContext);
 };
 
 // Information about a video capture client of ours.
@@ -234,35 +301,16 @@ void VideoCaptureImpl::OnStateChanged(media::mojom::VideoCaptureState state) {
   }
 }
 
-void VideoCaptureImpl::OnBufferCreated(int32_t buffer_id,
-                                       mojo::ScopedSharedBufferHandle handle) {
+void VideoCaptureImpl::OnNewBuffer(
+    int32_t buffer_id,
+    media::mojom::VideoBufferHandlePtr buffer_handle) {
   DVLOG(1) << __func__ << " buffer_id: " << buffer_id;
   DCHECK(io_thread_checker_.CalledOnValidThread());
-  DCHECK(handle.is_valid());
 
-  base::SharedMemoryHandle memory_handle;
-  size_t memory_size = 0;
-  mojo::UnwrappedSharedMemoryHandleProtection protection;
-
-  const MojoResult result = mojo::UnwrapSharedMemoryHandle(
-      std::move(handle), &memory_handle, &memory_size, &protection);
-  DCHECK_EQ(MOJO_RESULT_OK, result);
-  DCHECK_GT(memory_size, 0u);
-
-  // TODO(https://crbug.com/803136): We should also be able to assert that the
-  // unwrapped handle was shared for read-only mapping. That condition is not
-  // currently guaranteed to be met.
-
-  std::unique_ptr<base::SharedMemory> shm(
-      new base::SharedMemory(memory_handle, true /* read_only */));
-  if (!shm->Map(memory_size)) {
-    DLOG(ERROR) << "OnBufferCreated: Map failed.";
-    return;
-  }
   const bool inserted =
       client_buffers_
           .insert(std::make_pair(buffer_id,
-                                 new ClientBuffer(std::move(shm), memory_size)))
+                                 new BufferContext(std::move(buffer_handle))))
           .second;
   DCHECK(inserted);
 }
@@ -273,14 +321,6 @@ void VideoCaptureImpl::OnBufferReady(int32_t buffer_id,
   DCHECK(io_thread_checker_.CalledOnValidThread());
 
   bool consume_buffer = state_ == VIDEO_CAPTURE_STATE_STARTED;
-  if ((info->pixel_format != media::PIXEL_FORMAT_I420 &&
-       info->pixel_format != media::PIXEL_FORMAT_Y16) ||
-      info->storage_type != media::VideoPixelStorage::CPU) {
-    consume_buffer = false;
-    LOG(DFATAL) << "Wrong pixel format or storage, got pixel format:"
-                << VideoPixelFormatToString(info->pixel_format)
-                << ", storage:" << static_cast<int>(info->storage_type);
-  }
   if (!consume_buffer) {
     GetVideoCaptureHost()->ReleaseBuffer(device_id_, buffer_id, -1.0);
     return;
@@ -313,14 +353,67 @@ void VideoCaptureImpl::OnBufferReady(int32_t buffer_id,
 
   const auto& iter = client_buffers_.find(buffer_id);
   DCHECK(iter != client_buffers_.end());
-  scoped_refptr<ClientBuffer> buffer = iter->second;
-  scoped_refptr<media::VideoFrame> frame =
-      media::VideoFrame::WrapExternalSharedMemory(
-          static_cast<media::VideoPixelFormat>(info->pixel_format),
-          info->coded_size, info->visible_rect, info->visible_rect.size(),
-          reinterpret_cast<uint8_t*>(buffer->buffer()->memory()),
-          buffer->buffer_size(), buffer->buffer()->handle(),
-          0 /* shared_memory_offset */, info->timestamp);
+  scoped_refptr<BufferContext> buffer_context = iter->second;
+  scoped_refptr<media::VideoFrame> frame;
+  switch (buffer_context->buffer_type()) {
+    case VideoFrameBufferHandleType::SHARED_BUFFER_HANDLE:
+      if (info->strides) {
+        CHECK(IsYuvPlanar(info->pixel_format) &&
+              (media::VideoFrame::NumPlanes(info->pixel_format) == 3))
+            << "Currently, only YUV formats support custom strides.";
+        uint8_t* y_data =
+            static_cast<uint8_t*>(buffer_context->shared_memory()->memory());
+        uint8_t* u_data =
+            y_data + (media::VideoFrame::Rows(media::VideoFrame::kYPlane,
+                                              info->pixel_format,
+                                              info->coded_size.height()) *
+                      info->strides->stride_by_plane[0]);
+        uint8_t* v_data =
+            u_data + (media::VideoFrame::Rows(media::VideoFrame::kUPlane,
+                                              info->pixel_format,
+                                              info->coded_size.height()) *
+                      info->strides->stride_by_plane[1]);
+        frame = media::VideoFrame::WrapExternalYuvData(
+            info->pixel_format, info->coded_size, info->visible_rect,
+            info->visible_rect.size(), info->strides->stride_by_plane[0],
+            info->strides->stride_by_plane[1],
+            info->strides->stride_by_plane[2], y_data, u_data, v_data,
+            info->timestamp);
+        frame->AddSharedMemoryHandle(buffer_context->shared_memory()->handle());
+      } else {
+        frame = media::VideoFrame::WrapExternalSharedMemory(
+            info->pixel_format, info->coded_size, info->visible_rect,
+            info->visible_rect.size(),
+            static_cast<uint8_t*>(buffer_context->shared_memory()->memory()),
+            buffer_context->shared_memory_size(),
+            buffer_context->shared_memory()->handle(),
+            0 /* shared_memory_offset */, info->timestamp);
+      }
+      break;
+    case VideoFrameBufferHandleType::READ_ONLY_SHMEM_REGION:
+      frame = media::VideoFrame::WrapExternalData(
+          info->pixel_format, info->coded_size, info->visible_rect,
+          info->visible_rect.size(),
+          const_cast<uint8_t*>(
+              static_cast<const uint8_t*>(buffer_context->read_only_shmem())),
+          buffer_context->read_only_shmem_size(), info->timestamp);
+      break;
+    case VideoFrameBufferHandleType::SHARED_MEMORY_VIA_RAW_FILE_DESCRIPTOR:
+      NOTREACHED();
+      break;
+    case VideoFrameBufferHandleType::MAILBOX_HANDLES:
+      gpu::MailboxHolder mailbox_holder_array[media::VideoFrame::kMaxPlanes];
+      CHECK_EQ(media::VideoFrame::kMaxPlanes,
+               buffer_context->mailbox_holders().size());
+      for (int i = 0; i < media::VideoFrame::kMaxPlanes; i++) {
+        mailbox_holder_array[i] = buffer_context->mailbox_holders()[i];
+      }
+      frame = media::VideoFrame::WrapNativeTextures(
+          info->pixel_format, mailbox_holder_array,
+          media::VideoFrame::ReleaseMailboxCB(), info->coded_size,
+          info->visible_rect, info->visible_rect.size(), info->timestamp);
+      break;
+  }
   if (!frame) {
     GetVideoCaptureHost()->ReleaseBuffer(device_id_, buffer_id, -1.0);
     return;
@@ -329,8 +422,8 @@ void VideoCaptureImpl::OnBufferReady(int32_t buffer_id,
   frame->AddDestructionObserver(base::BindOnce(
       &VideoCaptureImpl::DidFinishConsumingFrame, frame->metadata(),
       media::BindToCurrentLoop(base::BindOnce(
-          &VideoCaptureImpl::OnClientBufferFinished, weak_factory_.GetWeakPtr(),
-          buffer_id, std::move(buffer)))));
+          &VideoCaptureImpl::OnAllClientsFinishedConsumingFrame,
+          weak_factory_.GetWeakPtr(), buffer_id, std::move(buffer_context)))));
 
   frame->metadata()->MergeInternalValuesFrom(info->metadata);
 
@@ -351,29 +444,29 @@ void VideoCaptureImpl::OnBufferDestroyed(int32_t buffer_id) {
   }
 }
 
-void VideoCaptureImpl::OnClientBufferFinished(
+void VideoCaptureImpl::OnAllClientsFinishedConsumingFrame(
     int buffer_id,
-    scoped_refptr<ClientBuffer> buffer,
+    scoped_refptr<BufferContext> buffer_context,
     double consumer_resource_utilization) {
   DCHECK(io_thread_checker_.CalledOnValidThread());
 
-// Subtle race note: It's important that the |buffer| argument be
+// Subtle race note: It's important that the |buffer_context| argument be
 // std::move()'ed to this method and never copied. This is so that the caller,
 // DidFinishConsumingFrame(), does not implicitly retain a reference while it
 // is running the trampoline callback on another thread. This is necessary to
-// ensure the reference count on the ClientBuffer will be correct at the time
+// ensure the reference count on the BufferContext will be correct at the time
 // OnBufferDestroyed() is called. http://crbug.com/797851
 #if DCHECK_IS_ON()
-  // The ClientBuffer should have exactly two references to it at this point,
+  // The BufferContext should have exactly two references to it at this point,
   // one is this method's second argument and the other is from
   // |client_buffers_|.
-  DCHECK(!buffer->HasOneRef());
-  ClientBuffer* const buffer_raw_ptr = buffer.get();
-  buffer = nullptr;
+  DCHECK(!buffer_context->HasOneRef());
+  BufferContext* const buffer_raw_ptr = buffer_context.get();
+  buffer_context = nullptr;
   // Now there should be only one reference, from |client_buffers_|.
   DCHECK(buffer_raw_ptr->HasOneRef());
 #else
-  buffer = nullptr;
+  buffer_context = nullptr;
 #endif
 
   GetVideoCaptureHost()->ReleaseBuffer(
@@ -454,7 +547,7 @@ media::mojom::VideoCaptureHost* VideoCaptureImpl::GetVideoCaptureHost() {
   if (!video_capture_host_.get())
     video_capture_host_.Bind(std::move(video_capture_host_info_));
   return video_capture_host_.get();
-};
+}
 
 // static
 void VideoCaptureImpl::DidFinishConsumingFrame(

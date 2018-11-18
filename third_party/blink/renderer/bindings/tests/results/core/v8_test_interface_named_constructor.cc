@@ -8,20 +8,22 @@
 // DO NOT MODIFY!
 
 // clang-format off
-#include "v8_test_interface_named_constructor.h"
+#include "third_party/blink/renderer/bindings/tests/results/core/v8_test_interface_named_constructor.h"
 
 #include "base/memory/scoped_refptr.h"
-#include "bindings/core/v8/exception_state.h"
-#include "bindings/core/v8/idl_types.h"
-#include "bindings/core/v8/native_value_traits_impl.h"
-#include "bindings/core/v8/v8_dom_configuration.h"
-#include "core/dom/document.h"
-#include "core/execution_context/execution_context.h"
-#include "core/frame/local_dom_window.h"
-#include "platform/bindings/runtime_call_stats.h"
-#include "platform/bindings/v8_object_constructor.h"
-#include "platform/bindings/v8_private_property.h"
-#include "platform/wtf/get_ptr.h"
+#include "third_party/blink/renderer/bindings/core/v8/idl_types.h"
+#include "third_party/blink/renderer/bindings/core/v8/native_value_traits_impl.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_dom_configuration.h"
+#include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
+#include "third_party/blink/renderer/platform/bindings/exception_messages.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
+#include "third_party/blink/renderer/platform/bindings/runtime_call_stats.h"
+#include "third_party/blink/renderer/platform/bindings/v8_object_constructor.h"
+#include "third_party/blink/renderer/platform/bindings/v8_per_context_data.h"
+#include "third_party/blink/renderer/platform/bindings/v8_private_property.h"
+#include "third_party/blink/renderer/platform/wtf/get_ptr.h"
 
 namespace blink {
 
@@ -79,8 +81,8 @@ void V8TestInterfaceNamedConstructor::testNamedConstructorConstructorAttributeCo
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wglobal-constructors"
 #endif
-static const V8DOMConfiguration::AttributeConfiguration V8TestInterfaceNamedConstructorLazyDataAttributes[] = {
-    { "testNamedConstructorConstructorAttribute", V8TestInterfaceNamedConstructor::testNamedConstructorConstructorAttributeConstructorGetterCallback, nullptr, static_cast<v8::PropertyAttribute>(v8::DontEnum), V8DOMConfiguration::kOnInstance, V8DOMConfiguration::kCheckHolder, V8DOMConfiguration::kHasSideEffect, V8DOMConfiguration::kAllWorlds },
+static const V8DOMConfiguration::AttributeConfiguration V8TestInterfaceNamedConstructorAttributes[] = {
+    { "testNamedConstructorConstructorAttribute", V8TestInterfaceNamedConstructor::testNamedConstructorConstructorAttributeConstructorGetterCallback, nullptr, static_cast<v8::PropertyAttribute>(v8::DontEnum), V8DOMConfiguration::kOnInstance, V8DOMConfiguration::kCheckHolder, V8DOMConfiguration::kHasSideEffect, V8DOMConfiguration::kReplaceWithDataProperty, V8DOMConfiguration::kAllWorlds },
 };
 #if defined(COMPONENT_BUILD) && defined(WIN32) && defined(__clang__)
 #pragma clang diagnostic pop
@@ -162,7 +164,7 @@ static void V8TestInterfaceNamedConstructorConstructorCallback(const v8::Functio
     defaultNullStringOptionalstringArg = nullptr;
   }
   if (UNLIKELY(numArgsPassed <= 5)) {
-    Document& document = *ToDocument(ToExecutionContext(
+    Document& document = *To<Document>(ToExecutionContext(
         info.NewTarget().As<v8::Object>()->CreationContext()));
     TestInterfaceNamedConstructor* impl = TestInterfaceNamedConstructor::CreateForJSConstructor(document, stringArg, defaultUndefinedOptionalBooleanArg, defaultUndefinedOptionalLongArg, defaultUndefinedOptionalStringArg, defaultNullStringOptionalstringArg, exceptionState);
     if (exceptionState.HadException()) {
@@ -177,7 +179,7 @@ static void V8TestInterfaceNamedConstructorConstructorCallback(const v8::Functio
   if (!optionalStringArg.Prepare())
     return;
 
-  Document& document = *ToDocument(ToExecutionContext(
+  Document& document = *To<Document>(ToExecutionContext(
       info.NewTarget().As<v8::Object>()->CreationContext()));
   TestInterfaceNamedConstructor* impl = TestInterfaceNamedConstructor::CreateForJSConstructor(document, stringArg, defaultUndefinedOptionalBooleanArg, defaultUndefinedOptionalLongArg, defaultUndefinedOptionalStringArg, defaultNullStringOptionalstringArg, optionalStringArg, exceptionState);
   if (exceptionState.HadException()) {
@@ -248,9 +250,9 @@ static void installV8TestInterfaceNamedConstructorTemplate(
   ALLOW_UNUSED_LOCAL(prototypeTemplate);
 
   // Register IDL constants, attributes and operations.
-  V8DOMConfiguration::InstallLazyDataAttributes(
+  V8DOMConfiguration::InstallAttributes(
       isolate, world, instanceTemplate, prototypeTemplate,
-      V8TestInterfaceNamedConstructorLazyDataAttributes, WTF_ARRAY_LENGTH(V8TestInterfaceNamedConstructorLazyDataAttributes));
+      V8TestInterfaceNamedConstructorAttributes, base::size(V8TestInterfaceNamedConstructorAttributes));
 
   // Custom signature
 

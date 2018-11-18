@@ -10,17 +10,16 @@
 #include <vector>
 
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/test_extension_environment.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/views/apps/app_info_dialog/app_info_footer_panel.h"
 #include "chrome/browser/ui/views/apps/app_info_dialog/app_info_header_panel.h"
-#include "chrome/common/extensions/extension_constants.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "chrome/test/base/testing_profile.h"
 #include "extensions/browser/extension_system.h"
+#include "extensions/common/constants.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/views/controls/link.h"
 #include "ui/views/test/scoped_views_test_helper.h"
@@ -165,8 +164,8 @@ class AppInfoDialogViewsTest : public BrowserWithTestWindowTest,
  protected:
   views::Widget* widget_ = nullptr;
   AppInfoDialog* dialog_ = nullptr;  // Owned by |widget_|'s views hierarchy.
-  scoped_refptr<extensions::Extension> extension_;
-  scoped_refptr<extensions::Extension> chrome_app_;
+  scoped_refptr<const extensions::Extension> extension_;
+  scoped_refptr<const extensions::Extension> chrome_app_;
   extensions::TestExtensionEnvironment extension_environment_{
       extensions::TestExtensionEnvironment::Type::
           kInheritExistingTaskEnvironment};

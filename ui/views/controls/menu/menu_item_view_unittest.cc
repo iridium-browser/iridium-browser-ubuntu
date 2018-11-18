@@ -41,6 +41,8 @@ class TestMenuItemView : public MenuItemView {
 
   void AddEmptyMenus() { MenuItemView::AddEmptyMenus(); }
 
+  void SetHasMnemonics(bool has_mnemonics) { has_mnemonics_ = has_mnemonics; }
+
  private:
   DISALLOW_COPY_AND_ASSIGN(TestMenuItemView);
 };
@@ -70,15 +72,14 @@ TEST(MenuItemViewUnitTest, TestMenuItemViewWithFlexibleWidthChild) {
   ASSERT_EQ(flexible_view, submenu->GetMenuItemAt(1));
   gfx::Size flexible_size = flexible_view->GetPreferredSize();
 
-  // The flexible view's "preferred size" should be 1x1...
-  EXPECT_EQ(flexible_size, gfx::Size(1, 1));
+  EXPECT_EQ(1, flexible_size.width());
 
   // ...but it should use whatever space is available to make a square.
   int flex_height = flexible_view->GetHeightForWidth(label_size.width());
   EXPECT_EQ(label_size.width(), flex_height);
 
-  // The submenu should be tall enough to allow for both menu items at the given
-  // width.
+  // The submenu should be tall enough to allow for both menu items at the
+  // given width.
   EXPECT_EQ(label_size.height() + flex_height,
             submenu->GetPreferredSize().height());
 }
@@ -135,16 +136,39 @@ TEST(MenuItemViewUnitTest, TestEmptySubmenuWhenAllChildItemsAreHidden) {
   EXPECT_EQ(2, submenu->child_count());
 
   // Adds any empty menu items to the menu, if needed.
+  EXPECT_FALSE(submenu->HasEmptyMenuItemView());
   root_menu.AddEmptyMenus();
-
+  EXPECT_TRUE(submenu->HasEmptyMenuItemView());
   // Because all of the submenu's children are hidden, an empty menu item should
   // have been added.
   ASSERT_EQ(3, submenu->child_count());
   MenuItemView* empty_item = static_cast<MenuItemView*>(submenu->child_at(0));
   ASSERT_TRUE(empty_item);
+  // Not allowed to add an duplicated empty menu item
+  // if it already has an empty menu item.
+  root_menu.AddEmptyMenus();
+  ASSERT_EQ(3, submenu->child_count());
   ASSERT_EQ(MenuItemView::kEmptyMenuItemViewID, empty_item->id());
   EXPECT_EQ(l10n_util::GetStringUTF16(IDS_APP_MENU_EMPTY_SUBMENU),
             empty_item->title());
+}
+
+TEST(MenuItemViewUnitTest, UseMnemonicOnPlatform) {
+  TestMenuItemView root_menu;
+  views::MenuItemView* item1 =
+      root_menu.AppendMenuItemWithLabel(1, base::ASCIIToUTF16("&Item 1"));
+  views::MenuItemView* item2 =
+      root_menu.AppendMenuItemWithLabel(2, base::ASCIIToUTF16("I&tem 2"));
+
+  root_menu.SetHasMnemonics(true);
+
+  if (MenuConfig::instance().use_mnemonics) {
+    EXPECT_EQ('i', item1->GetMnemonic());
+    EXPECT_EQ('t', item2->GetMnemonic());
+  } else {
+    EXPECT_EQ(0, item1->GetMnemonic());
+    EXPECT_EQ(0, item2->GetMnemonic());
+  }
 }
 
 class MenuItemViewPaintUnitTest : public ViewsTestBase {

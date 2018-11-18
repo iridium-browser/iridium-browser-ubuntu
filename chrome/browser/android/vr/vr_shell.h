@@ -18,28 +18,25 @@
 #include "chrome/browser/ui/page_info/page_info_ui.h"
 #include "chrome/browser/ui/toolbar/chrome_toolbar_model_delegate.h"
 #include "chrome/browser/vr/assets_load_status.h"
-#include "chrome/browser/vr/content_input_delegate.h"
 #include "chrome/browser/vr/exit_vr_prompt_choice.h"
 #include "chrome/browser/vr/metrics/session_metrics_helper.h"
 #include "chrome/browser/vr/model/capturing_state_model.h"
+#include "chrome/browser/vr/platform_ui_input_delegate.h"
 #include "chrome/browser/vr/speech_recognizer.h"
-#include "chrome/browser/vr/ui.h"
 #include "chrome/browser/vr/ui_browser_interface.h"
+#include "chrome/browser/vr/ui_initial_state.h"
 #include "chrome/browser/vr/ui_unsupported_mode.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "device/vr/android/gvr/cardboard_gamepad_data_provider.h"
 #include "device/vr/android/gvr/gvr_gamepad_data_provider.h"
 #include "device/vr/public/mojom/vr_service.mojom.h"
+#include "device/vr/vr_device.h"
 #include "services/device/public/mojom/geolocation_config.mojom.h"
 #include "third_party/gvr-android-sdk/src/libraries/headers/vr/gvr/capi/include/gvr_types.h"
 
 namespace base {
 class Version;
 }  // namespace base
-
-namespace blink {
-class WebInputEvent;
-}  // namespace blink
 
 namespace content {
 class WebContents;
@@ -59,6 +56,9 @@ class VrGLThread;
 class VrInputConnection;
 class VrShellDelegate;
 class VrWebContentsObserver;
+enum class UiTestOperationType;
+enum class UiTestOperationResult;
+struct Assets;
 struct AutocompleteRequest;
 
 // The native instance of the Java VrShell. This class is not threadsafe and
@@ -79,7 +79,10 @@ class VrShell : device::GvrGamepadDataProvider,
           float display_height_meters,
           int display_width_pixels,
           int display_height_pixels,
-          bool pause_content);
+          bool pause_content,
+          bool low_density);
+  bool HasUiFinishedLoading(JNIEnv* env,
+                            const base::android::JavaParamRef<jobject>& obj);
   void SwapContents(JNIEnv* env,
                     const base::android::JavaParamRef<jobject>& obj,
                     const base::android::JavaParamRef<jobject>& web_contents);
@@ -111,7 +114,6 @@ class VrShell : device::GvrGamepadDataProvider,
   base::android::ScopedJavaLocalRef<jobject> GetVrInputConnectionForTesting(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj);
-  void OnFullscreenChanged(bool enabled);
   void OnLoadProgressChanged(JNIEnv* env,
                              const base::android::JavaParamRef<jobject>& obj,
                              double progress);
@@ -128,14 +130,22 @@ class VrShell : device::GvrGamepadDataProvider,
                     const base::android::JavaParamRef<jobject>& obj,
                     jboolean incognito,
                     jint id);
-  void OnContentPaused(bool paused);
   void Navigate(GURL url, NavigationMethod method);
   void NavigateBack();
   void NavigateForward();
   void ReloadTab();
   void OpenNewTab(bool incognito);
+  void SelectTab(int id, bool incognito);
+  void OpenBookmarks();
+  void OpenRecentTabs();
+  void OpenHistory();
+  void OpenDownloads();
+  void OpenShare();
+  void OpenSettings();
+  void CloseTab(int id, bool incognito);
+  void CloseAllTabs();
   void CloseAllIncognitoTabs();
-  void ExitCct();
+  void OpenFeedback();
   void CloseHostedDialog();
   void ToggleCardboardGamepad(bool enabled);
   void ToggleGvrGamepad(bool enabled);
@@ -173,9 +183,7 @@ class VrShell : device::GvrGamepadDataProvider,
   void ContentOverlaySurfaceCreated(jobject surface,
                                     gl::SurfaceTexture* texture);
   void GvrDelegateReady(gvr::ViewerType viewer_type);
-  void SendRequestPresentReply(
-      bool success,
-      device::mojom::VRDisplayFrameTransportOptionsPtr);
+  void SendRequestPresentReply(device::mojom::XRSessionPtr);
 
   void DialogSurfaceCreated(jobject surface, gl::SurfaceTexture* texture);
 
@@ -203,10 +211,9 @@ class VrShell : device::GvrGamepadDataProvider,
   bool HasAudioPermission();
 
   void ClearFocusedElement();
-  void ProcessContentGesture(std::unique_ptr<blink::WebInputEvent> event,
-                             int content_id);
+  void ProcessContentGesture(std::unique_ptr<InputEvent> event, int content_id);
 
-  void ProcessDialogGesture(std::unique_ptr<blink::WebInputEvent> event);
+  void ProcessDialogGesture(std::unique_ptr<InputEvent> event);
 
   void SetAlertDialog(JNIEnv* env,
                       const base::android::JavaParamRef<jobject>& obj,
@@ -216,8 +223,8 @@ class VrShell : device::GvrGamepadDataProvider,
                         const base::android::JavaParamRef<jobject>& obj);
   void SetDialogBufferSize(JNIEnv* env,
                            const base::android::JavaParamRef<jobject>& obj,
-                           float width,
-                           float height);
+                           int width,
+                           int height);
   void SetAlertDialogSize(JNIEnv* env,
                           const base::android::JavaParamRef<jobject>& obj,
                           float width,
@@ -237,10 +244,8 @@ class VrShell : device::GvrGamepadDataProvider,
                    const base::android::JavaParamRef<jobject>& obj);
 
   void ConnectPresentingService(
-      device::mojom::VRSubmitFrameClientPtr submit_client,
-      device::mojom::VRPresentationProviderRequest request,
       device::mojom::VRDisplayInfoPtr display_info,
-      device::mojom::VRRequestPresentOptionsPtr present_options);
+      device::mojom::XRRuntimeSessionOptionsPtr options);
 
   // device::GvrGamepadDataProvider implementation.
   void UpdateGamepadData(device::GvrGamepadData) override;
@@ -270,6 +275,40 @@ class VrShell : device::GvrGamepadDataProvider,
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj);
 
+  void SetUiExpectingActivityForTesting(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj,
+      jint quiescence_timeout_ms);
+
+  void SaveNextFrameBufferToDiskForTesting(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj,
+      jstring filepath_base);
+
+  void WatchElementForVisibilityChangeForTesting(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj,
+      jint element_name,
+      jint timeout_ms);
+
+  void ReportUiOperationResultForTesting(UiTestOperationType action_type,
+                                         UiTestOperationResult result);
+
+  void PerformControllerActionForTesting(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj,
+      jint element_name,
+      jint action_type,
+      jfloat x,
+      jfloat y);
+
+  void PerformKeyboardInputForTesting(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj,
+      jint input_type,
+      jstring input_string);
+  gfx::AcceleratedWidget GetRenderSurface();
+
  private:
   ~VrShell() override;
   void PostToGlThread(const base::Location& from_here, base::OnceClosure task);
@@ -278,8 +317,6 @@ class VrShell : device::GvrGamepadDataProvider,
   void PollCapturingState();
 
   bool HasDaydreamSupport(JNIEnv* env);
-
-  void ExitVrDueToUnsupportedMode(UiUnsupportedMode mode);
 
   content::WebContents* GetNonNativePageWebContents() const;
 
@@ -324,7 +361,9 @@ class VrShell : device::GvrGamepadDataProvider,
   device::mojom::GeolocationConfigPtr geolocation_config_;
 
   base::CancelableClosure poll_capturing_state_task_;
-  CapturingStateModel capturing_state_;
+  CapturingStateModel active_capturing_;
+  CapturingStateModel background_capturing_;
+  CapturingStateModel potential_capturing_;
 
   // Are we currently providing a gamepad factory to the gamepad manager?
   bool gvr_gamepad_source_active_ = false;
@@ -348,9 +387,12 @@ class VrShell : device::GvrGamepadDataProvider,
   gl::SurfaceTexture* overlay_surface_texture_ = nullptr;
   gl::SurfaceTexture* ui_surface_texture_ = nullptr;
 
-  base::Timer waiting_for_assets_component_timer_;
+  base::OneShotTimer waiting_for_assets_component_timer_;
+  bool can_load_new_assets_ = false;
+  bool ui_finished_loading_ = false;
 
-  std::set<int> incognito_tab_ids_;
+  base::WaitableEvent gl_surface_created_event_;
+  gfx::AcceleratedWidget surface_window_ = nullptr;
 
   base::WeakPtrFactory<VrShell> weak_ptr_factory_;
 

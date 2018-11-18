@@ -15,7 +15,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "chrome/browser/media/router/media_router_feature.h"
+#include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/media_router/media_cast_mode.h"
@@ -27,6 +27,8 @@
 #include "chrome/common/media_router/issue.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/policy/core/browser/browser_policy_connector.h"
+#include "components/policy/policy_constants.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_navigation_observer.h"
@@ -184,9 +186,11 @@ void MediaRouterIntegrationBrowserTest::TearDownOnMainThread() {
   test_navigation_observer_.reset();
 }
 
-void MediaRouterIntegrationBrowserTest::SetUpOnMainThread() {
-  MediaRouterBaseBrowserTest::SetUpOnMainThread();
-  scoped_feature_list_.InitAndEnableFeature(kEnableCastLocalMedia);
+void MediaRouterIntegrationBrowserTest::SetUpInProcessBrowserTestFixture() {
+  MediaRouterBaseBrowserTest::SetUpInProcessBrowserTestFixture();
+  EXPECT_CALL(provider_, IsInitializationComplete(testing::_))
+      .WillRepeatedly(testing::Return(true));
+  policy::BrowserPolicyConnector::SetPolicyProviderForTesting(&provider_);
 }
 
 void MediaRouterIntegrationBrowserTest::ExecuteJavaScriptAPI(
@@ -439,7 +443,7 @@ base::FilePath MediaRouterIntegrationBrowserTest::GetResourceFile(
   base::FilePath base_dir;
   // ASSERT_TRUE can only be used in void returning functions.
   // Use CHECK instead in non-void returning functions.
-  CHECK(PathService::Get(base::DIR_MODULE, &base_dir));
+  CHECK(base::PathService::Get(base::DIR_MODULE, &base_dir));
   base::FilePath full_path =
       base_dir.Append(kResourcePath).Append(relative_path);
   {
@@ -688,6 +692,16 @@ void MediaRouterIntegrationBrowserTest::RunReconnectSessionTest() {
   ExecuteJavaScriptAPI(web_contents, kTerminateSessionScript);
 }
 
+void MediaRouterIntegrationBrowserTest::SetEnableMediaRouter(bool enable) {
+  policy::PolicyMap policy;
+  policy.Set(policy::key::kEnableMediaRouter, policy::POLICY_LEVEL_MANDATORY,
+             policy::POLICY_SCOPE_USER, policy::POLICY_SOURCE_CLOUD,
+             std::make_unique<base::Value>(enable), nullptr);
+  provider_.UpdateChromePolicy(policy);
+  base::RunLoop loop;
+  loop.RunUntilIdle();
+}
+
 void MediaRouterIntegrationBrowserTest::RunReconnectSessionSameTabTest() {
   WebContents* web_contents = StartSessionWithTestPageAndChooseSink();
   CheckSessionValidity(web_contents);
@@ -730,9 +744,11 @@ IN_PROC_BROWSER_TEST_F(MediaRouterIntegrationBrowserTest,
   WaitUntilRouteCreated();
 }
 
+// TODO(crbug.com/849216): Disabled due to crashes and timeouts.
+//
 // Tests that creating a route with a local file opens the file in a new tab.
 IN_PROC_BROWSER_TEST_F(MediaRouterIntegrationBrowserTest,
-                       OpenLocalMediaFileInNewTab) {
+                       DISABLED_OpenLocalMediaFileInNewTab) {
   // Start at a tab with content in it, the file will open in a new tab.
   ui_test_utils::NavigateToURL(browser(), GURL("http://google.com"));
   // Make sure there is 1 tab.
@@ -820,7 +836,8 @@ IN_PROC_BROWSER_TEST_F(MediaRouterIntegrationBrowserTest, Fail_SendMessage) {
   RunFailToSendMessageTest();
 }
 
-IN_PROC_BROWSER_TEST_F(MediaRouterIntegrationBrowserTest, Fail_NoProvider) {
+IN_PROC_BROWSER_TEST_F(MediaRouterIntegrationBrowserTest,
+                       DISABLED_Fail_NoProvider) {
   SetTestData(FILE_PATH_LITERAL("no_provider.json"));
   WebContents* web_contents = StartSessionWithTestPageAndChooseSink();
   CheckStartFailed(web_contents, "UnknownError",
@@ -839,8 +856,14 @@ IN_PROC_BROWSER_TEST_F(MediaRouterIntegrationBrowserTest,
   RunReconnectSessionTest();
 }
 
+// Flaky on Linux MSAN. https://crbug.com/840165
+#if defined(OS_LINUX) && defined(MEMORY_SANITIZER)
+#define MAYBE_Fail_ReconnectSession DISABLED_Fail_ReconnectSession
+#else
+#define MAYBE_Fail_ReconnectSession Fail_ReconnectSession
+#endif
 IN_PROC_BROWSER_TEST_F(MediaRouterIntegrationBrowserTest,
-                       Fail_ReconnectSession) {
+                       MAYBE_Fail_ReconnectSession) {
   WebContents* web_contents = StartSessionWithTestPageAndChooseSink();
   CheckSessionValidity(web_contents);
   std::string session_id(GetStartedConnectionId(web_contents));
@@ -891,7 +914,14 @@ Browser* MediaRouterIntegrationIncognitoBrowserTest::browser() {
   return incognito_browser_;
 }
 
-IN_PROC_BROWSER_TEST_F(MediaRouterIntegrationIncognitoBrowserTest, Basic) {
+// Test is flaky on Linux. (https://crbug.com/853167)
+#if defined(OS_LINUX)
+#define MAYBE_Basic DISABLED_Basic
+#else
+#define MAYBE_Basic Basic
+#endif
+IN_PROC_BROWSER_TEST_F(MediaRouterIntegrationIncognitoBrowserTest,
+                       MAYBE_Basic) {
   RunBasicTest();
 }
 

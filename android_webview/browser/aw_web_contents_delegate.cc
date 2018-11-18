@@ -20,13 +20,13 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "components/navigation_interception/intercept_navigation_delegate.h"
+#include "content/public/browser/file_select_listener.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/file_chooser_file_info.h"
-#include "content/public/common/file_chooser_params.h"
 #include "content/public/common/media_stream_request.h"
 #include "jni/AwWebContentsDelegate_jni.h"
 #include "net/base/escape.h"
@@ -36,7 +36,9 @@ using base::android::ConvertUTF16ToJavaString;
 using base::android::ConvertUTF8ToJavaString;
 using base::android::JavaParamRef;
 using base::android::ScopedJavaLocalRef;
-using content::FileChooserParams;
+using blink::mojom::FileChooserFileInfo;
+using blink::mojom::FileChooserFileInfoPtr;
+using blink::mojom::FileChooserParams;
 using content::WebContents;
 
 namespace android_webview {
@@ -88,26 +90,31 @@ void AwWebContentsDelegate::CanDownload(
 
 void AwWebContentsDelegate::RunFileChooser(
     content::RenderFrameHost* render_frame_host,
+    std::unique_ptr<content::FileSelectListener> listener,
     const FileChooserParams& params) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> java_delegate = GetJavaDelegate(env);
-  if (!java_delegate.obj())
+  if (!java_delegate.obj()) {
+    listener->FileSelectionCanceled();
     return;
+  }
 
   int mode_flags = 0;
-  if (params.mode == FileChooserParams::OpenMultiple) {
+  if (params.mode == FileChooserParams::Mode::kOpenMultiple) {
     mode_flags |= kFileChooserModeOpenMultiple;
-  } else if (params.mode == FileChooserParams::UploadFolder) {
+  } else if (params.mode == FileChooserParams::Mode::kUploadFolder) {
     // Folder implies multiple in Chrome.
     mode_flags |= kFileChooserModeOpenMultiple | kFileChooserModeOpenFolder;
-  } else if (params.mode == FileChooserParams::Save) {
+  } else if (params.mode == FileChooserParams::Mode::kSave) {
     // Save not supported, so cancel it.
-    render_frame_host->FilesSelectedInChooser(
-        std::vector<content::FileChooserFileInfo>(), params.mode);
+    listener->FileSelectionCanceled();
     return;
   } else {
-    DCHECK_EQ(FileChooserParams::Open, params.mode);
+    DCHECK_EQ(FileChooserParams::Mode::kOpen, params.mode);
   }
+  DCHECK(!file_select_listener_)
+      << "Multiple concurrent FileChooser requests are not supported.";
+  file_select_listener_ = std::move(listener);
   Java_AwWebContentsDelegate_runFileChooser(
       env, java_delegate, render_frame_host->GetProcess()->GetID(),
       render_frame_host->GetRoutingID(), mode_flags,
@@ -118,15 +125,16 @@ void AwWebContentsDelegate::RunFileChooser(
       params.default_file_name.empty()
           ? nullptr
           : ConvertUTF8ToJavaString(env, params.default_file_name.value()),
-      params.capture);
+      params.use_media_capture);
 }
 
-void AwWebContentsDelegate::AddNewContents(WebContents* source,
-                                           WebContents* new_contents,
-                                           WindowOpenDisposition disposition,
-                                           const gfx::Rect& initial_rect,
-                                           bool user_gesture,
-                                           bool* was_blocked) {
+void AwWebContentsDelegate::AddNewContents(
+    WebContents* source,
+    std::unique_ptr<WebContents> new_contents,
+    WindowOpenDisposition disposition,
+    const gfx::Rect& initial_rect,
+    bool user_gesture,
+    bool* was_blocked) {
   JNIEnv* env = AttachCurrentThread();
 
   bool is_dialog = disposition == WindowOpenDisposition::NEW_POPUP;
@@ -144,17 +152,22 @@ void AwWebContentsDelegate::AddNewContents(WebContents* source,
     // it. The source AwContents takes ownership of the new WebContents
     // until then, and when the callback is made we will swap the WebContents
     // out into the new AwContents.
+    WebContents* raw_new_contents = new_contents.get();
     AwContents::FromWebContents(source)->SetPendingWebContentsForPopup(
-        base::WrapUnique(new_contents));
+        std::move(new_contents));
+    // It's possible that SetPendingWebContentsForPopup deletes |new_contents|,
+    // but it only does so asynchronously, so it's safe to use a raw pointer
+    // here.
     // Hide the WebContents for the pop up now, we will show it again
     // when the user calls us back with an AwContents to use to show it.
-    new_contents->WasHidden();
+    raw_new_contents->WasHidden();
   } else {
     // The embedder has forgone their chance to display this popup
     // window, so we're done with the WebContents now. We use
     // DeleteSoon as WebContentsImpl may call methods on |new_contents|
     // after this method returns.
-    base::ThreadTaskRunnerHandle::Get()->DeleteSoon(FROM_HERE, new_contents);
+    base::ThreadTaskRunnerHandle::Get()->DeleteSoon(FROM_HERE,
+                                                    std::move(new_contents));
   }
 
   if (was_blocked) {
@@ -226,37 +239,52 @@ bool AwWebContentsDelegate::ShouldResumeRequestsForCreatedWindow() {
 void AwWebContentsDelegate::RequestMediaAccessPermission(
     WebContents* web_contents,
     const content::MediaStreamRequest& request,
-    const content::MediaResponseCallback& callback) {
+    content::MediaResponseCallback callback) {
   AwContents* aw_contents = AwContents::FromWebContents(web_contents);
   if (!aw_contents) {
-    callback.Run(content::MediaStreamDevices(),
-                 content::MEDIA_DEVICE_FAILED_DUE_TO_SHUTDOWN,
-                 std::unique_ptr<content::MediaStreamUI>());
+    std::move(callback).Run(content::MediaStreamDevices(),
+                            content::MEDIA_DEVICE_FAILED_DUE_TO_SHUTDOWN,
+                            std::unique_ptr<content::MediaStreamUI>());
     return;
   }
   aw_contents->GetPermissionRequestHandler()->SendRequest(
       std::unique_ptr<AwPermissionRequestDelegate>(
-          new MediaAccessPermissionRequest(request, callback)));
+          new MediaAccessPermissionRequest(request, std::move(callback))));
 }
 
 void AwWebContentsDelegate::EnterFullscreenModeForTab(
     content::WebContents* web_contents,
-    const GURL& origin) {
-  WebContentsDelegateAndroid::EnterFullscreenModeForTab(web_contents, origin);
+    const GURL& origin,
+    const blink::WebFullscreenOptions& options) {
+  WebContentsDelegateAndroid::EnterFullscreenModeForTab(web_contents, origin,
+                                                        options);
   is_fullscreen_ = true;
-  web_contents->GetRenderViewHost()->GetWidget()->WasResized();
+  web_contents->GetRenderViewHost()->GetWidget()->SynchronizeVisualProperties();
 }
 
 void AwWebContentsDelegate::ExitFullscreenModeForTab(
     content::WebContents* web_contents) {
   WebContentsDelegateAndroid::ExitFullscreenModeForTab(web_contents);
   is_fullscreen_ = false;
-  web_contents->GetRenderViewHost()->GetWidget()->WasResized();
+  web_contents->GetRenderViewHost()->GetWidget()->SynchronizeVisualProperties();
 }
 
 bool AwWebContentsDelegate::IsFullscreenForTabOrPending(
     const content::WebContents* web_contents) const {
   return is_fullscreen_;
+}
+
+void AwWebContentsDelegate::UpdateUserGestureCarryoverInfo(
+    content::WebContents* web_contents) {
+  auto* intercept_navigation_delegate =
+      navigation_interception::InterceptNavigationDelegate::Get(web_contents);
+  if (intercept_navigation_delegate)
+    intercept_navigation_delegate->UpdateLastUserGestureCarryoverTimestamp();
+}
+
+std::unique_ptr<content::FileSelectListener>
+AwWebContentsDelegate::TakeFileSelectListener() {
+  return std::move(file_select_listener_);
 }
 
 static void JNI_AwWebContentsDelegate_FilesSelectedInChooser(
@@ -269,17 +297,29 @@ static void JNI_AwWebContentsDelegate_FilesSelectedInChooser(
     const JavaParamRef<jobjectArray>& display_names) {
   content::RenderFrameHost* rfh =
       content::RenderFrameHost::FromID(process_id, render_id);
-  if (!rfh)
+  auto* web_contents = WebContents::FromRenderFrameHost(rfh);
+  if (!web_contents)
     return;
+  auto* delegate =
+      static_cast<AwWebContentsDelegate*>(web_contents->GetDelegate());
+  if (!delegate)
+    return;
+  std::unique_ptr<content::FileSelectListener> listener =
+      delegate->TakeFileSelectListener();
+
+  if (!file_paths.obj()) {
+    listener->FileSelectionCanceled();
+    return;
+  }
 
   std::vector<std::string> file_path_str;
-  std::vector<std::string> display_name_str;
+  std::vector<base::string16> display_name_str;
   // Note file_paths maybe NULL, but this will just yield a zero-length vector.
   base::android::AppendJavaStringArrayToStringVector(env, file_paths,
                                                      &file_path_str);
   base::android::AppendJavaStringArrayToStringVector(env, display_names,
                                                      &display_name_str);
-  std::vector<content::FileChooserFileInfo> files;
+  std::vector<FileChooserFileInfoPtr> files;
   files.reserve(file_path_str.size());
   for (size_t i = 0; i < file_path_str.size(); ++i) {
     GURL url(file_path_str[i]);
@@ -292,23 +332,23 @@ static void JNI_AwWebContentsDelegate_FilesSelectedInChooser(
                                   net::UnescapeRule::
                                       URL_SPECIAL_CHARS_EXCEPT_PATH_SEPARATORS)
             : file_path_str[i]);
-    content::FileChooserFileInfo file_info;
-    file_info.file_path = path;
+    auto file_info = blink::mojom::NativeFileInfo::New();
+    file_info->file_path = path;
     if (!display_name_str[i].empty())
-      file_info.display_name = display_name_str[i];
-    files.push_back(file_info);
+      file_info->display_name = display_name_str[i];
+    files.push_back(FileChooserFileInfo::NewNativeFile(std::move(file_info)));
   }
   FileChooserParams::Mode mode;
   if (mode_flags & kFileChooserModeOpenFolder) {
-    mode = FileChooserParams::UploadFolder;
+    mode = FileChooserParams::Mode::kUploadFolder;
   } else if (mode_flags & kFileChooserModeOpenMultiple) {
-    mode = FileChooserParams::OpenMultiple;
+    mode = FileChooserParams::Mode::kOpenMultiple;
   } else {
-    mode = FileChooserParams::Open;
+    mode = FileChooserParams::Mode::kOpen;
   }
   DVLOG(0) << "File Chooser result: mode = " << mode
            << ", file paths = " << base::JoinString(file_path_str, ":");
-  rfh->FilesSelectedInChooser(files, mode);
+  listener->FileSelected(std::move(files), mode);
 }
 
 }  // namespace android_webview

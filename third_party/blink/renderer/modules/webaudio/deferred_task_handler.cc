@@ -23,12 +23,14 @@
  * DAMAGE.
  */
 
+#include "third_party/blink/renderer/modules/webaudio/deferred_task_handler.h"
+
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_node.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_node_output.h"
-#include "third_party/blink/renderer/modules/webaudio/deferred_task_handler.h"
 #include "third_party/blink/renderer/modules/webaudio/offline_audio_context.h"
 #include "third_party/blink/renderer/platform/cross_thread_functional.h"
+#include "third_party/blink/renderer/platform/scheduler/public/thread.h"
 #include "third_party/blink/renderer/platform/web_task_runner.h"
 
 namespace blink {
@@ -66,16 +68,6 @@ void DeferredTaskHandler::OfflineLock() {
   context_graph_mutex_.lock();
 }
 
-bool DeferredTaskHandler::IsGraphOwner() {
-#if DCHECK_IS_ON()
-  return context_graph_mutex_.Locked();
-#else
-  // The method is only used inside of DCHECK() so it must be no-op in the
-  // release build. Returning false so we can catch when it happens.
-  return false;
-#endif
-}
-
 void DeferredTaskHandler::AddDeferredBreakConnection(AudioHandler& node) {
   DCHECK(IsAudioThread());
   deferred_break_connection_list_.push_back(&node);
@@ -83,7 +75,7 @@ void DeferredTaskHandler::AddDeferredBreakConnection(AudioHandler& node) {
 
 void DeferredTaskHandler::BreakConnections() {
   DCHECK(IsAudioThread());
-  DCHECK(IsGraphOwner());
+  AssertGraphOwner();
 
   for (unsigned i = 0; i < deferred_break_connection_list_.size(); ++i)
     deferred_break_connection_list_[i]->BreakConnectionWithLock();
@@ -92,39 +84,38 @@ void DeferredTaskHandler::BreakConnections() {
 
 void DeferredTaskHandler::MarkSummingJunctionDirty(
     AudioSummingJunction* summing_junction) {
-  DCHECK(IsGraphOwner());
+  AssertGraphOwner();
   dirty_summing_junctions_.insert(summing_junction);
 }
 
 void DeferredTaskHandler::RemoveMarkedSummingJunction(
     AudioSummingJunction* summing_junction) {
   DCHECK(IsMainThread());
-  GraphAutoLocker locker(*this);
+  AssertGraphOwner();
   dirty_summing_junctions_.erase(summing_junction);
 }
 
 void DeferredTaskHandler::MarkAudioNodeOutputDirty(AudioNodeOutput* output) {
-  DCHECK(IsGraphOwner());
   DCHECK(IsMainThread());
+  AssertGraphOwner();
   dirty_audio_node_outputs_.insert(output);
 }
 
 void DeferredTaskHandler::RemoveMarkedAudioNodeOutput(AudioNodeOutput* output) {
-  DCHECK(IsGraphOwner());
   DCHECK(IsMainThread());
+  AssertGraphOwner();
   dirty_audio_node_outputs_.erase(output);
 }
 
 void DeferredTaskHandler::HandleDirtyAudioSummingJunctions() {
-  DCHECK(IsGraphOwner());
-
+  AssertGraphOwner();
   for (AudioSummingJunction* junction : dirty_summing_junctions_)
     junction->UpdateRenderingState();
   dirty_summing_junctions_.clear();
 }
 
 void DeferredTaskHandler::HandleDirtyAudioNodeOutputs() {
-  DCHECK(IsGraphOwner());
+  AssertGraphOwner();
 
   HashSet<AudioNodeOutput*> dirty_outputs;
   dirty_audio_node_outputs_.swap(dirty_outputs);
@@ -136,43 +127,47 @@ void DeferredTaskHandler::HandleDirtyAudioNodeOutputs() {
     output->UpdateRenderingState();
 }
 
-void DeferredTaskHandler::AddAutomaticPullNode(AudioHandler* node) {
-  DCHECK(IsGraphOwner());
+void DeferredTaskHandler::AddAutomaticPullNode(
+    scoped_refptr<AudioHandler> node) {
+  AssertGraphOwner();
 
-  if (!automatic_pull_nodes_.Contains(node)) {
-    automatic_pull_nodes_.insert(node);
-    automatic_pull_nodes_need_updating_ = true;
+  if (!automatic_pull_handlers_.Contains(node)) {
+    automatic_pull_handlers_.insert(node);
+    automatic_pull_handlers_need_updating_ = true;
   }
 }
 
-void DeferredTaskHandler::RemoveAutomaticPullNode(AudioHandler* node) {
-  DCHECK(IsGraphOwner());
+void DeferredTaskHandler::RemoveAutomaticPullNode(
+    scoped_refptr<AudioHandler> node) {
+  AssertGraphOwner();
 
-  if (automatic_pull_nodes_.Contains(node)) {
-    automatic_pull_nodes_.erase(node);
-    automatic_pull_nodes_need_updating_ = true;
+  if (automatic_pull_handlers_.Contains(node)) {
+    automatic_pull_handlers_.erase(node);
+    automatic_pull_handlers_need_updating_ = true;
   }
 }
 
 void DeferredTaskHandler::UpdateAutomaticPullNodes() {
-  DCHECK(IsGraphOwner());
+  AssertGraphOwner();
 
-  if (automatic_pull_nodes_need_updating_) {
-    CopyToVector(automatic_pull_nodes_, rendering_automatic_pull_nodes_);
-    automatic_pull_nodes_need_updating_ = false;
+  if (automatic_pull_handlers_need_updating_) {
+    CopyToVector(automatic_pull_handlers_, rendering_automatic_pull_handlers_);
+    automatic_pull_handlers_need_updating_ = false;
   }
 }
 
 void DeferredTaskHandler::ProcessAutomaticPullNodes(size_t frames_to_process) {
   DCHECK(IsAudioThread());
 
-  for (unsigned i = 0; i < rendering_automatic_pull_nodes_.size(); ++i)
-    rendering_automatic_pull_nodes_[i]->ProcessIfNecessary(frames_to_process);
+  for (unsigned i = 0; i < rendering_automatic_pull_handlers_.size(); ++i) {
+    rendering_automatic_pull_handlers_[i]->ProcessIfNecessary(
+        frames_to_process);
+  }
 }
 
 void DeferredTaskHandler::AddTailProcessingHandler(
     scoped_refptr<AudioHandler> handler) {
-  DCHECK(IsGraphOwner());
+  AssertGraphOwner();
 
   if (!tail_processing_handlers_.Contains(handler)) {
 #if DEBUG_AUDIONODE_REFERENCES > 1
@@ -185,12 +180,12 @@ void DeferredTaskHandler::AddTailProcessingHandler(
 void DeferredTaskHandler::RemoveTailProcessingHandler(
     scoped_refptr<AudioHandler> handler,
     bool disable_outputs) {
-  DCHECK(IsGraphOwner());
+  AssertGraphOwner();
 
   size_t index = tail_processing_handlers_.Find(handler);
   if (index != kNotFound) {
 #if DEBUG_AUDIONODE_REFERENCES > 1
-    handler->RemoveTailProcessingDebug();
+    handler->RemoveTailProcessingDebug(disable_outputs);
 #endif
 
     if (disable_outputs) {
@@ -199,6 +194,19 @@ void DeferredTaskHandler::RemoveTailProcessingHandler(
       finished_tail_processing_handlers_.push_back(handler);
     }
     tail_processing_handlers_.EraseAt(index);
+
+    return;
+  }
+
+  // Check finished tail handlers and remove this handler from the list so that
+  // we don't disable outputs later when these are processed.
+  index = finished_tail_processing_handlers_.Find(handler);
+  if (index != kNotFound) {
+#if DEBUG_AUDIONODE_REFERENCES > 1
+    handler->RemoveTailProcessingDebug(disable_outputs);
+#endif
+    finished_tail_processing_handlers_.EraseAt(index);
+    return;
   }
 }
 
@@ -221,59 +229,54 @@ void DeferredTaskHandler::UpdateTailProcessingHandlers() {
 }
 
 void DeferredTaskHandler::AddChangedChannelCountMode(AudioHandler* node) {
-  DCHECK(IsGraphOwner());
   DCHECK(IsMainThread());
+  AssertGraphOwner();
   deferred_count_mode_change_.insert(node);
 }
 
 void DeferredTaskHandler::RemoveChangedChannelCountMode(AudioHandler* node) {
-  DCHECK(IsGraphOwner());
-
+  AssertGraphOwner();
   deferred_count_mode_change_.erase(node);
 }
 
 void DeferredTaskHandler::AddChangedChannelInterpretation(AudioHandler* node) {
-  DCHECK(IsGraphOwner());
   DCHECK(IsMainThread());
+  AssertGraphOwner();
   deferred_channel_interpretation_change_.insert(node);
 }
 
 void DeferredTaskHandler::RemoveChangedChannelInterpretation(
     AudioHandler* node) {
-  DCHECK(IsGraphOwner());
-
+  AssertGraphOwner();
   deferred_channel_interpretation_change_.erase(node);
 }
 
 void DeferredTaskHandler::UpdateChangedChannelCountMode() {
-  DCHECK(IsGraphOwner());
-
+  AssertGraphOwner();
   for (AudioHandler* node : deferred_count_mode_change_)
     node->UpdateChannelCountMode();
   deferred_count_mode_change_.clear();
 }
 
 void DeferredTaskHandler::UpdateChangedChannelInterpretation() {
-  DCHECK(IsGraphOwner());
-
+  AssertGraphOwner();
   for (AudioHandler* node : deferred_channel_interpretation_change_)
     node->UpdateChannelInterpretation();
   deferred_channel_interpretation_change_.clear();
 }
 
-DeferredTaskHandler::DeferredTaskHandler()
-    : automatic_pull_nodes_need_updating_(false), audio_thread_(0) {}
+DeferredTaskHandler::DeferredTaskHandler(
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner)
+    : automatic_pull_handlers_need_updating_(false),
+      task_runner_(std::move(task_runner)),
+      audio_thread_(0) {}
 
-scoped_refptr<DeferredTaskHandler> DeferredTaskHandler::Create() {
-  return base::AdoptRef(new DeferredTaskHandler());
+scoped_refptr<DeferredTaskHandler> DeferredTaskHandler::Create(
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
+  return base::AdoptRef(new DeferredTaskHandler(std::move(task_runner)));
 }
 
-DeferredTaskHandler::~DeferredTaskHandler() {
-  DCHECK(!automatic_pull_nodes_.size());
-  if (automatic_pull_nodes_need_updating_)
-    rendering_automatic_pull_nodes_.resize(automatic_pull_nodes_.size());
-  DCHECK(!rendering_automatic_pull_nodes_.size());
-}
+DeferredTaskHandler::~DeferredTaskHandler() = default;
 
 void DeferredTaskHandler::HandleDeferredTasks() {
   UpdateChangedChannelCountMode();
@@ -312,14 +315,14 @@ void DeferredTaskHandler::AddRenderingOrphanHandler(
 }
 
 void DeferredTaskHandler::RequestToDeleteHandlersOnMainThread() {
-  DCHECK(IsGraphOwner());
   DCHECK(IsAudioThread());
+  AssertGraphOwner();
   if (rendering_orphan_handlers_.IsEmpty())
     return;
   deletable_orphan_handlers_.AppendVector(rendering_orphan_handlers_);
   rendering_orphan_handlers_.clear();
   PostCrossThreadTask(
-      *Platform::Current()->MainThread()->GetTaskRunner(), FROM_HERE,
+      *task_runner_, FROM_HERE,
       CrossThreadBind(&DeferredTaskHandler::DeleteHandlersOnMainThread,
                       scoped_refptr<DeferredTaskHandler>(this)));
 }
@@ -337,6 +340,8 @@ void DeferredTaskHandler::ClearHandlersToBeDeleted() {
   tail_processing_handlers_.clear();
   rendering_orphan_handlers_.clear();
   deletable_orphan_handlers_.clear();
+  automatic_pull_handlers_.clear();
+  rendering_automatic_pull_handlers_.clear();
 }
 
 void DeferredTaskHandler::SetAudioThreadToCurrentThread() {
@@ -351,7 +356,12 @@ void DeferredTaskHandler::DisableOutputsForTailProcessing() {
   // disable their outputs to indicate to downstream nodes that they're done.
   // This has to be done in the main thread because DisableOutputs() can cause
   // summing juctions to go away, which must be done on the main thread.
-  for (auto& handler : finished_tail_processing_handlers_) {
+  for (auto handler : finished_tail_processing_handlers_) {
+#if DEBUG_AUDIONODE_REFERENCES > 1
+    fprintf(stderr, "[%16p]: %16p: %2d: DisableOutputsForTailProcessing @%g\n",
+            handler->Context(), handler.get(), handler->GetNodeType(),
+            handler->Context()->currentTime());
+#endif
     handler->DisableOutputs();
   }
   finished_tail_processing_handlers_.clear();

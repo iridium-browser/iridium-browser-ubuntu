@@ -7,6 +7,11 @@
 
 #include "src/objects/arguments.h"
 
+#include "src/contexts-inl.h"
+#include "src/isolate-inl.h"
+#include "src/objects-inl.h"
+#include "src/objects/fixed-array-inl.h"
+
 // Has to be the last include (doesn't have include guards):
 #include "src/objects/object-macros.h"
 
@@ -18,8 +23,6 @@ CAST_ACCESSOR(JSArgumentsObject)
 CAST_ACCESSOR(SloppyArgumentsElements)
 
 SMI_ACCESSORS(AliasedArgumentsEntry, aliased_context_slot, kAliasedContextSlot)
-
-TYPE_CHECKER(JSArgumentsObject, JS_ARGUMENTS_TYPE)
 
 Context* SloppyArgumentsElements::context() {
   return Context::cast(get(kContextIndex));
@@ -60,7 +63,8 @@ bool JSSloppyArgumentsObject::GetSloppyArgumentsLength(Isolate* isolate,
     return false;
   }
   DCHECK(object->HasFastElements() || object->HasFastArgumentsElements());
-  Object* len_obj = object->InObjectPropertyAt(JSArgumentsObject::kLengthIndex);
+  Object* len_obj =
+      object->InObjectPropertyAt(JSArgumentsObjectWithLength::kLengthIndex);
   if (!len_obj->IsSmi()) return false;
   *out = Max(0, Smi::ToInt(len_obj));
 

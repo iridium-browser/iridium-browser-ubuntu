@@ -24,9 +24,11 @@ class VIZ_SERVICE_EXPORT OverlayStrategyUnderlayCast
   ~OverlayStrategyUnderlayCast() override;
 
   bool Attempt(const SkMatrix44& output_color_matrix,
-               cc::DisplayResourceProvider* resource_provider,
+               const OverlayProcessor::FilterOperationsMap&
+                   render_pass_background_filters,
+               DisplayResourceProvider* resource_provider,
                RenderPass* render_pass,
-               cc::OverlayCandidateList* candidate_list,
+               OverlayCandidateList* candidate_list,
                std::vector<gfx::Rect>* content_bounds) override;
 
   // Callback that's made whenever an overlay quad is processed in the
@@ -36,7 +38,12 @@ class VIZ_SERVICE_EXPORT OverlayStrategyUnderlayCast
       base::RepeatingCallback<void(const gfx::RectF&, gfx::OverlayTransform)>;
   static void SetOverlayCompositedCallback(const OverlayCompositedCallback& cb);
 
+  OverlayProcessor::StrategyType GetUMAEnum() const override;
+
  private:
+  // Keep track if an overlay is being used on the previous frame.
+  bool is_using_overlay_ = false;
+
   DISALLOW_COPY_AND_ASSIGN(OverlayStrategyUnderlayCast);
 };
 

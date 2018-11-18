@@ -151,11 +151,6 @@ binding.registerCustomHook(function(bindingsAPI) {
     fileManagerPrivateInternal.getFileTasks(urls, callback);
   });
 
-  apiFunctions.setHandleRequest('getShareUrl', function(entry, callback) {
-    var url = fileManagerPrivateNatives.GetEntryURL(entry);
-    fileManagerPrivateInternal.getShareUrl(url, callback);
-  });
-
   apiFunctions.setHandleRequest('getDownloadUrl', function(entry, callback) {
     var url = fileManagerPrivateNatives.GetEntryURL(entry);
     fileManagerPrivateInternal.getDownloadUrl(url, callback);
@@ -220,6 +215,35 @@ binding.registerCustomHook(function(bindingsAPI) {
         return GetExternalFileEntry(description);
       }));
     });
+  });
+
+  apiFunctions.setHandleRequest(
+      'sharePathWithCrostini', function(entry, callback) {
+        const url = fileManagerPrivateNatives.GetEntryURL(entry);
+        fileManagerPrivateInternal.sharePathWithCrostini(
+            url, callback);
+      });
+
+  apiFunctions.setHandleRequest(
+      'getCrostiniSharedPaths', function(callback) {
+        fileManagerPrivateInternal.getCrostiniSharedPaths(
+            function(entryDescriptions) {
+              callback(entryDescriptions.map(function(description) {
+                return GetExternalFileEntry(description);
+              }));
+            });
+      });
+
+  apiFunctions.setHandleRequest('installLinuxPackage', function(
+        entry, callback) {
+    var url = fileManagerPrivateNatives.GetEntryURL(entry);
+    fileManagerPrivateInternal.installLinuxPackage(url, callback);
+  });
+
+  apiFunctions.setHandleRequest('getThumbnail', function(
+        entry, cropToSquare, callback) {
+    var url = fileManagerPrivateNatives.GetEntryURL(entry);
+    fileManagerPrivateInternal.getThumbnail(url, cropToSquare, callback);
   });
 });
 

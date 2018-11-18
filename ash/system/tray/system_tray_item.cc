@@ -14,7 +14,8 @@
 
 namespace ash {
 
-SystemTrayItem::SystemTrayItem(SystemTray* system_tray, UmaType uma_type)
+SystemTrayItem::SystemTrayItem(SystemTray* system_tray,
+                               SystemTrayItemUmaType uma_type)
     : system_tray_(system_tray), uma_type_(uma_type), restore_focus_(false) {}
 
 SystemTrayItem::~SystemTrayItem() = default;
@@ -71,6 +72,10 @@ bool SystemTrayItem::IsUnifiedBubbleShown() {
                                                        ->GetStatusAreaWidget()
                                                        ->unified_system_tray()
                                                        ->IsBubbleShown();
+}
+
+views::View* SystemTrayItem::GetItemToRestoreFocusTo() {
+  return nullptr;
 }
 
 }  // namespace ash

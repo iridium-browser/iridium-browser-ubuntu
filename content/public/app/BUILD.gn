@@ -22,6 +22,7 @@
 
 import("//build/config/chrome_build.gni")
 import("//build/config/ui.gni")
+import("//chromeos/assistant/assistant.gni")
 import("//services/service_manager/public/service_manifest.gni")
 import("//tools/v8_context_snapshot/v8_context_snapshot.gni")
 import("//ui/base/ui_features.gni")
@@ -189,6 +190,7 @@ service_manifest("packaged_services_manifest") {
     "//services/audio:manifest",
     "//services/data_decoder:manifest",
     "//services/device:manifest",
+    "//services/media_session:manifest",
     "//services/metrics:manifest",
     "//services/network:manifest",
     "//services/resource_coordinator:manifest",
@@ -198,15 +200,23 @@ service_manifest("packaged_services_manifest") {
     "//services/viz:manifest",
   ]
 
-  if (enable_mus) {
-    packaged_services += [ "//services/ui:manifest" ]
+  if (is_linux) {
+    packaged_services += [ "//components/services/font:manifest" ]
+  }
+
+  if (enable_cros_libassistant) {
+    packaged_services +=
+        [ "//chromeos/services/assistant/audio_decoder:manifest" ]
   }
 }
 
 service_manifest("browser_manifest") {
   name = "content_browser"
   source = "mojo/content_browser_manifest.json"
-  packaged_services = [ "//services/file:manifest" ]
+  packaged_services = [
+    "//services/content:manifest",
+    "//services/file:manifest",
+  ]
 }
 
 service_manifest("gpu_manifest") {

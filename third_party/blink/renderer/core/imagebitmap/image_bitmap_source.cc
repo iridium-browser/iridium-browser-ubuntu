@@ -17,8 +17,9 @@ ScriptPromise ImageBitmapSource::FulfillImageBitmap(ScriptState* script_state,
   if (image_bitmap && image_bitmap->BitmapImage()) {
     resolver->Resolve(image_bitmap);
   } else {
-    resolver->Reject(DOMException::Create(
-        kInvalidStateError, "The ImageBitmap could not be allocated."));
+    resolver->Reject(
+        DOMException::Create(DOMExceptionCode::kInvalidStateError,
+                             "The ImageBitmap could not be allocated."));
   }
   return promise;
 }
@@ -26,7 +27,7 @@ ScriptPromise ImageBitmapSource::FulfillImageBitmap(ScriptState* script_state,
 ScriptPromise ImageBitmapSource::CreateImageBitmap(
     ScriptState* script_state,
     EventTarget& event_target,
-    Optional<IntRect> crop_rect,
+    base::Optional<IntRect> crop_rect,
     const ImageBitmapOptions& options) {
   return ScriptPromise();
 }

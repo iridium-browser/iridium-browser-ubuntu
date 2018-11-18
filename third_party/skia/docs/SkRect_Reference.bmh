@@ -1,17 +1,15 @@
 #Topic Rect
-#Alias Rects
-#Alias Rect_Reference
-
-#Subtopic Overview
-    #Subtopic Subtopic
-    #Populate
-    ##
-##
+#Alias Rects ##
+#Alias Rect_Reference ##
 
 #Struct SkRect
 
+#Code
+#Populate
+##
+
 SkRect holds four SkScalar coordinates describing the upper and
-lower bounds of a rectangle. SkRect may be created from outer bounds or 
+lower bounds of a rectangle. SkRect may be created from outer bounds or
 from position, width, and height. SkRect describes an area; if its right
 is less than or equal to its left, or if its bottom is less than or equal to
 its top, it is considered empty.
@@ -19,17 +17,6 @@ its top, it is considered empty.
 # move to topic about MakeIWH and friends
 SkRect can be constructed from int values to avoid compiler warnings that
 integer input cannot convert to SkScalar without loss of precision.
-
-#Subtopic Related_Function
-#Populate
-#Subtopic ##
-
-#Subtopic Member_Function
-#Populate
-##
-
-#Subtopic Member
-#Populate
 
 #Member SkScalar  fLeft
 #Line # smaller x-axis bounds ##
@@ -55,22 +42,19 @@ May contain any value, including infinities and NaN. The larger of the
 vertical values when sorted. When equal to or less than fTop, Rect is empty.
 ##
 
-#Subtopic Member ##
-
-#Subtopic Constructor
-#Populate
+#Subtopic Constructors
 
 # ------------------------------------------------------------------------------
 
-#Method static constexpr SkRect SK_WARN_UNUSED_RESULT MakeEmpty()
+#Method static constexpr SkRect MakeEmpty()
 
-#In Constructor
+#In Constructors
 #Line # constructs from bounds of (0, 0, 0, 0) ##
 Returns constructed Rect set to (0, 0, 0, 0).
 Many other rectangles are empty; if left is equal to or greater than right,
 or if top is equal to or greater than bottom. Setting all members to zero
 is a convenience, but does not designate a special empty rectangle.
- 
+
 #Return bounds (0, 0, 0, 0) ##
 
 #Example
@@ -96,9 +80,9 @@ outset rect isEmpty: false
 
 # ------------------------------------------------------------------------------
 
-#Method static constexpr SkRect SK_WARN_UNUSED_RESULT MakeWH(SkScalar w, SkScalar h)
+#Method static constexpr SkRect MakeWH(SkScalar w, SkScalar h)
 
-#In Constructor
+#In Constructors
 #Line # constructs from SkScalar input returning (0, 0, width, height) ##
 Returns constructed Rect set to SkScalar values (0, 0, w, h). Does not
 validate input; w or h may be negative.
@@ -129,9 +113,9 @@ all equal
 
 # ------------------------------------------------------------------------------
 
-#Method static SkRect SK_WARN_UNUSED_RESULT MakeIWH(int w, int h)
+#Method static SkRect MakeIWH(int w, int h)
 
-#In Constructor
+#In Constructors
 #Line # constructs from int input returning (0, 0, width, height) ##
 Returns constructed Rect set to integer values (0, 0, w, h). Does not validate
 input; w or h may be negative.
@@ -163,9 +147,9 @@ i_rect width: 125000111 f_rect width:125000112
 
 # ------------------------------------------------------------------------------
 
-#Method static constexpr SkRect SK_WARN_UNUSED_RESULT MakeSize(const SkSize& size)
+#Method static constexpr SkRect MakeSize(const SkSize& size)
 
-#In Constructor
+#In Constructors
 #Line # constructs from Size returning (0, 0, width, height) ##
 Returns constructed Rect set to (0, 0, size.width(), size.height()). Does not
 validate input; size.width() or size.height() may be negative.
@@ -193,9 +177,9 @@ floor width: 25  height: 35
 
 # ------------------------------------------------------------------------------
 
-#Method static constexpr SkRect SK_WARN_UNUSED_RESULT MakeLTRB(SkScalar l, SkScalar t, SkScalar r,
+#Method static constexpr SkRect MakeLTRB(SkScalar l, SkScalar t, SkScalar r,
                                                            SkScalar b)
-#In Constructor
+#In Constructors
 #Line # constructs from SkScalar left, top, right, bottom ##
 
 Returns constructed Rect set to (l, t, r, b). Does not sort input; Rect may
@@ -227,16 +211,12 @@ rect: 5, 25, 15, 35  isEmpty: false
 
 # ------------------------------------------------------------------------------
 
-#Method static constexpr SkRect SK_WARN_UNUSED_RESULT MakeXYWH(SkScalar x, SkScalar y, SkScalar w, SkScalar h)
+#Method static constexpr SkRect MakeXYWH(SkScalar x, SkScalar y, SkScalar w, SkScalar h)
 
-#In Constructor
+#In Constructors
 #Line # constructs from SkScalar input returning (x, y, width, height) ##
-Returns constructed Rect set to
-#Formula
-(x, y, x + w, y + h)
-##
-. Does not validate input;
-w or h may be negative.
+Returns constructed Rect set to #Formula # (x, y, x + w, y + h) ##.
+Does not validate input; w or h may be negative.
 
 #Param x  stored in fLeft ##
 #Param y  stored in fTop ##
@@ -264,17 +244,11 @@ rect: -10, 35, 5, 60  isEmpty: false
 
 # ------------------------------------------------------------------------------
 
-#Method static SkRect SK_WARN_UNUSED_RESULT MakeFromIRect(const SkIRect& irect)
-#Deprecated
-##
-
-# ------------------------------------------------------------------------------
-
 #Method static SkRect Make(const SkISize& size)
 
-#In Constructor
+#In Constructors
 #Line # constructs from ISize returning (0, 0, width, height) ##
-Returns constructed IRect set to (0, 0, size.width(), size.height()). 
+Returns constructed IRect set to (0, 0, size.width(), size.height()).
 Does not validate input; size.width() or size.height() may be negative.
 
 #Param size  integer values for Rect width and height ##
@@ -296,9 +270,9 @@ rect1 == rect2
 
 # ------------------------------------------------------------------------------
 
-#Method static SkRect SK_WARN_UNUSED_RESULT Make(const SkIRect& irect)
+#Method static SkRect Make(const SkIRect& irect)
 
-#In Constructor
+#In Constructors
 Returns constructed IRect set to irect, promoting integers to Scalar.
 Does not validate input; fLeft may be greater than fRight, fTop may be greater
 than fBottom.
@@ -320,11 +294,10 @@ than fBottom.
 
 ##
 
-#Subtopic Constructor ##
+#Subtopic Constructors ##
 
 #Subtopic Property
 #Line # member values, center, validity ##
-#Populate
 
 # ------------------------------------------------------------------------------
 
@@ -336,7 +309,7 @@ Returns true if fLeft is equal to or greater than fRight, or if fTop is equal
 to or greater than fBottom. Call sort() to reverse rectangles with negative
 width() or height().
 
-#Return true if width() or height() are zero or negative ##
+#Return true if width() or height() are not positive and valid ##
 
 #Example
     SkRect tests[] = {{20, 40, 10, 50}, {20, 40, 20, 50}};
@@ -399,7 +372,7 @@ sorted: {20, 40, 20, 50} is sorted
 #In Property
 #Line # returns true if no member is infinite or NaN ##
 Returns true if all values in the rectangle are finite: SK_ScalarMin or larger,
-and SK_ScalarMax or smaller. 
+and SK_ScalarMax or smaller.
 
 #Return true if no member is infinite or NaN ##
 
@@ -611,7 +584,7 @@ large width: 4294967296
 
 #In Property
 #Line # returns span in y ##
-Returns span on the y-axis. This does not check if IRect is sorted, or if
+Returns span on the y-axis. This does not check if Rect is sorted, or if
 result fits in 32-bit float; result may be negative or infinity.
 
 #Return fBottom minus fTop ##
@@ -660,7 +633,7 @@ left: -41 right: -20 centerX: -30.5
 ##
 ##
 
-#SeeAlso centerY SkIRect::centerX
+#SeeAlso centerY
 
 ##
 
@@ -671,7 +644,7 @@ left: -41 right: -20 centerX: -30.5
 #In Property
 #Line # returns midpoint in y ##
 Returns average of top edge and bottom edge. Result does not change if Rect
-is sorted. Result may overflow to infinity if Rect is far from the origin.
+is sorted.
 
 #Return midpoint in y ##
 
@@ -680,27 +653,25 @@ is sorted. Result may overflow to infinity if Rect is far from the origin.
    SkDebugf("left: %g right: %g centerX: %g ", rect.left(), rect.right(), rect.centerX());
    SkDebugf("safe mid x: %g\n", rect.left() / 2 + rect.right() / 2);
 #StdOut
-left: 2e+38 right: 3e+38 centerX: inf safe mid x: 2.5e+38
+left: 2e+38 right: 3e+38 centerX: 2.5e+38 safe mid x: 2.5e+38
 ##
 ##
 
-#SeeAlso centerX SkIRect::centerY
+#SeeAlso centerX
 
 ##
 
 #Subtopic Property ##
 
-#Subtopic Operator
-
-#Populate
+#Subtopic Operators
 
 # ------------------------------------------------------------------------------
 
 #Method bool operator==(const SkRect& a, const SkRect& b)
 
-#In Operator
+#In Operators
 #Line # returns true if members are equal ##
-Returns true if all members in a: fLeft, fTop, fRight, and fBottom; are  
+Returns true if all members in a: fLeft, fTop, fRight, and fBottom; are
 equal to the corresponding members in b.
 
 a and b are not equal if either contain NaN. a and b are equal if members
@@ -731,7 +702,7 @@ contain zeroes width different signs.
 tests are equal
 {0, 0, 2, 2} == {-0, -0, 2, 2} and are numerically equal
 {0, 0, 2, 2} == {-0, -0, 2, 2} and are numerically equal
-{0, 0, 2, 2} == {-0, -0, 2, 2} and are numerically equal    
+{0, 0, 2, 2} == {-0, -0, 2, 2} and are numerically equal
 ##
 ##
 
@@ -743,9 +714,9 @@ tests are equal
 
 #Method bool operator!=(const SkRect& a, const SkRect& b)
 
-#In Operator
+#In Operators
 #Line # returns true if members are unequal ##
-Returns true if any in a: fLeft, fTop, fRight, and fBottom; does not   
+Returns true if any in a: fLeft, fTop, fRight, and fBottom; does not
 equal the corresponding members in b.
 
 a and b are not equal if either contain NaN. a and b are equal if members
@@ -760,7 +731,7 @@ contain zeroes width different signs.
     SkRect test = {0, 0, 2, SK_ScalarNaN};
     SkDebugf("test with NaN is %s" "equal to itself\n", test == test ? "" : "not ");
 #StdOut
-test with NaN is not equal to itself    
+test with NaN is not equal to itself
 ##
 ##
 
@@ -768,12 +739,10 @@ test with NaN is not equal to itself
 
 ##
 
-#Subtopic Operator ##
+#Subtopic Operators ##
 
 #Subtopic As_Points
 #Line # conversion to and from Points ##
-
-#Populate
 
 # ------------------------------------------------------------------------------
 
@@ -782,10 +751,10 @@ test with NaN is not equal to itself
 #In As_Points
 #Line # returns four corners as Point ##
 Returns four points in quad that enclose Rect ordered as: top-left, top-right,
-bottom-right, bottom-left. 
+bottom-right, bottom-left.
 
 #Private
-Consider adding param to control whether quad is CW or CCW.
+Consider adding param to control whether quad is clockwise or counterclockwise.
 ##
 
 #Param quad  storage for corners of Rect ##
@@ -802,7 +771,7 @@ Consider adding param to control whether quad is CW or CCW.
     SkDebugf("\n");
 #StdOut
 rect: {1, 2, 3, 4}
-corners: {1, 2} {3, 2} {3, 4} {1, 4}    
+corners: {1, 2} {3, 2} {3, 4} {1, 4}
 ##
 ##
 
@@ -899,7 +868,35 @@ added: nan, 8 count: 4 rect: 0, 0, 0, 0 success: false
 
 #Subtopic Set
 #Line # replaces all values ##
-#Populate
+
+# ------------------------------------------------------------------------------
+
+#Method void setBoundsNoCheck(const SkPoint pts[], int count)
+#In Set
+#Line # sets to upper and lower limits of Point array ##
+Sets to bounds of Point pts array with count entries. If any Point in pts
+contains infinity or NaN, all Rect dimensions are set to NaN.
+
+#Param pts  Point array ##
+#Param count  entries in array ##
+
+#Example
+   SkPoint points[] = {{3, 4}, {1, 2}, {SK_ScalarInfinity, 6}, {SK_ScalarNaN, 8}};
+   for (int count = 0; count <= (int) SK_ARRAY_COUNT(points); ++count) {
+       SkRect rect;
+       rect.setBoundsNoCheck(points, count);
+       if (count > 0) {
+           SkDebugf("added: %3g, %g ", points[count - 1].fX,  points[count - 1].fY);
+       } else {
+           SkDebugf("%14s", " ");
+       }
+       SkDebugf("count: %d rect: %g, %g, %g, %g\n", count,
+               rect.fLeft, rect.fTop, rect.fRight, rect.fBottom);
+   }
+##
+
+#SeeAlso setBoundsCheck
+#Method ##
 
 # ------------------------------------------------------------------------------
 
@@ -937,7 +934,7 @@ rect: {0, 0, 0, 0} is empty
 #In Set
 #Line # sets to SkScalar input (left, top, right, bottom) and others ##
 Sets Rect to src, promoting src members from integer to Scalar.
-Very large values in src may lose precision. 
+Very large values in src may lose precision.
 
 #Param src  integer Rect ##
 
@@ -1071,7 +1068,7 @@ sorted and may be empty. Does not check to see if values are finite.
 
 #Example
 #Description
-p0 and p1 may be swapped and have the same effect unless one contains NaN. 
+p0 and p1 may be swapped and have the same effect unless one contains NaN.
 ##
    SkPoint point1 = {SK_ScalarNaN, 8};
    SkPoint point2 = {3, 4};
@@ -1092,12 +1089,8 @@ p0 and p1 may be swapped and have the same effect unless one contains NaN.
 
 #In Set
 #Line # sets to SkScalar input (x, y, width, height) ##
-Sets Rect to 
-#Formula
-(x, y, x + width, y + height)
-##
-. Does not validate input;
-width or height may be negative.
+Sets Rect to #Formula # (x, y, x + width, y + height) ##.
+Does not validate input; width or height may be negative.
 
 #Param x  stored in fLeft ##
 #Param y  stored in fTop ##
@@ -1155,9 +1148,7 @@ rect: -15, 0, 0, 25  isEmpty: false
 #Subtopic Set ##
 
 #Subtopic From_Integers
-#Line # set Scalar values from integer input ##
-
-#Populate
+#Line # sets Scalar values from integer input ##
 
 # ------------------------------------------------------------------------------
 
@@ -1225,8 +1216,6 @@ rect2: {0, 0, 1, 2}
 #Subtopic Inset_Outset_Offset
 #Line # moves sides ##
 
-#Populate
-
 # ------------------------------------------------------------------------------
 
 #Method SkRect makeOffset(SkScalar dx, SkScalar dy) const
@@ -1238,12 +1227,12 @@ Returns Rect offset by (dx, dy).
 If dx is negative, Rect returned is moved to the left.
 If dx is positive, Rect returned is moved to the right.
 If dy is negative, Rect returned is moved upward.
-If dy is positive, Rect returned is moved downward. 
+If dy is positive, Rect returned is moved downward.
 
 #Param dx  added to fLeft and fRight ##
 #Param dy  added to fTop and fBottom ##
 
-#Return Rect offset in x or y, with original width and height ##
+#Return Rect offset on axes, with original width and height ##
 
 #Example
     SkRect rect = { 10, 50, 20, 60 };
@@ -1273,7 +1262,7 @@ Returns Rect, inset by (dx, dy).
 If dx is negative, Rect returned is wider.
 If dx is positive, Rect returned is narrower.
 If dy is negative, Rect returned is taller.
-If dy is positive, Rect returned is shorter. 
+If dy is positive, Rect returned is shorter.
 
 #Param dx  added to fLeft and subtracted from fRight ##
 #Param dy  added to fTop and subtracted from fBottom ##
@@ -1308,7 +1297,7 @@ Returns Rect, outset by (dx, dy).
 If dx is negative, Rect returned is narrower.
 If dx is positive, Rect returned is wider.
 If dy is negative, Rect returned is shorter.
-If dy is positive, Rect returned is taller. 
+If dy is positive, Rect returned is taller.
 
 #Param dx  subtracted to fLeft and added from fRight ##
 #Param dy  subtracted to fTop and added from fBottom ##
@@ -1343,7 +1332,7 @@ Offsets Rect by adding dx to fLeft, fRight; and by adding dy to fTop, fBottom.
 If dx is negative, moves Rect to the left.
 If dx is positive, moves Rect to the right.
 If dy is negative, moves Rect upward.
-If dy is positive, moves Rect downward. 
+If dy is positive, moves Rect downward.
 
 #Param dx  offset added to fLeft and fRight ##
 #Param dy  offset added to fTop and fBottom ##
@@ -1372,7 +1361,7 @@ fTop, fBottom.
 If delta.fX is negative, moves Rect to the left.
 If delta.fX is positive, moves Rect to the right.
 If delta.fY is negative, moves Rect upward.
-If delta.fY is positive, moves Rect downward. 
+If delta.fY is positive, moves Rect downward.
 
 #Param delta  added to Rect ##
 
@@ -1475,22 +1464,16 @@ rect: 5, 1, 55, 86
 #Subtopic Inset_Outset_Offset ##
 
 #Subtopic Intersection
-#Line # set to shared bounds ##
+#Line # sets to shared bounds ##
 
-Rects intersect when they enclose a common area. To intersect, each of the pair 
+Rects intersect when they enclose a common area. To intersect, each of the pair
 must describe area; fLeft is less than fRight, and fTop is less than fBottom;
 empty() returns false. The intersection of Rect pair can be described by:
-
-#Formula
-(max(a.fLeft, b.fLeft), max(a.fTop, b.fTop),
- min(a.fRight, b.fRight), min(a.fBottom, b.fBottom))
-##
-.
+#Formula # (max(a.fLeft, b.fLeft), max(a.fTop, b.fTop),
+            min(a.fRight, b.fRight), min(a.fBottom, b.fBottom)) ##.
 
 The intersection is only meaningful if the resulting Rect is not empty and
 describes an area: fLeft is less than fRight, and fTop is less than fBottom.
-
-#Populate
 
 # ------------------------------------------------------------------------------
 
@@ -1501,10 +1484,10 @@ describes an area: fLeft is less than fRight, and fTop is less than fBottom.
 Returns true if: fLeft <= x < fRight && fTop <= y < fBottom.
 Returns false if SkRect is empty.
 
-#Param x  test SkPoint x-coordinate ##
-#Param y  test SkPoint y-coordinate ##
+#Param x  test Point x-coordinate ##
+#Param y  test Point y-coordinate ##
 
-#Return true if (x, y) is inside SkRect ##
+#Return true if (x, y) is inside Rect ##
 
 #Example
     SkRect rect = { 30, 50, 40, 60 };
@@ -1522,7 +1505,7 @@ rect: (30, 50, 40, 60) does not contain (29, 59)
 ##
 ##
 
-#SeeAlso SkIRect::contains
+#SeeAlso SkIRect::contains SkRRect::contains
 
 ##
 
@@ -1618,11 +1601,11 @@ be before or after the call to intersect.
     SkRect leftRect =  { 10, 40, 50, 80 };
     SkRect rightRect = { 30, 60, 70, 90 };
     SkDebugf("%s intersection: ", leftRect.intersect(rightRect) ? "" : "no ");
-    SkDebugf("%g, %g, %g, %g\n", leftRect.left(), leftRect.top(), 
+    SkDebugf("%g, %g, %g, %g\n", leftRect.left(), leftRect.top(),
                                  leftRect.right(), leftRect.bottom());
 #StdOut
  intersection: 30, 60, 50, 80
-##                                 
+##
 ##
 
 #SeeAlso intersects Intersects join SkIRect::intersect
@@ -1642,10 +1625,10 @@ Returns false if Rect does not intersect construction, and leaves Rect unchanged
 
 Returns false if either construction or Rect is empty, leaving Rect unchanged.
 
-#Param left  x minimum of constructed Rect ##
-#Param top  y minimum of constructed Rect ##
-#Param right  x maximum of constructed Rect ##
-#Param bottom  y maximum of constructed Rect ##
+#Param left  x-axis minimum of constructed Rect ##
+#Param top  y-axis minimum of constructed Rect ##
+#Param right  x-axis maximum of constructed Rect ##
+#Param bottom  y-axis maximum of constructed Rect ##
 
 #Return true if construction and Rect have area in common ##
 
@@ -1657,11 +1640,11 @@ be before or after the call to intersect.
 ##
     SkRect leftRect =  { 10, 40, 50, 80 };
     SkDebugf("%s intersection: ", leftRect.intersect(30, 60, 70, 90) ? "" : "no ");
-    SkDebugf("%g, %g, %g, %g\n", leftRect.left(), leftRect.top(), 
+    SkDebugf("%g, %g, %g, %g\n", leftRect.left(), leftRect.top(),
                                  leftRect.right(), leftRect.bottom());
 #StdOut
  intersection: 30, 60, 50, 80
-##                                 
+##
 ##
 
 #SeeAlso intersects Intersects join SkIRect::intersect
@@ -1670,7 +1653,7 @@ be before or after the call to intersect.
 
 # ------------------------------------------------------------------------------
 
-#Method bool SK_WARN_UNUSED_RESULT intersect(const SkRect& a, const SkRect& b)
+#Method bool intersect(const SkRect& a, const SkRect& b)
 
 #In Intersection
 Returns true if a intersects b, and sets Rect to intersection.
@@ -1690,7 +1673,7 @@ Returns false if either a or b is empty, leaving Rect unchanged.
              result.left(), result.top(), result.right(), result.bottom());
 #StdOut
  intersection: 30, 60, 50, 80
-##                                 
+##
 ##
 
 #SeeAlso intersects Intersects join SkIRect::intersect
@@ -1709,10 +1692,10 @@ construction.
 Returns true if Rect intersects construction.
 Returns false if either construction or Rect is empty, or do not intersect.
 
-#Param left  x minimum of constructed Rect ##
-#Param top  y minimum of constructed Rect ##
-#Param right  x maximum of constructed Rect ##
-#Param bottom  y maximum of constructed Rect ##
+#Param left  x-axis minimum of constructed Rect ##
+#Param top  y-axis minimum of constructed Rect ##
+#Param right  x-axis maximum of constructed Rect ##
+#Param bottom  y-axis maximum of constructed Rect ##
 
 #Return true if construction and Rect have area in common ##
 
@@ -1721,7 +1704,7 @@ Returns false if either construction or Rect is empty, or do not intersect.
     SkDebugf("%s intersection", rect.intersects(30, 60, 70, 90) ? "" : "no ");
 #StdOut
  intersection
-##                                 
+##
 ##
 
 #SeeAlso intersect Intersects SkIRect::Intersects
@@ -1745,7 +1728,7 @@ Returns false if either r or Rect is empty, or do not intersect.
     SkDebugf("%s intersection", rect.intersects({30, 60, 70, 90}) ? "" : "no ");
 #StdOut
  intersection
-##                                 
+##
 ##
 
 #SeeAlso intersect Intersects SkIRect::Intersects
@@ -1770,7 +1753,7 @@ Returns false if either a or b is empty, or do not intersect.
     SkDebugf("%s intersection", SkRect::Intersects({10, 40, 50, 80}, {30, 60, 70, 90}) ? "" : "no ");
 #StdOut
  intersection
-##                                 
+##
 ##
 
 #SeeAlso intersect intersects SkIRect::Intersects
@@ -1780,9 +1763,7 @@ Returns false if either a or b is empty, or do not intersect.
 #Subtopic Intersection ##
 
 #Subtopic Join
-#Line # set to union of bounds ##
-
-#Populate
+#Line # sets to union of bounds ##
 
 # ------------------------------------------------------------------------------
 
@@ -1798,10 +1779,10 @@ Sets Rect to the union of itself and the construction.
 Has no effect if construction is empty. Otherwise, if Rect is empty, sets
 Rect to construction.
 
-#Param left  x minimum of constructed Rect ##
-#Param top  y minimum of constructed Rect ##
-#Param right  x maximum of constructed Rect ##
-#Param bottom  y maximum of constructed Rect ##
+#Param left  x-axis minimum of constructed Rect ##
+#Param top  y-axis minimum of constructed Rect ##
+#Param right  x-axis maximum of constructed Rect ##
+#Param bottom  y-axis maximum of constructed Rect ##
 
 #Example
     SkRect rect = { 10, 20, 15, 25};
@@ -1809,7 +1790,7 @@ Rect to construction.
     SkDebugf("join: %g, %g, %g, %g\n", rect.fLeft, rect.fTop, rect.fRight, rect.fBottom);
 #StdOut
  join: 10, 20, 55, 65
-##                                 
+##
 ##
 
 #SeeAlso joinNonEmptyArg joinPossiblyEmptyRect SkIRect::join
@@ -1834,7 +1815,7 @@ Rect to r.
     SkDebugf("join: %g, %g, %g, %g\n", rect.fLeft, rect.fTop, rect.fRight, rect.fBottom);
 #StdOut
  join: 10, 20, 55, 65
-##                                 
+##
 ##
 
 #SeeAlso joinNonEmptyArg joinPossiblyEmptyRect SkIRect::join
@@ -1870,7 +1851,7 @@ Since Rect is not sorted, first result is copy of toJoin.
 #StdOut
 rect: 50, 60, 55, 65
 sorted: 10, 0, 55, 100
-##                                 
+##
 ##
 
 #SeeAlso join joinPossiblyEmptyRect SkIRect::join
@@ -1882,7 +1863,7 @@ sorted: 10, 0, 55, 100
 #Method    void joinPossiblyEmptyRect(const SkRect& r)
 
 #In Join
-#Line # sets to union of bounds. Skips empty check for both ##
+#Line # sets to union of bounds; skips empty check for both ##
 Sets Rect to the union of itself and the construction.
 
 May produce incorrect results if Rect or r is empty.
@@ -1903,7 +1884,7 @@ Since Rect is not sorted, first result is not useful.
 #StdOut
 rect: 10, 60, 55, 65
 sorted: 10, 0, 55, 100
-##                                 
+##
 ##
 
 #SeeAlso joinNonEmptyArg join SkIRect::join
@@ -1915,19 +1896,13 @@ sorted: 10, 0, 55, 100
 #Subtopic Rounding
 #Line # adjust to integer bounds ##
 
-#Populate
-
 #Method    void round(SkIRect* dst) const
 
 #In Rounding
 #Line # sets members to nearest integer value ##
 Sets IRect by adding 0.5 and discarding the fractional portion of Rect
-members, using
-#Formula
-(SkScalarRoundToInt(fLeft), SkScalarRoundToInt(fTop),
- SkScalarRoundToInt(fRight), SkScalarRoundToInt(fBottom))
-##
-.
+members, using #Formula # (SkScalarRoundToInt(fLeft), SkScalarRoundToInt(fTop),
+                           SkScalarRoundToInt(fRight), SkScalarRoundToInt(fBottom)) ##.
 
 #Param dst  storage for IRect ##
 
@@ -1951,13 +1926,10 @@ round: 31, 51, 41, 61
 
 #In Rounding
 #Line # sets members to nearest integer value away from opposite ##
-Sets IRect by discarding the fractional portion of fLeft and fTop; and
-rounding up fRight and fBottom, using
-#Formula
-(SkScalarFloorToInt(fLeft), SkScalarFloorToInt(fTop),
- SkScalarCeilToInt(fRight), SkScalarCeilToInt(fBottom))
-##
-.
+Sets IRect by discarding the fractional portion of fLeft and fTop; and rounding
+up fRight and fBottom, using 
+#Formula # (SkScalarFloorToInt(fLeft), SkScalarFloorToInt(fTop),
+            SkScalarCeilToInt(fRight), SkScalarCeilToInt(fBottom)) ##.
 
 #Param dst  storage for IRect ##
 
@@ -1977,16 +1949,13 @@ round: 30, 50, 41, 61
 
 # ------------------------------------------------------------------------------
 
-#Method    void roundOut(SkRect* dst) const 
+#Method    void roundOut(SkRect* dst) const
 
 #In Rounding
-Sets Rect by discarding the fractional portion of fLeft and fTop; and
-rounding up fRight and fBottom, using
-#Formula
-(SkScalarFloorToInt(fLeft), SkScalarFloorToInt(fTop),
- SkScalarCeilToInt(fRight), SkScalarCeilToInt(fBottom))
-##
-.
+Sets Rect by discarding the fractional portion of fLeft and fTop; and rounding 
+up fRight and fBottom, using 
+#Formula # (SkScalarFloorToInt(fLeft), SkScalarFloorToInt(fTop),
+            SkScalarCeilToInt(fRight), SkScalarCeilToInt(fBottom)) ##.
 
 #Param dst  storage for Rect ##
 
@@ -2010,14 +1979,10 @@ round: 30, 50, 41, 61
 
 #In Rounding
 #Line # sets members to nearest integer value towards opposite ##
-Sets Rect by rounding up fLeft and fTop; and
-discarding the fractional portion of fRight and fBottom, using
-
-#Formula
-(SkScalarCeilToInt(fLeft), SkScalarCeilToInt(fTop),
- SkScalarFloorToInt(fRight), SkScalarFloorToInt(fBottom))
-##
-.
+Sets Rect by rounding up fLeft and fTop; and discarding the fractional portion
+of fRight and fBottom, using
+#Formula # (SkScalarCeilToInt(fLeft), SkScalarCeilToInt(fTop),
+            SkScalarFloorToInt(fRight), SkScalarFloorToInt(fBottom)) ##.
 
 #Param dst  storage for IRect ##
 
@@ -2041,12 +2006,8 @@ round: 31, 51, 40, 60
 
 #In Rounding
 Returns IRect by adding 0.5 and discarding the fractional portion of Rect
-members, using
-#Formula
-(SkScalarRoundToInt(fLeft), SkScalarRoundToInt(fTop),
- SkScalarRoundToInt(fRight), SkScalarRoundToInt(fBottom))
-##
-.
+members, using #Formula # (SkScalarRoundToInt(fLeft), SkScalarRoundToInt(fTop),
+                           SkScalarRoundToInt(fRight), SkScalarRoundToInt(fBottom)) ##.
 
 #Return  rounded IRect ##
 
@@ -2068,13 +2029,10 @@ round: 31, 51, 41, 61
 #Method    SkIRect roundOut() const
 
 #In Rounding
-Sets IRect by discarding the fractional portion of fLeft and fTop; and
-rounding up fRight and fBottom, using
-#Formula
-(SkScalarFloorToInt(fLeft), SkScalarFloorToInt(fTop),
- SkScalarCeilToInt(fRight), SkScalarCeilToInt(fBottom))
-##
-.
+Sets IRect by discarding the fractional portion of fLeft and fTop; and rounding
+up fRight and fBottom, using
+#Formula # (SkScalarFloorToInt(fLeft), SkScalarFloorToInt(fTop),
+            SkScalarCeilToInt(fRight), SkScalarCeilToInt(fBottom)) ##.
 
 #Return  rounded IRect ##
 
@@ -2095,8 +2053,6 @@ round: 30, 50, 41, 61
 
 #Subtopic Sorting
 #Line # orders sides ##
-
-#Populate
 
 # ------------------------------------------------------------------------------
 
@@ -2128,8 +2084,8 @@ sorted: 20.5, 10.5, 30.5, 50.5
 #Method    SkRect makeSorted() const
 
 #In Sorting
-#In Constructor
-#Line # constructs, ordering sides from smaller to larger ##
+#In Constructors
+#Line # constructs Rect, ordering sides from smaller to larger ##
 Returns Rect with fLeft and fRight swapped if fLeft is greater than fRight; and
 with fTop and fBottom swapped if fTop is greater than fBottom. Result may be empty;
 and width() and height() will be zero or positive.
@@ -2180,7 +2136,7 @@ rect.asScalars() == &rect.fLeft
 #Method    void dump(bool asHex) const
 #In Property
 #Line # sends text representation to standard output using floats ##
-Writes text representation of Rect to standard output. Set asHex to true to 
+Writes text representation of Rect to standard output. Set asHex to true to
 generate exact binary representations of floating point numbers.
 
 #Param asHex  true if SkScalar values are written as hexadecimal ##
@@ -2239,8 +2195,8 @@ directly compiled as C++ code. Floating point values are written
 in hexadecimal to preserve their exact bit pattern. The output reconstructs the
 original Rect.
 
-Use instead of dump() when submitting 
-#A bug reports against Skia # http://bug.skia.org ##
+Use instead of dump() when submitting
+#A bug reports against Skia # https://bug.skia.org ##
 .
 
 #Example
@@ -2264,7 +2220,7 @@ rect is equal to copy
 
 ##
 
-#Method static SkRect SK_WARN_UNUSED_RESULT MakeLargest()
+#Method static SkRect MakeLargest()
 #Deprecated
 ##
 

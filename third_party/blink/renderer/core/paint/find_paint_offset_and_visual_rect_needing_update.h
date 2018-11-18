@@ -8,7 +8,6 @@
 #if DCHECK_IS_ON()
 
 #include "third_party/blink/renderer/core/layout/layout_object.h"
-#include "third_party/blink/renderer/core/paint/find_properties_needing_update.h"
 #include "third_party/blink/renderer/core/paint/object_paint_invalidator.h"
 #include "third_party/blink/renderer/core/paint/paint_invalidator.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
@@ -32,10 +31,11 @@ class FindPaintOffsetNeedingUpdateScope {
         fragment_data_(fragment_data),
         is_actually_needed_(is_actually_needed),
         old_paint_offset_(fragment_data.PaintOffset()) {
-    auto* properties = fragment_data.PaintProperties();
-    if (properties && properties->PaintOffsetTranslation()) {
-      old_paint_offset_translation_ =
-          properties->PaintOffsetTranslation()->Clone();
+    if (const auto* properties = fragment_data.PaintProperties()) {
+      if (const auto* translation = properties->PaintOffsetTranslation()) {
+        old_parent_ = translation->Parent();
+        old_translation_ = translation->Matrix();
+      }
     }
   }
 
@@ -43,12 +43,20 @@ class FindPaintOffsetNeedingUpdateScope {
     if (is_actually_needed_)
       return;
     LayoutPoint paint_offset = fragment_data_.PaintOffset();
-    DCHECK_OBJECT_PROPERTY_EQ(object_, &old_paint_offset_, &paint_offset);
-    auto* paint_properties = fragment_data_.PaintProperties();
-    const auto* paint_offset_translation =
-        paint_properties ? paint_properties->PaintOffsetTranslation() : nullptr;
-    DCHECK_OBJECT_PROPERTY_EQ(object_, old_paint_offset_translation_.get(),
-                              paint_offset_translation);
+    DCHECK_EQ(old_paint_offset_, paint_offset) << object_.DebugName();
+
+    const TransformPaintPropertyNode* new_parent = nullptr;
+    base::Optional<TransformationMatrix> new_translation;
+    if (const auto* properties = fragment_data_.PaintProperties()) {
+      if (const auto* translation = properties->PaintOffsetTranslation()) {
+        new_parent = translation->Parent();
+        new_translation = translation->Matrix();
+      }
+    }
+    DCHECK_EQ(!!old_translation_, !!new_translation) << object_.DebugName();
+    DCHECK_EQ(old_parent_, new_parent) << object_.DebugName();
+    if (old_translation_ && new_translation)
+      DCHECK_EQ(*old_translation_, *new_translation) << object_.DebugName();
   }
 
  private:
@@ -56,21 +64,21 @@ class FindPaintOffsetNeedingUpdateScope {
   const FragmentData& fragment_data_;
   const bool& is_actually_needed_;
   LayoutPoint old_paint_offset_;
-  scoped_refptr<const TransformPaintPropertyNode> old_paint_offset_translation_;
+  const TransformPaintPropertyNode* old_parent_ = nullptr;
+  base::Optional<TransformationMatrix> old_translation_;
 };
 
 class FindVisualRectNeedingUpdateScopeBase {
  protected:
   FindVisualRectNeedingUpdateScopeBase(const LayoutObject& object,
                                        const PaintInvalidatorContext& context,
-                                       const LayoutRect& old_visual_rect,
-                                       bool is_actually_needed)
+                                       const LayoutRect& old_visual_rect)
       : object_(object),
         context_(context),
         old_visual_rect_(old_visual_rect),
         needed_visual_rect_update_(context.NeedsVisualRectUpdate(object)) {
     if (needed_visual_rect_update_) {
-      DCHECK(is_actually_needed);
+      DCHECK(context.tree_builder_context_actually_needed_);
       return;
     }
     context.force_visual_rect_update_for_checking_ = true;
@@ -125,11 +133,7 @@ class FindVisualRectNeedingUpdateScope : FindVisualRectNeedingUpdateScopeBase {
                                    // Must be a reference to a rect that
                                    // outlives this scope.
                                    const LayoutRect& new_visual_rect)
-      : FindVisualRectNeedingUpdateScopeBase(
-            object,
-            context,
-            old_visual_rect,
-            context.tree_builder_context_actually_needed_),
+      : FindVisualRectNeedingUpdateScopeBase(object, context, old_visual_rect),
         new_visual_rect_ref_(new_visual_rect) {}
 
   ~FindVisualRectNeedingUpdateScope() { CheckVisualRect(new_visual_rect_ref_); }
@@ -144,42 +148,18 @@ class FindObjectVisualRectNeedingUpdateScope
  public:
   FindObjectVisualRectNeedingUpdateScope(const LayoutObject& object,
                                          const FragmentData& fragment_data,
-                                         const PaintInvalidatorContext& context,
-                                         bool is_actually_needed)
+                                         const PaintInvalidatorContext& context)
       : FindVisualRectNeedingUpdateScopeBase(object,
                                              context,
-                                             fragment_data.VisualRect(),
-                                             is_actually_needed),
-        fragment_data_(fragment_data),
-        old_location_(context.old_location) {}
+                                             fragment_data.VisualRect()),
+        fragment_data_(fragment_data) {}
 
   ~FindObjectVisualRectNeedingUpdateScope() {
     CheckVisualRect(fragment_data_.VisualRect());
-    CheckLocation();
-  }
-
-  void CheckLocation() {
-    if (needed_visual_rect_update_)
-      return;
-    LayoutPoint new_location = fragment_data_.LocationInBacking();
-    // Location of LayoutText and non-root SVG is location of the visual rect
-    // which have been checked above.
-    DCHECK(object_.IsText() || object_.IsSVGChild() ||
-           new_location == old_location_ ||
-           object_.EnclosingLayer()->SubtreeIsInvisible() ||
-           // See checkVisualRect for the issue of approximation.
-           LayoutRect(-1, -1, 2, 2)
-               .Contains(LayoutRect(LayoutPoint(new_location - old_location_),
-                                    LayoutSize())))
-        << "Location changed without needing update"
-        << " object=" << object_.DebugName()
-        << " old=" << old_location_.ToString()
-        << " new=" << new_location.ToString();
   }
 
  private:
   const FragmentData& fragment_data_;
-  LayoutPoint old_location_;
 };
 
 }  // namespace blink

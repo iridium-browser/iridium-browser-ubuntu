@@ -11,7 +11,6 @@
 #include "base/macros.h"
 #include "base/metrics/histogram_samples.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/passwords/manage_passwords_test.h"
@@ -25,7 +24,6 @@
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 #include "chrome/common/chrome_features.h"
 #include "chrome/test/base/interactive_test_utils.h"
-#include "chrome/test/views/scoped_macviews_browser_mode.h"
 #include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/common/content_features.h"
@@ -33,8 +31,6 @@
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
 #include "testing/gmock/include/gmock/gmock.h"
-#include "ui/base/ui_base_features.h"
-#include "ui/base/ui_features.h"
 #include "ui/views/window/dialog_client_view.h"
 
 using net::test_server::BasicHttpResponse;
@@ -72,16 +68,6 @@ class PasswordBubbleInteractiveUiTest : public ManagePasswordsTest {
   PasswordBubbleInteractiveUiTest() {}
   ~PasswordBubbleInteractiveUiTest() override {}
 
-  // ManagePasswordsTest:
-  void SetUp() override {
-#if defined(OS_MACOSX)
-    scoped_feature_list_.InitWithFeatures(
-        {features::kSecondaryUiMd, features::kShowAllDialogsWithViewsToolkit},
-        {});
-#endif
-    ManagePasswordsTest::SetUp();
-  }
-
   MOCK_METHOD0(OnIconRequestDone, void());
 
   // Called on the server background thread.
@@ -94,9 +80,6 @@ class PasswordBubbleInteractiveUiTest : public ManagePasswordsTest {
   }
 
  private:
-  test::ScopedMacViewsBrowserMode views_mode_{true};
-  base::test::ScopedFeatureList scoped_feature_list_;
-
   DISALLOW_COPY_AND_ASSIGN(PasswordBubbleInteractiveUiTest);
 };
 
@@ -396,12 +379,5 @@ IN_PROC_BROWSER_TEST_F(PasswordBubbleInteractiveUiTest, AutoSigninNoFocus) {
   ui_test_utils::BrowserActivationWaiter waiter(browser());
   waiter.WaitForActivation();
 
-// Sign-in dialogs opened for inactive browser windows do not auto-close on
-// MacOS. This matches existing Cocoa bubble behavior.
-// TODO(varkha): Remove the limitation as part of http://crbug/671916 .
-#if !defined(OS_MACOSX) || BUILDFLAG(MAC_VIEWS_BROWSER)
   EXPECT_FALSE(IsBubbleShowing());
-#else
-  EXPECT_TRUE(IsBubbleShowing());
-#endif
 }

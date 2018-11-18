@@ -28,17 +28,16 @@ class XR final : public EventTargetWithInlineData,
   USING_GARBAGE_COLLECTED_MIXIN(XR);
 
  public:
-  static XR* Create(LocalFrame& frame) { return new XR(frame); }
+  static XR* Create(LocalFrame& frame, int64_t source_id) {
+    return new XR(frame, source_id);
+  }
 
   DEFINE_ATTRIBUTE_EVENT_LISTENER(devicechange);
 
   ScriptPromise requestDevice(ScriptState*);
 
-  // XRServiceClient overrides.
-  void OnDisplayConnected(device::mojom::blink::VRMagicWindowProviderPtr,
-                          device::mojom::blink::VRDisplayHostPtr,
-                          device::mojom::blink::VRDisplayClientRequest,
-                          device::mojom::blink::VRDisplayInfoPtr) override;
+  // VRServiceClient overrides.
+  void OnDeviceChanged() override;
 
   // EventTarget overrides.
   ExecutionContext* GetExecutionContext() const override;
@@ -52,16 +51,29 @@ class XR final : public EventTargetWithInlineData,
   void FocusedFrameChanged() override;
   bool IsFrameFocused();
 
- private:
-  explicit XR(LocalFrame& frame);
+  int64_t GetSourceId() const { return ukm_source_id_; }
 
-  void OnDevicesSynced();
+ private:
+  explicit XR(LocalFrame& frame, int64_t ukm_source_id_);
+
+  void OnRequestDeviceReturned(device::mojom::blink::XRDevicePtr device);
   void ResolveRequestDevice();
+  void ReportImmersiveSupported(bool supported);
+
+  void AddedEventListener(const AtomicString& event_type,
+                          RegisteredEventListener&) override;
+
   void Dispose();
 
-  bool devices_synced_;
+  bool pending_sync_ = false;
 
-  HeapVector<Member<XRDevice>> devices_;
+  // Indicates whether use of requestDevice has already been logged.
+  bool did_log_requestDevice_ = false;
+  bool did_log_returned_device_ = false;
+  bool did_log_supports_immersive_ = false;
+  const int64_t ukm_source_id_;
+
+  Member<XRDevice> device_;
   Member<ScriptPromiseResolver> pending_devices_resolver_;
   device::mojom::blink::VRServicePtr service_;
   mojo::Binding<device::mojom::blink::VRServiceClient> binding_;

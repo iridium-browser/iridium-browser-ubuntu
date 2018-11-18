@@ -6,6 +6,7 @@
 
 #include <utility>
 
+#include "base/no_destructor.h"
 #include "base/strings/string_util.h"
 #include "base/values.h"
 #include "net/base/host_port_pair.h"
@@ -13,15 +14,45 @@
 
 namespace net {
 
+class MappedHostResolver::AlwaysErrorRequestImpl
+    : public HostResolver::ResolveHostRequest {
+ public:
+  explicit AlwaysErrorRequestImpl(int error) : error_(error) {}
+
+  int Start(CompletionOnceCallback callback) override { return error_; }
+
+  const base::Optional<AddressList>& GetAddressResults() const override {
+    static base::NoDestructor<base::Optional<AddressList>> nullopt_address_list;
+    return *nullopt_address_list;
+  }
+
+ private:
+  const int error_;
+};
+
 MappedHostResolver::MappedHostResolver(std::unique_ptr<HostResolver> impl)
     : impl_(std::move(impl)) {}
 
 MappedHostResolver::~MappedHostResolver() = default;
 
+std::unique_ptr<HostResolver::ResolveHostRequest>
+MappedHostResolver::CreateRequest(
+    const HostPortPair& host,
+    const NetLogWithSource& source_net_log,
+    const base::Optional<ResolveHostParameters>& optional_parameters) {
+  HostPortPair rewritten = host;
+  rules_.RewriteHost(&rewritten);
+
+  if (rewritten.host() == "~NOTFOUND")
+    return std::make_unique<AlwaysErrorRequestImpl>(ERR_NAME_NOT_RESOLVED);
+
+  return impl_->CreateRequest(rewritten, source_net_log, optional_parameters);
+}
+
 int MappedHostResolver::Resolve(const RequestInfo& original_info,
                                 RequestPriority priority,
                                 AddressList* addresses,
-                                const CompletionCallback& callback,
+                                CompletionOnceCallback callback,
                                 std::unique_ptr<Request>* request,
                                 const NetLogWithSource& net_log) {
   RequestInfo info = original_info;
@@ -29,7 +60,8 @@ int MappedHostResolver::Resolve(const RequestInfo& original_info,
   if (rv != OK)
     return rv;
 
-  return impl_->Resolve(info, priority, addresses, callback, request, net_log);
+  return impl_->Resolve(info, priority, addresses, std::move(callback), request,
+                        net_log);
 }
 
 int MappedHostResolver::ResolveFromCache(const RequestInfo& original_info,
@@ -80,6 +112,20 @@ void MappedHostResolver::SetNoIPv6OnWifi(bool no_ipv6_on_wifi) {
 
 bool MappedHostResolver::GetNoIPv6OnWifi() {
   return impl_->GetNoIPv6OnWifi();
+}
+
+void MappedHostResolver::SetDnsConfigOverrides(
+    const DnsConfigOverrides& overrides) {
+  impl_->SetDnsConfigOverrides(overrides);
+}
+
+void MappedHostResolver::SetRequestContext(URLRequestContext* request_context) {
+  impl_->SetRequestContext(request_context);
+}
+
+const std::vector<DnsConfig::DnsOverHttpsServerConfig>*
+MappedHostResolver::GetDnsOverHttpsServersForTesting() const {
+  return impl_->GetDnsOverHttpsServersForTesting();
 }
 
 int MappedHostResolver::ApplyRules(RequestInfo* info) const {

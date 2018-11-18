@@ -61,10 +61,10 @@ class CrOSInterfaceTest(unittest.TestCase):
   @decorators.Enabled('chromeos')
   def testGetFileNonExistent(self):
     with self._GetCRI() as cri:
-      f = tempfile.NamedTemporaryFile()
-      cri.PushContents('testGetFileNonExistent', f.name)
-      cri.RmRF(f.name)
-      self.assertRaises(OSError, lambda: cri.GetFile(f.name))
+      f = '/tmp/testGetFile'  # A path that can be created on the device.
+      cri.PushContents('testGetFileNonExistent', f)
+      cri.RmRF(f)
+      self.assertRaises(OSError, lambda: cri.GetFile(f))
 
   @decorators.Enabled('chromeos')
   def testIsServiceRunning(self):
@@ -166,7 +166,8 @@ class CrOSInterfaceTest(unittest.TestCase):
     cri = cros_interface.CrOSInterface(
         "testhostname", 22, options_for_unittests.GetCopy().cros_ssh_identity)
     cri.TryLogin()
-    mock_run_cmd.assert_called_once_with(['echo', '$USER'], quiet=True)
+    mock_run_cmd.assert_called_once_with(
+        ['echo', '$USER'], quiet=True, connect_timeout=60)
 
   @decorators.Enabled('chromeos')
   @mock.patch.object(cros_interface.CrOSInterface, 'RunCmdOnDevice')

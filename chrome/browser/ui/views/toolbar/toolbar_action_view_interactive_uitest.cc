@@ -23,7 +23,6 @@
 #include "chrome/browser/ui/views/toolbar/extension_toolbar_menu_view.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 #include "chrome/test/base/interactive_test_utils.h"
-#include "chrome/test/views/scoped_macviews_browser_mode.h"
 #include "extensions/browser/notification_types.h"
 #include "extensions/common/extension_builder.h"
 #include "extensions/common/feature_switch.h"
@@ -134,18 +133,17 @@ void TestWhileContextMenuOpen(Browser* browser,
 
 }  // namespace
 
-class ToolbarActionViewInteractiveUITest : public ExtensionBrowserTest {
+class ToolbarActionViewInteractiveUITest
+    : public extensions::ExtensionBrowserTest {
  protected:
   ToolbarActionViewInteractiveUITest();
   ~ToolbarActionViewInteractiveUITest() override;
 
-  // ExtensionBrowserTest:
+  // extensions::ExtensionBrowserTest:
   void SetUpCommandLine(base::CommandLine* command_line) override;
   void TearDownOnMainThread() override;
 
  private:
-  test::ScopedMacViewsBrowserMode views_mode_{true};
-
   DISALLOW_COPY_AND_ASSIGN(ToolbarActionViewInteractiveUITest);
 };
 
@@ -154,7 +152,7 @@ ToolbarActionViewInteractiveUITest::~ToolbarActionViewInteractiveUITest() {}
 
 void ToolbarActionViewInteractiveUITest::SetUpCommandLine(
     base::CommandLine* command_line) {
-  ExtensionBrowserTest::SetUpCommandLine(command_line);
+  extensions::ExtensionBrowserTest::SetUpCommandLine(command_line);
   ToolbarActionsBar::disable_animations_for_testing_ = true;
 }
 

@@ -13,9 +13,12 @@
 #include "base/memory/scoped_refptr.h"
 #include "components/policy/core/common/cloud/cloud_policy_client.h"
 #include "components/policy/core/common/cloud/cloud_policy_service.h"
-#include "net/url_request/url_request_context_getter.h"
 
 class PrefService;
+
+namespace network {
+class SharedURLLoaderFactory;
+}
 
 namespace policy {
 
@@ -29,7 +32,7 @@ class MachineLevelUserCloudPolicyRegistrar {
  public:
   MachineLevelUserCloudPolicyRegistrar(
       DeviceManagementService* device_management_service,
-      scoped_refptr<net::URLRequestContextGetter> system_request_context);
+      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory);
   ~MachineLevelUserCloudPolicyRegistrar();
 
   // The callback invoked once policy registration is complete. Passed
@@ -52,7 +55,7 @@ class MachineLevelUserCloudPolicyRegistrar {
 
   std::unique_ptr<CloudPolicyClientRegistrationHelper> registration_helper_;
   DeviceManagementService* device_management_service_;
-  scoped_refptr<net::URLRequestContextGetter> system_request_context_;
+  scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(MachineLevelUserCloudPolicyRegistrar);
 };
@@ -64,7 +67,7 @@ class MachineLevelUserCloudPolicyFetcher : public CloudPolicyService::Observer {
       MachineLevelUserCloudPolicyManager* policy_manager,
       PrefService* local_state,
       DeviceManagementService* device_management_service,
-      scoped_refptr<net::URLRequestContextGetter> system_request_context);
+      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory);
   ~MachineLevelUserCloudPolicyFetcher() override;
 
   // Initialize the cloud policy client and policy store then fetch
@@ -83,7 +86,7 @@ class MachineLevelUserCloudPolicyFetcher : public CloudPolicyService::Observer {
   MachineLevelUserCloudPolicyManager* policy_manager_;
   PrefService* local_state_;
   DeviceManagementService* device_management_service_;
-  scoped_refptr<net::URLRequestContextGetter> system_request_context_;
+  scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(MachineLevelUserCloudPolicyFetcher);
 };

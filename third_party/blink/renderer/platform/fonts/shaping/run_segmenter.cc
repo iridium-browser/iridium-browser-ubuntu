@@ -35,7 +35,7 @@ RunSegmenter::RunSegmenter(const UChar* buffer,
           run_orientation == FontOrientation::kVerticalMixed ? 0
                                                              : buffer_size_),
       symbols_iterator_position_(0),
-      at_end_(false) {}
+      at_end_(!buffer_size_) {}
 
 void RunSegmenter::ConsumeScriptIteratorPastLastSplit() {
   DCHECK(script_run_iterator_);
@@ -74,8 +74,10 @@ void RunSegmenter::ConsumeSymbolsIteratorPastLastSplit() {
   }
 }
 
+// Consume the input until the next range. Returns false if no more ranges are
+// available.
 bool RunSegmenter::Consume(RunSegmenterRange* next_range) {
-  if (at_end_ || !buffer_size_)
+  if (at_end_)
     return false;
 
   ConsumeScriptIteratorPastLastSplit();

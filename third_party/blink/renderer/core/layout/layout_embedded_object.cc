@@ -30,10 +30,10 @@
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/html/html_plugin_element.h"
 #include "third_party/blink/renderer/core/html_names.h"
+#include "third_party/blink/renderer/core/layout/intrinsic_sizing_info.h"
 #include "third_party/blink/renderer/core/layout/layout_analyzer.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/page/page.h"
-#include "third_party/blink/renderer/core/paint/embedded_object_paint_invalidator.h"
 #include "third_party/blink/renderer/core/paint/embedded_object_painter.h"
 #include "third_party/blink/renderer/platform/text/platform_locale.h"
 
@@ -47,17 +47,6 @@ LayoutEmbeddedObject::LayoutEmbeddedObject(Element* element)
 }
 
 LayoutEmbeddedObject::~LayoutEmbeddedObject() = default;
-
-PaintLayerType LayoutEmbeddedObject::LayerTypeRequired() const {
-  // This can't just use LayoutEmbeddedContent::layerTypeRequired, because
-  // PaintLayerCompositor doesn't loop through LayoutEmbeddedObjects the way it
-  // does frames in order to update the self painting bit on their Layer.
-  // Also, unlike iframes, embeds don't used the usesCompositing bit on
-  // LayoutView in requiresAcceleratedCompositing.
-  if (RequiresAcceleratedCompositing())
-    return kNormalPaintLayer;
-  return LayoutEmbeddedContent::LayerTypeRequired();
-}
 
 static String LocalizedUnavailablePluginReplacementText(
     Node* node,
@@ -93,35 +82,10 @@ bool LayoutEmbeddedObject::ShowsUnavailablePluginIndicator() const {
   return plugin_availability_ != kPluginAvailable;
 }
 
-void LayoutEmbeddedObject::PaintContents(
-    const PaintInfo& paint_info,
-    const LayoutPoint& paint_offset) const {
-  Element* element = ToElement(GetNode());
-  if (!IsHTMLPlugInElement(element))
-    return;
-
-  LayoutEmbeddedContent::PaintContents(paint_info, paint_offset);
-}
-
-void LayoutEmbeddedObject::Paint(const PaintInfo& paint_info,
-                                 const LayoutPoint& paint_offset) const {
-  if (ShowsUnavailablePluginIndicator()) {
-    LayoutReplaced::Paint(paint_info, paint_offset);
-    return;
-  }
-
-  LayoutEmbeddedContent::Paint(paint_info, paint_offset);
-}
-
 void LayoutEmbeddedObject::PaintReplaced(
     const PaintInfo& paint_info,
     const LayoutPoint& paint_offset) const {
   EmbeddedObjectPainter(*this).PaintReplaced(paint_info, paint_offset);
-}
-
-PaintInvalidationReason LayoutEmbeddedObject::InvalidatePaint(
-    const PaintInvalidatorContext& context) const {
-  return EmbeddedObjectPaintInvalidator(*this, context).InvalidatePaint();
 }
 
 void LayoutEmbeddedObject::UpdateLayout() {
@@ -142,15 +106,26 @@ void LayoutEmbeddedObject::UpdateLayout() {
   ClearNeedsLayout();
 }
 
-ScrollResult LayoutEmbeddedObject::Scroll(ScrollGranularity granularity,
-                                          const FloatSize&) {
-  return ScrollResult();
-}
-
 CompositingReasons LayoutEmbeddedObject::AdditionalCompositingReasons() const {
   if (RequiresAcceleratedCompositing())
     return CompositingReason::kPlugin;
   return CompositingReason::kNone;
+}
+
+void LayoutEmbeddedObject::ComputeIntrinsicSizingInfo(
+    IntrinsicSizingInfo& intrinsic_sizing_info) const {
+  FrameView* frame_view = ChildFrameView();
+  if (frame_view && frame_view->GetIntrinsicSizingInfo(intrinsic_sizing_info)) {
+    // Handle zoom & vertical writing modes here, as the embedded document
+    // doesn't know about them.
+    intrinsic_sizing_info.size.Scale(StyleRef().EffectiveZoom());
+
+    if (!IsHorizontalWritingMode())
+      intrinsic_sizing_info.Transpose();
+    return;
+  }
+
+  LayoutEmbeddedContent::ComputeIntrinsicSizingInfo(intrinsic_sizing_info);
 }
 
 bool LayoutEmbeddedObject::NeedsPreferredWidthsRecalculation() const {
@@ -158,13 +133,6 @@ bool LayoutEmbeddedObject::NeedsPreferredWidthsRecalculation() const {
     return true;
   FrameView* frame_view = ChildFrameView();
   return frame_view && frame_view->HasIntrinsicSizingInfo();
-}
-
-bool LayoutEmbeddedObject::GetNestedIntrinsicSizingInfo(
-    IntrinsicSizingInfo& intrinsic_sizing_info) const {
-  if (FrameView* frame_view = ChildFrameView())
-    return frame_view->GetIntrinsicSizingInfo(intrinsic_sizing_info);
-  return false;
 }
 
 }  // namespace blink

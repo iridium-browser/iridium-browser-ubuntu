@@ -47,6 +47,7 @@
 #include "rtc_base/arraysize.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/fileutils.h"
+#include "rtc_base/logging.h"
 #include "rtc_base/pathutils.h"
 #include "rtc_base/stream.h"
 #include "rtc_base/stringutils.h"
@@ -57,7 +58,7 @@ UnixFilesystem::UnixFilesystem() {}
 
 UnixFilesystem::~UnixFilesystem() {}
 
-bool UnixFilesystem::DeleteFile(const Pathname &filename) {
+bool UnixFilesystem::DeleteFile(const Pathname& filename) {
   RTC_LOG(LS_INFO) << "Deleting file:" << filename.pathname();
 
   if (!IsFile(filename)) {
@@ -67,8 +68,8 @@ bool UnixFilesystem::DeleteFile(const Pathname &filename) {
   return ::unlink(filename.pathname().c_str()) == 0;
 }
 
-bool UnixFilesystem::MoveFile(const Pathname &old_path,
-                              const Pathname &new_path) {
+bool UnixFilesystem::MoveFile(const Pathname& old_path,
+                              const Pathname& new_path) {
   if (!IsFile(old_path)) {
     RTC_DCHECK(IsFile(old_path));
     return false;
@@ -81,7 +82,7 @@ bool UnixFilesystem::MoveFile(const Pathname &old_path,
   return true;
 }
 
-bool UnixFilesystem::IsFolder(const Pathname &path) {
+bool UnixFilesystem::IsFolder(const Pathname& path) {
   struct stat st;
   if (stat(path.pathname().c_str(), &st) < 0)
     return false;
@@ -95,7 +96,7 @@ bool UnixFilesystem::IsFile(const Pathname& pathname) {
   return res == 0 && !S_ISDIR(st.st_mode);
 }
 
-bool UnixFilesystem::GetFileSize(const Pathname& pathname, size_t *size) {
+bool UnixFilesystem::GetFileSize(const Pathname& pathname, size_t* size) {
   struct stat st;
   if (::stat(pathname.pathname().c_str(), &st) != 0)
     return false;

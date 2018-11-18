@@ -17,9 +17,14 @@
 #ifndef INCLUDE_PERFETTO_BASE_UTILS_H_
 #define INCLUDE_PERFETTO_BASE_UTILS_H_
 
+#include "perfetto/base/build_config.h"
+
 #include <errno.h>
 #include <stddef.h>
 #include <stdlib.h>
+#if !PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
+#include <sys/types.h>
+#endif
 
 #define PERFETTO_EINTR(x)                                   \
   ({                                                        \
@@ -30,8 +35,42 @@
     eintr_wrapper_result;                                   \
   })
 
+#define PERFETTO_LIKELY(_x) __builtin_expect(!!(_x), 1)
+#define PERFETTO_UNLIKELY(_x) __builtin_expect(!!(_x), 0)
+
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
+// TODO(brucedawson) - create a ::perfetto::base::IOSize to replace this.
+#if defined(_WIN64)
+using ssize_t = __int64;
+#else
+using ssize_t = long;
+#endif
+#endif
+
+#if defined(__GNUC__) || defined(__clang__)
+#define PERFETTO_WARN_UNUSED_RESULT __attribute__((warn_unused_result))
+#else
+#define PERFETTO_WARN_UNUSED_RESULT
+#endif
+
+#if defined(__clang__)
+#define PERFETTO_ALWAYS_INLINE __attribute__((__always_inline__))
+#else
+// GCC is too pedantic and often fails with the error:
+// "always_inline function might not be inlinable"
+#define PERFETTO_ALWAYS_INLINE
+#endif
+
 namespace perfetto {
 namespace base {
+
+#if !PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
+constexpr uid_t kInvalidUid = static_cast<uid_t>(-1);
+constexpr pid_t kInvalidPid = static_cast<pid_t>(-1);
+#endif
+
+constexpr size_t kPageSize = 4096;
+constexpr size_t kMaxCpus = 128;
 
 template <typename T>
 constexpr size_t ArraySize(const T& array) {
@@ -55,6 +94,13 @@ constexpr T AssumeLittleEndian(T value) {
   static_assert(__BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__,
                 "Unimplemented on big-endian archs");
   return value;
+}
+
+// Round up |size| to a multiple of |alignment| (must be a power of two).
+template <size_t alignment>
+constexpr size_t AlignUp(size_t size) {
+  static_assert((alignment & (alignment - 1)) == 0, "alignment must be a pow2");
+  return (size + alignment - 1) & ~(alignment - 1);
 }
 
 }  // namespace base

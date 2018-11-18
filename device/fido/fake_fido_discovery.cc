@@ -20,7 +20,7 @@ namespace test {
 
 FakeFidoDiscovery::FakeFidoDiscovery(FidoTransportProtocol transport,
                                      StartMode mode)
-    : FidoDiscovery(transport), mode_(mode) {}
+    : FidoDeviceDiscovery(transport), mode_(mode) {}
 FakeFidoDiscovery::~FakeFidoDiscovery() = default;
 
 void FakeFidoDiscovery::WaitForCallToStart() {
@@ -43,7 +43,7 @@ void FakeFidoDiscovery::StartInternal() {
   if (mode_ == StartMode::kAutomatic) {
     base::SequencedTaskRunnerHandle::Get()->PostTask(
         FROM_HERE, base::BindOnce(&FakeFidoDiscovery::SimulateStarted,
-                                  base::Unretained(this), true /* success */));
+                                  AsWeakPtr(), true /* success */));
   }
 }
 
@@ -73,7 +73,14 @@ FakeFidoDiscovery* ScopedFakeFidoDiscoveryFactory::ForgeNextBleDiscovery(
   return next_ble_discovery_.get();
 }
 
-std::unique_ptr<FidoDiscovery>
+FakeFidoDiscovery* ScopedFakeFidoDiscoveryFactory::ForgeNextCableDiscovery(
+    FakeFidoDiscovery::StartMode mode) {
+  next_cable_discovery_ = std::make_unique<FakeFidoDiscovery>(
+      FidoTransportProtocol::kCloudAssistedBluetoothLowEnergy, mode);
+  return next_cable_discovery_.get();
+}
+
+std::unique_ptr<FidoDeviceDiscovery>
 ScopedFakeFidoDiscoveryFactory::CreateFidoDiscovery(
     FidoTransportProtocol transport,
     ::service_manager::Connector* connector) {
@@ -84,6 +91,11 @@ ScopedFakeFidoDiscoveryFactory::CreateFidoDiscovery(
       return std::move(next_nfc_discovery_);
     case FidoTransportProtocol::kBluetoothLowEnergy:
       return std::move(next_ble_discovery_);
+    case FidoTransportProtocol::kCloudAssistedBluetoothLowEnergy:
+      return std::move(next_cable_discovery_);
+    case FidoTransportProtocol::kInternal:
+      NOTREACHED() << "Internal authenticators should be handled separately.";
+      return nullptr;
   }
   NOTREACHED();
   return nullptr;

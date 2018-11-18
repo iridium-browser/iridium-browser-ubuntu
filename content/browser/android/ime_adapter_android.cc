@@ -14,12 +14,12 @@
 #include "base/android/scoped_java_ref.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
+#include "content/browser/android/text_suggestion_host_android.h"
 #include "content/browser/frame_host/render_frame_host_impl.h"
 #include "content/browser/renderer_host/render_view_host_delegate.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/browser/renderer_host/render_widget_host_view_android.h"
 #include "content/common/frame_messages.h"
-#include "content/common/input_messages.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/native_web_keyboard_event.h"
@@ -54,10 +54,10 @@ NativeWebKeyboardEvent NativeWebKeyboardEventFromKeyEvent(
     int scan_code,
     bool is_system_key,
     int unicode_char) {
-  return NativeWebKeyboardEvent(env, java_key_event,
-                                static_cast<blink::WebInputEvent::Type>(type),
-                                modifiers, time_ms / 1000.0, key_code,
-                                scan_code, unicode_char, is_system_key);
+  return NativeWebKeyboardEvent(
+      env, java_key_event, static_cast<blink::WebInputEvent::Type>(type),
+      modifiers, base::TimeTicks() + base::TimeDelta::FromMilliseconds(time_ms),
+      key_code, scan_code, unicode_char, is_system_key);
 }
 
 }  // anonymous namespace
@@ -145,13 +145,17 @@ ImeAdapterAndroid::ImeAdapterAndroid(JNIEnv* env,
                                      WebContents* web_contents)
     : RenderWidgetHostConnector(web_contents), rwhva_(nullptr) {
   java_ime_adapter_ = JavaObjectWeakGlobalRef(env, obj);
+
+  // Set up mojo client for TextSuggestionHost in advance. Java side is
+  // initialized lazily right before showing the menu first time.
+  TextSuggestionHostAndroid::Create(env, web_contents);
 }
 
 ImeAdapterAndroid::~ImeAdapterAndroid() {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = java_ime_adapter_.get(env);
   if (!obj.is_null())
-    Java_ImeAdapterImpl_destroy(env, obj);
+    Java_ImeAdapterImpl_onNativeDestroyed(env, obj);
 }
 
 void ImeAdapterAndroid::UpdateRenderProcessConnection(

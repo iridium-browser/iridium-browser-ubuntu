@@ -5,8 +5,9 @@
 # Recipe module for Skia Swarming SKQP testing.
 
 DEPS = [
-  'core',
   'flavor',
+  'recipe_engine/file',
+  'recipe_engine/path',
   'recipe_engine/properties',
   'run',
   'vars',
@@ -27,7 +28,10 @@ def test_firebase_steps(api):
   api.run(api.flavor.step, 'run firebase testlab', cmd=args)
 
 def RunSteps(api):
-  api.core.setup()
+  api.vars.setup()
+  api.file.ensure_directory('makedirs tmp_dir', api.vars.tmp_dir)
+  api.flavor.setup()
+
   test_firebase_steps(api)
   api.run.check_failure()
 

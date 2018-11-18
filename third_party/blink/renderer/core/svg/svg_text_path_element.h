@@ -71,7 +71,7 @@ class SVGTextPathElement final : public SVGTextContentElement,
     return spacing_.Get();
   }
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  private:
   explicit SVGTextPathElement(Document&);
@@ -81,8 +81,8 @@ class SVGTextPathElement final : public SVGTextContentElement,
   void ClearResourceReferences();
 
   void BuildPendingResource() override;
-  InsertionNotificationRequest InsertedInto(ContainerNode*) override;
-  void RemovedFrom(ContainerNode*) override;
+  InsertionNotificationRequest InsertedInto(ContainerNode&) override;
+  void RemovedFrom(ContainerNode&) override;
 
   void SvgAttributeChanged(const QualifiedName&) override;
 

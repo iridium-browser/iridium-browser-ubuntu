@@ -2,16 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef BASE_SAMPLING_HEAP_PROFILER_SAMPLING_HEAP_PROFILER_H
-#define BASE_SAMPLING_HEAP_PROFILER_SAMPLING_HEAP_PROFILER_H
+#ifndef BASE_SAMPLING_HEAP_PROFILER_SAMPLING_HEAP_PROFILER_H_
+#define BASE_SAMPLING_HEAP_PROFILER_SAMPLING_HEAP_PROFILER_H_
 
 #include <unordered_map>
 #include <vector>
 
 #include "base/base_export.h"
 #include "base/macros.h"
+#include "base/sampling_heap_profiler/poisson_allocation_sampler.h"
 #include "base/synchronization/lock.h"
-#include "base/threading/thread_local.h"
 
 namespace base {
 
@@ -19,11 +19,11 @@ template <typename T>
 class NoDestructor;
 
 // The class implements sampling profiling of native memory heap.
-// It hooks on base::allocator and base::PartitionAlloc.
-// When started it selects and records allocation samples based on
-// the sampling_interval parameter.
+// It uses PoissonAllocationSampler to aggregate the heap allocations and
+// record samples.
 // The recorded samples can then be retrieved using GetSamples method.
-class BASE_EXPORT SamplingHeapProfiler {
+class BASE_EXPORT SamplingHeapProfiler
+    : private PoissonAllocationSampler::SamplesObserver {
  public:
   class BASE_EXPORT Sample {
    public:
@@ -42,69 +42,36 @@ class BASE_EXPORT SamplingHeapProfiler {
     uint32_t ordinal;
   };
 
-  class SamplesObserver {
-   public:
-    virtual ~SamplesObserver() = default;
-    virtual void SampleAdded(uint32_t id, size_t size, size_t total) = 0;
-    virtual void SampleRemoved(uint32_t id) = 0;
-  };
-
-  // Must be called early during the process initialization. It creates and
-  // reserves a TLS slot.
-  static void InitTLSSlot();
-
-  // This is an entry point for plugging in an external allocator.
-  // Profiler will invoke the provided callback upon initialization.
-  // The callback should install hooks onto the corresponding memory allocator
-  // and make them invoke SamplingHeapProfiler::RecordAlloc and
-  // SamplingHeapProfiler::RecordFree upon corresponding allocation events.
-  //
-  // If the method is called after profiler is initialized, the callback
-  // is invoked right away.
-  static void SetHooksInstallCallback(void (*hooks_install_callback)());
-
-  void AddSamplesObserver(SamplesObserver*);
-  void RemoveSamplesObserver(SamplesObserver*);
-
   uint32_t Start();
   void Stop();
   void SetSamplingInterval(size_t sampling_interval);
-  void SuppressRandomnessForTest(bool suppress);
 
   std::vector<Sample> GetSamples(uint32_t profile_id);
 
-  static void RecordAlloc(void* address, size_t, uint32_t skip_frames = 0);
-  static void RecordFree(void* address);
-
-  static SamplingHeapProfiler* GetInstance();
+  static void Init();
+  static SamplingHeapProfiler* Get();
 
  private:
   SamplingHeapProfiler();
-  ~SamplingHeapProfiler() = delete;
+  ~SamplingHeapProfiler() override;
 
-  static void InstallAllocatorHooksOnce();
-  static bool InstallAllocatorHooks();
-  static size_t GetNextSampleInterval(size_t base_interval);
+  // PoissonAllocationSampler::SamplesObserver
+  void SampleAdded(void* address,
+                   size_t size,
+                   size_t total,
+                   PoissonAllocationSampler::AllocatorType type,
+                   const char* context) override;
+  void SampleRemoved(void* address) override;
 
-  void DoRecordAlloc(size_t total_allocated,
-                     size_t allocation_size,
-                     void* address,
-                     uint32_t skip_frames);
-  void DoRecordFree(void* address);
-  void RecordStackTrace(Sample*, uint32_t skip_frames);
-
-  base::ThreadLocalBoolean entered_;
-  base::Lock mutex_;
+  Lock mutex_;
   std::unordered_map<void*, Sample> samples_;
-  std::vector<SamplesObserver*> observers_;
+  uint32_t last_sample_ordinal_ = 1;
 
-  static SamplingHeapProfiler* instance_;
-
-  friend class base::NoDestructor<SamplingHeapProfiler>;
+  friend class NoDestructor<SamplingHeapProfiler>;
 
   DISALLOW_COPY_AND_ASSIGN(SamplingHeapProfiler);
 };
 
 }  // namespace base
 
-#endif  // BASE_SAMPLING_HEAP_PROFILER_SAMPLING_HEAP_PROFILER_H
+#endif  // BASE_SAMPLING_HEAP_PROFILER_SAMPLING_HEAP_PROFILER_H_

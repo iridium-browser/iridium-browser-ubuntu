@@ -35,8 +35,7 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/login/users/scoped_test_user_manager.h"
-#include "chrome/browser/chromeos/settings/cros_settings.h"
-#include "chrome/browser/chromeos/settings/device_settings_service.h"
+#include "chrome/browser/chromeos/settings/scoped_cros_settings_test_helper.h"
 #endif
 
 using ::testing::StrictMock;
@@ -59,7 +58,7 @@ class ExtensionTestingProfile : public TestingProfile {
 
  private:
   TestingProfile* profile_;
-  ExtensionService* extension_service_;
+  extensions::ExtensionService* extension_service_;
   extensions::ExtensionPrefs* extension_prefs_;
 };
 
@@ -83,7 +82,7 @@ void ExtensionTestingProfile::AddExtension(std::string extension_id,
                                            std::string description,
                                            std::string update_url,
                                            int state_value) {
-  scoped_refptr<extensions::Extension> extension =
+  scoped_refptr<const extensions::Extension> extension =
       extensions::ExtensionBuilder()
           .SetID(extension_id)
           .SetManifest(extensions::DictionaryBuilder()
@@ -185,8 +184,7 @@ class ExtensionDataCollectionTest : public testing::Test {
   int profile_number_;
 
 #if defined OS_CHROMEOS
-  chromeos::ScopedTestDeviceSettingsService test_device_settings_service_;
-  chromeos::ScopedTestCrosSettings test_cros_settings_;
+  chromeos::ScopedCrosSettingsTestHelper cros_settings_test_helper_;
   std::unique_ptr<chromeos::ScopedTestUserManager> test_user_manager_;
 #endif
 };

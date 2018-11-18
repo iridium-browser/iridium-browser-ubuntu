@@ -136,8 +136,6 @@ class CORE_EXPORT HTMLSelectElement final
   void OptGroupInsertedOrRemoved(HTMLOptGroupElement&);
   void HrInsertedOrRemoved(HTMLHRElement&);
 
-  void UpdateListOnLayoutObject();
-
   HTMLOptionElement* SpatialNavigationFocusedOption();
   void HandleMouseRelease();
 
@@ -175,6 +173,8 @@ class CORE_EXPORT HTMLSelectElement final
   bool HasNonInBodyInsertionMode() const override { return true; }
 
   void Trace(blink::Visitor*) override;
+  void CloneNonAttributePropertiesFrom(const Element&,
+                                       CloneChildrenFlag) override;
 
  protected:
   explicit HTMLSelectElement(Document&);
@@ -182,7 +182,7 @@ class CORE_EXPORT HTMLSelectElement final
  private:
   const AtomicString& FormControlType() const override;
 
-  bool ShouldShowFocusRingOnMouseFocus() const override;
+  bool MayTriggerVirtualKeyboard() const override;
 
   void DispatchFocusEvent(
       Element* old_focused_element,
@@ -211,7 +211,7 @@ class CORE_EXPORT HTMLSelectElement final
   void AppendToFormData(FormData&) override;
   void DidAddUserAgentShadowRoot(ShadowRoot&) override;
 
-  void DefaultEventHandler(Event*) override;
+  void DefaultEventHandler(Event&) override;
 
   void DispatchInputAndChangeEventForMenuList();
 
@@ -219,7 +219,7 @@ class CORE_EXPORT HTMLSelectElement final
   void RecalcListItems() const;
   enum ResetReason { kResetReasonSelectedOptionRemoved, kResetReasonOthers };
   void ResetToDefaultSelection(ResetReason = kResetReasonOthers);
-  void TypeAheadFind(KeyboardEvent*);
+  void TypeAheadFind(const KeyboardEvent&);
   void SaveLastSelection();
   void SaveListboxActiveSelection();
   // Returns the first selected OPTION, or nullptr.
@@ -244,15 +244,15 @@ class CORE_EXPORT HTMLSelectElement final
   void ParseMultipleAttribute(const AtomicString&);
   HTMLOptionElement* LastSelectedOption() const;
   void UpdateSelectedState(HTMLOptionElement*, bool multi, bool shift);
-  void MenuListDefaultEventHandler(Event*);
-  void HandlePopupOpenKeyboardEvent(Event*);
-  bool ShouldOpenPopupForKeyDownEvent(KeyboardEvent*);
-  bool ShouldOpenPopupForKeyPressEvent(KeyboardEvent*);
-  void ListBoxDefaultEventHandler(Event*);
+  void MenuListDefaultEventHandler(Event&);
+  void HandlePopupOpenKeyboardEvent(Event&);
+  bool ShouldOpenPopupForKeyDownEvent(const KeyboardEvent&);
+  bool ShouldOpenPopupForKeyPressEvent(const KeyboardEvent&);
+  void ListBoxDefaultEventHandler(Event&);
   void SetOptionsChangedOnLayoutObject();
-  size_t SearchOptionsForValue(const String&,
-                               size_t list_index_start,
-                               size_t list_index_end) const;
+  wtf_size_t SearchOptionsForValue(const String&,
+                                   wtf_size_t list_index_start,
+                                   wtf_size_t list_index_end) const;
   void UpdateListBoxSelection(bool deselect_other_options, bool scroll = true);
   void SetIndexToSelectOnCancel(int list_index);
   void SetSuggestedOption(HTMLOptionElement*);
@@ -285,7 +285,7 @@ class CORE_EXPORT HTMLSelectElement final
   void ObserveTreeMutation();
   void UnobserveTreeMutation();
 
-  // m_listItems contains HTMLOptionElement, HTMLOptGroupElement, and
+  // list_items_ contains HTMLOptionElement, HTMLOptGroupElement, and
   // HTMLHRElement objects.
   mutable ListItems list_items_;
   Vector<bool> last_on_change_selection_;

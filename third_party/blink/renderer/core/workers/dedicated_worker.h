@@ -14,6 +14,8 @@
 #include "third_party/blink/renderer/core/messaging/message_port.h"
 #include "third_party/blink/renderer/core/workers/abstract_worker.h"
 #include "third_party/blink/renderer/core/workers/worker_options.h"
+#include "third_party/blink/renderer/platform/graphics/begin_frame_provider.h"
+#include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 
 namespace v8_inspector {
@@ -25,10 +27,10 @@ namespace blink {
 class DedicatedWorkerMessagingProxy;
 class ExceptionState;
 class ExecutionContext;
+class PostMessageOptions;
 class ScriptState;
 class WorkerClassicScriptLoader;
 class WorkerClients;
-class WorkerModuleFetchCoordinator;
 struct GlobalScopeCreationParams;
 
 // Implementation of the Worker interface defined in the WebWorker HTML spec:
@@ -54,11 +56,15 @@ class CORE_EXPORT DedicatedWorker final
   ~DedicatedWorker() override;
 
   void postMessage(ScriptState*,
-                   scoped_refptr<SerializedScriptValue> message,
-                   const MessagePortArray&,
+                   const ScriptValue& message,
+                   Vector<ScriptValue>& transfer,
                    ExceptionState&);
-  static bool CanTransferArrayBuffersAndImageBitmaps() { return true; }
+  void postMessage(ScriptState*,
+                   const ScriptValue& message,
+                   const PostMessageOptions&,
+                   ExceptionState&);
   void terminate();
+  BeginFrameProviderParams CreateBeginFrameProviderParams();
 
   // Implements ContextLifecycleObserver (via AbstractWorker).
   void ContextDestroyed(ExecutionContext*) override;
@@ -67,19 +73,23 @@ class CORE_EXPORT DedicatedWorker final
   // (via AbstractWorker -> EventTargetWithInlineData -> EventTarget).
   bool HasPendingActivity() const final;
 
+  // Returns the name specified by WorkerOptions.
+  const String Name() const;
+
   DEFINE_ATTRIBUTE_EVENT_LISTENER(message);
 
   void Trace(blink::Visitor*) override;
 
  private:
   DedicatedWorker(ExecutionContext*,
-                  const KURL& script_url,
+                  const KURL& script_request_url,
                   const WorkerOptions&);
 
   // Starts the worker.
   void Start();
 
-  std::unique_ptr<GlobalScopeCreationParams> CreateGlobalScopeCreationParams();
+  std::unique_ptr<GlobalScopeCreationParams> CreateGlobalScopeCreationParams(
+      const KURL& script_url);
 
   WorkerClients* CreateWorkerClients();
 
@@ -90,13 +100,11 @@ class CORE_EXPORT DedicatedWorker final
   // Implements EventTarget (via AbstractWorker -> EventTargetWithInlineData).
   const AtomicString& InterfaceName() const final;
 
-  const KURL script_url_;
+  const KURL script_request_url_;
   const WorkerOptions options_;
   const Member<DedicatedWorkerMessagingProxy> context_proxy_;
 
   scoped_refptr<WorkerClassicScriptLoader> classic_script_loader_;
-
-  Member<WorkerModuleFetchCoordinator> module_fetch_coordinator_;
 };
 
 }  // namespace blink

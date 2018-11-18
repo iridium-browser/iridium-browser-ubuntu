@@ -27,47 +27,20 @@
 
 namespace views {
 
-namespace {
-
-bool UseMaterialSecondaryButtons() {
-#if defined(OS_MACOSX)
-  return true;
-#else
-  return ui::MaterialDesignController::IsSecondaryUiMaterial();
-#endif  // defined(OS_MACOSX)
-}
-
-LabelButton* CreateButton(ButtonListener* listener,
-                          const base::string16& text,
-                          bool md) {
-  if (md)
-    return MdTextButton::Create(listener, text, style::CONTEXT_BUTTON_MD);
-
-  LabelButton* button = new LabelButton(listener, text, style::CONTEXT_BUTTON);
-  button->SetStyleDeprecated(Button::STYLE_BUTTON);
-  return button;
-}
-
-}  // namespace
-
 // static
 LabelButton* MdTextButton::CreateSecondaryUiButton(ButtonListener* listener,
                                                    const base::string16& text) {
-  return CreateButton(listener, text, UseMaterialSecondaryButtons());
+  return MdTextButton::Create(listener, text, style::CONTEXT_BUTTON_MD);
 }
 
 // static
 LabelButton* MdTextButton::CreateSecondaryUiBlueButton(
     ButtonListener* listener,
     const base::string16& text) {
-  if (UseMaterialSecondaryButtons()) {
-    MdTextButton* md_button =
-        MdTextButton::Create(listener, text, style::CONTEXT_BUTTON_MD);
-    md_button->SetProminent(true);
-    return md_button;
-  }
-
-  return new BlueButton(listener, text);
+  MdTextButton* md_button =
+      MdTextButton::Create(listener, text, style::CONTEXT_BUTTON_MD);
+  md_button->SetProminent(true);
+  return md_button;
 }
 
 // static
@@ -77,6 +50,7 @@ MdTextButton* MdTextButton::Create(ButtonListener* listener,
   MdTextButton* button = new MdTextButton(listener, button_context);
   button->SetText(text);
   button->SetFocusForPlatform();
+
   return button;
 }
 
@@ -95,23 +69,22 @@ void MdTextButton::SetBgColorOverride(const base::Optional<SkColor>& color) {
   UpdateColors();
 }
 
+void MdTextButton::set_corner_radius(float radius) {
+  corner_radius_ = radius;
+  set_ink_drop_corner_radii(corner_radius_, corner_radius_);
+}
+
 void MdTextButton::OnPaintBackground(gfx::Canvas* canvas) {
   LabelButton::OnPaintBackground(canvas);
   if (hover_animation().is_animating() || state() == STATE_HOVERED) {
     const int kHoverAlpha = is_prominent_ ? 0x0c : 0x05;
     SkScalar alpha = hover_animation().CurrentValueBetween(0, kHoverAlpha);
-    canvas->FillRect(GetLocalBounds(), SkColorSetA(SK_ColorBLACK, alpha));
+    cc::PaintFlags flags;
+    flags.setColor(SkColorSetA(SK_ColorBLACK, alpha));
+    flags.setStyle(cc::PaintFlags::kFill_Style);
+    flags.setAntiAlias(true);
+    canvas->DrawRoundRect(gfx::RectF(GetLocalBounds()), corner_radius_, flags);
   }
-}
-
-void MdTextButton::OnFocus() {
-  LabelButton::OnFocus();
-  FocusRing::Install(this);
-}
-
-void MdTextButton::OnBlur() {
-  LabelButton::OnBlur();
-  FocusRing::Uninstall(this);
 }
 
 void MdTextButton::OnNativeThemeChanged(const ui::NativeTheme* theme) {
@@ -179,16 +152,17 @@ void MdTextButton::UpdateStyleToIndicateDefaultStatus() {
 
 MdTextButton::MdTextButton(ButtonListener* listener, int button_context)
     : LabelButton(listener, base::string16(), button_context),
-      is_prominent_(false),
-      corner_radius_(kInkDropSmallCornerRadius) {
+      is_prominent_(false) {
   SetInkDropMode(InkDropMode::ON);
   set_has_ink_drop_action_on_click(true);
+  set_corner_radius(LayoutProvider::Get()->GetCornerRadiusMetric(EMPHASIS_LOW));
   SetHorizontalAlignment(gfx::ALIGN_CENTER);
   SetFocusForPlatform();
   const int minimum_width = LayoutProvider::Get()->GetDistanceMetric(
       DISTANCE_DIALOG_BUTTON_MINIMUM_WIDTH);
   SetMinSize(gfx::Size(minimum_width, 0));
   SetFocusPainter(nullptr);
+  SetInstallFocusRingOnFocus(true);
   label()->SetAutoColorReadabilityEnabled(false);
   set_request_focus_on_press(false);
 
@@ -226,8 +200,9 @@ void MdTextButton::UpdatePadding() {
   // GetControlHeightForFont(). It can't because that only returns a correct
   // result with --secondary-ui-md, and MdTextButtons appear in top chrome
   // without that.
-  const int kBaseHeight = 28;
-  int target_height = std::max(kBaseHeight + size_delta * 2,
+  const int base_height =
+      ui::MaterialDesignController::IsNewerMaterialUi() ? 32 : 28;
+  int target_height = std::max(base_height + size_delta * 2,
                                label()->font_list().GetFontSize() * 2);
 
   int label_height = label()->GetPreferredSize().height();
@@ -305,25 +280,10 @@ void MdTextButton::UpdateColors() {
       // Harmony and non-Harmony colors.
       stroke_alpha = 0x43;
     } else {
-      // These alpha values will take the enabled button colors, 5a5a5a @ 1.0
-      // alpha for non-Harmony, 757575 @ 1.0 alpha for Harmony and turn it into
-      // an effective b2b2b2 @ 1.0 alpha or 000000 @ 0.3 for the stroke_color.
-      stroke_alpha = UseMaterialSecondaryButtons() ? 0x8f : 0x77;
-#if defined(OS_MACOSX)
-      // Without full secondary UI MD support, the text color is solid black,
-      // and so the border is too dark on Mac. On Retina it looks OK, so
-      // heuristically determine the scale factor as well.
-      if (!ui::MaterialDesignController::IsSecondaryUiMaterial()) {
-        // The Compositor may only be set when attached to a Widget. But, since
-        // that also determines the theme, UpdateColors() will always be called
-        // after attaching to a Widget.
-        // TODO(tapted): Move this into SolidRoundRectPainter if we like this
-        // logic for Harmony.
-        auto* compositor = layer()->GetCompositor();
-        if (compositor && compositor->device_scale_factor() == 1)
-          stroke_alpha = 0x4d;  // Chosen to match full secondary UI MD (0.3).
-      }
-#endif
+      // These alpha values will take the enabled button colors, 757575 @ 1.0
+      // alpha turn it into an effective b2b2b2 @ 1.0 alpha or 000000 @ 0.3 for
+      // the stroke_color.
+      stroke_alpha = 0x8f;
     }
     stroke_color = SkColorSetA(text_color, stroke_alpha);
   }

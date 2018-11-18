@@ -2,10 +2,16 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/config/jumbo.gni")
+
 # Implementations of media C++ interfaces using corresponding mojo services.
-source_set("clients") {
+jumbo_source_set("clients") {
   visibility = [
     "//chromecast/*",
+
+    # Mirroring Service needs the video accelerated encoder mojom interfaces.
+    "//components/mirroring/service:mirroring_service",
+
     "//content/renderer:*",
 
     # TODO(xhwang): Only allow //media/mojo/services:media_service_unittests
@@ -14,6 +20,8 @@ source_set("clients") {
     "//media/mojo:test_support",
 
     "//media/test/*",
+
+    "//chrome/browser:*",
 
     "//content/gpu:*",
 
@@ -67,7 +75,6 @@ source_set("clients") {
     "//media/gpu",
     "//media/mojo/common",
     "//media/mojo/common:mojo_shared_buffer_video_frame",
-    "//mojo/common",
     "//services/service_manager/public/cpp",
   ]
 
@@ -80,7 +87,10 @@ source_set("clients") {
 }
 
 source_set("jpeg_decode_accelerator") {
-  visibility = [ "//content/browser" ]
+  visibility = [
+    "//content/browser",
+    "//media/capture:capture_lib",
+  ]
 
   sources = [
     "mojo_jpeg_decode_accelerator.cc",
@@ -90,7 +100,6 @@ source_set("jpeg_decode_accelerator") {
   deps = [
     "//base",
     "//media/mojo/interfaces",
-    "//mojo/common",
   ]
 }
 

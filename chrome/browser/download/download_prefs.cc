@@ -13,9 +13,9 @@
 #include "base/bind_helpers.h"
 #include "base/feature_list.h"
 #include "base/files/file_util.h"
-#include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/no_destructor.h"
 #include "base/path_service.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
@@ -74,7 +74,7 @@ bool DownloadPathIsDangerous(const base::FilePath& download_path) {
   return false;
 #else
   base::FilePath desktop_dir;
-  if (!PathService::Get(base::DIR_USER_DESKTOP, &desktop_dir)) {
+  if (!base::PathService::Get(base::DIR_USER_DESKTOP, &desktop_dir)) {
     NOTREACHED();
     return false;
   }
@@ -86,29 +86,33 @@ class DefaultDownloadDirectory {
  public:
   const base::FilePath& path() const { return path_; }
 
- private:
-  friend struct base::LazyInstanceTraitsBase<DefaultDownloadDirectory>;
-
-  DefaultDownloadDirectory() {
-    if (!PathService::Get(chrome::DIR_DEFAULT_DOWNLOADS, &path_)) {
+  void Initialize() {
+    if (!base::PathService::Get(chrome::DIR_DEFAULT_DOWNLOADS, &path_)) {
       NOTREACHED();
     }
     if (DownloadPathIsDangerous(path_)) {
       // This is only useful on platforms that support
       // DIR_DEFAULT_DOWNLOADS_SAFE.
-      if (!PathService::Get(chrome::DIR_DEFAULT_DOWNLOADS_SAFE, &path_)) {
+      if (!base::PathService::Get(chrome::DIR_DEFAULT_DOWNLOADS_SAFE, &path_)) {
         NOTREACHED();
       }
     }
   }
+
+ private:
+  friend class base::NoDestructor<DefaultDownloadDirectory>;
+
+  DefaultDownloadDirectory() { Initialize(); }
 
   base::FilePath path_;
 
   DISALLOW_COPY_AND_ASSIGN(DefaultDownloadDirectory);
 };
 
-base::LazyInstance<DefaultDownloadDirectory>::DestructorAtExit
-    g_default_download_directory = LAZY_INSTANCE_INITIALIZER;
+DefaultDownloadDirectory& GetDefaultDownloadDirectorySingleton() {
+  static base::NoDestructor<DefaultDownloadDirectory> instance;
+  return *instance;
+}
 
 }  // namespace
 
@@ -162,6 +166,16 @@ DownloadPrefs::DownloadPrefs(Profile* profile) : profile_(profile) {
   prompt_for_download_.Init(prefs::kPromptForDownload, prefs);
 #if defined(OS_ANDROID)
   prompt_for_download_android_.Init(prefs::kPromptForDownloadAndroid, prefs);
+
+  // If |kDownloadsLocationChange| is not enabled, always uses the default
+  // download location, in case that the feature is enabled and then disabled
+  // from finch config and the user may stuck at other download locations.
+  if (!base::FeatureList::IsEnabled(features::kDownloadsLocationChange)) {
+    prefs->SetFilePath(prefs::kDownloadDefaultDirectory,
+                       GetDefaultDownloadDirectoryForProfile());
+    prefs->SetFilePath(prefs::kSaveFileDefaultDirectory,
+                       GetDefaultDownloadDirectoryForProfile());
+  }
 #endif
   download_path_.Init(prefs::kDownloadDefaultDirectory, prefs);
   save_file_path_.Init(prefs::kSaveFileDefaultDirectory, prefs);
@@ -233,11 +247,14 @@ void DownloadPrefs::RegisterProfilePrefs(
 #endif
 #if defined(OS_ANDROID)
   DownloadPromptStatus download_prompt_status =
-      (base::FeatureList::IsEnabled(features::kDownloadsLocationChange))
+      base::FeatureList::IsEnabled(features::kDownloadsLocationChange)
           ? DownloadPromptStatus::SHOW_INITIAL
           : DownloadPromptStatus::DONT_SHOW;
   registry->RegisterIntegerPref(prefs::kPromptForDownloadAndroid,
                                 static_cast<int>(download_prompt_status));
+  registry->RegisterBooleanPref(
+      prefs::kShowMissingSdCardErrorAndroid,
+      base::FeatureList::IsEnabled(features::kDownloadsLocationChange));
 #endif
 }
 
@@ -250,8 +267,13 @@ base::FilePath DownloadPrefs::GetDefaultDownloadDirectoryForProfile() const {
 }
 
 // static
+void DownloadPrefs::ReinitializeDefaultDownloadDirectoryForTesting() {
+  GetDefaultDownloadDirectorySingleton().Initialize();
+}
+
+// static
 const base::FilePath& DownloadPrefs::GetDefaultDownloadDirectory() {
-  return g_default_download_directory.Get().path();
+  return GetDefaultDownloadDirectorySingleton().path();
 }
 
 // static
@@ -414,8 +436,7 @@ void DownloadPrefs::ResetAutoOpen() {
 
 void DownloadPrefs::SaveAutoOpenState() {
   std::string extensions;
-  for (AutoOpenSet::iterator it = auto_open_.begin();
-       it != auto_open_.end(); ++it) {
+  for (auto it = auto_open_.begin(); it != auto_open_.end(); ++it) {
 #if defined(OS_POSIX)
     std::string this_extension = *it;
 #elif defined(OS_WIN)
@@ -455,6 +476,22 @@ base::FilePath DownloadPrefs::SanitizeDownloadTargetPath(
   if (media_mount_point.AppendRelativePath(path, &relative) &&
       !relative.ReferencesParent()) {
     return media_mount_point.Append(relative);
+  }
+
+  // Allow paths under the Android files mount point.
+  base::FilePath android_files_mount_point(
+      file_manager::util::kAndroidFilesPath);
+  if (android_files_mount_point.AppendRelativePath(path, &relative) &&
+      !relative.ReferencesParent()) {
+    return android_files_mount_point.Append(relative);
+  }
+
+  // Allow paths under the Linux files mount point.
+  base::FilePath linux_files_mount_point =
+      file_manager::util::GetCrostiniMountDirectory(profile_);
+  if (linux_files_mount_point.AppendRelativePath(path, &relative) &&
+      !relative.ReferencesParent()) {
+    return linux_files_mount_point.Append(relative);
   }
 
   // Fall back to the default download directory for all other paths.

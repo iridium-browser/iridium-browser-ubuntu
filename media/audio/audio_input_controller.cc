@@ -208,10 +208,9 @@ scoped_refptr<AudioInputController> AudioInputController::Create(
   DCHECK(audio_manager);
   DCHECK(sync_writer);
   DCHECK(event_handler);
+  DCHECK(params.IsValid());
 
-  // TODO(https://crbug.com/803102): remove check after switching to input
-  // stream factory.
-  if (!params.IsValid() || (params.channels() > kMaxInputChannels))
+  if (params.channels() > kMaxInputChannels)
     return nullptr;
 
   if (factory_) {
@@ -313,6 +312,20 @@ void AudioInputController::SetVolume(double volume) {
   task_runner_->PostTask(
       FROM_HERE,
       base::BindOnce(&AudioInputController::DoSetVolume, this, volume));
+}
+
+void AudioInputController::SetOutputDeviceForAec(
+    const std::string& output_device_id) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(owning_sequence_);
+
+  if (task_runner_->BelongsToCurrentThread()) {
+    DoSetOutputDeviceForAec(output_device_id);
+    return;
+  }
+
+  task_runner_->PostTask(
+      FROM_HERE, base::BindOnce(&AudioInputController::DoSetOutputDeviceForAec,
+                                this, output_device_id));
 }
 
 void AudioInputController::DoCreate(AudioManager* audio_manager,
@@ -503,6 +516,13 @@ void AudioInputController::DoSetVolume(double volume) {
   stream_->SetVolume(max_volume_ * volume);
 }
 
+void AudioInputController::DoSetOutputDeviceForAec(
+    const std::string& output_device_id) {
+  DCHECK(task_runner_->BelongsToCurrentThread());
+  if (stream_)
+    stream_->SetOutputDeviceForAec(output_device_id);
+}
+
 void AudioInputController::DoLogAudioLevels(float level_dbfs,
                                             int microphone_volume_percent) {
 #if defined(AUDIO_POWER_MONITORING)
@@ -532,7 +552,6 @@ void AudioInputController::DoLogAudioLevels(float level_dbfs,
 
   UpdateSilenceState(level_dbfs < kSilenceThresholdDBFS);
 
-  UMA_HISTOGRAM_PERCENTAGE("Media.MicrophoneVolume", microphone_volume_percent);
   log_string = base::StringPrintf(
       "AIC::OnData: microphone volume=%d%%", microphone_volume_percent);
   if (microphone_volume_percent < kLowLevelMicrophoneLevelPercent)
@@ -663,7 +682,6 @@ void AudioInputController::CheckMutedState() {
   const bool new_state = stream_->IsMuted();
   if (new_state != is_muted_) {
     is_muted_ = new_state;
-    // We don't log OnMuted here, but leave that for AudioInputRendererHost.
     handler_->OnMuted(is_muted_);
   }
 }

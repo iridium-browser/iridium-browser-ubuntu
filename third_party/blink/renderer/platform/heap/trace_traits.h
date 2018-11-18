@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_HEAP_TRACE_TRAITS_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_HEAP_TRACE_TRAITS_H_
 
+#include "base/optional.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable_visitor.h"
 #include "third_party/blink/renderer/platform/heap/gc_info.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
@@ -18,7 +19,6 @@
 #include "third_party/blink/renderer/platform/wtf/hash_table.h"
 #include "third_party/blink/renderer/platform/wtf/linked_hash_set.h"
 #include "third_party/blink/renderer/platform/wtf/list_hash_set.h"
-#include "third_party/blink/renderer/platform/wtf/optional.h"
 #include "third_party/blink/renderer/platform/wtf/type_traits.h"
 
 namespace blink {
@@ -40,6 +40,8 @@ class TraceTrait;
 template <typename T>
 class WeakMember;
 template <typename T>
+class Persistent;
+template <typename T>
 class WeakPersistent;
 
 template <typename T, bool = NeedsAdjustPointer<T>::value>
@@ -52,12 +54,6 @@ class AdjustPointerTrait<T, false> {
  public:
   static TraceDescriptor GetTraceDescriptor(void* self) {
     return {self, TraceTrait<T>::Trace, TraceEagerlyTrait<T>::value};
-  }
-
-  static TraceWrapperDescriptor GetTraceWrapperDescriptor(void* self) {
-    return {self, TraceTrait<T>::TraceWrappers,
-            ScriptWrappableVisitor::MissedWriteBarrier<T>,
-            ScriptWrappableVisitor::NameCallback<T>};
   }
 
   static HeapObjectHeader* GetHeapObjectHeader(void* self) {
@@ -76,11 +72,6 @@ class AdjustPointerTrait<T, true> {
   static TraceDescriptor GetTraceDescriptor(const T* self) {
     DCHECK(self);
     return self->GetTraceDescriptor();
-  }
-
-  static TraceWrapperDescriptor GetTraceWrapperDescriptor(const T* self) {
-    DCHECK(self);
-    return self->GetTraceWrapperDescriptor();
   }
 
   static HeapObjectHeader* GetHeapObjectHeader(const T* self) {
@@ -193,17 +184,11 @@ class TraceTrait {
     return AdjustPointerTrait<T>::GetTraceDescriptor(static_cast<T*>(self));
   }
 
-  static TraceWrapperDescriptor GetTraceWrapperDescriptor(void* self) {
-    return AdjustPointerTrait<T>::GetTraceWrapperDescriptor(
-        static_cast<T*>(self));
-  }
-
   static HeapObjectHeader* GetHeapObjectHeader(void* self) {
     return AdjustPointerTrait<T>::GetHeapObjectHeader(static_cast<T*>(self));
   }
 
   static void Trace(Visitor*, void* self);
-  static void TraceWrappers(ScriptWrappableVisitor*, void*);
 };
 
 template <typename T>
@@ -213,14 +198,6 @@ template <typename T>
 void TraceTrait<T>::Trace(Visitor* visitor, void* self) {
   static_assert(WTF::IsTraceable<T>::value, "T should not be traced");
   static_cast<T*>(self)->Trace(visitor);
-}
-
-template <typename T>
-void TraceTrait<T>::TraceWrappers(ScriptWrappableVisitor* visitor, void* self) {
-  static_assert(sizeof(T), "type needs to be defined");
-  static_assert(IsGarbageCollectedType<T>::value,
-                "only objects deriving from GarbageCollected can be used");
-  visitor->DispatchTraceWrappers(static_cast<T*>(self));
 }
 
 template <typename T, typename Traits>
@@ -289,17 +266,18 @@ class TraceTrait<std::pair<T, U>> {
   }
 };
 
-// While using Optional<T> with garbage-collected types is generally disallowed
-// by the OptionalGarbageCollected check in blink_gc_plugin, garbage-collected
-// containers such as HeapVector are allowed and need to be traced.
+// While using base::Optional<T> with garbage-collected types is generally
+// disallowed by the OptionalGarbageCollected check in blink_gc_plugin,
+// garbage-collected containers such as HeapVector are allowed and need to be
+// traced.
 template <typename T>
-class TraceTrait<WTF::Optional<T>> {
+class TraceTrait<base::Optional<T>> {
   STATIC_ONLY(TraceTrait);
 
  public:
   template <typename VisitorDispatcher>
-  static void Trace(VisitorDispatcher visitor, WTF::Optional<T>* optional) {
-    if (*optional != WTF::nullopt) {
+  static void Trace(VisitorDispatcher visitor, base::Optional<T>* optional) {
+    if (*optional != base::nullopt) {
       TraceIfEnabled<T, WTF::IsTraceable<T>::value>::Trace(visitor,
                                                            optional->value());
     }
@@ -424,9 +402,9 @@ class TraceEagerlyTrait<HeapDoublyLinkedList<T>> {
   static const bool value = TraceEagerlyTrait<T>::value;
 };
 
-template <typename ValueArg, size_t inlineCapacity>
+template <typename ValueArg, wtf_size_t inlineCapacity>
 class HeapListHashSetAllocator;
-template <typename T, size_t inlineCapacity>
+template <typename T, wtf_size_t inlineCapacity>
 class TraceEagerlyTrait<
     WTF::ListHashSetNode<T, HeapListHashSetAllocator<T, inlineCapacity>>> {
   STATIC_ONLY(TraceEagerlyTrait);

@@ -56,8 +56,6 @@ const int kImageSearchThumbnailMaxHeight = 600;
 
 }  // namespace
 
-DEFINE_WEB_CONTENTS_USER_DATA_KEY(CoreTabHelper);
-
 CoreTabHelper::CoreTabHelper(WebContents* web_contents)
     : content::WebContentsObserver(web_contents),
       delegate_(NULL),
@@ -275,7 +273,8 @@ void CoreTabHelper::WebContentsDestroyed() {
   }
 }
 
-void CoreTabHelper::BeforeUnloadFired(const base::TimeTicks& proceed_time) {
+void CoreTabHelper::BeforeUnloadFired(bool proceed,
+                                      const base::TimeTicks& proceed_time) {
   before_unload_end_time_ = proceed_time;
 }
 

@@ -27,7 +27,8 @@ class CONTENT_EXPORT RenderFrameMetadataProviderImpl
     : public RenderFrameMetadataProvider,
       public mojom::RenderFrameMetadataObserverClient {
  public:
-  explicit RenderFrameMetadataProviderImpl(
+  RenderFrameMetadataProviderImpl(
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner,
       FrameTokenMessageQueue* frame_token_message_queue);
   ~RenderFrameMetadataProviderImpl() override;
 
@@ -50,7 +51,8 @@ class CONTENT_EXPORT RenderFrameMetadataProviderImpl
   // methods are enqueued in |frame_token_message_queue_|. They are invoked when
   // the browser process receives their associated frame tokens. These then
   // notify any |observers_|.
-  void OnFrameTokenRenderFrameMetadataChanged(cc::RenderFrameMetadata metadata);
+  void OnRenderFrameMetadataChangedAfterActivation(
+      cc::RenderFrameMetadata metadata);
   void OnFrameTokenFrameSubmissionForTesting();
 
   // Set |last_render_frame_metadata_| to the given |metadata| for testing
@@ -63,9 +65,13 @@ class CONTENT_EXPORT RenderFrameMetadataProviderImpl
       const cc::RenderFrameMetadata& metadata) override;
   void OnFrameSubmissionForTesting(uint32_t frame_token) override;
 
-  base::ObserverList<Observer> observers_;
+  base::ObserverList<Observer>::Unchecked observers_;
 
   cc::RenderFrameMetadata last_render_frame_metadata_;
+
+  base::Optional<viz::LocalSurfaceId> last_local_surface_id_;
+
+  scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
 
   // Not owned.
   FrameTokenMessageQueue* const frame_token_message_queue_;
@@ -73,6 +79,8 @@ class CONTENT_EXPORT RenderFrameMetadataProviderImpl
   mojo::Binding<mojom::RenderFrameMetadataObserverClient>
       render_frame_metadata_observer_client_binding_;
   mojom::RenderFrameMetadataObserverPtr render_frame_metadata_observer_ptr_;
+
+  base::Optional<bool> pending_report_all_frame_submission_;
 
   base::WeakPtrFactory<RenderFrameMetadataProviderImpl> weak_factory_;
 

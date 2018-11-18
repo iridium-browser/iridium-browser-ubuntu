@@ -6,6 +6,7 @@
 
 #include <utility>
 
+#include "components/sync/model/conflict_resolution.h"
 #include "components/sync/model/metadata_batch.h"
 #include "components/sync/model/metadata_change_list.h"
 
@@ -15,11 +16,23 @@ ModelTypeSyncBridge::ModelTypeSyncBridge(
     std::unique_ptr<ModelTypeChangeProcessor> change_processor)
     : change_processor_(std::move(change_processor)) {
   DCHECK(change_processor_);
+  change_processor_->OnModelStarting(this);
 }
 
 ModelTypeSyncBridge::~ModelTypeSyncBridge() {}
 
+void ModelTypeSyncBridge::OnSyncStarting(
+    const DataTypeActivationRequest& request) {}
+
+bool ModelTypeSyncBridge::SupportsGetClientTag() const {
+  return true;
+}
+
 bool ModelTypeSyncBridge::SupportsGetStorageKey() const {
+  return true;
+}
+
+bool ModelTypeSyncBridge::SupportsIncrementalUpdates() const {
   return true;
 }
 
@@ -33,25 +46,21 @@ ConflictResolution ModelTypeSyncBridge::ResolveConflict(
   return ConflictResolution::UseRemote();
 }
 
-void ModelTypeSyncBridge::OnSyncStarting(
-    const ModelErrorHandler& error_handler,
-    const ModelTypeChangeProcessor::StartCallback& start_callback) {
-  change_processor_->OnSyncStarting(std::move(error_handler), start_callback);
-}
-
-void ModelTypeSyncBridge::DisableSync() {
-  // The processor resets its internal state and clears the metadata (by calling
-  // ApplyDisableSyncChanges() of this bridge).
-  change_processor_->DisableSync();
-}
-
-void ModelTypeSyncBridge::ApplyDisableSyncChanges(
+ModelTypeSyncBridge::StopSyncResponse ModelTypeSyncBridge::ApplyStopSyncChanges(
     std::unique_ptr<MetadataChangeList> delete_metadata_change_list) {
-  // Nothing to do if this fails, so just ignore the error it might return.
-  ApplySyncChanges(std::move(delete_metadata_change_list), EntityChangeList());
+  if (delete_metadata_change_list) {
+    // Nothing to do if this fails, so just ignore the error it might return.
+    ApplySyncChanges(std::move(delete_metadata_change_list),
+                     EntityChangeList());
+  }
+  return StopSyncResponse::kModelStillReadyToSync;
 }
 
-ModelTypeChangeProcessor* ModelTypeSyncBridge::change_processor() const {
+size_t ModelTypeSyncBridge::EstimateSyncOverheadMemoryUsage() const {
+  return 0U;
+}
+
+ModelTypeChangeProcessor* ModelTypeSyncBridge::change_processor() {
   return change_processor_.get();
 }
 

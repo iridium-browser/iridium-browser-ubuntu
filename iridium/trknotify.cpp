@@ -8,11 +8,14 @@
 #ifdef __linux__
 #	include <unistd.h>
 #endif
+#include "base/task/post_task.h"
+#include "base/task/task_traits.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "url/url_constants.h"
 #include "iridium/trkbar.h"
 #include "iridium/trknotify.h"
@@ -52,7 +55,7 @@ static void __trace_url_request(const std::string &caller, const GURL &url)
 
 void trace_url_request(const std::string &caller, const GURL &url)
 {
-	content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
+	base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI},
 		base::Bind(&__trace_url_request, caller, url));
 }
 

@@ -10,7 +10,12 @@
 namespace media_router {
 
 TEST(CastMediaSourceTest, FromCastURL) {
-  MediaSource::Id source_id("cast:ABCDEFAB?capabilities=video_out,audio_out");
+  MediaSource::Id source_id(
+      "cast:ABCDEFAB?capabilities=video_out,audio_out"
+      "&broadcastNamespace=namespace"
+      "&broadcastMessage=message"
+      "&clientId=12345"
+      "&launchTimeout=30000");
   std::unique_ptr<CastMediaSource> source = CastMediaSource::From(source_id);
   ASSERT_TRUE(source);
   EXPECT_EQ(source_id, source->source_id());
@@ -20,11 +25,21 @@ TEST(CastMediaSourceTest, FromCastURL) {
   EXPECT_EQ(cast_channel::CastDeviceCapability::VIDEO_OUT |
                 cast_channel::CastDeviceCapability::AUDIO_OUT,
             app_info.required_capabilities);
+  const auto& broadcast_request = source->broadcast_request();
+  ASSERT_TRUE(broadcast_request);
+  EXPECT_EQ("namespace", broadcast_request->broadcast_namespace);
+  EXPECT_EQ("message", broadcast_request->message);
+  EXPECT_EQ("12345", source->client_id());
+  EXPECT_EQ(base::TimeDelta::FromMilliseconds(30000), source->launch_timeout());
 }
 
 TEST(CastMediaSourceTest, FromLegacyCastURL) {
   MediaSource::Id source_id(
-      "https://google.com/cast#__castAppId__=ABCDEFAB(video_out,audio_out)");
+      "https://google.com/cast#__castAppId__=ABCDEFAB(video_out,audio_out)"
+      "/__castBroadcastNamespace__=namespace"
+      "/__castBroadcastMessage__=message"
+      "/__castClientId__=12345"
+      "/__castLaunchTimeout__=30000");
   std::unique_ptr<CastMediaSource> source = CastMediaSource::From(source_id);
   ASSERT_TRUE(source);
   EXPECT_EQ(source_id, source->source_id());
@@ -34,6 +49,12 @@ TEST(CastMediaSourceTest, FromLegacyCastURL) {
   EXPECT_EQ(cast_channel::CastDeviceCapability::VIDEO_OUT |
                 cast_channel::CastDeviceCapability::AUDIO_OUT,
             app_info.required_capabilities);
+  const auto& broadcast_request = source->broadcast_request();
+  ASSERT_TRUE(broadcast_request);
+  EXPECT_EQ("namespace", broadcast_request->broadcast_namespace);
+  EXPECT_EQ("message", broadcast_request->message);
+  EXPECT_EQ("12345", source->client_id());
+  EXPECT_EQ(base::TimeDelta::FromMilliseconds(30000), source->launch_timeout());
 }
 
 TEST(CastMediaSourceTest, FromPresentationURL) {
@@ -42,8 +63,10 @@ TEST(CastMediaSourceTest, FromPresentationURL) {
   ASSERT_TRUE(source);
   EXPECT_EQ(source_id, source->source_id());
   ASSERT_EQ(2u, source->app_infos().size());
-  EXPECT_EQ("0F5096E8", source->app_infos()[0].app_id);
-  EXPECT_EQ("85CDB22F", source->app_infos()[1].app_id);
+  EXPECT_EQ(kCastStreamingAppId, source->app_infos()[0].app_id);
+  EXPECT_EQ(kCastStreamingAudioAppId, source->app_infos()[1].app_id);
+  EXPECT_TRUE(source->client_id().empty());
+  EXPECT_EQ(kDefaultLaunchTimeout, source->launch_timeout());
 }
 
 TEST(CastMediaSourceTest, FromMirroringURN) {
@@ -52,8 +75,21 @@ TEST(CastMediaSourceTest, FromMirroringURN) {
   ASSERT_TRUE(source);
   EXPECT_EQ(source_id, source->source_id());
   ASSERT_EQ(2u, source->app_infos().size());
-  EXPECT_EQ("0F5096E8", source->app_infos()[0].app_id);
-  EXPECT_EQ("85CDB22F", source->app_infos()[1].app_id);
+  EXPECT_EQ(kCastStreamingAppId, source->app_infos()[0].app_id);
+  EXPECT_EQ(kCastStreamingAudioAppId, source->app_infos()[1].app_id);
+  EXPECT_TRUE(source->client_id().empty());
+  EXPECT_EQ(kDefaultLaunchTimeout, source->launch_timeout());
+}
+
+TEST(CastMediaSourceTest, FromDesktopUrn) {
+  MediaSource::Id source_id("urn:x-org.chromium.media:source:desktop");
+  std::unique_ptr<CastMediaSource> source = CastMediaSource::From(source_id);
+  ASSERT_TRUE(source);
+  EXPECT_EQ(source_id, source->source_id());
+  ASSERT_EQ(1u, source->app_infos().size());
+  EXPECT_EQ(kCastStreamingAppId, source->app_infos()[0].app_id);
+  EXPECT_TRUE(source->client_id().empty());
+  EXPECT_EQ(kDefaultLaunchTimeout, source->launch_timeout());
 }
 
 TEST(CastMediaSourceTest, FromInvalidSource) {

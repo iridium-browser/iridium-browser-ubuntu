@@ -23,6 +23,7 @@
 #include <initializer_list>
 #include <iosfwd>
 #include <string>
+#include <tuple>
 #include <unordered_map>
 
 #include "gtest/gtest.h"
@@ -34,39 +35,38 @@
 #include "absl/strings/substitute.h"
 #include "absl/types/optional.h"
 
-namespace absl {
-struct InternalAbslNamespaceFinder {};
+namespace testing {
 
-struct ConstructorTracker;
+enum class TypeSpec;
+enum class AllocSpec;
 
-// A configuration enum for Throwing*.  Operations whose flags are set will
-// throw, everything else won't.  This isn't meant to be exhaustive, more flags
-// can always be made in the future.
-enum class NoThrow : uint8_t {
-  kNone = 0,
-  kMoveCtor = 1,
-  kMoveAssign = 1 << 1,
-  kAllocation = 1 << 2,
-  kIntCtor = 1 << 3,
-  kNoThrow = static_cast<uint8_t>(-1)
-};
-
-constexpr NoThrow operator|(NoThrow a, NoThrow b) {
-  using T = absl::underlying_type_t<NoThrow>;
-  return static_cast<NoThrow>(static_cast<T>(a) | static_cast<T>(b));
+constexpr TypeSpec operator|(TypeSpec a, TypeSpec b) {
+  using T = absl::underlying_type_t<TypeSpec>;
+  return static_cast<TypeSpec>(static_cast<T>(a) | static_cast<T>(b));
 }
 
-constexpr NoThrow operator&(NoThrow a, NoThrow b) {
-  using T = absl::underlying_type_t<NoThrow>;
-  return static_cast<NoThrow>(static_cast<T>(a) & static_cast<T>(b));
+constexpr TypeSpec operator&(TypeSpec a, TypeSpec b) {
+  using T = absl::underlying_type_t<TypeSpec>;
+  return static_cast<TypeSpec>(static_cast<T>(a) & static_cast<T>(b));
+}
+
+constexpr AllocSpec operator|(AllocSpec a, AllocSpec b) {
+  using T = absl::underlying_type_t<AllocSpec>;
+  return static_cast<AllocSpec>(static_cast<T>(a) | static_cast<T>(b));
+}
+
+constexpr AllocSpec operator&(AllocSpec a, AllocSpec b) {
+  using T = absl::underlying_type_t<AllocSpec>;
+  return static_cast<AllocSpec>(static_cast<T>(a) & static_cast<T>(b));
 }
 
 namespace exceptions_internal {
-struct NoThrowTag {};
 
-constexpr bool ThrowingAllowed(NoThrow flags, NoThrow flag) {
-  return !static_cast<bool>(flags & flag);
-}
+std::string GetSpecString(TypeSpec);
+std::string GetSpecString(AllocSpec);
+
+struct NoThrowTag {};
+struct StrongGuaranteeTagType {};
 
 // A simple exception class.  We throw this so that test code can catch
 // exceptions specifically thrown by ThrowingValue.
@@ -87,17 +87,96 @@ class TestException {
 // bad_alloc exception in TestExceptionSafety.
 class TestBadAllocException : public std::bad_alloc, public TestException {
  public:
-  explicit TestBadAllocException(absl::string_view msg)
-      : TestException(msg) {}
+  explicit TestBadAllocException(absl::string_view msg) : TestException(msg) {}
   using TestException::what;
 };
 
 extern int countdown;
 
+// Allows the countdown variable to be set manually (defaulting to the initial
+// value of 0)
+inline void SetCountdown(int i = 0) { countdown = i; }
+// Sets the countdown to the terminal value -1
+inline void UnsetCountdown() { SetCountdown(-1); }
+
 void MaybeThrow(absl::string_view msg, bool throw_bad_alloc = false);
 
 testing::AssertionResult FailureMessage(const TestException& e,
                                         int countdown) noexcept;
+
+struct TrackedAddress {
+  bool is_alive;
+  std::string description;
+};
+
+// Inspects the constructions and destructions of anything inheriting from
+// TrackedObject. This allows us to safely "leak" TrackedObjects, as
+// ConstructorTracker will destroy everything left over in its destructor.
+class ConstructorTracker {
+ public:
+  explicit ConstructorTracker(int count) : countdown_(count) {
+    assert(current_tracker_instance_ == nullptr);
+    current_tracker_instance_ = this;
+  }
+
+  ~ConstructorTracker() {
+    assert(current_tracker_instance_ == this);
+    current_tracker_instance_ = nullptr;
+
+    for (auto& it : address_map_) {
+      void* address = it.first;
+      TrackedAddress& tracked_address = it.second;
+      if (tracked_address.is_alive) {
+        ADD_FAILURE() << "Object at address " << address
+                      << " with countdown of " << countdown_
+                      << " was not destroyed [" << tracked_address.description
+                      << "]";
+      }
+    }
+  }
+
+  static void ObjectConstructed(void* address, std::string description) {
+    if (!CurrentlyTracking()) return;
+
+    TrackedAddress& tracked_address =
+        current_tracker_instance_->address_map_[address];
+    if (tracked_address.is_alive) {
+      ADD_FAILURE() << "Object at address " << address << " with countdown of "
+                    << current_tracker_instance_->countdown_
+                    << " was re-constructed. Previously: ["
+                    << tracked_address.description << "] Now: [" << description
+                    << "]";
+    }
+    tracked_address = {true, std::move(description)};
+  }
+
+  static void ObjectDestructed(void* address) {
+    if (!CurrentlyTracking()) return;
+
+    auto it = current_tracker_instance_->address_map_.find(address);
+    // Not tracked. Ignore.
+    if (it == current_tracker_instance_->address_map_.end()) return;
+
+    TrackedAddress& tracked_address = it->second;
+    if (!tracked_address.is_alive) {
+      ADD_FAILURE() << "Object at address " << address << " with countdown of "
+                    << current_tracker_instance_->countdown_
+                    << " was re-destroyed or created prior to construction "
+                    << "tracking [" << tracked_address.description << "]";
+    }
+    tracked_address.is_alive = false;
+  }
+
+ private:
+  static bool CurrentlyTracking() {
+    return current_tracker_instance_ != nullptr;
+  }
+
+  std::unordered_map<void*, TrackedAddress> address_map_;
+  int countdown_;
+
+  static ConstructorTracker* current_tracker_instance_;
+};
 
 class TrackedObject {
  public:
@@ -105,110 +184,88 @@ class TrackedObject {
   TrackedObject(TrackedObject&&) = delete;
 
  protected:
-  explicit TrackedObject(const char* child_ctor) {
-    if (!GetAllocs().emplace(this, child_ctor).second) {
-      ADD_FAILURE() << "Object at address " << static_cast<void*>(this)
-                    << " re-constructed in ctor " << child_ctor;
-    }
+  explicit TrackedObject(std::string description) {
+    ConstructorTracker::ObjectConstructed(this, std::move(description));
   }
 
-  static std::unordered_map<TrackedObject*, absl::string_view>& GetAllocs() {
-    static auto* m =
-        new std::unordered_map<TrackedObject*, absl::string_view>();
-    return *m;
-  }
-
-  ~TrackedObject() noexcept {
-    if (GetAllocs().erase(this) == 0) {
-      ADD_FAILURE() << "Object at address " << static_cast<void*>(this)
-                    << " destroyed improperly";
-    }
-  }
-
-  friend struct ::absl::ConstructorTracker;
+  ~TrackedObject() noexcept { ConstructorTracker::ObjectDestructed(this); }
 };
 
-template <typename Factory>
-using FactoryType = typename absl::result_of_t<Factory()>::element_type;
-
-// Returns an optional with the result of the check if op fails, or an empty
-// optional if op passes
-template <typename Factory, typename Op, typename Checker>
-absl::optional<testing::AssertionResult> TestCheckerAtCountdown(
-    Factory factory, const Op& op, int count, const Checker& check) {
+template <typename Factory, typename Operation, typename Invariant>
+absl::optional<testing::AssertionResult> TestSingleInvariantAtCountdownImpl(
+    const Factory& factory, const Operation& operation, int count,
+    const Invariant& invariant) {
   auto t_ptr = factory();
-  absl::optional<testing::AssertionResult> out;
+  absl::optional<testing::AssertionResult> current_res;
+  SetCountdown(count);
   try {
-    exceptions_internal::countdown = count;
-    op(t_ptr.get());
+    operation(t_ptr.get());
   } catch (const exceptions_internal::TestException& e) {
-    out.emplace(check(t_ptr.get()));
-    if (!*out) {
-      *out << " caused by exception thrown by " << e.what();
+    current_res.emplace(invariant(t_ptr.get()));
+    if (!current_res.value()) {
+      *current_res << e.what() << " failed invariant check";
     }
   }
-  return out;
+  UnsetCountdown();
+  return current_res;
 }
 
-template <typename Factory, typename Op, typename Checker>
-int UpdateOut(Factory factory, const Op& op, int count, const Checker& checker,
-              testing::AssertionResult* out) {
-  if (*out) *out = *TestCheckerAtCountdown(factory, op, count, checker);
+template <typename Factory, typename Operation>
+absl::optional<testing::AssertionResult> TestSingleInvariantAtCountdownImpl(
+    const Factory& factory, const Operation& operation, int count,
+    StrongGuaranteeTagType) {
+  using TPtr = typename decltype(factory())::pointer;
+  auto t_is_strong = [&](TPtr t) { return *t == *factory(); };
+  return TestSingleInvariantAtCountdownImpl(factory, operation, count,
+                                            t_is_strong);
+}
+
+template <typename Factory, typename Operation, typename Invariant>
+int TestSingleInvariantAtCountdown(
+    const Factory& factory, const Operation& operation, int count,
+    const Invariant& invariant,
+    absl::optional<testing::AssertionResult>* reduced_res) {
+  // If reduced_res is empty, it means the current call to
+  // TestSingleInvariantAtCountdown(...) is the first test being run so we do
+  // want to run it. Alternatively, if it's not empty (meaning a previous test
+  // has run) we want to check if it passed. If the previous test did pass, we
+  // want to contine running tests so we do want to run the current one. If it
+  // failed, we want to short circuit so as not to overwrite the AssertionResult
+  // output. If that's the case, we do not run the current test and instead we
+  // simply return.
+  if (!reduced_res->has_value() || reduced_res->value()) {
+    *reduced_res = TestSingleInvariantAtCountdownImpl(factory, operation, count,
+                                                      invariant);
+  }
   return 0;
 }
 
-// Declare AbslCheckInvariants so that it can be found eventually via ADL.
-// Taking `...` gives it the lowest possible precedence.
-void AbslCheckInvariants(...);
-
-// Returns an optional with the result of the check if op fails, or an empty
-// optional if op passes
-template <typename Factory, typename Op, typename... Checkers>
-absl::optional<testing::AssertionResult> TestAtCountdown(
-    Factory factory, const Op& op, int count, const Checkers&... checkers) {
-  // Don't bother with the checkers if the class invariants are already broken.
-  auto out = TestCheckerAtCountdown(
-      factory, op, count, [](FactoryType<Factory>* t_ptr) {
-        return AbslCheckInvariants(t_ptr, InternalAbslNamespaceFinder());
-      });
-  if (!out.has_value()) return out;
+template <typename Factory, typename Operation, typename... Invariants>
+inline absl::optional<testing::AssertionResult> TestAllInvariantsAtCountdown(
+    const Factory& factory, const Operation& operation, int count,
+    const Invariants&... invariants) {
+  absl::optional<testing::AssertionResult> reduced_res;
 
   // Run each checker, short circuiting after the first failure
-  int dummy[] = {0, (UpdateOut(factory, op, count, checkers, &*out))...};
+  int dummy[] = {
+      0, (TestSingleInvariantAtCountdown(factory, operation, count, invariants,
+                                         &reduced_res))...};
   static_cast<void>(dummy);
-  return out;
+  return reduced_res;
 }
 
-template <typename T, typename EqualTo>
-class StrongGuaranteeTester {
- public:
-  explicit StrongGuaranteeTester(std::unique_ptr<T> t_ptr, EqualTo eq) noexcept
-      : val_(std::move(t_ptr)), eq_(eq) {}
-
-  testing::AssertionResult operator()(T* other) const {
-    return eq_(*val_, *other) ? testing::AssertionSuccess()
-                              : testing::AssertionFailure() << "State changed";
-  }
-
- private:
-  std::unique_ptr<T> val_;
-  EqualTo eq_;
-};
 }  // namespace exceptions_internal
 
-extern exceptions_internal::NoThrowTag no_throw_ctor;
+extern exceptions_internal::NoThrowTag nothrow_ctor;
 
-// These are useful for tests which just construct objects and make sure there
-// are no leaks.
-inline void SetCountdown() { exceptions_internal::countdown = 0; }
-inline void UnsetCountdown() { exceptions_internal::countdown = -1; }
+extern exceptions_internal::StrongGuaranteeTagType strong_guarantee;
 
 // A test class which is convertible to bool.  The conversion can be
 // instrumented to throw at a controlled time.
 class ThrowingBool {
  public:
   ThrowingBool(bool b) noexcept : b_(b) {}  // NOLINT(runtime/explicit)
-  operator bool() const {  // NOLINT(runtime/explicit)
+  operator bool() const {                   // NOLINT
     exceptions_internal::MaybeThrow(ABSL_PRETTY_FUNCTION);
     return b_;
   }
@@ -217,65 +274,95 @@ class ThrowingBool {
   bool b_;
 };
 
-// A testing class instrumented to throw an exception at a controlled time.
-//
-// ThrowingValue implements a slightly relaxed version of the Regular concept --
-// that is it's a value type with the expected semantics.  It also implements
-// arithmetic operations.  It doesn't implement member and pointer operators
-// like operator-> or operator[].
-//
-// ThrowingValue can be instrumented to have certain operations be noexcept by
-// using compile-time bitfield flag template arguments.  That is, to make an
-// ThrowingValue which has a noexcept move constructor and noexcept move
-// assignment, use
-// ThrowingValue<absl::NoThrow::kMoveCtor | absl::NoThrow::kMoveAssign>.
-template <NoThrow Flags = NoThrow::kNone>
+/*
+ * Configuration enum for the ThrowingValue type that defines behavior for the
+ * lifetime of the instance. Use testing::nothrow_ctor to prevent the integer
+ * constructor from throwing.
+ *
+ * kEverythingThrows: Every operation can throw an exception
+ * kNoThrowCopy: Copy construction and copy assignment will not throw
+ * kNoThrowMove: Move construction and move assignment will not throw
+ * kNoThrowNew: Overloaded operators new and new[] will not throw
+ */
+enum class TypeSpec {
+  kEverythingThrows = 0,
+  kNoThrowCopy = 1,
+  kNoThrowMove = 1 << 1,
+  kNoThrowNew = 1 << 2,
+};
+
+/*
+ * A testing class instrumented to throw an exception at a controlled time.
+ *
+ * ThrowingValue implements a slightly relaxed version of the Regular concept --
+ * that is it's a value type with the expected semantics.  It also implements
+ * arithmetic operations.  It doesn't implement member and pointer operators
+ * like operator-> or operator[].
+ *
+ * ThrowingValue can be instrumented to have certain operations be noexcept by
+ * using compile-time bitfield template arguments.  That is, to make an
+ * ThrowingValue which has noexcept move construction/assignment and noexcept
+ * copy construction/assignment, use the following:
+ *   ThrowingValue<testing::kNoThrowMove | testing::kNoThrowCopy> my_thrwr{val};
+ */
+template <TypeSpec Spec = TypeSpec::kEverythingThrows>
 class ThrowingValue : private exceptions_internal::TrackedObject {
- public:
-  ThrowingValue() : TrackedObject(ABSL_PRETTY_FUNCTION) {
-    exceptions_internal::MaybeThrow(ABSL_PRETTY_FUNCTION);
-    dummy_ = 0;
+  static constexpr bool IsSpecified(TypeSpec spec) {
+    return static_cast<bool>(Spec & spec);
   }
 
-  ThrowingValue(const ThrowingValue& other)
-      : TrackedObject(ABSL_PRETTY_FUNCTION) {
+  static constexpr int kDefaultValue = 0;
+  static constexpr int kBadValue = 938550620;
+
+ public:
+  ThrowingValue() : TrackedObject(GetInstanceString(kDefaultValue)) {
     exceptions_internal::MaybeThrow(ABSL_PRETTY_FUNCTION);
+    dummy_ = kDefaultValue;
+  }
+
+  ThrowingValue(const ThrowingValue& other) noexcept(
+      IsSpecified(TypeSpec::kNoThrowCopy))
+      : TrackedObject(GetInstanceString(other.dummy_)) {
+    if (!IsSpecified(TypeSpec::kNoThrowCopy)) {
+      exceptions_internal::MaybeThrow(ABSL_PRETTY_FUNCTION);
+    }
     dummy_ = other.dummy_;
   }
 
   ThrowingValue(ThrowingValue&& other) noexcept(
-      !exceptions_internal::ThrowingAllowed(Flags, NoThrow::kMoveCtor))
-      : TrackedObject(ABSL_PRETTY_FUNCTION) {
-    if (exceptions_internal::ThrowingAllowed(Flags, NoThrow::kMoveCtor)) {
+      IsSpecified(TypeSpec::kNoThrowMove))
+      : TrackedObject(GetInstanceString(other.dummy_)) {
+    if (!IsSpecified(TypeSpec::kNoThrowMove)) {
       exceptions_internal::MaybeThrow(ABSL_PRETTY_FUNCTION);
     }
     dummy_ = other.dummy_;
   }
 
-  explicit ThrowingValue(int i) noexcept(
-      !exceptions_internal::ThrowingAllowed(Flags, NoThrow::kIntCtor))
-      : TrackedObject(ABSL_PRETTY_FUNCTION) {
-    if (exceptions_internal::ThrowingAllowed(Flags, NoThrow::kIntCtor)) {
-      exceptions_internal::MaybeThrow(ABSL_PRETTY_FUNCTION);
-    }
+  explicit ThrowingValue(int i) : TrackedObject(GetInstanceString(i)) {
+    exceptions_internal::MaybeThrow(ABSL_PRETTY_FUNCTION);
     dummy_ = i;
   }
 
   ThrowingValue(int i, exceptions_internal::NoThrowTag) noexcept
-      : TrackedObject(ABSL_PRETTY_FUNCTION), dummy_(i) {}
+      : TrackedObject(GetInstanceString(i)), dummy_(i) {}
 
   // absl expects nothrow destructors
   ~ThrowingValue() noexcept = default;
 
-  ThrowingValue& operator=(const ThrowingValue& other) {
-    exceptions_internal::MaybeThrow(ABSL_PRETTY_FUNCTION);
+  ThrowingValue& operator=(const ThrowingValue& other) noexcept(
+      IsSpecified(TypeSpec::kNoThrowCopy)) {
+    dummy_ = kBadValue;
+    if (!IsSpecified(TypeSpec::kNoThrowCopy)) {
+      exceptions_internal::MaybeThrow(ABSL_PRETTY_FUNCTION);
+    }
     dummy_ = other.dummy_;
     return *this;
   }
 
   ThrowingValue& operator=(ThrowingValue&& other) noexcept(
-      !exceptions_internal::ThrowingAllowed(Flags, NoThrow::kMoveAssign)) {
-    if (exceptions_internal::ThrowingAllowed(Flags, NoThrow::kMoveAssign)) {
+      IsSpecified(TypeSpec::kNoThrowMove)) {
+    dummy_ = kBadValue;
+    if (!IsSpecified(TypeSpec::kNoThrowMove)) {
       exceptions_internal::MaybeThrow(ABSL_PRETTY_FUNCTION);
     }
     dummy_ = other.dummy_;
@@ -285,22 +372,22 @@ class ThrowingValue : private exceptions_internal::TrackedObject {
   // Arithmetic Operators
   ThrowingValue operator+(const ThrowingValue& other) const {
     exceptions_internal::MaybeThrow(ABSL_PRETTY_FUNCTION);
-    return ThrowingValue(dummy_ + other.dummy_, no_throw_ctor);
+    return ThrowingValue(dummy_ + other.dummy_, nothrow_ctor);
   }
 
   ThrowingValue operator+() const {
     exceptions_internal::MaybeThrow(ABSL_PRETTY_FUNCTION);
-    return ThrowingValue(dummy_, no_throw_ctor);
+    return ThrowingValue(dummy_, nothrow_ctor);
   }
 
   ThrowingValue operator-(const ThrowingValue& other) const {
     exceptions_internal::MaybeThrow(ABSL_PRETTY_FUNCTION);
-    return ThrowingValue(dummy_ - other.dummy_, no_throw_ctor);
+    return ThrowingValue(dummy_ - other.dummy_, nothrow_ctor);
   }
 
   ThrowingValue operator-() const {
     exceptions_internal::MaybeThrow(ABSL_PRETTY_FUNCTION);
-    return ThrowingValue(-dummy_, no_throw_ctor);
+    return ThrowingValue(-dummy_, nothrow_ctor);
   }
 
   ThrowingValue& operator++() {
@@ -311,7 +398,7 @@ class ThrowingValue : private exceptions_internal::TrackedObject {
 
   ThrowingValue operator++(int) {
     exceptions_internal::MaybeThrow(ABSL_PRETTY_FUNCTION);
-    auto out = ThrowingValue(dummy_, no_throw_ctor);
+    auto out = ThrowingValue(dummy_, nothrow_ctor);
     ++dummy_;
     return out;
   }
@@ -324,34 +411,34 @@ class ThrowingValue : private exceptions_internal::TrackedObject {
 
   ThrowingValue operator--(int) {
     exceptions_internal::MaybeThrow(ABSL_PRETTY_FUNCTION);
-    auto out = ThrowingValue(dummy_, no_throw_ctor);
+    auto out = ThrowingValue(dummy_, nothrow_ctor);
     --dummy_;
     return out;
   }
 
   ThrowingValue operator*(const ThrowingValue& other) const {
     exceptions_internal::MaybeThrow(ABSL_PRETTY_FUNCTION);
-    return ThrowingValue(dummy_ * other.dummy_, no_throw_ctor);
+    return ThrowingValue(dummy_ * other.dummy_, nothrow_ctor);
   }
 
   ThrowingValue operator/(const ThrowingValue& other) const {
     exceptions_internal::MaybeThrow(ABSL_PRETTY_FUNCTION);
-    return ThrowingValue(dummy_ / other.dummy_, no_throw_ctor);
+    return ThrowingValue(dummy_ / other.dummy_, nothrow_ctor);
   }
 
   ThrowingValue operator%(const ThrowingValue& other) const {
     exceptions_internal::MaybeThrow(ABSL_PRETTY_FUNCTION);
-    return ThrowingValue(dummy_ % other.dummy_, no_throw_ctor);
+    return ThrowingValue(dummy_ % other.dummy_, nothrow_ctor);
   }
 
   ThrowingValue operator<<(int shift) const {
     exceptions_internal::MaybeThrow(ABSL_PRETTY_FUNCTION);
-    return ThrowingValue(dummy_ << shift, no_throw_ctor);
+    return ThrowingValue(dummy_ << shift, nothrow_ctor);
   }
 
   ThrowingValue operator>>(int shift) const {
     exceptions_internal::MaybeThrow(ABSL_PRETTY_FUNCTION);
-    return ThrowingValue(dummy_ >> shift, no_throw_ctor);
+    return ThrowingValue(dummy_ >> shift, nothrow_ctor);
   }
 
   // Comparison Operators
@@ -407,22 +494,22 @@ class ThrowingValue : private exceptions_internal::TrackedObject {
   // Bitwise Logical Operators
   ThrowingValue operator~() const {
     exceptions_internal::MaybeThrow(ABSL_PRETTY_FUNCTION);
-    return ThrowingValue(~dummy_, no_throw_ctor);
+    return ThrowingValue(~dummy_, nothrow_ctor);
   }
 
   ThrowingValue operator&(const ThrowingValue& other) const {
     exceptions_internal::MaybeThrow(ABSL_PRETTY_FUNCTION);
-    return ThrowingValue(dummy_ & other.dummy_, no_throw_ctor);
+    return ThrowingValue(dummy_ & other.dummy_, nothrow_ctor);
   }
 
   ThrowingValue operator|(const ThrowingValue& other) const {
     exceptions_internal::MaybeThrow(ABSL_PRETTY_FUNCTION);
-    return ThrowingValue(dummy_ | other.dummy_, no_throw_ctor);
+    return ThrowingValue(dummy_ | other.dummy_, nothrow_ctor);
   }
 
   ThrowingValue operator^(const ThrowingValue& other) const {
     exceptions_internal::MaybeThrow(ABSL_PRETTY_FUNCTION);
-    return ThrowingValue(dummy_ ^ other.dummy_, no_throw_ctor);
+    return ThrowingValue(dummy_ ^ other.dummy_, nothrow_ctor);
   }
 
   // Compound Assignment operators
@@ -490,9 +577,9 @@ class ThrowingValue : private exceptions_internal::TrackedObject {
   void operator&() const = delete;  // NOLINT(runtime/operator)
 
   // Stream operators
-  friend std::ostream& operator<<(std::ostream& os, const ThrowingValue&) {
+  friend std::ostream& operator<<(std::ostream& os, const ThrowingValue& tv) {
     exceptions_internal::MaybeThrow(ABSL_PRETTY_FUNCTION);
-    return os;
+    return os << GetInstanceString(tv.dummy_);
   }
 
   friend std::istream& operator>>(std::istream& is, const ThrowingValue&) {
@@ -504,8 +591,8 @@ class ThrowingValue : private exceptions_internal::TrackedObject {
   // Args.. allows us to overload regular and placement new in one shot
   template <typename... Args>
   static void* operator new(size_t s, Args&&... args) noexcept(
-      !exceptions_internal::ThrowingAllowed(Flags, NoThrow::kAllocation)) {
-    if (exceptions_internal::ThrowingAllowed(Flags, NoThrow::kAllocation)) {
+      IsSpecified(TypeSpec::kNoThrowNew)) {
+    if (!IsSpecified(TypeSpec::kNoThrowNew)) {
       exceptions_internal::MaybeThrow(ABSL_PRETTY_FUNCTION, true);
     }
     return ::operator new(s, std::forward<Args>(args)...);
@@ -513,8 +600,8 @@ class ThrowingValue : private exceptions_internal::TrackedObject {
 
   template <typename... Args>
   static void* operator new[](size_t s, Args&&... args) noexcept(
-      !exceptions_internal::ThrowingAllowed(Flags, NoThrow::kAllocation)) {
-    if (exceptions_internal::ThrowingAllowed(Flags, NoThrow::kAllocation)) {
+      IsSpecified(TypeSpec::kNoThrowNew)) {
+    if (!IsSpecified(TypeSpec::kNoThrowNew)) {
       exceptions_internal::MaybeThrow(ABSL_PRETTY_FUNCTION, true);
     }
     return ::operator new[](s, std::forward<Args>(args)...);
@@ -548,24 +635,45 @@ class ThrowingValue : private exceptions_internal::TrackedObject {
   const int& Get() const noexcept { return dummy_; }
 
  private:
+  static std::string GetInstanceString(int dummy) {
+    return absl::StrCat("ThrowingValue<",
+                        exceptions_internal::GetSpecString(Spec), ">(", dummy,
+                        ")");
+  }
+
   int dummy_;
 };
 // While not having to do with exceptions, explicitly delete comma operator, to
 // make sure we don't use it on user-supplied types.
-template <NoThrow N, typename T>
-void operator,(const ThrowingValue<N>& ef, T&& t) = delete;
-template <NoThrow N, typename T>
-void operator,(T&& t, const ThrowingValue<N>& ef) = delete;
+template <TypeSpec Spec, typename T>
+void operator,(const ThrowingValue<Spec>&, T&&) = delete;
+template <TypeSpec Spec, typename T>
+void operator,(T&&, const ThrowingValue<Spec>&) = delete;
 
-// An allocator type which is instrumented to throw at a controlled time, or not
-// to throw, using NoThrow.  The supported settings are the default of every
-// function which is allowed to throw in a conforming allocator possibly
-// throwing, or nothing throws, in line with the ABSL_ALLOCATOR_THROWS
-// configuration macro.
-template <typename T, NoThrow Flags = NoThrow::kNone>
+/*
+ * Configuration enum for the ThrowingAllocator type that defines behavior for
+ * the lifetime of the instance.
+ *
+ * kEverythingThrows: Calls to the member functions may throw
+ * kNoThrowAllocate: Calls to the member functions will not throw
+ */
+enum class AllocSpec {
+  kEverythingThrows = 0,
+  kNoThrowAllocate = 1,
+};
+
+/*
+ * An allocator type which is instrumented to throw at a controlled time, or not
+ * to throw, using AllocSpec. The supported settings are the default of every
+ * function which is allowed to throw in a conforming allocator possibly
+ * throwing, or nothing throws, in line with the ABSL_ALLOCATOR_THROWS
+ * configuration macro.
+ */
+template <typename T, AllocSpec Spec = AllocSpec::kEverythingThrows>
 class ThrowingAllocator : private exceptions_internal::TrackedObject {
-  static_assert(Flags == NoThrow::kNone || Flags == NoThrow::kNoThrow,
-                "Invalid flag");
+  static constexpr bool IsSpecified(AllocSpec spec) {
+    return static_cast<bool>(Spec & spec);
+  }
 
  public:
   using pointer = T*;
@@ -578,34 +686,37 @@ class ThrowingAllocator : private exceptions_internal::TrackedObject {
   using size_type = size_t;
   using difference_type = ptrdiff_t;
 
-  using is_nothrow = std::integral_constant<bool, Flags == NoThrow::kNoThrow>;
+  using is_nothrow =
+      std::integral_constant<bool, Spec == AllocSpec::kNoThrowAllocate>;
   using propagate_on_container_copy_assignment = std::true_type;
   using propagate_on_container_move_assignment = std::true_type;
   using propagate_on_container_swap = std::true_type;
   using is_always_equal = std::false_type;
 
-  ThrowingAllocator() : TrackedObject(ABSL_PRETTY_FUNCTION) {
+  ThrowingAllocator() : TrackedObject(GetInstanceString(next_id_)) {
     exceptions_internal::MaybeThrow(ABSL_PRETTY_FUNCTION);
     dummy_ = std::make_shared<const int>(next_id_++);
   }
 
   template <typename U>
-  ThrowingAllocator(  // NOLINT
-      const ThrowingAllocator<U, Flags>& other) noexcept
-      : TrackedObject(ABSL_PRETTY_FUNCTION), dummy_(other.State()) {}
+  ThrowingAllocator(const ThrowingAllocator<U, Spec>& other) noexcept  // NOLINT
+      : TrackedObject(GetInstanceString(*other.State())),
+        dummy_(other.State()) {}
 
   // According to C++11 standard [17.6.3.5], Table 28, the move/copy ctors of
   // allocator shall not exit via an exception, thus they are marked noexcept.
   ThrowingAllocator(const ThrowingAllocator& other) noexcept
-      : TrackedObject(ABSL_PRETTY_FUNCTION), dummy_(other.State()) {}
+      : TrackedObject(GetInstanceString(*other.State())),
+        dummy_(other.State()) {}
 
   template <typename U>
-  ThrowingAllocator(  // NOLINT
-      ThrowingAllocator<U, Flags>&& other) noexcept
-      : TrackedObject(ABSL_PRETTY_FUNCTION), dummy_(std::move(other.State())) {}
+  ThrowingAllocator(ThrowingAllocator<U, Spec>&& other) noexcept  // NOLINT
+      : TrackedObject(GetInstanceString(*other.State())),
+        dummy_(std::move(other.State())) {}
 
   ThrowingAllocator(ThrowingAllocator&& other) noexcept
-      : TrackedObject(ABSL_PRETTY_FUNCTION), dummy_(std::move(other.State())) {}
+      : TrackedObject(GetInstanceString(*other.State())),
+        dummy_(std::move(other.State())) {}
 
   ~ThrowingAllocator() noexcept = default;
 
@@ -616,29 +727,30 @@ class ThrowingAllocator : private exceptions_internal::TrackedObject {
 
   template <typename U>
   ThrowingAllocator& operator=(
-      const ThrowingAllocator<U, Flags>& other) noexcept {
+      const ThrowingAllocator<U, Spec>& other) noexcept {
     dummy_ = other.State();
     return *this;
   }
 
   template <typename U>
-  ThrowingAllocator& operator=(ThrowingAllocator<U, Flags>&& other) noexcept {
+  ThrowingAllocator& operator=(ThrowingAllocator<U, Spec>&& other) noexcept {
     dummy_ = std::move(other.State());
     return *this;
   }
 
   template <typename U>
   struct rebind {
-    using other = ThrowingAllocator<U, Flags>;
+    using other = ThrowingAllocator<U, Spec>;
   };
 
   pointer allocate(size_type n) noexcept(
-      !exceptions_internal::ThrowingAllowed(Flags, NoThrow::kNoThrow)) {
+      IsSpecified(AllocSpec::kNoThrowAllocate)) {
     ReadStateAndMaybeThrow(ABSL_PRETTY_FUNCTION);
     return static_cast<pointer>(::operator new(n * sizeof(T)));
   }
+
   pointer allocate(size_type n, const_void_pointer) noexcept(
-      !exceptions_internal::ThrowingAllowed(Flags, NoThrow::kNoThrow)) {
+      IsSpecified(AllocSpec::kNoThrowAllocate)) {
     return allocate(n);
   }
 
@@ -649,7 +761,7 @@ class ThrowingAllocator : private exceptions_internal::TrackedObject {
 
   template <typename U, typename... Args>
   void construct(U* ptr, Args&&... args) noexcept(
-      !exceptions_internal::ThrowingAllowed(Flags, NoThrow::kNoThrow)) {
+      IsSpecified(AllocSpec::kNoThrowAllocate)) {
     ReadStateAndMaybeThrow(ABSL_PRETTY_FUNCTION);
     ::new (static_cast<void*>(ptr)) U(std::forward<Args>(args)...);
   }
@@ -665,26 +777,32 @@ class ThrowingAllocator : private exceptions_internal::TrackedObject {
   }
 
   ThrowingAllocator select_on_container_copy_construction() noexcept(
-      !exceptions_internal::ThrowingAllowed(Flags, NoThrow::kNoThrow)) {
+      IsSpecified(AllocSpec::kNoThrowAllocate)) {
     auto& out = *this;
     ReadStateAndMaybeThrow(ABSL_PRETTY_FUNCTION);
     return out;
   }
 
   template <typename U>
-  bool operator==(const ThrowingAllocator<U, Flags>& other) const noexcept {
+  bool operator==(const ThrowingAllocator<U, Spec>& other) const noexcept {
     return dummy_ == other.dummy_;
   }
 
   template <typename U>
-  bool operator!=(const ThrowingAllocator<U, Flags>& other) const noexcept {
+  bool operator!=(const ThrowingAllocator<U, Spec>& other) const noexcept {
     return dummy_ != other.dummy_;
   }
 
-  template <typename U, NoThrow B>
+  template <typename, AllocSpec>
   friend class ThrowingAllocator;
 
  private:
+  static std::string GetInstanceString(int dummy) {
+    return absl::StrCat("ThrowingAllocator<",
+                        exceptions_internal::GetSpecString(Spec), ">(", dummy,
+                        ")");
+  }
+
   const std::shared_ptr<const int>& State() const { return dummy_; }
   std::shared_ptr<const int>& State() { return dummy_; }
 
@@ -695,7 +813,7 @@ class ThrowingAllocator : private exceptions_internal::TrackedObject {
   }
 
   void ReadStateAndMaybeThrow(absl::string_view msg) const {
-    if (exceptions_internal::ThrowingAllowed(Flags, NoThrow::kNoThrow)) {
+    if (!IsSpecified(AllocSpec::kNoThrowAllocate)) {
       exceptions_internal::MaybeThrow(
           absl::Substitute("Allocator id $0 threw from $1", *dummy_, msg));
     }
@@ -705,100 +823,287 @@ class ThrowingAllocator : private exceptions_internal::TrackedObject {
   std::shared_ptr<const int> dummy_;
 };
 
-template <typename T, NoThrow Throws>
-int ThrowingAllocator<T, Throws>::next_id_ = 0;
-
-// Inspects the constructions and destructions of anything inheriting from
-// TrackedObject.  Place this as a member variable in a test fixture to ensure
-// that every ThrowingValue was constructed and destroyed correctly.  This also
-// allows us to safely "leak" TrackedObjects, as ConstructorTracker will destroy
-// everything left over in its destructor.
-struct ConstructorTracker {
-  ConstructorTracker() = default;
-  ~ConstructorTracker() {
-    auto& allocs = exceptions_internal::TrackedObject::GetAllocs();
-    for (const auto& kv : allocs) {
-      ADD_FAILURE() << "Object at address " << static_cast<void*>(kv.first)
-                    << " constructed from " << kv.second << " not destroyed";
-    }
-    allocs.clear();
-  }
-};
+template <typename T, AllocSpec Spec>
+int ThrowingAllocator<T, Spec>::next_id_ = 0;
 
 // Tests for resource leaks by attempting to construct a T using args repeatedly
 // until successful, using the countdown method.  Side effects can then be
-// tested for resource leaks.  If a ConstructorTracker is present in the test
-// fixture, then this will also test that memory resources are not leaked as
-// long as T allocates TrackedObjects.
+// tested for resource leaks.
 template <typename T, typename... Args>
-T TestThrowingCtor(Args&&... args) {
+void TestThrowingCtor(Args&&... args) {
   struct Cleanup {
-    ~Cleanup() { UnsetCountdown(); }
-  };
-  Cleanup c;
-  for (int countdown = 0;; ++countdown) {
-    exceptions_internal::countdown = countdown;
+    ~Cleanup() { exceptions_internal::UnsetCountdown(); }
+  } c;
+  for (int count = 0;; ++count) {
+    exceptions_internal::ConstructorTracker ct(count);
+    exceptions_internal::SetCountdown(count);
     try {
-      return T(std::forward<Args>(args)...);
+      T temp(std::forward<Args>(args)...);
+      static_cast<void>(temp);
+      break;
     } catch (const exceptions_internal::TestException&) {
     }
   }
 }
 
-// Tests that performing operation Op on a T follows exception safety
-// guarantees.  By default only tests the basic guarantee. There must be a
-// function, AbslCheckInvariants(T*, absl::InternalAbslNamespaceFinder) which
-// returns anything convertible to bool and which makes sure the invariants of
-// the type are upheld.  This is called before any of the checkers.  The
-// InternalAbslNamespaceFinder is unused, and just helps find
-// AbslCheckInvariants for absl types which become aliases to std::types in
-// C++17.
-//
-// Parameters:
-//   * TFactory: operator() returns a unique_ptr to the type under test (T).  It
-//   should always return pointers to values which compare equal.
-//   * FunctionFromTPtrToVoid: A functor exercising the function under test.  It
-//   should take a T* and return void.
-//   * Checkers: Any number of functions taking a T* and returning
-//   anything contextually convertible to bool.  If a testing::AssertionResult
-//   is used then the error message is kept.  These test invariants related to
-//   the operation. To test the strong guarantee, pass
-//   absl::StrongGuarantee(factory).  A checker may freely modify the passed-in
-//   T, for example to make sure the T can be set to a known state.
-template <typename TFactory, typename FunctionFromTPtrToVoid,
-          typename... Checkers>
-testing::AssertionResult TestExceptionSafety(TFactory factory,
-                                             FunctionFromTPtrToVoid&& op,
-                                             const Checkers&... checkers) {
+// Tests the nothrow guarantee of the provided nullary operation. If the an
+// exception is thrown, the result will be AssertionFailure(). Otherwise, it
+// will be AssertionSuccess().
+template <typename Operation>
+testing::AssertionResult TestNothrowOp(const Operation& operation) {
   struct Cleanup {
-    ~Cleanup() { UnsetCountdown(); }
+    Cleanup() { exceptions_internal::SetCountdown(); }
+    ~Cleanup() { exceptions_internal::UnsetCountdown(); }
   } c;
-  for (int countdown = 0;; ++countdown) {
-    auto out = exceptions_internal::TestAtCountdown(factory, op, countdown,
-                                                    checkers...);
-    if (!out.has_value()) {
-      return testing::AssertionSuccess();
-    }
-    if (!*out) return *out;
+  try {
+    operation();
+    return testing::AssertionSuccess();
+  } catch (exceptions_internal::TestException) {
+    return testing::AssertionFailure()
+           << "TestException thrown during call to operation() when nothrow "
+              "guarantee was expected.";
+  } catch (...) {
+    return testing::AssertionFailure()
+           << "Unknown exception thrown during call to operation() when "
+              "nothrow guarantee was expected.";
   }
 }
 
-// Returns a functor to test for the strong exception-safety guarantee.
-// Equality comparisons are made against the T provided by the factory and
-// default to using operator==.
-//
-// Parameters:
-//   * TFactory: operator() returns a unique_ptr to the type under test.  It
-//   should always return pointers to values which compare equal.
-template <typename TFactory, typename EqualTo = std::equal_to<
-                                 exceptions_internal::FactoryType<TFactory>>>
-exceptions_internal::StrongGuaranteeTester<
-    exceptions_internal::FactoryType<TFactory>, EqualTo>
-StrongGuarantee(TFactory factory, EqualTo eq = EqualTo()) {
-  return exceptions_internal::StrongGuaranteeTester<
-      exceptions_internal::FactoryType<TFactory>, EqualTo>(factory(), eq);
+namespace exceptions_internal {
+
+// Dummy struct for ExceptionSafetyTester<> partial state.
+struct UninitializedT {};
+
+template <typename T>
+class DefaultFactory {
+ public:
+  explicit DefaultFactory(const T& t) : t_(t) {}
+  std::unique_ptr<T> operator()() const { return absl::make_unique<T>(t_); }
+
+ private:
+  T t_;
+};
+
+template <size_t LazyInvariantsCount, typename LazyFactory,
+          typename LazyOperation>
+using EnableIfTestable = typename absl::enable_if_t<
+    LazyInvariantsCount != 0 &&
+    !std::is_same<LazyFactory, UninitializedT>::value &&
+    !std::is_same<LazyOperation, UninitializedT>::value>;
+
+template <typename Factory = UninitializedT,
+          typename Operation = UninitializedT, typename... Invariants>
+class ExceptionSafetyTester;
+
+}  // namespace exceptions_internal
+
+exceptions_internal::ExceptionSafetyTester<> MakeExceptionSafetyTester();
+
+namespace exceptions_internal {
+
+/*
+ * Builds a tester object that tests if performing a operation on a T follows
+ * exception safety guarantees. Verification is done via invariant assertion
+ * callbacks applied to T instances post-throw.
+ *
+ * Template parameters for ExceptionSafetyTester:
+ *
+ * - Factory: The factory object (passed in via tester.WithFactory(...) or
+ *   tester.WithInitialValue(...)) must be invocable with the signature
+ *   `std::unique_ptr<T> operator()() const` where T is the type being tested.
+ *   It is used for reliably creating identical T instances to test on.
+ *
+ * - Operation: The operation object (passsed in via tester.WithOperation(...)
+ *   or tester.Test(...)) must be invocable with the signature
+ *   `void operator()(T*) const` where T is the type being tested. It is used
+ *   for performing steps on a T instance that may throw and that need to be
+ *   checked for exception safety. Each call to the operation will receive a
+ *   fresh T instance so it's free to modify and destroy the T instances as it
+ *   pleases.
+ *
+ * - Invariants...: The invariant assertion callback objects (passed in via
+ *   tester.WithInvariants(...)) must be invocable with the signature
+ *   `testing::AssertionResult operator()(T*) const` where T is the type being
+ *   tested. Invariant assertion callbacks are provided T instances post-throw.
+ *   They must return testing::AssertionSuccess when the type invariants of the
+ *   provided T instance hold. If the type invariants of the T instance do not
+ *   hold, they must return testing::AssertionFailure. Execution order of
+ *   Invariants... is unspecified. They will each individually get a fresh T
+ *   instance so they are free to modify and destroy the T instances as they
+ *   please.
+ */
+template <typename Factory, typename Operation, typename... Invariants>
+class ExceptionSafetyTester {
+ public:
+  /*
+   * Returns a new ExceptionSafetyTester with an included T factory based on the
+   * provided T instance. The existing factory will not be included in the newly
+   * created tester instance. The created factory returns a new T instance by
+   * copy-constructing the provided const T& t.
+   *
+   * Preconditions for tester.WithInitialValue(const T& t):
+   *
+   * - The const T& t object must be copy-constructible where T is the type
+   *   being tested. For non-copy-constructible objects, use the method
+   *   tester.WithFactory(...).
+   */
+  template <typename T>
+  ExceptionSafetyTester<DefaultFactory<T>, Operation, Invariants...>
+  WithInitialValue(const T& t) const {
+    return WithFactory(DefaultFactory<T>(t));
+  }
+
+  /*
+   * Returns a new ExceptionSafetyTester with the provided T factory included.
+   * The existing factory will not be included in the newly-created tester
+   * instance. This method is intended for use with types lacking a copy
+   * constructor. Types that can be copy-constructed should instead use the
+   * method tester.WithInitialValue(...).
+   */
+  template <typename NewFactory>
+  ExceptionSafetyTester<absl::decay_t<NewFactory>, Operation, Invariants...>
+  WithFactory(const NewFactory& new_factory) const {
+    return {new_factory, operation_, invariants_};
+  }
+
+  /*
+   * Returns a new ExceptionSafetyTester with the provided testable operation
+   * included. The existing operation will not be included in the newly created
+   * tester.
+   */
+  template <typename NewOperation>
+  ExceptionSafetyTester<Factory, absl::decay_t<NewOperation>, Invariants...>
+  WithOperation(const NewOperation& new_operation) const {
+    return {factory_, new_operation, invariants_};
+  }
+
+  /*
+   * Returns a new ExceptionSafetyTester with the provided MoreInvariants...
+   * combined with the Invariants... that were already included in the instance
+   * on which the method was called. Invariants... cannot be removed or replaced
+   * once added to an ExceptionSafetyTester instance. A fresh object must be
+   * created in order to get an empty Invariants... list.
+   *
+   * In addition to passing in custom invariant assertion callbacks, this method
+   * accepts `testing::strong_guarantee` as an argument which checks T instances
+   * post-throw against freshly created T instances via operator== to verify
+   * that any state changes made during the execution of the operation were
+   * properly rolled back.
+   */
+  template <typename... MoreInvariants>
+  ExceptionSafetyTester<Factory, Operation, Invariants...,
+                        absl::decay_t<MoreInvariants>...>
+  WithInvariants(const MoreInvariants&... more_invariants) const {
+    return {factory_, operation_,
+            std::tuple_cat(invariants_,
+                           std::tuple<absl::decay_t<MoreInvariants>...>(
+                               more_invariants...))};
+  }
+
+  /*
+   * Returns a testing::AssertionResult that is the reduced result of the
+   * exception safety algorithm. The algorithm short circuits and returns
+   * AssertionFailure after the first invariant callback returns an
+   * AssertionFailure. Otherwise, if all invariant callbacks return an
+   * AssertionSuccess, the reduced result is AssertionSuccess.
+   *
+   * The passed-in testable operation will not be saved in a new tester instance
+   * nor will it modify/replace the existing tester instance. This is useful
+   * when each operation being tested is unique and does not need to be reused.
+   *
+   * Preconditions for tester.Test(const NewOperation& new_operation):
+   *
+   * - May only be called after at least one invariant assertion callback and a
+   *   factory or initial value have been provided.
+   */
+  template <
+      typename NewOperation,
+      typename = EnableIfTestable<sizeof...(Invariants), Factory, NewOperation>>
+  testing::AssertionResult Test(const NewOperation& new_operation) const {
+    return TestImpl(new_operation, absl::index_sequence_for<Invariants...>());
+  }
+
+  /*
+   * Returns a testing::AssertionResult that is the reduced result of the
+   * exception safety algorithm. The algorithm short circuits and returns
+   * AssertionFailure after the first invariant callback returns an
+   * AssertionFailure. Otherwise, if all invariant callbacks return an
+   * AssertionSuccess, the reduced result is AssertionSuccess.
+   *
+   * Preconditions for tester.Test():
+   *
+   * - May only be called after at least one invariant assertion callback, a
+   *   factory or initial value and a testable operation have been provided.
+   */
+  template <typename LazyOperation = Operation,
+            typename =
+                EnableIfTestable<sizeof...(Invariants), Factory, LazyOperation>>
+  testing::AssertionResult Test() const {
+    return TestImpl(operation_, absl::index_sequence_for<Invariants...>());
+  }
+
+ private:
+  template <typename, typename, typename...>
+  friend class ExceptionSafetyTester;
+
+  friend ExceptionSafetyTester<> testing::MakeExceptionSafetyTester();
+
+  ExceptionSafetyTester() {}
+
+  ExceptionSafetyTester(const Factory& f, const Operation& o,
+                        const std::tuple<Invariants...>& i)
+      : factory_(f), operation_(o), invariants_(i) {}
+
+  template <typename SelectedOperation, size_t... Indices>
+  testing::AssertionResult TestImpl(const SelectedOperation& selected_operation,
+                                    absl::index_sequence<Indices...>) const {
+    // Starting from 0 and counting upwards until one of the exit conditions is
+    // hit...
+    for (int count = 0;; ++count) {
+      exceptions_internal::ConstructorTracker ct(count);
+
+      // Run the full exception safety test algorithm for the current countdown
+      auto reduced_res =
+          TestAllInvariantsAtCountdown(factory_, selected_operation, count,
+                                       std::get<Indices>(invariants_)...);
+      // If there is no value in the optional, no invariants were run because no
+      // exception was thrown. This means that the test is complete and the loop
+      // can exit successfully.
+      if (!reduced_res.has_value()) {
+        return testing::AssertionSuccess();
+      }
+      // If the optional is not empty and the value is falsy, an invariant check
+      // failed so the test must exit to propegate the failure.
+      if (!reduced_res.value()) {
+        return reduced_res.value();
+      }
+      // If the optional is not empty and the value is not falsy, it means
+      // exceptions were thrown but the invariants passed so the test must
+      // continue to run.
+    }
+  }
+
+  Factory factory_;
+  Operation operation_;
+  std::tuple<Invariants...> invariants_;
+};
+
+}  // namespace exceptions_internal
+
+/*
+ * Constructs an empty ExceptionSafetyTester. All ExceptionSafetyTester
+ * objects are immutable and all With[thing] mutation methods return new
+ * instances of ExceptionSafetyTester.
+ *
+ * In order to test a T for exception safety, a factory for that T, a testable
+ * operation, and at least one invariant callback returning an assertion
+ * result must be applied using the respective methods.
+ */
+inline exceptions_internal::ExceptionSafetyTester<>
+MakeExceptionSafetyTester() {
+  return {};
 }
 
-}  // namespace absl
+}  // namespace testing
 
 #endif  // ABSL_BASE_INTERNAL_EXCEPTION_SAFETY_TESTING_H_

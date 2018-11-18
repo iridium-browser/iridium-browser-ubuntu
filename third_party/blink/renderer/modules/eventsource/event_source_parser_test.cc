@@ -6,6 +6,7 @@
 
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/modules/eventsource/event_source.h"
+#include "third_party/blink/renderer/platform/heap/persistent.h"
 #include "third_party/blink/renderer/platform/wtf/text/character_names.h"
 
 #include <string.h>
@@ -76,7 +77,7 @@ class StoppingClient : public GarbageCollectedFinalized<StoppingClient>,
     events_.push_back(EventOrReconnectionTimeSetting(reconnection_time));
   }
 
-  virtual void Trace(blink::Visitor* visitor) {
+  void Trace(blink::Visitor* visitor) override {
     visitor->Trace(parser_);
     EventSourceParser::Client::Trace(visitor);
   }
@@ -94,7 +95,9 @@ class EventSourceParserTest : public testing::Test {
         parser_(new EventSourceParser(AtomicString(), client_)) {}
   ~EventSourceParserTest() override = default;
 
-  void Enqueue(const char* data) { parser_->AddBytes(data, strlen(data)); }
+  void Enqueue(const char* data) {
+    parser_->AddBytes(data, static_cast<uint32_t>(strlen(data)));
+  }
   void EnqueueOneByOne(const char* data) {
     const char* p = data;
     while (*p != '\0')

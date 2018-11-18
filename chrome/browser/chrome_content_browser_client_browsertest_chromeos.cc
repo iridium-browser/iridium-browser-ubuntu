@@ -9,14 +9,16 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/run_loop.h"
+#include "base/task/post_task.h"
 #include "base/threading/thread_restrictions.h"
-#include "chrome/browser/chromeos/ash_config.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "content/public/browser/browser_child_process_host_iterator.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_data.h"
 #include "content/public/common/process_type.h"
+#include "ui/base/ui_base_features.h"
 
 using content::BrowserChildProcessHostIterator;
 using content::BrowserThread;
@@ -26,7 +28,7 @@ namespace {
 void GetUtilityProcessPidsOnIOThread(std::vector<pid_t>* pids) {
   for (BrowserChildProcessHostIterator it(content::PROCESS_TYPE_UTILITY);
        !it.Done(); ++it) {
-    pid_t pid = it.GetData().handle;
+    pid_t pid = it.GetData().GetHandle();
     pids->push_back(pid);
   }
 }
@@ -50,17 +52,18 @@ bool HasSubstring(base::StringPiece str, base::StringPiece sub) {
 
 using ChromeContentBrowserClientMashTest = InProcessBrowserTest;
 
-// Verifies that mash service child processes do not use in-process breakpad
-// crash dumping.
+// Verifies that mash service child processes use in-process breakpad crash
+// dumping.
 IN_PROC_BROWSER_TEST_F(ChromeContentBrowserClientMashTest, CrashReporter) {
-  if (chromeos::GetAshConfig() != ash::Config::MASH)
+  // Test only applies to out-of-process.
+  if (!features::IsMultiProcessMash())
     return;
 
   // Child process management lives on the IO thread.
   std::vector<pid_t> pids;
   base::RunLoop loop;
-  BrowserThread::PostTaskAndReply(
-      BrowserThread::IO, FROM_HERE,
+  base::PostTaskWithTraitsAndReply(
+      FROM_HERE, {BrowserThread::IO},
       base::Bind(&GetUtilityProcessPidsOnIOThread, &pids), loop.QuitClosure());
   loop.Run();
   ASSERT_FALSE(pids.empty());
@@ -76,8 +79,8 @@ IN_PROC_BROWSER_TEST_F(ChromeContentBrowserClientMashTest, CrashReporter) {
     // spaces, which makes them hard to tokenize. Just search the whole string.
     if (HasSubstring(cmdline, switches::kMashServiceName)) {
       ++mash_service_count;
-      // Mash services should not use in-process breakpad crash dumping.
-      EXPECT_FALSE(HasSubstring(cmdline, switches::kEnableCrashReporter));
+      // Mash services use in-process breakpad crash dumping.
+      EXPECT_TRUE(HasSubstring(cmdline, switches::kEnableCrashReporter));
     }
   }
   // There's at least one mash service, for ash.

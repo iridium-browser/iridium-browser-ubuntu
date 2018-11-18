@@ -21,7 +21,7 @@
 #include "chrome/browser/chromeos/extensions/external_cache_delegate.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/install_attributes.h"
-#include "components/signin/core/account_id/account_id.h"
+#include "components/account_id/account_id.h"
 #include "ui/gfx/image/image_skia.h"
 
 class GURL;
@@ -361,7 +361,7 @@ class KioskAppManager : public KioskAppDataDelegate,
   std::vector<std::unique_ptr<KioskAppData>> apps_;
   std::string auto_launch_app_id_;
   std::string currently_auto_launched_with_zero_delay_app_;
-  base::ObserverList<KioskAppManagerObserver, true> observers_;
+  base::ObserverList<KioskAppManagerObserver, true>::Unchecked observers_;
 
   std::unique_ptr<CrosSettings::ObserverSubscription>
       local_accounts_subscription_;

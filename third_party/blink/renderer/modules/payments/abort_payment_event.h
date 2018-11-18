@@ -6,7 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_PAYMENTS_ABORT_PAYMENT_EVENT_H_
 
 #include "third_party/blink/renderer/modules/event_modules.h"
-#include "third_party/blink/renderer/modules/serviceworkers/extendable_event.h"
+#include "third_party/blink/renderer/modules/service_worker/extendable_event.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/wtf/noncopyable.h"
@@ -38,7 +38,7 @@ class MODULES_EXPORT AbortPaymentEvent final : public ExtendableEvent {
 
   void respondWith(ScriptState*, ScriptPromise, ExceptionState&);
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  private:
   AbortPaymentEvent(const AtomicString& type,

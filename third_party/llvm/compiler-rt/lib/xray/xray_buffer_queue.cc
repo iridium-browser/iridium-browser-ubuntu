@@ -13,48 +13,63 @@
 //
 //===----------------------------------------------------------------------===//
 #include "xray_buffer_queue.h"
-#include "sanitizer_common/sanitizer_allocator_internal.h"
 #include "sanitizer_common/sanitizer_common.h"
 #include "sanitizer_common/sanitizer_libc.h"
+#include "sanitizer_common/sanitizer_posix.h"
+#include "xray_allocator.h"
+#include "xray_defs.h"
+#include <memory>
+#include <sys/mman.h>
 
 using namespace __xray;
 using namespace __sanitizer;
 
-BufferQueue::BufferQueue(size_t B, size_t N, bool &Success)
-    : BufferSize(B), Buffers(new BufferRep[N]()), BufferCount(N), Finalizing{0},
-      OwnedBuffers(new void *[N]()), Next(Buffers), First(Buffers),
+BufferQueue::BufferQueue(size_t B, size_t N,
+                         bool &Success) XRAY_NEVER_INSTRUMENT
+    : BufferSize(B),
+      BufferCount(N),
+      Mutex(),
+      Finalizing{0},
+      BackingStore(allocateBuffer(B *N)),
+      Buffers(initArray<BufferQueue::BufferRep>(N)),
+      Next(Buffers),
+      First(Buffers),
       LiveBuffers(0) {
+  if (BackingStore == nullptr) {
+    Success = false;
+    return;
+  }
+  if (Buffers == nullptr) {
+    deallocateBuffer(BackingStore, BufferSize * BufferCount);
+    Success = false;
+    return;
+  }
+
   for (size_t i = 0; i < N; ++i) {
     auto &T = Buffers[i];
-    void *Tmp = InternalAlloc(BufferSize, nullptr, 64);
-    if (Tmp == nullptr) {
-      Success = false;
-      return;
-    }
-    void *Extents = InternalAlloc(sizeof(BufferExtents), nullptr, 64);
-    if (Extents == nullptr) {
-      Success = false;
-      return;
-    }
     auto &Buf = T.Buff;
-    Buf.Data = Tmp;
+    Buf.Data = reinterpret_cast<char *>(BackingStore) + (BufferSize * i);
     Buf.Size = B;
-    Buf.Extents = reinterpret_cast<BufferExtents *>(Extents);
-    OwnedBuffers[i] = Tmp;
+    atomic_store(&Buf.Extents, 0, memory_order_release);
+    T.Used = false;
   }
   Success = true;
 }
 
 BufferQueue::ErrorCode BufferQueue::getBuffer(Buffer &Buf) {
-  if (__sanitizer::atomic_load(&Finalizing, __sanitizer::memory_order_acquire))
+  if (atomic_load(&Finalizing, memory_order_acquire))
     return ErrorCode::QueueFinalizing;
-  __sanitizer::SpinMutexLock Guard(&Mutex);
+
+  SpinMutexLock Guard(&Mutex);
   if (LiveBuffers == BufferCount)
     return ErrorCode::NotEnoughMemory;
 
   auto &T = *Next;
   auto &B = T.Buff;
-  Buf = B;
+  auto Extents = atomic_load(&B.Extents, memory_order_acquire);
+  atomic_store(&Buf.Extents, Extents, memory_order_release);
+  Buf.Data = B.Data;
+  Buf.Size = B.Size;
   T.Used = true;
   ++LiveBuffers;
 
@@ -65,18 +80,14 @@ BufferQueue::ErrorCode BufferQueue::getBuffer(Buffer &Buf) {
 }
 
 BufferQueue::ErrorCode BufferQueue::releaseBuffer(Buffer &Buf) {
-  // Blitz through the buffers array to find the buffer.
-  bool Found = false;
-  for (auto I = OwnedBuffers, E = OwnedBuffers + BufferCount; I != E; ++I) {
-    if (*I == Buf.Data) {
-      Found = true;
-      break;
-    }
-  }
-  if (!Found)
+  // Check whether the buffer being referred to is within the bounds of the
+  // backing store's range.
+  if (Buf.Data < BackingStore ||
+      Buf.Data >
+          reinterpret_cast<char *>(BackingStore) + (BufferCount * BufferSize))
     return ErrorCode::UnrecognizedBuffer;
 
-  __sanitizer::SpinMutexLock Guard(&Mutex);
+  SpinMutexLock Guard(&Mutex);
 
   // This points to a semantic bug, we really ought to not be releasing more
   // buffers than we actually get.
@@ -84,10 +95,14 @@ BufferQueue::ErrorCode BufferQueue::releaseBuffer(Buffer &Buf) {
     return ErrorCode::NotEnoughMemory;
 
   // Now that the buffer has been released, we mark it as "used".
-  First->Buff = Buf;
+  auto Extents = atomic_load(&Buf.Extents, memory_order_acquire);
+  atomic_store(&First->Buff.Extents, Extents, memory_order_release);
+  First->Buff.Data = Buf.Data;
+  First->Buff.Size = Buf.Size;
   First->Used = true;
   Buf.Data = nullptr;
   Buf.Size = 0;
+  atomic_store(&Buf.Extents, 0, memory_order_release);
   --LiveBuffers;
   if (++First == (Buffers + BufferCount))
     First = Buffers;
@@ -96,19 +111,14 @@ BufferQueue::ErrorCode BufferQueue::releaseBuffer(Buffer &Buf) {
 }
 
 BufferQueue::ErrorCode BufferQueue::finalize() {
-  if (__sanitizer::atomic_exchange(&Finalizing, 1,
-                                   __sanitizer::memory_order_acq_rel))
+  if (atomic_exchange(&Finalizing, 1, memory_order_acq_rel))
     return ErrorCode::QueueFinalizing;
   return ErrorCode::Ok;
 }
 
 BufferQueue::~BufferQueue() {
-  for (auto I = Buffers, E = Buffers + BufferCount; I != E; ++I) {
-    auto &T = *I;
-    auto &Buf = T.Buff;
-    InternalFree(Buf.Data);
-    InternalFree(Buf.Extents);
-  }
-  delete[] Buffers;
-  delete[] OwnedBuffers;
+  for (auto B = Buffers, E = Buffers + BufferCount; B != E; ++B)
+    B->~BufferRep();
+  deallocateBuffer(Buffers, BufferCount);
+  deallocateBuffer(BackingStore, BufferSize * BufferCount);
 }

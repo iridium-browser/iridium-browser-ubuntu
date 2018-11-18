@@ -9,7 +9,6 @@ import re
 import subprocess
 import tempfile
 
-from battor import battor_wrapper
 from telemetry.core import android_platform
 from telemetry.core import exceptions
 from telemetry.core import util
@@ -27,8 +26,6 @@ from telemetry.internal.platform.power_monitor import sysfs_power_monitor
 from telemetry.internal.util import binary_manager
 from telemetry.internal.util import external_modules
 
-psutil = external_modules.ImportOptionalModule('psutil')
-
 from devil.android import app_ui
 from devil.android import battery_utils
 from devil.android import device_errors
@@ -38,6 +35,7 @@ from devil.android.perf import perf_control
 from devil.android.perf import thermal_throttle
 from devil.android.sdk import shared_prefs
 from devil.android.sdk import version_codes
+from devil.android.tools import provision_devices
 from devil.android.tools import video_recorder
 
 try:
@@ -51,6 +49,7 @@ try:
 except Exception: # pylint: disable=broad-except
   surface_stats_collector = None
 
+psutil = external_modules.ImportOptionalModule('psutil')
 
 _ARCH_TO_STACK_TOOL_ARCH = {
     'armeabi-v7a': 'arm',
@@ -77,16 +76,16 @@ class AndroidPlatformBackend(
         self._device.EnableRoot()
       except device_errors.CommandFailedError:
         logging.warning('Unable to root %s', str(self._device))
-    assert self._device.HasRoot(), (
-        'Android device must be rooted to run Telemetry')
+    self._can_elevate_privilege = (
+        self._device.HasRoot() or self._device.NeedsSU())
+    assert self._can_elevate_privilege, (
+        'Android device must have root access to run Telemetry')
     self._battery = battery_utils.BatteryUtils(self._device)
     self._enable_performance_mode = device.enable_performance_mode
     self._surface_stats_collector = None
     self._perf_tests_setup = perf_control.PerfControl(self._device)
     self._thermal_throttle = thermal_throttle.ThermalThrottle(self._device)
     self._raw_display_frame_rate_measurements = []
-    self._can_elevate_privilege = (
-        self._device.HasRoot() or self._device.NeedsSU())
     self._device_copy_script = None
     self._power_monitor = (
         android_power_monitor_controller.AndroidPowerMonitorController([
@@ -98,8 +97,6 @@ class AndroidPlatformBackend(
                 self._battery),
         ], self._battery))
     self._video_recorder = None
-    self._installed_applications = None
-
     self._system_ui = None
 
     _FixPossibleAdbInstability()
@@ -195,22 +192,21 @@ class AndroidPlatformBackend(
     finally:
       self._surface_stats_collector = None
     # TODO(sullivan): should this code be inline, or live elsewhere?
-    events = []
+    events = [_BuildEvent(
+        '__metadata', 'process_name', 'M', pid, 0, {'name': 'SurfaceFlinger'})]
     for ts in timestamps:
-      events.append({
-          'cat': 'SurfaceFlinger',
-          'name': 'vsync_before',
-          'ts': ts,
-          'pid': pid,
-          'tid': pid,
-          'args': {
-              'data': {
-                  'frame_count': 1,
-                  'refresh_period': refresh_period,
-              }
-          }
-      })
-    return events
+      events.append(_BuildEvent('SurfaceFlinger', 'vsync_before', 'I', pid, ts,
+                                {'data': {'frame_count': 1}}))
+
+    return {
+        'traceEvents': events,
+        'metadata': {
+            'clock-domain': 'LINUX_CLOCK_MONOTONIC',
+            'surface_flinger': {
+                'refresh_period': refresh_period,
+            },
+        }
+    }
 
   def CanTakeScreenshot(self):
     return True
@@ -341,7 +337,7 @@ class AndroidPlatformBackend(
       application: The full package name string of the application to kill.
     """
     assert isinstance(application, basestring)
-    self._device.KillAll(application, blocking=True, quiet=True)
+    self._device.KillAll(application, blocking=True, quiet=True, as_root=True)
 
   def LaunchApplication(
       self, application, parameters=None, elevate_privilege=False):
@@ -375,13 +371,9 @@ class AndroidPlatformBackend(
     return bool(self._device.GetApplicationPids(application))
 
   def CanLaunchApplication(self, application):
-    if not self._installed_applications:
-      self._installed_applications = self._device.RunShellCommand(
-          ['pm', 'list', 'packages'], check_return=True)
-    return 'package:' + application in self._installed_applications
+    return bool(self._device.GetApplicationPaths(application))
 
   def InstallApplication(self, application):
-    self._installed_applications = None
     self._device.Install(application)
 
   @decorators.Cache
@@ -505,14 +497,6 @@ class AndroidPlatformBackend(
       if not self._device.DismissCrashDialogIfNeeded():
         break
 
-  def IsAppRunning(self, process_name):
-    """Determine if the given process is running.
-
-    Args:
-      process_name: The full package name string of the process.
-    """
-    return bool(self._device.GetApplicationPids(process_name))
-
   def PushProfile(self, package, new_profile_dir):
     """Replace application profile with files found on host machine.
 
@@ -532,8 +516,13 @@ class AndroidPlatformBackend(
     if not profile_base:
       profile_base = os.path.basename(profile_parent)
 
-    saved_profile_location = '/sdcard/profile/%s' % profile_base
-    self._device.PushChangedFiles([(new_profile_dir, saved_profile_location)])
+    provision_devices.CheckExternalStorage(self._device)
+
+    saved_profile_location = posixpath.join(
+        self._device.GetExternalStoragePath(),
+        'profile', profile_base)
+    self._device.PushChangedFiles([(new_profile_dir, saved_profile_location)],
+                                  delete_device_stale=True)
 
     profile_dir = self.GetProfileDir(package)
     self._EfficientDeviceDirectoryCopy(
@@ -542,21 +531,31 @@ class AndroidPlatformBackend(
         ['dumpsys', 'package', package], check_return=True)
     id_line = next(line for line in dumpsys if 'userId=' in line)
     uid = re.search(r'\d+', id_line).group()
-    files = self._device.ListDirectory(profile_dir, as_root=True)
-    paths = [posixpath.join(profile_dir, f) for f in files if f != 'lib']
+
+    # Generate all of the paths copied to the device, via walking through
+    # |new_profile_dir| and doing path manipulations. This could be replaced
+    # with recursive commands (e.g. chown -R) below, but those are not well
+    # supported by older Android versions.
+    device_paths = []
+    for root, dirs, files in os.walk(new_profile_dir):
+      rel_root = os.path.relpath(root, new_profile_dir)
+      posix_rel_root = rel_root.replace(os.sep, posixpath.sep)
+
+      device_root = posixpath.normpath(posixpath.join(profile_dir,
+                                                      posix_rel_root))
+
+      if rel_root == '.' and 'lib' in files:
+        files.remove('lib')
+      device_paths.extend(posixpath.join(device_root, n) for n in files + dirs)
+
+    owner_group = '%s.%s' % (uid, uid)
+    self._device.ChangeOwner(owner_group, device_paths)
+
+    # Not having the correct SELinux security context can prevent Chrome from
+    # loading files even though the mode/group/owner combination should allow
+    # it.
     security_context = self._device.GetSecurityContextForPackage(package)
-    for path in paths:
-      # TODO(crbug.com/628617): Implement without ignoring shell errors.
-      # Note: need to pass command as a string for the shell to expand the *'s.
-      extended_path = '%s %s/* %s/*/* %s/*/*/*' % (path, path, path, path)
-      self._device.RunShellCommand(
-          'chown %s.%s %s' % (uid, uid, extended_path),
-          check_return=False, shell=True)
-      # Not having the correct SELinux security context can prevent Chrome from
-      # loading files even though the mode/group/owner combination should allow
-      # it.
-      self._device.RunShellCommand(['chcon', '-R', security_context, path],
-                                   as_root=True, check_return=True)
+    self._device.ChangeSecurityContext(security_context, device_paths)
 
   def _EfficientDeviceDirectoryCopy(self, source, dest):
     if not self._device_copy_script:
@@ -584,7 +583,7 @@ class AndroidPlatformBackend(
         if f not in ignore_list]
     if not files:
       return
-    self._device.RemovePath(files, recursive=True, as_root=True)
+    self._device.RemovePath(files, force=True, recursive=True, as_root=True)
 
   def GetProfileDir(self, package):
     """Returns the on-device location where the application profile is stored
@@ -714,13 +713,6 @@ class AndroidPlatformBackend(
                                                  check_return=True)
     return self._IsScreenLocked(input_methods)
 
-  def HasBattOrConnected(self):
-    # Use linux instead of Android because when determining what tests to run on
-    # a bot the individual device could be down, which would make BattOr tests
-    # not run on any device. BattOrs communicate with the host and not android
-    # devices.
-    return battor_wrapper.IsBattOrConnected('linux')
-
   def Log(self, message):
     """Prints line to logcat."""
     TELEMETRY_LOGCAT_TAG = 'Telemetry'
@@ -749,3 +741,18 @@ def _FixPossibleAdbInstability():
           process.set_cpu_affinity([0])
     except (psutil.NoSuchProcess, psutil.AccessDenied):
       logging.warn('Failed to set adb process CPU affinity')
+
+def _BuildEvent(cat, name, ph, pid, ts, args):
+  event = {
+      'cat': cat,
+      'name': name,
+      'ph': ph,
+      'pid': pid,
+      'tid': pid,
+      'ts': ts * 1000,
+      'args': args
+  }
+  # Instant events need to specify the scope, too.
+  if ph == 'I':
+    event['s'] = 't'
+  return event

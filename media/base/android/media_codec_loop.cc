@@ -40,12 +40,14 @@ MediaCodecLoop::MediaCodecLoop(
     int sdk_int,
     Client* client,
     std::unique_ptr<MediaCodecBridge> media_codec,
-    scoped_refptr<base::SingleThreadTaskRunner> timer_task_runner)
+    scoped_refptr<base::SingleThreadTaskRunner> timer_task_runner,
+    bool disable_timer)
     : state_(STATE_READY),
       client_(client),
       media_codec_(std::move(media_codec)),
       pending_input_buf_index_(kInvalidBufferIndex),
       sdk_int_(sdk_int),
+      disable_timer_(disable_timer),
       weak_factory_(this) {
   if (timer_task_runner)
     io_timer_.SetTaskRunner(timer_task_runner);
@@ -66,7 +68,7 @@ void MediaCodecLoop::OnKeyAdded() {
   if (state_ == STATE_WAITING_FOR_KEY)
     SetState(STATE_READY);
 
-  DoPendingWork();
+  ExpectWork();
 }
 
 bool MediaCodecLoop::TryFlush() {
@@ -93,6 +95,13 @@ bool MediaCodecLoop::TryFlush() {
 
   SetState(STATE_READY);
   return true;
+}
+
+void MediaCodecLoop::ExpectWork() {
+  // Start / reset the timer, since we believe that progress can be made soon,
+  // even if not immediately.
+  ManageTimer(true);
+  DoPendingWork();
 }
 
 void MediaCodecLoop::DoPendingWork() {
@@ -309,6 +318,9 @@ bool MediaCodecLoop::ProcessOneOutputBuffer() {
 }
 
 void MediaCodecLoop::ManageTimer(bool did_work) {
+  if (disable_timer_)
+    return;
+
   bool should_be_running = true;
 
   // One might also use DefaultTickClock, but then ownership becomes harder.

@@ -14,8 +14,9 @@ class WebState;
 }  // namespace web
 
 typedef void (^SuggestionsAvailableCompletion)(BOOL suggestionsAvailable);
-typedef void (^SuggestionsReadyCompletion)(NSArray* suggestions,
-                                           id<FormSuggestionProvider> delegate);
+typedef void (^SuggestionsReadyCompletion)(
+    NSArray<FormSuggestion*>* suggestions,
+    id<FormSuggestionProvider> delegate);
 typedef void (^SuggestionHandledCompletion)(void);
 
 // Provides user-selectable suggestions for an input field of a web form
@@ -31,7 +32,9 @@ typedef void (^SuggestionHandledCompletion)(void);
                                  fieldType:(NSString*)fieldType
                                       type:(NSString*)type
                                 typedValue:(NSString*)typedValue
+                                   frameID:(NSString*)frameID
                                isMainFrame:(BOOL)isMainFrame
+                            hasUserGesture:(BOOL)hasUserGesture
                                   webState:(web::WebState*)webState
                          completionHandler:
                              (SuggestionsAvailableCompletion)completion;
@@ -45,6 +48,7 @@ typedef void (^SuggestionHandledCompletion)(void);
                          fieldType:(NSString*)fieldType
                               type:(NSString*)type
                         typedValue:(NSString*)typedValue
+                           frameID:(NSString*)frameID
                           webState:(web::WebState*)webState
                  completionHandler:(SuggestionsReadyCompletion)completion;
 
@@ -54,6 +58,7 @@ typedef void (^SuggestionHandledCompletion)(void);
                   fieldName:(NSString*)fieldName
             fieldIdentifier:(NSString*)fieldIdentifier
                        form:(NSString*)formName
+                    frameID:(NSString*)frameID
           completionHandler:(SuggestionHandledCompletion)completion;
 
 @end

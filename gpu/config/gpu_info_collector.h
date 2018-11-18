@@ -20,6 +20,7 @@ class CommandLine;
 }
 
 namespace gpu {
+struct GpuPreferences;
 
 // Collects basic GPU info without creating a GL/DirectX context (and without
 // the danger of crashing), including vendor_id and device_id.
@@ -34,21 +35,20 @@ GPU_EXPORT bool CollectBasicGraphicsInfo(const base::CommandLine* command_line,
 
 // Create a GL/DirectX context and collect related info.
 // This is called at GPU process startup time.
-GPU_EXPORT bool CollectContextGraphicsInfo(GPUInfo* gpu_info);
+GPU_EXPORT bool CollectContextGraphicsInfo(
+    GPUInfo* gpu_info,
+    const GpuPreferences& gpu_preferences);
 
 #if defined(OS_WIN)
 // Collect the DirectX Disagnostics information about the attached displays.
 GPU_EXPORT bool GetDxDiagnostics(DxDiagNode* output);
-GPU_EXPORT void RecordGpuSupportedRuntimeVersionHistograms(GPUInfo* gpu_info);
-GPU_EXPORT void GetGpuSupportedD3DVersion(GPUInfo* gpu_info);
-GPU_EXPORT void GetGpuSupportedVulkanVersion(GPUInfo* gpu_info);
+GPU_EXPORT void RecordGpuSupportedRuntimeVersionHistograms(
+    Dx12VulkanVersionInfo* dx12_vulkan_version_info);
 #endif  // OS_WIN
 
 // Create a GL context and collect GL strings and versions.
-GPU_EXPORT bool CollectGraphicsInfoGL(GPUInfo* gpu_info);
-
-// Each platform stores the driver version on the GL_VERSION string differently
-GPU_EXPORT void CollectDriverInfoGL(GPUInfo* gpu_info);
+GPU_EXPORT bool CollectGraphicsInfoGL(GPUInfo* gpu_info,
+                                      const GpuPreferences& gpu_preferences);
 
 // If more than one GPUs are identified, and GL strings are available,
 // identify the active GPU based on GL strings.

@@ -4,19 +4,23 @@
 
 """Finds android browsers that can be controlled by telemetry."""
 
+import contextlib
 import logging
 import os
+import shutil
 import subprocess
 import sys
 
-from py_utils import dependency_util
 from devil import base_error
 from devil.android import apk_helper
 from devil.android import flag_changer
-
+from py_utils import dependency_util
+from py_utils import file_util
+from py_utils import tempfile_ext
+from telemetry import compact_mode_options
+from telemetry import decorators
 from telemetry.core import exceptions
 from telemetry.core import platform
-from telemetry import decorators
 from telemetry.internal.backends import android_browser_backend_settings
 from telemetry.internal.backends.chrome import android_browser_backend
 from telemetry.internal.backends.chrome import chrome_startup_args
@@ -31,8 +35,43 @@ ANDROID_BACKEND_SETTINGS = (
     android_browser_backend_settings.ANDROID_BACKEND_SETTINGS)
 
 
+@contextlib.contextmanager
+def _ProfileWithExtraFiles(profile_dir, profile_files_to_copy):
+  """Yields a temporary directory populated with input files.
+
+  Args:
+    profile_dir: A directory whose contents will be copied to the output
+      directory.
+    profile_files_to_copy: A list of (source, dest) tuples to be copied to
+      the output directory.
+
+  Yields: A path to a temporary directory, named "_default_profile". This
+    directory will be cleaned up when this context exits.
+  """
+  with tempfile_ext.NamedTemporaryDirectory() as tempdir:
+    # TODO(csharrison): "_default_profile" was chosen because this directory
+    # will be pushed to the device's sdcard. We don't want to choose a
+    # random name due to the extra failure mode of filling up the sdcard
+    # in the case of unclean test teardown. We should consider changing
+    # PushProfile to avoid writing to this intermediate location.
+    host_profile = os.path.join(tempdir, '_default_profile')
+    if profile_dir:
+      shutil.copytree(profile_dir, host_profile)
+    else:
+      os.mkdir(host_profile)
+
+    # Add files from |profile_files_to_copy| into the host profile
+    # directory. Don't copy files if they already exist.
+    for source, dest in profile_files_to_copy:
+      host_path = os.path.join(host_profile, dest)
+      if not os.path.exists(host_path):
+        file_util.CopyFileWithIntermediateDirectories(source, host_path)
+    yield host_profile
+
+
 class PossibleAndroidBrowser(possible_browser.PossibleBrowser):
   """A launchable android browser instance."""
+
   def __init__(self, browser_type, finder_options, android_platform,
                backend_settings, local_apk=None):
     super(PossibleAndroidBrowser, self).__init__(
@@ -124,15 +163,21 @@ class PossibleAndroidBrowser(possible_browser.PossibleBrowser):
   def _SetupProfile(self):
     if self._browser_options.dont_override_profile:
       return
-    if self._browser_options.profile_dir:
-      # Push profile_dir path on the host to the device.
-      self._platform_backend.PushProfile(
-          self._backend_settings.package,
-          self._browser_options.profile_dir)
-    else:
+
+    # Just remove the existing profile if we don't have any files to copy over.
+    # This is because PushProfile does not support pushing completely empty
+    # directories.
+    profile_files_to_copy = self._browser_options.profile_files_to_copy
+    if not self._browser_options.profile_dir and not profile_files_to_copy:
       self._platform_backend.RemoveProfile(
           self._backend_settings.package,
           self._backend_settings.profile_ignore_list)
+      return
+
+    with _ProfileWithExtraFiles(self._browser_options.profile_dir,
+                                profile_files_to_copy) as profile_dir:
+      self._platform_backend.PushProfile(self._backend_settings.package,
+                                         profile_dir)
 
   def SetUpEnvironment(self, browser_options):
     super(PossibleAndroidBrowser, self).SetUpEnvironment(browser_options)
@@ -141,8 +186,11 @@ class PossibleAndroidBrowser(possible_browser.PossibleBrowser):
     startup_args = self.GetBrowserStartupArgs(self._browser_options)
     device.adb.Logcat(clear=True)
 
+    # use legacy commandline path if in compatibility mode
     self._flag_changer = flag_changer.FlagChanger(
-        device, self._backend_settings.command_line_name)
+        device, self._backend_settings.command_line_name, use_legacy_path=
+        compact_mode_options.LEGACY_COMMAND_LINE_PATH in
+        browser_options.compatibility_mode)
     self._flag_changer.ReplaceFlags(startup_args)
     # Stop any existing browser found already running on the device. This is
     # done *after* setting the command line flags, in case some other Android
@@ -160,9 +208,9 @@ class PossibleAndroidBrowser(possible_browser.PossibleBrowser):
       finally:
         self._flag_changer = None
 
-  def Create(self):
+  def Create(self, clear_caches=True):
     """Launch the browser on the device and return a Browser object."""
-    return self._GetBrowserInstance(existing=False)
+    return self._GetBrowserInstance(existing=False, clear_caches=clear_caches)
 
   def FindExistingBrowser(self):
     """Find a browser running on the device and bind a Browser object to it.
@@ -173,14 +221,16 @@ class PossibleAndroidBrowser(possible_browser.PossibleBrowser):
 
     A BrowserGoneException is raised if the browser cannot be found.
     """
-    return self._GetBrowserInstance(existing=True)
+    return self._GetBrowserInstance(existing=True, clear_caches=False)
 
-  def _GetBrowserInstance(self, existing=False):
+  def _GetBrowserInstance(self, existing, clear_caches):
     browser_backend = android_browser_backend.AndroidBrowserBackend(
         self._platform_backend, self._browser_options,
         self.browser_directory, self.profile_directory,
         self._backend_settings)
-    self._ClearCachesOnStart()
+    # TODO(crbug.com/811244): Remove when this is handled by shared state.
+    if clear_caches:
+      self._ClearCachesOnStart()
     try:
       returned_browser = browser.Browser(
           browser_backend, self._platform_backend, startup_args=(),
@@ -196,20 +246,21 @@ class PossibleAndroidBrowser(possible_browser.PossibleBrowser):
           exc_info[0].__name__)
       try:
         browser_backend.Close()
-      except Exception: # pylint: disable=broad-except
+      except Exception:  # pylint: disable=broad-except
         logging.exception('Secondary failure while closing browser backend.')
 
       raise exc_info[0], exc_info[1], exc_info[2]
-    finally:
-      # After the browser has been launched (or not) it's fine to restore the
-      # command line flags on the device.
-      self._RestoreCommandLineFlags()
 
   def GetBrowserStartupArgs(self, browser_options):
     startup_args = chrome_startup_args.GetFromBrowserOptions(browser_options)
+    # use the flag `--ignore-certificate-errors` if in compatibility mode
+    supports_spki_list = (
+        self._backend_settings.supports_spki_list and
+        compact_mode_options.IGNORE_CERTIFICATE_ERROR
+        not in browser_options.compatibility_mode)
     startup_args.extend(chrome_startup_args.GetReplayArgs(
         self._platform_backend.network_controller_backend,
-        supports_spki_list=self._backend_settings.supports_spki_list))
+        supports_spki_list=supports_spki_list))
     startup_args.append('--enable-remote-debugging')
     startup_args.append('--disable-fre')
     startup_args.append('--disable-external-intent-requests')

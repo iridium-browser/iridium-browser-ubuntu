@@ -13,10 +13,12 @@
 
 #include <memory>
 
-#include "rtc_base/asyncpacketsocket.h"
-#include "rtc_base/buffer.h"
-#include "rtc_base/constructormagic.h"
-#include "rtc_base/socketfactory.h"
+#include "rtc_base/asyncpacketsocket.h"  // for PacketOptions, AsyncPacketSo...
+#include "rtc_base/asyncsocket.h"        // for AsyncSocket
+#include "rtc_base/buffer.h"             // for Buffer
+#include "rtc_base/constructormagic.h"   // for RTC_DISALLOW_COPY_AND_ASSIGN
+#include "rtc_base/socket.h"             // for Socket, Socket::Option
+#include "rtc_base/socketaddress.h"      // for SocketAddress
 
 namespace rtc {
 
@@ -29,8 +31,9 @@ class AsyncTCPSocketBase : public AsyncPacketSocket {
   ~AsyncTCPSocketBase() override;
 
   // Pure virtual methods to send and recv data.
-  int Send(const void *pv, size_t cb,
-                   const rtc::PacketOptions& options) override = 0;
+  int Send(const void* pv,
+           size_t cb,
+           const rtc::PacketOptions& options) override = 0;
   virtual void ProcessInput(char* data, size_t* len) = 0;
   // Signals incoming connection.
   virtual void HandleIncomingConnection(AsyncSocket* socket) = 0;

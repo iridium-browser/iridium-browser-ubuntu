@@ -23,20 +23,21 @@
 #include "components/policy/core/common/cloud/cloud_policy_constants.h"
 #include "components/policy/policy_export.h"
 #include "components/policy/proto/device_management_backend.pb.h"
-#include "net/url_request/url_fetcher_delegate.h"
 
 namespace base {
 class SequencedTaskRunner;
 }
 
-namespace net {
-class URLRequestContextGetter;
-}
+namespace network {
+class SharedURLLoaderFactory;
+class SimpleURLLoader;
+}  // namespace network
 
 namespace policy {
 
 class DeviceManagementRequestJobImpl;
 class DeviceManagementService;
+class DMAuth;
 
 // DeviceManagementRequestJob describes a request to send to the device
 // management service. Jobs are created by DeviceManagementService. They can be
@@ -66,6 +67,8 @@ class POLICY_EXPORT DeviceManagementRequestJob {
     TYPE_UPLOAD_APP_INSTALL_REPORT = 17,
     TYPE_TOKEN_ENROLLMENT = 18,
     TYPE_CHROME_DESKTOP_REPORT = 19,
+    TYPE_INITIAL_ENROLLMENT_STATE_RETRIEVAL = 20,
+    TYPE_UPLOAD_POLICY_VALIDATION_REPORT = 21,
   };
 
   typedef base::Callback<
@@ -78,11 +81,9 @@ class POLICY_EXPORT DeviceManagementRequestJob {
 
   // Functions for configuring the job. These should only be called before
   // Start()ing the job, but never afterwards.
-  void SetGaiaToken(const std::string& gaia_token);
-  void SetOAuthToken(const std::string& oauth_token);
-  void SetDMToken(const std::string& dm_token);
   void SetClientID(const std::string& client_id);
-  void SetEnrollmentToken(const std::string& token);
+  void SetAuthData(std::unique_ptr<DMAuth> auth);
+
   // Sets the critical request parameter, which is used to differentiate regular
   // DMServer requests (like scheduled policy fetches) from time-sensitive ones
   // (like policy fetch during device enrollment). Should only be called before
@@ -116,9 +117,8 @@ class POLICY_EXPORT DeviceManagementRequestJob {
 
   JobType type_;
   ParameterMap query_params_;
-  std::string gaia_token_;
-  std::string dm_token_;
-  std::string enrollment_token_;
+
+  std::unique_ptr<DMAuth> auth_data_;
   enterprise_management::DeviceManagementRequest request_;
   RetryCallback retry_callback_;
 
@@ -132,7 +132,7 @@ class POLICY_EXPORT DeviceManagementRequestJob {
 // communication with the device management server. It creates the backends
 // objects that the device management policy provider and friends use to issue
 // requests.
-class POLICY_EXPORT DeviceManagementService : public net::URLFetcherDelegate {
+class POLICY_EXPORT DeviceManagementService {
  public:
   // Obtains the parameters used to contact the server.
   // This allows creating the DeviceManagementService early and getting these
@@ -154,18 +154,13 @@ class POLICY_EXPORT DeviceManagementService : public net::URLFetcherDelegate {
 
   explicit DeviceManagementService(
       std::unique_ptr<Configuration> configuration);
-  ~DeviceManagementService() override;
-
-  // The ID of URLFetchers created by the DeviceManagementService. This can be
-  // used by tests that use a TestURLFetcherFactory to get the pending fetchers
-  // created by the DeviceManagementService.
-  static const int kURLFetcherID;
+  virtual ~DeviceManagementService();
 
   // Creates a new device management request job. Ownership is transferred to
   // the caller.
   virtual DeviceManagementRequestJob* CreateJob(
       DeviceManagementRequestJob::JobType type,
-      const scoped_refptr<net::URLRequestContextGetter>& request_context);
+      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory);
 
   // Schedules a task to run |Initialize| after |delay_milliseconds| had passed.
   void ScheduleInitialization(int64_t delay_milliseconds);
@@ -176,19 +171,32 @@ class POLICY_EXPORT DeviceManagementService : public net::URLFetcherDelegate {
   // Gets the URL that the DMServer requests are sent to.
   std::string GetServerUrl();
 
+  // Called by SimpleURLLoader.
+  void OnURLLoaderComplete(network::SimpleURLLoader* url_loader,
+                           std::unique_ptr<std::string> response_body);
+
+  // Called by OnURLLoaderComplete, exposed publicly to ease unit testing.
+  void OnURLLoaderCompleteInternal(network::SimpleURLLoader* url_loader,
+                                   const std::string& response_body,
+                                   const std::string& mime_type,
+                                   int net_error,
+                                   int response_code,
+                                   bool was_fetched_via_proxy);
+
+  // Returns the SimpleURLLoader for testing. Expects that there's only one.
+  network::SimpleURLLoader* GetSimpleURLLoaderForTesting();
+
   // Sets the retry delay to a shorter time to prevent browser tests from
   // timing out.
   static void SetRetryDelayForTesting(long retryDelayMs);
 
  private:
-  typedef std::map<const net::URLFetcher*,
-                   DeviceManagementRequestJobImpl*> JobFetcherMap;
+  typedef std::map<const network::SimpleURLLoader*,
+                   DeviceManagementRequestJobImpl*>
+      JobFetcherMap;
   typedef base::circular_deque<DeviceManagementRequestJobImpl*> JobQueue;
 
   friend class DeviceManagementRequestJobImpl;
-
-  // net::URLFetcherDelegate override.
-  void OnURLFetchComplete(const net::URLFetcher* source) override;
 
   // Starts processing any queued jobs.
   void Initialize();

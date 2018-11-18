@@ -8,12 +8,31 @@
 #ifndef SkNx_sse_DEFINED
 #define SkNx_sse_DEFINED
 
-#include <immintrin.h>
+#include "SkTypes.h"
+
+#if SK_CPU_SSE_LEVEL >= SK_CPU_SSE_LEVEL_SSE41
+    #include <smmintrin.h>
+#elif SK_CPU_SSE_LEVEL >= SK_CPU_SSE_LEVEL_SSSE3
+    #include <tmmintrin.h>
+#else
+    #include <emmintrin.h>
+#endif
 
 // This file may assume <= SSE2, but must check SK_CPU_SSE_LEVEL for anything more recent.
 // If you do, make sure this is in a static inline function... anywhere else risks violating ODR.
 
 namespace {
+
+// Emulate _mm_floor_ps() with SSE2:
+//   - roundtrip through integers via truncation
+//   - subtract 1 if that's too big (possible for negative values).
+// This restricts the domain of our inputs to a maximum somehwere around 2^31.
+// Seems plenty big.
+AI static __m128 emulate_mm_floor_ps(__m128 v) {
+    __m128 roundtrip = _mm_cvtepi32_ps(_mm_cvttps_epi32(v));
+    __m128 too_big = _mm_cmpgt_ps(roundtrip, v);
+    return _mm_sub_ps(roundtrip, _mm_and_ps(too_big, _mm_set1_ps(1.0f)));
+}
 
 template <>
 class SkNx<2, float> {
@@ -28,6 +47,12 @@ public:
     AI SkNx(float a, float b) : fVec(_mm_setr_ps(a,b,0,0)) {}
 
     AI void store(void* ptr) const { _mm_storel_pi((__m64*)ptr, fVec); }
+
+    AI static void Load2(const void* ptr, SkNx* x, SkNx* y) {
+        const float* m = (const float*)ptr;
+        *x = SkNx{m[0], m[2]};
+        *y = SkNx{m[1], m[3]};
+    }
 
     AI static void Store2(void* dst, const SkNx& a, const SkNx& b) {
         auto vals = _mm_unpacklo_ps(a.fVec, b.fVec);
@@ -65,7 +90,15 @@ public:
     AI static SkNx Min(const SkNx& l, const SkNx& r) { return _mm_min_ps(l.fVec, r.fVec); }
     AI static SkNx Max(const SkNx& l, const SkNx& r) { return _mm_max_ps(l.fVec, r.fVec); }
 
-    AI SkNx    abs() const { return _mm_andnot_ps(_mm_set1_ps(-0.0f), fVec); }
+    AI SkNx abs() const { return _mm_andnot_ps(_mm_set1_ps(-0.0f), fVec); }
+    AI SkNx floor() const {
+    #if SK_CPU_SSE_LEVEL >= SK_CPU_SSE_LEVEL_SSE41
+        return _mm_floor_ps(fVec);
+    #else
+        return emulate_mm_floor_ps(fVec);
+    #endif
+    }
+
     AI SkNx   sqrt() const { return _mm_sqrt_ps (fVec);  }
     AI SkNx  rsqrt() const { return _mm_rsqrt_ps(fVec); }
     AI SkNx invert() const { return _mm_rcp_ps(fVec); }
@@ -155,14 +188,7 @@ public:
     #if SK_CPU_SSE_LEVEL >= SK_CPU_SSE_LEVEL_SSE41
         return _mm_floor_ps(fVec);
     #else
-        // Emulate _mm_floor_ps() with SSE2:
-        //   - roundtrip through integers via truncation
-        //   - subtract 1 if that's too big (possible for negative values).
-        // This restricts the domain of our inputs to a maximum somehwere around 2^31.
-        // Seems plenty big.
-        __m128 roundtrip = _mm_cvtepi32_ps(_mm_cvttps_epi32(fVec));
-        __m128 too_big = _mm_cmpgt_ps(roundtrip, fVec);
-        return _mm_sub_ps(roundtrip, _mm_and_ps(too_big, _mm_set1_ps(1.0f)));
+        return emulate_mm_floor_ps(fVec);
     #endif
     }
 
@@ -174,6 +200,18 @@ public:
         SkASSERT(0 <= k && k < 4);
         union { __m128 v; float fs[4]; } pun = {fVec};
         return pun.fs[k&3];
+    }
+
+    AI float min() const {
+        SkNx min = Min(*this, _mm_shuffle_ps(fVec, fVec, _MM_SHUFFLE(2,3,0,1)));
+        min = Min(min, _mm_shuffle_ps(min.fVec, min.fVec, _MM_SHUFFLE(0,1,2,3)));
+        return min[0];
+    }
+
+    AI float max() const {
+        SkNx max = Max(*this, _mm_shuffle_ps(fVec, fVec, _MM_SHUFFLE(2,3,0,1)));
+        max = Max(max, _mm_shuffle_ps(max.fVec, max.fVec, _MM_SHUFFLE(0,1,2,3)));
+        return max[0];
     }
 
     AI bool allTrue() const { return 0xffff == _mm_movemask_epi8(_mm_castps_si128(fVec)); }

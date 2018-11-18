@@ -78,14 +78,17 @@ int TrayItemView::GetAnimationDurationMS() {
 gfx::Size TrayItemView::CalculatePreferredSize() const {
   DCHECK_EQ(1, child_count());
   gfx::Size inner_size = views::View::CalculatePreferredSize();
-  if (image_view_)
-    inner_size = gfx::Size(kTrayIconSize, kTrayIconSize);
+  if (image_view_) {
+    inner_size = gfx::Size(TrayConstants::GetTrayIconSize(),
+                           TrayConstants::GetTrayIconSize());
+  }
   gfx::Rect rect(inner_size);
-  rect.Inset(gfx::Insets(-kTrayImageItemPadding));
+  if (label_)
+    rect.Inset(gfx::Insets(-kTrayImageItemPadding));
   gfx::Size size = rect.size();
   if (!animation_.get() || !animation_->is_animating())
     return size;
-  if (owner()->system_tray()->shelf()->IsHorizontalAlignment()) {
+  if (!owner() || owner()->system_tray()->shelf()->IsHorizontalAlignment()) {
     size.set_width(std::max(
         1, static_cast<int>(size.width() * animation_->GetCurrentValue())));
   } else {
@@ -105,7 +108,7 @@ void TrayItemView::ChildPreferredSizeChanged(views::View* child) {
 
 void TrayItemView::AnimationProgressed(const gfx::Animation* animation) {
   gfx::Transform transform;
-  if (owner()->system_tray()->shelf()->IsHorizontalAlignment()) {
+  if (!owner() || owner()->system_tray()->shelf()->IsHorizontalAlignment()) {
     transform.Translate(0, animation->CurrentValueBetween(
                                static_cast<double>(height()) / 2, 0.));
   } else {

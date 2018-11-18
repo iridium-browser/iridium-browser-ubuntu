@@ -29,11 +29,11 @@ import org.chromium.chrome.browser.util.MathUtils;
 import org.chromium.chrome.browser.widget.ClipDrawableProgressBar.ProgressBarObserver;
 import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
-import org.chromium.content.browser.test.util.JavaScriptUtils;
-import org.chromium.content.browser.test.util.TestCallbackHelperContainer.OnPageFinishedHelper;
-import org.chromium.content.browser.test.util.TestCallbackHelperContainer.OnPageStartedHelper;
-import org.chromium.content.browser.test.util.TestWebContentsObserver;
 import org.chromium.content_public.browser.WebContents;
+import org.chromium.content_public.browser.test.util.JavaScriptUtils;
+import org.chromium.content_public.browser.test.util.TestCallbackHelperContainer.OnPageFinishedHelper;
+import org.chromium.content_public.browser.test.util.TestCallbackHelperContainer.OnPageStartedHelper;
+import org.chromium.content_public.browser.test.util.TestWebContentsObserver;
 import org.chromium.net.test.EmbeddedTestServer;
 import org.chromium.ui.test.util.UiRestriction;
 
@@ -118,8 +118,7 @@ public class ToolbarProgressBarTest {
         EmbeddedTestServer testServer =
                 EmbeddedTestServer.createAndStartServer(InstrumentationRegistry.getContext());
 
-        final WebContents webContents =
-                mActivityTestRule.getActivity().getActivityTab().getWebContents();
+        final WebContents webContents = mActivityTestRule.getWebContents();
 
         TestWebContentsObserver observer = new TestWebContentsObserver(webContents);
         // Start and stop load events are carefully tracked; there should be two start-stop pairs

@@ -28,14 +28,13 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_DOM_EVENTS_WINDOW_EVENT_CONTEXT_H_
 
 #include "base/macros.h"
-#include "base/memory/scoped_refptr.h"
-#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 
 namespace blink {
 
 class EventTarget;
 class Event;
+class LocalDOMWindow;
 class NodeEventContext;
 
 class WindowEventContext : public GarbageCollected<WindowEventContext> {
@@ -44,6 +43,7 @@ class WindowEventContext : public GarbageCollected<WindowEventContext> {
 
   LocalDOMWindow* Window() const;
   EventTarget* Target() const;
+  EventTarget* RelatedTarget() const;
   bool HandleLocalEvents(Event&);
 
   void Trace(blink::Visitor*);
@@ -51,6 +51,7 @@ class WindowEventContext : public GarbageCollected<WindowEventContext> {
  private:
   Member<LocalDOMWindow> window_;
   Member<EventTarget> target_;
+  Member<EventTarget> related_target_;
   DISALLOW_COPY_AND_ASSIGN(WindowEventContext);
 };
 
@@ -60,6 +61,10 @@ inline LocalDOMWindow* WindowEventContext::Window() const {
 
 inline EventTarget* WindowEventContext::Target() const {
   return target_.Get();
+}
+
+inline EventTarget* WindowEventContext::RelatedTarget() const {
+  return related_target_.Get();
 }
 
 }  // namespace blink

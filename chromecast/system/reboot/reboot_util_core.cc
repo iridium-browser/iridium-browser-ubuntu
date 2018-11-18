@@ -5,6 +5,7 @@
 #include "chromecast/system/reboot/reboot_util.h"
 
 #include "base/logging.h"
+#include "base/no_destructor.h"
 #include "chromecast/public/reboot_shlib.h"
 
 // This is a partial implementation of the reboot_util.h interface.
@@ -12,6 +13,12 @@
 // on which platform/product they are for.
 
 namespace chromecast {
+namespace {
+RebootUtil::RebootCallback& GetTestRebootCallback() {
+  static base::NoDestructor<RebootUtil::RebootCallback> callback;
+  return *callback;
+}
+}  // namespace
 
 // static
 bool RebootUtil::IsRebootSupported() {
@@ -30,6 +37,8 @@ bool RebootUtil::IsValidRebootSource(RebootShlib::RebootSource reboot_source) {
     case RebootShlib::RebootSource::PROCESS_MANAGER:
     case RebootShlib::RebootSource::CRASH_UPLOADER:
     case RebootShlib::RebootSource::FDR:
+    case RebootShlib::RebootSource::HW_WATCHDOG:
+    case RebootShlib::RebootSource::SW_OTHER:
       return true;
     default:
       return false;
@@ -45,8 +54,15 @@ bool RebootUtil::IsRebootSourceSupported(
 
 // static
 bool RebootUtil::RebootNow(RebootShlib::RebootSource reboot_source) {
+  // If we have a testing callback avoid calling RebootShlib::RebootNow
+  // because it will crash our test
+  RebootUtil::RebootCallback& callback = GetTestRebootCallback();
+  SetNextRebootSource(reboot_source);
+  if (callback) {
+    LOG(WARNING) << "Using reboot callback for test! Device will not reboot!";
+    return callback.Run(reboot_source);
+  }
   DCHECK(IsRebootSourceSupported(reboot_source));
-  SetLastRebootSource(reboot_source);
   return RebootShlib::RebootNow(reboot_source);
 }
 
@@ -72,6 +88,17 @@ bool RebootUtil::IsOtaForNextRebootSupported() {
 void RebootUtil::SetOtaForNextReboot() {
   DCHECK(IsOtaForNextRebootSupported());
   RebootShlib::SetOtaForNextReboot();
+}
+
+// static
+void RebootUtil::SetRebootCallbackForTest(
+    const RebootUtil::RebootCallback& callback) {
+  GetTestRebootCallback() = callback;
+}
+
+// static
+void RebootUtil::ClearRebootCallbackForTest() {
+  GetTestRebootCallback().Reset();
 }
 
 }  // namespace chromecast

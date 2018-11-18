@@ -88,7 +88,7 @@ glPopGroupMarkerEXT();                 // -> log prefix = "Foo.That"
 You can often make a simple OpenGL-ES-2.0-only C++ reduced test case that is
 relatively quick to compile and test, by adding tests to the `gl_tests` target.
 Those tests exist in `src/gpu/command_buffer/tests` and are made part of the
-build in `src/gpu/gpu.gyp`. Build with `ninja -C out/Debug gl_tests`. All the
+build in `src/gpu/BUILD.gn`. Build with `ninja -C out/Debug gl_tests`. All the
 same command line options listed on this page will work with the `gl_tests`,
 plus `--gtest_filter=NameOfTest` to run a specific test. Note the `gl_tests`
 are not multi-process, so they probably won't help with race conditions, but
@@ -188,7 +188,7 @@ This will print the name of each GPU command before it is executed.
 ### Debugging in the GPU Process
 
 Given the multi-processness of chromium it can be hard to debug both sides.
-Turing on all the logging and having a small test case is useful. One minor
+Turning on all the logging and having a small test case is useful. One minor
 suggestion, if you have some idea where the bug is happening a call to some
 obscure gl function like `glHint()` can give you a place to catch a command
 being processed in the GPU process (put a break point on

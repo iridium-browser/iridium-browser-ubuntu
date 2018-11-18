@@ -8,17 +8,21 @@
 
 #include "apps/browser_context_keyed_service_factories.h"
 #include "base/command_line.h"
+#include "base/task/post_task.h"
 #include "build/build_config.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/nacl/common/buildflags.h"
 #include "components/prefs/pref_service.h"
+#include "components/sessions/core/session_id_generator.h"
 #include "components/storage_monitor/storage_monitor.h"
 #include "components/update_client/update_query_params.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/context_factory.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/result_codes.h"
+#include "content/public/common/service_manager_connection.h"
 #include "content/shell/browser/shell_devtools_manager_delegate.h"
 #include "extensions/browser/browser_context_keyed_service_factories.h"
 #include "extensions/browser/extension_system.h"
@@ -61,11 +65,7 @@
 #if defined(OS_CHROMEOS)
 #include "chromeos/dbus/dbus_thread_manager.h"
 #elif defined(OS_LINUX)
-#include "device/bluetooth/dbus/dbus_thread_manager_linux.h"
-#endif
-
-#if defined(OS_MACOSX)
-#include "extensions/shell/browser/shell_browser_main_parts_mac.h"
+#include "device/bluetooth/dbus/bluez_dbus_thread_manager.h"
 #endif
 
 #if BUILDFLAG(ENABLE_NACL)
@@ -114,9 +114,6 @@ void ShellBrowserMainParts::PreMainMessageLoopStart() {
 #if defined(USE_AURA) && defined(USE_X11)
   ui::TouchFactory::SetTouchDeviceListFromCommandLine();
 #endif
-#if defined(OS_MACOSX)
-  MainPartsPreMainMessageLoopStartMac();
-#endif
 }
 
 void ShellBrowserMainParts::PostMainMessageLoopStart() {
@@ -127,9 +124,7 @@ void ShellBrowserMainParts::PostMainMessageLoopStart() {
   chromeos::DBusThreadManager::Initialize();
   chromeos::disks::DiskMountManager::Initialize();
 
-  bluez::BluezDBusManager::Initialize(
-      chromeos::DBusThreadManager::Get()->GetSystemBus(),
-      chromeos::DBusThreadManager::Get()->IsUsingFakes());
+  bluez::BluezDBusManager::Initialize();
 
   chromeos::NetworkHandler::Initialize();
   network_controller_.reset(new ShellNetworkController(
@@ -146,17 +141,15 @@ void ShellBrowserMainParts::PostMainMessageLoopStart() {
   // TODO(michaelpg): Verify this works for target environments.
   ui::InitializeInputMethodForTesting();
 
-  bluez::DBusThreadManagerLinux::Initialize();
-  bluez::BluezDBusManager::Initialize(
-      bluez::DBusThreadManagerLinux::Get()->GetSystemBus(),
-      /*use_dbus_fakes=*/false);
+  bluez::BluezDBusThreadManager::Initialize();
+  bluez::BluezDBusManager::Initialize();
 #else
   ui::InitializeInputMethodForTesting();
 #endif
 }
 
 int ShellBrowserMainParts::PreEarlyInitialization() {
-  return content::RESULT_CODE_NORMAL_EXIT;
+  return service_manager::RESULT_CODE_NORMAL_EXIT;
 }
 
 int ShellBrowserMainParts::PreCreateThreads() {
@@ -187,6 +180,7 @@ void ShellBrowserMainParts::PreMainMessageLoopRun() {
   // app_shell only supports a single user, so all preferences live in the user
   // data directory, including the device-wide local state.
   local_state_ = shell_prefs::CreateLocalState(browser_context_->GetPath());
+  sessions::SessionIdGenerator::GetInstance()->Init(local_state_.get());
   user_pref_service_ =
       shell_prefs::CreateUserPrefService(browser_context_.get());
   extensions_browser_client_->InitWithBrowserContext(browser_context_.get(),
@@ -209,7 +203,10 @@ void ShellBrowserMainParts::PreMainMessageLoopRun() {
       content::GetContextFactoryPrivate());
 #endif
 
-  storage_monitor::StorageMonitor::Create();
+  storage_monitor::StorageMonitor::Create(
+      content::ServiceManagerConnection::GetForProcess()
+          ->GetConnector()
+          ->Clone());
 
   desktop_controller_.reset(
       browser_main_delegate_->CreateDesktopController(browser_context_.get()));
@@ -227,7 +224,6 @@ void ShellBrowserMainParts::PreMainMessageLoopRun() {
   // Initialize OAuth2 support from command line.
   base::CommandLine* cmd = base::CommandLine::ForCurrentProcess();
   oauth2_token_service_.reset(new ShellOAuth2TokenService(
-      browser_context_.get(),
       cmd->GetSwitchValueASCII(switches::kAppShellUser),
       cmd->GetSwitchValueASCII(switches::kAppShellRefreshToken)));
 
@@ -237,8 +233,8 @@ void ShellBrowserMainParts::PreMainMessageLoopRun() {
   // Track the task so it can be canceled if app_shell shuts down very quickly,
   // such as in browser tests.
   task_tracker_.PostTask(
-      BrowserThread::GetTaskRunnerForThread(BrowserThread::IO).get(), FROM_HERE,
-      base::Bind(nacl::NaClProcessHost::EarlyStartup));
+      base::CreateSingleThreadTaskRunnerWithTraits({BrowserThread::IO}).get(),
+      FROM_HERE, base::Bind(nacl::NaClProcessHost::EarlyStartup));
 #endif
 
   content::ShellDevToolsManagerDelegate::StartHttpHandler(
@@ -261,7 +257,7 @@ bool ShellBrowserMainParts::MainMessageLoopRun(int* result_code) {
   if (!run_message_loop_)
     return true;
   desktop_controller_->Run();
-  *result_code = content::RESULT_CODE_NORMAL_EXIT;
+  *result_code = service_manager::RESULT_CODE_NORMAL_EXIT;
   return true;
 }
 
@@ -281,8 +277,6 @@ void ShellBrowserMainParts::PostMainMessageLoopRun() {
   BrowserContextDependencyManager::GetInstance()->DestroyBrowserContextServices(
       browser_context_.get());
   extension_system_ = NULL;
-  ExtensionsBrowserClient::Set(NULL);
-  extensions_browser_client_.reset();
 
   desktop_controller_.reset();
 
@@ -293,6 +287,8 @@ void ShellBrowserMainParts::PostMainMessageLoopRun() {
   chromeos::CrasAudioHandler::Shutdown();
 #endif
 
+  sessions::SessionIdGenerator::GetInstance()->Shutdown();
+
   user_pref_service_->CommitPendingWrite();
   user_pref_service_.reset();
   local_state_->CommitPendingWrite();
@@ -302,6 +298,9 @@ void ShellBrowserMainParts::PostMainMessageLoopRun() {
 }
 
 void ShellBrowserMainParts::PostDestroyThreads() {
+  extensions_browser_client_.reset();
+  ExtensionsBrowserClient::Set(nullptr);
+
 #if defined(OS_CHROMEOS)
   network_controller_.reset();
   chromeos::NetworkHandler::Shutdown();
@@ -312,7 +311,7 @@ void ShellBrowserMainParts::PostDestroyThreads() {
 #elif defined(OS_LINUX)
   device::BluetoothAdapterFactory::Shutdown();
   bluez::BluezDBusManager::Shutdown();
-  bluez::DBusThreadManagerLinux::Shutdown();
+  bluez::BluezDBusThreadManager::Shutdown();
 #endif
 }
 

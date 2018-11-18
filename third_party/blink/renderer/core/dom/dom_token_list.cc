@@ -24,11 +24,10 @@
 
 #include "third_party/blink/renderer/core/dom/dom_token_list.h"
 
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
+#include "base/auto_reset.h"
 #include "third_party/blink/renderer/core/dom/element.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
 #include "third_party/blink/renderer/core/html/parser/html_parser_idioms.h"
-#include "third_party/blink/renderer/platform/wtf/auto_reset.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 
 namespace blink {
 
@@ -37,7 +36,7 @@ namespace {
 bool CheckEmptyToken(const String& token, ExceptionState& exception_state) {
   if (!token.IsEmpty())
     return true;
-  exception_state.ThrowDOMException(kSyntaxError,
+  exception_state.ThrowDOMException(DOMExceptionCode::kSyntaxError,
                                     "The token provided must not be empty.");
   return false;
 }
@@ -46,7 +45,7 @@ bool CheckTokenWithWhitespace(const String& token,
                               ExceptionState& exception_state) {
   if (token.Find(IsHTMLSpace) == kNotFound)
     return true;
-  exception_state.ThrowDOMException(kInvalidCharacterError,
+  exception_state.ThrowDOMException(DOMExceptionCode::kInvalidCharacterError,
                                     "The token provided ('" + token +
                                         "') contains HTML space characters, "
                                         "which are not valid in tokens.");
@@ -194,7 +193,7 @@ bool DOMTokenList::replace(const AtomicString& token,
   bool found_old_token = false;
   bool found_new_token = false;
   bool did_update = false;
-  for (size_t i = 0; i < token_set_.size(); ++i) {
+  for (wtf_size_t i = 0; i < token_set_.size(); ++i) {
     const AtomicString& existing_token = token_set_[i];
     if (found_old_token) {
       if (existing_token == new_token) {
@@ -251,7 +250,7 @@ void DOMTokenList::RemoveTokens(const Vector<String>& tokens) {
 
 // https://dom.spec.whatwg.org/#concept-dtl-update
 void DOMTokenList::UpdateWithTokenSet(const SpaceSplitString& token_set) {
-  AutoReset<bool> updating(&is_in_update_step_, true);
+  base::AutoReset<bool> updating(&is_in_update_step_, true);
   setValue(token_set.SerializeToString());
 }
 

@@ -8,10 +8,10 @@
 #include <memory>
 
 #include "base/memory/weak_ptr.h"
-#include "net/base/completion_callback.h"
+#include "net/base/completion_once_callback.h"
 #include "net/base/net_export.h"
-#include "net/spdy/chromium/spdy_read_queue.h"
-#include "net/spdy/chromium/spdy_stream.h"
+#include "net/spdy/spdy_read_queue.h"
+#include "net/spdy/spdy_stream.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/websockets/websocket_basic_stream.h"
 
@@ -32,10 +32,10 @@ class NET_EXPORT_PRIVATE WebSocketClientSocketHandleAdapter
 
   int Read(IOBuffer* buf,
            int buf_len,
-           const CompletionCallback& callback) override;
+           CompletionOnceCallback callback) override;
   int Write(IOBuffer* buf,
             int buf_len,
-            const CompletionCallback& callback,
+            CompletionOnceCallback callback,
             const NetworkTrafficAnnotationTag& traffic_annotation) override;
   void Disconnect() override;
   bool is_initialized() const override;
@@ -60,7 +60,8 @@ class NET_EXPORT_PRIVATE WebSocketSpdyStreamAdapter
    public:
     virtual ~Delegate() = default;
     virtual void OnHeadersSent() = 0;
-    virtual void OnHeadersReceived(const SpdyHeaderBlock& response_headers) = 0;
+    virtual void OnHeadersReceived(
+        const spdy::SpdyHeaderBlock& response_headers) = 0;
     // Might destroy |this|.
     virtual void OnClose(int status) = 0;
   };
@@ -78,13 +79,13 @@ class NET_EXPORT_PRIVATE WebSocketSpdyStreamAdapter
 
   int Read(IOBuffer* buf,
            int buf_len,
-           const CompletionCallback& callback) override;
+           CompletionOnceCallback callback) override;
 
   // Write() must not be called before Delegate::OnHeadersSent() is called.
   // Write() always returns asynchronously.
   int Write(IOBuffer* buf,
             int buf_len,
-            const CompletionCallback& callback,
+            CompletionOnceCallback callback,
             const NetworkTrafficAnnotationTag& traffic_annotation) override;
 
   void Disconnect() override;
@@ -93,10 +94,12 @@ class NET_EXPORT_PRIVATE WebSocketSpdyStreamAdapter
   // SpdyStream::Delegate methods.
 
   void OnHeadersSent() override;
-  void OnHeadersReceived(const SpdyHeaderBlock& response_headers) override;
+  void OnHeadersReceived(
+      const spdy::SpdyHeaderBlock& response_headers,
+      const spdy::SpdyHeaderBlock* pushed_request_headers) override;
   void OnDataReceived(std::unique_ptr<SpdyBuffer> buffer) override;
   void OnDataSent() override;
-  void OnTrailers(const SpdyHeaderBlock& trailers) override;
+  void OnTrailers(const spdy::SpdyHeaderBlock& trailers) override;
   void OnClose(int status) override;
   NetLogSource source_dependency() const override;
 
@@ -129,7 +132,7 @@ class NET_EXPORT_PRIVATE WebSocketSpdyStreamAdapter
 
   // Read callback saved for asynchronous reads.
   // Whenever |read_data_| is not empty, |read_callback_| must be null.
-  CompletionCallback read_callback_;
+  CompletionOnceCallback read_callback_;
 
   // Write length saved to be passed to |write_callback_|.  This is necessary
   // because SpdyStream::Delegate::OnDataSent() does not pass number of bytes
@@ -137,7 +140,7 @@ class NET_EXPORT_PRIVATE WebSocketSpdyStreamAdapter
   int write_length_;
 
   // Write callback saved for asynchronous writes (all writes are asynchronous).
-  CompletionCallback write_callback_;
+  CompletionOnceCallback write_callback_;
 
   NetLogWithSource net_log_;
 

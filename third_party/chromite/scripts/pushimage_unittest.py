@@ -286,7 +286,7 @@ class PushImageTests(gs_unittest.AbstractGSContextTest):
     with mock.patch.object(gs.GSContext, 'Exists', return_value=True):
       urls = pushimage.PushImage('/src', 'test.board', 'R34-5126.0.0',
                                  sign_types=['recovery'])
-    self.assertEqual(self.gs_mock.call_count, 26)
+    self.assertEqual(self.gs_mock.call_count, 24)
     self.assertTrue(self.mark_mock.called)
     self.assertEqual(urls, EXPECTED)
 
@@ -304,7 +304,7 @@ class PushImageTests(gs_unittest.AbstractGSContextTest):
     with mock.patch.object(gs.GSContext, 'Exists', return_value=True):
       urls = pushimage.PushImage('/src', 'test.board', 'R34-5126.0.0',
                                  sign_types=['base'])
-    self.assertEqual(self.gs_mock.call_count, 28)
+    self.assertEqual(self.gs_mock.call_count, 26)
     self.assertTrue(self.mark_mock.called)
     self.assertEqual(urls, EXPECTED)
 
@@ -312,7 +312,7 @@ class PushImageTests(gs_unittest.AbstractGSContextTest):
     """Verify nothing is signed when we request an unavailable type"""
     urls = pushimage.PushImage('/src', 'test.board', 'R34-5126.0.0',
                                sign_types=['nononononono'])
-    self.assertEqual(self.gs_mock.call_count, 24)
+    self.assertEqual(self.gs_mock.call_count, 22)
     self.assertFalse(self.mark_mock.called)
     self.assertEqual(urls, {})
 
@@ -399,9 +399,10 @@ class MainTests(cros_test_lib.MockTestCase):
 
 
 def main(_argv):
-  # Use our local copy of insns for testing as the main one is not
-  # available in the public manifest.
-  signing.INPUT_INSN_DIR = signing.TEST_INPUT_INSN_DIR
+  # Use our local copy of insns for testing as the main one is not available in
+  # the public manifest. Even though _REL is a relative path, this works because
+  # os.join leaves absolute paths on the right hand side alone.
+  signing.INPUT_INSN_DIR_REL = signing.TEST_INPUT_INSN_DIR
 
   # Run the tests.
   cros_test_lib.main(level='notice', module=__name__)

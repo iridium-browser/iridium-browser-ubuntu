@@ -19,17 +19,13 @@ bool PasswordManagerClient::IsFillingFallbackEnabledForCurrentPage() const {
   return true;
 }
 
-void PasswordManagerClient::PostHSTSQueryForHost(
-    const GURL& origin,
-    const HSTSCallback& callback) const {
-  callback.Run(false);
+void PasswordManagerClient::PostHSTSQueryForHost(const GURL& origin,
+                                                 HSTSCallback callback) const {
+  std::move(callback).Run(HSTSResult::kError);
 }
 
 bool PasswordManagerClient::OnCredentialManagerUsed() {
   return true;
-}
-
-void PasswordManagerClient::ForceSavePassword() {
 }
 
 void PasswordManagerClient::GeneratePassword() {}
@@ -40,8 +36,12 @@ void PasswordManagerClient::PasswordWasAutofilled(
     const std::vector<const autofill::PasswordForm*>* federated_matches) const {
 }
 
-PasswordSyncState PasswordManagerClient::GetPasswordSyncState() const {
-  return NOT_SYNCING_PASSWORDS;
+SyncState PasswordManagerClient::GetPasswordSyncState() const {
+  return NOT_SYNCING;
+}
+
+SyncState PasswordManagerClient::GetHistorySyncState() const {
+  return NOT_SYNCING;
 }
 
 bool PasswordManagerClient::WasLastNavigationHTTPError() const {
@@ -83,5 +83,20 @@ const LogManager* PasswordManagerClient::GetLogManager() const {
 }
 
 void PasswordManagerClient::AnnotateNavigationEntry(bool has_password_field) {}
+
+PasswordRequirementsService*
+PasswordManagerClient::GetPasswordRequirementsService() {
+  // Not impemented but that is a valid state as per interface definition.
+  // Therefore, don't call NOTIMPLEMENTED() here.
+  return nullptr;
+}
+
+favicon::FaviconService* PasswordManagerClient::GetFaviconService() {
+  return nullptr;
+}
+
+bool PasswordManagerClient::IsUnderAdvancedProtection() const {
+  return false;
+}
 
 }  // namespace password_manager

@@ -8,8 +8,8 @@
 #ifndef SkPictureShader_DEFINED
 #define SkPictureShader_DEFINED
 
-#include "SkAtomics.h"
 #include "SkShaderBase.h"
+#include <atomic>
 
 class SkArenaAlloc;
 class SkBitmap;
@@ -28,7 +28,6 @@ public:
     static sk_sp<SkShader> Make(sk_sp<SkPicture>, TileMode, TileMode, const SkMatrix*,
                                 const SkRect*);
 
-    void toString(SkString* str) const override;
     SK_DECLARE_PUBLIC_FLATTENABLE_DESERIALIZATION_PROCS(SkPictureShader)
 
 #if SK_SUPPORT_GPU
@@ -74,8 +73,8 @@ private:
     // forces a deferred color space xform.
     sk_sp<SkColorSpace>    fColorSpace;
 
-    const uint32_t         fUniqueID;
-    mutable SkAtomic<bool> fAddedToCache;
+    const uint32_t            fUniqueID;
+    mutable std::atomic<bool> fAddedToCache;
 
     typedef SkShaderBase INHERITED;
 };

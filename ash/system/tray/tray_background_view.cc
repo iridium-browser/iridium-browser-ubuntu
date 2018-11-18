@@ -7,21 +7,24 @@
 #include <algorithm>
 #include <memory>
 
-#include "ash/ash_constants.h"
 #include "ash/focus_cycler.h"
 #include "ash/login/ui/lock_screen.h"
 #include "ash/login/ui/lock_window.h"
+#include "ash/public/cpp/ash_constants.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/shelf/shelf.h"
 #include "ash/shelf/shelf_constants.h"
+#include "ash/shelf/shelf_layout_manager.h"
 #include "ash/shelf/shelf_widget.h"
 #include "ash/shell.h"
+#include "ash/system/model/system_tray_model.h"
 #include "ash/system/status_area_widget.h"
 #include "ash/system/status_area_widget_delegate.h"
 #include "ash/system/tray/system_tray_notifier.h"
 #include "ash/system/tray/tray_constants.h"
 #include "ash/system/tray/tray_container.h"
 #include "ash/system/tray/tray_event_filter.h"
+#include "ash/window_factory.h"
 #include "ash/wm/tablet_mode/tablet_mode_controller.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/compositor/layer.h"
@@ -66,20 +69,23 @@ void MirrorInsetsIfNecessary(gfx::Insets* insets) {
 // mirrored if RTL mode is active.
 gfx::Insets GetMirroredBackgroundInsets(bool is_shelf_horizontal) {
   gfx::Insets insets;
+  // "Primary" is the same direction as the shelf, "secondary" is orthogonal.
+  const int primary_padding = 0;
+  const int secondary_padding = -ash::kHitRegionPadding;
+  const int separator_width = ash::TrayConstants::separator_width();
+
   if (is_shelf_horizontal) {
-    insets.Set(0, ash::kHitRegionPadding, 0,
-               ash::kHitRegionPadding + ash::kSeparatorWidth);
+    insets.Set(secondary_padding, primary_padding, secondary_padding,
+               primary_padding + separator_width);
   } else {
-    insets.Set(ash::kHitRegionPadding, 0,
-               ash::kHitRegionPadding + ash::kSeparatorWidth, 0);
+    insets.Set(primary_padding, secondary_padding,
+               primary_padding + separator_width, secondary_padding);
   }
   MirrorInsetsIfNecessary(&insets);
   return insets;
 }
 
 }  // namespace
-
-using views::TrayBubbleView;
 
 namespace ash {
 
@@ -123,12 +129,14 @@ class TrayBackground : public views::Background {
     gfx::ScopedCanvas scoped_canvas(canvas);
     cc::PaintFlags background_flags;
     background_flags.setAntiAlias(true);
-    background_flags.setColor(color_);
+    int border_radius = kTrayRoundedBorderRadius;
+    background_flags.setColor(kShelfControlPermanentHighlightBackground);
+    border_radius = ShelfConstants::control_border_radius();
 
     gfx::Rect bounds = tray_background_view_->GetBackgroundBounds();
     const float dsf = canvas->UndoDeviceScaleFactor();
     canvas->DrawRoundRect(gfx::ScaleToRoundedRect(bounds, dsf),
-                          kTrayRoundedBorderRadius * dsf, background_flags);
+                          border_radius * dsf, background_flags);
   }
 
   // Reference to the TrayBackgroundView for which this is a background.
@@ -170,6 +178,8 @@ TrayBackgroundView::TrayBackgroundView(Shelf* shelf)
       background_(new TrayBackground(this)),
       is_active_(false),
       separator_visible_(true),
+      visible_preferred_(false),
+      show_with_virtual_keyboard_(false),
       widget_observer_(new TrayWidgetObserver(this)) {
   DCHECK(shelf_);
   set_notify_enter_exit_on_child(true);
@@ -190,6 +200,7 @@ TrayBackgroundView::TrayBackgroundView(Shelf* shelf)
 }
 
 TrayBackgroundView::~TrayBackgroundView() {
+  Shell::Get()->system_tray_model()->virtual_keyboard()->RemoveObserver(this);
   if (GetWidget())
     GetWidget()->RemoveObserver(widget_observer_.get());
   StopObservingImplicitAnimations();
@@ -197,6 +208,7 @@ TrayBackgroundView::~TrayBackgroundView() {
 
 void TrayBackgroundView::Initialize() {
   GetWidget()->AddObserver(widget_observer_.get());
+  Shell::Get()->system_tray_model()->virtual_keyboard()->AddObserver(this);
 }
 
 // static
@@ -211,6 +223,16 @@ void TrayBackgroundView::InitializeBubbleAnimations(
 }
 
 void TrayBackgroundView::SetVisible(bool visible) {
+  visible_preferred_ = visible;
+
+  // If virtual keyboard is visible and TrayBackgroundView is hidden because of
+  // that, ignore SetVisible() call. |visible_preferred_|  will be restored
+  // in OnVirtualKeyboardVisibilityChanged() when virtual keyboard is hidden.
+  if (!show_with_virtual_keyboard_ &&
+      Shell::Get()->system_tray_model()->virtual_keyboard()->visible()) {
+    return;
+  }
+
   if (visible == layer()->GetTargetVisibility())
     return;
 
@@ -308,7 +330,7 @@ void TrayBackgroundView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   ActionableView::GetAccessibleNodeData(node_data);
   node_data->SetName(GetAccessibleNameForTray());
 
-  if (LockScreen::IsShown()) {
+  if (LockScreen::HasInstance()) {
     int next_id = views::AXAuraObjCache::GetInstance()->GetID(
         static_cast<views::Widget*>(LockScreen::Get()->window()));
     node_data->AddIntAttribute(ax::mojom::IntAttribute::kNextFocusId, next_id);
@@ -364,16 +386,18 @@ void TrayBackgroundView::PaintButtonContents(gfx::Canvas* canvas) {
   // underneath the items instead.
   const gfx::Rect local_bounds = GetLocalBounds();
   const SkColor color = SkColorSetA(SK_ColorWHITE, 0x4D);
+  const int shelf_size = ShelfConstants::shelf_size();
+  const int separator_width = ash::TrayConstants::separator_width();
 
   if (shelf_->IsHorizontalAlignment()) {
     const gfx::PointF point(
-        base::i18n::IsRTL() ? 0 : (local_bounds.width() - kSeparatorWidth),
-        (kShelfSize - kTrayItemSize) / 2);
+        base::i18n::IsRTL() ? 0 : (local_bounds.width() - separator_width),
+        (shelf_size - kTrayItemSize) / 2);
     const gfx::Vector2dF vector(0, kTrayItemSize);
     canvas->Draw1pxLine(point, point + vector, color);
   } else {
-    const gfx::PointF point((kShelfSize - kTrayItemSize) / 2,
-                            local_bounds.height() - kSeparatorWidth);
+    const gfx::PointF point((shelf_size - kTrayItemSize) / 2,
+                            local_bounds.height() - separator_width);
     const gfx::Vector2dF vector(kTrayItemSize, 0);
     canvas->Draw1pxLine(point, point + vector, color);
   }
@@ -382,6 +406,24 @@ void TrayBackgroundView::PaintButtonContents(gfx::Canvas* canvas) {
 void TrayBackgroundView::ProcessGestureEventForBubble(ui::GestureEvent* event) {
   if (drag_controller())
     drag_controller_->ProcessGestureEvent(event, this);
+}
+
+void TrayBackgroundView::OnVirtualKeyboardVisibilityChanged() {
+  if (show_with_virtual_keyboard_) {
+    // The view always shows up when virtual keyboard is visible if
+    // |show_with_virtual_keyboard| is true.
+    views::View::SetVisible(
+        Shell::Get()->system_tray_model()->virtual_keyboard()->visible() ||
+        visible_preferred_);
+    return;
+  }
+
+  // If virtual keyboard is hidden and current preferred visibility is true,
+  // set the visibility to true. We call base class' SetVisible because we don't
+  // want |visible_preferred_| to be updated here.
+  views::View::SetVisible(
+      !Shell::Get()->system_tray_model()->virtual_keyboard()->visible() &&
+      visible_preferred_);
 }
 
 TrayBubbleView* TrayBackgroundView::GetBubbleView() {
@@ -407,8 +449,7 @@ void TrayBackgroundView::AnchorUpdated() {
     UpdateClippingWindowBounds();
 }
 
-void TrayBackgroundView::BubbleResized(
-    const views::TrayBubbleView* bubble_view) {}
+void TrayBackgroundView::BubbleResized(const TrayBubbleView* bubble_view) {}
 
 void TrayBackgroundView::OnImplicitAnimationsCompleted() {
   // If there is another animation in the queue, the reverse animation was
@@ -457,8 +498,7 @@ void TrayBackgroundView::SetIsActive(bool is_active) {
                  nullptr);
 }
 
-void TrayBackgroundView::UpdateBubbleViewArrow(
-    views::TrayBubbleView* bubble_view) {
+void TrayBackgroundView::UpdateBubbleViewArrow(TrayBubbleView* bubble_view) {
   // Nothing to do here.
 }
 
@@ -501,7 +541,7 @@ aura::Window* TrayBackgroundView::GetBubbleWindowContainer() {
           ->IsTabletModeWindowManagerEnabled() &&
       drag_controller()) {
     if (!clipping_window_.get()) {
-      clipping_window_ = std::make_unique<aura::Window>(nullptr);
+      clipping_window_ = window_factory::NewWindow();
       clipping_window_->Init(ui::LAYER_NOT_DRAWN);
       clipping_window_->layer()->SetMasksToBounds(true);
       container->AddChild(clipping_window_.get());
@@ -538,8 +578,9 @@ gfx::Rect TrayBackgroundView::GetBackgroundBounds() const {
 
 std::unique_ptr<views::InkDropMask> TrayBackgroundView::CreateInkDropMask()
     const {
+  const int border_radius = ShelfConstants::control_border_radius();
   return std::make_unique<views::RoundRectInkDropMask>(
-      size(), GetBackgroundInsets(), kTrayRoundedBorderRadius);
+      size(), GetBackgroundInsets(), border_radius);
 }
 
 bool TrayBackgroundView::ShouldEnterPushedState(const ui::Event& event) {

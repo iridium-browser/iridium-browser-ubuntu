@@ -82,6 +82,8 @@ void MediaCodecAudioDecoder::Initialize(
     sample_format_ = kSampleFormatAc3;
   else if (config.codec() == kCodecEAC3)
     sample_format_ = kSampleFormatEac3;
+  else if (config.codec() == kCodecMpegHAudio)
+    sample_format_ = kSampleFormatMpegHAudio;
 
   if (state_ == STATE_ERROR) {
     DVLOG(1) << "Decoder is in error state.";
@@ -139,7 +141,15 @@ bool MediaCodecAudioDecoder::CreateMediaCodecLoop() {
   const base::android::JavaRef<jobject>& media_crypto =
       media_crypto_ ? *media_crypto_ : nullptr;
   std::unique_ptr<MediaCodecBridge> audio_codec_bridge(
-      MediaCodecBridgeImpl::CreateAudioDecoder(config_, media_crypto));
+      MediaCodecBridgeImpl::CreateAudioDecoder(
+          config_, media_crypto,
+          // Use the asynchronous API if we're on Marshallow or higher.
+          base::android::BuildInfo::GetInstance()->sdk_int() >=
+                  base::android::SDK_VERSION_MARSHMALLOW
+              ? BindToCurrentLoop(base::BindRepeating(
+                    &MediaCodecAudioDecoder::PumpMediaCodecLoop,
+                    weak_factory_.GetWeakPtr()))
+              : base::RepeatingClosure()));
   if (!audio_codec_bridge) {
     DLOG(ERROR) << __func__ << " failed: cannot create MediaCodecBridge";
     return false;
@@ -176,7 +186,7 @@ void MediaCodecAudioDecoder::Decode(scoped_refptr<DecoderBuffer> buffer,
 
   DCHECK(codec_loop_);
 
-  DVLOG(2) << __func__ << " " << buffer->AsHumanReadableString();
+  DVLOG(3) << __func__ << " " << buffer->AsHumanReadableString();
 
   DCHECK_EQ(state_, STATE_READY) << " unexpected state " << AsString(state_);
 
@@ -186,11 +196,11 @@ void MediaCodecAudioDecoder::Decode(scoped_refptr<DecoderBuffer> buffer,
 
   input_queue_.push_back(std::make_pair(std::move(buffer), bound_decode_cb));
 
-  codec_loop_->DoPendingWork();
+  codec_loop_->ExpectWork();
 }
 
 void MediaCodecAudioDecoder::Reset(const base::Closure& closure) {
-  DVLOG(1) << __func__;
+  DVLOG(2) << __func__;
 
   ClearInputQueue(DecodeStatus::ABORTED);
 
@@ -285,7 +295,7 @@ bool MediaCodecAudioDecoder::IsAnyInputPending() const {
 }
 
 MediaCodecLoop::InputData MediaCodecAudioDecoder::ProvideInputData() {
-  DVLOG(2) << __func__;
+  DVLOG(3) << __func__;
 
   const DecoderBuffer* decoder_buffer = input_queue_.front().first.get();
 
@@ -296,7 +306,9 @@ MediaCodecLoop::InputData MediaCodecAudioDecoder::ProvideInputData() {
     input_data.memory = static_cast<const uint8_t*>(decoder_buffer->data());
     input_data.length = decoder_buffer->data_size();
     const DecryptConfig* decrypt_config = decoder_buffer->decrypt_config();
-    if (decrypt_config && decrypt_config->is_encrypted()) {
+    if (decrypt_config) {
+      // TODO(crbug.com/813845): Use encryption scheme settings from
+      // DecryptConfig.
       input_data.key_id = decrypt_config->key_id();
       input_data.iv = decrypt_config->iv();
       input_data.subsamples = decrypt_config->subsamples();
@@ -334,7 +346,7 @@ void MediaCodecAudioDecoder::ClearInputQueue(DecodeStatus decode_status) {
 }
 
 void MediaCodecAudioDecoder::SetState(State new_state) {
-  DVLOG(1) << __func__ << ": " << AsString(state_) << "->"
+  DVLOG(3) << __func__ << ": " << AsString(state_) << "->"
            << AsString(new_state);
   state_ = new_state;
 }
@@ -372,7 +384,7 @@ bool MediaCodecAudioDecoder::OnDecodedEos(
 
 bool MediaCodecAudioDecoder::OnDecodedFrame(
     const MediaCodecLoop::OutputBuffer& out) {
-  DVLOG(2) << __func__ << " pts:" << out.pts;
+  DVLOG(3) << __func__ << " pts:" << out.pts;
 
   DCHECK_NE(out.size, 0U);
   DCHECK_NE(out.index, MediaCodecLoop::kInvalidBufferIndex);
@@ -510,6 +522,10 @@ void MediaCodecAudioDecoder::SetInitialConfiguration() {
 
   sample_rate_ = config_.samples_per_second();
   timestamp_helper_.reset(new AudioTimestampHelper(sample_rate_));
+}
+
+void MediaCodecAudioDecoder::PumpMediaCodecLoop() {
+  codec_loop_->ExpectWork();
 }
 
 #undef RETURN_STRING

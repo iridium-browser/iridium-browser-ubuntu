@@ -31,16 +31,13 @@
 #include "ui/gl/test/gl_surface_test_support.h"
 
 #if defined(OS_CHROMEOS)
-#include "ash/public/cpp/config.h"
-#include "ash/test/ash_test_helper.h"
 #include "chromeos/chromeos_paths.h"
-#include "ui/aura/env.h"
-#include "ui/aura/test/aura_test_context_factory.h"
 #endif
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
-#include "chrome/common/extensions/chrome_extensions_client.h"
+#include "chrome/common/initialize_extensions_client.h"
 #include "extensions/common/extension_paths.h"
+#include "extensions/common/extensions_client.h"
 #endif
 
 namespace {
@@ -54,11 +51,6 @@ class ChromeUnitTestSuiteInitializer : public testing::EmptyTestEventListener {
   void OnTestStart(const testing::TestInfo& test_info) override {
     content_client_.reset(new ChromeContentClient);
     content::SetContentClient(content_client_.get());
-#if BUILDFLAG(ENABLE_EXTENSIONS)
-    extensions::ExtensionsClient::Get()->InitializeWebStoreUrls(
-        base::CommandLine::ForCurrentProcess());
-
-#endif
 
     browser_content_client_.reset(new ChromeContentBrowserClient());
     content::SetBrowserClientForTesting(browser_content_client_.get());
@@ -66,10 +58,6 @@ class ChromeUnitTestSuiteInitializer : public testing::EmptyTestEventListener {
     content::SetUtilityClientForTesting(utility_content_client_.get());
 
     TestingBrowserProcess::CreateInstance();
-
-    // Force TabManager creation before the first tab is created. In production,
-    // that happens in ChromeBrowserMainParts::PreBrowserStart().
-    g_browser_process->GetTabManager();
   }
 
   void OnTestEnd(const testing::TestInfo& test_info) override {
@@ -116,16 +104,6 @@ void ChromeUnitTestSuite::Initialize() {
 
   base::DiscardableMemoryAllocator::SetInstance(&discardable_memory_allocator_);
   ProfileShortcutManager::DisableForUnitTests();
-
-#if defined(OS_CHROMEOS)
-  aura::Env* env = aura::Env::GetInstance();
-  if (env->mode() == aura::Env::Mode::MUS) {
-    ash::AshTestHelper::set_config(ash::Config::MUS);
-    context_factory_ = std::make_unique<aura::test::AuraTestContextFactory>();
-    env->set_context_factory(context_factory_.get());
-    env->set_context_factory_private(nullptr);
-  }
-#endif
 }
 
 void ChromeUnitTestSuite::Shutdown() {
@@ -153,18 +131,13 @@ void ChromeUnitTestSuite::InitializeProviders() {
 #if BUILDFLAG(ENABLE_EXTENSIONS)
   extensions::RegisterPathProvider();
 
-  extensions::ExtensionsClient::Set(
-      extensions::ChromeExtensionsClient::GetInstance());
+  EnsureExtensionsClientInitialized();
 #endif
 
   content::WebUIControllerFactory::RegisterFactory(
       ChromeWebUIControllerFactory::GetInstance());
 
   gl::GLSurfaceTestSupport::InitializeOneOff();
-
-#if defined(OS_MACOSX)
-  gpu::ImageTransportSurface::SetAllowOSMesaForTesting(true);
-#endif
 
   update_client::UpdateQueryParams::SetDelegate(
       ChromeUpdateQueryParamsDelegate::GetInstance());
@@ -176,7 +149,7 @@ void ChromeUnitTestSuite::InitializeResourceBundle() {
   ui::ResourceBundle::InitSharedInstanceWithLocale(
       "en-US", NULL, ui::ResourceBundle::LOAD_COMMON_RESOURCES);
   base::FilePath resources_pack_path;
-  PathService::Get(chrome::FILE_RESOURCES_PACK, &resources_pack_path);
+  base::PathService::Get(chrome::FILE_RESOURCES_PACK, &resources_pack_path);
   ui::ResourceBundle::GetSharedInstance().AddDataPackFromPath(
       resources_pack_path, ui::SCALE_FACTOR_NONE);
 }

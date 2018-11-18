@@ -26,6 +26,21 @@ static_library("test_config") {
 static_library("test_support") {
   testonly = true
   sources = [
+    "../memory/fake_memory_pressure_monitor.cc",
+    "../memory/fake_memory_pressure_monitor.h",
+    "../task/sequence_manager/test/fake_task.cc",
+    "../task/sequence_manager/test/fake_task.h",
+    "../task/sequence_manager/test/lazy_thread_controller_for_test.cc",
+    "../task/sequence_manager/test/lazy_thread_controller_for_test.h",
+    "../task/sequence_manager/test/mock_time_domain.cc",
+    "../task/sequence_manager/test/mock_time_domain.h",
+    "../task/sequence_manager/test/sequence_manager_for_test.cc",
+    "../task/sequence_manager/test/sequence_manager_for_test.h",
+    "../task/sequence_manager/test/test_task_queue.cc",
+    "../task/sequence_manager/test/test_task_queue.h",
+    "../task/sequence_manager/test/test_task_time_observer.h",
+    "../timer/mock_timer.cc",
+    "../timer/mock_timer.h",
     "../trace_event/trace_config_memory_test_util.h",
     "android/java_handler_thread_helpers.cc",
     "android/java_handler_thread_helpers.h",
@@ -41,8 +56,6 @@ static_library("test_support") {
     "gtest_xml_unittest_result_printer.h",
     "gtest_xml_util.cc",
     "gtest_xml_util.h",
-    "histogram_tester.cc",
-    "histogram_tester.h",
     "icu_test_util.cc",
     "icu_test_util.h",
     "ios/wait_util.h",
@@ -51,6 +64,12 @@ static_library("test_support") {
     "launcher/test_result.h",
     "launcher/test_results_tracker.h",
     "launcher/unit_test_launcher.h",
+    "metrics/histogram_enum_reader.cc",
+    "metrics/histogram_enum_reader.h",
+    "metrics/histogram_tester.cc",
+    "metrics/histogram_tester.h",
+    "metrics/user_action_tester.cc",
+    "metrics/user_action_tester.h",
     "mock_callback.h",
     "mock_chrome_application_mac.h",
     "mock_chrome_application_mac.mm",
@@ -79,10 +98,12 @@ static_library("test_support") {
     "scoped_environment_variable_override.h",
     "scoped_feature_list.cc",
     "scoped_feature_list.h",
-    "scoped_locale.cc",
-    "scoped_locale.h",
+    "scoped_mock_clock_override.cc",
+    "scoped_mock_clock_override.h",
     "scoped_mock_time_message_loop_task_runner.cc",
     "scoped_mock_time_message_loop_task_runner.h",
+    "scoped_os_info_override_win.cc",
+    "scoped_os_info_override_win.h",
     "scoped_path_override.cc",
     "scoped_path_override.h",
     "scoped_task_environment.cc",
@@ -102,7 +123,6 @@ static_library("test_support") {
     "test_file_util_android.cc",
     "test_file_util_linux.cc",
     "test_file_util_mac.cc",
-    "test_file_util_posix.cc",
     "test_file_util_win.cc",
     "test_io_thread.cc",
     "test_io_thread.h",
@@ -128,16 +148,12 @@ static_library("test_support") {
     "test_support_android.h",
     "test_support_ios.h",
     "test_support_ios.mm",
-    "test_ui_thread_android.cc",
-    "test_ui_thread_android.h",
     "thread_test_helper.cc",
     "thread_test_helper.h",
     "trace_event_analyzer.cc",
     "trace_event_analyzer.h",
     "trace_to_file.cc",
     "trace_to_file.h",
-    "user_action_tester.cc",
-    "user_action_tester.h",
     "values_test_util.cc",
     "values_test_util.h",
   ]
@@ -178,11 +194,16 @@ static_library("test_support") {
     "//third_party/libxml",
   ]
 
-  if (!is_posix && !is_fuchsia) {
-    sources -= [
+  if (is_posix || is_fuchsia) {
+    sources += [
       "scoped_locale.cc",
       "scoped_locale.h",
+      "test_file_util_posix.cc",
     ]
+  }
+
+  if (is_fuchsia) {
+    deps += [ "//third_party/fuchsia-sdk:zx" ]
   }
 
   if (is_linux) {
@@ -192,7 +213,6 @@ static_library("test_support") {
     ]
     if (current_toolchain == host_toolchain) {
       data_deps += [ ":do_generate_fontconfig_caches" ]
-      data += [ "$root_out_dir/fontconfig_caches/" ]
     }
   }
 
@@ -229,6 +249,8 @@ static_library("test_support") {
       "gtest_xml_util.h",
       "icu_test_util.cc",
       "icu_test_util.h",
+      "metrics/histogram_enum_reader.cc",
+      "metrics/histogram_enum_reader.h",
       "perf_test_suite.cc",
       "perf_test_suite.h",
       "scoped_path_override.cc",
@@ -349,7 +371,6 @@ if (is_linux) {
       deps = [
         ":fontconfig_util_linux",
         "//base",
-        "//build/config:exe_and_shlib_deps",
       ]
     }
 
@@ -361,7 +382,8 @@ if (is_linux) {
       ]
       args = []
       outputs = [
-        "$root_out_dir/fontconfig_caches/STAMP",
+        "$root_out_dir/fontconfig_caches/df1acc8c-39d5-4a8b-8507-b1a7396ac3ac-le64.cache-7",
+        "$root_out_dir/test_fonts/.uuid",
       ]
     }
   }
@@ -373,7 +395,6 @@ if (is_linux) {
     ]
     deps = [
       "//base",
-      "//build/config:exe_and_shlib_deps",
     ]
   }
 }
@@ -383,7 +404,6 @@ if (is_android) {
     sources = [
       "android/java/src/org/chromium/base/ContentUriTestUtils.java",
       "android/java/src/org/chromium/base/JavaHandlerThreadHelpers.java",
-      "android/java/src/org/chromium/base/TestUiThread.java",
     ]
     jni_package = "base"
   }
@@ -401,8 +421,9 @@ if (is_android) {
     testonly = true
     deps = [
       "//base:base_java",
+      "//base:base_java_test_support",
       "//testing/android/native_test:native_main_runner_java",
-      "//third_party/android_tools:android_support_annotations_java",
+      "//third_party/android_deps:android_support_annotations_java",
       "//third_party/jsr-305:jsr_305_javalib",
     ]
     srcjar_deps = [ ":test_support_java_aidl" ]
@@ -430,4 +451,13 @@ if (is_android) {
       "android/java/src/org/chromium/base/ITestController.aidl",
     ]
   }
+}
+
+# Trivial executable which outputs space-delimited argv to stdout,
+# used for testing.
+executable("test_child_process") {
+  testonly = true
+  sources = [
+    "test_child_process.cc",
+  ]
 }

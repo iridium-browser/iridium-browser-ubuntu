@@ -82,7 +82,7 @@ Thumb2InstrInfo::ReplaceTailWithBranchTo(MachineBasicBlock::iterator Tail,
     MachineBasicBlock::iterator E = MBB->begin();
     unsigned Count = 4; // At most 4 instructions in an IT block.
     while (Count && MBBI != E) {
-      if (MBBI->isDebugValue()) {
+      if (MBBI->isDebugInstr()) {
         --MBBI;
         continue;
       }
@@ -109,7 +109,7 @@ Thumb2InstrInfo::ReplaceTailWithBranchTo(MachineBasicBlock::iterator Tail,
 bool
 Thumb2InstrInfo::isLegalToSplitMBBAt(MachineBasicBlock &MBB,
                                      MachineBasicBlock::iterator MBBI) const {
-  while (MBBI->isDebugValue()) {
+  while (MBBI->isDebugInstr()) {
     ++MBBI;
     if (MBBI == MBB.end())
       return false;
@@ -620,6 +620,11 @@ bool llvm::rewriteT2FrameIndex(MachineInstr &MI, unsigned FrameRegIdx,
       NumBits = 10; // 8 bits scaled by 4
       // MCInst operand expects already scaled value.
       Scale = 1;
+      assert((Offset & 3) == 0 && "Can't encode this offset!");
+    } else if (AddrMode == ARMII::AddrModeT2_ldrex) {
+      Offset += MI.getOperand(FrameRegIdx + 1).getImm() * 4;
+      NumBits = 8; // 8 bits scaled by 4
+      Scale = 4;
       assert((Offset & 3) == 0 && "Can't encode this offset!");
     } else {
       llvm_unreachable("Unsupported addressing mode!");

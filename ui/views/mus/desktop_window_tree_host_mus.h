@@ -8,11 +8,13 @@
 #include <memory>
 #include <set>
 
+#include "base/scoped_observer.h"
 #include "base/macros.h"
 #include "ui/aura/mus/focus_synchronizer_observer.h"
 #include "ui/aura/mus/window_tree_host_mus.h"
 #include "ui/aura/window_observer.h"
 #include "ui/views/mus/mus_client_observer.h"
+#include "ui/views/view_observer.h"
 #include "ui/views/mus/mus_export.h"
 #include "ui/views/widget/desktop_aura/desktop_window_tree_host.h"
 #include "ui/views/widget/widget.h"
@@ -28,7 +30,8 @@ class VIEWS_MUS_EXPORT DesktopWindowTreeHostMus
       public MusClientObserver,
       public aura::FocusSynchronizerObserver,
       public aura::WindowObserver,
-      public aura::WindowTreeHostMus {
+      public aura::WindowTreeHostMus,
+      public views::ViewObserver {
  public:
   DesktopWindowTreeHostMus(
       aura::WindowTreeHostMusInitParams init_params,
@@ -46,7 +49,6 @@ class VIEWS_MUS_EXPORT DesktopWindowTreeHostMus
 
  private:
   void SendClientAreaToServer();
-  void SendHitTestMaskToServer();
 
   // Returns true if the FocusClient associated with our window is installed on
   // the FocusSynchronizer.
@@ -71,8 +73,8 @@ class VIEWS_MUS_EXPORT DesktopWindowTreeHostMus
   void Close() override;
   void CloseNow() override;
   aura::WindowTreeHost* AsWindowTreeHost() override;
-  void ShowWindowWithState(ui::WindowShowState state) override;
-  void ShowMaximizedWithBounds(const gfx::Rect& restored_bounds) override;
+  void Show(ui::WindowShowState show_state,
+            const gfx::Rect& restore_bounds) override;
   bool IsVisible() const override;
   void SetSize(const gfx::Size& size) override;
   void StackAbove(aura::Window* window) override;
@@ -114,6 +116,7 @@ class VIEWS_MUS_EXPORT DesktopWindowTreeHostMus
   void SetFullscreen(bool fullscreen) override;
   bool IsFullscreen() const override;
   void SetOpacity(float opacity) override;
+  void SetAspectRatio(const gfx::SizeF& aspect_ratio) override {}
   void SetWindowIcons(const gfx::ImageSkia& window_icon,
                       const gfx::ImageSkia& app_icon) override;
   void InitModalType(ui::ModalType modal_type) override;
@@ -140,7 +143,12 @@ class VIEWS_MUS_EXPORT DesktopWindowTreeHostMus
   // aura::WindowTreeHostMus:
   void ShowImpl() override;
   void HideImpl() override;
-  void SetBoundsInPixels(const gfx::Rect& bounds_in_pixels) override;
+  void SetBoundsInPixels(const gfx::Rect& bounds_in_pixels,
+                         const viz::LocalSurfaceId& local_surface_id) override;
+
+  // views::ViewObserver:
+  void OnViewBoundsChanged(views::View* observed_view) override;
+  void OnViewIsDeleting(View* observed_view) override;
 
   // Accessor for DesktopNativeWidgetAura::content_window().
   aura::Window* content_window();
@@ -159,6 +167,8 @@ class VIEWS_MUS_EXPORT DesktopWindowTreeHostMus
   std::unique_ptr<wm::CursorManager> cursor_manager_;
 
   bool auto_update_client_area_ = true;
+
+  ScopedObserver<views::View, views::ViewObserver> observed_frame_{this};
 
   // Used so that Close() isn't immediate.
   base::WeakPtrFactory<DesktopWindowTreeHostMus> close_widget_factory_;

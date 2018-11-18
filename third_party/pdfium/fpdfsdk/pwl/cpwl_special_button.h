@@ -9,23 +9,21 @@
 
 #include "fpdfsdk/pwl/cpwl_button.h"
 
-class CPWL_PushButton : public CPWL_Button {
+class CPWL_PushButton final : public CPWL_Button {
  public:
   CPWL_PushButton();
   ~CPWL_PushButton() override;
 
   // CPWL_Button
-  ByteString GetClassName() const override;
   CFX_FloatRect GetFocusRect() const override;
 };
 
-class CPWL_CheckBox : public CPWL_Button {
+class CPWL_CheckBox final : public CPWL_Button {
  public:
   CPWL_CheckBox();
   ~CPWL_CheckBox() override;
 
   // CPWL_Button
-  ByteString GetClassName() const override;
   bool OnLButtonUp(const CFX_PointF& point, uint32_t nFlag) override;
   bool OnChar(uint16_t nChar, uint32_t nFlag) override;
 
@@ -36,13 +34,12 @@ class CPWL_CheckBox : public CPWL_Button {
   bool m_bChecked;
 };
 
-class CPWL_RadioButton : public CPWL_Button {
+class CPWL_RadioButton final : public CPWL_Button {
  public:
   CPWL_RadioButton();
   ~CPWL_RadioButton() override;
 
   // CPWL_Button
-  ByteString GetClassName() const override;
   bool OnLButtonUp(const CFX_PointF& point, uint32_t nFlag) override;
   bool OnChar(uint16_t nChar, uint32_t nFlag) override;
 

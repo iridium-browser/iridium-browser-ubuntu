@@ -4,8 +4,9 @@
 
 #include "src/v8.h"
 
+#include <fstream>
+
 #include "src/api.h"
-#include "src/assembler.h"
 #include "src/base/atomicops.h"
 #include "src/base/once.h"
 #include "src/base/platform/platform.h"
@@ -14,15 +15,18 @@
 #include "src/deoptimizer.h"
 #include "src/elements.h"
 #include "src/frames.h"
+#include "src/interface-descriptors.h"
 #include "src/isolate.h"
 #include "src/libsampler/sampler.h"
 #include "src/objects-inl.h"
 #include "src/profiler/heap-profiler.h"
+#include "src/reloc-info.h"
 #include "src/runtime-profiler.h"
 #include "src/simulator.h"
 #include "src/snapshot/natives.h"
 #include "src/snapshot/snapshot.h"
 #include "src/tracing/tracing-category-observer.h"
+#include "src/wasm/wasm-engine.h"
 
 namespace v8 {
 namespace internal {
@@ -46,10 +50,11 @@ void V8::TearDown() {
 #if defined(USE_SIMULATOR)
   Simulator::GlobalTearDown();
 #endif
+  wasm::WasmEngine::GlobalTearDown();
+  CallDescriptors::TearDown();
   Bootstrapper::TearDownExtensions();
   ElementsAccessor::TearDown();
   RegisteredExtension::UnregisterAll();
-  Isolate::GlobalTearDown();
   sampler::Sampler::TearDown();
   FlagList::ResetAllFlags();  // Frees memory held by string arguments.
 }
@@ -69,6 +74,12 @@ void V8::InitializeOncePerProcessImpl() {
     FLAG_max_semi_space_size = 1;
   }
 
+  if (FLAG_trace_turbo) {
+    // Create an empty file shared by the process (e.g. the wasm engine).
+    std::ofstream(Isolate::GetTurboCfgFileName(nullptr).c_str(),
+                  std::ios_base::trunc);
+  }
+
   base::OS::Initialize(FLAG_hard_abort, FLAG_gc_fake_mmap);
 
   if (FLAG_random_seed) SetRandomMmapSeed(FLAG_random_seed);
@@ -81,8 +92,9 @@ void V8::InitializeOncePerProcessImpl() {
   sampler::Sampler::SetUp();
   CpuFeatures::Probe(false);
   ElementsAccessor::InitializeOncePerProcess();
-  ExternalReference::SetUp();
   Bootstrapper::InitializeOncePerProcess();
+  CallDescriptors::InitializeOncePerProcess();
+  wasm::WasmEngine::InitializeOncePerProcess();
 }
 
 

@@ -14,11 +14,10 @@
 #include "chrome/services/printing/public/mojom/pdf_to_emf_converter.mojom.h"
 #include "content/public/common/child_process_host_delegate.h"
 #include "ipc/ipc_platform_file.h"
-#include "mojo/edk/embedder/outgoing_broker_client_invitation.h"
+#include "mojo/public/cpp/system/invitation.h"
 
 namespace base {
 class CommandLine;
-class File;
 class FilePath;
 class SingleThreadTaskRunner;
 }  // namespace base
@@ -84,9 +83,10 @@ class ServiceUtilityProcessHost : public content::ChildProcessHostDelegate {
     friend class base::RefCountedThreadSafe<Client>;
     friend class ServiceUtilityProcessHost;
 
-    // Invoked when a metafile file is ready.
-    // Returns true if metafile successfully loaded from |file|.
-    bool MetafileAvailable(float scale_factor, base::File file);
+    // Invoked when a metafile is ready.
+    // Returns true if metafile successfully loaded from |emf_region|.
+    bool MetafileAvailable(float scale_factor,
+                           base::ReadOnlySharedMemoryRegion emf_region);
 
     DISALLOW_COPY_AND_ASSIGN(Client);
   };
@@ -143,7 +143,9 @@ class ServiceUtilityProcessHost : public content::ChildProcessHostDelegate {
   void OnRenderPDFPagesToMetafilesPageCount(
       printing::mojom::PdfToEmfConverterPtr converter,
       uint32_t page_count);
-  void OnRenderPDFPagesToMetafilesPageDone(bool success, float scale_factor);
+  void OnRenderPDFPagesToMetafilesPageDone(
+      base::ReadOnlySharedMemoryRegion emf_region,
+      float scale_factor);
 
   // IPC Messages handlers:
   void OnGetPrinterCapsAndDefaultsSucceeded(
@@ -162,7 +164,7 @@ class ServiceUtilityProcessHost : public content::ChildProcessHostDelegate {
   scoped_refptr<Client> client_;
   scoped_refptr<base::SingleThreadTaskRunner> client_task_runner_;
   bool waiting_for_reply_;
-  mojo::edk::OutgoingBrokerClientInvitation broker_client_invitation_;
+  mojo::OutgoingInvitation mojo_invitation_;
 
   class PdfToEmfState;
   std::unique_ptr<PdfToEmfState> pdf_to_emf_state_;

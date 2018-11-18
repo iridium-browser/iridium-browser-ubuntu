@@ -10,6 +10,7 @@
 #include "ash/root_window_controller.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
+#include "ash/window_factory.h"
 #include "ash/wm/container_finder.h"
 #include "ash/wm/window_util.h"
 #include "base/command_line.h"
@@ -26,8 +27,8 @@
 #include "ui/events/test/event_generator.h"
 #include "ui/keyboard/keyboard_controller.h"
 #include "ui/keyboard/keyboard_switches.h"
-#include "ui/keyboard/keyboard_test_util.h"
 #include "ui/keyboard/keyboard_ui.h"
+#include "ui/keyboard/test/keyboard_test_util.h"
 #include "ui/views/test/capture_tracking_view.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
@@ -153,12 +154,12 @@ class SystemModalContainerLayoutManagerTest : public AshTestBase {
 
   void ActivateKeyboard() {
     Shell::GetPrimaryRootWindowController()->ActivateKeyboard(
-        keyboard::KeyboardController::GetInstance());
+        keyboard::KeyboardController::Get());
   }
 
   void DeactivateKeyboard() {
     Shell::GetPrimaryRootWindowController()->DeactivateKeyboard(
-        keyboard::KeyboardController::GetInstance());
+        keyboard::KeyboardController::Get());
   }
 
   aura::Window* OpenToplevelTestWindow(bool modal) {
@@ -177,24 +178,24 @@ class SystemModalContainerLayoutManagerTest : public AshTestBase {
 
   // Show or hide the keyboard.
   void ShowKeyboard(bool show) {
-    keyboard::KeyboardController* keyboard =
-        keyboard::KeyboardController::GetInstance();
-    ASSERT_TRUE(keyboard);
-    if (show == keyboard->keyboard_visible())
+    auto* keyboard = keyboard::KeyboardController::Get();
+    ASSERT_TRUE(keyboard->IsEnabled());
+    if (show == keyboard->IsKeyboardVisible())
       return;
 
     if (show) {
       keyboard->ShowKeyboard(true);
-      if (keyboard->ui()->GetContentsWindow()->bounds().height() == 0) {
-        keyboard->ui()->GetContentsWindow()->SetBounds(
+      if (keyboard->GetKeyboardWindow()->bounds().height() == 0) {
+        keyboard->GetKeyboardWindow()->SetBounds(
             keyboard::KeyboardBoundsFromRootBounds(
                 Shell::GetPrimaryRootWindow()->bounds(), 100));
+        keyboard->NotifyKeyboardWindowLoaded();
       }
     } else {
-      keyboard->HideKeyboard(keyboard::KeyboardController::HIDE_REASON_MANUAL);
+      keyboard->HideKeyboardByUser();
     }
 
-    DCHECK_EQ(show, keyboard->keyboard_visible());
+    DCHECK_EQ(show, keyboard->IsKeyboardVisible());
   }
 };
 
@@ -417,7 +418,8 @@ TEST_F(SystemModalContainerLayoutManagerTest, ModalTransientChildEvents) {
   // Create a child control for modal1_transient and it receives mouse events.
   aura::test::EventCountDelegate control_delegate;
   control_delegate.set_window_component(HTCLIENT);
-  std::unique_ptr<aura::Window> child(new aura::Window(&control_delegate));
+  std::unique_ptr<aura::Window> child =
+      window_factory::NewWindow(&control_delegate);
   child->SetType(aura::client::WINDOW_TYPE_CONTROL);
   child->Init(ui::LAYER_TEXTURED);
   modal1_transient->AddChild(child.get());
@@ -800,7 +802,7 @@ TEST_F(SystemModalContainerLayoutManagerTest, VisibilityChange) {
 
   // Make sure that a child visibility change should not cause
   // inconsistent state.
-  std::unique_ptr<aura::Window> child = std::make_unique<aura::Window>(nullptr);
+  std::unique_ptr<aura::Window> child = window_factory::NewWindow();
   child->SetType(aura::client::WINDOW_TYPE_CONTROL);
   child->Init(ui::LAYER_TEXTURED);
   modal_window->AddChild(child.get());

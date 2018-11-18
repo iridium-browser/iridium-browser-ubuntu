@@ -7,6 +7,7 @@
 
 #include "base/feature_list.h"
 #include "base/run_loop.h"
+#include "base/task/post_task.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
@@ -22,17 +23,17 @@
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/safe_browsing/db/v4_protocol_manager_util.h"
-#include "components/subresource_filter/content/browser/content_ruleset_service.h"
-#include "components/subresource_filter/content/browser/content_subresource_filter_driver_factory.h"
+#include "components/subresource_filter/content/browser/ruleset_service.h"
 #include "components/subresource_filter/content/browser/subresource_filter_observer_test_utils.h"
-#include "components/subresource_filter/core/browser/ruleset_service.h"
 #include "components/subresource_filter/core/common/activation_decision.h"
-#include "components/subresource_filter/core/common/activation_level.h"
 #include "components/subresource_filter/core/common/activation_list.h"
 #include "components/subresource_filter/core/common/test_ruleset_creator.h"
+#include "components/subresource_filter/mojom/subresource_filter.mojom.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/navigation_throttle.h"
 #include "content/public/test/navigation_simulator.h"
 #include "content/public/test/test_renderer_host.h"
+#include "net/url_request/url_request_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 
@@ -46,15 +47,19 @@ void SubresourceFilterTestHarness::SetUp() {
   ChromeRenderViewHostTestHarness::SetUp();
 
   // Ensure correct features.
-  scoped_feature_toggle_.ResetSubresourceFilterState(
-      base::FeatureList::OVERRIDE_ENABLE_FEATURE,
-      "SafeBrowsingV4OnlyEnabled,SubresourceFilterExperimentalUI");
   scoped_configuration_.ResetConfiguration(subresource_filter::Configuration(
-      subresource_filter::ActivationLevel::ENABLED,
+      subresource_filter::mojom::ActivationLevel::kEnabled,
       subresource_filter::ActivationScope::ACTIVATION_LIST,
       subresource_filter::ActivationList::SUBRESOURCE_FILTER));
 
   NavigateAndCommit(GURL("https://example.first"));
+
+  system_request_context_getter_ =
+      base::MakeRefCounted<net::TestURLRequestContextGetter>(
+          base::CreateSingleThreadTaskRunnerWithTraits(
+              {content::BrowserThread::IO}));
+  TestingBrowserProcess::GetGlobal()->SetSystemRequestContext(
+      system_request_context_getter_.get());
 
   // Set up safe browsing service with the fake database manager.
   //
@@ -90,7 +95,7 @@ void SubresourceFilterTestHarness::SetUp() {
   auto ruleset_service = std::make_unique<subresource_filter::RulesetService>(
       &pref_service_, base::ThreadTaskRunnerHandle::Get(),
       content_service.get(), ruleset_service_dir_.GetPath());
-  content_service->set_ruleset_service(std::move(ruleset_service));
+  content_service->SetAndInitializeRulesetService(std::move(ruleset_service));
   TestingBrowserProcess::GetGlobal()->SetRulesetService(
       std::move(content_service));
 
@@ -119,6 +124,9 @@ void SubresourceFilterTestHarness::TearDown() {
   // all cleanup related to these classes actually happens.
   TestingBrowserProcess::GetGlobal()->SetRulesetService(nullptr);
   TestingBrowserProcess::GetGlobal()->SetSafeBrowsingService(nullptr);
+  TestingBrowserProcess::GetGlobal()->SetSystemRequestContext(nullptr);
+  system_request_context_getter_ = nullptr;
+
   base::RunLoop().RunUntilIdle();
 
   ChromeRenderViewHostTestHarness::TearDown();

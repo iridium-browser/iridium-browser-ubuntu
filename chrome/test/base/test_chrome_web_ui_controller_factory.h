@@ -5,8 +5,8 @@
 #ifndef CHROME_TEST_BASE_TEST_CHROME_WEB_UI_CONTROLLER_FACTORY_H_
 #define CHROME_TEST_BASE_TEST_CHROME_WEB_UI_CONTROLLER_FACTORY_H_
 
-#include <functional>
 #include <map>
+#include <memory>
 #include <string>
 
 #include "base/macros.h"
@@ -23,14 +23,15 @@ class TestChromeWebUIControllerFactory : public ChromeWebUIControllerFactory {
    public:
     // Create and return a new WebUI object for the |web_contents| based on the
     // |url|.
-     virtual content::WebUIController* NewWebUI(content::WebUI* web_ui,
-                                                const GURL& url) = 0;
+    virtual std::unique_ptr<content::WebUIController> NewWebUI(
+        content::WebUI* web_ui,
+        const GURL& url) = 0;
 
    protected:
     virtual ~WebUIProvider();
   };
 
-  typedef std::map<std::string, WebUIProvider*> FactoryOverridesMap;
+  using FactoryOverridesMap = std::map<std::string, WebUIProvider*>;
 
   TestChromeWebUIControllerFactory();
   ~TestChromeWebUIControllerFactory() override;
@@ -44,7 +45,7 @@ class TestChromeWebUIControllerFactory : public ChromeWebUIControllerFactory {
   // ChromeWebUIFactory overrides.
   content::WebUI::TypeID GetWebUIType(content::BrowserContext* browser_context,
                                       const GURL& url) const override;
-  content::WebUIController* CreateWebUIControllerForURL(
+  std::unique_ptr<content::WebUIController> CreateWebUIControllerForURL(
       content::WebUI* web_ui,
       const GURL& url) const override;
 

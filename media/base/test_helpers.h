@@ -88,7 +88,11 @@ class TestVideoConfig {
   static VideoDecoderConfig Invalid();
 
   static VideoDecoderConfig Normal(VideoCodec codec = kCodecVP8);
-  static VideoDecoderConfig NormalH264();
+  static VideoDecoderConfig NormalH264(
+      VideoCodecProfile = VIDEO_CODEC_PROFILE_UNKNOWN);
+  static VideoDecoderConfig NormalCodecProfile(
+      VideoCodec codec = kCodecVP8,
+      VideoCodecProfile profile = VIDEO_CODEC_PROFILE_UNKNOWN);
   static VideoDecoderConfig NormalEncrypted(VideoCodec codec = kCodecVP8);
   static VideoDecoderConfig NormalRotated(VideoRotation rotation);
 
@@ -109,6 +113,7 @@ class TestVideoConfig {
 class TestAudioConfig {
  public:
   static AudioDecoderConfig Normal();
+  static AudioDecoderConfig NormalEncrypted();
 };
 
 // Provides pre-canned AudioParameters objects.
@@ -328,6 +333,12 @@ MATCHER_P2(SkippingSpliceTooLittleOverlap,
                base::IntToString(overlap_microseconds) +
                "us of overlap, need at least 1000us. Multiple occurrences may "
                "result in loss of A/V sync.");
+}
+
+// Prefer WebMSimpleBlockDurationEstimated over this matcher, unless the actual
+// estimated duration value is unimportant to the test.
+MATCHER(WebMSimpleBlockDurationEstimatedAny, "") {
+  return CONTAINS_STRING(arg, "Estimating WebM block duration=");
 }
 
 MATCHER_P(WebMSimpleBlockDurationEstimated, estimated_duration_ms, "") {

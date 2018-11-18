@@ -150,9 +150,8 @@ Layer::~Layer() {
   for (auto& observer : observer_list_)
     observer.LayerDestroyed(this);
 
-  // Destroying the animator may cause observers to use the layer (and
-  // indirectly the WebLayer). Destroy the animator first so that the WebLayer
-  // is still around.
+  // Destroying the animator may cause observers to use the layer. Destroy the
+  // animator first so that the layer is still around.
   SetAnimator(nullptr);
   if (compositor_)
     compositor_->SetRootLayer(nullptr);
@@ -188,18 +187,16 @@ std::unique_ptr<Layer> Layer::Clone() const {
 
   // cc::Layer state.
   if (surface_layer_) {
-    if (surface_layer_->primary_surface_id().is_valid()) {
-      clone->SetShowPrimarySurface(
-          surface_layer_->primary_surface_id(), frame_size_in_dip_,
-          surface_layer_->background_color(),
-          surface_layer_->deadline_in_frames()
-              ? cc::DeadlinePolicy::UseSpecifiedDeadline(
-                    *surface_layer_->deadline_in_frames())
-              : cc::DeadlinePolicy::UseDefaultDeadline(),
-          surface_layer_->stretch_content_to_fill_bounds());
-    }
-    if (surface_layer_->fallback_surface_id().is_valid())
-      clone->SetFallbackSurfaceId(surface_layer_->fallback_surface_id());
+    clone->SetShowPrimarySurface(
+        surface_layer_->primary_surface_id(), frame_size_in_dip_,
+        surface_layer_->background_color(),
+        surface_layer_->deadline_in_frames()
+            ? cc::DeadlinePolicy::UseSpecifiedDeadline(
+                  *surface_layer_->deadline_in_frames())
+            : cc::DeadlinePolicy::UseDefaultDeadline(),
+        surface_layer_->stretch_content_to_fill_bounds());
+    if (surface_layer_->fallback_surface_id())
+      clone->SetFallbackSurfaceId(*surface_layer_->fallback_surface_id());
   } else if (type_ == LAYER_SOLID_COLOR) {
     clone->SetColor(GetTargetColor());
   }
@@ -287,8 +284,7 @@ void Layer::Remove(Layer* child) {
   if (compositor)
     child->ResetCompositorForAnimatorsInTree(compositor);
 
-  std::vector<Layer*>::iterator i =
-      std::find(children_.begin(), children_.end(), child);
+  auto i = std::find(children_.begin(), children_.end(), child);
   DCHECK(i != children_.end());
   children_.erase(i);
   child->parent_ = nullptr;
@@ -452,12 +448,16 @@ void Layer::SetMaskLayer(Layer* layer_mask) {
          (!layer_mask->layer_mask_layer() && layer_mask->children().empty() &&
           !layer_mask->layer_mask_back_link_));
   DCHECK(!layer_mask_back_link_);
+  DCHECK(!layer_mask || layer_mask->type_ == LAYER_TEXTURED);
+  // Masks must be backed by a PictureLayer.
+  DCHECK(!layer_mask || layer_mask->content_layer_);
   // We need to de-reference the currently linked object so that no problem
   // arises if the mask layer gets deleted before this object.
   if (layer_mask_)
     layer_mask_->layer_mask_back_link_ = nullptr;
   layer_mask_ = layer_mask;
-  cc_layer_->SetMaskLayer(layer_mask ? layer_mask->cc_layer_ : nullptr);
+  cc_layer_->SetMaskLayer(layer_mask ? layer_mask->content_layer_.get()
+                                     : nullptr);
   // We need to reference the linked object so that it can properly break the
   // link to us when it gets deleted.
   if (layer_mask) {
@@ -477,6 +477,9 @@ void Layer::SetAlphaShape(std::unique_ptr<ShapeRects> shape) {
   alpha_shape_ = std::move(shape);
 
   SetLayerFilters();
+
+  if (delegate_)
+    delegate_->OnLayerAlphaShapeChanged();
 }
 
 void Layer::SetLayerFilters() {
@@ -642,9 +645,9 @@ void Layer::SwitchToLayer(scoped_refptr<cc::Layer> new_layer) {
 }
 
 void Layer::SwitchCCLayerForTest() {
-  scoped_refptr<cc::Layer> new_layer = cc::PictureLayer::Create(this);
+  scoped_refptr<cc::PictureLayer> new_layer = cc::PictureLayer::Create(this);
   SwitchToLayer(new_layer);
-  content_layer_ = new_layer;
+  content_layer_ = std::move(new_layer);
 }
 
 // Note: The code that sets this flag would be responsible to unset it on that
@@ -714,6 +717,14 @@ bool Layer::StretchContentToFillBounds() const {
   return surface_layer_->stretch_content_to_fill_bounds();
 }
 
+void Layer::SetSurfaceSize(gfx::Size surface_size_in_dip) {
+  DCHECK(surface_layer_);
+  if (frame_size_in_dip_ == surface_size_in_dip)
+    return;
+  frame_size_in_dip_ = surface_size_in_dip;
+  RecomputeDrawsContentAndUVRect();
+}
+
 void Layer::SetTransferableResource(
     const viz::TransferableResource& resource,
     std::unique_ptr<viz::SingleReleaseCallback> release_callback,
@@ -767,7 +778,7 @@ void Layer::SetShowPrimarySurface(const viz::SurfaceId& surface_id,
 
   if (!surface_layer_) {
     scoped_refptr<cc::SurfaceLayer> new_layer = cc::SurfaceLayer::Create();
-    new_layer->SetHitTestable(true);
+    new_layer->SetSurfaceHitTestable(true);
     SwitchToLayer(new_layer);
     surface_layer_ = new_layer;
   }
@@ -803,8 +814,8 @@ const viz::SurfaceId* Layer::GetPrimarySurfaceId() const {
 }
 
 const viz::SurfaceId* Layer::GetFallbackSurfaceId() const {
-  if (surface_layer_)
-    return &surface_layer_->fallback_surface_id();
+  if (surface_layer_ && surface_layer_->fallback_surface_id())
+    return &surface_layer_->fallback_surface_id().value();
   return nullptr;
 }
 
@@ -836,7 +847,7 @@ void Layer::UpdateNinePatchLayerImage(const gfx::ImageSkia& image) {
   // we don't need/want to, but we should address this in the future if it
   // becomes an issue.
   nine_patch_layer_->SetBitmap(
-      image.GetRepresentation(device_scale_factor_).sk_bitmap());
+      image.GetRepresentation(device_scale_factor_).GetBitmap());
 }
 
 void Layer::UpdateNinePatchLayerAperture(const gfx::Rect& aperture_in_dip) {
@@ -972,15 +983,15 @@ gfx::ScrollOffset Layer::CurrentScrollOffset() const {
   const Compositor* compositor = GetCompositor();
   gfx::ScrollOffset offset;
   if (compositor &&
-      compositor->GetScrollOffsetForLayer(cc_layer_->id(), &offset))
+      compositor->GetScrollOffsetForLayer(cc_layer_->element_id(), &offset))
     return offset;
-  return cc_layer_->scroll_offset();
+  return cc_layer_->CurrentScrollOffset();
 }
 
 void Layer::SetScrollOffset(const gfx::ScrollOffset& offset) {
   Compositor* compositor = GetCompositor();
   bool scrolled_on_impl_side =
-      compositor && compositor->ScrollLayerTo(cc_layer_->id(), offset);
+      compositor && compositor->ScrollLayerTo(cc_layer_->element_id(), offset);
 
   if (!scrolled_on_impl_side)
     cc_layer_->SetScrollOffset(offset);
@@ -1037,29 +1048,14 @@ bool Layer::PrepareTransferableResource(
   return true;
 }
 
-class LayerDebugInfo : public base::trace_event::ConvertableToTraceFormat {
- public:
-  explicit LayerDebugInfo(const std::string& name) : name_(name) {}
-  ~LayerDebugInfo() override {}
-  void AppendAsTraceFormat(std::string* out) const override {
-    base::DictionaryValue dictionary;
-    dictionary.SetString("layer_name", name_);
-    std::string tmp;
-    base::JSONWriter::Write(dictionary, &tmp);
-    out->append(tmp);
-  }
-
- private:
-  std::string name_;
-};
-
-std::unique_ptr<base::trace_event::ConvertableToTraceFormat>
-Layer::TakeDebugInfo(cc::Layer* layer) {
-  return base::WrapUnique(new LayerDebugInfo(name_));
+std::unique_ptr<base::trace_event::TracedValue> Layer::TakeDebugInfo(
+    cc::Layer* layer) {
+  auto value = std::make_unique<base::trace_event::TracedValue>();
+  value->SetString("layer_name", name_);
+  return value;
 }
 
-void Layer::didUpdateMainThreadScrollingReasons() {}
-void Layer::didChangeScrollbarsHiddenIfOverlay(bool) {}
+void Layer::DidChangeScrollbarsHiddenIfOverlay(bool) {}
 
 void Layer::CollectAnimators(
     std::vector<scoped_refptr<LayerAnimator>>* animators) {
@@ -1215,7 +1211,6 @@ float Layer::GetGrayscaleForAnimation() const {
 }
 
 SkColor Layer::GetColorForAnimation() const {
-  // WebColor is equivalent to SkColor, per WebColor.h.
   // The NULL check is here since this is invoked regardless of whether we have
   // been configured as LAYER_SOLID_COLOR.
   return solid_color_layer_.get() ?

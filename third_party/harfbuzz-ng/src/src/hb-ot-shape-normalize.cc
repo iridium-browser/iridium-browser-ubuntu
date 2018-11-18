@@ -24,9 +24,9 @@
  * Google Author(s): Behdad Esfahbod
  */
 
-#include "hb-ot-shape-normalize-private.hh"
-#include "hb-ot-shape-complex-private.hh"
-#include "hb-ot-shape-private.hh"
+#include "hb-ot-shape-normalize.hh"
+#include "hb-ot-shape-complex.hh"
+#include "hb-ot-shape.hh"
 
 
 /*
@@ -119,7 +119,7 @@ skip_char (hb_buffer_t *buffer)
 static inline unsigned int
 decompose (const hb_ot_shape_normalize_context_t *c, bool shortest, hb_codepoint_t ab)
 {
-  hb_codepoint_t a, b, a_glyph, b_glyph;
+  hb_codepoint_t a = 0, b = 0, a_glyph = 0, b_glyph = 0;
   hb_buffer_t * const buffer = c->buffer;
   hb_font_t * const font = c->font;
 
@@ -164,7 +164,7 @@ decompose_current_character (const hb_ot_shape_normalize_context_t *c, bool shor
 {
   hb_buffer_t * const buffer = c->buffer;
   hb_codepoint_t u = buffer->cur().codepoint;
-  hb_codepoint_t glyph;
+  hb_codepoint_t glyph = 0;
 
   if (shortest && c->font->get_nominal_glyph (u, &glyph))
   {
@@ -218,7 +218,7 @@ handle_variation_selector_cluster (const hb_ot_shape_normalize_context_t *c, uns
   /* TODO Currently if there's a variation-selector we give-up, it's just too hard. */
   hb_buffer_t * const buffer = c->buffer;
   hb_font_t * const font = c->font;
-  for (; buffer->idx < end - 1 && !buffer->in_error;) {
+  for (; buffer->idx < end - 1 && buffer->successful;) {
     if (unlikely (buffer->unicode->is_variation_selector (buffer->cur(+1).codepoint))) {
       /* The next two lines are some ugly lines... But work. */
       if (font->get_variation_glyph (buffer->cur().codepoint, buffer->cur(+1).codepoint, &buffer->cur().glyph_index()))
@@ -254,13 +254,13 @@ static inline void
 decompose_multi_char_cluster (const hb_ot_shape_normalize_context_t *c, unsigned int end, bool short_circuit)
 {
   hb_buffer_t * const buffer = c->buffer;
-  for (unsigned int i = buffer->idx; i < end && !buffer->in_error; i++)
+  for (unsigned int i = buffer->idx; i < end && buffer->successful; i++)
     if (unlikely (buffer->unicode->is_variation_selector (buffer->info[i].codepoint))) {
       handle_variation_selector_cluster (c, end, short_circuit);
       return;
     }
 
-  while (buffer->idx < end && !buffer->in_error)
+  while (buffer->idx < end && buffer->successful)
     decompose_current_character (c, short_circuit);
 }
 
@@ -294,6 +294,16 @@ _hb_ot_shape_normalize (const hb_ot_shape_plan_t *plan,
   _hb_buffer_assert_unicode_vars (buffer);
 
   hb_ot_shape_normalization_mode_t mode = plan->shaper->normalization_preference;
+  if (mode == HB_OT_SHAPE_NORMALIZATION_MODE_AUTO)
+  {
+    if (plan->has_gpos_mark)
+      // https://github.com/harfbuzz/harfbuzz/issues/653#issuecomment-423905920
+      //mode = HB_OT_SHAPE_NORMALIZATION_MODE_DECOMPOSED;
+      mode = HB_OT_SHAPE_NORMALIZATION_MODE_COMPOSED_DIACRITICS;
+    else
+      mode = HB_OT_SHAPE_NORMALIZATION_MODE_COMPOSED_DIACRITICS;
+  }
+
   const hb_ot_shape_normalize_context_t c = {
     plan,
     buffer,
@@ -320,7 +330,7 @@ _hb_ot_shape_normalize (const hb_ot_shape_plan_t *plan,
 
   buffer->clear_output ();
   count = buffer->len;
-  for (buffer->idx = 0; buffer->idx < count && !buffer->in_error;)
+  for (buffer->idx = 0; buffer->idx < count && buffer->successful;)
   {
     unsigned int end;
     for (end = buffer->idx + 1; end < count; end++)
@@ -358,65 +368,6 @@ _hb_ot_shape_normalize (const hb_ot_shape_plan_t *plan,
 
     i = end;
   }
-
-
-  if (mode == HB_OT_SHAPE_NORMALIZATION_MODE_NONE ||
-      mode == HB_OT_SHAPE_NORMALIZATION_MODE_DECOMPOSED)
-    return;
-
-  /* Third round, recompose */
-
-  /* As noted in the comment earlier, we don't try to combine
-   * ccc=0 chars with their previous Starter. */
-
-  buffer->clear_output ();
-  count = buffer->len;
-  unsigned int starter = 0;
-  buffer->next_glyph ();
-  while (buffer->idx < count && !buffer->in_error)
-  {
-    hb_codepoint_t composed, glyph;
-    if (/* We don't try to compose a non-mark character with it's preceding starter.
-	 * This is both an optimization to avoid trying to compose every two neighboring
-	 * glyphs in most scripts AND a desired feature for Hangul.  Apparently Hangul
-	 * fonts are not designed to mix-and-match pre-composed syllables and Jamo. */
-	HB_UNICODE_GENERAL_CATEGORY_IS_MARK (_hb_glyph_info_get_general_category (&buffer->cur())))
-    {
-      if (/* If there's anything between the starter and this char, they should have CCC
-	   * smaller than this character's. */
-	  (starter == buffer->out_len - 1 ||
-	   info_cc (buffer->prev()) < info_cc (buffer->cur())) &&
-	  /* And compose. */
-	  c.compose (&c,
-		     buffer->out_info[starter].codepoint,
-		     buffer->cur().codepoint,
-		     &composed) &&
-	  /* And the font has glyph for the composite. */
-	  font->get_nominal_glyph (composed, &glyph))
-      {
-	/* Composes. */
-	buffer->next_glyph (); /* Copy to out-buffer. */
-	if (unlikely (buffer->in_error))
-	  return;
-	buffer->merge_out_clusters (starter, buffer->out_len);
-	buffer->out_len--; /* Remove the second composable. */
-	/* Modify starter and carry on. */
-	buffer->out_info[starter].codepoint = composed;
-	buffer->out_info[starter].glyph_index() = glyph;
-	_hb_glyph_info_set_unicode_props (&buffer->out_info[starter], buffer);
-
-	continue;
-      }
-    }
-
-    /* Blocked, or doesn't compose. */
-    buffer->next_glyph ();
-
-    if (info_cc (buffer->prev()) == 0)
-      starter = buffer->out_len - 1;
-  }
-  buffer->swap_buffers ();
-
   if (buffer->scratch_flags & HB_BUFFER_SCRATCH_FLAG_HAS_CGJ)
   {
     /* For all CGJ, check if it prevented any reordering at all.
@@ -429,5 +380,63 @@ _hb_ot_shape_normalize (const hb_ot_shape_plan_t *plan,
       {
 	_hb_glyph_info_unhide (&buffer->info[i]);
       }
+  }
+
+
+  /* Third round, recompose */
+
+  if (mode == HB_OT_SHAPE_NORMALIZATION_MODE_COMPOSED_DIACRITICS ||
+      mode == HB_OT_SHAPE_NORMALIZATION_MODE_COMPOSED_DIACRITICS_NO_SHORT_CIRCUIT)
+  {
+    /* As noted in the comment earlier, we don't try to combine
+     * ccc=0 chars with their previous Starter. */
+
+    buffer->clear_output ();
+    count = buffer->len;
+    unsigned int starter = 0;
+    buffer->next_glyph ();
+    while (buffer->idx < count && buffer->successful)
+    {
+      hb_codepoint_t composed, glyph;
+      if (/* We don't try to compose a non-mark character with it's preceding starter.
+	   * This is both an optimization to avoid trying to compose every two neighboring
+	   * glyphs in most scripts AND a desired feature for Hangul.  Apparently Hangul
+	   * fonts are not designed to mix-and-match pre-composed syllables and Jamo. */
+	  HB_UNICODE_GENERAL_CATEGORY_IS_MARK (_hb_glyph_info_get_general_category (&buffer->cur())))
+      {
+	if (/* If there's anything between the starter and this char, they should have CCC
+	     * smaller than this character's. */
+	    (starter == buffer->out_len - 1 ||
+	     info_cc (buffer->prev()) < info_cc (buffer->cur())) &&
+	    /* And compose. */
+	    c.compose (&c,
+		       buffer->out_info[starter].codepoint,
+		       buffer->cur().codepoint,
+		       &composed) &&
+	    /* And the font has glyph for the composite. */
+	    font->get_nominal_glyph (composed, &glyph))
+	{
+	  /* Composes. */
+	  buffer->next_glyph (); /* Copy to out-buffer. */
+	  if (unlikely (!buffer->successful))
+	    return;
+	  buffer->merge_out_clusters (starter, buffer->out_len);
+	  buffer->out_len--; /* Remove the second composable. */
+	  /* Modify starter and carry on. */
+	  buffer->out_info[starter].codepoint = composed;
+	  buffer->out_info[starter].glyph_index() = glyph;
+	  _hb_glyph_info_set_unicode_props (&buffer->out_info[starter], buffer);
+
+	  continue;
+	}
+      }
+
+      /* Blocked, or doesn't compose. */
+      buffer->next_glyph ();
+
+      if (info_cc (buffer->prev()) == 0)
+	starter = buffer->out_len - 1;
+    }
+    buffer->swap_buffers ();
   }
 }

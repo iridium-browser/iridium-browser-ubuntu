@@ -24,6 +24,7 @@
 #include "base/trace_event/trace_event.h"
 #include "base/version.h"
 #include "build/build_config.h"
+#include "components/language/core/browser/locale_util.h"
 #include "components/prefs/pref_service.h"
 #include "components/variations/field_trial_config/field_trial_util.h"
 #include "components/variations/platform_field_trials.h"
@@ -35,6 +36,8 @@
 #include "components/variations/variations_seed_processor.h"
 #include "components/variations/variations_switches.h"
 #include "ui/base/device_form_factor.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/resource/resource_bundle.h"
 
 namespace variations {
 namespace {
@@ -156,11 +159,14 @@ void ExitWithMessage(const std::string& message) {
 VariationsFieldTrialCreator::VariationsFieldTrialCreator(
     PrefService* local_state,
     VariationsServiceClient* client,
+    std::unique_ptr<VariationsSeedStore> seed_store,
     const UIStringOverrider& ui_string_overrider)
     : client_(client),
       ui_string_overrider_(ui_string_overrider),
-      seed_store_(local_state),
+      seed_store_(std::move(seed_store)),
       create_trials_from_seed_called_(false),
+      application_locale_(
+          language::GetApplicationLocale(seed_store_->local_state())),
       has_platform_override_(false),
       platform_override_(Study::PLATFORM_WINDOWS) {}
 
@@ -205,14 +211,15 @@ bool VariationsFieldTrialCreator::CreateTrialsFromSeed(
   UMA_HISTOGRAM_BOOLEAN("Variations.SafeMode.FellBackToSafeMode2",
                         run_in_safe_mode);
 
-  // Note that passing |&ui_string_overrider_| via base::Unretained below is
-  // safe because the callback is executed synchronously. It is not possible to
-  // pass UIStringOverrider directly to VariationSeedProcessor as the variations
-  // component should not depend on //ui/base.
+  // Note that passing base::Unretained(this) below is safe because the callback
+  // is executed synchronously. It is not possible to pass UIStringOverrider
+  // directly to VariationsSeedProcessor (which is in components/variations and
+  // not components/variations/service) as the variations component should not
+  // depend on //ui/base.
   VariationsSeedProcessor().CreateTrialsFromSeed(
       seed, *client_filterable_state,
-      base::Bind(&UIStringOverrider::OverrideUIString,
-                 base::Unretained(&ui_string_overrider_)),
+      base::BindRepeating(&VariationsFieldTrialCreator::OverrideUIString,
+                          base::Unretained(this)),
       low_entropy_provider.get(), feature_list);
 
   // Store into the |safe_seed_manager| the combined server and client data used
@@ -222,7 +229,7 @@ bool VariationsFieldTrialCreator::CreateTrialsFromSeed(
   if (!run_in_safe_mode) {
     safe_seed_manager->SetActiveSeedState(seed_data, base64_seed_signature,
                                           std::move(client_filterable_state),
-                                          seed_store_.GetLastFetchTime());
+                                          seed_store_->GetLastFetchTime());
   }
 
   UMA_HISTOGRAM_TIMES("Variations.SeedProcessingTime",
@@ -235,14 +242,12 @@ VariationsFieldTrialCreator::GetClientFilterableStateForVersion(
     const base::Version& version) {
   std::unique_ptr<ClientFilterableState> state =
       std::make_unique<ClientFilterableState>();
-  state->locale = client_->GetApplicationLocale();
+  state->locale = application_locale_;
   state->reference_date = GetReferenceDateForExpiryChecks(local_state());
   state->version = version;
   state->channel = GetChannelForVariations(client_->GetChannel());
   state->form_factor = GetCurrentFormFactor();
-  state->platform = (has_platform_override_)
-                        ? platform_override_
-                        : ClientFilterableState::GetCurrentPlatform();
+  state->platform = GetPlatform();
   state->hardware_class = GetShortHardwareClass();
 #if defined(OS_ANDROID)
   // This is set on Android only currently, because the IsLowEndDevice() API
@@ -251,6 +256,8 @@ VariationsFieldTrialCreator::GetClientFilterableStateForVersion(
   // evaluated, that field trial would not be able to apply for this case.
   state->is_low_end_device = base::SysInfo::IsLowEndDevice();
 #endif
+  state->supports_permanent_consistency =
+      client_->GetSupportsPermanentConsistency();
   state->session_consistency_country = GetLatestCountry();
   state->permanent_consistency_country = LoadPermanentConsistencyCountry(
       version, state->session_consistency_country);
@@ -348,6 +355,18 @@ void VariationsFieldTrialCreator::OverrideVariationsPlatform(
   platform_override_ = platform_override;
 }
 
+void VariationsFieldTrialCreator::OverrideCachedUIStrings() {
+  DCHECK(ui::ResourceBundle::HasSharedInstance());
+
+  ui::ResourceBundle* bundle = &ui::ResourceBundle::GetSharedInstance();
+  bundle->CheckCanOverrideStringResources();
+
+  for (auto const& it : overridden_strings_map_)
+    bundle->OverrideLocaleStringResource(it.first, it.second);
+
+  overridden_strings_map_.clear();
+}
+
 // static
 std::string VariationsFieldTrialCreator::GetShortHardwareClass() {
 #if defined(OS_CHROMEOS)
@@ -370,11 +389,11 @@ bool VariationsFieldTrialCreator::LoadSeed(VariationsSeed* seed,
   if (!GetSeedStore()->LoadSeed(seed, seed_data, base64_signature))
     return false;
 
-  const base::Time last_fetch_time = seed_store_.GetLastFetchTime();
+  const base::Time last_fetch_time = seed_store_->GetLastFetchTime();
   if (last_fetch_time.is_null()) {
     // If the last fetch time is missing and we have a seed, then this must be
     // the first run of Chrome. Store the current time as the last fetch time.
-    seed_store_.RecordLastFetchTime();
+    seed_store_->RecordLastFetchTime();
     RecordCreateTrialsSeedExpiry(VARIATIONS_SEED_EXPIRY_FETCH_TIME_MISSING);
     return true;
   }
@@ -479,18 +498,22 @@ bool VariationsFieldTrialCreator::SetupFieldTrials(
       command_line->GetSwitchValueASCII(kEnableFeatures),
       command_line->GetSwitchValueASCII(kDisableFeatures));
 
+  bool used_testing_config = false;
 #if defined(FIELDTRIAL_TESTING_ENABLED)
   if (!command_line->HasSwitch(switches::kDisableFieldTrialTestingConfig) &&
       !command_line->HasSwitch(::switches::kForceFieldTrials) &&
       !command_line->HasSwitch(switches::kVariationsServerURL)) {
-    AssociateDefaultFieldTrialConfig(feature_list.get());
+    AssociateDefaultFieldTrialConfig(feature_list.get(), GetPlatform());
+    used_testing_config = true;
   }
 #endif  // defined(FIELDTRIAL_TESTING_ENABLED)
+  bool used_seed = false;
+  if (!used_testing_config) {
+    used_seed = CreateTrialsFromSeed(std::move(low_entropy_provider),
+                                     feature_list.get(), safe_seed_manager);
+  }
 
-  bool has_seed = CreateTrialsFromSeed(std::move(low_entropy_provider),
-                                       feature_list.get(), safe_seed_manager);
-
-  platform_field_trials->SetupFeatureControllingFieldTrials(has_seed,
+  platform_field_trials->SetupFeatureControllingFieldTrials(used_seed,
                                                             feature_list.get());
 
   base::FeatureList::SetInstance(std::move(feature_list));
@@ -498,11 +521,38 @@ bool VariationsFieldTrialCreator::SetupFieldTrials(
   // This must be called after |local_state_| is initialized.
   platform_field_trials->SetupFieldTrials();
 
-  return has_seed;
+  return used_seed;
+}
+
+void VariationsFieldTrialCreator::OverrideUIString(uint32_t resource_hash,
+                                                   const base::string16& str) {
+  int resource_id = ui_string_overrider_.GetResourceIndex(resource_hash);
+  if (resource_id == -1)
+    return;
+
+  // This function may be called before the resource bundle is initialized. So
+  // we cache the UI strings and override them after the full browser starts.
+  if (!ui::ResourceBundle::HasSharedInstance()) {
+    overridden_strings_map_[resource_id] = str;
+    return;
+  }
+
+  ui::ResourceBundle::GetSharedInstance().OverrideLocaleStringResource(
+      resource_id, str);
+}
+
+bool VariationsFieldTrialCreator::IsOverrideResourceMapEmpty() {
+  return overridden_strings_map_.empty();
 }
 
 VariationsSeedStore* VariationsFieldTrialCreator::GetSeedStore() {
-  return &seed_store_;
+  return seed_store_.get();
+}
+
+Study::Platform VariationsFieldTrialCreator::GetPlatform() {
+  if (has_platform_override_)
+    return platform_override_;
+  return ClientFilterableState::GetCurrentPlatform();
 }
 
 }  // namespace variations

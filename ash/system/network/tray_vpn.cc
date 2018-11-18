@@ -15,6 +15,7 @@
 #include "ash/system/network/vpn_list.h"
 #include "ash/system/network/vpn_list_view.h"
 #include "ash/system/tray/system_tray.h"
+#include "ash/system/tray/system_tray_item_detailed_view_delegate.h"
 #include "ash/system/tray/tray_constants.h"
 #include "ash/system/tray/tray_item_more.h"
 #include "ash/system/tray/tray_popup_item_style.h"
@@ -141,9 +142,11 @@ class VpnDefaultView : public TrayItemMore,
 }  // namespace tray
 
 TrayVPN::TrayVPN(SystemTray* system_tray)
-    : SystemTrayItem(system_tray, UMA_VPN),
+    : SystemTrayItem(system_tray, SystemTrayItemUmaType::UMA_VPN),
       default_(nullptr),
-      detailed_(nullptr) {
+      detailed_(nullptr),
+      detailed_view_delegate_(
+          std::make_unique<SystemTrayItemDetailedViewDelegate>(this)) {
   network_state_observer_.reset(new TrayNetworkStateObserver(this));
 }
 
@@ -173,7 +176,7 @@ views::View* TrayVPN::CreateDetailedView(LoginStatus status) {
 
   Shell::Get()->metrics()->RecordUserMetricsAction(
       UMA_STATUS_AREA_DETAILED_VPN_VIEW);
-  detailed_ = new tray::VPNListView(this, status);
+  detailed_ = new tray::VPNListView(detailed_view_delegate_.get(), status);
   detailed_->Init();
   return detailed_;
 }

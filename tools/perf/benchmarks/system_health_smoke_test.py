@@ -35,44 +35,39 @@ def GetSystemHealthBenchmarksToSmokeTest():
 
 _DISABLED_TESTS = frozenset({
   # crbug.com/733427
-  'benchmarks.system_health_smoke_test.SystemHealthBenchmarkSmokeTest.system_health.memory_mobile.browse:news:cnn',  # pylint: disable=line-too-long
-  # cburg.com/721549
-  'benchmarks.system_health_smoke_test.SystemHealthBenchmarkSmokeTest.system_health.memory_mobile.browse:news:toi',  # pylint: disable=line-too-long
+  'benchmarks.system_health_smoke_test.SystemHealthBenchmarkSmokeTest.system_health.memory_mobile/browse:news:cnn',  # pylint: disable=line-too-long
   # crbug.com/637230
-  'benchmarks.system_health_smoke_test.SystemHealthBenchmarkSmokeTest.system_health.memory_desktop.browse:news:cnn',  # pylint: disable=line-too-long
+  'benchmarks.system_health_smoke_test.SystemHealthBenchmarkSmokeTest.system_health.memory_desktop/browse:news:cnn',  # pylint: disable=line-too-long
   # Permenently disabled from smoke test for being long-running.
-  'benchmarks.system_health_smoke_test.SystemHealthBenchmarkSmokeTest.system_health.memory_mobile.long_running:tools:gmail-foreground',  # pylint: disable=line-too-long
-  'benchmarks.system_health_smoke_test.SystemHealthBenchmarkSmokeTest.system_health.memory_mobile.long_running:tools:gmail-background',  # pylint: disable=line-too-long
-  'benchmarks.system_health_smoke_test.SystemHealthBenchmarkSmokeTest.system_health.memory_desktop.long_running:tools:gmail-foreground',  # pylint: disable=line-too-long
-  'benchmarks.system_health_smoke_test.SystemHealthBenchmarkSmokeTest.system_health.memory_desktop.long_running:tools:gmail-background',  # pylint: disable=line-too-long
+  'benchmarks.system_health_smoke_test.SystemHealthBenchmarkSmokeTest.system_health.memory_mobile/long_running:tools:gmail-foreground',  # pylint: disable=line-too-long
+  'benchmarks.system_health_smoke_test.SystemHealthBenchmarkSmokeTest.system_health.memory_mobile/long_running:tools:gmail-background',  # pylint: disable=line-too-long
+  'benchmarks.system_health_smoke_test.SystemHealthBenchmarkSmokeTest.system_health.memory_desktop/long_running:tools:gmail-foreground',  # pylint: disable=line-too-long
+  'benchmarks.system_health_smoke_test.SystemHealthBenchmarkSmokeTest.system_health.memory_desktop/long_running:tools:gmail-background',  # pylint: disable=line-too-long
 
   # crbug.com/769263
-  'benchmarks.system_health_smoke_test.SystemHealthBenchmarkSmokeTest.system_health.memory_desktop.play:media:soundcloud',  # pylint: disable=line-too-long
-
-  # crbug.com/769809
-  'benchmarks.system_health_smoke_test.SystemHealthBenchmarkSmokeTest.system_health.memory_desktop.browse_accessibility:tools:gmail_compose', # pylint: disable=line-too-long
+  'benchmarks.system_health_smoke_test.SystemHealthBenchmarkSmokeTest.system_health.memory_desktop/play:media:soundcloud',  # pylint: disable=line-too-long
 
   # crbug.com/
-  'benchmarks.system_health_smoke_test.SystemHealthBenchmarkSmokeTest.system_health.memory_desktop.browse:news:nytimes',  # pylint: disable=line-too-long
+  'benchmarks.system_health_smoke_test.SystemHealthBenchmarkSmokeTest.system_health.memory_desktop/browse:news:nytimes',  # pylint: disable=line-too-long
 
   # crbug.com/688190
-  'benchmarks.system_health_smoke_test.SystemHealthBenchmarkSmokeTest.system_health.memory_mobile.browse:news:washingtonpost',  # pylint: disable=line-too-long
+  'benchmarks.system_health_smoke_test.SystemHealthBenchmarkSmokeTest.system_health.memory_mobile/browse:news:washingtonpost',  # pylint: disable=line-too-long
 
   # crbug.com/696824
-  'benchmarks.system_health_smoke_test.SystemHealthBenchmarkSmokeTest.system_health.memory_desktop.load:news:qq',  # pylint: disable=line-too-long
+  'benchmarks.system_health_smoke_test.SystemHealthBenchmarkSmokeTest.system_health.memory_desktop/load:news:qq',  # pylint: disable=line-too-long
 
   # crbug.com/698006
-  'benchmarks.system_health_smoke_test.SystemHealthBenchmarkSmokeTest.system_health.memory_desktop.load:tools:drive',  # pylint: disable=line-too-long
-  'benchmarks.system_health_smoke_test.SystemHealthBenchmarkSmokeTest.system_health.memory_desktop.load:tools:gmail',  # pylint: disable=line-too-long
+  'benchmarks.system_health_smoke_test.SystemHealthBenchmarkSmokeTest.system_health.memory_desktop/load:tools:drive',  # pylint: disable=line-too-long
+  'benchmarks.system_health_smoke_test.SystemHealthBenchmarkSmokeTest.system_health.memory_desktop/load:tools:gmail',  # pylint: disable=line-too-long
 
   # crbug.com/725386
-  'benchmarks.system_health_smoke_test.SystemHealthBenchmarkSmokeTest.system_health.memory_desktop.browse:social:twitter', # pylint: disable=line-too-long
-
-  # crbug.com/799734
-  'benchmarks.system_health_smoke_test.SystemHealthBenchmarkSmokeTest.system_health.memory_desktop.browse:media:tumblr', # pylint: disable=line-too-long
+  'benchmarks.system_health_smoke_test.SystemHealthBenchmarkSmokeTest.system_health.memory_desktop/browse:social:twitter', # pylint: disable=line-too-long
 
   # crbug.com/816482
-  'benchmarks.system_health_smoke_test.SystemHealthBenchmarkSmokeTest.system_health.memory_desktop.load:news:nytimes', # pylint: disable=line-too-long
+  'benchmarks.system_health_smoke_test.SystemHealthBenchmarkSmokeTest.system_health.memory_desktop/load:news:nytimes', # pylint: disable=line-too-long
+
+  # crbug.com/885320
+  'benchmarks.system_health_smoke_test.SystemHealthBenchmarkSmokeTest.system_health.memory_desktop/browse:search:google:2018', # pylint: disable=line-too-long
 })
 
 
@@ -130,8 +125,8 @@ def _GenerateSmokeTestCase(benchmark_class, story_to_smoke_test):
 
   # We attach the test method to SystemHealthBenchmarkSmokeTest dynamically
   # so that we can set the test method name to include
-  # '<benchmark class name>.<story name>'.
-  test_method_name = '%s.%s' % (
+  # '<benchmark class name>/<story name>'.
+  test_method_name = '%s/%s' % (
       benchmark_class.Name(), story_to_smoke_test.name)
 
   class SystemHealthBenchmarkSmokeTest(unittest.TestCase):
@@ -186,7 +181,9 @@ def load_tests(loader, standard_tests, pattern):
     # Prefetch WPR archive needed by the stories set to avoid race condition
     # when feching them when tests are run in parallel.
     # See crbug.com/700426 for more details.
-    stories_set.wpr_archive_info.DownloadArchivesIfNeeded()
+    story_names = [s.name for s in stories_set if not s.is_local]
+    stories_set.wpr_archive_info.DownloadArchivesIfNeeded(
+        story_names=story_names)
 
     for story_to_smoke_test in stories_set.stories:
       suite.addTest(

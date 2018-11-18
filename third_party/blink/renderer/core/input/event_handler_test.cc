@@ -8,6 +8,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/range.h"
+#include "third_party/blink/renderer/core/editing/editing_behavior.h"
 #include "third_party/blink/renderer/core/editing/editor.h"
 #include "third_party/blink/renderer/core/editing/ephemeral_range.h"
 #include "third_party/blink/renderer/core/editing/frame_selection.h"
@@ -24,9 +25,11 @@
 #include "third_party/blink/renderer/core/loader/empty_clients.h"
 #include "third_party/blink/renderer/core/page/autoscroll_controller.h"
 #include "third_party/blink/renderer/core/page/page.h"
+#include "third_party/blink/renderer/core/paint/paint_layer_scrollable_area.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_request.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_test.h"
+#include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 
 namespace blink {
 
@@ -44,7 +47,7 @@ class TapEventBuilder : public WebGestureEvent {
   TapEventBuilder(FloatPoint position, int tap_count)
       : WebGestureEvent(WebInputEvent::kGestureTap,
                         WebInputEvent::kNoModifiers,
-                        CurrentTimeTicksInSeconds(),
+                        CurrentTimeTicks(),
                         kWebGestureDeviceTouchscreen) {
     SetPositionInWidget(position);
     SetPositionInScreen(position);
@@ -55,12 +58,42 @@ class TapEventBuilder : public WebGestureEvent {
   }
 };
 
+class TapDownEventBuilder : public WebGestureEvent {
+ public:
+  TapDownEventBuilder(FloatPoint position)
+      : WebGestureEvent(WebInputEvent::kGestureTapDown,
+                        WebInputEvent::kNoModifiers,
+                        CurrentTimeTicks(),
+                        kWebGestureDeviceTouchscreen) {
+    SetPositionInWidget(position);
+    SetPositionInScreen(position);
+    data.tap_down.width = 5;
+    data.tap_down.height = 5;
+    frame_scale_ = 1;
+  }
+};
+
+class ShowPressEventBuilder : public WebGestureEvent {
+ public:
+  ShowPressEventBuilder(FloatPoint position)
+      : WebGestureEvent(WebInputEvent::kGestureShowPress,
+                        WebInputEvent::kNoModifiers,
+                        CurrentTimeTicks(),
+                        kWebGestureDeviceTouchscreen) {
+    SetPositionInWidget(position);
+    SetPositionInScreen(position);
+    data.show_press.width = 5;
+    data.show_press.height = 5;
+    frame_scale_ = 1;
+  }
+};
+
 class LongPressEventBuilder : public WebGestureEvent {
  public:
   LongPressEventBuilder(FloatPoint position)
       : WebGestureEvent(WebInputEvent::kGestureLongPress,
                         WebInputEvent::kNoModifiers,
-                        CurrentTimeTicksInSeconds(),
+                        CurrentTimeTicks(),
                         kWebGestureDeviceTouchscreen) {
     SetPositionInWidget(position);
     SetPositionInScreen(position);
@@ -77,7 +110,7 @@ class MousePressEventBuilder : public WebMouseEvent {
                          WebMouseEvent::Button button_param)
       : WebMouseEvent(WebInputEvent::kMouseDown,
                       WebInputEvent::kNoModifiers,
-                      CurrentTimeTicksInSeconds()) {
+                      CurrentTimeTicks()) {
     click_count = click_count_param;
     button = button_param;
     SetPositionInWidget(position_param.X(), position_param.Y());
@@ -120,8 +153,8 @@ TEST_F(EventHandlerTest, dragSelectionAfterScroll) {
       "</div>");
 
   LocalFrameView* frame_view = GetDocument().View();
-  frame_view->LayoutViewportScrollableArea()->SetScrollOffset(
-      ScrollOffset(0, 400), kProgrammaticScroll);
+  frame_view->LayoutViewport()->SetScrollOffset(ScrollOffset(0, 400),
+                                                kProgrammaticScroll);
 
   WebMouseEvent mouse_down_event(WebInputEvent::kMouseDown, WebFloatPoint(0, 0),
                                  WebFloatPoint(100, 200),
@@ -147,9 +180,8 @@ TEST_F(EventHandlerTest, dragSelectionAfterScroll) {
   GetDocument().GetFrame()->GetEventHandler().HandleMouseMoveEvent(
       mouse_move_event, Vector<WebMouseEvent>());
 
-  GetPage().GetAutoscrollController().Animate(WTF::CurrentTimeTicksInSeconds());
-  GetPage().Animator().ServiceScriptedAnimations(
-      WTF::CurrentTimeTicksInSeconds());
+  GetPage().GetAutoscrollController().Animate();
+  GetPage().Animator().ServiceScriptedAnimations(WTF::CurrentTimeTicks());
 
   WebMouseEvent mouse_up_event(
       WebMouseEvent::kMouseUp, WebFloatPoint(100, 50), WebFloatPoint(200, 250),
@@ -317,9 +349,10 @@ TEST_F(EventHandlerTest, draggedSVGImagePositionTest) {
 
 TEST_F(EventHandlerTest, HitOnNothingDoesNotShowIBeam) {
   SetHtmlInnerHTML("");
+  HitTestLocation location((LayoutPoint(10, 10)));
   HitTestResult hit =
-      GetDocument().GetFrame()->GetEventHandler().HitTestResultAtPoint(
-          LayoutPoint(10, 10));
+      GetDocument().GetFrame()->GetEventHandler().HitTestResultAtLocation(
+          location);
   EXPECT_FALSE(
       GetDocument().GetFrame()->GetEventHandler().ShouldShowIBeamForNode(
           GetDocument().body(), hit));
@@ -328,10 +361,10 @@ TEST_F(EventHandlerTest, HitOnNothingDoesNotShowIBeam) {
 TEST_F(EventHandlerTest, HitOnTextShowsIBeam) {
   SetHtmlInnerHTML("blabla");
   Node* const text = GetDocument().body()->firstChild();
-  LayoutPoint location =
-      text->GetLayoutObject()->FirstFragment().VisualRect().Center();
+  HitTestLocation location(
+      text->GetLayoutObject()->FirstFragment().VisualRect().Center());
   HitTestResult hit =
-      GetDocument().GetFrame()->GetEventHandler().HitTestResultAtPoint(
+      GetDocument().GetFrame()->GetEventHandler().HitTestResultAtLocation(
           location);
   EXPECT_TRUE(text->CanStartSelection());
   EXPECT_TRUE(
@@ -342,10 +375,10 @@ TEST_F(EventHandlerTest, HitOnTextShowsIBeam) {
 TEST_F(EventHandlerTest, HitOnUserSelectNoneDoesNotShowIBeam) {
   SetHtmlInnerHTML("<span style='user-select: none'>blabla</span>");
   Node* const text = GetDocument().body()->firstChild()->firstChild();
-  LayoutPoint location =
-      text->GetLayoutObject()->FirstFragment().VisualRect().Center();
+  HitTestLocation location(
+      text->GetLayoutObject()->FirstFragment().VisualRect().Center());
   HitTestResult hit =
-      GetDocument().GetFrame()->GetEventHandler().HitTestResultAtPoint(
+      GetDocument().GetFrame()->GetEventHandler().HitTestResultAtLocation(
           location);
   EXPECT_FALSE(text->CanStartSelection());
   EXPECT_FALSE(
@@ -359,10 +392,10 @@ TEST_F(EventHandlerTest, ShadowChildCanOverrideUserSelectNone) {
       "<span style='user-select: text' id='bla'>blabla</span>", "host");
 
   Node* const text = shadow_root->getElementById("bla")->firstChild();
-  LayoutPoint location =
-      text->GetLayoutObject()->FirstFragment().VisualRect().Center();
+  HitTestLocation location(
+      text->GetLayoutObject()->FirstFragment().VisualRect().Center());
   HitTestResult hit =
-      GetDocument().GetFrame()->GetEventHandler().HitTestResultAtPoint(
+      GetDocument().GetFrame()->GetEventHandler().HitTestResultAtLocation(
           location);
   EXPECT_TRUE(text->CanStartSelection());
   EXPECT_TRUE(
@@ -377,10 +410,10 @@ TEST_F(EventHandlerTest, UserSelectAllCanOverrideUserSelectNone) {
       "</div>");
   Node* const text =
       GetDocument().body()->firstChild()->firstChild()->firstChild();
-  LayoutPoint location =
-      text->GetLayoutObject()->FirstFragment().VisualRect().Center();
+  HitTestLocation location(
+      text->GetLayoutObject()->FirstFragment().VisualRect().Center());
   HitTestResult hit =
-      GetDocument().GetFrame()->GetEventHandler().HitTestResultAtPoint(
+      GetDocument().GetFrame()->GetEventHandler().HitTestResultAtLocation(
           location);
   EXPECT_TRUE(text->CanStartSelection());
   EXPECT_TRUE(
@@ -395,10 +428,10 @@ TEST_F(EventHandlerTest, UserSelectNoneCanOverrideUserSelectAll) {
       "</div>");
   Node* const text =
       GetDocument().body()->firstChild()->firstChild()->firstChild();
-  LayoutPoint location =
-      text->GetLayoutObject()->FirstFragment().VisualRect().Center();
+  HitTestLocation location(
+      text->GetLayoutObject()->FirstFragment().VisualRect().Center());
   HitTestResult hit =
-      GetDocument().GetFrame()->GetEventHandler().HitTestResultAtPoint(
+      GetDocument().GetFrame()->GetEventHandler().HitTestResultAtLocation(
           location);
   EXPECT_FALSE(text->CanStartSelection());
   EXPECT_FALSE(
@@ -413,10 +446,10 @@ TEST_F(EventHandlerTest, UserSelectTextCanOverrideUserSelectNone) {
       "</div>");
   Node* const text =
       GetDocument().body()->firstChild()->firstChild()->firstChild();
-  LayoutPoint location =
-      text->GetLayoutObject()->FirstFragment().VisualRect().Center();
+  HitTestLocation location(
+      text->GetLayoutObject()->FirstFragment().VisualRect().Center());
   HitTestResult hit =
-      GetDocument().GetFrame()->GetEventHandler().HitTestResultAtPoint(
+      GetDocument().GetFrame()->GetEventHandler().HitTestResultAtLocation(
           location);
   EXPECT_TRUE(text->CanStartSelection());
   EXPECT_TRUE(
@@ -430,10 +463,10 @@ TEST_F(EventHandlerTest, UserSelectNoneCanOverrideUserSelectText) {
       "<span style='user-select: none'>blabla</span>"
       "</div>");
   Node* const text = GetDocument().body()->firstChild()->firstChild()->firstChild();
-  LayoutPoint location =
-      text->GetLayoutObject()->FirstFragment().VisualRect().Center();
+  HitTestLocation location(
+      text->GetLayoutObject()->FirstFragment().VisualRect().Center());
   HitTestResult hit =
-      GetDocument().GetFrame()->GetEventHandler().HitTestResultAtPoint(
+      GetDocument().GetFrame()->GetEventHandler().HitTestResultAtLocation(
           location);
   EXPECT_FALSE(text->CanStartSelection());
   EXPECT_FALSE(
@@ -447,10 +480,10 @@ TEST_F(EventHandlerTest, ShadowChildCanOverrideUserSelectText) {
       "<span style='user-select: none' id='bla'>blabla</span>", "host");
 
   Node* const text = shadow_root->getElementById("bla")->firstChild();
-  LayoutPoint location =
-      text->GetLayoutObject()->FirstFragment().VisualRect().Center();
+  HitTestLocation location(
+      text->GetLayoutObject()->FirstFragment().VisualRect().Center());
   HitTestResult hit =
-      GetDocument().GetFrame()->GetEventHandler().HitTestResultAtPoint(
+      GetDocument().GetFrame()->GetEventHandler().HitTestResultAtLocation(
           location);
   EXPECT_FALSE(text->CanStartSelection());
   EXPECT_FALSE(
@@ -462,10 +495,10 @@ TEST_F(EventHandlerTest, InputFieldsCanStartSelection) {
   SetHtmlInnerHTML("<input value='blabla'>");
   auto* const field = ToHTMLInputElement(GetDocument().body()->firstChild());
   Element* const text = field->InnerEditorElement();
-  LayoutPoint location =
-      text->GetLayoutObject()->FirstFragment().VisualRect().Center();
+  HitTestLocation location(
+      text->GetLayoutObject()->FirstFragment().VisualRect().Center());
   HitTestResult hit =
-      GetDocument().GetFrame()->GetEventHandler().HitTestResultAtPoint(
+      GetDocument().GetFrame()->GetEventHandler().HitTestResultAtLocation(
           location);
   EXPECT_TRUE(text->CanStartSelection());
   EXPECT_TRUE(
@@ -482,10 +515,10 @@ TEST_F(EventHandlerTest, ReadOnlyInputDoesNotInheritUserSelect) {
       ToHTMLInputElement(GetDocument().getElementById("sample"));
   Node* const text = input->InnerEditorElement()->firstChild();
 
-  LayoutPoint location =
-      text->GetLayoutObject()->FirstFragment().VisualRect().Center();
+  HitTestLocation location(
+      text->GetLayoutObject()->FirstFragment().VisualRect().Center());
   HitTestResult hit =
-      GetDocument().GetFrame()->GetEventHandler().HitTestResultAtPoint(
+      GetDocument().GetFrame()->GetEventHandler().HitTestResultAtLocation(
           location);
   EXPECT_TRUE(text->CanStartSelection());
   EXPECT_TRUE(
@@ -496,10 +529,10 @@ TEST_F(EventHandlerTest, ReadOnlyInputDoesNotInheritUserSelect) {
 TEST_F(EventHandlerTest, ImagesCannotStartSelection) {
   SetHtmlInnerHTML("<img>");
   Element* const img = ToElement(GetDocument().body()->firstChild());
-  LayoutPoint location =
-      img->GetLayoutObject()->FirstFragment().VisualRect().Center();
+  HitTestLocation location(
+      img->GetLayoutObject()->FirstFragment().VisualRect().Center());
   HitTestResult hit =
-      GetDocument().GetFrame()->GetEventHandler().HitTestResultAtPoint(
+      GetDocument().GetFrame()->GetEventHandler().HitTestResultAtLocation(
           location);
   EXPECT_FALSE(img->CanStartSelection());
   EXPECT_FALSE(
@@ -510,24 +543,24 @@ TEST_F(EventHandlerTest, ImagesCannotStartSelection) {
 TEST_F(EventHandlerTest, AnchorTextCannotStartSelection) {
   SetHtmlInnerHTML("<a href='bala'>link text</a>");
   Node* const link = GetDocument().body()->firstChild();
-  LayoutPoint location =
-      link->GetLayoutObject()->FirstFragment().VisualRect().Center();
-  HitTestResult hit =
-      GetDocument().GetFrame()->GetEventHandler().HitTestResultAtPoint(
+  HitTestLocation location(
+      link->GetLayoutObject()->FirstFragment().VisualRect().Center());
+  HitTestResult result =
+      GetDocument().GetFrame()->GetEventHandler().HitTestResultAtLocation(
           location);
   Node* const text = link->firstChild();
   EXPECT_FALSE(text->CanStartSelection());
-  EXPECT_TRUE(hit.IsOverLink());
+  EXPECT_TRUE(result.IsOverLink());
   // ShouldShowIBeamForNode() returns |cursor: auto|'s value.
   // In https://github.com/w3c/csswg-drafts/issues/1598 it was decided that:
   // a { cursor: auto } /* gives I-beam over links */
   EXPECT_TRUE(
-      GetDocument().GetFrame()->GetEventHandler().ShouldShowIBeamForNode(text,
-                                                                         hit));
+      GetDocument().GetFrame()->GetEventHandler().ShouldShowIBeamForNode(
+          text, result));
   EXPECT_EQ(GetDocument()
                 .GetFrame()
                 ->GetEventHandler()
-                .SelectCursor(hit)
+                .SelectCursor(location, result)
                 .GetCursor()
                 .GetType(),
             Cursor::Type::kHand);  // A hand signals ability to navigate.
@@ -536,21 +569,21 @@ TEST_F(EventHandlerTest, AnchorTextCannotStartSelection) {
 TEST_F(EventHandlerTest, EditableAnchorTextCanStartSelection) {
   SetHtmlInnerHTML("<a contenteditable='true' href='bala'>editable link</a>");
   Node* const link = GetDocument().body()->firstChild();
-  LayoutPoint location =
-      link->GetLayoutObject()->FirstFragment().VisualRect().Center();
-  HitTestResult hit =
-      GetDocument().GetFrame()->GetEventHandler().HitTestResultAtPoint(
+  HitTestLocation location(
+      link->GetLayoutObject()->FirstFragment().VisualRect().Center());
+  HitTestResult result =
+      GetDocument().GetFrame()->GetEventHandler().HitTestResultAtLocation(
           location);
   Node* const text = link->firstChild();
   EXPECT_TRUE(text->CanStartSelection());
-  EXPECT_TRUE(hit.IsOverLink());
+  EXPECT_TRUE(result.IsOverLink());
   EXPECT_TRUE(
-      GetDocument().GetFrame()->GetEventHandler().ShouldShowIBeamForNode(text,
-                                                                         hit));
+      GetDocument().GetFrame()->GetEventHandler().ShouldShowIBeamForNode(
+          text, result));
   EXPECT_EQ(GetDocument()
                 .GetFrame()
                 ->GetEventHandler()
-                .SelectCursor(hit)
+                .SelectCursor(location, result)
                 .GetCursor()
                 .GetType(),
             Cursor::Type::kIBeam);  // An I-beam signals editability.
@@ -576,7 +609,7 @@ TEST_F(EventHandlerTest, sendContextMenuEventWithHover) {
   WebMouseEvent mouse_down_event(
       WebMouseEvent::kMouseDown, WebFloatPoint(0, 0), WebFloatPoint(100, 200),
       WebPointerProperties::Button::kRight, 1,
-      WebInputEvent::Modifiers::kRightButtonDown, CurrentTimeTicksInSeconds());
+      WebInputEvent::Modifiers::kRightButtonDown, CurrentTimeTicks());
   mouse_down_event.SetFrameScale(1);
   EXPECT_EQ(WebInputEventResult::kHandledApplication,
             GetDocument().GetFrame()->GetEventHandler().SendContextMenuEvent(
@@ -733,7 +766,7 @@ TEST_F(EventHandlerTest, dragEndInNewDrag) {
   WebMouseEvent mouse_down_event(
       WebInputEvent::kMouseDown, WebFloatPoint(50, 50), WebFloatPoint(50, 50),
       WebPointerProperties::Button::kLeft, 1,
-      WebInputEvent::Modifiers::kLeftButtonDown, CurrentTimeTicksInSeconds());
+      WebInputEvent::Modifiers::kLeftButtonDown, CurrentTimeTicks());
   mouse_down_event.SetFrameScale(1);
   GetDocument().GetFrame()->GetEventHandler().HandleMousePressEvent(
       mouse_down_event);
@@ -741,7 +774,7 @@ TEST_F(EventHandlerTest, dragEndInNewDrag) {
   WebMouseEvent mouse_move_event(
       WebInputEvent::kMouseMove, WebFloatPoint(51, 50), WebFloatPoint(51, 50),
       WebPointerProperties::Button::kLeft, 1,
-      WebInputEvent::Modifiers::kLeftButtonDown, CurrentTimeTicksInSeconds());
+      WebInputEvent::Modifiers::kLeftButtonDown, CurrentTimeTicks());
   mouse_move_event.SetFrameScale(1);
   GetDocument().GetFrame()->GetEventHandler().HandleMouseMoveEvent(
       mouse_move_event, Vector<WebMouseEvent>());
@@ -752,10 +785,10 @@ TEST_F(EventHandlerTest, dragEndInNewDrag) {
   // this contrived test. Given the current code, it is unclear how the
   // dragSourceEndedAt() call could occur before a drag operation is started.
 
-  WebMouseEvent mouse_up_event(
-      WebInputEvent::kMouseUp, WebFloatPoint(100, 50), WebFloatPoint(200, 250),
-      WebPointerProperties::Button::kLeft, 1, WebInputEvent::kNoModifiers,
-      CurrentTimeTicksInSeconds());
+  WebMouseEvent mouse_up_event(WebInputEvent::kMouseUp, WebFloatPoint(100, 50),
+                               WebFloatPoint(200, 250),
+                               WebPointerProperties::Button::kLeft, 1,
+                               WebInputEvent::kNoModifiers, CurrentTimeTicks());
   mouse_up_event.SetFrameScale(1);
   GetDocument().GetFrame()->GetEventHandler().DragSourceEndedAt(
       mouse_up_event, kDragOperationNone);
@@ -844,7 +877,7 @@ TEST_F(EventHandlerTooltipTest, mouseLeaveClearsTooltip) {
   WebMouseEvent mouse_move_event(
       WebInputEvent::kMouseMove, WebFloatPoint(51, 50), WebFloatPoint(51, 50),
       WebPointerProperties::Button::kNoButton, 0, WebInputEvent::kNoModifiers,
-      CurrentTimeTicksInSeconds());
+      CurrentTimeTicks());
   mouse_move_event.SetFrameScale(1);
   GetDocument().GetFrame()->GetEventHandler().HandleMouseMoveEvent(
       mouse_move_event, Vector<WebMouseEvent>());
@@ -854,7 +887,7 @@ TEST_F(EventHandlerTooltipTest, mouseLeaveClearsTooltip) {
   WebMouseEvent mouse_leave_event(
       WebInputEvent::kMouseLeave, WebFloatPoint(0, 0), WebFloatPoint(0, 0),
       WebPointerProperties::Button::kNoButton, 0, WebInputEvent::kNoModifiers,
-      CurrentTimeTicksInSeconds());
+      CurrentTimeTicks());
   mouse_leave_event.SetFrameScale(1);
   GetDocument().GetFrame()->GetEventHandler().HandleMouseLeaveEvent(
       mouse_leave_event);
@@ -913,7 +946,7 @@ TEST_F(EventHandlerLatencyTest, NeedsUnbufferedInput) {
   WebMouseEvent mouse_press_event(
       WebInputEvent::kMouseDown, WebFloatPoint(51, 50), WebFloatPoint(51, 50),
       WebPointerProperties::Button::kLeft, 0, WebInputEvent::kNoModifiers,
-      CurrentTimeTicksInSeconds());
+      CurrentTimeTicks());
   mouse_press_event.SetFrameScale(1);
   GetDocument().GetFrame()->GetEventHandler().HandleMousePressEvent(
       mouse_press_event);
@@ -971,7 +1004,7 @@ TEST_F(EventHandlerNavigationTest, MouseButtonsNavigate) {
   WebMouseEvent mouse_back_event(
       WebInputEvent::kMouseUp, WebFloatPoint(51, 50), WebFloatPoint(51, 50),
       WebPointerProperties::Button::kBack, 0, WebInputEvent::kNoModifiers,
-      CurrentTimeTicksInSeconds());
+      CurrentTimeTicks());
   mouse_back_event.SetFrameScale(1);
   GetDocument().GetFrame()->GetEventHandler().HandleMouseReleaseEvent(
       mouse_back_event);
@@ -981,7 +1014,7 @@ TEST_F(EventHandlerNavigationTest, MouseButtonsNavigate) {
   WebMouseEvent mouse_forward_event(
       WebInputEvent::kMouseUp, WebFloatPoint(51, 50), WebFloatPoint(51, 50),
       WebPointerProperties::Button::kForward, 0, WebInputEvent::kNoModifiers,
-      CurrentTimeTicksInSeconds());
+      CurrentTimeTicks());
   mouse_forward_event.SetFrameScale(1);
   GetDocument().GetFrame()->GetEventHandler().HandleMouseReleaseEvent(
       mouse_forward_event);
@@ -1003,7 +1036,7 @@ TEST_F(EventHandlerNavigationTest, MouseButtonsDontNavigate) {
   WebMouseEvent mouse_back_event(
       WebInputEvent::kMouseUp, WebFloatPoint(51, 50), WebFloatPoint(51, 50),
       WebPointerProperties::Button::kBack, 0, WebInputEvent::kNoModifiers,
-      CurrentTimeTicksInSeconds());
+      CurrentTimeTicks());
   mouse_back_event.SetFrameScale(1);
   GetDocument().GetFrame()->GetEventHandler().HandleMouseReleaseEvent(
       mouse_back_event);
@@ -1013,7 +1046,7 @@ TEST_F(EventHandlerNavigationTest, MouseButtonsDontNavigate) {
   WebMouseEvent mouse_forward_event(
       WebInputEvent::kMouseUp, WebFloatPoint(51, 50), WebFloatPoint(51, 50),
       WebPointerProperties::Button::kForward, 0, WebInputEvent::kNoModifiers,
-      CurrentTimeTicksInSeconds());
+      CurrentTimeTicks());
   mouse_forward_event.SetFrameScale(1);
   GetDocument().GetFrame()->GetEventHandler().HandleMouseReleaseEvent(
       mouse_forward_event);
@@ -1153,6 +1186,70 @@ TEST_F(EventHandlerSimTest, CursorStyleBeforeStartDragging) {
                                      ->GetChromeClient()
                                      .LastSetCursorForTesting()
                                      .GetType());
+}
+
+// Ensure that tap on element in iframe should apply active state.
+TEST_F(EventHandlerSimTest, TapActiveInFrame) {
+  WebView().Resize(WebSize(800, 600));
+
+  SimRequest main_resource("https://example.com/test.html", "text/html");
+  SimRequest frame_resource("https://example.com/iframe.html", "text/html");
+  LoadURL("https://example.com/test.html");
+  main_resource.Complete(R"HTML(
+    <!DOCTYPE html>
+    <style>
+    body {
+      margin: 0;
+    }
+    iframe {
+      width: 200px;
+      height: 200px;
+    }
+    </style>
+    <iframe id='iframe' src='iframe.html'>
+    </iframe>
+  )HTML");
+
+  frame_resource.Complete(R"HTML(
+    <!DOCTYPE html>
+    <style>
+    body {
+      margin: 0;
+    }
+    div {
+      width: 100px;
+      height: 100px;
+    }
+    </style>
+    <div></div>
+  )HTML");
+  Compositor().BeginFrame();
+
+  auto* iframe_element =
+      ToHTMLIFrameElement(GetDocument().getElementById("iframe"));
+  Document* iframe_doc = iframe_element->contentDocument();
+
+  TapDownEventBuilder tap_down(FloatPoint(10, 10));
+  GetDocument().GetFrame()->GetEventHandler().HandleGestureEvent(tap_down);
+
+  ShowPressEventBuilder show_press(FloatPoint(10, 10));
+  GetDocument().GetFrame()->GetEventHandler().HandleGestureEvent(show_press);
+
+  // TapDown and ShowPress active the iframe.
+  EXPECT_TRUE(GetDocument().GetActiveElement());
+  EXPECT_TRUE(iframe_doc->GetActiveElement());
+
+  TapEventBuilder tap(FloatPoint(10, 10), 1);
+  GetDocument().GetFrame()->GetEventHandler().HandleGestureEvent(tap);
+
+  // Should still active.
+  EXPECT_TRUE(GetDocument().GetActiveElement());
+  EXPECT_TRUE(iframe_doc->GetActiveElement());
+
+  // The active will cancel after 15ms.
+  test::RunDelayedTasks(TimeDelta::FromSecondsD(0.2));
+  EXPECT_FALSE(GetDocument().GetActiveElement());
+  EXPECT_FALSE(iframe_doc->GetActiveElement());
 }
 
 }  // namespace blink

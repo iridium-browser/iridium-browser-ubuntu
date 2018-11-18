@@ -5,13 +5,16 @@
     "service_manager:connector": {
       "requires": {
         "ash": [ "system_ui" ],
-        "identity": [ "identity_manager" ]
+        "identity": [ "identity_manager" ],
+        "device": [ "device:battery_monitor" ],
+        "audio": [ "stream_factory" ],
+        "assistant_audio_decoder": [ "assistant:audio_decoder" ]
       },
       "provides": {
         "assistant": [
-            "chromeos::assistant::mojom::Assistant",
-            "chromeos::assistant::mojom::AssistantPlatform",
-            "chromeos::assistant::mojom::AssistantSettingsManager"
+            "chromeos.assistant.mojom.Assistant",
+            "chromeos.assistant.mojom.AssistantPlatform",
+            "chromeos.assistant.mojom.AssistantSettingsManager"
         ]
       }
     }

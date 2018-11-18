@@ -35,6 +35,7 @@ class MEDIA_EXPORT PipelineController {
     PLAYING,
     PLAYING_OR_SUSPENDED,
     SEEKING,
+    SWITCHING_TRACKS,
     SUSPENDING,
     SUSPENDED,
     RESUMING,
@@ -113,6 +114,10 @@ class MEDIA_EXPORT PipelineController {
   // Returns true if the current target state is suspended.
   bool IsSuspended();
 
+  // Returns true if Seek() was called and there is a seek operation which has
+  // not yet completed.
+  bool IsPendingSeek();
+
   // Returns true if |pipeline_| is suspended.
   bool IsPipelineSuspended();
 
@@ -130,9 +135,13 @@ class MEDIA_EXPORT PipelineController {
   PipelineStatistics GetStatistics() const;
   void SetCdm(CdmContext* cdm_context, const CdmAttachedCB& cdm_attached_cb);
   void OnEnabledAudioTracksChanged(
-      const std::vector<MediaTrack::Id>& enabledTrackIds);
+      const std::vector<MediaTrack::Id>& enabled_track_ids);
   void OnSelectedVideoTrackChanged(
       base::Optional<MediaTrack::Id> selected_track_id);
+
+  // Used to fire the OnTrackChangeComplete function which is captured in a
+  // OnceCallback, and doesn't play nicely with gmock.
+  void FireOnTrackChangeCompleteForTesting(State set_to);
 
  private:
   // Attempts to make progress from the current state to the target state.
@@ -140,6 +149,8 @@ class MEDIA_EXPORT PipelineController {
 
   // PipelineStaus callback that also carries the target state.
   void OnPipelineStatus(State state, PipelineStatus pipeline_status);
+
+  void OnTrackChangeComplete(State previous_state);
 
   // The Pipeline we are managing state for.
   std::unique_ptr<Pipeline> pipeline_;
@@ -182,6 +193,9 @@ class MEDIA_EXPORT PipelineController {
   // issued at the next stable state.
   bool pending_seeked_cb_ = false;
 
+  // Indicates that a seek has occurred from an explicit call to Seek().
+  bool pending_seek_except_start_ = false;
+
   // Indicates that time has been changed by a seek, which will be reported at
   // the next seeked callback.
   bool pending_time_updated_ = false;
@@ -189,12 +203,22 @@ class MEDIA_EXPORT PipelineController {
   // The target time of the active seek; valid while SEEKING or RESUMING.
   base::TimeDelta seek_time_;
 
-  // Target state which we will work to achieve. |pending_seek_time_| is only
-  // valid when |pending_seek_| is true.
+  // Target state which we will work to achieve.
   bool pending_seek_ = false;
-  base::TimeDelta pending_seek_time_;
   bool pending_suspend_ = false;
   bool pending_resume_ = false;
+  bool pending_audio_track_change_ = false;
+  bool pending_video_track_change_ = false;
+
+  // |pending_seek_time_| is only valid when |pending_seek_| is true.
+  // |pending_track_change_type_| is only valid when |pending_track_change_|.
+  // |pending_audio_track_change_ids_| is only valid when
+  //   |pending_audio_track_change_|.
+  // |pending_video_track_change_id_| is only valid when
+  //   |pending_video_track_change_|.
+  base::TimeDelta pending_seek_time_;
+  std::vector<MediaTrack::Id> pending_audio_track_change_ids_;
+  base::Optional<MediaTrack::Id> pending_video_track_change_id_;
 
   // Set to true during Start(). Indicates that |seeked_cb_| must be fired once
   // we've completed startup.

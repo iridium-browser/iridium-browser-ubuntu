@@ -6,7 +6,6 @@
 #define CHROME_BROWSER_UI_VIEWS_FRAME_OPAQUE_BROWSER_FRAME_VIEW_LAYOUT_DELEGATE_H_
 
 namespace gfx {
-class ImageSkia;
 class Size;
 }
 
@@ -14,9 +13,6 @@ class Size;
 // Browser{,Frame,View}.
 class OpaqueBrowserFrameViewLayoutDelegate {
  public:
-  // Returns true if the browser is in incognito mode.
-  virtual bool IsIncognito() const = 0;
-
   // Controls the visual placement of the window icon/title in non-tabstrip
   // mode.
   virtual bool ShouldShowWindowIcon() const = 0;
@@ -38,14 +34,9 @@ class OpaqueBrowserFrameViewLayoutDelegate {
   // Returns true if in guest mode or a non off the record session.
   virtual bool IsRegularOrGuestSession() const = 0;
 
-  // We don't have a ThemeProvider in the layout manager, so plumb in the icon
-  // source here.
-  virtual gfx::ImageSkia GetIncognitoAvatarIcon() const = 0;
-
   // Controls window state.
   virtual bool IsMaximized() const = 0;
   virtual bool IsMinimized() const = 0;
-  virtual bool IsFullscreen() const = 0;
 
   virtual bool IsTabStripVisible() const = 0;
   virtual int GetTabStripHeight() const = 0;
@@ -60,6 +51,16 @@ class OpaqueBrowserFrameViewLayoutDelegate {
 
   // Returns true if the window frame is rendered by Chrome.
   virtual bool UseCustomFrame() const = 0;
+
+  // Determines whether the top frame is condensed vertically, as when the
+  // window is maximized. If true, the top frame is just the height of a tab,
+  // rather than having extra vertical space above the tabs. This also removes
+  // the thick frame border and rounded corners.
+  virtual bool IsFrameCondensed() const = 0;
+
+  // Returns whether the shapes of background tabs are visible against the frame
+  // for either active or inactive windows.
+  virtual bool EverHasVisibleBackgroundTabShapes() const = 0;
 
  protected:
   virtual ~OpaqueBrowserFrameViewLayoutDelegate() {}

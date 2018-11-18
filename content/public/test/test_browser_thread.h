@@ -8,10 +8,11 @@
 #include <memory>
 
 #include "base/macros.h"
+#include "base/memory/scoped_refptr.h"
+#include "base/single_thread_task_runner.h"
 #include "content/public/browser/browser_thread.h"
 
 namespace base {
-class MessageLoop;
 class Thread;
 }
 
@@ -29,9 +30,10 @@ class TestBrowserThread {
   // MessageLoopForIO if |identifier == BrowserThread::IO|.
   explicit TestBrowserThread(BrowserThread::ID identifier);
 
-  // Constructs a TestBrowserThread based on |message_loop| (no |real_thread_|).
+  // Constructs a TestBrowserThread "running" on |thread_runner| (no
+  // |real_thread_|).
   TestBrowserThread(BrowserThread::ID identifier,
-                    base::MessageLoop* message_loop);
+                    scoped_refptr<base::SingleThreadTaskRunner> thread_runner);
 
   ~TestBrowserThread();
 

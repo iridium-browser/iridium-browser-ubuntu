@@ -17,7 +17,6 @@ if (enable_me2me_host) {
 
     deps = [
       "//base",
-      "//build/config:exe_and_shlib_deps",
     ]
 
     libs = [ "pam" ]
@@ -59,14 +58,14 @@ if (enable_me2me_host) {
     ]
     deps = [
       ":remoting_user_session",
-      "//build/config:exe_and_shlib_deps",
     ]
     if (is_component_build) {
       sources += [ "$root_build_dir/libbase.so" ]
       deps += [ "//base:base" ]
-    }
-    if (!libcpp_is_static && use_custom_libcxx) {
-      sources += [ "$root_build_dir/libc++.so" ]
+      if (use_custom_libcxx) {
+        sources += [ "$root_build_dir/libc++.so" ]
+        deps += [ "//buildtools/third_party/libc++" ]
+      }
     }
   }
 
@@ -104,22 +103,24 @@ source_set("linux") {
   }
 }
 
-source_set("x11") {
-  sources = [
-    "unicode_to_keysym.cc",
-    "unicode_to_keysym.h",
-    "x11_character_injector.cc",
-    "x11_character_injector.h",
-    "x11_keyboard_impl.cc",
-    "x11_keyboard_impl.h",
-    "x11_util.cc",
-    "x11_util.h",
-    "x_server_clipboard.cc",
-    "x_server_clipboard.h",
-  ]
-  deps = [
-    "//third_party/webrtc/modules/desktop_capture",
-  ]
+if (use_x11) {
+  source_set("x11") {
+    sources = [
+      "unicode_to_keysym.cc",
+      "unicode_to_keysym.h",
+      "x11_character_injector.cc",
+      "x11_character_injector.h",
+      "x11_keyboard_impl.cc",
+      "x11_keyboard_impl.h",
+      "x11_util.cc",
+      "x11_util.h",
+      "x_server_clipboard.cc",
+      "x_server_clipboard.h",
+    ]
+    deps = [
+      "//third_party/webrtc/modules/desktop_capture",
+    ]
+  }
 }
 
 executable("remoting_native_messaging_host") {
@@ -133,13 +134,13 @@ executable("remoting_native_messaging_host") {
 
   deps = [
     "//base",
-    "//build/config:exe_and_shlib_deps",
     "//net",
     "//remoting/base:breakpad",
     "//remoting/host",
     "//remoting/host:remoting_infoplist_strings",
     "//remoting/host/native_messaging",
     "//remoting/host/setup",
+    "//services/network/public/mojom",
   ]
 
   # The |major|, |build| and |patch| versions are inherited from Chrome.
@@ -162,7 +163,10 @@ source_set("unit_tests") {
   ]
 
   if (!use_x11) {
-    sources -= [ "unicode_to_keysym_unittest.cc" ]
+    sources -= [
+      "unicode_to_keysym_unittest.cc",
+      "x_server_clipboard_unittest.cc",
+    ]
   }
 
   configs += [ "//remoting/build/config:version" ]

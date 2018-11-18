@@ -24,8 +24,7 @@
 #include "third_party/blink/renderer/core/svg/graphics/filters/svg_fe_image.h"
 
 #include "third_party/blink/renderer/core/layout/layout_object.h"
-#include "third_party/blink/renderer/core/paint/svg_paint_context.h"
-#include "third_party/blink/renderer/core/paint/transform_recorder.h"
+#include "third_party/blink/renderer/core/paint/svg_object_painter.h"
 #include "third_party/blink/renderer/core/svg/svg_element.h"
 #include "third_party/blink/renderer/core/svg/svg_length_context.h"
 #include "third_party/blink/renderer/core/svg/svg_uri_reference.h"
@@ -34,8 +33,8 @@
 #include "third_party/blink/renderer/platform/graphics/graphics_context.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_record.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_record_builder.h"
-#include "third_party/blink/renderer/platform/text/text_stream.h"
 #include "third_party/blink/renderer/platform/transforms/affine_transform.h"
+#include "third_party/blink/renderer/platform/wtf/text/text_stream.h"
 
 namespace blink {
 
@@ -139,7 +138,8 @@ LayoutObject* FEImage::ReferencedLayoutObject() const {
   return href_element->GetLayoutObject();
 }
 
-TextStream& FEImage::ExternalRepresentation(TextStream& ts, int indent) const {
+WTF::TextStream& FEImage::ExternalRepresentation(WTF::TextStream& ts,
+                                                 int indent) const {
   IntSize image_size;
   if (image_) {
     image_size = image_->Size();
@@ -179,10 +179,10 @@ sk_sp<PaintFilter> FEImage::CreateImageFilterForLayoutObject(
   }
 
   PaintRecordBuilder builder;
-  SVGPaintContext::PaintResourceSubtree(builder.Context(), &layout_object);
+  SVGObjectPainter(layout_object).PaintResourceSubtree(builder.Context());
 
   PaintRecorder paint_recorder;
-  PaintCanvas* canvas = paint_recorder.beginRecording(dst_rect);
+  cc::PaintCanvas* canvas = paint_recorder.beginRecording(dst_rect);
   canvas->concat(AffineTransformToSkMatrix(transform));
   builder.EndRecording(*canvas);
 

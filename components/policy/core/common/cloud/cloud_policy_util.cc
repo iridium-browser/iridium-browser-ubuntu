@@ -6,10 +6,20 @@
 
 #include "build/build_config.h"
 
-#include <limits.h>
-
 #if defined(OS_WIN)
 #include <Windows.h>  // For GetComputerNameW()
+// SECURITY_WIN32 must be defined in order to get
+// EXTENDED_NAME_FORMAT enumeration.
+#define SECURITY_WIN32 1
+#include <security.h>
+#undef SECURITY_WIN32
+#include <wincred.h>
+#endif
+
+#if defined(OS_LINUX) && !defined(OS_CHROMEOS) || defined(OS_MACOSX)
+#include <pwd.h>
+#include <sys/types.h>
+#include <unistd.h>
 #endif
 
 #if defined(OS_MACOSX)
@@ -18,9 +28,14 @@
 #include <sys/sysctl.h>
 #endif
 
+#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+#include <limits.h>  // For HOST_NAME_MAX
+#endif
+
 #include <utility>
 
 #include "base/logging.h"
+#include "base/sys_info.h"
 #include "components/version_info/version_info.h"
 
 #if defined(OS_WIN)
@@ -30,10 +45,10 @@
 #endif
 
 #if defined(OS_MACOSX)
-#include "base/mac/mac_util.h"
 #include "base/mac/scoped_cftyperef.h"
 #include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
+#include "base/sys_info.h"
 #endif
 
 #if defined(OS_LINUX) && !defined(OS_CHROMEOS)
@@ -41,6 +56,8 @@
 #endif
 
 namespace policy {
+
+namespace em = enterprise_management;
 
 std::string GetMachineName() {
 #if defined(OS_LINUX) && !defined(OS_CHROMEOS)
@@ -93,10 +110,8 @@ std::string GetMachineName() {
 }
 
 std::string GetOSVersion() {
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+#if defined(OS_LINUX) && !defined(OS_CHROMEOS) || defined(OS_MACOSX)
   return base::SysInfo::OperatingSystemVersion();
-#elif defined(OS_MACOSX)
-  return base::mac::GetModelIdentifier();
 #elif defined(OS_WIN)
   base::win::OSInfo::VersionNumber version_number =
       base::win::OSInfo::GetInstance()->version_number();
@@ -111,6 +126,51 @@ std::string GetOSVersion() {
 
 std::string GetOSPlatform() {
   return version_info::GetOSType();
+}
+
+std::string GetOSArchitecture() {
+  return base::SysInfo::OperatingSystemArchitecture();
+}
+
+std::string GetOSUsername() {
+#if defined(OS_LINUX) && !defined(OS_CHROMEOS) || defined(OS_MACOSX)
+  struct passwd* creds = getpwuid(getuid());
+  if (!creds || !creds->pw_name)
+    return std::string();
+
+  return creds->pw_name;
+#elif defined(OS_WIN)
+  WCHAR username[CREDUI_MAX_USERNAME_LENGTH + 1] = {};
+  DWORD username_length = sizeof(username);
+
+  // The SAM compatible username works on both standalone workstations and
+  // domain joined machines.  The form is "DOMAIN\username", where DOMAIN is the
+  // the name of the machine for standalone workstations.
+  if (!::GetUserNameEx(::NameSamCompatible, username, &username_length) ||
+      username_length <= 0) {
+    return std::string();
+  }
+
+  return base::WideToUTF8(username);
+#else
+  NOTREACHED();
+  return std::string();
+#endif
+}
+
+em::Channel ConvertToProtoChannel(version_info::Channel channel) {
+  switch (channel) {
+    case version_info::Channel::UNKNOWN:
+      return em::CHANNEL_UNKNOWN;
+    case version_info::Channel::CANARY:
+      return em::CHANNEL_CANARY;
+    case version_info::Channel::DEV:
+      return em::CHANNEL_DEV;
+    case version_info::Channel::BETA:
+      return em::CHANNEL_BETA;
+    case version_info::Channel::STABLE:
+      return em::CHANNEL_STABLE;
+  }
 }
 
 }  // namespace policy

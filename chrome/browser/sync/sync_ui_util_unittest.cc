@@ -13,17 +13,19 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/account_tracker_service_factory.h"
 #include "chrome/browser/signin/chrome_signin_client_factory.h"
+#include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/signin_error_controller_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/profile_sync_test_util.h"
 #include "chrome/browser/sync/sync_ui_util.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/browser_sync/profile_sync_service_mock.h"
-#include "components/signin/core/browser/fake_auth_status_provider.h"
 #include "components/signin/core/browser/fake_signin_manager.h"
+#include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "content/public/test/test_browser_thread.h"
 #include "content/public/test/test_browser_thread_bundle.h"
+#include "google_apis/gaia/oauth2_token_service_delegate.h"
 #include "testing/gmock/include/gmock/gmock-actions.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -100,17 +102,16 @@ class FakeSigninManagerForSyncUIUtilTest : public FakeSigninManagerBase {
 // in order to perform tests on the generated messages.
 void GetDistinctCase(ProfileSyncServiceMock* service,
                      FakeSigninManagerForSyncUIUtilTest* signin,
-                     FakeAuthStatusProvider* provider,
-                     int caseNumber) {
+                     ProfileOAuth2TokenService* token_service,
+                     int case_number) {
   // Auth Error object is returned by reference in mock and needs to stay in
   // scope throughout test, so it is owned by calling method. However it is
   // immutable so can only be allocated in this method.
-  switch (caseNumber) {
+  switch (case_number) {
     case STATUS_CASE_SETUP_IN_PROGRESS: {
       EXPECT_CALL(*service, IsFirstSetupComplete())
           .WillRepeatedly(Return(false));
-      EXPECT_CALL(*service, IsFirstSetupInProgress())
-          .WillRepeatedly(Return(true));
+      EXPECT_CALL(*service, IsSetupInProgress()).WillRepeatedly(Return(true));
       syncer::SyncEngine::Status status;
       EXPECT_CALL(*service, QueryDetailedSyncStatus(_))
           .WillRepeatedly(DoAll(SetArgPointee<0>(status), Return(false)));
@@ -119,10 +120,10 @@ void GetDistinctCase(ProfileSyncServiceMock* service,
     case STATUS_CASE_SETUP_ERROR: {
       EXPECT_CALL(*service, IsFirstSetupComplete())
           .WillRepeatedly(Return(false));
-      EXPECT_CALL(*service, IsFirstSetupInProgress())
-          .WillRepeatedly(Return(false));
-      EXPECT_CALL(*service, HasUnrecoverableError())
-          .WillRepeatedly(Return(true));
+      EXPECT_CALL(*service, IsSetupInProgress()).WillRepeatedly(Return(false));
+      EXPECT_CALL(*service, GetDisableReasons())
+          .WillRepeatedly(
+              Return(syncer::SyncService::DISABLE_REASON_UNRECOVERABLE_ERROR));
       syncer::SyncEngine::Status status;
       EXPECT_CALL(*service, QueryDetailedSyncStatus(_))
           .WillRepeatedly(DoAll(SetArgPointee<0>(status), Return(false)));
@@ -131,37 +132,44 @@ void GetDistinctCase(ProfileSyncServiceMock* service,
     case STATUS_CASE_AUTHENTICATING: {
       EXPECT_CALL(*service, IsFirstSetupComplete())
           .WillRepeatedly(Return(true));
-      EXPECT_CALL(*service, IsSyncActive()).WillRepeatedly(Return(true));
+      EXPECT_CALL(*service, GetTransportState())
+          .WillRepeatedly(Return(syncer::SyncService::TransportState::ACTIVE));
       EXPECT_CALL(*service, IsPassphraseRequired())
           .WillRepeatedly(Return(false));
       syncer::SyncEngine::Status status;
       EXPECT_CALL(*service, QueryDetailedSyncStatus(_))
           .WillRepeatedly(DoAll(SetArgPointee<0>(status), Return(false)));
-      EXPECT_CALL(*service, HasUnrecoverableError())
-          .WillRepeatedly(Return(false));
+      EXPECT_CALL(*service, GetDisableReasons())
+          .WillRepeatedly(Return(syncer::SyncService::DISABLE_REASON_NONE));
       signin->set_auth_in_progress();
       return;
     }
     case STATUS_CASE_AUTH_ERROR: {
       EXPECT_CALL(*service, IsFirstSetupComplete())
           .WillRepeatedly(Return(true));
-      EXPECT_CALL(*service, IsSyncActive()).WillRepeatedly(Return(true));
+      EXPECT_CALL(*service, GetTransportState())
+          .WillRepeatedly(Return(syncer::SyncService::TransportState::ACTIVE));
       EXPECT_CALL(*service, IsPassphraseRequired())
           .WillRepeatedly(Return(false));
       syncer::SyncEngine::Status status;
       EXPECT_CALL(*service, QueryDetailedSyncStatus(_))
           .WillRepeatedly(DoAll(SetArgPointee<0>(status), Return(false)));
-      provider->SetAuthError(
-          signin->GetAuthenticatedAccountId(),
+      std::string account_id = signin->GetAuthenticatedAccountId();
+      token_service->UpdateCredentials(account_id, "refresh_token");
+      // TODO(https://crbug.com/836212): Do not use the delegate directly,
+      // because it is internal API.
+      token_service->GetDelegate()->UpdateAuthError(
+          account_id,
           GoogleServiceAuthError(GoogleServiceAuthError::SERVICE_ERROR));
-      EXPECT_CALL(*service, HasUnrecoverableError())
-          .WillRepeatedly(Return(false));
+      EXPECT_CALL(*service, GetDisableReasons())
+          .WillRepeatedly(Return(syncer::SyncService::DISABLE_REASON_NONE));
       return;
     }
     case STATUS_CASE_PROTOCOL_ERROR: {
       EXPECT_CALL(*service, IsFirstSetupComplete())
           .WillRepeatedly(Return(true));
-      EXPECT_CALL(*service, IsSyncActive()).WillRepeatedly(Return(true));
+      EXPECT_CALL(*service, GetTransportState())
+          .WillRepeatedly(Return(syncer::SyncService::TransportState::ACTIVE));
       EXPECT_CALL(*service, IsPassphraseRequired())
           .WillRepeatedly(Return(false));
       syncer::SyncProtocolError protocolError;
@@ -170,8 +178,8 @@ void GetDistinctCase(ProfileSyncServiceMock* service,
       status.sync_protocol_error = protocolError;
       EXPECT_CALL(*service, QueryDetailedSyncStatus(_))
           .WillRepeatedly(DoAll(SetArgPointee<0>(status), Return(false)));
-      EXPECT_CALL(*service, HasUnrecoverableError())
-          .WillRepeatedly(Return(false));
+      EXPECT_CALL(*service, GetDisableReasons())
+          .WillRepeatedly(Return(syncer::SyncService::DISABLE_REASON_NONE));
       return;
     }
     case STATUS_CASE_CONFIRM_SYNC_SETTINGS: {
@@ -187,12 +195,13 @@ void GetDistinctCase(ProfileSyncServiceMock* service,
     case STATUS_CASE_PASSPHRASE_ERROR: {
       EXPECT_CALL(*service, IsFirstSetupComplete())
           .WillRepeatedly(Return(true));
-      EXPECT_CALL(*service, IsSyncActive()).WillRepeatedly(Return(true));
+      EXPECT_CALL(*service, GetTransportState())
+          .WillRepeatedly(Return(syncer::SyncService::TransportState::ACTIVE));
       syncer::SyncEngine::Status status;
       EXPECT_CALL(*service, QueryDetailedSyncStatus(_))
           .WillRepeatedly(DoAll(SetArgPointee<0>(status), Return(false)));
-      EXPECT_CALL(*service, HasUnrecoverableError())
-          .WillRepeatedly(Return(false));
+      EXPECT_CALL(*service, GetDisableReasons())
+          .WillRepeatedly(Return(syncer::SyncService::DISABLE_REASON_NONE));
       EXPECT_CALL(*service, IsPassphraseRequired())
           .WillRepeatedly(Return(true));
       EXPECT_CALL(*service, IsPassphraseRequiredForDecryption())
@@ -202,30 +211,33 @@ void GetDistinctCase(ProfileSyncServiceMock* service,
     case STATUS_CASE_SYNCED: {
       EXPECT_CALL(*service, IsFirstSetupComplete())
           .WillRepeatedly(Return(true));
-      EXPECT_CALL(*service, IsSyncActive()).WillRepeatedly(Return(true));
+      EXPECT_CALL(*service, GetTransportState())
+          .WillRepeatedly(Return(syncer::SyncService::TransportState::ACTIVE));
       EXPECT_CALL(*service, IsPassphraseRequired())
           .WillRepeatedly(Return(false));
       syncer::SyncEngine::Status status;
       EXPECT_CALL(*service, QueryDetailedSyncStatus(_))
           .WillRepeatedly(DoAll(SetArgPointee<0>(status), Return(false)));
-      EXPECT_CALL(*service, HasUnrecoverableError())
-          .WillRepeatedly(Return(false));
+      EXPECT_CALL(*service, GetDisableReasons())
+          .WillRepeatedly(Return(syncer::SyncService::DISABLE_REASON_NONE));
       EXPECT_CALL(*service, IsPassphraseRequired())
           .WillRepeatedly(Return(false));
       return;
     }
     case STATUS_CASE_SYNC_DISABLED_BY_POLICY: {
-      EXPECT_CALL(*service, IsManaged()).WillRepeatedly(Return(true));
+      EXPECT_CALL(*service, GetDisableReasons())
+          .WillRepeatedly(
+              Return(syncer::SyncService::DISABLE_REASON_ENTERPRISE_POLICY));
       EXPECT_CALL(*service, IsFirstSetupComplete())
           .WillRepeatedly(Return(false));
-      EXPECT_CALL(*service, IsSyncActive()).WillRepeatedly(Return(false));
+      EXPECT_CALL(*service, GetTransportState())
+          .WillRepeatedly(
+              Return(syncer::SyncService::TransportState::DISABLED));
       EXPECT_CALL(*service, IsPassphraseRequired())
           .WillRepeatedly(Return(false));
       syncer::SyncEngine::Status status;
       EXPECT_CALL(*service, QueryDetailedSyncStatus(_))
           .WillRepeatedly(DoAll(SetArgPointee<0>(status), Return(false)));
-      EXPECT_CALL(*service, HasUnrecoverableError())
-          .WillRepeatedly(Return(false));
       return;
     }
     default:
@@ -275,15 +287,14 @@ TEST_F(SyncUIUtilTest, DistinctCasesReportUniqueMessageSets) {
     EXPECT_CALL(service, GetAuthError()).WillRepeatedly(ReturnRef(error));
     FakeSigninManagerForSyncUIUtilTest signin(profile.get());
     signin.SetAuthenticatedAccountInfo(kTestGaiaId, kTestUser);
-    std::unique_ptr<FakeAuthStatusProvider> provider(new FakeAuthStatusProvider(
-        SigninErrorControllerFactory::GetForProfile(profile.get())));
-    GetDistinctCase(&service, &signin, provider.get(), idx);
+    ProfileOAuth2TokenService* token_service =
+        ProfileOAuth2TokenServiceFactory::GetForProfile(profile.get());
+    GetDistinctCase(&service, &signin, token_service, idx);
     base::string16 status_label;
     base::string16 link_label;
     sync_ui_util::ActionType action_type = sync_ui_util::NO_ACTION;
     sync_ui_util::GetStatusLabels(profile.get(), &service, signin,
-                                  sync_ui_util::WITH_HTML, &status_label,
-                                  &link_label, &action_type);
+                                  &status_label, &link_label, &action_type);
 
     EXPECT_EQ(GetActionTypeforDistinctCase(idx), action_type);
     // If the status and link message combination is already present in the set
@@ -291,6 +302,11 @@ TEST_F(SyncUIUtilTest, DistinctCasesReportUniqueMessageSets) {
     // message, and the test has failed.
     EXPECT_FALSE(status_label.empty()) <<
         "Empty status label returned for case #" << idx;
+    // Ensures a search for string 'href' (found in links, not a string to be
+    // found in an English language message) fails, since links are excluded
+    // from the status label.
+    EXPECT_EQ(status_label.find(base::ASCIIToUTF16("href")),
+              base::string16::npos);
     base::string16 combined_label =
         status_label + base::ASCIIToUTF16("#") + link_label;
     EXPECT_TRUE(messages.find(combined_label) == messages.end()) <<
@@ -299,44 +315,6 @@ TEST_F(SyncUIUtilTest, DistinctCasesReportUniqueMessageSets) {
     testing::Mock::VerifyAndClearExpectations(&service);
     testing::Mock::VerifyAndClearExpectations(&signin);
     EXPECT_CALL(service, GetAuthError()).WillRepeatedly(ReturnRef(error));
-    provider.reset();
-    signin.Shutdown();
-  }
-}
-
-// This test ensures that the html_links parameter on GetStatusLabels() is
-// honored.
-TEST_F(SyncUIUtilTest, HtmlNotIncludedInStatusIfNotRequested) {
-  for (int idx = 0; idx != NUMBER_OF_STATUS_CASES; idx++) {
-    std::unique_ptr<Profile> profile = std::make_unique<TestingProfile>();
-    ProfileSyncService::InitParams init_params =
-        CreateProfileSyncServiceParamsForTest(profile.get());
-    NiceMock<ProfileSyncServiceMock> service(&init_params);
-    GoogleServiceAuthError error = GoogleServiceAuthError::AuthErrorNone();
-    EXPECT_CALL(service, GetAuthError()).WillRepeatedly(ReturnRef(error));
-    FakeSigninManagerForSyncUIUtilTest signin(profile.get());
-    signin.SetAuthenticatedAccountInfo(kTestGaiaId, kTestUser);
-    std::unique_ptr<FakeAuthStatusProvider> provider(new FakeAuthStatusProvider(
-        SigninErrorControllerFactory::GetForProfile(profile.get())));
-    GetDistinctCase(&service, &signin, provider.get(), idx);
-    base::string16 status_label;
-    base::string16 link_label;
-    sync_ui_util::ActionType action_type = sync_ui_util::NO_ACTION;
-    sync_ui_util::GetStatusLabels(profile.get(), &service, signin,
-                                  sync_ui_util::PLAIN_TEXT, &status_label,
-                                  &link_label, &action_type);
-
-    EXPECT_EQ(GetActionTypeforDistinctCase(idx), action_type);
-    // Ensures a search for string 'href' (found in links, not a string to be
-    // found in an English language message) fails when links are excluded from
-    // the status label.
-    EXPECT_FALSE(status_label.empty());
-    EXPECT_EQ(status_label.find(base::ASCIIToUTF16("href")),
-              base::string16::npos);
-    testing::Mock::VerifyAndClearExpectations(&service);
-    testing::Mock::VerifyAndClearExpectations(&signin);
-    EXPECT_CALL(service, GetAuthError()).WillRepeatedly(ReturnRef(error));
-    provider.reset();
     signin.Shutdown();
   }
 }
@@ -349,7 +327,9 @@ TEST_F(SyncUIUtilTest, UnrecoverableErrorWithActionableError) {
   ProfileSyncServiceMock service(
       CreateProfileSyncServiceParamsForTest(profile.get()));
   EXPECT_CALL(service, IsFirstSetupComplete()).WillRepeatedly(Return(true));
-  EXPECT_CALL(service, HasUnrecoverableError()).WillRepeatedly(Return(true));
+  EXPECT_CALL(service, GetDisableReasons())
+      .WillRepeatedly(
+          Return(syncer::SyncService::DISABLE_REASON_UNRECOVERABLE_ERROR));
 
   // First time action is not set. We should get unrecoverable error.
   syncer::SyncStatus status;
@@ -360,7 +340,6 @@ TEST_F(SyncUIUtilTest, UnrecoverableErrorWithActionableError) {
   base::string16 unrecoverable_error_status_label;
   sync_ui_util::ActionType action_type = sync_ui_util::NO_ACTION;
   sync_ui_util::GetStatusLabels(profile.get(), &service, *signin,
-                                sync_ui_util::PLAIN_TEXT,
                                 &unrecoverable_error_status_label, &link_label,
                                 &action_type);
 
@@ -374,7 +353,6 @@ TEST_F(SyncUIUtilTest, UnrecoverableErrorWithActionableError) {
       .WillOnce(DoAll(SetArgPointee<0>(status), Return(true)));
   base::string16 upgrade_client_status_label;
   sync_ui_util::GetStatusLabels(profile.get(), &service, *signin,
-                                sync_ui_util::PLAIN_TEXT,
                                 &upgrade_client_status_label, &link_label,
                                 &action_type);
   // Expect an explicit 'client upgrade' action.
@@ -391,7 +369,9 @@ TEST_F(SyncUIUtilTest, ActionableErrorWithPassiveMessage) {
   ProfileSyncServiceMock service(
       CreateProfileSyncServiceParamsForTest(profile.get()));
   EXPECT_CALL(service, IsFirstSetupComplete()).WillRepeatedly(Return(true));
-  EXPECT_CALL(service, HasUnrecoverableError()).WillRepeatedly(Return(true));
+  EXPECT_CALL(service, GetDisableReasons())
+      .WillRepeatedly(
+          Return(syncer::SyncService::DISABLE_REASON_UNRECOVERABLE_ERROR));
 
   // Set action to UPGRADE_CLIENT.
   syncer::SyncStatus status;
@@ -403,7 +383,6 @@ TEST_F(SyncUIUtilTest, ActionableErrorWithPassiveMessage) {
   base::string16 link_label;
   sync_ui_util::ActionType action_type = sync_ui_util::NO_ACTION;
   sync_ui_util::GetStatusLabels(profile.get(), &service, *signin,
-                                sync_ui_util::PLAIN_TEXT,
                                 &first_actionable_error_status_label,
                                 &link_label, &action_type);
   // Expect a 'client upgrade' call to action.
@@ -417,7 +396,6 @@ TEST_F(SyncUIUtilTest, ActionableErrorWithPassiveMessage) {
   base::string16 second_actionable_error_status_label;
   action_type = sync_ui_util::NO_ACTION;
   sync_ui_util::GetStatusLabels(profile.get(), &service, *signin,
-                                sync_ui_util::PLAIN_TEXT,
                                 &second_actionable_error_status_label,
                                 &link_label, &action_type);
   // Expect a passive message instead of a call to action.
@@ -440,9 +418,9 @@ TEST_F(SyncUIUtilTest, SyncSettingsConfirmationNeededTest) {
   base::string16 link_label;
   sync_ui_util::ActionType action_type = sync_ui_util::NO_ACTION;
 
-  sync_ui_util::GetStatusLabels(
-      profile.get(), &service, *signin, sync_ui_util::PLAIN_TEXT,
-      &actionable_error_status_label, &link_label, &action_type);
+  sync_ui_util::GetStatusLabels(profile.get(), &service, *signin,
+                                &actionable_error_status_label, &link_label,
+                                &action_type);
 
   EXPECT_EQ(action_type, sync_ui_util::CONFIRM_SYNC_SETTINGS);
 }

@@ -190,14 +190,14 @@ bool InitHeap() {
 int TouchMemory(void* buffer, size_t size_bytes, RequiredAccess intent) {
   const int kPageSize = 4096;
   int dummy = 0;
-  char* start = reinterpret_cast<char*>(buffer);
-  char* end = start + size_bytes - 1;
+  volatile char* start = reinterpret_cast<char*>(buffer);
+  volatile char* end = start + size_bytes - 1;
 
   if (WRITE == intent) {
     for (; start < end; start += kPageSize) {
-      *start = 0;
+      *start = *start;
     }
-    *end = 0;
+    *end = *end;
   } else {
     for (; start < end; start += kPageSize) {
       dummy += *start;
@@ -300,14 +300,13 @@ NTSTATUS AllocAndGetFullPath(HANDLE root, wchar_t* path, wchar_t** full_path) {
 
 // Hacky code... replace with AllocAndCopyObjectAttributes.
 NTSTATUS AllocAndCopyName(const OBJECT_ATTRIBUTES* in_object,
-                          wchar_t** out_name,
+                          std::unique_ptr<wchar_t, NtAllocDeleter>* out_name,
                           uint32_t* attributes,
                           HANDLE* root) {
   if (!InitHeap())
     return STATUS_NO_MEMORY;
 
   DCHECK_NT(out_name);
-  *out_name = nullptr;
   NTSTATUS ret = STATUS_UNSUCCESSFUL;
   __try {
     do {
@@ -319,16 +318,16 @@ NTSTATUS AllocAndCopyName(const OBJECT_ATTRIBUTES* in_object,
         break;
 
       size_t size = in_object->ObjectName->Length + sizeof(wchar_t);
-      *out_name = new (NT_ALLOC) wchar_t[size / sizeof(wchar_t)];
+      out_name->reset(new (NT_ALLOC) wchar_t[size / sizeof(wchar_t)]);
       if (!*out_name)
         break;
 
-      ret = CopyData(*out_name, in_object->ObjectName->Buffer,
+      ret = CopyData(out_name->get(), in_object->ObjectName->Buffer,
                      size - sizeof(wchar_t));
       if (!NT_SUCCESS(ret))
         break;
 
-      (*out_name)[size / sizeof(wchar_t) - 1] = L'\0';
+      out_name->get()[size / sizeof(wchar_t) - 1] = L'\0';
 
       if (attributes)
         *attributes = in_object->Attributes;
@@ -341,10 +340,8 @@ NTSTATUS AllocAndCopyName(const OBJECT_ATTRIBUTES* in_object,
     ret = GetExceptionCode();
   }
 
-  if (!NT_SUCCESS(ret) && *out_name) {
-    operator delete(*out_name, NT_ALLOC);
-    *out_name = nullptr;
-  }
+  if (!NT_SUCCESS(ret) && *out_name)
+    out_name->reset(nullptr);
 
   return ret;
 }
@@ -473,6 +470,29 @@ UNICODE_STRING* GetImageInfoFromModule(HMODULE module, uint32_t* flags) {
         if (headers->OptionalHeader.SizeOfCode)
           *flags |= MODULE_HAS_CODE;
       }
+    } while (false);
+  } __except (EXCEPTION_EXECUTE_HANDLER) {
+  }
+
+  return out_name;
+#pragma warning(pop)
+}
+
+const char* GetAnsiImageInfoFromModule(HMODULE module) {
+// PEImage's dtor won't be run during SEH unwinding, but that's OK.
+#pragma warning(push)
+#pragma warning(disable : 4509)
+  const char* out_name = nullptr;
+  __try {
+    do {
+      base::win::PEImage pe(module);
+
+      if (!pe.VerifyMagic())
+        break;
+
+      PIMAGE_EXPORT_DIRECTORY exports = pe.GetExportDirectory();
+      if (exports)
+        out_name = static_cast<const char*>(pe.RVAToAddr(exports->Name));
     } while (false);
   } __except (EXCEPTION_EXECUTE_HANDLER) {
   }

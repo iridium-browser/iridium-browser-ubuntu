@@ -5,13 +5,10 @@
 #ifndef SERVICES_NETWORK_PUBLIC_CPP_CORS_CORS_LEGACY_H_
 #define SERVICES_NETWORK_PUBLIC_CPP_CORS_CORS_LEGACY_H_
 
+#include <string>
 #include <vector>
 
 #include "base/component_export.h"
-
-namespace url {
-class Origin;
-}  // namespace url
 
 namespace network {
 namespace cors {
@@ -25,13 +22,14 @@ namespace cors {
 // TODO(toyoshim): Remove all functions after Network Service is enabled.
 namespace legacy {
 
-// Registers whitelisted secure origins for CORS checks in CORSURLLoader.
+// Registers whitelisted secure origins and hostname patterns for CORS checks in
+// CORSURLLoader.
 COMPONENT_EXPORT(NETWORK_CPP)
-void RegisterSecureOrigins(const std::vector<url::Origin>& secure_origins);
+void RegisterSecureOrigins(const std::vector<std::string>& secure_origins);
 
-// Refers the registered whitelisted secure origins.
+// Refers the registered whitelisted secure origins and hostname patterns.
 COMPONENT_EXPORT(NETWORK_CPP)
-const std::vector<url::Origin>& GetSecureOrigins();
+const std::vector<std::string>& GetSecureOrigins();
 
 }  // namespace legacy
 

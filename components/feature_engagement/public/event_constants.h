@@ -40,6 +40,11 @@ extern const char kIncognitoWindowOpened[];
 // IncognitoWindowPromo by accumulating 2 hours of active session time (one-off
 // event).
 extern const char kIncognitoWindowSessionTimeMet[];
+
+// All conditions for reopen closed tab IPH were met. Since this IPH needs to
+// track user events (opening/closing tabs, focusing the omnibox, etc) on the
+// second level, it must be done manually.
+extern const char kReopenTabConditionsMet[];
 #endif  // BUILDFLAG(ENABLE_DESKTOP_IN_PRODUCT_HELP)
 
 #if defined(OS_WIN) || defined(OS_LINUX) || defined(OS_IOS)
@@ -64,6 +69,9 @@ extern const char kClearedBrowsingData[];
 
 // The user has viewed their reading list.
 extern const char kViewedReadingList[];
+
+// The user has viewed the the BottomToolbar tip.
+extern const char kBottomToolbarOpened[];
 #endif  // defined(OS_IOS)
 
 }  // namespace events

@@ -7,6 +7,7 @@
  * This class has functions and callbacks necessary for Select-to-Speak
  * to function. It keeps track of the utterances currently being spoken,
  * and whether TTS should be speaking or is stopped.
+ * @constructor
  */
 var MockTts = function() {
   /**
@@ -29,6 +30,13 @@ var MockTts = function() {
    * @private
    */
   this.speechCallbackStack_ = [];
+
+  /**
+   * Options object for speech.
+   * @type {onEvent: !function({type: string, charIndex: number})}
+   * @private
+   */
+  this.options_ = null;
 };
 
 MockTts.prototype = {
@@ -37,6 +45,10 @@ MockTts.prototype = {
   speak: function(utterance, options) {
     this.pendingUtterances_.push(utterance);
     this.currentlySpeaking_ = true;
+    if (options && options.onEvent) {
+      this.options_ = options;
+      this.options_.onEvent({type: 'start', charIndex: 0});
+    }
     if (this.speechCallbackStack_.length > 0) {
       this.speechCallbackStack_.pop()(utterance);
     }
@@ -44,6 +56,10 @@ MockTts.prototype = {
   stop: function() {
     this.pendingUtterances_ = [];
     this.currentlySpeaking_ = false;
+    if (this.options_) {
+      this.options_.onEvent({type: 'cancelled'});
+      this.options_ = null;
+    }
   },
   getVoices: function(callback) {
     callback([{voiceName: 'English US', lang: 'English'}]);

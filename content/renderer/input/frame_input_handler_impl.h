@@ -6,6 +6,8 @@
 #define CONTENT_RENDERER_INPUT_FRAME_INPUT_HANDLER_IMPL_H_
 
 #include "base/memory/ref_counted.h"
+#include "build/build_config.h"
+#include "content/common/content_export.h"
 #include "content/common/input/input_handler.mojom.h"
 #include "content/renderer/render_frame_impl.h"
 #include "mojo/public/cpp/bindings/binding.h"
@@ -35,7 +37,7 @@ class MainThreadEventQueue;
 //
 // When a compositor thread isn't used the mojo channel is just bound
 // on the main thread and messages are handled right away.
-class FrameInputHandlerImpl : public mojom::FrameInputHandler {
+class CONTENT_EXPORT FrameInputHandlerImpl : public mojom::FrameInputHandler {
  public:
   static void CreateMojoService(
       base::WeakPtr<RenderFrameImpl> render_frame,
@@ -65,6 +67,9 @@ class FrameInputHandlerImpl : public mojom::FrameInputHandler {
   void SelectAll() override;
   void CollapseSelection() override;
   void SelectRange(const gfx::Point& base, const gfx::Point& extent) override;
+#if defined(OS_ANDROID)
+  void SelectWordAroundCaret(SelectWordAroundCaretCallback callback) override;
+#endif  // defined(OS_ANDROID)
   void AdjustSelectionByCharacterOffset(
       int32_t start,
       int32_t end,
@@ -95,7 +100,7 @@ class FrameInputHandlerImpl : public mojom::FrameInputHandler {
   FrameInputHandlerImpl(base::WeakPtr<RenderFrameImpl> render_frame,
                         mojom::FrameInputHandlerRequest request);
 
-  void RunOnMainThread(const base::Closure& closure);
+  void RunOnMainThread(base::OnceClosure closure);
   void BindNow(mojom::FrameInputHandlerRequest request);
   void ExecuteCommandOnMainThread(const std::string& command,
                                   UpdateState state);

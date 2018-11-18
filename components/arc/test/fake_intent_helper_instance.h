@@ -78,9 +78,9 @@ class FakeIntentHelperInstance : public mojom::IntentHelperInstance {
   void HandleUrl(const std::string& url,
                  const std::string& package_name) override;
 
-  void HandleUrlList(std::vector<mojom::UrlWithMimeTypePtr> urls,
-                     mojom::ActivityNamePtr activity,
-                     mojom::ActionType action) override;
+  void HandleUrlListDeprecated(std::vector<mojom::UrlWithMimeTypePtr> urls,
+                               mojom::ActivityNamePtr activity,
+                               mojom::ActionType action) override;
 
   void InitDeprecated(mojom::IntentHelperHostPtr host_ptr) override;
 
@@ -110,6 +110,16 @@ class FakeIntentHelperInstance : public mojom::IntentHelperInstance {
                      const std::string& package_name,
                      const std::string& cls,
                      const std::string& extras) override;
+
+  void ClassifySelectionDeprecated(
+      const std::string& text,
+      ::arc::mojom::ScaleFactor scale_factor,
+      ClassifySelectionDeprecatedCallback callback) override;
+
+  void RequestTextSelectionActions(
+      const std::string& text,
+      ::arc::mojom::ScaleFactor scale_factor,
+      RequestTextSelectionActionsCallback callback) override;
 
  private:
   std::vector<Broadcast> broadcasts_;

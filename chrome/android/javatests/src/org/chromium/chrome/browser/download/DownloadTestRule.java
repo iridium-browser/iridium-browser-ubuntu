@@ -9,7 +9,6 @@ import android.content.Context;
 import android.database.Cursor;
 import android.os.Environment;
 import android.os.Handler;
-import android.support.test.InstrumentationRegistry;
 import android.text.TextUtils;
 
 import org.junit.Assert;
@@ -21,6 +20,7 @@ import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.chrome.browser.ChromeActivity;
+import org.chromium.chrome.browser.preferences.PrefServiceBridge;
 import org.chromium.chrome.test.ChromeActivityTestRule;
 
 import java.io.File;
@@ -181,9 +181,9 @@ public class DownloadTestRule extends ChromeActivityTestRule<ChromeActivity> {
     }
 
     private class TestDownloadManagerService extends DownloadManagerService {
-        public TestDownloadManagerService(Context context, DownloadNotifier downloadNotifier,
-                Handler handler, long updateDelayInMillis) {
-            super(context, downloadNotifier, handler, updateDelayInMillis);
+        public TestDownloadManagerService(
+                DownloadNotifier downloadNotifier, Handler handler, long updateDelayInMillis) {
+            super(downloadNotifier, handler, updateDelayInMillis);
         }
 
         @Override
@@ -209,14 +209,17 @@ public class DownloadTestRule extends ChromeActivityTestRule<ChromeActivity> {
     private void setUp() throws Exception {
         mActivityStart.customMainActivityStart();
 
+        ThreadUtils.runOnUiThreadBlocking(() -> {
+            PrefServiceBridge.getInstance().setPromptForDownloadAndroid(
+                    DownloadPromptStatus.DONT_SHOW);
+        });
+
         cleanUpAllDownloads();
 
-        final Context context = InstrumentationRegistry.getTargetContext().getApplicationContext();
-
         ThreadUtils.runOnUiThreadBlocking(() -> {
-            mSavedDownloadManagerService = DownloadManagerService.setDownloadManagerService(
-                    new TestDownloadManagerService(context, new SystemDownloadNotifier(context),
-                            new Handler(), UPDATE_DELAY_MILLIS));
+            mSavedDownloadManagerService =
+                    DownloadManagerService.setDownloadManagerService(new TestDownloadManagerService(
+                            new SystemDownloadNotifier(), new Handler(), UPDATE_DELAY_MILLIS));
             DownloadController.setDownloadNotificationService(
                     DownloadManagerService.getDownloadManagerService());
         });

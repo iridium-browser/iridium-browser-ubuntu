@@ -14,6 +14,7 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/location.h"
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
@@ -67,7 +68,7 @@ class RedirectTest : public InProcessBrowserTest {
                                const history::RedirectList* redirects) {
     rv->insert(rv->end(), redirects->begin(), redirects->end());
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::MessageLoop::QuitWhenIdleClosure());
+        FROM_HERE, base::RunLoop::QuitCurrentWhenIdleClosureDeprecated());
   }
 
   // Tracker for asynchronous history queries.
@@ -303,8 +304,7 @@ IN_PROC_BROWSER_TEST_F(RedirectTest,
   std::vector<GURL> redirects = GetRedirects(first_url);
   // Check to make sure our request for /title2.html doesn't get flagged
   // as a client redirect from the first (/client-redirect?) page.
-  for (std::vector<GURL>::iterator it = redirects.begin();
-       it != redirects.end(); ++it) {
+  for (auto it = redirects.begin(); it != redirects.end(); ++it) {
     if (final_url.spec() == it->spec()) {
       final_navigation_not_redirect = false;
       break;

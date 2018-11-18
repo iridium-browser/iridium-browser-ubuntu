@@ -6,6 +6,7 @@ import("//third_party/blink/renderer/modules/modules.gni")
 blink_modules_sources("exported") {
   sources = [
     "web_apply_constraints_request.cc",
+    "web_ax_context.cc",
     "web_ax_object.cc",
     "web_crypto_normalize.cc",
     "web_dom_file_system.cc",
@@ -16,10 +17,6 @@ blink_modules_sources("exported") {
     "web_idb_key_range.cc",
     "web_idb_value.cc",
     "web_media_stream_registry.cc",
-    "web_speech_grammar.cc",
-    "web_speech_recognition_handle.cc",
-    "web_speech_recognition_result.cc",
-    "web_speech_recognizer_client.cc",
     "web_storage_event_dispatcher_impl.cc",
     "web_user_media_request.cc",
   ]
@@ -44,6 +41,4 @@ static_library("test_support") {
     "//third_party/blink/renderer:config",
     "//third_party/blink/renderer/core:blink_core_pch",
   ]
-
-  include_dirs = [ "$root_gen_dir/third_party/blink/renderer" ]
 }

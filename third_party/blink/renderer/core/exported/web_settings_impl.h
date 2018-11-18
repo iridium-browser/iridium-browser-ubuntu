@@ -54,7 +54,6 @@ class CORE_EXPORT WebSettingsImpl final : public WebSettings {
   void SetAcceleratedCompositingEnabled(bool) override;
   void SetAutoplayPolicy(AutoplayPolicy) override;
   void SetPreferCompositingToLCDTextEnabled(bool) override;
-  void SetAccessibilityEnabled(bool) override;
   void SetAccessibilityPasswordValuesEnabled(bool) override;
   void SetAllowFileAccessFromFileURLs(bool) override;
   void SetAllowCustomScrollbarInMainFrame(bool) override;
@@ -66,7 +65,6 @@ class CORE_EXPORT WebSettingsImpl final : public WebSettings {
   void SetAntialiased2dCanvasEnabled(bool) override;
   void SetAntialiasedClips2dCanvasEnabled(bool) override;
   void SetAutoZoomFocusedNodeToLegibleScale(bool) override;
-  void SetBrowserSideNavigationEnabled(bool) override;
   void SetClobberUserAgentInitialScaleQuirk(bool) override;
   void SetCookieEnabled(bool) override;
   void SetNavigateOnDragDrop(bool) override;
@@ -86,14 +84,13 @@ class CORE_EXPORT WebSettingsImpl final : public WebSettings {
   void SetEditingBehavior(EditingBehavior) override;
   void SetEnableScrollAnimator(bool) override;
   void SetEnableTouchAdjustment(bool) override;
-  bool MultiTargetTapNotificationEnabled() override;
-  void SetMultiTargetTapNotificationEnabled(bool) override;
   void SetWebGL1Enabled(bool) override;
   void SetWebGL2Enabled(bool) override;
   void SetFantasyFontFamily(const WebString&,
                             UScriptCode = USCRIPT_COMMON) override;
   void SetFixedFontFamily(const WebString&,
                           UScriptCode = USCRIPT_COMMON) override;
+  void SetNetworkQuietTimeout(double timeout) override;
   void SetForceMainWorldInitialization(bool) override;
   void SetForcePreloadNoneForMediaElements(bool) override;
   void SetForceZeroLayoutHeight(bool) override;
@@ -117,6 +114,8 @@ class CORE_EXPORT WebSettingsImpl final : public WebSettings {
   void SetMainFrameResizesAreOrientationChanges(bool) override;
   void SetMaxTouchPoints(int) override;
   void SetPictureInPictureEnabled(bool) override;
+  void SetDataSaverHoldbackWebApi(bool) override;
+  void SetDataSaverHoldbackMediaApi(bool) override;
   void SetMediaPlaybackGestureWhitelistScope(const WebString&) override;
   void SetPresentationRequiresUserGesture(bool) override;
   void SetEmbeddedMediaExperienceEnabled(bool) override;
@@ -145,7 +144,7 @@ class CORE_EXPORT WebSettingsImpl final : public WebSettings {
   void SetRubberBandingOnCompositorThread(bool) override;
   void SetSansSerifFontFamily(const WebString&,
                               UScriptCode = USCRIPT_COMMON) override;
-  void SetSelectTrailingWhitespaceEnabled(bool override);
+  void SetSelectTrailingWhitespaceEnabled(bool override) override;
   void SetSelectionIncludesAltImageText(bool) override;
   void SetSelectionStrategy(SelectionStrategyType) override;
   void SetSerifFontFamily(const WebString&,
@@ -206,6 +205,21 @@ class CORE_EXPORT WebSettingsImpl final : public WebSettings {
   void SetMediaDownloadInProductHelpEnabled(bool) override;
   void SetLowPriorityIframesThreshold(WebEffectiveConnectionType) override;
 
+  // TODO(rajendrant): Remove these lazyload distance threshold settings for
+  // frames and images, once the values are finalized from the experiment.
+  void SetLazyFrameLoadingDistanceThresholdPxUnknown(int) override;
+  void SetLazyFrameLoadingDistanceThresholdPxOffline(int) override;
+  void SetLazyFrameLoadingDistanceThresholdPxSlow2G(int) override;
+  void SetLazyFrameLoadingDistanceThresholdPx2G(int) override;
+  void SetLazyFrameLoadingDistanceThresholdPx3G(int) override;
+  void SetLazyFrameLoadingDistanceThresholdPx4G(int) override;
+  void SetLazyImageLoadingDistanceThresholdPxUnknown(int) override;
+  void SetLazyImageLoadingDistanceThresholdPxOffline(int) override;
+  void SetLazyImageLoadingDistanceThresholdPxSlow2G(int) override;
+  void SetLazyImageLoadingDistanceThresholdPx2G(int) override;
+  void SetLazyImageLoadingDistanceThresholdPx3G(int) override;
+  void SetLazyImageLoadingDistanceThresholdPx4G(int) override;
+
   bool ShowFPSCounter() const { return show_fps_counter_; }
   bool ShowPaintRects() const { return show_paint_rects_; }
   bool RenderVSyncNotificationEnabled() const {
@@ -242,7 +256,6 @@ class CORE_EXPORT WebSettingsImpl final : public WebSettings {
   bool auto_zoom_focused_node_to_legible_scale_;
   bool per_tile_painting_enabled_;
   bool support_deprecated_target_density_dpi_;
-  bool shrinks_viewport_content_to_fit_;
   // This quirk is to maintain compatibility with Android apps built on
   // the Android SDK prior to and including version 18. Presumably, this
   // can be removed any time after 2015. See http://crbug.com/277369.

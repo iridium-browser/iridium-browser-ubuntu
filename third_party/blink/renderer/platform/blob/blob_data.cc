@@ -46,7 +46,6 @@
 #include "third_party/blink/renderer/platform/cross_thread_functional.h"
 #include "third_party/blink/renderer/platform/histogram.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
-#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/text/line_ending.h"
 #include "third_party/blink/renderer/platform/uuid.h"
 #include "third_party/blink/renderer/platform/web_task_runner.h"
@@ -216,8 +215,7 @@ void BlobData::AppendText(const String& text,
                           bool do_normalize_line_endings_to_native) {
   DCHECK_EQ(file_composition_, FileCompositionStatus::NO_UNKNOWN_SIZE_FILES)
       << "Blobs with a unknown-size file cannot have other items.";
-  CString utf8_text =
-      UTF8Encoding().Encode(text, WTF::kEntitiesForUnencodables);
+  CString utf8_text = UTF8Encoding().Encode(text, WTF::kNoUnencodables);
 
   if (do_normalize_line_endings_to_native) {
     if (utf8_text.length() >
@@ -282,14 +280,14 @@ void BlobData::AppendDataInternal(base::span<const char> data,
       current_memory_population_ += data.size();
     } else if (bytes_element->embedded_data) {
       current_memory_population_ -= bytes_element->embedded_data->size();
-      bytes_element->embedded_data = WTF::nullopt;
+      bytes_element->embedded_data = base::nullopt;
     }
   } else {
     BytesProviderPtrInfo bytes_provider_info;
     last_bytes_provider_ =
         BlobBytesProvider::CreateAndBind(MakeRequest(&bytes_provider_info));
 
-    auto bytes_element = DataElementBytes::New(data.size(), WTF::nullopt,
+    auto bytes_element = DataElementBytes::New(data.size(), base::nullopt,
                                                std::move(bytes_provider_info));
     if (should_embed_bytes) {
       bytes_element->embedded_data = Vector<uint8_t>();
@@ -360,6 +358,18 @@ BlobPtr BlobDataHandle::CloneBlobPtr() {
   blob->Clone(MakeRequest(&blob_clone));
   blob_info_ = blob.PassInterface();
   return blob_clone;
+}
+
+network::mojom::blink::DataPipeGetterPtr BlobDataHandle::AsDataPipeGetter() {
+  MutexLocker locker(blob_info_mutex_);
+  if (!blob_info_.is_valid())
+    return nullptr;
+  network::mojom::blink::DataPipeGetterPtr result;
+  BlobPtr blob;
+  blob.Bind(std::move(blob_info_));
+  blob->AsDataPipeGetter(MakeRequest(&result));
+  blob_info_ = blob.PassInterface();
+  return result;
 }
 
 void BlobDataHandle::ReadAll(mojo::ScopedDataPipeProducerHandle pipe,

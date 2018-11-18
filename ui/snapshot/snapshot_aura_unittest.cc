@@ -10,7 +10,10 @@
 #include "base/bind.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
+#include "base/test/scoped_task_environment.h"
 #include "base/test/test_simple_task_runner.h"
+#include "base/win/windows_version.h"
+#include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkPixelRef.h"
 #include "ui/aura/test/aura_test_helper.h"
@@ -96,6 +99,10 @@ class SnapshotAuraTest : public testing::Test {
   void SetUp() override {
     testing::Test::SetUp();
 
+    scoped_task_environment_ =
+        std::make_unique<base::test::ScopedTaskEnvironment>(
+            base::test::ScopedTaskEnvironment::MainThreadType::UI);
+
     // The ContextFactory must exist before any Compositors are created.
     // Snapshot test tests real drawing and readback, so needs pixel output.
     bool enable_pixel_output = true;
@@ -116,6 +123,7 @@ class SnapshotAuraTest : public testing::Test {
     helper_->RunAllPendingInMessageLoop();
     helper_->TearDown();
     ui::TerminateContextFactoryForTests();
+    scoped_task_environment_.reset();
     testing::Test::TearDown();
   }
 
@@ -176,6 +184,7 @@ class SnapshotAuraTest : public testing::Test {
     bool completed_;
   };
 
+  std::unique_ptr<base::test::ScopedTaskEnvironment> scoped_task_environment_;
   std::unique_ptr<aura::test::AuraTestHelper> helper_;
   std::unique_ptr<aura::Window> test_window_;
   std::unique_ptr<TestPaintingWindowDelegate> delegate_;
@@ -184,7 +193,19 @@ class SnapshotAuraTest : public testing::Test {
   DISALLOW_COPY_AND_ASSIGN(SnapshotAuraTest);
 };
 
-TEST_F(SnapshotAuraTest, FullScreenWindow) {
+#if defined(OS_WIN) && !defined(NDEBUG)
+// https://crbug.com/852512
+#define MAYBE_FullScreenWindow DISABLED_FullScreenWindow
+#else
+#define MAYBE_FullScreenWindow FullScreenWindow
+#endif
+TEST_F(SnapshotAuraTest, MAYBE_FullScreenWindow) {
+#if defined(OS_WIN)
+  // TODO(https://crbug.com/850556): Make work on Win10.
+  base::win::Version version = base::win::GetVersion();
+  if (version >= base::win::VERSION_WIN10)
+    return;
+#endif
   SetupTestWindow(root_window()->bounds());
   WaitForDraw();
 
@@ -195,6 +216,12 @@ TEST_F(SnapshotAuraTest, FullScreenWindow) {
 }
 
 TEST_F(SnapshotAuraTest, PartialBounds) {
+#if defined(OS_WIN)
+  // TODO(https://crbug.com/850556): Make work on Win10.
+  base::win::Version version = base::win::GetVersion();
+  if (version >= base::win::VERSION_WIN10)
+    return;
+#endif
   gfx::Rect test_bounds(100, 100, 300, 200);
   SetupTestWindow(test_bounds);
   WaitForDraw();
@@ -205,6 +232,12 @@ TEST_F(SnapshotAuraTest, PartialBounds) {
 }
 
 TEST_F(SnapshotAuraTest, Rotated) {
+#if defined(OS_WIN)
+  // TODO(https://crbug.com/850556): Make work on Win10.
+  base::win::Version version = base::win::GetVersion();
+  if (version >= base::win::VERSION_WIN10)
+    return;
+#endif
   test_screen()->SetDisplayRotation(display::Display::ROTATE_90);
 
   gfx::Rect test_bounds(100, 100, 300, 200);
@@ -217,6 +250,12 @@ TEST_F(SnapshotAuraTest, Rotated) {
 }
 
 TEST_F(SnapshotAuraTest, UIScale) {
+#if defined(OS_WIN)
+  // TODO(https://crbug.com/850556): Make work on Win10.
+  base::win::Version version = base::win::GetVersion();
+  if (version >= base::win::VERSION_WIN10)
+    return;
+#endif
   const float kUIScale = 0.5f;
   test_screen()->SetUIScale(kUIScale);
 
@@ -235,6 +274,12 @@ TEST_F(SnapshotAuraTest, UIScale) {
 }
 
 TEST_F(SnapshotAuraTest, DeviceScaleFactor) {
+#if defined(OS_WIN)
+  // TODO(https://crbug.com/850556): Make work on Win10.
+  base::win::Version version = base::win::GetVersion();
+  if (version >= base::win::VERSION_WIN10)
+    return;
+#endif
   test_screen()->SetDeviceScaleFactor(2.0f);
 
   gfx::Rect test_bounds(100, 100, 150, 100);
@@ -252,6 +297,12 @@ TEST_F(SnapshotAuraTest, DeviceScaleFactor) {
 }
 
 TEST_F(SnapshotAuraTest, RotateAndUIScale) {
+#if defined(OS_WIN)
+  // TODO(https://crbug.com/850556): Make work on Win10.
+  base::win::Version version = base::win::GetVersion();
+  if (version >= base::win::VERSION_WIN10)
+    return;
+#endif
   const float kUIScale = 0.5f;
   test_screen()->SetUIScale(kUIScale);
   test_screen()->SetDisplayRotation(display::Display::ROTATE_90);
@@ -271,6 +322,12 @@ TEST_F(SnapshotAuraTest, RotateAndUIScale) {
 }
 
 TEST_F(SnapshotAuraTest, RotateAndUIScaleAndScaleFactor) {
+#if defined(OS_WIN)
+  // TODO(https://crbug.com/850556): Make work on Win10.
+  base::win::Version version = base::win::GetVersion();
+  if (version >= base::win::VERSION_WIN10)
+    return;
+#endif
   test_screen()->SetDeviceScaleFactor(2.0f);
   const float kUIScale = 0.5f;
   test_screen()->SetUIScale(kUIScale);

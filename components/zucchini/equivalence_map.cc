@@ -8,11 +8,32 @@
 #include <utility>
 
 #include "base/logging.h"
+#include "base/numerics/safe_conversions.h"
+#include "base/stl_util.h"
 #include "components/zucchini/encoded_view.h"
 #include "components/zucchini/patch_reader.h"
 #include "components/zucchini/suffix_array.h"
 
 namespace zucchini {
+
+namespace {
+
+// TODO(haungs): Tune these numbers to improve pathological case results.
+
+// In pathological cases Zucchini can exhibit O(n^2) behavior if the seed
+// selection process runs to completion. To prevent this we impose a quota for
+// the total length of equivalences the seed selection process can perform
+// trials on. For regular use cases it is unlikely this quota will be exceeded,
+// and if it is the effects on patch size are expected to be small.
+constexpr uint64_t kSeedSelectionTotalVisitLengthQuota = 1 << 18;  // 256 KiB
+
+// The aforementioned quota alone is insufficient, as exploring backwards will
+// still be very successful resulting in O(n) behavior in the case of a limited
+// seed selection trials. This results in O(n^2) behavior returning. To mitigate
+// this we also impose a cap on the ExtendEquivalenceBackward() exploration.
+constexpr offset_t kBackwardsExtendLimit = 1 << 16;  // 64 KiB
+
+}  // namespace
 
 /******** Utility Functions ********/
 
@@ -39,12 +60,13 @@ double GetTokenSimilarity(
 
   const ReferenceSet& old_ref_set = old_image_index.refs(old_type);
   const ReferenceSet& new_ref_set = new_image_index.refs(new_type);
-  IndirectReference old_reference = old_ref_set.at(src);
-  IndirectReference new_reference = new_ref_set.at(dst);
+  Reference old_reference = old_ref_set.at(src);
+  Reference new_reference = new_ref_set.at(dst);
   PoolTag pool_tag = old_ref_set.pool_tag();
 
   double affinity = targets_affinities[pool_tag.value()].AffinityBetween(
-      old_reference.target_key, new_reference.target_key);
+      old_ref_set.target_pool().KeyForOffset(old_reference.target),
+      new_ref_set.target_pool().KeyForOffset(new_reference.target));
 
   // Both targets are not associated, which implies a weak match.
   if (affinity == 0.0)
@@ -132,8 +154,9 @@ EquivalenceCandidate ExtendEquivalenceBackward(
   double current_similarity = candidate.similarity;
   double best_similarity = current_similarity;
   double current_penalty = 0.0;
-  for (offset_t k = 1;
-       k <= equivalence.dst_offset && k <= equivalence.src_offset; ++k) {
+  offset_t k_min = std::min(
+      {equivalence.dst_offset, equivalence.src_offset, kBackwardsExtendLimit});
+  for (offset_t k = 1; k <= k_min; ++k) {
     // Mismatch in type, |candidate| cannot be extended further.
     if (old_image_index.LookupType(equivalence.src_offset - k) !=
         new_image_index.LookupType(equivalence.dst_offset - k)) {
@@ -191,15 +214,25 @@ EquivalenceCandidate VisitEquivalenceSeed(
 
 /******** OffsetMapper ********/
 
-OffsetMapper::OffsetMapper(std::vector<Equivalence>&& equivalences)
-    : equivalences_(std::move(equivalences)) {
+OffsetMapper::OffsetMapper(std::vector<Equivalence>&& equivalences,
+                           offset_t old_image_size,
+                           offset_t new_image_size)
+    : equivalences_(std::move(equivalences)),
+      old_image_size_(old_image_size),
+      new_image_size_(new_image_size) {
+  DCHECK_GT(new_image_size_, 0U);
   DCHECK(std::is_sorted(equivalences_.begin(), equivalences_.end(),
                         [](const Equivalence& a, const Equivalence& b) {
                           return a.src_offset < b.src_offset;
                         }));
+  // This is for testing. Assume pruned.
 }
 
-OffsetMapper::OffsetMapper(EquivalenceSource&& equivalence_source) {
+OffsetMapper::OffsetMapper(EquivalenceSource&& equivalence_source,
+                           offset_t old_image_size,
+                           offset_t new_image_size)
+    : old_image_size_(old_image_size), new_image_size_(new_image_size) {
+  DCHECK_GT(new_image_size_, 0U);
   for (auto e = equivalence_source.GetNext(); e.has_value();
        e = equivalence_source.GetNext()) {
     equivalences_.push_back(*e);
@@ -207,8 +240,13 @@ OffsetMapper::OffsetMapper(EquivalenceSource&& equivalence_source) {
   PruneEquivalencesAndSortBySource(&equivalences_);
 }
 
-OffsetMapper::OffsetMapper(const EquivalenceMap& equivalence_map)
-    : equivalences_(equivalence_map.size()) {
+OffsetMapper::OffsetMapper(const EquivalenceMap& equivalence_map,
+                           offset_t old_image_size,
+                           offset_t new_image_size)
+    : equivalences_(equivalence_map.size()),
+      old_image_size_(old_image_size),
+      new_image_size_(new_image_size) {
+  DCHECK_GT(new_image_size_, 0U);
   std::transform(equivalence_map.begin(), equivalence_map.end(),
                  equivalences_.begin(),
                  [](const EquivalenceCandidate& c) { return c.eq; });
@@ -217,17 +255,40 @@ OffsetMapper::OffsetMapper(const EquivalenceMap& equivalence_map)
 
 OffsetMapper::~OffsetMapper() = default;
 
-offset_t OffsetMapper::ForwardProject(offset_t offset) const {
-  auto pos = std::upper_bound(
-      equivalences_.begin(), equivalences_.end(), offset,
-      [](offset_t a, const Equivalence& b) { return a < b.src_offset; });
-  if (pos != equivalences_.begin()) {
-    if (pos == equivalences_.end() || offset < pos[-1].src_end() ||
-        offset - pos[-1].src_end() < pos->src_offset - offset) {
+// Safely evaluates |offset - unit.src_offset + unit.dst_offset| with signed
+// arithmetic, then clips the result to |[0, new_image_size_)|.
+offset_t OffsetMapper::NaiveExtendedForwardProject(const Equivalence& unit,
+                                                   offset_t offset) const {
+  int64_t old_offset64 = offset;
+  int64_t src_offset64 = unit.src_offset;
+  int64_t dst_offset64 = unit.dst_offset;
+  uint64_t new_offset64 = std::min<uint64_t>(
+      std::max<int64_t>(0LL, old_offset64 - src_offset64 + dst_offset64),
+      new_image_size_ - 1);
+  return base::checked_cast<offset_t>(new_offset64);
+}
+
+offset_t OffsetMapper::ExtendedForwardProject(offset_t offset) const {
+  DCHECK(!equivalences_.empty());
+  if (offset < old_image_size_) {
+    // Finds the equivalence unit whose "old" block is nearest to |offset|,
+    // favoring the block with lower offset in case of a tie.
+    auto pos = std::upper_bound(
+        equivalences_.begin(), equivalences_.end(), offset,
+        [](offset_t a, const Equivalence& b) { return a < b.src_offset; });
+    // For tiebreaking: |offset - pos[-1].src_end()| is actually 1 less than
+    // |offset|'s distance to "old" block of |pos[-1]|. Therefore "<" is used.
+    if (pos != equivalences_.begin() &&
+        (pos == equivalences_.end() || offset < pos[-1].src_end() ||
+         offset - pos[-1].src_end() < pos->src_offset - offset)) {
       --pos;
     }
+    return NaiveExtendedForwardProject(*pos, offset);
   }
-  return offset - pos->src_offset + pos->dst_offset;
+  // Fake offsets.
+  offset_t delta = offset - old_image_size_;
+  return delta < kOffsetBound - new_image_size_ ? new_image_size_ + delta
+                                                : kOffsetBound - 1;
 }
 
 void OffsetMapper::ForwardProjectAll(std::vector<offset_t>* offsets) const {
@@ -244,8 +305,7 @@ void OffsetMapper::ForwardProjectAll(std::vector<offset_t>* offsets) const {
       src = kInvalidOffset;
     }
   }
-  offsets->erase(std::remove(offsets->begin(), offsets->end(), kInvalidOffset),
-                 offsets->end());
+  base::Erase(*offsets, kInvalidOffset);
   offsets->shrink_to_fit();
 }
 
@@ -305,11 +365,9 @@ void OffsetMapper::PruneEquivalencesAndSortBySource(
   }
 
   // Discard all equivalences with length == 0.
-  equivalences->erase(std::remove_if(equivalences->begin(), equivalences->end(),
-                                     [](const Equivalence& equivalence) {
-                                       return equivalence.length == 0;
-                                     }),
-                      equivalences->end());
+  base::EraseIf(*equivalences, [](const Equivalence& equivalence) {
+    return equivalence.length == 0;
+  });
 }
 
 /******** EquivalenceMap ********/
@@ -374,6 +432,7 @@ void EquivalenceMap::CreateCandidates(
     offset_t next_dst_offset = dst_offset + 1;
     // TODO(huangs): Clean up.
     double best_similarity = min_similarity;
+    uint64_t total_visit_length = 0;
     EquivalenceCandidate best_candidate = {{0, 0, 0}, 0.0};
     for (auto it = match; it != old_sa.end(); ++it) {
       EquivalenceCandidate candidate = VisitEquivalenceSeed(
@@ -383,10 +442,15 @@ void EquivalenceMap::CreateCandidates(
         best_candidate = candidate;
         best_similarity = candidate.similarity;
         next_dst_offset = candidate.eq.dst_end();
+        total_visit_length += candidate.eq.length;
+        if (total_visit_length > kSeedSelectionTotalVisitLengthQuota) {
+          break;
+        }
       } else {
         break;
       }
     }
+    total_visit_length = 0;
     for (auto it = match; it != old_sa.begin(); --it) {
       EquivalenceCandidate candidate = VisitEquivalenceSeed(
           old_view.image_index(), new_view.image_index(), targets_affinities,
@@ -395,6 +459,10 @@ void EquivalenceMap::CreateCandidates(
         best_candidate = candidate;
         best_similarity = candidate.similarity;
         next_dst_offset = candidate.eq.dst_end();
+        total_visit_length += candidate.eq.length;
+        if (total_visit_length > kSeedSelectionTotalVisitLengthQuota) {
+          break;
+        }
       } else {
         break;
       }
@@ -471,12 +539,10 @@ void EquivalenceMap::Prune(
   }
 
   // Discard all candidates with similarity smaller than |min_similarity|.
-  candidates_.erase(
-      std::remove_if(candidates_.begin(), candidates_.end(),
-                     [min_similarity](const EquivalenceCandidate& candidate) {
-                       return candidate.similarity < min_similarity;
-                     }),
-      candidates_.end());
+  base::EraseIf(candidates_,
+                [min_similarity](const EquivalenceCandidate& candidate) {
+                  return candidate.similarity < min_similarity;
+                });
 }
 
 }  // namespace zucchini

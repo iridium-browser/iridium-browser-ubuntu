@@ -33,6 +33,8 @@
 
 namespace blink {
 
+class USVStringOrTrustedURL;
+class ExceptionState;
 class HTMLSourceElement final : public HTMLElement {
   DEFINE_WRAPPERTYPEINFO();
 
@@ -42,8 +44,12 @@ class HTMLSourceElement final : public HTMLElement {
   DECLARE_NODE_FACTORY(HTMLSourceElement);
   ~HTMLSourceElement() override;
 
+  // Returns attributes that should be checked against Trusted Types
+  const HashSet<AtomicString>& GetCheckedAttributeNames() const override;
+
   const AtomicString& type() const;
   void SetSrc(const String&);
+  void SetSrc(const USVStringOrTrustedURL&, ExceptionState&);
   void setType(const AtomicString&);
 
   void ScheduleErrorEvent();
@@ -54,7 +60,7 @@ class HTMLSourceElement final : public HTMLElement {
   void RemoveMediaQueryListListener();
   void AddMediaQueryListListener();
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  private:
   explicit HTMLSourceElement(Document&);
@@ -63,8 +69,8 @@ class HTMLSourceElement final : public HTMLElement {
 
   void DidMoveToNewDocument(Document& old_document) override;
 
-  InsertionNotificationRequest InsertedInto(ContainerNode*) override;
-  void RemovedFrom(ContainerNode*) override;
+  InsertionNotificationRequest InsertedInto(ContainerNode&) override;
+  void RemovedFrom(ContainerNode&) override;
   bool IsURLAttribute(const Attribute&) const override;
   void ParseAttribute(const AttributeModificationParams&) override;
 

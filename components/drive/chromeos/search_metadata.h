@@ -25,7 +25,8 @@ namespace internal {
 
 class ResourceMetadata;
 
-typedef base::Callback<bool(const ResourceEntry&)> SearchMetadataPredicate;
+typedef base::RepeatingCallback<bool(const ResourceEntry&)>
+    SearchMetadataPredicate;
 
 // Searches the local resource metadata, and returns the entries
 // |at_most_num_matches| that contain |query| in their base names. Search is
@@ -42,7 +43,7 @@ void SearchMetadata(
     const SearchMetadataPredicate& predicate,
     size_t at_most_num_matches,
     MetadataSearchOrder order,
-    const SearchMetadataCallback& callback);
+    SearchMetadataCallback callback);
 
 // Returns true if |entry| is eligible for the search |options| and should be
 // tested for the match with the query.  If

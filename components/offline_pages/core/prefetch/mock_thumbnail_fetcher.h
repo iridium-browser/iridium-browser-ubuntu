@@ -14,13 +14,10 @@ class MockThumbnailFetcher : public ThumbnailFetcher {
  public:
   MockThumbnailFetcher();
   ~MockThumbnailFetcher() override;
-  MOCK_METHOD2(FetchSuggestionImageData_,
+  MOCK_METHOD3(FetchSuggestionImageData,
                void(const ClientId& client_id,
-                    ImageDataFetchedCallback* callback));
-  void FetchSuggestionImageData(const ClientId& client_id,
-                                ImageDataFetchedCallback callback) {
-    FetchSuggestionImageData_(client_id, &callback);
-  }
+                    bool is_first_attempt,
+                    ImageDataFetchedCallback callback));
 };
 
 }  // namespace offline_pages

@@ -12,7 +12,6 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_string_resource.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer.h"
@@ -21,6 +20,7 @@
 #include "third_party/blink/renderer/modules/nfc/nfc_push_options.h"
 #include "third_party/blink/renderer/modules/nfc/nfc_watch_options.h"
 #include "third_party/blink/renderer/platform/mojo/mojo_helper.h"
+#include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 
 namespace {
 const char kJsonMimePostfix[] = "+json";
@@ -175,8 +175,8 @@ struct TypeConverter<NFCMessagePtr, String> {
 };
 
 template <>
-struct TypeConverter<Optional<Vector<uint8_t>>, blink::ScriptValue> {
-  static Optional<Vector<uint8_t>> Convert(
+struct TypeConverter<base::Optional<Vector<uint8_t>>, blink::ScriptValue> {
+  static base::Optional<Vector<uint8_t>> Convert(
       const blink::ScriptValue& scriptValue) {
     v8::Local<v8::Value> value = scriptValue.V8Value();
 
@@ -202,11 +202,11 @@ struct TypeConverter<Optional<Vector<uint8_t>>, blink::ScriptValue> {
       if (!v8::JSON::Stringify(scriptValue.GetContext(), value.As<v8::Object>())
                .ToLocal(&jsonString) ||
           try_catch.HasCaught()) {
-        return WTF::nullopt;
+        return base::nullopt;
       }
 
-      String string = blink::V8StringToWebCoreString<String>(
-          jsonString, blink::kDoNotExternalize);
+      String string =
+          blink::ToBlinkString<String>(jsonString, blink::kDoNotExternalize);
       return mojo::ConvertTo<Vector<uint8_t>>(string);
     }
 
@@ -215,7 +215,7 @@ struct TypeConverter<Optional<Vector<uint8_t>>, blink::ScriptValue> {
           blink::V8ArrayBuffer::ToImpl(value.As<v8::Object>()));
     }
 
-    return WTF::nullopt;
+    return base::nullopt;
   }
 };
 
@@ -251,7 +251,8 @@ struct TypeConverter<NFCRecordPtr, blink::NFCRecord> {
         break;
     }
 
-    auto recordData = mojo::ConvertTo<Optional<Vector<uint8_t>>>(record.data());
+    auto recordData =
+        mojo::ConvertTo<base::Optional<Vector<uint8_t>>>(record.data());
     // If JS object cannot be converted to uint8_t array, return null,
     // interrupt NFCMessage conversion algorithm and reject promise with
     // SyntaxError exception.
@@ -269,7 +270,7 @@ struct TypeConverter<NFCMessagePtr, blink::NFCMessage> {
     NFCMessagePtr messagePtr = NFCMessage::New();
     messagePtr->url = message.url();
     messagePtr->data.resize(message.records().size());
-    for (size_t i = 0; i < message.records().size(); ++i) {
+    for (wtf_size_t i = 0; i < message.records().size(); ++i) {
       NFCRecordPtr record = NFCRecord::From(message.records()[i]);
       if (record.is_null())
         return nullptr;
@@ -372,10 +373,10 @@ ScriptPromise RejectWithTypeError(ScriptState* script_state,
 }
 
 ScriptPromise RejectWithDOMException(ScriptState* script_state,
-                                     ExceptionCode ec,
+                                     DOMExceptionCode exception_code,
                                      const String& message) {
   return ScriptPromise::RejectWithDOMException(
-      script_state, DOMException::Create(ec, message));
+      script_state, DOMException::Create(exception_code, message));
 }
 
 ScriptPromise RejectIfInvalidTextRecord(ScriptState* script_state,
@@ -390,7 +391,7 @@ ScriptPromise RejectIfInvalidTextRecord(ScriptState* script_state,
 
   if (record.hasMediaType() &&
       !record.mediaType().StartsWithIgnoringASCIICase(kPlainTextMimePrefix)) {
-    return RejectWithDOMException(script_state, kSyntaxError,
+    return RejectWithDOMException(script_state, DOMExceptionCode::kSyntaxError,
                                   "Invalid media type for 'text' record.");
   }
 
@@ -407,7 +408,7 @@ ScriptPromise RejectIfInvalidURLRecord(ScriptState* script_state,
   blink::V8StringResource<> string_resource = record.data().V8Value();
   if (!string_resource.Prepare() ||
       !KURL(NullURL(), string_resource).IsValid()) {
-    return RejectWithDOMException(script_state, kSyntaxError,
+    return RejectWithDOMException(script_state, DOMExceptionCode::kSyntaxError,
                                   "Cannot parse data for 'url' record.");
   }
 
@@ -428,7 +429,7 @@ ScriptPromise RejectIfInvalidJSONRecord(ScriptState* script_state,
       (record.mediaType() != kJsonMimeType &&
        !(record.mediaType().StartsWithIgnoringASCIICase(kJsonMimePrefix) &&
          record.mediaType().EndsWithIgnoringASCIICase(kJsonMimePostfix)))) {
-    return RejectWithDOMException(script_state, kSyntaxError,
+    return RejectWithDOMException(script_state, DOMExceptionCode::kSyntaxError,
                                   "Invalid media type for 'json' record.");
   }
 
@@ -618,7 +619,7 @@ NFCMessage ToNFCMessage(ScriptState* script_state,
   NFCMessage nfc_message;
   nfc_message.setURL(message->url);
   blink::HeapVector<NFCRecord> records;
-  for (size_t i = 0; i < message->data.size(); ++i)
+  for (wtf_size_t i = 0; i < message->data.size(); ++i)
     records.push_back(ToNFCRecord(script_state, message->data[i]));
   nfc_message.setRecords(records);
   return nfc_message;
@@ -626,7 +627,7 @@ NFCMessage ToNFCMessage(ScriptState* script_state,
 
 size_t GetNFCMessageSize(const device::mojom::blink::NFCMessagePtr& message) {
   size_t message_size = message->url.CharactersSizeInBytes();
-  for (size_t i = 0; i < message->data.size(); ++i) {
+  for (wtf_size_t i = 0; i < message->data.size(); ++i) {
     message_size += message->data[i]->media_type.CharactersSizeInBytes();
     message_size += message->data[i]->data.size();
   }
@@ -700,19 +701,20 @@ ScriptPromise NFC::push(ScriptState* script_state,
   device::mojom::blink::NFCMessagePtr message =
       device::mojom::blink::NFCMessage::From(push_message);
   if (!message) {
-    return RejectWithDOMException(script_state, kSyntaxError,
+    return RejectWithDOMException(script_state, DOMExceptionCode::kSyntaxError,
                                   "Cannot convert NFCMessage.");
   }
 
   if (!SetURL(
           ExecutionContext::From(script_state)->GetSecurityOrigin()->ToString(),
           message)) {
-    return RejectWithDOMException(script_state, kSyntaxError,
+    return RejectWithDOMException(script_state, DOMExceptionCode::kSyntaxError,
                                   "Cannot set WebNFC Id.");
   }
 
   if (GetNFCMessageSize(message) > device::mojom::blink::NFCMessage::kMaxSize) {
-    return RejectWithDOMException(script_state, kNotSupportedError,
+    return RejectWithDOMException(script_state,
+                                  DOMExceptionCode::kNotSupportedError,
                                   "NFCMessage exceeds maximum supported size.");
   }
 
@@ -755,7 +757,8 @@ ScriptPromise NFC::watch(ScriptState* script_state,
   if (options.hasURL() && !options.url().IsEmpty()) {
     KURL pattern_url(options.url());
     if (!pattern_url.IsValid() || pattern_url.Protocol() != kProtocolHttps) {
-      return RejectWithDOMException(script_state, kSyntaxError,
+      return RejectWithDOMException(script_state,
+                                    DOMExceptionCode::kSyntaxError,
                                     "Invalid URL pattern was provided.");
     }
   }
@@ -772,7 +775,7 @@ ScriptPromise NFC::watch(ScriptState* script_state,
 }
 
 // https://w3c.github.io/web-nfc/#dom-nfc-cancelwatch
-ScriptPromise NFC::cancelWatch(ScriptState* script_state, long id) {
+ScriptPromise NFC::cancelWatch(ScriptState* script_state, int32_t id) {
   ScriptPromise promise = RejectIfNotSupported(script_state);
   if (!promise.IsEmpty())
     return promise;
@@ -780,7 +783,8 @@ ScriptPromise NFC::cancelWatch(ScriptState* script_state, long id) {
   if (id) {
     callbacks_.erase(id);
   } else {
-    return RejectWithDOMException(script_state, kNotFoundError,
+    return RejectWithDOMException(script_state,
+                                  DOMExceptionCode::kNotFoundError,
                                   "Provided watch id cannot be found.");
   }
 
@@ -868,8 +872,8 @@ bool NFC::IsSupportedInContext(ExecutionContext* context,
                                String& error_message) {
   // https://w3c.github.io/web-nfc/#security-policies
   // WebNFC API must be only accessible from top level browsing context.
-  if (!ToDocument(context)->domWindow()->GetFrame() ||
-      !ToDocument(context)->GetFrame()->IsMainFrame()) {
+  if (!To<Document>(context)->domWindow()->GetFrame() ||
+      !To<Document>(context)->GetFrame()->IsMainFrame()) {
     error_message = "Must be in a top-level browsing context";
     return false;
   }
@@ -881,11 +885,13 @@ ScriptPromise NFC::RejectIfNotSupported(ScriptState* script_state) {
   String error_message;
   if (!IsSupportedInContext(ExecutionContext::From(script_state),
                             error_message)) {
-    return RejectWithDOMException(script_state, kSecurityError, error_message);
+    return RejectWithDOMException(
+        script_state, DOMExceptionCode::kSecurityError, error_message);
   }
 
   if (!nfc_) {
-    return RejectWithDOMException(script_state, kNotSupportedError,
+    return RejectWithDOMException(script_state,
+                                  DOMExceptionCode::kNotSupportedError,
                                   "WebNFC is not supported.");
   }
 
@@ -923,12 +929,6 @@ void NFC::Trace(blink::Visitor* visitor) {
   ScriptWrappable::Trace(visitor);
   PageVisibilityObserver::Trace(visitor);
   ContextLifecycleObserver::Trace(visitor);
-}
-
-void NFC::TraceWrappers(const ScriptWrappableVisitor* visitor) const {
-  for (const auto& callback : callbacks_.Values())
-    visitor->TraceWrappers(callback);
-  ScriptWrappable::TraceWrappers(visitor);
 }
 
 }  // namespace blink

@@ -399,7 +399,7 @@ class HoveredImageSource : public gfx::ImageSkiaSource {
 
   gfx::ImageSkiaRep GetImageForScale(float scale) override {
     const gfx::ImageSkiaRep& rep = image_.GetRepresentation(scale);
-    SkBitmap bitmap = rep.sk_bitmap();
+    SkBitmap bitmap = rep.GetBitmap();
     SkBitmap white;
     white.allocN32Pixels(bitmap.width(), bitmap.height());
     white.eraseARGB(0, 0, 0, 0);
@@ -762,8 +762,7 @@ class AppMenu::RecentTabsMenuModelDelegate : public ui::MenuModelDelegate {
 
       // Remove all elements in |AppMenu::command_id_to_entry_| that map to
       // |model_|.
-      AppMenu::CommandIDToEntry::iterator iter =
-          app_menu_->command_id_to_entry_.begin();
+      auto iter = app_menu_->command_id_to_entry_.begin();
       while (iter != app_menu_->command_id_to_entry_.end()) {
         if (iter->second.first == model_)
           app_menu_->command_id_to_entry_.erase(iter++);
@@ -827,11 +826,9 @@ void AppMenu::Init(ui::MenuModel* model) {
 }
 
 void AppMenu::RunMenu(views::MenuButton* host) {
-  gfx::Point screen_loc;
-  views::View::ConvertPointToScreen(host, &screen_loc);
-  gfx::Rect bounds(screen_loc, host->size());
   base::RecordAction(UserMetricsAction("ShowAppMenu"));
-  menu_runner_->RunMenuAt(host->GetWidget(), host, bounds,
+  menu_runner_->RunMenuAt(host->GetWidget(), host,
+                          host->GetAnchorBoundsInScreen(),
                           views::MENU_ANCHOR_TOPRIGHT, ui::MENU_SOURCE_NONE);
 }
 
@@ -852,18 +849,20 @@ void AppMenu::RemoveObserver(AppMenuObserver* observer) {
   observer_list_.RemoveObserver(observer);
 }
 
-const gfx::FontList* AppMenu::GetLabelFontList(int command_id) const {
+void AppMenu::GetLabelStyle(int command_id, LabelStyle* style) const {
   if (IsRecentTabsCommand(command_id)) {
-    return recent_tabs_menu_model_delegate_->GetLabelFontListAt(
-        ModelIndexFromCommandId(command_id));
+    const gfx::FontList* font_list =
+        recent_tabs_menu_model_delegate_->GetLabelFontListAt(
+            ModelIndexFromCommandId(command_id));
+    // Only fill in |*color| if there's a font list - otherwise this method will
+    // override the color for every recent tab item, not just the header.
+    if (font_list) {
+      // TODO(ellyjones): Use CONTEXT_MENU instead of CONTEXT_LABEL.
+      style->foreground = views::style::GetColor(
+          *root_, views::style::CONTEXT_LABEL, views::style::STYLE_PRIMARY);
+      style->font_list = *font_list;
+    }
   }
-  return nullptr;
-}
-
-bool AppMenu::GetShouldUseNormalForegroundColor(int command_id) const {
-  // Use the normal foreground color instead of the disabled color for the
-  // recent tab headers. Only the headers from that submenu have font lists.
-  return IsRecentTabsCommand(command_id) && GetLabelFontList(command_id);
 }
 
 base::string16 AppMenu::GetTooltipText(int command_id,
@@ -945,8 +944,10 @@ int AppMenu::GetDragOperations(MenuItemView* sender) {
 }
 
 int AppMenu::GetMaxWidthForMenu(MenuItemView* menu) {
-  if (IsBookmarkCommand(menu->GetCommand()))
+  if (menu->GetCommand() == IDC_BOOKMARKS_MENU ||
+      IsBookmarkCommand(menu->GetCommand())) {
     return bookmark_menu_delegate_->GetMaxWidthForMenu(menu);
+  }
   return MenuDelegate::GetMaxWidthForMenu(menu);
 }
 
@@ -1012,7 +1013,7 @@ bool AppMenu::GetAccelerator(int command_id,
     return false;
   }
 
-  CommandIDToEntry::const_iterator ix = command_id_to_entry_.find(command_id);
+  auto ix = command_id_to_entry_.find(command_id);
   const Entry& entry = ix->second;
   ui::Accelerator menu_accelerator;
   if (!entry.first->GetAcceleratorAt(entry.second, &menu_accelerator))
@@ -1252,7 +1253,7 @@ void AppMenu::CreateBookmarkMenu() {
 }
 
 int AppMenu::ModelIndexFromCommandId(int command_id) const {
-  CommandIDToEntry::const_iterator ix = command_id_to_entry_.find(command_id);
+  auto ix = command_id_to_entry_.find(command_id);
   DCHECK(ix != command_id_to_entry_.end());
   return ix->second.second;
 }

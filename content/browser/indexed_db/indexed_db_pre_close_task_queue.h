@@ -14,8 +14,12 @@
 #include "base/memory/ref_counted.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
-#include "content/common/indexed_db/indexed_db_metadata.h"
+#include "content/common/content_export.h"
 #include "third_party/leveldatabase/src/include/leveldb/status.h"
+
+namespace blink {
+struct IndexedDBDatabaseMetadata;
+}
 
 namespace content {
 
@@ -48,7 +52,7 @@ class CONTENT_EXPORT IndexedDBPreCloseTaskQueue {
 
     // Called before RunRound. |metadata| is guaranteed to outlive this task.
     virtual void SetMetadata(
-        std::vector<IndexedDBDatabaseMetadata> const* metadata) = 0;
+        std::vector<blink::IndexedDBDatabaseMetadata> const* metadata) = 0;
 
     // Tells the task to stop before completion. It will be destroyed after this
     // call. Can be called at any time.
@@ -64,7 +68,7 @@ class CONTENT_EXPORT IndexedDBPreCloseTaskQueue {
   IndexedDBPreCloseTaskQueue(std::list<std::unique_ptr<PreCloseTask>> tasks,
                              base::OnceClosure on_complete,
                              base::TimeDelta max_run_time,
-                             std::unique_ptr<base::Timer> timer);
+                             std::unique_ptr<base::OneShotTimer> timer);
   ~IndexedDBPreCloseTaskQueue();
 
   bool started() const { return started_; }
@@ -77,8 +81,9 @@ class CONTENT_EXPORT IndexedDBPreCloseTaskQueue {
   void StopForNewConnection();
 
   // Starts running tasks. Can only be called once.
-  void Start(base::OnceCallback<leveldb::Status(
-                 std::vector<IndexedDBDatabaseMetadata>*)> metadata_fetcher);
+  void Start(
+      base::OnceCallback<leveldb::Status(
+          std::vector<blink::IndexedDBDatabaseMetadata>*)> metadata_fetcher);
 
  private:
   void OnComplete();
@@ -88,7 +93,7 @@ class CONTENT_EXPORT IndexedDBPreCloseTaskQueue {
 
   void RunLoop();
 
-  std::vector<IndexedDBDatabaseMetadata> metadata_;
+  std::vector<blink::IndexedDBDatabaseMetadata> metadata_;
 
   bool started_ = false;
   bool done_ = false;
@@ -96,7 +101,7 @@ class CONTENT_EXPORT IndexedDBPreCloseTaskQueue {
   base::OnceClosure on_done_;
 
   base::TimeDelta timeout_time_;
-  std::unique_ptr<base::Timer> timeout_timer_;
+  std::unique_ptr<base::OneShotTimer> timeout_timer_;
   scoped_refptr<base::SequencedTaskRunner> task_runner_;
 
   base::WeakPtrFactory<IndexedDBPreCloseTaskQueue> ptr_factory_;

@@ -9,6 +9,7 @@
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/stringprintf.h"
+#include "media/base/bind_to_current_loop.h"
 #include "media/base/video_codecs.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
 #include "services/metrics/public/cpp/ukm_builders.h"
@@ -17,11 +18,12 @@
 namespace media {
 
 VideoDecodePerfHistory::VideoDecodePerfHistory(
-    std::unique_ptr<VideoDecodeStatsDBFactory> db_factory)
-    : db_factory_(std::move(db_factory)),
+    std::unique_ptr<VideoDecodeStatsDB> db)
+    : db_(std::move(db)),
       db_init_status_(UNINITIALIZED),
       weak_ptr_factory_(this) {
   DVLOG(2) << __func__;
+  DCHECK(db_);
 }
 
 VideoDecodePerfHistory::~VideoDecodePerfHistory() {
@@ -43,7 +45,11 @@ void VideoDecodePerfHistory::InitDatabase() {
   if (db_init_status_ == PENDING)
     return;
 
-  db_ = db_factory_->CreateDB();
+  // DB should be initialized only once! We hand out references to the
+  // initialized DB via GetVideoDecodeStatsDB(). Dependents expect DB to remain
+  // initialized during their lifetime.
+  DCHECK_EQ(db_init_status_, UNINITIALIZED);
+
   db_->Initialize(base::BindOnce(&VideoDecodePerfHistory::OnDatabaseInit,
                                  weak_ptr_factory_.GetWeakPtr()));
   db_init_status_ = PENDING;
@@ -56,9 +62,7 @@ void VideoDecodePerfHistory::OnDatabaseInit(bool success) {
 
   db_init_status_ = success ? COMPLETE : FAILED;
 
-  // Post all the deferred API calls as if they're just now coming in. Posting
-  // avoids subtle issues with deferred calls that may otherwise re-enter and
-  // potentially reinitialize the DB (e.g. ClearHistory).
+  // Post all the deferred API calls as if they're just now coming in.
   for (auto& deferred_call : init_deferred_api_calls_) {
     base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
                                                   std::move(deferred_call));
@@ -111,7 +115,7 @@ void VideoDecodePerfHistory::AssessStats(
   // this will be janky.
 
   // No stats? Lets be optimistic.
-  if (!stats) {
+  if (!stats || stats->frames_decoded == 0) {
     *is_power_efficient = true;
     *is_smooth = true;
     return;
@@ -120,7 +124,7 @@ void VideoDecodePerfHistory::AssessStats(
   double percent_dropped =
       static_cast<double>(stats->frames_dropped) / stats->frames_decoded;
   double percent_power_efficient =
-      static_cast<double>(stats->frames_decoded_power_efficient) /
+      static_cast<double>(stats->frames_power_efficient) /
       stats->frames_decoded;
 
   *is_power_efficient =
@@ -134,7 +138,7 @@ void VideoDecodePerfHistory::OnGotStatsForRequest(
     bool database_success,
     std::unique_ptr<VideoDecodeStatsDB::DecodeStatsEntry> stats) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  DCHECK(!got_info_cb.is_null());
+  DCHECK(got_info_cb);
   DCHECK_EQ(db_init_status_, COMPLETE);
 
   bool is_power_efficient = false;
@@ -144,12 +148,12 @@ void VideoDecodePerfHistory::OnGotStatsForRequest(
 
   AssessStats(stats.get(), &is_smooth, &is_power_efficient);
 
-  if (stats) {
+  if (stats && stats->frames_decoded) {
     DCHECK(database_success);
     percent_dropped =
         static_cast<double>(stats->frames_dropped) / stats->frames_decoded;
     percent_power_efficient =
-        static_cast<double>(stats->frames_decoded_power_efficient) /
+        static_cast<double>(stats->frames_power_efficient) /
         stats->frames_decoded;
   }
 
@@ -169,13 +173,17 @@ void VideoDecodePerfHistory::OnGotStatsForRequest(
   std::move(got_info_cb).Run(is_smooth, is_power_efficient);
 }
 
-void VideoDecodePerfHistory::SavePerfRecord(
-    const url::Origin& untrusted_top_frame_origin,
-    bool is_top_frame,
-    mojom::PredictionFeatures features,
-    mojom::PredictionTargets targets,
-    uint64_t player_id,
-    base::OnceClosure save_done_cb) {
+VideoDecodePerfHistory::SaveCallback VideoDecodePerfHistory::GetSaveCallback() {
+  return base::BindRepeating(&VideoDecodePerfHistory::SavePerfRecord,
+                             weak_ptr_factory_.GetWeakPtr());
+}
+
+void VideoDecodePerfHistory::SavePerfRecord(ukm::SourceId source_id,
+                                            bool is_top_frame,
+                                            mojom::PredictionFeatures features,
+                                            mojom::PredictionTargets targets,
+                                            uint64_t player_id,
+                                            base::OnceClosure save_done_cb) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DVLOG(3) << __func__
            << base::StringPrintf(
@@ -194,8 +202,8 @@ void VideoDecodePerfHistory::SavePerfRecord(
   if (db_init_status_ != COMPLETE) {
     init_deferred_api_calls_.push_back(base::BindOnce(
         &VideoDecodePerfHistory::SavePerfRecord, weak_ptr_factory_.GetWeakPtr(),
-        untrusted_top_frame_origin, is_top_frame, std::move(features),
-        std::move(targets), player_id, std::move(save_done_cb)));
+        source_id, is_top_frame, std::move(features), std::move(targets),
+        player_id, std::move(save_done_cb)));
     InitDatabase();
     return;
   }
@@ -205,19 +213,18 @@ void VideoDecodePerfHistory::SavePerfRecord(
           features.profile, features.video_size, features.frames_per_sec);
   VideoDecodeStatsDB::DecodeStatsEntry new_stats(
       targets.frames_decoded, targets.frames_dropped,
-      targets.frames_decoded_power_efficient);
+      targets.frames_power_efficient);
 
   // Get past perf info and report UKM metrics before saving this record.
   db_->GetDecodeStats(
       video_key,
       base::BindOnce(&VideoDecodePerfHistory::OnGotStatsForSave,
-                     weak_ptr_factory_.GetWeakPtr(), untrusted_top_frame_origin,
-                     is_top_frame, player_id, video_key, new_stats,
-                     std::move(save_done_cb)));
+                     weak_ptr_factory_.GetWeakPtr(), source_id, is_top_frame,
+                     player_id, video_key, new_stats, std::move(save_done_cb)));
 }
 
 void VideoDecodePerfHistory::OnGotStatsForSave(
-    const url::Origin& untrusted_top_frame_origin,
+    ukm::SourceId source_id,
     bool is_top_frame,
     uint64_t player_id,
     const VideoDecodeStatsDB::VideoDescKey& video_key,
@@ -234,8 +241,8 @@ void VideoDecodePerfHistory::OnGotStatsForSave(
     return;
   }
 
-  ReportUkmMetrics(untrusted_top_frame_origin, is_top_frame, player_id,
-                   video_key, new_stats, past_stats.get());
+  ReportUkmMetrics(source_id, is_top_frame, player_id, video_key, new_stats,
+                   past_stats.get());
 
   // TODO(dalecurtis): Abort stats recording if db_ is in read-only mode.
 
@@ -261,7 +268,7 @@ void VideoDecodePerfHistory::OnSaveDone(base::OnceClosure save_done_cb,
 }
 
 void VideoDecodePerfHistory::ReportUkmMetrics(
-    const url::Origin& untrusted_top_frame_origin,
+    ukm::SourceId source_id,
     bool is_top_frame,
     uint64_t player_id,
     const VideoDecodeStatsDB::VideoDescKey& video_key,
@@ -276,11 +283,7 @@ void VideoDecodePerfHistory::ReportUkmMetrics(
   if (!ukm_recorder)
     return;
 
-  const int32_t source_id = ukm_recorder->GetNewSourceID();
   ukm::builders::Media_VideoDecodePerfRecord builder(source_id);
-
-  // TODO(crbug.com/787209): Stop getting origin from the renderer.
-  ukm_recorder->UpdateSourceURL(source_id, untrusted_top_frame_origin.GetURL());
   builder.SetVideo_InTopFrame(is_top_frame);
   builder.SetVideo_PlayerID(player_id);
 
@@ -298,7 +301,7 @@ void VideoDecodePerfHistory::ReportUkmMetrics(
     builder.SetPerf_PastVideoFramesDecoded(past_stats->frames_decoded);
     builder.SetPerf_PastVideoFramesDropped(past_stats->frames_dropped);
     builder.SetPerf_PastVideoFramesPowerEfficient(
-        past_stats->frames_decoded_power_efficient);
+        past_stats->frames_power_efficient);
   } else {
     builder.SetPerf_PastVideoFramesDecoded(0);
     builder.SetPerf_PastVideoFramesDropped(0);
@@ -312,8 +315,7 @@ void VideoDecodePerfHistory::ReportUkmMetrics(
   builder.SetPerf_RecordIsPowerEfficient(new_is_efficient);
   builder.SetPerf_VideoFramesDecoded(new_stats.frames_decoded);
   builder.SetPerf_VideoFramesDropped(new_stats.frames_dropped);
-  builder.SetPerf_VideoFramesPowerEfficient(
-      new_stats.frames_decoded_power_efficient);
+  builder.SetPerf_VideoFramesPowerEfficient(new_stats.frames_power_efficient);
 
   builder.Record(ukm_recorder);
 }
@@ -337,29 +339,39 @@ void VideoDecodePerfHistory::ClearHistory(base::OnceClosure clear_done_cb) {
     return;
   }
 
-  // Set status to pending to prevent using the DB while destruction is ongoing.
-  // Once finished, we will re-initialize the DB and run any deferred API calls.
-  db_init_status_ = PENDING;
-  db_->DestroyStats(base::BindOnce(&VideoDecodePerfHistory::OnClearedHistory,
-                                   weak_ptr_factory_.GetWeakPtr(),
-                                   std::move(clear_done_cb)));
+  db_->ClearStats(base::BindOnce(&VideoDecodePerfHistory::OnClearedHistory,
+                                 weak_ptr_factory_.GetWeakPtr(),
+                                 std::move(clear_done_cb)));
 }
 
 void VideoDecodePerfHistory::OnClearedHistory(base::OnceClosure clear_done_cb) {
   DVLOG(2) << __func__;
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
-  // DB is effectively uninitialized while destructively clearing the history.
-  // During this period |db_init_status_| should be PENDING to prevent other
-  // APIs from racing to reinitialize.
-  DCHECK_EQ(db_init_status_, PENDING);
-  // With destructive clearing complete, reset to UNITINIALIZED so
-  // InitDatabase() will run initialization and any deferred API calls once
-  // complete.
-  db_init_status_ = UNINITIALIZED;
-  InitDatabase();
-
   std::move(clear_done_cb).Run();
+}
+
+void VideoDecodePerfHistory::GetVideoDecodeStatsDB(GetCB get_db_cb) {
+  DVLOG(3) << __func__;
+  DCHECK(get_db_cb);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  if (db_init_status_ == FAILED) {
+    std::move(get_db_cb).Run(nullptr);
+    return;
+  }
+
+  // Defer this request until the DB is initialized.
+  if (db_init_status_ != COMPLETE) {
+    init_deferred_api_calls_.push_back(
+        base::BindOnce(&VideoDecodePerfHistory::GetVideoDecodeStatsDB,
+                       weak_ptr_factory_.GetWeakPtr(), std::move(get_db_cb)));
+    InitDatabase();
+    return;
+  }
+
+  // DB is already initialized. BindToCurrentLoop to avoid reentrancy.
+  std::move(BindToCurrentLoop(std::move(get_db_cb))).Run(db_.get());
 }
 
 }  // namespace media

@@ -12,7 +12,7 @@
 #include "base/timer/elapsed_timer.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_platform_part.h"
-#include "chrome/browser/browser_shutdown.h"
+#include "chrome/browser/chromeos/login/configuration_keys.h"
 #include "chrome/browser/chromeos/login/enrollment/enrollment_uma.h"
 #include "chrome/browser/chromeos/login/screen_manager.h"
 #include "chrome/browser/chromeos/login/screens/base_screen_delegate.h"
@@ -22,6 +22,7 @@
 #include "chrome/browser/chromeos/policy/enrollment_status_chromeos.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
+#include "chrome/browser/lifetime/browser_shutdown.h"
 #include "chromeos/dbus/cryptohome_client.h"
 #include "chromeos/dbus/dbus_method_call_status.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
@@ -111,7 +112,8 @@ EnrollmentScreen::EnrollmentScreen(BaseScreenDelegate* base_screen_delegate,
 
 EnrollmentScreen::~EnrollmentScreen() {
   DCHECK(!enrollment_helper_ || g_browser_process->IsShuttingDown() ||
-         browser_shutdown::IsTryingToQuit());
+         browser_shutdown::IsTryingToQuit() ||
+         DBusThreadManager::Get()->IsUsingFakes());
 }
 
 void EnrollmentScreen::SetParameters(
@@ -270,6 +272,16 @@ void EnrollmentScreen::OnCancel() {
     return;
   }
 
+  if (enrollment_succeeded_) {
+    // Cancellation is the same to confirmation after the successful enrollment.
+    OnConfirmationClosed();
+    return;
+  }
+
+  on_joined_callback_.Reset();
+  if (authpolicy_login_helper_)
+    authpolicy_login_helper_->CancelRequestsAndRestart();
+
   UMA(policy::kMetricEnrollmentCancelled);
   if (elapsed_timer_)
     UMA_ENROLLMENT_TIME(kMetricEnrollmentTimeCancel, elapsed_timer_);
@@ -296,10 +308,6 @@ void EnrollmentScreen::OnConfirmationClosed() {
   }
 }
 
-void EnrollmentScreen::OnAdJoined(const std::string& realm) {
-  std::move(on_joined_callback_).Run(realm);
-}
-
 void EnrollmentScreen::OnAuthError(const GoogleServiceAuthError& error) {
   RecordEnrollmentErrorMetrics();
   view_->ShowAuthError(error);
@@ -307,6 +315,22 @@ void EnrollmentScreen::OnAuthError(const GoogleServiceAuthError& error) {
 
 void EnrollmentScreen::OnMultipleLicensesAvailable(
     const EnrollmentLicenseMap& licenses) {
+  if (GetConfiguration()) {
+    auto* license_type_value = GetConfiguration()->FindKeyOfType(
+        configuration::kEnrollmentLicenseType, base::Value::Type::STRING);
+    if (license_type_value) {
+      const std::string& license_type = license_type_value->GetString();
+      for (const auto& it : licenses) {
+        if (license_type == GetLicenseIdByType(it.first) && it.second > 0) {
+          VLOG(1) << "Using License type from configuration " << license_type;
+          OnLicenseTypeSelected(license_type);
+          return;
+        }
+      }
+      VLOG(1) << "No licenses for License type from configuration "
+              << license_type;
+    }
+  }
   base::DictionaryValue license_dict;
   for (const auto& it : licenses)
     license_dict.SetInteger(GetLicenseIdByType(it.first), it.second);
@@ -337,10 +361,24 @@ void EnrollmentScreen::OnOtherError(
 }
 
 void EnrollmentScreen::OnDeviceEnrolled(const std::string& additional_token) {
+  enrollment_succeeded_ = true;
   if (!additional_token.empty())
     SendEnrollmentAuthToken(additional_token);
 
   enrollment_helper_->GetDeviceAttributeUpdatePermission();
+}
+
+void EnrollmentScreen::OnActiveDirectoryCredsProvided(
+    const std::string& machine_name,
+    const std::string& distinguished_name,
+    int encryption_types,
+    const std::string& username,
+    const std::string& password) {
+  DCHECK(authpolicy_login_helper_);
+  authpolicy_login_helper_->JoinAdDomain(
+      machine_name, distinguished_name, encryption_types, username, password,
+      base::BindOnce(&EnrollmentScreen::OnActiveDirectoryJoined,
+                     weak_ptr_factory_.GetWeakPtr(), machine_name, username));
 }
 
 void EnrollmentScreen::OnDeviceAttributeProvided(const std::string& asset_id,
@@ -382,12 +420,45 @@ void EnrollmentScreen::ShowAttributePromptScreen() {
   policy::DeviceCloudPolicyManagerChromeOS* policy_manager =
       connector->GetDeviceCloudPolicyManager();
 
+  std::string asset_id;
+  std::string location;
+
+  if (GetConfiguration()) {
+    auto* asset_id_value = GetConfiguration()->FindKeyOfType(
+        configuration::kEnrollmentAssetId, base::Value::Type::STRING);
+    if (asset_id_value) {
+      VLOG(1) << "Using Asset ID from configuration "
+              << asset_id_value->GetString();
+      asset_id = asset_id_value->GetString();
+    }
+    auto* location_value = GetConfiguration()->FindKeyOfType(
+        configuration::kEnrollmentLocation, base::Value::Type::STRING);
+    if (location_value) {
+      VLOG(1) << "Using Location from configuration "
+              << location_value->GetString();
+      location = location_value->GetString();
+    }
+  }
+
   policy::CloudPolicyStore* store = policy_manager->core()->store();
 
   const enterprise_management::PolicyData* policy = store->policy();
 
-  std::string asset_id = policy ? policy->annotated_asset_id() : std::string();
-  std::string location = policy ? policy->annotated_location() : std::string();
+  if (policy) {
+    asset_id = policy->annotated_asset_id();
+    location = policy->annotated_location();
+  }
+
+  if (GetConfiguration()) {
+    auto* auto_attributes = GetConfiguration()->FindKeyOfType(
+        configuration::kEnrollmentAutoAttributes, base::Value::Type::BOOLEAN);
+    if (auto_attributes && auto_attributes->GetBool()) {
+      VLOG(1) << "Automatically accept attributes";
+      OnDeviceAttributeProvided(asset_id, location);
+      return;
+    }
+  }
+
   view_->ShowAttributePromptScreen(asset_id, location);
 }
 
@@ -425,9 +496,30 @@ void EnrollmentScreen::RecordEnrollmentErrorMetrics() {
     UMA_ENROLLMENT_TIME(kMetricEnrollmentTimeFailure, elapsed_timer_);
 }
 
-void EnrollmentScreen::JoinDomain(OnDomainJoinedCallback on_joined_callback) {
+void EnrollmentScreen::JoinDomain(const std::string& dm_token,
+                                  const std::string& domain_join_config,
+                                  OnDomainJoinedCallback on_joined_callback) {
+  if (!authpolicy_login_helper_)
+    authpolicy_login_helper_ = std::make_unique<AuthPolicyLoginHelper>();
+  authpolicy_login_helper_->set_dm_token(dm_token);
   on_joined_callback_ = std::move(on_joined_callback);
-  view_->ShowAdJoin();
+  view_->ShowActiveDirectoryScreen(
+      domain_join_config, std::string() /* machine_name */,
+      std::string() /* username */, authpolicy::ERROR_NONE);
+}
+
+void EnrollmentScreen::OnActiveDirectoryJoined(
+    const std::string& machine_name,
+    const std::string& username,
+    authpolicy::ErrorType error,
+    const std::string& machine_domain) {
+  if (error == authpolicy::ERROR_NONE) {
+    view_->ShowEnrollmentSpinnerScreen();
+    std::move(on_joined_callback_).Run(machine_domain);
+    return;
+  }
+  view_->ShowActiveDirectoryScreen(std::string() /* domain_join_config */,
+                                   machine_name, username, error);
 }
 
 }  // namespace chromeos

@@ -14,6 +14,7 @@ import android.support.v4.util.ObjectsCompat;
 import android.support.v7.app.AlertDialog;
 import android.support.v7.widget.LinearLayoutManager;
 import android.support.v7.widget.RecyclerView;
+import android.text.TextUtils;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -41,15 +42,18 @@ import java.util.List;
 public class AccountPickerDialogFragment extends DialogFragment {
     public interface Callback {
         /**
-         * Notifies that user has selected an account.
+         * Notifies that the user has selected an account.
          * @param accountName The email of the selected account.
          * @param isDefaultAccount Whether the selected account is the first in the account list.
          */
         void onAccountSelected(String accountName, boolean isDefaultAccount);
+
+        /** Notifies that the user has clicked "Add account" button. */
+        void addAccount();
     }
 
-    @Retention(RetentionPolicy.SOURCE)
     @IntDef({ViewType.EXISTING_ACCOUNT, ViewType.NEW_ACCOUNT})
+    @Retention(RetentionPolicy.SOURCE)
     private @interface ViewType {
         int EXISTING_ACCOUNT = 0;
         int NEW_ACCOUNT = 1;
@@ -58,17 +62,18 @@ public class AccountPickerDialogFragment extends DialogFragment {
     private class Adapter extends RecyclerView.Adapter<Adapter.ViewHolder> {
         class ViewHolder extends RecyclerView.ViewHolder {
             private final @Nullable ImageView mAccountImage;
-            private final @Nullable TextView mAccountName;
-            private final @Nullable TextView mAccountEmail;
+            private final @Nullable TextView mAccountTextPrimary;
+            private final @Nullable TextView mAccountTextSecondary;
             private final @Nullable ImageView mSelectionMark;
 
             /** Used for displaying profile data for existing account. */
-            ViewHolder(View view, @Nullable ImageView accountImage, @Nullable TextView accountName,
-                    @Nullable TextView accountEmail, @Nullable ImageView selectionMark) {
+            ViewHolder(View view, @Nullable ImageView accountImage,
+                    @Nullable TextView accountTextPrimary, @Nullable TextView accountTextSecondary,
+                    @Nullable ImageView selectionMark) {
                 super(view);
                 mAccountImage = accountImage;
-                mAccountName = accountName;
-                mAccountEmail = accountEmail;
+                mAccountTextPrimary = accountTextPrimary;
+                mAccountTextSecondary = accountTextSecondary;
                 mSelectionMark = selectionMark;
             }
 
@@ -79,8 +84,18 @@ public class AccountPickerDialogFragment extends DialogFragment {
 
             void onBind(DisplayableProfileData profileData, boolean isSelected) {
                 mAccountImage.setImageDrawable(profileData.getImage());
-                mAccountName.setText(profileData.getFullNameOrEmail());
-                mAccountEmail.setText(profileData.getAccountName());
+
+                String fullName = profileData.getFullName();
+                if (!TextUtils.isEmpty(fullName)) {
+                    mAccountTextPrimary.setText(fullName);
+                    mAccountTextSecondary.setText(profileData.getAccountName());
+                    mAccountTextSecondary.setVisibility(View.VISIBLE);
+                } else {
+                    // Full name is not available, show the email in the primary TextView.
+                    mAccountTextPrimary.setText(profileData.getAccountName());
+                    mAccountTextSecondary.setVisibility(View.GONE);
+                }
+
                 mSelectionMark.setVisibility(isSelected ? View.VISIBLE : View.GONE);
             }
         }
@@ -102,11 +117,12 @@ public class AccountPickerDialogFragment extends DialogFragment {
                 return new ViewHolder(view);
             }
             View view = inflater.inflate(R.layout.account_picker_row, viewGroup, false);
-            ImageView accountImage = (ImageView) view.findViewById(R.id.account_image);
-            TextView accountName = (TextView) view.findViewById(R.id.account_name);
-            TextView accountEmail = (TextView) view.findViewById(R.id.account_email);
-            ImageView selectionMark = (ImageView) view.findViewById(R.id.account_selection_mark);
-            return new ViewHolder(view, accountImage, accountName, accountEmail, selectionMark);
+            ImageView accountImage = view.findViewById(R.id.account_image);
+            TextView accountTextPrimary = view.findViewById(R.id.account_text_primary);
+            TextView accountTextSecondary = view.findViewById(R.id.account_text_secondary);
+            ImageView selectionMark = view.findViewById(R.id.account_selection_mark);
+            return new ViewHolder(
+                    view, accountImage, accountTextPrimary, accountTextSecondary, selectionMark);
         }
 
         @Override
@@ -126,7 +142,7 @@ public class AccountPickerDialogFragment extends DialogFragment {
                     return;
                 case ViewType.NEW_ACCOUNT:
                     // "Add account" row is immutable.
-                    // TODO(https://crbug.com/814728): Add click listener.
+                    holder.itemView.setOnClickListener(view -> getCallback().addAccount());
                     return;
                 default:
                     assert false : "Unexpected view type!";

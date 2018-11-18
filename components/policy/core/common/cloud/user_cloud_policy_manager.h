@@ -6,7 +6,6 @@
 #define COMPONENTS_POLICY_CORE_COMMON_CLOUD_USER_CLOUD_POLICY_MANAGER_H_
 
 #include <memory>
-#include <string>
 
 #include "base/compiler_specific.h"
 #include "base/debug/stack_trace.h"
@@ -15,15 +14,17 @@
 #include "base/memory/ref_counted.h"
 #include "components/policy/core/common/cloud/cloud_policy_manager.h"
 #include "components/policy/policy_export.h"
+#include "services/network/public/cpp/network_connection_tracker.h"
 
+class AccountId;
 class PrefService;
 
 namespace base {
 class SequencedTaskRunner;
 }
 
-namespace net {
-class URLRequestContextGetter;
+namespace network {
+class SharedURLLoaderFactory;
 }
 
 namespace policy {
@@ -36,27 +37,25 @@ class UserCloudPolicyStore;
 class POLICY_EXPORT UserCloudPolicyManager : public CloudPolicyManager {
  public:
   // |task_runner| is the runner for policy refresh tasks.
-  // |io_task_runner| is used for network IO. Currently this must be the IO
-  // BrowserThread.
   UserCloudPolicyManager(
       std::unique_ptr<UserCloudPolicyStore> store,
       const base::FilePath& component_policy_cache_path,
       std::unique_ptr<CloudExternalDataManager> external_data_manager,
       const scoped_refptr<base::SequencedTaskRunner>& task_runner,
-      const scoped_refptr<base::SequencedTaskRunner>& io_task_runner);
+      network::NetworkConnectionTrackerGetter
+          network_connection_tracker_getter);
   ~UserCloudPolicyManager() override;
 
   // ConfigurationPolicyProvider overrides:
   void Shutdown() override;
 
-  void SetSigninUsername(const std::string& username);
+  void SetSigninAccountId(const AccountId& account_id);
 
   // Initializes the cloud connection. |local_state| must stay valid until this
   // object is deleted or DisconnectAndRemovePolicy() gets called. Virtual for
   // mocking.
   virtual void Connect(
       PrefService* local_state,
-      scoped_refptr<net::URLRequestContextGetter> request_context,
       std::unique_ptr<CloudPolicyClient> client);
 
   // Shuts down the UserCloudPolicyManager (removes and stops refreshing the
@@ -75,7 +74,7 @@ class POLICY_EXPORT UserCloudPolicyManager : public CloudPolicyManager {
   // want to check if the user's domain requires policy).
   static std::unique_ptr<CloudPolicyClient> CreateCloudPolicyClient(
       DeviceManagementService* device_management_service,
-      scoped_refptr<net::URLRequestContextGetter> request_context);
+      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory);
 
  private:
   // CloudPolicyManager:

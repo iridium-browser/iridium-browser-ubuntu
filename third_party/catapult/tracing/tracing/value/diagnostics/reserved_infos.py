@@ -32,11 +32,17 @@ BENCHMARK_START = _Info('benchmarkStart', 'DateRange')
 BENCHMARK_DESCRIPTIONS = _Info('benchmarkDescriptions', 'GenericSet', str)
 BOTS = _Info('bots', 'GenericSet', str)
 BUG_COMPONENTS = _Info('bugComponents', 'GenericSet', str)
+BUILD_URLS = _Info('buildUrls', 'GenericSet', str)
 BUILDS = _Info('builds', 'GenericSet', int)
 CATAPULT_REVISIONS = _Info('catapultRevisions', 'GenericSet', str)
 CHROMIUM_COMMIT_POSITIONS = _Info('chromiumCommitPositions', 'GenericSet', int)
 CHROMIUM_REVISIONS = _Info('chromiumRevisions', 'GenericSet', str)
 DEVICE_IDS = _Info('deviceIds', 'GenericSet', str)
+DOCUMENTATION_URLS = _Info('documentationLinks', 'GenericSet', str)
+FUCHSIA_GARNET_REVISIONS = _Info('fuchsiaGarnetRevisions', 'GenericSet', str)
+FUCHSIA_PERIDOT_REVISIONS = _Info('fuchsiaPeridotRevisions', 'GenericSet', str)
+FUCHSIA_TOPAZ_REVISIONS = _Info('fuchsiaTopazRevisions', 'GenericSet', str)
+FUCHSIA_ZIRCON_REVISIONS = _Info('fuchsiaZirconRevisions', 'GenericSet', str)
 GPUS = _Info('gpus', 'GenericSet', str)
 GROUPING_PATH = _Info('groupingPath')
 HAD_FAILURES = _Info('hadFailures', 'GenericSet', bool)
@@ -50,8 +56,10 @@ MERGED_TO = _Info('mergedTo', 'RelatedHistogramMap')
 OS_NAMES = _Info('osNames', 'GenericSet', str)
 OS_VERSIONS = _Info('osVersions', 'GenericSet', str)
 OWNERS = _Info('owners', 'GenericSet', str)
+POINT_ID = _Info('pointId', 'GenericSet', int)
 PRODUCT_VERSIONS = _Info('productVersions', 'GenericSet', str)
 RELATED_NAMES = _Info('relatedNames', 'GenericSet', str)
+REVISION_TIMESTAMPS = _Info('revisionTimestamps', 'DateRange')
 SKIA_REVISIONS = _Info('skiaRevisions', 'GenericSet', str)
 STORIES = _Info('stories', 'GenericSet', str)
 STORYSET_REPEATS = _Info('storysetRepeats', 'GenericSet', int)
@@ -65,15 +73,24 @@ V8_COMMIT_POSITIONS = _Info('v8CommitPositions', 'DateRange')
 V8_REVISIONS = _Info('v8Revisions', 'GenericSet', str)
 WEBRTC_REVISIONS = _Info('webrtcRevisions', 'GenericSet', str)
 
-def GetTypeForName(name):
-  for info in globals().itervalues():
-    if isinstance(info, _Info) and info.name == name:
-      return info.type
 
-def AllInfos():
+def _CreateCachedInfoTypes():
+  info_types = {}
   for info in globals().itervalues():
     if isinstance(info, _Info):
-      yield info
+      info_types[info.name] = info
+  return info_types
+
+_CACHED_INFO_TYPES = _CreateCachedInfoTypes()
+
+def GetTypeForName(name):
+  info = _CACHED_INFO_TYPES.get(name)
+  if info:
+    return info.type
+
+def AllInfos():
+  for info in _CACHED_INFO_TYPES.itervalues():
+    yield info
 
 def AllNames():
   for info in AllInfos():

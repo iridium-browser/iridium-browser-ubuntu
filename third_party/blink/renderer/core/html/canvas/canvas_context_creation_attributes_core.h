@@ -6,14 +6,14 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_HTML_CANVAS_CANVAS_CONTEXT_CREATION_ATTRIBUTES_CORE_H_
 
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/core/dom/events/event_target.h"
+#include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
 
 class CORE_EXPORT CanvasContextCreationAttributesCore {
-  DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
+  DISALLOW_NEW();
 
  public:
   CanvasContextCreationAttributesCore();
@@ -27,13 +27,13 @@ class CORE_EXPORT CanvasContextCreationAttributesCore {
   bool depth = true;
   bool fail_if_major_performance_caveat = false;
   bool low_latency = false;
-  String pixel_format = "8-8-8-8";
+  String pixel_format = "uint8";
   bool premultiplied_alpha = true;
   bool preserve_drawing_buffer = false;
   bool stencil = false;
 
-  // This attribute is of type XRDevice, defined in modules/xr/XRDevice.h
-  Member<EventTargetWithInlineData> compatible_xr_device;
+  // This attribute is of type XRDevice, defined in modules/xr/xr_device.h
+  Member<ScriptWrappable> compatible_xr_device;
 
   void Trace(blink::Visitor*);
 };

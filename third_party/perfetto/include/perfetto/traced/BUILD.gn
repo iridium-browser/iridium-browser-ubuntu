@@ -14,6 +14,20 @@
 
 source_set("traced") {
   sources = [
+    "data_source_types.h",
     "traced.h",
+  ]
+}
+
+source_set("sys_stats_counters") {
+  deps = [
+    "../../../gn:default_deps",
+  ]
+  public_deps = [
+    "../../../protos/perfetto/common:zero",
+    "../base",
+  ]
+  sources = [
+    "sys_stats_counters.h",
   ]
 }

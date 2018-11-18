@@ -9,10 +9,11 @@
 #include "core/fpdfapi/parser/cpdf_array.h"
 #include "core/fpdfapi/parser/cpdf_dictionary.h"
 #include "core/fpdfapi/parser/cpdf_stream.h"
+#include "third_party/base/ptr_util.h"
 
 namespace {
 
-class StreamIterator : public CPDF_ObjectWalker::SubobjectIterator {
+class StreamIterator final : public CPDF_ObjectWalker::SubobjectIterator {
  public:
   explicit StreamIterator(const CPDF_Stream* stream)
       : SubobjectIterator(stream) {}
@@ -33,7 +34,7 @@ class StreamIterator : public CPDF_ObjectWalker::SubobjectIterator {
   bool is_finished_ = false;
 };
 
-class DictionaryIterator : public CPDF_ObjectWalker::SubobjectIterator {
+class DictionaryIterator final : public CPDF_ObjectWalker::SubobjectIterator {
  public:
   explicit DictionaryIterator(const CPDF_Dictionary* dictionary)
       : SubobjectIterator(dictionary) {}
@@ -57,14 +58,14 @@ class DictionaryIterator : public CPDF_ObjectWalker::SubobjectIterator {
     dict_iterator_ = object()->GetDict()->begin();
   }
 
-  const ByteString& dict_key() const { return dict_key_; }
+  ByteString dict_key() const { return dict_key_; }
 
  private:
   CPDF_Dictionary::const_iterator dict_iterator_;
   ByteString dict_key_;
 };
 
-class ArrayIterator : public CPDF_ObjectWalker::SubobjectIterator {
+class ArrayIterator final : public CPDF_ObjectWalker::SubobjectIterator {
  public:
   explicit ArrayIterator(const CPDF_Array* array) : SubobjectIterator(array) {}
 
@@ -124,19 +125,19 @@ CPDF_ObjectWalker::MakeIterator(const CPDF_Object* object) {
 }
 
 CPDF_ObjectWalker::CPDF_ObjectWalker(const CPDF_Object* root)
-    : next_object_(root), parent_object_(nullptr), current_depth_(0) {}
+    : next_object_(root) {}
 
-CPDF_ObjectWalker::~CPDF_ObjectWalker() {}
+CPDF_ObjectWalker::~CPDF_ObjectWalker() = default;
 
 const CPDF_Object* CPDF_ObjectWalker::GetNext() {
   while (!stack_.empty() || next_object_) {
     if (next_object_) {
-      auto new_iterator = MakeIterator(next_object_);
+      auto new_iterator = MakeIterator(next_object_.Get());
       if (new_iterator) {
         // Schedule walk within composite objects.
         stack_.push(std::move(new_iterator));
       }
-      auto* result = next_object_;
+      auto* result = next_object_.Get();
       next_object_ = nullptr;
       return result;
     }

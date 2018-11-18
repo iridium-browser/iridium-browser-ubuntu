@@ -28,6 +28,7 @@
 
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/frame_request_callback_collection.h"
+#include "third_party/blink/renderer/platform/bindings/name_client.h"
 #include "third_party/blink/renderer/platform/bindings/trace_wrapper_member.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
@@ -43,7 +44,7 @@ class MediaQueryListListener;
 
 class CORE_EXPORT ScriptedAnimationController
     : public GarbageCollectedFinalized<ScriptedAnimationController>,
-      public TraceWrapperBase {
+      public NameClient {
  public:
   static ScriptedAnimationController* Create(Document* document) {
     return new ScriptedAnimationController(document);
@@ -51,7 +52,6 @@ class CORE_EXPORT ScriptedAnimationController
   virtual ~ScriptedAnimationController() = default;
 
   void Trace(blink::Visitor*);
-  void TraceWrappers(const ScriptWrappableVisitor*) const override;
   const char* NameInHeapSnapshot() const override {
     return "ScriptedAnimationController";
   }
@@ -77,7 +77,7 @@ class CORE_EXPORT ScriptedAnimationController
 
   // Invokes callbacks, dispatches events, etc. The order is defined by HTML:
   // https://html.spec.whatwg.org/multipage/webappapis.html#event-loop-processing-model
-  void ServiceScriptedAnimations(double monotonic_time_now);
+  void ServiceScriptedAnimations(base::TimeTicks monotonic_time_now);
 
   void Pause();
   void Unpause();
@@ -95,7 +95,7 @@ class CORE_EXPORT ScriptedAnimationController
   void RunTasks();
   void DispatchEvents(
       const AtomicString& event_interface_filter = AtomicString());
-  void ExecuteCallbacks(double monotonic_time_now);
+  void ExecuteCallbacks(base::TimeTicks monotonic_time_now);
   void CallMediaQueryListListeners();
 
   bool HasScheduledItems() const;

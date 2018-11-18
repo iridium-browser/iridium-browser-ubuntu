@@ -8,20 +8,28 @@
 namespace content {
 
 constexpr char kAcceptHeaderSignedExchangeSuffix[] =
-    ",application/signed-exchange;v=b0";
+    ",application/signed-exchange;v=b2";
+
+enum class SignedExchangeVersion { kUnknown, kB2 };
 
 // Field names defined in the application/signed-exchange content type:
 // https://wicg.github.io/webpackage/draft-yasskin-httpbis-origin-signed-exchanges-impl.html#application-signed-exchange
 
-constexpr char kCertSha256Key[] = "certSha256";
+constexpr char kCertSha256Key[] = "cert-sha256";
+constexpr char kCertUrl[] = "cert-url";
 constexpr char kDateKey[] = "date";
 constexpr char kExpiresKey[] = "expires";
 constexpr char kHeadersKey[] = "headers";
+constexpr char kIntegrity[] = "integrity";
 constexpr char kMethodKey[] = ":method";
-constexpr char kSignature[] = "signature";
+constexpr char kSig[] = "sig";
 constexpr char kStatusKey[] = ":status";
 constexpr char kUrlKey[] = ":url";
-constexpr char kValidityUrlKey[] = "validityUrl";
+constexpr char kValidityUrlKey[] = "validity-url";
+constexpr char kCertChainCborMagic[] = u8"\U0001F4DC\u26D3";  // "📜⛓"
+constexpr char kCertKey[] = "cert";
+constexpr char kOcspKey[] = "ocsp";
+constexpr char kSctKey[] = "sct";
 
 }  // namespace content
 

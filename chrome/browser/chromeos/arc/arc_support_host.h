@@ -157,8 +157,6 @@ class ArcSupportHost : public arc::ArcSupportMessageHost::Observer,
   void OnMessage(const base::DictionaryValue& message) override;
 
   // display::DisplayObserver:
-  void OnDisplayAdded(const display::Display& new_display) override;
-  void OnDisplayRemoved(const display::Display& old_display) override;
   void OnDisplayMetricsChanged(const display::Display& display,
                                uint32_t changed_metrics) override;
 
@@ -169,12 +167,6 @@ class ArcSupportHost : public arc::ArcSupportMessageHost::Observer,
 
   void SetRequestOpenAppCallbackForTesting(
       const RequestOpenAppCallback& callback);
-
-  // Computes consent IDs based on the content of the Play ToS. Useful as the
-  // Play ToS is not contained within the Chrome binary, but rather fetched
-  // live.
-  // Returns a vector of consent "IDs" based on the Play ToS content.
-  static std::vector<int> ComputePlayToSConsentIds(const std::string& content);
 
  private:
   struct PreferenceCheckboxData {

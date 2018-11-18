@@ -5,7 +5,6 @@
 #include "media/audio/win/core_audio_util_win.h"
 
 #include <devicetopology.h>
-#include <dxdiag.h>
 #include <functiondiscoverykeys_devpkey.h>
 #include <objbase.h>
 #include <stddef.h>
@@ -181,15 +180,6 @@ std::ostream& operator<<(std::ostream& os, const WAVEFORMATPCMEX& format) {
   return os;
 }
 
-bool LoadAudiosesDll() {
-  static const wchar_t* const kAudiosesDLL =
-      L"%WINDIR%\\system32\\audioses.dll";
-
-  wchar_t path[MAX_PATH] = {0};
-  ExpandEnvironmentStringsW(kAudiosesDLL, path, arraysize(path));
-  return (LoadLibraryExW(path, NULL, LOAD_WITH_ALTERED_SEARCH_PATH) != NULL);
-}
-
 std::string GetDeviceID(IMMDevice* device) {
   ScopedCoMem<WCHAR> device_id_com;
   std::string device_id;
@@ -287,18 +277,7 @@ bool IsSupportedInternal() {
     return false;
   }
 
-  // The audio core APIs are implemented in the Mmdevapi.dll and
-  // Audioses.dll system components. Dependency Walker shows that it is
-  // enough to verify possibility to load the Audioses DLL since it depends
-  // on Mmdevapi.dll. See http://crbug.com/166397 why this extra step is
-  // required to guarantee Core Audio support.
-  if (!LoadAudiosesDll())
-    return false;
-
-  // Being able to load the Audioses.dll does not seem to be sufficient for
-  // all devices to guarantee Core Audio support. To be 100%, we also verify
-  // that it is possible to a create the IMMDeviceEnumerator interface. If
-  // this works as well we should be home free.
+  // Verify that it is possible to a create the IMMDeviceEnumerator interface.
   ComPtr<IMMDeviceEnumerator> device_enumerator =
       CreateDeviceEnumeratorInternal(false,
                                      base::BindRepeating(&LogUMAEmptyCb));
@@ -405,11 +384,6 @@ HRESULT GetPreferredAudioParametersInternal(IAudioClient* client,
   // Preferred sample rate.
   int sample_rate = mix_format.Format.nSamplesPerSec;
 
-  // TODO(henrika): possibly use format.Format.wBitsPerSample here instead.
-  // We use a hard-coded value of 16 bits per sample today even if most audio
-  // engines does the actual mixing in 32 bits per sample.
-  int bits_per_sample = 16;
-
   // We are using the native device period to derive the smallest possible
   // buffer size in shared mode. Note that the actual endpoint buffer will be
   // larger than this size but it will be possible to fill it up in two calls.
@@ -420,8 +394,7 @@ HRESULT GetPreferredAudioParametersInternal(IAudioClient* client,
       0.5);
 
   AudioParameters audio_params(AudioParameters::AUDIO_PCM_LOW_LATENCY,
-                               channel_layout, sample_rate, bits_per_sample,
-                               frames_per_buffer);
+                               channel_layout, sample_rate, frames_per_buffer);
   *params = audio_params;
   DVLOG(1) << params->AsHumanReadableString();
 
@@ -793,8 +766,7 @@ HRESULT CoreAudioUtil::GetPreferredAudioParameters(const std::string& device_id,
   // need to do the same thing?
   if (params->channels() != 1) {
     params->Reset(params->format(), CHANNEL_LAYOUT_STEREO,
-                  params->sample_rate(), params->bits_per_sample(),
-                  params->frames_per_buffer());
+                  params->sample_rate(), params->frames_per_buffer());
   }
 
   return hr;
@@ -925,59 +897,6 @@ bool CoreAudioUtil::FillRenderEndpointBufferWithSilence(
                                           AUDCLNT_BUFFERFLAGS_SILENT))) {
     PLOG(ERROR) << "Failed IAudioRenderClient::ReleaseBuffer()";
     return false;
-  }
-
-  return true;
-}
-
-bool CoreAudioUtil::GetDxDiagDetails(std::string* driver_name,
-                                     std::string* driver_version) {
-  ComPtr<IDxDiagProvider> provider;
-  HRESULT hr =
-      ::CoCreateInstance(CLSID_DxDiagProvider, NULL, CLSCTX_INPROC_SERVER,
-                         IID_IDxDiagProvider, &provider);
-  if (FAILED(hr))
-    return false;
-
-  DXDIAG_INIT_PARAMS params = {sizeof(params)};
-  params.dwDxDiagHeaderVersion = DXDIAG_DX9_SDK_VERSION;
-  params.bAllowWHQLChecks = FALSE;
-  params.pReserved = NULL;
-  hr = provider->Initialize(&params);
-  if (FAILED(hr))
-    return false;
-
-  ComPtr<IDxDiagContainer> root;
-  hr = provider->GetRootContainer(root.GetAddressOf());
-  if (FAILED(hr))
-    return false;
-
-  // Limit to the SoundDevices subtree. The tree in its entirity is
-  // enormous and only this branch contains useful information.
-  ComPtr<IDxDiagContainer> sound_devices;
-  hr = root->GetChildContainer(L"DxDiag_DirectSound.DxDiag_SoundDevices.0",
-                               sound_devices.GetAddressOf());
-  if (FAILED(hr))
-    return false;
-
-  base::win::ScopedVariant variant;
-  hr = sound_devices->GetProp(L"szDriverName", variant.Receive());
-  if (FAILED(hr))
-    return false;
-
-  if (variant.type() == VT_BSTR && variant.ptr()->bstrVal) {
-    base::WideToUTF8(variant.ptr()->bstrVal, wcslen(variant.ptr()->bstrVal),
-                     driver_name);
-  }
-
-  variant.Reset();
-  hr = sound_devices->GetProp(L"szDriverVersion", variant.Receive());
-  if (FAILED(hr))
-    return false;
-
-  if (variant.type() == VT_BSTR && variant.ptr()->bstrVal) {
-    base::WideToUTF8(variant.ptr()->bstrVal, wcslen(variant.ptr()->bstrVal),
-                     driver_version);
   }
 
   return true;

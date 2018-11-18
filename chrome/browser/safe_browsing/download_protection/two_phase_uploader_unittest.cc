@@ -6,19 +6,22 @@
 
 #include <stdint.h>
 
+#include <memory>
+#include <utility>
+
 #include "base/files/file_path.h"
-#include "base/message_loop/message_loop.h"
-#include "base/task_scheduler/post_task.h"
-#include "base/task_scheduler/task_traits.h"
+#include "base/path_service.h"
+#include "base/sequenced_task_runner.h"
+#include "base/task/post_task.h"
+#include "base/task/task_traits.h"
 #include "chrome/browser/safe_browsing/local_two_phase_testserver.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_utils.h"
 #include "net/base/net_errors.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
-#include "net/url_request/url_fetcher.h"
-#include "net/url_request/url_request_test_util.h"
-#include "services/network/network_context.h"
-#include "services/network/public/cpp/shared_url_loader_factory.h"
+#include "services/network/network_service.h"
+#include "services/network/test/test_network_service_client.h"
+#include "services/network/test/test_shared_url_loader_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using content::BrowserThread;
@@ -52,7 +55,7 @@ class Delegate {
 
 base::FilePath GetTestFilePath() {
   base::FilePath file_path;
-  PathService::Get(base::DIR_SOURCE_ROOT, &file_path);
+  base::PathService::Get(base::DIR_SOURCE_ROOT, &file_path);
   file_path = file_path.AppendASCII("net");
   file_path = file_path.AppendASCII("data");
   file_path = file_path.AppendASCII("url_request_unittest");
@@ -60,66 +63,32 @@ base::FilePath GetTestFilePath() {
   return file_path;
 }
 
-class SharedURLLoaderFactory : public network::SharedURLLoaderFactory {
- public:
-  explicit SharedURLLoaderFactory(
-      network::mojom::URLLoaderFactory* url_loader_factory)
-      : url_loader_factory_(url_loader_factory) {}
-
-  std::unique_ptr<network::SharedURLLoaderFactoryInfo> Clone() override {
-    NOTREACHED();
-    return nullptr;
-  }
-
-  // network::URLLoaderFactory implementation:
-  void CreateLoaderAndStart(network::mojom::URLLoaderRequest loader,
-                            int32_t routing_id,
-                            int32_t request_id,
-                            uint32_t options,
-                            const network::ResourceRequest& request,
-                            network::mojom::URLLoaderClientPtr client,
-                            const net::MutableNetworkTrafficAnnotationTag&
-                                traffic_annotation) override {
-    url_loader_factory_->CreateLoaderAndStart(
-        std::move(loader), routing_id, request_id, options, std::move(request),
-        std::move(client), traffic_annotation);
-  }
-
- private:
-  friend class base::RefCounted<SharedURLLoaderFactory>;
-  ~SharedURLLoaderFactory() override = default;
-
-  network::mojom::URLLoaderFactory* url_loader_factory_;
-};
-
 }  // namespace
 
 class TwoPhaseUploaderTest : public testing::Test {
  public:
   TwoPhaseUploaderTest()
-      : thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP),
-        url_request_context_getter_(new net::TestURLRequestContextGetter(
-            BrowserThread::GetTaskRunnerForThread(BrowserThread::IO))) {
-    network::mojom::NetworkContextPtr network_context;
-    network_context_ = std::make_unique<network::NetworkContext>(
-        nullptr, mojo::MakeRequest(&network_context),
-        url_request_context_getter_);
-    network_context_->CreateURLLoaderFactory(
-        mojo::MakeRequest(&url_loader_factory_), 0);
+      : thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP) {
+    // A NetworkServiceClient is needed for uploads to work.
+    network::mojom::NetworkServiceClientPtr network_service_client_ptr;
+    network_service_client_ =
+        std::make_unique<network::TestNetworkServiceClient>(
+            mojo::MakeRequest(&network_service_client_ptr));
+    network_service_ = network::NetworkService::CreateForTesting();
+    network_service_->SetClient(std::move(network_service_client_ptr));
     shared_url_loader_factory_ =
-        base::MakeRefCounted<SharedURLLoaderFactory>(url_loader_factory_.get());
+        base::MakeRefCounted<network::TestSharedURLLoaderFactory>(
+            network_service_.get());
   }
 
  protected:
   content::TestBrowserThreadBundle thread_bundle_;
-
-  scoped_refptr<net::TestURLRequestContextGetter> url_request_context_getter_;
   const scoped_refptr<base::SequencedTaskRunner> task_runner_ =
       base::CreateSequencedTaskRunnerWithTraits(
-          {base::MayBlock(), base::TaskPriority::BACKGROUND});
-  std::unique_ptr<network::NetworkContext> network_context_;
-  network::mojom::URLLoaderFactoryPtr url_loader_factory_;
-  scoped_refptr<SharedURLLoaderFactory> shared_url_loader_factory_;
+          {base::MayBlock(), base::TaskPriority::BEST_EFFORT});
+  std::unique_ptr<network::TestNetworkServiceClient> network_service_client_;
+  std::unique_ptr<network::NetworkService> network_service_;
+  scoped_refptr<network::TestSharedURLLoaderFactory> shared_url_loader_factory_;
 };
 
 TEST_F(TwoPhaseUploaderTest, UploadFile) {

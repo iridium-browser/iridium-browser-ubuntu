@@ -6,6 +6,7 @@
 
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/dom/events/event_dispatcher.h"
+#include "third_party/blink/renderer/core/dom/events/event_path.h"
 
 namespace blink {
 
@@ -99,9 +100,39 @@ double PointerEvent::pageY() const {
              : page_location_.Y();
 }
 
+double PointerEvent::offsetX() {
+  if (!HasPosition())
+    return 0;
+  if (!has_cached_relative_position_)
+    ComputeRelativePosition();
+  return (!RuntimeEnabledFeatures::FractionalMouseTypePointerEventEnabled() &&
+          pointer_type_ == "mouse")
+             ? std::round(offset_location_.X())
+             : offset_location_.X();
+}
+
+double PointerEvent::offsetY() {
+  if (!HasPosition())
+    return 0;
+  if (!has_cached_relative_position_)
+    ComputeRelativePosition();
+  return (!RuntimeEnabledFeatures::FractionalMouseTypePointerEventEnabled() &&
+          pointer_type_ == "mouse")
+             ? std::round(offset_location_.Y())
+             : offset_location_.Y();
+}
+
 void PointerEvent::ReceivedTarget() {
   coalesced_events_targets_dirty_ = true;
   MouseEvent::ReceivedTarget();
+}
+
+Node* PointerEvent::toElement() const {
+  return nullptr;
+}
+
+Node* PointerEvent::fromElement() const {
+  return nullptr;
 }
 
 HeapVector<Member<PointerEvent>> PointerEvent::getCoalescedEvents() {
@@ -111,6 +142,14 @@ HeapVector<Member<PointerEvent>> PointerEvent::getCoalescedEvents() {
     coalesced_events_targets_dirty_ = false;
   }
   return coalesced_events_;
+}
+
+TimeTicks PointerEvent::OldestPlatformTimeStamp() const {
+  if (coalesced_events_.size() > 0) {
+    // Assume that time stamps of coalesced events are in ascending order.
+    return coalesced_events_[0]->PlatformTimeStamp();
+  }
+  return this->PlatformTimeStamp();
 }
 
 void PointerEvent::Trace(blink::Visitor* visitor) {

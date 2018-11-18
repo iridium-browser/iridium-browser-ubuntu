@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/files/file_path.h"
 #include "base/logging.h"
@@ -18,6 +19,7 @@
 #include "base/run_loop.h"
 #include "base/test/gtest_util.h"
 #include "base/test/test_simple_task_runner.h"
+#include "base/timer/mock_timer.h"
 #include "content/browser/loader/mock_resource_loader.h"
 #include "content/browser/loader/resource_controller.h"
 #include "content/browser/loader/resource_dispatcher_host_impl.h"
@@ -49,7 +51,9 @@
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
+#include "net/url_request/url_request_job_factory_impl.h"
 #include "net/url_request/url_request_status.h"
+#include "net/url_request/url_request_test_job.h"
 #include "net/url_request/url_request_test_util.h"
 #include "services/network/public/cpp/resource_response.h"
 #include "services/network/public/cpp/url_loader_completion_status.h"
@@ -104,14 +108,6 @@ class TestResourceDispatcherHostDelegate final
  public:
   TestResourceDispatcherHostDelegate() = default;
   ~TestResourceDispatcherHostDelegate() override = default;
-
-  bool ShouldBeginRequest(const std::string& method,
-                          const GURL& url,
-                          ResourceType resource_type,
-                          ResourceContext* resource_context) override {
-    ADD_FAILURE() << "ShouldBeginRequest should not be called.";
-    return false;
-  }
 
   void RequestBeginning(
       net::URLRequest* request,
@@ -312,9 +308,9 @@ class MojoAsyncResourceHandlerTestBase {
 
     // Create and initialize |request_|.  None of this matters, for these tests,
     // just need something non-NULL.
-    net::URLRequestContext* request_context =
+    request_context_ =
         browser_context_->GetResourceContext()->GetRequestContext();
-    request_ = request_context->CreateRequest(
+    request_ = request_context_->CreateRequest(
         GURL("http://foo/"), net::DEFAULT_PRIORITY, &url_request_delegate_,
         TRAFFIC_ANNOTATION_FOR_TESTS);
     request_->set_upload(std::move(upload_stream));
@@ -411,6 +407,7 @@ class MojoAsyncResourceHandlerTestBase {
   network::TestURLLoaderClient url_loader_client_;
   std::unique_ptr<TestBrowserContext> browser_context_;
   net::TestDelegate url_request_delegate_;
+  net::URLRequestContext* request_context_;
   std::unique_ptr<net::URLRequest> request_;
   std::unique_ptr<MojoAsyncResourceHandlerWithStubOperations> handler_;
   std::unique_ptr<MockResourceLoader> mock_loader_;
@@ -495,7 +492,8 @@ TEST_F(MojoAsyncResourceHandlerTest, OnWillStart) {
 }
 
 TEST_F(MojoAsyncResourceHandlerTest, OnResponseStarted) {
-  scoped_refptr<net::IOBufferWithSize> metadata = new net::IOBufferWithSize(5);
+  scoped_refptr<net::IOBufferWithSize> metadata =
+      base::MakeRefCounted<net::IOBufferWithSize>(5);
   memcpy(metadata->data(), "hello", 5);
   handler_->SetMetadata(metadata);
 
@@ -1219,7 +1217,7 @@ TEST_P(MojoAsyncResourceHandlerWithAllocationSizeTest, RedirectHandling) {
 
   ASSERT_EQ(MockResourceLoader::Status::CALLBACK_PENDING,
             mock_loader_->status());
-  handler_->FollowRedirect();
+  handler_->FollowRedirect(base::nullopt, base::nullopt);
   ASSERT_EQ(MockResourceLoader::Status::IDLE, mock_loader_->status());
 
   url_loader_client_.ClearHasReceivedRedirect();
@@ -1240,7 +1238,7 @@ TEST_P(MojoAsyncResourceHandlerWithAllocationSizeTest, RedirectHandling) {
 
   ASSERT_EQ(MockResourceLoader::Status::CALLBACK_PENDING,
             mock_loader_->status());
-  handler_->FollowRedirect();
+  handler_->FollowRedirect(base::nullopt, base::nullopt);
   ASSERT_EQ(MockResourceLoader::Status::IDLE, mock_loader_->status());
 
   // Give the final response.
@@ -1264,7 +1262,7 @@ TEST_P(MojoAsyncResourceHandlerWithAllocationSizeTest, RedirectHandling) {
 // redirect, despite the fact that no redirect has been received yet.
 TEST_P(MojoAsyncResourceHandlerWithAllocationSizeTest,
        MalformedFollowRedirectRequest) {
-  handler_->FollowRedirect();
+  handler_->FollowRedirect(base::nullopt, base::nullopt);
 
   EXPECT_TRUE(handler_->has_received_bad_message());
 }
@@ -1466,6 +1464,122 @@ TEST_F(MojoAsyncResourceHandlerSendSSLInfoForCertificateError,
   url_loader_client_.RunUntilComplete();
   EXPECT_FALSE(url_loader_client_.completion_status().ssl_info);
 };
+
+TEST_F(MojoAsyncResourceHandlerTest,
+       TransferSizeUpdateCalledForNonBlockedResponse) {
+  net::URLRequestJobFactoryImpl test_job_factory_;
+  auto test_job = std::make_unique<net::URLRequestTestJob>(
+      request_.get(), request_context_->network_delegate(), "response headers",
+      "response body", true);
+  auto test_job_interceptor = std::make_unique<net::TestJobInterceptor>();
+  net::TestJobInterceptor* raw_test_job_interceptor =
+      test_job_interceptor.get();
+  EXPECT_TRUE(test_job_factory_.SetProtocolHandler(
+      url::kHttpScheme, std::move(test_job_interceptor)));
+
+  request_context_->set_job_factory(&test_job_factory_);
+  raw_test_job_interceptor->set_main_intercept_job(std::move(test_job));
+  request_->Start();
+
+  ASSERT_TRUE(CallOnWillStartAndOnResponseStarted());
+  url_request_delegate_.RunUntilComplete();
+
+  net::URLRequestStatus status(net::URLRequestStatus::SUCCESS, net::OK);
+  ASSERT_EQ(MockResourceLoader::Status::IDLE,
+            mock_loader_->OnResponseCompleted(status));
+  url_loader_client_.RunUntilComplete();
+  EXPECT_LT(0, url_loader_client_.body_transfer_size());
+  EXPECT_EQ(request_->GetTotalReceivedBytes(),
+            url_loader_client_.body_transfer_size());
+}
+
+TEST_F(MojoAsyncResourceHandlerTest,
+       TransferSizeUpdateNotCalledForBlockedResponse) {
+  net::URLRequestJobFactoryImpl test_job_factory_;
+  auto test_job = std::make_unique<net::URLRequestTestJob>(
+      request_.get(), request_context_->network_delegate(), "response headers",
+      "response body", true);
+  auto test_job_interceptor = std::make_unique<net::TestJobInterceptor>();
+  net::TestJobInterceptor* raw_test_job_interceptor =
+      test_job_interceptor.get();
+  EXPECT_TRUE(test_job_factory_.SetProtocolHandler(
+      url::kHttpScheme, std::move(test_job_interceptor)));
+
+  request_context_->set_job_factory(&test_job_factory_);
+  raw_test_job_interceptor->set_main_intercept_job(std::move(test_job));
+  request_->Start();
+
+  // Block the response to reach renderer.
+  ResourceRequestInfoImpl::ForRequest(request_.get())
+      ->set_blocked_response_from_reaching_renderer(true);
+
+  ASSERT_TRUE(CallOnWillStartAndOnResponseStarted());
+
+  net::URLRequestStatus status(net::URLRequestStatus::SUCCESS, net::OK);
+  ASSERT_EQ(MockResourceLoader::Status::IDLE,
+            mock_loader_->OnResponseCompleted(status));
+  url_request_delegate_.RunUntilComplete();
+  EXPECT_TRUE(ResourceRequestInfoImpl::ForRequest(request_.get())
+                  ->blocked_response_from_reaching_renderer());
+  EXPECT_EQ(0, url_loader_client_.body_transfer_size());
+  EXPECT_LT(0, request_->GetTotalReceivedBytes());
+}
+
+TEST_F(MojoAsyncResourceHandlerTest,
+       TransferSizeUpdateCalledWithoutResponseComplete) {
+  const char kResponseHeaders[] = "response headers";
+  const char kResponseData[] = "response data";
+  // Create a mock timer to control when the final transfersizeupdate is sent.
+  auto timer = std::make_unique<base::MockOneShotTimer>();
+  auto* raw_timer = timer.get();
+  handler_->set_report_transfer_size_async_timer_for_testing(std::move(timer));
+
+  // Create a test job so the underlying URLRequest will receive bytes.
+  net::URLRequestJobFactoryImpl test_job_factory_;
+  auto test_job = std::make_unique<net::URLRequestTestJob>(
+      request_.get(), request_context_->network_delegate(), kResponseHeaders,
+      kResponseData, true);
+  auto test_job_interceptor = std::make_unique<net::TestJobInterceptor>();
+  net::TestJobInterceptor* raw_test_job_interceptor =
+      test_job_interceptor.get();
+  EXPECT_TRUE(test_job_factory_.SetProtocolHandler(
+      url::kHttpScheme, std::move(test_job_interceptor)));
+  request_context_->set_job_factory(&test_job_factory_);
+  raw_test_job_interceptor->set_main_intercept_job(std::move(test_job));
+  request_->Start();
+
+  // Prepare for loader read complete.
+  ASSERT_TRUE(CallOnWillStartAndOnResponseStarted());
+  EXPECT_EQ(MockResourceLoader::Status::IDLE,
+            mock_loader_->OnWillStart(request_->url()));
+  EXPECT_EQ(MockResourceLoader::Status::IDLE, mock_loader_->OnWillRead());
+  // Only headers are read by the time the response is started.
+  mock_loader_->OnReadCompleted(kResponseHeaders);
+
+  // Make the loader process another read of the rest of the URLTestJob data.
+  EXPECT_EQ(MockResourceLoader::Status::IDLE, mock_loader_->OnWillRead());
+  mock_loader_->OnReadCompleted(kResponseData);
+
+  // Process the entire URL request.
+  url_request_delegate_.RunUntilComplete();
+
+  // All data received by the request.
+  EXPECT_EQ(
+      request_->GetTotalReceivedBytes(),
+      static_cast<int64_t>(strlen(kResponseHeaders) + strlen(kResponseData)));
+
+  // Wait for a transfer size update to be received.
+  url_loader_client_.RunUntilTransferSizeUpdated();
+  // Only the first read caused a transfer size update.
+  EXPECT_EQ(static_cast<int64_t>(strlen(kResponseHeaders)),
+            url_loader_client_.body_transfer_size());
+  // Firing the timer will cause the rest of the bytes to be reported.
+  // Without timer fire no transfer size updates would be received.
+  raw_timer->Fire();
+  url_loader_client_.RunUntilTransferSizeUpdated();
+  EXPECT_EQ(request_->GetTotalReceivedBytes(),
+            url_loader_client_.body_transfer_size());
+}
 
 INSTANTIATE_TEST_CASE_P(MojoAsyncResourceHandlerWithAllocationSizeTest,
                         MojoAsyncResourceHandlerWithAllocationSizeTest,

@@ -147,6 +147,10 @@ bool CXFA_FFWidgetHandler::OnChar(CXFA_FFWidget* hWidget,
   return bRet;
 }
 
+WideString CXFA_FFWidgetHandler::GetText(CXFA_FFWidget* widget) {
+  return widget->GetText();
+}
+
 WideString CXFA_FFWidgetHandler::GetSelectedText(CXFA_FFWidget* widget) {
   if (!widget->CanCopy())
     return WideString();
@@ -160,6 +164,22 @@ void CXFA_FFWidgetHandler::PasteText(CXFA_FFWidget* widget,
     return;
 
   widget->Paste(text);
+}
+
+bool CXFA_FFWidgetHandler::CanUndo(CXFA_FFWidget* widget) {
+  return widget->CanUndo();
+}
+
+bool CXFA_FFWidgetHandler::CanRedo(CXFA_FFWidget* widget) {
+  return widget->CanRedo();
+}
+
+bool CXFA_FFWidgetHandler::Undo(CXFA_FFWidget* widget) {
+  return widget->Undo();
+}
+
+bool CXFA_FFWidgetHandler::Redo(CXFA_FFWidget* widget) {
+  return widget->Redo();
 }
 
 FWL_WidgetHit CXFA_FFWidgetHandler::OnHitTest(CXFA_FFWidget* hWidget,
@@ -214,11 +234,11 @@ int32_t CXFA_FFWidgetHandler::ProcessEvent(CXFA_Node* pNode,
 
   switch (pParam->m_eType) {
     case XFA_EVENT_Calculate:
-      return pNode->ProcessCalculate(m_pDocView);
+      return pNode->ProcessCalculate(m_pDocView.Get());
     case XFA_EVENT_Validate:
       if (m_pDocView->GetDoc()->GetDocEnvironment()->IsValidationsEnabled(
               m_pDocView->GetDoc())) {
-        return pNode->ProcessValidate(m_pDocView, 0);
+        return pNode->ProcessValidate(m_pDocView.Get(), 0);
       }
       return XFA_EVENTERROR_Disabled;
     case XFA_EVENT_InitCalculate: {
@@ -227,15 +247,14 @@ int32_t CXFA_FFWidgetHandler::ProcessEvent(CXFA_Node* pNode,
         return XFA_EVENTERROR_NotExist;
       if (pNode->IsUserInteractive())
         return XFA_EVENTERROR_Disabled;
-      return pNode->ExecuteScript(m_pDocView, calc->GetScriptIfExists(),
+      return pNode->ExecuteScript(m_pDocView.Get(), calc->GetScriptIfExists(),
                                   pParam);
     }
     default:
       break;
   }
-  int32_t iRet = pNode->ProcessEvent(m_pDocView,
-                                     gs_EventActivity[pParam->m_eType], pParam);
-  return iRet;
+  return pNode->ProcessEvent(m_pDocView.Get(),
+                             gs_EventActivity[pParam->m_eType], pParam);
 }
 
 CXFA_FFWidget* CXFA_FFWidgetHandler::CreateWidget(CXFA_FFWidget* hParent,
@@ -313,32 +332,32 @@ CXFA_Node* CXFA_FFWidgetHandler::CreateWidgetFormItem(
 CXFA_Node* CXFA_FFWidgetHandler::CreatePushButton(CXFA_Node* pParent,
                                                   CXFA_Node* pBefore) const {
   CXFA_Node* pField = CreateField(XFA_Element::Button, pParent, pBefore);
-  CXFA_Node* pCaption = CreateCopyNode(XFA_Element::Caption, pField);
-  CXFA_Node* pValue = CreateCopyNode(XFA_Element::Value, pCaption);
-  CXFA_Node* pText = CreateCopyNode(XFA_Element::Text, pValue);
+  CXFA_Node* pCaption = CreateCopyNode(XFA_Element::Caption, pField, nullptr);
+  CXFA_Node* pValue = CreateCopyNode(XFA_Element::Value, pCaption, nullptr);
+  CXFA_Node* pText = CreateCopyNode(XFA_Element::Text, pValue, nullptr);
   pText->JSObject()->SetContent(L"Button", L"Button", false, false, true);
 
-  CXFA_Node* pPara = CreateCopyNode(XFA_Element::Para, pCaption);
+  CXFA_Node* pPara = CreateCopyNode(XFA_Element::Para, pCaption, nullptr);
   pPara->JSObject()->SetEnum(XFA_Attribute::VAlign, XFA_AttributeEnum::Middle,
                              false);
   pPara->JSObject()->SetEnum(XFA_Attribute::HAlign, XFA_AttributeEnum::Center,
                              false);
   CreateFontNode(pCaption);
 
-  CXFA_Node* pBorder = CreateCopyNode(XFA_Element::Border, pField);
+  CXFA_Node* pBorder = CreateCopyNode(XFA_Element::Border, pField, nullptr);
   pBorder->JSObject()->SetEnum(XFA_Attribute::Hand, XFA_AttributeEnum::Right,
                                false);
 
-  CXFA_Node* pEdge = CreateCopyNode(XFA_Element::Edge, pBorder);
+  CXFA_Node* pEdge = CreateCopyNode(XFA_Element::Edge, pBorder, nullptr);
   pEdge->JSObject()->SetEnum(XFA_Attribute::Stroke, XFA_AttributeEnum::Raised,
                              false);
 
-  CXFA_Node* pFill = CreateCopyNode(XFA_Element::Fill, pBorder);
-  CXFA_Node* pColor = CreateCopyNode(XFA_Element::Color, pFill);
+  CXFA_Node* pFill = CreateCopyNode(XFA_Element::Fill, pBorder, nullptr);
+  CXFA_Node* pColor = CreateCopyNode(XFA_Element::Color, pFill, nullptr);
   pColor->JSObject()->SetCData(XFA_Attribute::Value, L"212, 208, 200", false,
                                false);
 
-  CXFA_Node* pBind = CreateCopyNode(XFA_Element::Bind, pField);
+  CXFA_Node* pBind = CreateCopyNode(XFA_Element::Bind, pField, nullptr);
   pBind->JSObject()->SetEnum(XFA_Attribute::Match, XFA_AttributeEnum::None,
                              false);
 
@@ -420,7 +439,7 @@ CXFA_Node* CXFA_FFWidgetHandler::CreateImageField(CXFA_Node* pParent,
 CXFA_Node* CXFA_FFWidgetHandler::CreatePasswordEdit(CXFA_Node* pParent,
                                                     CXFA_Node* pBefore) const {
   CXFA_Node* pField = CreateField(XFA_Element::PasswordEdit, pParent, pBefore);
-  CXFA_Node* pBind = CreateCopyNode(XFA_Element::Bind, pField);
+  CXFA_Node* pBind = CreateCopyNode(XFA_Element::Bind, pField, nullptr);
   pBind->JSObject()->SetEnum(XFA_Attribute::Match, XFA_AttributeEnum::None,
                              false);
   return pField;
@@ -430,7 +449,8 @@ CXFA_Node* CXFA_FFWidgetHandler::CreateField(XFA_Element eElement,
                                              CXFA_Node* pParent,
                                              CXFA_Node* pBefore) const {
   CXFA_Node* pField = CreateFormItem(XFA_Element::Field, pParent, pBefore);
-  CreateCopyNode(eElement, CreateCopyNode(XFA_Element::Ui, pField));
+  CreateCopyNode(eElement, CreateCopyNode(XFA_Element::Ui, pField, nullptr),
+                 nullptr);
   CreateFontNode(pField);
   return pField;
 }
@@ -449,7 +469,7 @@ CXFA_Node* CXFA_FFWidgetHandler::CreateImage(CXFA_Node* pParent,
                                              CXFA_Node* pBefore) const {
   CXFA_Node* pField = CreateDraw(XFA_Element::Image, pParent, pBefore);
   CreateCopyNode(XFA_Element::ImageEdit,
-                 CreateCopyNode(XFA_Element::Ui, pField));
+                 CreateCopyNode(XFA_Element::Ui, pField, nullptr), nullptr);
   return pField;
 }
 
@@ -462,7 +482,7 @@ CXFA_Node* CXFA_FFWidgetHandler::CreateText(CXFA_Node* pParent,
                                             CXFA_Node* pBefore) const {
   CXFA_Node* pField = CreateDraw(XFA_Element::Text, pParent, pBefore);
   CreateCopyNode(XFA_Element::TextEdit,
-                 CreateCopyNode(XFA_Element::Ui, pField));
+                 CreateCopyNode(XFA_Element::Ui, pField, nullptr), nullptr);
   CreateFontNode(pField);
   return pField;
 }
@@ -524,7 +544,7 @@ CXFA_Node* CXFA_FFWidgetHandler::CreateTemplateNode(XFA_Element eElement,
 }
 
 CXFA_Node* CXFA_FFWidgetHandler::CreateFontNode(CXFA_Node* pParent) const {
-  CXFA_Node* pFont = CreateCopyNode(XFA_Element::Font, pParent);
+  CXFA_Node* pFont = CreateCopyNode(XFA_Element::Font, pParent, nullptr);
   pFont->JSObject()->SetCData(XFA_Attribute::Typeface, L"Myriad Pro", false,
                               false);
   return pFont;
@@ -533,7 +553,7 @@ CXFA_Node* CXFA_FFWidgetHandler::CreateFontNode(CXFA_Node* pParent) const {
 CXFA_Node* CXFA_FFWidgetHandler::CreateMarginNode(CXFA_Node* pParent,
                                                   uint32_t dwFlags,
                                                   float fInsets[4]) const {
-  CXFA_Node* pMargin = CreateCopyNode(XFA_Element::Margin, pParent);
+  CXFA_Node* pMargin = CreateCopyNode(XFA_Element::Margin, pParent, nullptr);
   if (dwFlags & 0x01)
     pMargin->JSObject()->SetMeasure(XFA_Attribute::LeftInset,
                                     CXFA_Measurement(fInsets[0], XFA_Unit::Pt),
@@ -555,8 +575,8 @@ CXFA_Node* CXFA_FFWidgetHandler::CreateMarginNode(CXFA_Node* pParent,
 
 CXFA_Node* CXFA_FFWidgetHandler::CreateValueNode(XFA_Element eValue,
                                                  CXFA_Node* pParent) const {
-  CXFA_Node* pValue = CreateCopyNode(XFA_Element::Value, pParent);
-  CreateCopyNode(eValue, pValue);
+  CXFA_Node* pValue = CreateCopyNode(XFA_Element::Value, pParent, nullptr);
+  CreateCopyNode(eValue, pValue, nullptr);
   return pValue;
 }
 

@@ -52,7 +52,7 @@ import org.chromium.ui.test.util.UiRestriction;
 public class LayoutManagerTest implements MockTabModelDelegate {
     private static final String TAG = "LayoutManagerTest";
 
-    private long mLastDownTime = 0;
+    private long mLastDownTime;
 
     private TabModelSelector mTabModelSelector;
     private LayoutManagerChrome mManager;
@@ -516,7 +516,8 @@ public class LayoutManagerTest implements MockTabModelDelegate {
         });
     }
 
-    private void runToolbarSideSwipeTestOnCurrentModel(ScrollDirection direction, int finalIndex) {
+    private void runToolbarSideSwipeTestOnCurrentModel(
+            @ScrollDirection int direction, int finalIndex) {
         final TabModel model = mTabModelSelector.getCurrentModel();
         final int finalId = model.getTabAt(finalIndex).getId();
 
@@ -532,14 +533,14 @@ public class LayoutManagerTest implements MockTabModelDelegate {
                 mManager.getActiveLayout() instanceof StaticLayout);
     }
 
-    private void performToolbarSideSwipe(ScrollDirection direction) {
+    private void performToolbarSideSwipe(@ScrollDirection int direction) {
         Assert.assertTrue("Unexpected direction for side swipe " + direction,
                 direction == ScrollDirection.LEFT || direction == ScrollDirection.RIGHT);
 
         final Layout layout = mManager.getActiveLayout();
-        final EdgeSwipeHandler eventHandler = mManager.getTopSwipeHandler();
+        final EdgeSwipeHandler eventHandler = mManager.getToolbarSwipeHandler();
 
-        Assert.assertNotNull("LayoutManager#getTopSwipeHandler() returned null", eventHandler);
+        Assert.assertNotNull("LayoutManager#getToolbarSwipeHandler() returned null", eventHandler);
         Assert.assertNotNull("LayoutManager#getActiveLayout() returned null", layout);
 
         final float layoutWidth = layout.getWidth();

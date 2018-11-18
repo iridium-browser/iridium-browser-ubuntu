@@ -2,11 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "src/builtins/builtins-utils.h"
+#include "src/builtins/builtins-utils-inl.h"
 #include "src/builtins/builtins.h"
 #include "src/conversions.h"
 #include "src/counters.h"
+#include "src/maybe-handles-inl.h"
 #include "src/objects-inl.h"
+#include "src/objects/js-array-buffer-inl.h"
 
 namespace v8 {
 namespace internal {
@@ -29,10 +31,12 @@ Object* ConstructBuffer(Isolate* isolate, Handle<JSFunction> target,
                         Handle<JSReceiver> new_target, Handle<Object> length,
                         bool initialize) {
   Handle<JSObject> result;
-  ASSIGN_RETURN_FAILURE_ON_EXCEPTION(isolate, result,
-                                     JSObject::New(target, new_target));
+  ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
+      isolate, result,
+      JSObject::New(target, new_target, Handle<AllocationSite>::null()));
   size_t byte_length;
-  if (!TryNumberToSize(*length, &byte_length)) {
+  if (!TryNumberToSize(*length, &byte_length) ||
+      byte_length > JSArrayBuffer::kMaxByteLength) {
     THROW_NEW_ERROR_RETURN_FAILURE(
         isolate, NewRangeError(MessageTemplate::kInvalidArrayBufferLength));
   }
@@ -61,20 +65,20 @@ BUILTIN(ArrayBufferConstructor) {
     THROW_NEW_ERROR_RETURN_FAILURE(
         isolate, NewTypeError(MessageTemplate::kConstructorNotFunction,
                               handle(target->shared()->Name(), isolate)));
-  } else {  // [[Construct]]
-    Handle<JSReceiver> new_target = Handle<JSReceiver>::cast(args.new_target());
-    Handle<Object> length = args.atOrUndefined(isolate, 1);
+  }
+  // [[Construct]]
+  Handle<JSReceiver> new_target = Handle<JSReceiver>::cast(args.new_target());
+  Handle<Object> length = args.atOrUndefined(isolate, 1);
 
-    Handle<Object> number_length;
-    ASSIGN_RETURN_FAILURE_ON_EXCEPTION(isolate, number_length,
-                                       Object::ToInteger(isolate, length));
-    if (number_length->Number() < 0.0) {
-      THROW_NEW_ERROR_RETURN_FAILURE(
-          isolate, NewRangeError(MessageTemplate::kInvalidArrayBufferLength));
+  Handle<Object> number_length;
+  ASSIGN_RETURN_FAILURE_ON_EXCEPTION(isolate, number_length,
+                                     Object::ToInteger(isolate, length));
+  if (number_length->Number() < 0.0) {
+    THROW_NEW_ERROR_RETURN_FAILURE(
+        isolate, NewRangeError(MessageTemplate::kInvalidArrayBufferLength));
     }
 
     return ConstructBuffer(isolate, target, new_target, number_length, true);
-  }
 }
 
 // This is a helper to construct an ArrayBuffer with uinitialized memory.
@@ -82,7 +86,8 @@ BUILTIN(ArrayBufferConstructor) {
 // all cases, or we will expose uinitialized memory to user code.
 BUILTIN(ArrayBufferConstructor_DoNotInitialize) {
   HandleScope scope(isolate);
-  Handle<JSFunction> target(isolate->native_context()->array_buffer_fun());
+  Handle<JSFunction> target(isolate->native_context()->array_buffer_fun(),
+                            isolate);
   Handle<Object> length = args.atOrUndefined(isolate, 1);
   return ConstructBuffer(isolate, target, target, length, false);
 }
@@ -95,7 +100,7 @@ BUILTIN(ArrayBufferPrototypeGetByteLength) {
   CHECK_SHARED(false, array_buffer, kMethodName);
   // TODO(franzih): According to the ES6 spec, we should throw a TypeError
   // here if the JSArrayBuffer is detached.
-  return array_buffer->byte_length();
+  return *isolate->factory()->NewNumberFromSize(array_buffer->byte_length());
 }
 
 // ES7 sharedmem 6.3.4.1 get SharedArrayBuffer.prototype.byteLength
@@ -105,7 +110,7 @@ BUILTIN(SharedArrayBufferPrototypeGetByteLength) {
   CHECK_RECEIVER(JSArrayBuffer, array_buffer,
                  "get SharedArrayBuffer.prototype.byteLength");
   CHECK_SHARED(true, array_buffer, kMethodName);
-  return array_buffer->byte_length();
+  return *isolate->factory()->NewNumberFromSize(array_buffer->byte_length());
 }
 
 // ES6 section 24.1.3.1 ArrayBuffer.isView ( arg )
@@ -140,7 +145,7 @@ static Object* SliceHelper(BuiltinArguments args, Isolate* isolate,
 
   // * [AB] Let len be O.[[ArrayBufferByteLength]].
   // * [SAB] Let len be O.[[ArrayBufferByteLength]].
-  double const len = array_buffer->byte_length()->Number();
+  double const len = array_buffer->byte_length();
 
   // * Let relativeStart be ? ToInteger(start).
   Handle<Object> relative_start;
@@ -239,7 +244,7 @@ static Object* SliceHelper(BuiltinArguments args, Isolate* isolate,
   }
 
   // * If new.[[ArrayBufferByteLength]] < newLen, throw a TypeError exception.
-  if (new_array_buffer->byte_length()->Number() < new_len) {
+  if (new_array_buffer->byte_length() < new_len) {
     THROW_NEW_ERROR_RETURN_FAILURE(
         isolate,
         NewTypeError(is_shared ? MessageTemplate::kSharedArrayBufferTooShort
@@ -261,10 +266,10 @@ static Object* SliceHelper(BuiltinArguments args, Isolate* isolate,
   size_t first_size = 0, new_len_size = 0;
   CHECK(TryNumberToSize(*first_obj, &first_size));
   CHECK(TryNumberToSize(*new_len_obj, &new_len_size));
-  DCHECK(NumberToSize(new_array_buffer->byte_length()) >= new_len_size);
+  DCHECK(new_array_buffer->byte_length() >= new_len_size);
 
   if (new_len_size != 0) {
-    size_t from_byte_length = NumberToSize(array_buffer->byte_length());
+    size_t from_byte_length = array_buffer->byte_length();
     USE(from_byte_length);
     DCHECK(first_size <= from_byte_length);
     DCHECK(from_byte_length - first_size >= new_len_size);

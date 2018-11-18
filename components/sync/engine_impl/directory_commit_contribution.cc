@@ -40,8 +40,7 @@ std::unique_ptr<DirectoryCommitContribution> DirectoryCommitContribution::Build(
     return std::unique_ptr<DirectoryCommitContribution>();
 
   google::protobuf::RepeatedPtrField<sync_pb::SyncEntity> entities;
-  for (std::vector<int64_t>::iterator it = metahandles.begin();
-       it != metahandles.end(); ++it) {
+  for (auto it = metahandles.begin(); it != metahandles.end(); ++it) {
     sync_pb::SyncEntity* entity = entities.Add();
     syncable::ModelNeutralMutableEntry entry(&trans, GET_BY_HANDLE, *it);
     commit_util::BuildCommitItem(entry, entity);
@@ -67,7 +66,16 @@ void DirectoryCommitContribution::AddToCommitMessage(
     commit_message->add_client_contexts()->Swap(&context_);
 
   CommitCounters* counters = debug_info_emitter_->GetMutableCommitCounters();
-  counters->num_commits_attempted += entities_.size();
+  for (const sync_pb::SyncEntity& entity : entities_) {
+    // Update the relevant counter based on the type of |entity|.
+    if (entity.deleted()) {
+      counters->num_deletion_commits_attempted++;
+    } else if (entity.version() <= 0) {
+      counters->num_creation_commits_attempted++;
+    } else {
+      counters->num_update_commits_attempted++;
+    }
+  }
 }
 
 SyncerError DirectoryCommitContribution::ProcessCommitResponse(
@@ -176,8 +184,7 @@ DirectoryCommitContribution::DirectoryCommitContribution(
 
 void DirectoryCommitContribution::UnsetSyncingBits() {
   syncable::ModelNeutralWriteTransaction trans(FROM_HERE, SYNCER, dir_);
-  for (std::vector<int64_t>::const_iterator it = metahandles_.begin();
-       it != metahandles_.end(); ++it) {
+  for (auto it = metahandles_.begin(); it != metahandles_.end(); ++it) {
     syncable::ModelNeutralMutableEntry entry(&trans, GET_BY_HANDLE, *it);
     // TODO(sync): this seems like it could be harmful if a sync cycle doesn't
     // complete but the Cleanup method is called anyways. It appears these are

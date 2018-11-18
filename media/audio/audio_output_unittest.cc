@@ -11,6 +11,7 @@
 #include "base/run_loop.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
+#include "build/build_config.h"
 #include "media/audio/audio_device_info_accessor_for_tests.h"
 #include "media/audio/audio_io.h"
 #include "media/audio/audio_manager.h"
@@ -53,7 +54,7 @@ class AudioOutputTest : public ::testing::Test {
   }
 
  protected:
-  base::MessageLoop message_loop_;
+  base::MessageLoopForIO message_loop_;
   std::unique_ptr<AudioManager> audio_manager_;
   std::unique_ptr<AudioDeviceInfoAccessorForTests> audio_manager_device_info_;
   AudioParameters stream_params_;

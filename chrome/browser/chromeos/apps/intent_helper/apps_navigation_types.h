@@ -6,21 +6,14 @@
 #define CHROME_BROWSER_CHROMEOS_APPS_INTENT_HELPER_APPS_NAVIGATION_TYPES_H_
 
 #include <string>
+#include <vector>
 
 #include "base/callback_forward.h"
 #include "base/macros.h"
+#include "chrome/browser/apps/foundation/app_service/public/mojom/types.mojom.h"
 #include "ui/gfx/image/image.h"
 
 namespace chromeos {
-
-enum class AppType {
-  // Used for error scenarios and other cases where the app type isn't going to
-  // be used (e.g. not launching an app).
-  INVALID,
-
-  // An Android app.
-  ARC,
-};
 
 // Describes the possible ways for the intent picker to be closed.
 enum class IntentPickerCloseReason {
@@ -40,6 +33,22 @@ enum class IntentPickerCloseReason {
   OPEN_APP,
 };
 
+// Describes what's the preferred platform for this navigation, if any.
+enum class PreferredPlatform {
+  // Either there was an error or there is no preferred app at all.
+  NONE,
+
+  // The preferred app is Chrome.
+  NATIVE_CHROME,
+
+  // The preferred app is an ARC app.
+  ARC,
+
+  // TODO(crbug.com/826982) Not needed until app registry is in use.
+  // The preferred app is a PWA app.
+  PWA,
+};
+
 enum class AppsNavigationAction {
   // The current navigation should be cancelled.
   CANCEL,
@@ -50,7 +59,7 @@ enum class AppsNavigationAction {
 
 // Represents the data required to display an app in a picker to the user.
 struct IntentPickerAppInfo {
-  IntentPickerAppInfo(AppType type,
+  IntentPickerAppInfo(apps::mojom::AppType type,
                       const gfx::Image& icon,
                       const std::string& launch_name,
                       const std::string& display_name);
@@ -60,7 +69,7 @@ struct IntentPickerAppInfo {
   IntentPickerAppInfo& operator=(IntentPickerAppInfo&& other);
 
   // The type of app that this object represents.
-  AppType type;
+  apps::mojom::AppType type;
 
   // The icon to be displayed for this app in the picker.
   gfx::Image icon;
@@ -84,9 +93,19 @@ using AppsNavigationCallback =
 
 // Callback to allow app-platform-specific code to asynchronously provide a list
 // of apps which can handle the navigation.
-using QueryAppsCallback =
+using GetAppsCallback =
     base::OnceCallback<void(std::vector<IntentPickerAppInfo> apps)>;
 
 }  // namespace chromeos
+
+// Callback to pass the launch name and type of the app selected by the user,
+// along with the reason why the Bubble was closed and whether the decision
+// should be persisted. When the reason is ERROR or DIALOG_DEACTIVATED, the
+// values of the launch name, app type, and persistence boolean are all ignored.
+using IntentPickerResponse =
+    base::OnceCallback<void(const std::string& launch_name,
+                            apps::mojom::AppType app_type,
+                            chromeos::IntentPickerCloseReason close_reason,
+                            bool should_persist)>;
 
 #endif  // CHROME_BROWSER_CHROMEOS_APPS_INTENT_HELPER_APPS_NAVIGATION_TYPES_H_

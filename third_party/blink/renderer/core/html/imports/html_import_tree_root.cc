@@ -19,7 +19,7 @@ HTMLImportTreeRoot::HTMLImportTreeRoot(Document* document)
     : HTMLImport(HTMLImport::kSync),
       document_(document),
       recalc_timer_(
-          document->GetFrame()->GetTaskRunner(TaskType::kUnspecedTimer),
+          document->GetFrame()->GetTaskRunner(TaskType::kInternalDefault),
           this,
           &HTMLImportTreeRoot::RecalcTimerFired) {
   ScheduleRecalcState();  // This recomputes initial state.
@@ -85,11 +85,6 @@ void HTMLImportTreeRoot::Trace(blink::Visitor* visitor) {
   visitor->Trace(document_);
   visitor->Trace(imports_);
   HTMLImport::Trace(visitor);
-}
-
-void HTMLImportTreeRoot::TraceWrappers(
-    const ScriptWrappableVisitor* visitor) const {
-  visitor->TraceWrappers(document_);
 }
 
 }  // namespace blink

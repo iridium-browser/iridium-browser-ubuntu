@@ -7,8 +7,12 @@
 
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
+#include "base/containers/small_map.h"
+#include "base/containers/span.h"
+#include "base/gtest_prod_util.h"
 #include "base/lazy_instance.h"
 #include "base/memory/linked_ptr.h"
 #include "base/strings/string16.h"
@@ -118,7 +122,7 @@ class ManifestHandler {
 
  private:
   // The keys to register us for (in Register).
-  virtual const std::vector<std::string> Keys() const = 0;
+  virtual base::span<const char* const> Keys() const = 0;
 };
 
 // The global registry for manifest handlers.
@@ -126,15 +130,20 @@ class ManifestHandlerRegistry {
  private:
   friend class ManifestHandler;
   friend class ScopedTestingManifestHandlerRegistry;
-  friend class ContentVerifierTest;
   friend struct base::LazyInstanceTraitsBase<ManifestHandlerRegistry>;
+  FRIEND_TEST_ALL_PREFIXES(ManifestHandlerPerfTest, MANUAL_CommonInitialize);
+  FRIEND_TEST_ALL_PREFIXES(ManifestHandlerPerfTest, MANUAL_LookupTest);
+  FRIEND_TEST_ALL_PREFIXES(ManifestHandlerPerfTest,
+                           MANUAL_CommonMeasureFinalization);
+  FRIEND_TEST_ALL_PREFIXES(ChromeExtensionsClientTest,
+                           CheckManifestHandlerRegistryForOverflow);
 
   ManifestHandlerRegistry();
   ~ManifestHandlerRegistry();
 
   void Finalize();
 
-  void RegisterManifestHandler(const std::string& key,
+  void RegisterManifestHandler(const char* key,
                                linked_ptr<ManifestHandler> handler);
   bool ParseExtension(Extension* extension, base::string16* error);
   bool ValidateExtension(const Extension* extension,
@@ -147,14 +156,32 @@ class ManifestHandlerRegistry {
       const Extension* extension,
       ManifestPermissionSet* permission_set);
 
+  // Get the one true instance.
+  static ManifestHandlerRegistry* Get();
+
+  // Reset the one true instance.
+  static void ResetForTesting();
+
   // Overrides the current global ManifestHandlerRegistry with
   // |registry|, returning the current one.
   static ManifestHandlerRegistry* SetForTesting(
       ManifestHandlerRegistry* new_registry);
 
-  typedef std::map<std::string, linked_ptr<ManifestHandler> >
-      ManifestHandlerMap;
-  typedef std::map<ManifestHandler*, int> ManifestHandlerPriorityMap;
+  // This number is derived from determining the total number of manifest
+  // handlers that are installed for all build configurations. It is
+  // checked through a unit test:
+  // ChromeExtensionsClientTest.CheckManifestHandlerRegistryForOverflow.
+  //
+  // Any new manifest handlers added may cause the small_map to overflow
+  // to the backup std::unordered_map, which we don't want, as that would
+  // defeat the optimization of using small_map.
+  static constexpr size_t kHandlerMax = 72;
+  using FallbackMap =
+      std::unordered_map<std::string, linked_ptr<ManifestHandler>>;
+  using ManifestHandlerMap = base::small_map<FallbackMap, kHandlerMax>;
+  using FallbackPriorityMap = std::unordered_map<ManifestHandler*, int>;
+  using ManifestHandlerPriorityMap =
+      base::small_map<FallbackPriorityMap, kHandlerMax>;
 
   // Puts the manifest handlers in order such that each handler comes after
   // any handlers for their PrerequisiteKeys. If there is no handler for

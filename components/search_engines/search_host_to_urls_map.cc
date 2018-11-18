@@ -16,7 +16,7 @@ SearchHostToURLsMap::~SearchHostToURLsMap() {
 }
 
 void SearchHostToURLsMap::Init(
-    const TemplateURLService::OwnedTemplateURLVector& template_urls,
+    const TemplateURL::OwnedTemplateURLVector& template_urls,
     const SearchTermsData& search_terms_data) {
   DCHECK(!initialized_);
   initialized_ = true;  // Set here so Add doesn't assert.
@@ -66,14 +66,14 @@ SearchHostToURLsMap::TemplateURLSet* SearchHostToURLsMap::GetURLsForHost(
     base::StringPiece host) {
   DCHECK(initialized_);
 
-  HostToURLsMap::iterator urls_for_host = host_to_urls_map_.find(host);
+  auto urls_for_host = host_to_urls_map_.find(host);
   if (urls_for_host == host_to_urls_map_.end() || urls_for_host->second.empty())
     return nullptr;
   return &urls_for_host->second;
 }
 
 void SearchHostToURLsMap::Add(
-    const TemplateURLService::OwnedTemplateURLVector& template_urls,
+    const TemplateURL::OwnedTemplateURLVector& template_urls,
     const SearchTermsData& search_terms_data) {
   for (const auto& turl : template_urls)
     Add(turl.get(), search_terms_data);

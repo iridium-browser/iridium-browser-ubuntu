@@ -22,9 +22,9 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/account_id/account_id.h"
 #include "components/prefs/scoped_user_pref_update.h"
 #include "components/prefs/testing_pref_service.h"
-#include "components/signin/core/account_id/account_id.h"
 #include "components/user_manager/scoped_user_manager.h"
 #include "components/user_manager/user_manager.h"
 #include "components/user_manager/user_names.h"
@@ -32,7 +32,8 @@
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/install_flag.h"
-#include "extensions/common/manifest_constants.h"
+#include "extensions/common/extension_builder.h"
+#include "extensions/common/value_builder.h"
 #include "ppapi/buildflags/buildflags.h"
 
 namespace {
@@ -115,20 +116,15 @@ class ExtensionGarbageCollectorChromeOSUnitTest
                                                  std::move(version_info));
   }
 
-  scoped_refptr<Extension> CreateExtension(const std::string& id,
-                                           const std::string& version,
-                                           const base::FilePath& path) {
-    base::DictionaryValue manifest;
-    manifest.SetString(manifest_keys::kName, "test");
-    manifest.SetString(manifest_keys::kVersion, version);
-
-    std::string error;
-    scoped_refptr<Extension> extension = Extension::Create(
-        path, Manifest::INTERNAL, manifest, Extension::NO_FLAGS, id, &error);
-    CHECK(extension.get()) << error;
-    CHECK_EQ(id, extension->id());
-
-    return extension;
+  scoped_refptr<const Extension> CreateExtension(const std::string& id,
+                                                 const std::string& version,
+                                                 const base::FilePath& path) {
+    return ExtensionBuilder("test")
+        .SetVersion(version)
+        .SetID(id)
+        .SetPath(path)
+        .SetLocation(Manifest::INTERNAL)
+        .Build();
   }
 
   ExtensionPrefs* GetExtensionPrefs() {
@@ -167,8 +163,8 @@ TEST_F(ExtensionGarbageCollectorChromeOSUnitTest, SharedExtensions) {
   CreateSharedExtensionPrefs(kExtensionId2, "1.0",
                              user_manager::StubAccountId().GetUserEmail(),
                              path_id2_1);
-  scoped_refptr<Extension> extension2 = CreateExtension(kExtensionId2, "1.0",
-                                                        path_id2_1);
+  scoped_refptr<const Extension> extension2 =
+      CreateExtension(kExtensionId2, "1.0", path_id2_1);
   GetExtensionPrefs()->SetDelayedInstallInfo(
       extension2.get(),
       Extension::ENABLED,

@@ -15,8 +15,8 @@ namespace autofill {
 namespace {
 
 // Increment this anytime pickle format is modified as well as provide
-// deserialization routine from previous kPickleVersion format.
-const int kPickleVersion = 7;
+// deserialization routine from previous kFormFieldDataPickleVersion format.
+const int kFormFieldDataPickleVersion = 7;
 
 void AddVectorToPickle(std::vector<base::string16> strings,
                        base::Pickle* pickle) {
@@ -145,6 +145,8 @@ FormFieldData::FormFieldData()
       role(ROLE_ATTRIBUTE_OTHER),
       text_direction(base::i18n::UNKNOWN_DIRECTION),
       properties_mask(0),
+      is_enabled(false),
+      is_readonly(false),
       label_source(LabelSource::UNKNOWN) {}
 
 FormFieldData::FormFieldData(const FormFieldData& other) = default;
@@ -154,6 +156,11 @@ FormFieldData::~FormFieldData() {}
 bool FormFieldData::SameFieldAs(const FormFieldData& field) const {
   // A FormFieldData stores a value, but the value is not part of the identity
   // of the field, so we don't want to compare the values.
+  // Similarly, flags like is_enabled, which are only used for parsing but are
+  // not stored persistently, are not used for comparison.
+  // is_autofilled and section are also secondary properties of a field. Two
+  // fields could be the same, and have different sections, because the section
+  // is updated for one, but not for the other.
   return name == field.name && id == field.id &&
          form_control_type == field.form_control_type &&
          autocomplete_attribute == field.autocomplete_attribute &&
@@ -181,8 +188,21 @@ bool FormFieldData::SimilarFieldAs(const FormFieldData& field) const {
          IsCheckable(check_status) == IsCheckable(field.check_status);
 }
 
+bool FormFieldData::DynamicallySameFieldAs(const FormFieldData& field) const {
+  return name == field.name && id == field.id && HaveSameLabel(*this, field) &&
+         IsVisible() == field.IsVisible() &&
+         form_control_type == field.form_control_type;
+}
+
+bool FormFieldData::IsTextInputElement() const {
+  return form_control_type == "text" || form_control_type == "password" ||
+         form_control_type == "search" || form_control_type == "tel" ||
+         form_control_type == "url" || form_control_type == "email";
+}
+
 bool FormFieldData::operator==(const FormFieldData& field) const {
-  return SameFieldAs(field) && is_autofilled == field.is_autofilled &&
+  return SameFieldAs(field) && unique_renderer_id == field.unique_renderer_id &&
+         is_autofilled == field.is_autofilled &&
          check_status == field.check_status &&
          option_values == field.option_values &&
          option_contents == field.option_contents &&
@@ -253,13 +273,14 @@ bool FormFieldData::operator<(const FormFieldData& field) const {
     return true;
   if (text_direction > field.text_direction)
     return false;
-  // See SameFieldAs above for why we don't check option_values/contents.
+  // See SameFieldAs above for why we don't check option_values/contents and
+  // flags like is_enabled.
   return false;
 }
 
 void SerializeFormFieldData(const FormFieldData& field_data,
                             base::Pickle* pickle) {
-  pickle->WriteInt(kPickleVersion);
+  pickle->WriteInt(kFormFieldDataPickleVersion);
   pickle->WriteString16(field_data.label);
   pickle->WriteString16(field_data.name);
   pickle->WriteString16(field_data.value);
@@ -431,6 +452,9 @@ std::ostream& operator<<(std::ostream& os, const FormFieldData& field) {
             << "should_autocomplete=" << field.should_autocomplete << " "
             << "role=" << role_str << " "
             << "text_direction=" << field.text_direction << " "
+            << "is_enabled=" << field.is_enabled << " "
+            << "is_readonly=" << field.is_readonly << " "
+            << "typed_value=" << field.typed_value << " "
             << "properties_mask=" << field.properties_mask << " "
             << "label_source=" << field.label_source;
 }

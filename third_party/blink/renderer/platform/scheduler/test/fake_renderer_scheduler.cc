@@ -7,7 +7,7 @@
 #include "base/message_loop/message_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "build/build_config.h"
-#include "third_party/blink/public/platform/web_thread.h"
+#include "third_party/blink/renderer/platform/scheduler/public/thread.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
@@ -17,7 +17,7 @@ FakeRendererScheduler::FakeRendererScheduler() = default;
 
 FakeRendererScheduler::~FakeRendererScheduler() = default;
 
-std::unique_ptr<blink::WebThread> FakeRendererScheduler::CreateMainThread() {
+std::unique_ptr<Thread> FakeRendererScheduler::CreateMainThread() {
   return nullptr;
 }
 
@@ -68,10 +68,6 @@ void FakeRendererScheduler::DidHandleInputEventOnMainThread(
     const blink::WebInputEvent& web_input_event,
     WebInputEventResult result) {}
 
-base::TimeDelta FakeRendererScheduler::MostRecentExpectedQueueingTime() {
-  return base::TimeDelta();
-}
-
 void FakeRendererScheduler::DidAnimateForInputOnCompositorThread() {}
 
 bool FakeRendererScheduler::IsHighPriorityWorkAnticipated() {
@@ -95,39 +91,17 @@ void FakeRendererScheduler::PauseTimersForAndroidWebView() {}
 void FakeRendererScheduler::ResumeTimersForAndroidWebView() {}
 #endif
 
-void FakeRendererScheduler::AddPendingNavigation(NavigatingFrameType type) {}
-
-void FakeRendererScheduler::RemovePendingNavigation(NavigatingFrameType type) {}
-
-bool FakeRendererScheduler::ShouldYieldForHighPriorityWork() {
-  return false;
-}
-
-bool FakeRendererScheduler::CanExceedIdleDeadlineIfRequired() const {
-  return false;
-}
-
-void FakeRendererScheduler::AddTaskObserver(
-    base::MessageLoop::TaskObserver* task_observer) {}
-
-void FakeRendererScheduler::RemoveTaskObserver(
-    base::MessageLoop::TaskObserver* task_observer) {}
-
 void FakeRendererScheduler::Shutdown() {}
-
-void FakeRendererScheduler::SetStoppingWhenBackgroundedEnabled(bool enabled) {}
 
 void FakeRendererScheduler::SetTopLevelBlameContext(
     base::trace_event::BlameContext* blame_context) {}
 
-void FakeRendererScheduler::SetRAILModeObserver(RAILModeObserver* observer) {}
-
-bool FakeRendererScheduler::MainThreadSeemsUnresponsive(
-    base::TimeDelta main_thread_responsiveness_threshold) {
-  return false;
+void FakeRendererScheduler::AddRAILModeObserver(WebRAILModeObserver* observer) {
 }
 
 void FakeRendererScheduler::SetRendererProcessType(RendererProcessType type) {}
+
+void FakeRendererScheduler::OnMainFrameRequestedForInput() {}
 
 WebScopedVirtualTimePauser
 FakeRendererScheduler::CreateWebScopedVirtualTimePauser(

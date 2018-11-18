@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include <memory>
+#include "base/single_thread_task_runner.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/platform/task_type.h"
@@ -10,6 +11,7 @@
 #include "third_party/blink/renderer/core/events/message_event.h"
 #include "third_party/blink/renderer/core/inspector/console_message_storage.h"
 #include "third_party/blink/renderer/core/inspector/thread_debugger.h"
+#include "third_party/blink/renderer/core/script/script.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
 #include "third_party/blink/renderer/core/workers/dedicated_worker_global_scope.h"
 #include "third_party/blink/renderer/core/workers/dedicated_worker_messaging_proxy.h"
@@ -20,6 +22,7 @@
 #include "third_party/blink/renderer/core/workers/worker_thread.h"
 #include "third_party/blink/renderer/core/workers/worker_thread_test_helper.h"
 #include "third_party/blink/renderer/platform/cross_thread_functional.h"
+#include "third_party/blink/renderer/platform/loader/fetch/access_control_status.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 #include "third_party/blink/renderer/platform/weborigin/security_policy.h"
 
@@ -28,16 +31,17 @@ namespace blink {
 class DedicatedWorkerThreadForTest final : public DedicatedWorkerThread {
  public:
   DedicatedWorkerThreadForTest(DedicatedWorkerObjectProxy& worker_object_proxy)
-      : DedicatedWorkerThread(nullptr /* ThreadableLoadingContext */,
+      : DedicatedWorkerThread("fake worker name",
+                              nullptr /* parent_execution_context*/,
                               worker_object_proxy) {
-    worker_backing_thread_ = WorkerBackingThread::CreateForTest(
-        WebThreadCreationParams(WebThreadType::kTestThread));
+    worker_backing_thread_ = WorkerBackingThread::Create(
+        ThreadCreationParams(WebThreadType::kTestThread));
   }
 
   WorkerOrWorkletGlobalScope* CreateWorkerGlobalScope(
       std::unique_ptr<GlobalScopeCreationParams> creation_params) override {
     auto* global_scope = new DedicatedWorkerGlobalScope(
-        std::move(creation_params), this, time_origin_);
+        "fake worker name", std::move(creation_params), this, time_origin_);
     // Initializing a global scope with a dummy creation params may emit warning
     // messages (e.g., invalid CSP directives). Clear them here for tests that
     // check console messages (i.e., UseCounter tests).
@@ -123,26 +127,26 @@ class DedicatedWorkerMessagingProxyForTest
   void StartWithSourceCode(const String& source) {
     KURL script_url("http://fake.url/");
     security_origin_ = SecurityOrigin::Create(script_url);
-    auto headers = std::make_unique<Vector<CSPHeaderAndType>>();
-    CSPHeaderAndType header_and_type("contentSecurityPolicy",
-                                     kContentSecurityPolicyHeaderTypeReport);
-    headers->push_back(header_and_type);
+    Vector<CSPHeaderAndType> headers{
+        {"contentSecurityPolicy", kContentSecurityPolicyHeaderTypeReport}};
     auto worker_settings = std::make_unique<WorkerSettings>(
-        ToDocument(GetExecutionContext())->GetSettings());
+        To<Document>(GetExecutionContext())->GetSettings());
     InitializeWorkerThread(
         std::make_unique<GlobalScopeCreationParams>(
-            script_url, "fake user agent", headers.get(),
+            script_url, ScriptType::kClassic, "fake user agent", headers,
             kReferrerPolicyDefault, security_origin_.get(),
-            false /* starter_secure_context */, nullptr /* worker_clients */,
-            mojom::IPAddressSpace::kLocal, nullptr /* origin_trial_tokens */,
-            base::UnguessableToken::Create(), std::move(worker_settings),
-            kV8CacheOptionsDefault, nullptr /* module_fetch_coordinator */),
+            false /* starter_secure_context */,
+            CalculateHttpsState(security_origin_.get()),
+            nullptr /* worker_clients */, mojom::IPAddressSpace::kLocal,
+            nullptr /* origin_trial_tokens */, base::UnguessableToken::Create(),
+            std::move(worker_settings), kV8CacheOptionsDefault,
+            nullptr /* worklet_module_responses_map */),
         WorkerBackingThreadStartupData(
             WorkerBackingThreadStartupData::HeapLimitMode::kDefault,
             WorkerBackingThreadStartupData::AtomicsWaitMode::kAllow));
-    GetWorkerThread()->EvaluateClassicScript(script_url, source,
-                                             nullptr /* cached_meta_data */,
-                                             v8_inspector::V8StackTraceId());
+    GetWorkerThread()->EvaluateClassicScript(
+        script_url, kOpaqueResource, source, nullptr /* cached_meta_data */,
+        v8_inspector::V8StackTraceId());
   }
 
   DedicatedWorkerThreadForTest* GetDedicatedWorkerThread() {
@@ -150,25 +154,14 @@ class DedicatedWorkerMessagingProxyForTest
   }
 
   void Trace(blink::Visitor* visitor) override {
-    visitor->Trace(mock_worker_thread_lifecycle_observer_);
     DedicatedWorkerMessagingProxy::Trace(visitor);
   }
 
  private:
   std::unique_ptr<WorkerThread> CreateWorkerThread() override {
-    auto worker_thread =
-        std::make_unique<DedicatedWorkerThreadForTest>(WorkerObjectProxy());
-    mock_worker_thread_lifecycle_observer_ =
-        new MockWorkerThreadLifecycleObserver(
-            worker_thread->GetWorkerThreadLifecycleContext());
-    EXPECT_CALL(*mock_worker_thread_lifecycle_observer_,
-                ContextDestroyed(testing::_))
-        .Times(1);
-    return std::move(worker_thread);
+    return std::make_unique<DedicatedWorkerThreadForTest>(WorkerObjectProxy());
   }
 
-  Member<MockWorkerThreadLifecycleObserver>
-      mock_worker_thread_lifecycle_observer_;
   scoped_refptr<const SecurityOrigin> security_origin_;
 };
 
@@ -188,9 +181,8 @@ class DedicatedWorkerTest : public PageTestBase {
   }
 
   void DispatchMessageEvent() {
-    WorkerMessagingProxy()->PostMessageToWorkerGlobalScope(
-        nullptr /* message */, Vector<MessagePortChannel>(),
-        v8_inspector::V8StackTraceId());
+    BlinkTransferableMessage message;
+    WorkerMessagingProxy()->PostMessageToWorkerGlobalScope(std::move(message));
   }
 
   DedicatedWorkerMessagingProxyForTest* WorkerMessagingProxy() {
@@ -217,6 +209,7 @@ TEST_F(DedicatedWorkerTest, PendingActivity_NoActivityAfterContextDestroyed) {
 }
 
 TEST_F(DedicatedWorkerTest, UseCounter) {
+  Page::InsertOrdinaryPageForTesting(&GetPage());
   const String source_code = "// Do nothing";
   WorkerMessagingProxy()->StartWithSourceCode(source_code);
 

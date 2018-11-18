@@ -29,13 +29,11 @@ class AvSyncVideo : public AvSync {
   ~AvSyncVideo() override;
 
   // AvSync implementation:
-  void NotifyAudioBufferPushed(
-      int64_t buffer_timestamp,
-      MediaPipelineBackend::AudioDecoder::RenderingDelay delay) override;
-  void NotifyStart() override;
+  void NotifyStart(int64_t timestamp, int64_t pts) override;
   void NotifyStop() override;
   void NotifyPause() override;
   void NotifyResume() override;
+  void NotifyPlaybackRateChange(float rate) override;
 
   class Delegate {
    public:
@@ -61,10 +59,23 @@ class AvSyncVideo : public AvSync {
   void StartAvSync();
   void StopAvSync();
   void GatherPlaybackStatistics();
+  void FlushAudioPts();
+  void FlushVideoPts();
+  // This returns an approximate value of the current video fps that is rounded
+  // to the nearest frame. This is a calculation of the duration of video in the
+  // linear regression / the number of samples (which are unique frames).
+  int GetContentFrameRate();
 
-  void SoftCorrection(int64_t now);
-  void HardCorrection(int64_t now);
-  void InSyncCorrection(int64_t now);
+  void HardCorrection(int64_t now,
+                      int64_t new_vpts,
+                      int64_t new_vpts_timestamp,
+                      int64_t difference);
+  void AudioRateUpkeep(int64_t now,
+                       int64_t new_raw_vpts,
+                       int64_t new_raw_apts,
+                       double apts_slope,
+                       double vpts_slope,
+                       int64_t linear_regression_difference);
 
   Delegate* delegate_ = nullptr;
 
@@ -73,9 +84,6 @@ class AvSyncVideo : public AvSync {
 
   base::RepeatingTimer upkeep_av_sync_timer_;
   base::RepeatingTimer playback_statistics_timer_;
-  bool setup_video_clock_ = false;
-  bool in_soft_correction_ = false;
-  int64_t difference_at_start_of_correction_ = 0;
 
   // TODO(almasrymina): having a linear regression for the audio pts is
   // dangerous, because glitches in the audio or intentional changes in the
@@ -84,16 +92,33 @@ class AvSyncVideo : public AvSync {
   // that will reset the linear regression model.
   std::unique_ptr<WeightedMovingLinearRegression> audio_pts_;
   std::unique_ptr<WeightedMovingLinearRegression> video_pts_;
-  std::unique_ptr<WeightedMovingLinearRegression> error_;
-  double current_video_playback_rate_ = 1.0;
+
+  // This is the audio playback rate propagated from SetPlaybackRate, which is
+  // exposed to the user to speed up or slow down their playback.
+  double current_media_playback_rate_ = 1.0;
+
+  // This is the small playback rate change done to maintain AV sync.
+  double current_av_sync_audio_playback_rate_ = 1.0;
 
   int64_t last_gather_timestamp_us_ = 0;
   int64_t last_repeated_frames_ = 0;
   int64_t last_dropped_frames_ = 0;
-  int64_t number_of_hard_corrections_ = 0;
-  int64_t number_of_soft_corrections_ = 0;
-
   int64_t last_vpts_value_recorded_ = 0;
+  int64_t last_apts_value_recorded_ = 0;
+
+  // Those are initialized to INT64_MIN as not to be confused with 0 timestamp
+  // and 0 pts.
+  int64_t playback_start_pts_us_ = INT64_MIN;
+
+  // This is initialized to INT64_MAX as AV sync will start upkeeping the AV
+  // sync after this timestamp is hit. It is initialized to max so that we
+  // don't upkeep AV sync.
+  int64_t playback_start_timestamp_us_ = INT64_MAX;
+
+  bool first_audio_pts_received_ = false;
+  bool first_video_pts_received_ = false;
+
+  int spammy_log_count_ = 0;
 
   MediaPipelineBackendForMixer* const backend_;
 };

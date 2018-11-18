@@ -17,10 +17,10 @@ namespace {
 
 constexpr char kCloseDelimiterSuffix[] = "--\r\n";
 constexpr size_t kCloseDelimiterSuffixSize =
-    WTF_ARRAY_LENGTH(kCloseDelimiterSuffix) - 1u;
+    arraysize(kCloseDelimiterSuffix) - 1u;
 constexpr size_t kDashBoundaryOffset = 2u;  // The length of "\r\n".
 constexpr char kDelimiterSuffix[] = "\r\n";
-constexpr size_t kDelimiterSuffixSize = WTF_ARRAY_LENGTH(kDelimiterSuffix) - 1u;
+constexpr size_t kDelimiterSuffixSize = arraysize(kDelimiterSuffix) - 1u;
 
 }  // namespace
 
@@ -263,7 +263,9 @@ void MultipartParser::ParseDataAndDelimiter(const char** bytes_pointer,
   } else {
     // Search for a partial delimiter in the end of the bytes.
     const size_t size = static_cast<size_t>(bytes_end - *bytes_pointer);
-    for (delimiter_begin = bytes_end - std::min(delimiter_.size() - 1u, size);
+    for (delimiter_begin =
+             bytes_end -
+             std::min(static_cast<size_t>(delimiter_.size() - 1u), size);
          delimiter_begin < bytes_end; ++delimiter_begin) {
       if (matcher_.Match(delimiter_begin, bytes_end))
         break;

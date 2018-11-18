@@ -55,7 +55,7 @@ error::Error GLES2DecoderPassthroughImpl::HandleBufferData(
 error::Error GLES2DecoderPassthroughImpl::HandleClientWaitSync(
     uint32_t immediate_data_size,
     const volatile void* cmd_data) {
-  if (!feature_info_->IsWebGL2OrES3Context()) {
+  if (!feature_info_->IsWebGL2OrES3OrHigherContext()) {
     return error::kUnknownCommand;
   }
   const volatile gles2::cmds::ClientWaitSync& c =
@@ -99,7 +99,7 @@ error::Error GLES2DecoderPassthroughImpl::HandleCreateShader(
 error::Error GLES2DecoderPassthroughImpl::HandleFenceSync(
     uint32_t immediate_data_size,
     const volatile void* cmd_data) {
-  if (!feature_info_->IsWebGL2OrES3Context()) {
+  if (!feature_info_->IsWebGL2OrES3OrHigherContext()) {
     return error::kUnknownCommand;
   }
   const volatile gles2::cmds::FenceSync& c =
@@ -210,7 +210,7 @@ error::Error GLES2DecoderPassthroughImpl::HandleGetActiveUniform(
 error::Error GLES2DecoderPassthroughImpl::HandleGetActiveUniformBlockiv(
     uint32_t immediate_data_size,
     const volatile void* cmd_data) {
-  if (!feature_info_->IsWebGL2OrES3Context()) {
+  if (!feature_info_->IsWebGL2OrES3OrHigherContext()) {
     return error::kUnknownCommand;
   }
   const volatile gles2::cmds::GetActiveUniformBlockiv& c =
@@ -247,7 +247,7 @@ error::Error GLES2DecoderPassthroughImpl::HandleGetActiveUniformBlockiv(
 error::Error GLES2DecoderPassthroughImpl::HandleGetActiveUniformBlockName(
     uint32_t immediate_data_size,
     const volatile void* cmd_data) {
-  if (!feature_info_->IsWebGL2OrES3Context()) {
+  if (!feature_info_->IsWebGL2OrES3OrHigherContext()) {
     return error::kUnknownCommand;
   }
   const volatile gles2::cmds::GetActiveUniformBlockName& c =
@@ -286,7 +286,7 @@ error::Error GLES2DecoderPassthroughImpl::HandleGetActiveUniformBlockName(
 error::Error GLES2DecoderPassthroughImpl::HandleGetActiveUniformsiv(
     uint32_t immediate_data_size,
     const volatile void* cmd_data) {
-  if (!feature_info_->IsWebGL2OrES3Context()) {
+  if (!feature_info_->IsWebGL2OrES3OrHigherContext()) {
     return error::kUnknownCommand;
   }
   const volatile gles2::cmds::GetActiveUniformsiv& c =
@@ -386,35 +386,10 @@ error::Error GLES2DecoderPassthroughImpl::HandleGetAttribLocation(
   return DoGetAttribLocation(program, name_str.c_str(), location);
 }
 
-error::Error GLES2DecoderPassthroughImpl::HandleGetBufferSubDataAsyncCHROMIUM(
-    uint32_t immediate_data_size,
-    const volatile void* cmd_data) {
-  if (!feature_info_->IsWebGL2OrES3Context()) {
-    return error::kUnknownCommand;
-  }
-  const volatile gles2::cmds::GetBufferSubDataAsyncCHROMIUM& c =
-      *static_cast<const volatile gles2::cmds::GetBufferSubDataAsyncCHROMIUM*>(
-          cmd_data);
-  GLenum target = static_cast<GLenum>(c.target);
-  GLintptr offset = static_cast<GLintptr>(c.offset);
-  GLsizeiptr size = static_cast<GLsizeiptr>(c.size);
-  uint32_t data_shm_id = c.data_shm_id;
-  uint32_t data_shm_offset = c.data_shm_offset;
-
-  uint8_t* mem =
-      GetSharedMemoryAs<uint8_t*>(data_shm_id, data_shm_offset, size);
-  if (!mem) {
-    return error::kOutOfBounds;
-  }
-
-  return DoGetBufferSubDataAsyncCHROMIUM(target, offset, size, mem);
-}
-
-
 error::Error GLES2DecoderPassthroughImpl::HandleGetFragDataLocation(
     uint32_t immediate_data_size,
     const volatile void* cmd_data) {
-  if (!feature_info_->IsWebGL2OrES3Context()) {
+  if (!feature_info_->IsWebGL2OrES3OrHigherContext()) {
     return error::kUnknownCommand;
   }
   const volatile gles2::cmds::GetFragDataLocation& c =
@@ -446,7 +421,7 @@ error::Error GLES2DecoderPassthroughImpl::HandleGetFragDataLocation(
 error::Error GLES2DecoderPassthroughImpl::HandleGetInternalformativ(
     uint32_t immediate_data_size,
     const volatile void* cmd_data) {
-  if (!feature_info_->IsWebGL2OrES3Context()) {
+  if (!feature_info_->IsWebGL2OrES3OrHigherContext()) {
     return error::kUnknownCommand;
   }
   const volatile gles2::cmds::GetInternalformativ& c =
@@ -589,7 +564,7 @@ error::Error GLES2DecoderPassthroughImpl::HandleGetString(
 error::Error GLES2DecoderPassthroughImpl::HandleGetTransformFeedbackVarying(
     uint32_t immediate_data_size,
     const volatile void* cmd_data) {
-  if (!feature_info_->IsWebGL2OrES3Context()) {
+  if (!feature_info_->IsWebGL2OrES3OrHigherContext()) {
     return error::kUnknownCommand;
   }
   const volatile gles2::cmds::GetTransformFeedbackVarying& c =
@@ -632,7 +607,7 @@ error::Error GLES2DecoderPassthroughImpl::HandleGetTransformFeedbackVarying(
 error::Error GLES2DecoderPassthroughImpl::HandleGetUniformBlockIndex(
     uint32_t immediate_data_size,
     const volatile void* cmd_data) {
-  if (!feature_info_->IsWebGL2OrES3Context()) {
+  if (!feature_info_->IsWebGL2OrES3OrHigherContext()) {
     return error::kUnknownCommand;
   }
   const volatile gles2::cmds::GetUniformBlockIndex& c =
@@ -728,7 +703,7 @@ error::Error GLES2DecoderPassthroughImpl::HandleGetUniformiv(
 error::Error GLES2DecoderPassthroughImpl::HandleGetUniformuiv(
     uint32_t immediate_data_size,
     const volatile void* cmd_data) {
-  if (!feature_info_->IsWebGL2OrES3Context()) {
+  if (!feature_info_->IsWebGL2OrES3OrHigherContext()) {
     return error::kUnknownCommand;
   }
   const volatile gles2::cmds::GetUniformuiv& c =
@@ -763,7 +738,7 @@ error::Error GLES2DecoderPassthroughImpl::HandleGetUniformuiv(
 error::Error GLES2DecoderPassthroughImpl::HandleGetUniformIndices(
     uint32_t immediate_data_size,
     const volatile void* cmd_data) {
-  if (!feature_info_->IsWebGL2OrES3Context()) {
+  if (!feature_info_->IsWebGL2OrES3OrHigherContext()) {
     return error::kUnknownCommand;
   }
   const volatile gles2::cmds::GetUniformIndices& c =
@@ -1021,7 +996,7 @@ error::Error GLES2DecoderPassthroughImpl::HandleTexImage2D(
 error::Error GLES2DecoderPassthroughImpl::HandleTexImage3D(
     uint32_t immediate_data_size,
     const volatile void* cmd_data) {
-  if (!feature_info_->IsWebGL2OrES3Context()) {
+  if (!feature_info_->IsWebGL2OrES3OrHigherContext()) {
     return error::kUnknownCommand;
   }
   const volatile gles2::cmds::TexImage3D& c =
@@ -1093,7 +1068,7 @@ error::Error GLES2DecoderPassthroughImpl::HandleTexSubImage2D(
 error::Error GLES2DecoderPassthroughImpl::HandleTexSubImage3D(
     uint32_t immediate_data_size,
     const volatile void* cmd_data) {
-  if (!feature_info_->IsWebGL2OrES3Context()) {
+  if (!feature_info_->IsWebGL2OrES3OrHigherContext()) {
     return error::kUnknownCommand;
   }
   const volatile gles2::cmds::TexSubImage3D& c =
@@ -1132,7 +1107,7 @@ error::Error GLES2DecoderPassthroughImpl::HandleTexSubImage3D(
 error::Error GLES2DecoderPassthroughImpl::HandleUniformBlockBinding(
     uint32_t immediate_data_size,
     const volatile void* cmd_data) {
-  if (!feature_info_->IsWebGL2OrES3Context()) {
+  if (!feature_info_->IsWebGL2OrES3OrHigherContext()) {
     return error::kUnknownCommand;
   }
   const volatile gles2::cmds::UniformBlockBinding& c =
@@ -1147,7 +1122,7 @@ error::Error GLES2DecoderPassthroughImpl::HandleUniformBlockBinding(
 error::Error GLES2DecoderPassthroughImpl::HandleVertexAttribIPointer(
     uint32_t immediate_data_size,
     const volatile void* cmd_data) {
-  if (!feature_info_->IsWebGL2OrES3Context()) {
+  if (!feature_info_->IsWebGL2OrES3OrHigherContext()) {
     return error::kUnknownCommand;
   }
   const volatile gles2::cmds::VertexAttribIPointer& c =
@@ -1181,7 +1156,7 @@ error::Error GLES2DecoderPassthroughImpl::HandleVertexAttribPointer(
 error::Error GLES2DecoderPassthroughImpl::HandleWaitSync(
     uint32_t immediate_data_size,
     const volatile void* cmd_data) {
-  if (!feature_info_->IsWebGL2OrES3Context())
+  if (!feature_info_->IsWebGL2OrES3OrHigherContext())
     return error::kUnknownCommand;
   const volatile gles2::cmds::WaitSync& c =
       *static_cast<const volatile gles2::cmds::WaitSync*>(cmd_data);
@@ -1333,7 +1308,7 @@ error::Error GLES2DecoderPassthroughImpl::HandleEnableFeatureCHROMIUM(
 error::Error GLES2DecoderPassthroughImpl::HandleMapBufferRange(
     uint32_t immediate_data_size,
     const volatile void* cmd_data) {
-  if (!feature_info_->IsWebGL2OrES3Context()) {
+  if (!feature_info_->IsWebGL2OrES3OrHigherContext()) {
     return error::kUnknownCommand;
   }
   const volatile gles2::cmds::MapBufferRange& c =
@@ -1372,7 +1347,7 @@ error::Error GLES2DecoderPassthroughImpl::HandleMapBufferRange(
 error::Error GLES2DecoderPassthroughImpl::HandleUnmapBuffer(
     uint32_t immediate_data_size,
     const volatile void* cmd_data) {
-  if (!feature_info_->IsWebGL2OrES3Context()) {
+  if (!feature_info_->IsWebGL2OrES3OrHigherContext()) {
     return error::kUnknownCommand;
   }
   const volatile gles2::cmds::UnmapBuffer& c =
@@ -1472,7 +1447,7 @@ error::Error GLES2DecoderPassthroughImpl::HandleGetProgramInfoCHROMIUM(
 error::Error GLES2DecoderPassthroughImpl::HandleGetUniformBlocksCHROMIUM(
     uint32_t immediate_data_size,
     const volatile void* cmd_data) {
-  if (!feature_info_->IsWebGL2OrES3Context()) {
+  if (!feature_info_->IsWebGL2OrES3OrHigherContext()) {
     return error::kUnknownCommand;
   }
   const volatile gles2::cmds::GetUniformBlocksCHROMIUM& c =
@@ -1500,7 +1475,7 @@ error::Error
 GLES2DecoderPassthroughImpl::HandleGetTransformFeedbackVaryingsCHROMIUM(
     uint32_t immediate_data_size,
     const volatile void* cmd_data) {
-  if (!feature_info_->IsWebGL2OrES3Context()) {
+  if (!feature_info_->IsWebGL2OrES3OrHigherContext()) {
     return error::kUnknownCommand;
   }
   const volatile gles2::cmds::GetTransformFeedbackVaryingsCHROMIUM& c =
@@ -1528,7 +1503,7 @@ GLES2DecoderPassthroughImpl::HandleGetTransformFeedbackVaryingsCHROMIUM(
 error::Error GLES2DecoderPassthroughImpl::HandleGetUniformsES3CHROMIUM(
     uint32_t immediate_data_size,
     const volatile void* cmd_data) {
-  if (!feature_info_->IsWebGL2OrES3Context()) {
+  if (!feature_info_->IsWebGL2OrES3OrHigherContext()) {
     return error::kUnknownCommand;
   }
   const volatile gles2::cmds::GetUniformsES3CHROMIUM& c =
@@ -1586,8 +1561,10 @@ error::Error GLES2DecoderPassthroughImpl::HandlePostSubBufferCHROMIUM(
   GLint y = static_cast<GLint>(c.y);
   GLint width = static_cast<GLint>(c.width);
   GLint height = static_cast<GLint>(c.height);
+  GLuint64 swap_id = static_cast<GLuint64>(c.swap_id());
+  GLbitfield flags = static_cast<GLbitfield>(c.flags);
 
-  return DoPostSubBufferCHROMIUM(x, y, width, height);
+  return DoPostSubBufferCHROMIUM(swap_id, x, y, width, height, flags);
 }
 
 error::Error GLES2DecoderPassthroughImpl::HandleDrawArraysInstancedANGLE(
@@ -1674,8 +1651,10 @@ error::Error GLES2DecoderPassthroughImpl::HandleTraceBeginCHROMIUM(
 
   Bucket* category_bucket = GetBucket(category_bucket_id);
   Bucket* name_bucket = GetBucket(name_bucket_id);
-  if (!category_bucket || category_bucket->size() == 0 || !name_bucket ||
-      name_bucket->size() == 0) {
+  static constexpr size_t kMaxStrLen = 256;
+  if (!category_bucket || category_bucket->size() == 0 ||
+      category_bucket->size() > kMaxStrLen || !name_bucket ||
+      name_bucket->size() == 0 || name_bucket->size() > kMaxStrLen) {
     return error::kInvalidArguments;
   }
 
@@ -1754,10 +1733,12 @@ error::Error GLES2DecoderPassthroughImpl::HandleScheduleOverlayPlaneCHROMIUM(
   GLfloat uv_y = static_cast<GLfloat>(c.uv_y);
   GLfloat uv_width = static_cast<GLfloat>(c.uv_width);
   GLfloat uv_height = static_cast<GLfloat>(c.uv_height);
+  GLuint gpu_fence_id = static_cast<GLuint>(c.gpu_fence_id);
 
-  return DoScheduleOverlayPlaneCHROMIUM(
-      plane_z_order, plane_transform, overlay_texture_id, bounds_x, bounds_y,
-      bounds_width, bounds_height, uv_x, uv_y, uv_width, uv_height);
+  return DoScheduleOverlayPlaneCHROMIUM(plane_z_order, plane_transform,
+                                        overlay_texture_id, bounds_x, bounds_y,
+                                        bounds_width, bounds_height, uv_x, uv_y,
+                                        uv_width, uv_height, gpu_fence_id);
 }
 
 error::Error
@@ -1860,9 +1841,9 @@ error::Error GLES2DecoderPassthroughImpl::HandleScheduleDCLayerCHROMIUM(
       reinterpret_cast<const volatile GLuint*>(mem + 8);
   const GLfloat* contents_rect = mem;
   const GLfloat* bounds_rect = mem + 4;
-  return DoScheduleDCLayerCHROMIUM(num_textures, contents_texture_ids,
-                                   contents_rect, background_color,
-                                   edge_aa_mask, filter, bounds_rect);
+  return DoScheduleDCLayerCHROMIUM(
+      num_textures, contents_texture_ids, contents_rect, background_color,
+      edge_aa_mask, filter, bounds_rect, c.is_protected_video);
 }
 
 error::Error GLES2DecoderPassthroughImpl::HandleSetColorSpaceMetadataCHROMIUM(
@@ -2673,7 +2654,7 @@ error::Error GLES2DecoderPassthroughImpl::HandleCompressedTexSubImage2D(
 
 error::Error GLES2DecoderPassthroughImpl::HandleCompressedTexImage3DBucket(
     uint32_t immediate_data_size, const volatile void* cmd_data) {
-  if (!feature_info_->IsWebGL2OrES3Context()) {
+  if (!feature_info_->IsWebGL2OrES3OrHigherContext()) {
     return error::kUnknownCommand;
   }
   const volatile gles2::cmds::CompressedTexImage3DBucket& c =
@@ -2701,7 +2682,7 @@ error::Error GLES2DecoderPassthroughImpl::HandleCompressedTexImage3DBucket(
 
 error::Error GLES2DecoderPassthroughImpl::HandleCompressedTexImage3D(
     uint32_t immediate_data_size, const volatile void* cmd_data) {
-  if (!feature_info_->IsWebGL2OrES3Context()) {
+  if (!feature_info_->IsWebGL2OrES3OrHigherContext()) {
     return error::kUnknownCommand;
   }
   const volatile gles2::cmds::CompressedTexImage3D& c =
@@ -2736,7 +2717,7 @@ error::Error GLES2DecoderPassthroughImpl::HandleCompressedTexImage3D(
 
 error::Error GLES2DecoderPassthroughImpl::HandleCompressedTexSubImage3DBucket(
     uint32_t immediate_data_size, const volatile void* cmd_data) {
-  if (!feature_info_->IsWebGL2OrES3Context()) {
+  if (!feature_info_->IsWebGL2OrES3OrHigherContext()) {
     return error::kUnknownCommand;
   }
   const volatile gles2::cmds::CompressedTexSubImage3DBucket& c =
@@ -2767,7 +2748,7 @@ error::Error GLES2DecoderPassthroughImpl::HandleCompressedTexSubImage3DBucket(
 
 error::Error GLES2DecoderPassthroughImpl::HandleCompressedTexSubImage3D(
     uint32_t immediate_data_size, const volatile void* cmd_data) {
-  if (!feature_info_->IsWebGL2OrES3Context()) {
+  if (!feature_info_->IsWebGL2OrES3OrHigherContext()) {
     return error::kUnknownCommand;
   }
   const volatile gles2::cmds::CompressedTexSubImage3D& c =

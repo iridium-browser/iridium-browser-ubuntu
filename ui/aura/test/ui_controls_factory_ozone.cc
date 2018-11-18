@@ -6,12 +6,12 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/optional.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "services/service_manager/public/cpp/connector.h"
-#include "services/ui/public/interfaces/constants.mojom.h"
-#include "services/ui/public/interfaces/event_injector.mojom.h"
-#include "ui/aura/client/screen_position_client.h"
+#include "services/ws/public/mojom/constants.mojom.h"
+#include "services/ws/public/mojom/event_injector.mojom.h"
 #include "ui/aura/env.h"
 #include "ui/aura/mus/window_tree_client.h"
 #include "ui/aura/test/aura_test_utils.h"
@@ -19,6 +19,8 @@
 #include "ui/aura/test/ui_controls_factory_aura.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/base/test/ui_controls_aura.h"
+#include "ui/display/display.h"
+#include "ui/display/screen.h"
 #include "ui/events/event_utils.h"
 #include "ui/events/test/events_test_utils.h"
 
@@ -122,16 +124,19 @@ class UIControlsOzone : public ui_controls::UIControlsAura {
   bool SendMouseMoveNotifyWhenDone(long screen_x,
                                    long screen_y,
                                    base::OnceClosure closure) override {
-    gfx::Point root_location(screen_x, screen_y);
-    aura::client::ScreenPositionClient* screen_position_client =
-        aura::client::GetScreenPositionClient(host_->window());
-    if (screen_position_client) {
-      screen_position_client->ConvertPointFromScreen(host_->window(),
-                                                     &root_location);
+    // The location needs to be in display's coordinate.
+    gfx::Point display_location(screen_x, screen_y);
+    display::Display display;
+    if (!display::Screen::GetScreen()->GetDisplayWithDisplayId(
+            host_->GetDisplayId(), &display)) {
+      LOG(ERROR) << "Failed to see the display for " << host_->GetDisplayId();
+      return false;
     }
+    display_location -= display.bounds().OffsetFromOrigin();
 
-    gfx::Point host_location = root_location;
+    gfx::Point host_location = display_location;
     host_->ConvertDIPToPixels(&host_location);
+    last_mouse_location_ = host_location;
 
     ui::EventType event_type;
 
@@ -145,74 +150,90 @@ class UIControlsOzone : public ui_controls::UIControlsAura {
 
     return true;
   }
-  bool SendMouseEvents(ui_controls::MouseButton type, int state) override {
-    return SendMouseEventsNotifyWhenDone(type, state, base::OnceClosure());
+  bool SendMouseEvents(ui_controls::MouseButton type,
+                       int button_state,
+                       int accelerator_state) override {
+    return SendMouseEventsNotifyWhenDone(
+        type, button_state, base::OnceClosure(), accelerator_state);
   }
   bool SendMouseEventsNotifyWhenDone(ui_controls::MouseButton type,
-                                     int state,
-                                     base::OnceClosure closure) override {
-    gfx::Point root_location = aura::Env::GetInstance()->last_mouse_location();
-    aura::client::ScreenPositionClient* screen_position_client =
-        aura::client::GetScreenPositionClient(host_->window());
-    if (screen_position_client) {
-      screen_position_client->ConvertPointFromScreen(host_->window(),
-                                                     &root_location);
+                                     int button_state,
+                                     base::OnceClosure closure,
+                                     int accelerator_state) override {
+    gfx::Point host_location;
+    if (last_mouse_location_.has_value()) {
+      host_location = last_mouse_location_.value();
+    } else {
+      // The location needs to be in display's coordinate.
+      gfx::Point display_location =
+          host_->window()->env()->last_mouse_location();
+      display::Display display;
+      if (!display::Screen::GetScreen()->GetDisplayWithDisplayId(
+              host_->GetDisplayId(), &display)) {
+        LOG(ERROR) << "Failed to see the display for " << host_->GetDisplayId();
+        return false;
+      }
+      display_location -= display.bounds().OffsetFromOrigin();
+
+      host_location = display_location;
+      host_->ConvertDIPToPixels(&host_location);
     }
 
-    gfx::Point host_location = root_location;
-    host_->ConvertDIPToPixels(&host_location);
-
-    int flag = 0;
+    int changed_button_flag = 0;
 
     switch (type) {
       case ui_controls::LEFT:
-        flag = ui::EF_LEFT_MOUSE_BUTTON;
+        changed_button_flag = ui::EF_LEFT_MOUSE_BUTTON;
         break;
       case ui_controls::MIDDLE:
-        flag = ui::EF_MIDDLE_MOUSE_BUTTON;
+        changed_button_flag = ui::EF_MIDDLE_MOUSE_BUTTON;
         break;
       case ui_controls::RIGHT:
-        flag = ui::EF_RIGHT_MOUSE_BUTTON;
+        changed_button_flag = ui::EF_RIGHT_MOUSE_BUTTON;
         break;
       default:
         NOTREACHED();
         break;
     }
 
-    if (state & ui_controls::DOWN) {
+    // Process the accelerator key state.
+    int flag = changed_button_flag;
+    if (accelerator_state & ui_controls::kShift)
+      flag |= ui::EF_SHIFT_DOWN;
+    if (accelerator_state & ui_controls::kControl)
+      flag |= ui::EF_CONTROL_DOWN;
+    if (accelerator_state & ui_controls::kAlt)
+      flag |= ui::EF_ALT_DOWN;
+    if (accelerator_state & ui_controls::kCommand)
+      flag |= ui::EF_COMMAND_DOWN;
+
+    if (button_state & ui_controls::DOWN) {
       button_down_mask_ |= flag;
       // Pass the real closure to the last generated MouseEvent.
-      PostMouseEvent(
-          ui::ET_MOUSE_PRESSED, host_location, button_down_mask_ | flag, flag,
-          (state & ui_controls::UP) ? base::OnceClosure() : std::move(closure));
+      PostMouseEvent(ui::ET_MOUSE_PRESSED, host_location,
+                     button_down_mask_ | flag, changed_button_flag,
+                     (button_state & ui_controls::UP) ? base::OnceClosure()
+                                                      : std::move(closure));
     }
-    if (state & ui_controls::UP) {
+    if (button_state & ui_controls::UP) {
       button_down_mask_ &= ~flag;
       PostMouseEvent(ui::ET_MOUSE_RELEASED, host_location,
-                     button_down_mask_ | flag, flag, std::move(closure));
+                     button_down_mask_ | flag, changed_button_flag,
+                     std::move(closure));
     }
 
     return true;
   }
   bool SendMouseClick(ui_controls::MouseButton type) override {
-    return SendMouseEvents(type, ui_controls::UP | ui_controls::DOWN);
+    return SendMouseEvents(type, ui_controls::UP | ui_controls::DOWN,
+                           ui_controls::kNoAccelerator);
   }
 
  private:
   void SendEventToSink(ui::Event* event, base::OnceClosure closure) {
-    if (aura::Env::GetInstance()->mode() == aura::Env::Mode::MUS) {
-      std::unique_ptr<ui::Event> event_to_send;
-      if (event->IsMouseEvent()) {
-        // WindowService expects MouseEvents as PointerEvents.
-        // See http://crbug.com/617222.
-        event_to_send =
-            std::make_unique<ui::PointerEvent>(*event->AsMouseEvent());
-      } else {
-        event_to_send = ui::Event::Clone(*event);
-      }
-
+    if (host_->window()->env()->mode() == aura::Env::Mode::MUS) {
       GetEventInjector()->InjectEvent(
-          host_->GetDisplayId(), std::move(event_to_send),
+          host_->GetDisplayId(), ui::Event::Clone(*event),
           base::BindOnce(&OnWindowServiceProcessedEvent, std::move(closure)));
       return;
     }
@@ -276,22 +297,27 @@ class UIControlsOzone : public ui_controls::UIControlsAura {
     SendEventToSink(&mouse_event2, std::move(closure));
   }
 
-  // Returns the ui::mojom::EventInjector, which is used to send events
+  // Returns the ws::mojom::EventInjector, which is used to send events
   // to the Window Service for dispatch.
-  ui::mojom::EventInjector* GetEventInjector() {
-    DCHECK_EQ(aura::Env::Mode::MUS, aura::Env::GetInstance()->mode());
+  ws::mojom::EventInjector* GetEventInjector() {
+    DCHECK_EQ(aura::Env::Mode::MUS, host_->window()->env()->mode());
     if (!event_injector_) {
       DCHECK(aura::test::EnvTestHelper().GetWindowTreeClient());
       aura::test::EnvTestHelper()
           .GetWindowTreeClient()
           ->connector()
-          ->BindInterface(ui::mojom::kServiceName, &event_injector_);
+          ->BindInterface(ws::mojom::kServiceName, &event_injector_);
     }
     return event_injector_.get();
   }
 
   WindowTreeHost* host_;
-  ui::mojom::EventInjectorPtr event_injector_;
+  ws::mojom::EventInjectorPtr event_injector_;
+
+  // The mouse location for the last SendMouseEventsNotifyWhenDone call. This is
+  // used rather than Env::last_mouse_location() as Env::last_mouse_location()
+  // is updated asynchronously with mus.
+  base::Optional<gfx::Point> last_mouse_location_;
 
   // Mask of the mouse buttons currently down. This is static as it needs to
   // track the state globally for all displays. A UIControlsOzone instance is

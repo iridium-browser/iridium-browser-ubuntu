@@ -4,14 +4,12 @@
 
 #include "base/macros.h"
 #include "chrome/browser/ui/browser.h"
-#include "chrome/browser/ui/passwords/manage_passwords_icon.h"
 #include "chrome/browser/ui/passwords/manage_passwords_test.h"
 #include "chrome/browser/ui/passwords/manage_passwords_ui_controller_mock.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/passwords/manage_passwords_icon_views.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 #include "chrome/grit/generated_resources.h"
-#include "chrome/test/views/scoped_macviews_browser_mode.h"
 #include "components/password_manager/core/common/password_manager_ui.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -39,12 +37,10 @@ class ManagePasswordsIconViewTest : public ManagePasswordsTest {
   }
 
   const gfx::ImageSkia& GetImage() {
-    return GetView()->GetImage();
+    return GetView()->GetImageView()->GetImage();
   }
 
  private:
-  test::ScopedMacViewsBrowserMode views_mode_{true};
-
   DISALLOW_COPY_AND_ASSIGN(ManagePasswordsIconViewTest);
 };
 

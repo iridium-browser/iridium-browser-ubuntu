@@ -8,7 +8,6 @@
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
@@ -36,10 +35,10 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test_utils.h"
-#include "device/geolocation/public/cpp/scoped_geolocation_overrider.h"
 #include "net/base/escape.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/url_request/test_url_fetcher_factory.h"
+#include "services/device/public/cpp/test/scoped_geolocation_overrider.h"
 #include "services/device/public/mojom/geoposition.mojom.h"
 
 namespace {

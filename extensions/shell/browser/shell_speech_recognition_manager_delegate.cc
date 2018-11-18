@@ -5,6 +5,8 @@
 #include "extensions/shell/browser/shell_speech_recognition_manager_delegate.h"
 
 #include "base/bind.h"
+#include "base/task/post_task.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/speech_recognition_manager.h"
@@ -50,13 +52,11 @@ void ShellSpeechRecognitionManagerDelegate::OnRecognitionEnd(int session_id) {
 
 void ShellSpeechRecognitionManagerDelegate::OnRecognitionResults(
     int session_id,
-    const content::SpeechRecognitionResults& result) {
-}
+    const std::vector<blink::mojom::SpeechRecognitionResultPtr>& result) {}
 
 void ShellSpeechRecognitionManagerDelegate::OnRecognitionError(
     int session_id,
-    const content::SpeechRecognitionError& error) {
-}
+    const blink::mojom::SpeechRecognitionError& error) {}
 
 void ShellSpeechRecognitionManagerDelegate::OnAudioLevelsChange(
     int session_id,
@@ -76,8 +76,8 @@ void ShellSpeechRecognitionManagerDelegate::CheckRecognitionIsAllowed(
   // |render_process_id| field, which is needed later to retrieve the profile.
   DCHECK_NE(context.render_process_id, 0);
 
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::UI},
       base::BindOnce(&CheckRenderFrameType, std::move(callback),
                      context.render_process_id, context.render_frame_id));
 }
@@ -119,8 +119,8 @@ void ShellSpeechRecognitionManagerDelegate::CheckRenderFrameType(
     }
   }
 
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::IO},
       base::BindOnce(std::move(callback), check_permission, allowed));
 }
 

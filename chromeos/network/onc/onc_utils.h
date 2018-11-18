@@ -10,10 +10,10 @@
 #include <string>
 #include <vector>
 
-#include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "chromeos/chromeos_export.h"
 #include "chromeos/network/network_type_pattern.h"
+#include "chromeos/tools/variable_expander.h"
 #include "components/onc/onc_constants.h"
 #include "net/cert/scoped_nss_types.h"
 
@@ -43,62 +43,46 @@ CHROMEOS_EXPORT extern const char kEmptyUnencryptedConfiguration[];
 typedef std::map<std::string, std::string> CertPEMsByGUIDMap;
 
 // Parses |json| according to the JSON format. If |json| is a JSON formatted
-// dictionary, the function returns the dictionary as a DictionaryValue.
-// Otherwise returns NULL.
-CHROMEOS_EXPORT std::unique_ptr<base::DictionaryValue> ReadDictionaryFromJson(
+// dictionary, the function returns the dictionary value, otherwise returns
+// null.
+CHROMEOS_EXPORT std::unique_ptr<base::Value> ReadDictionaryFromJson(
     const std::string& json);
 
 // Decrypts the given EncryptedConfiguration |onc| (see the ONC specification)
 // using |passphrase|. The resulting UnencryptedConfiguration is returned. If an
-// error occurs, returns NULL.
-CHROMEOS_EXPORT std::unique_ptr<base::DictionaryValue> Decrypt(
+// error occurs, returns null.
+CHROMEOS_EXPORT std::unique_ptr<base::Value> Decrypt(
     const std::string& passphrase,
-    const base::DictionaryValue& onc);
+    const base::Value& onc);
 
 // For logging only: strings not user facing.
 CHROMEOS_EXPORT std::string GetSourceAsString(::onc::ONCSource source);
 
-// Used for string expansion with function ExpandStringInOncObject(...).
-class CHROMEOS_EXPORT StringSubstitution {
- public:
-  StringSubstitution() {}
-  virtual ~StringSubstitution() {}
-
-  // Returns the replacement string for |placeholder| in
-  // |substitute|. Currently, substitutes::kLoginIDField and
-  // substitutes::kEmailField are supported.
-  virtual bool GetSubstitute(const std::string& placeholder,
-                             std::string* substitute) const = 0;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(StringSubstitution);
-};
-
 // Replaces all expandable fields that are mentioned in the ONC
-// specification. The object of |onc_object| is modified in place. Currently
-// substitutes::kLoginIDField and substitutes::kEmailField are expanded. The
-// replacement strings are obtained from |substitution|.
+// specification. The object of |onc_object| is modified in place.
+// The substitution is performed using the passed |variable_expander|, which
+// defines the placeholder-value mapping.
 CHROMEOS_EXPORT void ExpandStringsInOncObject(
     const OncValueSignature& signature,
-    const StringSubstitution& substitution,
+    const VariableExpander& variable_expander,
     base::DictionaryValue* onc_object);
 
 // Replaces expandable fields in the networks of |network_configs|, which must
 // be a list of ONC NetworkConfigurations. See ExpandStringsInOncObject above.
 CHROMEOS_EXPORT void ExpandStringsInNetworks(
-    const StringSubstitution& substitution,
+    const VariableExpander& variable_expander,
     base::ListValue* network_configs);
 
 // Fills in all missing HexSSID fields that are mentioned in the ONC
 // specification. The object of |onc_object| is modified in place.
 CHROMEOS_EXPORT void FillInHexSSIDFieldsInOncObject(
     const OncValueSignature& signature,
-    base::DictionaryValue* onc_object);
+    base::Value* onc_object);
 
 // If the SSID field is set, but HexSSID is not, converts the contents of the
 // SSID field to UTF-8 encoding, creates the hex representation and assigns the
 // result to HexSSID.
-CHROMEOS_EXPORT void FillInHexSSIDField(base::DictionaryValue* wifi_fields);
+CHROMEOS_EXPORT void FillInHexSSIDField(base::Value* wifi_fields);
 
 // Creates a copy of |onc_object| with all values of sensitive fields replaced
 // by |mask|. To find sensitive fields, signature and field name are checked
@@ -154,25 +138,19 @@ CHROMEOS_EXPORT bool ResolveServerCertRefsInNetwork(
 CHROMEOS_EXPORT NetworkTypePattern NetworkTypePatternFromOncType(
     const std::string& type);
 
-// Returns true if |property_key| is a recommended value in the ONC dictionary.
-CHROMEOS_EXPORT bool IsRecommendedValue(const base::DictionaryValue* onc,
-                                        const std::string& property_key);
-
 // Translates |onc_proxy_settings|, which must be a valid ONC ProxySettings
 // dictionary, to a ProxyConfig dictionary (see proxy_config_dictionary.h).
-CHROMEOS_EXPORT std::unique_ptr<base::DictionaryValue>
-ConvertOncProxySettingsToProxyConfig(
-    const base::DictionaryValue& onc_proxy_settings);
+CHROMEOS_EXPORT base::Value ConvertOncProxySettingsToProxyConfig(
+    const base::Value& onc_proxy_settings);
 
 // Translates |proxy_config_value|, which must be a valid ProxyConfig dictionary
 // (see proxy_config_dictionary.h) to an ONC ProxySettings dictionary.
-CHROMEOS_EXPORT std::unique_ptr<base::DictionaryValue>
-ConvertProxyConfigToOncProxySettings(
-    std::unique_ptr<base::DictionaryValue> proxy_config_value);
+CHROMEOS_EXPORT base::Value ConvertProxyConfigToOncProxySettings(
+    const base::Value& proxy_config_value);
 
-// Replaces string placeholders in |network_configs|, which must be a list of
-// ONC NetworkConfigurations. Currently only user name placeholders are
-// implemented, which are replaced by attributes from |user|.
+// Replaces user-specific string placeholders in |network_configs|, which must
+// be a list of ONC NetworkConfigurations. Currently only user name placeholders
+// are implemented, which are replaced by attributes from |user|.
 CHROMEOS_EXPORT void ExpandStringPlaceholdersInNetworksForUser(
     const user_manager::User* user,
     base::ListValue* network_configs);

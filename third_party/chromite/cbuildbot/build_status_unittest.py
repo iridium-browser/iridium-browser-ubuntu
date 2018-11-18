@@ -27,9 +27,6 @@ from chromite.lib import patch_unittest
 from chromite.lib import tree_status
 
 
-site_config = config_lib.GetConfig()
-
-
 # pylint: disable=protected-access
 class BuildbucketInfos(object):
   """Helper methods to build BuildbucketInfo."""
@@ -196,6 +193,8 @@ class SlaveStatusTest(cros_test_lib.MockTestCase):
   """Test methods testing methods in SlaveStatus class."""
 
   def setUp(self):
+    site_config = config_lib.GetConfig()
+
     self.time_now = datetime.datetime.now()
     self.master_build_id = 0
     self.master_test_config = config_lib.BuildConfig(
@@ -206,9 +205,6 @@ class SlaveStatusTest(cros_test_lib.MockTestCase):
     self.metadata = metadata_lib.CBuildbotMetadata()
     self.db = fake_cidb.FakeCIDBConnection()
     self.buildbucket_client = mock.Mock()
-    # TODO(nxia): crbug.com/791592, remove the hack after switching all master
-    # builds to use Buildbucket to schedule slave builds.
-    self.PatchObject(config_lib, 'UseBuildbucketScheduler', return_value=True)
     self.PatchObject(tree_status, 'GetExperimentalBuilders', return_value=[])
     self._patch_factory = patch_unittest.MockPatchFactory()
 

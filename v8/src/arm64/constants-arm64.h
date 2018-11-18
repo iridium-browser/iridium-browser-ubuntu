@@ -26,11 +26,12 @@ STATIC_ASSERT(sizeof(1L) == sizeof(int64_t));
 namespace v8 {
 namespace internal {
 
+constexpr size_t kMaxPCRelativeCodeRangeInMB = 128;
 
-const unsigned kInstructionSize = 4;
-const unsigned kInstructionSizeLog2 = 2;
-const unsigned kLoadLiteralScaleLog2 = 2;
-const unsigned kMaxLoadLiteralRange = 1 * MB;
+constexpr uint8_t kInstrSize = 4;
+constexpr uint8_t kInstrSizeLog2 = 2;
+constexpr size_t kLoadLiteralScaleLog2 = 2;
+constexpr size_t kMaxLoadLiteralRange = 1 * MB;
 
 const int kNumberOfRegisters = 32;
 const int kNumberOfVRegisters = 32;
@@ -41,7 +42,7 @@ const int kFirstCalleeSavedRegisterIndex = 19;
 const int kNumberOfCalleeSavedVRegisters = 8;
 const int kFirstCalleeSavedVRegisterIndex = 8;
 // Callee saved registers with no specific purpose in JS are x19-x25.
-const unsigned kJSCalleeSavedRegList = 0x03f80000;
+const size_t kJSCalleeSavedRegList = 0x03f80000;
 const int kWRegSizeInBits = 32;
 const int kWRegSizeInBitsLog2 = 5;
 const int kWRegSize = kWRegSizeInBits >> 3;
@@ -139,6 +140,11 @@ const unsigned kFloatExponentBias = 127;
 const unsigned kFloat16MantissaBits = 10;
 const unsigned kFloat16ExponentBits = 5;
 const unsigned kFloat16ExponentBias = 15;
+
+// Actual value of root register is offset from the root array's start
+// to take advantage of negative displacement values.
+// TODO(sigurds): Choose best value.
+constexpr int kRootRegisterBias = 256;
 
 typedef uint16_t float16;
 
@@ -285,10 +291,8 @@ M_(FPCR, AHP_mask | DN_mask | FZ_mask | RMode_mask)
   const uint32_t Name##_mask = ((1 << Name##_width) - 1) << LowBit;
 #define DECLARE_INSTRUCTION_FIELDS_OFFSETS(Name, HighBit, LowBit, unused_1)    \
   DECLARE_FIELDS_OFFSETS(Name, HighBit, LowBit, unused_1, unused_2)
-#define NOTHING(A, B)
 INSTRUCTION_FIELDS_LIST(DECLARE_INSTRUCTION_FIELDS_OFFSETS)
 SYSTEM_REGISTER_FIELDS_LIST(DECLARE_FIELDS_OFFSETS, NOTHING)
-#undef NOTHING
 #undef DECLARE_FIELDS_OFFSETS
 #undef DECLARE_INSTRUCTION_FIELDS_OFFSETS
 
@@ -321,36 +325,6 @@ inline Condition NegateCondition(Condition cond) {
   // inverted, because there is no never condition.
   DCHECK((cond != al) && (cond != nv));
   return static_cast<Condition>(cond ^ 1);
-}
-
-// Commute a condition such that {a cond b == b cond' a}.
-inline Condition CommuteCondition(Condition cond) {
-  switch (cond) {
-    case lo:
-      return hi;
-    case hi:
-      return lo;
-    case hs:
-      return ls;
-    case ls:
-      return hs;
-    case lt:
-      return gt;
-    case gt:
-      return lt;
-    case ge:
-      return le;
-    case le:
-      return ge;
-    case eq:
-      return eq;
-    default:
-      // In practice this function is only used with a condition coming from
-      // TokenToCondition in lithium-codegen-arm64.cc. Any other condition is
-      // invalid as it doesn't necessary make sense to reverse it (consider
-      // 'mi' for instance).
-      UNREACHABLE();
-  }
 }
 
 enum FlagsUpdate {

@@ -36,33 +36,6 @@ int DesktopLinuxBrowserFrameViewLayout::GetWindowCaptionSpacing(
   return spacing;
 }
 
-void DesktopLinuxBrowserFrameViewLayout::LayoutNewStyleAvatar(
-    views::View* host) {
-  if (!new_avatar_button_)
-    return;
-
-  gfx::Size button_size;
-  gfx::Insets button_spacing;
-  nav_button_provider_->CalculateCaptionButtonLayout(
-      new_avatar_button_->GetPreferredSize(),
-      delegate_->GetTopAreaHeight() - TitlebarTopThickness(), &button_size,
-      &button_spacing);
-  int extra_offset = has_trailing_buttons()
-                         ? nav_button_provider_->GetInterNavButtonSpacing()
-                         : 0;
-
-  int total_width = button_size.width() + button_spacing.right() + extra_offset;
-
-  int button_x = host->width() - trailing_button_start_ - total_width;
-  int button_y = button_spacing.top() + TitlebarTopThickness();
-
-  minimum_size_for_buttons_ += total_width;
-  trailing_button_start_ += total_width;
-
-  new_avatar_button_->SetBounds(button_x, button_y, button_size.width(),
-                                button_size.height());
-}
-
 bool DesktopLinuxBrowserFrameViewLayout::ShouldDrawImageMirrored(
     views::ImageButton* button,
     ButtonAlignment alignment) const {

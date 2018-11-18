@@ -21,9 +21,9 @@
 #include "base/time/time.h"
 #include "components/sessions/core/session_id.h"
 #include "components/sessions/core/session_types.h"
-#include "components/sync/base/sync_prefs.h"
 #include "components/sync/device_info/device_info.h"
 #include "components/sync/model/syncable_service.h"
+#include "components/sync_sessions/abstract_sessions_sync_manager.h"
 #include "components/sync_sessions/favicon_cache.h"
 #include "components/sync_sessions/local_session_event_handler_impl.h"
 #include "components/sync_sessions/lost_navigations_recorder.h"
@@ -33,9 +33,7 @@
 #include "components/sync_sessions/synced_session_tracker.h"
 
 namespace syncer {
-class LocalDeviceInfoProvider;
 class SyncErrorFactory;
-class SyncPrefs;
 }  // namespace syncer
 
 namespace sync_pb {
@@ -51,14 +49,20 @@ namespace sync_sessions {
 
 // Contains all logic for associating the Chrome sessions model and
 // the sync sessions model.
-class SessionsSyncManager : public syncer::SyncableService,
+class SessionsSyncManager : public AbstractSessionsSyncManager,
+                            public syncer::SyncableService,
                             public LocalSessionEventHandlerImpl::Delegate {
  public:
-  SessionsSyncManager(SyncSessionsClient* sessions_client,
-                      syncer::SyncPrefs* sync_prefs,
-                      syncer::LocalDeviceInfoProvider* local_device,
-                      const base::RepeatingClosure& sessions_updated_callback);
+  explicit SessionsSyncManager(SyncSessionsClient* sessions_client);
   ~SessionsSyncManager() override;
+
+  // AbstractSessionsSyncManager implementation.
+  void ScheduleGarbageCollection() override;
+  FaviconCache* GetFaviconCache() override;
+  SessionsGlobalIdMapper* GetGlobalIdMapper() override;
+  OpenTabsUIDelegate* GetOpenTabsUIDelegate() override;
+  syncer::SyncableService* GetSyncableService() override;
+  syncer::ModelTypeSyncBridge* GetModelTypeSyncBridge() override;
 
   // syncer::SyncableService implementation.
   syncer::SyncMergeResult MergeDataAndStartSyncing(
@@ -79,8 +83,6 @@ class SessionsSyncManager : public syncer::SyncableService,
   void OnPageFaviconUpdated(const GURL& page_url) override;
   void OnFaviconVisited(const GURL& page_url, const GURL& favicon_url) override;
 
-  FaviconCache* GetFaviconCache();
-
   // Returns the tag used to uniquely identify this machine's session in the
   // sync model.
   const std::string& current_machine_tag() const {
@@ -96,10 +98,6 @@ class SessionsSyncManager : public syncer::SyncableService,
   // |stale_session_threshold_days_|). This is called every time we see new
   // sessions data downloaded (sync cycles complete).
   void DoGarbageCollection();
-
-  SessionsGlobalIdMapper* GetGlobalIdMapper();
-
-  OpenTabsUIDelegate* GetOpenTabsUIDelegate();
 
  private:
   friend class extensions::ExtensionSessionsTest;
@@ -187,13 +185,8 @@ class SessionsSyncManager : public syncer::SyncableService,
   // proves that we are still relevant.
   bool local_tab_pool_out_of_sync_;
 
-  syncer::SyncPrefs* sync_prefs_;
-
   std::unique_ptr<syncer::SyncErrorFactory> error_handler_;
   std::unique_ptr<syncer::SyncChangeProcessor> sync_processor_;
-
-  // Local device info provider, owned by ProfileSyncService.
-  const syncer::LocalDeviceInfoProvider* const local_device_;
 
   // Unique client tag.
   std::string current_machine_tag_;
@@ -207,9 +200,6 @@ class SessionsSyncManager : public syncer::SyncableService,
 
   std::unique_ptr<sync_sessions::LostNavigationsRecorder>
       lost_navigations_recorder_;
-
-  // Callback to inform interested observer that new sessions data has arrived.
-  base::RepeatingClosure sessions_updated_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(SessionsSyncManager);
 };

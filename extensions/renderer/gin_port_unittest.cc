@@ -65,8 +65,11 @@ class GinPortTest : public APIBindingTest {
 
   void SetUp() override {
     APIBindingTest::SetUp();
-    event_handler_ =
-        std::make_unique<APIEventHandler>(base::DoNothing(), nullptr);
+    auto get_context_owner = [](v8::Local<v8::Context> context) {
+      return std::string();
+    };
+    event_handler_ = std::make_unique<APIEventHandler>(
+        base::DoNothing(), base::BindRepeating(get_context_owner), nullptr);
     delegate_ = std::make_unique<testing::StrictMock<TestPortDelegate>>();
   }
 
@@ -355,7 +358,8 @@ TEST_F(GinPortTest, TryUsingPortAfterInvalidation) {
   for (const auto& function :
        {send_message_function, disconnect_function, get_on_message_function,
         get_on_disconnect_function}) {
-    SCOPED_TRACE(gin::V8ToString(function->ToString(context).ToLocalChecked()));
+    SCOPED_TRACE(gin::V8ToString(isolate(),
+                                 function->ToString(context).ToLocalChecked()));
     RunFunctionAndExpectError(function, context, arraysize(function_args),
                               function_args,
                               "Uncaught Error: Extension context invalidated.");

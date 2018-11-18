@@ -10,16 +10,16 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/location.h"
-#include "base/message_loop/message_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "chromeos/chromeos_switches.h"
+#include "chromeos/dbus/dbus_switches.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/fake_shill_device_client.h"
 #include "chromeos/dbus/shill_device_client.h"
@@ -132,6 +132,15 @@ bool IsCellularTechnology(const std::string& type) {
           type == shill::kNetworkTechnologyLteAdvanced);
 }
 
+void SetInitialDeviceProperty(const std::string& device_path,
+                              const std::string& name,
+                              const base::Value& value) {
+  DBusThreadManager::Get()
+      ->GetShillDeviceClient()
+      ->GetTestInterface()
+      ->SetDeviceProperty(device_path, name, value, /*notify_changed=*/false);
+}
+
 const char kTechnologyUnavailable[] = "unavailable";
 const char kTechnologyInitializing[] = "initializing";
 const char kNetworkActivated[] = "activated";
@@ -146,6 +155,7 @@ const char FakeShillManagerClient::kFakeEthernetNetworkGuid[] = "eth1_guid";
 
 FakeShillManagerClient::FakeShillManagerClient()
     : interactive_delay_(0),
+      cellular_carrier_(shill::kCarrierSprint),
       cellular_technology_(shill::kNetworkTechnologyGsm),
       weak_ptr_factory_(this) {
   ParseCommandLineSwitch();
@@ -203,7 +213,8 @@ void FakeShillManagerClient::RequestScan(const std::string& type,
   std::string device_path = device_client->GetDevicePathForType(device_type);
   if (!device_path.empty()) {
     device_client->SetDeviceProperty(device_path, shill::kScanningProperty,
-                                     base::Value(true));
+                                     base::Value(true),
+                                     /*notify_changed=*/true);
     if (device_type == shill::kTypeCellular)
       device_client->AddCellularFoundNetwork(device_path);
   }
@@ -653,22 +664,18 @@ void FakeShillManagerClient::SetupDefaultEnvironment() {
   state = GetInitialStateForType(shill::kTypeEthernet, &enabled);
   if (state == shill::kStateOnline || state == shill::kStateIdle) {
     AddTechnology(shill::kTypeEthernet, enabled);
-    devices->AddDevice(
-        "/device/eth1", shill::kTypeEthernet, "stub_eth_device1");
-    devices->SetDeviceProperty("/device/eth1", shill::kAddressProperty,
-                               base::Value("0123456789ab"));
+    devices->AddDevice("/device/eth1", shill::kTypeEthernet,
+                       "stub_eth_device1");
+    SetInitialDeviceProperty("/device/eth1", shill::kAddressProperty,
+                             base::Value("0123456789ab"));
     base::ListValue eth_ip_configs;
     eth_ip_configs.AppendString("ipconfig_v4_path");
     eth_ip_configs.AppendString("ipconfig_v6_path");
-    devices->SetDeviceProperty("/device/eth1",
-                               shill::kIPConfigsProperty,
-                               eth_ip_configs);
+    SetInitialDeviceProperty("/device/eth1", shill::kIPConfigsProperty,
+                             eth_ip_configs);
     const std::string kFakeEthernetNetworkPath = "/service/eth1";
-    services->AddService(kFakeEthernetNetworkPath,
-                         kFakeEthernetNetworkGuid,
-                         "eth1" /* name */,
-                         shill::kTypeEthernet,
-                         state,
+    services->AddService(kFakeEthernetNetworkPath, kFakeEthernetNetworkGuid,
+                         "eth1" /* name */, shill::kTypeEthernet, state,
                          add_to_visible);
     profiles->AddService(shared_profile, kFakeEthernetNetworkPath);
   }
@@ -690,22 +697,17 @@ void FakeShillManagerClient::SetupDefaultEnvironment() {
     }
     AddTechnology(shill::kTypeWifi, enabled);
     devices->AddDevice("/device/wifi1", shill::kTypeWifi, "stub_wifi_device1");
-    devices->SetDeviceProperty("/device/wifi1", shill::kAddressProperty,
-                               base::Value("23456789abcd"));
+    SetInitialDeviceProperty("/device/wifi1", shill::kAddressProperty,
+                             base::Value("23456789abcd"));
     base::ListValue wifi_ip_configs;
     wifi_ip_configs.AppendString("ipconfig_v4_path");
     wifi_ip_configs.AppendString("ipconfig_v6_path");
-    devices->SetDeviceProperty("/device/wifi1",
-                               shill::kIPConfigsProperty,
-                               wifi_ip_configs);
+    SetInitialDeviceProperty("/device/wifi1", shill::kIPConfigsProperty,
+                             wifi_ip_configs);
 
     const std::string kWifi1Path = "/service/wifi1";
-    services->AddService(kWifi1Path,
-                         "wifi1_guid",
-                         "wifi1" /* name */,
-                         shill::kTypeWifi,
-                         state,
-                         add_to_visible);
+    services->AddService(kWifi1Path, "wifi1_guid", "wifi1" /* name */,
+                         shill::kTypeWifi, state, add_to_visible);
     services->SetServiceProperty(kWifi1Path, shill::kSecurityClassProperty,
                                  base::Value(shill::kSecurityWep));
     services->SetServiceProperty(kWifi1Path, shill::kConnectableProperty,
@@ -738,12 +740,9 @@ void FakeShillManagerClient::SetupDefaultEnvironment() {
     profiles->AddService(shared_profile, kWifi2Path);
 
     const std::string kWifi3Path = "/service/wifi3";
-    services->AddService(kWifi3Path,
-                         "",  /* empty GUID */
-                         "wifi3" /* name */,
-                         shill::kTypeWifi,
-                         shill::kStateIdle,
-                         add_to_visible);
+    services->AddService(kWifi3Path, "", /* empty GUID */
+                         "wifi3" /* name */, shill::kTypeWifi,
+                         shill::kStateIdle, add_to_visible);
     services->SetServiceProperty(kWifi3Path, shill::kSignalStrengthProperty,
                                  base::Value(40));
 
@@ -778,8 +777,8 @@ void FakeShillManagerClient::SetupDefaultEnvironment() {
   state = GetInitialStateForType(shill::kTypeWimax, &enabled);
   if (state != kTechnologyUnavailable) {
     AddTechnology(shill::kTypeWimax, enabled);
-    devices->AddDevice(
-        "/device/wimax1", shill::kTypeWimax, "stub_wimax_device1");
+    devices->AddDevice("/device/wimax1", shill::kTypeWimax,
+                       "stub_wimax_device1");
 
     services->AddService(kWimaxPath, "wimax1_guid", "wimax1" /* name */,
                          shill::kTypeWimax, state, add_to_visible);
@@ -793,6 +792,7 @@ void FakeShillManagerClient::SetupDefaultEnvironment() {
 
   // Cellular
   state = GetInitialStateForType(shill::kTypeCellular, &enabled);
+  VLOG(1) << "Cellular state: " << state << " Enabled: " << enabled;
   if (state == kTechnologyInitializing) {
     SetTechnologyInitializing(shill::kTypeCellular, true);
   } else if (state != kTechnologyUnavailable) {
@@ -804,24 +804,24 @@ void FakeShillManagerClient::SetupDefaultEnvironment() {
     AddTechnology(shill::kTypeCellular, enabled);
     devices->AddDevice("/device/cellular1", shill::kTypeCellular,
                        "stub_cellular_device1");
-    devices->SetDeviceProperty("/device/cellular1", shill::kCarrierProperty,
-                               base::Value(shill::kCarrierSprint));
+    SetInitialDeviceProperty("/device/cellular1", shill::kCarrierProperty,
+                             base::Value(cellular_carrier_));
     base::ListValue carrier_list;
-    carrier_list.AppendString(shill::kCarrierSprint);
+    carrier_list.AppendString(cellular_carrier_);
     carrier_list.AppendString(shill::kCarrierGenericUMTS);
-    devices->SetDeviceProperty("/device/cellular1",
-                               shill::kSupportedCarriersProperty, carrier_list);
+    SetInitialDeviceProperty("/device/cellular1",
+                             shill::kSupportedCarriersProperty, carrier_list);
     if (roaming_state_ == kRoamingRequired) {
-      devices->SetDeviceProperty("/device/cellular1",
-                                 shill::kProviderRequiresRoamingProperty,
-                                 base::Value(true));
+      SetInitialDeviceProperty("/device/cellular1",
+                               shill::kProviderRequiresRoamingProperty,
+                               base::Value(true));
     }
     if (cellular_technology_ == shill::kNetworkTechnologyGsm) {
-      devices->SetDeviceProperty("/device/cellular1",
-                                 shill::kSupportNetworkScanProperty,
-                                 base::Value(true));
-      devices->SetDeviceProperty("/device/cellular1",
-                                 shill::kSIMPresentProperty, base::Value(true));
+      SetInitialDeviceProperty("/device/cellular1",
+                               shill::kSupportNetworkScanProperty,
+                               base::Value(true));
+      SetInitialDeviceProperty("/device/cellular1", shill::kSIMPresentProperty,
+                               base::Value(true));
       devices->SetSimLocked("/device/cellular1", false);
     }
 
@@ -830,9 +830,9 @@ void FakeShillManagerClient::SetupDefaultEnvironment() {
                            "cellular1" /* name */, shill::kTypeCellular, state,
                            add_to_visible);
       base::Value technology_value(cellular_technology_);
-      devices->SetDeviceProperty("/device/cellular1",
-                                 shill::kTechnologyFamilyProperty,
-                                 technology_value);
+      SetInitialDeviceProperty("/device/cellular1",
+                               shill::kTechnologyFamilyProperty,
+                               technology_value);
       services->SetServiceProperty(kCellularServicePath,
                                    shill::kNetworkTechnologyProperty,
                                    technology_value);
@@ -853,6 +853,16 @@ void FakeShillManagerClient::SetupDefaultEnvironment() {
             base::Value(shill::kActivationStateNotActivated));
       }
 
+      base::Value payment_portal(base::Value::Type::DICTIONARY);
+      payment_portal.SetKey(shill::kPaymentPortalMethod, base::Value("POST"));
+      payment_portal.SetKey(shill::kPaymentPortalPostData,
+                            base::Value("iccid=123&imei=456&mdn=789"));
+      payment_portal.SetKey(shill::kPaymentPortalURL,
+                            base::Value(cellular_olp_));
+      services->SetServiceProperty(kCellularServicePath,
+                                   shill::kPaymentPortalProperty,
+                                   std::move(payment_portal));
+
       std::string shill_roaming_state;
       if (roaming_state_ == kRoamingRequired)
         shill_roaming_state = shill::kRoamingStateRoaming;
@@ -871,6 +881,7 @@ void FakeShillManagerClient::SetupDefaultEnvironment() {
                  base::Value("Localized Test APN"));
       apn.SetKey(shill::kApnUsernameProperty, base::Value("User1"));
       apn.SetKey(shill::kApnPasswordProperty, base::Value("password"));
+      apn.SetKey(shill::kApnAuthenticationProperty, base::Value("chap"));
       base::DictionaryValue apn2;
       apn2.SetKey(shill::kApnProperty, base::Value("testapn2"));
       services->SetServiceProperty(kCellularServicePath,
@@ -880,8 +891,8 @@ void FakeShillManagerClient::SetupDefaultEnvironment() {
       base::ListValue apn_list;
       apn_list.Append(apn.CreateDeepCopy());
       apn_list.Append(apn2.CreateDeepCopy());
-      devices->SetDeviceProperty("/device/cellular1",
-                                 shill::kCellularApnListProperty, apn_list);
+      SetInitialDeviceProperty("/device/cellular1",
+                               shill::kCellularApnListProperty, apn_list);
 
       profiles->AddService(shared_profile, kCellularServicePath);
     }
@@ -899,14 +910,10 @@ void FakeShillManagerClient::SetupDefaultEnvironment() {
                                           shill::kProviderOpenVpn);
     provider_properties_openvpn.SetString(shill::kHostProperty, "vpn_host");
 
-    services->AddService("/service/vpn1",
-                         "vpn1_guid",
-                         "vpn1" /* name */,
-                         shill::kTypeVPN,
-                         state,
-                         add_to_visible);
-    services->SetServiceProperty(
-        "/service/vpn1", shill::kProviderProperty, provider_properties_openvpn);
+    services->AddService("/service/vpn1", "vpn1_guid", "vpn1" /* name */,
+                         shill::kTypeVPN, state, add_to_visible);
+    services->SetServiceProperty("/service/vpn1", shill::kProviderProperty,
+                                 provider_properties_openvpn);
     profiles->AddService(shared_profile, "/service/vpn1");
 
     base::DictionaryValue provider_properties_l2tp;
@@ -914,14 +921,10 @@ void FakeShillManagerClient::SetupDefaultEnvironment() {
                                        shill::kProviderL2tpIpsec);
     provider_properties_l2tp.SetString(shill::kHostProperty, "vpn_host2");
 
-    services->AddService("/service/vpn2",
-                         "vpn2_guid",
-                         "vpn2" /* name */,
-                         shill::kTypeVPN,
-                         shill::kStateIdle,
-                         add_to_visible);
-    services->SetServiceProperty(
-        "/service/vpn2", shill::kProviderProperty, provider_properties_l2tp);
+    services->AddService("/service/vpn2", "vpn2_guid", "vpn2" /* name */,
+                         shill::kTypeVPN, shill::kStateIdle, add_to_visible);
+    services->SetServiceProperty("/service/vpn2", shill::kProviderProperty,
+                                 provider_properties_l2tp);
   }
 
   // Additional device states
@@ -931,7 +934,7 @@ void FakeShillManagerClient::SetupDefaultEnvironment() {
     std::string device_path = devices->GetDevicePathForType(device_type);
     for (ShillPropertyMap::iterator iter2 = iter1->second.begin();
          iter2 != iter1->second.end(); ++iter2) {
-      devices->SetDeviceProperty(device_path, iter2->first, *(iter2->second));
+      SetInitialDeviceProperty(device_path, iter2->first, *(iter2->second));
       delete iter2->second;
     }
   }
@@ -1064,7 +1067,7 @@ void FakeShillManagerClient::ScanCompleted(const std::string& device_path,
         ->GetShillDeviceClient()
         ->GetTestInterface()
         ->SetDeviceProperty(device_path, shill::kScanningProperty,
-                            base::Value(false));
+                            base::Value(false), /*notify_changed=*/true);
   }
   VLOG(1) << "ScanCompleted";
   CallNotifyObserversPropertyChanged(shill::kServiceCompleteListProperty);
@@ -1139,6 +1142,12 @@ bool FakeShillManagerClient::ParseOption(const std::string& arg0,
     else
       s_tdls_busy_count = 1;
     return true;
+  } else if (arg0 == "carrier") {
+    cellular_carrier_ = arg1;
+    return true;
+  } else if (arg0 == "olp") {
+    cellular_olp_ = arg1;
+    return true;
   } else if (arg0 == "roaming") {
     // "home", "roaming", or "required"
     roaming_state_ = arg1;
@@ -1159,11 +1168,11 @@ bool FakeShillManagerClient::SetInitialNetworkState(
   std::string state;
   if (state_arg.empty() || state_arg == "1" || state_arg == "on" ||
       state_arg == "enabled" || state_arg == "connected" ||
-      state_arg == "online") {
+      state_arg == "online" || state_arg == "inactive") {
     // Enabled and connected (default value)
     state = shill::kStateOnline;
   } else if (state_arg == "0" || state_arg == "off" ||
-             state_arg == "inactive" || state_arg == shill::kStateIdle) {
+             state_arg == shill::kStateIdle) {
     // Technology enabled, services are created but are not connected.
     state = shill::kStateIdle;
   } else if (type_arg == shill::kTypeWifi && state_arg_as_int > 1) {

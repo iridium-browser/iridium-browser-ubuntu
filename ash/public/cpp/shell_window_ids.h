@@ -57,14 +57,23 @@ enum ShellWindowId {
   // The container for the app list.
   kShellWindowId_AppListContainer,
 
+  // The container for the app list in tablet mode.
+  kShellWindowId_AppListTabletModeContainer,
+
+  // The parent container that holds the ARC IME container and windows created
+  // by ARC IME other than the virtual keyboard window.
+  // This container window is to ensure that the ARC IME window is stacked above
+  // top-level windows and the app list window but below the shelf.
+  kShellWindowId_ArcImeWindowParentContainer,
+
+  // The container for Virtual Keyboard from ARC IMEs.
+  kShellWindowId_ArcVirtualKeyboardContainer,
+
   // The container for the shelf.
   kShellWindowId_ShelfContainer,
 
   // The container for bubbles which float over the shelf.
   kShellWindowId_ShelfBubbleContainer,
-
-  // The container for panel windows.
-  kShellWindowId_PanelContainer,
 
   // The container for user-specific modal windows.
   kShellWindowId_SystemModalContainer,
@@ -152,9 +161,11 @@ const int32_t kAllShellContainerIds[] = {
     kShellWindowId_DefaultContainer,
     kShellWindowId_AlwaysOnTopContainer,
     kShellWindowId_AppListContainer,
+    kShellWindowId_AppListTabletModeContainer,
+    kShellWindowId_ArcImeWindowParentContainer,
+    kShellWindowId_ArcVirtualKeyboardContainer,
     kShellWindowId_ShelfContainer,
     kShellWindowId_ShelfBubbleContainer,
-    kShellWindowId_PanelContainer,
     kShellWindowId_SystemModalContainer,
     kShellWindowId_LockScreenWallpaperContainer,
     kShellWindowId_LockScreenContainer,
@@ -172,6 +183,12 @@ const int32_t kAllShellContainerIds[] = {
     kShellWindowId_MouseCursorContainer,
     kShellWindowId_PowerButtonAnimationContainer,
 };
+
+// A list of system modal container IDs. The order of the list is important that
+// the more restrictive container appears before the less restrictive ones.
+const int32_t kSystemModalContainerIds[] = {
+    kShellWindowId_LockSystemModalContainer,
+    kShellWindowId_SystemModalContainer};
 
 // These are the list of container ids of containers which may contain windows
 // that need to be activated.

@@ -4,10 +4,12 @@
 
 #include "third_party/blink/renderer/core/frame/reporting_context.h"
 
-#include "third_party/blink/public/platform/task_type.h"
+#include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/report.h"
 #include "third_party/blink/renderer/core/frame/reporting_observer.h"
+#include "third_party/blink/renderer/core/frame/use_counter.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 
 namespace blink {
@@ -30,45 +32,54 @@ ReportingContext* ReportingContext::From(ExecutionContext* context) {
 }
 
 void ReportingContext::QueueReport(Report* report) {
-  if (!ObserverExists())
-    return;
+  CountReport(report);
+  report_buffer_.insert(report);
 
-  reports_.push_back(report);
+  // Only the most recent 100 reports will remain buffered.
+  // https://w3c.github.io/reporting/#notify-observers
+  if (report_buffer_.size() > 100)
+    report_buffer_.RemoveFirst();
 
-  // When the first report of a batch is queued, make a task to report the whole
-  // batch (in the queue) to all ReportingObservers.
-  if (reports_.size() == 1) {
-    execution_context_->GetTaskRunner(TaskType::kMiscPlatformAPI)
-        ->PostTask(FROM_HERE, WTF::Bind(&ReportingContext::SendReports,
-                                        WrapWeakPersistent(this)));
-  }
+  for (auto observer : observers_)
+    observer->QueueReport(report);
 }
 
-void ReportingContext::SendReports() {
-  // The reports queued to be sent to callbacks are copied (and cleared) before
-  // being sent to observers, since additional reports may be queued as a result
-  // of the callbacks.
-  auto reports_to_send = reports_;
-  reports_.clear();
-  for (auto observer : observers_)
-    observer->ReportToCallback(reports_to_send);
+void ReportingContext::CountReport(Report* report) {
+  const String& type = report->type();
+  WebFeature feature;
+
+  if (type == "deprecation") {
+    feature = WebFeature::kDeprecationReport;
+  } else if (type == "feature-policy") {
+    feature = WebFeature::kFeaturePolicyReport;
+  } else if (type == "intervention") {
+    feature = WebFeature::kInterventionReport;
+  } else {
+    return;
+  }
+
+  UseCounter::Count(execution_context_, feature);
 }
 
 void ReportingContext::RegisterObserver(ReportingObserver* observer) {
+  UseCounter::Count(execution_context_, WebFeature::kReportingObserver);
+
   observers_.insert(observer);
+  if (!observer->Buffered())
+    return;
+
+  observer->ClearBuffered();
+  for (auto report : report_buffer_)
+    observer->QueueReport(report);
 }
 
 void ReportingContext::UnregisterObserver(ReportingObserver* observer) {
   observers_.erase(observer);
 }
 
-bool ReportingContext::ObserverExists() {
-  return observers_.size();
-}
-
 void ReportingContext::Trace(blink::Visitor* visitor) {
   visitor->Trace(observers_);
-  visitor->Trace(reports_);
+  visitor->Trace(report_buffer_);
   visitor->Trace(execution_context_);
   Supplement<ExecutionContext>::Trace(visitor);
 }

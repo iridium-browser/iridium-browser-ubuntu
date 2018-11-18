@@ -59,8 +59,8 @@ IN_PROC_BROWSER_TEST_F(RendererPrelauncherTest, ReusedRenderer) {
   EXPECT_TRUE(browser_context);
 
   // Prelaunch a renderer process for the url.
-  std::unique_ptr<RendererPrelauncher> prelauncher(
-      new RendererPrelauncher(browser_context, gurl));
+  auto prelauncher =
+      std::make_unique<RendererPrelauncher>(browser_context, gurl);
   prelauncher->Prelaunch();
   scoped_refptr<content::SiteInstance> site_instance =
       prelauncher->site_instance();

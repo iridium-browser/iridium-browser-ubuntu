@@ -11,11 +11,13 @@
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/singleton.h"
+#include "base/stl_util.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/payments/content/installable_payment_app_crawler.h"
 #include "components/payments/content/manifest_verifier.h"
 #include "components/payments/content/payment_manifest_web_data_service.h"
 #include "components/payments/content/utility/payment_manifest_parser.h"
+#include "components/payments/core/features.h"
 #include "components/payments/core/payment_manifest_downloader.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
@@ -65,9 +67,7 @@ bool AppSupportsAtLeastOneRequestedMethodData(
     const std::vector<mojom::PaymentMethodDataPtr>& requests) {
   for (const auto& enabled_method : app.enabled_methods) {
     for (const auto& request : requests) {
-      auto it = std::find(request->supported_methods.begin(),
-                          request->supported_methods.end(), enabled_method);
-      if (it != request->supported_methods.end()) {
+      if (enabled_method == request->supported_method) {
         if (enabled_method != "basic-card" ||
             BasicCardCapabilitiesMatch(app.capabilities, request)) {
           return true;
@@ -112,7 +112,9 @@ class SelfDeletingServiceWorkerPaymentAppFactory {
     cache_ = cache;
     verifier_ = std::make_unique<ManifestVerifier>(
         web_contents, downloader_.get(), parser_.get(), cache_.get());
-    if (may_crawl_for_installable_payment_apps) {
+    if (may_crawl_for_installable_payment_apps &&
+        base::FeatureList::IsEnabled(
+            features::kWebPaymentsJustInTimePaymentApp)) {
       // Construct crawler in constructor to allow it observe the web_contents.
       crawler_ = std::make_unique<InstallablePaymentAppCrawler>(
           web_contents, downloader_.get(), parser_.get(), cache_.get());
@@ -264,7 +266,7 @@ void ServiceWorkerPaymentAppFactory::GetAllPaymentApps(
           ? std::make_unique<payments::PaymentManifestDownloader>(
                 content::BrowserContext::GetDefaultStoragePartition(
                     web_contents->GetBrowserContext())
-                    ->GetURLRequestContext())
+                    ->GetURLLoaderFactoryForBrowserProcess())
           : std::move(test_downloader_),
       cache, requested_method_data, may_crawl_for_installable_payment_apps,
       std::move(callback),

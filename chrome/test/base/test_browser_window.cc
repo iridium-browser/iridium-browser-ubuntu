@@ -35,9 +35,9 @@ ui::PageTransition
   return ui::PAGE_TRANSITION_LINK;
 }
 
-bool TestBrowserWindow::TestLocationBar::ShowPageInfoDialog(
-    content::WebContents* contents) {
-  return true;
+base::TimeTicks TestBrowserWindow::TestLocationBar::GetMatchSelectionTimestamp()
+    const {
+  return base::TimeTicks();
 }
 
 const OmniboxView* TestBrowserWindow::TestLocationBar::GetOmniboxView() const {
@@ -71,6 +71,22 @@ bool TestBrowserWindow::IsAlwaysOnTop() const {
 gfx::NativeWindow TestBrowserWindow::GetNativeWindow() const {
   return NULL;
 }
+
+void TestBrowserWindow::SetTopControlsShownRatio(
+    content::WebContents* web_contents,
+    float ratio) {}
+
+bool TestBrowserWindow::DoBrowserControlsShrinkRendererSize(
+    const content::WebContents* contents) const {
+  return false;
+}
+
+int TestBrowserWindow::GetTopControlsHeight() const {
+  return 0;
+}
+
+void TestBrowserWindow::SetTopControlsGestureScrollInProgress(
+    bool in_progress) {}
 
 StatusBubble* TestBrowserWindow::GetStatusBubble() {
   return NULL;
@@ -120,6 +136,10 @@ LocationBar* TestBrowserWindow::GetLocationBar() const {
   return const_cast<TestLocationBar*>(&location_bar_);
 }
 
+PageActionIconContainer* TestBrowserWindow::GetPageActionIconContainer() {
+  return nullptr;
+}
+
 ToolbarActionsBar* TestBrowserWindow::GetToolbarActionsBar() {
   return nullptr;
 }
@@ -165,17 +185,20 @@ autofill::SaveCardBubbleView* TestBrowserWindow::ShowSaveCreditCardBubble(
   return nullptr;
 }
 
+autofill::LocalCardMigrationBubble*
+TestBrowserWindow::ShowLocalCardMigrationBubble(
+    content::WebContents* contents,
+    autofill::LocalCardMigrationBubbleController* controller,
+    bool user_gesture) {
+  return nullptr;
+}
+
 bool TestBrowserWindow::IsDownloadShelfVisible() const {
   return false;
 }
 
 DownloadShelf* TestBrowserWindow::GetDownloadShelf() {
   return &download_shelf_;
-}
-
-WindowOpenDisposition TestBrowserWindow::GetDispositionForPopupBounds(
-    const gfx::Rect& bounds) {
-  return WindowOpenDisposition::NEW_POPUP;
 }
 
 FindBar* TestBrowserWindow::CreateFindBar() {

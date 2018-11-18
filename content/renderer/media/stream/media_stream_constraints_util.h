@@ -16,13 +16,14 @@
 #include "third_party/blink/public/platform/modules/mediastream/media_devices.mojom.h"
 #include "third_party/blink/public/platform/web_media_constraints.h"
 #include "third_party/blink/public/platform/web_media_stream_source.h"
-#include "third_party/webrtc/api/optional.h"
 
 namespace content {
 
+namespace media_constraints {
 class ResolutionSet;
 template <typename T>
 class NumericRangeSet;
+}  // namespace media_constraints
 
 // This class represents the output the SelectSettings algorithm for video
 // constraints (see https://w3c.github.io/mediacapture-main/#dfn-selectsettings)
@@ -35,8 +36,8 @@ class NumericRangeSet;
 // The following fields are used to control MediaStreamVideoSource objects:
 //   * device_id: used for device selection and obtained from the deviceId
 //   * capture_params: used to initialize video capture. Its values are obtained
-//     from the width, height, aspectRatio, frame_rate, googPowerLineFrequency,
-//     and googNoiseReduction constraints.
+//     from the width, height, aspectRatio, frame_rate, and googNoiseReduction
+//     constraints.
 // The following fields are used to control MediaStreamVideoTrack objects:
 //   * track_adapter_settings: All track objects use a VideoTrackAdapter object
 //     that may perform cropping and frame-rate adjustment. This field contains
@@ -102,10 +103,6 @@ class CONTENT_EXPORT VideoCaptureSettings {
   media::ResolutionChangePolicy ResolutionChangePolicy() const {
     DCHECK(HasValue());
     return capture_params_.resolution_change_policy;
-  }
-  media::PowerLineFrequency PowerLineFrequency() const {
-    DCHECK(HasValue());
-    return capture_params_.power_line_frequency;
   }
 
   // Other accessors.
@@ -185,7 +182,6 @@ class CONTENT_EXPORT AudioCaptureSettings {
   // Creates an object with the given values.
   explicit AudioCaptureSettings(
       std::string device_id,
-      const media::AudioParameters& audio_parameters,
       bool enable_hotword,
       bool disable_local_echo,
       bool enable_automatic_output_device_selection,
@@ -202,11 +198,6 @@ class CONTENT_EXPORT AudioCaptureSettings {
   const std::string& device_id() const {
     DCHECK(HasValue());
     return device_id_;
-  }
-  // This field is meaningless in content capture.
-  const media::AudioParameters& device_parameters() const {
-    DCHECK(HasValue());
-    return audio_parameters_;
   }
   bool hotword_enabled() const {
     DCHECK(HasValue());
@@ -228,7 +219,6 @@ class CONTENT_EXPORT AudioCaptureSettings {
  private:
   const char* failed_constraint_name_;
   std::string device_id_;
-  media::AudioParameters audio_parameters_;
   bool hotword_enabled_;
   bool disable_local_echo_;
   bool render_to_associated_sink_;
@@ -286,10 +276,6 @@ bool CONTENT_EXPORT GetConstraintValueAsString(
     const blink::WebMediaConstraints& constraints,
     const blink::StringConstraint blink::WebMediaTrackConstraintSet::*picker,
     std::string* value);
-
-rtc::Optional<bool> ConstraintToOptional(
-    const blink::WebMediaConstraints& constraints,
-    const blink::BooleanConstraint blink::WebMediaTrackConstraintSet::*picker);
 
 template <typename ConstraintType>
 bool ConstraintHasMax(const ConstraintType& constraint) {
@@ -355,8 +341,8 @@ bool IsDeviceCapture(const blink::WebMediaConstraints& constraints);
 // |frame_rate_set| are empty.
 VideoTrackAdapterSettings CONTENT_EXPORT SelectVideoTrackAdapterSettings(
     const blink::WebMediaTrackConstraintSet& basic_constraint_set,
-    const ResolutionSet& resolution_set,
-    const NumericRangeSet<double>& frame_rate_set,
+    const media_constraints::ResolutionSet& resolution_set,
+    const media_constraints::NumericRangeSet<double>& frame_rate_set,
     const media::VideoCaptureFormat& source_format);
 
 // Generic distance function between two values for numeric constraints. Based
@@ -373,10 +359,12 @@ double StringConstraintFitnessDistance(
 // This method computes capabilities for a video source based on the given
 // |formats|. |facing_mode| is valid only in case of video device capture.
 blink::WebMediaStreamSource::Capabilities CONTENT_EXPORT
-ComputeCapabilitiesForVideoSource(const blink::WebString& device_id,
-                                  const media::VideoCaptureFormats& formats,
-                                  media::VideoFacingMode facing_mode,
-                                  bool is_device_capture);
+ComputeCapabilitiesForVideoSource(
+    const blink::WebString& device_id,
+    const media::VideoCaptureFormats& formats,
+    media::VideoFacingMode facing_mode,
+    bool is_device_capture,
+    const base::Optional<std::string>& group_id = base::nullopt);
 
 }  // namespace content
 

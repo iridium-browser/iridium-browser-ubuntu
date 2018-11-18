@@ -8,9 +8,8 @@
 #include "base/callback.h"
 #include "base/location.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "base/test/scoped_task_environment.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/sequenced_task_runner_handle.h"
@@ -46,7 +45,7 @@ class SequencedModelWorkerTest : public testing::Test {
   SyncerError DoWork() {
     EXPECT_TRUE(task_runner_->RunsTasksInCurrentSequence());
     scoped_task_environment_.GetMainThreadTaskRunner()->PostTask(
-        FROM_HERE, base::MessageLoop::QuitWhenIdleClosure());
+        FROM_HERE, run_loop_.QuitClosure());
     did_do_work_ = true;
     return SYNCER_OK;
   }
@@ -57,13 +56,13 @@ class SequencedModelWorkerTest : public testing::Test {
     ADD_FAILURE()
         << "Timed out waiting for work to be done on the DB sequence.";
     scoped_task_environment_.GetMainThreadTaskRunner()->PostTask(
-        FROM_HERE, base::MessageLoop::QuitWhenIdleClosure());
+        FROM_HERE, run_loop_.QuitClosure());
   }
 
  protected:
   void SetUp() override {
     task_runner_ = base::CreateSequencedTaskRunnerWithTraits(
-        {base::MayBlock(), base::TaskPriority::BACKGROUND});
+        {base::MayBlock(), base::TaskPriority::BEST_EFFORT});
     worker_ = new SequencedModelWorker(task_runner_, GROUP_DB);
   }
 
@@ -74,14 +73,18 @@ class SequencedModelWorkerTest : public testing::Test {
   scoped_refptr<SequencedModelWorker> worker_;
   base::OneShotTimer timer_;
 
+ protected:
+  base::RunLoop run_loop_;
+
+ private:
   base::WeakPtrFactory<SequencedModelWorkerTest> weak_factory_;
 };
 
 TEST_F(SequencedModelWorkerTest, DoesWorkOnDatabaseSequence) {
   base::SequencedTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::Bind(&SequencedModelWorkerTest::ScheduleWork,
-                            factory()->GetWeakPtr()));
-  base::RunLoop().Run();
+      FROM_HERE, base::BindOnce(&SequencedModelWorkerTest::ScheduleWork,
+                                factory()->GetWeakPtr()));
+  run_loop_.Run();
   EXPECT_TRUE(did_do_work());
 }
 

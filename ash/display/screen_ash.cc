@@ -15,8 +15,10 @@
 #include "base/logging.h"
 #include "ui/aura/client/screen_position_client.h"
 #include "ui/aura/env.h"
+#include "ui/aura/mus/window_tree_host_mus.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
+#include "ui/base/ui_base_features.h"
 #include "ui/display/display.h"
 #include "ui/display/display_finder.h"
 #include "ui/display/manager/display_manager.h"
@@ -27,8 +29,7 @@ namespace ash {
 
 namespace {
 
-// We need to keep this in order for unittests to tell if
-// the object in display::Screen::GetScreenByType is for shutdown.
+// Intentionally leaked in production.
 display::Screen* screen_for_shutdown = nullptr;
 
 display::DisplayManager* GetDisplayManager() {
@@ -39,7 +40,9 @@ class ScreenForShutdown : public display::Screen {
  public:
   explicit ScreenForShutdown(display::Screen* screen_ash)
       : display_list_(screen_ash->GetAllDisplays()),
-        primary_display_(screen_ash->GetPrimaryDisplay()) {}
+        primary_display_(screen_ash->GetPrimaryDisplay()) {
+    SetDisplayForNewWindows(primary_display_.id());
+  }
 
   // display::Screen overrides:
   gfx::Point GetCursorScreenPoint() override { return gfx::Point(); }
@@ -88,7 +91,7 @@ ScreenAsh::ScreenAsh() = default;
 ScreenAsh::~ScreenAsh() = default;
 
 gfx::Point ScreenAsh::GetCursorScreenPoint() {
-  return aura::Env::GetInstance()->last_mouse_location();
+  return Shell::Get()->aura_env()->last_mouse_location();
 }
 
 bool ScreenAsh::IsWindowUnderCursor(gfx::NativeWindow window) {
@@ -120,6 +123,17 @@ display::Display ScreenAsh::GetDisplayNearestWindow(
     gfx::NativeView window) const {
   if (!window)
     return GetPrimaryDisplay();
+
+  if (::features::IsSingleProcessMash()) {
+    // In IsSingleProcessMash() ScreenAsh is also called from non-ash code.
+    // Non-ash code creates aura Windows that are not parented to Ash's root
+    // Windows. Check for this first.
+    aura::WindowTreeHostMus* window_tree_host_mus =
+        aura::WindowTreeHostMus::ForWindow(window);
+    if (window_tree_host_mus)
+      return window_tree_host_mus->GetDisplay();
+  }
+
   const aura::Window* root_window = window->GetRootWindow();
   if (!root_window)
     return GetPrimaryDisplay();
@@ -165,6 +179,17 @@ display::Display ScreenAsh::GetDisplayMatching(
 }
 
 display::Display ScreenAsh::GetPrimaryDisplay() const {
+  if (!WindowTreeHostManager::HasValidPrimaryDisplayId()) {
+    // This should only be allowed temporarily when there are no displays
+    // available and hence no primary display. In this case we return a default
+    // display to avoid crashes for display observers trying to get the primary
+    // display when notified with the removal of the last display.
+    // https://crbug.com/866714.
+    DCHECK(
+        Shell::Get()->window_tree_host_manager()->GetAllRootWindows().empty());
+    return display::Display::GetDefaultDisplay();
+  }
+
   return GetDisplayManager()->GetDisplayForId(
       WindowTreeHostManager::GetPrimaryDisplayId());
 }
@@ -200,6 +225,14 @@ void ScreenAsh::CreateScreenForShutdown() {
   delete screen_for_shutdown;
   screen_for_shutdown = new ScreenForShutdown(display::Screen::GetScreen());
   display::Screen::SetScreenInstance(screen_for_shutdown);
+}
+
+// static
+void ScreenAsh::DeleteScreenForShutdown() {
+  if (display::Screen::GetScreen() == screen_for_shutdown)
+    display::Screen::SetScreenInstance(nullptr);
+  delete screen_for_shutdown;
+  screen_for_shutdown = nullptr;
 }
 
 }  // namespace ash

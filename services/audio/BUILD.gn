@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//media/webrtc/audio_processing.gni")
 import("//services/catalog/public/tools/catalog.gni")
 import("//services/service_manager/public/cpp/service.gni")
 import("//services/service_manager/public/service_manifest.gni")
@@ -32,15 +33,33 @@ source_set("lib") {
   sources = [
     "debug_recording.cc",
     "debug_recording.h",
-    "group_coordinator.cc",
+    "delay_buffer.cc",
+    "delay_buffer.h",
+    "device_notifier.cc",
+    "device_notifier.h",
+    "group_coordinator-impl.h",
     "group_coordinator.h",
-    "group_member.h",
     "in_process_audio_manager_accessor.cc",
     "in_process_audio_manager_accessor.h",
+    "input_controller.cc",
+    "input_controller.h",
     "input_stream.cc",
     "input_stream.h",
+    "input_sync_writer.cc",
+    "input_sync_writer.h",
     "local_muter.cc",
     "local_muter.h",
+    "log_adapter.cc",
+    "log_adapter.h",
+    "log_factory_adapter.cc",
+    "log_factory_adapter.h",
+    "log_factory_manager.cc",
+    "log_factory_manager.h",
+    "loopback_coordinator.cc",
+    "loopback_coordinator.h",
+    "loopback_group_member.h",
+    "loopback_stream.cc",
+    "loopback_stream.h",
     "output_controller.cc",
     "output_controller.h",
     "output_stream.cc",
@@ -51,19 +70,59 @@ source_set("lib") {
     "service.h",
     "service_factory.cc",
     "service_factory.h",
+    "service_metrics.cc",
+    "service_metrics.h",
+    "snooper_node.cc",
+    "snooper_node.h",
     "stream_factory.cc",
     "stream_factory.h",
+    "stream_monitor.h",
+    "stream_monitor_coordinator.cc",
+    "stream_monitor_coordinator.h",
     "sync_reader.cc",
     "sync_reader.h",
     "system_info.cc",
     "system_info.h",
+    "traced_service_ref.cc",
+    "traced_service_ref.h",
+    "user_input_monitor.cc",
+    "user_input_monitor.h",
   ]
+
+  if (audio_processing_in_audio_service_supported) {
+    deps = [
+      "//media/webrtc",
+    ]
+  }
 
   public_deps = [
     "//base",
     "//media",
+    "//media/webrtc",
     "//services/audio/public/mojom",
     "//services/service_manager/public/cpp",
+    "//services/service_manager/sandbox:sandbox",
+  ]
+
+  if (is_linux) {
+    sources += [
+      "audio_sandbox_hook_linux.cc",
+      "audio_sandbox_hook_linux.h",
+    ]
+    public_deps += [ "//sandbox/linux:sandbox_services" ]
+  }
+
+  if (is_win) {
+    sources += [
+      "audio_sandbox_win.cc",
+      "audio_sandbox_win.h",
+    ]
+    public_deps += [ "//sandbox/win:sandbox" ]
+  }
+  configs += [
+    "//build/config/compiler:wexit_time_destructors",
+    "//media:media_config",
+    "//media/audio:platform_config",
   ]
 }
 
@@ -72,16 +131,32 @@ source_set("tests") {
 
   sources = [
     "debug_recording_unittest.cc",
+    "delay_buffer_unittest.cc",
+    "device_notifier_unittest.cc",
     "group_coordinator_unittest.cc",
+    "input_controller_unittest.cc",
     "input_stream_unittest.cc",
+    "input_sync_writer_unittest.cc",
     "local_muter_unittest.cc",
+    "log_factory_manager_unittest.cc",
+    "loopback_stream_unittest.cc",
     "output_controller_unittest.cc",
     "output_stream_unittest.cc",
+    "public/cpp/input_ipc_unittest.cc",
+    "public/cpp/output_device_unittest.cc",
+    "service_metrics_unittest.cc",
+    "snooper_node_unittest.cc",
     "stream_factory_unittest.cc",
     "sync_reader_unittest.cc",
     "test/audio_system_to_service_adapter_test.cc",
     "test/debug_recording_session_unittest.cc",
+    "test/fake_consumer.cc",
+    "test/fake_consumer.h",
+    "test/fake_loopback_group_member.cc",
+    "test/fake_loopback_group_member.h",
     "test/in_process_service_test.cc",
+    "test/mock_group_coordinator.cc",
+    "test/mock_group_coordinator.h",
     "test/mock_group_member.cc",
     "test/mock_group_member.h",
     "test/mock_log.cc",
@@ -90,6 +165,7 @@ source_set("tests") {
     "test/service_lifetime_test_template.h",
     "test/service_observer_mock.cc",
     "test/service_observer_mock.h",
+    "user_input_monitor_unittest.cc",
   ]
 
   deps = [
@@ -97,7 +173,7 @@ source_set("tests") {
     ":lib",
     "//base/test:test_support",
     "//media:test_support",
-    "//mojo/edk",
+    "//mojo/core/embedder",
     "//services/audio/public/cpp",
     "//services/audio/public/cpp:test_support",
     "//services/audio/public/mojom",

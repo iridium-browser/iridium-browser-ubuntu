@@ -25,12 +25,10 @@
 
 #include "third_party/blink/renderer/core/layout/layout_video.h"
 
-#include "third_party/blink/public/platform/web_layer.h"
+#include "third_party/blink/public/platform/web_size.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/html/media/html_video_element.h"
-#include "third_party/blink/renderer/core/html_names.h"
-#include "third_party/blink/renderer/core/layout/layout_block_flow.h"
-#include "third_party/blink/renderer/core/layout/layout_full_screen.h"
+#include "third_party/blink/renderer/core/html/media/media_element_parser_helpers.h"
 #include "third_party/blink/renderer/core/paint/video_painter.h"
 
 namespace blink {
@@ -55,7 +53,7 @@ void LayoutVideo::IntrinsicSizeChanged() {
 
 void LayoutVideo::UpdateIntrinsicSize() {
   LayoutSize size = CalculateIntrinsicSize();
-  size.Scale(Style()->EffectiveZoom());
+  size.Scale(StyleRef().EffectiveZoom());
 
   // Never set the element size to zero when in a media document.
   if (size.IsEmpty() && GetNode()->ownerDocument() &&
@@ -73,6 +71,11 @@ void LayoutVideo::UpdateIntrinsicSize() {
 
 LayoutSize LayoutVideo::CalculateIntrinsicSize() {
   HTMLVideoElement* video = VideoElement();
+  DCHECK(video);
+
+  if (RuntimeEnabledFeatures::ExperimentalProductivityFeaturesEnabled() &&
+      !video->GetOverriddenIntrinsicSize().IsEmpty())
+    return LayoutSize(video->GetOverriddenIntrinsicSize());
 
   // Spec text from 4.8.6
   //
@@ -101,9 +104,8 @@ LayoutSize LayoutVideo::CalculateIntrinsicSize() {
 }
 
 void LayoutVideo::ImageChanged(WrappedImagePtr new_image,
-                               CanDeferInvalidation defer,
-                               const IntRect* rect) {
-  LayoutMedia::ImageChanged(new_image, defer, rect);
+                               CanDeferInvalidation defer) {
+  LayoutMedia::ImageChanged(new_image, defer);
 
   // Cache the image intrinsic size so we can continue to use it to draw the
   // image correctly even if we know the video intrinsic size but aren't able to
@@ -174,10 +176,7 @@ LayoutRect LayoutVideo::ReplacedContentRect() const {
   if (ShouldDisplayVideo()) {
     // Video codecs may need to restart from an I-frame when the output is
     // resized. Round size in advance to avoid 1px snap difference.
-    // TODO(trchen): The way of rounding is different from LayoutEmbeddedContent
-    // just to match existing behavior. This is probably a bug and We should
-    // unify it with LayoutEmbeddedContent.
-    return LayoutRect(PixelSnappedIntRect(ComputeObjectFit()));
+    return PreSnappedRectForPersistentSizing(ComputeObjectFit());
   }
   // If we are displaying the poster image no pre-rounding is needed, but the
   // size of the image should be used for fitting instead.
@@ -185,45 +184,7 @@ LayoutRect LayoutVideo::ReplacedContentRect() const {
 }
 
 bool LayoutVideo::SupportsAcceleratedRendering() const {
-  return !!MediaElement()->PlatformLayer();
-}
-
-static const LayoutBlock* LayoutObjectPlaceholder(
-    const LayoutObject* layout_object) {
-  LayoutObject* parent = layout_object->Parent();
-  if (!parent)
-    return nullptr;
-
-  LayoutFullScreen* full_screen =
-      parent->IsLayoutFullScreen() ? ToLayoutFullScreen(parent) : nullptr;
-  if (!full_screen)
-    return nullptr;
-
-  return full_screen->Placeholder();
-}
-
-LayoutUnit LayoutVideo::OffsetLeft(const Element* parent) const {
-  if (const LayoutBlock* block = LayoutObjectPlaceholder(this))
-    return block->OffsetLeft(parent);
-  return LayoutMedia::OffsetLeft(parent);
-}
-
-LayoutUnit LayoutVideo::OffsetTop(const Element* parent) const {
-  if (const LayoutBlock* block = LayoutObjectPlaceholder(this))
-    return block->OffsetTop(parent);
-  return LayoutMedia::OffsetTop(parent);
-}
-
-LayoutUnit LayoutVideo::OffsetWidth() const {
-  if (const LayoutBlock* block = LayoutObjectPlaceholder(this))
-    return block->OffsetWidth();
-  return LayoutMedia::OffsetWidth();
-}
-
-LayoutUnit LayoutVideo::OffsetHeight() const {
-  if (const LayoutBlock* block = LayoutObjectPlaceholder(this))
-    return block->OffsetHeight();
-  return LayoutMedia::OffsetHeight();
+  return !!MediaElement()->CcLayer();
 }
 
 CompositingReasons LayoutVideo::AdditionalCompositingReasons() const {
@@ -235,6 +196,15 @@ CompositingReasons LayoutVideo::AdditionalCompositingReasons() const {
     return CompositingReason::kVideo;
 
   return CompositingReason::kNone;
+}
+
+void LayoutVideo::UpdateAfterLayout() {
+  LayoutBox::UpdateAfterLayout();
+  // Report violation of unsized-media policy.
+  if (auto* video_element = ToHTMLVideoElementOrNull(GetNode())) {
+    if (video_element->IsDefaultIntrinsicSize())
+      MediaElementParserHelpers::ReportUnsizedMediaViolation(this);
+  }
 }
 
 }  // namespace blink

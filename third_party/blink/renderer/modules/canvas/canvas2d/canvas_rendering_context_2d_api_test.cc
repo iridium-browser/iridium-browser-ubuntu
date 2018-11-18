@@ -7,6 +7,7 @@
 #include <memory>
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/renderer/core/accessibility/ax_context.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
@@ -59,9 +60,7 @@ void CanvasRenderingContext2DAPITest::CreateContext(OpacityMode opacity_mode) {
 }
 
 void CanvasRenderingContext2DAPITest::SetUp() {
-  Page::PageClients page_clients;
-  FillWithEmptyClients(page_clients);
-  SetupPageWithClients(&page_clients);
+  PageTestBase::SetUp();
   GetDocument().documentElement()->SetInnerHTMLFromString(
       "<body><canvas id='c'></canvas></body>");
   GetDocument().View()->UpdateAllLifecyclePhases();
@@ -274,7 +273,7 @@ TEST_F(CanvasRenderingContext2DAPITest, CreateImageDataTooBig) {
       Context2d()->createImageData(1000000, 1000000, exception_state);
   EXPECT_EQ(nullptr, too_big_image_data);
   EXPECT_TRUE(exception_state.HadException());
-  EXPECT_EQ(kV8RangeError, exception_state.Code());
+  EXPECT_EQ(ESErrorType::kRangeError, exception_state.CodeAs<ESErrorType>());
 }
 
 TEST_F(CanvasRenderingContext2DAPITest, GetImageDataTooBig) {
@@ -284,7 +283,7 @@ TEST_F(CanvasRenderingContext2DAPITest, GetImageDataTooBig) {
       Context2d()->getImageData(0, 0, 1000000, 1000000, exception_state);
   EXPECT_EQ(nullptr, image_data);
   EXPECT_TRUE(exception_state.HadException());
-  EXPECT_EQ(kV8RangeError, exception_state.Code());
+  EXPECT_EQ(ESErrorType::kRangeError, exception_state.CodeAs<ESErrorType>());
 }
 
 TEST_F(CanvasRenderingContext2DAPITest,
@@ -295,14 +294,14 @@ TEST_F(CanvasRenderingContext2DAPITest,
       1, -2147483647, 1, -2147483647, exception_state);
   EXPECT_EQ(nullptr, image_data);
   EXPECT_TRUE(exception_state.HadException());
-  EXPECT_EQ(kV8RangeError, exception_state.Code());
+  EXPECT_EQ(ESErrorType::kRangeError, exception_state.CodeAs<ESErrorType>());
 
   exception_state.ClearException();
   image_data = Context2d()->getImageData(-2147483647, 1, -2147483647, 1,
                                          exception_state);
   EXPECT_EQ(nullptr, image_data);
   EXPECT_TRUE(exception_state.HadException());
-  EXPECT_EQ(kV8RangeError, exception_state.Code());
+  EXPECT_EQ(ESErrorType::kRangeError, exception_state.CodeAs<ESErrorType>());
 }
 
 void ResetCanvasForAccessibilityRectTest(Document& document) {
@@ -311,7 +310,6 @@ void ResetCanvasForAccessibilityRectTest(Document& document) {
     padding:10px; margin:5px;'>
     <button id='button'></button></canvas>
   )HTML");
-  document.GetSettings()->SetAccessibilityEnabled(true);
   HTMLCanvasElement* canvas =
       ToHTMLCanvasElement(document.getElementById("canvas"));
 
@@ -326,6 +324,7 @@ void ResetCanvasForAccessibilityRectTest(Document& document) {
 
 TEST_F(CanvasRenderingContext2DAPITest, AccessibilityRectTestForAddHitRegion) {
   ResetCanvasForAccessibilityRectTest(GetDocument());
+  AXContext ax_context(GetDocument());
 
   Element* button_element = GetDocument().getElementById("button");
   HTMLCanvasElement* canvas =
@@ -355,6 +354,7 @@ TEST_F(CanvasRenderingContext2DAPITest, AccessibilityRectTestForAddHitRegion) {
 TEST_F(CanvasRenderingContext2DAPITest,
        AccessibilityRectTestForDrawFocusIfNeeded) {
   ResetCanvasForAccessibilityRectTest(GetDocument());
+  AXContext ax_context(GetDocument());
 
   Element* button_element = GetDocument().getElementById("button");
   HTMLCanvasElement* canvas =

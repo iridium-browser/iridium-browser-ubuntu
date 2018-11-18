@@ -17,7 +17,7 @@ namespace autofill {
 
 namespace {
 
-const int kPickleVersion = 6;
+const int kFormDataPickleVersion = 6;
 
 bool ReadGURL(base::PickleIterator* iter, GURL* url) {
   std::string spec;
@@ -77,7 +77,9 @@ FormData::FormData(const FormData& data)
       main_frame_origin(data.main_frame_origin),
       is_form_tag(data.is_form_tag),
       is_formless_checkout(data.is_formless_checkout),
-      fields(data.fields) {}
+      unique_renderer_id(data.unique_renderer_id),
+      fields(data.fields),
+      username_predictions(data.username_predictions) {}
 
 FormData::~FormData() {
 }
@@ -108,11 +110,23 @@ bool FormData::SimilarFormAs(const FormData& form) const {
   return true;
 }
 
+bool FormData::DynamicallySameFormAs(const FormData& form) const {
+  if (name != form.name || fields.size() != form.fields.size())
+    return false;
+  for (size_t i = 0; i < fields.size(); ++i) {
+    if (!fields[i].DynamicallySameFieldAs(form.fields[i]))
+      return false;
+  }
+  return true;
+}
+
 bool FormData::operator==(const FormData& form) const {
   return name == form.name && origin == form.origin && action == form.action &&
+         unique_renderer_id == form.unique_renderer_id &&
          is_form_tag == form.is_form_tag &&
          is_formless_checkout == form.is_formless_checkout &&
-         fields == form.fields;
+         fields == form.fields &&
+         username_predictions == form.username_predictions;
 }
 
 bool FormData::operator!=(const FormData& form) const {
@@ -138,7 +152,7 @@ std::ostream& operator<<(std::ostream& os, const FormData& form) {
 }
 
 void SerializeFormData(const FormData& form_data, base::Pickle* pickle) {
-  pickle->WriteInt(kPickleVersion);
+  pickle->WriteInt(kFormDataPickleVersion);
   pickle->WriteString16(form_data.name);
   pickle->WriteString(form_data.origin.spec());
   pickle->WriteString(form_data.action.spec());
@@ -165,7 +179,7 @@ bool DeserializeFormData(base::PickleIterator* iter, FormData* form_data) {
     return false;
   }
 
-  if (version < 1 || version > kPickleVersion) {
+  if (version < 1 || version > kFormDataPickleVersion) {
     DVLOG(1) << "Unknown FormData pickle version " << version;
     return false;
   }

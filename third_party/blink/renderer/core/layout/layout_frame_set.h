@@ -41,6 +41,8 @@ enum FrameEdge {
 
 struct FrameEdgeInfo {
   STACK_ALLOCATED();
+
+ public:
   FrameEdgeInfo(bool prevent_resize = false, bool allow_border = true)
       : prevent_resize_(4), allow_border_(4) {
     prevent_resize_.Fill(prevent_resize);
@@ -85,7 +87,7 @@ class LayoutFrameSet final : public LayoutBox {
 
   FrameEdgeInfo EdgeInfo() const;
 
-  bool UserResize(MouseEvent*);
+  bool UserResize(const MouseEvent&);
 
   bool CanResizeRow(const IntPoint&) const;
   bool CanResizeColumn(const IntPoint&) const;
@@ -129,7 +131,7 @@ class LayoutFrameSet final : public LayoutBox {
   }
 
   void UpdateLayout() override;
-  void Paint(const PaintInfo&, const LayoutPoint&) const override;
+  void Paint(const PaintInfo&) const override;
   void ComputePreferredLogicalWidths() override;
   bool IsChildAllowed(LayoutObject*, const ComputedStyle&) const override;
   CursorDirective GetCursor(const LayoutPoint&, Cursor&) const override;

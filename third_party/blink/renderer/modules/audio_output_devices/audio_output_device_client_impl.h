@@ -25,12 +25,12 @@ class MODULES_EXPORT AudioOutputDeviceClientImpl
 
   // AudioOutputDeviceClient implementation.
   void CheckIfAudioSinkExistsAndIsAuthorized(
-      ExecutionContext*,
+      Document&,
       const WebString& sink_id,
       std::unique_ptr<WebSetSinkIdCallbacks>) override;
 
   // GarbageCollectedFinalized implementation.
-  virtual void Trace(blink::Visitor* visitor) {
+  void Trace(blink::Visitor* visitor) override {
     AudioOutputDeviceClient::Trace(visitor);
   }
 };

@@ -29,9 +29,9 @@ import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.components.location.LocationUtils;
 import org.chromium.components.security_state.ConnectionSecurityLevel;
-import org.chromium.content.browser.test.util.Criteria;
-import org.chromium.content.browser.test.util.CriteriaHelper;
-import org.chromium.content.browser.test.util.TouchCommon;
+import org.chromium.content_public.browser.test.util.Criteria;
+import org.chromium.content_public.browser.test.util.CriteriaHelper;
+import org.chromium.content_public.browser.test.util.TouchCommon;
 import org.chromium.ui.base.ActivityWindowAndroid;
 import org.chromium.ui.base.AndroidPermissionDelegate;
 import org.chromium.ui.base.PermissionCallback;
@@ -52,7 +52,7 @@ public class BluetoothChooserDialogTest {
     static class BluetoothChooserDialogWithFakeNatives extends BluetoothChooserDialog {
         int mFinishedEventType = -1;
         String mFinishedDeviceId;
-        int mRestartSearchCount = 0;
+        int mRestartSearchCount;
 
         BluetoothChooserDialogWithFakeNatives(WindowAndroid windowAndroid, String origin,
                 int securityLevel, long nativeBluetoothChooserDialogPtr) {
@@ -202,8 +202,8 @@ public class BluetoothChooserDialogTest {
             }
         });
 
-        Assert.assertEquals(BluetoothChooserDialog.DIALOG_FINISHED_CANCELLED,
-                mChooserDialog.mFinishedEventType);
+        Assert.assertEquals(
+                BluetoothChooserDialog.DialogFinished.CANCELLED, mChooserDialog.mFinishedEventType);
         Assert.assertEquals("", mChooserDialog.mFinishedDeviceId);
     }
 
@@ -261,7 +261,7 @@ public class BluetoothChooserDialogTest {
         selectItem(mChooserDialog, 2);
 
         Assert.assertEquals(
-                BluetoothChooserDialog.DIALOG_FINISHED_SELECTED, mChooserDialog.mFinishedEventType);
+                BluetoothChooserDialog.DialogFinished.SELECTED, mChooserDialog.mFinishedEventType);
         Assert.assertEquals("id-2", mChooserDialog.mFinishedDeviceId);
     }
 
@@ -284,8 +284,10 @@ public class BluetoothChooserDialogTest {
                 new TestAndroidPermissionDelegate(dialog);
         mWindowAndroid.setAndroidPermissionDelegate(permissionDelegate);
 
-        ThreadUtils.runOnUiThreadBlocking(() -> mChooserDialog.notifyDiscoveryState(
-                BluetoothChooserDialog.DISCOVERY_FAILED_TO_START));
+        ThreadUtils.runOnUiThreadBlocking(
+                ()
+                        -> mChooserDialog.notifyDiscoveryState(
+                                BluetoothChooserDialog.DiscoveryMode.DISCOVERY_FAILED_TO_START));
 
         Assert.assertEquals(removeLinkTags(mActivityTestRule.getActivity().getString(
                                     R.string.bluetooth_need_location_permission)),
@@ -342,8 +344,10 @@ public class BluetoothChooserDialogTest {
         mLocationUtils.mLocationGranted = true;
         mLocationUtils.mSystemLocationSettingsEnabled = false;
 
-        ThreadUtils.runOnUiThreadBlocking(() -> mChooserDialog.notifyDiscoveryState(
-                BluetoothChooserDialog.DISCOVERY_FAILED_TO_START));
+        ThreadUtils.runOnUiThreadBlocking(
+                ()
+                        -> mChooserDialog.notifyDiscoveryState(
+                                BluetoothChooserDialog.DiscoveryMode.DISCOVERY_FAILED_TO_START));
 
         Assert.assertEquals(removeLinkTags(mActivityTestRule.getActivity().getString(
                                     R.string.bluetooth_need_location_services_on)),
@@ -413,9 +417,9 @@ public class BluetoothChooserDialogTest {
     }
 
     private static class TestAndroidPermissionDelegate implements AndroidPermissionDelegate {
-        Dialog mDialog = null;
-        PermissionCallback mCallback = null;
-        String[] mPermissionsRequested = null;
+        Dialog mDialog;
+        PermissionCallback mCallback;
+        String[] mPermissionsRequested;
 
         public TestAndroidPermissionDelegate(Dialog dialog) {
             mDialog = dialog;
@@ -448,12 +452,14 @@ public class BluetoothChooserDialogTest {
         }
 
         @Override
-        public void onRequestPermissionsResult(
-                int requestCode, String[] permissions, int[] grantResults) {}
+        public boolean handlePermissionResult(
+                int requestCode, String[] permissions, int[] grantResults) {
+            return false;
+        }
     }
 
     private static class FakeLocationUtils extends LocationUtils {
-        public boolean mLocationGranted = false;
+        public boolean mLocationGranted;
 
         @Override
         public boolean hasAndroidLocationPermission() {

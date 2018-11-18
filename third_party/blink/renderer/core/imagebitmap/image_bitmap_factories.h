@@ -41,6 +41,7 @@
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/imagebitmap/image_bitmap_options.h"
 #include "third_party/blink/renderer/core/workers/worker_global_scope.h"
+#include "third_party/blink/renderer/platform/bindings/name_client.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/geometry/int_rect.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
@@ -62,7 +63,7 @@ class ImageBitmapFactories final
     : public GarbageCollectedFinalized<ImageBitmapFactories>,
       public Supplement<LocalDOMWindow>,
       public Supplement<WorkerGlobalScope>,
-      public TraceWrapperBase {
+      public NameClient {
   USING_GARBAGE_COLLECTED_MIXIN(ImageBitmapFactories);
 
  public:
@@ -83,18 +84,18 @@ class ImageBitmapFactories final
   static ScriptPromise createImageBitmap(ScriptState*,
                                          EventTarget&,
                                          ImageBitmapSource*,
-                                         Optional<IntRect> crop_rect,
+                                         base::Optional<IntRect> crop_rect,
                                          const ImageBitmapOptions&);
-  static ScriptPromise CreateImageBitmapFromBlob(ScriptState*,
-                                                 EventTarget&,
-                                                 ImageBitmapSource*,
-                                                 Optional<IntRect> crop_rect,
-                                                 const ImageBitmapOptions&);
+  static ScriptPromise CreateImageBitmapFromBlob(
+      ScriptState*,
+      EventTarget&,
+      ImageBitmapSource*,
+      base::Optional<IntRect> crop_rect,
+      const ImageBitmapOptions&);
 
   virtual ~ImageBitmapFactories() = default;
 
-  void Trace(blink::Visitor*);
-  void TraceWrappers(const ScriptWrappableVisitor*) const override;
+  void Trace(blink::Visitor*) override;
   const char* NameInHeapSnapshot() const override {
     return "ImageBitmapLoader";
   }
@@ -105,7 +106,7 @@ class ImageBitmapFactories final
         public FileReaderLoaderClient {
    public:
     static ImageBitmapLoader* Create(ImageBitmapFactories& factory,
-                                     Optional<IntRect> crop_rect,
+                                     base::Optional<IntRect> crop_rect,
                                      const ImageBitmapOptions& options,
                                      ScriptState* script_state) {
       return new ImageBitmapLoader(factory, crop_rect, script_state, options);
@@ -120,7 +121,7 @@ class ImageBitmapFactories final
 
    private:
     ImageBitmapLoader(ImageBitmapFactories&,
-                      Optional<IntRect> crop_rect,
+                      base::Optional<IntRect> crop_rect,
                       ScriptState*,
                       const ImageBitmapOptions&);
 
@@ -148,7 +149,7 @@ class ImageBitmapFactories final
     std::unique_ptr<FileReaderLoader> loader_;
     Member<ImageBitmapFactories> factory_;
     Member<ScriptPromiseResolver> resolver_;
-    Optional<IntRect> crop_rect_;
+    base::Optional<IntRect> crop_rect_;
     ImageBitmapOptions options_;
   };
 

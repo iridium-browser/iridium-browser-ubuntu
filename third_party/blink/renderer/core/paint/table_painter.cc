@@ -7,7 +7,6 @@
 #include "third_party/blink/renderer/core/layout/collapsed_border_value.h"
 #include "third_party/blink/renderer/core/layout/layout_table.h"
 #include "third_party/blink/renderer/core/layout/layout_table_section.h"
-#include "third_party/blink/renderer/core/paint/box_clipper.h"
 #include "third_party/blink/renderer/core/paint/box_painter.h"
 #include "third_party/blink/renderer/core/paint/object_painter.h"
 #include "third_party/blink/renderer/core/paint/paint_info.h"
@@ -38,16 +37,14 @@ void TablePainter::PaintObject(const PaintInfo& paint_info,
          child = child->NextSibling()) {
       if (child->IsBox() && !ToLayoutBox(child)->HasSelfPaintingLayer() &&
           (child->IsTableSection() || child->IsTableCaption())) {
-        LayoutPoint child_point = layout_table_.FlipForWritingModeForChild(
-            ToLayoutBox(child), paint_offset);
-        child->Paint(paint_info_for_descendants, child_point);
+        child->Paint(paint_info_for_descendants);
       }
     }
 
     if (layout_table_.HasCollapsedBorders() &&
         ShouldPaintDescendantBlockBackgrounds(paint_phase) &&
-        layout_table_.Style()->Visibility() == EVisibility::kVisible) {
-      PaintCollapsedBorders(paint_info_for_descendants, paint_offset);
+        layout_table_.StyleRef().Visibility() == EVisibility::kVisible) {
+      PaintCollapsedBorders(paint_info_for_descendants);
     }
   }
 
@@ -55,22 +52,42 @@ void TablePainter::PaintObject(const PaintInfo& paint_info,
     ObjectPainter(layout_table_).PaintOutline(paint_info, paint_offset);
 }
 
+void TablePainter::RecordHitTestData(const PaintInfo& paint_info,
+                                     const LayoutPoint& paint_offset) {
+  // Hit test display items are only needed for compositing. This flag is used
+  // for for printing and drag images which do not need hit testing.
+  if (paint_info.GetGlobalPaintFlags() & kGlobalPaintFlattenCompositingLayers)
+    return;
+
+  auto touch_action = layout_table_.EffectiveWhitelistedTouchAction();
+  if (touch_action == TouchAction::kTouchActionAuto)
+    return;
+
+  auto rect = layout_table_.BorderBoxRect();
+  rect.MoveBy(paint_offset);
+  HitTestData::RecordHitTestRect(paint_info.context, layout_table_,
+                                 HitTestRect(rect, touch_action));
+}
+
 void TablePainter::PaintBoxDecorationBackground(
     const PaintInfo& paint_info,
     const LayoutPoint& paint_offset) {
+  if (RuntimeEnabledFeatures::PaintTouchActionRectsEnabled())
+    RecordHitTestData(paint_info, paint_offset);
+
   if (!layout_table_.HasBoxDecorationBackground() ||
-      layout_table_.Style()->Visibility() != EVisibility::kVisible)
+      layout_table_.StyleRef().Visibility() != EVisibility::kVisible)
     return;
 
   LayoutRect rect(paint_offset, layout_table_.Size());
   layout_table_.SubtractCaptionRect(rect);
   BoxPainter(layout_table_)
-      .PaintBoxDecorationBackgroundWithRect(paint_info, paint_offset, rect);
+      .PaintBoxDecorationBackgroundWithRect(paint_info, rect);
 }
 
 void TablePainter::PaintMask(const PaintInfo& paint_info,
                              const LayoutPoint& paint_offset) {
-  if (layout_table_.Style()->Visibility() != EVisibility::kVisible ||
+  if (layout_table_.StyleRef().Visibility() != EVisibility::kVisible ||
       paint_info.phase != PaintPhase::kMask)
     return;
 
@@ -85,9 +102,8 @@ void TablePainter::PaintMask(const PaintInfo& paint_info,
   BoxPainter(layout_table_).PaintMaskImages(paint_info, rect);
 }
 
-void TablePainter::PaintCollapsedBorders(const PaintInfo& paint_info,
-                                         const LayoutPoint& paint_offset) {
-  Optional<DrawingRecorder> recorder;
+void TablePainter::PaintCollapsedBorders(const PaintInfo& paint_info) {
+  base::Optional<DrawingRecorder> recorder;
   if (UNLIKELY(layout_table_.ShouldPaintAllCollapsedBorders())) {
     if (DrawingRecorder::UseCachedDrawingIfPossible(
             paint_info.context, layout_table_,
@@ -100,10 +116,7 @@ void TablePainter::PaintCollapsedBorders(const PaintInfo& paint_info,
 
   for (LayoutTableSection* section = layout_table_.BottomSection(); section;
        section = layout_table_.SectionAbove(section)) {
-    LayoutPoint child_point =
-        layout_table_.FlipForWritingModeForChild(section, paint_offset);
-    TableSectionPainter(*section).PaintCollapsedBorders(paint_info,
-                                                        child_point);
+    TableSectionPainter(*section).PaintCollapsedBorders(paint_info);
   }
 }
 

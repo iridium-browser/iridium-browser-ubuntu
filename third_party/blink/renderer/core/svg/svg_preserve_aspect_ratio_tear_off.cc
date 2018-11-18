@@ -30,9 +30,7 @@
 
 #include "third_party/blink/renderer/core/svg/svg_preserve_aspect_ratio_tear_off.h"
 
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
-#include "third_party/blink/renderer/core/svg/svg_element.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 
 namespace blink {
 
@@ -44,7 +42,7 @@ void SVGPreserveAspectRatioTearOff::setAlign(unsigned short align,
   }
   if (align == kSvgPreserveaspectratioUnknown ||
       align > kSvgPreserveaspectratioXmaxymax) {
-    exception_state.ThrowDOMException(kNotSupportedError,
+    exception_state.ThrowDOMException(DOMExceptionCode::kNotSupportedError,
                                       "The alignment provided is invalid.");
     return;
   }
@@ -62,7 +60,7 @@ void SVGPreserveAspectRatioTearOff::setMeetOrSlice(
   }
   if (meet_or_slice == kSvgMeetorsliceUnknown ||
       meet_or_slice > kSvgMeetorsliceSlice) {
-    exception_state.ThrowDOMException(kNotSupportedError,
+    exception_state.ThrowDOMException(DOMExceptionCode::kNotSupportedError,
                                       "The meetOrSlice provided is invalid.");
     return;
   }
@@ -73,12 +71,10 @@ void SVGPreserveAspectRatioTearOff::setMeetOrSlice(
 
 SVGPreserveAspectRatioTearOff::SVGPreserveAspectRatioTearOff(
     SVGPreserveAspectRatio* target,
-    SVGElement* context_element,
-    PropertyIsAnimValType property_is_anim_val,
-    const QualifiedName& attribute_name)
+    SVGAnimatedPropertyBase* binding,
+    PropertyIsAnimValType property_is_anim_val)
     : SVGPropertyTearOff<SVGPreserveAspectRatio>(target,
-                                                 context_element,
-                                                 property_is_anim_val,
-                                                 attribute_name) {}
+                                                 binding,
+                                                 property_is_anim_val) {}
 
 }  // namespace blink

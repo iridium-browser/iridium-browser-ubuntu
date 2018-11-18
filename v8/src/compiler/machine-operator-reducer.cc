@@ -9,19 +9,20 @@
 #include "src/base/ieee754.h"
 #include "src/compiler/diamond.h"
 #include "src/compiler/graph.h"
-#include "src/compiler/js-graph.h"
+#include "src/compiler/machine-graph.h"
 #include "src/compiler/node-matchers.h"
+#include "src/compiler/node-properties.h"
 #include "src/conversions-inl.h"
 
 namespace v8 {
 namespace internal {
 namespace compiler {
 
-MachineOperatorReducer::MachineOperatorReducer(JSGraph* jsgraph,
+MachineOperatorReducer::MachineOperatorReducer(MachineGraph* mcgraph,
                                                bool allow_signalling_nan)
-    : jsgraph_(jsgraph), allow_signalling_nan_(allow_signalling_nan) {}
+    : mcgraph_(mcgraph), allow_signalling_nan_(allow_signalling_nan) {}
 
-MachineOperatorReducer::~MachineOperatorReducer() {}
+MachineOperatorReducer::~MachineOperatorReducer() = default;
 
 
 Node* MachineOperatorReducer::Float32Constant(volatile float value) {
@@ -30,12 +31,12 @@ Node* MachineOperatorReducer::Float32Constant(volatile float value) {
 
 
 Node* MachineOperatorReducer::Float64Constant(volatile double value) {
-  return jsgraph()->Float64Constant(value);
+  return mcgraph()->Float64Constant(value);
 }
 
 
 Node* MachineOperatorReducer::Int32Constant(int32_t value) {
-  return jsgraph()->Int32Constant(value);
+  return mcgraph()->Int32Constant(value);
 }
 
 
@@ -613,8 +614,14 @@ Reduction MachineOperatorReducer::Reduce(Node* node) {
     }
     case IrOpcode::kChangeFloat64ToInt32: {
       Float64Matcher m(node->InputAt(0));
-      if (m.HasValue()) return ReplaceInt32(FastD2I(m.Value()));
+      if (m.HasValue()) return ReplaceInt32(FastD2IChecked(m.Value()));
       if (m.IsChangeInt32ToFloat64()) return Replace(m.node()->InputAt(0));
+      break;
+    }
+    case IrOpcode::kChangeFloat64ToInt64: {
+      Float64Matcher m(node->InputAt(0));
+      if (m.HasValue()) return ReplaceInt64(static_cast<int64_t>(m.Value()));
+      if (m.IsChangeInt64ToFloat64()) return Replace(m.node()->InputAt(0));
       break;
     }
     case IrOpcode::kChangeFloat64ToUint32: {
@@ -631,6 +638,12 @@ Reduction MachineOperatorReducer::Reduce(Node* node) {
     case IrOpcode::kChangeInt32ToInt64: {
       Int32Matcher m(node->InputAt(0));
       if (m.HasValue()) return ReplaceInt64(m.Value());
+      break;
+    }
+    case IrOpcode::kChangeInt64ToFloat64: {
+      Int64Matcher m(node->InputAt(0));
+      if (m.HasValue()) return ReplaceFloat64(static_cast<double>(m.Value()));
+      if (m.IsChangeFloat64ToInt64()) return Replace(m.node()->InputAt(0));
       break;
     }
     case IrOpcode::kChangeUint32ToFloat64: {
@@ -670,7 +683,9 @@ Reduction MachineOperatorReducer::Reduce(Node* node) {
     }
     case IrOpcode::kRoundFloat64ToInt32: {
       Float64Matcher m(node->InputAt(0));
-      if (m.HasValue()) return ReplaceInt32(static_cast<int32_t>(m.Value()));
+      if (m.HasValue()) {
+        return ReplaceInt32(DoubleToInt32(m.Value()));
+      }
       if (m.IsChangeInt32ToFloat64()) return Replace(m.node()->InputAt(0));
       break;
     }
@@ -1371,21 +1386,32 @@ bool IsFloat64RepresentableAsFloat32(const Float64Matcher& m) {
 
 
 Reduction MachineOperatorReducer::ReduceFloat64Compare(Node* node) {
-  DCHECK((IrOpcode::kFloat64Equal == node->opcode()) ||
-         (IrOpcode::kFloat64LessThan == node->opcode()) ||
-         (IrOpcode::kFloat64LessThanOrEqual == node->opcode()));
-  // As all Float32 values have an exact representation in Float64, comparing
-  // two Float64 values both converted from Float32 is equivalent to comparing
-  // the original Float32s, so we can ignore the conversions. We can also reduce
-  // comparisons of converted Float64 values against constants that can be
-  // represented exactly as Float32.
+  DCHECK(IrOpcode::kFloat64Equal == node->opcode() ||
+         IrOpcode::kFloat64LessThan == node->opcode() ||
+         IrOpcode::kFloat64LessThanOrEqual == node->opcode());
   Float64BinopMatcher m(node);
-  if ((m.left().IsChangeFloat32ToFloat64() &&
-       m.right().IsChangeFloat32ToFloat64()) ||
-      (m.left().IsChangeFloat32ToFloat64() &&
-       IsFloat64RepresentableAsFloat32(m.right())) ||
-      (IsFloat64RepresentableAsFloat32(m.left()) &&
-       m.right().IsChangeFloat32ToFloat64())) {
+  if (m.IsFoldable()) {
+    switch (node->opcode()) {
+      case IrOpcode::kFloat64Equal:
+        return ReplaceBool(m.left().Value() == m.right().Value());
+      case IrOpcode::kFloat64LessThan:
+        return ReplaceBool(m.left().Value() < m.right().Value());
+      case IrOpcode::kFloat64LessThanOrEqual:
+        return ReplaceBool(m.left().Value() <= m.right().Value());
+      default:
+        UNREACHABLE();
+    }
+  } else if ((m.left().IsChangeFloat32ToFloat64() &&
+              m.right().IsChangeFloat32ToFloat64()) ||
+             (m.left().IsChangeFloat32ToFloat64() &&
+              IsFloat64RepresentableAsFloat32(m.right())) ||
+             (IsFloat64RepresentableAsFloat32(m.left()) &&
+              m.right().IsChangeFloat32ToFloat64())) {
+    // As all Float32 values have an exact representation in Float64, comparing
+    // two Float64 values both converted from Float32 is equivalent to comparing
+    // the original Float32s, so we can ignore the conversions. We can also
+    // reduce comparisons of converted Float64 values against constants that
+    // can be represented exactly as Float32.
     switch (node->opcode()) {
       case IrOpcode::kFloat64Equal:
         NodeProperties::ChangeOp(node, machine()->Float32Equal());
@@ -1397,7 +1423,7 @@ Reduction MachineOperatorReducer::ReduceFloat64Compare(Node* node) {
         NodeProperties::ChangeOp(node, machine()->Float32LessThanOrEqual());
         break;
       default:
-        return NoChange();
+        UNREACHABLE();
     }
     node->ReplaceInput(
         0, m.left().HasValue()
@@ -1422,16 +1448,15 @@ Reduction MachineOperatorReducer::ReduceFloat64RoundDown(Node* node) {
 }
 
 CommonOperatorBuilder* MachineOperatorReducer::common() const {
-  return jsgraph()->common();
+  return mcgraph()->common();
 }
 
 
 MachineOperatorBuilder* MachineOperatorReducer::machine() const {
-  return jsgraph()->machine();
+  return mcgraph()->machine();
 }
 
-
-Graph* MachineOperatorReducer::graph() const { return jsgraph()->graph(); }
+Graph* MachineOperatorReducer::graph() const { return mcgraph()->graph(); }
 
 }  // namespace compiler
 }  // namespace internal

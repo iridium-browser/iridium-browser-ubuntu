@@ -12,6 +12,14 @@
 // TableViewTextItem contains the model data for a TableViewTextCell.
 @interface TableViewTextItem : TableViewItem
 
+// Text Alignment for the cell's textLabel. Default is NSTextAlignmentLeft.
+@property(nonatomic, assign) NSTextAlignment textAlignment;
+
+// UIColor for the cell's textLabel. Default is
+// kTableViewTextLabelColorLightGrey. ChromeTableViewStyler's |cellTitleColor|
+// takes precedence over the default color, but not over |textColor|.
+@property(nonatomic, assign) UIColor* textColor;
+
 @property(nonatomic, readwrite, strong) NSString* text;
 
 @end
@@ -21,6 +29,9 @@
 
 // The text to display.
 @property(nonatomic, readonly, strong) UILabel* textLabel;
+
+// Whether to show the checkmark accessory view.
+@property(nonatomic, assign) BOOL checked;
 
 @end
 

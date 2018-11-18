@@ -10,14 +10,17 @@
 Polymer({
   is: 'password-list-item',
 
-  behaviors: [FocusRowBehavior, ShowPasswordBehavior],
+  behaviors: [
+    FocusRowBehavior,
+    ShowPasswordBehavior,
+  ],
 
   /**
    * Selects the password on tap if revealed.
    * @private
    */
   onReadonlyInputTap_: function() {
-    if (this.password)
+    if (this.item.password)
       this.$$('#password').select();
   },
 
@@ -32,10 +35,7 @@ Polymer({
 
   /**
    * Get the aria label for the More Actions button on this row.
-   * @param {{
-   *    entry: !chrome.passwordsPrivate.PasswordUiEntry,
-   *    password: string
-   * }} item This row's item.
+   * @param {!PasswordManagerProxy.UiEntryWithPassword} item This row's item.
    * @private
    */
   getMoreActionsLabel_: function(item) {

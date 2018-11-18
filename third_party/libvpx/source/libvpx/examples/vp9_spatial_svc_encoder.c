@@ -25,7 +25,7 @@
 #include "../video_writer.h"
 
 #include "../vpx_ports/vpx_timer.h"
-#include "vpx/svc_context.h"
+#include "./svc_context.h"
 #include "vpx/vp8cx.h"
 #include "vpx/vpx_encoder.h"
 #include "../vpxstats.h"
@@ -86,6 +86,19 @@ static const arg_def_t aqmode_arg =
     ARG_DEF("aq", "aqmode", 1, "aq-mode off/on");
 static const arg_def_t bitrates_arg =
     ARG_DEF("bl", "bitrates", 1, "bitrates[sl * num_tl + tl]");
+static const arg_def_t dropframe_thresh_arg =
+    ARG_DEF(NULL, "drop-frame", 1, "Temporal resampling threshold (buf %)");
+static const struct arg_enum_list tune_content_enum[] = {
+  { "default", VP9E_CONTENT_DEFAULT },
+  { "screen", VP9E_CONTENT_SCREEN },
+  { "film", VP9E_CONTENT_FILM },
+  { NULL, 0 }
+};
+
+static const arg_def_t tune_content_arg = ARG_DEF_ENUM(
+    NULL, "tune-content", 1, "Tune content type", tune_content_enum);
+static const arg_def_t inter_layer_pred_arg = ARG_DEF(
+    NULL, "inter-layer-pred", 1, "0 - 3: On, Off, Key-frames, Constrained");
 
 #if CONFIG_VP9_HIGHBITDEPTH
 static const struct arg_enum_list bitdepth_enum[] = {
@@ -127,6 +140,9 @@ static const arg_def_t *svc_args[] = { &frames_arg,
                                        &speed_arg,
                                        &rc_end_usage_arg,
                                        &bitrates_arg,
+                                       &dropframe_thresh_arg,
+                                       &tune_content_arg,
+                                       &inter_layer_pred_arg,
                                        NULL };
 
 static const uint32_t default_frames_to_skip = 0;
@@ -153,6 +169,8 @@ typedef struct {
   stats_io_t rc_stats;
   int passes;
   int pass;
+  int tune_content;
+  int inter_layer_pred;
 } AppInput;
 
 static const char *exec_name;
@@ -251,11 +269,15 @@ static void parse_command_line(int argc, const char **argv_,
       enc_cfg->kf_min_dist = arg_parse_uint(&arg);
       enc_cfg->kf_max_dist = enc_cfg->kf_min_dist;
     } else if (arg_match(&arg, &scale_factors_arg, argi)) {
-      snprintf(string_options, sizeof(string_options), "%s scale-factors=%s",
-               string_options, arg.val);
+      strncat(string_options, " scale-factors=",
+              sizeof(string_options) - strlen(string_options) - 1);
+      strncat(string_options, arg.val,
+              sizeof(string_options) - strlen(string_options) - 1);
     } else if (arg_match(&arg, &bitrates_arg, argi)) {
-      snprintf(string_options, sizeof(string_options), "%s bitrates=%s",
-               string_options, arg.val);
+      strncat(string_options, " bitrates=",
+              sizeof(string_options) - strlen(string_options) - 1);
+      strncat(string_options, arg.val,
+              sizeof(string_options) - strlen(string_options) - 1);
     } else if (arg_match(&arg, &passes_arg, argi)) {
       passes = arg_parse_uint(&arg);
       if (passes < 1 || passes > 2) {
@@ -269,11 +291,15 @@ static void parse_command_line(int argc, const char **argv_,
     } else if (arg_match(&arg, &fpf_name_arg, argi)) {
       fpf_file_name = arg.val;
     } else if (arg_match(&arg, &min_q_arg, argi)) {
-      snprintf(string_options, sizeof(string_options), "%s min-quantizers=%s",
-               string_options, arg.val);
+      strncat(string_options, " min-quantizers=",
+              sizeof(string_options) - strlen(string_options) - 1);
+      strncat(string_options, arg.val,
+              sizeof(string_options) - strlen(string_options) - 1);
     } else if (arg_match(&arg, &max_q_arg, argi)) {
-      snprintf(string_options, sizeof(string_options), "%s max-quantizers=%s",
-               string_options, arg.val);
+      strncat(string_options, " max-quantizers=",
+              sizeof(string_options) - strlen(string_options) - 1);
+      strncat(string_options, arg.val,
+              sizeof(string_options) - strlen(string_options) - 1);
     } else if (arg_match(&arg, &min_bitrate_arg, argi)) {
       min_bitrate = arg_parse_uint(&arg);
     } else if (arg_match(&arg, &max_bitrate_arg, argi)) {
@@ -303,6 +329,12 @@ static void parse_command_line(int argc, const char **argv_,
           break;
       }
 #endif  // CONFIG_VP9_HIGHBITDEPTH
+    } else if (arg_match(&arg, &dropframe_thresh_arg, argi)) {
+      enc_cfg->rc_dropframe_thresh = arg_parse_uint(&arg);
+    } else if (arg_match(&arg, &tune_content_arg, argi)) {
+      app_input->tune_content = arg_parse_uint(&arg);
+    } else if (arg_match(&arg, &inter_layer_pred_arg, argi)) {
+      app_input->inter_layer_pred = arg_parse_uint(&arg);
     } else {
       ++argj;
     }
@@ -560,40 +592,15 @@ vpx_codec_err_t parse_superframe_index(const uint8_t *data, size_t data_sz,
 // bypass/flexible mode. The pattern corresponds to the pattern
 // VP9E_TEMPORAL_LAYERING_MODE_0101 (temporal_layering_mode == 2) used in
 // non-flexible mode.
-void set_frame_flags_bypass_mode(int tl, int num_spatial_layers,
-                                 int is_key_frame,
-                                 vpx_svc_ref_frame_config_t *ref_frame_config) {
+static void set_frame_flags_bypass_mode_ex0(
+    int tl, int num_spatial_layers, int is_key_frame,
+    vpx_svc_ref_frame_config_t *ref_frame_config) {
   int sl;
+  for (sl = 0; sl < num_spatial_layers; ++sl)
+    ref_frame_config->update_buffer_slot[sl] = 0;
+
   for (sl = 0; sl < num_spatial_layers; ++sl) {
-    if (!tl) {
-      if (!sl) {
-        ref_frame_config->frame_flags[sl] =
-            VP8_EFLAG_NO_REF_GF | VP8_EFLAG_NO_REF_ARF | VP8_EFLAG_NO_UPD_GF |
-            VP8_EFLAG_NO_UPD_ARF;
-      } else {
-        if (is_key_frame) {
-          ref_frame_config->frame_flags[sl] =
-              VP8_EFLAG_NO_REF_GF | VP8_EFLAG_NO_REF_ARF |
-              VP8_EFLAG_NO_UPD_LAST | VP8_EFLAG_NO_UPD_ARF;
-        } else {
-          ref_frame_config->frame_flags[sl] =
-              VP8_EFLAG_NO_REF_ARF | VP8_EFLAG_NO_UPD_GF | VP8_EFLAG_NO_UPD_ARF;
-        }
-      }
-    } else if (tl == 1) {
-      if (!sl) {
-        ref_frame_config->frame_flags[sl] =
-            VP8_EFLAG_NO_REF_GF | VP8_EFLAG_NO_REF_ARF | VP8_EFLAG_NO_UPD_LAST |
-            VP8_EFLAG_NO_UPD_GF;
-      } else {
-        ref_frame_config->frame_flags[sl] =
-            VP8_EFLAG_NO_REF_ARF | VP8_EFLAG_NO_UPD_LAST | VP8_EFLAG_NO_UPD_GF;
-        if (sl == num_spatial_layers - 1)
-          ref_frame_config->frame_flags[sl] =
-              VP8_EFLAG_NO_UPD_ARF | VP8_EFLAG_NO_REF_ARF |
-              VP8_EFLAG_NO_UPD_LAST | VP8_EFLAG_NO_UPD_GF;
-      }
-    }
+    // Set the buffer idx.
     if (tl == 0) {
       ref_frame_config->lst_fb_idx[sl] = sl;
       if (sl) {
@@ -612,6 +619,121 @@ void set_frame_flags_bypass_mode(int tl, int num_spatial_layers,
       ref_frame_config->gld_fb_idx[sl] = num_spatial_layers + sl - 1;
       ref_frame_config->alt_fb_idx[sl] = num_spatial_layers + sl;
     }
+    // Set the reference and update flags.
+    if (!tl) {
+      if (!sl) {
+        // Base spatial and base temporal (sl = 0, tl = 0)
+        ref_frame_config->reference_last[sl] = 1;
+        ref_frame_config->reference_golden[sl] = 0;
+        ref_frame_config->reference_alt_ref[sl] = 0;
+        ref_frame_config->update_buffer_slot[sl] |=
+            1 << ref_frame_config->lst_fb_idx[sl];
+      } else {
+        if (is_key_frame) {
+          ref_frame_config->reference_last[sl] = 1;
+          ref_frame_config->reference_golden[sl] = 0;
+          ref_frame_config->reference_alt_ref[sl] = 0;
+          ref_frame_config->update_buffer_slot[sl] |=
+              1 << ref_frame_config->gld_fb_idx[sl];
+        } else {
+          // Non-zero spatiall layer.
+          ref_frame_config->reference_last[sl] = 1;
+          ref_frame_config->reference_golden[sl] = 1;
+          ref_frame_config->reference_alt_ref[sl] = 1;
+          ref_frame_config->update_buffer_slot[sl] |=
+              1 << ref_frame_config->lst_fb_idx[sl];
+        }
+      }
+    } else if (tl == 1) {
+      if (!sl) {
+        // Base spatial and top temporal (tl = 1)
+        ref_frame_config->reference_last[sl] = 1;
+        ref_frame_config->reference_golden[sl] = 0;
+        ref_frame_config->reference_alt_ref[sl] = 0;
+        ref_frame_config->update_buffer_slot[sl] |=
+            1 << ref_frame_config->alt_fb_idx[sl];
+      } else {
+        // Non-zero spatial.
+        if (sl < num_spatial_layers - 1) {
+          ref_frame_config->reference_last[sl] = 1;
+          ref_frame_config->reference_golden[sl] = 1;
+          ref_frame_config->reference_alt_ref[sl] = 0;
+          ref_frame_config->update_buffer_slot[sl] |=
+              1 << ref_frame_config->alt_fb_idx[sl];
+        } else if (sl == num_spatial_layers - 1) {
+          // Top spatial and top temporal (non-reference -- doesn't update any
+          // reference buffers)
+          ref_frame_config->reference_last[sl] = 1;
+          ref_frame_config->reference_golden[sl] = 1;
+          ref_frame_config->reference_alt_ref[sl] = 0;
+        }
+      }
+    }
+  }
+}
+
+// Example pattern for 2 spatial layers and 2 temporal layers used in the
+// bypass/flexible mode, except only 1 spatial layer when temporal_layer_id = 1.
+static void set_frame_flags_bypass_mode_ex1(
+    int tl, int num_spatial_layers, int is_key_frame,
+    vpx_svc_ref_frame_config_t *ref_frame_config) {
+  int sl;
+  for (sl = 0; sl < num_spatial_layers; ++sl)
+    ref_frame_config->update_buffer_slot[sl] = 0;
+
+  if (tl == 0) {
+    if (is_key_frame) {
+      ref_frame_config->lst_fb_idx[1] = 0;
+      ref_frame_config->gld_fb_idx[1] = 1;
+    } else {
+      ref_frame_config->lst_fb_idx[1] = 1;
+      ref_frame_config->gld_fb_idx[1] = 0;
+    }
+    ref_frame_config->alt_fb_idx[1] = 0;
+
+    ref_frame_config->lst_fb_idx[0] = 0;
+    ref_frame_config->gld_fb_idx[0] = 0;
+    ref_frame_config->alt_fb_idx[0] = 0;
+  }
+  if (tl == 1) {
+    ref_frame_config->lst_fb_idx[0] = 0;
+    ref_frame_config->gld_fb_idx[0] = 1;
+    ref_frame_config->alt_fb_idx[0] = 2;
+
+    ref_frame_config->lst_fb_idx[1] = 1;
+    ref_frame_config->gld_fb_idx[1] = 2;
+    ref_frame_config->alt_fb_idx[1] = 3;
+  }
+  // Set the reference and update flags.
+  if (tl == 0) {
+    // Base spatial and base temporal (sl = 0, tl = 0)
+    ref_frame_config->reference_last[0] = 1;
+    ref_frame_config->reference_golden[0] = 0;
+    ref_frame_config->reference_alt_ref[0] = 0;
+    ref_frame_config->update_buffer_slot[0] |=
+        1 << ref_frame_config->lst_fb_idx[0];
+
+    if (is_key_frame) {
+      ref_frame_config->reference_last[1] = 1;
+      ref_frame_config->reference_golden[1] = 0;
+      ref_frame_config->reference_alt_ref[1] = 0;
+      ref_frame_config->update_buffer_slot[1] |=
+          1 << ref_frame_config->gld_fb_idx[1];
+    } else {
+      // Non-zero spatiall layer.
+      ref_frame_config->reference_last[1] = 1;
+      ref_frame_config->reference_golden[1] = 1;
+      ref_frame_config->reference_alt_ref[1] = 1;
+      ref_frame_config->update_buffer_slot[1] |=
+          1 << ref_frame_config->lst_fb_idx[1];
+    }
+  }
+  if (tl == 1) {
+    // Top spatial and top temporal (non-reference -- doesn't update any
+    // reference buffers)
+    ref_frame_config->reference_last[1] = 1;
+    ref_frame_config->reference_golden[1] = 0;
+    ref_frame_config->reference_alt_ref[1] = 0;
   }
 }
 
@@ -622,6 +744,7 @@ int main(int argc, const char **argv) {
   vpx_codec_ctx_t codec;
   vpx_codec_enc_cfg_t enc_cfg;
   SvcContext svc_ctx;
+  vpx_svc_frame_drop_t svc_drop_frame;
   uint32_t i;
   uint32_t frame_cnt = 0;
   vpx_image_t raw;
@@ -646,6 +769,8 @@ int main(int argc, const char **argv) {
   memset(&svc_ctx, 0, sizeof(svc_ctx));
   memset(&app_input, 0, sizeof(AppInput));
   memset(&info, 0, sizeof(VpxVideoInfo));
+  memset(&layer_id, 0, sizeof(vpx_svc_layer_id_t));
+  memset(&rc, 0, sizeof(struct RateControlStats));
   exec_name = argv[0];
   parse_command_line(argc, argv, &app_input, &svc_ctx, &enc_cfg);
 
@@ -726,14 +851,29 @@ int main(int argc, const char **argv) {
     vpx_codec_control(&codec, VP8E_SET_STATIC_THRESHOLD, 1);
   vpx_codec_control(&codec, VP8E_SET_MAX_INTRA_BITRATE_PCT, 900);
 
-  vpx_codec_control(&codec, VP9E_SET_SVC_INTER_LAYER_PRED, 0);
+  vpx_codec_control(&codec, VP9E_SET_SVC_INTER_LAYER_PRED,
+                    app_input.inter_layer_pred);
 
   vpx_codec_control(&codec, VP9E_SET_NOISE_SENSITIVITY, 0);
+
+  vpx_codec_control(&codec, VP9E_SET_TUNE_CONTENT, app_input.tune_content);
+
+  svc_drop_frame.framedrop_mode = FULL_SUPERFRAME_DROP;
+  for (sl = 0; sl < (unsigned int)svc_ctx.spatial_layers; ++sl)
+    svc_drop_frame.framedrop_thresh[sl] = enc_cfg.rc_dropframe_thresh;
+  svc_drop_frame.max_consec_drop = INT_MAX;
+  vpx_codec_control(&codec, VP9E_SET_SVC_FRAME_DROP_LAYER, &svc_drop_frame);
 
   // Encode frames
   while (!end_of_stream) {
     vpx_codec_iter_t iter = NULL;
     const vpx_codec_cx_pkt_t *cx_pkt;
+    // Example patterns for bypass/flexible mode:
+    // example_pattern = 0: 2 temporal layers, and spatial_layers = 1,2,3. Exact
+    // to fixed SVC patterns. example_pattern = 1: 2 spatial and 2 temporal
+    // layers, with SL0 only has TL0, and SL1 has both TL0 and TL1. This example
+    // uses the extended API.
+    int example_pattern = 0;
     if (frame_cnt >= app_input.frames_to_code || !vpx_img_read(&raw, infile)) {
       // We need one extra vpx_svc_encode call at end of stream to flush
       // encoder and get remaining data
@@ -742,26 +882,52 @@ int main(int argc, const char **argv) {
 
     // For BYPASS/FLEXIBLE mode, set the frame flags (reference and updates)
     // and the buffer indices for each spatial layer of the current
-    // (super)frame to be encoded. The temporal layer_id for the current frame
-    // also needs to be set.
+    // (super)frame to be encoded. The spatial and temporal layer_id for the
+    // current frame also needs to be set.
     // TODO(marpan): Should rename the "VP9E_TEMPORAL_LAYERING_MODE_BYPASS"
     // mode to "VP9E_LAYERING_MODE_BYPASS".
     if (svc_ctx.temporal_layering_mode == VP9E_TEMPORAL_LAYERING_MODE_BYPASS) {
       layer_id.spatial_layer_id = 0;
       // Example for 2 temporal layers.
-      if (frame_cnt % 2 == 0)
+      if (frame_cnt % 2 == 0) {
         layer_id.temporal_layer_id = 0;
-      else
+        for (i = 0; i < VPX_SS_MAX_LAYERS; i++)
+          layer_id.temporal_layer_id_per_spatial[i] = 0;
+      } else {
         layer_id.temporal_layer_id = 1;
-      // Note that we only set the temporal layer_id, since we are calling
-      // the encode for the whole superframe. The encoder will internally loop
-      // over all the spatial layers for the current superframe.
+        for (i = 0; i < VPX_SS_MAX_LAYERS; i++)
+          layer_id.temporal_layer_id_per_spatial[i] = 1;
+      }
+      if (example_pattern == 1) {
+        // example_pattern 1 is hard-coded for 2 spatial and 2 temporal layers.
+        assert(svc_ctx.spatial_layers == 2);
+        assert(svc_ctx.temporal_layers == 2);
+        if (frame_cnt % 2 == 0) {
+          // Spatial layer 0 and 1 are encoded.
+          layer_id.temporal_layer_id_per_spatial[0] = 0;
+          layer_id.temporal_layer_id_per_spatial[1] = 0;
+          layer_id.spatial_layer_id = 0;
+        } else {
+          // Only spatial layer 1 is encoded here.
+          layer_id.temporal_layer_id_per_spatial[1] = 1;
+          layer_id.spatial_layer_id = 1;
+        }
+      }
       vpx_codec_control(&codec, VP9E_SET_SVC_LAYER_ID, &layer_id);
       // TODO(jianj): Fix the parameter passing for "is_key_frame" in
       // set_frame_flags_bypass_model() for case of periodic key frames.
-      set_frame_flags_bypass_mode(layer_id.temporal_layer_id,
-                                  svc_ctx.spatial_layers, frame_cnt == 0,
-                                  &ref_frame_config);
+      if (example_pattern == 0) {
+        set_frame_flags_bypass_mode_ex0(layer_id.temporal_layer_id,
+                                        svc_ctx.spatial_layers, frame_cnt == 0,
+                                        &ref_frame_config);
+      } else if (example_pattern == 1) {
+        set_frame_flags_bypass_mode_ex1(layer_id.temporal_layer_id,
+                                        svc_ctx.spatial_layers, frame_cnt == 0,
+                                        &ref_frame_config);
+      }
+      ref_frame_config.duration[0] = frame_duration * 1;
+      ref_frame_config.duration[1] = frame_duration * 1;
+
       vpx_codec_control(&codec, VP9E_SET_SVC_REF_FRAME_CONFIG,
                         &ref_frame_config);
       // Keep track of input frames, to account for frame drops in rate control
@@ -813,34 +979,31 @@ int main(int argc, const char **argv) {
 #if OUTPUT_RC_STATS
             // TODO(marpan): Put this (to line728) in separate function.
             if (svc_ctx.output_rc_stat) {
+              int num_layers_encoded = 0;
               vpx_codec_control(&codec, VP9E_GET_SVC_LAYER_ID, &layer_id);
               parse_superframe_index(cx_pkt->data.frame.buf,
                                      cx_pkt->data.frame.sz, sizes_parsed,
                                      &count);
               if (enc_cfg.ss_number_layers == 1)
                 sizes[0] = cx_pkt->data.frame.sz;
-              if (svc_ctx.temporal_layering_mode !=
-                  VP9E_TEMPORAL_LAYERING_MODE_BYPASS) {
-                int num_layers_encoded = 0;
-                for (sl = 0; sl < enc_cfg.ss_number_layers; ++sl) {
-                  sizes[sl] = 0;
-                  if (cx_pkt->data.frame.spatial_layer_encoded[sl]) {
-                    sizes[sl] = sizes_parsed[num_layers_encoded];
-                    num_layers_encoded++;
-                  }
+              for (sl = 0; sl < enc_cfg.ss_number_layers; ++sl) {
+                sizes[sl] = 0;
+                if (cx_pkt->data.frame.spatial_layer_encoded[sl]) {
+                  sizes[sl] = sizes_parsed[num_layers_encoded];
+                  num_layers_encoded++;
                 }
-                for (sl = 0; sl < enc_cfg.ss_number_layers; ++sl) {
-                  unsigned int sl2;
-                  uint64_t tot_size = 0;
-                  for (sl2 = 0; sl2 <= sl; ++sl2) {
-                    if (cx_pkt->data.frame.spatial_layer_encoded[sl2])
-                      tot_size += sizes[sl2];
-                  }
-                  if (tot_size > 0)
-                    vpx_video_writer_write_frame(
-                        outfile[sl], cx_pkt->data.frame.buf, (size_t)(tot_size),
-                        cx_pkt->data.frame.pts);
+              }
+              for (sl = 0; sl < enc_cfg.ss_number_layers; ++sl) {
+                unsigned int sl2;
+                uint64_t tot_size = 0;
+                for (sl2 = 0; sl2 <= sl; ++sl2) {
+                  if (cx_pkt->data.frame.spatial_layer_encoded[sl2])
+                    tot_size += sizes[sl2];
                 }
+                if (tot_size > 0)
+                  vpx_video_writer_write_frame(
+                      outfile[sl], cx_pkt->data.frame.buf, (size_t)(tot_size),
+                      cx_pkt->data.frame.pts);
               }
               for (sl = 0; sl < enc_cfg.ss_number_layers; ++sl) {
                 if (cx_pkt->data.frame.spatial_layer_encoded[sl]) {
@@ -923,15 +1086,6 @@ int main(int argc, const char **argv) {
     if (!end_of_stream) {
       ++frame_cnt;
       pts += frame_duration;
-    }
-  }
-
-  // Compensate for the extra frame count for the bypass mode.
-  if (svc_ctx.temporal_layering_mode == VP9E_TEMPORAL_LAYERING_MODE_BYPASS) {
-    for (sl = 0; sl < enc_cfg.ss_number_layers; ++sl) {
-      const int layer =
-          sl * enc_cfg.ts_number_layers + layer_id.temporal_layer_id;
-      --rc.layer_input_frames[layer];
     }
   }
 

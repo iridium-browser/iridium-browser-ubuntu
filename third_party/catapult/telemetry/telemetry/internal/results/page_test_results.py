@@ -28,7 +28,6 @@ from telemetry.value import trace
 from tracing.value import convert_chart_json
 from tracing.value import histogram
 from tracing.value import histogram_set
-from tracing.value.diagnostics import generic_set
 from tracing.value.diagnostics import reserved_infos
 
 class TelemetryInfo(object):
@@ -205,7 +204,7 @@ class PageTestResults(object):
                progress_reporter=None, trace_tag='', output_dir=None,
                should_add_value=lambda v, is_first: True,
                benchmark_enabled=True, upload_bucket=None,
-               artifact_results=None):
+               artifact_results=None, benchmark_metadata=None):
     """
     Args:
       output_formatters: A list of output formatters. The output
@@ -223,6 +222,8 @@ class PageTestResults(object):
           to the test results and False otherwise.
       artifact_results: An artifact results object. This is used to contain
           any artifacts from tests. Stored so that clients can call AddArtifact.
+      benchmark_metadata: A benchmark.BenchmarkMetadata object. This is used in
+          the chart JSON output formatter.
     """
     # TODO(chrishenry): Figure out if trace_tag is still necessary.
 
@@ -242,8 +243,6 @@ class PageTestResults(object):
     self._representative_value_for_each_value_name = {}
     self._all_summary_values = []
     self._serialized_trace_file_ids_to_paths = {}
-    self._pages_to_profiling_files = collections.defaultdict(list)
-    self._pages_to_profiling_files_cloud_url = collections.defaultdict(list)
 
     self._histograms = histogram_set.HistogramSet()
 
@@ -254,6 +253,13 @@ class PageTestResults(object):
     self._benchmark_enabled = benchmark_enabled
 
     self._artifact_results = artifact_results
+    self._benchmark_metadata = benchmark_metadata
+
+    self._histogram_dicts_to_add = []
+
+    # Mapping of the stories that have run to the number of times they have run
+    # This is necessary on interrupt if some of the stories did not run.
+    self._story_run_count = {}
 
   @property
   def telemetry_info(self):
@@ -262,12 +268,12 @@ class PageTestResults(object):
   def AsHistogramDicts(self):
     return self._histograms.AsDicts()
 
-  def PopulateHistogramSet(self, benchmark_metadata):
+  def PopulateHistogramSet(self):
     if len(self._histograms):
       return
 
     chart_json = chart_json_output_formatter.ResultsAsChartDict(
-        benchmark_metadata, self)
+        self._benchmark_metadata, self)
     info = self.telemetry_info
     chart_json['label'] = info.label
     chart_json['benchmarkStartMs'] = info.benchmark_start_epoch * 1000.0
@@ -285,6 +291,7 @@ class PageTestResults(object):
                     vinn_result.stdout)
       return []
     self._histograms.ImportDicts(json.loads(vinn_result.stdout))
+    self._histograms.ImportDicts(self._histogram_dicts_to_add)
     self._histograms.ResolveRelatedHistograms()
 
   def __copy__(self):
@@ -297,16 +304,8 @@ class PageTestResults(object):
     return result
 
   @property
-  def pages_to_profiling_files(self):
-    return self._pages_to_profiling_files
-
-  @property
   def serialized_trace_file_ids_to_paths(self):
     return self._serialized_trace_file_ids_to_paths
-
-  @property
-  def pages_to_profiling_files_cloud_url(self):
-    return self._pages_to_profiling_files_cloud_url
 
   @property
   def all_page_specific_values(self):
@@ -382,6 +381,10 @@ class PageTestResults(object):
     values = self.all_page_specific_values
     return [v for v in values if isinstance(v, skip.SkipValue)]
 
+  @property
+  def artifact_results(self):
+    return self._artifact_results
+
   def _GetStringFromExcInfo(self, err):
     return ''.join(traceback.format_exception(*err))
 
@@ -422,31 +425,34 @@ class PageTestResults(object):
     assert self._current_page_run, 'Did not call WillRunPage.'
     self._progress_reporter.DidRunPage(self)
     self._all_page_runs.append(self._current_page_run)
-    self._all_stories.add(self._current_page_run.story)
+    story = self._current_page_run.story
+    self._all_stories.add(story)
+    if bool(self._story_run_count.get(story)):
+      self._story_run_count[story] += 1
+    else:
+      self._story_run_count[story] = 1
     self._current_page_run = None
 
-  def AddDurationHistogram(self, duration_in_milliseconds):
-    hist = histogram.Histogram(
-        'benchmark_total_duration', 'ms_smallerIsBetter')
-    hist.AddSample(duration_in_milliseconds)
-    # TODO(#4244): Do this generally.
-    hist.diagnostics[reserved_infos.LABELS.name] = generic_set.GenericSet(
-        [self.telemetry_info.label])
-    hist.diagnostics[reserved_infos.BENCHMARKS.name] = generic_set.GenericSet(
-        [self.telemetry_info.benchmark_name])
-    hist.diagnostics[reserved_infos.BENCHMARK_START.name] = histogram.DateRange(
-        self.telemetry_info.benchmark_start_epoch)
-    if self.telemetry_info.benchmark_descriptions:
-      hist.diagnostics[
-          reserved_infos.BENCHMARK_DESCRIPTIONS.name] = generic_set.GenericSet([
-              self.telemetry_info.benchmark_descriptions])
-    self._histograms.AddHistogram(hist)
+  def InterruptBenchmark(self, stories, repeat_count):
+    self.telemetry_info.InterruptBenchmark()
+    # If we are in the middle of running a page it didn't finish
+    # so reset the current page run
+    self._current_page_run = None
+    for story in stories:
+      num_runs = repeat_count - self._story_run_count.get(story, 0)
+      for i in xrange(num_runs):
+        self._GenerateSkippedStoryRun(story, i)
+
+  def _GenerateSkippedStoryRun(self, story, storyset_repeat_counter):
+    self.WillRunPage(story, storyset_repeat_counter)
+    self.Skip('Telemetry interrupted', is_expected=False)
+    self.DidRunPage(story)
 
   def AddHistogram(self, hist):
     if self._ShouldAddHistogram(hist):
       self._histograms.AddHistogram(hist)
 
-  def ImportHistogramDicts(self, histogram_dicts):
+  def ImportHistogramDicts(self, histogram_dicts, import_immediately=True):
     dicts_to_add = []
     for d in histogram_dicts:
       # If there's a type field, it's a diagnostic.
@@ -456,7 +462,20 @@ class PageTestResults(object):
         hist = histogram.Histogram.FromDict(d)
         if self._ShouldAddHistogram(hist):
           dicts_to_add.append(d)
-    self._histograms.ImportDicts(dicts_to_add)
+
+    # For measurements that add both TBMv2 and legacy metrics to results, we
+    # want TBMv2 histograms be imported at the end, when PopulateHistogramSet is
+    # called so that legacy histograms can be built, too, from scalar value
+    # data.
+    #
+    # Measurements that add only TBMv2 metrics and also add scalar value data
+    # should set import_immediately to True (i.e. the default behaviour) to
+    # prevent PopulateHistogramSet from trying to build more histograms from the
+    # scalar value data.
+    if import_immediately:
+      self._histograms.ImportDicts(dicts_to_add)
+    else:
+      self._histogram_dicts_to_add.extend(dicts_to_add)
 
   def _ShouldAddHistogram(self, hist):
     assert self._current_page_run, 'Not currently running test.'
@@ -518,21 +537,19 @@ class PageTestResults(object):
       failure_str = 'Failure recorded: %s' % failure
     else:
       failure_str = ''.join(traceback.format_exception(*failure))
+    logging.error(failure_str)
     self._current_page_run.SetFailed(failure_str)
-    self._progress_reporter.DidFail(failure_str)
 
-  def Skip(self, reason):
+  def Skip(self, reason, is_expected=True):
     assert self._current_page_run, 'Not currently running test.'
-    self.AddValue(skip.SkipValue(self.current_page, reason))
+    self.AddValue(skip.SkipValue(self.current_page, reason, is_expected))
 
-  def CreateArtifact(self, story, name):
-    return self._artifact_results.CreateArtifact(story, name)
+  def CreateArtifact(self, story, name, prefix='', suffix=''):
+    return self._artifact_results.CreateArtifact(
+        story, name, prefix=prefix, suffix=suffix)
 
   def AddArtifact(self, story, name, path):
     self._artifact_results.AddArtifact(story, name, path)
-
-  def AddProfilingFile(self, page, fh):
-    self._pages_to_profiling_files[page].append(fh)
 
   def AddSummaryValue(self, value):
     assert value.page is None
@@ -621,24 +638,3 @@ class PageTestResults(object):
               'Uploading %s of page %s to %s (%d out of %d)\n' %
               (artifact_type, test_name, cloud_url, i + 1,
                total_num_artifacts))
-
-
-  def UploadProfilingFilesToCloud(self):
-    bucket = self.telemetry_info.upload_bucket
-    for page, file_handle_list in self._pages_to_profiling_files.iteritems():
-      for fh in file_handle_list:
-        remote_path = ('profiler-file-id_%s-%s%-d%s' % (
-            fh.id,
-            datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S'),
-            random.randint(1, 100000),
-            fh.extension))
-        try:
-          cloud_url = cloud_storage.Insert(
-              bucket, remote_path, fh.GetAbsPath())
-          sys.stderr.write(
-              'View generated profiler files online at %s for page %s\n' %
-              (cloud_url, page.name))
-          self._pages_to_profiling_files_cloud_url[page].append(cloud_url)
-        except cloud_storage.PermissionError as e:
-          logging.error('Cannot upload profiling files to cloud storage due to '
-                        ' permission error: %s', e.message)

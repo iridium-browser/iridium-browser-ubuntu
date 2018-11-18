@@ -8,8 +8,8 @@
 
 #include "ash/login/ui/arrow_button_view.h"
 #include "ash/login/ui/hover_notifier.h"
-#include "ash/login/ui/layout_util.h"
 #include "ash/login/ui/login_display_style.h"
+#include "ash/login/ui/views_utils.h"
 #include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/views/layout/box_layout.h"
 
@@ -21,7 +21,7 @@ constexpr char kLoginPublicAccountUserViewClassName[] =
 
 // Color of the user domain text.
 constexpr SkColor kArrowButtonBackground =
-    SkColorSetARGBMacro(0x2B, 0xFF, 0xFF, 0xFF);
+    SkColorSetARGB(0x2B, 0xFF, 0xFF, 0xFF);
 
 // Distance from the top of the user view to the user icon.
 constexpr int kDistanceFromTopOfBigUserViewToUserIconDp = 54;
@@ -40,6 +40,15 @@ constexpr int kNonEmptyWidth = 1;
 constexpr int kArrowButtonFadeAnimationDurationMs = 180;
 
 }  // namespace
+
+LoginPublicAccountUserView::TestApi::TestApi(LoginPublicAccountUserView* view)
+    : view_(view) {}
+
+LoginPublicAccountUserView::TestApi::~TestApi() = default;
+
+views::View* LoginPublicAccountUserView::TestApi::arrow_button() const {
+  return view_->arrow_button_;
+}
 
 LoginPublicAccountUserView::Callbacks::Callbacks() = default;
 
@@ -74,7 +83,7 @@ LoginPublicAccountUserView::LoginPublicAccountUserView(
   SetLayoutManager(
       std::make_unique<views::BoxLayout>(views::BoxLayout::kVertical));
   views::View* wrapped_user_view =
-      login_layout_util::WrapViewForPreferredSize(user_view_);
+      login_views_utils::WrapViewForPreferredSize(user_view_);
 
   auto add_padding = [&](int amount) {
     auto* padding = new NonAccessibleView();
@@ -113,6 +122,8 @@ void LoginPublicAccountUserView::SetAuthEnabled(bool enabled, bool animate) {
   user_view_->SetTapEnabled(!enabled);
   if (enabled)
     arrow_button_->RequestFocus();
+
+  PreferredSizeChanged();
 }
 
 void LoginPublicAccountUserView::UpdateForUser(

@@ -9,10 +9,12 @@
 #include <stdint.h>
 
 #include <list>
+#include <memory>
+#include <string>
 
 #include "base/containers/id_map.h"
 #include "base/process/kill.h"
-#include "base/process/process_handle.h"
+#include "base/process/process.h"
 #include "base/supports_user_data.h"
 #include "build/build_config.h"
 #include "content/common/content_export.h"
@@ -20,6 +22,8 @@
 #include "ipc/ipc_channel_proxy.h"
 #include "ipc/ipc_sender.h"
 #include "media/media_buildflags.h"
+#include "services/network/public/mojom/url_loader_factory.mojom.h"
+#include "third_party/blink/public/platform/modules/cache_storage/cache_storage.mojom.h"
 #include "ui/gfx/native_widget_types.h"
 
 #if defined(OS_ANDROID)
@@ -41,10 +45,6 @@ namespace resource_coordinator {
 class ProcessResourceCoordinator;
 }
 
-namespace viz {
-class SharedBitmapAllocationNotifierImpl;
-}
-
 namespace content {
 class BrowserContext;
 class BrowserMessageFilter;
@@ -52,7 +52,6 @@ class RenderProcessHostObserver;
 class RenderWidgetHost;
 class RendererAudioOutputStreamFactoryContext;
 class StoragePartition;
-struct GlobalRequestID;
 
 #if defined(OS_ANDROID)
 enum class ChildProcessImportance;
@@ -77,6 +76,7 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   struct Priority {
     bool is_hidden;
     unsigned int frame_depth;
+    bool intersects_viewport;
 #if defined(OS_ANDROID)
     ChildProcessImportance importance;
 #endif
@@ -91,17 +91,6 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
 
    protected:
     virtual ~PriorityClient() {}
-  };
-
-  // Details for RENDERER_PROCESS_CLOSED notifications.
-  struct RendererClosedDetails {
-    RendererClosedDetails(base::TerminationStatus status,
-                          int exit_code) {
-      this->status = status;
-      this->exit_code = exit_code;
-    }
-    base::TerminationStatus status;
-    int exit_code;
   };
 
   // Crash reporting mode for ShutdownForBadMessage.
@@ -159,7 +148,10 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   virtual int VisibleClientCount() const = 0;
 
   // Get computed frame depth from PriorityClients.
-  virtual unsigned int GetFrameDepthForTesting() const = 0;
+  virtual unsigned int GetFrameDepth() const = 0;
+
+  // Get computed viewport intersection state from PriorityClients.
+  virtual bool GetIntersectsViewport() const = 0;
 
   virtual RendererAudioOutputStreamFactoryContext*
   GetRendererAudioOutputStreamFactoryContext() = 0;
@@ -206,7 +198,7 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   // Init starts the process asynchronously.  It's guaranteed to be valid after
   // the first IPC arrives or RenderProcessReady was called on a
   // RenderProcessHostObserver for this. At that point, IsReady() returns true.
-  virtual base::ProcessHandle GetHandle() const = 0;
+  virtual const base::Process& GetProcess() const = 0;
 
   // Returns whether the process is ready. The process is ready once both
   // conditions (which can happen in arbitrary order) are true:
@@ -234,9 +226,13 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   // This will never return ChildProcessHost::kInvalidUniqueID.
   virtual int GetID() const = 0;
 
-  // Returns true iff channel_ has been set to non-nullptr. Use this for
-  // checking if there is connection or not. Virtual for mocking out for tests.
-  virtual bool HasConnection() const = 0;
+  // Returns true iff the Init() was called and the process hasn't died yet.
+  //
+  // Note that even if IsInitializedAndNotDead() returns true, then (for a short
+  // duration after calling Init()) the process might not be fully spawned
+  // *yet*.  For example - IsReady() might return false and GetProcess() might
+  // still return an invalid process with a null handle.
+  virtual bool IsInitializedAndNotDead() const = 0;
 
   // Returns the renderer channel.
   virtual IPC::ChannelProxy* GetChannel() = 0;
@@ -282,7 +278,6 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   // |empty_allowed| must be set to false for navigations for security reasons.
   virtual void FilterURL(bool empty_allowed, GURL* url) = 0;
 
-#if BUILDFLAG(ENABLE_WEBRTC)
   virtual void EnableAudioDebugRecordings(const base::FilePath& file) = 0;
   virtual void DisableAudioDebugRecordings() = 0;
 
@@ -317,11 +312,6 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   // Start/stop event log output from WebRTC on this RPH for the peer connection
   // identified locally within the RPH using the ID |lid|.
   virtual void SetWebRtcEventLogOutput(int lid, bool enabled) = 0;
-#endif
-
-  // Tells the ResourceDispatcherHost to resume a deferred navigation without
-  // transferring it to a new renderer process.
-  virtual void ResumeDeferredNavigation(const GlobalRequestID& request_id) = 0;
 
   // Binds interfaces exposed to the browser process from the renderer.
   virtual void BindInterface(const std::string& interface_name,
@@ -351,6 +341,7 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
     kServiceWorker = 0,
     kSharedWorker = 1,
     kFetch = 2,
+    kUnload = 3,
   };
   // "Keep alive ref count" represents the number of the customers of this
   // render process who wish the renderer process to be alive. While the ref
@@ -373,6 +364,10 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   //    When a fetch request with keepalive flag
   //    (https://fetch.spec.whatwg.org/#request-keepalive-flag) specified is
   //    pending, it wishes the renderer process to be kept alive.
+  //  - Unload handlers:
+  //    Keeps the process alive briefly to give subframe unload handlers a
+  //    chance to execute after their parent frame navigates or is detached.
+  //    See https://crbug.com/852204.
   virtual void IncrementKeepAliveRefCount(KeepAliveClientType) = 0;
   virtual void DecrementKeepAliveRefCount(KeepAliveClientType) = 0;
 
@@ -401,6 +396,19 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   virtual resource_coordinator::ProcessResourceCoordinator*
   GetProcessResourceCoordinator() = 0;
 
+  // Create an URLLoaderFactory that can be used by |origin| being hosted in
+  // |this| process.
+  //
+  // When NetworkService is enabled, |request| will be bound with a new
+  // URLLoaderFactory created from the storage partition's Network Context. Note
+  // that the URLLoaderFactory returned by this method does NOT support
+  // auto-reconnect after a crash of Network Service.
+  // When NetworkService is not enabled, |request| will be bound with a
+  // URLLoaderFactory which routes requests to ResourceDispatcherHost.
+  virtual void CreateURLLoaderFactory(
+      const url::Origin& origin,
+      network::mojom::URLLoaderFactoryRequest request) = 0;
+
   // Whether this process is locked out from ever being reused for sites other
   // than the ones it currently has.
   virtual void SetIsNeverSuitableForReuse() = 0;
@@ -428,6 +436,19 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   // crbug.com/738634.
   virtual bool HostHasNotBeenUsed() = 0;
 
+  // Locks this RenderProcessHost to the 'origin' |lock_url|. This method is
+  // public so that it can be called from SiteInstanceImpl, and used by
+  // MockRenderProcessHost. It isn't meant to be called outside of content.
+  // TODO(creis): Rename LockToOrigin to LockToPrincipal. See
+  // https://crbug.com/846155.
+  virtual void LockToOrigin(const GURL& lock_url) = 0;
+
+  // Binds |request| to the CacheStorageDispatcherHost instance. The binding is
+  // sent to the IO thread. This is for internal use only, and is only exposed
+  // here to support MockRenderProcessHost usage in tests.
+  virtual void BindCacheStorage(blink::mojom::CacheStorageRequest request,
+                                const url::Origin& origin) = 0;
+
   // Returns the current number of active views in this process.  Excludes
   // any RenderViewHosts that are swapped out.
   size_t GetActiveViewCount();
@@ -439,11 +460,15 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   // be posted back on the UI thread).
   void PostTaskWhenProcessIsReady(base::OnceClosure task);
 
-  // Returns the SharedBitmapAllocationNotifier associated with this process.
-  // SharedBitmapAllocationNotifier manages viz::SharedBitmaps created by this
-  // process and can notify observers when a new SharedBitmap is allocated.
-  virtual viz::SharedBitmapAllocationNotifierImpl*
-  GetSharedBitmapAllocationNotifier() = 0;
+  // Controls whether the destructor of RenderProcessHost*Impl* will end up
+  // cleaning the memory used by the exception added via
+  // RenderProcessHostImpl::AddCorbExceptionForPlugin.
+  //
+  // TODO(lukasza): https://crbug.com/652474: This method shouldn't be part of
+  // the //content public API, because it shouldn't be called by anyone other
+  // than RenderProcessHostImpl (from underneath
+  // RenderProcessHostImpl::AddCorbExceptionForPlugin).
+  virtual void CleanupCorbExceptionForPluginUponDestruction() = 0;
 
   // Static management functions -----------------------------------------------
 

@@ -9,6 +9,7 @@
 #include "components/version_info/version_info.h"
 #include "ios/chrome/browser/application_context.h"
 #include "ios/chrome/common/channel_info.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 
 namespace {
 
@@ -26,18 +27,14 @@ IOSChromeVariationsServiceClient::IOSChromeVariationsServiceClient() {}
 
 IOSChromeVariationsServiceClient::~IOSChromeVariationsServiceClient() {}
 
-std::string IOSChromeVariationsServiceClient::GetApplicationLocale() {
-  return GetApplicationContext()->GetApplicationLocale();
-}
-
 base::Callback<base::Version()>
 IOSChromeVariationsServiceClient::GetVersionForSimulationCallback() {
   return base::Bind(&GetVersionForSimulation);
 }
 
-net::URLRequestContextGetter*
-IOSChromeVariationsServiceClient::GetURLRequestContext() {
-  return GetApplicationContext()->GetSystemURLRequestContext();
+scoped_refptr<network::SharedURLLoaderFactory>
+IOSChromeVariationsServiceClient::GetURLLoaderFactory() {
+  return GetApplicationContext()->GetSharedURLLoaderFactory();
 }
 
 network_time::NetworkTimeTracker*

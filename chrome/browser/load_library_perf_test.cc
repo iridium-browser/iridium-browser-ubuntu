@@ -16,8 +16,8 @@
 #include "media/media_buildflags.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/perf/perf_test.h"
-
-#include "widevine_cdm_version.h"  //  In SHARED_INTERMEDIATE_DIR.
+#include "third_party/widevine/cdm/buildflags.h"
+#include "third_party/widevine/cdm/widevine_cdm_common.h"
 
 #if BUILDFLAG(ENABLE_LIBRARY_CDMS)
 #include "media/cdm/cdm_paths.h"
@@ -31,7 +31,7 @@ void MeasureSizeAndTimeToLoadNativeLibrary(
     const base::FilePath& library_relative_dir,
     const base::FilePath& library_name) {
   base::FilePath output_dir;
-  ASSERT_TRUE(PathService::Get(base::DIR_MODULE, &output_dir));
+  ASSERT_TRUE(base::PathService::Get(base::DIR_MODULE, &output_dir));
   output_dir = output_dir.Append(library_relative_dir);
   base::FilePath library_path = output_dir.Append(library_name);
   ASSERT_TRUE(base::PathExists(library_path)) << library_path.value();
@@ -75,13 +75,13 @@ void MeasureSizeAndTimeToLoadCdm(const std::string& cdm_base_dir,
 
 #if BUILDFLAG(ENABLE_LIBRARY_CDMS)
 
-#if defined(WIDEVINE_CDM_AVAILABLE)
+#if BUILDFLAG(ENABLE_WIDEVINE)
 TEST(LoadCDMPerfTest, Widevine) {
   MeasureSizeAndTimeToLoadCdm(
       kWidevineCdmBaseDirectory,
       base::GetNativeLibraryName(kWidevineCdmLibraryName));
 }
-#endif  // defined(WIDEVINE_CDM_AVAILABLE)
+#endif  // BUILDFLAG(ENABLE_WIDEVINE)
 
 TEST(LoadCDMPerfTest, ExternalClearKey) {
   MeasureSizeAndTimeToLoadCdm(

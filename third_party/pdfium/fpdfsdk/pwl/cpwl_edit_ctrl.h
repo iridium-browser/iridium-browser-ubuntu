@@ -9,6 +9,7 @@
 
 #include <memory>
 
+#include "core/fxcrt/fx_codepage.h"
 #include "core/fxcrt/fx_string.h"
 #include "fpdfsdk/pwl/cpwl_wnd.h"
 
@@ -25,7 +26,6 @@ class CPWL_EditCtrl : public CPWL_Wnd {
   CPWL_EditCtrl();
   ~CPWL_EditCtrl() override;
 
-  WideString GetText() const;
   void SetSelection(int32_t nStartChar, int32_t nEndChar);
   void GetSelection(int32_t& nStartChar, int32_t& nEndChar) const;
   void ClearSelection();
@@ -37,10 +37,10 @@ class CPWL_EditCtrl : public CPWL_Wnd {
   void SetCharSet(uint8_t nCharSet) { m_nCharSet = nCharSet; }
   int32_t GetCharSet() const;
 
-  bool CanUndo() const;
-  bool CanRedo() const;
-  void Redo();
-  void Undo();
+  bool CanUndo() override;
+  bool CanRedo() override;
+  bool Undo() override;
+  bool Redo() override;
 
   void SetReadyToInput();
 
@@ -60,6 +60,7 @@ class CPWL_EditCtrl : public CPWL_Wnd {
   void SetFontSize(float fFontSize) override;
   float GetFontSize() const override;
   void SetCursor() override;
+  WideString GetText() override;
   WideString GetSelectedText() override;
   void ReplaceSelection(const WideString& text) override;
 
@@ -73,24 +74,20 @@ class CPWL_EditCtrl : public CPWL_Wnd {
   void CutText();
   void InsertWord(uint16_t word, int32_t nCharset);
   void InsertReturn();
-
   bool IsWndHorV();
-
   void Delete();
   void Backspace();
-
   void GetCaretInfo(CFX_PointF* ptHead, CFX_PointF* ptFoot) const;
-
   void SetEditCaret(bool bVisible);
 
-  std::unique_ptr<CPWL_EditImpl> m_pEdit;
-  CPWL_Caret* m_pEditCaret;
-  bool m_bMouseDown;
+  std::unique_ptr<CPWL_EditImpl> const m_pEdit;
+  CPWL_Caret* m_pEditCaret = nullptr;
+  bool m_bMouseDown = false;
 
  private:
   void CreateEditCaret(const CreateParams& cp);
 
-  int32_t m_nCharSet;
+  int32_t m_nCharSet = FX_CHARSET_Default;
 };
 
 #endif  // FPDFSDK_PWL_CPWL_EDIT_CTRL_H_

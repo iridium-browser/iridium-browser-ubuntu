@@ -27,11 +27,10 @@
 
 #include <memory>
 
-#include "third_party/blink/renderer/bindings/core/v8/exception_messages.h"
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_basic_processor_handler.h"
 #include "third_party/blink/renderer/modules/webaudio/biquad_filter_options.h"
+#include "third_party/blink/renderer/platform/bindings/exception_messages.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/histogram.h"
 
 namespace blink {
@@ -68,24 +67,31 @@ scoped_refptr<BiquadFilterHandler> BiquadFilterHandler::Create(
 
 BiquadFilterNode::BiquadFilterNode(BaseAudioContext& context)
     : AudioNode(context),
-      frequency_(AudioParam::Create(context,
-                                    kParamTypeBiquadFilterFrequency,
-                                    "BiquadFilter.frequency",
-                                    350.0,
-                                    0,
-                                    context.sampleRate() / 2)),
+      frequency_(
+          AudioParam::Create(context,
+                             kParamTypeBiquadFilterFrequency,
+                             350.0,
+                             AudioParamHandler::AutomationRate::kAudio,
+                             AudioParamHandler::AutomationRateMode::kVariable,
+                             0,
+                             context.sampleRate() / 2)),
       q_(AudioParam::Create(context,
                             kParamTypeBiquadFilterQ,
-                            "BiquadFilter.Q",
-                            1.0)),
-      gain_(AudioParam::Create(context,
-                               kParamTypeBiquadFilterGain,
-                               "BiquadFilter.gain",
-                               0.0)),
-      detune_(AudioParam::Create(context,
-                                 kParamTypeBiquadFilterDetune,
-                                 "BiquadFilter.detune",
-                                 0.0)) {
+                            1.0,
+                            AudioParamHandler::AutomationRate::kAudio,
+                            AudioParamHandler::AutomationRateMode::kVariable)),
+      gain_(
+          AudioParam::Create(context,
+                             kParamTypeBiquadFilterGain,
+                             0.0,
+                             AudioParamHandler::AutomationRate::kAudio,
+                             AudioParamHandler::AutomationRateMode::kVariable)),
+      detune_(AudioParam::Create(
+          context,
+          kParamTypeBiquadFilterDetune,
+          0.0,
+          AudioParamHandler::AutomationRate::kAudio,
+          AudioParamHandler::AutomationRateMode::kVariable)) {
   SetHandler(BiquadFilterHandler::Create(*this, context.sampleRate(),
                                          frequency_->Handler(), q_->Handler(),
                                          gain_->Handler(), detune_->Handler()));
@@ -209,7 +215,7 @@ void BiquadFilterNode::getFrequencyResponse(
 
   if (mag_response.View()->length() != frequency_hz_length) {
     exception_state.ThrowDOMException(
-        kInvalidAccessError,
+        DOMExceptionCode::kInvalidAccessError,
         ExceptionMessages::IndexOutsideRange(
             "magResponse length", mag_response.View()->length(),
             frequency_hz_length, ExceptionMessages::kInclusiveBound,
@@ -219,7 +225,7 @@ void BiquadFilterNode::getFrequencyResponse(
 
   if (phase_response.View()->length() != frequency_hz_length) {
     exception_state.ThrowDOMException(
-        kInvalidAccessError,
+        DOMExceptionCode::kInvalidAccessError,
         ExceptionMessages::IndexOutsideRange(
             "phaseResponse length", phase_response.View()->length(),
             frequency_hz_length, ExceptionMessages::kInclusiveBound,

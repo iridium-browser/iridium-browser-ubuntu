@@ -92,14 +92,14 @@ fixture_init (fixture_t *fixture, gconstpointer user_data)
 }
 
 static void
-fixture_finish (fixture_t *fixture, gconstpointer user_data)
+fixture_finish (fixture_t *fixture, gconstpointer user_data HB_UNUSED)
 {
   hb_buffer_destroy (fixture->buffer);
 }
 
 
 static void
-test_buffer_properties (fixture_t *fixture, gconstpointer user_data)
+test_buffer_properties (fixture_t *fixture, gconstpointer user_data HB_UNUSED)
 {
   hb_buffer_t *b = fixture->buffer;
   hb_unicode_funcs_t *ufuncs;
@@ -294,7 +294,7 @@ test_buffer_contents (fixture_t *fixture, gconstpointer user_data)
 }
 
 static void
-test_buffer_positions (fixture_t *fixture, gconstpointer user_data)
+test_buffer_positions (fixture_t *fixture, gconstpointer user_data HB_UNUSED)
 {
   hb_buffer_t *b = fixture->buffer;
   unsigned int i, len, len2;
@@ -319,7 +319,7 @@ test_buffer_positions (fixture_t *fixture, gconstpointer user_data)
 }
 
 static void
-test_buffer_allocation (fixture_t *fixture, gconstpointer user_data)
+test_buffer_allocation (fixture_t *fixture, gconstpointer user_data HB_UNUSED)
 {
   hb_buffer_t *b = fixture->buffer;
 
@@ -445,7 +445,7 @@ static const utf8_validity_test_t utf8_validity_tests[] = {
   { "\xe2\x89\xa0\xe2\x89\xa0",  5, 3, FALSE },
   { "\xe2\x89\xa0\xe2\x89\xa0",  6, 6, TRUE },
 
-  /* examples from http://www.cl.cam.ac.uk/~mgk25/ucs/examples/UTF-8-test.txt */
+  /* examples from https://www.cl.cam.ac.uk/~mgk25/ucs/examples/UTF-8-test.txt */
   /* greek 'kosme' */
   { "\xce\xba\xe1\xbd\xb9\xcf\x83\xce\xbc\xce\xb5", -1, 11, TRUE },
   /* first sequence of each length */

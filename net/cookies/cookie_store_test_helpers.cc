@@ -17,6 +17,7 @@ using net::registry_controlled_domains::GetDomainAndRegistry;
 using net::registry_controlled_domains::GetRegistryLength;
 using net::registry_controlled_domains::INCLUDE_PRIVATE_REGISTRIES;
 using net::registry_controlled_domains::INCLUDE_UNKNOWN_REGISTRIES;
+using TimeRange = net::CookieDeletionInfo::TimeRange;
 
 namespace {
 
@@ -63,7 +64,9 @@ DelayedCookieMonsterChangeDispatcher::AddCallbackForAllChanges(
 }
 
 DelayedCookieMonster::DelayedCookieMonster()
-    : cookie_monster_(new CookieMonster(nullptr, nullptr)),
+    : cookie_monster_(new CookieMonster(nullptr /* store */,
+                                        nullptr /* channel_id_service */,
+                                        nullptr /* netlog */)),
       did_run_(false),
       result_(false) {}
 
@@ -175,17 +178,14 @@ void DelayedCookieMonster::DeleteCanonicalCookieAsync(
   ADD_FAILURE();
 }
 
-void DelayedCookieMonster::DeleteAllCreatedBetweenAsync(
-    const base::Time& delete_begin,
-    const base::Time& delete_end,
+void DelayedCookieMonster::DeleteAllCreatedInTimeRangeAsync(
+    const TimeRange& creation_range,
     DeleteCallback callback) {
   ADD_FAILURE();
 }
 
-void DelayedCookieMonster::DeleteAllCreatedBetweenWithPredicateAsync(
-    const base::Time& delete_begin,
-    const base::Time& delete_end,
-    const base::Callback<bool(const CanonicalCookie&)>& predicate,
+void DelayedCookieMonster::DeleteAllMatchingInfoAsync(
+    net::CookieDeletionInfo delete_info,
     DeleteCallback callback) {
   ADD_FAILURE();
 }
@@ -232,7 +232,8 @@ std::string CookieURLHelper::Format(const std::string& format_string) const {
 //
 FlushablePersistentStore::FlushablePersistentStore() : flush_count_(0) {}
 
-void FlushablePersistentStore::Load(const LoadedCallback& loaded_callback) {
+void FlushablePersistentStore::Load(const LoadedCallback& loaded_callback,
+                                    const NetLogWithSource& /* net_log */) {
   std::vector<std::unique_ptr<CanonicalCookie>> out_cookies;
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, base::BindOnce(loaded_callback, std::move(out_cookies)));
@@ -241,7 +242,7 @@ void FlushablePersistentStore::Load(const LoadedCallback& loaded_callback) {
 void FlushablePersistentStore::LoadCookiesForKey(
     const std::string& key,
     const LoadedCallback& loaded_callback) {
-  Load(loaded_callback);
+  Load(loaded_callback, NetLogWithSource());
 }
 
 void FlushablePersistentStore::AddCookie(const CanonicalCookie&) {}

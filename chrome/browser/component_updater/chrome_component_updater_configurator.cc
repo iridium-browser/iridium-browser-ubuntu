@@ -16,9 +16,11 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/component_updater/component_updater_utils.h"
 #include "chrome/browser/google/google_brand.h"
+#include "chrome/browser/net/system_network_context_manager.h"
 #include "chrome/browser/update_client/chrome_update_query_params_delegate.h"
 #include "chrome/common/channel_info.h"
 #include "chrome/common/pref_names.h"
+#include "components/component_updater/component_updater_command_line_config_policy.h"
 #include "components/component_updater/configurator_impl.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
@@ -30,6 +32,7 @@
 
 #if defined(OS_WIN)
 #include "base/win/win_util.h"
+#include "chrome/install_static/install_util.h"
 #include "chrome/installer/util/google_update_settings.h"
 #endif
 
@@ -55,9 +58,10 @@ class ChromeConfigurator : public update_client::Configurator {
   std::string GetBrand() const override;
   std::string GetLang() const override;
   std::string GetOSLongName() const override;
-  std::string ExtraRequestParams() const override;
+  base::flat_map<std::string, std::string> ExtraRequestParams() const override;
   std::string GetDownloadPreference() const override;
-  scoped_refptr<net::URLRequestContextGetter> RequestContext() const override;
+  scoped_refptr<network::SharedURLLoaderFactory> URLLoaderFactory()
+      const override;
   std::unique_ptr<service_manager::Connector> CreateServiceManagerConnector()
       const override;
   bool EnabledDeltas() const override;
@@ -68,6 +72,7 @@ class ChromeConfigurator : public update_client::Configurator {
   update_client::ActivityDataService* GetActivityDataService() const override;
   bool IsPerUserInstall() const override;
   std::vector<uint8_t> GetRunActionKeyHash() const override;
+  std::string GetAppGuid() const override;
 
  private:
   friend class base::RefCountedThreadSafe<ChromeConfigurator>;
@@ -83,7 +88,9 @@ class ChromeConfigurator : public update_client::Configurator {
 // a custom message signing protocol and it does not depend on using HTTPS.
 ChromeConfigurator::ChromeConfigurator(const base::CommandLine* cmdline,
                                        PrefService* pref_service)
-    : configurator_impl_(cmdline, false), pref_service_(pref_service) {
+    : configurator_impl_(ComponentUpdaterCommandLineConfigPolicy(cmdline),
+                         false),
+      pref_service_(pref_service) {
   DCHECK(pref_service_);
 }
 
@@ -138,7 +145,8 @@ std::string ChromeConfigurator::GetOSLongName() const {
   return configurator_impl_.GetOSLongName();
 }
 
-std::string ChromeConfigurator::ExtraRequestParams() const {
+base::flat_map<std::string, std::string>
+ChromeConfigurator::ExtraRequestParams() const {
   return configurator_impl_.ExtraRequestParams();
 }
 
@@ -154,9 +162,14 @@ std::string ChromeConfigurator::GetDownloadPreference() const {
 #endif
 }
 
-scoped_refptr<net::URLRequestContextGetter> ChromeConfigurator::RequestContext()
-    const {
-  return g_browser_process->system_request_context();
+scoped_refptr<network::SharedURLLoaderFactory>
+ChromeConfigurator::URLLoaderFactory() const {
+  SystemNetworkContextManager* system_network_context_manager =
+      g_browser_process->system_network_context_manager();
+  // Manager will be null if called from InitializeForTesting.
+  if (!system_network_context_manager)
+    return nullptr;
+  return system_network_context_manager->GetSharedURLLoaderFactory();
 }
 
 std::unique_ptr<service_manager::Connector>
@@ -198,6 +211,14 @@ bool ChromeConfigurator::IsPerUserInstall() const {
 
 std::vector<uint8_t> ChromeConfigurator::GetRunActionKeyHash() const {
   return configurator_impl_.GetRunActionKeyHash();
+}
+
+std::string ChromeConfigurator::GetAppGuid() const {
+#if defined(OS_WIN)
+  return install_static::UTF16ToUTF8(install_static::GetAppGuid());
+#else
+  return configurator_impl_.GetAppGuid();
+#endif
 }
 
 }  // namespace

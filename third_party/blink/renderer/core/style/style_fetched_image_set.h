@@ -80,7 +80,7 @@ class StyleFetchedImageSet final : public StyleImage,
   bool KnownToBeOpaque(const Document&, const ComputedStyle&) const override;
   ImageResourceContent* CachedImage() const override;
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  private:
   StyleFetchedImageSet(ImageResourceContent*,
@@ -88,6 +88,7 @@ class StyleFetchedImageSet final : public StyleImage,
                        CSSImageSetValue*,
                        const KURL&);
 
+  bool IsEqual(const StyleImage& other) const override;
   void Dispose();
 
   String DebugName() const override { return "StyleFetchedImageSet"; }

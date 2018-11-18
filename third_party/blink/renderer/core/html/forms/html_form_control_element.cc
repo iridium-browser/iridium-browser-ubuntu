@@ -25,9 +25,10 @@
 #include "third_party/blink/renderer/core/html/forms/html_form_control_element.h"
 
 #include "third_party/blink/public/platform/task_type.h"
-#include "third_party/blink/renderer/core/dom/ax_object_cache.h"
+#include "third_party/blink/renderer/core/accessibility/ax_object_cache.h"
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
+#include "third_party/blink/renderer/core/dom/events/event_dispatch_forbidden_scope.h"
 #include "third_party/blink/renderer/core/frame/use_counter.h"
 #include "third_party/blink/renderer/core/html/forms/html_data_list_element.h"
 #include "third_party/blink/renderer/core/html/forms/html_field_set_element.h"
@@ -40,7 +41,6 @@
 #include "third_party/blink/renderer/core/layout/layout_object.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/page/validation_message_client.h"
-#include "third_party/blink/renderer/platform/event_dispatch_forbidden_scope.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
 #include "third_party/blink/renderer/platform/text/bidi_text_run.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
@@ -52,10 +52,10 @@ using namespace HTMLNames;
 HTMLFormControlElement::HTMLFormControlElement(const QualifiedName& tag_name,
                                                Document& document)
     : LabelableElement(tag_name, document),
+      autofill_state_(WebAutofillState::kNotFilled),
       ancestor_disabled_state_(kAncestorDisabledStateUnknown),
       data_list_ancestor_state_(kUnknown),
       may_have_field_set_ancestor_(true),
-      is_autofilled_(false),
       has_validation_message_(false),
       will_validate_initialized_(false),
       will_validate_(true),
@@ -63,6 +63,8 @@ HTMLFormControlElement::HTMLFormControlElement(const QualifiedName& tag_name,
       validity_is_dirty_(false),
       blocks_form_submission_(false) {
   SetHasCustomStyleCallbacks();
+  static unsigned next_free_unique_id = 0;
+  unique_renderer_form_control_id_ = next_free_unique_id++;
 }
 
 HTMLFormControlElement::~HTMLFormControlElement() = default;
@@ -145,7 +147,7 @@ void HTMLFormControlElement::AncestorDisabledStateWasChanged() {
 }
 
 void HTMLFormControlElement::Reset() {
-  SetAutofilled(false);
+  SetAutofillState(WebAutofillState::kNotFilled);
   ResetImpl();
 }
 
@@ -230,12 +232,18 @@ bool HTMLFormControlElement::IsAutofocusable() const {
   return FastHasAttribute(autofocusAttr) && SupportsAutofocus();
 }
 
-void HTMLFormControlElement::SetAutofilled(bool autofilled) {
-  if (autofilled == is_autofilled_)
+void HTMLFormControlElement::SetAutofillState(WebAutofillState autofill_state) {
+  if (autofill_state == autofill_state_)
     return;
 
-  is_autofilled_ = autofilled;
+  autofill_state_ = autofill_state;
   PseudoStateChanged(CSSSelector::kPseudoAutofill);
+  PseudoStateChanged(CSSSelector::kPseudoAutofillSelected);
+  PseudoStateChanged(CSSSelector::kPseudoAutofillPreviewed);
+}
+
+void HTMLFormControlElement::SetAutofillSection(const WebString& section) {
+  autofill_section_ = section;
 }
 
 const AtomicString& HTMLFormControlElement::autocapitalize() const {
@@ -290,7 +298,7 @@ void HTMLFormControlElement::DidMoveToNewDocument(Document& old_document) {
 }
 
 Node::InsertionNotificationRequest HTMLFormControlElement::InsertedInto(
-    ContainerNode* insertion_point) {
+    ContainerNode& insertion_point) {
   ancestor_disabled_state_ = kAncestorDisabledStateUnknown;
   // Force traversal to find ancestor
   may_have_field_set_ancestor_ = true;
@@ -298,17 +306,17 @@ Node::InsertionNotificationRequest HTMLFormControlElement::InsertedInto(
   SetNeedsWillValidateCheck();
   HTMLElement::InsertedInto(insertion_point);
   ListedElement::InsertedInto(insertion_point);
-  FieldSetAncestorsSetNeedsValidityCheck(insertion_point);
+  FieldSetAncestorsSetNeedsValidityCheck(&insertion_point);
 
   // Trigger for elements outside of forms.
-  if (!formOwner() && insertion_point->isConnected())
+  if (!formOwner() && insertion_point.isConnected())
     GetDocument().DidAssociateFormControl(this);
 
   return kInsertionDone;
 }
 
-void HTMLFormControlElement::RemovedFrom(ContainerNode* insertion_point) {
-  FieldSetAncestorsSetNeedsValidityCheck(insertion_point);
+void HTMLFormControlElement::RemovedFrom(ContainerNode& insertion_point) {
+  FieldSetAncestorsSetNeedsValidityCheck(&insertion_point);
   HideVisibleValidationMessage();
   has_validation_message_ = false;
   ancestor_disabled_state_ = kAncestorDisabledStateUnknown;
@@ -355,7 +363,7 @@ void HTMLFormControlElement::FieldSetAncestorsSetNeedsValidityCheck(
 }
 
 void HTMLFormControlElement::DispatchChangeEvent() {
-  DispatchScopedEvent(Event::CreateBubble(EventTypeNames::change));
+  DispatchScopedEvent(*Event::CreateBubble(EventTypeNames::change));
 }
 
 HTMLFormElement* HTMLFormControlElement::formOwner() const {
@@ -403,30 +411,13 @@ bool HTMLFormControlElement::IsKeyboardFocusable() const {
   return IsFocusable();
 }
 
-bool HTMLFormControlElement::ShouldShowFocusRingOnMouseFocus() const {
+bool HTMLFormControlElement::MayTriggerVirtualKeyboard() const {
   return false;
 }
 
 bool HTMLFormControlElement::ShouldHaveFocusAppearance() const {
-  return !WasFocusedByMouse() || ShouldShowFocusRingOnMouseFocus();
-}
-
-void HTMLFormControlElement::WillCallDefaultEventHandler(const Event& event) {
-  if (!WasFocusedByMouse())
-    return;
-  if (!event.IsKeyboardEvent() || event.type() != EventTypeNames::keydown)
-    return;
-
-  bool old_should_have_focus_appearance = ShouldHaveFocusAppearance();
-  SetWasFocusedByMouse(false);
-
-  // Changes to WasFocusedByMouse may affect ShouldHaveFocusAppearance() and
-  // LayoutTheme::IsFocused(). Inform LayoutTheme if
-  // ShouldHaveFocusAppearance() changes.
-  if (old_should_have_focus_appearance != ShouldHaveFocusAppearance() &&
-      GetLayoutObject()) {
-    GetLayoutObject()->InvalidateIfControlStateChanged(kFocusControlState);
-  }
+  return (GetDocument().LastFocusType() != kWebFocusTypeMouse) ||
+         GetDocument().HadKeyboardEvent() || MayTriggerVirtualKeyboard();
 }
 
 int HTMLFormControlElement::tabIndex() const {
@@ -465,17 +456,17 @@ void HTMLFormControlElement::SetNeedsWillValidateCheck() {
     return;
   will_validate_initialized_ = true;
   will_validate_ = new_will_validate;
-  // Needs to force setNeedsValidityCheck() to invalidate validity state of
+  // Needs to force SetNeedsValidityCheck() to invalidate validity state of
   // FORM/FIELDSET. If this element updates willValidate twice and
-  // isValidElement() is not called between them, the second call of this
-  // function still has m_validityIsDirty==true, which means
-  // setNeedsValidityCheck() doesn't invalidate validity state of
+  // IsValidElement() is not called between them, the second call of this
+  // function still has validity_is_dirty_==true, which means
+  // SetNeedsValidityCheck() doesn't invalidate validity state of
   // FORM/FIELDSET.
   validity_is_dirty_ = false;
   SetNeedsValidityCheck();
   // No need to trigger style recalculation here because
-  // setNeedsValidityCheck() does it in the right away. This relies on
-  // the assumption that valid() is always true if willValidate() is false.
+  // SetNeedsValidityCheck() does it in the right away. This relies on
+  // the assumption that Valid() is always true if willValidate() is false.
 
   if (!will_validate_)
     HideVisibleValidationMessage();
@@ -555,7 +546,7 @@ bool HTMLFormControlElement::checkValidity(
     return false;
   Document* original_document = &GetDocument();
   DispatchEventResult dispatch_result =
-      DispatchEvent(Event::CreateCancelable(EventTypeNames::invalid));
+      DispatchEvent(*Event::CreateCancelable(EventTypeNames::invalid));
   if (dispatch_result == DispatchEventResult::kNotCanceled &&
       unhandled_invalid_controls && isConnected() &&
       original_document == GetDocument())

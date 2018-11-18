@@ -27,6 +27,7 @@
 #include "extensions/common/extension.h"
 #include "extensions/common/features/feature.h"
 #include "ipc/ipc_message.h"
+#include "third_party/blink/public/mojom/service_worker/service_worker_registration.mojom.h"
 
 class ExtensionFunction;
 class UIThreadExtensionFunction;
@@ -276,8 +277,12 @@ class ExtensionFunction
   void set_has_callback(bool has_callback) { has_callback_ = has_callback; }
   bool has_callback() { return has_callback_; }
 
-  void set_include_incognito(bool include) { include_incognito_ = include; }
-  bool include_incognito() const { return include_incognito_; }
+  void set_include_incognito_information(bool include) {
+    include_incognito_information_ = include;
+  }
+  bool include_incognito_information() const {
+    return include_incognito_information_;
+  }
 
   // Note: consider using ScopedUserGestureForTests instead of calling
   // set_user_gesture directly.
@@ -342,7 +347,7 @@ class ExtensionFunction
   // Error. chrome.runtime.lastError.message will be set to |error|.
   ResponseValue Error(const std::string& error);
   // Error with formatting. Args are processed using
-  // ErrorUtils::FormatErrorMessage, that is, each occurence of * is replaced
+  // ErrorUtils::FormatErrorMessage, that is, each occurrence of * is replaced
   // by the corresponding |s*|:
   // Error("Error in *: *", "foo", "bar") <--> Error("Error in foo: bar").
   ResponseValue Error(const std::string& format, const std::string& s1);
@@ -469,7 +474,7 @@ class ExtensionFunction
   // even if our profile_ is non-incognito. Note that in the case of a "split"
   // mode extension, this will always be false, and we will limit access to
   // data from within the same profile_ (either incognito or not).
-  bool include_incognito_;
+  bool include_incognito_information_;
 
   // True if the call was made in response of user gesture.
   bool user_gesture_;
@@ -538,12 +543,6 @@ class UIThreadExtensionFunction : public ExtensionFunction {
     service_worker_version_id_ = version_id;
   }
 
-  // Gets the "current" web contents if any. If there is no associated web
-  // contents then defaults to the foremost one.
-  // NOTE: "current" can mean different things in different contexts. You
-  // probably want to use GetSenderWebContents().
-  virtual content::WebContents* GetAssociatedWebContents();
-
   // Returns the web contents associated with the sending |render_frame_host_|.
   // This can be null.
   content::WebContents* GetSenderWebContents();
@@ -575,7 +574,7 @@ class UIThreadExtensionFunction : public ExtensionFunction {
 
   bool is_from_service_worker() const {
     return service_worker_version_id_ !=
-           extensions::kInvalidServiceWorkerVersionId;
+           blink::mojom::kInvalidServiceWorkerVersionId;
   }
 
   // The dispatcher that will service this extension function call.

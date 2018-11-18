@@ -7,9 +7,9 @@
 #include "base/bind.h"
 #include "base/files/file_util.h"
 #include "base/sys_info.h"
-#include "components/offline_pages/core/offline_page_metadata_store_sql.h"
+#include "components/offline_pages/core/offline_page_metadata_store.h"
 #include "components/offline_pages/core/offline_store_utils.h"
-#include "sql/connection.h"
+#include "sql/database.h"
 #include "sql/statement.h"
 #include "sql/transaction.h"
 
@@ -20,15 +20,12 @@ namespace {
 StartUpgradeResult StartOfflinePageUpgradeSync(
     int64_t offline_id,
     const base::FilePath& target_directory,
-    sql::Connection* db) {
-  if (!db)
-    return StartUpgradeResult(StartUpgradeStatus::DB_ERROR);
-
+    sql::Database* db) {
   sql::Transaction transaction(db);
   if (!transaction.Begin())
     return StartUpgradeResult(StartUpgradeStatus::DB_ERROR);
 
-  const char kSql[] =
+  static const char kSql[] =
       "SELECT file_path, file_size, digest"
       " FROM offlinepages_v1 WHERE offline_id = ?";
   sql::Statement select_statement(db->GetCachedStatement(SQL_FROM_HERE, kSql));
@@ -56,7 +53,7 @@ StartUpgradeResult StartOfflinePageUpgradeSync(
 
   // Conditions for upgrade are met here.
   // Update remaining attempts in DB and complete task.
-  const char kUpdateSql[] =
+  static const char kUpdateSql[] =
       "UPDATE offlinepages_v1 SET upgrade_attempt = upgrade_attempt - 1 "
       " WHERE offline_id = ?";
   sql::Statement update_statement(
@@ -73,7 +70,7 @@ StartUpgradeResult StartOfflinePageUpgradeSync(
 }  // namespace
 
 StartOfflinePageUpgradeTask::StartOfflinePageUpgradeTask(
-    OfflinePageMetadataStoreSQL* store,
+    OfflinePageMetadataStore* store,
     int64_t offline_id,
     const base::FilePath& target_directory,
     StartUpgradeCallback callback)
@@ -93,7 +90,8 @@ void StartOfflinePageUpgradeTask::Run() {
       base::BindOnce(&StartOfflinePageUpgradeSync, offline_id_,
                      target_directory_),
       base::BindOnce(&StartOfflinePageUpgradeTask::InformUpgradeAttemptDone,
-                     weak_ptr_factory_.GetWeakPtr()));
+                     weak_ptr_factory_.GetWeakPtr()),
+      StartUpgradeResult(StartUpgradeStatus::DB_ERROR));
 }
 
 void StartOfflinePageUpgradeTask::InformUpgradeAttemptDone(

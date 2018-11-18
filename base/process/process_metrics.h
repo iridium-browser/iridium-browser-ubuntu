@@ -143,6 +143,12 @@ class BASE_EXPORT ProcessMetrics {
   // first call, and an actual value only on the second and subsequent calls.
   double GetPlatformIndependentCPUUsage();
 
+  // Returns the cumulative CPU usage across all threads of the process since
+  // process start. In case of multi-core processors, a process can consume CPU
+  // at a rate higher than wall-clock time, e.g. two cores at full utilization
+  // will result in a time delta of 2 seconds/per 1 wall-clock second.
+  TimeDelta GetCumulativeCPUUsage();
+
   // Returns the number of average idle cpu wakeups per second since the last
   // call.
   int GetIdleWakeupsPerSecond();
@@ -170,6 +176,18 @@ class BASE_EXPORT ProcessMetrics {
   // and fills in the IO_COUNTERS passed in. The function returns false
   // otherwise.
   bool GetIOCounters(IoCounters* io_counters) const;
+
+  // Returns the number of bytes transferred to/from disk per second, across all
+  // threads of the process, in the interval since the last time the method was
+  // called.
+  //
+  // Since this API measures usage over an interval, it will return zero on the
+  // first call, and an actual value only on the second and subsequent calls.
+  uint64_t GetDiskUsageBytesPerSecond();
+
+  // Returns the cumulative disk usage in bytes across all threads of the
+  // process since process start.
+  uint64_t GetCumulativeDiskUsageInBytes();
 
 #if defined(OS_LINUX) || defined(OS_AIX) || defined(OS_ANDROID)
   // Returns the number of file descriptors currently open by the process, or
@@ -219,9 +237,15 @@ class BASE_EXPORT ProcessMetrics {
   // Used to store the previous times and CPU usage counts so we can
   // compute the CPU usage between calls.
   TimeTicks last_cpu_time_;
-#if defined(OS_WIN) || defined(OS_MACOSX)
-  int64_t last_system_time_;
+#if !defined(OS_FREEBSD) || !defined(OS_POSIX)
+  TimeDelta last_cumulative_cpu_;
 #endif
+
+  // Used to store the previous times and disk usage counts so we can
+  // compute the disk usage between calls.
+  TimeTicks last_disk_usage_time_;
+  // Number of bytes transferred to/from disk in bytes.
+  uint64_t last_cumulative_disk_usage_ = 0;
 
 #if defined(OS_MACOSX) || defined(OS_LINUX) || defined(OS_AIX)
   // Same thing for idle wakeups.
@@ -241,10 +265,7 @@ class BASE_EXPORT ProcessMetrics {
   mach_port_t TaskForPid(ProcessHandle process) const;
 
   PortProvider* port_provider_;
-#elif defined(OS_POSIX)
-  // Jiffie count at the last_cpu_time_ we updated.
-  int last_cpu_;
-#endif  // defined(OS_POSIX)
+#endif  // defined(OS_MACOSX)
 #endif  // !defined(OS_IOS)
 
   DISALLOW_COPY_AND_ASSIGN(ProcessMetrics);
@@ -264,10 +285,11 @@ BASE_EXPORT size_t GetPageSize();
 // at once. If the number is unavailable, a conservative best guess is returned.
 BASE_EXPORT size_t GetMaxFds();
 
-#if defined(OS_POSIX) && !defined(OS_FUCHSIA)
-// Sets the file descriptor soft limit to |max_descriptors| or the OS hard
-// limit, whichever is lower.
-BASE_EXPORT void SetFdLimit(unsigned int max_descriptors);
+#if defined(OS_POSIX)
+// Increases the file descriptor soft limit to |max_descriptors| or the OS hard
+// limit, whichever is lower. If the limit is already higher than
+// |max_descriptors|, then nothing happens.
+BASE_EXPORT void IncreaseFdLimitTo(unsigned int max_descriptors);
 #endif  // defined(OS_POSIX)
 
 #if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_LINUX) || \
@@ -471,6 +493,44 @@ BASE_EXPORT bool ParseZramStat(StringPiece stat_data, SwapInfo* swap_info);
 BASE_EXPORT bool GetSwapInfo(SwapInfo* swap_info);
 #endif  // defined(OS_CHROMEOS)
 
+struct BASE_EXPORT SystemPerformanceInfo {
+  SystemPerformanceInfo();
+  SystemPerformanceInfo(const SystemPerformanceInfo& other);
+
+  // Serializes the platform specific fields to value.
+  std::unique_ptr<Value> ToValue() const;
+
+  // Total idle time of all processes in the system (units of 100 ns).
+  uint64_t idle_time = 0;
+  // Number of bytes read.
+  uint64_t read_transfer_count = 0;
+  // Number of bytes written.
+  uint64_t write_transfer_count = 0;
+  // Number of bytes transferred (e.g. DeviceIoControlFile)
+  uint64_t other_transfer_count = 0;
+  // The amount of read operations.
+  uint64_t read_operation_count = 0;
+  // The amount of write operations.
+  uint64_t write_operation_count = 0;
+  // The amount of other operations.
+  uint64_t other_operation_count = 0;
+  // The number of pages written to the system's pagefiles.
+  uint64_t pagefile_pages_written = 0;
+  // The number of write operations performed on the system's pagefiles.
+  uint64_t pagefile_pages_write_ios = 0;
+  // The number of pages of physical memory available to processes running on
+  // the system.
+  uint64_t available_pages = 0;
+  // The number of pages read from disk to resolve page faults.
+  uint64_t pages_read = 0;
+  // The number of read operations initiated to resolve page faults.
+  uint64_t page_read_ios = 0;
+};
+
+// Retrieves performance counters from the operating system.
+// Fills in the provided |info| structure. Returns true on success.
+BASE_EXPORT bool GetSystemPerformanceInfo(SystemPerformanceInfo* info);
+
 // Collects and holds performance metrics for system memory and disk.
 // Provides functionality to retrieve the data on various platforms and
 // to serialize the stored data.
@@ -494,6 +554,9 @@ class SystemMetrics {
 #endif
 #if defined(OS_CHROMEOS)
   SwapInfo swap_info_;
+#endif
+#if defined(OS_WIN)
+  SystemPerformanceInfo performance_;
 #endif
 };
 

@@ -16,6 +16,7 @@
 #include "third_party/blink/renderer/modules/sensor/sensor_options.h"
 #include "third_party/blink/renderer/modules/sensor/sensor_proxy.h"
 #include "third_party/blink/renderer/modules/sensor/spatial_sensor_options.h"
+#include "third_party/blink/renderer/platform/bindings/exception_code.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/web_task_runner.h"
@@ -61,7 +62,7 @@ class Sensor : public EventTargetWithInlineData,
   // ActiveScriptWrappable overrides.
   bool HasPendingActivity() const override;
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  protected:
   Sensor(ExecutionContext*,
@@ -91,7 +92,7 @@ class Sensor : public EventTargetWithInlineData,
   // SensorProxy::Observer overrides.
   void OnSensorInitialized() override;
   void OnSensorReadingChanged() override;
-  void OnSensorError(ExceptionCode,
+  void OnSensorError(DOMExceptionCode,
                      const String& sanitized_message,
                      const String& unsanitized_message) override;
 
@@ -108,15 +109,14 @@ class Sensor : public EventTargetWithInlineData,
 
   void RequestAddConfiguration();
 
-  void HandleError(ExceptionCode = kUnknownError,
-                   const String& sanitized_message = String(),
+  void HandleError(DOMExceptionCode,
+                   const String& sanitized_message,
                    const String& unsanitized_message = String());
 
   void NotifyReading();
   void NotifyActivated();
   void NotifyError(DOMException* error);
 
- private:
   double frequency_;
   device::mojom::blink::SensorType type_;
   SensorState state_;

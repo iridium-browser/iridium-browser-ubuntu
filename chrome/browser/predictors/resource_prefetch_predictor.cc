@@ -136,9 +136,6 @@ ResourcePrefetchPredictor::ResourcePrefetchPredictor(
       history_service_observer_(this),
       weak_factory_(this) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-
-  // Some form of learning has to be enabled.
-  DCHECK(config_.IsLearningEnabled());
 }
 
 ResourcePrefetchPredictor::~ResourcePrefetchPredictor() {}
@@ -200,9 +197,7 @@ void ResourcePrefetchPredictor::RecordPageRequestSummary(
 
   const std::string& host = summary->main_frame_url.host();
   LearnRedirect(summary->initial_url.host(), host, host_redirect_data_.get());
-
-  if (config_.is_origin_learning_enabled)
-    LearnOrigins(host, summary->main_frame_url.GetOrigin(), summary->origins);
+  LearnOrigins(host, summary->main_frame_url.GetOrigin(), summary->origins);
 
   if (observer_)
     observer_->OnNavigationLearned(*summary);
@@ -269,11 +264,21 @@ void ResourcePrefetchPredictor::OnHistoryAndCacheLoaded() {
   DCHECK_EQ(INITIALIZING, initialization_state_);
 
   initialization_state_ = INITIALIZED;
+  if (delete_all_data_requested_) {
+    DeleteAllUrls();
+    delete_all_data_requested_ = false;
+  }
   if (observer_)
     observer_->OnPredictorInitialized();
 }
 
 void ResourcePrefetchPredictor::DeleteAllUrls() {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  if (initialization_state_ != INITIALIZED) {
+    delete_all_data_requested_ = true;
+    return;
+  }
+
   host_redirect_data_->DeleteAllData();
   origin_data_->DeleteAllData();
 }
@@ -429,20 +434,17 @@ void ResourcePrefetchPredictor::LearnOrigins(
 
 void ResourcePrefetchPredictor::OnURLsDeleted(
     history::HistoryService* history_service,
-    bool all_history,
-    bool expired,
-    const history::URLRows& deleted_rows,
-    const std::set<GURL>& favicon_urls) {
+    const history::DeletionInfo& deletion_info) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(initialization_state_ == INITIALIZED);
 
-  if (all_history) {
+  if (deletion_info.IsAllHistory()) {
     DeleteAllUrls();
     UMA_HISTOGRAM_ENUMERATION("ResourcePrefetchPredictor.ReportingEvent",
                               REPORTING_EVENT_ALL_HISTORY_CLEARED,
                               REPORTING_EVENT_COUNT);
   } else {
-    DeleteUrls(deleted_rows);
+    DeleteUrls(deletion_info.deleted_rows());
     UMA_HISTOGRAM_ENUMERATION("ResourcePrefetchPredictor.ReportingEvent",
                               REPORTING_EVENT_PARTIAL_HISTORY_CLEARED,
                               REPORTING_EVENT_COUNT);

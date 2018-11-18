@@ -6,21 +6,19 @@
 
 import json
 import logging
-import re
 import sys
 
 from google.appengine.ext import ndb
 
 # TODO(eakuefner): Move these helpers so we don't have to import add_point or
 # add_point_queue directly.
-from dashboard import add_histograms
 from dashboard import add_point
 from dashboard import add_point_queue
 from dashboard import find_anomalies
 from dashboard import graph_revisions
 from dashboard.common import datastore_hooks
+from dashboard.common import histogram_helpers
 from dashboard.common import request_handler
-from dashboard.common import stored_object
 from dashboard.common import utils
 from dashboard.models import anomaly
 from dashboard.models import graph_data
@@ -32,90 +30,21 @@ from tracing.value.diagnostics import diagnostic_ref
 from tracing.value.diagnostics import reserved_infos
 
 DIAGNOSTIC_NAMES_TO_ANNOTATION_NAMES = {
-    reserved_infos.LOG_URLS.name: 'a_stdio_uri',
-    reserved_infos.CHROMIUM_COMMIT_POSITIONS.name: 'r_chromium_commit_pos',
-    reserved_infos.V8_COMMIT_POSITIONS.name: 'r_v8_rev',
-    reserved_infos.CHROMIUM_REVISIONS.name: 'r_chromium_git',
-    reserved_infos.V8_REVISIONS.name: 'r_v8_git',
+    reserved_infos.CHROMIUM_COMMIT_POSITIONS.name: 'r_commit_pos',
+    reserved_infos.V8_COMMIT_POSITIONS.name: 'r_v8_commit_pos',
+    reserved_infos.CHROMIUM_REVISIONS.name: 'r_chromium',
+    reserved_infos.V8_REVISIONS.name: 'r_v8_rev',
     # TODO(eakuefner): Add r_catapult_git to Dashboard revision_info map (see
     # https://github.com/catapult-project/catapult/issues/3545).
     reserved_infos.CATAPULT_REVISIONS.name: 'r_catapult_git',
     reserved_infos.ANGLE_REVISIONS.name: 'r_angle_git',
-    reserved_infos.WEBRTC_REVISIONS.name: 'r_webrtc_git'
+    reserved_infos.WEBRTC_REVISIONS.name: 'r_webrtc_git',
+    reserved_infos.FUCHSIA_GARNET_REVISIONS.name: 'r_fuchsia_garnet_git',
+    reserved_infos.FUCHSIA_PERIDOT_REVISIONS.name: 'r_fuchsia_peridot_git',
+    reserved_infos.FUCHSIA_TOPAZ_REVISIONS.name: 'r_fuchsia_topaz_git',
+    reserved_infos.FUCHSIA_ZIRCON_REVISIONS.name: 'r_fuchsia_zircon_git',
+    reserved_infos.REVISION_TIMESTAMPS.name: 'r_revision_timestamp',
 }
-
-
-# List of non-TBMv2 chromium.perf Telemetry benchmarks
-LEGACY_BENCHMARKS = [
-    'blink_perf.bindings',
-    'blink_perf.canvas',
-    'blink_perf.css',
-    'blink_perf.dom',
-    'blink_perf.events',
-    'blink_perf.image_decoder',
-    'blink_perf.layout',
-    'blink_perf.owp_storage',
-    'blink_perf.paint',
-    'blink_perf.parser',
-    'blink_perf.shadow_dom',
-    'blink_perf.svg',
-    'cronet_perf_tests',
-    'dromaeo',
-    'dummy_benchmark.noisy_benchmark_1',
-    'dummy_benchmark.stable_benchmark_1',
-    'jetstream',
-    'kraken',
-    'octane',
-    'rasterize_and_record_micro.partial_invalidation',
-    'rasterize_and_record_micro.top_25',
-    'scheduler.tough_scheduling_cases',
-    'smoothness.desktop_tough_pinch_zoom_cases',
-    'smoothness.gpu_rasterization.polymer',
-    'smoothness.gpu_rasterization.top_25_smooth',
-    'smoothness.gpu_rasterization.tough_filters_cases',
-    'smoothness.gpu_rasterization.tough_path_rendering_cases',
-    'smoothness.gpu_rasterization.tough_pinch_zoom_cases',
-    'smoothness.gpu_rasterization.tough_scrolling_cases',
-    'smoothness.gpu_rasterization_and_decoding.image_decoding_cases',
-    'smoothness.image_decoding_cases',
-    'smoothness.key_desktop_move_cases',
-    'smoothness.key_mobile_sites_smooth',
-    'smoothness.key_silk_cases',
-    'smoothness.maps',
-    'smoothness.pathological_mobile_sites',
-    'smoothness.simple_mobile_sites',
-    'smoothness.sync_scroll.key_mobile_sites_smooth',
-    'smoothness.top_25_smooth',
-    'smoothness.tough_ad_cases',
-    'smoothness.tough_animation_cases',
-    'smoothness.tough_canvas_cases',
-    'smoothness.tough_filters_cases',
-    'smoothness.tough_image_decode_cases',
-    'smoothness.tough_path_rendering_cases',
-    'smoothness.tough_pinch_zoom_cases',
-    'smoothness.tough_scrolling_cases',
-    'smoothness.tough_texture_upload_cases',
-    'smoothness.tough_webgl_ad_cases',
-    'smoothness.tough_webgl_cases',
-    'speedometer',
-    'speedometer-future',
-    'speedometer2',
-    'speedometer2-future',
-    'start_with_url.cold.startup_pages',
-    'start_with_url.warm.startup_pages',
-    'thread_times.key_hit_test_cases',
-    'thread_times.key_idle_power_cases',
-    'thread_times.key_mobile_sites_smooth',
-    'thread_times.key_noop_cases',
-    'thread_times.key_silk_cases',
-    'thread_times.simple_mobile_sites',
-    'thread_times.tough_compositor_cases',
-    'thread_times.tough_scrolling_cases',
-    'v8.detached_context_age_in_gc'
-]
-
-
-STATS_BLACKLIST = ['std', 'count', 'max', 'min', 'sum']
 
 
 class BadRequestError(Exception):
@@ -156,14 +85,9 @@ class AddHistogramsQueueHandler(request_handler.RequestHandler):
     """
     datastore_hooks.SetPrivilegedRequest()
 
-    bot_whitelist_future = stored_object.GetAsync(
-        add_point_queue.BOT_WHITELIST_KEY)
-
     params = json.loads(self.request.body)
 
     _PrewarmGets(params)
-
-    bot_whitelist = bot_whitelist_future.get_result()
 
     # Roughly, the processing of histograms and the processing of rows can be
     # done in parallel since there are no dependencies.
@@ -171,7 +95,7 @@ class AddHistogramsQueueHandler(request_handler.RequestHandler):
     futures = []
 
     for p in params:
-      futures.extend(_ProcessRowAndHistogram(p, bot_whitelist))
+      futures.extend(_ProcessRowAndHistogram(p))
 
     ndb.Future.wait_all(futures)
 
@@ -209,7 +133,7 @@ def _PrewarmGets(params):
   ndb.get_multi_async(list(keys))
 
 
-def _ProcessRowAndHistogram(params, bot_whitelist):
+def _ProcessRowAndHistogram(params):
   revision = int(params['revision'])
   test_path = params['test_path']
   benchmark_description = params['benchmark_description']
@@ -232,7 +156,7 @@ def _ProcessRowAndHistogram(params, bot_whitelist):
   else:
     rest = None
   full_test_name = '/'.join(test_path_parts[2:])
-  internal_only = add_point_queue.BotInternalOnly(bot, bot_whitelist)
+  internal_only = graph_data.Bot.GetInternalOnlySync(master, bot)
   extra_args = GetUnitArgs(hist.unit)
 
   unescaped_story_name = _GetStoryFromDiagnosticsDict(params.get('diagnostics'))
@@ -250,11 +174,12 @@ def _ProcessRowAndHistogram(params, bot_whitelist):
   legacy_parent_tests = {}
 
   # TODO(#4213): Stop doing this.
-  if benchmark_name in LEGACY_BENCHMARKS:
+  if histogram_helpers.IsLegacyBenchmark(benchmark_name):
     statistics_scalars = {}
 
   for stat_name, scalar in statistics_scalars.iteritems():
-    if _ShouldFilter(histogram_name, benchmark_name, stat_name):
+    if histogram_helpers.ShouldFilterStatistic(
+        histogram_name, benchmark_name, stat_name):
       continue
     extra_args = GetUnitArgs(scalar.unit)
     suffixed_name = '%s/%s_%s' % (
@@ -266,88 +191,23 @@ def _ProcessRowAndHistogram(params, bot_whitelist):
         unescaped_story_name=unescaped_story_name, **extra_args)
 
   return [
-      _AddRowsFromData(params, revision, parent_test, legacy_parent_tests,
-                       internal_only),
+      _AddRowsFromData(params, revision, parent_test, legacy_parent_tests),
       _AddHistogramFromData(params, revision, test_key, internal_only)]
 
 
-def _ShouldFilter(test_name, benchmark_name, stat_name):
-  if test_name == 'benchmark_total_duration':
-    return True
-  if benchmark_name.startswith('memory') and not benchmark_name.startswith(
-      'memory.long_running'):
-    if 'memory:' in test_name and stat_name in STATS_BLACKLIST:
-      return True
-  if benchmark_name.startswith('memory.long_running'):
-    value_name = '%s_%s' % (test_name, stat_name)
-    return not _ShouldAddMemoryLongRunningValue(value_name)
-  if benchmark_name == 'media.desktop' or benchmark_name == 'media.mobile':
-    value_name = '%s_%s' % (test_name, stat_name)
-    return not _ShouldAddMediaValue(value_name)
-  if benchmark_name.startswith('system_health'):
-    if stat_name in STATS_BLACKLIST:
-      return True
-  if benchmark_name.startswith('v8.browsing'):
-    value_name = '%s_%s' % (test_name, stat_name)
-    return not _ShouldAddV8BrowsingValue(value_name)
-  return False
-
-
-def _ShouldAddMediaValue(value_name):
-  media_re = re.compile(
-      r'(?<!dump)(?<!process)_(std|count|max|min|sum|pct_\d{4}(_\d+)?)$')
-  return not media_re.search(value_name)
-
-
-def _ShouldAddMemoryLongRunningValue(value_name):
-  v8_re = re.compile(
-      r'renderer_processes:'
-      r'(reported_by_chrome:v8|reported_by_os:system_memory:[^:]+$)')
-  if 'memory:chrome' in value_name:
-    return ('renderer:subsystem:v8' in value_name or
-            'renderer:vmstats:overall' in value_name or
-            bool(v8_re.search(value_name)))
-  return 'v8' in value_name
-
-
-def _ShouldAddV8BrowsingValue(value_name):
-  v8_gc_re = re.compile(
-      r'^v8-gc-('
-      r'full-mark-compactor_|'
-      r'incremental-finalize_|'
-      r'incremental-step_|'
-      r'latency-mark-compactor_|'
-      r'memory-mark-compactor_|'
-      r'scavenger_|'
-      r'total_)')
-  stats_re = re.compile(r'_(std|count|min|sum|pct_\d{4}(_\d+)?)$')
-  v8_stats_re = re.compile(
-      r'_(idle_deadline_overrun|percentage_idle|outside_idle)')
-  if 'memory:unknown_browser' in value_name:
-    return ('renderer_processes' in value_name and
-            not stats_re.search(value_name))
-  if 'memory:chrome' in value_name:
-    return ('renderer_processes' in value_name and
-            not stats_re.search(value_name))
-  if 'v8-gc' in value_name:
-    return v8_gc_re.search(value_name) and not v8_stats_re.search(value_name)
-  return True
-
-
 @ndb.tasklet
-def _AddRowsFromData(params, revision, parent_test, legacy_parent_tests,
-                     internal_only):
+def _AddRowsFromData(params, revision, parent_test, legacy_parent_tests):
   data_dict = params['data']
   test_key = parent_test.key
 
   stat_names_to_test_keys = {k: v.key for k, v in
                              legacy_parent_tests.iteritems()}
-  rows = AddRows(data_dict, test_key, stat_names_to_test_keys, revision,
-                 internal_only)
+  rows = CreateRowEntities(
+      data_dict, test_key, stat_names_to_test_keys, revision)
   if not rows:
     raise ndb.Return()
 
-  yield ndb.put_multi_async(rows)
+  yield ndb.put_multi_async(rows) + [r.UpdateParentAsync() for r in rows]
 
   tests_keys = []
   is_monitored = parent_test.sheriff and parent_test.has_rows
@@ -408,9 +268,14 @@ def ProcessDiagnostics(diagnostic_data, revision, test_key, internal_only):
         id=guid, name=name, data=diagnostic_datum, test=test_key,
         start_revision=revision, end_revision=sys.maxint,
         internal_only=internal_only))
+
+  suite_key = utils.TestKey('/'.join(test_key.id().split('/')[:3]))
+  last_added = yield histogram.HistogramRevisionRecord.GetLatest(suite_key)
+  assert last_added
+
   new_guids_to_existing_diagnostics = yield (
-      add_histograms.DeduplicateAndPutAsync(
-          diagnostic_entities, test_key, revision))
+      histogram.SparseDiagnostic.FindOrInsertDiagnostics(
+          diagnostic_entities, test_key, revision, last_added.revision))
 
   raise ndb.Return(new_guids_to_existing_diagnostics)
 
@@ -430,8 +295,8 @@ def GetUnitArgs(unit):
   return unit_args
 
 
-def AddRows(histogram_dict, test_metadata_key, stat_names_to_test_keys,
-            revision, internal_only):
+def CreateRowEntities(
+    histogram_dict, test_metadata_key, stat_names_to_test_keys, revision):
   h = histogram_module.Histogram.FromDict(histogram_dict)
   # TODO(eakuefner): Move this check into _PopulateNumericalFields once we
   # know that it's okay to put rows that don't have a value/error (see
@@ -445,15 +310,14 @@ def AddRows(histogram_dict, test_metadata_key, stat_names_to_test_keys,
   properties = add_point.GetAndValidateRowProperties(row_dict)
   test_container_key = utils.GetTestContainerKey(test_metadata_key)
   rows.append(graph_data.Row(id=revision, parent=test_container_key,
-                             internal_only=internal_only, **properties))
+                             **properties))
 
   for stat_name, suffixed_key in stat_names_to_test_keys.iteritems():
     row_dict = _MakeRowDict(revision, suffixed_key.id(), h, stat_name=stat_name)
     properties = add_point.GetAndValidateRowProperties(row_dict)
     test_container_key = utils.GetTestContainerKey(suffixed_key)
     rows.append(graph_data.Row(
-        id=revision, parent=suffixed_key, internal_only=internal_only,
-        **properties))
+        id=revision, parent=suffixed_key, **properties))
 
   return rows
 
@@ -470,8 +334,10 @@ def _MakeRowDict(revision, test_path, tracing_histogram, stat_name=None):
   # histogram and all its diagnostics including the full set of trace urls.
   trace_url_set = tracing_histogram.diagnostics.get(
       reserved_infos.TRACE_URLS.name)
-  if trace_url_set and len(trace_url_set) == 1:
-    d['supplemental_columns']['a_tracing_uri'] = trace_url_set.GetOnlyElement()
+  # We don't show trace URLs for summary values in the legacy pipeline
+  is_summary = reserved_infos.SUMMARY_KEYS.name in tracing_histogram.diagnostics
+  if trace_url_set and not is_summary:
+    d['supplemental_columns']['a_tracing_uri'] = list(trace_url_set)[-1]
 
   for diag_name, annotation in DIAGNOSTIC_NAMES_TO_ANNOTATION_NAMES.iteritems():
     revision_info = tracing_histogram.diagnostics.get(diag_name)
@@ -487,6 +353,8 @@ def _MakeRowDict(revision, test_path, tracing_histogram, stat_name=None):
 
     d['supplemental_columns'][annotation] = value[0]
 
+  _AddStdioUris(tracing_histogram, d)
+
   if stat_name is not None:
     d['value'] = tracing_histogram.statistics_scalars[stat_name].value
     d['error'] = 0.0
@@ -495,6 +363,33 @@ def _MakeRowDict(revision, test_path, tracing_histogram, stat_name=None):
   else:
     _PopulateNumericalFields(d, tracing_histogram)
   return d
+
+
+def _AddStdioUris(tracing_histogram, row_dict):
+  build_urls_diagnostic = tracing_histogram.diagnostics.get(
+      reserved_infos.BUILD_URLS.name)
+  if build_urls_diagnostic:
+    build_tuple = build_urls_diagnostic.GetOnlyElement()
+    if isinstance(build_tuple, list):
+      link = '[%s](%s)' % tuple(build_tuple)
+      row_dict['supplemental_columns']['a_build_uri'] = link
+
+  log_urls = tracing_histogram.diagnostics.get(reserved_infos.LOG_URLS.name)
+  if not log_urls:
+    return
+
+  if len(log_urls) == 1:
+    _AddStdioUri('a_stdio_uri', log_urls.GetOnlyElement(), row_dict)
+
+
+def _AddStdioUri(name, link_list, row_dict):
+  # TODO(#4397): Change this to an assert after infra-side fixes roll
+  if isinstance(link_list, list):
+    row_dict['supplemental_columns'][name] = '[%s](%s)' % tuple(link_list)
+  # Support busted format until infra changes roll
+  elif isinstance(link_list, str):
+    row_dict['supplemental_columns'][name] = link_list
+
 
 def _PopulateNumericalFields(row_dict, tracing_histogram):
   statistics_scalars = tracing_histogram.statistics_scalars

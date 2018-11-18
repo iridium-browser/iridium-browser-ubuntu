@@ -33,22 +33,27 @@
 
 #include <memory>
 
+#include "base/macros.h"
 #include "cc/layers/texture_layer_client.h"
 #include "cc/resources/cross_thread_shared_bitmap.h"
 #include "cc/resources/shared_bitmap_id_registrar.h"
 #include "gpu/command_buffer/common/mailbox.h"
 #include "gpu/command_buffer/common/sync_token.h"
+#include "gpu/config/gpu_feature_info.h"
 #include "third_party/blink/renderer/platform/geometry/int_size.h"
 #include "third_party/blink/renderer/platform/graphics/gpu/webgl_image_conversion.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_types_3d.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/wtf/deque.h"
-#include "third_party/blink/renderer/platform/wtf/noncopyable.h"
 #include "third_party/blink/renderer/platform/wtf/ref_counted.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 #include "third_party/khronos/GLES2/gl2.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/color_space.h"
+
+namespace cc {
+class Layer;
+}
 
 namespace gfx {
 class GpuMemoryBuffer;
@@ -64,16 +69,13 @@ namespace blink {
 class CanvasColorParams;
 class Extensions3DUtil;
 class StaticBitmapImage;
-class WebExternalTextureLayer;
 class WebGraphicsContext3DProvider;
 class WebGraphicsContext3DProviderWrapper;
-class WebLayer;
 
 // Manages a rendering target (framebuffer + attachment) for a canvas.  Can
-// publish its rendering results to a WebLayer for compositing.
+// publish its rendering results to a cc::Layer for compositing.
 class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
                                       public RefCounted<DrawingBuffer> {
-  WTF_MAKE_NONCOPYABLE(DrawingBuffer);
 
  public:
   class Client {
@@ -94,6 +96,11 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
     virtual void DrawingBufferClientRestorePixelPackBufferBinding() = 0;
   };
 
+  struct WebGLContextLimits {
+    uint32_t max_active_webgl_contexts = 0;
+    uint32_t max_active_webgl_contexts_on_worker = 0;
+  };
+
   enum PreserveDrawingBuffer {
     kPreserve,
     kDiscard,
@@ -101,6 +108,7 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
   enum WebGLVersion {
     kWebGL1,
     kWebGL2,
+    kWebGL2Compute,
   };
 
   enum ChromiumImageUsage {
@@ -191,7 +199,7 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
   // default framebuffer.
   bool DefaultBufferRequiresAlphaChannelToBePreserved();
 
-  WebLayer* PlatformLayer();
+  cc::Layer* CcLayer();
 
   gpu::gles2::GLES2Interface* ContextGL();
   WebGraphicsContext3DProvider* ContextProvider();
@@ -199,6 +207,7 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
   Client* client() { return client_; }
   WebGLVersion webgl_version() const { return webgl_version_; }
   bool destroyed() const { return destruction_in_progress_; }
+  const WebGLContextLimits& webgl_context_limits();
 
   // cc::TextureLayerClient implementation.
   bool PrepareTransferableResource(
@@ -230,7 +239,7 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
 
   int SampleCount() const { return sample_count_; }
   bool ExplicitResolveOfMultisampleData() const {
-    return anti_aliasing_mode_ == kMSAAExplicitResolve;
+    return anti_aliasing_mode_ == gpu::kAntialiasingModeMSAAExplicitResolve;
   }
 
   // Rebind the read and draw framebuffers that WebGL is expecting.
@@ -358,7 +367,7 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
     gpu::SyncToken receive_sync_token;
 
    private:
-    WTF_MAKE_NONCOPYABLE(ColorBuffer);
+    DISALLOW_COPY_AND_ASSIGN(ColorBuffer);
   };
 
   // The same as clearFramebuffers(), but leaves GL state dirty.
@@ -401,7 +410,7 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
   // the operation was successful.
   bool ResizeDefaultFramebuffer(const IntSize&);
 
-  void ClearPlatformLayer();
+  void ClearCcLayer();
 
   RegisteredBitmap CreateOrRecycleBitmap(
       cc::SharedBitmapIdRegistrar* bitmap_registrar);
@@ -460,6 +469,7 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
 
   const PreserveDrawingBuffer preserve_drawing_buffer_;
   const WebGLVersion webgl_version_;
+  WebGLContextLimits webgl_context_limits_;
 
   std::unique_ptr<WebGraphicsContext3DProviderWrapper> context_provider_;
   // Lifetime is tied to the m_contextProvider.
@@ -507,6 +517,10 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
   // channels when copying into the GMB.
   GLuint premultiplied_alpha_false_texture_ = 0;
 
+  // A mailbox for the premultiplied_alpha_false_texture_, created lazily if we
+  // need to produce it.
+  gpu::Mailbox premultiplied_alpha_false_mailbox_;
+
   // When wantExplicitResolve() returns false, the target of all draw and
   // read operations. When wantExplicitResolve() returns true, the target of
   // all read operations.
@@ -541,14 +555,7 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
   const gfx::ColorSpace storage_color_space_;
   const gfx::ColorSpace sampler_color_space_;
 
-  enum AntialiasingMode {
-    kNone,
-    kMSAAImplicitResolve,
-    kMSAAExplicitResolve,
-    kScreenSpaceAntialiasing,
-  };
-
-  AntialiasingMode anti_aliasing_mode_ = kNone;
+  gpu::AntialiasingMode anti_aliasing_mode_ = gpu::kAntialiasingModeNone;
 
   bool use_half_float_storage_ = false;
 
@@ -558,7 +565,7 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
   bool is_hidden_ = false;
   SkFilterQuality filter_quality_ = kLow_SkFilterQuality;
 
-  std::unique_ptr<WebExternalTextureLayer> layer_;
+  scoped_refptr<cc::TextureLayer> layer_;
 
   // Mailboxes that were released by the compositor can be used again by this
   // DrawingBuffer.
@@ -578,6 +585,10 @@ class PLATFORM_EXPORT DrawingBuffer : public cc::TextureLayerClient,
   // DisallowChromiumImage in the case of OffscreenCanvas.
   ChromiumImageUsage chromium_image_usage_;
   bool ShouldUseChromiumImage();
+
+  bool opengl_flip_y_extension_;
+
+  DISALLOW_COPY_AND_ASSIGN(DrawingBuffer);
 };
 
 }  // namespace blink

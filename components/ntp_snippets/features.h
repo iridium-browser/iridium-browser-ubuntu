@@ -33,17 +33,11 @@ extern const base::Feature* const kAllFeatures[];
 // helpers in chrome/browser/ntp_snippets/dependent_features.h instead.
 
 extern const base::Feature kBookmarkSuggestionsFeature;
-extern const base::Feature kRecentOfflineTabSuggestionsFeature;
-extern const base::Feature kPhysicalWebPageSuggestionsFeature;
 extern const base::Feature kForeignSessionsSuggestionsFeature;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Independent features. Treat as normal
 
-// Feature to allow show/hide article suggestions by clicking the header.
-extern const base::Feature kArticleSuggestionsExpandableHeader;
-
-// TODO(jkrcal): Rename to kRemoteSuggestionsFeature.
 extern const base::Feature kArticleSuggestionsFeature;
 
 // Feature to allow UI as specified here: https://crbug.com/660837.
@@ -140,6 +134,11 @@ extern const base::Feature kKeepPrefetchedContentSuggestions;
 // Enables debug logging accessible through snippets-internals.
 extern const base::Feature kContentSuggestionsDebugLog;
 
+// Return all the features as a vector.
+std::vector<const base::Feature*> GetAllFeatures();
+
+// Return a referrer URL for content suggestions.
+std::string GetContentSuggestionsReferrerURL();
 }  // namespace ntp_snippets
 
 #endif  // COMPONENTS_NTP_SNIPPETS_FEATURES_H_

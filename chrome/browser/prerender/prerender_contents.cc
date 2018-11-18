@@ -12,6 +12,7 @@
 #include "base/bind.h"
 #include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/post_task.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/history/history_tab_helper.h"
@@ -30,6 +31,7 @@
 #include "chrome/common/prerender_types.h"
 #include "chrome/common/prerender_util.h"
 #include "components/history/core/browser/history_types.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/notification_service.h"
@@ -197,7 +199,6 @@ PrerenderContents::PrerenderContents(PrerenderManager* prerender_manager,
       prerender_url_(url),
       referrer_(referrer),
       profile_(profile),
-      has_stopped_loading_(false),
       has_finished_loading_(false),
       final_status_(FINAL_STATUS_MAX),
       prerendering_has_been_cancelled_(false),
@@ -256,7 +257,7 @@ void PrerenderContents::StartPrerendering(
 
   prerendering_has_started_ = true;
 
-  prerender_contents_.reset(CreateWebContents(session_storage_namespace));
+  prerender_contents_ = CreateWebContents(session_storage_namespace);
   TabHelpers::AttachTabHelpers(prerender_contents_.get());
   content::WebContentsObserver::Observe(prerender_contents_.get());
 
@@ -399,7 +400,7 @@ void PrerenderContents::Observe(int type,
         // thread of the browser process.  When the RenderView receives its
         // size, is also sets itself to be visible, which would then break the
         // visibility API.
-        new_render_view_host->GetWidget()->WasResized();
+        new_render_view_host->GetWidget()->SynchronizeVisualProperties();
         prerender_contents_->WasHidden();
       }
       break;
@@ -415,7 +416,7 @@ void PrerenderContents::OnRenderViewHostCreated(
     RenderViewHost* new_render_view_host) {
 }
 
-WebContents* PrerenderContents::CreateWebContents(
+std::unique_ptr<WebContents> PrerenderContents::CreateWebContents(
     SessionStorageNamespace* session_storage_namespace) {
   // TODO(ajwong): Remove the temporary map once prerendering is aware of
   // multiple session storage namespaces per tab.
@@ -523,7 +524,6 @@ void PrerenderContents::RenderFrameCreated(
 }
 
 void PrerenderContents::DidStopLoading() {
-  has_stopped_loading_ = true;
   NotifyPrerenderStopLoading();
 }
 
@@ -547,8 +547,7 @@ void PrerenderContents::DidStartNavigation(
   // Neither of these can happen in the case of an invisible prerender.
   // So the cause is: Some JavaScript caused a new URL to be loaded.  In that
   // case, the spinner would start again in the browser, so we must reset
-  // has_stopped_loading_ so that the spinner won't be stopped.
-  has_stopped_loading_ = false;
+  // has_finished_loading_ so that the spinner won't be stopped.
   has_finished_loading_ = false;
 }
 
@@ -627,6 +626,8 @@ void PrerenderContents::Destroy(FinalStatus final_status) {
 
   prerendering_has_been_cancelled_ = true;
   prerender_manager_->AddToHistory(this);
+  prerender_manager_->SetPrefetchFinalStatusForUrl(prerender_url_,
+                                                   final_status);
   prerender_manager_->MoveEntryToPendingDelete(this, final_status);
 
   if (prerendering_has_started())
@@ -643,11 +644,11 @@ void PrerenderContents::DestroyWhenUsingTooManyResources() {
     if (!rph)
       return;
 
-    base::ProcessHandle handle = rph->GetHandle();
+    base::ProcessHandle handle = rph->GetProcess().Handle();
     if (handle == base::kNullProcessHandle)
       return;
 
-    process_pid_ = base::GetProcId(handle);
+    process_pid_ = rph->GetProcess().Pid();
   }
 
   if (process_pid_ == base::kNullProcessId)
@@ -656,10 +657,10 @@ void PrerenderContents::DestroyWhenUsingTooManyResources() {
   // Using AdaptCallbackForRepeating allows for an easier transition to
   // OnceCallbacks for https://crbug.com/714018.
   memory_instrumentation::MemoryInstrumentation::GetInstance()
-      ->RequestGlobalDumpForPid(process_pid_,
-                                base::AdaptCallbackForRepeating(base::BindOnce(
-                                    &PrerenderContents::DidGetMemoryUsage,
-                                    weak_factory_.GetWeakPtr())));
+      ->RequestPrivateMemoryFootprint(
+          process_pid_, base::AdaptCallbackForRepeating(base::BindOnce(
+                            &PrerenderContents::DidGetMemoryUsage,
+                            weak_factory_.GetWeakPtr())));
 }
 
 void PrerenderContents::DidGetMemoryUsage(
@@ -738,8 +739,8 @@ void PrerenderContents::PrepareForUse() {
 
   NotifyPrerenderStop();
 
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::IO},
       base::BindOnce(&ResumeThrottles, resource_throttles_, idle_resources_));
   resource_throttles_.clear();
   idle_resources_.clear();

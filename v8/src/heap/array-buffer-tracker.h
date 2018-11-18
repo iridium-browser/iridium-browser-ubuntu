@@ -5,19 +5,19 @@
 #ifndef V8_HEAP_ARRAY_BUFFER_TRACKER_H_
 #define V8_HEAP_ARRAY_BUFFER_TRACKER_H_
 
-#include <unordered_set>
+#include <unordered_map>
 
 #include "src/allocation.h"
 #include "src/base/platform/mutex.h"
 #include "src/globals.h"
+#include "src/objects/js-array-buffer.h"
 
 namespace v8 {
 namespace internal {
 
-class Heap;
-class JSArrayBuffer;
 class MarkingState;
 class Page;
+class Space;
 
 class ArrayBufferTracker : public AllStatic {
  public:
@@ -37,9 +37,6 @@ class ArrayBufferTracker : public AllStatic {
   // Identifies all backing store pointers for dead JSArrayBuffers in new space.
   // Does not take any locks and can only be called during Scavenge.
   static void PrepareToFreeDeadInNewSpace(Heap* heap);
-
-  // Number of array buffer bytes retained from new space.
-  static size_t RetainedInNewSpace(Heap* heap);
 
   // Frees all backing store pointers for dead JSArrayBuffer on a given page.
   // Requires marking information to be present. Requires the page lock to be
@@ -70,8 +67,7 @@ class LocalArrayBufferTracker {
   enum CallbackResult { kKeepEntry, kUpdateEntry, kRemoveEntry };
   enum FreeMode { kFreeDead, kFreeAll };
 
-  explicit LocalArrayBufferTracker(Heap* heap)
-      : heap_(heap), retained_size_(0) {}
+  explicit LocalArrayBufferTracker(Page* page) : page_(page) {}
   ~LocalArrayBufferTracker();
 
   inline void Add(JSArrayBuffer* buffer, size_t length);
@@ -101,8 +97,6 @@ class LocalArrayBufferTracker {
     return array_buffers_.find(buffer) != array_buffers_.end();
   }
 
-  size_t retained_size() const { return retained_size_; }
-
  private:
   class Hasher {
    public:
@@ -111,14 +105,24 @@ class LocalArrayBufferTracker {
     }
   };
 
-  typedef std::unordered_set<JSArrayBuffer*, Hasher> TrackingData;
+  // Keep track of the backing store and the corresponding length at time of
+  // registering. The length is accessed from JavaScript and can be a
+  // HeapNumber. The reason for tracking the length is that in the case of
+  // length being a HeapNumber, the buffer and its length may be stored on
+  // different memory pages, making it impossible to guarantee order of freeing.
+  typedef std::unordered_map<JSArrayBuffer*, JSArrayBuffer::Allocation, Hasher>
+      TrackingData;
 
-  Heap* heap_;
+  // Internal version of add that does not update counters. Requires separate
+  // logic for updating external memory counters.
+  inline void AddInternal(JSArrayBuffer* buffer, size_t length);
+
+  inline Space* space();
+
+  Page* page_;
   // The set contains raw heap pointers which are removed by the GC upon
   // processing the tracker through its owning page.
   TrackingData array_buffers_;
-  // Retained size of array buffers for this tracker in bytes.
-  size_t retained_size_;
 };
 
 }  // namespace internal

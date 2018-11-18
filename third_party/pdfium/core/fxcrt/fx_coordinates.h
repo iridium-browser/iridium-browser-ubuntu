@@ -132,7 +132,7 @@ using CFX_Size = CFX_STemplate<int32_t>;
 using CFX_SizeF = CFX_STemplate<float>;
 
 template <class BaseType>
-class CFX_VTemplate : public CFX_PTemplate<BaseType> {
+class CFX_VTemplate final : public CFX_PTemplate<BaseType> {
  public:
   using CFX_PTemplate<BaseType>::x;
   using CFX_PTemplate<BaseType>::y;
@@ -225,8 +225,8 @@ struct FX_RECT {
 // LTRB rectangles (y-axis runs upwards).
 class CFX_FloatRect {
  public:
-  CFX_FloatRect() : CFX_FloatRect(0.0f, 0.0f, 0.0f, 0.0f) {}
-  CFX_FloatRect(float l, float b, float r, float t)
+  constexpr CFX_FloatRect() : CFX_FloatRect(0.0f, 0.0f, 0.0f, 0.0f) {}
+  constexpr CFX_FloatRect(float l, float b, float r, float t)
       : left(l), bottom(b), right(r), top(t) {}
 
   explicit CFX_FloatRect(const float* pArray)
@@ -275,68 +275,23 @@ class CFX_FloatRect {
   float Width() const { return right - left; }
   float Height() const { return top - bottom; }
 
-  void Inflate(float x, float y) {
-    Normalize();
-    left -= x;
-    right += x;
-    bottom -= y;
-    top += y;
-  }
-
+  void Inflate(float x, float y);
   void Inflate(float other_left,
                float other_bottom,
                float other_right,
-               float other_top) {
-    Normalize();
-    left -= other_left;
-    bottom -= other_bottom;
-    right += other_right;
-    top += other_top;
-  }
+               float other_top);
+  void Inflate(const CFX_FloatRect& rt);
 
-  void Inflate(const CFX_FloatRect& rt) {
-    Inflate(rt.left, rt.bottom, rt.right, rt.top);
-  }
-
-  void Deflate(float x, float y) {
-    Normalize();
-    left += x;
-    right -= x;
-    bottom += y;
-    top -= y;
-  }
-
+  void Deflate(float x, float y);
   void Deflate(float other_left,
                float other_bottom,
                float other_right,
-               float other_top) {
-    Normalize();
-    left += other_left;
-    bottom += other_bottom;
-    right -= other_right;
-    top -= other_top;
-  }
+               float other_top);
+  void Deflate(const CFX_FloatRect& rt);
 
-  void Deflate(const CFX_FloatRect& rt) {
-    Deflate(rt.left, rt.bottom, rt.right, rt.top);
-  }
+  CFX_FloatRect GetDeflated(float x, float y) const;
 
-  CFX_FloatRect GetDeflated(float x, float y) const {
-    if (IsEmpty())
-      return CFX_FloatRect();
-
-    CFX_FloatRect that = *this;
-    that.Deflate(x, y);
-    that.Normalize();
-    return that;
-  }
-
-  void Translate(float e, float f) {
-    left += e;
-    right += e;
-    top += f;
-    bottom += f;
-  }
+  void Translate(float e, float f);
 
   void Scale(float fScale);
   void ScaleFromCenterPoint(float fScale);
@@ -592,8 +547,10 @@ class CFX_Matrix {
 
   CFX_Matrix GetInverse() const;
 
-  void Concat(const CFX_Matrix& m, bool bPrepended = false);
-  void ConcatInverse(const CFX_Matrix& m, bool bPrepended = false);
+  void Concat(const CFX_Matrix& right);
+  void ConcatPrepend(const CFX_Matrix& left);
+  void ConcatInverse(const CFX_Matrix& m);
+  void ConcatInversePrepend(const CFX_Matrix& m);
 
   bool IsIdentity() const {
     return a == 1 && b == 0 && c == 0 && d == 1 && e == 0 && f == 0;
@@ -603,18 +560,18 @@ class CFX_Matrix {
   bool IsScaled() const;
   bool WillScale() const { return a != 1.0f || b != 0 || c != 0 || d != 1.0f; }
 
-  void Translate(float x, float y, bool bPrepended = false);
-  void Translate(int32_t x, int32_t y, bool bPrepended = false) {
-    Translate(static_cast<float>(x), static_cast<float>(y), bPrepended);
+  void Translate(float x, float y);
+  void TranslatePrepend(float x, float y);
+  void Translate(int32_t x, int32_t y) {
+    Translate(static_cast<float>(x), static_cast<float>(y));
+  }
+  void TranslatePrepend(int32_t x, int32_t y) {
+    TranslatePrepend(static_cast<float>(x), static_cast<float>(y));
   }
 
-  void Scale(float sx, float sy, bool bPrepended = false);
-  void Rotate(float fRadian, bool bPrepended = false);
-
-  // Rotates counterclockwise around the (x, y) point.
-  void RotateAt(float fRadian, float x, float y, bool bPrepended = false);
-
-  void Shear(float fAlphaRadian, float fBetaRadian, bool bPrepended = false);
+  void Scale(float sx, float sy);
+  void Rotate(float fRadian);
+  void Shear(float fAlphaRadian, float fBetaRadian);
 
   void MatchRect(const CFX_FloatRect& dest, const CFX_FloatRect& src);
 
@@ -641,9 +598,6 @@ class CFX_Matrix {
   float d;
   float e;
   float f;
-
- private:
-  void ConcatInternal(const CFX_Matrix& other, bool prepend);
 };
 
 #endif  // CORE_FXCRT_FX_COORDINATES_H_

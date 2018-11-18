@@ -39,10 +39,21 @@ class RulesetMatcher {
   // This is logged as part of UMA. Hence existing values should not be re-
   // numbered or deleted. New values should be added before kLoadRulesetMax.
   enum LoadRulesetResult {
+    // Ruleset loading succeeded.
     kLoadSuccess = 0,
+
+    // Ruleset loading failed since the provided path did not exist.
     kLoadErrorInvalidPath = 1,
+
+    // Ruleset loading failed due to a file read error.
     kLoadErrorFileRead = 2,
-    kLoadErrorRulesetVerification = 3,
+
+    // Ruleset loading failed due to a checksum mismatch.
+    kLoadErrorChecksumMismatch = 3,
+
+    // Ruleset loading failed due to version header mismatch.
+    kLoadErrorVersionMismatch = 4,
+
     kLoadResultMax
   };
 
@@ -83,8 +94,8 @@ class RulesetMatcher {
   const std::string ruleset_data_;
 
   const flat::ExtensionIndexedRuleset* const root_;
-  const UrlPatternIndexMatcher blacklist_matcher_;
-  const UrlPatternIndexMatcher whitelist_matcher_;
+  const UrlPatternIndexMatcher blocking_matcher_;
+  const UrlPatternIndexMatcher allowing_matcher_;
   const UrlPatternIndexMatcher redirect_matcher_;
   const ExtensionMetadataList* const metadata_list_;
 

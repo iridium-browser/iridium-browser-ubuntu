@@ -21,10 +21,10 @@ static llvm::cl::opt<std::string>
                  llvm::cl::init("standalone"));
 
 void InMemoryToolResults::addResult(StringRef Key, StringRef Value) {
-  KVResults.push_back({Key.str(), Value.str()});
+  KVResults.push_back({Strings.save(Key), Strings.save(Value)});
 }
 
-std::vector<std::pair<std::string, std::string>>
+std::vector<std::pair<llvm::StringRef, llvm::StringRef>>
 InMemoryToolResults::AllKVResults() {
   return KVResults;
 }

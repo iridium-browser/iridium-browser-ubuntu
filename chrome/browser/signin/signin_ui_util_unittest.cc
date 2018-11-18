@@ -4,9 +4,10 @@
 
 #include "chrome/browser/signin/signin_ui_util.h"
 
+#include "base/bind.h"
 #include "base/macros.h"
-#include "base/test/histogram_tester.h"
-#include "base/test/user_action_tester.h"
+#include "base/test/metrics/histogram_tester.h"
+#include "base/test/metrics/user_action_tester.h"
 #include "build/buildflag.h"
 #include "chrome/browser/signin/account_tracker_service_factory.h"
 #include "chrome/browser/signin/fake_gaia_cookie_manager_service_builder.h"
@@ -14,11 +15,11 @@
 #include "chrome/browser/signin/fake_signin_manager_builder.h"
 #include "chrome/browser/signin/gaia_cookie_manager_service_factory.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
+#include "chrome/browser/signin/scoped_account_consistency.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/signin/signin_promo.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "components/signin/core/browser/profile_management_switches.h"
-#include "components/signin/core/browser/scoped_account_consistency.h"
 #include "components/signin/core/browser/signin_buildflags.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -82,7 +83,8 @@ class SigninUiUtilTestBrowserWindow : public TestBrowserWindow {
 class DiceSigninUiUtilTest : public BrowserWithTestWindowTest {
  public:
   DiceSigninUiUtilTest()
-      : scoped_account_consistency_(signin::AccountConsistencyMethod::kDice) {}
+      : BrowserWithTestWindowTest(
+            content::TestBrowserThreadBundle::IO_MAINLOOP) {}
   ~DiceSigninUiUtilTest() override = default;
 
   struct CreateDiceTurnSyncOnHelperParams {
@@ -130,11 +132,13 @@ class DiceSigninUiUtilTest : public BrowserWithTestWindowTest {
 
   // BrowserWithTestWindowTest:
   TestingProfile::TestingFactories GetTestingFactories() override {
-    return {{SigninManagerFactory::GetInstance(), BuildFakeSigninManagerBase},
+    return {{SigninManagerFactory::GetInstance(),
+             base::BindRepeating(&BuildFakeSigninManagerBase)},
             {ProfileOAuth2TokenServiceFactory::GetInstance(),
-             BuildFakeProfileOAuth2TokenService},
+             base::BindRepeating(&BuildFakeProfileOAuth2TokenService)},
             {GaiaCookieManagerServiceFactory::GetInstance(),
-             BuildFakeGaiaCookieManagerService}};
+             base::BindRepeating(
+                 &BuildFakeGaiaCookieManagerServiceNoFakeUrlFetcher)}};
   }
 
   // BrowserWithTestWindowTest:
@@ -168,7 +172,11 @@ class DiceSigninUiUtilTest : public BrowserWithTestWindowTest {
     histogram_tester.ExpectTotalCount(
         "Signin.SigninStartedAccessPoint.NotDefault", 0);
     histogram_tester.ExpectTotalCount(
-        "Signin.SigninStartedAccessPoint.NewAccount", 0);
+        "Signin.SigninStartedAccessPoint.NewAccountPreDice", 0);
+    histogram_tester.ExpectTotalCount(
+        "Signin.SigninStartedAccessPoint.NewAccountNoExistingAccount", 0);
+    histogram_tester.ExpectTotalCount(
+        "Signin.SigninStartedAccessPoint.NewAccountExistingAccount", 0);
   }
 
   void ExpectOneSigninStartedHistograms(
@@ -179,41 +187,86 @@ class DiceSigninUiUtilTest : public BrowserWithTestWindowTest {
     switch (expected_promo_action) {
       case signin_metrics::PromoAction::PROMO_ACTION_NO_SIGNIN_PROMO:
         histogram_tester.ExpectTotalCount(
-            "Signin.SigninStartedAccessPoint.NewAccount", 0);
-        histogram_tester.ExpectTotalCount(
             "Signin.SigninStartedAccessPoint.NotDefault", 0);
         histogram_tester.ExpectTotalCount(
             "Signin.SigninStartedAccessPoint.WithDefault", 0);
+        histogram_tester.ExpectTotalCount(
+            "Signin.SigninStartedAccessPoint.NewAccountPreDice", 0);
+        histogram_tester.ExpectTotalCount(
+            "Signin.SigninStartedAccessPoint.NewAccountNoExistingAccount", 0);
+        histogram_tester.ExpectTotalCount(
+            "Signin.SigninStartedAccessPoint.NewAccountExistingAccount", 0);
         break;
       case signin_metrics::PromoAction::PROMO_ACTION_WITH_DEFAULT:
-        histogram_tester.ExpectTotalCount(
-            "Signin.SigninStartedAccessPoint.NewAccount", 0);
         histogram_tester.ExpectTotalCount(
             "Signin.SigninStartedAccessPoint.NotDefault", 0);
         histogram_tester.ExpectUniqueSample(
             "Signin.SigninStartedAccessPoint.WithDefault", access_point_, 1);
+        histogram_tester.ExpectTotalCount(
+            "Signin.SigninStartedAccessPoint.NewAccountPreDice", 0);
+        histogram_tester.ExpectTotalCount(
+            "Signin.SigninStartedAccessPoint.NewAccountNoExistingAccount", 0);
+        histogram_tester.ExpectTotalCount(
+            "Signin.SigninStartedAccessPoint.NewAccountExistingAccount", 0);
         break;
       case signin_metrics::PromoAction::PROMO_ACTION_NOT_DEFAULT:
-        histogram_tester.ExpectTotalCount(
-            "Signin.SigninStartedAccessPoint.NewAccount", 0);
         histogram_tester.ExpectTotalCount(
             "Signin.SigninStartedAccessPoint.WithDefault", 0);
         histogram_tester.ExpectUniqueSample(
             "Signin.SigninStartedAccessPoint.NotDefault", access_point_, 1);
+        histogram_tester.ExpectTotalCount(
+            "Signin.SigninStartedAccessPoint.NewAccountPreDice", 0);
+        histogram_tester.ExpectTotalCount(
+            "Signin.SigninStartedAccessPoint.NewAccountNoExistingAccount", 0);
+        histogram_tester.ExpectTotalCount(
+            "Signin.SigninStartedAccessPoint.NewAccountExistingAccount", 0);
         break;
-      case signin_metrics::PromoAction::PROMO_ACTION_NEW_ACCOUNT:
+      case signin_metrics::PromoAction::PROMO_ACTION_NEW_ACCOUNT_PRE_DICE:
         histogram_tester.ExpectTotalCount(
             "Signin.SigninStartedAccessPoint.WithDefault", 0);
         histogram_tester.ExpectTotalCount(
             "Signin.SigninStartedAccessPoint.NotDefault", 0);
         histogram_tester.ExpectUniqueSample(
-            "Signin.SigninStartedAccessPoint.NewAccount", access_point_, 1);
+            "Signin.SigninStartedAccessPoint.NewAccountPreDice", access_point_,
+            1);
+        histogram_tester.ExpectTotalCount(
+            "Signin.SigninStartedAccessPoint.NewAccountNoExistingAccount", 0);
+        histogram_tester.ExpectTotalCount(
+            "Signin.SigninStartedAccessPoint.NewAccountExistingAccount", 0);
+        break;
+      case signin_metrics::PromoAction::
+          PROMO_ACTION_NEW_ACCOUNT_NO_EXISTING_ACCOUNT:
+        histogram_tester.ExpectTotalCount(
+            "Signin.SigninStartedAccessPoint.WithDefault", 0);
+        histogram_tester.ExpectTotalCount(
+            "Signin.SigninStartedAccessPoint.NotDefault", 0);
+        histogram_tester.ExpectTotalCount(
+            "Signin.SigninStartedAccessPoint.NewAccountPreDice", 0);
+        histogram_tester.ExpectUniqueSample(
+            "Signin.SigninStartedAccessPoint.NewAccountNoExistingAccount",
+            access_point_, 1);
+        histogram_tester.ExpectTotalCount(
+            "Signin.SigninStartedAccessPoint.NewAccountExistingAccount", 0);
+        break;
+      case signin_metrics::PromoAction::
+          PROMO_ACTION_NEW_ACCOUNT_EXISTING_ACCOUNT:
+        histogram_tester.ExpectTotalCount(
+            "Signin.SigninStartedAccessPoint.WithDefault", 0);
+        histogram_tester.ExpectTotalCount(
+            "Signin.SigninStartedAccessPoint.NotDefault", 0);
+        histogram_tester.ExpectTotalCount(
+            "Signin.SigninStartedAccessPoint.NewAccountPreDice", 0);
+        histogram_tester.ExpectTotalCount(
+            "Signin.SigninStartedAccessPoint.NewAccountNoExistingAccount", 0);
+        histogram_tester.ExpectUniqueSample(
+            "Signin.SigninStartedAccessPoint.NewAccountExistingAccount",
+            access_point_, 1);
         break;
     }
   }
 
-  const signin::ScopedAccountConsistency scoped_account_consistency_;
-  const signin_metrics::AccessPoint access_point_ =
+  const ScopedAccountConsistencyDice scoped_account_consistency_;
+  signin_metrics::AccessPoint access_point_ =
       signin_metrics::AccessPoint::ACCESS_POINT_BOOKMARK_BUBBLE;
 
   bool create_dice_turn_sync_on_helper_called_ = false;
@@ -270,6 +323,7 @@ TEST_F(DiceSigninUiUtilTest, EnableSyncWithExistingAccount) {
 }
 
 TEST_F(DiceSigninUiUtilTest, EnableSyncWithAccountThatNeedsReauth) {
+  AddTab(browser(), GURL("http://example.com"));
   // Add an account to the account tracker, but do not add it to the token
   // service in order for it to require a reauth before enabling sync.
   std::string account_id =
@@ -304,11 +358,14 @@ TEST_F(DiceSigninUiUtilTest, EnableSyncWithAccountThatNeedsReauth) {
     }
 
     // Verify that the active tab has the correct DICE sign-in URL.
-    content::WebContents* active_contents =
-        browser()->tab_strip_model()->GetActiveWebContents();
+    TabStripModel* tab_strip = browser()->tab_strip_model();
+    content::WebContents* active_contents = tab_strip->GetActiveWebContents();
     ASSERT_TRUE(active_contents);
     EXPECT_EQ(signin::GetSigninURLForDice(profile(), kMainEmail),
               active_contents->GetVisibleURL());
+    tab_strip->CloseWebContentsAt(
+        tab_strip->GetIndexOfWebContents(active_contents),
+        TabStripModel::CLOSE_USER_GESTURE);
   }
 }
 
@@ -324,11 +381,13 @@ TEST_F(DiceSigninUiUtilTest, EnableSyncForNewAccountWithNoTab) {
   ASSERT_FALSE(create_dice_turn_sync_on_helper_called_);
 
   ExpectOneSigninStartedHistograms(
-      histogram_tester, signin_metrics::PromoAction::PROMO_ACTION_NEW_ACCOUNT);
+      histogram_tester, signin_metrics::PromoAction::
+                            PROMO_ACTION_NEW_ACCOUNT_NO_EXISTING_ACCOUNT);
   EXPECT_EQ(
       1, user_action_tester.GetActionCount("Signin_Signin_FromBookmarkBubble"));
-  EXPECT_EQ(1, user_action_tester.GetActionCount(
-                   "Signin_SigninNewAccount_FromBookmarkBubble"));
+  EXPECT_EQ(1,
+            user_action_tester.GetActionCount(
+                "Signin_SigninNewAccountNoExistingAccount_FromBookmarkBubble"));
 
   // Verify that the active tab has the correct DICE sign-in URL.
   content::WebContents* active_contents =
@@ -336,6 +395,32 @@ TEST_F(DiceSigninUiUtilTest, EnableSyncForNewAccountWithNoTab) {
   ASSERT_TRUE(active_contents);
   EXPECT_EQ(signin::GetSigninURLForDice(profile(), ""),
             active_contents->GetVisibleURL());
+}
+
+TEST_F(DiceSigninUiUtilTest, EnableSyncForNewAccountWithNoTabWithExisting) {
+  base::HistogramTester histogram_tester;
+  base::UserActionTester user_action_tester;
+
+  // Add an account.
+  std::string account_id =
+      GetAccountTrackerService()->SeedAccountInfo(kMainEmail, kMainGaiaID);
+  GetTokenService()->UpdateCredentials(account_id, "token");
+
+  ExpectNoSigninStartedHistograms(histogram_tester);
+  EXPECT_EQ(
+      0, user_action_tester.GetActionCount("Signin_Signin_FromBookmarkBubble"));
+
+  EnableSync(AccountInfo(), false /* is_default_promo_account (not used)*/);
+  ASSERT_FALSE(create_dice_turn_sync_on_helper_called_);
+
+  ExpectOneSigninStartedHistograms(
+      histogram_tester,
+      signin_metrics::PromoAction::PROMO_ACTION_NEW_ACCOUNT_EXISTING_ACCOUNT);
+  EXPECT_EQ(
+      1, user_action_tester.GetActionCount("Signin_Signin_FromBookmarkBubble"));
+  EXPECT_EQ(1,
+            user_action_tester.GetActionCount(
+                "Signin_SigninNewAccountExistingAccount_FromBookmarkBubble"));
 }
 
 TEST_F(DiceSigninUiUtilTest, EnableSyncForNewAccountWithOneTab) {
@@ -351,11 +436,13 @@ TEST_F(DiceSigninUiUtilTest, EnableSyncForNewAccountWithOneTab) {
   ASSERT_FALSE(create_dice_turn_sync_on_helper_called_);
 
   ExpectOneSigninStartedHistograms(
-      histogram_tester, signin_metrics::PromoAction::PROMO_ACTION_NEW_ACCOUNT);
+      histogram_tester, signin_metrics::PromoAction::
+                            PROMO_ACTION_NEW_ACCOUNT_NO_EXISTING_ACCOUNT);
   EXPECT_EQ(
       1, user_action_tester.GetActionCount("Signin_Signin_FromBookmarkBubble"));
-  EXPECT_EQ(1, user_action_tester.GetActionCount(
-                   "Signin_SigninNewAccount_FromBookmarkBubble"));
+  EXPECT_EQ(1,
+            user_action_tester.GetActionCount(
+                "Signin_SigninNewAccountNoExistingAccount_FromBookmarkBubble"));
 
   // Verify that the active tab has the correct DICE sign-in URL.
   content::WebContents* active_contents =
@@ -363,6 +450,49 @@ TEST_F(DiceSigninUiUtilTest, EnableSyncForNewAccountWithOneTab) {
   ASSERT_TRUE(active_contents);
   EXPECT_EQ(signin::GetSigninURLForDice(profile(), ""),
             active_contents->GetVisibleURL());
+}
+
+TEST_F(DiceSigninUiUtilTest, GetAccountsForDicePromos) {
+  // Should start off with no accounts.
+  std::vector<AccountInfo> accounts = GetAccountsForDicePromos(profile());
+  EXPECT_TRUE(accounts.empty());
+
+  // TODO(tangltom): Flesh out this test.
+}
+
+TEST_F(DiceSigninUiUtilTest, MergeDiceSigninTab) {
+  base::UserActionTester user_action_tester;
+  EnableSync(AccountInfo(), false);
+  EXPECT_EQ(
+      1, user_action_tester.GetActionCount("Signin_Signin_FromBookmarkBubble"));
+
+  // Signin tab is reused.
+  EnableSync(AccountInfo(), false);
+  EXPECT_EQ(
+      1, user_action_tester.GetActionCount("Signin_Signin_FromBookmarkBubble"));
+
+  // Give focus to a different tab.
+  TabStripModel* tab_strip = browser()->tab_strip_model();
+  ASSERT_EQ(0, tab_strip->active_index());
+  GURL other_url = GURL("http://example.com");
+  AddTab(browser(), other_url);
+  tab_strip->ActivateTabAt(0, true);
+  ASSERT_EQ(other_url, tab_strip->GetActiveWebContents()->GetVisibleURL());
+  ASSERT_EQ(0, tab_strip->active_index());
+
+  // Extensions re-use the tab but do not take focus.
+  access_point_ = signin_metrics::AccessPoint::ACCESS_POINT_EXTENSIONS;
+  EnableSync(AccountInfo(), false);
+  EXPECT_EQ(
+      1, user_action_tester.GetActionCount("Signin_Signin_FromBookmarkBubble"));
+  EXPECT_EQ(0, tab_strip->active_index());
+
+  // Other access points re-use the tab and take focus.
+  access_point_ = signin_metrics::AccessPoint::ACCESS_POINT_SETTINGS;
+  EnableSync(AccountInfo(), false);
+  EXPECT_EQ(
+      1, user_action_tester.GetActionCount("Signin_Signin_FromBookmarkBubble"));
+  EXPECT_EQ(1, tab_strip->active_index());
 }
 #endif  // BUILDFLAG(ENABLE_DICE_SUPPORT)
 

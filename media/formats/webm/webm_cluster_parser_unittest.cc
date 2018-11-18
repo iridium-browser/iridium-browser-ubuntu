@@ -699,10 +699,7 @@ TEST_F(WebMClusterParserTest, ParseMultipleTextTracks) {
 
   const WebMClusterParser::TextBufferQueueMap& text_map =
       parser_->GetTextBuffers();
-  for (WebMClusterParser::TextBufferQueueMap::const_iterator itr =
-           text_map.begin();
-       itr != text_map.end();
-       ++itr) {
+  for (auto itr = text_map.begin(); itr != text_map.end(); ++itr) {
     const TextTracks::const_iterator find_result =
         text_tracks.find(itr->first);
     ASSERT_TRUE(find_result != text_tracks.end());
@@ -830,11 +827,9 @@ TEST_F(WebMClusterParserTest, ParseWithoutAnyDurationsSimpleBlocks) {
   // Absent DefaultDuration information, SimpleBlock durations are derived from
   // inter-buffer track timestamp delta if within the cluster. Duration for the
   // last block in a cluster is estimated independently for each track in the
-  // cluster. For video tracks we use the maximum seen so far. For audio we use
-  // the the minimum.
-  // TODO(chcunningham): Move audio over to use the maximum.
+  // cluster using the maximum seen so far.
 
-  const int kExpectedAudioEstimationInMs = 22;
+  const int kExpectedAudioEstimationInMs = 23;
   const int kExpectedVideoEstimationInMs = 34;
   const BlockInfo kBlockInfo1[] = {
       {kAudioTrackNum, 0, 23, true, NULL, 0, false},
@@ -902,11 +897,9 @@ TEST_F(WebMClusterParserTest, ParseWithoutAnyDurationsBlockGroups) {
   // Absent DefaultDuration and BlockDuration information, BlockGroup block
   // durations are derived from inter-buffer track timestamp delta if within the
   // cluster. Duration for the last block in a cluster is estimated
-  // independently for each track in the cluster. For video tracks we use the
-  // maximum seen so far. For audio we use the the minimum.
-  // TODO(chcunningham): Move audio over to use the maximum.
+  // independently for each track in the cluster using the maximum seen so far.
 
-  const int kExpectedAudioEstimationInMs = 22;
+  const int kExpectedAudioEstimationInMs = 23;
   const int kExpectedVideoEstimationInMs = 34;
   const BlockInfo kBlockInfo1[] = {
       {kAudioTrackNum, 0, -23, false, NULL, 0, false},

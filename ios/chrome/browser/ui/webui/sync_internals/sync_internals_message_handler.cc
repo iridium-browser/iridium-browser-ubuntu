@@ -19,7 +19,7 @@
 #include "components/sync/engine/events/protocol_event.h"
 #include "components/sync/js/js_event_details.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
-#include "ios/chrome/browser/sync/ios_chrome_profile_sync_service_factory.h"
+#include "ios/chrome/browser/sync/profile_sync_service_factory.h"
 #include "ios/chrome/common/channel_info.h"
 #include "ios/web/public/web_thread.h"
 #include "ios/web/public/webui/web_ui_ios.h"
@@ -131,9 +131,8 @@ void SyncInternalsMessageHandler::HandleRequestListOfTypes(
   base::DictionaryValue event_details;
   std::unique_ptr<base::ListValue> type_list(new base::ListValue());
   ModelTypeSet protocol_types = syncer::ProtocolTypes();
-  for (ModelTypeSet::Iterator it = protocol_types.First(); it.Good();
-       it.Inc()) {
-    type_list->AppendString(ModelTypeToString(it.Get()));
+  for (syncer::ModelType type : protocol_types) {
+    type_list->AppendString(ModelTypeToString(type));
   }
   event_details.Set(syncer::sync_ui_util::kTypes, std::move(type_list));
   web_ui()->CallJavascriptFunction(
@@ -225,8 +224,8 @@ void SyncInternalsMessageHandler::HandleJsEvent(const std::string& name,
 void SyncInternalsMessageHandler::SendAboutInfo() {
   syncer::SyncService* sync_service = GetSyncService();
   std::unique_ptr<base::DictionaryValue> value =
-      syncer::sync_ui_util::ConstructAboutInformation_DEPRECATED(sync_service,
-                                                                 GetChannel());
+      syncer::sync_ui_util::ConstructAboutInformation(sync_service,
+                                                      GetChannel());
   web_ui()->CallJavascriptFunction(
       syncer::sync_ui_util::kDispatchEvent,
       base::Value(syncer::sync_ui_util::kOnAboutInfoUpdated), *value);
@@ -236,6 +235,6 @@ void SyncInternalsMessageHandler::SendAboutInfo() {
 syncer::SyncService* SyncInternalsMessageHandler::GetSyncService() {
   ios::ChromeBrowserState* browser_state =
       ios::ChromeBrowserState::FromWebUIIOS(web_ui());
-  return IOSChromeProfileSyncServiceFactory::GetForBrowserState(
+  return ProfileSyncServiceFactory::GetForBrowserState(
       browser_state->GetOriginalChromeBrowserState());
 }

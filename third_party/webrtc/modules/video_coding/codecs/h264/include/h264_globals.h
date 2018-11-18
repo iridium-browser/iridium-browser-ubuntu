@@ -16,6 +16,8 @@
 
 #include <string>
 
+#include "rtc_base/checks.h"
+
 namespace webrtc {
 
 // The packetization types that we support: single, aggregated, and fragmented.
@@ -51,11 +53,6 @@ inline std::string ToString(H264PacketizationMode mode) {
   }
   RTC_NOTREACHED();
   return "";
-}
-
-inline std::ostream& operator<<(std::ostream& stream,
-                                H264PacketizationMode mode) {
-  return stream << ToString(mode);
 }
 
 struct NaluInfo {

@@ -106,11 +106,13 @@ class NET_EXPORT HttpServerPropertiesManager : public HttpServerProperties {
       const url::SchemeHostPort& origin,
       const AlternativeService& alternative_service,
       base::Time expiration,
-      const QuicTransportVersionVector& advertised_versions) override;
+      const quic::QuicTransportVersionVector& advertised_versions) override;
   bool SetAlternativeServices(const url::SchemeHostPort& origin,
                               const AlternativeServiceInfoVector&
                                   alternative_service_info_vector) override;
   void MarkAlternativeServiceBroken(
+      const AlternativeService& alternative_service) override;
+  void MarkAlternativeServiceBrokenUntilDefaultNetworkChanges(
       const AlternativeService& alternative_service) override;
   void MarkAlternativeServiceRecentlyBroken(
       const AlternativeService& alternative_service) override;
@@ -120,6 +122,7 @@ class NET_EXPORT HttpServerPropertiesManager : public HttpServerProperties {
       const AlternativeService& alternative_service) override;
   void ConfirmAlternativeService(
       const AlternativeService& alternative_service) override;
+  bool OnDefaultNetworkChanged() override;
   const AlternativeServiceMap& alternative_service_map() const override;
   std::unique_ptr<base::Value> GetAlternativeServiceInfoAsValue()
       const override;
@@ -131,9 +134,10 @@ class NET_EXPORT HttpServerPropertiesManager : public HttpServerProperties {
   const ServerNetworkStats* GetServerNetworkStats(
       const url::SchemeHostPort& server) override;
   const ServerNetworkStatsMap& server_network_stats_map() const override;
-  bool SetQuicServerInfo(const QuicServerId& server_id,
+  bool SetQuicServerInfo(const quic::QuicServerId& server_id,
                          const std::string& server_info) override;
-  const std::string* GetQuicServerInfo(const QuicServerId& server_id) override;
+  const std::string* GetQuicServerInfo(
+      const quic::QuicServerId& server_id) override;
   const QuicServerInfoMap& quic_server_info_map() const override;
   size_t max_server_configs_stored_in_properties() const override;
   void SetMaxServerConfigsStoredInProperties(
@@ -165,7 +169,9 @@ class NET_EXPORT HttpServerPropertiesManager : public HttpServerProperties {
     DETECTED_CORRUPTED_PREFS = 12,
     SET_QUIC_SERVER_INFO = 13,
     CLEAR_SERVER_NETWORK_STATS = 14,
-    NUM_LOCATIONS = 15,
+    MARK_ALTERNATIVE_SERVICE_BROKEN_UNTIL_DEFAULT_NETWORK_CHANGES = 15,
+    ON_DEFAULT_NETWORK_CHANGED = 16,
+    NUM_LOCATIONS = 17,
   };
 
   // --------------------

@@ -26,17 +26,16 @@
 
 #include "third_party/blink/renderer/core/page/create_window.h"
 
+#include "base/metrics/histogram_macros.h"
+#include "services/metrics/public/cpp/ukm_builders.h"
 #include "services/network/public/mojom/request_context_frame_type.mojom-blink.h"
 #include "third_party/blink/public/platform/web_input_event.h"
-#include "third_party/blink/public/platform/web_keyboard_event.h"
-#include "third_party/blink/public/platform/web_mouse_event.h"
 #include "third_party/blink/public/platform/web_url_request.h"
 #include "third_party/blink/public/web/web_window_features.h"
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/events/current_input_event.h"
-#include "third_party/blink/renderer/core/events/ui_event_with_key_state.h"
 #include "third_party/blink/renderer/core/exported/web_view_impl.h"
+#include "third_party/blink/renderer/core/frame/ad_tracker.h"
 #include "third_party/blink/renderer/core/frame/csp/content_security_policy.h"
 #include "third_party/blink/renderer/core/frame/frame_client.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
@@ -46,101 +45,13 @@
 #include "third_party/blink/renderer/core/page/focus_controller.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
-#include "third_party/blink/renderer/platform/keyboard_codes.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_request.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 #include "third_party/blink/renderer/platform/weborigin/security_policy.h"
 
 namespace blink {
-
-namespace {
-
-void UpdatePolicyForEvent(const WebInputEvent* input_event,
-                          NavigationPolicy* policy) {
-  if (!input_event)
-    return;
-
-  unsigned short button_number = 0;
-  if (input_event->GetType() == WebInputEvent::kMouseUp) {
-    const WebMouseEvent* mouse_event =
-        static_cast<const WebMouseEvent*>(input_event);
-
-    switch (mouse_event->button) {
-      case WebMouseEvent::Button::kLeft:
-        button_number = 0;
-        break;
-      case WebMouseEvent::Button::kMiddle:
-        button_number = 1;
-        break;
-      case WebMouseEvent::Button::kRight:
-        button_number = 2;
-        break;
-      default:
-        return;
-    }
-  } else if ((WebInputEvent::IsKeyboardEventType(input_event->GetType()) &&
-              static_cast<const WebKeyboardEvent*>(input_event)
-                      ->windows_key_code == VKEY_RETURN) ||
-             WebInputEvent::IsGestureEventType(input_event->GetType())) {
-    // Keyboard and gesture events can simulate mouse events.
-    button_number = 0;
-  } else {
-    return;
-  }
-
-  bool ctrl = input_event->GetModifiers() & WebInputEvent::kControlKey;
-  bool shift = input_event->GetModifiers() & WebInputEvent::kShiftKey;
-  bool alt = input_event->GetModifiers() & WebInputEvent::kAltKey;
-  bool meta = input_event->GetModifiers() & WebInputEvent::kMetaKey;
-
-  NavigationPolicy user_policy = *policy;
-  NavigationPolicyFromMouseEvent(button_number, ctrl, shift, alt, meta,
-                                 &user_policy);
-
-  // When the input event suggests a download, but the navigation was initiated
-  // by script, we should not override it.
-  if (user_policy == kNavigationPolicyDownload &&
-      *policy != kNavigationPolicyIgnore)
-    return;
-
-  // User and app agree that we want a new window; let the app override the
-  // decorations.
-  if (user_policy == kNavigationPolicyNewWindow &&
-      *policy == kNavigationPolicyNewPopup)
-    return;
-  *policy = user_policy;
-}
-
-NavigationPolicy GetNavigationPolicy(const WebInputEvent* current_event,
-                                     const WebWindowFeatures& features) {
-  // If our default configuration was modified by a script or wasn't
-  // created by a user gesture, then show as a popup. Else, let this
-  // new window be opened as a toplevel window.
-  bool as_popup = !features.tool_bar_visible || !features.status_bar_visible ||
-                  !features.scrollbars_visible || !features.menu_bar_visible ||
-                  !features.resizable;
-  NavigationPolicy policy =
-      as_popup ? kNavigationPolicyNewPopup : kNavigationPolicyNewForegroundTab;
-  UpdatePolicyForEvent(current_event, &policy);
-  return policy;
-}
-
-}  // anonymous namespace
-
-NavigationPolicy EffectiveNavigationPolicy(NavigationPolicy policy,
-                                           const WebInputEvent* current_event,
-                                           const WebWindowFeatures& features) {
-  if (policy == kNavigationPolicyIgnore)
-    return GetNavigationPolicy(current_event, features);
-  if (policy == kNavigationPolicyNewBackgroundTab &&
-      GetNavigationPolicy(current_event, features) !=
-          kNavigationPolicyNewBackgroundTab &&
-      !UIEventWithKeyState::NewTabModifierSetFromIsolatedWorld()) {
-    return kNavigationPolicyNewForegroundTab;
-  }
-  return policy;
-}
 
 // Though isspace() considers \t and \v to be whitespace, Win IE doesn't when
 // parsing window features.
@@ -270,10 +181,8 @@ WebWindowFeatures GetWindowFeaturesFromString(const String& feature_string) {
 static Frame* ReuseExistingWindow(LocalFrame& active_frame,
                                   LocalFrame& lookup_frame,
                                   const AtomicString& frame_name,
-                                  NavigationPolicy policy,
                                   const KURL& destination_url) {
-  if (!frame_name.IsEmpty() && !EqualIgnoringASCIICase(frame_name, "_blank") &&
-      policy == kNavigationPolicyIgnore) {
+  if (!frame_name.IsEmpty() && !EqualIgnoringASCIICase(frame_name, "_blank")) {
     if (Frame* frame = lookup_frame.FindFrameForNavigation(
             frame_name, active_frame, destination_url)) {
       if (!EqualIgnoringASCIICase(frame_name, "_self")) {
@@ -290,17 +199,58 @@ static Frame* ReuseExistingWindow(LocalFrame& active_frame,
   return nullptr;
 }
 
+enum class WindowOpenFromAdState {
+  // This is used for a UMA histogram. Please never alter existing values, only
+  // append new ones and make sure to update enums.xml.
+  kAdScriptAndAdFrame = 0,
+  kNonAdScriptAndAdFrame = 1,
+  kAdScriptAndNonAdFrame = 2,
+  kNonAdScriptAndNonAdFrame = 3,
+  kMaxValue = kNonAdScriptAndNonAdFrame,
+};
+
+static void MaybeLogWindowOpen(LocalFrame& opener_frame) {
+  AdTracker* ad_tracker = opener_frame.GetAdTracker();
+  if (!ad_tracker) {
+    return;
+  }
+
+  bool is_ad_subframe = opener_frame.IsAdSubframe();
+  bool is_ad_script_in_stack = ad_tracker->IsAdScriptInStack();
+
+  // Log to UMA.
+  WindowOpenFromAdState state =
+      is_ad_subframe ? (is_ad_script_in_stack
+                            ? WindowOpenFromAdState::kAdScriptAndAdFrame
+                            : WindowOpenFromAdState::kNonAdScriptAndAdFrame)
+                     : (is_ad_script_in_stack
+                            ? WindowOpenFromAdState::kAdScriptAndNonAdFrame
+                            : WindowOpenFromAdState::kNonAdScriptAndNonAdFrame);
+  UMA_HISTOGRAM_ENUMERATION("Blink.WindowOpen.FromAdState", state);
+
+  // Log to UKM.
+  ukm::UkmRecorder* ukm_recorder = opener_frame.GetDocument()->UkmRecorder();
+  ukm::SourceId source_id = opener_frame.GetDocument()->UkmSourceID();
+  if (source_id != ukm::kInvalidSourceId) {
+    ukm::builders::AbusiveExperienceHeuristic_WindowOpen(source_id)
+        .SetFromAdSubframe(is_ad_subframe)
+        .SetFromAdScript(is_ad_script_in_stack)
+        .Record(ukm_recorder);
+  }
+}
+
 static Frame* CreateNewWindow(LocalFrame& opener_frame,
                               const FrameLoadRequest& request,
                               const WebWindowFeatures& features,
-                              NavigationPolicy policy,
+                              bool force_new_foreground_tab,
                               bool& created) {
   Page* old_page = opener_frame.GetPage();
   if (!old_page)
     return nullptr;
 
-  policy =
-      EffectiveNavigationPolicy(policy, CurrentInputEvent::Get(), features);
+  NavigationPolicy policy = force_new_foreground_tab
+                                ? kNavigationPolicyNewForegroundTab
+                                : NavigationPolicyForCreateWindow(features);
 
   const SandboxFlags sandbox_flags =
       opener_frame.GetDocument()->IsSandboxed(
@@ -315,6 +265,8 @@ static Frame* CreateNewWindow(LocalFrame& opener_frame,
 
   if (page == old_page) {
     Frame* frame = &opener_frame.Tree().Top();
+    if (!opener_frame.CanNavigate(*frame))
+      return nullptr;
     if (request.GetShouldSetOpener() == kMaybeSetOpener)
       frame->Client()->SetOpener(&opener_frame);
     return frame;
@@ -348,6 +300,7 @@ static Frame* CreateNewWindow(LocalFrame& opener_frame,
   page->GetChromeClient().SetWindowRectWithAdjustment(window_rect, frame);
   page->GetChromeClient().Show(policy);
 
+  MaybeLogWindowOpen(opener_frame);
   created = true;
   return &frame;
 }
@@ -357,7 +310,7 @@ static Frame* CreateWindowHelper(LocalFrame& opener_frame,
                                  LocalFrame& lookup_frame,
                                  const FrameLoadRequest& request,
                                  const WebWindowFeatures& features,
-                                 NavigationPolicy policy,
+                                 bool force_new_foreground_tab,
                                  bool& created) {
   DCHECK(request.GetResourceRequest().RequestorOrigin() ||
          opener_frame.GetDocument()->Url().IsEmpty());
@@ -365,14 +318,15 @@ static Frame* CreateWindowHelper(LocalFrame& opener_frame,
             network::mojom::RequestContextFrameType::kAuxiliary);
   probe::windowOpen(opener_frame.GetDocument(),
                     request.GetResourceRequest().Url(), request.FrameName(),
-                    features, Frame::HasTransientUserActivation(&opener_frame));
+                    features,
+                    LocalFrame::HasTransientUserActivation(&opener_frame));
   created = false;
 
   Frame* window =
-      features.noopener
+      features.noopener || force_new_foreground_tab
           ? nullptr
           : ReuseExistingWindow(active_frame, lookup_frame, request.FrameName(),
-                                policy, request.GetResourceRequest().Url());
+                                request.GetResourceRequest().Url());
 
   if (!window) {
     // Sandboxed frames cannot open new auxiliary browsing contexts.
@@ -390,7 +344,7 @@ static Frame* CreateWindowHelper(LocalFrame& opener_frame,
   }
 
   if (window) {
-    // JS can run inside reuseExistingWindow (via onblur), which can detach
+    // JS can run inside ReuseExistingWindow (via onblur), which can detach
     // the target window.
     if (!window->Client())
       return nullptr;
@@ -399,7 +353,8 @@ static Frame* CreateWindowHelper(LocalFrame& opener_frame,
     return window;
   }
 
-  return CreateNewWindow(opener_frame, request, features, policy, created);
+  return CreateNewWindow(opener_frame, request, features,
+                         force_new_foreground_tab, created);
 }
 
 DOMWindow* CreateWindow(const String& url_string,
@@ -418,8 +373,9 @@ DOMWindow* CreateWindow(const String& url_string,
   if (!completed_url.IsEmpty() && !completed_url.IsValid()) {
     UseCounter::Count(active_frame, WebFeature::kWindowOpenWithInvalidURL);
     exception_state.ThrowDOMException(
-        kSyntaxError, "Unable to open a window with invalid URL '" +
-                          completed_url.GetString() + "'.\n");
+        DOMExceptionCode::kSyntaxError,
+        "Unable to open a window with invalid URL '" +
+            completed_url.GetString() + "'.\n");
     return nullptr;
   }
 
@@ -427,9 +383,7 @@ DOMWindow* CreateWindow(const String& url_string,
       opener_frame.GetDocument()->GetContentSecurityPolicy() &&
       !ContentSecurityPolicy::ShouldBypassMainWorld(
           opener_frame.GetDocument())) {
-    const int kJavascriptSchemeLength = sizeof("javascript:") - 1;
-    String script_source = DecodeURLEscapeSequences(completed_url.GetString())
-                               .Substring(kJavascriptSchemeLength);
+    String script_source = DecodeURLEscapeSequences(completed_url.GetString());
 
     if (!opener_frame.GetDocument()
              ->GetContentSecurityPolicy()
@@ -456,6 +410,8 @@ DOMWindow* CreateWindow(const String& url_string,
   // an embedder-initiated navigation.  FrameLoader assumes no responsibility
   // for generating an embedder-initiated navigation's referrer, so we need to
   // ensure the proper referrer is set now.
+  // TODO(domfarolino): Stop setting ResourceRequest's HTTP Referrer and store
+  // this is a separate member. See https://crbug.com/850813.
   frame_request.GetResourceRequest().SetHTTPReferrer(
       SecurityPolicy::GenerateReferrer(
           active_frame->GetDocument()->GetReferrerPolicy(), completed_url,
@@ -464,7 +420,7 @@ DOMWindow* CreateWindow(const String& url_string,
   // Records HasUserGesture before the value is invalidated inside
   // createWindow(LocalFrame& openerFrame, ...).
   // This value will be set in ResourceRequest loaded in a new LocalFrame.
-  bool has_user_gesture = Frame::HasTransientUserActivation(&opener_frame);
+  bool has_user_gesture = LocalFrame::HasTransientUserActivation(&opener_frame);
 
   // We pass the opener frame for the lookupFrame in case the active frame is
   // different from the opener frame, and the name references a frame relative
@@ -472,7 +428,7 @@ DOMWindow* CreateWindow(const String& url_string,
   bool created;
   Frame* new_frame = CreateWindowHelper(
       opener_frame, *active_frame, opener_frame, frame_request, window_features,
-      kNavigationPolicyIgnore, created);
+      false /* force_new_foreground_tab */, created);
   if (!new_frame)
     return nullptr;
   if (new_frame->DomWindow()->IsInsecureScriptAccess(calling_window,
@@ -492,18 +448,21 @@ DOMWindow* CreateWindow(const String& url_string,
     FrameLoadRequest request(calling_window.document(),
                              ResourceRequest(completed_url));
     request.GetResourceRequest().SetHasUserGesture(has_user_gesture);
-    new_frame->Navigate(request);
+    if (const WebInputEvent* input_event = CurrentInputEvent::Get()) {
+      request.SetInputStartTime(input_event->TimeStamp());
+    }
+    new_frame->Navigate(request, WebFrameLoadType::kStandard);
   } else if (!url_string.IsEmpty()) {
-    new_frame->Navigate(*calling_window.document(), completed_url, false,
-                        has_user_gesture ? UserGestureStatus::kActive
-                                         : UserGestureStatus::kNone);
+    new_frame->ScheduleNavigation(*calling_window.document(), completed_url,
+                                  WebFrameLoadType::kStandard,
+                                  has_user_gesture ? UserGestureStatus::kActive
+                                                   : UserGestureStatus::kNone);
   }
   return window_features.noopener ? nullptr : new_frame->DomWindow();
 }
 
 void CreateWindowForRequest(const FrameLoadRequest& request,
-                            LocalFrame& opener_frame,
-                            NavigationPolicy policy) {
+                            LocalFrame& opener_frame) {
   DCHECK(request.GetResourceRequest().RequestorOrigin() ||
          (opener_frame.GetDocument() &&
           opener_frame.GetDocument()->Url().IsEmpty()));
@@ -516,15 +475,12 @@ void CreateWindowForRequest(const FrameLoadRequest& request,
       opener_frame.GetDocument()->IsSandboxed(kSandboxPopups))
     return;
 
-  if (policy == kNavigationPolicyCurrentTab)
-    policy = kNavigationPolicyNewForegroundTab;
-
   WebWindowFeatures features;
   features.noopener = request.GetShouldSetOpener() == kNeverSetOpener;
   bool created;
-  Frame* new_frame =
-      CreateWindowHelper(opener_frame, opener_frame, opener_frame, request,
-                         features, policy, created);
+  Frame* new_frame = CreateWindowHelper(
+      opener_frame, opener_frame, opener_frame, request, features,
+      true /* force_new_foreground_tab */, created);
   if (!new_frame)
     return;
   if (request.GetShouldSendReferrer() == kMaybeSendReferrer) {
@@ -537,8 +493,14 @@ void CreateWindowForRequest(const FrameLoadRequest& request,
   // TODO(japhet): Form submissions on RemoteFrames don't work yet.
   FrameLoadRequest new_request(nullptr, request.GetResourceRequest());
   new_request.SetForm(request.Form());
+  if (const WebInputEvent* input_event = CurrentInputEvent::Get()) {
+    new_request.SetInputStartTime(input_event->TimeStamp());
+  }
+  auto blob_url_token = request.GetBlobURLToken();
+  if (blob_url_token)
+    new_request.SetBlobURLToken(std::move(blob_url_token));
   if (new_frame->IsLocalFrame())
-    ToLocalFrame(new_frame)->Loader().Load(new_request);
+    ToLocalFrame(new_frame)->Loader().StartNavigation(new_request);
 }
 
 }  // namespace blink

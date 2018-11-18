@@ -36,7 +36,8 @@ public:
     Results.addResult(Key, Value);
   }
 
-  std::vector<std::pair<std::string, std::string>> AllKVResults() override {
+  std::vector<std::pair<llvm::StringRef, llvm::StringRef>>
+  AllKVResults() override {
     return Results.AllKVResults();
   }
 
@@ -103,7 +104,12 @@ llvm::Error AllTUsToolExecutor::execute(
   {
     llvm::ThreadPool Pool(ThreadCount == 0 ? llvm::hardware_concurrency()
                                            : ThreadCount);
-
+    llvm::SmallString<128> InitialWorkingDir;
+    if (auto EC = llvm::sys::fs::current_path(InitialWorkingDir)) {
+      InitialWorkingDir = "";
+      llvm::errs() << "Error while getting current working directory: "
+                   << EC.message() << "\n";
+    }
     for (std::string File : Files) {
       Pool.async(
           [&](std::string Path) {
@@ -115,11 +121,20 @@ llvm::Error AllTUsToolExecutor::execute(
             for (const auto &FileAndContent : OverlayFiles)
               Tool.mapVirtualFile(FileAndContent.first(),
                                   FileAndContent.second);
+            // Do not restore working dir from multiple threads to avoid races.
+            Tool.setRestoreWorkingDir(false);
             if (Tool.run(Action.first.get()))
               AppendError(llvm::Twine("Failed to run action on ") + Path +
                           "\n");
           },
           File);
+    }
+    // Make sure all tasks have finished before resetting the working directory.
+    Pool.wait();
+    if (!InitialWorkingDir.empty()) {
+      if (auto EC = llvm::sys::fs::set_current_path(InitialWorkingDir))
+        llvm::errs() << "Error while restoring working directory: "
+                     << EC.message() << "\n";
     }
   }
 

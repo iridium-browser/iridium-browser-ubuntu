@@ -4,7 +4,6 @@
 
 #include "ui/views/accessibility/ax_aura_obj_cache.h"
 
-#include "base/memory/ptr_util.h"
 #include "base/memory/singleton.h"
 #include "base/strings/string_util.h"
 #include "ui/aura/client/aura_constants.h"
@@ -16,6 +15,7 @@
 #include "ui/views/accessibility/ax_window_obj_wrapper.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
+#include "ui/views/widget/widget_delegate.h"
 
 namespace views {
 
@@ -31,6 +31,9 @@ AXAuraObjCache* AXAuraObjCache::GetInstance() {
 }
 
 AXAuraObjWrapper* AXAuraObjCache::GetOrCreate(View* view) {
+  // Avoid problems with transient focus events. https://crbug.com/729449
+  if (!view->GetWidget())
+    return nullptr;
   return CreateInternal<AXViewObjWrapper>(view, view_to_id_map_);
 }
 
@@ -69,8 +72,9 @@ void AXAuraObjCache::Remove(Widget* widget) {
 
   // When an entire widget is deleted, it doesn't always send a notification
   // on each of its views, so we need to explore them recursively.
-  if (widget->GetRootView())
-    RemoveViewSubtree(widget->GetRootView());
+  auto* view = widget->GetRootView();
+  if (view)
+    RemoveViewSubtree(view);
 }
 
 void AXAuraObjCache::Remove(aura::Window* window, aura::Window* parent) {
@@ -83,28 +87,14 @@ void AXAuraObjCache::Remove(aura::Window* window, aura::Window* parent) {
 
 AXAuraObjWrapper* AXAuraObjCache::Get(int32_t id) {
   auto it = cache_.find(id);
-
-  if (it == cache_.end())
-    return nullptr;
-
-  return it->second.get();
-}
-
-void AXAuraObjCache::Remove(int32_t id) {
-  AXAuraObjWrapper* obj = Get(id);
-
-  if (id == -1 || !obj)
-    return;
-
-  cache_.erase(id);
+  return it != cache_.end() ? it->second.get() : nullptr;
 }
 
 void AXAuraObjCache::GetTopLevelWindows(
     std::vector<AXAuraObjWrapper*>* children) {
-  for (auto it = window_to_id_map_.begin(); it != window_to_id_map_.end();
-       ++it) {
-    if (!it->first->parent())
-      children->push_back(GetOrCreate(it->first));
+  for (const auto& it : window_to_id_map_) {
+    if (!it.first->parent())
+      children->push_back(GetOrCreate(it.first));
   }
 }
 
@@ -135,24 +125,28 @@ AXAuraObjCache::~AXAuraObjCache() {
 }
 
 View* AXAuraObjCache::GetFocusedView() {
-  if (root_windows_.empty())
-    return nullptr;
-  aura::client::FocusClient* focus_client =
-      GetFocusClient(*root_windows_.begin());
-  if (!focus_client)
-    return nullptr;
+  Widget* focused_widget = focused_widget_for_testing_;
+  aura::Window* focused_window = nullptr;
+  if (!focused_widget) {
+    if (root_windows_.empty())
+      return nullptr;
+    aura::client::FocusClient* focus_client =
+        GetFocusClient(*root_windows_.begin());
+    if (!focus_client)
+      return nullptr;
 
-  aura::Window* focused_window = focus_client->GetFocusedWindow();
-  if (!focused_window)
-    return nullptr;
-
-  Widget* focused_widget = Widget::GetWidgetForNativeView(focused_window);
-  while (!focused_widget) {
-    focused_window = focused_window->parent();
+    focused_window = focus_client->GetFocusedWindow();
     if (!focused_window)
-      break;
+      return nullptr;
 
     focused_widget = Widget::GetWidgetForNativeView(focused_window);
+    while (!focused_widget) {
+      focused_window = focused_window->parent();
+      if (!focused_window)
+        break;
+
+      focused_widget = Widget::GetWidgetForNativeView(focused_window);
+    }
   }
 
   if (!focused_widget)
@@ -166,9 +160,18 @@ View* AXAuraObjCache::GetFocusedView() {
   if (focused_view)
     return focused_view;
 
-  if (focused_window->GetProperty(
+  if (focused_window &&
+      focused_window->GetProperty(
           aura::client::kAccessibilityFocusFallsbackToWidgetKey)) {
-    // If no view is focused, falls back to root view.
+    // If focused widget has non client view, falls back to first child view of
+    // its client view. We don't expect that non client view gets keyboard
+    // focus.
+    if (focused_widget->non_client_view() &&
+        focused_widget->non_client_view()->client_view() &&
+        focused_widget->non_client_view()->client_view()->has_children()) {
+      return focused_widget->non_client_view()->client_view()->child_at(0);
+    }
+
     return focused_widget->GetRootView();
   }
 
@@ -204,11 +207,11 @@ AXAuraObjWrapper* AXAuraObjCache::CreateInternal(
   if (it != aura_view_to_id_map.end())
     return Get(it->second);
 
-  AXAuraObjWrapper* wrapper = new AuraViewWrapper(aura_view);
+  auto wrapper = std::make_unique<AuraViewWrapper>(aura_view);
   int32_t id = wrapper->GetUniqueId().Get();
   aura_view_to_id_map[aura_view] = id;
-  cache_[id] = base::WrapUnique(wrapper);
-  return wrapper;
+  cache_[id] = std::move(wrapper);
+  return cache_[id].get();
 }
 
 template <typename AuraView>
@@ -219,10 +222,7 @@ int32_t AXAuraObjCache::GetIDInternal(
     return -1;
 
   auto it = aura_view_to_id_map.find(aura_view);
-  if (it != aura_view_to_id_map.end())
-    return it->second;
-
-  return -1;
+  return it != aura_view_to_id_map.end() ? it->second : -1;
 }
 
 template <typename AuraView>
@@ -233,7 +233,7 @@ void AXAuraObjCache::RemoveInternal(
   if (id == -1)
     return;
   aura_view_to_id_map.erase(aura_view);
-  Remove(id);
+  cache_.erase(id);
 }
 
 }  // namespace views

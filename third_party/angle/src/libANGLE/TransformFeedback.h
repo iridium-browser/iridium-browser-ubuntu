@@ -9,6 +9,7 @@
 
 #include "libANGLE/RefCountObject.h"
 
+#include "common/PackedEnums.h"
 #include "common/angleutils.h"
 #include "libANGLE/Debug.h"
 
@@ -42,7 +43,7 @@ class TransformFeedbackState final : angle::NonCopyable
     std::string mLabel;
 
     bool mActive;
-    GLenum mPrimitiveMode;
+    PrimitiveMode mPrimitiveMode;
     bool mPaused;
     GLsizeiptr mVerticesDrawn;
     GLsizeiptr mVertexCapacity;
@@ -57,19 +58,20 @@ class TransformFeedback final : public RefCountObject, public LabeledObject
   public:
     TransformFeedback(rx::GLImplFactory *implFactory, GLuint id, const Caps &caps);
     ~TransformFeedback() override;
-    Error onDestroy(const Context *context) override;
+    void onDestroy(const Context *context) override;
 
     void setLabel(const std::string &label) override;
     const std::string &getLabel() const override;
 
-    void begin(const Context *context, GLenum primitiveMode, Program *program);
+    void begin(const Context *context, PrimitiveMode primitiveMode, Program *program);
     void end(const Context *context);
     void pause();
     void resume();
 
-    bool isActive() const;
+    bool isActive() const { return mState.mActive; }
+
     bool isPaused() const;
-    GLenum getPrimitiveMode() const;
+    PrimitiveMode getPrimitiveMode() const;
     // Validates that the vertices produced by a draw call will fit in the bound transform feedback
     // buffers.
     bool checkBufferSpaceForDraw(GLsizei count, GLsizei primcount) const;
@@ -97,15 +99,15 @@ class TransformFeedback final : public RefCountObject, public LabeledObject
     rx::TransformFeedbackImpl *getImplementation();
     const rx::TransformFeedbackImpl *getImplementation() const;
 
-    void onBindingChanged(bool bound);
+    void onBindingChanged(const Context *context, bool bound);
 
   private:
     void bindProgram(const Context *context, Program *program);
 
     TransformFeedbackState mState;
-    rx::TransformFeedbackImpl* mImplementation;
+    rx::TransformFeedbackImpl *mImplementation;
 };
 
-}
+}  // namespace gl
 
-#endif // LIBANGLE_TRANSFORM_FEEDBACK_H_
+#endif  // LIBANGLE_TRANSFORM_FEEDBACK_H_

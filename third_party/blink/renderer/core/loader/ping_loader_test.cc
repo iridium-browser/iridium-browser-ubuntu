@@ -12,6 +12,7 @@
 #include "third_party/blink/renderer/core/loader/frame_loader.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
 #include "third_party/blink/renderer/platform/loader/fetch/substitute_data.h"
+#include "third_party/blink/renderer/platform/network/encoded_form_data.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 #include "third_party/blink/renderer/platform/testing/url_test_helpers.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
@@ -47,9 +48,10 @@ class PingLoaderTest : public PageTestBase {
   }
 
   void SetDocumentURL(const KURL& url) {
-    FrameLoadRequest request(nullptr, ResourceRequest(url),
-                             SubstituteData(SharedBuffer::Create()));
-    GetFrame().Loader().Load(request);
+    GetFrame().Loader().CommitNavigation(
+        ResourceRequest(url), SubstituteData(SharedBuffer::Create()),
+        ClientRedirectPolicy::kNotClientRedirect,
+        base::UnguessableToken::Create());
     blink::test::RunPendingTasks();
     ASSERT_EQ(url.GetString(), GetDocument().Url().GetString());
   }

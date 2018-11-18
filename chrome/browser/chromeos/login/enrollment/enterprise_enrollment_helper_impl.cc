@@ -20,12 +20,15 @@
 #include "chrome/browser/chromeos/policy/enrollment_status_chromeos.h"
 #include "chrome/browser/chromeos/policy/policy_oauth2_token_fetcher.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
+#include "chrome/browser/net/system_network_context_manager.h"
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "components/policy/core/common/cloud/cloud_policy_constants.h"
+#include "components/policy/core/common/cloud/dm_auth.h"
 #include "google_apis/gaia/gaia_auth_consumer.h"
 #include "google_apis/gaia/gaia_auth_fetcher.h"
 #include "google_apis/gaia/gaia_constants.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 
 namespace {
 
@@ -50,7 +53,8 @@ class TokenRevoker : public GaiaAuthConsumer {
 TokenRevoker::TokenRevoker()
     : gaia_fetcher_(this,
                     GaiaConstants::kChromeOSSource,
-                    g_browser_process->system_request_context()) {}
+                    g_browser_process->system_network_context_manager()
+                        ->GetSharedURLLoaderFactory()) {}
 
 TokenRevoker::~TokenRevoker() {}
 
@@ -97,7 +101,9 @@ void EnterpriseEnrollmentHelperImpl::EnrollUsingAuthCode(
   oauth_status_ = OAUTH_STARTED_WITH_AUTH_CODE;
   oauth_fetcher_.reset(policy::PolicyOAuth2TokenFetcher::CreateInstance());
   oauth_fetcher_->StartWithAuthCode(
-      auth_code, g_browser_process->system_request_context(),
+      auth_code,
+      g_browser_process->system_network_context_manager()
+          ->GetSharedURLLoaderFactory(),
       base::Bind(&EnterpriseEnrollmentHelperImpl::OnTokenFetched,
                  weak_ptr_factory_.GetWeakPtr(),
                  fetch_additional_token /* is_additional_token */));
@@ -108,12 +114,20 @@ void EnterpriseEnrollmentHelperImpl::EnrollUsingToken(
   DCHECK(oauth_status_ != OAUTH_STARTED_WITH_TOKEN);
   if (oauth_status_ == OAUTH_NOT_STARTED)
     oauth_status_ = OAUTH_STARTED_WITH_TOKEN;
-  DoEnroll(token);
+  DoEnroll(policy::DMAuth::FromOAuthToken(token));
 }
 
 void EnterpriseEnrollmentHelperImpl::EnrollUsingAttestation() {
   CHECK(enrollment_config_.is_mode_attestation());
-  DoEnroll("");  // The token is not used in attestation mode.
+  // The tokens are not used in attestation mode.
+  DoEnroll(policy::DMAuth::NoAuth());
+}
+
+void EnterpriseEnrollmentHelperImpl::EnrollForOfflineDemo() {
+  CHECK_EQ(enrollment_config_.mode,
+           policy::EnrollmentConfig::MODE_OFFLINE_DEMO);
+  // The tokens are not used in offline demo mode.
+  DoEnroll(policy::DMAuth::NoAuth());
 }
 
 void EnterpriseEnrollmentHelperImpl::ClearAuth(const base::Closure& callback) {
@@ -131,23 +145,39 @@ void EnterpriseEnrollmentHelperImpl::ClearAuth(const base::Closure& callback) {
         (new TokenRevoker())->Start(oauth_fetcher_->OAuth2RefreshToken());
 
       oauth_fetcher_.reset();
-    } else if (oauth_token_.length()) {
+    } else if (auth_data_ && auth_data_->has_oauth_token()) {
       // EnrollUsingToken was called.
-      (new TokenRevoker())->Start(oauth_token_);
+      (new TokenRevoker())->Start(auth_data_->oauth_token());
     }
   }
-
+  auth_data_.reset();
   chromeos::ProfileHelper::Get()->ClearSigninProfile(
       base::Bind(&EnterpriseEnrollmentHelperImpl::OnSigninProfileCleared,
                  weak_ptr_factory_.GetWeakPtr(), callback));
 }
 
-void EnterpriseEnrollmentHelperImpl::DoEnroll(const std::string& token) {
-  DCHECK(token == oauth_token_ || oauth_token_.empty());
+bool EnterpriseEnrollmentHelperImpl::ShouldCheckLicenseType() const {
+  // The license selection dialog is not used when doing Zero Touch or setting
+  // up offline demo-mode, or when forced to enroll by server.
+  if (enrollment_config_.is_mode_attestation() ||
+      enrollment_config_.mode == policy::EnrollmentConfig::MODE_SERVER_FORCED ||
+      enrollment_config_.mode == policy::EnrollmentConfig::MODE_OFFLINE_DEMO) {
+    return false;
+  }
+  return !base::CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kEnterpriseDisableLicenseTypeSelection);
+}
+
+void EnterpriseEnrollmentHelperImpl::DoEnroll(
+    std::unique_ptr<policy::DMAuth> auth_data) {
+  CHECK(auth_data);
+  DCHECK(!auth_data_ || auth_data_->Equals(*auth_data));
   DCHECK(enrollment_config_.is_mode_attestation() ||
+         enrollment_config_.mode ==
+             policy::EnrollmentConfig::MODE_OFFLINE_DEMO ||
          oauth_status_ == OAUTH_STARTED_WITH_AUTH_CODE ||
          oauth_status_ == OAUTH_STARTED_WITH_TOKEN);
-  oauth_token_ = token;
+  auth_data_ = std::move(auth_data);
   policy::BrowserPolicyConnectorChromeOS* connector =
       g_browser_process->platform_part()->browser_policy_connector_chromeos();
   // Re-enrollment is not implemented for Active Directory.
@@ -162,23 +192,16 @@ void EnterpriseEnrollmentHelperImpl::DoEnroll(const std::string& token) {
     return;
   }
 
-  bool check_license_type = false;
-  // The license selection dialog is not used when doing Zero Touch.
-  if (!enrollment_config_.is_mode_attestation()) {
-    check_license_type = !base::CommandLine::ForCurrentProcess()->HasSwitch(
-        chromeos::switches::kEnterpriseDisableLicenseTypeSelection);
-  }
-
   connector->ScheduleServiceInitialization(0);
   policy::DeviceCloudPolicyInitializer* dcp_initializer =
       connector->GetDeviceCloudPolicyInitializer();
   CHECK(dcp_initializer);
   dcp_initializer->PrepareEnrollment(
       connector->device_management_service(), ad_join_delegate_,
-      enrollment_config_, token,
+      enrollment_config_, auth_data_->Clone(),
       base::Bind(&EnterpriseEnrollmentHelperImpl::OnEnrollmentFinished,
                  weak_ptr_factory_.GetWeakPtr()));
-  if (check_license_type) {
+  if (ShouldCheckLicenseType()) {
     dcp_initializer->CheckAvailableLicenses(
         base::Bind(&EnterpriseEnrollmentHelperImpl::OnLicenseMapObtained,
                    weak_ptr_factory_.GetWeakPtr()));
@@ -199,6 +222,7 @@ void EnterpriseEnrollmentHelperImpl::UseLicenseType(policy::LicenseType type) {
 }
 
 void EnterpriseEnrollmentHelperImpl::GetDeviceAttributeUpdatePermission() {
+  DCHECK(auth_data_);
   policy::BrowserPolicyConnectorChromeOS* connector =
       g_browser_process->platform_part()->browser_policy_connector_chromeos();
   // Don't update device attributes for Active Directory management.
@@ -211,7 +235,7 @@ void EnterpriseEnrollmentHelperImpl::GetDeviceAttributeUpdatePermission() {
   policy::CloudPolicyClient* client = policy_manager->core()->client();
 
   client->GetDeviceAttributeUpdatePermission(
-      oauth_token_,
+      auth_data_->Clone(),
       base::Bind(
           &EnterpriseEnrollmentHelperImpl::OnDeviceAttributeUpdatePermission,
           weak_ptr_factory_.GetWeakPtr()));
@@ -220,6 +244,7 @@ void EnterpriseEnrollmentHelperImpl::GetDeviceAttributeUpdatePermission() {
 void EnterpriseEnrollmentHelperImpl::UpdateDeviceAttributes(
     const std::string& asset_id,
     const std::string& location) {
+  DCHECK(auth_data_);
   policy::BrowserPolicyConnectorChromeOS* connector =
       g_browser_process->platform_part()->browser_policy_connector_chromeos();
   policy::DeviceCloudPolicyManagerChromeOS* policy_manager =
@@ -227,7 +252,7 @@ void EnterpriseEnrollmentHelperImpl::UpdateDeviceAttributes(
   policy::CloudPolicyClient* client = policy_manager->core()->client();
 
   client->UpdateDeviceAttributes(
-      oauth_token_, asset_id, location,
+      auth_data_->Clone(), asset_id, location,
       base::Bind(
           &EnterpriseEnrollmentHelperImpl::OnDeviceAttributeUploadCompleted,
           weak_ptr_factory_.GetWeakPtr()));
@@ -253,7 +278,9 @@ void EnterpriseEnrollmentHelperImpl::OnTokenFetched(
   std::string refresh_token = oauth_fetcher_->OAuth2RefreshToken();
   oauth_fetcher_.reset(policy::PolicyOAuth2TokenFetcher::CreateInstance());
   oauth_fetcher_->StartWithRefreshToken(
-      refresh_token, g_browser_process->system_request_context(),
+      refresh_token,
+      g_browser_process->system_network_context_manager()
+          ->GetSharedURLLoaderFactory(),
       base::Bind(&EnterpriseEnrollmentHelperImpl::OnTokenFetched,
                  weak_ptr_factory_.GetWeakPtr(),
                  false /* is_additional_token */));
@@ -409,6 +436,10 @@ void EnterpriseEnrollmentHelperImpl::ReportEnrollmentStatus(
         case policy::DM_STATUS_SERVICE_ARC_DISABLED:
           NOTREACHED();
           break;
+        case policy::DM_STATUS_SERVICE_CONSUMER_ACCOUNT_WITH_PACKAGED_LICENSE:
+          UMA(policy::
+                  kMetricEnrollmentRegisterConsumerAccountWithPackagedLicense);
+          break;
       }
       break;
     case policy::EnrollmentStatus::REGISTRATION_BAD_MODE:
@@ -481,6 +512,10 @@ void EnterpriseEnrollmentHelperImpl::ReportEnrollmentStatus(
       break;
     case policy::EnrollmentStatus::LICENSE_REQUEST_FAILED:
       UMA(policy::kMetricEnrollmentLicenseRequestFailed);
+      break;
+    case policy::EnrollmentStatus::OFFLINE_POLICY_LOAD_FAILED:
+    case policy::EnrollmentStatus::OFFLINE_POLICY_DECODING_FAILED:
+      UMA(policy::kMetricEnrollmentRegisterPolicyResponseInvalid);
       break;
   }
 }

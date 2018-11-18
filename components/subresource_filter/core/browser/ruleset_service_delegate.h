@@ -19,7 +19,7 @@ class RulesetServiceDelegate {
   virtual ~RulesetServiceDelegate() = default;
 
   // Posts |task| to be executed on the UI thread after browser start-up.
-  virtual void PostAfterStartupTask(base::Closure task) = 0;
+  virtual void PostAfterStartupTask(base::OnceClosure task) = 0;
 
   // Schedules file open and use it as ruleset file. In the case of success,
   // the new and valid |base::File| is passed to |callback|. In the case of
@@ -27,6 +27,7 @@ class RulesetServiceDelegate {
   // ruleset file will be used (if any).
   virtual void TryOpenAndSetRulesetFile(
       const base::FilePath& file_path,
+      int expected_checksum,
       base::OnceCallback<void(base::File)> callback) = 0;
 
   // Redistributes the new version of the |ruleset| to all existing consumers,

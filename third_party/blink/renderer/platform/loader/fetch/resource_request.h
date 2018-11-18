@@ -29,43 +29,31 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_LOADER_FETCH_RESOURCE_REQUEST_H_
 
 #include <memory>
+#include "base/macros.h"
+#include "base/optional.h"
+#include "base/time/time.h"
+#include "base/unguessable_token.h"
 #include "services/network/public/mojom/cors.mojom-blink.h"
 #include "services/network/public/mojom/fetch_api.mojom-blink.h"
 #include "services/network/public/mojom/request_context_frame_type.mojom-shared.h"
 #include "third_party/blink/public/mojom/net/ip_address_space.mojom-blink.h"
 #include "third_party/blink/public/platform/modules/fetch/fetch_api_request.mojom-shared.h"
+#include "third_party/blink/public/platform/resource_request_blocked_reason.h"
+#include "third_party/blink/public/platform/web_content_security_policy_struct.h"
 #include "third_party/blink/public/platform/web_url_request.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_load_priority.h"
-#include "third_party/blink/renderer/platform/network/encoded_form_data.h"
 #include "third_party/blink/renderer/platform/network/http_header_map.h"
 #include "third_party/blink/renderer/platform/network/http_names.h"
 #include "third_party/blink/renderer/platform/network/http_parsers.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/weborigin/referrer.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
-#include "third_party/blink/renderer/platform/wtf/optional.h"
 #include "third_party/blink/renderer/platform/wtf/ref_counted.h"
+#include "third_party/blink/renderer/platform/wtf/time.h"
 
 namespace blink {
 
-enum class ResourceRequestBlockedReason {
-  kCSP,
-  kMixedContent,
-  kOrigin,
-  kInspector,
-  kSubresourceFilter,
-  kOther,
-  kContentType,
-  kNone
-};
-
-enum InputToLoadPerfMetricReportPolicy : uint8_t {
-  kNoReport,    // Don't report metrics for this ResourceRequest.
-  kReportLink,  // Report metrics for this request as initiated by a link click.
-  kReportIntent,  // Report metrics for this request as initiated by an intent.
-};
-
-struct CrossThreadResourceRequestData;
+class EncodedFormData;
 
 // A ResourceRequest is a "request" object for ResourceLoader. Conceptually
 // it is https://fetch.spec.whatwg.org/#concept-request, but it contains
@@ -73,10 +61,7 @@ struct CrossThreadResourceRequestData;
 // of this class and WebURLLoader needs it. See WebURLRequest and
 // WrappedResourceRequest.
 //
-// There are cases where we need to copy a request across threads, and
-// CrossThreadResourceRequestData is a struct for the purpose. When you add a
-// member variable to this class, do not forget to add the corresponding
-// one in CrossThreadResourceRequestData and write copying logic.
+// This class is thread-bound. Do not copy/pass an instance across threads.
 class PLATFORM_EXPORT ResourceRequest final {
   USING_FAST_MALLOC(ResourceRequest);
 
@@ -86,12 +71,13 @@ class PLATFORM_EXPORT ResourceRequest final {
   ResourceRequest();
   explicit ResourceRequest(const String& url_string);
   explicit ResourceRequest(const KURL&);
-  explicit ResourceRequest(CrossThreadResourceRequestData*);
 
   // TODO(toyoshim): Use std::unique_ptr as much as possible, and hopefully
   // make ResourceRequest WTF_MAKE_NONCOPYABLE. See crbug.com/787704.
   ResourceRequest(const ResourceRequest&);
   ResourceRequest& operator=(const ResourceRequest&);
+
+  ~ResourceRequest();
 
   // Constructs a new ResourceRequest for a redirect from this instance.
   std::unique_ptr<ResourceRequest> CreateRedirectRequest(
@@ -101,9 +87,6 @@ class PLATFORM_EXPORT ResourceRequest final {
       const String& new_referrer,
       ReferrerPolicy new_referrer_policy,
       bool skip_service_worker) const;
-
-  // Gets a copy of the data suitable for passing to another thread.
-  std::unique_ptr<CrossThreadResourceRequestData> CopyData() const;
 
   bool IsNull() const;
 
@@ -115,14 +98,23 @@ class PLATFORM_EXPORT ResourceRequest final {
   mojom::FetchCacheMode GetCacheMode() const;
   void SetCacheMode(mojom::FetchCacheMode);
 
-  double TimeoutInterval() const;  // May return 0 when using platform default.
-  void SetTimeoutInterval(double);
+  base::TimeDelta TimeoutInterval() const;
+  void SetTimeoutInterval(base::TimeDelta);
 
   const KURL& SiteForCookies() const;
   void SetSiteForCookies(const KURL&);
 
-  scoped_refptr<const SecurityOrigin> RequestorOrigin() const;
-  void SetRequestorOrigin(scoped_refptr<const SecurityOrigin>);
+  // The origin of the request, specified at
+  // https://fetch.spec.whatwg.org/#concept-request-origin. This origin can be
+  // null upon request, corresponding to the "client" value in the spec. In that
+  // case client's origin will be set when requesting. See
+  // ResourceFetcher::RequestResource.
+  const scoped_refptr<const SecurityOrigin>& RequestorOrigin() const {
+    return requestor_origin_;
+  }
+  void SetRequestorOrigin(scoped_refptr<const SecurityOrigin> origin) {
+    requestor_origin_ = std::move(origin);
+  }
 
   const AtomicString& HttpMethod() const;
   void SetHTTPMethod(const AtomicString&);
@@ -141,13 +133,25 @@ class PLATFORM_EXPORT ResourceRequest final {
     SetHTTPHeaderField(HTTPNames::Content_Type, http_content_type);
   }
 
-  bool DidSetHTTPReferrer() const { return did_set_http_referrer_; }
+  // TODO(domfarolino): Remove this once we stop storing the generated referrer
+  // as a header, and instead use a separate member. See
+  // https://crbug.com/850813.
   const AtomicString& HttpReferrer() const {
     return HttpHeaderField(HTTPNames::Referer);
   }
-  ReferrerPolicy GetReferrerPolicy() const { return referrer_policy_; }
   void SetHTTPReferrer(const Referrer&);
+  bool DidSetHTTPReferrer() const { return did_set_http_referrer_; }
   void ClearHTTPReferrer();
+
+  void SetReferrerPolicy(ReferrerPolicy referrer_policy) {
+    referrer_policy_ = referrer_policy;
+  }
+  ReferrerPolicy GetReferrerPolicy() const { return referrer_policy_; }
+
+  void SetReferrerString(const String& referrer_string) {
+    referrer_string_ = referrer_string;
+  }
+  const String& ReferrerString() const { return referrer_string_; }
 
   const AtomicString& HttpOrigin() const {
     return HttpHeaderField(HTTPNames::Origin);
@@ -214,12 +218,6 @@ class PLATFORM_EXPORT ResourceRequest final {
   bool HasUserGesture() const { return has_user_gesture_; }
   void SetHasUserGesture(bool);
 
-  // True if request should be downloaded to file.
-  bool DownloadToFile() const { return download_to_file_; }
-  void SetDownloadToFile(bool download_to_file) {
-    download_to_file_ = download_to_file;
-  }
-
   // True if request shuold be downloaded to blob.
   bool DownloadToBlob() const { return download_to_blob_; }
   void SetDownloadToBlob(bool download_to_blob) {
@@ -262,10 +260,10 @@ class PLATFORM_EXPORT ResourceRequest final {
     }
   }
 
-  WebURLRequest::RequestContext GetRequestContext() const {
+  mojom::RequestContextType GetRequestContext() const {
     return request_context_;
   }
-  void SetRequestContext(WebURLRequest::RequestContext context) {
+  void SetRequestContext(mojom::RequestContextType context) {
     request_context_ = context;
   }
 
@@ -281,6 +279,21 @@ class PLATFORM_EXPORT ResourceRequest final {
   }
   void SetFetchRequestMode(network::mojom::FetchRequestMode mode) {
     fetch_request_mode_ = mode;
+  }
+
+  // A resource request's fetch_importance_mode_ is a developer-set priority
+  // hint that differs from priority_. It is used in
+  // ResourceFetcher::ComputeLoadPriority to possibly influence the resolved
+  // priority of a resource request.
+  // This member exists both here and in FetchParameters, as opposed just in
+  // the latter because the fetch() API creates a ResourceRequest object long
+  // before its associaed FetchParameters, so this makes it easier to
+  // communicate an importance value down to the lower-level fetching code.
+  mojom::FetchImportanceMode GetFetchImportanceMode() const {
+    return fetch_importance_mode_;
+  }
+  void SetFetchImportanceMode(mojom::FetchImportanceMode mode) {
+    fetch_importance_mode_ = mode;
   }
 
   network::mojom::FetchCredentialsMode GetFetchCredentialsMode() const {
@@ -313,20 +326,8 @@ class PLATFORM_EXPORT ResourceRequest final {
   bool CacheControlContainsNoStore() const;
   bool HasCacheValidatorFields() const;
 
-  bool CheckForBrowserSideNavigation() const {
-    return check_for_browser_side_navigation_;
-  }
-  void SetCheckForBrowserSideNavigation(bool check) {
-    check_for_browser_side_navigation_ = check;
-  }
-
   bool WasDiscarded() const { return was_discarded_; }
   void SetWasDiscarded(bool was_discarded) { was_discarded_ = was_discarded; }
-
-  double UiStartTime() const { return ui_start_time_; }
-  void SetUIStartTime(double ui_start_time_seconds) {
-    ui_start_time_ = ui_start_time_seconds;
-  }
 
   // https://wicg.github.io/cors-rfc1918/#external-request
   bool IsExternalRequest() const { return is_external_request_; }
@@ -339,34 +340,57 @@ class PLATFORM_EXPORT ResourceRequest final {
     cors_preflight_policy_ = policy;
   }
 
-  InputToLoadPerfMetricReportPolicy InputPerfMetricReportPolicy() const {
-    return input_perf_metric_report_policy_;
-  }
-  void SetInputPerfMetricReportPolicy(
-      InputToLoadPerfMetricReportPolicy input_perf_metric_report_policy) {
-    input_perf_metric_report_policy_ = input_perf_metric_report_policy;
-  }
-
   void SetRedirectStatus(RedirectStatus status) { redirect_status_ = status; }
   RedirectStatus GetRedirectStatus() const { return redirect_status_; }
 
-  void SetSuggestedFilename(const WTF::Optional<String>& suggested_filename) {
+  void SetSuggestedFilename(const base::Optional<String>& suggested_filename) {
     suggested_filename_ = suggested_filename;
   }
-  const WTF::Optional<String>& GetSuggestedFilename() const {
+  const base::Optional<String>& GetSuggestedFilename() const {
     return suggested_filename_;
   }
 
-  void SetNavigationStartTime(double);
-  double NavigationStartTime() const { return navigation_start_; }
-
-  void SetIsSameDocumentNavigation(bool is_same_document) {
-    is_same_document_navigation_ = is_same_document;
-  }
-  bool IsSameDocumentNavigation() const { return is_same_document_navigation_; }
+  void SetNavigationStartTime(TimeTicks);
+  TimeTicks NavigationStartTime() const { return navigation_start_; }
 
   void SetIsAdResource() { is_ad_resource_ = true; }
   bool IsAdResource() const { return is_ad_resource_; }
+
+  void SetInitiatorCSP(const WebContentSecurityPolicyList& initiator_csp) {
+    initiator_csp_ = initiator_csp;
+  }
+  const WebContentSecurityPolicyList& GetInitiatorCSP() const {
+    return initiator_csp_;
+  }
+
+  void SetUpgradeIfInsecure(bool upgrade_if_insecure) {
+    upgrade_if_insecure_ = upgrade_if_insecure;
+  }
+  bool UpgradeIfInsecure() const { return upgrade_if_insecure_; }
+
+  bool IsRevalidating() const { return is_revalidating_; }
+  void SetIsRevalidating(bool value) { is_revalidating_ = value; }
+  void SetIsAutomaticUpgrade(bool is_automatic_upgrade) {
+    is_automatic_upgrade_ = is_automatic_upgrade;
+  }
+  bool IsAutomaticUpgrade() const { return is_automatic_upgrade_; }
+
+  void SetAllowStaleResponse(bool value) { allow_stale_response_ = value; }
+  bool AllowsStaleResponse() const { return allow_stale_response_; }
+
+  const base::Optional<base::UnguessableToken>& GetDevToolsToken() const {
+    return devtools_token_;
+  }
+  void SetDevToolsToken(
+      const base::Optional<base::UnguessableToken>& devtools_token) {
+    devtools_token_ = devtools_token;
+  }
+
+  void SetOriginPolicy(const String& policy) { origin_policy_ = policy; }
+  const String& GetOriginPolicy() const { return origin_policy_; }
+
+  void SetRequestedWith(const String& value) { requested_with_ = value; }
+  const String& GetRequestedWith() const { return requested_with_; }
 
  private:
   using SharableExtraData =
@@ -377,15 +401,10 @@ class PLATFORM_EXPORT ResourceRequest final {
   bool NeedsHTTPOrigin() const;
 
   KURL url_;
-  double timeout_interval_;  // 0 is a magic value for platform default on
-                             // platforms that have one.
+  // TimeDelta::Max() represents the default timeout on platforms that have one.
+  base::TimeDelta timeout_interval_;
   KURL site_for_cookies_;
 
-  // The SecurityOrigin specified by the ResourceLoaderOptions in case e.g.
-  // when the fetching was initiated in an isolated world. Set by
-  // ResourceFetcher but only when needed.
-  //
-  // TODO(crbug.com/811669): Merge with some of the other origin variables.
   scoped_refptr<const SecurityOrigin> requestor_origin_;
 
   AtomicString http_method_;
@@ -395,11 +414,11 @@ class PLATFORM_EXPORT ResourceRequest final {
   bool report_upload_progress_ : 1;
   bool report_raw_headers_ : 1;
   bool has_user_gesture_ : 1;
-  bool download_to_file_ : 1;
   bool download_to_blob_ : 1;
   bool use_stream_on_response_ : 1;
   bool keepalive_ : 1;
   bool should_reset_app_cache_ : 1;
+  bool allow_stale_response_ : 1;
   mojom::FetchCacheMode cache_mode_;
   bool skip_service_worker_ : 1;
   ResourceLoadPriority priority_;
@@ -409,88 +428,42 @@ class PLATFORM_EXPORT ResourceRequest final {
   int app_cache_host_id_;
   WebURLRequest::PreviewsState previews_state_;
   scoped_refptr<SharableExtraData> sharable_extra_data_;
-  WebURLRequest::RequestContext request_context_;
+  mojom::RequestContextType request_context_;
   network::mojom::RequestContextFrameType frame_type_;
   network::mojom::FetchRequestMode fetch_request_mode_;
+  mojom::FetchImportanceMode fetch_importance_mode_;
   network::mojom::FetchCredentialsMode fetch_credentials_mode_;
   network::mojom::FetchRedirectMode fetch_redirect_mode_;
   String fetch_integrity_;
+  // TODO(domfarolino): Use AtomicString for referrer_string_ once
+  // off-main-thread fetch is fully implemented and ResourceRequest never gets
+  // transferred between threads. See https://crbug.com/706331.
+  String referrer_string_;
   ReferrerPolicy referrer_policy_;
   bool did_set_http_referrer_;
-  bool check_for_browser_side_navigation_;
   bool was_discarded_;
-  double ui_start_time_;
   bool is_external_request_;
   network::mojom::CORSPreflightPolicy cors_preflight_policy_;
-  bool is_same_document_navigation_;
-  InputToLoadPerfMetricReportPolicy input_perf_metric_report_policy_;
   RedirectStatus redirect_status_;
-  WTF::Optional<String> suggested_filename_;
+  base::Optional<String> suggested_filename_;
 
   mutable CacheControlHeader cache_control_header_cache_;
 
-  static double default_timeout_interval_;
+  static base::TimeDelta default_timeout_interval_;
 
-  double navigation_start_ = 0;
+  TimeTicks navigation_start_;
 
   bool is_ad_resource_ = false;
-};
+  WebContentSecurityPolicyList initiator_csp_;
 
-// This class is needed to copy a ResourceRequest across threads, because it
-// has some members which cannot be transferred across threads (AtomicString
-// for example).
-// There are some rules / restrictions:
-//  - This struct cannot contain an object that cannot be transferred across
-//    threads (e.g., AtomicString)
-//  - Non-simple members need explicit copying (e.g., String::IsolatedCopy,
-//    KURL::Copy) rather than the copy constructor or the assignment operator.
-struct CrossThreadResourceRequestData {
-  WTF_MAKE_NONCOPYABLE(CrossThreadResourceRequestData);
-  USING_FAST_MALLOC(CrossThreadResourceRequestData);
+  bool upgrade_if_insecure_ = false;
+  bool is_revalidating_ = false;
 
- public:
-  CrossThreadResourceRequestData() = default;
-  KURL url_;
+  bool is_automatic_upgrade_ = false;
 
-  mojom::FetchCacheMode cache_mode_;
-  double timeout_interval_;
-  KURL site_for_cookies_;
-  scoped_refptr<const SecurityOrigin> requestor_origin_;
-
-  String http_method_;
-  std::unique_ptr<CrossThreadHTTPHeaderMapData> http_headers_;
-  scoped_refptr<EncodedFormData> http_body_;
-  bool allow_stored_credentials_;
-  bool report_upload_progress_;
-  bool has_user_gesture_;
-  bool download_to_file_;
-  bool download_to_blob_;
-  bool skip_service_worker_;
-  bool use_stream_on_response_;
-  bool keepalive_;
-  bool should_reset_app_cache_;
-  ResourceLoadPriority priority_;
-  int intra_priority_value_;
-  int requestor_id_;
-  int plugin_child_id_;
-  int app_cache_host_id_;
-  WebURLRequest::RequestContext request_context_;
-  network::mojom::RequestContextFrameType frame_type_;
-  network::mojom::FetchRequestMode fetch_request_mode_;
-  network::mojom::FetchCredentialsMode fetch_credentials_mode_;
-  network::mojom::FetchRedirectMode fetch_redirect_mode_;
-  String fetch_integrity_;
-  WebURLRequest::PreviewsState previews_state_;
-  ReferrerPolicy referrer_policy_;
-  bool did_set_http_referrer_;
-  bool check_for_browser_side_navigation_;
-  double ui_start_time_;
-  bool is_external_request_;
-  network::mojom::CORSPreflightPolicy cors_preflight_policy_;
-  InputToLoadPerfMetricReportPolicy input_perf_metric_report_policy_;
-  ResourceRequest::RedirectStatus redirect_status_;
-  base::Optional<String> suggested_filename_;
-  bool is_ad_resource_;
+  base::Optional<base::UnguessableToken> devtools_token_;
+  String origin_policy_;
+  String requested_with_;
 };
 
 }  // namespace blink

@@ -6,7 +6,6 @@ package org.chromium.chrome.browser.survey;
 
 import android.content.Context;
 import android.content.SharedPreferences;
-import android.os.AsyncTask;
 import android.os.Handler;
 import android.support.annotation.IntDef;
 import android.support.annotation.VisibleForTesting;
@@ -17,9 +16,11 @@ import org.chromium.base.ContextUtils;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
+import org.chromium.base.task.AsyncTask;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.ChromeSwitches;
+import org.chromium.chrome.browser.ChromeVersionInfo;
 import org.chromium.chrome.browser.infobar.InfoBarContainer;
 import org.chromium.chrome.browser.infobar.InfoBarContainerLayout.Item;
 import org.chromium.chrome.browser.infobar.InfoBarIdentifier;
@@ -28,11 +29,11 @@ import org.chromium.chrome.browser.infobar.SurveyInfoBarDelegate;
 import org.chromium.chrome.browser.preferences.privacy.PrivacyPreferencesManager;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.tab.Tab.TabHidingType;
 import org.chromium.chrome.browser.tab.TabObserver;
 import org.chromium.chrome.browser.tabmodel.EmptyTabModelSelectorObserver;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.tabmodel.TabModelSelectorObserver;
-import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.components.variations.VariationsAssociatedData;
 
 import java.lang.annotation.Retention;
@@ -63,12 +64,14 @@ public class ChromeSurveyController implements InfoBarContainer.InfoBarAnimation
 
     /**
      * Reasons that the user was rejected from being selected for a survey
-     *  Note: these values must match the SurveyFilteringResult enum in enums.xml.
+     * Note: these values cannot change and must match the SurveyFilteringResult enum in enums.xml
+     * because they're written to logs.
      */
     @IntDef({FilteringResult.SURVEY_INFOBAR_ALREADY_DISPLAYED,
             FilteringResult.FORCE_SURVEY_ON_COMMAND_PRESENT,
             FilteringResult.USER_ALREADY_SAMPLED_TODAY, FilteringResult.MAX_NUMBER_MISSING,
-            FilteringResult.ROLLED_NON_ZERO_NUMBER, FilteringResult.USER_SELECTED_FOR_SURVEY})
+            FilteringResult.ROLLED_NON_ZERO_NUMBER, FilteringResult.USER_SELECTED_FOR_SURVEY,
+            FilteringResult.SURVEY_ALREADY_EXISTS})
     @Retention(RetentionPolicy.SOURCE)
     public @interface FilteringResult {
         int SURVEY_INFOBAR_ALREADY_DISPLAYED = 0;
@@ -77,7 +80,9 @@ public class ChromeSurveyController implements InfoBarContainer.InfoBarAnimation
         int MAX_NUMBER_MISSING = 4;
         int ROLLED_NON_ZERO_NUMBER = 5;
         int USER_SELECTED_FOR_SURVEY = 6;
-        int ENUM_BOUNDARY = 7;
+        int SURVEY_ALREADY_EXISTS = 7;
+        // Number of entries
+        int NUM_ENTRIES = 8;
     }
 
     /**
@@ -92,7 +97,8 @@ public class ChromeSurveyController implements InfoBarContainer.InfoBarAnimation
         int CLOSE_BUTTON = 1;
         int VISIBLE_INDIRECT = 2;
         int HIDDEN_INDIRECT = 3;
-        int ENUM_BOUNDARY = 4;
+        // Number of entries
+        int NUM_ENTRIES = 4;
     }
 
     private TabModelSelector mTabModelSelector;
@@ -138,8 +144,10 @@ public class ChromeSurveyController implements InfoBarContainer.InfoBarAnimation
             }
         };
 
-        String siteContext = String.format(
-                "Is Modern Design Enabled? %s", FeatureUtilities.isChromeModernDesignEnabled());
+        String siteContext = ChromeVersionInfo.getProductVersion() + ","
+                + (ChromeFeatureList.isEnabled(ChromeFeatureList.HORIZONTAL_TAB_SWITCHER_ANDROID)
+                                  ? "HorizontalTabSwitcher"
+                                  : "NotHorizontalTabSwitcher");
         surveyController.downloadSurvey(context, siteId, onSuccessRunnable, siteContext);
     }
 
@@ -205,7 +213,7 @@ public class ChromeSurveyController implements InfoBarContainer.InfoBarAnimation
     @VisibleForTesting
     void showSurveyInfoBar(Tab tab, String siteId) {
         mSurveyInfoBarTab = tab;
-        tab.getInfoBarContainer().addAnimationListener(this);
+        InfoBarContainer.get(tab).addAnimationListener(this);
         SurveyInfoBar.showSurveyInfoBar(tab.getWebContents(), siteId, true,
                 R.drawable.chrome_sync_logo, getSurveyInfoBarDelegate());
 
@@ -231,7 +239,7 @@ public class ChromeSurveyController implements InfoBarContainer.InfoBarAnimation
             }
 
             @Override
-            public void onHidden(Tab tab) {
+            public void onHidden(Tab tab, @TabHidingType int type) {
                 // An infobar shouldn't appear on a tab that the user left.
                 tab.removeObserver(this);
             }
@@ -317,10 +325,20 @@ public class ChromeSurveyController implements InfoBarContainer.InfoBarAnimation
         }
 
         int maxNumber = getMaxNumber();
-        if (FeatureUtilities.isChromeModernDesignEnabled()) {
-            maxNumber = ChromeFeatureList.getFieldTrialParamByFeatureAsInt(
-                    ChromeFeatureList.CHROME_MODERN_DESIGN, MAX_NUMBER, maxNumber);
+
+        int maxForHorizontalTabSwitcher = -1;
+        if (ChromeFeatureList.isEnabled(ChromeFeatureList.HORIZONTAL_TAB_SWITCHER_ANDROID)) {
+            maxForHorizontalTabSwitcher = ChromeFeatureList.getFieldTrialParamByFeatureAsInt(
+                    ChromeFeatureList.HORIZONTAL_TAB_SWITCHER_ANDROID, MAX_NUMBER, -1);
         }
+        if (maxForHorizontalTabSwitcher != -1) {
+            if (maxNumber == -1) {
+                maxNumber = maxForHorizontalTabSwitcher;
+            } else {
+                maxNumber = Math.min(maxNumber, maxForHorizontalTabSwitcher);
+            }
+        }
+
         if (maxNumber == -1) {
             recordSurveyFilteringResult(FilteringResult.MAX_NUMBER_MISSING);
             return false;
@@ -423,9 +441,8 @@ public class ChromeSurveyController implements InfoBarContainer.InfoBarAnimation
         // Return early to allow only one call to this method (http://crbug.com/791076).
         if (mSurveyInfoBarTab == null) return;
 
-        if (mSurveyInfoBarTab.getInfoBarContainer() != null) {
-            mSurveyInfoBarTab.getInfoBarContainer().removeAnimationListener(this);
-        }
+        InfoBarContainer container = InfoBarContainer.get(mSurveyInfoBarTab);
+        if (container != null) container.removeAnimationListener(this);
 
         mLoggingHandler.removeCallbacksAndMessages(null);
 
@@ -443,15 +460,15 @@ public class ChromeSurveyController implements InfoBarContainer.InfoBarAnimation
 
     private void recordSurveyFilteringResult(@FilteringResult int value) {
         RecordHistogram.recordEnumeratedHistogram(
-                "Android.Survey.SurveyFilteringResults", value, FilteringResult.ENUM_BOUNDARY);
+                "Android.Survey.SurveyFilteringResults", value, FilteringResult.NUM_ENTRIES);
     }
 
     private void recordInfoBarClosingState(@InfoBarClosingState int value) {
         RecordHistogram.recordEnumeratedHistogram(
-                "Android.Survey.InfoBarClosingState", value, InfoBarClosingState.ENUM_BOUNDARY);
+                "Android.Survey.InfoBarClosingState", value, InfoBarClosingState.NUM_ENTRIES);
     }
 
-    static class StartDownloadIfEligibleTask extends AsyncTask<Void, Void, Boolean> {
+    static class StartDownloadIfEligibleTask extends AsyncTask<Boolean> {
         ChromeSurveyController mController;
         final TabModelSelector mSelector;
 
@@ -462,11 +479,12 @@ public class ChromeSurveyController implements InfoBarContainer.InfoBarAnimation
         }
 
         @Override
-        protected Boolean doInBackground(Void... params) {
+        protected Boolean doInBackground() {
             if (!mController.doesUserQualifyForSurvey()) return false;
 
             if (SurveyController.getInstance().doesSurveyExist(
                         mController.getSiteId(), ContextUtils.getApplicationContext())) {
+                mController.recordSurveyFilteringResult(FilteringResult.SURVEY_ALREADY_EXISTS);
                 return true;
             } else {
                 boolean forceSurveyOn = false;

@@ -12,14 +12,17 @@
 #include "base/strings/string_util.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
+#include "chrome/browser/chromeos/login/screens/gaia_view.h"
 #include "chrome/browser/chromeos/login/session/user_session_manager.h"
 #include "chrome/browser/chromeos/login/session/user_session_manager_test_api.h"
+#include "chrome/browser/chromeos/login/ui/login_display_host.h"
 #include "chrome/browser/chromeos/login/users/chrome_user_manager_impl.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/policy/login_policy_test_base.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/scoped_cros_settings_test_helper.h"
 #include "chrome/browser/chromeos/settings/stub_install_attributes.h"
+#include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/cryptohome/cryptohome_parameters.h"
@@ -266,18 +269,11 @@ class SiteIsolationFlagHandlingTest
   void SetUpInProcessBrowserTestFixture() override {
     policy::LoginPolicyTestBase::SetUpInProcessBrowserTestFixture();
 
-    // Set up fake install attributes to pretend the machine is enrolled. This
-    // is important because ephemeral users only work on enrolled machines.
-    auto attributes = std::make_unique<StubInstallAttributes>();
-    attributes->SetCloudManaged("example.com", "fake-id");
-    policy::BrowserPolicyConnectorChromeOS::SetInstallAttributesForTesting(
-        attributes.release());
-
     // Set up fake_session_manager_client_ so we can verify the flags for the
     // user session.
     auto fake_session_manager_client =
         std::make_unique<FakeSessionManagerClient>(
-            FakeSessionManagerClient::USE_HOST_POLICY);
+            FakeSessionManagerClient::PolicyStorageType::kOnDisk);
     fake_session_manager_client_ = fake_session_manager_client.get();
     DBusThreadManager::GetSetterForTesting()->SetSessionManagerClient(
         std::move(fake_session_manager_client));
@@ -293,7 +289,7 @@ class SiteIsolationFlagHandlingTest
     policy::LoginPolicyTestBase::SetUpOnMainThread();
 
     // Write ephemeral users status directly into CrosSettings.
-    settings_helper_.ReplaceProvider(kAccountsPrefEphemeralUsersEnabled);
+    settings_helper_.ReplaceDeviceSettingsProviderWithStub();
     settings_helper_.SetBoolean(kAccountsPrefEphemeralUsersEnabled,
                                 GetParam().ephemeral_users);
 
@@ -319,7 +315,9 @@ class SiteIsolationFlagHandlingTest
                 base::Unretained(this)));
   }
 
-  void TearDownOnMainThread() override { settings_helper_.RestoreProvider(); }
+  void TearDownOnMainThread() override {
+    settings_helper_.RestoreRealDeviceSettingsProvider();
+  }
 
   ChromeUserManagerImpl* GetChromeUserManager() const {
     return static_cast<ChromeUserManagerImpl*>(
@@ -353,6 +351,11 @@ class SiteIsolationFlagHandlingTest
   // This will be set to |true| when chrome has requested a restart.
   bool attempt_restart_called_ = false;
 
+  // Set up fake install attributes to pretend the machine is enrolled. This
+  // is important because ephemeral users only work on enrolled machines.
+  ScopedStubInstallAttributes test_install_attributes_{
+      StubInstallAttributes::CreateCloudManaged("example.com", "fake-id")};
+
   // Observes for user session start.
   std::unique_ptr<content::WindowedNotificationObserver>
       user_session_started_observer_;
@@ -370,7 +373,10 @@ IN_PROC_BROWSER_TEST_P(SiteIsolationFlagHandlingTest, FlagHandlingTest) {
   // it waits for a user session start unconditionally, which will not happen if
   // chrome requests a restart to set user-session flags.
   SkipToLoginScreen();
-  GetLoginDisplay()->ShowSigninScreenForCreds(kAccountId, kAccountPassword);
+  LoginDisplayHost::default_host()
+      ->GetOobeUI()
+      ->GetGaiaScreenView()
+      ->ShowSigninScreenForTest(kAccountId, kAccountPassword, kEmptyServices);
 
   // Wait for either the user session to start, or for restart to be requested
   // (whichever happens first).
@@ -386,7 +392,8 @@ IN_PROC_BROWSER_TEST_P(SiteIsolationFlagHandlingTest, FlagHandlingTest) {
       AccountId::FromUserEmailGaiaId(GetAccount(), kTestUserGaiaId);
   std::vector<std::string> flags_for_user;
   bool has_flags_for_user = fake_session_manager_client()->GetFlagsForUser(
-      cryptohome::Identification(test_account_id), &flags_for_user);
+      cryptohome::CreateAccountIdentifierFromAccountId(test_account_id),
+      &flags_for_user);
   EXPECT_TRUE(has_flags_for_user);
 
   // Remove flag sentinels. Keep whatever is between those sentinels, to

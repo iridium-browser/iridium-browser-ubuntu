@@ -38,6 +38,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/sys_info.h"
 #include "sandbox/mac/sandbox_compiler.h"
+#include "services/service_manager/sandbox/mac/audio.sb.h"
 #include "services/service_manager/sandbox/mac/cdm.sb.h"
 #include "services/service_manager/sandbox/mac/common.sb.h"
 #include "services/service_manager/sandbox/mac/gpu.sb.h"
@@ -73,6 +74,7 @@ SandboxTypeToResourceIDMapping kDefaultSandboxTypeToResourceIDMapping[] = {
     {SANDBOX_TYPE_NACL_LOADER, kSeatbeltPolicyString_nacl_loader},
     {SANDBOX_TYPE_PDF_COMPOSITOR, kSeatbeltPolicyString_ppapi},
     {SANDBOX_TYPE_PROFILING, kSeatbeltPolicyString_utility},
+    {SANDBOX_TYPE_AUDIO, kSeatbeltPolicyString_audio},
 };
 
 static_assert(arraysize(kDefaultSandboxTypeToResourceIDMapping) ==
@@ -240,9 +242,9 @@ bool SandboxMac::Enable(SandboxType sandbox_type) {
   if (!compiler.InsertBooleanParam(kSandboxMacOS1013, macos_1013))
     return false;
 
-  if (sandbox_type == service_manager::SANDBOX_TYPE_CDM) {
-    base::FilePath bundle_path = SandboxMac::GetCanonicalPath(
-        base::mac::FrameworkBundlePath().DirName());
+  if (sandbox_type == service_manager::SANDBOX_TYPE_GPU) {
+    base::FilePath bundle_path =
+        SandboxMac::GetCanonicalPath(base::mac::FrameworkBundlePath());
     if (!compiler.InsertStringParam(kSandboxBundleVersionPath,
                                     bundle_path.value()))
       return false;

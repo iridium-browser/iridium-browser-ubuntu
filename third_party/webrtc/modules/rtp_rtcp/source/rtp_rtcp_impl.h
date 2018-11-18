@@ -17,7 +17,8 @@
 #include <utility>
 #include <vector>
 
-#include "api/optional.h"
+#include "absl/types/optional.h"
+#include "api/video/video_bitrate_allocation.h"
 #include "modules/rtp_rtcp/include/rtp_rtcp.h"
 #include "modules/rtp_rtcp/include/rtp_rtcp_defines.h"
 #include "modules/rtp_rtcp/source/packet_loss_stats.h"
@@ -61,6 +62,7 @@ class ModuleRtpRtcpImpl : public RtpRtcp, public RTCPReceiver::ModuleRtpRtcp {
   // Register RTP header extension.
   int32_t RegisterSendRtpHeaderExtension(RTPExtensionType type,
                                          uint8_t id) override;
+  bool RegisterRtpHeaderExtension(const std::string& uri, int id) override;
 
   int32_t DeregisterSendRtpHeaderExtension(RTPExtensionType type) override;
 
@@ -101,7 +103,7 @@ class ModuleRtpRtcpImpl : public RtpRtcp, public RTCPReceiver::ModuleRtpRtcp {
   void SetRtxSendPayloadType(int payload_type,
                              int associated_payload_type) override;
 
-  rtc::Optional<uint32_t> FlexfecSsrc() const override;
+  absl::optional<uint32_t> FlexfecSsrc() const override;
 
   // Sends kRtcpByeCode when going from true to false.
   int32_t SetSendingStatus(bool sending) override;
@@ -112,6 +114,8 @@ class ModuleRtpRtcpImpl : public RtpRtcp, public RTCPReceiver::ModuleRtpRtcp {
   void SetSendingMediaStatus(bool sending) override;
 
   bool SendingMedia() const override;
+
+  void SetAsPartOfAllocation(bool part_of_allocation) override;
 
   // Used by the codec module to deliver a video or audio frame for
   // packetization.
@@ -238,9 +242,6 @@ class ModuleRtpRtcpImpl : public RtpRtcp, public RTCPReceiver::ModuleRtpRtcp {
                                          const uint8_t* data,
                                          uint16_t length) override;
 
-  // (XR) VOIP metric.
-  int32_t SetRTCPVoIPMetrics(const RTCPVoIPMetric* VoIPMetric) override;
-
   // (XR) Receiver reference time report.
   void SetRtcpXrRrtrStatus(bool enable) override;
 
@@ -292,7 +293,8 @@ class ModuleRtpRtcpImpl : public RtpRtcp, public RTCPReceiver::ModuleRtpRtcp {
       const ReportBlockList& report_blocks) override;
   void OnRequestSendReport() override;
 
-  void SetVideoBitrateAllocation(const BitrateAllocation& bitrate) override;
+  void SetVideoBitrateAllocation(
+      const VideoBitrateAllocation& bitrate) override;
 
  protected:
   bool UpdateRTCPReceiveInformationTimers();
@@ -335,8 +337,7 @@ class ModuleRtpRtcpImpl : public RtpRtcp, public RTCPReceiver::ModuleRtpRtcp {
   uint16_t packet_overhead_;
 
   // Send side
-  int64_t nack_last_time_sent_full_;
-  uint32_t nack_last_time_sent_full_prev_;
+  int64_t nack_last_time_sent_full_ms_;
   uint16_t nack_last_seq_number_sent_;
 
   KeyFrameRequestMethod key_frame_req_method_;

@@ -141,8 +141,9 @@ std::string BuildUpdateCompleteEventElement(const Component& component) {
   std::string event("<event eventtype=\"3\"");
   const int event_result = component.state() == ComponentState::kUpdated;
   StringAppendF(&event, " eventresult=\"%d\"", event_result);
-  if (component.error_category())
-    StringAppendF(&event, " errorcat=\"%d\"", component.error_category());
+  if (component.error_category() != ErrorCategory::kNone)
+    StringAppendF(&event, " errorcat=\"%d\"",
+                  static_cast<int>(component.error_category()));
   if (component.error_code())
     StringAppendF(&event, " errorcode=\"%d\"", component.error_code());
   if (component.extra_code1())
@@ -150,9 +151,9 @@ std::string BuildUpdateCompleteEventElement(const Component& component) {
   if (HasDiffUpdate(component))
     StringAppendF(&event, " diffresult=\"%d\"",
                   !component.diff_update_failed());
-  if (component.diff_error_category()) {
+  if (component.diff_error_category() != ErrorCategory::kNone) {
     StringAppendF(&event, " differrorcat=\"%d\"",
-                  component.diff_error_category());
+                  static_cast<int>(component.diff_error_category()));
   }
   if (component.diff_error_code())
     StringAppendF(&event, " differrorcode=\"%d\"", component.diff_error_code());
@@ -210,15 +211,18 @@ std::string BuildProtocolRequest(
     const std::string& os_long_name,
     const std::string& download_preference,
     const std::string& request_body,
-    const std::string& additional_attributes,
+    const base::flat_map<std::string, std::string>& additional_attributes,
     const std::unique_ptr<UpdaterState::Attributes>& updater_state_attributes) {
   std::string request = base::StringPrintf(
       "<?xml version=\"1.0\" encoding=\"UTF-8\"?>"
       "<request protocol=\"%s\" ",
       kProtocolVersion);
 
-  if (!additional_attributes.empty())
-    base::StringAppendF(&request, "%s ", additional_attributes.c_str());
+  if (!additional_attributes.empty()) {
+    for (const auto& attr : additional_attributes)
+      base::StringAppendF(&request, "%s=\"%s\" ", attr.first.c_str(),
+                          attr.second.c_str());
+  }
 
   // Constant information for this updater.
   base::StringAppendF(&request, "dedup=\"cr\" acceptformat=\"crx2,crx3\" ");
@@ -232,11 +236,11 @@ std::string BuildProtocolRequest(
 
   // Chrome version and platform information.
   base::StringAppendF(&request,
-                      "version=\"%s-%s\" prodversion=\"%s\" "
+                      "updater=\"%s\" updaterversion=\"%s\" prodversion=\"%s\" "
                       "lang=\"%s\" updaterchannel=\"%s\" prodchannel=\"%s\" "
                       "os=\"%s\" arch=\"%s\" nacl_arch=\"%s\"",
-                      prod_id.c_str(),  // "version" is prefixed by prod_id.
-                      browser_version.c_str(),
+                      prod_id.c_str(),                    // "updater"
+                      browser_version.c_str(),            // "updaterversion"
                       browser_version.c_str(),            // "prodversion"
                       lang.c_str(),                       // "lang"
                       channel.c_str(),                    // "updaterchannel"
@@ -300,7 +304,7 @@ std::string BuildProtocolRequest(
   return request;
 }
 
-std::map<std::string, std::string> BuildUpdateCheckExtraRequestHeaders(
+base::flat_map<std::string, std::string> BuildUpdateCheckExtraRequestHeaders(
     scoped_refptr<Configurator> config,
     const std::vector<std::string>& ids,
     bool is_foreground) {
@@ -311,7 +315,7 @@ std::map<std::string, std::string> BuildUpdateCheckExtraRequestHeaders(
           ? ids
           : std::vector<std::string>(ids.cbegin(),
                                      ids.cbegin() + maxExtensionCount);
-  return std::map<std::string, std::string>{
+  return {
       {"X-Goog-Update-Updater",
        base::StringPrintf("%s-%s", config->GetProdId().c_str(),
                           config->GetBrowserVersion().GetString().c_str())},
@@ -326,7 +330,7 @@ std::string BuildUpdateCheckRequest(
     const std::vector<std::string>& ids_checked,
     const IdToComponentPtrMap& components,
     PersistedData* metadata,
-    const std::string& additional_attributes,
+    const base::flat_map<std::string, std::string>& additional_attributes,
     bool enabled_component_updates,
     const std::unique_ptr<UpdaterState::Attributes>& updater_state_attributes) {
   const std::string brand(SanitizeBrand(config.GetBrand()));
@@ -334,22 +338,27 @@ std::string BuildUpdateCheckRequest(
   for (const auto& id : ids_checked) {
     DCHECK_EQ(1u, components.count(id));
     const auto& component = *components.at(id);
-    const auto& crx_component = component.crx_component();
     const auto& component_id = component.id();
+    const auto crx_component = component.crx_component();
+
+    DCHECK(crx_component);
 
     const update_client::InstallerAttributes installer_attributes(
-        SanitizeInstallerAttributes(crx_component.installer_attributes));
+        SanitizeInstallerAttributes(crx_component->installer_attributes));
     std::string app("<app ");
     base::StringAppendF(&app, "appid=\"%s\" version=\"%s\"",
                         component_id.c_str(),
-                        crx_component.version.GetString().c_str());
+                        crx_component->version.GetString().c_str());
     if (!brand.empty())
       base::StringAppendF(&app, " brand=\"%s\"", brand.c_str());
-    if (!crx_component.install_source.empty())
+    if (!crx_component->install_source.empty())
       base::StringAppendF(&app, " installsource=\"%s\"",
-                          crx_component.install_source.c_str());
+                          crx_component->install_source.c_str());
     else if (component.is_foreground())
       base::StringAppendF(&app, " installsource=\"ondemand\"");
+    if (!crx_component->install_location.empty())
+      base::StringAppendF(&app, " installedby=\"%s\"",
+                          crx_component->install_location.c_str());
     for (const auto& attr : installer_attributes) {
       base::StringAppendF(&app, " %s=\"%s\"", attr.first.c_str(),
                           attr.second.c_str());
@@ -357,7 +366,7 @@ std::string BuildUpdateCheckRequest(
     const auto& cohort = metadata->GetCohort(component_id);
     const auto& cohort_name = metadata->GetCohortName(component_id);
     const auto& cohort_hint = metadata->GetCohortHint(component_id);
-    const auto& disabled_reasons = crx_component.disabled_reasons;
+    const auto& disabled_reasons = crx_component->disabled_reasons;
     if (!cohort.empty())
       base::StringAppendF(&app, " cohort=\"%s\"", cohort.c_str());
     if (!cohort_name.empty())
@@ -371,7 +380,7 @@ std::string BuildUpdateCheckRequest(
       base::StringAppendF(&app, "<disabled reason=\"%d\"/>", disabled_reason);
 
     base::StringAppendF(&app, "<updatecheck");
-    if (crx_component.supports_group_policy_enable_component_updates &&
+    if (crx_component->supports_group_policy_enable_component_updates &&
         !enabled_component_updates) {
       base::StringAppendF(&app, " updatedisabled=\"true\"");
     }
@@ -399,12 +408,12 @@ std::string BuildUpdateCheckRequest(
     base::StringAppendF(&app, " ping_freshness=\"%s\"/>",
                         metadata->GetPingFreshness(component_id).c_str());
 
-    if (!crx_component.fingerprint.empty()) {
+    if (!crx_component->fingerprint.empty()) {
       base::StringAppendF(&app,
                           "<packages>"
                           "<package fp=\"%s\"/>"
                           "</packages>",
-                          crx_component.fingerprint.c_str());
+                          crx_component->fingerprint.c_str());
     }
     base::StringAppendF(&app, "</app>");
     app_elements.append(app);
@@ -436,7 +445,7 @@ std::string BuildEventPingRequest(const Configurator& config,
                               config.GetBrowserVersion().GetString(),
                               config.GetChannel(), config.GetLang(),
                               config.GetOSLongName(),
-                              config.GetDownloadPreference(), app, "", nullptr);
+                              config.GetDownloadPreference(), app, {}, nullptr);
 }
 
 }  // namespace update_client

@@ -7,6 +7,7 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <vector>
 
 #include "base/callback.h"
@@ -15,6 +16,7 @@
 #include "base/memory/weak_ptr.h"
 #include "base/optional.h"
 #include "device/fido/ctap_get_assertion_request.h"
+#include "device/fido/device_operation.h"
 #include "device/fido/fido_constants.h"
 #include "device/fido/fido_task.h"
 
@@ -27,8 +29,10 @@ class AuthenticatorGetAssertionResponse;
 class COMPONENT_EXPORT(DEVICE_FIDO) GetAssertionTask : public FidoTask {
  public:
   using GetAssertionTaskCallback = base::OnceCallback<void(
-      CtapDeviceResponseCode return_code,
-      base::Optional<AuthenticatorGetAssertionResponse> response_data)>;
+      CtapDeviceResponseCode,
+      base::Optional<AuthenticatorGetAssertionResponse>)>;
+  using SignOperation = DeviceOperation<CtapGetAssertionRequest,
+                                        AuthenticatorGetAssertionResponse>;
 
   GetAssertionTask(FidoDevice* device,
                    CtapGetAssertionRequest request,
@@ -39,45 +43,22 @@ class COMPONENT_EXPORT(DEVICE_FIDO) GetAssertionTask : public FidoTask {
   // FidoTask:
   void StartTask() override;
 
-  void GetAssertion();
+  void GetAssertion(bool enforce_user_presence = false);
   void U2fSign();
 
-  // PublicKeyUserEntity field in GetAssertion response is optional with the
-  // following constraints:
-  // - If assertion has been made without user verification, user identifiable
-  //   information must not be included.
-  // - For resident key credentials, user id of the user entity is mandatory.
-  // - When multiple accounts exist for specified RP ID, user entity is
-  //   mandatory.
-  // TODO(hongjunchoi) : Add link to section of the CTAP spec once it is
-  // published.
-  bool CheckRequirementsOnReturnedUserEntities(
-      const AuthenticatorGetAssertionResponse& response);
-
-  // Checks whether credential ID returned from the authenticator was included
-  // in the allowed list for authenticators. If the device has resident key
-  // support, returned credential ID may be resident credential. Thus, returned
-  // credential ID need not be in allowed list.
-  // TODO(hongjunchoi) : Add link to section of the CTAP spec once it is
-  // published.
-  bool CheckRequirementsOnReturnedCredentialId(
-      const AuthenticatorGetAssertionResponse& response);
-
-  // Checks UserVerificationRequirement enum passed from the relying party
-  // is compatible with the authenticator using the following logic:
-  //  - If UserVerificationRequirement is set to kRequired, user verification
-  //    option parameter should be set to true.
-  //  - If UserVerificationRequirement is set to kPreferred, user verification
-  //    option is set to true only if the authenticator supports UV.
-  //  - If UserVerificationRequirement is set to kDiscouraged, user verification
-  //    is set to false.
-  // https://w3c.github.io/webauthn/#enumdef-userverificationrequirement
-  bool CheckUserVerificationCompatible();
-
-  void OnCtapGetAssertionResponseReceived(
-      base::Optional<std::vector<uint8_t>> device_response);
+  // Callback logic for CTAP2 GetAssertion. This will fall back to U2F on hybrid
+  // U2F/CTAP2 devices when:
+  //   a) No credentials were recognized via CTAP2 and,
+  //   b) The request contains the appID extension.
+  void GetAssertionCallbackWithU2fFallback(
+      bool is_silent_authentication,
+      UserVerificationRequirement user_verification_required,
+      GetAssertionTaskCallback callback,
+      CtapDeviceResponseCode,
+      base::Optional<AuthenticatorGetAssertionResponse>);
 
   CtapGetAssertionRequest request_;
+  std::unique_ptr<SignOperation> sign_operation_;
   GetAssertionTaskCallback callback_;
   base::WeakPtrFactory<GetAssertionTask> weak_factory_;
 

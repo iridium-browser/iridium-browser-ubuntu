@@ -73,6 +73,7 @@ class MODULES_EXPORT UserMediaRequest final
 
   static UserMediaRequest* Create(ExecutionContext*,
                                   UserMediaController*,
+                                  WebUserMediaRequest::MediaType media_type,
                                   const MediaStreamConstraints& options,
                                   Callbacks*,
                                   MediaErrorState&);
@@ -94,6 +95,7 @@ class MODULES_EXPORT UserMediaRequest final
   void FailConstraint(const String& constraint_name, const String& message);
   void Fail(WebUserMediaRequest::Error name, const String& message);
 
+  WebUserMediaRequest::MediaType MediaRequestType() const;
   bool Audio() const;
   bool Video() const;
   WebMediaConstraints AudioConstraints() const;
@@ -103,8 +105,6 @@ class MODULES_EXPORT UserMediaRequest final
   // enabled. Will be removed at end of trial. See: http://crbug.com/789152.
   bool ShouldDisableHardwareNoiseSuppression() const;
 
-  bool ShouldEnableExperimentalHardwareEchoCancellation() const;
-
   // errorMessage is only set if requestIsPrivilegedContext() returns |false|.
   // Caller is responsible for properly setting errors and canceling request.
   bool IsSecureContextUse(String& error_message);
@@ -112,19 +112,20 @@ class MODULES_EXPORT UserMediaRequest final
   // ContextLifecycleObserver
   void ContextDestroyed(ExecutionContext*) override;
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  private:
   UserMediaRequest(ExecutionContext*,
                    UserMediaController*,
+                   WebUserMediaRequest::MediaType media_type,
                    WebMediaConstraints audio,
                    WebMediaConstraints video,
                    Callbacks*);
 
+  WebUserMediaRequest::MediaType media_type_;
   WebMediaConstraints audio_;
   WebMediaConstraints video_;
   bool should_disable_hardware_noise_suppression_;
-  bool should_enable_experimental_hw_echo_cancellation_;
 
   Member<UserMediaController> controller_;
 

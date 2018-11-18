@@ -17,12 +17,16 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.browser.compositor.bottombar.OverlayPanel.StateChangeReason;
+import org.chromium.chrome.browser.compositor.bottombar.OverlayPanelManager.OverlayPanelManagerObserver;
 import org.chromium.chrome.browser.compositor.bottombar.OverlayPanelManager.PanelPriority;
 import org.chromium.chrome.browser.compositor.layouts.LayoutUpdateHost;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.ui.resources.dynamics.DynamicResourceLoader;
+
+import java.util.concurrent.TimeoutException;
 
 /**
  * Class responsible for testing the OverlayPanelManager.
@@ -37,17 +41,16 @@ public class OverlayPanelManagerTest {
     // --------------------------------------------------------------------------------------------
 
     /**
-     * Mocks the ContextualSearchPanel, so it doesn't create ContentViewCore.
+     * Mocks the ContextualSearchPanel, so it doesn't create WebContents.
      */
-    public static class MockOverlayPanel extends OverlayPanel {
-
-        private PanelPriority mPriority;
+    private static class MockOverlayPanel extends OverlayPanel {
+        private @PanelPriority int mPriority;
         private boolean mCanBeSuppressed;
         private ViewGroup mContainerView;
         private DynamicResourceLoader mResourceLoader;
 
         public MockOverlayPanel(Context context, LayoutUpdateHost updateHost,
-                OverlayPanelManager panelManager, PanelPriority priority,
+                OverlayPanelManager panelManager, @PanelPriority int priority,
                 boolean canBeSuppressed) {
             super(context, updateHost, panelManager);
             mPriority = priority;
@@ -60,6 +63,7 @@ public class OverlayPanelManagerTest {
             mContainerView = container;
         }
 
+        @Override
         public ViewGroup getContainerView() {
             return mContainerView;
         }
@@ -80,7 +84,7 @@ public class OverlayPanelManagerTest {
         }
 
         @Override
-        public PanelPriority getPriority() {
+        public @PanelPriority int getPriority() {
             return mPriority;
         }
 
@@ -95,13 +99,13 @@ public class OverlayPanelManagerTest {
         }
 
         @Override
-        public void closePanel(StateChangeReason reason, boolean animate) {
+        public void closePanel(@StateChangeReason int reason, boolean animate) {
             // Immediately call onClosed rather than wait for animation to finish.
             onClosed(reason);
         }
 
         /**
-         * Override creation and destruction of the ContentViewCore as they rely on native methods.
+         * Override creation and destruction of the WebContents as they rely on native methods.
          */
         private static class MockOverlayPanelContent extends OverlayPanelContent {
             public MockOverlayPanelContent() {
@@ -333,5 +337,56 @@ public class OverlayPanelManagerTest {
         Assert.assertTrue(earlyPanel.getContainerView() == latePanel.getContainerView());
         Assert.assertTrue(
                 earlyPanel.getDynamicResourceLoader() == latePanel.getDynamicResourceLoader());
+    }
+
+    @Test
+    @SmallTest
+    @Feature({"OverlayPanel"})
+    @UiThreadTest
+    public void testManagerObserver() throws InterruptedException, TimeoutException {
+        Context context = InstrumentationRegistry.getTargetContext();
+
+        final CallbackHelper shownHelper = new CallbackHelper();
+        final CallbackHelper hiddenHelper = new CallbackHelper();
+
+        OverlayPanelManager panelManager = new OverlayPanelManager();
+        panelManager.addObserver(new OverlayPanelManagerObserver() {
+            @Override
+            public void onOverlayPanelShown() {
+                shownHelper.notifyCalled();
+            }
+
+            @Override
+            public void onOverlayPanelHidden() {
+                hiddenHelper.notifyCalled();
+            }
+        });
+
+        OverlayPanel lowPriorityPanel =
+                new MockOverlayPanel(context, null, panelManager, PanelPriority.LOW, true);
+        OverlayPanel highPriorityPanel =
+                new MockOverlayPanel(context, null, panelManager, PanelPriority.HIGH, false);
+
+        lowPriorityPanel.requestPanelShow(StateChangeReason.UNKNOWN);
+
+        // Wait for the panel to be shown.
+        shownHelper.waitForCallback(0);
+
+        highPriorityPanel.requestPanelShow(StateChangeReason.UNKNOWN);
+
+        // Wait for the low priority panel to be hidden and high priority panel to be shown.
+        hiddenHelper.waitForCallback(0);
+        shownHelper.waitForCallback(1);
+
+        highPriorityPanel.closePanel(StateChangeReason.UNKNOWN, false);
+
+        // Wait for the open panel to be closed and the supressed one to be re-shown.
+        hiddenHelper.waitForCallback(1);
+        shownHelper.waitForCallback(2);
+
+        Assert.assertEquals(
+                "Shown event should have been called three times.", 3, shownHelper.getCallCount());
+        Assert.assertEquals(
+                "Hidden event should have been called twice.", 2, hiddenHelper.getCallCount());
     }
 }

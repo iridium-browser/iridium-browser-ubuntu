@@ -235,7 +235,6 @@ BlitFramebufferParams D3D11(BufferType type, unsigned int samples)
     params.samples       = samples;
     return params;
 }
-
 }  // anonymous namespace
 
 // TODO(jmadill): Programatically generate these combinations.

@@ -23,6 +23,7 @@
 
 #include "api/fec_controller.h"
 #include "api/video/video_frame.h"
+#include "api/video_codecs/video_codec.h"
 #include "modules/include/module.h"
 #include "modules/include/module_common_types.h"
 #include "modules/video_coding/include/video_coding_defines.h"
@@ -32,13 +33,8 @@ namespace webrtc {
 
 class Clock;
 class EncodedImageCallback;
-// TODO(pbos): Remove VCMQMSettingsCallback completely. This might be done by
-// removing the VCM and use VideoSender/VideoReceiver as a public interface
-// directly.
-class VCMQMSettingsCallback;
-class VideoBitrateAllocator;
-class VideoEncoder;
 class VideoDecoder;
+class VideoEncoder;
 struct CodecSpecificInfo;
 
 class EventFactory {
@@ -50,9 +46,9 @@ class EventFactory {
 
 class EventFactoryImpl : public EventFactory {
  public:
-  virtual ~EventFactoryImpl() {}
+  ~EventFactoryImpl() override {}
 
-  virtual EventWrapper* CreateEvent() { return EventWrapper::Create(); }
+  EventWrapper* CreateEvent() override;
 };
 
 // Used to indicate which decode with errors mode should be used.
@@ -76,8 +72,8 @@ class VideoCodingModule : public Module {
   static VideoCodingModule* Create(Clock* clock, EventFactory* event_factory);
 
   /*
-  *   Sender
-  */
+   *   Sender
+   */
 
   // Registers a codec to be used for encoding. Calling this
   // API multiple times overwrites any previously registered codecs.
@@ -186,8 +182,8 @@ class VideoCodingModule : public Module {
   virtual int32_t EnableFrameDropper(bool enable) = 0;
 
   /*
-  *   Receiver
-  */
+   *   Receiver
+   */
 
   // Register possible receive codecs, can be called multiple times for
   // different codecs.
@@ -210,6 +206,14 @@ class VideoCodingModule : public Module {
   virtual int32_t RegisterReceiveCodec(const VideoCodec* receiveCodec,
                                        int32_t numberOfCores,
                                        bool requireKeyFrame = false) = 0;
+
+  // Register an external decoder object.
+  //
+  // Input:
+  //      - externalDecoder : Decoder object to be used for decoding frames.
+  //      - payloadType     : The payload type which this decoder is bound to.
+  virtual void RegisterExternalDecoder(VideoDecoder* externalDecoder,
+                                       uint8_t payloadType) = 0;
 
   // Register a receive callback. Will be called whenever there is a new frame
   // ready

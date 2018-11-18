@@ -20,7 +20,8 @@
 #include "chromeos/components/proximity_auth/proximity_auth_pref_manager.h"
 #include "chromeos/components/proximity_auth/proximity_monitor_impl.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
-#include "components/cryptauth/remote_device.h"
+#include "chromeos/services/secure_channel/public/cpp/client/client_channel.h"
+#include "components/cryptauth/remote_device_ref.h"
 #include "components/cryptauth/secure_context.h"
 #include "device/bluetooth/bluetooth_adapter_factory.h"
 
@@ -102,7 +103,7 @@ UnlockManagerImpl::UnlockManagerImpl(
 
   DBusThreadManager::Get()->GetPowerManagerClient()->AddObserver(this);
 
-  SetWakingUpState(true);
+  SetWakingUpState(true /* is_waking_up */);
 
   if (device::BluetoothAdapterFactory::IsBluetoothSupported()) {
     device::BluetoothAdapterFactory::GetAdapter(
@@ -141,7 +142,8 @@ void UnlockManagerImpl::SetRemoteDeviceLifeCycle(
 
   life_cycle_ = life_cycle;
   if (life_cycle_) {
-    SetWakingUpState(true);
+    AttemptToStartRemoteDeviceLifecycle();
+    SetWakingUpState(true /* is_waking_up */);
   } else {
     proximity_monitor_.reset();
   }
@@ -151,20 +153,17 @@ void UnlockManagerImpl::SetRemoteDeviceLifeCycle(
 
 void UnlockManagerImpl::OnLifeCycleStateChanged() {
   RemoteDeviceLifeCycle::State state = life_cycle_->GetState();
-  PA_LOG(INFO) << "RemoteDeviceLifeCycle state changed: "
-               << static_cast<int>(state);
 
   remote_screenlock_state_.reset();
   if (state == RemoteDeviceLifeCycle::State::SECURE_CHANNEL_ESTABLISHED) {
-    DCHECK(life_cycle_->GetConnection());
+    DCHECK(life_cycle_->GetConnection() || life_cycle_->GetChannel());
     DCHECK(GetMessenger());
-    proximity_monitor_ =
-        CreateProximityMonitor(life_cycle_->GetConnection(), pref_manager_);
+    proximity_monitor_ = CreateProximityMonitor(life_cycle_, pref_manager_);
     GetMessenger()->AddObserver(this);
   }
 
   if (state == RemoteDeviceLifeCycle::State::AUTHENTICATION_FAILED)
-    SetWakingUpState(false);
+    SetWakingUpState(false /* is_waking_up */);
 
   UpdateLockScreen();
 }
@@ -192,13 +191,12 @@ void UnlockManagerImpl::OnRemoteStatusUpdate(
       GetScreenlockStateFromRemoteUpdate(status_update)));
 
   // This also calls |UpdateLockScreen()|
-  SetWakingUpState(false);
+  SetWakingUpState(false /* is_waking_up */);
 }
 
 void UnlockManagerImpl::OnDecryptResponse(const std::string& decrypted_bytes) {
   if (!is_attempting_auth_) {
-    PA_LOG(ERROR) << "Decrypt response received but not attempting "
-                  << "auth.";
+    PA_LOG(ERROR) << "Decrypt response received but not attempting auth.";
     return;
   }
 
@@ -214,8 +212,7 @@ void UnlockManagerImpl::OnDecryptResponse(const std::string& decrypted_bytes) {
 
 void UnlockManagerImpl::OnUnlockResponse(bool success) {
   if (!is_attempting_auth_) {
-    PA_LOG(ERROR) << "Unlock response received but not attempting "
-                  << "auth.";
+    PA_LOG(ERROR) << "Unlock response received but not attempting auth.";
     return;
   }
 
@@ -250,12 +247,8 @@ void UnlockManagerImpl::OnScreenDidUnlock(
 void UnlockManagerImpl::OnFocusedUserChanged(const AccountId& account_id) {}
 
 void UnlockManagerImpl::OnScreenLockedOrUnlocked(bool is_locked) {
-  if (is_locked && bluetooth_adapter_ && bluetooth_adapter_->IsPowered() &&
-      life_cycle_ &&
-      life_cycle_->GetState() ==
-          RemoteDeviceLifeCycle::State::FINDING_CONNECTION) {
-    SetWakingUpState(true);
-  }
+  if (is_locked && IsBluetoothPresentAndPowered() && life_cycle_)
+    SetWakingUpState(true /* is_waking_up */);
 
   is_locked_ = is_locked;
   UpdateProximityMonitorState();
@@ -278,7 +271,22 @@ void UnlockManagerImpl::AdapterPoweredChanged(device::BluetoothAdapter* adapter,
 }
 
 void UnlockManagerImpl::SuspendDone(const base::TimeDelta& sleep_duration) {
-  SetWakingUpState(true);
+  SetWakingUpState(true /* is_waking_up */);
+}
+
+bool UnlockManagerImpl::IsBluetoothPresentAndPowered() const {
+  return bluetooth_adapter_ && bluetooth_adapter_->IsPresent() &&
+         bluetooth_adapter_->IsPowered();
+}
+
+void UnlockManagerImpl::AttemptToStartRemoteDeviceLifecycle() {
+  if (IsBluetoothPresentAndPowered() && life_cycle_ &&
+      life_cycle_->GetState() == RemoteDeviceLifeCycle::State::STOPPED) {
+    // If Bluetooth is disabled after this, |life_cycle_| will be notified by
+    // SecureChannel that the connection attempt failed. From that point on,
+    // |life_cycle_| will wait to be started again by UnlockManager.
+    life_cycle_->Start();
+  }
 }
 
 void UnlockManagerImpl::OnAuthAttempted(mojom::AuthType auth_type) {
@@ -324,21 +332,58 @@ void UnlockManagerImpl::OnAuthAttempted(mojom::AuthType auth_type) {
 }
 
 std::unique_ptr<ProximityMonitor> UnlockManagerImpl::CreateProximityMonitor(
-    cryptauth::Connection* connection,
+    RemoteDeviceLifeCycle* life_cycle,
     ProximityAuthPrefManager* pref_manager) {
-  return std::make_unique<ProximityMonitorImpl>(connection, pref_manager);
+  return std::make_unique<ProximityMonitorImpl>(
+      life_cycle->GetRemoteDevice(),
+      base::FeatureList::IsEnabled(chromeos::features::kMultiDeviceApi)
+          ? life_cycle->GetChannel()
+          : nullptr,
+      base::FeatureList::IsEnabled(chromeos::features::kMultiDeviceApi)
+          ? nullptr
+          : life_cycle->GetConnection(),
+      pref_manager);
 }
 
 void UnlockManagerImpl::SendSignInChallenge() {
-  if (!life_cycle_ || !GetMessenger() || !GetMessenger()->GetSecureContext()) {
+  if (!life_cycle_ || !GetMessenger()) {
     PA_LOG(ERROR) << "Not ready to send sign-in challenge";
     return;
   }
 
-  cryptauth::RemoteDevice remote_device = life_cycle_->GetRemoteDevice();
+  if (base::FeatureList::IsEnabled(chromeos::features::kMultiDeviceApi)) {
+    if (!GetMessenger()->GetChannel()) {
+      PA_LOG(ERROR) << "Channel is not ready to send sign-in challenge.";
+      return;
+    }
+
+    GetMessenger()->GetChannel()->GetConnectionMetadata(
+        base::BindOnce(&UnlockManagerImpl::OnGetConnectionMetadata,
+                       weak_ptr_factory_.GetWeakPtr()));
+  } else {
+    if (!GetMessenger()->GetSecureContext()) {
+      PA_LOG(ERROR) << "SecureContext is not ready to send sign-in challenge.";
+      return;
+    }
+
+    cryptauth::RemoteDeviceRef remote_device = life_cycle_->GetRemoteDevice();
+    proximity_auth_client_->GetChallengeForUserAndDevice(
+        remote_device.user_id(), remote_device.public_key(),
+        GetMessenger()->GetSecureContext()->GetChannelBindingData(),
+        base::Bind(&UnlockManagerImpl::OnGotSignInChallenge,
+                   weak_ptr_factory_.GetWeakPtr()));
+  }
+}
+
+void UnlockManagerImpl::OnGetConnectionMetadata(
+    chromeos::secure_channel::mojom::ConnectionMetadataPtr
+        connection_metadata_ptr) {
+  DCHECK(base::FeatureList::IsEnabled(chromeos::features::kMultiDeviceApi));
+
+  cryptauth::RemoteDeviceRef remote_device = life_cycle_->GetRemoteDevice();
   proximity_auth_client_->GetChallengeForUserAndDevice(
-      remote_device.user_id, remote_device.public_key,
-      GetMessenger()->GetSecureContext()->GetChannelBindingData(),
+      remote_device.user_id(), remote_device.public_key(),
+      connection_metadata_ptr->channel_binding_data,
       base::Bind(&UnlockManagerImpl::OnGotSignInChallenge,
                  weak_ptr_factory_.GetWeakPtr()));
 }
@@ -353,16 +398,13 @@ ScreenlockState UnlockManagerImpl::GetScreenlockState() {
   if (!life_cycle_)
     return ScreenlockState::INACTIVE;
 
-  RemoteDeviceLifeCycle::State life_cycle_state = life_cycle_->GetState();
-  if (life_cycle_state == RemoteDeviceLifeCycle::State::STOPPED)
-    return ScreenlockState::INACTIVE;
-
-  if (!bluetooth_adapter_ || !bluetooth_adapter_->IsPowered())
+  if (!IsBluetoothPresentAndPowered())
     return ScreenlockState::NO_BLUETOOTH;
 
   if (IsUnlockAllowed())
     return ScreenlockState::AUTHENTICATED;
 
+  RemoteDeviceLifeCycle::State life_cycle_state = life_cycle_->GetState();
   if (life_cycle_state == RemoteDeviceLifeCycle::State::AUTHENTICATION_FAILED)
     return ScreenlockState::PHONE_NOT_AUTHENTICATED;
 
@@ -413,15 +455,16 @@ ScreenlockState UnlockManagerImpl::GetScreenlockState() {
 }
 
 void UnlockManagerImpl::UpdateLockScreen() {
+  AttemptToStartRemoteDeviceLifecycle();
+
   UpdateProximityMonitorState();
 
   ScreenlockState new_state = GetScreenlockState();
   if (screenlock_state_ == new_state)
     return;
 
-  PA_LOG(INFO) << "Updating screenlock state from "
-               << static_cast<int>(screenlock_state_) << " to "
-               << static_cast<int>(new_state);
+  PA_LOG(INFO) << "Updating screenlock state from " << screenlock_state_
+               << " to " << new_state;
   proximity_auth_client_->UpdateScreenlockState(new_state);
   screenlock_state_ = new_state;
 }

@@ -15,7 +15,7 @@
 #include "base/time/default_clock.h"
 #include "base/time/default_tick_clock.h"
 #include "components/password_manager/core/browser/android_affiliation/affiliation_backend.h"
-#include "net/url_request/url_request_context_getter.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 
 namespace password_manager {
 
@@ -34,17 +34,20 @@ AffiliationService::~AffiliationService() {
 }
 
 void AffiliationService::Initialize(
-    net::URLRequestContextGetter* request_context_getter,
+    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
+    network::NetworkConnectionTracker* network_connection_tracker,
     const base::FilePath& db_path) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(!backend_);
-  backend_ = new AffiliationBackend(
-      request_context_getter, backend_task_runner_,
-      base::DefaultClock::GetInstance(), base::DefaultTickClock::GetInstance());
+  backend_ = new AffiliationBackend(backend_task_runner_,
+                                    base::DefaultClock::GetInstance(),
+                                    base::DefaultTickClock::GetInstance());
 
   backend_task_runner_->PostTask(
-      FROM_HERE, base::Bind(&AffiliationBackend::Initialize,
-                            base::Unretained(backend_), db_path));
+      FROM_HERE,
+      base::BindOnce(&AffiliationBackend::Initialize,
+                     base::Unretained(backend_), url_loader_factory->Clone(),
+                     base::Unretained(network_connection_tracker), db_path));
 }
 
 void AffiliationService::GetAffiliationsAndBranding(
@@ -55,9 +58,9 @@ void AffiliationService::GetAffiliationsAndBranding(
   DCHECK(backend_);
   backend_task_runner_->PostTask(
       FROM_HERE,
-      base::Bind(&AffiliationBackend::GetAffiliationsAndBranding,
-                 base::Unretained(backend_), facet_uri, cache_miss_strategy,
-                 result_callback, base::SequencedTaskRunnerHandle::Get()));
+      base::BindOnce(&AffiliationBackend::GetAffiliationsAndBranding,
+                     base::Unretained(backend_), facet_uri, cache_miss_strategy,
+                     result_callback, base::SequencedTaskRunnerHandle::Get()));
 }
 
 void AffiliationService::Prefetch(const FacetURI& facet_uri,
@@ -66,8 +69,8 @@ void AffiliationService::Prefetch(const FacetURI& facet_uri,
   DCHECK(backend_);
   backend_task_runner_->PostTask(
       FROM_HERE,
-      base::Bind(&AffiliationBackend::Prefetch, base::Unretained(backend_),
-                 facet_uri, keep_fresh_until));
+      base::BindOnce(&AffiliationBackend::Prefetch, base::Unretained(backend_),
+                     facet_uri, keep_fresh_until));
 }
 
 void AffiliationService::CancelPrefetch(const FacetURI& facet_uri,
@@ -76,16 +79,16 @@ void AffiliationService::CancelPrefetch(const FacetURI& facet_uri,
   DCHECK(backend_);
   backend_task_runner_->PostTask(
       FROM_HERE,
-      base::Bind(&AffiliationBackend::CancelPrefetch,
-                 base::Unretained(backend_), facet_uri, keep_fresh_until));
+      base::BindOnce(&AffiliationBackend::CancelPrefetch,
+                     base::Unretained(backend_), facet_uri, keep_fresh_until));
 }
 
 void AffiliationService::TrimCacheForFacetURI(const FacetURI& facet_uri) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(backend_);
   backend_task_runner_->PostTask(
-      FROM_HERE, base::Bind(&AffiliationBackend::TrimCacheForFacetURI,
-                            base::Unretained(backend_), facet_uri));
+      FROM_HERE, base::BindOnce(&AffiliationBackend::TrimCacheForFacetURI,
+                                base::Unretained(backend_), facet_uri));
 }
 
 }  // namespace password_manager

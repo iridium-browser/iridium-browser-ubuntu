@@ -16,16 +16,20 @@ branch, but not on TOT.
 
 from __future__ import print_function
 
+import base64
 import functools
 import os
 import time
 
 from chromite.cbuildbot import repository
 from chromite.cbuildbot.stages import sync_stages
+from chromite.lib import boto_compat
+from chromite.lib import build_summary
 from chromite.lib import config_lib
 from chromite.lib import constants
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_logging as logging
+from chromite.lib import cros_sdk_lib
 from chromite.lib import metrics
 from chromite.lib import osutils
 from chromite.lib import ts_mon_config
@@ -37,18 +41,22 @@ BUILDROOT_BUILDROOT_LAYOUT = 2
 _DISTFILES_CACHE_EXPIRY_HOURS = 8 * 24
 
 # Metrics reported to Monarch.
-METRIC_ACTIVE = 'chromeos/chromite/cbuildbot_launch/active'
-METRIC_INVOKED = 'chromeos/chromite/cbuildbot_launch/invoked'
-METRIC_COMPLETED = 'chromeos/chromite/cbuildbot_launch/completed'
-METRIC_PREP = 'chromeos/chromite/cbuildbot_launch/prep_completed'
-METRIC_CLEAN = 'chromeos/chromite/cbuildbot_launch/clean_buildroot_durations'
-METRIC_INITIAL = 'chromeos/chromite/cbuildbot_launch/initial_checkout_durations'
-METRIC_CBUILDBOT = 'chromeos/chromite/cbuildbot_launch/cbuildbot_durations'
-METRIC_CLOBBER = 'chromeos/chromite/cbuildbot_launch/clobber'
-METRIC_BRANCH_CLEANUP = 'chromeos/chromite/cbuildbot_launch/branch_cleanup'
-METRIC_DISTFILES_CLEANUP = (
-    'chromeos/chromite/cbuildbot_launch/distfiles_cleanup')
-METRIC_DEPOT_TOOLS = 'chromeos/chromite/cbuildbot_launch/depot_tools_prep'
+METRIC_PREFIX = 'chromeos/chromite/cbuildbot_launch/'
+METRIC_ACTIVE = METRIC_PREFIX + 'active'
+METRIC_INVOKED = METRIC_PREFIX + 'invoked'
+METRIC_COMPLETED = METRIC_PREFIX + 'completed'
+METRIC_PREP = METRIC_PREFIX + 'prep_completed'
+METRIC_CLEAN = METRIC_PREFIX + 'clean_buildroot_durations'
+METRIC_INITIAL = METRIC_PREFIX + 'initial_checkout_durations'
+METRIC_CBUILDBOT = METRIC_PREFIX + 'cbuildbot_durations'
+METRIC_CBUILDBOT_INSTANCE = METRIC_PREFIX + 'cbuildbot_instance_durations'
+METRIC_CLOBBER = METRIC_PREFIX + 'clobber'
+METRIC_BRANCH_CLEANUP = METRIC_PREFIX + 'branch_cleanup'
+METRIC_DISTFILES_CLEANUP = METRIC_PREFIX + 'distfiles_cleanup'
+METRIC_CHROOT_CLEANUP = METRIC_PREFIX + 'chroot_cleanup'
+
+# Builder state
+BUILDER_STATE_FILENAME = '.cbuildbot_build_state.json'
 
 
 def StageDecorator(functor):
@@ -120,51 +128,75 @@ def PreParseArguments(argv):
   return options
 
 
-def GetState(root):
-  """Fetch the current state of our working directory.
+def GetCurrentBuildState(options, branch):
+  """Extract information about the current build state from command-line args.
 
-  Will return with a default result if there is no known state.
+  Args:
+    options: A parsed options object from a cbuildbot parser.
+    branch: The name of the branch this builder was called with.
+
+  Returns:
+    A BuildSummary object describing the current build.
+  """
+  build_state = build_summary.BuildSummary(
+      status=constants.BUILDER_STATUS_INFLIGHT,
+      buildroot_layout=BUILDROOT_BUILDROOT_LAYOUT,
+      branch=branch)
+  if options.buildnumber:
+    build_state.build_number = options.buildnumber
+  if options.buildbucket_id:
+    build_state.buildbucket_id = options.buildbucket_id
+  if options.master_build_id:
+    build_state.master_build_id = options.master_build_id
+  return build_state
+
+
+def GetLastBuildState(root):
+  """Fetch the state of the last build run from |root|.
+
+  If the saved state file can't be read or doesn't contain valid JSON, a default
+  state will be returned.
 
   Args:
     root: Root of the working directory tree as a string.
 
   Returns:
-    Layout version as an integer (0 for unknown).
-    Previous branch as a string ('' for unknown).
-    Last distfiles clearance time in POSIX time (None for unknown).
+    A BuildSummary object representing the previous build.
   """
-  state_file = os.path.join(root, '.cbuildbot_launch_state')
+  state_file = os.path.join(root, BUILDER_STATE_FILENAME)
+
+  state = build_summary.BuildSummary()
 
   try:
-    state = osutils.ReadFile(state_file)
-    parts = state.split()
-    if len(parts) >= 3:
-      return int(parts[0]), parts[1], float(parts[2])
-    else:
-      # TODO(pprabhu) delete this branch once most buildslaves have migrated to
-      # newer state with three parts.
-      return int(parts[0]), parts[1], None
-  except (IOError, ValueError, IndexError):
-    # If we are unable to either read or parse the state file, we get here.
-    return 0, '', None
+    state_raw = osutils.ReadFile(state_file)
+    state.from_json(state_raw)
+  except IOError as e:
+    logging.warning('Unable to read %s: %s', state_file, e)
+    return state
+  except ValueError as e:
+    logging.warning('Saved state file %s is not valid JSON: %s', state_file, e)
+    return state
+
+  if not state.is_valid():
+    logging.warning('Previous build state is not valid.  Ignoring.')
+    state = build_summary.BuildSummary()
+
+  return state
 
 
-def SetState(branchname, root, distfiles_ts=None):
-  """Save the current state of our working directory.
+def SetLastBuildState(root, new_state):
+  """Save the state of the last build under |root|.
 
   Args:
-    branchname: Name of branch we prepped for as a string.
     root: Root of the working directory tree as a string.
-    distfiles_ts: float unix timestamp to include as the distfiles timestamp. If
-        None, current time will be used.
+    new_state: BuildSummary object containing the state to be saved.
   """
-  assert branchname
-  state_file = os.path.join(root, '.cbuildbot_launch_state')
-  if distfiles_ts is None:
-    distfiles_ts = time.time()
-  new_state = '%d %s %f' % (
-      BUILDROOT_BUILDROOT_LAYOUT, branchname, distfiles_ts)
-  osutils.WriteFile(state_file, new_state)
+  state_file = os.path.join(root, BUILDER_STATE_FILENAME)
+  osutils.WriteFile(state_file, new_state.to_json())
+
+  # Remove old state file.  Its contents have been migrated into the new file.
+  old_state_file = os.path.join(root, '.cbuildbot_launch_state')
+  osutils.SafeUnlink(old_state_file)
 
 
 def _MaybeCleanDistfiles(repo, distfiles_ts, metrics_fields):
@@ -179,9 +211,9 @@ def _MaybeCleanDistfiles(repo, distfiles_ts, metrics_fields):
   Returns:
     The new distfiles_ts to persist in state.
   """
-
+  # distfiles_ts can be None for a fresh environment, which means clean.
   if distfiles_ts is None:
-    return None
+    return time.time()
 
   distfiles_age = (time.time() - distfiles_ts) / 3600.0
   if distfiles_age < _DISTFILES_CACHE_EXPIRY_HOURS:
@@ -193,12 +225,13 @@ def _MaybeCleanDistfiles(repo, distfiles_ts, metrics_fields):
                 ignore_missing=True, sudo=True)
   metrics.Counter(METRIC_DISTFILES_CLEANUP).increment(
       field(metrics_fields, reason='cache_expired'))
+
   # Cleaned cache, so reset distfiles_ts
-  return None
+  return time.time()
 
 
 @StageDecorator
-def CleanBuildRoot(root, repo, metrics_fields):
+def CleanBuildRoot(root, repo, metrics_fields, build_state):
   """Some kinds of branch transitions break builds.
 
   This method ensures that cbuildbot's buildroot is a clean checkout on the
@@ -209,47 +242,55 @@ def CleanBuildRoot(root, repo, metrics_fields):
     root: Root directory owned by cbuildbot_launch.
     repo: repository.RepoRepository instance.
     metrics_fields: Dictionary of fields to include in metrics.
+    build_state: BuildSummary object containing the current build state that
+        will be saved into the cleaned root.  The distfiles_ts property will
+        be updated if the distfiles cache is cleaned.
   """
-  old_buildroot_layout, old_branch, distfiles_ts = GetState(root)
-  distfiles_ts = _MaybeCleanDistfiles(repo, distfiles_ts, metrics_fields)
+  previous_state = GetLastBuildState(root)
+  build_state.distfiles_ts = _MaybeCleanDistfiles(
+      repo, previous_state.distfiles_ts, metrics_fields)
 
-  if old_buildroot_layout != BUILDROOT_BUILDROOT_LAYOUT:
+  if previous_state.buildroot_layout != BUILDROOT_BUILDROOT_LAYOUT:
     logging.PrintBuildbotStepText('Unknown layout: Wiping buildroot.')
     metrics.Counter(METRIC_CLOBBER).increment(
         field(metrics_fields, reason='layout_change'))
     chroot_dir = os.path.join(root, constants.DEFAULT_CHROOT_DIR)
     if os.path.exists(chroot_dir) or os.path.exists(chroot_dir + '.img'):
-      cros_build_lib.CleanupChrootMount(chroot_dir, delete_image=True)
+      cros_sdk_lib.CleanupChrootMount(chroot_dir, delete=True)
     osutils.RmDir(root, ignore_missing=True, sudo=True)
   else:
-    if old_branch != repo.branch:
+    if previous_state.branch != repo.branch:
       logging.PrintBuildbotStepText('Branch change: Cleaning buildroot.')
-      logging.info('Unmatched branch: %s -> %s', old_branch, repo.branch)
+      logging.info('Unmatched branch: %s -> %s', previous_state.branch,
+                   repo.branch)
       metrics.Counter(METRIC_BRANCH_CLEANUP).increment(
-          field(metrics_fields, old_branch=old_branch))
+          field(metrics_fields, old_branch=previous_state.branch))
 
       logging.info('Remove Chroot.')
       chroot_dir = os.path.join(repo.directory, constants.DEFAULT_CHROOT_DIR)
       if os.path.exists(chroot_dir) or os.path.exists(chroot_dir + '.img'):
-        cros_build_lib.CleanupChrootMount(chroot_dir, delete_image=True)
-      osutils.RmDir(chroot_dir, ignore_missing=True, sudo=True)
+        cros_sdk_lib.CleanupChrootMount(chroot_dir, delete=True)
 
       logging.info('Remove Chrome checkout.')
       osutils.RmDir(os.path.join(repo.directory, '.cache', 'distfiles'),
                     ignore_missing=True, sudo=True)
 
-    try:
-      # If there is any failure doing the cleanup, wipe everything.
-      repo.BuildRootGitCleanup(prune_all=True)
-    except Exception:
-      logging.info('Checkout cleanup failed, wiping buildroot:', exc_info=True)
-      metrics.Counter(METRIC_CLOBBER).increment(
-          field(metrics_fields, reason='repo_cleanup_failure'))
-      repository.ClearBuildRoot(repo.directory)
+  try:
+    # If there is any failure doing the cleanup, wipe everything.
+    # The previous run might have been killed in the middle leaving stale git
+    # locks. Clean those up, first.
+    repo.PreLoad()
+    repo.CleanStaleLocks()
+    repo.BuildRootGitCleanup(prune_all=True)
+  except Exception:
+    logging.info('Checkout cleanup failed, wiping buildroot:', exc_info=True)
+    metrics.Counter(METRIC_CLOBBER).increment(
+        field(metrics_fields, reason='repo_cleanup_failure'))
+    repository.ClearBuildRoot(repo.directory)
 
   # Ensure buildroot exists. Save the state we are prepped for.
   osutils.SafeMakedirs(repo.directory)
-  SetState(repo.branch, root, distfiles_ts)
+  SetLastBuildState(root, build_state)
 
 
 @StageDecorator
@@ -274,27 +315,26 @@ def InitialCheckout(repo):
   repo.Sync(detach=True)
 
 
-@StageDecorator
-def DepotToolsEnsureBootstrap(depot_tools_path):
-  """Start cbuildbot in specified directory with all arguments.
+def ShouldFixBotoCerts(options):
+  """Decide if FixBotoCerts should be applied for this branch."""
+  try:
+    # Only apply to factory and firmware branches.
+    branch = options.branch or ''
+    prefix = branch.split('-')[0]
+    if prefix not in ('factory', 'firmware'):
+      return False
 
-  Args:
-    buildroot: Directory to be passed to cbuildbot with --buildroot.
-    depot_tools_path: Directory for depot_tools to be used by cbuildbot.
-    argv: Command line options passed to cbuildbot_launch.
+    # Only apply to "old" branches.
+    if branch.endswith('.B'):
+      version = branch[:-2].split('-')[-1]
+      major = int(version.split('.')[0])
+      return major <= 9667  # This is the newest known to be failing.
 
-  Returns:
-    Return code of cbuildbot as an integer.
-  """
-  ensure_bootstrap_script = os.path.join(depot_tools_path, 'ensure_bootstrap')
-  if os.path.exists(ensure_bootstrap_script):
-    extra_env = {'PATH': PrependPath(depot_tools_path)}
-    cros_build_lib.RunCommand(
-        [ensure_bootstrap_script], extra_env=extra_env, cwd=depot_tools_path)
-  else:
-    # This is normal when checking out branches older than this script.
-    logging.warn('ensure_bootstrap not found, skipping: %s',
-                 ensure_bootstrap_script)
+    return False
+  except Exception as e:
+    logging.warning(' failed: %s', e)
+    # Conservatively continue without the fix.
+    return False
 
 
 @StageDecorator
@@ -330,8 +370,13 @@ def Cbuildbot(buildroot, depot_tools_path, argv):
   logging.info('Adding depot_tools into PATH: %s', depot_tools_path)
   extra_env = {'PATH': PrependPath(depot_tools_path)}
 
-  result = cros_build_lib.RunCommand(
-      cmd, extra_env=extra_env, error_code_ok=True, cwd=buildroot)
+  # TODO(crbug.com/845304): Remove once underlying boto issues are resolved.
+  fix_boto = ShouldFixBotoCerts(options)
+
+  with boto_compat.FixBotoCerts(activate=fix_boto):
+    result = cros_build_lib.RunCommand(
+        cmd, extra_env=extra_env, error_code_ok=True, cwd=buildroot)
+
   return result.returncode
 
 
@@ -345,7 +390,7 @@ def CleanupChroot(buildroot):
   chroot_dir = os.path.join(buildroot, constants.DEFAULT_CHROOT_DIR)
   logging.info('Cleaning up chroot at %s', chroot_dir)
   if os.path.exists(chroot_dir) or os.path.exists(chroot_dir + '.img'):
-    cros_build_lib.CleanupChrootMount(chroot_dir, delete_image=False)
+    cros_sdk_lib.CleanupChrootMount(chroot_dir, delete=False)
 
 
 def ConfigureGlobalEnvironment():
@@ -380,6 +425,7 @@ def _main(argv):
   branchname = options.branch or 'master'
   root = options.buildroot
   buildroot = os.path.join(root, 'repository')
+  workspace = os.path.join(root, 'workspace')
   depot_tools_path = os.path.join(buildroot, constants.DEPOT_TOOLS_SUBPATH)
 
   metrics_fields = {
@@ -387,6 +433,12 @@ def _main(argv):
       'build_config': options.build_config_name,
       'tryjob': options.remote_trybot,
   }
+
+  #TODO: Move error handling to lib.metrics
+  try:
+    metrics.SetupMetricFields(fields=metrics_fields)
+  except Exception:
+    logging.error('SetupMetricFields Exception:', exc_info=True)
 
   # Does the entire build pass or fail.
   with metrics.Presence(METRIC_ACTIVE, metrics_fields), \
@@ -400,30 +452,42 @@ def _main(argv):
 
     # Prepare the buildroot with source for the build.
     with metrics.SuccessCounter(METRIC_PREP, metrics_fields):
-      site_config = config_lib.GetConfig()
-      manifest_url = site_config.params['MANIFEST_INT_URL']
+      manifest_url = config_lib.GetSiteParams().MANIFEST_INT_URL
       repo = repository.RepoRepository(manifest_url, buildroot,
                                        branch=branchname,
                                        git_cache_dir=options.git_cache_dir)
+      previous_build_state = GetLastBuildState(root)
 
       # Clean up the buildroot to a safe state.
       with metrics.SecondsTimer(METRIC_CLEAN, fields=metrics_fields):
-        CleanBuildRoot(root, repo, metrics_fields)
+        build_state = GetCurrentBuildState(options, branchname)
+        CleanBuildRoot(root, repo, metrics_fields, build_state)
 
       # Get a checkout close enough to the branch that cbuildbot can handle it.
       if options.sync:
         with metrics.SecondsTimer(METRIC_INITIAL, fields=metrics_fields):
           InitialCheckout(repo)
 
-      # Get a checkout close enough to the branch that cbuildbot can handle it.
-      with metrics.SecondsTimer(METRIC_DEPOT_TOOLS, fields=metrics_fields):
-        DepotToolsEnsureBootstrap(depot_tools_path)
-
     # Run cbuildbot inside the full ChromeOS checkout, on the specified branch.
-    with metrics.SecondsTimer(METRIC_CBUILDBOT, fields=metrics_fields):
+    with metrics.SecondsTimer(METRIC_CBUILDBOT, fields=metrics_fields), \
+         metrics.SecondsInstanceTimer(METRIC_CBUILDBOT_INSTANCE,
+                                      fields=metrics_fields):
+      if previous_build_state.is_valid():
+        argv.append('--previous-build-state')
+        argv.append(base64.b64encode(previous_build_state.to_json()))
+      argv.extend(['--workspace', workspace])
+
       result = Cbuildbot(buildroot, depot_tools_path, argv)
       s_fields['success'] = (result == 0)
-      CleanupChroot(buildroot)
+
+      build_state.status = (
+          constants.BUILDER_STATUS_PASSED
+          if result == 0 else constants.BUILDER_STATUS_FAILED)
+      SetLastBuildState(root, build_state)
+
+      with metrics.SecondsTimer(METRIC_CHROOT_CLEANUP, fields=metrics_fields):
+        CleanupChroot(buildroot)
+
       return result
 
 

@@ -10,7 +10,7 @@
 
 namespace heap_profiling {
 
-ReceiverPipeBase::ReceiverPipeBase(mojo::edk::ScopedPlatformHandle handle)
+ReceiverPipeBase::ReceiverPipeBase(mojo::PlatformHandle handle)
     : handle_(std::move(handle)) {}
 
 ReceiverPipeBase::~ReceiverPipeBase() = default;

@@ -35,6 +35,7 @@ DriverEntry CreateDriverEntry(const InMemoryDownload& download) {
   entry.done = entry.state == DriverEntry::State::COMPLETE ||
                entry.state == DriverEntry::State::CANCELLED;
   entry.bytes_downloaded = download.bytes_downloaded();
+  entry.url_chain = download.url_chain();
   entry.response_headers = download.response_headers();
   if (entry.response_headers) {
     entry.expected_total_size = entry.response_headers->GetContentLength();
@@ -107,10 +108,9 @@ void InMemoryDownloadDriver::Start(
   downloads_.emplace(guid, std::move(download));
 
   download_ptr->Start();
-  client_->OnDownloadCreated(CreateDriverEntry(*download_ptr));
 }
 
-void InMemoryDownloadDriver::Remove(const std::string& guid) {
+void InMemoryDownloadDriver::Remove(const std::string& guid, bool remove_file) {
   downloads_.erase(guid);
 }
 
@@ -131,7 +131,7 @@ base::Optional<DriverEntry> InMemoryDownloadDriver::Find(
   base::Optional<DriverEntry> entry;
   auto it = downloads_.find(guid);
   if (it != downloads_.end())
-    entry = CreateDriverEntry(*it->second.get());
+    entry = CreateDriverEntry(*it->second);
   return entry;
 }
 
@@ -152,6 +152,11 @@ size_t InMemoryDownloadDriver::EstimateMemoryUsage() const {
     memory_usage += it.second->EstimateMemoryUsage();
   }
   return memory_usage;
+}
+
+void InMemoryDownloadDriver::OnDownloadStarted(InMemoryDownload* download) {
+  DCHECK(client_);
+  client_->OnDownloadCreated(CreateDriverEntry(*download));
 }
 
 void InMemoryDownloadDriver::OnDownloadProgress(InMemoryDownload* download) {

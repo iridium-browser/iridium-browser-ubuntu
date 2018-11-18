@@ -180,8 +180,8 @@ EventFactoryEvdev::EventFactoryEvdev(CursorDelegateEvdev* cursor,
       gamepad_provider_(GamepadProviderOzone::GetInstance()),
       keyboard_(&modifiers_,
                 keyboard_layout,
-                base::Bind(&EventFactoryEvdev::DispatchUiEvent,
-                           base::Unretained(this))),
+                base::BindRepeating(&EventFactoryEvdev::DispatchUiEvent,
+                                    base::Unretained(this))),
       cursor_(cursor),
       input_controller_(&keyboard_, &button_map_),
       touch_id_generator_(0),
@@ -309,7 +309,8 @@ void EventFactoryEvdev::DispatchPinchEvent(const PinchEventParams& params) {
                params.device_id);
   GestureEventDetails details(params.type);
   details.set_device_type(GestureDeviceType::DEVICE_TOUCHPAD);
-  details.set_scale(params.scale);
+  if (params.type == ET_GESTURE_PINCH_UPDATE)
+    details.set_scale(params.scale);
   GestureEvent event(params.location.x(), params.location.y(), 0,
                      params.timestamp, details);
   event.set_source_device_id(params.device_id);
@@ -335,13 +336,13 @@ void EventFactoryEvdev::DispatchTouchEvent(const TouchEventParams& params) {
 
   gfx::PointF location = GetTransformedEventLocation(params);
   PointerDetails details = GetTransformedEventPointerDetails(params);
+  details.twist = 0.f;
 
   // params.slot is guaranteed to be < kNumTouchEvdevSlots.
   int input_id = params.device_id * kNumTouchEvdevSlots + params.slot;
   details.id = touch_id_generator_.GetGeneratedID(input_id);
   TouchEvent touch_event(params.type, gfx::Point(), params.timestamp, details,
-                         modifiers_.GetModifierFlags() | params.flags,
-                         /* angle */ 0.f);
+                         modifiers_.GetModifierFlags() | params.flags);
   touch_event.set_location_f(location);
   touch_event.set_root_location_f(location);
   touch_event.set_source_device_id(params.device_id);
@@ -467,8 +468,8 @@ void EventFactoryEvdev::StartThread() {
       new ProxyDeviceEventDispatcher(base::ThreadTaskRunnerHandle::Get(),
                                      weak_ptr_factory_.GetWeakPtr()));
   thread_.Start(std::move(proxy_dispatcher), cursor_,
-                base::Bind(&EventFactoryEvdev::OnThreadStarted,
-                           weak_ptr_factory_.GetWeakPtr()));
+                base::BindOnce(&EventFactoryEvdev::OnThreadStarted,
+                               weak_ptr_factory_.GetWeakPtr()));
 }
 
 void EventFactoryEvdev::OnThreadStarted(

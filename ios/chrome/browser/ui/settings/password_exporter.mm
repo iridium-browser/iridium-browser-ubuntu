@@ -4,18 +4,19 @@
 
 #import "ios/chrome/browser/ui/settings/password_exporter.h"
 
+#include "base/bind.h"
+#include "base/files/file_path.h"
 #include "base/logging.h"
-#include "base/mac/bind_objc_block.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/sys_string_conversions.h"
+#include "base/task/post_task.h"
 #include "base/task_runner_util.h"
-#include "base/task_scheduler/post_task.h"
-#include "base/threading/thread_restrictions.h"
+#include "base/threading/scoped_blocking_call.h"
 #include "components/autofill/core/common/password_form.h"
 #include "components/password_manager/core/browser/export/password_csv_writer.h"
 #include "components/password_manager/core/browser/password_manager_metrics_util.h"
+#include "components/password_manager/core/common/passwords_directory_util_ios.h"
 #include "components/strings/grit/components_strings.h"
-#import "ios/chrome/browser/passwords/passwords_directory_util.h"
 #import "ios/chrome/browser/ui/settings/reauthentication_module.h"
 #include "ios/chrome/grit/ios_strings.h"
 #include "ui/base/l10n/l10n_util_mac.h"
@@ -46,8 +47,7 @@ enum class ReauthenticationStatus {
       FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_BLOCKING},
       base::BindOnce(&password_manager::PasswordCSVWriter::SerializePasswords,
                      std::move(passwords)),
-      base::OnceCallback<void(std::string)>(
-          base::BindBlockArc(serializedPasswordsHandler)));
+      base::BindOnce(serializedPasswordsHandler));
 }
 
 @end
@@ -60,13 +60,14 @@ enum class ReauthenticationStatus {
 - (void)writeData:(NSData*)data
             toURL:(NSURL*)fileURL
           handler:(void (^)(WriteToURLStatus))handler {
-  WriteToURLStatus (^writeToFile)() = ^() {
-    base::AssertBlockingAllowed();
+  WriteToURLStatus (^writeToFile)() = ^{
     NSError* error = nil;
 
     NSURL* directoryURL = [fileURL URLByDeletingLastPathComponent];
     NSFileManager* fileManager = [NSFileManager defaultManager];
 
+    base::ScopedBlockingCall scoped_blocking_call(
+        base::BlockingType::WILL_BLOCK);
     if (![fileManager createDirectoryAtURL:directoryURL
                withIntermediateDirectories:YES
                                 attributes:nil
@@ -90,7 +91,7 @@ enum class ReauthenticationStatus {
   };
   base::PostTaskWithTraitsAndReplyWithResult(
       FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_BLOCKING},
-      base::BindBlockArc(writeToFile), base::BindBlockArc(handler));
+      base::BindOnce(writeToFile), base::BindOnce(handler));
 }
 
 @end
@@ -271,8 +272,21 @@ enum class ReauthenticationStatus {
     [self resetExportState];
     return;
   }
-
-  NSURL* uniqueDirectoryURL = [GetPasswordsDirectoryURL()
+  base::FilePath filePath;
+  if (!password_manager::GetPasswordsDirectory(&filePath)) {
+    [self showExportErrorAlertWithLocalizedReason:
+              l10n_util::GetNSString(
+                  IDS_IOS_EXPORT_PASSWORDS_UNKNOWN_ERROR_ALERT_MESSAGE)];
+    UMA_HISTOGRAM_ENUMERATION(
+        "PasswordManager.ExportPasswordsToCSVResult",
+        password_manager::metrics_util::ExportPasswordsResult::WRITE_FAILED,
+        password_manager::metrics_util::ExportPasswordsResult::COUNT);
+    [self resetExportState];
+    return;
+  }
+  NSString* filePathString =
+      [NSString stringWithUTF8String:filePath.value().c_str()];
+  NSURL* uniqueDirectoryURL = [[NSURL fileURLWithPath:filePathString]
       URLByAppendingPathComponent:[[NSUUID UUID] UUIDString]
                       isDirectory:YES];
   NSURL* passwordsTempFileURL =
@@ -335,10 +349,11 @@ enum class ReauthenticationStatus {
   NSURL* uniqueDirectoryURL =
       [passwordsTempFileURL URLByDeletingLastPathComponent];
   base::PostTaskWithTraits(
-      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
-      base::BindBlockArc(^() {
-        base::AssertBlockingAllowed();
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
+      base::BindOnce(^{
         NSFileManager* fileManager = [NSFileManager defaultManager];
+        base::ScopedBlockingCall scoped_blocking_call(
+            base::BlockingType::WILL_BLOCK);
         [fileManager removeItemAtURL:uniqueDirectoryURL error:nil];
       }));
 }
@@ -361,8 +376,8 @@ enum class ReauthenticationStatus {
       "PasswordManager.ExportPasswordsToCSVResult",
       password_manager::metrics_util::ExportPasswordsResult::SUCCESS,
       password_manager::metrics_util::ExportPasswordsResult::COUNT);
-  UMA_HISTOGRAM_COUNTS("PasswordManager.ExportedPasswordsPerUserInCSV",
-                       self.passwordCount);
+  UMA_HISTOGRAM_COUNTS_1M("PasswordManager.ExportedPasswordsPerUserInCSV",
+                          self.passwordCount);
 }
 
 #pragma mark - ForTesting

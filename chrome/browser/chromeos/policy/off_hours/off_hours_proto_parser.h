@@ -11,21 +11,24 @@
 
 #include "base/optional.h"
 #include "base/values.h"
-#include "chrome/browser/chromeos/policy/off_hours/off_hours_interval.h"
-#include "chrome/browser/chromeos/policy/off_hours/weekly_time.h"
+#include "chromeos/policy/weekly_time/weekly_time.h"
+#include "chromeos/policy/weekly_time/weekly_time_interval.h"
 #include "components/policy/proto/chrome_device_policy.pb.h"
+
+namespace base {
+class Clock;
+}
 
 namespace policy {
 namespace off_hours {
 
-// Return WeeklyTime structure from WeeklyTimeProto. Return nullptr if
-// WeeklyTime structure isn't correct.
-std::unique_ptr<WeeklyTime> ExtractWeeklyTimeFromProto(
-    const enterprise_management::WeeklyTimeProto& container);
-
-// Return list of time intervals from DeviceOffHoursProto structure.
-std::vector<OffHoursInterval> ExtractOffHoursIntervalsFromProto(
-    const enterprise_management::DeviceOffHoursProto& container);
+// Return list of time intervals from DeviceOffHoursProto structure. Takes the
+// timezone into account, this is to be used for non-value conversion purposes,
+// i.e. if the intervals are going to be used in code.
+std::vector<WeeklyTimeInterval> ExtractWeeklyTimeIntervalsFromProto(
+    const enterprise_management::DeviceOffHoursProto& container,
+    const std::string& timezone,
+    base::Clock* clock);
 
 // Return list of proto tags of ignored policies from DeviceOffHoursProto
 // structure.

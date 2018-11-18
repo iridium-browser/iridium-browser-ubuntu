@@ -242,8 +242,6 @@ namespace sw
 						c.w = Short4(0x1000);
 					case FORMAT_A32B32G32R32F:
 						break;
-					case FORMAT_D32F:
-					case FORMAT_D32FS8:
 					case FORMAT_D32F_LOCKABLE:
 					case FORMAT_D32FS8_TEXTURE:
 					case FORMAT_D32F_SHADOW:
@@ -472,8 +470,6 @@ namespace sw
 					c.w = Float4(1.0f);
 				case FORMAT_A32B32G32R32F:
 					break;
-				case FORMAT_D32F:
-				case FORMAT_D32FS8:
 				case FORMAT_D32F_LOCKABLE:
 				case FORMAT_D32FS8_TEXTURE:
 				case FORMAT_D32F_SHADOW:
@@ -2370,7 +2366,12 @@ namespace sw
 
 			if(state.textureType == TEXTURE_RECTANGLE)
 			{
-				coord = Min(Max(coord, Float4(0.0f)), Float4(dim - Int4(1)));
+				// According to https://www.khronos.org/registry/OpenGL/extensions/ARB/ARB_texture_rectangle.txt
+				// "CLAMP_TO_EDGE causes the s coordinate to be clamped to the range[0.5, wt - 0.5].
+				//  CLAMP_TO_EDGE causes the t coordinate to be clamped to the range[0.5, ht - 0.5]."
+				// Unless SwiftShader implements support for ADDRESSING_BORDER, other modes should be equivalent
+				// to CLAMP_TO_EDGE. Rectangle textures have no support for any MIRROR or REPEAT modes.
+				coord = Min(Max(coord, Float4(0.5f)), Float4(dim) - Float4(0.5f));
 			}
 			else
 			{
@@ -2635,8 +2636,6 @@ namespace sw
 		case FORMAT_R8:
 		case FORMAT_L8:
 		case FORMAT_A8L8:
-		case FORMAT_D32F:
-		case FORMAT_D32FS8:
 		case FORMAT_D32F_LOCKABLE:
 		case FORMAT_D32FS8_TEXTURE:
 		case FORMAT_D32F_SHADOW:
@@ -2703,8 +2702,6 @@ namespace sw
 		case FORMAT_X32B32G32R32F:
 		case FORMAT_A32B32G32R32F:
 		case FORMAT_X32B32G32R32F_UNSIGNED:
-		case FORMAT_D32F:
-		case FORMAT_D32FS8:
 		case FORMAT_D32F_LOCKABLE:
 		case FORMAT_D32FS8_TEXTURE:
 		case FORMAT_D32F_SHADOW:
@@ -2786,8 +2783,6 @@ namespace sw
 		case FORMAT_R8:
 		case FORMAT_L8:
 		case FORMAT_A8L8:
-		case FORMAT_D32F:
-		case FORMAT_D32FS8:
 		case FORMAT_D32F_LOCKABLE:
 		case FORMAT_D32FS8_TEXTURE:
 		case FORMAT_D32F_SHADOW:
@@ -2868,8 +2863,6 @@ namespace sw
 		case FORMAT_R8:
 		case FORMAT_L8:
 		case FORMAT_A8L8:
-		case FORMAT_D32F:
-		case FORMAT_D32FS8:
 		case FORMAT_D32F_LOCKABLE:
 		case FORMAT_D32FS8_TEXTURE:
 		case FORMAT_D32F_SHADOW:
@@ -2942,8 +2935,6 @@ namespace sw
 		case FORMAT_R8:
 		case FORMAT_L8:
 		case FORMAT_A8L8:
-		case FORMAT_D32F:
-		case FORMAT_D32FS8:
 		case FORMAT_D32F_LOCKABLE:
 		case FORMAT_D32FS8_TEXTURE:
 		case FORMAT_D32F_SHADOW:
@@ -3014,8 +3005,6 @@ namespace sw
 		case FORMAT_R8:             return component < 1;
 		case FORMAT_L8:             return component < 1;
 		case FORMAT_A8L8:           return component < 1;
-		case FORMAT_D32F:           return false;
-		case FORMAT_D32FS8:         return false;
 		case FORMAT_D32F_LOCKABLE:  return false;
 		case FORMAT_D32FS8_TEXTURE: return false;
 		case FORMAT_D32F_SHADOW:    return false;

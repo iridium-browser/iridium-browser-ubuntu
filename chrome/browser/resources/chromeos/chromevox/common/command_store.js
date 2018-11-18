@@ -247,6 +247,13 @@ cvox.CommandStore.CMD_WHITELIST = {
       {announce: true, msgId: 'previous_granularity', category: 'navigation'},
   'nextGranularity':
       {announce: true, msgId: 'next_granularity', category: 'navigation'},
+  'previousAtGranularity': {
+    announce: true,
+    msgId: 'previous_at_granularity',
+    category: 'navigation'
+  },
+  'nextAtGranularity':
+      {announce: true, msgId: 'next_at_granularity', category: 'navigation'},
 
   'previousCharacter': {
     backward: true,
@@ -347,6 +354,9 @@ cvox.CommandStore.CMD_WHITELIST = {
   'moveToStartOfLine': {forward: true, announce: true},
   'moveToEndOfLine': {backward: true, announce: true},
 
+  'jumpToDetails':
+      {announce: false, msgId: 'jump_to_details', category: 'navigation'},
+
   'readFromHere': {
     forward: true,
     announce: false,
@@ -354,19 +364,12 @@ cvox.CommandStore.CMD_WHITELIST = {
     category: 'navigation'
   },
 
-  'performDefaultAction': {
-    disallowContinuation: true,
-    msgId: 'perform_default_action',
-    doDefault: true,
-    skipInput: true,
-    category: 'navigation'
-  },
   'forceClickOnCurrentItem': {
     announce: true,
     disallowContinuation: true,
     allowEvents: true,
     msgId: 'force_click_on_current_item',
-    category: 'navigation'
+    category: 'actions'
   },
   'forceDoubleClickOnCurrentItem':
       {announce: true, allowEvents: true, disallowContinuation: true},
@@ -383,7 +386,7 @@ cvox.CommandStore.CMD_WHITELIST = {
   'speakTimeAndDate':
       {announce: false, msgId: 'speak_time_and_date', category: 'information'},
   'toggleSelection':
-      {announce: true, msgId: 'toggle_selection', category: 'information'},
+      {announce: true, msgId: 'toggle_selection', category: 'actions'},
 
   'toggleSearchWidget': {
     announce: false,
@@ -402,9 +405,11 @@ cvox.CommandStore.CMD_WHITELIST = {
   'toggleKeyboardHelp': {
     announce: false,
     disallowContinuation: true,
-    msgId: 'show_power_key',
+    msgId: 'show_panel_menu',
     category: 'help_commands'
   },
+  'showPanelMenuMostRecent':
+      {announce: false, msgId: 'show_panel_menu', category: 'help_commands'},
   'help': {
     announce: false,
     msgId: 'help',
@@ -433,6 +438,8 @@ cvox.CommandStore.CMD_WHITELIST = {
     'disallowOOBE': true,
     category: 'help_commands'
   },
+  'showTtsSettings':
+      {announce: false, msgId: 'show_tts_settings', category: 'help_commands'},
   'toggleBrailleCaptions':
       {announce: false, msgId: 'braille_captions', category: 'help_commands'},
   'reportIssue': {
@@ -815,6 +822,10 @@ cvox.CommandStore.CMD_WHITELIST = {
   'pauseAllMedia':
       {announce: false, msgId: 'pause_all_media', category: 'information'},
 
+  // Scrolling actions.
+  'scrollBackward': {msgId: 'action_scroll_backward_description'},
+  'scrollForward': {msgId: 'action_scroll_forward_description'},
+
   // Math specific commands.
   'toggleSemantics':
       {announce: false, msgId: 'toggle_semantics', category: 'information'},
@@ -882,6 +893,7 @@ cvox.CommandStore.CMD_WHITELIST = {
 /**
  * List of find next commands and their associated data.
  * @type {Object<{predicate: string,
+ *                typeMsg: string,
  *                forwardError: string,
  *                backwardError: string}>}
  *  predicate: The name of the predicate. This must be defined in DomPredicates.

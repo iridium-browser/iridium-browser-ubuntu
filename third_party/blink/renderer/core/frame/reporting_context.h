@@ -29,24 +29,24 @@ class CORE_EXPORT ReportingContext final
   // Returns the ReportingContext for an ExecutionContext. If one does not
   // already exist for the given context, one is created.
   static ReportingContext* From(ExecutionContext*);
+  static ReportingContext* From(const ExecutionContext* context) {
+    return ReportingContext::From(const_cast<ExecutionContext*>(context));
+  }
 
-  // Queues a report to be reported to all observers.
+  // Queues a report in all registered observers.
   void QueueReport(Report*);
 
-  // Sends all queued reports to all observers.
-  void SendReports();
+  // Counts the use of a report type via UseCounter.
+  void CountReport(Report*);
 
   void RegisterObserver(ReportingObserver*);
   void UnregisterObserver(ReportingObserver*);
 
-  // Returns whether there is at least one active ReportingObserver.
-  bool ObserverExists();
-
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  private:
   HeapListHashSet<Member<ReportingObserver>> observers_;
-  HeapVector<Member<Report>> reports_;
+  HeapListHashSet<Member<Report>> report_buffer_;
   Member<ExecutionContext> execution_context_;
 };
 

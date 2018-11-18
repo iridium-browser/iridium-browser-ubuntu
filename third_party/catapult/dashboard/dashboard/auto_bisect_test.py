@@ -2,6 +2,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import json
 import unittest
 
 import mock
@@ -20,7 +21,9 @@ class StartNewBisectForBugTest(testing_common.TestCase):
   def setUp(self):
     super(StartNewBisectForBugTest, self).setUp()
     self.SetCurrentUser('internal@chromium.org')
-    auto_bisect._PINPOINT_BOTS = ['linux-pinpoint']
+    namespaced_stored_object.Set('bot_configurations', {
+        'linux-pinpoint': {},
+    })
 
   @mock.patch.object(auto_bisect.start_try_job, 'PerformBisect')
   def testStartNewBisectForBug_StartsBisect(self, mock_perform_bisect):
@@ -143,14 +146,12 @@ class StartNewBisectForBugTest(testing_common.TestCase):
   @mock.patch.object(
       utils, 'IsValidSheriffUser', mock.MagicMock(return_value=True))
   @mock.patch.object(
-      auto_bisect.pinpoint_service, 'NewJob',
-      mock.MagicMock(
-          return_value={'jobId': 123, 'jobUrl': 'http://pinpoint/123'}))
+      auto_bisect.pinpoint_service, 'NewJob')
   @mock.patch.object(
       auto_bisect.start_try_job, 'GuessStoryFilter')
   @mock.patch.object(auto_bisect.pinpoint_request, 'ResolveToGitHash',
                      mock.MagicMock(return_value='abc123'))
-  def testStartNewBisectForBug_Pinpoint_Succeeds(self, mock_guess):
+  def testStartNewBisectForBug_Pinpoint_Succeeds(self, mock_guess, mock_new):
     namespaced_stored_object.Set('bot_configurations', {
         'linux-pinpoint': {
             'dimensions': [{'key': 'foo', 'value': 'bar'}]
@@ -160,6 +161,8 @@ class StartNewBisectForBugTest(testing_common.TestCase):
     namespaced_stored_object.Set('repositories', {
         'chromium': {'some': 'params'},
     })
+
+    mock_new.return_value = {'jobId': 123, 'jobUrl': 'http://pinpoint/123'}
 
     testing_common.AddTests(
         ['ChromiumPerf'], ['linux-pinpoint'], {'sunspider': {'score': {}}})
@@ -176,7 +179,7 @@ class StartNewBisectForBugTest(testing_common.TestCase):
                 'r_chromium': 'fc34e5346446854637311ad7793a95d56e314042'
             }
         })
-    anomaly.Anomaly(
+    a = anomaly.Anomaly(
         bug_id=333, test=test_key,
         start_revision=12000, end_revision=12500,
         median_before_anomaly=100, median_after_anomaly=200).put()
@@ -185,6 +188,16 @@ class StartNewBisectForBugTest(testing_common.TestCase):
         {'issue_id': 123, 'issue_url': 'http://pinpoint/123'}, result)
     mock_guess.assert_called_once_with(
         'ChromiumPerf/linux-pinpoint/sunspider/score')
+    self.assertEqual('123', a.get().pinpoint_bisects[0])
+    self.assertEqual(
+        {'alert': a.urlsafe(), 'test_path': test_key.id()},
+        json.loads(mock_new.call_args[0][0]['tags']))
+    anomaly_entity = a.get()
+    anomaly_magnitude = (anomaly_entity.median_after_anomaly -
+                         anomaly_entity.median_before_anomaly)
+    self.assertEqual(
+        anomaly_magnitude,
+        mock_new.call_args[0][0]['comparison_magnitude'])
 
   @mock.patch.object(
       auto_bisect.pinpoint_request, 'PinpointParamsFromBisectParams',

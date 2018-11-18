@@ -86,14 +86,15 @@ class WebContentsObserverProxy extends WebContentsObserver {
     }
 
     @CalledByNative
-    public void didFinishNavigation(String url, boolean isInMainFrame, boolean isErrorPage,
+    private void didFinishNavigation(String url, boolean isInMainFrame, boolean isErrorPage,
             boolean hasCommitted, boolean isSameDocument, boolean isFragmentNavigation,
-            int transition, int errorCode, String errorDescription, int httpStatusCode) {
+            boolean isRendererInitiated, boolean isDownload, int transition, int errorCode,
+            String errorDescription, int httpStatusCode) {
         Integer pageTransition = transition == -1 ? null : transition;
         for (mObserversIterator.rewind(); mObserversIterator.hasNext();) {
             mObserversIterator.next().didFinishNavigation(url, isInMainFrame, isErrorPage,
-                    hasCommitted, isSameDocument, isFragmentNavigation, pageTransition, errorCode,
-                    errorDescription, httpStatusCode);
+                    hasCommitted, isSameDocument, isFragmentNavigation, isRendererInitiated,
+                    isDownload, pageTransition, errorCode, errorDescription, httpStatusCode);
         }
     }
 
@@ -223,6 +224,22 @@ class WebContentsObserverProxy extends WebContentsObserver {
     public void hasEffectivelyFullscreenVideoChange(boolean isFullscreen) {
         for (mObserversIterator.rewind(); mObserversIterator.hasNext();) {
             mObserversIterator.next().hasEffectivelyFullscreenVideoChange(isFullscreen);
+        }
+    }
+
+    @Override
+    @CalledByNative
+    public void viewportFitChanged(@WebContentsObserver.ViewportFitType int value) {
+        for (mObserversIterator.rewind(); mObserversIterator.hasNext();) {
+            mObserversIterator.next().viewportFitChanged(value);
+        }
+    }
+
+    @Override
+    @CalledByNative
+    public void didReloadLoFiImages() {
+        for (mObserversIterator.rewind(); mObserversIterator.hasNext();) {
+            mObserversIterator.next().didReloadLoFiImages();
         }
     }
 

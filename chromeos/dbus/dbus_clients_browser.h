@@ -16,10 +16,12 @@ class Bus;
 
 namespace chromeos {
 
+class ArcAppfuseProviderClient;
 class ArcMidisClient;
 class ArcObbMounterClient;
 class ArcOemCryptoClient;
 class AuthPolicyClient;
+class CiceroneClient;
 class ConciergeClient;
 class CrosDisksClient;
 class DebugDaemonClient;
@@ -28,6 +30,8 @@ class ImageBurnerClient;
 class ImageLoaderClient;
 class LorgnetteManagerClient;
 class MediaAnalyticsClient;
+class OobeConfigurationClient;
+class SeneschalClient;
 class SmbProviderClient;
 class VirtualFileProviderClient;
 
@@ -46,10 +50,12 @@ class CHROMEOS_EXPORT DBusClientsBrowser {
   friend class DBusThreadManager;
   friend class DBusThreadManagerSetter;
 
+  std::unique_ptr<ArcAppfuseProviderClient> arc_appfuse_provider_client_;
   std::unique_ptr<ArcMidisClient> arc_midis_client_;
   std::unique_ptr<ArcObbMounterClient> arc_obb_mounter_client_;
   std::unique_ptr<ArcOemCryptoClient> arc_oemcrypto_client_;
   std::unique_ptr<AuthPolicyClient> auth_policy_client_;
+  std::unique_ptr<CiceroneClient> cicerone_client_;
   std::unique_ptr<ConciergeClient> concierge_client_;
   std::unique_ptr<CrosDisksClient> cros_disks_client_;
   std::unique_ptr<DebugDaemonClient> debug_daemon_client_;
@@ -58,6 +64,8 @@ class CHROMEOS_EXPORT DBusClientsBrowser {
   std::unique_ptr<ImageLoaderClient> image_loader_client_;
   std::unique_ptr<LorgnetteManagerClient> lorgnette_manager_client_;
   std::unique_ptr<MediaAnalyticsClient> media_analytics_client_;
+  std::unique_ptr<OobeConfigurationClient> oobe_configuration_client_;
+  std::unique_ptr<SeneschalClient> seneschal_client_;
   std::unique_ptr<SmbProviderClient> smb_provider_client_;
   std::unique_ptr<VirtualFileProviderClient> virtual_file_provider_client_;
 

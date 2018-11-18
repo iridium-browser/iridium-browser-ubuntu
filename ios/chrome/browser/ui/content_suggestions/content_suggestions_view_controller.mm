@@ -24,7 +24,8 @@
 #import "ios/chrome/browser/ui/ntp/new_tab_page_header_constants.h"
 #import "ios/chrome/browser/ui/overscroll_actions/overscroll_actions_controller.h"
 #import "ios/chrome/browser/ui/uikit_ui_util.h"
-#import "ios/chrome/browser/ui/util/constraints_ui_util.h"
+#import "ios/chrome/common/ui_util/constraints_ui_util.h"
+#include "ios/web/public/features.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -32,18 +33,9 @@
 
 namespace {
 using CSCollectionViewItem = CollectionViewItem<SuggestedContent>;
-const CGFloat kMaxCardWidth = 416;
-const CGFloat kStandardSpacing = 8;
 const CGFloat kMostVisitedBottomMargin = 13;
 const CGFloat kCardBorderRadius = 11;
 
-// Returns whether the cells should be displayed using the full width.
-BOOL ShouldCellsBeFullWidth(UITraitCollection* collection) {
-  if (IsUIRefreshPhase1Enabled())
-    return NO;
-  return collection.horizontalSizeClass == UIUserInterfaceSizeClassCompact &&
-         collection.verticalSizeClass != UIUserInterfaceSizeClassCompact;
-}
 }
 
 @interface ContentSuggestionsViewController ()<UIGestureRecognizerDelegate>
@@ -113,7 +105,6 @@ BOOL ShouldCellsBeFullWidth(UITraitCollection* collection) {
     [self addEmptySectionPlaceholderIfNeeded:indexPath.section];
   }
       completion:^(BOOL) {
-        [self.audience contentOffsetDidChange];
         // The context menu could be displayed for the deleted entry.
         [self.suggestionCommandHandler dismissModals];
       }];
@@ -132,7 +123,6 @@ BOOL ShouldCellsBeFullWidth(UITraitCollection* collection) {
     [self.collectionView deleteSections:[NSIndexSet indexSetWithIndex:section]];
   }
       completion:^(BOOL) {
-        [self.audience contentOffsetDidChange];
         // The context menu could be displayed for the deleted entries.
         [self.suggestionCommandHandler dismissModals];
       }];
@@ -140,16 +130,11 @@ BOOL ShouldCellsBeFullWidth(UITraitCollection* collection) {
 
 - (void)addSuggestions:(NSArray<CSCollectionViewItem*>*)suggestions
          toSectionInfo:(ContentSuggestionsSectionInformation*)sectionInfo {
-  [self.collectionView performBatchUpdates:^{
+  void (^batchUpdates)(void) = ^{
     NSIndexSet* addedSections = [self.collectionUpdater
         addSectionsForSectionInfoToModel:@[ sectionInfo ]];
     [self.collectionView insertSections:addedSections];
-  }
-      completion:^(BOOL) {
-        [self.audience contentOffsetDidChange];
-      }];
 
-  [self.collectionView performBatchUpdates:^{
     NSIndexPath* removedItem = [self.collectionUpdater
         removeEmptySuggestionsForSectionInfo:sectionInfo];
     if (removedItem) {
@@ -160,10 +145,9 @@ BOOL ShouldCellsBeFullWidth(UITraitCollection* collection) {
         [self.collectionUpdater addSuggestionsToModel:suggestions
                                       withSectionInfo:sectionInfo];
     [self.collectionView insertItemsAtIndexPaths:addedItems];
-  }
-      completion:^(BOOL) {
-        [self.audience contentOffsetDidChange];
-      }];
+  };
+
+  [self.collectionView performBatchUpdates:batchUpdates completion:nil];
 }
 
 - (NSInteger)numberOfSuggestionsAbove:(NSInteger)section {
@@ -192,13 +176,9 @@ BOOL ShouldCellsBeFullWidth(UITraitCollection* collection) {
       updateMostVisitedForSize:self.collectionView.bounds.size];
   [self.headerSynchronizer
       updateFakeOmniboxOnNewWidth:self.collectionView.bounds.size.width];
+  [self.headerSynchronizer updateConstraints];
   [self.collectionView reloadData];
-  if (ShouldCellsBeFullWidth(
-          [UIApplication sharedApplication].keyWindow.traitCollection)) {
-    self.styler.cellStyle = MDCCollectionViewCellStyleGrouped;
-  } else {
-    self.styler.cellStyle = MDCCollectionViewCellStyleCard;
-  }
+  self.styler.cellStyle = MDCCollectionViewCellStyleCard;
 }
 
 - (void)clearOverscroll {
@@ -216,11 +196,10 @@ BOOL ShouldCellsBeFullWidth(UITraitCollection* collection) {
 
   self.collectionView.prefetchingEnabled = NO;
   if (@available(iOS 11, *)) {
-    // Use automatic behavior as each element takes the safe area into account
-    // separately and the overscroll action does not work well with content
-    // offset.
+    // Overscroll action does not work well with content offset, so set this
+    // to never and internally offset the UI to account for safe area insets.
     self.collectionView.contentInsetAdjustmentBehavior =
-        UIScrollViewContentInsetAdjustmentAutomatic;
+        UIScrollViewContentInsetAdjustmentNever;
   }
   self.collectionView.accessibilityIdentifier =
       [[self class] collectionAccessibilityIdentifier];
@@ -228,16 +207,11 @@ BOOL ShouldCellsBeFullWidth(UITraitCollection* collection) {
 
   self.collectionView.delegate = self;
   self.collectionView.backgroundColor = ntp_home::kNTPBackgroundColor();
-  if (ShouldCellsBeFullWidth(
-          [UIApplication sharedApplication].keyWindow.traitCollection)) {
-    self.styler.cellStyle = MDCCollectionViewCellStyleGrouped;
-  } else {
-    self.styler.cellStyle = MDCCollectionViewCellStyleCard;
-    if (IsUIRefreshPhase1Enabled())
-      self.styler.cardBorderRadius = kCardBorderRadius;
-  }
+  self.styler.cellStyle = MDCCollectionViewCellStyleCard;
+  self.styler.cardBorderRadius = kCardBorderRadius;
   self.automaticallyAdjustsScrollViewInsets = NO;
   self.collectionView.translatesAutoresizingMaskIntoConstraints = NO;
+
   ApplyVisualConstraints(@[ @"V:|[collection]|", @"H:|[collection]|" ],
                          @{@"collection" : self.collectionView});
 
@@ -257,10 +231,10 @@ BOOL ShouldCellsBeFullWidth(UITraitCollection* collection) {
 }
 
 - (void)updateOverscrollActionsState {
-  if (IsRegularXRegularSizeClass(self)) {
-    [self.overscrollActionsController disableOverscrollActions];
-  } else {
+  if (IsSplitToolbarMode(self)) {
     [self.overscrollActionsController enableOverscrollActions];
+  } else {
+    [self.overscrollActionsController disableOverscrollActions];
   }
 }
 
@@ -280,9 +254,8 @@ BOOL ShouldCellsBeFullWidth(UITraitCollection* collection) {
   [super viewDidAppear:animated];
   // Resize the collection as it might have been rotated while not being
   // presented (e.g. rotation on stack view).
+  [self correctMissingSafeArea];
   [self updateConstraints];
-  // Update the shadow bar.
-  [self.audience contentOffsetDidChange];
 }
 
 - (void)viewWillTransitionToSize:(CGSize)size
@@ -308,16 +281,21 @@ BOOL ShouldCellsBeFullWidth(UITraitCollection* collection) {
   // Invalidating the layout after changing the cellStyle results in the layout
   // not being updated. Do it before to have it taken into account.
   [self.collectionView.collectionViewLayout invalidateLayout];
-  if (ShouldCellsBeFullWidth(newCollection)) {
-    self.styler.cellStyle = MDCCollectionViewCellStyleGrouped;
-  } else {
-    self.styler.cellStyle = MDCCollectionViewCellStyleCard;
-  }
+  self.styler.cellStyle = MDCCollectionViewCellStyleCard;
 }
 
 - (void)traitCollectionDidChange:(UITraitCollection*)previousTraitCollection {
   [super traitCollectionDidChange:previousTraitCollection];
+  [self correctMissingSafeArea];
   [self updateOverscrollActionsState];
+}
+
+- (void)viewSafeAreaInsetsDidChange {
+  [super viewSafeAreaInsetsDidChange];
+  [self correctMissingSafeArea];
+  [self.headerSynchronizer
+      updateFakeOmniboxOnNewWidth:self.collectionView.bounds.size.width];
+  [self.headerSynchronizer updateConstraints];
 }
 
 #pragma mark - UICollectionViewDelegate
@@ -412,58 +390,12 @@ BOOL ShouldCellsBeFullWidth(UITraitCollection* collection) {
     parentInset.left = margin;
     parentInset.right = margin;
     if ([self.collectionUpdater isMostVisitedSection:section]) {
-      if (IsUIRefreshPhase1Enabled()) {
-        parentInset.bottom = kMostVisitedBottomMargin;
-      } else {
-        // Make sure the Content Suggestions is displayed at a reasonnable
-        // distance from the Most Visited tiles.
-        CGFloat maximumMargin = IsIPadIdiom()
-                                    ? ntp_home::kMostVisitedBottomMarginIPad
-                                    : ntp_home::kMostVisitedBottomMarginIPhone;
-
-        NSInteger promoSection = -1;
-        for (NSInteger i = 0; i < [self.collectionViewModel numberOfSections];
-             i++) {
-          if ([self.collectionUpdater isPromoSection:i]) {
-            promoSection = i;
-          }
-        }
-
-        // Height for the displayed content.
-        CGFloat contentHeight =
-            [self collectionView:collectionView
-                                         layout:collectionViewLayout
-                referenceSizeForHeaderInSection:0]
-                .height;
-        contentHeight += kStandardSpacing;
-        if (promoSection >= 0) {
-          contentHeight +=
-              [self collectionView:collectionView
-                  cellHeightAtIndexPath:[NSIndexPath
-                                            indexPathForItem:0
-                                                   inSection:promoSection]];
-          contentHeight += kStandardSpacing;
-        }
-        contentHeight +=
-            2 * [ContentSuggestionsMostVisitedCell defaultSize].height;
-        contentHeight += content_suggestions::verticalSpacingBetweenTiles();
-
-        // The Content Suggestions should idealy be displayed such as only part
-        // of the first suggestion is displayed. The distance should be capped
-        // to not push the suggestions too far.
-        CGFloat collectionHeight = collectionView.bounds.size.height;
-        CGFloat idealMargin = collectionHeight - contentHeight -
-                              ntp_home::kSuggestionPeekingHeight;
-        CGFloat margin = MIN(MAX(kStandardSpacing, idealMargin), maximumMargin);
-        parentInset.bottom = margin;
-      }
+      parentInset.bottom = kMostVisitedBottomMargin;
     }
   } else if (self.styler.cellStyle == MDCCollectionViewCellStyleCard) {
     CGFloat collectionWidth = collectionView.bounds.size.width;
     CGFloat maxCardWidth =
-        IsUIRefreshPhase1Enabled()
-            ? content_suggestions::searchFieldWidth(collectionWidth)
-            : kMaxCardWidth;
+        content_suggestions::searchFieldWidth(collectionWidth);
     CGFloat margin =
         MAX(0, (collectionView.frame.size.width - maxCardWidth) / 2);
     parentInset.left = margin;
@@ -488,11 +420,7 @@ BOOL ShouldCellsBeFullWidth(UITraitCollection* collection) {
 
 - (BOOL)collectionView:(UICollectionView*)collectionView
     hidesInkViewAtIndexPath:(NSIndexPath*)indexPath {
-  ContentSuggestionType itemType = [self.collectionUpdater
-      contentSuggestionTypeForItem:[self.collectionViewModel
-                                       itemAtIndexPath:indexPath]];
-  return [self.collectionUpdater isMostVisitedSection:indexPath.section] ||
-         itemType == ContentSuggestionTypeEmpty;
+  return YES;
 }
 
 - (UIColor*)collectionView:(nonnull UICollectionView*)collectionView
@@ -524,10 +452,7 @@ BOOL ShouldCellsBeFullWidth(UITraitCollection* collection) {
 
 - (BOOL)collectionView:(UICollectionView*)collectionView
     shouldHideHeaderBackgroundForSection:(NSInteger)section {
-  if (IsUIRefreshPhase1Enabled()) {
-    return [self.collectionUpdater shouldUseCustomStyleForSection:section];
-  }
-  return YES;
+  return [self.collectionUpdater shouldUseCustomStyleForSection:section];
 }
 
 - (CGFloat)collectionView:(UICollectionView*)collectionView
@@ -545,30 +470,20 @@ BOOL ShouldCellsBeFullWidth(UITraitCollection* collection) {
 
 - (BOOL)collectionView:(UICollectionView*)collectionView
     shouldHideItemSeparatorAtIndexPath:(NSIndexPath*)indexPath {
-  if (IsUIRefreshPhase1Enabled()) {
-    // Special case, show a seperator between the last regular item and the
-    // footer.
-    if (![self.collectionUpdater
-            shouldUseCustomStyleForSection:indexPath.section] &&
-        indexPath.row ==
-            [self.collectionView numberOfItemsInSection:indexPath.section] -
-                1) {
-      return NO;
-    }
-    return YES;
-  } else {
-    return [self collectionView:collectionView
-        shouldHideItemBackgroundAtIndexPath:indexPath];
+  // Special case, show a seperator between the last regular item and the
+  // footer.
+  if (![self.collectionUpdater
+          shouldUseCustomStyleForSection:indexPath.section] &&
+      indexPath.row ==
+          [self.collectionView numberOfItemsInSection:indexPath.section] - 1) {
+    return NO;
   }
+  return YES;
 }
 
 - (BOOL)collectionView:(UICollectionView*)collectionView
     shouldHideHeaderSeparatorForSection:(NSInteger)section {
-  if (IsUIRefreshPhase1Enabled()) {
-    return [self.collectionUpdater shouldUseCustomStyleForSection:section];
-  } else {
-    return YES;
-  }
+  return [self.collectionUpdater shouldUseCustomStyleForSection:section];
 }
 
 #pragma mark - MDCCollectionViewEditingDelegate
@@ -601,7 +516,6 @@ BOOL ShouldCellsBeFullWidth(UITraitCollection* collection) {
 
 - (void)scrollViewDidScroll:(UIScrollView*)scrollView {
   [super scrollViewDidScroll:scrollView];
-  [self.audience contentOffsetDidChange];
   [self.overscrollActionsController scrollViewDidScroll:scrollView];
   [self.headerSynchronizer updateFakeOmniboxOnCollectionScroll];
   self.scrolledToTop =
@@ -629,22 +543,6 @@ BOOL ShouldCellsBeFullWidth(UITraitCollection* collection) {
       scrollViewWillEndDragging:scrollView
                    withVelocity:velocity
             targetContentOffset:targetContentOffset];
-
-  CGFloat toolbarHeight = ntp_header::ToolbarHeight();
-  CGFloat targetY = targetContentOffset->y;
-
-  if (content_suggestions::IsRegularXRegularSizeClass(self) || targetY <= 0 ||
-      targetY >= toolbarHeight || !self.containsToolbar)
-    return;
-
-  CGFloat xOffset = self.collectionView.contentOffset.x;
-  // Adjust the toolbar to be all the way on or off screen.
-  if (targetY > toolbarHeight / 2) {
-    [self.collectionView setContentOffset:CGPointMake(xOffset, toolbarHeight)
-                                 animated:YES];
-  } else {
-    [self.collectionView setContentOffset:CGPointMake(xOffset, 0) animated:YES];
-  }
 }
 
 #pragma mark - UIGestureRecognizerDelegate
@@ -687,6 +585,26 @@ BOOL ShouldCellsBeFullWidth(UITraitCollection* collection) {
 }
 
 #pragma mark - Private
+
+// TODO(crbug.com/826369) Remove this when the NTP is conatined by the BVC
+// and removed from native content.  As a part of native content, the NTP is
+// contained by a view controller that is inset from safeArea.top.  Even
+// though content suggestions appear under the top safe area, they are blocked
+// by the browser container view controller.
+- (void)correctMissingSafeArea {
+  if (base::FeatureList::IsEnabled(web::features::kBrowserContainerFullscreen))
+    return;
+
+  if (@available(iOS 11, *)) {
+    UIEdgeInsets missingTop = UIEdgeInsetsZero;
+    // During the new tab animation the browser container view controller
+    // actually matches the browser view controller frame, so safe area does
+    // work, so be sure to check the parent view controller offset.
+    if (self.parentViewController.view.frame.origin.y == StatusBarHeight())
+      missingTop = UIEdgeInsetsMake(StatusBarHeight(), 0, 0, 0);
+    self.additionalSafeAreaInsets = missingTop;
+  }
+}
 
 - (void)handleLongPress:(UILongPressGestureRecognizer*)gestureRecognizer {
   if (self.editor.editing ||
@@ -733,7 +651,7 @@ BOOL ShouldCellsBeFullWidth(UITraitCollection* collection) {
       break;
   }
 
-  if (content_suggestions::IsRegularXRegularSizeClass(self))
+  if (IsRegularXRegularSizeClass(self))
     [self.headerSynchronizer unfocusOmnibox];
 }
 

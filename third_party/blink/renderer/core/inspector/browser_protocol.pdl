@@ -1,6 +1,8 @@
 # Copyright 2017 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+#
+# Contribuging to Chrome DevTools Protocol: https://docs.google.com/document/d/1c-COD2kaK__5iMM5SEx-PzNA7HFmgttcYfOHHX0HaOM/edit?usp=sharing
 
 version
   major 1
@@ -124,7 +126,7 @@ experimental domain Accessibility
       relevant
       root
       autocomplete
-      haspopup
+      hasPopup
       level
       multiselectable
       orientation
@@ -186,6 +188,11 @@ experimental domain Accessibility
     returns
       # The `Accessibility.AXNode` for this DOM node, if it exists, plus its ancestors, siblings and
       # children, if requested.
+      array of AXNode nodes
+
+  # Fetches the entire accessibility tree
+  experimental command getFullAXTree
+    returns
       array of AXNode nodes
 
 experimental domain Animation
@@ -478,8 +485,44 @@ domain Browser
       # The window state. Default to normal.
       optional WindowState windowState
 
+  experimental type PermissionType extends string
+    enum
+      accessibilityEvents
+      audioCapture
+      backgroundSync
+      clipboardRead
+      clipboardWrite
+      durableStorage
+      flash
+      geolocation
+      midi
+      midiSysex
+      notifications
+      paymentHandler
+      protectedMediaIdentifier
+      sensors
+      videoCapture
+
+  # Grant specific permissions to the given origin and reject all others.
+  experimental command grantPermissions
+    parameters
+      string origin
+      array of PermissionType permissions
+      # BrowserContext to override permissions. When omitted, default browser context is used.
+      optional Target.BrowserContextID browserContextId
+
+  # Reset all permission management for all origins.
+  experimental command resetPermissions
+    parameters
+      # BrowserContext to reset permissions. When omitted, default browser context is used.
+      optional Target.BrowserContextID browserContextId
+
+
   # Close browser gracefully.
   command close
+
+  # Crashes browser on the main thread.
+  experimental command crash
 
   # Returns version information.
   command getVersion
@@ -531,6 +574,9 @@ domain Browser
       # substring in their name are extracted. An empty or absent query returns
       # all histograms.
       optional string query
+      # If true, retrieve delta since last call.
+      optional boolean delta
+
     returns
       # Histograms.
       array of Histogram histograms
@@ -540,6 +586,8 @@ domain Browser
     parameters
       # Requested histogram name.
       string name
+      # If true, retrieve delta since last call.
+      optional boolean delta
     returns
       # Histogram.
       Histogram histogram
@@ -983,7 +1031,7 @@ experimental domain CSS
       # Usage statistics for every employed platform font.
       array of PlatformFontUsage fonts
 
-  # Returns the current textual content and the URL for a stylesheet.
+  # Returns the current textual content for a stylesheet.
   command getStyleSheetText
     parameters
       StyleSheetId styleSheetId
@@ -1442,6 +1490,20 @@ domain DOM
       # Box model for the node.
       BoxModel model
 
+  # Returns quads that describe node position on the page. This method
+  # might return multiple quads for inline nodes.
+  experimental command getContentQuads
+    parameters
+      # Identifier of the node.
+      optional NodeId nodeId
+      # Identifier of the backend node.
+      optional BackendNodeId backendNodeId
+      # JavaScript object id of the node wrapper.
+      optional Runtime.RemoteObjectId objectId
+    returns
+      # Quads that describe node layout relative to viewport.
+      array of Quad quads
+
   # Returns the root DOM node (and optionally the subtree) to the caller.
   command getDocument
     parameters
@@ -1468,7 +1530,8 @@ domain DOM
       # Resulting node.
       array of Node nodes
 
-  # Returns node id at given location.
+  # Returns node id at given location. Depending on whether DOM domain is enabled, nodeId is
+  # either returned or not.
   experimental command getNodeForLocation
     parameters
       # X coordinate.
@@ -1478,8 +1541,10 @@ domain DOM
       # False to skip to the nearest non-UA shadow root ancestor (default: false).
       optional boolean includeUserAgentShadowDOM
     returns
-      # Id of the node at given coordinates.
-      NodeId nodeId
+      # Resulting node.
+      BackendNodeId backendNodeId
+      # Id of the node at given coordinates, only when enabled.
+      optional NodeId nodeId
 
   # Returns node's HTML markup.
   command getOuterHTML
@@ -1735,7 +1800,10 @@ domain DOM
     parameters
       Page.FrameId frameId
     returns
-      NodeId nodeId
+      # Resulting node.
+      BackendNodeId backendNodeId
+      # Id of the node at given coordinates, only when enabled.
+      optional NodeId nodeId
 
   # Fired when `Element`'s attribute is modified.
   event attributeModified
@@ -1852,6 +1920,7 @@ domain DOM
 domain DOMDebugger
   depends on DOM
   depends on Debugger
+  depends on Runtime
 
   # DOM breakpoint type.
   type DOMBreakpointType extends string
@@ -2010,12 +2079,6 @@ experimental domain DOMSnapshot
       # The index of a frame owner element's content document in the `domNodes` array returned by
       # `getSnapshot`, if any.
       optional integer contentDocumentIndex
-      # Index of the imported document's node of a link element in the `domNodes` array returned by
-      # `getSnapshot`, if any.
-      optional integer importedDocumentIndex
-      # Index of the content node of a template element in the `domNodes` array returned by
-      # `getSnapshot`.
-      optional integer templateContentIndex
       # Type of a pseudo element node.
       optional DOM.PseudoType pseudoType
       # Shadow root type.
@@ -2028,12 +2091,17 @@ experimental domain DOMSnapshot
       optional array of DOMDebugger.EventListener eventListeners
       # The selected url for nodes with a srcset attribute.
       optional string currentSourceURL
+      # The url of the script (if any) that generates this node.
+      optional string originURL
+      # Scroll offsets, set when this node is a Document.
+      optional number scrollOffsetX
+      optional number scrollOffsetY
 
   # Details of post layout rendered text positions. The exact layout should not be regarded as
   # stable and may change between versions.
   type InlineTextBox extends object
     properties
-      # The absolute position bounding box.
+      # The bounding box in document coordinates. Note that scroll offset of the document is ignored.
       DOM.Rect boundingBox
       # The starting index in characters, for this post layout textbox substring. Characters that
       # would be represented as a surrogate pair in UTF-16 have length 2.
@@ -2047,7 +2115,7 @@ experimental domain DOMSnapshot
     properties
       # The index of the related DOM node in the `domNodes` array returned by `getSnapshot`.
       integer domNodeIndex
-      # The absolute position bounding box.
+      # The bounding box in document coordinates. Note that scroll offset of the document is ignored.
       DOM.Rect boundingBox
       # Contents of the LayoutText, if any.
       optional string layoutText
@@ -2059,6 +2127,8 @@ experimental domain DOMSnapshot
       # that are painted together will have the same index. Only provided if includePaintOrder in
       # getSnapshot was true.
       optional integer paintOrder
+      # Set to true to indicate the element begins a new stacking context.
+      optional boolean isStackingContext
 
   # A subset of the full ComputedStyle as defined by the request whitelist.
   type ComputedStyle extends object
@@ -2074,11 +2144,132 @@ experimental domain DOMSnapshot
       # Attribute/property value.
       string value
 
+  # Index of the string in the strings table.
+  type StringIndex extends integer
+
+  # Index of the string in the strings table.
+  type ArrayOfStrings extends array of StringIndex
+
+  # Data that is only present on rare nodes.
+  type RareStringData extends object
+    properties
+      array of integer index
+      array of StringIndex value
+
+  type RareBooleanData extends object
+    properties
+      array of integer index
+
+  type RareIntegerData extends object
+    properties
+      array of integer index
+      array of integer value
+
+  type Rectangle extends array of number
+
+  # Document snapshot.
+  type DocumentSnapshot extends object
+    properties
+      # Document URL that `Document` or `FrameOwner` node points to.
+      StringIndex documentURL
+      # Base URL that `Document` or `FrameOwner` node uses for URL completion.
+      StringIndex baseURL
+      # Contains the document's content language.
+      StringIndex contentLanguage
+      # Contains the document's character set encoding.
+      StringIndex encodingName
+      # `DocumentType` node's publicId.
+      StringIndex publicId
+      # `DocumentType` node's systemId.
+      StringIndex systemId
+      # Frame ID for frame owner elements and also for the document node.
+      StringIndex frameId
+      # A table with dom nodes.
+      NodeTreeSnapshot nodes
+      # The nodes in the layout tree.
+      LayoutTreeSnapshot layout
+      # The post-layout inline text nodes.
+      TextBoxSnapshot textBoxes
+      # Scroll offsets.
+      optional number scrollOffsetX
+      optional number scrollOffsetY
+
+  # Table containing nodes.
+  type NodeTreeSnapshot extends object
+    properties
+      # Parent node index.
+      optional array of integer parentIndex
+      # `Node`'s nodeType.
+      optional array of integer nodeType
+      # `Node`'s nodeName.
+      optional array of StringIndex nodeName
+      # `Node`'s nodeValue.
+      optional array of StringIndex nodeValue
+      # `Node`'s id, corresponds to DOM.Node.backendNodeId.
+      optional array of DOM.BackendNodeId backendNodeId
+      # Attributes of an `Element` node. Flatten name, value pairs.
+      optional array of ArrayOfStrings attributes
+      # Only set for textarea elements, contains the text value.
+      optional RareStringData textValue
+      # Only set for input elements, contains the input's associated text value.
+      optional RareStringData inputValue
+      # Only set for radio and checkbox input elements, indicates if the element has been checked
+      optional RareBooleanData inputChecked
+      # Only set for option elements, indicates if the element has been selected
+      optional RareBooleanData optionSelected
+      # The index of the document in the list of the snapshot documents.
+      optional RareIntegerData contentDocumentIndex
+      # Type of a pseudo element node.
+      optional RareStringData pseudoType
+      # Whether this DOM node responds to mouse clicks. This includes nodes that have had click
+      # event listeners attached via JavaScript as well as anchor tags that naturally navigate when
+      # clicked.
+      optional RareBooleanData isClickable
+      # The selected url for nodes with a srcset attribute.
+      optional RareStringData currentSourceURL
+      # The url of the script (if any) that generates this node.
+      optional RareStringData originURL
+
+  # Details of an element in the DOM tree with a LayoutObject.
+  type LayoutTreeSnapshot extends object
+    properties
+      # The index of the related DOM node in the `domNodes` array returned by `getSnapshot`.
+      array of integer nodeIndex
+      # Index into the `computedStyles` array returned by `captureSnapshot`.
+      array of ArrayOfStrings styles
+      # The absolute position bounding box.
+      array of Rectangle bounds
+      # Contents of the LayoutText, if any.
+      array of StringIndex text
+      # Stacking context information.
+      RareBooleanData stackingContexts
+
+  # Details of post layout rendered text positions. The exact layout should not be regarded as
+  # stable and may change between versions.
+  type TextBoxSnapshot extends object
+    properties
+      # Intex of th elayout tree node that owns this box collection.
+      array of integer layoutIndex
+      # The absolute position bounding box.
+      array of Rectangle bounds
+      # The starting index in characters, for this post layout textbox substring. Characters that
+      # would be represented as a surrogate pair in UTF-16 have length 2.
+      array of integer start
+      # The number of characters in this post layout textbox substring. Characters that would be
+      # represented as a surrogate pair in UTF-16 have length 2.
+      array of integer length
+
+  # Disables DOM snapshot agent for the given page.
+  command disable
+
+  # Enables DOM snapshot agent for the given page.
+  command enable
+
   # Returns a document snapshot, including the full DOM tree of the root node (including iframes,
   # template contents, and imported documents) in a flattened array, as well as layout and
   # white-listed computed style information for the nodes. Shadow DOM in the returned DOM tree is
   # flattened.
-  command getSnapshot
+  deprecated command getSnapshot
     parameters
       # Whitelist of computed styles to return.
       array of string computedStyleWhitelist
@@ -2086,6 +2277,8 @@ experimental domain DOMSnapshot
       optional boolean includeEventListeners
       # Whether to determine and include the paint order index of LayoutTreeNodes (default false).
       optional boolean includePaintOrder
+      # Whether to include UA shadow tree in the snapshot (default false).
+      optional boolean includeUserAgentShadowTree
     returns
       # The nodes in the DOM tree. The DOMNode at index 0 corresponds to the root document.
       array of DOMNode domNodes
@@ -2093,6 +2286,20 @@ experimental domain DOMSnapshot
       array of LayoutTreeNode layoutTreeNodes
       # Whitelisted ComputedStyle properties for each node in the layout tree.
       array of ComputedStyle computedStyles
+
+  # Returns a document snapshot, including the full DOM tree of the root node (including iframes,
+  # template contents, and imported documents) in a flattened array, as well as layout and
+  # white-listed computed style information for the nodes. Shadow DOM in the returned DOM tree is
+  # flattened.
+  command captureSnapshot
+    parameters
+      # Whitelist of computed styles to return.
+      array of string computedStyles
+    returns
+      # The nodes in the DOM tree. The DOMNode at index 0 corresponds to the root document.
+      array of DocumentSnapshot documents
+      # Shared string table that all string properties refer to with indexes.
+      array of string strings
 
 # Query and modify DOM storage.
 experimental domain DOMStorage
@@ -2265,6 +2472,12 @@ domain Emulation
   # Requests that page scale factor is reset to initial values.
   experimental command resetPageScaleFactor
 
+  # Enables or disables simulating a focused and active page.
+  experimental command setFocusEmulationEnabled
+    parameters
+      # Whether to enable to disable focus emulation.
+      boolean enabled
+
   # Enables CPU throttling to emulate slow CPUs.
   experimental command setCPUThrottlingRate
     parameters
@@ -2311,6 +2524,16 @@ domain Emulation
       # change is not observed by the page, e.g. viewport-relative elements do not change positions.
       experimental optional Page.Viewport viewport
 
+  experimental command setScrollbarsHidden
+    parameters
+      # Whether scrollbars should be always hidden.
+      boolean hidden
+
+  experimental command setDocumentCookieDisabled
+    parameters
+      # Whether document.coookie API should be disabled.
+      boolean disabled
+
   experimental command setEmitTouchEventsForMouse
     parameters
       # Whether touch emulation based on mouse input should be enabled.
@@ -2338,7 +2561,7 @@ domain Emulation
       optional number accuracy
 
   # Overrides value returned by the javascript navigator object.
-  experimental command setNavigatorOverrides
+  experimental deprecated command setNavigatorOverrides
     parameters
       # The platform navigator.platform should return.
       string platform
@@ -2377,9 +2600,9 @@ domain Emulation
       # If set the virtual time policy change should be deferred until any frame starts navigating.
       # Note any previous deferred policy change is superseded.
       optional boolean waitForNavigation
+      # If set, base::Time::Now will be overriden to initially return this value.
+      optional Network.TimeSinceEpoch initialVirtualTime
     returns
-      # Absolute timestamp at which virtual time was first enabled (milliseconds since epoch).
-      Runtime.Timestamp virtualTimeBase
       # Absolute timestamp at which virtual time was first enabled (up time in milliseconds).
       number virtualTimeTicksBase
 
@@ -2410,6 +2633,16 @@ domain Emulation
       # enabled.
       number virtualTimeElapsed
 
+  # Allows overriding user agent with the given string.
+  command setUserAgentOverride
+    parameters
+      # User agent to use.
+      string userAgent
+      # Browser langugage to emulate.
+      optional string acceptLanguage
+      # The platform navigator.platform should return.
+      optional string platform
+
 # This domain provides experimental commands only supported in headless mode.
 experimental domain HeadlessExperimental
   depends on Page
@@ -2431,18 +2664,9 @@ experimental domain HeadlessExperimental
   # https://goo.gl/3zHXhB for more background.
   command beginFrame
     parameters
-      # Timestamp of this BeginFrame (milliseconds since epoch). If not set, the current time will
-      # be used unless frameTicks is specified.
-      optional Runtime.Timestamp frameTime
       # Timestamp of this BeginFrame in Renderer TimeTicks (milliseconds of uptime). If not set,
-      # the current time will be used unless frameTime is specified.
+      # the current time will be used.
       optional number frameTimeTicks
-      # Deadline of this BeginFrame (milliseconds since epoch). If not set, the deadline will be
-      # calculated from the frameTime and interval unless deadlineTicks is specified.
-      optional Runtime.Timestamp deadline
-      # Deadline of this BeginFrame in Renderer TimeTicks  (milliseconds of uptime). If not set,
-      # the deadline will be calculated from the frameTime and interval unless deadline is specified.
-      optional number deadlineTicks
       # The interval between BeginFrames that is reported to the compositor, in milliseconds.
       # Defaults to a 60 frames/second interval, i.e. about 16.666 milliseconds.
       optional number interval
@@ -2460,13 +2684,6 @@ experimental domain HeadlessExperimental
       boolean hasDamage
       # Base64-encoded image data of the screenshot, if one was requested and successfully taken.
       optional string screenshotData
-
-  # Puts the browser into deterministic mode.  Only effective for subsequently created web contents.
-  # Only supported in headless mode.  Once set there's no way of leaving deterministic mode.
-  command enterDeterministicMode
-    parameters
-      # Number of seconds since the Epoch
-      optional number initialDate
 
   # Disables headless events for the target.
   command disable
@@ -2499,7 +2716,7 @@ domain IO
       # Handle of the stream to read.
       StreamHandle handle
       # Seek to the specified offset before reading (if not specificed, proceed with offset
-      # following the last read).
+      # following the last read). Some types of streams may only support sequential reads.
       optional integer offset
       # Maximum number of bytes to read (left upon the agent discretion if not specified).
       optional integer size
@@ -2755,6 +2972,13 @@ domain Input
       # Whether the event was from the left or right side of the keyboard. 1=Left, 2=Right (default:
       # 0).
       optional integer location
+
+  # This method emulates inserting text that doesn't come from a key press,
+  # for example an emoji keyboard or an IME.
+  experimental command insertText
+    parameters
+      # The text to insert.
+      string text
 
   # Dispatches a mouse event to the page.
   command dispatchMouseEvent
@@ -3254,6 +3478,20 @@ experimental domain Memory
   type SamplingProfile extends object
     properties
       array of SamplingProfileNode samples
+      array of Module modules
+
+  # Executable module information
+  type Module extends object
+    properties
+      # Name of the module.
+      string name
+      # UUID of the module.
+      string uuid
+      # Base address where the module is loaded into memory. Encoded as a decimal
+      # or hexadecimal (0x prefixed) string.
+      string baseAddress
+      # Size of the module in bytes.
+      number size
 
 # Network domain allows tracking network activities of the page. It exposes information about http,
 # file, data and other requests and responses, their headers, bodies, timing, etc.
@@ -3261,6 +3499,26 @@ domain Network
   depends on Debugger
   depends on Runtime
   depends on Security
+
+  # Resource type as it was perceived by the rendering engine.
+  type ResourceType extends string
+    enum
+      Document
+      Stylesheet
+      Image
+      Media
+      Font
+      Script
+      TextTrack
+      XHR
+      Fetch
+      EventSource
+      WebSocket
+      Manifest
+      SignedExchange
+      Ping
+      CSPViolationReport
+      Other
 
   # Unique loader identifier.
   type LoaderId extends string
@@ -3286,6 +3544,8 @@ domain Network
       NameNotResolved
       InternetDisconnected
       AddressUnreachable
+      BlockedByClient
+      BlockedByResponse
 
   # UTC time in seconds, counted from January 1, 1970.
   type TimeSinceEpoch extends number
@@ -3365,8 +3625,10 @@ domain Network
   # HTTP request data.
   type Request extends object
     properties
-      # Request URL.
+      # Request URL (without fragment).
       string url
+      # Fragment of the requested URL starting with hash, if present.
+      optional string urlFragment
       # HTTP request method.
       string method
       # HTTP request headers.
@@ -3452,12 +3714,14 @@ domain Network
   # The reason why request was blocked.
   type BlockedReason extends string
     enum
+      other
       csp
       mixed-content
       origin
       inspector
       subresource-filter
-      other
+      content-type
+      collapsed-by-client
 
   # HTTP response data.
   type Response extends object
@@ -3539,7 +3803,7 @@ domain Network
       # Resource URL. This is the url of the original network request.
       string url
       # Type of this resource.
-      Page.ResourceType type
+      ResourceType type
       # Cached response data.
       optional Response response
       # Cached response body size.
@@ -3553,10 +3817,11 @@ domain Network
         parser
         script
         preload
+        SignedExchange
         other
       # Initiator JavaScript stack trace, set for Script only.
       optional Runtime.StackTrace stack
-      # Initiator URL, set for Parser type or for Script type (when script is importing module).
+      # Initiator URL, set for Parser type or for Script type (when script is importing module) or for SignedExchange type.
       optional string url
       # Initiator line number, set for Parser type or for Script type (when script is importing
       # module) (0-based).
@@ -3654,9 +3919,79 @@ domain Network
       # backslash. Omitting is equivalent to "*".
       optional string urlPattern
       # If set, only requests for matching resource types will be intercepted.
-      optional Page.ResourceType resourceType
+      optional ResourceType resourceType
       # Stage at wich to begin intercepting requests. Default is Request.
       optional InterceptionStage interceptionStage
+
+  # Information about a signed exchange signature.
+  # https://wicg.github.io/webpackage/draft-yasskin-httpbis-origin-signed-exchanges-impl.html#rfc.section.3.1
+  experimental type SignedExchangeSignature extends object
+    properties
+      # Signed exchange signature label.
+      string label
+      # The hex string of signed exchange signature.
+      string signature
+      # Signed exchange signature integrity.
+      string integrity
+      # Signed exchange signature cert Url.
+      optional string certUrl
+      # The hex string of signed exchange signature cert sha256.
+      optional string certSha256
+      # Signed exchange signature validity Url.
+      string validityUrl
+      # Signed exchange signature date.
+      integer date
+      # Signed exchange signature expires.
+      integer expires
+      # The encoded certificates.
+      optional array of string certificates
+
+  # Information about a signed exchange header.
+  # https://wicg.github.io/webpackage/draft-yasskin-httpbis-origin-signed-exchanges-impl.html#cbor-representation
+  experimental type SignedExchangeHeader extends object
+    properties
+      # Signed exchange request URL.
+      string requestUrl
+      # Signed exchange request method.
+      string requestMethod
+      # Signed exchange response code.
+      integer responseCode
+      # Signed exchange response headers.
+      Headers responseHeaders
+      # Signed exchange response signature.
+      array of SignedExchangeSignature signatures
+
+  # Field type for a signed exchange related error.
+  experimental type SignedExchangeErrorField extends string
+    enum
+      signatureSig
+      signatureIntegrity
+      signatureCertUrl
+      signatureCertSha256
+      signatureValidityUrl
+      signatureTimestamps
+
+  # Information about a signed exchange response.
+  experimental type SignedExchangeError extends object
+    properties
+      # Error message.
+      string message
+      # The index of the signature which caused the error.
+      optional integer signatureIndex
+      # The field which caused the error.
+      optional SignedExchangeErrorField errorField
+
+  # Information about a signed exchange response.
+  experimental type SignedExchangeInfo extends object
+    properties
+      # The outer response of signed HTTP exchange which was received from network.
+      Response outerResponse
+      # Information about the signed exchange header.
+      optional SignedExchangeHeader header
+      # Security details for the signed exchange header.
+      optional SecurityDetails securityDetails
+      # Errors occurred while handling the signed exchagne.
+      optional array of SignedExchangeError errors
 
   # Tells whether clearing browser cache is supported.
   deprecated command canClearBrowserCache
@@ -3806,6 +4141,16 @@ domain Network
       # True, if content was sent as base64.
       boolean base64Encoded
 
+  # Returns a handle to the stream representing the response body. Note that after this command,
+  # the intercepted request can't be continued as is -- you either need to cancel it or to provide
+  # the response body. The stream only supports sequential read, IO.read will fail if the position
+  # is specified.
+  experimental command takeResponseBodyForInterceptionAsStream
+    parameters
+      InterceptionId interceptionId
+    returns
+      IO.StreamHandle stream
+
   # This method sends a new XMLHttpRequest which is identical to the original one. The following
   # parameters should be identical: method, url, async, request body, extra headers, withCredentials
   # attribute, user, password.
@@ -3902,9 +4247,14 @@ domain Network
 
   # Allows overriding user agent with the given string.
   command setUserAgentOverride
+    redirect Emulation
     parameters
       # User agent to use.
       string userAgent
+      # Browser langugage to emulate.
+      optional string acceptLanguage
+      # The platform navigator.platform should return.
+      optional string platform
 
   # Fired when data chunk was received over the network.
   event dataReceived
@@ -3940,7 +4290,7 @@ domain Network
       # Timestamp.
       MonotonicTime timestamp
       # Resource type.
-      Page.ResourceType type
+      ResourceType type
       # User friendly error message.
       string errorText
       # True if loading was canceled.
@@ -3957,8 +4307,9 @@ domain Network
       MonotonicTime timestamp
       # Total number of bytes received for this request.
       number encodedDataLength
-      # Set when response was blocked due to being cross-site document response.
-      optional boolean blockedCrossSiteDocument
+      # Set when 1) response was blocked by Cross-Origin Read Blocking and also
+      # 2) this needs to be reported to the DevTools console.
+      optional boolean shouldReportCorbBlocking
 
   # Details of an intercepted HTTP request, which must be either allowed, blocked, modified or
   # mocked.
@@ -3972,9 +4323,12 @@ domain Network
       # The id of the frame that initiated the request.
       Page.FrameId frameId
       # How the requested resource will be used.
-      Page.ResourceType resourceType
+      ResourceType resourceType
       # Whether this is a navigation request, which can abort the navigation completely.
       boolean isNavigationRequest
+      # Set if the request is a navigation that will result in a download.
+      # Only present after response is received from the server (i.e. HeadersReceived stage).
+      optional boolean isDownload
       # Redirect location, only sent if a redirect was intercepted.
       optional string redirectUrl
       # Details of the Authorization Challenge encountered. If this is set then
@@ -4016,7 +4370,7 @@ domain Network
       # Redirect response data.
       optional Response redirectResponse
       # Type of this resource.
-      optional Page.ResourceType type
+      optional ResourceType type
       # Frame identifier.
       optional Page.FrameId frameId
       # Whether the request is initiated by a user gesture. Defaults to false.
@@ -4032,6 +4386,14 @@ domain Network
       # Timestamp.
       MonotonicTime timestamp
 
+  # Fired when a signed exchange was received over the network
+  experimental event signedExchangeReceived
+    parameters
+      # Request identifier.
+      RequestId requestId
+      # Information about the signed exchange response.
+      SignedExchangeInfo info
+
   # Fired when HTTP response is available.
   event responseReceived
     parameters
@@ -4042,7 +4404,7 @@ domain Network
       # Timestamp.
       MonotonicTime timestamp
       # Resource type.
-      Page.ResourceType type
+      ResourceType type
       # Response data.
       Response response
       # Frame identifier.
@@ -4299,23 +4661,7 @@ domain Page
   depends on Debugger
   depends on DOM
   depends on Network
-
-  # Resource type as it was perceived by the rendering engine.
-  type ResourceType extends string
-    enum
-      Document
-      Stylesheet
-      Image
-      Media
-      Font
-      Script
-      TextTrack
-      XHR
-      Fetch
-      EventSource
-      WebSocket
-      Manifest
-      Other
+  depends on Runtime
 
   # Unique frame identifier.
   type FrameId extends string
@@ -4346,7 +4692,7 @@ domain Page
       # Resource URL.
       string url
       # Type of this resource.
-      ResourceType type
+      Network.ResourceType type
       # Resource mimeType as determined by the browser.
       string mimeType
       # last-modified timestamp as reported by server.
@@ -4384,6 +4730,7 @@ domain Page
     enum
       link
       typed
+      address_bar
       auto_bookmark
       auto_subframe
       manual_subframe
@@ -4491,6 +4838,32 @@ domain Page
       # Page scale factor.
       number scale
 
+  # Generic font families collection.
+  experimental type FontFamilies extends object
+    properties
+      # The standard font-family.
+      optional string standard
+      # The fixed font-family.
+      optional string fixed
+      # The serif font-family.
+      optional string serif
+      # The sansSerif font-family.
+      optional string sansSerif
+      # The cursive font-family.
+      optional string cursive
+      # The fantasy font-family.
+      optional string fantasy
+      # The pictograph font-family.
+      optional string pictograph
+
+  # Default font sizes.
+  experimental type FontSizes extends object
+    properties
+      # Default standard font size.
+      optional integer standard
+      # Default fixed font size.
+      optional integer fixed
+
   # Deprecated, please use addScriptToEvaluateOnNewDocument instead.
   experimental deprecated command addScriptToEvaluateOnLoad
     parameters
@@ -4503,6 +4876,10 @@ domain Page
   command addScriptToEvaluateOnNewDocument
     parameters
       string source
+      # If specified, creates an isolated world with the given name and evaluates given script in it.
+      # This world name will be used as the ExecutionContextDescription::name when the corresponding
+      # event is emitted.
+      experimental optional string worldName
     returns
       # Identifier of the added script.
       ScriptIdentifier identifier
@@ -4815,6 +5192,18 @@ domain Page
       # Mock gamma
       number gamma
 
+  # Set generic font families.
+  experimental command setFontFamilies
+    parameters
+      # Specifies font families to set. If a font family is not specified, it won't be changed.
+      FontFamilies fontFamilies
+
+  # Set default font sizes.
+  experimental command setFontSizes
+    parameters
+      # Specifies font sizes to set. If a font size is not specified, it won't be changed.
+      FontSizes fontSizes
+
   # Sets given markup as the document's HTML.
   command setDocumentContent
     parameters
@@ -4888,8 +5277,45 @@ domain Page
   # Crashes renderer on the IO thread, generates minidumps.
   experimental command crash
 
+  # Tries to close page, running its beforeunload hooks, if any.
+  experimental command close
+
+  # Tries to update the web lifecycle state of the page.
+  # It will transition the page to the given state according to:
+  # https://github.com/WICG/web-lifecycle/
+  experimental command setWebLifecycleState
+    parameters
+      # Target lifecycle state
+      enum state
+        frozen
+        active
+
   # Stops sending each frame in the `screencastFrame`.
   experimental command stopScreencast
+
+  # Forces compilation cache to be generated for every subresource script.
+  experimental command setProduceCompilationCache
+    parameters
+      boolean enabled
+
+  # Seeds compilation cache for given url. Compilation cache does not survive
+  # cross-process navigation.
+  experimental command addCompilationCache
+    parameters
+      string url
+      # Base64-encoded data
+      string data
+
+  # Clears seeded compilation cache.
+  experimental command clearCompilationCache
+
+  # Generates a report for testing.
+  experimental command generateTestReport
+    parameters
+      # Message to be displayed in the report.
+      string message
+      # Specifies the endpoint group to deliver the report to.
+      optional string group
 
   event domContentEventFired
     parameters
@@ -5040,6 +5466,15 @@ domain Page
       # Whether or not it was triggered by user gesture.
       boolean userGesture
 
+  # Issued for every compilation cache generated. Is only available
+  # if Page.setGenerateCompilationCache is enabled.
+  experimental event compilationCacheProduced
+    parameters
+      string url
+      # Base64-encoded data
+      string data
+
+
 domain Performance
 
   # Run-time execution metric.
@@ -5055,6 +5490,18 @@ domain Performance
 
   # Enable collecting and reporting metrics.
   command enable
+
+  # Sets time domain to use for collecting and reporting duration metrics.
+  # Note that this must be called before enabling metrics collection. Calling
+  # this method while metrics collection is enabled returns an error.
+  experimental command setTimeDomain
+    parameters
+      # Time domain
+      enum timeDomain
+        # Use monotonically increasing abstract time (default).
+        timeTicks
+        # Use thread running time.
+        threadTicks
 
   # Retrieve current values of run-time metrics.
   command getMetrics
@@ -5463,6 +5910,7 @@ domain Target
       boolean attached
       # Opener target Id
       optional TargetID openerId
+      experimental optional BrowserContextID browserContextId
 
   experimental type RemoteLocation extends object
     properties
@@ -5478,6 +5926,14 @@ domain Target
   command attachToTarget
     parameters
       TargetID targetId
+      # Enables "flat" access to the session via specifying sessionId attribute in the commands.
+      experimental optional boolean flatten
+    returns
+      # Id assigned to the session.
+      SessionID sessionId
+
+  # Attaches to the browser target, only uses flat sessionId mode.
+  experimental command attachToBrowserTarget
     returns
       # Id assigned to the session.
       SessionID sessionId
@@ -5489,12 +5945,32 @@ domain Target
     returns
       boolean success
 
+  # Inject object to the target's main frame that provides a communication
+  # channel with browser target.
+  #
+  # Injected object will be available as `window[bindingName]`.
+  #
+  # The object has the follwing API:
+  # - `binding.send(json)` - a method to send messages over the remote debugging protocol
+  # - `binding.onmessage = json => handleMessage(json)` - a callback that will be called for the protocol notifications and command responses.
+  experimental command exposeDevToolsProtocol
+    parameters
+      TargetID targetId
+      # Binding name, 'cdp' if not specified.
+      optional string bindingName
+
   # Creates a new empty BrowserContext. Similar to an incognito profile but you can have more than
   # one.
   experimental command createBrowserContext
     returns
       # The id of the context created.
       BrowserContextID browserContextId
+
+  # Returns all browser contexts created with `Target.createBrowserContext` method.
+  experimental command getBrowserContexts
+    returns
+      # An array of browser context ids.
+      array of BrowserContextID browserContextIds
 
   # Creates a new page.
   command createTarget
@@ -5505,7 +5981,7 @@ domain Target
       optional integer width
       # Frame height in DIP (headless chrome only).
       optional integer height
-      # The browser context to create the page in (headless chrome only).
+      # The browser context to create the page in.
       optional BrowserContextID browserContextId
       # Whether BeginFrames for this target will be controlled via DevTools (headless chrome only,
       # not supported on MacOS yet, false by default).
@@ -5522,17 +5998,16 @@ domain Target
       # Deprecated.
       deprecated optional TargetID targetId
 
-  # Deletes a BrowserContext, will fail of any open page uses it.
+  # Deletes a BrowserContext. All the belonging pages will be closed without calling their
+  # beforeunload hooks.
   experimental command disposeBrowserContext
     parameters
       BrowserContextID browserContextId
-    returns
-      boolean success
 
   # Returns information about a target.
   experimental command getTargetInfo
     parameters
-      TargetID targetId
+      optional TargetID targetId
     returns
       TargetInfo targetInfo
 
@@ -5561,6 +6036,8 @@ domain Target
       # Whether to pause new targets when attaching to them. Use `Runtime.runIfWaitingForDebugger`
       # to run paused targets.
       boolean waitForDebuggerOnStart
+      # Enables "flat" access to the session via specifying sessionId attribute in the commands.
+      experimental optional boolean flatten
 
   # Controls whether to discover available targets and notify via
   # `targetCreated/targetInfoChanged/targetDestroyed` events.
@@ -5612,6 +6089,15 @@ domain Target
   event targetDestroyed
     parameters
       TargetID targetId
+
+  # Issued when a target has crashed.
+  event targetCrashed
+    parameters
+      TargetID targetId
+      # Termination status type.
+      string status
+      # Termination error code.
+      integer errorCode
 
   # Issued when some information about a target has changed. This only happens between
   # `targetCreated` and `targetDestroyed`.
@@ -5744,3 +6230,16 @@ experimental domain Tracing
       optional IO.StreamHandle stream
       # Compression format of returned stream.
       optional StreamCompression streamCompression
+
+# Testing domain is a dumping ground for the capabilities requires for browser or app testing that do not fit other
+# domains.
+experimental domain Testing
+  depends on Page
+
+  # Generates a report for testing.
+  command generateTestReport
+    parameters
+      # Message to be displayed in the report.
+      string message
+      # Specifies the endpoint group to deliver the report to.
+      optional string group

@@ -11,6 +11,7 @@
 #include "base/callback.h"
 #include "base/location.h"
 #include "base/optional.h"
+#include "base/task/post_task.h"
 #include "base/time/time.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/attestation/attestation_ca_client.h"
@@ -22,10 +23,11 @@
 #include "chromeos/dbus/cryptohome_client.h"
 #include "chromeos/dbus/dbus_method_call_status.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
+#include "components/account_id/account_id.h"
 #include "components/policy/core/common/cloud/cloud_policy_client.h"
 #include "components/policy/core/common/cloud/cloud_policy_manager.h"
-#include "components/signin/core/account_id/account_id.h"
 #include "components/user_manager/known_user.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
 #include "net/cert/pem_tokenizer.h"
@@ -190,7 +192,7 @@ void AttestationPolicyObserver::Start() {
                  weak_factory_.GetWeakPtr());
   cryptohome_client_->TpmAttestationDoesKeyExist(
       KEY_DEVICE,
-      cryptohome::Identification(),  // Not used.
+      cryptohome::AccountIdentifier(),  // Not used.
       kEnterpriseMachineKey,
       base::BindOnce(DBusBoolRedirectCallback, on_does_exist, on_does_not_exist,
                      base::Bind(&AttestationPolicyObserver::Reschedule,
@@ -224,7 +226,7 @@ void AttestationPolicyObserver::GetNewCertificate() {
 void AttestationPolicyObserver::GetExistingCertificate() {
   cryptohome_client_->TpmAttestationGetCertificate(
       KEY_DEVICE,
-      cryptohome::Identification(),  // Not used.
+      cryptohome::AccountIdentifier(),  // Not used.
       kEnterpriseMachineKey,
       base::Bind(DBusStringCallback,
                  base::Bind(&AttestationPolicyObserver::CheckCertificateExpiry,
@@ -296,7 +298,7 @@ void AttestationPolicyObserver::GetKeyPayload(
     base::Callback<void(const std::string&)> callback) {
   cryptohome_client_->TpmAttestationGetKeyPayload(
       KEY_DEVICE,
-      cryptohome::Identification(),  // Not used.
+      cryptohome::AccountIdentifier(),  // Not used.
       kEnterpriseMachineKey,
       base::Bind(DBusStringCallback, callback,
                  base::Bind(&AttestationPolicyObserver::Reschedule,
@@ -324,7 +326,7 @@ void AttestationPolicyObserver::MarkAsUploaded(const std::string& key_payload) {
   }
   cryptohome_client_->TpmAttestationSetKeyPayload(
       KEY_DEVICE,
-      cryptohome::Identification(),  // Not used.
+      cryptohome::AccountIdentifier(),  // Not used.
       kEnterpriseMachineKey, new_payload,
       base::BindRepeating(DBusBoolRedirectCallback, base::RepeatingClosure(),
                           base::RepeatingClosure(), base::RepeatingClosure(),
@@ -339,8 +341,8 @@ void AttestationPolicyObserver::HandleGetCertificateFailure(
 
 void AttestationPolicyObserver::Reschedule() {
   if (++num_retries_ < retry_limit_) {
-    content::BrowserThread::PostDelayedTask(
-        content::BrowserThread::UI, FROM_HERE,
+    base::PostDelayedTaskWithTraits(
+        FROM_HERE, {content::BrowserThread::UI},
         base::BindRepeating(&AttestationPolicyObserver::Start,
                             weak_factory_.GetWeakPtr()),
         base::TimeDelta::FromSeconds(retry_delay_));

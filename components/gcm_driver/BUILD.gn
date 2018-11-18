@@ -14,8 +14,6 @@ static_library("gcm_driver") {
   sources = [
     "features.cc",
     "features.h",
-    "gcm_account_tracker.cc",
-    "gcm_account_tracker.h",
     "gcm_activity.cc",
     "gcm_activity.h",
     "gcm_app_handler.cc",
@@ -49,7 +47,9 @@ static_library("gcm_driver") {
     "//components/gcm_driver/common",
     "//components/gcm_driver/crypto",
     "//components/gcm_driver/instance_id",
+    "//crypto",
   ]
+
   deps = [
     ":gcm_buildflags",
     "//base:i18n",
@@ -59,12 +59,14 @@ static_library("gcm_driver") {
     "//components/os_crypt",
     "//components/pref_registry",
     "//components/prefs",
-    "//components/signin/core/browser",
     "//components/sync",
     "//components/version_info",
     "//google_apis",
     "//google_apis/gcm",
     "//net",
+    "//services/identity/public/cpp",
+    "//services/network/public/cpp",
+    "//services/network/public/mojom",
     "//url:url",
   ]
 
@@ -88,8 +90,12 @@ static_library("gcm_driver") {
     ]
   } else {
     sources += [
+      "account_tracker.cc",
+      "account_tracker.h",
       "gcm_account_mapper.cc",
       "gcm_account_mapper.h",
+      "gcm_account_tracker.cc",
+      "gcm_account_tracker.h",
       "gcm_channel_status_request.cc",
       "gcm_channel_status_request.h",
       "gcm_channel_status_syncer.cc",
@@ -133,9 +139,11 @@ static_library("test_support") {
   deps = [
     "//base",
     "//components/gcm_driver/instance_id:test_support",
-    "//content/public/browser",
     "//google_apis/gcm:test_support",
     "//net",
+    "//services/network:test_support",
+    "//services/network/public/cpp",
+    "//services/network/public/mojom",
     "//testing/gtest",
   ]
 
@@ -149,8 +157,6 @@ static_library("test_support") {
       "fake_gcm_profile_service.cc",
       "fake_gcm_profile_service.h",
     ]
-
-    deps -= [ "//content/public/browser" ]
   }
 
   if (!use_gcm_from_platform) {
@@ -169,7 +175,6 @@ source_set("unit_tests") {
   testonly = true
 
   sources = [
-    "gcm_account_tracker_unittest.cc",
     "gcm_delayed_task_controller_unittest.cc",
     "gcm_stats_recorder_android_unittest.cc",
   ]
@@ -192,11 +197,17 @@ source_set("unit_tests") {
 
   if (!use_gcm_from_platform) {
     sources += [
+      "account_tracker_unittest.cc",
       "gcm_account_mapper_unittest.cc",
+      "gcm_account_tracker_unittest.cc",
       "gcm_channel_status_request_unittest.cc",
       "gcm_client_impl_unittest.cc",
       "gcm_driver_desktop_unittest.cc",
       "gcm_stats_recorder_impl_unittest.cc",
     ]
   }
+  deps += [
+    "//services/identity/public/cpp",
+    "//services/identity/public/cpp:test_support",
+  ]
 }

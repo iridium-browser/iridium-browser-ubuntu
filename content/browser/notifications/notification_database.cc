@@ -7,10 +7,13 @@
 #include <string>
 
 #include "base/files/file_util.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
+#include "base/task/post_task.h"
 #include "content/browser/notifications/notification_database_data_conversions.h"
 #include "content/common/service_worker/service_worker_types.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_database_data.h"
 #include "storage/common/database/database_identifier.h"
@@ -37,14 +40,10 @@ namespace content {
 namespace {
 
 // Keys of the fields defined in the database.
-const char kNextNotificationIdKey[] = "NEXT_NOTIFICATION_ID";
 const char kDataKeyPrefix[] = "DATA:";
 
 // Separates the components of compound keys.
 const char kNotificationKeySeparator = '\x00';
-
-// The first notification id which to be handed out by the database.
-const int64_t kFirstPersistentNotificationId = 1;
 
 // Converts the LevelDB |status| to one of the notification database's values.
 NotificationDatabase::Status LevelDBStatusToNotificationDatabaseStatus(
@@ -99,10 +98,20 @@ NotificationDatabase::Status DeserializedNotificationData(
   return NotificationDatabase::STATUS_ERROR_CORRUPTED;
 }
 
+// Updates the time of the last click on the notification, and the first if
+// necessary.
+void UpdateNotificationTimestamps(NotificationDatabaseData* data) {
+  base::TimeDelta delta = base::Time::Now() - data->creation_time_millis;
+  if (!data->time_until_first_click_millis.has_value())
+    data->time_until_first_click_millis = delta;
+  data->time_until_last_click_millis = delta;
+}
+
 }  // namespace
 
-NotificationDatabase::NotificationDatabase(const base::FilePath& path)
-    : path_(path) {}
+NotificationDatabase::NotificationDatabase(const base::FilePath& path,
+                                           UkmCallback callback)
+    : path_(path), record_notification_to_ukm_callback_(std::move(callback)) {}
 
 NotificationDatabase::~NotificationDatabase() {
   DCHECK(sequence_checker_.CalledOnValidSequence());
@@ -111,7 +120,7 @@ NotificationDatabase::~NotificationDatabase() {
 NotificationDatabase::Status NotificationDatabase::Open(
     bool create_if_missing) {
   DCHECK(sequence_checker_.CalledOnValidSequence());
-  DCHECK_EQ(STATE_UNINITIALIZED, state_);
+  DCHECK_EQ(State::UNINITIALIZED, state_);
 
   if (!create_if_missing) {
     if (IsInMemoryDatabase() || !base::PathExists(path_) ||
@@ -128,22 +137,16 @@ NotificationDatabase::Status NotificationDatabase::Open(
   options.filter_policy = filter_policy_.get();
   options.block_cache = leveldb_chrome::GetSharedWebBlockCache();
   if (IsInMemoryDatabase()) {
-    env_.reset(leveldb_chrome::NewMemEnv(leveldb::Env::Default()));
+    env_ = leveldb_chrome::NewMemEnv("notification");
     options.env = env_.get();
   }
 
   Status status = LevelDBStatusToNotificationDatabaseStatus(
       leveldb_env::OpenDB(options, path_.AsUTF8Unsafe(), &db_));
-  if (status != STATUS_OK)
-    return status;
+  if (status == STATUS_OK)
+    state_ = State::INITIALIZED;
 
-  state_ = STATE_INITIALIZED;
-
-  return ReadNextPersistentNotificationId();
-}
-
-int64_t NotificationDatabase::GetNextPersistentNotificationId() {
-  return next_persistent_notification_id_++;
+  return status;
 }
 
 NotificationDatabase::Status NotificationDatabase::ReadNotificationData(
@@ -151,7 +154,7 @@ NotificationDatabase::Status NotificationDatabase::ReadNotificationData(
     const GURL& origin,
     NotificationDatabaseData* notification_database_data) const {
   DCHECK(sequence_checker_.CalledOnValidSequence());
-  DCHECK_EQ(STATE_INITIALIZED, state_);
+  DCHECK_EQ(State::INITIALIZED, state_);
   DCHECK(!notification_id.empty());
   DCHECK(origin.is_valid());
   DCHECK(notification_database_data);
@@ -166,6 +169,45 @@ NotificationDatabase::Status NotificationDatabase::ReadNotificationData(
 
   return DeserializedNotificationData(serialized_data,
                                       notification_database_data);
+}
+
+NotificationDatabase::Status
+NotificationDatabase::ReadNotificationDataAndRecordInteraction(
+    const std::string& notification_id,
+    const GURL& origin,
+    PlatformNotificationContext::Interaction interaction,
+    NotificationDatabaseData* notification_database_data) {
+  Status status =
+      ReadNotificationData(notification_id, origin, notification_database_data);
+  if (status != STATUS_OK)
+    return status;
+
+  // Update the appropriate fields for UKM logging purposes.
+  switch (interaction) {
+    case PlatformNotificationContext::Interaction::CLOSED:
+      notification_database_data->closed_reason =
+          NotificationDatabaseData::ClosedReason::USER;
+      notification_database_data->time_until_close_millis =
+          base::Time::Now() - notification_database_data->creation_time_millis;
+      break;
+    case PlatformNotificationContext::Interaction::NONE:
+      break;
+    case PlatformNotificationContext::Interaction::ACTION_BUTTON_CLICKED:
+      notification_database_data->num_action_button_clicks += 1;
+      UpdateNotificationTimestamps(notification_database_data);
+      break;
+    case PlatformNotificationContext::Interaction::CLICKED:
+      notification_database_data->num_clicks += 1;
+      UpdateNotificationTimestamps(notification_database_data);
+      break;
+  }
+
+  // Write the changed values to the database.
+  status = WriteNotificationData(origin, *notification_database_data);
+  UMA_HISTOGRAM_ENUMERATION(
+      "Notifications.Database.ReadResultRecordInteraction", status,
+      NotificationDatabase::STATUS_COUNT);
+  return status;
 }
 
 NotificationDatabase::Status NotificationDatabase::ReadAllNotificationData(
@@ -197,7 +239,7 @@ NotificationDatabase::Status NotificationDatabase::WriteNotificationData(
     const GURL& origin,
     const NotificationDatabaseData& notification_data) {
   DCHECK(sequence_checker_.CalledOnValidSequence());
-  DCHECK_EQ(STATE_INITIALIZED, state_);
+  DCHECK_EQ(State::INITIALIZED, state_);
   DCHECK(origin.is_valid());
 
   const std::string& notification_id = notification_data.notification_id;
@@ -213,12 +255,6 @@ NotificationDatabase::Status NotificationDatabase::WriteNotificationData(
   leveldb::WriteBatch batch;
   batch.Put(CreateDataKey(origin, notification_id), serialized_data);
 
-  if (written_persistent_notification_id_ != next_persistent_notification_id_) {
-    written_persistent_notification_id_ = next_persistent_notification_id_;
-    batch.Put(kNextNotificationIdKey,
-              base::Int64ToString(next_persistent_notification_id_));
-  }
-
   return LevelDBStatusToNotificationDatabaseStatus(
       db_->Write(leveldb::WriteOptions(), &batch));
 }
@@ -227,10 +263,17 @@ NotificationDatabase::Status NotificationDatabase::DeleteNotificationData(
     const std::string& notification_id,
     const GURL& origin) {
   DCHECK(sequence_checker_.CalledOnValidSequence());
-  DCHECK_EQ(STATE_INITIALIZED, state_);
+  DCHECK_EQ(State::INITIALIZED, state_);
   DCHECK(!notification_id.empty());
   DCHECK(origin.is_valid());
 
+  NotificationDatabaseData data;
+  Status status = ReadNotificationData(notification_id, origin, &data);
+  if (status == STATUS_OK && record_notification_to_ukm_callback_) {
+    base::PostTaskWithTraits(
+        FROM_HERE, {BrowserThread::UI},
+        base::BindOnce(record_notification_to_ukm_callback_, data));
+  }
   std::string key = CreateDataKey(origin, notification_id);
   return LevelDBStatusToNotificationDatabaseStatus(
       db_->Delete(leveldb::WriteOptions(), key));
@@ -267,36 +310,11 @@ NotificationDatabase::Status NotificationDatabase::Destroy() {
     options.env = env_.get();
   }
 
-  state_ = STATE_DISABLED;
+  state_ = State::DISABLED;
   db_.reset();
 
   return LevelDBStatusToNotificationDatabaseStatus(
       leveldb::DestroyDB(path_.AsUTF8Unsafe(), options));
-}
-
-NotificationDatabase::Status
-NotificationDatabase::ReadNextPersistentNotificationId() {
-  std::string value;
-  Status status = LevelDBStatusToNotificationDatabaseStatus(
-      db_->Get(leveldb::ReadOptions(), kNextNotificationIdKey, &value));
-
-  if (status == STATUS_ERROR_NOT_FOUND) {
-    next_persistent_notification_id_ = kFirstPersistentNotificationId;
-    written_persistent_notification_id_ = kFirstPersistentNotificationId;
-    return STATUS_OK;
-  }
-
-  if (status != STATUS_OK)
-    return status;
-
-  if (!base::StringToInt64(value, &next_persistent_notification_id_) ||
-      next_persistent_notification_id_ < kFirstPersistentNotificationId) {
-    return STATUS_ERROR_CORRUPTED;
-  }
-
-  written_persistent_notification_id_ = next_persistent_notification_id_;
-
-  return STATUS_OK;
 }
 
 NotificationDatabase::Status
@@ -375,13 +393,16 @@ NotificationDatabase::DeleteAllNotificationDataInternal(
       continue;
     }
 
+    if (record_notification_to_ukm_callback_) {
+      base::PostTaskWithTraits(
+          FROM_HERE, {BrowserThread::UI},
+          base::BindOnce(record_notification_to_ukm_callback_,
+                         notification_database_data));
+    }
+
     batch.Delete(iter->key());
 
-    // Silently remove the notification if it doesn't have an ID assigned.
-    // TODO(peter): Remove this clause when Chrome 55 has branched.
-    if (notification_database_data.notification_id.empty())
-      continue;
-
+    DCHECK(!notification_database_data.notification_id.empty());
     deleted_notification_ids->insert(
         notification_database_data.notification_id);
   }

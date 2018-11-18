@@ -26,7 +26,7 @@
 
 #include <memory>
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
+#include "third_party/blink/renderer/platform/bindings/name_client.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 
@@ -39,11 +39,10 @@ class TextResourceDecoder;
 
 class CORE_EXPORT DocumentParser
     : public GarbageCollectedFinalized<DocumentParser>,
-      public TraceWrapperBase {
+      public NameClient {
  public:
   virtual ~DocumentParser();
   virtual void Trace(blink::Visitor*);
-  void TraceWrappers(const ScriptWrappableVisitor*) const override {}
   const char* NameInHeapSnapshot() const override { return "DocumentParser"; }
 
   virtual ScriptableDocumentParser* AsScriptableDocumentParser() {
@@ -91,9 +90,9 @@ class CORE_EXPORT DocumentParser
   virtual void StopParsing();
 
   // Document is expected to detach the parser before releasing its ref.
-  // After detach, m_document is cleared.  The parser will unwind its
+  // After detach, document_ is cleared.  The parser will unwind its
   // callstacks, but not produce any more nodes.
-  // It is impossible for the parser to touch the rest of WebCore after
+  // It is impossible for the parser to touch the rest of Blink Core after
   // detach is called.
   // Oilpan: We don't need to call detach when a Document is destructed.
   virtual void Detach();
@@ -130,7 +129,7 @@ class CORE_EXPORT DocumentParser
   bool document_was_loaded_as_part_of_navigation_;
 
   // Every DocumentParser needs a pointer back to the document.
-  // m_document will be 0 after the parser is stopped.
+  // document_ will be 0 after the parser is stopped.
   Member<Document> document_;
 
   HeapHashSet<WeakMember<DocumentParserClient>> clients_;

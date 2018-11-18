@@ -20,11 +20,12 @@
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 
+class AccountId;
 class PrefService;
 class Profile;
 
-namespace net {
-class URLRequestContextGetter;
+namespace network {
+class SharedURLLoaderFactory;
 }
 
 namespace policy {
@@ -68,7 +69,7 @@ class UserPolicySigninServiceBase : public KeyedService,
       DeviceManagementService* device_management_service,
       UserCloudPolicyManager* policy_manager,
       SigninManager* signin_manager,
-      scoped_refptr<net::URLRequestContextGetter> system_request_context);
+      scoped_refptr<network::SharedURLLoaderFactory> system_url_loader_factory);
   ~UserPolicySigninServiceBase() override;
 
   // Initiates a policy fetch as part of user signin, using a |dm_token| and
@@ -77,10 +78,10 @@ class UserPolicySigninServiceBase : public KeyedService,
   // succeeded.
   // Virtual for testing.
   virtual void FetchPolicyForSignedInUser(
-      const std::string& username,
+      const AccountId& account_id,
       const std::string& dm_token,
       const std::string& client_id,
-      scoped_refptr<net::URLRequestContextGetter> profile_request_context,
+      scoped_refptr<network::SharedURLLoaderFactory> profile_url_loader_factory,
       const PolicyFetchCallback& callback);
 
   // SigninManagerBase::Observer implementation:
@@ -103,14 +104,7 @@ class UserPolicySigninServiceBase : public KeyedService,
   // KeyedService implementation:
   void Shutdown() override;
 
-  void SetSystemRequestContext(
-      scoped_refptr<net::URLRequestContextGetter> request_context);
-
  protected:
-  net::URLRequestContextGetter* system_request_context() {
-    return system_request_context_.get();
-  }
-
   // Returns a CloudPolicyClient to perform a registration with the DM server,
   // or NULL if |username| shouldn't register for policy management.
   std::unique_ptr<CloudPolicyClient> CreateClientForRegistrationOnly(
@@ -127,21 +121,22 @@ class UserPolicySigninServiceBase : public KeyedService,
   // InitializeForSignedInUser(); otherwise it clears any stored policies.
   void InitializeOnProfileReady(Profile* profile);
 
-  // Invoked to initialize the cloud policy service for |username|, which is the
-  // account associated with the Profile that owns this service. This is invoked
-  // from InitializeOnProfileReady() if the Profile already has a signed-in
-  // account at startup, or (on the desktop platforms) as soon as the user
-  // signs-in and an OAuth2 login refresh token becomes available.
+  // Invoked to initialize the cloud policy service for |account_id|, which is
+  // the account associated with the Profile that owns this service. This is
+  // invoked from InitializeOnProfileReady() if the Profile already has a
+  // signed-in account at startup, or (on the desktop platforms) as soon as the
+  // user signs-in and an OAuth2 login refresh token becomes available.
   void InitializeForSignedInUser(
-      const std::string& username,
-      scoped_refptr<net::URLRequestContextGetter> profile_request_context);
+      const AccountId& account_id,
+      scoped_refptr<network::SharedURLLoaderFactory>
+          profile_url_loader_factory);
 
   // Initializes the cloud policy manager with the passed |client|. This is
   // called from InitializeForSignedInUser() when the Profile already has a
   // signed in account at startup, and from FetchPolicyForSignedInUser() during
   // the initial policy fetch after signing in.
   virtual void InitializeUserCloudPolicyManager(
-      const std::string& username,
+      const AccountId& account_id,
       std::unique_ptr<CloudPolicyClient> client);
 
   // Prepares for the UserCloudPolicyManager to be shutdown due to
@@ -169,7 +164,7 @@ class UserPolicySigninServiceBase : public KeyedService,
 
   PrefService* local_state_;
   DeviceManagementService* device_management_service_;
-  scoped_refptr<net::URLRequestContextGetter> system_request_context_;
+  scoped_refptr<network::SharedURLLoaderFactory> system_url_loader_factory_;
 
   base::WeakPtrFactory<UserPolicySigninServiceBase> weak_factory_;
 

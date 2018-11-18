@@ -68,12 +68,19 @@ class ExtensionManagementPrefUpdaterBase {
 
   // Helper functions for 'runtime_blocked_hosts' manipulation. |prefix| can be
   // kWildCard or a valid extension ID.
-  void UnsetRuntimeBlockedHosts(const std::string& prefix);
-  void ClearRuntimeBlockedHosts(const std::string& prefix);
-  void AddRuntimeBlockedHost(const std::string& prefix,
-                             const std::string& host);
-  void RemoveRuntimeBlockedHost(const std::string& prefix,
-                                const std::string& host);
+  void UnsetPolicyBlockedHosts(const std::string& prefix);
+  void ClearPolicyBlockedHosts(const std::string& prefix);
+  void AddPolicyBlockedHost(const std::string& prefix, const std::string& host);
+  void RemovePolicyBlockedHost(const std::string& prefix,
+                               const std::string& host);
+
+  // Helper functions for 'runtime_allowed_hosts' manipulation. |prefix| can be
+  // kWildCard or a valid extension ID.
+  void UnsetPolicyAllowedHosts(const std::string& prefix);
+  void ClearPolicyAllowedHosts(const std::string& prefix);
+  void AddPolicyAllowedHost(const std::string& prefix, const std::string& host);
+  void RemovePolicyAllowedHost(const std::string& prefix,
+                               const std::string& host);
 
   // Helper functions for 'allowed_permissions' manipulation. |id| must be a
   // valid extension ID.

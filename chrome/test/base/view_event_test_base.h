@@ -16,13 +16,12 @@
 #include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/threading/thread.h"
 #include "build/build_config.h"
+#include "chrome/test/views/chrome_test_views_delegate.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/views/test/test_views_delegate.h"
 #include "ui/views/widget/widget_delegate.h"
 
 #if defined(OS_WIN)
@@ -101,10 +100,6 @@ class ViewEventTestBase : public views::WidgetDelegate,
   const views::Widget* GetWidget() const override;
   views::Widget* GetWidget() override;
 
-  // Overridden to do nothing so that this class can be used in runnable tasks.
-  void AddRef() {}
-  void Release() {}
-
  protected:
   ~ViewEventTestBase() override;
 
@@ -123,8 +118,8 @@ class ViewEventTestBase : public views::WidgetDelegate,
   // Done is invoked.
   template <class T, class Method>
   base::Closure CreateEventTask(T* target, Method method) {
-    return base::Bind(&ViewEventTestBase::RunTestMethod, this,
-                      base::Bind(method, target));
+    return base::Bind(&ViewEventTestBase::RunTestMethod, base::Unretained(this),
+                      base::Bind(method, base::Unretained(target)));
   }
 
   // Spawns a new thread posts a MouseMove in the background.
@@ -154,7 +149,7 @@ class ViewEventTestBase : public views::WidgetDelegate,
 
   std::unique_ptr<ViewEventTestPlatformPart> platform_part_;
 
-  views::TestViewsDelegate views_delegate_;
+  ChromeTestViewsDelegate views_delegate_;
 
   base::RunLoop run_loop_;
 

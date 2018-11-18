@@ -8,6 +8,7 @@ import android.os.Handler;
 import android.text.TextUtils;
 
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.autofill.CardType;
 import org.chromium.chrome.browser.autofill.PersonalDataManager;
 import org.chromium.chrome.browser.autofill.PersonalDataManager.AutofillProfile;
@@ -45,10 +46,20 @@ public class AutofillPaymentApp implements PaymentApp {
     @Override
     public void getInstruments(Map<String, PaymentMethodData> methodDataMap, String unusedOrigin,
             String unusedIFRameOrigin, byte[][] unusedCertificateChain,
-            Map<String, PaymentDetailsModifier> modifiers, final InstrumentsCallback callback) {
+            Map<String, PaymentDetailsModifier> unusedModifiers,
+            final InstrumentsCallback callback) {
+        new Handler().post(()
+                                   -> callback.onInstrumentsReady(
+                                           AutofillPaymentApp.this, getInstruments(methodDataMap)));
+    }
+
+    /** Method to get instruments synchronously. */
+    public List<PaymentInstrument> getInstruments(Map<String, PaymentMethodData> methodDataMap) {
         PersonalDataManager pdm = PersonalDataManager.getInstance();
-        List<CreditCard> cards = pdm.getCreditCardsToSuggest();
-        final List<PaymentInstrument> instruments = new ArrayList<>(cards.size());
+        List<CreditCard> cards =
+                pdm.getCreditCardsToSuggest(/*includeServerCards=*/ChromeFeatureList.isEnabled(
+                        ChromeFeatureList.WEB_PAYMENTS_RETURN_GOOGLE_PAY_IN_BASIC_CARD));
+        List<PaymentInstrument> instruments = new ArrayList<>(cards.size());
 
         if (methodDataMap.containsKey(BasicCardUtils.BASIC_CARD_METHOD_NAME)) {
             mBasicCardSupportedNetworks = BasicCardUtils.convertBasicCardToNetworks(
@@ -66,7 +77,7 @@ public class AutofillPaymentApp implements PaymentApp {
             if (instrument != null) instruments.add(instrument);
         }
 
-        new Handler().post(() -> callback.onInstrumentsReady(AutofillPaymentApp.this, instruments));
+        return instruments;
     }
 
     /**
@@ -86,8 +97,8 @@ public class AutofillPaymentApp implements PaymentApp {
 
         if (billingAddress != null
                 && AutofillAddress.checkAddressCompletionStatus(
-                           billingAddress, AutofillAddress.IGNORE_PHONE_COMPLETENESS_CHECK)
-                        != AutofillAddress.COMPLETE) {
+                           billingAddress, AutofillAddress.CompletenessCheckType.IGNORE_PHONE)
+                        != AutofillAddress.CompletionStatus.COMPLETE) {
             billingAddress = null;
         }
 

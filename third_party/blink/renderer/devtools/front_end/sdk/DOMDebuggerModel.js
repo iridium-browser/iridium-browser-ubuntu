@@ -400,14 +400,14 @@ SDK.EventListener = class {
           this['on' + type] = undefined;
       }
 
-      return /** @type {!Promise<undefined>} */ (this._eventTarget.callFunctionPromise(removeListener, [
+      return /** @type {!Promise<undefined>} */ (this._eventTarget.callFunction(removeListener, [
         SDK.RemoteObject.toCallArgument(this._type), SDK.RemoteObject.toCallArgument(this._originalHandler),
         SDK.RemoteObject.toCallArgument(this._useCapture)
       ]));
     }
 
     return this._customRemoveFunction
-        .callFunctionPromise(
+        .callFunction(
             callCustomRemove,
             [
               SDK.RemoteObject.toCallArgument(this._type),
@@ -441,7 +441,7 @@ SDK.EventListener = class {
    * @return {!Promise<undefined>}
    */
   togglePassive() {
-    return /** @type {!Promise<undefined>} */ (this._eventTarget.callFunctionPromise(callTogglePassive, [
+    return /** @type {!Promise<undefined>} */ (this._eventTarget.callFunction(callTogglePassive, [
       SDK.RemoteObject.toCallArgument(this._type),
       SDK.RemoteObject.toCallArgument(this._originalHandler),
       SDK.RemoteObject.toCallArgument(this._useCapture),
@@ -588,6 +588,9 @@ SDK.DOMDebuggerManager = class {
         Common.UIString('Timer'),
         ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'setTimeout.callback', 'setInterval.callback']);
     this._createInstrumentationBreakpoints(Common.UIString('Window'), ['DOMWindow.close']);
+    this._createInstrumentationBreakpoints(
+        Common.UIString('WebAudio'),
+        ['audioContextCreated', 'audioContextClosed', 'audioContextResumed', 'audioContextSuspended']);
 
     this._createEventListenerBreakpoints(
         Common.UIString('Media'),
@@ -598,6 +601,9 @@ SDK.DOMDebuggerManager = class {
           'stalled',   'loadedmetadata', 'loadeddata', 'waiting'
         ],
         ['audio', 'video']);
+    this._createEventListenerBreakpoints(
+        Common.UIString('Picture-in-Picture'), ['enterpictureinpicture', 'leavepictureinpicture'], ['video']);
+    this._createEventListenerBreakpoints(Common.UIString('Picture-in-Picture'), ['resize'], ['PictureInPictureWindow']);
     this._createEventListenerBreakpoints(
         Common.UIString('Clipboard'), ['copy', 'cut', 'paste', 'beforecopy', 'beforecut', 'beforepaste'], ['*']);
     this._createEventListenerBreakpoints(
@@ -669,6 +675,14 @@ SDK.DOMDebuggerManager = class {
     this._resolveEventListenerBreakpoint('instrumentation:Notification.requestPermission')._title = 'requestPermission';
     this._resolveEventListenerBreakpoint('instrumentation:DOMWindow.close')._title = 'window.close';
     this._resolveEventListenerBreakpoint('instrumentation:Document.write')._title = 'document.write';
+    this._resolveEventListenerBreakpoint('instrumentation:audioContextCreated')._title =
+        Common.UIString('Create AudioContext');
+    this._resolveEventListenerBreakpoint('instrumentation:audioContextClosed')._title =
+        Common.UIString('Close AudioContext');
+    this._resolveEventListenerBreakpoint('instrumentation:audioContextResumed')._title =
+        Common.UIString('Resume AudioContext');
+    this._resolveEventListenerBreakpoint('instrumentation:audioContextSuspended')._title =
+        Common.UIString('Suspend AudioContext');
 
     SDK.targetManager.observeModels(SDK.DOMDebuggerModel, this);
   }

@@ -24,6 +24,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/browser_side_navigation_policy.h"
 #include "third_party/blink/public/common/frame/sandbox_flags.h"
+#include "third_party/blink/public/common/frame/user_activation_update_type.h"
 
 namespace content {
 
@@ -41,46 +42,6 @@ base::LazyInstance<FrameTreeNodeIdMap>::DestructorAtExit
 // minimum progress value.
 const double kLoadingProgressMinimum = 0.1;
 const double kLoadingProgressDone = 1.0;
-
-void RecordUniqueNameSize(FrameTreeNode* node) {
-  const auto& unique_name = node->current_replication_state().unique_name;
-
-  // Don't record numbers for the root node, which always has an empty unique
-  // name.
-  if (!node->parent()) {
-    DCHECK(unique_name.empty());
-    return;
-  }
-
-  // The original requested name is derived from the browsing context name and
-  // is essentially unbounded in size...
-  UMA_HISTOGRAM_COUNTS_1M(
-      "SessionRestore.FrameUniqueNameOriginalRequestedNameSize",
-      node->current_replication_state().name.size());
-  // If the name is a frame path, attempt to normalize the statistics based on
-  // the number of frames in the frame path.
-  if (base::StartsWith(unique_name, "<!--framePath //",
-                       base::CompareCase::SENSITIVE)) {
-    size_t depth = 1;
-    while (node->parent()) {
-      ++depth;
-      node = node->parent();
-    }
-    // The max possible size of a unique name is 80 characters, so the expected
-    // size per component shouldn't be much more than that.
-    UMA_HISTOGRAM_COUNTS_100(
-        "SessionRestore.FrameUniqueNameWithFramePathSizePerComponent",
-        round(unique_name.size() / static_cast<float>(depth)));
-    // Blink allows a maximum of ~1024 subframes in a document, so this should
-    // be less than (80 character name + 1 character delimiter) * 1024.
-    UMA_HISTOGRAM_COUNTS_100000(
-        "SessionRestore.FrameUniqueNameWithFramePathSize", unique_name.size());
-  } else {
-    UMA_HISTOGRAM_COUNTS_100(
-        "SessionRestore.FrameUniqueNameFromRequestedNameSize",
-        unique_name.size());
-  }
-}
 
 }  // namespace
 
@@ -121,15 +82,12 @@ int FrameTreeNode::next_frame_tree_node_id_ = 1;
 FrameTreeNode* FrameTreeNode::GloballyFindByID(int frame_tree_node_id) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   FrameTreeNodeIdMap* nodes = g_frame_tree_node_id_map.Pointer();
-  FrameTreeNodeIdMap::iterator it = nodes->find(frame_tree_node_id);
+  auto it = nodes->find(frame_tree_node_id);
   return it == nodes->end() ? nullptr : it->second;
 }
 
 FrameTreeNode::FrameTreeNode(FrameTree* frame_tree,
                              Navigator* navigator,
-                             RenderFrameHostDelegate* render_frame_delegate,
-                             RenderWidgetHostDelegate* render_widget_delegate,
-                             RenderFrameHostManager::Delegate* manager_delegate,
                              FrameTreeNode* parent,
                              blink::WebTreeScopeType scope,
                              const std::string& name,
@@ -139,10 +97,7 @@ FrameTreeNode::FrameTreeNode(FrameTree* frame_tree,
                              const FrameOwnerProperties& frame_owner_properties)
     : frame_tree_(frame_tree),
       navigator_(navigator),
-      render_manager_(this,
-                      render_frame_delegate,
-                      render_widget_delegate,
-                      manager_delegate),
+      render_manager_(this, frame_tree->manager_delegate()),
       frame_tree_node_id_(next_frame_tree_node_id_++),
       parent_(parent),
       depth_(parent ? parent->depth_ + 1 : 0u),
@@ -170,16 +125,13 @@ FrameTreeNode::FrameTreeNode(FrameTree* frame_tree,
           std::make_pair(frame_tree_node_id_, this));
   CHECK(result.second);
 
-  RecordUniqueNameSize(this);
-
   // Note: this should always be done last in the constructor.
   blame_context_.Initialize();
 }
 
 FrameTreeNode::~FrameTreeNode() {
-  // Remove the children.  See https://crbug.com/612450 for explanation why we
-  // don't just call the std::vector::clear method.
-  std::vector<std::unique_ptr<FrameTreeNode>>().swap(children_);
+  // Remove the children.
+  current_frame_host()->ResetChildren();
 
   // If the removed frame was created by a script, then its history entry will
   // never be reused - we can save some memory by removing the history entry.
@@ -224,50 +176,8 @@ bool FrameTreeNode::IsMainFrame() const {
   return frame_tree_->root() == this;
 }
 
-FrameTreeNode* FrameTreeNode::AddChild(std::unique_ptr<FrameTreeNode> child,
-                                       int process_id,
-                                       int frame_routing_id) {
-  // Child frame must always be created in the same process as the parent.
-  CHECK_EQ(process_id, render_manager_.current_host()->GetProcess()->GetID());
-
-  // Initialize the RenderFrameHost for the new node.  We always create child
-  // frames in the same SiteInstance as the current frame, and they can swap to
-  // a different one if they navigate away.
-  child->render_manager()->Init(
-      render_manager_.current_host()->GetSiteInstance(),
-      render_manager_.current_host()->GetRoutingID(), frame_routing_id,
-      MSG_ROUTING_NONE, false);
-
-  // Other renderer processes in this BrowsingInstance may need to find out
-  // about the new frame.  Create a proxy for the child frame in all
-  // SiteInstances that have a proxy for the frame's parent, since all frames
-  // in a frame tree should have the same set of proxies.
-  render_manager_.CreateProxiesForChildFrame(child.get());
-
-  children_.push_back(std::move(child));
-  return children_.back().get();
-}
-
-void FrameTreeNode::RemoveChild(FrameTreeNode* child) {
-  for (auto iter = children_.begin(); iter != children_.end(); ++iter) {
-    if (iter->get() == child) {
-      // Subtle: we need to make sure the node is gone from the tree before
-      // observers are notified of its deletion.
-      std::unique_ptr<FrameTreeNode> node_to_delete(std::move(*iter));
-      children_.erase(iter);
-      node_to_delete.reset();
-      return;
-    }
-  }
-}
-
 void FrameTreeNode::ResetForNewProcess() {
-  current_frame_host()->SetLastCommittedUrl(GURL());
-  blame_context_.TakeSnapshot();
-
-  // Remove child nodes from the tree, then delete them. This destruction
-  // operation will notify observers.
-  std::vector<std::unique_ptr<FrameTreeNode>>().swap(children_);
+  current_frame_host()->ResetChildren();
 }
 
 void FrameTreeNode::ResetForNavigation() {
@@ -360,8 +270,6 @@ void FrameTreeNode::SetFrameName(const std::string& name,
 
   // Note the unique name should only be able to change before the first real
   // load is committed, but that's not strongly enforced here.
-  if (unique_name != replication_state_.unique_name)
-    RecordUniqueNameSize(this);
   render_manager_.OnDidUpdateName(name, unique_name);
   replication_state_.name = name;
   replication_state_.unique_name = unique_name;
@@ -403,18 +311,6 @@ void FrameTreeNode::SetPendingFramePolicy(blink::FramePolicy frame_policy) {
     // main frame.
     pending_frame_policy_.container_policy = frame_policy.container_policy;
   }
-}
-
-bool FrameTreeNode::IsDescendantOf(FrameTreeNode* other) const {
-  if (!other || !other->child_count())
-    return false;
-
-  for (FrameTreeNode* node = parent(); node; node = node->parent()) {
-    if (node == other)
-      return true;
-  }
-
-  return false;
 }
 
 FrameTreeNode* FrameTreeNode::PreviousSibling() const {
@@ -467,8 +363,6 @@ void FrameTreeNode::TransferNavigationRequestOwnership(
 
 void FrameTreeNode::CreatedNavigationRequest(
     std::unique_ptr<NavigationRequest> navigation_request) {
-  CHECK(IsBrowserSideNavigationEnabled());
-
   // This is never called when navigating to a Javascript URL. For the loading
   // state, this matches what Blink is doing: Blink doesn't send throbber
   // notifications for Javascript URLS.
@@ -504,7 +398,6 @@ void FrameTreeNode::CreatedNavigationRequest(
 
 void FrameTreeNode::ResetNavigationRequest(bool keep_state,
                                            bool inform_renderer) {
-  CHECK(IsBrowserSideNavigationEnabled());
   if (!navigation_request_)
     return;
 
@@ -513,8 +406,9 @@ void FrameTreeNode::ResetNavigationRequest(bool keep_state,
 
   // The renderer should be informed if the caller allows to do so and the
   // navigation came from a BeginNavigation IPC.
-  int need_to_inform_renderer =
-      inform_renderer && navigation_request_->from_begin_navigation();
+  bool need_to_inform_renderer =
+      !IsPerNavigationMojoInterfaceEnabled() & inform_renderer &&
+      navigation_request_->from_begin_navigation();
 
   NavigationRequest::AssociatedSiteInstanceType site_instance_type =
       navigation_request_->associated_site_instance_type();
@@ -548,6 +442,9 @@ void FrameTreeNode::ResetNavigationRequest(bool keep_state,
 
 void FrameTreeNode::DidStartLoading(bool to_different_document,
                                     bool was_previously_loading) {
+  TRACE_EVENT2("navigation", "FrameTreeNode::DidStartLoading",
+               "frame_tree_node", frame_tree_node_id(), "to different document",
+               to_different_document);
   // Any main frame load to a new document should reset the load progress since
   // it will replace the current page and any frames. The WebContents will
   // be notified when DidChangeLoadProgress is called.
@@ -567,6 +464,8 @@ void FrameTreeNode::DidStartLoading(bool to_different_document,
 }
 
 void FrameTreeNode::DidStopLoading() {
+  TRACE_EVENT1("navigation", "FrameTreeNode::DidStopLoading", "frame_tree_node",
+               frame_tree_node_id());
   // Set final load progress and update overall progress. This will notify
   // the WebContents of the load progress change.
   DidChangeLoadProgress(kLoadingProgressDone);
@@ -594,20 +493,17 @@ void FrameTreeNode::DidChangeLoadProgress(double load_progress) {
 }
 
 bool FrameTreeNode::StopLoading() {
-  if (IsBrowserSideNavigationEnabled()) {
-    if (navigation_request_) {
-      int expected_pending_nav_entry_id = navigation_request_->nav_entry_id();
-      if (navigation_request_->navigation_handle()) {
-        navigation_request_->navigation_handle()->set_net_error_code(
-            net::ERR_ABORTED);
-        expected_pending_nav_entry_id =
-            navigation_request_->navigation_handle()->pending_nav_entry_id();
-      }
-      navigator_->DiscardPendingEntryIfNeeded(expected_pending_nav_entry_id,
-                                              false /* is_download */);
+  if (navigation_request_) {
+    int expected_pending_nav_entry_id = navigation_request_->nav_entry_id();
+    if (navigation_request_->navigation_handle()) {
+      navigation_request_->navigation_handle()->set_net_error_code(
+          net::ERR_ABORTED);
+      expected_pending_nav_entry_id =
+          navigation_request_->navigation_handle()->pending_nav_entry_id();
     }
-    ResetNavigationRequest(false, true);
+    navigator_->DiscardPendingEntryIfNeeded(expected_pending_nav_entry_id);
   }
+  ResetNavigationRequest(false, true);
 
   // TODO(nasko): see if child frames should send IPCs in site-per-process
   // mode.
@@ -645,9 +541,31 @@ void FrameTreeNode::BeforeUnloadCanceled() {
     ResetNavigationRequest(false, true);
 }
 
-void FrameTreeNode::OnSetHasReceivedUserGesture() {
-  render_manager_.OnSetHasReceivedUserGesture();
+bool FrameTreeNode::NotifyUserActivation() {
+  for (FrameTreeNode* node = this; node; node = node->parent())
+    node->user_activation_state_.Activate();
   replication_state_.has_received_user_gesture = true;
+  return true;
+}
+
+bool FrameTreeNode::ConsumeTransientUserActivation() {
+  bool was_active = user_activation_state_.IsActive();
+  for (FrameTreeNode* node : frame_tree()->Nodes())
+    node->user_activation_state_.ConsumeIfActive();
+  return was_active;
+}
+
+bool FrameTreeNode::UpdateUserActivationState(
+    blink::UserActivationUpdateType update_type) {
+  render_manager_.UpdateUserActivationState(update_type);
+  switch (update_type) {
+    case blink::UserActivationUpdateType::kConsumeTransientActivation:
+      return ConsumeTransientUserActivation();
+
+    case blink::UserActivationUpdateType::kNotifyActivation:
+      return NotifyUserActivation();
+  }
+  NOTREACHED() << "Invalid update_type.";
 }
 
 void FrameTreeNode::OnSetHasReceivedUserGestureBeforeNavigation(bool value) {

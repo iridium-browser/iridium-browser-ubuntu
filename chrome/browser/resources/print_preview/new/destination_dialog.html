@@ -2,112 +2,162 @@
 
 <link rel="import" href="chrome://resources/cr_elements/cr_dialog/cr_dialog.html">
 <link rel="import" href="chrome://resources/cr_elements/hidden_style_css.html">
+<link rel="import" href="chrome://resources/cr_elements/paper_button_style_css.html">
+<link rel="import" href="chrome://resources/cr_elements/shared_vars_css.html">
+/* The imports below are needed as an action-link is added to the promo-text
+ * div to create the cloud print "Sign in" link when this element is
+ * attached. */
+<link rel="import" href="chrome://resources/html/action_link.html">
 <link rel="import" href="chrome://resources/html/action_link_css.html">
+<link rel="import" href="chrome://resources/html/event_tracker.html">
 <link rel="import" href="chrome://resources/html/i18n_behavior.html">
+<link rel="import" href="chrome://resources/html/list_property_update_behavior.html">
+<link rel="import" href="chrome://resources/html/md_select_css.html">
+<link rel="import" href="chrome://resources/polymer/v1_0/iron-icon/iron-icon.html">
+<link rel="import" href="chrome://resources/polymer/v1_0/paper-button/paper-button.html">
+<link rel="import" href="chrome://resources/polymer/v1_0/paper-icon-button/paper-icon-button-light.html">
+<link rel="import" href="../icons.html">
+<link rel="import" href="../metrics.html">
+<link rel="import" href="../print_preview_utils.html">
 <link rel="import" href="../data/destination.html">
 <link rel="import" href="../data/destination_store.html">
 <link rel="import" href="../data/invitation.html">
 <link rel="import" href="../data/invitation_store.html">
-<link rel="import" href="button_css.html">
 <link rel="import" href="destination_list.html">
 <link rel="import" href="print_preview_search_box.html">
 <link rel="import" href="print_preview_shared_css.html">
-<link rel="import" href="search_dialog_css.html">
-<link rel="import" href="select_css.html">
+<link rel="import" href="provisional_destination_resolver.html">
+<link rel="import" href="strings.html">
 <link rel="import" href="throbber_css.html">
 
 <dom-module id="print-preview-destination-dialog">
   <template>
-    <style include="print-preview-shared button action-link select cr-hidden-style search-dialog throbber">
-      :host #dialog {
+    <style include="print-preview-shared action-link md-select cr-hidden-style throbber paper-button-style">
+      #dialog {
         --cr-dialog-native: {
-          box-shadow: 0 4px 23px 5px rgba(0, 0, 0, 0.2),
-            0 2px 6px rgba(0, 0, 0, 0.15);
-          width: 640px;
-        }
+          height: calc(100vh - 2 * var(--print-preview-dialog-margin));
+          max-width: 640px;
+          width:  calc(100vw - 2 * var(--print-preview-dialog-margin));
+        };
+        --cr-dialog-wrapper: {
+          height: calc(100vh - 2 * var(--print-preview-dialog-margin));
+          width: 100%;
+        };
+        --cr-dialog-body-container: {
+          flex: 1;
+        };
       }
 
-      :host .user-info {
-        font-size: calc(13/15 * 1em);
+      print-preview-search-box {
+        margin-bottom: 16px;
         margin-top: 14px;
       }
 
-      :host .user-info .account-select-label {
-        -webkit-padding-end: 18px;
+      .user-info {
+        font-size: calc(13 / 15 * 1em);
+        line-height: normal;
+        margin-bottom: 14px;
+        margin-top: 8px;
       }
 
-      :host .user-info .account-select {
+      .user-info .account-select-label {
+        padding-inline-end: 18px;
+      }
+
+      .user-info .account-select {
         width: auto
       }
 
-      :host #dialog #promos {
+      cr-dialog [slot=body] {
+        display: flex;
+        flex: 1;
+        flex-direction: column;
+        min-height: 0;
+      }
+
+      /* Height = 3 * destination item + 10px padding + 1 line text */
+      #recentList,
+      #printList {
+        min-height:
+            calc(2 * var(--destination-item-height) + 10px + 20 / 13 * 1rem);
+      }
+
+      #recentList {
+        flex: 1;
+        max-height:
+            calc(3 * var(--destination-item-height) + 10px + 20 / 13 * 1rem);
+        padding-bottom: 18px;
+      }
+
+      #printList {
+        flex: 1;
+        padding-bottom: 0;
+      }
+
+      paper-button {
+        font-size: calc(12 / 13 * 1em);
+      }
+
+      #dialog #promos {
+        background: rgb(248, 249, 250);
         padding: 0;
       }
 
-      :host #dialog .promo {
+      #dialog .promo {
         align-items: center;
-        background-color: #f5f5f5;
-        border-top: 1px solid #e7e7e7;
-        color: #888;
+        color: var(--google-grey-900);
         display: flex;
-        padding: 14px 17px;
+        padding: 16px 20px;
       }
 
-      :host #cloudprintPromo .promo-text {
+      #cloudprintPromo .promo-text {
         flex: 1;
       }
 
-      :host #cloudprintPromo .icon {
-        -webkit-margin-end: 12px;
-        display: block;
-        height: 24px;
-        width: 24px;
+      #cloudprintPromo iron-icon {
+        margin-inline-end: 16px;
+        width: 20px;
       }
 
-      :host #cloudprintPromo .close-button {
-        -webkit-margin-start: 12px;
-        background-image: -webkit-image-set(
-          url(chrome://theme/IDR_CLOSE_DIALOG) 1x,
-          url(chrome://theme/IDR_CLOSE_DIALOG@2x) 2x);
-        background-repeat: no-repeat;
-        background-size: 14px;
-        height: 14px;
-        width: 14px;
+      #cloudPrintClose {
+        --cr-icon-ripple-size: 20px;
+        --cr-icon-size: 16px;
+        margin-inline-start: 16px;
+        min-height: 14px;
+        min-width: 14px;
+        padding: 0;
       }
 
-      :host #cloudprintPromo .close-button:hover {
-        background-image: -webkit-image-set(
-          url(chrome://theme/IDR_CLOSE_DIALOG_H) 1x,
-          url(chrome://theme/IDR_CLOSE_DIALOG_H@2x) 2x);
-      }
-
-      :host #cloudprintPromo .close-button:active {
-        background-image: -webkit-image-set(
-          url(chrome://theme/IDR_CLOSE_DIALOG_P) 1x,
-          url(chrome://theme/IDR_CLOSE_DIALOG_P@2x) 2x);
-      }
-
-      :host #invitationPromo {
+      #invitationPromo {
         flex-direction: column;
+        text-align: center;
       }
 
-      :host #invitationPromo .invitation-text {
-        padding-bottom: 12px;
+      #invitationPromo .invitation-buttons {
+        display: flex;
+        padding: 12px 0;
       }
 
-      :host #invitationPromo .invitation-reject-button {
-        -webkit-margin-start: 10px;
+      #invitationPromo paper-button {
+        background-color: white;
+        margin: 0 4px;
+      }
+
+      #invitationPromo invitation-details {
+        color: var(--google-grey-refresh-700);
+        font-size: calc(10 / 13 * 1em);
+        font-weight: 500;
       }
     </style>
     <cr-dialog id="dialog" on-close="onCloseOrCancel_">
-      <div slot="title">
+      <div slot="title" id="header">
         <div>$i18n{destinationSearchTitle}</div>
         <div class="user-info" hidden$="[[!userInfo.loggedIn]]">
           <label class="account-select-label" id="accountSelectLabel">
             $i18n{accountSelectTitle}
           </label>
-          <select class="account-select" aria-labelledby="accountSelectLabel"
-              on-change="onUserChange_">
+          <select class="md-select account-select"
+              aria-labelledby="accountSelectLabel" on-change="onUserChange_">
             <template is="dom-repeat" items="[[userInfo.users]]">
               <option selected="[[isSelected_(item, userInfo.activeUser)]]"
                   value="[[item]]">
@@ -118,49 +168,55 @@
           </select>
         </div>
         <print-preview-search-box id="searchBox"
-            label="$i18n{searchBoxPlaceholder}" search-query="{{searchQuery_}}">
+            label="$i18n{searchBoxPlaceholder}" search-query="{{searchQuery_}}"
+            autofocus>
         </print-preview-search-box>
       </div>
-      <div slot="body" scrollable>
-        <print-preview-destination-list
+      <div slot="body">
+        <print-preview-destination-list id="recentList"
             destinations="[[recentDestinationList_]]"
             search-query="[[searchQuery_]]"
-            title="$i18n{recentDestinationsTitle}"
+            list-name="$i18n{recentDestinationsTitle}"
             on-destination-selected="onDestinationSelected_">
         </print-preview-destination-list>
-        <print-preview-destination-list destinations="[[destinations_]]"
+        <print-preview-destination-list id="printList"
+            destinations="[[destinations_]]"
             has-action-link loading-destinations="[[loadingDestinations_]]"
             search-query="[[searchQuery_]]"
-            title="$i18n{printDestinationsTitle}"
+            list-name="$i18n{printDestinationsTitle}"
             on-destination-selected="onDestinationSelected_">
         </print-preview-destination-list>
+        <print-preview-provisional-destination-resolver id="provisionalResolver"
+            destination-store="[[destinationStore]]">
+        </print-preview-provisional-destination-resolver>
       </div>
       <div slot="button-container">
-        <button class="cancel-button" on-click="onCancelButtonClick_">
+        <paper-button class="cancel-button" on-click="onCancelButtonClick_">
           $i18n{cancel}
-        </button>
+        </paper-button>
       </div>
       <div id="promos" slot="footer">
         <div class="promo" id="cloudprintPromo"
             hidden$="[[!showCloudPrintPromo]]">
-          <img src="../images/cloud.png" class="icon" alt="">
+          <iron-icon icon="print-preview:cloud-queue" alt=""></iron-icon>
           <div class="promo-text"></div>
-          <div class="close-button"></div>
+          <paper-icon-button-light id="cloudPrintClose" class="icon-clear">
+            <button on-click="onCloudPrintPromoDismissed_"></button>
+          </paper-icon-button-light>
         </div>
         <div class="promo" id="invitationPromo" hidden="[[!invitation_]]">
-          <div class="invitation-text"
-              inner-h-t-m-l="[[getInvitationText_(invitation_)]]">
-          </div>
+          <div inner-h-t-m-l="[[getInvitationText_(invitation_)]]"></div>
           <div class="invitation-buttons">
-            <button class="invitation-accept-button"
-                on-click="onInvitationAcceptClick_">
+            <paper-button on-click="onInvitationAcceptClick_">
               [[getAcceptButtonText_(invitation_)]]
-            </button>
-            <button class="invitation-reject-button"
-                on-click="onInvitationRejectClick_">
+            </paper-button>
+            <paper-button on-click="onInvitationRejectClick_">
               $i18n{reject}
-            </button>
+            </paper-button>
             <div id="invitation-process-throbber" class="throbber" hidden></div>
+          </div>
+          <div class="invitation-details">
+            $i18nRaw{registerPrinterInformationMessage}
           </div>
         </div>
       </div>

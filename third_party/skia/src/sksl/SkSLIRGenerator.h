@@ -77,16 +77,21 @@ public:
     std::unique_ptr<Expression> constantFold(const Expression& left,
                                              Token::Kind op,
                                              const Expression& right) const;
+
+    std::unique_ptr<Expression> getArg(int offset, String name) const;
+
     Program::Inputs fInputs;
     const Program::Settings* fSettings;
     const Context& fContext;
+    Program::Kind fKind;
 
 private:
     /**
      * Prepare to compile a program. Resets state, pushes a new symbol table, and installs the
      * settings.
      */
-    void start(const Program::Settings* settings);
+    void start(const Program::Settings* settings,
+               std::vector<std::unique_ptr<ProgramElement>>* inherited);
 
     /**
      * Performs cleanup after compilation is complete.
@@ -147,7 +152,6 @@ private:
     std::unique_ptr<Statement> convertReturn(const ASTReturnStatement& r);
     std::unique_ptr<Section> convertSection(const ASTSection& e);
     std::unique_ptr<Expression> getCap(int offset, String name);
-    std::unique_ptr<Expression> getArg(int offset, String name);
     std::unique_ptr<Expression> convertSuffixExpression(const ASTSuffixExpression& expression);
     std::unique_ptr<Expression> convertTypeField(int offset, const Type& type,
                                                  StringFragment field);
@@ -168,7 +172,6 @@ private:
     void setRefKind(const Expression& expr, VariableReference::RefKind kind);
     void getConstantInt(const Expression& value, int64_t* out);
 
-    Program::Kind fKind;
     const FunctionDeclaration* fCurrentFunction;
     std::unordered_map<String, Program::Settings::Value> fCapsMap;
     std::shared_ptr<SymbolTable> fRootSymbolTable;
@@ -182,10 +185,11 @@ private:
     ErrorReporter& fErrors;
     int fInvocations;
     std::vector<std::unique_ptr<ProgramElement>>* fProgramElements;
-    Variable* fSkPerVertex;
+    const Variable* fSkPerVertex = nullptr;
     Variable* fRTAdjust;
     Variable* fRTAdjustInterfaceBlock;
     int fRTAdjustFieldIndex;
+    bool fStarted = false;
 
     friend class AutoSymbolTable;
     friend class AutoLoopLevel;

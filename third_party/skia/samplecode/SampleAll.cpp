@@ -4,36 +4,36 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
-#include "SampleCode.h"
-#include "SkBlurMask.h"
-#include "SkCanvas.h"
-#include "SkView.h"
+
+#include "Sample.h"
+
+#include "DecodeFile.h"
 #include "Sk1DPathEffect.h"
 #include "Sk2DPathEffect.h"
+#include "SkBlurMask.h"
 #include "SkBlurMaskFilter.h"
+#include "SkCanvas.h"
 #include "SkColorMatrixFilter.h"
 #include "SkColorPriv.h"
 #include "SkCornerPathEffect.h"
 #include "SkDashPathEffect.h"
 #include "SkDiscretePathEffect.h"
 #include "SkEmbossMaskFilter.h"
-#include "SkReadBuffer.h"
-#include "SkWriteBuffer.h"
 #include "SkGradientShader.h"
 #include "SkMath.h"
 #include "SkPath.h"
-#include "SkPictureRecorder.h"
-#include "SkRegion.h"
-#include "SkShader.h"
-#include "SkCornerPathEffect.h"
 #include "SkPathMeasure.h"
 #include "SkPicture.h"
+#include "SkPictureRecorder.h"
 #include "SkRandom.h"
+#include "SkReadBuffer.h"
+#include "SkRegion.h"
+#include "SkShader.h"
 #include "SkTypeface.h"
-#include "SkUtils.h"
+#include "SkUTF.h"
+#include "SkWriteBuffer.h"
 
 #include <math.h>
-#include "DecodeFile.h"
 
 class Dot2DPathEffect : public Sk2DPathEffect {
 public:
@@ -58,15 +58,14 @@ private:
     typedef Sk2DPathEffect INHERITED;
 };
 
-class DemoView : public SampleView {
+class DemoView : public Sample {
 public:
     DemoView() {}
 
 protected:
-    // overrides from SkEventSink
-    virtual bool onQuery(SkEvent* evt) {
-        if (SampleCode::TitleQ(*evt)) {
-            SampleCode::TitleR(evt, "Demo");
+    virtual bool onQuery(Sample::Event* evt) {
+        if (Sample::TitleQ(*evt)) {
+            Sample::TitleR(evt, "Demo");
             return true;
         }
         return this->INHERITED::onQuery(evt);
@@ -140,8 +139,6 @@ protected:
         char ascii[] = "ascii...";
         int asciiLength = sizeof(ascii) - 1;
         char utf8[] = "utf8" "\xe2\x80\xa6";
-        short utf16[] = {'u', 't', 'f', '1', '6', 0x2026 };
-        short utf16simple[] = {'u', 't', 'f', '1', '6', '!' };
 
         makePath(path);
         SkTDArray<SkPoint> pos;
@@ -259,21 +256,12 @@ protected:
         paint.setColor(SK_ColorCYAN);
         canvas->drawText(utf8, sizeof(utf8) - 1, x, y, paint);
 
-        canvas->translate(SkIntToScalar(30), 0);
-        paint.setColor(SK_ColorMAGENTA);
-        paint.setTextEncoding(SkPaint::kUTF16_TextEncoding);
-        matrix.setTranslate(SkIntToScalar(10), SkIntToScalar(10));
-        canvas->drawTextOnPath((void*) utf16, sizeof(utf16), path, &matrix, paint);
-        canvas->translate(0, SkIntToScalar(20));
-        canvas->drawTextOnPath((void*) utf16simple, sizeof(utf16simple), path, &matrix, paint);
-        canvas->restore();
-
         canvas->translate(0, SkIntToScalar(60));
         paint.setTextEncoding(SkPaint::kUTF8_TextEncoding);
         canvas->restore();
     }
 
-    virtual SkView::Click* onFindClickHandler(SkScalar x, SkScalar y, unsigned modi) {
+    virtual Sample::Click* onFindClickHandler(SkScalar x, SkScalar y, unsigned modi) {
         fClickPt.set(x, y);
         return this->INHERITED::onFindClickHandler(x, y, modi);
     }
@@ -316,10 +304,9 @@ protected:
 private:
     SkPoint fClickPt;
     SkBitmap fBug, fTb, fTx;
-    typedef SampleView INHERITED;
+    typedef Sample INHERITED;
 };
 
 //////////////////////////////////////////////////////////////////////////////
 
-static SkView* MyFactory() { return new DemoView; }
-static SkViewRegister reg(MyFactory);
+DEF_SAMPLE( return new DemoView(); )

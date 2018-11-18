@@ -87,7 +87,7 @@ constexpr auto GetDataImpl(C& c, char) noexcept  // NOLINT(runtime/references)
   return c.data();
 }
 
-// Before C++17, std::string::data returns a const char* in all cases.
+// Before C++17, string::data returns a const char* in all cases.
 inline char* GetDataImpl(std::string& s,  // NOLINT(runtime/references)
                          int) noexcept {
   return &s[0];
@@ -216,7 +216,7 @@ using EnableIfConvertibleToSpanConst =
 //   // Construct a Span implicitly from a container
 //   void MyRoutine(absl::Span<const int> a) {
 //     ...
-//   };
+//   }
 //   std::vector v = {1,2,3,4,5};
 //   MyRoutine(v)                     // convert to Span<const T>
 //
@@ -224,7 +224,7 @@ using EnableIfConvertibleToSpanConst =
 // point to remains alive, must also ensure that such memory does not get
 // reallocated. Therefore, to avoid undefined behavior, containers with
 // associated span views should not invoke operations that may reallocate memory
-// (such as resizing) or invalidate iterarors into the container.
+// (such as resizing) or invalidate iterators into the container.
 //
 // One common use for a `Span` is when passing arguments to a routine that can
 // accept a variety of array types (e.g. a `std::vector`, `absl::InlinedVector`,
@@ -235,7 +235,7 @@ using EnableIfConvertibleToSpanConst =
 //
 //   void MyRoutine(absl::Span<const int> a) {
 //     ...
-//   };
+//   }
 //
 //   std::vector v = {1,2,3,4,5};
 //   MyRoutine(v);
@@ -279,7 +279,7 @@ class Span {
   using size_type = size_t;
   using difference_type = ptrdiff_t;
 
-  static const size_type npos = ~size_type{0};
+  static const size_type npos = ~(size_type(0));
 
   constexpr Span() noexcept : Span(nullptr, 0) {}
   constexpr Span(pointer array, size_type length) noexcept
@@ -290,7 +290,8 @@ class Span {
   constexpr Span(T (&a)[N]) noexcept  // NOLINT(runtime/explicit)
       : Span(a, N) {}
 
-  // Explicit reference constructor for a mutable `Span<T>` type
+  // Explicit reference constructor for a mutable `Span<T>` type. Can be
+  // replaced with MakeSpan() to infer the type parameter.
   template <typename V, typename = EnableIfConvertibleFrom<V>,
             typename = EnableIfMutableView<V>>
   explicit Span(V& v) noexcept  // NOLINT(runtime/references)
@@ -458,10 +459,20 @@ class Span {
 
   // Span::subspan()
   //
-  // Returns a `Span` starting at element `pos` and of length `len`, with
-  // proper bounds checking to ensure `len` does not exceed the ptr+size of the
-  // original array. (Spans whose `len` would point past the end of the array
-  // will throw a `std::out_of_range`.)
+  // Returns a `Span` starting at element `pos` and of length `len`. Both `pos`
+  // and `len` are of type `size_type` and thus non-negative. Parameter `pos`
+  // must be <= size(). Any `len` value that points past the end of the span
+  // will be trimmed to at most size() - `pos`. A default `len` value of `npos`
+  // ensures the returned subspan continues until the end of the span.
+  //
+  // Examples:
+  //
+  //   std::vector<int> vec = {10, 11, 12, 13};
+  //   absl::MakeSpan(vec).subspan(1, 2);  // {11, 12}
+  //   absl::MakeSpan(vec).subspan(2, 8);  // {12, 13}
+  //   absl::MakeSpan(vec).subspan(1);     // {11, 12, 13}
+  //   absl::MakeSpan(vec).subspan(4);     // {}
+  //   absl::MakeSpan(vec).subspan(5);     // throws std::out_of_range
   constexpr Span subspan(size_type pos = 0, size_type len = npos) const {
     return (pos <= len_)
                ? Span(ptr_ + pos, span_internal::Min(len_ - pos, len))

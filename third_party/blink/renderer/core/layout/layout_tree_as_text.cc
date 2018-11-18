@@ -48,6 +48,7 @@
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_inline_fragment_traversal.h"
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_text_fragment.h"
 #include "third_party/blink/renderer/core/layout/ng/list/layout_ng_list_item.h"
+#include "third_party/blink/renderer/core/layout/ng/ng_physical_box_fragment.h"
 #include "third_party/blink/renderer/core/layout/svg/layout_svg_image.h"
 #include "third_party/blink/renderer/core/layout/svg/layout_svg_inline.h"
 #include "third_party/blink/renderer/core/layout/svg/layout_svg_inline_text.h"
@@ -58,6 +59,7 @@
 #include "third_party/blink/renderer/core/page/print_context.h"
 #include "third_party/blink/renderer/core/paint/compositing/composited_layer_mapping.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
+#include "third_party/blink/renderer/core/paint/paint_layer_scrollable_area.h"
 #include "third_party/blink/renderer/platform/layout_unit.h"
 #include "third_party/blink/renderer/platform/wtf/hex_number.h"
 #include "third_party/blink/renderer/platform/wtf/text/character_names.h"
@@ -67,7 +69,8 @@ namespace blink {
 
 using namespace HTMLNames;
 
-static void PrintBorderStyle(TextStream& ts, const EBorderStyle border_style) {
+static void PrintBorderStyle(WTF::TextStream& ts,
+                             const EBorderStyle border_style) {
   switch (border_style) {
     case EBorderStyle::kNone:
       ts << "none";
@@ -141,11 +144,11 @@ String QuoteAndEscapeNonPrintables(const String& s) {
   return result.ToString();
 }
 
-TextStream& operator<<(TextStream& ts, const Color& c) {
+WTF::TextStream& operator<<(WTF::TextStream& ts, const Color& c) {
   return ts << c.NameForLayoutTreeAsText();
 }
 
-void LayoutTreeAsText::WriteLayoutObject(TextStream& ts,
+void LayoutTreeAsText::WriteLayoutObject(WTF::TextStream& ts,
                                          const LayoutObject& o,
                                          LayoutAsTextBehavior behavior) {
   ts << o.DecoratedName();
@@ -153,8 +156,8 @@ void LayoutTreeAsText::WriteLayoutObject(TextStream& ts,
   if (behavior & kLayoutAsTextShowAddresses)
     ts << " " << static_cast<const void*>(&o);
 
-  if (o.Style() && o.Style()->ZIndex())
-    ts << " zI: " << o.Style()->ZIndex();
+  if (o.Style() && o.StyleRef().ZIndex())
+    ts << " zI: " << o.StyleRef().ZIndex();
 
   if (o.GetNode()) {
     String tag_name = GetTagName(o.GetNode());
@@ -198,10 +201,10 @@ void LayoutTreeAsText::WriteLayoutObject(TextStream& ts,
           text_stroke_color != color && text_stroke_color.Rgb())
         ts << " [textStrokeColor=" << text_stroke_color << "]";
 
-      if (o.Parent()->Style()->TextStrokeWidth() !=
-              o.Style()->TextStrokeWidth() &&
-          o.Style()->TextStrokeWidth() > 0)
-        ts << " [textStrokeWidth=" << o.Style()->TextStrokeWidth() << "]";
+      if (o.Parent()->StyleRef().TextStrokeWidth() !=
+              o.StyleRef().TextStrokeWidth() &&
+          o.StyleRef().TextStrokeWidth() > 0)
+        ts << " [textStrokeWidth=" << o.StyleRef().TextStrokeWidth() << "]";
     }
 
     if (!o.IsBoxModelObject())
@@ -212,44 +215,44 @@ void LayoutTreeAsText::WriteLayoutObject(TextStream& ts,
         box.BorderLeft()) {
       ts << " [border:";
 
-      BorderValue prev_border = o.Style()->BorderTop();
+      BorderValue prev_border = o.StyleRef().BorderTop();
       if (!box.BorderTop()) {
         ts << " none";
       } else {
         ts << " (" << box.BorderTop() << "px ";
-        PrintBorderStyle(ts, o.Style()->BorderTopStyle());
+        PrintBorderStyle(ts, o.StyleRef().BorderTopStyle());
         ts << o.ResolveColor(GetCSSPropertyBorderTopColor()) << ")";
       }
 
-      if (!o.Style()->BorderRightEquals(prev_border)) {
-        prev_border = o.Style()->BorderRight();
+      if (!o.StyleRef().BorderRightEquals(prev_border)) {
+        prev_border = o.StyleRef().BorderRight();
         if (!box.BorderRight()) {
           ts << " none";
         } else {
           ts << " (" << box.BorderRight() << "px ";
-          PrintBorderStyle(ts, o.Style()->BorderRightStyle());
+          PrintBorderStyle(ts, o.StyleRef().BorderRightStyle());
           ts << o.ResolveColor(GetCSSPropertyBorderRightColor()) << ")";
         }
       }
 
-      if (!o.Style()->BorderBottomEquals(prev_border)) {
-        prev_border = box.Style()->BorderBottom();
+      if (!o.StyleRef().BorderBottomEquals(prev_border)) {
+        prev_border = box.StyleRef().BorderBottom();
         if (!box.BorderBottom()) {
           ts << " none";
         } else {
           ts << " (" << box.BorderBottom() << "px ";
-          PrintBorderStyle(ts, o.Style()->BorderBottomStyle());
+          PrintBorderStyle(ts, o.StyleRef().BorderBottomStyle());
           ts << o.ResolveColor(GetCSSPropertyBorderBottomColor()) << ")";
         }
       }
 
-      if (!o.Style()->BorderLeftEquals(prev_border)) {
-        prev_border = o.Style()->BorderLeft();
+      if (!o.StyleRef().BorderLeftEquals(prev_border)) {
+        prev_border = o.StyleRef().BorderLeft();
         if (!box.BorderLeft()) {
           ts << " none";
         } else {
           ts << " (" << box.BorderLeft() << "px ";
-          PrintBorderStyle(ts, o.Style()->BorderLeftStyle());
+          PrintBorderStyle(ts, o.StyleRef().BorderLeftStyle());
           ts << o.ResolveColor(GetCSSPropertyBorderLeftColor()) << ")";
         }
       }
@@ -363,7 +366,9 @@ void LayoutTreeAsText::WriteLayoutObject(TextStream& ts,
   }
 }
 
-static void WriteInlineBox(TextStream& ts, const InlineBox& box, int indent) {
+static void WriteInlineBox(WTF::TextStream& ts,
+                           const InlineBox& box,
+                           int indent) {
   WriteIndent(ts, indent);
   ts << "+ ";
   ts << box.BoxName() << " {" << box.GetLineLayoutItem().DebugName() << "}"
@@ -373,7 +378,7 @@ static void WriteInlineBox(TextStream& ts, const InlineBox& box, int indent) {
      << box.BaselinePosition(kIdeographicBaseline);
 }
 
-static void WriteInlineTextBox(TextStream& ts,
+static void WriteInlineTextBox(WTF::TextStream& ts,
                                const InlineTextBox& text_box,
                                int indent) {
   WriteInlineBox(ts, text_box, indent);
@@ -386,7 +391,7 @@ static void WriteInlineTextBox(TextStream& ts,
      << " \"" << value << "\"";
 }
 
-static void WriteInlineFlowBox(TextStream& ts,
+static void WriteInlineFlowBox(WTF::TextStream& ts,
                                const InlineFlowBox& root_box,
                                int indent) {
   WriteInlineBox(ts, root_box, indent);
@@ -407,7 +412,7 @@ static void WriteInlineFlowBox(TextStream& ts,
   }
 }
 
-void LayoutTreeAsText::WriteLineBoxTree(TextStream& ts,
+void LayoutTreeAsText::WriteLineBoxTree(WTF::TextStream& ts,
                                         const LayoutBlockFlow& o,
                                         int indent) {
   for (const InlineFlowBox* root_box : o.LineBoxes()) {
@@ -415,7 +420,7 @@ void LayoutTreeAsText::WriteLineBoxTree(TextStream& ts,
   }
 }
 
-static void WriteTextRun(TextStream& ts,
+static void WriteTextRun(WTF::TextStream& ts,
                          const LayoutText& o,
                          const InlineTextBox& run) {
   // FIXME: For now use an "enclosingIntRect" model for x, y and logicalWidth,
@@ -438,21 +443,33 @@ static void WriteTextRun(TextStream& ts,
   ts << ": "
      << QuoteAndEscapeNonPrintables(
             String(o.GetText()).Substring(run.Start(), run.Len()));
-  if (run.HasHyphen())
+  if (run.HasHyphen()) {
     ts << " + hyphen string "
-       << QuoteAndEscapeNonPrintables(o.Style()->HyphenString());
+       << QuoteAndEscapeNonPrintables(o.StyleRef().HyphenString());
+  }
   ts << "\n";
 }
 
-static void WriteTextFragment(TextStream& ts,
+static void WriteTextFragment(WTF::TextStream& ts,
                               const NGPhysicalFragment& physical_fragment,
                               NGPhysicalOffset offset_to_container_box) {
   if (!physical_fragment.IsText())
     return;
   const NGPhysicalTextFragment& physical_text_fragment =
       ToNGPhysicalTextFragment(physical_fragment);
-  NGTextFragment fragment(physical_fragment.Style().GetWritingMode(),
-                          physical_text_fragment);
+  const ComputedStyle& style = physical_fragment.Style();
+  NGTextFragment fragment(style.GetWritingMode(), physical_text_fragment);
+  if (UNLIKELY(style.IsFlippedBlocksWritingMode())) {
+    if (physical_fragment.GetLayoutObject()) {
+      LayoutRect rect(offset_to_container_box.ToLayoutPoint(),
+                      physical_fragment.Size().ToLayoutSize());
+      const LayoutBlock* containing_block =
+          physical_fragment.GetLayoutObject()->ContainingBlock();
+      containing_block->FlipForWritingMode(rect);
+      offset_to_container_box.left = rect.X();
+    }
+  }
+
   // See WriteTextRun() for why we convert to int.
   int x = offset_to_container_box.left.ToInt();
   int y = offset_to_container_box.top.ToInt();
@@ -464,7 +481,7 @@ static void WriteTextFragment(TextStream& ts,
   ts << "\n";
 }
 
-static void WritePaintProperties(TextStream& ts,
+static void WritePaintProperties(WTF::TextStream& ts,
                                  const LayoutObject& o,
                                  int indent) {
   bool has_fragments = o.FirstFragment().NextFragment();
@@ -490,7 +507,7 @@ static void WritePaintProperties(TextStream& ts,
   }
 }
 
-void Write(TextStream& ts,
+void Write(WTF::TextStream& ts,
            const LayoutObject& o,
            int indent,
            LayoutAsTextBehavior behavior) {
@@ -585,7 +602,7 @@ enum LayerPaintPhase {
   kLayerPaintPhaseForeground = 1
 };
 
-static void Write(TextStream& ts,
+static void Write(WTF::TextStream& ts,
                   PaintLayer& layer,
                   const LayoutRect& layer_bounds,
                   const LayoutRect& background_clip_rect,
@@ -595,30 +612,16 @@ static void Write(TextStream& ts,
                   LayoutAsTextBehavior behavior = kLayoutAsTextBehaviorNormal,
                   const PaintLayer* marked_layer = nullptr) {
   IntRect adjusted_layout_bounds = PixelSnappedIntRect(layer_bounds);
-  IntRect adjusted_layout_bounds_with_scrollbars = adjusted_layout_bounds;
   IntRect adjusted_background_clip_rect =
       PixelSnappedIntRect(background_clip_rect);
   IntRect adjusted_clip_rect = PixelSnappedIntRect(clip_rect);
-
-  bool report_frame_scroll_info =
-      layer.GetLayoutObject().IsLayoutView() &&
-      !RuntimeEnabledFeatures::RootLayerScrollingEnabled();
-
-  if (report_frame_scroll_info) {
-    LayoutView& layout_view = ToLayoutView(layer.GetLayoutObject());
-
-    adjusted_layout_bounds_with_scrollbars.SetWidth(
-        layout_view.ViewWidth(kIncludeScrollbars));
-    adjusted_layout_bounds_with_scrollbars.SetHeight(
-        layout_view.ViewHeight(kIncludeScrollbars));
-  }
 
   if (marked_layer)
     ts << (marked_layer == &layer ? "*" : " ");
 
   WriteIndent(ts, indent);
 
-  if (layer.GetLayoutObject().Style()->Visibility() == EVisibility::kHidden)
+  if (layer.GetLayoutObject().StyleRef().Visibility() == EVisibility::kHidden)
     ts << "hidden ";
 
   ts << "layer ";
@@ -626,27 +629,22 @@ static void Write(TextStream& ts,
   if (behavior & kLayoutAsTextShowAddresses)
     ts << static_cast<const void*>(&layer) << " ";
 
-  ts << adjusted_layout_bounds_with_scrollbars;
+  ts << adjusted_layout_bounds;
 
   if (!adjusted_layout_bounds.IsEmpty()) {
     if (!adjusted_background_clip_rect.Contains(adjusted_layout_bounds))
       ts << " backgroundClip " << adjusted_background_clip_rect;
-    if (!adjusted_clip_rect.Contains(adjusted_layout_bounds_with_scrollbars))
+    if (!adjusted_clip_rect.Contains(adjusted_layout_bounds))
       ts << " clip " << adjusted_clip_rect;
   }
   if (layer.IsTransparent())
     ts << " transparent";
 
-  if (layer.GetLayoutObject().HasOverflowClip() || report_frame_scroll_info) {
-    ScrollableArea* scrollable_area;
-    if (report_frame_scroll_info)
-      scrollable_area = ToLayoutView(layer.GetLayoutObject()).GetFrameView();
-    else
-      scrollable_area = layer.GetScrollableArea();
-
+  if (layer.GetLayoutObject().HasOverflowClip()) {
+    PaintLayerScrollableArea* scrollable_area = layer.GetScrollableArea();
     ScrollOffset adjusted_scroll_offset =
         scrollable_area->GetScrollOffset() +
-        ToFloatSize(scrollable_area->ScrollOrigin());
+        ToFloatSize(FloatPoint(scrollable_area->ScrollOrigin()));
     if (adjusted_scroll_offset.Width())
       ts << " scrollX " << adjusted_scroll_offset.Width();
     if (adjusted_scroll_offset.Height())
@@ -667,10 +665,11 @@ static void Write(TextStream& ts,
   else if (paint_phase == kLayerPaintPhaseForeground)
     ts << " layerType: foreground only";
 
-  if (layer.GetLayoutObject().Style()->HasBlendMode()) {
+  if (layer.GetLayoutObject().StyleRef().HasBlendMode()) {
     ts << " blendMode: "
-       << CompositeOperatorName(kCompositeSourceOver,
-                                layer.GetLayoutObject().Style()->BlendMode());
+       << CompositeOperatorName(
+              kCompositeSourceOver,
+              layer.GetLayoutObject().StyleRef().GetBlendMode());
   }
 
   if (behavior & kLayoutAsTextShowCompositedLayers) {
@@ -694,16 +693,18 @@ static void Write(TextStream& ts,
     Write(ts, layer.GetLayoutObject(), indent + 1, behavior);
 }
 
-static Vector<PaintLayerStackingNode*> NormalFlowListFor(
+static PaintLayerStackingNode::PaintLayers NormalFlowListFor(
     PaintLayerStackingNode* node) {
-  PaintLayerStackingNodeIterator it(*node, kNormalFlowChildren);
-  Vector<PaintLayerStackingNode*> vector;
-  while (PaintLayerStackingNode* normal_flow_child = it.Next())
-    vector.push_back(normal_flow_child);
+  PaintLayerStackingNode::PaintLayers vector;
+  if (node) {
+    PaintLayerStackingNodeIterator it(*node, kNormalFlowChildren);
+    while (PaintLayer* normal_flow_child = it.Next())
+      vector.push_back(normal_flow_child);
+  }
   return vector;
 }
 
-void LayoutTreeAsText::WriteLayers(TextStream& ts,
+void LayoutTreeAsText::WriteLayers(WTF::TextStream& ts,
                                    const PaintLayer* root_layer,
                                    PaintLayer* layer,
                                    const LayoutRect& paint_rect,
@@ -714,12 +715,12 @@ void LayoutTreeAsText::WriteLayers(TextStream& ts,
   LayoutRect layer_bounds;
   ClipRect damage_rect, clip_rect_to_apply;
   layer->Clipper(PaintLayer::kUseGeometryMapper)
-      .CalculateRects(ClipRectsContext(root_layer, kUncachedClipRects),
-                      &layer->GetLayoutObject().FirstFragment(), paint_rect,
-                      layer_bounds, damage_rect, clip_rect_to_apply);
-
-  // Ensure our lists are up to date.
-  layer->StackingNode()->UpdateLayerListsIfNeeded();
+      .CalculateRects(
+          ClipRectsContext(root_layer,
+                           &root_layer->GetLayoutObject().FirstFragment(),
+                           kUncachedClipRects),
+          &layer->GetLayoutObject().FirstFragment(), &paint_rect, layer_bounds,
+          damage_rect, clip_rect_to_apply);
 
   LayoutPoint offset_from_root;
   layer->ConvertToLayerCoords(root_layer, offset_from_root);
@@ -740,58 +741,68 @@ void LayoutTreeAsText::WriteLayers(TextStream& ts,
   }
 #endif
 
-  Vector<PaintLayerStackingNode*>* neg_list =
-      layer->StackingNode()->NegZOrderList();
-  bool paints_background_separately = neg_list && neg_list->size() > 0;
-  if (should_paint && paints_background_separately)
-    Write(ts, *layer, layer_bounds, damage_rect.Rect(),
-          clip_rect_to_apply.Rect(), kLayerPaintPhaseBackground, indent,
-          behavior, marked_layer);
-
-  if (neg_list) {
-    int curr_indent = indent;
-    if (behavior & kLayoutAsTextShowLayerNesting) {
-      WriteIndent(ts, indent);
-      ts << " negative z-order list(" << neg_list->size() << ")\n";
-      ++curr_indent;
+  bool paints_background_separately = false;
+  if (layer->StackingNode()) {
+    PaintLayerStackingNode::PaintLayers* neg_list =
+        layer->StackingNode()->NegZOrderList();
+    paints_background_separately = neg_list && neg_list->size() > 0;
+    if (should_paint && paints_background_separately) {
+      Write(ts, *layer, layer_bounds, damage_rect.Rect(),
+            clip_rect_to_apply.Rect(), kLayerPaintPhaseBackground, indent,
+            behavior, marked_layer);
     }
-    for (unsigned i = 0; i != neg_list->size(); ++i)
-      WriteLayers(ts, root_layer, neg_list->at(i)->Layer(), paint_rect,
-                  curr_indent, behavior, marked_layer);
+
+    if (neg_list) {
+      int curr_indent = indent;
+      if (behavior & kLayoutAsTextShowLayerNesting) {
+        WriteIndent(ts, indent);
+        ts << " negative z-order list(" << neg_list->size() << ")\n";
+        ++curr_indent;
+      }
+      for (unsigned i = 0; i != neg_list->size(); ++i) {
+        WriteLayers(ts, root_layer, neg_list->at(i), paint_rect, curr_indent,
+                    behavior, marked_layer);
+      }
+    }
   }
 
-  if (should_paint)
+  if (should_paint) {
     Write(ts, *layer, layer_bounds, damage_rect.Rect(),
           clip_rect_to_apply.Rect(),
           paints_background_separately ? kLayerPaintPhaseForeground
                                        : kLayerPaintPhaseAll,
           indent, behavior, marked_layer);
-
-  Vector<PaintLayerStackingNode*> normal_flow_list =
-      NormalFlowListFor(layer->StackingNode());
-  if (!normal_flow_list.IsEmpty()) {
-    int curr_indent = indent;
-    if (behavior & kLayoutAsTextShowLayerNesting) {
-      WriteIndent(ts, indent);
-      ts << " normal flow list(" << normal_flow_list.size() << ")\n";
-      ++curr_indent;
-    }
-    for (unsigned i = 0; i != normal_flow_list.size(); ++i)
-      WriteLayers(ts, root_layer, normal_flow_list.at(i)->Layer(), paint_rect,
-                  curr_indent, behavior, marked_layer);
   }
 
-  if (Vector<PaintLayerStackingNode*>* pos_list =
-          layer->StackingNode()->PosZOrderList()) {
-    int curr_indent = indent;
-    if (behavior & kLayoutAsTextShowLayerNesting) {
-      WriteIndent(ts, indent);
-      ts << " positive z-order list(" << pos_list->size() << ")\n";
-      ++curr_indent;
+  if (layer->StackingNode()) {
+    PaintLayerStackingNode::PaintLayers normal_flow_list =
+        NormalFlowListFor(layer->StackingNode());
+    if (!normal_flow_list.IsEmpty()) {
+      int curr_indent = indent;
+      if (behavior & kLayoutAsTextShowLayerNesting) {
+        WriteIndent(ts, indent);
+        ts << " normal flow list(" << normal_flow_list.size() << ")\n";
+        ++curr_indent;
+      }
+      for (unsigned i = 0; i != normal_flow_list.size(); ++i) {
+        WriteLayers(ts, root_layer, normal_flow_list.at(i), paint_rect,
+                    curr_indent, behavior, marked_layer);
+      }
     }
-    for (unsigned i = 0; i != pos_list->size(); ++i)
-      WriteLayers(ts, root_layer, pos_list->at(i)->Layer(), paint_rect,
-                  curr_indent, behavior, marked_layer);
+
+    if (PaintLayerStackingNode::PaintLayers* pos_list =
+            layer->StackingNode()->PosZOrderList()) {
+      int curr_indent = indent;
+      if (behavior & kLayoutAsTextShowLayerNesting) {
+        WriteIndent(ts, indent);
+        ts << " positive z-order list(" << pos_list->size() << ")\n";
+        ++curr_indent;
+      }
+      for (unsigned i = 0; i != pos_list->size(); ++i) {
+        WriteLayers(ts, root_layer, pos_list->at(i), paint_rect, curr_indent,
+                    behavior, marked_layer);
+      }
+    }
   }
 }
 
@@ -829,12 +840,11 @@ static String NodePosition(Node* node) {
   return result.ToString();
 }
 
-static void WriteSelection(TextStream& ts, const LayoutObject* o) {
-  Node* n = o->GetNode();
-  if (!n || !n->IsDocumentNode())
+static void WriteSelection(WTF::TextStream& ts, const LayoutObject* o) {
+  Document* doc = DynamicTo<Document>(o->GetNode());
+  if (!doc)
     return;
 
-  Document* doc = ToDocument(n);
   LocalFrame* frame = doc->GetFrame();
   if (!frame)
     return;
@@ -859,7 +869,7 @@ static void WriteSelection(TextStream& ts, const LayoutObject* o) {
 static String ExternalRepresentation(LayoutBox* layout_object,
                                      LayoutAsTextBehavior behavior,
                                      const PaintLayer* marked_layer = nullptr) {
-  TextStream ts;
+  WTF::TextStream ts;
   if (!layout_object->HasLayer())
     return ts.Release();
 
@@ -875,7 +885,7 @@ String ExternalRepresentation(LocalFrame* frame,
                               LayoutAsTextBehavior behavior,
                               const PaintLayer* marked_layer) {
   if (!(behavior & kLayoutAsTextDontUpdateLayout)) {
-    bool success = frame->View()->UpdateLifecycleToPrePaintClean();
+    bool success = frame->View()->UpdateAllLifecyclePhasesExceptPaint();
     DCHECK(success);
   };
 
@@ -917,7 +927,7 @@ String ExternalRepresentation(Element* element, LayoutAsTextBehavior behavior) {
                                 behavior | kLayoutAsTextShowAllLayers);
 }
 
-static void WriteCounterValuesFromChildren(TextStream& stream,
+static void WriteCounterValuesFromChildren(WTF::TextStream& stream,
                                            LayoutObject* parent,
                                            bool& is_first_counter) {
   for (LayoutObject* child = parent->SlowFirstChild(); child;
@@ -934,7 +944,7 @@ static void WriteCounterValuesFromChildren(TextStream& stream,
 
 String CounterValueForElement(Element* element) {
   element->GetDocument().UpdateStyleAndLayout();
-  TextStream stream;
+  WTF::TextStream stream;
   bool is_first_counter = true;
   // The counter layoutObjects should be children of :before or :after
   // pseudo-elements.

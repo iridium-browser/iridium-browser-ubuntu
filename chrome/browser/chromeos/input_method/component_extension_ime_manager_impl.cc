@@ -15,7 +15,7 @@
 #include "base/path_service.h"
 #include "base/strings/string_util.h"
 #include "base/sys_info.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "chrome/browser/extensions/component_loader.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
@@ -85,7 +85,8 @@ const char kImePathKeyName[] = "ime_path";
 extensions::ComponentLoader* GetComponentLoader(Profile* profile) {
   extensions::ExtensionSystem* extension_system =
       extensions::ExtensionSystem::Get(profile);
-  ExtensionService* extension_service = extension_system->extension_service();
+  extensions::ExtensionService* extension_service =
+      extension_system->extension_service();
   return extension_service->component_loader();
 }
 
@@ -95,7 +96,8 @@ void DoLoadExtension(Profile* profile,
                      const base::FilePath& file_path) {
   extensions::ExtensionSystem* extension_system =
       extensions::ExtensionSystem::Get(profile);
-  ExtensionService* extension_service = extension_system->extension_service();
+  extensions::ExtensionService* extension_service =
+      extension_system->extension_service();
   DCHECK(extension_service);
   if (extension_service->GetExtensionById(extension_id, false)) {
     VLOG(1) << "the IME extension(id=\"" << extension_id
@@ -162,7 +164,7 @@ void ComponentExtensionIMEManagerImpl::Load(Profile* profile,
   // url won't be override by IME component extensions.
   base::FilePath* copied_file_path = new base::FilePath(file_path);
   base::PostTaskWithTraitsAndReplyWithResult(
-      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
       base::Bind(&CheckFilePath, base::Unretained(copied_file_path)),
       base::Bind(&OnFilePathChecked, base::Unretained(profile),
                  base::Owned(new std::string(extension_id)),
@@ -341,7 +343,7 @@ void ComponentExtensionIMEManagerImpl::ReadComponentExtensionsInfo(
 
     if (!component_ime.path.IsAbsolute()) {
       base::FilePath resources_path;
-      if (!PathService::Get(chrome::DIR_RESOURCES, &resources_path))
+      if (!base::PathService::Get(chrome::DIR_RESOURCES, &resources_path))
         NOTREACHED();
       component_ime.path = resources_path.Append(component_ime.path);
     }

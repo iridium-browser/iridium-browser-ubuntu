@@ -18,14 +18,21 @@ scoped_refptr<ResourceRequestBody> ResourceRequestBody::CreateFromBytes(
   return result;
 }
 
-void ResourceRequestBody::AppendBytes(const char* bytes, int bytes_len) {
+void ResourceRequestBody::AppendBytes(std::vector<char> bytes) {
   DCHECK(elements_.empty() ||
          elements_.front().type() != DataElement::TYPE_CHUNKED_DATA_PIPE);
 
-  if (bytes_len > 0) {
+  if (bytes.size() > 0) {
     elements_.push_back(DataElement());
-    elements_.back().SetToBytes(bytes, bytes_len);
+    elements_.back().SetToBytes(std::move(bytes));
   }
+}
+
+void ResourceRequestBody::AppendBytes(const char* bytes, int bytes_len) {
+  std::vector<char> vec;
+  vec.assign(bytes, bytes + bytes_len);
+
+  AppendBytes(std::move(vec));
 }
 
 void ResourceRequestBody::AppendFileRange(
@@ -56,11 +63,15 @@ void ResourceRequestBody::AppendRawFileRange(
 }
 
 void ResourceRequestBody::AppendBlob(const std::string& uuid) {
+  AppendBlob(uuid, std::numeric_limits<uint64_t>::max());
+}
+
+void ResourceRequestBody::AppendBlob(const std::string& uuid, uint64_t length) {
   DCHECK(elements_.empty() ||
          elements_.front().type() != DataElement::TYPE_CHUNKED_DATA_PIPE);
 
   elements_.push_back(DataElement());
-  elements_.back().SetToBlob(uuid);
+  elements_.back().SetToBlobRange(uuid, 0 /* offset */, length);
 }
 
 void ResourceRequestBody::AppendDataPipe(

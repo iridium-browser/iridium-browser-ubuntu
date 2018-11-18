@@ -18,8 +18,8 @@
 #include "base/path_service.h"
 #include "base/sequenced_task_runner.h"
 #include "base/strings/string_util.h"
+#include "base/task/post_task.h"
 #include "base/task_runner_util.h"
-#include "base/task_scheduler/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
@@ -491,7 +491,7 @@ void UserImageManagerImpl::Job::SaveImageAndUpdateLocalState(
   }
 
   base::FilePath user_data_dir;
-  PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
+  base::PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
   // TODO(crbug.com/670557): Use GetAccountIdKey() instead of user_id().
   image_path_ = user_data_dir.AppendASCII(
       user_id() + ChooseExtensionFromImageFormat(image_format));
@@ -563,7 +563,7 @@ UserImageManagerImpl::UserImageManagerImpl(
       has_managed_image_(false),
       weak_factory_(this) {
   background_task_runner_ = base::CreateSequencedTaskRunnerWithTraits(
-      {base::MayBlock(), base::TaskPriority::BACKGROUND,
+      {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
        base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN});
 }
 
@@ -759,6 +759,9 @@ void UserImageManagerImpl::OnExternalDataSet(const std::string& policy) {
 
 void UserImageManagerImpl::OnExternalDataCleared(const std::string& policy) {
   DCHECK_EQ(policy::key::kUserAvatarImage, policy);
+  if (!IsUserImageManaged())
+    return;
+
   has_managed_image_ = false;
   SetInitialUserImage();
   TryToCreateImageSyncObserver();

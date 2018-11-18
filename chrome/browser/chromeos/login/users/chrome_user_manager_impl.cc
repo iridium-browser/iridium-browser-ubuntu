@@ -10,7 +10,6 @@
 #include <set>
 #include <utility>
 
-#include "ash/multi_profile_uma.h"
 #include "ash/public/cpp/ash_pref_names.h"
 #include "ash/public/interfaces/constants.mojom.h"
 #include "ash/public/interfaces/session_controller.mojom.h"
@@ -28,8 +27,8 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/sys_info.h"
+#include "base/task/post_task.h"
 #include "base/task_runner.h"
-#include "base/task_scheduler/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
@@ -63,8 +62,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_attributes_storage.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/supervised_user/chromeos/manager_password_service_factory.h"
-#include "chrome/browser/supervised_user/chromeos/supervised_user_password_service_factory.h"
 #include "chrome/browser/ui/ash/wallpaper_controller_client.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/common/chrome_constants.h"
@@ -73,9 +70,14 @@
 #include "chrome/common/pref_names.h"
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/cryptohome/async_method_caller.h"
+#include "chromeos/cryptohome/cryptohome_util.h"
+#include "chromeos/dbus/cryptohome/rpc.pb.h"
+#include "chromeos/dbus/dbus_thread_manager.h"
+#include "chromeos/dbus/upstart_client.h"
 #include "chromeos/login/login_state.h"
 #include "chromeos/settings/cros_settings_names.h"
 #include "chromeos/timezone/timezone_resolver.h"
+#include "components/account_id/account_id.h"
 #include "components/arc/arc_util.h"
 #include "components/crash/core/common/crash_key.h"
 #include "components/policy/policy_constants.h"
@@ -83,7 +85,6 @@
 #include "components/prefs/pref_service.h"
 #include "components/prefs/scoped_user_pref_update.h"
 #include "components/session_manager/core/session_manager.h"
-#include "components/signin/core/account_id/account_id.h"
 #include "components/user_manager/known_user.h"
 #include "components/user_manager/remove_user_delegate.h"
 #include "components/user_manager/user.h"
@@ -118,6 +119,8 @@ const char kDeviceLocalAccounts[] = "PublicAccounts";
 const char kDeviceLocalAccountPendingDataRemoval[] =
     "PublicAccountPendingDataRemoval";
 
+constexpr char kGoogleDotCom[] = "@google.com";
+
 bool FakeOwnership() {
   return base::CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kStubCrosSettings);
@@ -129,12 +132,11 @@ std::string FullyCanonicalize(const std::string& email) {
 
 // Callback that is called after user removal is complete.
 void OnRemoveUserComplete(const AccountId& account_id,
-                          bool success,
-                          cryptohome::MountError return_code) {
-  // Log the error, but there's not much we can do.
-  if (!success) {
+                          base::Optional<cryptohome::BaseReply> reply) {
+  cryptohome::MountError error = BaseReplyToMountError(reply);
+  if (error != cryptohome::MOUNT_ERROR_NONE) {
     LOG(ERROR) << "Removal of cryptohome for " << account_id.Serialize()
-               << " failed, return code: " << return_code;
+               << " failed, return code: " << error;
   }
 }
 
@@ -168,13 +170,14 @@ bool GetUserLockAttributes(const user_manager::User* user,
 // not freed and they leak but that is fine.
 void SetPublicAccountDelegates() {
   extensions::PermissionsUpdater::SetPlatformDelegate(
-      new extensions::PermissionsUpdaterDelegateChromeOS);
+      std::make_unique<extensions::PermissionsUpdaterDelegateChromeOS>());
 
   extensions::ExtensionTabUtil::SetPlatformDelegate(
-      new extensions::ExtensionTabUtilDelegateChromeOS);
+      std::make_unique<extensions::ExtensionTabUtilDelegateChromeOS>());
 
   extensions::ActiveTabPermissionGranter::SetPlatformDelegate(
-      new extensions::ActiveTabPermissionGranterDelegateChromeOS);
+      std::make_unique<
+          extensions::ActiveTabPermissionGranterDelegateChromeOS>());
 }
 
 policy::MinimumVersionPolicyHandler* GetMinimumVersionPolicyHandler() {
@@ -186,6 +189,24 @@ policy::MinimumVersionPolicyHandler* GetMinimumVersionPolicyHandler() {
 base::WeakPtr<ExternalPrinters> GetExternalPrinters(
     const AccountId& account_id) {
   return ExternalPrintersFactory::Get()->GetForAccountId(account_id);
+}
+
+// Starts bluetooth logging service for accounts ending with |kGoogleDotCom|
+// and certain devices.
+void MaybeStartBluetoothLogging(const AccountId& account_id) {
+  if (!base::EndsWith(account_id.GetUserEmail(), kGoogleDotCom,
+                      base::CompareCase::INSENSITIVE_ASCII)) {
+    return;
+  }
+  const std::vector<std::string> board =
+      base::SplitString(base::SysInfo::GetLsbReleaseBoard(), "-",
+                        base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
+  const std::string board_name = board[0];
+  if (board_name != "eve" && board_name != "nocturne")
+    return;
+  chromeos::DBusThreadManager::Get()
+      ->GetUpstartClient()
+      ->StartBluetoothLogging();
 }
 
 }  // namespace
@@ -208,6 +229,13 @@ void ChromeUserManagerImpl::RegisterPrefs(PrefRegistrySimple* registry) {
 std::unique_ptr<ChromeUserManager>
 ChromeUserManagerImpl::CreateChromeUserManager() {
   return std::unique_ptr<ChromeUserManager>(new ChromeUserManagerImpl());
+}
+
+// static
+void ChromeUserManagerImpl::ResetPublicAccountDelegatesForTesting() {
+  extensions::PermissionsUpdater::SetPlatformDelegate(nullptr);
+  extensions::ExtensionTabUtil::SetPlatformDelegate(nullptr);
+  extensions::ActiveTabPermissionGranter::SetPlatformDelegate(nullptr);
 }
 
 ChromeUserManagerImpl::ChromeUserManagerImpl()
@@ -337,6 +365,24 @@ void ChromeUserManagerImpl::Shutdown() {
   registrar_.RemoveAll();
 }
 
+void ChromeUserManagerImpl::UserLoggedIn(const AccountId& account_id,
+                                         const std::string& username_hash,
+                                         bool browser_restart,
+                                         bool is_child) {
+  if (FakeOwnership()) {
+    std::string owner_email;
+    chromeos::CrosSettings::Get()->GetString(chromeos::kDeviceOwner,
+                                             &owner_email);
+    if (owner_email.empty()) {
+      owner_email = account_id.GetUserEmail();
+      VLOG(1) << "Set device owner to: " << owner_email;
+      CrosSettings::Get()->SetString(kDeviceOwner, owner_email);
+    }
+  }
+  ChromeUserManager::UserLoggedIn(account_id, username_hash, browser_restart,
+                                  is_child);
+}
+
 MultiProfileUserController*
 ChromeUserManagerImpl::GetMultiProfileUserController() {
   return multi_profile_user_controller_.get();
@@ -347,10 +393,11 @@ UserImageManager* ChromeUserManagerImpl::GetUserImageManager(
   UserImageManagerMap::iterator ui = user_image_managers_.find(account_id);
   if (ui != user_image_managers_.end())
     return ui->second.get();
-  linked_ptr<UserImageManagerImpl> mgr(
-      new UserImageManagerImpl(account_id.GetUserEmail(), this));
-  user_image_managers_[account_id] = mgr;
-  return mgr.get();
+  auto mgr =
+      std::make_unique<UserImageManagerImpl>(account_id.GetUserEmail(), this);
+  UserImageManagerImpl* mgr_raw = mgr.get();
+  user_image_managers_[account_id] = std::move(mgr);
+  return mgr_raw;
 }
 
 SupervisedUserManager* ChromeUserManagerImpl::GetSupervisedUserManager() {
@@ -516,11 +563,6 @@ void ChromeUserManagerImpl::Observe(
       Profile* profile = content::Details<Profile>(details).ptr();
       if (IsUserLoggedIn() && !IsLoggedInAsGuest() && !IsLoggedInAsKioskApp() &&
           !IsLoggedInAsArcKioskApp()) {
-        if (IsLoggedInAsSupervisedUser())
-          SupervisedUserPasswordServiceFactory::GetForProfile(profile);
-        if (IsLoggedInAsUserWithGaiaAccount())
-          ManagerPasswordServiceFactory::GetForProfile(profile);
-
         if (!profile->IsOffTheRecord()) {
           if (AuthSyncObserver::ShouldObserve(profile)) {
             AuthSyncObserver* sync_observer =
@@ -765,7 +807,9 @@ void ChromeUserManagerImpl::RetrieveTrustedDevicePolicies() {
 
   std::string owner_email;
   cros_settings_->GetString(kDeviceOwner, &owner_email);
-  SetOwnerId(AccountId::FromUserEmail(owner_email));
+  const AccountId owner_account_id = user_manager::known_user::GetAccountId(
+      owner_email, std::string() /* id */, AccountType::UNKNOWN);
+  SetOwnerId(owner_account_id);
 
   EnsureUsersLoaded();
 
@@ -818,17 +862,21 @@ void ChromeUserManagerImpl::GuestUserLoggedIn() {
 void ChromeUserManagerImpl::RegularUserLoggedIn(
     const AccountId& account_id,
     const user_manager::UserType user_type) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   ChromeUserManager::RegularUserLoggedIn(account_id, user_type);
 
+  MaybeStartBluetoothLogging(account_id);
+
   if (FakeOwnership()) {
-    const AccountId owner_account_id = GetActiveUser()->GetAccountId();
-    VLOG(1) << "Set device owner to: " << owner_account_id.GetUserEmail();
-    CrosSettings::Get()->SetString(kDeviceOwner,
-                                   owner_account_id.GetUserEmail());
-    SetOwnerId(owner_account_id);
+    std::string owner_email;
+    chromeos::CrosSettings::Get()->GetString(chromeos::kDeviceOwner,
+                                             &owner_email);
+    if (owner_email == account_id.GetUserEmail())
+      SetOwnerId(account_id);
   }
-  WallpaperControllerClient::Get()->ShowUserWallpaper(account_id);
   GetUserImageManager(account_id)->UserLoggedIn(IsCurrentUserNew(), false);
+  WallpaperControllerClient::Get()->ShowUserWallpaper(account_id);
+
   // Make sure that new data is persisted to Local State.
   GetLocalState()->CommitPendingWrite();
 }
@@ -1215,16 +1263,38 @@ void ChromeUserManagerImpl::ResetUserFlow(const AccountId& account_id) {
 }
 
 bool ChromeUserManagerImpl::AreSupervisedUsersAllowed() const {
-  return chrome_user_manager_util::AreSupervisedUsersAllowed(cros_settings_);
+  bool supervised_users_allowed = false;
+  cros_settings_->GetBoolean(kAccountsPrefSupervisedUsersEnabled,
+                             &supervised_users_allowed);
+  return supervised_users_allowed;
 }
 
 bool ChromeUserManagerImpl::IsGuestSessionAllowed() const {
-  return chrome_user_manager_util::IsGuestSessionAllowed(cros_settings_);
+  const AccountId& owner_account_id = GetOwnerAccountId();
+  if (owner_account_id.is_valid()) {
+    // Some Autotest policy tests appear to wipe the user list in Local State
+    // but preserve a policy file referencing an owner: https://crbug.com/850139
+    const user_manager::User* owner_user = FindUser(owner_account_id);
+    if (owner_user &&
+        owner_user->GetType() == user_manager::UserType::USER_TYPE_CHILD) {
+      return false;
+    }
+  }
+
+  // In tests CrosSettings might not be initialized.
+  if (!cros_settings_)
+    return false;
+
+  bool is_guest_allowed = false;
+  cros_settings_->GetBoolean(kAccountsPrefAllowGuest, &is_guest_allowed);
+  return is_guest_allowed;
 }
 
 bool ChromeUserManagerImpl::IsGaiaUserAllowed(
     const user_manager::User& user) const {
-  return chrome_user_manager_util::IsGaiaUserAllowed(user, cros_settings_);
+  DCHECK(user.HasGaiaAccount());
+  return cros_settings_->IsUserWhitelisted(user.GetAccountId().GetUserEmail(),
+                                           nullptr);
 }
 
 void ChromeUserManagerImpl::OnMinimumVersionStateChanged() {
@@ -1233,7 +1303,15 @@ void ChromeUserManagerImpl::OnMinimumVersionStateChanged() {
 
 bool ChromeUserManagerImpl::IsUserAllowed(
     const user_manager::User& user) const {
-  return chrome_user_manager_util::IsUserAllowed(user, cros_settings_);
+  DCHECK(user.GetType() == user_manager::USER_TYPE_REGULAR ||
+         user.GetType() == user_manager::USER_TYPE_GUEST ||
+         user.GetType() == user_manager::USER_TYPE_SUPERVISED ||
+         user.GetType() == user_manager::USER_TYPE_CHILD);
+
+  return chrome_user_manager_util::IsUserAllowed(
+      user, AreSupervisedUsersAllowed(), IsGuestSessionAllowed(),
+      user.HasGaiaAccount() && IsGaiaUserAllowed(user),
+      GetMinimumVersionPolicyHandler()->RequirementsAreSatisfied());
 }
 
 UserFlow* ChromeUserManagerImpl::GetDefaultUserFlow() const {
@@ -1282,8 +1360,10 @@ void ChromeUserManagerImpl::UpdateNumberOfUsers() {
   size_t users = GetLoggedInUsers().size();
   if (users) {
     // Write the user number as UMA stat when a multi user session is possible.
-    if ((users + GetUsersAllowedForMultiProfile().size()) > 1)
-      ash::MultiProfileUMA::RecordUserCount(users);
+    if ((users + GetUsersAllowedForMultiProfile().size()) > 1) {
+      UMA_HISTOGRAM_COUNTS_100("MultiProfile.UsersPerSessionIncremental",
+                               users);
+    }
   }
 
   static crash_reporter::CrashKeyString<64> crash_key("num-users");
@@ -1316,10 +1396,8 @@ void ChromeUserManagerImpl::UpdateUserTimeZoneRefresher(Profile* profile) {
 }
 
 void ChromeUserManagerImpl::SetUserAffiliation(
-    const std::string& user_email,
+    const AccountId& account_id,
     const AffiliationIDSet& user_affiliation_ids) {
-  const AccountId& account_id = user_manager::known_user::GetAccountId(
-      user_email, std::string() /* id */, AccountType::UNKNOWN);
   user_manager::User* user = FindUserAndModify(account_id);
 
   if (user) {
@@ -1359,22 +1437,6 @@ void ChromeUserManagerImpl::RemoveReportingUser(const AccountId& account_id) {
       base::Value(FullyCanonicalize(account_id.GetUserEmail())), NULL);
 }
 
-void ChromeUserManagerImpl::UpdateLoginState(
-    const user_manager::User* active_user,
-    const user_manager::User* primary_user,
-    bool is_current_user_owner) const {
-  chrome_user_manager_util::UpdateLoginState(active_user, primary_user,
-                                             is_current_user_owner);
-}
-
-bool ChromeUserManagerImpl::GetPlatformKnownUserId(
-    const std::string& user_email,
-    const std::string& gaia_id,
-    AccountId* out_account_id) const {
-  return chrome_user_manager_util::GetPlatformKnownUserId(user_email, gaia_id,
-                                                          out_account_id);
-}
-
 const AccountId& ChromeUserManagerImpl::GetGuestAccountId() const {
   return user_manager::GuestAccountId();
 }
@@ -1386,9 +1448,11 @@ bool ChromeUserManagerImpl::IsFirstExecAfterBoot() const {
 
 void ChromeUserManagerImpl::AsyncRemoveCryptohome(
     const AccountId& account_id) const {
-  cryptohome::AsyncMethodCaller::GetInstance()->AsyncRemove(
-      cryptohome::Identification(account_id),
-      base::Bind(&OnRemoveUserComplete, account_id));
+  cryptohome::AccountIdentifier account_id_proto;
+  account_id_proto.set_account_id(cryptohome::Identification(account_id).id());
+
+  DBusThreadManager::Get()->GetCryptohomeClient()->RemoveEx(
+      account_id_proto, base::BindOnce(&OnRemoveUserComplete, account_id));
 }
 
 bool ChromeUserManagerImpl::IsGuestAccountId(
@@ -1397,7 +1461,8 @@ bool ChromeUserManagerImpl::IsGuestAccountId(
 }
 
 bool ChromeUserManagerImpl::IsStubAccountId(const AccountId& account_id) const {
-  return account_id == user_manager::StubAccountId();
+  return account_id == user_manager::StubAccountId() ||
+         account_id == user_manager::StubAdAccountId();
 }
 
 bool ChromeUserManagerImpl::IsSupervisedAccountId(
@@ -1434,7 +1499,7 @@ void ChromeUserManagerImpl::ScheduleResolveLocale(
     base::OnceClosure on_resolved_callback,
     std::string* out_resolved_locale) const {
   base::PostTaskWithTraitsAndReply(
-      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
       base::BindOnce(ResolveLocale, locale,
                      base::Unretained(out_resolved_locale)),
       std::move(on_resolved_callback));

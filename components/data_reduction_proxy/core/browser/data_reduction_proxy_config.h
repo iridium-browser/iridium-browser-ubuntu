@@ -16,17 +16,20 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
+#include "base/optional.h"
 #include "base/threading/thread_checker.h"
 #include "base/time/time.h"
+#include "build/build_config.h"
 #include "components/data_reduction_proxy/core/browser/secure_proxy_checker.h"
 #include "components/data_reduction_proxy/core/browser/warmup_url_fetcher.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_server.h"
+#include "components/data_reduction_proxy/core/common/data_reduction_proxy_type_info.h"
 #include "components/data_reduction_proxy/proto/client_config.pb.h"
 #include "components/previews/core/previews_experiments.h"
-#include "net/base/network_change_notifier.h"
 #include "net/log/net_log_with_source.h"
 #include "net/proxy_resolution/proxy_config.h"
 #include "net/proxy_resolution/proxy_retry_info.h"
+#include "services/network/public/cpp/network_connection_tracker.h"
 
 namespace base {
 class SingleThreadTaskRunner;
@@ -39,10 +42,6 @@ class URLRequest;
 class URLRequestContextGetter;
 class URLRequestStatus;
 }  // namespace net
-
-namespace previews {
-class PreviewsDecider;
-}
 
 namespace data_reduction_proxy {
 
@@ -85,7 +84,7 @@ enum SecureProxyCheckFetchResult {
 // This object lives on the IO thread and all of its methods are expected to be
 // called from there.
 class DataReductionProxyConfig
-    : public net::NetworkChangeNotifier::NetworkChangeObserver {
+    : public network::NetworkConnectionTracker::NetworkConnectionObserver {
  public:
   // The caller must ensure that all parameters remain alive for the lifetime
   // of the |DataReductionProxyConfig| instance, with the exception of
@@ -97,6 +96,7 @@ class DataReductionProxyConfig
   DataReductionProxyConfig(
       scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
       net::NetLog* net_log,
+      network::NetworkConnectionTracker* network_connection_tracker,
       std::unique_ptr<DataReductionProxyConfigValues> config_values,
       DataReductionProxyConfigurator* configurator,
       DataReductionProxyEventCreator* event_creator);
@@ -107,11 +107,11 @@ class DataReductionProxyConfig
   // disables the use of alternative protocols and proxies.
   // |url_request_context_getter| is the default net::URLRequestContextGetter
   // used for making URL requests.
-  void InitializeOnIOThread(const scoped_refptr<net::URLRequestContextGetter>&
-                                basic_url_request_context_getter,
-                            const scoped_refptr<net::URLRequestContextGetter>&
-                                url_request_context_getter,
-                            NetworkPropertiesManager* manager);
+  void InitializeOnIOThread(
+      const scoped_refptr<net::URLRequestContextGetter>&
+          basic_url_request_context_getter,
+      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
+      NetworkPropertiesManager* manager);
 
   // Sets the proxy configs, enabling or disabling the proxy according to
   // the value of |enabled|. If |restricted| is true, only enable the fallback
@@ -119,27 +119,11 @@ class DataReductionProxyConfig
   // InitDataReductionProxySettings.
   void SetProxyConfig(bool enabled, bool at_startup);
 
-  // Returns true if a Data Reduction Proxy was used for the given |request|.
-  // If true, |proxy_info.proxy_servers.front()| will contain the name of the
-  // proxy that was used. Subsequent entries in |proxy_info.proxy_servers| will
-  // contain the names of the Data Reduction Proxy servers that would be used if
-  // |proxy_info.proxy_servers.front()| is bypassed, if any exist. In addition,
-  // |proxy_info| will note if the proxy used was a fallback. |proxy_info| can
-  // be NULL if the caller isn't interested in its values. Virtualized for
-  // testing.
-  virtual bool WasDataReductionProxyUsed(
-      const net::URLRequest* request,
-      DataReductionProxyTypeInfo* proxy_info) const;
-
-  // Returns true if the specified |proxy_server| matches a Data Reduction
-  // Proxy. If true, |proxy_info.proxy_servers.front()| will contain the name of
-  // the proxy that matches. Subsequent entries in |proxy_info.proxy_servers|
-  // will contain the name of the Data Reduction Proxy servers that would be
-  // used if |proxy_info.proxy_servers.front()| is bypassed, if any exist. In
-  // addition, |proxy_info| will note if the proxy was a fallback. |proxy_info|
-  // can be NULL if the caller isn't interested in its values.
-  bool IsDataReductionProxy(const net::ProxyServer& proxy_server,
-                            DataReductionProxyTypeInfo* proxy_info) const;
+  // If the specified |proxy_server| matches a Data Reduction Proxy, returns the
+  // DataReductionProxyTypeInfo showing where that proxy is in the list of
+  // configured proxies, otherwise returns an empty optional value.
+  base::Optional<DataReductionProxyTypeInfo> FindConfiguredDataReductionProxy(
+      const net::ProxyServer& proxy_server) const;
 
   // Returns true if this request would be bypassed by the Data Reduction Proxy
   // based on applying the |data_reduction_proxy_config| param rules to the
@@ -171,15 +155,6 @@ class DataReductionProxyConfig
   virtual bool ContainsDataReductionProxy(
       const net::ProxyConfig::ProxyRules& proxy_rules) const;
 
-  // Returns whether the client should report to the data reduction proxy that
-  // it is willing to accept server previews for |request|.
-  // |previews_decider| is used to check if |request| is locally blacklisted.
-  // Should only be used if the kDataReductionProxyDecidesTransform feature is
-  // enabled.
-  bool ShouldAcceptServerPreview(
-      const net::URLRequest& request,
-      const previews::PreviewsDecider& previews_decider) const;
-
   // Returns true if the data saver has been enabled by the user, and the data
   // saver proxy is reachable.
   bool enabled_by_user_and_reachable() const;
@@ -206,10 +181,19 @@ class DataReductionProxyConfig
       std::pair<bool /* is_secure_proxy */, bool /*is_core_proxy */>>
   GetInFlightWarmupProxyDetails() const;
 
-  void set_get_network_id_task_runner(
-      scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
-    get_network_id_task_runner_ = task_runner;
-  }
+#if defined(OS_CHROMEOS)
+  // Enables getting the network id asynchronously when
+  // GatherEstimatesForNextConnectionType(). This should always be called in
+  // production, because getting the network id involves a blocking call to
+  // recv() in AddressTrackerLinux, and the IO thread should never be blocked.
+  // TODO(https://crbug.com/821607): Remove after the bug is resolved.
+  void EnableGetNetworkIdAsynchronously();
+#endif  // defined(OS_CHROMEOS)
+  // Called when there is a change in the HTTP RTT estimate.
+  void OnRTTOrThroughputEstimatesComputed(base::TimeDelta http_rtt);
+
+  // Returns the current HTTP RTT estimate.
+  base::Optional<base::TimeDelta> GetHttpRttEstimate() const;
 
  protected:
   virtual base::TimeTicks GetTicksNow() const;
@@ -261,7 +245,7 @@ class DataReductionProxyConfig
                            ShouldAcceptServerPreview);
 
   // Values of the estimated network quality at the beginning of the most
-  // recent query of the Network Quality Estimator.
+  // recent query of the Network quality estimate provider.
   enum NetworkQualityAtLastQuery {
     NETWORK_QUALITY_AT_LAST_QUERY_UNKNOWN,
     NETWORK_QUALITY_AT_LAST_QUERY_SLOW,
@@ -273,12 +257,11 @@ class DataReductionProxyConfig
   // |configurator_|. Used by the Data Reduction Proxy config service client.
   void ReloadConfig();
 
-  // NetworkChangeNotifier::NetworkChangeObserver implementation:
-  void OnNetworkChanged(
-      net::NetworkChangeNotifier::ConnectionType type) override;
+  // network::NetworkConnectionTracker::NetworkConnectionObserver:
+  void OnConnectionChanged(network::mojom::ConnectionType type) override;
 
   // Invoked to continue network changed handling after the network id is
-  // retrieved. If |get_network_id_task_runner_| is set, the network id is
+  // retrieved. If |get_network_id_asynchronously_| is set, the network id is
   // fetched on the worker thread. Otherwise, OnNetworkChanged calls this
   // directly. This is a workaround for https://crbug.com/821607 where
   // net::GetWifiSSID() call gets stuck.
@@ -309,11 +292,6 @@ class DataReductionProxyConfig
                           bool is_https,
                           base::TimeDelta* min_retry_delay) const;
 
-  // Returns whether the request is blacklisted (or if Lo-Fi is disabled).
-  bool IsBlackListedOrDisabled(
-      const net::URLRequest& request,
-      const previews::PreviewsDecider& previews_decider,
-      previews::PreviewsType previews_type) const;
 
   // Checks if the current network has captive portal, and handles the result.
   // If the captive portal probe was blocked on the current network, disables
@@ -326,12 +304,6 @@ class DataReductionProxyConfig
 
   // Fetches the warmup URL.
   void FetchWarmupProbeURL();
-
-  // Returns true if |proxy_server| is a core data reduction proxy server.
-  // Should be called only if |proxy_server| is a valid data reduction proxy
-  // server.
-  bool IsDataReductionProxyServerCore(
-      const net::ProxyServer& proxy_server) const;
 
   // URL fetcher used for performing the secure proxy check.
   std::unique_ptr<SecureProxyChecker> secure_proxy_checker_;
@@ -347,8 +319,10 @@ class DataReductionProxyConfig
 
   scoped_refptr<base::SingleThreadTaskRunner> io_task_runner_;
 
-  // Optional task runner for GetCurrentNetworkID.
-  scoped_refptr<base::SingleThreadTaskRunner> get_network_id_task_runner_;
+#if defined(OS_CHROMEOS)
+  // Whether the network id should be obtained on a worker thread.
+  bool get_network_id_asynchronously_ = false;
+#endif
 
   // The caller must ensure that the |net_log_|, if set, outlives this instance.
   // It is used to create new instances of |net_log_with_source_| on secure
@@ -357,6 +331,9 @@ class DataReductionProxyConfig
   // each secure proxy check (with |net_log_| as a parameter).
   net::NetLog* net_log_;
   net::NetLogWithSource net_log_with_source_;
+
+  // Watches for network connection changes.
+  network::NetworkConnectionTracker* network_connection_tracker_;
 
   // The caller must ensure that the |configurator_| outlives this instance.
   DataReductionProxyConfigurator* configurator_;
@@ -368,7 +345,7 @@ class DataReductionProxyConfig
   base::ThreadChecker thread_checker_;
 
   // The current connection type.
-  net::NetworkChangeNotifier::ConnectionType connection_type_;
+  network::mojom::ConnectionType connection_type_;
 
   // Stores the properties of the proxy which is currently being probed. The
   // values are valid only if a probe (or warmup URL) fetch is currently
@@ -379,6 +356,9 @@ class DataReductionProxyConfig
   // Should be accessed only on the IO thread. Guaranteed to be non-null during
   // the lifetime of |this| if accessed on the IO thread.
   NetworkPropertiesManager* network_properties_manager_;
+
+  // Current HTTP RTT estimate.
+  base::Optional<base::TimeDelta> http_rtt_;
 
   base::WeakPtrFactory<DataReductionProxyConfig> weak_factory_;
 

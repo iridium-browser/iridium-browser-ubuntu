@@ -9,7 +9,7 @@
 
 #include "xfa/fwl/theme/cfwl_widgettp.h"
 
-class CFWL_ComboBoxTP : public CFWL_WidgetTP {
+class CFWL_ComboBoxTP final : public CFWL_WidgetTP {
  public:
   CFWL_ComboBoxTP();
   ~CFWL_ComboBoxTP() override;
@@ -17,7 +17,7 @@ class CFWL_ComboBoxTP : public CFWL_WidgetTP {
   // CFWL_WidgetTP
   void DrawBackground(CFWL_ThemeBackground* pParams) override;
 
- protected:
+ private:
   void DrawDropDownButton(CFWL_ThemeBackground* pParams,
                           uint32_t dwStates,
                           CFX_Matrix* pMatrix);

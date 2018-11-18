@@ -218,8 +218,6 @@ TEST_F(DrawingBufferTest, VerifyDestructionCompleteAfterAllResourceReleased) {
   viz::TransferableResource resource3;
   std::unique_ptr<viz::SingleReleaseCallback> release_callback3;
 
-  IntSize initial_size(kInitialWidth, kInitialHeight);
-
   // Produce resources.
   EXPECT_FALSE(drawing_buffer_->MarkContentsChanged());
   drawing_buffer_->ClearFramebuffers(GL_STENCIL_BUFFER_BIT);
@@ -439,7 +437,7 @@ TEST_F(DrawingBufferImageChromiumTest, VerifyResizingReallocatesImages) {
                                                            &release_callback));
   EXPECT_EQ(initial_size, gl_->MostRecentlyProducedSize());
   EXPECT_TRUE(resource.is_overlay_candidate);
-  EXPECT_EQ(initial_size, resource.size);
+  EXPECT_EQ(static_cast<gfx::Size>(initial_size), resource.size);
   testing::Mock::VerifyAndClearExpectations(gl_);
   VerifyStateWasRestored();
 
@@ -464,7 +462,7 @@ TEST_F(DrawingBufferImageChromiumTest, VerifyResizingReallocatesImages) {
                                                            &release_callback));
   EXPECT_EQ(alternate_size, gl_->MostRecentlyProducedSize());
   EXPECT_TRUE(resource.is_overlay_candidate);
-  EXPECT_EQ(alternate_size, resource.size);
+  EXPECT_EQ(static_cast<gfx::Size>(alternate_size), resource.size);
   testing::Mock::VerifyAndClearExpectations(gl_);
 
   GLuint image_id4 = gl_->NextImageIdToBeCreated();
@@ -488,7 +486,7 @@ TEST_F(DrawingBufferImageChromiumTest, VerifyResizingReallocatesImages) {
                                                            &release_callback));
   EXPECT_EQ(initial_size, gl_->MostRecentlyProducedSize());
   EXPECT_TRUE(resource.is_overlay_candidate);
-  EXPECT_EQ(initial_size, resource.size);
+  EXPECT_EQ(static_cast<gfx::Size>(initial_size), resource.size);
   testing::Mock::VerifyAndClearExpectations(gl_);
 
   // Prepare one final resource and verify that it's the correct size.
@@ -498,7 +496,7 @@ TEST_F(DrawingBufferImageChromiumTest, VerifyResizingReallocatesImages) {
                                                            &release_callback));
   EXPECT_EQ(initial_size, gl_->MostRecentlyProducedSize());
   EXPECT_TRUE(resource.is_overlay_candidate);
-  EXPECT_EQ(initial_size, resource.size);
+  EXPECT_EQ(static_cast<gfx::Size>(initial_size), resource.size);
   release_callback->Run(gpu::SyncToken(), false /* lostResource */);
 
   EXPECT_CALL(*gl_, DestroyImageMock(image_id5)).Times(1);
@@ -521,7 +519,6 @@ TEST_F(DrawingBufferImageChromiumTest, AllocationFailure) {
   // Request a resource. An image should already be created. Everything works
   // as expected.
   EXPECT_CALL(*gl_, BindTexImage2DMock(_)).Times(1);
-  IntSize initial_size(kInitialWidth, kInitialHeight);
   EXPECT_FALSE(drawing_buffer_->MarkContentsChanged());
   EXPECT_TRUE(drawing_buffer_->PrepareTransferableResource(nullptr, &resource1,
                                                            &release_callback1));
@@ -649,7 +646,7 @@ TEST(DrawingBufferDepthStencilTest, packedDepthStencilSupported) {
       DepthStencilTestCase(true, true, 1, "both"),
   };
 
-  for (size_t i = 0; i < WTF_ARRAY_LENGTH(cases); i++) {
+  for (size_t i = 0; i < arraysize(cases); i++) {
     SCOPED_TRACE(cases[i].test_case_name);
     auto gl = std::make_unique<DepthStencilTrackingGLES2Interface>();
     DepthStencilTrackingGLES2Interface* tracking_gl = gl.get();

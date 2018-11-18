@@ -71,13 +71,15 @@ class CORE_EXPORT CSSSelectorList {
     o.selector_array_ = nullptr;
   }
 
-  static CSSSelectorList ConcatenatePseudoMatchesExpansion(
+  static CSSSelectorList ConcatenateListExpansion(
       const CSSSelectorList& expanded,
       const CSSSelectorList& original);
 
-  CSSSelectorList ExpandedFirstMatchesPseudo() const;
-  CSSSelectorList TransformForPseudoMatches();
+  CSSSelectorList ExpandedFirstPseudoClass() const;
+  CSSSelectorList TransformForListExpansion();
   bool HasPseudoMatches() const;
+  bool HasPseudoIS() const;
+  bool RequiresExpansion() const;
 
   CSSSelectorList& operator=(CSSSelectorList&& o) {
     DCHECK(this != &o);
@@ -103,15 +105,15 @@ class CORE_EXPORT CSSSelectorList {
   bool HasOneSelector() const {
     return selector_array_ && !Next(*selector_array_);
   }
-  const CSSSelector& SelectorAt(size_t index) const {
+  const CSSSelector& SelectorAt(wtf_size_t index) const {
     return selector_array_[index];
   }
 
-  size_t SelectorIndex(const CSSSelector& selector) const {
-    return &selector - selector_array_;
+  wtf_size_t SelectorIndex(const CSSSelector& selector) const {
+    return static_cast<wtf_size_t>(&selector - selector_array_);
   }
 
-  size_t IndexOfNextSelectorAfter(size_t index) const {
+  wtf_size_t IndexOfNextSelectorAfter(wtf_size_t index) const {
     const CSSSelector& current = SelectorAt(index);
     const CSSSelector* next = this->Next(current);
     if (!next)

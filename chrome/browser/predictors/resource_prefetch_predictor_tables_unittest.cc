@@ -7,6 +7,7 @@
 #include <utility>
 #include <vector>
 
+#include "base/sequenced_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "chrome/browser/predictors/loading_test_util.h"
@@ -433,14 +434,14 @@ TEST_F(ResourcePrefetchPredictorTablesTest, DeleteAllData) {
 }
 
 TEST_F(ResourcePrefetchPredictorTablesTest, DatabaseVersionIsSet) {
-  sql::Connection* db = tables_->DB();
+  sql::Database* db = tables_->DB();
   const int version = ResourcePrefetchPredictorTables::kDatabaseVersion;
   EXPECT_EQ(version, ResourcePrefetchPredictorTables::GetDatabaseVersion(db));
 }
 
 TEST_F(ResourcePrefetchPredictorTablesTest, DatabaseIsResetWhenIncompatible) {
   const int version = ResourcePrefetchPredictorTables::kDatabaseVersion;
-  sql::Connection* db = tables_->DB();
+  sql::Database* db = tables_->DB();
   ASSERT_TRUE(
       ResourcePrefetchPredictorTables::SetDatabaseVersion(db, version + 1));
   EXPECT_EQ(version + 1,

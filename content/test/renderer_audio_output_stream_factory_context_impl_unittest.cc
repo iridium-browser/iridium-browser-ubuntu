@@ -12,14 +12,16 @@
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/sync_socket.h"
+#include "base/task/post_task.h"
 #include "cc/base/math_util.h"
 #include "content/browser/renderer_host/media/media_stream_manager.h"
 #include "content/common/media/renderer_audio_output_stream_factory.mojom.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/test/mock_render_process_host.h"
 #include "content/public/test/test_browser_context.h"
 #include "content/public/test/test_browser_thread_bundle.h"
-#include "content/renderer/media/mojo_audio_output_ipc.h"
+#include "content/renderer/media/audio/mojo_audio_output_ipc.h"
 #include "media/audio/audio_manager_base.h"
 #include "media/audio/audio_output_controller.h"
 #include "media/audio/audio_output_device.h"
@@ -33,7 +35,6 @@
 #include "mojo/public/cpp/system/platform_handle.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "url/origin.h"
 
 namespace content {
 
@@ -46,12 +47,10 @@ using testing::Test;
 
 const int kRenderProcessId = 42;
 const int kRenderFrameId = 24;
-const int kNoSessionId = 0;
 const float kWaveFrequency = 440.f;
 const int kChannels = 1;
 const int kBuffers = 1000;
 const int kSampleFrequency = 44100;
-const int kBitsPerSample = 16;
 const int kSamplesPerBuffer = kSampleFrequency / 100;
 
 std::unique_ptr<media::AudioOutputStream::AudioSourceCallback>
@@ -63,7 +62,7 @@ GetTestAudioSource() {
 media::AudioParameters GetTestAudioParameters() {
   return media::AudioParameters(media::AudioParameters::AUDIO_PCM_LOW_LATENCY,
                                 media::CHANNEL_LAYOUT_MONO, kSampleFrequency,
-                                kBitsPerSample, kSamplesPerBuffer);
+                                kSamplesPerBuffer);
 }
 
 void SyncWith(scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
@@ -82,7 +81,7 @@ void SyncWithAllThreads() {
   // least one task will be run. 20 iterations should be enough for our code.
   for (int i = 0; i < 20; ++i) {
     base::RunLoop(base::RunLoop::Type::kNestableTasksAllowed).RunUntilIdle();
-    SyncWith(BrowserThread::GetTaskRunnerForThread(BrowserThread::IO));
+    SyncWith(base::CreateSingleThreadTaskRunnerWithTraits({BrowserThread::IO}));
     SyncWith(media::AudioManager::Get()->GetWorkerTaskRunner());
   }
 }
@@ -261,8 +260,8 @@ TEST_F(RendererAudioOutputStreamFactoryIntegrationTest, StreamIntegrationTest) {
       renderer_ipc_task_runner);
 
   auto device = base::MakeRefCounted<media::AudioOutputDevice>(
-      std::move(renderer_side_ipc), renderer_ipc_task_runner, kNoSessionId, "",
-      url::Origin(), base::TimeDelta());
+      std::move(renderer_side_ipc), renderer_ipc_task_runner,
+      media::AudioSinkParameters(), base::TimeDelta());
 
   StrictMock<TestRenderCallback> source;
 

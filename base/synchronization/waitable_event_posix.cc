@@ -162,8 +162,8 @@ bool WaitableEvent::TimedWait(const TimeDelta& wait_delta) {
 }
 
 bool WaitableEvent::TimedWaitUntil(const TimeTicks& end_time) {
-  internal::AssertBaseSyncPrimitivesAllowed();
-  ScopedBlockingCall scoped_blocking_call(BlockingType::MAY_BLOCK);
+  internal::ScopedBlockingCallWithBaseSyncPrimitives scoped_blocking_call(
+      BlockingType::MAY_BLOCK);
   // Record the event that this thread is blocking upon (for hang diagnosis).
   base::debug::ScopedEventWaitActivity event_activity(this);
 
@@ -237,9 +237,9 @@ cmp_fst_addr(const std::pair<WaitableEvent*, unsigned> &a,
 // static
 size_t WaitableEvent::WaitMany(WaitableEvent** raw_waitables,
                                size_t count) {
-  internal::AssertBaseSyncPrimitivesAllowed();
   DCHECK(count) << "Cannot wait on no events";
-  ScopedBlockingCall scoped_blocking_call(BlockingType::MAY_BLOCK);
+  internal::ScopedBlockingCallWithBaseSyncPrimitives scoped_blocking_call(
+      BlockingType::MAY_BLOCK);
   // Record an event (the first) that this thread is blocking upon.
   base::debug::ScopedEventWaitActivity event_activity(raw_waitables[0]);
 
@@ -382,8 +382,7 @@ WaitableEvent::WaitableEventKernel::~WaitableEventKernel() = default;
 bool WaitableEvent::SignalAll() {
   bool signaled_at_least_one = false;
 
-  for (std::list<Waiter*>::iterator
-       i = kernel_->waiters_.begin(); i != kernel_->waiters_.end(); ++i) {
+  for (auto i = kernel_->waiters_.begin(); i != kernel_->waiters_.end(); ++i) {
     if ((*i)->Fire(this))
       signaled_at_least_one = true;
   }
@@ -420,8 +419,7 @@ void WaitableEvent::Enqueue(Waiter* waiter) {
 // actually removed. Called with lock held.
 // -----------------------------------------------------------------------------
 bool WaitableEvent::WaitableEventKernel::Dequeue(Waiter* waiter, void* tag) {
-  for (std::list<Waiter*>::iterator
-       i = waiters_.begin(); i != waiters_.end(); ++i) {
+  for (auto i = waiters_.begin(); i != waiters_.end(); ++i) {
     if (*i == waiter && (*i)->Compare(tag)) {
       waiters_.erase(i);
       return true;

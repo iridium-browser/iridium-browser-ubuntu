@@ -14,13 +14,14 @@
 #include "base/strings/utf_string_conversions.h"
 #include "components/autofill/core/browser/autofill_data_util.h"
 #include "components/autofill/core/browser/autofill_type.h"
+#include "components/autofill/core/common/autofill_features.h"
 #include "components/autofill/core/common/autofill_l10n_util.h"
 
 namespace autofill {
 
 NameInfo::NameInfo() {}
 
-NameInfo::NameInfo(const NameInfo& info) : FormGroup() {
+NameInfo::NameInfo(const NameInfo& info) {
   *this = info;
 }
 
@@ -181,7 +182,7 @@ void NameInfo::SetFullName(const base::string16& full) {
 
 EmailInfo::EmailInfo() {}
 
-EmailInfo::EmailInfo(const EmailInfo& info) : FormGroup() {
+EmailInfo::EmailInfo(const EmailInfo& info) {
   *this = info;
 }
 
@@ -217,7 +218,7 @@ void EmailInfo::SetRawInfo(ServerFieldType type, const base::string16& value) {
 
 CompanyInfo::CompanyInfo() {}
 
-CompanyInfo::CompanyInfo(const CompanyInfo& info) : FormGroup() {
+CompanyInfo::CompanyInfo(const CompanyInfo& info) {
   *this = info;
 }
 
@@ -240,10 +241,7 @@ void CompanyInfo::GetSupportedTypes(ServerFieldTypeSet* supported_types) const {
 }
 
 base::string16 CompanyInfo::GetRawInfo(ServerFieldType type) const {
-  if (type == COMPANY_NAME)
-    return company_name_;
-
-  return base::string16();
+  return company_name_;
 }
 
 void CompanyInfo::SetRawInfo(ServerFieldType type,

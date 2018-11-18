@@ -18,6 +18,8 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_preferences_util.h"
 #include "chrome/browser/ssl/cert_report_helper.h"
+#include "chrome/browser/ssl/chrome_ssl_host_state_delegate.h"
+#include "chrome/browser/ssl/chrome_ssl_host_state_delegate_factory.h"
 #include "chrome/browser/ssl/ssl_cert_reporter.h"
 #include "chrome/browser/ssl/ssl_error_controller_client.h"
 #include "chrome/common/chrome_switches.h"
@@ -85,6 +87,38 @@ SSLBlockingPage* SSLBlockingPage::Create(
                                     overridable, is_superfish));
   metrics_helper.get()->StartRecordingCaptivePortalMetrics(overridable);
 
+  ChromeSSLHostStateDelegate* state =
+      ChromeSSLHostStateDelegateFactory::GetForProfile(
+          Profile::FromBrowserContext(web_contents->GetBrowserContext()));
+  state->DidDisplayErrorPage(cert_error);
+  bool is_recurrent_error = state->HasSeenRecurrentErrors(cert_error);
+  if (overridable) {
+    UMA_HISTOGRAM_BOOLEAN("interstitial.ssl_overridable.is_recurrent_error",
+                          is_recurrent_error);
+    if (cert_error == net::ERR_CERTIFICATE_TRANSPARENCY_REQUIRED) {
+      UMA_HISTOGRAM_BOOLEAN(
+          "interstitial.ssl_overridable.is_recurrent_error.ct_error",
+          is_recurrent_error);
+    }
+  } else {
+    UMA_HISTOGRAM_BOOLEAN("interstitial.ssl_nonoverridable.is_recurrent_error",
+                          is_recurrent_error);
+    if (cert_error == net::ERR_CERTIFICATE_TRANSPARENCY_REQUIRED) {
+      UMA_HISTOGRAM_BOOLEAN(
+          "interstitial.ssl_nonoverridable.is_recurrent_error.ct_error",
+          is_recurrent_error);
+    }
+  }
+
+  if (cert_error == net::ERR_CERT_SYMANTEC_LEGACY) {
+    GURL symantec_support_url(kSymantecSupportUrl);
+    return new SSLBlockingPage(
+        web_contents, cert_error, ssl_info, request_url, options_mask,
+        time_triggered, std::move(symantec_support_url),
+        std::move(ssl_cert_reporter), overridable, std::move(metrics_helper),
+        is_superfish, callback);
+  }
+
   return new SSLBlockingPage(web_contents, cert_error, ssl_info, request_url,
                              options_mask, time_triggered, support_url,
                              std::move(ssl_cert_reporter), overridable,
@@ -129,6 +163,7 @@ SSLBlockingPage::SSLBlockingPage(
     bool is_superfish,
     const base::Callback<void(content::CertificateRequestResultType)>& callback)
     : SSLBlockingPageBase(web_contents,
+                          cert_error,
                           is_superfish
                               ? CertificateErrorReport::INTERSTITIAL_SUPERFISH
                               : CertificateErrorReport::INTERSTITIAL_SSL,
@@ -140,6 +175,7 @@ SSLBlockingPage::SSLBlockingPage(
                           std::make_unique<SSLErrorControllerClient>(
                               web_contents,
                               ssl_info,
+                              cert_error,
                               request_url,
                               std::move(metrics_helper))),
       callback_(callback),
@@ -197,8 +233,7 @@ void SSLBlockingPage::OverrideRendererPrefs(
       content::RendererPreferences* prefs) {
   Profile* profile = Profile::FromBrowserContext(
       web_contents()->GetBrowserContext());
-  renderer_preferences_util::UpdateFromSystemSettings(
-      prefs, profile, web_contents());
+  renderer_preferences_util::UpdateFromSystemSettings(prefs, profile);
 }
 
 void SSLBlockingPage::OnProceed() {

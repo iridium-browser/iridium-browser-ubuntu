@@ -10,9 +10,10 @@
 
 #include "base/feature_list.h"
 #include "build/build_config.h"
+#include "chrome/browser/data_use_measurement/chrome_data_use_measurement.h"
 #include "chrome/browser/data_use_measurement/chrome_data_use_recorder.h"
-#include "chrome/browser/data_use_measurement/page_load_capping/chrome_page_load_capping_features.h"
 #include "components/data_use_measurement/content/content_url_request_classifier.h"
+#include "components/data_use_measurement/core/data_use_network_delegate.h"
 #include "components/data_use_measurement/core/data_use_recorder.h"
 #include "components/data_use_measurement/core/data_use_user_data.h"
 #include "components/data_use_measurement/core/url_request_classifier.h"
@@ -25,8 +26,10 @@
 
 namespace data_use_measurement {
 
+// This flag allows us to enable ChromeDataUseAscriber for data saver users
+// using Finch. The default is to disable ChromeDataUseAscriber.
 const base::Feature kDisableAscriberIfDataSaverDisabled{
-    "DisableAscriberIfDataSaverDisabled", base::FEATURE_DISABLED_BY_DEFAULT};
+    "DisableAscriberIfDataSaverDisabled", base::FEATURE_ENABLED_BY_DEFAULT};
 
 // static
 const void* const ChromeDataUseAscriber::DataUseRecorderEntryAsUserData::
@@ -67,7 +70,7 @@ ChromeDataUseAscriber::~ChromeDataUseAscriber() {
 
 ChromeDataUseRecorder* ChromeDataUseAscriber::GetOrCreateDataUseRecorder(
     net::URLRequest* request) {
-  DataUseRecorderEntry entry = GetOrCreateDataUseRecorderEntry(request);
+  auto entry = GetOrCreateDataUseRecorderEntry(request);
   return entry == data_use_recorders_.end() ? nullptr : &(*entry);
 }
 
@@ -109,10 +112,9 @@ ChromeDataUseAscriber::GetOrCreateDataUseRecorderEntry(
   DataUseUserData* service = static_cast<DataUseUserData*>(
       request->GetUserData(DataUseUserData::kUserDataKey));
   if (service) {
-    DataUseRecorderEntry entry =
+    auto entry =
         CreateNewDataUseRecorder(request, DataUse::TrafficType::SERVICES);
-    entry->data_use().set_description(
-        DataUseUserData::GetServiceNameAsString(service->service_name()));
+    entry->data_use().set_description("");
     return entry;
   }
 
@@ -124,7 +126,7 @@ ChromeDataUseAscriber::GetOrCreateDataUseRecorderEntry(
   if (!request_info ||
       request_info->GetGlobalRequestID() == content::GlobalRequestID()) {
     // Create a new DataUseRecorder for all non-content initiated requests.
-    DataUseRecorderEntry entry =
+    auto entry =
         CreateNewDataUseRecorder(request, DataUse::TrafficType::UNKNOWN);
     DataUse& data_use = entry->data_use();
     data_use.set_url(request->url());
@@ -132,7 +134,7 @@ ChromeDataUseAscriber::GetOrCreateDataUseRecorderEntry(
   }
 
   if (request_info->GetResourceType() == content::RESOURCE_TYPE_MAIN_FRAME) {
-    DataUseRecorderEntry new_entry =
+    auto new_entry =
         CreateNewDataUseRecorder(request, DataUse::TrafficType::USER_TRAFFIC);
     new_entry->set_main_frame_request_id(request_info->GetGlobalRequestID());
     pending_navigation_data_use_map_.insert(
@@ -152,7 +154,7 @@ ChromeDataUseAscriber::GetOrCreateDataUseRecorderEntry(
     // render frames don't have a record. However, this can also be caused by
     // URLRequests racing the frame create events.
     // TODO(kundaji): Add UMA.
-    RenderFrameHostID frame_key(render_process_id, render_frame_id);
+    content::GlobalFrameRoutingId frame_key(render_process_id, render_frame_id);
     const auto main_frame_key_iter = subframe_to_mainframe_map_.find(frame_key);
     if (main_frame_key_iter == subframe_to_mainframe_map_.end()) {
       return data_use_recorders_.end();
@@ -170,7 +172,7 @@ ChromeDataUseAscriber::GetOrCreateDataUseRecorderEntry(
   }
 
   // Create a new DataUseRecorder for all other requests.
-  DataUseRecorderEntry entry = CreateNewDataUseRecorder(
+  auto entry = CreateNewDataUseRecorder(
       request,
       content::ResourceRequestInfo::OriginatedFromServiceWorker(request)
           ? DataUse::TrafficType::SERVICE_WORKER
@@ -307,20 +309,20 @@ void ChromeDataUseAscriber::RenderFrameCreated(int render_process_id,
     return;
 
   const auto render_frame =
-      RenderFrameHostID(render_process_id, render_frame_id);
+      content::GlobalFrameRoutingId(render_process_id, render_frame_id);
 
   if (main_render_process_id != -1 && main_render_frame_id != -1) {
     // Create an entry in |subframe_to_mainframe_map_| for this frame mapped to
     // it's parent frame.
     subframe_to_mainframe_map_.insert(std::make_pair(
-        render_frame,
-        RenderFrameHostID(main_render_process_id, main_render_frame_id)));
+        render_frame, content::GlobalFrameRoutingId(main_render_process_id,
+                                                    main_render_frame_id)));
   } else {
     subframe_to_mainframe_map_.insert(
         std::make_pair(render_frame, render_frame));
     DCHECK(main_render_frame_entry_map_.find(render_frame) ==
            main_render_frame_entry_map_.end());
-    DataUseRecorderEntry entry =
+    auto entry =
         CreateNewDataUseRecorder(nullptr, DataUse::TrafficType::USER_TRAFFIC);
     entry->set_main_frame_id(render_frame);
     main_render_frame_entry_map_.emplace(std::piecewise_construct,
@@ -338,13 +340,13 @@ void ChromeDataUseAscriber::RenderFrameDeleted(int render_process_id,
   if (IsDisabled())
     return;
 
-  RenderFrameHostID key(render_process_id, render_frame_id);
+  content::GlobalFrameRoutingId key(render_process_id, render_frame_id);
 
   if (main_render_process_id == -1 && main_render_frame_id == -1) {
     auto main_frame_it = main_render_frame_entry_map_.find(key);
 
     if (main_render_frame_entry_map_.end() != main_frame_it) {
-      DataUseRecorderEntry entry = main_frame_it->second.data_use_recorder;
+      auto entry = main_frame_it->second.data_use_recorder;
 
       // Stop tracking requests for the old frame.
       std::vector<net::URLRequest*> pending_url_requests;
@@ -396,7 +398,7 @@ void ChromeDataUseAscriber::ReadyToCommitMainFrameNavigation(
     return;
 
   main_render_frame_entry_map_
-      .find(RenderFrameHostID(render_process_id, render_frame_id))
+      .find(content::GlobalFrameRoutingId(render_process_id, render_frame_id))
       ->second.pending_navigation_global_request_id = global_request_id;
 }
 
@@ -411,7 +413,7 @@ void ChromeDataUseAscriber::DidFinishMainFrameNavigation(
   if (IsDisabled())
     return;
 
-  RenderFrameHostID main_frame(render_process_id, render_frame_id);
+  content::GlobalFrameRoutingId main_frame(render_process_id, render_frame_id);
 
   auto main_frame_it = main_render_frame_entry_map_.find(main_frame);
   if (main_frame_it == main_render_frame_entry_map_.end())
@@ -473,8 +475,7 @@ void ChromeDataUseAscriber::DidFinishMainFrameNavigation(
     }
     return;
   }
-  DataUseRecorderEntry old_frame_entry =
-      main_frame_it->second.data_use_recorder;
+  auto old_frame_entry = main_frame_it->second.data_use_recorder;
   old_frame_entry->set_page_transition(page_transition);
 
   if (old_frame_entry == entry)
@@ -547,14 +548,14 @@ void ChromeDataUseAscriber::DidFinishLoad(int render_process_id,
   if (!validated_url.SchemeIsHTTPOrHTTPS())
     return;
 
-  RenderFrameHostID main_frame(render_process_id, render_frame_id);
+  content::GlobalFrameRoutingId main_frame(render_process_id, render_frame_id);
 
   auto main_frame_it = main_render_frame_entry_map_.find(main_frame);
   if (main_frame_it == main_render_frame_entry_map_.end())
     return;
 
   // Check that the DataUse entry has a committed URL.
-  DataUseRecorderEntry entry = main_frame_it->second.data_use_recorder;
+  auto entry = main_frame_it->second.data_use_recorder;
   DataUse& data_use = entry->data_use();
   if (data_use.url().is_valid()) {
     NotifyDidFinishLoad(entry);
@@ -577,6 +578,15 @@ void ChromeDataUseAscriber::NotifyPageLoadConcluded(
     observer.OnPageLoadConcluded(&entry->data_use());
 }
 
+std::unique_ptr<net::NetworkDelegate>
+ChromeDataUseAscriber::CreateNetworkDelegate(
+    std::unique_ptr<net::NetworkDelegate> wrapped_network_delegate) {
+  return std::make_unique<data_use_measurement::DataUseNetworkDelegate>(
+      std::move(wrapped_network_delegate), this,
+      std::make_unique<ChromeDataUseMeasurement>(CreateURLRequestClassifier(),
+                                                 this));
+}
+
 std::unique_ptr<URLRequestClassifier>
 ChromeDataUseAscriber::CreateURLRequestClassifier() const {
   return std::make_unique<ContentURLRequestClassifier>();
@@ -586,7 +596,7 @@ ChromeDataUseAscriber::DataUseRecorderEntry
 ChromeDataUseAscriber::CreateNewDataUseRecorder(
     net::URLRequest* request,
     DataUse::TrafficType traffic_type) {
-  DataUseRecorderEntry entry =
+  auto entry =
       data_use_recorders_.emplace(data_use_recorders_.end(), traffic_type);
   if (request)
     AscribeRecorderWithRequest(request, entry);
@@ -609,8 +619,9 @@ void ChromeDataUseAscriber::WasShownOrHidden(int main_render_process_id,
   if (IsDisabled())
     return;
 
-  auto main_frame_it = main_render_frame_entry_map_.find(
-      RenderFrameHostID(main_render_process_id, main_render_frame_id));
+  auto main_frame_it =
+      main_render_frame_entry_map_.find(content::GlobalFrameRoutingId(
+          main_render_process_id, main_render_frame_id));
   if (main_frame_it != main_render_frame_entry_map_.end()) {
     main_frame_it->second.is_visible = visible;
     if (main_frame_it->second.data_use_recorder != data_use_recorders_.end())
@@ -626,8 +637,9 @@ void ChromeDataUseAscriber::RenderFrameHostChanged(int old_render_process_id,
   if (IsDisabled())
     return;
 
-  auto old_frame_iter = main_render_frame_entry_map_.find(
-      RenderFrameHostID(old_render_process_id, old_render_frame_id));
+  auto old_frame_iter =
+      main_render_frame_entry_map_.find(content::GlobalFrameRoutingId(
+          old_render_process_id, old_render_frame_id));
 
   if (old_frame_iter != main_render_frame_entry_map_.end()) {
     WasShownOrHidden(new_render_process_id, new_render_frame_id, true);
@@ -636,7 +648,8 @@ void ChromeDataUseAscriber::RenderFrameHostChanged(int old_render_process_id,
       // Transfer the pending navigation global request ID from old to new main
       // frame.
       main_render_frame_entry_map_
-          .find(RenderFrameHostID(new_render_process_id, new_render_frame_id))
+          .find(content::GlobalFrameRoutingId(new_render_process_id,
+                                              new_render_frame_id))
           ->second.pending_navigation_global_request_id =
           old_frame_iter->second.pending_navigation_global_request_id;
       old_frame_iter->second.pending_navigation_global_request_id =
@@ -648,8 +661,8 @@ void ChromeDataUseAscriber::RenderFrameHostChanged(int old_render_process_id,
 bool ChromeDataUseAscriber::IsDisabled() const {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
 
-  // TODO(rajendrant): https://crbug.com/753559. Fix platform specific race
-  // conditions and re-enable.
+  // TODO(rajendrant): Disable and deprecate the ChromeDataUseAscriber
+  // altogether.
   return base::FeatureList::IsEnabled(kDisableAscriberIfDataSaverDisabled) &&
          disable_ascriber_;
 }

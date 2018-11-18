@@ -5,8 +5,8 @@
 #include "chrome/browser/ui/webui/theme_source.h"
 
 #include "base/memory/ref_counted_memory.h"
-#include "base/message_loop/message_loop.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/task/post_task.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/resources_util.h"
 #include "chrome/browser/search/instant_io_context.h"
@@ -20,6 +20,7 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/theme_resources.h"
 #include "components/version_info/version_info.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/url_request/url_request.h"
 #include "ui/base/layout.h"
@@ -50,7 +51,7 @@ void ProcessImageOnUiThread(const gfx::ImageSkia& image,
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   const gfx::ImageSkiaRep& rep = image.GetRepresentation(scale);
   gfx::PNGCodec::EncodeBGRASkBitmap(
-      rep.sk_bitmap(), false /* discard transparency */, &data->data());
+      rep.GetBitmap(), false /* discard transparency */, &data->data());
 }
 
 void ProcessResourceOnUiThread(int resource_id,
@@ -230,8 +231,8 @@ void ThemeSource::SendThemeImage(
     DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
     // Fetching image data in ResourceBundle should happen on the UI thread. See
     // crbug.com/449277
-    content::BrowserThread::PostTaskAndReply(
-        content::BrowserThread::UI, FROM_HERE,
+    base::PostTaskWithTraitsAndReply(
+        FROM_HERE, {content::BrowserThread::UI},
         base::BindOnce(&ProcessResourceOnUiThread, resource_id, scale, data),
         base::BindOnce(callback, data));
   }

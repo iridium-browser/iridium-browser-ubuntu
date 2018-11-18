@@ -13,10 +13,10 @@
 
 #include <memory>
 
+#include "api/video/encoded_image.h"
 #include "api/video_codecs/video_decoder.h"
 #include "common_types.h"  // NOLINT(build/include)
 #include "common_video/include/i420_buffer_pool.h"
-#include "common_video/include/video_frame.h"
 #include "modules/include/module_common_types.h"
 #include "modules/video_coding/codecs/vp8/include/vp8.h"
 #include "modules/video_coding/include/video_codec_interface.h"
@@ -25,7 +25,7 @@
 
 namespace webrtc {
 
-class LibvpxVp8Decoder : public VP8Decoder {
+class LibvpxVp8Decoder : public VideoDecoder {
  public:
   LibvpxVp8Decoder();
   ~LibvpxVp8Decoder() override;
@@ -34,7 +34,6 @@ class LibvpxVp8Decoder : public VP8Decoder {
 
   int Decode(const EncodedImage& input_image,
              bool missing_frames,
-             const RTPFragmentationHeader* fragmentation,
              const CodecSpecificInfo* codec_specific_info,
              int64_t /*render_time_ms*/) override;
 

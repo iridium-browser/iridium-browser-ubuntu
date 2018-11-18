@@ -54,6 +54,7 @@ class FakeModelTypeSyncBridge : public ModelTypeSyncBridge {
     void PutMetadata(const std::string& key,
                      const sync_pb::EntityMetadata& metadata);
     void RemoveData(const std::string& key);
+    void ClearAllData();
     void RemoveMetadata(const std::string& key);
     bool HasData(const std::string& key) const;
     bool HasMetadata(const std::string& key) const;
@@ -104,6 +105,10 @@ class FakeModelTypeSyncBridge : public ModelTypeSyncBridge {
   // Local data deletion.
   void DeleteItem(const std::string& key);
 
+  // Deletes local data without notifying the processor (useful for modeling
+  // faulty bridges).
+  void MimicBugToLooseItemWithoutNotifyingProcessor(const std::string& key);
+
   // ModelTypeSyncBridge implementation
   std::unique_ptr<MetadataChangeList> CreateMetadataChangeList() override;
   base::Optional<ModelError> MergeSyncData(
@@ -113,7 +118,7 @@ class FakeModelTypeSyncBridge : public ModelTypeSyncBridge {
       std::unique_ptr<MetadataChangeList> metadata_change_list,
       EntityChangeList entity_changes) override;
   void GetData(StorageKeyList storage_keys, DataCallback callback) override;
-  void GetAllData(DataCallback callback) override;
+  void GetAllDataForDebugging(DataCallback callback) override;
   std::string GetClientTag(const EntityData& entity_data) override;
   std::string GetStorageKey(const EntityData& entity_data) override;
   bool SupportsGetStorageKey() const override;
@@ -121,10 +126,15 @@ class FakeModelTypeSyncBridge : public ModelTypeSyncBridge {
   ConflictResolution ResolveConflict(
       const EntityData& local_data,
       const EntityData& remote_data) const override;
+  StopSyncResponse ApplyStopSyncChanges(
+      std::unique_ptr<MetadataChangeList> delete_metadata_change_list) override;
 
-  // Store a resolution for the next call to ResolveConflict. Note that if this
+  // Stores a resolution for the next call to ResolveConflict. Note that if this
   // is a USE_NEW resolution, the data will only exist for one resolve call.
   void SetConflictResolution(ConflictResolution resolution);
+
+  // Stores the value returned by future calls to ApplyStopSyncChanges().
+  void SetStopSyncResponse(StopSyncResponse response);
 
   // Sets an error that the next fallible call to the bridge will generate.
   void ErrorOnNextCall();
@@ -134,7 +144,7 @@ class FakeModelTypeSyncBridge : public ModelTypeSyncBridge {
   // test code here, this function is needed to manually copy it.
   static std::unique_ptr<EntityData> CopyEntityData(const EntityData& old_data);
 
-  // Set storage key which will be ignored by bridge.
+  // Sets storage key which will be ignored by bridge.
   void SetKeyToIgnore(const std::string key);
 
   const Store& db() { return *db_; }
@@ -151,6 +161,9 @@ class FakeModelTypeSyncBridge : public ModelTypeSyncBridge {
 
   // The conflict resolution to use for calls to ResolveConflict.
   std::unique_ptr<ConflictResolution> conflict_resolution_;
+
+  StopSyncResponse stop_sync_response_ =
+      StopSyncResponse::kModelStillReadyToSync;
 
   // The storage keys which bridge will ignore.
   std::unordered_set<std::string> keys_to_ignore_;

@@ -71,7 +71,11 @@ public class SharedStatics {
 
     public void freeMemoryForTests() {
         if (ActivityManager.isRunningInTestHarness()) {
-            MemoryPressureMonitor.INSTANCE.notifyPressure(MemoryPressureLevel.CRITICAL);
+            ThreadUtils.postOnUiThread(() -> {
+                // This variable is needed to prevent weird formatting by "git cl format".
+                MemoryPressureMonitor pressureMonitor = MemoryPressureMonitor.INSTANCE;
+                pressureMonitor.notifyPressure(MemoryPressureLevel.CRITICAL);
+            });
         }
     }
 
@@ -112,5 +116,14 @@ public class SharedStatics {
     public Uri getSafeBrowsingPrivacyPolicyUrl() {
         return ThreadUtils.runOnUiThreadBlockingNoException(
                 () -> AwContentsStatics.getSafeBrowsingPrivacyPolicyUrl());
+    }
+
+    public void setProxyOverride(String host, int port, String[] exclusionList, Runnable callback) {
+        ThreadUtils.runOnUiThread(
+                () -> AwContentsStatics.setProxyOverride(host, port, exclusionList, callback));
+    }
+
+    public void clearProxyOverride(Runnable callback) {
+        ThreadUtils.runOnUiThread(() -> AwContentsStatics.clearProxyOverride(callback));
     }
 }

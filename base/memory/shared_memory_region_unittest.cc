@@ -6,6 +6,7 @@
 
 #include "base/memory/platform_shared_memory_region.h"
 #include "base/memory/read_only_shared_memory_region.h"
+#include "base/memory/shared_memory.h"
 #include "base/memory/unsafe_shared_memory_region.h"
 #include "base/memory/writable_shared_memory_region.h"
 #include "base/sys_info.h"
@@ -32,35 +33,18 @@ template <typename SharedMemoryRegionType>
 class SharedMemoryRegionTest : public ::testing::Test {
  public:
   void SetUp() override {
-    std::tie(region_, rw_mapping_) = CreateWithMapping(kRegionSize);
+    std::tie(region_, rw_mapping_) =
+        CreateMappedRegion<SharedMemoryRegionType>(kRegionSize);
     ASSERT_TRUE(region_.IsValid());
     ASSERT_TRUE(rw_mapping_.IsValid());
     memset(rw_mapping_.memory(), 'G', kRegionSize);
     EXPECT_TRUE(IsMemoryFilledWithByte(rw_mapping_.memory(), kRegionSize, 'G'));
   }
 
-  static std::pair<SharedMemoryRegionType, WritableSharedMemoryMapping>
-  CreateWithMapping(size_t size) {
-    SharedMemoryRegionType region = SharedMemoryRegionType::Create(size);
-    WritableSharedMemoryMapping mapping = region.Map();
-    return {std::move(region), std::move(mapping)};
-  }
-
  protected:
   SharedMemoryRegionType region_;
   WritableSharedMemoryMapping rw_mapping_;
 };
-
-// Template specialization of SharedMemoryRegionTest<>::CreateWithMapping() for
-// the ReadOnlySharedMemoryRegion. We need this because
-// ReadOnlySharedMemoryRegion::Create() has a different return type.
-template <>
-std::pair<ReadOnlySharedMemoryRegion, WritableSharedMemoryMapping>
-SharedMemoryRegionTest<ReadOnlySharedMemoryRegion>::CreateWithMapping(
-    size_t size) {
-  MappedReadOnlyRegion mapped_region = ReadOnlySharedMemoryRegion::Create(size);
-  return {std::move(mapped_region.region), std::move(mapped_region.mapping)};
-}
 
 typedef ::testing::Types<WritableSharedMemoryRegion,
                          UnsafeSharedMemoryRegion,
@@ -176,7 +160,7 @@ TYPED_TEST(SharedMemoryRegionTest, MapAt) {
 
   TypeParam region;
   WritableSharedMemoryMapping rw_mapping;
-  std::tie(region, rw_mapping) = TestFixture::CreateWithMapping(kDataSize);
+  std::tie(region, rw_mapping) = CreateMappedRegion<TypeParam>(kDataSize);
   ASSERT_TRUE(region.IsValid());
   ASSERT_TRUE(rw_mapping.IsValid());
   uint32_t* ptr = static_cast<uint32_t*>(rw_mapping.memory());
@@ -202,12 +186,17 @@ TYPED_TEST(SharedMemoryRegionTest, MapAtNotAlignedOffsetFails) {
 
   TypeParam region;
   WritableSharedMemoryMapping rw_mapping;
-  std::tie(region, rw_mapping) = TestFixture::CreateWithMapping(kDataSize);
+  std::tie(region, rw_mapping) = CreateMappedRegion<TypeParam>(kDataSize);
   ASSERT_TRUE(region.IsValid());
   ASSERT_TRUE(rw_mapping.IsValid());
   off_t offset = kDataSize / 2;
   typename TypeParam::MappingType mapping =
       region.MapAt(offset, kDataSize - offset);
+  EXPECT_FALSE(mapping.IsValid());
+}
+
+TYPED_TEST(SharedMemoryRegionTest, MapZeroBytesFails) {
+  typename TypeParam::MappingType mapping = this->region_.MapAt(0, 0);
   EXPECT_FALSE(mapping.IsValid());
 }
 
@@ -228,6 +217,7 @@ TYPED_TEST_CASE(DuplicatableSharedMemoryRegionTest, DuplicatableRegionTypes);
 
 TYPED_TEST(DuplicatableSharedMemoryRegionTest, Duplicate) {
   TypeParam dup_region = this->region_.Duplicate();
+  EXPECT_EQ(this->region_.GetGUID(), dup_region.GetGUID());
   typename TypeParam::MappingType mapping = dup_region.Map();
   ASSERT_TRUE(mapping.IsValid());
   EXPECT_NE(this->rw_mapping_.memory(), mapping.memory());
@@ -291,6 +281,19 @@ TEST_F(ReadOnlySharedMemoryRegionTest,
   ASSERT_TRUE(mapping.IsValid());
   void* memory_ptr = const_cast<void*>(mapping.memory());
   EXPECT_DEATH_IF_SUPPORTED(memset(memory_ptr, 'G', kRegionSize), "");
+}
+
+class UnsafeSharedMemoryRegionTest : public ::testing::Test {};
+
+TEST_F(UnsafeSharedMemoryRegionTest, CreateFromHandleTest) {
+  SharedMemory shm;
+
+  auto region = UnsafeSharedMemoryRegion::CreateFromHandle(shm.TakeHandle());
+  ASSERT_FALSE(region.IsValid());
+
+  shm.CreateAndMapAnonymous(10);
+  region = UnsafeSharedMemoryRegion::CreateFromHandle(shm.TakeHandle());
+  ASSERT_TRUE(region.IsValid());
 }
 
 }  // namespace base

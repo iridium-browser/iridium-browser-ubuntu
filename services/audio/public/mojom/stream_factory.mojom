@@ -10,6 +10,7 @@ import "media/mojo/interfaces/audio_logging.mojom";
 import "media/mojo/interfaces/audio_output_stream.mojom";
 import "media/mojo/interfaces/audio_parameters.mojom";
 import "mojo/public/mojom/base/unguessable_token.mojom";
+import "services/audio/public/mojom/audio_processing.mojom";
 
 // Mutes a group of AudioOutputStreams while at least one binding to an instance
 // exists. Once the last binding is dropped, all streams in the group are
@@ -23,39 +24,56 @@ interface LocalMuter {};
 //
 // The client must keep the connection to the factory while streams are
 // running.
-// TODO(https://crbug.com/803102): Add other stream creation functionality to
-// this interface.
 interface StreamFactory {
-  // Creates an AudioInputStream and returns the AudioDataPipe it writes data
-  // to and a bool indicating whether the stream is initially muted. |data_pipe|
-  // is null and |initially_muted| is false in case stream creation failed.
+  // Creates an AudioInputStream and returns the AudioDataPipe it writes data to
+  // and a bool indicating whether the stream is initially muted. |data_pipe| is
+  // null, |initially_muted| is false and |stream_id| is empty in case stream
+  // creation failed.
   // |device_id| is either the |unique_id| field from an AudioDeviceDescription
   // obtained from the audio.mojom.SystemInfo interface, or "default".
   // |shared_memory_count| indicates how many buffer segments can the input
   // stream client read at once, to avoid data overwriting. |enable_agc| is used
-  // for enabling automatic gain control.
+  // for enabling automatic gain control. |key_press_count_buffer| is an
+  // optional readonly shared memory handle for reading the current key press
+  // count, updated by browser process in media::UserInputMonitor
+  // implementation. |processing_config| should be set if audio processing by
+  // the service is desired.
   CreateInputStream(
     media.mojom.AudioInputStream& stream,
     media.mojom.AudioInputStreamClient client,
-    media.mojom.AudioInputStreamObserver observer,
-    media.mojom.AudioLog log,
+    media.mojom.AudioInputStreamObserver? observer,
+    media.mojom.AudioLog? log,
     string device_id, media.mojom.AudioParameters params,
-    uint32 shared_memory_count, bool enable_agc)
-    => (media.mojom.AudioDataPipe? data_pipe, bool initially_muted);
+    uint32 shared_memory_count, bool enable_agc,
+    handle<shared_buffer>? key_press_count_buffer,
+    audio.mojom.AudioProcessingConfig? processing_config)
+      => (media.mojom.ReadOnlyAudioDataPipe? data_pipe, bool initially_muted,
+          mojo_base.mojom.UnguessableToken? stream_id);
+
+  // Associates an output device with an input stream, so that the input knows
+  // which output device to cancel echo from. |input_stream_id| is the id
+  // returned when the stream was created. |output_device_id| is a raw device
+  // id. In case either of the parameters are invalid, the operation will
+  // silently fail.
+  AssociateInputAndOutputForAec(
+      mojo_base.mojom.UnguessableToken input_stream_id,
+      string output_device_id);
 
   // Creates an AudioOutputStream and returns the AudioDataPipe it reads data
   // from. |data_pipe| is null in case stream creation failed. |device_id| is
   // either the |unique_id| field from an AudioDeviceDescription obtained from
   // the audio.mojom.SystemInfo interface, or "default". The stream |group_id|
-  // will later be used for muting streams or capturing them for loopback.
+  // is used for muting streams or capturing them for loopback. |processing_id|
+  // is used to connect the stream to input streams that need to analyze the
+  // output signal as part of their processing.
   CreateOutputStream(
     media.mojom.AudioOutputStream& stream,
-    media.mojom.AudioOutputStreamClient client,
-    associated media.mojom.AudioOutputStreamObserver observer,
-    media.mojom.AudioLog log,
+    associated media.mojom.AudioOutputStreamObserver? observer,
+    media.mojom.AudioLog? log,
     string device_id, media.mojom.AudioParameters params,
-    mojo_base.mojom.UnguessableToken group_id)
-    => (media.mojom.AudioDataPipe? data_pipe);
+    mojo_base.mojom.UnguessableToken group_id,
+    mojo_base.mojom.UnguessableToken? processing_id)
+    => (media.mojom.ReadWriteAudioDataPipe? data_pipe);
 
   // Binds the request to the LocalMuter associated with the given |group_id|.
   // While one or more bindings to a group's LocalMuter exists, all local audio
@@ -68,4 +86,19 @@ interface StreamFactory {
   // is the reason for the associated request argument.)
   BindMuter(associated LocalMuter& request,
             mojo_base.mojom.UnguessableToken group_id);
+
+  // Creates an AudioInputStream that provides the result of looping-back and
+  // mixing-together all current and future AudioOutputStreams tagged with the
+  // given |group_id|. The loopback re-mixes audio, if necessary, so that the
+  // resulting data stream format matches the specified |params|. All other args
+  // and the result are as described in CreateInputStream() above, except for
+  // |stream_id|. Loopback streams have no ID, since they cannot be used in
+  // echo cancellation.
+  CreateLoopbackStream(media.mojom.AudioInputStream& stream,
+                       media.mojom.AudioInputStreamClient client,
+                       media.mojom.AudioInputStreamObserver observer,
+                       media.mojom.AudioParameters params,
+                       uint32 shared_memory_count,
+                       mojo_base.mojom.UnguessableToken group_id)
+    => (media.mojom.ReadOnlyAudioDataPipe? data_pipe);
 };

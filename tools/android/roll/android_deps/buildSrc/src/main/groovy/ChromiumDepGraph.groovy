@@ -20,6 +20,28 @@ import org.gradle.maven.MavenPomArtifact
 class ChromiumDepGraph {
     final def dependencies = new HashMap<String, DependencyDescription>()
 
+    // Some libraries don't properly fill their POM with the appropriate licensing information.
+    // It is provided here from manual lookups. Note that licenseUrl must provide textual content
+    // rather than be an html page.
+    final def FALLBACK_PROPERTIES = [
+        'com_google_googlejavaformat_google_java_format': new DependencyDescription(
+            url: "https://github.com/google/google-java-format",
+            licenseUrl: "https://www.apache.org/licenses/LICENSE-2.0.txt",
+            licenseName: "Apache 2.0"),
+        'com_google_guava_guava': new DependencyDescription(
+            url: "https://github.com/google/guava",
+            licenseUrl: "https://www.apache.org/licenses/LICENSE-2.0.txt",
+            licenseName: "Apache 2.0"),
+        'org_codehaus_mojo_animal_sniffer_annotations': new DependencyDescription(
+            url: "http://www.mojohaus.org/animal-sniffer/animal-sniffer-annotations/",
+            licenseUrl: "https://raw.githubusercontent.com/mojohaus/animal-sniffer/master/animal-sniffer-annotations/pom.xml",
+            licensePath: "licenses/Codehaus_License-2009.txt",
+            licenseName: "MIT"),
+        'org_checkerframework_checker_compat_qual' :new DependencyDescription(
+            licenseUrl: "https://raw.githubusercontent.com/typetools/checker-framework/master/LICENSE.txt",
+            licenseName: "GPL v2 with the classpath exception"),
+    ]
+
     Project project
 
     void collectDependencies() {
@@ -105,12 +127,12 @@ class ChromiumDepGraph {
         def pomContent = new XmlSlurper(false, false).parse(pom)
         String licenseName
         String licenseUrl
-        (licenseName, licenseUrl) = resolveLicenseInfomation(id, pomContent)
+        (licenseName, licenseUrl) = resolveLicenseInformation(id, pomContent)
 
         // Get rid of irrelevant indent that might be present in the XML file.
         def description = pomContent.description?.text()?.trim()?.replaceAll(/\s+/, " ")
 
-        return new DependencyDescription(
+        return customizeDep(new DependencyDescription(
                 id: id,
                 artifact: artifact,
                 group: dependency.module.id.group,
@@ -121,14 +143,42 @@ class ChromiumDepGraph {
                 children: Collections.unmodifiableList(new ArrayList<>(childModules)),
                 licenseName: licenseName,
                 licenseUrl: licenseUrl,
+                licensePath: "",
                 fileName: artifact.file.name,
                 description: description,
-                url: pomContent.url?.text() ?: FALLBACK_PROPERTIES.get(id)?.url,
-                displayName: pomContent.name?.text()
-        )
+                url: pomContent.url?.text(),
+                displayName: pomContent.name?.text(),
+                exclude: false,
+        ))
     }
 
-    private resolveLicenseInfomation(String id, GPathResult pomContent) {
+    private customizeDep(DependencyDescription dep) {
+        if (dep.id?.startsWith("com_google_android_")) {
+            dep.licenseUrl = ""
+            // This should match fetch_all._ANDROID_SDK_LICENSE_PATH
+            dep.licensePath = "licenses/Android_SDK_License-December_9_2016.txt"
+            if (dep.url?.isEmpty()) {
+                dep.url = "https://developers.google.com/android/guides/setup"
+            }
+        } else if (dep.licenseName?.isEmpty()) {
+            def fallbackProperties = FALLBACK_PROPERTIES.get(dep.id)
+            if (fallbackProperties != null) {
+                project.logger.debug("Using fallback properties for ${dep.id}")
+                dep.licenseName = fallbackProperties.licenseName
+                dep.licenseUrl = fallbackProperties.licenseUrl
+                if (fallbackProperties.licensePath != null) {
+                    dep.licensePath = fallbackProperties.licensePath
+                }
+                if (dep.url?.isEmpty()) {
+                    dep.url = fallbackProperties.url
+                }
+            }
+        }
+
+        return dep
+    }
+
+    private resolveLicenseInformation(String id, GPathResult pomContent) {
       def licenseName = ''
       def licenseUrl = ''
 
@@ -150,9 +200,9 @@ class ChromiumDepGraph {
         String id
         ResolvedArtifact artifact
         String group, name, version, extension, displayName, description, url
-        String licenseName, licenseUrl
+        String licenseName, licenseUrl, licensePath
         String fileName
-        boolean supportsAndroid, visible
+        boolean supportsAndroid, visible, exclude
         ComponentIdentifier componentId
         List<String> children
     }

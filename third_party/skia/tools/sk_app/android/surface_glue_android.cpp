@@ -22,8 +22,9 @@
 
 #include "../Application.h"
 #include "ResourceFactory.h"
+#include "SkTo.h"
 #include "SkTypes.h"
-#include "SkUtils.h"
+#include "SkUTF.h"
 #include "Window_android.h"
 
 

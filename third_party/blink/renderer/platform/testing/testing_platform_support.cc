@@ -38,27 +38,18 @@
 #include "base/run_loop.h"
 #include "base/test/icu_test_util.h"
 #include "base/test/test_discardable_memory_allocator.h"
-#include "cc/blink/web_compositor_support_impl.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
 #include "third_party/blink/public/platform/interface_provider.h"
-#include "third_party/blink/public/platform/web_content_layer.h"
-#include "third_party/blink/public/platform/web_external_texture_layer.h"
-#include "third_party/blink/public/platform/web_image_layer.h"
 #include "third_party/blink/public/platform/web_runtime_features.h"
-#include "third_party/blink/public/platform/web_scrollbar_layer.h"
 #include "third_party/blink/renderer/platform/font_family_names.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
-#include "third_party/blink/renderer/platform/instrumentation/resource_coordinator/blink_resource_coordinator_base.h"
 #include "third_party/blink/renderer/platform/instrumentation/resource_coordinator/renderer_resource_coordinator.h"
 #include "third_party/blink/renderer/platform/language.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_initiator_type_names.h"
 #include "third_party/blink/renderer/platform/network/http_names.h"
 #include "third_party/blink/renderer/platform/network/mime/mock_mime_registry.h"
-#include "third_party/blink/renderer/platform/scheduler/base/real_time_domain.h"
-#include "third_party/blink/renderer/platform/scheduler/base/task_queue_manager.h"
 #include "third_party/blink/renderer/platform/scheduler/main_thread/main_thread_scheduler_impl.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/partitions.h"
-#include "third_party/blink/renderer/platform/wtf/cryptographically_random_number.h"
 #include "third_party/blink/renderer/platform/wtf/wtf.h"
 
 namespace blink {
@@ -71,6 +62,11 @@ class TestingPlatformSupport::TestingInterfaceProvider
 
   void GetInterface(const char* name,
                     mojo::ScopedMessagePipeHandle handle) override {
+    auto& override_callback = GetOverrideCallback();
+    if (!override_callback.is_null()) {
+      override_callback.Run(name, std::move(handle));
+      return;
+    }
     if (std::string(name) == mojom::blink::MimeRegistry::Name_) {
       mojo::MakeStrongBinding(
           std::make_unique<MockMimeRegistry>(),
@@ -78,73 +74,29 @@ class TestingPlatformSupport::TestingInterfaceProvider
       return;
     }
   }
+
+  static ScopedOverrideMojoInterface::GetInterfaceCallback&
+  GetOverrideCallback() {
+    DEFINE_THREAD_SAFE_STATIC_LOCAL(
+        ScopedOverrideMojoInterface::GetInterfaceCallback, callback, ());
+    return callback;
+  }
 };
 
-namespace {
+TestingPlatformSupport::ScopedOverrideMojoInterface::
+    ScopedOverrideMojoInterface(GetInterfaceCallback callback)
+    : auto_reset_(&TestingInterfaceProvider::GetOverrideCallback(),
+                  std::move(callback)) {}
 
-class DummyThread final : public blink::WebThread {
- public:
-  bool IsCurrentThread() const override { return true; }
-  blink::WebScheduler* Scheduler() const override { return nullptr; }
-};
-
-}  // namespace
-
-std::unique_ptr<WebLayer> TestingCompositorSupport::CreateLayer() {
-  return nullptr;
-}
-
-std::unique_ptr<WebLayer> TestingCompositorSupport::CreateLayerFromCCLayer(
-    cc::Layer*) {
-  return nullptr;
-}
-
-std::unique_ptr<WebContentLayer> TestingCompositorSupport::CreateContentLayer(
-    WebContentLayerClient*) {
-  return nullptr;
-}
-std::unique_ptr<WebExternalTextureLayer>
-TestingCompositorSupport::CreateExternalTextureLayer(cc::TextureLayerClient*) {
-  return nullptr;
-}
-
-std::unique_ptr<WebImageLayer> TestingCompositorSupport::CreateImageLayer() {
-  return nullptr;
-}
-
-std::unique_ptr<WebScrollbarLayer>
-TestingCompositorSupport::CreateScrollbarLayer(
-    std::unique_ptr<WebScrollbar>,
-    WebScrollbarThemePainter,
-    std::unique_ptr<WebScrollbarThemeGeometry>) {
-  return nullptr;
-}
-
-std::unique_ptr<WebScrollbarLayer>
-TestingCompositorSupport::CreateOverlayScrollbarLayer(
-    std::unique_ptr<WebScrollbar>,
-    WebScrollbarThemePainter,
-    std::unique_ptr<WebScrollbarThemeGeometry>) {
-  return nullptr;
-}
-
-std::unique_ptr<WebScrollbarLayer>
-TestingCompositorSupport::CreateSolidColorScrollbarLayer(
-    WebScrollbar::Orientation,
-    int thumb_thickness,
-    int track_start,
-    bool is_left_side_vertical_scrollbar) {
-  return nullptr;
-}
+TestingPlatformSupport::ScopedOverrideMojoInterface::
+    ~ScopedOverrideMojoInterface() = default;
 
 TestingPlatformSupport::TestingPlatformSupport()
-    : TestingPlatformSupport(TestingPlatformSupport::Config()) {}
-
-TestingPlatformSupport::TestingPlatformSupport(const Config& config)
-    : config_(config),
-      old_platform_(Platform::Current()),
+    : old_platform_(Platform::Current()),
       interface_provider_(new TestingInterfaceProvider) {
   DCHECK(old_platform_);
+  DCHECK(WTF::IsMainThread());
+  main_thread_ = old_platform_->CurrentThread();
 }
 
 TestingPlatformSupport::~TestingPlatformSupport() {
@@ -155,31 +107,12 @@ WebString TestingPlatformSupport::DefaultLocale() {
   return WebString::FromUTF8("en-US");
 }
 
-WebCompositorSupport* TestingPlatformSupport::CompositorSupport() {
-  if (config_.compositor_support)
-    return config_.compositor_support;
-
-  return old_platform_ ? old_platform_->CompositorSupport() : nullptr;
-}
-
-WebThread* TestingPlatformSupport::CurrentThread() {
-  return old_platform_ ? old_platform_->CurrentThread() : nullptr;
-}
-
 WebBlobRegistry* TestingPlatformSupport::GetBlobRegistry() {
   return old_platform_ ? old_platform_->GetBlobRegistry() : nullptr;
 }
 
-WebClipboard* TestingPlatformSupport::Clipboard() {
-  return old_platform_ ? old_platform_->Clipboard() : nullptr;
-}
-
-WebFileUtilities* TestingPlatformSupport::GetFileUtilities() {
-  return old_platform_ ? old_platform_->GetFileUtilities() : nullptr;
-}
-
-WebIDBFactory* TestingPlatformSupport::IdbFactory() {
-  return old_platform_ ? old_platform_->IdbFactory() : nullptr;
+std::unique_ptr<WebIDBFactory> TestingPlatformSupport::CreateIdbFactory() {
+  return old_platform_ ? old_platform_->CreateIdbFactory() : nullptr;
 }
 
 WebURLLoaderMockFactory* TestingPlatformSupport::GetURLLoaderMockFactory() {
@@ -204,16 +137,13 @@ void TestingPlatformSupport::RunUntilIdle() {
   base::RunLoop().RunUntilIdle();
 }
 
-class ScopedUnittestsEnvironmentSetup::DummyPlatform final
-    : public blink::Platform {
- public:
-  DummyPlatform() = default;
+bool TestingPlatformSupport::IsThreadedAnimationEnabled() {
+  return is_threaded_animation_enabled_;
+}
 
-  blink::WebThread* CurrentThread() override {
-    static DummyThread dummy_thread;
-    return &dummy_thread;
-  };
-};
+void TestingPlatformSupport::SetThreadedAnimationEnabled(bool enabled) {
+  is_threaded_animation_enabled_ = enabled;
+}
 
 class ScopedUnittestsEnvironmentSetup::DummyRendererResourceCoordinator final
     : public blink::RendererResourceCoordinator {};
@@ -229,25 +159,19 @@ ScopedUnittestsEnvironmentSetup::ScopedUnittestsEnvironmentSetup(int argc,
   base::DiscardableMemoryAllocator::SetInstance(
       discardable_memory_allocator_.get());
 
-  dummy_platform_ = std::make_unique<DummyPlatform>();
+  dummy_platform_ = std::make_unique<Platform>();
   Platform::SetCurrentPlatformForTesting(dummy_platform_.get());
 
   WTF::Partitions::Initialize(nullptr);
   WTF::Initialize(nullptr);
 
-  compositor_support_ = std::make_unique<cc_blink::WebCompositorSupportImpl>();
-  testing_platform_config_.compositor_support = compositor_support_.get();
-  testing_platform_support_ =
-      std::make_unique<TestingPlatformSupport>(testing_platform_config_);
+  testing_platform_support_ = std::make_unique<TestingPlatformSupport>();
   Platform::SetCurrentPlatformForTesting(testing_platform_support_.get());
 
-  if (BlinkResourceCoordinatorBase::IsEnabled()) {
-    dummy_renderer_resource_coordinator_ =
-        std::make_unique<DummyRendererResourceCoordinator>();
-    RendererResourceCoordinator::
-        SetCurrentRendererResourceCoordinatorForTesting(
-            dummy_renderer_resource_coordinator_.get());
-  }
+  dummy_renderer_resource_coordinator_ =
+      std::make_unique<DummyRendererResourceCoordinator>();
+  RendererResourceCoordinator::SetCurrentRendererResourceCoordinatorForTesting(
+      dummy_renderer_resource_coordinator_.get());
 
   ProcessHeap::Init();
   ThreadState::AttachMainThread();

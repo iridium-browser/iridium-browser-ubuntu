@@ -13,9 +13,13 @@
 #include "base/time/time.h"
 #include "net/ssl/ssl_info.h"
 #include "services/network/public/cpp/cors/cors_error_status.h"
+#include "services/network/public/cpp/cors/preflight_timing_info.h"
 #include "services/network/public/mojom/cors.mojom-shared.h"
 
 namespace network {
+
+// NOTE: When adding/removing fields to this struct, don't forget to
+// update services/network/public/cpp/network_ipc_param_traits.h.
 
 struct COMPONENT_EXPORT(NETWORK_CPP_BASE) URLLoaderCompletionStatus {
   URLLoaderCompletionStatus();
@@ -45,6 +49,9 @@ struct COMPONENT_EXPORT(NETWORK_CPP_BASE) URLLoaderCompletionStatus {
   // Time the request completed.
   base::TimeTicks completion_time;
 
+  // Timing info if CORS preflights were made.
+  std::vector<cors::PreflightTimingInfo> cors_preflight_timing_info;
+
   // Total amount of data received from the network.
   int64_t encoded_data_length = 0;
 
@@ -60,8 +67,9 @@ struct COMPONENT_EXPORT(NETWORK_CPP_BASE) URLLoaderCompletionStatus {
   // Optional SSL certificate info.
   base::Optional<net::SSLInfo> ssl_info;
 
-  // Set when response was blocked due to being cross-site document load.
-  bool blocked_cross_site_document = false;
+  // Set when response blocked by CORB needs to be reported to the DevTools
+  // console.
+  bool should_report_corb_blocking = false;
 };
 
 }  // namespace network

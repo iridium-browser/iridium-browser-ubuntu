@@ -15,6 +15,8 @@
 
 namespace net {
 
+class NetLog;
+
 // The CookieStoreIOSPersistent is an implementation of CookieStore relying on
 // on backing CookieStore.
 // CookieStoreIOSPersistent is not thread safe.
@@ -27,13 +29,15 @@ namespace net {
 class CookieStoreIOSPersistent : public CookieStoreIOS {
  public:
   // Constructs a CookieStoreIOS with a default SystemCookieStore.
-  explicit CookieStoreIOSPersistent(
-      net::CookieMonster::PersistentCookieStore* persistent_store);
+  CookieStoreIOSPersistent(
+      net::CookieMonster::PersistentCookieStore* persistent_store,
+      NetLog* net_log);
 
   // Constructs a CookieStoreIOS backed by |system_store|.
   CookieStoreIOSPersistent(
       net::CookieMonster::PersistentCookieStore* persistent_store,
-      std::unique_ptr<SystemCookieStore> system_store);
+      std::unique_ptr<SystemCookieStore> system_store,
+      NetLog* net_log);
 
   ~CookieStoreIOSPersistent() override;
 
@@ -55,14 +59,11 @@ class CookieStoreIOSPersistent : public CookieStoreIOS {
                          base::OnceClosure callback) override;
   void DeleteCanonicalCookieAsync(const CanonicalCookie& cookie,
                                   DeleteCallback callback) override;
-  void DeleteAllCreatedBetweenAsync(const base::Time& delete_begin,
-                                    const base::Time& delete_end,
-                                    DeleteCallback callback) override;
-  void DeleteAllCreatedBetweenWithPredicateAsync(
-      const base::Time& delete_begin,
-      const base::Time& delete_end,
-      const CookiePredicate& predicate,
+  void DeleteAllCreatedInTimeRangeAsync(
+      const net::CookieDeletionInfo::TimeRange& creation_range,
       DeleteCallback callback) override;
+  void DeleteAllMatchingInfoAsync(CookieDeletionInfo delete_info,
+                                  DeleteCallback callback) override;
   void DeleteSessionCookiesAsync(DeleteCallback callback) override;
 
  private:

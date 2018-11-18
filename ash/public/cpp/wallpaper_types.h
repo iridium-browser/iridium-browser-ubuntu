@@ -6,8 +6,21 @@
 #define ASH_PUBLIC_CPP_WALLPAPER_TYPES_H_
 
 #include "ash/public/cpp/ash_public_export.h"
+#include "third_party/skia/include/core/SkColor.h"
 
 namespace ash {
+
+// The value assigned to the wallpaper color calculation result if calculation
+// fails or is disabled (e.g. from command line, lock/login screens).
+constexpr SkColor kInvalidWallpaperColor = SK_ColorTRANSPARENT;
+
+// The width and height of small/large resolution wallpapers. When screen size
+// is smaller than |kSmallWallpaperMaxWidth| and |kSmallWallpaperMaxHeight|,
+// the small wallpaper is used. Otherwise, use the large wallpaper.
+constexpr int kSmallWallpaperMaxWidth = 1366;
+constexpr int kSmallWallpaperMaxHeight = 800;
+constexpr int kLargeWallpaperMaxWidth = 2560;
+constexpr int kLargeWallpaperMaxHeight = 1700;
 
 // This enum is used to define the buckets for an enumerated UMA histogram.
 // Hence,
@@ -44,7 +57,12 @@ enum WallpaperType {
   DEVICE = 7,        // Current wallpaper is the device policy controlled
                      // wallpaper. It shows on the login screen if the device
                      // is an enterprise managed device.
-  WALLPAPER_TYPE_COUNT = 8
+  ONE_SHOT = 8,      // Current wallpaper is shown one-time only, which doesn't
+                     // belong to a particular user and isn't saved to file. It
+                     // goes away when another wallpaper is shown or the browser
+                     // process exits. Note: the image will never be blurred or
+                     // dimmed.
+  WALLPAPER_TYPE_COUNT = 9
 };
 
 // The color profile type, ordered as the color profiles applied in

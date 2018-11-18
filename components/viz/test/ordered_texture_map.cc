@@ -18,7 +18,7 @@ OrderedTextureMap::OrderedTextureMap() = default;
 OrderedTextureMap::~OrderedTextureMap() = default;
 
 void OrderedTextureMap::Append(GLuint id, scoped_refptr<TestTexture> texture) {
-  DCHECK(texture.get());
+  DCHECK(texture);
   DCHECK(!ContainsId(id));
 
   textures_[id] = texture;
@@ -26,21 +26,21 @@ void OrderedTextureMap::Append(GLuint id, scoped_refptr<TestTexture> texture) {
 }
 
 void OrderedTextureMap::Replace(GLuint id, scoped_refptr<TestTexture> texture) {
-  DCHECK(texture.get());
+  DCHECK(texture);
   DCHECK(ContainsId(id));
 
   textures_[id] = texture;
 }
 
 void OrderedTextureMap::Remove(GLuint id) {
-  TextureMap::iterator map_it = textures_.find(id);
+  auto map_it = textures_.find(id);
   // for some test we generate dummy tex id, which are not registered,
   // nothing to remove in that case.
   if (map_it == textures_.end())
     return;
   textures_.erase(map_it);
 
-  TextureList::iterator list_it =
+  auto list_it =
       std::find(ordered_textures_.begin(), ordered_textures_.end(), id);
   DCHECK(list_it != ordered_textures_.end());
   ordered_textures_.erase(list_it);
@@ -57,7 +57,7 @@ bool OrderedTextureMap::ContainsId(GLuint id) {
 scoped_refptr<TestTexture> OrderedTextureMap::TextureForId(GLuint id) {
   DCHECK(ContainsId(id));
   scoped_refptr<TestTexture> texture = textures_[id];
-  DCHECK(texture.get());
+  DCHECK(texture);
   return texture;
 }
 

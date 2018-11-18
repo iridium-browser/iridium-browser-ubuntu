@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef BLINK_CORE_STYLE_COMPUTED_STYLE_INITIAL_VALUES_H_
-#define BLINK_CORE_STYLE_COMPUTED_STYLE_INITIAL_VALUES_H_
+#ifndef THIRD_PARTY_BLINK_RENDERER_CORE_STYLE_COMPUTED_STYLE_INITIAL_VALUES_H_
+#define THIRD_PARTY_BLINK_RENDERER_CORE_STYLE_COMPUTED_STYLE_INITIAL_VALUES_H_
 
 #include "third_party/blink/renderer/core/layout/layout_theme.h"
 #include "third_party/blink/renderer/core/style/computed_style_constants.h"
@@ -26,8 +26,8 @@ class {{forward_declaration}};
 
 /**
  * A set of functions that return the initial value for each field on ComputedStyle.
- * This includes both properties defined in CSSProperties.json5 and the extra
- * fields defined in ComputedStyleExtraFields.json5.
+ * This includes both properties defined in css_properties.json5 and the extra
+ * fields defined in computed_style_extra_fields.json5.
  */
 class ComputedStyleInitialValues{
   STATIC_ONLY(ComputedStyleInitialValues);
@@ -121,12 +121,12 @@ class ComputedStyleInitialValues{
 
  private:
   static const FilterOperations& InitialFilterInternal() {
-    DEFINE_STATIC_LOCAL(FilterOperationsWrapper, ops,
+    DEFINE_STATIC_LOCAL(Persistent<FilterOperationsWrapper>, ops,
         (FilterOperationsWrapper::Create()));
-    return ops.Operations();
+    return ops->Operations();
   }
 };
 
 }  // namespace blink
 
-#endif  // BLINK_CORE_STYLE_COMPUTED_STYLE_INITIAL_VALUES_H_
+#endif  // THIRD_PARTY_BLINK_RENDERER_CORE_STYLE_COMPUTED_STYLE_INITIAL_VALUES_H_

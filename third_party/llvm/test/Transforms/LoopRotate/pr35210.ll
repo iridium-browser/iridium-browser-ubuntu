@@ -6,12 +6,12 @@
 
 ; CHECK: Starting llvm::Function pass manager run.
 ; CHECK-NEXT: Running pass: ADCEPass on f
-; CHECK-NEXT: Running analysis: DominatorTreeAnalysis on f
 ; CHECK-NEXT: Running analysis: PostDominatorTreeAnalysis on f
 ; CHECK-NEXT: Running pass: FunctionToLoopPassAdaptor{{.*}} on f
 ; CHECK-NEXT: Starting llvm::Function pass manager run.
 ; CHECK-NEXT: Running pass: LoopSimplifyPass on f
 ; CHECK-NEXT: Running analysis: LoopAnalysis on f
+; CHECK-NEXT: Running analysis: DominatorTreeAnalysis on f
 ; CHECK-NEXT: Running analysis: AssumptionAnalysis on f
 ; CHECK-NEXT: Running pass: LCSSAPass on f
 ; CHECK-NEXT: Finished llvm::Function pass manager run.
@@ -21,6 +21,7 @@
 ; CHECK-NEXT: Running analysis: TargetIRAnalysis on f
 ; CHECK-NEXT: Running analysis: InnerAnalysisManagerProxy{{.*}} on f
 ; CHECK-NEXT: Starting Loop pass manager run.
+; CHECK-NEXT: Running analysis: PassInstrumentationAnalysis on bb
 ; CHECK-NEXT: Running pass: LoopRotatePass on Loop at depth 1 containing: %bb<header><exiting>,%bb4<latch>
 ; CHECK-NEXT: Folding loop latch bb4 into bb
 ; CHECK-NEXT: Invalidating all non-preserved analyses for: bb

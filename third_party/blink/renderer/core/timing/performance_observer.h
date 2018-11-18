@@ -49,7 +49,6 @@ class CORE_EXPORT PerformanceObserver final
   bool HasPendingActivity() const final;
 
   void Trace(blink::Visitor*) override;
-  void TraceWrappers(const ScriptWrappableVisitor*) const override;
 
  private:
   PerformanceObserver(ExecutionContext*,

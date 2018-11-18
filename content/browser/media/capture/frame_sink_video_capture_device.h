@@ -6,6 +6,8 @@
 #define CONTENT_BROWSER_MEDIA_CAPTURE_FRAME_SINK_VIDEO_CAPTURE_DEVICE_H_
 
 #include <memory>
+#include <string>
+#include <utility>
 #include <vector>
 
 #include "base/macros.h"
@@ -13,7 +15,7 @@
 #include "base/optional.h"
 #include "base/sequence_checker.h"
 #include "components/viz/common/surfaces/frame_sink_id.h"
-#include "content/browser/media/capture/cursor_renderer.h"
+#include "components/viz/host/client_frame_sink_video_capturer.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/browser_thread.h"
 #include "media/base/video_frame.h"
@@ -21,9 +23,10 @@
 #include "media/capture/video/video_frame_receiver.h"
 #include "media/capture/video_capture_types.h"
 #include "mojo/public/cpp/bindings/binding.h"
-#include "services/viz/privileged/interfaces/compositing/frame_sink_video_capture.mojom.h"
 
 namespace content {
+
+class MouseCursorOverlayController;
 
 // A virtualized VideoCaptureDevice that captures the displayed contents of a
 // frame sink (see viz::CompositorFrameSink), such as the composited main view
@@ -43,9 +46,6 @@ class CONTENT_EXPORT FrameSinkVideoCaptureDevice
     : public media::VideoCaptureDevice,
       public viz::mojom::FrameSinkVideoConsumer {
  public:
-  using CapturerCreatorCallback =
-      base::RepeatingCallback<viz::mojom::FrameSinkVideoCapturerPtrInfo()>;
-
   FrameSinkVideoCaptureDevice();
   ~FrameSinkVideoCaptureDevice() override;
 
@@ -73,13 +73,11 @@ class CONTENT_EXPORT FrameSinkVideoCaptureDevice
 
   // FrameSinkVideoConsumer implementation.
   void OnFrameCaptured(
-      mojo::ScopedSharedBufferHandle buffer,
-      uint32_t buffer_size,
+      base::ReadOnlySharedMemoryRegion data,
       media::mojom::VideoFrameInfoPtr info,
       const gfx::Rect& update_rect,
       const gfx::Rect& content_rect,
       viz::mojom::FrameSinkVideoConsumerFrameCallbacksPtr callbacks) final;
-  void OnTargetLost(const viz::FrameSinkId& frame_sink_id) final;
   void OnStopped() final;
 
   // These are called to notify when the capture target has changed or was
@@ -87,21 +85,28 @@ class CONTENT_EXPORT FrameSinkVideoCaptureDevice
   void OnTargetChanged(const viz::FrameSinkId& frame_sink_id);
   void OnTargetPermanentlyLost();
 
-  // Overrides the callback that is run to create the capturer.
-  void SetCapturerCreatorForTesting(CapturerCreatorCallback creator);
-
  protected:
-  CursorRenderer* cursor_renderer() const { return cursor_renderer_.get(); }
+  MouseCursorOverlayController* cursor_controller() const {
+    return cursor_controller_.get();
+  }
 
   // Subclasses override these to perform additional start/stop tasks.
   virtual void WillStart();
   virtual void DidStop();
 
+  // Establishes connection to FrameSinkVideoCapturer. The default
+  // implementation calls CreateCapturerViaGlobalManager(), but subclasses
+  // and/or tests may provide alternatives.
+  virtual void CreateCapturer(
+      viz::mojom::FrameSinkVideoCapturerRequest request);
+
+  // Establishes connection to FrameSinkVideoCapturer using the global
+  // viz::HostFrameSinkManager.
+  static void CreateCapturerViaGlobalManager(
+      viz::mojom::FrameSinkVideoCapturerRequest request);
+
  private:
   using BufferId = decltype(media::VideoCaptureDevice::Client::Buffer::id);
-
-  // Bind a newly-created capturer, configure it, and resuming consuming.
-  void OnCapturerCreated(viz::mojom::FrameSinkVideoCapturerPtrInfo info);
 
   // If not consuming and all preconditions are met, set up and start consuming.
   void MaybeStartConsuming();
@@ -109,10 +114,8 @@ class CONTENT_EXPORT FrameSinkVideoCaptureDevice
   // If consuming, shut it down.
   void MaybeStopConsuming();
 
-  // Undoes mouse cursor rendering and notifies the capturer that consumption of
-  // the frame is complete.
-  void OnFramePropagationComplete(size_t slot_index,
-                                  scoped_refptr<media::VideoFrame> frame);
+  // Notifies the capturer that consumption of the frame is complete.
+  void OnFramePropagationComplete(BufferId buffer_id);
 
   // Helper that logs the given error |message| to the |receiver_| and then
   // stops capture and this VideoCaptureDevice.
@@ -135,29 +138,15 @@ class CONTENT_EXPORT FrameSinkVideoCaptureDevice
   // cleared by StopAndDeAllocate().
   std::unique_ptr<media::VideoFrameReceiver> receiver_;
 
-  // Callback that is run to request a capturer be created and returns the
-  // client-side interface. This callback will be run on the UI BrowserThread.
-  // The constructor provides a default, but unit tests can override this.
-  CapturerCreatorCallback capturer_creator_;
+  std::unique_ptr<viz::ClientFrameSinkVideoCapturer> capturer_;
 
-  // Mojo pointer to the capturer instance in VIZ.
-  viz::mojom::FrameSinkVideoCapturerPtr capturer_;
-
-  // Mojo binding to this instance as a consumer of frames from the capturer.
-  mojo::Binding<viz::mojom::FrameSinkVideoConsumer> binding_;
-
-  // A pool of structs that hold state relevant to frames currently being
-  // processed by VideoFrameReceiver. Each "slot" is re-used by later frames.
-  struct ConsumptionState {
-    viz::mojom::FrameSinkVideoConsumerFrameCallbacksPtr callbacks;
-    CursorRendererUndoer undoer;
-
-    ConsumptionState();
-    ~ConsumptionState();
-    ConsumptionState(ConsumptionState&& other);
-    ConsumptionState& operator=(ConsumptionState&& other);
-  };
-  std::vector<ConsumptionState> slots_;
+  // A vector that holds the "callbacks" mojo InterfacePtr for each frame while
+  // the frame is being processed by VideoFrameReceiver. The index corresponding
+  // to a particular frame is used as the BufferId passed to VideoFrameReceiver.
+  // Therefore, non-null pointers in this vector must never move to a different
+  // position.
+  std::vector<viz::mojom::FrameSinkVideoConsumerFrameCallbacksPtr>
+      frame_callbacks_;
 
   // Set when OnFatalError() is called. This prevents any future
   // AllocateAndStartWithReceiver() calls from succeeding.
@@ -165,9 +154,10 @@ class CONTENT_EXPORT FrameSinkVideoCaptureDevice
 
   SEQUENCE_CHECKER(sequence_checker_);
 
-  // Renders the mouse cursor on each video frame.
-  const std::unique_ptr<CursorRenderer, BrowserThread::DeleteOnUIThread>
-      cursor_renderer_;
+  // Controls the overlay that renders the mouse cursor onto each video frame.
+  const std::unique_ptr<MouseCursorOverlayController,
+                        BrowserThread::DeleteOnUIThread>
+      cursor_controller_;
 
   // Creates WeakPtrs for use on the device thread.
   base::WeakPtrFactory<FrameSinkVideoCaptureDevice> weak_factory_;

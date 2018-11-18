@@ -30,15 +30,16 @@
 
 #include "third_party/blink/renderer/platform/network/network_state_notifier.h"
 
+#include "base/optional.h"
+#include "base/single_thread_task_runner.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_connection_type.h"
 #include "third_party/blink/public/platform/web_effective_connection_type.h"
-#include "third_party/blink/public/platform/web_thread.h"
+#include "third_party/blink/renderer/platform/scheduler/public/thread.h"
 #include "third_party/blink/renderer/platform/scheduler/test/fake_task_runner.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
-#include "third_party/blink/renderer/platform/wtf/optional.h"
 #include "third_party/blink/renderer/platform/wtf/time.h"
 
 namespace blink {
@@ -49,12 +50,13 @@ namespace {
 const double kNoneMaxBandwidthMbps = 0.0;
 const double kBluetoothMaxBandwidthMbps = 1.0;
 const double kEthernetMaxBandwidthMbps = 2.0;
-const Optional<TimeDelta> kEthernetHttpRtt(TimeDelta::FromMilliseconds(50));
-const Optional<TimeDelta> kEthernetTransportRtt(
+const base::Optional<TimeDelta> kEthernetHttpRtt(
+    TimeDelta::FromMilliseconds(50));
+const base::Optional<TimeDelta> kEthernetTransportRtt(
     TimeDelta::FromMilliseconds(25));
-const Optional<double> kEthernetThroughputMbps(75.0);
-const Optional<TimeDelta> kUnknownRtt;
-const Optional<double> kUnknownThroughputMbps;
+const base::Optional<double> kEthernetThroughputMbps(75.0);
+const base::Optional<TimeDelta> kUnknownRtt;
+const base::Optional<double> kUnknownThroughputMbps;
 
 enum class SaveData {
   kOff = 0,
@@ -76,14 +78,13 @@ class StateObserver : public NetworkStateNotifier::NetworkStateObserver {
         observed_save_data_(SaveData::kOff),
         callback_count_(0) {}
 
-  virtual void ConnectionChange(
-      WebConnectionType type,
-      double max_bandwidth_mbps,
-      WebEffectiveConnectionType effective_type,
-      const Optional<TimeDelta>& http_rtt,
-      const Optional<TimeDelta>& transport_rtt,
-      const Optional<double>& downlink_throughput_mbps,
-      bool save_data) {
+  void ConnectionChange(WebConnectionType type,
+                        double max_bandwidth_mbps,
+                        WebEffectiveConnectionType effective_type,
+                        const base::Optional<TimeDelta>& http_rtt,
+                        const base::Optional<TimeDelta>& transport_rtt,
+                        const base::Optional<double>& downlink_throughput_mbps,
+                        bool save_data) override {
     observed_type_ = type;
     observed_max_bandwidth_mbps_ = max_bandwidth_mbps;
     observed_effective_type_ = effective_type;
@@ -97,7 +98,7 @@ class StateObserver : public NetworkStateNotifier::NetworkStateObserver {
       std::move(closure_).Run();
   }
 
-  virtual void OnLineStateChange(bool on_line) {
+  void OnLineStateChange(bool on_line) override {
     observed_on_line_state_ = on_line;
     callback_count_ += 1;
 
@@ -110,11 +111,13 @@ class StateObserver : public NetworkStateNotifier::NetworkStateObserver {
   WebEffectiveConnectionType ObservedEffectiveType() const {
     return observed_effective_type_;
   }
-  Optional<TimeDelta> ObservedHttpRtt() const { return observed_http_rtt_; }
-  Optional<TimeDelta> ObservedTransportRtt() const {
+  base::Optional<TimeDelta> ObservedHttpRtt() const {
+    return observed_http_rtt_;
+  }
+  base::Optional<TimeDelta> ObservedTransportRtt() const {
     return observed_transport_rtt_;
   }
-  Optional<double> ObservedDownlinkThroughputMbps() const {
+  base::Optional<double> ObservedDownlinkThroughputMbps() const {
     return observed_downlink_throughput_mbps_;
   }
   bool ObservedOnLineState() const { return observed_on_line_state_; }
@@ -150,9 +153,9 @@ class StateObserver : public NetworkStateNotifier::NetworkStateObserver {
   WebConnectionType observed_type_;
   double observed_max_bandwidth_mbps_;
   WebEffectiveConnectionType observed_effective_type_;
-  Optional<TimeDelta> observed_http_rtt_;
-  Optional<TimeDelta> observed_transport_rtt_;
-  Optional<double> observed_downlink_throughput_mbps_;
+  base::Optional<TimeDelta> observed_http_rtt_;
+  base::Optional<TimeDelta> observed_transport_rtt_;
+  base::Optional<double> observed_downlink_throughput_mbps_;
   bool observed_on_line_state_;
   SaveData observed_save_data_;
   int callback_count_;
@@ -192,9 +195,9 @@ class NetworkStateNotifierTest : public testing::Test {
   void SetConnection(WebConnectionType type,
                      double max_bandwidth_mbps,
                      WebEffectiveConnectionType effective_type,
-                     const Optional<TimeDelta>& http_rtt,
-                     const Optional<TimeDelta>& transport_rtt,
-                     const Optional<double>& downlink_throughput_mbps,
+                     const base::Optional<TimeDelta>& http_rtt,
+                     const base::Optional<TimeDelta>& transport_rtt,
+                     const base::Optional<double>& downlink_throughput_mbps,
                      SaveData save_data) {
     notifier_.SetWebConnection(type, max_bandwidth_mbps);
     notifier_.SetNetworkQuality(
@@ -214,14 +217,41 @@ class NetworkStateNotifierTest : public testing::Test {
     RunPendingTasks();
   }
 
-  bool VerifyObservations(const StateObserver& observer,
-                          WebConnectionType type,
-                          double max_bandwidth_mbps,
-                          WebEffectiveConnectionType effective_type,
-                          const Optional<TimeDelta>& http_rtt,
-                          const Optional<TimeDelta>& transport_rtt,
-                          const Optional<double>& downlink_throughput_mbps,
-                          SaveData save_data) const {
+  void VerifyInitialMetricsWithWebHoldbackState(
+      WebConnectionType expected_type,
+      double expected_max_bandwidth_mbps,
+      WebEffectiveConnectionType expected_effective_type,
+      const base::Optional<TimeDelta>& expected_http_rtt,
+      const base::Optional<double>& expected_downlink_throughput_mbps,
+      SaveData expected_save_data) const {
+    WebConnectionType initial_type;
+    double initial_downlink_max_mbps;
+    WebEffectiveConnectionType initial_effective_type;
+    base::Optional<TimeDelta> initial_http_rtt;
+    base::Optional<double> initial_downlink_mbps;
+    bool initial_save_data;
+
+    notifier_.GetMetricsWithWebHoldback(
+        &initial_type, &initial_downlink_max_mbps, &initial_effective_type,
+        &initial_http_rtt, &initial_downlink_mbps, &initial_save_data);
+
+    EXPECT_EQ(expected_type, initial_type);
+    EXPECT_EQ(expected_max_bandwidth_mbps, initial_downlink_max_mbps);
+    EXPECT_EQ(expected_effective_type, initial_effective_type);
+    EXPECT_EQ(expected_http_rtt, initial_http_rtt);
+    EXPECT_EQ(expected_downlink_throughput_mbps, initial_downlink_mbps);
+    EXPECT_EQ(expected_save_data == SaveData::kOn, initial_save_data);
+  }
+
+  bool VerifyObservations(
+      const StateObserver& observer,
+      WebConnectionType type,
+      double max_bandwidth_mbps,
+      WebEffectiveConnectionType effective_type,
+      const base::Optional<TimeDelta>& http_rtt,
+      const base::Optional<TimeDelta>& transport_rtt,
+      const base::Optional<double>& downlink_throughput_mbps,
+      SaveData save_data) const {
     EXPECT_EQ(type, observer.ObservedType());
     EXPECT_EQ(max_bandwidth_mbps, observer.ObservedMaxBandwidth());
     EXPECT_EQ(effective_type, observer.ObservedEffectiveType());
@@ -255,6 +285,11 @@ TEST_F(NetworkStateNotifierTest, AddObserver) {
       WebEffectiveConnectionType::kTypeUnknown, kUnknownRtt, kUnknownRtt,
       kUnknownThroughputMbps, SaveData::kOff));
 
+  VerifyInitialMetricsWithWebHoldbackState(
+      kWebConnectionTypeUnknown, kNoneMaxBandwidthMbps,
+      WebEffectiveConnectionType::kTypeUnknown, kUnknownRtt,
+      kUnknownThroughputMbps, SaveData::kOff);
+
   // Change max. bandwidth and the network quality estimates.
   SetConnection(kWebConnectionTypeBluetooth, kBluetoothMaxBandwidthMbps,
                 WebEffectiveConnectionType::kType3G, kEthernetHttpRtt,
@@ -264,6 +299,11 @@ TEST_F(NetworkStateNotifierTest, AddObserver) {
       WebEffectiveConnectionType::kType3G, kEthernetHttpRtt,
       kEthernetTransportRtt, kEthernetThroughputMbps, SaveData::kOff));
   EXPECT_EQ(observer.CallbackCount(), 2);
+
+  VerifyInitialMetricsWithWebHoldbackState(
+      kWebConnectionTypeBluetooth, kBluetoothMaxBandwidthMbps,
+      WebEffectiveConnectionType::kType3G, kEthernetHttpRtt,
+      kEthernetThroughputMbps, SaveData::kOff);
 
   // Only change the connection type.
   SetConnection(kWebConnectionTypeEthernet, kBluetoothMaxBandwidthMbps,
@@ -567,6 +607,10 @@ TEST_F(NetworkStateNotifierTest, SetNetworkConnectionInfoOverride) {
   EXPECT_TRUE(notifier_.OnLine());
   EXPECT_EQ(kWebConnectionTypeBluetooth, notifier_.ConnectionType());
   EXPECT_EQ(kBluetoothMaxBandwidthMbps, notifier_.MaxBandwidth());
+  VerifyInitialMetricsWithWebHoldbackState(
+      kWebConnectionTypeBluetooth, kBluetoothMaxBandwidthMbps,
+      WebEffectiveConnectionType::kTypeUnknown, kUnknownRtt,
+      kUnknownThroughputMbps, SaveData::kOff);
 
   notifier_.SetNetworkConnectionInfoOverride(
       true, kWebConnectionTypeEthernet, WebEffectiveConnectionType::kType4G,
@@ -579,6 +623,10 @@ TEST_F(NetworkStateNotifierTest, SetNetworkConnectionInfoOverride) {
   EXPECT_TRUE(notifier_.OnLine());
   EXPECT_EQ(kWebConnectionTypeEthernet, notifier_.ConnectionType());
   EXPECT_EQ(kEthernetMaxBandwidthMbps, notifier_.MaxBandwidth());
+  VerifyInitialMetricsWithWebHoldbackState(
+      kWebConnectionTypeEthernet, kEthernetMaxBandwidthMbps,
+      WebEffectiveConnectionType::kType4G, kEthernetHttpRtt,
+      kEthernetMaxBandwidthMbps, SaveData::kOff);
 
   // When override is active, calls to setOnLine and setConnection are temporary
   // ignored.
@@ -594,6 +642,10 @@ TEST_F(NetworkStateNotifierTest, SetNetworkConnectionInfoOverride) {
   EXPECT_TRUE(notifier_.OnLine());
   EXPECT_EQ(kWebConnectionTypeEthernet, notifier_.ConnectionType());
   EXPECT_EQ(kEthernetMaxBandwidthMbps, notifier_.MaxBandwidth());
+  VerifyInitialMetricsWithWebHoldbackState(
+      kWebConnectionTypeEthernet, kEthernetMaxBandwidthMbps,
+      WebEffectiveConnectionType::kType4G, kEthernetHttpRtt,
+      kEthernetMaxBandwidthMbps, SaveData::kOff);
 
   notifier_.ClearOverride();
   RunPendingTasks();
@@ -604,6 +656,10 @@ TEST_F(NetworkStateNotifierTest, SetNetworkConnectionInfoOverride) {
   EXPECT_FALSE(notifier_.OnLine());
   EXPECT_EQ(kWebConnectionTypeNone, notifier_.ConnectionType());
   EXPECT_EQ(kNoneMaxBandwidthMbps, notifier_.MaxBandwidth());
+  VerifyInitialMetricsWithWebHoldbackState(
+      kWebConnectionTypeNone, kNoneMaxBandwidthMbps,
+      WebEffectiveConnectionType::kTypeUnknown, kUnknownRtt,
+      kUnknownThroughputMbps, SaveData::kOff);
 }
 
 TEST_F(NetworkStateNotifierTest, SetNetworkQualityInfoOverride) {
@@ -622,6 +678,10 @@ TEST_F(NetworkStateNotifierTest, SetNetworkQualityInfoOverride) {
   EXPECT_TRUE(notifier_.OnLine());
   EXPECT_EQ(kWebConnectionTypeBluetooth, notifier_.ConnectionType());
   EXPECT_EQ(kBluetoothMaxBandwidthMbps, notifier_.MaxBandwidth());
+  VerifyInitialMetricsWithWebHoldbackState(
+      kWebConnectionTypeBluetooth, kBluetoothMaxBandwidthMbps,
+      WebEffectiveConnectionType::kTypeUnknown, kUnknownRtt,
+      kUnknownThroughputMbps, SaveData::kOff);
 
   notifier_.SetNetworkConnectionInfoOverride(
       true, kWebConnectionTypeOther, WebEffectiveConnectionType::kType3G,
@@ -638,6 +698,10 @@ TEST_F(NetworkStateNotifierTest, SetNetworkQualityInfoOverride) {
   EXPECT_EQ(WebEffectiveConnectionType::kType3G, notifier_.EffectiveType());
   EXPECT_EQ(kEthernetHttpRtt, notifier_.HttpRtt());
   EXPECT_EQ(kEthernetThroughputMbps, notifier_.DownlinkThroughputMbps());
+  VerifyInitialMetricsWithWebHoldbackState(
+      kWebConnectionTypeOther, kEthernetThroughputMbps.value(),
+      WebEffectiveConnectionType::kType3G, kEthernetHttpRtt,
+      kEthernetThroughputMbps, SaveData::kOff);
 
   // When override is active, calls to SetConnection are temporary ignored.
   notifier_.SetOnLine(false);
@@ -937,7 +1001,7 @@ TEST_F(NetworkStateNotifierTest, SetNetworkConnectionInfoOverrideGenerateECTs) {
       kNoneMaxBandwidthMbps, SaveData::kOff));
 
   const struct {
-    Optional<TimeDelta> rtt;
+    base::Optional<TimeDelta> rtt;
     WebEffectiveConnectionType expected_effective_connection_type;
   } tests[] = {
       {TimeDelta::FromMilliseconds(100), WebEffectiveConnectionType::kType4G},
@@ -960,6 +1024,31 @@ TEST_F(NetworkStateNotifierTest, SetNetworkConnectionInfoOverrideGenerateECTs) {
         test.expected_effective_connection_type, test.rtt, kUnknownRtt,
         kNoneMaxBandwidthMbps, SaveData::kOff));
   }
+}
+
+// Verify that network state notifier APIs return the correct value when the
+// network quality web holdback experiment is enabled.
+TEST_F(NetworkStateNotifierTest, SetNetInfoHoldback) {
+  VerifyInitialMetricsWithWebHoldbackState(
+      kWebConnectionTypeUnknown, kNoneMaxBandwidthMbps,
+      WebEffectiveConnectionType::kTypeUnknown, kUnknownRtt,
+      kUnknownThroughputMbps, SaveData::kOff);
+
+  EXPECT_FALSE(notifier_.GetWebHoldbackEffectiveType().has_value());
+  EXPECT_FALSE(notifier_.GetWebHoldbackHttpRtt().has_value());
+  EXPECT_FALSE(notifier_.GetWebHoldbackDownlinkThroughputMbps().has_value());
+
+  notifier_.SetNetworkQualityWebHoldback(WebEffectiveConnectionType::kType2G);
+  VerifyInitialMetricsWithWebHoldbackState(
+      kWebConnectionTypeUnknown, kNoneMaxBandwidthMbps,
+      WebEffectiveConnectionType::kType2G,
+      base::TimeDelta::FromMilliseconds(1800), 0.075, SaveData::kOff);
+
+  EXPECT_EQ(WebEffectiveConnectionType::kType2G,
+            notifier_.GetWebHoldbackEffectiveType().value());
+  EXPECT_EQ(base::TimeDelta::FromMilliseconds(1800),
+            notifier_.GetWebHoldbackHttpRtt().value());
+  EXPECT_EQ(0.075, notifier_.GetWebHoldbackDownlinkThroughputMbps().value());
 }
 
 }  // namespace blink

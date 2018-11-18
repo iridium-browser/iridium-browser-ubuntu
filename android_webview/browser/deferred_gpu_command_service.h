@@ -13,11 +13,10 @@
 #include "base/containers/queue.h"
 #include "base/lazy_instance.h"
 #include "base/macros.h"
-#include "base/memory/ref_counted.h"
 #include "base/threading/thread_local.h"
 #include "base/time/time.h"
 #include "gpu/config/gpu_info.h"
-#include "gpu/ipc/in_process_command_buffer.h"
+#include "gpu/ipc/command_buffer_task_executor.h"
 
 namespace gpu {
 struct GpuFeatureInfo;
@@ -41,51 +40,61 @@ class ScopedAllowGL {
   DISALLOW_COPY_AND_ASSIGN(ScopedAllowGL);
 };
 
-class DeferredGpuCommandService
-    : public gpu::InProcessCommandBuffer::Service,
-      public base::RefCountedThreadSafe<DeferredGpuCommandService> {
+class TaskForwardingSequence;
+
+class DeferredGpuCommandService : public gpu::CommandBufferTaskExecutor {
  public:
   static DeferredGpuCommandService* GetInstance();
 
-  void ScheduleTask(base::OnceClosure task) override;
-  void ScheduleDelayedWork(base::OnceClosure task) override;
-  bool UseVirtualizedGLContexts() override;
-  gpu::SyncPointManager* sync_point_manager() override;
-
-  void RunTasks();
-  // If |is_idle| is false, this will only run older idle tasks.
-  void PerformIdleWork(bool is_idle);
-  // Flush the idle queue until it is empty. This is different from
-  // PerformIdleWork(is_idle = true), which does not run any newly scheduled
-  // idle tasks during the idle run.
-  void PerformAllIdleWork();
-
-  void AddRef() const override;
-  void Release() const override;
+  // gpu::CommandBufferTaskExecutor implementation.
+  bool ForceVirtualizedGLContexts() const override;
+  bool ShouldCreateMemoryTracker() const override;
   bool BlockThreadOnWaitSyncToken() const override;
+  std::unique_ptr<gpu::CommandBufferTaskExecutor::Sequence> CreateSequence()
+      override;
+  void ScheduleOutOfOrderTask(base::OnceClosure task) override;
+  void ScheduleDelayedWork(base::OnceClosure task) override;
 
   const gpu::GPUInfo& gpu_info() const { return gpu_info_; }
 
   bool CanSupportThreadedTextureMailbox() const;
 
+  // If |is_idle| is false, this will only run older idle tasks.
+  void PerformIdleWork(bool is_idle);
+
+  // Flush the idle queue until it is empty. This is different from
+  // PerformIdleWork(is_idle = true), which does not run any newly scheduled
+  // idle tasks during the idle run.
+  void PerformAllIdleWork();
+
  protected:
   ~DeferredGpuCommandService() override;
-  friend class base::RefCountedThreadSafe<DeferredGpuCommandService>;
 
  private:
   friend class ScopedAllowGL;
+  friend class TaskForwardingSequence;
+
   static void RequestProcessGL(bool for_idle);
 
-  DeferredGpuCommandService(const gpu::GpuPreferences& gpu_preferences,
-                            const gpu::GPUInfo& gpu_info,
-                            const gpu::GpuFeatureInfo& gpu_feature_info);
+  DeferredGpuCommandService(
+      std::unique_ptr<gpu::SyncPointManager> sync_point_manager,
+      const gpu::GpuPreferences& gpu_preferences,
+      const gpu::GPUInfo& gpu_info,
+      const gpu::GpuFeatureInfo& gpu_feature_info);
 
   static DeferredGpuCommandService* CreateDeferredGpuCommandService();
 
   size_t IdleQueueSize();
 
+  // Called by ScopedAllowGL and ScheduleTask().
+  void RunTasks();
+
+  // Called by TaskForwardingSequence. |out_of_order| indicates if task should
+  // be run ahead of already enqueued tasks.
+  void ScheduleTask(base::OnceClosure task, bool out_of_order);
+
   base::Lock tasks_lock_;
-  base::queue<base::OnceClosure> tasks_;
+  base::circular_deque<base::OnceClosure> tasks_;
   base::queue<std::pair<base::Time, base::OnceClosure>> idle_tasks_;
 
   std::unique_ptr<gpu::SyncPointManager> sync_point_manager_;

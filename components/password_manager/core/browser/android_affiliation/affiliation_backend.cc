@@ -21,16 +21,15 @@
 #include "components/password_manager/core/browser/android_affiliation/affiliation_fetcher.h"
 #include "components/password_manager/core/browser/android_affiliation/facet_manager.h"
 #include "net/url_request/url_request_context_getter.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 
 namespace password_manager {
 
 AffiliationBackend::AffiliationBackend(
-    const scoped_refptr<net::URLRequestContextGetter>& request_context_getter,
     const scoped_refptr<base::SequencedTaskRunner>& task_runner,
     base::Clock* time_source,
     const base::TickClock* time_tick_source)
-    : request_context_getter_(request_context_getter),
-      task_runner_(task_runner),
+    : task_runner_(task_runner),
       clock_(time_source),
       tick_clock_(time_tick_source),
       construction_time_(clock_->Now()),
@@ -42,11 +41,15 @@ AffiliationBackend::AffiliationBackend(
 AffiliationBackend::~AffiliationBackend() {
 }
 
-void AffiliationBackend::Initialize(const base::FilePath& db_path) {
+void AffiliationBackend::Initialize(
+    std::unique_ptr<network::SharedURLLoaderFactoryInfo>
+        url_loader_factory_info,
+    network::NetworkConnectionTracker* network_connection_tracker,
+    const base::FilePath& db_path) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(!throttler_);
-  throttler_.reset(
-      new AffiliationFetchThrottler(this, task_runner_, tick_clock_));
+  throttler_.reset(new AffiliationFetchThrottler(
+      this, task_runner_, network_connection_tracker, tick_clock_));
 
   // TODO(engedy): Currently, when Init() returns false, it always poisons the
   // DB, so subsequent operations will silently fail. Consider either fully
@@ -54,6 +57,10 @@ void AffiliationBackend::Initialize(const base::FilePath& db_path) {
   // return value here. See: https://crbug.com/478831.
   cache_.reset(new AffiliationDatabase());
   cache_->Init(db_path);
+  DCHECK(url_loader_factory_info);
+  DCHECK(!url_loader_factory_);
+  url_loader_factory_ = network::SharedURLLoaderFactory::Create(
+      std::move(url_loader_factory_info));
 }
 
 void AffiliationBackend::GetAffiliationsAndBranding(
@@ -165,8 +172,8 @@ void AffiliationBackend::RequestNotificationAtTime(const FacetURI& facet_uri,
   // callback. crbug.com/437865.
   task_runner_->PostDelayedTask(
       FROM_HERE,
-      base::Bind(&AffiliationBackend::OnSendNotification,
-                 weak_ptr_factory_.GetWeakPtr(), facet_uri),
+      base::BindOnce(&AffiliationBackend::OnSendNotification,
+                     weak_ptr_factory_.GetWeakPtr(), facet_uri),
       time - clock_->Now());
 }
 
@@ -252,7 +259,7 @@ bool AffiliationBackend::OnCanSendNetworkRequest() {
   if (requested_facet_uris.empty())
     return false;
 
-  fetcher_.reset(AffiliationFetcher::Create(request_context_getter_.get(),
+  fetcher_.reset(AffiliationFetcher::Create(url_loader_factory_,
                                             requested_facet_uris, this));
   fetcher_->StartRequest();
   ReportStatistics(requested_facet_uris.size());

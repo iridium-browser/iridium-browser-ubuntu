@@ -14,7 +14,7 @@
 #include "core/fpdfapi/parser/cpdf_stream_acc.h"
 #include "core/fxcrt/retain_ptr.h"
 
-class CPDF_SampledFunc : public CPDF_Function {
+class CPDF_SampledFunc final : public CPDF_Function {
  public:
   struct SampleEncodeInfo {
     float encode_max;
@@ -31,8 +31,9 @@ class CPDF_SampledFunc : public CPDF_Function {
   ~CPDF_SampledFunc() override;
 
   // CPDF_Function
-  bool v_Init(CPDF_Object* pObj, std::set<CPDF_Object*>* pVisited) override;
-  bool v_Call(float* inputs, float* results) const override;
+  bool v_Init(const CPDF_Object* pObj,
+              std::set<const CPDF_Object*>* pVisited) override;
+  bool v_Call(const float* inputs, float* results) const override;
 
   const std::vector<SampleEncodeInfo>& GetEncodeInfo() const {
     return m_EncodeInfo;

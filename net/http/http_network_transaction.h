@@ -15,6 +15,8 @@
 #include "base/memory/ref_counted.h"
 #include "base/time/time.h"
 #include "crypto/ec_private_key.h"
+#include "net/base/completion_once_callback.h"
+#include "net/base/completion_repeating_callback.h"
 #include "net/base/net_error_details.h"
 #include "net/base/net_export.h"
 #include "net/base/request_priority.h"
@@ -30,10 +32,6 @@
 #include "net/ssl/channel_id_service.h"
 #include "net/ssl/ssl_config_service.h"
 #include "net/websockets/websocket_handshake_stream_base.h"
-
-namespace crypto {
-class ECPrivateKey;
-}
 
 namespace net {
 
@@ -57,19 +55,19 @@ class NET_EXPORT_PRIVATE HttpNetworkTransaction
 
   // HttpTransaction methods:
   int Start(const HttpRequestInfo* request_info,
-            const CompletionCallback& callback,
+            CompletionOnceCallback callback,
             const NetLogWithSource& net_log) override;
-  int RestartIgnoringLastError(const CompletionCallback& callback) override;
+  int RestartIgnoringLastError(CompletionOnceCallback callback) override;
   int RestartWithCertificate(scoped_refptr<X509Certificate> client_cert,
                              scoped_refptr<SSLPrivateKey> client_private_key,
-                             const CompletionCallback& callback) override;
+                             CompletionOnceCallback callback) override;
   int RestartWithAuth(const AuthCredentials& credentials,
-                      const CompletionCallback& callback) override;
+                      CompletionOnceCallback callback) override;
   bool IsReadyToRestartForAuth() override;
 
   int Read(IOBuffer* buf,
            int buf_len,
-           const CompletionCallback& callback) override;
+           CompletionOnceCallback callback) override;
   void StopCaching() override;
   bool GetFullRequestHeaders(HttpRequestHeaders* headers) const override;
   int64_t GetTotalReceivedBytes() const override;
@@ -129,6 +127,7 @@ class NET_EXPORT_PRIVATE HttpNetworkTransaction
   FRIEND_TEST_ALL_PREFIXES(HttpNetworkTransactionTest, ResetStateForRestart);
   FRIEND_TEST_ALL_PREFIXES(HttpNetworkTransactionTest,
                            CreateWebSocketHandshakeStream);
+  FRIEND_TEST_ALL_PREFIXES(HttpNetworkTransactionSSLTest, ChannelID);
   FRIEND_TEST_ALL_PREFIXES(SpdyNetworkTransactionTest, WindowUpdateReceived);
   FRIEND_TEST_ALL_PREFIXES(SpdyNetworkTransactionTest, WindowUpdateSent);
   FRIEND_TEST_ALL_PREFIXES(SpdyNetworkTransactionTest, WindowUpdateOverflow);
@@ -148,10 +147,6 @@ class NET_EXPORT_PRIVATE HttpNetworkTransaction
     STATE_GENERATE_PROXY_AUTH_TOKEN_COMPLETE,
     STATE_GENERATE_SERVER_AUTH_TOKEN,
     STATE_GENERATE_SERVER_AUTH_TOKEN_COMPLETE,
-    STATE_GET_PROVIDED_TOKEN_BINDING_KEY,
-    STATE_GET_PROVIDED_TOKEN_BINDING_KEY_COMPLETE,
-    STATE_GET_REFERRED_TOKEN_BINDING_KEY,
-    STATE_GET_REFERRED_TOKEN_BINDING_KEY_COMPLETE,
     STATE_INIT_REQUEST_BODY,
     STATE_INIT_REQUEST_BODY_COMPLETE,
     STATE_BUILD_REQUEST,
@@ -168,8 +163,6 @@ class NET_EXPORT_PRIVATE HttpNetworkTransaction
   };
 
   bool IsSecureRequest() const;
-  bool IsTokenBindingEnabled() const;
-  void RecordTokenBindingSupport() const;
 
   // Returns true if the request is using an HTTP(S) proxy without being
   // tunneled via the CONNECT method.
@@ -194,10 +187,6 @@ class NET_EXPORT_PRIVATE HttpNetworkTransaction
   int DoGenerateProxyAuthTokenComplete(int result);
   int DoGenerateServerAuthToken();
   int DoGenerateServerAuthTokenComplete(int result);
-  int DoGetProvidedTokenBindingKey();
-  int DoGetProvidedTokenBindingKeyComplete(int result);
-  int DoGetReferredTokenBindingKey();
-  int DoGetReferredTokenBindingKeyComplete(int result);
   int DoInitRequestBody();
   int DoInitRequestBodyComplete(int result);
   int DoBuildRequest();
@@ -212,7 +201,6 @@ class NET_EXPORT_PRIVATE HttpNetworkTransaction
   int DoDrainBodyForAuthRestartComplete(int result);
 
   int BuildRequestHeaders(bool using_http_proxy_without_tunnel);
-  int BuildTokenBindingHeader(std::string* out);
 
   // Writes a log message to help debugging in the field when we block a proxy
   // response to a CONNECT request.
@@ -307,8 +295,8 @@ class NET_EXPORT_PRIVATE HttpNetworkTransaction
   // cleared by RestartWithAuth().
   HttpAuth::Target pending_auth_target_;
 
-  CompletionCallback io_callback_;
-  CompletionCallback callback_;
+  CompletionRepeatingCallback io_callback_;
+  CompletionOnceCallback callback_;
 
   HttpNetworkSession* session_;
 
@@ -347,13 +335,6 @@ class NET_EXPORT_PRIVATE HttpNetworkTransaction
   // sense of SSLConfig (related to https://crbug.com/488043).
   SSLConfig server_ssl_config_;
   SSLConfig proxy_ssl_config_;
-
-  // Keys to use for signing message in Token Binding header.
-  std::unique_ptr<crypto::ECPrivateKey> provided_token_binding_key_;
-  std::unique_ptr<crypto::ECPrivateKey> referred_token_binding_key_;
-  // Object to manage lookup of |provided_token_binding_key_| and
-  // |referred_token_binding_key_|.
-  ChannelIDService::Request token_binding_request_;
 
   HttpRequestHeaders request_headers_;
 

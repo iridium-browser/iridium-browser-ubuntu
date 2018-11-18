@@ -10,6 +10,7 @@
 #include "base/macros.h"
 #include "chrome/browser/ui/autofill/autofill_dialog_models.h"
 #include "components/autofill/core/browser/ui/card_unmask_prompt_view.h"
+#include "ui/views/bubble/bubble_dialog_delegate_view.h"
 #include "ui/views/controls/combobox/combobox_listener.h"
 #include "ui/views/controls/link_listener.h"
 #include "ui/views/controls/textfield/textfield_controller.h"
@@ -21,7 +22,7 @@ class WebContents;
 
 namespace views {
 class Checkbox;
-class ImageView;
+class GridLayout;
 class Label;
 class Link;
 class Textfield;
@@ -34,7 +35,7 @@ class CardUnmaskPromptController;
 
 class CardUnmaskPromptViews : public CardUnmaskPromptView,
                               public views::ComboboxListener,
-                              public views::DialogDelegateView,
+                              public views::BubbleDialogDelegateView,
                               public views::TextfieldController,
                               public views::LinkListener {
  public:
@@ -55,10 +56,12 @@ class CardUnmaskPromptViews : public CardUnmaskPromptView,
 
   // views::View
   gfx::Size CalculatePreferredSize() const override;
+  void AddedToWidget() override;
   void OnNativeThemeChanged(const ui::NativeTheme* theme) override;
   ui::ModalType GetModalType() const override;
   base::string16 GetWindowTitle() const override;
   void DeleteDelegate() override;
+  int GetDialogButtons() const override;
   base::string16 GetDialogButtonLabel(ui::DialogButton button) const override;
   bool IsDialogButtonEnabled(ui::DialogButton button) const override;
   View* GetInitiallyFocusedView() override;
@@ -85,6 +88,7 @@ class CardUnmaskPromptViews : public CardUnmaskPromptView,
   void SetInputsEnabled(bool enabled);
   void ShowNewCardLink();
   void ClosePrompt();
+  views::GridLayout* ResetOverlayLayout();
 
   CardUnmaskPromptController* controller_;
   content::WebContents* web_contents_;
@@ -103,20 +107,18 @@ class CardUnmaskPromptViews : public CardUnmaskPromptView,
 
   views::Link* new_card_link_ = nullptr;
 
-  // The error icon and label for most errors, which live beneath the inputs.
-  views::ImageView* error_icon_ = nullptr;
+  // The error row view and label for most errors, which live beneath the
+  // inputs.
+  views::View* temporary_error_ = nullptr;
   views::Label* error_label_ = nullptr;
-  // The error label for permanent errors (where the user can't retry).
-  views::Label* permanent_error_label_ = nullptr;
 
   views::View* controls_container_ = nullptr;
-  views::View* storage_row_ = nullptr;
   views::Checkbox* storage_checkbox_ = nullptr;
 
-  // Elements related to progress when the request is being made.
-  views::View* progress_overlay_ = nullptr;
+  // Elements related to progress or error when the request is being made.
+  views::View* overlay_ = nullptr;
+  views::Label* overlay_label_ = nullptr;
   views::Throbber* progress_throbber_ = nullptr;
-  views::Label* progress_label_ = nullptr;
 
   base::WeakPtrFactory<CardUnmaskPromptViews> weak_ptr_factory_;
 

@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 import("//build/buildflag_header.gni")
+import("//build/config/jumbo.gni")
 import("//device/vr/buildflags/buildflags.gni")
 import("//third_party/protobuf/proto_library.gni")
 import("//components/vector_icons/vector_icons.gni")
@@ -20,23 +21,31 @@ aggregate_vector_icons("omnibox_vector_icons") {
   icon_directory = "vector_icons"
 
   icons = [
+    "answer_currency.icon",
+    "answer_default.icon",
+    "answer_dictionary.icon",
+    "answer_finance.icon",
+    "answer_sunrise.icon",
+    "answer_when_is.icon",
+    "bookmark.icon",
+    "clear.icon",
+    "drive_docs.icon",
+    "drive_forms.icon",
+    "drive_logo.icon",
+    "drive_sheets.icon",
+    "drive_slides.icon",
     "blank.icon",
     "calculator.icon",
     "extension_app.icon",
-    "extension_app_20.icon",
-    "http.icon",
     "keyword_search.icon",
-    "star.icon",
+    "page.icon",
+    "pedal.icon",
     "switch.icon",
     "tab.icon",
-    "touchable_bookmark.icon",
-    "touchable_clear.icon",
-    "touchable_page.icon",
-    "touchable_search.icon",
   ]
 }
 
-static_library("browser") {
+jumbo_static_library("browser") {
   sources = [
     "answers_cache.cc",
     "answers_cache.h",
@@ -66,6 +75,12 @@ static_library("browser") {
     "clipboard_url_provider.h",
     "contextual_suggestions_service.cc",
     "contextual_suggestions_service.h",
+    "document_provider.cc",
+    "document_provider.h",
+    "document_suggestions_service.cc",
+    "document_suggestions_service.h",
+    "favicon_cache.cc",
+    "favicon_cache.h",
     "history_match.cc",
     "history_match.h",
     "history_provider.cc",
@@ -100,6 +115,12 @@ static_library("browser") {
     "omnibox_metrics_provider.cc",
     "omnibox_metrics_provider.h",
     "omnibox_navigation_observer.h",
+    "omnibox_pedal.cc",
+    "omnibox_pedal.h",
+    "omnibox_pedal_implementations.cc",
+    "omnibox_pedal_implementations.h",
+    "omnibox_pedal_provider.cc",
+    "omnibox_pedal_provider.h",
     "omnibox_popup_model.cc",
     "omnibox_popup_model.h",
     "omnibox_popup_view.h",
@@ -109,10 +130,8 @@ static_library("browser") {
     "omnibox_switches.h",
     "omnibox_view.cc",
     "omnibox_view.h",
-    "physical_web_node.cc",
-    "physical_web_node.h",
-    "physical_web_provider.cc",
-    "physical_web_provider.h",
+    "query_in_omnibox.cc",
+    "query_in_omnibox.h",
     "scored_history_match.cc",
     "scored_history_match.h",
     "search_provider.cc",
@@ -157,11 +176,12 @@ static_library("browser") {
     "//base:i18n",
     "//components/bookmarks/browser",
     "//components/data_use_measurement/core",
+    "//components/favicon/core",
+    "//components/favicon_base",
     "//components/keyed_service/core",
     "//components/metrics",
     "//components/navigation_metrics",
     "//components/open_from_clipboard",
-    "//components/physical_web/data_source",
     "//components/pref_registry",
     "//components/prefs",
     "//components/query_parser",
@@ -193,9 +213,6 @@ static_library("browser") {
       "//components/vector_icons",
     ]
   }
-
-  # TODO(brettw) Fix the include cycle and remove this line.
-  allow_circular_includes_from = [ "//components/search_engines" ]
 }
 
 if (is_android) {
@@ -218,7 +235,7 @@ proto_library("in_memory_url_index_cache_proto") {
   ]
 }
 
-static_library("test_support") {
+jumbo_static_library("test_support") {
   testonly = true
   sources = [
     "fake_autocomplete_provider_client.cc",
@@ -237,6 +254,8 @@ static_library("test_support") {
     "test_omnibox_client.h",
     "test_omnibox_edit_controller.cc",
     "test_omnibox_edit_controller.h",
+    "test_omnibox_edit_model.cc",
+    "test_omnibox_edit_model.h",
     "test_omnibox_view.cc",
     "test_omnibox_view.h",
     "test_scheme_classifier.cc",
@@ -255,6 +274,7 @@ static_library("test_support") {
     "//components/sessions",
     "//components/toolbar:test_support",
     "//net",
+    "//services/network:test_support",
     "//testing/gmock",
     "//testing/gtest",
     "//third_party/metrics_proto",
@@ -290,17 +310,22 @@ source_set("unit_tests") {
     "bookmark_provider_unittest.cc",
     "builtin_provider_unittest.cc",
     "clipboard_url_provider_unittest.cc",
+    "document_provider_unittest.cc",
+    "favicon_cache_unittest.cc",
     "history_provider_unittest.cc",
     "history_quick_provider_unittest.cc",
     "history_url_provider_unittest.cc",
     "in_memory_url_index_types_unittest.cc",
     "in_memory_url_index_unittest.cc",
     "keyword_provider_unittest.cc",
+    "omnibox_controller_unittest.cc",
     "omnibox_edit_model_unittest.cc",
     "omnibox_field_trial_unittest.cc",
+    "omnibox_pedal_provider_unittest.cc",
+    "omnibox_pedal_unittest.cc",
     "omnibox_popup_model_unittest.cc",
     "omnibox_view_unittest.cc",
-    "physical_web_provider_unittest.cc",
+    "query_in_omnibox_unittest.cc",
     "scored_history_match_unittest.cc",
     "search_suggestion_parser_unittest.cc",
     "shortcuts_backend_unittest.cc",
@@ -318,12 +343,12 @@ source_set("unit_tests") {
     ":test_support",
     ":unit_tests_bundle_data",
     "//base",
+    "//base/test:test_support",
     "//components/bookmarks/browser",
     "//components/bookmarks/test",
+    "//components/favicon/core/test:test_support",
     "//components/history/core/test",
     "//components/open_from_clipboard:test_support",
-    "//components/physical_web/data_source",
-    "//components/physical_web/data_source:test_support",
     "//components/prefs:test_support",
     "//components/search",
     "//components/search_engines",
@@ -332,12 +357,12 @@ source_set("unit_tests") {
     "//components/toolbar:test_support",
     "//components/url_formatter",
     "//components/variations",
-    "//net:test_support",
+    "//services/network:test_support",
     "//sql",
     "//sql:test_support",
     "//testing/gmock",
     "//testing/gtest",
-    "//ui/base:base",
+    "//ui/base:test_support",
     "//url",
   ]
 }

@@ -20,7 +20,9 @@
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/history/history_utils.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/search/ntp_features.h"
 #include "chrome/common/chrome_features.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/locale_settings.h"
@@ -31,6 +33,7 @@
 #include "components/history/core/browser/top_sites_provider.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/pref_registry/pref_registry_syncable.h"
+#include "components/prefs/pref_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "url/gurl.h"
@@ -44,37 +47,41 @@ bool IsTopSitesDisabled() {
 }
 
 struct RawPrepopulatedPage {
-  int url_id;        // The resource for the page URL.
-  int title_id;      // The resource for the page title.
-  int favicon_id;    // The raw data resource for the favicon.
-  int thumbnail_id;  // The raw data resource for the thumbnail.
-  SkColor color;     // The best color to highlight the page (should roughly
-                     // match favicon).
+  int url_id;            // The resource for the page URL.
+  int title_id;          // The resource for the page title.
+  int favicon_id;        // The raw data resource for the favicon.
+  int large_favicon_id;  // The raw data resource for the larger favicon.
+  int thumbnail_id;      // The raw data resource for the thumbnail.
+  SkColor color;         // The best color to highlight the page (should
+                         // roughly match favicon).
 };
 
 #if !defined(OS_ANDROID)
 // Android does not use prepopulated pages.
 const RawPrepopulatedPage kRawPrepopulatedPages[] = {
     {
-     IDS_WEBSTORE_URL,
-     IDS_EXTENSION_WEB_STORE_TITLE,
-     IDR_WEBSTORE_ICON_16,
-     IDR_NEWTAB_WEBSTORE_THUMBNAIL,
-     SkColorSetRGB(63, 132, 197),
+        IDS_WEBSTORE_URL, IDS_EXTENSION_WEB_STORE_TITLE_SHORT,
+        IDR_WEBSTORE_ICON_16, IDR_WEBSTORE_ICON_32,
+        IDR_NEWTAB_WEBSTORE_THUMBNAIL, SkColorSetRGB(63, 132, 197),
     },
 };
 #endif
 
 void InitializePrepopulatedPageList(
+    PrefService* prefs,
     history::PrepopulatedPageList* prepopulated_pages) {
 #if !defined(OS_ANDROID)
   DCHECK(prepopulated_pages);
+  bool hide_web_store_icon = prefs->GetBoolean(prefs::kHideWebStoreIcon);
   prepopulated_pages->reserve(arraysize(kRawPrepopulatedPages));
   for (size_t i = 0; i < arraysize(kRawPrepopulatedPages); ++i) {
     const RawPrepopulatedPage& page = kRawPrepopulatedPages[i];
+    if (hide_web_store_icon && page.url_id == IDS_WEBSTORE_URL)
+      continue;
     prepopulated_pages->push_back(history::PrepopulatedPage(
         GURL(l10n_util::GetStringUTF8(page.url_id)),
-        l10n_util::GetStringUTF16(page.title_id), page.favicon_id,
+        l10n_util::GetStringUTF16(page.title_id),
+        features::IsMDIconsEnabled() ? page.large_favicon_id : page.favicon_id,
         page.thumbnail_id, page.color));
   }
 #endif
@@ -115,7 +122,6 @@ scoped_refptr<history::TopSites> TopSitesFactory::BuildTopSites(
   history::HistoryService* history_service =
       HistoryServiceFactory::GetForProfile(profile,
                                            ServiceAccessType::EXPLICIT_ACCESS);
-
   scoped_refptr<history::TopSitesImpl> top_sites(new history::TopSitesImpl(
       profile->GetPrefs(), history_service,
       CreateTopSitesProvider(profile, history_service), prepopulated_page_list,
@@ -141,7 +147,8 @@ TopSitesFactory::~TopSitesFactory() {
 scoped_refptr<RefcountedKeyedService> TopSitesFactory::BuildServiceInstanceFor(
     content::BrowserContext* context) const {
   history::PrepopulatedPageList prepopulated_pages;
-  InitializePrepopulatedPageList(&prepopulated_pages);
+  InitializePrepopulatedPageList(
+      Profile::FromBrowserContext(context)->GetPrefs(), &prepopulated_pages);
   return BuildTopSites(context, prepopulated_pages);
 }
 

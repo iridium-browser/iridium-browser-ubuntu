@@ -13,7 +13,6 @@
 /gsutil.vpython recipes
 
 # Extensionless tools we want and support scripts.
-/apply_issue                  recipes
 /clang*                       recipes
 /depot-tools-auth             recipes
 /download_from_google_storage recipes
@@ -25,6 +24,7 @@
 /pylint*                      recipes
 /repo                         recipes
 /roll-dep*                    recipes
+/yapf*                        recipes
 
 # Symlinks
 /cbuildbot      recipes
@@ -37,7 +37,6 @@
 # move to vpython/cipd.
 /third_party/**                     recipes
 /third_party/pymox/**              -recipes
-/third_party/cq_client/testdata/** -recipes
 
 /win_toolchain/** recipes
 

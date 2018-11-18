@@ -26,7 +26,7 @@ import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.UrlConstants;
-import org.chromium.chrome.browser.ntp.ContextMenuManager;
+import org.chromium.chrome.browser.native_page.ContextMenuManager;
 import org.chromium.chrome.browser.ntp.NewTabPage;
 import org.chromium.chrome.browser.ntp.cards.NewTabPageRecyclerView;
 import org.chromium.chrome.browser.snackbar.SnackbarManager;
@@ -38,9 +38,9 @@ import org.chromium.chrome.test.util.browser.RecyclerViewTestUtils;
 import org.chromium.chrome.test.util.browser.suggestions.FakeMostVisitedSites;
 import org.chromium.chrome.test.util.browser.suggestions.FakeSuggestionsSource;
 import org.chromium.chrome.test.util.browser.suggestions.SuggestionsDependenciesRule;
-import org.chromium.content.browser.test.util.Criteria;
-import org.chromium.content.browser.test.util.CriteriaHelper;
-import org.chromium.content.browser.test.util.TestTouchUtils;
+import org.chromium.content_public.browser.test.util.Criteria;
+import org.chromium.content_public.browser.test.util.CriteriaHelper;
+import org.chromium.content_public.browser.test.util.TestTouchUtils;
 import org.chromium.net.test.EmbeddedTestServer;
 
 import java.util.concurrent.ExecutionException;
@@ -105,7 +105,7 @@ public class TileGroupTest {
         final View tileView = getTileViewFor(siteToDismiss);
 
         // Dismiss the tile using the context menu.
-        invokeContextMenu(tileView, ContextMenuManager.ID_REMOVE);
+        invokeContextMenu(tileView, ContextMenuManager.ContextMenuItemId.REMOVE);
         Assert.assertTrue(mMostVisitedSites.isUrlBlacklisted(mSiteSuggestionUrls[0]));
 
         // Ensure that the removal is reflected in the ui.
@@ -131,7 +131,7 @@ public class TileGroupTest {
         Assert.assertEquals(3, tileContainer.getChildCount());
 
         // Dismiss the tile using the context menu.
-        invokeContextMenu(tileView, ContextMenuManager.ID_REMOVE);
+        invokeContextMenu(tileView, ContextMenuManager.ContextMenuItemId.REMOVE);
 
         // Ensure that the removal update goes through.
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
@@ -171,10 +171,10 @@ public class TileGroupTest {
     }
 
     private TileGridLayout getTileGridLayout() {
-        ViewGroup aboveTheFoldView = getRecyclerView().getAboveTheFoldView();
-        Assert.assertNotNull("Unable to retrieve the AboveTheFold view.", aboveTheFoldView);
+        ViewGroup newTabPageLayout = mNtp.getNewTabPageLayout();
+        Assert.assertNotNull("Unable to retrieve the NewTabPageLayout.", newTabPageLayout);
 
-        TileGridLayout tileGridLayout = aboveTheFoldView.findViewById(R.id.tile_grid_layout);
+        TileGridLayout tileGridLayout = newTabPageLayout.findViewById(R.id.tile_grid_layout);
         Assert.assertNotNull("Unable to retrieve the TileGridLayout.", tileGridLayout);
         return tileGridLayout;
     }
@@ -216,7 +216,7 @@ public class TileGroupTest {
     private void waitForTileRemoved(final SiteSuggestion suggestion)
             throws TimeoutException, InterruptedException {
         TileGridLayout tileContainer = getTileGridLayout();
-        final TileView removedTile = tileContainer.getTileView(suggestion);
+        final SuggestionsTileView removedTile = tileContainer.getTileView(suggestion);
         if (removedTile == null) return;
 
         final CallbackHelper callback = new CallbackHelper();
@@ -242,8 +242,8 @@ public class TileGroupTest {
         tileContainer.setOnHierarchyChangeListener(new ViewGroup.OnHierarchyChangeListener() {
             @Override
             public void onChildViewAdded(View parent, View child) {
-                if (!(child instanceof TileView)) return;
-                if (!((TileView) child).getData().equals(suggestion)) return;
+                if (!(child instanceof SuggestionsTileView)) return;
+                if (!((SuggestionsTileView) child).getData().equals(suggestion)) return;
 
                 callback.notifyCalled();
             }

@@ -57,12 +57,12 @@ class WebURLLoader {
   // |downloaded_blob|.
   virtual void LoadSynchronously(
       const WebURLRequest&,
+      WebURLLoaderClient*,
       WebURLResponse&,
       base::Optional<WebURLError>&,
       WebData&,
       int64_t& encoded_data_length,
       int64_t& encoded_body_length,
-      base::Optional<int64_t>& downloaded_file_length,
       WebBlobInfo& downloaded_blob) = 0;
 
   // Load the request asynchronously, sending notifications to the given

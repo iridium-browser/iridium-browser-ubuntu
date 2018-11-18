@@ -8,6 +8,7 @@
 
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/single_thread_task_runner.h"
 #include "content/public/common/referrer.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/renderer/loader/resource_dispatcher.h"
@@ -174,8 +175,7 @@ class ResourceFetcherImpl::ClientImpl : public network::mojom::URLLoaderClient {
 
   // network::mojom::URLLoaderClient overrides:
   void OnReceiveResponse(
-      const network::ResourceResponseHead& response_head,
-      network::mojom::DownloadedTempFilePtr downloaded_file) override {
+      const network::ResourceResponseHead& response_head) override {
     DCHECK_EQ(Status::kStarted, status_);
     // Existing callers need URL and HTTP status code. URL is already set in
     // Start().
@@ -186,10 +186,9 @@ class ResourceFetcherImpl::ClientImpl : public network::mojom::URLLoaderClient {
       const net::RedirectInfo& redirect_info,
       const network::ResourceResponseHead& response_head) override {
     DCHECK_EQ(Status::kStarted, status_);
-    loader_->FollowRedirect();
+    loader_->FollowRedirect(base::nullopt, base::nullopt);
     response_.SetURL(redirect_info.new_url);
   }
-  void OnDataDownloaded(int64_t data_len, int64_t encoded_data_len) override {}
   void OnUploadProgress(int64_t current_position,
                         int64_t total_size,
                         OnUploadProgressCallback ack_callback) override {}
@@ -286,7 +285,7 @@ void ResourceFetcherImpl::SetHeader(const std::string& header,
 
 void ResourceFetcherImpl::Start(
     blink::WebLocalFrame* frame,
-    blink::WebURLRequest::RequestContext request_context,
+    blink::mojom::RequestContextType request_context,
     scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
     const net::NetworkTrafficAnnotationTag& annotation_tag,
     Callback callback,
@@ -303,7 +302,7 @@ void ResourceFetcherImpl::Start(
         << "GETs can't have bodies.";
   }
 
-  request_.fetch_request_context_type = request_context;
+  request_.fetch_request_context_type = static_cast<int>(request_context);
   request_.site_for_cookies = frame->GetDocument().SiteForCookies();
   if (!frame->GetDocument().GetSecurityOrigin().IsNull()) {
     request_.request_initiator =
@@ -311,7 +310,7 @@ void ResourceFetcherImpl::Start(
     SetHeader(kAccessControlAllowOriginHeader,
               blink::WebSecurityOrigin::CreateUnique().ToString().Ascii());
   }
-  request_.resource_type = WebURLRequestContextToResourceType(request_context);
+  request_.resource_type = RequestContextToResourceType(request_context);
 
   client_ = std::make_unique<ClientImpl>(
       this, std::move(callback), maximum_download_size,

@@ -17,6 +17,10 @@ var media = (function() {
     manager = theManager;
   };
 
+  media.updateGeneralAudioInformation = function(audioInfo) {
+    manager.updateGeneralAudioInformation(audioInfo);
+  };
+
   media.onReceiveAudioStreamData = function(audioStreamData) {
     for (var component in audioStreamData) {
       media.updateAudioComponent(audioStreamData[component]);
@@ -24,8 +28,15 @@ var media = (function() {
   };
 
   media.onReceiveVideoCaptureCapabilities = function(videoCaptureCapabilities) {
-    manager.updateVideoCaptureCapabilities(videoCaptureCapabilities)
-  }
+    manager.updateVideoCaptureCapabilities(videoCaptureCapabilities);
+  };
+
+  media.onReceiveAudioFocusState = function(audioFocusState) {
+    if (!audioFocusState)
+      return;
+
+    manager.updateAudioFocusSessions(audioFocusState.sessions);
+  };
 
   media.updateAudioComponent = function(component) {
     var uniqueComponentId = component.owner_id + ':' + component.component_id;

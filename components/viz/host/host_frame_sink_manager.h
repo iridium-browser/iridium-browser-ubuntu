@@ -17,7 +17,9 @@
 #include "base/observer_list.h"
 #include "base/optional.h"
 #include "components/viz/common/surfaces/frame_sink_id.h"
+#include "components/viz/host/client_frame_sink_video_capturer.h"
 #include "components/viz/host/hit_test/hit_test_query.h"
+#include "components/viz/host/hit_test/hit_test_region_observer.h"
 #include "components/viz/host/host_frame_sink_client.h"
 #include "components/viz/host/viz_host_export.h"
 #include "components/viz/service/frame_sinks/compositor_frame_sink_support_manager.h"
@@ -75,6 +77,10 @@ class VIZ_HOST_EXPORT HostFrameSinkManager
   void RegisterFrameSinkId(const FrameSinkId& frame_sink_id,
                            HostFrameSinkClient* client);
 
+  // Returns true if RegisterFrameSinkId() was called with |frame_sink_id| and
+  // InvalidateFrameSinkId() has not been called.
+  bool IsFrameSinkIdRegistered(const FrameSinkId& frame_sink_id) const;
+
   // Invalidates |frame_sink_id| which cleans up any dangling temporary
   // references assigned to it. If there is a CompositorFrameSink for
   // |frame_sink_id| then it will be destroyed and the message pipe to the
@@ -114,9 +120,15 @@ class VIZ_HOST_EXPORT HostFrameSinkManager
                                  mojom::CompositorFrameSinkRequest request,
                                  mojom::CompositorFrameSinkClientPtr client);
 
-  // Registers frame sink hierarchy. Both parent and child FrameSinkIds must be
-  // registered before calling. A frame sink can have multiple parents.
-  void RegisterFrameSinkHierarchy(const FrameSinkId& parent_frame_sink_id,
+  // Registers FrameSink hierarchy. It's expected that the parent will embed
+  // the child. If |parent_frame_sink_id| is registered then it will be added as
+  // a parent of |child_frame_sink_id| and the function will return true. If
+  // |parent_frame_sink_id| is not registered then the function will return
+  // false.
+  //
+  // |child_frame_sink_id| must be registered before calling. A frame sink
+  // can have multiple parents.
+  bool RegisterFrameSinkHierarchy(const FrameSinkId& parent_frame_sink_id,
                                   const FrameSinkId& child_frame_sink_id);
 
   // Unregisters FrameSink hierarchy. Client must have registered frame sink
@@ -124,18 +136,27 @@ class VIZ_HOST_EXPORT HostFrameSinkManager
   void UnregisterFrameSinkHierarchy(const FrameSinkId& parent_frame_sink_id,
                                     const FrameSinkId& child_frame_sink_id);
 
-  void DropTemporaryReference(const SurfaceId& surface_id);
+  // Returns true if RegisterFrameSinkHierarchy() was called with the supplied
+  // arguments.
+  bool IsFrameSinkHierarchyRegistered(
+      const FrameSinkId& parent_frame_sink_id,
+      const FrameSinkId& child_frame_sink_id) const;
 
-  // These two functions should only be used by WindowServer.
-  void WillAssignTemporaryReferencesExternally();
-  void AssignTemporaryReference(const SurfaceId& surface_id,
-                                const FrameSinkId& owner);
+  // Returns the first ancestor of |start| (including |start|) that is a root.
+  base::Optional<FrameSinkId> FindRootFrameSinkId(
+      const FrameSinkId& start) const;
 
   // Asks viz to send updates regarding video activity to |observer|.
   void AddVideoDetectorObserver(mojom::VideoDetectorObserverPtr observer);
 
-  // Creates a FrameSinkVideoCapturer instance.
+  // Creates a FrameSinkVideoCapturer instance in viz.
   void CreateVideoCapturer(mojom::FrameSinkVideoCapturerRequest request);
+
+  // Creates a FrameSinkVideoCapturer instance in viz and returns a
+  // ClientFrameSinkVideoCapturer that's connected to it. Clients should prefer
+  // this version because ClientFrameSinkVideoCapturer is resilient to viz
+  // crashes.
+  std::unique_ptr<ClientFrameSinkVideoCapturer> CreateVideoCapturer();
 
   // Marks the given SurfaceIds for destruction.
   void EvictSurfaces(const std::vector<SurfaceId>& surface_ids);
@@ -149,6 +170,11 @@ class VIZ_HOST_EXPORT HostFrameSinkManager
   void RequestCopyOfOutput(const SurfaceId& surface_id,
                            std::unique_ptr<CopyOutputRequest> request);
 
+  // Add/Remove an observer to receive notifications of when the host receives
+  // new hit test data.
+  void AddHitTestRegionObserver(HitTestRegionObserver* observer);
+  void RemoveHitTestRegionObserver(HitTestRegionObserver* observer);
+
   // CompositorFrameSinkSupportManager:
   std::unique_ptr<CompositorFrameSinkSupport> CreateCompositorFrameSinkSupport(
       mojom::CompositorFrameSinkClient* client,
@@ -160,6 +186,7 @@ class VIZ_HOST_EXPORT HostFrameSinkManager
                            uint32_t frame_token) override;
 
  private:
+  friend class HostFrameSinkManagerTestApi;
   friend class HostFrameSinkManagerTestBase;
 
   struct FrameSinkData {
@@ -170,13 +197,9 @@ class VIZ_HOST_EXPORT HostFrameSinkManager
 
     bool IsFrameSinkRegistered() const { return client != nullptr; }
 
-    bool HasCompositorFrameSinkData() const {
-      return has_created_compositor_frame_sink || support;
-    }
-
     // Returns true if there is nothing in FrameSinkData and it can be deleted.
     bool IsEmpty() const {
-      return !IsFrameSinkRegistered() && !HasCompositorFrameSinkData() &&
+      return !IsFrameSinkRegistered() && !has_created_compositor_frame_sink &&
              parents.empty() && children.empty();
     }
 
@@ -197,9 +220,6 @@ class VIZ_HOST_EXPORT HostFrameSinkManager
     // will always be false if not using Mojo.
     bool has_created_compositor_frame_sink = false;
 
-    // This will be null if using Mojo.
-    CompositorFrameSinkSupport* support = nullptr;
-
     // Track frame sink hierarchy in both directions.
     std::vector<FrameSinkId> parents;
     std::vector<FrameSinkId> children;
@@ -207,14 +227,6 @@ class VIZ_HOST_EXPORT HostFrameSinkManager
    private:
     DISALLOW_COPY_AND_ASSIGN(FrameSinkData);
   };
-
-  // Provided as a callback to clear state when a CompositorFrameSinkSupport is
-  // destroyed.
-  void CompositorFrameSinkSupportDestroyed(const FrameSinkId& frame_sink_id);
-
-  // Assigns the temporary reference to the frame sink that is expected to
-  // embeded |surface_id|, otherwise drops the temporary reference.
-  void PerformAssignTemporaryReference(const SurfaceId& surface_id);
 
   // Handles connection loss to |frame_sink_manager_ptr_|. This should only
   // happen when the GPU process crashes.
@@ -224,17 +236,10 @@ class VIZ_HOST_EXPORT HostFrameSinkManager
   void RegisterAfterConnectionLoss();
 
   // mojom::FrameSinkManagerClient:
-  void OnSurfaceCreated(const SurfaceId& surface_id) override;
   void OnFirstSurfaceActivation(const SurfaceInfo& surface_info) override;
   void OnAggregatedHitTestRegionListUpdated(
       const FrameSinkId& frame_sink_id,
-      mojo::ScopedSharedBufferHandle active_handle,
-      uint32_t active_handle_size,
-      mojo::ScopedSharedBufferHandle idle_handle,
-      uint32_t idle_handle_sizes) override;
-  void SwitchActiveAggregatedHitTestRegionList(
-      const FrameSinkId& frame_sink_id,
-      uint8_t active_handle_index) override;
+      const std::vector<AggregatedHitTestRegion>& hit_test_data) override;
 
   // This will point to |frame_sink_manager_ptr_| if using Mojo or
   // |frame_sink_manager_impl_| if directly connected. Use this to make function
@@ -259,16 +264,15 @@ class VIZ_HOST_EXPORT HostFrameSinkManager
   // If |frame_sink_manager_ptr_| connection was lost.
   bool connection_was_lost_ = false;
 
-  // If a FrameSinkId owner should be assigned when a new surface is created.
-  // This will be set false if using surface sequences or if temporary
-  // references are being assigned externally.
-  bool assign_temporary_references_ = true;
-
   base::RepeatingClosure connection_lost_callback_;
 
   base::RepeatingClosure bad_message_received_from_gpu_callback_;
 
   DisplayHitTestQueryMap display_hit_test_query_;
+
+  // TODO(jonross): Separate out all hit testing work into its own separate
+  // class.
+  base::ObserverList<HitTestRegionObserver>::Unchecked observers_;
 
   base::WeakPtrFactory<HostFrameSinkManager> weak_ptr_factory_;
 

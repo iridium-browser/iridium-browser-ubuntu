@@ -235,6 +235,10 @@ Polymer({
     this.timelineView_ = view;
   },
 
+  get processViews() {
+    return this.modelTrack_.processViews;
+  },
+
   onSelectionChanged_() {
     this.showHintText_('Press \'m\' to mark current selection');
     this.viewport_.dispatchChangeEvent();
@@ -634,13 +638,13 @@ Polymer({
       this.timelineView_.setFindCtlText(
           state.toUserFriendlyString(this.viewport_));
     }.bind(this),
-        undefined, // Mouse up handler.
-        function onKeyUpDuringDrag() {
-          if (this.dragBeginEvent_) {
-            this.setDragBoxPosition_(this.dragBoxXStart_, this.dragBoxYStart_,
-                this.dragBoxXEnd_, this.dragBoxYEnd_);
-          }
-        }.bind(this));
+    undefined, // Mouse up handler.
+    function onKeyUpDuringDrag() {
+      if (this.dragBeginEvent_) {
+        this.setDragBoxPosition_(this.dragBoxXStart_, this.dragBoxYStart_,
+            this.dragBoxXEnd_, this.dragBoxYEnd_);
+      }
+    }.bind(this));
   },
 
   queueSmoothPan_(viewDeltaX, deltaY) {

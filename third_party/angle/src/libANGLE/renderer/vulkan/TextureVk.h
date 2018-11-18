@@ -18,35 +18,75 @@
 namespace rx
 {
 
-class StagingStorage final : angle::NonCopyable
+class PixelBuffer final : angle::NonCopyable
 {
   public:
-    StagingStorage();
-    ~StagingStorage();
+    PixelBuffer(RendererVk *renderer);
+    ~PixelBuffer();
 
     void release(RendererVk *renderer);
 
-    gl::Error stageSubresourceUpdate(ContextVk *contextVk,
-                                     const gl::Extents &extents,
-                                     const gl::InternalFormat &formatInfo,
-                                     const gl::PixelUnpackState &unpack,
-                                     GLenum type,
-                                     const uint8_t *pixels);
+    void removeStagedUpdates(const gl::ImageIndex &index);
 
-    vk::Error flushUpdatesToImage(RendererVk *renderer,
-                                  vk::ImageHelper *image,
-                                  vk::CommandBuffer *commandBuffer);
+    angle::Result stageSubresourceUpdate(ContextVk *contextVk,
+                                         const gl::ImageIndex &index,
+                                         const gl::Extents &extents,
+                                         const gl::Offset &offset,
+                                         const gl::InternalFormat &formatInfo,
+                                         const gl::PixelUnpackState &unpack,
+                                         GLenum type,
+                                         const uint8_t *pixels);
+
+    angle::Result stageSubresourceUpdateAndGetData(ContextVk *contextVk,
+                                                   size_t allocationSize,
+                                                   const gl::ImageIndex &imageIndex,
+                                                   const gl::Extents &extents,
+                                                   const gl::Offset &offset,
+                                                   uint8_t **destData);
+
+    angle::Result stageSubresourceUpdateFromFramebuffer(const gl::Context *context,
+                                                        const gl::ImageIndex &index,
+                                                        const gl::Rectangle &sourceArea,
+                                                        const gl::Offset &dstOffset,
+                                                        const gl::Extents &dstExtent,
+                                                        const gl::InternalFormat &formatInfo,
+                                                        FramebufferVk *framebufferVk);
+
+    // This will use the underlying dynamic buffer to allocate some memory to be used as a src or
+    // dst.
+    angle::Result allocate(ContextVk *contextVk,
+                           size_t sizeInBytes,
+                           uint8_t **ptrOut,
+                           VkBuffer *handleOut,
+                           VkDeviceSize *offsetOut,
+                           bool *newBufferAllocatedOut);
+
+    angle::Result flushUpdatesToImage(ContextVk *contextVk,
+                                      uint32_t levelCount,
+                                      vk::ImageHelper *image,
+                                      vk::CommandBuffer *commandBuffer);
+
+    bool empty() const;
 
   private:
+    struct SubresourceUpdate
+    {
+        SubresourceUpdate();
+        SubresourceUpdate(VkBuffer bufferHandle, const VkBufferImageCopy &copyRegion);
+        SubresourceUpdate(const SubresourceUpdate &other);
+
+        VkBuffer bufferHandle;
+        VkBufferImageCopy copyRegion;
+    };
+
     vk::DynamicBuffer mStagingBuffer;
-    VkBuffer mCurrentBufferHandle;
-    VkBufferImageCopy mCurrentCopyRegion;
+    std::vector<SubresourceUpdate> mSubresourceUpdates;
 };
 
-class TextureVk : public TextureImpl, public vk::CommandGraphResource
+class TextureVk : public TextureImpl
 {
   public:
-    TextureVk(const gl::TextureState &state);
+    TextureVk(const gl::TextureState &state, RendererVk *renderer);
     ~TextureVk() override;
     gl::Error onDestroy(const gl::Context *context) override;
 
@@ -64,6 +104,7 @@ class TextureVk : public TextureImpl, public vk::CommandGraphResource
                           GLenum format,
                           GLenum type,
                           const gl::PixelUnpackState &unpack,
+                          gl::Buffer *unpackBuffer,
                           const uint8_t *pixels) override;
 
     gl::Error setCompressedImage(const gl::Context *context,
@@ -89,8 +130,27 @@ class TextureVk : public TextureImpl, public vk::CommandGraphResource
     gl::Error copySubImage(const gl::Context *context,
                            const gl::ImageIndex &index,
                            const gl::Offset &destOffset,
-                           const gl::Rectangle &sourceArea,
+                           const gl::Rectangle &sourceRect,
                            gl::Framebuffer *source) override;
+
+    gl::Error copyTexture(const gl::Context *context,
+                          const gl::ImageIndex &index,
+                          GLenum internalFormat,
+                          GLenum type,
+                          size_t sourceLevel,
+                          bool unpackFlipY,
+                          bool unpackPremultiplyAlpha,
+                          bool unpackUnmultiplyAlpha,
+                          const gl::Texture *source) override;
+    gl::Error copySubTexture(const gl::Context *context,
+                             const gl::ImageIndex &index,
+                             const gl::Offset &destOffset,
+                             size_t sourceLevel,
+                             const gl::Box &sourceBox,
+                             bool unpackFlipY,
+                             bool unpackPremultiplyAlpha,
+                             bool unpackUnmultiplyAlpha,
+                             const gl::Texture *source) override;
 
     gl::Error setStorage(const gl::Context *context,
                          gl::TextureType type,
@@ -114,12 +174,13 @@ class TextureVk : public TextureImpl, public vk::CommandGraphResource
     gl::Error bindTexImage(const gl::Context *context, egl::Surface *surface) override;
     gl::Error releaseTexImage(const gl::Context *context) override;
 
-    gl::Error getAttachmentRenderTarget(const gl::Context *context,
-                                        GLenum binding,
-                                        const gl::ImageIndex &imageIndex,
-                                        FramebufferAttachmentRenderTarget **rtOut) override;
+    angle::Result getAttachmentRenderTarget(const gl::Context *context,
+                                            GLenum binding,
+                                            const gl::ImageIndex &imageIndex,
+                                            FramebufferAttachmentRenderTarget **rtOut) override;
 
-    void syncState(const gl::Texture::DirtyBits &dirtyBits) override;
+    angle::Result syncState(const gl::Context *context,
+                            const gl::Texture::DirtyBits &dirtyBits) override;
 
     gl::Error setStorageMultisample(const gl::Context *context,
                                     gl::TextureType type,
@@ -128,25 +189,87 @@ class TextureVk : public TextureImpl, public vk::CommandGraphResource
                                     const gl::Extents &size,
                                     bool fixedSampleLocations) override;
 
-    gl::Error initializeContents(const gl::Context *context,
-                                 const gl::ImageIndex &imageIndex) override;
+    angle::Result initializeContents(const gl::Context *context,
+                                     const gl::ImageIndex &imageIndex) override;
 
-    const vk::ImageHelper &getImage() const;
+    const vk::ImageHelper &getImage() const
+    {
+        ASSERT(mImage.valid());
+        return mImage;
+    }
+
+    vk::ImageHelper &getImage()
+    {
+        ASSERT(mImage.valid());
+        return mImage;
+    }
+
     const vk::ImageView &getImageView() const;
     const vk::Sampler &getSampler() const;
 
-    vk::Error ensureImageInitialized(RendererVk *renderer);
+    angle::Result ensureImageInitialized(ContextVk *contextVk);
 
   private:
+    angle::Result redefineImage(const gl::Context *context,
+                                const gl::ImageIndex &index,
+                                const gl::InternalFormat &internalFormat,
+                                const gl::Extents &size);
+
+    angle::Result copyImageDataToBuffer(ContextVk *contextVk,
+                                        size_t sourceLevel,
+                                        uint32_t layerCount,
+                                        const gl::Rectangle &sourceArea,
+                                        uint8_t **outDataPtr);
+
+    angle::Result generateMipmapsWithCPU(const gl::Context *context);
+
+    angle::Result generateMipmapLevelsWithCPU(ContextVk *contextVk,
+                                              const angle::Format &sourceFormat,
+                                              GLuint layer,
+                                              GLuint firstMipLevel,
+                                              GLuint maxMipLevel,
+                                              size_t sourceWidth,
+                                              size_t sourceHeight,
+                                              size_t sourceRowPitch,
+                                              uint8_t *sourceData);
+
+    angle::Result copySubImageImpl(const gl::Context *context,
+                                   const gl::ImageIndex &index,
+                                   const gl::Offset &destOffset,
+                                   const gl::Rectangle &sourceArea,
+                                   const gl::InternalFormat &internalFormat,
+                                   gl::Framebuffer *source);
+
+    gl::Error copySubTextureImpl(ContextVk *contextVk,
+                                 const gl::ImageIndex &index,
+                                 const gl::Offset &destOffset,
+                                 const gl::InternalFormat &destFormat,
+                                 size_t sourceLevel,
+                                 const gl::Rectangle &sourceArea,
+                                 bool unpackFlipY,
+                                 bool unpackPremultiplyAlpha,
+                                 bool unpackUnmultiplyAlpha,
+                                 TextureVk *source);
+
+    angle::Result initImage(ContextVk *contextVk,
+                            const vk::Format &format,
+                            const gl::Extents &extents,
+                            const uint32_t levelCount,
+                            vk::CommandBuffer *commandBuffer);
     void releaseImage(const gl::Context *context, RendererVk *renderer);
+    uint32_t getLevelCount() const;
+    angle::Result initCubeMapRenderTargets(ContextVk *contextVk);
 
     vk::ImageHelper mImage;
-    vk::ImageView mImageView;
+    vk::ImageView mBaseLevelImageView;
+    vk::ImageView mMipmapImageView;
     vk::Sampler mSampler;
 
     RenderTargetVk mRenderTarget;
+    std::vector<vk::ImageView> mCubeMapFaceImageViews;
+    std::vector<RenderTargetVk> mCubeMapRenderTargets;
 
-    StagingStorage mStagingStorage;
+    PixelBuffer mPixelBuffer;
 };
 
 }  // namespace rx

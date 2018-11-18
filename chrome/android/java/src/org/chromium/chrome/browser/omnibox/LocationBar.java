@@ -17,6 +17,7 @@ import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.toolbar.Toolbar;
 import org.chromium.chrome.browser.toolbar.ToolbarActionModeCallback;
 import org.chromium.chrome.browser.toolbar.ToolbarDataProvider;
+import org.chromium.chrome.browser.widget.ScrimView;
 import org.chromium.chrome.browser.widget.bottomsheet.BottomSheet;
 import org.chromium.ui.base.WindowAndroid;
 
@@ -139,11 +140,6 @@ public interface LocationBar extends UrlBarDelegate {
     void revertChanges();
 
     /**
-     * @return The timestamp for the {@link UrlBar} gaining focus for the first time.
-     */
-    long getFirstUrlBarFocusTime();
-
-    /**
      * Updates the security icon displayed in the LocationBar.
      */
     void updateSecurityIcon();
@@ -152,6 +148,11 @@ public interface LocationBar extends UrlBarDelegate {
      * @return The {@link ViewGroup} that this container holds.
      */
     View getContainerView();
+
+    /**
+     * @return The view containing the security icon.
+     */
+    View getSecurityIconView();
 
     /**
      * Updates the state of the mic button if there is one.
@@ -170,21 +171,18 @@ public interface LocationBar extends UrlBarDelegate {
     void setDefaultTextEditActionModeCallback(ToolbarActionModeCallback callback);
 
     /**
-     * Returns whether the {@link UrlBar} must be queried for its location on screen when
-     * suggestions are being laid out by {@link SuggestionView}.
-     * TODO(dfalcantara): Revisit this after M58.
-     *
-     * @return Whether or not the {@link UrlBar} has to be explicitly checked for its location.
-     */
-    boolean mustQueryUrlBarLocationForSuggestions();
-
-    /**
      * @return Whether suggestions are being shown for the location bar.
      */
     boolean isSuggestionsListShown();
 
     /**
-     * @return Whether the location bar is allowed to use Chrome modern design.
+     * @return The margin to be applied to the URL bar based on the buttons currently visible next
+     *         to it, used to avoid text overlapping the buttons and vice versa.
      */
-    boolean useModernDesign();
+    int getUrlContainerMarginEnd();
+
+    /**
+     * @param scrim The scrim for this location bar to use.
+     */
+    void setScrim(ScrimView scrim);
 }

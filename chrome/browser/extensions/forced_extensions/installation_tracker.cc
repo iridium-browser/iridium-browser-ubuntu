@@ -7,6 +7,8 @@
 #include "base/bind.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/values.h"
+#include "chrome/browser/extensions/forced_extensions/installation_failures.h"
+#include "chrome/browser/profiles/profile.h"
 #include "components/prefs/pref_service.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/pref_names.h"
@@ -19,11 +21,13 @@ constexpr base::TimeDelta kInstallationTimeout =
 
 namespace extensions {
 
-InstallationTracker::InstallationTracker(ExtensionRegistry* registry,
-                                         PrefService* pref_service,
-                                         std::unique_ptr<base::Timer> timer)
+InstallationTracker::InstallationTracker(
+    ExtensionRegistry* registry,
+    Profile* profile,
+    std::unique_ptr<base::OneShotTimer> timer)
     : registry_(registry),
-      pref_service_(pref_service),
+      profile_(profile),
+      pref_service_(profile->GetPrefs()),
       start_time_(base::Time::Now()),
       observer_(this),
       timer_(std::move(timer)) {
@@ -55,12 +59,9 @@ void InstallationTracker::OnForcedExtensionsPrefChanged() {
   if (!value || value->empty())
     return;
 
-  std::unique_ptr<ExtensionSet> installed_extensions =
-      registry_->GenerateInstalledExtensionsSet();
-
   for (const auto& entry : *value) {
     forced_extensions_.insert(entry.first);
-    if (!installed_extensions->Contains(entry.first))
+    if (!registry_->enabled_extensions().Contains(entry.first))
       pending_forced_extensions_.insert(entry.first);
   }
   if (pending_forced_extensions_.empty())
@@ -84,11 +85,27 @@ void InstallationTracker::ReportResults(bool succeeded) {
       UMA_HISTOGRAM_LONG_TIMES("Extensions.ForceInstalledLoadTime",
                                base::Time::Now() - start_time_);
     } else {
+      size_t enabled_missing_count = pending_forced_extensions_.size();
+      auto installed_extensions = registry_->GenerateInstalledExtensionsSet();
+      for (const auto& entry : *installed_extensions)
+        pending_forced_extensions_.erase(entry->id());
+      size_t installed_missing_count = pending_forced_extensions_.size();
+
       UMA_HISTOGRAM_COUNTS_100("Extensions.ForceInstalledTimedOutCount",
-                               pending_forced_extensions_.size());
+                               enabled_missing_count);
+      UMA_HISTOGRAM_COUNTS_100(
+          "Extensions.ForceInstalledTimedOutAndNotInstalledCount",
+          installed_missing_count);
+      for (const auto& extension_id : pending_forced_extensions_) {
+        InstallationFailures::Reason reason =
+            InstallationFailures::Get(profile_, extension_id);
+        UMA_HISTOGRAM_ENUMERATION("Extensions.ForceInstalledFailureReason",
+                                  reason);
+      }
     }
   }
   reported_ = true;
+  InstallationFailures::Clear(profile_);
   observer_.RemoveAll();
   pref_change_registrar_.RemoveAll();
   timer_->Stop();

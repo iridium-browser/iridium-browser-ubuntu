@@ -10,11 +10,13 @@
 #include "base/macros.h"
 #include "content/public/browser/android/motion_event_action.h"
 
-namespace blink {
-class WebInputEvent;
+namespace gfx {
+class PointF;
 }
 
 namespace vr {
+
+class InputEvent;
 
 // Used to forward events to MotionEventSynthesizer. Owned by VrShell.
 class AndroidUiGestureTarget {
@@ -29,11 +31,17 @@ class AndroidUiGestureTarget {
   static AndroidUiGestureTarget* FromJavaObject(
       const base::android::JavaRef<jobject>& obj);
 
-  void DispatchWebInputEvent(std::unique_ptr<blink::WebInputEvent> event);
+  void DispatchInputEvent(std::unique_ptr<InputEvent> event);
 
  private:
   void Inject(content::MotionEventAction action, int64_t time_ms);
-  void SetPointer(int x, int y);
+  void SetPointer(const gfx::PointF& position);
+  void SetPointer(float x, float y);
+  void SetDelayedEvent(float x,
+                       float y,
+                       content::MotionEventAction action,
+                       int64_t time_ms,
+                       int delay_ms);
 
   int scroll_x_ = 0;
   int scroll_y_ = 0;

@@ -17,9 +17,12 @@
 #ifndef INCLUDE_PERFETTO_BASE_UNIX_TASK_RUNNER_H_
 #define INCLUDE_PERFETTO_BASE_UNIX_TASK_RUNNER_H_
 
+#include "perfetto/base/build_config.h"
+#include "perfetto/base/event.h"
 #include "perfetto/base/scoped_file.h"
 #include "perfetto/base/task_runner.h"
 #include "perfetto/base/thread_checker.h"
+#include "perfetto/base/time.h"
 
 #include <poll.h>
 #include <chrono>
@@ -48,28 +51,25 @@ class UnixTaskRunner : public TaskRunner {
 
   // TaskRunner implementation:
   void PostTask(std::function<void()>) override;
-  void PostDelayedTask(std::function<void()>, int delay_ms) override;
+  void PostDelayedTask(std::function<void()>, uint32_t delay_ms) override;
   void AddFileDescriptorWatch(int fd, std::function<void()>) override;
   void RemoveFileDescriptorWatch(int fd) override;
 
  private:
-  using TimePoint = std::chrono::time_point<std::chrono::steady_clock>;
-  using TimeDurationMs = std::chrono::milliseconds;
-  TimePoint GetTime() const;
-
   void WakeUp();
 
   void UpdateWatchTasksLocked();
 
-  TimeDurationMs GetDelayToNextTaskLocked() const;
+  int GetDelayMsToNextTaskLocked() const;
   void RunImmediateAndDelayedTask();
   void PostFileDescriptorWatches();
   void RunFileDescriptorWatch(int fd);
 
   ThreadChecker thread_checker_;
 
-  ScopedFile control_read_;
-  ScopedFile control_write_;
+  // On Linux, an eventfd(2) used to waking up the task runner when a new task
+  // is posted. Otherwise the read end of a pipe used for the same purpose.
+  Event event_;
 
   std::vector<struct pollfd> poll_fds_;
 
@@ -78,7 +78,7 @@ class UnixTaskRunner : public TaskRunner {
   std::mutex lock_;
 
   std::deque<std::function<void()>> immediate_tasks_;
-  std::multimap<TimePoint, std::function<void()>> delayed_tasks_;
+  std::multimap<TimeMillis, std::function<void()>> delayed_tasks_;
   bool quit_ = false;
 
   struct WatchTask {

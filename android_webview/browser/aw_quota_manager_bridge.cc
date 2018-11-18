@@ -10,7 +10,10 @@
 #include "android_webview/browser/aw_content_browser_client.h"
 #include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/task/post_task.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/content_client.h"
@@ -18,6 +21,7 @@
 #include "storage/browser/quota/quota_manager.h"
 #include "third_party/blink/public/mojom/quota/quota_types.mojom.h"
 #include "url/gurl.h"
+#include "url/origin.h"
 
 using base::android::AttachCurrentThread;
 using base::android::JavaParamRef;
@@ -46,10 +50,10 @@ class GetOriginsTask : public base::RefCountedThreadSafe<GetOriginsTask> {
   friend class base::RefCountedThreadSafe<GetOriginsTask>;
   ~GetOriginsTask();
 
-  void OnOriginsObtained(const std::set<GURL>& origins,
+  void OnOriginsObtained(const std::set<url::Origin>& origins,
                          blink::mojom::StorageType type);
 
-  void OnUsageAndQuotaObtained(const GURL& origin,
+  void OnUsageAndQuotaObtained(const url::Origin& origin,
                                blink::mojom::QuotaStatusCode status_code,
                                int64_t usage,
                                int64_t quota);
@@ -81,39 +85,37 @@ GetOriginsTask::~GetOriginsTask() {}
 
 void GetOriginsTask::Run() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::IO},
       base::BindOnce(&QuotaManager::GetOriginsModifiedSince, quota_manager_,
                      blink::mojom::StorageType::kTemporary,
                      base::Time() /* Since beginning of time. */,
                      base::BindOnce(&GetOriginsTask::OnOriginsObtained, this)));
 }
 
-void GetOriginsTask::OnOriginsObtained(const std::set<GURL>& origins,
+void GetOriginsTask::OnOriginsObtained(const std::set<url::Origin>& origins,
                                        blink::mojom::StorageType type) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   num_callbacks_to_wait_ = origins.size();
   num_callbacks_received_ = 0u;
 
-  for (std::set<GURL>::const_iterator origin = origins.begin();
-       origin != origins.end(); ++origin) {
+  for (const url::Origin& origin : origins) {
     quota_manager_->GetUsageAndQuota(
-        *origin, type,
-        base::BindOnce(&GetOriginsTask::OnUsageAndQuotaObtained, this,
-                       *origin));
+        origin, type,
+        base::BindOnce(&GetOriginsTask::OnUsageAndQuotaObtained, this, origin));
   }
 
   CheckDone();
 }
 
 void GetOriginsTask::OnUsageAndQuotaObtained(
-    const GURL& origin,
+    const url::Origin& origin,
     blink::mojom::QuotaStatusCode status_code,
     int64_t usage,
     int64_t quota) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (status_code == blink::mojom::QuotaStatusCode::kOk) {
-    origin_.push_back(origin.spec());
+    origin_.push_back(origin.GetURL().spec());
     usage_.push_back(usage);
     quota_.push_back(quota);
   }
@@ -125,8 +127,8 @@ void GetOriginsTask::OnUsageAndQuotaObtained(
 void GetOriginsTask::CheckDone() {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (num_callbacks_received_ == num_callbacks_to_wait_) {
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, {BrowserThread::UI},
         base::BindOnce(&GetOriginsTask::DoneOnUIThread, this));
   } else if (num_callbacks_received_ > num_callbacks_to_wait_) {
     NOTREACHED();
@@ -143,7 +145,7 @@ void RunOnUIThread(base::OnceClosure task) {
   if (BrowserThread::CurrentlyOn(BrowserThread::UI)) {
     std::move(task).Run();
   } else {
-    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE, std::move(task));
+    base::PostTaskWithTraits(FROM_HERE, {BrowserThread::UI}, std::move(task));
   }
 }
 
@@ -251,8 +253,9 @@ void AwQuotaManagerBridge::GetOriginsOnUiThread(jint callback_id) {
   GetOriginsCallback ui_callback =
       base::BindOnce(&AwQuotaManagerBridge::GetOriginsCallbackImpl,
                      weak_factory_.GetWeakPtr(), callback_id);
-
-  (new GetOriginsTask(std::move(ui_callback), GetQuotaManager()))->Run();
+  base::MakeRefCounted<GetOriginsTask>(std::move(ui_callback),
+                                       GetQuotaManager())
+      ->Run();
 }
 
 void AwQuotaManagerBridge::GetOriginsCallbackImpl(
@@ -284,8 +287,9 @@ void OnUsageAndQuotaObtained(
     usage = 0;
     quota = 0;
   }
-  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                          base::BindOnce(std::move(ui_callback), usage, quota));
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::UI},
+      base::BindOnce(std::move(ui_callback), usage, quota));
 }
 
 }  // namespace
@@ -312,10 +316,12 @@ void AwQuotaManagerBridge::GetUsageAndQuotaForOriginOnUiThread(
       base::BindOnce(&AwQuotaManagerBridge::QuotaUsageCallbackImpl,
                      weak_factory_.GetWeakPtr(), callback_id, is_quota);
 
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
+  // TODO(crbug.com/889590): Use helper for url::Origin creation from string.
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::IO},
       base::BindOnce(
-          &QuotaManager::GetUsageAndQuota, GetQuotaManager(), GURL(origin),
+          &QuotaManager::GetUsageAndQuota, GetQuotaManager(),
+          url::Origin::Create(GURL(origin)),
           blink::mojom::StorageType::kTemporary,
           base::BindOnce(&OnUsageAndQuotaObtained, std::move(ui_callback))));
 }

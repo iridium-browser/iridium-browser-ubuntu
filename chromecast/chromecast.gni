@@ -5,15 +5,12 @@
 import("//build/config/chromecast_build.gni")
 import("//build/config/locales.gni")
 import("//extensions/buildflags/buildflags.gni")
+import("//media/media_options.gni")
 
 # This args block should contain arguments used within the //chromecast
 # directory. Arguments which are used in other Chrome components should
 # be instead declared in //build/config/chromecast_build.gni.
 declare_args() {
-  # chromecast_branding is used to include or exclude Google-branded components.
-  # Set it to "public" for a Chromium build.
-  chromecast_branding = "public"
-
   # The incremental build number. The Cast automated builders will set this
   # value to indicate the buildset. Note: The default value should be greater
   # than any value the builder may assign to prevent attempted automatic updates
@@ -49,6 +46,10 @@ declare_args() {
   # Set true for builds targeting Android Things.
   is_android_things = false
 
+  # Set true if the platform works as a single volume device, mapping all
+  # volume streams to a single one.
+  is_single_volume = false
+
   # Set to true to start music apps in headless mode.
   enable_headless_music_mode = false
 
@@ -79,6 +80,24 @@ declare_args() {
   # Set to true to enable a CMA media backend that allows mixed audio to be
   # output with sync'd video.
   enable_video_with_mixed_audio = false
+
+  # unified flag to pick monotonic_clock OR monotonic_clock_raw
+  media_clock_monotonic_raw = !is_android && !is_cast_desktop_build
+
+  # Include 'Android' in user agent string to avoid being served desktop
+  # versions of websites.
+  # TODO(halliwell): consider making this default for all Cast hardware.
+  use_android_user_agent = false
+
+  # Contain default command line switches we want to set.
+  # The syntax: "test-flag-one=public,test-flag-two=true,test-flag-three=1,".
+  # This arg can be overridden but not supports += operator.
+  # TODO(ziyangch): make the parsing logic have ability to quote/escape characters.
+  default_command_line_flags = ""
+
+  # Set to true to disable secure flac/opus support in EME, when using
+  # cast CMA media backend and supporting Widevine or Playready.
+  disable_secure_flac_and_opus_decoding = false
 }
 
 declare_args() {
@@ -110,8 +129,12 @@ cast_locales = locales
 
 enable_chromecast_extensions = enable_extensions
 
-# These templates are a temporary fix fo link libc++ into shared libraries and
-# executables. These should be removed as soon as crbug.com/746091 is resolved.
+# Use Chromecast CDMs for protected content. Some Android platforms use
+# MediaDrm for CDM support.
+declare_args() {
+  use_chromecast_cdms = is_cast_using_cma_backend
+}
+
 foreach(target_type,
         [
           "executable",
@@ -124,14 +147,6 @@ foreach(target_type,
       forward_variables_from(invoker, "*")
 
       configs += [ "//chromecast:cast_config" ]
-
-      if (!defined(deps)) {
-        deps = []
-      }
-
-      if (target_type != "source_set") {
-        deps += [ "//build/config:exe_and_shlib_deps" ]
-      }
     }
   }
 }

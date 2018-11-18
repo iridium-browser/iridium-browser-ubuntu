@@ -5,17 +5,22 @@
 #import "ios/chrome/browser/ui/omnibox/omnibox_coordinator.h"
 
 #include "base/logging.h"
+#include "base/strings/sys_string_conversions.h"
 #include "components/omnibox/browser/omnibox_edit_model.h"
 #include "components/strings/grit/components_strings.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
+#import "ios/chrome/browser/ui/commands/load_query_commands.h"
 #import "ios/chrome/browser/ui/location_bar/location_bar_constants.h"
+#import "ios/chrome/browser/ui/omnibox/omnibox_mediator.h"
 #import "ios/chrome/browser/ui/omnibox/omnibox_text_field_ios.h"
+#import "ios/chrome/browser/ui/omnibox/omnibox_util.h"
+#include "ios/chrome/browser/ui/omnibox/omnibox_view_controller.h"
 #include "ios/chrome/browser/ui/omnibox/omnibox_view_ios.h"
 #import "ios/chrome/browser/ui/omnibox/popup/omnibox_popup_coordinator.h"
 #include "ios/chrome/browser/ui/omnibox/popup/omnibox_popup_view_ios.h"
 #import "ios/chrome/browser/ui/toolbar/keyboard_assist/toolbar_assistive_keyboard_delegate.h"
 #import "ios/chrome/browser/ui/toolbar/keyboard_assist/toolbar_assistive_keyboard_views.h"
-#import "ios/chrome/browser/ui/uikit_ui_util.h"
+#import "ios/chrome/browser/ui/toolbar/public/omnibox_focuser.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -26,6 +31,12 @@
 @property(nonatomic, strong)
     ToolbarAssistiveKeyboardDelegateImpl* keyboardDelegate;
 
+// View controller managed by this coordinator.
+@property(nonatomic, strong) OmniboxViewController* viewController;
+
+// The mediator for the omnibox.
+@property(nonatomic, strong) OmniboxMediator* mediator;
+
 @end
 
 @implementation OmniboxCoordinator {
@@ -33,40 +44,36 @@
   // OmniboxPopupViewSuggestionsDelegate instead of OmniboxViewIOS.
   std::unique_ptr<OmniboxViewIOS> _editView;
 }
-@synthesize textField = _textField;
 @synthesize editController = _editController;
 @synthesize browserState = _browserState;
 @synthesize keyboardDelegate = _keyboardDelegate;
 @synthesize dispatcher = _dispatcher;
+@synthesize viewController = _viewController;
+@synthesize mediator = _mediator;
+
+#pragma mark - public
 
 - (void)start {
-  DCHECK(self.textField);
+  BOOL isIncognito = self.browserState->IsOffTheRecord();
+
+  self.viewController =
+      [[OmniboxViewController alloc] initWithIncognito:isIncognito];
+  self.viewController.defaultLeadingImage =
+      GetOmniboxSuggestionIcon(DEFAULT_FAVICON);
+  self.viewController.emptyTextLeadingImage = GetOmniboxSuggestionIcon(SEARCH);
+
+  self.viewController.dispatcher =
+      static_cast<id<LoadQueryCommands, OmniboxFocuser>>(self.dispatcher);
+  self.mediator = [[OmniboxMediator alloc] init];
+  self.mediator.consumer = self.viewController;
+
   DCHECK(self.editController);
-  // TODO(crbug.com/818637): implement left view provider.
   _editView = std::make_unique<OmniboxViewIOS>(
-      self.textField, self.editController, nullptr, self.browserState);
+      self.textField, self.editController, self.mediator, self.browserState);
 
   // Configure the textfield.
-  BOOL isIncognito = self.browserState->IsOffTheRecord();
-  SetA11yLabelAndUiAutomationName(self.textField, IDS_ACCNAME_LOCATION,
-                                  @"Address");
-  self.textField.incognito = isIncognito;
   self.textField.suggestionCommandsEndpoint =
       static_cast<id<OmniboxSuggestionCommands>>(self.dispatcher);
-
-  if (isIncognito) {
-    [self.textField
-        setSelectedTextBackgroundColor:[UIColor colorWithWhite:1 alpha:0.1]];
-    [self.textField
-        setPlaceholderTextColor:[UIColor colorWithWhite:1 alpha:0.5]];
-  } else if (!IsIPadIdiom()) {
-    // Set placeholder text color to match fakebox placeholder text color when
-    // on iPhone.
-    UIColor* placeholderTextColor =
-        [UIColor colorWithWhite:kiPhoneLocationBarPlaceholderColorBrightness
-                          alpha:1.0];
-    [self.textField setPlaceholderTextColor:placeholderTextColor];
-  }
 
   self.keyboardDelegate = [[ToolbarAssistiveKeyboardDelegateImpl alloc] init];
   self.keyboardDelegate.dispatcher =
@@ -79,7 +86,8 @@
 - (void)stop {
   _editView.reset();
   self.editController = nil;
-  self.textField = nil;
+  self.viewController = nil;
+  self.mediator = nil;
 }
 
 - (void)updateOmniboxState {
@@ -129,6 +137,25 @@
   coordinator.positioner = positioner;
 
   return coordinator;
+}
+
+- (UIViewController*)managedViewController {
+  return self.viewController;
+}
+
+- (id<LocationBarOffsetProvider>)offsetProvider {
+  return self.viewController;
+}
+
+- (id<EditViewAnimatee>)animatee {
+  return self.viewController;
+}
+
+#pragma mark - private
+
+// Convenience accessor.
+- (OmniboxTextFieldIOS*)textField {
+  return self.viewController.textField;
 }
 
 @end

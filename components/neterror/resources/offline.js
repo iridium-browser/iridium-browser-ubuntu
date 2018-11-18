@@ -20,6 +20,8 @@ function Runner(outerContainerId, opt_config) {
   this.outerContainerEl = document.querySelector(outerContainerId);
   this.containerEl = null;
   this.snackbarEl = null;
+  // A div to intercept touch events. Only set while (playing && useTouch).
+  this.touchController = null;
 
   this.config = opt_config || Runner.config;
   // Logical dimensions of the container.
@@ -104,6 +106,8 @@ Runner.config = {
   ACCELERATION: 0.001,
   BG_CLOUD_SPEED: 0.2,
   BOTTOM_PAD: 10,
+  // Scroll Y threshold at which the game can be activated.
+  CANVAS_IN_VIEW_OFFSET: -10,
   CLEAR_TIME: 3000,
   CLOUD_FREQUENCY: 0.5,
   GAMEOVER_CLEAR_TIME: 750,
@@ -394,6 +398,7 @@ Runner.prototype = {
     this.touchController.className = Runner.classes.TOUCH_CONTROLLER;
     this.touchController.addEventListener(Runner.events.TOUCHSTART, this);
     this.touchController.addEventListener(Runner.events.TOUCHEND, this);
+    this.outerContainerEl.appendChild(this.touchController);
   },
 
   /**
@@ -477,10 +482,7 @@ Runner.prototype = {
       this.containerEl.style.webkitAnimation = 'intro .4s ease-out 1 both';
       this.containerEl.style.width = this.dimensions.WIDTH + 'px';
 
-      if (this.touchController) {
-        this.outerContainerEl.appendChild(this.touchController);
-      }
-      this.playing = true;
+      this.setPlayStatus(true);
       this.activated = true;
     } else if (this.crashed) {
       this.restart();
@@ -518,6 +520,16 @@ Runner.prototype = {
   },
 
   /**
+   * Checks whether the canvas area is in the viewport of the browser
+   * through the current scroll position.
+   * @return boolean.
+   */
+  isCanvasInView: function() {
+    return this.containerEl.getBoundingClientRect().top >
+        Runner.config.CANVAS_IN_VIEW_OFFSET;
+  },
+
+  /**
    * Update the game frame and schedules the next one.
    */
   update: function() {
@@ -525,6 +537,7 @@ Runner.prototype = {
 
     var now = getTimeStamp();
     var deltaTime = now - (this.time || now);
+
     this.time = now;
 
     if (this.playing) {
@@ -663,41 +676,43 @@ Runner.prototype = {
       e.preventDefault();
     }
 
-    if (!this.crashed && !this.paused) {
-      if (Runner.keycodes.JUMP[e.keyCode] ||
-          e.type == Runner.events.TOUCHSTART) {
-        e.preventDefault();
-        // Starting the game for the first time.
-        if (!this.playing) {
-          // Started by touch so create a touch controller.
-          if (!this.touchController && e.type == Runner.events.TOUCHSTART) {
-            this.createTouchController();
+    if (this.isCanvasInView()) {
+      if (!this.crashed && !this.paused) {
+        if (Runner.keycodes.JUMP[e.keyCode] ||
+            e.type == Runner.events.TOUCHSTART) {
+          e.preventDefault();
+          // Starting the game for the first time.
+          if (!this.playing) {
+            // Started by touch so create a touch controller.
+            if (!this.touchController && e.type == Runner.events.TOUCHSTART) {
+              this.createTouchController();
+            }
+            this.loadSounds();
+            this.setPlayStatus(true);
+            this.update();
+            if (window.errorPageController) {
+              errorPageController.trackEasterEgg();
+            }
           }
-          this.loadSounds();
-          this.playing = true;
-          this.update();
-          if (window.errorPageController) {
-            errorPageController.trackEasterEgg();
+          // Start jump.
+          if (!this.tRex.jumping && !this.tRex.ducking) {
+            this.playSound(this.soundFx.BUTTON_PRESS);
+            this.tRex.startJump(this.currentSpeed);
+          }
+        } else if (this.playing && Runner.keycodes.DUCK[e.keyCode]) {
+          e.preventDefault();
+          if (this.tRex.jumping) {
+            // Speed drop, activated only when jump key is not pressed.
+            this.tRex.setSpeedDrop();
+          } else if (!this.tRex.jumping && !this.tRex.ducking) {
+            // Duck.
+            this.tRex.setDuck(true);
           }
         }
-        // Start jump.
-        if (!this.tRex.jumping && !this.tRex.ducking) {
-          this.playSound(this.soundFx.BUTTON_PRESS);
-          this.tRex.startJump(this.currentSpeed);
-        }
-      } else if (this.playing && Runner.keycodes.DUCK[e.keyCode]) {
-        e.preventDefault();
-        if (this.tRex.jumping) {
-          // Speed drop, activated only when jump key is not pressed.
-          this.tRex.setSpeedDrop();
-        } else if (!this.tRex.jumping && !this.tRex.ducking) {
-          // Duck.
-          this.tRex.setDuck(true);
-        }
+      } else if (this.crashed && e.type == Runner.events.TOUCHSTART &&
+          e.currentTarget == this.containerEl) {
+        this.restart();
       }
-    } else if (this.crashed && e.type == Runner.events.TOUCHSTART &&
-        e.currentTarget == this.containerEl) {
-      this.restart();
     }
   },
 
@@ -721,9 +736,10 @@ Runner.prototype = {
       // Check that enough time has elapsed before allowing jump key to restart.
       var deltaTime = getTimeStamp() - this.time;
 
-      if (Runner.keycodes.RESTART[keyCode] || this.isLeftClickOnCanvas(e) ||
+      if (this.isCanvasInView() &&
+          (Runner.keycodes.RESTART[keyCode] || this.isLeftClickOnCanvas(e) ||
           (deltaTime >= this.config.GAMEOVER_CLEAR_TIME &&
-          Runner.keycodes.JUMP[keyCode])) {
+          Runner.keycodes.JUMP[keyCode]))) {
         this.restart();
       }
     } else if (this.paused && isjumpKey) {
@@ -795,7 +811,7 @@ Runner.prototype = {
   },
 
   stop: function() {
-    this.playing = false;
+    this.setPlayStatus(false);
     this.paused = true;
     cancelAnimationFrame(this.raqId);
     this.raqId = 0;
@@ -803,7 +819,7 @@ Runner.prototype = {
 
   play: function() {
     if (!this.crashed) {
-      this.playing = true;
+      this.setPlayStatus(true);
       this.paused = false;
       this.tRex.update(0, Trex.status.RUNNING);
       this.time = getTimeStamp();
@@ -815,7 +831,7 @@ Runner.prototype = {
     if (!this.raqId) {
       this.playCount++;
       this.runningTime = 0;
-      this.playing = true;
+      this.setPlayStatus(true);
       this.paused = false;
       this.crashed = false;
       this.distanceRan = 0;
@@ -828,8 +844,15 @@ Runner.prototype = {
       this.tRex.reset();
       this.playSound(this.soundFx.BUTTON_PRESS);
       this.invert(true);
+      this.bdayFlashTimer = null;
       this.update();
     }
+  },
+
+  setPlayStatus: function(isPlaying) {
+    if (this.touchController)
+      this.touchController.classList.toggle(HIDDEN_CLASS, !isPlaying);
+    this.playing = isPlaying;
   },
 
   /**
@@ -1631,7 +1654,7 @@ Trex.animFrames = {
     msPerFrame: 1000 / 60
   },
   DUCKING: {
-    frames: [262, 321],
+    frames: [264, 323],
     msPerFrame: 1000 / 8
   }
 };
@@ -1719,6 +1742,7 @@ Trex.prototype = {
     var sourceWidth = this.ducking && this.status != Trex.status.CRASHED ?
         this.config.WIDTH_DUCK : this.config.WIDTH;
     var sourceHeight = this.config.HEIGHT;
+    var outputHeight = sourceHeight;
 
     if (IS_HIDPI) {
       sourceX *= 2;
@@ -1736,7 +1760,7 @@ Trex.prototype = {
       this.canvasCtx.drawImage(Runner.imageSprite, sourceX, sourceY,
           sourceWidth, sourceHeight,
           this.xPos, this.yPos,
-          this.config.WIDTH_DUCK, this.config.HEIGHT);
+          this.config.WIDTH_DUCK, outputHeight);
     } else {
       // Crashed whilst ducking. Trex is standing up so needs adjustment.
       if (this.ducking && this.status == Trex.status.CRASHED) {
@@ -1746,8 +1770,9 @@ Trex.prototype = {
       this.canvasCtx.drawImage(Runner.imageSprite, sourceX, sourceY,
           sourceWidth, sourceHeight,
           this.xPos, this.yPos,
-          this.config.WIDTH, this.config.HEIGHT);
+          this.config.WIDTH, outputHeight);
     }
+    this.canvasCtx.globalAlpha = 1;
   },
 
   /**
@@ -1835,8 +1860,6 @@ Trex.prototype = {
       this.reset();
       this.jumpCount++;
     }
-
-    this.update(deltaTime);
   },
 
   /**
@@ -2192,7 +2215,8 @@ Cloud.prototype = {
     this.canvasCtx.save();
     var sourceWidth = Cloud.config.WIDTH;
     var sourceHeight = Cloud.config.HEIGHT;
-
+    var outputWidth = sourceWidth;
+    var outputHeight = sourceHeight;
     if (IS_HIDPI) {
       sourceWidth = sourceWidth * 2;
       sourceHeight = sourceHeight * 2;
@@ -2202,7 +2226,7 @@ Cloud.prototype = {
         this.spritePos.y,
         sourceWidth, sourceHeight,
         this.xPos, this.yPos,
-        Cloud.config.WIDTH, Cloud.config.HEIGHT);
+        outputWidth, outputHeight);
 
     this.canvasCtx.restore();
   },

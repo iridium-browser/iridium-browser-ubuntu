@@ -30,7 +30,7 @@
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
-#include "third_party/blink/renderer/core/inspector/InspectorTraceEvents.h"
+#include "third_party/blink/renderer/core/inspector/inspector_trace_events.h"
 #include "third_party/blink/renderer/core/loader/document_loader.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/platform/wtf/time.h"
@@ -52,17 +52,12 @@ void ScriptedAnimationController::Trace(blink::Visitor* visitor) {
   visitor->Trace(per_frame_events_);
 }
 
-void ScriptedAnimationController::TraceWrappers(
-    const ScriptWrappableVisitor* visitor) const {
-  visitor->TraceWrappers(callback_collection_);
-}
-
 void ScriptedAnimationController::Pause() {
   ++suspend_count_;
 }
 
 void ScriptedAnimationController::Unpause() {
-  // It would be nice to put an DCHECK(m_suspendCount > 0) here, but in WK1
+  // It would be nice to put an DCHECK_GT(suspend_count_, 0) here, but in WK1
   // resume() can be called even when suspend hasn't (if a tab was created in
   // the background).
   if (suspend_count_ > 0)
@@ -125,25 +120,28 @@ void ScriptedAnimationController::DispatchEvents(
     // tree.
     probe::AsyncTask async_task(event_target->GetExecutionContext(), event);
     if (LocalDOMWindow* window = event_target->ToLocalDOMWindow())
-      window->DispatchEvent(event, nullptr);
+      window->DispatchEvent(*event, nullptr);
     else
-      event_target->DispatchEvent(event);
+      event_target->DispatchEvent(*event);
   }
 }
 
-void ScriptedAnimationController::ExecuteCallbacks(double monotonic_time_now) {
+void ScriptedAnimationController::ExecuteCallbacks(
+    base::TimeTicks monotonic_time_now) {
   // dispatchEvents() runs script which can cause the document to be destroyed.
   if (!document_)
     return;
 
-  TimeTicks time = TimeTicksFromSeconds(monotonic_time_now);
   double high_res_now_ms =
-      1000.0 *
-      document_->Loader()->GetTiming().MonotonicTimeToZeroBasedDocumentTime(
-          time);
+      document_->Loader()
+          ->GetTiming()
+          .MonotonicTimeToZeroBasedDocumentTime(monotonic_time_now)
+          .InMillisecondsF();
   double legacy_high_res_now_ms =
-      1000.0 *
-      document_->Loader()->GetTiming().MonotonicTimeToPseudoWallTime(time);
+      document_->Loader()
+          ->GetTiming()
+          .MonotonicTimeToPseudoWallTime(monotonic_time_now)
+          .InMillisecondsF();
   callback_collection_.ExecuteCallbacks(high_res_now_ms,
                                         legacy_high_res_now_ms);
 }
@@ -166,7 +164,7 @@ bool ScriptedAnimationController::HasScheduledItems() const {
 }
 
 void ScriptedAnimationController::ServiceScriptedAnimations(
-    double monotonic_time_now) {
+    base::TimeTicks monotonic_time_now) {
   current_frame_had_raf_ = HasCallback();
   if (!HasScheduledItems())
     return;

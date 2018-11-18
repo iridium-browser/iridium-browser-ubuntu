@@ -62,6 +62,8 @@ class ToolbarActionView : public views::MenuButton,
   ~ToolbarActionView() override;
 
   // views::MenuButton:
+  void OnBoundsChanged(const gfx::Rect& previous_bounds) override;
+  gfx::Rect GetAnchorBoundsInScreen() const override;
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
   std::unique_ptr<views::LabelButtonBorder> CreateDefaultBorder()
       const override;
@@ -72,7 +74,6 @@ class ToolbarActionView : public views::MenuButton,
   std::unique_ptr<views::InkDropRipple> CreateInkDropRipple() const override;
   std::unique_ptr<views::InkDropHighlight> CreateInkDropHighlight()
       const override;
-  std::unique_ptr<views::InkDropMask> CreateInkDropMask() const override;
 
   // ToolbarActionViewDelegateViews:
   content::WebContents* GetCurrentWebContents() const override;

@@ -5,7 +5,8 @@
 #ifndef UI_VIEWS_MUS_POINTER_WATCHER_EVENT_ROUTER_H_
 #define UI_VIEWS_MUS_POINTER_WATCHER_EVENT_ROUTER_H_
 
-#include "base/compiler_specific.h"
+#include <stdint.h>
+
 #include "base/macros.h"
 #include "base/observer_list.h"
 #include "ui/aura/client/capture_client_observer.h"
@@ -18,6 +19,10 @@ class WindowTreeClient;
 namespace client {
 class CaptureClient;
 }
+}
+
+namespace gfx {
+class Point;
 }
 
 namespace ui {
@@ -58,6 +63,7 @@ class VIEWS_MUS_EXPORT PointerWatcherEventRouter
 
   // Called by WindowTreeClientDelegate to notify PointerWatchers appropriately.
   void OnPointerEventObserved(const ui::PointerEvent& event,
+                              const gfx::Point& location_in_screen,
                               aura::Window* target);
 
   // Called when the |capture_client| has been set or will be unset.
@@ -82,8 +88,8 @@ class VIEWS_MUS_EXPORT PointerWatcherEventRouter
   // destruction. Two sets of observers are maintained, one for observers not
   // needing moves |non_move_watchers_| and |move_watchers_| for those
   // observers wanting moves too.
-  base::ObserverList<views::PointerWatcher, true> non_move_watchers_;
-  base::ObserverList<views::PointerWatcher, true> move_watchers_;
+  base::ObserverList<views::PointerWatcher, true>::Unchecked non_move_watchers_;
+  base::ObserverList<views::PointerWatcher, true>::Unchecked move_watchers_;
 
   EventTypes event_types_ = EventTypes::NONE;
 

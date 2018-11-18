@@ -13,6 +13,7 @@
 #include "base/callback.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/run_loop.h"
+#include "base/sequenced_task_runner.h"
 #include "base/values.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "content/public/test/test_browser_context.h"
@@ -113,7 +114,7 @@ class DataItemTest : public testing::Test {
 
   std::string GenerateKey(const std::string& password) {
     std::unique_ptr<crypto::SymmetricKey> key =
-        crypto::SymmetricKey::DeriveKeyFromPassword(
+        crypto::SymmetricKey::DeriveKeyFromPasswordUsingPbkdf2(
             crypto::SymmetricKey::AES, password, "salt", 1000, 256);
     if (!key) {
       ADD_FAILURE() << "Failed to create symmetric key";
@@ -170,7 +171,7 @@ class DataItemTest : public testing::Test {
     ListBuilder app_handlers_builder;
     app_handlers_builder.Append(DictionaryBuilder()
                                     .Set("action", "new_note")
-                                    .SetBoolean("enabled_on_lock_screen", true)
+                                    .Set("enabled_on_lock_screen", true)
                                     .Build());
     scoped_refptr<const Extension> extension =
         ExtensionBuilder()

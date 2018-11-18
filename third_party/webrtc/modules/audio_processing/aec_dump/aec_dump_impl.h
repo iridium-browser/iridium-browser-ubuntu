@@ -15,10 +15,10 @@
 #include <string>
 #include <vector>
 
+#include "api/audio/audio_frame.h"
 #include "modules/audio_processing/aec_dump/capture_stream_info.h"
 #include "modules/audio_processing/aec_dump/write_to_file_task.h"
 #include "modules/audio_processing/include/aec_dump.h"
-#include "modules/include/module_common_types.h"
 #include "rtc_base/ignore_wundef.h"
 #include "rtc_base/platform_file.h"
 #include "rtc_base/race_checker.h"
@@ -52,8 +52,8 @@ class AecDumpImpl : public AecDump {
 
   ~AecDumpImpl() override;
 
-  void WriteInitMessage(const InternalAPMStreamsConfig& api_format) override;
-
+  void WriteInitMessage(const ProcessingConfig& api_format,
+                        int64_t time_now_ms) override;
   void AddCaptureStreamInput(const AudioFrameView<const float>& src) override;
   void AddCaptureStreamOutput(const AudioFrameView<const float>& src) override;
   void AddCaptureStreamInput(const AudioFrame& frame) override;
@@ -66,6 +66,9 @@ class AecDumpImpl : public AecDump {
       const AudioFrameView<const float>& src) override;
 
   void WriteConfig(const InternalAPMConfig& config) override;
+
+  void WriteRuntimeSetting(
+      const AudioProcessing::RuntimeSetting& runtime_setting) override;
 
  private:
   std::unique_ptr<WriteToFileTask> CreateWriteToFileTask();

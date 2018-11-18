@@ -11,7 +11,7 @@
 #import "base/mac/mac_util.h"
 #import "base/mac/scoped_sending_event.h"
 #include "base/mac/sdk_forward_declarations.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop/message_loop_current.h"
 #import "base/message_loop/message_pump_mac.h"
 #include "content/browser/frame_host/popup_menu_helper_mac.h"
 #include "content/browser/renderer_host/display_util.h"
@@ -23,11 +23,15 @@
 #import "content/browser/web_contents/web_drag_source_mac.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/interstitial_page.h"
+#include "content/public/browser/ns_view_bridge_factory_host.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/browser/web_contents_view_delegate.h"
+#include "mojo/public/cpp/bindings/interface_request.h"
 #include "skia/ext/skia_utils_mac.h"
 #import "third_party/mozilla/NSPasteboard+Utils.h"
 #include "ui/base/clipboard/custom_data_helper.h"
+#include "ui/base/cocoa/cocoa_base_utils.h"
+#include "ui/base/cocoa/ns_view_ids.h"
 #include "ui/base/dragdrop/cocoa_dnd_util.h"
 #include "ui/display/screen.h"
 #include "ui/gfx/image/image_skia_util_mac.h"
@@ -106,10 +110,13 @@ WebContentsViewMac::WebContentsViewMac(WebContentsImpl* web_contents,
                                        WebContentsViewDelegate* delegate)
     : web_contents_(web_contents),
       delegate_(delegate),
-      allow_other_views_(false) {
-}
+      ns_view_id_(ui::NSViewIds::GetNewId()),
+      ns_view_client_binding_(this) {}
 
 WebContentsViewMac::~WebContentsViewMac() {
+  if (views_host_)
+    views_host_->OnHostableViewDestroying();
+  DCHECK(!views_host_);
   // This handles the case where a renderer close call was deferred
   // while the user was operating a UI control which resulted in a
   // close.  In that case, the Cocoa view outlives the
@@ -164,8 +171,7 @@ void WebContentsViewMac::StartDragging(
 
   // The drag invokes a nested event loop, arrange to continue
   // processing events.
-  base::MessageLoop::ScopedNestableTaskAllower allow(
-      base::MessageLoop::current());
+  base::MessageLoopCurrent::ScopedNestableTaskAllower allow;
   NSDragOperation mask = static_cast<NSDragOperation>(allowed_operations);
   NSPoint offset = NSPointFromCGPoint(
       gfx::PointAtOffsetFromOrigin(image_offset).ToCGPoint());
@@ -198,9 +204,6 @@ void WebContentsViewMac::Focus() {
   gfx::NativeView native_view = GetNativeViewForFocus();
   NSWindow* window = [native_view window];
   [window makeFirstResponder:native_view];
-  if (![window isVisible])
-    return;
-  [window makeKeyAndOrderFront:nil];
 }
 
 void WebContentsViewMac::SetInitialFocus() {
@@ -318,24 +321,11 @@ void WebContentsViewMac::OnMenuClosed() {
 }
 
 gfx::Rect WebContentsViewMac::GetViewBounds() const {
-  // This method is not currently used on mac.
-  NOTIMPLEMENTED();
-  return gfx::Rect();
-}
-
-void WebContentsViewMac::SetAllowOtherViews(bool allow) {
-  if (allow_other_views_ == allow)
-    return;
-
-  allow_other_views_ = allow;
-  RenderWidgetHostViewMac* view = static_cast<RenderWidgetHostViewMac*>(
-      web_contents_->GetRenderWidgetHostView());
-  if (view)
-    view->SetAllowPauseForResizeOrRepaint(!allow_other_views_);
-}
-
-bool WebContentsViewMac::GetAllowOtherViews() const {
-  return allow_other_views_;
+  NSRect window_bounds =
+      [cocoa_view_ convertRect:[cocoa_view_ bounds] toView:nil];
+  window_bounds.origin = ui::ConvertPointFromWindowToScreen(
+      [cocoa_view_ window], window_bounds.origin);
+  return gfx::ScreenRectFromNSRect(window_bounds);
 }
 
 void WebContentsViewMac::CreateView(
@@ -370,7 +360,17 @@ RenderWidgetHostViewBase* WebContentsViewMac::CreateViewForWidget(
 
     view->SetDelegate(rw_delegate.get());
   }
-  view->SetAllowPauseForResizeOrRepaint(!allow_other_views_);
+
+  // Add the RenderWidgetHostView to the ui::Layer heirarchy.
+  child_views_.push_back(view->GetWeakPtr());
+  if (views_host_) {
+    NSViewBridgeFactoryHost* factory_host =
+        NSViewBridgeFactoryHost::GetFromHostId(
+            views_host_->GetViewsFactoryHostId());
+
+    view->MigrateNSViewBridge(factory_host, ns_view_id_);
+    view->SetParentUiLayer(views_host_->GetUiLayer());
+  }
 
   // Fancy layout comes later; for now just make it our size and resize it
   // with us. In case there are other siblings of the content area, we want
@@ -394,7 +394,7 @@ RenderWidgetHostViewBase* WebContentsViewMac::CreateViewForWidget(
   return view;
 }
 
-RenderWidgetHostViewBase* WebContentsViewMac::CreateViewForPopupWidget(
+RenderWidgetHostViewBase* WebContentsViewMac::CreateViewForChildWidget(
     RenderWidgetHost* render_widget_host) {
   RenderWidgetHostViewMac* view =
       new RenderWidgetHostViewMac(render_widget_host, false);
@@ -419,8 +419,10 @@ void WebContentsViewMac::RenderViewCreated(RenderViewHost* host) {
   host->EnablePreferredSizeMode();
 }
 
-void WebContentsViewMac::RenderViewSwappedIn(RenderViewHost* host) {
-}
+void WebContentsViewMac::RenderViewReady() {}
+
+void WebContentsViewMac::RenderViewHostChanged(RenderViewHost* old_host,
+                                               RenderViewHost* new_host) {}
 
 void WebContentsViewMac::SetOverscrollControllerEnabled(bool enabled) {
 }
@@ -444,7 +446,90 @@ void WebContentsViewMac::CloseTab() {
   web_contents_->Close(web_contents_->GetRenderViewHost());
 }
 
+std::list<RenderWidgetHostViewMac*> WebContentsViewMac::GetChildViews() {
+  // Remove any child NSViews that have been destroyed.
+  std::list<RenderWidgetHostViewMac*> result;
+  for (auto iter = child_views_.begin(); iter != child_views_.end();) {
+    if (*iter) {
+      result.push_back(reinterpret_cast<RenderWidgetHostViewMac*>(iter->get()));
+      iter++;
+    } else {
+      iter = child_views_.erase(iter);
+    }
+  }
+  return result;
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// WebContentsViewMac, ViewsHostableView:
+
+void WebContentsViewMac::OnViewsHostableAttached(
+    ViewsHostableView::Host* host) {
+  views_host_ = host;
+  [cocoa_view_
+      setAccessibilityParentElement:views_host_->GetAccessibilityElement()];
+
+  // Create an NSView in the target process, if one exists.
+  uint64_t factory_host_id = views_host_->GetViewsFactoryHostId();
+  NSViewBridgeFactoryHost* factory_host =
+      NSViewBridgeFactoryHost::GetFromHostId(factory_host_id);
+  if (factory_host) {
+    mojom::WebContentsNSViewClientAssociatedPtr client;
+    ns_view_client_binding_.Bind(mojo::MakeRequest(&client));
+    mojom::WebContentsNSViewBridgeAssociatedRequest bridge_request =
+        mojo::MakeRequest(&ns_view_bridge_remote_);
+
+    factory_host->GetFactory()->CreateWebContentsNSViewBridge(
+        ns_view_id_, client.PassInterface(), std::move(bridge_request));
+
+    ns_view_bridge_remote_->SetParentViewsNSView(views_host_->GetNSViewId());
+  } else if (factory_host_id != NSViewBridgeFactoryHost::kLocalDirectHostId) {
+    LOG(ERROR) << "Failed to look up NSViewBridgeFactoryHost!";
+  }
+
+  for (auto* rwhv_mac : GetChildViews()) {
+    rwhv_mac->MigrateNSViewBridge(factory_host, ns_view_id_);
+    rwhv_mac->SetParentUiLayer(views_host_->GetUiLayer());
+  }
+}
+
+void WebContentsViewMac::OnViewsHostableDetached() {
+  DCHECK(views_host_);
+  views_host_ = nullptr;
+
+  for (auto* rwhv_mac : GetChildViews()) {
+    rwhv_mac->MigrateNSViewBridge(nullptr, 0);
+    rwhv_mac->SetParentUiLayer(nullptr);
+  }
+
+  [cocoa_view_ setAccessibilityParentElement:nil];
+
+  // Disconnect from the bridge. This will have the effect of destroying the
+  // associated bridge instance with its NSView.
+  ns_view_client_binding_.Close();
+  ns_view_bridge_remote_.reset();
+}
+
+void WebContentsViewMac::OnViewsHostableShow(
+    const gfx::Rect& bounds_in_window) {
+  if (ns_view_bridge_remote_)
+    ns_view_bridge_remote_->Show(bounds_in_window);
+}
+
+void WebContentsViewMac::OnViewsHostableHide() {
+  if (ns_view_bridge_remote_)
+    ns_view_bridge_remote_->Hide();
+}
+
+void WebContentsViewMac::OnViewsHostableMakeFirstResponder() {
+  if (ns_view_bridge_remote_)
+    ns_view_bridge_remote_->MakeFirstResponder();
+}
+
 }  // namespace content
+
+////////////////////////////////////////////////////////////////////////////////
+// WebContentsViewCocoa
 
 @implementation WebContentsViewCocoa
 
@@ -720,6 +805,24 @@ void WebContentsViewMac::CloseTab() {
 
 - (void)viewDidUnhide {
   [self updateWebContentsVisibility];
+}
+
+- (void)setAccessibilityParentElement:(id)accessibilityParent {
+  accessibilityParent_.reset([accessibilityParent retain]);
+}
+
+// ViewsHostable protocol implementation.
+- (ui::ViewsHostableView*)viewsHostableView {
+  return webContentsView_;
+}
+
+// NSAccessibility informal protocol implementation.
+- (id)accessibilityAttributeValue:(NSString*)attribute {
+  if (accessibilityParent_ &&
+      [attribute isEqualToString:NSAccessibilityParentAttribute]) {
+    return accessibilityParent_;
+  }
+  return [super accessibilityAttributeValue:attribute];
 }
 
 @end

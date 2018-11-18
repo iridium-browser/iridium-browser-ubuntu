@@ -8,12 +8,12 @@
 
 #include "testing/gtest/include/gtest/gtest-death-test.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
 #include "third_party/blink/renderer/bindings/core/v8/idl_types.h"
 #include "third_party/blink/renderer/bindings/core/v8/to_v8_for_core.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_testing.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_internals.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_test_sequence_callback.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
@@ -145,7 +145,9 @@ TEST(NativeValueTraitsImplTest, IDLRecord) {
     EXPECT_TRUE(
         V8String(scope.GetIsolate(), "bogus!")
             ->Equals(
-                v8_exception->ToString(scope.GetContext()).ToLocalChecked()));
+                scope.GetContext(),
+                v8_exception->ToString(scope.GetContext()).ToLocalChecked())
+            .ToChecked());
   }
   {
     v8::Local<v8::Object> v8_object = v8::Object::New(scope.GetIsolate());

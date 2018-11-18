@@ -6,6 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_MOJO_TEST_MOJO_INTERFACE_REQUEST_EVENT_H_
 
 #include "third_party/blink/renderer/core/dom/events/event.h"
+#include "third_party/blink/renderer/core/event_names.h"
 
 namespace blink {
 
@@ -38,7 +39,7 @@ class MojoInterfaceRequestEvent final : public Event {
     return EventNames::MojoInterfaceRequestEvent;
   }
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  private:
   explicit MojoInterfaceRequestEvent(MojoHandle*);

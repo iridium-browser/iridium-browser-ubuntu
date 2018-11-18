@@ -10,20 +10,21 @@
 
 namespace blink {
 class PlatformEventController;
+class LocalFrame;
 
 class CORE_EXPORT PlatformEventDispatcher : public GarbageCollectedMixin {
  public:
   void AddController(PlatformEventController*);
   void RemoveController(PlatformEventController*);
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  protected:
   PlatformEventDispatcher();
 
   void NotifyControllers();
 
-  virtual void StartListening() = 0;
+  virtual void StartListening(LocalFrame* frame) = 0;
   virtual void StopListening() = 0;
 
  private:

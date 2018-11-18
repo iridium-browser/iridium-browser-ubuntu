@@ -63,7 +63,7 @@ class CORE_EXPORT DataObject : public GarbageCollectedFinalized<DataObject>,
     virtual void OnItemListChanged() = 0;
   };
 
-  static DataObject* CreateFromPasteboard(PasteMode);
+  static DataObject* CreateFromClipboard(PasteMode);
   static DataObject* CreateFromString(const String&);
   static DataObject* Create();
   static DataObject* Create(WebDragData);
@@ -71,11 +71,11 @@ class CORE_EXPORT DataObject : public GarbageCollectedFinalized<DataObject>,
   virtual ~DataObject();
 
   // DataTransferItemList support.
-  size_t length() const;
-  DataObjectItem* Item(unsigned long index);
+  uint32_t length() const;
+  DataObjectItem* Item(uint32_t index);
   // FIXME: Implement V8DataTransferItemList::indexedPropertyDeleter to get this
   // called.
-  void DeleteItem(unsigned long index);
+  void DeleteItem(uint32_t index);
   void ClearAll();
   // Returns null if an item already exists with the provided type.
   DataObjectItem* Add(const String& data, const String& type);
@@ -123,7 +123,7 @@ class CORE_EXPORT DataObject : public GarbageCollectedFinalized<DataObject>,
   // whenever the underlying item_list_ changes.
   void AddObserver(Observer*);
 
-  void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
   WebDragData ToWebDragData();
 

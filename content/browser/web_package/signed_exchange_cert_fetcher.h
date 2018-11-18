@@ -12,8 +12,9 @@
 #include "base/callback_helpers.h"
 #include "base/memory/weak_ptr.h"
 #include "base/optional.h"
+#include "base/unguessable_token.h"
 #include "content/browser/web_package/signed_exchange_certificate_chain.h"
-#include "content/browser/web_package/signed_exchange_utils.h"
+#include "content/browser/web_package/signed_exchange_error.h"
 #include "content/common/content_export.h"
 #include "services/network/public/mojom/url_loader.mojom.h"
 #include "url/origin.h"
@@ -28,6 +29,7 @@ class SimpleWatcher;
 
 namespace content {
 
+class SignedExchangeDevToolsProxy;
 class ThrottlingURLLoader;
 class URLLoaderThrottle;
 
@@ -35,7 +37,8 @@ class CONTENT_EXPORT SignedExchangeCertFetcher
     : public network::mojom::URLLoaderClient {
  public:
   using CertificateCallback =
-      base::OnceCallback<void(std::unique_ptr<SignedExchangeCertificateChain>)>;
+      base::OnceCallback<void(SignedExchangeLoadResult,
+                              std::unique_ptr<SignedExchangeCertificateChain>)>;
 
   // Starts fetching the certificate using a ThrottlingURLLoader created with
   // the |shared_url_loader_factory| and the |throttles|. The |callback| will
@@ -51,8 +54,10 @@ class CONTENT_EXPORT SignedExchangeCertFetcher
       const GURL& cert_url,
       url::Origin request_initiator,
       bool force_fetch,
+      SignedExchangeVersion version,
       CertificateCallback callback,
-      const signed_exchange_utils::LogCallback& error_message_callback);
+      SignedExchangeDevToolsProxy* devtools_proxy,
+      const base::Optional<base::UnguessableToken>& throttling_profile_id);
 
   ~SignedExchangeCertFetcher() override;
 
@@ -72,20 +77,19 @@ class CONTENT_EXPORT SignedExchangeCertFetcher
       const GURL& cert_url,
       url::Origin request_initiator,
       bool force_fetch,
+      SignedExchangeVersion version,
       CertificateCallback callback,
-      const signed_exchange_utils::LogCallback& error_message_callback);
+      SignedExchangeDevToolsProxy* devtools_proxy,
+      const base::Optional<base::UnguessableToken>& throttling_profile_id);
   void Start();
   void Abort();
   void OnHandleReady(MojoResult result);
   void OnDataComplete();
 
   // network::mojom::URLLoaderClient
-  void OnReceiveResponse(
-      const network::ResourceResponseHead& head,
-      network::mojom::DownloadedTempFilePtr downloaded_file) override;
+  void OnReceiveResponse(const network::ResourceResponseHead& head) override;
   void OnReceiveRedirect(const net::RedirectInfo& redirect_info,
                          const network::ResourceResponseHead& head) override;
-  void OnDataDownloaded(int64_t data_length, int64_t encoded_length) override;
   void OnUploadProgress(int64_t current_position,
                         int64_t total_size,
                         OnUploadProgressCallback callback) override;
@@ -98,13 +102,17 @@ class CONTENT_EXPORT SignedExchangeCertFetcher
   scoped_refptr<network::SharedURLLoaderFactory> shared_url_loader_factory_;
   std::vector<std::unique_ptr<URLLoaderThrottle>> throttles_;
   std::unique_ptr<network::ResourceRequest> resource_request_;
+  const SignedExchangeVersion version_;
   CertificateCallback callback_;
-  signed_exchange_utils::LogCallback error_message_callback_;
 
   std::unique_ptr<ThrottlingURLLoader> url_loader_;
   mojo::ScopedDataPipeConsumerHandle body_;
   std::unique_ptr<mojo::SimpleWatcher> handle_watcher_;
   std::string body_string_;
+
+  // This is owned by SignedExchangeHandler which is the owner of |this|.
+  SignedExchangeDevToolsProxy* devtools_proxy_;
+  base::Optional<base::UnguessableToken> cert_request_id_;
 
   DISALLOW_COPY_AND_ASSIGN(SignedExchangeCertFetcher);
 };

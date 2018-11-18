@@ -11,6 +11,7 @@
 #include "Resources.h"
 #include "SkCanvas.h"
 #include "SkStream.h"
+#include "SkTo.h"
 #include "SkTypeface.h"
 
 namespace skiagm {
@@ -40,7 +41,7 @@ protected:
 
     void onDraw(SkCanvas* canvas) override {
 
-        canvas->drawColor(sk_tool_utils::color_to_565(SK_ColorGRAY));
+        canvas->drawColor(SK_ColorGRAY);
 
         SkPaint paint;
         paint.setTypeface(fEmojiFont.fTypeface);
@@ -90,7 +91,7 @@ protected:
 
     void onDraw(SkCanvas* canvas) override {
 
-        canvas->drawColor(sk_tool_utils::color_to_565(SK_ColorGRAY));
+        canvas->drawColor(SK_ColorGRAY);
 
         SkPaint paint;
         paint.setTypeface(fEmojiFont.fTypeface);

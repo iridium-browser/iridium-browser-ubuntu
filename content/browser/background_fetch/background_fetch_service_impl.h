@@ -12,6 +12,7 @@
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "content/browser/background_fetch/background_fetch_context.h"
 #include "content/common/content_export.h"
 #include "third_party/blink/public/platform/modules/background_fetch/background_fetch.mojom.h"
 #include "url/origin.h"
@@ -19,6 +20,7 @@
 namespace content {
 
 class BackgroundFetchContext;
+class RenderFrameHost;
 class RenderProcessHost;
 struct BackgroundFetchOptions;
 struct ServiceWorkerFetchRequest;
@@ -28,12 +30,19 @@ class CONTENT_EXPORT BackgroundFetchServiceImpl
  public:
   BackgroundFetchServiceImpl(
       scoped_refptr<BackgroundFetchContext> background_fetch_context,
-      url::Origin origin);
+      url::Origin origin,
+      RenderFrameHost* render_frame_host);
   ~BackgroundFetchServiceImpl() override;
 
-  static void Create(blink::mojom::BackgroundFetchServiceRequest request,
-                     RenderProcessHost* render_process_host,
-                     const url::Origin& origin);
+  static void CreateForWorker(
+      blink::mojom::BackgroundFetchServiceRequest request,
+      RenderProcessHost* render_process_host,
+      const url::Origin& origin);
+
+  static void CreateForFrame(
+      RenderProcessHost* render_process_host,
+      int render_frame_id,
+      blink::mojom::BackgroundFetchServiceRequest request);
 
   // blink::mojom::BackgroundFetchService implementation.
   void Fetch(int64_t service_worker_registration_id,
@@ -41,12 +50,22 @@ class CONTENT_EXPORT BackgroundFetchServiceImpl
              const std::vector<ServiceWorkerFetchRequest>& requests,
              const BackgroundFetchOptions& options,
              const SkBitmap& icon,
+             blink::mojom::BackgroundFetchUkmDataPtr ukm_data,
              FetchCallback callback) override;
   void GetIconDisplaySize(GetIconDisplaySizeCallback callback) override;
+  void MatchRequests(
+      int64_t service_worker_registration_id,
+      const std::string& developer_id,
+      const std::string& unique_id,
+      const base::Optional<ServiceWorkerFetchRequest>& request_to_match,
+      blink::mojom::QueryParamsPtr cache_query_params,
+      bool match_all,
+      MatchRequestsCallback callback) override;
   void UpdateUI(int64_t service_worker_registration_id,
                 const std::string& developer_id,
                 const std::string& unique_id,
-                const std::string& title,
+                const base::Optional<std::string>& title,
+                const SkBitmap& icon,
                 UpdateUICallback callback) override;
   void Abort(int64_t service_worker_registration_id,
              const std::string& developer_id,
@@ -65,6 +84,7 @@ class CONTENT_EXPORT BackgroundFetchServiceImpl
   static void CreateOnIoThread(
       scoped_refptr<BackgroundFetchContext> background_fetch_context,
       url::Origin origin,
+      RenderFrameHost* render_frame_host,
       blink::mojom::BackgroundFetchServiceRequest request);
 
   // Validates and returns whether the |developer_id|, |unique_id|, |requests|
@@ -80,6 +100,8 @@ class CONTENT_EXPORT BackgroundFetchServiceImpl
   scoped_refptr<BackgroundFetchContext> background_fetch_context_;
 
   const url::Origin origin_;
+
+  RenderFrameHost* render_frame_host_;
 
   DISALLOW_COPY_AND_ASSIGN(BackgroundFetchServiceImpl);
 };

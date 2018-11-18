@@ -42,6 +42,7 @@ using ::testing::_;
 class MockTestPersonalDataManager : public autofill::TestPersonalDataManager {
  public:
   MockTestPersonalDataManager() : TestPersonalDataManager() {
+    SetAutofillProfileEnabled(true);
     SetAutofillCreditCardEnabled(true);
     SetAutofillWalletImportEnabled(true);
   }
@@ -72,6 +73,7 @@ class PaymentRequestTest : public PlatformTest {
  protected:
   PaymentRequestTest()
       : chrome_browser_state_(TestChromeBrowserState::Builder().Build()) {
+    test_personal_data_manager_.SetAutofillProfileEnabled(true);
     test_personal_data_manager_.SetAutofillCreditCardEnabled(true);
     test_personal_data_manager_.SetAutofillWalletImportEnabled(true);
   }
@@ -132,16 +134,6 @@ TEST_F(PaymentRequestTest, CreatesCurrencyFormatterCorrectly) {
   currency_formatter = payment_request2.GetOrCreateCurrencyFormatter();
   EXPECT_EQ(base::UTF8ToUTF16("¥55"), currency_formatter->Format("55.00"));
   EXPECT_EQ("JPY", currency_formatter->formatted_currency_code());
-
-  web_payment_request.details.total->amount->currency_system = "NOT_ISO4217";
-  web_payment_request.details.total->amount->currency = "USD";
-  TestPaymentRequest payment_request3(web_payment_request,
-                                      chrome_browser_state_.get(), &web_state_,
-                                      &test_personal_data_manager_);
-  ASSERT_EQ("en", payment_request3.GetApplicationLocale());
-  currency_formatter = payment_request3.GetOrCreateCurrencyFormatter();
-  EXPECT_EQ(base::UTF8ToUTF16("55.00"), currency_formatter->Format("55.00"));
-  EXPECT_EQ("USD", currency_formatter->formatted_currency_code());
 }
 
 // Tests that the accepted card networks are identified correctly.
@@ -149,10 +141,10 @@ TEST_F(PaymentRequestTest, AcceptedPaymentNetworks) {
   WebPaymentRequest web_payment_request;
 
   PaymentMethodData method_datum1;
-  method_datum1.supported_methods.push_back("visa");
+  method_datum1.supported_method = "visa";
   web_payment_request.method_data.push_back(method_datum1);
   PaymentMethodData method_datum2;
-  method_datum2.supported_methods.push_back("mastercard");
+  method_datum2.supported_method = "mastercard";
   web_payment_request.method_data.push_back(method_datum2);
 
   TestPaymentRequest payment_request(web_payment_request,
@@ -172,14 +164,23 @@ TEST_F(PaymentRequestTest, SupportedMethods) {
   feature_list.InitAndEnableFeature(features::kWebPaymentsNativeApps);
 
   PaymentMethodData method_datum1;
-  method_datum1.supported_methods.push_back("visa");
-  method_datum1.supported_methods.push_back("mastercard");
-  method_datum1.supported_methods.push_back("invalid");
-  method_datum1.supported_methods.push_back("");
-  method_datum1.supported_methods.push_back("visa");
-  method_datum1.supported_methods.push_back("https://bobpay.com");
-  method_datum1.supported_methods.push_back("http://invalidpay.com");
+  method_datum1.supported_method = "visa";
+  PaymentMethodData method_datum2;
+  method_datum2.supported_method = "mastercard";
+  PaymentMethodData method_datum3;
+  method_datum3.supported_method = "invalid";
+  PaymentMethodData method_datum4;
+  method_datum4.supported_method = "visa";
+  PaymentMethodData method_datum5;
+  method_datum5.supported_method = "https://bobpay.com";
+  PaymentMethodData method_datum6;
+  method_datum6.supported_method = "http://invalidpay.com";
   web_payment_request.method_data.push_back(method_datum1);
+  web_payment_request.method_data.push_back(method_datum2);
+  web_payment_request.method_data.push_back(method_datum3);
+  web_payment_request.method_data.push_back(method_datum4);
+  web_payment_request.method_data.push_back(method_datum5);
+  web_payment_request.method_data.push_back(method_datum6);
 
   TestPaymentRequest payment_request(web_payment_request,
                                      chrome_browser_state_.get(), &web_state_,
@@ -202,20 +203,23 @@ TEST_F(PaymentRequestTest, SupportedMethods_MultipleEntries) {
   feature_list.InitAndEnableFeature(features::kWebPaymentsNativeApps);
 
   PaymentMethodData method_datum1;
-  method_datum1.supported_methods.push_back("visa");
-  method_datum1.supported_methods.push_back("https://bobpay.com");
-  web_payment_request.method_data.push_back(method_datum1);
+  method_datum1.supported_method = "visa";
   PaymentMethodData method_datum2;
-  method_datum2.supported_methods.push_back("mastercard");
-  web_payment_request.method_data.push_back(method_datum2);
+  method_datum2.supported_method = "https://bobpay.com";
   PaymentMethodData method_datum3;
-  method_datum3.supported_methods.push_back("");
-  method_datum3.supported_methods.push_back("http://invalidpay.com");
-  web_payment_request.method_data.push_back(method_datum3);
+  method_datum3.supported_method = "mastercard";
   PaymentMethodData method_datum4;
-  method_datum4.supported_methods.push_back("visa");
-  method_datum4.supported_methods.push_back("https://bobpay.com");
+  method_datum4.supported_method = "http://invalidpay.com";
+  PaymentMethodData method_datum5;
+  method_datum5.supported_method = "visa";
+  PaymentMethodData method_datum6;
+  method_datum6.supported_method = "https://bobpay.com";
+  web_payment_request.method_data.push_back(method_datum1);
+  web_payment_request.method_data.push_back(method_datum2);
+  web_payment_request.method_data.push_back(method_datum3);
   web_payment_request.method_data.push_back(method_datum4);
+  web_payment_request.method_data.push_back(method_datum5);
+  web_payment_request.method_data.push_back(method_datum6);
 
   TestPaymentRequest payment_request(web_payment_request,
                                      chrome_browser_state_.get(), &web_state_,
@@ -234,7 +238,7 @@ TEST_F(PaymentRequestTest, SupportedMethods_OnlyBasicCard) {
   WebPaymentRequest web_payment_request;
 
   PaymentMethodData method_datum1;
-  method_datum1.supported_methods.push_back("basic-card");
+  method_datum1.supported_method = "basic-card";
   web_payment_request.method_data.push_back(method_datum1);
 
   TestPaymentRequest payment_request(web_payment_request,
@@ -261,9 +265,11 @@ TEST_F(PaymentRequestTest, SupportedMethods_BasicCard_WithSpecificMethod) {
   WebPaymentRequest web_payment_request;
 
   PaymentMethodData method_datum1;
-  method_datum1.supported_methods.push_back("jcb");
-  method_datum1.supported_methods.push_back("basic-card");
+  method_datum1.supported_method = "jcb";
+  PaymentMethodData method_datum2;
+  method_datum2.supported_method = "basic-card";
   web_payment_request.method_data.push_back(method_datum1);
+  web_payment_request.method_data.push_back(method_datum2);
 
   TestPaymentRequest payment_request(web_payment_request,
                                      chrome_browser_state_.get(), &web_state_,
@@ -288,15 +294,17 @@ TEST_F(PaymentRequestTest, SupportedMethods_BasicCard_Overlap) {
   WebPaymentRequest web_payment_request;
 
   PaymentMethodData method_datum1;
-  method_datum1.supported_methods.push_back("mastercard");
-  method_datum1.supported_methods.push_back("visa");
-  web_payment_request.method_data.push_back(method_datum1);
+  method_datum1.supported_method = "mastercard";
   PaymentMethodData method_datum2;
-  method_datum2.supported_methods.push_back("basic-card");
-  method_datum2.supported_networks.push_back("visa");
-  method_datum2.supported_networks.push_back("mastercard");
-  method_datum2.supported_networks.push_back("unionpay");
+  method_datum2.supported_method = "visa";
+  PaymentMethodData method_datum3;
+  method_datum3.supported_method = "basic-card";
+  method_datum3.supported_networks.push_back("visa");
+  method_datum3.supported_networks.push_back("mastercard");
+  method_datum3.supported_networks.push_back("unionpay");
+  web_payment_request.method_data.push_back(method_datum1);
   web_payment_request.method_data.push_back(method_datum2);
+  web_payment_request.method_data.push_back(method_datum3);
 
   TestPaymentRequest payment_request(web_payment_request,
                                      chrome_browser_state_.get(), &web_state_,
@@ -314,7 +322,7 @@ TEST_F(PaymentRequestTest, SupportedMethods_BasicCard_WithSupportedNetworks) {
   WebPaymentRequest web_payment_request;
 
   PaymentMethodData method_datum1;
-  method_datum1.supported_methods.push_back("basic-card");
+  method_datum1.supported_method = "basic-card";
   method_datum1.supported_networks.push_back("visa");
   method_datum1.supported_networks.push_back("unionpay");
   web_payment_request.method_data.push_back(method_datum1);
@@ -329,12 +337,70 @@ TEST_F(PaymentRequestTest, SupportedMethods_BasicCard_WithSupportedNetworks) {
   EXPECT_EQ("unionpay", payment_request.supported_card_networks()[1]);
 }
 
+TEST_F(PaymentRequestTest, GooglePayCardsInBasicCard_Allowed) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeature(features::kReturnGooglePayInBasicCard);
+
+  WebPaymentRequest web_payment_request;
+  PaymentMethodData method_datum;
+  method_datum.supported_method = "basic-card";
+  method_datum.supported_networks.push_back("mastercard");
+  web_payment_request.method_data.push_back(method_datum);
+
+  // Add a mastercard with billing address.
+  autofill::AutofillProfile address = autofill::test::GetFullProfile();
+  test_personal_data_manager_.AddProfile(address);
+  autofill::CreditCard credit_card = autofill::test::GetMaskedServerCard();
+  credit_card.set_card_type(autofill::CreditCard::CardType::CARD_TYPE_CREDIT);
+  credit_card.set_billing_address_id(address.guid());
+  test_personal_data_manager_.AddServerCreditCard(credit_card);
+
+  TestPaymentRequest payment_request(web_payment_request,
+                                     chrome_browser_state_.get(), &web_state_,
+                                     &test_personal_data_manager_);
+
+  // The card is available in the payment request, and added to the
+  // PersonalDataManager.
+  EXPECT_EQ(1U, payment_request.payment_methods().size());
+  // The card is expected to have been added to the PersonalDataManager.
+  EXPECT_EQ(1U, test_personal_data_manager_.GetCreditCards().size());
+}
+
+TEST_F(PaymentRequestTest, GooglePayCardsInBasicCard_NotAllowed) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndDisableFeature(features::kReturnGooglePayInBasicCard);
+
+  WebPaymentRequest web_payment_request;
+  PaymentMethodData method_datum;
+  method_datum.supported_method = "basic-card";
+  method_datum.supported_networks.push_back("mastercard");
+  web_payment_request.method_data.push_back(method_datum);
+
+  // Add a mastercard with billing address.
+  autofill::AutofillProfile address = autofill::test::GetFullProfile();
+  test_personal_data_manager_.AddProfile(address);
+  autofill::CreditCard credit_card = autofill::test::GetMaskedServerCard();
+  credit_card.set_card_type(autofill::CreditCard::CardType::CARD_TYPE_CREDIT);
+  credit_card.set_billing_address_id(address.guid());
+  test_personal_data_manager_.AddServerCreditCard(credit_card);
+
+  TestPaymentRequest payment_request(web_payment_request,
+                                     chrome_browser_state_.get(), &web_state_,
+                                     &test_personal_data_manager_);
+
+  // The card is not available in the payment request, but added to the
+  // PersonalDataManager.
+  EXPECT_TRUE(payment_request.payment_methods().empty());
+  // The card is expected to have been added to the PersonalDataManager.
+  EXPECT_EQ(1U, test_personal_data_manager_.GetCreditCards().size());
+}
+
 // Tests that an autofill payment instrumnt e.g., credit cards can be added
 // to the list of available payment methods.
 TEST_F(PaymentRequestTest, CreateAndAddAutofillPaymentInstrument) {
   WebPaymentRequest web_payment_request;
   PaymentMethodData method_datum;
-  method_datum.supported_methods.push_back("basic-card");
+  method_datum.supported_method = "basic-card";
   method_datum.supported_networks.push_back("visa");
   web_payment_request.method_data.push_back(method_datum);
 
@@ -358,7 +424,7 @@ TEST_F(PaymentRequestTest, CreateAndAddAutofillPaymentInstrument) {
 TEST_F(PaymentRequestTest, CreateAndAddAutofillPaymentInstrumentIncognito) {
   WebPaymentRequest web_payment_request;
   PaymentMethodData method_datum;
-  method_datum.supported_methods.push_back("basic-card");
+  method_datum.supported_method = "basic-card";
   method_datum.supported_networks.push_back("visa");
   web_payment_request.method_data.push_back(method_datum);
 
@@ -383,7 +449,7 @@ TEST_F(PaymentRequestTest, CreateAndAddAutofillPaymentInstrumentIncognito) {
 TEST_F(PaymentRequestTest, UpdateAutofillPaymentInstrument) {
   WebPaymentRequest web_payment_request;
   PaymentMethodData method_datum;
-  method_datum.supported_methods.push_back("basic-card");
+  method_datum.supported_method = "basic-card";
   method_datum.supported_networks.push_back("visa");
   method_datum.supported_networks.push_back("amex");
   web_payment_request.method_data.push_back(method_datum);
@@ -412,7 +478,7 @@ TEST_F(PaymentRequestTest, UpdateAutofillPaymentInstrument) {
 TEST_F(PaymentRequestTest, UpdateAutofillPaymentInstrumentIncognito) {
   WebPaymentRequest web_payment_request;
   PaymentMethodData method_datum;
-  method_datum.supported_methods.push_back("basic-card");
+  method_datum.supported_method = "basic-card";
   method_datum.supported_networks.push_back("visa");
   method_datum.supported_networks.push_back("amex");
   web_payment_request.method_data.push_back(method_datum);
@@ -1039,7 +1105,7 @@ TEST_F(PaymentRequestTest, PaymentDetailsModifier_BasicCard_NetworkMismatch) {
   WebPaymentRequest web_payment_request =
       payment_request_test_util::CreateTestWebPaymentRequest();
   PaymentDetailsModifier modifier;
-  modifier.method_data.supported_methods.push_back("basic-card");
+  modifier.method_data.supported_method = "basic-card";
   modifier.method_data.supported_networks.push_back("amex");
   modifier.total = std::make_unique<payments::PaymentItem>();
   modifier.total->label = "Discounted Total";
@@ -1076,7 +1142,7 @@ TEST_F(PaymentRequestTest, PaymentDetailsModifier_BasicCard_NetworkMatch) {
   WebPaymentRequest web_payment_request =
       payment_request_test_util::CreateTestWebPaymentRequest();
   PaymentDetailsModifier modifier;
-  modifier.method_data.supported_methods.push_back("basic-card");
+  modifier.method_data.supported_method = "basic-card";
   modifier.method_data.supported_networks.push_back("amex");
   modifier.total = std::make_unique<payments::PaymentItem>();
   modifier.total->label = "Discounted Total";
@@ -1123,7 +1189,7 @@ TEST_F(PaymentRequestTest, PaymentDetailsModifier_BasicCard_TypeMismatch) {
   WebPaymentRequest web_payment_request =
       payment_request_test_util::CreateTestWebPaymentRequest();
   PaymentDetailsModifier modifier;
-  modifier.method_data.supported_methods.push_back("basic-card");
+  modifier.method_data.supported_method = "basic-card";
   modifier.method_data.supported_networks.push_back("amex");
   modifier.method_data.supported_types.insert(
       autofill::CreditCard::CARD_TYPE_CREDIT);
@@ -1155,17 +1221,21 @@ TEST_F(PaymentRequestTest, PaymentDetailsModifier_BasicCard_TypeMismatch) {
 // are both a match.
 TEST_F(PaymentRequestTest,
        PaymentDetailsModifier_BasicCard_NetworkAndTypeMatch) {
+  // Only Google Pay cards have a type.
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeature(features::kReturnGooglePayInBasicCard);
+
   autofill::AutofillProfile address = autofill::test::GetFullProfile();
   test_personal_data_manager_.AddProfile(address);
   autofill::CreditCard credit_card = autofill::test::GetMaskedServerCardAmex();
   credit_card.set_card_type(autofill::CreditCard::CardType::CARD_TYPE_CREDIT);
   credit_card.set_billing_address_id(address.guid());
-  test_personal_data_manager_.AddCreditCard(credit_card);
+  test_personal_data_manager_.AddServerCreditCard(credit_card);
 
   WebPaymentRequest web_payment_request =
       payment_request_test_util::CreateTestWebPaymentRequest();
   PaymentDetailsModifier modifier;
-  modifier.method_data.supported_methods.push_back("basic-card");
+  modifier.method_data.supported_method = "basic-card";
   modifier.method_data.supported_networks.push_back("amex");
   modifier.method_data.supported_types.insert(
       autofill::CreditCard::CARD_TYPE_CREDIT);
@@ -1238,7 +1308,7 @@ TEST_F(PaymentRequestTest, RequestContactInfo) {
 TEST_F(PaymentRequestTest, CanPay) {
   payments::WebPaymentRequest web_payment_request;
   payments::PaymentMethodData method_datum;
-  method_datum.supported_methods.push_back("basic-card");
+  method_datum.supported_method = "basic-card";
   method_datum.supported_networks.push_back("visa");
   web_payment_request.method_data.push_back(method_datum);
 

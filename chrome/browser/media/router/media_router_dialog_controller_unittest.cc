@@ -46,9 +46,12 @@ class MockWebContentsDelegate : public content::WebContentsDelegate {
 
 class MediaRouterDialogControllerTest : public ChromeRenderViewHostTestHarness {
  public:
-  MOCK_METHOD2(RequestSuccess,
-               void(const content::PresentationInfo&, const MediaRoute&));
-  MOCK_METHOD1(RequestError, void(const content::PresentationError& error));
+  MOCK_METHOD3(RequestSuccess,
+               void(const blink::mojom::PresentationInfo&,
+                    mojom::RoutePresentationConnectionPtr,
+                    const MediaRoute&));
+  MOCK_METHOD1(RequestError,
+               void(const blink::mojom::PresentationError& error));
 
  protected:
   MediaRouterDialogControllerTest() {}
@@ -140,9 +143,9 @@ TEST_F(MediaRouterDialogControllerTest, StartPresentationContext) {
                    false, false);
   auto result = RouteRequestResult::FromSuccess(route, "presentationId");
 
-  EXPECT_CALL(*this, RequestSuccess(_, _)).Times(1);
+  EXPECT_CALL(*this, RequestSuccess(_, _, _)).Times(1);
   EXPECT_CALL(*this, RequestError(_)).Times(0);
-  StartPresentationContext::HandleRouteResponse(std::move(context), *result);
+  context->HandleRouteResponse(nullptr, *result);
 }
 
 }  // namespace media_router

@@ -9,7 +9,7 @@
 #include "base/logging.h"
 #include "base/sequenced_task_runner.h"
 #include "content/public/browser/browser_thread.h"
-#include "sql/connection.h"
+#include "sql/database.h"
 
 using content::BrowserThread;
 
@@ -26,7 +26,7 @@ PredictorTableBase::PredictorTableBase(
 PredictorTableBase::~PredictorTableBase() {
 }
 
-void PredictorTableBase::Initialize(sql::Connection* db) {
+void PredictorTableBase::Initialize(sql::Database* db) {
   DCHECK(db_task_runner_->RunsTasksInCurrentSequence());
   db_ = db;
   CreateTableIfNonExistent();
@@ -36,7 +36,11 @@ void PredictorTableBase::SetCancelled() {
   cancelled_.Set();
 }
 
-sql::Connection* PredictorTableBase::DB() {
+bool PredictorTableBase::IsCancelled() {
+  return cancelled_.IsSet();
+}
+
+sql::Database* PredictorTableBase::DB() {
   DCHECK(db_task_runner_->RunsTasksInCurrentSequence());
   return db_;
 }

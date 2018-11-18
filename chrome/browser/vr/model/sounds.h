@@ -6,15 +6,17 @@
 #define CHROME_BROWSER_VR_MODEL_SOUNDS_H_
 
 #include "chrome/browser/vr/model/sound_id.h"
+#include "chrome/browser/vr/vr_export.h"
 
 namespace vr {
 
-struct Sounds {
+struct VR_EXPORT Sounds {
   SoundId hover_enter = kSoundNone;
   SoundId hover_leave = kSoundNone;
+  SoundId hover_move = kSoundNone;
   SoundId button_down = kSoundNone;
   SoundId button_up = kSoundNone;
-  SoundId move = kSoundNone;
+  SoundId touch_move = kSoundNone;
 };
 
 }  // namespace vr

@@ -85,9 +85,9 @@ Status Truncate(const std::string& filename, uint64_t length) {
 
 struct FileState {
   std::string filename_;
-  ssize_t pos_;
-  ssize_t pos_at_last_sync_;
-  ssize_t pos_at_last_flush_;
+  int64_t pos_;
+  int64_t pos_at_last_sync_;
+  int64_t pos_at_last_flush_;
 
   FileState(const std::string& filename)
       : filename_(filename),
@@ -172,7 +172,7 @@ TestWritableFile::TestWritableFile(const FileState& state,
       target_(f),
       writable_file_opened_(true),
       env_(env) {
-  assert(f != NULL);
+  assert(f != nullptr);
 }
 
 TestWritableFile::~TestWritableFile() {
@@ -360,7 +360,7 @@ void FaultInjectionTestEnv::WritableFileClosed(const FileState& state) {
 }
 
 Status FileState::DropUnsyncedData() const {
-  ssize_t sync_pos = pos_at_last_sync_ == -1 ? 0 : pos_at_last_sync_;
+  int64_t sync_pos = pos_at_last_sync_ == -1 ? 0 : pos_at_last_sync_;
   return Truncate(filename_, sync_pos);
 }
 
@@ -378,7 +378,7 @@ class FaultInjectionTest {
   FaultInjectionTest()
       : env_(new FaultInjectionTestEnv),
         tiny_cache_(NewLRUCache(100)),
-        db_(NULL) {
+        db_(nullptr) {
     dbname_ = test::TmpDir() + "/fault_test";
     DestroyDB(dbname_, Options());  // Destroy any db from earlier run
     options_.reuse_logs = true;
@@ -457,14 +457,14 @@ class FaultInjectionTest {
 
   Status OpenDB() {
     delete db_;
-    db_ = NULL;
+    db_ = nullptr;
     env_->ResetState();
     return DB::Open(options_, dbname_, &db_);
   }
 
   void CloseDB() {
     delete db_;
-    db_ = NULL;
+    db_ = nullptr;
   }
 
   void DeleteAllData() {
@@ -493,7 +493,7 @@ class FaultInjectionTest {
   void PartialCompactTestPreFault(int num_pre_sync, int num_post_sync) {
     DeleteAllData();
     Build(0, num_pre_sync);
-    db_->CompactRange(NULL, NULL);
+    db_->CompactRange(nullptr, nullptr);
     Build(num_pre_sync, num_post_sync);
   }
 

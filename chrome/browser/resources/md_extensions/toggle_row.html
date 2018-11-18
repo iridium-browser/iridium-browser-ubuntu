@@ -33,11 +33,11 @@
       }
 
       :host ::slotted(*) {
-        -webkit-margin-end: 20px;
         flex: 1;
+        margin-inline-end: 20px;
       }
     </style>
-    <label id="label" on-click="onLabelTap_">
+    <label id="label">
       <input id="native" type="checkbox" checked="[[checked]]"
           on-change="onNativeChange_" on-click="onNativeClick_">
       <slot></slot>

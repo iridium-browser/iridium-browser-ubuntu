@@ -5,19 +5,16 @@
 #include "components/offline_pages/core/model/clear_digest_task.h"
 
 #include "base/bind.h"
-#include "components/offline_pages/core/offline_page_metadata_store_sql.h"
-#include "sql/connection.h"
+#include "components/offline_pages/core/offline_page_metadata_store.h"
+#include "sql/database.h"
 #include "sql/statement.h"
 
 namespace offline_pages {
 
 namespace {
 
-bool ClearDigestSync(int64_t offline_id, sql::Connection* db) {
-  if (!db)
-    return false;
-
-  const char kSql[] =
+bool ClearDigestSync(int64_t offline_id, sql::Database* db) {
+  static const char kSql[] =
       "UPDATE OR IGNORE offlinepages_v1"
       " SET digest = '' "
       " WHERE offline_id = ?";
@@ -28,7 +25,7 @@ bool ClearDigestSync(int64_t offline_id, sql::Connection* db) {
 
 }  // namespace
 
-ClearDigestTask::ClearDigestTask(OfflinePageMetadataStoreSQL* store,
+ClearDigestTask::ClearDigestTask(OfflinePageMetadataStore* store,
                                  int64_t offline_id)
     : store_(store), offline_id_(offline_id), weak_ptr_factory_(this) {
   DCHECK(store_);
@@ -39,7 +36,8 @@ ClearDigestTask::~ClearDigestTask(){};
 void ClearDigestTask::Run() {
   store_->Execute(base::BindOnce(&ClearDigestSync, offline_id_),
                   base::BindOnce(&ClearDigestTask::OnClearDigestDone,
-                                 weak_ptr_factory_.GetWeakPtr()));
+                                 weak_ptr_factory_.GetWeakPtr()),
+                  false);
 }
 
 void ClearDigestTask::OnClearDigestDone(bool result) {

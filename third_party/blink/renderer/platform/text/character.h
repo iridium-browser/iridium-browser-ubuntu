@@ -72,13 +72,18 @@ class PLATFORM_EXPORT Character {
            !(U_GET_GC_MASK(c) & (U_GC_M_MASK | U_GC_LM_MASK | U_GC_SK_MASK));
   }
 
+  static bool IsHangul(UChar32 c) {
+    // Below U+1100 is likely a common case.
+    return c < 0x1100 ? false : IsHangulSlow(c);
+  }
+
   static unsigned ExpansionOpportunityCount(const LChar*,
-                                            size_t length,
+                                            unsigned length,
                                             TextDirection,
                                             bool& is_after_expansion,
                                             const TextJustify);
   static unsigned ExpansionOpportunityCount(const UChar*,
-                                            size_t length,
+                                            unsigned length,
                                             TextDirection,
                                             bool& is_after_expansion,
                                             const TextJustify);
@@ -101,6 +106,9 @@ class PLATFORM_EXPORT Character {
            ch == '_' || ch == 0xb7 || (0xc0 <= ch && ch != 0xd7 && ch != 0xf7);
   }
   static bool IsPotentialCustomElementNameChar(UChar32 character);
+
+  // http://unicode.org/reports/tr9/#Directional_Formatting_Characters
+  static bool IsBidiControl(UChar32 character);
 
   static bool TreatAsSpace(UChar32 c) {
     return c == kSpaceCharacter || c == kTabulationCharacter ||
@@ -175,10 +183,28 @@ class PLATFORM_EXPORT Character {
   static String NormalizeSpaces(const UChar*, unsigned length);
 
   static bool IsCommonOrInheritedScript(UChar32);
-  static bool IsUnassignedOrPrivateUse(UChar32);
+  static bool IsPrivateUse(UChar32);
+  static bool IsNonCharacter(UChar32);
+
+  // Returns whether a script code could be determined for the given character
+  // and that script code is not USCRIPT_COMMON or USCRIPT_INHERITED.
+  static bool HasDefiniteScript(UChar32);
+
+  static bool IsModernGeorgianUppercase(UChar32 c) {
+    return IsInRange(c, 0x1C90, 0x1CBF);
+  }
+
+  // Map modern secular Georgian uppercase letters added in Unicode
+  // 11.0 to their corresponding lowercase letters.
+  // https://www.unicode.org/charts/PDF/U10A0.pdf
+  // https://www.unicode.org/charts/PDF/U1C90.pdf
+  static UChar32 LowercaseModernGeorgianUppercase(UChar32 c) {
+    return (c - (0x1C90 - 0x10D0));
+  }
 
  private:
   static bool IsCJKIdeographOrSymbolSlow(UChar32);
+  static bool IsHangulSlow(UChar32);
 };
 
 }  // namespace blink

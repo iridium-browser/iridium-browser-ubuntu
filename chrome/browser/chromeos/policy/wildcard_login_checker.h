@@ -9,13 +9,10 @@
 
 #include "base/callback.h"
 #include "base/macros.h"
+#include "base/memory/ref_counted.h"
 #include "base/time/time.h"
 #include "components/policy/core/common/cloud/user_info_fetcher.h"
 #include "google_apis/gaia/google_service_auth_error.h"
-
-namespace net {
-class URLRequestContextGetter;
-}
 
 namespace policy {
 
@@ -37,11 +34,6 @@ class WildcardLoginChecker : public UserInfoFetcher::Delegate {
 
   WildcardLoginChecker();
   virtual ~WildcardLoginChecker();
-
-  // Starts checking. The result will be reported via |callback_|.
-  void StartWithSigninContext(
-      scoped_refptr<net::URLRequestContextGetter> signin_context,
-      StatusCallback callback);
 
   // Starts checking with a provided refresh token.
   void StartWithRefreshToken(const std::string& refresh_token,

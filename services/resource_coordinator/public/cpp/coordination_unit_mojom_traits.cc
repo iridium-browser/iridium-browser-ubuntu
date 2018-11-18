@@ -18,6 +18,8 @@ EnumTraits<resource_coordinator::mojom::CoordinationUnitType,
       return resource_coordinator::mojom::CoordinationUnitType::kFrame;
     case resource_coordinator::CoordinationUnitType::kProcess:
       return resource_coordinator::mojom::CoordinationUnitType::kProcess;
+    case resource_coordinator::CoordinationUnitType::kSystem:
+      return resource_coordinator::mojom::CoordinationUnitType::kSystem;
     default:
       NOTREACHED() << "Invalid type: " << static_cast<uint8_t>(type);
       // This should not be reached. Just return a random value.
@@ -40,6 +42,9 @@ bool EnumTraits<resource_coordinator::mojom::CoordinationUnitType,
     case resource_coordinator::mojom::CoordinationUnitType::kProcess:
       *out = resource_coordinator::CoordinationUnitType::kProcess;
       break;
+    case resource_coordinator::mojom::CoordinationUnitType::kSystem:
+      *out = resource_coordinator::CoordinationUnitType::kSystem;
+      break;
     default:
       NOTREACHED() << "Invalid type: " << static_cast<uint8_t>(input);
       return false;
@@ -54,6 +59,19 @@ bool StructTraits<resource_coordinator::mojom::CoordinationUnitIDDataView,
          resource_coordinator::CoordinationUnitID* out) {
   out->id = input.id();
   if (!input.ReadType(&out->type))
+    return false;
+  return true;
+}
+
+// static
+bool StructTraits<resource_coordinator::mojom::PageNavigationIdentityDataView,
+                  resource_coordinator::PageNavigationIdentity>::
+    Read(resource_coordinator::mojom::PageNavigationIdentityDataView input,
+         resource_coordinator::PageNavigationIdentity* out) {
+  if (!input.ReadPageCuId(&out->page_cu_id))
+    return false;
+  out->navigation_id = input.navigation_id();
+  if (!input.ReadUrl(&out->url))
     return false;
   return true;
 }

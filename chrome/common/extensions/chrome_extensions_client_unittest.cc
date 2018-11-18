@@ -13,6 +13,7 @@
 #include "extensions/common/extension.h"
 #include "extensions/common/file_util.h"
 #include "extensions/common/manifest.h"
+#include "extensions/common/manifest_handler.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace extensions {
@@ -31,7 +32,7 @@ class ChromeExtensionsClientTest : public testing::Test {
 // Test that a browser action extension returns a path to an icon.
 TEST_F(ChromeExtensionsClientTest, GetBrowserImagePaths) {
   base::FilePath install_dir;
-  ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &install_dir));
+  ASSERT_TRUE(base::PathService::Get(chrome::DIR_TEST_DATA, &install_dir));
   install_dir = install_dir.AppendASCII("extensions")
                     .AppendASCII("api_test")
                     .AppendASCII("browser_action")
@@ -52,7 +53,7 @@ TEST_F(ChromeExtensionsClientTest, GetBrowserImagePaths) {
 // Test that extensions with zero-length action icons will not load.
 TEST_F(ChromeExtensionsClientTest, CheckZeroLengthActionIconFiles) {
   base::FilePath install_dir;
-  ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &install_dir));
+  ASSERT_TRUE(base::PathService::Get(chrome::DIR_TEST_DATA, &install_dir));
 
   // Try to install an extension with a zero-length browser action icon file.
   base::FilePath ext_dir = install_dir.AppendASCII("extensions")
@@ -78,6 +79,15 @@ TEST_F(ChromeExtensionsClientTest, CheckZeroLengthActionIconFiles) {
   EXPECT_FALSE(extension3.get());
   EXPECT_STREQ("Could not load icon 'icon.png' for page action.",
                error.c_str());
+}
+
+// Test that the ManifestHandlerRegistry handler map hasn't overflowed.
+// If this test fails, increase ManifestHandlerRegistry::kHandlerMax.
+TEST_F(ChromeExtensionsClientTest, CheckManifestHandlerRegistryForOverflow) {
+  ManifestHandlerRegistry* registry = ManifestHandlerRegistry::Get();
+  ASSERT_TRUE(registry);
+  ASSERT_LT(0u, registry->handlers_.size());
+  EXPECT_LE(registry->handlers_.size(), ManifestHandlerRegistry::kHandlerMax);
 }
 
 }  // namespace extensions

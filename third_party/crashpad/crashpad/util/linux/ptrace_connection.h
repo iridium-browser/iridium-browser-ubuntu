@@ -18,9 +18,11 @@
 #include <sys/types.h>
 
 #include <string>
+#include <vector>
 
 #include "base/files/file_path.h"
 #include "util/linux/thread_info.h"
+#include "util/process/process_memory.h"
 
 namespace crashpad {
 
@@ -57,6 +59,20 @@ class PtraceConnection {
   //! \return `true` on success. `false` on failure with a message logged.
   virtual bool ReadFileContents(const base::FilePath& path,
                                 std::string* contents) = 0;
+
+  //! \brief Returns a memory reader for the connected process.
+  //!
+  //! The caller does not take ownership of the reader. The reader is valid for
+  //! the lifetime of the PtraceConnection that created it.
+  virtual ProcessMemory* Memory() = 0;
+
+  //! \brief Determines the thread IDs of the threads in the connected process.
+  //!
+  //! \param[out] threads The list of thread IDs.
+  //! \return `true` on success, `false` on failure with a message logged. If
+  //!     this method returns `false`, \a threads may contain a partial list of
+  //!     thread IDs.
+  virtual bool Threads(std::vector<pid_t>* threads) = 0;
 };
 
 }  // namespace crashpad

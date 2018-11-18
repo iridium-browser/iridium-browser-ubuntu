@@ -10,10 +10,13 @@
 #include "ui/gfx/geometry/size.h"
 
 enum LayoutConstant {
-  // The minimum height of Bookmarks Bar, when attached to the toolbar. The
-  // height of the toolbar may grow to more than this value if the embedded
-  // views need more space, for example, when the font is larger than normal.
+  // The height of Bookmarks Bar when attached to the toolbar. The height of the
+  // Bookmarks Bar is larger than the BOOKMARK_BAR_BUTTON_HEIGHT by a fixed
+  // amount.
   BOOKMARK_BAR_HEIGHT,
+
+  // The height of a button within the Bookmarks Bar.
+  BOOKMARK_BAR_BUTTON_HEIGHT,
 
 #if defined(OS_MACOSX)
   // This is a little smaller than the bookmarkbar height because of the visual
@@ -34,6 +37,9 @@ enum LayoutConstant {
   // The size of the app menu button in a hosted app browser window.
   HOSTED_APP_MENU_BUTTON_SIZE,
 
+  // The size of page action icons in a hosted app title bar.
+  HOSTED_APP_PAGE_ACTION_ICON_SIZE,
+
   // The vertical padding (additional to TOOLBAR_ELEMENT_PADDING) above and
   // below location bar bubbles.
   LOCATION_BAR_BUBBLE_VERTICAL_PADDING,
@@ -51,25 +57,17 @@ enum LayoutConstant {
   // images inside.
   LOCATION_BAR_BUBBLE_ANCHOR_VERTICAL_INSET,
 
-  // The horizontal padding between location bar decorations as well as the
-  // vertical and horizontal padding inside the border.
+  // The vertical and horizontal padding inside the border.
   LOCATION_BAR_ELEMENT_PADDING,
+
+  // The horizontal padding between location bar decorations.
+  LOCATION_BAR_BETWEEN_ELEMENTS_PADDING,
 
   // The height to be occupied by the LocationBar.
   LOCATION_BAR_HEIGHT,
 
   // The size of the icons used inside the LocationBar.
   LOCATION_BAR_ICON_SIZE,
-
-  // The amount of padding used around the icon inside the LocationBar, i.e. the
-  // full width of a LocationBar icon will be LOCATION_BAR_ICON_SIZE + 2 *
-  // LOCATION_BAR_ICON_INTERIOR_PADDING. Icons may additionally be spaced
-  // horizontally by LOCATION_BAR_ELEMENT_PADDING, but this region is not part
-  // of the icon view (e.g. does not highlight on hover).
-  LOCATION_BAR_ICON_INTERIOR_PADDING,
-
-  // The amount of spacing between the last tab and the new tab button.
-  TABSTRIP_NEW_TAB_BUTTON_SPACING,
 
   // Padding after the tab title.
   TAB_AFTER_TITLE_PADDING,
@@ -93,25 +91,28 @@ enum LayoutConstant {
   // subsequent tab when tabs are stacked.
   TAB_STACK_DISTANCE,
 
-  // The standard width of a tab when is stacked layout. This does not include
-  // the endcap width.
-  TAB_STACK_TAB_WIDTH,
-
-  // The standard tab width excluding the overlap (which is the endcap width on
-  // one side)
-  TAB_STANDARD_WIDTH,
+  // In refresh, tabs are drawn with an extension into the toolbar's
+  // space to prevent a gap from appearing between the toolbar and the
+  // bottom of tabs on some non-integral scales.
+  // TODO(tbergquist): Remove this after pixel canvas or any deeper fix to
+  // non-pixel-aligned drawing goes in.  See https://crbug.com/765723.
+  TABSTRIP_TOOLBAR_OVERLAP,
 
   // Additional horizontal padding between the elements in the toolbar.
   TOOLBAR_ELEMENT_PADDING,
 
   // The horizontal space between most items in the toolbar.
   TOOLBAR_STANDARD_SPACING,
-
 };
 
 enum LayoutInset {
-  // The padding inside the tab bounds that defines the tab contents region.
-  TAB,
+  // The padding used around the icon inside the LocationBar. The full width of
+  // the icon would be LOCATION_BAR_ICON_SIZE + 2 * inset.width(). The full
+  // height of the icon would be LOCATION_BAR_ICON_SIZE + 2 * inset.height().
+  // Icons may additionally be spaced horizontally by
+  // LOCATION_BAR_ELEMENT_PADDING, but this region is not part of the icon view
+  // (e.g. does not highlight on hover).
+  LOCATION_BAR_ICON_INTERIOR_PADDING,
 
   // The padding inside the border of a toolbar button (around the image).
   TOOLBAR_BUTTON,
@@ -120,16 +121,14 @@ enum LayoutInset {
   TOOLBAR_ACTION_VIEW,
 };
 
-enum LayoutSize {
-  // The visible size of the new tab button; does not include any Fitts' Law
-  // extensions. Note that in touch-optimized UI mode, the new tab button's
-  // width is larger when the browser is in incognito mode. The height remains
-  // the same whether incognito or not.
-  NEW_TAB_BUTTON,
-};
-
 int GetLayoutConstant(LayoutConstant constant);
+#if defined(OS_MACOSX)
+// Use this function instead of GetLayoutConstant() for Cocoa browser.
+// This will handle Cocoa specific layout constants. For non Cocoa specific
+// constants, it will call GetLayoutConstant() anyway.
+int GetCocoaLayoutConstant(LayoutConstant constant);
+#endif
+
 gfx::Insets GetLayoutInsets(LayoutInset inset);
-gfx::Size GetLayoutSize(LayoutSize size, bool is_incognito);
 
 #endif  // CHROME_BROWSER_UI_LAYOUT_CONSTANTS_H_

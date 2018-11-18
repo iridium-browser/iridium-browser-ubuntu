@@ -4,6 +4,8 @@
 
 #include "chromecast/browser/renderer_prelauncher.h"
 
+#include <utility>
+
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/site_instance.h"
 #include "content/public/common/child_process_host.h"
@@ -31,6 +33,12 @@ void RendererPrelauncher::Prelaunch() {
   rph_routing_id_ = rph->GetNextRoutingID();
   rph->AddRoute(rph_routing_id_, this);
   rph->Init();
+}
+
+bool RendererPrelauncher::IsForURL(const GURL& gurl) const {
+  if (!site_instance())
+    return gurl_ == gurl;
+  return site_instance() == site_instance()->GetRelatedSiteInstance(gurl);
 }
 
 // We don't process any IPC messages, but we do register as an IPC receiver to

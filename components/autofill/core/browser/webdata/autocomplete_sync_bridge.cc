@@ -50,7 +50,7 @@ const char kAutocompleteTagDelimiter[] = "|";
     return ret_val;                       \
   }
 
-void* UserDataKey() {
+void* AutocompleteSyncBridgeUserDataKey() {
   // Use the address of a static that COMDAT folding won't ever collide
   // with something else.
   static int user_data_key = 0;
@@ -283,7 +283,7 @@ void AutocompleteSyncBridge::CreateForWebDataServiceAndBackend(
     AutofillWebDataService* web_data_service,
     AutofillWebDataBackend* web_data_backend) {
   web_data_service->GetDBUserData()->SetUserData(
-      UserDataKey(),
+      AutocompleteSyncBridgeUserDataKey(),
       std::make_unique<AutocompleteSyncBridge>(
           web_data_backend,
           std::make_unique<ClientTagBasedModelTypeProcessor>(
@@ -291,11 +291,11 @@ void AutocompleteSyncBridge::CreateForWebDataServiceAndBackend(
 }
 
 // static
-base::WeakPtr<ModelTypeSyncBridge> AutocompleteSyncBridge::FromWebDataService(
+ModelTypeSyncBridge* AutocompleteSyncBridge::FromWebDataService(
     AutofillWebDataService* web_data_service) {
   return static_cast<AutocompleteSyncBridge*>(
-             web_data_service->GetDBUserData()->GetUserData(UserDataKey()))
-      ->AsWeakPtr();
+      web_data_service->GetDBUserData()->GetUserData(
+          AutocompleteSyncBridgeUserDataKey()));
 }
 
 AutocompleteSyncBridge::AutocompleteSyncBridge(
@@ -388,7 +388,7 @@ void AutocompleteSyncBridge::AutocompleteSyncBridge::GetData(
   std::move(callback).Run(std::move(batch));
 }
 
-void AutocompleteSyncBridge::GetAllData(DataCallback callback) {
+void AutocompleteSyncBridge::GetAllDataForDebugging(DataCallback callback) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
   std::vector<AutofillEntry> entries;
@@ -459,7 +459,7 @@ void AutocompleteSyncBridge::LoadMetadata() {
         {FROM_HERE, "Failed reading autofill metadata from WebDatabase."});
     return;
   }
-  change_processor()->ModelReadyToSync(this, std::move(batch));
+  change_processor()->ModelReadyToSync(std::move(batch));
 }
 
 std::string AutocompleteSyncBridge::GetClientTag(

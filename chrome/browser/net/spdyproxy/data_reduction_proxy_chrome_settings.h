@@ -14,6 +14,7 @@
 #include "components/keyed_service/core/keyed_service.h"
 
 class PrefService;
+class Profile;
 
 namespace base {
 class SequencedTaskRunner;
@@ -27,6 +28,10 @@ class DataStore;
 
 namespace net {
 class URLRequestContextGetter;
+}
+
+namespace network {
+class SharedURLLoaderFactory;
 }
 
 class PrefService;
@@ -62,11 +67,14 @@ class DataReductionProxyChromeSettings
   void Shutdown() override;
 
   // Initialize the settings object with the given io_data, prefs services,
-  // request context getter, data store, ui task runner, and db task runner.
+  // request context getter, URL loader factory, data store, ui task runner, and
+  // db task runner.
   void InitDataReductionProxySettings(
       data_reduction_proxy::DataReductionProxyIOData* io_data,
       PrefService* profile_prefs,
       net::URLRequestContextGetter* request_context_getter,
+      Profile* profile,
+      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
       std::unique_ptr<data_reduction_proxy::DataStore> store,
       const scoped_refptr<base::SingleThreadTaskRunner>& ui_task_runner,
       const scoped_refptr<base::SequencedTaskRunner>& db_task_runner);
@@ -84,6 +92,9 @@ class DataReductionProxyChromeSettings
     data_reduction_proxy_enabled_pref_name_ = pref_name;
   }
 
+  void SetIgnoreLongTermBlackListRules(
+      bool ignore_long_term_black_list_rules) override;
+
  private:
   // Helper method for migrating the Data Reduction Proxy away from using the
   // proxy pref. Returns the ProxyPrefMigrationResult value indicating the
@@ -92,6 +103,9 @@ class DataReductionProxyChromeSettings
       PrefService* prefs);
 
   std::string data_reduction_proxy_enabled_pref_name_;
+
+  // Null before InitDataReductionProxySettings is called.
+  Profile* profile_;
 
   DISALLOW_COPY_AND_ASSIGN(DataReductionProxyChromeSettings);
 };

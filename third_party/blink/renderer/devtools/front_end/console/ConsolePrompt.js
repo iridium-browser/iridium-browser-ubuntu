@@ -1,19 +1,37 @@
 // Copyright 2016 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
-/**
- * @unrestricted
- */
+
 Console.ConsolePrompt = class extends UI.Widget {
   constructor() {
     super();
+    this.registerRequiredCSS('console/consolePrompt.css');
     this._addCompletionsFromHistory = true;
     this._history = new Console.ConsoleHistoryManager();
 
     this._initialText = '';
+    /** @type {?UI.TextEditor} */
     this._editor = null;
+    this._isBelowPromptEnabled = Runtime.experiments.isEnabled('consoleBelowPrompt');
+    this._eagerPreviewElement = createElementWithClass('div', 'console-eager-preview');
+    this._textChangeThrottler = new Common.Throttler(150);
+    this._formatter = new ObjectUI.RemoteObjectPreviewFormatter();
+    this._requestPreviewBound = this._requestPreview.bind(this);
+    this._innerPreviewElement = this._eagerPreviewElement.createChild('div', 'console-eager-inner-preview');
+    this._eagerPreviewElement.appendChild(UI.Icon.create('smallicon-command-result', 'preview-result-icon'));
+
+    this._eagerEvalSetting = Common.settings.moduleSetting('consoleEagerEval');
+    this._eagerEvalSetting.addChangeListener(this._eagerSettingChanged.bind(this));
+    this._eagerPreviewElement.classList.toggle('hidden', !this._eagerEvalSetting.get());
 
     this.element.tabIndex = 0;
+    /** @type {?Promise} */
+    this._previewRequestForTest = null;
+
+    /** @type {?UI.AutocompleteConfig} */
+    this._defaultAutocompleteConfig = null;
+
+    this._highlightingNode = false;
 
     self.runtime.extension(UI.TextEditorFactory).instance().then(gotFactory.bind(this));
 
@@ -25,27 +43,84 @@ Console.ConsolePrompt = class extends UI.Widget {
       this._editor =
           factory.createEditor({lineNumbers: false, lineWrapping: true, mimeType: 'javascript', autoHeight: true});
 
-      this._editor.configureAutocomplete({
-        substituteRangeCallback: this._substituteRange.bind(this),
+      this._defaultAutocompleteConfig = ObjectUI.JavaScriptAutocompleteConfig.createConfigForEditor(this._editor);
+      this._editor.configureAutocomplete(Object.assign({}, this._defaultAutocompleteConfig, {
         suggestionsCallback: this._wordsWithQuery.bind(this),
-        captureEnter: true
-      });
+        anchorBehavior: this._isBelowPromptEnabled ? UI.GlassPane.AnchorBehavior.PreferTop :
+                                                     UI.GlassPane.AnchorBehavior.PreferBottom
+      }));
       this._editor.widget().element.addEventListener('keydown', this._editorKeyDown.bind(this), true);
       this._editor.widget().show(this.element);
       this._editor.addEventListener(UI.TextEditor.Events.TextChanged, this._onTextChanged, this);
+      this._editor.addEventListener(UI.TextEditor.Events.SuggestionChanged, this._onTextChanged, this);
+      if (this._isBelowPromptEnabled)
+        this.element.appendChild(this._eagerPreviewElement);
 
       this.setText(this._initialText);
       delete this._initialText;
       if (this.hasFocus())
         this.focus();
-      this.element.tabIndex = -1;
+      this.element.removeAttribute('tabindex');
+      this._editor.widget().element.tabIndex = -1;
 
       this._editorSetForTest();
     }
   }
 
+  _eagerSettingChanged() {
+    const enabled = this._eagerEvalSetting.get();
+    this._eagerPreviewElement.classList.toggle('hidden', !enabled);
+    if (enabled)
+      this._requestPreview();
+  }
+
+  /**
+   * @return {!Element}
+   */
+  belowEditorElement() {
+    return this._eagerPreviewElement;
+  }
+
   _onTextChanged() {
+    // ConsoleView and prompt both use a throttler, so we clear the preview
+    // ASAP to avoid inconsistency between a fresh viewport and stale preview.
+    if (this._isBelowPromptEnabled && this._eagerEvalSetting.get()) {
+      const asSoonAsPossible = !this._editor.textWithCurrentSuggestion();
+      this._previewRequestForTest = this._textChangeThrottler.schedule(this._requestPreviewBound, asSoonAsPossible);
+    }
     this.dispatchEventToListeners(Console.ConsolePrompt.Events.TextChanged);
+  }
+
+  /**
+   * @return {!Promise}
+   */
+  async _requestPreview() {
+    const text = this._editor.textWithCurrentSuggestion().trim();
+    const executionContext = UI.context.flavor(SDK.ExecutionContext);
+    const {preview, result} =
+        await ObjectUI.JavaScriptREPL.evaluateAndBuildPreview(text, true /* throwOnSideEffect */, 500);
+    this._innerPreviewElement.removeChildren();
+    if (preview.deepTextContent() !== this._editor.textWithCurrentSuggestion().trim())
+      this._innerPreviewElement.appendChild(preview);
+    if (result && result.object && result.object.subtype === 'node') {
+      this._highlightingNode = true;
+      SDK.OverlayModel.highlightObjectAsDOMNode(result.object);
+    } else if (this._highlightingNode) {
+      this._highlightingNode = false;
+      SDK.OverlayModel.hideDOMNodeHighlight();
+    }
+    if (result)
+      executionContext.runtimeModel.releaseEvaluationResult(result);
+  }
+
+  /**
+   * @override
+   */
+  willHide() {
+    if (this._highlightingNode) {
+      this._highlightingNode = false;
+      SDK.OverlayModel.hideDOMNodeHighlight();
+    }
   }
 
   /**
@@ -170,23 +245,15 @@ Console.ConsolePrompt = class extends UI.Widget {
     if (!str.length)
       return;
 
-    const currentExecutionContext = UI.context.flavor(SDK.ExecutionContext);
-    if (!this._isCaretAtEndOfPrompt() || !currentExecutionContext) {
-      this._appendCommand(str, true);
+    if (!this._isCaretAtEndOfPrompt()) {
+      await this._appendCommand(str, true);
       return;
     }
-    const result = await currentExecutionContext.runtimeModel.compileScript(str, '', false, currentExecutionContext.id);
-    if (str !== this.text())
-      return;
-    const exceptionDetails = result.exceptionDetails;
-    if (exceptionDetails &&
-        (exceptionDetails.exception.description.startsWith('SyntaxError: Unexpected end of input') ||
-         exceptionDetails.exception.description.startsWith('SyntaxError: Unterminated template literal'))) {
+
+    if (await ObjectUI.JavaScriptAutocomplete.isExpressionComplete(str))
+      await this._appendCommand(str, true);
+    else
       this._editor.newlineAndIndent();
-      this._enterProcessedForTest();
-      return;
-    }
-    await this._appendCommand(str, true);
     this._enterProcessedForTest();
   }
 
@@ -200,15 +267,10 @@ Console.ConsolePrompt = class extends UI.Widget {
     if (currentExecutionContext) {
       const executionContext = currentExecutionContext;
       const message = SDK.consoleModel.addCommandMessage(executionContext, text);
-      text = SDK.RuntimeModel.wrapObjectLiteralExpressionIfNeeded(text);
-      let preprocessed = false;
-      if (text.indexOf('await') !== -1) {
-        const preprocessedText = await Formatter.formatterWorkerPool().preprocessTopLevelAwaitExpressions(text);
-        preprocessed = !!preprocessedText;
-        text = preprocessedText || text;
-      }
+      const wrappedResult = await ObjectUI.JavaScriptREPL.preprocessExpression(text);
       SDK.consoleModel.evaluateCommandInConsole(
-          executionContext, message, text, useCommandLineAPI, /* awaitPromise */ preprocessed);
+          executionContext, message, wrappedResult.text, useCommandLineAPI,
+          /* awaitPromise */ wrappedResult.preprocessed);
       if (Console.ConsolePanel.instance().isShowing())
         Host.userMetrics.actionTaken(Host.UserMetrics.Action.CommandEvaluatedInConsolePanel);
     }
@@ -223,10 +285,10 @@ Console.ConsolePrompt = class extends UI.Widget {
    * @return {!UI.SuggestBox.Suggestions}
    */
   _historyCompletions(prefix, force) {
-    if (!this._addCompletionsFromHistory || !this._isCaretAtEndOfPrompt() || (!prefix && !force))
+    const text = this.text();
+    if (!this._addCompletionsFromHistory || !this._isCaretAtEndOfPrompt() || (!text && !force))
       return [];
     const result = [];
-    const text = this.text();
     const set = new Set();
     const data = this._history.historyData();
     for (let i = data.length - 1; i >= 0 && result.length < 50; --i) {
@@ -253,47 +315,16 @@ Console.ConsolePrompt = class extends UI.Widget {
   }
 
   /**
-   * @param {number} lineNumber
-   * @param {number} columnNumber
-   * @return {?TextUtils.TextRange}
-   */
-  _substituteRange(lineNumber, columnNumber) {
-    const token = this._editor.tokenAtTextPosition(lineNumber, columnNumber);
-    if (token && token.type === 'js-string')
-      return new TextUtils.TextRange(lineNumber, token.startColumn, lineNumber, columnNumber);
-
-    const lineText = this._editor.line(lineNumber);
-    let index;
-    for (index = columnNumber - 1; index >= 0; index--) {
-      if (' =:[({;,!+-*/&|^<>.\t\r\n'.indexOf(lineText.charAt(index)) !== -1)
-        break;
-    }
-    return new TextUtils.TextRange(lineNumber, index + 1, lineNumber, columnNumber);
-  }
-
-  /**
    * @param {!TextUtils.TextRange} queryRange
    * @param {!TextUtils.TextRange} substituteRange
    * @param {boolean=} force
    * @return {!Promise<!UI.SuggestBox.Suggestions>}
    */
-  _wordsWithQuery(queryRange, substituteRange, force) {
+  async _wordsWithQuery(queryRange, substituteRange, force) {
     const query = this._editor.text(queryRange);
-    const before = this._editor.text(new TextUtils.TextRange(0, 0, queryRange.startLine, queryRange.startColumn));
+    const words = await this._defaultAutocompleteConfig.suggestionsCallback(queryRange, substituteRange, force);
     const historyWords = this._historyCompletions(query, force);
-    const token = this._editor.tokenAtTextPosition(substituteRange.startLine, substituteRange.startColumn);
-    if (token) {
-      const excludedTokens = new Set(['js-comment', 'js-string-2', 'js-def']);
-      const trimmedBefore = before.trim();
-      if (!trimmedBefore.endsWith('[') && !trimmedBefore.match(/\.\s*(get|set|delete)\s*\(\s*$/))
-        excludedTokens.add('js-string');
-      if (!trimmedBefore.endsWith('.'))
-        excludedTokens.add('js-property');
-      if (excludedTokens.has(token.type))
-        return Promise.resolve(historyWords);
-    }
-    return ObjectUI.javaScriptAutocomplete.completionsForTextInCurrentContext(before, query, force)
-        .then(words => words.concat(historyWords));
+    return words.concat(historyWords);
   }
 
   _editorSetForTest() {

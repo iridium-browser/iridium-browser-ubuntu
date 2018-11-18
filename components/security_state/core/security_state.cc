@@ -19,6 +19,18 @@ namespace security_state {
 
 namespace {
 
+// Returns true if |url| is a blob: URL and its path parses as a GURL with a
+// nonsecure origin, and false otherwise. See
+// https://url.spec.whatwg.org/#origin.
+bool IsNonsecureBlobUrl(
+    const GURL& url,
+    const IsOriginSecureCallback& is_origin_secure_callback) {
+  if (!url.SchemeIs(url::kBlobScheme))
+    return false;
+  GURL inner_url(url.path());
+  return !is_origin_secure_callback.Run(inner_url);
+}
+
 // For nonsecure pages, sets |security_level| in |*security_info| based on the
 // provided information and the kMarkHttpAsFeature field trial. Also sets the
 // explanatory fields |incognito_downgraded_security_level| and
@@ -38,22 +50,6 @@ void SetSecurityLevelAndRelatedFieldsForNonSecureFieldTrial(
       return;
     }
 
-    if (parameter == features::kMarkHttpAsParameterWarning) {
-      security_info->security_level = HTTP_SHOW_WARNING;
-      return;
-    }
-
-    if (parameter ==
-        features::kMarkHttpAsParameterWarningAndDangerousOnFormEdits) {
-      security_info->security_level =
-          input_events.insecure_field_edited ? DANGEROUS : HTTP_SHOW_WARNING;
-      // Do not set |field_edit_downgraded_security_level| here because that
-      // field is for specifically for when the security level was downgraded
-      // from NONE to HTTP_SHOW_WARNING, not from HTTP_SHOW_WARNING to DANGEROUS
-      // as in this case.
-      return;
-    }
-
     if (parameter ==
         features::
             kMarkHttpAsParameterWarningAndDangerousOnPasswordsAndCreditCards) {
@@ -63,6 +59,16 @@ void SetSecurityLevelAndRelatedFieldsForNonSecureFieldTrial(
                                           : HTTP_SHOW_WARNING;
       return;
     }
+
+    // By default, if the feature is enabled, show a warning on all http://
+    // pages and mark as dangerous on form edits.
+    security_info->security_level =
+        input_events.insecure_field_edited ? DANGEROUS : HTTP_SHOW_WARNING;
+    // Do not set |field_edit_downgraded_security_level| here because that
+    // field is for specifically for when the security level was downgraded
+    // from NONE to HTTP_SHOW_WARNING, not from HTTP_SHOW_WARNING to DANGEROUS
+    // as in this case.
+    return;
   }
 
   // No warning treatment is configured via field trial. Default to warning on
@@ -152,7 +158,8 @@ void SetSecurityLevelAndRelatedFields(
   if (!is_cryptographic_with_certificate) {
     if (!visible_security_state.is_error_page &&
         !is_origin_secure_callback.Run(url) &&
-        (url.IsStandard() || url.SchemeIs(url::kBlobScheme))) {
+        (url.IsStandard() ||
+         IsNonsecureBlobUrl(url, is_origin_secure_callback))) {
       SetSecurityLevelAndRelatedFieldsForNonSecureFieldTrial(
           visible_security_state.is_incognito,
           visible_security_state.is_error_page,
@@ -280,9 +287,6 @@ void SecurityInfoForRequest(
 
 }  // namespace
 
-const base::Feature kHttpFormWarningFeature{"HttpFormWarning",
-                                            base::FEATURE_DISABLED_BY_DEFAULT};
-
 SecurityInfo::SecurityInfo()
     : security_level(NONE),
       malicious_content_status(MALICIOUS_CONTENT_STATUS_NONE),
@@ -311,10 +315,6 @@ void GetSecurityInfo(
   SecurityInfoForRequest(*visible_security_state,
                          used_policy_installed_certificate,
                          is_origin_secure_callback, result);
-}
-
-bool IsHttpWarningInFormEnabled() {
-  return base::FeatureList::IsEnabled(kHttpFormWarningFeature);
 }
 
 VisibleSecurityState::VisibleSecurityState()

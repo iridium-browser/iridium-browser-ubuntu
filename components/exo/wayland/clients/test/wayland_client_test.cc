@@ -8,7 +8,6 @@
 
 #include <memory>
 
-#include "ash/public/cpp/config.h"
 #include "ash/session/session_controller.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_environment.h"
@@ -17,11 +16,13 @@
 #include "base/command_line.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/message_loop/message_loop.h"
+#include "base/message_loop/message_loop_current.h"
 #include "base/synchronization/waitable_event.h"
 #include "components/exo/display.h"
 #include "components/exo/file_helper.h"
 #include "components/exo/wayland/server.h"
 #include "components/exo/wm_helper.h"
+#include "ui/aura/env.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/events/gesture_detection/gesture_configuration.h"
 #include "ui/wm/core/cursor_manager.h"
@@ -52,7 +53,7 @@ class WaylandClientTest::WaylandWatcher
  public:
   explicit WaylandWatcher(exo::wayland::Server* server)
       : controller_(FROM_HERE), server_(server) {
-    base::MessageLoopForUI::current()->WatchFileDescriptor(
+    base::MessageLoopCurrentForUI::Get()->WatchFileDescriptor(
         server_->GetFileDescriptor(),
         true,  // persistent
         base::MessagePumpLibevent::WATCH_READ, &controller_, this);
@@ -86,13 +87,13 @@ void WaylandClientTest::SetUp() {
   if (!ui_message_loop_)
     return;
 
-  DCHECK_NE(base::MessageLoop::current(), ui_message_loop_);
+  DCHECK_NE(base::MessageLoopCurrent::Get(), ui_message_loop_);
 
   base::WaitableEvent event(base::WaitableEvent::ResetPolicy::MANUAL,
                             base::WaitableEvent::InitialState::NOT_SIGNALED);
   ui_message_loop_->task_runner()->PostTask(
-      FROM_HERE, base::Bind(&WaylandClientTest::SetUpOnUIThread,
-                            base::Unretained(this), &event));
+      FROM_HERE, base::BindOnce(&WaylandClientTest::SetUpOnUIThread,
+                                base::Unretained(this), &event));
   event.Wait();
 }
 
@@ -101,13 +102,13 @@ void WaylandClientTest::TearDown() {
     return;
 
   DCHECK(ui_message_loop_);
-  DCHECK_NE(base::MessageLoop::current(), ui_message_loop_);
+  DCHECK_NE(base::MessageLoopCurrent::Get(), ui_message_loop_);
 
   base::WaitableEvent event(base::WaitableEvent::ResetPolicy::MANUAL,
                             base::WaitableEvent::InitialState::NOT_SIGNALED);
   ui_message_loop_->task_runner()->PostTask(
-      FROM_HERE, base::Bind(&WaylandClientTest::TearDownOnUIThread,
-                            base::Unretained(this), &event));
+      FROM_HERE, base::BindOnce(&WaylandClientTest::TearDownOnUIThread,
+                                base::Unretained(this), &event));
   event.Wait();
 }
 
@@ -130,9 +131,7 @@ void WaylandClientTest::SetUpOnUIThread(base::WaitableEvent* event) {
   ash::Shell::GetPrimaryRootWindow()->Show();
   ash::Shell::GetPrimaryRootWindow()->GetHost()->Show();
   ash::Shell::GetPrimaryRootWindow()->MoveCursorTo(gfx::Point(-1000, -1000));
-
-  if (ash::Shell::GetAshConfig() == ash::Config::CLASSIC)
-    ash::Shell::Get()->cursor_manager()->EnableMouseEvents();
+  ash::Shell::Get()->cursor_manager()->EnableMouseEvents();
 
   // Changing GestureConfiguration shouldn't make tests fail. These values
   // prevent unexpected events from being generated during tests. Such as
@@ -143,9 +142,9 @@ void WaylandClientTest::SetUpOnUIThread(base::WaitableEvent* event) {
   gesture_config->set_long_press_time_in_ms(1000);
   gesture_config->set_max_touch_move_in_pixels_for_click(5);
 
-  wm_helper_ = std::make_unique<WMHelper>();
+  wm_helper_ = std::make_unique<WMHelper>(ash::Shell::Get()->aura_env());
   WMHelper::SetInstance(wm_helper_.get());
-  display_ = std::make_unique<Display>(nullptr, nullptr);
+  display_ = std::make_unique<Display>(nullptr, nullptr, nullptr);
   wayland_server_ = exo::wayland::Server::Create(display_.get());
   DCHECK(wayland_server_);
   wayland_watcher_ = std::make_unique<WaylandWatcher>(wayland_server_.get());

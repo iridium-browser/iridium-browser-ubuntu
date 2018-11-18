@@ -10,6 +10,12 @@
 #include "services/service_manager/public/cpp/service_context.h"
 #include "services/tracing/agent_registry.h"
 #include "services/tracing/coordinator.h"
+#include "services/tracing/public/cpp/tracing_features.h"
+
+#if defined(PERFETTO_SERVICE_AVAILABLE)
+#include "services/tracing/perfetto/perfetto_service.h"
+#include "services/tracing/perfetto/perfetto_tracing_coordinator.h"
+#endif
 
 namespace tracing {
 
@@ -17,23 +23,62 @@ std::unique_ptr<service_manager::Service> TracingService::Create() {
   return std::make_unique<TracingService>();
 }
 
-TracingService::TracingService() : weak_factory_(this) {}
+TracingService::TracingService() : weak_factory_(this) {
+  task_runner_ = base::SequencedTaskRunnerHandle::Get();
+}
 
-TracingService::~TracingService() = default;
+TracingService::~TracingService() {
+  task_runner_->DeleteSoon(FROM_HERE, std::move(tracing_agent_registry_));
+
+#if defined(PERFETTO_SERVICE_AVAILABLE)
+  if (perfetto_tracing_coordinator_) {
+    task_runner_->DeleteSoon(FROM_HERE,
+                             std::move(perfetto_tracing_coordinator_));
+  }
+
+  if (perfetto_service_) {
+    task_runner_->DeleteSoon(FROM_HERE, std::move(perfetto_service_));
+  }
+#endif
+}
 
 void TracingService::OnStart() {
-  ref_factory_.reset(new service_manager::ServiceContextRefFactory(
-      context()->CreateQuitClosure()));
+  tracing_agent_registry_ = std::make_unique<AgentRegistry>();
 
-  tracing_agent_registry_ = std::make_unique<AgentRegistry>(ref_factory_.get());
-  registry_.AddInterface(
-      base::BindRepeating(&AgentRegistry::BindAgentRegistryRequest,
-                          base::Unretained(tracing_agent_registry_.get())));
+  bool enable_legacy_tracing = true;
 
-  tracing_coordinator_ = std::make_unique<Coordinator>(ref_factory_.get());
-  registry_.AddInterface(
-      base::BindRepeating(&Coordinator::BindCoordinatorRequest,
-                          base::Unretained(tracing_coordinator_.get())));
+  if (TracingUsesPerfettoBackend()) {
+#if defined(PERFETTO_SERVICE_AVAILABLE)
+    perfetto_service_ = std::make_unique<tracing::PerfettoService>();
+    task_runner_ = perfetto_service_->task_runner();
+    registry_.AddInterface(
+        base::BindRepeating(&tracing::PerfettoService::BindRequest,
+                            base::Unretained(perfetto_service_.get())));
+
+    auto perfetto_coordinator = std::make_unique<PerfettoTracingCoordinator>(
+        tracing_agent_registry_.get());
+    registry_.AddInterface(
+        base::BindRepeating(&PerfettoTracingCoordinator::BindCoordinatorRequest,
+                            base::Unretained(perfetto_coordinator.get())));
+    perfetto_tracing_coordinator_ = std::move(perfetto_coordinator);
+    enable_legacy_tracing = false;
+#endif
+  }
+
+  // Use legacy tracing if we're on an unsupported platform or the feature flag
+  // is disabled.
+  if (enable_legacy_tracing) {
+    auto tracing_coordinator =
+        std::make_unique<Coordinator>(tracing_agent_registry_.get());
+    registry_.AddInterface(
+        base::BindRepeating(&Coordinator::BindCoordinatorRequest,
+                            base::Unretained(tracing_coordinator.get())));
+    tracing_coordinator_ = std::move(tracing_coordinator);
+  }
+
+  registry_.AddInterface(base::BindRepeating(
+      &AgentRegistry::BindAgentRegistryRequest,
+      base::Unretained(tracing_agent_registry_.get()), task_runner_));
 }
 
 void TracingService::OnBindInterface(

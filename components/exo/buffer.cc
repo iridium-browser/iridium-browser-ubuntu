@@ -21,8 +21,10 @@
 #include "base/trace_event/trace_event.h"
 #include "base/trace_event/trace_event_argument.h"
 #include "components/exo/layer_tree_frame_sink_holder.h"
+#include "components/exo/wm_helper.h"
 #include "components/viz/common/gpu/context_provider.h"
 #include "components/viz/common/resources/resource_format.h"
+#include "components/viz/common/resources/resource_format_utils.h"
 #include "components/viz/common/resources/single_release_callback.h"
 #include "gpu/command_buffer/client/context_support.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
@@ -41,11 +43,6 @@ const int kWaitForReleaseDelayMs = 500;
 
 GLenum GLInternalFormat(gfx::BufferFormat format) {
   const GLenum kGLInternalFormats[] = {
-      GL_ATC_RGBA_INTERPOLATED_ALPHA_AMD,  // ATC
-      GL_COMPRESSED_RGB_S3TC_DXT1_EXT,     // ATCIA
-      GL_COMPRESSED_RGB_S3TC_DXT1_EXT,     // DXT1
-      GL_COMPRESSED_RGBA_S3TC_DXT5_EXT,    // DXT5
-      GL_ETC1_RGB8_OES,                    // ETC1
       GL_R8_EXT,                           // R_8
       GL_R16_EXT,                          // R_16
       GL_RG8_EXT,                          // RG_88
@@ -82,14 +79,6 @@ unsigned CreateGLTexture(gpu::gles2::GLES2Interface* gles2, GLenum target) {
   return texture_id;
 }
 
-void CreateGLMailbox(gpu::gles2::GLES2Interface* gles2,
-                     unsigned texture_id,
-                     GLenum target,
-                     gpu::Mailbox* mailbox) {
-  gles2->GenMailboxCHROMIUM(mailbox->name);
-  gles2->ProduceTextureDirectCHROMIUM(texture_id, mailbox->name);
-}
-
 }  // namespace
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -109,7 +98,8 @@ class Buffer::Texture : public ui::ContextFactoryObserver {
   ~Texture() override;
 
   // Overridden from ui::ContextFactoryObserver:
-  void OnLostResources() override;
+  void OnLostSharedContext() override;
+  void OnLostVizProcess() override;
 
   // Returns true if GLES2 resources for texture have been lost.
   bool IsLost();
@@ -178,7 +168,7 @@ Buffer::Texture::Texture(ui::ContextFactory* context_factory,
   gpu::gles2::GLES2Interface* gles2 = context_provider_->ContextGL();
   texture_id_ = CreateGLTexture(gles2, texture_target_);
   // Generate a crypto-secure random mailbox name.
-  CreateGLMailbox(gles2, texture_id_, texture_target_, &mailbox_);
+  gles2->ProduceTextureDirectCHROMIUM(texture_id_, mailbox_.name);
   // Provides a notification when |context_provider_| is lost.
   context_factory_->AddObserver(this);
 }
@@ -216,12 +206,14 @@ Buffer::Texture::~Texture() {
     context_factory_->RemoveObserver(this);
 }
 
-void Buffer::Texture::OnLostResources() {
+void Buffer::Texture::OnLostSharedContext() {
   DestroyResources();
   context_factory_->RemoveObserver(this);
   context_provider_ = nullptr;
   context_factory_ = nullptr;
 }
+
+void Buffer::Texture::OnLostVizProcess() {}
 
 bool Buffer::Texture::IsLost() {
   if (context_provider_) {
@@ -255,7 +247,7 @@ gpu::SyncToken Buffer::Texture::BindTexImage() {
     gles2->BindTexImage2DCHROMIUM(texture_target_, image_id_);
     // Generate a crypto-secure random mailbox name if not already done.
     if (mailbox_.IsZero())
-      CreateGLMailbox(gles2, texture_id_, texture_target_, &mailbox_);
+      gles2->ProduceTextureDirectCHROMIUM(texture_id_, mailbox_.name);
     // Create and return a sync token that can be used to ensure that the
     // BindTexImage2DCHROMIUM call is processed before issuing any commands
     // that will read from the texture on a different context.
@@ -338,8 +330,8 @@ void Buffer::Texture::ReleaseWhenQueryResultIsAvailable(
   TRACE_EVENT_ASYNC_STEP_INTO0("exo", "BufferInUse", gpu_memory_buffer_,
                                "pending_query");
   context_provider_->ContextSupport()->SignalQuery(
-      query_id_,
-      base::Bind(&Buffer::Texture::Released, weak_ptr_factory_.GetWeakPtr()));
+      query_id_, base::BindOnce(&Buffer::Texture::Released,
+                                weak_ptr_factory_.GetWeakPtr()));
 }
 
 void Buffer::Texture::Released() {
@@ -353,8 +345,9 @@ void Buffer::Texture::ScheduleWaitForRelease(base::TimeDelta delay) {
 
   wait_for_release_pending_ = true;
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-      FROM_HERE, base::Bind(&Buffer::Texture::WaitForRelease,
-                            weak_ptr_factory_.GetWeakPtr()),
+      FROM_HERE,
+      base::BindOnce(&Buffer::Texture::WaitForRelease,
+                     weak_ptr_factory_.GetWeakPtr()),
       delay);
 }
 
@@ -426,7 +419,7 @@ bool Buffer::ProduceTransferableResource(
     texture_.reset();
 
   ui::ContextFactory* context_factory =
-      aura::Env::GetInstance()->context_factory();
+      WMHelper::GetInstance()->env()->context_factory();
   // Note: This can fail if GPU acceleration has been disabled.
   scoped_refptr<viz::ContextProvider> context_provider =
       context_factory->SharedMainThreadContextProvider();
@@ -466,17 +459,17 @@ bool Buffer::ProduceTransferableResource(
     resource->mailbox_holder = gpu::MailboxHolder(contents_texture->mailbox(),
                                                   sync_token, texture_target_);
     resource->is_overlay_candidate = is_overlay_candidate_;
-    resource->buffer_format = gpu_memory_buffer_->GetFormat();
+    resource->format = viz::GetResourceFormat(gpu_memory_buffer_->GetFormat());
 
     // The contents texture will be released when no longer used by the
     // compositor.
     layer_tree_frame_sink_holder->SetResourceReleaseCallback(
         resource->id,
-        base::Bind(&Buffer::Texture::ReleaseTexImage,
-                   base::Unretained(contents_texture),
-                   base::Bind(&Buffer::ReleaseContentsTexture, AsWeakPtr(),
-                              base::Passed(&contents_texture_),
-                              release_contents_callback_.callback())));
+        base::BindOnce(&Buffer::Texture::ReleaseTexImage,
+                       base::Unretained(contents_texture),
+                       base::Bind(&Buffer::ReleaseContentsTexture, AsWeakPtr(),
+                                  base::Passed(&contents_texture_),
+                                  release_contents_callback_.callback())));
     return true;
   }
 
@@ -502,9 +495,9 @@ bool Buffer::ProduceTransferableResource(
   // compositor.
   layer_tree_frame_sink_holder->SetResourceReleaseCallback(
       resource->id,
-      base::Bind(&Buffer::Texture::Release, base::Unretained(texture),
-                 base::Bind(&Buffer::ReleaseTexture, AsWeakPtr(),
-                            base::Passed(&texture_))));
+      base::BindOnce(&Buffer::Texture::Release, base::Unretained(texture),
+                     base::Bind(&Buffer::ReleaseTexture, AsWeakPtr(),
+                                base::Passed(&texture_))));
   return true;
 }
 

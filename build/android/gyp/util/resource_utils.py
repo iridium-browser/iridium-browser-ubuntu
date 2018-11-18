@@ -14,8 +14,8 @@ from xml.etree import ElementTree
 
 import util.build_utils as build_utils
 
-_SOURCE_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(
-    os.path.dirname(__file__)))))
+_SOURCE_ROOT = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), '..', '..', '..', '..'))
 # Import jinja2 from third_party/jinja2
 sys.path.insert(1, os.path.join(_SOURCE_ROOT, 'third_party'))
 from jinja2 import Template # pylint: disable=F0401
@@ -25,9 +25,42 @@ EMPTY_ANDROID_MANIFEST_PATH = os.path.join(
     _SOURCE_ROOT, 'build', 'android', 'AndroidManifest.xml')
 
 
+# A variation of this lists also exists in:
+# //base/android/java/src/org/chromium/base/LocaleUtils.java
+# //ui/android/java/src/org/chromium/base/LocalizationUtils.java
+CHROME_TO_ANDROID_LOCALE_MAP = {
+    'en-GB': 'en-rGB',
+    'en-US': 'en-rUS',
+    'es-419': 'es-rUS',
+    'fil': 'tl',
+    'he': 'iw',
+    'id': 'in',
+    'pt-PT': 'pt-rPT',
+    'pt-BR': 'pt-rBR',
+    'yi': 'ji',
+    'zh-CN': 'zh-rCN',
+    'zh-TW': 'zh-rTW',
+}
+
 # Represents a line from a R.txt file.
 _TextSymbolEntry = collections.namedtuple('RTextEntry',
     ('java_type', 'resource_type', 'name', 'value'))
+
+
+def CreateResourceInfoFile(files_to_zip, zip_path):
+  """Given a mapping of archive paths to their source, write an info file.
+
+  The info file contains lines of '{archive_path},{source_path}' for ease of
+  parsing. Assumes that there is no comma in the file names.
+
+  Args:
+    files_to_zip: Dict mapping path in the zip archive to original source.
+    zip_path: Path where the zip file ends up, this is where the info file goes.
+  """
+  info_file_path = zip_path + '.info'
+  with open(info_file_path, 'w') as info_file:
+    for archive_path, source_path in files_to_zip.iteritems():
+      info_file.write('{},{}\n'.format(archive_path, source_path))
 
 
 def _ParseTextSymbolsFile(path, fix_package_ids=False):
@@ -181,7 +214,7 @@ def CreateRJavaFiles(srcjar_dir, package, main_r_txt_file,
   packages = list(extra_res_packages)
   r_txt_files = list(extra_r_txt_files)
 
-  if package not in packages:
+  if package and package not in packages:
     # Sometimes, an apk target and a resources target share the same
     # AndroidManifest.xml and thus |package| will already be in |packages|.
     packages.append(package)
@@ -296,7 +329,11 @@ public final class R {
         public static final {{ e.java_type }} {{ e.name }} = {{ e.value }};
         {% endfor %}
         {% for e in non_final_resources[resource_type] %}
+            {% if e.value != '0' %}
         public static {{ e.java_type }} {{ e.name }} = {{ e.value }};
+            {% else %}
+        public static {{ e.java_type }} {{ e.name }};
+            {% endif %}
         {% endfor %}
     }
     {% endfor %}
@@ -416,11 +453,16 @@ def ResourceArgsParser():
 
   build_utils.AddDepfileOption(output_opts)
 
-  input_opts.add_argument('--android-sdk-jar', required=True,
-                        help='Path to the android.jar file.')
+  input_opts.add_argument('--include-resources', required=True, action="append",
+                        help='Paths to arsc resource files used to link '
+                             'against. Can be specified multiple times.')
 
   input_opts.add_argument('--aapt-path', required=True,
                          help='Path to the Android aapt tool')
+
+  input_opts.add_argument('--aapt2-path',
+                          help='Path to the Android aapt2 tool. If in different'
+                          ' directory from --aapt-path.')
 
   input_opts.add_argument('--dependencies-res-zips', required=True,
                     help='Resources zip archives from dependents. Required to '
@@ -452,6 +494,12 @@ def HandleCommonOptions(options):
     options: the result of parse_args() on the parser returned by
         ResourceArgsParser(). This function updates a few common fields.
   """
+  options.include_resources = [build_utils.ParseGnList(r) for r in
+                               options.include_resources]
+  # Flatten list of include resources list to make it easier to use.
+  options.include_resources = [r for resources in options.include_resources
+                               for r in resources]
+
   options.dependencies_res_zips = (
       build_utils.ParseGnList(options.dependencies_res_zips))
 
@@ -467,3 +515,6 @@ def HandleCommonOptions(options):
         build_utils.ParseGnList(options.extra_r_text_files))
   else:
     options.extra_r_text_files = []
+
+  if not options.aapt2_path:
+    options.aapt2_path = options.aapt_path + '2'

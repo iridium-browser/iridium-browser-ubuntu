@@ -10,6 +10,7 @@
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/time/default_tick_clock.h"
 #include "base/trace_event/trace_event.h"
 #include "base/values.h"
 #include "net/base/net_errors.h"
@@ -42,8 +43,7 @@ const char kAddressesKey[] = "addresses";
 
 bool AddressListFromListValue(const base::ListValue* value, AddressList* list) {
   list->clear();
-  for (base::ListValue::const_iterator it = value->begin(); it != value->end();
-       it++) {
+  for (auto it = value->begin(); it != value->end(); it++) {
     IPAddress address;
     std::string addr_string;
     if (!it->GetAsString(&addr_string) ||
@@ -154,11 +154,12 @@ HostCache::HostCache(size_t max_entries)
     : max_entries_(max_entries),
       network_changes_(0),
       restore_size_(0),
-      delegate_(nullptr) {}
+      delegate_(nullptr),
+      tick_clock_(base::DefaultTickClock::GetInstance()) {}
 
 HostCache::~HostCache() {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  RecordEraseAll(ERASE_DESTRUCT, base::TimeTicks::Now());
+  RecordEraseAll(ERASE_DESTRUCT, tick_clock_->NowTicks());
 }
 
 const HostCache::Entry* HostCache::Lookup(const Key& key,
@@ -266,7 +267,7 @@ void HostCache::set_persistence_delegate(PersistenceDelegate* delegate) {
 
 void HostCache::clear() {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  RecordEraseAll(ERASE_CLEAR, base::TimeTicks::Now());
+  RecordEraseAll(ERASE_CLEAR, tick_clock_->NowTicks());
 
   // Don't bother scheduling a write if there's nothing to clear.
   if (size() == 0)
@@ -287,9 +288,9 @@ void HostCache::ClearForHosts(
   }
 
   bool changed = false;
-  base::TimeTicks now = base::TimeTicks::Now();
-  for (EntryMap::iterator it = entries_.begin(); it != entries_.end();) {
-    EntryMap::iterator next_it = std::next(it);
+  base::TimeTicks now = tick_clock_->NowTicks();
+  for (auto it = entries_.begin(); it != entries_.end();) {
+    auto next_it = std::next(it);
 
     if (host_filter.Run(it->first.hostname)) {
       RecordErase(ERASE_CLEAR, now, it->second);
@@ -322,6 +323,9 @@ void HostCache::GetAsListValue(base::ListValue* entry_list,
     entry_dict->SetInteger(kFlagsKey, key.host_resolver_flags);
 
     if (include_staleness) {
+      // The kExpirationKey value is using TimeTicks instead of Time used if
+      // |include_staleness| is false, so it cannot be used to deserialize.
+      // This is ok as it is used only for netlog.
       entry_dict->SetString(kExpirationKey,
                             NetLog::TickCountToString(entry.expires()));
       entry_dict->SetInteger(kTtlKey, entry.ttl().InMilliseconds());
@@ -330,7 +334,7 @@ void HostCache::GetAsListValue(base::ListValue* entry_list,
       // Convert expiration time in TimeTicks to Time for serialization, using a
       // string because base::Value doesn't handle 64-bit integers.
       base::Time expiration_time =
-          base::Time::Now() - (base::TimeTicks::Now() - entry.expires());
+          base::Time::Now() - (tick_clock_->NowTicks() - entry.expires());
       entry_dict->SetString(
           kExpirationKey,
           base::Int64ToString(expiration_time.ToInternalValue()));
@@ -384,7 +388,7 @@ bool HostCache::RestoreFromListValue(const base::ListValue& old_cache) {
       return false;
 
     base::TimeTicks expiration_time =
-        base::TimeTicks::Now() -
+        tick_clock_->NowTicks() -
         (base::Time::Now() - base::Time::FromInternalValue(time_internal));
 
     Key key(hostname, static_cast<AddressFamily>(address_family), flags);
@@ -549,7 +553,7 @@ bool HostCache::HasEntry(base::StringPiece hostname,
   hostname.CopyToString(&cache_key.hostname);
 
   const HostCache::Entry* entry =
-      LookupStale(cache_key, base::TimeTicks::Now(), stale_out);
+      LookupStale(cache_key, tick_clock_->NowTicks(), stale_out);
   if (!entry) {
     // Might not have found the cache entry because the address_family or
     // host_resolver_flags in cache_key do not match those used for the
@@ -558,7 +562,7 @@ bool HostCache::HasEntry(base::StringPiece hostname,
     cache_key.address_family = net::ADDRESS_FAMILY_IPV4;
     cache_key.host_resolver_flags =
         net::HOST_RESOLVER_DEFAULT_FAMILY_SET_DUE_TO_NO_IPV6;
-    entry = LookupStale(cache_key, base::TimeTicks::Now(), stale_out);
+    entry = LookupStale(cache_key, tick_clock_->NowTicks(), stale_out);
     if (!entry)
       return false;
   }

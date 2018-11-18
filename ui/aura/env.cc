@@ -6,35 +6,39 @@
 
 #include "base/command_line.h"
 #include "base/lazy_instance.h"
-#include "base/threading/thread_local.h"
-#include "services/ui/public/interfaces/window_tree.mojom.h"
+#include "base/memory/ptr_util.h"
+#include "services/ws/public/mojom/window_tree.mojom.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/env_input_state_controller.h"
 #include "ui/aura/env_observer.h"
 #include "ui/aura/input_state_lookup.h"
 #include "ui/aura/local/window_port_local.h"
+#include "ui/aura/mouse_location_manager.h"
 #include "ui/aura/mus/mus_types.h"
 #include "ui/aura/mus/os_exchange_data_provider_mus.h"
 #include "ui/aura/mus/system_input_injector_mus.h"
 #include "ui/aura/mus/window_port_mus.h"
 #include "ui/aura/mus/window_tree_client.h"
 #include "ui/aura/window.h"
+#include "ui/aura/window_event_dispatcher_observer.h"
+#include "ui/aura/window_occlusion_tracker.h"
 #include "ui/aura/window_port_for_shutdown.h"
+#include "ui/base/ui_base_features.h"
 #include "ui/events/event_target_iterator.h"
+#include "ui/events/gestures/gesture_recognizer_impl.h"
 #include "ui/events/platform/platform_event_source.h"
 
 #if defined(USE_OZONE)
 #include "ui/ozone/public/ozone_platform.h"
-#include "ui/ozone/public/ozone_switches.h"
 #endif
 
 namespace aura {
 
 namespace {
 
-// Env is thread local so that aura may be used on multiple threads.
-base::LazyInstance<base::ThreadLocalPointer<Env>>::Leaky lazy_tls_ptr =
-    LAZY_INSTANCE_INITIALIZER;
+// Instance created by all static functions, except
+// CreateLocalInstanceForInProcess(). See GetInstance() for details.
+Env* g_primary_instance = nullptr;
 
 }  // namespace
 
@@ -50,34 +54,57 @@ Env::~Env() {
   for (EnvObserver& observer : observers_)
     observer.OnWillDestroyEnv();
 
-#if defined(USE_OZONE)
-  if (mode_ == Mode::LOCAL)
-    ui::OzonePlatform::Shutdown();
-#endif
-
-  DCHECK_EQ(this, lazy_tls_ptr.Pointer()->Get());
-  lazy_tls_ptr.Pointer()->Set(NULL);
+  if (this == g_primary_instance)
+    g_primary_instance = nullptr;
 }
 
 // static
 std::unique_ptr<Env> Env::CreateInstance(Mode mode) {
-  DCHECK(!lazy_tls_ptr.Pointer()->Get());
+  DCHECK(!g_primary_instance);
+  // No make_unique as constructor is private.
   std::unique_ptr<Env> env(new Env(mode));
-  env->Init();
+  g_primary_instance = env.get();
+  env->Init(nullptr);
   return env;
 }
 
 // static
+std::unique_ptr<Env> Env::CreateLocalInstanceForInProcess() {
+  // It is expected this constructor is called *after* an instance has been
+  // created of type MUS. The order, and DCHECKs, aren't strictly necessary but
+  // help reinforce when this should be used.
+  DCHECK(g_primary_instance);
+  DCHECK(g_primary_instance->mode() == Mode::MUS);
+  // No make_unique as constructor is private.
+  std::unique_ptr<Env> env(new Env(Mode::LOCAL));
+  env->Init(nullptr);
+  return env;
+}
+
+#if defined(USE_OZONE)
+// static
+std::unique_ptr<Env> Env::CreateInstanceToHostViz(
+    service_manager::Connector* connector) {
+  DCHECK(!g_primary_instance);
+  // No make_unique as constructor is private.
+  std::unique_ptr<Env> env(new Env(Mode::LOCAL));
+  g_primary_instance = env.get();
+  env->Init(connector);
+  return env;
+}
+#endif
+
+// static
 Env* Env::GetInstance() {
-  Env* env = lazy_tls_ptr.Pointer()->Get();
+  Env* env = g_primary_instance;
   DCHECK(env) << "Env::CreateInstance must be called before getting the "
                  "instance of Env.";
   return env;
 }
 
 // static
-Env* Env::GetInstanceDontCreate() {
-  return lazy_tls_ptr.Pointer()->Get();
+bool Env::HasInstance() {
+  return !!g_primary_instance;
 }
 
 std::unique_ptr<WindowPort> Env::CreateWindowPort(Window* window) {
@@ -88,22 +115,8 @@ std::unique_ptr<WindowPort> Env::CreateWindowPort(Window* window) {
     return std::make_unique<WindowPortForShutdown>();
 
   DCHECK(window_tree_client_);
-  WindowMusType window_mus_type;
-  switch (window->GetProperty(aura::client::kEmbedType)) {
-    case aura::client::WindowEmbedType::NONE:
-      window_mus_type = WindowMusType::LOCAL;
-      break;
-    case aura::client::WindowEmbedType::TOP_LEVEL_IN_WM:
-      window_mus_type = WindowMusType::TOP_LEVEL_IN_WM;
-      break;
-    case aura::client::WindowEmbedType::EMBED_IN_OWNER:
-      window_mus_type = WindowMusType::EMBED_IN_OWNER;
-      break;
-    default:
-      NOTREACHED();
-  }
-  // Use LOCAL as all other cases are created by WindowTreeClient explicitly.
-  return std::make_unique<WindowPortMus>(window_tree_client_, window_mus_type);
+  return std::make_unique<WindowPortMus>(window_tree_client_,
+                                         WindowMusType::LOCAL);
 }
 
 void Env::AddObserver(EnvObserver* observer) {
@@ -112,6 +125,16 @@ void Env::AddObserver(EnvObserver* observer) {
 
 void Env::RemoveObserver(EnvObserver* observer) {
   observers_.RemoveObserver(observer);
+}
+
+void Env::AddWindowEventDispatcherObserver(
+    WindowEventDispatcherObserver* observer) {
+  window_event_dispatcher_observers_.AddObserver(observer);
+}
+
+void Env::RemoveWindowEventDispatcherObserver(
+    WindowEventDispatcherObserver* observer) {
+  window_event_dispatcher_observers_.RemoveObserver(observer);
 }
 
 bool Env::IsMouseButtonDown() const {
@@ -133,6 +156,22 @@ const gfx::Point& Env::last_mouse_location() const {
   return last_mouse_location_;
 }
 
+void Env::SetLastMouseLocation(const gfx::Point& last_mouse_location) {
+  last_mouse_location_ = last_mouse_location;
+  if (mouse_location_manager_)
+    mouse_location_manager_->SetMouseLocation(last_mouse_location);
+}
+
+void Env::CreateMouseLocationManager() {
+  if (!mouse_location_manager_)
+    mouse_location_manager_ = std::make_unique<MouseLocationManager>();
+}
+
+mojo::ScopedSharedBufferHandle Env::GetLastMouseLocationMemory() {
+  DCHECK(mouse_location_manager_);
+  return mouse_location_manager_->GetMouseLocationMemory();
+}
+
 void Env::SetWindowTreeClient(WindowTreeClient* window_tree_client) {
   // The WindowTreeClient should only be set once. Test code may need to change
   // the value after the fact, to do that use EnvTestHelper.
@@ -141,11 +180,22 @@ void Env::SetWindowTreeClient(WindowTreeClient* window_tree_client) {
 }
 
 void Env::ScheduleEmbed(
-    ui::mojom::WindowTreeClientPtr client,
+    ws::mojom::WindowTreeClientPtr client,
     base::OnceCallback<void(const base::UnguessableToken&)> callback) {
   DCHECK_EQ(Mode::MUS, mode_);
   DCHECK(window_tree_client_);
   window_tree_client_->ScheduleEmbed(std::move(client), std::move(callback));
+}
+
+WindowOcclusionTracker* Env::GetWindowOcclusionTracker() {
+  // TODO(https://crbug.com/867150): DCHECK to ensure LOCAL aura after mus
+  //     code path is wired up.
+  if (!window_occlusion_tracker_) {
+    // Use base::WrapUnique + new because of the constructor is private.
+    window_occlusion_tracker_ = base::WrapUnique(new WindowOcclusionTracker());
+  }
+
+  return window_occlusion_tracker_.get();
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -156,18 +206,16 @@ bool Env::initial_throttle_input_on_resize_ = true;
 
 Env::Env(Mode mode)
     : mode_(mode),
-      env_controller_(new EnvInputStateController),
+      env_controller_(std::make_unique<EnvInputStateController>(this)),
       mouse_button_flags_(0),
       is_touch_down_(false),
       get_last_mouse_location_from_mus_(mode_ == Mode::MUS),
+      gesture_recognizer_(std::make_unique<ui::GestureRecognizerImpl>()),
       input_state_lookup_(InputStateLookup::Create()),
       context_factory_(nullptr),
-      context_factory_private_(nullptr) {
-  DCHECK(lazy_tls_ptr.Pointer()->Get() == NULL);
-  lazy_tls_ptr.Pointer()->Set(this);
-}
+      context_factory_private_(nullptr) {}
 
-void Env::Init() {
+void Env::Init(service_manager::Connector* connector) {
   if (mode_ == Mode::MUS) {
     EnableMusOSExchangeDataProvider();
     EnableMusOverrideInputInjector();
@@ -184,7 +232,15 @@ void Env::Init() {
   // instead of checking flags here.
   params.single_process = command_line->HasSwitch("single-process") ||
                           command_line->HasSwitch("in-process-gpu");
-  params.using_mojo = command_line->HasSwitch(switches::kEnableDrmMojo);
+  params.using_mojo = features::IsOzoneDrmMojo();
+
+  if (connector) {
+    // Supplying a connector implies this process is hosting Viz.
+    params.connector = connector;
+    // Hosting viz is currently single-process only.
+    params.single_process = true;
+    params.using_mojo = true;
+  }
 
   ui::OzonePlatform::InitializeForUI(params);
 #endif
@@ -256,7 +312,8 @@ std::unique_ptr<ui::OSExchangeData::Provider> Env::BuildProvider() {
 }
 
 std::unique_ptr<ui::SystemInputInjector> Env::CreateSystemInputInjector() {
-  return std::make_unique<SystemInputInjectorMus>(window_tree_client_);
+  return std::make_unique<SystemInputInjectorMus>(
+      window_tree_client_ ? window_tree_client_->connector() : nullptr);
 }
 
 }  // namespace aura

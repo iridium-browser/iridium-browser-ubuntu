@@ -18,19 +18,22 @@
 #include "ash/host/root_window_transformer.h"
 #include "ash/magnifier/magnification_controller.h"
 #include "ash/magnifier/partial_magnification_controller.h"
-#include "ash/public/cpp/config.h"
+#include "ash/public/cpp/ash_features.h"
 #include "ash/root_window_controller.h"
 #include "ash/root_window_settings.h"
 #include "ash/shell.h"
+#include "ash/system/status_area_widget.h"
 #include "ash/system/tray/system_tray.h"
+#include "ash/system/unified/unified_system_tray.h"
 #include "ash/wm/window_util.h"
+#include "ash/ws/window_service_owner.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "services/ws/window_service.h"
 #include "ui/aura/client/capture_client.h"
 #include "ui/aura/client/focus_client.h"
 #include "ui/aura/client/screen_position_client.h"
-#include "ui/aura/env.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/aura/window_tracker.h"
@@ -74,14 +77,6 @@ void SetDisplayPropertiesOnHost(AshWindowTreeHost* ash_host,
       CreateRootWindowTransformerForDisplay(host->window(), display));
   ash_host->SetRootWindowTransformer(std::move(transformer));
 
-  display::ManagedDisplayMode mode;
-  if (GetDisplayManager()->GetActiveModeForDisplayId(display.id(), &mode) &&
-      mode.refresh_rate() > 0.0f) {
-    host->compositor()->SetAuthoritativeVSyncInterval(
-        base::TimeDelta::FromMicroseconds(base::Time::kMicrosecondsPerSecond /
-                                          mode.refresh_rate()));
-  }
-
   // Just moving the display requires the full redraw.
   // chrome-os-partner:33558.
   host->compositor()->ScheduleFullRedraw();
@@ -94,11 +89,6 @@ void ClearDisplayPropertiesOnHost(AshWindowTreeHost* ash_host) {
 aura::Window* GetWindow(AshWindowTreeHost* ash_host) {
   CHECK(ash_host->AsWindowTreeHost());
   return ash_host->AsWindowTreeHost()->window();
-}
-
-bool ShouldUpdateMirrorWindowController() {
-  return aura::Env::GetInstance()->mode() == aura::Env::Mode::LOCAL ||
-         !base::FeatureList::IsEnabled(features::kMash);
 }
 
 }  // namespace
@@ -264,6 +254,11 @@ void WindowTreeHostManager::RemoveObserver(Observer* observer) {
 int64_t WindowTreeHostManager::GetPrimaryDisplayId() {
   CHECK_NE(display::kInvalidDisplayId, primary_display_id);
   return primary_display_id;
+}
+
+// static
+bool WindowTreeHostManager::HasValidPrimaryDisplayId() {
+  return primary_display_id != display::kInvalidDisplayId;
 }
 
 aura::Window* WindowTreeHostManager::GetPrimaryRootWindow() {
@@ -467,12 +462,12 @@ void WindowTreeHostManager::UpdateMouseLocationAfterDisplayChange() {
   if (target_location_in_native !=
           cursor_location_in_native_coords_for_restore_ ||
       target_display_id != cursor_display_id_for_restore_) {
-    // TODO(oshima): Moving the cursor was necessary for x11, but We
-    // probably do not have to do this any more on ozone.  Consider
-    // just notifying the cursor location change.
-    if (Shell::Get()->cursor_manager() &&
-        Shell::Get()->cursor_manager()->IsCursorVisible()) {
-      dst_root_window->MoveCursorTo(target_location_in_root);
+    if (Shell::Get()->cursor_manager()) {
+      if (Shell::Get()->cursor_manager()->IsCursorVisible()) {
+        dst_root_window->MoveCursorTo(target_location_in_root);
+      } else if (target_display_id != cursor_display_id_for_restore_) {
+        Shell::Get()->cursor_manager()->SetDisplay(target_display);
+      }
     }
 
   } else if (target_location_in_screen !=
@@ -531,10 +526,25 @@ void WindowTreeHostManager::OnDisplayAdded(const display::Display& display) {
 
     // Show the shelf if the original WTH had a visible system
     // tray. It may or may not be visible depending on OOBE state.
-    ash::SystemTray* old_tray =
-        RootWindowController::ForWindow(to_delete->AsWindowTreeHost()->window())
-            ->GetSystemTray();
-    ash::SystemTray* new_tray = ash::Shell::Get()->GetPrimarySystemTray();
+    RootWindowController* old_root_window_controller =
+        RootWindowController::ForWindow(
+            to_delete->AsWindowTreeHost()->window());
+    RootWindowController* new_root_window_controller =
+        ash::Shell::Get()->GetPrimaryRootWindowController();
+    TrayBackgroundView* old_tray =
+        features::IsSystemTrayUnifiedEnabled()
+            ? static_cast<TrayBackgroundView*>(
+                  old_root_window_controller->GetStatusAreaWidget()
+                      ->unified_system_tray())
+            : static_cast<TrayBackgroundView*>(
+                  old_root_window_controller->GetSystemTray());
+    TrayBackgroundView* new_tray =
+        features::IsSystemTrayUnifiedEnabled()
+            ? static_cast<TrayBackgroundView*>(
+                  new_root_window_controller->GetStatusAreaWidget()
+                      ->unified_system_tray())
+            : static_cast<TrayBackgroundView*>(
+                  new_root_window_controller->GetSystemTray());
     if (old_tray->GetWidget()->IsVisible()) {
       new_tray->SetVisible(true);
       new_tray->GetWidget()->Show();
@@ -645,6 +655,15 @@ void WindowTreeHostManager::OnDisplayRemoved(const display::Display& display) {
 void WindowTreeHostManager::OnDisplayMetricsChanged(
     const display::Display& display,
     uint32_t metrics) {
+  // Shell creates |window_service_owner_| from Shell::Init(), but this
+  // function may be called before |window_service_owner_| is created. It's safe
+  // to ignore the call in this case as no clients have connected yet.
+  ws::WindowService* window_service =
+      Shell::Get()->window_service_owner()
+          ? Shell::Get()->window_service_owner()->window_service()
+          : nullptr;
+  if (window_service)
+    window_service->OnDisplayMetricsChanged(display, metrics);
   if (!(metrics & (DISPLAY_METRIC_BOUNDS | DISPLAY_METRIC_ROTATION |
                    DISPLAY_METRIC_DEVICE_SCALE_FACTOR)))
     return;
@@ -664,9 +683,7 @@ void WindowTreeHostManager::OnHostResized(aura::WindowTreeHost* host) {
   display::DisplayManager* display_manager = GetDisplayManager();
   if (display_manager->UpdateDisplayBounds(display.id(),
                                            host->GetBoundsInPixels())) {
-    // The window server controls mirroring in Mus, not Ash.
-    if (ShouldUpdateMirrorWindowController())
-      mirror_window_controller_->UpdateWindow();
+    mirror_window_controller_->UpdateWindow();
     cursor_window_controller_->UpdateContainer();
   }
 }
@@ -675,9 +692,7 @@ void WindowTreeHostManager::CreateOrUpdateMirroringDisplay(
     const display::DisplayInfoList& info_list) {
   if (GetDisplayManager()->IsInMirrorMode() ||
       GetDisplayManager()->IsInUnifiedMode()) {
-    // The window server controls mirroring in Mus, not Ash.
-    if (ShouldUpdateMirrorWindowController())
-      mirror_window_controller_->UpdateWindow(info_list);
+    mirror_window_controller_->UpdateWindow(info_list);
     cursor_window_controller_->UpdateContainer();
   } else {
     NOTREACHED();
@@ -685,9 +700,7 @@ void WindowTreeHostManager::CreateOrUpdateMirroringDisplay(
 }
 
 void WindowTreeHostManager::CloseMirroringDisplayIfNotNecessary() {
-  // The window server controls mirroring in Mus, not Ash.
-  if (ShouldUpdateMirrorWindowController())
-    mirror_window_controller_->CloseIfNotNecessary();
+  mirror_window_controller_->CloseIfNotNecessary();
   // If cursor_compositing is enabled for large cursor, the cursor window is
   // always on the desktop display (the visible cursor on the non-desktop
   // display is drawn through compositor mirroring). Therefore, it's unnecessary
@@ -757,7 +770,8 @@ display::DisplayConfigurator* WindowTreeHostManager::display_configurator() {
 }
 
 ui::EventDispatchDetails WindowTreeHostManager::DispatchKeyEventPostIME(
-    ui::KeyEvent* event) {
+    ui::KeyEvent* event,
+    base::OnceCallback<void(bool)> ack_callback) {
   aura::Window* root_window = nullptr;
   if (event->target()) {
     root_window = static_cast<aura::Window*>(event->target())->GetRootWindow();
@@ -770,7 +784,8 @@ ui::EventDispatchDetails WindowTreeHostManager::DispatchKeyEventPostIME(
     root_window = active_window ? active_window->GetRootWindow()
                                 : Shell::GetPrimaryRootWindow();
   }
-  return root_window->GetHost()->DispatchKeyEventPostIME(event);
+  return root_window->GetHost()->DispatchKeyEventPostIME(
+      event, std::move(ack_callback));
 }
 
 AshWindowTreeHost* WindowTreeHostManager::AddWindowTreeHostForDisplay(
@@ -787,15 +802,14 @@ AshWindowTreeHost* WindowTreeHostManager::AddWindowTreeHostForDisplay(
   }
   params_with_bounds.display_id = display.id();
   params_with_bounds.device_scale_factor = display.device_scale_factor();
-  params_with_bounds.ui_scale_factor = display_info.configured_ui_scale();
   // The AshWindowTreeHost ends up owned by the RootWindowControllers created
   // by this class.
   AshWindowTreeHost* ash_host =
       AshWindowTreeHost::Create(params_with_bounds).release();
   aura::WindowTreeHost* host = ash_host->AsWindowTreeHost();
-  // When using IME service, input method is hosted by the browser process, so
-  // we don't need to create and set it here.
-  if (!Shell::ShouldUseIMEService()) {
+  // Out-of-process ash uses the IME mojo service. In-process ash uses a single
+  // input method shared between ash and browser code.
+  if (!::features::IsMultiProcessMash()) {
     DCHECK(!host->has_input_method());
     if (!input_method_) {  // Singleton input method instance for Ash.
       input_method_ = ui::CreateInputMethod(this, host->GetAcceleratedWidget());

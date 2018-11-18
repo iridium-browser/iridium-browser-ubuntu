@@ -16,21 +16,16 @@
 #include <memory>
 #include <vector>
 
-#include "api/videosinkinterface.h"
+#include "api/video/video_sink_interface.h"
 #include "modules/remote_bitrate_estimator/include/remote_bitrate_estimator.h"
 #include "modules/video_coding/include/video_coding_defines.h"
 #include "rtc_base/criticalsection.h"
 #include "rtc_base/platform_thread.h"
 #include "rtc_base/scoped_ref_ptr.h"
-#include "typedefs.h"  // NOLINT(build/include)
 
 namespace webrtc {
 
-class CallStatsObserver;
-class ChannelStatsObserver;
-class EncodedImageCallback;
 class ReceiveStatisticsProxy;
-class VideoRenderCallback;
 
 namespace vcm {
 class VideoReceiver;
@@ -44,8 +39,6 @@ enum StreamType {
 class VideoStreamDecoder : public VCMReceiveCallback,
                            public VCMReceiveStatisticsCallback {
  public:
-  friend class ChannelStatsObserver;
-
   VideoStreamDecoder(
       vcm::VideoReceiver* video_receiver,
       VCMFrameTypeCallback* vcm_frame_type_callback,
@@ -54,11 +47,11 @@ class VideoStreamDecoder : public VCMReceiveCallback,
       bool enable_fec,
       ReceiveStatisticsProxy* receive_statistics_proxy,
       rtc::VideoSinkInterface<VideoFrame>* incoming_video_stream);
-  ~VideoStreamDecoder();
+  ~VideoStreamDecoder() override;
 
   // Implements VCMReceiveCallback.
   int32_t FrameToRender(VideoFrame& video_frame,
-                        rtc::Optional<uint8_t> qp,
+                        absl::optional<uint8_t> qp,
                         VideoContentType content_type) override;
   int32_t ReceivedDecodedReferenceFrame(const uint64_t picture_id) override;
   void OnIncomingPayloadType(int payload_type) override;

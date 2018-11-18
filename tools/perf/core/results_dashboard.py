@@ -11,28 +11,29 @@
 import calendar
 import datetime
 import httplib
-import httplib2
 import json
 import os
 import subprocess
 import sys
 import traceback
+import time
+import tempfile
 import urllib
 import urllib2
+import zlib
+
+import httplib2
+
+from telemetry.internal.util import external_modules
 
 from core import path_util
+
+psutil = external_modules.ImportOptionalModule('psutil')
+
 
 # The paths in the results dashboard URLs for sending results.
 SEND_RESULTS_PATH = '/add_point'
 SEND_HISTOGRAMS_PATH = '/add_histograms'
-
-# CACHE_DIR/CACHE_FILENAME will be created in a tmp_dir to cache
-# results which need to be retried.
-CACHE_DIR = 'results_dashboard'
-CACHE_FILENAME = 'results_to_retry'
-
-ERROR_NO_OAUTH_TOKEN = (
-    'No oauth token provided, cannot upload HistogramSet. Discarding.')
 
 
 class SendResultException(Exception):
@@ -47,149 +48,100 @@ class SendResultsFatalException(SendResultException):
   pass
 
 
-def SendResults(data, url, tmp_dir,
-                send_as_histograms=False, oauth_token=None):
+def LuciAuthTokenGeneratorCallback(service_account_file):
+  args = ['luci-auth', 'token']
+  if service_account_file:
+    args += ['-service-account-json', service_account_file]
+  else:
+    print ('service_account_file is not set. '
+           'Use LUCI swarming task service account')
+  p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+  if p.wait() == 0:
+    return p.stdout.read()
+  else:
+    raise RuntimeError(
+        'Error generating authentication token.\nStdout: %s\nStder:%s' %
+        (p.stdout.read(), p.stderr.read()))
+
+
+def SendResults(data, data_label, url, send_as_histograms=False,
+                service_account_file=None,
+                token_generator_callback=LuciAuthTokenGeneratorCallback,
+                num_retries=4):
   """Sends results to the Chrome Performance Dashboard.
 
-  This function tries to send the given data to the dashboard, in addition to
-  any data from the cache file. The cache file contains any data that wasn't
-  successfully sent in a previous run.
+  This function tries to send the given data to the dashboard.
 
   Args:
     data: The data to try to send. Must be JSON-serializable.
+    data_label: string name of the data to be uploaded. This is only used for
+    logging purpose.
     url: Performance Dashboard URL (including schema).
-    tmp_dir: Directory name, where the cache directory shall be.
-    json_url_file: Optional file to which to write the dashboard viewing URL.
     send_as_histograms: True if result is to be sent to /add_histograms.
-    oauth_token: string; used for flushing oauth uploads from cache.
+    service_account_file: string; path to service account file which is used
+      for authenticating when upload data to perf dashboard. This can be None
+      for the case of LUCI builder, which means the task service account of the
+      builder will be used.
+    token_generator_callback: a callback for generating the authentication token
+      to upload to perf dashboard.
+      This callback takes |service_account_file| and returns the token
+      string.
+      If |token_generator_callback| is not specified, it's default to
+      LuciAuthTokenGeneratorCallback.
+    num_retries: Number of times to retry uploading to the perf dashboard upon
+      recoverable error.
   """
-  results_json = json.dumps({
-      'is_histogramset': send_as_histograms,
-      'data': data
-  })
-
-  # Write the new request line to the cache file, which contains all lines
-  # that we shall try to send now.
-  cache_file_name = _GetCacheFileName(tmp_dir)
-  _AddLineToCacheFile(results_json, cache_file_name)
-
-  # Send all the results from this run and the previous cache to the dashboard.
-  fatal_error, errors = _SendResultsFromCache(cache_file_name, url, oauth_token)
-
-  # Print any errors; if there was a fatal error, it should be an exception.
-  for error in errors:
-    print error
-  if fatal_error:
-    return False
-  return True
-
-
-def _GetCacheFileName(tmp_dir):
-  """Gets the cache filename, creating the file if it does not exist."""
-  cache_dir = os.path.join(os.path.abspath(tmp_dir), CACHE_DIR)
-  if not os.path.exists(cache_dir):
-    os.makedirs(cache_dir)
-  cache_filename = os.path.join(cache_dir, CACHE_FILENAME)
-  if not os.path.exists(cache_filename):
-    # Create the file.
-    open(cache_filename, 'wb').close()
-  return cache_filename
-
-
-def _AddLineToCacheFile(line, cache_file_name):
-  """Appends a line to the given file."""
-  with open(cache_file_name, 'ab') as cache:
-    cache.write('\n' + line)
-
-
-def _SendResultsFromCache(cache_file_name, url, oauth_token):
-  """Tries to send each line from the cache file in a separate request.
-
-  This also writes data which failed to send back to the cache file.
-
-  Args:
-    cache_file_name: A file name.
-    url: The instance URL to which to post results.
-    oauth_token: An oauth token to use for histogram uploads. Might be None.
-
-  Returns:
-    A pair (fatal_error, errors), where fatal_error is a boolean indicating
-    whether there there was a major error and the step should fail, and errors
-    is a list of error strings.
-  """
-  with open(cache_file_name, 'rb') as cache:
-    cache_lines = cache.readlines()
-  total_results = len(cache_lines)
-
-  fatal_error = False
+  start = time.time()
   errors = []
+  all_data_uploaded = False
 
-  lines_to_retry = []
-  for index, line in enumerate(cache_lines):
-    line = line.strip()
-    if not line:
-      continue
-    print 'Sending result %d of %d to dashboard.' % (index + 1, total_results)
-    # We need to check whether we're trying to upload histograms. If the JSON
-    # is invalid, we should not try to send this data or re-try it later.
-    # Instead, we'll print an error.
+  data_type = ('histogram' if send_as_histograms else 'chartjson')
+
+  dashboard_data_str = json.dumps(data)
+
+  # When perf dashboard is overloaded, it takes sometimes to spin up new
+  # instance. So sleep before retrying again. (
+  # For more details, see crbug.com/867379.
+  wait_before_next_retry_in_seconds = 30
+
+  for i in xrange(1, num_retries + 1):
     try:
-      is_histogramset, data = _GetData(line)
-    except ValueError:
-      errors.append('Could not parse JSON: %s' % line)
-      continue
-
-    data_type = ('histogram' if is_histogramset else 'chartjson')
-
-    try:
-      if is_histogramset:
-        # TODO(eakuefner): Remove this discard logic once all bots use
-        # histograms.
-        if oauth_token is None:
-          raise SendResultsFatalException(ERROR_NO_OAUTH_TOKEN)
-
-        _SendHistogramJson(url, json.dumps(data), oauth_token)
+      print 'Sending %s result of %s to dashboard (attempt %i out of %i).' % (
+          data_type, data_label, i, num_retries)
+      if send_as_histograms:
+        _SendHistogramJson(url, dashboard_data_str,
+                           service_account_file, token_generator_callback)
       else:
-        _SendResultsJson(url, json.dumps(data))
+        # TODO(eakuefner): Remove this logic once all bots use histograms.
+        _SendResultsJson(url, dashboard_data_str)
+      all_data_uploaded = True
+      break
     except SendResultsRetryException as e:
       error = 'Error while uploading %s data: %s' % (data_type, str(e))
-      if index != len(cache_lines) - 1:
-        # The very last item in the cache_lines list is the new results line.
-        # If this line is not the new results line, then this results line
-        # has already been tried before; now it's considered fatal.
-        fatal_error = True
-
-      # The lines to retry are all lines starting from the current one.
-      lines_to_retry = [l.strip() for l in cache_lines[index:] if l.strip()]
       errors.append(error)
-      break
+      time.sleep(wait_before_next_retry_in_seconds)
+      wait_before_next_retry_in_seconds *= 2
     except SendResultsFatalException as e:
-      error = 'Error uploading %s data: %s' % (data_type, str(e))
+      error = 'Fatal error while uploading %s data: %s' % (data_type, str(e))
       errors.append(error)
-      fatal_error = True
       break
     except Exception:
       error = 'Unexpected error while uploading %s data: %s' % (
           data_type, traceback.format_exc())
       errors.append(error)
-      fatal_error = True
       break
 
-  # Write any failing requests to the cache file.
-  cache = open(cache_file_name, 'wb')
-  cache.write('\n'.join(set(lines_to_retry)))
-  cache.close()
+  for err in errors:
+    print err
 
-  return fatal_error, errors
+  print 'Time spent sending results to %s: %s' % (url, time.time() - start)
 
-
-def _GetData(line):
-  line_dict = json.loads(line)
-  return bool(line_dict.get('is_histogramset')), line_dict['data']
+  return all_data_uploaded
 
 
 def MakeHistogramSetWithDiagnostics(histograms_file,
                                     test_name, bot, buildername, buildnumber,
+                                    project, buildbucket,
                                     revisions_dict, is_reference_build,
                                     perf_dashboard_machine_group):
   add_diagnostics_args = []
@@ -201,9 +153,16 @@ def MakeHistogramSetWithDiagnostics(histograms_file,
       '--is_reference_build', 'true' if is_reference_build else '',
   ])
 
-  url = _MakeStdioUrl(test_name, buildername, buildnumber)
-  if url:
-    add_diagnostics_args.extend(['--log_urls', url])
+  stdio_url = _MakeStdioUrl(test_name, buildername, buildnumber)
+  if stdio_url:
+    add_diagnostics_args.extend(['--log_urls_k', 'Buildbot stdio'])
+    add_diagnostics_args.extend(['--log_urls_v', stdio_url])
+
+  build_status_url = _MakeBuildStatusUrl(
+      project, buildbucket, buildername, buildnumber)
+  if build_status_url:
+    add_diagnostics_args.extend(['--build_urls_k', 'Build Status'])
+    add_diagnostics_args.extend(['--build_urls_v', build_status_url])
 
   for k, v in revisions_dict.iteritems():
     add_diagnostics_args.extend((k, v))
@@ -216,15 +175,22 @@ def MakeHistogramSetWithDiagnostics(histograms_file,
   add_reserved_diagnostics_path = os.path.join(
       path_util.GetChromiumSrcDir(), 'third_party', 'catapult', 'tracing',
       'bin', 'add_reserved_diagnostics')
-  cmd = [sys.executable, add_reserved_diagnostics_path] + add_diagnostics_args
 
-  subprocess.call(cmd)
+  tf = tempfile.NamedTemporaryFile(delete=False)
+  tf.close()
+  temp_histogram_output_file = tf.name
 
-  # TODO: Handle reference builds
-  with open(histograms_file) as f:
-    hs = json.load(f)
+  cmd = ([sys.executable, add_reserved_diagnostics_path] +
+         add_diagnostics_args + ['--output_path', temp_histogram_output_file])
 
-  return hs
+  try:
+    subprocess.check_call(cmd)
+    # TODO: Handle reference builds
+    with open(temp_histogram_output_file) as f:
+      hs = json.load(f)
+    return hs
+  finally:
+    os.remove(temp_histogram_output_file)
 
 
 def MakeListOfPoints(charts, bot, test_name, buildername,
@@ -360,6 +326,18 @@ def _MakeStdioUrl(test_name, buildername, buildnumber):
       urllib.quote(test_name))
 
 
+def _MakeBuildStatusUrl(project, buildbucket, buildername, buildnumber):
+  # Note: this construction only works for LUCI but it's ok because we are
+  # converting all perf bots to LUCI (crbug.com/803137).
+  if not (project and buildbucket and buildnumber and buildnumber):
+    return None
+  return 'https://ci.chromium.org/p/%s/builders/%s/%s/%s' % (
+      urllib.quote(project),
+      urllib.quote(buildbucket),
+      urllib.quote(buildername),
+      urllib.quote(str(buildnumber)))
+
+
 def _GetStdioUriColumn(test_name, buildername, buildnumber):
   """Gets a supplemental column containing buildbot stdio link."""
   url = _MakeStdioUrl(test_name, buildername, buildnumber)
@@ -488,42 +466,48 @@ def _SendResultsJson(url, results_json):
       # If the remote app rejects the JSON, it's probably malformed,
       # so we don't want to retry it.
       raise SendResultsFatalException('Discarding JSON, error:\n%s' % error)
-    raise SendResultsRetryException()
+    raise SendResultsRetryException(error)
 
-def _Httplib2Request(url, data, oauth_token):
-  data = urllib.urlencode({'data': data})
-  headers = {
-      'Authorization': 'Bearer %s' % oauth_token,
-      'User-Agent': 'perf-uploader/1.0'
-  }
 
-  http = httplib2.Http()
-  return http.request(
-      url + SEND_HISTOGRAMS_PATH, method='POST', body=data, headers=headers)
-
-def _SendHistogramJson(url, histogramset_json, oauth_token):
+def _SendHistogramJson(url, histogramset_json,
+                       service_account_file, token_generator_callback):
   """POST a HistogramSet JSON to the Performance Dashboard.
 
   Args:
     url: URL of Performance Dashboard instance, e.g.
         "https://chromeperf.appspot.com".
     histogramset_json: JSON string that contains a serialized HistogramSet.
-    oauth_token: An oauth token to be used for this upload.
+
+    For |service_account_file| and |token_generator_callback|, see SendResults's
+    documentation.
 
   Returns:
     None if successful, or an error string if there were errors.
   """
   try:
-    response, _ = _Httplib2Request(url, histogramset_json, oauth_token)
+    oauth_token = token_generator_callback(service_account_file)
+
+    data = zlib.compress(histogramset_json)
+    headers = {
+        'Authorization': 'Bearer %s' % oauth_token,
+        'User-Agent': 'perf-uploader/1.0'
+    }
+
+    http = httplib2.Http()
+
+    response, _ = http.request(
+      url + SEND_HISTOGRAMS_PATH, method='POST', body=data, headers=headers)
 
     # A 500 is presented on an exception on the dashboard side, timeout,
     # exception, etc. The dashboard can also send back 400 and 403, we could
     # recover from 403 (auth error), but 400 is generally malformed data.
-    if response.status == 403:
-      raise SendResultsRetryException(traceback.format_exc())
-
-    if response.status != 200:
+    if response.status in (403, 500):
+      raise SendResultsRetryException('HTTP Response %d: %s' % (
+          response.status, response.reason))
+    elif response.status != 200:
       raise SendResultsFatalException('HTTP Response %d: %s' % (
           response.status, response.reason))
+  except httplib.ResponseNotReady:
+    raise SendResultsRetryException(traceback.format_exc())
   except httplib2.HttpLib2Error:
     raise SendResultsRetryException(traceback.format_exc())

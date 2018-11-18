@@ -13,12 +13,14 @@
 #include "base/location.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
+#include "base/sequenced_task_runner.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/test/test_timeouts.h"
-#include "base/threading/thread_task_runner_handle.h"
+#include "base/threading/sequenced_task_runner_handle.h"
 #include "components/sync/base/cancelation_signal.h"
 #include "components/sync/base/extensions_activity.h"
 #include "components/sync/base/model_type_test_util.h"
+#include "components/sync/engine/sync_engine_switches.h"
 #include "components/sync/engine_impl/backoff_delay_provider.h"
 #include "components/sync/engine_impl/cycle/test_util.h"
 #include "components/sync/syncable/test_user_share.h"
@@ -35,7 +37,11 @@ using base::TimeTicks;
 using testing::_;
 using testing::AtLeast;
 using testing::DoAll;
+using testing::Eq;
+using testing::Ge;
+using testing::Gt;
 using testing::Invoke;
+using testing::Lt;
 using testing::Mock;
 using testing::Return;
 using testing::WithArg;
@@ -75,15 +81,15 @@ void PumpLoop() {
   // Do it this way instead of RunAllPending to pump loop exactly once
   // (necessary in the presence of timers; see comment in
   // QuitLoopNow).
-  base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
-                                                base::Bind(&QuitLoopNow));
+  base::SequencedTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::BindOnce(&QuitLoopNow));
   RunLoop();
 }
 
 void PumpLoopFor(TimeDelta time) {
   // Allow the loop to run for the specified amount of time.
-  base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-      FROM_HERE, base::Bind(&QuitLoopNow), time);
+  base::SequencedTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE, base::BindOnce(&QuitLoopNow), time);
   RunLoop();
 }
 
@@ -115,7 +121,6 @@ class SyncSchedulerImplTest : public testing::Test {
 
   void SetUp() override {
     test_user_share_.SetUp();
-    syncer_ = new testing::StrictMock<MockSyncer>();
     delay_ = nullptr;
     extensions_activity_ = new ExtensionsActivity();
 
@@ -141,9 +146,17 @@ class SyncSchedulerImplTest : public testing::Test {
         model_type_registry_.get(),
         true,   // enable keystore encryption
         false,  // force enable pre-commit GU avoidance
-        "fake_invalidator_client_id");
+        "fake_invalidator_client_id",
+        /*short_poll_interval=*/base::TimeDelta::FromMinutes(30),
+        /*long_poll_interval=*/base::TimeDelta::FromMinutes(120));
     context_->set_notifications_enabled(true);
     context_->set_account_name("Test");
+    RebuildScheduler();
+  }
+
+  void RebuildScheduler() {
+    // The old syncer is destroyed with the scheduler that owns it.
+    syncer_ = new testing::StrictMock<MockSyncer>();
     scheduler_ = std::make_unique<SyncSchedulerImpl>(
         "TestSyncScheduler", BackoffDelayProvider::FromDefaults(), context(),
         syncer_, false);
@@ -189,9 +202,9 @@ class SyncSchedulerImplTest : public testing::Test {
 
   // This stops the scheduler synchronously.
   void StopSyncScheduler() {
-    base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::Bind(&SyncSchedulerImplTest::DoQuitLoopNow,
-                              weak_ptr_factory_.GetWeakPtr()));
+    base::SequencedTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::BindOnce(&SyncSchedulerImplTest::DoQuitLoopNow,
+                                  weak_ptr_factory_.GetWeakPtr()));
     RunLoop();
   }
 
@@ -215,11 +228,10 @@ class SyncSchedulerImplTest : public testing::Test {
   ModelTypeSet GetThrottledTypes() {
     ModelTypeSet throttled_types;
     ModelTypeSet blocked_types = scheduler_->nudge_tracker_.GetBlockedTypes();
-    for (ModelTypeSet::Iterator type_it = blocked_types.First(); type_it.Good();
-         type_it.Inc()) {
-      if (scheduler_->nudge_tracker_.GetTypeBlockingMode(type_it.Get()) ==
+    for (ModelType type : blocked_types) {
+      if (scheduler_->nudge_tracker_.GetTypeBlockingMode(type) ==
           WaitInterval::THROTTLED) {
-        throttled_types.Put(type_it.Get());
+        throttled_types.Put(type);
       }
     }
     return throttled_types;
@@ -228,11 +240,10 @@ class SyncSchedulerImplTest : public testing::Test {
   ModelTypeSet GetBackedOffTypes() {
     ModelTypeSet backed_off_types;
     ModelTypeSet blocked_types = scheduler_->nudge_tracker_.GetBlockedTypes();
-    for (ModelTypeSet::Iterator type_it = blocked_types.First(); type_it.Good();
-         type_it.Inc()) {
-      if (scheduler_->nudge_tracker_.GetTypeBlockingMode(type_it.Get()) ==
+    for (ModelType type : blocked_types) {
+      if (scheduler_->nudge_tracker_.GetTypeBlockingMode(type) ==
           WaitInterval::EXPONENTIAL_BACKOFF) {
-        backed_off_types.Put(type_it.Get());
+        backed_off_types.Put(type);
       }
     }
     return backed_off_types;
@@ -257,7 +268,7 @@ class SyncSchedulerImplTest : public testing::Test {
     NudgeTracker::TypeTrackerMap::const_iterator tracker_it =
         scheduler_->nudge_tracker_.type_trackers_.find(type);
     DCHECK(tracker_it != scheduler_->nudge_tracker_.type_trackers_.end());
-    DCHECK(tracker_it->second->wait_interval_.get());
+    DCHECK(tracker_it->second->wait_interval_);
     return tracker_it->second->wait_interval_->length;
   }
 
@@ -265,7 +276,7 @@ class SyncSchedulerImplTest : public testing::Test {
     NudgeTracker::TypeTrackerMap::const_iterator tracker_it =
         scheduler_->nudge_tracker_.type_trackers_.find(type);
     DCHECK(tracker_it != scheduler_->nudge_tracker_.type_trackers_.end());
-    DCHECK(tracker_it->second->wait_interval_.get());
+    DCHECK(tracker_it->second->wait_interval_);
     tracker_it->second->wait_interval_->mode = mode;
   }
 
@@ -285,6 +296,14 @@ class SyncSchedulerImplTest : public testing::Test {
   TimeDelta GetPendingWakeupTimerDelay() {
     EXPECT_TRUE(scheduler_->pending_wakeup_timer_.IsRunning());
     return scheduler_->pending_wakeup_timer_.GetCurrentDelay();
+  }
+
+  // Provide access for tests to private method.
+  base::Time ComputeLastPollOnStart(base::Time last_poll,
+                                    base::TimeDelta poll_interval,
+                                    base::Time now) {
+    return SyncSchedulerImpl::ComputeLastPollOnStart(last_poll, poll_interval,
+                                                     now);
   }
 
  private:
@@ -610,7 +629,7 @@ TEST_F(SyncSchedulerImplTest, NudgeCoalescingWithDifferentTimings) {
   TimeDelta delay = TimeDelta::FromDays(1);
 
   std::map<ModelType, TimeDelta> delay_map;
-  delay_map[types1.First().Get()] = delay;
+  delay_map[*(types1.begin())] = delay;
   scheduler()->OnReceivedCustomNudgeDelays(delay_map);
   scheduler()->ScheduleLocalNudge(types1, FROM_HERE);
   scheduler()->ScheduleLocalNudge(types2, FROM_HERE);
@@ -663,6 +682,30 @@ TEST_F(SyncSchedulerImplTest, Polling) {
                 RecordSyncShareMultiple(&times, kMinNumSamples, true)));
 
   scheduler()->OnReceivedLongPollIntervalUpdate(poll_interval);
+
+  TimeTicks optimal_start = TimeTicks::Now() + poll_interval;
+  StartSyncScheduler(base::Time());
+
+  // Run again to wait for polling.
+  RunLoop();
+
+  StopSyncScheduler();
+  AnalyzePollRun(times, kMinNumSamples, optimal_start, poll_interval);
+}
+
+// Test that polling gets the intervals from the provided context.
+TEST_F(SyncSchedulerImplTest, ShouldUseInitialPollIntervalFromContext) {
+  SyncShareTimes times;
+  TimeDelta poll_interval(TimeDelta::FromMilliseconds(30));
+  context()->set_short_poll_interval(poll_interval);
+  context()->set_long_poll_interval(poll_interval);
+  RebuildScheduler();
+
+  EXPECT_CALL(*syncer(), PollSyncShare(_, _))
+      .Times(AtLeast(kMinNumSamples))
+      .WillRepeatedly(
+          DoAll(Invoke(test_util::SimulatePollSuccess),
+                RecordSyncShareMultiple(&times, kMinNumSamples, true)));
 
   TimeTicks optimal_start = TimeTicks::Now() + poll_interval;
   StartSyncScheduler(base::Time());
@@ -1506,7 +1549,7 @@ TEST_F(SyncSchedulerImplTest, StartWhenNotConnected) {
   base::RunLoop().RunUntilIdle();
 
   scheduler()->OnConnectionStatusChange(
-      net::NetworkChangeNotifier::CONNECTION_WIFI);
+      network::mojom::ConnectionType::CONNECTION_WIFI);
   connection()->SetServerReachable();
   connection()->UpdateConnectionStatus();
   base::RunLoop().RunUntilIdle();
@@ -1532,7 +1575,7 @@ TEST_F(SyncSchedulerImplTest, SyncShareNotCalledWhenDisconnected) {
   // Simulate a disconnect signal. The scheduler should not retry the previously
   // failed nudge.
   scheduler()->OnConnectionStatusChange(
-      net::NetworkChangeNotifier::CONNECTION_NONE);
+      network::mojom::ConnectionType::CONNECTION_NONE);
   base::RunLoop().RunUntilIdle();
 }
 
@@ -1557,7 +1600,7 @@ TEST_F(SyncSchedulerImplTest, ServerConnectionChangeDuringBackoff) {
 
   // Before we run the scheduled canary, trigger a server connection change.
   scheduler()->OnConnectionStatusChange(
-      net::NetworkChangeNotifier::CONNECTION_WIFI);
+      network::mojom::ConnectionType::CONNECTION_WIFI);
   connection()->SetServerReachable();
   connection()->UpdateConnectionStatus();
   base::RunLoop().RunUntilIdle();
@@ -1590,7 +1633,7 @@ TEST_F(SyncSchedulerImplTest, ConnectionChangeCanaryPreemptedByNudge) {
 
   // Before we run the scheduled canary, trigger a server connection change.
   scheduler()->OnConnectionStatusChange(
-      net::NetworkChangeNotifier::CONNECTION_WIFI);
+      network::mojom::ConnectionType::CONNECTION_WIFI);
   PumpLoop();
   connection()->SetServerReachable();
   connection()->UpdateConnectionStatus();
@@ -1618,9 +1661,9 @@ TEST_F(SyncSchedulerImplTest, DoubleCanaryInConfigure) {
   scheduler()->ScheduleConfiguration(params);
 
   scheduler()->OnConnectionStatusChange(
-      net::NetworkChangeNotifier::CONNECTION_WIFI);
+      network::mojom::ConnectionType::CONNECTION_WIFI);
   scheduler()->OnConnectionStatusChange(
-      net::NetworkChangeNotifier::CONNECTION_WIFI);
+      network::mojom::ConnectionType::CONNECTION_WIFI);
 
   PumpLoop();  // Run the nudge, that will fail and schedule a quick retry.
 }
@@ -1973,6 +2016,59 @@ TEST_F(SyncSchedulerImplTest, InterleavedNudgesStillRestart) {
   EXPECT_TRUE(BlockTimerIsRunning());
   EXPECT_LT(TimeDelta::FromSeconds(50), GetPendingWakeupTimerDelay());
   EXPECT_TRUE(scheduler()->IsGlobalBackoff());
+}
+
+TEST_F(SyncSchedulerImplTest, PollOnStartUpAfterLongPause) {
+  base::Time now = base::Time::Now();
+  base::TimeDelta poll_interval = base::TimeDelta::FromHours(4);
+  base::Time last_reset = ComputeLastPollOnStart(
+      /*last_poll=*/now - base::TimeDelta::FromDays(1), poll_interval, now);
+  EXPECT_THAT(last_reset, Gt(now - poll_interval));
+  // The max poll delay is 1% of the poll_interval.
+  EXPECT_THAT(last_reset, Lt(now - 0.99 * poll_interval));
+}
+
+TEST_F(SyncSchedulerImplTest, PollOnStartUpAfterShortPause) {
+  base::Time now = base::Time::Now();
+  base::TimeDelta poll_interval = base::TimeDelta::FromHours(4);
+  base::Time last_poll = now - base::TimeDelta::FromHours(2);
+  EXPECT_THAT(ComputeLastPollOnStart(last_poll, poll_interval, now),
+              Eq(last_poll));
+}
+
+// Verifies that the delay is in [0, 0.01*poll_interval) and spot checks the
+// random number generation.
+TEST_F(SyncSchedulerImplTest, PollOnStartUpWithinBoundsAfterLongPause) {
+  base::Time now = base::Time::Now();
+  base::TimeDelta poll_interval = base::TimeDelta::FromHours(4);
+  base::Time last_poll = now - base::TimeDelta::FromDays(2);
+  bool found_delay_greater_than_5_permille = false;
+  bool found_delay_less_or_equal_5_permille = false;
+  for (int i = 0; i < 10000; ++i) {
+    base::Time result = ComputeLastPollOnStart(last_poll, poll_interval, now);
+    base::TimeDelta delay = result + poll_interval - now;
+    double fraction = delay.InSeconds() * 1.0 / poll_interval.InSeconds();
+    if (fraction > 0.005) {
+      found_delay_greater_than_5_permille = true;
+    } else {
+      found_delay_less_or_equal_5_permille = true;
+    }
+    EXPECT_THAT(fraction, Ge(0));
+    EXPECT_THAT(fraction, Lt(0.01));
+  }
+  EXPECT_TRUE(found_delay_greater_than_5_permille);
+  EXPECT_TRUE(found_delay_less_or_equal_5_permille);
+}
+
+TEST_F(SyncSchedulerImplTest, TestResetPollIntervalOnStartFeatureFlag) {
+  base::test::ScopedFeatureList feature_list;
+  feature_list.InitAndEnableFeature(switches::kSyncResetPollIntervalOnStart);
+  base::Time now = base::Time::Now();
+  base::TimeDelta poll_interval = base::TimeDelta::FromHours(4);
+  EXPECT_THAT(
+      ComputeLastPollOnStart(
+          /*last_poll=*/now - base::TimeDelta::FromDays(1), poll_interval, now),
+      Eq(now));
 }
 
 }  // namespace syncer

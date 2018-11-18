@@ -10,12 +10,15 @@
 #include "base/bind_helpers.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop/message_loop_current.h"
 #include "base/numerics/ranges.h"
+#include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/synchronization/lock.h"
+#include "base/task/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_util.h"
@@ -58,8 +61,8 @@ void OnResume(scoped_refptr<base::SingleThreadTaskRunner> task_runner,
 void OnResponseSentOnServerIOThread(
     const TestDownloadHttpResponse::OnResponseSentCallback& callback,
     std::unique_ptr<TestDownloadHttpResponse::CompletedRequest> request) {
-  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                          base::BindOnce(callback, std::move(request)));
+  base::PostTaskWithTraits(FROM_HERE, {BrowserThread::UI},
+                           base::BindOnce(callback, std::move(request)));
 }
 
 // The shim response object used by embedded_test_server. After this object is
@@ -120,6 +123,7 @@ TestDownloadHttpResponse::Parameters::Parameters()
       size(102400),
       pattern_generator_seed(1),
       support_byte_ranges(true),
+      support_partial_response(true),
       connection_type(
           net::HttpResponseInfo::ConnectionInfo::CONNECTION_INFO_UNKNOWN) {}
 
@@ -135,6 +139,7 @@ TestDownloadHttpResponse::Parameters::Parameters(Parameters&& that)
       size(that.size),
       pattern_generator_seed(that.pattern_generator_seed),
       support_byte_ranges(that.support_byte_ranges),
+      support_partial_response(that.support_partial_response),
       connection_type(that.connection_type),
       static_response(std::move(that.static_response)),
       injected_errors(std::move(that.injected_errors)),
@@ -145,11 +150,12 @@ TestDownloadHttpResponse::Parameters::Parameters(Parameters&& that)
 TestDownloadHttpResponse::Parameters& TestDownloadHttpResponse::Parameters::
 operator=(Parameters&& that) {
   etag = std::move(that.etag);
-  last_modified = std::move(that.etag);
+  last_modified = std::move(that.last_modified);
   content_type = std::move(that.content_type);
   size = that.size;
   pattern_generator_seed = that.pattern_generator_seed;
   support_byte_ranges = that.support_byte_ranges;
+  support_partial_response = that.support_partial_response;
   static_response = std::move(that.static_response);
   injected_errors = std::move(that.injected_errors);
   inject_error_cb = that.inject_error_cb;
@@ -260,11 +266,12 @@ void TestDownloadHttpResponse::SendResponse(
       parameters_.injected_errors.front() <= range_.last_byte_position() &&
       parameters_.injected_errors.front() >= range_.first_byte_position() &&
       !parameters_.inject_error_cb.is_null()) {
-    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                            base::BindOnce(parameters_.inject_error_cb,
-                                           range_.first_byte_position(),
-                                           parameters_.injected_errors.front() -
-                                               range_.first_byte_position()));
+    base::PostTaskWithTraits(
+        FROM_HERE, {BrowserThread::UI},
+        base::BindOnce(parameters_.inject_error_cb,
+                       range_.first_byte_position(),
+                       parameters_.injected_errors.front() -
+                           range_.first_byte_position()));
   }
 
   // Pause before sending headers.
@@ -296,7 +303,8 @@ void TestDownloadHttpResponse::ParseRequestHeader() {
   // Adjust the response range according to request range. The first byte offset
   // of the request may be larger than entity body size.
   request_range_ = ranges[0];
-  range_.set_first_byte_position(request_range_.first_byte_position());
+  if (parameters_.support_partial_response)
+    range_.set_first_byte_position(request_range_.first_byte_position());
   range_.ComputeBounds(parameters_.size);
 
   response_sent_offset_ = range_.first_byte_position();
@@ -324,7 +332,7 @@ void TestDownloadHttpResponse::SendResponseHeaders() {
 std::string TestDownloadHttpResponse::GetDefaultResponseHeaders() {
   std::string headers;
   // Send partial response.
-  if (parameters_.support_byte_ranges &&
+  if (parameters_.support_partial_response && parameters_.support_byte_ranges &&
       request_.headers.find(net::HttpRequestHeaders::kIfRange) !=
           request_.headers.end() &&
       request_.headers.at(net::HttpRequestHeaders::kIfRange) ==
@@ -334,7 +342,7 @@ std::string TestDownloadHttpResponse::GetDefaultResponseHeaders() {
   }
 
   // Send precondition failed for "If-Match" request header.
-  if (parameters_.support_byte_ranges &&
+  if (parameters_.support_partial_response && parameters_.support_byte_ranges &&
       request_.headers.find(net::HttpRequestHeaders::kIfMatch) !=
           request_.headers.end()) {
     if (request_.headers.at(net::HttpRequestHeaders::kIfMatch) !=
@@ -460,6 +468,9 @@ bool TestDownloadHttpResponse::HandlePause(
     return false;
 
   int64_t pause_offset = parameters_.pause_offset.value();
+  if (pause_offset < request_range_.first_byte_position())
+    return false;
+
   if (pause_offset > buffer_range.last_byte_position() ||
       pause_offset < buffer_range.first_byte_position()) {
     return false;
@@ -531,8 +542,8 @@ void TestDownloadHttpResponse::PauseResponsesAndWaitForResumption() {
 
   // Continue to send data after resumption.
   // TODO(xingliu): Unwind thread hopping callbacks here.
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::UI},
       base::BindOnce(
           pause_callback,
           base::BindRepeating(&OnResume, base::ThreadTaskRunnerHandle::Get(),
@@ -601,7 +612,7 @@ std::unique_ptr<net::test_server::HttpResponse>
 TestDownloadResponseHandler::HandleTestDownloadRequest(
     const TestDownloadHttpResponse::OnResponseSentCallback& callback,
     const net::test_server::HttpRequest& request) {
-  server_task_runner_ = base::MessageLoop::current()->task_runner();
+  server_task_runner_ = base::MessageLoopCurrent::Get()->task_runner();
 
   if (request.headers.find(net::HttpRequestHeaders::kHost) ==
       request.headers.end()) {

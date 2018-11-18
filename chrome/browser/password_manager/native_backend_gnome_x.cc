@@ -17,13 +17,14 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "base/time/time.h"
 #include "chrome/browser/password_manager/password_manager_util_linux.h"
 #include "components/autofill/core/common/password_form.h"
 #include "components/password_manager/core/browser/password_manager_metrics_util.h"
 #include "components/password_manager/core/browser/password_manager_util.h"
 #include "components/password_manager/core/browser/psl_matching_helper.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 
 using autofill::PasswordForm;
@@ -320,7 +321,7 @@ void GKRMethod::AddLogin(const PasswordForm& form, const char* app_string) {
       "avatar_url", form.icon_url.spec().c_str(),
       // We serialize unique origins as "", in order to make other systems that
       // read from the login database happy. https://crbug.com/591310
-      "federation_url", form.federation_origin.unique()
+      "federation_url", form.federation_origin.opaque()
           ? ""
           : form.federation_origin.Serialize().c_str(),
       "should_skip_zero_click", form.skip_zero_click,
@@ -483,8 +484,8 @@ void GKRMethod::OnOperationGetList(GnomeKeyringResult result, GList* list,
 // deprecated.
 NativeBackendGnome::NativeBackendGnome(LocalProfileId id)
     : app_string_(GetProfileSpecificAppString(id)),
-      main_task_runner_(content::BrowserThread::GetTaskRunnerForThread(
-          content::BrowserThread::UI)),
+      main_task_runner_(base::CreateSingleThreadTaskRunnerWithTraits(
+          {content::BrowserThread::UI})),
       background_task_runner_(base::CreateSequencedTaskRunnerWithTraits(
           {base::MayBlock(), base::WithBaseSyncPrimitives(),
            base::TaskPriority::USER_VISIBLE})) {}

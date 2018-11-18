@@ -731,8 +731,7 @@ bool HCE::ExtRoot::operator< (const HCE::ExtRoot &ER) const {
     case MachineOperand::MO_ExternalSymbol:
       return StringRef(V.SymbolName) < StringRef(ER.V.SymbolName);
     case MachineOperand::MO_GlobalAddress:
-      assert(V.GV->hasName() && ER.V.GV->hasName());
-      return V.GV->getName() < ER.V.GV->getName();
+      return V.GV->getGUID() < ER.V.GV->getGUID();
     case MachineOperand::MO_BlockAddress: {
       const BasicBlock *ThisB = V.BA->getBasicBlock();
       const BasicBlock *OtherB = ER.V.BA->getBasicBlock();
@@ -1140,6 +1139,13 @@ void HCE::recordExtender(MachineInstr &MI, unsigned OpNum) {
   bool IsLoad = MI.mayLoad();
   bool IsStore = MI.mayStore();
 
+  // Fixed stack slots have negative indexes, and they cannot be used
+  // with TRI::stackSlot2Index and TRI::index2StackSlot. This is somewhat
+  // unfortunate, but should not be a frequent thing.
+  for (MachineOperand &Op : MI.operands())
+    if (Op.isFI() && Op.getIndex() < 0)
+      return;
+
   if (IsLoad || IsStore) {
     unsigned AM = HII->getAddrMode(MI);
     switch (AM) {
@@ -1202,6 +1208,12 @@ void HCE::recordExtender(MachineInstr &MI, unsigned OpNum) {
   }
 
   ED.UseMI = &MI;
+
+  // Ignore unnamed globals.
+  ExtRoot ER(ED.getOp());
+  if (ER.Kind == MachineOperand::MO_GlobalAddress)
+    if (ER.V.GV->getName().empty())
+      return;
   Extenders.push_back(ED);
 }
 
@@ -1251,7 +1263,7 @@ void HCE::assignInits(const ExtRoot &ER, unsigned Begin, unsigned End,
     if (!ED.IsDef)
       continue;
     ExtValue EV(ED);
-    DEBUG(dbgs() << " =" << I << ". " << EV << "  " << ED << '\n');
+    LLVM_DEBUG(dbgs() << " =" << I << ". " << EV << "  " << ED << '\n');
     assert(ED.Rd.Reg != 0);
     Ranges[I-Begin] = getOffsetRange(ED.Rd).shift(EV.Offset);
     // A2_tfrsi is a special case: it will be replaced with A2_addi, which
@@ -1271,7 +1283,7 @@ void HCE::assignInits(const ExtRoot &ER, unsigned Begin, unsigned End,
     if (ED.IsDef)
       continue;
     ExtValue EV(ED);
-    DEBUG(dbgs() << "  " << I << ". " << EV << "  " << ED << '\n');
+    LLVM_DEBUG(dbgs() << "  " << I << ". " << EV << "  " << ED << '\n');
     OffsetRange Dev = getOffsetRange(ED);
     Ranges[I-Begin].intersect(Dev.shift(EV.Offset));
   }
@@ -1283,7 +1295,7 @@ void HCE::assignInits(const ExtRoot &ER, unsigned Begin, unsigned End,
   for (unsigned I = Begin; I != End; ++I)
     RangeMap[Ranges[I-Begin]].insert(I);
 
-  DEBUG({
+  LLVM_DEBUG({
     dbgs() << "Ranges\n";
     for (unsigned I = Begin; I != End; ++I)
       dbgs() << "  " << I << ". " << Ranges[I-Begin] << '\n';
@@ -1377,7 +1389,7 @@ void HCE::assignInits(const ExtRoot &ER, unsigned Begin, unsigned End,
     }
   }
 
-  DEBUG(dbgs() << "IMap (before fixup) = " << PrintIMap(IMap, *HRI));
+  LLVM_DEBUG(dbgs() << "IMap (before fixup) = " << PrintIMap(IMap, *HRI));
 
   // There is some ambiguity in what initializer should be used, if the
   // descriptor's subexpression is non-trivial: it can be the entire
@@ -1396,10 +1408,50 @@ void HCE::assignInits(const ExtRoot &ER, unsigned Begin, unsigned End,
     AssignmentMap::iterator F = IMap.find({EV, ExtExpr()});
     if (F == IMap.end())
       continue;
+
     // Finally, check if all extenders have the same value as the initializer.
-    auto SameValue = [&EV,this](unsigned I) {
+    // Make sure that extenders that are a part of a stack address are not
+    // merged with those that aren't. Stack addresses need an offset field
+    // (to be used by frame index elimination), while non-stack expressions
+    // can be replaced with forms (such as rr) that do not have such a field.
+    // Example:
+    //
+    // Collected 3 extenders
+    //  =2. imm:0  off:32968  bb#2: %7 = ## + __ << 0, def
+    //   0. imm:0  off:267  bb#0: __ = ## + SS#1 << 0
+    //   1. imm:0  off:267  bb#1: __ = ## + SS#1 << 0
+    // Ranges
+    //   0. [-756,267]a1+0
+    //   1. [-756,267]a1+0
+    //   2. [201,65735]a1+0
+    // RangeMap
+    //   [-756,267]a1+0 -> 0 1
+    //   [201,65735]a1+0 -> 2
+    // IMap (before fixup) = {
+    //   [imm:0  off:267, ## + __ << 0] -> { 2 }
+    //   [imm:0  off:267, ## + SS#1 << 0] -> { 0 1 }
+    // }
+    // IMap (after fixup) = {
+    //   [imm:0  off:267, ## + __ << 0] -> { 2 0 1 }
+    //   [imm:0  off:267, ## + SS#1 << 0] -> { }
+    // }
+    // Inserted def in bb#0 for initializer: [imm:0  off:267, ## + __ << 0]
+    //   %12:intregs = A2_tfrsi 267
+    //
+    // The result was
+    //   %12:intregs = A2_tfrsi 267
+    //   S4_pstorerbt_rr %3, %12, %stack.1, 0, killed %4
+    // Which became
+    //   r0 = #267
+    //   if (p0.new) memb(r0+r29<<#4) = r2
+
+    bool IsStack = any_of(F->second, [this](unsigned I) {
+                      return Extenders[I].Expr.Rs.isSlot();
+                   });
+    auto SameValue = [&EV,this,IsStack](unsigned I) {
       const ExtDesc &ED = Extenders[I];
-      return ExtValue(ED).Offset == EV.Offset;
+      return ED.Expr.Rs.isSlot() == IsStack &&
+             ExtValue(ED).Offset == EV.Offset;
     };
     if (all_of(P.second, SameValue)) {
       F->second.insert(P.second.begin(), P.second.end());
@@ -1407,7 +1459,7 @@ void HCE::assignInits(const ExtRoot &ER, unsigned Begin, unsigned End,
     }
   }
 
-  DEBUG(dbgs() << "IMap (after fixup) = " << PrintIMap(IMap, *HRI));
+  LLVM_DEBUG(dbgs() << "IMap (after fixup) = " << PrintIMap(IMap, *HRI));
 }
 
 void HCE::calculatePlacement(const ExtenderInit &ExtI, const IndexList &Refs,
@@ -1510,9 +1562,9 @@ HCE::Register HCE::insertInitializer(Loc DefL, const ExtenderInit &ExtI) {
 
   assert(InitI);
   (void)InitI;
-  DEBUG(dbgs() << "Inserted def in bb#" << MBB.getNumber()
-               << " for initializer: " << PrintInit(ExtI, *HRI)
-               << "\n  " << *InitI);
+  LLVM_DEBUG(dbgs() << "Inserted def in bb#" << MBB.getNumber()
+                    << " for initializer: " << PrintInit(ExtI, *HRI) << "\n  "
+                    << *InitI);
   return { DefR, 0 };
 }
 
@@ -1570,7 +1622,7 @@ bool HCE::replaceInstrExact(const ExtDesc &ED, Register ExtR) {
       else
         MIB.add(MachineOperand(ExtR));
     }
-    MIB.setMemRefs(MI.memoperands_begin(), MI.memoperands_end());
+    MIB.cloneMemRefs(MI);
     MBB.erase(MI);
     return true;
   }
@@ -1621,7 +1673,7 @@ bool HCE::replaceInstrExact(const ExtDesc &ED, Register ExtR) {
     // Add the stored value for stores.
     if (MI.mayStore())
       MIB.add(getStoredValueOp(MI));
-    MIB.setMemRefs(MI.memoperands_begin(), MI.memoperands_end());
+    MIB.cloneMemRefs(MI);
     MBB.erase(MI);
     return true;
   }
@@ -1656,6 +1708,15 @@ bool HCE::replaceInstrExpr(const ExtDesc &ED, const ExtenderInit &ExtI,
 
     // Clamp Diff to the 16 bit range.
     int32_t D = isInt<16>(Diff) ? Diff : (Diff > 0 ? 32767 : -32768);
+    if (Diff > 32767) {
+      // Split Diff into two values: one that is close to min/max int16,
+      // and the other being the rest, and such that both have the same
+      // "alignment" as Diff.
+      uint32_t UD = Diff;
+      OffsetRange R = getOffsetRange(MI.getOperand(0));
+      uint32_t A = std::min<uint32_t>(R.Align, 1u << countTrailingZeros(UD));
+      D &= ~(A-1);
+    }
     BuildMI(MBB, At, dl, HII->get(IdxOpc))
       .add(MI.getOperand(0))
       .add(MachineOperand(ExtR))
@@ -1738,7 +1799,7 @@ bool HCE::replaceInstrExpr(const ExtDesc &ED, const ExtenderInit &ExtI,
     // Add the stored value for stores.
     if (MI.mayStore())
       MIB.add(getStoredValueOp(MI));
-    MIB.setMemRefs(MI.memoperands_begin(), MI.memoperands_end());
+    MIB.cloneMemRefs(MI);
     MBB.erase(MI);
     return true;
   }
@@ -1765,8 +1826,8 @@ bool HCE::replaceInstr(unsigned Idx, Register ExtR, const ExtenderInit &ExtI) {
   ExtValue EV(ED);
   int32_t Diff = EV.Offset - DefV.Offset;
   const MachineInstr &MI = *ED.UseMI;
-  DEBUG(dbgs() << __func__ << " Idx:" << Idx << " ExtR:"
-               << PrintRegister(ExtR, *HRI) << " Diff:" << Diff << '\n');
+  LLVM_DEBUG(dbgs() << __func__ << " Idx:" << Idx << " ExtR:"
+                    << PrintRegister(ExtR, *HRI) << " Diff:" << Diff << '\n');
 
   // These two addressing modes must be converted into indexed forms
   // regardless of what the initializer looks like.
@@ -1872,7 +1933,12 @@ const MachineOperand &HCE::getStoredValueOp(const MachineInstr &MI) const {
 bool HCE::runOnMachineFunction(MachineFunction &MF) {
   if (skipFunction(MF.getFunction()))
     return false;
-  DEBUG(MF.print(dbgs() << "Before " << getPassName() << '\n', nullptr));
+  if (MF.getFunction().hasPersonalityFn()) {
+    LLVM_DEBUG(dbgs() << getPassName() << ": skipping " << MF.getName()
+                      << " due to exception handling\n");
+    return false;
+  }
+  LLVM_DEBUG(MF.print(dbgs() << "Before " << getPassName() << '\n', nullptr));
 
   HII = MF.getSubtarget<HexagonSubtarget>().getInstrInfo();
   HRI = MF.getSubtarget<HexagonSubtarget>().getRegisterInfo();
@@ -1881,13 +1947,12 @@ bool HCE::runOnMachineFunction(MachineFunction &MF) {
   AssignmentMap IMap;
 
   collect(MF);
-  llvm::sort(Extenders.begin(), Extenders.end(),
-    [](const ExtDesc &A, const ExtDesc &B) {
-      return ExtValue(A) < ExtValue(B);
-    });
+  llvm::sort(Extenders, [](const ExtDesc &A, const ExtDesc &B) {
+    return ExtValue(A) < ExtValue(B);
+  });
 
   bool Changed = false;
-  DEBUG(dbgs() << "Collected " << Extenders.size() << " extenders\n");
+  LLVM_DEBUG(dbgs() << "Collected " << Extenders.size() << " extenders\n");
   for (unsigned I = 0, E = Extenders.size(); I != E; ) {
     unsigned B = I;
     const ExtRoot &T = Extenders[B].getOp();
@@ -1899,7 +1964,7 @@ bool HCE::runOnMachineFunction(MachineFunction &MF) {
     Changed |= replaceExtenders(IMap);
   }
 
-  DEBUG({
+  LLVM_DEBUG({
     if (Changed)
       MF.print(dbgs() << "After " << getPassName() << '\n', nullptr);
     else

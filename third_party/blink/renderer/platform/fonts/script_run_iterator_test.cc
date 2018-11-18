@@ -4,7 +4,6 @@
 
 #include "third_party/blink/renderer/platform/fonts/script_run_iterator.h"
 
-#include <string>
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
@@ -13,7 +12,7 @@
 namespace blink {
 
 struct ScriptTestRun {
-  std::string text;
+  const char* const text;
   UScriptCode code;
 };
 
@@ -34,7 +33,7 @@ class MockScriptData : public ScriptData {
     return &mock_script_data;
   }
 
-  void GetScripts(UChar32 ch, Vector<UScriptCode>& dst) const override {
+  void GetScripts(UChar32 ch, UScriptCodeList& dst) const override {
     DCHECK_GE(ch, kMockCharMin);
     DCHECK_LT(ch, kMockCharLimit);
 
@@ -290,7 +289,7 @@ class ScriptRunIteratorTest : public testing::Test {
     String text(g_empty_string16_bit);
     Vector<ScriptExpectedRun> expect;
     for (auto& run : runs) {
-      text.append(String::FromUTF8(run.text.c_str()));
+      text.append(String::FromUTF8(run.text));
       expect.push_back(ScriptExpectedRun(text.length(), run.code));
     }
     ScriptRunIterator script_run_iterator(text.Characters16(), text.length());
@@ -663,7 +662,7 @@ TEST_F(ScriptRunIteratorICUDataTest, ValidateICUMaxScriptExtensions) {
 TEST_F(ScriptRunIteratorICUDataTest, ICUDataGetScriptsReturnsAllExtensions) {
   int max_extensions;
   UChar32 cp = GetACharWithMaxExtensions(&max_extensions);
-  Vector<UScriptCode> extensions;
+  ScriptData::UScriptCodeList extensions;
   ICUScriptData::Instance()->GetScripts(cp, extensions);
 
   // It's possible that GetScripts adds the primary script to the list of
@@ -673,7 +672,7 @@ TEST_F(ScriptRunIteratorICUDataTest, ICUDataGetScriptsReturnsAllExtensions) {
 }
 
 TEST_F(ScriptRunIteratorICUDataTest, CommonHaveNoMoreThanOneExtension) {
-  Vector<UScriptCode> extensions;
+  ScriptData::UScriptCodeList extensions;
   for (UChar32 cp = 0; cp < 0x110000; ++cp) {
     ICUScriptData::Instance()->GetScripts(cp, extensions);
     UScriptCode primary = extensions.at(0);

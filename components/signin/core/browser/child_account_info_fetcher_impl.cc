@@ -4,6 +4,7 @@
 
 #include "components/signin/core/browser/child_account_info_fetcher_impl.h"
 
+#include "base/stl_util.h"
 #include "base/strings/string_split.h"
 #include "base/trace_event/trace_event.h"
 #include "base/values.h"
@@ -15,6 +16,7 @@
 #include "google/cacheinvalidation/types.pb.h"
 #include "google_apis/gaia/gaia_auth_fetcher.h"
 #include "google_apis/gaia/gaia_constants.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 
 // TODO(maroun): Remove this file.
 
@@ -47,11 +49,11 @@ ChildAccountInfoFetcherImpl::ChildAccountInfoFetcherImpl(
     const std::string& account_id,
     AccountFetcherService* fetcher_service,
     OAuth2TokenService* token_service,
-    net::URLRequestContextGetter* request_context_getter,
+    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
     invalidation::InvalidationService* invalidation_service)
     : OAuth2TokenService::Consumer(kFetcherId),
       token_service_(token_service),
-      request_context_getter_(request_context_getter),
+      url_loader_factory_(url_loader_factory),
       fetcher_service_(fetcher_service),
       invalidation_service_(invalidation_service),
       account_id_(account_id),
@@ -92,15 +94,14 @@ void ChildAccountInfoFetcherImpl::FetchIfNotInProgress() {
 
 void ChildAccountInfoFetcherImpl::OnGetTokenSuccess(
     const OAuth2TokenService::Request* request,
-    const std::string& access_token,
-    const base::Time& expiration_time) {
+    const OAuth2AccessTokenConsumer::TokenResponse& token_response) {
   TRACE_EVENT_ASYNC_STEP_PAST0("AccountFetcherService", kFetcherId, this,
                                "OnGetTokenSuccess");
   DCHECK_EQ(request, login_token_request_.get());
 
   gaia_auth_fetcher_ = fetcher_service_->signin_client_->CreateGaiaAuthFetcher(
-      this, GaiaConstants::kChromeSource, request_context_getter_);
-  gaia_auth_fetcher_->StartOAuthLogin(access_token,
+      this, GaiaConstants::kChromeSource, url_loader_factory_);
+  gaia_auth_fetcher_->StartOAuthLogin(token_response.access_token,
                                       GaiaConstants::kGaiaService);
 }
 
@@ -122,15 +123,13 @@ void ChildAccountInfoFetcherImpl::OnClientLoginFailure(
 
 void ChildAccountInfoFetcherImpl::OnGetUserInfoSuccess(
     const UserInfoMap& data) {
-  UserInfoMap::const_iterator services_iter = data.find("allServices");
+  auto services_iter = data.find("allServices");
   if (services_iter != data.end()) {
     std::vector<std::string> service_flags = base::SplitString(
         services_iter->second, ",", base::TRIM_WHITESPACE,
         base::SPLIT_WANT_ALL);
-    bool is_child_account =
-        std::find(service_flags.begin(), service_flags.end(),
-                  AccountTrackerService::kChildAccountServiceFlag) !=
-        service_flags.end();
+    bool is_child_account = base::ContainsValue(
+        service_flags, AccountTrackerService::kChildAccountServiceFlag);
     if (!is_child_account && invalidation_service_) {
       // Don't bother listening for invalidations as a non-child account can't
       // become a child account.

@@ -22,14 +22,15 @@ ShaderVk::~ShaderVk()
 {
 }
 
-ShCompileOptions ShaderVk::prepareSourceAndReturnOptions(std::stringstream *sourceStream,
+ShCompileOptions ShaderVk::prepareSourceAndReturnOptions(const gl::Context *context,
+                                                         std::stringstream *sourceStream,
                                                          std::string *sourcePath)
 {
     *sourceStream << mData.getSource();
-    return 0;
+    return SH_INITIALIZE_UNINITIALIZED_LOCALS;
 }
 
-bool ShaderVk::postTranslateCompile(gl::Compiler *compiler, std::string *infoLog)
+bool ShaderVk::postTranslateCompile(gl::ShCompilerInstance *compiler, std::string *infoLog)
 {
     // No work to do here.
     return true;

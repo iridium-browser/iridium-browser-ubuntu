@@ -28,11 +28,11 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/frame_navigate_params.h"
 #include "content/public/test/test_renderer_host.h"
-#include "mojo/public/cpp/bindings/binding_set.h"
+#include "mojo/public/cpp/bindings/associated_binding_set.h"
 #include "net/base/net_errors.h"
-#include "services/service_manager/public/cpp/interface_provider.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
 
 namespace autofill {
 
@@ -47,13 +47,14 @@ class FakeAutofillAgent : public mojom::AutofillAgent {
   FakeAutofillAgent()
       : fill_form_id_(-1),
         preview_form_id_(-1),
-        called_clear_form_(false),
+        called_clear_section_(false),
         called_clear_previewed_form_(false) {}
 
   ~FakeAutofillAgent() override {}
 
-  void BindRequest(mojo::ScopedMessagePipeHandle handle) {
-    bindings_.AddBinding(this, mojom::AutofillAgentRequest(std::move(handle)));
+  void BindRequest(mojo::ScopedInterfaceEndpointHandle handle) {
+    bindings_.AddBinding(
+        this, mojom::AutofillAgentAssociatedRequest(std::move(handle)));
   }
 
   void SetQuitLoopClosure(base::Closure closure) { quit_closure_ = closure; }
@@ -101,7 +102,7 @@ class FakeAutofillAgent : public mojom::AutofillAgent {
 
   // Returns whether mojo interface method mojom::AutofillAgent::ClearForm() got
   // called.
-  bool GetCalledClearForm() { return called_clear_form_; }
+  bool GetCalledClearSection() { return called_clear_section_; }
 
   // Returns whether mojo interface method
   // mojom::AutofillAgent::ClearPreviewedForm() got called.
@@ -167,8 +168,8 @@ class FakeAutofillAgent : public mojom::AutofillAgent {
     CallDone();
   }
 
-  void ClearForm() override {
-    called_clear_form_ = true;
+  void ClearSection() override {
+    called_clear_section_ = true;
     CallDone();
   }
 
@@ -199,7 +200,6 @@ class FakeAutofillAgent : public mojom::AutofillAgent {
                                  const base::string16& password) override {}
 
   void ShowInitialPasswordAccountSuggestions(
-      int32_t key,
       const PasswordFormFillData& form_data) override {}
 
   void SetUserGestureRequired(bool required) override {}
@@ -210,7 +210,11 @@ class FakeAutofillAgent : public mojom::AutofillAgent {
 
   void SetQueryPasswordSuggestion(bool query) override{};
 
-  mojo::BindingSet<mojom::AutofillAgent> bindings_;
+  void GetElementFormAndFieldData(
+      const std::vector<std::string>& selectors,
+      GetElementFormAndFieldDataCallback callback) override {}
+
+  mojo::AssociatedBindingSet<mojom::AutofillAgent> bindings_;
 
   base::Closure quit_closure_;
 
@@ -222,8 +226,8 @@ class FakeAutofillAgent : public mojom::AutofillAgent {
   base::Optional<FormData> preview_form_form_;
   // Records data received from FieldTypePredictionsAvailable() call.
   base::Optional<std::vector<FormDataPredictions>> predictions_;
-  // Records whether ClearForm() got called.
-  bool called_clear_form_;
+  // Records whether ClearSection() got called.
+  bool called_clear_section_;
   // Records whether ClearPreviewedForm() got called.
   bool called_clear_previewed_form_;
   // Records string received from FillFieldWithValue() call.
@@ -240,7 +244,7 @@ class MockAutofillManager : public AutofillManager {
  public:
   MockAutofillManager(AutofillDriver* driver, AutofillClient* client)
       : AutofillManager(driver, client, kAppLocale, kDownloadState) {}
-  virtual ~MockAutofillManager() {}
+  ~MockAutofillManager() override {}
 
   MOCK_METHOD0(Reset, void());
 };
@@ -285,12 +289,12 @@ class ContentAutofillDriverTest : public content::RenderViewHostTestHarness {
     driver_.reset(new TestContentAutofillDriver(web_contents()->GetMainFrame(),
                                                 test_autofill_client_.get()));
 
-    service_manager::InterfaceProvider* remote_interfaces =
-        web_contents()->GetMainFrame()->GetRemoteInterfaces();
-    service_manager::InterfaceProvider::TestApi test_api(remote_interfaces);
-    test_api.SetBinderForName(mojom::AutofillAgent::Name_,
-                              base::Bind(&FakeAutofillAgent::BindRequest,
-                                         base::Unretained(&fake_agent_)));
+    blink::AssociatedInterfaceProvider* remote_interfaces =
+        web_contents()->GetMainFrame()->GetRemoteAssociatedInterfaces();
+    remote_interfaces->OverrideBinderForTesting(
+        mojom::AutofillAgent::Name_,
+        base::BindRepeating(&FakeAutofillAgent::BindRequest,
+                            base::Unretained(&fake_agent_)));
   }
 
   void TearDown() override {
@@ -410,13 +414,13 @@ TEST_F(ContentAutofillDriverTest, AcceptDataListSuggestion) {
   EXPECT_EQ(input_value, output_value);
 }
 
-TEST_F(ContentAutofillDriverTest, ClearFilledFormSentToRenderer) {
+TEST_F(ContentAutofillDriverTest, ClearFilledSectionSentToRenderer) {
   base::RunLoop run_loop;
   fake_agent_.SetQuitLoopClosure(run_loop.QuitClosure());
-  driver_->RendererShouldClearFilledForm();
+  driver_->RendererShouldClearFilledSection();
   run_loop.RunUntilIdle();
 
-  EXPECT_TRUE(fake_agent_.GetCalledClearForm());
+  EXPECT_TRUE(fake_agent_.GetCalledClearSection());
 }
 
 TEST_F(ContentAutofillDriverTest, ClearPreviewedFormSentToRenderer) {

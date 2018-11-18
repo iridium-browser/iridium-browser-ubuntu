@@ -10,7 +10,6 @@
 #include "base/callback.h"
 #include "base/observer_list.h"
 #include "base/single_thread_task_runner.h"
-#include "base/synchronization/lock.h"
 #include "ui/display/types/display_constants.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/ozone/common/gpu/ozone_gpu_message_params.h"
@@ -45,7 +44,8 @@ class DrmGpuPlatformSupportHost : public GpuPlatformSupportHost,
   void OnGpuServiceLaunched(
       scoped_refptr<base::SingleThreadTaskRunner> ui_runner,
       scoped_refptr<base::SingleThreadTaskRunner> io_runner,
-      GpuHostBindInterfaceCallback binder) override;
+      GpuHostBindInterfaceCallback binder,
+      GpuHostTerminateCallback terminate_callback) override;
 
   void OnMessageReceived(const IPC::Message& message) override;
 
@@ -87,11 +87,12 @@ class DrmGpuPlatformSupportHost : public GpuPlatformSupportHost,
   bool GpuDisableNativeDisplay(int64_t display_id) override;
   bool GpuGetHDCPState(int64_t display_id) override;
   bool GpuSetHDCPState(int64_t display_id, display::HDCPState state) override;
-  bool GpuSetColorCorrection(
+  bool GpuSetColorMatrix(int64_t display_id,
+                         const std::vector<float>& color_matrix) override;
+  bool GpuSetGammaCorrection(
       int64_t display_id,
       const std::vector<display::GammaRampRGBEntry>& degamma_lut,
-      const std::vector<display::GammaRampRGBEntry>& gamma_lut,
-      const std::vector<float>& correction_matrix) override;
+      const std::vector<display::GammaRampRGBEntry>& gamma_lut) override;
 
   // Services needed by DrmWindowHost
   bool GpuDestroyWindow(gfx::AcceleratedWidget widget) override;
@@ -100,10 +101,7 @@ class DrmGpuPlatformSupportHost : public GpuPlatformSupportHost,
                               const gfx::Rect& bounds) override;
 
  private:
-  void OnChannelEstablished(
-      int host_id,
-      scoped_refptr<base::SingleThreadTaskRunner> send_runner,
-      const base::Callback<void(IPC::Message*)>& send_callback);
+  void OnChannelEstablished();
   bool OnMessageReceivedForDrmDisplayHostManager(const IPC::Message& message);
   void OnUpdateNativeDisplays(
       const std::vector<DisplaySnapshot_Params>& displays);
@@ -121,7 +119,7 @@ class DrmGpuPlatformSupportHost : public GpuPlatformSupportHost,
                        const std::vector<OverlayCheckReturn_Params>& returns);
 
   int host_id_ = -1;
-  base::Lock host_id_lock_;
+  bool channel_established_ = false;
 
   scoped_refptr<base::SingleThreadTaskRunner> ui_runner_;
   scoped_refptr<base::SingleThreadTaskRunner> send_runner_;
@@ -130,8 +128,8 @@ class DrmGpuPlatformSupportHost : public GpuPlatformSupportHost,
   DrmDisplayHostManager* display_manager_;  // Not owned.
   DrmOverlayManager* overlay_manager_;      // Not owned.
 
-  DrmCursor* cursor_;                              // Not owned.
-  base::ObserverList<GpuThreadObserver> gpu_thread_observers_;
+  DrmCursor* const cursor_;  // Not owned.
+  base::ObserverList<GpuThreadObserver>::Unchecked gpu_thread_observers_;
 
   base::WeakPtr<DrmGpuPlatformSupportHost> weak_ptr_;
   base::WeakPtrFactory<DrmGpuPlatformSupportHost> weak_ptr_factory_;

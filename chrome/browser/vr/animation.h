@@ -11,6 +11,7 @@
 #include "base/macros.h"
 #include "cc/animation/keyframe_model.h"
 #include "chrome/browser/vr/transition.h"
+#include "chrome/browser/vr/vr_ui_export.h"
 #include "third_party/skia/include/core/SkColor.h"
 
 namespace cc {
@@ -31,7 +32,7 @@ namespace vr {
 // TODO(vollick): if cc::KeyframeModel and friends move into gfx/, then this
 // class should follow suit. As such, it should not absorb any vr-specific
 // functionality.
-class Animation final {
+class VR_UI_EXPORT Animation final {
  public:
   static int GetNextKeyframeModelId();
   static int GetNextGroupId();
@@ -47,6 +48,9 @@ class Animation final {
   void RemoveKeyframeModels(int target_property);
 
   void Tick(base::TimeTicks monotonic_time);
+
+  // This ticks all keyframe models until they are complete.
+  void FinishAll();
 
   using KeyframeModels = std::vector<std::unique_ptr<cc::KeyframeModel>>;
   const KeyframeModels& keyframe_models() { return keyframe_models_; }
@@ -92,7 +96,10 @@ class Animation final {
   SkColor GetTargetColorValue(int target_property, SkColor default_value) const;
 
  private:
-  void StartKeyframeModels(base::TimeTicks monotonic_time);
+  void TickInternal(base::TimeTicks monotonic_time,
+                    bool include_infinite_animations);
+  void StartKeyframeModels(base::TimeTicks monotonic_time,
+                           bool include_infinite_animations);
   template <typename ValueType>
   void TransitionValueTo(base::TimeTicks monotonic_time,
                          int target_property,

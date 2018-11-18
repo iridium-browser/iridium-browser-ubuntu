@@ -15,9 +15,12 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/run_loop.h"
 #include "base/strings/pattern.h"
+#include "base/task/post_task.h"
 #include "base/trace_event/trace_event.h"
+#include "content/browser/tracing/background_startup_tracing_observer.h"
 #include "content/browser/tracing/background_tracing_manager_impl.h"
 #include "content/browser/tracing/background_tracing_rule.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/content_browser_test.h"
@@ -95,6 +98,19 @@ void TestBackgroundTracingObserver::OnTracingEnabled(
   tracing_enabled_callback_.Run();
 }
 
+class TestStartupPreferenceManagerImpl
+    : public BackgroundStartupTracingObserver::PreferenceManager {
+ public:
+  void SetBackgroundStartupTracingEnabled(bool enabled) override {
+    enabled_ = enabled;
+  }
+
+  bool GetBackgroundStartupTracingEnabled() const override { return enabled_; }
+
+ private:
+  bool enabled_ = false;
+};
+
 }  // namespace
 
 class BackgroundTracingManagerBrowserTest : public ContentBrowserTest {
@@ -107,16 +123,13 @@ class BackgroundTracingManagerBrowserTest : public ContentBrowserTest {
 
 class BackgroundTracingManagerUploadConfigWrapper {
  public:
-  BackgroundTracingManagerUploadConfigWrapper(const base::Closure& callback)
-      : callback_(callback), receive_count_(0) {
-    receive_callback_ =
-        base::Bind(&BackgroundTracingManagerUploadConfigWrapper::Upload,
-                   base::Unretained(this));
-  }
+  BackgroundTracingManagerUploadConfigWrapper(base::OnceClosure callback)
+      : callback_(std::move(callback)), receive_count_(0) {}
 
-  void Upload(const scoped_refptr<base::RefCountedString>& file_contents,
-              std::unique_ptr<const base::DictionaryValue> metadata,
-              base::Callback<void()> done_callback) {
+  void Upload(
+      const scoped_refptr<base::RefCountedString>& file_contents,
+      std::unique_ptr<const base::DictionaryValue> metadata,
+      BackgroundTracingManager::FinishedProcessingCallback done_callback) {
     receive_count_ += 1;
     EXPECT_TRUE(file_contents);
 
@@ -141,9 +154,15 @@ class BackgroundTracingManagerUploadConfigWrapper {
     EXPECT_EQ(Z_STREAM_END, result);
 
     last_file_contents_.assign(output_str.data(), bytes_written);
-    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                            std::move(done_callback));
-    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE, callback_);
+    base::PostTaskWithTraits(FROM_HERE, {BrowserThread::UI},
+                             base::BindOnce(std::move(done_callback), true));
+    CHECK(callback_);
+    base::PostTaskWithTraits(FROM_HERE, {BrowserThread::UI},
+                             std::move(callback_));
+  }
+
+  void SetUploadCallback(base::OnceClosure callback) {
+    callback_ = std::move(callback);
   }
 
   bool TraceHasMatchingString(const char* str) {
@@ -152,14 +171,14 @@ class BackgroundTracingManagerUploadConfigWrapper {
 
   int get_receive_count() const { return receive_count_; }
 
-  const BackgroundTracingManager::ReceiveCallback& get_receive_callback()
-      const {
-    return receive_callback_;
+  BackgroundTracingManager::ReceiveCallback get_receive_callback() {
+    return base::BindRepeating(
+        &BackgroundTracingManagerUploadConfigWrapper::Upload,
+        base::Unretained(this));
   }
 
  private:
-  BackgroundTracingManager::ReceiveCallback receive_callback_;
-  base::Closure callback_;
+  base::OnceClosure callback_;
   int receive_count_;
   std::string last_file_contents_;
 };
@@ -567,6 +586,18 @@ IN_PROC_BROWSER_TEST_F(BackgroundTracingManagerBrowserTest,
 IN_PROC_BROWSER_TEST_F(BackgroundTracingManagerBrowserTest,
                        MAYBE_ToggleBlinkScenarios) {
   {
+    base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+    ASSERT_TRUE(command_line);
+
+    // Early bailout in the case command line arguments have been explicitly set
+    // for the runner.
+    if (!command_line->GetSwitchValueASCII(switches::kEnableBlinkFeatures)
+             .empty() ||
+        !command_line->GetSwitchValueASCII(switches::kDisableBlinkFeatures)
+             .empty()) {
+      return;
+    }
+
     SetupBackgroundTracingManager();
 
     base::RunLoop run_loop;
@@ -600,10 +631,6 @@ IN_PROC_BROWSER_TEST_F(BackgroundTracingManagerBrowserTest,
             BackgroundTracingManager::NO_DATA_FILTERING);
 
     EXPECT_TRUE(scenario_activated);
-
-    base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-    EXPECT_TRUE(command_line);
-
     EXPECT_EQ(command_line->GetSwitchValueASCII(switches::kEnableBlinkFeatures),
               "FasterWeb1,FasterWeb2");
     EXPECT_EQ(
@@ -1338,6 +1365,57 @@ IN_PROC_BROWSER_TEST_F(BackgroundTracingManagerBrowserTest,
 
 #if defined(OS_ANDROID)
 // Flaky on android: https://crbug.com/639706
+#define MAYBE_ReactiveSecondUpload DISABLED_ReactiveSecondUpload
+#else
+#define MAYBE_ReactiveSecondUpload ReactiveSecondUpload
+#endif
+
+// This tests that reactive mode uploads on a second set of triggers.
+IN_PROC_BROWSER_TEST_F(BackgroundTracingManagerBrowserTest,
+                       MAYBE_ReactiveSecondUpload) {
+  {
+    SetupBackgroundTracingManager();
+
+    base::RunLoop run_loop;
+    BackgroundTracingManagerUploadConfigWrapper upload_config_wrapper(
+        run_loop.QuitClosure());
+
+    std::unique_ptr<BackgroundTracingConfig> config = CreateReactiveConfig();
+
+    BackgroundTracingManager::TriggerHandle handle =
+        BackgroundTracingManager::GetInstance()->RegisterTriggerType(
+            "reactive_test");
+
+    EXPECT_TRUE(BackgroundTracingManager::GetInstance()->SetActiveScenario(
+        std::move(config), upload_config_wrapper.get_receive_callback(),
+        BackgroundTracingManager::NO_DATA_FILTERING));
+
+    BackgroundTracingManager::GetInstance()->TriggerNamedEvent(
+        handle, base::Bind(&StartedFinalizingCallback, base::Closure(), true));
+    // second trigger to terminate.
+    BackgroundTracingManager::GetInstance()->TriggerNamedEvent(
+        handle, base::Bind(&StartedFinalizingCallback, base::Closure(), true));
+
+    run_loop.Run();
+
+    base::RunLoop second_upload_run_loop;
+    upload_config_wrapper.SetUploadCallback(
+        second_upload_run_loop.QuitClosure());
+
+    BackgroundTracingManager::GetInstance()->TriggerNamedEvent(
+        handle, base::Bind(&StartedFinalizingCallback, base::Closure(), true));
+    // second trigger to terminate.
+    BackgroundTracingManager::GetInstance()->TriggerNamedEvent(
+        handle, base::Bind(&StartedFinalizingCallback, base::Closure(), true));
+
+    second_upload_run_loop.Run();
+
+    EXPECT_TRUE(upload_config_wrapper.get_receive_count() == 2);
+  }
+}
+
+#if defined(OS_ANDROID)
+// Flaky on android: https://crbug.com/639706
 #define MAYBE_ReactiveSecondTriggerMustMatchForTermination \
         DISABLED_ReactiveSecondTriggerMustMatchForTermination
 #else
@@ -1533,6 +1611,125 @@ IN_PROC_BROWSER_TEST_F(BackgroundTracingManagerBrowserTest,
 
     EXPECT_TRUE(upload_config_wrapper.get_receive_count() == 1);
   }
+}
+
+IN_PROC_BROWSER_TEST_F(BackgroundTracingManagerBrowserTest,
+                       SetupStartupTracing) {
+  SetupBackgroundTracingManager();
+  std::unique_ptr<TestStartupPreferenceManagerImpl> preferences_moved(
+      new TestStartupPreferenceManagerImpl);
+  TestStartupPreferenceManagerImpl* preferences = preferences_moved.get();
+  BackgroundStartupTracingObserver::GetInstance()
+      ->SetPreferenceManagerForTesting(std::move(preferences_moved));
+  preferences->SetBackgroundStartupTracingEnabled(false);
+  BackgroundTracingManagerUploadConfigWrapper upload_config_wrapper(
+      (base::OnceClosure()));
+
+  base::DictionaryValue dict;
+  std::unique_ptr<base::ListValue> rules_list(new base::ListValue());
+  {
+    std::unique_ptr<base::DictionaryValue> rules_dict(
+        new base::DictionaryValue());
+    rules_dict->SetString("rule", "MONITOR_AND_DUMP_WHEN_TRIGGER_NAMED");
+    rules_dict->SetString("trigger_name", "startup-config");
+    rules_dict->SetBoolean("stop_tracing_on_repeated_reactive", false);
+    rules_dict->SetInteger("trigger_delay", 10);
+    rules_dict->SetString("category", "BENCHMARK_STARTUP");
+    rules_list->Append(std::move(rules_dict));
+  }
+  dict.Set("configs", std::move(rules_list));
+
+  std::unique_ptr<BackgroundTracingConfig> config(
+      BackgroundTracingConfigImpl::ReactiveFromDict(&dict));
+
+  base::RunLoop wait_for_tracing_enabled;
+  TestBackgroundTracingObserver observer(
+      wait_for_tracing_enabled.QuitClosure());
+  EXPECT_TRUE(BackgroundTracingManager::GetInstance()->SetActiveScenario(
+      std::move(config), upload_config_wrapper.get_receive_callback(),
+      BackgroundTracingManager::NO_DATA_FILTERING));
+
+  BackgroundTracingManager::GetInstance()->WhenIdle(
+      base::BindRepeating(&DisableScenarioWhenIdle));
+
+  base::RunLoop().RunUntilIdle();
+
+  // Since we specified a delay in the scenario, we should still be tracing
+  // at this point.
+  EXPECT_FALSE(
+      BackgroundTracingManagerImpl::GetInstance()->IsTracingForTesting());
+  EXPECT_TRUE(preferences->GetBackgroundStartupTracingEnabled());
+}
+
+IN_PROC_BROWSER_TEST_F(BackgroundTracingManagerBrowserTest, RunStartupTracing) {
+  SetupBackgroundTracingManager();
+  std::unique_ptr<TestStartupPreferenceManagerImpl> preferences_moved(
+      new TestStartupPreferenceManagerImpl);
+  TestStartupPreferenceManagerImpl* preferences = preferences_moved.get();
+  BackgroundStartupTracingObserver::GetInstance()
+      ->SetPreferenceManagerForTesting(std::move(preferences_moved));
+  preferences->SetBackgroundStartupTracingEnabled(true);
+  TraceLog::GetInstance()->SetArgumentFilterPredicate(
+      base::BindRepeating(&IsTraceEventArgsWhitelisted));
+  base::RunLoop wait_for_trace_log_enabled;
+  std::unique_ptr<TestEnabledStateObserver> trace_log_observer(
+      new TestEnabledStateObserver(wait_for_trace_log_enabled.QuitClosure()));
+
+  base::RunLoop run_loop;
+  BackgroundTracingManagerUploadConfigWrapper upload_config_wrapper(
+      run_loop.QuitClosure());
+
+  base::DictionaryValue dict;
+  std::unique_ptr<base::ListValue> rules_list(new base::ListValue());
+  {
+    std::unique_ptr<base::DictionaryValue> rules_dict(
+        new base::DictionaryValue());
+    rules_dict->SetString("rule", "MONITOR_AND_DUMP_WHEN_TRIGGER_NAMED");
+    rules_dict->SetString("trigger_name", "gpu-config");
+    rules_dict->SetBoolean("stop_tracing_on_repeated_reactive", false);
+    rules_dict->SetInteger("trigger_delay", 10);
+    rules_dict->SetString("category", "BENCHMARK_GPU");
+    rules_list->Append(std::move(rules_dict));
+  }
+  dict.Set("configs", std::move(rules_list));
+
+  std::unique_ptr<BackgroundTracingConfig> config(
+      BackgroundTracingConfigImpl::ReactiveFromDict(&dict));
+
+  base::RunLoop wait_for_tracing_enabled;
+  TestBackgroundTracingObserver observer(
+      wait_for_tracing_enabled.QuitClosure());
+  EXPECT_TRUE(BackgroundTracingManager::GetInstance()->SetActiveScenario(
+      std::move(config), upload_config_wrapper.get_receive_callback(),
+      BackgroundTracingManager::NO_DATA_FILTERING));
+
+  BackgroundTracingManager::GetInstance()->WhenIdle(
+      base::BindRepeating(&DisableScenarioWhenIdle));
+
+  wait_for_tracing_enabled.Run();
+  wait_for_trace_log_enabled.Run();
+  trace_log_observer.reset();
+
+  EXPECT_TRUE(BackgroundTracingManagerImpl::GetInstance()
+                  ->requires_anonymized_data_for_testing());
+  EXPECT_TRUE(base::trace_event::TraceLog::GetInstance()
+                  ->GetCurrentTraceConfig()
+                  .IsArgumentFilterEnabled());
+
+  // Since we specified a delay in the scenario, we should still be tracing
+  // at this point.
+  EXPECT_TRUE(
+      BackgroundTracingManagerImpl::GetInstance()->IsTracingForTesting());
+
+  BackgroundTracingManager::GetInstance()->FireTimerForTesting();
+
+  EXPECT_FALSE(
+      BackgroundTracingManagerImpl::GetInstance()->IsTracingForTesting());
+
+  run_loop.Run();
+
+  EXPECT_TRUE(upload_config_wrapper.get_receive_count() == 1);
+  EXPECT_FALSE(preferences->GetBackgroundStartupTracingEnabled());
 }
 
 }  // namespace content

@@ -12,7 +12,7 @@
 #include "base/bind_helpers.h"
 #include "base/callback_forward.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/ui/views/harmony/chrome_typography.h"
+#include "chrome/browser/ui/views/chrome_typography.h"
 #include "chrome/browser/ui/views/payments/payment_request_dialog_view.h"
 #include "chrome/browser/ui/views/payments/payment_request_dialog_view_ids.h"
 #include "chrome/browser/ui/views/payments/payment_request_row_view.h"
@@ -39,13 +39,12 @@ namespace payments {
 
 namespace {
 
-constexpr int kFirstTagValue =
-    static_cast<int>(PaymentRequestCommonTags::PAYMENT_REQUEST_COMMON_TAG_MAX);
-
 enum class PaymentMethodViewControllerTags : int {
   // The tag for the button that triggers the "add card" flow. Starts at
-  // |kFirstTagValue| not to conflict with tags common to all views.
-  ADD_CREDIT_CARD_BUTTON = kFirstTagValue,
+  // |PAYMENT_REQUEST_COMMON_TAG_MAX| not to conflict with tags common to all
+  // views.
+  ADD_CREDIT_CARD_BUTTON = static_cast<int>(
+      PaymentRequestCommonTags::PAYMENT_REQUEST_COMMON_TAG_MAX),
   // This value is passed to inner views so they can use it as a starting tag.
   MAX_TAG,
 };
@@ -104,8 +103,7 @@ class PaymentMethodListItem : public PaymentRequestItemList::Item {
     std::unique_ptr<views::ImageView> icon_view = CreateInstrumentIconView(
         instrument_->icon_resource_id(), instrument_->icon_image_skia(),
         instrument_->GetLabel());
-    icon_view->SetImageSize(gfx::Size(32, 20));
-    return std::move(icon_view);
+    return icon_view;
   }
 
   std::unique_ptr<views::View> CreateContentView(
@@ -130,8 +128,8 @@ class PaymentMethodListItem : public PaymentRequestItemList::Item {
     base::string16 missing_info;
     if (!instrument_->IsCompleteForPayment()) {
       missing_info = instrument_->GetMissingInfoLabel();
-      auto missing_info_label = std::make_unique<views::Label>(
-          missing_info, CONTEXT_DEPRECATED_SMALL);
+      auto missing_info_label =
+          std::make_unique<views::Label>(missing_info, CONTEXT_BODY_TEXT_SMALL);
       missing_info_label->SetEnabledColor(
           missing_info_label->GetNativeTheme()->GetSystemColor(
               ui::NativeTheme::kColorId_LinkEnabled));
@@ -179,7 +177,7 @@ std::unique_ptr<views::View> CreateHeaderView(const base::string16& text) {
   label->SetBorder(views::CreateEmptyBorder(
       kPaymentRequestRowVerticalInsets, kPaymentRequestRowHorizontalInsets, 0,
       kPaymentRequestRowHorizontalInsets));
-  return std::move(label);
+  return label;
 }
 
 }  // namespace

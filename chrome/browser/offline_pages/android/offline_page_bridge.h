@@ -13,6 +13,7 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/supports_user_data.h"
+#include "components/offline_items_collection/core/launch_location.h"
 #include "components/offline_pages/core/offline_page_item.h"
 #include "components/offline_pages/core/offline_page_model.h"
 
@@ -23,6 +24,9 @@ class WebContents;
 
 namespace offline_pages {
 namespace android {
+
+// This enum must be kept in sync with enums.xml - OfflinePagesPublishSource
+enum PublishSource { kPublishByOfflineId = 0, kPublishByGuid = 1, kMaxValue };
 
 /**
  * Bridge between C++ and Java for exposing native implementation of offline
@@ -166,15 +170,9 @@ class OfflinePageBridge : public OfflinePageModel::Observer,
       const base::android::JavaParamRef<jlongArray>& j_request_ids_array,
       const base::android::JavaParamRef<jobject>& j_callback_obj);
 
-  void RegisterRecentTab(JNIEnv* env,
-                         const base::android::JavaParamRef<jobject>& obj,
-                         int tab_id);
   void WillCloseTab(JNIEnv* env,
                     const base::android::JavaParamRef<jobject>& obj,
                     const base::android::JavaParamRef<jobject>& j_web_contents);
-  void UnregisterRecentTab(JNIEnv* env,
-                           const base::android::JavaParamRef<jobject>& obj,
-                           int tab_id);
   void ScheduleDownload(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj,
@@ -196,6 +194,11 @@ class OfflinePageBridge : public OfflinePageModel::Observer,
       const base::android::JavaParamRef<jobject>& obj,
       const base::android::JavaParamRef<jstring>& j_file_path);
 
+  jboolean IsUserRequestedDownloadNamespace(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj,
+      const base::android::JavaParamRef<jstring>& j_name_space);
+
   base::android::ScopedJavaLocalRef<jobject> GetOfflinePage(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj,
@@ -207,10 +210,11 @@ class OfflinePageBridge : public OfflinePageModel::Observer,
       const jlong j_timestamp_millis,
       const base::android::JavaParamRef<jobject>& j_callback_obj);
 
-  void GetLaunchUrlByOfflineId(
+  void GetLoadUrlParamsByOfflineId(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj,
       jlong j_offline_id,
+      jint launch_location,
       const base::android::JavaParamRef<jobject>& j_callback_obj);
 
   void GetLoadUrlParamsForOpeningMhtmlFileOrContent(
@@ -232,6 +236,7 @@ class OfflinePageBridge : public OfflinePageModel::Observer,
 
  private:
   void GetPageByOfflineIdDone(
+      offline_items_collection::LaunchLocation launch_location,
       const base::android::ScopedJavaGlobalRef<jobject>& j_callback_obj,
       const OfflinePageItem* offline_page);
 
@@ -253,6 +258,7 @@ class OfflinePageBridge : public OfflinePageModel::Observer,
 
   void PublishInternalArchive(
       const base::android::ScopedJavaGlobalRef<jobject>& j_callback_obj,
+      const PublishSource publish_source,
       const OfflinePageItem* offline_page);
 
   base::android::ScopedJavaGlobalRef<jobject> java_ref_;

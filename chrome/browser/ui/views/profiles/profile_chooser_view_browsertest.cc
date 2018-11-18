@@ -12,7 +12,7 @@
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/test/histogram_tester.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
@@ -23,31 +23,28 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profile_metrics.h"
 #include "chrome/browser/profiles/profiles_state.h"
+#include "chrome/browser/signin/scoped_account_consistency.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/test/test_browser_dialog.h"
 #include "chrome/browser/ui/user_manager.h"
-#include "chrome/browser/ui/views/profiles/profile_indicator_icon.h"
+#include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/profiles/user_manager_view.h"
-#include "chrome/browser/ui/views_mode_controller.h"
+#include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "components/prefs/pref_service.h"
-#include "components/signin/core/browser/scoped_account_consistency.h"
 #include "components/signin/core/browser/signin_pref_names.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/extension_registry.h"
+#include "ui/base/material_design/material_design_controller.h"
 #include "ui/events/event_utils.h"
 #include "ui/views/controls/button/label_button.h"
 #include "ui/views/controls/webview/webview.h"
-
-#if !defined(OS_MACOSX) || BUILDFLAG(MAC_VIEWS_BROWSER)
-#include "chrome/browser/ui/views/frame/browser_view.h"
-#endif
 
 namespace {
 
@@ -69,22 +66,9 @@ Profile* CreateTestingProfile(const base::FilePath& path) {
 
 Profile* CreateTestingProfile(const std::string& profile_name) {
   base::FilePath path;
-  PathService::Get(chrome::DIR_USER_DATA, &path);
+  base::PathService::Get(chrome::DIR_USER_DATA, &path);
   path = path.AppendASCII(profile_name);
   return CreateTestingProfile(path);
-}
-
-Profile* CreateProfileOutsideUserDataDir() {
-  base::ScopedAllowBlockingForTesting allow_blocking;
-  base::FilePath path;
-  if (!base::CreateNewTempDirectory(base::FilePath::StringType(), &path))
-    NOTREACHED() << "Could not create directory at " << path.MaybeAsASCII();
-
-  ProfileManager* profile_manager = g_browser_process->profile_manager();
-  Profile* profile =
-      Profile::CreateProfile(path, nullptr, Profile::CREATE_MODE_SYNCHRONOUS);
-  profile_manager->RegisterTestingProfile(profile, true, false);
-  return profile;
 }
 
 // Turns a normal profile into one that's signed in.
@@ -125,13 +109,17 @@ Profile* SetupProfilesForLock(Profile* signed_in) {
 }  // namespace
 
 class ProfileChooserViewExtensionsTest
-    : public SupportsTestDialog<ExtensionBrowserTest> {
+    : public SupportsTestDialog<extensions::ExtensionBrowserTest> {
  public:
   ProfileChooserViewExtensionsTest() {}
   ~ProfileChooserViewExtensionsTest() override {}
 
   // SupportsTestUi:
   void ShowUi(const std::string& name) override {
+    // Bubble dialogs' bounds may exceed the display's work area.
+    // https://crbug.com/893292.
+    set_should_verify_dialog_bounds(false);
+
     constexpr char kSignedIn[] = "SignedIn";
     constexpr char kMultiProfile[] = "MultiProfile";
     constexpr char kGuest[] = "Guest";
@@ -141,9 +129,6 @@ class ProfileChooserViewExtensionsTest
     constexpr char kSupervisedUser[] = "SupervisedUser";
 
     Browser* target_browser = browser();
-    std::unique_ptr<signin::ScopedAccountConsistency>
-        scoped_account_consistency;
-
     if (name == kSignedIn || name == kManageAccountLink) {
       constexpr char kEmail[] = "verylongemailfortesting@gmail.com";
       AddAccountToProfile(target_browser->profile(), kEmail);
@@ -165,11 +150,7 @@ class ProfileChooserViewExtensionsTest
       EXPECT_TRUE(guest);
       target_browser = chrome::FindAnyBrowser(guest, true);
     }
-    if (name == kManageAccountLink) {
-      scoped_account_consistency =
-          std::make_unique<signin::ScopedAccountConsistency>(
-              signin::AccountConsistencyMethod::kMirror);
-    }
+
     Profile* supervised = nullptr;
     if (name == kSupervisedOwner || name == kSupervisedUser) {
       supervised = SetupProfilesForLock(target_browser->profile());
@@ -187,19 +168,10 @@ class ProfileChooserViewExtensionsTest
  protected:
   void OpenProfileChooserView(Browser* browser) {
     ProfileChooserView::close_on_deactivate_for_testing_ = false;
-#if defined(OS_MACOSX) && BUILDFLAG(MAC_VIEWS_BROWSER)
-    if (views_mode_controller::IsViewsBrowserCocoa())
-      OpenProfileChooserCocoa(browser);
-    else
-      OpenProfileChooserViews(browser);
-#elif defined(OS_MACOSX)
-    OpenProfileChooserCocoa(browser);
-#else
     OpenProfileChooserViews(browser);
-#endif
 
     base::RunLoop().RunUntilIdle();
-    EXPECT_TRUE(ProfileChooserView::IsShowing());
+    ASSERT_TRUE(ProfileChooserView::IsShowing());
 
     // Create this observer before lock is pressed to avoid a race condition.
     window_close_observer_.reset(new content::WindowedNotificationObserver(
@@ -207,29 +179,15 @@ class ProfileChooserViewExtensionsTest
         content::Source<Browser>(browser)));
   }
 
-#if defined(OS_MACOSX)
-  void OpenProfileChooserCocoa(Browser* browser) {
-    // Show the avatar bubble via API on macOS until |mac_views_browser| is
-    // enabled.
-    browser->window()->ShowAvatarBubbleFromAvatarButton(
-        BrowserWindow::AVATAR_BUBBLE_MODE_DEFAULT,
-        signin::ManageAccountsParams(),
-        signin_metrics::AccessPoint::ACCESS_POINT_UNKNOWN, true);
-  }
-#endif
-
-#if !defined(OS_MACOSX) || BUILDFLAG(MAC_VIEWS_BROWSER)
   void OpenProfileChooserViews(Browser* browser) {
     BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser);
-    views::View* button = browser_view->frame()->GetNewAvatarMenuButton();
-    if (!button)
-      NOTREACHED() << "NewAvatarButton not found.";
+    views::View* button = browser_view->toolbar()->avatar_button();
+    DCHECK(button);
 
     ui::MouseEvent e(ui::ET_MOUSE_PRESSED, gfx::Point(), gfx::Point(),
                      ui::EventTimeForNow(), ui::EF_LEFT_MOUSE_BUTTON, 0);
     button->OnMousePressed(e);
   }
-#endif
 
   AvatarMenu* GetProfileChooserViewAvatarMenu() {
     return ProfileChooserView::profile_bubble_->avatar_menu_.get();
@@ -278,31 +236,13 @@ class ProfileChooserViewExtensionsTest
   DISALLOW_COPY_AND_ASSIGN(ProfileChooserViewExtensionsTest);
 };
 
-#if !defined(OS_MACOSX)
-#define MAYBE_NoProfileChooserOnOutsideUserDataDirProfiles \
-  NoProfileChooserOnOutsideUserDataDirProfiles
+#if defined(OS_WIN)
+#define MAYBE_SigninButtonHasFocus DISABLED_SigninButtonHasFocus
 #else
-// Test fails on macOS as |ProfileImpl::GetSSLConfigService| is not yet
-// initialized when creating the browser - see http://crbug.com/795688 .
-#define MAYBE_NoProfileChooserOnOutsideUserDataDirProfiles \
-  DISABLED_NoProfileChooserOnOutsideUserDataDirProfiles
+#define MAYBE_SigninButtonHasFocus SigninButtonHasFocus
 #endif
 IN_PROC_BROWSER_TEST_F(ProfileChooserViewExtensionsTest,
-                       MAYBE_NoProfileChooserOnOutsideUserDataDirProfiles) {
-  // Test that the profile chooser view does not show when avatar menu is not
-  // available. This can be repro'ed with a profile path outside user_data_dir.
-  // crbug.com/527505
-  Profile* new_profile = CreateProfileOutsideUserDataDir();
-  Browser* browser = CreateBrowser(new_profile);
-  browser->window()->ShowAvatarBubbleFromAvatarButton(
-      BrowserWindow::AVATAR_BUBBLE_MODE_CONFIRM_SIGNIN,
-      signin::ManageAccountsParams(),
-      signin_metrics::AccessPoint::ACCESS_POINT_AVATAR_BUBBLE_SIGN_IN, false);
-  ASSERT_FALSE(ProfileChooserView::IsShowing());
-  CloseBrowserSynchronously(browser);
-}
-
-IN_PROC_BROWSER_TEST_F(ProfileChooserViewExtensionsTest, SigninButtonHasFocus) {
+                       MAYBE_SigninButtonHasFocus) {
   ASSERT_TRUE(profiles::IsMultipleProfilesEnabled());
   ASSERT_NO_FATAL_FAILURE(OpenProfileChooserView(browser()));
 
@@ -521,7 +461,7 @@ IN_PROC_BROWSER_TEST_F(ProfileChooserViewExtensionsTest, InvokeUi_Guest) {
 // flag is enabled.
 IN_PROC_BROWSER_TEST_F(ProfileChooserViewExtensionsTest,
                        DISABLED_InvokeUi_DiceGuest) {
-  signin::ScopedAccountConsistencyDice scoped_dice;
+  ScopedAccountConsistencyDice scoped_dice;
   ShowAndVerifyUi();
 }
 
@@ -539,23 +479,28 @@ IN_PROC_BROWSER_TEST_F(ProfileChooserViewExtensionsTest,
   ShowAndVerifyUi();
 }
 
-// Crashes on Win only.  http://crbug.com/820390
-#if defined(OS_WIN)
-#define MAYBE_InvokeUi_SupervisedUser DISABLED_InvokeUi_SupervisedUser
-#else
-#define MAYBE_InvokeUi_SupervisedUser InvokeUi_SupervisedUser
-#endif
+// Crashes because account consistency changes:  http://crbug.com/820390
 // Shows the |ProfileChooserView| when a supervised user is the active profile.
 IN_PROC_BROWSER_TEST_F(ProfileChooserViewExtensionsTest,
-                       MAYBE_InvokeUi_SupervisedUser) {
+                       DISABLED_InvokeUi_SupervisedUser) {
+  ScopedAccountConsistencyDiceFixAuthErrors scoped_account_consistency;
   ShowAndVerifyUi();
 }
 
 // Open the profile chooser to increment the Dice sign-in promo show counter
 // below the threshold.
+// TODO(https://crbug.com/862573): Re-enable when no longer failing when
+// is_chrome_branded is true.
+#if defined(GOOGLE_CHROME_BUILD)
+#define MAYBE_IncrementDiceSigninPromoShowCounter \
+  DISABLED_IncrementDiceSigninPromoShowCounter
+#else
+#define MAYBE_IncrementDiceSigninPromoShowCounter \
+  IncrementDiceSigninPromoShowCounter
+#endif
 IN_PROC_BROWSER_TEST_F(ProfileChooserViewExtensionsTest,
-                       IncrementDiceSigninPromoShowCounter) {
-  signin::ScopedAccountConsistencyDice scoped_dice;
+                       MAYBE_IncrementDiceSigninPromoShowCounter) {
+  ScopedAccountConsistencyDice scoped_dice;
   browser()->profile()->GetPrefs()->SetInteger(
       prefs::kDiceSigninUserMenuPromoCount, 7);
   ASSERT_NO_FATAL_FAILURE(OpenProfileChooserView(browser()));
@@ -564,9 +509,18 @@ IN_PROC_BROWSER_TEST_F(ProfileChooserViewExtensionsTest,
 
 // The DICE sync illustration is shown only the first 10 times. This test
 // ensures that the profile chooser is shown correctly above this threshold.
+// TODO(https://crbug.com/862573): Re-enable when no longer failing when
+// is_chrome_branded is true.
+#if defined(GOOGLE_CHROME_BUILD)
+#define MAYBE_DiceSigninPromoWithoutIllustration \
+  DISABLED_DiceSigninPromoWithoutIllustration
+#else
+#define MAYBE_DiceSigninPromoWithoutIllustration \
+  DiceSigninPromoWithoutIllustration
+#endif
 IN_PROC_BROWSER_TEST_F(ProfileChooserViewExtensionsTest,
-                       DiceSigninPromoWithoutIllustration) {
-  signin::ScopedAccountConsistencyDice scoped_dice;
+                       MAYBE_DiceSigninPromoWithoutIllustration) {
+  ScopedAccountConsistencyDice scoped_dice;
   browser()->profile()->GetPrefs()->SetInteger(
       prefs::kDiceSigninUserMenuPromoCount, 10);
   ASSERT_NO_FATAL_FAILURE(OpenProfileChooserView(browser()));

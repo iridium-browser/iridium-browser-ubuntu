@@ -37,7 +37,7 @@ if (enable_nacl) {
       "//base",
       "//base:base_static",
       "//content/public/common:service_names",
-      "//mojo/edk",
+      "//mojo/core/embedder",
       "//services/service_manager/public/cpp",
     ]
   }
@@ -51,7 +51,6 @@ if (enable_nacl) {
     sources = [
       "//content/public/common/content_descriptors.h",
       "//content/public/common/content_switches.h",
-      "//content/public/common/mojo_channel_switches.h",
       "//content/public/common/process_type.h",
     ]
 

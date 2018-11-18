@@ -26,7 +26,7 @@
 #include "SkColorFilterImageFilter.h"
 #include "SkColorMatrixFilter.h"
 #include "third_party/blink/renderer/platform/graphics/filters/paint_filter_builder.h"
-#include "third_party/blink/renderer/platform/text/text_stream.h"
+#include "third_party/blink/renderer/platform/wtf/text/text_stream.h"
 
 namespace blink {
 
@@ -84,8 +84,8 @@ static void SaturateMatrix(float s, SkScalar matrix[kColorMatrixSize]) {
 }
 
 static void HueRotateMatrix(float hue, SkScalar matrix[kColorMatrixSize]) {
-  float cos_hue = cosf(hue * piFloat / 180);
-  float sin_hue = sinf(hue * piFloat / 180);
+  float cos_hue = cosf(hue * kPiFloat / 180);
+  float sin_hue = sinf(hue * kPiFloat / 180);
   matrix[0] = 0.213f + cos_hue * 0.787f - sin_hue * 0.213f;
   matrix[1] = 0.715f - cos_hue * 0.715f - sin_hue * 0.715f;
   matrix[2] = 0.072f - cos_hue * 0.072f + sin_hue * 0.928f;
@@ -161,7 +161,8 @@ sk_sp<PaintFilter> FEColorMatrix::CreateImageFilter() {
                                             &rect);
 }
 
-static TextStream& operator<<(TextStream& ts, const ColorMatrixType& type) {
+static WTF::TextStream& operator<<(WTF::TextStream& ts,
+                                   const ColorMatrixType& type) {
   switch (type) {
     case FECOLORMATRIX_TYPE_UNKNOWN:
       ts << "UNKNOWN";
@@ -199,8 +200,8 @@ static bool ValuesIsValidForType(ColorMatrixType type,
   return false;
 }
 
-TextStream& FEColorMatrix::ExternalRepresentation(TextStream& ts,
-                                                  int indent) const {
+WTF::TextStream& FEColorMatrix::ExternalRepresentation(WTF::TextStream& ts,
+                                                       int indent) const {
   WriteIndent(ts, indent);
   ts << "[feColorMatrix";
   FilterEffect::ExternalRepresentation(ts);

@@ -68,8 +68,7 @@ class PossibleBrowser(possible_app.PossibleApp):
         p for p in self._GetPathsForOsPageCacheFlushing() if p is not None]
     if (self.platform.CanFlushIndividualFilesFromSystemCache() and
         paths_to_flush):
-      for path in paths_to_flush:
-        self.platform.FlushSystemCacheForDirectory(path)
+      self.platform.FlushSystemCacheForDirectories(paths_to_flush)
     elif self.platform.SupportFlushEntireSystemCache():
       self.platform.FlushEntireSystemCache()
     else:
@@ -105,7 +104,9 @@ class PossibleBrowser(possible_app.PossibleApp):
     assert getattr(browser_options, 'IS_BROWSER_OPTIONS', False)
     self._browser_options = browser_options
 
-  def Create(self):
+  def Create(self, clear_caches=True):
+    # TODO(crbug.com/811244): The clear_caches option should be removed then
+    # this is handled by the shared state.
     raise NotImplementedError()
 
   def CleanUpEnvironment(self):

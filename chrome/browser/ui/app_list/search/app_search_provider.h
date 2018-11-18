@@ -7,9 +7,9 @@
 
 #include <memory>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
+#include "base/containers/flat_map.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/scoped_observer.h"
@@ -24,6 +24,8 @@ class Clock;
 }
 
 namespace app_list {
+
+class AppSearchResultRanker;
 
 class AppSearchProvider : public SearchProvider {
  public:
@@ -43,6 +45,7 @@ class AppSearchProvider : public SearchProvider {
 
   // SearchProvider overrides:
   void Start(const base::string16& query) override;
+  void Train(const std::string& id) override;
 
   // Refresh indexed app data and update search results. When |force_inline| is
   // set to true, search results is updated before returning from the function.
@@ -54,15 +57,17 @@ class AppSearchProvider : public SearchProvider {
   void RefreshApps();
   void UpdateResults();
   void UpdateRecommendedResults(
-      const std::unordered_map<std::string, uint16_t>& id_to_app_list_index);
+      const base::flat_map<std::string, uint16_t>& id_to_app_list_index);
   void UpdateQueriedResults();
 
+  Profile* profile_;
   AppListControllerDelegate* const list_controller_;
   base::string16 query_;
   Apps apps_;
   AppListModelUpdater* const model_updater_;
   base::Clock* clock_;
   std::vector<std::unique_ptr<DataSource>> data_sources_;
+  std::unique_ptr<AppSearchResultRanker> ranker_;
   base::WeakPtrFactory<AppSearchProvider> update_results_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(AppSearchProvider);

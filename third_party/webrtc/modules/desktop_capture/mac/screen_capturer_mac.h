@@ -14,6 +14,7 @@
 #include <CoreGraphics/CoreGraphics.h>
 
 #include <memory>
+#include <vector>
 
 #include "modules/desktop_capture/desktop_capture_options.h"
 #include "modules/desktop_capture/desktop_capturer.h"
@@ -22,9 +23,11 @@
 #include "modules/desktop_capture/desktop_region.h"
 #include "modules/desktop_capture/mac/desktop_configuration.h"
 #include "modules/desktop_capture/mac/desktop_configuration_monitor.h"
+#include "modules/desktop_capture/mac/desktop_frame_provider.h"
 #include "modules/desktop_capture/screen_capture_frame_queue.h"
 #include "modules/desktop_capture/screen_capturer_helper.h"
 #include "modules/desktop_capture/shared_desktop_frame.h"
+#include "rtc_base/thread_checker.h"
 
 namespace webrtc {
 
@@ -33,9 +36,10 @@ class DisplayStreamManager;
 // A class to perform video frame capturing for mac.
 class ScreenCapturerMac final : public DesktopCapturer {
  public:
-  explicit ScreenCapturerMac(
+  ScreenCapturerMac(
       rtc::scoped_refptr<DesktopConfigurationMonitor> desktop_config_monitor,
-      bool detect_updated_region);
+      bool detect_updated_region,
+      bool allow_iosurface);
   ~ScreenCapturerMac() override;
 
   // TODO(julien.isorce): Remove Init() or make it private.
@@ -58,9 +62,11 @@ class ScreenCapturerMac final : public DesktopCapturer {
   bool RegisterRefreshAndMoveHandlers();
   void UnregisterRefreshAndMoveHandlers();
 
-  void ScreenRefresh(CGRectCount count,
+  void ScreenRefresh(CGDirectDisplayID display_id,
+                     CGRectCount count,
                      const CGRect* rect_array,
-                     DesktopVector display_origin);
+                     DesktopVector display_origin,
+                     IOSurfaceRef io_surface);
   void ReleaseBuffers();
 
   std::unique_ptr<DesktopFrame> CreateFrame();
@@ -97,9 +103,14 @@ class ScreenCapturerMac final : public DesktopCapturer {
 
   CGWindowID excluded_window_ = 0;
 
-  // A self-owned object that will destroy itself after ScreenCapturerMac and
-  // all display streams have been destroyed..
-  DisplayStreamManager* display_stream_manager_;
+  // List of streams, one per screen.
+  std::vector<CGDisplayStreamRef> display_streams_;
+
+  // Container holding latest state of the snapshot per displays.
+  DesktopFrameProvider desktop_frame_provider_;
+
+  // Start, CaptureFrame and destructor have to called in the same thread.
+  rtc::ThreadChecker thread_checker_;
 
   RTC_DISALLOW_COPY_AND_ASSIGN(ScreenCapturerMac);
 };

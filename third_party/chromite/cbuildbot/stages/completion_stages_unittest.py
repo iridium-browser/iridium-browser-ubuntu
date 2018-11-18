@@ -29,6 +29,7 @@ from chromite.lib import cidb
 from chromite.lib import cros_logging as logging
 from chromite.lib import config_lib
 from chromite.lib import constants
+from chromite.lib import portage_util
 from chromite.lib import tree_status
 
 
@@ -41,12 +42,12 @@ class ManifestVersionedSyncCompletionStageTest(
 
   # pylint: disable=abstract-method
 
-  BOT_ID = 'x86-mario-release'
+  BOT_ID = 'eve-release'
 
 
   def testManifestVersionedSyncCompletedSuccess(self):
     """Tests basic ManifestVersionedSyncStageCompleted on success"""
-    board_runattrs = self._run.GetBoardRunAttrs('x86-mario')
+    board_runattrs = self._run.GetBoardRunAttrs('eve')
     board_runattrs.SetParallel('success', True)
     update_status_mock = self.PatchObject(
         manifest_version.BuildSpecsManager, 'UpdateStatus')
@@ -83,7 +84,7 @@ class ManifestVersionedSyncCompletionStageTest(
 
   def testGetBuilderSuccessMap(self):
     """Tests that the builder success map is properly created."""
-    board_runattrs = self._run.GetBoardRunAttrs('x86-mario')
+    board_runattrs = self._run.GetBoardRunAttrs('eve')
     board_runattrs.SetParallel('success', True)
     builder_success_map = completion_stages.GetBuilderSuccessMap(
         self._run, True)
@@ -197,7 +198,6 @@ class MasterSlaveSyncCompletionStageMockConfigTest(
 
   def testGetSlavesForMaster(self):
     """Tests that we get the slaves for a fake unified master configuration."""
-    self.maxDiff = None
     stage = self.ConstructStage()
     p = stage._GetSlaveConfigs()
     self.assertEqual([self.test_config['test3'], self.test_config['test5']], p)
@@ -385,7 +385,7 @@ class MasterSlaveSyncCompletionStageTestWithMasterPaladin(
         side_effect=logging.PrintBuildbotStepText)
 
     no_stat = set(['not_scheduled_build_1'])
-    stage._AnnotateBuildStatusFromBuildbucket(no_stat)
+    stage._AnnotateNoStatBuilders(no_stat)
     mock_logging_text.assert_called_once_with(
         '%s wasn\'t scheduled by master.' % 'not_scheduled_build_1')
 
@@ -401,7 +401,7 @@ class MasterSlaveSyncCompletionStageTestWithMasterPaladin(
                      'GetBuildRequest',
                      return_value=build_content)
     no_stat = set(['build_1'])
-    stage._AnnotateBuildStatusFromBuildbucket(no_stat)
+    stage._AnnotateNoStatBuilders(no_stat)
     mock_logging_link.assert_called_once_with(
         '%s: [status] %s [result] %s [failure_reason] %s' %
         ('build_1', 'COMPLETED', 'FAILURE', 'BUILD_FAILURE'),
@@ -420,7 +420,7 @@ class MasterSlaveSyncCompletionStageTestWithMasterPaladin(
                      'GetBuildRequest',
                      return_value=build_content)
     no_stat = set(['build_1'])
-    stage._AnnotateBuildStatusFromBuildbucket(no_stat)
+    stage._AnnotateNoStatBuilders(no_stat)
     mock_logging_link.assert_called_once_with(
         '%s: [status] %s [result] %s [cancelation_reason] %s' %
         ('build_1', 'COMPLETED', 'CANCELED', 'CANCELED_EXPLICITLY'),
@@ -432,7 +432,7 @@ class MasterSlaveSyncCompletionStageTestWithMasterPaladin(
                      'GetBuildRequest',
                      side_effect=buildbucket_lib.BuildbucketResponseException)
     no_stat = set(['build_1'])
-    stage._AnnotateBuildStatusFromBuildbucket(no_stat)
+    stage._AnnotateNoStatBuilders(no_stat)
     mock_logging_text.assert_called_once_with(
         'No status found for build %s buildbucket_id %s' %
         ('build_1', 'buildbucket_id_1'))
@@ -443,7 +443,7 @@ class MasterSlaveSyncCompletionStageTestWithMasterPaladin(
 
     annotate_mock = self.PatchObject(
         completion_stages.MasterSlaveSyncCompletionStage,
-        '_AnnotateBuildStatusFromBuildbucket')
+        '_AnnotateNoStatBuilders')
 
     no_stat = {'no_stat_1', 'no_stat_2'}
     stage._AnnotateNoStatBuilders(no_stat)
@@ -546,16 +546,6 @@ class CanaryCompletionStageTest(
     sync_stage = sync_stages.ManifestVersionedSyncStage(self._run)
     return completion_stages.CanaryCompletionStage(
         self._run, sync_stage, success=True)
-
-  def testComposeTreeStatusMessage(self):
-    """Tests that the status message is constructed as expected."""
-    failing = ['foo1', 'foo2', 'foo3', 'foo4', 'foo5']
-    inflight = ['bar']
-    no_stat = []
-    stage = self.ConstructStage()
-    self.assertEqual(
-        stage._ComposeTreeStatusMessage(failing, inflight, no_stat),
-        'bar timed out; foo1,foo2 and 3 others failed')
 
   def testGetBuilderStatusesFetcher(self):
     """Test GetBuilderStatusesFetcher."""
@@ -662,7 +652,7 @@ class BaseCommitQueueCompletionStageTest(
 # pylint: disable=too-many-ancestors
 class SlaveCommitQueueCompletionStageTest(BaseCommitQueueCompletionStageTest):
   """Tests how CQ a slave handles changes in CommitQueueCompletionStage."""
-  BOT_ID = 'x86-mario-paladin'
+  BOT_ID = 'eve-paladin'
 
   def testSuccess(self):
     """Test the slave succeeding."""
@@ -831,8 +821,15 @@ class PublishUprevChangesStageTest(
   def setUp(self):
     self.PatchObject(completion_stages.PublishUprevChangesStage,
                      '_GetPortageEnvVar')
-    self.PatchObject(completion_stages.PublishUprevChangesStage,
-                     '_ExtractOverlays', return_value=[['foo'], ['bar']])
+
+    overlays_map = {
+        constants.BOTH_OVERLAYS: ['ext', 'int'],
+        constants.PUBLIC_OVERLAYS: ['ext'],
+        constants.PRIVATE_OVERLAYS: ['int'],
+    }
+
+    self.PatchObject(portage_util, 'FindOverlays',
+                     side_effect=lambda o, buildroot: overlays_map[o])
     self.PatchObject(prebuilts.BinhostConfWriter, 'Perform')
     self.push_mock = self.PatchObject(commands, 'UprevPush')
     self.PatchObject(generic_stages.BuilderStage, 'GetRepoRepository')
@@ -852,8 +849,9 @@ class PublishUprevChangesStageTest(
                   extra_cmd_args=['--chrome_rev', constants.CHROME_REV_TOT])
     self._run.options.prebuilts = True
     self.RunStage()
-    self.push_mock.assert_called_once_with(self.build_root, ['bar'], False,
-                                           staging_branch=None)
+    self.push_mock.assert_called_once_with(
+        self.build_root, overlay_type='public', dryrun=False,
+        staging_branch=None)
     self.assertTrue(self._run.attrs.metadata.GetValue('UprevvedChrome'))
     metadata_dict = self._run.attrs.metadata.GetDict()
     self.assertFalse(metadata_dict.has_key('UprevvedAndroid'))
@@ -926,8 +924,9 @@ class PublishUprevChangesStageTest(
                                   constants.ANDROID_REV_LATEST])
     self._run.options.prebuilts = True
     self.RunStage()
-    self.push_mock.assert_called_once_with(self.build_root, ['bar'], False,
-                                           staging_branch=None)
+    self.push_mock.assert_called_once_with(
+        self.build_root, overlay_type='public', dryrun=False,
+        staging_branch=None)
     self.assertTrue(self._run.attrs.metadata.GetValue('UprevvedAndroid'))
     metadata_dict = self._run.attrs.metadata.GetDict()
     self.assertFalse(metadata_dict.has_key('UprevvedChrome'))
@@ -937,8 +936,9 @@ class PublishUprevChangesStageTest(
     stage = self.ConstructStage()
     stage.sync_stage.pool.HasPickedUpCLs.return_value = True
     stage.PerformStage()
-    self.push_mock.assert_called_once_with(self.build_root, ['bar'], False,
-                                           staging_branch=None)
+    self.push_mock.assert_called_once_with(
+        self.build_root, overlay_type='both', dryrun=False,
+        staging_branch=None)
 
   def testPerformStageOnCQMasterWithPickedUpCLs(self):
     """Test PerformStage on CQ-master with picked up CLs."""
@@ -946,8 +946,9 @@ class PublishUprevChangesStageTest(
     stage = self.ConstructStage()
     stage.sync_stage.pool.HasPickedUpCLs.return_value = True
     stage.PerformStage()
-    self.push_mock.assert_called_once_with(self.build_root, ['bar'], False,
-                                           staging_branch=None)
+    self.push_mock.assert_called_once_with(
+        self.build_root, overlay_type='both', dryrun=False,
+        staging_branch=None)
 
   def testPerformStageOnCQMasterWithoutPickedUpCLs(self):
     """Test PerformStage on CQ-master without picked up CLs."""

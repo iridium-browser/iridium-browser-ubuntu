@@ -12,11 +12,13 @@
 #import <UIKit/UIKit.h>
 #include <cmath>
 
+#include "base/ios/ios_util.h"
 #include "base/logging.h"
 #include "base/mac/foundation_util.h"
 #include "base/numerics/math_constants.h"
 #include "ios/chrome/browser/experimental_flags.h"
 #include "ios/chrome/browser/ui/rtl_geometry.h"
+#include "ios/chrome/browser/ui/ui_feature_flags.h"
 #include "ios/chrome/browser/ui/ui_util.h"
 #include "ios/web/public/web_thread.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -559,9 +561,20 @@ bool IsRegularXRegularSizeClass() {
 }
 
 bool IsRegularXRegularSizeClass(id<UITraitEnvironment> environment) {
-  UITraitCollection* traitCollection = environment.traitCollection;
+  return IsRegularXRegularSizeClass(environment.traitCollection);
+}
+
+bool IsRegularXRegularSizeClass(UITraitCollection* traitCollection) {
   return traitCollection.verticalSizeClass == UIUserInterfaceSizeClassRegular &&
          traitCollection.horizontalSizeClass == UIUserInterfaceSizeClassRegular;
+}
+
+bool ShouldShowCompactToolbar(UITraitCollection* traitCollection) {
+  return !IsRegularXRegularSizeClass(traitCollection);
+}
+
+bool ShouldShowCompactToolbar() {
+  return !IsRegularXRegularSizeClass();
 }
 
 bool IsSplitToolbarMode() {
@@ -569,19 +582,37 @@ bool IsSplitToolbarMode() {
 }
 
 bool IsSplitToolbarMode(id<UITraitEnvironment> environment) {
-  return IsUIRefreshPhase1Enabled() && IsCompactWidth(environment) &&
-         !IsCompactHeight(environment);
+  return IsCompactWidth(environment) && !IsCompactHeight(environment);
 }
 
-// Returns the current first responder.
+// Returns the first responder in the subviews of |view|, or nil if no view in
+// the subtree is the first responder.
+UIView* GetFirstResponderSubview(UIView* view) {
+  if ([view isFirstResponder])
+    return view;
+
+  for (UIView* subview in [view subviews]) {
+    UIView* firstResponder = GetFirstResponderSubview(subview);
+    if (firstResponder)
+      return firstResponder;
+  }
+
+  return nil;
+}
+
 UIResponder* GetFirstResponder() {
+  UIApplication* application = [UIApplication sharedApplication];
+  if (base::ios::IsRunningOnIOS11OrLater() &&
+      base::FeatureList::IsEnabled(kFirstResponderKeyWindow)) {
+    return GetFirstResponderSubview(application.keyWindow);
+  }
+
   DCHECK_CURRENTLY_ON(web::WebThread::UI);
   DCHECK(!gFirstResponder);
-  [[UIApplication sharedApplication]
-      sendAction:@selector(cr_markSelfCurrentFirstResponder)
-              to:nil
-            from:nil
-        forEvent:nil];
+  [application sendAction:@selector(cr_markSelfCurrentFirstResponder)
+                       to:nil
+                     from:nil
+                 forEvent:nil];
   UIResponder* firstResponder = gFirstResponder;
   gFirstResponder = nil;
   return firstResponder;
@@ -589,7 +620,7 @@ UIResponder* GetFirstResponder() {
 
 // Trigger a haptic vibration for the user selecting an action. This is a no-op
 // for devices that do not support it.
-void TriggerHapticFeedbackForAction() {
+void TriggerHapticFeedbackForImpact(UIImpactFeedbackStyle impactStyle) {
   // Although Apple documentation claims that UIFeedbackGenerator and its
   // concrete subclasses are available on iOS 10+, they are not really
   // available on an app whose deployment target is iOS 10.0 (iOS 10.1+ are
@@ -598,7 +629,8 @@ void TriggerHapticFeedbackForAction() {
   // using it.
   Class generatorClass = NSClassFromString(@"UIImpactFeedbackGenerator");
   if (generatorClass) {
-    UIImpactFeedbackGenerator* generator = [[generatorClass alloc] init];
+    UIImpactFeedbackGenerator* generator =
+        [[generatorClass alloc] initWithStyle:impactStyle];
     [generator impactOccurred];
   }
 }
@@ -640,5 +672,28 @@ UIEdgeInsets SafeAreaInsetsForView(UIView* view) {
     return view.safeAreaInsets;
   } else {
     return UIEdgeInsetsZero;
+  }
+}
+
+NSString* TextForTabCount(long count) {
+  if (count <= 0)
+    return @"";
+  if (count > 99)
+    return @":)";
+  return [NSString stringWithFormat:@"%ld", count];
+}
+
+BOOL ContentSizeCategoryIsAccessibilityCategory(
+    UIContentSizeCategory category) {
+  if (@available(iOS 11.0, *)) {
+    return UIContentSizeCategoryIsAccessibilityCategory(category);
+  } else {
+    return
+        [category
+            isEqual:UIContentSizeCategoryAccessibilityExtraExtraExtraLarge] ||
+        [category isEqual:UIContentSizeCategoryAccessibilityExtraExtraLarge] ||
+        [category isEqual:UIContentSizeCategoryAccessibilityExtraLarge] ||
+        [category isEqual:UIContentSizeCategoryAccessibilityLarge] ||
+        [category isEqual:UIContentSizeCategoryAccessibilityMedium];
   }
 }

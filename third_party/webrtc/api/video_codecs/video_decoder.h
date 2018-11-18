@@ -15,14 +15,12 @@
 #include <string>
 #include <vector>
 
+#include "api/video/encoded_image.h"
 #include "api/video/video_frame.h"
-#include "common_types.h"  // NOLINT(build/include)
-#include "common_video/include/video_frame.h"
-#include "typedefs.h"  // NOLINT(build/include)
+#include "api/video_codecs/video_codec.h"
 
 namespace webrtc {
 
-class RTPFragmentationHeader;
 // TODO(pbos): Expose these through a public (root) header or change these APIs.
 struct CodecSpecificInfo;
 class VideoCodec;
@@ -41,8 +39,8 @@ class DecodedImageCallback {
   // TODO(sakal): Remove other implementations when upstream projects have been
   // updated.
   virtual void Decoded(VideoFrame& decodedImage,
-                       rtc::Optional<int32_t> decode_time_ms,
-                       rtc::Optional<uint8_t> qp);
+                       absl::optional<int32_t> decode_time_ms,
+                       absl::optional<uint8_t> qp);
 
   virtual int32_t ReceivedDecodedReferenceFrame(const uint64_t pictureId);
 
@@ -58,9 +56,8 @@ class VideoDecoder {
 
   virtual int32_t Decode(const EncodedImage& input_image,
                          bool missing_frames,
-                         const RTPFragmentationHeader* fragmentation,
-                         const CodecSpecificInfo* codec_specific_info = NULL,
-                         int64_t render_time_ms = -1) = 0;
+                         const CodecSpecificInfo* codec_specific_info,
+                         int64_t render_time_ms) = 0;
 
   virtual int32_t RegisterDecodeCompleteCallback(
       DecodedImageCallback* callback) = 0;

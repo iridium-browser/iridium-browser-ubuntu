@@ -9,6 +9,8 @@
 
 goog.provide('cvox.OptionsPage');
 
+goog.require('ConsoleTts');
+goog.require('EventStreamLogger');
 goog.require('Msgs');
 goog.require('PanelCommand');
 goog.require('cvox.BrailleTable');
@@ -35,12 +37,20 @@ cvox.OptionsPage = function() {};
 cvox.OptionsPage.prefs;
 
 /**
+ * The ChromeVoxConsoleTts object.
+ * @type {ConsoleTts}
+ */
+cvox.OptionsPage.consoleTts;
+
+/**
  * Initialize the options page by setting the current value of all prefs, and
  * adding event listeners.
  * @suppress {missingProperties} Property prefs never defined on Window
  */
 cvox.OptionsPage.init = function() {
   cvox.OptionsPage.prefs = chrome.extension.getBackgroundPage().prefs;
+  cvox.OptionsPage.consoleTts =
+      chrome.extension.getBackgroundPage().ConsoleTts.getInstance();
   cvox.OptionsPage.populateVoicesSelect();
   cvox.BrailleTable.getAll(function(tables) {
     /** @type {!Array<cvox.BrailleTable.Table>} */
@@ -74,6 +84,12 @@ cvox.OptionsPage.init = function() {
       currentlyDisplayingSideBySide :
       currentlyDisplayingInterleave;
 
+  var showEventStreamFilters = Msgs.getMsg('options_show_event_stream_filters');
+  var hideEventStreamFilters = Msgs.getMsg('options_hide_event_stream_filters');
+  $('toggleEventStreamFilters').textContent = showEventStreamFilters;
+  cvox.OptionsPage.disableEventStreamFilterCheckBoxes(
+      localStorage['enableEventStreamLogging'] == 'false');
+
   chrome.commandLinePrivate.hasSwitch('enable-audio-focus', function(result) {
     if (!result) {
       $('audioStrategy').hidden = true;
@@ -88,6 +104,31 @@ cvox.OptionsPage.init = function() {
     }
   });
 
+  var registerEventStreamFiltersListener = function() {
+    $('toggleEventStreamFilters').addEventListener('click', function(evt) {
+      if ($('eventStreamFilters').hidden) {
+        $('eventStreamFilters').hidden = false;
+        $('toggleEventStreamFilters').textContent = hideEventStreamFilters;
+      } else {
+        $('eventStreamFilters').hidden = true;
+        $('toggleEventStreamFilters').textContent = showEventStreamFilters;
+      }
+    });
+  };
+
+  chrome.commandLinePrivate.hasSwitch(
+      'enable-chromevox-developer-option', function(enable) {
+        if (!enable) {
+          $('developerDescription').hidden = true;
+          $('developerSpeechLogging').hidden = true;
+          $('developerEarconLogging').hidden = true;
+          $('developerBrailleLogging').hidden = true;
+          $('developerEventStream').hidden = true;
+          return;
+        }
+        registerEventStreamFiltersListener();
+      });
+
   Msgs.addTranslatedMessagesToDom(document);
   cvox.OptionsPage.hidePlatformSpecifics();
 
@@ -96,6 +137,13 @@ cvox.OptionsPage.init = function() {
   document.addEventListener('change', cvox.OptionsPage.eventListener, false);
   document.addEventListener('click', cvox.OptionsPage.eventListener, false);
   document.addEventListener('keydown', cvox.OptionsPage.eventListener, false);
+
+  window.addEventListener('storage', (event) => {
+    if (event.key == 'speakTextUnderMouse') {
+      chrome.accessibilityPrivate.enableChromeVoxMouseEvents(
+          event.newValue == String(true));
+    }
+  });
 
   cvox.ExtensionBridge.addMessageListener(function(message) {
     if (message['prefs']) {
@@ -153,6 +201,7 @@ cvox.OptionsPage.update = function() {
     }
   }
 };
+
 /**
  * Adds event listeners to input boxes to update local storage values and
  * make sure that the input is a positive nonempty number between 1 and 99.
@@ -190,8 +239,17 @@ cvox.OptionsPage.populateVoicesSelect = function() {
   var select = $('voices');
 
   function setVoiceList() {
-    var selectedVoiceName =
+    var selectedVoice =
         chrome.extension.getBackgroundPage()['getCurrentVoice']();
+    let addVoiceOption = (visibleVoiceName, voiceName) => {
+      let option = document.createElement('option');
+      option.voiceName = voiceName;
+      option.innerText = visibleVoiceName;
+      if (selectedVoice === voiceName) {
+        option.setAttribute('selected', '');
+      }
+      select.add(option);
+    };
     chrome.tts.getVoices(function(voices) {
       select.innerHTML = '';
       // TODO(plundblad): voiceName can actually be omitted in the TTS engine.
@@ -202,14 +260,11 @@ cvox.OptionsPage.populateVoicesSelect = function() {
       voices.sort(function(a, b) {
         return a.voiceName.localeCompare(b.voiceName);
       });
-      voices.forEach(function(voice) {
-        var option = document.createElement('option');
-        option.voiceName = voice.voiceName;
-        option.innerText = option.voiceName;
-        if (selectedVoiceName === voice.voiceName) {
-          option.setAttribute('selected', '');
-        }
-        select.add(option);
+      addVoiceOption(
+          chrome.i18n.getMessage('chromevox_system_voice'),
+          constants.SYSTEM_VOICE);
+      voices.forEach((voice) => {
+        addVoiceOption(voice.voiceName, voice.voiceName);
       });
     });
   }
@@ -325,6 +380,17 @@ cvox.OptionsPage.setValue = function(element, value) {
 };
 
 /**
+ * Disable event stream logging filter check boxes.
+ * Check boxes should be disabled when event stream logging is disabled.
+ * @param {boolean} disable
+ */
+cvox.OptionsPage.disableEventStreamFilterCheckBoxes = function(disable) {
+  var filters = document.querySelectorAll('.option-eventstream > input');
+  for (var i = 0; i < filters.length; i++)
+    filters[i].disabled = disable;
+};
+
+/**
  * Event listener, called when an event occurs in the page that might
  * affect one of the preference controls.
  * @param {Event} event The event.
@@ -335,6 +401,15 @@ cvox.OptionsPage.eventListener = function(event) {
     var target = event.target;
     if (target.id == 'brailleWordWrap') {
       chrome.storage.local.set({brailleWordWrap: target.checked});
+    } else if (target.className.indexOf('logging') != -1) {
+      cvox.OptionsPage.prefs.setLoggingPrefs(target.name, target.checked);
+      if (target.name == 'enableEventStreamLogging')
+        cvox.OptionsPage.disableEventStreamFilterCheckBoxes(!target.checked);
+    } else if (target.className.indexOf('eventstream') != -1) {
+      cvox.OptionsPage.prefs.setPref(target.name, target.checked);
+      chrome.extension.getBackgroundPage()
+          .EventStreamLogger.instance.notifyEventStreamFilterChanged(
+              target.name, target.checked);
     } else if (target.classList.contains('pref')) {
       if (target.tagName == 'INPUT' && target.type == 'checkbox') {
         cvox.OptionsPage.prefs.setPref(target.name, target.checked);

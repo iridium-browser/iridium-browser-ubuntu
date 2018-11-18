@@ -58,16 +58,16 @@ class OpenFileOperation {
   void OpenFile(const base::FilePath& file_path,
                 OpenMode open_mode,
                 const std::string& mime_type,
-                const OpenFileCallback& callback);
+                OpenFileCallback callback);
 
  private:
   // Part of OpenFile(). Called after file creation is completed.
   void OpenFileAfterCreateFile(const base::FilePath& file_path,
-                               const OpenFileCallback& callback,
+                               OpenFileCallback callback,
                                FileError error);
 
   // Part of OpenFile(). Called after file downloading is completed.
-  void OpenFileAfterFileDownloaded(const OpenFileCallback& callback,
+  void OpenFileAfterFileDownloaded(OpenFileCallback callback,
                                    FileError error,
                                    const base::FilePath& local_file_path,
                                    std::unique_ptr<ResourceEntry> entry);
@@ -76,7 +76,7 @@ class OpenFileOperation {
   void OpenFileAfterOpenForWrite(
       const base::FilePath& local_file_path,
       const std::string& local_id,
-      const OpenFileCallback& callback,
+      OpenFileCallback callback,
       std::unique_ptr<base::ScopedClosureRunner>* file_closer,
       FileError error);
 
@@ -95,7 +95,7 @@ class OpenFileOperation {
   // the file is opened.
   std::map<std::string, int> open_files_;
 
-  base::ThreadChecker thread_checker_;
+  THREAD_CHECKER(thread_checker_);
 
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate its weak pointers before any other members are destroyed.

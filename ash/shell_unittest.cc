@@ -10,9 +10,10 @@
 
 #include "ash/display/mouse_cursor_event_filter.h"
 #include "ash/drag_drop/drag_drop_controller.h"
-#include "ash/public/cpp/config.h"
+#include "ash/drag_drop/drag_drop_controller_test_api.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/root_window_controller.h"
+#include "ash/scoped_root_window_for_new_windows.h"
 #include "ash/session/session_controller.h"
 #include "ash/session/test_session_controller_client.h"
 #include "ash/shelf/shelf.h"
@@ -23,18 +24,22 @@
 #include "ash/test/ash_test_helper.h"
 #include "ash/test_shell_delegate.h"
 #include "ash/wallpaper/wallpaper_widget_controller.h"
+#include "ash/window_factory.h"
 #include "ash/wm/window_util.h"
 #include "base/command_line.h"
 #include "base/macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "components/account_id/account_id.h"
 #include "components/prefs/testing_pref_service.h"
-#include "components/signin/core/account_id/account_id.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/env.h"
+#include "ui/aura/test/mus/test_window_tree_client_delegate.h"
+#include "ui/aura/test/mus/test_window_tree_client_setup.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/base/models/simple_menu_model.h"
+#include "ui/base/ui_base_features.h"
 #include "ui/events/test/event_generator.h"
 #include "ui/events/test/events_test_utils.h"
 #include "ui/events/test/test_event_handler.h"
@@ -79,7 +84,6 @@ void ExpectAllContainers() {
       Shell::GetContainer(root_window, kShellWindowId_DefaultContainer));
   EXPECT_TRUE(
       Shell::GetContainer(root_window, kShellWindowId_AlwaysOnTopContainer));
-  EXPECT_TRUE(Shell::GetContainer(root_window, kShellWindowId_PanelContainer));
   EXPECT_TRUE(Shell::GetContainer(root_window, kShellWindowId_ShelfContainer));
   EXPECT_TRUE(
       Shell::GetContainer(root_window, kShellWindowId_SystemModalContainer));
@@ -125,6 +129,20 @@ class ModalWindow : public views::WidgetDelegateView {
   DISALLOW_COPY_AND_ASSIGN(ModalWindow);
 };
 
+class WindowWithPreferredSize : public views::WidgetDelegateView {
+ public:
+  WindowWithPreferredSize() = default;
+  ~WindowWithPreferredSize() override = default;
+
+  // views::WidgetDelegate:
+  gfx::Size CalculatePreferredSize() const override {
+    return gfx::Size(400, 300);
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(WindowWithPreferredSize);
+};
+
 class SimpleMenuDelegate : public ui::SimpleMenuModel::Delegate {
  public:
   SimpleMenuDelegate() = default;
@@ -163,6 +181,7 @@ class ShellTest : public AshTestBase {
   // TODO(jamescook): Convert to AshTestBase::CreateTestWidget().
   views::Widget* CreateTestWindow(views::Widget::InitParams params) {
     views::Widget* widget = new views::Widget;
+    params.context = CurrentContext();
     widget->Init(params);
     return widget;
   }
@@ -231,6 +250,29 @@ TEST_F(ShellTest, CreateWindow) {
   TestCreateWindow(views::Widget::InitParams::TYPE_POPUP,
                    true,  // always_on_top
                    GetAlwaysOnTopContainer());
+}
+
+// Verifies that a window with a preferred size is created centered on the
+// default display for new windows. Mojo apps like shortcut_viewer rely on this
+// behavior.
+TEST_F(ShellTest, CreateWindowWithPreferredSize) {
+  UpdateDisplay("1024x768,800x600");
+
+  aura::Window* secondary_root = Shell::GetAllRootWindows()[1];
+  ScopedRootWindowForNewWindows scoped_root(secondary_root);
+
+  views::Widget::InitParams params;
+  params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+  // Don't specify bounds, parent or context.
+  params.delegate = new WindowWithPreferredSize;
+  views::Widget widget;
+  params.context = CurrentContext();
+  widget.Init(params);
+
+  // Widget is centered on secondary display.
+  EXPECT_EQ(secondary_root, widget.GetNativeWindow()->GetRootWindow());
+  EXPECT_EQ(GetSecondaryDisplay().work_area().CenterPoint(),
+            widget.GetRestoredBounds().CenterPoint());
 }
 
 TEST_F(ShellTest, ChangeAlwaysOnTop) {
@@ -459,7 +501,7 @@ TEST_F(ShellTest, FullscreenWindowHidesShelf) {
 // Various assertions around auto-hide behavior.
 // TODO(jamescook): Move this to ShelfTest.
 TEST_F(ShellTest, ToggleAutoHide) {
-  std::unique_ptr<aura::Window> window(new aura::Window(NULL));
+  std::unique_ptr<aura::Window> window = window_factory::NewWindow();
   window->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_NORMAL);
   window->SetType(aura::client::WINDOW_TYPE_NORMAL);
   window->Init(ui::LAYER_TEXTURED);
@@ -504,26 +546,27 @@ TEST_F(ShellTest, TestPreTargetHandlerOrder) {
 // Verifies an EventHandler added to Env gets notified from EventGenerator.
 TEST_F(ShellTest, EnvPreTargetHandler) {
   ui::test::TestEventHandler event_handler;
-  aura::Env::GetInstance()->AddPreTargetHandler(&event_handler);
+  Shell::Get()->aura_env()->AddPreTargetHandler(&event_handler);
   ui::test::EventGenerator generator(Shell::GetPrimaryRootWindow());
   generator.MoveMouseBy(1, 1);
   EXPECT_NE(0, event_handler.num_mouse_events());
-  aura::Env::GetInstance()->RemovePreTargetHandler(&event_handler);
+  Shell::Get()->aura_env()->RemovePreTargetHandler(&event_handler);
 }
 
-// Verifies keyboard is re-created on proper timing.
+// Verifies keyboard is re-enabled on proper timing.
 TEST_F(ShellTest, KeyboardCreation) {
   base::CommandLine::ForCurrentProcess()->AppendSwitch(
       keyboard::switches::kEnableVirtualKeyboard);
 
   ASSERT_TRUE(keyboard::IsKeyboardEnabled());
 
-  SessionObserver* shell = Shell::Get();
-  EXPECT_FALSE(keyboard::KeyboardController::GetInstance());
-  shell->OnSessionStateChanged(
-      session_manager::SessionState::LOGGED_IN_NOT_ACTIVE);
+  EXPECT_FALSE(keyboard::KeyboardController::Get()->IsEnabled());
 
-  EXPECT_TRUE(keyboard::KeyboardController::GetInstance());
+  mojom::SessionInfoPtr info = mojom::SessionInfo::New();
+  info->state = session_manager::SessionState::LOGGED_IN_NOT_ACTIVE;
+  ash::Shell::Get()->session_controller()->SetSessionInfo(std::move(info));
+
+  EXPECT_TRUE(keyboard::KeyboardController::Get()->IsEnabled());
 }
 
 // This verifies WindowObservers are removed when a window is destroyed after
@@ -546,7 +589,69 @@ class ShellTest2 : public AshTestBase {
 };
 
 TEST_F(ShellTest2, DontCrashWhenWindowDeleted) {
-  window_.reset(new aura::Window(NULL));
+  // DontCrashWhenWindowDeletedSingleProcess covers the SingleProcessMash case.
+  if (::features::IsSingleProcessMash())
+    return;
+
+  // This test explicitly uses aura::Env::GetInstance() rather than
+  // Shell->aura_env() as the Window outlives the Shell. In order for a Window
+  // to outlive Shell the Window must be created outside of Ash, which uses
+  // aura::Env::GetInstance() as the Env.
+  window_ = std::make_unique<aura::Window>(
+      nullptr, aura::client::WINDOW_TYPE_UNKNOWN, aura::Env::GetInstance());
+  window_->Init(ui::LAYER_NOT_DRAWN);
+}
+
+// This verifies WindowObservers are removed when a window is destroyed after
+// the Shell is destroyed. This scenario (aura::Windows being deleted after the
+// Shell) occurs if someone is holding a reference to an unparented Window, as
+// is the case with a RenderWidgetHostViewAura that isn't on screen. As long as
+// everything is ok, we won't crash. If there is a bug, window's destructor will
+// notify some deleted object (say VideoDetector or ActivationController) and
+// this will crash.
+class ShellTest3 : public AshTestBase {
+ public:
+  ShellTest3() = default;
+  ~ShellTest3() override = default;
+
+  void SetUp() override {
+    AshTestBase::SetUp();
+    if (!::features::IsSingleProcessMash())
+      return;
+    window_service_setup_ = std::make_unique<aura::TestWindowTreeClientSetup>();
+    window_service_setup_->InitWithoutEmbed(&test_window_tree_client_delegate_);
+    aura::Env::GetInstance()->SetWindowTreeClient(
+        window_service_setup_->window_tree_client());
+  }
+
+  void TearDown() override {
+    AshTestBase::TearDown();
+    if (!::features::IsSingleProcessMash())
+      return;
+    window_.reset();
+    window_service_setup_.reset();
+    aura::Env::GetInstance()->SetWindowTreeClient(nullptr);
+  }
+
+ protected:
+  std::unique_ptr<aura::Window> window_;
+
+ private:
+  aura::TestWindowTreeClientDelegate test_window_tree_client_delegate_;
+  std::unique_ptr<aura::TestWindowTreeClientSetup> window_service_setup_;
+
+  DISALLOW_COPY_AND_ASSIGN(ShellTest3);
+};
+
+TEST_F(ShellTest3, DontCrashWhenWindowDeletedSingleProcess) {
+  if (!::features::IsSingleProcessMash())
+    return;
+  // This test explicitly uses aura::Env::GetInstance() rather than
+  // Shell->aura_env() as the Window outlives the Shell. In order for a Window
+  // to outlive Shell the Window must be created outside of Ash, which uses
+  // aura::Env::GetInstance() as the Env.
+  window_ = std::make_unique<aura::Window>(
+      nullptr, aura::client::WINDOW_TYPE_UNKNOWN, aura::Env::GetInstance());
   window_->Init(ui::LAYER_NOT_DRAWN);
 }
 
@@ -563,13 +668,25 @@ TEST_F(ShellLocalStateTest, LocalState) {
   // Prefs service wrapper code creates a PrefService.
   std::unique_ptr<TestingPrefServiceSimple> local_state =
       std::make_unique<TestingPrefServiceSimple>();
-  Shell::RegisterLocalStatePrefs(local_state->registry());
+  Shell::RegisterLocalStatePrefs(local_state->registry(), true);
   TestingPrefServiceSimple* local_state_ptr = local_state.get();
   ShellTestApi().OnLocalStatePrefServiceInitialized(std::move(local_state));
   EXPECT_EQ(local_state_ptr, observer.last_local_state_);
   EXPECT_EQ(local_state_ptr, ash_test_helper()->GetLocalStatePrefService());
 
   Shell::Get()->RemoveShellObserver(&observer);
+}
+
+using ShellLoginTest = NoSessionAshTestBase;
+
+TEST_F(ShellLoginTest, DragAndDropDisabledBeforeLogin) {
+  DragDropController* drag_drop_controller =
+      ShellTestApi(Shell::Get()).drag_drop_controller();
+  DragDropControllerTestApi drag_drop_controller_test_api(drag_drop_controller);
+  EXPECT_FALSE(drag_drop_controller_test_api.enabled());
+
+  SimulateUserLogin("user1@test.com");
+  EXPECT_TRUE(drag_drop_controller_test_api.enabled());
 }
 
 }  // namespace ash

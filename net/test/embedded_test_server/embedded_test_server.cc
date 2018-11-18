@@ -12,6 +12,7 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
+#include "base/message_loop/message_loop_current.h"
 #include "base/path_service.h"
 #include "base/process/process_metrics.h"
 #include "base/run_loop.h"
@@ -29,6 +30,7 @@
 #include "net/socket/ssl_server_socket.h"
 #include "net/socket/stream_socket.h"
 #include "net/socket/tcp_server_socket.h"
+#include "net/ssl/ssl_info.h"
 #include "net/ssl/ssl_server_config.h"
 #include "net/test/cert_test_util.h"
 #include "net/test/embedded_test_server/default_handlers.h"
@@ -66,14 +68,14 @@ EmbeddedTestServer::~EmbeddedTestServer() {
 
   {
     // Thread::Join induced by test code should cause an assert.
-    base::ThreadRestrictions::ScopedAllowIO allow_io_for_thread_join;
+    base::ScopedAllowBlockingForTesting allow_blocking;
 
     io_thread_.reset();
   }
 }
 
 void EmbeddedTestServer::RegisterTestCerts() {
-  base::ThreadRestrictions::ScopedAllowIO allow_io_for_importing_test_cert;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   TestRootCerts* root_certs = TestRootCerts::GetInstance();
   bool added_root_certs = root_certs->AddFromFile(GetRootCertPemPath());
   DCHECK(added_root_certs)
@@ -82,19 +84,20 @@ void EmbeddedTestServer::RegisterTestCerts() {
 
 void EmbeddedTestServer::SetConnectionListener(
     EmbeddedTestServerConnectionListener* listener) {
-  DCHECK(!io_thread_.get());
+  DCHECK(!io_thread_.get())
+      << "ConnectionListener must be set before starting the server.";
   connection_listener_ = listener;
 }
 
-bool EmbeddedTestServer::Start() {
-  bool success = InitializeAndListen();
+bool EmbeddedTestServer::Start(int port) {
+  bool success = InitializeAndListen(port);
   if (!success)
     return false;
   StartAcceptingConnections();
   return true;
 }
 
-bool EmbeddedTestServer::InitializeAndListen() {
+bool EmbeddedTestServer::InitializeAndListen(int port) {
   DCHECK(!Started());
 
   const int max_tries = 5;
@@ -111,7 +114,8 @@ bool EmbeddedTestServer::InitializeAndListen() {
 
     listen_socket_.reset(new TCPServerSocket(nullptr, NetLogSource()));
 
-    int result = listen_socket_->ListenWithAddressAndPort("127.0.0.1", 0, 10);
+    int result =
+        listen_socket_->ListenWithAddressAndPort("127.0.0.1", port, 10);
     if (result) {
       LOG(ERROR) << "Listen failed: " << ErrorToString(result);
       listen_socket_.reset();
@@ -148,7 +152,7 @@ bool EmbeddedTestServer::InitializeAndListen() {
 }
 
 void EmbeddedTestServer::InitializeSSLServerContext() {
-  base::ThreadRestrictions::ScopedAllowIO allow_io_for_ssl_initialization;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   base::FilePath certs_dir(GetTestCertsDirectory());
   std::string cert_name = GetCertificateName();
 
@@ -169,7 +173,8 @@ void EmbeddedTestServer::InitializeSSLServerContext() {
 }
 
 void EmbeddedTestServer::StartAcceptingConnections() {
-  DCHECK(!io_thread_.get());
+  DCHECK(!io_thread_.get())
+      << "Server must not be started while server is running";
   base::Thread::Options thread_options;
   thread_options.message_loop_type = base::MessageLoop::TYPE_IO;
   io_thread_.reset(new base::Thread("EmbeddedTestServer IO Thread"));
@@ -204,6 +209,12 @@ void EmbeddedTestServer::HandleRequest(HttpConnection* connection,
                                        std::unique_ptr<HttpRequest> request) {
   DCHECK(io_thread_->task_runner()->BelongsToCurrentThread());
   request->base_url = base_url_;
+
+  SSLInfo ssl_info;
+  if (connection->socket_->GetSSLInfo(&ssl_info) &&
+      ssl_info.early_data_received) {
+    request->headers["Early-Data"] = "1";
+  }
 
   for (const auto& monitor : request_monitors_)
     monitor.Run(*request);
@@ -255,16 +266,32 @@ GURL EmbeddedTestServer::GetURL(
   return local_url.ReplaceComponents(replace_host);
 }
 
-bool EmbeddedTestServer::GetAddressList(AddressList* address_list) const {
-  *address_list = AddressList(local_endpoint_);
-  return true;
-}
-
 void EmbeddedTestServer::SetSSLConfig(ServerCertificate cert,
                                       const SSLServerConfig& ssl_config) {
   DCHECK(!Started());
   cert_ = cert;
   ssl_config_ = ssl_config;
+}
+
+bool EmbeddedTestServer::GetAddressList(AddressList* address_list) const {
+  *address_list = AddressList(local_endpoint_);
+  return true;
+}
+
+void EmbeddedTestServer::ResetSSLConfigOnIOThread(
+    ServerCertificate cert,
+    const SSLServerConfig& ssl_config) {
+  cert_ = cert;
+  ssl_config_ = ssl_config;
+  connections_.clear();
+  InitializeSSLServerContext();
+}
+
+bool EmbeddedTestServer::ResetSSLConfig(ServerCertificate cert,
+                                        const SSLServerConfig& ssl_config) {
+  return PostTaskToIOThreadAndWait(
+      base::BindRepeating(&EmbeddedTestServer::ResetSSLConfigOnIOThread,
+                          base::Unretained(this), cert, ssl_config));
 }
 
 void EmbeddedTestServer::SetSSLConfig(ServerCertificate cert) {
@@ -294,32 +321,32 @@ scoped_refptr<X509Certificate> EmbeddedTestServer::GetCertificate() const {
   DCHECK(is_using_ssl_);
   base::FilePath certs_dir(GetTestCertsDirectory());
 
-  base::ThreadRestrictions::ScopedAllowIO allow_io_for_importing_test_cert;
+  base::ScopedAllowBlockingForTesting allow_blocking;
   return ImportCertFromFile(certs_dir, GetCertificateName());
 }
 
 void EmbeddedTestServer::ServeFilesFromDirectory(
     const base::FilePath& directory) {
-  RegisterRequestHandler(base::Bind(&HandleFileRequest, directory));
+  RegisterDefaultHandler(base::Bind(&HandleFileRequest, directory));
 }
 
 void EmbeddedTestServer::ServeFilesFromSourceDirectory(
     const std::string& relative) {
   base::FilePath test_data_dir;
-  CHECK(PathService::Get(base::DIR_SOURCE_ROOT, &test_data_dir));
+  CHECK(base::PathService::Get(base::DIR_SOURCE_ROOT, &test_data_dir));
   ServeFilesFromDirectory(test_data_dir.AppendASCII(relative));
 }
 
 void EmbeddedTestServer::ServeFilesFromSourceDirectory(
     const base::FilePath& relative) {
   base::FilePath test_data_dir;
-  CHECK(PathService::Get(base::DIR_SOURCE_ROOT, &test_data_dir));
+  CHECK(base::PathService::Get(base::DIR_SOURCE_ROOT, &test_data_dir));
   ServeFilesFromDirectory(test_data_dir.Append(relative));
 }
 
 void EmbeddedTestServer::AddDefaultHandlers(const base::FilePath& directory) {
-  RegisterDefaultHandlers(this);
   ServeFilesFromSourceDirectory(directory);
+  RegisterDefaultHandlers(this);
 }
 
 void EmbeddedTestServer::RegisterRequestHandler(
@@ -351,13 +378,10 @@ std::unique_ptr<StreamSocket> EmbeddedTestServer::DoSSLUpgrade(
 }
 
 void EmbeddedTestServer::DoAcceptLoop() {
-  int rv = OK;
-  while (rv == OK) {
-    rv = listen_socket_->Accept(
-        &accepted_socket_, base::Bind(&EmbeddedTestServer::OnAcceptCompleted,
-                                      base::Unretained(this)));
-    if (rv == ERR_IO_PENDING)
-      return;
+  while (
+      listen_socket_->Accept(&accepted_socket_,
+                             base::Bind(&EmbeddedTestServer::OnAcceptCompleted,
+                                        base::Unretained(this))) == OK) {
     HandleAcceptResult(std::move(accepted_socket_));
   }
 }
@@ -479,7 +503,7 @@ bool EmbeddedTestServer::PostTaskToIOThreadAndWait(
   // To handle this situation, create temporary message loop to support the
   // PostTaskAndReply operation if the current thread as no message loop.
   std::unique_ptr<base::MessageLoop> temporary_loop;
-  if (!base::MessageLoop::current())
+  if (!base::MessageLoopCurrent::Get())
     temporary_loop.reset(new base::MessageLoop());
 
   base::RunLoop run_loop;

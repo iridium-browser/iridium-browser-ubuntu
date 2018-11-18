@@ -14,7 +14,7 @@ namespace policy {
 class MockCloudPolicyStore : public CloudPolicyStore {
  public:
   MockCloudPolicyStore();
-  virtual ~MockCloudPolicyStore();
+  ~MockCloudPolicyStore() override;
 
   MOCK_METHOD1(Store, void(const enterprise_management::PolicyFetchResponse&));
   MOCK_METHOD0(Load, void(void));
@@ -28,6 +28,7 @@ class MockCloudPolicyStore : public CloudPolicyStore {
   using CloudPolicyStore::status_;
   using CloudPolicyStore::invalidation_version_;
   using CloudPolicyStore::policy_signature_public_key_;
+  using CloudPolicyStore::validation_result_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockCloudPolicyStore);
@@ -36,7 +37,7 @@ class MockCloudPolicyStore : public CloudPolicyStore {
 class MockCloudPolicyStoreObserver : public CloudPolicyStore::Observer {
  public:
   MockCloudPolicyStoreObserver();
-  virtual ~MockCloudPolicyStoreObserver();
+  ~MockCloudPolicyStoreObserver() override;
 
   MOCK_METHOD1(OnStoreLoaded, void(CloudPolicyStore* store));
   MOCK_METHOD1(OnStoreError, void(CloudPolicyStore* store));

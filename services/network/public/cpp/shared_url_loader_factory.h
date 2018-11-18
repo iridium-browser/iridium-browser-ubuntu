@@ -27,15 +27,24 @@ class SharedURLLoaderFactoryInfo;
 // instance to a new SharedURLLoaderFactory.
 class COMPONENT_EXPORT(NETWORK_CPP) SharedURLLoaderFactory
     : public base::RefCounted<SharedURLLoaderFactory>,
-      public network::mojom::URLLoaderFactory {
+      public mojom::URLLoaderFactory {
  public:
   static scoped_refptr<SharedURLLoaderFactory> Create(
       std::unique_ptr<SharedURLLoaderFactoryInfo> info);
 
-  // network::mojom::URLLoaderFactory
-  void Clone(network::mojom::URLLoaderFactoryRequest request) final;
+  // From mojom::URLLoaderFactory:
+  void Clone(mojom::URLLoaderFactoryRequest request) override = 0;
 
+  // If implemented, creates a SharedURLLoaderFactoryInfo that can be used on
+  // any thread to create a SharedURLLoaderFactory that works there.
+  //
+  // A simple way of providing this API is to use
+  // CrossThreadSharedURLLoaderFactoryInfo; which will implement it at cost of
+  // a single thread hop on any different-thread fetch.
   virtual std::unique_ptr<SharedURLLoaderFactoryInfo> Clone() = 0;
+
+  // If this returns true, any redirect safety checks should be bypassed.
+  virtual bool BypassRedirectChecks() const;
 
  protected:
   friend class base::RefCounted<SharedURLLoaderFactory>;

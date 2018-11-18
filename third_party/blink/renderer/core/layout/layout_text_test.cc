@@ -6,6 +6,9 @@
 
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/renderer/core/editing/frame_selection.h"
+#include "third_party/blink/renderer/core/editing/selection_template.h"
+#include "third_party/blink/renderer/core/editing/testing/selection_sample.h"
 #include "third_party/blink/renderer/core/layout/line/inline_text_box.h"
 #include "third_party/blink/renderer/core/testing/core_unit_test_helper.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
@@ -24,7 +27,7 @@ class LayoutTextTest : public RenderingTest {
 
   void SetAhemBody(const char* message, const unsigned width) {
     SetBodyInnerHTML(String::Format(
-        "<div id='target' style='font: Ahem; width: %uem'>%s</div>", width,
+        "<div id='target' style='font: 10px Ahem; width: %uem'>%s</div>", width,
         message));
   }
 
@@ -33,6 +36,35 @@ class LayoutTextTest : public RenderingTest {
   }
 
   LayoutText* GetBasicText() { return GetLayoutTextById("target"); }
+
+  void SetSelectionAndUpdateLayoutSelection(const std::string& selection_text) {
+    const SelectionInDOMTree selection =
+        SelectionSample::SetSelectionText(GetDocument().body(), selection_text);
+    UpdateAllLifecyclePhases();
+    Selection().SetSelectionAndEndTyping(selection);
+    Selection().CommitAppearanceIfNeeded();
+  }
+
+  const LayoutText* FindFirstLayoutText() {
+    for (const Node& node :
+         NodeTraversal::DescendantsOf(*GetDocument().body())) {
+      if (node.GetLayoutObject() && node.GetLayoutObject()->IsText())
+        return ToLayoutTextOrDie(node.GetLayoutObject());
+    }
+    NOTREACHED();
+    return nullptr;
+  }
+
+  LayoutRect GetSelectionRectFor(const std::string& selection_text) {
+    std::stringstream stream;
+    stream << "<div style='font: 10px/10px Ahem;'>" << selection_text
+           << "</div>";
+    SetSelectionAndUpdateLayoutSelection(stream.str());
+    const Node* target = GetDocument().getElementById("target");
+    const LayoutObject* layout_object =
+        target ? target->GetLayoutObject() : FindFirstLayoutText();
+    return layout_object->LocalSelectionRect();
+  }
 };
 
 const char kTacoText[] = "Los Compadres Taco Truck";
@@ -447,7 +479,7 @@ TEST_P(ParameterizedLayoutTextTest, GetUpperLeftCorner) {
     <div>12345 123<span id="target">45</span></div>
   )HTML");
   LayoutText* layout_text = GetLayoutTextById("target");
-  Optional<FloatPoint> upper_left = layout_text->GetUpperLeftCorner();
+  base::Optional<FloatPoint> upper_left = layout_text->GetUpperLeftCorner();
   EXPECT_TRUE(upper_left.has_value());
   EXPECT_EQ(FloatPoint(30, 10), upper_left.value());
 }
@@ -465,7 +497,7 @@ TEST_P(ParameterizedLayoutTextTest, GetUpperLeftCornerVLR) {
     <div>12345 123<span id="target">45</span></div>
   )HTML");
   LayoutText* layout_text = GetLayoutTextById("target");
-  Optional<FloatPoint> upper_left = layout_text->GetUpperLeftCorner();
+  base::Optional<FloatPoint> upper_left = layout_text->GetUpperLeftCorner();
   EXPECT_TRUE(upper_left.has_value());
   EXPECT_EQ(FloatPoint(10, 30), upper_left.value());
 }
@@ -577,6 +609,124 @@ TEST_P(ParameterizedLayoutTextTest, WordBreakElement) {
   EXPECT_EQ(0u, layout_wbr->ResolvedTextLength());
   EXPECT_EQ(0, layout_wbr->CaretMinOffset());
   EXPECT_EQ(0, layout_wbr->CaretMaxOffset());
+}
+
+TEST_P(ParameterizedLayoutTextTest, LocalSelectionRect) {
+  LoadAhem();
+  // TODO(yoichio): Fix LayoutNG incompatibility.
+  EXPECT_EQ(LayoutRect(10, 0, 50, 10), GetSelectionRectFor("f^oo ba|r"));
+  EXPECT_EQ(LayoutRect(0, 0, 40, 20),
+            GetSelectionRectFor("<div style='width: 2em'>f^oo ba|r</div>"));
+  EXPECT_EQ(LayoutRect(30, 0, 10, 10),
+            GetSelectionRectFor("foo^<br id='target'>|bar"));
+  EXPECT_EQ(LayoutRect(10, 0, 20, 10), GetSelectionRectFor("f^oo<br>b|ar"));
+  EXPECT_EQ(LayoutRect(10, 0, 30, 10),
+            GetSelectionRectFor("<div>f^oo</div><div>b|ar</div>"));
+  EXPECT_EQ(LayoutRect(30, 0, 10, 10), GetSelectionRectFor("foo^ |bar"));
+  EXPECT_EQ(LayoutRect(0, 0, 0, 0), GetSelectionRectFor("^ |foo"));
+  EXPECT_EQ(LayoutRect(0, 0, 0, 0),
+            GetSelectionRectFor("fo^o<wbr id='target'>ba|r"));
+  EXPECT_EQ(
+      LayoutRect(0, 0, 10, 10),
+      GetSelectionRectFor("<style>:first-letter { float: right}</style>^fo|o"));
+  // Since we don't paint trimed white spaces on LayoutNG,  we don't need fix
+  // this case.
+  EXPECT_EQ(
+      LayoutNGEnabled() ? LayoutRect(0, 0, 0, 0) : LayoutRect(30, 0, 10, 10),
+      GetSelectionRectFor("foo^ |"));
+}
+
+TEST_P(ParameterizedLayoutTextTest, LocalSelectionRectLineBreak) {
+  LoadAhem();
+  EXPECT_EQ(LayoutRect(30, 0, 10, 10),
+            GetSelectionRectFor("f^oo<br id='target'><br>ba|r"));
+  EXPECT_EQ(LayoutRect(0, 10, 10, 10),
+            GetSelectionRectFor("f^oo<br><br id='target'>ba|r"));
+}
+
+TEST_P(ParameterizedLayoutTextTest, LocalSelectionRectLineBreakPre) {
+  LoadAhem();
+  EXPECT_EQ(
+      LayoutRect(30, 0, 10, 10),
+      GetSelectionRectFor("<div style='white-space:pre;'>foo^\n|\nbar</div>"));
+  EXPECT_EQ(
+      LayoutRect(0, 10, 10, 10),
+      GetSelectionRectFor("<div style='white-space:pre;'>foo\n^\n|bar</div>"));
+}
+
+TEST_P(ParameterizedLayoutTextTest, LocalSelectionRectRTL) {
+  LoadAhem();
+  // TODO(yoichio) : Fix LastLogicalLeafIgnoringLineBreak so that 'foo' is the
+  // last fragment.
+  EXPECT_EQ(LayoutNGEnabled() ? LayoutRect(-10, 0, 30, 20)
+                              : LayoutRect(-10, 0, 40, 20),
+            GetSelectionRectFor("<div style='width: 2em' dir=rtl>"
+                                "f^oo ba|r baz</div>"));
+  EXPECT_EQ(LayoutRect(0, 0, 40, 20),
+            GetSelectionRectFor("<div style='width: 2em' dir=ltr>"
+                                "f^oo ba|r baz</div>"));
+}
+
+TEST_P(ParameterizedLayoutTextTest, LocalSelectionRectVertical) {
+  LoadAhem();
+  EXPECT_EQ(
+      LayoutRect(0, 0, 20, 40),
+      GetSelectionRectFor("<div style='writing-mode: vertical-lr; height: 2em'>"
+                          "f^oo ba|r baz</div>"));
+  // TODO(yoichio): This is caused by mixing lrt between vertical and logical.
+  EXPECT_EQ(
+      LayoutNGEnabled() ? LayoutRect(10, 0, 20, 40) : LayoutRect(0, 0, 20, 40),
+      GetSelectionRectFor("<div style='writing-mode: vertical-rl; height: 2em'>"
+                          "f^oo ba|r baz</div>"));
+}
+
+TEST_P(ParameterizedLayoutTextTest, LocalSelectionRectVerticalRTL) {
+  LoadAhem();
+  EXPECT_EQ(LayoutNGEnabled() ? LayoutRect(0, -10, 20, 30)
+                              : LayoutRect(0, -10, 20, 40),
+            GetSelectionRectFor(
+                "<div style='writing-mode: vertical-lr; height: 2em' dir=rtl>"
+                "f^oo ba|r baz</div>"));
+  EXPECT_EQ(LayoutNGEnabled() ? LayoutRect(10, -10, 20, 30)
+                              : LayoutRect(0, -10, 20, 40),
+            GetSelectionRectFor(
+                "<div style='writing-mode: vertical-rl; height: 2em' dir=rtl>"
+                "f^oo ba|r baz</div>"));
+}
+
+TEST_P(ParameterizedLayoutTextTest, LocalSelectionRectLineHeight) {
+  LoadAhem();
+  EXPECT_EQ(LayoutNGEnabled() ? LayoutRect(10, 0, 10, 50)
+                              : LayoutRect(10, 20, 10, 10),
+            GetSelectionRectFor("<div style='line-height: 50px; width:1em;'>"
+                                "f^o|o bar baz</div>"));
+  EXPECT_EQ(LayoutNGEnabled() ? LayoutRect(10, 50, 10, 50)
+                              : LayoutRect(10, 30, 10, 50),
+            GetSelectionRectFor("<div style='line-height: 50px; width:1em;'>"
+                                "foo b^a|r baz</div>"));
+  EXPECT_EQ(LayoutNGEnabled() ? LayoutRect(10, 100, 10, 50)
+                              : LayoutRect(10, 80, 10, 50),
+            GetSelectionRectFor("<div style='line-height: 50px; width:1em;'>"
+                                "foo bar b^a|</div>"));
+}
+
+TEST_P(ParameterizedLayoutTextTest, LocalSelectionRectLineHeightVertical) {
+  LoadAhem();
+  EXPECT_EQ(LayoutNGEnabled() ? LayoutRect(0, 10, 50, 10)
+                              : LayoutRect(20, 10, 50, 10),
+            GetSelectionRectFor("<div style='line-height: 50px; height:1em; "
+                                "writing-mode:vertical-lr'>"
+                                "f^o|o bar baz</div>"));
+  EXPECT_EQ(LayoutNGEnabled() ? LayoutRect(50, 10, 50, 10)
+                              : LayoutRect(70, 10, 50, 10),
+            GetSelectionRectFor("<div style='line-height: 50px; height:1em; "
+                                "writing-mode:vertical-lr'>"
+                                "foo b^a|r baz</div>"));
+  EXPECT_EQ(LayoutNGEnabled() ? LayoutRect(100, 10, 50, 10)
+                              : LayoutRect(120, 10, 10, 10),
+            GetSelectionRectFor("<div style='line-height: 50px; height:1em; "
+                                "writing-mode:vertical-lr'>"
+                                "foo bar b^a|z</div>"));
 }
 
 }  // namespace blink

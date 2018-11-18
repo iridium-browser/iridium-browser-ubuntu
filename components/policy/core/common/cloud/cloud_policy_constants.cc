@@ -57,6 +57,10 @@ const char kValueRequestCheckDeviceLicense[] = "check_device_license";
 const char kValueRequestAppInstallReport[] = "app_install_report";
 const char kValueRequestTokenEnrollment[] = "register_browser";
 const char kValueRequestChromeDesktopReport[] = "chrome_desktop_report";
+const char kValueRequestInitialEnrollmentStateRetrieval[] =
+    "device_initial_enrollment_state";
+const char kValueRequestUploadPolicyValidationReport[] =
+    "policy_validation_report";
 
 const char kChromeDevicePolicyType[] = "google/chromeos/device";
 #if defined(OS_CHROMEOS)

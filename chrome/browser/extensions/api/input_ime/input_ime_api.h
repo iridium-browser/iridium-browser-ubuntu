@@ -16,6 +16,7 @@
 #include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/input_method/input_method_engine_base.h"
+#include "chrome/common/extensions/api/input_ime.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -80,16 +81,23 @@ class ImeObserver : public input_method::InputMethodEngineBase::Observer {
   bool ShouldForwardKeyEvent() const;
 
   // Returns true if there are any listeners on the given event.
+  // TODO(https://crbug.com/835699): Merge this with |ExtensionHasListener|.
   bool HasListener(const std::string& event_name) const;
+
+  // Returns true if the extension has any listeners on the given event.
+  bool ExtensionHasListener(const std::string& event_name) const;
 
   // Functions used to convert InputContext struct to string
   std::string ConvertInputContextType(
       IMEEngineHandlerInterface::InputContext input_context);
-  bool ConvertInputContextAutoCorrect(
+  virtual bool ConvertInputContextAutoCorrect(
       IMEEngineHandlerInterface::InputContext input_context);
-  bool ConvertInputContextAutoComplete(
+  virtual bool ConvertInputContextAutoComplete(
       IMEEngineHandlerInterface::InputContext input_context);
-  bool ConvertInputContextSpellCheck(
+  virtual extensions::api::input_ime::AutoCapitalizeType
+  ConvertInputContextAutoCapitalize(
+      IMEEngineHandlerInterface::InputContext input_context);
+  virtual bool ConvertInputContextSpellCheck(
       IMEEngineHandlerInterface::InputContext input_context);
 
   std::string extension_id_;

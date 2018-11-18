@@ -7,21 +7,28 @@
 #include "base/base64.h"
 #include "base/command_line.h"
 #include "base/feature_list.h"
+#include "base/files/file_util.h"
 #include "base/json/json_string_value_serializer.h"
 #include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/metrics/field_trial_params.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/task/post_task.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/search/background/ntp_background_data.h"
+#include "chrome/browser/search/background/ntp_background_service.h"
+#include "chrome/browser/search/background/ntp_background_service_factory.h"
 #include "chrome/browser/search/instant_io_context.h"
 #include "chrome/browser/search/local_files_ntp_source.h"
 #include "chrome/browser/search/local_ntp_js_integrity.h"
+#include "chrome/browser/search/ntp_features.h"
 #include "chrome/browser/search/one_google_bar/one_google_bar_data.h"
 #include "chrome/browser/search/one_google_bar/one_google_bar_service.h"
 #include "chrome/browser/search/one_google_bar/one_google_bar_service_factory.h"
@@ -32,10 +39,14 @@
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/common/chrome_features.h"
+#include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/browser_resources.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/prefs/pref_registry_simple.h"
+#include "components/prefs/pref_service.h"
 #include "components/search_engines/search_terms_data.h"
 #include "components/search_engines/template_url_service.h"
 #include "components/search_engines/template_url_service_observer.h"
@@ -45,6 +56,7 @@
 #include "components/strings/grit/components_strings.h"
 #include "content/public/browser/browser_accessibility_state.h"
 #include "content/public/browser/browser_thread.h"
+#include "crypto/sha2.h"
 #include "net/base/url_util.h"
 #include "net/url_request/url_request.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -69,9 +81,11 @@ const int kLocalResource = -1;
 const char kConfigDataFilename[] = "config.js";
 const char kThemeCSSFilename[] = "theme.css";
 const char kMainHtmlFilename[] = "local-ntp.html";
+const char kNtpBackgroundCollectionScriptFilename[] =
+    "ntp-background-collections.js";
+const char kNtpBackgroundImageScriptFilename[] = "ntp-background-images.js";
 const char kOneGoogleBarScriptFilename[] = "one-google.js";
 const char kDoodleScriptFilename[] = "doodle.js";
-
 const char kIntegrityFormat[] = "integrity=\"sha256-%s\"";
 
 const struct Resource{
@@ -82,14 +96,25 @@ const struct Resource{
     {kMainHtmlFilename, kLocalResource, "text/html"},
     {"local-ntp.js", IDR_LOCAL_NTP_JS, "application/javascript"},
     {"voice.js", IDR_LOCAL_NTP_VOICE_JS, "application/javascript"},
+    {"custom-backgrounds.js", IDR_LOCAL_NTP_CUSTOM_BACKGROUNDS_JS,
+     "application/javascript"},
     {kConfigDataFilename, kLocalResource, "application/javascript"},
     {kThemeCSSFilename, kLocalResource, "text/css"},
     {"local-ntp.css", IDR_LOCAL_NTP_CSS, "text/css"},
     {"voice.css", IDR_LOCAL_NTP_VOICE_CSS, "text/css"},
+    {"custom-backgrounds.css", IDR_LOCAL_NTP_CUSTOM_BACKGROUNDS_CSS,
+     "text/css"},
     {"images/close_3_mask.png", IDR_CLOSE_3_MASK, "image/png"},
     {"images/ntp_default_favicon.png", IDR_NTP_DEFAULT_FAVICON, "image/png"},
+    {kNtpBackgroundCollectionScriptFilename, kLocalResource, "text/javascript"},
+    {kNtpBackgroundImageScriptFilename, kLocalResource, "text/javascript"},
     {kOneGoogleBarScriptFilename, kLocalResource, "text/javascript"},
     {kDoodleScriptFilename, kLocalResource, "text/javascript"},
+    // Image may not be a jpeg but the .jpg extension here still works for other
+    // filetypes. Special handling for different extensions isn't worth the
+    // added complexity.
+    {chrome::kChromeSearchLocalNtpBackgroundFilename, kLocalResource,
+     "image/jpg"},
 };
 
 // Strips any query parameters from the specified path.
@@ -110,7 +135,9 @@ std::unique_ptr<base::DictionaryValue> GetTranslatedStrings(bool is_google) {
   auto translated_strings = std::make_unique<base::DictionaryValue>();
 
   AddString(translated_strings.get(), "thumbnailRemovedNotification",
-            IDS_NEW_TAB_THUMBNAIL_REMOVED_NOTIFICATION);
+            features::IsMDIconsEnabled()
+                ? IDS_NTP_CONFIRM_MSG_SHORTCUT_REMOVED
+                : IDS_NEW_TAB_THUMBNAIL_REMOVED_NOTIFICATION);
   AddString(translated_strings.get(), "removeThumbnailTooltip",
             IDS_NEW_TAB_REMOVE_THUMBNAIL_TOOLTIP);
   AddString(translated_strings.get(), "undoThumbnailRemove",
@@ -125,7 +152,78 @@ std::unique_ptr<base::DictionaryValue> GetTranslatedStrings(bool is_google) {
 
   if (is_google) {
     AddString(translated_strings.get(), "searchboxPlaceholder",
-              IDS_GOOGLE_SEARCH_BOX_EMPTY_HINT);
+              features::IsMDUIEnabled() ? IDS_GOOGLE_SEARCH_BOX_EMPTY_HINT_MD
+                                        : IDS_GOOGLE_SEARCH_BOX_EMPTY_HINT);
+
+    // Custom Backgrounds
+    AddString(translated_strings.get(), "customizeBackground",
+              IDS_NTP_CUSTOM_BG_CUSTOMIZE_BACKGROUND);
+    AddString(translated_strings.get(), "connectGooglePhotos",
+              IDS_NTP_CUSTOM_BG_GOOGLE_PHOTOS);
+    AddString(translated_strings.get(), "defaultWallpapers",
+              IDS_NTP_CUSTOM_BG_CHROME_WALLPAPERS);
+    AddString(translated_strings.get(), "uploadImage",
+              IDS_NTP_CUSTOM_BG_UPLOAD_AN_IMAGE);
+    AddString(translated_strings.get(), "restoreDefaultBackground",
+              IDS_NTP_CUSTOM_BG_RESTORE_DEFAULT);
+    AddString(translated_strings.get(), "selectChromeWallpaper",
+              IDS_NTP_CUSTOM_BG_SELECT_A_COLLECTION);
+    AddString(translated_strings.get(), "dailyRefresh",
+              IDS_NTP_CUSTOM_BG_DAILY_REFRESH);
+    AddString(translated_strings.get(), "selectionDone",
+              IDS_NTP_CUSTOM_LINKS_DONE);
+    AddString(translated_strings.get(), "selectionCancel",
+              IDS_NTP_CUSTOM_BG_CANCEL);
+    AddString(translated_strings.get(), "selectGooglePhotoAlbum",
+              IDS_NTP_CUSTOM_BG_SELECT_GOOGLE_ALBUM);
+    AddString(translated_strings.get(), "connectionErrorNoPeriod",
+              IDS_NTP_CONNECTION_ERROR_NO_PERIOD);
+    AddString(translated_strings.get(), "connectionError",
+              IDS_NTP_CONNECTION_ERROR);
+    AddString(translated_strings.get(), "moreInfo", IDS_NTP_ERROR_MORE_INFO);
+    AddString(translated_strings.get(), "backgroundsUnavailable",
+              IDS_NTP_CUSTOM_BG_BACKGROUNDS_UNAVAILABLE);
+    AddString(translated_strings.get(), "customizeThisPage",
+              IDS_NTP_CUSTOM_BG_CUSTOMIZE_NTP_LABEL);
+    AddString(translated_strings.get(), "backLabel",
+              IDS_NTP_CUSTOM_BG_BACK_LABEL);
+    AddString(translated_strings.get(), "photoLabel",
+              IDS_NTP_CUSTOM_BG_GOOGLE_PHOTO_LABEL);
+    AddString(translated_strings.get(), "selectedLabel",
+              IDS_NTP_CUSTOM_BG_PHOTO_SELECTED);
+
+    // Custom Links
+    AddString(translated_strings.get(), "addLinkTitle",
+              IDS_NTP_CUSTOM_LINKS_ADD_SHORTCUT_TITLE);
+    AddString(translated_strings.get(), "addLinkTooltip",
+              IDS_NTP_CUSTOM_LINKS_ADD_SHORTCUT_TOOLTIP);
+    AddString(translated_strings.get(), "editLinkTitle",
+              IDS_NTP_CUSTOM_LINKS_EDIT_SHORTCUT);
+    AddString(translated_strings.get(), "editLinkTooltip",
+              IDS_NTP_CUSTOM_LINKS_EDIT_SHORTCUT_TOOLTIP);
+    AddString(translated_strings.get(), "nameField", IDS_NTP_CUSTOM_LINKS_NAME);
+    AddString(translated_strings.get(), "urlField", IDS_NTP_CUSTOM_LINKS_URL);
+    AddString(translated_strings.get(), "linkRemove",
+              IDS_NTP_CUSTOM_LINKS_REMOVE);
+    AddString(translated_strings.get(), "linkCancel",
+              IDS_NTP_CUSTOM_LINKS_CANCEL);
+    AddString(translated_strings.get(), "linkDone", IDS_NTP_CUSTOM_LINKS_DONE);
+    AddString(translated_strings.get(), "invalidUrl",
+              IDS_NTP_CUSTOM_LINKS_INVALID_URL);
+    AddString(translated_strings.get(), "linkRemovedMsg",
+              IDS_NTP_CONFIRM_MSG_SHORTCUT_REMOVED);
+    AddString(translated_strings.get(), "linkEditedMsg",
+              IDS_NTP_CONFIRM_MSG_SHORTCUT_EDITED);
+    AddString(translated_strings.get(), "linkAddedMsg",
+              IDS_NTP_CONFIRM_MSG_SHORTCUT_ADDED);
+    AddString(translated_strings.get(), "restoreDefaultLinks",
+              IDS_NTP_CONFIRM_MSG_RESTORE_DEFAULTS);
+    AddString(translated_strings.get(), "linkCantCreate",
+              IDS_NTP_CUSTOM_LINKS_CANT_CREATE);
+    AddString(translated_strings.get(), "linkCantEdit",
+              IDS_NTP_CUSTOM_LINKS_CANT_EDIT);
+    AddString(translated_strings.get(), "linkCantRemove",
+              IDS_NTP_CUSTOM_LINKS_CANT_REMOVE);
 
     // Voice Search
     AddString(translated_strings.get(), "audioError",
@@ -158,32 +256,6 @@ std::unique_ptr<base::DictionaryValue> GetTranslatedStrings(bool is_google) {
   return translated_strings;
 }
 
-// Returns a JS dictionary of configuration data for the local NTP.
-std::string GetConfigData(bool is_google, const GURL& google_base_url) {
-  base::DictionaryValue config_data;
-  config_data.Set("translatedStrings", GetTranslatedStrings(is_google));
-  config_data.SetBoolean("isGooglePage", is_google);
-  config_data.SetString("googleBaseUrl", google_base_url.spec());
-  config_data.SetBoolean(
-      "isAccessibleBrowser",
-      content::BrowserAccessibilityState::GetInstance()->IsAccessibleBrowser());
-
-  bool is_voice_search_enabled =
-      base::FeatureList::IsEnabled(features::kVoiceSearchOnLocalNtp);
-  config_data.SetBoolean("isVoiceSearchEnabled", is_voice_search_enabled);
-
-  // Serialize the dictionary.
-  std::string js_text;
-  JSONStringValueSerializer serializer(&js_text);
-  serializer.Serialize(config_data);
-
-  std::string config_data_js;
-  config_data_js.append("var configData = ");
-  config_data_js.append(js_text);
-  config_data_js.append(";");
-  return config_data_js;
-}
-
 std::string GetThemeCSS(Profile* profile) {
   SkColor background_color =
       ThemeService::GetThemeProviderForProfile(profile)
@@ -195,9 +267,90 @@ std::string GetThemeCSS(Profile* profile) {
                             SkColorGetB(background_color));
 }
 
+std::string ReadBackgroundImageData(const base::FilePath& profile_path) {
+  std::string data_string;
+  base::ReadFileToString(
+      profile_path.AppendASCII(chrome::kChromeSearchLocalNtpBackgroundFilename),
+      &data_string);
+  return data_string;
+}
+
+void ServeBackgroundImageData(
+    const content::URLDataSource::GotDataCallback& callback,
+    std::string data_string) {
+  callback.Run(base::RefCountedString::TakeString(&data_string));
+}
+
 std::string GetLocalNtpPath() {
   return std::string(chrome::kChromeSearchScheme) + "://" +
          std::string(chrome::kChromeSearchLocalNtpHost) + "/";
+}
+
+base::Value ConvertCollectionInfoToDict(
+    const std::vector<CollectionInfo>& collection_info) {
+  base::Value collections(base::Value::Type::LIST);
+  collections.GetList().reserve(collection_info.size());
+  for (const CollectionInfo& collection : collection_info) {
+    base::Value dict(base::Value::Type::DICTIONARY);
+    dict.SetKey("collectionId", base::Value(collection.collection_id));
+    dict.SetKey("collectionName", base::Value(collection.collection_name));
+    dict.SetKey("previewImageUrl",
+                base::Value(collection.preview_image_url.spec()));
+    collections.GetList().push_back(std::move(dict));
+  }
+  return collections;
+}
+
+base::Value ConvertCollectionImageToDict(
+    const std::vector<CollectionImage>& collection_image) {
+  base::Value images(base::Value::Type::LIST);
+  images.GetList().reserve(collection_image.size());
+  for (const CollectionImage& image : collection_image) {
+    base::Value dict(base::Value::Type::DICTIONARY);
+    dict.SetKey("thumbnailImageUrl",
+                base::Value(image.thumbnail_image_url.spec()));
+    dict.SetKey("imageUrl", base::Value(image.image_url.spec()));
+    dict.SetKey("collectionId", base::Value(image.collection_id));
+    base::Value attributions(base::Value::Type::LIST);
+    for (const auto& attribution : image.attribution) {
+      attributions.GetList().push_back(base::Value(attribution));
+    }
+    dict.SetKey("attributions", std::move(attributions));
+    dict.SetKey("attributionActionUrl",
+                base::Value(image.attribution_action_url.spec()));
+    images.GetList().push_back(std::move(dict));
+  }
+  return images;
+}
+
+base::Value ConvertAlbumInfoToDict(const std::vector<AlbumInfo>& album_info) {
+  base::Value albums(base::Value::Type::LIST);
+  albums.GetList().reserve(album_info.size());
+  for (const AlbumInfo& album : album_info) {
+    base::Value dict(base::Value::Type::DICTIONARY);
+    dict.SetKey("albumId", base::Value(std::to_string(album.album_id)));
+    dict.SetKey("photoContainerId", base::Value(album.photo_container_id));
+    dict.SetKey("albumName", base::Value(album.album_name));
+    dict.SetKey("previewImageUrl", base::Value(album.preview_image_url.spec()));
+    albums.GetList().push_back(std::move(dict));
+  }
+  return albums;
+}
+
+base::Value ConvertAlbumPhotosToDict(
+    const std::vector<AlbumPhoto>& album_photos) {
+  base::Value photos(base::Value::Type::LIST);
+  photos.GetList().reserve(album_photos.size());
+  for (const AlbumPhoto& photo : album_photos) {
+    base::Value dict(base::Value::Type::DICTIONARY);
+    dict.SetKey("thumbnailPhotoUrl",
+                base::Value(photo.thumbnail_photo_url.spec()));
+    dict.SetKey("photoUrl", base::Value(photo.photo_url.spec()));
+    dict.SetKey("albumId", base::Value(photo.album_id));
+    dict.SetKey("photoContainerId", base::Value(photo.photo_container_id));
+    photos.GetList().push_back(std::move(dict));
+  }
+  return photos;
 }
 
 std::unique_ptr<base::DictionaryValue> ConvertOGBDataToDict(
@@ -297,54 +450,88 @@ bool ShouldServiceRequestIOThread(const GURL& url,
   return false;
 }
 
-std::string GetContentSecurityPolicyScriptSrcIOThread() {
-#if !defined(GOOGLE_CHROME_BUILD)
-  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(switches::kLocalNtpReload)) {
-    // While live-editing the local NTP files, turn off CSP.
-    return "script-src * 'unsafe-inline';";
-  }
-#endif  // !defined(GOOGLE_CHROME_BUILD)
+std::string GetErrorDict(const ErrorInfo& error) {
+  base::DictionaryValue error_info;
+  error_info.SetBoolean("auth_error",
+                        error.error_type == ErrorType::AUTH_ERROR);
+  error_info.SetBoolean("net_error", error.error_type == ErrorType::NET_ERROR);
+  error_info.SetBoolean("service_error",
+                        error.error_type == ErrorType::SERVICE_ERROR);
+  error_info.SetInteger("net_error_no", error.net_error);
 
-  return base::StringPrintf(
-      "script-src 'strict-dynamic' 'sha256-%s' 'sha256-%s';",
-      LOCAL_NTP_JS_INTEGRITY, VOICE_JS_INTEGRITY);
-}
+  std::string js_text;
+  JSONStringValueSerializer serializer(&js_text);
+  serializer.Serialize(error_info);
 
-std::string GetContentSecurityPolicyChildSrcIOThread() {
-  // Allow embedding of the most visited iframe, as well as the account
-  // switcher and the notifications dropdown from the One Google Bar, and/or
-  // the iframe for interactive Doodles.
-  return base::StringPrintf("child-src %s https://*.google.com/;",
-                            chrome::kChromeSearchMostVisitedUrl);
+  return js_text;
 }
 
 }  // namespace
 
-class LocalNtpSource::GoogleSearchProviderTracker
+// Keeps the search engine configuration data to be included on the Local NTP,
+// and will also keep track of any changes in search engine provider to
+// recompute this data.
+class LocalNtpSource::SearchConfigurationProvider
     : public TemplateURLServiceObserver {
  public:
-  explicit GoogleSearchProviderTracker(TemplateURLService* service)
-      : service_(service), is_google_(false) {
+  explicit SearchConfigurationProvider(TemplateURLService* service)
+      : service_(service) {
     DCHECK(service_);
     service_->AddObserver(this);
-    is_google_ = search::DefaultSearchProviderIsGoogle(service_);
-    google_base_url_ = GURL(service_->search_terms_data().GoogleBaseURLValue());
+    UpdateConfigData();
   }
 
-  ~GoogleSearchProviderTracker() override {
+  ~SearchConfigurationProvider() override {
     if (service_)
       service_->RemoveObserver(this);
   }
 
-  bool DefaultSearchProviderIsGoogle() const { return is_google_; }
-
-  const GURL& GetGoogleBaseUrl() const { return google_base_url_; }
+  const std::string& config_data_js() const { return config_data_js_; }
+  const std::string& config_data_integrity() const {
+    return config_data_integrity_;
+  }
 
  private:
+  // Updates the configuration data for the local NTP.
+  void UpdateConfigData() {
+    bool is_google = search::DefaultSearchProviderIsGoogle(service_);
+    const GURL google_base_url =
+        GURL(service_->search_terms_data().GoogleBaseURLValue());
+    base::DictionaryValue config_data;
+    config_data.Set("translatedStrings", GetTranslatedStrings(is_google));
+    config_data.SetBoolean("isGooglePage", is_google);
+    config_data.SetString("googleBaseUrl", google_base_url.spec());
+    config_data.SetBoolean("isAccessibleBrowser",
+                           content::BrowserAccessibilityState::GetInstance()
+                               ->IsAccessibleBrowser());
+
+    config_data.SetBoolean("isMDUIEnabled", features::IsMDUIEnabled());
+
+    config_data.SetBoolean("isMDIconsEnabled", features::IsMDIconsEnabled());
+
+    if (is_google) {
+      config_data.SetBoolean("isCustomLinksEnabled",
+                             features::IsCustomLinksEnabled());
+      config_data.SetBoolean("isCustomBackgroundsEnabled",
+                             features::IsCustomBackgroundsEnabled());
+    }
+
+    // Serialize the dictionary.
+    std::string js_text;
+    JSONStringValueSerializer serializer(&js_text);
+    serializer.Serialize(config_data);
+
+    config_data_js_ = "var configData = ";
+    config_data_js_.append(js_text);
+    config_data_js_.append(";");
+
+    std::string config_sha256 = crypto::SHA256HashString(config_data_js_);
+    base::Base64Encode(config_sha256, &config_data_integrity_);
+  }
+
   void OnTemplateURLServiceChanged() override {
-    is_google_ = search::DefaultSearchProviderIsGoogle(service_);
-    google_base_url_ = GURL(service_->search_terms_data().GoogleBaseURLValue());
+    // The search provider may have changed, keep the config data valid.
+    UpdateConfigData();
   }
 
   void OnTemplateURLServiceShuttingDown() override {
@@ -354,8 +541,8 @@ class LocalNtpSource::GoogleSearchProviderTracker
 
   TemplateURLService* service_;
 
-  bool is_google_;
-  GURL google_base_url_;
+  std::string config_data_js_;
+  std::string config_data_integrity_;
 };
 
 class LocalNtpSource::DesktopLogoObserver {
@@ -469,12 +656,20 @@ class LocalNtpSource::DesktopLogoObserver {
 
 LocalNtpSource::LocalNtpSource(Profile* profile)
     : profile_(profile),
+      ntp_background_service_(
+          NtpBackgroundServiceFactory::GetForProfile(profile_)),
+      ntp_background_service_observer_(this),
       one_google_bar_service_(
           OneGoogleBarServiceFactory::GetForProfile(profile_)),
       one_google_bar_service_observer_(this),
       logo_service_(nullptr),
       weak_ptr_factory_(this) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+
+  // |ntp_background_service_| is null in incognito, or when the feature is
+  // disabled.
+  if (ntp_background_service_)
+    ntp_background_service_observer_.Add(ntp_background_service_);
 
   // |one_google_bar_service_| is null in incognito, or when the feature is
   // disabled.
@@ -489,8 +684,8 @@ LocalNtpSource::LocalNtpSource(Profile* profile)
   TemplateURLService* template_url_service =
       TemplateURLServiceFactory::GetForProfile(profile_);
   if (template_url_service) {
-    google_tracker_ =
-        std::make_unique<GoogleSearchProviderTracker>(template_url_service);
+    search_config_provider_ =
+        std::make_unique<SearchConfigurationProvider>(template_url_service);
   }
 }
 
@@ -508,15 +703,87 @@ void LocalNtpSource::StartDataRequest(
 
   std::string stripped_path = StripParameters(path);
   if (stripped_path == kConfigDataFilename) {
-    std::string config_data_js =
-        GetConfigData(google_tracker_->DefaultSearchProviderIsGoogle(),
-                      google_tracker_->GetGoogleBaseUrl());
+    std::string config_data_js = search_config_provider_->config_data_js();
     callback.Run(base::RefCountedString::TakeString(&config_data_js));
     return;
   }
   if (stripped_path == kThemeCSSFilename) {
     std::string theme_css = GetThemeCSS(profile_);
     callback.Run(base::RefCountedString::TakeString(&theme_css));
+    return;
+  }
+
+  if (stripped_path == chrome::kChromeSearchLocalNtpBackgroundFilename) {
+    base::PostTaskWithTraitsAndReplyWithResult(
+        FROM_HERE, {base::TaskPriority::USER_VISIBLE, base::MayBlock()},
+        base::BindOnce(&ReadBackgroundImageData, profile_->GetPath()),
+        base::BindOnce(&ServeBackgroundImageData, callback));
+    return;
+  }
+
+  if (stripped_path == kNtpBackgroundCollectionScriptFilename) {
+    if (!ntp_background_service_) {
+      callback.Run(nullptr);
+      return;
+    }
+
+    std::string collection_type_param;
+    GURL path_url = GURL(chrome::kChromeSearchLocalNtpUrl).Resolve(path);
+    if (net::GetValueForKeyInQuery(path_url, "collection_type",
+                                   &collection_type_param) &&
+        (collection_type_param == "album")) {
+      ntp_background_albums_requests_.emplace_back(base::TimeTicks::Now(),
+                                                   callback);
+      ntp_background_service_->FetchAlbumInfo();
+    } else {
+      // If collection_type is not "album", default to getting collections.
+      // TODO(ramyan): Explicitly require a collection_type when frontend
+      //  supports it.
+      ntp_background_collections_requests_.emplace_back(base::TimeTicks::Now(),
+                                                        callback);
+      ntp_background_service_->FetchCollectionInfo();
+    }
+    return;
+  }
+
+  if (stripped_path == kNtpBackgroundImageScriptFilename) {
+    if (!ntp_background_service_) {
+      callback.Run(nullptr);
+      return;
+    }
+    std::string collection_type_param;
+    GURL path_url = GURL(chrome::kChromeSearchLocalNtpUrl).Resolve(path);
+    if (net::GetValueForKeyInQuery(path_url, "collection_type",
+                                   &collection_type_param) &&
+        (collection_type_param == "album")) {
+      std::string album_id_param;
+      std::string photo_container_id_param;
+      if (!net::GetValueForKeyInQuery(path_url, "album_id", &album_id_param) ||
+          !net::GetValueForKeyInQuery(path_url, "photo_container_id",
+                                      &photo_container_id_param)) {
+        callback.Run(nullptr);
+        return;
+      }
+      ntp_background_photos_requests_.emplace_back(base::TimeTicks::Now(),
+                                                   callback);
+      ntp_background_service_->FetchAlbumPhotos(album_id_param,
+                                                photo_container_id_param);
+    } else {
+      // If collection_type is not "album", default to getting images for a
+      // collection.
+      // TODO(ramyan): Explicitly require a collection_type when frontend
+      // supports it.
+      std::string collection_id_param;
+      GURL path_url = GURL(chrome::kChromeSearchLocalNtpUrl).Resolve(path);
+      if (net::GetValueForKeyInQuery(path_url, "collection_id",
+                                     &collection_id_param)) {
+        ntp_background_image_info_requests_.emplace_back(base::TimeTicks::Now(),
+                                                         callback);
+        ntp_background_service_->FetchCollectionImageInfo(collection_id_param);
+      } else {
+        callback.Run(nullptr);
+      }
+    }
     return;
   }
 
@@ -569,6 +836,7 @@ void LocalNtpSource::StartDataRequest(
     std::string html = ui::ResourceBundle::GetSharedInstance()
                            .GetRawDataResource(IDR_LOCAL_NTP_HTML)
                            .as_string();
+
     std::string local_ntp_integrity =
         base::StringPrintf(kIntegrityFormat, LOCAL_NTP_JS_INTEGRITY);
     base::ReplaceFirstSubstringAfterOffset(&html, 0, "{{LOCAL_NTP_INTEGRITY}}",
@@ -578,6 +846,22 @@ void LocalNtpSource::StartDataRequest(
         base::StringPrintf(kIntegrityFormat, VOICE_JS_INTEGRITY);
     base::ReplaceFirstSubstringAfterOffset(
         &html, 0, "{{LOCAL_NTP_VOICE_INTEGRITY}}", local_ntp_voice_integrity);
+
+    std::string local_ntp_custom_bg_integrity =
+        base::StringPrintf(kIntegrityFormat, CUSTOM_BACKGROUNDS_JS_INTEGRITY);
+    base::ReplaceFirstSubstringAfterOffset(&html, 0,
+                                           "{{LOCAL_NTP_CUSTOM_BG_INTEGRITY}}",
+                                           local_ntp_custom_bg_integrity);
+
+    std::string config_data_integrity = base::StringPrintf(
+        kIntegrityFormat,
+        search_config_provider_->config_data_integrity().c_str());
+    base::ReplaceFirstSubstringAfterOffset(
+        &html, 0, "{{CONFIG_DATA_INTEGRITY}}", config_data_integrity);
+
+    base::ReplaceFirstSubstringAfterOffset(
+        &html, 0, "{{CONTENT_SECURITY_POLICY}}", GetContentSecurityPolicy());
+
     callback.Run(base::RefCountedString::TakeString(&html));
     return;
   }
@@ -627,16 +911,179 @@ bool LocalNtpSource::ShouldServiceRequest(
   return ShouldServiceRequestIOThread(url, resource_context, render_process_id);
 }
 
-std::string LocalNtpSource::GetContentSecurityPolicyScriptSrc() const {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
-
-  return GetContentSecurityPolicyScriptSrcIOThread();
+bool LocalNtpSource::ShouldAddContentSecurityPolicy() const {
+  // The Content Security Policy is served as a meta tag in local NTP html.
+  // We disable the HTTP Header version here to avoid a conflicting policy. See
+  // GetContentSecurityPolicy.
+  return false;
 }
 
-std::string LocalNtpSource::GetContentSecurityPolicyChildSrc() const {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
+std::string LocalNtpSource::GetContentSecurityPolicy() const {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+#if !defined(GOOGLE_CHROME_BUILD)
+  base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
+  if (command_line->HasSwitch(switches::kLocalNtpReload)) {
+    // While live-editing the local NTP files, turn off CSP.
+    return "script-src * 'unsafe-inline';";
+  }
+#endif  // !defined(GOOGLE_CHROME_BUILD)
 
-  return GetContentSecurityPolicyChildSrcIOThread();
+  // Allow embedding of the most visited iframe, as well as the account
+  // switcher and the notifications dropdown from the One Google Bar, and/or
+  // the iframe for interactive Doodles.
+  std::string child_src_csp =
+      base::StringPrintf("child-src %s https://*.google.com/;",
+                         chrome::kChromeSearchMostVisitedUrl);
+
+  // Restrict scripts in the main page to those listed here. However,
+  // 'strict-dynamic' allows those scripts to load dependencies not listed here.
+  std::string script_src_csp = base::StringPrintf(
+      "script-src 'strict-dynamic' 'sha256-%s' 'sha256-%s' 'sha256-%s' "
+      "'sha256-%s';",
+      LOCAL_NTP_JS_INTEGRITY, VOICE_JS_INTEGRITY,
+      CUSTOM_BACKGROUNDS_JS_INTEGRITY,
+      search_config_provider_->config_data_integrity().c_str());
+
+  return GetContentSecurityPolicyObjectSrc() +
+         GetContentSecurityPolicyStyleSrc() + GetContentSecurityPolicyImgSrc() +
+         child_src_csp + script_src_csp;
+}
+
+void LocalNtpSource::OnCollectionInfoAvailable() {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+
+  if (ntp_background_collections_requests_.empty())
+    return;
+
+  std::string js_errors =
+      "var coll_errors = " +
+      GetErrorDict(ntp_background_service_->collection_error_info());
+
+  scoped_refptr<base::RefCountedString> result;
+  std::string js;
+  base::JSONWriter::Write(
+      ConvertCollectionInfoToDict(ntp_background_service_->collection_info()),
+      &js);
+  js = "var coll = " + js + "; " + js_errors;
+  result = base::RefCountedString::TakeString(&js);
+
+  base::TimeTicks now = base::TimeTicks::Now();
+  for (const auto& request : ntp_background_collections_requests_) {
+    request.callback.Run(result);
+    base::TimeDelta delta = now - request.start_time;
+    UMA_HISTOGRAM_MEDIUM_TIMES(
+        "NewTabPage.BackgroundService.Collections.RequestLatency", delta);
+    // Any response where no collections are returned is considered a failure.
+    if (ntp_background_service_->collection_info().empty()) {
+      UMA_HISTOGRAM_MEDIUM_TIMES(
+          "NewTabPage.BackgroundService.Collections.RequestLatency.Failure",
+          delta);
+    } else {
+      UMA_HISTOGRAM_MEDIUM_TIMES(
+          "NewTabPage.BackgroundService.Collections.RequestLatency.Success",
+          delta);
+    }
+  }
+  ntp_background_collections_requests_.clear();
+}
+
+void LocalNtpSource::OnCollectionImagesAvailable() {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+
+  if (ntp_background_image_info_requests_.empty())
+    return;
+
+  std::string js_errors =
+      "var coll_img_errors = " +
+      GetErrorDict(ntp_background_service_->collection_images_error_info());
+
+  scoped_refptr<base::RefCountedString> result;
+  std::string js;
+  base::JSONWriter::Write(ConvertCollectionImageToDict(
+                              ntp_background_service_->collection_images()),
+                          &js);
+  js = "var coll_img = " + js + "; " + js_errors;
+  result = base::RefCountedString::TakeString(&js);
+
+  base::TimeTicks now = base::TimeTicks::Now();
+  for (const auto& request : ntp_background_image_info_requests_) {
+    request.callback.Run(result);
+    base::TimeDelta delta = now - request.start_time;
+    UMA_HISTOGRAM_MEDIUM_TIMES(
+        "NewTabPage.BackgroundService.Images.RequestLatency", delta);
+    // Any response where no images are returned is considered a failure.
+    if (ntp_background_service_->collection_images().empty()) {
+      UMA_HISTOGRAM_MEDIUM_TIMES(
+          "NewTabPage.BackgroundService.Images.RequestLatency.Failure", delta);
+    } else {
+      UMA_HISTOGRAM_MEDIUM_TIMES(
+          "NewTabPage.BackgroundService.Images.RequestLatency.Success", delta);
+    }
+  }
+  ntp_background_image_info_requests_.clear();
+}
+
+void LocalNtpSource::OnAlbumInfoAvailable() {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+
+  if (ntp_background_albums_requests_.empty())
+    return;
+
+  std::string js_errors =
+      "var albums_errors = " +
+      GetErrorDict(ntp_background_service_->album_error_info());
+
+  scoped_refptr<base::RefCountedString> result;
+  std::string js;
+  base::JSONWriter::Write(
+      ConvertAlbumInfoToDict(ntp_background_service_->album_info()), &js);
+  js = "var albums = " + js + "; " + js_errors;
+  result = base::RefCountedString::TakeString(&js);
+
+  base::TimeTicks now = base::TimeTicks::Now();
+  for (const auto& request : ntp_background_albums_requests_) {
+    request.callback.Run(result);
+    base::TimeDelta delta = now - request.start_time;
+    UMA_HISTOGRAM_MEDIUM_TIMES(
+        "NewTabPage.BackgroundService.Albums.RequestLatency", delta);
+    // TODO(ramyan): Define and capture latency for failed requests.
+  }
+  ntp_background_albums_requests_.clear();
+}
+
+void LocalNtpSource::OnAlbumPhotosAvailable() {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+
+  if (ntp_background_photos_requests_.empty())
+    return;
+
+  std::string js_errors =
+      "var photos_errors = " +
+      GetErrorDict(ntp_background_service_->album_photos_error_info());
+
+  scoped_refptr<base::RefCountedString> result;
+  std::string js;
+  base::JSONWriter::Write(
+      ConvertAlbumPhotosToDict(ntp_background_service_->album_photos()), &js);
+  js = "var photos = " + js + "; " + js_errors;
+  result = base::RefCountedString::TakeString(&js);
+
+  base::TimeTicks now = base::TimeTicks::Now();
+  for (const auto& request : ntp_background_photos_requests_) {
+    request.callback.Run(result);
+    base::TimeDelta delta = now - request.start_time;
+    UMA_HISTOGRAM_MEDIUM_TIMES(
+        "NewTabPage.BackgroundService.Photos.RequestLatency", delta);
+    // TODO(ramyan): Define and capture latency for failed requests.
+  }
+  ntp_background_photos_requests_.clear();
+}
+
+void LocalNtpSource::OnNtpBackgroundServiceShuttingDown() {
+  DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+
+  ntp_background_service_observer_.RemoveAll();
+  ntp_background_service_ = nullptr;
 }
 
 void LocalNtpSource::OnOneGoogleBarDataUpdated() {
@@ -682,6 +1129,16 @@ void LocalNtpSource::ServeOneGoogleBar(
   }
   one_google_bar_requests_.clear();
 }
+
+LocalNtpSource::NtpBackgroundRequest::NtpBackgroundRequest(
+    base::TimeTicks start_time,
+    const content::URLDataSource::GotDataCallback& callback)
+    : start_time(start_time), callback(callback) {}
+
+LocalNtpSource::NtpBackgroundRequest::NtpBackgroundRequest(
+    const NtpBackgroundRequest&) = default;
+
+LocalNtpSource::NtpBackgroundRequest::~NtpBackgroundRequest() = default;
 
 LocalNtpSource::OneGoogleBarRequest::OneGoogleBarRequest(
     base::TimeTicks start_time,

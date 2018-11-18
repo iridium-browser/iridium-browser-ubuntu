@@ -97,7 +97,7 @@ class TextTrackCue : public EventTargetWithInlineData {
   DEFINE_ATTRIBUTE_EVENT_LISTENER(enter);
   DEFINE_ATTRIBUTE_EVENT_LISTENER(exit);
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  protected:
   TextTrackCue(double start, double end);
@@ -109,7 +109,7 @@ class TextTrackCue : public EventTargetWithInlineData {
   void CueWillChange();
   virtual void CueDidChange(
       CueMutationAffectsOrder = kCueMutationDoesNotAffectOrder);
-  DispatchEventResult DispatchEventInternal(Event*) override;
+  DispatchEventResult DispatchEventInternal(Event&) override;
 
  private:
   AtomicString id_;

@@ -33,6 +33,8 @@ class TestSessionControllerClient : public ash::mojom::SessionControllerClient {
   explicit TestSessionControllerClient(SessionController* controller);
   ~TestSessionControllerClient() override;
 
+  static void DisableAutomaticallyProvideSigninPref();
+
   // Initialize using existing info in |controller| and bind as its client.
   void InitializeAndBind();
 
@@ -45,6 +47,7 @@ class TestSessionControllerClient : public ash::mojom::SessionControllerClient {
   void SetAddUserSessionPolicy(AddUserSessionPolicy policy);
   void SetSessionState(session_manager::SessionState state);
   void SetIsRunningInAppMode(bool app_mode);
+  void SetIsDemoSession();
 
   // Creates the |count| pre-defined user sessions. The users are named by
   // numbers using "user%d@tray" template. The first user is set as active user
@@ -62,7 +65,8 @@ class TestSessionControllerClient : public ash::mojom::SessionControllerClient {
       user_manager::UserType user_type = user_manager::USER_TYPE_REGULAR,
       bool enable_settings = true,
       bool provide_pref_service = true,
-      bool is_new_profile = false);
+      bool is_new_profile = false,
+      const std::string& service_user_id = std::string());
 
   // Creates a test PrefService and associates it with the user.
   void ProvidePrefServiceForUser(const AccountId& account_id);

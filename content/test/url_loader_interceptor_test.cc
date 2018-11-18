@@ -18,6 +18,7 @@
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/public/test/test_utils.h"
 #include "content/shell/browser/shell.h"
+#include "mojo/public/cpp/system/data_pipe_utils.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "services/network/public/cpp/features.h"
 #include "services/network/test/test_url_loader_client.h"
@@ -51,9 +52,6 @@ class URLLoaderInterceptorTest : public ContentBrowserTest {
 };
 
 IN_PROC_BROWSER_TEST_F(URLLoaderInterceptorTest, MonitorFrame) {
-  if (!base::FeatureList::IsEnabled(network::features::kNetworkService))
-    return;  // Depends on http://crbug.com/747130.
-
   bool seen = false;
   GURL url = GetPageURL();
   URLLoaderInterceptor interceptor(base::BindLambdaForTesting(
@@ -70,9 +68,6 @@ IN_PROC_BROWSER_TEST_F(URLLoaderInterceptorTest, MonitorFrame) {
 }
 
 IN_PROC_BROWSER_TEST_F(URLLoaderInterceptorTest, InterceptFrame) {
-  if (!base::FeatureList::IsEnabled(network::features::kNetworkService))
-    return;  // Depends on http://crbug.com/747130.
-
   GURL url = GetPageURL();
   URLLoaderInterceptor interceptor(base::BindLambdaForTesting(
       [&](URLLoaderInterceptor::RequestParams* params) {
@@ -143,6 +138,79 @@ IN_PROC_BROWSER_TEST_F(URLLoaderInterceptorTest, InterceptBrowser) {
       net::MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS));
   client.RunUntilComplete();
   EXPECT_EQ(net::ERR_FAILED, client.completion_status().error_code);
+}
+
+IN_PROC_BROWSER_TEST_F(URLLoaderInterceptorTest, WriteResponse) {
+  std::string body("<html>Hello</html>");
+  network::TestURLLoaderClient client;
+  URLLoaderInterceptor::WriteResponse(
+      "HTTP/1.1 200 OK\nContent-type: text/html\n\n", body, &client);
+  client.RunUntilComplete();
+
+  EXPECT_EQ(client.response_head().headers->response_code(), 200);
+  EXPECT_EQ(client.response_head().mime_type, "text/html");
+
+  std::string response;
+  EXPECT_TRUE(
+      mojo::BlockingCopyToString(client.response_body_release(), &response));
+  EXPECT_EQ(response, body);
+}
+
+// Passes in headers (e.g. not reading from disk).
+IN_PROC_BROWSER_TEST_F(URLLoaderInterceptorTest, WriteResponseFromFile1) {
+  base::ScopedAllowBlockingForTesting allow_io;
+  std::string body("<!doctype html>\n<p>hello</p>\n");
+  std::string headers("HTTP/1.1 404\n");
+  network::TestURLLoaderClient client;
+  URLLoaderInterceptor::WriteResponse("content/test/data/hello.html", &client,
+                                      &headers);
+  client.RunUntilComplete();
+
+  EXPECT_EQ(client.response_head().headers->response_code(), 404);
+
+  std::string response;
+  EXPECT_TRUE(
+      mojo::BlockingCopyToString(client.response_body_release(), &response));
+  EXPECT_EQ(response, body);
+}
+
+// Headers read from disk.
+IN_PROC_BROWSER_TEST_F(URLLoaderInterceptorTest, WriteResponseFromFile2) {
+  base::ScopedAllowBlockingForTesting allow_io;
+  std::string body("<!doctype html>\n<p>hello</p>\n");
+  network::TestURLLoaderClient client;
+  URLLoaderInterceptor::WriteResponse("content/test/data/hello.html", &client);
+  client.RunUntilComplete();
+
+  EXPECT_EQ(client.response_head().headers->response_code(), 200);
+
+  std::string mime_type;
+  EXPECT_TRUE(client.response_head().headers->GetMimeType(&mime_type));
+  EXPECT_EQ(mime_type, "text/html");
+
+  std::string response;
+  EXPECT_TRUE(
+      mojo::BlockingCopyToString(client.response_body_release(), &response));
+  EXPECT_EQ(response, body);
+}
+
+// Headers generated.
+IN_PROC_BROWSER_TEST_F(URLLoaderInterceptorTest, WriteResponseFromFile3) {
+  base::ScopedAllowBlockingForTesting allow_io;
+  network::TestURLLoaderClient client;
+  URLLoaderInterceptor::WriteResponse("content/test/data/empty.html", &client);
+  client.RunUntilComplete();
+
+  EXPECT_EQ(client.response_head().headers->response_code(), 200);
+
+  std::string mime_type;
+  EXPECT_TRUE(client.response_head().headers->GetMimeType(&mime_type));
+  EXPECT_EQ(mime_type, "text/html");
+
+  std::string response;
+  EXPECT_TRUE(
+      mojo::BlockingCopyToString(client.response_body_release(), &response));
+  EXPECT_TRUE(response.empty());
 }
 
 }  // namespace

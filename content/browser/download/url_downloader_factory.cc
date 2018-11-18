@@ -5,8 +5,10 @@
 #include "content/browser/download/url_downloader_factory.h"
 
 #include "components/download/public/common/download_item.h"
+#include "components/download/public/common/download_url_loader_factory_getter.h"
 #include "content/browser/download/download_request_core.h"
 #include "content/browser/download/url_downloader.h"
+#include "net/url_request/url_request_context_getter.h"
 
 namespace content {
 
@@ -18,11 +20,13 @@ download::UrlDownloadHandler::UniqueUrlDownloadHandlerPtr
 UrlDownloaderFactory::CreateUrlDownloadHandler(
     std::unique_ptr<download::DownloadUrlParameters> params,
     base::WeakPtr<download::UrlDownloadHandler::Delegate> delegate,
-    scoped_refptr<network::SharedURLLoaderFactory> shared_url_loader_factory,
+    scoped_refptr<download::DownloadURLLoaderFactoryGetter>
+        url_loader_factory_getter,
+    scoped_refptr<net::URLRequestContextGetter> url_request_context_getter,
     const scoped_refptr<base::SingleThreadTaskRunner>& task_runner) {
   std::unique_ptr<net::URLRequest> url_request =
       DownloadRequestCore::CreateRequestOnIOThread(
-          download::DownloadItem::kInvalidId, params.get());
+          true, params.get(), std::move(url_request_context_getter));
 
   return download::UrlDownloadHandler::UniqueUrlDownloadHandlerPtr(
       UrlDownloader::BeginDownload(delegate, std::move(url_request),

@@ -102,6 +102,23 @@ class CONTENT_EXPORT FrameTree {
 
   FrameTreeNode* root() const { return root_; }
 
+  // Delegates for RenderFrameHosts, RenderViewHosts, RenderWidgetHosts and
+  // RenderFrameHostManagers. These can be kept centrally on the FrameTree
+  // because they are expected to be the same for all frames on a given
+  // FrameTree.
+  RenderFrameHostDelegate* render_frame_delegate() {
+    return render_frame_delegate_;
+  }
+  RenderViewHostDelegate* render_view_delegate() {
+    return render_view_delegate_;
+  }
+  RenderWidgetHostDelegate* render_widget_delegate() {
+    return render_widget_delegate_;
+  }
+  RenderFrameHostManager::Delegate* manager_delegate() {
+    return manager_delegate_;
+  }
+
   // Returns the FrameTreeNode with the given |frame_tree_node_id| if it is part
   // of this FrameTree.
   FrameTreeNode* FindByID(int frame_tree_node_id);
@@ -183,6 +200,7 @@ class CONTENT_EXPORT FrameTree {
   RenderViewHostImpl* CreateRenderViewHost(SiteInstance* site_instance,
                                            int32_t routing_id,
                                            int32_t main_frame_routing_id,
+                                           int32_t widget_routing_id,
                                            bool swapped_out,
                                            bool hidden);
 

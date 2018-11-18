@@ -4,12 +4,14 @@
 
 #include "components/offline_pages/core/prefetch/prefetch_dispatcher_impl.h"
 
+#include <algorithm>
 #include <utility>
 
 #include "base/bind.h"
 #include "base/guid.h"
+#include "base/strings/utf_string_conversions.h"
+#include "base/task/post_task.h"
 #include "base/task_runner.h"
-#include "base/task_scheduler/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/offline_pages/core/client_namespace_constants.h"
 #include "components/offline_pages/core/offline_event_logger.h"
@@ -32,47 +34,38 @@
 #include "components/offline_pages/core/prefetch/page_bundle_update_task.h"
 #include "components/offline_pages/core/prefetch/prefetch_background_task.h"
 #include "components/offline_pages/core/prefetch/prefetch_background_task_handler.h"
-#include "components/offline_pages/core/prefetch/prefetch_configuration.h"
 #include "components/offline_pages/core/prefetch/prefetch_downloader.h"
 #include "components/offline_pages/core/prefetch/prefetch_gcm_handler.h"
 #include "components/offline_pages/core/prefetch/prefetch_importer.h"
 #include "components/offline_pages/core/prefetch/prefetch_network_request_factory.h"
+#include "components/offline_pages/core/prefetch/prefetch_prefs.h"
 #include "components/offline_pages/core/prefetch/prefetch_service.h"
 #include "components/offline_pages/core/prefetch/prefetch_types.h"
 #include "components/offline_pages/core/prefetch/sent_get_operation_cleanup_task.h"
 #include "components/offline_pages/core/prefetch/stale_entry_finalizer_task.h"
 #include "components/offline_pages/core/prefetch/suggested_articles_observer.h"
+#include "components/offline_pages/core/prefetch/suggestions_provider.h"
 #include "components/offline_pages/core/prefetch/thumbnail_fetcher.h"
-#include "components/offline_pages/core/task.h"
+#include "components/prefs/pref_service.h"
 #include "url/gurl.h"
 
 namespace offline_pages {
 
 namespace {
+
 void DeleteBackgroundTaskHelper(std::unique_ptr<PrefetchBackgroundTask> task) {
   task.reset();
 }
 
-void FetchComplete(OfflinePageModel* offline_model,
-                   int64_t offline_id,
-                   const std::string& image_data) {
-  if (image_data.empty())
-    return;
-  // Thumbnails are marked to expire after this delta. Expired thumbnails are
-  // eventually deleted if their offline_id does not correspond to an offline
-  // item. Two days gives us plenty of time so that the prefetched item can be
-  // imported into the offline item database.
-  const base::TimeDelta kThumbnailExpirationDelta =
-      base::TimeDelta::FromDays(2);
-
-  offline_model->StoreThumbnail(OfflinePageThumbnail(
-      offline_id, base::Time::Now() + kThumbnailExpirationDelta, image_data));
+PrefetchURL SuggestionToPrefetchURL(PrefetchSuggestion suggestion) {
+  return PrefetchURL(suggestion.article_url.spec(), suggestion.article_url,
+                     base::UTF8ToUTF16(suggestion.article_title));
 }
 
 }  // namespace
 
-PrefetchDispatcherImpl::PrefetchDispatcherImpl()
-    : task_queue_(this), weak_factory_(this) {}
+PrefetchDispatcherImpl::PrefetchDispatcherImpl(PrefService* pref_service)
+    : pref_service_(pref_service), task_queue_(this), weak_factory_(this) {}
 
 PrefetchDispatcherImpl::~PrefetchDispatcherImpl() = default;
 
@@ -99,7 +92,7 @@ void PrefetchDispatcherImpl::EnsureTaskScheduled() {
 void PrefetchDispatcherImpl::AddCandidatePrefetchURLs(
     const std::string& name_space,
     const std::vector<PrefetchURL>& prefetch_urls) {
-  if (!service_->GetPrefetchConfiguration()->IsPrefetchingEnabled())
+  if (!prefetch_prefs::IsEnabled(pref_service_))
     return;
 
   service_->GetLogger()->RecordActivity("Dispatcher: Received " +
@@ -128,9 +121,24 @@ void PrefetchDispatcherImpl::AddCandidatePrefetchURLs(
   service_->GetOfflineMetricsCollector()->OnPrefetchEnabled();
 }
 
+void PrefetchDispatcherImpl::NewSuggestionsAvailable(
+    SuggestionsProvider* suggestions_provider) {
+  if (!prefetch_prefs::IsEnabled(pref_service_))
+    return;
+  suggestions_provider->GetCurrentArticleSuggestions(base::BindOnce(
+      &PrefetchDispatcherImpl::AddSuggestions, weak_factory_.GetWeakPtr()));
+}
+
+void PrefetchDispatcherImpl::RemoveSuggestion(const GURL& url) {
+  if (!prefetch_prefs::IsEnabled(pref_service_))
+    return;
+  // TODO(https://crbug.com/841516): to be implemented soon.
+  NOTIMPLEMENTED();
+}
+
 void PrefetchDispatcherImpl::RemoveAllUnprocessedPrefetchURLs(
     const std::string& name_space) {
-  if (!service_->GetPrefetchConfiguration()->IsPrefetchingEnabled())
+  if (!prefetch_prefs::IsEnabled(pref_service_))
     return;
 
   NOTIMPLEMENTED();
@@ -138,7 +146,7 @@ void PrefetchDispatcherImpl::RemoveAllUnprocessedPrefetchURLs(
 
 void PrefetchDispatcherImpl::RemovePrefetchURLsByClientId(
     const ClientId& client_id) {
-  if (!service_->GetPrefetchConfiguration()->IsPrefetchingEnabled())
+  if (!prefetch_prefs::IsEnabled(pref_service_))
     return;
   PrefetchStore* prefetch_store = service_->GetPrefetchStore();
   task_queue_.AddTask(std::make_unique<FinalizeDismissedUrlSuggestionTask>(
@@ -147,7 +155,7 @@ void PrefetchDispatcherImpl::RemovePrefetchURLsByClientId(
 
 void PrefetchDispatcherImpl::BeginBackgroundTask(
     std::unique_ptr<PrefetchBackgroundTask> background_task) {
-  if (!service_->GetPrefetchConfiguration()->IsPrefetchingEnabled())
+  if (!prefetch_prefs::IsEnabled(pref_service_))
     return;
   service_->GetLogger()->RecordActivity(
       "Dispatcher: Beginning background task.");
@@ -223,23 +231,34 @@ void PrefetchDispatcherImpl::QueueActionTasks() {
   std::unique_ptr<Task> get_operation_task = std::make_unique<GetOperationTask>(
       service_->GetPrefetchStore(),
       service_->GetPrefetchNetworkRequestFactory(),
-      base::Bind(
+      base::BindOnce(
           &PrefetchDispatcherImpl::DidGenerateBundleOrGetOperationRequest,
           weak_factory_.GetWeakPtr(), "GetOperationRequest"));
   task_queue_.AddTask(std::move(get_operation_task));
 
   std::unique_ptr<Task> generate_page_bundle_task =
       std::make_unique<GeneratePageBundleTask>(
-          service_->GetPrefetchStore(), service_->GetPrefetchGCMHandler(),
+          this, service_->GetPrefetchStore(), service_->GetPrefetchGCMHandler(),
           service_->GetPrefetchNetworkRequestFactory(),
-          base::Bind(
+          base::BindOnce(
               &PrefetchDispatcherImpl::DidGenerateBundleOrGetOperationRequest,
               weak_factory_.GetWeakPtr(), "GeneratePageBundleRequest"));
   task_queue_.AddTask(std::move(generate_page_bundle_task));
 }
 
+void PrefetchDispatcherImpl::AddSuggestions(
+    std::vector<PrefetchSuggestion> suggestions) {
+  std::vector<PrefetchURL> urls;
+  urls.reserve(suggestions.size());
+
+  for (auto& suggestion : suggestions) {
+    urls.push_back(SuggestionToPrefetchURL(std::move(suggestion)));
+  }
+  AddCandidatePrefetchURLs(kSuggestedArticlesNamespace, urls);
+}
+
 void PrefetchDispatcherImpl::StopBackgroundTask() {
-  if (!service_->GetPrefetchConfiguration()->IsPrefetchingEnabled())
+  if (!prefetch_prefs::IsEnabled(pref_service_))
     return;
 
   service_->GetLogger()->RecordActivity(
@@ -272,7 +291,7 @@ void PrefetchDispatcherImpl::DisposeTask() {
 
 void PrefetchDispatcherImpl::GCMOperationCompletedMessageReceived(
     const std::string& operation_name) {
-  if (!service_->GetPrefetchConfiguration()->IsPrefetchingEnabled())
+  if (!prefetch_prefs::IsEnabled(pref_service_))
     return;
 
   service_->GetLogger()->RecordActivity("Dispatcher: Received GCM message.");
@@ -297,22 +316,24 @@ void PrefetchDispatcherImpl::DidGenerateBundleOrGetOperationRequest(
   task_queue_.AddTask(std::make_unique<PageBundleUpdateTask>(
       prefetch_store, this, operation_name, pages));
 
-  if (background_task_ && status != PrefetchRequestStatus::SUCCESS) {
+  if (background_task_ && status != PrefetchRequestStatus::kSuccess) {
     PrefetchBackgroundTaskRescheduleType reschedule_type =
         PrefetchBackgroundTaskRescheduleType::NO_RESCHEDULE;
     switch (status) {
-      case PrefetchRequestStatus::SHOULD_RETRY_WITH_BACKOFF:
+      case PrefetchRequestStatus::kShouldRetryWithBackoff:
         reschedule_type =
             PrefetchBackgroundTaskRescheduleType::RESCHEDULE_WITH_BACKOFF;
         break;
-      case PrefetchRequestStatus::SHOULD_RETRY_WITHOUT_BACKOFF:
+      case PrefetchRequestStatus::kShouldRetryWithoutBackoff:
         reschedule_type =
             PrefetchBackgroundTaskRescheduleType::RESCHEDULE_WITHOUT_BACKOFF;
         break;
-      case PrefetchRequestStatus::SHOULD_SUSPEND:
+      case PrefetchRequestStatus::kShouldSuspendForbidden:
+      case PrefetchRequestStatus::kShouldSuspendNotImplemented:
+      case PrefetchRequestStatus::kShouldSuspendBlockedByAdministrator:
         reschedule_type = PrefetchBackgroundTaskRescheduleType::SUSPEND;
         break;
-      default:
+      case PrefetchRequestStatus::kSuccess:
         NOTREACHED();
         break;
     }
@@ -332,9 +353,17 @@ void PrefetchDispatcherImpl::CleanupDownloads(
       success_downloads));
 }
 
+void PrefetchDispatcherImpl::GeneratePageBundleRequested(
+    std::unique_ptr<PrefetchDispatcher::IdsVector> ids) {
+  // Reverse the order so that the fresher items are last. This is done because
+  // the ids are popped from the end of the vector.
+  std::reverse(ids->begin(), ids->end());
+  FetchThumbnails(std::move(ids), /* is_first_attempt= */ true);
+}
+
 void PrefetchDispatcherImpl::DownloadCompleted(
     const PrefetchDownloadResult& download_result) {
-  if (!service_->GetPrefetchConfiguration()->IsPrefetchingEnabled())
+  if (!prefetch_prefs::IsEnabled(pref_service_))
     return;
 
   service_->GetLogger()->RecordActivity(
@@ -353,18 +382,15 @@ void PrefetchDispatcherImpl::DownloadCompleted(
 
 void PrefetchDispatcherImpl::ItemDownloaded(int64_t offline_id,
                                             const ClientId& client_id) {
-  DCHECK(client_id.name_space == kSuggestedArticlesNamespace);
-  auto complete_callback = base::BindOnce(
-      &FetchComplete, base::Unretained(service_->GetOfflinePageModel()),
-      offline_id);
-  service_->GetThumbnailFetcher()->FetchSuggestionImageData(
-      client_id, std::move(complete_callback));
+  auto ids = std::make_unique<IdsVector>();
+  ids->emplace_back(offline_id, client_id);
+  FetchThumbnails(std::move(ids), /* is_first_attempt= */ false);
 }
 
 void PrefetchDispatcherImpl::ArchiveImported(int64_t offline_id, bool success) {
   DCHECK_NE(OfflinePageModel::kInvalidOfflineId, offline_id);
 
-  if (!service_->GetPrefetchConfiguration()->IsPrefetchingEnabled())
+  if (!prefetch_prefs::IsEnabled(pref_service_))
     return;
 
   service_->GetLogger()->RecordActivity("Importing archive " +
@@ -394,6 +420,65 @@ void PrefetchDispatcherImpl::LogRequestResult(
         "Response for page: " + page.url +
         "; status=" + std::to_string(static_cast<int>(page.status)));
   }
+}
+
+void PrefetchDispatcherImpl::FetchThumbnails(
+    std::unique_ptr<PrefetchDispatcher::IdsVector> remaining_ids,
+    bool is_first_attempt) {
+  if (remaining_ids->empty())
+    return;
+
+  // Zine/Feed
+  // TODO(https://crbug.com/841516): Implement thumbnail fetching with the Feed.
+  if (!service_->GetThumbnailFetcher())
+    return;
+
+  int64_t offline_id = remaining_ids->back().first;
+  ClientId client_id = std::move(remaining_ids->back().second);
+  DCHECK(client_id.name_space == kSuggestedArticlesNamespace);
+  remaining_ids->pop_back();
+
+  service_->GetOfflinePageModel()->HasThumbnailForOfflineId(
+      offline_id,
+      base::BindOnce(&PrefetchDispatcherImpl::ThumbnailExistenceChecked,
+                     base::Unretained(this), offline_id, std::move(client_id),
+                     std::move(remaining_ids), is_first_attempt));
+}
+
+void PrefetchDispatcherImpl::ThumbnailExistenceChecked(
+    const int64_t offline_id,
+    ClientId client_id,
+    std::unique_ptr<PrefetchDispatcher::IdsVector> remaining_ids,
+    bool is_first_attempt,
+    bool thumbnail_exists) {
+  if (thumbnail_exists) {
+    FetchThumbnails(std::move(remaining_ids), is_first_attempt);
+  } else {
+    auto complete_callback = base::BindOnce(
+        &PrefetchDispatcherImpl::ThumbnailFetchComplete, base::Unretained(this),
+        offline_id, std::move(remaining_ids), is_first_attempt);
+    service_->GetThumbnailFetcher()->FetchSuggestionImageData(
+        client_id, is_first_attempt, std::move(complete_callback));
+  }
+}
+
+void PrefetchDispatcherImpl::ThumbnailFetchComplete(
+    const int64_t offline_id,
+    std::unique_ptr<PrefetchDispatcher::IdsVector> remaining_ids,
+    bool is_first_attempt,
+    const std::string& image_data) {
+  // Thumbnails are marked to expire after this delta. Expired thumbnails are
+  // eventually deleted if their offline_id does not correspond to an offline
+  // item. Two days gives us plenty of time so that the prefetched item can be
+  // imported into the offline item database.
+  const base::TimeDelta kThumbnailExpirationDelta =
+      base::TimeDelta::FromDays(2);
+
+  if (!image_data.empty()) {
+    service_->GetOfflinePageModel()->StoreThumbnail(OfflinePageThumbnail(
+        offline_id, base::Time::Now() + kThumbnailExpirationDelta, image_data));
+  }
+  FetchThumbnails(std::move(remaining_ids), is_first_attempt);
 }
 
 }  // namespace offline_pages

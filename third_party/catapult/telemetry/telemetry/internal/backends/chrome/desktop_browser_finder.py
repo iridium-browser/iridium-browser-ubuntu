@@ -11,6 +11,7 @@ import tempfile
 
 import dependency_manager  # pylint: disable=import-error
 
+from py_utils import file_util
 from telemetry.core import exceptions
 from telemetry.core import platform as platform_module
 from telemetry.internal.backends.chrome import chrome_startup_args
@@ -40,6 +41,7 @@ class PossibleDesktopBrowser(possible_browser.PossibleBrowser):
     self._is_content_shell = is_content_shell
     self._browser_directory = browser_directory
     self._profile_directory = None
+    self._extra_browser_args = set()
     self.is_local_build = is_local_build
 
   def __repr__(self):
@@ -59,6 +61,13 @@ class PossibleDesktopBrowser(possible_browser.PossibleBrowser):
     if os.path.exists(self._local_executable):
       return os.path.getmtime(self._local_executable)
     return -1
+
+  @property
+  def extra_browser_args(self):
+    return list(self._extra_browser_args)
+
+  def AddExtraBrowserArg(self, arg):
+    self._extra_browser_args.add(arg)
 
   def _InitPlatformIfNeeded(self):
     if self._platform:
@@ -85,6 +94,9 @@ class PossibleDesktopBrowser(possible_browser.PossibleBrowser):
     self._profile_directory = tempfile.mkdtemp()
     if source_profile:
       logging.info('Seeding profile directory from: %s', source_profile)
+      # copytree requires the directory to not exist, so just delete the empty
+      # directory and re-create it.
+      os.rmdir(self._profile_directory)
       shutil.copytree(source_profile, self._profile_directory)
 
       # When using an existing profile directory, we need to make sure to
@@ -95,13 +107,20 @@ class PossibleDesktopBrowser(possible_browser.PossibleBrowser):
       if os.path.isfile(devtools_file_path):
         os.remove(devtools_file_path)
 
+    # Copy data into the profile if it hasn't already been added via
+    # |source_profile|.
+    for source, dest in self._browser_options.profile_files_to_copy:
+      full_dest_path = os.path.join(self._profile_directory, dest)
+      if not os.path.exists(full_dest_path):
+        file_util.CopyFileWithIntermediateDirectories(source, full_dest_path)
+
   def _TearDownEnvironment(self):
     if self._profile_directory and os.path.exists(self._profile_directory):
       # Remove the profile directory, which was hosted on a temp dir.
       shutil.rmtree(self._profile_directory, ignore_errors=True)
       self._profile_directory = None
 
-  def Create(self):
+  def Create(self, clear_caches=True):
     if self._flash_path and not os.path.exists(self._flash_path):
       logging.warning(
           'Could not find Flash at %s. Continuing without Flash.\n'
@@ -111,12 +130,16 @@ class PossibleDesktopBrowser(possible_browser.PossibleBrowser):
 
     self._InitPlatformIfNeeded()
 
-    startup_args = self.GetBrowserStartupArgs(self._browser_options)
 
     num_retries = 3
     for x in range(0, num_retries):
       returned_browser = None
       try:
+        # Note: we need to regenerate the browser startup arguments for each
+        # browser startup attempt since the state of the startup arguments
+        # may not be guaranteed the same each time
+        # For example, see: crbug.com/865895#c17
+        startup_args = self.GetBrowserStartupArgs(self._browser_options)
         returned_browser = None
 
         browser_backend = desktop_browser_backend.DesktopBrowserBackend(
@@ -124,7 +147,9 @@ class PossibleDesktopBrowser(possible_browser.PossibleBrowser):
             self._browser_directory, self._profile_directory,
             self._local_executable, self._flash_path, self._is_content_shell)
 
-        self._ClearCachesOnStart()
+        # TODO(crbug.com/811244): Remove when this is handled by shared state.
+        if clear_caches:
+          self._ClearCachesOnStart()
 
         returned_browser = browser.Browser(
             browser_backend, self._platform_backend, startup_args)
@@ -144,6 +169,7 @@ class PossibleDesktopBrowser(possible_browser.PossibleBrowser):
         # Attempt to clean up things left over from the failed browser startup.
         try:
           if returned_browser:
+            returned_browser.DumpStateUponFailure()
             returned_browser.Close()
         except Exception: # pylint: disable=broad-except
           pass
@@ -179,6 +205,9 @@ class PossibleDesktopBrowser(possible_browser.PossibleBrowser):
                          .GetChromeTraceConfigFile())
     if trace_config_file:
       startup_args.append('--trace-config-file=%s' % trace_config_file)
+
+    startup_args.extend(
+        [a for a in self.extra_browser_args if a not in startup_args])
 
     return startup_args
 
@@ -235,8 +264,7 @@ def FindAllAvailableBrowsers(finder_options, device):
     return []
 
   has_x11_display = True
-  if (sys.platform.startswith('linux') and
-      os.getenv('DISPLAY') == None):
+  if sys.platform.startswith('linux') and os.getenv('DISPLAY') is None:
     has_x11_display = False
 
   os_name = platform_module.GetHostPlatform().GetOSName()

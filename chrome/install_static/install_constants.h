@@ -65,13 +65,17 @@ struct InstallConstants {
   // name registered with Default Programs on Windows.
   const wchar_t* base_app_name;
 
-  // The unsuffixed portion of the AppUserModelId. The AppUserModelId is used to
-  // group an app's windows together on the Windows taskbar along with its
+  // Used for the following:
+  // * The unsuffixed portion of the AppUserModelId. The AppUserModelId is used
+  // to group an app's windows together on the Windows taskbar along with its
   // corresponding shortcuts; see
   // https://msdn.microsoft.com/library/windows/desktop/dd378459.aspx for more
   // information. Use ShellUtil::GetBrowserModelId to get the suffixed value --
   // it is almost never correct to use the unsuffixed (base) portion of this id
   // directly.
+  // * The prefix for the Elevation Service Name. See
+  // install_static::GetElevationServiceDisplayName() and
+  // install_static::GetElevationServiceName().
   const wchar_t* base_app_id;
 
   // The prefix for the browser's ProgID. This prefix may be no more than 11
@@ -96,6 +100,9 @@ struct InstallConstants {
   // activation via user interaction with a toast notification in the Action
   // Center.
   CLSID toast_activator_clsid;
+
+  // The CLSID of the COM server that provides silent elevation functionality.
+  CLSID elevator_clsid;
 
   // The default name for this mode's update channel.
   const wchar_t* default_channel_name;
@@ -124,6 +131,9 @@ struct InstallConstants {
 
   // The resource id of this mode's main application icon.
   int16_t app_icon_resource_id;
+
+  // The app container sid prefix for sandbox.
+  const wchar_t* sandbox_sid_prefix;
 };
 
 }  // namespace install_static

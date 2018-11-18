@@ -9,8 +9,10 @@
 #include "base/metrics/histogram_macros.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/policy/policy_oauth2_token_fetcher.h"
+#include "chrome/browser/net/system_network_context_manager.h"
 #include "components/policy/core/browser/browser_policy_connector.h"
 #include "net/url_request/url_request_context_getter.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 
 namespace policy {
 
@@ -34,22 +36,6 @@ WildcardLoginChecker::WildcardLoginChecker() {}
 
 WildcardLoginChecker::~WildcardLoginChecker() {}
 
-void WildcardLoginChecker::StartWithSigninContext(
-    scoped_refptr<net::URLRequestContextGetter> signin_context,
-    StatusCallback callback) {
-  CHECK(!token_fetcher_);
-  CHECK(!user_info_fetcher_);
-
-  start_timestamp_ = base::Time::Now();
-  callback_ = std::move(callback);
-
-  token_fetcher_.reset(PolicyOAuth2TokenFetcher::CreateInstance());
-  token_fetcher_->StartWithSigninContext(
-      signin_context.get(), g_browser_process->system_request_context(),
-      base::Bind(&WildcardLoginChecker::OnPolicyTokenFetched,
-                 base::Unretained(this)));
-}
-
 void WildcardLoginChecker::StartWithRefreshToken(
     const std::string& refresh_token,
     StatusCallback callback) {
@@ -61,7 +47,9 @@ void WildcardLoginChecker::StartWithRefreshToken(
 
   token_fetcher_.reset(PolicyOAuth2TokenFetcher::CreateInstance());
   token_fetcher_->StartWithRefreshToken(
-      refresh_token, g_browser_process->system_request_context(),
+      refresh_token,
+      g_browser_process->system_network_context_manager()
+          ->GetSharedURLLoaderFactory(),
       base::Bind(&WildcardLoginChecker::OnPolicyTokenFetched,
                  base::Unretained(this)));
 }
@@ -118,8 +106,8 @@ void WildcardLoginChecker::OnPolicyTokenFetched(
 
 void WildcardLoginChecker::StartUserInfoFetcher(
     const std::string& access_token) {
-  user_info_fetcher_.reset(
-      new UserInfoFetcher(this, g_browser_process->system_request_context()));
+  user_info_fetcher_.reset(new UserInfoFetcher(
+      this, g_browser_process->shared_url_loader_factory()));
   user_info_fetcher_->Start(access_token);
 }
 

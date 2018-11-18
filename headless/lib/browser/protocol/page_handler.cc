@@ -11,17 +11,17 @@
 namespace headless {
 namespace protocol {
 
-#if BUILDFLAG(ENABLE_BASIC_PRINTING)
+#if BUILDFLAG(ENABLE_PRINTING)
 namespace {
+
 // The max and min value should match the ones in scaling_settings.html.
 // Update both files at the same time.
 const double kScaleMaxVal = 200;
 const double kScaleMinVal = 10;
 
-static void PDFCreated(
-    std::unique_ptr<PageHandler::PrintToPDFCallback> callback,
-    HeadlessPrintManager::PrintResult print_result,
-    const std::string& data) {
+void PDFCreated(std::unique_ptr<PageHandler::PrintToPDFCallback> callback,
+                HeadlessPrintManager::PrintResult print_result,
+                const std::string& data) {
   std::unique_ptr<base::DictionaryValue> response;
   if (print_result == HeadlessPrintManager::PRINT_SUCCESS) {
     std::string base_64_data;
@@ -34,7 +34,7 @@ static void PDFCreated(
 }
 
 }  // namespace
-#endif
+#endif  // BUILDFLAG(ENABLE_PRINTING)
 
 PageHandler::PageHandler(base::WeakPtr<HeadlessBrowserImpl> browser,
                          content::WebContents* web_contents)
@@ -65,7 +65,7 @@ void PageHandler::PrintToPDF(Maybe<bool> landscape,
                              Maybe<String> footer_template,
                              Maybe<bool> prefer_css_page_size,
                              std::unique_ptr<PrintToPDFCallback> callback) {
-#if BUILDFLAG(ENABLE_BASIC_PRINTING)
+#if BUILDFLAG(ENABLE_PRINTING)
   HeadlessPrintSettings settings;
   settings.landscape = landscape.fromMaybe(false);
   settings.display_header_footer = display_header_footer.fromMaybe(false);
@@ -100,12 +100,14 @@ void PageHandler::PrintToPDF(Maybe<bool> landscape,
                 paper_height_in_inch * printing::kPointsPerInch);
 
   // Set default margin to 1.0cm = ~2/5 of an inch.
-  double default_margin_in_inch = 1000.0 / printing::kHundrethsMMPerInch;
-  double margin_top_in_inch = margin_top.fromMaybe(default_margin_in_inch);
-  double margin_right_in_inch = margin_right.fromMaybe(default_margin_in_inch);
-  double margin_bottom_in_inch =
-      margin_bottom.fromMaybe(default_margin_in_inch);
-  double margin_left_in_inch = margin_left.fromMaybe(default_margin_in_inch);
+  static constexpr double kDefaultMarginInMM = 10.0;
+  static constexpr double kMMPerInch = printing::kMicronsPerMil;
+  static constexpr double kDefaultMarginInInch =
+      kDefaultMarginInMM / kMMPerInch;
+  double margin_top_in_inch = margin_top.fromMaybe(kDefaultMarginInInch);
+  double margin_right_in_inch = margin_right.fromMaybe(kDefaultMarginInInch);
+  double margin_bottom_in_inch = margin_bottom.fromMaybe(kDefaultMarginInInch);
+  double margin_left_in_inch = margin_left.fromMaybe(kDefaultMarginInInch);
 
   settings.header_template = header_template.fromMaybe("");
   settings.footer_template = footer_template.fromMaybe("");
@@ -142,7 +144,7 @@ void PageHandler::PrintToPDF(Maybe<bool> landscape,
 #else
   callback->sendFailure(Response::Error("Printing is not enabled"));
   return;
-#endif
+#endif  // BUILDFLAG(ENABLE_PRINTING)
 }
 
 }  // namespace protocol

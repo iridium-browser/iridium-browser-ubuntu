@@ -38,6 +38,9 @@ class ZoomBubbleView : public LocationBarBubbleDelegateView,
                          const gfx::Point& anchor_point,
                          DisplayReason reason);
 
+  // If the bubble is being shown for the given |web_contents|, refreshes it.
+  static bool RefreshBubbleIfShowing(const content::WebContents* web_contents);
+
   // Closes the showing bubble (if one exists).
   static void CloseCurrentBubble();
 
@@ -51,6 +54,13 @@ class ZoomBubbleView : public LocationBarBubbleDelegateView,
 
  private:
   FRIEND_TEST_ALL_PREFIXES(ZoomBubbleBrowserTest, ImmersiveFullscreen);
+  FRIEND_TEST_ALL_PREFIXES(ZoomBubbleBrowserTest,
+                           BubbleSuppressingExtensionRefreshesExistingBubble);
+  FRIEND_TEST_ALL_PREFIXES(ZoomBubbleBrowserTest, FocusPreventsClose);
+
+  // Returns true if we can reuse the existing bubble for the given
+  // |web_contents|.
+  static bool CanRefresh(const content::WebContents* web_contents);
 
   // Stores information about the extension that initiated the zoom change, if
   // any.
@@ -83,8 +93,13 @@ class ZoomBubbleView : public LocationBarBubbleDelegateView,
   ~ZoomBubbleView() override;
 
   // LocationBarBubbleDelegateView:
+  View* GetInitiallyFocusedView() override;
+  base::string16 GetAccessibleWindowTitle() const override;
   int GetDialogButtons() const override;
+  void OnFocus() override;
+  void OnBlur() override;
   void OnGestureEvent(ui::GestureEvent* event) override;
+  void OnKeyEvent(ui::KeyEvent* event) override;
   void OnMouseEntered(const ui::MouseEvent& event) override;
   void OnMouseExited(const ui::MouseEvent& event) override;
   void Init() override;
@@ -109,7 +124,7 @@ class ZoomBubbleView : public LocationBarBubbleDelegateView,
   // Updates |label_| with the up to date zoom.
   void UpdateZoomPercent();
 
-  // Updates visibility of the zoom icon in location bar.
+  // Updates visibility of the zoom icon.
   void UpdateZoomIconVisibility();
 
   // Starts a timer which will close the bubble if |auto_close_| is true.
@@ -126,7 +141,7 @@ class ZoomBubbleView : public LocationBarBubbleDelegateView,
   static ZoomBubbleView* zoom_bubble_;
 
   // Timer used to auto close the bubble.
-  base::OneShotTimer timer_;
+  base::OneShotTimer auto_close_timer_;
 
   // Timer duration that is made longer if a user presses + or - buttons.
   base::TimeDelta auto_close_duration_;

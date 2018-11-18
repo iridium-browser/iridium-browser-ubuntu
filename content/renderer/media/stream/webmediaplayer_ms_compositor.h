@@ -11,14 +11,17 @@
 #include <memory>
 #include <vector>
 
-#include "base/memory/ref_counted.h"
+#include "base/memory/ref_counted_delete_on_sequence.h"
 #include "base/memory/weak_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread_checker.h"
+#include "cc/layers/surface_layer.h"
 #include "cc/layers/video_frame_provider.h"
 #include "content/common/content_export.h"
 #include "media/base/media_log.h"
+#include "media/blink/webmediaplayer_params.h"
+#include "third_party/blink/public/platform/web_video_frame_submitter.h"
 
 namespace base {
 class SingleThreadTaskRunner;
@@ -36,6 +39,10 @@ namespace media {
 class VideoRendererAlgorithm;
 }
 
+namespace viz {
+class SurfaceId;
+}
+
 namespace content {
 class WebMediaPlayerMS;
 
@@ -50,17 +57,24 @@ class WebMediaPlayerMS;
 // frame, and submit it whenever asked by the compositor.
 class CONTENT_EXPORT WebMediaPlayerMSCompositor
     : public cc::VideoFrameProvider,
-      public base::RefCountedThreadSafe<WebMediaPlayerMSCompositor> {
+      public base::RefCountedDeleteOnSequence<WebMediaPlayerMSCompositor> {
  public:
   // This |url| represents the media stream we are rendering. |url| is used to
   // find out what web stream this WebMediaPlayerMSCompositor is playing, and
   // together with flag "--disable-rtc-smoothness-algorithm" determine whether
   // we enable algorithm or not.
   WebMediaPlayerMSCompositor(
-      scoped_refptr<base::SingleThreadTaskRunner> compositor_task_runner,
+      scoped_refptr<base::SingleThreadTaskRunner> task_runner,
       scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
       const blink::WebMediaStream& web_stream,
+      std::unique_ptr<blink::WebVideoFrameSubmitter> submitter,
+      blink::WebMediaPlayer::SurfaceLayerMode surface_layer_mode,
       const base::WeakPtr<WebMediaPlayerMS>& player);
+
+  // Can be called from any thread.
+  cc::UpdateSubmissionStateCB GetUpdateSubmissionStateCallback() {
+    return update_submission_state_callback_;
+  }
 
   void EnqueueFrame(scoped_refptr<media::VideoFrame> frame);
 
@@ -69,6 +83,24 @@ class CONTENT_EXPORT WebMediaPlayerMSCompositor
   base::TimeDelta GetCurrentTime();
   size_t total_frame_count();
   size_t dropped_frame_count();
+
+  // Signals the VideoFrameSubmitter to prepare to receive BeginFrames and
+  // submit video frames given by WebMediaPlayerMSCompositor.
+  virtual void EnableSubmission(
+      const viz::SurfaceId& id,
+      media::VideoRotation rotation,
+      bool force_submit,
+      bool is_opaque,
+      blink::WebFrameSinkDestroyedCallback frame_sink_destroyed_callback);
+
+  // Updates the rotation information for frames given to |submitter_|.
+  void UpdateRotation(media::VideoRotation rotation);
+
+  // Notifies the |submitter_| that the frames must be submitted.
+  void SetForceSubmit(bool);
+
+  // Updates the opacity information for frames given to |submitter_|.
+  void UpdateIsOpaque(bool);
 
   // VideoFrameProvider implementation.
   void SetVideoFrameProviderClient(
@@ -95,19 +127,38 @@ class CONTENT_EXPORT WebMediaPlayerMSCompositor
   void StopUsingProvider();
 
  private:
-  friend class base::RefCountedThreadSafe<WebMediaPlayerMSCompositor>;
+  friend class base::RefCountedDeleteOnSequence<WebMediaPlayerMSCompositor>;
+  friend class base::DeleteHelper<WebMediaPlayerMSCompositor>;
   friend class WebMediaPlayerMSTest;
 
   ~WebMediaPlayerMSCompositor() override;
+
+  // Ran on the |video_frame_compositor_task_runner_| to initialize
+  // |submitter_|
+  void InitializeSubmitter();
+
+  // Signals the VideoFrameSubmitter to stop submitting frames.
+  void UpdateSubmissionState(bool);
 
   bool MapTimestampsToRenderTimeTicks(
       const std::vector<base::TimeDelta>& timestamps,
       std::vector<base::TimeTicks>* wall_clock_times);
 
-  // For algorithm enabled case only: given the render interval, update
-  // current_frame_ and dropped_frame_count_.
-  void Render(base::TimeTicks deadline_min, base::TimeTicks deadline_max);
+  // For algorithm enabled case only: given the render interval, call
+  // SetCurrentFrame() if a new frame is available.
+  // |video_frame_provider_client_| gets notified about the new frame when it
+  // calls UpdateCurrentFrame().
+  void RenderUsingAlgorithm(base::TimeTicks deadline_min,
+                            base::TimeTicks deadline_max);
 
+  // For algorithm disabled case only: call SetCurrentFrame() with the current
+  // frame immediately. |video_frame_provider_client_| gets notified about the
+  // new frame with a DidReceiveFrame() call.
+  void RenderWithoutAlgorithm(const scoped_refptr<media::VideoFrame>& frame);
+  void RenderWithoutAlgorithmOnCompositor(
+      const scoped_refptr<media::VideoFrame>& frame);
+
+  // Update |current_frame_| and |dropped_frame_count_|
   void SetCurrentFrame(const scoped_refptr<media::VideoFrame>& frame);
 
   void StartRenderingInternal();
@@ -121,7 +172,8 @@ class CONTENT_EXPORT WebMediaPlayerMSCompositor
   // which is renderer main thread in this class.
   base::ThreadChecker thread_checker_;
 
-  const scoped_refptr<base::SingleThreadTaskRunner> compositor_task_runner_;
+  const scoped_refptr<base::SingleThreadTaskRunner>
+      video_frame_compositor_task_runner_;
   const scoped_refptr<base::SingleThreadTaskRunner> io_task_runner_;
   base::MessageLoop* main_message_loop_;
 
@@ -151,10 +203,11 @@ class CONTENT_EXPORT WebMediaPlayerMSCompositor
   // selection method which returns the best frame for the render interval.
   std::unique_ptr<media::VideoRendererAlgorithm> rendering_frame_buffer_;
 
-  // |current_frame_used_by_compositor_| is updated on compositor thread only.
+  // |current_frame_rendered_| is updated on compositor thread only.
   // It's used to track whether |current_frame_| was painted for detecting
-  // when to increase |dropped_frame_count_|.
-  bool current_frame_used_by_compositor_;
+  // when to increase |dropped_frame_count_|. It is also used when checking if
+  // new frame for display is available in UpdateCurrentFrame().
+  bool current_frame_rendered_;
 
   // Historical data about last rendering. These are for detecting whether
   // rendering is paused (one reason is that the tab is not in the front), in
@@ -168,11 +221,17 @@ class CONTENT_EXPORT WebMediaPlayerMSCompositor
   bool stopped_;
   bool render_started_;
 
+  std::unique_ptr<blink::WebVideoFrameSubmitter> submitter_;
+
   std::map<base::TimeDelta, base::TimeTicks> timestamps_to_clock_times_;
 
-  // |current_frame_lock_| protects |current_frame_used_by_compositor_|,
-  // |current_frame_|, |rendering_frame_buffer_|, and |render_started_|.
+  cc::UpdateSubmissionStateCB update_submission_state_callback_;
+
+  // |current_frame_lock_| protects |current_frame_|, |rendering_frame_buffer_|,
+  // |dropped_frame_count_|, and |render_started_|.
   base::Lock current_frame_lock_;
+
+  base::WeakPtrFactory<WebMediaPlayerMSCompositor> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(WebMediaPlayerMSCompositor);
 };

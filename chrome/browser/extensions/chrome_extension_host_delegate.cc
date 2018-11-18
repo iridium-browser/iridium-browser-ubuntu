@@ -14,6 +14,7 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
 #include "chrome/browser/media/webrtc/media_capture_devices_dispatcher.h"
+#include "chrome/browser/picture_in_picture/picture_in_picture_window_manager.h"
 #include "chrome/browser/ui/prefs/prefs_tab_helper.h"
 #include "components/app_modal/javascript_dialog_manager.h"
 #include "extensions/browser/extension_host.h"
@@ -63,28 +64,29 @@ ChromeExtensionHostDelegate::GetJavaScriptDialogManager() {
   return app_modal::JavaScriptDialogManager::GetInstance();
 }
 
-void ChromeExtensionHostDelegate::CreateTab(content::WebContents* web_contents,
-                                            const std::string& extension_id,
-                                            WindowOpenDisposition disposition,
-                                            const gfx::Rect& initial_rect,
-                                            bool user_gesture) {
+void ChromeExtensionHostDelegate::CreateTab(
+    std::unique_ptr<content::WebContents> web_contents,
+    const std::string& extension_id,
+    WindowOpenDisposition disposition,
+    const gfx::Rect& initial_rect,
+    bool user_gesture) {
   // Verify that the browser is not shutting down. It can be the case if the
   // call is propagated through a posted task that was already in the queue when
   // shutdown started. See crbug.com/625646
   if (g_browser_process->IsShuttingDown())
     return;
 
-  ExtensionTabUtil::CreateTab(
-      web_contents, extension_id, disposition, initial_rect, user_gesture);
+  ExtensionTabUtil::CreateTab(std::move(web_contents), extension_id,
+                              disposition, initial_rect, user_gesture);
 }
 
 void ChromeExtensionHostDelegate::ProcessMediaAccessRequest(
     content::WebContents* web_contents,
     const content::MediaStreamRequest& request,
-    const content::MediaResponseCallback& callback,
+    content::MediaResponseCallback callback,
     const Extension* extension) {
   MediaCaptureDevicesDispatcher::GetInstance()->ProcessMediaAccessRequest(
-      web_contents, request, callback, extension);
+      web_contents, request, std::move(callback), extension);
 }
 
 bool ChromeExtensionHostDelegate::CheckMediaAccessPermission(
@@ -99,6 +101,18 @@ bool ChromeExtensionHostDelegate::CheckMediaAccessPermission(
 
 ExtensionHostQueue* ChromeExtensionHostDelegate::GetExtensionHostQueue() const {
   return g_queue.Get().queue.get();
+}
+
+gfx::Size ChromeExtensionHostDelegate::EnterPictureInPicture(
+    content::WebContents* web_contents,
+    const viz::SurfaceId& surface_id,
+    const gfx::Size& natural_size) {
+  return PictureInPictureWindowManager::GetInstance()->EnterPictureInPicture(
+      web_contents, surface_id, natural_size);
+}
+
+void ChromeExtensionHostDelegate::ExitPictureInPicture() {
+  PictureInPictureWindowManager::GetInstance()->ExitPictureInPicture();
 }
 
 }  // namespace extensions

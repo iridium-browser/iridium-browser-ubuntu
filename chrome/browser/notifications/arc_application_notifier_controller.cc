@@ -53,7 +53,10 @@ ArcApplicationNotifierController::~ArcApplicationNotifierController() {
 
 std::vector<ash::mojom::NotifierUiDataPtr>
 ArcApplicationNotifierController::GetNotifierList(Profile* profile) {
-  DCHECK(!profile->IsOffTheRecord());
+  // In Guest mode, it can be called but there's no ARC apps to return.
+  if (profile->IsOffTheRecord())
+    return std::vector<ash::mojom::NotifierUiDataPtr>();
+
   package_to_app_ids_.clear();
   icons_.clear();
   StopObserving();
@@ -79,12 +82,12 @@ ArcApplicationNotifierController::GetNotifierList(Profile* profile) {
       continue;
 
     // Load icons for notifier.
-    std::unique_ptr<ArcAppIcon> icon(
-        new ArcAppIcon(profile, app_id,
+    std::unique_ptr<ArcAppIcon> icon =
+        std::make_unique<ArcAppIcon>(profile, app_id,
                        // ARC icon is available only for 48x48 dips.
                        kArcAppIconSizeInDp,
                        // The life time of icon must shorter than |this|.
-                       this));
+                       this);
     // Apply icon now to set the default image.
     OnIconUpdated(icon.get());
 

@@ -10,14 +10,14 @@
 
 // Description of a decoration to be added inside the location bar, either to
 // the left or to the right.
-struct LocationBarDecoration {
-  LocationBarDecoration(int y,
-                        int height,
-                        bool auto_collapse,
-                        double max_fraction,
-                        int edge_item_padding,
-                        int item_padding,
-                        views::View* view);
+struct DecorationInfo {
+  DecorationInfo(int y,
+                 int height,
+                 bool auto_collapse,
+                 double max_fraction,
+                 int edge_item_padding,
+                 int item_padding,
+                 views::View* view);
 
   // The y position of the view inside its parent.
   int y;
@@ -47,13 +47,13 @@ struct LocationBarDecoration {
   double computed_width;
 };
 
-LocationBarDecoration::LocationBarDecoration(int y,
-                                             int height,
-                                             bool auto_collapse,
-                                             double max_fraction,
-                                             int edge_item_padding,
-                                             int item_padding,
-                                             views::View* view)
+DecorationInfo::DecorationInfo(int y,
+                               int height,
+                               bool auto_collapse,
+                               double max_fraction,
+                               int edge_item_padding,
+                               int item_padding,
+                               views::View* view)
     : y(y),
       height(height),
       auto_collapse(auto_collapse),
@@ -68,12 +68,8 @@ LocationBarDecoration::LocationBarDecoration(int y,
 
 // LocationBarLayout ---------------------------------------------------------
 
-LocationBarLayout::LocationBarLayout(Position position,
-                                     int item_padding,
-                                     int item_edit_padding)
-    : position_(position),
-      item_padding_(item_padding),
-      item_edit_padding_(item_edit_padding) {}
+LocationBarLayout::LocationBarLayout(Position position, int item_edit_padding)
+    : position_(position), item_edit_padding_(item_edit_padding) {}
 
 LocationBarLayout::~LocationBarLayout() {
 }
@@ -85,16 +81,9 @@ void LocationBarLayout::AddDecoration(int y,
                                       int edge_item_padding,
                                       int item_padding,
                                       views::View* view) {
-  decorations_.push_back(std::make_unique<LocationBarDecoration>(
-      y, height, auto_collapse, max_fraction, edge_item_padding, item_padding,
-      view));
-}
-
-void LocationBarLayout::AddDecoration(int y,
-                                      int height,
-                                      views::View* view) {
-  decorations_.push_back(std::make_unique<LocationBarDecoration>(
-      y, height, false, 0, item_padding_, item_padding_, view));
+  decorations_.push_back(
+      std::make_unique<DecorationInfo>(y, height, auto_collapse, max_fraction,
+                                       edge_item_padding, item_padding, view));
 }
 
 void LocationBarLayout::LayoutPass1(int* entry_width) {

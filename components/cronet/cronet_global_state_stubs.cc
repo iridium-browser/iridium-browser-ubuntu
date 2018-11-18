@@ -5,8 +5,9 @@
 #include "components/cronet/cronet_global_state.h"
 
 #include "base/at_exit.h"
-#include "base/task_scheduler/post_task.h"
-#include "base/task_scheduler/task_scheduler.h"
+#include "base/feature_list.h"
+#include "base/task/post_task.h"
+#include "base/task/task_scheduler/task_scheduler.h"
 #include "net/proxy_resolution/proxy_config_service.h"
 #include "net/proxy_resolution/proxy_resolution_service.h"
 #include "url/url_util.h"
@@ -20,16 +21,13 @@ namespace cronet {
 namespace {
 
 scoped_refptr<base::SingleThreadTaskRunner> InitializeAndCreateTaskRunner() {
-// TODO(https://crbug.com/816705): Chromium Debug bots use component builds,
-// which result in //base and other process-global state being shared between
-// the library and the test suite. Since the Debug build is only used to run
-// the Debug cronet_tests, assume the suite will define things, for now.
-#if defined(NDEBUG)
-  // TODO(wez): Remove this once AtExitManager dependencies are gone.
-  // This fails cronet_test in component builds, which are not supported.
-  // See https://crbug.com/816705.
+// Cronet tests sets AtExitManager as part of TestSuite, so statically linked
+// library is not allowed to set its own.
+#if !defined(CRONET_TESTS_IMPLEMENTATION)
   ignore_result(new base::AtExitManager);
-#endif  // defined(NDEBUG)
+#endif
+
+  base::FeatureList::InitializeInstance(std::string(), std::string());
 
   url::Initialize();
 
@@ -78,6 +76,10 @@ std::unique_ptr<net::ProxyResolutionService> CreateProxyResolutionService(
 
 std::string CreateDefaultUserAgent(const std::string& partial_user_agent) {
   return partial_user_agent;
+}
+
+void SetNetworkThreadPriorityOnNetworkThread(double priority) {
+  NOTIMPLEMENTED();
 }
 
 }  // namespace cronet

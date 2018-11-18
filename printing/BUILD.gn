@@ -35,9 +35,13 @@ component("printing") {
     "emf_win.h",
     "metafile.cc",
     "metafile.h",
+    "metafile_skia.cc",
+    "metafile_skia.h",
     "metafile_skia_wrapper.cc",
     "metafile_skia_wrapper.h",
     "native_drawing_context.h",
+    "nup_parameters.cc",
+    "nup_parameters.h",
     "page_number.cc",
     "page_number.h",
     "page_range.cc",
@@ -47,8 +51,6 @@ component("printing") {
     "page_size_margins.h",
     "pdf_metafile_cg_mac.cc",
     "pdf_metafile_cg_mac.h",
-    "pdf_metafile_skia.cc",
-    "pdf_metafile_skia.h",
     "pdf_render_settings.h",
     "print_dialog_gtk_interface.h",
     "print_job_constants.cc",
@@ -110,6 +112,7 @@ component("printing") {
     }
     libs = [
       "AppKit.framework",
+      "QuartzCore.framework",
       "ApplicationServices.framework",
       "CoreFoundation.framework",
       "CoreGraphics.framework",
@@ -211,6 +214,8 @@ component("printing") {
 
     sources += [
       "backend/print_backend_chromeos.cc",
+      "backend/printing_restrictions.cc",
+      "backend/printing_restrictions.h",
       "printed_document_chromeos.cc",
       "printing_context_no_system_dialog.cc",
       "printing_context_no_system_dialog.h",
@@ -261,6 +266,8 @@ static_library("test_support") {
 test("printing_unittests") {
   sources = [
     "emf_win_unittest.cc",
+    "metafile_skia_unittest.cc",
+    "nup_parameters_unittest.cc",
     "page_number_unittest.cc",
     "page_range_unittest.cc",
     "page_setup_unittest.cc",
@@ -275,6 +282,8 @@ test("printing_unittests") {
     ":printing",
     "//base/test:run_all_unittests",
     "//base/test:test_support",
+    "//printing/common",
+    "//testing/gmock",
     "//testing/gtest",
     "//ui/base",
     "//ui/gfx",
@@ -343,7 +352,6 @@ if (is_android) {
       "android/java/src/org/chromium/printing/PrintManagerDelegateImpl.java",
       "android/java/src/org/chromium/printing/Printable.java",
       "android/java/src/org/chromium/printing/PrintingContext.java",
-      "android/java/src/org/chromium/printing/PrintingContextInterface.java",
       "android/java/src/org/chromium/printing/PrintingController.java",
       "android/java/src/org/chromium/printing/PrintingControllerImpl.java",
     ]

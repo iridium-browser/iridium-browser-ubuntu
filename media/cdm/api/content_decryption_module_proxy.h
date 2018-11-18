@@ -32,6 +32,11 @@ class CDM_CLASS_API CdmProxy {
     // There will be more values in the future e.g. for D3D11 RSA method.
   };
 
+  enum KeyType : uint32_t {
+    kDecryptOnly = 0,
+    kDecryptAndDecode = 1,
+  };
+
   // Initializes the proxy. The results will be returned in
   // CdmProxyClient::OnInitialized().
   virtual void Initialize() = 0;
@@ -57,6 +62,7 @@ class CDM_CLASS_API CdmProxy {
   virtual void SetKey(uint32_t crypto_session_id,
                       const uint8_t* key_id,
                       uint32_t key_id_size,
+                      KeyType key_type,
                       const uint8_t* key_blob,
                       uint32_t key_blob_size) = 0;
 
@@ -80,7 +86,7 @@ class CDM_CLASS_API CdmProxyClient {
 
   enum Protocol : uint32_t {
     kNone = 0,  // No protocol supported. Can be used in failure cases.
-    kIntelConvergedSecurityAndManageabilityEngine,  // Method using Intel CSME.
+    kIntel,  // Method using Intel CSME.
     // There will be more values in the future e.g. kD3D11RsaHardware,
     // kD3D11RsaSoftware to use the D3D11 RSA method.
   };
@@ -103,6 +109,12 @@ class CDM_CLASS_API CdmProxyClient {
   virtual void OnMediaCryptoSessionCreated(Status status,
                                            uint32_t crypto_session_id,
                                            uint64_t output_data) = 0;
+
+  // Callback for SetKey().
+  virtual void OnKeySet(Status status) = 0;
+
+  // Callback for RemoveKey().
+  virtual void OnKeyRemoved(Status status) = 0;
 
   // Called when there is a hardware reset and all the hardware context is lost.
   virtual void NotifyHardwareReset() = 0;

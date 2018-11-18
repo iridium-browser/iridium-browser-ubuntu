@@ -9,6 +9,7 @@
 
 #include "base/macros.h"
 
+#include "chrome/browser/vr/vr_export.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "device/vr/public/mojom/vr_service.mojom.h"
 #include "device/vr/vr_device.h"
@@ -17,15 +18,12 @@
 
 namespace vr {
 
-class VRDisplayHost;
+class XRDeviceImpl;
 
-// Browser process representation of a WebVR site session. Instantiated through
-// Mojo once the user loads a page containing WebVR.
-// It instantiates a VRDisplayImpl for each newly connected VRDisplay and sends
-// the display's info to the render process through its connected
-// mojom::VRServiceClient.
-class VRServiceImpl : public device::mojom::VRService,
-                      content::WebContentsObserver {
+// Browser process implementation of the VRService mojo interface. Instantiated
+// through Mojo once the user loads a page containing WebXR.
+class VR_EXPORT VRServiceImpl : public device::mojom::VRService,
+                                content::WebContentsObserver {
  public:
   explicit VRServiceImpl(content::RenderFrameHost* render_frame_host);
   ~VRServiceImpl() override;
@@ -34,15 +32,11 @@ class VRServiceImpl : public device::mojom::VRService,
                      device::mojom::VRServiceRequest request);
 
   // device::mojom::VRService implementation
-  // Adds this service to the VRDeviceManager.
-  void SetClient(device::mojom::VRServiceClientPtr service_client,
-                 SetClientCallback callback) override;
+  void RequestDevice(RequestDeviceCallback callback) override;
+  void SetClient(device::mojom::VRServiceClientPtr service_client) override;
 
-  // Tells the renderer that a new VR device is available.
-  void ConnectDevice(device::VRDevice* device);
-
-  // Tells the renderer that a VR device has gone away.
-  void RemoveDevice(device::VRDevice* device);
+  // Tells the renderer that the state of the physical devices changed.
+  void RuntimesChanged();
 
   void InitializationComplete();
 
@@ -50,13 +44,12 @@ class VRServiceImpl : public device::mojom::VRService,
   // Constructor for tests.
   VRServiceImpl();
 
-  int NumberOfConnectedDisplayHosts() { return displays_.size(); }
-
  private:
   void SetBinding(mojo::StrongBindingPtr<VRService> binding);
 
   // device::mojom::VRService implementation
-  void SetListeningForActivate(bool listening) override;
+  void SetListeningForActivate(
+      device::mojom::VRDisplayClientPtr client) override;
 
   // content::WebContentsObserver implementation
   void OnWebContentsFocused(content::RenderWidgetHost* host) override;
@@ -65,11 +58,14 @@ class VRServiceImpl : public device::mojom::VRService,
 
   void OnWebContentsFocusChanged(content::RenderWidgetHost* host, bool focused);
 
-  std::map<device::VRDevice*, std::unique_ptr<VRDisplayHost>> displays_;
-  SetClientCallback set_client_callback_;
+  void MaybeReturnDevice();
+
+  std::unique_ptr<XRDeviceImpl> device_;
+  RequestDeviceCallback request_device_callback_;
   device::mojom::VRServiceClientPtr client_;
   content::RenderFrameHost* render_frame_host_;
   mojo::StrongBindingPtr<VRService> binding_;
+  bool initialization_complete_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(VRServiceImpl);
 };

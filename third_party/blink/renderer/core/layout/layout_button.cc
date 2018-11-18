@@ -34,7 +34,7 @@ void LayoutButton::AddChild(LayoutObject* new_child,
   if (!inner_) {
     // Create an anonymous block.
     DCHECK(!FirstChild());
-    inner_ = CreateAnonymousBlock(Style()->Display());
+    inner_ = CreateAnonymousBlock(StyleRef().Display());
     LayoutFlexibleBox::AddChild(inner_);
   }
 
@@ -56,10 +56,9 @@ void LayoutButton::RemoveChild(LayoutObject* old_child) {
   }
 }
 
-void LayoutButton::UpdateAnonymousChildStyle(const LayoutObject& child,
+void LayoutButton::UpdateAnonymousChildStyle(const LayoutObject* child,
                                              ComputedStyle& child_style) const {
-  DCHECK(!inner_ || &child == inner_);
-
+  DCHECK_EQ(inner_, child);
   child_style.SetFlexGrow(1.0f);
   // min-width: 0; is needed for correct shrinking.
   child_style.SetMinWidth(Length(0, kFixed));
@@ -67,13 +66,13 @@ void LayoutButton::UpdateAnonymousChildStyle(const LayoutObject& child,
   // when the content overflows, treat it the same as align-items: flex-start.
   child_style.SetMarginTop(Length());
   child_style.SetMarginBottom(Length());
-  child_style.SetFlexDirection(Style()->FlexDirection());
-  child_style.SetJustifyContent(Style()->JustifyContent());
-  child_style.SetFlexWrap(Style()->FlexWrap());
+  child_style.SetFlexDirection(StyleRef().FlexDirection());
+  child_style.SetJustifyContent(StyleRef().JustifyContent());
+  child_style.SetFlexWrap(StyleRef().FlexWrap());
   // TODO (lajava): An anonymous box must not be used to resolve children's auto
   // values.
-  child_style.SetAlignItems(Style()->AlignItems());
-  child_style.SetAlignContent(Style()->AlignContent());
+  child_style.SetAlignItems(StyleRef().AlignItems());
+  child_style.SetAlignContent(StyleRef().AlignContent());
 }
 
 LayoutRect LayoutButton::ControlClipRect(

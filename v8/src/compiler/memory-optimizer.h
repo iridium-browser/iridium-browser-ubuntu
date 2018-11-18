@@ -34,9 +34,9 @@ class MemoryOptimizer final {
   enum class AllocationFolding { kDoAllocationFolding, kDontAllocationFolding };
 
   MemoryOptimizer(JSGraph* jsgraph, Zone* zone,
-                  PoisoningMitigationLevel poisoning_enabled,
+                  PoisoningMitigationLevel poisoning_level,
                   AllocationFolding allocation_folding);
-  ~MemoryOptimizer() {}
+  ~MemoryOptimizer() = default;
 
   void Optimize();
 
@@ -48,7 +48,7 @@ class MemoryOptimizer final {
     AllocationGroup(Node* node, PretenureFlag pretenure, Zone* zone);
     AllocationGroup(Node* node, PretenureFlag pretenure, Node* size,
                     Zone* zone);
-    ~AllocationGroup() {}
+    ~AllocationGroup() = default;
 
     void Add(Node* object);
     bool Contains(Node* object) const;
@@ -74,7 +74,7 @@ class MemoryOptimizer final {
     static AllocationState const* Closed(AllocationGroup* group, Zone* zone) {
       return new (zone) AllocationState(group);
     }
-    static AllocationState const* Open(AllocationGroup* group, int size,
+    static AllocationState const* Open(AllocationGroup* group, intptr_t size,
                                        Node* top, Zone* zone) {
       return new (zone) AllocationState(group, size, top);
     }
@@ -83,17 +83,17 @@ class MemoryOptimizer final {
 
     AllocationGroup* group() const { return group_; }
     Node* top() const { return top_; }
-    int size() const { return size_; }
+    intptr_t size() const { return size_; }
 
    private:
     AllocationState();
     explicit AllocationState(AllocationGroup* group);
-    AllocationState(AllocationGroup* group, int size, Node* top);
+    AllocationState(AllocationGroup* group, intptr_t size, Node* top);
 
     AllocationGroup* const group_;
     // The upper bound of the combined allocated object size on the current path
     // (max int if allocation folding is impossible on this path).
-    int const size_;
+    intptr_t const size_;
     Node* const top_;
 
     DISALLOW_COPY_AND_ASSIGN(AllocationState);
@@ -130,6 +130,8 @@ class MemoryOptimizer final {
   void EnqueueUses(Node*, AllocationState const*);
   void EnqueueUse(Node*, int, AllocationState const*);
 
+  bool NeedsPoisoning(LoadSensitivity load_sensitivity) const;
+
   AllocationState const* empty_state() const { return empty_state_; }
   Graph* graph() const;
   Isolate* isolate() const;
@@ -146,7 +148,7 @@ class MemoryOptimizer final {
   ZoneQueue<Token> tokens_;
   Zone* const zone_;
   GraphAssembler graph_assembler_;
-  PoisoningMitigationLevel poisoning_enabled_;
+  PoisoningMitigationLevel poisoning_level_;
   AllocationFolding allocation_folding_;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(MemoryOptimizer);

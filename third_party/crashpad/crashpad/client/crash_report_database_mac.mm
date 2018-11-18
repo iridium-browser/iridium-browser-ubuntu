@@ -141,7 +141,8 @@ class CrashReportDatabaseMac : public CrashReportDatabase {
   OperationStatus GetCompletedReports(std::vector<Report>* reports) override;
   OperationStatus GetReportForUploading(
       const UUID& uuid,
-      std::unique_ptr<const UploadReport>* report) override;
+      std::unique_ptr<const UploadReport>* report,
+      bool report_metrics) override;
   OperationStatus SkipReportUpload(const UUID& uuid,
                                    Metrics::CrashSkippedReason reason) override;
   OperationStatus DeleteReport(const UUID& uuid) override;
@@ -245,6 +246,16 @@ class CrashReportDatabaseMac : public CrashReportDatabase {
   DISALLOW_COPY_AND_ASSIGN(CrashReportDatabaseMac);
 };
 
+FileWriter* CrashReportDatabase::NewReport::AddAttachment(
+    const std::string& name) {
+  // Attachments aren't implemented in the Mac database yet.
+  return nullptr;
+}
+
+void CrashReportDatabase::UploadReport::InitializeAttachments() {
+  // Attachments aren't implemented in the Mac database yet.
+}
+
 CrashReportDatabaseMac::CrashReportDatabaseMac(const base::FilePath& path)
     : CrashReportDatabase(),
       base_dir_(path),
@@ -311,7 +322,8 @@ CrashReportDatabaseMac::PrepareNewCrashReport(
   INITIALIZATION_STATE_DCHECK_VALID(initialized_);
 
   std::unique_ptr<NewReport> report(new NewReport());
-  if (!report->Initialize(base_dir_.Append(kWriteDirectory),
+  if (!report->Initialize(this,
+                          base_dir_.Append(kWriteDirectory),
                           std::string(".") + kCrashReportFileExtension)) {
     return kFileSystemError;
   }
@@ -411,7 +423,8 @@ CrashReportDatabaseMac::GetCompletedReports(
 CrashReportDatabase::OperationStatus
 CrashReportDatabaseMac::GetReportForUploading(
     const UUID& uuid,
-    std::unique_ptr<const UploadReport>* report) {
+    std::unique_ptr<const UploadReport>* report,
+    bool report_metrics) {
   INITIALIZATION_STATE_DCHECK_VALID(initialized_);
 
   auto upload_report = std::make_unique<UploadReportMac>();
@@ -433,6 +446,7 @@ CrashReportDatabaseMac::GetReportForUploading(
 
   upload_report->database_ = this;
   upload_report->lock_fd.reset(lock.release());
+  upload_report->report_metrics_ = report_metrics;
   report->reset(upload_report.release());
   return kNoError;
 }
@@ -443,7 +457,9 @@ CrashReportDatabaseMac::RecordUploadAttempt(UploadReport* report,
                                             const std::string& id) {
   INITIALIZATION_STATE_DCHECK_VALID(initialized_);
 
-  Metrics::CrashUploadAttempted(successful);
+  if (report->report_metrics_) {
+    Metrics::CrashUploadAttempted(successful);
+  }
 
   DCHECK(report);
   DCHECK(successful || id.empty());

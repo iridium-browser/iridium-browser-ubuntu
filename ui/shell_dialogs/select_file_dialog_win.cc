@@ -23,7 +23,6 @@
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
 #include "base/single_thread_task_runner.h"
-#include "base/threading/thread.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/win/registry.h"
 #include "base/win/shortcut.h"
@@ -274,7 +273,7 @@ class SelectFileDialogImpl : public ui::SelectFileDialog,
   // Runs a Folder selection dialog box, passes back the selected folder in
   // |path| and returns true if the user clicks OK. If the user cancels the
   // dialog box the value in |path| is not modified and returns false. Run
-  // on the dialog thread.
+  // on the dedicated dialog sequence.
   bool RunSelectFolderDialog(const ExecuteSelectParams& params,
                              base::FilePath* path);
 
@@ -344,7 +343,7 @@ void SelectFileDialogImpl::SelectFileImpl(
                                      default_path, file_types, file_type_index,
                                      default_extension, BeginRun(owner),
                                      owner, params);
-  execute_params.run_state.dialog_thread->task_runner()->PostTask(
+  execute_params.run_state.dialog_task_runner->PostTask(
       FROM_HERE, base::BindOnce(&SelectFileDialogImpl::ExecuteSelectFile, this,
                                 execute_params));
 }
@@ -373,7 +372,8 @@ void SelectFileDialogImpl::ExecuteSelectFile(
   base::FilePath path = params.default_path;
   bool success = false;
   unsigned filter_index = params.file_type_index;
-  if (params.type == SELECT_FOLDER || params.type == SELECT_UPLOAD_FOLDER) {
+  if (params.type == SELECT_FOLDER || params.type == SELECT_UPLOAD_FOLDER ||
+      params.type == SELECT_EXISTING_FOLDER) {
     success = RunSelectFolderDialog(params, &path);
   } else if (params.type == SELECT_SAVEAS_FILE) {
     std::wstring path_as_wstring = path.value();
@@ -561,8 +561,10 @@ bool SelectFileDialogImpl::RunSelectFolderDialog(
     dialog_options.default_path = path->value().c_str();
   if (params.type == SELECT_UPLOAD_FOLDER) {
     dialog_options.is_upload = true;
-    browse_info.ulFlags |= BIF_NONEWFOLDERBUTTON;
   }
+  if (params.type == SELECT_UPLOAD_FOLDER ||
+      params.type == SELECT_EXISTING_FOLDER)
+    browse_info.ulFlags |= BIF_NONEWFOLDERBUTTON;
   if (dialog_options.is_upload || dialog_options.default_path) {
     browse_info.lParam = reinterpret_cast<LPARAM>(&dialog_options);
     browse_info.lpfn = &BrowseCallbackProc;

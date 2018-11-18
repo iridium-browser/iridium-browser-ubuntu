@@ -12,11 +12,11 @@
 #include <utility>
 
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
 #include "base/metrics/user_metrics.h"
 #include "base/pickle.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
+#include "components/viz/common/features.h"
 #include "components/viz/common/surfaces/surface_info.h"
 #include "components/viz/service/surfaces/surface.h"
 #include "content/browser/browser_plugin/browser_plugin_embedder.h"
@@ -36,11 +36,11 @@
 #include "content/common/browser_plugin/browser_plugin_messages.h"
 #include "content/common/content_constants_internal.h"
 #include "content/common/drag_messages.h"
-#include "content/common/frame_resize_params.h"
+#include "content/common/frame_visual_properties.h"
 #include "content/common/input/ime_text_span_conversions.h"
-#include "content/common/input_messages.h"
 #include "content/common/text_input_state.h"
 #include "content/common/view_messages.h"
+#include "content/common/widget_messages.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_plugin_guest_manager.h"
 #include "content/public/browser/content_browser_client.h"
@@ -89,7 +89,6 @@ BrowserPluginGuest::BrowserPluginGuest(bool has_render_view,
     : WebContentsObserver(web_contents),
       owner_web_contents_(nullptr),
       attached_(false),
-      has_attached_since_surface_set_(false),
       browser_plugin_instance_id_(browser_plugin::kInstanceIDNone),
       focused_(false),
       mouse_locked_(false),
@@ -176,11 +175,11 @@ void BrowserPluginGuest::DisableAutoResize() {
       browser_plugin_instance_id_));
 }
 
-void BrowserPluginGuest::ResizeDueToAutoResize(const gfx::Size& new_size,
-                                               uint64_t sequence_number) {
+void BrowserPluginGuest::DidUpdateVisualProperties(
+    const cc::RenderFrameMetadata& metadata) {
   SendMessageToEmbedder(
-      std::make_unique<BrowserPluginMsg_ResizeDueToAutoResize>(
-          browser_plugin_instance_id_, sequence_number));
+      std::make_unique<BrowserPluginMsg_DidUpdateVisualProperties>(
+          browser_plugin_instance_id_, metadata));
 }
 
 void BrowserPluginGuest::SizeContents(const gfx::Size& new_size) {
@@ -288,8 +287,8 @@ bool BrowserPluginGuest::OnMessageReceivedFromEmbedder(
     IPC_MESSAGE_HANDLER(BrowserPluginHostMsg_SetFocus, OnSetFocus)
     IPC_MESSAGE_HANDLER(BrowserPluginHostMsg_SetVisibility, OnSetVisibility)
     IPC_MESSAGE_HANDLER(BrowserPluginHostMsg_UnlockMouse_ACK, OnUnlockMouseAck)
-    IPC_MESSAGE_HANDLER(BrowserPluginHostMsg_UpdateResizeParams,
-                        OnUpdateResizeParams)
+    IPC_MESSAGE_HANDLER(BrowserPluginHostMsg_SynchronizeVisualProperties,
+                        OnSynchronizeVisualProperties)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
@@ -409,16 +408,6 @@ void BrowserPluginGuest::PointerLockPermissionResponse(bool allow) {
       browser_plugin_instance_id(), allow));
 }
 
-void BrowserPluginGuest::SetChildFrameSurface(
-    const viz::SurfaceInfo& surface_info) {
-  has_attached_since_surface_set_ = false;
-  if (!base::FeatureList::IsEnabled(::features::kMash)) {
-    SendMessageToEmbedder(
-        std::make_unique<BrowserPluginMsg_SetChildFrameSurface>(
-            browser_plugin_instance_id(), surface_info));
-  }
-}
-
 void BrowserPluginGuest::ResendEventToEmbedder(
     const blink::WebInputEvent& event) {
   if (!attached() || !owner_web_contents_)
@@ -440,6 +429,10 @@ void BrowserPluginGuest::ResendEventToEmbedder(
     ui::LatencyInfo latency_info =
         ui::WebInputEventTraits::CreateLatencyInfoForWebGestureEvent(
             resent_gesture_event);
+    // The touch action may not be set for the embedder because the
+    // GestureScrollBegin is sent to the guest view. In this case, set the touch
+    // action of the embedder to Auto to prevent crash.
+    GetOwnerRenderWidgetHost()->input_router()->ForceSetTouchActionAuto();
     view->ProcessGestureEvent(resent_gesture_event, latency_info);
   } else if (event.GetType() == blink::WebInputEvent::kMouseWheel) {
     blink::WebMouseWheelEvent resent_wheel_event;
@@ -665,7 +658,7 @@ void BrowserPluginGuest::RenderViewReady() {
   // In case we've created a new guest render process after a crash, let the
   // associated BrowserPlugin know. We only need to send this if we're attached,
   // as guest_crashed_ is cleared automatically on attach anyways.
-  if (attached() && !base::FeatureList::IsEnabled(::features::kMash)) {
+  if (attached() && !features::IsMultiProcessMash()) {
     RenderWidgetHostViewGuest* rwhv = static_cast<RenderWidgetHostViewGuest*>(
         web_contents()->GetRenderWidgetHostView());
     if (rwhv) {
@@ -715,8 +708,6 @@ bool BrowserPluginGuest::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
   // In --site-per-process, we do not need most of BrowserPluginGuest to drive
   // inner WebContents.
-  // Right now InputHostMsg_ImeCompositionRangeChanged hits NOTREACHED() in
-  // RWHVChildFrame, so we're disabling message handling entirely here.
   // TODO(lazyboy): Fix this as part of http://crbug.com/330264. The required
   // parts of code from this class should be extracted to a separate class for
   // --site-per-process.
@@ -724,20 +715,14 @@ bool BrowserPluginGuest::OnMessageReceived(const IPC::Message& message) {
     return false;
 
   IPC_BEGIN_MESSAGE_MAP(BrowserPluginGuest, message)
-    IPC_MESSAGE_HANDLER(InputHostMsg_ImeCancelComposition,
-                        OnImeCancelComposition)
-#if defined(OS_MACOSX) || defined(USE_AURA)
-    IPC_MESSAGE_HANDLER(InputHostMsg_ImeCompositionRangeChanged,
-                        OnImeCompositionRangeChanged)
-#endif
     IPC_MESSAGE_HANDLER(ViewHostMsg_HasTouchEventHandlers,
                         OnHasTouchEventHandlers)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_LockMouse, OnLockMouse)
+    IPC_MESSAGE_HANDLER(WidgetHostMsg_LockMouse, OnLockMouse)
     IPC_MESSAGE_HANDLER(ViewHostMsg_ShowWidget, OnShowWidget)
     IPC_MESSAGE_HANDLER(ViewHostMsg_TakeFocus, OnTakeFocus)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_TextInputStateChanged,
+    IPC_MESSAGE_HANDLER(WidgetHostMsg_TextInputStateChanged,
                         OnTextInputStateChanged)
-    IPC_MESSAGE_HANDLER(ViewHostMsg_UnlockMouse, OnUnlockMouse)
+    IPC_MESSAGE_HANDLER(WidgetHostMsg_UnlockMouse, OnUnlockMouse)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
@@ -776,11 +761,12 @@ void BrowserPluginGuest::Attach(
   // change embedders before attach completes. If the embedder goes away,
   // so does the guest and so we will never call WillAttachComplete because
   // we have a weak ptr.
-  delegate_->WillAttach(embedder_web_contents, browser_plugin_instance_id,
-                        params.is_full_page_plugin,
-                        base::Bind(&BrowserPluginGuest::OnWillAttachComplete,
-                                   weak_ptr_factory_.GetWeakPtr(),
-                                   embedder_web_contents, params));
+  delegate_->WillAttach(
+      embedder_web_contents, browser_plugin_instance_id,
+      params.is_full_page_plugin,
+      base::BindOnce(&BrowserPluginGuest::OnWillAttachComplete,
+                     weak_ptr_factory_.GetWeakPtr(), embedder_web_contents,
+                     params));
 }
 
 void BrowserPluginGuest::OnWillAttachComplete(
@@ -806,7 +792,6 @@ void BrowserPluginGuest::OnWillAttachComplete(
   InitInternal(params, embedder_web_contents);
 
   attached_ = true;
-  has_attached_since_surface_set_ = true;
   SendQueuedMessages();
 
   delegate_->DidAttach(GetGuestProxyRoutingID());
@@ -929,7 +914,7 @@ void BrowserPluginGuest::OnImeCommitText(
       ->GetWidget()
       ->GetWidgetInputHandler()
       ->ImeCommitText(text, ui_ime_text_spans, replacement_range,
-                      relative_cursor_pos);
+                      relative_cursor_pos, base::OnceClosure());
 }
 
 void BrowserPluginGuest::OnImeFinishComposingText(
@@ -961,7 +946,7 @@ void BrowserPluginGuest::OnLockMouse(bool user_gesture,
     RenderWidgetHost* widget_host =
         web_contents()->GetRenderViewHost()->GetWidget();
     widget_host->Send(
-        new ViewMsg_LockMouse_ACK(widget_host->GetRoutingID(), false));
+        new WidgetMsg_LockMouse_ACK(widget_host->GetRoutingID(), false));
     return;
   }
 
@@ -982,7 +967,7 @@ void BrowserPluginGuest::OnLockMouseAck(int browser_plugin_instance_id,
   RenderWidgetHost* widget_host =
       web_contents()->GetRenderViewHost()->GetWidget();
   widget_host->Send(
-      new ViewMsg_LockMouse_ACK(widget_host->GetRoutingID(), succeeded));
+      new WidgetMsg_LockMouse_ACK(widget_host->GetRoutingID(), succeeded));
   pending_lock_request_ = false;
   if (succeeded)
     mouse_locked_ = true;
@@ -1036,18 +1021,20 @@ void BrowserPluginGuest::OnUnlockMouseAck(int browser_plugin_instance_id) {
   if (mouse_locked_) {
     RenderWidgetHost* widget_host =
         web_contents()->GetRenderViewHost()->GetWidget();
-    widget_host->Send(new ViewMsg_MouseLockLost(widget_host->GetRoutingID()));
+    widget_host->Send(new WidgetMsg_MouseLockLost(widget_host->GetRoutingID()));
   }
   mouse_locked_ = false;
 }
 
-void BrowserPluginGuest::OnUpdateResizeParams(
+void BrowserPluginGuest::OnSynchronizeVisualProperties(
     int browser_plugin_instance_id,
     const viz::LocalSurfaceId& local_surface_id,
-    const FrameResizeParams& resize_params) {
+    const FrameVisualProperties& visual_properties) {
   if (local_surface_id_ > local_surface_id ||
-      ((frame_rect_.size() != resize_params.screen_space_rect.size() ||
-        screen_info_ != resize_params.screen_info) &&
+      ((frame_rect_.size() != visual_properties.screen_space_rect.size() ||
+        screen_info_ != visual_properties.screen_info ||
+        capture_sequence_number_ != visual_properties.capture_sequence_number ||
+        zoom_level_ != visual_properties.zoom_level) &&
        local_surface_id_ == local_surface_id)) {
     SiteInstance* owner_site_instance = delegate_->GetOwnerSiteInstance();
     bad_message::ReceivedBadMessage(
@@ -1056,30 +1043,37 @@ void BrowserPluginGuest::OnUpdateResizeParams(
     return;
   }
 
-  screen_info_ = resize_params.screen_info;
-  frame_rect_ = resize_params.screen_space_rect;
+  screen_info_ = visual_properties.screen_info;
+  frame_rect_ = visual_properties.screen_space_rect;
+  zoom_level_ = visual_properties.zoom_level;
+
   GetWebContents()->SendScreenRects();
   local_surface_id_ = local_surface_id;
+  bool capture_sequence_number_changed =
+      capture_sequence_number_ != visual_properties.capture_sequence_number;
+  capture_sequence_number_ = visual_properties.capture_sequence_number;
 
   RenderWidgetHostView* view = web_contents()->GetRenderWidgetHostView();
   if (!view)
     return;
 
+  // We could add functionality to set a specific capture sequence number on the
+  // |view|, but knowing that it's changed is sufficient for us simply request
+  // that our RenderWidgetHostView synchronizes its surfaces. Note that this
+  // should only happen during layout tests, since that is the only call that
+  // should trigger the capture sequence number to change.
+  if (capture_sequence_number_changed)
+    view->EnsureSurfaceSynchronizedForLayoutTest();
+
   RenderWidgetHostImpl* render_widget_host =
       RenderWidgetHostImpl::From(view->GetRenderWidgetHost());
   DCHECK(render_widget_host);
 
-  render_widget_host->SetAutoResize(resize_params.auto_resize_enabled,
-                                    resize_params.min_size_for_auto_resize,
-                                    resize_params.max_size_for_auto_resize);
+  render_widget_host->SetAutoResize(visual_properties.auto_resize_enabled,
+                                    visual_properties.min_size_for_auto_resize,
+                                    visual_properties.max_size_for_auto_resize);
 
-  if (render_widget_host->auto_resize_enabled()) {
-    render_widget_host->DidAllocateLocalSurfaceIdForAutoResize(
-        resize_params.auto_resize_sequence_number);
-    return;
-  }
-
-  render_widget_host->WasResized();
+  render_widget_host->SynchronizeVisualProperties();
 }
 
 void BrowserPluginGuest::OnHasTouchEventHandlers(bool accept) {
@@ -1113,10 +1107,11 @@ void BrowserPluginGuest::OnShowPopup(
 }
 #endif
 
-void BrowserPluginGuest::OnShowWidget(int route_id,
+void BrowserPluginGuest::OnShowWidget(int widget_route_id,
                                       const gfx::Rect& initial_rect) {
   int process_id = GetWebContents()->GetMainFrame()->GetProcess()->GetID();
-  GetWebContents()->ShowCreatedWidget(process_id, route_id, initial_rect);
+  GetWebContents()->ShowCreatedWidget(process_id, widget_route_id,
+                                      initial_rect);
 }
 
 void BrowserPluginGuest::OnTakeFocus(bool reverse) {
@@ -1132,20 +1127,5 @@ void BrowserPluginGuest::OnTextInputStateChanged(const TextInputState& params) {
       static_cast<RenderWidgetHostViewBase*>(
           web_contents()->GetRenderWidgetHostView()));
 }
-
-void BrowserPluginGuest::OnImeCancelComposition() {
-  static_cast<RenderWidgetHostViewBase*>(
-      web_contents()->GetRenderWidgetHostView())->ImeCancelComposition();
-}
-
-#if defined(OS_MACOSX) || defined(USE_AURA)
-void BrowserPluginGuest::OnImeCompositionRangeChanged(
-      const gfx::Range& range,
-      const std::vector<gfx::Rect>& character_bounds) {
-  static_cast<RenderWidgetHostViewBase*>(
-      web_contents()->GetRenderWidgetHostView())->ImeCompositionRangeChanged(
-          range, character_bounds);
-}
-#endif
 
 }  // namespace content

@@ -9,7 +9,7 @@
 #include "build/build_config.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/ui/exclusive_access/exclusive_access_manager.h"
-#include "chrome/browser/ui/views/harmony/chrome_layout_provider.h"
+#include "chrome/browser/ui/views/chrome_layout_provider.h"
 #include "chrome/browser/ui/views/hover_button.h"
 #include "chrome/browser/ui/views/page_info/chosen_object_view.h"
 #include "chrome/browser/ui/views/page_info/permission_selector_row.h"
@@ -21,13 +21,11 @@
 #include "content/public/browser/ssl_status.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_web_contents_factory.h"
-#include "device/base/mock_device_client.h"
-#include "device/usb/mock_usb_device.h"
-#include "device/usb/mock_usb_service.h"
+#include "device/usb/public/cpp/fake_usb_device_manager.h"
+#include "device/usb/public/mojom/device.mojom.h"
 #include "ppapi/buildflags/buildflags.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/ui_base_features.h"
 #include "ui/events/event_utils.h"
 #include "ui/views/controls/button/menu_button.h"
@@ -78,16 +76,12 @@ class PageInfoBubbleViewTestApi {
   // Returns the number of cookies shown on the link or button to open the
   // collected cookies dialog. This should always be shown.
   base::string16 GetCookiesLinkText() {
-    if (ui::MaterialDesignController::IsSecondaryUiMaterial()) {
       EXPECT_TRUE(view_->cookie_button_);
       ui::AXNodeData data;
       view_->cookie_button_->GetAccessibleNodeData(&data);
       std::string name;
       data.GetStringAttribute(ax::mojom::StringAttribute::kName, &name);
       return base::ASCIIToUTF16(name);
-    }
-    EXPECT_TRUE(view_->cookie_link_legacy_);
-    return view_->cookie_link_legacy_->text();
   }
 
   // Returns the permission label text of the |index|th permission selector row.
@@ -191,7 +185,6 @@ class PageInfoBubbleViewTest : public testing::Test {
   void TearDown() override { parent_window_->CloseNow(); }
 
  protected:
-  device::MockDeviceClient device_client_;
   ScopedWebContentsTestHelper web_contents_helper_;
   views::ScopedViewsTestHelper views_helper_;
 
@@ -216,10 +209,11 @@ class FlashContentSettingsChangeWaiter : public content_settings::Observer {
   }
 
   // content_settings::Observer:
-  void OnContentSettingChanged(const ContentSettingsPattern& primary_pattern,
-                               const ContentSettingsPattern& secondary_pattern,
-                               ContentSettingsType content_type,
-                               std::string resource_identifier) override {
+  void OnContentSettingChanged(
+      const ContentSettingsPattern& primary_pattern,
+      const ContentSettingsPattern& secondary_pattern,
+      ContentSettingsType content_type,
+      const std::string& resource_identifier) override {
     if (content_type == CONTENT_SETTINGS_TYPE_PLUGINS)
       Proceed();
   }
@@ -248,13 +242,7 @@ TEST_F(PageInfoBubbleViewTest, SetPermissionInfo) {
   // practice. In practice, every setting in PermissionSelectorRow starts off
   // "set", so there is always one option checked in the resulting MenuModel.
   // This test creates settings that are left at their defaults, leading to zero
-  // checked options, and checks that the text on the MenuButtons is right. On
-  // Mac, the behavior matches, but only when SecondaryUiMd is enabled.
-  const bool is_md = base::FeatureList::IsEnabled(features::kSecondaryUiMd);
-#if defined(OS_MACOSX)
-  if (!is_md)
-    return;
-#endif
+  // checked options, and checks that the text on the MenuButtons is right.
 
   PermissionInfoList list(1);
   list.back().type = CONTENT_SETTINGS_TYPE_GEOLOCATION;
@@ -285,31 +273,14 @@ TEST_F(PageInfoBubbleViewTest, SetPermissionInfo) {
 
   // Simulate a user selection via the UI. Note this will also cover logic in
   // PageInfo to update the pref.
-  if (is_md) {
-    // Under MD, the changed setting is always read from the combobox selected
-    // index when changed in the UI. PermissionSelectorRow::PermissionChanged()
-    // ignores the argument, except to detect whether it is the default.
-    api_->SimulateUserSelectingComboboxItemAt(0, 1);
-  } else {
-    list.back().setting = CONTENT_SETTING_ALLOW;
-    api_->GetPermissionSelectorAt(0)->PermissionChanged(list.back());
-  }
+  api_->SimulateUserSelectingComboboxItemAt(0, 1);
   EXPECT_EQ(num_expected_children, api_->permissions_view()->child_count());
   EXPECT_EQ(base::ASCIIToUTF16("Allow"), api_->GetPermissionButtonTextAt(0));
 
   // Setting to the default via the UI should keep the button around.
-  if (is_md) {
-    api_->SimulateUserSelectingComboboxItemAt(0, 0);
-    // Under MD, PermissionMenuModel gets strings using PageInfoUI::
-    // PermissionActionToUIString(..) rather than directly from the
-    // ResourceBundle.
-    EXPECT_EQ(base::ASCIIToUTF16("Ask (default)"),
-              api_->GetPermissionButtonTextAt(0));
-  } else {
-    list.back().setting = CONTENT_SETTING_ASK;
-    api_->GetPermissionSelectorAt(0)->PermissionChanged(list.back());
-    EXPECT_EQ(base::ASCIIToUTF16("Ask"), api_->GetPermissionButtonTextAt(0));
-  }
+  api_->SimulateUserSelectingComboboxItemAt(0, 0);
+  EXPECT_EQ(base::ASCIIToUTF16("Ask (default)"),
+            api_->GetPermissionButtonTextAt(0));
   EXPECT_EQ(num_expected_children, api_->permissions_view()->child_count());
 
   // However, since the setting is now default, recreating the dialog with those
@@ -328,12 +299,18 @@ TEST_F(PageInfoBubbleViewTest, SetPermissionInfoWithUsbDevice) {
   EXPECT_EQ(kExpectedChildren, api_->permissions_view()->child_count());
 
   const GURL origin = GURL(kUrl).GetOrigin();
-  scoped_refptr<device::UsbDevice> device =
-      new device::MockUsbDevice(0, 0, "Google", "Gizmo", "1234567890");
-  device_client_.usb_service()->AddDevice(device);
+
+  // Connect the UsbChooserContext with FakeUsbDeviceManager.
+  device::FakeUsbDeviceManager usb_device_manager;
+  device::mojom::UsbDeviceManagerPtr device_manager_ptr;
+  usb_device_manager.AddBinding(mojo::MakeRequest(&device_manager_ptr));
   UsbChooserContext* store =
       UsbChooserContextFactory::GetForProfile(web_contents_helper_.profile());
-  store->GrantDevicePermission(origin, origin, device->guid());
+  store->SetDeviceManagerForTesting(std::move(device_manager_ptr));
+
+  auto device_info = usb_device_manager.CreateAndAddDevice(
+      0, 0, "Google", "Gizmo", "1234567890");
+  store->GrantDevicePermission(origin, origin, *device_info);
 
   PermissionInfoList list;
   api_->SetPermissionInfo(list);
@@ -359,7 +336,7 @@ TEST_F(PageInfoBubbleViewTest, SetPermissionInfoWithUsbDevice) {
   button_listener->ButtonPressed(button, event);
   api_->SetPermissionInfo(list);
   EXPECT_EQ(kExpectedChildren, api_->permissions_view()->child_count());
-  EXPECT_FALSE(store->HasDevicePermission(origin, origin, device));
+  EXPECT_FALSE(store->HasDevicePermission(origin, origin, *device_info));
 }
 
 TEST_F(PageInfoBubbleViewTest, SetPermissionInfoForUsbGuard) {
@@ -367,14 +344,7 @@ TEST_F(PageInfoBubbleViewTest, SetPermissionInfoForUsbGuard) {
   // practice. In practice, every setting in PermissionSelectorRow starts off
   // "set", so there is always one option checked in the resulting MenuModel.
   // This test creates settings that are left at their defaults, leading to zero
-  // checked options, and checks that the text on the MenuButtons is right. On
-  // Mac, the behavior matches, but only when SecondaryUiMd is enabled.
-  const bool is_md = base::FeatureList::IsEnabled(features::kSecondaryUiMd);
-#if defined(OS_MACOSX)
-  if (!is_md)
-    return;
-#endif
-
+  // checked options, and checks that the text on the MenuButtons is right.
   PermissionInfoList list(1);
   list.back().type = CONTENT_SETTINGS_TYPE_USB_GUARD;
   list.back().source = content_settings::SETTING_SOURCE_USER;
@@ -393,31 +363,14 @@ TEST_F(PageInfoBubbleViewTest, SetPermissionInfoForUsbGuard) {
 
   // Simulate a user selection via the UI. Note this will also cover logic in
   // PageInfo to update the pref.
-  if (is_md) {
-    // Under MD, the changed setting is always read from the combobox selected
-    // index when changed in the UI. PermissionSelectorRow::PermissionChanged()
-    // ignores the argument, except to detect whether it is the default.
-    api_->SimulateUserSelectingComboboxItemAt(0, 2);
-  } else {
-    list.back().setting = CONTENT_SETTING_ASK;
-    api_->GetPermissionSelectorAt(0)->PermissionChanged(list.back());
-  }
+  api_->SimulateUserSelectingComboboxItemAt(0, 2);
   EXPECT_EQ(num_expected_children, api_->permissions_view()->child_count());
   EXPECT_EQ(base::ASCIIToUTF16("Ask"), api_->GetPermissionButtonTextAt(0));
 
   // Setting to the default via the UI should keep the button around.
-  if (is_md) {
     api_->SimulateUserSelectingComboboxItemAt(0, 0);
-    // Under MD, PermissionMenuModel gets strings using PageInfoUI::
-    // PermissionActionToUIString(..) rather than directly from the
-    // ResourceBundle.
     EXPECT_EQ(base::ASCIIToUTF16("Ask (default)"),
               api_->GetPermissionButtonTextAt(0));
-  } else {
-    list.back().setting = CONTENT_SETTING_ASK;
-    api_->GetPermissionSelectorAt(0)->PermissionChanged(list.back());
-    EXPECT_EQ(base::ASCIIToUTF16("Ask"), api_->GetPermissionButtonTextAt(0));
-  }
   EXPECT_EQ(num_expected_children, api_->permissions_view()->child_count());
 
   // However, since the setting is now default, recreating the dialog with those

@@ -27,9 +27,11 @@ MEDIA_EXPORT extern const char kAudioServiceQuitTimeoutMs[];
 MEDIA_EXPORT extern const char kAutoplayPolicy[];
 
 MEDIA_EXPORT extern const char kDisableAudioOutput[];
+MEDIA_EXPORT extern const char kFailAudioStreamCreation[];
 
 MEDIA_EXPORT extern const char kVideoThreads[];
 
+// TODO(crbug.com/867146): remove these switches.
 MEDIA_EXPORT extern const char kEnableMediaSuspend[];
 MEDIA_EXPORT extern const char kDisableMediaSuspend[];
 
@@ -54,9 +56,6 @@ MEDIA_EXPORT extern const char kUseCras[];
 MEDIA_EXPORT extern const char
     kUnsafelyAllowProtectedMediaIdentifierForDomain[];
 
-MEDIA_EXPORT extern const char kEnableAudioFocus[];
-MEDIA_EXPORT extern const char kEnableAudioFocusDuckFlash[];
-
 #if BUILDFLAG(ENABLE_RUNTIME_MEDIA_RENDERER_SELECTION)
 MEDIA_EXPORT extern const char kDisableMojoRenderer[];
 #endif  // BUILDFLAG(ENABLE_RUNTIME_MEDIA_RENDERER_SELECTION)
@@ -65,8 +64,7 @@ MEDIA_EXPORT extern const char kUseFakeDeviceForMediaStream[];
 MEDIA_EXPORT extern const char kUseFileForFakeVideoCapture[];
 MEDIA_EXPORT extern const char kUseFileForFakeAudioCapture[];
 MEDIA_EXPORT extern const char kUseFakeJpegDecodeAccelerator[];
-
-MEDIA_EXPORT extern const char kEnableInbandTextTracks[];
+MEDIA_EXPORT extern const char kDisableAcceleratedMjpegDecode[];
 
 MEDIA_EXPORT extern const char kRequireAudioHardwareForTesting[];
 MEDIA_EXPORT extern const char kMuteAudio[];
@@ -77,14 +75,12 @@ MEDIA_EXPORT extern const char kDisableRTCSmoothnessAlgorithm[];
 
 MEDIA_EXPORT extern const char kForceVideoOverlays[];
 
-MEDIA_EXPORT extern const char kMSEAudioBufferSizeLimit[];
-MEDIA_EXPORT extern const char kMSEVideoBufferSizeLimit[];
+MEDIA_EXPORT extern const char kMSEAudioBufferSizeLimitMb[];
+MEDIA_EXPORT extern const char kMSEVideoBufferSizeLimitMb[];
 
 MEDIA_EXPORT extern const char kClearKeyCdmPathForTesting[];
-
-#if !defined(OS_ANDROID)
-MEDIA_EXPORT extern const char kEnableInternalMediaSession[];
-#endif  // !defined(OS_ANDROID)
+MEDIA_EXPORT extern const char kOverrideEnabledCdmInterfaceVersion[];
+MEDIA_EXPORT extern const char kOverrideHardwareSecureCodecsForTesting[];
 
 namespace autoplay {
 
@@ -102,18 +98,25 @@ namespace media {
 // All features in alphabetical order. The features should be documented
 // alongside the definition of their values in the .cc file.
 
+MEDIA_EXPORT extern const base::Feature kAutoplayIgnoreWebAudio;
+MEDIA_EXPORT extern const base::Feature kAutoplayDisableSettings;
+MEDIA_EXPORT extern const base::Feature kAutoplayWhitelistSettings;
 MEDIA_EXPORT extern const base::Feature kAv1Decoder;
+MEDIA_EXPORT extern const base::Feature kBackgroundSrcVideoTrackOptimization;
 MEDIA_EXPORT extern const base::Feature kBackgroundVideoPauseOptimization;
-MEDIA_EXPORT extern const base::Feature kBackgroundVideoTrackOptimization;
+MEDIA_EXPORT extern const base::Feature kD3D11EncryptedMedia;
+MEDIA_EXPORT extern const base::Feature kD3D11VP9Decoder;
+MEDIA_EXPORT extern const base::Feature kD3D11VideoDecoder;
 MEDIA_EXPORT extern const base::Feature kExternalClearKeyForTesting;
+MEDIA_EXPORT extern const base::Feature kFallbackAfterDecodeError;
+MEDIA_EXPORT extern const base::Feature kHardwareSecureDecryption;
+MEDIA_EXPORT extern const base::Feature kLimitParallelMediaPreloading;
 MEDIA_EXPORT extern const base::Feature kLowDelayVideoRenderingOnLiveStream;
 MEDIA_EXPORT extern const base::Feature kMediaCastOverlayButton;
-MEDIA_EXPORT extern const base::Feature kRecordMediaEngagementScores;
 MEDIA_EXPORT extern const base::Feature kMediaEngagementBypassAutoplayPolicies;
 MEDIA_EXPORT extern const base::Feature kMemoryPressureBasedSourceBufferGC;
 MEDIA_EXPORT extern const base::Feature kMojoVideoDecoder;
 MEDIA_EXPORT extern const base::Feature kMseBufferByPts;
-MEDIA_EXPORT extern const base::Feature kMseFlacInIsobmff;
 MEDIA_EXPORT extern const base::Feature kNewAudioRenderingMixingStrategy;
 MEDIA_EXPORT extern const base::Feature kNewEncodeCpuLoadEstimator;
 MEDIA_EXPORT extern const base::Feature kNewRemotePlaybackPipeline;
@@ -121,24 +124,31 @@ MEDIA_EXPORT extern const base::Feature kOverflowIconsForMediaControls;
 MEDIA_EXPORT extern const base::Feature kOverlayFullscreenVideo;
 MEDIA_EXPORT extern const base::Feature kPictureInPicture;
 MEDIA_EXPORT extern const base::Feature kPreloadMediaEngagementData;
+MEDIA_EXPORT extern const base::Feature kPreloadMetadataLazyLoad;
 MEDIA_EXPORT extern const base::Feature kPreloadMetadataSuspend;
+MEDIA_EXPORT extern const base::Feature kRTCVideoDecoderAdapter;
+MEDIA_EXPORT extern const base::Feature kRecordMediaEngagementScores;
+MEDIA_EXPORT extern const base::Feature kRecordWebAudioEngagement;
 MEDIA_EXPORT extern const base::Feature kResumeBackgroundVideo;
 MEDIA_EXPORT extern const base::Feature kSpecCompliantCanPlayThrough;
-MEDIA_EXPORT extern const base::Feature kSupportExperimentalCdmInterface;
+MEDIA_EXPORT extern const base::Feature kUnifiedAutoplay;
 MEDIA_EXPORT extern const base::Feature kUseAndroidOverlay;
 MEDIA_EXPORT extern const base::Feature kUseAndroidOverlayAggressively;
+MEDIA_EXPORT extern const base::Feature kUseModernMediaControls;
 MEDIA_EXPORT extern const base::Feature kUseNewMediaCache;
 MEDIA_EXPORT extern const base::Feature kUseR16Texture;
-MEDIA_EXPORT extern const base::Feature kVideoBlitColorAccuracy;
-MEDIA_EXPORT extern const base::Feature kUnifiedAutoplay;
 MEDIA_EXPORT extern const base::Feature kUseSurfaceLayerForVideo;
-MEDIA_EXPORT extern const base::Feature kUseModernMediaControls;
+MEDIA_EXPORT extern const base::Feature kUseSurfaceLayerForVideoPIP;
+MEDIA_EXPORT extern const base::Feature kVaapiVP8Encoder;
+MEDIA_EXPORT extern const base::Feature kVideoBlitColorAccuracy;
 
 #if defined(OS_ANDROID)
+MEDIA_EXPORT extern const base::Feature kMediaControlsExpandGesture;
 MEDIA_EXPORT extern const base::Feature kVideoFullscreenOrientationLock;
 MEDIA_EXPORT extern const base::Feature kVideoRotateToFullscreen;
 MEDIA_EXPORT extern const base::Feature kMediaDrmPersistentLicense;
 MEDIA_EXPORT extern const base::Feature kCafMediaRouterImpl;
+MEDIA_EXPORT extern const base::Feature kAImageReaderVideoOutput;
 #endif  // defined(OS_ANDROID)
 
 #if defined(OS_WIN)
@@ -156,9 +166,7 @@ MEDIA_EXPORT extern const base::Feature kDirectShowGetPhotoState;
 MEDIA_EXPORT std::string GetEffectiveAutoplayPolicy(
     const base::CommandLine& command_line);
 
-// Based on the command line of the current process, determine if
-// audio focus duck flash should be enabled.
-MEDIA_EXPORT bool IsAudioFocusDuckFlashEnabled();
+MEDIA_EXPORT bool IsVideoCaptureAcceleratedJpegDecodingEnabled();
 
 }  // namespace media
 

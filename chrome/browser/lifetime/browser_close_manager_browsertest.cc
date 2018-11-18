@@ -11,11 +11,11 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
+#include "base/task/post_task.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
 #include "chrome/browser/background/background_mode_manager.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/download/chrome_download_manager_delegate.h"
@@ -23,6 +23,7 @@
 #include "chrome/browser/download/download_core_service_factory.h"
 #include "chrome/browser/download/download_prefs.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
+#include "chrome/browser/lifetime/browser_shutdown.h"
 #include "chrome/browser/net/url_request_mock_util.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/profiles/profile.h"
@@ -46,11 +47,11 @@
 #include "components/sessions/core/tab_restore_service.h"
 #include "components/sessions/core/tab_restore_service_observer.h"
 #include "content/public/browser/browser_context.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_frame_host.h"
-#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/test/browser_test_utils.h"
@@ -96,8 +97,8 @@ class RepeatedNotificationObserver : public content::NotificationObserver {
                const content::NotificationDetails& details) override {
     ASSERT_GT(num_outstanding_, 0);
     if (!--num_outstanding_ && running_) {
-      content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
-                                       run_loop_.QuitClosure());
+      base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI},
+                               run_loop_.QuitClosure());
     }
   }
 
@@ -108,6 +109,8 @@ class RepeatedNotificationObserver : public content::NotificationObserver {
     running_ = true;
     run_loop_.Run();
     running_ = false;
+
+    EXPECT_LE(num_outstanding_, 0);
   }
 
  private:
@@ -265,8 +268,8 @@ class BrowserCloseManagerBrowserTest
     SessionStartupPref::SetStartupPref(
         browser()->profile(), SessionStartupPref(SessionStartupPref::LAST));
     browsers_.push_back(browser());
-    content::BrowserThread::PostTask(
-        content::BrowserThread::IO, FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, {content::BrowserThread::IO},
         base::BindOnce(&chrome_browser_net::SetUrlRequestMocksEnabled, true));
     embedded_test_server()->RegisterRequestHandler(base::BindRepeating(
         &content::SlowDownloadHttpResponse::HandleSlowDownloadRequest));
@@ -823,7 +826,7 @@ IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
   // Add beforeunload handler for the 2nd (title2.html) tab which haven't had it
   // yet.
   ASSERT_TRUE(content::ExecuteScript(
-      browser2->tab_strip_model()->GetWebContentsAt(1)->GetRenderViewHost(),
+      browser2->tab_strip_model()->GetWebContentsAt(1),
       "window.addEventListener('beforeunload', "
       "function(event) { event.returnValue = 'Foo'; });"));
   EXPECT_TRUE(browser2->tab_strip_model()
@@ -1089,8 +1092,10 @@ IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
 // browser is opened and closed. While there are active downloads, closing the
 // incognito window shouldn't block on the active downloads which belong to the
 // parent profile.
+// TODO(https://crbug.com/844019): Fix the notification expectation around the
+// call to AttemptClose.
 IN_PROC_BROWSER_TEST_P(BrowserCloseManagerBrowserTest,
-                       TestWithOffTheRecordWindowAndRegularDownload) {
+                       DISABLED_TestWithOffTheRecordWindowAndRegularDownload) {
   Profile* otr_profile = browser()->profile()->GetOffTheRecordProfile();
   Browser* otr_browser = CreateBrowser(otr_profile);
   ASSERT_NO_FATAL_FAILURE(CreateStalledDownload(browser()));

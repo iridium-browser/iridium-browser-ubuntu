@@ -4,14 +4,15 @@
 
 #include "components/download/internal/common/download_worker.h"
 
-#include "base/message_loop/message_loop.h"
+#include "components/download/internal/common/resource_downloader.h"
 #include "components/download/public/common/download_create_info.h"
 #include "components/download/public/common/download_interrupt_reasons.h"
 #include "components/download/public/common/download_task_runner.h"
+#include "components/download/public/common/download_url_loader_factory_getter.h"
 #include "components/download/public/common/download_utils.h"
 #include "components/download/public/common/input_stream.h"
-#include "components/download/public/common/resource_downloader.h"
 #include "components/download/public/common/url_download_handler_factory.h"
+#include "net/url_request/url_request_context_getter.h"
 #include "services/network/public/cpp/features.h"
 #include "services/network/public/cpp/shared_url_loader_factory.h"
 
@@ -43,11 +44,13 @@ class CompletedInputStream : public InputStream {
 void CreateUrlDownloadHandler(
     std::unique_ptr<DownloadUrlParameters> params,
     base::WeakPtr<UrlDownloadHandler::Delegate> delegate,
-    scoped_refptr<network::SharedURLLoaderFactory> shared_url_loader_factory,
+    scoped_refptr<download::DownloadURLLoaderFactoryGetter>
+        url_loader_factory_getter,
+    scoped_refptr<net::URLRequestContextGetter> url_request_context_getter,
     const scoped_refptr<base::SingleThreadTaskRunner>& task_runner) {
   auto downloader = UrlDownloadHandlerFactory::Create(
-      std::move(params), delegate, std::move(shared_url_loader_factory),
-      task_runner);
+      std::move(params), delegate, std::move(url_loader_factory_getter),
+      std::move(url_request_context_getter), task_runner);
   task_runner->PostTask(
       FROM_HERE,
       base::BindOnce(&UrlDownloadHandler::Delegate::OnUrlDownloadHandlerCreated,
@@ -74,11 +77,14 @@ DownloadWorker::~DownloadWorker() = default;
 
 void DownloadWorker::SendRequest(
     std::unique_ptr<DownloadUrlParameters> params,
-    scoped_refptr<network::SharedURLLoaderFactory> shared_url_loader_factory) {
+    scoped_refptr<download::DownloadURLLoaderFactoryGetter>
+        url_loader_factory_getter,
+    scoped_refptr<net::URLRequestContextGetter> url_request_context_getter) {
   GetIOTaskRunner()->PostTask(
       FROM_HERE, base::BindOnce(&CreateUrlDownloadHandler, std::move(params),
                                 weak_factory_.GetWeakPtr(),
-                                std::move(shared_url_loader_factory),
+                                std::move(url_loader_factory_getter),
+                                std::move(url_request_context_getter),
                                 base::ThreadTaskRunnerHandle::Get()));
 }
 
@@ -104,7 +110,8 @@ void DownloadWorker::Cancel(bool user_cancel) {
 void DownloadWorker::OnUrlDownloadStarted(
     std::unique_ptr<DownloadCreateInfo> create_info,
     std::unique_ptr<InputStream> input_stream,
-    scoped_refptr<network::SharedURLLoaderFactory> shared_url_loader_factory,
+    scoped_refptr<download::DownloadURLLoaderFactoryGetter>
+        url_loader_factory_getter,
     const DownloadUrlParameters::OnStartedCallback& callback) {
   // |callback| is not used in subsequent requests.
   DCHECK(callback.is_null());
@@ -134,7 +141,8 @@ void DownloadWorker::OnUrlDownloadStarted(
     Pause();
   }
 
-  delegate_->OnInputStreamReady(this, std::move(input_stream));
+  delegate_->OnInputStreamReady(this, std::move(input_stream),
+                                std::move(create_info));
 }
 
 void DownloadWorker::OnUrlDownloadStopped(UrlDownloadHandler* downloader) {

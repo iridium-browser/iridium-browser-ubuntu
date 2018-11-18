@@ -30,6 +30,7 @@ struct vp9_extracfg {
   unsigned int static_thresh;
   unsigned int tile_columns;
   unsigned int tile_rows;
+  unsigned int enable_tpl_model;
   unsigned int arnr_max_frames;
   unsigned int arnr_strength;
   unsigned int min_gf_interval;
@@ -63,6 +64,7 @@ static struct vp9_extracfg default_extra_cfg = {
   0,                     // static_thresh
   6,                     // tile_columns
   0,                     // tile_rows
+  1,                     // enable_tpl_model
   7,                     // arnr_max_frames
   5,                     // arnr_strength
   0,                     // min_gf_interval; 0 -> default decision
@@ -247,8 +249,8 @@ static vpx_codec_err_t validate_config(vpx_codec_alg_priv_t *ctx,
 
   RANGE_CHECK(extra_cfg, row_mt, 0, 1);
   RANGE_CHECK(extra_cfg, motion_vector_unit_test, 0, 2);
-  RANGE_CHECK(extra_cfg, enable_auto_alt_ref, 0, 2);
-  RANGE_CHECK(extra_cfg, cpu_used, -8, 8);
+  RANGE_CHECK(extra_cfg, enable_auto_alt_ref, 0, MAX_ARF_LAYERS);
+  RANGE_CHECK(extra_cfg, cpu_used, -9, 9);
   RANGE_CHECK_HI(extra_cfg, noise_sensitivity, 6);
   RANGE_CHECK(extra_cfg, tile_columns, 0, 6);
   RANGE_CHECK(extra_cfg, tile_rows, 0, 2);
@@ -544,6 +546,8 @@ static vpx_codec_err_t set_encoder_config(
 
   oxcf->tile_columns = extra_cfg->tile_columns;
 
+  oxcf->enable_tpl_model = extra_cfg->enable_tpl_model;
+
   // TODO(yunqing): The dependencies between row tiles cause error in multi-
   // threaded encoding. For now, tile_rows is forced to be 0 in this case.
   // The further fix can be done by adding synchronizations after a tile row
@@ -737,6 +741,13 @@ static vpx_codec_err_t ctrl_set_tile_rows(vpx_codec_alg_priv_t *ctx,
                                           va_list args) {
   struct vp9_extracfg extra_cfg = ctx->extra_cfg;
   extra_cfg.tile_rows = CAST(VP9E_SET_TILE_ROWS, args);
+  return update_extra_cfg(ctx, &extra_cfg);
+}
+
+static vpx_codec_err_t ctrl_set_tpl_model(vpx_codec_alg_priv_t *ctx,
+                                          va_list args) {
+  struct vp9_extracfg extra_cfg = ctx->extra_cfg;
+  extra_cfg.enable_tpl_model = CAST(VP9E_SET_TPL, args);
   return update_extra_cfg(ctx, &extra_cfg);
 }
 
@@ -1074,23 +1085,11 @@ static vpx_codec_err_t encoder_encode(vpx_codec_alg_priv_t *ctx,
 
   if (cpi->oxcf.pass == 2 && cpi->level_constraint.level_index >= 0 &&
       !cpi->level_constraint.rc_config_updated) {
-    SVC *const svc = &cpi->svc;
-    const int is_two_pass_svc =
-        (svc->number_spatial_layers > 1) || (svc->number_temporal_layers > 1);
     const VP9EncoderConfig *const oxcf = &cpi->oxcf;
     TWO_PASS *const twopass = &cpi->twopass;
     FIRSTPASS_STATS *stats = &twopass->total_stats;
-    if (is_two_pass_svc) {
-      const double frame_rate = 10000000.0 * stats->count / stats->duration;
-      vp9_update_spatial_layer_framerate(cpi, frame_rate);
-      twopass->bits_left =
-          (int64_t)(stats->duration *
-                    svc->layer_context[svc->spatial_layer_id].target_bandwidth /
-                    10000000.0);
-    } else {
-      twopass->bits_left =
-          (int64_t)(stats->duration * oxcf->target_bandwidth / 10000000.0);
-    }
+    twopass->bits_left =
+        (int64_t)(stats->duration * oxcf->target_bandwidth / 10000000.0);
     cpi->level_constraint.rc_config_updated = 1;
   }
 
@@ -1100,7 +1099,7 @@ static vpx_codec_err_t encoder_encode(vpx_codec_alg_priv_t *ctx,
       // There's no codec control for multiple alt-refs so check the encoder
       // instance for its status to determine the compressed data size.
       data_sz = ctx->cfg.g_w * ctx->cfg.g_h * get_image_bps(img) / 8 *
-                (cpi->multi_arf_allowed ? 8 : 2);
+                (cpi->multi_layer_arf ? 8 : 2);
       if (data_sz < kMinCompressedSize) data_sz = kMinCompressedSize;
       if (ctx->cx_data == NULL || ctx->cx_data_sz < data_sz) {
         ctx->cx_data_sz = data_sz;
@@ -1150,6 +1149,8 @@ static vpx_codec_err_t encoder_encode(vpx_codec_alg_priv_t *ctx,
         timebase_units_to_ticks(timebase, pts + duration);
     size_t size, cx_data_sz;
     unsigned char *cx_data;
+
+    cpi->svc.timebase_fac = timebase_units_to_ticks(timebase, 1);
 
     // Set up internal flags
     if (ctx->base.init_flags & VPX_CODEC_USE_PSNR) cpi->b_calculate_psnr = 1;
@@ -1318,9 +1319,9 @@ static vpx_codec_err_t ctrl_get_reference(vpx_codec_alg_priv_t *ctx,
   vp9_ref_frame_t *const frame = va_arg(args, vp9_ref_frame_t *);
 
   if (frame != NULL) {
-    YV12_BUFFER_CONFIG *fb = get_ref_frame(&ctx->cpi->common, frame->idx);
+    const int fb_idx = ctx->cpi->common.cur_show_frame_fb_idx;
+    YV12_BUFFER_CONFIG *fb = get_buf_frame(&ctx->cpi->common, fb_idx);
     if (fb == NULL) return VPX_CODEC_ERROR;
-
     yuvconfig2image(&frame->img, fb, NULL);
     return VPX_CODEC_OK;
   }
@@ -1447,22 +1448,23 @@ static vpx_codec_err_t ctrl_set_svc_layer_id(vpx_codec_alg_priv_t *ctx,
   vpx_svc_layer_id_t *const data = va_arg(args, vpx_svc_layer_id_t *);
   VP9_COMP *const cpi = (VP9_COMP *)ctx->cpi;
   SVC *const svc = &cpi->svc;
+  int sl;
 
-  svc->first_spatial_layer_to_encode = data->spatial_layer_id;
   svc->spatial_layer_to_encode = data->spatial_layer_id;
+  svc->first_spatial_layer_to_encode = data->spatial_layer_id;
+  // TODO(jianj): Deprecated to be removed.
   svc->temporal_layer_id = data->temporal_layer_id;
+  // Allow for setting temporal layer per spatial layer for superframe.
+  for (sl = 0; sl < cpi->svc.number_spatial_layers; ++sl) {
+    svc->temporal_layer_id_per_spatial[sl] =
+        data->temporal_layer_id_per_spatial[sl];
+  }
   // Checks on valid layer_id input.
   if (svc->temporal_layer_id < 0 ||
       svc->temporal_layer_id >= (int)ctx->cfg.ts_number_layers) {
     return VPX_CODEC_INVALID_PARAM;
   }
-  if (svc->first_spatial_layer_to_encode < 0 ||
-      svc->first_spatial_layer_to_encode >= (int)ctx->cfg.ss_number_layers) {
-    return VPX_CODEC_INVALID_PARAM;
-  }
-  // First spatial layer to encode not implemented for two-pass.
-  if (is_two_pass_svc(cpi) && svc->first_spatial_layer_to_encode > 0)
-    return VPX_CODEC_INVALID_PARAM;
+
   return VPX_CODEC_OK;
 }
 
@@ -1502,16 +1504,42 @@ static vpx_codec_err_t ctrl_set_svc_parameters(vpx_codec_alg_priv_t *ctx,
   return VPX_CODEC_OK;
 }
 
+static vpx_codec_err_t ctrl_get_svc_ref_frame_config(vpx_codec_alg_priv_t *ctx,
+                                                     va_list args) {
+  VP9_COMP *const cpi = ctx->cpi;
+  vpx_svc_ref_frame_config_t *data = va_arg(args, vpx_svc_ref_frame_config_t *);
+  int sl;
+  for (sl = 0; sl <= cpi->svc.spatial_layer_id; sl++) {
+    data->update_buffer_slot[sl] = cpi->svc.update_buffer_slot[sl];
+    data->reference_last[sl] = cpi->svc.reference_last[sl];
+    data->reference_golden[sl] = cpi->svc.reference_golden[sl];
+    data->reference_alt_ref[sl] = cpi->svc.reference_altref[sl];
+    data->lst_fb_idx[sl] = cpi->svc.lst_fb_idx[sl];
+    data->gld_fb_idx[sl] = cpi->svc.gld_fb_idx[sl];
+    data->alt_fb_idx[sl] = cpi->svc.alt_fb_idx[sl];
+    // TODO(jianj): Remove these 3, deprecated.
+    data->update_last[sl] = cpi->svc.update_last[sl];
+    data->update_golden[sl] = cpi->svc.update_golden[sl];
+    data->update_alt_ref[sl] = cpi->svc.update_altref[sl];
+  }
+  return VPX_CODEC_OK;
+}
+
 static vpx_codec_err_t ctrl_set_svc_ref_frame_config(vpx_codec_alg_priv_t *ctx,
                                                      va_list args) {
   VP9_COMP *const cpi = ctx->cpi;
   vpx_svc_ref_frame_config_t *data = va_arg(args, vpx_svc_ref_frame_config_t *);
   int sl;
+  cpi->svc.use_set_ref_frame_config = 1;
   for (sl = 0; sl < cpi->svc.number_spatial_layers; ++sl) {
-    cpi->svc.ext_frame_flags[sl] = data->frame_flags[sl];
-    cpi->svc.ext_lst_fb_idx[sl] = data->lst_fb_idx[sl];
-    cpi->svc.ext_gld_fb_idx[sl] = data->gld_fb_idx[sl];
-    cpi->svc.ext_alt_fb_idx[sl] = data->alt_fb_idx[sl];
+    cpi->svc.update_buffer_slot[sl] = data->update_buffer_slot[sl];
+    cpi->svc.reference_last[sl] = data->reference_last[sl];
+    cpi->svc.reference_golden[sl] = data->reference_golden[sl];
+    cpi->svc.reference_altref[sl] = data->reference_alt_ref[sl];
+    cpi->svc.lst_fb_idx[sl] = data->lst_fb_idx[sl];
+    cpi->svc.gld_fb_idx[sl] = data->gld_fb_idx[sl];
+    cpi->svc.alt_fb_idx[sl] = data->alt_fb_idx[sl];
+    cpi->svc.duration[sl] = data->duration[sl];
   }
   return VPX_CODEC_OK;
 }
@@ -1532,6 +1560,28 @@ static vpx_codec_err_t ctrl_set_svc_frame_drop_layer(vpx_codec_alg_priv_t *ctx,
   cpi->svc.framedrop_mode = data->framedrop_mode;
   for (sl = 0; sl < cpi->svc.number_spatial_layers; ++sl)
     cpi->svc.framedrop_thresh[sl] = data->framedrop_thresh[sl];
+  // Don't allow max_consec_drop values below 1.
+  cpi->svc.max_consec_drop = VPXMAX(1, data->max_consec_drop);
+  return VPX_CODEC_OK;
+}
+
+static vpx_codec_err_t ctrl_set_svc_gf_temporal_ref(vpx_codec_alg_priv_t *ctx,
+                                                    va_list args) {
+  VP9_COMP *const cpi = ctx->cpi;
+  const unsigned int data = va_arg(args, unsigned int);
+  cpi->svc.use_gf_temporal_ref = data;
+  return VPX_CODEC_OK;
+}
+
+static vpx_codec_err_t ctrl_set_svc_spatial_layer_sync(
+    vpx_codec_alg_priv_t *ctx, va_list args) {
+  VP9_COMP *const cpi = ctx->cpi;
+  vpx_svc_spatial_layer_sync_t *data =
+      va_arg(args, vpx_svc_spatial_layer_sync_t *);
+  int sl;
+  for (sl = 0; sl < cpi->svc.number_spatial_layers; ++sl)
+    cpi->svc.spatial_layer_sync[sl] = data->spatial_layer_sync[sl];
+  cpi->svc.set_intra_only_frame = data->base_layer_intra_only;
   return VPX_CODEC_OK;
 }
 
@@ -1590,6 +1640,7 @@ static vpx_codec_ctrl_fn_map_t encoder_ctrl_maps[] = {
   { VP8E_SET_STATIC_THRESHOLD, ctrl_set_static_thresh },
   { VP9E_SET_TILE_COLUMNS, ctrl_set_tile_columns },
   { VP9E_SET_TILE_ROWS, ctrl_set_tile_rows },
+  { VP9E_SET_TPL, ctrl_set_tpl_model },
   { VP8E_SET_ARNR_MAXFRAMES, ctrl_set_arnr_max_frames },
   { VP8E_SET_ARNR_STRENGTH, ctrl_set_arnr_strength },
   { VP8E_SET_ARNR_TYPE, ctrl_set_arnr_type },
@@ -1620,6 +1671,8 @@ static vpx_codec_ctrl_fn_map_t encoder_ctrl_maps[] = {
   { VP9E_ENABLE_MOTION_VECTOR_UNIT_TEST, ctrl_enable_motion_vector_unit_test },
   { VP9E_SET_SVC_INTER_LAYER_PRED, ctrl_set_svc_inter_layer_pred },
   { VP9E_SET_SVC_FRAME_DROP_LAYER, ctrl_set_svc_frame_drop_layer },
+  { VP9E_SET_SVC_GF_TEMPORAL_REF, ctrl_set_svc_gf_temporal_ref },
+  { VP9E_SET_SVC_SPATIAL_LAYER_SYNC, ctrl_set_svc_spatial_layer_sync },
 
   // Getters
   { VP8E_GET_LAST_QUANTIZER, ctrl_get_quantizer },
@@ -1628,6 +1681,7 @@ static vpx_codec_ctrl_fn_map_t encoder_ctrl_maps[] = {
   { VP9E_GET_SVC_LAYER_ID, ctrl_get_svc_layer_id },
   { VP9E_GET_ACTIVEMAP, ctrl_get_active_map },
   { VP9E_GET_LEVEL, ctrl_get_level },
+  { VP9E_GET_SVC_REF_FRAME_CONFIG, ctrl_get_svc_ref_frame_config },
 
   { -1, NULL },
 };

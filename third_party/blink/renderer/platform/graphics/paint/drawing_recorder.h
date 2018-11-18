@@ -7,22 +7,21 @@
 
 #include "third_party/blink/renderer/platform/platform_export.h"
 
+#include "base/auto_reset.h"
+#include "base/macros.h"
 #include "third_party/blink/renderer/platform/geometry/float_rect.h"
 #include "third_party/blink/renderer/platform/geometry/layout_rect.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context.h"
 #include "third_party/blink/renderer/platform/graphics/paint/drawing_display_item.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_controller.h"
 #include "third_party/blink/renderer/platform/wtf/allocator.h"
-#include "third_party/blink/renderer/platform/wtf/auto_reset.h"
-#include "third_party/blink/renderer/platform/wtf/noncopyable.h"
 
 namespace blink {
 
 class GraphicsContext;
 
 class PLATFORM_EXPORT DrawingRecorder final {
-  DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
-  WTF_MAKE_NONCOPYABLE(DrawingRecorder);
+  DISALLOW_NEW();
 
  public:
   static bool UseCachedDrawingIfPossible(GraphicsContext& context,
@@ -69,18 +68,21 @@ class PLATFORM_EXPORT DrawingRecorder final {
   // Ensures the list size does not change during the recorder's scope.
   size_t initial_display_item_list_size_;
 #endif
+
+  DISALLOW_COPY_AND_ASSIGN(DrawingRecorder);
 };
 
 #if DCHECK_IS_ON()
 class DisableListModificationCheck {
   STACK_ALLOCATED();
-  WTF_MAKE_NONCOPYABLE(DisableListModificationCheck);
 
  public:
   DisableListModificationCheck();
 
  private:
-  AutoReset<bool> disabler_;
+  base::AutoReset<bool> disabler_;
+
+  DISALLOW_COPY_AND_ASSIGN(DisableListModificationCheck);
 };
 #endif  // DCHECK_IS_ON()
 

@@ -12,6 +12,7 @@
 #include <string>
 
 #include "base/base_export.h"
+#include "base/callback_forward.h"
 #include "base/files/file_path.h"
 #include "base/gtest_prod_util.h"
 #include "base/time/time.h"
@@ -68,11 +69,21 @@ class BASE_EXPORT SysInfo {
   static TimeDelta Uptime();
 
   // Returns a descriptive string for the current machine model or an empty
-  // string if the machine model is unknown or an error occured.
+  // string if the machine model is unknown or an error occurred.
   // e.g. "MacPro1,1" on Mac, "iPhone9,3" on iOS or "Nexus 5" on Android. Only
-  // implemented on OS X, iOS, Android, and Chrome OS. This returns an empty
-  // string on other platforms.
+  // implemented on OS X, iOS, and Android. This returns an empty string on
+  // other platforms.
   static std::string HardwareModelName();
+
+  struct HardwareInfo {
+    std::string manufacturer;
+    std::string model;
+  };
+  // Returns via |callback| a struct containing descriptive UTF-8 strings for
+  // the current machine manufacturer and model, or empty strings if the
+  // information is unknown or an error occurred. Implemented on Windows, OS X,
+  // iOS, Linux, Chrome OS and Android.
+  static void GetHardwareInfo(base::OnceCallback<void(HardwareInfo)> callback);
 
   // Returns the name of the host operating system.
   static std::string OperatingSystemName();
@@ -107,12 +118,7 @@ class BASE_EXPORT SysInfo {
   static size_t VMAllocationGranularity();
 
 #if defined(OS_CHROMEOS)
-  typedef std::map<std::string, std::string> LsbReleaseMap;
-
-  // Returns the contents of /etc/lsb-release as a map.
-  static const LsbReleaseMap& GetLsbReleaseMap();
-
-  // If |key| is present in the LsbReleaseMap, sets |value| and returns true.
+  // Set |value| and return true if LsbRelease contains information about |key|.
   static bool GetLsbReleaseValue(const std::string& key, std::string* value);
 
   // Convenience function for GetLsbReleaseValue("CHROMEOS_RELEASE_BOARD",...).
@@ -131,12 +137,6 @@ class BASE_EXPORT SysInfo {
   // details.
   static std::string GetLsbReleaseBoard();
 
-  // DEPRECATED: Please see GetLsbReleaseBoard's comment.
-  // Convenience function for GetLsbReleaseBoard() removing trailing "-signed-*"
-  // if present. Returns "unknown" if CHROMEOS_RELEASE_BOARD is not set.
-  // TODO(derat): Delete this after October 2017.
-  static std::string GetStrippedReleaseBoard();
-
   // Returns the creation time of /etc/lsb-release. (Used to get the date and
   // time of the Chrome OS build).
   static Time GetLsbReleaseTime();
@@ -147,6 +147,9 @@ class BASE_EXPORT SysInfo {
   // Test method to force re-parsing of lsb-release.
   static void SetChromeOSVersionInfoForTest(const std::string& lsb_release,
                                             const Time& lsb_release_time);
+
+  // Returns the kernel version of the host operating system.
+  static std::string KernelVersion();
 #endif  // defined(OS_CHROMEOS)
 
 #if defined(OS_ANDROID)
@@ -173,6 +176,7 @@ class BASE_EXPORT SysInfo {
   static int64_t AmountOfPhysicalMemoryImpl();
   static int64_t AmountOfAvailablePhysicalMemoryImpl();
   static bool IsLowEndDeviceImpl();
+  static HardwareInfo GetHardwareInfoSync();
 
 #if defined(OS_LINUX) || defined(OS_ANDROID) || defined(OS_AIX)
   static int64_t AmountOfAvailablePhysicalMemory(

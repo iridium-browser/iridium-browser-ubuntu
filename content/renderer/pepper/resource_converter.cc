@@ -7,7 +7,6 @@
 #include <stddef.h>
 
 #include "base/bind.h"
-#include "base/message_loop/message_loop.h"
 #include "content/public/renderer/renderer_ppapi_host.h"
 #include "content/renderer/pepper/pepper_file_system_host.h"
 #include "content/renderer/pepper/pepper_media_stream_audio_track_host.h"
@@ -20,7 +19,7 @@
 #include "ppapi/shared_impl/resource_var.h"
 #include "ppapi/shared_impl/scoped_pp_var.h"
 #include "storage/common/fileapi/file_system_util.h"
-#include "third_party/blink/public/platform/web_file_system.h"
+#include "third_party/blink/public/platform/web_file_system_type.h"
 #include "third_party/blink/public/platform/web_media_stream_source.h"
 #include "third_party/blink/public/platform/web_media_stream_track.h"
 #include "third_party/blink/public/web/web_dom_file_system.h"
@@ -43,16 +42,15 @@ void FlushComplete(
   callback.Run(true);
 }
 
-// Converts a blink::WebFileSystem::Type to a PP_FileSystemType.
-PP_FileSystemType WebFileSystemTypeToPPAPI(blink::WebFileSystem::Type type) {
+PP_FileSystemType WebFileSystemTypeToPPAPI(blink::WebFileSystemType type) {
   switch (type) {
-    case blink::WebFileSystem::kTypeTemporary:
+    case blink::WebFileSystemType::kWebFileSystemTypeTemporary:
       return PP_FILESYSTEMTYPE_LOCALTEMPORARY;
-    case blink::WebFileSystem::kTypePersistent:
+    case blink::WebFileSystemType::kWebFileSystemTypePersistent:
       return PP_FILESYSTEMTYPE_LOCALPERSISTENT;
-    case blink::WebFileSystem::kTypeIsolated:
+    case blink::WebFileSystemType::kWebFileSystemTypeIsolated:
       return PP_FILESYSTEMTYPE_ISOLATED;
-    case blink::WebFileSystem::kTypeExternal:
+    case blink::WebFileSystemType::kWebFileSystemTypeExternal:
       return PP_FILESYSTEMTYPE_EXTERNAL;
     default:
       NOTREACHED();
@@ -164,7 +162,6 @@ bool DOMMediaStreamTrackToResource(
     std::unique_ptr<IPC::Message>* create_message) {
   DCHECK(!dom_media_stream_track.IsNull());
   *pending_renderer_id = 0;
-#if BUILDFLAG(ENABLE_WEBRTC)
   const blink::WebMediaStreamTrack track = dom_media_stream_track.Component();
   const std::string id = track.Source().Id().Utf8();
 
@@ -190,7 +187,6 @@ bool DOMMediaStreamTrackToResource(
         new PpapiPluginMsg_MediaStreamAudioTrack_CreateFromPendingHost(id));
     return true;
   }
-#endif
   return false;
 }
 

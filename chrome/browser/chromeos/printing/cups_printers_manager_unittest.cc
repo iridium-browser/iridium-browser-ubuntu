@@ -152,7 +152,7 @@ class FakeSyncedPrintersManager : public SyncedPrintersManager {
     target->resize(new_end - target->begin());
   }
 
-  base::ObserverList<SyncedPrintersManager::Observer> observers_;
+  base::ObserverList<SyncedPrintersManager::Observer>::Unchecked observers_;
   std::vector<Printer> configured_printers_;
   std::vector<Printer> enterprise_printers_;
 };
@@ -193,7 +193,7 @@ class FakePrinterDetector : public PrinterDetector {
 
  private:
   std::vector<DetectedPrinter> detections_;
-  base::ObserverList<PrinterDetector::Observer> observers_;
+  base::ObserverList<PrinterDetector::Observer>::Unchecked observers_;
 };
 
 // Fake PpdProvider backend.  This fake generates PpdReferences based on
@@ -263,7 +263,7 @@ class CupsPrintersManagerTest : public testing::Test,
     // Register the pref |UserNativePrintersAllowed|
     CupsPrintersManager::RegisterProfilePrefs(pref_service_.registry());
 
-    manager_ = CupsPrintersManager::Create(
+    manager_ = CupsPrintersManager::CreateForTesting(
         &synced_printers_manager_, std::move(usb_detector),
         std::move(zeroconf_detector), ppd_provider_, &event_tracker_,
         &pref_service_);

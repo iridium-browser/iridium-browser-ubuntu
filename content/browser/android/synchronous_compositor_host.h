@@ -23,10 +23,6 @@
 #include "ui/gfx/geometry/scroll_offset.h"
 #include "ui/gfx/geometry/size_f.h"
 
-namespace IPC {
-class Message;
-}
-
 namespace ui {
 class WindowAndroid;
 struct DidOverscrollParams;
@@ -37,8 +33,6 @@ namespace content {
 class RenderProcessHost;
 class RenderWidgetHostViewAndroid;
 class SynchronousCompositorClient;
-class SynchronousCompositorBrowserFilter;
-class SynchronousCompositorLegacyChromeIPC;
 class SynchronousCompositorSyncCallBridge;
 struct SyncCompositorCommonRendererParams;
 
@@ -60,6 +54,7 @@ class SynchronousCompositorHost : public SynchronousCompositor,
       uint32_t layer_tree_frame_sink_id,
       const std::vector<viz::ReturnedResource>& resources) override;
   void SetMemoryPolicy(size_t bytes_limit) override;
+  void DidBecomeActive() override;
   void DidChangeRootLayerScrollOffset(
       const gfx::ScrollOffset& root_offset) override;
   void SynchronouslyZoomBy(float zoom_delta, const gfx::Point& anchor) override;
@@ -69,7 +64,6 @@ class SynchronousCompositorHost : public SynchronousCompositor,
   void BeginFrame(ui::WindowAndroid* window_android,
                   const viz::BeginFrameArgs& args);
   void SetBeginFramePaused(bool paused);
-  bool OnMessageReceived(const IPC::Message& message);
 
   // Called by SynchronousCompositorSyncCallBridge.
   int routing_id() const { return routing_id_; }
@@ -81,7 +75,6 @@ class SynchronousCompositorHost : public SynchronousCompositor,
 
   SynchronousCompositorClient* client() { return client_; }
 
-  SynchronousCompositorBrowserFilter* GetFilter();
   RenderProcessHost* GetRenderProcessHost();
 
   // mojom::SynchronousCompositorHost overrides.
@@ -110,14 +103,13 @@ class SynchronousCompositorHost : public SynchronousCompositor,
   // Whether the synchronous compositor host is ready to
   // handle blocking calls.
   bool IsReadyForSynchronousCall();
+  void UpdateRootLayerStateOnClient();
 
   RenderWidgetHostViewAndroid* const rwhva_;
   SynchronousCompositorClient* const client_;
   const int process_id_;
   const int routing_id_;
-  const bool use_mojo_;
   const bool use_in_process_zero_copy_software_draw_;
-  std::unique_ptr<SynchronousCompositorLegacyChromeIPC> legacy_compositor_;
   mojom::SynchronousCompositorAssociatedPtr sync_compositor_;
   mojo::AssociatedBinding<mojom::SynchronousCompositorHost> host_binding_;
 
@@ -139,7 +131,8 @@ class SynchronousCompositorHost : public SynchronousCompositor,
   // Indicates begin frames are paused from the browser.
   bool begin_frame_paused_ = false;
 
-  // Updated by both renderer and browser.
+  // Updated by both renderer and browser. This is in physical pixel when
+  // use-zoom-for-dsf is enabled, otherwise in dip.
   gfx::ScrollOffset root_scroll_offset_;
 
   // Indicates that whether OnComputeScroll is called or overridden. The
@@ -151,8 +144,15 @@ class SynchronousCompositorHost : public SynchronousCompositor,
   uint32_t renderer_param_version_;
   bool need_animate_scroll_;
   uint32_t need_invalidate_count_;
+  bool invalidate_needs_draw_;
   uint32_t did_activate_pending_tree_count_;
   uint32_t frame_metadata_version_ = 0u;
+  // Physical pixel when use-zoom-for-dsf is enabled, otherwise in dip.
+  gfx::ScrollOffset max_scroll_offset_;
+  gfx::SizeF scrollable_size_;
+  float page_scale_factor_ = 0.f;
+  float min_page_scale_factor_ = 0.f;
+  float max_page_scale_factor_ = 0.f;
 
   scoped_refptr<SynchronousCompositorSyncCallBridge> bridge_;
 

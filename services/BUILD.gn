@@ -19,6 +19,7 @@ service_test("services_unittests") {
   # If your service does not run on iOS, its tests should go in the !iOS
   # section below. If you are unsure, contact blundell@chromium.org.
   deps = [
+    "//services/content:tests",
     "//services/identity:tests",
     "//services/metrics/public/cpp:tests",
     "//services/network:tests",
@@ -30,6 +31,7 @@ service_test("services_unittests") {
       "//services/audio:tests",
       "//services/data_decoder:tests",
       "//services/device:tests",
+      "//services/media_session:tests",
       "//services/preferences:tests",
       "//services/proxy_resolver:tests",
       "//services/resource_coordinator:tests",
@@ -38,25 +40,18 @@ service_test("services_unittests") {
       "//services/viz",
       "//services/viz/privileged/interfaces:unit_tests",
       "//services/viz/public/cpp/compositing:tests",
+      "//services/viz/public/cpp/hit_test:tests",
     ]
   }
 
   if (use_aura) {
     deps += [
-      "//services/ui/clipboard:tests",
-      "//services/ui/ime:tests",
-      "//services/ui/input_devices:tests",
-      "//services/ui/public/cpp/tests",
-      "//services/ui/public/interfaces:tests",
+      "//services/ws:tests",
+      "//services/ws/ime:tests",
+      "//services/ws/input_devices:tests",
+      "//services/ws/public/cpp/tests",
+      "//services/ws/public/mojom:tests",
     ]
-
-    if (is_linux && !is_chromeos) {
-      deps += [ "//services/ui/demo:tests" ]
-    }
-
-    if (use_ozone || (!is_chromeos && !is_mac && !is_ios)) {
-      deps += [ "//services/ui/ws:tests" ]
-    }
   }
 
   if (is_android) {
@@ -81,10 +76,6 @@ service_test("services_unittests") {
     # or iOS, so any tests which use the ServiceTest framework to connect to
     # standalone services must be added here.
     deps += [ "//services/video_capture:tests" ]
-  }
-
-  if (is_chromeos) {
-    deps += [ "//services/ui/display:tests" ]
   }
 
   test_runner = "//services/test:run_all_service_tests"
@@ -116,17 +107,22 @@ catalog("services_unittests_catalog") {
 
   if (use_aura) {
     catalog_deps += [
-      "//services/ui/clipboard:tests_catalog",
-      "//services/ui/ime:tests_catalog",
+      "//services/ws/ime:tests_catalog",
+      "//services/ws:tests_catalog",
     ]
+  }
+}
 
-    if (is_linux && !is_chromeos) {
-      catalog_deps += [ "//services/ui/demo:tests_catalog" ]
-    }
+if (!is_ios) {
+  service_test("services_perftests") {
+    deps = [
+      "//services/viz/public/cpp/compositing:perftests",
+    ]
+    catalog = ":services_perftests_catalog"
+  }
 
-    if (use_ozone || (!is_chromeos && !is_ios)) {
-      catalog_deps += [ "//services/ui/ws:tests_catalog" ]
-    }
+  catalog("services_perftests_catalog") {
+    testonly = true
   }
 }
 
@@ -135,6 +131,7 @@ if (is_android) {
     java_files = [
       "device/generic_sensor/android/junit/src/org/chromium/device/sensors/PlatformSensorAndProviderTest.java",
       "device/nfc/android/junit/src/org/chromium/device/nfc/NFCTest.java",
+      "device/geolocation/android/junit/src/org/chromium/device/geolocation/LocationProviderTest.java",
       "shape_detection/android/junit/src/org/chromium/shape_detection/BitmapUtilsTest.java",
     ]
     deps = [
@@ -148,13 +145,15 @@ if (is_android) {
       "//mojo/public/java:bindings_java",
       "//mojo/public/java:system_java",
       "//services/device/generic_sensor:java",
+      "//services/device/geolocation:geolocation_java",
       "//services/device/nfc/android:java",
+      "//services/device/public/java:geolocation_java_test_support",
       "//services/device/public/java:nfc_java",
       "//services/device/public/mojom:generic_sensor_java",
       "//services/device/public/mojom:mojom_java",
       "//services/shape_detection:shape_detection_java",
       "//skia/public/interfaces:interfaces_java",
-      "//third_party/android_tools:android_support_annotations_java",
+      "//third_party/android_deps:android_support_annotations_java",
     ]
   }
 
@@ -173,6 +172,7 @@ if (is_android) {
       "$google_play_services_package:google_play_services_vision_java",
       "//base:base_java",
       "//base:base_java_test_support",
+      "//mojo/public/java:base_java",
       "//mojo/public/java:bindings_java",
       "//services/shape_detection:shape_detection_java",
       "//services/shape_detection/public/mojom:mojom_java",

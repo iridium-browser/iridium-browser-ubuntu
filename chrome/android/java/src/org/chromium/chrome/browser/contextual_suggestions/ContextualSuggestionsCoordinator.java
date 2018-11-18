@@ -4,18 +4,26 @@
 
 package org.chromium.chrome.browser.contextual_suggestions;
 
+import android.content.Intent;
 import android.support.annotation.Nullable;
 
 import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.browser.ChromeActivity;
+import org.chromium.chrome.browser.dependency_injection.ActivityScope;
+import org.chromium.chrome.browser.help.HelpAndFeedback;
+import org.chromium.chrome.browser.preferences.ContextualSuggestionsPreference;
+import org.chromium.chrome.browser.preferences.PreferencesLauncher;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.suggestions.SuggestionsNavigationDelegate;
-import org.chromium.chrome.browser.suggestions.SuggestionsNavigationDelegateImpl;
 import org.chromium.chrome.browser.suggestions.SuggestionsUiDelegateImpl;
+import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
+import org.chromium.chrome.browser.util.IntentUtils;
 import org.chromium.chrome.browser.widget.bottomsheet.BottomSheet;
 import org.chromium.chrome.browser.widget.bottomsheet.BottomSheetController;
 import org.chromium.chrome.browser.widget.bottomsheet.BottomSheetObserver;
+
+import javax.inject.Inject;
 
 /**
  * The coordinator for the contextual suggestions UI component. Manages communication with other
@@ -25,12 +33,15 @@ import org.chromium.chrome.browser.widget.bottomsheet.BottomSheetObserver;
  * and {@link ToolbarCoordinator}. These sub-components each have their own views and view binders.
  * They share a {@link ContextualSuggestionsMediator} and {@link ContextualSuggestionsModel}.
  */
+@ActivityScope
 public class ContextualSuggestionsCoordinator {
+    private static final String FEEDBACK_CONTEXT = "contextual_suggestions";
+
+    private final Profile mProfile = Profile.getLastUsedProfile().getOriginalProfile();
+    private final ContextualSuggestionsModel mModel;
     private final ChromeActivity mActivity;
     private final BottomSheetController mBottomSheetController;
     private final TabModelSelector mTabModelSelector;
-    private final Profile mProfile;
-    private final ContextualSuggestionsModel mModel;
     private final ContextualSuggestionsMediator mMediator;
 
     private @Nullable ToolbarCoordinator mToolbarCoordinator;
@@ -38,26 +49,27 @@ public class ContextualSuggestionsCoordinator {
     private @Nullable ContextualSuggestionsBottomSheetContent mBottomSheetContent;
 
     /**
-     * Construct a new {@link ContextualSuggestionsCoordinator}.
      * @param activity The containing {@link ChromeActivity}.
      * @param bottomSheetController The {@link BottomSheetController} to request content be shown.
      * @param tabModelSelector The {@link TabModelSelector} for the activity.
+     * @param model The model of the component.
+     * @param mediator The mediator of the component
      */
-    public ContextualSuggestionsCoordinator(ChromeActivity activity,
-            BottomSheetController bottomSheetController, TabModelSelector tabModelSelector) {
+    @Inject
+    ContextualSuggestionsCoordinator(ChromeActivity activity,
+            BottomSheetController bottomSheetController, TabModelSelector tabModelSelector,
+            ContextualSuggestionsModel model, ContextualSuggestionsMediator mediator) {
         mActivity = activity;
+        mModel = model;
         mBottomSheetController = bottomSheetController;
         mTabModelSelector = tabModelSelector;
-        mProfile = Profile.getLastUsedProfile().getOriginalProfile();
-
-        mModel = new ContextualSuggestionsModel();
-        mMediator = new ContextualSuggestionsMediator(mProfile, tabModelSelector,
-                activity.getFullscreenManager(), this, mModel,
-                mBottomSheetController.getBottomSheet());
+        mMediator = mediator;
+        mediator.initialize(this);
     }
 
     /** Called when the containing activity is destroyed. */
     public void destroy() {
+        mModel.getClusterList().destroy();
         mMediator.destroy();
 
         if (mToolbarCoordinator != null) mToolbarCoordinator.destroy();
@@ -66,41 +78,18 @@ public class ContextualSuggestionsCoordinator {
     }
 
     /**
-     * Called when accessibility mode changes.
-     * @param enabled Whether accessibility mode is enabled.
+     * Show the contextual suggestions content in the {@link BottomSheet}.
+     * Only the views needed for peeking the bottom sheet will be constructed. Another
+     * call to {@link #displaySuggestions()} is needed to finish inflating views for the
+     * suggestions cards.
      */
-    public void onAccessibilityModeChanged(boolean enabled) {
-        mMediator.onAccessibilityModeChanged();
-    }
-
-    /**
-     * Preload the contextual suggestions content in the {@link BottomSheet}; the sheet won't
-     * actually be shown until {@link #showContentInSheet()} is called.
-     */
-    void preloadContentInSheet() {
+    void showContentInSheet() {
         mToolbarCoordinator =
                 new ToolbarCoordinator(mActivity, mBottomSheetController.getBottomSheet(), mModel);
         mContentCoordinator =
                 new ContentCoordinator(mActivity, mBottomSheetController.getBottomSheet());
         mBottomSheetContent = new ContextualSuggestionsBottomSheetContent(
                 mContentCoordinator, mToolbarCoordinator);
-        // TODO(twellington): Handle the case where preload returns false.
-        mBottomSheetController.requestContentPreload(mBottomSheetContent);
-    }
-
-    /**
-     * Show the contextual suggestions content in the {@link BottomSheet}.
-     * {@link #preloadContentInSheet()} must be called prior to calling this method.
-     *
-     * Only the views needed for peeking the bottom sheet will be constructed. Another
-     * call to {@link #displaySuggestions()} is needed to finish inflating views for the
-     * suggestions cards.
-     */
-    void showContentInSheet() {
-        // #preloadContentInSheet will always be called before this method, regardless of
-        // whether content was actually put in the sheet (meaning mBottomSheetContent should never
-        // be null). If content is not successfully preloaded
-        // BottomSheetController#requestContentPreload will return false.
         assert mBottomSheetContent != null;
         mBottomSheetController.requestShowContent(mBottomSheetContent, false);
     }
@@ -113,7 +102,14 @@ public class ContextualSuggestionsCoordinator {
      *                          things needed to display suggestions (e.g. favicons, thumbnails).
      */
     void showSuggestions(ContextualSuggestionsSource suggestionsSource) {
-        SuggestionsNavigationDelegate navigationDelegate = new SuggestionsNavigationDelegateImpl(
+        // If the content coordinator has already been destroyed when this method is called, return
+        // early. See https://crbug.com/873052.
+        if (mContentCoordinator == null) {
+            assert false : "ContentCoordinator false when #showSuggestions was called.";
+            return;
+        }
+
+        SuggestionsNavigationDelegate navigationDelegate = new SuggestionsNavigationDelegate(
                 mActivity, mProfile, mBottomSheetController.getBottomSheet(), mTabModelSelector);
         SuggestionsUiDelegateImpl uiDelegate = new SuggestionsUiDelegateImpl(suggestionsSource,
                 new ContextualSuggestionsEventReporter(mTabModelSelector, suggestionsSource),
@@ -165,6 +161,25 @@ public class ContextualSuggestionsCoordinator {
             mBottomSheetContent.destroy();
             mBottomSheetContent = null;
         }
+    }
+
+    /** Show the settings page for contextual suggestions. */
+    void showSettings() {
+        Intent intent = PreferencesLauncher.createIntentForSettingsPage(
+                mActivity, ContextualSuggestionsPreference.class.getName());
+        IntentUtils.safeStartActivity(mActivity, intent);
+    }
+
+    /** Show the feedback page. */
+    void showFeedback() {
+        Tab currentTab = mActivity.getActivityTab();
+        HelpAndFeedback.getInstance(mActivity).showFeedback(mActivity, mProfile,
+                currentTab != null ? currentTab.getUrl() : null, null, FEEDBACK_CONTEXT);
+    }
+
+    /** @return The height of the bottom sheet when it's peeking. */
+    float getSheetPeekHeight() {
+        return mActivity.getBottomSheet().getSheetHeightForState(BottomSheet.SheetState.PEEK);
     }
 
     @VisibleForTesting

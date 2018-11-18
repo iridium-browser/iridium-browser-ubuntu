@@ -12,14 +12,16 @@
 #include "base/logging.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string_util.h"
+#include "base/task/post_task.h"
 #include "chromeos/chromeos_switches.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "google_apis/gaia/gaia_auth_fetcher.h"
 #include "google_apis/gaia/gaia_constants.h"
 #include "google_apis/gaia/gaia_urls.h"
 #include "google_apis/gaia/google_service_auth_error.h"
 #include "google_apis/gaia/oauth2_access_token_fetcher_impl.h"
-#include "net/url_request/url_request_context_getter.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 
 using content::BrowserThread;
 
@@ -45,16 +47,13 @@ class PolicyOAuth2TokenFetcherImpl : public PolicyOAuth2TokenFetcher,
 
  private:
   // PolicyOAuth2TokenFetcher overrides.
-  void StartWithSigninContext(
-      net::URLRequestContextGetter* auth_context_getter,
-      net::URLRequestContextGetter* system_context_getter,
+  void StartWithAuthCode(
+      const std::string& auth_code,
+      scoped_refptr<network::SharedURLLoaderFactory> system_url_loader_factory,
       const TokenCallback& callback) override;
-  void StartWithAuthCode(const std::string& auth_code,
-                         net::URLRequestContextGetter* system_context_getter,
-                         const TokenCallback& callback) override;
   void StartWithRefreshToken(
       const std::string& oauth2_refresh_token,
-      net::URLRequestContextGetter* system_context_getter,
+      scoped_refptr<network::SharedURLLoaderFactory> system_url_loader_factory,
       const TokenCallback& callback) override;
 
   // Returns true if we have previously attempted to fetch tokens with this
@@ -74,8 +73,8 @@ class PolicyOAuth2TokenFetcherImpl : public PolicyOAuth2TokenFetcher,
   void OnClientOAuthFailure(const GoogleServiceAuthError& error) override;
 
   // OAuth2AccessTokenConsumer overrides.
-  void OnGetTokenSuccess(const std::string& access_token,
-                         const base::Time& expiration_time) override;
+  void OnGetTokenSuccess(
+      const OAuth2AccessTokenConsumer::TokenResponse& token_response) override;
   void OnGetTokenFailure(const GoogleServiceAuthError& error) override;
 
   // Starts fetching OAuth2 refresh token.
@@ -98,8 +97,7 @@ class PolicyOAuth2TokenFetcherImpl : public PolicyOAuth2TokenFetcher,
   // Auth code which is used to retreive a refresh token.
   std::string auth_code_;
 
-  scoped_refptr<net::URLRequestContextGetter> auth_context_getter_;
-  scoped_refptr<net::URLRequestContextGetter> system_context_getter_;
+  scoped_refptr<network::SharedURLLoaderFactory> system_url_loader_factory_;
   std::unique_ptr<GaiaAuthFetcher> refresh_token_fetcher_;
   std::unique_ptr<OAuth2AccessTokenFetcher> access_token_fetcher_;
 
@@ -129,38 +127,26 @@ PolicyOAuth2TokenFetcherImpl::PolicyOAuth2TokenFetcherImpl()
 
 PolicyOAuth2TokenFetcherImpl::~PolicyOAuth2TokenFetcherImpl() {}
 
-void PolicyOAuth2TokenFetcherImpl::StartWithSigninContext(
-    net::URLRequestContextGetter* auth_context_getter,
-    net::URLRequestContextGetter* system_context_getter,
-    const TokenCallback& callback) {
-  DCHECK(!refresh_token_fetcher_ && !access_token_fetcher_);
-
-  auth_context_getter_ = auth_context_getter;
-  system_context_getter_ = system_context_getter;
-  callback_ = callback;
-  StartFetchingRefreshToken();
-}
-
 void PolicyOAuth2TokenFetcherImpl::StartWithAuthCode(
     const std::string& auth_code,
-    net::URLRequestContextGetter* system_context_getter,
+    scoped_refptr<network::SharedURLLoaderFactory> system_url_loader_factory,
     const TokenCallback& callback) {
   DCHECK(!refresh_token_fetcher_ && !access_token_fetcher_);
 
   auth_code_ = auth_code;
-  system_context_getter_ = system_context_getter;
+  system_url_loader_factory_ = system_url_loader_factory;
   callback_ = callback;
   StartFetchingRefreshToken();
 }
 
 void PolicyOAuth2TokenFetcherImpl::StartWithRefreshToken(
     const std::string& oauth2_refresh_token,
-    net::URLRequestContextGetter* system_context_getter,
+    scoped_refptr<network::SharedURLLoaderFactory> system_url_loader_factory,
     const TokenCallback& callback) {
   DCHECK(!refresh_token_fetcher_ && !access_token_fetcher_);
 
   oauth2_refresh_token_ = oauth2_refresh_token;
-  system_context_getter_ = system_context_getter;
+  system_url_loader_factory_ = system_url_loader_factory;
   callback_ = callback;
   StartFetchingAccessToken();
 }
@@ -176,26 +162,18 @@ void PolicyOAuth2TokenFetcherImpl::StartFetchingRefreshToken() {
     return;
   }
 
-  if (auth_code_.empty()) {
-    refresh_token_fetcher_.reset(new GaiaAuthFetcher(
-        this, GaiaConstants::kChromeSource, auth_context_getter_.get()));
-    refresh_token_fetcher_->DeprecatedStartCookieForOAuthLoginTokenExchange(
-        std::string());
-  } else {
-    refresh_token_fetcher_.reset(new GaiaAuthFetcher(
-        this, GaiaConstants::kChromeSource, system_context_getter_.get()));
-    refresh_token_fetcher_->StartAuthCodeForOAuth2TokenExchange(auth_code_);
-  }
+  DCHECK(!auth_code_.empty());
+  refresh_token_fetcher_.reset(new GaiaAuthFetcher(
+      this, GaiaConstants::kChromeSource, system_url_loader_factory_));
+  refresh_token_fetcher_->StartAuthCodeForOAuth2TokenExchange(auth_code_);
 }
 
 void PolicyOAuth2TokenFetcherImpl::StartFetchingAccessToken() {
   std::vector<std::string> scopes;
   scopes.push_back(GaiaConstants::kDeviceManagementServiceOAuth);
   scopes.push_back(GaiaConstants::kOAuthWrapBridgeUserInfoScope);
-  access_token_fetcher_.reset(
-      new OAuth2AccessTokenFetcherImpl(this,
-                                       system_context_getter_.get(),
-                                       oauth2_refresh_token_));
+  access_token_fetcher_.reset(new OAuth2AccessTokenFetcherImpl(
+      this, system_url_loader_factory_, oauth2_refresh_token_));
   access_token_fetcher_->Start(
       GaiaUrls::GetInstance()->oauth2_chrome_client_id(),
       GaiaUrls::GetInstance()->oauth2_chrome_client_secret(),
@@ -221,11 +199,10 @@ void PolicyOAuth2TokenFetcherImpl::OnClientOAuthFailure(
 }
 
 void PolicyOAuth2TokenFetcherImpl::OnGetTokenSuccess(
-    const std::string& access_token,
-    const base::Time& expiration_time) {
+    const OAuth2AccessTokenConsumer::TokenResponse& token_response) {
   VLOG(1) << "OAuth2 access token (device management) fetching succeeded.";
-  oauth2_access_token_ = access_token;
-  ForwardPolicyToken(access_token,
+  oauth2_access_token_ = token_response.access_token;
+  ForwardPolicyToken(token_response.access_token,
                      GoogleServiceAuthError(GoogleServiceAuthError::NONE));
 }
 
@@ -243,8 +220,8 @@ void PolicyOAuth2TokenFetcherImpl::RetryOnError(
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (error.IsTransientError() && retry_count_ < kMaxRequestAttemptCount) {
     retry_count_++;
-    BrowserThread::PostDelayedTask(
-        BrowserThread::UI, FROM_HERE, task,
+    base::PostDelayedTaskWithTraits(
+        FROM_HERE, {BrowserThread::UI}, task,
         base::TimeDelta::FromMilliseconds(kRequestRestartDelay));
     return;
   }
@@ -273,23 +250,16 @@ class PolicyOAuth2TokenFetcherFake : public PolicyOAuth2TokenFetcher {
   ~PolicyOAuth2TokenFetcherFake() override {}
 
  private:
-  // PolicyOAuth2TokenFetcher overrides.
-  void StartWithSigninContext(
-      net::URLRequestContextGetter* auth_context_getter,
-      net::URLRequestContextGetter* system_context_getter,
+  void StartWithAuthCode(
+      const std::string& auth_code,
+      scoped_refptr<network::SharedURLLoaderFactory> system_url_loader_factory,
       const TokenCallback& callback) override {
-    ForwardPolicyToken(callback);
-  }
-
-  void StartWithAuthCode(const std::string& auth_code,
-                         net::URLRequestContextGetter* system_context_getter,
-                         const TokenCallback& callback) override {
     ForwardPolicyToken(callback);
   }
 
   void StartWithRefreshToken(
       const std::string& oauth2_refresh_token,
-      net::URLRequestContextGetter* system_context_getter,
+      scoped_refptr<network::SharedURLLoaderFactory> system_url_loader_factory,
       const TokenCallback& callback) override {
     ForwardPolicyToken(callback);
   }

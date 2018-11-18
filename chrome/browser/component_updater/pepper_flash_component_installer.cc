@@ -14,7 +14,6 @@
 #include "base/base_paths.h"
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/json/json_reader.h"
@@ -25,7 +24,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "base/version.h"
 #include "build/build_config.h"
 #include "chrome/browser/component_updater/component_installer_errors.h"
@@ -40,6 +39,8 @@
 #include "components/component_updater/component_updater_service.h"
 #include "components/update_client/update_client.h"
 #include "components/update_client/update_client_errors.h"
+#include "components/update_client/utils.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/plugin_service.h"
 #include "content/public/common/content_constants.h"
@@ -202,17 +203,16 @@ void RegisterPepperFlashWithChrome(const base::FilePath& path,
   content::WebPluginInfo web_plugin = plugin_info.ToWebPluginInfo();
 
   base::FilePath system_flash_path;
-  PathService::Get(chrome::FILE_PEPPER_FLASH_SYSTEM_PLUGIN, &system_flash_path);
+  base::PathService::Get(chrome::FILE_PEPPER_FLASH_SYSTEM_PLUGIN,
+                         &system_flash_path);
 
   std::vector<content::WebPluginInfo> plugins;
   PluginService::GetInstance()->GetInternalPlugins(&plugins);
-  base::FilePath placeholder_path =
-      base::FilePath::FromUTF8Unsafe(ChromeContentClient::kNotPresent);
   for (const auto& plugin : plugins) {
     if (!plugin.is_pepper_plugin() || plugin.name != web_plugin.name)
       continue;
 
-    if (plugin.path == placeholder_path) {
+    if (plugin.path.value() == ChromeContentClient::kNotPresent) {
       // This is the Flash placeholder; replace it regardless of version or
       // other considerations.
       PluginService::GetInstance()->UnregisterInternalPlugin(plugin.path);
@@ -237,7 +237,7 @@ void RegisterPepperFlashWithChrome(const base::FilePath& path,
 }
 
 void UpdatePathService(const base::FilePath& path) {
-  PathService::Override(chrome::DIR_PEPPER_FLASH_PLUGIN, path);
+  base::PathService::Override(chrome::DIR_PEPPER_FLASH_PLUGIN, path);
 }
 #endif  // !defined(OS_LINUX) && defined(GOOGLE_CHROME_BUILD)
 
@@ -286,11 +286,12 @@ FlashComponentInstallerPolicy::OnCustomInstall(
     const base::FilePath& install_dir) {
   std::string version;
   if (!manifest.GetString("version", &version)) {
-    return ToInstallerResult(FlashError::MISSING_VERSION_IN_MANIFEST);
+    return update_client::ToInstallerResult(
+        FlashError::MISSING_VERSION_IN_MANIFEST);
   }
 
 #if defined(OS_CHROMEOS)
-  content::BrowserThread::GetTaskRunnerForThread(content::BrowserThread::UI)
+  base::CreateSingleThreadTaskRunnerWithTraits({content::BrowserThread::UI})
       ->PostTask(FROM_HERE, base::BindOnce(&ImageLoaderRegistration, version,
                                            install_dir));
 #elif defined(OS_LINUX)
@@ -300,7 +301,7 @@ FlashComponentInstallerPolicy::OnCustomInstall(
   // locate and preload the latest version of flash.
   if (!component_flash_hint_file::RecordFlashUpdate(flash_path, flash_path,
                                                     version)) {
-    return ToInstallerResult(FlashError::HINT_FILE_RECORD_ERROR);
+    return update_client::ToInstallerResult(FlashError::HINT_FILE_RECORD_ERROR);
   }
 #endif  // defined(OS_LINUX)
   return update_client::CrxInstaller::Result(update_client::InstallError::NONE);
@@ -319,7 +320,7 @@ void FlashComponentInstallerPolicy::ComponentReady(
   RegisterPepperFlashWithChrome(path.Append(chrome::kPepperFlashPluginFilename),
                                 version);
   base::PostTaskWithTraits(FROM_HERE,
-                           {base::TaskPriority::BACKGROUND, base::MayBlock()},
+                           {base::TaskPriority::BEST_EFFORT, base::MayBlock()},
                            base::BindOnce(&UpdatePathService, path));
 #endif  // !defined(OS_LINUX)
 }

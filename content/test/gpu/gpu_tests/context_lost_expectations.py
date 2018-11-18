@@ -7,6 +7,9 @@ from gpu_tests.gpu_test_expectations import GpuTestExpectations
 # See the GpuTestExpectations class for documentation.
 
 class ContextLostExpectations(GpuTestExpectations):
+  def __init__(self, is_asan=False):
+    super(ContextLostExpectations, self).__init__(is_asan=is_asan)
+
   def SetExpectations(self):
     # Sample Usage:
     # self.Fail('ContextLost_WebGLContextLostFromGPUProcessExit',
@@ -39,6 +42,10 @@ class ContextLostExpectations(GpuTestExpectations):
     self.Skip('ContextLost_WebGLContextLostFromSelectElement',
               ['lion', 'debug'], bug=498149)
 
+    # Flaking on Mac.
+    self.Flaky('GpuCrash_GPUProcessCrashesExactlyOncePerVisitToAboutGpuCrash',
+              ['mac'], bug=878258)
+
     # 'Browser must support tab control' raised on Android
     self.Skip('GpuCrash_GPUProcessCrashesExactlyOncePerVisitToAboutGpuCrash',
               ['android'], bug=609629)
@@ -46,6 +53,14 @@ class ContextLostExpectations(GpuTestExpectations):
               ['android'], bug=609629)
     self.Skip('ContextLost_WebGLContextLostInHiddenTab',
               ['android'], bug=609629)
+
+    # Flaking on Nexus 5X
+    self.Flaky('ContextLost_WebGLUnblockedAfterUserInitiatedReload',
+              ['android'], bug=879423)
+    self.Fail('ContextLost_WorkerRAFAfterGPUCrash',
+              ['android'], bug=880078)
+    self.Fail('ContextLost_WorkerRAFAfterGPUCrash_OOPD',
+              ['android'], bug=880078)
 
     # Nexus 6
     # The Nexus 6 times out on these tests while waiting for the JS to complete

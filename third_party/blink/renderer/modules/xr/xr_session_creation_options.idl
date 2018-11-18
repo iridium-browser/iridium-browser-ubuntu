@@ -2,10 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// https://immersive-web.github.io/webxr/spec/latest/#xrsessioncreationoptions-interface
-[
-    SecureContext
-] dictionary XRSessionCreationOptions {
-  boolean exclusive = false;
+// https://immersive-web.github.io/webxr/#xrsessioncreationoptions-interface
+dictionary XRSessionCreationOptions {
+  [RuntimeEnabled=WebXRHitTest] boolean environmentIntegration = false;
+  boolean immersive = false;
   XRPresentationContext outputContext;
 };

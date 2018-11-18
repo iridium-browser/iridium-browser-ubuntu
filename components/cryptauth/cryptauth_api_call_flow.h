@@ -9,7 +9,9 @@
 
 #include "base/callback.h"
 #include "base/macros.h"
+#include "components/cryptauth/network_request_error.h"
 #include "google_apis/gaia/oauth2_api_call_flow.h"
+#include "services/network/public/cpp/resource_response.h"
 
 namespace cryptauth {
 
@@ -20,7 +22,7 @@ class CryptAuthApiCallFlow : public OAuth2ApiCallFlow {
  public:
   typedef base::Callback<void(const std::string& serialized_response)>
       ResultCallback;
-  typedef base::Callback<void(const std::string& error_message)> ErrorCallback;
+  typedef base::Callback<void(NetworkRequestError error)> ErrorCallback;
 
   CryptAuthApiCallFlow();
   ~CryptAuthApiCallFlow() override;
@@ -33,12 +35,13 @@ class CryptAuthApiCallFlow : public OAuth2ApiCallFlow {
   //   result_callback: Called when the flow completes successfully with a
   //       serialized response proto.
   //   error_callback: Called when the flow completes with an error.
-  virtual void Start(const GURL& request_url,
-                     net::URLRequestContextGetter* context,
-                     const std::string& access_token,
-                     const std::string& serialized_request,
-                     const ResultCallback& result_callback,
-                     const ErrorCallback& error_callback);
+  virtual void Start(
+      const GURL& request_url,
+      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
+      const std::string& access_token,
+      const std::string& serialized_request,
+      const ResultCallback& result_callback,
+      const ErrorCallback& error_callback);
 
   void SetPartialNetworkTrafficAnnotation(
       const net::PartialNetworkTrafficAnnotationTag&
@@ -57,10 +60,12 @@ class CryptAuthApiCallFlow : public OAuth2ApiCallFlow {
   GURL CreateApiCallUrl() override;
   std::string CreateApiCallBody() override;
   std::string CreateApiCallBodyContentType() override;
-  net::URLFetcher::RequestType GetRequestTypeForBody(
-      const std::string& body) override;
-  void ProcessApiCallSuccess(const net::URLFetcher* source) override;
-  void ProcessApiCallFailure(const net::URLFetcher* source) override;
+  std::string GetRequestTypeForBody(const std::string& body) override;
+  void ProcessApiCallSuccess(const network::ResourceResponseHead* head,
+                             std::unique_ptr<std::string> body) override;
+  void ProcessApiCallFailure(int net_error,
+                             const network::ResourceResponseHead* head,
+                             std::unique_ptr<std::string> body) override;
   net::PartialNetworkTrafficAnnotationTag GetNetworkTrafficAnnotationTag()
       override;
 

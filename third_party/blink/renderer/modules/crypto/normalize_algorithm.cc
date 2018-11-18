@@ -86,7 +86,7 @@ const AlgorithmNameMapping kAlgorithmNameMappings[] = {
 // Reminder to update the table mapping names to IDs whenever adding a new
 // algorithm ID.
 static_assert(kWebCryptoAlgorithmIdLast + 1 ==
-                  WTF_ARRAY_LENGTH(kAlgorithmNameMappings),
+                  arraysize(kAlgorithmNameMappings),
               "algorithmNameMappings needs to be updated");
 
 #if DCHECK_IS_ON()
@@ -135,7 +135,8 @@ bool VerifyAlgorithmNameMappings(const AlgorithmNameMapping* begin,
   for (const AlgorithmNameMapping* it = begin; it != end; ++it) {
     if (it->algorithm_name_length != strlen(it->algorithm_name))
       return false;
-    String str(it->algorithm_name, it->algorithm_name_length);
+    String str(it->algorithm_name,
+               static_cast<unsigned>(it->algorithm_name_length));
     if (!str.ContainsOnlyASCII())
       return false;
     if (str.UpperASCII() != str)
@@ -176,7 +177,7 @@ bool LookupAlgorithmIdByName(const String& algorithm_name,
                              WebCryptoAlgorithmId& id) {
   const AlgorithmNameMapping* begin = kAlgorithmNameMappings;
   const AlgorithmNameMapping* end =
-      kAlgorithmNameMappings + WTF_ARRAY_LENGTH(kAlgorithmNameMappings);
+      kAlgorithmNameMappings + arraysize(kAlgorithmNameMappings);
 
 #if DCHECK_IS_ON()
   DCHECK(VerifyAlgorithmNameMappings(begin, end));
@@ -227,17 +228,18 @@ class ErrorContext {
       return String();
 
     StringBuilder result;
-    const char* separator = ": ";
+    constexpr const char* separator = ": ";
 
-    size_t length = (messages_.size() - 1) * strlen(separator);
-    for (size_t i = 0; i < messages_.size(); ++i)
+    wtf_size_t length = (messages_.size() - 1) * strlen(separator);
+    for (wtf_size_t i = 0; i < messages_.size(); ++i)
       length += strlen(messages_[i]);
     result.ReserveCapacity(length);
 
-    for (size_t i = 0; i < messages_.size(); ++i) {
+    for (wtf_size_t i = 0; i < messages_.size(); ++i) {
       if (i)
         result.Append(separator, strlen(separator));
-      result.Append(messages_[i], strlen(messages_[i]));
+      result.Append(messages_[i],
+                    static_cast<wtf_size_t>(strlen(messages_[i])));
     }
 
     return result.ToString();
@@ -770,8 +772,7 @@ const CurveNameMapping kCurveNameMappings[] = {
     {"P-521", kWebCryptoNamedCurveP521}};
 
 // Reminder to update curveNameMappings when adding a new curve.
-static_assert(kWebCryptoNamedCurveLast + 1 ==
-                  WTF_ARRAY_LENGTH(kCurveNameMappings),
+static_assert(kWebCryptoNamedCurveLast + 1 == arraysize(kCurveNameMappings),
               "curveNameMappings needs to be updated");
 
 bool ParseNamedCurve(const Dictionary& raw,
@@ -785,7 +786,7 @@ bool ParseNamedCurve(const Dictionary& raw,
     return false;
   }
 
-  for (size_t i = 0; i < WTF_ARRAY_LENGTH(kCurveNameMappings); ++i) {
+  for (size_t i = 0; i < arraysize(kCurveNameMappings); ++i) {
     if (kCurveNameMappings[i].name == named_curve_string) {
       named_curve = kCurveNameMappings[i].value;
       return true;

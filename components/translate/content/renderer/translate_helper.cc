@@ -195,7 +195,7 @@ void TranslateHelper::ExecuteScript(const std::string& script) {
     return;
 
   WebScriptSource source = WebScriptSource(WebString::FromASCII(script));
-  main_frame->ExecuteScriptInIsolatedWorld(world_id_, &source, 1);
+  main_frame->ExecuteScriptInIsolatedWorld(world_id_, source);
 }
 
 bool TranslateHelper::ExecuteScriptAndGetBoolResult(const std::string& script,
@@ -205,15 +205,15 @@ bool TranslateHelper::ExecuteScriptAndGetBoolResult(const std::string& script,
     return fallback;
 
   v8::HandleScope handle_scope(v8::Isolate::GetCurrent());
-  WebVector<v8::Local<v8::Value> > results;
   WebScriptSource source = WebScriptSource(WebString::FromASCII(script));
-  main_frame->ExecuteScriptInIsolatedWorld(world_id_, &source, 1, &results);
-  if (results.size() != 1 || results[0].IsEmpty() || !results[0]->IsBoolean()) {
+  v8::Local<v8::Value> result =
+      main_frame->ExecuteScriptInIsolatedWorldAndReturnValue(world_id_, source);
+  if (result.IsEmpty() || !result->IsBoolean()) {
     NOTREACHED();
     return fallback;
   }
 
-  return results[0]->BooleanValue();
+  return result.As<v8::Boolean>()->Value();
 }
 
 std::string TranslateHelper::ExecuteScriptAndGetStringResult(
@@ -222,19 +222,20 @@ std::string TranslateHelper::ExecuteScriptAndGetStringResult(
   if (!main_frame)
     return std::string();
 
-  v8::HandleScope handle_scope(v8::Isolate::GetCurrent());
-  WebVector<v8::Local<v8::Value> > results;
+  v8::Isolate* isolate = v8::Isolate::GetCurrent();
+  v8::HandleScope handle_scope(isolate);
   WebScriptSource source = WebScriptSource(WebString::FromASCII(script));
-  main_frame->ExecuteScriptInIsolatedWorld(world_id_, &source, 1, &results);
-  if (results.size() != 1 || results[0].IsEmpty() || !results[0]->IsString()) {
+  v8::Local<v8::Value> result =
+      main_frame->ExecuteScriptInIsolatedWorldAndReturnValue(world_id_, source);
+  if (result.IsEmpty() || !result->IsString()) {
     NOTREACHED();
     return std::string();
   }
 
-  v8::Local<v8::String> v8_str = results[0].As<v8::String>();
-  int length = v8_str->Utf8Length() + 1;
+  v8::Local<v8::String> v8_str = result.As<v8::String>();
+  int length = v8_str->Utf8Length(isolate) + 1;
   std::unique_ptr<char[]> str(new char[length]);
-  v8_str->WriteUtf8(str.get(), length);
+  v8_str->WriteUtf8(isolate, str.get(), length);
   return std::string(str.get());
 }
 
@@ -245,15 +246,15 @@ double TranslateHelper::ExecuteScriptAndGetDoubleResult(
     return 0.0;
 
   v8::HandleScope handle_scope(v8::Isolate::GetCurrent());
-  WebVector<v8::Local<v8::Value> > results;
   WebScriptSource source = WebScriptSource(WebString::FromASCII(script));
-  main_frame->ExecuteScriptInIsolatedWorld(world_id_, &source, 1, &results);
-  if (results.size() != 1 || results[0].IsEmpty() || !results[0]->IsNumber()) {
+  v8::Local<v8::Value> result =
+      main_frame->ExecuteScriptInIsolatedWorldAndReturnValue(world_id_, source);
+  if (result.IsEmpty() || !result->IsNumber()) {
     NOTREACHED();
     return 0.0;
   }
 
-  return results[0]->NumberValue();
+  return result.As<v8::Number>()->Value();
 }
 
 int64_t TranslateHelper::ExecuteScriptAndGetIntegerResult(
@@ -263,15 +264,15 @@ int64_t TranslateHelper::ExecuteScriptAndGetIntegerResult(
     return 0;
 
   v8::HandleScope handle_scope(v8::Isolate::GetCurrent());
-  WebVector<v8::Local<v8::Value>> results;
   WebScriptSource source = WebScriptSource(WebString::FromASCII(script));
-  main_frame->ExecuteScriptInIsolatedWorld(world_id_, &source, 1, &results);
-  if (results.size() != 1 || results[0].IsEmpty() || !results[0]->IsNumber()) {
+  v8::Local<v8::Value> result =
+      main_frame->ExecuteScriptInIsolatedWorldAndReturnValue(world_id_, source);
+  if (result.IsEmpty() || !result->IsNumber()) {
     NOTREACHED();
     return 0;
   }
 
-  return results[0]->IntegerValue();
+  return result.As<v8::Integer>()->Value();
 }
 
 // mojom::Page implementations.
@@ -386,8 +387,9 @@ void TranslateHelper::CheckTranslateStatus() {
 
   // The translation is still pending, check again later.
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-      FROM_HERE, base::Bind(&TranslateHelper::CheckTranslateStatus,
-                            weak_method_factory_.GetWeakPtr()),
+      FROM_HERE,
+      base::BindOnce(&TranslateHelper::CheckTranslateStatus,
+                     weak_method_factory_.GetWeakPtr()),
       AdjustDelay(kTranslateStatusCheckDelayMs));
 }
 
@@ -409,8 +411,9 @@ void TranslateHelper::TranslatePageImpl(int count) {
       return;
     }
     base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-        FROM_HERE, base::Bind(&TranslateHelper::TranslatePageImpl,
-                              weak_method_factory_.GetWeakPtr(), count),
+        FROM_HERE,
+        base::BindOnce(&TranslateHelper::TranslatePageImpl,
+                       weak_method_factory_.GetWeakPtr(), count),
         AdjustDelay(count * kTranslateInitCheckDelayMs));
     return;
   }
@@ -428,8 +431,9 @@ void TranslateHelper::TranslatePageImpl(int count) {
   }
   // Check the status of the translation.
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-      FROM_HERE, base::Bind(&TranslateHelper::CheckTranslateStatus,
-                            weak_method_factory_.GetWeakPtr()),
+      FROM_HERE,
+      base::BindOnce(&TranslateHelper::CheckTranslateStatus,
+                     weak_method_factory_.GetWeakPtr()),
       AdjustDelay(kTranslateStatusCheckDelayMs));
 }
 

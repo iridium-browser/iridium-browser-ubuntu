@@ -19,7 +19,7 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/single_thread_task_runner.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_platform_part_chromeos.h"
@@ -33,6 +33,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "components/policy/core/common/cloud/cloud_policy_constants.h"
 #include "content/public/browser/browser_context.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "crypto/nss_key_util.h"
 #include "crypto/openssl_util.h"
@@ -148,13 +149,10 @@ void GetCertDatabase(const std::string& token_id,
                      const GetCertDBCallback& callback,
                      BrowserContext* browser_context,
                      NSSOperationState* state) {
-  BrowserThread::PostTask(BrowserThread::IO,
-                          FROM_HERE,
-                          base::Bind(&GetCertDatabaseOnIOThread,
-                                     token_id,
-                                     callback,
-                                     browser_context->GetResourceContext(),
-                                     state));
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::IO},
+      base::Bind(&GetCertDatabaseOnIOThread, token_id, callback,
+                 browser_context->GetResourceContext(), state));
 }
 
 class GenerateRSAKeyState : public NSSOperationState {
@@ -476,7 +474,7 @@ void GenerateRSAKeyWithDB(std::unique_ptr<GenerateRSAKeyState> state,
   // This task interacts with the TPM, hence MayBlock().
   base::PostTaskWithTraits(
       FROM_HERE,
-      {base::MayBlock(), base::TaskPriority::BACKGROUND,
+      {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
        base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
       base::Bind(&GenerateRSAKeyOnWorkerThread, base::Passed(&state)));
 }
@@ -570,7 +568,7 @@ void SignRSAWithDB(std::unique_ptr<SignRSAState> state,
   // This task interacts with the TPM, hence MayBlock().
   base::PostTaskWithTraits(
       FROM_HERE,
-      {base::MayBlock(), base::TaskPriority::BACKGROUND,
+      {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
        base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
       base::Bind(&SignRSAOnWorkerThread, base::Passed(&state)));
 }
@@ -654,7 +652,7 @@ void DidGetCertificates(std::unique_ptr<GetCertificatesState> state,
   // This task interacts with the TPM, hence MayBlock().
   base::PostTaskWithTraits(
       FROM_HERE,
-      {base::MayBlock(), base::TaskPriority::BACKGROUND,
+      {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
        base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
       base::Bind(&FilterCertificatesOnWorkerThread, base::Passed(&state)));
 }
@@ -785,6 +783,14 @@ void GetKeyLocationsWithDB(std::unique_ptr<GetKeyLocationsState> state,
     if (rsa_key)
       token_ids.push_back(kTokenIdUser);
   }
+  if (token_ids.empty() && cert_db->GetPublicSlot().get()) {
+    crypto::ScopedSECKEYPrivateKey rsa_key =
+        crypto::FindNSSKeyFromPublicKeyInfoInSlot(
+            public_key_vector, cert_db->GetPublicSlot().get());
+    if (rsa_key)
+      token_ids.push_back(kTokenIdUser);
+  }
+
   if (cert_db->GetSystemSlot().get()) {
     crypto::ScopedSECKEYPrivateKey rsa_key =
         crypto::FindNSSKeyFromPublicKeyInfoInSlot(
@@ -887,8 +893,8 @@ void SelectClientCertificates(
   std::unique_ptr<SelectCertificatesState> state(new SelectCertificatesState(
       user->username_hash(), use_system_key_slot, cert_request_info, callback));
 
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::IO},
       base::Bind(&SelectCertificatesOnIOThread, base::Passed(&state)));
 }
 

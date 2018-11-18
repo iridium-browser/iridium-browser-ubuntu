@@ -4,10 +4,10 @@
 
 #include "third_party/blink/renderer/core/layout/ng/ng_text_decoration_offset.h"
 
-#include "third_party/blink/renderer/core/layout/line/root_inline_box.h"
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_baseline.h"
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_physical_text_fragment.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_physical_box_fragment.h"
+#include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/platform/fonts/font_metrics.h"
 
 namespace blink {
@@ -16,7 +16,8 @@ int NGTextDecorationOffset::ComputeUnderlineOffsetForUnder(
     float text_decoration_thickness,
     FontVerticalPositionType position_type) const {
   LayoutUnit offset = LayoutUnit::Max();
-  FontBaseline baseline_type = text_fragment_.BaselineType();
+  const ComputedStyle& style = text_fragment_.Style();
+  FontBaseline baseline_type = style.GetFontBaseline();
 
   if (decorating_box_) {
     // TODO(eae): Replace with actual baseline once available.
@@ -32,8 +33,7 @@ int NGTextDecorationOffset::ComputeUnderlineOffsetForUnder(
   if (offset == LayoutUnit::Max()) {
     // TODO(layout-dev): How do we compute the baseline offset with a
     // decorating_box?
-    const SimpleFontData* font_data =
-        text_fragment_.Style().GetFont().PrimaryFont();
+    const SimpleFontData* font_data = style.GetFont().PrimaryFont();
     if (!font_data)
       return 0;
     offset = font_data->GetFontMetrics().Ascent(baseline_type) -
@@ -41,18 +41,15 @@ int NGTextDecorationOffset::ComputeUnderlineOffsetForUnder(
   }
 
   // Compute offset to the farthest position of the decorating box.
-  // TODO(layout-dev): This is quite incorrect.
-  LayoutUnit logical_top = text_fragment_.Offset().top;
-  LayoutUnit position = logical_top + offset;
-  int offset_int = position.Floor();
+  // TODO(layout-dev): This does not take farthest offset within the decorating
+  // box into account, only the position within this text fragment.
+  int offset_int = offset.Floor();
 
   // Gaps are not needed for TextTop because it generally has internal
   // leadings.
   if (position_type == FontVerticalPositionType::TextTop)
     return offset_int;
-
-  // TODO(layout-dev): Add or subtract one depending on side (IsLineOverSide).
-  return offset_int + 1;
+  return !IsLineOverSide(position_type) ? offset_int + 1 : offset_int - 1;
 }
 
 }  // namespace blink

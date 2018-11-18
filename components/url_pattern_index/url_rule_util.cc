@@ -76,9 +76,14 @@ std::string TypeOptionsToString(
     out += options_printer->PrintOption("genericblock");
   }
 
-  uint16_t types = flat_rule->element_types();
-
-  if (types == url_pattern_index::flat::ElementType_ANY)
+  // Filterlists do not support the "main_frame" and "csp_report" element types.
+  // Hence we ignore them here.
+  constexpr uint16_t kSupportedElementTypes =
+      url_pattern_index::flat::ElementType_ANY &
+      ~url_pattern_index::flat::ElementType_MAIN_FRAME &
+      ~url_pattern_index::flat::ElementType_CSP_REPORT;
+  uint16_t types = flat_rule->element_types() & kSupportedElementTypes;
+  if (types == kSupportedElementTypes)
     return out;
 
   if (types & url_pattern_index::flat::ElementType_OTHER)
@@ -144,7 +149,7 @@ std::string DomainOptionsToString(
 
 }  // namespace
 
-std::string FlatUrlRuleToString(const flat::UrlRule* flat_rule) {
+std::string FlatUrlRuleToFilterlistString(const flat::UrlRule* flat_rule) {
   std::string out;
 
   if (flat_rule->options() & url_pattern_index::flat::OptionFlag_IS_WHITELIST)
@@ -170,8 +175,8 @@ std::string FlatUrlRuleToString(const flat::UrlRule* flat_rule) {
 
   out += PartyOptionsToString(&options_printer, flat_rule);
 
-  if (flat_rule->options() & url_pattern_index::flat::OptionFlag_IS_MATCH_CASE)
-    out += options_printer.PrintOption("match-case");
+  // TODO(csharrison): Consider printing something for case-insensitive /
+  // case-sensitive rules.
 
   out += TypeOptionsToString(&options_printer, flat_rule);
 

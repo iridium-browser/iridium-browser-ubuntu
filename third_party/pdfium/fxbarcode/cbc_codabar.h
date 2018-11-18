@@ -14,21 +14,16 @@
 
 class CBC_OnedCodaBarWriter;
 
-class CBC_Codabar : public CBC_OneCode {
+class CBC_Codabar final : public CBC_OneCode {
  public:
   CBC_Codabar();
   ~CBC_Codabar() override;
 
   // CBC_OneCode:
+  BC_TYPE GetType() override;
   bool Encode(const WideStringView& contents) override;
   bool RenderDevice(CFX_RenderDevice* device,
                     const CFX_Matrix* matrix) override;
-  BC_TYPE GetType() override;
-
-  bool SetStartChar(char start);
-  bool SetEndChar(char end);
-  bool SetTextLocation(BC_TEXT_LOC location);
-  bool SetWideNarrowRatio(int8_t ratio);
 
  private:
   CBC_OnedCodaBarWriter* GetOnedCodaBarWriter();

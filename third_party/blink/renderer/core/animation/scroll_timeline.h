@@ -8,6 +8,7 @@
 #include "third_party/blink/renderer/core/animation/animation_timeline.h"
 #include "third_party/blink/renderer/core/animation/scroll_timeline_options.h"
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/core/css/css_primitive_value.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
@@ -30,6 +31,8 @@ class CORE_EXPORT ScrollTimeline final : public AnimationTimeline {
   enum ScrollDirection {
     Block,
     Inline,
+    Horizontal,
+    Vertical,
   };
 
   static ScrollTimeline* Create(Document&,
@@ -38,23 +41,60 @@ class CORE_EXPORT ScrollTimeline final : public AnimationTimeline {
 
   // AnimationTimeline implementation.
   double currentTime(bool& is_null) final;
+  bool IsScrollTimeline() const override { return true; }
 
   // IDL API implementation.
   Element* scrollSource();
   String orientation();
+  String startScrollOffset();
+  String endScrollOffset();
   void timeRange(DoubleOrScrollTimelineAutoKeyword&);
+
+  // Returns the Node that should actually have the ScrollableArea (if one
+  // exists). This can differ from |scrollSource| when |scroll_source_| is the
+  // Document's scrollingElement.
+  Node* ResolvedScrollSource() const;
 
   ScrollDirection GetOrientation() const { return orientation_; }
 
+  // Must be called when this ScrollTimeline is attached/detached from an
+  // animation.
+  void AttachAnimation();
+  void DetachAnimation();
+
   void Trace(blink::Visitor*) override;
 
+  // For the AnimationWorklet origin trial, we need to automatically composite
+  // elements that are targets of ScrollTimelines (http://crbug.com/776533). We
+  // expose a static lookup method to enable this.
+  //
+  // TODO(crbug.com/839341): Remove once WorkletAnimations can run on main.
+  static bool HasActiveScrollTimeline(Node* node);
+
  private:
-  ScrollTimeline(const Document&, Element*, ScrollDirection, double);
+  ScrollTimeline(Element*,
+                 ScrollDirection,
+                 CSSPrimitiveValue*,
+                 CSSPrimitiveValue*,
+                 double);
+
+  void ResolveScrollStartAndEnd(const LayoutBox*,
+                                double max_offset,
+                                double& resolved_start_scroll_offset,
+                                double& resolved_end_scroll_offset);
 
   Member<Element> scroll_source_;
   ScrollDirection orientation_;
+  Member<CSSPrimitiveValue> start_scroll_offset_;
+  Member<CSSPrimitiveValue> end_scroll_offset_;
   double time_range_;
 };
+
+DEFINE_TYPE_CASTS(ScrollTimeline,
+                  AnimationTimeline,
+                  value,
+                  value->IsScrollTimeline(),
+                  value.IsScrollTimeline());
 
 }  // namespace blink
 

@@ -355,27 +355,25 @@ void FrameSerializer::SerializeFrame(const LocalFrame& frame) {
     // in each bucket to avoid potential spikes in the distribution.
     UMA_HISTOGRAM_COUNTS_100(
         "PageSerialization.ProblemDetection.TotalImageCount",
-        static_cast<int64_t>(total_image_count_));
+        total_image_count_);
     if (total_image_count_ > 0) {
       DCHECK_LE(loaded_image_count_, total_image_count_);
       DEFINE_STATIC_LOCAL(
           LinearHistogram, image_histogram,
           ("PageSerialization.ProblemDetection.LoadedImagePercentage", 1, 100,
            21));
-      image_histogram.Count(
-          static_cast<int64_t>(loaded_image_count_ * 100 / total_image_count_));
+      image_histogram.Count(loaded_image_count_ * 100 / total_image_count_);
     }
 
     UMA_HISTOGRAM_COUNTS_100("PageSerialization.ProblemDetection.TotalCSSCount",
-                             static_cast<int64_t>(total_css_count_));
+                             total_css_count_);
     if (total_css_count_ > 0) {
       DCHECK_LE(loaded_css_count_, total_css_count_);
       DEFINE_STATIC_LOCAL(
           LinearHistogram, css_histogram,
           ("PageSerialization.ProblemDetection.LoadedCSSPercentage", 1, 100,
            21));
-      css_histogram.Count(
-          static_cast<int64_t>(loaded_css_count_ * 100 / total_css_count_));
+      css_histogram.Count(loaded_css_count_ * 100 / total_css_count_);
     }
     should_collect_problem_metric_ = false;
   }
@@ -403,10 +401,10 @@ void FrameSerializer::SerializeCSSStyleSheet(CSSStyleSheet& style_sheet,
   TRACE_EVENT2("page-serialization", "FrameSerializer::serializeCSSStyleSheet",
                "type", "CSS", "url", url.ElidedString().Utf8().data());
   // Only report UMA metric if this is not a reentrant CSS serialization call.
-  double css_start_time = 0;
+  TimeTicks css_start_time;
   if (!is_serializing_css_) {
     is_serializing_css_ = true;
-    css_start_time = CurrentTimeTicksInSeconds();
+    css_start_time = CurrentTimeTicks();
   }
 
   // If this CSS is inlined its definition was already serialized with the frame
@@ -443,14 +441,12 @@ void FrameSerializer::SerializeCSSStyleSheet(CSSStyleSheet& style_sheet,
   for (unsigned i = 0; i < style_sheet.length(); ++i)
     SerializeCSSRule(style_sheet.item(i));
 
-  if (css_start_time != 0) {
+  if (css_start_time != TimeTicks()) {
     is_serializing_css_ = false;
     DEFINE_STATIC_LOCAL(CustomCountHistogram, css_histogram,
                         ("PageSerialization.SerializationTime.CSSElement", 0,
                          maxSerializationTimeUmaMicroseconds, 50));
-    css_histogram.Count(
-        static_cast<int64_t>((CurrentTimeTicksInSeconds() - css_start_time) *
-                             secondsToMicroseconds));
+    css_histogram.CountMicroseconds(CurrentTimeTicks() - css_start_time);
   }
 }
 
@@ -534,7 +530,7 @@ void FrameSerializer::AddImageToResources(ImageResourceContent* image,
 
   TRACE_EVENT2("page-serialization", "FrameSerializer::addImageToResources",
                "type", "image", "url", url.ElidedString().Utf8().data());
-  double image_start_time = CurrentTimeTicksInSeconds();
+  base::TimeTicks image_start_time = CurrentTimeTicks();
 
   scoped_refptr<const SharedBuffer> data = image->GetImage()->Data();
   AddToResources(image->GetResponse().MimeType(),
@@ -549,9 +545,7 @@ void FrameSerializer::AddImageToResources(ImageResourceContent* image,
     DEFINE_STATIC_LOCAL(CustomCountHistogram, image_histogram,
                         ("PageSerialization.SerializationTime.ImageElement", 0,
                          maxSerializationTimeUmaMicroseconds, 50));
-    image_histogram.Count(
-        static_cast<int64_t>((CurrentTimeTicksInSeconds() - image_start_time) *
-                             secondsToMicroseconds));
+    image_histogram.CountMicroseconds(CurrentTimeTicks() - image_start_time);
   }
 }
 

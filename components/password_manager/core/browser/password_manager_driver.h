@@ -8,9 +8,11 @@
 #include <map>
 #include <vector>
 
+#include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
+#include "components/autofill/core/common/filling_status.h"
 #include "components/autofill/core/common/password_form_field_prediction_map.h"
 
 namespace autofill {
@@ -62,12 +64,16 @@ class PasswordManagerDriver
   // Notifies the driver that the user has accepted a generated password.
   virtual void GeneratedPasswordAccepted(const base::string16& password) = 0;
 
-  // User have selected a password generation option.
-  virtual void UserSelectedManualGenerationOption() = 0;
-
   // Tells the driver to fill the form with the |username| and |password|.
   virtual void FillSuggestion(const base::string16& username,
                               const base::string16& password) = 0;
+
+  // Tells the renderer to fill the given credential into the focused element.
+  // Always calls |completed_callback| with a status indicating success/error.
+  virtual void FillIntoFocusedField(
+      bool is_password,
+      const base::string16& user_provided_credential,
+      base::OnceCallback<void(autofill::FillingStatus)> compeleted_callback) {}
 
   // Tells the driver to preview filling form with the |username| and
   // |password|.
@@ -81,18 +87,6 @@ class PasswordManagerDriver
 
   // Tells the driver to clear previewed password and username fields.
   virtual void ClearPreviewedForm() = 0;
-
-  // Tells the driver to find the focused password field and report back
-  // the corresponding password form, so that it can be saved.
-  virtual void ForceSavePassword() {}
-
-  // Tells the driver to show the manual fallback for password saving, i.e. to
-  // show the omnibox icon with anchored hidden save prompt.
-  virtual void ShowManualFallbackForSaving(const autofill::PasswordForm& form) {
-  }
-
-  // Tells the driver to hide the manual fallback for saving.
-  virtual void HideManualFallbackForSaving() {}
 
   // Tells the driver to find the focused password field and to show generation
   // popup at it.
@@ -111,17 +105,11 @@ class PasswordManagerDriver
   // chrome://password-manager-internals is available.
   virtual void SendLoggingAvailability() {}
 
-  // Allows the form classifier to find generation fields.
-  virtual void AllowToRunFormClassifier() {}
-
   // Return the associated AutofillDriver.
   virtual autofill::AutofillDriver* GetAutofillDriver() = 0;
 
   // Return true iff the driver corresponds to the main frame.
   virtual bool IsMainFrame() const = 0;
-
-  // Tells the driver that the matching blacklisted form was found.
-  virtual void MatchingBlacklistedFormFound() = 0;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(PasswordManagerDriver);

@@ -4,7 +4,10 @@
 
 #include "content/browser/background_fetch/storage/update_registration_ui_task.h"
 
+#include "content/browser/background_fetch/background_fetch_data_manager.h"
+#include "content/browser/background_fetch/background_fetch_data_manager_observer.h"
 #include "content/browser/background_fetch/storage/database_helpers.h"
+#include "content/browser/background_fetch/storage/image_helpers.h"
 #include "content/browser/service_worker/service_worker_context_wrapper.h"
 #include "third_party/blink/public/platform/modules/background_fetch/background_fetch.mojom.h"
 
@@ -13,82 +16,113 @@ namespace content {
 namespace background_fetch {
 
 UpdateRegistrationUITask::UpdateRegistrationUITask(
-    BackgroundFetchDataManager* data_manager,
+    DatabaseTaskHost* host,
     const BackgroundFetchRegistrationId& registration_id,
-    const std::string& updated_title,
+    const base::Optional<std::string>& title,
+    const base::Optional<SkBitmap>& icon,
     UpdateRegistrationUICallback callback)
-    : DatabaseTask(data_manager),
+    : DatabaseTask(host),
       registration_id_(registration_id),
-      updated_title_(updated_title),
+      title_(title),
+      icon_(icon),
       callback_(std::move(callback)),
-      weak_factory_(this) {}
+      weak_factory_(this) {
+  DCHECK(title_ || icon_);
+}
 
 UpdateRegistrationUITask::~UpdateRegistrationUITask() = default;
 
 void UpdateRegistrationUITask::Start() {
-  service_worker_context()->GetRegistrationUserData(
-      registration_id_.service_worker_registration_id(),
-      {RegistrationKey(registration_id_.unique_id())},
-      base::BindOnce(&UpdateRegistrationUITask::DidGetMetadata,
-                     weak_factory_.GetWeakPtr()));
-}
-
-void UpdateRegistrationUITask::DidGetMetadata(
-    const std::vector<std::string>& data,
-    ServiceWorkerStatusCode status) {
-  switch (ToDatabaseStatus(status)) {
-    case DatabaseStatus::kNotFound:
-    case DatabaseStatus::kFailed:
-      std::move(callback_).Run(
-          blink::mojom::BackgroundFetchError::STORAGE_ERROR);
-      Finished();  // Destroys |this|.
-      return;
-    case DatabaseStatus::kOk:
-      if (data.size() != 1u) {
-        std::move(callback_).Run(
-            blink::mojom::BackgroundFetchError::STORAGE_ERROR);
-        Finished();  // Destroys |this|.
-        return;
-      }
-      UpdateUI(data[0]);
-      return;
-  }
-}
-
-void UpdateRegistrationUITask::UpdateUI(
-    const std::string& serialized_metadata_proto) {
-  proto::BackgroundFetchMetadata metadata_proto;
-  if (!metadata_proto.ParseFromString(serialized_metadata_proto)) {
-    std::move(callback_).Run(blink::mojom::BackgroundFetchError::STORAGE_ERROR);
-    Finished();  // Destroys |this|.
+  if (title_ && icon_ && ShouldPersistIcon(*icon_)) {
+    // Directly overwrite whatever's stored in the SWDB.
+    SerializeIcon(*icon_,
+                  base::BindOnce(&UpdateRegistrationUITask::DidSerializeIcon,
+                                 weak_factory_.GetWeakPtr()));
     return;
   }
 
-  metadata_proto.set_ui_title(updated_title_);
+  service_worker_context()->GetRegistrationUserData(
+      registration_id_.service_worker_registration_id(),
+      {UIOptionsKey(registration_id_.unique_id())},
+      base::BindOnce(&UpdateRegistrationUITask::DidGetUIOptions,
+                     weak_factory_.GetWeakPtr()));
+}
+
+void UpdateRegistrationUITask::DidGetUIOptions(
+    const std::vector<std::string>& data,
+    blink::ServiceWorkerStatusCode status) {
+  switch (ToDatabaseStatus(status)) {
+    case DatabaseStatus::kFailed:
+      SetStorageErrorAndFinish(
+          BackgroundFetchStorageError::kServiceWorkerStorageError);
+      return;
+    case DatabaseStatus::kNotFound:
+    case DatabaseStatus::kOk:
+      break;
+  }
+
+  if (data.empty() || !ui_options_.ParseFromString(data[0])) {
+    SetStorageErrorAndFinish(
+        BackgroundFetchStorageError::kServiceWorkerStorageError);
+    return;
+  }
+
+  if (icon_ && ShouldPersistIcon(*icon_)) {
+    ui_options_.clear_icon();
+    SerializeIcon(*icon_,
+                  base::BindOnce(&UpdateRegistrationUITask::DidSerializeIcon,
+                                 weak_factory_.GetWeakPtr()));
+  } else {
+    StoreUIOptions();
+  }
+}
+
+void UpdateRegistrationUITask::DidSerializeIcon(std::string serialized_icon) {
+  ui_options_.set_icon(std::move(serialized_icon));
+  StoreUIOptions();
+}
+
+void UpdateRegistrationUITask::StoreUIOptions() {
+  if (title_)
+    ui_options_.set_title(*title_);
 
   service_worker_context()->StoreRegistrationUserData(
       registration_id_.service_worker_registration_id(),
       registration_id_.origin().GetURL(),
-      {{RegistrationKey(registration_id_.unique_id()),
-        metadata_proto.SerializeAsString()}},
-      base::BindOnce(&UpdateRegistrationUITask::DidUpdateUI,
+      {{UIOptionsKey(registration_id_.unique_id()),
+        ui_options_.SerializeAsString()}},
+      base::BindOnce(&UpdateRegistrationUITask::DidUpdateUIOptions,
                      weak_factory_.GetWeakPtr()));
 }
 
-void UpdateRegistrationUITask::DidUpdateUI(ServiceWorkerStatusCode status) {
+void UpdateRegistrationUITask::DidUpdateUIOptions(
+    blink::ServiceWorkerStatusCode status) {
   switch (ToDatabaseStatus(status)) {
     case DatabaseStatus::kOk:
       break;
     case DatabaseStatus::kFailed:
     case DatabaseStatus::kNotFound:
-      std::move(callback_).Run(
-          blink::mojom::BackgroundFetchError::STORAGE_ERROR);
-      Finished();  // Destroys |this|.
+      SetStorageErrorAndFinish(
+          BackgroundFetchStorageError::kServiceWorkerStorageError);
       return;
   }
 
-  std::move(callback_).Run(blink::mojom::BackgroundFetchError::NONE);
+  FinishWithError(blink::mojom::BackgroundFetchError::NONE);
+}
+
+void UpdateRegistrationUITask::FinishWithError(
+    blink::mojom::BackgroundFetchError error) {
+  for (auto& observer : data_manager()->observers())
+    observer.OnUpdatedUI(registration_id_, title_, icon_);
+
+  ReportStorageError();
+
+  std::move(callback_).Run(error);
   Finished();  // Destroys |this|.
+}
+
+std::string UpdateRegistrationUITask::HistogramName() const {
+  return "UpdateRegistrationUITask";
 }
 
 }  // namespace background_fetch

@@ -5,7 +5,6 @@
 #ifndef V8_SNAPSHOT_CODE_SERIALIZER_H_
 #define V8_SNAPSHOT_CODE_SERIALIZER_H_
 
-#include "src/parsing/preparse-data.h"
 #include "src/snapshot/serializer.h"
 
 namespace v8 {
@@ -45,21 +44,20 @@ class ScriptData {
 
 class CodeSerializer : public Serializer<> {
  public:
-  static ScriptCompiler::CachedData* Serialize(Handle<SharedFunctionInfo> info,
-                                               Handle<String> source);
+  static ScriptCompiler::CachedData* Serialize(Handle<SharedFunctionInfo> info);
 
-  ScriptData* Serialize(Handle<HeapObject> obj);
+  ScriptData* SerializeSharedFunctionInfo(Handle<SharedFunctionInfo> info);
 
   V8_WARN_UNUSED_RESULT static MaybeHandle<SharedFunctionInfo> Deserialize(
-      Isolate* isolate, ScriptData* cached_data, Handle<String> source);
+      Isolate* isolate, ScriptData* cached_data, Handle<String> source,
+      ScriptOriginOptions origin_options);
 
   const std::vector<uint32_t>* stub_keys() const { return &stub_keys_; }
 
   uint32_t source_hash() const { return source_hash_; }
 
  protected:
-  explicit CodeSerializer(Isolate* isolate, uint32_t source_hash)
-      : Serializer(isolate), source_hash_(source_hash) {}
+  CodeSerializer(Isolate* isolate, uint32_t source_hash);
   ~CodeSerializer() override { OutputStatistics("CodeSerializer"); }
 
   virtual void SerializeCodeObject(Code* code_object, HowToCode how_to_code,
@@ -112,8 +110,8 @@ class SerializedCodeData : public SerializedData {
   // [6] number of code stub keys
   // [7] number of reservation size entries
   // [8] payload length
-  // [9] payload checksum part 1
-  // [10] payload checksum part 2
+  // [9] payload checksum part A
+  // [10] payload checksum part B
   // ...  reservations
   // ...  code stub keys
   // ...  serialized payload
@@ -126,9 +124,12 @@ class SerializedCodeData : public SerializedData {
       kNumReservationsOffset + kUInt32Size;
   static const uint32_t kPayloadLengthOffset =
       kNumCodeStubKeysOffset + kUInt32Size;
-  static const uint32_t kChecksum1Offset = kPayloadLengthOffset + kUInt32Size;
-  static const uint32_t kChecksum2Offset = kChecksum1Offset + kUInt32Size;
-  static const uint32_t kUnalignedHeaderSize = kChecksum2Offset + kUInt32Size;
+  static const uint32_t kChecksumPartAOffset =
+      kPayloadLengthOffset + kUInt32Size;
+  static const uint32_t kChecksumPartBOffset =
+      kChecksumPartAOffset + kUInt32Size;
+  static const uint32_t kUnalignedHeaderSize =
+      kChecksumPartBOffset + kUInt32Size;
   static const uint32_t kHeaderSize = POINTER_SIZE_ALIGN(kUnalignedHeaderSize);
 
   // Used when consuming.
@@ -149,14 +150,15 @@ class SerializedCodeData : public SerializedData {
 
   Vector<const uint32_t> CodeStubKeys() const;
 
-  static uint32_t SourceHash(Handle<String> source);
+  static uint32_t SourceHash(Handle<String> source,
+                             ScriptOriginOptions origin_options);
 
  private:
   explicit SerializedCodeData(ScriptData* data);
   SerializedCodeData(const byte* data, int size)
       : SerializedData(const_cast<byte*>(data), size) {}
 
-  Vector<const byte> DataWithoutHeader() const {
+  Vector<const byte> ChecksummedContent() const {
     return Vector<const byte>(data_ + kHeaderSize, size_ - kHeaderSize);
   }
 

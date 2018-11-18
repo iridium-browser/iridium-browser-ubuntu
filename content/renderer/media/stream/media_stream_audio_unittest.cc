@@ -5,9 +5,9 @@
 #include <stdint.h>
 
 #include "base/atomicops.h"
-#include "base/message_loop/message_loop.h"
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/test/scoped_task_environment.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/platform_thread.h"
 #include "base/threading/thread_checker.h"
@@ -93,7 +93,7 @@ class FakeMediaStreamAudioSource
       if (!audio_bus_ || audio_bus_->frames() != buffer_size) {
         MediaStreamAudioSource::SetFormat(media::AudioParameters(
             media::AudioParameters::AUDIO_PCM_LOW_LATENCY,
-            media::CHANNEL_LAYOUT_MONO, kSampleRate, 16, buffer_size));
+            media::CHANNEL_LAYOUT_MONO, kSampleRate, buffer_size));
         audio_bus_ = media::AudioBus::Create(1, buffer_size);
       }
 
@@ -267,7 +267,7 @@ class MediaStreamAudioTest : public ::testing::Test {
   blink::WebMediaStreamSource blink_audio_source_;
   blink::WebMediaStreamTrack blink_audio_track_;
 
-  base::MessageLoop message_loop_;
+  base::test::ScopedTaskEnvironment task_environment_;
 };
 
 // Tests that a simple source-->track-->sink connection and audio data flow
@@ -300,7 +300,7 @@ TEST_F(MediaStreamAudioTest, BasicUsage) {
   // Check that the audio parameters propagated to the track and sink.
   const media::AudioParameters expected_params(
       media::AudioParameters::AUDIO_PCM_LOW_LATENCY, media::CHANNEL_LAYOUT_MONO,
-      kSampleRate, 16, kBufferSize);
+      kSampleRate, kBufferSize);
   EXPECT_TRUE(expected_params.Equals(track()->GetOutputFormat()));
   EXPECT_TRUE(expected_params.Equals(sink.params()));
 
@@ -369,7 +369,7 @@ TEST_F(MediaStreamAudioTest, FormatChangesPropagate) {
     base::PlatformThread::Sleep(TestTimeouts::tiny_timeout());
   const media::AudioParameters expected_params(
       media::AudioParameters::AUDIO_PCM_LOW_LATENCY, media::CHANNEL_LAYOUT_MONO,
-      kSampleRate, 16, kBufferSize);
+      kSampleRate, kBufferSize);
   EXPECT_TRUE(expected_params.Equals(track()->GetOutputFormat()));
   EXPECT_TRUE(expected_params.Equals(sink.params()));
 

@@ -15,11 +15,15 @@
 #include "components/invalidation/impl/sync_system_resources.h"
 #include "components/invalidation/public/invalidation_export.h"
 #include "net/base/backoff_entry.h"
-#include "net/base/network_change_notifier.h"
-#include "net/url_request/url_fetcher_delegate.h"
+#include "services/network/public/cpp/network_connection_tracker.h"
 #include "url/gurl.h"
 
 class GoogleServiceAuthError;
+
+namespace network {
+class SharedURLLoaderFactory;
+class SimpleURLLoader;
+}  // namespace network
 
 namespace syncer {
 class GCMNetworkChannel;
@@ -48,11 +52,11 @@ struct GCMNetworkChannelDiagnostic {
 // messages through GCMService.
 class INVALIDATION_EXPORT GCMNetworkChannel
     : public SyncNetworkChannel,
-      public net::URLFetcherDelegate,
-      public net::NetworkChangeNotifier::NetworkChangeObserver {
+      public network::NetworkConnectionTracker::NetworkConnectionObserver {
  public:
   GCMNetworkChannel(
-      scoped_refptr<net::URLRequestContextGetter> request_context_getter,
+      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
+      network::NetworkConnectionTracker* network_connection_tracker,
       std::unique_ptr<GCMNetworkChannelDelegate> delegate);
 
   ~GCMNetworkChannel() override;
@@ -69,12 +73,9 @@ class INVALIDATION_EXPORT GCMNetworkChannel
   void RequestDetailedStatus(
       base::Callback<void(const base::DictionaryValue&)> callback) override;
 
-  // URLFetcherDelegate implementation.
-  void OnURLFetchComplete(const net::URLFetcher* source) override;
-
-  // NetworkChangeObserver implementation.
-  void OnNetworkChanged(
-      net::NetworkChangeNotifier::ConnectionType connection_type) override;
+  // NetworkConnectionObserver implementation.
+  void OnConnectionChanged(
+      network::mojom::ConnectionType connection_type) override;
 
  protected:
   void ResetRegisterBackoffEntryForTest(
@@ -97,7 +98,11 @@ class INVALIDATION_EXPORT GCMNetworkChannel
   void UpdateGcmChannelState(bool online);
   void UpdateHttpChannelState(bool online);
 
-  scoped_refptr<net::URLRequestContextGetter> request_context_getter_;
+  // Callback is called when |simple_url_loader_| completes a network request.
+  void OnSimpleLoaderComplete(std::unique_ptr<std::string> response_body);
+
+  scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory_;
+  network::NetworkConnectionTracker* network_connection_tracker_;
   std::unique_ptr<GCMNetworkChannelDelegate> delegate_;
 
   // Message is saved until all conditions are met: there is valid
@@ -113,7 +118,7 @@ class INVALIDATION_EXPORT GCMNetworkChannel
   std::string registration_id_;
   std::unique_ptr<net::BackoffEntry> register_backoff_entry_;
 
-  std::unique_ptr<net::URLFetcher> fetcher_;
+  std::unique_ptr<network::SimpleURLLoader> simple_url_loader_;
 
   // cacheinvalidation client receives echo_token with incoming message from
   // GCM and shuld include it in headers with outgoing message over http.

@@ -4,7 +4,6 @@
 
 package org.chromium.chrome.browser;
 
-import android.os.AsyncTask;
 import android.os.Build;
 import android.speech.tts.TextToSpeech;
 import android.speech.tts.UtteranceProgressListener;
@@ -13,6 +12,7 @@ import org.chromium.base.ContextUtils;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.TraceEvent;
 import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.task.AsyncTask;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -266,9 +266,9 @@ class TtsPlatformImpl {
     private void initialize() {
         TraceEvent.begin("TtsPlatformImpl:initialize");
 
-        new AsyncTask<Void, Void, List<TtsVoice>>() {
+        new AsyncTask<List<TtsVoice>>() {
             @Override
-            protected List<TtsVoice> doInBackground(Void... unused) {
+            protected List<TtsVoice> doInBackground() {
                 assert mNativeTtsPlatformImplAndroid != 0;
 
                 try (TraceEvent te = TraceEvent.scoped("TtsPlatformImpl:initialize.async_task")) {
@@ -309,7 +309,8 @@ class TtsPlatformImpl {
 
                 TraceEvent.end("TtsPlatformImpl:initialize");
             }
-        }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+        }
+                .executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
     }
 
     private native void nativeVoicesChanged(long nativeTtsPlatformImplAndroid);

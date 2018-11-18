@@ -5,12 +5,22 @@
 #ifndef COMPONENTS_CRONET_STALE_HOST_RESOLVER_H_
 #define COMPONENTS_CRONET_STALE_HOST_RESOLVER_H_
 
+#include <memory>
 #include <unordered_set>
 
+#include "base/time/default_tick_clock.h"
+#include "net/base/completion_once_callback.h"
 #include "net/dns/host_resolver.h"
 #include "net/dns/host_resolver_impl.h"
 
+namespace base {
+class TickClock;
+}  // namespace base
+
 namespace cronet {
+namespace {
+class StaleHostResolverTest;
+}  // namespace
 
 // A HostResolver that wraps a HostResolverImpl and uses it to make requests,
 // but "impatiently" returns stale data (if available and usable) after a delay,
@@ -40,6 +50,10 @@ class StaleHostResolver : public net::HostResolver {
     // If positive, the maximum number of times a stale entry can be used. If
     // zero, there is no limit.
     int max_stale_uses;
+
+    // If network resolution returns ERR_NAME_NOT_RESOLVED, use stale result if
+    // available.
+    bool use_stale_on_name_not_resolved;
   };
 
   // Creates a StaleHostResolver that uses |inner_resolver| for actual
@@ -52,6 +66,12 @@ class StaleHostResolver : public net::HostResolver {
 
   // HostResolver implementation:
 
+  std::unique_ptr<ResolveHostRequest> CreateRequest(
+      const net::HostPortPair& host,
+      const net::NetLogWithSource& net_log,
+      const base::Optional<ResolveHostParameters>& optional_parameters)
+      override;
+
   // Resolves as a regular HostResolver, but if stale data is available and
   // usable (according to the options passed to the constructor), and fresh data
   // is not returned before the specified delay, returns the stale data instead.
@@ -61,7 +81,7 @@ class StaleHostResolver : public net::HostResolver {
   int Resolve(const RequestInfo& info,
               net::RequestPriority priority,
               net::AddressList* addresses,
-              const net::CompletionCallback& callback,
+              net::CompletionOnceCallback callback,
               std::unique_ptr<Request>* out_req,
               const net::NetLogWithSource& net_log) override;
 
@@ -84,13 +104,20 @@ class StaleHostResolver : public net::HostResolver {
 
  private:
   class RequestImpl;
+  friend class StaleHostResolverTest;
 
   // Called from |Request| when a request is complete and can be destroyed.
   void OnRequestComplete(Request* request);
 
+  // Set |tick_clock_| for testing. Must be set before issuing any requests.
+  void SetTickClockForTesting(const base::TickClock* tick_clock);
+
   // The underlying HostResolverImpl that will be used to make cache and network
   // requests.
   std::unique_ptr<net::HostResolverImpl> inner_resolver_;
+
+  // Shared instance of tick clock, overridden for testing.
+  const base::TickClock* tick_clock_ = base::DefaultTickClock::GetInstance();
 
   // Options that govern when a stale response can or can't be returned.
   StaleOptions options_;

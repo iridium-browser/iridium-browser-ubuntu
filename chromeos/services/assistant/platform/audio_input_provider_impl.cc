@@ -7,6 +7,12 @@
 #include "base/logging.h"
 #include "base/stl_util.h"
 #include "libassistant/shared/public/platform_audio_buffer.h"
+#include "media/audio/audio_device_description.h"
+#include "media/base/audio_parameters.h"
+#include "media/base/audio_sample_types.h"
+#include "media/base/channel_layout.h"
+#include "services/audio/public/cpp/device_factory.h"
+#include "services/service_manager/public/cpp/connector.h"
 
 namespace chromeos {
 namespace assistant {
@@ -15,93 +21,84 @@ namespace {
 
 // This format should match //c/b/c/assistant/platform_audio_input_host.cc.
 constexpr assistant_client::BufferFormat kFormat{
-    16000 /* sample_rate */, assistant_client::INTERLEAVED_S32, 2 /* channels */
+    16000 /* sample_rate */, assistant_client::INTERLEAVED_S32, 1 /* channels */
 };
 
 }  // namespace
 
-AudioInputConfigImpl::AudioInputConfigImpl() = default;
+AudioInputBufferImpl::AudioInputBufferImpl(const void* data,
+                                           uint32_t frame_count)
+    : data_(data), frame_count_(frame_count) {}
 
-AudioInputConfigImpl::~AudioInputConfigImpl() = default;
+AudioInputBufferImpl::~AudioInputBufferImpl() = default;
 
-std::vector<int> AudioInputConfigImpl::GetSelectedChannels() const {
-  return std::vector<int>{};
+assistant_client::BufferFormat AudioInputBufferImpl::GetFormat() const {
+  return kFormat;
 }
 
-float AudioInputConfigImpl::GetMicSensitivity() const {
-  return 0.f;
+const void* AudioInputBufferImpl::GetData() const {
+  return data_;
 }
 
-assistant_client::AudioInputConfig::InputType
-AudioInputConfigImpl::GetInputType() const {
-  return assistant_client::AudioInputConfig::MICROPHONE_NEAR_FIELD;
+void* AudioInputBufferImpl::GetWritableData() {
+  NOTREACHED();
+  return nullptr;
 }
 
-std::string AudioInputConfigImpl::GetMicManufacturer() const {
-  return "default";
+int AudioInputBufferImpl::GetFrameCount() const {
+  return frame_count_;
 }
 
-std::string AudioInputConfigImpl::GetMicModel() const {
-  return "default";
+AudioInputImpl::AudioInputImpl(
+    std::unique_ptr<service_manager::Connector> connector,
+    bool default_on)
+    : source_(audio::CreateInputDevice(
+          std::move(connector),
+          media::AudioDeviceDescription::kDefaultDeviceId)),
+      default_on_(default_on),
+      task_runner_(base::ThreadTaskRunnerHandle::Get()),
+      weak_factory_(this) {
+  DETACH_FROM_SEQUENCE(observer_sequence_checker_);
+  // AUDIO_PCM_LINEAR and AUDIO_PCM_LOW_LATENCY are the same on CRAS.
+  source_->Initialize(
+      media::AudioParameters(
+          media::AudioParameters::AUDIO_PCM_LOW_LATENCY,
+          media::CHANNEL_LAYOUT_MONO, kFormat.sample_rate,
+          kFormat.sample_rate / 10 /* buffer size for 100 ms */),
+      this);
 }
 
-std::string AudioInputConfigImpl::GetMicVersion() const {
-  return "0";
+AudioInputImpl::~AudioInputImpl() {
+  DCHECK(task_runner_->RunsTasksInCurrentSequence());
+  source_->Stop();
 }
 
-assistant_client::AudioInputConfig::MicState AudioInputConfigImpl::GetMicState()
-    const {
-  return assistant_client::AudioInputConfig::ENABLED;
-}
-
-class AudioInputBufferImpl : public assistant_client::AudioBuffer {
- public:
-  AudioInputBufferImpl(const void* data, uint32_t frame_count)
-      : data_(data), frame_count_(frame_count) {}
-  ~AudioInputBufferImpl() override = default;
-
-  // assistant_client::AudioBuffer overrides:
-  assistant_client::BufferFormat GetFormat() const override { return kFormat; }
-  const void* GetData() const override { return data_; }
-  void* GetWritableData() override {
-    NOTREACHED();
-    return nullptr;
-  }
-  int GetFrameCount() const override { return frame_count_; }
-
- private:
-  const void* data_;
-  int frame_count_;
-  DISALLOW_COPY_AND_ASSIGN(AudioInputBufferImpl);
-};
-
-AudioInputImpl::AudioInputImpl(mojom::AudioInputPtr audio_input)
-    : binding_(this) {
-  mojom::AudioInputObserverPtr observer;
-  binding_.Bind(mojo::MakeRequest(&observer));
-  audio_input->AddObserver(std::move(observer));
-}
-
-AudioInputImpl::~AudioInputImpl() = default;
-
-void AudioInputImpl::OnAudioInputFramesAvailable(
-    const std::vector<int32_t>& buffer,
-    uint32_t frame_count,
-    base::TimeTicks timestamp) {
-  AudioInputBufferImpl input_buffer(buffer.data(), frame_count);
-  int64_t time = timestamp.since_origin().InMilliseconds();
+void AudioInputImpl::Capture(const media::AudioBus* audio_source,
+                             int audio_delay_milliseconds,
+                             double volume,
+                             bool key_pressed) {
+  DCHECK_EQ(kFormat.num_channels, audio_source->channels());
+  std::vector<int32_t> buffer(kFormat.num_channels * audio_source->frames());
+  audio_source->ToInterleaved<media::SignedInt32SampleTypeTraits>(
+      audio_source->frames(), buffer.data());
+  int64_t time = base::TimeTicks::Now().since_origin().InMilliseconds() -
+                 audio_delay_milliseconds;
+  AudioInputBufferImpl input_buffer(buffer.data(), audio_source->frames());
   {
-    base::AutoLock auto_lock(lock_);
+    base::AutoLock lock(lock_);
     for (auto* observer : observers_)
       observer->OnBufferAvailable(input_buffer, time);
   }
 }
 
-void AudioInputImpl::OnAudioInputClosed() {
-  base::AutoLock auto_lock(lock_);
+void AudioInputImpl::OnCaptureError(const std::string& message) {
+  DLOG(ERROR) << "Capture error " << message;
+  base::AutoLock lock(lock_);
   for (auto* observer : observers_)
-    observer->OnStopped();
+    observer->OnError(AudioInput::Error::FATAL_ERROR);
 }
+
+void AudioInputImpl::OnCaptureMuted(bool is_muted) {}
 
 assistant_client::BufferFormat AudioInputImpl::GetFormat() const {
   return kFormat;
@@ -109,25 +106,87 @@ assistant_client::BufferFormat AudioInputImpl::GetFormat() const {
 
 void AudioInputImpl::AddObserver(
     assistant_client::AudioInput::Observer* observer) {
-  base::AutoLock auto_lock(lock_);
-  observers_.push_back(observer);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(observer_sequence_checker_);
+  bool should_start = false;
+  {
+    base::AutoLock lock(lock_);
+    observers_.push_back(observer);
+    should_start = observers_.size() == 1;
+  }
+
+  if (default_on_ && should_start) {
+    // Post to main thread runner to start audio recording. Assistant thread
+    // does not have thread context defined in //base and will fail sequence
+    // check in AudioCapturerSource::Start().
+    task_runner_->PostTask(FROM_HERE,
+                           base::BindOnce(&AudioInputImpl::StartRecording,
+                                          weak_factory_.GetWeakPtr()));
+  }
 }
 
 void AudioInputImpl::RemoveObserver(
     assistant_client::AudioInput::Observer* observer) {
-  base::AutoLock auto_lock(lock_);
-  base::Erase(observers_, observer);
+  DCHECK_CALLED_ON_VALID_SEQUENCE(observer_sequence_checker_);
+  bool should_stop = false;
+  {
+    base::AutoLock lock(lock_);
+    base::Erase(observers_, observer);
+    should_stop = observers_.empty();
+  }
+  if (should_stop) {
+    task_runner_->PostTask(FROM_HERE,
+                           base::BindOnce(&AudioInputImpl::StopRecording,
+                                          weak_factory_.GetWeakPtr()));
+
+    // Reset the sequence checker since assistant may call from different thread
+    // after restart.
+    DETACH_FROM_SEQUENCE(observer_sequence_checker_);
+  }
 }
 
-AudioInputProviderImpl::AudioInputProviderImpl(mojom::AudioInputPtr audio_input)
-    : audio_input_(std::move(audio_input)) {}
+void AudioInputImpl::SetMicState(bool mic_open) {
+  if (!default_on_) {
+    if (mic_open) {
+      task_runner_->PostTask(FROM_HERE,
+                             base::BindOnce(&AudioInputImpl::StartRecording,
+                                            weak_factory_.GetWeakPtr()));
+    } else {
+      task_runner_->PostTask(FROM_HERE,
+                             base::BindOnce(&AudioInputImpl::StopRecording,
+                                            weak_factory_.GetWeakPtr()));
+    }
+  }
+}
+
+void AudioInputImpl::OnHotwordEnabled(bool enable) {
+  default_on_ = enable;
+  if (default_on_) {
+    task_runner_->PostTask(FROM_HERE,
+                           base::BindOnce(&AudioInputImpl::StartRecording,
+                                          weak_factory_.GetWeakPtr()));
+  } else {
+    task_runner_->PostTask(FROM_HERE,
+                           base::BindOnce(&AudioInputImpl::StopRecording,
+                                          weak_factory_.GetWeakPtr()));
+  }
+}
+
+void AudioInputImpl::StartRecording() {
+  DCHECK(task_runner_->RunsTasksInCurrentSequence());
+  source_->Start();
+}
+
+void AudioInputImpl::StopRecording() {
+  DCHECK(task_runner_->RunsTasksInCurrentSequence());
+  source_->Stop();
+}
+
+AudioInputProviderImpl::AudioInputProviderImpl(
+    service_manager::Connector* connector,
+    bool default_on)
+    : audio_input_(connector->Clone(), default_on) {}
 
 AudioInputProviderImpl::~AudioInputProviderImpl() = default;
-
-assistant_client::AudioInputConfig&
-AudioInputProviderImpl::GetAudioInputConfig() {
-  return audio_input_config_;
-}
 
 assistant_client::AudioInput& AudioInputProviderImpl::GetAudioInput() {
   return audio_input_;
@@ -136,6 +195,14 @@ assistant_client::AudioInput& AudioInputProviderImpl::GetAudioInput() {
 int64_t AudioInputProviderImpl::GetCurrentAudioTime() {
   // TODO(xiaohuic): see if we can support real timestamp.
   return 0;
+}
+
+void AudioInputProviderImpl::SetMicState(bool mic_open) {
+  audio_input_.SetMicState(mic_open);
+}
+
+void AudioInputProviderImpl::OnHotwordEnabled(bool enable) {
+  audio_input_.OnHotwordEnabled(enable);
 }
 
 }  // namespace assistant

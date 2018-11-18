@@ -48,7 +48,7 @@ namespace base {
 
 #define V8_FAST_TLS_SUPPORTED 1
 
-INLINE(intptr_t InternalGetExistingThreadLocal(intptr_t index));
+V8_INLINE intptr_t InternalGetExistingThreadLocal(intptr_t index);
 
 inline intptr_t InternalGetExistingThreadLocal(intptr_t index) {
   const intptr_t kTibInlineTlsOffset = 0xE10;
@@ -74,7 +74,7 @@ inline intptr_t InternalGetExistingThreadLocal(intptr_t index) {
 
 extern V8_BASE_EXPORT intptr_t kMacTlsBaseOffset;
 
-INLINE(intptr_t InternalGetExistingThreadLocal(intptr_t index));
+V8_INLINE intptr_t InternalGetExistingThreadLocal(intptr_t index);
 
 inline intptr_t InternalGetExistingThreadLocal(intptr_t index) {
   intptr_t result;
@@ -159,6 +159,7 @@ class V8_BASE_EXPORT OS {
   // v8::PageAllocator.
   enum class MemoryPermission {
     kNoAccess,
+    kRead,
     kReadWrite,
     // TODO(hpayer): Remove this flag. Memory should never be rwx.
     kReadWriteExecute,
@@ -187,7 +188,7 @@ class V8_BASE_EXPORT OS {
 
   class V8_BASE_EXPORT MemoryMappedFile {
    public:
-    virtual ~MemoryMappedFile() {}
+    virtual ~MemoryMappedFile() = default;
     virtual void* memory() const = 0;
     virtual size_t size() const = 0;
 

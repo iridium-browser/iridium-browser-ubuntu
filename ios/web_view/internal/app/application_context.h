@@ -10,6 +10,8 @@
 
 #include "base/macros.h"
 #include "base/sequence_checker.h"
+#include "ios/web/public/network_context_owner.h"
+#include "services/network/public/mojom/network_service.mojom.h"
 
 namespace base {
 template <typename T>
@@ -19,6 +21,16 @@ struct DefaultSingletonTraits;
 namespace net {
 class URLRequestContextGetter;
 }
+
+namespace network {
+class NetworkChangeManager;
+class NetworkConnectionTracker;
+class SharedURLLoaderFactory;
+class WeakWrapperSharedURLLoaderFactory;
+namespace mojom {
+class NetworkContext;
+}
+}  // namespace network
 
 namespace net_log {
 class ChromeNetLog;
@@ -40,6 +52,12 @@ class ApplicationContext {
 
   // Gets the URL request context associated with this application.
   net::URLRequestContextGetter* GetSystemURLRequestContext();
+
+  scoped_refptr<network::SharedURLLoaderFactory> GetSharedURLLoaderFactory();
+  network::mojom::NetworkContext* GetSystemNetworkContext();
+
+  // Returns the NetworkConnectionTracker instance for this ApplicationContext.
+  network::NetworkConnectionTracker* GetNetworkConnectionTracker();
 
   // Gets the locale used by the application.
   const std::string& GetApplicationLocale();
@@ -76,6 +94,18 @@ class ApplicationContext {
   std::unique_ptr<net_log::ChromeNetLog> net_log_;
   std::unique_ptr<WebViewIOThread> web_view_io_thread_;
   std::string application_locale_;
+
+  network::mojom::NetworkContextPtr network_context_;
+  network::mojom::URLLoaderFactoryPtr url_loader_factory_;
+  scoped_refptr<network::WeakWrapperSharedURLLoaderFactory>
+      shared_url_loader_factory_;
+
+  // Created on the UI thread, destroyed on the IO thread.
+  std::unique_ptr<web::NetworkContextOwner> network_context_owner_;
+
+  std::unique_ptr<network::NetworkChangeManager> network_change_manager_;
+  std::unique_ptr<network::NetworkConnectionTracker>
+      network_connection_tracker_;
 
   DISALLOW_COPY_AND_ASSIGN(ApplicationContext);
 };

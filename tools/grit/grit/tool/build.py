@@ -113,10 +113,9 @@ Options:
                     flag should match what sys.platform would report for your
                     target platform; see grit.node.base.EvaluateCondition.
 
-  -h HEADERFORMAT   Custom format string to use for generating rc header files.
-                    The string should have two placeholders: {textual_id}
-                    and {numeric_id}. E.g. "#define {textual_id} {numeric_id}"
-                    Otherwise it will use the default "#define SYMBOL 1234"
+  --whitelist-support
+                    Generate code to support extracting a resource whitelist
+                    from executables.
 
   --write-only-new flag
                     If flag is non-0, write output files to a temporary file
@@ -148,6 +147,7 @@ are exported to translation interchange files (e.g. XMB files), etc.
     return 'A tool that builds RC files for compilation.'
 
   def Run(self, opts, args):
+    os.environ['cwd'] = os.getcwd()
     self.output_directory = '.'
     first_ids_file = None
     predetermined_ids_file = None
@@ -156,19 +156,20 @@ are exported to translation interchange files (e.g. XMB files), etc.
     target_platform = None
     depfile = None
     depdir = None
-    rc_header_format = None
+    whitelist_support = False
     write_only_new = False
     depend_on_stamp = False
     js_minifier = None
     replace_ellipsis = True
-    (own_opts, args) = getopt.getopt(args, 'a:p:o:D:E:f:w:t:h:',
+    (own_opts, args) = getopt.getopt(args, 'a:p:o:D:E:f:w:t:',
         ('depdir=','depfile=','assert-file-list=',
          'output-all-resource-defines',
          'no-output-all-resource-defines',
          'no-replace-ellipsis',
          'depend-on-stamp',
          'js-minifier=',
-         'write-only-new='))
+         'write-only-new=',
+         'whitelist-support'))
     for (key, val) in own_opts:
       if key == '-a':
         assert_output_files.append(val)
@@ -196,8 +197,6 @@ are exported to translation interchange files (e.g. XMB files), etc.
         predetermined_ids_file = val
       elif key == '-t':
         target_platform = val
-      elif key == '-h':
-        rc_header_format = val
       elif key == '--depdir':
         depdir = val
       elif key == '--depfile':
@@ -208,6 +207,8 @@ are exported to translation interchange files (e.g. XMB files), etc.
         depend_on_stamp = True
       elif key == '--js-minifier':
         js_minifier = val
+      elif key == '--whitelist-support':
+        whitelist_support = True
 
     if len(args):
       print 'This tool takes no tool-specific arguments.'
@@ -243,8 +244,7 @@ are exported to translation interchange files (e.g. XMB files), etc.
     # gathering stage; we use a dummy language here since we are not outputting
     # a specific language.
     self.res.SetOutputLanguage('en')
-    if rc_header_format:
-      self.res.AssignRcHeaderFormat(rc_header_format)
+    self.res.SetWhitelistSupportEnabled(whitelist_support)
     self.res.RunGatherers()
 
     # Replace ... with the single-character version. http://crbug.com/621772
@@ -338,11 +338,9 @@ are exported to translation interchange files (e.g. XMB files), etc.
                        'gzipped_resource_file_map_source'):
       return 'cp1252'
     if output_type in ('android', 'c_format', 'js_map_format', 'plist',
-                       'plist_strings', 'doc', 'json', 'android_policy'):
+                       'plist_strings', 'doc', 'json', 'android_policy',
+                       'chrome_messages_json'):
       return 'utf_8'
-    if output_type in ('chrome_messages_json'):
-      # Chrome Web Store currently expects BOM for UTF-8 files :-(
-      return 'utf-8-sig'
     # TODO(gfeher) modify here to set utf-8 encoding for admx/adml
     return 'utf_16'
 

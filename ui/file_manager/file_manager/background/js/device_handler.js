@@ -285,7 +285,7 @@ DeviceHandler.Notification.prototype.makeId_ = function(devicePath) {
 
 /**
  * Handles notifications from C++ sides.
- * @param {DeviceEvent} event Device event.
+ * @param {chrome.fileManagerPrivate.DeviceEvent} event Device event.
  * @private
  */
 DeviceHandler.prototype.onDeviceChanged_ = function(event) {
@@ -295,7 +295,7 @@ DeviceHandler.prototype.onDeviceChanged_ = function(event) {
 };
 
 /**
- * @param {DeviceEvent} event Device event.
+ * @param {chrome.fileManagerPrivate.DeviceEvent} event Device event.
  * @private
  */
 DeviceHandler.prototype.onDeviceChangedInternal_ = function(event) {
@@ -357,7 +357,8 @@ Object.freeze(DeviceHandler.MountStatus);
 
 /**
  * Handles mount completed events to show notifications for removable devices.
- * @param {MountCompletedEvent} event Mount completed event.
+ * @param {chrome.fileManagerPrivate.MountCompletedEvent} event Mount completed
+ * event.
  * @private
  */
 DeviceHandler.prototype.onMountCompleted_ = function(event) {
@@ -468,7 +469,7 @@ DeviceHandler.prototype.onMountCompletedInternal_ = function(event) {
 
 /**
  * Handles mount events.
- * @param {MountCompletedEvent} event
+ * @param {chrome.fileManagerPrivate.MountCompletedEvent} event
  * @private
  */
 DeviceHandler.prototype.onMount_ = function(event) {
@@ -481,12 +482,11 @@ DeviceHandler.prototype.onMount_ = function(event) {
            * @param {!VolumeManager} volumeManager
            * @return {!Promise<!VolumeInfo>}
            */
-          function(volumeManager) {
+          (volumeManager) => {
             if (!metadata.volumeId) {
               return Promise.reject('No volume id associated with event.');
             }
-            return volumeManager.volumeInfoList.whenVolumeInfoReady(
-                metadata.volumeId);
+            return volumeManager.whenVolumeInfoReady(metadata.volumeId);
           })
       .then(
           /**
@@ -513,15 +513,13 @@ DeviceHandler.prototype.onMount_ = function(event) {
           function(root) {
             return importer.getMediaDirectory(root);
           })
-      .then(
-          (/**
-           * @param {!DirectoryEntry} directory
-           * @this {DeviceHandler}
-           */
-          function(directory) {
-            return importer.isPhotosAppImportEnabled()
-                .then(
-                    (/**
+      .then((/**
+              * @param {!DirectoryEntry} directory
+              * @this {DeviceHandler}
+              */
+             function(directory) {
+               return importer.isPhotosAppImportEnabled().then(
+                   (/**
                      * @param {boolean} appEnabled
                      * @this {DeviceHandler}
                      */
@@ -534,20 +532,18 @@ DeviceHandler.prototype.onMount_ = function(event) {
                             metadata.volumeId, null, directory.fullPath);
                       }
                     }).bind(this));
-          }).bind(this))
-      .catch(
-        function(error) {
-          if (metadata.deviceType && metadata.devicePath) {
-            if (metadata.isReadOnly &&
-                !metadata.isReadOnlyRemovableDevice) {
-              DeviceHandler.Notification.DEVICE_NAVIGATION_READONLY_POLICY.show(
-                  /** @type {string} */ (metadata.devicePath));
-            } else {
-              DeviceHandler.Notification.DEVICE_NAVIGATION.show(
-                  /** @type {string} */ (metadata.devicePath));
-            }
+             }).bind(this))
+      .catch(function(error) {
+        if (metadata.deviceType && metadata.devicePath) {
+          if (metadata.isReadOnly && !metadata.isReadOnlyRemovableDevice) {
+            DeviceHandler.Notification.DEVICE_NAVIGATION_READONLY_POLICY.show(
+                /** @type {string} */ (metadata.devicePath));
+          } else {
+            DeviceHandler.Notification.DEVICE_NAVIGATION.show(
+                /** @type {string} */ (metadata.devicePath));
           }
-        });
+        }
+      });
 };
 
 DeviceHandler.prototype.onUnmount_ = function(event) {

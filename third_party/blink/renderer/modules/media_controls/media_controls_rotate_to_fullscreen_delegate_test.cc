@@ -8,10 +8,11 @@
 #include "services/device/public/mojom/screen_orientation.mojom-blink.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/public/platform/modules/screen_orientation/web_screen_orientation_type.h"
+#include "third_party/blink/public/common/screen_orientation/web_screen_orientation_type.h"
 #include "third_party/blink/public/platform/web_size.h"
 #include "third_party/blink/renderer/core/css/css_style_declaration.h"
 #include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/dom/user_gesture_indicator.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
@@ -61,11 +62,11 @@ class MockChromeClient : public EmptyChromeClient {
         ->SetScreenOrientationAssociatedPtrForTests(
             std::move(screen_orientation));
   }
-  void EnterFullscreen(LocalFrame& frame) override {
-    Fullscreen::From(*frame.GetDocument()).DidEnterFullscreen();
+  void EnterFullscreen(LocalFrame& frame, const FullscreenOptions&) override {
+    Fullscreen::DidEnterFullscreen(*frame.GetDocument());
   }
   void ExitFullscreen(LocalFrame& frame) override {
-    Fullscreen::From(*frame.GetDocument()).DidExitFullscreen();
+    Fullscreen::DidExitFullscreen(*frame.GetDocument());
   }
 
   MOCK_CONST_METHOD0(GetScreenInfo, WebScreenInfo());
@@ -149,7 +150,7 @@ class MediaControlsRotateToFullscreenDelegateTest
   }
 
   void DispatchEvent(EventTarget& target, const AtomicString& type) {
-    target.DispatchEvent(Event::Create(type));
+    target.DispatchEvent(*Event::Create(type));
   }
 
   void InitScreenAndVideo(WebScreenOrientationType initial_screen_orientation,
@@ -190,8 +191,8 @@ void MediaControlsRotateToFullscreenDelegateTest::InitScreenAndVideo(
   WebScreenInfo screen_info;
   screen_info.orientation_type = initial_screen_orientation;
   EXPECT_CALL(GetChromeClient(), GetScreenInfo())
-      .Times(1)
-      .WillOnce(Return(screen_info));
+      .Times(AtLeast(1))
+      .WillRepeatedly(Return(screen_info));
 
   // Set up the WebMediaPlayer instance.
   GetDocument().body()->AppendChild(&GetVideo());
@@ -219,7 +220,7 @@ void MediaControlsRotateToFullscreenDelegateTest::InitScreenAndVideo(
 void MediaControlsRotateToFullscreenDelegateTest::PlayVideo() {
   {
     std::unique_ptr<UserGestureIndicator> gesture =
-        Frame::NotifyUserActivation(GetDocument().GetFrame());
+        LocalFrame::NotifyUserActivation(GetDocument().GetFrame());
     GetVideo().Play();
   }
   test::RunPendingTasks();
@@ -306,7 +307,7 @@ TEST_F(MediaControlsRotateToFullscreenDelegateTest,
   // Should start observing visibility when played.
   {
     std::unique_ptr<UserGestureIndicator> gesture =
-        Frame::NotifyUserActivation(GetDocument().GetFrame());
+        LocalFrame::NotifyUserActivation(GetDocument().GetFrame());
     GetVideo().Play();
   }
   test::RunPendingTasks();
@@ -327,7 +328,7 @@ TEST_F(MediaControlsRotateToFullscreenDelegateTest,
   // Should resume observing visibility when playback resumes.
   {
     std::unique_ptr<UserGestureIndicator> gesture =
-        Frame::NotifyUserActivation(GetDocument().GetFrame());
+        LocalFrame::NotifyUserActivation(GetDocument().GetFrame());
     GetVideo().Play();
   }
   test::RunPendingTasks();
@@ -621,7 +622,7 @@ TEST_F(MediaControlsRotateToFullscreenDelegateTest,
   // video (in this case document.body).
   {
     std::unique_ptr<UserGestureIndicator> gesture =
-        Frame::NotifyUserActivation(GetDocument().GetFrame());
+        LocalFrame::NotifyUserActivation(GetDocument().GetFrame());
     Fullscreen::RequestFullscreen(*GetDocument().body());
   }
   test::RunPendingTasks();
@@ -652,7 +653,7 @@ TEST_F(MediaControlsRotateToFullscreenDelegateTest,
   // Start in fullscreen.
   {
     std::unique_ptr<UserGestureIndicator> gesture =
-        Frame::NotifyUserActivation(GetDocument().GetFrame());
+        LocalFrame::NotifyUserActivation(GetDocument().GetFrame());
     GetMediaControls().EnterFullscreen();
   }
   // n.b. omit to call Fullscreen::From(GetDocument()).DidEnterFullscreen() so
@@ -683,7 +684,7 @@ TEST_F(MediaControlsRotateToFullscreenDelegateTest,
   // Start in fullscreen.
   {
     std::unique_ptr<UserGestureIndicator> gesture =
-        Frame::NotifyUserActivation(GetDocument().GetFrame());
+        LocalFrame::NotifyUserActivation(GetDocument().GetFrame());
     GetMediaControls().EnterFullscreen();
   }
   // n.b. omit to call Fullscreen::From(GetDocument()).DidEnterFullscreen() so
@@ -715,7 +716,7 @@ TEST_F(MediaControlsRotateToFullscreenDelegateTest,
   // video (in this case document.body).
   {
     std::unique_ptr<UserGestureIndicator> gesture =
-        Frame::NotifyUserActivation(GetDocument().GetFrame());
+        LocalFrame::NotifyUserActivation(GetDocument().GetFrame());
     Fullscreen::RequestFullscreen(*GetDocument().body());
   }
   test::RunPendingTasks();
@@ -732,6 +733,52 @@ TEST_F(MediaControlsRotateToFullscreenDelegateTest,
   // Should not exit fullscreen, since video was not the fullscreen element.
   EXPECT_TRUE(Fullscreen::IsFullscreenElement(*GetDocument().body()));
   EXPECT_FALSE(GetVideo().IsFullscreen());
+}
+
+TEST_F(MediaControlsRotateToFullscreenDelegateTest,
+       EnterFailControlsListNoFullscreen) {
+  // Portrait screen, landscape video.
+  InitScreenAndVideo(kWebScreenOrientationPortraitPrimary, WebSize(640, 480));
+  EXPECT_EQ(SimpleOrientation::kPortrait, ObservedScreenOrientation());
+  EXPECT_EQ(SimpleOrientation::kLandscape, ComputeVideoOrientation());
+
+  EXPECT_FALSE(ObservedVisibility());
+
+  GetVideo().setAttribute("controlslist", "nofullscreen");
+
+  PlayVideo();
+  UpdateVisibilityObserver();
+
+  EXPECT_TRUE(ObservedVisibility());
+
+  // Rotate screen to landscape.
+  RotateTo(kWebScreenOrientationLandscapePrimary);
+
+  // Should not enter fullscreen when controlsList=nofullscreen.
+  EXPECT_FALSE(GetVideo().IsFullscreen());
+}
+
+TEST_F(MediaControlsRotateToFullscreenDelegateTest,
+       EnterSuccessControlsListNoDownload) {
+  // Portrait screen, landscape video.
+  InitScreenAndVideo(kWebScreenOrientationPortraitPrimary, WebSize(640, 480));
+  EXPECT_EQ(SimpleOrientation::kPortrait, ObservedScreenOrientation());
+  EXPECT_EQ(SimpleOrientation::kLandscape, ComputeVideoOrientation());
+
+  EXPECT_FALSE(ObservedVisibility());
+
+  GetVideo().setAttribute("controlslist", "nodownload");
+
+  PlayVideo();
+  UpdateVisibilityObserver();
+
+  EXPECT_TRUE(ObservedVisibility());
+
+  // Rotate screen to landscape.
+  RotateTo(kWebScreenOrientationLandscapePrimary);
+
+  // Should enter fullscreen when controlsList is not set to nofullscreen.
+  EXPECT_TRUE(GetVideo().IsFullscreen());
 }
 
 }  // namespace blink

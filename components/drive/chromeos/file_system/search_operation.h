@@ -52,17 +52,17 @@ class SearchOperation {
   // |callback| must not be null.
   void Search(const std::string& search_query,
               const GURL& next_link,
-              const SearchCallback& callback);
+              SearchCallback callback);
 
  private:
   // Part of Search(), called after the FileList is fetched from the server.
-  void SearchAfterGetFileList(const SearchCallback& callback,
+  void SearchAfterGetFileList(SearchCallback callback,
                               google_apis::DriveApiErrorCode gdata_error,
                               std::unique_ptr<google_apis::FileList> file_list);
 
   // Part of Search(), called after |result| is filled on the blocking pool.
   void SearchAfterResolveSearchResult(
-      const SearchCallback& callback,
+      SearchCallback callback,
       const GURL& next_link,
       std::unique_ptr<std::vector<SearchResultInfo>> result,
       FileError error);
@@ -72,7 +72,7 @@ class SearchOperation {
   internal::ResourceMetadata* metadata_;
   internal::LoaderController* loader_controller_;
 
-  base::ThreadChecker thread_checker_;
+  THREAD_CHECKER(thread_checker_);
 
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate the weak pointers before any other members are destroyed.

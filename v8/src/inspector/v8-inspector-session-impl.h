@@ -34,7 +34,7 @@ class V8InspectorSessionImpl : public V8InspectorSession,
   static std::unique_ptr<V8InspectorSessionImpl> create(
       V8InspectorImpl*, int contextGroupId, int sessionId,
       V8Inspector::Channel*, const StringView& state);
-  ~V8InspectorSessionImpl();
+  ~V8InspectorSessionImpl() override;
 
   V8InspectorImpl* inspector() const { return m_inspector; }
   V8ConsoleAgentImpl* consoleAgent() { return m_consoleAgent.get(); }
@@ -101,6 +101,8 @@ class V8InspectorSessionImpl : public V8InspectorSession,
       int callId, std::unique_ptr<protocol::Serializable> message) override;
   void sendProtocolNotification(
       std::unique_ptr<protocol::Serializable> message) override;
+  void fallThrough(int callId, const String16& method,
+                   const String16& message) override;
   void flushProtocolNotifications() override;
 
   int m_contextGroupId;

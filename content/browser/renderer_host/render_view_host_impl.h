@@ -31,7 +31,6 @@
 #include "net/base/load_states.h"
 #include "third_party/blink/public/web/web_ax_enums.h"
 #include "third_party/blink/public/web/web_console_message.h"
-#include "third_party/blink/public/web/web_popup_type.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/mojo/window_open_disposition.mojom.h"
 
@@ -63,10 +62,11 @@ class TimeoutMonitor;
 // https://www.chromium.org/developers/design-documents/site-isolation.
 class CONTENT_EXPORT RenderViewHostImpl : public RenderViewHost,
                                           public RenderWidgetHostOwnerDelegate,
-                                          public RenderProcessHostObserver {
+                                          public RenderProcessHostObserver,
+                                          public IPC::Listener {
  public:
   // Convenience function, just like RenderViewHost::FromID.
-  static RenderViewHostImpl* FromID(int render_process_id, int render_view_id);
+  static RenderViewHostImpl* FromID(int process_id, int routing_id);
 
   // Convenience function, just like RenderViewHost::From.
   static RenderViewHostImpl* From(RenderWidgetHost* rwh);
@@ -74,9 +74,12 @@ class CONTENT_EXPORT RenderViewHostImpl : public RenderViewHost,
   RenderViewHostImpl(SiteInstance* instance,
                      std::unique_ptr<RenderWidgetHostImpl> widget,
                      RenderViewHostDelegate* delegate,
+                     int32_t routing_id,
                      int32_t main_frame_routing_id,
                      bool swapped_out,
                      bool has_initialized_audio_host);
+  // TODO(ajwong): Make destructor private. Deletion of this object should only
+  // be done via ShutdownAndDestroy(). https://crbug.com/545684
   ~RenderViewHostImpl() override;
 
   // Shuts down this RenderViewHost and deletes it.
@@ -93,9 +96,6 @@ class CONTENT_EXPORT RenderViewHostImpl : public RenderViewHost,
       const std::vector<base::FilePath>& files) override;
   void DisableScrollbarsForThreshold(const gfx::Size& size) override;
   void EnablePreferredSizeMode() override;
-  void ExecuteMediaPlayerActionAtLocation(
-      const gfx::Point& location,
-      const blink::WebMediaPlayerAction& action) override;
   void ExecutePluginActionAtLocation(
       const gfx::Point& location,
       const blink::WebPluginAction& action) override;
@@ -109,12 +109,10 @@ class CONTENT_EXPORT RenderViewHostImpl : public RenderViewHost,
   WebPreferences GetWebkitPreferences() override;
   void UpdateWebkitPreferences(const WebPreferences& prefs) override;
   void OnWebkitPreferencesChanged() override;
-  void SelectWordAroundCaret() override;
 
   // RenderProcessHostObserver implementation
   void RenderProcessExited(RenderProcessHost* host,
-                           base::TerminationStatus status,
-                           int exit_code) override;
+                           const ChildProcessTerminationInfo& info) override;
 
   void set_delegate(RenderViewHostDelegate* d) {
     CHECK(d);  // http://crbug.com/82827
@@ -193,11 +191,8 @@ class CONTENT_EXPORT RenderViewHostImpl : public RenderViewHost,
     sudden_termination_allowed_ = enabled;
   }
 
-  // Creates a new RenderWidget with the given route id.  |popup_type| indicates
-  // if this widget is a popup and what kind of popup it is (select, autofill).
-  void CreateNewWidget(int32_t route_id,
-                       mojom::WidgetPtr widget,
-                       blink::WebPopupType popup_type);
+  // Creates a new RenderWidget with the given route id.
+  void CreateNewWidget(int32_t route_id, mojom::WidgetPtr widget);
 
   // Creates a full screen RenderWidget.
   void CreateNewFullscreenWidget(int32_t route_id, mojom::WidgetPtr widget);
@@ -239,18 +234,17 @@ class CONTENT_EXPORT RenderViewHostImpl : public RenderViewHost,
   bool MayRenderWidgetForwardKeyboardEvent(
       const NativeWebKeyboardEvent& key_event) override;
   bool ShouldContributePriorityToProcess() override;
+  void RequestSetBounds(const gfx::Rect& bounds) override;
 
   // IPC message handlers.
   void OnShowView(int route_id,
                   WindowOpenDisposition disposition,
                   const gfx::Rect& initial_rect,
                   bool user_gesture);
-  void OnShowWidget(int route_id, const gfx::Rect& initial_rect);
-  void OnShowFullscreenWidget(int route_id);
-  void OnRenderProcessGone(int status, int error_code);
+  void OnShowWidget(int widget_route_id, const gfx::Rect& initial_rect);
+  void OnShowFullscreenWidget(int widget_route_id);
   void OnUpdateTargetURL(const GURL& url);
   void OnClose();
-  void OnRequestMove(const gfx::Rect& pos);
   void OnDocumentAvailableInMainFrame(bool uses_temporary_zoom_level);
   void OnDidContentsPreferredSizeChange(const gfx::Size& new_size);
   void OnPasteFromSelectionClipboard();
@@ -315,6 +309,9 @@ class CONTENT_EXPORT RenderViewHostImpl : public RenderViewHost,
   // TODO(creis): Remove this when we no longer filter IPCs after swap out.
   // See https://crbug.com/745091.
   bool is_swapped_out_;
+
+  // Routing ID for this RenderViewHost.
+  const int routing_id_;
 
   // Routing ID for the main frame's RenderFrameHost.
   int main_frame_routing_id_;

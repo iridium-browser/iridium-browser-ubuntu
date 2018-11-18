@@ -8,6 +8,8 @@
 #include "include/v8.h"
 #include "src/base/macros.h"
 #include "src/handles.h"
+#include "src/maybe-handles.h"
+#include "src/objects.h"
 #include "src/property-details.h"
 
 namespace v8 {
@@ -26,21 +28,15 @@ class ApiNatives {
       MaybeHandle<Name> maybe_name = MaybeHandle<Name>());
 
   V8_WARN_UNUSED_RESULT static MaybeHandle<JSObject> InstantiateObject(
-      Handle<ObjectTemplateInfo> data,
+      Isolate* isolate, Handle<ObjectTemplateInfo> data,
       Handle<JSReceiver> new_target = Handle<JSReceiver>());
 
   V8_WARN_UNUSED_RESULT static MaybeHandle<JSObject> InstantiateRemoteObject(
       Handle<ObjectTemplateInfo> data);
 
-  enum ApiInstanceType {
-    JavaScriptObjectType,
-    GlobalObjectType,
-    GlobalProxyType
-  };
-
   static Handle<JSFunction> CreateApiFunction(
       Isolate* isolate, Handle<FunctionTemplateInfo> obj,
-      Handle<Object> prototype, ApiInstanceType instance_type,
+      Handle<Object> prototype, InstanceType type,
       MaybeHandle<Name> name = MaybeHandle<Name>());
 
   static void AddDataProperty(Isolate* isolate, Handle<TemplateInfo> info,

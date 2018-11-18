@@ -14,6 +14,7 @@
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
 #include "chrome/browser/ui/toolbar/app_menu_icon_controller.h"
 #include "chrome/browser/ui/views/frame/app_menu_button.h"
+#include "ui/base/material_design/material_design_controller_observer.h"
 #include "ui/views/controls/animated_icon_view.h"
 #include "ui/views/view.h"
 
@@ -26,7 +27,8 @@ class ToolbarView;
 // The app menu button in the main browser window (as opposed to hosted app
 // windows, which is implemented in HostedAppMenuButton).
 class BrowserAppMenuButton : public AppMenuButton,
-                             public TabStripModelObserver {
+                             public TabStripModelObserver,
+                             public ui::MaterialDesignControllerObserver {
  public:
   explicit BrowserAppMenuButton(ToolbarView* toolbar_view);
   ~BrowserAppMenuButton() override;
@@ -46,6 +48,8 @@ class BrowserAppMenuButton : public AppMenuButton,
   void SetIsProminent(bool is_prominent);
 
   // views::MenuButton:
+  void OnBoundsChanged(const gfx::Rect& previous_bounds) override;
+  gfx::Rect GetAnchorBoundsInScreen() const override;
   gfx::Size CalculatePreferredSize() const override;
   void Layout() override;
   void OnThemeChanged() override;
@@ -67,6 +71,10 @@ class BrowserAppMenuButton : public AppMenuButton,
   // Opens the app menu immediately during a drag-and-drop operation.
   // Used only in testing.
   static bool g_open_app_immediately_for_testing;
+
+ protected:
+  // ui::MaterialDesignControllerObserver:
+  void OnMdModeChanged() override;
 
  private:
   // Animates the icon if possible. The icon will not animate if the severity
@@ -93,7 +101,6 @@ class BrowserAppMenuButton : public AppMenuButton,
   std::unique_ptr<views::InkDropRipple> CreateInkDropRipple() const override;
   std::unique_ptr<views::InkDropHighlight> CreateInkDropHighlight()
       const override;
-  std::unique_ptr<views::InkDropMask> CreateInkDropMask() const override;
 
   AppMenuIconController::Severity severity_ =
       AppMenuIconController::Severity::NONE;
@@ -109,7 +116,7 @@ class BrowserAppMenuButton : public AppMenuButton,
 
   // Used to delay the animation. Not used if |should_delay_animation_| is
   // false.
-  base::Timer animation_delay_timer_;
+  base::OneShotTimer animation_delay_timer_;
 
   // True if the app menu should use the new animated icon.
   bool should_use_new_icon_ = false;
@@ -120,6 +127,10 @@ class BrowserAppMenuButton : public AppMenuButton,
   // Any trailing margin to be applied. Used when the browser is in
   // a maximized state to extend to the full window width.
   int margin_trailing_ = 0;
+
+  ScopedObserver<ui::MaterialDesignController,
+                 ui::MaterialDesignControllerObserver>
+      md_observer_{this};
 
   // Used to spawn weak pointers for delayed tasks to open the overflow menu.
   base::WeakPtrFactory<BrowserAppMenuButton> weak_factory_{this};

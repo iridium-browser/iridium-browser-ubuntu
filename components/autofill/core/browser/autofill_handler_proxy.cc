@@ -16,12 +16,11 @@ AutofillHandlerProxy::AutofillHandlerProxy(AutofillDriver* driver,
 
 AutofillHandlerProxy::~AutofillHandlerProxy() {}
 
-bool AutofillHandlerProxy::OnFormSubmittedImpl(const FormData& form,
+void AutofillHandlerProxy::OnFormSubmittedImpl(const FormData& form,
                                                bool known_success,
                                                SubmissionSource source,
                                                base::TimeTicks timestamp) {
-  return provider_->OnFormSubmitted(this, form, known_success, source,
-                                    timestamp);
+  provider_->OnFormSubmitted(this, form, known_success, source, timestamp);
 }
 
 void AutofillHandlerProxy::OnTextFieldDidChangeImpl(
@@ -43,9 +42,10 @@ void AutofillHandlerProxy::OnQueryFormFieldAutofillImpl(
     int query_id,
     const FormData& form,
     const FormFieldData& field,
-    const gfx::RectF& bounding_box) {
-  provider_->OnQueryFormFieldAutofill(this, query_id, form, field,
-                                      bounding_box);
+    const gfx::RectF& bounding_box,
+    bool autoselect_first_suggestion) {
+  provider_->OnQueryFormFieldAutofill(this, query_id, form, field, bounding_box,
+                                      autoselect_first_suggestion);
 }
 
 void AutofillHandlerProxy::OnFocusOnFormFieldImpl(
@@ -62,6 +62,18 @@ void AutofillHandlerProxy::OnSelectControlDidChangeImpl(
   provider_->OnSelectControlDidChange(this, form, field, bounding_box);
 }
 
+bool AutofillHandlerProxy::ShouldParseForms(const std::vector<FormData>& forms,
+                                            const base::TimeTicks timestamp) {
+  provider_->OnFormsSeen(this, forms, timestamp);
+  // Need to parse the |forms| to FormStructure, so heuristic_type can be
+  // retrieved later.
+  return true;
+}
+
+void AutofillHandlerProxy::OnFormsParsed(
+    const std::vector<FormStructure*>& form_structures,
+    const base::TimeTicks timestamp) {}
+
 void AutofillHandlerProxy::OnFocusNoLongerOnForm() {
   provider_->OnFocusNoLongerOnForm(this);
 }
@@ -73,11 +85,6 @@ void AutofillHandlerProxy::OnDidFillAutofillFormData(
 }
 
 void AutofillHandlerProxy::OnDidPreviewAutofillFormData() {}
-
-void AutofillHandlerProxy::OnFormsSeen(const std::vector<FormData>& forms,
-                                       const base::TimeTicks timestamp) {
-  provider_->OnFormsSeen(this, forms, timestamp);
-}
 
 void AutofillHandlerProxy::OnDidEndTextFieldEditing() {}
 

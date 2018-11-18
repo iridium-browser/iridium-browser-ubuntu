@@ -18,12 +18,12 @@ import org.chromium.base.test.BaseJUnit4ClassRunner;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.base.test.util.UrlUtils;
-import org.chromium.content.browser.test.util.Criteria;
-import org.chromium.content.browser.test.util.CriteriaHelper;
-import org.chromium.content.browser.test.util.DOMUtils;
-import org.chromium.content.browser.test.util.TestCallbackHelperContainer;
-import org.chromium.content.browser.test.util.TestCallbackHelperContainer.OnPageFinishedHelper;
-import org.chromium.content_public.browser.ContentViewCore;
+import org.chromium.content_public.browser.WebContents;
+import org.chromium.content_public.browser.test.util.Criteria;
+import org.chromium.content_public.browser.test.util.CriteriaHelper;
+import org.chromium.content_public.browser.test.util.DOMUtils;
+import org.chromium.content_public.browser.test.util.TestCallbackHelperContainer;
+import org.chromium.content_public.browser.test.util.TestCallbackHelperContainer.OnPageFinishedHelper;
 import org.chromium.content_shell_apk.ContentShellActivityTestRule;
 import org.chromium.content_shell_apk.ContentShellActivityTestRule.RerunWithUpdatedContainerView;
 
@@ -60,7 +60,7 @@ public class SelectPopupTest {
 
         @Override
         public boolean isSatisfied() {
-            return mActivityTestRule.getContentViewCore().isSelectPopupVisibleForTest();
+            return mActivityTestRule.getSelectPopup().isVisibleForTesting();
         }
     }
 
@@ -71,7 +71,7 @@ public class SelectPopupTest {
 
         @Override
         public boolean isSatisfied() {
-            return !mActivityTestRule.getContentViewCore().isSelectPopupVisibleForTest();
+            return !mActivityTestRule.getSelectPopup().isVisibleForTesting();
         }
     }
 
@@ -92,36 +92,31 @@ public class SelectPopupTest {
     @RetryOnFailure
     public void testReloadWhilePopupShowing() throws InterruptedException, Exception, Throwable {
         // The popup should be hidden before the click.
-        CriteriaHelper.pollInstrumentationThread(new PopupHiddenCriteria());
+        CriteriaHelper.pollUiThread(new PopupHiddenCriteria());
 
-        final ContentViewCore viewCore = mActivityTestRule.getContentViewCore();
-        final TestCallbackHelperContainer viewClient = new TestCallbackHelperContainer(viewCore);
+        final WebContents webContents = mActivityTestRule.getWebContents();
+        final TestCallbackHelperContainer viewClient = new TestCallbackHelperContainer(webContents);
         final OnPageFinishedHelper onPageFinishedHelper = viewClient.getOnPageFinishedHelper();
 
         // Once clicked, the popup should show up.
-        DOMUtils.clickNode(viewCore, "select");
+        DOMUtils.clickNode(webContents, "select");
         CriteriaHelper.pollInstrumentationThread(new PopupShowingCriteria());
 
         // Reload the test page.
         int currentCallCount = onPageFinishedHelper.getCallCount();
-        InstrumentationRegistry.getInstrumentation().runOnMainSync(new Runnable() {
-            @Override
-            public void run() {
-                // Now reload the page while the popup is showing, it gets hidden.
-                mActivityTestRule.getContentViewCore()
-                        .getWebContents()
-                        .getNavigationController()
-                        .reload(true);
-            }
+
+        InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+            // Now reload the page while the popup is showing, it gets hidden.
+            mActivityTestRule.getWebContents().getNavigationController().reload(true);
         });
         onPageFinishedHelper.waitForCallback(currentCallCount, 1,
                 WAIT_TIMEOUT_SECONDS, TimeUnit.SECONDS);
 
         // The popup should be hidden after the page reload.
-        CriteriaHelper.pollInstrumentationThread(new PopupHiddenCriteria());
+        CriteriaHelper.pollUiThread(new PopupHiddenCriteria());
 
         // Click the select and wait for the popup to show.
-        DOMUtils.clickNode(viewCore, "select");
-        CriteriaHelper.pollInstrumentationThread(new PopupShowingCriteria());
+        DOMUtils.clickNode(webContents, "select");
+        CriteriaHelper.pollUiThread(new PopupShowingCriteria());
     }
 }

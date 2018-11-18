@@ -168,25 +168,29 @@ float MotionEventWeb::GetPressure(size_t pointer_index) const {
 float MotionEventWeb::GetTiltX(size_t pointer_index) const {
   DCHECK_LT(pointer_index, GetPointerCount());
 
-  if (GetToolType(pointer_index) != ToolType::STYLUS)
-    return 0.f;
-
   return event_.touches[pointer_index].tilt_x;
 }
 
 float MotionEventWeb::GetTiltY(size_t pointer_index) const {
   DCHECK_LT(pointer_index, GetPointerCount());
 
-  if (GetToolType(pointer_index) != ToolType::STYLUS)
-    return 0.f;
-
   return event_.touches[pointer_index].tilt_y;
 }
 
+float MotionEventWeb::GetTwist(size_t pointer_index) const {
+  DCHECK_LT(pointer_index, GetPointerCount());
+
+  return event_.touches[pointer_index].twist;
+}
+
+float MotionEventWeb::GetTangentialPressure(size_t pointer_index) const {
+  DCHECK_LT(pointer_index, GetPointerCount());
+
+  return event_.touches[pointer_index].tangential_pressure;
+}
+
 base::TimeTicks MotionEventWeb::GetEventTime() const {
-  return base::TimeTicks() +
-         base::TimeDelta::FromMicroseconds(event_.TimeStampSeconds() *
-                                           base::Time::kMicrosecondsPerSecond);
+  return event_.TimeStamp();
 }
 
 ui::MotionEvent::ToolType MotionEventWeb::GetToolType(

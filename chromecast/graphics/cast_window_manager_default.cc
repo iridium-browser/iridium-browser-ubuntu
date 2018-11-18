@@ -5,14 +5,9 @@
 #include "chromecast/graphics/cast_window_manager_default.h"
 
 #include "base/memory/ptr_util.h"
+#include "chromecast/graphics/cast_touch_activity_observer.h"
 
 namespace chromecast {
-
-// static
-std::unique_ptr<CastWindowManager> CastWindowManager::Create(
-    bool enable_input) {
-  return base::WrapUnique(new CastWindowManagerDefault());
-}
 
 CastWindowManagerDefault::CastWindowManagerDefault() {}
 
@@ -27,14 +22,19 @@ gfx::NativeView CastWindowManagerDefault::GetRootWindow() {
   return nullptr;
 }
 
-void CastWindowManagerDefault::AddSideSwipeGestureHandler(
-    CastSideSwipeGestureHandlerInterface* handler) {}
-
 void CastWindowManagerDefault::SetColorInversion(bool enable) {}
 
-// Remove the registration of a system side swipe event handler.
-void CastWindowManagerDefault::CastWindowManagerDefault::
-    RemoveSideSwipeGestureHandler(
-        CastSideSwipeGestureHandlerInterface* handler) {}
+// Register a new handler for system gesture events.
+void CastWindowManagerDefault::AddGestureHandler(CastGestureHandler* handler) {}
+// Remove the registration of a system gesture events handler.
+void CastWindowManagerDefault::RemoveGestureHandler(
+    CastGestureHandler* handler) {}
+
+void CastWindowManagerDefault::SetTouchInputDisabled(bool disabled) {}
+
+void CastWindowManagerDefault::AddTouchActivityObserver(
+    CastTouchActivityObserver* observer) {}
+void CastWindowManagerDefault::RemoveTouchActivityObserver(
+    CastTouchActivityObserver* observer) {}
 
 }  // namespace chromecast

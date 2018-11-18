@@ -6,11 +6,16 @@
 #include <vector>
 
 #include "base/strings/sys_string_conversions.h"
+#include "base/test/scoped_feature_list.h"
 #include "components/autofill/core/browser/autofill_profile.h"
 #include "components/autofill/core/browser/autofill_test_utils.h"
 #include "components/autofill/core/browser/credit_card.h"
 #include "components/autofill/core/browser/field_types.h"
+#include "components/payments/core/features.h"
+#include "components/payments/core/payment_prefs.h"
+#include "components/prefs/pref_service.h"
 #include "components/strings/grit/components_strings.h"
+#include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/payments/payment_request_util.h"
 #include "ios/chrome/browser/ui/autofill/card_unmask_prompt_view_bridge.h"
 #import "ios/chrome/browser/ui/payments/payment_request_egtest_base.h"
@@ -70,6 +75,10 @@ std::unique_ptr<autofill::AutofillProfile> _profile;
   _profile = std::make_unique<autofill::AutofillProfile>(
       autofill::test::GetFullProfile());
   [self addAutofillProfile:*_profile];
+
+  // Allow canMakePayment to return a truthful value by default.
+  PrefService* prefs = chrome_test_util::GetOriginalBrowserState()->GetPrefs();
+  prefs->SetBoolean(payments::kCanMakePaymentEnabled, true);
 }
 
 - (void)addServerCardWithType:(autofill::CreditCard::CardType)cardType {
@@ -83,6 +92,10 @@ std::unique_ptr<autofill::AutofillProfile> _profile;
 
 // Tests that canMakePayment() resolves with true with a debit card.
 - (void)testCanMakePaymentWithDebitCard {
+  base::test::ScopedFeatureList featureList;
+  featureList.InitAndEnableFeature(
+      payments::features::kReturnGooglePayInBasicCard);
+
   [ChromeEarlGrey loadURL:web::test::HttpServer::MakeUrl(kDebitPage)];
 
   [self addServerCardWithType:DEBIT];
@@ -94,6 +107,10 @@ std::unique_ptr<autofill::AutofillProfile> _profile;
 
 // Tests that canMakePayment() resolves with true with an "unknown" card.
 - (void)testCanMakePaymentWithUnknownCardType {
+  base::test::ScopedFeatureList featureList;
+  featureList.InitAndEnableFeature(
+      payments::features::kReturnGooglePayInBasicCard);
+
   [ChromeEarlGrey loadURL:web::test::HttpServer::MakeUrl(kDebitPage)];
 
   [self addServerCardWithType:UNKNOWN];
@@ -117,6 +134,10 @@ std::unique_ptr<autofill::AutofillProfile> _profile;
 
 // Tests that a debit card is preselected.
 - (void)testDebitCardIsPreselected {
+  base::test::ScopedFeatureList featureList;
+  featureList.InitAndEnableFeature(
+      payments::features::kReturnGooglePayInBasicCard);
+
   [ChromeEarlGrey loadURL:web::test::HttpServer::MakeUrl(kDebitPage)];
 
   [self addServerCardWithType:DEBIT];

@@ -54,17 +54,13 @@ class AppLaunchSigninScreen : public SigninScreenHandlerDelegate,
   const user_manager::UserList& GetUsers() const;
 
   // SigninScreenHandlerDelegate implementation:
-  void CancelPasswordChangedFlow() override;
   void CancelUserAdding() override;
   void Login(const UserContext& user_context,
              const SigninSpecifics& specifics) override;
-  void MigrateUserData(const std::string& old_password) override;
   void OnSigninScreenReady() override;
   void RemoveUser(const AccountId& account_id) override;
-  void ResyncUserData() override;
   void ShowEnterpriseEnrollmentScreen() override;
   void ShowEnableDebuggingScreen() override;
-  void ShowDemoModeSetupScreen() override;
   void ShowKioskEnableScreen() override;
   void ShowKioskAutolaunchScreen() override;
   void ShowUpdateRequiredScreen() override;

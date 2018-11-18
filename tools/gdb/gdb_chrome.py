@@ -30,9 +30,9 @@ import sys
 
 sys.path.insert(0, os.path.join(
     os.path.dirname(os.path.abspath(__file__)),
-    '..', '..', 'third_party', 'WebKit', 'Tools', 'gdb'))
+    '..', '..', 'third_party', 'blink', 'tools', 'gdb'))
 try:
-  import webkit
+  import blink
 finally:
   sys.path.pop(0)
 
@@ -88,7 +88,7 @@ class StringPrinter(Printer):
 
 class String16Printer(StringPrinter):
     def to_string(self):
-        return webkit.ustring_to_string(self.val['_M_dataplus']['_M_p'])
+        return blink.ustring_to_string(self.val['_M_dataplus']['_M_p'])
 pp_set.add_printer(
     'string16',
     '^string16|std::basic_string<(unsigned short|base::char16).*>$',

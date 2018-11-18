@@ -40,6 +40,7 @@ public:
         kWeightedTriangles, // Triangles (from the tessellator) whose winding magnitude > 1.
         kQuadratics,
         kCubics,
+        kConics
     };
     static const char* PrimitiveTypeName(PrimitiveType);
 
@@ -51,17 +52,20 @@ public:
 
         void set(const SkPoint[3], const Sk2f& trans);
         void set(const SkPoint&, const SkPoint&, const SkPoint&, const Sk2f& trans);
+        void set(const Sk2f& P0, const Sk2f& P1, const Sk2f& P2, const Sk2f& trans);
     };
 
-    // Defines a single primitive shape with 4 input points, or 3 input points plus a W parameter
-    // duplicated in both 4th components (i.e. Cubics or Triangles with a custom winding number).
-    // X,Y point values are transposed.
+    // Defines a single primitive shape with 4 input points, or 3 input points plus a "weight"
+    // parameter duplicated in both lanes of the 4th input (i.e. Cubics, Conics, and Triangles with
+    // a weighted winding number). X,Y point values are transposed.
     struct QuadPointInstance {
         float fX[4];
         float fY[4];
 
         void set(const SkPoint[4], float dx, float dy);
+        void setW(const SkPoint[3], const Sk2f& trans, float w);
         void setW(const SkPoint&, const SkPoint&, const SkPoint&, const Sk2f& trans, float w);
+        void setW(const Sk2f& P0, const Sk2f& P1, const Sk2f& P2, const Sk2f& trans, float w);
     };
 
     GrCCCoverageProcessor(GrResourceProvider* rp, PrimitiveType type)
@@ -103,7 +107,7 @@ public:
         }
     }
 
-    void draw(GrOpFlushState*, const GrPipeline&, const GrMesh[], const GrPipeline::DynamicState[],
+    void draw(GrOpFlushState*, const GrPipeline&, const SkIRect scissorRects[], const GrMesh[],
               int meshCount, const SkRect& drawBounds) const;
 
     // The Shader provides code to calculate each pixel's coverage in a RenderPass. It also
@@ -130,6 +134,11 @@ public:
 
         void emitFragmentCode(const GrCCCoverageProcessor&, GrGLSLFPFragmentBuilder*,
                               const char* skOutputColor, const char* skOutputCoverage) const;
+
+        // Calculates the winding direction of the input points (+1, -1, or 0). Wind for extremely
+        // thin triangles gets rounded to zero.
+        static void CalcWind(const GrCCCoverageProcessor&, GrGLSLVertexGeoBuilder*, const char* pts,
+                             const char* outputWind);
 
         // Defines an equation ("dot(float3(pt, 1), distance_equation)") that is -1 on the outside
         // border of a conservative raster edge and 0 on the inside. 'leftPt' and 'rightPt' must be
@@ -205,6 +214,16 @@ private:
     // Number of bezier points for curves, or 3 for triangles.
     int numInputPoints() const { return PrimitiveType::kCubics == fPrimitiveType ? 4 : 3; }
 
+    bool isTriangles() const {
+        return PrimitiveType::kTriangles == fPrimitiveType ||
+               PrimitiveType::kWeightedTriangles == fPrimitiveType;
+    }
+
+    int hasInputWeight() const {
+        return PrimitiveType::kWeightedTriangles == fPrimitiveType ||
+               PrimitiveType::kConics == fPrimitiveType;
+    }
+
     enum class Impl : bool {
         kGeometryShader,
         kVertexShader
@@ -229,6 +248,13 @@ private:
     void initGS();
     void initVS(GrResourceProvider*);
 
+    const Attribute& onVertexAttribute(int i) const override { return fVertexAttribute; }
+
+    const Attribute& onInstanceAttribute(int i) const override {
+        SkASSERT(fImpl == Impl::kVertexShader);
+        return fInstanceAttributes[i];
+    }
+
     void appendGSMesh(GrBuffer* instanceBuffer, int instanceCount, int baseInstance,
                       SkTArray<GrMesh>* out) const;
     void appendVSMesh(GrBuffer* instanceBuffer, int instanceCount, int baseInstance,
@@ -236,6 +262,8 @@ private:
 
     GrGLSLPrimitiveProcessor* createGSImpl(std::unique_ptr<Shader>) const;
     GrGLSLPrimitiveProcessor* createVSImpl(std::unique_ptr<Shader>) const;
+    // The type and meaning of this attribute depends on whether we're using VSImpl or GSImpl.
+    Attribute fVertexAttribute;
 
     const PrimitiveType fPrimitiveType;
     const Impl fImpl;
@@ -245,6 +273,7 @@ private:
     const GSSubpass fGSSubpass = GSSubpass::kHulls;
 
     // Used by VSImpl.
+    Attribute fInstanceAttributes[2];
     sk_sp<const GrBuffer> fVSVertexBuffer;
     sk_sp<const GrBuffer> fVSIndexBuffer;
     int fVSNumIndicesPerInstance;
@@ -259,6 +288,7 @@ inline const char* GrCCCoverageProcessor::PrimitiveTypeName(PrimitiveType type) 
         case PrimitiveType::kWeightedTriangles: return "kWeightedTriangles";
         case PrimitiveType::kQuadratics: return "kQuadratics";
         case PrimitiveType::kCubics: return "kCubics";
+        case PrimitiveType::kConics: return "kConics";
     }
     SK_ABORT("Invalid PrimitiveType");
     return "";
@@ -270,10 +300,15 @@ inline void GrCCCoverageProcessor::TriPointInstance::set(const SkPoint p[3], con
 
 inline void GrCCCoverageProcessor::TriPointInstance::set(const SkPoint& p0, const SkPoint& p1,
                                                          const SkPoint& p2, const Sk2f& trans) {
-    Sk2f P0 = Sk2f::Load(&p0) + trans;
-    Sk2f P1 = Sk2f::Load(&p1) + trans;
-    Sk2f P2 = Sk2f::Load(&p2) + trans;
-    Sk2f::Store3(this, P0, P1, P2);
+    Sk2f P0 = Sk2f::Load(&p0);
+    Sk2f P1 = Sk2f::Load(&p1);
+    Sk2f P2 = Sk2f::Load(&p2);
+    this->set(P0, P1, P2, trans);
+}
+
+inline void GrCCCoverageProcessor::TriPointInstance::set(const Sk2f& P0, const Sk2f& P1,
+                                                         const Sk2f& P2, const Sk2f& trans) {
+    Sk2f::Store3(this, P0 + trans, P1 + trans, P2 + trans);
 }
 
 inline void GrCCCoverageProcessor::QuadPointInstance::set(const SkPoint p[4], float dx, float dy) {
@@ -283,14 +318,25 @@ inline void GrCCCoverageProcessor::QuadPointInstance::set(const SkPoint p[4], fl
     (Y + dy).store(&fY);
 }
 
+inline void GrCCCoverageProcessor::QuadPointInstance::setW(const SkPoint p[3], const Sk2f& trans,
+                                                           float w) {
+    this->setW(p[0], p[1], p[2], trans, w);
+}
+
 inline void GrCCCoverageProcessor::QuadPointInstance::setW(const SkPoint& p0, const SkPoint& p1,
                                                            const SkPoint& p2, const Sk2f& trans,
                                                            float w) {
-    Sk2f P0 = Sk2f::Load(&p0) + trans;
-    Sk2f P1 = Sk2f::Load(&p1) + trans;
-    Sk2f P2 = Sk2f::Load(&p2) + trans;
+    Sk2f P0 = Sk2f::Load(&p0);
+    Sk2f P1 = Sk2f::Load(&p1);
+    Sk2f P2 = Sk2f::Load(&p2);
+    this->setW(P0, P1, P2, trans, w);
+}
+
+inline void GrCCCoverageProcessor::QuadPointInstance::setW(const Sk2f& P0, const Sk2f& P1,
+                                                           const Sk2f& P2, const Sk2f& trans,
+                                                           float w) {
     Sk2f W = Sk2f(w);
-    Sk2f::Store4(this, P0, P1, P2, W);
+    Sk2f::Store4(this, P0 + trans, P1 + trans, P2 + trans, W);
 }
 
 #endif

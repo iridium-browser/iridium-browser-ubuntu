@@ -7,6 +7,7 @@
 #include <utility>
 #include <vector>
 
+#include "constants/stream_dict_common.h"
 #include "core/fpdfapi/parser/cpdf_array.h"
 #include "core/fpdfapi/parser/cpdf_boolean.h"
 #include "core/fpdfapi/parser/cpdf_dictionary.h"
@@ -16,8 +17,10 @@
 #include "core/fpdfapi/parser/cpdf_number.h"
 #include "core/fpdfapi/parser/cpdf_reference.h"
 #include "core/fpdfapi/parser/cpdf_stream.h"
+#include "core/fpdfapi/parser/cpdf_stream_acc.h"
 #include "core/fpdfapi/parser/cpdf_string.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/base/ptr_util.h"
 
 namespace {
 
@@ -152,16 +155,18 @@ class PDFObjectsTest : public testing::Test {
         // Compare dictionaries.
         if (!Equal(stream1->GetDict(), stream2->GetDict()))
           return false;
+
+        auto streamAcc1 = pdfium::MakeRetain<CPDF_StreamAcc>(stream1);
+        streamAcc1->LoadAllDataRaw();
+        auto streamAcc2 = pdfium::MakeRetain<CPDF_StreamAcc>(stream2);
+        streamAcc2->LoadAllDataRaw();
+
         // Compare sizes.
-        if (stream1->GetRawSize() != stream2->GetRawSize())
+        if (streamAcc1->GetSize() != streamAcc2->GetSize())
           return false;
-        // Compare contents.
-        // Since this function is used for testing Clone(), only memory based
-        // streams need to be handled.
-        if (!stream1->IsMemoryBased() || !stream2->IsMemoryBased())
-          return false;
-        return memcmp(stream1->GetRawData(), stream2->GetRawData(),
-                      stream1->GetRawSize()) == 0;
+
+        return memcmp(streamAcc1->GetData(), streamAcc2->GetData(),
+                      streamAcc2->GetSize()) == 0;
       }
       case CPDF_Object::REFERENCE:
         return obj1->AsReference()->GetRefObjNum() ==
@@ -387,6 +392,18 @@ TEST_F(PDFObjectsTest, IsTypeAndAsType) {
     EXPECT_TRUE(m_RefObjs[i]->IsReference());
     EXPECT_EQ(m_RefObjs[i].get(), m_RefObjs[i]->AsReference());
   }
+}
+
+TEST_F(PDFObjectsTest, MakeReferenceGeneric) {
+  auto original_obj = pdfium::MakeUnique<CPDF_Null>();
+  original_obj->SetObjNum(42);
+  ASSERT_FALSE(original_obj->IsInline());
+
+  auto ref_obj = original_obj->MakeReference(m_ObjHolder.get());
+
+  ASSERT_TRUE(ref_obj->IsReference());
+  EXPECT_EQ(original_obj->GetObjNum(),
+            ToReference(ref_obj.get())->GetRefObjNum());
 }
 
 TEST(PDFArrayTest, GetMatrix) {
@@ -787,46 +804,50 @@ TEST(PDFArrayTest, ConvertIndirect) {
 TEST(PDFStreamTest, SetData) {
   std::vector<uint8_t> data(100);
   auto stream = pdfium::MakeUnique<CPDF_Stream>();
-  stream->InitStream(data.data(), data.size(),
-                     pdfium::MakeUnique<CPDF_Dictionary>());
+  stream->InitStream(data, pdfium::MakeUnique<CPDF_Dictionary>());
   EXPECT_EQ(static_cast<int>(data.size()),
-            stream->GetDict()->GetIntegerFor("Length"));
+            stream->GetDict()->GetIntegerFor(pdfium::stream::kLength));
 
-  stream->GetDict()->SetNewFor<CPDF_String>("Filter", L"SomeFilter");
-  stream->GetDict()->SetNewFor<CPDF_String>("DecodeParms", L"SomeParams");
+  stream->GetDict()->SetNewFor<CPDF_String>(pdfium::stream::kFilter,
+                                            L"SomeFilter");
+  stream->GetDict()->SetNewFor<CPDF_String>(pdfium::stream::kDecodeParms,
+                                            L"SomeParams");
 
   std::vector<uint8_t> new_data(data.size() * 2);
-  stream->SetData(new_data.data(), new_data.size());
+  stream->SetData(new_data);
 
   // The "Length" field should be updated for new data size.
   EXPECT_EQ(static_cast<int>(new_data.size()),
-            stream->GetDict()->GetIntegerFor("Length"));
+            stream->GetDict()->GetIntegerFor(pdfium::stream::kLength));
 
   // The "Filter" and "DecodeParms" fields should not be changed.
-  EXPECT_EQ(stream->GetDict()->GetUnicodeTextFor("Filter"), L"SomeFilter");
-  EXPECT_EQ(stream->GetDict()->GetUnicodeTextFor("DecodeParms"), L"SomeParams");
+  EXPECT_EQ(stream->GetDict()->GetUnicodeTextFor(pdfium::stream::kFilter),
+            L"SomeFilter");
+  EXPECT_EQ(stream->GetDict()->GetUnicodeTextFor(pdfium::stream::kDecodeParms),
+            L"SomeParams");
 }
 
 TEST(PDFStreamTest, SetDataAndRemoveFilter) {
   std::vector<uint8_t> data(100);
   auto stream = pdfium::MakeUnique<CPDF_Stream>();
-  stream->InitStream(data.data(), data.size(),
-                     pdfium::MakeUnique<CPDF_Dictionary>());
+  stream->InitStream(data, pdfium::MakeUnique<CPDF_Dictionary>());
   EXPECT_EQ(static_cast<int>(data.size()),
-            stream->GetDict()->GetIntegerFor("Length"));
+            stream->GetDict()->GetIntegerFor(pdfium::stream::kLength));
 
-  stream->GetDict()->SetNewFor<CPDF_String>("Filter", L"SomeFilter");
-  stream->GetDict()->SetNewFor<CPDF_String>("DecodeParms", L"SomeParams");
+  stream->GetDict()->SetNewFor<CPDF_String>(pdfium::stream::kFilter,
+                                            L"SomeFilter");
+  stream->GetDict()->SetNewFor<CPDF_String>(pdfium::stream::kDecodeParms,
+                                            L"SomeParams");
 
   std::vector<uint8_t> new_data(data.size() * 2);
-  stream->SetDataAndRemoveFilter(new_data.data(), new_data.size());
+  stream->SetDataAndRemoveFilter(new_data);
   // The "Length" field should be updated for new data size.
   EXPECT_EQ(static_cast<int>(new_data.size()),
-            stream->GetDict()->GetIntegerFor("Length"));
+            stream->GetDict()->GetIntegerFor(pdfium::stream::kLength));
 
   // The "Filter" and "DecodeParms" should be removed.
-  EXPECT_FALSE(stream->GetDict()->KeyExist("Filter"));
-  EXPECT_FALSE(stream->GetDict()->KeyExist("DecodeParms"));
+  EXPECT_FALSE(stream->GetDict()->KeyExist(pdfium::stream::kFilter));
+  EXPECT_FALSE(stream->GetDict()->KeyExist(pdfium::stream::kDecodeParms));
 }
 
 TEST(PDFStreamTest, LengthInDictionaryOnCreate) {
@@ -838,18 +859,18 @@ TEST(PDFStreamTest, LengthInDictionaryOnCreate) {
     auto stream = pdfium::MakeUnique<CPDF_Stream>(
         std::move(data), kBufSize, pdfium::MakeUnique<CPDF_Dictionary>());
     EXPECT_EQ(static_cast<int>(kBufSize),
-              stream->GetDict()->GetIntegerFor("Length"));
+              stream->GetDict()->GetIntegerFor(pdfium::stream::kLength));
   }
   // The length field should be corrected on stream create.
   {
     std::unique_ptr<uint8_t, FxFreeDeleter> data;
     data.reset(FX_Alloc(uint8_t, kBufSize));
     auto dict = pdfium::MakeUnique<CPDF_Dictionary>();
-    dict->SetNewFor<CPDF_Number>("Length", 30000);
+    dict->SetNewFor<CPDF_Number>(pdfium::stream::kLength, 30000);
     auto stream = pdfium::MakeUnique<CPDF_Stream>(std::move(data), kBufSize,
                                                   std::move(dict));
     EXPECT_EQ(static_cast<int>(kBufSize),
-              stream->GetDict()->GetIntegerFor("Length"));
+              stream->GetDict()->GetIntegerFor(pdfium::stream::kLength));
   }
 }
 
@@ -960,4 +981,19 @@ TEST(PDFDictionaryTest, ExtractObjectOnRemove) {
 
   extracted_object = dict->RemoveFor("non_exists_object");
   EXPECT_FALSE(extracted_object);
+}
+
+TEST(PDFRefernceTest, MakeReferenceToReference) {
+  auto obj_holder = pdfium::MakeUnique<CPDF_IndirectObjectHolder>();
+  auto original_ref = pdfium::MakeUnique<CPDF_Reference>(obj_holder.get(), 42);
+  original_ref->SetObjNum(1952);
+  ASSERT_FALSE(original_ref->IsInline());
+
+  auto ref_obj = original_ref->MakeReference(obj_holder.get());
+
+  ASSERT_TRUE(ref_obj->IsReference());
+  // We do not allow reference to reference.
+  // New reference should have same RefObjNum.
+  EXPECT_EQ(original_ref->GetRefObjNum(),
+            ToReference(ref_obj.get())->GetRefObjNum());
 }

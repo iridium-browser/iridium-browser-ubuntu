@@ -7,15 +7,12 @@
 
 #include "SkTypes.h"
 
-#if SK_SUPPORT_GPU
-
 #include "GrContext.h"
 #include "GrContextPriv.h"
 #include "GrGpu.h"
 #include "GrProxyProvider.h"
 #include "GrRenderTarget.h"
 #include "GrResourceProvider.h"
-#include "GrTest.h"
 #include "GrTexture.h"
 #include "SkMipMap.h"
 #include "Test.h"
@@ -51,7 +48,7 @@ DEF_GPUTEST_FOR_NULLGL_CONTEXT(GrSurface, reporter, ctxInfo) {
     REPORTER_ASSERT(reporter, static_cast<GrSurface*>(tex1.get()) == tex1->asTexture());
 
     GrBackendTexture backendTex = gpu->createTestingOnlyBackendTexture(
-        nullptr, 256, 256, kRGBA_8888_GrPixelConfig, false, GrMipMapped::kNo);
+        nullptr, 256, 256, GrColorType::kRGBA_8888, false, GrMipMapped::kNo);
 
     sk_sp<GrSurface> texRT2 =
             resourceProvider->wrapRenderableBackendTexture(backendTex, 1, kBorrow_GrWrapOwnership);
@@ -74,7 +71,7 @@ DEF_GPUTEST_FOR_ALL_CONTEXTS(GrSurfaceRenderability, reporter, ctxInfo) {
     GrContext* context = ctxInfo.grContext();
     GrProxyProvider* proxyProvider = context->contextPriv().proxyProvider();
     GrResourceProvider* resourceProvider = context->contextPriv().resourceProvider();
-    const GrCaps* caps = context->caps();
+    const GrCaps* caps = context->contextPriv().caps();
 
     GrPixelConfig configs[] = {
         kUnknown_GrPixelConfig,
@@ -153,16 +150,12 @@ DEF_GPUTEST_FOR_RENDERING_CONTEXTS(InitialTextureClear, reporter, context_info) 
 
     for (int c = 0; c <= kLast_GrPixelConfig; ++c) {
         desc.fConfig = static_cast<GrPixelConfig>(c);
-        sk_sp<SkColorSpace> colorSpace;
-        if (GrPixelConfigIsSRGB(desc.fConfig)) {
-            colorSpace = SkColorSpace::MakeSRGB();
-        }
-        if (!context_info.grContext()->caps()->isConfigTexturable(desc.fConfig)) {
+        if (!context->contextPriv().caps()->isConfigTexturable(desc.fConfig)) {
             continue;
         }
         desc.fFlags = kPerformInitialClear_GrSurfaceFlag;
         for (bool rt : {false, true}) {
-            if (rt && !context->caps()->isConfigRenderable(desc.fConfig)) {
+            if (rt && !context->contextPriv().caps()->isConfigRenderable(desc.fConfig)) {
                 continue;
             }
             desc.fFlags |= rt ? kRenderTarget_GrSurfaceFlag : kNone_GrSurfaceFlags;
@@ -172,13 +165,13 @@ DEF_GPUTEST_FOR_RENDERING_CONTEXTS(InitialTextureClear, reporter, context_info) 
                     // Try directly creating the texture.
                     // Do this twice in an attempt to hit the cache on the second time through.
                     for (int i = 0; i < 2; ++i) {
-                        sk_sp<GrTextureProxy> proxy = proxyProvider->createInstantiatedProxy(
+                        auto proxy = proxyProvider->testingOnly_createInstantiatedProxy(
                                 desc, origin, fit, SkBudgeted::kYes);
                         if (!proxy) {
                             continue;
                         }
                         auto texCtx = context->contextPriv().makeWrappedSurfaceContext(
-                                std::move(proxy), colorSpace);
+                                std::move(proxy));
                         SkImageInfo info = SkImageInfo::Make(
                                 kSize, kSize, kRGBA_8888_SkColorType, kPremul_SkAlphaType);
                         memset(data.get(), 0xAB, kSize * kSize * sizeof(uint32_t));
@@ -203,7 +196,7 @@ DEF_GPUTEST_FOR_RENDERING_CONTEXTS(InitialTextureClear, reporter, context_info) 
                     // Try creating the texture as a deferred proxy.
                     for (int i = 0; i < 2; ++i) {
                         auto surfCtx = context->contextPriv().makeDeferredSurfaceContext(
-                                desc, origin, GrMipMapped::kNo, fit, SkBudgeted::kYes, colorSpace);
+                                desc, origin, GrMipMapped::kNo, fit, SkBudgeted::kYes);
                         if (!surfCtx) {
                             continue;
                         }
@@ -231,4 +224,3 @@ DEF_GPUTEST_FOR_RENDERING_CONTEXTS(InitialTextureClear, reporter, context_info) 
         }
     }
 }
-#endif

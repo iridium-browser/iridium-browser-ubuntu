@@ -10,7 +10,7 @@
 #include "base/files/file_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "ios/chrome/browser/download/download_directory_util.h"
 #import "ios/chrome/browser/download/google_drive_app_util.h"
 #include "ios/chrome/grit/ios_strings.h"
@@ -61,30 +61,42 @@ void DownloadManagerMediator::StartDowloading() {
       FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},
       base::BindOnce(&base::CreateDirectory, download_dir),
       base::BindOnce(&DownloadManagerMediator::DownloadWithDestinationDir,
-                     weak_ptr_factory_.GetWeakPtr(), download_dir));
+                     weak_ptr_factory_.GetWeakPtr(), download_dir, task_));
 }
 
 void DownloadManagerMediator::DownloadWithDestinationDir(
     const base::FilePath& destination_dir,
+    web::DownloadTask* task,
     bool directory_created) {
   if (!directory_created) {
     [consumer_ setState:kDownloadManagerStateFailed];
     return;
   }
 
+  if (task_ != task) {
+    // Download task has been replaced, so simply ignore the old download.
+    return;
+  }
+
   auto task_runner = base::CreateSequencedTaskRunnerWithTraits(
-      {base::MayBlock(), base::TaskPriority::BACKGROUND});
+      {base::MayBlock(), base::TaskPriority::BEST_EFFORT});
   base::string16 file_name = task_->GetSuggestedFilename();
   base::FilePath path = destination_dir.Append(base::UTF16ToUTF8(file_name));
   auto writer = std::make_unique<net::URLFetcherFileWriter>(task_runner, path);
   writer->Initialize(base::BindRepeating(
       &DownloadManagerMediator::DownloadWithWriter,
-      weak_ptr_factory_.GetWeakPtr(), base::Passed(std::move(writer))));
+      weak_ptr_factory_.GetWeakPtr(), base::Passed(std::move(writer)), task_));
 }
 
 void DownloadManagerMediator::DownloadWithWriter(
     std::unique_ptr<net::URLFetcherFileWriter> writer,
+    web::DownloadTask* task,
     int writer_initialization_status) {
+  if (task_ != task) {
+    // Download task has been replaced, so simply ignore the old download.
+    return;
+  }
+
   if (writer_initialization_status == net::OK) {
     task_->Start(std::move(writer));
   } else {

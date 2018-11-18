@@ -5,9 +5,8 @@
 #import "components/storage_monitor/image_capture_device.h"
 
 #include "base/files/file_util.h"
-#include "base/task_scheduler/post_task.h"
-#include "base/task_scheduler/task_traits.h"
-#include "base/threading/thread_restrictions.h"
+#include "base/task/post_task.h"
+#include "base/task/task_traits.h"
 #include "content/public/browser/browser_thread.h"
 
 namespace storage_monitor {
@@ -16,7 +15,6 @@ namespace {
 
 base::File::Error RenameFile(const base::FilePath& downloaded_filename,
                              const base::FilePath& desired_filename) {
-  base::AssertBlockingAllowed();
   bool success = base::ReplaceFile(downloaded_filename, desired_filename, NULL);
   return success ? base::File::FILE_OK : base::File::FILE_ERROR_NOT_FOUND;
 }
@@ -224,11 +222,45 @@ base::FilePath PathForCameraItem(ICCameraItem* item) {
   // downloaded will be incorrectly named.
   base::PostTaskWithTraitsAndReplyWithResult(
       FROM_HERE,
-      {base::MayBlock(), base::TaskPriority::BACKGROUND,
+      {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
        base::TaskShutdownBehavior::BLOCK_SHUTDOWN},
       base::Bind(&storage_monitor::RenameFile, savedPath, saveAsPath),
       base::Bind(&storage_monitor::ReturnRenameResultToListener, listener_,
                  name));
+}
+
+// MacOS 10.14 SDK methods, not yet implemented (https://crbug.com/849689)
+- (void)cameraDevice:(ICCameraDevice*)camera
+      didRenameItems:(NSArray<ICCameraItem*>*)items {
+  NOTIMPLEMENTED();
+}
+
+- (void)cameraDevice:(ICCameraDevice*)camera didRemoveItem:(ICCameraItem*)item {
+  NOTIMPLEMENTED();
+}
+
+- (void)cameraDevice:(ICCameraDevice*)camera
+    didCompleteDeleteFilesWithError:(NSError*)error {
+  NOTIMPLEMENTED();
+}
+
+- (void)cameraDeviceDidChangeCapability:(ICCameraDevice*)camera {
+  NOTIMPLEMENTED();
+}
+
+- (void)cameraDevice:(ICCameraDevice*)camera
+    didReceiveThumbnailForItem:(ICCameraItem*)item {
+  NOTIMPLEMENTED();
+}
+
+- (void)cameraDevice:(ICCameraDevice*)camera
+    didReceiveMetadataForItem:(ICCameraItem*)item {
+  NOTIMPLEMENTED();
+}
+
+- (void)cameraDevice:(ICCameraDevice*)camera
+    didReceivePTPEvent:(NSData*)eventData {
+  NOTIMPLEMENTED();
 }
 
 @end  // ImageCaptureDevice

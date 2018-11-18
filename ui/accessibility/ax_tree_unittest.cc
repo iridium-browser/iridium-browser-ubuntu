@@ -323,25 +323,6 @@ TEST(AXTreeTest, SerializeAXTreeUpdate) {
       update.ToString());
 }
 
-TEST(AXTreeTest, DeleteUnknownSubtreeFails) {
-  AXNodeData root;
-  root.id = 1;
-
-  AXTreeUpdate initial_state;
-  initial_state.root_id = 1;
-  initial_state.nodes.push_back(root);
-  AXTree tree(initial_state);
-
-  // This should fail because we're asking it to delete
-  // a subtree rooted at id=2, which doesn't exist.
-  AXTreeUpdate update;
-  update.node_id_to_clear = 2;
-  update.nodes.resize(1);
-  update.nodes[0].id = 1;
-  EXPECT_FALSE(tree.Unserialize(update));
-  ASSERT_EQ("Bad node_id_to_clear: 2", tree.error());
-}
-
 TEST(AXTreeTest, LeaveOrphanedDeletedSubtreeFails) {
   AXTreeUpdate initial_state;
   initial_state.root_id = 1;
@@ -1317,6 +1298,94 @@ TEST(AXTreeTest, IntListReverseRelations) {
   EXPECT_TRUE(base::ContainsKey(reverse_labelled_by, 1));
 }
 
+TEST(AXTreeTest, DeletingNodeUpdatesReverseRelations) {
+  AXTreeUpdate initial_state;
+  initial_state.root_id = 1;
+  initial_state.nodes.resize(3);
+  initial_state.nodes[0].id = 1;
+  initial_state.nodes[0].child_ids = {2, 3};
+  initial_state.nodes[1].id = 2;
+  initial_state.nodes[2].id = 3;
+  initial_state.nodes[2].AddIntAttribute(
+      ax::mojom::IntAttribute::kActivedescendantId, 2);
+  AXTree tree(initial_state);
+
+  auto reverse_active_descendant =
+      tree.GetReverseRelations(ax::mojom::IntAttribute::kActivedescendantId, 2);
+  ASSERT_EQ(1U, reverse_active_descendant.size());
+  EXPECT_TRUE(base::ContainsKey(reverse_active_descendant, 3));
+
+  AXTreeUpdate update;
+  update.root_id = 1;
+  update.nodes.resize(1);
+  update.nodes[0].id = 1;
+  update.nodes[0].child_ids = {2};
+  EXPECT_TRUE(tree.Unserialize(update));
+
+  reverse_active_descendant =
+      tree.GetReverseRelations(ax::mojom::IntAttribute::kActivedescendantId, 2);
+  ASSERT_EQ(0U, reverse_active_descendant.size());
+}
+
+TEST(AXTreeTest, ReverseRelationsDoNotKeepGrowing) {
+  // The number of total entries in int_reverse_relations and
+  // intlist_reverse_relations should not keep growing as the tree
+  // changes.
+
+  AXTreeUpdate initial_state;
+  initial_state.root_id = 1;
+  initial_state.nodes.resize(2);
+  initial_state.nodes[0].id = 1;
+  initial_state.nodes[0].AddIntAttribute(
+      ax::mojom::IntAttribute::kActivedescendantId, 2);
+  initial_state.nodes[0].AddIntListAttribute(
+      ax::mojom::IntListAttribute::kLabelledbyIds, {2});
+  initial_state.nodes[0].child_ids.push_back(2);
+  initial_state.nodes[1].id = 2;
+  AXTree tree(initial_state);
+
+  for (int i = 0; i < 1000; ++i) {
+    AXTreeUpdate update;
+    update.root_id = 1;
+    update.nodes.resize(2);
+    update.nodes[0].id = 1;
+    update.nodes[1].id = i + 3;
+    update.nodes[0].AddIntAttribute(
+        ax::mojom::IntAttribute::kActivedescendantId, update.nodes[1].id);
+    update.nodes[0].AddIntListAttribute(
+        ax::mojom::IntListAttribute::kLabelledbyIds, {update.nodes[1].id});
+    update.nodes[1].AddIntAttribute(ax::mojom::IntAttribute::kMemberOfId, 1);
+    update.nodes[0].child_ids.push_back(update.nodes[1].id);
+    EXPECT_TRUE(tree.Unserialize(update));
+  }
+
+  size_t map_key_count = 0;
+  size_t set_entry_count = 0;
+  for (auto& iter : tree.int_reverse_relations()) {
+    map_key_count += iter.second.size() + 1;
+    for (auto it2 = iter.second.begin(); it2 != iter.second.end(); ++it2) {
+      set_entry_count += it2->second.size();
+    }
+  }
+
+  // Note: 10 is arbitary, the idea here is just that we mutated the tree
+  // 1000 times, so if we have fewer than 10 entries in the maps / sets then
+  // the map isn't growing / leaking. Same below.
+  EXPECT_LT(map_key_count, 10U);
+  EXPECT_LT(set_entry_count, 10U);
+
+  map_key_count = 0;
+  set_entry_count = 0;
+  for (auto& iter : tree.intlist_reverse_relations()) {
+    map_key_count += iter.second.size() + 1;
+    for (auto it2 = iter.second.begin(); it2 != iter.second.end(); ++it2) {
+      set_entry_count += it2->second.size();
+    }
+  }
+  EXPECT_LT(map_key_count, 10U);
+  EXPECT_LT(set_entry_count, 10U);
+}
+
 TEST(AXTreeTest, SkipIgnoredNodes) {
   AXTreeUpdate tree_update;
   tree_update.root_id = 1;
@@ -1345,6 +1414,59 @@ TEST(AXTreeTest, SkipIgnoredNodes) {
   EXPECT_EQ(2, root->GetUnignoredChildAtIndex(2)->GetUnignoredIndexInParent());
 
   EXPECT_EQ(1, root->GetUnignoredChildAtIndex(0)->GetUnignoredParent()->id());
+}
+
+TEST(AXTreeTest, ChildTreeIds) {
+  AXTreeUpdate initial_state;
+  initial_state.root_id = 1;
+  initial_state.nodes.resize(4);
+  initial_state.nodes[0].id = 1;
+  initial_state.nodes[0].child_ids.push_back(2);
+  initial_state.nodes[0].child_ids.push_back(3);
+  initial_state.nodes[0].child_ids.push_back(4);
+  initial_state.nodes[1].id = 2;
+  initial_state.nodes[1].AddStringAttribute(
+      ax::mojom::StringAttribute::kChildTreeId, "92");
+  initial_state.nodes[2].id = 3;
+  initial_state.nodes[2].AddStringAttribute(
+      ax::mojom::StringAttribute::kChildTreeId, "93");
+  initial_state.nodes[3].id = 4;
+  initial_state.nodes[3].AddStringAttribute(
+      ax::mojom::StringAttribute::kChildTreeId, "93");
+  AXTree tree(initial_state);
+
+  auto child_tree_91_nodes =
+      tree.GetNodeIdsForChildTreeId(AXTreeID::FromString("91"));
+  EXPECT_EQ(0U, child_tree_91_nodes.size());
+
+  auto child_tree_92_nodes =
+      tree.GetNodeIdsForChildTreeId(AXTreeID::FromString("92"));
+  EXPECT_EQ(1U, child_tree_92_nodes.size());
+  EXPECT_TRUE(base::ContainsKey(child_tree_92_nodes, 2));
+
+  auto child_tree_93_nodes =
+      tree.GetNodeIdsForChildTreeId(AXTreeID::FromString("93"));
+  EXPECT_EQ(2U, child_tree_93_nodes.size());
+  EXPECT_TRUE(base::ContainsKey(child_tree_93_nodes, 3));
+  EXPECT_TRUE(base::ContainsKey(child_tree_93_nodes, 4));
+
+  AXTreeUpdate update = initial_state;
+  update.nodes[2].string_attributes.clear();
+  update.nodes[2].AddStringAttribute(ax::mojom::StringAttribute::kChildTreeId,
+                                     "92");
+  update.nodes[3].string_attributes.clear();
+
+  EXPECT_TRUE(tree.Unserialize(update));
+
+  child_tree_92_nodes =
+      tree.GetNodeIdsForChildTreeId(AXTreeID::FromString("92"));
+  EXPECT_EQ(2U, child_tree_92_nodes.size());
+  EXPECT_TRUE(base::ContainsKey(child_tree_92_nodes, 2));
+  EXPECT_TRUE(base::ContainsKey(child_tree_92_nodes, 3));
+
+  child_tree_93_nodes =
+      tree.GetNodeIdsForChildTreeId(AXTreeID::FromString("93"));
+  EXPECT_EQ(0U, child_tree_93_nodes.size());
 }
 
 }  // namespace ui

@@ -16,6 +16,7 @@ import org.chromium.chrome.R;
 import org.chromium.chrome.browser.survey.SurveyController;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.tab.Tab.TabHidingType;
 import org.chromium.chrome.browser.util.AccessibilityUtil;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.ui.text.NoUnderlineClickableSpan;
@@ -87,7 +88,7 @@ public class SurveyInfoBar extends InfoBar {
         Tab tab = nativeGetTab(getNativeInfoBarPtr());
         tab.addObserver(new EmptyTabObserver() {
             @Override
-            public void onHidden(Tab tab) {
+            public void onHidden(Tab tab, @TabHidingType int type) {
                 mDelegate.onSurveyInfoBarTabHidden();
                 tab.removeObserver(this);
 
@@ -103,16 +104,12 @@ public class SurveyInfoBar extends InfoBar {
             }
         });
 
-        NoUnderlineClickableSpan clickableSpan = new NoUnderlineClickableSpan() {
-            /** Prevent double clicking on the text span. */
-
-            @Override
-            public void onClick(View widget) {
-                if (mClicked) return;
-                showSurvey(tab);
-                mClosedByInteraction = true;
-            }
-        };
+        NoUnderlineClickableSpan clickableSpan = new NoUnderlineClickableSpan((widget) -> {
+            // Prevent double clicking on the text span.
+            if (mClicked) return;
+            showSurvey(tab);
+            mClosedByInteraction = true;
+        });
 
         CharSequence infoBarText = SpanApplier.applySpans(mDelegate.getSurveyPromptString(),
                 new SpanInfo("<LINK>", "</LINK>", clickableSpan));

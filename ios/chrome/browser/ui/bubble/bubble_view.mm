@@ -5,45 +5,43 @@
 #import "ios/chrome/browser/ui/bubble/bubble_view.h"
 
 #include "base/logging.h"
+#import "ios/chrome/browser/ui/bubble/bubble_util.h"
 #import "ios/chrome/browser/ui/colors/MDCPalette+CrAdditions.h"
+#include "ios/chrome/browser/ui/ui_util.h"
+#include "ios/chrome/browser/ui/uikit_ui_util.h"
 #import "ios/third_party/material_components_ios/src/components/Typography/src/MaterialTypography.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
 
-const CGFloat kBubbleAlignmentOffset = 26.0f;
 
 namespace {
+const int kBubbleColor = 0x4285F4;
 // The color of the bubble (both circular background and arrow).
 UIColor* BubbleColor() {
-  return [[MDCPalette cr_bluePalette] tint500];
+  return UIColorFromRGB(kBubbleColor);
 }
+
 // The corner radius of the bubble's background, which causes the ends of the
 // badge to be circular.
-const CGFloat kBubbleCornerRadius = 17.0f;
-// The minimum bubble width is two times the bubble alignment offset, which
-// causes the bubble to appear center-aligned for short display text.
-const CGFloat kMinBubbleWidth = kBubbleAlignmentOffset * 2;
+const CGFloat kBubbleCornerRadius = 13.0f;
 // The maximum label width preserves readability, ensuring that long labels do
 // not span across wide screens.
 const CGFloat kMaxLabelWidth = 359.0f;
-// Font size for the bubble's display text.
-const CGFloat kFontSize = 16.0f;
 
 // Margin between the bubble view's bounds and its content. This margin is on
 // all sides of the bubble.
 const CGFloat kBubbleMargin = 4.0f;
 // Padding between the top and bottom the bubble's background and the top and
 // bottom of the label.
-const CGFloat kLabelVerticalPadding = 8.0f;
+const CGFloat kLabelVerticalPadding = 15.0f;
 // Padding between the sides of the bubble's background and the sides of the
-// label. This has the same value as |kBubbleCornerRadius| to ensure that the
-// label is positioned within the non-rounded portion of the bubble.
-const CGFloat kLabelHorizontalPadding = kBubbleCornerRadius;
+// label.
+const CGFloat kLabelHorizontalPadding = 20.0f;
 
 // The size that the arrow will appear to have.
-const CGSize kArrowSize = {14.0f, 10.0f};
+const CGSize kArrowSize = {32, 9};
 
 // The offset of the bubble's drop shadow, which will be slightly below the
 // bubble.
@@ -52,6 +50,10 @@ const CGSize kShadowOffset = {0.0f, 2.0f};
 const CGFloat kShadowRadius = 4.0f;
 // The opacity of the bubble's drop shadow.
 const CGFloat kShadowOpacity = 0.1f;
+
+// Bezier curve constants.
+const CGFloat kControlPointCenter = 0.243125;
+const CGFloat kControlPointEnd = 0.514375;
 }  // namespace
 
 @interface BubbleView ()
@@ -114,18 +116,36 @@ const CGFloat kShadowOpacity = 0.1f;
     UIView* arrow =
         [[UIView alloc] initWithFrame:CGRectMake(0.0f, 0.0f, width, height)];
     UIBezierPath* path = UIBezierPath.bezierPath;
+    CGFloat xCenter = width / 2;
     if (self.direction == BubbleArrowDirectionUp) {
-      [path moveToPoint:CGPointMake(width / 2.0f, 0.0f)];
-      [path addLineToPoint:CGPointMake(0.0f, height)];
-      [path addLineToPoint:CGPointMake(width, height)];
-    } else {
-      DCHECK(self.direction == BubbleArrowDirectionDown);
-      [path moveToPoint:CGPointMake(width / 2.0f, height)];
-      [path addLineToPoint:CGPointMake(0.0f, 0.0f)];
-      [path addLineToPoint:CGPointMake(width, 0.0f)];
-    }
+      [path moveToPoint:CGPointMake(xCenter, 0)];
+      [path addCurveToPoint:CGPointMake(width, height)
+              controlPoint1:CGPointMake(xCenter + xCenter * kControlPointCenter,
+                                        0)
+              controlPoint2:CGPointMake(xCenter + xCenter * kControlPointEnd,
+                                        height)];
+      [path addLineToPoint:CGPointMake(0, height)];
+      [path addCurveToPoint:CGPointMake(xCenter, 0)
+              controlPoint1:CGPointMake(xCenter - xCenter * kControlPointEnd,
+                                        height)
+              controlPoint2:CGPointMake(xCenter - xCenter * kControlPointCenter,
+                                        0)];
+      } else {
+        [path moveToPoint:CGPointMake(xCenter, height)];
+        [path
+            addCurveToPoint:CGPointMake(width, 0)
+              controlPoint1:CGPointMake(xCenter + xCenter * kControlPointCenter,
+                                        height)
+              controlPoint2:CGPointMake(xCenter + xCenter * kControlPointEnd,
+                                        0)];
+        [path addLineToPoint:CGPointZero];
+        [path
+            addCurveToPoint:CGPointMake(xCenter, height)
+              controlPoint1:CGPointMake(xCenter - xCenter * kControlPointEnd, 0)
+              controlPoint2:CGPointMake(xCenter - xCenter * kControlPointCenter,
+                                        height)];
+      }
     [path closePath];
-
     CAShapeLayer* layer = [CAShapeLayer layer];
     [layer setPath:path.CGPath];
     [layer setFillColor:BubbleColor().CGColor];
@@ -143,7 +163,7 @@ const CGFloat kShadowOpacity = 0.1f;
   DCHECK(text.length);
   UILabel* label = [[UILabel alloc] initWithFrame:CGRectZero];
   [label setText:text];
-  [label setFont:[[MDCTypography fontLoader] regularFontOfSize:kFontSize]];
+  [label setFont:[UIFont preferredFontForTextStyle:UIFontTextStyleSubheadline]];
   [label setTextColor:[UIColor whiteColor]];
   [label setTextAlignment:NSTextAlignmentCenter];
   [label setNumberOfLines:0];
@@ -192,7 +212,7 @@ const CGFloat kShadowOpacity = 0.1f;
                        constant:kLabelHorizontalPadding * 2],
     // Enforce the minimum width of the background view.
     [self.background.widthAnchor
-        constraintGreaterThanOrEqualToConstant:kMinBubbleWidth -
+        constraintGreaterThanOrEqualToConstant:[self minBubbleWidth] -
                                                kBubbleMargin * 2],
     // Ensure that the background view is as tall as the label, with added
     // padding to the top and bottom of the label.
@@ -227,7 +247,7 @@ const CGFloat kShadowOpacity = 0.1f;
       // point by aligning the center of the arrow with the leading edge of the
       // bubble view and adding an offset of |kBubbleAlignmentOffset|.
       anchor = self.leadingAnchor;
-      offset = kBubbleAlignmentOffset;
+      offset = bubble_util::BubbleAlignmentOffset();
       break;
     case BubbleAlignmentCenter:
       // Since the anchor point is in the center of the bubble view, center the
@@ -241,7 +261,7 @@ const CGFloat kShadowOpacity = 0.1f;
       // point by aligning the center of the arrow with the trailing edge of the
       // bubble view and adding an offset of |-kBubbleAlignmentOffset|.
       anchor = self.trailingAnchor;
-      offset = -kBubbleAlignmentOffset;
+      offset = -bubble_util::BubbleAlignmentOffset();
       break;
     default:
       NOTREACHED() << "Invalid bubble alignment " << self.alignment;
@@ -321,10 +341,18 @@ const CGFloat kShadowOpacity = 0.1f;
   CGSize labelSize = [self.label sizeThatFits:labelMaxSize];
   // Ensure that the bubble is at least as wide as the minimum bubble width.
   CGFloat optimalWidth =
-      MAX(labelSize.width + labelHorizontalInset, kMinBubbleWidth);
+      MAX(labelSize.width + labelHorizontalInset, [self minBubbleWidth]);
   CGSize optimalSize =
       CGSizeMake(optimalWidth, labelSize.height + labelVerticalInset);
   return optimalSize;
+}
+
+#pragma mark - Private sizes
+
+// The minimum bubble width is two times the bubble alignment offset, which
+// causes the bubble to appear center-aligned for short display text.
+- (CGFloat)minBubbleWidth {
+  return bubble_util::BubbleAlignmentOffset() * 2;
 }
 
 @end

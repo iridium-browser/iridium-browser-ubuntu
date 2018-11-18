@@ -21,114 +21,114 @@
 define i32 @crc32_32_8(i32 %a0, i8 %a1, i8 *%a2) {
 ; GENERIC-LABEL: crc32_32_8:
 ; GENERIC:       # %bb.0:
-; GENERIC-NEXT:    crc32b %sil, %edi # sched: [3:1.00]
-; GENERIC-NEXT:    crc32b (%rdx), %edi # sched: [8:1.00]
 ; GENERIC-NEXT:    movl %edi, %eax # sched: [1:0.33]
+; GENERIC-NEXT:    crc32b %sil, %eax # sched: [3:1.00]
+; GENERIC-NEXT:    crc32b (%rdx), %eax # sched: [8:1.00]
 ; GENERIC-NEXT:    retq # sched: [1:1.00]
 ;
 ; SLM-LABEL: crc32_32_8:
 ; SLM:       # %bb.0:
-; SLM-NEXT:    crc32b %sil, %edi # sched: [3:1.00]
-; SLM-NEXT:    crc32b (%rdx), %edi # sched: [6:1.00]
 ; SLM-NEXT:    movl %edi, %eax # sched: [1:0.50]
+; SLM-NEXT:    crc32b %sil, %eax # sched: [3:1.00]
+; SLM-NEXT:    crc32b (%rdx), %eax # sched: [6:1.00]
 ; SLM-NEXT:    retq # sched: [4:1.00]
 ;
 ; SANDY-SSE-LABEL: crc32_32_8:
 ; SANDY-SSE:       # %bb.0:
-; SANDY-SSE-NEXT:    crc32b %sil, %edi # sched: [3:1.00]
-; SANDY-SSE-NEXT:    crc32b (%rdx), %edi # sched: [8:1.00]
 ; SANDY-SSE-NEXT:    movl %edi, %eax # sched: [1:0.33]
+; SANDY-SSE-NEXT:    crc32b %sil, %eax # sched: [3:1.00]
+; SANDY-SSE-NEXT:    crc32b (%rdx), %eax # sched: [8:1.00]
 ; SANDY-SSE-NEXT:    retq # sched: [1:1.00]
 ;
 ; SANDY-LABEL: crc32_32_8:
 ; SANDY:       # %bb.0:
-; SANDY-NEXT:    crc32b %sil, %edi # sched: [3:1.00]
-; SANDY-NEXT:    crc32b (%rdx), %edi # sched: [8:1.00]
 ; SANDY-NEXT:    movl %edi, %eax # sched: [1:0.33]
+; SANDY-NEXT:    crc32b %sil, %eax # sched: [3:1.00]
+; SANDY-NEXT:    crc32b (%rdx), %eax # sched: [8:1.00]
 ; SANDY-NEXT:    retq # sched: [1:1.00]
 ;
 ; HASWELL-SSE-LABEL: crc32_32_8:
 ; HASWELL-SSE:       # %bb.0:
-; HASWELL-SSE-NEXT:    crc32b %sil, %edi # sched: [3:1.00]
-; HASWELL-SSE-NEXT:    crc32b (%rdx), %edi # sched: [8:1.00]
 ; HASWELL-SSE-NEXT:    movl %edi, %eax # sched: [1:0.25]
+; HASWELL-SSE-NEXT:    crc32b %sil, %eax # sched: [3:1.00]
+; HASWELL-SSE-NEXT:    crc32b (%rdx), %eax # sched: [8:1.00]
 ; HASWELL-SSE-NEXT:    retq # sched: [7:1.00]
 ;
 ; HASWELL-LABEL: crc32_32_8:
 ; HASWELL:       # %bb.0:
-; HASWELL-NEXT:    crc32b %sil, %edi # sched: [3:1.00]
-; HASWELL-NEXT:    crc32b (%rdx), %edi # sched: [8:1.00]
 ; HASWELL-NEXT:    movl %edi, %eax # sched: [1:0.25]
+; HASWELL-NEXT:    crc32b %sil, %eax # sched: [3:1.00]
+; HASWELL-NEXT:    crc32b (%rdx), %eax # sched: [8:1.00]
 ; HASWELL-NEXT:    retq # sched: [7:1.00]
 ;
 ; BROADWELL-SSE-LABEL: crc32_32_8:
 ; BROADWELL-SSE:       # %bb.0:
-; BROADWELL-SSE-NEXT:    crc32b %sil, %edi # sched: [3:1.00]
-; BROADWELL-SSE-NEXT:    crc32b (%rdx), %edi # sched: [8:1.00]
 ; BROADWELL-SSE-NEXT:    movl %edi, %eax # sched: [1:0.25]
+; BROADWELL-SSE-NEXT:    crc32b %sil, %eax # sched: [3:1.00]
+; BROADWELL-SSE-NEXT:    crc32b (%rdx), %eax # sched: [8:1.00]
 ; BROADWELL-SSE-NEXT:    retq # sched: [7:1.00]
 ;
 ; BROADWELL-LABEL: crc32_32_8:
 ; BROADWELL:       # %bb.0:
-; BROADWELL-NEXT:    crc32b %sil, %edi # sched: [3:1.00]
-; BROADWELL-NEXT:    crc32b (%rdx), %edi # sched: [8:1.00]
 ; BROADWELL-NEXT:    movl %edi, %eax # sched: [1:0.25]
+; BROADWELL-NEXT:    crc32b %sil, %eax # sched: [3:1.00]
+; BROADWELL-NEXT:    crc32b (%rdx), %eax # sched: [8:1.00]
 ; BROADWELL-NEXT:    retq # sched: [7:1.00]
 ;
 ; SKYLAKE-SSE-LABEL: crc32_32_8:
 ; SKYLAKE-SSE:       # %bb.0:
-; SKYLAKE-SSE-NEXT:    crc32b %sil, %edi # sched: [3:1.00]
-; SKYLAKE-SSE-NEXT:    crc32b (%rdx), %edi # sched: [8:1.00]
 ; SKYLAKE-SSE-NEXT:    movl %edi, %eax # sched: [1:0.25]
+; SKYLAKE-SSE-NEXT:    crc32b %sil, %eax # sched: [3:1.00]
+; SKYLAKE-SSE-NEXT:    crc32b (%rdx), %eax # sched: [8:1.00]
 ; SKYLAKE-SSE-NEXT:    retq # sched: [7:1.00]
 ;
 ; SKYLAKE-LABEL: crc32_32_8:
 ; SKYLAKE:       # %bb.0:
-; SKYLAKE-NEXT:    crc32b %sil, %edi # sched: [3:1.00]
-; SKYLAKE-NEXT:    crc32b (%rdx), %edi # sched: [8:1.00]
 ; SKYLAKE-NEXT:    movl %edi, %eax # sched: [1:0.25]
+; SKYLAKE-NEXT:    crc32b %sil, %eax # sched: [3:1.00]
+; SKYLAKE-NEXT:    crc32b (%rdx), %eax # sched: [8:1.00]
 ; SKYLAKE-NEXT:    retq # sched: [7:1.00]
 ;
 ; SKX-SSE-LABEL: crc32_32_8:
 ; SKX-SSE:       # %bb.0:
-; SKX-SSE-NEXT:    crc32b %sil, %edi # sched: [3:1.00]
-; SKX-SSE-NEXT:    crc32b (%rdx), %edi # sched: [8:1.00]
 ; SKX-SSE-NEXT:    movl %edi, %eax # sched: [1:0.25]
+; SKX-SSE-NEXT:    crc32b %sil, %eax # sched: [3:1.00]
+; SKX-SSE-NEXT:    crc32b (%rdx), %eax # sched: [8:1.00]
 ; SKX-SSE-NEXT:    retq # sched: [7:1.00]
 ;
 ; SKX-LABEL: crc32_32_8:
 ; SKX:       # %bb.0:
-; SKX-NEXT:    crc32b %sil, %edi # sched: [3:1.00]
-; SKX-NEXT:    crc32b (%rdx), %edi # sched: [8:1.00]
 ; SKX-NEXT:    movl %edi, %eax # sched: [1:0.25]
+; SKX-NEXT:    crc32b %sil, %eax # sched: [3:1.00]
+; SKX-NEXT:    crc32b (%rdx), %eax # sched: [8:1.00]
 ; SKX-NEXT:    retq # sched: [7:1.00]
 ;
 ; BTVER2-SSE-LABEL: crc32_32_8:
 ; BTVER2-SSE:       # %bb.0:
-; BTVER2-SSE-NEXT:    crc32b %sil, %edi # sched: [3:2.00]
-; BTVER2-SSE-NEXT:    crc32b (%rdx), %edi # sched: [6:2.00]
 ; BTVER2-SSE-NEXT:    movl %edi, %eax # sched: [1:0.50]
+; BTVER2-SSE-NEXT:    crc32b %sil, %eax # sched: [3:2.00]
+; BTVER2-SSE-NEXT:    crc32b (%rdx), %eax # sched: [6:2.00]
 ; BTVER2-SSE-NEXT:    retq # sched: [4:1.00]
 ;
 ; BTVER2-LABEL: crc32_32_8:
 ; BTVER2:       # %bb.0:
-; BTVER2-NEXT:    crc32b %sil, %edi # sched: [3:2.00]
-; BTVER2-NEXT:    crc32b (%rdx), %edi # sched: [6:2.00]
 ; BTVER2-NEXT:    movl %edi, %eax # sched: [1:0.50]
+; BTVER2-NEXT:    crc32b %sil, %eax # sched: [3:2.00]
+; BTVER2-NEXT:    crc32b (%rdx), %eax # sched: [6:2.00]
 ; BTVER2-NEXT:    retq # sched: [4:1.00]
 ;
 ; ZNVER1-SSE-LABEL: crc32_32_8:
 ; ZNVER1-SSE:       # %bb.0:
-; ZNVER1-SSE-NEXT:    crc32b %sil, %edi # sched: [3:1.00]
-; ZNVER1-SSE-NEXT:    crc32b (%rdx), %edi # sched: [10:1.00]
 ; ZNVER1-SSE-NEXT:    movl %edi, %eax # sched: [1:0.25]
+; ZNVER1-SSE-NEXT:    crc32b %sil, %eax # sched: [3:1.00]
+; ZNVER1-SSE-NEXT:    crc32b (%rdx), %eax # sched: [10:1.00]
 ; ZNVER1-SSE-NEXT:    retq # sched: [1:0.50]
 ;
 ; ZNVER1-LABEL: crc32_32_8:
 ; ZNVER1:       # %bb.0:
-; ZNVER1-NEXT:    crc32b %sil, %edi # sched: [3:1.00]
-; ZNVER1-NEXT:    crc32b (%rdx), %edi # sched: [10:1.00]
 ; ZNVER1-NEXT:    movl %edi, %eax # sched: [1:0.25]
+; ZNVER1-NEXT:    crc32b %sil, %eax # sched: [3:1.00]
+; ZNVER1-NEXT:    crc32b (%rdx), %eax # sched: [10:1.00]
 ; ZNVER1-NEXT:    retq # sched: [1:0.50]
   %1 = call i32 @llvm.x86.sse42.crc32.32.8(i32 %a0, i8 %a1)
   %2 = load i8, i8 *%a2
@@ -140,114 +140,114 @@ declare i32 @llvm.x86.sse42.crc32.32.8(i32, i8) nounwind
 define i32 @crc32_32_16(i32 %a0, i16 %a1, i16 *%a2) {
 ; GENERIC-LABEL: crc32_32_16:
 ; GENERIC:       # %bb.0:
-; GENERIC-NEXT:    crc32w %si, %edi # sched: [3:1.00]
-; GENERIC-NEXT:    crc32w (%rdx), %edi # sched: [8:1.00]
 ; GENERIC-NEXT:    movl %edi, %eax # sched: [1:0.33]
+; GENERIC-NEXT:    crc32w %si, %eax # sched: [3:1.00]
+; GENERIC-NEXT:    crc32w (%rdx), %eax # sched: [8:1.00]
 ; GENERIC-NEXT:    retq # sched: [1:1.00]
 ;
 ; SLM-LABEL: crc32_32_16:
 ; SLM:       # %bb.0:
-; SLM-NEXT:    crc32w %si, %edi # sched: [3:1.00]
-; SLM-NEXT:    crc32w (%rdx), %edi # sched: [6:1.00]
 ; SLM-NEXT:    movl %edi, %eax # sched: [1:0.50]
+; SLM-NEXT:    crc32w %si, %eax # sched: [3:1.00]
+; SLM-NEXT:    crc32w (%rdx), %eax # sched: [6:1.00]
 ; SLM-NEXT:    retq # sched: [4:1.00]
 ;
 ; SANDY-SSE-LABEL: crc32_32_16:
 ; SANDY-SSE:       # %bb.0:
-; SANDY-SSE-NEXT:    crc32w %si, %edi # sched: [3:1.00]
-; SANDY-SSE-NEXT:    crc32w (%rdx), %edi # sched: [8:1.00]
 ; SANDY-SSE-NEXT:    movl %edi, %eax # sched: [1:0.33]
+; SANDY-SSE-NEXT:    crc32w %si, %eax # sched: [3:1.00]
+; SANDY-SSE-NEXT:    crc32w (%rdx), %eax # sched: [8:1.00]
 ; SANDY-SSE-NEXT:    retq # sched: [1:1.00]
 ;
 ; SANDY-LABEL: crc32_32_16:
 ; SANDY:       # %bb.0:
-; SANDY-NEXT:    crc32w %si, %edi # sched: [3:1.00]
-; SANDY-NEXT:    crc32w (%rdx), %edi # sched: [8:1.00]
 ; SANDY-NEXT:    movl %edi, %eax # sched: [1:0.33]
+; SANDY-NEXT:    crc32w %si, %eax # sched: [3:1.00]
+; SANDY-NEXT:    crc32w (%rdx), %eax # sched: [8:1.00]
 ; SANDY-NEXT:    retq # sched: [1:1.00]
 ;
 ; HASWELL-SSE-LABEL: crc32_32_16:
 ; HASWELL-SSE:       # %bb.0:
-; HASWELL-SSE-NEXT:    crc32w %si, %edi # sched: [3:1.00]
-; HASWELL-SSE-NEXT:    crc32w (%rdx), %edi # sched: [8:1.00]
 ; HASWELL-SSE-NEXT:    movl %edi, %eax # sched: [1:0.25]
+; HASWELL-SSE-NEXT:    crc32w %si, %eax # sched: [3:1.00]
+; HASWELL-SSE-NEXT:    crc32w (%rdx), %eax # sched: [8:1.00]
 ; HASWELL-SSE-NEXT:    retq # sched: [7:1.00]
 ;
 ; HASWELL-LABEL: crc32_32_16:
 ; HASWELL:       # %bb.0:
-; HASWELL-NEXT:    crc32w %si, %edi # sched: [3:1.00]
-; HASWELL-NEXT:    crc32w (%rdx), %edi # sched: [8:1.00]
 ; HASWELL-NEXT:    movl %edi, %eax # sched: [1:0.25]
+; HASWELL-NEXT:    crc32w %si, %eax # sched: [3:1.00]
+; HASWELL-NEXT:    crc32w (%rdx), %eax # sched: [8:1.00]
 ; HASWELL-NEXT:    retq # sched: [7:1.00]
 ;
 ; BROADWELL-SSE-LABEL: crc32_32_16:
 ; BROADWELL-SSE:       # %bb.0:
-; BROADWELL-SSE-NEXT:    crc32w %si, %edi # sched: [3:1.00]
-; BROADWELL-SSE-NEXT:    crc32w (%rdx), %edi # sched: [8:1.00]
 ; BROADWELL-SSE-NEXT:    movl %edi, %eax # sched: [1:0.25]
+; BROADWELL-SSE-NEXT:    crc32w %si, %eax # sched: [3:1.00]
+; BROADWELL-SSE-NEXT:    crc32w (%rdx), %eax # sched: [8:1.00]
 ; BROADWELL-SSE-NEXT:    retq # sched: [7:1.00]
 ;
 ; BROADWELL-LABEL: crc32_32_16:
 ; BROADWELL:       # %bb.0:
-; BROADWELL-NEXT:    crc32w %si, %edi # sched: [3:1.00]
-; BROADWELL-NEXT:    crc32w (%rdx), %edi # sched: [8:1.00]
 ; BROADWELL-NEXT:    movl %edi, %eax # sched: [1:0.25]
+; BROADWELL-NEXT:    crc32w %si, %eax # sched: [3:1.00]
+; BROADWELL-NEXT:    crc32w (%rdx), %eax # sched: [8:1.00]
 ; BROADWELL-NEXT:    retq # sched: [7:1.00]
 ;
 ; SKYLAKE-SSE-LABEL: crc32_32_16:
 ; SKYLAKE-SSE:       # %bb.0:
-; SKYLAKE-SSE-NEXT:    crc32w %si, %edi # sched: [3:1.00]
-; SKYLAKE-SSE-NEXT:    crc32w (%rdx), %edi # sched: [8:1.00]
 ; SKYLAKE-SSE-NEXT:    movl %edi, %eax # sched: [1:0.25]
+; SKYLAKE-SSE-NEXT:    crc32w %si, %eax # sched: [3:1.00]
+; SKYLAKE-SSE-NEXT:    crc32w (%rdx), %eax # sched: [8:1.00]
 ; SKYLAKE-SSE-NEXT:    retq # sched: [7:1.00]
 ;
 ; SKYLAKE-LABEL: crc32_32_16:
 ; SKYLAKE:       # %bb.0:
-; SKYLAKE-NEXT:    crc32w %si, %edi # sched: [3:1.00]
-; SKYLAKE-NEXT:    crc32w (%rdx), %edi # sched: [8:1.00]
 ; SKYLAKE-NEXT:    movl %edi, %eax # sched: [1:0.25]
+; SKYLAKE-NEXT:    crc32w %si, %eax # sched: [3:1.00]
+; SKYLAKE-NEXT:    crc32w (%rdx), %eax # sched: [8:1.00]
 ; SKYLAKE-NEXT:    retq # sched: [7:1.00]
 ;
 ; SKX-SSE-LABEL: crc32_32_16:
 ; SKX-SSE:       # %bb.0:
-; SKX-SSE-NEXT:    crc32w %si, %edi # sched: [3:1.00]
-; SKX-SSE-NEXT:    crc32w (%rdx), %edi # sched: [8:1.00]
 ; SKX-SSE-NEXT:    movl %edi, %eax # sched: [1:0.25]
+; SKX-SSE-NEXT:    crc32w %si, %eax # sched: [3:1.00]
+; SKX-SSE-NEXT:    crc32w (%rdx), %eax # sched: [8:1.00]
 ; SKX-SSE-NEXT:    retq # sched: [7:1.00]
 ;
 ; SKX-LABEL: crc32_32_16:
 ; SKX:       # %bb.0:
-; SKX-NEXT:    crc32w %si, %edi # sched: [3:1.00]
-; SKX-NEXT:    crc32w (%rdx), %edi # sched: [8:1.00]
 ; SKX-NEXT:    movl %edi, %eax # sched: [1:0.25]
+; SKX-NEXT:    crc32w %si, %eax # sched: [3:1.00]
+; SKX-NEXT:    crc32w (%rdx), %eax # sched: [8:1.00]
 ; SKX-NEXT:    retq # sched: [7:1.00]
 ;
 ; BTVER2-SSE-LABEL: crc32_32_16:
 ; BTVER2-SSE:       # %bb.0:
-; BTVER2-SSE-NEXT:    crc32w %si, %edi # sched: [3:2.00]
-; BTVER2-SSE-NEXT:    crc32w (%rdx), %edi # sched: [6:2.00]
 ; BTVER2-SSE-NEXT:    movl %edi, %eax # sched: [1:0.50]
+; BTVER2-SSE-NEXT:    crc32w %si, %eax # sched: [3:2.00]
+; BTVER2-SSE-NEXT:    crc32w (%rdx), %eax # sched: [6:2.00]
 ; BTVER2-SSE-NEXT:    retq # sched: [4:1.00]
 ;
 ; BTVER2-LABEL: crc32_32_16:
 ; BTVER2:       # %bb.0:
-; BTVER2-NEXT:    crc32w %si, %edi # sched: [3:2.00]
-; BTVER2-NEXT:    crc32w (%rdx), %edi # sched: [6:2.00]
 ; BTVER2-NEXT:    movl %edi, %eax # sched: [1:0.50]
+; BTVER2-NEXT:    crc32w %si, %eax # sched: [3:2.00]
+; BTVER2-NEXT:    crc32w (%rdx), %eax # sched: [6:2.00]
 ; BTVER2-NEXT:    retq # sched: [4:1.00]
 ;
 ; ZNVER1-SSE-LABEL: crc32_32_16:
 ; ZNVER1-SSE:       # %bb.0:
-; ZNVER1-SSE-NEXT:    crc32w %si, %edi # sched: [3:1.00]
-; ZNVER1-SSE-NEXT:    crc32w (%rdx), %edi # sched: [10:1.00]
 ; ZNVER1-SSE-NEXT:    movl %edi, %eax # sched: [1:0.25]
+; ZNVER1-SSE-NEXT:    crc32w %si, %eax # sched: [3:1.00]
+; ZNVER1-SSE-NEXT:    crc32w (%rdx), %eax # sched: [10:1.00]
 ; ZNVER1-SSE-NEXT:    retq # sched: [1:0.50]
 ;
 ; ZNVER1-LABEL: crc32_32_16:
 ; ZNVER1:       # %bb.0:
-; ZNVER1-NEXT:    crc32w %si, %edi # sched: [3:1.00]
-; ZNVER1-NEXT:    crc32w (%rdx), %edi # sched: [10:1.00]
 ; ZNVER1-NEXT:    movl %edi, %eax # sched: [1:0.25]
+; ZNVER1-NEXT:    crc32w %si, %eax # sched: [3:1.00]
+; ZNVER1-NEXT:    crc32w (%rdx), %eax # sched: [10:1.00]
 ; ZNVER1-NEXT:    retq # sched: [1:0.50]
   %1 = call i32 @llvm.x86.sse42.crc32.32.16(i32 %a0, i16 %a1)
   %2 = load i16, i16 *%a2
@@ -259,114 +259,114 @@ declare i32 @llvm.x86.sse42.crc32.32.16(i32, i16) nounwind
 define i32 @crc32_32_32(i32 %a0, i32 %a1, i32 *%a2) {
 ; GENERIC-LABEL: crc32_32_32:
 ; GENERIC:       # %bb.0:
-; GENERIC-NEXT:    crc32l %esi, %edi # sched: [3:1.00]
-; GENERIC-NEXT:    crc32l (%rdx), %edi # sched: [8:1.00]
 ; GENERIC-NEXT:    movl %edi, %eax # sched: [1:0.33]
+; GENERIC-NEXT:    crc32l %esi, %eax # sched: [3:1.00]
+; GENERIC-NEXT:    crc32l (%rdx), %eax # sched: [8:1.00]
 ; GENERIC-NEXT:    retq # sched: [1:1.00]
 ;
 ; SLM-LABEL: crc32_32_32:
 ; SLM:       # %bb.0:
-; SLM-NEXT:    crc32l %esi, %edi # sched: [3:1.00]
-; SLM-NEXT:    crc32l (%rdx), %edi # sched: [6:1.00]
 ; SLM-NEXT:    movl %edi, %eax # sched: [1:0.50]
+; SLM-NEXT:    crc32l %esi, %eax # sched: [3:1.00]
+; SLM-NEXT:    crc32l (%rdx), %eax # sched: [6:1.00]
 ; SLM-NEXT:    retq # sched: [4:1.00]
 ;
 ; SANDY-SSE-LABEL: crc32_32_32:
 ; SANDY-SSE:       # %bb.0:
-; SANDY-SSE-NEXT:    crc32l %esi, %edi # sched: [3:1.00]
-; SANDY-SSE-NEXT:    crc32l (%rdx), %edi # sched: [8:1.00]
 ; SANDY-SSE-NEXT:    movl %edi, %eax # sched: [1:0.33]
+; SANDY-SSE-NEXT:    crc32l %esi, %eax # sched: [3:1.00]
+; SANDY-SSE-NEXT:    crc32l (%rdx), %eax # sched: [8:1.00]
 ; SANDY-SSE-NEXT:    retq # sched: [1:1.00]
 ;
 ; SANDY-LABEL: crc32_32_32:
 ; SANDY:       # %bb.0:
-; SANDY-NEXT:    crc32l %esi, %edi # sched: [3:1.00]
-; SANDY-NEXT:    crc32l (%rdx), %edi # sched: [8:1.00]
 ; SANDY-NEXT:    movl %edi, %eax # sched: [1:0.33]
+; SANDY-NEXT:    crc32l %esi, %eax # sched: [3:1.00]
+; SANDY-NEXT:    crc32l (%rdx), %eax # sched: [8:1.00]
 ; SANDY-NEXT:    retq # sched: [1:1.00]
 ;
 ; HASWELL-SSE-LABEL: crc32_32_32:
 ; HASWELL-SSE:       # %bb.0:
-; HASWELL-SSE-NEXT:    crc32l %esi, %edi # sched: [3:1.00]
-; HASWELL-SSE-NEXT:    crc32l (%rdx), %edi # sched: [8:1.00]
 ; HASWELL-SSE-NEXT:    movl %edi, %eax # sched: [1:0.25]
+; HASWELL-SSE-NEXT:    crc32l %esi, %eax # sched: [3:1.00]
+; HASWELL-SSE-NEXT:    crc32l (%rdx), %eax # sched: [8:1.00]
 ; HASWELL-SSE-NEXT:    retq # sched: [7:1.00]
 ;
 ; HASWELL-LABEL: crc32_32_32:
 ; HASWELL:       # %bb.0:
-; HASWELL-NEXT:    crc32l %esi, %edi # sched: [3:1.00]
-; HASWELL-NEXT:    crc32l (%rdx), %edi # sched: [8:1.00]
 ; HASWELL-NEXT:    movl %edi, %eax # sched: [1:0.25]
+; HASWELL-NEXT:    crc32l %esi, %eax # sched: [3:1.00]
+; HASWELL-NEXT:    crc32l (%rdx), %eax # sched: [8:1.00]
 ; HASWELL-NEXT:    retq # sched: [7:1.00]
 ;
 ; BROADWELL-SSE-LABEL: crc32_32_32:
 ; BROADWELL-SSE:       # %bb.0:
-; BROADWELL-SSE-NEXT:    crc32l %esi, %edi # sched: [3:1.00]
-; BROADWELL-SSE-NEXT:    crc32l (%rdx), %edi # sched: [8:1.00]
 ; BROADWELL-SSE-NEXT:    movl %edi, %eax # sched: [1:0.25]
+; BROADWELL-SSE-NEXT:    crc32l %esi, %eax # sched: [3:1.00]
+; BROADWELL-SSE-NEXT:    crc32l (%rdx), %eax # sched: [8:1.00]
 ; BROADWELL-SSE-NEXT:    retq # sched: [7:1.00]
 ;
 ; BROADWELL-LABEL: crc32_32_32:
 ; BROADWELL:       # %bb.0:
-; BROADWELL-NEXT:    crc32l %esi, %edi # sched: [3:1.00]
-; BROADWELL-NEXT:    crc32l (%rdx), %edi # sched: [8:1.00]
 ; BROADWELL-NEXT:    movl %edi, %eax # sched: [1:0.25]
+; BROADWELL-NEXT:    crc32l %esi, %eax # sched: [3:1.00]
+; BROADWELL-NEXT:    crc32l (%rdx), %eax # sched: [8:1.00]
 ; BROADWELL-NEXT:    retq # sched: [7:1.00]
 ;
 ; SKYLAKE-SSE-LABEL: crc32_32_32:
 ; SKYLAKE-SSE:       # %bb.0:
-; SKYLAKE-SSE-NEXT:    crc32l %esi, %edi # sched: [3:1.00]
-; SKYLAKE-SSE-NEXT:    crc32l (%rdx), %edi # sched: [8:1.00]
 ; SKYLAKE-SSE-NEXT:    movl %edi, %eax # sched: [1:0.25]
+; SKYLAKE-SSE-NEXT:    crc32l %esi, %eax # sched: [3:1.00]
+; SKYLAKE-SSE-NEXT:    crc32l (%rdx), %eax # sched: [8:1.00]
 ; SKYLAKE-SSE-NEXT:    retq # sched: [7:1.00]
 ;
 ; SKYLAKE-LABEL: crc32_32_32:
 ; SKYLAKE:       # %bb.0:
-; SKYLAKE-NEXT:    crc32l %esi, %edi # sched: [3:1.00]
-; SKYLAKE-NEXT:    crc32l (%rdx), %edi # sched: [8:1.00]
 ; SKYLAKE-NEXT:    movl %edi, %eax # sched: [1:0.25]
+; SKYLAKE-NEXT:    crc32l %esi, %eax # sched: [3:1.00]
+; SKYLAKE-NEXT:    crc32l (%rdx), %eax # sched: [8:1.00]
 ; SKYLAKE-NEXT:    retq # sched: [7:1.00]
 ;
 ; SKX-SSE-LABEL: crc32_32_32:
 ; SKX-SSE:       # %bb.0:
-; SKX-SSE-NEXT:    crc32l %esi, %edi # sched: [3:1.00]
-; SKX-SSE-NEXT:    crc32l (%rdx), %edi # sched: [8:1.00]
 ; SKX-SSE-NEXT:    movl %edi, %eax # sched: [1:0.25]
+; SKX-SSE-NEXT:    crc32l %esi, %eax # sched: [3:1.00]
+; SKX-SSE-NEXT:    crc32l (%rdx), %eax # sched: [8:1.00]
 ; SKX-SSE-NEXT:    retq # sched: [7:1.00]
 ;
 ; SKX-LABEL: crc32_32_32:
 ; SKX:       # %bb.0:
-; SKX-NEXT:    crc32l %esi, %edi # sched: [3:1.00]
-; SKX-NEXT:    crc32l (%rdx), %edi # sched: [8:1.00]
 ; SKX-NEXT:    movl %edi, %eax # sched: [1:0.25]
+; SKX-NEXT:    crc32l %esi, %eax # sched: [3:1.00]
+; SKX-NEXT:    crc32l (%rdx), %eax # sched: [8:1.00]
 ; SKX-NEXT:    retq # sched: [7:1.00]
 ;
 ; BTVER2-SSE-LABEL: crc32_32_32:
 ; BTVER2-SSE:       # %bb.0:
-; BTVER2-SSE-NEXT:    crc32l %esi, %edi # sched: [3:2.00]
-; BTVER2-SSE-NEXT:    crc32l (%rdx), %edi # sched: [6:2.00]
 ; BTVER2-SSE-NEXT:    movl %edi, %eax # sched: [1:0.50]
+; BTVER2-SSE-NEXT:    crc32l %esi, %eax # sched: [3:2.00]
+; BTVER2-SSE-NEXT:    crc32l (%rdx), %eax # sched: [6:2.00]
 ; BTVER2-SSE-NEXT:    retq # sched: [4:1.00]
 ;
 ; BTVER2-LABEL: crc32_32_32:
 ; BTVER2:       # %bb.0:
-; BTVER2-NEXT:    crc32l %esi, %edi # sched: [3:2.00]
-; BTVER2-NEXT:    crc32l (%rdx), %edi # sched: [6:2.00]
 ; BTVER2-NEXT:    movl %edi, %eax # sched: [1:0.50]
+; BTVER2-NEXT:    crc32l %esi, %eax # sched: [3:2.00]
+; BTVER2-NEXT:    crc32l (%rdx), %eax # sched: [6:2.00]
 ; BTVER2-NEXT:    retq # sched: [4:1.00]
 ;
 ; ZNVER1-SSE-LABEL: crc32_32_32:
 ; ZNVER1-SSE:       # %bb.0:
-; ZNVER1-SSE-NEXT:    crc32l %esi, %edi # sched: [3:1.00]
-; ZNVER1-SSE-NEXT:    crc32l (%rdx), %edi # sched: [10:1.00]
 ; ZNVER1-SSE-NEXT:    movl %edi, %eax # sched: [1:0.25]
+; ZNVER1-SSE-NEXT:    crc32l %esi, %eax # sched: [3:1.00]
+; ZNVER1-SSE-NEXT:    crc32l (%rdx), %eax # sched: [10:1.00]
 ; ZNVER1-SSE-NEXT:    retq # sched: [1:0.50]
 ;
 ; ZNVER1-LABEL: crc32_32_32:
 ; ZNVER1:       # %bb.0:
-; ZNVER1-NEXT:    crc32l %esi, %edi # sched: [3:1.00]
-; ZNVER1-NEXT:    crc32l (%rdx), %edi # sched: [10:1.00]
 ; ZNVER1-NEXT:    movl %edi, %eax # sched: [1:0.25]
+; ZNVER1-NEXT:    crc32l %esi, %eax # sched: [3:1.00]
+; ZNVER1-NEXT:    crc32l (%rdx), %eax # sched: [10:1.00]
 ; ZNVER1-NEXT:    retq # sched: [1:0.50]
   %1 = call i32 @llvm.x86.sse42.crc32.32.32(i32 %a0, i32 %a1)
   %2 = load i32, i32 *%a2
@@ -378,114 +378,114 @@ declare i32 @llvm.x86.sse42.crc32.32.32(i32, i32) nounwind
 define i64 @crc32_64_8(i64 %a0, i8 %a1, i8 *%a2) nounwind {
 ; GENERIC-LABEL: crc32_64_8:
 ; GENERIC:       # %bb.0:
-; GENERIC-NEXT:    crc32b %sil, %edi # sched: [3:1.00]
-; GENERIC-NEXT:    crc32b (%rdx), %edi # sched: [8:1.00]
 ; GENERIC-NEXT:    movq %rdi, %rax # sched: [1:0.33]
+; GENERIC-NEXT:    crc32b %sil, %eax # sched: [3:1.00]
+; GENERIC-NEXT:    crc32b (%rdx), %eax # sched: [8:1.00]
 ; GENERIC-NEXT:    retq # sched: [1:1.00]
 ;
 ; SLM-LABEL: crc32_64_8:
 ; SLM:       # %bb.0:
-; SLM-NEXT:    crc32b %sil, %edi # sched: [3:1.00]
-; SLM-NEXT:    crc32b (%rdx), %edi # sched: [6:1.00]
 ; SLM-NEXT:    movq %rdi, %rax # sched: [1:0.50]
+; SLM-NEXT:    crc32b %sil, %eax # sched: [3:1.00]
+; SLM-NEXT:    crc32b (%rdx), %eax # sched: [6:1.00]
 ; SLM-NEXT:    retq # sched: [4:1.00]
 ;
 ; SANDY-SSE-LABEL: crc32_64_8:
 ; SANDY-SSE:       # %bb.0:
-; SANDY-SSE-NEXT:    crc32b %sil, %edi # sched: [3:1.00]
-; SANDY-SSE-NEXT:    crc32b (%rdx), %edi # sched: [8:1.00]
 ; SANDY-SSE-NEXT:    movq %rdi, %rax # sched: [1:0.33]
+; SANDY-SSE-NEXT:    crc32b %sil, %eax # sched: [3:1.00]
+; SANDY-SSE-NEXT:    crc32b (%rdx), %eax # sched: [8:1.00]
 ; SANDY-SSE-NEXT:    retq # sched: [1:1.00]
 ;
 ; SANDY-LABEL: crc32_64_8:
 ; SANDY:       # %bb.0:
-; SANDY-NEXT:    crc32b %sil, %edi # sched: [3:1.00]
-; SANDY-NEXT:    crc32b (%rdx), %edi # sched: [8:1.00]
 ; SANDY-NEXT:    movq %rdi, %rax # sched: [1:0.33]
+; SANDY-NEXT:    crc32b %sil, %eax # sched: [3:1.00]
+; SANDY-NEXT:    crc32b (%rdx), %eax # sched: [8:1.00]
 ; SANDY-NEXT:    retq # sched: [1:1.00]
 ;
 ; HASWELL-SSE-LABEL: crc32_64_8:
 ; HASWELL-SSE:       # %bb.0:
-; HASWELL-SSE-NEXT:    crc32b %sil, %edi # sched: [3:1.00]
-; HASWELL-SSE-NEXT:    crc32b (%rdx), %edi # sched: [8:1.00]
 ; HASWELL-SSE-NEXT:    movq %rdi, %rax # sched: [1:0.25]
+; HASWELL-SSE-NEXT:    crc32b %sil, %eax # sched: [3:1.00]
+; HASWELL-SSE-NEXT:    crc32b (%rdx), %eax # sched: [8:1.00]
 ; HASWELL-SSE-NEXT:    retq # sched: [7:1.00]
 ;
 ; HASWELL-LABEL: crc32_64_8:
 ; HASWELL:       # %bb.0:
-; HASWELL-NEXT:    crc32b %sil, %edi # sched: [3:1.00]
-; HASWELL-NEXT:    crc32b (%rdx), %edi # sched: [8:1.00]
 ; HASWELL-NEXT:    movq %rdi, %rax # sched: [1:0.25]
+; HASWELL-NEXT:    crc32b %sil, %eax # sched: [3:1.00]
+; HASWELL-NEXT:    crc32b (%rdx), %eax # sched: [8:1.00]
 ; HASWELL-NEXT:    retq # sched: [7:1.00]
 ;
 ; BROADWELL-SSE-LABEL: crc32_64_8:
 ; BROADWELL-SSE:       # %bb.0:
-; BROADWELL-SSE-NEXT:    crc32b %sil, %edi # sched: [3:1.00]
-; BROADWELL-SSE-NEXT:    crc32b (%rdx), %edi # sched: [8:1.00]
 ; BROADWELL-SSE-NEXT:    movq %rdi, %rax # sched: [1:0.25]
+; BROADWELL-SSE-NEXT:    crc32b %sil, %eax # sched: [3:1.00]
+; BROADWELL-SSE-NEXT:    crc32b (%rdx), %eax # sched: [8:1.00]
 ; BROADWELL-SSE-NEXT:    retq # sched: [7:1.00]
 ;
 ; BROADWELL-LABEL: crc32_64_8:
 ; BROADWELL:       # %bb.0:
-; BROADWELL-NEXT:    crc32b %sil, %edi # sched: [3:1.00]
-; BROADWELL-NEXT:    crc32b (%rdx), %edi # sched: [8:1.00]
 ; BROADWELL-NEXT:    movq %rdi, %rax # sched: [1:0.25]
+; BROADWELL-NEXT:    crc32b %sil, %eax # sched: [3:1.00]
+; BROADWELL-NEXT:    crc32b (%rdx), %eax # sched: [8:1.00]
 ; BROADWELL-NEXT:    retq # sched: [7:1.00]
 ;
 ; SKYLAKE-SSE-LABEL: crc32_64_8:
 ; SKYLAKE-SSE:       # %bb.0:
-; SKYLAKE-SSE-NEXT:    crc32b %sil, %edi # sched: [3:1.00]
-; SKYLAKE-SSE-NEXT:    crc32b (%rdx), %edi # sched: [8:1.00]
 ; SKYLAKE-SSE-NEXT:    movq %rdi, %rax # sched: [1:0.25]
+; SKYLAKE-SSE-NEXT:    crc32b %sil, %eax # sched: [3:1.00]
+; SKYLAKE-SSE-NEXT:    crc32b (%rdx), %eax # sched: [8:1.00]
 ; SKYLAKE-SSE-NEXT:    retq # sched: [7:1.00]
 ;
 ; SKYLAKE-LABEL: crc32_64_8:
 ; SKYLAKE:       # %bb.0:
-; SKYLAKE-NEXT:    crc32b %sil, %edi # sched: [3:1.00]
-; SKYLAKE-NEXT:    crc32b (%rdx), %edi # sched: [8:1.00]
 ; SKYLAKE-NEXT:    movq %rdi, %rax # sched: [1:0.25]
+; SKYLAKE-NEXT:    crc32b %sil, %eax # sched: [3:1.00]
+; SKYLAKE-NEXT:    crc32b (%rdx), %eax # sched: [8:1.00]
 ; SKYLAKE-NEXT:    retq # sched: [7:1.00]
 ;
 ; SKX-SSE-LABEL: crc32_64_8:
 ; SKX-SSE:       # %bb.0:
-; SKX-SSE-NEXT:    crc32b %sil, %edi # sched: [3:1.00]
-; SKX-SSE-NEXT:    crc32b (%rdx), %edi # sched: [8:1.00]
 ; SKX-SSE-NEXT:    movq %rdi, %rax # sched: [1:0.25]
+; SKX-SSE-NEXT:    crc32b %sil, %eax # sched: [3:1.00]
+; SKX-SSE-NEXT:    crc32b (%rdx), %eax # sched: [8:1.00]
 ; SKX-SSE-NEXT:    retq # sched: [7:1.00]
 ;
 ; SKX-LABEL: crc32_64_8:
 ; SKX:       # %bb.0:
-; SKX-NEXT:    crc32b %sil, %edi # sched: [3:1.00]
-; SKX-NEXT:    crc32b (%rdx), %edi # sched: [8:1.00]
 ; SKX-NEXT:    movq %rdi, %rax # sched: [1:0.25]
+; SKX-NEXT:    crc32b %sil, %eax # sched: [3:1.00]
+; SKX-NEXT:    crc32b (%rdx), %eax # sched: [8:1.00]
 ; SKX-NEXT:    retq # sched: [7:1.00]
 ;
 ; BTVER2-SSE-LABEL: crc32_64_8:
 ; BTVER2-SSE:       # %bb.0:
-; BTVER2-SSE-NEXT:    crc32b %sil, %edi # sched: [3:2.00]
-; BTVER2-SSE-NEXT:    crc32b (%rdx), %edi # sched: [6:2.00]
 ; BTVER2-SSE-NEXT:    movq %rdi, %rax # sched: [1:0.50]
+; BTVER2-SSE-NEXT:    crc32b %sil, %eax # sched: [3:2.00]
+; BTVER2-SSE-NEXT:    crc32b (%rdx), %eax # sched: [6:2.00]
 ; BTVER2-SSE-NEXT:    retq # sched: [4:1.00]
 ;
 ; BTVER2-LABEL: crc32_64_8:
 ; BTVER2:       # %bb.0:
-; BTVER2-NEXT:    crc32b %sil, %edi # sched: [3:2.00]
-; BTVER2-NEXT:    crc32b (%rdx), %edi # sched: [6:2.00]
 ; BTVER2-NEXT:    movq %rdi, %rax # sched: [1:0.50]
+; BTVER2-NEXT:    crc32b %sil, %eax # sched: [3:2.00]
+; BTVER2-NEXT:    crc32b (%rdx), %eax # sched: [6:2.00]
 ; BTVER2-NEXT:    retq # sched: [4:1.00]
 ;
 ; ZNVER1-SSE-LABEL: crc32_64_8:
 ; ZNVER1-SSE:       # %bb.0:
-; ZNVER1-SSE-NEXT:    crc32b %sil, %edi # sched: [3:1.00]
-; ZNVER1-SSE-NEXT:    crc32b (%rdx), %edi # sched: [10:1.00]
 ; ZNVER1-SSE-NEXT:    movq %rdi, %rax # sched: [1:0.25]
+; ZNVER1-SSE-NEXT:    crc32b %sil, %eax # sched: [3:1.00]
+; ZNVER1-SSE-NEXT:    crc32b (%rdx), %eax # sched: [10:1.00]
 ; ZNVER1-SSE-NEXT:    retq # sched: [1:0.50]
 ;
 ; ZNVER1-LABEL: crc32_64_8:
 ; ZNVER1:       # %bb.0:
-; ZNVER1-NEXT:    crc32b %sil, %edi # sched: [3:1.00]
-; ZNVER1-NEXT:    crc32b (%rdx), %edi # sched: [10:1.00]
 ; ZNVER1-NEXT:    movq %rdi, %rax # sched: [1:0.25]
+; ZNVER1-NEXT:    crc32b %sil, %eax # sched: [3:1.00]
+; ZNVER1-NEXT:    crc32b (%rdx), %eax # sched: [10:1.00]
 ; ZNVER1-NEXT:    retq # sched: [1:0.50]
   %1 = call i64 @llvm.x86.sse42.crc32.64.8(i64 %a0, i8 %a1)
   %2 = load i8, i8 *%a2
@@ -497,114 +497,114 @@ declare i64 @llvm.x86.sse42.crc32.64.8(i64, i8) nounwind
 define i64 @crc32_64_64(i64 %a0, i64 %a1, i64 *%a2) {
 ; GENERIC-LABEL: crc32_64_64:
 ; GENERIC:       # %bb.0:
-; GENERIC-NEXT:    crc32q %rsi, %rdi # sched: [3:1.00]
-; GENERIC-NEXT:    crc32q (%rdx), %rdi # sched: [8:1.00]
 ; GENERIC-NEXT:    movq %rdi, %rax # sched: [1:0.33]
+; GENERIC-NEXT:    crc32q %rsi, %rax # sched: [3:1.00]
+; GENERIC-NEXT:    crc32q (%rdx), %rax # sched: [8:1.00]
 ; GENERIC-NEXT:    retq # sched: [1:1.00]
 ;
 ; SLM-LABEL: crc32_64_64:
 ; SLM:       # %bb.0:
-; SLM-NEXT:    crc32q %rsi, %rdi # sched: [3:1.00]
-; SLM-NEXT:    crc32q (%rdx), %rdi # sched: [6:1.00]
 ; SLM-NEXT:    movq %rdi, %rax # sched: [1:0.50]
+; SLM-NEXT:    crc32q %rsi, %rax # sched: [3:1.00]
+; SLM-NEXT:    crc32q (%rdx), %rax # sched: [6:1.00]
 ; SLM-NEXT:    retq # sched: [4:1.00]
 ;
 ; SANDY-SSE-LABEL: crc32_64_64:
 ; SANDY-SSE:       # %bb.0:
-; SANDY-SSE-NEXT:    crc32q %rsi, %rdi # sched: [3:1.00]
-; SANDY-SSE-NEXT:    crc32q (%rdx), %rdi # sched: [8:1.00]
 ; SANDY-SSE-NEXT:    movq %rdi, %rax # sched: [1:0.33]
+; SANDY-SSE-NEXT:    crc32q %rsi, %rax # sched: [3:1.00]
+; SANDY-SSE-NEXT:    crc32q (%rdx), %rax # sched: [8:1.00]
 ; SANDY-SSE-NEXT:    retq # sched: [1:1.00]
 ;
 ; SANDY-LABEL: crc32_64_64:
 ; SANDY:       # %bb.0:
-; SANDY-NEXT:    crc32q %rsi, %rdi # sched: [3:1.00]
-; SANDY-NEXT:    crc32q (%rdx), %rdi # sched: [8:1.00]
 ; SANDY-NEXT:    movq %rdi, %rax # sched: [1:0.33]
+; SANDY-NEXT:    crc32q %rsi, %rax # sched: [3:1.00]
+; SANDY-NEXT:    crc32q (%rdx), %rax # sched: [8:1.00]
 ; SANDY-NEXT:    retq # sched: [1:1.00]
 ;
 ; HASWELL-SSE-LABEL: crc32_64_64:
 ; HASWELL-SSE:       # %bb.0:
-; HASWELL-SSE-NEXT:    crc32q %rsi, %rdi # sched: [3:1.00]
-; HASWELL-SSE-NEXT:    crc32q (%rdx), %rdi # sched: [8:1.00]
 ; HASWELL-SSE-NEXT:    movq %rdi, %rax # sched: [1:0.25]
+; HASWELL-SSE-NEXT:    crc32q %rsi, %rax # sched: [3:1.00]
+; HASWELL-SSE-NEXT:    crc32q (%rdx), %rax # sched: [8:1.00]
 ; HASWELL-SSE-NEXT:    retq # sched: [7:1.00]
 ;
 ; HASWELL-LABEL: crc32_64_64:
 ; HASWELL:       # %bb.0:
-; HASWELL-NEXT:    crc32q %rsi, %rdi # sched: [3:1.00]
-; HASWELL-NEXT:    crc32q (%rdx), %rdi # sched: [8:1.00]
 ; HASWELL-NEXT:    movq %rdi, %rax # sched: [1:0.25]
+; HASWELL-NEXT:    crc32q %rsi, %rax # sched: [3:1.00]
+; HASWELL-NEXT:    crc32q (%rdx), %rax # sched: [8:1.00]
 ; HASWELL-NEXT:    retq # sched: [7:1.00]
 ;
 ; BROADWELL-SSE-LABEL: crc32_64_64:
 ; BROADWELL-SSE:       # %bb.0:
-; BROADWELL-SSE-NEXT:    crc32q %rsi, %rdi # sched: [3:1.00]
-; BROADWELL-SSE-NEXT:    crc32q (%rdx), %rdi # sched: [8:1.00]
 ; BROADWELL-SSE-NEXT:    movq %rdi, %rax # sched: [1:0.25]
+; BROADWELL-SSE-NEXT:    crc32q %rsi, %rax # sched: [3:1.00]
+; BROADWELL-SSE-NEXT:    crc32q (%rdx), %rax # sched: [8:1.00]
 ; BROADWELL-SSE-NEXT:    retq # sched: [7:1.00]
 ;
 ; BROADWELL-LABEL: crc32_64_64:
 ; BROADWELL:       # %bb.0:
-; BROADWELL-NEXT:    crc32q %rsi, %rdi # sched: [3:1.00]
-; BROADWELL-NEXT:    crc32q (%rdx), %rdi # sched: [8:1.00]
 ; BROADWELL-NEXT:    movq %rdi, %rax # sched: [1:0.25]
+; BROADWELL-NEXT:    crc32q %rsi, %rax # sched: [3:1.00]
+; BROADWELL-NEXT:    crc32q (%rdx), %rax # sched: [8:1.00]
 ; BROADWELL-NEXT:    retq # sched: [7:1.00]
 ;
 ; SKYLAKE-SSE-LABEL: crc32_64_64:
 ; SKYLAKE-SSE:       # %bb.0:
-; SKYLAKE-SSE-NEXT:    crc32q %rsi, %rdi # sched: [3:1.00]
-; SKYLAKE-SSE-NEXT:    crc32q (%rdx), %rdi # sched: [8:1.00]
 ; SKYLAKE-SSE-NEXT:    movq %rdi, %rax # sched: [1:0.25]
+; SKYLAKE-SSE-NEXT:    crc32q %rsi, %rax # sched: [3:1.00]
+; SKYLAKE-SSE-NEXT:    crc32q (%rdx), %rax # sched: [8:1.00]
 ; SKYLAKE-SSE-NEXT:    retq # sched: [7:1.00]
 ;
 ; SKYLAKE-LABEL: crc32_64_64:
 ; SKYLAKE:       # %bb.0:
-; SKYLAKE-NEXT:    crc32q %rsi, %rdi # sched: [3:1.00]
-; SKYLAKE-NEXT:    crc32q (%rdx), %rdi # sched: [8:1.00]
 ; SKYLAKE-NEXT:    movq %rdi, %rax # sched: [1:0.25]
+; SKYLAKE-NEXT:    crc32q %rsi, %rax # sched: [3:1.00]
+; SKYLAKE-NEXT:    crc32q (%rdx), %rax # sched: [8:1.00]
 ; SKYLAKE-NEXT:    retq # sched: [7:1.00]
 ;
 ; SKX-SSE-LABEL: crc32_64_64:
 ; SKX-SSE:       # %bb.0:
-; SKX-SSE-NEXT:    crc32q %rsi, %rdi # sched: [3:1.00]
-; SKX-SSE-NEXT:    crc32q (%rdx), %rdi # sched: [8:1.00]
 ; SKX-SSE-NEXT:    movq %rdi, %rax # sched: [1:0.25]
+; SKX-SSE-NEXT:    crc32q %rsi, %rax # sched: [3:1.00]
+; SKX-SSE-NEXT:    crc32q (%rdx), %rax # sched: [8:1.00]
 ; SKX-SSE-NEXT:    retq # sched: [7:1.00]
 ;
 ; SKX-LABEL: crc32_64_64:
 ; SKX:       # %bb.0:
-; SKX-NEXT:    crc32q %rsi, %rdi # sched: [3:1.00]
-; SKX-NEXT:    crc32q (%rdx), %rdi # sched: [8:1.00]
 ; SKX-NEXT:    movq %rdi, %rax # sched: [1:0.25]
+; SKX-NEXT:    crc32q %rsi, %rax # sched: [3:1.00]
+; SKX-NEXT:    crc32q (%rdx), %rax # sched: [8:1.00]
 ; SKX-NEXT:    retq # sched: [7:1.00]
 ;
 ; BTVER2-SSE-LABEL: crc32_64_64:
 ; BTVER2-SSE:       # %bb.0:
-; BTVER2-SSE-NEXT:    crc32q %rsi, %rdi # sched: [3:2.00]
-; BTVER2-SSE-NEXT:    crc32q (%rdx), %rdi # sched: [6:2.00]
 ; BTVER2-SSE-NEXT:    movq %rdi, %rax # sched: [1:0.50]
+; BTVER2-SSE-NEXT:    crc32q %rsi, %rax # sched: [3:2.00]
+; BTVER2-SSE-NEXT:    crc32q (%rdx), %rax # sched: [6:2.00]
 ; BTVER2-SSE-NEXT:    retq # sched: [4:1.00]
 ;
 ; BTVER2-LABEL: crc32_64_64:
 ; BTVER2:       # %bb.0:
-; BTVER2-NEXT:    crc32q %rsi, %rdi # sched: [3:2.00]
-; BTVER2-NEXT:    crc32q (%rdx), %rdi # sched: [6:2.00]
 ; BTVER2-NEXT:    movq %rdi, %rax # sched: [1:0.50]
+; BTVER2-NEXT:    crc32q %rsi, %rax # sched: [3:2.00]
+; BTVER2-NEXT:    crc32q (%rdx), %rax # sched: [6:2.00]
 ; BTVER2-NEXT:    retq # sched: [4:1.00]
 ;
 ; ZNVER1-SSE-LABEL: crc32_64_64:
 ; ZNVER1-SSE:       # %bb.0:
-; ZNVER1-SSE-NEXT:    crc32q %rsi, %rdi # sched: [3:1.00]
-; ZNVER1-SSE-NEXT:    crc32q (%rdx), %rdi # sched: [10:1.00]
 ; ZNVER1-SSE-NEXT:    movq %rdi, %rax # sched: [1:0.25]
+; ZNVER1-SSE-NEXT:    crc32q %rsi, %rax # sched: [3:1.00]
+; ZNVER1-SSE-NEXT:    crc32q (%rdx), %rax # sched: [10:1.00]
 ; ZNVER1-SSE-NEXT:    retq # sched: [1:0.50]
 ;
 ; ZNVER1-LABEL: crc32_64_64:
 ; ZNVER1:       # %bb.0:
-; ZNVER1-NEXT:    crc32q %rsi, %rdi # sched: [3:1.00]
-; ZNVER1-NEXT:    crc32q (%rdx), %rdi # sched: [10:1.00]
 ; ZNVER1-NEXT:    movq %rdi, %rax # sched: [1:0.25]
+; ZNVER1-NEXT:    crc32q %rsi, %rax # sched: [3:1.00]
+; ZNVER1-NEXT:    crc32q (%rdx), %rax # sched: [10:1.00]
 ; ZNVER1-NEXT:    retq # sched: [1:0.50]
   %1 = call i64 @llvm.x86.sse42.crc32.64.64(i64 %a0, i64 %a1)
   %2 = load i64, i64 *%a2
@@ -800,11 +800,11 @@ define i32 @test_pcmpestri(<16 x i8> %a0, <16 x i8> %a1, <16 x i8> *%a2) {
 ; ZNVER1-SSE:       # %bb.0:
 ; ZNVER1-SSE-NEXT:    movl $7, %eax # sched: [1:0.25]
 ; ZNVER1-SSE-NEXT:    movl $7, %edx # sched: [1:0.25]
-; ZNVER1-SSE-NEXT:    pcmpestri $7, %xmm1, %xmm0 # sched: [100:?]
+; ZNVER1-SSE-NEXT:    pcmpestri $7, %xmm1, %xmm0 # sched: [100:0.25]
 ; ZNVER1-SSE-NEXT:    movl $7, %eax # sched: [1:0.25]
 ; ZNVER1-SSE-NEXT:    movl $7, %edx # sched: [1:0.25]
 ; ZNVER1-SSE-NEXT:    movl %ecx, %esi # sched: [1:0.25]
-; ZNVER1-SSE-NEXT:    pcmpestri $7, (%rdi), %xmm0 # sched: [100:?]
+; ZNVER1-SSE-NEXT:    pcmpestri $7, (%rdi), %xmm0 # sched: [100:0.25]
 ; ZNVER1-SSE-NEXT:    # kill: def $ecx killed $ecx def $rcx
 ; ZNVER1-SSE-NEXT:    leal (%rcx,%rsi), %eax # sched: [1:0.25]
 ; ZNVER1-SSE-NEXT:    retq # sched: [1:0.50]
@@ -813,11 +813,11 @@ define i32 @test_pcmpestri(<16 x i8> %a0, <16 x i8> %a1, <16 x i8> *%a2) {
 ; ZNVER1:       # %bb.0:
 ; ZNVER1-NEXT:    movl $7, %eax # sched: [1:0.25]
 ; ZNVER1-NEXT:    movl $7, %edx # sched: [1:0.25]
-; ZNVER1-NEXT:    vpcmpestri $7, %xmm1, %xmm0 # sched: [100:?]
+; ZNVER1-NEXT:    vpcmpestri $7, %xmm1, %xmm0 # sched: [100:0.25]
 ; ZNVER1-NEXT:    movl $7, %eax # sched: [1:0.25]
 ; ZNVER1-NEXT:    movl $7, %edx # sched: [1:0.25]
 ; ZNVER1-NEXT:    movl %ecx, %esi # sched: [1:0.25]
-; ZNVER1-NEXT:    vpcmpestri $7, (%rdi), %xmm0 # sched: [100:?]
+; ZNVER1-NEXT:    vpcmpestri $7, (%rdi), %xmm0 # sched: [100:0.25]
 ; ZNVER1-NEXT:    # kill: def $ecx killed $ecx def $rcx
 ; ZNVER1-NEXT:    leal (%rcx,%rsi), %eax # sched: [1:0.25]
 ; ZNVER1-NEXT:    retq # sched: [1:0.50]
@@ -974,20 +974,20 @@ define <16 x i8> @test_pcmpestrm(<16 x i8> %a0, <16 x i8> %a1, <16 x i8> *%a2) {
 ; ZNVER1-SSE:       # %bb.0:
 ; ZNVER1-SSE-NEXT:    movl $7, %eax # sched: [1:0.25]
 ; ZNVER1-SSE-NEXT:    movl $7, %edx # sched: [1:0.25]
-; ZNVER1-SSE-NEXT:    pcmpestrm $7, %xmm1, %xmm0 # sched: [100:?]
+; ZNVER1-SSE-NEXT:    pcmpestrm $7, %xmm1, %xmm0 # sched: [100:0.25]
 ; ZNVER1-SSE-NEXT:    movl $7, %eax # sched: [1:0.25]
 ; ZNVER1-SSE-NEXT:    movl $7, %edx # sched: [1:0.25]
-; ZNVER1-SSE-NEXT:    pcmpestrm $7, (%rdi), %xmm0 # sched: [100:?]
+; ZNVER1-SSE-NEXT:    pcmpestrm $7, (%rdi), %xmm0 # sched: [100:0.25]
 ; ZNVER1-SSE-NEXT:    retq # sched: [1:0.50]
 ;
 ; ZNVER1-LABEL: test_pcmpestrm:
 ; ZNVER1:       # %bb.0:
 ; ZNVER1-NEXT:    movl $7, %eax # sched: [1:0.25]
 ; ZNVER1-NEXT:    movl $7, %edx # sched: [1:0.25]
-; ZNVER1-NEXT:    vpcmpestrm $7, %xmm1, %xmm0 # sched: [100:?]
+; ZNVER1-NEXT:    vpcmpestrm $7, %xmm1, %xmm0 # sched: [100:0.25]
 ; ZNVER1-NEXT:    movl $7, %eax # sched: [1:0.25]
 ; ZNVER1-NEXT:    movl $7, %edx # sched: [1:0.25]
-; ZNVER1-NEXT:    vpcmpestrm $7, (%rdi), %xmm0 # sched: [100:?]
+; ZNVER1-NEXT:    vpcmpestrm $7, (%rdi), %xmm0 # sched: [100:0.25]
 ; ZNVER1-NEXT:    retq # sched: [1:0.50]
   %1 = call <16 x i8> @llvm.x86.sse42.pcmpestrm128(<16 x i8> %a0, i32 7, <16 x i8> %a1, i32 7, i8 7)
   %2 = load <16 x i8>, <16 x i8> *%a2, align 16
@@ -1125,18 +1125,18 @@ define i32 @test_pcmpistri(<16 x i8> %a0, <16 x i8> %a1, <16 x i8> *%a2) {
 ;
 ; ZNVER1-SSE-LABEL: test_pcmpistri:
 ; ZNVER1-SSE:       # %bb.0:
-; ZNVER1-SSE-NEXT:    pcmpistri $7, %xmm1, %xmm0 # sched: [100:?]
+; ZNVER1-SSE-NEXT:    pcmpistri $7, %xmm1, %xmm0 # sched: [100:0.25]
 ; ZNVER1-SSE-NEXT:    movl %ecx, %eax # sched: [1:0.25]
-; ZNVER1-SSE-NEXT:    pcmpistri $7, (%rdi), %xmm0 # sched: [100:?]
+; ZNVER1-SSE-NEXT:    pcmpistri $7, (%rdi), %xmm0 # sched: [100:0.25]
 ; ZNVER1-SSE-NEXT:    # kill: def $ecx killed $ecx def $rcx
 ; ZNVER1-SSE-NEXT:    leal (%rcx,%rax), %eax # sched: [1:0.25]
 ; ZNVER1-SSE-NEXT:    retq # sched: [1:0.50]
 ;
 ; ZNVER1-LABEL: test_pcmpistri:
 ; ZNVER1:       # %bb.0:
-; ZNVER1-NEXT:    vpcmpistri $7, %xmm1, %xmm0 # sched: [100:?]
+; ZNVER1-NEXT:    vpcmpistri $7, %xmm1, %xmm0 # sched: [100:0.25]
 ; ZNVER1-NEXT:    movl %ecx, %eax # sched: [1:0.25]
-; ZNVER1-NEXT:    vpcmpistri $7, (%rdi), %xmm0 # sched: [100:?]
+; ZNVER1-NEXT:    vpcmpistri $7, (%rdi), %xmm0 # sched: [100:0.25]
 ; ZNVER1-NEXT:    # kill: def $ecx killed $ecx def $rcx
 ; ZNVER1-NEXT:    leal (%rcx,%rax), %eax # sched: [1:0.25]
 ; ZNVER1-NEXT:    retq # sched: [1:0.50]
@@ -1235,14 +1235,14 @@ define <16 x i8> @test_pcmpistrm(<16 x i8> %a0, <16 x i8> %a1, <16 x i8> *%a2) {
 ;
 ; ZNVER1-SSE-LABEL: test_pcmpistrm:
 ; ZNVER1-SSE:       # %bb.0:
-; ZNVER1-SSE-NEXT:    pcmpistrm $7, %xmm1, %xmm0 # sched: [100:?]
-; ZNVER1-SSE-NEXT:    pcmpistrm $7, (%rdi), %xmm0 # sched: [100:?]
+; ZNVER1-SSE-NEXT:    pcmpistrm $7, %xmm1, %xmm0 # sched: [100:0.25]
+; ZNVER1-SSE-NEXT:    pcmpistrm $7, (%rdi), %xmm0 # sched: [100:0.25]
 ; ZNVER1-SSE-NEXT:    retq # sched: [1:0.50]
 ;
 ; ZNVER1-LABEL: test_pcmpistrm:
 ; ZNVER1:       # %bb.0:
-; ZNVER1-NEXT:    vpcmpistrm $7, %xmm1, %xmm0 # sched: [100:?]
-; ZNVER1-NEXT:    vpcmpistrm $7, (%rdi), %xmm0 # sched: [100:?]
+; ZNVER1-NEXT:    vpcmpistrm $7, %xmm1, %xmm0 # sched: [100:0.25]
+; ZNVER1-NEXT:    vpcmpistrm $7, (%rdi), %xmm0 # sched: [100:0.25]
 ; ZNVER1-NEXT:    retq # sched: [1:0.50]
   %1 = call <16 x i8> @llvm.x86.sse42.pcmpistrm128(<16 x i8> %a0, <16 x i8> %a1, i8 7)
   %2 = load <16 x i8>, <16 x i8> *%a2, align 16
@@ -1442,14 +1442,14 @@ define <2 x i64> @test_pclmulqdq(<2 x i64> %a0, <2 x i64> %a1, <2 x i64> *%a2) {
 ;
 ; ZNVER1-SSE-LABEL: test_pclmulqdq:
 ; ZNVER1-SSE:       # %bb.0:
-; ZNVER1-SSE-NEXT:    pclmulqdq $0, %xmm1, %xmm0 # sched: [100:?]
-; ZNVER1-SSE-NEXT:    pclmulqdq $0, (%rdi), %xmm0 # sched: [100:?]
+; ZNVER1-SSE-NEXT:    pclmulqdq $0, %xmm1, %xmm0 # sched: [100:0.25]
+; ZNVER1-SSE-NEXT:    pclmulqdq $0, (%rdi), %xmm0 # sched: [100:0.25]
 ; ZNVER1-SSE-NEXT:    retq # sched: [1:0.50]
 ;
 ; ZNVER1-LABEL: test_pclmulqdq:
 ; ZNVER1:       # %bb.0:
-; ZNVER1-NEXT:    vpclmulqdq $0, %xmm1, %xmm0, %xmm0 # sched: [100:?]
-; ZNVER1-NEXT:    vpclmulqdq $0, (%rdi), %xmm0, %xmm0 # sched: [100:?]
+; ZNVER1-NEXT:    vpclmulqdq $0, %xmm1, %xmm0, %xmm0 # sched: [100:0.25]
+; ZNVER1-NEXT:    vpclmulqdq $0, (%rdi), %xmm0, %xmm0 # sched: [100:0.25]
 ; ZNVER1-NEXT:    retq # sched: [1:0.50]
   %1 = load <2 x i64>, <2 x i64> *%a2, align 16
   %2 = call <2 x i64> @llvm.x86.pclmulqdq(<2 x i64> %a0, <2 x i64> %a1, i8 0)

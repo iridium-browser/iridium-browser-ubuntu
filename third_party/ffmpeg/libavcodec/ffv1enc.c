@@ -123,7 +123,7 @@ static const uint8_t ver2_state[256] = {
      40,  40,  41,  79,  43,  44,  45,  45, 48,   48,  64,  50,  51,  52,  88,  52,
      53,  74,  55,  57,  58,  58,  74,  60, 101,  61,  62,  84,  66,  66,  68,  69,
      87,  82,  71,  97,  73,  73,  82,  75, 111,  77,  94,  78,  87,  81,  83,  97,
-     85,  83,  94,  86,  99,  89,  90,  99, 111,  92,  93,  134, 95,  98,  105, 98,
+     85,  83,  94,  86,  99,  89,  90,  99, 111,  92,  93,  134, 95,  98, 105,  98,
     105, 110, 102, 108, 102, 118, 103, 106, 106, 113, 109, 112, 114, 112, 116, 125,
     115, 116, 117, 117, 126, 119, 125, 121, 121, 123, 145, 124, 126, 131, 127, 129,
     165, 130, 132, 138, 133, 135, 145, 136, 137, 139, 146, 141, 143, 142, 144, 148,
@@ -539,6 +539,10 @@ static av_cold int encode_init(AVCodecContext *avctx)
         s->ec = (s->version >= 3);
     }
 
+    // CRC requires version 3+
+    if (s->ec)
+        s->version = FFMAX(s->version, 3);
+
     if ((s->version == 2 || s->version>3) && avctx->strict_std_compliance > FF_COMPLIANCE_EXPERIMENTAL) {
         av_log(avctx, AV_LOG_ERROR, "Version 2 needed for requested features but version 2 is experimental and not enabled\n");
         return AVERROR_INVALIDDATA;
@@ -620,7 +624,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
     case AV_PIX_FMT_YUVA420P:
         s->chroma_planes = desc->nb_components < 3 ? 0 : 1;
         s->colorspace = 0;
-        s->transparency = desc->nb_components == 4 || desc->nb_components == 2;
+        s->transparency = !!(desc->flags & AV_PIX_FMT_FLAG_ALPHA);
         if (!avctx->bits_per_raw_sample && !s->bits_per_raw_sample)
             s->bits_per_raw_sample = 8;
         else if (!s->bits_per_raw_sample)
@@ -672,7 +676,7 @@ FF_ENABLE_DEPRECATION_WARNINGS
             s->bits_per_raw_sample = 16;
         else if (!s->bits_per_raw_sample)
             s->bits_per_raw_sample = avctx->bits_per_raw_sample;
-        s->transparency = desc->nb_components == 4 || desc->nb_components == 2;
+        s->transparency = !!(desc->flags & AV_PIX_FMT_FLAG_ALPHA);
         s->colorspace = 1;
         s->chroma_planes = 1;
         if (s->bits_per_raw_sample >= 16) {

@@ -24,8 +24,11 @@
 #if defined(__ANDROID__)
 #include <system/window.h>
 #include "../../Common/GrallocAndroid.hpp"
+#endif
+
+#if defined(__ANDROID__) && !defined(ANDROID_HOST_BUILD)
 #include "../../Common/DebugAndroid.hpp"
-#define LOGLOCK(fmt, ...) // ALOGI(fmt " tid=%d", ##__VA_ARGS__, gettid())
+#define LOGLOCK(fmt, ...) // TRACE(fmt " tid=%d", ##__VA_ARGS__, gettid())
 #else
 #include <assert.h>
 #define LOGLOCK(...)
@@ -50,7 +53,6 @@ struct PixelStorageModes
 };
 
 GLint GetSizedInternalFormat(GLint internalFormat, GLenum type);
-sw::Format ConvertReadFormatType(GLenum format, GLenum type);
 sw::Format SelectInternalFormat(GLint format);
 bool IsUnsizedInternalFormat(GLint internalformat);
 GLenum GetBaseInternalFormat(GLint internalformat);
@@ -79,6 +81,7 @@ public:
 	void release();
 	void* lock(int x, int y, int z);
 	void unlock();
+	bool requiresSync() const;
 
 private:
 	int width;
@@ -144,6 +147,8 @@ public:
 
 	// Back buffer from client buffer
 	static Image *create(const egl::ClientBuffer& clientBuffer);
+
+	static size_t size(int width, int height, int depth, int border, int samples, GLint internalformat);
 
 	GLsizei getWidth() const
 	{
@@ -247,12 +252,12 @@ inline GLenum GLPixelFormatFromAndroid(int halFormat)
 #ifdef GRALLOC_MODULE_API_VERSION_0_2
 	case HAL_PIXEL_FORMAT_YCbCr_420_888: return SW_YV12_BT601;
 #endif
-#if PLATFORM_SDK_VERSION >= 26
+#if ANDROID_PLATFORM_SDK_VERSION >= 26
 	case HAL_PIXEL_FORMAT_RGBA_FP16: return GL_RGBA16F;
 #endif
 	case HAL_PIXEL_FORMAT_RGB_888:   // Unsupported.
 	default:
-		ALOGE("Unsupported EGL image format %d", halFormat); ASSERT(false);
+		ERR("Unsupported EGL image format %d", halFormat); ASSERT(false);
 		return GL_NONE;
 	}
 }
@@ -290,7 +295,7 @@ private:
 		{
 			if(x != 0 || y != 0 || z != 0)
 			{
-				ALOGI("badness: %s called with unsupported parms: image=%p x=%d y=%d z=%d", __FUNCTION__, this, x, y, z);
+				TRACE("badness: %s called with unsupported parms: image=%p x=%d y=%d z=%d", __FUNCTION__, this, x, y, z);
 			}
 
 			LOGLOCK("image=%p op=%s.ani lock=%d", this, __FUNCTION__, lock);

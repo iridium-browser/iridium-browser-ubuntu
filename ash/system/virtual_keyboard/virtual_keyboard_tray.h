@@ -5,7 +5,8 @@
 #ifndef ASH_SYSTEM_VIRTUAL_KEYBOARD_VIRTUAL_KEYBOARD_TRAY_H_
 #define ASH_SYSTEM_VIRTUAL_KEYBOARD_VIRTUAL_KEYBOARD_TRAY_H_
 
-#include "ash/keyboard/keyboard_ui_observer.h"
+#include "ash/accessibility/accessibility_observer.h"
+#include "ash/session/session_observer.h"
 #include "ash/shell_observer.h"
 #include "ash/system/tray/tray_background_view.h"
 #include "base/macros.h"
@@ -19,36 +20,39 @@ namespace ash {
 
 // TODO(sky): make this visible on non-chromeos platforms.
 class VirtualKeyboardTray : public TrayBackgroundView,
-                            public KeyboardUIObserver,
+                            public AccessibilityObserver,
                             public keyboard::KeyboardControllerObserver,
-                            public ShellObserver {
+                            public ShellObserver,
+                            public SessionObserver {
  public:
   explicit VirtualKeyboardTray(Shelf* shelf);
   ~VirtualKeyboardTray() override;
 
   // TrayBackgroundView:
   base::string16 GetAccessibleNameForTray() override;
-  void HideBubbleWithView(const views::TrayBubbleView* bubble_view) override;
+  void HideBubbleWithView(const TrayBubbleView* bubble_view) override;
   void ClickedOutsideBubble() override;
   bool PerformAction(const ui::Event& event) override;
 
-  // KeyboardUIObserver:
-  void OnKeyboardEnabledStateChanged(bool new_enabled) override;
+  // AccessibilityObserver:
+  void OnAccessibilityStatusChanged() override;
 
   // keyboard::KeyboardControllerObserver:
-  void OnKeyboardAvailabilityChanged(const bool is_available) override;
+  void OnKeyboardVisibilityStateChanged(bool is_visible) override;
 
-  // ShellObserver:
-  void OnKeyboardControllerCreated() override;
+  // SessionObserver:
+  void OnSessionStateChanged(session_manager::SessionState state) override;
 
  private:
-  void ObserveKeyboardController();
-  void UnobserveKeyboardController();
+  // Updates the icon UI.
+  void UpdateIcon();
 
   // Weak pointer, will be parented by TrayContainer for its lifetime.
   views::ImageView* icon_;
 
   Shelf* shelf_;
+
+  ScopedSessionObserver session_observer_{this};
 
   DISALLOW_COPY_AND_ASSIGN(VirtualKeyboardTray);
 };

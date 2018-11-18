@@ -14,9 +14,9 @@
 #include "components/offline_pages/core/archive_manager.h"
 #include "components/offline_pages/core/client_policy_controller.h"
 #include "components/offline_pages/core/offline_page_client_policy.h"
-#include "components/offline_pages/core/offline_page_metadata_store_sql.h"
+#include "components/offline_pages/core/offline_page_metadata_store.h"
 #include "components/offline_pages/core/offline_store_utils.h"
-#include "sql/connection.h"
+#include "sql/database.h"
 #include "sql/statement.h"
 #include "sql/transaction.h"
 
@@ -41,7 +41,7 @@ struct PageInfo {
 
 std::vector<PageInfo> GetPageInfosByNamespaces(
     const std::vector<std::string>& temp_namespaces,
-    sql::Connection* db) {
+    sql::Database* db) {
   std::vector<PageInfo> result;
 
   static const char kSql[] =
@@ -64,7 +64,7 @@ std::vector<PageInfo> GetPageInfosByNamespaces(
 }
 
 bool DeletePagesByOfflineIds(const std::vector<int64_t>& offline_ids,
-                             sql::Connection* db) {
+                             sql::Database* db) {
   static const char kSql[] =
       "DELETE FROM " OFFLINE_PAGES_TABLE_NAME " WHERE offline_id = ?";
 
@@ -79,7 +79,7 @@ bool DeletePagesByOfflineIds(const std::vector<int64_t>& offline_ids,
 
 bool MarkPagesAsMissing(const std::vector<int64_t>& ids_of_missing_pages,
                         base::Time missing_time,
-                        sql::Connection* db) {
+                        sql::Database* db) {
   static const char kSql[] = "UPDATE OR IGNORE " OFFLINE_PAGES_TABLE_NAME
                              " SET file_missing_time = ?"
                              " WHERE offline_id = ?";
@@ -95,7 +95,7 @@ bool MarkPagesAsMissing(const std::vector<int64_t>& ids_of_missing_pages,
 }
 
 bool MarkPagesAsReappeared(const std::vector<int64_t>& ids_of_reappeared_pages,
-                           sql::Connection* db) {
+                           sql::Database* db) {
   static const char kSql[] = "UPDATE OR IGNORE " OFFLINE_PAGES_TABLE_NAME
                              " SET file_missing_time = ?"
                              " WHERE offline_id = ?";
@@ -113,16 +113,13 @@ bool MarkPagesAsReappeared(const std::vector<int64_t>& ids_of_reappeared_pages,
 
 PersistentPageConsistencyCheckTask::CheckResult
 PersistentPageConsistencyCheckSync(
-    OfflinePageMetadataStoreSQL* store,
+    OfflinePageMetadataStore* store,
     const base::FilePath& private_dir,
     const base::FilePath& public_dir,
     const std::vector<std::string>& persistent_namespaces,
     base::Time check_time,
-    sql::Connection* db) {
+    sql::Database* db) {
   std::vector<int64_t> download_ids_of_deleted_pages;
-  if (!db)
-    return {SyncOperationResult::INVALID_DB_CONNECTION,
-            download_ids_of_deleted_pages};
 
   sql::Transaction transaction(db);
   if (!transaction.Begin())
@@ -200,7 +197,7 @@ PersistentPageConsistencyCheckTask::CheckResult::operator=(
 PersistentPageConsistencyCheckTask::CheckResult::~CheckResult() {}
 
 PersistentPageConsistencyCheckTask::PersistentPageConsistencyCheckTask(
-    OfflinePageMetadataStoreSQL* store,
+    OfflinePageMetadataStore* store,
     ArchiveManager* archive_manager,
     ClientPolicyController* policy_controller,
     base::Time check_time,
@@ -220,12 +217,8 @@ PersistentPageConsistencyCheckTask::~PersistentPageConsistencyCheckTask() =
     default;
 
 void PersistentPageConsistencyCheckTask::Run() {
-  std::vector<std::string> namespaces = policy_controller_->GetAllNamespaces();
-  std::vector<std::string> persistent_namespaces;
-  for (const auto& name_space : namespaces) {
-    if (!policy_controller_->IsRemovedOnCacheReset(name_space))
-      persistent_namespaces.push_back(name_space);
-  }
+  std::vector<std::string> persistent_namespaces =
+      policy_controller_->GetNamespacesForUserRequestedDownload();
 
   store_->Execute(base::BindOnce(&PersistentPageConsistencyCheckSync, store_,
                                  archive_manager_->GetPrivateArchivesDir(),
@@ -233,7 +226,8 @@ void PersistentPageConsistencyCheckTask::Run() {
                                  persistent_namespaces, check_time_),
                   base::BindOnce(&PersistentPageConsistencyCheckTask::
                                      OnPersistentPageConsistencyCheckDone,
-                                 weak_ptr_factory_.GetWeakPtr()));
+                                 weak_ptr_factory_.GetWeakPtr()),
+                  CheckResult{SyncOperationResult::INVALID_DB_CONNECTION, {}});
 }
 
 void PersistentPageConsistencyCheckTask::OnPersistentPageConsistencyCheckDone(

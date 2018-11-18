@@ -15,12 +15,13 @@
 #include "core/fxge/dib/cfx_imagerenderer.h"
 
 class CFX_DIBitmap;
-class CFX_DIBSource;
+class CFX_DIBBase;
 class CFX_DefaultRenderDevice;
 class CFX_ImageTransformer;
 class CPDF_ImageObject;
 class CPDF_PageObject;
 class CPDF_Pattern;
+class CPDF_RenderOptions;
 class CPDF_RenderStatus;
 
 class CPDF_ImageRenderer {
@@ -35,7 +36,7 @@ class CPDF_ImageRenderer {
              int blendType);
 
   bool Start(CPDF_RenderStatus* pStatus,
-             const RetainPtr<CFX_DIBSource>& pDIBSource,
+             const RetainPtr<CFX_DIBBase>& pDIBBase,
              FX_ARGB bitmap_argb,
              int bitmap_alpha,
              const CFX_Matrix* pImage2Device,
@@ -48,9 +49,9 @@ class CPDF_ImageRenderer {
 
  private:
   bool StartBitmapAlpha();
-  bool StartDIBSource();
-  bool StartRenderDIBSource();
-  bool StartLoadDIBSource();
+  bool StartDIBBase();
+  bool StartRenderDIBBase();
+  bool StartLoadDIBBase();
   bool DrawMaskedImage();
   bool DrawPatternImage(const CFX_Matrix* pObj2Device);
   bool NotDrawing() const;
@@ -58,28 +59,29 @@ class CPDF_ImageRenderer {
   CFX_Matrix GetDrawMatrix(const FX_RECT& rect) const;
   void CalculateDrawImage(CFX_DefaultRenderDevice* bitmap_device1,
                           CFX_DefaultRenderDevice* bitmap_device2,
-                          const RetainPtr<CFX_DIBSource>& pDIBSource,
+                          const RetainPtr<CFX_DIBBase>& pDIBBase,
                           CFX_Matrix* pNewMatrix,
                           const FX_RECT& rect) const;
+  const CPDF_RenderOptions& GetRenderOptions() const;
   void HandleFilters();
 
   UnownedPtr<CPDF_RenderStatus> m_pRenderStatus;
   UnownedPtr<CPDF_ImageObject> m_pImageObject;
-  int m_Status;
   UnownedPtr<const CFX_Matrix> m_pObj2Device;
+  UnownedPtr<CPDF_Pattern> m_pPattern;
+  RetainPtr<CFX_DIBBase> m_pDIBBase;
   CFX_Matrix m_ImageMatrix;
   CPDF_ImageLoader m_Loader;
-  RetainPtr<CFX_DIBSource> m_pDIBSource;
-  int m_BitmapAlpha;
-  bool m_bPatternColor;
-  UnownedPtr<CPDF_Pattern> m_pPattern;
-  FX_ARGB m_FillArgb;
-  uint32_t m_Flags;
   std::unique_ptr<CFX_ImageTransformer> m_pTransformer;
   std::unique_ptr<CFX_ImageRenderer> m_DeviceHandle;
-  bool m_bStdCS;
-  int m_BlendType;
-  bool m_Result;
+  int m_Status = 0;
+  int m_BitmapAlpha = 0;
+  int m_BlendType = FXDIB_BLEND_NORMAL;
+  FX_ARGB m_FillArgb = 0;
+  uint32_t m_Flags = 0;
+  bool m_bPatternColor = false;
+  bool m_bStdCS = false;
+  bool m_Result = true;
 };
 
 #endif  // CORE_FPDFAPI_RENDER_CPDF_IMAGERENDERER_H_

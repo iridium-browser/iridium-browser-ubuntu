@@ -304,7 +304,7 @@ class Intrinsic {
   ListInit *Body;
   /// The architectural #ifdef guard.
   std::string Guard;
-  /// Set if the Unvailable bit is 1. This means we don't generate a body,
+  /// Set if the Unavailable bit is 1. This means we don't generate a body,
   /// just an "unavailable" attribute on a declaration.
   bool IsUnavailable;
   /// Is this intrinsic safe for big-endian? or does it need its arguments
@@ -994,6 +994,19 @@ void Type::applyModifier(char Mod) {
     NumVectors = 4;
     if (!AppliedQuad)
       Bitwidth *= 2;
+    break;
+  case '7':
+    if (AppliedQuad)
+      Bitwidth /= 2;
+    ElementBitwidth = 8;
+    break;
+  case '8':
+    ElementBitwidth = 8;
+    break;
+  case '9':
+    if (!AppliedQuad)
+      Bitwidth *= 2;
+    ElementBitwidth = 8;
     break;
   default:
     llvm_unreachable("Unhandled character!");
@@ -2007,7 +2020,7 @@ void NeonEmitter::createIntrinsic(Record *R,
     }
   }
 
-  llvm::sort(NewTypeSpecs.begin(), NewTypeSpecs.end());
+  llvm::sort(NewTypeSpecs);
   NewTypeSpecs.erase(std::unique(NewTypeSpecs.begin(), NewTypeSpecs.end()),
 		     NewTypeSpecs.end());
   auto &Entry = IntrinsicMap[Name];
@@ -2149,8 +2162,7 @@ void NeonEmitter::genOverloadTypeCheckCode(raw_ostream &OS,
   OS << "#endif\n\n";
 }
 
-void
-NeonEmitter::genIntrinsicRangeCheckCode(raw_ostream &OS,
+void NeonEmitter::genIntrinsicRangeCheckCode(raw_ostream &OS,
                                         SmallVectorImpl<Intrinsic *> &Defs) {
   OS << "#ifdef GET_NEON_IMMEDIATE_CHECK\n";
 
@@ -2175,11 +2187,15 @@ NeonEmitter::genIntrinsicRangeCheckCode(raw_ostream &OS,
     Record *R = Def->getRecord();
     if (R->getValueAsBit("isVCVT_N")) {
       // VCVT between floating- and fixed-point values takes an immediate
-      // in the range [1, 32) for f32 or [1, 64) for f64.
+      // in the range [1, 32) for f32 or [1, 64) for f64 or [1, 16) for f16.
       LowerBound = "1";
-      if (Def->getBaseType().getElementSizeInBits() == 32)
+	  if (Def->getBaseType().getElementSizeInBits() == 16 ||
+		  Def->getName().find('h') != std::string::npos)
+		// VCVTh operating on FP16 intrinsics in range [1, 16)
+		UpperBound = "15";
+	  else if (Def->getBaseType().getElementSizeInBits() == 32)
         UpperBound = "31";
-      else
+	  else
         UpperBound = "63";
     } else if (R->getValueAsBit("isScalarShift")) {
       // Right shifts have an 'r' in the name, left shifts do not. Convert
@@ -2393,7 +2409,7 @@ void NeonEmitter::run(raw_ostream &OS) {
     OS << "#endif\n";
   OS << "\n";
 
-  OS << "#define __ai static inline __attribute__((__always_inline__, "
+  OS << "#define __ai static __inline__ __attribute__((__always_inline__, "
         "__nodebug__))\n\n";
 
   SmallVector<Intrinsic *, 128> Defs;
@@ -2502,7 +2518,7 @@ void NeonEmitter::runFP16(raw_ostream &OS) {
 
   OS << "typedef __fp16 float16_t;\n";
 
-  OS << "#define __ai static inline __attribute__((__always_inline__, "
+  OS << "#define __ai static __inline__ __attribute__((__always_inline__, "
         "__nodebug__))\n\n";
 
   SmallVector<Intrinsic *, 128> Defs;

@@ -6,6 +6,7 @@
 
 #include <stddef.h>
 #include <algorithm>
+#include <memory>
 #include <utility>
 
 #include "base/files/file_util.h"
@@ -155,8 +156,8 @@ void CollectCopyHistogramSample(const std::string& histogram_name,
 
 // Metadata jobs are cheap, so we run them concurrently. File jobs run serially.
 const int JobScheduler::kMaxJobCount[] = {
-  5,  // METADATA_QUEUE
-  1,  // FILE_QUEUE
+    20,  // METADATA_QUEUE
+    1,   // FILE_QUEUE
 };
 
 JobScheduler::JobEntry::JobEntry(JobType type)
@@ -193,8 +194,8 @@ JobScheduler::JobScheduler(
       pref_service_(pref_service),
       weak_ptr_factory_(this) {
   for (int i = 0; i < NUM_QUEUES; ++i)
-    queue_[i].reset(new JobQueue(kMaxJobCount[i], NUM_CONTEXT_TYPES,
-                                 kMaxBatchCount, kMaxBatchSize));
+    queue_[i] = std::make_unique<JobQueue>(kMaxJobCount[i], NUM_CONTEXT_TYPES,
+                                           kMaxBatchCount, kMaxBatchSize);
 
   net::NetworkChangeNotifier::AddNetworkChangeObserver(this);
 }
@@ -270,18 +271,19 @@ void JobScheduler::GetAboutResource(
   StartJob(new_job);
 }
 
-void JobScheduler::GetAppList(const google_apis::AppListCallback& callback) {
+void JobScheduler::GetStartPageToken(
+    const std::string& team_drive_id,
+    const google_apis::StartPageTokenCallback& callback) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!callback.is_null());
 
-  JobEntry* new_job = CreateNewJob(TYPE_GET_APP_LIST);
-  new_job->task = base::Bind(
-      &DriveServiceInterface::GetAppList,
-      base::Unretained(drive_service_),
-      base::Bind(&JobScheduler::OnGetAppListJobDone,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 new_job->job_info.job_id,
-                 callback));
+  JobEntry* new_job = CreateNewJob(TYPE_GET_START_PAGE_TOKEN);
+  new_job->task = base::BindRepeating(
+      &DriveServiceInterface::GetStartPageToken,
+      base::Unretained(drive_service_), team_drive_id,
+      base::BindRepeating(&JobScheduler::OnGetStartPageTokenDone,
+                          weak_ptr_factory_.GetWeakPtr(),
+                          new_job->job_info.job_id, callback));
   new_job->abort_callback = CreateErrorRunCallback(callback);
   StartJob(new_job);
 }
@@ -302,18 +304,17 @@ void JobScheduler::GetAllTeamDriveList(
 }
 
 void JobScheduler::GetAllFileList(
+    const std::string& team_drive_id,
     const google_apis::FileListCallback& callback) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!callback.is_null());
 
   JobEntry* new_job = CreateNewJob(TYPE_GET_ALL_RESOURCE_LIST);
-  new_job->task = base::Bind(
-      &DriveServiceInterface::GetAllFileList,
-      base::Unretained(drive_service_),
-      base::Bind(&JobScheduler::OnGetFileListJobDone,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 new_job->job_info.job_id,
-                 callback));
+  new_job->task = base::Bind(&DriveServiceInterface::GetAllFileList,
+                             base::Unretained(drive_service_), team_drive_id,
+                             base::Bind(&JobScheduler::OnGetFileListJobDone,
+                                        weak_ptr_factory_.GetWeakPtr(),
+                                        new_job->job_info.job_id, callback));
   new_job->abort_callback = CreateErrorRunCallback(callback);
   StartJob(new_job);
 }
@@ -371,6 +372,21 @@ void JobScheduler::GetChangeList(
                  weak_ptr_factory_.GetWeakPtr(),
                  new_job->job_info.job_id,
                  callback));
+  new_job->abort_callback = CreateErrorRunCallback(callback);
+  StartJob(new_job);
+}
+
+void JobScheduler::GetChangeList(
+    const std::string& team_drive_id,
+    const std::string& start_page_token,
+    const google_apis::ChangeListCallback& callback) {
+  JobEntry* new_job = CreateNewJob(TYPE_GET_CHANGE_LIST);
+  new_job->task = base::BindRepeating(
+      &DriveServiceInterface::GetChangeListByToken,
+      base::Unretained(drive_service_), team_drive_id, start_page_token,
+      base::BindRepeating(&JobScheduler::OnGetChangeListJobDone,
+                          weak_ptr_factory_.GetWeakPtr(),
+                          new_job->job_info.job_id, callback));
   new_job->abort_callback = CreateErrorRunCallback(callback);
   StartJob(new_job);
 }
@@ -443,29 +459,6 @@ void JobScheduler::GetFileResource(
       base::Unretained(drive_service_),
       resource_id,
       base::Bind(&JobScheduler::OnGetFileResourceJobDone,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 new_job->job_info.job_id,
-                 callback));
-  new_job->abort_callback = CreateErrorRunCallback(callback);
-  StartJob(new_job);
-}
-
-void JobScheduler::GetShareUrl(
-    const std::string& resource_id,
-    const GURL& embed_origin,
-    const ClientContext& context,
-    const google_apis::GetShareUrlCallback& callback) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK(!callback.is_null());
-
-  JobEntry* new_job = CreateNewJob(TYPE_GET_SHARE_URL);
-  new_job->context = context;
-  new_job->task = base::Bind(
-      &DriveServiceInterface::GetShareUrl,
-      base::Unretained(drive_service_),
-      resource_id,
-      embed_origin,
-      base::Bind(&JobScheduler::OnGetShareUrlJobDone,
                  weak_ptr_factory_.GetWeakPtr(),
                  new_job->job_info.job_id,
                  callback));
@@ -828,9 +821,8 @@ void JobScheduler::DoJobLoop(QueueType queue_type) {
   if (now < wait_until_) {
     base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE,
-        base::Bind(&JobScheduler::DoJobLoop,
-                   weak_ptr_factory_.GetWeakPtr(),
-                   queue_type),
+        base::BindOnce(&JobScheduler::DoJobLoop, weak_ptr_factory_.GetWeakPtr(),
+                       queue_type),
         wait_until_ - now);
     return;
   }
@@ -958,10 +950,8 @@ bool JobScheduler::OnJobDone(JobID job_id,
   // Post a task to continue the job loop.  This allows us to finish handling
   // the current job before starting the next one.
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE,
-      base::Bind(&JobScheduler::DoJobLoop,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 queue_type));
+      FROM_HERE, base::BindOnce(&JobScheduler::DoJobLoop,
+                                weak_ptr_factory_.GetWeakPtr(), queue_type));
   return !should_retry;
 }
 
@@ -1025,28 +1015,16 @@ void JobScheduler::OnGetAboutResourceJobDone(
     callback.Run(error, std::move(about_resource));
 }
 
-void JobScheduler::OnGetShareUrlJobDone(
+void JobScheduler::OnGetStartPageTokenDone(
     JobID job_id,
-    const google_apis::GetShareUrlCallback& callback,
+    const google_apis::StartPageTokenCallback& callback,
     google_apis::DriveApiErrorCode error,
-    const GURL& share_url) {
+    std::unique_ptr<google_apis::StartPageToken> start_page_token) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!callback.is_null());
 
   if (OnJobDone(job_id, error))
-    callback.Run(error, share_url);
-}
-
-void JobScheduler::OnGetAppListJobDone(
-    JobID job_id,
-    const google_apis::AppListCallback& callback,
-    google_apis::DriveApiErrorCode error,
-    std::unique_ptr<google_apis::AppList> app_list) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK(!callback.is_null());
-
-  if (OnJobDone(job_id, error))
-    callback.Run(error, std::move(app_list));
+    callback.Run(error, std::move(start_page_token));
 }
 
 void JobScheduler::OnEntryActionJobDone(
@@ -1176,6 +1154,7 @@ JobScheduler::QueueType JobScheduler::GetJobQueueType(JobType type) {
     case TYPE_GET_REMAINING_FILE_LIST:
     case TYPE_GET_RESOURCE_ENTRY:
     case TYPE_GET_SHARE_URL:
+    case TYPE_GET_START_PAGE_TOKEN:
     case TYPE_TRASH_RESOURCE:
     case TYPE_COPY_RESOURCE:
     case TYPE_UPDATE_RESOURCE:
@@ -1212,8 +1191,8 @@ void JobScheduler::AbortNotRunningJob(JobEntry* job,
   queue_[GetJobQueueType(job->job_info.job_type)]->Remove(job->job_info.job_id);
   NotifyJobDone(job->job_info, error);
   job_map_.Remove(job->job_info.job_id);
-  base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
-                                                base::Bind(callback, error));
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::BindOnce(callback, error));
 }
 
 void JobScheduler::NotifyJobAdded(const JobInfo& job_info) {

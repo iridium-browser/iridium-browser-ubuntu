@@ -15,10 +15,10 @@
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/post_task.h"
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/prerender/prerender_manager_factory.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/safe_browsing/local_database_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/pref_names.h"
@@ -26,10 +26,9 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/prefs/pref_service.h"
 #include "components/safe_browsing/db/v4_protocol_manager_util.h"
-#include "content/public/browser/notification_details.h"
-#include "content/public/browser/notification_source.h"
-#include "content/public/browser/notification_types.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/render_view_host.h"
+#include "content/public/browser/render_widget_host.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/test/ppapi_test_utils.h"
@@ -92,8 +91,8 @@ class CountingInterceptor : public net::URLRequestInterceptor {
   }
 
   void RequestStarted() {
-    content::BrowserThread::PostTask(
-        content::BrowserThread::UI, FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, {content::BrowserThread::UI},
         base::BindOnce(&RequestCounter::RequestStarted, counter_));
   }
 
@@ -115,8 +114,8 @@ class CountingInterceptorWithCallback : public net::URLRequestInterceptor {
     base::WeakPtr<RequestCounter> weakptr;
     if (counter)
       weakptr = counter->AsWeakPtr();
-    content::BrowserThread::PostTask(
-        content::BrowserThread::IO, FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, {content::BrowserThread::IO},
         base::BindOnce(&CountingInterceptorWithCallback::CreateAndAddOnIO, url,
                        weakptr, callback_io));
   }
@@ -129,8 +128,8 @@ class CountingInterceptorWithCallback : public net::URLRequestInterceptor {
     callback_.Run(request);
 
     // Ping the request counter.
-    content::BrowserThread::PostTask(
-        content::BrowserThread::UI, FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, {content::BrowserThread::UI},
         base::BindOnce(&RequestCounter::RequestStarted, counter_));
     return nullptr;
   }
@@ -159,45 +158,6 @@ class CountingInterceptorWithCallback : public net::URLRequestInterceptor {
   DISALLOW_COPY_AND_ASSIGN(CountingInterceptorWithCallback);
 };
 
-// URLRequestJob (and associated handler) which hangs.
-class HangingURLRequestJob : public net::URLRequestJob {
- public:
-  HangingURLRequestJob(net::URLRequest* request,
-                          net::NetworkDelegate* network_delegate)
-      : net::URLRequestJob(request, network_delegate) {
-  }
-
-  void Start() override {}
-
- private:
-  ~HangingURLRequestJob() override {}
-};
-
-class HangingFirstRequestInterceptor : public net::URLRequestInterceptor {
- public:
-  HangingFirstRequestInterceptor(
-      const base::FilePath& file,
-      base::Callback<void(net::URLRequest*)> callback)
-      : file_(file), callback_(callback), first_run_(true) {}
-  ~HangingFirstRequestInterceptor() override {}
-
-  net::URLRequestJob* MaybeInterceptRequest(
-      net::URLRequest* request,
-      net::NetworkDelegate* network_delegate) const override {
-    if (first_run_) {
-      first_run_ = false;
-      if (!callback_.is_null())
-        callback_.Run(request);
-      return new HangingURLRequestJob(request, network_delegate);
-    }
-    return new net::URLRequestMockHTTPJob(request, network_delegate, file_);
-  }
-
- private:
-  base::FilePath file_;
-  base::Callback<void(net::URLRequest*)> callback_;
-  mutable bool first_run_;
-};
 
 // An ExternalProtocolHandler that blocks everything and asserts it never is
 // called.
@@ -240,17 +200,6 @@ class NeverRunsExternalProtocolHandlerDelegate
   void FinishedProcessingCheck() override { NOTREACHED(); }
 };
 
-void CreateHangingFirstRequestInterceptorOnIO(
-    const GURL& url,
-    const base::FilePath& file,
-    base::Callback<void(net::URLRequest*)> callback_io) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  std::unique_ptr<net::URLRequestInterceptor> interceptor(
-      new HangingFirstRequestInterceptor(file, callback_io));
-  net::URLRequestFilter::GetInstance()->AddUrlInterceptor(
-      url, std::move(interceptor));
-}
-
 }  // namespace
 
 RequestCounter::RequestCounter() : count_(0), expected_count_(-1) {}
@@ -288,8 +237,8 @@ bool FakeSafeBrowsingDatabaseManager::CheckBrowseUrl(
     return true;
   }
 
-  content::BrowserThread::PostTask(
-      content::BrowserThread::IO, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {content::BrowserThread::IO},
       base::BindOnce(&FakeSafeBrowsingDatabaseManager::OnCheckBrowseURLDone,
                      this, gurl, client));
   return false;
@@ -318,18 +267,8 @@ FakeSafeBrowsingDatabaseManager::~FakeSafeBrowsingDatabaseManager() {}
 
 void FakeSafeBrowsingDatabaseManager::OnCheckBrowseURLDone(const GURL& gurl,
                                                            Client* client) {
-  safe_browsing::SBThreatTypeSet expected_threats =
-      safe_browsing::CreateSBThreatTypeSet(
-          {safe_browsing::SB_THREAT_TYPE_URL_MALWARE,
-           safe_browsing::SB_THREAT_TYPE_URL_PHISHING});
-
-  // TODO(nparker): Replace SafeBrowsingCheck w/ a call to
-  // client->OnCheckBrowseUrlResult()
-  safe_browsing::LocalSafeBrowsingDatabaseManager::SafeBrowsingCheck sb_check(
-      std::vector<GURL>(1, gurl), std::vector<safe_browsing::SBFullHash>(),
-      client, safe_browsing::MALWARE, expected_threats);
-  sb_check.url_results[0] = bad_urls_[gurl.spec()];
-  sb_check.OnSafeBrowsingResult();
+  client->OnCheckBrowseUrlResult(gurl, bad_urls_[gurl.spec()],
+                                 safe_browsing::ThreatMetadata());
 }
 
 TestPrerenderContents::TestPrerenderContents(
@@ -341,6 +280,7 @@ TestPrerenderContents::TestPrerenderContents(
     FinalStatus expected_final_status)
     : PrerenderContents(prerender_manager, profile, url, referrer, origin),
       expected_final_status_(expected_final_status),
+      observer_(this),
       new_render_view_host_(nullptr),
       was_hidden_(false),
       was_shown_(false),
@@ -384,36 +324,31 @@ void TestPrerenderContents::OnRenderViewHostCreated(
     RenderViewHost* new_render_view_host) {
   // Used to make sure the RenderViewHost is hidden and, if used,
   // subsequently shown.
-  notification_registrar().Add(
-      this, content::NOTIFICATION_RENDER_WIDGET_VISIBILITY_CHANGED,
-      content::Source<content::RenderWidgetHost>(
-          new_render_view_host->GetWidget()));
+  observer_.Add(new_render_view_host->GetWidget());
 
   new_render_view_host_ = new_render_view_host;
 
   PrerenderContents::OnRenderViewHostCreated(new_render_view_host);
 }
 
-void TestPrerenderContents::Observe(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
-  if (type == content::NOTIFICATION_RENDER_WIDGET_VISIBILITY_CHANGED) {
-    EXPECT_EQ(new_render_view_host_->GetWidget(),
-              content::Source<content::RenderWidgetHost>(source).ptr());
-    bool is_visible = *content::Details<bool>(details).ptr();
+void TestPrerenderContents::RenderWidgetHostVisibilityChanged(
+    content::RenderWidgetHost* widget_host,
+    bool became_visible) {
+  EXPECT_EQ(new_render_view_host_->GetWidget(), widget_host);
 
-    if (!is_visible) {
-      was_hidden_ = true;
-    } else if (is_visible && was_hidden_) {
-      // Once hidden, a prerendered RenderViewHost should only be shown after
-      // being removed from the PrerenderContents for display.
-      EXPECT_FALSE(GetRenderViewHost());
-      was_shown_ = true;
-    }
-    return;
+  if (!became_visible) {
+    was_hidden_ = true;
+  } else if (became_visible && was_hidden_) {
+    // Once hidden, a prerendered RenderViewHost should only be shown after
+    // being removed from the PrerenderContents for display.
+    EXPECT_FALSE(GetRenderViewHost());
+    was_shown_ = true;
   }
-  PrerenderContents::Observe(type, source, details);
+}
+
+void TestPrerenderContents::RenderWidgetHostDestroyed(
+    content::RenderWidgetHost* widget_host) {
+  observer_.Remove(widget_host);
 }
 
 DestructionWaiter::DestructionWaiter(TestPrerenderContents* prerender_contents,
@@ -696,7 +631,8 @@ PrerenderInProcessBrowserTest::GetFakeSafeBrowsingDatabaseManager() {
           .get());
 }
 
-void PrerenderInProcessBrowserTest::SetUpInProcessBrowserTestFixture() {
+void PrerenderInProcessBrowserTest::CreatedBrowserMainParts(
+    content::BrowserMainParts* browser_main_parts) {
   safe_browsing_factory_->SetTestDatabaseManager(
       new test_utils::FakeSafeBrowsingDatabaseManager());
   safe_browsing::SafeBrowsingService::RegisterFactory(
@@ -854,33 +790,10 @@ void CreateCountingInterceptorOnIO(
       url, std::make_unique<CountingInterceptor>(file, counter));
 }
 
-void InterceptRequest(const GURL& url,
-                      base::Callback<void(net::URLRequest*)> callback_io) {
-  CountingInterceptorWithCallback::Initialize(url, nullptr, callback_io);
-}
-
-void InterceptRequestAndCount(
-    const GURL& url,
-    RequestCounter* counter,
-    base::Callback<void(net::URLRequest*)> callback_io) {
-  CountingInterceptorWithCallback::Initialize(url, counter, callback_io);
-}
-
 void CreateMockInterceptorOnIO(const GURL& url, const base::FilePath& file) {
   CHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::IO));
   net::URLRequestFilter::GetInstance()->AddUrlInterceptor(
       url, net::URLRequestMockHTTPJob::CreateInterceptorForSingleFile(file));
-}
-
-void CreateHangingFirstRequestInterceptor(
-    const GURL& url,
-    const base::FilePath& file,
-    base::Callback<void(net::URLRequest*)> callback_io) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  content::BrowserThread::PostTask(
-      content::BrowserThread::IO, FROM_HERE,
-      base::BindOnce(&CreateHangingFirstRequestInterceptorOnIO, url, file,
-                     callback_io));
 }
 
 }  // namespace test_utils

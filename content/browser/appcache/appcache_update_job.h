@@ -9,6 +9,7 @@
 #include <stdint.h>
 
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <vector>
@@ -26,7 +27,6 @@
 #include "content/browser/appcache/appcache_storage.h"
 #include "content/common/appcache_interfaces.h"
 #include "content/common/content_export.h"
-#include "net/base/completion_callback.h"
 #include "net/http/http_response_headers.h"
 #include "net/url_request/url_request.h"
 #include "url/gurl.h"
@@ -117,7 +117,7 @@ class CONTENT_EXPORT AppCacheUpdateJob
     scoped_refptr<AppCacheResponseInfo> existing_response_info;
   };
 
-  AppCacheResponseWriter* CreateResponseWriter();
+  std::unique_ptr<AppCacheResponseWriter> CreateResponseWriter();
 
   // Methods for AppCacheStorage::Delegate.
   void OnResponseInfoLoaded(AppCacheResponseInfo* response_info,

@@ -12,9 +12,9 @@
 #include "components/autofill/core/browser/autofill_driver.h"
 #include "components/autofill/core/browser/autofill_experiments.h"
 #include "components/autofill/core/browser/autofill_external_delegate.h"
+#include "components/autofill/core/browser/autofill_metrics.h"
 #include "components/autofill/core/browser/suggestion.h"
 #include "components/autofill/core/browser/validation.h"
-#include "components/autofill/core/common/autofill_pref_names.h"
 #include "components/autofill/core/common/form_data.h"
 #include "components/prefs/pref_service.h"
 
@@ -35,6 +35,39 @@ bool IsTextField(const FormFieldData& field) {
 }
 
 }  // namespace
+
+void AutocompleteHistoryManager::UMARecorder::OnGetAutocompleteSuggestions(
+    const base::string16& name,
+    WebDataServiceBase::Handle pending_query_handle) {
+  // log only if the current field is different than the latest one that has
+  // been logged. we assume that user works at the same field if
+  // measuring_name_ is same as the name of current field.
+  bool should_log_query = measuring_name_ != name;
+
+  if (should_log_query) {
+    AutofillMetrics::LogAutocompleteQuery(pending_query_handle /* created */);
+    measuring_name_ = name;
+  }
+  // We should track the query and log the suggestions, only if
+  // - query has been logged.
+  // - or, the query we previously tracked has been cancelled
+  // The previous query must be cancelled if measuring_query_handle_ isn't
+  // reset.
+  if (should_log_query || measuring_query_handle_)
+    measuring_query_handle_ = pending_query_handle;
+}
+
+void AutocompleteHistoryManager::UMARecorder::OnWebDataServiceRequestDone(
+    WebDataServiceBase::Handle pending_query_handle,
+    bool has_suggestion) {
+  // If handle of completed query does not match the query we're currently
+  // measuring then we've already logged a query for this name.
+  bool was_already_logged = (pending_query_handle != measuring_query_handle_);
+  measuring_query_handle_ = 0;
+  if (was_already_logged)
+    return;
+  AutofillMetrics::LogAutocompleteSuggestions(has_suggestion);
+}
 
 AutocompleteHistoryManager::AutocompleteHistoryManager(
     AutofillDriver* driver,
@@ -61,16 +94,18 @@ void AutocompleteHistoryManager::OnGetAutocompleteSuggestions(
 
   query_id_ = query_id;
   if (!autofill_client_->IsAutocompleteEnabled() ||
-      !autofill_client_->IsAutofillSupported() ||
       form_control_type == "textarea" ||
       IsInAutofillSuggestionsDisabledExperiment()) {
     SendSuggestions(nullptr);
+    uma_recorder_.OnGetAutocompleteSuggestions(name,
+                                               0 /* pending_query_handle */);
     return;
   }
 
-  if (database_.get()) {
+  if (database_) {
     pending_query_handle_ = database_->GetFormValuesForElementName(
         name, prefix, kMaxAutocompleteMenuItems, this);
+    uma_recorder_.OnGetAutocompleteSuggestions(name, pending_query_handle_);
   }
 }
 
@@ -90,14 +125,14 @@ void AutocompleteHistoryManager::OnWillSubmitForm(const FormData& form) {
   //  - value is not a SSN
   //  - field was not identified as a CVC field (this is handled in
   //    AutofillManager)
+  //  - field is focusable
+  //  - not a presentation field
   std::vector<FormFieldData> values;
   for (const FormFieldData& field : form.fields) {
-    if (!field.value.empty() &&
-        !field.name.empty() &&
-        IsTextField(field) &&
-        field.should_autocomplete &&
-        !IsValidCreditCardNumber(field.value) &&
-        !IsSSN(field.value)) {
+    if (!field.value.empty() && !field.name.empty() && IsTextField(field) &&
+        field.should_autocomplete && !IsValidCreditCardNumber(field.value) &&
+        !IsSSN(field.value) && field.is_focusable &&
+        field.role != FormFieldData::ROLE_ATTRIBUTE_PRESENTATION) {
       values.push_back(field);
     }
   }
@@ -108,7 +143,7 @@ void AutocompleteHistoryManager::OnWillSubmitForm(const FormData& form) {
 
 void AutocompleteHistoryManager::OnRemoveAutocompleteEntry(
     const base::string16& name, const base::string16& value) {
-  if (database_.get())
+  if (database_)
     database_->RemoveFormValueForElementName(name, value);
 }
 
@@ -119,7 +154,7 @@ void AutocompleteHistoryManager::SetExternalDelegate(
 
 void AutocompleteHistoryManager::CancelPendingQuery() {
   if (pending_query_handle_) {
-    if (database_.get())
+    if (database_)
       database_->CancelRequest(pending_query_handle_);
     pending_query_handle_ = 0;
   }
@@ -134,7 +169,7 @@ void AutocompleteHistoryManager::SendSuggestions(
     }
   }
 
-  external_delegate_->OnSuggestionsReturned(query_id_, suggestions);
+  external_delegate_->OnSuggestionsReturned(query_id_, suggestions, false);
   query_id_ = 0;
 }
 
@@ -142,6 +177,7 @@ void AutocompleteHistoryManager::OnWebDataServiceRequestDone(
     WebDataServiceBase::Handle h,
     std::unique_ptr<WDTypedResult> result) {
   DCHECK(pending_query_handle_);
+  auto current_query_handle = pending_query_handle_;
   pending_query_handle_ = 0;
 
   DCHECK(result);
@@ -150,6 +186,8 @@ void AutocompleteHistoryManager::OnWebDataServiceRequestDone(
   // See http://crbug.com/68783.
   if (!result) {
     SendSuggestions(nullptr);
+    uma_recorder_.OnWebDataServiceRequestDone(current_query_handle,
+                                              false /* has_suggestion */);
     return;
   }
 
@@ -158,6 +196,8 @@ void AutocompleteHistoryManager::OnWebDataServiceRequestDone(
       static_cast<const WDResult<std::vector<base::string16>>*>(result.get());
   std::vector<base::string16> suggestions = autofill_result->GetValue();
   SendSuggestions(&suggestions);
+  uma_recorder_.OnWebDataServiceRequestDone(
+      current_query_handle, !suggestions.empty() /* has_suggestion */);
 }
 
 }  // namespace autofill

@@ -5,8 +5,9 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_ROOT_FRAME_VIEWPORT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FRAME_ROOT_FRAME_VIEWPORT_H_
 
+#include "base/single_thread_task_runner.h"
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/platform/scroll/scrollable_area.h"
+#include "third_party/blink/renderer/core/scroll/scrollable_area.h"
 
 namespace blink {
 
@@ -34,7 +35,7 @@ class CORE_EXPORT RootFrameViewport final
     return new RootFrameViewport(visual_viewport, layout_viewport);
   }
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
   void SetLayoutViewport(ScrollableArea&);
   ScrollableArea& LayoutViewport() const;
@@ -63,8 +64,14 @@ class CORE_EXPORT RootFrameViewport final
                             const WebScrollIntoViewParams&) override;
   IntRect VisibleContentRect(
       IncludeScrollbarsInRect = kExcludeScrollbars) const override;
-  LayoutRect VisibleScrollSnapportRect() const override;
+  LayoutRect VisibleScrollSnapportRect(
+      IncludeScrollbarsInRect = kExcludeScrollbars) const override;
   bool ShouldUseIntegerScrollOffset() const override;
+  bool IsThrottled() const override {
+    // RootFrameViewport is always in the main frame, so the frame does not get
+    // throttled.
+    return false;
+  }
   bool IsActive() const override;
   int ScrollSize(ScrollbarOrientation) const override;
   bool IsScrollCornerVisible() const override;
@@ -96,8 +103,10 @@ class CORE_EXPORT RootFrameViewport final
           kIgnorePlatformOverlayScrollbarSize) const override;
   ScrollResult UserScroll(ScrollGranularity, const FloatSize&) override;
   CompositorElementId GetCompositorElementId() const override;
+  CompositorElementId GetScrollbarElementId(
+      ScrollbarOrientation orientation) override;
   bool ScrollAnimatorEnabled() const override;
-  PlatformChromeClient* GetChromeClient() const override;
+  ChromeClient* GetChromeClient() const override;
   SmoothScrollSequencer* GetSmoothScrollSequencer() const override;
   void ServiceScrollAnimations(double) override;
   void UpdateCompositorScrollAnimations() override;

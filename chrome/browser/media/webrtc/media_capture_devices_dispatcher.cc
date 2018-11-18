@@ -4,15 +4,18 @@
 
 #include "chrome/browser/media/webrtc/media_capture_devices_dispatcher.h"
 
+#include <memory>
+#include <utility>
+
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/metrics/field_trial.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/post_task.h"
 #include "build/build_config.h"
 #include "chrome/browser/media/media_access_handler.h"
-#include "chrome/browser/media/webrtc/desktop_streams_registry.h"
 #include "chrome/browser/media/webrtc/media_stream_capture_indicator.h"
 #include "chrome/browser/media/webrtc/permission_bubble_media_access_handler.h"
 #include "chrome/browser/profiles/profile.h"
@@ -23,6 +26,7 @@
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
 #include "components/prefs/scoped_user_pref_update.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/media_capture_devices.h"
 #include "content/public/browser/notification_source.h"
@@ -33,6 +37,10 @@
 #include "extensions/buildflags/buildflags.h"
 #include "extensions/common/constants.h"
 #include "media/base/media_switches.h"
+
+#if !defined(OS_ANDROID)
+#include "chrome/browser/media/webrtc/display_media_access_handler.h"
+#endif  //  defined(OS_ANDROID)
 
 #if defined(OS_CHROMEOS)
 #include "ash/shell.h"
@@ -48,7 +56,7 @@
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/permissions/permissions_data.h"
-#endif
+#endif  // BUILDFLAG(ENABLE_EXTENSIONS)
 
 using content::BrowserThread;
 using content::MediaCaptureDevices;
@@ -60,7 +68,7 @@ namespace {
 const content::MediaStreamDevice* FindDeviceWithId(
     const content::MediaStreamDevices& devices,
     const std::string& device_id) {
-  content::MediaStreamDevices::const_iterator iter = devices.begin();
+  auto iter = devices.begin();
   for (; iter != devices.end(); ++iter) {
     if (iter->id == device_id) {
       return &(*iter);
@@ -77,12 +85,6 @@ content::WebContents* WebContentsFromIds(int render_process_id,
   return web_contents;
 }
 
-#if BUILDFLAG(ENABLE_EXTENSIONS)
-inline CaptureAccessHandlerBase* ToCaptureAccessHandlerBase(
-    MediaAccessHandler* handler) {
-  return static_cast<CaptureAccessHandlerBase*>(handler);
-}
-#endif
 }  // namespace
 
 MediaCaptureDevicesDispatcher* MediaCaptureDevicesDispatcher::GetInstance() {
@@ -93,6 +95,11 @@ MediaCaptureDevicesDispatcher::MediaCaptureDevicesDispatcher()
     : is_device_enumeration_disabled_(false),
       media_stream_capture_indicator_(new MediaStreamCaptureIndicator()) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
+#if !defined(OS_ANDROID)
+  media_access_handlers_.push_back(
+      std::make_unique<DisplayMediaAccessHandler>());
+#endif  //  defined(OS_ANDROID)
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
 #if defined(OS_CHROMEOS)
@@ -170,7 +177,7 @@ MediaCaptureDevicesDispatcher::GetVideoCaptureDevices() {
 void MediaCaptureDevicesDispatcher::ProcessMediaAccessRequest(
     content::WebContents* web_contents,
     const content::MediaStreamRequest& request,
-    const content::MediaResponseCallback& callback,
+    content::MediaResponseCallback callback,
     const extensions::Extension* extension) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
@@ -179,12 +186,13 @@ void MediaCaptureDevicesDispatcher::ProcessMediaAccessRequest(
                                     extension) ||
         handler->SupportsStreamType(web_contents, request.audio_type,
                                     extension)) {
-      handler->HandleRequest(web_contents, request, callback, extension);
+      handler->HandleRequest(web_contents, request, std::move(callback),
+                             extension);
       return;
     }
   }
-  callback.Run(content::MediaStreamDevices(),
-               content::MEDIA_DEVICE_NOT_SUPPORTED, nullptr);
+  std::move(callback).Run(content::MediaStreamDevices(),
+                          content::MEDIA_DEVICE_NOT_SUPPORTED, nullptr);
 }
 
 bool MediaCaptureDevicesDispatcher::CheckMediaAccessPermission(
@@ -304,17 +312,10 @@ MediaCaptureDevicesDispatcher::GetMediaStreamCaptureIndicator() {
   return media_stream_capture_indicator_;
 }
 
-DesktopStreamsRegistry*
-MediaCaptureDevicesDispatcher::GetDesktopStreamsRegistry() {
-  if (!desktop_streams_registry_)
-    desktop_streams_registry_.reset(new DesktopStreamsRegistry());
-  return desktop_streams_registry_.get();
-}
-
 void MediaCaptureDevicesDispatcher::OnAudioCaptureDevicesChanged() {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::UI},
       base::BindOnce(
           &MediaCaptureDevicesDispatcher::NotifyAudioDevicesChangedOnUIThread,
           base::Unretained(this)));
@@ -322,8 +323,8 @@ void MediaCaptureDevicesDispatcher::OnAudioCaptureDevicesChanged() {
 
 void MediaCaptureDevicesDispatcher::OnVideoCaptureDevicesChanged() {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::UI},
       base::BindOnce(
           &MediaCaptureDevicesDispatcher::NotifyVideoDevicesChangedOnUIThread,
           base::Unretained(this)));
@@ -337,20 +338,29 @@ void MediaCaptureDevicesDispatcher::OnMediaRequestStateChanged(
     content::MediaStreamType stream_type,
     content::MediaRequestState state) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::UI},
       base::BindOnce(
           &MediaCaptureDevicesDispatcher::UpdateMediaRequestStateOnUIThread,
           base::Unretained(this), render_process_id, render_frame_id,
           page_request_id, security_origin, stream_type, state));
 }
 
-void MediaCaptureDevicesDispatcher::OnCreatingAudioStream(
-    int render_process_id,
-    int render_frame_id) {
+void MediaCaptureDevicesDispatcher::OnCreatingAudioStream(int render_process_id,
+                                                          int render_frame_id) {
+  // TODO(https://crbug.com/837606): Figure out how to simplify threading here.
+  // Currently, this will either always be called on the UI thread, or always
+  // on the IO thread, depending on how far along the work to migrate to the
+  // audio service has progressed. The rest of the methods of the
+  // content::MediaObserver are always called on the IO thread.
+  if (BrowserThread::CurrentlyOn(BrowserThread::UI)) {
+    OnCreatingAudioStreamOnUIThread(render_process_id, render_frame_id);
+    return;
+  }
+
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::UI},
       base::BindOnce(
           &MediaCaptureDevicesDispatcher::OnCreatingAudioStreamOnUIThread,
           base::Unretained(this), render_process_id, render_frame_id));
@@ -387,7 +397,8 @@ void MediaCaptureDevicesDispatcher::UpdateMediaRequestStateOnUIThread(
   }
 
 #if defined(OS_CHROMEOS)
-  if (IsOriginForCasting(security_origin) && IsVideoMediaType(stream_type)) {
+  if (IsOriginForCasting(security_origin) &&
+      IsVideoInputMediaType(stream_type)) {
     // Notify ash that casting state has changed.
     if (state == content::MEDIA_REQUEST_STATE_DONE) {
       ash::Shell::Get()->OnCastingSessionStartedOrStopped(true);
@@ -415,21 +426,12 @@ bool MediaCaptureDevicesDispatcher::IsInsecureCapturingInProgress(
     int render_process_id,
     int render_frame_id) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-#if BUILDFLAG(ENABLE_EXTENSIONS)
+
   for (const auto& handler : media_access_handlers_) {
-    if (handler->SupportsStreamType(
-            WebContentsFromIds(render_process_id, render_frame_id),
-            content::MEDIA_DESKTOP_VIDEO_CAPTURE, nullptr) ||
-        handler->SupportsStreamType(
-            WebContentsFromIds(render_process_id, render_frame_id),
-            content::MEDIA_TAB_VIDEO_CAPTURE, nullptr)) {
-      if (ToCaptureAccessHandlerBase(handler.get())
-              ->IsInsecureCapturingInProgress(render_process_id,
-                                              render_frame_id))
-        return true;
-    }
+    if (handler->IsInsecureCapturingInProgress(render_process_id,
+                                               render_frame_id))
+      return true;
   }
-#endif
   return false;
 }
 
@@ -450,12 +452,13 @@ void MediaCaptureDevicesDispatcher::OnSetCapturingLinkSecured(
     content::MediaStreamType stream_type,
     bool is_secure) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  if (stream_type != content::MEDIA_TAB_VIDEO_CAPTURE &&
-      stream_type != content::MEDIA_DESKTOP_VIDEO_CAPTURE)
+  if (stream_type != content::MEDIA_GUM_TAB_VIDEO_CAPTURE &&
+      stream_type != content::MEDIA_GUM_DESKTOP_VIDEO_CAPTURE &&
+      stream_type != content::MEDIA_DISPLAY_VIDEO_CAPTURE) {
     return;
-
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
+  }
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::UI},
       base::BindOnce(&MediaCaptureDevicesDispatcher::UpdateCapturingLinkSecured,
                      base::Unretained(this), render_process_id, render_frame_id,
                      page_request_id, stream_type, is_secure));
@@ -468,20 +471,15 @@ void MediaCaptureDevicesDispatcher::UpdateCapturingLinkSecured(
     content::MediaStreamType stream_type,
     bool is_secure) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  if (stream_type != content::MEDIA_TAB_VIDEO_CAPTURE &&
-      stream_type != content::MEDIA_DESKTOP_VIDEO_CAPTURE)
+  if (stream_type != content::MEDIA_GUM_TAB_VIDEO_CAPTURE &&
+      stream_type != content::MEDIA_GUM_DESKTOP_VIDEO_CAPTURE &&
+      stream_type != content::MEDIA_DISPLAY_VIDEO_CAPTURE) {
     return;
-
-#if BUILDFLAG(ENABLE_EXTENSIONS)
-  for (const auto& handler : media_access_handlers_) {
-    if (handler->SupportsStreamType(
-            WebContentsFromIds(render_process_id, render_frame_id), stream_type,
-            nullptr)) {
-      ToCaptureAccessHandlerBase(handler.get())
-          ->UpdateCapturingLinkSecured(render_process_id, render_frame_id,
-                                       page_request_id, is_secure);
-      break;
-    }
   }
-#endif
+
+  for (const auto& handler : media_access_handlers_) {
+    handler->UpdateCapturingLinkSecured(render_process_id, render_frame_id,
+                                        page_request_id, is_secure);
+    break;
+  }
 }

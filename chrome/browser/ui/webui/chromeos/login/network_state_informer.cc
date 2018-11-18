@@ -6,7 +6,6 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/login/screens/network_error.h"
@@ -194,13 +193,13 @@ bool NetworkStateInformer::UpdateState() {
 bool NetworkStateInformer::UpdateProxyConfig() {
   const NetworkState* default_network =
       NetworkHandler::Get()->network_state_handler()->DefaultNetwork();
-  if (!default_network)
+  if (!default_network || !default_network->proxy_config())
     return false;
 
-  if (proxy_config_ && *proxy_config_ == default_network->proxy_config())
+  if (proxy_config_ && *proxy_config_ == *default_network->proxy_config())
     return false;
   proxy_config_ =
-      std::make_unique<base::Value>(default_network->proxy_config().Clone());
+      std::make_unique<base::Value>(default_network->proxy_config()->Clone());
   return true;
 }
 

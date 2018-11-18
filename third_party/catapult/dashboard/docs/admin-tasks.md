@@ -54,11 +54,9 @@ If it's necessary at some point to have scheduled downtime, announce
 it ahead of time. At least 2 days before the downtime (ideally more),
 announce in these ways:
 
- 1. Use [/set\_warning\_message](https://chromeperf.appspot.com/set_warning_message) to
-    put a warning message on the dashboard itself.
- 2. Send an email to any Chromium perf sheriffs who will be affected,
+ 1. Send an email to any Chromium perf sheriffs who will be affected,
     or all perf sheriffs (`perf-sheriffs@chromium.org`).
- 3. Send an email to `chrome-perf-dashboard-announce@google.com`.
+ 2. Send an email to `chrome-perf-dashboard-announce@google.com`.
 
 If possible, it's probably best to schedule it for Saturday, when usage
 is likely to be relatively low.
@@ -190,6 +188,4 @@ unit test with the JSON to `add_point_test.py` and debug it from there.
 The bot whitelist is a list of bot names which are publicly visible. If a
 bot is not on the list, users must be logged into google.com accounts to
 see the data for that bot. You can add or remove a bot from the whitelist
-at [/bot\_whitelist](https://chromeperf.appspot.com/bot_whitelist),
-and make a bot’s existing data publicly visible (or internal\_only)
-at [/change\_internal\_only](https://chromeperf.appspot.com/change_internal_only).
+using the dev console by importing `dashboard.change_internal_only`.

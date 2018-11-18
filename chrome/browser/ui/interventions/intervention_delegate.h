@@ -10,6 +10,11 @@ class InterventionDelegate {
  public:
   virtual void AcceptIntervention() = 0;
   virtual void DeclineIntervention() = 0;
+  virtual void DeclineInterventionWithReload() = 0;
+
+  // Called if the user declines the intervention in a sticky way. e.g. by
+  // indicating they always want to decline the intervention on the site.
+  virtual void DeclineInterventionSticky() = 0;
 
  protected:
   virtual ~InterventionDelegate() = default;

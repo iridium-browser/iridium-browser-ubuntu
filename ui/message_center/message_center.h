@@ -39,6 +39,7 @@ namespace test {
 class MessagePopupCollectionTest;
 }
 
+class LockScreenController;
 class MessageCenterObserver;
 class MessageCenterImplTest;
 class NotificationBlocker;
@@ -52,8 +53,10 @@ class MESSAGE_CENTER_EXPORT MessageCenter {
     NON_PINNED,
   };
 
-  // Creates the global message center object.
+  // Creates the global message center object with default LockScreenController.
   static void Initialize();
+  // Creates the global message center object with custom LockScreenController.
+  static void Initialize(std::unique_ptr<LockScreenController> controller);
 
   // Returns the global message center object. Returns null if Initialize is
   // not called.
@@ -74,6 +77,11 @@ class MESSAGE_CENTER_EXPORT MessageCenter {
   // Find the notification with the corresponding id. Returns null if not
   // found. The returned instance is owned by the message center.
   virtual Notification* FindVisibleNotificationById(const std::string& id) = 0;
+
+  // Find all notifications with the corresponding |app_id|. Returns an
+  // empty set if none are found.
+  virtual NotificationList::Notifications FindNotificationsByAppId(
+      const std::string& app_id) = 0;
 
   // Gets all notifications to be shown to the user in the message center.  Note
   // that queued changes due to the message center being open are not reflected
@@ -175,6 +183,14 @@ class MESSAGE_CENTER_EXPORT MessageCenter {
   // Allows querying the visibility of the center.
   virtual bool IsMessageCenterVisible() const = 0;
 
+  // Informs the MessageCenter whether there's a bubble anchored to a system
+  // tray which holds notifications. If false, only toasts are shown (e.g. on
+  // desktop Linux and Windows). When there's no message center view, updated
+  // notifications will be re-appear as toasts even if they've already been
+  // shown.
+  virtual void SetHasMessageCenterView(bool has_message_center_view) = 0;
+  virtual bool HasMessageCenterView() const = 0;
+
   // UI classes should call this when there is cause to leave popups visible for
   // longer than the default (for example, when the mouse hovers over a popup).
   virtual void PausePopupTimers() = 0;
@@ -198,7 +214,7 @@ class MESSAGE_CENTER_EXPORT MessageCenter {
   friend class MessageCenterImplTestWithoutChangeQueue;
   friend class UiControllerTest;
   friend class TrayViewControllerTest;
-  friend class test::MessagePopupCollectionTest;
+  friend class MessagePopupCollectionTest;
   virtual void DisableTimersForTest() = 0;
 
   MessageCenter();

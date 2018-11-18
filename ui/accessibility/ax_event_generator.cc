@@ -10,12 +10,25 @@
 
 namespace ui {
 
-AXEventGenerator::TargetedEvent::TargetedEvent(ui::AXNode* node, Event event)
-    : node(node), event(event) {}
+AXEventGenerator::EventParams::EventParams(Event event,
+                                           ax::mojom::EventFrom event_from)
+    : event(event), event_from(event_from) {}
+
+AXEventGenerator::TargetedEvent::TargetedEvent(ui::AXNode* node,
+                                               const EventParams& event_params)
+    : node(node), event_params(event_params) {}
+
+bool AXEventGenerator::EventParams::operator==(const EventParams& rhs) {
+  return rhs.event == event;
+}
+
+bool AXEventGenerator::EventParams::operator<(const EventParams& rhs) const {
+  return event < rhs.event;
+}
 
 AXEventGenerator::Iterator::Iterator(
-    const std::map<AXNode*, std::set<Event>>& map,
-    const std::map<AXNode*, std::set<Event>>::const_iterator& head)
+    const std::map<AXNode*, std::set<EventParams>>& map,
+    const std::map<AXNode*, std::set<EventParams>>::const_iterator& head)
     : map_(map), map_iter_(head) {
   if (map_iter_ != map.end())
     set_iter_ = map_iter_->second.begin();
@@ -87,12 +100,16 @@ void AXEventGenerator::AddEvent(ui::AXNode* node,
   // A newly created live region or alert should not *also* fire a
   // live region changed event.
   if (event == Event::LIVE_REGION_CHANGED &&
-      (base::ContainsKey(tree_events_[node], Event::ALERT) ||
-       base::ContainsKey(tree_events_[node], Event::LIVE_REGION_CREATED))) {
+      (base::ContainsKey(
+           tree_events_[node],
+           EventParams(Event::ALERT, ax::mojom::EventFrom::kNone)) ||
+       base::ContainsKey(tree_events_[node],
+                         EventParams(Event::LIVE_REGION_CREATED,
+                                     ax::mojom::EventFrom::kNone)))) {
     return;
   }
 
-  tree_events_[node].insert(event);
+  tree_events_[node].insert(EventParams(event, event_from_));
 }
 
 void AXEventGenerator::OnNodeDataWillChange(AXTree* tree,
@@ -107,7 +124,8 @@ void AXEventGenerator::OnNodeDataWillChange(AXTree* tree,
   if (new_node_data.child_ids != old_node_data.child_ids &&
       new_node_data.role != ax::mojom::Role::kStaticText) {
     AXNode* node = tree_->GetFromId(new_node_data.id);
-    tree_events_[node].insert(Event::CHILDREN_CHANGED);
+    tree_events_[node].insert(
+        EventParams(Event::CHILDREN_CHANGED, ax::mojom::EventFrom::kNone));
   }
 }
 
@@ -161,7 +179,10 @@ void AXEventGenerator::OnStringAttributeChanged(AXTree* tree,
 
   switch (attr) {
     case ax::mojom::StringAttribute::kName:
-      AddEvent(node, Event::NAME_CHANGED);
+      // If the name of the root node changes, we expect OnTreeDataChanged to
+      // add a DOCUMENT_TITLE_CHANGED event instead.
+      if (node != tree->root())
+        AddEvent(node, Event::NAME_CHANGED);
 
       // TODO(accessibility): tree in the midst of updates. Disallow
       // access to |node|.
@@ -200,8 +221,12 @@ void AXEventGenerator::OnIntAttributeChanged(AXTree* tree,
 
   switch (attr) {
     case ax::mojom::IntAttribute::kActivedescendantId:
-      AddEvent(node, Event::ACTIVE_DESCENDANT_CHANGED);
-      active_descendant_changed_.push_back(node);
+      // Don't fire on invisible containers, as it confuses some screen readers,
+      // such as NVDA.
+      if (!node->data().HasState(ax::mojom::State::kInvisible)) {
+        AddEvent(node, Event::ACTIVE_DESCENDANT_CHANGED);
+        active_descendant_changed_.push_back(node);
+      }
       break;
     case ax::mojom::IntAttribute::kCheckedState:
       AddEvent(node, Event::CHECKED_STATE_CHANGED);
@@ -279,8 +304,11 @@ void AXEventGenerator::OnTreeDataChanged(AXTree* tree,
                                          const ui::AXTreeData& new_tree_data) {
   DCHECK_EQ(tree_, tree);
 
-  if (new_tree_data.loaded && !old_tree_data.loaded)
+  if (new_tree_data.loaded && !old_tree_data.loaded &&
+      ShouldFireLoadEvents(tree->root())) {
     AddEvent(tree->root(), Event::LOAD_COMPLETE);
+  }
+
   if (new_tree_data.sel_anchor_object_id !=
           old_tree_data.sel_anchor_object_id ||
       new_tree_data.sel_anchor_offset != old_tree_data.sel_anchor_offset ||
@@ -330,8 +358,12 @@ void AXEventGenerator::OnAtomicUpdateFinished(
     const std::vector<Change>& changes) {
   DCHECK_EQ(tree_, tree);
 
-  if (root_changed && tree->data().loaded)
-    AddEvent(tree->root(), Event::LOAD_COMPLETE);
+  if (root_changed && ShouldFireLoadEvents(tree->root())) {
+    if (tree->data().loaded)
+      AddEvent(tree->root(), Event::LOAD_COMPLETE);
+    else
+      AddEvent(tree->root(), Event::LOAD_START);
+  }
 
   for (const auto& change : changes) {
     if ((change.type == NODE_CREATED || change.type == SUBTREE_CREATED)) {
@@ -423,6 +455,13 @@ void AXEventGenerator::FireRelationSourceEvents(AXTree* tree,
                 tree->int_reverse_relations().end(), callback);
   std::for_each(tree->intlist_reverse_relations().begin(),
                 tree->intlist_reverse_relations().end(), callback);
+}
+
+// Attempts to suppress load-related events that we presume no AT will be
+// interested in under any circumstances, such as pages which have no size.
+bool AXEventGenerator::ShouldFireLoadEvents(AXNode* node) {
+  const AXNodeData& data = node->data();
+  return data.location.width() || data.location.height();
 }
 
 }  // namespace ui

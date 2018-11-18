@@ -54,12 +54,12 @@ FontFaceSetDocument::FontFaceSetDocument(Document& document)
 FontFaceSetDocument::~FontFaceSetDocument() = default;
 
 Document* FontFaceSetDocument::GetDocument() const {
-  return ToDocument(GetExecutionContext());
+  return To<Document>(GetExecutionContext());
 }
 
 bool FontFaceSetDocument::InActiveContext() const {
   ExecutionContext* context = GetExecutionContext();
-  return context && ToDocument(context)->IsActive();
+  return context && To<Document>(context)->IsActive();
 }
 
 
@@ -205,12 +205,6 @@ size_t FontFaceSetDocument::ApproximateBlankCharacterCount(Document& document) {
 void FontFaceSetDocument::Trace(blink::Visitor* visitor) {
   Supplement<Document>::Trace(visitor);
   FontFaceSet::Trace(visitor);
-}
-
-void FontFaceSetDocument::TraceWrappers(
-    const ScriptWrappableVisitor* visitor) const {
-  FontFaceSet::TraceWrappers(visitor);
-  Supplement<Document>::TraceWrappers(visitor);
 }
 
 void FontFaceSetDocument::FontLoadHistogram::UpdateStatus(FontFace* font_face) {

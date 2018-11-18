@@ -5,15 +5,16 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_BLOCK_PAINTER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_BLOCK_PAINTER_H_
 
+#include "third_party/blink/renderer/core/layout/order_iterator.h"
 #include "third_party/blink/renderer/platform/wtf/allocator.h"
 
 namespace blink {
 
 struct PaintInfo;
+class ScopedPaintState;
 class InlineBox;
 class LayoutBlock;
 class LayoutBox;
-class LayoutFlexibleBox;
 class LayoutPoint;
 
 class BlockPainter {
@@ -22,34 +23,31 @@ class BlockPainter {
  public:
   BlockPainter(const LayoutBlock& block) : layout_block_(block) {}
 
-  void Paint(const PaintInfo&, const LayoutPoint& paint_offset);
-  void PaintObject(const PaintInfo&, const LayoutPoint&);
-  void PaintContents(const PaintInfo&, const LayoutPoint&);
-  void PaintChildren(const PaintInfo&, const LayoutPoint&);
-  void PaintChild(const LayoutBox&, const PaintInfo&, const LayoutPoint&);
-  void PaintOverflowControlsIfNeeded(const PaintInfo&, const LayoutPoint&);
+  void Paint(const PaintInfo&);
+  void PaintObject(const PaintInfo&, const LayoutPoint& paint_offset);
+  void PaintContents(const PaintInfo&, const LayoutPoint& paint_offset);
+  void PaintChildren(const PaintInfo&);
+  void PaintChild(const LayoutBox&, const PaintInfo&);
+  void PaintOverflowControlsIfNeeded(const PaintInfo&,
+                                     const LayoutPoint& paint_offset);
 
-  // See ObjectPainter::paintAllPhasesAtomically().
-  void PaintAllChildPhasesAtomically(const LayoutBox&,
-                                     const PaintInfo&,
-                                     const LayoutPoint&);
-  static void PaintChildrenOfFlexibleBox(const LayoutFlexibleBox&,
-                                         const PaintInfo&,
-                                         const LayoutPoint& paint_offset);
-  static void PaintInlineBox(const InlineBox&,
-                             const PaintInfo&,
-                             const LayoutPoint& paint_offset);
-
-  // The adjustedPaintOffset should include the location (offset) of the object
-  // itself.
-  bool IntersectsPaintRect(const PaintInfo&,
-                           const LayoutPoint& adjusted_paint_offset) const;
+  // See ObjectPainter::PaintAllPhasesAtomically().
+  void PaintAllChildPhasesAtomically(const LayoutBox&, const PaintInfo&);
+  void PaintChildrenAtomically(const OrderIterator&, const PaintInfo&);
+  static void PaintInlineBox(const InlineBox&, const PaintInfo&);
 
  private:
   // Paint scroll hit test placeholders in the correct paint order (see:
   // ScrollHitTestDisplayItem.h).
   void PaintScrollHitTestDisplayItem(const PaintInfo&);
-  void PaintCarets(const PaintInfo&, const LayoutPoint&);
+  // Paint a hit test display item and record hit test data. This should be
+  // called in the background paint phase even if there is no other painted
+  // content.
+  void RecordHitTestData(const PaintInfo&, const LayoutPoint& paint_offset);
+  void PaintBlockFlowContents(const PaintInfo&, const LayoutPoint&);
+  void PaintCarets(const PaintInfo&, const LayoutPoint& paint_offset);
+
+  bool ShouldPaint(const ScopedPaintState&) const;
 
   const LayoutBlock& layout_block_;
 };

@@ -28,8 +28,9 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_HTML_LIST_ITEM_ORDINAL_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_HTML_LIST_ITEM_ORDINAL_H_
 
+#include "base/optional.h"
+#include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/heap/persistent.h"
-#include "third_party/blink/renderer/platform/wtf/optional.h"
 
 namespace blink {
 
@@ -44,7 +45,7 @@ class Node;
 // elements with 'display: list-item' can be list items, the layout tree
 // provides the storage for the instances of this class, and is responsible for
 // firing events for insertions and removals.
-class ListItemOrdinal {
+class CORE_EXPORT ListItemOrdinal {
  public:
   ListItemOrdinal();
 
@@ -56,13 +57,15 @@ class ListItemOrdinal {
 
   // Get/set/clear the explicit value; i.e., the 'value' attribute of an <li>
   // element.
-  Optional<int> ExplicitValue() const;
+  base::Optional<int> ExplicitValue() const;
   void SetExplicitValue(int, const Node&);
   void ClearExplicitValue(const Node&);
 
   // Get/set whether this item is in a list or not.
   bool NotInList() const { return not_in_list_; }
-  void SetNotInList(bool);
+  void SetNotInList(bool, const Node&);
+  bool NotInListChanged() const { return not_in_list_changed_; }
+  void SetNotInListChanged(bool);
 
   static bool IsList(const Node&);
   static bool IsListItem(const Node&);
@@ -86,6 +89,8 @@ class ListItemOrdinal {
   static Node* EnclosingList(const Node*);
   struct NodeAndOrdinal {
     STACK_ALLOCATED();
+
+   public:
     Persistent<const Node> node;
     ListItemOrdinal* ordinal = nullptr;
     operator bool() const { return node; }
@@ -109,6 +114,7 @@ class ListItemOrdinal {
   mutable int value_ = 0;
   mutable unsigned type_ : 2;  // ValueType
   unsigned not_in_list_ : 1;
+  unsigned not_in_list_changed_ : 1;
 };
 
 }  // namespace blink

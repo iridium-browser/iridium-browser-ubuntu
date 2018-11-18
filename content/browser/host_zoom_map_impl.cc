@@ -153,8 +153,7 @@ double HostZoomMapImpl::GetZoomLevelForHost(const std::string& host) const {
 bool HostZoomMapImpl::HasZoomLevel(const std::string& scheme,
                                    const std::string& host) const {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  SchemeHostZoomLevels::const_iterator scheme_iterator(
-      scheme_host_zoom_levels_.find(scheme));
+  auto scheme_iterator(scheme_host_zoom_levels_.find(scheme));
 
   const HostZoomLevels& zoom_levels =
       (scheme_iterator != scheme_host_zoom_levels_.end())
@@ -168,10 +167,9 @@ double HostZoomMapImpl::GetZoomLevelForHostAndScheme(
     const std::string& scheme,
     const std::string& host) const {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  SchemeHostZoomLevels::const_iterator scheme_iterator(
-      scheme_host_zoom_levels_.find(scheme));
+  auto scheme_iterator(scheme_host_zoom_levels_.find(scheme));
   if (scheme_iterator != scheme_host_zoom_levels_.end()) {
-    HostZoomLevels::const_iterator i(scheme_iterator->second.find(host));
+    auto i(scheme_iterator->second.find(host));
     if (i != scheme_iterator->second.end())
       return i->second.level;
   }
@@ -238,7 +236,7 @@ void HostZoomMapImpl::SetZoomLevelForHostInternal(const std::string& host,
   }
 
   // TODO(wjmaclean) Should we use a GURL here? crbug.com/384486
-  SendZoomLevelChange(std::string(), host, level);
+  SendZoomLevelChange(std::string(), host);
 
   HostZoomMap::ZoomLevelChange change;
   change.mode = HostZoomMap::ZOOM_CHANGED_FOR_HOST;
@@ -257,7 +255,7 @@ void HostZoomMapImpl::SetZoomLevelForHostAndScheme(const std::string& scheme,
   // not persistet and are used for special cases only.
   scheme_host_zoom_levels_[scheme][host].level = level;
 
-  SendZoomLevelChange(scheme, host, level);
+  SendZoomLevelChange(scheme, host);
 
   HostZoomMap::ZoomLevelChange change;
   change.mode = HostZoomMap::ZOOM_CHANGED_FOR_SCHEME_AND_HOST;
@@ -324,7 +322,7 @@ void HostZoomMapImpl::SetDefaultZoomLevel(double level) {
         !UsesTemporaryZoomLevel(render_process_id, render_view_id);
 
     if (uses_default_zoom) {
-      web_contents->UpdateZoom(level);
+      web_contents->UpdateZoom();
 
       HostZoomMap::ZoomLevelChange change;
       change.mode = HostZoomMap::ZOOM_CHANGED_FOR_HOST;
@@ -460,7 +458,7 @@ void HostZoomMapImpl::SetTemporaryZoomLevel(int render_process_id,
   WebContentsImpl* web_contents =
       static_cast<WebContentsImpl*>(WebContents::FromRenderViewHost(
           RenderViewHost::FromID(render_process_id, render_view_id)));
-  web_contents->SetTemporaryZoomLevel(level, true);
+  web_contents->UpdateZoom();
 
   HostZoomMap::ZoomLevelChange change;
   change.mode = HostZoomMap::ZOOM_CHANGED_TEMPORARY_ZOOM;
@@ -499,7 +497,7 @@ void HostZoomMapImpl::ClearTemporaryZoomLevel(int render_process_id,
                                               int render_view_id) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   RenderViewKey key(render_process_id, render_view_id);
-  TemporaryZoomLevels::iterator it = temporary_zoom_levels_.find(key);
+  auto it = temporary_zoom_levels_.find(key);
   if (it == temporary_zoom_levels_.end())
     return;
 
@@ -507,13 +505,11 @@ void HostZoomMapImpl::ClearTemporaryZoomLevel(int render_process_id,
   WebContentsImpl* web_contents =
       static_cast<WebContentsImpl*>(WebContents::FromRenderViewHost(
           RenderViewHost::FromID(render_process_id, render_view_id)));
-  web_contents->SetTemporaryZoomLevel(GetZoomLevelForHost(
-          GetHostFromProcessView(render_process_id, render_view_id)), false);
+  web_contents->UpdateZoom();
 }
 
 void HostZoomMapImpl::SendZoomLevelChange(const std::string& scheme,
-                                          const std::string& host,
-                                          double level) {
+                                          const std::string& host) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   // We'll only send to WebContents not using temporary zoom levels. The one
   // other case of interest is where the renderer is hosting a plugin document;
@@ -530,7 +526,7 @@ void HostZoomMapImpl::SendZoomLevelChange(const std::string& scheme,
     int render_view_id = web_contents->GetRenderViewHost()->GetRoutingID();
 
     if (!UsesTemporaryZoomLevel(render_process_id, render_view_id))
-      web_contents->UpdateZoomIfNecessary(scheme, host, level);
+      web_contents->UpdateZoomIfNecessary(scheme, host);
   }
 }
 
@@ -538,9 +534,8 @@ void HostZoomMapImpl::SendErrorPageZoomLevelRefresh() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   GURL error_url(kUnreachableWebDataURL);
   std::string host = net::GetHostOrSpecFromURL(error_url);
-  double error_page_zoom_level = GetZoomLevelForHost(host);
 
-  SendZoomLevelChange(std::string(), host, error_page_zoom_level);
+  SendZoomLevelChange(std::string(), host);
 }
 
 void HostZoomMapImpl::WillCloseRenderView(int render_process_id,

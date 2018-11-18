@@ -16,7 +16,7 @@
 #include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/loader/empty_clients.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
-#include "third_party/blink/renderer/platform/testing/use_mock_scrollbar_settings.h"
+#include "third_party/blink/renderer/core/testing/use_mock_scrollbar_settings.h"
 #include "third_party/blink/renderer/platform/wtf/allocator.h"
 
 namespace blink {
@@ -59,6 +59,7 @@ class LocalFrameClientWithParent final : public EmptyLocalFrameClient {
   // FrameClient overrides:
   void Detached(FrameDetachType) override;
   LocalFrame* Parent() const override { return parent_.Get(); }
+  LocalFrame* Top() const override { return parent_.Get(); }
 
  private:
   explicit LocalFrameClientWithParent(LocalFrame* parent) : parent_(parent) {}
@@ -76,6 +77,9 @@ class RenderingTest : public PageTestBase, public UseMockScrollbarSettings {
   virtual ChromeClient& GetChromeClient() const;
 
   explicit RenderingTest(LocalFrameClient* = nullptr);
+
+  const Node* HitTest(int x, int y);
+  HitTestResult::NodeSet RectBasedHitTest(LayoutRect rect);
 
  protected:
   void SetUp() override;

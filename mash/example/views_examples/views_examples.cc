@@ -31,10 +31,10 @@ class ViewsExamples : public service_manager::Service,
  private:
   // service_manager::Service:
   void OnStart() override {
-    aura_init_ =
-        views::AuraInit::Create(context()->connector(), context()->identity(),
-                                "views_mus_resources.pak", std::string(),
-                                nullptr, views::AuraInit::Mode::AURA_MUS);
+    views::AuraInit::InitParams params;
+    params.connector = context()->connector();
+    params.identity = context()->identity();
+    aura_init_ = views::AuraInit::Create(params);
     if (!aura_init_)
       context()->QuitNow();
   }
@@ -46,7 +46,9 @@ class ViewsExamples : public service_manager::Service,
 
   // mash::mojom::Launchable:
   void Launch(uint32_t what, mash::mojom::LaunchMode how) override {
-    views::examples::ShowExamplesWindow(views::examples::QUIT_ON_CLOSE);
+    views::examples::ShowExamplesWindow(
+        base::BindOnce(&service_manager::ServiceContext::QuitNow,
+                       base::Unretained(context())));
   }
 
   void Create(mash::mojom::LaunchableRequest request) {

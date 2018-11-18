@@ -8,6 +8,7 @@
 #ifndef GPU_COMMAND_BUFFER_SERVICE_GL_UTILS_H_
 #define GPU_COMMAND_BUFFER_SERVICE_GL_UTILS_H_
 
+#include <string>
 #include <vector>
 
 #include "build/build_config.h"
@@ -41,7 +42,15 @@ namespace gles2 {
 class ErrorState;
 class FeatureInfo;
 class Logger;
+class Texture;
 enum class CopyTextureMethod;
+
+// clang-format off
+constexpr GLfloat kIdentityMatrix[16] = { 1.0f, 0.0f, 0.0f, 0.0f,
+                                          0.0f, 1.0f, 0.0f, 0.0f,
+                                          0.0f, 0.0f, 1.0f, 0.0f,
+                                          0.0f, 0.0f, 0.0f, 1.0f };
+// clang-format on
 
 struct CALayerSharedState {
   float opacity;
@@ -105,6 +114,28 @@ bool GetCompressedTexSizeInBytes(const char* function_name,
                                  GLsizei* size_in_bytes,
                                  ErrorState* error_state);
 
+bool ValidateCompressedTexSubDimensions(GLenum target,
+                                        GLint level,
+                                        GLint xoffset,
+                                        GLint yoffset,
+                                        GLint zoffset,
+                                        GLsizei width,
+                                        GLsizei height,
+                                        GLsizei depth,
+                                        GLenum format,
+                                        Texture* texture,
+                                        bool restrict_for_webgl,
+                                        const char** error_message);
+
+bool ValidateCompressedTexDimensions(GLenum target,
+                                     GLint level,
+                                     GLsizei width,
+                                     GLsizei height,
+                                     GLsizei depth,
+                                     GLenum format,
+                                     bool restrict_for_webgl,
+                                     const char** error_message);
+
 bool ValidateCopyTexFormatHelper(const FeatureInfo* feature_info,
                                  GLenum internal_format,
                                  GLenum read_format,
@@ -124,6 +155,10 @@ CopyTextureMethod GetCopyTextureCHROMIUMMethod(const FeatureInfo* feature_info,
                                                bool unpremultiply_alpha,
                                                bool dither);
 
+bool ValidateCopyTextureCHROMIUMInternalFormats(const FeatureInfo* feature_info,
+                                                GLenum source_internal_format,
+                                                GLenum dest_internal_format,
+                                                std::string* output_error_msg);
 }  // namespace gles2
 }  // namespace gpu
 

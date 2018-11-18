@@ -16,8 +16,6 @@
 #include "base/time/time.h"
 #include "content/common/content_export.h"
 #include "content/public/common/referrer.h"
-#include "content/public/common/request_context_type.h"
-#include "services/network/public/mojom/fetch_api.mojom.h"
 #include "services/network/public/mojom/request_context_frame_type.mojom.h"
 #include "third_party/blink/public/mojom/page/page_visibility_state.mojom.h"
 #include "third_party/blink/public/mojom/service_worker/service_worker_client.mojom.h"
@@ -90,14 +88,18 @@ struct CONTENT_EXPORT ServiceWorkerFetchRequest {
   ServiceWorkerFetchRequest& operator=(const ServiceWorkerFetchRequest& other);
   ~ServiceWorkerFetchRequest();
   size_t EstimatedStructSize();
+  std::string Serialize() const;
 
-  static blink::mojom::FetchCacheMode GetCacheModeFromLoadFlags(int load_flags);
+  static ServiceWorkerFetchRequest ParseFromString(
+      const std::string& serialized);
 
-  // Be sure to update EstimatedStructSize() when adding members.
+  // Be sure to update EstimatedStructSize(), Serialize(), and ParseFromString()
+  // when adding members.
   network::mojom::FetchRequestMode mode =
       network::mojom::FetchRequestMode::kNoCORS;
   bool is_main_resource_load = false;
-  RequestContextType request_context_type = REQUEST_CONTEXT_TYPE_UNSPECIFIED;
+  blink::mojom::RequestContextType request_context_type =
+      blink::mojom::RequestContextType::UNSPECIFIED;
   network::mojom::RequestContextFrameType frame_type =
       network::mojom::RequestContextFrameType::kNone;
   GURL url;
@@ -114,86 +116,7 @@ struct CONTENT_EXPORT ServiceWorkerFetchRequest {
   bool keepalive = false;
   std::string client_id;
   bool is_reload = false;
-};
-
-// Roughly corresponds to the Fetch API's Response type. This struct has several
-// users:
-// - Service Worker API: The renderer sends the browser this type to
-// represent the response a service worker provided to FetchEvent#respondWith.
-// - Background Fetch API: Uses this type to represent responses to background
-// fetches.
-// - Cache Storage API: Uses this type to represent responses to requests.
-// Note that the Fetch API does not use this type; it uses ResourceResponse
-// instead.
-// TODO(falken): Can everyone just use ResourceResponse?
-struct CONTENT_EXPORT ServiceWorkerResponse {
-  ServiceWorkerResponse();
-  ServiceWorkerResponse(
-      std::unique_ptr<std::vector<GURL>> url_list,
-      int status_code,
-      const std::string& status_text,
-      network::mojom::FetchResponseType response_type,
-      std::unique_ptr<ServiceWorkerHeaderMap> headers,
-      const std::string& blob_uuid,
-      uint64_t blob_size,
-      scoped_refptr<storage::BlobHandle> blob,
-      blink::mojom::ServiceWorkerResponseError error,
-      base::Time response_time,
-      bool is_in_cache_storage,
-      const std::string& cache_storage_cache_name,
-      std::unique_ptr<ServiceWorkerHeaderList> cors_exposed_header_names);
-  ServiceWorkerResponse(const ServiceWorkerResponse& other);
-  ServiceWorkerResponse& operator=(const ServiceWorkerResponse& other);
-  ~ServiceWorkerResponse();
-  size_t EstimatedStructSize();
-
-  // Be sure to update EstimatedStructSize() when adding members.
-  std::vector<GURL> url_list;
-  int status_code;
-  std::string status_text;
-  network::mojom::FetchResponseType response_type;
-  ServiceWorkerHeaderMap headers;
-  // |blob_uuid| and |blob_size| are set when the body is a blob. For other
-  // types of responses, the body is provided separately in Mojo IPC via
-  // ServiceWorkerFetchResponseCallback.
-  std::string blob_uuid;
-  uint64_t blob_size;
-  scoped_refptr<storage::BlobHandle> blob;
-  blink::mojom::ServiceWorkerResponseError error;
-  base::Time response_time;
-  bool is_in_cache_storage = false;
-  std::string cache_storage_cache_name;
-  ServiceWorkerHeaderList cors_exposed_header_names;
-
-  // Side data is used to pass the metadata of the response (eg: V8 code cache).
-  std::string side_data_blob_uuid;
-  uint64_t side_data_blob_size = 0;
-  // |side_data_blob| is only used when features::kMojoBlobs is enabled.
-  scoped_refptr<storage::BlobHandle> side_data_blob;
-};
-
-class ChangedVersionAttributesMask {
- public:
-  enum {
-    INSTALLING_VERSION = 1 << 0,
-    WAITING_VERSION = 1 << 1,
-    ACTIVE_VERSION = 1 << 2,
-    CONTROLLING_VERSION = 1 << 3,
-  };
-
-  ChangedVersionAttributesMask() : changed_(0) {}
-  explicit ChangedVersionAttributesMask(int changed) : changed_(changed) {}
-
-  int changed() const { return changed_; }
-
-  void add(int changed_versions) { changed_ |= changed_versions; }
-  bool installing_changed() const { return !!(changed_ & INSTALLING_VERSION); }
-  bool waiting_changed() const { return !!(changed_ & WAITING_VERSION); }
-  bool active_changed() const { return !!(changed_ & ACTIVE_VERSION); }
-  bool controller_changed() const { return !!(changed_ & CONTROLLING_VERSION); }
-
- private:
-  int changed_;
+  bool is_history_navigation = false;
 };
 
 }  // namespace content

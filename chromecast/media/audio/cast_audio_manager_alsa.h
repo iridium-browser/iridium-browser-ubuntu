@@ -9,6 +9,7 @@
 #include <string>
 
 #include "base/macros.h"
+#include "base/single_thread_task_runner.h"
 #include "chromecast/media/audio/cast_audio_manager.h"
 
 namespace media {
@@ -24,8 +25,10 @@ class CastAudioManagerAlsa : public CastAudioManager {
   CastAudioManagerAlsa(
       std::unique_ptr<::media::AudioThread> audio_thread,
       ::media::AudioLogFactory* audio_log_factory,
-      std::unique_ptr<CmaBackendFactory> backend_factory,
-      scoped_refptr<base::SingleThreadTaskRunner> backend_task_runner,
+      base::RepeatingCallback<CmaBackendFactory*()> backend_factory_getter,
+      scoped_refptr<base::SingleThreadTaskRunner> browser_task_runner,
+      scoped_refptr<base::SingleThreadTaskRunner> media_task_runner,
+      service_manager::Connector* connector,
       bool use_mixer);
   ~CastAudioManagerAlsa() override;
 

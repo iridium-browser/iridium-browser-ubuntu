@@ -58,7 +58,8 @@ cr.define('cr.ui', function() {
       this.addEventListener('dblclick', this.handleDblClick);
       this.addEventListener('keydown', this.handleKeyDown);
 
-      this.setAttribute('role', 'group');
+      if (!this.hasAttribute('role'))
+        this.setAttribute('role', 'group');
     },
 
     /**
@@ -310,7 +311,7 @@ cr.define('cr.ui', function() {
      */
     setDepth_: function(depth) {
       if (depth != this.depth_) {
-        this.rowElement.style.WebkitPaddingStart =
+        this.rowElement.style.paddingInlineStart =
             Math.max(0, depth - 1) * INDENT + 'px';
         this.depth_ = depth;
         var items = this.items;

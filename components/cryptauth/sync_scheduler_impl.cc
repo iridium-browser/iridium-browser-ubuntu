@@ -116,10 +116,8 @@ void SyncSchedulerImpl::OnTimerFired() {
       std::make_unique<SyncRequest>(weak_ptr_factory_.GetWeakPtr()));
 }
 
-std::unique_ptr<base::Timer> SyncSchedulerImpl::CreateTimer() {
-  bool retain_user_task = false;
-  bool is_repeating = false;
-  return std::make_unique<base::Timer>(retain_user_task, is_repeating);
+std::unique_ptr<base::OneShotTimer> SyncSchedulerImpl::CreateTimer() {
+  return std::make_unique<base::OneShotTimer>();
 }
 
 void SyncSchedulerImpl::ScheduleNextSync(const base::TimeDelta& sync_delta) {
@@ -143,8 +141,8 @@ void SyncSchedulerImpl::ScheduleNextSync(const base::TimeDelta& sync_delta) {
 
   timer_ = CreateTimer();
   timer_->Start(FROM_HERE, sync_delta,
-                base::Bind(&SyncSchedulerImpl::OnTimerFired,
-                           weak_ptr_factory_.GetWeakPtr()));
+                base::BindOnce(&SyncSchedulerImpl::OnTimerFired,
+                               weak_ptr_factory_.GetWeakPtr()));
 }
 
 void SyncSchedulerImpl::OnSyncCompleted(bool success) {

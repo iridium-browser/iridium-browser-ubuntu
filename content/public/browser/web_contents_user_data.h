@@ -25,9 +25,6 @@ namespace content {
 //   friend class content::WebContentsUserData<FooTabHelper>;
 //   // ... more private stuff here ...
 // }
-// --- in foo_tab_helper.cc ---
-// DEFINE_WEB_CONTENTS_USER_DATA_KEY(FooTabHelper);
-//
 template <typename T>
 class WebContentsUserData : public base::SupportsUserData::Data {
  public:
@@ -52,26 +49,11 @@ class WebContentsUserData : public base::SupportsUserData::Data {
   }
 
  protected:
-  static inline void* UserDataKey() {
-    return &kLocatorKey;
+  static inline const void* UserDataKey() {
+    static const int kId = 0;
+    return &kId;
   }
-
- private:
-  // The user data key.
-  static int kLocatorKey;
 };
-
-// The macro to define the locator key. This key must be defined in the .cc file
-// of the tab helper otherwise different instances for different template types
-// will be collapsed by the Visual Studio linker.
-//
-// The "= 0" is surprising, but is required to effect a definition rather than
-// a declaration. Without it, this would be merely a declaration of a template
-// specialization. (C++98: 14.7.3.15; C++11: 14.7.3.13)
-//
-#define DEFINE_WEB_CONTENTS_USER_DATA_KEY(TYPE) \
-template<>                                      \
-int content::WebContentsUserData<TYPE>::kLocatorKey = 0
 
 }  // namespace content
 

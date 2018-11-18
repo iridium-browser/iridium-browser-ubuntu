@@ -29,7 +29,11 @@ class XRLayer : public ScriptWrappable {
   virtual void OnFrameEnd();
   virtual void OnResize();
 
-  virtual void Trace(blink::Visitor*);
+  // Called from XRSession::OnFrame handler. Params are background texture
+  // mailbox holder and its size respectively.
+  virtual void HandleBackgroundImage(const gpu::MailboxHolder&, const IntSize&);
+
+  void Trace(blink::Visitor*) override;
 
  private:
   const Member<XRSession> session_;

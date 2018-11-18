@@ -66,37 +66,15 @@ enum class QuarantineFileResult {
 //
 // Parameters:
 //   |file| : Final name of the file.
-//   |source_url|: URL from which the file content was downloaded.
-//   |referrer_url|: Referring URL.
+//   |source_url|: URL from which the file content was downloaded. This is empty
+//     for off-the-record download.
+//   |referrer_url|: Referring URL. This is empty for off-the-record download.
 //   |client_guid|: Only used on Windows. Identifies the client application
 //     that downloaded the file.
 QuarantineFileResult QuarantineFile(const base::FilePath& file,
                                     const GURL& source_url,
                                     const GURL& referrer_url,
                                     const std::string& client_guid);
-
-// Determine if a file has quarantine metadata attached to it.
-//
-// If |source_url| is non-empty, then the download source URL in
-// quarantine metadata should match |source_url| exactly. The function returns
-// |false| if there is a mismatch. If |source_url| is empty, then this function
-// only checks for the existence of a download source URL in quarantine
-// metadata.
-//
-// If |referrer_url| is valid, then the download referrer URL in quarantine
-// metadata must match |referrer_url| exactly. The function returns |false| if
-// there is a mismatch in the |referrer_url| even if the |source_url| matches.
-// No referrer URL checks are performed if |referrer_url| is empty.
-//
-// If both |source_url| and |referrer_url|, then the funciton returns true if
-// any quarantine metadata is present for the file.
-//
-// **Note**: On Windows, this function only checks if the |ZoneIdentifier|
-// metadata is present. |source_url| and |referrer_url| are ignored. Windows
-// currently doesn't store individual URLs as part of the mark-of-the-web.
-bool IsFileQuarantined(const base::FilePath& file,
-                       const GURL& source_url,
-                       const GURL& referrer_url);
 
 }  // namespace download
 

@@ -12,14 +12,14 @@
 
 namespace {
 
-class DeclarativeNetRequestAPItest : public ExtensionApiTest {
+class DeclarativeNetRequestAPItest : public extensions::ExtensionApiTest {
  public:
   DeclarativeNetRequestAPItest() {}
 
  protected:
   // ExtensionApiTest override.
   void SetUpOnMainThread() override {
-    ExtensionApiTest::SetUpOnMainThread();
+    extensions::ExtensionApiTest::SetUpOnMainThread();
 
     base::FilePath test_data_dir =
         test_data_dir_.AppendASCII("declarative_net_request");
@@ -42,8 +42,8 @@ class DeclarativeNetRequestAPItest : public ExtensionApiTest {
   DISALLOW_COPY_AND_ASSIGN(DeclarativeNetRequestAPItest);
 };
 
-IN_PROC_BROWSER_TEST_F(DeclarativeNetRequestAPItest, PageWhitelistingAPI) {
-  ASSERT_TRUE(RunExtensionTest("page_whitelisting_api")) << message_;
+IN_PROC_BROWSER_TEST_F(DeclarativeNetRequestAPItest, PageAllowingAPI) {
+  ASSERT_TRUE(RunExtensionTest("page_allowing_api")) << message_;
 }
 
 IN_PROC_BROWSER_TEST_F(DeclarativeNetRequestAPItest, ExtensionWithNoRuleset) {

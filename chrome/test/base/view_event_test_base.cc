@@ -13,12 +13,20 @@
 #include "chrome/test/base/interactive_test_utils.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/view_event_test_platform_part.h"
-#include "mojo/edk/embedder/embedder.h"
+#include "mojo/core/embedder/embedder.h"
 #include "ui/base/ime/input_method_initializer.h"
 #include "ui/base/test/ui_controls.h"
 #include "ui/compositor/test/context_factories_for_test.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
+
+#if defined(OS_CHROMEOS)
+#include "ash/test/ui_controls_factory_ash.h"
+#include "ui/aura/test/ui_controls_factory_aura.h"
+#include "ui/aura/window.h"
+#include "ui/base/test/ui_controls_aura.h"
+#include "ui/base/ui_base_features.h"
+#endif
 
 namespace {
 
@@ -74,7 +82,7 @@ void ViewEventTestBase::SetUp() {
   // Mojo is initialized here similar to how each browser test case initializes
   // Mojo when starting. This only works because each interactive_ui_test runs
   // in a new process.
-  mojo::edk::Init();
+  mojo::core::Init();
 
   ui::InitializeInputMethodForTesting();
 
@@ -94,6 +102,13 @@ void ViewEventTestBase::SetUp() {
   gfx::NativeWindow context = platform_part_->GetContext();
   window_ = views::Widget::CreateWindowWithContext(this, context);
   window_->Show();
+#if defined(OS_CHROMEOS)
+  ui_controls::InstallUIControlsAura(
+      features::IsUsingWindowService()
+          ? aura::test::CreateUIControlsAura(
+                window_->GetNativeWindow()->GetHost())
+          : ash::test::CreateAshUIControls());
+#endif
 }
 
 void ViewEventTestBase::TearDown() {
@@ -152,7 +167,8 @@ void ViewEventTestBase::StartMessageLoopAndRunTest() {
   // Schedule a task that starts the test. Need to do this as we're going to
   // run the message loop.
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::Bind(&ViewEventTestBase::DoTestOnMessageLoop, this));
+      FROM_HERE, base::Bind(&ViewEventTestBase::DoTestOnMessageLoop,
+                            base::Unretained(this)));
 
   content::RunThisRunLoop(&run_loop_);
 }

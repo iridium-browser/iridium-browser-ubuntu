@@ -50,10 +50,7 @@ class WaitForURLsDeletedObserver : public history::HistoryServiceObserver {
  private:
   // history::HistoryServiceObserver:
   void OnURLsDeleted(history::HistoryService* service,
-                     bool all_history,
-                     bool expired,
-                     const history::URLRows& deleted_rows,
-                     const std::set<GURL>& favicon_urls) override;
+                     const history::DeletionInfo& deletion_info) override;
 
   // Weak. Owned by our owner.
   base::RunLoop* runner_;
@@ -70,10 +67,7 @@ WaitForURLsDeletedObserver::~WaitForURLsDeletedObserver() {
 
 void WaitForURLsDeletedObserver::OnURLsDeleted(
     history::HistoryService* service,
-    bool all_history,
-    bool expired,
-    const history::URLRows& deleted_rows,
-    const std::set<GURL>& favicon_urls) {
+    const history::DeletionInfo& deletion_info) {
   runner_->Quit();
 }
 
@@ -292,8 +286,7 @@ void HistoryQuickProviderTest::FillData() {
 
 HistoryQuickProviderTest::SetShouldContain::SetShouldContain(
     const ACMatches& matched_urls) {
-  for (ACMatches::const_iterator iter = matched_urls.begin();
-       iter != matched_urls.end(); ++iter)
+  for (auto iter = matched_urls.begin(); iter != matched_urls.end(); ++iter)
     matches_.insert(iter->destination_url.spec());
 }
 

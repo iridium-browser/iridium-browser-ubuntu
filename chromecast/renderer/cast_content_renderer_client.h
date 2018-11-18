@@ -11,14 +11,10 @@
 #include "base/macros.h"
 #include "build/build_config.h"
 #include "chromecast/chromecast_buildflags.h"
-#include "chromecast/common/application_media_capabilities.mojom.h"
+#include "chromecast/common/mojom/application_media_capabilities.mojom.h"
 #include "content/public/renderer/content_renderer_client.h"
 #include "media/base/audio_codecs.h"
 #include "mojo/public/cpp/bindings/binding.h"
-
-#if defined(CHROMECAST_BUILD)
-#include <string>
-#endif
 
 namespace extensions {
 class ExtensionsClient;
@@ -67,17 +63,21 @@ class CastContentRendererClient
   bool IsSupportedVideoConfig(const ::media::VideoConfig& config) override;
   bool IsSupportedBitstreamAudioCodec(::media::AudioCodec codec) override;
   blink::WebPrescientNetworking* GetPrescientNetworking() override;
-  void DeferMediaLoad(content::RenderFrame* render_frame,
+  bool DeferMediaLoad(content::RenderFrame* render_frame,
                       bool render_frame_has_played_media_before,
-                      const base::Closure& closure) override;
-  bool AllowIdleMediaSuspend() override;
+                      base::OnceClosure closure) override;
+  bool IsIdleMediaSuspendEnabled() override;
+  bool IsBackgroundMediaSuspendEnabled(
+      content::RenderFrame* render_frame) override;
   void SetRuntimeFeaturesDefaultsBeforeBlinkInitialization() override;
 
  protected:
   CastContentRendererClient();
 
-  virtual void RunWhenInForeground(content::RenderFrame* render_frame,
-                                   const base::Closure& closure);
+  // Returns true if running is deferred until in foreground; false if running
+  // occurs immediately.
+  virtual bool RunWhenInForeground(content::RenderFrame* render_frame,
+                                   base::OnceClosure closure);
 
  private:
   // mojom::ApplicationMediaCapabilitiesObserver implementation:
@@ -101,7 +101,6 @@ class CastContentRendererClient
       guest_view_container_dispatcher_;
 #endif
 
-  const bool allow_hidden_media_playback_;
   int supported_bitstream_audio_codecs_;
 
   DISALLOW_COPY_AND_ASSIGN(CastContentRendererClient);

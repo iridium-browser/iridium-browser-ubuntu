@@ -11,7 +11,7 @@
 
 #include "base/macros.h"
 #include "chromeos/components/proximity_auth/proximity_auth_pref_manager.h"
-#include "components/signin/core/account_id/account_id.h"
+#include "components/account_id/account_id.h"
 
 class PrefRegistrySimple;
 class PrefService;
@@ -44,14 +44,15 @@ class ProximityAuthLocalStatePrefManager : public ProximityAuthPrefManager {
   // ProximityAuthPrefManager:
   bool IsEasyUnlockAllowed() const override;
   bool IsEasyUnlockEnabled() const override;
+  bool IsEasyUnlockEnabledStateSet() const override;
   ProximityThreshold GetProximityThreshold() const override;
-  bool IsChromeOSLoginEnabled() override;
+  bool IsChromeOSLoginAllowed() const override;
+  bool IsChromeOSLoginEnabled() const override;
 
  private:
   // ProximityAuthPrefManager:
   void SetIsEasyUnlockEnabled(bool is_easy_unlock_enabled) const override;
-  void SetLastPasswordEntryTimestampMs(int64_t timestamp_ms) override;
-  int64_t GetLastPasswordEntryTimestampMs() const override;
+  void SetEasyUnlockEnabledStateSet() const override;
   void SetLastPromotionCheckTimestampMs(int64_t timestamp_ms) override;
   int64_t GetLastPromotionCheckTimestampMs() const override;
   void SetPromotionShownCount(int count) override;

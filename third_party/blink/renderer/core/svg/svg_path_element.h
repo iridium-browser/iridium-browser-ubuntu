@@ -49,7 +49,7 @@ class SVGPathElement final : public SVGGeometryElement {
 
   FloatRect GetBBox() override;
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  private:
   explicit SVGPathElement(Document&);
@@ -63,8 +63,8 @@ class SVGPathElement final : public SVGGeometryElement {
       const AtomicString&,
       MutableCSSPropertyValueSet*) override;
 
-  Node::InsertionNotificationRequest InsertedInto(ContainerNode*) override;
-  void RemovedFrom(ContainerNode*) override;
+  Node::InsertionNotificationRequest InsertedInto(ContainerNode&) override;
+  void RemovedFrom(ContainerNode&) override;
 
   void InvalidateMPathDependencies();
 

@@ -5,12 +5,11 @@
 #include "third_party/blink/renderer/modules/webaudio/constant_source_node.h"
 
 #include <algorithm>
-#include "third_party/blink/renderer/bindings/core/v8/exception_messages.h"
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
+
 #include "third_party/blink/renderer/modules/webaudio/audio_node_output.h"
 #include "third_party/blink/renderer/modules/webaudio/constant_source_options.h"
 #include "third_party/blink/renderer/platform/audio/audio_utilities.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 
@@ -62,8 +61,9 @@ void ConstantSourceHandler::Process(size_t frames_to_process) {
 
   // Figure out where in the current rendering quantum that the source is
   // active and for how many frames.
-  UpdateSchedulingInfo(frames_to_process, output_bus, quantum_frame_offset,
-                       non_silent_frames_to_process, start_frame_offset);
+  std::tie(quantum_frame_offset, non_silent_frames_to_process,
+           start_frame_offset) =
+      UpdateSchedulingInfo(frames_to_process, output_bus);
 
   if (!non_silent_frames_to_process) {
     output_bus->Zero();
@@ -107,10 +107,12 @@ bool ConstantSourceHandler::PropagatesSilence() const {
 // ----------------------------------------------------------------
 ConstantSourceNode::ConstantSourceNode(BaseAudioContext& context)
     : AudioScheduledSourceNode(context),
-      offset_(AudioParam::Create(context,
-                                 kParamTypeConstantSourceOffset,
-                                 "ConstantSource.offset",
-                                 1)) {
+      offset_(AudioParam::Create(
+          context,
+          kParamTypeConstantSourceOffset,
+          1,
+          AudioParamHandler::AutomationRate::kAudio,
+          AudioParamHandler::AutomationRateMode::kVariable)) {
   SetHandler(ConstantSourceHandler::Create(*this, context.sampleRate(),
                                            offset_->Handler()));
 }

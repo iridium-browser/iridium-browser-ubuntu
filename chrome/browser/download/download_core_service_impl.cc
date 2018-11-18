@@ -9,6 +9,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/download/chrome_download_manager_delegate.h"
 #include "chrome/browser/download/download_history.h"
+#include "chrome/browser/download/download_offline_content_provider.h"
 #include "chrome/browser/download/download_status_updater.h"
 #include "chrome/browser/download/download_ui_controller.h"
 #include "chrome/browser/history/history_service_factory.h"
@@ -65,6 +66,12 @@ DownloadCoreServiceImpl::GetDownloadManagerDelegate() {
   download_ui_.reset(new DownloadUIController(
       manager, std::unique_ptr<DownloadUIController::Delegate>()));
 
+  download_provider_.reset(new DownloadOfflineContentProvider(manager));
+
+#if !defined(OS_ANDROID)
+  download_shelf_controller_.reset(new DownloadShelfController(profile_));
+#endif
+
   // Include this download manager in the set monitored by the
   // global status updater.
   DCHECK(g_browser_process->download_status_updater());
@@ -107,8 +114,7 @@ void DownloadCoreServiceImpl::CancelDownloads() {
       BrowserContext::GetDownloadManager(profile_);
   DownloadManager::DownloadVector downloads;
   download_manager->GetAllDownloads(&downloads);
-  for (DownloadManager::DownloadVector::iterator it = downloads.begin();
-       it != downloads.end(); ++it) {
+  for (auto it = downloads.begin(); it != downloads.end(); ++it) {
     if ((*it)->GetState() == download::DownloadItem::IN_PROGRESS)
       (*it)->Cancel(false);
   }

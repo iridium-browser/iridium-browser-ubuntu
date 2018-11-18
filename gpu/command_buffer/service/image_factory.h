@@ -25,7 +25,7 @@ class GPU_EXPORT ImageFactory {
   // |client_id| should be set to the client requesting the creation of instance
   // and can be used by factory implementation to verify access rights.
   virtual scoped_refptr<gl::GLImage> CreateImageForGpuMemoryBuffer(
-      const gfx::GpuMemoryBufferHandle& handle,
+      gfx::GpuMemoryBufferHandle handle,
       const gfx::Size& size,
       gfx::BufferFormat format,
       unsigned internalformat,
@@ -34,6 +34,7 @@ class GPU_EXPORT ImageFactory {
 
   // Create an anonymous GLImage backed by a GpuMemoryBuffer that doesn't have a
   // client_id. It can't be passed to other processes.
+  virtual bool SupportsCreateAnonymousImage() const;
   virtual scoped_refptr<gl::GLImage> CreateAnonymousImage(
       const gfx::Size& size,
       gfx::BufferFormat format,

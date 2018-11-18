@@ -138,18 +138,19 @@ void DiscardRedundantExtensions(
 
 bool ValidateRtpExtensions(
     const std::vector<webrtc::RtpExtension>& extensions) {
-  bool id_used[14] = {false};
+  bool id_used[1 + webrtc::RtpExtension::kMaxId] = {false};
   for (const auto& extension : extensions) {
-    if (extension.id <= 0 || extension.id >= 15) {
+    if (extension.id < webrtc::RtpExtension::kMinId ||
+        extension.id > webrtc::RtpExtension::kMaxId) {
       RTC_LOG(LS_ERROR) << "Bad RTP extension ID: " << extension.ToString();
       return false;
     }
-    if (id_used[extension.id - 1]) {
+    if (id_used[extension.id]) {
       RTC_LOG(LS_ERROR) << "Duplicate RTP extension ID: "
                         << extension.ToString();
       return false;
     }
-    id_used[extension.id - 1] = true;
+    id_used[extension.id] = true;
   }
   return true;
 }
@@ -175,12 +176,12 @@ std::vector<webrtc::RtpExtension> FilterRtpExtensions(
   // Sort by name, ascending (prioritise encryption), so that we don't reset
   // extensions if they were specified in a different order (also allows us
   // to use std::unique below).
-  std::sort(result.begin(), result.end(),
-            [](const webrtc::RtpExtension& rhs,
-               const webrtc::RtpExtension& lhs) {
-                return rhs.encrypt == lhs.encrypt ? rhs.uri < lhs.uri
-                                                  : rhs.encrypt > lhs.encrypt;
-              });
+  std::sort(
+      result.begin(), result.end(),
+      [](const webrtc::RtpExtension& rhs, const webrtc::RtpExtension& lhs) {
+        return rhs.encrypt == lhs.encrypt ? rhs.uri < lhs.uri
+                                          : rhs.encrypt > lhs.encrypt;
+      });
 
   // Remove unnecessary extensions (used on send side).
   if (filter_redundant_extensions) {

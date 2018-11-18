@@ -4,18 +4,18 @@
 
 #include "third_party/blink/renderer/platform/graphics/static_bitmap_image.h"
 
+#include "base/numerics/checked_math.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
-#include "skia/ext/texture_handle.h"
 #include "third_party/blink/renderer/platform/graphics/accelerated_static_bitmap_image.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context.h"
 #include "third_party/blink/renderer/platform/graphics/image_observer.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_image.h"
 #include "third_party/blink/renderer/platform/graphics/unaccelerated_static_bitmap_image.h"
-#include "third_party/blink/renderer/platform/wtf/checked_numeric.h"
 #include "third_party/blink/renderer/platform/wtf/typed_arrays/array_buffer_contents.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkImage.h"
 #include "third_party/skia/include/core/SkPaint.h"
+#include "third_party/skia/include/core/SkSurface.h"
 #include "third_party/skia/include/gpu/GrContext.h"
 
 namespace blink {
@@ -63,7 +63,7 @@ scoped_refptr<StaticBitmapImage> StaticBitmapImage::Create(
   return Create(SkImage::MakeFromRaster(pixmap, nullptr, nullptr));
 }
 
-void StaticBitmapImage::DrawHelper(PaintCanvas* canvas,
+void StaticBitmapImage::DrawHelper(cc::PaintCanvas* canvas,
                                    const PaintFlags& flags,
                                    const FloatRect& dst_rect,
                                    const FloatRect& src_rect,
@@ -80,25 +80,47 @@ void StaticBitmapImage::DrawHelper(PaintCanvas* canvas,
 }
 
 scoped_refptr<StaticBitmapImage> StaticBitmapImage::ConvertToColorSpace(
-    sk_sp<SkColorSpace> target,
-    SkTransferFunctionBehavior transfer_function_behavior) {
+    sk_sp<SkColorSpace> color_space,
+    SkColorType color_type) {
+  DCHECK(color_space);
   sk_sp<SkImage> skia_image = PaintImageForCurrentFrame().GetSkImage();
+  // If we don't need to change the color type, use SkImage::makeColorSpace()
+  if (skia_image->colorType() == color_type) {
+    skia_image = skia_image->makeColorSpace(color_space);
+    return StaticBitmapImage::Create(skia_image, skia_image->isTextureBacked()
+                                                     ? ContextProviderWrapper()
+                                                     : nullptr);
+  }
+
+  // Otherwise, create a surface and draw on that to avoid GPU readback.
   sk_sp<SkColorSpace> src_color_space = skia_image->refColorSpace();
   if (!src_color_space.get())
     src_color_space = SkColorSpace::MakeSRGB();
-  sk_sp<SkColorSpace> dst_color_space = target;
+  sk_sp<SkColorSpace> dst_color_space = color_space;
   if (!dst_color_space.get())
     dst_color_space = SkColorSpace::MakeSRGB();
-  if (SkColorSpace::Equals(src_color_space.get(), dst_color_space.get()))
-    return this;
 
-  sk_sp<SkImage> converted_skia_image =
-      skia_image->makeColorSpace(dst_color_space, transfer_function_behavior);
+  SkImageInfo info =
+      SkImageInfo::Make(skia_image->width(), skia_image->height(), color_type,
+                        skia_image->alphaType(), dst_color_space);
+  sk_sp<SkSurface> surface = nullptr;
+  if (skia_image->isTextureBacked()) {
+    GrContext* gr = ContextProviderWrapper()->ContextProvider()->GetGrContext();
+    surface = SkSurface::MakeRenderTarget(gr, SkBudgeted::kNo, info);
+  } else {
+      surface = SkSurface::MakeRaster(info);
+  }
+  SkPaint paint;
+  surface->getCanvas()->drawImage(skia_image, 0, 0, &paint);
+  sk_sp<SkImage> converted_skia_image = surface->makeImageSnapshot();
+
   DCHECK(converted_skia_image.get());
   DCHECK(skia_image.get() != converted_skia_image.get());
 
   return StaticBitmapImage::Create(converted_skia_image,
-                                   ContextProviderWrapper());
+                                   converted_skia_image->isTextureBacked()
+                                       ? ContextProviderWrapper()
+                                       : nullptr);
 }
 
 bool StaticBitmapImage::ConvertToArrayBufferContents(
@@ -108,7 +130,7 @@ bool StaticBitmapImage::ConvertToArrayBufferContents(
     const CanvasColorParams& color_params,
     bool is_accelerated) {
   uint8_t bytes_per_pixel = color_params.BytesPerPixel();
-  CheckedNumeric<int> data_size = bytes_per_pixel;
+  base::CheckedNumeric<int> data_size = bytes_per_pixel;
   data_size *= rect.Size().Area();
   if (!data_size.IsValid() ||
       data_size.ValueOrDie() > v8::TypedArray::kMaxLength)

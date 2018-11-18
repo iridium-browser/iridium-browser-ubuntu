@@ -26,15 +26,14 @@
 #include "third_party/blink/renderer/modules/indexeddb/idb_open_db_request.h"
 
 #include <memory>
+#include "base/optional.h"
 #include "third_party/blink/renderer/bindings/modules/v8/idb_object_store_or_idb_index_or_idb_cursor.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_database.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_database_callbacks.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_tracing.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_version_change_event.h"
-#include "third_party/blink/renderer/platform/wtf/optional.h"
 
 using blink::WebIDBDatabase;
 
@@ -88,7 +87,7 @@ void IDBOpenDBRequest::EnqueueBlocked(int64_t old_version) {
   IDB_TRACE("IDBOpenDBRequest::onBlocked()");
   if (!ShouldEnqueueEvent())
     return;
-  Optional<unsigned long long> new_version_nullable;
+  base::Optional<unsigned long long> new_version_nullable;
   if (version_ != IDBDatabaseMetadata::kDefaultVersion) {
     new_version_nullable = version_;
   }
@@ -174,7 +173,7 @@ void IDBOpenDBRequest::EnqueueResponse(int64_t old_version) {
   }
   SetResult(IDBAny::CreateUndefined());
   EnqueueEvent(IDBVersionChangeEvent::Create(EventTypeNames::success,
-                                             old_version, WTF::nullopt));
+                                             old_version, base::nullopt));
   metrics_.RecordAndReset();
 }
 
@@ -187,16 +186,15 @@ bool IDBOpenDBRequest::ShouldEnqueueEvent() const {
   return true;
 }
 
-DispatchEventResult IDBOpenDBRequest::DispatchEventInternal(Event* event) {
+DispatchEventResult IDBOpenDBRequest::DispatchEventInternal(Event& event) {
   // If the connection closed between onUpgradeNeeded and the delivery of the
   // "success" event, an "error" event should be fired instead.
-  if (event->type() == EventTypeNames::success &&
+  if (event.type() == EventTypeNames::success &&
       ResultAsAny()->GetType() == IDBAny::kIDBDatabaseType &&
       ResultAsAny()->IdbDatabase()->IsClosePending()) {
-    DequeueEvent(event);
     SetResult(nullptr);
-    HandleResponse(
-        DOMException::Create(kAbortError, "The connection was closed."));
+    HandleResponse(DOMException::Create(DOMExceptionCode::kAbortError,
+                                        "The connection was closed."));
     return DispatchEventResult::kCanceledBeforeDispatch;
   }
 

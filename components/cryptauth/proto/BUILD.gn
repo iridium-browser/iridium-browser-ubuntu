@@ -10,3 +10,18 @@ proto_library("proto") {
     "securemessage.proto",
   ]
 }
+
+static_library("util") {
+  sources = [
+    "enum_util.cc",
+    "enum_util.h",
+  ]
+
+  public_deps = [
+    ":proto",
+  ]
+
+  deps = [
+    "//base",
+  ]
+}

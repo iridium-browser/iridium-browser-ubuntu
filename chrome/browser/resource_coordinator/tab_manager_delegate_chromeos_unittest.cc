@@ -11,7 +11,8 @@
 
 #include "base/macros.h"
 #include "base/process/process_handle.h"
-#include "chrome/browser/resource_coordinator/lifecycle_unit_base.h"
+#include "base/time/time.h"
+#include "chrome/browser/resource_coordinator/test_lifecycle_unit.h"
 #include "chrome/browser/resource_coordinator/time.h"
 #include "chromeos/dbus/fake_debug_daemon_client.h"
 #include "content/public/test/test_browser_thread_bundle.h"
@@ -27,44 +28,6 @@ class TabManagerDelegateTest : public testing::Test {
 
  private:
   content::TestBrowserThreadBundle thread_bundle_;
-};
-
-class DummyLifecycleUnit : public LifecycleUnitBase {
- public:
-  explicit DummyLifecycleUnit(
-      base::TimeTicks last_focused_time,
-      base::ProcessHandle process_handle = base::ProcessHandle(),
-      bool can_discard = true)
-      : last_focused_time_(last_focused_time),
-        process_handle_(process_handle),
-        can_discard_(can_discard) {}
-
-  // LifecycleUnit:
-  base::string16 GetTitle() const override { return base::string16(); }
-  std::string GetIconURL() const override { return std::string(); }
-  base::ProcessHandle GetProcessHandle() const override {
-    return process_handle_;
-  }
-  TabLifecycleUnitExternal* AsTabLifecycleUnitExternal() override {
-    return nullptr;
-  }
-  SortKey GetSortKey() const override { return SortKey(last_focused_time_); }
-  State GetState() const override { return State::LOADED; }
-  content::Visibility GetVisibility() const override {
-    return content::Visibility::VISIBLE;
-  }
-  bool Freeze() override { return false; }
-  int GetEstimatedMemoryFreedOnDiscardKB() const override { return 0; }
-  bool CanPurge() const override { return false; }
-  bool CanDiscard(DiscardReason reason) const override { return can_discard_; }
-  bool Discard(DiscardReason discard_reason) override { return false; }
-
- private:
-  base::TimeTicks last_focused_time_;
-  base::ProcessHandle process_handle_;
-  bool can_discard_;
-
-  DISALLOW_COPY_AND_ASSIGN(DummyLifecycleUnit);
 };
 
 constexpr bool kIsFocused = true;
@@ -83,12 +46,12 @@ TEST_F(TabManagerDelegateTest, CandidatesSorted) {
   arc_processes.emplace_back(4, 40, "visible2", arc::mojom::ProcessState::TOP,
                              kNotFocused, 150);
 
-  DummyLifecycleUnit focused_lifecycle_unit(base::TimeTicks::Max());
-  DummyLifecycleUnit protected_lifecycle_unit(
+  TestLifecycleUnit focused_lifecycle_unit(base::TimeTicks::Max());
+  TestLifecycleUnit protected_lifecycle_unit(
       base::TimeTicks() + base::TimeDelta::FromSeconds(5), 0, false);
-  DummyLifecycleUnit non_focused_lifecycle_unit(
-      base::TimeTicks() + base::TimeDelta::FromSeconds(1));
-  DummyLifecycleUnit other_non_focused_lifecycle_unit(
+  TestLifecycleUnit non_focused_lifecycle_unit(base::TimeTicks() +
+                                               base::TimeDelta::FromSeconds(1));
+  TestLifecycleUnit other_non_focused_lifecycle_unit(
       base::TimeTicks() + base::TimeDelta::FromSeconds(2));
   LifecycleUnitVector lifecycle_units{
       &focused_lifecycle_unit, &protected_lifecycle_unit,
@@ -128,7 +91,7 @@ TEST_F(TabManagerDelegateTest, CandidatesSortedWithFocusedAppAndTab) {
   arc_processes.emplace_back(1, 10, "focused", arc::mojom::ProcessState::TOP,
                              kIsFocused, 100);
 
-  DummyLifecycleUnit focused_lifecycle_unit(base::TimeTicks::Max());
+  TestLifecycleUnit focused_lifecycle_unit(base::TimeTicks::Max());
   LifecycleUnitVector lifecycle_units{&focused_lifecycle_unit};
 
   const std::vector<TabManagerDelegate::Candidate> candidates =
@@ -186,7 +149,8 @@ class MockTabManagerDelegate : public TabManagerDelegate {
     return true;
   }
 
-  bool KillTab(LifecycleUnit* lifecycle_unit, DiscardReason reason) override {
+  bool KillTab(LifecycleUnit* lifecycle_unit,
+               ::mojom::LifecycleUnitDiscardReason reason) override {
     killed_tabs_.push_back(lifecycle_unit);
     return true;
   }
@@ -250,20 +214,20 @@ TEST_F(TabManagerDelegateTest, SetOomScoreAdj) {
                              arc::mojom::ProcessState::PERSISTENT_UI,
                              kNotFocused, 700);
 
-  DummyLifecycleUnit tab1(base::TimeTicks() + base::TimeDelta::FromSeconds(3),
-                          11);
+  TestLifecycleUnit tab1(base::TimeTicks() + base::TimeDelta::FromSeconds(3),
+                         11);
   tab_manager_delegate.AddLifecycleUnit(&tab1);
-  DummyLifecycleUnit tab2(base::TimeTicks() + base::TimeDelta::FromSeconds(1),
-                          11);
+  TestLifecycleUnit tab2(base::TimeTicks() + base::TimeDelta::FromSeconds(1),
+                         11);
   tab_manager_delegate.AddLifecycleUnit(&tab2);
-  DummyLifecycleUnit tab3(base::TimeTicks() + base::TimeDelta::FromSeconds(5),
-                          12);
+  TestLifecycleUnit tab3(base::TimeTicks() + base::TimeDelta::FromSeconds(5),
+                         12);
   tab_manager_delegate.AddLifecycleUnit(&tab3);
-  DummyLifecycleUnit tab4(base::TimeTicks() + base::TimeDelta::FromSeconds(4),
-                          12);
+  TestLifecycleUnit tab4(base::TimeTicks() + base::TimeDelta::FromSeconds(4),
+                         12);
   tab_manager_delegate.AddLifecycleUnit(&tab4);
-  DummyLifecycleUnit tab5(base::TimeTicks() + base::TimeDelta::FromSeconds(2),
-                          12);
+  TestLifecycleUnit tab5(base::TimeTicks() + base::TimeDelta::FromSeconds(2),
+                         12);
   tab_manager_delegate.AddLifecycleUnit(&tab5);
 
   // Sorted order (by GetSortedCandidates):
@@ -287,8 +251,8 @@ TEST_F(TabManagerDelegateTest, SetOomScoreAdj) {
   // Non-killable part. AdjustOomPrioritiesImpl() does make a focused app/tab
   // kernel-killable, but does not do that for PERSISTENT and PERSISTENT_UI
   // apps.
-  EXPECT_EQ(TabManagerDelegate::kLowestOomScore, oom_score_map[50]);
-  EXPECT_EQ(TabManagerDelegate::kLowestOomScore, oom_score_map[60]);
+  EXPECT_EQ(TabManagerDelegate::kPersistentArcAppOomScore, oom_score_map[50]);
+  EXPECT_EQ(TabManagerDelegate::kPersistentArcAppOomScore, oom_score_map[60]);
 
   // Higher priority part.
   EXPECT_EQ(300, oom_score_map[10]);
@@ -364,8 +328,9 @@ TEST_F(TabManagerDelegateTest, DoNotKillRecentlyKilledArcProcesses) {
 
   memory_stat->SetTargetMemoryToFreeKB(250000);
   memory_stat->SetProcessPss(30, 10000);
-  tab_manager_delegate.LowMemoryKillImpl(DiscardReason::kUrgent,
-                                         std::move(arc_processes));
+  tab_manager_delegate.LowMemoryKillImpl(
+      base::TimeTicks::Now(), ::mojom::LifecycleUnitDiscardReason::URGENT,
+      std::move(arc_processes));
 
   auto killed_arc_processes = tab_manager_delegate.GetKilledArcProcesses();
   EXPECT_EQ(0U, killed_arc_processes.size());
@@ -395,20 +360,20 @@ TEST_F(TabManagerDelegateTest, KillMultipleProcesses) {
                              arc::mojom::ProcessState::PERSISTENT, kNotFocused,
                              400);
 
-  DummyLifecycleUnit tab1(base::TimeTicks() + base::TimeDelta::FromSeconds(3),
-                          11);
+  TestLifecycleUnit tab1(base::TimeTicks() + base::TimeDelta::FromSeconds(3),
+                         11);
   tab_manager_delegate.AddLifecycleUnit(&tab1);
-  DummyLifecycleUnit tab2(base::TimeTicks() + base::TimeDelta::FromSeconds(1),
-                          11);
+  TestLifecycleUnit tab2(base::TimeTicks() + base::TimeDelta::FromSeconds(1),
+                         11);
   tab_manager_delegate.AddLifecycleUnit(&tab2);
-  DummyLifecycleUnit tab3(base::TimeTicks() + base::TimeDelta::FromSeconds(5),
-                          12);
+  TestLifecycleUnit tab3(base::TimeTicks() + base::TimeDelta::FromSeconds(5),
+                         12);
   tab_manager_delegate.AddLifecycleUnit(&tab3);
-  DummyLifecycleUnit tab4(base::TimeTicks() + base::TimeDelta::FromSeconds(4),
-                          12);
+  TestLifecycleUnit tab4(base::TimeTicks() + base::TimeDelta::FromSeconds(4),
+                         12);
   tab_manager_delegate.AddLifecycleUnit(&tab4);
-  DummyLifecycleUnit tab5(base::TimeTicks() + base::TimeDelta::FromSeconds(2),
-                          12);
+  TestLifecycleUnit tab5(base::TimeTicks() + base::TimeDelta::FromSeconds(2),
+                         12);
   tab_manager_delegate.AddLifecycleUnit(&tab5);
 
   // Sorted order (by GetSortedCandidates):
@@ -435,8 +400,9 @@ TEST_F(TabManagerDelegateTest, KillMultipleProcesses) {
   memory_stat->SetProcessPss(20, 30000);
   memory_stat->SetProcessPss(10, 100000);
 
-  tab_manager_delegate.LowMemoryKillImpl(DiscardReason::kProactive,
-                                         std::move(arc_processes));
+  tab_manager_delegate.LowMemoryKillImpl(
+      base::TimeTicks::Now(), ::mojom::LifecycleUnitDiscardReason::PROACTIVE,
+      std::move(arc_processes));
 
   auto killed_arc_processes = tab_manager_delegate.GetKilledArcProcesses();
   auto killed_tabs = tab_manager_delegate.GetKilledTabs();

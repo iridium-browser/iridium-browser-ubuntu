@@ -10,7 +10,10 @@ underscore are intended to be implementation details, and should not
 be subclassed; however, some, like FakeBrowser, have public APIs that
 may need to be called in tests.
 """
+import types
+
 from telemetry.core import exceptions
+from telemetry.internal.backends.chrome_inspector import inspector_websocket
 from telemetry.internal.backends.chrome_inspector import websocket
 from telemetry.internal.browser import browser_options as browser_options_module
 from telemetry.internal.platform import system_info
@@ -18,22 +21,30 @@ from telemetry.page import shared_page_state
 from telemetry.util import image_util
 from telemetry.util import wpr_modes
 from telemetry.testing.internal import fake_gpu_info
-from types import ModuleType
 
 
 # Classes and functions which are intended to be part of the public
 # fakes API.
 
+class FakePlatformBackend(object):
+  def __init__(self, os_name):
+    self._os_name = os_name
+
+  def GetOSName(self):
+    return self._os_name
+
+
 class FakePlatform(object):
   def __init__(self):
     self._network_controller = None
     self._tracing_controller = None
-    self._has_battor = False
     self._os_name = 'FakeOS'
+    self._os_version_name = 'FakeVersion'
     self._device_type_name = 'abc'
     self._is_svelte = False
     self._is_aosp = True
     self._get_os_version_detail_string = 'OsVersionString'
+    self._platform_backend = FakePlatformBackend('FakeOS')
 
   @property
   def is_host_platform(self):
@@ -72,11 +83,14 @@ class FakePlatform(object):
   def SetOSName(self, name):
     self._os_name = name
 
+  def GetOSVersionName(self):
+    return self._os_version_name
+
+  def SetOSVersionName(self, os_version_name):
+    self._os_version_name = os_version_name
+
   def GetOSName(self):
     return self._os_name
-
-  def GetOSVersionName(self):
-    raise NotImplementedError
 
   def GetDeviceId(self):
     return None
@@ -89,13 +103,6 @@ class FakePlatform(object):
 
   def WaitForBatteryTemperature(self, _):
     pass
-
-  def HasBattOrConnected(self):
-    return self._has_battor
-
-  def SetBattOrDetected(self, b):
-    assert isinstance(b, bool)
-    self._has_battor = b
 
   # TODO(rnephew): Investigate moving from setters to @property.
   def SetDeviceTypeName(self, name):
@@ -263,7 +270,7 @@ class FakeSharedPageState(shared_page_state.SharedPageState):
 
 class FakeSystemInfo(system_info.SystemInfo):
   def __init__(self, model_name='', gpu_dict=None, command_line=''):
-    if gpu_dict == None:
+    if gpu_dict is None:
       gpu_dict = fake_gpu_info.FAKE_GPU_INFO
     super(FakeSystemInfo, self).__init__(model_name, gpu_dict, command_line)
 
@@ -357,10 +364,6 @@ class FakeBrowser(FakeApp):
   def Close(self):
     self._is_crashed = False
 
-  @property
-  def supports_system_info(self):
-    return True
-
   def GetSystemInfo(self):
     return self.returned_system_info
 
@@ -372,8 +375,15 @@ class FakeBrowser(FakeApp):
   def tabs(self):
     return self._tabs
 
+  @property
+  def _platform_backend(self):
+    return self._platform._platform_backend
+
   def DumpStateUponFailure(self):
     pass
+
+  def LogSymbolizedUnsymbolizedMinidumps(self, log_level):
+    del log_level  # unused
 
 
 class _FakeTracingController(object):
@@ -578,12 +588,14 @@ class FakeInspectorWebsocket(object):
     current_time = self._mock_timer.time()
     if not self._notifications:
       self._mock_timer.SetTime(current_time + timeout + 1)
-      raise websocket.WebSocketTimeoutException()
+      raise inspector_websocket.WebSocketException(
+          websocket.WebSocketTimeoutException())
 
     response, time, kind = self._notifications[0]
     if time - current_time > timeout:
       self._mock_timer.SetTime(current_time + timeout + 1)
-      raise websocket.WebSocketTimeoutException()
+      raise inspector_websocket.WebSocketException(
+          websocket.WebSocketTimeoutException())
 
     self._notifications.pop(0)
     self._mock_timer.SetTime(time + 1)
@@ -606,7 +618,7 @@ class FakeTimer(object):
     self._module = module
     self._actual_time = None
     if module:
-      assert isinstance(module, ModuleType)
+      assert isinstance(module, types.ModuleType)
       self._actual_time = module.time
       self._module.time = self
 

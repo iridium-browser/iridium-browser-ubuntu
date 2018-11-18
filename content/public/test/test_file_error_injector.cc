@@ -10,12 +10,14 @@
 #include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/logging.h"
+#include "base/task/post_task.h"
 #include "components/download/public/common/download_file_factory.h"
 #include "components/download/public/common/download_file_impl.h"
 #include "components/download/public/common/download_interrupt_reasons_utils.h"
 #include "components/download/public/common/download_task_runner.h"
 #include "content/browser/download/download_manager_impl.h"
 #include "content/browser/loader/resource_dispatcher_host_impl.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "url/gurl.h"
 
@@ -155,8 +157,8 @@ void DownloadFileWithError::Initialize(
     if (download::DOWNLOAD_INTERRUPT_REASON_NONE != error_to_return) {
       // Don't execute a, probably successful, Initialize; just
       // return the error.
-      BrowserThread::PostTask(
-          BrowserThread::UI, FROM_HERE,
+      base::PostTaskWithTraits(
+          FROM_HERE, {BrowserThread::UI},
           base::BindOnce(std::move(callback_to_use), error_to_return, 0));
       return;
     }
@@ -210,8 +212,8 @@ void DownloadFileWithError::RenameAndUniquify(
     if (download::DOWNLOAD_INTERRUPT_REASON_NONE != error_to_return) {
       // Don't execute a, probably successful, RenameAndUniquify; just
       // return the error.
-      BrowserThread::PostTask(
-          BrowserThread::UI, FROM_HERE,
+      base::PostTaskWithTraits(
+          FROM_HERE, {BrowserThread::UI},
           base::BindOnce(callback, error_to_return, base::FilePath()));
       return;
     }
@@ -242,8 +244,8 @@ void DownloadFileWithError::RenameAndAnnotate(
     if (download::DOWNLOAD_INTERRUPT_REASON_NONE != error_to_return) {
       // Don't execute a, probably successful, RenameAndAnnotate; just
       // return the error.
-      BrowserThread::PostTask(
-          BrowserThread::UI, FROM_HERE,
+      base::PostTaskWithTraits(
+          FROM_HERE, {BrowserThread::UI},
           base::BindOnce(callback, error_to_return, base::FilePath()));
       return;
     }
@@ -350,17 +352,6 @@ TestFileErrorInjector::TestFileErrorInjector(DownloadManager* download_manager)
     :  // This code is only used for browser_tests, so a
       // DownloadManager is always a DownloadManagerImpl.
       download_manager_(static_cast<DownloadManagerImpl*>(download_manager)) {
-  // Record the value of the pointer, for later validation.
-  created_factory_ = new DownloadFileWithErrorFactory(
-      base::Bind(&TestFileErrorInjector::RecordDownloadFileConstruction, this),
-      base::Bind(&TestFileErrorInjector::RecordDownloadFileDestruction, this));
-
-  // We will transfer ownership of the factory to the download manager.
-  std::unique_ptr<download::DownloadFileFactory> download_file_factory(
-      created_factory_);
-
-  download_manager_->SetDownloadFileFactoryForTesting(
-      std::move(download_file_factory));
 }
 
 TestFileErrorInjector::~TestFileErrorInjector() {
@@ -410,14 +401,14 @@ void TestFileErrorInjector::DestroyingDownloadFile() {
 }
 
 void TestFileErrorInjector::RecordDownloadFileConstruction() {
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::UI},
       base::BindOnce(&TestFileErrorInjector::DownloadFileCreated, this));
 }
 
 void TestFileErrorInjector::RecordDownloadFileDestruction() {
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::UI},
       base::BindOnce(&TestFileErrorInjector::DestroyingDownloadFile, this));
 }
 
@@ -430,6 +421,20 @@ scoped_refptr<TestFileErrorInjector> TestFileErrorInjector::Create(
 
   scoped_refptr<TestFileErrorInjector> single_injector(
       new TestFileErrorInjector(download_manager));
+  // Record the value of the pointer, for later validation.
+  single_injector->created_factory_ = new DownloadFileWithErrorFactory(
+      base::BindRepeating(
+          &TestFileErrorInjector::RecordDownloadFileConstruction,
+          single_injector),
+      base::BindRepeating(&TestFileErrorInjector::RecordDownloadFileDestruction,
+                          single_injector));
+
+  // We will transfer ownership of the factory to the download manager.
+  std::unique_ptr<download::DownloadFileFactory> download_file_factory(
+      single_injector->created_factory_);
+
+  single_injector->download_manager_->SetDownloadFileFactoryForTesting(
+      std::move(download_file_factory));
 
   return single_injector;
 }

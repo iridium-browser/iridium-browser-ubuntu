@@ -1,4 +1,13 @@
+#if defined(__has_feature)
+#if __has_feature(memory_sanitizer) && !defined(OPENSSL_NO_ASM)
+#define OPENSSL_NO_ASM
+#endif
+#endif
+
 #if defined(__x86_64__) && !defined(OPENSSL_NO_ASM)
+#if defined(BORINGSSL_PREFIX)
+#include <boringssl_prefix_symbols_asm.h>
+#endif
 .text	
 
 .p2align	4
@@ -327,11 +336,11 @@ L$enc_compact_done:
 .byte	0xf3,0xc3
 
 .p2align	4
-.globl	_asm_AES_encrypt
-.private_extern _asm_AES_encrypt
+.globl	_aes_nohw_encrypt
+.private_extern _aes_nohw_encrypt
 
-.private_extern	_asm_AES_encrypt
-_asm_AES_encrypt:
+.private_extern	_aes_nohw_encrypt
+_aes_nohw_encrypt:
 
 	movq	%rsp,%rax
 
@@ -791,11 +800,11 @@ L$dec_compact_done:
 .byte	0xf3,0xc3
 
 .p2align	4
-.globl	_asm_AES_decrypt
-.private_extern _asm_AES_decrypt
+.globl	_aes_nohw_decrypt
+.private_extern _aes_nohw_decrypt
 
-.private_extern	_asm_AES_decrypt
-_asm_AES_decrypt:
+.private_extern	_aes_nohw_decrypt
+_aes_nohw_decrypt:
 
 	movq	%rsp,%rax
 
@@ -877,10 +886,10 @@ L$dec_epilogue:
 
 
 .p2align	4
-.globl	_asm_AES_set_encrypt_key
-.private_extern _asm_AES_set_encrypt_key
+.globl	_aes_nohw_set_encrypt_key
+.private_extern _aes_nohw_set_encrypt_key
 
-_asm_AES_set_encrypt_key:
+_aes_nohw_set_encrypt_key:
 
 	pushq	%rbx
 
@@ -1151,10 +1160,10 @@ L$exit:
 .byte	0xf3,0xc3
 
 .p2align	4
-.globl	_asm_AES_set_decrypt_key
-.private_extern _asm_AES_set_decrypt_key
+.globl	_aes_nohw_set_decrypt_key
+.private_extern _aes_nohw_set_decrypt_key
 
-_asm_AES_set_decrypt_key:
+_aes_nohw_set_decrypt_key:
 
 	pushq	%rbx
 
@@ -1355,12 +1364,12 @@ L$dec_key_epilogue:
 
 
 .p2align	4
-.globl	_asm_AES_cbc_encrypt
-.private_extern _asm_AES_cbc_encrypt
+.globl	_aes_nohw_cbc_encrypt
+.private_extern _aes_nohw_cbc_encrypt
 
 
-.private_extern	_asm_AES_cbc_encrypt
-_asm_AES_cbc_encrypt:
+.private_extern	_aes_nohw_cbc_encrypt
+_aes_nohw_cbc_encrypt:
 
 	cmpq	$0,%rdx
 	je	L$cbc_epilogue

@@ -9,6 +9,7 @@
 #include "base/time/clock.h"
 #include "base/time/tick_clock.h"
 #include "mojo/public/cpp/bindings/binding.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
@@ -72,7 +73,7 @@ class FakeNightLightClient : public NightLightClient,
   ~FakeNightLightClient() override = default;
 
   // base::Clock:
-  base::Time Now() override { return fake_now_; }
+  base::Time Now() const override { return fake_now_; }
 
   // base::TickClock:
   base::TimeTicks NowTicks() const override { return fake_now_ticks_; }

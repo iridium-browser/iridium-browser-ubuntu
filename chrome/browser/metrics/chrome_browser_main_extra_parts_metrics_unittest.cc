@@ -7,8 +7,7 @@
 #include <memory>
 
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
-#include "base/test/histogram_tester.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_service_manager_context.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -17,7 +16,7 @@
 #include "ui/gfx/geometry/size.h"
 
 #if defined(USE_OZONE) || defined(USE_X11)
-#include "services/ui/public/cpp/input_devices/input_device_client_test_api.h"
+#include "services/ws/public/cpp/input_devices/input_device_client_test_api.h"
 #endif
 
 namespace {
@@ -34,7 +33,7 @@ class ChromeBrowserMainExtraPartsMetricsTest : public testing::Test {
 
  protected:
 #if defined(USE_OZONE) || defined(USE_X11)
-  ui::InputDeviceClientTestApi input_device_client_test_api_;
+  ws::InputDeviceClientTestApi input_device_client_test_api_;
 #endif
 
  private:

@@ -250,15 +250,6 @@ define i64 @test18(i64 %Y) {
   ret i64 %tmp.8
 }
 
-define i32 @test19(i32 %X, i32 %Y) {
-; CHECK-LABEL: @test19(
-; CHECK-NEXT:    ret i32 [[X:%.*]]
-;
-  %Z = sub i32 %X, %Y
-  %Q = add i32 %Z, %Y
-  ret i32 %Q
-}
-
 define i1 @test20(i32 %g, i32 %h) {
 ; CHECK-LABEL: @test20(
 ; CHECK-NEXT:    [[TMP_4:%.*]] = icmp ne i32 [[H:%.*]], 0
@@ -593,26 +584,6 @@ define <2 x i64> @test32(<2 x i64> %A) {
   ret <2 x i64> %sub
 }
 
-define <2 x i64> @test33(<2 x i1> %A) {
-; CHECK-LABEL: @test33(
-; CHECK-NEXT:    [[SUB:%.*]] = sext <2 x i1> [[A:%.*]] to <2 x i64>
-; CHECK-NEXT:    ret <2 x i64> [[SUB]]
-;
-  %ext = zext <2 x i1> %A to <2 x i64>
-  %sub = sub <2 x i64> zeroinitializer, %ext
-  ret <2 x i64> %sub
-}
-
-define <2 x i64> @test34(<2 x i1> %A) {
-; CHECK-LABEL: @test34(
-; CHECK-NEXT:    [[SUB:%.*]] = zext <2 x i1> [[A:%.*]] to <2 x i64>
-; CHECK-NEXT:    ret <2 x i64> [[SUB]]
-;
-  %ext = sext <2 x i1> %A to <2 x i64>
-  %sub = sub <2 x i64> zeroinitializer, %ext
-  ret <2 x i64> %sub
-}
-
 define <2 x i64> @test35(<2 x i64> %A) {
 ; CHECK-LABEL: @test35(
 ; CHECK-NEXT:    [[SUB:%.*]] = mul <2 x i64> [[A:%.*]], <i64 -2, i64 -3>
@@ -792,58 +763,6 @@ define i32 @test48(i1 %A, i32 %B, i32 %C, i32 %D) {
   %sel1 = select i1 %A, i32 %B, i32 %C
   %sub = sub i32 %sel0, %sel1
   ret i32 %sub
-}
-
-; Zext+add is more canonical than sext+sub.
-
-define i8 @bool_sext_sub(i8 %x, i1 %y) {
-; CHECK-LABEL: @bool_sext_sub(
-; CHECK-NEXT:    [[TMP1:%.*]] = zext i1 [[Y:%.*]] to i8
-; CHECK-NEXT:    [[SUB:%.*]] = add i8 [[TMP1]], [[X:%.*]]
-; CHECK-NEXT:    ret i8 [[SUB]]
-;
-  %sext = sext i1 %y to i8
-  %sub = sub i8 %x, %sext
-  ret i8 %sub
-}
-
-; Vectors get the same transform.
-
-define <2 x i8> @bool_sext_sub_vec(<2 x i8> %x, <2 x i1> %y) {
-; CHECK-LABEL: @bool_sext_sub_vec(
-; CHECK-NEXT:    [[TMP1:%.*]] = zext <2 x i1> [[Y:%.*]] to <2 x i8>
-; CHECK-NEXT:    [[SUB:%.*]] = add <2 x i8> [[TMP1]], [[X:%.*]]
-; CHECK-NEXT:    ret <2 x i8> [[SUB]]
-;
-  %sext = sext <2 x i1> %y to <2 x i8>
-  %sub = sub <2 x i8> %x, %sext
-  ret <2 x i8> %sub
-}
-
-; NSW is preserved.
-
-define <2 x i8> @bool_sext_sub_vec_nsw(<2 x i8> %x, <2 x i1> %y) {
-; CHECK-LABEL: @bool_sext_sub_vec_nsw(
-; CHECK-NEXT:    [[TMP1:%.*]] = zext <2 x i1> [[Y:%.*]] to <2 x i8>
-; CHECK-NEXT:    [[SUB:%.*]] = add nsw <2 x i8> [[TMP1]], [[X:%.*]]
-; CHECK-NEXT:    ret <2 x i8> [[SUB]]
-;
-  %sext = sext <2 x i1> %y to <2 x i8>
-  %sub = sub nsw <2 x i8> %x, %sext
-  ret <2 x i8> %sub
-}
-
-; We favor the canonical zext+add over keeping the NUW.
-
-define i8 @bool_sext_sub_nuw(i8 %x, i1 %y) {
-; CHECK-LABEL: @bool_sext_sub_nuw(
-; CHECK-NEXT:    [[TMP1:%.*]] = zext i1 [[Y:%.*]] to i8
-; CHECK-NEXT:    [[SUB:%.*]] = add i8 [[TMP1]], [[X:%.*]]
-; CHECK-NEXT:    ret i8 [[SUB]]
-;
-  %sext = sext i1 %y to i8
-  %sub = sub nuw i8 %x, %sext
-  ret i8 %sub
 }
 
 define i32 @test49(i32 %X) {
@@ -1136,4 +1055,91 @@ define <2 x i32> @test63vec(<2 x i32> %A) {
   %C = shl <2 x i32> %B, <i32 1, i32 1>
   %D = sub <2 x i32> <i32 2, i32 2>, %C
   ret <2 x i32> %D
+}
+
+; FIXME: Transform (neg (max ~X, C)) -> ((min X, ~C) + 1). Same for min.
+define i32 @test64(i32 %x) {
+; CHECK-LABEL: @test64(
+; CHECK-NEXT:    [[TMP1:%.*]] = icmp slt i32 [[X:%.*]], 255
+; CHECK-NEXT:    [[TMP2:%.*]] = select i1 [[TMP1]], i32 [[X]], i32 255
+; CHECK-NEXT:    [[RES:%.*]] = add i32 [[TMP2]], 1
+; CHECK-NEXT:    ret i32 [[RES]]
+;
+  %1 = xor i32 %x, -1
+  %2 = icmp sgt i32 %1, -256
+  %3 = select i1 %2, i32 %1, i32 -256
+  %res = sub i32 0, %3
+  ret i32 %res
+}
+
+define i32 @test65(i32 %x) {
+; CHECK-LABEL: @test65(
+; CHECK-NEXT:    [[TMP1:%.*]] = icmp sgt i32 [[X:%.*]], -256
+; CHECK-NEXT:    [[TMP2:%.*]] = select i1 [[TMP1]], i32 [[X]], i32 -256
+; CHECK-NEXT:    [[RES:%.*]] = add i32 [[TMP2]], 1
+; CHECK-NEXT:    ret i32 [[RES]]
+;
+  %1 = xor i32 %x, -1
+  %2 = icmp slt i32 %1, 255
+  %3 = select i1 %2, i32 %1, i32 255
+  %res = sub i32 0, %3
+  ret i32 %res
+}
+
+define i32 @test66(i32 %x) {
+; CHECK-LABEL: @test66(
+; CHECK-NEXT:    [[TMP1:%.*]] = icmp ult i32 [[X:%.*]], -101
+; CHECK-NEXT:    [[TMP2:%.*]] = select i1 [[TMP1]], i32 [[X]], i32 -101
+; CHECK-NEXT:    [[RES:%.*]] = add i32 [[TMP2]], 1
+; CHECK-NEXT:    ret i32 [[RES]]
+;
+  %1 = xor i32 %x, -1
+  %2 = icmp ugt i32 %1, 100
+  %3 = select i1 %2, i32 %1, i32 100
+  %res = sub i32 0, %3
+  ret i32 %res
+}
+
+define i32 @test67(i32 %x) {
+; CHECK-LABEL: @test67(
+; CHECK-NEXT:    [[TMP1:%.*]] = icmp ugt i32 [[X:%.*]], 100
+; CHECK-NEXT:    [[TMP2:%.*]] = select i1 [[TMP1]], i32 [[X]], i32 100
+; CHECK-NEXT:    [[RES:%.*]] = add i32 [[TMP2]], 1
+; CHECK-NEXT:    ret i32 [[RES]]
+;
+  %1 = xor i32 %x, -1
+  %2 = icmp ult i32 %1, -101
+  %3 = select i1 %2, i32 %1, i32 -101
+  %res = sub i32 0, %3
+  ret i32 %res
+}
+
+; Check splat vectors too
+define <2 x i32> @test68(<2 x i32> %x) {
+; CHECK-LABEL: @test68(
+; CHECK-NEXT:    [[TMP1:%.*]] = icmp slt <2 x i32> [[X:%.*]], <i32 255, i32 255>
+; CHECK-NEXT:    [[TMP2:%.*]] = select <2 x i1> [[TMP1]], <2 x i32> [[X]], <2 x i32> <i32 255, i32 255>
+; CHECK-NEXT:    [[RES:%.*]] = add <2 x i32> [[TMP2]], <i32 1, i32 1>
+; CHECK-NEXT:    ret <2 x i32> [[RES]]
+;
+  %1 = xor <2 x i32> %x, <i32 -1, i32 -1>
+  %2 = icmp sgt <2 x i32> %1, <i32 -256, i32 -256>
+  %3 = select <2 x i1> %2, <2 x i32> %1, <2 x i32> <i32 -256, i32 -256>
+  %res = sub <2 x i32> zeroinitializer, %3
+  ret <2 x i32> %res
+}
+
+; And non-splat constant vectors.
+define <2 x i32> @test69(<2 x i32> %x) {
+; CHECK-LABEL: @test69(
+; CHECK-NEXT:    [[TMP1:%.*]] = icmp slt <2 x i32> [[X:%.*]], <i32 255, i32 127>
+; CHECK-NEXT:    [[TMP2:%.*]] = select <2 x i1> [[TMP1]], <2 x i32> [[X]], <2 x i32> <i32 255, i32 127>
+; CHECK-NEXT:    [[RES:%.*]] = add <2 x i32> [[TMP2]], <i32 1, i32 1>
+; CHECK-NEXT:    ret <2 x i32> [[RES]]
+;
+  %1 = xor <2 x i32> %x, <i32 -1, i32 -1>
+  %2 = icmp sgt <2 x i32> %1, <i32 -256, i32 -128>
+  %3 = select <2 x i1> %2, <2 x i32> %1, <2 x i32> <i32 -256, i32 -128>
+  %res = sub <2 x i32> zeroinitializer, %3
+  ret <2 x i32> %res
 }

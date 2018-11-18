@@ -31,12 +31,13 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_ANIMATION_EFFECT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_ANIMATION_ANIMATION_EFFECT_H_
 
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
+#include "base/optional.h"
+#include "third_party/blink/renderer/core/animation/animation_time_delta.h"
 #include "third_party/blink/renderer/core/animation/timing.h"
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/wtf/optional.h"
 
 namespace blink {
 
@@ -45,6 +46,7 @@ class AnimationEffectOwner;
 class EffectTiming;
 class ComputedEffectTiming;
 class OptionalEffectTiming;
+class WorkletAnimation;
 
 enum TimingUpdateReason {
   kTimingUpdateOnDemand,
@@ -65,6 +67,7 @@ class CORE_EXPORT AnimationEffect : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
   // Calls Attach/Detach, GetAnimation, UpdateInheritedTime.
   friend class Animation;
+  friend class WorkletAnimation;
 
   // Calls GetAnimation().
   // TODO(majidvp): Remove this. EffectStack should not need to access animation
@@ -88,7 +91,7 @@ class CORE_EXPORT AnimationEffect : public ScriptWrappable {
     virtual void Trace(blink::Visitor* visitor) {}
   };
 
-  virtual ~AnimationEffect() = default;
+  ~AnimationEffect() override = default;
 
   virtual bool IsKeyframeEffect() const { return false; }
   virtual bool IsInertEffect() const { return false; }
@@ -100,7 +103,9 @@ class CORE_EXPORT AnimationEffect : public ScriptWrappable {
   double CurrentIteration() const {
     return EnsureCalculated().current_iteration;
   }
-  WTF::Optional<double> Progress() const { return EnsureCalculated().progress; }
+  base::Optional<double> Progress() const {
+    return EnsureCalculated().progress;
+  }
   double TimeToForwardsEffectChange() const {
     return EnsureCalculated().time_to_forwards_effect_change;
   }
@@ -108,8 +113,8 @@ class CORE_EXPORT AnimationEffect : public ScriptWrappable {
     return EnsureCalculated().time_to_reverse_effect_change;
   }
 
-  double IterationDuration() const;
-  double ActiveDurationInternal() const;
+  AnimationTimeDelta IterationDuration() const;
+  double RepeatedDuration() const;
   double EndTimeInternal() const;
 
   const Timing& SpecifiedTiming() const { return timing_; }
@@ -132,7 +137,7 @@ class CORE_EXPORT AnimationEffect : public ScriptWrappable {
 
   const Animation* GetAnimationForTesting() const { return GetAnimation(); }
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  protected:
   explicit AnimationEffect(const Timing&, EventDelegate* = nullptr);
@@ -142,15 +147,16 @@ class CORE_EXPORT AnimationEffect : public ScriptWrappable {
   // updateChildrenAndEffects.
   void UpdateInheritedTime(double inherited_time, TimingUpdateReason) const;
   void Invalidate() const { needs_update_ = true; }
+  void InvalidateAndNotifyOwner() const;
   bool RequiresIterationEvents() const {
     return event_delegate_ && event_delegate_->RequiresIterationEvents(*this);
   }
   void ClearEventDelegate() { event_delegate_ = nullptr; }
 
-  double RepeatedDuration() const;
-
   virtual void UpdateChildrenAndEffects() const = 0;
-  virtual double IntrinsicIterationDuration() const { return 0; }
+  virtual AnimationTimeDelta IntrinsicIterationDuration() const {
+    return AnimationTimeDelta();
+  }
   virtual double CalculateTimeToEffectChange(
       bool forwards,
       double local_time,
@@ -167,7 +173,7 @@ class CORE_EXPORT AnimationEffect : public ScriptWrappable {
     DISALLOW_NEW();
     Phase phase;
     double current_iteration;
-    WTF::Optional<double> progress;
+    base::Optional<double> progress;
     bool is_current;
     bool is_in_effect;
     bool is_in_play;

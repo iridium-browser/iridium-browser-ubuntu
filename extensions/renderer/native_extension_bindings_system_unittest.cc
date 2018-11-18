@@ -5,6 +5,7 @@
 #include "extensions/renderer/native_extension_bindings_system_test_base.h"
 
 #include "base/strings/stringprintf.h"
+#include "base/test/bind_test_util.h"
 #include "components/crx_file/id_util.h"
 #include "extensions/common/extension_api.h"
 #include "extensions/common/extension_builder.h"
@@ -14,6 +15,7 @@
 #include "extensions/common/value_builder.h"
 #include "extensions/renderer/bindings/api_binding_test_util.h"
 #include "extensions/renderer/bindings/api_invocation_errors.h"
+#include "extensions/renderer/bindings/api_response_validator.h"
 #include "extensions/renderer/bindings/test_js_runner.h"
 #include "extensions/renderer/message_target.h"
 #include "extensions/renderer/native_extension_bindings_system.h"
@@ -35,7 +37,7 @@ bool PropertyExists(v8::Local<v8::Context> context,
 }  // namespace
 
 TEST_F(NativeExtensionBindingsSystemUnittest, Basic) {
-  scoped_refptr<Extension> extension =
+  scoped_refptr<const Extension> extension =
       ExtensionBuilder("foo")
           .AddPermissions({"idle", "power", "webRequest"})
           .Build();
@@ -144,7 +146,7 @@ TEST_F(NativeExtensionBindingsSystemUnittest, Basic) {
 }
 
 TEST_F(NativeExtensionBindingsSystemUnittest, Events) {
-  scoped_refptr<Extension> extension =
+  scoped_refptr<const Extension> extension =
       ExtensionBuilder("foo").AddPermissions({"idle", "power"}).Build();
   RegisterExtension(extension);
 
@@ -190,7 +192,7 @@ TEST_F(NativeExtensionBindingsSystemUnittest, Events) {
 // Tests that referencing the same API multiple times returns the same object;
 // i.e. chrome.foo === chrome.foo.
 TEST_F(NativeExtensionBindingsSystemUnittest, APIObjectsAreEqual) {
-  scoped_refptr<Extension> extension =
+  scoped_refptr<const Extension> extension =
       ExtensionBuilder("foo").AddPermission("idle").Build();
   RegisterExtension(extension);
 
@@ -217,7 +219,7 @@ TEST_F(NativeExtensionBindingsSystemUnittest, APIObjectsAreEqual) {
 // returns undefined if not yet instantiated).
 TEST_F(NativeExtensionBindingsSystemUnittest,
        ReferencingAPIAfterDisposingContext) {
-  scoped_refptr<Extension> extension =
+  scoped_refptr<const Extension> extension =
       ExtensionBuilder("foo").AddPermissions({"idle", "power"}).Build();
 
   RegisterExtension(extension);
@@ -277,7 +279,7 @@ TEST_F(NativeExtensionBindingsSystemUnittest, TestBridgingToJSCustomBindings) {
 
   source_map()->RegisterModule("idle", kCustomBinding);
 
-  scoped_refptr<Extension> extension =
+  scoped_refptr<const Extension> extension =
       ExtensionBuilder("foo").AddPermission("idle").Build();
   RegisterExtension(extension);
 
@@ -367,7 +369,7 @@ TEST_F(NativeExtensionBindingsSystemUnittest, TestSendRequestHook) {
 
   source_map()->RegisterModule("idle", kCustomBinding);
 
-  scoped_refptr<Extension> extension =
+  scoped_refptr<const Extension> extension =
       ExtensionBuilder("foo").AddPermission("idle").Build();
   RegisterExtension(extension);
 
@@ -401,7 +403,7 @@ TEST_F(NativeExtensionBindingsSystemUnittest, TestSendRequestHook) {
 // Note: the notification logic is tested more thoroughly in the APIEventHandler
 // unittests.
 TEST_F(NativeExtensionBindingsSystemUnittest, TestEventRegistration) {
-  scoped_refptr<Extension> extension =
+  scoped_refptr<const Extension> extension =
       ExtensionBuilder("foo").AddPermissions({"idle", "power"}).Build();
 
   RegisterExtension(extension);
@@ -452,7 +454,7 @@ TEST_F(NativeExtensionBindingsSystemUnittest, TestEventRegistration) {
 
 TEST_F(NativeExtensionBindingsSystemUnittest,
        TestPrefixedApiEventsAndAppBinding) {
-  scoped_refptr<Extension> app =
+  scoped_refptr<const Extension> app =
       ExtensionBuilder("foo", ExtensionBuilder::Type::PLATFORM_APP).Build();
   EXPECT_TRUE(app->is_platform_app());
   RegisterExtension(app);
@@ -474,7 +476,7 @@ TEST_F(NativeExtensionBindingsSystemUnittest,
   ASSERT_FALSE(app_binding_keys.IsEmpty());
   ASSERT_TRUE(app_binding_keys->IsString());
   EXPECT_EQ("[\"runtime\",\"window\"]",
-            gin::V8ToString(app_binding_keys));
+            gin::V8ToString(isolate(), app_binding_keys));
 
   const char kUseAppRuntime[] =
       "(function() {\n"
@@ -492,7 +494,7 @@ TEST_F(NativeExtensionBindingsSystemUnittest,
 
 TEST_F(NativeExtensionBindingsSystemUnittest,
        TestPrefixedApiMethodsAndSystemBinding) {
-  scoped_refptr<Extension> extension =
+  scoped_refptr<const Extension> extension =
       ExtensionBuilder("foo").AddPermission("system.cpu").Build();
   RegisterExtension(extension);
 
@@ -532,7 +534,7 @@ TEST_F(NativeExtensionBindingsSystemUnittest,
 }
 
 TEST_F(NativeExtensionBindingsSystemUnittest, TestLastError) {
-  scoped_refptr<Extension> extension =
+  scoped_refptr<const Extension> extension =
       ExtensionBuilder("foo").AddPermissions({"idle", "power"}).Build();
   RegisterExtension(extension);
 
@@ -582,7 +584,7 @@ TEST_F(NativeExtensionBindingsSystemUnittest, TestLastError) {
 }
 
 TEST_F(NativeExtensionBindingsSystemUnittest, TestCustomProperties) {
-  scoped_refptr<Extension> extension =
+  scoped_refptr<const Extension> extension =
       ExtensionBuilder("storage extension").AddPermission("storage").Build();
   RegisterExtension(extension);
 
@@ -618,7 +620,7 @@ TEST_F(NativeExtensionBindingsSystemUnittest, TestCustomProperties) {
 // Ensure that different contexts have different API objects.
 TEST_F(NativeExtensionBindingsSystemUnittest,
        CheckDifferentContextsHaveDifferentAPIObjects) {
-  scoped_refptr<Extension> extension =
+  scoped_refptr<const Extension> extension =
       ExtensionBuilder("extension").AddPermission("idle").Build();
   RegisterExtension(extension);
 
@@ -655,7 +657,7 @@ TEST_F(NativeExtensionBindingsSystemUnittest,
 // context are properly present or absent from the API object.
 TEST_F(NativeExtensionBindingsSystemUnittest,
        CheckRestrictedFeaturesBasedOnContext) {
-  scoped_refptr<Extension> connectable_extension;
+  scoped_refptr<const Extension> connectable_extension;
   {
     DictionaryBuilder manifest;
     manifest.Set("name", "connectable")
@@ -724,7 +726,8 @@ TEST_F(NativeExtensionBindingsSystemUnittest,
 
 // Tests behavior when script sets window.chrome to be various things.
 TEST_F(NativeExtensionBindingsSystemUnittest, TestUsingOtherChromeObjects) {
-  scoped_refptr<Extension> extension = ExtensionBuilder("extension").Build();
+  scoped_refptr<const Extension> extension =
+      ExtensionBuilder("extension").Build();
   RegisterExtension(extension);
 
   v8::HandleScope handle_scope(isolate());
@@ -792,7 +795,7 @@ TEST_F(NativeExtensionBindingsSystemUnittest, TestUsingOtherChromeObjects) {
 
 // Tests updating a context's bindings after adding or removing permissions.
 TEST_F(NativeExtensionBindingsSystemUnittest, TestUpdatingPermissions) {
-  scoped_refptr<Extension> extension =
+  scoped_refptr<const Extension> extension =
       ExtensionBuilder("extension").AddPermission("idle").Build();
 
   RegisterExtension(extension);
@@ -888,7 +891,8 @@ TEST_F(NativeExtensionBindingsSystemUnittest, TestUpdatingPermissions) {
 }
 
 TEST_F(NativeExtensionBindingsSystemUnittest, UnmanagedEvents) {
-  scoped_refptr<Extension> extension = ExtensionBuilder("extension").Build();
+  scoped_refptr<const Extension> extension =
+      ExtensionBuilder("extension").Build();
 
   RegisterExtension(extension);
 
@@ -920,10 +924,11 @@ TEST_F(NativeExtensionBindingsSystemUnittest, UnmanagedEvents) {
 TEST_F(NativeExtensionBindingsSystemUnittest,
        AccessToAliasSourceDoesntGiveAliasAccess) {
   const char kWhitelistedId[] = "pkedcjkdefgpdelpbcmbmeomcjbeemfm";
-  scoped_refptr<Extension> extension = ExtensionBuilder("extension")
-                                           .SetID(kWhitelistedId)
-                                           .AddPermission("networkingPrivate")
-                                           .Build();
+  scoped_refptr<const Extension> extension =
+      ExtensionBuilder("extension")
+          .SetID(kWhitelistedId)
+          .AddPermission("networkingPrivate")
+          .Build();
 
   RegisterExtension(extension);
 
@@ -936,10 +941,14 @@ TEST_F(NativeExtensionBindingsSystemUnittest,
 
   // The extension only has access to networkingPrivate, so networking.onc
   // (and chrome.networking in general) should be undefined.
-  EXPECT_EQ("object", gin::V8ToString(V8ValueFromScriptSource(
-                          context, "typeof chrome.networkingPrivate")));
-  EXPECT_EQ("undefined", gin::V8ToString(V8ValueFromScriptSource(
-                             context, "typeof chrome.networking")));
+  EXPECT_EQ("object",
+            gin::V8ToString(isolate(),
+                            V8ValueFromScriptSource(
+                                context, "typeof chrome.networkingPrivate")));
+  EXPECT_EQ(
+      "undefined",
+      gin::V8ToString(isolate(), V8ValueFromScriptSource(
+                                     context, "typeof chrome.networking")));
 }
 
 // Tests that a context having access to the source for an aliased API does not
@@ -947,10 +956,11 @@ TEST_F(NativeExtensionBindingsSystemUnittest,
 TEST_F(NativeExtensionBindingsSystemUnittest,
        AccessToAliasDoesntGiveAliasSourceAccess) {
   const char kWhitelistedId[] = "pkedcjkdefgpdelpbcmbmeomcjbeemfm";
-  scoped_refptr<Extension> extension = ExtensionBuilder("extension")
-                                           .SetID(kWhitelistedId)
-                                           .AddPermission("networking.onc")
-                                           .Build();
+  scoped_refptr<const Extension> extension =
+      ExtensionBuilder("extension")
+          .SetID(kWhitelistedId)
+          .AddPermission("networking.onc")
+          .Build();
   RegisterExtension(extension);
 
   v8::HandleScope handle_scope(isolate());
@@ -962,17 +972,21 @@ TEST_F(NativeExtensionBindingsSystemUnittest,
 
   // The extension only has access to networking.onc, so networkingPrivate
   // should be undefined.
-  EXPECT_EQ("undefined", gin::V8ToString(V8ValueFromScriptSource(
-                             context, "typeof chrome.networkingPrivate")));
-  EXPECT_EQ("object", gin::V8ToString(V8ValueFromScriptSource(
-                          context, "typeof chrome.networking.onc")));
+  EXPECT_EQ("undefined",
+            gin::V8ToString(isolate(),
+                            V8ValueFromScriptSource(
+                                context, "typeof chrome.networkingPrivate")));
+  EXPECT_EQ(
+      "object",
+      gin::V8ToString(isolate(), V8ValueFromScriptSource(
+                                     context, "typeof chrome.networking.onc")));
 }
 
 // Test that if an extension has access to both an alias and an alias source,
 // the objects on the API are different.
 TEST_F(NativeExtensionBindingsSystemUnittest, AliasedAPIsAreDifferentObjects) {
   const char kWhitelistedId[] = "pkedcjkdefgpdelpbcmbmeomcjbeemfm";
-  scoped_refptr<Extension> extension =
+  scoped_refptr<const Extension> extension =
       ExtensionBuilder("extension")
           .SetID(kWhitelistedId)
           .AddPermissions({"networkingPrivate", "networking.onc"})
@@ -987,10 +1001,14 @@ TEST_F(NativeExtensionBindingsSystemUnittest, AliasedAPIsAreDifferentObjects) {
   bindings_system()->UpdateBindingsForContext(script_context);
 
   // Both APIs should be defined, since the extension has access to each.
-  EXPECT_EQ("object", gin::V8ToString(V8ValueFromScriptSource(
-                          context, "typeof chrome.networkingPrivate")));
-  EXPECT_EQ("object", gin::V8ToString(V8ValueFromScriptSource(
-                          context, "typeof chrome.networking.onc")));
+  EXPECT_EQ("object",
+            gin::V8ToString(isolate(),
+                            V8ValueFromScriptSource(
+                                context, "typeof chrome.networkingPrivate")));
+  EXPECT_EQ(
+      "object",
+      gin::V8ToString(isolate(), V8ValueFromScriptSource(
+                                     context, "typeof chrome.networking.onc")));
 
   // The APIs should not be equal.
   bool equal = true;
@@ -1004,7 +1022,8 @@ TEST_F(NativeExtensionBindingsSystemUnittest, AliasedAPIsAreDifferentObjects) {
 
 // Tests that script can overwrite the value of an API.
 TEST_F(NativeExtensionBindingsSystemUnittest, CanOverwriteAPIs) {
-  scoped_refptr<Extension> extension = ExtensionBuilder("extension").Build();
+  scoped_refptr<const Extension> extension =
+      ExtensionBuilder("extension").Build();
 
   RegisterExtension(extension);
 
@@ -1022,12 +1041,13 @@ TEST_F(NativeExtensionBindingsSystemUnittest, CanOverwriteAPIs) {
   v8::Local<v8::Value> property =
       V8ValueFromScriptSource(context, "chrome.runtime");
   EXPECT_TRUE(property->IsString());
-  EXPECT_EQ("bar", gin::V8ToString(property));
+  EXPECT_EQ("bar", gin::V8ToString(isolate(), property));
 }
 
 // Tests that script can delete an API property.
 TEST_F(NativeExtensionBindingsSystemUnittest, CanDeleteAPIs) {
-  scoped_refptr<Extension> extension = ExtensionBuilder("extension").Build();
+  scoped_refptr<const Extension> extension =
+      ExtensionBuilder("extension").Build();
 
   RegisterExtension(extension);
 
@@ -1073,7 +1093,7 @@ TEST_F(NativeExtensionBindingsSystemUnittest, APIIsInitializedByOwningContext) {
          apiBridge.registerCustomHook(() => {});)";
   source_map()->RegisterModule("idle", kCustomBinding);
 
-  scoped_refptr<Extension> extension =
+  scoped_refptr<const Extension> extension =
       ExtensionBuilder("foo").AddPermission("idle").Build();
   RegisterExtension(extension);
 
@@ -1114,5 +1134,110 @@ TEST_F(NativeExtensionBindingsSystemUnittest, APIIsInitializedByOwningContext) {
   ASSERT_TRUE(api_bridge->IsObject());
   EXPECT_EQ(context, api_bridge.As<v8::Object>()->CreationContext());
 }
+
+class ResponseValidationNativeExtensionBindingsSystemUnittest
+    : public NativeExtensionBindingsSystemUnittest,
+      public testing::WithParamInterface<bool> {
+ public:
+  ResponseValidationNativeExtensionBindingsSystemUnittest() = default;
+  ~ResponseValidationNativeExtensionBindingsSystemUnittest() override = default;
+
+  void SetUp() override {
+    response_validation_override_ =
+        binding::SetResponseValidationEnabledForTesting(GetParam());
+    NativeExtensionBindingsSystemUnittest::SetUp();
+  }
+
+  void TearDown() override {
+    NativeExtensionBindingsSystemUnittest::TearDown();
+    response_validation_override_.reset();
+  }
+
+ private:
+  std::unique_ptr<base::AutoReset<bool>> response_validation_override_;
+
+  DISALLOW_COPY_AND_ASSIGN(
+      ResponseValidationNativeExtensionBindingsSystemUnittest);
+};
+
+TEST_P(ResponseValidationNativeExtensionBindingsSystemUnittest,
+       ResponseValidation) {
+  // The APIResponseValidator should only be used if response validation is
+  // enabled. Otherwise, it should be null.
+  EXPECT_EQ(GetParam(), bindings_system()
+                            ->api_system()
+                            ->request_handler()
+                            ->has_response_validator_for_testing());
+
+  base::Optional<std::string> validation_failure_method_name;
+  base::Optional<std::string> validation_failure_error;
+
+  auto on_validation_failure =
+      [&validation_failure_method_name, &validation_failure_error](
+          const std::string& method_name, const std::string& error) {
+        validation_failure_method_name = method_name;
+        validation_failure_error = error;
+      };
+  APIResponseValidator::TestHandler test_validation_failure_handler(
+      base::BindLambdaForTesting(on_validation_failure));
+
+  scoped_refptr<const Extension> extension =
+      ExtensionBuilder("foo")
+          .AddPermissions({"idle", "power", "webRequest"})
+          .Build();
+  RegisterExtension(extension);
+
+  v8::HandleScope handle_scope(isolate());
+  v8::Local<v8::Context> context = MainContext();
+
+  ScriptContext* script_context = CreateScriptContext(
+      context, extension.get(), Feature::BLESSED_EXTENSION_CONTEXT);
+  script_context->set_url(extension->url());
+
+  bindings_system()->UpdateBindingsForContext(script_context);
+
+  const char kCallIdleQueryState[] =
+      "(function() { chrome.idle.queryState(30, function() {}); })";
+
+  v8::Local<v8::Function> call_idle_query_state =
+      FunctionFromString(context, kCallIdleQueryState);
+  RunFunctionOnGlobal(call_idle_query_state, context, 0, nullptr);
+
+  EXPECT_FALSE(validation_failure_method_name);
+  EXPECT_FALSE(validation_failure_error);
+
+  // Respond with a valid value. Validation should not fail.
+  ASSERT_TRUE(has_last_params());
+  bindings_system()->HandleResponse(last_params().request_id, true,
+                                    *ListValueFromString("['active']"),
+                                    std::string());
+
+  EXPECT_FALSE(validation_failure_method_name);
+  EXPECT_FALSE(validation_failure_error);
+
+  // Run the function again, and response with an invalid value.
+  RunFunctionOnGlobal(call_idle_query_state, context, 0, nullptr);
+  ASSERT_TRUE(has_last_params());
+  bindings_system()->HandleResponse(last_params().request_id, true,
+                                    *ListValueFromString("['bad enum']"),
+                                    std::string());
+
+  // Validation should fail iff response validation is enabled.
+  if (GetParam()) {
+    EXPECT_EQ("idle.queryState",
+              validation_failure_method_name.value_or("no value"));
+    EXPECT_EQ(api_errors::ArgumentError(
+                  "newState",
+                  api_errors::InvalidEnumValue({"active", "idle", "locked"})),
+              validation_failure_error.value_or("no value"));
+  } else {
+    EXPECT_FALSE(validation_failure_method_name);
+    EXPECT_FALSE(validation_failure_error);
+  }
+}
+
+INSTANTIATE_TEST_CASE_P(,
+                        ResponseValidationNativeExtensionBindingsSystemUnittest,
+                        testing::Bool());
 
 }  // namespace extensions

@@ -14,6 +14,11 @@ const char kSyncLastSyncedTime[] = "sync.last_synced_time";
 // 64-bit integer serialization of the base::Time of the last sync poll.
 const char kSyncLastPollTime[] = "sync.last_poll_time";
 
+// 64-bit integer serialization of base::TimeDelta storing poll intervals
+// received by the server (in seconds).
+const char kSyncShortPollIntervalSeconds[] = "sync.short_poll_interval";
+const char kSyncLongPollIntervalSeconds[] = "sync.long_poll_interval";
+
 // Boolean specifying whether the user finished setting up sync at least once.
 const char kSyncFirstSetupComplete[] = "sync.has_setup_completed";
 
@@ -45,6 +50,7 @@ const char kSyncExtensions[] = "sync.extensions";
 const char kSyncFaviconImages[] = "sync.favicon_images";
 const char kSyncFaviconTracking[] = "sync.favicon_tracking";
 const char kSyncHistoryDeleteDirectives[] = "sync.history_delete_directives";
+const char kSyncMountainShares[] = "sync.mountain_shares";
 const char kSyncPasswords[] = "sync.passwords";
 const char kSyncPreferences[] = "sync.preferences";
 const char kSyncPrinters[] = "sync.printers";
@@ -63,6 +69,7 @@ const char kSyncSyncedNotifications[] = "sync.synced_notifications";
 const char kSyncTabs[] = "sync.tabs";
 const char kSyncThemes[] = "sync.themes";
 const char kSyncTypedUrls[] = "sync.typed_urls";
+const char kSyncUserConsents[] = "sync.user_consents";
 const char kSyncUserEvents[] = "sync.user_events";
 const char kSyncWifiCredentials[] = "sync.wifi_credentials";
 
@@ -82,10 +89,6 @@ const char kSyncEncryptionBootstrapToken[] = "sync.encryption_bootstrap_token";
 // so we don't have to do a GetKey command at restart.
 const char kSyncKeystoreEncryptionBootstrapToken[] =
     "sync.keystore_encryption_bootstrap_token";
-
-// The GUID session sync will use to identify this client, even across sync
-// disable/enable events.
-const char kSyncSessionsGUID[] = "sync.session_sync_guid";
 
 #if defined(OS_CHROMEOS)
 // A string that is used to store first-time sync startup after once sync is

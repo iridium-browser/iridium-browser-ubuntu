@@ -8,98 +8,113 @@
 #include <memory>
 
 #include "base/component_export.h"
-#include "base/containers/span.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "mojo/public/cpp/system/data_pipe.h"
-#include "mojo/public/cpp/system/simple_watcher.h"
 #include "net/base/address_family.h"
-#include "net/base/completion_callback.h"
 #include "net/base/ip_endpoint.h"
 #include "net/interfaces/address_family.mojom.h"
 #include "net/interfaces/ip_endpoint.mojom.h"
 #include "net/socket/tcp_client_socket.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "services/network/public/cpp/net_adapters.h"
-#include "services/network/public/mojom/network_service.mojom.h"
+#include "services/network/public/mojom/network_context.mojom.h"
 #include "services/network/public/mojom/tcp_socket.mojom.h"
+#include "services/network/socket_data_pump.h"
+#include "services/network/tls_socket_factory.h"
 
 namespace net {
-class ClientSocketFactory;
 class NetLog;
-class StreamSocket;
+class ClientSocketFactory;
+class TransportClientSocket;
 }  // namespace net
 
 namespace network {
 
 class COMPONENT_EXPORT(NETWORK_SERVICE) TCPConnectedSocket
-    : public mojom::TCPConnectedSocket {
+    : public mojom::TCPConnectedSocket,
+      public SocketDataPump::Delegate,
+      public TLSSocketFactory::Delegate {
  public:
+  // Max send/receive buffer size the consumer is allowed to set. Exposed for
+  // testing.
+  static const int kMaxBufferSize;
+
+  // If |client_socket_factory| is nullptr, consumers must use
+  // ConnectWithSocket() instead of Connect().
   TCPConnectedSocket(
-      mojom::TCPConnectedSocketObserverPtr observer,
+      mojom::SocketObserverPtr observer,
       net::NetLog* net_log,
+      TLSSocketFactory* tls_socket_factory,
       net::ClientSocketFactory* client_socket_factory,
       const net::NetworkTrafficAnnotationTag& traffic_annotation);
   TCPConnectedSocket(
-      mojom::TCPConnectedSocketObserverPtr observer,
-      std::unique_ptr<net::StreamSocket> socket,
+      mojom::SocketObserverPtr observer,
+      std::unique_ptr<net::TransportClientSocket> socket,
       mojo::ScopedDataPipeProducerHandle receive_pipe_handle,
       mojo::ScopedDataPipeConsumerHandle send_pipe_handle,
       const net::NetworkTrafficAnnotationTag& traffic_annotation);
   ~TCPConnectedSocket() override;
+
   void Connect(
       const base::Optional<net::IPEndPoint>& local_addr,
       const net::AddressList& remote_addr_list,
+      mojom::TCPConnectedSocketOptionsPtr tcp_connected_socket_options,
+      mojom::NetworkContext::CreateTCPConnectedSocketCallback callback);
+
+  // Tries to connects using the provided TCPClientSocket. |socket| owns the
+  // list of addresses to try to connect to, so this method doesn't need any
+  // addresses as input.
+  void ConnectWithSocket(
+      std::unique_ptr<net::TransportClientSocket> socket,
+      mojom::TCPConnectedSocketOptionsPtr tcp_connected_socket_options,
       mojom::NetworkContext::CreateTCPConnectedSocketCallback callback);
 
   // mojom::TCPConnectedSocket implementation.
-  void GetLocalAddress(GetLocalAddressCallback callback) override;
+  void UpgradeToTLS(
+      const net::HostPortPair& host_port_pair,
+      mojom::TLSClientSocketOptionsPtr socket_options,
+      const net::MutableNetworkTrafficAnnotationTag& traffic_annotation,
+      mojom::TLSClientSocketRequest request,
+      mojom::SocketObserverPtr observer,
+      mojom::TCPConnectedSocket::UpgradeToTLSCallback callback) override;
+  void SetSendBufferSize(int send_buffer_size,
+                         SetSendBufferSizeCallback callback) override;
+  void SetReceiveBufferSize(int send_buffer_size,
+                            SetSendBufferSizeCallback callback) override;
+  void SetNoDelay(bool no_delay, SetNoDelayCallback callback) override;
+  void SetKeepAlive(bool enable,
+                    int32_t delay_secs,
+                    SetKeepAliveCallback callback) override;
 
  private:
   // Invoked when net::TCPClientSocket::Connect() completes.
   void OnConnectCompleted(int net_result);
 
-  // Helper to start watching |send_stream_| and |receive_stream_|.
-  void StartWatching();
+  // SocketDataPump::Delegate implementation.
+  void OnNetworkReadError(int net_error) override;
+  void OnNetworkWriteError(int net_error) override;
+  void OnShutdown() override;
 
-  // "Receiving" in this context means reading from |socket_| and writing to
-  // the Mojo |receive_stream_|.
-  void ReceiveMore();
-  void OnReceiveStreamWritable(MojoResult result);
-  void OnNetworkReadCompleted(int result);
-  void ShutdownReceive();
+  // TLSSocketFactory::Delegate implementation.
+  const net::StreamSocket* BorrowSocket() override;
+  std::unique_ptr<net::StreamSocket> TakeSocket() override;
 
-  // "Writing" is reading from the Mojo |send_stream_| and writing to the
-  // |socket_|.
-  void SendMore();
-  void OnSendStreamReadable(MojoResult result);
-  void OnNetworkWriteCompleted(int result);
-  void ShutdownSend();
+  const mojom::SocketObserverPtr observer_;
 
-  mojom::TCPConnectedSocketObserverPtr observer_;
+  net::NetLog* const net_log_;
+  net::ClientSocketFactory* const client_socket_factory_;
+  TLSSocketFactory* tls_socket_factory_;
 
-  net::NetLog* net_log_;
-  net::ClientSocketFactory* client_socket_factory_;
-
-  std::unique_ptr<net::StreamSocket> socket_;
+  std::unique_ptr<net::TransportClientSocket> socket_;
 
   mojom::NetworkContext::CreateTCPConnectedSocketCallback connect_callback_;
 
-  // The *stream handles will be null while there is an in-progress transation
-  // between net and mojo. During this time, the handle will be owned by the
-  // *PendingBuffer.
+  base::OnceClosure pending_upgrade_to_tls_callback_;
 
-  // For reading from the Mojo pipe and writing to the network.
-  mojo::ScopedDataPipeConsumerHandle send_stream_;
-  scoped_refptr<MojoToNetPendingBuffer> pending_send_;
-  mojo::SimpleWatcher readable_handle_watcher_;
+  std::unique_ptr<SocketDataPump> socket_data_pump_;
 
-  // For reading from the network and writing to Mojo pipe.
-  mojo::ScopedDataPipeProducerHandle receive_stream_;
-  scoped_refptr<NetToMojoPendingBuffer> pending_receive_;
-  mojo::SimpleWatcher writable_handle_watcher_;
-
-  net::NetworkTrafficAnnotationTag traffic_annotation_;
+  const net::NetworkTrafficAnnotationTag traffic_annotation_;
 
   DISALLOW_COPY_AND_ASSIGN(TCPConnectedSocket);
 };

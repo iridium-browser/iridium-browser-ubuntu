@@ -40,15 +40,16 @@ public class ModalDialogView implements View.OnClickListener {
         void onClick(@ButtonType int buttonType);
 
         /**
-         * Handle cancel event when the dialog is not dismissed by actions on the dialog such as
-         * back press, and on tab modal dialog, tab switcher button click.
+         * Handle dismiss event when the dialog is dismissed by actions on the dialog. Note that it
+         * can be dangerous to the {@code dismissalCause} for business logic other than metrics
+         * recording, unless the dismissal cause is fully controlled by the client (e.g. button
+         * clicked), because the dismissal cause can be different values depending on modal dialog
+         * type and mode of presentation (e.g. it could be unknown on VR but a specific value on
+         * non-VR).
+         * @param dismissalCause The reason of the dialog being dismissed.
+         * @see DialogDismissalCause
          */
-        void onCancel();
-
-        /**
-         * Handle dismiss event when the dialog is dismissed by actions on the dialog.
-         */
-        void onDismiss();
+        void onDismiss(@DialogDismissalCause int dismissalCause);
     }
 
     /** Parameters that can be used to create a new ModalDialogView. */
@@ -95,11 +96,12 @@ public class ModalDialogView implements View.OnClickListener {
         public boolean titleScrollable;
     }
 
-    @IntDef({BUTTON_POSITIVE, BUTTON_NEGATIVE})
+    @IntDef({ButtonType.POSITIVE, ButtonType.NEGATIVE})
     @Retention(RetentionPolicy.SOURCE)
-    public @interface ButtonType {}
-    public static final int BUTTON_POSITIVE = 0;
-    public static final int BUTTON_NEGATIVE = 1;
+    public @interface ButtonType {
+        int POSITIVE = 0;
+        int NEGATIVE = 1;
+    }
 
     private final Controller mController;
     private final Params mParams;
@@ -139,9 +141,9 @@ public class ModalDialogView implements View.OnClickListener {
     @Override
     public void onClick(View view) {
         if (view == mPositiveButton) {
-            mController.onClick(BUTTON_POSITIVE);
+            mController.onClick(ButtonType.POSITIVE);
         } else if (view == mNegativeButton) {
-            mController.onClick(BUTTON_NEGATIVE);
+            mController.onClick(ButtonType.NEGATIVE);
         }
     }
 
@@ -203,7 +205,7 @@ public class ModalDialogView implements View.OnClickListener {
             mCustomView.setLayoutParams(layoutParams);
         } else {
             scrollView.setEdgeVisibility(
-                    FadingEdgeScrollView.DRAW_NO_EDGE, FadingEdgeScrollView.DRAW_NO_EDGE);
+                    FadingEdgeScrollView.EdgeType.NONE, FadingEdgeScrollView.EdgeType.NONE);
         }
     }
 
@@ -212,6 +214,20 @@ public class ModalDialogView implements View.OnClickListener {
      */
     public View getView() {
         return mDialogView;
+    }
+
+    /**
+     * @return The button that was added to the dialog using {@link Params}.
+     * @param button indicates which button should be returned.
+     */
+    public Button getButton(@ButtonType int button) {
+        if (button == ButtonType.POSITIVE) {
+            return mPositiveButton;
+        } else if (button == ButtonType.NEGATIVE) {
+            return mNegativeButton;
+        }
+        assert false;
+        return null;
     }
 
     /**
@@ -226,6 +242,16 @@ public class ModalDialogView implements View.OnClickListener {
      */
     public String getContentDescription() {
         return mParams.title;
+    }
+
+    /**
+     * TODO(huayinz): Should we consider adding a model change processor now that the params are
+     * mutable
+     *
+     * @param title Updates the title string to the new title.
+     */
+    public void setTitle(String title) {
+        mTitleView.setText(title);
     }
 
     /**

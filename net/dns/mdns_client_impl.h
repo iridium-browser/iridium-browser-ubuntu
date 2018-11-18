@@ -29,20 +29,25 @@
 
 namespace base {
 class Clock;
-class Timer;
+class OneShotTimer;
 }  // namespace base
 
 namespace net {
 
+class NetLog;
+
 class MDnsSocketFactoryImpl : public MDnsSocketFactory {
  public:
-  MDnsSocketFactoryImpl() {}
+  MDnsSocketFactoryImpl() : net_log_(nullptr) {}
+  explicit MDnsSocketFactoryImpl(NetLog* net_log) : net_log_(net_log) {}
   ~MDnsSocketFactoryImpl() override {}
 
   void CreateSockets(
       std::vector<std::unique_ptr<DatagramServerSocket>>* sockets) override;
 
  private:
+  NetLog* const net_log_;
+
   DISALLOW_COPY_AND_ASSIGN(MDnsSocketFactoryImpl);
 };
 
@@ -121,7 +126,7 @@ class NET_EXPORT_PRIVATE MDnsClientImpl : public MDnsClient {
   // invalidate the core.
   class Core : public base::SupportsWeakPtr<Core>, MDnsConnection::Delegate {
    public:
-    Core(base::Clock* clock, base::Timer* timer);
+    Core(base::Clock* clock, base::OneShotTimer* timer);
     ~Core() override;
 
     // Initialize the core. Returns true on success.
@@ -148,8 +153,8 @@ class NET_EXPORT_PRIVATE MDnsClientImpl : public MDnsClient {
     FRIEND_TEST_ALL_PREFIXES(MDnsTest, CacheCleanupWithShortTTL);
 
     typedef std::pair<std::string, uint16_t> ListenerKey;
-    typedef std::map<ListenerKey,
-                     std::unique_ptr<base::ObserverList<MDnsListenerImpl>>>
+    typedef base::ObserverList<MDnsListenerImpl>::Unchecked ObserverListType;
+    typedef std::map<ListenerKey, std::unique_ptr<ObserverListType>>
         ListenerMap;
 
     // Alert listeners of an update to the cache.
@@ -176,7 +181,7 @@ class NET_EXPORT_PRIVATE MDnsClientImpl : public MDnsClient {
     MDnsCache cache_;
 
     base::Clock* clock_;
-    base::Timer* cleanup_timer_;
+    base::OneShotTimer* cleanup_timer_;
     base::Time scheduled_cleanup_;
 
     std::unique_ptr<MDnsConnection> connection_;
@@ -210,11 +215,11 @@ class NET_EXPORT_PRIVATE MDnsClientImpl : public MDnsClient {
 
   // Test constructor, takes a mock clock and mock timer.
   MDnsClientImpl(base::Clock* clock,
-                 std::unique_ptr<base::Timer> cleanup_timer);
+                 std::unique_ptr<base::OneShotTimer> cleanup_timer);
 
   std::unique_ptr<Core> core_;
   base::Clock* clock_;
-  std::unique_ptr<base::Timer> cleanup_timer_;
+  std::unique_ptr<base::OneShotTimer> cleanup_timer_;
 
   DISALLOW_COPY_AND_ASSIGN(MDnsClientImpl);
 };

@@ -9,20 +9,18 @@ namespace network {
 // static
 scoped_refptr<SharedURLLoaderFactory> SharedURLLoaderFactory::Create(
     std::unique_ptr<SharedURLLoaderFactoryInfo> info) {
+  DCHECK(info);
   return info->CreateFactory();
 }
 
 SharedURLLoaderFactory::~SharedURLLoaderFactory() = default;
 
-void SharedURLLoaderFactory::Clone(
-    network::mojom::URLLoaderFactoryRequest request) {
-  NOTREACHED() << "Don't call SharedURLLoaderFactory Clone method from "
-                  "URLLoaderFactory interface as that the loses type safety "
-                  "that SharedURLLoaderFactory gives. Instead call Clone().";
-}
-
 SharedURLLoaderFactoryInfo::SharedURLLoaderFactoryInfo() = default;
 
 SharedURLLoaderFactoryInfo::~SharedURLLoaderFactoryInfo() = default;
+
+bool SharedURLLoaderFactory::BypassRedirectChecks() const {
+  return false;
+}
 
 }  // namespace network

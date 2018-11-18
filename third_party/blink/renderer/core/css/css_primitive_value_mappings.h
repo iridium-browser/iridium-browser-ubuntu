@@ -31,13 +31,14 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_PRIMITIVE_VALUE_MAPPINGS_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CSS_CSS_PRIMITIVE_VALUE_MAPPINGS_H_
 
-#include "third_party/blink/public/platform/web_blend_mode.h"
 #include "third_party/blink/renderer/core/css/css_calculation_value.h"
 #include "third_party/blink/renderer/core/css/css_identifier_value.h"
 #include "third_party/blink/renderer/core/css/css_primitive_value.h"
 #include "third_party/blink/renderer/core/css/css_reflection_direction.h"
 #include "third_party/blink/renderer/core/css/css_to_length_conversion_data.h"
 #include "third_party/blink/renderer/core/css_value_keywords.h"
+#include "third_party/blink/renderer/core/scroll/scroll_customization.h"
+#include "third_party/blink/renderer/core/scroll/scrollable_area.h"
 #include "third_party/blink/renderer/core/style/computed_style_constants.h"
 #include "third_party/blink/renderer/core/style/svg_computed_style_defs.h"
 #include "third_party/blink/renderer/platform/fonts/font_description.h"
@@ -46,8 +47,6 @@
 #include "third_party/blink/renderer/platform/graphics/graphics_types.h"
 #include "third_party/blink/renderer/platform/graphics/touch_action.h"
 #include "third_party/blink/renderer/platform/length.h"
-#include "third_party/blink/renderer/platform/scroll/scroll_customization.h"
-#include "third_party/blink/renderer/platform/scroll/scrollable_area.h"
 #include "third_party/blink/renderer/platform/text/text_run.h"
 #include "third_party/blink/renderer/platform/text/writing_mode.h"
 #include "third_party/blink/renderer/platform/theme_types.h"
@@ -889,13 +888,13 @@ inline CSSIdentifierValue::CSSIdentifierValue(TextRenderingMode e)
       value_id_ = CSSValueAuto;
       break;
     case kOptimizeSpeed:
-      value_id_ = CSSValueOptimizeSpeed;
+      value_id_ = CSSValueOptimizespeed;
       break;
     case kOptimizeLegibility:
-      value_id_ = CSSValueOptimizeLegibility;
+      value_id_ = CSSValueOptimizelegibility;
       break;
     case kGeometricPrecision:
-      value_id_ = CSSValueGeometricPrecision;
+      value_id_ = CSSValueGeometricprecision;
       break;
   }
 }
@@ -905,11 +904,11 @@ inline TextRenderingMode CSSIdentifierValue::ConvertTo() const {
   switch (value_id_) {
     case CSSValueAuto:
       return kAutoTextRendering;
-    case CSSValueOptimizeSpeed:
+    case CSSValueOptimizespeed:
       return kOptimizeSpeed;
-    case CSSValueOptimizeLegibility:
+    case CSSValueOptimizelegibility:
       return kOptimizeLegibility;
-    case CSSValueGeometricPrecision:
+    case CSSValueGeometricprecision:
       return kGeometricPrecision;
     default:
       break;
@@ -1163,7 +1162,7 @@ inline CSSIdentifierValue::CSSIdentifierValue(EColorInterpolation e)
       value_id_ = CSSValueSRGB;
       break;
     case CI_LINEARRGB:
-      value_id_ = CSSValueLinearRGB;
+      value_id_ = CSSValueLinearrgb;
       break;
   }
 }
@@ -1173,7 +1172,7 @@ inline EColorInterpolation CSSIdentifierValue::ConvertTo() const {
   switch (value_id_) {
     case CSSValueSRGB:
       return CI_SRGB;
-    case CSSValueLinearRGB:
+    case CSSValueLinearrgb:
       return CI_LINEARRGB;
     case CSSValueAuto:
       return CI_AUTO;
@@ -1193,10 +1192,10 @@ inline CSSIdentifierValue::CSSIdentifierValue(EColorRendering e)
       value_id_ = CSSValueAuto;
       break;
     case CR_OPTIMIZESPEED:
-      value_id_ = CSSValueOptimizeSpeed;
+      value_id_ = CSSValueOptimizespeed;
       break;
     case CR_OPTIMIZEQUALITY:
-      value_id_ = CSSValueOptimizeQuality;
+      value_id_ = CSSValueOptimizequality;
       break;
   }
 }
@@ -1204,9 +1203,9 @@ inline CSSIdentifierValue::CSSIdentifierValue(EColorRendering e)
 template <>
 inline EColorRendering CSSIdentifierValue::ConvertTo() const {
   switch (value_id_) {
-    case CSSValueOptimizeSpeed:
+    case CSSValueOptimizespeed:
       return CR_OPTIMIZESPEED;
-    case CSSValueOptimizeQuality:
+    case CSSValueOptimizequality:
       return CR_OPTIMIZEQUALITY;
     case CSSValueAuto:
       return CR_AUTO;
@@ -1304,13 +1303,13 @@ inline CSSIdentifierValue::CSSIdentifierValue(EShapeRendering e)
       value_id_ = CSSValueAuto;
       break;
     case SR_OPTIMIZESPEED:
-      value_id_ = CSSValueOptimizeSpeed;
+      value_id_ = CSSValueOptimizespeed;
       break;
     case SR_CRISPEDGES:
-      value_id_ = CSSValueCrispEdges;
+      value_id_ = CSSValueCrispedges;
       break;
     case SR_GEOMETRICPRECISION:
-      value_id_ = CSSValueGeometricPrecision;
+      value_id_ = CSSValueGeometricprecision;
       break;
   }
 }
@@ -1320,11 +1319,11 @@ inline EShapeRendering CSSIdentifierValue::ConvertTo() const {
   switch (value_id_) {
     case CSSValueAuto:
       return SR_AUTO;
-    case CSSValueOptimizeSpeed:
+    case CSSValueOptimizespeed:
       return SR_OPTIMIZESPEED;
-    case CSSValueCrispEdges:
+    case CSSValueCrispedges:
       return SR_CRISPEDGES;
-    case CSSValueGeometricPrecision:
+    case CSSValueGeometricprecision:
       return SR_GEOMETRICPRECISION;
     default:
       break;
@@ -1981,6 +1980,43 @@ inline Containment CSSIdentifierValue::ConvertTo() const {
   }
   NOTREACHED();
   return kContainsNone;
+}
+
+template <>
+inline CSSIdentifierValue::CSSIdentifierValue(TextUnderlinePosition position)
+    : CSSValue(kIdentifierClass) {
+  switch (position) {
+    case kTextUnderlinePositionAuto:
+      value_id_ = CSSValueAuto;
+      break;
+    case kTextUnderlinePositionUnder:
+      value_id_ = CSSValueUnder;
+      break;
+    case kTextUnderlinePositionLeft:
+      value_id_ = CSSValueLeft;
+      break;
+    case kTextUnderlinePositionRight:
+      value_id_ = CSSValueRight;
+      break;
+  }
+}
+
+template <>
+inline TextUnderlinePosition CSSIdentifierValue::ConvertTo() const {
+  switch (GetValueID()) {
+    case CSSValueAuto:
+      return kTextUnderlinePositionAuto;
+    case CSSValueUnder:
+      return kTextUnderlinePositionUnder;
+    case CSSValueLeft:
+      return kTextUnderlinePositionLeft;
+    case CSSValueRight:
+      return kTextUnderlinePositionRight;
+    default:
+      break;
+  }
+  NOTREACHED();
+  return kTextUnderlinePositionAuto;
 }
 
 }  // namespace blink

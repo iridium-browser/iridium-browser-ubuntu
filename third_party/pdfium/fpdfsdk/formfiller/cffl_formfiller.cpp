@@ -16,17 +16,9 @@
 #include "fpdfsdk/cpdfsdk_widget.h"
 #include "fpdfsdk/formfiller/cba_fontmap.h"
 
-namespace {
-
-CPDFSDK_Widget* CPDFSDKAnnotToWidget(CPDFSDK_Annot* annot) {
-  return static_cast<CPDFSDK_Widget*>(annot);
-}
-
-}  // namespace
-
 CFFL_FormFiller::CFFL_FormFiller(CPDFSDK_FormFillEnvironment* pFormFillEnv,
                                  CPDFSDK_Widget* pWidget)
-    : m_pFormFillEnv(pFormFillEnv), m_pWidget(pWidget), m_bValid(false) {
+    : m_pFormFillEnv(pFormFillEnv), m_pWidget(pWidget) {
   ASSERT(m_pFormFillEnv);
 }
 
@@ -35,15 +27,17 @@ CFFL_FormFiller::~CFFL_FormFiller() {
 }
 
 void CFFL_FormFiller::DestroyWindows() {
-  for (const auto& it : m_Maps) {
-    CPWL_Wnd* pWnd = it.second;
-    auto* pData = static_cast<CFFL_PrivateData*>(pWnd->GetAttachedData());
-    pWnd->InvalidateProvider(this);
-    pWnd->Destroy();
-    delete pWnd;
-    delete pData;
+  while (!m_Maps.empty()) {
+    std::unique_ptr<CFFL_PrivateData> pData;
+    {
+      auto it = m_Maps.begin();
+      std::unique_ptr<CPWL_Wnd> pWnd = std::move(it->second);
+      pData.reset(static_cast<CFFL_PrivateData*>(pWnd->GetAttachedData()));
+      m_Maps.erase(it);
+      pWnd->InvalidateProvider(this);
+      pWnd->Destroy();
+    }
   }
-  m_Maps.clear();
 }
 
 FX_RECT CFFL_FormFiller::GetViewBBox(CPDFSDK_PageView* pPageView,
@@ -71,8 +65,6 @@ void CFFL_FormFiller::OnDraw(CPDFSDK_PageView* pPageView,
                              CPDFSDK_Annot* pAnnot,
                              CFX_RenderDevice* pDevice,
                              const CFX_Matrix& mtUser2Device) {
-  ASSERT(pAnnot->GetPDFAnnot()->GetSubtype() == CPDF_Annot::Subtype::WIDGET);
-
   if (CPWL_Wnd* pWnd = GetPDFWindow(pPageView, false)) {
     CFX_Matrix mt = GetCurMatrix();
     mt.Concat(mtUser2Device);
@@ -80,7 +72,7 @@ void CFFL_FormFiller::OnDraw(CPDFSDK_PageView* pPageView,
     return;
   }
 
-  CPDFSDK_Widget* pWidget = CPDFSDKAnnotToWidget(pAnnot);
+  CPDFSDK_Widget* pWidget = ToCPDFSDKWidget(pAnnot);
   if (!CFFL_InteractiveFormFiller::IsVisible(pWidget))
     return;
 
@@ -91,8 +83,8 @@ void CFFL_FormFiller::OnDrawDeactive(CPDFSDK_PageView* pPageView,
                                      CPDFSDK_Annot* pAnnot,
                                      CFX_RenderDevice* pDevice,
                                      const CFX_Matrix& mtUser2Device) {
-  CPDFSDKAnnotToWidget(pAnnot)->DrawAppearance(pDevice, mtUser2Device,
-                                               CPDF_Annot::Normal, nullptr);
+  ToCPDFSDKWidget(pAnnot)->DrawAppearance(pDevice, mtUser2Device,
+                                          CPDF_Annot::Normal, nullptr);
 }
 
 void CFFL_FormFiller::OnMouseEnter(CPDFSDK_PageView* pPageView,
@@ -219,6 +211,17 @@ bool CFFL_FormFiller::OnChar(CPDFSDK_Annot* pAnnot,
   return pWnd && pWnd->OnChar(nChar, nFlags);
 }
 
+WideString CFFL_FormFiller::GetText(CPDFSDK_Annot* pAnnot) {
+  if (!IsValid())
+    return WideString();
+
+  CPDFSDK_PageView* pPageView = GetCurPageView(true);
+  ASSERT(pPageView);
+
+  CPWL_Wnd* pWnd = GetPDFWindow(pPageView, false);
+  return pWnd ? pWnd->GetText() : WideString();
+}
+
 WideString CFFL_FormFiller::GetSelectedText(CPDFSDK_Annot* pAnnot) {
   if (!IsValid())
     return WideString();
@@ -245,9 +248,53 @@ void CFFL_FormFiller::ReplaceSelection(CPDFSDK_Annot* pAnnot,
   pWnd->ReplaceSelection(text);
 }
 
+bool CFFL_FormFiller::CanUndo(CPDFSDK_Annot* pAnnot) {
+  if (!IsValid())
+    return false;
+
+  CPDFSDK_PageView* pPageView = GetCurPageView(true);
+  ASSERT(pPageView);
+
+  CPWL_Wnd* pWnd = GetPDFWindow(pPageView, false);
+  return pWnd && pWnd->CanUndo();
+}
+
+bool CFFL_FormFiller::CanRedo(CPDFSDK_Annot* pAnnot) {
+  if (!IsValid())
+    return false;
+
+  CPDFSDK_PageView* pPageView = GetCurPageView(true);
+  ASSERT(pPageView);
+
+  CPWL_Wnd* pWnd = GetPDFWindow(pPageView, false);
+  return pWnd && pWnd->CanRedo();
+}
+
+bool CFFL_FormFiller::Undo(CPDFSDK_Annot* pAnnot) {
+  if (!IsValid())
+    return false;
+
+  CPDFSDK_PageView* pPageView = GetCurPageView(true);
+  ASSERT(pPageView);
+
+  CPWL_Wnd* pWnd = GetPDFWindow(pPageView, false);
+  return pWnd && pWnd->Undo();
+}
+
+bool CFFL_FormFiller::Redo(CPDFSDK_Annot* pAnnot) {
+  if (!IsValid())
+    return false;
+
+  CPDFSDK_PageView* pPageView = GetCurPageView(true);
+  ASSERT(pPageView);
+
+  CPWL_Wnd* pWnd = GetPDFWindow(pPageView, false);
+  return pWnd && pWnd->Redo();
+}
+
 void CFFL_FormFiller::SetFocusForAnnot(CPDFSDK_Annot* pAnnot, uint32_t nFlag) {
-  CPDFSDK_Widget* pWidget = (CPDFSDK_Widget*)pAnnot;
-  UnderlyingPageType* pPage = pWidget->GetUnderlyingPage();
+  CPDFSDK_Widget* pWidget = ToCPDFSDKWidget(pAnnot);
+  IPDF_Page* pPage = pWidget->GetPage();
   CPDFSDK_PageView* pPageView = m_pFormFillEnv->GetPageView(pPage, true);
   if (CPWL_Wnd* pWnd = GetPDFWindow(pPageView, true))
     pWnd->SetFocus();
@@ -295,16 +342,18 @@ CPWL_Wnd::CreateParams CFFL_FormFiller::GetCreateParam() {
   if (dwFieldFlag & FIELDFLAG_READONLY)
     dwCreateFlags |= PWS_READONLY;
 
-  FX_COLORREF color;
-  if (m_pWidget->GetFillColor(color))
-    cp.sBackgroundColor = CFX_Color(color);
-  if (m_pWidget->GetBorderColor(color))
-    cp.sBorderColor = CFX_Color(color);
+  Optional<FX_COLORREF> color = m_pWidget->GetFillColor();
+  if (color.has_value())
+    cp.sBackgroundColor = CFX_Color(color.value());
+  color = m_pWidget->GetBorderColor();
+  if (color.has_value())
+    cp.sBorderColor = CFX_Color(color.value());
 
   cp.sTextColor = CFX_Color(CFX_Color::kGray, 0);
 
-  if (m_pWidget->GetTextColor(color))
-    cp.sTextColor = CFX_Color(color);
+  color = m_pWidget->GetTextColor();
+  if (color.has_value())
+    cp.sTextColor = CFX_Color(color.value());
 
   cp.fFontSize = m_pWidget->GetFontSize();
   cp.dwBorderWidth = m_pWidget->GetBorderWidth();
@@ -333,27 +382,27 @@ CPWL_Wnd::CreateParams CFFL_FormFiller::GetCreateParam() {
 CPWL_Wnd* CFFL_FormFiller::GetPDFWindow(CPDFSDK_PageView* pPageView,
                                         bool bNew) {
   ASSERT(pPageView);
-
   auto it = m_Maps.find(pPageView);
-  const bool found = it != m_Maps.end();
-  CPWL_Wnd* pWnd = found ? it->second : nullptr;
-  if (!bNew)
-    return pWnd;
+  if (it == m_Maps.end()) {
+    if (!bNew)
+      return nullptr;
 
-  if (!found) {
     CPWL_Wnd::CreateParams cp = GetCreateParam();
     cp.pAttachedWidget.Reset(m_pWidget.Get());
 
-    auto* pPrivateData = new CFFL_PrivateData;
+    auto pPrivateData = pdfium::MakeUnique<CFFL_PrivateData>();
     pPrivateData->pWidget = m_pWidget.Get();
     pPrivateData->pPageView = pPageView;
     pPrivateData->nWidgetAppearanceAge = m_pWidget->GetAppearanceAge();
     pPrivateData->nWidgetValueAge = 0;
-    cp.pAttachedData = pPrivateData;
-    CPWL_Wnd* pNewWnd = NewPDFWindow(cp);
-    m_Maps[pPageView] = pNewWnd;
-    return pNewWnd;
+    cp.pAttachedData = pPrivateData.release();
+    m_Maps[pPageView] = NewPDFWindow(cp);
+    return m_Maps[pPageView].get();
   }
+
+  CPWL_Wnd* pWnd = it->second.get();
+  if (!bNew)
+    return pWnd;
 
   auto* pPrivateData = static_cast<CFFL_PrivateData*>(pWnd->GetAttachedData());
   if (pPrivateData->nWidgetAppearanceAge == m_pWidget->GetAppearanceAge())
@@ -368,12 +417,13 @@ void CFFL_FormFiller::DestroyPDFWindow(CPDFSDK_PageView* pPageView) {
   if (it == m_Maps.end())
     return;
 
-  CPWL_Wnd* pWnd = it->second;
-  auto* pData = static_cast<CFFL_PrivateData*>(pWnd->GetAttachedData());
-  pWnd->Destroy();
-  delete pWnd;
-  delete pData;
-  m_Maps.erase(it);
+  std::unique_ptr<CFFL_PrivateData> pData;
+  {
+    std::unique_ptr<CPWL_Wnd> pWnd = std::move(it->second);
+    m_Maps.erase(it);
+    pData.reset(static_cast<CFFL_PrivateData*>(pWnd->GetAttachedData()));
+    pWnd->Destroy();
+  }
 }
 
 CFX_Matrix CFFL_FormFiller::GetWindowMatrix(CPWL_Wnd::PrivateData* pAttached) {
@@ -424,7 +474,7 @@ CFX_FloatRect CFFL_FormFiller::GetPDFWindowRect() const {
 }
 
 CPDFSDK_PageView* CFFL_FormFiller::GetCurPageView(bool renew) {
-  UnderlyingPageType* pPage = m_pWidget->GetUnderlyingPage();
+  IPDF_Page* pPage = m_pWidget->GetPage();
   return m_pFormFillEnv->GetPageView(pPage, renew);
 }
 
@@ -434,9 +484,8 @@ CFX_FloatRect CFFL_FormFiller::GetFocusBox(CPDFSDK_PageView* pPageView) {
     return CFX_FloatRect();
 
   CFX_FloatRect rcFocus = FFLtoWnd(pPageView, PWLtoFFL(pWnd->GetFocusRect()));
-  return pPageView->GetPDFPage()->GetPageBBox().Contains(rcFocus)
-             ? rcFocus
-             : CFX_FloatRect();
+  return pPageView->GetPDFPage()->GetBBox().Contains(rcFocus) ? rcFocus
+                                                              : CFX_FloatRect();
 }
 
 CFX_FloatRect CFFL_FormFiller::FFLtoPWL(const CFX_FloatRect& rect) {
@@ -491,7 +540,7 @@ bool CFFL_FormFiller::CommitData(CPDFSDK_PageView* pPageView, uint32_t nFlag) {
   if (!pObserved)
     return false;
 
-  SaveData(pPageView); // may invoking JS to delete this widget.
+  SaveData(pPageView);  // may invoking JS to delete this widget.
   if (!pObserved)
     return false;
 
@@ -563,5 +612,5 @@ void CFFL_FormFiller::EscapeFiller(CPDFSDK_PageView* pPageView,
 }
 
 void CFFL_FormFiller::InvalidateRect(const FX_RECT& rect) {
-  m_pFormFillEnv->Invalidate(m_pWidget->GetUnderlyingPage(), rect);
+  m_pFormFillEnv->Invalidate(m_pWidget->GetPage(), rect);
 }

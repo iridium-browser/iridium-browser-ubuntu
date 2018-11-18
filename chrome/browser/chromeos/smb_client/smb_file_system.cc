@@ -8,9 +8,12 @@
 #include <memory>
 #include <utility>
 
+#include "base/metrics/histogram_macros.h"
 #include "base/posix/eintr_wrapper.h"
-#include "base/strings/string_number_conversions.h"
+#include "base/task/post_task.h"
 #include "chrome/browser/chromeos/file_system_provider/service.h"
+#include "chrome/browser/chromeos/smb_client/smb_errors.h"
+#include "chrome/browser/chromeos/smb_client/smb_file_system_id.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/smb_provider_client.h"
 #include "components/services/filesystem/public/interfaces/types.mojom.h"
@@ -19,6 +22,8 @@
 namespace chromeos {
 
 namespace {
+
+using file_system_provider::ProvidedFileSystemInterface;
 
 // This is a bogus data URI.
 // The Files app will attempt to download a whole image to create a thumbnail
@@ -35,7 +40,16 @@ constexpr uint32_t kReadDirectoryInitialBatchSize = 64;
 // Maximum number of entries to send at a time for read directory,
 constexpr uint32_t kReadDirectoryMaxBatchSize = 2048;
 
-using file_system_provider::ProvidedFileSystemInterface;
+// Capacity of the task queue. Represents how many operations can be in-flight
+// over D-Bus concurrently.
+constexpr size_t kTaskQueueCapacity = 2;
+
+constexpr ProvidedFileSystemInterface::MetadataFieldMask kRequestableFields =
+    ProvidedFileSystemInterface::MetadataField::METADATA_FIELD_IS_DIRECTORY |
+    ProvidedFileSystemInterface::MetadataField::METADATA_FIELD_NAME |
+    ProvidedFileSystemInterface::MetadataField::METADATA_FIELD_SIZE |
+    ProvidedFileSystemInterface::MetadataField::
+        METADATA_FIELD_MODIFICATION_TIME;
 
 bool RequestedIsDirectory(
     ProvidedFileSystemInterface::MetadataFieldMask fields) {
@@ -64,20 +78,44 @@ bool RequestedThumbnail(ProvidedFileSystemInterface::MetadataFieldMask fields) {
          ProvidedFileSystemInterface::MetadataField::METADATA_FIELD_THUMBNAIL;
 }
 
-}  // namespace
-
-namespace smb_client {
-
-namespace {
+bool IsRedundantRequest(ProvidedFileSystemInterface::MetadataFieldMask fields) {
+  // If there isn't at least 1 requestable field there is no point doing a
+  // network request.
+  return (fields & kRequestableFields) == 0;
+}
 
 filesystem::mojom::FsFileType MapEntryType(bool is_directory) {
   return is_directory ? filesystem::mojom::FsFileType::DIRECTORY
                       : filesystem::mojom::FsFileType::REGULAR_FILE;
 }
 
-constexpr size_t kTaskQueueCapacity = 2;
+std::unique_ptr<smb_client::TempFileManager> CreateTempFileManager() {
+  return std::make_unique<smb_client::TempFileManager>();
+}
+
+void ConvertEntries(const smbprovider::DirectoryEntryListProto& entries_proto,
+                    storage::AsyncFileUtil::EntryList* out_entries) {
+  DCHECK(out_entries);
+
+  for (const smbprovider::DirectoryEntryProto& entry :
+       entries_proto.entries()) {
+    out_entries->emplace_back(base::FilePath(entry.name()),
+                              MapEntryType(entry.is_directory()));
+  }
+}
+
+// Metrics recording.
+void RecordReadDirectoryCount(int count) {
+  UMA_HISTOGRAM_COUNTS_100000("NativeSmbFileShare.ReadDirectoryCount", count);
+}
+
+void RecordReadDirectoryDuration(const base::TimeDelta& delta) {
+  UMA_HISTOGRAM_TIMES("NativeSmbFileShare.ReadDirectoryDuration", delta);
+}
 
 }  // namespace
+
+namespace smb_client {
 
 using file_system_provider::AbortCallback;
 
@@ -90,63 +128,8 @@ SmbFileSystem::SmbFileSystem(
 
 SmbFileSystem::~SmbFileSystem() {}
 
-// static
-base::File::Error SmbFileSystem::TranslateError(smbprovider::ErrorType error) {
-  DCHECK_NE(smbprovider::ERROR_NONE, error);
-
-  switch (error) {
-    case smbprovider::ERROR_OK:
-      return base::File::FILE_OK;
-    case smbprovider::ERROR_FAILED:
-      return base::File::FILE_ERROR_FAILED;
-    case smbprovider::ERROR_IN_USE:
-      return base::File::FILE_ERROR_IN_USE;
-    case smbprovider::ERROR_EXISTS:
-      return base::File::FILE_ERROR_EXISTS;
-    case smbprovider::ERROR_NOT_FOUND:
-      return base::File::FILE_ERROR_NOT_FOUND;
-    case smbprovider::ERROR_ACCESS_DENIED:
-      return base::File::FILE_ERROR_ACCESS_DENIED;
-    case smbprovider::ERROR_TOO_MANY_OPENED:
-      return base::File::FILE_ERROR_TOO_MANY_OPENED;
-    case smbprovider::ERROR_NO_MEMORY:
-      return base::File::FILE_ERROR_NO_MEMORY;
-    case smbprovider::ERROR_NO_SPACE:
-      return base::File::FILE_ERROR_NO_SPACE;
-    case smbprovider::ERROR_NOT_A_DIRECTORY:
-      return base::File::FILE_ERROR_NOT_A_DIRECTORY;
-    case smbprovider::ERROR_INVALID_OPERATION:
-      return base::File::FILE_ERROR_INVALID_OPERATION;
-    case smbprovider::ERROR_SECURITY:
-      return base::File::FILE_ERROR_SECURITY;
-    case smbprovider::ERROR_ABORT:
-      return base::File::FILE_ERROR_ABORT;
-    case smbprovider::ERROR_NOT_A_FILE:
-      return base::File::FILE_ERROR_NOT_A_FILE;
-    case smbprovider::ERROR_NOT_EMPTY:
-      return base::File::FILE_ERROR_NOT_EMPTY;
-    case smbprovider::ERROR_INVALID_URL:
-      return base::File::FILE_ERROR_INVALID_URL;
-    case smbprovider::ERROR_IO:
-      return base::File::FILE_ERROR_IO;
-    case smbprovider::ERROR_DBUS_PARSE_FAILED:
-      // DBUS_PARSE_FAILED maps to generic ERROR_FAILED
-      LOG(ERROR) << "DBUS PARSE FAILED";
-      return base::File::FILE_ERROR_FAILED;
-    default:
-      break;
-  }
-
-  NOTREACHED();
-  return base::File::FILE_ERROR_FAILED;
-}
-
 int32_t SmbFileSystem::GetMountId() const {
-  int32_t mount_id;
-  bool result =
-      base::StringToInt(file_system_info_.file_system_id(), &mount_id);
-  DCHECK(result);
-  return mount_id;
+  return GetMountIdFromFileSystemId(file_system_info_.file_system_id());
 }
 
 SmbProviderClient* SmbFileSystem::GetSmbProviderClient() const {
@@ -200,7 +183,7 @@ void SmbFileSystem::HandleRequestUnmountCallback(
     storage::AsyncFileUtil::StatusCallback callback,
     smbprovider::ErrorType error) {
   task_queue_.TaskFinished();
-  base::File::Error result = TranslateError(error);
+  base::File::Error result = TranslateToFileError(error);
   if (result == base::File::FILE_OK) {
     result =
         RunUnmountCallback(file_system_info_.file_system_id(),
@@ -213,9 +196,13 @@ AbortCallback SmbFileSystem::GetMetadata(
     const base::FilePath& entry_path,
     ProvidedFileSystemInterface::MetadataFieldMask fields,
     ProvidedFileSystemInterface::GetMetadataCallback callback) {
+  if (IsRedundantRequest(fields)) {
+    return HandleSyncRedundantGetMetadata(fields, std::move(callback));
+  }
+
   auto reply =
       base::BindOnce(&SmbFileSystem::HandleRequestGetMetadataEntryCallback,
-                     AsWeakPtr(), fields, callback);
+                     AsWeakPtr(), fields, std::move(callback));
   SmbTask task = base::BindOnce(&SmbProviderClient::GetMetadataEntry,
                                 GetWeakSmbProviderClient(), GetMountId(),
                                 entry_path, std::move(reply));
@@ -243,14 +230,11 @@ AbortCallback SmbFileSystem::ExecuteAction(
 AbortCallback SmbFileSystem::ReadDirectory(
     const base::FilePath& directory_path,
     storage::AsyncFileUtil::ReadDirectoryCallback callback) {
-  auto reply =
-      base::BindOnce(&SmbFileSystem::HandleRequestReadDirectoryCallback,
-                     AsWeakPtr(), callback);
-  SmbTask task = base::BindOnce(&SmbProviderClient::ReadDirectory,
-                                GetWeakSmbProviderClient(), GetMountId(),
-                                directory_path, std::move(reply));
+  OperationId operation_id = task_queue_.GetNextOperationId();
 
-  return EnqueueTaskAndGetCallback(std::move(task));
+  StartReadDirectory(directory_path, operation_id, std::move(callback));
+
+  return CreateAbortCallback(operation_id);
 }
 
 AbortCallback SmbFileSystem::OpenFile(const base::FilePath& file_path,
@@ -273,7 +257,7 @@ void SmbFileSystem::HandleRequestOpenFileCallback(
     smbprovider::ErrorType error,
     int32_t file_id) const {
   task_queue_.TaskFinished();
-  callback.Run(file_id, TranslateError(error));
+  callback.Run(file_id, TranslateToFileError(error));
 }
 
 AbortCallback SmbFileSystem::CloseFile(
@@ -350,13 +334,11 @@ AbortCallback SmbFileSystem::CopyEntry(
     const base::FilePath& source_path,
     const base::FilePath& target_path,
     storage::AsyncFileUtil::StatusCallback callback) {
-  auto reply = base::BindOnce(&SmbFileSystem::HandleStatusCallback, AsWeakPtr(),
-                              std::move(callback));
-  SmbTask task =
-      base::BindOnce(&SmbProviderClient::CopyEntry, GetWeakSmbProviderClient(),
-                     GetMountId(), source_path, target_path, std::move(reply));
+  OperationId operation_id = task_queue_.GetNextOperationId();
 
-  return EnqueueTaskAndGetCallback(std::move(task));
+  StartCopy(source_path, target_path, operation_id, std::move(callback));
+
+  return CreateAbortCallback(operation_id);
 }
 
 AbortCallback SmbFileSystem::MoveEntry(
@@ -391,15 +373,61 @@ AbortCallback SmbFileSystem::WriteFile(
     int64_t offset,
     int length,
     storage::AsyncFileUtil::StatusCallback callback) {
+  if (length == 0) {
+    std::move(callback).Run(base::File::FILE_OK);
+    return CreateAbortCallback();
+  }
+
   const std::vector<uint8_t> data(buffer->data(), buffer->data() + length);
-  base::ScopedFD temp_fd = temp_file_manager_.CreateTempFile(data);
+  if (!temp_file_manager_) {
+    SmbTask task = base::BindOnce(
+        base::IgnoreResult(&SmbFileSystem::CallWriteFile), AsWeakPtr(),
+        file_handle, std::move(data), offset, length, std::move(callback));
+    CreateTempFileManagerAndExecuteTask(std::move(task));
+    // The call to init temp_file_manager_ will not be abortable since it is
+    // asynchronous.
+    return CreateAbortCallback();
+  }
+
+  return CallWriteFile(file_handle, data, offset, length, std::move(callback));
+}
+
+void SmbFileSystem::CreateTempFileManagerAndExecuteTask(SmbTask task) {
+  // CreateTempFileManager() has to be called on a separate thread since it
+  // contains a call that requires a blockable thread.
+  base::TaskTraits task_traits = {base::MayBlock(),
+                                  base::TaskPriority::USER_BLOCKING,
+                                  base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN};
+  auto init_task = base::BindOnce(&CreateTempFileManager);
+  auto reply = base::BindOnce(&SmbFileSystem::InitTempFileManagerAndExecuteTask,
+                              AsWeakPtr(), std::move(task));
+  base::PostTaskWithTraitsAndReplyWithResult(
+      FROM_HERE, task_traits, std::move(init_task), std::move(reply));
+}
+
+void SmbFileSystem::InitTempFileManagerAndExecuteTask(
+    SmbTask task,
+    std::unique_ptr<TempFileManager> temp_file_manager) {
+  DCHECK(!temp_file_manager_);
+  DCHECK(temp_file_manager);
+
+  temp_file_manager_ = std::move(temp_file_manager);
+  std::move(task).Run();
+}
+
+AbortCallback SmbFileSystem::CallWriteFile(
+    int file_handle,
+    const std::vector<uint8_t>& data,
+    int64_t offset,
+    int length,
+    storage::AsyncFileUtil::StatusCallback callback) {
+  base::ScopedFD temp_fd = temp_file_manager_->CreateTempFile(data);
 
   auto reply = base::BindOnce(&SmbFileSystem::HandleStatusCallback, AsWeakPtr(),
                               std::move(callback));
   SmbTask task = base::BindOnce(
       &SmbProviderClient::WriteFile, GetWeakSmbProviderClient(), GetMountId(),
       file_handle, offset, length, std::move(temp_fd), std::move(reply));
-
   return EnqueueTaskAndGetCallback(std::move(task));
 }
 
@@ -473,13 +501,78 @@ void SmbFileSystem::Configure(storage::AsyncFileUtil::StatusCallback callback) {
   NOTREACHED();
 }
 
+void SmbFileSystem::StartCopy(const base::FilePath& source_path,
+                              const base::FilePath& target_path,
+                              OperationId operation_id,
+                              storage::AsyncFileUtil::StatusCallback callback) {
+  auto reply = base::BindOnce(&SmbFileSystem::HandleStartCopyCallback,
+                              AsWeakPtr(), std::move(callback), operation_id);
+  SmbTask task =
+      base::BindOnce(&SmbProviderClient::StartCopy, GetWeakSmbProviderClient(),
+                     GetMountId(), source_path, target_path, std::move(reply));
+
+  EnqueueTask(std::move(task), operation_id);
+}
+
+void SmbFileSystem::ContinueCopy(
+    OperationId operation_id,
+    int32_t copy_token,
+    storage::AsyncFileUtil::StatusCallback callback) {
+  auto reply =
+      base::BindOnce(&SmbFileSystem::HandleContinueCopyCallback, AsWeakPtr(),
+                     std::move(callback), operation_id, copy_token);
+  SmbTask task = base::BindOnce(&SmbProviderClient::ContinueCopy,
+                                GetWeakSmbProviderClient(), GetMountId(),
+                                copy_token, std::move(reply));
+
+  EnqueueTask(std::move(task), operation_id);
+}
+
+void SmbFileSystem::StartReadDirectory(
+    const base::FilePath& directory_path,
+    OperationId operation_id,
+    storage::AsyncFileUtil::ReadDirectoryCallback callback) {
+  base::ElapsedTimer metrics_timer;
+
+  auto reply = base::BindOnce(&SmbFileSystem::HandleStartReadDirectoryCallback,
+                              AsWeakPtr(), std::move(callback), operation_id,
+                              std::move(metrics_timer));
+
+  SmbTask task = base::BindOnce(&SmbProviderClient::StartReadDirectory,
+                                GetWeakSmbProviderClient(), GetMountId(),
+                                directory_path, std::move(reply));
+
+  EnqueueTask(std::move(task), operation_id);
+}
+
+void SmbFileSystem::ContinueReadDirectory(
+    OperationId operation_id,
+    int32_t read_dir_token,
+    storage::AsyncFileUtil::ReadDirectoryCallback callback,
+    int entries_count,
+    base::ElapsedTimer metrics_timer) {
+  auto reply =
+      base::BindOnce(&SmbFileSystem::HandleContinueReadDirectoryCallback,
+                     AsWeakPtr(), std::move(callback), operation_id,
+                     read_dir_token, entries_count, std::move(metrics_timer));
+  SmbTask task = base::BindOnce(&SmbProviderClient::ContinueReadDirectory,
+                                GetWeakSmbProviderClient(), GetMountId(),
+                                read_dir_token, std::move(reply));
+
+  EnqueueTask(std::move(task), operation_id);
+}
+
 void SmbFileSystem::HandleRequestReadDirectoryCallback(
     storage::AsyncFileUtil::ReadDirectoryCallback callback,
+    const base::ElapsedTimer& metrics_timer,
     smbprovider::ErrorType error,
     const smbprovider::DirectoryEntryListProto& entries) const {
   task_queue_.TaskFinished();
   uint32_t batch_size = kReadDirectoryInitialBatchSize;
   storage::AsyncFileUtil::EntryList entry_list;
+
+  RecordReadDirectoryCount(entries.entries_size());
+  RecordReadDirectoryDuration(metrics_timer.Elapsed());
 
   // Loop through the entries and send when the desired batch size is hit.
   for (const smbprovider::DirectoryEntryProto& entry : entries.entries()) {
@@ -495,7 +588,7 @@ void SmbFileSystem::HandleRequestReadDirectoryCallback(
     }
   }
 
-  callback.Run(TranslateError(error), entry_list, false /* has_more */);
+  callback.Run(TranslateToFileError(error), entry_list, false /* has_more */);
 }
 
 void SmbFileSystem::HandleGetDeleteListCallback(
@@ -507,7 +600,7 @@ void SmbFileSystem::HandleGetDeleteListCallback(
   if (delete_list.entries_size() == 0) {
     // There are no entries to delete.
     DCHECK_NE(smbprovider::ERROR_OK, list_error);
-    std::move(callback).Run(TranslateError(list_error));
+    std::move(callback).Run(TranslateToFileError(list_error));
     return;
   }
 
@@ -538,8 +631,123 @@ void SmbFileSystem::HandleDeleteEntryCallback(
     if (list_error != smbprovider::ERROR_OK) {
       delete_error = list_error;
     }
-    std::move(callback).Run(TranslateError(delete_error));
+    std::move(callback).Run(TranslateToFileError(delete_error));
   }
+}
+
+void SmbFileSystem::HandleStartCopyCallback(
+    storage::AsyncFileUtil::StatusCallback callback,
+    OperationId operation_id,
+    smbprovider::ErrorType error,
+    int32_t copy_token) {
+  task_queue_.TaskFinished();
+
+  if (error == smbprovider::ERROR_COPY_PENDING) {
+    // The copy needs to be continued.
+    DCHECK_GE(copy_token, 0);
+
+    ContinueCopy(operation_id, copy_token, std::move(callback));
+    return;
+  }
+
+  std::move(callback).Run(TranslateToFileError(error));
+}
+
+void SmbFileSystem::HandleContinueCopyCallback(
+    storage::AsyncFileUtil::StatusCallback callback,
+    OperationId operation_id,
+    int32_t copy_token,
+    smbprovider::ErrorType error) {
+  task_queue_.TaskFinished();
+
+  if (error == smbprovider::ERROR_COPY_PENDING) {
+    // The copy needs to be continued.
+    ContinueCopy(operation_id, copy_token, std::move(callback));
+    return;
+  }
+
+  std::move(callback).Run(TranslateToFileError(error));
+}
+
+void SmbFileSystem::HandleStartReadDirectoryCallback(
+    storage::AsyncFileUtil::ReadDirectoryCallback callback,
+    OperationId operation_id,
+    base::ElapsedTimer metrics_timer,
+    smbprovider::ErrorType error,
+    int32_t read_dir_token,
+    const smbprovider::DirectoryEntryListProto& entries) {
+  task_queue_.TaskFinished();
+
+  int entries_count = 0;
+  ProcessReadDirectoryResults(std::move(callback), operation_id, read_dir_token,
+                              error, entries, entries_count,
+                              std::move(metrics_timer));
+}
+
+void SmbFileSystem::HandleContinueReadDirectoryCallback(
+    storage::AsyncFileUtil::ReadDirectoryCallback callback,
+    OperationId operation_id,
+    int32_t read_dir_token,
+    int entries_count,
+    base::ElapsedTimer metrics_timer,
+    smbprovider::ErrorType error,
+    const smbprovider::DirectoryEntryListProto& entries) {
+  task_queue_.TaskFinished();
+
+  ProcessReadDirectoryResults(std::move(callback), operation_id, read_dir_token,
+                              error, entries, entries_count,
+                              std::move(metrics_timer));
+}
+
+void SmbFileSystem::ProcessReadDirectoryResults(
+    storage::AsyncFileUtil::ReadDirectoryCallback callback,
+    OperationId operation_id,
+    int32_t read_dir_token,
+    smbprovider::ErrorType error,
+    const smbprovider::DirectoryEntryListProto& entries,
+    int entries_count,
+    base::ElapsedTimer metrics_timer) {
+  storage::AsyncFileUtil::EntryList entry_list;
+
+  if (error != smbprovider::ERROR_OPERATION_PENDING &&
+      error != smbprovider::ERROR_OK) {
+    callback.Run(TranslateToFileError(error), entry_list, false /* has_more */);
+  }
+
+  ConvertEntries(entries, &entry_list);
+  entries_count += entry_list.size();
+
+  const bool has_more = (error == smbprovider::ERROR_OPERATION_PENDING);
+
+  // Run |callback| with the next batch of results;
+  callback.Run(base::File::FILE_OK, entry_list, has_more);
+
+  if (has_more) {
+    // There are more directory entries to read.
+    ContinueReadDirectory(operation_id, read_dir_token, callback, entries_count,
+                          std::move(metrics_timer));
+    return;
+  }
+
+  // Read Directory is complete, record metrics.
+  RecordReadDirectoryCount(entries_count);
+  RecordReadDirectoryDuration(metrics_timer.Elapsed());
+}
+
+AbortCallback SmbFileSystem::HandleSyncRedundantGetMetadata(
+    ProvidedFileSystemInterface::MetadataFieldMask fields,
+    ProvidedFileSystemInterface::GetMetadataCallback callback) {
+  auto metadata = std::make_unique<file_system_provider::EntryMetadata>();
+
+  // The fields could be empty or have one or both of thumbnail and metadata.
+  // We completely ignore metadata, but populate the bogus URI for the
+  // thumbnail.
+  if (RequestedThumbnail(fields)) {
+    metadata->thumbnail = std::make_unique<std::string>(kUnknownImageDataUri);
+  }
+
+  std::move(callback).Run(std::move(metadata), base::File::FILE_OK);
+  return CreateAbortCallback();
 }
 
 void SmbFileSystem::HandleRequestGetMetadataEntryCallback(
@@ -549,7 +757,7 @@ void SmbFileSystem::HandleRequestGetMetadataEntryCallback(
     const smbprovider::DirectoryEntryProto& entry) const {
   task_queue_.TaskFinished();
   if (error != smbprovider::ERROR_OK) {
-    std::move(callback).Run(nullptr, TranslateError(error));
+    std::move(callback).Run(nullptr, TranslateToFileError(error));
     return;
   }
   std::unique_ptr<file_system_provider::EntryMetadata> metadata =
@@ -592,7 +800,7 @@ void SmbFileSystem::HandleRequestReadFileCallback(
 
   if (error != smbprovider::ERROR_OK) {
     callback.Run(0 /* chunk_length */, false /* has_more */,
-                 TranslateError(error));
+                 TranslateToFileError(error));
     return;
   }
 
@@ -621,7 +829,7 @@ void SmbFileSystem::HandleStatusCallback(
     smbprovider::ErrorType error) const {
   task_queue_.TaskFinished();
 
-  std::move(callback).Run(TranslateError(error));
+  std::move(callback).Run(TranslateToFileError(error));
 }
 
 base::WeakPtr<file_system_provider::ProvidedFileSystemInterface>

@@ -24,6 +24,18 @@ SourceLocation::SourceLocation(const std::string& url,
 
 SourceLocation::~SourceLocation() = default;
 
+InitiatorCSPInfo::InitiatorCSPInfo() = default;
+InitiatorCSPInfo::InitiatorCSPInfo(
+    CSPDisposition should_check_main_world_csp,
+    const std::vector<ContentSecurityPolicy>& initiator_csp,
+    const base::Optional<CSPSource>& initiator_self_source)
+    : should_check_main_world_csp(should_check_main_world_csp),
+      initiator_csp(initiator_csp),
+      initiator_self_source(initiator_self_source) {}
+InitiatorCSPInfo::InitiatorCSPInfo(const InitiatorCSPInfo& other) = default;
+
+InitiatorCSPInfo::~InitiatorCSPInfo() = default;
+
 CommonNavigationParams::CommonNavigationParams() = default;
 
 CommonNavigationParams::CommonNavigationParams(
@@ -33,27 +45,23 @@ CommonNavigationParams::CommonNavigationParams(
     FrameMsg_Navigate_Type::Value navigation_type,
     bool allow_download,
     bool should_replace_current_entry,
-    base::TimeTicks ui_timestamp,
-    FrameMsg_UILoadMetricsReportType::Value report_type,
     const GURL& base_url_for_data_url,
     const GURL& history_url_for_data_url,
     PreviewsState previews_state,
-    const base::TimeTicks& navigation_start,
+    base::TimeTicks navigation_start,
     std::string method,
     const scoped_refptr<network::ResourceRequestBody>& post_data,
     base::Optional<SourceLocation> source_location,
-    CSPDisposition should_check_main_world_csp,
     bool started_from_context_menu,
     bool has_user_gesture,
-    const base::Optional<std::string>& suggested_filename)
+    const InitiatorCSPInfo& initiator_csp_info,
+    base::TimeTicks input_start)
     : url(url),
       referrer(referrer),
       transition(transition),
       navigation_type(navigation_type),
       allow_download(allow_download),
       should_replace_current_entry(should_replace_current_entry),
-      ui_timestamp(ui_timestamp),
-      report_type(report_type),
       base_url_for_data_url(base_url_for_data_url),
       history_url_for_data_url(history_url_for_data_url),
       previews_state(previews_state),
@@ -61,10 +69,10 @@ CommonNavigationParams::CommonNavigationParams(
       method(method),
       post_data(post_data),
       source_location(source_location),
-      should_check_main_world_csp(should_check_main_world_csp),
       started_from_context_menu(started_from_context_menu),
       has_user_gesture(has_user_gesture),
-      suggested_filename(suggested_filename) {
+      initiator_csp_info(initiator_csp_info),
+      input_start(input_start) {
   // |method != "POST"| should imply absence of |post_data|.
   if (method != "POST" && post_data) {
     NOTREACHED();

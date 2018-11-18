@@ -36,8 +36,8 @@ import org.chromium.chrome.browser.tab.InterceptNavigationDelegateImpl;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabDelegateFactory;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
-import org.chromium.content.browser.test.util.Criteria;
-import org.chromium.content.browser.test.util.CriteriaHelper;
+import org.chromium.content_public.browser.test.util.Criteria;
+import org.chromium.content_public.browser.test.util.CriteriaHelper;
 import org.chromium.net.test.EmbeddedTestServer;
 
 import java.util.concurrent.Callable;
@@ -151,10 +151,9 @@ public class CustomTabFromChromeExternalNavigationTest {
         });
 
         CriteriaHelper.pollUiThread(Criteria.equals(
-                OverrideUrlLoadingResult.OVERRIDE_WITH_EXTERNAL_INTENT,
-                new Callable<OverrideUrlLoadingResult>() {
+                OverrideUrlLoadingResult.OVERRIDE_WITH_EXTERNAL_INTENT, new Callable<Integer>() {
                     @Override
-                    public OverrideUrlLoadingResult call() throws Exception {
+                    public @OverrideUrlLoadingResult Integer call() throws Exception {
                         return navigationDelegate.get().getLastOverrideUrlLoadingResultForTests();
                     }
                 }));
@@ -184,7 +183,7 @@ public class CustomTabFromChromeExternalNavigationTest {
         Assert.assertFalse(customTabDelegateFactory.getExternalNavigationDelegate()
                                    instanceof CustomTabNavigationDelegate);
 
-        showAppMenuAndAssertMenuShown(mCustomTabActivityTestRule.getActivity().getAppMenuHandler());
+        CustomTabsTestUtils.openAppMenuAndAssertMenuShown(mCustomTabActivityTestRule.getActivity());
         Menu menu =
                 mCustomTabActivityTestRule.getActivity().getAppMenuHandler().getAppMenu().getMenu();
 
@@ -202,7 +201,7 @@ public class CustomTabFromChromeExternalNavigationTest {
         ThreadUtils.runOnUiThread(new Runnable() {
             @Override
             public void run() {
-                appMenuHandler.showAppMenu(null, false);
+                appMenuHandler.showAppMenu(null, false, false);
             }
         });
         CriteriaHelper.pollUiThread(new Criteria("AppMenu did not show") {

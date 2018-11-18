@@ -32,8 +32,16 @@
 #define THIRD_PARTY_BLINK_PUBLIC_PLATFORM_WEB_RTC_PEER_CONNECTION_HANDLER_H_
 
 #include "third_party/blink/public/platform/web_rtc_ice_candidate.h"
+#include "third_party/blink/public/platform/web_rtc_rtp_transceiver.h"
 #include "third_party/blink/public/platform/web_rtc_stats.h"
 #include "third_party/blink/public/platform/web_vector.h"
+#include "third_party/webrtc/api/peerconnectioninterface.h"
+#include "third_party/webrtc/api/rtcerror.h"
+#include "third_party/webrtc/api/rtptransceiverinterface.h"
+
+namespace webrtc {
+enum class RTCErrorType;
+}
 
 namespace blink {
 
@@ -42,7 +50,6 @@ class WebMediaStream;
 class WebMediaStreamTrack;
 class WebRTCAnswerOptions;
 class WebRTCDataChannelHandler;
-enum class WebRTCErrorType;
 class WebRTCOfferOptions;
 class WebRTCRtpSender;
 class WebRTCSessionDescription;
@@ -50,15 +57,15 @@ class WebRTCSessionDescriptionRequest;
 class WebRTCStatsRequest;
 class WebRTCVoidRequest;
 class WebString;
-struct WebRTCConfiguration;
 struct WebRTCDataChannelInit;
 
 class WebRTCPeerConnectionHandler {
  public:
   virtual ~WebRTCPeerConnectionHandler() = default;
 
-  virtual bool Initialize(const WebRTCConfiguration&,
-                          const WebMediaConstraints&) = 0;
+  virtual bool Initialize(
+      const webrtc::PeerConnectionInterface::RTCConfiguration&,
+      const WebMediaConstraints&) = 0;
 
   virtual void CreateOffer(const WebRTCSessionDescriptionRequest&,
                            const WebMediaConstraints&) = 0;
@@ -74,7 +81,14 @@ class WebRTCPeerConnectionHandler {
                                     const WebRTCSessionDescription&) = 0;
   virtual WebRTCSessionDescription LocalDescription() = 0;
   virtual WebRTCSessionDescription RemoteDescription() = 0;
-  virtual WebRTCErrorType SetConfiguration(const WebRTCConfiguration&) = 0;
+  virtual WebRTCSessionDescription CurrentLocalDescription() = 0;
+  virtual WebRTCSessionDescription CurrentRemoteDescription() = 0;
+  virtual WebRTCSessionDescription PendingLocalDescription() = 0;
+  virtual WebRTCSessionDescription PendingRemoteDescription() = 0;
+  virtual const webrtc::PeerConnectionInterface::RTCConfiguration&
+  GetConfiguration() const = 0;
+  virtual webrtc::RTCErrorType SetConfiguration(
+      const webrtc::PeerConnectionInterface::RTCConfiguration&) = 0;
 
   // DEPRECATED
   virtual bool AddICECandidate(scoped_refptr<WebRTCICECandidate>) {
@@ -93,14 +107,25 @@ class WebRTCPeerConnectionHandler {
   virtual WebRTCDataChannelHandler* CreateDataChannel(
       const WebString& label,
       const WebRTCDataChannelInit&) = 0;
-  // Adds the track to the peer connection, returning the resulting sender on
-  // success and null on failure.
-  virtual std::unique_ptr<WebRTCRtpSender> AddTrack(
+  virtual webrtc::RTCErrorOr<std::unique_ptr<WebRTCRtpTransceiver>>
+  AddTransceiverWithTrack(const WebMediaStreamTrack&,
+                          const webrtc::RtpTransceiverInit&) = 0;
+  virtual webrtc::RTCErrorOr<std::unique_ptr<WebRTCRtpTransceiver>>
+  AddTransceiverWithKind(
+      // webrtc::MediaStreamTrackInterface::kAudioKind or kVideoKind
+      std::string kind,
+      const webrtc::RtpTransceiverInit&) = 0;
+  // Adds the track to the peer connection, returning the resulting transceiver
+  // or error.
+  virtual webrtc::RTCErrorOr<std::unique_ptr<WebRTCRtpTransceiver>> AddTrack(
       const WebMediaStreamTrack&,
       const WebVector<WebMediaStream>&) = 0;
-  // Removes the sender, returning whether successful. On success, the sender's
-  // track must have been set to null.
-  virtual bool RemoveTrack(WebRTCRtpSender*) = 0;
+  // Removes the sender.
+  // In Plan B: Returns OK() with value nullptr on success. The sender's track
+  // must be nulled by the caller.
+  // In Unified Plan: Returns OK() with the updated transceiver state.
+  virtual webrtc::RTCErrorOr<std::unique_ptr<WebRTCRtpTransceiver>> RemoveTrack(
+      WebRTCRtpSender*) = 0;
   virtual void Stop() = 0;
 
   // Origin Trial - RtcPeerConnectionId

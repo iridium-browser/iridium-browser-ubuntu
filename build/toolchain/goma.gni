@@ -8,9 +8,10 @@ declare_args() {
   # Set to true to enable distributed compilation using Goma.
   use_goma = false
 
-  # Set to true to disable goma without update of command line.
-  # Changing this value does not cause full rebuild.
-  disable_goma = false
+  # This flag is for ChromeOS compiler wrapper.
+  # By passing gomacc path via GOMACC_PATH environment variable, ChromeOS'
+  # compiler wrapper invokes gomacc inside it.
+  has_gomacc_path = false
 
   # Set the default value based on the platform.
   if (host_os == "win") {
@@ -29,6 +30,3 @@ declare_args() {
 
 assert(!(is_win && host_os != "win") || !use_goma,
        "goma does not yet work in win cross builds, b/64390790")
-
-assert(!disable_goma || use_goma,
-       "disable_goma = true has no meaning if use_goma = false")

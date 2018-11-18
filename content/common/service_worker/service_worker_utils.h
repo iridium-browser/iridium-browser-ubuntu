@@ -5,15 +5,18 @@
 #ifndef CONTENT_COMMON_SERVICE_WORKER_SERVICE_WORKER_UTILS_H_
 #define CONTENT_COMMON_SERVICE_WORKER_SERVICE_WORKER_UTILS_H_
 
+#include <sstream>
+#include <string>
+#include <vector>
+
 #include "base/command_line.h"
 #include "base/macros.h"
 #include "content/common/content_export.h"
-#include "content/common/service_worker/service_worker_status_code.h"
 #include "content/common/service_worker/service_worker_types.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/resource_type.h"
 #include "net/http/http_request_headers.h"
-#include "third_party/blink/public/mojom/service_worker/service_worker_error_type.mojom.h"
+#include "third_party/blink/public/common/service_worker/service_worker_status_code.h"
 #include "url/gurl.h"
 
 namespace content {
@@ -37,6 +40,13 @@ class ServiceWorkerUtils {
       const std::string* service_worker_allowed_header_value,
       std::string* error_message);
 
+  // Same as above IsPathRestrictionSatisfied, but without considering
+  // 'Service-Worker-Allowed' header.
+  CONTENT_EXPORT static bool IsPathRestrictionSatisfiedWithoutHeader(
+      const GURL& scope,
+      const GURL& script_url,
+      std::string* error_message);
+
   static bool ContainsDisallowedCharacter(const GURL& scope,
                                           const GURL& script_url,
                                           std::string* error_message);
@@ -48,29 +58,35 @@ class ServiceWorkerUtils {
   CONTENT_EXPORT static bool AllOriginsMatchAndCanAccessServiceWorkers(
       const std::vector<GURL>& urls);
 
-  // Returns true if servicified service worker is enabled.
-  CONTENT_EXPORT static bool IsServicificationEnabled();
-
-  // PlzNavigate
   // Returns true if the |provider_id| was assigned by the browser process.
   static bool IsBrowserAssignedProviderId(int provider_id) {
     return provider_id < kInvalidServiceWorkerProviderId;
   }
 
-  static std::string ErrorTypeToString(
-      blink::mojom::ServiceWorkerErrorType error);
+  template <typename T>
+  static std::string MojoEnumToString(T mojo_enum) {
+    std::ostringstream oss;
+    oss << mojo_enum;
+    return oss.str();
+  }
 
-  static std::string ClientTypeToString(
-      blink::mojom::ServiceWorkerClientType type);
 
-  // Sets |has_range| to true if |headers| specify a single range request, and
-  // |offset| and |size| to the range. Returns true on valid input (regardless
-  // of |has_range|), and false if there is more than one range or if the bounds
-  // overflow.
-  static bool ExtractSinglePartHttpRange(const net::HttpRequestHeaders& headers,
-                                         bool* has_range_out,
-                                         uint64_t* offset_out,
-                                         uint64_t* size_out);
+  static bool ShouldBypassCacheDueToUpdateViaCache(
+      bool is_main_script,
+      blink::mojom::ServiceWorkerUpdateViaCache cache_mode);
+
+  // Converts an enum defined in net/base/load_flags.h to
+  // blink::mojom::FetchCacheMode.
+  CONTENT_EXPORT static blink::mojom::FetchCacheMode GetCacheModeFromLoadFlags(
+      int load_flags);
+
+ private:
+  static bool IsPathRestrictionSatisfiedInternal(
+      const GURL& scope,
+      const GURL& script_url,
+      bool service_worker_allowed_header_supported,
+      const std::string* service_worker_allowed_header_value,
+      std::string* error_message);
 };
 
 class CONTENT_EXPORT LongestScopeMatcher {

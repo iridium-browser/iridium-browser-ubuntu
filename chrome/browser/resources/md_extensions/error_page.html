@@ -2,16 +2,18 @@
 
 <link rel="import" href="chrome://resources/cr_elements/cr_container_shadow_behavior.html">
 <link rel="import" href="chrome://resources/cr_elements/cr_icons_css.html">
-<link rel="import" href="chrome://resources/cr_elements/shared_style_css.html">
+<link rel="import" href="chrome://resources/cr_elements/icons.html">
 <link rel="import" href="chrome://resources/cr_elements/paper_button_style_css.html">
+<link rel="import" href="chrome://resources/cr_elements/shared_style_css.html">
+<link rel="import" href="chrome://resources/cr_elements/shared_vars_css.html">
 <link rel="import" href="chrome://resources/html/cr.html">
 <link rel="import" href="chrome://resources/html/cr/ui/focus_outline_manager.html">
+<link rel="import" href="chrome://resources/html/cr/ui/focus_without_ink.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/iron-collapse/iron-collapse.html">
-<link rel="import" href="chrome://resources/polymer/v1_0/iron-icons/iron-icons.html">
+<link rel="import" href="chrome://resources/polymer/v1_0/iron-icon/iron-icon.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-button/paper-button.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-icon-button/paper-icon-button-light.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-styles/color.html">
-<link rel="import" href="chrome://resources/polymer/v1_0/paper-styles/shadow.html">
 <link rel="import" href="code_section.html">
 <link rel="import" href="item_util.html">
 <link rel="import" href="navigation_helper.html">
@@ -30,16 +32,16 @@
       }
 
       iron-icon {
-        --iron-icon-fill-color: var(--paper-grey-500);
+        --iron-icon-fill-color: var(--google-grey-refresh-700);
         @apply --cr-icon-height-width;
         flex-shrink: 0;
       }
 
-      iron-icon[icon=warning] {
+      iron-icon[icon='cr:warning'] {
         --iron-icon-fill-color: var(--paper-orange-500);
       }
 
-      iron-icon[icon=error] {
+      iron-icon[icon='cr:error'] {
         --iron-icon-fill-color: var(--paper-red-700);
       }
 
@@ -47,7 +49,7 @@
        * detail_view.html and error_page.html. Refactor such that no duplication
        * happens.*/
       #main {
-        @apply --shadow-elevation-2dp;
+        @apply --cr-card-elevation;
         background-color: white;
         margin: auto;
         min-height: 100%;
@@ -82,7 +84,7 @@
       }
 
       .error-item paper-icon-button-light {
-        -webkit-margin-end: 0;
+        margin-inline-end: 0;
       }
 
       .error-item.selected {
@@ -98,9 +100,9 @@
       }
 
       .error-message {
-        -webkit-margin-start: 10px;
         flex-grow: 1;
-        word-break: break-all;
+        margin-inline-start: 10px;
+        word-break: break-word;
       }
 
       .devtools-controls {
@@ -131,11 +133,6 @@
         background: var(--google-blue-100);
       }
 
-      .devtool-button {
-        margin-bottom: 20px;
-        max-width: 300px;
-      }
-
       extensions-code-section {
         background: white;
         height: 200px;
@@ -145,23 +142,23 @@
       /* TODO(scottchen): extract to shared location from settings. */
       .separator {
         --separator-gaps: 9px;
-        -webkit-border-start: var(--cr-separator-line);
-        -webkit-margin-end: var(--cr-section-padding);
+        border-inline-start: var(--cr-separator-line);
+        flex-shrink: 0;
+        height: calc(var(--cr-section-min-height) -
+            var(--separator-gaps));
+        margin-inline-end: var(--cr-section-padding);
+
         /**
          * Makes the tappable area fill its parent.
          * TODO(scottchen): This is an explicit reminder to override once
          * .separator styling is extracted from settings.
          */
-        -webkit-margin-start: 0;
-        flex-shrink: 0;
-        height: calc(var(--cr-section-min-height) -
-            var(--separator-gaps));
-
+        margin-inline-start: 0;
       }
 
       /* TODO(scottchen): extract to shared location from settings. */
       .separator + paper-icon-button-light {
-        -webkit-margin-start: var(--cr-icon-ripple-margin);
+        margin-inline-start: var(--cr-icon-ripple-margin);
       }
 
       :host-context(.focus-outline-visible) .start:focus {
@@ -176,7 +173,7 @@
       <div id="main">
         <div id="heading">
           <paper-icon-button-light class="icon-arrow-back no-overlap">
-            <button id="close-button" aria-label="$i18n{back}"
+            <button id="closeButton" aria-label="$i18n{back}"
                 on-click="onCloseButtonTap_">
             </button>
           </paper-icon-button-light>
@@ -191,10 +188,11 @@
               <div class="item-container">
                 <div class$="error-item
                     [[computeErrorClass_(item, selectedEntry_)]]">
-                  <div actionable class=" start" on-click="onErrorItemAction_"
+                  <div actionable class="start" on-click="onErrorItemAction_"
                       on-keydown="onErrorItemAction_" tabindex="0"
-                      role="button">
-                    <iron-icon icon$="[[computeErrorIcon_(item)]]"
+                      role="button" aria-expanded$="[[isAriaExpanded_(
+                          index, selectedEntry_)]]">
+                    <iron-icon icon$="cr:[[computeErrorIcon_(item)]]"
                         title$="[[computeErrorTypeLabel_(item)]]">
                     </iron-icon>
                     <div id$="[[item.id]]" class="error-message">
@@ -246,12 +244,6 @@
                           could-not-display-code="$i18n{noErrorsToShow}">
                       </extensions-code-section>
                     </template>
-                    <paper-button class="devtool-button action-button"
-                        hidden$="[[!computeIsRuntimeError_(item)]]"
-                        disabled="[[!item.canInspect]]"
-                        on-click="onDevToolButtonTap_">
-                      $i18n{openInDevtool}
-                    </paper-button>
                   </div>
                 </iron-collapse>
               </div>

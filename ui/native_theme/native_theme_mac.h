@@ -6,6 +6,7 @@
 #define UI_NATIVE_THEME_NATIVE_THEME_MAC_H_
 
 #include "base/macros.h"
+#include "base/no_destructor.h"
 #include "ui/native_theme/native_theme_base.h"
 #include "ui/native_theme/native_theme_export.h"
 
@@ -60,11 +61,17 @@ class NATIVE_THEME_EXPORT NativeThemeMac : public NativeThemeBase {
 
  protected:
   friend class NativeTheme;
+  friend class base::NoDestructor<NativeThemeMac>;
   static NativeThemeMac* instance();
 
  private:
   NativeThemeMac();
   ~NativeThemeMac() override;
+
+  // Paint the selected menu item background, and a border for emphasis when in
+  // high contrast.
+  void PaintSelectedMenuItem(cc::PaintCanvas* canvas,
+                             const gfx::Rect& rect) const;
 
   DISALLOW_COPY_AND_ASSIGN(NativeThemeMac);
 };

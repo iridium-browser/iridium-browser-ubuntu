@@ -12,6 +12,7 @@
 #include "third_party/blink/renderer/platform/fonts/font.h"
 #include "third_party/blink/renderer/platform/fonts/font_cache.h"
 #include "third_party/blink/renderer/platform/fonts/font_description.h"
+#include "third_party/blink/renderer/platform/fonts/text_run_paint_info.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context.h"
 #include "third_party/blink/renderer/platform/graphics/paint/drawing_recorder.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_record_builder.h"
@@ -76,10 +77,10 @@ float WebFont::XHeight() const {
   return font_data ? font_data->GetFontMetrics().XHeight() : 0;
 }
 
-void WebFont::DrawText(WebCanvas* canvas,
+void WebFont::DrawText(cc::PaintCanvas* canvas,
                        const WebTextRun& run,
                        const WebFloatPoint& left_baseline,
-                       WebColor color,
+                       SkColor color,
                        const WebRect& clip) const {
   FontCachePurgePreventer font_cache_purge_preventer;
   FloatRect text_clip_rect(clip);
@@ -107,7 +108,8 @@ int WebFont::CalculateWidth(const WebTextRun& run) const {
 }
 
 int WebFont::OffsetForPosition(const WebTextRun& run, float position) const {
-  return private_->GetFont().OffsetForPosition(run, position, true);
+  return private_->GetFont().OffsetForPosition(
+      run, position, IncludePartialGlyphs, DontBreakGlyphs);
 }
 
 WebFloatRect WebFont::SelectionRectForText(const WebTextRun& run,

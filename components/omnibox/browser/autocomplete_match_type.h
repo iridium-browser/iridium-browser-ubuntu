@@ -44,7 +44,7 @@ struct AutocompleteMatchType {
     SEARCH_SUGGEST_PROFILE      = 12,  // A personalized suggested search for a
                                        // Google+ profile.
     SEARCH_OTHER_ENGINE         = 13,  // A search with a non-default engine.
-    EXTENSION_APP               = 14,  // An Extension App with a title/url that
+    EXTENSION_APP_DEPRECATED    = 14,  // An Extension App with a title/url that
                                        // contains the input (deprecated).
     CONTACT_DEPRECATED          = 15,  // One of the user's contacts
                                        // (deprecated).
@@ -56,11 +56,15 @@ struct AutocompleteMatchType {
     VOICE_SUGGEST               = 20,  // An Android-specific type which
                                        // indicates a search from voice
                                        // recognizer.
-    PHYSICAL_WEB                = 21,  // A Physical Web nearby URL.
-    PHYSICAL_WEB_OVERFLOW       = 22,  // An item representing multiple
-                                       // Physical Web nearby URLs.
+    PHYSICAL_WEB_DEPRECATED     = 21,  // A Physical Web nearby URL
+                                       // (deprecated).
+    PHYSICAL_WEB_OVERFLOW_DEPRECATED = 22,  // An item representing multiple
+                                       // Physical Web nearby URLs
+                                       // (deprecated).
     TAB_SEARCH_DEPRECATED       = 23,  // A suggested open tab, based on its
                                        // URL or title, via HQP (deprecated).
+    DOCUMENT_SUGGESTION         = 24,  // A suggested document.
+    PEDAL                       = 25,  // An omnibox pedal suggestion.
     NUM_TYPES,
   };
   // clang-format on
@@ -79,11 +83,13 @@ struct AutocompleteMatchType {
       const base::string16& match_text,
       size_t match_index,
       size_t total_matches,
+      bool is_tab_switch_button_focused,
       int* label_prefix_length = nullptr);
   // This version returns a plain label without ", n of m" positional info:
   static base::string16 ToAccessibilityLabel(
       const AutocompleteMatch& match,
       const base::string16& match_text,
+      bool is_tab_switch_button_focused,
       int* label_prefix_length = nullptr);
 };
 

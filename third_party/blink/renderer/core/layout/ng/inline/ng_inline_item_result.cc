@@ -15,18 +15,23 @@ NGInlineItemResult::NGInlineItemResult()
 NGInlineItemResult::NGInlineItemResult(const NGInlineItem* item,
                                        unsigned index,
                                        unsigned start,
-                                       unsigned end)
-    : item(item), item_index(index), start_offset(start), end_offset(end) {}
+                                       unsigned end,
+                                       bool should_create_line_box)
+    : item(item),
+      item_index(index),
+      start_offset(start),
+      end_offset(end),
+      should_create_line_box(should_create_line_box) {}
 
 void NGLineInfo::SetLineStyle(const NGInlineNode& node,
+                              const NGInlineItemsData& items_data,
                               const NGConstraintSpace& constraint_space,
                               bool is_first_line,
+                              bool use_first_line_style,
                               bool is_after_forced_break) {
-  LayoutObject* layout_object = node.GetLayoutObject();
-  use_first_line_style_ =
-      is_first_line &&
-      layout_object->GetDocument().GetStyleEngine().UsesFirstLineRules();
-  line_style_ = layout_object->Style(use_first_line_style_);
+  use_first_line_style_ = use_first_line_style;
+  items_data_ = &items_data;
+  line_style_ = node.GetLayoutBox()->Style(use_first_line_style_);
 
   if (line_style_->ShouldUseTextIndent(is_first_line, is_after_forced_break)) {
     // 'text-indent' applies to block container, and percentage is of its
@@ -47,11 +52,13 @@ void NGLineInfo::SetLineStyle(const NGInlineNode& node,
 }
 
 #if DCHECK_IS_ON()
-void NGInlineItemResult::CheckConsistency() const {
+void NGInlineItemResult::CheckConsistency(bool during_line_break) const {
   DCHECK(item);
   if (item->Type() == NGInlineItem::kText) {
-    DCHECK(shape_result);
     DCHECK_LT(start_offset, end_offset);
+    if (during_line_break && !shape_result)
+      return;
+    DCHECK(shape_result);
     DCHECK_EQ(end_offset - start_offset, shape_result->NumCharacters());
     DCHECK_EQ(start_offset, shape_result->StartIndexForResult());
     DCHECK_EQ(end_offset, shape_result->EndIndexForResult());
@@ -59,16 +66,22 @@ void NGInlineItemResult::CheckConsistency() const {
 }
 #endif
 
-void NGLineInfo::SetLineBfcOffset(NGBfcOffset line_bfc_offset,
-                                  LayoutUnit available_width,
-                                  LayoutUnit width) {
-  line_bfc_offset_ = line_bfc_offset;
-  available_width_ = available_width;
-  width_ = width;
+LayoutUnit NGLineInfo::ComputeWidth() const {
+  LayoutUnit inline_size = TextIndent();
+  for (const NGInlineItemResult& item_result : Results())
+    inline_size += item_result.inline_size;
+
+  if (UNLIKELY(line_end_fragment_)) {
+    inline_size += line_end_fragment_->Size()
+                       .ConvertToLogical(LineStyle().GetWritingMode())
+                       .inline_size;
+  }
+
+  return inline_size;
 }
 
 void NGLineInfo::SetLineEndFragment(
-    scoped_refptr<NGPhysicalTextFragment> fragment) {
+    scoped_refptr<const NGPhysicalTextFragment> fragment) {
   line_end_fragment_ = std::move(fragment);
 }
 

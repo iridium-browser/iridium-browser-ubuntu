@@ -5,6 +5,8 @@
 #include "chrome/browser/ui/libgtkui/gtk_ui.h"
 
 #include <dlfcn.h>
+#include <gdk/gdk.h>
+#include <gdk/gdkkeysyms.h>
 #include <math.h>
 #include <pango/pango.h>
 
@@ -13,6 +15,7 @@
 #include <utility>
 
 #include "base/command_line.h"
+#include "base/containers/flat_map.h"
 #include "base/debug/leak_annotations.h"
 #include "base/environment.h"
 #include "base/i18n/rtl.h"
@@ -27,24 +30,32 @@
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/ui/libgtkui/app_indicator_icon.h"
-#include "chrome/browser/ui/libgtkui/chrome_gtk_frame.h"
 #include "chrome/browser/ui/libgtkui/gtk_event_loop.h"
 #include "chrome/browser/ui/libgtkui/gtk_key_bindings_handler.h"
 #include "chrome/browser/ui/libgtkui/gtk_status_icon.h"
 #include "chrome/browser/ui/libgtkui/gtk_util.h"
+#include "chrome/browser/ui/libgtkui/native_theme_gtk.h"
+#include "chrome/browser/ui/libgtkui/nav_button_provider_gtk.h"
 #include "chrome/browser/ui/libgtkui/print_dialog_gtk.h"
 #include "chrome/browser/ui/libgtkui/printing_gtk_util.h"
 #include "chrome/browser/ui/libgtkui/select_file_dialog_impl.h"
+#include "chrome/browser/ui/libgtkui/settings_provider_gtk.h"
 #include "chrome/browser/ui/libgtkui/skia_utils_gtk.h"
 #include "chrome/browser/ui/libgtkui/unity_service.h"
 #include "chrome/browser/ui/libgtkui/x11_input_method_context_impl_gtk.h"
+#include "chrome/common/pref_names.h"
+#include "components/prefs/pref_service.h"
 #include "printing/buildflags/buildflags.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkShader.h"
+#include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/display/display.h"
+#include "ui/events/keycodes/dom/dom_code.h"
+#include "ui/events/keycodes/dom/dom_keyboard_layout_manager.h"
+#include "ui/events/keycodes/dom/keycode_converter.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/font_render_params.h"
 #include "ui/gfx/geometry/rect.h"
@@ -64,19 +75,11 @@
 #include "ui/views/linux_ui/window_button_order_observer.h"
 #include "ui/views/resources/grit/views_resources.h"
 
-#if GTK_MAJOR_VERSION == 2
-#include "chrome/browser/ui/libgtkui/native_theme_gtk2.h"  // nogncheck
-#elif GTK_MAJOR_VERSION == 3
-#include "chrome/browser/ui/libgtkui/native_theme_gtk3.h"         // nogncheck
-#include "chrome/browser/ui/libgtkui/nav_button_provider_gtk3.h"  // nogncheck
-#include "chrome/browser/ui/libgtkui/settings_provider_gtk3.h"    // nogncheck
-#endif
-
 #if defined(USE_GIO)
 #include "chrome/browser/ui/libgtkui/settings_provider_gsettings.h"
 #endif
 
-#if BUILDFLAG(ENABLE_BASIC_PRINTING)
+#if BUILDFLAG(ENABLE_PRINTING)
 #include "printing/printing_context_linux.h"
 #endif
 
@@ -131,49 +134,6 @@ class GtkButtonImageSource : public gfx::ImageSkiaSource {
         width, height, width * 4);
     cairo_t* cr = cairo_create(surface);
 
-#if GTK_MAJOR_VERSION == 2
-    // Create a temporary GTK button to snapshot
-    GtkWidget* window = gtk_offscreen_window_new();
-    GtkWidget* button = gtk_toggle_button_new();
-
-    if (state_ == ui::NativeTheme::kPressed)
-      gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(button), true);
-    else if (state_ == ui::NativeTheme::kDisabled)
-      gtk_widget_set_sensitive(button, false);
-
-    gtk_widget_set_size_request(button, width, height);
-    gtk_container_add(GTK_CONTAINER(window), button);
-
-    if (is_blue_)
-      TurnButtonBlue(button);
-
-    gtk_widget_show_all(window);
-
-    if (focus_)
-      GTK_WIDGET_SET_FLAGS(button, GTK_HAS_FOCUS);
-
-    int w, h;
-    GdkPixmap* pixmap;
-
-    {
-      // http://crbug.com/346740
-      ANNOTATE_SCOPED_MEMORY_LEAK;
-      pixmap = gtk_widget_get_snapshot(button, nullptr);
-    }
-
-    gdk_drawable_get_size(GDK_DRAWABLE(pixmap), &w, &h);
-    GdkColormap* colormap = gdk_drawable_get_colormap(pixmap);
-    GdkPixbuf* pixbuf = gdk_pixbuf_get_from_drawable(
-        nullptr, GDK_DRAWABLE(pixmap), colormap, 0, 0, 0, 0, w, h);
-
-    gdk_cairo_set_source_pixbuf(cr, pixbuf, 0, 0);
-    cairo_paint(cr);
-
-    g_object_unref(pixbuf);
-    g_object_unref(pixmap);
-
-    gtk_widget_destroy(window);
-#else
     ScopedStyleContext context = GetStyleContextFromCss(
         is_blue_ ? "GtkButton#button.default.suggested-action"
                  : "GtkButton#button");
@@ -188,6 +148,7 @@ class GtkButtonImageSource : public gfx::ImageSkiaSource {
     if (focus_) {
       gfx::Rect focus_rect(width, height);
 
+#if !GTK_CHECK_VERSION(3, 90, 0)
       if (!GtkVersionCheck(3, 14)) {
         gint focus_pad;
         gtk_style_context_get_style(context, "focus-padding", &focus_pad,
@@ -205,17 +166,21 @@ class GtkButtonImageSource : public gfx::ImageSkiaSource {
             focus_rect.Offset(child_displacement_x, child_displacement_y);
         }
       }
+#endif
 
       if (!GtkVersionCheck(3, 20)) {
         GtkBorder border;
+#if GTK_CHECK_VERSION(3, 90, 0)
+        gtk_style_context_get_border(context, &border);
+#else
         gtk_style_context_get_border(context, state_flags, &border);
+#endif
         focus_rect.Inset(border.left, border.top, border.right, border.bottom);
       }
 
       gtk_render_focus(context, cr, focus_rect.x(), focus_rect.y(),
                        focus_rect.width(), focus_rect.height());
     }
-#endif
 
     cairo_destroy(cr);
     cairo_surface_destroy(surface);
@@ -256,29 +221,39 @@ struct GObjectDeleter {
 };
 struct GtkIconInfoDeleter {
   void operator()(GtkIconInfo* ptr) {
+#if GTK_CHECK_VERSION(3, 90, 0)
+    g_object_unref(ptr);
+#else
     G_GNUC_BEGIN_IGNORE_DEPRECATIONS
     gtk_icon_info_free(ptr);
     G_GNUC_END_IGNORE_DEPRECATIONS
+#endif
   }
 };
 typedef std::unique_ptr<GIcon, GObjectDeleter> ScopedGIcon;
 typedef std::unique_ptr<GtkIconInfo, GtkIconInfoDeleter> ScopedGtkIconInfo;
 typedef std::unique_ptr<GdkPixbuf, GObjectDeleter> ScopedGdkPixbuf;
 
+#if !GTK_CHECK_VERSION(3, 90, 0)
 // Prefix for app indicator ids
 const char kAppIndicatorIdPrefix[] = "chrome_app_indicator_";
+#endif
 
 // Number of app indicators used (used as part of app-indicator id).
 int indicators_count;
 
 // The unknown content type.
-const char* kUnknownContentType = "application/octet-stream";
+const char kUnknownContentType[] = "application/octet-stream";
+
+using GdkSetAllowedBackendsFn = void (*)(const gchar*);
+// Place this function pointer in read-only memory after being resolved to
+// prevent it being tampered with. See https://crbug.com/771365 for details.
+PROTECTED_MEMORY_SECTION base::ProtectedMemory<GdkSetAllowedBackendsFn>
+    g_gdk_set_allowed_backends;
 
 std::unique_ptr<SettingsProvider> CreateSettingsProvider(GtkUi* gtk_ui) {
-#if GTK_MAJOR_VERSION == 3
   if (GtkVersionCheck(3, 14))
-    return std::make_unique<SettingsProviderGtk3>(gtk_ui);
-#endif
+    return std::make_unique<SettingsProviderGtk>(gtk_ui);
 #if defined(USE_GIO)
   return std::make_unique<SettingsProviderGSettings>(gtk_ui);
 #else
@@ -336,10 +311,8 @@ gfx::FontRenderParams GetGtkFontRenderParams() {
 }
 
 views::LinuxUI::NonClientWindowFrameAction GetDefaultMiddleClickAction() {
-#if GTK_MAJOR_VERSION == 3
   if (GtkVersionCheck(3, 14))
     return views::LinuxUI::WINDOW_FRAME_ACTION_NONE;
-#endif
   std::unique_ptr<base::Environment> env(base::Environment::Create());
   switch (base::nix::GetDesktopEnvironment(env.get())) {
     case base::nix::DESKTOP_ENVIRONMENT_KDE4:
@@ -354,7 +327,6 @@ views::LinuxUI::NonClientWindowFrameAction GetDefaultMiddleClickAction() {
   }
 }
 
-#if GTK_MAJOR_VERSION > 2
 // COLOR_TOOLBAR_TOP_SEPARATOR represents the border between tabs and the
 // frame, as well as the border between tabs and the toolbar.  For this
 // reason, it is difficult to calculate the One True Color that works well on
@@ -405,15 +377,6 @@ SkColor GetToolbarTopSeparatorColor(SkColor header_fg,
   border.l = l;
   return HSLToSkColor(border, a * 0xff);
 }
-#endif
-
-#if GTK_MAJOR_VERSION > 2
-using GdkSetAllowedBackendsFn = void (*)(const gchar*);
-// Place this function pointers in read-only memory after being resolved to
-// prevent it being tampered with. See crbug.com/771365 for details.
-PROTECTED_MEMORY_SECTION base::ProtectedMemory<GdkSetAllowedBackendsFn>
-    g_gdk_set_allowed_backends;
-#endif
 
 }  // namespace
 
@@ -424,7 +387,6 @@ GtkUi::GtkUi() {
       GetDefaultMiddleClickAction();
   window_frame_actions_[WINDOW_FRAME_ACTION_SOURCE_RIGHT_CLICK] =
       views::LinuxUI::WINDOW_FRAME_ACTION_MENU;
-#if GTK_MAJOR_VERSION > 2
   // Force Gtk to use Xwayland if it would have used wayland.  libgtkui assumes
   // the use of X11 (eg. X11InputMethodContextImplGtk) and will crash under
   // other backends.
@@ -437,23 +399,13 @@ GtkUi::GtkUi() {
     DCHECK(*g_gdk_set_allowed_backends);
   if (*g_gdk_set_allowed_backends)
     base::UnsanitizedCfiCall(g_gdk_set_allowed_backends)("x11");
-#endif
-#if GTK_MAJOR_VERSION >= 3
   // Avoid GTK initializing atk-bridge, and let AuraLinux implementation
   // do it once it is ready.
   std::unique_ptr<base::Environment> env(base::Environment::Create());
   env->SetVar("NO_AT_BRIDGE", "1");
-#endif
   GtkInitFromCommandLine(*base::CommandLine::ForCurrentProcess());
-#if GTK_MAJOR_VERSION == 2
-  native_theme_ = NativeThemeGtk2::instance();
-  fake_window_ = chrome_gtk_frame_new();
-#elif GTK_MAJOR_VERSION == 3
-  native_theme_ = NativeThemeGtk3::instance();
+  native_theme_ = NativeThemeGtk::instance();
   fake_window_ = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-#else
-#error "Unsupported GTK version"
-#endif
   gtk_widget_realize(fake_window_);
 }
 
@@ -485,9 +437,9 @@ void GtkUi::Initialize() {
 
   LoadGtkValues();
 
-#if BUILDFLAG(ENABLE_BASIC_PRINTING)
+#if BUILDFLAG(ENABLE_PRINTING)
   printing::PrintingContextLinux::SetCreatePrintDialogFunction(
-      &PrintDialogGtk2::CreatePrintDialog);
+      &PrintDialogGtk::CreatePrintDialog);
   printing::PrintingContextLinux::SetPdfPaperSizeFunction(
       &GetPdfPaperSizeDeviceUnitsGtk);
 #endif
@@ -497,8 +449,8 @@ void GtkUi::Initialize() {
 
   indicators_count = 0;
 
-  // Instantiate the singleton instance of Gtk2EventLoop.
-  Gtk2EventLoop::GetInstance();
+  // Instantiate the singleton instance of GtkEventLoop.
+  GtkEventLoop::GetInstance();
 }
 
 bool GtkUi::GetTint(int id, color_utils::HSL* tint) const {
@@ -519,30 +471,31 @@ bool GtkUi::GetTint(int id, color_utils::HSL* tint) const {
   return false;
 }
 
-bool GtkUi::GetColor(int id, SkColor* color) const {
-  ColorMap::const_iterator it = colors_.find(id);
-  if (it != colors_.end()) {
-    *color = it->second;
-    return true;
+bool GtkUi::GetColor(int id, SkColor* color, PrefService* pref_service) const {
+  for (const ColorMap& color_map :
+       {colors_, pref_service->GetBoolean(prefs::kUseCustomChromeFrame)
+                     ? custom_frame_colors_
+                     : native_frame_colors_}) {
+    auto it = color_map.find(id);
+    if (it != color_map.end()) {
+      *color = it->second;
+      return true;
+    }
   }
 
   return false;
 }
 
+bool GtkUi::GetDisplayProperty(int id, int* result) const {
+  if (id == ThemeProperties::SHOULD_FILL_BACKGROUND_TAB_COLOR) {
+    *result = 0;
+    return true;
+  }
+  return false;
+}
+
 SkColor GtkUi::GetFocusRingColor() const {
   return focus_ring_color_;
-}
-
-SkColor GtkUi::GetThumbActiveColor() const {
-  return thumb_active_color_;
-}
-
-SkColor GtkUi::GetThumbInactiveColor() const {
-  return thumb_inactive_color_;
-}
-
-SkColor GtkUi::GetTrackColor() const {
-  return track_color_;
 }
 
 SkColor GtkUi::GetActiveSelectionBgColor() const {
@@ -628,12 +581,26 @@ void GtkUi::SetProgressFraction(float percentage) const {
 }
 
 bool GtkUi::IsStatusIconSupported() const {
+#if GTK_CHECK_VERSION(3, 90, 0)
+  // TODO(thomasanderson): Provide some sort of status icon for GTK4.  The GTK3
+  // config has two options.  The first is to use GTK status icons, but these
+  // were removed in GTK4.  The second is to use libappindicator.  However, that
+  // library has a dependency on GTK3, and loading multiple versions of GTK into
+  // the same process is explicitly unsupported.
+  NOTIMPLEMENTED();
+  return false;
+#else
   return true;
+#endif
 }
 
 std::unique_ptr<views::StatusIconLinux> GtkUi::CreateLinuxStatusIcon(
     const gfx::ImageSkia& image,
     const base::string16& tool_tip) const {
+#if GTK_CHECK_VERSION(3, 90, 0)
+  NOTIMPLEMENTED();
+  return nullptr;
+#else
   if (AppIndicatorIcon::CouldOpen()) {
     ++indicators_count;
     return std::unique_ptr<views::StatusIconLinux>(new AppIndicatorIcon(
@@ -641,8 +608,9 @@ std::unique_ptr<views::StatusIconLinux> GtkUi::CreateLinuxStatusIcon(
         image, tool_tip));
   } else {
     return std::unique_ptr<views::StatusIconLinux>(
-        new Gtk2StatusIcon(image, tool_tip));
+        new GtkStatusIcon(image, tool_tip));
   }
+#endif
 }
 
 gfx::Image GtkUi::GetIconForContentType(const std::string& content_type,
@@ -776,7 +744,7 @@ std::unique_ptr<ui::LinuxInputMethodContext> GtkUi::CreateInputMethodContext(
     ui::LinuxInputMethodContextDelegate* delegate,
     bool is_simple) const {
   return std::unique_ptr<ui::LinuxInputMethodContext>(
-      new X11InputMethodContextImplGtk2(delegate, is_simple));
+      new X11InputMethodContextImplGtk(delegate, is_simple));
 }
 
 gfx::FontRenderParams GtkUi::GetDefaultFontRenderParams() const {
@@ -833,16 +801,73 @@ bool GtkUi::PreferDarkTheme() const {
 #if BUILDFLAG(ENABLE_NATIVE_WINDOW_NAV_BUTTONS)
 std::unique_ptr<views::NavButtonProvider> GtkUi::CreateNavButtonProvider() {
   if (GtkVersionCheck(3, 14))
-    return std::make_unique<libgtkui::NavButtonProviderGtk3>();
+    return std::make_unique<libgtkui::NavButtonProviderGtk>();
   return nullptr;
 }
 #endif
+
+// Mapping from GDK dead keys to corresponding printable character.
+static struct {
+  guint gdk_key;
+  guint16 unicode;
+} kDeadKeyMapping[] = {
+    {GDK_KEY_dead_grave, 0x0060},      {GDK_KEY_dead_acute, 0x0027},
+    {GDK_KEY_dead_circumflex, 0x005e}, {GDK_KEY_dead_tilde, 0x007e},
+    {GDK_KEY_dead_diaeresis, 0x00a8},
+};
+
+base::flat_map<std::string, std::string> GtkUi::GetKeyboardLayoutMap() {
+  GdkDisplay* display = gdk_display_get_default();
+  GdkKeymap* keymap = gdk_keymap_get_for_display(display);
+  if (!keymap)
+    return {};
+
+  ui::DomKeyboardLayoutManager* layouts = new ui::DomKeyboardLayoutManager();
+  auto map = base::flat_map<std::string, std::string>();
+
+  for (unsigned int i_domcode = 0;
+       i_domcode < ui::kWritingSystemKeyDomCodeEntries; ++i_domcode) {
+    ui::DomCode domcode = ui::writing_system_key_domcodes[i_domcode];
+    guint16 keycode = ui::KeycodeConverter::DomCodeToNativeKeycode(domcode);
+    GdkKeymapKey* keys = nullptr;
+    guint* keyvals = nullptr;
+    gint n_entries = 0;
+
+    // The order of the layouts is based on the system default ordering in
+    // Keyboard Settings. The currently active layout does not affect this
+    // order.
+    if (gdk_keymap_get_entries_for_keycode(keymap, keycode, &keys, &keyvals,
+                                           &n_entries)) {
+      for (gint i = 0; i < n_entries; ++i) {
+        // There are 4 entries per layout group, one each for shift level 0..3.
+        // We only care about the unshifted values (level = 0).
+        if (keys[i].level == 0) {
+          uint16_t unicode = gdk_keyval_to_unicode(keyvals[i]);
+          if (unicode == 0) {
+            for (unsigned int i_dead = 0; i_dead < base::size(kDeadKeyMapping);
+                 ++i_dead) {
+              if (keyvals[i] == kDeadKeyMapping[i_dead].gdk_key)
+                unicode = kDeadKeyMapping[i_dead].unicode;
+            }
+          }
+          if (unicode != 0)
+            layouts->GetLayout(keys[i].group)->AddKeyMapping(domcode, unicode);
+        }
+      }
+    }
+    g_free(keys);
+    keys = nullptr;
+    g_free(keyvals);
+    keyvals = nullptr;
+  }
+  return layouts->GetFirstAsciiCapableLayout()->GetMap();
+}
 
 bool GtkUi::MatchEvent(const ui::Event& event,
                        std::vector<ui::TextEditCommandAuraLinux>* commands) {
   // Ensure that we have a keyboard handler.
   if (!key_bindings_handler_)
-    key_bindings_handler_.reset(new Gtk2KeyBindingsHandler);
+    key_bindings_handler_.reset(new GtkKeyBindingsHandler);
 
   return key_bindings_handler_->MatchEvent(event, commands);
 }
@@ -851,107 +876,17 @@ void GtkUi::OnDeviceScaleFactorMaybeChanged(void*, GParamSpec*) {
   UpdateDeviceScaleFactor();
 }
 
-void GtkUi::SetScrollbarColors() {
-  thumb_active_color_ = SkColorSetRGB(244, 244, 244);
-  thumb_inactive_color_ = SkColorSetRGB(234, 234, 234);
-  track_color_ = SkColorSetRGB(211, 211, 211);
-
-  GetChromeStyleColor("scrollbar-slider-prelight-color", &thumb_active_color_);
-  GetChromeStyleColor("scrollbar-slider-normal-color", &thumb_inactive_color_);
-  GetChromeStyleColor("scrollbar-trough-color", &track_color_);
-}
-
 void GtkUi::LoadGtkValues() {
-  // TODO(erg): GtkThemeService had a comment here about having to muck with
-  // the raw Prefs object to remove prefs::kCurrentThemeImages or else we'd
-  // regress startup time. Figure out how to do that when we can't access the
-  // prefs system from here.
-
+  // TODO(thomasanderson): GtkThemeService had a comment here about having to
+  // muck with the raw Prefs object to remove prefs::kCurrentThemeImages or else
+  // we'd regress startup time. Figure out how to do that when we can't access
+  // the prefs system from here.
   UpdateDeviceScaleFactor();
   UpdateCursorTheme();
+  UpdateColors();
+}
 
-#if GTK_MAJOR_VERSION == 2
-  const color_utils::HSL kDefaultFrameShift = {-1, -1, 0.4};
-  SkColor frame_color =
-      native_theme_->GetSystemColor(ui::NativeTheme::kColorId_WindowBackground);
-  frame_color = color_utils::HSLShift(frame_color, kDefaultFrameShift);
-  GetChromeStyleColor("frame-color", &frame_color);
-  colors_[ThemeProperties::COLOR_FRAME] = frame_color;
-
-  GtkStyle* style = gtk_rc_get_style(fake_window_);
-  SkColor temp_color = color_utils::HSLShift(
-      GdkColorToSkColor(style->bg[GTK_STATE_INSENSITIVE]), kDefaultFrameShift);
-  GetChromeStyleColor("inactive-frame-color", &temp_color);
-  colors_[ThemeProperties::COLOR_FRAME_INACTIVE] = temp_color;
-
-  temp_color = color_utils::HSLShift(frame_color, kDefaultTintFrameIncognito);
-  GetChromeStyleColor("incognito-frame-color", &temp_color);
-  colors_[ThemeProperties::COLOR_FRAME_INCOGNITO] = temp_color;
-
-  temp_color =
-      color_utils::HSLShift(frame_color, kDefaultTintFrameIncognitoInactive);
-  GetChromeStyleColor("incognito-inactive-frame-color", &temp_color);
-  colors_[ThemeProperties::COLOR_FRAME_INCOGNITO_INACTIVE] = temp_color;
-
-  SkColor tab_color =
-      native_theme_->GetSystemColor(ui::NativeTheme::kColorId_DialogBackground);
-  SkColor label_color = native_theme_->GetSystemColor(
-      ui::NativeTheme::kColorId_LabelEnabledColor);
-
-  colors_[ThemeProperties::COLOR_TOOLBAR_BUTTON_ICON] =
-      color_utils::DeriveDefaultIconColor(label_color);
-
-  colors_[ThemeProperties::COLOR_TAB_TEXT] = label_color;
-  colors_[ThemeProperties::COLOR_BOOKMARK_TEXT] = label_color;
-  colors_[ThemeProperties::COLOR_BACKGROUND_TAB_TEXT] =
-      color_utils::BlendTowardOppositeLuma(label_color, 50);
-
-  inactive_selection_bg_color_ = native_theme_->GetSystemColor(
-      ui::NativeTheme::kColorId_TextfieldReadOnlyBackground);
-  inactive_selection_fg_color_ = native_theme_->GetSystemColor(
-      ui::NativeTheme::kColorId_TextfieldReadOnlyColor);
-
-  // We pick the text and background colors for the NTP out of the
-  // colors for a GtkEntry. We do this because GtkEntries background
-  // color is never the same as |tab_color|, is usually a white,
-  // and when it isn't a white, provides sufficient contrast to
-  // |tab_color|. Try this out with Darklooks, HighContrastInverse
-  // or ThinIce.
-  colors_[ThemeProperties::COLOR_NTP_BACKGROUND] =
-      native_theme_->GetSystemColor(
-          ui::NativeTheme::kColorId_TextfieldDefaultBackground);
-  colors_[ThemeProperties::COLOR_NTP_TEXT] = native_theme_->GetSystemColor(
-      ui::NativeTheme::kColorId_TextfieldDefaultColor);
-  // The NTP header is the color that surrounds the current active
-  // thumbnail on the NTP, and acts as the border of the "Recent
-  // Links" box. It would be awesome if they were separated so we
-  // could use GetBorderColor() for the border around the "Recent
-  // Links" section, but matching the frame color is more important.
-  colors_[ThemeProperties::COLOR_NTP_HEADER] =
-      colors_[ThemeProperties::COLOR_FRAME];
-#else
-  std::string header_selector = GtkVersionCheck(3, 10)
-                                    ? "#headerbar.header-bar.titlebar"
-                                    : "GtkMenuBar#menubar";
-  SkColor frame_color = GetBgColor(header_selector);
-  SkColor frame_color_inactive = GetBgColor(header_selector + ":backdrop");
-  colors_[ThemeProperties::COLOR_FRAME] = frame_color;
-  colors_[ThemeProperties::COLOR_FRAME_INACTIVE] = frame_color_inactive;
-  colors_[ThemeProperties::COLOR_FRAME_INCOGNITO] =
-      color_utils::HSLShift(frame_color, kDefaultTintFrameIncognito);
-  colors_[ThemeProperties::COLOR_FRAME_INCOGNITO_INACTIVE] =
-      color_utils::HSLShift(frame_color_inactive, kDefaultTintFrameIncognito);
-
-  SkColor tab_color = GetBgColor("");
-  SkColor tab_text_color = GetFgColor("GtkLabel");
-
-  colors_[ThemeProperties::COLOR_TOOLBAR_BUTTON_ICON] = tab_text_color;
-
-  colors_[ThemeProperties::COLOR_TAB_TEXT] = tab_text_color;
-  colors_[ThemeProperties::COLOR_BOOKMARK_TEXT] = tab_text_color;
-  colors_[ThemeProperties::COLOR_BACKGROUND_TAB_TEXT] =
-      color_utils::BlendTowardOppositeLuma(tab_text_color, 50);
-
+void GtkUi::UpdateColors() {
   SkColor location_bar_border = GetBorderColor("GtkEntry#entry");
   if (SkColorGetA(location_bar_border))
     colors_[ThemeProperties::COLOR_LOCATION_BAR_BORDER] = location_bar_border;
@@ -966,31 +901,12 @@ void GtkUi::LoadGtkValues() {
                                         : "GtkTextView.view:selected:backdrop");
 
   SkColor tab_border = GetBorderColor("GtkButton#button");
-  colors_[ThemeProperties::COLOR_DETACHED_BOOKMARK_BAR_BACKGROUND] = tab_color;
-  colors_[ThemeProperties::COLOR_BOOKMARK_BAR_INSTRUCTIONS_TEXT] =
-      tab_text_color;
   // Separates the toolbar from the bookmark bar or butter bars.
-  colors_[ThemeProperties::COLOR_TOOLBAR_BOTTOM_SEPARATOR] = tab_border;
+  colors_[ThemeProperties::COLOR_TOOLBAR_CONTENT_AREA_SEPARATOR] = tab_border;
   // Separates entries in the downloads bar.
   colors_[ThemeProperties::COLOR_TOOLBAR_VERTICAL_SEPARATOR] = tab_border;
-
-  // These colors represent the border drawn around tabs and between
-  // the tabstrip and toolbar.
-  SkColor toolbar_top_separator = GetToolbarTopSeparatorColor(
-      GetBorderColor(header_selector + " GtkButton#button"), frame_color,
-      tab_border, tab_color);
-  SkColor toolbar_top_separator_inactive = GetToolbarTopSeparatorColor(
-      GetBorderColor(header_selector + ":backdrop GtkButton#button"),
-      frame_color_inactive, tab_border, tab_color);
-  // Unlike with toolbars, we always want a border around tabs, so let
-  // ThemeService choose the border color if the theme doesn't provide one.
-  if (SkColorGetA(toolbar_top_separator) &&
-      SkColorGetA(toolbar_top_separator_inactive)) {
-    colors_[ThemeProperties::COLOR_TOOLBAR_TOP_SEPARATOR] =
-        toolbar_top_separator;
-    colors_[ThemeProperties::COLOR_TOOLBAR_TOP_SEPARATOR_INACTIVE] =
-        toolbar_top_separator_inactive;
-  }
+  // Separates the detached bookmark bar from the NTP.
+  colors_[ThemeProperties::COLOR_DETACHED_BOOKMARK_BAR_SEPARATOR] = tab_border;
 
   colors_[ThemeProperties::COLOR_NTP_BACKGROUND] =
       native_theme_->GetSystemColor(
@@ -999,16 +915,25 @@ void GtkUi::LoadGtkValues() {
       ui::NativeTheme::kColorId_TextfieldDefaultColor);
   colors_[ThemeProperties::COLOR_NTP_HEADER] =
       GetBorderColor("GtkButton#button");
-#endif
 
-  colors_[ThemeProperties::COLOR_TOOLBAR] = tab_color;
-  colors_[ThemeProperties::COLOR_CONTROL_BACKGROUND] = tab_color;
+  SkColor tab_text_color = GetFgColor("GtkLabel");
+  colors_[ThemeProperties::COLOR_TOOLBAR_BUTTON_ICON] = tab_text_color;
+  colors_[ThemeProperties::COLOR_TAB_TEXT] = tab_text_color;
+  colors_[ThemeProperties::COLOR_BOOKMARK_TEXT] = tab_text_color;
+  colors_[ThemeProperties::COLOR_BOOKMARK_BAR_INSTRUCTIONS_TEXT] =
+      tab_text_color;
+
+  colors_[ThemeProperties::COLOR_BACKGROUND_TAB] = SK_ColorTRANSPARENT;
+  colors_[ThemeProperties::COLOR_BACKGROUND_TAB_INACTIVE] = SK_ColorTRANSPARENT;
+  colors_[ThemeProperties::COLOR_BACKGROUND_TAB_INCOGNITO] =
+      SK_ColorTRANSPARENT;
+  colors_[ThemeProperties::COLOR_BACKGROUND_TAB_INCOGNITO_INACTIVE] =
+      SK_ColorTRANSPARENT;
 
   colors_[ThemeProperties::COLOR_NTP_LINK] = native_theme_->GetSystemColor(
       ui::NativeTheme::kColorId_TextfieldSelectionBackgroundFocused);
 
   // Generate the colors that we pass to WebKit.
-  SetScrollbarColors();
   focus_ring_color_ = native_theme_->GetSystemColor(
       ui::NativeTheme::kColorId_FocusedBorderColor);
 
@@ -1025,6 +950,86 @@ void GtkUi::LoadGtkValues() {
   colors_[ThemeProperties::COLOR_TAB_THROBBER_WAITING] =
       native_theme_->GetSystemColor(
           ui::NativeTheme::kColorId_ThrobberWaitingColor);
+
+  // Generate colors that depend on whether or not a custom window frame is
+  // used.  These colors belong in |color_map| below, not |colors_|.
+  for (bool custom_frame : {false, true}) {
+    ColorMap& color_map =
+        custom_frame ? custom_frame_colors_ : native_frame_colors_;
+    const std::string header_selector = custom_frame && GtkVersionCheck(3, 10)
+                                            ? "#headerbar.header-bar.titlebar"
+                                            : "GtkMenuBar#menubar";
+    const std::string header_selector_inactive = header_selector + ":backdrop";
+    const SkColor frame_color =
+        SkColorSetA(GetBgColor(header_selector), SK_AlphaOPAQUE);
+    const SkColor frame_color_incognito =
+        color_utils::HSLShift(frame_color, kDefaultTintFrameIncognito);
+    const SkColor frame_color_inactive =
+        SkColorSetA(GetBgColor(header_selector_inactive), SK_AlphaOPAQUE);
+    const SkColor frame_color_incognito_inactive =
+        color_utils::HSLShift(frame_color_inactive, kDefaultTintFrameIncognito);
+
+    color_map[ThemeProperties::COLOR_FRAME] = frame_color;
+    color_map[ThemeProperties::COLOR_FRAME_INACTIVE] = frame_color_inactive;
+    color_map[ThemeProperties::COLOR_FRAME_INCOGNITO] = frame_color_incognito;
+    color_map[ThemeProperties::COLOR_FRAME_INCOGNITO_INACTIVE] =
+        frame_color_incognito_inactive;
+
+    // Compose the window color on the frame color to ensure the resulting tab
+    // color is opaque.
+    SkColor tab_color =
+        color_utils::GetResultingPaintColor(GetBgColor(""), frame_color);
+
+    color_map[ThemeProperties::COLOR_TOOLBAR] = tab_color;
+    color_map[ThemeProperties::COLOR_CONTROL_BACKGROUND] = tab_color;
+
+    color_map[ThemeProperties::COLOR_DETACHED_BOOKMARK_BAR_BACKGROUND] =
+        tab_color;
+
+    const SkColor background_tab_text_color =
+        GetFgColor(header_selector + " GtkLabel.title");
+    const SkColor background_tab_text_color_inactive =
+        GetFgColor(header_selector_inactive + " GtkLabel.title");
+
+    color_map[ThemeProperties::COLOR_BACKGROUND_TAB_TEXT] =
+        background_tab_text_color;
+    color_map[ThemeProperties::COLOR_BACKGROUND_TAB_TEXT_INCOGNITO] =
+        color_utils::GetColorWithMinimumContrast(
+            color_utils::HSLShift(background_tab_text_color,
+                                  kDefaultTintFrameIncognito),
+            frame_color_incognito);
+    color_map[ThemeProperties::COLOR_BACKGROUND_TAB_TEXT_INACTIVE] =
+        background_tab_text_color_inactive;
+    color_map[ThemeProperties::COLOR_BACKGROUND_TAB_TEXT_INCOGNITO_INACTIVE] =
+        color_utils::GetColorWithMinimumContrast(
+            color_utils::HSLShift(background_tab_text_color_inactive,
+                                  kDefaultTintFrameIncognito),
+            frame_color_incognito_inactive);
+
+    // These colors represent the border drawn around tabs and between
+    // the tabstrip and toolbar.
+    SkColor toolbar_top_separator =
+        GetBorderColor(header_selector + " GtkButton#button");
+    SkColor toolbar_top_separator_inactive =
+        GetBorderColor(header_selector + ":backdrop GtkButton#button");
+    if (!ui::MaterialDesignController::IsRefreshUi()) {
+      toolbar_top_separator = GetToolbarTopSeparatorColor(
+          toolbar_top_separator, frame_color, tab_border, tab_color);
+      toolbar_top_separator_inactive = GetToolbarTopSeparatorColor(
+          toolbar_top_separator_inactive, frame_color_inactive, tab_border,
+          tab_color);
+    }
+
+    // Unlike with toolbars, we always want a border around tabs, so let
+    // ThemeService choose the border color if the theme doesn't provide one.
+    if (SkColorGetA(toolbar_top_separator) &&
+        SkColorGetA(toolbar_top_separator_inactive)) {
+      color_map[ThemeProperties::COLOR_TOOLBAR_TOP_SEPARATOR] =
+          toolbar_top_separator;
+      color_map[ThemeProperties::COLOR_TOOLBAR_TOP_SEPARATOR_INACTIVE] =
+          toolbar_top_separator_inactive;
+    }
+  }
 }
 
 void GtkUi::UpdateCursorTheme() {
@@ -1089,21 +1094,6 @@ void GtkUi::UpdateDefaultFont() {
   g_object_unref(fake_label);
 }
 
-bool GtkUi::GetChromeStyleColor(const char* style_property,
-                                SkColor* ret_color) const {
-#if GTK_MAJOR_VERSION == 2
-  GdkColor* style_color = nullptr;
-  gtk_widget_style_get(fake_window_, style_property, &style_color, nullptr);
-  if (style_color) {
-    *ret_color = GdkColorToSkColor(*style_color);
-    gdk_color_free(style_color);
-    return true;
-  }
-#endif
-
-  return false;
-}
-
 void GtkUi::ResetStyle() {
   LoadGtkValues();
   native_theme_->NotifyObservers();
@@ -1113,19 +1103,12 @@ float GtkUi::GetRawDeviceScaleFactor() {
   if (display::Display::HasForceDeviceScaleFactor())
     return display::Display::GetForcedDeviceScaleFactor();
 
-#if GTK_MAJOR_VERSION == 2
-  GtkSettings* gtk_settings = gtk_settings_get_default();
-  gint gtk_dpi = -1;
-  g_object_get(gtk_settings, "gtk-xft-dpi", &gtk_dpi, nullptr);
-  const float scale_factor = gtk_dpi / (1024 * kDefaultDPI);
-#else
   GdkScreen* screen = gdk_screen_get_default();
   gint scale = gtk_widget_get_scale_factor(fake_window_);
   DCHECK_GT(scale, 0);
   gdouble resolution = gdk_screen_get_resolution(screen);
   const float scale_factor =
       resolution <= 0 ? scale : resolution * scale / kDefaultDPI;
-#endif
 
   // Blacklist scaling factors <120% (crbug.com/484400) and round
   // to 1 decimal to prevent rendering problems (crbug.com/485183).

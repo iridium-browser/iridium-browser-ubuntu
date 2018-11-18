@@ -14,7 +14,6 @@
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
@@ -168,17 +167,17 @@ ScriptPromise Bluetooth::requestDevice(ScriptState* script_state,
 
   // If the algorithm is not allowed to show a popup, reject promise with a
   // SecurityError and abort these steps.
-  Document* doc = ToDocumentOrNull(context);
-  if (!Frame::HasTransientUserActivation(doc ? doc->GetFrame() : nullptr)) {
+  auto& doc = *To<Document>(context);
+  if (!LocalFrame::HasTransientUserActivation(doc.GetFrame())) {
     return ScriptPromise::RejectWithDOMException(
         script_state,
         DOMException::Create(
-            kSecurityError,
+            DOMExceptionCode::kSecurityError,
             "Must be handling a user gesture to show a permission request."));
   }
 
-  if (!service_ && doc) {
-    LocalFrame* frame = doc->GetFrame();
+  if (!service_) {
+    LocalFrame* frame = doc.GetFrame();
     if (frame) {
       frame->GetInterfaceProvider().GetInterface(mojo::MakeRequest(&service_));
     }
@@ -186,7 +185,8 @@ ScriptPromise Bluetooth::requestDevice(ScriptState* script_state,
 
   if (!service_) {
     return ScriptPromise::RejectWithDOMException(
-        script_state, DOMException::Create(kNotSupportedError));
+        script_state,
+        DOMException::Create(DOMExceptionCode::kNotSupportedError));
   }
 
   // In order to convert the arguments from service names and aliases to just
@@ -195,12 +195,10 @@ ScriptPromise Bluetooth::requestDevice(ScriptState* script_state,
   ConvertRequestDeviceOptions(options, device_options, exception_state);
 
   if (exception_state.HadException())
-    return exception_state.Reject(script_state);
+    return ScriptPromise();
 
   // Record the eTLD+1 of the frame using the API.
-  Document* document = ToDocument(context);
-  Platform::Current()->RecordRapporURL("Bluetooth.APIUsage.Origin",
-                                       document->Url());
+  Platform::Current()->RecordRapporURL("Bluetooth.APIUsage.Origin", doc.Url());
 
   // Subsequent steps are handled in the browser process.
   ScriptPromiseResolver* resolver = ScriptPromiseResolver::Create(script_state);

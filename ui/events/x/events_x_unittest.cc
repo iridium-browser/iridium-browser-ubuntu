@@ -21,6 +21,7 @@
 #include "ui/events/event_utils.h"
 #include "ui/events/test/events_test_utils.h"
 #include "ui/events/test/events_test_utils_x11.h"
+#include "ui/events/test/scoped_event_test_tick_clock.h"
 #include "ui/events/x/events_x_utils.h"
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/x/x11.h"
@@ -75,6 +76,15 @@ float ComputeRotationAngle(float twist) {
   return rotation_angle;
 }
 
+class MockTimestampServer : public ui::TimestampServer {
+ public:
+  Time GetCurrentServerTime() override { return base_time_; }
+  void SetBaseTime(Time time) { base_time_ = time; }
+
+ private:
+  Time base_time_ = 0;
+};
+
 }  // namespace
 
 class EventsXTest : public testing::Test {
@@ -83,13 +93,15 @@ class EventsXTest : public testing::Test {
   ~EventsXTest() override {}
 
   void SetUp() override {
+    SetTimestampServer(&server_);
     DeviceDataManagerX11::CreateInstance();
     ui::TouchFactory::GetInstance()->ResetForTest();
-    ResetTimestampRolloverCountersForTesting();
   }
-  void TearDown() override { ResetTimestampRolloverCountersForTesting(); }
+
+  void TearDown() override { SetTimestampServer(nullptr); }
 
  private:
+  MockTimestampServer server_;
   DISALLOW_COPY_AND_ASSIGN(EventsXTest);
 };
 
@@ -539,56 +551,6 @@ TEST_F(EventsXTest, IgnoresMotionEventForMouseWheelScroll) {
   // We shouldn't produce a mouse move event on a mouse wheel
   // scroll. These events are only produced for some mice.
   EXPECT_EQ(ui::ET_UNKNOWN, ui::EventTypeFromNative(xev));
-}
-
-namespace {
-
-// Returns a fake TimeTicks based on the given millisecond offset.
-base::TimeTicks TimeTicksFromMillis(int64_t millis) {
-  return base::TimeTicks() + base::TimeDelta::FromMilliseconds(millis);
-}
-
-}  // namespace
-
-TEST_F(EventsXTest, TimestampRolloverAndAdjustWhenDecreasing) {
-  XEvent event;
-  InitButtonEvent(&event, true, gfx::Point(5, 10), 1, 0);
-
-  base::SimpleTestTickClock clock;
-  clock.SetNowTicks(TimeTicksFromMillis(0x100000001));
-  SetEventTickClockForTesting(&clock);
-  ResetTimestampRolloverCountersForTesting();
-
-  event.xbutton.time = 0xFFFFFFFF;
-  EXPECT_EQ(TimeTicksFromMillis(0xFFFFFFFF), ui::EventTimeFromNative(&event));
-
-  clock.SetNowTicks(TimeTicksFromMillis(0x100000007));
-  ResetTimestampRolloverCountersForTesting();
-
-  event.xbutton.time = 3;
-  EXPECT_EQ(TimeTicksFromMillis(0x100000000 + 3),
-            ui::EventTimeFromNative(&event));
-}
-
-TEST_F(EventsXTest, NoTimestampRolloverWhenMonotonicIncreasing) {
-  XEvent event;
-  InitButtonEvent(&event, true, gfx::Point(5, 10), 1, 0);
-
-  base::SimpleTestTickClock clock;
-  clock.SetNowTicks(TimeTicksFromMillis(10));
-  SetEventTickClockForTesting(&clock);
-  ResetTimestampRolloverCountersForTesting();
-
-  event.xbutton.time = 6;
-  EXPECT_EQ(TimeTicksFromMillis(6), ui::EventTimeFromNative(&event));
-  event.xbutton.time = 7;
-  EXPECT_EQ(TimeTicksFromMillis(7), ui::EventTimeFromNative(&event));
-
-  clock.SetNowTicks(TimeTicksFromMillis(0x100000005));
-  ResetTimestampRolloverCountersForTesting();
-
-  event.xbutton.time = 0xFFFFFFFF;
-  EXPECT_EQ(TimeTicksFromMillis(0xFFFFFFFF), ui::EventTimeFromNative(&event));
 }
 
 }  // namespace ui

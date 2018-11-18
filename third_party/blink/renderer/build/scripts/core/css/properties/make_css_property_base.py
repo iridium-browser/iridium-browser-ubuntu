@@ -12,7 +12,6 @@ import template_expander
 
 from collections import namedtuple
 from core.css import css_properties
-from name_utilities import snake_case
 
 
 class PropertyClassData(
@@ -21,8 +20,8 @@ class PropertyClassData(
 
 
 class CSSPropertyBaseWriter(json5_generator.Writer):
-    def __init__(self, json5_file_paths):
-        super(CSSPropertyBaseWriter, self).__init__([])
+    def __init__(self, json5_file_paths, output_dir):
+        super(CSSPropertyBaseWriter, self).__init__([], output_dir)
         self._input_files = json5_file_paths
         self._outputs = {
             'css_unresolved_property.h': self.generate_unresolved_property_header,
@@ -73,9 +72,9 @@ class CSSPropertyBaseWriter(json5_generator.Writer):
         return PropertyClassData(
             enum_value=property_['enum_value'],
             property_id=property_['property_id'],
-            classname=property_['upper_camel_name'],
+            classname=property_['name'].to_upper_camel_case(),
             namespace_group=namespace_group,
-            filename=snake_case(property_['upper_camel_name']))
+            filename=property_['name'].to_snake_case())
 
     @property
     def css_properties(self):

@@ -7,13 +7,13 @@ package org.chromium.components.sync.test.util;
 import android.accounts.Account;
 import android.content.ContentResolver;
 import android.content.SyncStatusObserver;
-import android.os.AsyncTask;
 import android.os.Bundle;
 
 import org.junit.Assert;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
+import org.chromium.base.task.AsyncTask;
 import org.chromium.components.sync.SyncContentResolverDelegate;
 
 import java.util.HashMap;
@@ -199,9 +199,9 @@ public class MockSyncContentResolverDelegate implements SyncContentResolverDeleg
 
         private void notifyObserverAsync(final Semaphore pendingObserverCount) {
             if (ThreadUtils.runningOnUiThread()) {
-                new AsyncTask<Void, Void, Void>() {
+                new AsyncTask<Void>() {
                     @Override
-                    protected Void doInBackground(Void... params) {
+                    protected Void doInBackground() {
                         mSyncStatusObserver.onStatusChanged(
                                 ContentResolver.SYNC_OBSERVER_TYPE_SETTINGS);
                         return null;
@@ -211,7 +211,8 @@ public class MockSyncContentResolverDelegate implements SyncContentResolverDeleg
                     protected void onPostExecute(Void result) {
                         pendingObserverCount.release();
                     }
-                }.execute();
+                }
+                        .executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
             } else {
                 mSyncStatusObserver.onStatusChanged(ContentResolver.SYNC_OBSERVER_TYPE_SETTINGS);
                 pendingObserverCount.release();

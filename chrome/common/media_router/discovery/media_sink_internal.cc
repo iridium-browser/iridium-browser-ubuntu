@@ -25,6 +25,10 @@ MediaSinkInternal::MediaSinkInternal(const MediaSinkInternal& other) {
   InternalCopyConstructFrom(other);
 }
 
+MediaSinkInternal::MediaSinkInternal(MediaSinkInternal&& other) noexcept {
+  InternalMoveConstructFrom(std::move(other));
+}
+
 MediaSinkInternal::~MediaSinkInternal() {
   InternalCleanup();
 }
@@ -34,6 +38,15 @@ MediaSinkInternal& MediaSinkInternal::operator=(
   if (this != &other) {
     InternalCleanup();
     InternalCopyConstructFrom(other);
+  }
+  return *this;
+}
+
+MediaSinkInternal& MediaSinkInternal::operator=(
+    MediaSinkInternal&& other) noexcept {
+  if (this != &other) {
+    InternalCleanup();
+    InternalMoveConstructFrom(std::move(other));
   }
   return *this;
 }
@@ -95,6 +108,11 @@ const CastSinkExtraData& MediaSinkInternal::cast_data() const {
   return cast_data_;
 }
 
+CastSinkExtraData& MediaSinkInternal::cast_data() {
+  DCHECK(is_cast_sink());
+  return cast_data_;
+}
+
 // static
 bool MediaSinkInternal::IsValidSinkId(const std::string& sink_id) {
   if (sink_id.empty() || !base::IsStringASCII(sink_id)) {
@@ -137,6 +155,23 @@ void MediaSinkInternal::InternalCopyConstructFrom(
   NOTREACHED();
 }
 
+void MediaSinkInternal::InternalMoveConstructFrom(MediaSinkInternal&& other) {
+  sink_ = std::move(other.sink_);
+  sink_type_ = other.sink_type_;
+
+  switch (sink_type_) {
+    case SinkType::DIAL:
+      new (&dial_data_) DialSinkExtraData(std::move(other.dial_data_));
+      return;
+    case SinkType::CAST:
+      new (&cast_data_) CastSinkExtraData(std::move(other.cast_data_));
+      return;
+    case SinkType::GENERIC:
+      return;
+  }
+  NOTREACHED();
+}
+
 void MediaSinkInternal::InternalCleanup() {
   switch (sink_type_) {
     case SinkType::DIAL:
@@ -153,6 +188,7 @@ void MediaSinkInternal::InternalCleanup() {
 
 DialSinkExtraData::DialSinkExtraData() = default;
 DialSinkExtraData::DialSinkExtraData(const DialSinkExtraData& other) = default;
+DialSinkExtraData::DialSinkExtraData(DialSinkExtraData&& other) = default;
 DialSinkExtraData::~DialSinkExtraData() = default;
 
 bool DialSinkExtraData::operator==(const DialSinkExtraData& other) const {
@@ -162,6 +198,7 @@ bool DialSinkExtraData::operator==(const DialSinkExtraData& other) const {
 
 CastSinkExtraData::CastSinkExtraData() = default;
 CastSinkExtraData::CastSinkExtraData(const CastSinkExtraData& other) = default;
+CastSinkExtraData::CastSinkExtraData(CastSinkExtraData&& other) = default;
 CastSinkExtraData::~CastSinkExtraData() = default;
 
 bool CastSinkExtraData::operator==(const CastSinkExtraData& other) const {

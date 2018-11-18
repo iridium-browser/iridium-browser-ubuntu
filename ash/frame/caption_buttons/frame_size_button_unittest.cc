@@ -2,11 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ash/frame/caption_buttons/frame_size_button.h"
+#include "ash/public/cpp/caption_buttons/frame_size_button.h"
 
-#include "ash/ash_layout_constants.h"
-#include "ash/frame/caption_buttons/frame_caption_button.h"
-#include "ash/frame/caption_buttons/frame_caption_button_container_view.h"
+#include "ash/frame/ash_frame_caption_controller.h"
+#include "ash/public/cpp/ash_layout_constants.h"
+#include "ash/public/cpp/caption_buttons/frame_caption_button.h"
+#include "ash/public/cpp/caption_buttons/frame_caption_button_container_view.h"
 #include "ash/public/cpp/vector_icons/vector_icons.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
@@ -53,8 +54,8 @@ class TestWidgetDelegate : public views::WidgetDelegateView {
   void ViewHierarchyChanged(
       const ViewHierarchyChangedDetails& details) override {
     if (details.is_add && details.child == this) {
-      caption_button_container_ =
-          new FrameCaptionButtonContainerView(GetWidget());
+      caption_button_container_ = new FrameCaptionButtonContainerView(
+          GetWidget(), &caption_controller_);
 
       // Set arbitrary images for the button icons and assign the default
       // caption button size.
@@ -71,6 +72,7 @@ class TestWidgetDelegate : public views::WidgetDelegateView {
 
   // Not owned.
   ash::FrameCaptionButtonContainerView* caption_button_container_;
+  AshFrameCaptionController caption_controller_;
   bool resizable_;
 
   DISALLOW_COPY_AND_ASSIGN(TestWidgetDelegate);
@@ -107,8 +109,10 @@ class FrameSizeButtonTest : public AshTestBase {
         views::Widget::InitParams::TYPE_WINDOW_FRAMELESS);
     params.delegate = delegate;
     params.bounds = gfx::Rect(10, 10, 100, 100);
+    params.context = CurrentContext();
     widget->Init(params);
     widget->Show();
+
     return widget;
   }
 
@@ -153,18 +157,18 @@ class FrameSizeButtonTest : public AshTestBase {
 // Tests that pressing the left mouse button or tapping down on the size button
 // puts the button into the pressed state.
 TEST_F(FrameSizeButtonTest, PressedState) {
-  ui::test::EventGenerator& generator = GetEventGenerator();
-  generator.MoveMouseTo(CenterPointInScreen(size_button()));
-  generator.PressLeftButton();
+  ui::test::EventGenerator* generator = GetEventGenerator();
+  generator->MoveMouseTo(CenterPointInScreen(size_button()));
+  generator->PressLeftButton();
   EXPECT_EQ(views::Button::STATE_PRESSED, size_button()->state());
-  generator.ReleaseLeftButton();
+  generator->ReleaseLeftButton();
   RunAllPendingInMessageLoop();
   EXPECT_EQ(views::Button::STATE_NORMAL, size_button()->state());
 
-  generator.MoveMouseTo(CenterPointInScreen(size_button()));
-  generator.PressTouchId(3);
+  generator->MoveMouseTo(CenterPointInScreen(size_button()));
+  generator->PressTouchId(3);
   EXPECT_EQ(views::Button::STATE_PRESSED, size_button()->state());
-  generator.ReleaseTouchId(3);
+  generator->ReleaseTouchId(3);
   RunAllPendingInMessageLoop();
   EXPECT_EQ(views::Button::STATE_NORMAL, size_button()->state());
 }
@@ -174,22 +178,22 @@ TEST_F(FrameSizeButtonTest, PressedState) {
 TEST_F(FrameSizeButtonTest, ClickSizeButtonTogglesMaximize) {
   EXPECT_FALSE(window_state()->IsMaximized());
 
-  ui::test::EventGenerator& generator = GetEventGenerator();
-  generator.MoveMouseTo(CenterPointInScreen(size_button()));
-  generator.ClickLeftButton();
+  ui::test::EventGenerator* generator = GetEventGenerator();
+  generator->MoveMouseTo(CenterPointInScreen(size_button()));
+  generator->ClickLeftButton();
   RunAllPendingInMessageLoop();
   EXPECT_TRUE(window_state()->IsMaximized());
 
-  generator.MoveMouseTo(CenterPointInScreen(size_button()));
-  generator.ClickLeftButton();
+  generator->MoveMouseTo(CenterPointInScreen(size_button()));
+  generator->ClickLeftButton();
   RunAllPendingInMessageLoop();
   EXPECT_FALSE(window_state()->IsMaximized());
 
-  generator.GestureTapAt(CenterPointInScreen(size_button()));
+  generator->GestureTapAt(CenterPointInScreen(size_button()));
   RunAllPendingInMessageLoop();
   EXPECT_TRUE(window_state()->IsMaximized());
 
-  generator.GestureTapAt(CenterPointInScreen(size_button()));
+  generator->GestureTapAt(CenterPointInScreen(size_button()));
   RunAllPendingInMessageLoop();
   EXPECT_FALSE(window_state()->IsMaximized());
 }
@@ -201,34 +205,34 @@ TEST_F(FrameSizeButtonTest, ButtonDrag) {
 
   // 1) Test by dragging the mouse.
   // Snap right.
-  ui::test::EventGenerator& generator = GetEventGenerator();
-  generator.MoveMouseTo(CenterPointInScreen(size_button()));
-  generator.PressLeftButton();
-  generator.MoveMouseTo(CenterPointInScreen(close_button()));
-  generator.ReleaseLeftButton();
+  ui::test::EventGenerator* generator = GetEventGenerator();
+  generator->MoveMouseTo(CenterPointInScreen(size_button()));
+  generator->PressLeftButton();
+  generator->MoveMouseTo(CenterPointInScreen(close_button()));
+  generator->ReleaseLeftButton();
   RunAllPendingInMessageLoop();
   EXPECT_TRUE(HasStateType(mojom::WindowStateType::RIGHT_SNAPPED));
 
   // Snap left.
-  generator.MoveMouseTo(CenterPointInScreen(size_button()));
-  generator.PressLeftButton();
-  generator.MoveMouseTo(CenterPointInScreen(minimize_button()));
-  generator.ReleaseLeftButton();
+  generator->MoveMouseTo(CenterPointInScreen(size_button()));
+  generator->PressLeftButton();
+  generator->MoveMouseTo(CenterPointInScreen(minimize_button()));
+  generator->ReleaseLeftButton();
   RunAllPendingInMessageLoop();
   EXPECT_TRUE(HasStateType(mojom::WindowStateType::LEFT_SNAPPED));
 
   // 2) Test with scroll gestures.
   // Snap right.
-  generator.GestureScrollSequence(CenterPointInScreen(size_button()),
-                                  CenterPointInScreen(close_button()),
-                                  base::TimeDelta::FromMilliseconds(100), 3);
+  generator->GestureScrollSequence(CenterPointInScreen(size_button()),
+                                   CenterPointInScreen(close_button()),
+                                   base::TimeDelta::FromMilliseconds(100), 3);
   RunAllPendingInMessageLoop();
   EXPECT_TRUE(HasStateType(mojom::WindowStateType::RIGHT_SNAPPED));
 
   // Snap left.
-  generator.GestureScrollSequence(CenterPointInScreen(size_button()),
-                                  CenterPointInScreen(minimize_button()),
-                                  base::TimeDelta::FromMilliseconds(100), 3);
+  generator->GestureScrollSequence(CenterPointInScreen(size_button()),
+                                   CenterPointInScreen(minimize_button()),
+                                   base::TimeDelta::FromMilliseconds(100), 3);
   RunAllPendingInMessageLoop();
   EXPECT_TRUE(HasStateType(mojom::WindowStateType::LEFT_SNAPPED));
 
@@ -237,13 +241,13 @@ TEST_F(FrameSizeButtonTest, ButtonDrag) {
       ui::GestureConfiguration::GetInstance()->default_radius();
   ui::GestureConfiguration::GetInstance()->set_default_radius(0);
   // Snap right.
-  generator.MoveMouseTo(CenterPointInScreen(size_button()));
-  generator.PressMoveAndReleaseTouchTo(CenterPointInScreen(close_button()));
+  generator->MoveMouseTo(CenterPointInScreen(size_button()));
+  generator->PressMoveAndReleaseTouchTo(CenterPointInScreen(close_button()));
   RunAllPendingInMessageLoop();
   EXPECT_TRUE(HasStateType(mojom::WindowStateType::RIGHT_SNAPPED));
   // Snap left.
-  generator.MoveMouseTo(CenterPointInScreen(size_button()));
-  generator.PressMoveAndReleaseTouchTo(CenterPointInScreen(minimize_button()));
+  generator->MoveMouseTo(CenterPointInScreen(size_button()));
+  generator->PressMoveAndReleaseTouchTo(CenterPointInScreen(minimize_button()));
   RunAllPendingInMessageLoop();
   EXPECT_TRUE(HasStateType(mojom::WindowStateType::LEFT_SNAPPED));
   ui::GestureConfiguration::GetInstance()->set_default_radius(
@@ -255,15 +259,15 @@ TEST_F(FrameSizeButtonTest, ButtonDrag) {
 TEST_F(FrameSizeButtonTest, SnapLeftOvershootMinimize) {
   EXPECT_TRUE(window_state()->IsNormalStateType());
 
-  ui::test::EventGenerator& generator = GetEventGenerator();
-  generator.MoveMouseTo(CenterPointInScreen(size_button()));
+  ui::test::EventGenerator* generator = GetEventGenerator();
+  generator->MoveMouseTo(CenterPointInScreen(size_button()));
 
-  generator.PressLeftButton();
+  generator->PressLeftButton();
   // Move to the minimize button.
-  generator.MoveMouseTo(CenterPointInScreen(minimize_button()));
+  generator->MoveMouseTo(CenterPointInScreen(minimize_button()));
   // Overshoot the minimize button.
-  generator.MoveMouseBy(-minimize_button()->width(), 0);
-  generator.ReleaseLeftButton();
+  generator->MoveMouseBy(-minimize_button()->width(), 0);
+  generator->ReleaseLeftButton();
   RunAllPendingInMessageLoop();
   EXPECT_TRUE(HasStateType(mojom::WindowStateType::LEFT_SNAPPED));
 }
@@ -272,10 +276,10 @@ TEST_F(FrameSizeButtonTest, SnapLeftOvershootMinimize) {
 TEST_F(FrameSizeButtonTest, RightMouseButton) {
   EXPECT_TRUE(window_state()->IsNormalStateType());
 
-  ui::test::EventGenerator& generator = GetEventGenerator();
-  generator.MoveMouseTo(CenterPointInScreen(size_button()));
-  generator.PressRightButton();
-  generator.ReleaseRightButton();
+  ui::test::EventGenerator* generator = GetEventGenerator();
+  generator->MoveMouseTo(CenterPointInScreen(size_button()));
+  generator->PressRightButton();
+  generator->ReleaseRightButton();
   RunAllPendingInMessageLoop();
   EXPECT_TRUE(window_state()->IsNormalStateType());
 }
@@ -291,9 +295,9 @@ TEST_F(FrameSizeButtonTest, ResetButtonsAfterClick) {
 
   // Pressing the size button should result in the size button being pressed and
   // the minimize and close button icons changing.
-  ui::test::EventGenerator& generator = GetEventGenerator();
-  generator.MoveMouseTo(CenterPointInScreen(size_button()));
-  generator.PressLeftButton();
+  ui::test::EventGenerator* generator = GetEventGenerator();
+  generator->MoveMouseTo(CenterPointInScreen(size_button()));
+  generator->PressLeftButton();
   EXPECT_EQ(views::Button::STATE_NORMAL, minimize_button()->state());
   EXPECT_EQ(views::Button::STATE_PRESSED, size_button()->state());
   EXPECT_EQ(views::Button::STATE_NORMAL, close_button()->state());
@@ -302,7 +306,7 @@ TEST_F(FrameSizeButtonTest, ResetButtonsAfterClick) {
 
   // Dragging the mouse over the minimize button should hover the minimize
   // button and the minimize and close button icons should stay changed.
-  generator.MoveMouseTo(CenterPointInScreen(minimize_button()));
+  generator->MoveMouseTo(CenterPointInScreen(minimize_button()));
   EXPECT_EQ(views::Button::STATE_HOVERED, minimize_button()->state());
   EXPECT_EQ(views::Button::STATE_PRESSED, size_button()->state());
   EXPECT_EQ(views::Button::STATE_NORMAL, close_button()->state());
@@ -310,7 +314,7 @@ TEST_F(FrameSizeButtonTest, ResetButtonsAfterClick) {
   EXPECT_EQ(CAPTION_BUTTON_ICON_RIGHT_SNAPPED, close_button()->icon());
 
   // Release the mouse, snapping the window left.
-  generator.ReleaseLeftButton();
+  generator->ReleaseLeftButton();
   RunAllPendingInMessageLoop();
   EXPECT_TRUE(HasStateType(mojom::WindowStateType::LEFT_SNAPPED));
 
@@ -322,8 +326,8 @@ TEST_F(FrameSizeButtonTest, ResetButtonsAfterClick) {
 
   // Repeat test but release button where it does not affect the window's state
   // because the code path is different.
-  generator.MoveMouseTo(CenterPointInScreen(size_button()));
-  generator.PressLeftButton();
+  generator->MoveMouseTo(CenterPointInScreen(size_button()));
+  generator->PressLeftButton();
   EXPECT_EQ(views::Button::STATE_NORMAL, minimize_button()->state());
   EXPECT_EQ(views::Button::STATE_PRESSED, size_button()->state());
   EXPECT_EQ(views::Button::STATE_NORMAL, close_button()->state());
@@ -332,7 +336,7 @@ TEST_F(FrameSizeButtonTest, ResetButtonsAfterClick) {
 
   const gfx::Rect work_area_bounds_in_screen =
       display::Screen::GetScreen()->GetPrimaryDisplay().work_area();
-  generator.MoveMouseTo(work_area_bounds_in_screen.bottom_left());
+  generator->MoveMouseTo(work_area_bounds_in_screen.bottom_left());
 
   // None of the buttons should be pressed because we are really far away from
   // any of the caption buttons. The minimize and close button icons should
@@ -342,7 +346,7 @@ TEST_F(FrameSizeButtonTest, ResetButtonsAfterClick) {
   EXPECT_EQ(CAPTION_BUTTON_ICON_RIGHT_SNAPPED, close_button()->icon());
 
   // Release the mouse. The window should stay snapped left.
-  generator.ReleaseLeftButton();
+  generator->ReleaseLeftButton();
   RunAllPendingInMessageLoop();
   EXPECT_TRUE(HasStateType(mojom::WindowStateType::LEFT_SNAPPED));
 
@@ -362,9 +366,9 @@ TEST_F(FrameSizeButtonTest, SizeButtonPressedWhenSnapButtonHovered) {
 
   // Pressing the size button should result in the size button being pressed and
   // the minimize and close button icons changing.
-  ui::test::EventGenerator& generator = GetEventGenerator();
-  generator.MoveMouseTo(CenterPointInScreen(size_button()));
-  generator.PressLeftButton();
+  ui::test::EventGenerator* generator = GetEventGenerator();
+  generator->MoveMouseTo(CenterPointInScreen(size_button()));
+  generator->PressLeftButton();
   EXPECT_EQ(views::Button::STATE_NORMAL, minimize_button()->state());
   EXPECT_EQ(views::Button::STATE_PRESSED, size_button()->state());
   EXPECT_EQ(views::Button::STATE_NORMAL, close_button()->state());
@@ -373,7 +377,7 @@ TEST_F(FrameSizeButtonTest, SizeButtonPressedWhenSnapButtonHovered) {
 
   // Dragging the mouse over the minimize button (snap left button) should hover
   // the minimize button and keep the size button pressed.
-  generator.MoveMouseTo(CenterPointInScreen(minimize_button()));
+  generator->MoveMouseTo(CenterPointInScreen(minimize_button()));
   EXPECT_EQ(views::Button::STATE_HOVERED, minimize_button()->state());
   EXPECT_EQ(views::Button::STATE_PRESSED, size_button()->state());
   EXPECT_EQ(views::Button::STATE_NORMAL, close_button()->state());
@@ -383,9 +387,9 @@ TEST_F(FrameSizeButtonTest, SizeButtonPressedWhenSnapButtonHovered) {
   // keep the size button pressed.
   const gfx::Rect work_area_bounds_in_screen =
       display::Screen::GetScreen()->GetPrimaryDisplay().work_area();
-  generator.MoveMouseTo(work_area_bounds_in_screen.bottom_left());
+  generator->MoveMouseTo(work_area_bounds_in_screen.bottom_left());
   EXPECT_TRUE(AllButtonsInNormalState());
-  generator.MoveMouseTo(CenterPointInScreen(close_button()));
+  generator->MoveMouseTo(CenterPointInScreen(close_button()));
   EXPECT_EQ(views::Button::STATE_NORMAL, minimize_button()->state());
   EXPECT_EQ(views::Button::STATE_PRESSED, size_button()->state());
   EXPECT_EQ(views::Button::STATE_HOVERED, close_button()->state());
@@ -432,9 +436,9 @@ TEST_F(FrameSizeButtonTestRTL, ButtonDrag) {
 
   // Pressing the size button should swap the icons of the minimize and close
   // buttons to icons for snapping right and for snapping left respectively.
-  ui::test::EventGenerator& generator = GetEventGenerator();
-  generator.MoveMouseTo(CenterPointInScreen(size_button()));
-  generator.PressLeftButton();
+  ui::test::EventGenerator* generator = GetEventGenerator();
+  generator->MoveMouseTo(CenterPointInScreen(size_button()));
+  generator->PressLeftButton();
   EXPECT_EQ(views::Button::STATE_NORMAL, minimize_button()->state());
   EXPECT_EQ(views::Button::STATE_PRESSED, size_button()->state());
   EXPECT_EQ(views::Button::STATE_NORMAL, close_button()->state());
@@ -442,13 +446,13 @@ TEST_F(FrameSizeButtonTestRTL, ButtonDrag) {
   EXPECT_EQ(CAPTION_BUTTON_ICON_LEFT_SNAPPED, close_button()->icon());
 
   // Dragging over to the minimize button should press it.
-  generator.MoveMouseTo(CenterPointInScreen(minimize_button()));
+  generator->MoveMouseTo(CenterPointInScreen(minimize_button()));
   EXPECT_EQ(views::Button::STATE_HOVERED, minimize_button()->state());
   EXPECT_EQ(views::Button::STATE_PRESSED, size_button()->state());
   EXPECT_EQ(views::Button::STATE_NORMAL, close_button()->state());
 
   // Releasing should snap the window right.
-  generator.ReleaseLeftButton();
+  generator->ReleaseLeftButton();
   RunAllPendingInMessageLoop();
   EXPECT_TRUE(HasStateType(mojom::WindowStateType::RIGHT_SNAPPED));
 
@@ -479,9 +483,9 @@ TEST_F(FrameSizeButtonNonResizableTest, NoSnap) {
 
   // Pressing the size button should result in the size button being pressed and
   // the minimize and close button icons changing.
-  ui::test::EventGenerator& generator = GetEventGenerator();
-  generator.MoveMouseTo(CenterPointInScreen(size_button()));
-  generator.PressLeftButton();
+  ui::test::EventGenerator* generator = GetEventGenerator();
+  generator->MoveMouseTo(CenterPointInScreen(size_button()));
+  generator->PressLeftButton();
   EXPECT_EQ(views::Button::STATE_NORMAL, minimize_button()->state());
   EXPECT_EQ(views::Button::STATE_PRESSED, size_button()->state());
   EXPECT_EQ(views::Button::STATE_NORMAL, close_button()->state());

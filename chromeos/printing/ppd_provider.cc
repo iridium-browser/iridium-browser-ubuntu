@@ -25,10 +25,10 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/synchronization/lock.h"
+#include "base/task/post_task.h"
 #include "base/task_runner_util.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/threading/scoped_blocking_call.h"
 #include "base/threading/sequenced_task_runner_handle.h"
-#include "base/threading/thread_restrictions.h"
 #include "base/time/time.h"
 #include "base/values.h"
 #include "chromeos/printing/ppd_cache.h"
@@ -40,6 +40,8 @@
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_fetcher_delegate.h"
 #include "net/url_request/url_request_context_getter.h"
+#include "services/network/public/cpp/resource_request.h"
+#include "services/network/public/cpp/simple_url_loader.h"
 #include "url/gurl.h"
 
 namespace chromeos {
@@ -249,7 +251,7 @@ bool PpdReferenceIsWellFormed(const Printer::PpdReference& reference) {
 bool FetchFile(const GURL& url, std::string* file_contents) {
   CHECK(url.is_valid());
   CHECK(url.SchemeIs("file"));
-  base::AssertBlockingAllowed();
+  base::ScopedBlockingCall scoped_blocking_call(base::BlockingType::MAY_BLOCK);
 
   // Here we are un-escaping the file path represented by the url. If we don't
   // transform the url into a valid file path then the file may fail to be
@@ -312,7 +314,7 @@ void FilterRestrictedPpdReferences(const base::Version& version,
   });
 }
 
-class PpdProviderImpl : public PpdProvider, public net::URLFetcherDelegate {
+class PpdProviderImpl : public PpdProvider {
  public:
   // What kind of thing is the fetcher currently fetching?  We use this to
   // determine what to do when the fetcher returns a result.
@@ -326,14 +328,13 @@ class PpdProviderImpl : public PpdProvider, public net::URLFetcherDelegate {
     FT_USB_DEVICES     // USB device id to canonical name map.
   };
 
-  PpdProviderImpl(
-      const std::string& browser_locale,
-      scoped_refptr<net::URLRequestContextGetter> url_context_getter,
-      scoped_refptr<PpdCache> ppd_cache,
-      const base::Version& current_version,
-      const PpdProvider::Options& options)
+  PpdProviderImpl(const std::string& browser_locale,
+                  network::mojom::URLLoaderFactory* loader_factory,
+                  scoped_refptr<PpdCache> ppd_cache,
+                  const base::Version& current_version,
+                  const PpdProvider::Options& options)
       : browser_locale_(browser_locale),
-        url_context_getter_(url_context_getter),
+        loader_factory_(loader_factory),
         ppd_cache_(ppd_cache),
         disk_task_runner_(base::CreateSequencedTaskRunnerWithTraits(
             {base::TaskPriority::USER_VISIBLE, base::MayBlock(),
@@ -522,9 +523,8 @@ class PpdProviderImpl : public PpdProvider, public net::URLFetcherDelegate {
                            ResolvePpdReferenceCallback cb) override {
     // In v2 metadata, we work with lowercased effective_make_and_models.
     PrinterSearchData lowercase_search_data(search_data);
-    for (auto& make_and_model : search_data.make_and_model) {
-      lowercase_search_data.make_and_model.push_back(
-          base::ToLowerASCII(make_and_model));
+    for (auto& make_and_model : lowercase_search_data.make_and_model) {
+      make_and_model = base::ToLowerASCII(make_and_model);
     }
 
     ppd_reference_resolution_queue_.push_back(
@@ -577,7 +577,9 @@ class PpdProviderImpl : public PpdProvider, public net::URLFetcherDelegate {
   // Common handler that gets called whenever a fetch completes.  Note this
   // is used both for |fetcher_| fetches (i.e. http[s]) and file-based fetches;
   // |source| may be null in the latter case.
-  void OnURLFetchComplete(const net::URLFetcher* source) override {
+  void OnURLFetchComplete(std::unique_ptr<std::string> body) {
+    response_body_ = std::move(body);
+
     switch (fetcher_target_) {
       case FT_LOCALES:
         OnLocalesFetchComplete();
@@ -589,7 +591,7 @@ class PpdProviderImpl : public PpdProvider, public net::URLFetcherDelegate {
         OnPrintersFetchComplete();
         break;
       case FT_PPD_INDEX:
-        OnPpdIndexFetchComplete(source->GetOriginalURL());
+        OnPpdIndexFetchComplete(fetcher_->GetFinalURL());
         break;
       case FT_PPD:
         OnPpdFetchComplete();
@@ -677,13 +679,23 @@ class PpdProviderImpl : public PpdProvider, public net::URLFetcherDelegate {
     fetch_inflight_ = true;
 
     if (url.SchemeIs("http") || url.SchemeIs("https")) {
-      fetcher_ = net::URLFetcher::Create(url, net::URLFetcher::GET, this);
-      fetcher_->SetRequestContext(url_context_getter_.get());
-      fetcher_->SetLoadFlags(net::LOAD_BYPASS_CACHE | net::LOAD_DISABLE_CACHE |
-                             net::LOAD_DO_NOT_SAVE_COOKIES |
-                             net::LOAD_DO_NOT_SEND_COOKIES |
-                             net::LOAD_DO_NOT_SEND_AUTH_DATA);
-      fetcher_->Start();
+      auto resource_request = std::make_unique<network::ResourceRequest>();
+      resource_request->url = url;
+      resource_request->load_flags =
+          net::LOAD_BYPASS_CACHE | net::LOAD_DISABLE_CACHE |
+          net::LOAD_DO_NOT_SAVE_COOKIES | net::LOAD_DO_NOT_SEND_COOKIES |
+          net::LOAD_DO_NOT_SEND_AUTH_DATA;
+
+      // TODO(luum): confirm correct traffic annotation
+      fetcher_ = network::SimpleURLLoader::Create(std::move(resource_request),
+                                                  MISSING_TRAFFIC_ANNOTATION);
+
+      // TODO(luum): consider using unbounded size
+      fetcher_->DownloadToString(
+          loader_factory_,
+          base::BindOnce(&PpdProviderImpl::OnURLFetchComplete, this),
+          network::SimpleURLLoader::kMaxBoundedStringDownloadSize);
+
     } else if (url.SchemeIs("file")) {
       auto file_contents = std::make_unique<std::string>();
       std::string* content_ptr = file_contents.get();
@@ -881,7 +893,7 @@ class PpdProviderImpl : public PpdProvider, public net::URLFetcherDelegate {
   // Called when |fetcher_| should have just received an index mapping
   // ppd server keys to ppd filenames.  Use this to populate
   // |cached_ppd_idxs_|.
-  void OnPpdIndexFetchComplete(const GURL& url) {
+  void OnPpdIndexFetchComplete(GURL url) {
     std::vector<PpdIndexJSON> contents;
     PpdProvider::CallbackResultCode code =
         ValidateAndParsePpdIndexJSON(&contents);
@@ -1142,17 +1154,13 @@ class PpdProviderImpl : public PpdProvider, public net::URLFetcherDelegate {
   CallbackResultCode ValidateAndGetResponseAsString(std::string* contents) {
     CallbackResultCode ret;
     if (fetcher_.get() != nullptr) {
-      if (fetcher_->GetStatus().status() != net::URLRequestStatus::SUCCESS) {
+      if (response_body_.get() == nullptr) {
         ret = PpdProvider::SERVER_ERROR;
-      } else if (fetcher_->GetResponseCode() != net::HTTP_OK) {
-        if (fetcher_->GetResponseCode() == net::HTTP_NOT_FOUND) {
-          // A 404 means not found, everything else is a server error.
-          ret = PpdProvider::NOT_FOUND;
-        } else {
-          ret = PpdProvider::SERVER_ERROR;
-        }
+      } else if (fetcher_->NetError() != 0) {
+        // TODO(luum): confirm netError != 0 behavior === 404 not found
+        ret = PpdProvider::SERVER_ERROR;
       } else {
-        fetcher_->GetResponseAsString(contents);
+        *contents = std::move(*response_body_);
         ret = PpdProvider::SUCCESS;
       }
       fetcher_.reset();
@@ -1457,14 +1465,15 @@ class PpdProviderImpl : public PpdProvider, public net::URLFetcherDelegate {
 
   // Fetcher used for all network fetches.  This is explicitly reset() when
   // a fetch has been processed.
-  std::unique_ptr<net::URLFetcher> fetcher_;
+  std::unique_ptr<network::SimpleURLLoader> fetcher_;
   bool fetch_inflight_ = false;
+  std::unique_ptr<std::string> response_body_;
 
   // Locale of the browser, as returned by
   // BrowserContext::GetApplicationLocale();
   const std::string browser_locale_;
 
-  scoped_refptr<net::URLRequestContextGetter> url_context_getter_;
+  network::mojom::URLLoaderFactory* loader_factory_;
 
   // For file:// fetches, a staging buffer and result flag for loading the file.
   std::string file_fetch_contents_;
@@ -1511,11 +1520,11 @@ PpdProvider::PrinterSearchData::~PrinterSearchData() = default;
 // static
 scoped_refptr<PpdProvider> PpdProvider::Create(
     const std::string& browser_locale,
-    scoped_refptr<net::URLRequestContextGetter> url_context_getter,
+    network::mojom::URLLoaderFactory* loader_factory,
     scoped_refptr<PpdCache> ppd_cache,
     const base::Version& current_version,
     const PpdProvider::Options& options) {
   return scoped_refptr<PpdProvider>(new PpdProviderImpl(
-      browser_locale, url_context_getter, ppd_cache, current_version, options));
+      browser_locale, loader_factory, ppd_cache, current_version, options));
 }
 }  // namespace chromeos

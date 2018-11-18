@@ -28,6 +28,7 @@
 #include "base/strings/string_piece.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
+#include "base/task/post_task.h"
 #include "base/values.h"
 #include "chrome/browser/accessibility/accessibility_extension_api.h"
 #include "chrome/browser/browser_process.h"
@@ -35,10 +36,9 @@
 #include "chrome/browser/chromeos/accessibility/accessibility_extension_loader.h"
 #include "chrome/browser/chromeos/accessibility/dictation_chromeos.h"
 #include "chrome/browser/chromeos/accessibility/magnification_manager.h"
-#include "chrome/browser/chromeos/accessibility/select_to_speak_event_handler.h"
+#include "chrome/browser/chromeos/accessibility/select_to_speak_event_handler_delegate.h"
 #include "chrome/browser/chromeos/accessibility/switch_access_event_handler.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
-#include "chrome/browser/chromeos/ash_config.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/extensions/api/braille_display_private/stub_braille_controller.h"
@@ -46,6 +46,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/speech/tts_controller.h"
+#include "chrome/browser/ui/ash/multi_user/multi_user_util.h"
 #include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/api/accessibility_private.h"
@@ -57,10 +58,12 @@
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/power_manager_client.h"
+#include "components/language/core/browser/pref_names.h"
 #include "components/prefs/pref_member.h"
 #include "components/prefs/pref_service.h"
-#include "components/session_manager/core/session_manager.h"
+#include "components/user_manager/known_user.h"
 #include "content/public/browser/browser_accessibility_state.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/focused_node_details.h"
 #include "content/public/browser/notification_details.h"
@@ -70,17 +73,20 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/common/service_manager_connection.h"
 #include "extensions/browser/extension_registry.h"
+#include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_messages.h"
 #include "extensions/common/extension_resource.h"
 #include "extensions/common/host_id.h"
 #include "mash/public/mojom/launchable.mojom.h"
 #include "media/audio/sounds/sounds_manager.h"
-#include "media/base/media_switches.h"
+#include "mojo/public/cpp/bindings/binding.h"
+#include "services/media_session/public/cpp/switches.h"
 #include "services/service_manager/public/cpp/connector.h"
 #include "ui/accessibility/ax_enum_util.h"
 #include "ui/base/ime/chromeos/extension_ime_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/base/ui_base_features.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_observer.h"
 #include "url/gurl.h"
@@ -98,6 +104,12 @@ namespace {
 // When this flag is set, system sounds will not be played.
 constexpr char kAshDisableSystemSounds[] = "ash-disable-system-sounds";
 
+// A key for the spoken feedback enabled boolean state for a known user.
+const char kUserSpokenFeedbackEnabled[] = "UserSpokenFeedbackEnabled";
+
+// A key for the startup sound enabled boolean state for a known user.
+const char kUserStartupSoundEnabled[] = "UserStartupSoundEnabled";
+
 static chromeos::AccessibilityManager* g_accessibility_manager = nullptr;
 
 static BrailleController* g_braille_controller_for_test = nullptr;
@@ -113,37 +125,46 @@ BrailleController* GetBrailleController() {
   return BrailleController::GetInstance();
 }
 
+void EnableChromeVoxAfterSwitchAccessMetric(bool val) {
+  UMA_HISTOGRAM_BOOLEAN("Accessibility.CrosChromeVoxAfterSwitchAccess", val);
+}
+
+void EnableSwitchAccessAfterChromeVoxMetric(bool val) {
+  UMA_HISTOGRAM_BOOLEAN("Accessibility.CrosSwitchAccessAfterChromeVox", val);
+}
+
 }  // namespace
 
-class ChromeVoxPanelWidgetObserver : public views::WidgetObserver {
+class AccessibilityPanelWidgetObserver : public views::WidgetObserver {
  public:
-  ChromeVoxPanelWidgetObserver(views::Widget* widget,
-                               AccessibilityManager* manager)
-      : widget_(widget), manager_(manager) {
+  AccessibilityPanelWidgetObserver(views::Widget* widget,
+                                   base::OnceCallback<void()> on_destroying)
+      : widget_(widget), on_destroying_(std::move(on_destroying)) {
     widget_->AddObserver(this);
   }
 
-  ~ChromeVoxPanelWidgetObserver() override = default;
+  ~AccessibilityPanelWidgetObserver() override = default;
 
   void OnWidgetClosing(views::Widget* widget) override {
     CHECK_EQ(widget_, widget);
     widget->RemoveObserver(this);
-    manager_->OnChromeVoxPanelClosing();
-    // |this| is deleted.
+    std::move(on_destroying_).Run();
+    // |this| should be deleted.
   }
 
   void OnWidgetDestroying(views::Widget* widget) override {
     CHECK_EQ(widget_, widget);
     widget->RemoveObserver(this);
-    manager_->OnChromeVoxPanelDestroying();
-    // |this| is deleted.
+    std::move(on_destroying_).Run();
+    // |this| should be deleted.
   }
 
  private:
   views::Widget* widget_;
-  AccessibilityManager* manager_;
 
-  DISALLOW_COPY_AND_ASSIGN(ChromeVoxPanelWidgetObserver);
+  base::OnceCallback<void()> on_destroying_;
+
+  DISALLOW_COPY_AND_ASSIGN(AccessibilityPanelWidgetObserver);
 };
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -207,7 +228,6 @@ AccessibilityManager::AccessibilityManager()
   notification_registrar_.Add(this, content::NOTIFICATION_FOCUS_CHANGED_IN_PAGE,
                               content::NotificationService::AllSources());
   input_method::InputMethodManager::Get()->AddObserver(this);
-  session_manager::SessionManager::Get()->AddObserver(this);
 
   ui::ResourceBundle& bundle = ui::ResourceBundle::GetSharedInstance();
   media::SoundsManager* manager = media::SoundsManager::Get();
@@ -237,24 +257,30 @@ AccessibilityManager::AccessibilityManager()
                       bundle.GetRawDataResource(IDR_SOUND_DICTATION_END_WAV));
   manager->Initialize(SOUND_DICTATION_START,
                       bundle.GetRawDataResource(IDR_SOUND_DICTATION_START_WAV));
+  manager->Initialize(
+      SOUND_DICTATION_CANCEL,
+      bundle.GetRawDataResource(IDR_SOUND_DICTATION_CANCEL_WAV));
+  manager->Initialize(SOUND_STARTUP,
+                      bundle.GetRawDataResource(IDR_SOUND_STARTUP_WAV));
 
   base::FilePath resources_path;
-  if (!PathService::Get(chrome::DIR_RESOURCES, &resources_path))
+  if (!base::PathService::Get(chrome::DIR_RESOURCES, &resources_path))
     NOTREACHED();
   chromevox_loader_ = base::WrapUnique(new AccessibilityExtensionLoader(
       extension_misc::kChromeVoxExtensionId,
       resources_path.Append(extension_misc::kChromeVoxExtensionPath),
-      base::Bind(&AccessibilityManager::PostUnloadChromeVox,
-                 weak_ptr_factory_.GetWeakPtr())));
+      base::BindRepeating(&AccessibilityManager::PostUnloadChromeVox,
+                          weak_ptr_factory_.GetWeakPtr())));
   select_to_speak_loader_ = base::WrapUnique(new AccessibilityExtensionLoader(
       extension_misc::kSelectToSpeakExtensionId,
       resources_path.Append(extension_misc::kSelectToSpeakExtensionPath),
-      base::Bind(&AccessibilityManager::PostUnloadSelectToSpeak,
-                 weak_ptr_factory_.GetWeakPtr())));
+      base::BindRepeating(&AccessibilityManager::PostUnloadSelectToSpeak,
+                          weak_ptr_factory_.GetWeakPtr())));
   switch_access_loader_ = base::WrapUnique(new AccessibilityExtensionLoader(
       extension_misc::kSwitchAccessExtensionId,
       resources_path.Append(extension_misc::kSwitchAccessExtensionPath),
-      base::Closure()));
+      base::BindRepeating(&AccessibilityManager::PostUnloadSwitchAccess,
+                          weak_ptr_factory_.GetWeakPtr())));
 
   // Connect to ash's AccessibilityController interface.
   content::ServiceManagerConnection::GetForProcess()
@@ -266,6 +292,8 @@ AccessibilityManager::AccessibilityManager()
       ->GetConnector()
       ->BindInterface(ash::mojom::kServiceName,
                       &accessibility_focus_ring_controller_);
+
+  CrasAudioHandler::Get()->AddAudioObserver(this);
 }
 
 AccessibilityManager::~AccessibilityManager() {
@@ -273,8 +301,8 @@ AccessibilityManager::~AccessibilityManager() {
   AccessibilityStatusEventDetails details(ACCESSIBILITY_MANAGER_SHUTDOWN,
                                           false);
   NotifyAccessibilityStatusChanged(details);
+  CrasAudioHandler::Get()->RemoveAudioObserver(this);
   input_method::InputMethodManager::Get()->RemoveObserver(this);
-  session_manager::SessionManager::Get()->RemoveObserver(this);
 
   if (chromevox_panel_) {
     chromevox_panel_->CloseNow();
@@ -306,6 +334,7 @@ bool AccessibilityManager::ShouldShowAccessibilityMenu() {
         prefs->GetBoolean(ash::prefs::kAccessibilityCaretHighlightEnabled) ||
         prefs->GetBoolean(ash::prefs::kAccessibilityCursorHighlightEnabled) ||
         prefs->GetBoolean(ash::prefs::kAccessibilityFocusHighlightEnabled) ||
+        prefs->GetBoolean(ash::prefs::kAccessibilityDictationEnabled) ||
         prefs->GetBoolean(ash::prefs::kDockedMagnifierEnabled)) {
       return true;
     }
@@ -318,7 +347,7 @@ void AccessibilityManager::UpdateAlwaysShowMenuFromPref() {
     return;
 
   // TODO(crbug.com/594887): Fix for mash by moving pref into ash.
-  if (GetAshConfig() == ash::Config::MASH)
+  if (features::IsMultiProcessMash())
     return;
 
   // Update system tray menu visibility.
@@ -372,6 +401,15 @@ void AccessibilityManager::EnableSpokenFeedback(bool enabled) {
   if (!profile_)
     return;
 
+  if (enabled) {
+    if (IsSwitchAccessEnabled()) {
+      SetSwitchAccessEnabled(false);
+      EnableChromeVoxAfterSwitchAccessMetric(true);
+    } else {
+      EnableChromeVoxAfterSwitchAccessMetric(false);
+    }
+  }
+
   PrefService* pref_service = profile_->GetPrefs();
   pref_service->SetBoolean(ash::prefs::kAccessibilitySpokenFeedbackEnabled,
                            enabled);
@@ -384,6 +422,21 @@ void AccessibilityManager::OnSpokenFeedbackChanged() {
 
   const bool enabled = profile_->GetPrefs()->GetBoolean(
       ash::prefs::kAccessibilitySpokenFeedbackEnabled);
+
+  if (enabled) {
+    if (IsSwitchAccessEnabled()) {
+      LOG(ERROR) << "Switch Access and ChromeVox is not supported.";
+      LOG(WARNING) << "Disabling Switch Access.";
+      SetSwitchAccessEnabled(false);
+      EnableChromeVoxAfterSwitchAccessMetric(true);
+    } else {
+      EnableChromeVoxAfterSwitchAccessMetric(false);
+    }
+  }
+
+  user_manager::known_user::SetBooleanPref(
+      multi_user_util::GetAccountIdFromProfile(profile_),
+      kUserSpokenFeedbackEnabled, enabled);
 
   if (enabled) {
     chromevox_loader_->SetProfile(
@@ -473,7 +526,6 @@ void AccessibilityManager::OnTwoFingerTouchStart() {
 
   extensions::EventRouter* event_router =
       extensions::EventRouter::Get(profile());
-  CHECK(event_router);
 
   auto event_args = std::make_unique<base::ListValue>();
   auto event = std::make_unique<extensions::Event>(
@@ -489,7 +541,6 @@ void AccessibilityManager::OnTwoFingerTouchStop() {
 
   extensions::EventRouter* event_router =
       extensions::EventRouter::Get(profile());
-  CHECK(event_router);
 
   auto event_args = std::make_unique<base::ListValue>();
   auto event = std::make_unique<extensions::Event>(
@@ -538,9 +589,9 @@ void AccessibilityManager::HandleAccessibilityGesture(
     ax::mojom::Gesture gesture) {
   extensions::EventRouter* event_router =
       extensions::EventRouter::Get(profile());
-  CHECK(event_router);
 
-  std::unique_ptr<base::ListValue> event_args(new base::ListValue());
+  std::unique_ptr<base::ListValue> event_args =
+      std::make_unique<base::ListValue>();
   event_args->AppendString(ui::ToString(gesture));
   std::unique_ptr<extensions::Event> event(new extensions::Event(
       extensions::events::ACCESSIBILITY_PRIVATE_ON_ACCESSIBILITY_GESTURE,
@@ -658,6 +709,11 @@ void AccessibilityManager::OnCursorHighlightChanged() {
   NotifyAccessibilityStatusChanged(details);
 }
 
+bool AccessibilityManager::IsDictationEnabled() const {
+  return profile_ && profile_->GetPrefs()->GetBoolean(
+                         ash::prefs::kAccessibilityDictationEnabled);
+}
+
 void AccessibilityManager::SetFocusHighlightEnabled(bool enabled) {
   if (!profile_)
     return;
@@ -699,15 +755,43 @@ bool AccessibilityManager::IsSelectToSpeakEnabled() const {
   return select_to_speak_enabled_;
 }
 
+void AccessibilityManager::RequestSelectToSpeakStateChange() {
+  extensions::EventRouter* event_router =
+      extensions::EventRouter::Get(profile_);
+
+  // Send an event to the Select-to-Speak extension requesting a state change.
+  std::unique_ptr<base::ListValue> event_args =
+      std::make_unique<base::ListValue>();
+  std::unique_ptr<extensions::Event> event(new extensions::Event(
+      extensions::events::
+          ACCESSIBILITY_PRIVATE_ON_SELECT_TO_SPEAK_STATE_CHANGE_REQUESTED,
+      extensions::api::accessibility_private::
+          OnSelectToSpeakStateChangeRequested::kEventName,
+      std::move(event_args)));
+  event_router->DispatchEventWithLazyListener(
+      extension_misc::kSelectToSpeakExtensionId, std::move(event));
+}
+
+void AccessibilityManager::OnSelectToSpeakStateChanged(
+    ash::mojom::SelectToSpeakState state) {
+  accessibility_controller_->SetSelectToSpeakState(state);
+
+  if (select_to_speak_state_observer_for_test_)
+    select_to_speak_state_observer_for_test_.Run();
+}
+
 void AccessibilityManager::OnSelectToSpeakChanged() {
   if (!profile_)
     return;
 
   const bool enabled = profile_->GetPrefs()->GetBoolean(
       ash::prefs::kAccessibilitySelectToSpeakEnabled);
+  if (enabled)
+    select_to_speak_loader_->SetProfile(profile_, base::Closure());
 
   if (select_to_speak_enabled_ == enabled)
     return;
+
   select_to_speak_enabled_ = enabled;
 
   AccessibilityStatusEventDetails details(ACCESSIBILITY_TOGGLE_SELECT_TO_SPEAK,
@@ -716,17 +800,28 @@ void AccessibilityManager::OnSelectToSpeakChanged() {
 
   if (enabled) {
     select_to_speak_loader_->Load(profile_, base::Closure() /* done_cb */);
-    select_to_speak_event_handler_.reset(
-        new chromeos::SelectToSpeakEventHandler());
+    // Construct a delegate to connect SelectToSpeak and its EventHandler in
+    // ash.
+    select_to_speak_event_handler_delegate_ =
+        std::make_unique<chromeos::SelectToSpeakEventHandlerDelegate>();
   } else {
     select_to_speak_loader_->Unload();
-    select_to_speak_event_handler_.reset(nullptr);
+    select_to_speak_event_handler_delegate_.reset();
   }
 }
 
 void AccessibilityManager::SetSwitchAccessEnabled(bool enabled) {
   if (!profile_)
     return;
+
+  if (enabled) {
+    if (IsSpokenFeedbackEnabled()) {
+      LOG(ERROR) << "Enabling Switch Access with ChromeVox is not supported.";
+      EnableSwitchAccessAfterChromeVoxMetric(true);
+      return;
+    }
+    EnableSwitchAccessAfterChromeVoxMetric(false);
+  }
 
   PrefService* pref_service = profile_->GetPrefs();
   pref_service->SetBoolean(ash::prefs::kAccessibilitySwitchAccessEnabled,
@@ -757,12 +852,25 @@ void AccessibilityManager::UpdateSwitchAccessFromPref() {
     return;
   }
 
+  if (enabled) {
+    if (IsSpokenFeedbackEnabled()) {
+      LOG(ERROR) << "Enabling Switch Access with ChromeVox is not supported.";
+      SetSwitchAccessEnabled(false);
+      EnableSwitchAccessAfterChromeVoxMetric(true);
+      return;
+    }
+    EnableSwitchAccessAfterChromeVoxMetric(false);
+  }
+
   if (switch_access_enabled_ == enabled)
     return;
   switch_access_enabled_ = enabled;
 
   if (enabled) {
-    switch_access_loader_->Load(profile_, base::Closure() /* done_cb */);
+    switch_access_loader_->Load(
+        profile_,
+        base::BindRepeating(&AccessibilityManager::PostLoadSwitchAccess,
+                            weak_ptr_factory_.GetWeakPtr()));
     switch_access_event_handler_.reset(
         new chromeos::SwitchAccessEventHandler());
   } else {
@@ -779,8 +887,8 @@ void AccessibilityManager::CheckBrailleState() {
   BrailleController* braille_controller = GetBrailleController();
   if (!scoped_braille_observer_.IsObserving(braille_controller))
     scoped_braille_observer_.Add(braille_controller);
-  BrowserThread::PostTaskAndReplyWithResult(
-      BrowserThread::IO, FROM_HERE,
+  base::PostTaskWithTraitsAndReplyWithResult(
+      FROM_HERE, {BrowserThread::IO},
       base::Bind(&BrailleController::GetDisplayState,
                  base::Unretained(braille_controller)),
       base::Bind(&AccessibilityManager::ReceiveBrailleDisplayState,
@@ -824,8 +932,8 @@ void AccessibilityManager::InputMethodChanged(
     Profile* /* profile */,
     bool show_message) {
   // Sticky keys is implemented only in ash.
-  // TODO(dpolukhin): support Athena, crbug.com/408733.
-  if (GetAshConfig() != ash::Config::MASH) {
+  // TODO(crbug.com/678820): Mash support.
+  if (!features::IsMultiProcessMash()) {
     ash::Shell::Get()->sticky_keys_controller()->SetModifiersEnabled(
         manager->IsISOLevel5ShiftUsedByCurrentInputMethod(),
         manager->IsAltGrUsedByCurrentInputMethod());
@@ -836,22 +944,32 @@ void AccessibilityManager::InputMethodChanged(
       (descriptor.id() == extension_ime_util::kBrailleImeEngineId);
 }
 
-void AccessibilityManager::OnSessionStateChanged() {
-  // Don't reload ChromeVox during shutdown. http://crrev.com/c/838180
-  if (app_terminating_)
+void AccessibilityManager::OnActiveOutputNodeChanged() {
+  if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
+          chromeos::switches::kFirstExecAfterBoot))
     return;
 
-  if (!chromevox_panel_)
+  AudioDevice device;
+  CrasAudioHandler::Get()->GetPrimaryActiveOutputDevice(&device);
+  if (device.type == AudioDeviceType::AUDIO_TYPE_OTHER)
     return;
-  if (chromevox_panel_->for_blocked_user_session() ==
-      session_manager::SessionManager::Get()->IsUserSessionBlocked()) {
+
+  CrasAudioHandler::Get()->RemoveAudioObserver(this);
+  if (GetStartupSoundEnabled()) {
+    PlayEarcon(SOUND_STARTUP, PlaySoundOption::ALWAYS);
     return;
   }
 
-  // If user session got blocked or unblocked, reload ChromeVox panel, as
-  // functionality available to the panel differs based on whether the user
-  // session is active (and unlocked) or not.
-  ReloadChromeVoxPanel();
+  const auto& account_ids = user_manager::known_user::GetKnownAccountIds();
+  for (size_t i = 0; i < account_ids.size(); ++i) {
+    bool val;
+    if (user_manager::known_user::GetBooleanPref(
+            account_ids[i], kUserSpokenFeedbackEnabled, &val) &&
+        val) {
+      PlayEarcon(SOUND_STARTUP, PlaySoundOption::ALWAYS);
+      break;
+    }
+  }
 }
 
 void AccessibilityManager::SetProfile(Profile* profile) {
@@ -928,7 +1046,7 @@ void AccessibilityManager::SetProfile(Profile* profile) {
     local_state_pref_change_registrar_.reset(new PrefChangeRegistrar);
     local_state_pref_change_registrar_->Init(g_browser_process->local_state());
     local_state_pref_change_registrar_->Add(
-        prefs::kApplicationLocale,
+        language::prefs::kApplicationLocale,
         base::Bind(&AccessibilityManager::OnLocaleChanged,
                    base::Unretained(this)));
 
@@ -982,13 +1100,23 @@ void AccessibilityManager::NotifyAccessibilityStatusChanged(
   callback_list_.Notify(details);
 
   // TODO(crbug.com/594887): Fix for mash by moving pref into ash.
-  if (GetAshConfig() == ash::Config::MASH)
+  if (features::IsMultiProcessMash())
     return;
+
+  if (details.notification_type == ACCESSIBILITY_TOGGLE_DICTATION) {
+    ash::Shell::Get()->accessibility_controller()->SetDictationActive(
+        details.enabled);
+    ash::Shell::Get()
+        ->accessibility_controller()
+        ->NotifyAccessibilityStatusChanged();
+    return;
+  }
 
   // Update system tray menu visibility. Prefs tracked inside ash handle their
   // own updates to avoid race conditions (pref updates are asynchronous between
   // chrome and ash).
-  if (details.notification_type == ACCESSIBILITY_TOGGLE_SCREEN_MAGNIFIER) {
+  if (details.notification_type == ACCESSIBILITY_TOGGLE_SCREEN_MAGNIFIER ||
+      details.notification_type == ACCESSIBILITY_TOGGLE_DICTATION) {
     ash::Shell::Get()
         ->accessibility_controller()
         ->NotifyAccessibilityStatusChanged();
@@ -1042,6 +1170,7 @@ void AccessibilityManager::UpdateChromeOSAccessibilityHistograms() {
                         IsCaretHighlightEnabled());
   UMA_HISTOGRAM_BOOLEAN("Accessibility.CrosCursorHighlight",
                         IsCursorHighlightEnabled());
+  UMA_HISTOGRAM_BOOLEAN("Accessibility.CrosDictation", IsDictationEnabled());
   UMA_HISTOGRAM_BOOLEAN("Accessibility.CrosFocusHighlight",
                         IsFocusHighlightEnabled());
   UMA_HISTOGRAM_BOOLEAN("Accessibility.CrosSelectToSpeak",
@@ -1089,6 +1218,10 @@ void AccessibilityManager::Observe(
       break;
     }
     case content::NOTIFICATION_FOCUS_CHANGED_IN_PAGE: {
+      // Avoid unnecessary mojo IPC to ash when focus highlight feature is not
+      // enabled.
+      if (!IsFocusHighlightEnabled())
+        return;
       content::FocusedNodeDetails* node_details =
           content::Details<content::FocusedNodeDetails>(details).ptr();
       accessibility_controller_->SetFocusHighlightRect(
@@ -1122,10 +1255,8 @@ void AccessibilityManager::OnExtensionUnloaded(
     content::BrowserContext* browser_context,
     const extensions::Extension* extension,
     extensions::UnloadedExtensionReason reason) {
-  if (extension->id() == keyboard_listener_extension_id_) {
+  if (extension->id() == keyboard_listener_extension_id_)
     keyboard_listener_extension_id_ = std::string();
-    keyboard_listener_capture_ = false;
-  }
 }
 
 void AccessibilityManager::OnShutdown(extensions::ExtensionRegistry* registry) {
@@ -1143,9 +1274,9 @@ void AccessibilityManager::PostLoadChromeVox() {
 
   extensions::EventRouter* event_router =
       extensions::EventRouter::Get(profile_);
-  CHECK(event_router);
 
-  std::unique_ptr<base::ListValue> event_args(new base::ListValue());
+  std::unique_ptr<base::ListValue> event_args =
+      std::make_unique<base::ListValue>();
   std::unique_ptr<extensions::Event> event(new extensions::Event(
       extensions::events::ACCESSIBILITY_PRIVATE_ON_INTRODUCE_CHROME_VOX,
       extensions::api::accessibility_private::OnIntroduceChromeVox::kEventName,
@@ -1154,17 +1285,17 @@ void AccessibilityManager::PostLoadChromeVox() {
       extension_misc::kChromeVoxExtensionId, std::move(event));
 
   if (!chromevox_panel_) {
-    chromevox_panel_ = new ChromeVoxPanel(
-        profile_,
-        session_manager::SessionManager::Get()->IsUserSessionBlocked());
-    chromevox_panel_widget_observer_.reset(
-        new ChromeVoxPanelWidgetObserver(chromevox_panel_->GetWidget(), this));
+    chromevox_panel_ = new ChromeVoxPanel(profile_);
+    chromevox_panel_widget_observer_.reset(new AccessibilityPanelWidgetObserver(
+        chromevox_panel_->GetWidget(),
+        base::BindOnce(&AccessibilityManager::OnChromeVoxPanelDestroying,
+                       base::Unretained(this))));
   }
 
   if (!base::CommandLine::ForCurrentProcess()->HasSwitch(
-          ::switches::kEnableAudioFocus)) {
+          media_session::switches::kEnableAudioFocus)) {
     base::CommandLine::ForCurrentProcess()->AppendSwitch(
-        ::switches::kEnableAudioFocus);
+        media_session::switches::kEnableAudioFocus);
   }
 }
 
@@ -1174,7 +1305,8 @@ void AccessibilityManager::PostUnloadChromeVox() {
 
   // Clear the accessibility focus ring.
   SetFocusRing(std::vector<gfx::Rect>(),
-               ash::mojom::FocusRingBehavior::PERSIST_FOCUS_RING);
+               ash::mojom::FocusRingBehavior::PERSIST_FOCUS_RING,
+               extension_misc::kChromeVoxExtensionId);
 
   if (chromevox_panel_) {
     chromevox_panel_->Close();
@@ -1189,23 +1321,15 @@ void AccessibilityManager::PostUnloadChromeVox() {
 }
 
 void AccessibilityManager::PostSwitchChromeVoxProfile() {
-  ReloadChromeVoxPanel();
-}
-
-void AccessibilityManager::ReloadChromeVoxPanel() {
   if (chromevox_panel_) {
     chromevox_panel_->CloseNow();
     chromevox_panel_ = nullptr;
   }
-  chromevox_panel_ = new ChromeVoxPanel(
-      profile_, session_manager::SessionManager::Get()->IsUserSessionBlocked());
-  chromevox_panel_widget_observer_.reset(
-      new ChromeVoxPanelWidgetObserver(chromevox_panel_->GetWidget(), this));
-}
-
-void AccessibilityManager::OnChromeVoxPanelClosing() {
-  chromevox_panel_widget_observer_.reset();
-  chromevox_panel_ = nullptr;
+  chromevox_panel_ = new ChromeVoxPanel(profile_);
+  chromevox_panel_widget_observer_.reset(new AccessibilityPanelWidgetObserver(
+      chromevox_panel_->GetWidget(),
+      base::BindOnce(&AccessibilityManager::OnChromeVoxPanelDestroying,
+                     base::Unretained(this))));
 }
 
 void AccessibilityManager::OnChromeVoxPanelDestroying() {
@@ -1218,11 +1342,41 @@ void AccessibilityManager::PostUnloadSelectToSpeak() {
   // unloads.
 
   // Clear the accessibility focus ring and highlight.
-  HideFocusRing();
+  HideFocusRing(extension_misc::kSelectToSpeakExtensionId);
   HideHighlights();
 
   // Stop speech.
   TtsController::GetInstance()->Stop();
+}
+
+void AccessibilityManager::PostLoadSwitchAccess() {
+  if (!switch_access_panel_) {
+    switch_access_panel_ = new SwitchAccessPanel(profile_);
+    switch_access_panel_widget_observer_.reset(
+        new AccessibilityPanelWidgetObserver(
+            switch_access_panel_->GetWidget(),
+            base::BindOnce(&AccessibilityManager::OnSwitchAccessPanelDestroying,
+                           base::Unretained(this))));
+  }
+}
+
+void AccessibilityManager::PostUnloadSwitchAccess() {
+  // Do any teardown work needed immediately after SwitchAccess actually
+  // unloads.
+
+  // Clear the accessibility focus ring.
+  HideFocusRing(extension_misc::kSwitchAccessExtensionId);
+
+  // Close the context menu
+  if (switch_access_panel_) {
+    switch_access_panel_->Close();
+    switch_access_panel_ = nullptr;
+  }
+}
+
+void AccessibilityManager::OnSwitchAccessPanelDestroying() {
+  switch_access_panel_widget_observer_.reset(nullptr);
+  switch_access_panel_ = nullptr;
 }
 
 void AccessibilityManager::SetKeyboardListenerExtensionId(
@@ -1241,35 +1395,37 @@ void AccessibilityManager::SetSwitchAccessKeys(const std::set<int>& key_codes) {
     switch_access_event_handler_->SetKeysToCapture(key_codes);
 }
 
-void AccessibilityManager::ToggleDictation() {
+bool AccessibilityManager::ToggleDictation() {
   if (!profile_)
-    return;
+    return false;
 
   if (!dictation_.get())
     dictation_ = std::make_unique<DictationChromeos>(profile_);
 
-  dictation_->OnToggleDictation();
+  return dictation_->OnToggleDictation();
 }
 
-void AccessibilityManager::SetFocusRingColor(SkColor color) {
-  accessibility_focus_ring_controller_->SetFocusRingColor(color);
+void AccessibilityManager::SetFocusRingColor(SkColor color,
+                                             std::string caller_id) {
+  accessibility_focus_ring_controller_->SetFocusRingColor(color, caller_id);
 }
 
-void AccessibilityManager::ResetFocusRingColor() {
-  accessibility_focus_ring_controller_->ResetFocusRingColor();
+void AccessibilityManager::ResetFocusRingColor(std::string caller_id) {
+  accessibility_focus_ring_controller_->ResetFocusRingColor(caller_id);
 }
 
 void AccessibilityManager::SetFocusRing(
     const std::vector<gfx::Rect>& rects_in_screen,
-    ash::mojom::FocusRingBehavior focus_ring_behavior) {
-  accessibility_focus_ring_controller_->SetFocusRing(rects_in_screen,
-                                                     focus_ring_behavior);
+    ash::mojom::FocusRingBehavior focus_ring_behavior,
+    std::string caller_id) {
+  accessibility_focus_ring_controller_->SetFocusRing(
+      rects_in_screen, focus_ring_behavior, caller_id);
   if (focus_ring_observer_for_test_)
     focus_ring_observer_for_test_.Run();
 }
 
-void AccessibilityManager::HideFocusRing() {
-  accessibility_focus_ring_controller_->HideFocusRing();
+void AccessibilityManager::HideFocusRing(std::string caller_id) {
+  accessibility_focus_ring_controller_->HideFocusRing(caller_id);
   if (focus_ring_observer_for_test_)
     focus_ring_observer_for_test_.Run();
 }
@@ -1282,6 +1438,40 @@ void AccessibilityManager::SetHighlights(
 
 void AccessibilityManager::HideHighlights() {
   accessibility_focus_ring_controller_->HideHighlights();
+}
+
+void AccessibilityManager::SetCaretBounds(const gfx::Rect& bounds_in_screen) {
+  // For efficiency only send mojo IPCs to ash if the highlight is enabled.
+  if (!IsCaretHighlightEnabled())
+    return;
+
+  accessibility_controller_->SetCaretBounds(bounds_in_screen);
+
+  if (caret_bounds_observer_for_test_)
+    caret_bounds_observer_for_test_.Run(bounds_in_screen);
+}
+
+bool AccessibilityManager::GetStartupSoundEnabled() const {
+  user_manager::UserManager* user_manager = user_manager::UserManager::Get();
+  const user_manager::UserList& user_list = user_manager->GetUsers();
+  if (user_list.empty())
+    return false;
+
+  // |user_list| is sorted by last log in date. Take the most recent user to log
+  // in.
+  bool val;
+  return user_manager::known_user::GetBooleanPref(
+             user_list[0]->GetAccountId(), kUserStartupSoundEnabled, &val) &&
+         val;
+}
+
+void AccessibilityManager::SetStartupSoundEnabled(bool value) const {
+  if (!profile_)
+    return;
+
+  user_manager::known_user::SetBooleanPref(
+      multi_user_util::GetAccountIdFromProfile(profile_),
+      kUserStartupSoundEnabled, value);
 }
 
 void AccessibilityManager::SetProfileForTest(Profile* profile) {
@@ -1301,6 +1491,16 @@ void AccessibilityManager::FlushForTesting() {
 void AccessibilityManager::SetFocusRingObserverForTest(
     base::RepeatingCallback<void()> observer) {
   focus_ring_observer_for_test_ = observer;
+}
+
+void AccessibilityManager::SetSelectToSpeakStateObserverForTest(
+    base::RepeatingCallback<void()> observer) {
+  select_to_speak_state_observer_for_test_ = observer;
+}
+
+void AccessibilityManager::SetCaretBoundsObserverForTest(
+    base::RepeatingCallback<void(const gfx::Rect&)> observer) {
+  caret_bounds_observer_for_test_ = observer;
 }
 
 }  // namespace chromeos

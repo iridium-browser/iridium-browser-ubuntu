@@ -12,16 +12,19 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/interstitials/chrome_metrics_helper.h"
+#include "chrome/browser/interstitials/enterprise_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/renderer_preferences_util.h"
 #include "chrome/browser/safe_browsing/safe_browsing_controller_client.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
+#include "chrome/browser/unified_consent/unified_consent_service_factory.h"
 #include "chrome/common/pref_names.h"
 #include "components/prefs/pref_service.h"
 #include "components/safe_browsing/browser/threat_details.h"
 #include "components/safe_browsing/common/safe_browsing_prefs.h"
 #include "components/safe_browsing/triggers/trigger_manager.h"
 #include "components/security_interstitials/content/security_interstitial_controller_client.h"
+#include "components/unified_consent/unified_consent_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/interstitial_page.h"
 #include "content/public/browser/navigation_entry.h"
@@ -55,12 +58,16 @@ class SafeBrowsingBlockingPageFactoryImpl
       const SafeBrowsingBlockingPage::UnsafeResourceList& unsafe_resources)
       override {
     // Create appropriate display options for this blocking page.
-    PrefService* prefs =
-        Profile::FromBrowserContext(web_contents->GetBrowserContext())
-            ->GetPrefs();
+    Profile* profile =
+        Profile::FromBrowserContext(web_contents->GetBrowserContext());
+    PrefService* prefs = profile->GetPrefs();
     bool is_extended_reporting_opt_in_allowed = false;
     bool is_proceed_anyway_disabled =
         prefs->GetBoolean(prefs::kSafeBrowsingProceedAnywayDisabled);
+    unified_consent::UnifiedConsentService* consent_service =
+        UnifiedConsentServiceFactory::GetForProfile(profile);
+    bool is_unified_consent_given =
+        consent_service && consent_service->IsUnifiedConsentGiven();
 
     // Determine if any prefs need to be updated prior to showing the security
     // interstitial. This must happen before querying IsScout to populate the
@@ -71,7 +78,8 @@ class SafeBrowsingBlockingPageFactoryImpl
         BaseBlockingPage::IsMainPageLoadBlocked(unsafe_resources),
         is_extended_reporting_opt_in_allowed,
         web_contents->GetBrowserContext()->IsOffTheRecord(),
-        IsExtendedReportingEnabled(*prefs), IsScout(*prefs),
+        is_unified_consent_given, IsExtendedReportingEnabled(*prefs),
+        true,  // is_scout_reporting_enabled,
         IsExtendedReportingPolicyManaged(*prefs), is_proceed_anyway_disabled,
         true,  // should_open_links_in_new_tab
         true,  // always_show_back_to_safety
@@ -149,15 +157,14 @@ void SafeBrowsingBlockingPage::OverrideRendererPrefs(
       content::RendererPreferences* prefs) {
   Profile* profile = Profile::FromBrowserContext(
       web_contents()->GetBrowserContext());
-  renderer_preferences_util::UpdateFromSystemSettings(
-      prefs, profile, web_contents());
+  renderer_preferences_util::UpdateFromSystemSettings(prefs, profile);
 }
 
 void SafeBrowsingBlockingPage::HandleSubresourcesAfterProceed() {
   // Check to see if some new notifications of unsafe resources have been
   // received while we were showing the interstitial.
   UnsafeResourceMap* unsafe_resource_map = GetUnsafeResourcesMap();
-  UnsafeResourceMap::iterator iter = unsafe_resource_map->find(web_contents());
+  auto iter = unsafe_resource_map->find(web_contents());
   if (iter != unsafe_resource_map->end() && !iter->second.empty()) {
     // All queued unsafe resources should be for the same page:
     UnsafeResourceList unsafe_resources = iter->second;
@@ -241,10 +248,14 @@ void SafeBrowsingBlockingPage::ShowBlockingPage(
     // interstitial, showing the new one will automatically hide the old one.
     content::NavigationEntry* entry =
         unsafe_resource.GetNavigationEntryForResource();
-    SafeBrowsingBlockingPage* blocking_page =
-        CreateBlockingPage(ui_manager, web_contents,
-                           entry ? entry->GetURL() : GURL(), unsafe_resource);
+    GURL main_fram_url = entry ? entry->GetURL() : GURL();
+    SafeBrowsingBlockingPage* blocking_page = CreateBlockingPage(
+        ui_manager, web_contents, main_fram_url, unsafe_resource);
     blocking_page->Show();
+    MaybeTriggerSecurityInterstitialShownEvent(
+        web_contents, main_fram_url,
+        GetThreatTypeStringForInterstitial(unsafe_resource.threat_type),
+        /*net_error_code=*/0);
   }
 }
 

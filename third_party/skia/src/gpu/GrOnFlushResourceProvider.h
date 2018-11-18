@@ -8,7 +8,6 @@
 #ifndef GrOnFlushResourceProvider_DEFINED
 #define GrOnFlushResourceProvider_DEFINED
 
-#include "GrTypes.h"
 #include "GrDeferredUpload.h"
 #include "GrOpFlushState.h"
 #include "GrResourceProvider.h"
@@ -21,7 +20,6 @@ class GrOnFlushResourceProvider;
 class GrRenderTargetOpList;
 class GrRenderTargetContext;
 class GrSurfaceProxy;
-
 class SkColorSpace;
 class SkSurfaceProps;
 
@@ -31,7 +29,7 @@ class SkSurfaceProps;
  */
 class GrOnFlushCallbackObject {
 public:
-    virtual ~GrOnFlushCallbackObject() { }
+    virtual ~GrOnFlushCallbackObject() {}
 
     /*
      * The onFlush callback allows subsystems (e.g., text, path renderers) to create atlases
@@ -77,6 +75,11 @@ public:
                                                          sk_sp<SkColorSpace>,
                                                          const SkSurfaceProps*);
 
+    // Proxy unique key management. See GrProxyProvider.
+    bool assignUniqueKeyToProxy(const GrUniqueKey&, GrTextureProxy*);
+    void removeUniqueKeyFromProxy(const GrUniqueKey&, GrTextureProxy*);
+    sk_sp<GrTextureProxy> findOrCreateProxyByUniqueKey(const GrUniqueKey&, GrSurfaceOrigin);
+
     bool instatiateProxy(GrSurfaceProxy*);
 
     // Creates a GPU buffer with a "dynamic" access pattern.
@@ -86,6 +89,7 @@ public:
     sk_sp<const GrBuffer> findOrMakeStaticBuffer(GrBufferType, size_t, const void* data,
                                                  const GrUniqueKey&);
 
+    uint32_t contextUniqueID() const;
     const GrCaps* caps() const;
 
 private:

@@ -9,12 +9,12 @@
  * PATENTS file, you can obtain it at www.aomedia.org/license/patent.
  */
 
-#ifndef AOM_DSP_X86_COMMON_AVX2_H
-#define AOM_DSP_X86_COMMON_AVX2_H
+#ifndef AOM_AOM_DSP_X86_COMMON_AVX2_H_
+#define AOM_AOM_DSP_X86_COMMON_AVX2_H_
 
 #include <immintrin.h>
 
-#include "./aom_config.h"
+#include "config/aom_config.h"
 
 // Note: in and out could have the same value
 static INLINE void mm256_transpose_16x16(const __m256i *in, __m256i *out) {
@@ -144,4 +144,4 @@ static INLINE void mm256_transpose_16x16(const __m256i *in, __m256i *out) {
   out[7] = _mm256_permute2x128_si256(tr0_7, tr0_f, 0x20);
   out[15] = _mm256_permute2x128_si256(tr0_7, tr0_f, 0x31);
 }
-#endif
+#endif  // AOM_AOM_DSP_X86_COMMON_AVX2_H_

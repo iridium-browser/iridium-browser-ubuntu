@@ -12,11 +12,19 @@
 #include <vector>
 
 #include "core/fpdfdoc/cpdf_aaction.h"
-#include "core/fpdfdoc/cpdf_formfield.h"
 #include "core/fxcrt/fx_string.h"
 #include "core/fxcrt/fx_system.h"
 #include "core/fxcrt/unowned_ptr.h"
 #include "third_party/base/stl_util.h"
+
+class CPDF_Dictionary;
+class CPDF_Font;
+class CPDF_FormControl;
+class CPDF_InteractiveForm;
+class CPDF_Object;
+class CPDF_String;
+
+enum class NotificationOption { kDoNotNotify = 0, kNotify };
 
 enum class FormFieldType : uint8_t {
   kUnknown = 0,
@@ -44,7 +52,7 @@ Optional<FormFieldType> IntToFormFieldType(int value);
 // If values are added to FormFieldType, these will need to be updated.
 #ifdef PDF_ENABLE_XFA
 constexpr size_t kFormFieldTypeCount = 16;
-#else
+#else   // PDF_ENABLE_XFA
 constexpr size_t kFormFieldTypeCount = 8;
 #endif  // PDF_ENABLE_XFA
 
@@ -69,19 +77,10 @@ constexpr FormFieldType kFormFieldTypes[kFormFieldTypeCount] = {
 #endif  // PDF_ENABLE_XFA
 };
 
-#define FORMFLAG_READONLY 0x01
-#define FORMFLAG_REQUIRED 0x02
-#define FORMFLAG_NOEXPORT 0x04
+const CPDF_Object* FPDF_GetFieldAttr(const CPDF_Dictionary* pFieldDict,
+                                     const char* name);
+CPDF_Object* FPDF_GetFieldAttr(CPDF_Dictionary* pFieldDict, const char* name);
 
-class CPDF_Dictionary;
-class CPDF_Font;
-class CPDF_FormControl;
-class CPDF_InterForm;
-class CPDF_String;
-
-CPDF_Object* FPDF_GetFieldAttr(const CPDF_Dictionary* pFieldDict,
-                               const char* name,
-                               int nLevel = 0);
 WideString FPDF_GetFullName(CPDF_Dictionary* pFieldDict);
 
 class CPDF_FormField {
@@ -99,7 +98,7 @@ class CPDF_FormField {
     Sign
   };
 
-  CPDF_FormField(CPDF_InterForm* pForm, CPDF_Dictionary* pDict);
+  CPDF_FormField(CPDF_InteractiveForm* pForm, CPDF_Dictionary* pDict);
   ~CPDF_FormField();
 
   WideString GetFullName() const;
@@ -108,9 +107,8 @@ class CPDF_FormField {
   uint32_t GetFlags() const { return m_Flags; }
 
   CPDF_Dictionary* GetFieldDict() const { return m_pDict.Get(); }
-  void SetFieldDict(CPDF_Dictionary* pDict) { m_pDict = pDict; }
 
-  bool ResetField(bool bNotify = false);
+  bool ResetField(NotificationOption notify);
 
   int CountControls() const {
     return pdfium::CollectionSize<int>(m_ControlList);
@@ -129,19 +127,23 @@ class CPDF_FormField {
 
   uint32_t GetFieldFlags() const;
   ByteString GetDefaultStyle() const;
-  WideString GetRichTextString() const;
+
+  // TODO(thestig): Figure out what to do with unused methods here.
+  bool IsReadOnly() const { return m_bReadOnly; }
+  bool IsRequired() const { return m_bRequired; }
+  bool IsNoExport() const { return m_bNoExport; }
 
   WideString GetValue() const;
   WideString GetDefaultValue() const;
-  bool SetValue(const WideString& value, bool bNotify = false);
+  bool SetValue(const WideString& value, NotificationOption notify);
 
   int GetMaxLen() const;
   int CountSelectedItems() const;
   int GetSelectedIndex(int index) const;
 
-  bool ClearSelection(bool bNotify = false);
+  bool ClearSelection(NotificationOption notify);
   bool IsItemSelected(int index) const;
-  bool SetItemSelection(int index, bool bSelected, bool bNotify = false);
+  bool SetItemSelection(int index, bool bSelected, NotificationOption notify);
 
   bool IsItemDefaultSelected(int index) const;
 
@@ -154,29 +156,22 @@ class CPDF_FormField {
   int FindOption(WideString csOptLabel) const;
   int FindOptionValue(const WideString& csOptValue) const;
 
-  bool CheckControl(int iControlIndex, bool bChecked, bool bNotify = false);
+  bool CheckControl(int iControlIndex,
+                    bool bChecked,
+                    NotificationOption notify);
 
   int GetTopVisibleIndex() const;
   int CountSelectedOptions() const;
 
   int GetSelectedOptionIndex(int index) const;
   bool IsOptionSelected(int iOptIndex) const;
-
-  bool SelectOption(int iOptIndex, bool bSelected, bool bNotify = false);
-
-  bool ClearSelectedOptions(bool bNotify = false);
-
-#ifdef PDF_ENABLE_XFA
-  bool ClearOptions(bool bNotify = false);
-
-  int InsertOption(WideString csOptLabel, int index = -1, bool bNotify = false);
-#endif  // PDF_ENABLE_XFA
+  bool SelectOption(int iOptIndex, bool bSelected, NotificationOption notify);
 
   float GetFontSize() const { return m_FontSize; }
   CPDF_Font* GetFont() const { return m_pFont.Get(); }
 
-  const CPDF_Dictionary* GetDict() const { return m_pDict.Get(); }
-  const CPDF_InterForm* GetForm() const { return m_pForm.Get(); }
+  CPDF_Dictionary* GetDict() const { return m_pDict.Get(); }
+  CPDF_InteractiveForm* GetForm() const { return m_pForm.Get(); }
 
   WideString GetCheckValue(bool bDefault) const;
 
@@ -184,37 +179,38 @@ class CPDF_FormField {
     m_ControlList.emplace_back(pFormControl);
   }
 
-  void SetOpt(std::unique_ptr<CPDF_Object> pOpt) {
-    m_pDict->SetFor("Opt", std::move(pOpt));
-  }
+  void SetOpt(std::unique_ptr<CPDF_Object> pOpt);
 
  private:
   WideString GetValue(bool bDefault) const;
-  bool SetValue(const WideString& value, bool bDefault, bool bNotify);
-
-  void SyncFieldFlags();
+  bool SetValue(const WideString& value,
+                bool bDefault,
+                NotificationOption notify);
+  void InitFieldFlags();
   int FindListSel(CPDF_String* str);
   WideString GetOptionText(int index, int sub_index) const;
-
   void LoadDA();
-  bool SetCheckValue(const WideString& value, bool bDefault, bool bNotify);
-
+  bool SetCheckValue(const WideString& value,
+                     bool bDefault,
+                     NotificationOption notify);
   bool NotifyBeforeSelectionChange(const WideString& value);
   void NotifyAfterSelectionChange();
-
   bool NotifyBeforeValueChange(const WideString& value);
   void NotifyAfterValueChange();
-
   bool NotifyListOrComboBoxBeforeChange(const WideString& value);
   void NotifyListOrComboBoxAfterChange();
 
-  CPDF_FormField::Type m_Type;
-  uint32_t m_Flags;
-  UnownedPtr<CPDF_InterForm> const m_pForm;
-  UnownedPtr<CPDF_Dictionary> m_pDict;
-  // Owned by InterForm parent.
+  CPDF_FormField::Type m_Type = Unknown;
+  uint32_t m_Flags = 0;
+  bool m_bReadOnly = false;
+  bool m_bRequired = false;
+  bool m_bNoExport = false;
+
+  UnownedPtr<CPDF_InteractiveForm> const m_pForm;
+  UnownedPtr<CPDF_Dictionary> const m_pDict;
+  // Owned by InteractiveForm parent.
   std::vector<UnownedPtr<CPDF_FormControl>> m_ControlList;
-  float m_FontSize;
+  float m_FontSize = 0;
   UnownedPtr<CPDF_Font> m_pFont;
 };
 

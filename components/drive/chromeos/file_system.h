@@ -7,7 +7,9 @@
 
 #include <stdint.h>
 
+#include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -16,12 +18,14 @@
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/threading/thread_checker.h"
+#include "base/time/default_clock.h"
 #include "components/drive/chromeos/change_list_loader_observer.h"
+#include "components/drive/chromeos/drive_operation_queue.h"
 #include "components/drive/chromeos/file_system/operation_delegate.h"
 #include "components/drive/chromeos/file_system_interface.h"
+#include "components/drive/chromeos/team_drive_change_list_loader.h"
+#include "components/drive/chromeos/team_drive_list_observer.h"
 #include "google_apis/drive/drive_api_error_codes.h"
-
-class PrefService;
 
 namespace base {
 class SequencedTaskRunner;
@@ -40,12 +44,12 @@ class JobScheduler;
 
 namespace internal {
 class AboutResourceLoader;
-class ChangeListLoader;
-class DirectoryLoader;
+class DriveChangeListLoader;
 class FileCache;
 class LoaderController;
 class ResourceMetadata;
 class SyncClient;
+class TeamDrive;
 }  // namespace internal
 
 namespace file_system {
@@ -66,31 +70,34 @@ class TruncateOperation;
 // The production implementation of FileSystemInterface.
 class FileSystem : public FileSystemInterface,
                    public internal::ChangeListLoaderObserver,
+                   public internal::TeamDriveListObserver,
                    public file_system::OperationDelegate {
  public:
-  FileSystem(PrefService* pref_service,
-             EventLogger* logger,
+  // |clock| can be mocked for testing.
+  FileSystem(EventLogger* logger,
              internal::FileCache* cache,
              JobScheduler* scheduler,
              internal::ResourceMetadata* resource_metadata,
              base::SequencedTaskRunner* blocking_task_runner,
-             const base::FilePath& temporary_file_directory);
+             const base::FilePath& temporary_file_directory,
+             const base::Clock* clock = base::DefaultClock::GetInstance());
   ~FileSystem() override;
 
   // FileSystemInterface overrides.
   void AddObserver(FileSystemObserver* observer) override;
   void RemoveObserver(FileSystemObserver* observer) override;
   void CheckForUpdates() override;
+  void CheckForUpdates(const std::set<std::string>& ids) override;
   void Search(const std::string& search_query,
               const GURL& next_link,
-              const SearchCallback& callback) override;
+              SearchCallback callback) override;
   void SearchMetadata(const std::string& query,
                       int options,
                       int at_most_num_matches,
                       MetadataSearchOrder order,
-                      const SearchMetadataCallback& callback) override;
+                      SearchMetadataCallback callback) override;
   void SearchByHashes(const std::set<std::string>& hashes,
-                      const SearchByHashesCallback& callback) override;
+                      SearchByHashesCallback callback) override;
   void TransferFileFromLocalToRemote(
       const base::FilePath& local_src_file_path,
       const base::FilePath& remote_dest_file_path,
@@ -98,7 +105,7 @@ class FileSystem : public FileSystemInterface,
   void OpenFile(const base::FilePath& file_path,
                 OpenMode open_mode,
                 const std::string& mime_type,
-                const OpenFileCallback& callback) override;
+                OpenFileCallback callback) override;
   void Copy(const base::FilePath& src_file_path,
             const base::FilePath& dest_file_path,
             bool preserve_last_modified,
@@ -129,28 +136,25 @@ class FileSystem : public FileSystemInterface,
   void Unpin(const base::FilePath& file_path,
              const FileOperationCallback& callback) override;
   void GetFile(const base::FilePath& file_path,
-               const GetFileCallback& callback) override;
+               GetFileCallback callback) override;
   void GetFileForSaving(const base::FilePath& file_path,
-                        const GetFileCallback& callback) override;
+                        GetFileCallback callback) override;
   base::Closure GetFileContent(
       const base::FilePath& file_path,
-      const GetFileContentInitializedCallback& initialized_callback,
+      GetFileContentInitializedCallback initialized_callback,
       const google_apis::GetContentCallback& get_content_callback,
       const FileOperationCallback& completion_callback) override;
   void GetResourceEntry(const base::FilePath& file_path,
-                        const GetResourceEntryCallback& callback) override;
+                        GetResourceEntryCallback callback) override;
   void ReadDirectory(const base::FilePath& directory_path,
-                     const ReadDirectoryEntriesCallback& entries_callback,
+                     ReadDirectoryEntriesCallback entries_callback,
                      const FileOperationCallback& completion_callback) override;
-  void GetAvailableSpace(const GetAvailableSpaceCallback& callback) override;
-  void GetShareUrl(const base::FilePath& file_path,
-                   const GURL& embed_origin,
-                   const GetShareUrlCallback& callback) override;
-  void GetMetadata(const GetFilesystemMetadataCallback& callback) override;
+  void GetAvailableSpace(GetAvailableSpaceCallback callback) override;
+  void GetMetadata(GetFilesystemMetadataCallback callback) override;
   void MarkCacheFileAsMounted(const base::FilePath& drive_file_path,
-                              const MarkMountedCallback& callback) override;
+                              MarkMountedCallback callback) override;
   void IsCacheFileMarkedAsMounted(const base::FilePath& drive_file_path,
-                                  const IsMountedCallback& callback) override;
+                                  IsMountedCallback callback) override;
   void MarkCacheFileAsUnmounted(const base::FilePath& cache_file_path,
                                 const FileOperationCallback& callback) override;
   void AddPermission(const base::FilePath& drive_file_path,
@@ -183,14 +187,26 @@ class FileSystem : public FileSystemInterface,
   // Used to propagate events from ChangeListLoader.
   void OnDirectoryReloaded(const base::FilePath& directory_path) override;
   void OnFileChanged(const FileChange& changed_files) override;
+  void OnTeamDrivesChanged(const FileChange& changed_team_drives) override;
   void OnLoadFromServerComplete() override;
   void OnInitialLoadComplete() override;
 
+  // TeamDriveListObserver overrides.
+  void OnTeamDriveListLoaded(
+      const std::vector<internal::TeamDrive>& team_drives_list,
+      const std::vector<internal::TeamDrive>& added_team_drives,
+      const std::vector<internal::TeamDrive>& removed_team_drives) override;
+
   // Used by tests.
-  internal::ChangeListLoader* change_list_loader_for_testing() {
-    return change_list_loader_.get();
+  internal::DriveChangeListLoader* change_list_loader_for_testing() {
+    return default_corpus_change_list_loader_.get();
   }
   internal::SyncClient* sync_client_for_testing() { return sync_client_.get(); }
+
+  internal::DriveBackgroundOperationQueue<internal::TeamDriveChangeListLoader>*
+  team_drive_operation_queue_for_testing() {
+    return team_drive_operation_queue_.get();
+  }
 
  private:
   struct CreateDirectoryParams;
@@ -214,30 +230,30 @@ class FileSystem : public FileSystemInterface,
 
   // Callback for handling about resource fetch.
   void OnGetAboutResource(
-      const GetAvailableSpaceCallback& callback,
+      GetAvailableSpaceCallback callback,
       google_apis::DriveApiErrorCode status,
       std::unique_ptr<google_apis::AboutResource> about_resource);
 
+  // Stores any file error as a result of Checking updates.
+  void OnUpdateChecked(const std::string& team_drive_id,
+                       const base::RepeatingClosure& closure,
+                       FileError error);
+
   // Part of CheckForUpdates(). Called when
   // ChangeListLoader::CheckForUpdates() is complete.
-  void OnUpdateChecked(FileError error);
+  void OnUpdateCompleted();
 
   // Part of GetResourceEntry().
   // Called when ReadDirectory() is complete.
   void GetResourceEntryAfterRead(const base::FilePath& file_path,
-                                 const GetResourceEntryCallback& callback,
+                                 GetResourceEntryCallback callback,
                                  FileError error);
 
-  // Part of GetShareUrl. Resolves the resource entry to get the resource it,
-  // and then uses it to ask for the share url. |callback| must not be null.
-  void GetShareUrlAfterGetResourceEntry(const base::FilePath& file_path,
-                                        const GURL& embed_origin,
-                                        const GetShareUrlCallback& callback,
-                                        ResourceEntry* entry,
-                                        FileError error);
-  void OnGetResourceEntryForGetShareUrl(const GetShareUrlCallback& callback,
-                                        google_apis::DriveApiErrorCode status,
-                                        const GURL& share_url);
+  void OnGetMetadata(
+      GetFilesystemMetadataCallback callback,
+      drive::FileSystemMetadata* default_corpus_metadata,
+      std::map<std::string, drive::FileSystemMetadata>* team_drive_metadata);
+
   // Part of AddPermission.
   void AddPermissionAfterGetResourceEntry(
       const std::string& email,
@@ -252,20 +268,14 @@ class FileSystem : public FileSystemInterface,
       const base::FilePath* file_path,
       FileError error);
 
-  // Used to get Drive related preferences.
-  PrefService* pref_service_;
-
   // Sub components owned by DriveIntegrationService.
   EventLogger* logger_;
   internal::FileCache* cache_;
   JobScheduler* scheduler_;
   internal::ResourceMetadata* resource_metadata_;
 
-  // Time of the last update check.
-  base::Time last_update_check_time_;
-
-  // Error of the last update check.
-  FileError last_update_check_error_;
+  // Stores debug update metadata for default corpus and team drive.
+  std::map<std::string, FileSystemMetadata> last_update_metadata_;
 
   // Used to load about resource.
   std::unique_ptr<internal::AboutResourceLoader> about_resource_loader_;
@@ -273,18 +283,28 @@ class FileSystem : public FileSystemInterface,
   // Used to control ChangeListLoader.
   std::unique_ptr<internal::LoaderController> loader_controller_;
 
-  // The loader is used to load the change lists.
-  std::unique_ptr<internal::ChangeListLoader> change_list_loader_;
+  // Used to retrieve changelists from the default corpus.
+  std::unique_ptr<internal::DriveChangeListLoader>
+      default_corpus_change_list_loader_;
 
-  std::unique_ptr<internal::DirectoryLoader> directory_loader_;
+  std::unique_ptr<internal::DriveBackgroundOperationQueue<
+      internal::TeamDriveChangeListLoader>>
+      team_drive_operation_queue_;
+
+  // Used to retrieve changelists for team drives. The key for the map is the
+  // team_drive_id.
+  std::map<std::string, std::unique_ptr<internal::TeamDriveChangeListLoader>>
+      team_drive_change_list_loaders_;
 
   std::unique_ptr<internal::SyncClient> sync_client_;
 
-  base::ObserverList<FileSystemObserver> observers_;
+  base::ObserverList<FileSystemObserver>::Unchecked observers_;
 
   scoped_refptr<base::SequencedTaskRunner> blocking_task_runner_;
 
   base::FilePath temporary_file_directory_;
+
+  const base::Clock* clock_;  // Not owned.
 
   // Implementation of each file system operation.
   std::unique_ptr<file_system::CopyOperation> copy_operation_;
@@ -302,7 +322,7 @@ class FileSystem : public FileSystemInterface,
       get_file_for_saving_operation_;
   std::unique_ptr<file_system::SetPropertyOperation> set_property_operation_;
 
-  base::ThreadChecker thread_checker_;
+  THREAD_CHECKER(thread_checker_);
 
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate the weak pointers before any other members are destroyed.

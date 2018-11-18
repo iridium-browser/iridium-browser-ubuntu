@@ -59,29 +59,24 @@ static_library("browser") {
     "//components/strings",
     "//components/translate/core/common",
     "//components/variations",
+    "//components/variations/net",
     "//google_apis",
     "//net",
     "//services/metrics/public/cpp:metrics_cpp",
     "//services/metrics/public/cpp:ukm_builders",
+    "//services/network/public/cpp:cpp",
     "//third_party/icu",
     "//third_party/metrics_proto",
     "//ui/base",
     "//url",
   ]
 
-  if (!use_aura) {
+  if (is_ios || is_android) {
     sources += [
       "translate_infobar_delegate.cc",
       "translate_infobar_delegate.h",
     ]
     deps += [ "//components/infobars/core" ]
-  }
-
-  if (is_mac) {
-    sources += [
-      "options_menu_model.cc",
-      "options_menu_model.h",
-    ]
   }
 }
 
@@ -112,6 +107,7 @@ source_set("unit_tests") {
     "//components/assist_ranker/proto",
     "//components/infobars/core",
     "//components/language/core/browser",
+    "//components/language/core/common:common",
     "//components/pref_registry:pref_registry",
     "//components/prefs",
     "//components/prefs:test_support",
@@ -122,6 +118,8 @@ source_set("unit_tests") {
     "//components/variations",
     "//net:test_support",
     "//services/metrics/public/cpp:ukm_builders",
+    "//services/network:test_support",
+    "//services/network/public/cpp:cpp",
     "//testing/gtest",
     "//third_party/metrics_proto",
     "//ui/base",

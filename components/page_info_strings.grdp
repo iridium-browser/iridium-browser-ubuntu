@@ -29,6 +29,11 @@
     You're viewing the source of a web page
   </message>
 
+  <!-- Viewing file strings -->
+  <message name="IDS_PAGE_INFO_FILE_PAGE" desc="Message to display in the page info bubble when the page the user has navigated to is a file:// page">
+    You're viewing a local or shared file
+  </message>
+
   <!-- Detail strings -->
   <message name="IDS_PAGE_INFO_SECURE_DETAILS" desc="A short paragraph explaining a secure site to the user.">
     Your information (for example, passwords or credit card numbers) is private when it is sent to this site.
@@ -212,8 +217,8 @@
     <message name="IDS_PAGE_INFO_TYPE_JAVASCRIPT" desc="The label used for JavaScript permission controls in the Page Info popup.">
       JavaScript
     </message>
-    <message name="IDS_PAGE_INFO_TYPE_POPUPS" desc="The label used for popups permission controls in the Page Info popup.">
-      Popups
+    <message name="IDS_PAGE_INFO_TYPE_POPUPS_REDIRECTS" desc="The label used for the popup/redirect permission controls in the Page Info popup.">
+      Pop-ups and redirects
     </message>
     <message name="IDS_PAGE_INFO_TYPE_FLASH" desc="The label used for Flash permissions in the Page Info popup.">
       Flash
@@ -254,6 +259,9 @@
     <message name="IDS_PAGE_INFO_BUTTON_TEXT_BLOCKED_BY_USER" desc="The Page Info popup contains several buttons for opening dropdown menus and changing site permissions. This is the text of such a button if the permission controlled by the button was explicitly set to block by the user.">
       Block
     </message>
+    <message name="IDS_PAGE_INFO_BUTTON_TEXT_MUTED_BY_USER" desc="The Page Info popup contains several buttons for opening dropdown menus and changing site permissions. This is the text of such a button if the button controls the sound permission and was explicitly set to mute by the user.">
+      Mute
+    </message>
     <message name="IDS_PAGE_INFO_BUTTON_TEXT_ASK_BY_USER" desc="The Page Info popup contains several buttons for opening dropdown menus and changing site permissions. This is the text of such a button if the permission controlled by the button was explicitly set to ask by the user.">
       Ask
     </message>
@@ -264,8 +272,14 @@
     <message name="IDS_PAGE_INFO_BUTTON_TEXT_ALLOWED_BY_DEFAULT" desc="The Page Info popup contains several buttons for opening dropdown menus and changing site permissions. This is the text of such a button if the permission controlled by the button is set to the default setting and the default settings is allow.">
       Allow (default)
     </message>
+    <message name="IDS_PAGE_INFO_BUTTON_TEXT_AUTOMATIC_BY_DEFAULT" desc="The Page Info popup contains several buttons for opening dropdown menus and changing site permissions. This is the text of such a button if the button controls the sound permission and is set to the default setting and the default setting is automatic.">
+      Automatic (default)
+    </message>
     <message name="IDS_PAGE_INFO_BUTTON_TEXT_BLOCKED_BY_DEFAULT" desc="The Page Info popup contains several buttons for opening dropdown menus and changing site permissions. This is the text of such a button if the permission controlled by the button is set to the default setting and the default settings is block.">
       Block (default)
+    </message>
+    <message name="IDS_PAGE_INFO_BUTTON_TEXT_MUTED_BY_DEFAULT" desc="The Page Info popup contains several buttons for opening dropdown menus and changing site permissions. This is the text of such a button if the button controls the sound permission and is set to the default setting and the default setting is mute.">
+      Mute (default)
     </message>
     <message name="IDS_PAGE_INFO_BUTTON_TEXT_ASK_BY_DEFAULT" desc="The Page Info popup contains several buttons for opening dropdown menus and changing site permissions. This is the text of such a button if the permission controlled by the button is set to the default setting and the default settings is ask.">
       Ask (default)
@@ -348,8 +362,8 @@
     <message name="IDS_PAGE_INFO_PERMISSION_AUTOMATICALLY_BLOCKED" desc="The label used underneath a permission listed in the Page Info bubble if the permission was blocked by Chrome on behalf of the user.">
       Automatically blocked
     </message>
-    <message name="IDS_PAGE_INFO_PERMISSION_ADS_SUBTITLE" desc="The label used underneath the ads permission in the Page Info UI if the site is being considered for ad blocking. Used on both desktop and Android platforms" formatter_data="android_java">
-      Site tends to show intrusive ads
+    <message name="IDS_PAGE_INFO_PERMISSION_ADS_SUBTITLE" desc="A subtitle shown under the ‘Ads’ setting indicating that a site has, in the past, shown intrusive or misleading ads. Shown when user clicks/taps the lock/'Danger' icon in the address bar. Used on both desktop and Android platforms" formatter_data="android_java">
+      Site shows intrusive or misleading ads
     </message>
 
     <!-- Permission change infobar. -->
@@ -365,9 +379,6 @@
     <!-- Password Protection -->
     <if expr="not is_android">
       <message name="IDS_PAGE_INFO_CHANGE_PASSWORD_SUMMARY" desc="A one-line summary at the top of the Page Info bubble (which shows when you click the security indicator) if user has reuse their google password on current website.">
-        This site may have just stolen your password
-      </message>
-      <message name="IDS_PAGE_INFO_CHANGE_PASSWORD_SUMMARY_SOFTER" desc="A one-line summary at the top of the Page Info bubble (which shows when you click the security indicator) if user has reuse their google password on current website.">
         Your password may be compromised
       </message>
       <if expr="_google_chrome">
@@ -414,4 +425,12 @@
       </message>
     </if>
   </if>
+
+     <!-- Billing -->
+    <message name="IDS_PAGE_INFO_BILLING_SUMMARY" desc="A one-line summary at the top of the Page Info bubble (which shows when you click the security indicator) if the website has been flagged for a billing interstitial">
+      This page may try to charge you money
+    </message>
+    <message name="IDS_PAGE_INFO_BILLING_DETAILS" desc="A one-line summary at the top of the Page Info bubble (which shows when you click the security indicator) if the website has been flagged for a billing interstitial.">
+      These charges could be one-time or recurring and may not be obvious.
+    </message>
 </grit-part>

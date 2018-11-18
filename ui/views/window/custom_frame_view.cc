@@ -197,8 +197,12 @@ void CustomFrameView::UpdateWindowIcon() {
 }
 
 void CustomFrameView::UpdateWindowTitle() {
-  if (frame_->widget_delegate()->ShouldShowWindowTitle())
+  if (frame_->widget_delegate()->ShouldShowWindowTitle() &&
+      // If this is still unset, we haven't laid out window controls yet.
+      maximum_title_bar_x_ > -1) {
+    LayoutTitleBar();
     SchedulePaintInRect(title_bounds_);
+  }
 }
 
 void CustomFrameView::SizeConstraintsChanged() {
@@ -518,8 +522,7 @@ void CustomFrameView::LayoutWindowControls() {
       button_order->trailing_buttons();
 
   ImageButton* button = NULL;
-  for (std::vector<views::FrameButton>::const_iterator it =
-           leading_buttons.begin(); it != leading_buttons.end(); ++it) {
+  for (auto it = leading_buttons.begin(); it != leading_buttons.end(); ++it) {
     button = GetImageButton(*it);
     if (!button)
       continue;
@@ -534,8 +537,8 @@ void CustomFrameView::LayoutWindowControls() {
 
   // Trailing buttions are laid out in a RTL fashion
   next_button_x = width() - FrameBorderThickness();
-  for (std::vector<views::FrameButton>::const_reverse_iterator it =
-           trailing_buttons.rbegin(); it != trailing_buttons.rend(); ++it) {
+  for (auto it = trailing_buttons.rbegin(); it != trailing_buttons.rend();
+       ++it) {
     button = GetImageButton(*it);
     if (!button)
       continue;

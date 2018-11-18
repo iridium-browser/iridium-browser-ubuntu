@@ -10,7 +10,6 @@
 #include <utility>
 #include <vector>
 
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "components/sync/base/model_type_test_util.h"
 #include "components/sync/test/mock_invalidation.h"
@@ -97,55 +96,12 @@ TEST_F(NudgeTrackerTest, EmptyNudgeTracker) {
   // Now we're at the normal, "idle" state.
   EXPECT_FALSE(nudge_tracker_.IsSyncRequired());
   EXPECT_FALSE(nudge_tracker_.IsGetUpdatesRequired());
-  EXPECT_EQ(sync_pb::GetUpdatesCallerInfo::UNKNOWN,
-            nudge_tracker_.GetLegacySource());
+  EXPECT_EQ(sync_pb::SyncEnums::UNKNOWN_ORIGIN, nudge_tracker_.GetOrigin());
 
   sync_pb::GetUpdateTriggers gu_trigger;
   nudge_tracker_.FillProtoMessage(BOOKMARKS, &gu_trigger);
 
-  EXPECT_EQ(sync_pb::GetUpdatesCallerInfo::UNKNOWN,
-            nudge_tracker_.GetLegacySource());
-}
-
-// Verify that nudges override each other based on a priority order.
-// RETRY < LOCAL < DATATYPE_REFRESH < NOTIFICATION
-TEST_F(NudgeTrackerTest, SourcePriorities) {
-  // Start with a retry request.
-  const base::TimeTicks t0 = base::TimeTicks::FromInternalValue(1234);
-  const base::TimeTicks t1 = t0 + base::TimeDelta::FromSeconds(10);
-  nudge_tracker_.SetNextRetryTime(t0);
-  nudge_tracker_.SetSyncCycleStartTime(t1);
-  EXPECT_EQ(sync_pb::GetUpdatesCallerInfo::RETRY,
-            nudge_tracker_.GetLegacySource());
-
-  // Track a local nudge.
-  nudge_tracker_.RecordLocalChange(ModelTypeSet(BOOKMARKS));
-  EXPECT_EQ(sync_pb::GetUpdatesCallerInfo::LOCAL,
-            nudge_tracker_.GetLegacySource());
-
-  // A refresh request will override it.
-  nudge_tracker_.RecordLocalRefreshRequest(ModelTypeSet(TYPED_URLS));
-  EXPECT_EQ(sync_pb::GetUpdatesCallerInfo::DATATYPE_REFRESH,
-            nudge_tracker_.GetLegacySource());
-
-  // Another local nudge will not be enough to change it.
-  nudge_tracker_.RecordLocalChange(ModelTypeSet(BOOKMARKS));
-  EXPECT_EQ(sync_pb::GetUpdatesCallerInfo::DATATYPE_REFRESH,
-            nudge_tracker_.GetLegacySource());
-
-  // An invalidation will override the refresh request source.
-  nudge_tracker_.RecordRemoteInvalidation(PREFERENCES,
-                                          BuildInvalidation(1, "hint"));
-  EXPECT_EQ(sync_pb::GetUpdatesCallerInfo::NOTIFICATION,
-            nudge_tracker_.GetLegacySource());
-
-  // Neither local nudges nor refresh requests will override it.
-  nudge_tracker_.RecordLocalChange(ModelTypeSet(BOOKMARKS));
-  EXPECT_EQ(sync_pb::GetUpdatesCallerInfo::NOTIFICATION,
-            nudge_tracker_.GetLegacySource());
-  nudge_tracker_.RecordLocalRefreshRequest(ModelTypeSet(TYPED_URLS));
-  EXPECT_EQ(sync_pb::GetUpdatesCallerInfo::NOTIFICATION,
-            nudge_tracker_.GetLegacySource());
+  EXPECT_EQ(sync_pb::SyncEnums::UNKNOWN_ORIGIN, nudge_tracker_.GetOrigin());
 }
 
 // Verify that nudges override each other based on a priority order.
@@ -181,27 +137,6 @@ TEST_F(NudgeTrackerTest, OriginPriorities) {
   EXPECT_EQ(sync_pb::SyncEnums::GU_TRIGGER, nudge_tracker_.GetOrigin());
   nudge_tracker_.RecordLocalRefreshRequest(ModelTypeSet(TYPED_URLS));
   EXPECT_EQ(sync_pb::SyncEnums::GU_TRIGGER, nudge_tracker_.GetOrigin());
-}
-
-TEST_F(NudgeTrackerTest, SourcePriority_InitialSyncRequest) {
-  nudge_tracker_.RecordInitialSyncRequired(BOOKMARKS);
-
-  // For lack of a better source, we describe an initial sync request as having
-  // source DATATYPE_REFRESH.
-  EXPECT_EQ(sync_pb::GetUpdatesCallerInfo::DATATYPE_REFRESH,
-            nudge_tracker_.GetLegacySource());
-
-  // This should never happen in practice.  But, if it did, we'd want the
-  // initial sync required to keep the source set to DATATYPE_REFRESH.
-  nudge_tracker_.RecordLocalChange(ModelTypeSet(BOOKMARKS));
-  EXPECT_EQ(sync_pb::GetUpdatesCallerInfo::DATATYPE_REFRESH,
-            nudge_tracker_.GetLegacySource());
-
-  // It should be safe to let NOTIFICATIONs override it.
-  nudge_tracker_.RecordRemoteInvalidation(BOOKMARKS,
-                                          BuildInvalidation(1, "hint"));
-  EXPECT_EQ(sync_pb::GetUpdatesCallerInfo::NOTIFICATION,
-            nudge_tracker_.GetLegacySource());
 }
 
 // Verifies the management of invalidation hints and GU trigger fields.
@@ -918,16 +853,14 @@ TEST_F(NudgeTrackerTest, NoTypesShorterThanDefault) {
 
   std::map<ModelType, base::TimeDelta> delay_map;
   ModelTypeSet protocol_types = ProtocolTypes();
-  for (ModelTypeSet::Iterator iter = protocol_types.First(); iter.Good();
-       iter.Inc()) {
-    delay_map[iter.Get()] = base::TimeDelta();
+  for (ModelType type : protocol_types) {
+    delay_map[type] = base::TimeDelta();
   }
   nudge_tracker_.OnReceivedCustomNudgeDelays(delay_map);
 
   // All types should still have a nudge greater than or equal to the minimum.
-  for (ModelTypeSet::Iterator iter = protocol_types.First(); iter.Good();
-       iter.Inc()) {
-    EXPECT_GE(nudge_tracker_.RecordLocalChange(ModelTypeSet(iter.Get())),
+  for (ModelType type : protocol_types) {
+    EXPECT_GE(nudge_tracker_.RecordLocalChange(ModelTypeSet(type)),
               base::TimeDelta::FromMilliseconds(500));
   }
 }

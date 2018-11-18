@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
@@ -155,9 +156,8 @@ template <typename Container>
 void ExpectEquivalentMaps(const Container& left, const Container& right) {
   ASSERT_EQ(left.size(), right.size());
 
-  typedef typename Container::const_iterator const_iterator;
-  const_iterator left_itr = left.begin();
-  const_iterator right_itr = right.begin();
+  auto left_itr = left.begin();
+  auto right_itr = right.begin();
   while (left_itr != left.end()) {
     EXPECT_EQ(left_itr->first, right_itr->first);
     ExpectEquivalent(left_itr->second, right_itr->second);
@@ -170,9 +170,8 @@ template <typename Container>
 void ExpectEquivalentSets(const Container& left, const Container& right) {
   ASSERT_EQ(left.size(), right.size());
 
-  typedef typename Container::const_iterator const_iterator;
-  const_iterator left_itr = left.begin();
-  const_iterator right_itr = right.begin();
+  auto left_itr = left.begin();
+  auto right_itr = right.begin();
   while (left_itr != left.end()) {
     ExpectEquivalent(*left_itr, *right_itr);
     ++left_itr;
@@ -198,7 +197,7 @@ class MetadataDatabaseTest : public testing::TestWithParam<bool> {
 
   void SetUp() override {
     ASSERT_TRUE(database_dir_.CreateUniqueTempDir());
-    in_memory_env_.reset(leveldb_chrome::NewMemEnv(leveldb::Env::Default()));
+    in_memory_env_ = leveldb_chrome::NewMemEnv("MetadataDatabaseTest");
   }
 
   void TearDown() override { DropDatabase(); }
@@ -217,10 +216,16 @@ class MetadataDatabaseTest : public testing::TestWithParam<bool> {
     return 0;
   }
 
+  bool enable_on_disk_index() const { return GetParam(); }
+
+  leveldb::Env* in_memory_env() const { return in_memory_env_.get(); }
+
+  const base::FilePath& DatabasePath() const { return database_dir_.GetPath(); }
+
   SyncStatusCode InitializeMetadataDatabase() {
     SyncStatusCode status = SYNC_STATUS_UNKNOWN;
     metadata_database_ = MetadataDatabase::CreateInternal(
-        database_dir_.GetPath(), in_memory_env_.get(), GetParam(), &status);
+        DatabasePath(), in_memory_env_.get(), enable_on_disk_index(), &status);
     return status;
   }
 
@@ -275,8 +280,8 @@ class MetadataDatabaseTest : public testing::TestWithParam<bool> {
     options.create_if_missing = true;
     options.max_open_files = 0;  // Use minimum.
     options.env = in_memory_env_.get();
-    leveldb::Status status = leveldb_env::OpenDB(
-        options, database_dir_.GetPath().AsUTF8Unsafe(), &db);
+    leveldb::Status status =
+        leveldb_env::OpenDB(options, DatabasePath().AsUTF8Unsafe(), &db);
     EXPECT_TRUE(status.ok());
 
     std::unique_ptr<LevelDBWrapper> wrapper(new LevelDBWrapper(std::move(db)));
@@ -538,7 +543,7 @@ class MetadataDatabaseTest : public testing::TestWithParam<bool> {
 
     MetadataDatabaseIndexInterface* index1 = metadata_database_->index_.get();
     MetadataDatabaseIndexInterface* index2 = metadata_database_2->index_.get();
-    if (GetParam()) {
+    if (enable_on_disk_index()) {
       VerifyReloadConsistencyForOnDisk(
           static_cast<MetadataDatabaseIndexOnDisk*>(index1),
           static_cast<MetadataDatabaseIndexOnDisk*>(index2));
@@ -1169,6 +1174,30 @@ TEST_P(MetadataDatabaseTest, DumpFiles) {
   EXPECT_TRUE(file->GetString("title", &str) && str == "file_0");
   EXPECT_TRUE(file->GetString("type", &str) && str == "file");
   EXPECT_TRUE(file->HasKey("details"));
+}
+
+TEST_P(MetadataDatabaseTest, ClearDatabase) {
+  const bool db_on_disk = enable_on_disk_index();
+  leveldb::Env* env = db_on_disk ? leveldb::Env::Default() : in_memory_env();
+  std::vector<std::string> children;
+  EXPECT_TRUE(env->GetChildren(DatabasePath().AsUTF8Unsafe(), &children).ok());
+  EXPECT_EQ(children.size(), 0ul);
+
+  SyncStatusCode status = SYNC_STATUS_UNKNOWN;
+  std::unique_ptr<MetadataDatabase> metadata_database =
+      MetadataDatabase::CreateInternal(DatabasePath(), env,
+                                       enable_on_disk_index(), &status);
+  ASSERT_EQ(SYNC_STATUS_OK, status);
+  EXPECT_TRUE(env->GetChildren(DatabasePath().AsUTF8Unsafe(), &children).ok());
+  EXPECT_GT(children.size(), 0ul);
+
+  MetadataDatabase::ClearDatabase(std::move(metadata_database));
+
+  if (db_on_disk) {
+    EXPECT_FALSE(base::PathExists(DatabasePath()));
+  } else {
+    EXPECT_TRUE(base::PathExists(DatabasePath()));
+  }
 }
 
 }  // namespace drive_backend

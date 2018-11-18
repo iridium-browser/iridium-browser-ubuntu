@@ -13,8 +13,8 @@
 #include "base/memory/ptr_util.h"
 #include "ui/keyboard/keyboard_controller.h"
 #include "ui/keyboard/keyboard_switches.h"
-#include "ui/keyboard/keyboard_test_util.h"
 #include "ui/keyboard/keyboard_ui.h"
+#include "ui/keyboard/test/keyboard_test_util.h"
 
 namespace ash {
 
@@ -55,9 +55,8 @@ class TestLayoutManager : public WorkspaceLayoutManager {
 
 // Verifies that the always on top controller is notified of keyboard bounds
 // changing events.
-TEST_F(VirtualKeyboardAlwaysOnTopControllerTest, NotifyKeyboardBoundsChanged) {
-  keyboard::KeyboardController* keyboard_controller =
-      keyboard::KeyboardController::GetInstance();
+TEST_F(VirtualKeyboardAlwaysOnTopControllerTest, NotifyKeyboardBoundsChanging) {
+  auto* keyboard_controller = keyboard::KeyboardController::Get();
   aura::Window* root_window = Shell::GetPrimaryRootWindow();
   aura::Window* always_on_top_container =
       Shell::GetContainer(root_window, kShellWindowId_AlwaysOnTopContainer);
@@ -72,18 +71,14 @@ TEST_F(VirtualKeyboardAlwaysOnTopControllerTest, NotifyKeyboardBoundsChanged) {
   // Activate keyboard. This triggers keyboard listeners to be registered.
   controller->ActivateKeyboard(keyboard_controller);
 
-  // Mock a keyboard appearing.
-  aura::Window* keyboard_container = keyboard_controller->GetContainerWindow();
-  ASSERT_TRUE(keyboard_container);
-  keyboard_container->Show();
-  aura::Window* contents_window =
-      keyboard_controller->ui()->GetContentsWindow();
+  // Show the keyboard.
+  keyboard_controller->ShowKeyboard(false /* locked */);
   const int kKeyboardHeight = 200;
   gfx::Rect keyboard_bounds = keyboard::KeyboardBoundsFromRootBounds(
       root_window->bounds(), kKeyboardHeight);
-  contents_window->SetBounds(keyboard_bounds);
-  contents_window->Show();
-  keyboard_controller->NotifyContentsBoundsChanging(keyboard_bounds);
+  keyboard_controller->GetKeyboardWindow()->SetBounds(keyboard_bounds);
+  keyboard_controller->NotifyKeyboardWindowLoaded();
+
   // Verify that test manager was notified of bounds change.
   ASSERT_TRUE(manager->keyboard_bounds_changed());
 }

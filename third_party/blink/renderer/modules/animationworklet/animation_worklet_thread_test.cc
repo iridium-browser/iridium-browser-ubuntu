@@ -13,9 +13,9 @@
 #include "third_party/blink/renderer/bindings/core/v8/source_location.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_gc_controller.h"
 #include "third_party/blink/renderer/bindings/core/v8/worker_or_worklet_script_controller.h"
-#include "third_party/blink/renderer/core/dom/animation_worklet_proxy_client.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/core/origin_trials/origin_trial_context.h"
+#include "third_party/blink/renderer/core/script/script.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
 #include "third_party/blink/renderer/core/workers/global_scope_creation_params.h"
 #include "third_party/blink/renderer/core/workers/parent_execution_context_task_runners.h"
@@ -24,10 +24,10 @@
 #include "third_party/blink/renderer/core/workers/worker_or_worklet_global_scope.h"
 #include "third_party/blink/renderer/core/workers/worker_reporting_proxy.h"
 #include "third_party/blink/renderer/core/workers/worklet_module_responses_map.h"
+#include "third_party/blink/renderer/modules/animationworklet/animation_worklet_proxy_client.h"
 #include "third_party/blink/renderer/platform/cross_thread_functional.h"
 #include "third_party/blink/renderer/platform/loader/fetch/access_control_status.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_loader_options.h"
-#include "third_party/blink/renderer/platform/testing/testing_platform_support.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 #include "third_party/blink/renderer/platform/waitable_event.h"
 #include "third_party/blink/renderer/platform/web_thread_supporting_gc.h"
@@ -36,33 +36,11 @@
 namespace blink {
 namespace {
 
-class AnimationWorkletTestPlatform : public TestingPlatformSupport {
+class TestAnimationWorkletProxyClient : public AnimationWorkletProxyClient {
  public:
-  WebCompositorSupport* CompositorSupport() override {
-    return &compositor_support_;
-  }
-
-  // Need to override the thread creating support so we can actually run
-  // Animation Worklet code that would go on a backing thread in non-test
-  // code. i.e. most tests remove the extra threads, but we need this one.
-  std::unique_ptr<WebThread> CreateThread(
-      const blink::WebThreadCreationParams& params) override {
-    return old_platform_->CreateThread(params);
-  }
-
- private:
-  TestingCompositorSupport compositor_support_;
-};
-
-class TestAnimationWorkletProxyClient
-    : public GarbageCollected<TestAnimationWorkletProxyClient>,
-      public AnimationWorkletProxyClient {
-  USING_GARBAGE_COLLECTED_MIXIN(TestAnimationWorkletProxyClient);
-
- public:
-  TestAnimationWorkletProxyClient() = default;
+  TestAnimationWorkletProxyClient()
+      : AnimationWorkletProxyClient(0, nullptr, nullptr, nullptr, nullptr){};
   void SetGlobalScope(WorkletGlobalScope*) override {}
-  void Dispose() override {}
 };
 
 }  // namespace
@@ -70,7 +48,7 @@ class TestAnimationWorkletProxyClient
 class AnimationWorkletThreadTest : public PageTestBase {
  public:
   void SetUp() override {
-    AnimationWorkletThread::CreateSharedBackingThreadForTest();
+    AnimationWorkletThread::EnsureSharedBackingThread();
     PageTestBase::SetUp(IntSize());
     Document* document = &GetDocument();
     document->SetURL(KURL("https://example.com/"));
@@ -88,19 +66,18 @@ class AnimationWorkletThreadTest : public PageTestBase {
                                          new TestAnimationWorkletProxyClient());
 
     std::unique_ptr<AnimationWorkletThread> thread =
-        AnimationWorkletThread::Create(nullptr, *reporting_proxy_);
+        AnimationWorkletThread::Create(*reporting_proxy_);
     Document* document = &GetDocument();
     thread->Start(
         std::make_unique<GlobalScopeCreationParams>(
-            document->Url(), document->UserAgent(),
-            nullptr /* content_security_policy_parsed_headers */,
-            document->GetReferrerPolicy(), document->GetSecurityOrigin(),
-            document->IsSecureContext(), clients, document->AddressSpace(),
+            document->Url(), ScriptType::kModule, document->UserAgent(),
+            Vector<CSPHeaderAndType>(), document->GetReferrerPolicy(),
+            document->GetSecurityOrigin(), document->IsSecureContext(),
+            document->GetHttpsState(), clients, document->AddressSpace(),
             OriginTrialContext::GetTokens(document).get(),
             base::UnguessableToken::Create(), nullptr /* worker_settings */,
-            kV8CacheOptionsDefault,
-            new WorkletModuleResponsesMap(document->Fetcher())),
-        WTF::nullopt, WorkerInspectorProxy::PauseOnWorkerStart::kDontPause,
+            kV8CacheOptionsDefault, new WorkletModuleResponsesMap),
+        base::nullopt, WorkerInspectorProxy::PauseOnWorkerStart::kDontPause,
         ParentExecutionContextTaskRunners::Create());
     return thread;
   }
@@ -138,7 +115,6 @@ class AnimationWorkletThreadTest : public PageTestBase {
   }
 
   std::unique_ptr<WorkerReportingProxy> reporting_proxy_;
-  ScopedTestingPlatformSupport<AnimationWorkletTestPlatform> platform_;
 };
 
 TEST_F(AnimationWorkletThreadTest, Basic) {

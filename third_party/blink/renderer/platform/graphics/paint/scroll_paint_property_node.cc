@@ -6,39 +6,86 @@
 
 namespace blink {
 
-ScrollPaintPropertyNode* ScrollPaintPropertyNode::Root() {
-  DEFINE_STATIC_REF(ScrollPaintPropertyNode, root,
-                    (ScrollPaintPropertyNode::Create(
-                        nullptr, IntRect(), IntRect(), false, false,
-                        MainThreadScrollingReason::kNotScrollingOnMain,
-                        CompositorElementId())));
-  return root;
+namespace {
+
+WTF::String OverscrollBehaviorTypeToString(
+    OverscrollBehavior::OverscrollBehaviorType value) {
+  switch (value) {
+    case OverscrollBehavior::kOverscrollBehaviorTypeNone:
+      return "none";
+    case OverscrollBehavior::kOverscrollBehaviorTypeAuto:
+      return "auto";
+    case OverscrollBehavior::kOverscrollBehaviorTypeContain:
+      return "contain";
+    default:
+      NOTREACHED();
+  }
+}
+
+}  // namespace
+
+const ScrollPaintPropertyNode& ScrollPaintPropertyNode::Root() {
+  DEFINE_STATIC_REF(
+      ScrollPaintPropertyNode, root,
+      base::AdoptRef(new ScrollPaintPropertyNode(nullptr, State{})));
+  return *root;
 }
 
 std::unique_ptr<JSONObject> ScrollPaintPropertyNode::ToJSON() const {
   auto json = JSONObject::Create();
   if (Parent())
     json->SetString("parent", String::Format("%p", Parent()));
-  if (container_rect_ != IntRect())
-    json->SetString("containerRect", container_rect_.ToString());
-  if (contents_rect_ != IntRect())
-    json->SetString("contentsRect", contents_rect_.ToString());
-  if (user_scrollable_horizontal_ || user_scrollable_vertical_) {
-    json->SetString("userScrollable",
-                    user_scrollable_horizontal_
-                        ? (user_scrollable_vertical_ ? "both" : "horizontal")
-                        : "vertical");
+  if (state_.container_rect != IntRect())
+    json->SetString("containerRect", state_.container_rect.ToString());
+  if (!state_.contents_size.IsZero())
+    json->SetString("contentsSize", state_.contents_size.ToString());
+  if (state_.user_scrollable_horizontal || state_.user_scrollable_vertical) {
+    json->SetString(
+        "userScrollable",
+        state_.user_scrollable_horizontal
+            ? (state_.user_scrollable_vertical ? "both" : "horizontal")
+            : "vertical");
   }
-  if (main_thread_scrolling_reasons_) {
-    json->SetString("mainThreadReasons",
-                    MainThreadScrollingReason::mainThreadScrollingReasonsAsText(
-                        main_thread_scrolling_reasons_)
-                        .c_str());
+  if (state_.main_thread_scrolling_reasons) {
+    json->SetString(
+        "mainThreadReasons",
+        MainThreadScrollingReason::AsText(state_.main_thread_scrolling_reasons)
+            .c_str());
   }
-  if (compositor_element_id_) {
+  if (state_.scrolls_inner_viewport)
+    json->SetString("scrollsInnerViewport", "true");
+  if (state_.scrolls_outer_viewport)
+    json->SetString("scrollsOuterViewport", "true");
+  if (state_.max_scroll_offset_affected_by_page_scale)
+    json->SetString("maxScrollOffsetAffectedByPageScale", "true");
+  if (state_.compositor_element_id) {
     json->SetString("compositorElementId",
-                    compositor_element_id_.ToString().c_str());
+                    state_.compositor_element_id.ToString().c_str());
   }
+  if (state_.overscroll_behavior.x !=
+      OverscrollBehavior::kOverscrollBehaviorTypeAuto) {
+    json->SetString("overscroll-behavior-x", OverscrollBehaviorTypeToString(
+                                                 state_.overscroll_behavior.x));
+  }
+  if (state_.overscroll_behavior.y !=
+      OverscrollBehavior::kOverscrollBehaviorTypeAuto) {
+    json->SetString("overscroll-behavior-y", OverscrollBehaviorTypeToString(
+                                                 state_.overscroll_behavior.y));
+  }
+
+  if (state_.snap_container_data) {
+    json->SetString("snap_container_rect",
+                    state_.snap_container_data->rect().ToString().c_str());
+    if (state_.snap_container_data->size()) {
+      auto area_rects_json = JSONArray::Create();
+      for (size_t i = 0; i < state_.snap_container_data->size(); ++i) {
+        area_rects_json->PushString(
+            state_.snap_container_data->at(i).rect.ToString().c_str());
+      }
+      json->SetArray("snap_area_rects", std::move(area_rects_json));
+    }
+  }
+
   return json;
 }
 

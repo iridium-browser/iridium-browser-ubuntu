@@ -21,7 +21,8 @@ using media::ChannelLayout;
 namespace content {
 
 WebRtcAudioDeviceImpl::WebRtcAudioDeviceImpl()
-    : audio_transport_callback_(nullptr),
+    : audio_processing_id_(base::UnguessableToken::Create()),
+      audio_transport_callback_(nullptr),
       output_delay_ms_(0),
       initialized_(false),
       playing_(false),
@@ -118,6 +119,20 @@ void WebRtcAudioDeviceImpl::AudioRendererThreadStopped() {
   // renderer thread is dead, so no race is possible with |playout_sinks_|
   for (auto* sink : playout_sinks_)
     sink->OnPlayoutDataSourceChanged();
+}
+
+void WebRtcAudioDeviceImpl::SetOutputDeviceForAec(
+    const std::string& output_device_id) {
+  DCHECK(main_thread_checker_.CalledOnValidThread());
+  output_device_id_for_aec_ = output_device_id;
+  base::AutoLock lock(lock_);
+  for (auto* capturer : capturers_) {
+    capturer->SetOutputDeviceForAec(output_device_id);
+  }
+}
+
+base::UnguessableToken WebRtcAudioDeviceImpl::GetAudioProcessingId() const {
+  return audio_processing_id_;
 }
 
 int32_t WebRtcAudioDeviceImpl::RegisterAudioCallback(
@@ -308,34 +323,6 @@ int32_t WebRtcAudioDeviceImpl::MinMicrophoneVolume(uint32_t* min_volume) const {
   return 0;
 }
 
-int32_t WebRtcAudioDeviceImpl::StereoPlayoutIsAvailable(bool* available) const {
-  DCHECK(initialized_);
-  // This method is called during initialization on the signaling thread and
-  // then later on the worker thread.  Due to this we cannot DCHECK on what
-  // thread we're on since it might incorrectly initialize the
-  // worker_thread_checker_.
-  base::AutoLock auto_lock(lock_);
-  *available = renderer_ && renderer_->channels() == 2;
-  return 0;
-}
-
-int32_t WebRtcAudioDeviceImpl::StereoRecordingIsAvailable(
-    bool* available) const {
-  DCHECK(initialized_);
-  // This method is called during initialization on the signaling thread and
-  // then later on the worker thread.  Due to this we cannot DCHECK on what
-  // thread we're on since it might incorrectly initialize the
-  // worker_thread_checker_.
-
-  // TODO(xians): These kind of hardware methods do not make much sense since we
-  // support multiple sources. Remove or figure out new APIs for such methods.
-  base::AutoLock auto_lock(lock_);
-  if (capturers_.empty())
-    return -1;
-  *available = (capturers_.back()->GetInputFormat().channels() == 2);
-  return 0;
-}
-
 int32_t WebRtcAudioDeviceImpl::PlayoutDelay(uint16_t* delay_ms) const {
   DCHECK(worker_thread_checker_.CalledOnValidThread());
   base::AutoLock auto_lock(lock_);
@@ -390,6 +377,7 @@ void WebRtcAudioDeviceImpl::AddAudioCapturer(
   base::AutoLock auto_lock(lock_);
   DCHECK(!base::ContainsValue(capturers_, capturer));
   capturers_.push_back(capturer);
+  capturer->SetOutputDeviceForAec(output_device_id_for_aec_);
 }
 
 void WebRtcAudioDeviceImpl::RemoveAudioCapturer(

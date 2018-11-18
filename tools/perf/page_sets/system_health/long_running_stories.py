@@ -4,6 +4,7 @@
 
 from page_sets.login_helpers import google_login
 from page_sets.system_health import platforms
+from page_sets.system_health import story_tags
 from page_sets.system_health import system_health_story
 
 
@@ -63,6 +64,8 @@ class _LongRunningGmailBase(_LongRunningStory):
 
 class _LongRunningGmailMobileBase(_LongRunningGmailBase):
   SUPPORTED_PLATFORMS = platforms.MOBILE_ONLY
+  # TODO(crbug.com/862077): Story breaks if login is skipped during replay.
+  SKIP_LOGIN = False
 
   def _DidLoadDocument(self, action_runner):
     # Close the "Get Inbox by Gmail" interstitial.
@@ -86,17 +89,24 @@ class _LongRunningGmailDesktopBase(_LongRunningGmailBase):
 
 class LongRunningGmailMobileForegroundStory(_LongRunningGmailMobileBase):
   NAME = 'long_running:tools:gmail-foreground'
+  TAGS = [story_tags.YEAR_2016]
 
 
 class LongRunningGmailDesktopForegroundStory(_LongRunningGmailDesktopBase):
   NAME = 'long_running:tools:gmail-foreground'
+  TAGS = [story_tags.YEAR_2016]
 
 
 class LongRunningGmailMobileBackgroundStory(_LongRunningGmailMobileBase):
   BACKGROUND = True
   NAME = 'long_running:tools:gmail-background'
+  TAGS = [story_tags.YEAR_2016]
+  # This runs a gmail story in a background tab, and tabs aren't supported
+  # on WebView.
+  WEBVIEW_NOT_SUPPORTED = True
 
 
 class LongRunningGmailDesktopBackgroundStory(_LongRunningGmailDesktopBase):
   BACKGROUND = True
   NAME = 'long_running:tools:gmail-background'
+  TAGS = [story_tags.YEAR_2016]

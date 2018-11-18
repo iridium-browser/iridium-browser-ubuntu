@@ -7,34 +7,39 @@
 #include <memory>
 #include <utility>
 
-#include "ash/content/shell_content_state.h"
+#include "ash/components/quick_launch/public/mojom/constants.mojom.h"
+#include "ash/components/shortcut_viewer/public/mojom/shortcut_viewer.mojom.h"
+#include "ash/components/tap_visualizer/public/mojom/constants.mojom.h"
 #include "ash/login_status.h"
 #include "ash/shell.h"
-#include "ash/shell/content/shell_content_state_impl.h"
 #include "ash/shell/example_session_controller_client.h"
 #include "ash/shell/shell_delegate_impl.h"
 #include "ash/shell/shell_views_delegate.h"
 #include "ash/shell/window_type_launcher.h"
 #include "ash/shell/window_watcher.h"
 #include "ash/shell_init_params.h"
-#include "ash/shell_port_classic.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/i18n/icu_util.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
+#include "base/time/time.h"
 #include "chromeos/audio/cras_audio_handler.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
+#include "chromeos/dbus/power_policy_controller.h"
 #include "components/exo/file_helper.h"
 #include "content/public/browser/context_factory.h"
+#include "content/public/browser/gpu_interface_provider_factory.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/common/service_manager_connection.h"
 #include "content/shell/browser/shell_browser_context.h"
 #include "content/shell/browser/shell_net_log.h"
 #include "device/bluetooth/dbus/bluez_dbus_manager.h"
 #include "net/base/net_module.h"
+#include "services/service_manager/public/cpp/connector.h"
+#include "services/ws/ime/test_ime_driver/public/mojom/constants.mojom.h"
 #include "ui/aura/env.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_tree_host.h"
@@ -75,16 +80,19 @@ void ShellBrowserMainParts::PreMainMessageLoopRun() {
   // is absent.
   chromeos::CrasAudioHandler::InitializeForTesting();
 
-  bluez::BluezDBusManager::Initialize(nullptr, true /* use stub */);
+  bluez::BluezDBusManager::Initialize();
 
-  ShellContentState::SetInstance(
-      new ShellContentStateImpl(browser_context_.get()));
+  chromeos::PowerPolicyController::Initialize(
+      chromeos::DBusThreadManager::Get()->GetPowerManagerClient());
+
   ui::MaterialDesignController::Initialize();
   ash::ShellInitParams init_params;
-  init_params.shell_port = std::make_unique<ash::ShellPortClassic>();
   init_params.delegate = std::make_unique<ash::shell::ShellDelegateImpl>();
   init_params.context_factory = content::GetContextFactory();
   init_params.context_factory_private = content::GetContextFactoryPrivate();
+  init_params.gpu_interface_provider = content::CreateGpuInterfaceProvider();
+  init_params.connector =
+      content::ServiceManagerConnection::GetForProcess()->GetConnector();
   ash::Shell::CreateInstance(std::move(init_params));
 
   // Initialize session controller client and create fake user sessions. The
@@ -96,22 +104,37 @@ void ShellBrowserMainParts::PreMainMessageLoopRun() {
 
   window_watcher_ = std::make_unique<WindowWatcher>();
 
-  ash::shell::InitWindowTypeLauncher(base::Bind(
-      &views::examples::ShowExamplesWindowWithContent,
-      views::examples::DO_NOTHING_ON_CLOSE,
-      ShellContentState::GetInstance()->GetActiveBrowserContext(), nullptr));
+  ash::shell::InitWindowTypeLauncher(
+      base::Bind(&views::examples::ShowExamplesWindowWithContent,
+                 base::Passed(base::OnceClosure()),
+                 base::Unretained(browser_context_.get()), nullptr));
 
   ash::Shell::GetPrimaryRootWindow()->GetHost()->Show();
 
-  ash::Shell::Get()->InitWaylandServer(nullptr, nullptr);
+  content::ServiceManagerConnection::GetForProcess()
+      ->GetConnector()
+      ->StartService(test_ime_driver::mojom::kServiceName);
+  content::ServiceManagerConnection::GetForProcess()
+      ->GetConnector()
+      ->StartService(quick_launch::mojom::kServiceName);
+  content::ServiceManagerConnection::GetForProcess()
+      ->GetConnector()
+      ->StartService(tap_visualizer::mojom::kServiceName);
+  shortcut_viewer::mojom::ShortcutViewerPtr shortcut_viewer;
+  content::ServiceManagerConnection::GetForProcess()
+      ->GetConnector()
+      ->BindInterface(shortcut_viewer::mojom::kServiceName, &shortcut_viewer);
+  shortcut_viewer->Toggle(base::TimeTicks::Now());
+  ash::Shell::Get()->InitWaylandServer(nullptr);
 }
 
 void ShellBrowserMainParts::PostMainMessageLoopRun() {
   window_watcher_.reset();
   ash::Shell::DeleteInstance();
-  ShellContentState::DestroyInstance();
 
   chromeos::CrasAudioHandler::Shutdown();
+
+  chromeos::PowerPolicyController::Shutdown();
 
   views_delegate_.reset();
 

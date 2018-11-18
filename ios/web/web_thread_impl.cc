@@ -15,7 +15,10 @@
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
+#include "base/task/post_task.h"
+#include "base/task/task_executor.h"
 #include "base/threading/thread_restrictions.h"
+#include "ios/web/public/web_task_traits.h"
 #include "ios/web/public/web_thread_delegate.h"
 #include "net/url_request/url_fetcher.h"
 
@@ -45,14 +48,15 @@ class WebThreadTaskRunner : public base::SingleThreadTaskRunner {
   bool PostDelayedTask(const base::Location& from_here,
                        base::OnceClosure task,
                        base::TimeDelta delay) override {
-    return WebThread::PostDelayedTask(id_, from_here, std::move(task), delay);
+    return base::PostDelayedTaskWithTraits(from_here, {id_}, std::move(task),
+                                           delay);
   }
 
   bool PostNonNestableDelayedTask(const base::Location& from_here,
                                   base::OnceClosure task,
                                   base::TimeDelta delay) override {
-    return WebThread::PostNonNestableDelayedTask(id_, from_here,
-                                                 std::move(task), delay);
+    return base::PostDelayedTaskWithTraits(from_here, {id_, NonNestable()},
+                                           std::move(task), delay);
   }
 
   bool RunsTasksInCurrentSequence() const override {
@@ -107,6 +111,98 @@ struct WebThreadGlobals {
 base::LazyInstance<WebThreadGlobals>::Leaky g_globals =
     LAZY_INSTANCE_INITIALIZER;
 
+bool PostTaskHelper(WebThread::ID identifier,
+                    const base::Location& from_here,
+                    base::OnceClosure task,
+                    base::TimeDelta delay,
+                    bool nestable) {
+  DCHECK(identifier >= 0 && identifier < WebThread::ID_COUNT);
+  // Optimization: to avoid unnecessary locks, we listed the ID enumeration in
+  // order of lifetime.  So no need to lock if we know that the target thread
+  // outlives current thread.
+  // Note: since the array is so small, ok to loop instead of creating a map,
+  // which would require a lock because std::map isn't thread safe, defeating
+  // the whole purpose of this optimization.
+  WebThread::ID current_thread = WebThread::ID_COUNT;
+  bool target_thread_outlives_current =
+      WebThread::GetCurrentThreadIdentifier(&current_thread) &&
+      current_thread >= identifier;
+
+  WebThreadGlobals& globals = g_globals.Get();
+  if (!target_thread_outlives_current)
+    globals.lock.Acquire();
+
+  base::MessageLoop* message_loop =
+      globals.threads[identifier] ? globals.threads[identifier]->message_loop()
+                                  : nullptr;
+  if (message_loop) {
+    if (nestable) {
+      message_loop->task_runner()->PostDelayedTask(from_here, std::move(task),
+                                                   delay);
+    } else {
+      message_loop->task_runner()->PostNonNestableDelayedTask(
+          from_here, std::move(task), delay);
+    }
+  }
+
+  if (!target_thread_outlives_current)
+    globals.lock.Release();
+
+  return !!message_loop;
+}
+
+class WebThreadTaskExecutor : public base::TaskExecutor {
+ public:
+  WebThreadTaskExecutor() {}
+  ~WebThreadTaskExecutor() override {}
+
+  // base::TaskExecutor implementation.
+  bool PostDelayedTaskWithTraits(const base::Location& from_here,
+                                 const base::TaskTraits& traits,
+                                 base::OnceClosure task,
+                                 base::TimeDelta delay) override {
+    return PostTaskHelper(
+        GetWebThreadIdentifier(traits), from_here, std::move(task), delay,
+        traits.GetExtension<WebTaskTraitsExtension>().nestable());
+  }
+
+  scoped_refptr<base::TaskRunner> CreateTaskRunnerWithTraits(
+      const base::TaskTraits& traits) override {
+    return GetTaskRunnerForThread(GetWebThreadIdentifier(traits));
+  }
+
+  scoped_refptr<base::SequencedTaskRunner> CreateSequencedTaskRunnerWithTraits(
+      const base::TaskTraits& traits) override {
+    return GetTaskRunnerForThread(GetWebThreadIdentifier(traits));
+  }
+
+  scoped_refptr<base::SingleThreadTaskRunner>
+  CreateSingleThreadTaskRunnerWithTraits(
+      const base::TaskTraits& traits,
+      base::SingleThreadTaskRunnerThreadMode thread_mode) override {
+    // It's not possible to request DEDICATED access to a WebThread.
+    DCHECK_EQ(thread_mode, base::SingleThreadTaskRunnerThreadMode::SHARED);
+    return GetTaskRunnerForThread(GetWebThreadIdentifier(traits));
+  }
+
+ private:
+  WebThread::ID GetWebThreadIdentifier(const base::TaskTraits& traits) {
+    DCHECK_EQ(traits.extension_id(), WebTaskTraitsExtension::kExtensionId);
+    WebThread::ID id =
+        traits.GetExtension<WebTaskTraitsExtension>().web_thread();
+    DCHECK_LT(id, WebThread::ID_COUNT);
+    return id;
+  }
+
+  scoped_refptr<base::SingleThreadTaskRunner> GetTaskRunnerForThread(
+      WebThread::ID identifier) {
+    return g_task_runners.Get().task_runners[identifier];
+  }
+};
+
+// |g_web_thread_task_executor| is intentionally leaked on shutdown.
+WebThreadTaskExecutor* g_web_thread_task_executor = nullptr;
+
 }  // namespace
 
 WebThreadImpl::WebThreadImpl(ID identifier)
@@ -137,8 +233,7 @@ void WebThreadImpl::Init() {
     // Though this thread is called the "IO" thread, it actually just routes
     // messages around; it shouldn't be allowed to perform any blocking disk
     // I/O.
-    base::ThreadRestrictions::SetIOAllowed(false);
-    base::ThreadRestrictions::DisallowWaiting();
+    base::DisallowUnresponsiveTasks();
   }
 }
 
@@ -224,47 +319,6 @@ WebThreadImpl::~WebThreadImpl() {
 }
 
 // static
-bool WebThreadImpl::PostTaskHelper(WebThread::ID identifier,
-                                   const base::Location& from_here,
-                                   base::OnceClosure task,
-                                   base::TimeDelta delay,
-                                   bool nestable) {
-  DCHECK(identifier >= 0 && identifier < ID_COUNT);
-  // Optimization: to avoid unnecessary locks, we listed the ID enumeration in
-  // order of lifetime.  So no need to lock if we know that the target thread
-  // outlives current thread.
-  // Note: since the array is so small, ok to loop instead of creating a map,
-  // which would require a lock because std::map isn't thread safe, defeating
-  // the whole purpose of this optimization.
-  WebThread::ID current_thread = ID_COUNT;
-  bool target_thread_outlives_current =
-      GetCurrentThreadIdentifier(&current_thread) &&
-      current_thread >= identifier;
-
-  WebThreadGlobals& globals = g_globals.Get();
-  if (!target_thread_outlives_current)
-    globals.lock.Acquire();
-
-  base::MessageLoop* message_loop =
-      globals.threads[identifier] ? globals.threads[identifier]->message_loop()
-                                  : nullptr;
-  if (message_loop) {
-    if (nestable) {
-      message_loop->task_runner()->PostDelayedTask(from_here, std::move(task),
-                                                   delay);
-    } else {
-      message_loop->task_runner()->PostNonNestableDelayedTask(
-          from_here, std::move(task), delay);
-    }
-  }
-
-  if (!target_thread_outlives_current)
-    globals.lock.Release();
-
-  return !!message_loop;
-}
-
-// static
 bool WebThread::IsThreadInitialized(ID identifier) {
   if (!g_globals.IsCreated())
     return false;
@@ -297,49 +351,6 @@ std::string WebThread::GetDCheckCurrentlyOnErrorMessage(ID expected) {
   result += actual_name;
   result += ".";
   return result;
-}
-
-// static
-bool WebThread::PostTask(ID identifier,
-                         const base::Location& from_here,
-                         base::OnceClosure task) {
-  return WebThreadImpl::PostTaskHelper(identifier, from_here, std::move(task),
-                                       base::TimeDelta(), true);
-}
-
-// static
-bool WebThread::PostDelayedTask(ID identifier,
-                                const base::Location& from_here,
-                                base::OnceClosure task,
-                                base::TimeDelta delay) {
-  return WebThreadImpl::PostTaskHelper(identifier, from_here, std::move(task),
-                                       delay, true);
-}
-
-// static
-bool WebThread::PostNonNestableTask(ID identifier,
-                                    const base::Location& from_here,
-                                    base::OnceClosure task) {
-  return WebThreadImpl::PostTaskHelper(identifier, from_here, std::move(task),
-                                       base::TimeDelta(), false);
-}
-
-// static
-bool WebThread::PostNonNestableDelayedTask(ID identifier,
-                                           const base::Location& from_here,
-                                           base::OnceClosure task,
-                                           base::TimeDelta delay) {
-  return WebThreadImpl::PostTaskHelper(identifier, from_here, std::move(task),
-                                       delay, false);
-}
-
-// static
-bool WebThread::PostTaskAndReply(ID identifier,
-                                 const base::Location& from_here,
-                                 base::OnceClosure task,
-                                 base::OnceClosure reply) {
-  return GetTaskRunnerForThread(identifier)
-      ->PostTaskAndReply(from_here, std::move(task), std::move(reply));
 }
 
 // static
@@ -377,6 +388,22 @@ void WebThread::SetDelegate(ID identifier, WebThreadDelegate* delegate) {
 
   // This catches registration when previously registered.
   DCHECK(!delegate || !old_pointer);
+}
+
+// static
+void WebThreadImpl::CreateTaskExecutor() {
+  DCHECK(!g_web_thread_task_executor);
+  g_web_thread_task_executor = new WebThreadTaskExecutor();
+  base::RegisterTaskExecutor(WebTaskTraitsExtension::kExtensionId,
+                             g_web_thread_task_executor);
+}
+
+// static
+void WebThreadImpl::ResetTaskExecutorForTesting() {
+  DCHECK(g_web_thread_task_executor);
+  base::UnregisterTaskExecutorForTesting(WebTaskTraitsExtension::kExtensionId);
+  delete g_web_thread_task_executor;
+  g_web_thread_task_executor = nullptr;
 }
 
 }  // namespace web

@@ -26,8 +26,6 @@ static_library("heap_profiling") {
     "receiver.h",
     "receiver_pipe.cc",
     "receiver_pipe.h",
-    "receiver_pipe_posix.cc",
-    "receiver_pipe_posix.h",
     "receiver_pipe_win.cc",
     "receiver_pipe_win.h",
     "stream_parser.cc",
@@ -38,10 +36,16 @@ static_library("heap_profiling") {
   deps = [
     "//base",
     "//components/services/heap_profiling/public/cpp",
-    "//mojo/edk",
     "//services/resource_coordinator/public/cpp:resource_coordinator_cpp",
     "//third_party/zlib",
   ]
+
+  if (is_posix) {
+    sources += [
+      "receiver_pipe_posix.cc",
+      "receiver_pipe_posix.h",
+    ]
+  }
 }
 
 source_set("unit_tests") {

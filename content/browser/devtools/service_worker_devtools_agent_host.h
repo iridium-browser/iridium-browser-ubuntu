@@ -46,14 +46,9 @@ class ServiceWorkerDevToolsAgentHost : public DevToolsAgentHostImpl {
   void Reload() override;
   bool Close() override;
 
-  // DevToolsAgentHostImpl overrides.
-  bool AttachSession(DevToolsSession* session) override;
-  void DetachSession(DevToolsSession* session) override;
-  void DispatchProtocolMessage(DevToolsSession* session,
-                               const std::string& message) override;
-
   void WorkerRestarted(int worker_process_id, int worker_route_id);
   void WorkerReadyForInspection(
+      blink::mojom::DevToolsAgentHostAssociatedRequest host_request,
       blink::mojom::DevToolsAgentAssociatedPtrInfo devtools_agent_ptr_info);
   void WorkerDestroyed();
   void WorkerVersionInstalled();
@@ -72,10 +67,18 @@ class ServiceWorkerDevToolsAgentHost : public DevToolsAgentHostImpl {
   // Returns the time when the ServiceWorker was doomed.
   base::Time version_doomed_time() const { return version_doomed_time_; }
 
+  int64_t version_id() const { return version_id_; }
+
   bool Matches(const ServiceWorkerContextCore* context, int64_t version_id);
 
  private:
   ~ServiceWorkerDevToolsAgentHost() override;
+  void UpdateIsAttached(bool attached);
+
+  // DevToolsAgentHostImpl overrides.
+  bool AttachSession(DevToolsSession* session,
+                     TargetRegistry* registry) override;
+  void DetachSession(DevToolsSession* session) override;
 
   enum WorkerState {
     WORKER_NOT_READY,
@@ -93,7 +96,6 @@ class ServiceWorkerDevToolsAgentHost : public DevToolsAgentHostImpl {
   GURL scope_;
   base::Time version_installed_time_;
   base::Time version_doomed_time_;
-  blink::mojom::DevToolsAgentAssociatedPtr agent_ptr_;
 
   DISALLOW_COPY_AND_ASSIGN(ServiceWorkerDevToolsAgentHost);
 };

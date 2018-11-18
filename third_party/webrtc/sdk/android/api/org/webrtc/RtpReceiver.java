@@ -14,7 +14,6 @@ import javax.annotation.Nullable;
 import org.webrtc.MediaStreamTrack;
 
 /** Java wrapper for a C++ RtpReceiverInterface. */
-@JNINamespace("webrtc::jni")
 public class RtpReceiver {
   /** Java wrapper for a C++ RtpReceiverObserverInterface*/
   public static interface Observer {
@@ -23,7 +22,7 @@ public class RtpReceiver {
     public void onFirstPacketReceived(MediaStreamTrack.MediaType media_type);
   }
 
-  final long nativeRtpReceiver;
+  private long nativeRtpReceiver;
   private long nativeObserver;
 
   @Nullable private MediaStreamTrack cachedTrack;
@@ -41,33 +40,50 @@ public class RtpReceiver {
   }
 
   public boolean setParameters(@Nullable RtpParameters parameters) {
+    checkRtpReceiverExists();
     return parameters == null ? false : nativeSetParameters(nativeRtpReceiver, parameters);
   }
 
   public RtpParameters getParameters() {
+    checkRtpReceiverExists();
     return nativeGetParameters(nativeRtpReceiver);
   }
 
   public String id() {
+    checkRtpReceiverExists();
     return nativeGetId(nativeRtpReceiver);
   }
 
   @CalledByNative
   public void dispose() {
+    checkRtpReceiverExists();
     cachedTrack.dispose();
     if (nativeObserver != 0) {
       nativeUnsetObserver(nativeRtpReceiver, nativeObserver);
       nativeObserver = 0;
     }
     JniCommon.nativeReleaseRef(nativeRtpReceiver);
+    nativeRtpReceiver = 0;
   }
 
   public void SetObserver(Observer observer) {
+    checkRtpReceiverExists();
     // Unset the existing one before setting a new one.
     if (nativeObserver != 0) {
       nativeUnsetObserver(nativeRtpReceiver, nativeObserver);
     }
     nativeObserver = nativeSetObserver(nativeRtpReceiver, observer);
+  }
+
+  public void setFrameDecryptor(FrameDecryptor frameDecryptor) {
+    checkRtpReceiverExists();
+    nativeSetFrameDecryptor(nativeRtpReceiver, frameDecryptor.getNativeFrameDecryptor());
+  }
+
+  private void checkRtpReceiverExists() {
+    if (nativeRtpReceiver == 0) {
+      throw new IllegalStateException("RtpReceiver has been disposed.");
+    }
   }
 
   // This should increment the reference count of the track.
@@ -78,4 +94,5 @@ public class RtpReceiver {
   private static native String nativeGetId(long rtpReceiver);
   private static native long nativeSetObserver(long rtpReceiver, Observer observer);
   private static native void nativeUnsetObserver(long rtpReceiver, long nativeObserver);
+  private static native void nativeSetFrameDecryptor(long rtpReceiver, long nativeFrameDecryptor);
 };

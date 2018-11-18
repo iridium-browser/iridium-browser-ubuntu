@@ -2,11 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "ash/public/cpp/ash_features.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/root_window_controller.h"
 #include "ash/shell.h"
+#include "ash/system/status_area_widget.h"
+#include "ash/system/status_area_widget_test_helper.h"
 #include "ash/system/tray/system_tray.h"
+#include "ash/system/unified/unified_system_tray.h"
 #include "ash/test/ash_test_base.h"
+#include "ash/window_factory.h"
 #include "ash/wm/root_window_finder.h"
 #include "ash/wm/window_properties.h"
 #include "ash/wm/window_util.h"
@@ -79,13 +84,18 @@ class MoveWindowByClickEventHandler : public ui::EventHandler {
 // An event handler which records the event's locations.
 class EventLocationRecordingEventHandler : public ui::EventHandler {
  public:
-  explicit EventLocationRecordingEventHandler() { reset(); }
+  EventLocationRecordingEventHandler() { Reset(); }
   ~EventLocationRecordingEventHandler() override = default;
 
-  std::string GetLocationsAndReset() {
-    std::string result = location_.ToString() + " " + root_location_.ToString();
-    reset();
-    return result;
+  // |location_| is relative to the target window.
+  std::string GetLocation() const { return location_.ToString(); }
+
+  // |root_location_| is relative to the display where the event started.
+  std::string GetRootLocation() const { return root_location_.ToString(); }
+
+  void Reset() {
+    location_.SetPoint(-999, -999);
+    root_location_.SetPoint(-999, -999);
   }
 
  private:
@@ -96,11 +106,6 @@ class EventLocationRecordingEventHandler : public ui::EventHandler {
       location_ = event->location();
       root_location_ = event->root_location();
     }
-  }
-
-  void reset() {
-    location_.SetPoint(-999, -999);
-    root_location_.SetPoint(-999, -999);
   }
 
   gfx::Point root_location_;
@@ -151,9 +156,23 @@ class ExtendedDesktopTest : public AshTestBase {
     views::Widget::InitParams params(views::Widget::InitParams::TYPE_WINDOW);
     params.bounds = bounds;
     views::Widget* widget = new views::Widget;
+    params.context = CurrentContext();
     widget->Init(params);
     widget->Show();
     return widget;
+  }
+
+ protected:
+  bool IsBubbleShown() {
+    return features::IsSystemTrayUnifiedEnabled()
+               ? GetPrimaryUnifiedSystemTray()->IsBubbleShown()
+               : GetPrimarySystemTray()->HasSystemBubble();
+  }
+
+  gfx::Rect GetSystemTrayBoundsInScreen() {
+    return features::IsSystemTrayUnifiedEnabled()
+               ? GetPrimaryUnifiedSystemTray()->GetBoundsInScreen()
+               : GetPrimarySystemTray()->GetBoundsInScreen();
   }
 
  private:
@@ -192,17 +211,17 @@ TEST_F(ExtendedDesktopTest, Activation) {
             aura::client::GetFocusClient(root_windows[0])->GetFocusedWindow());
   EXPECT_TRUE(wm::IsActiveWindow(widget_on_2nd->GetNativeView()));
 
-  ui::test::EventGenerator& event_generator(GetEventGenerator());
+  ui::test::EventGenerator* event_generator = GetEventGenerator();
   // Clicking a window changes the active window and active root window.
-  event_generator.MoveMouseToCenterOf(widget_on_1st->GetNativeView());
-  event_generator.ClickLeftButton();
+  event_generator->MoveMouseToCenterOf(widget_on_1st->GetNativeView());
+  event_generator->ClickLeftButton();
 
   EXPECT_EQ(widget_on_1st->GetNativeView(),
             aura::client::GetFocusClient(root_windows[0])->GetFocusedWindow());
   EXPECT_TRUE(wm::IsActiveWindow(widget_on_1st->GetNativeView()));
 
-  event_generator.MoveMouseToCenterOf(widget_on_2nd->GetNativeView());
-  event_generator.ClickLeftButton();
+  event_generator->MoveMouseToCenterOf(widget_on_2nd->GetNativeView());
+  event_generator->ClickLeftButton();
 
   EXPECT_EQ(widget_on_2nd->GetNativeView(),
             aura::client::GetFocusClient(root_windows[0])->GetFocusedWindow());
@@ -227,18 +246,18 @@ TEST_F(ExtendedDesktopTest, SystemModal) {
   EXPECT_EQ(root_windows[1], modal_widget->GetNativeView()->GetRootWindow());
   EXPECT_EQ(root_windows[1], Shell::GetRootWindowForNewWindows());
 
-  ui::test::EventGenerator& event_generator(GetEventGenerator());
+  ui::test::EventGenerator* event_generator = GetEventGenerator();
 
   // Clicking a widget on widget_on_1st display should not change activation.
-  event_generator.MoveMouseToCenterOf(widget_on_1st->GetNativeView());
-  event_generator.ClickLeftButton();
+  event_generator->MoveMouseToCenterOf(widget_on_1st->GetNativeView());
+  event_generator->ClickLeftButton();
   EXPECT_TRUE(wm::IsActiveWindow(modal_widget->GetNativeView()));
   EXPECT_EQ(root_windows[1], Shell::GetRootWindowForNewWindows());
 
   // Close system modal and so clicking a widget should work now.
   modal_widget->Close();
-  event_generator.MoveMouseToCenterOf(widget_on_1st->GetNativeView());
-  event_generator.ClickLeftButton();
+  event_generator->MoveMouseToCenterOf(widget_on_1st->GetNativeView());
+  event_generator->ClickLeftButton();
   EXPECT_TRUE(wm::IsActiveWindow(widget_on_1st->GetNativeView()));
   EXPECT_EQ(root_windows[0], Shell::GetRootWindowForNewWindows());
 }
@@ -334,7 +353,7 @@ TEST_F(ExtendedDesktopTest, GetRootWindowMatching) {
 TEST_F(ExtendedDesktopTest, Capture) {
   // This test deals with input events but not visuals so don't throttle input
   // on visuals.
-  aura::Env::GetInstance()->set_throttle_input_on_resize_for_testing(false);
+  Shell::Get()->aura_env()->set_throttle_input_on_resize_for_testing(false);
 
   UpdateDisplay("1000x600,600x400");
   aura::Window::Windows root_windows = Shell::GetAllRootWindows();
@@ -355,14 +374,14 @@ TEST_F(ExtendedDesktopTest, Capture) {
   EXPECT_EQ(r1_w1.get(),
             aura::client::GetCaptureWindow(r2_w1->GetRootWindow()));
 
-  ui::test::EventGenerator& generator = GetEventGenerator();
-  generator.MoveMouseToCenterOf(r2_w1.get());
+  ui::test::EventGenerator* generator = GetEventGenerator();
+  generator->MoveMouseToCenterOf(r2_w1.get());
   // |r1_w1| will receive the events because it has capture.
   EXPECT_EQ("1 1 0", r1_d1.GetMouseMotionCountsAndReset());
   EXPECT_EQ("0 0 0", r1_d2.GetMouseMotionCountsAndReset());
   EXPECT_EQ("0 0 0", r2_d1.GetMouseMotionCountsAndReset());
 
-  generator.ClickLeftButton();
+  generator->ClickLeftButton();
   EXPECT_EQ("0 0 0", r2_d1.GetMouseMotionCountsAndReset());
   EXPECT_EQ("0 0", r2_d1.GetMouseButtonCountsAndReset());
   // The mouse is outside. On chromeos, the mouse is warped to the
@@ -371,20 +390,20 @@ TEST_F(ExtendedDesktopTest, Capture) {
   EXPECT_EQ("0 0 0", r1_d1.GetMouseMotionCountsAndReset());
   EXPECT_EQ("1 1", r1_d1.GetMouseButtonCountsAndReset());
 
-  generator.MoveMouseTo(15, 15);
+  generator->MoveMouseTo(15, 15);
   EXPECT_EQ("0 1 0", r1_d1.GetMouseMotionCountsAndReset());
   EXPECT_EQ("0 0 0", r1_d2.GetMouseMotionCountsAndReset());
 
   r1_w2->SetCapture();
   EXPECT_EQ(r1_w2.get(),
             aura::client::GetCaptureWindow(r2_w1->GetRootWindow()));
-  generator.MoveMouseBy(10, 10);
+  generator->MoveMouseBy(10, 10);
   // |r1_w2| has the capture. So it will receive the mouse-move event.
   EXPECT_EQ("0 0 0", r1_d1.GetMouseMotionCountsAndReset());
   EXPECT_EQ("0 1 0", r1_d2.GetMouseMotionCountsAndReset());
   EXPECT_EQ("0 0 0", r2_d1.GetMouseMotionCountsAndReset());
 
-  generator.ClickLeftButton();
+  generator->ClickLeftButton();
   EXPECT_EQ("0 0 0", r2_d1.GetMouseMotionCountsAndReset());
   EXPECT_EQ("0 0", r2_d1.GetMouseButtonCountsAndReset());
   EXPECT_EQ("0 0 0", r1_d2.GetMouseMotionCountsAndReset());
@@ -393,8 +412,8 @@ TEST_F(ExtendedDesktopTest, Capture) {
   r1_w2->ReleaseCapture();
   EXPECT_EQ(nullptr, aura::client::GetCaptureWindow(r2_w1->GetRootWindow()));
 
-  generator.MoveMouseToCenterOf(r2_w1.get());
-  generator.ClickLeftButton();
+  generator->MoveMouseToCenterOf(r2_w1.get());
+  generator->ClickLeftButton();
   EXPECT_EQ("1 1 0", r2_d1.GetMouseMotionCountsAndReset());
   EXPECT_EQ("1 1", r2_d1.GetMouseButtonCountsAndReset());
   // Make sure the mouse_moved_handler_ is properly reset.
@@ -419,14 +438,14 @@ TEST_F(ExtendedDesktopTest, CaptureEventLocation) {
 
   r1_w1->SetCapture();
 
-  ui::test::EventGenerator& generator = GetEventGenerator();
-  generator.MoveMouseToCenterOf(r2_w1.get());
+  ui::test::EventGenerator* generator = GetEventGenerator();
+  generator->MoveMouseToCenterOf(r2_w1.get());
   EXPECT_EQ(gfx::Point(1060, 60).ToString(),
-            generator.current_location().ToString());
+            generator->current_location().ToString());
 
   EventLocationHandler location_handler;
   r1_w1->AddPreTargetHandler(&location_handler);
-  generator.ClickLeftButton();
+  generator->ClickLeftButton();
   r1_w1->RemovePreTargetHandler(&location_handler);
   EXPECT_EQ(gfx::Point(1050, 50).ToString(),
             location_handler.press_location().ToString());
@@ -451,14 +470,14 @@ TEST_F(ExtendedDesktopTest, CaptureEventLocationHighDPI) {
 
   r1_w1->SetCapture();
 
-  ui::test::EventGenerator& generator = GetEventGenerator();
-  generator.MoveMouseToCenterOf(r2_w1.get());
+  ui::test::EventGenerator* generator = GetEventGenerator();
+  generator->MoveMouseToCenterOf(r2_w1.get());
   EXPECT_EQ(gfx::Point(560, 60).ToString(),
-            generator.current_location().ToString());
+            generator->current_location().ToString());
 
   EventLocationHandler location_handler;
   r1_w1->AddPreTargetHandler(&location_handler);
-  generator.ClickLeftButton();
+  generator->ClickLeftButton();
   r1_w1->RemovePreTargetHandler(&location_handler);
   EXPECT_EQ(gfx::Point(550, 50).ToString(),
             location_handler.press_location().ToString());
@@ -483,14 +502,14 @@ TEST_F(ExtendedDesktopTest, CaptureEventLocationHighDPI_2) {
 
   r1_w1->SetCapture();
 
-  ui::test::EventGenerator& generator = GetEventGenerator();
-  generator.MoveMouseToCenterOf(r2_w1.get());
+  ui::test::EventGenerator* generator = GetEventGenerator();
+  generator->MoveMouseToCenterOf(r2_w1.get());
   EXPECT_EQ(gfx::Point(1060, 60).ToString(),
-            generator.current_location().ToString());
+            generator->current_location().ToString());
 
   EventLocationHandler location_handler;
   r1_w1->AddPreTargetHandler(&location_handler);
-  generator.ClickLeftButton();
+  generator->ClickLeftButton();
   r1_w1->RemovePreTargetHandler(&location_handler);
   // Event-generator dispatches the event in the primary root-window's coord
   // space. Since the location is (1060, 60), it goes to the secondary
@@ -543,10 +562,10 @@ TEST_F(ExtendedDesktopTest, MoveWindowByMouseClick) {
   MoveWindowByClickEventHandler event_handler(window.get());
   window->AddPreTargetHandler(&event_handler);
 
-  ui::test::EventGenerator& event_generator(GetEventGenerator());
+  ui::test::EventGenerator* event_generator = GetEventGenerator();
 
-  event_generator.MoveMouseToCenterOf(window.get());
-  event_generator.ClickLeftButton();
+  event_generator->MoveMouseToCenterOf(window.get());
+  event_generator->ClickLeftButton();
   // Both mouse pressed and released arrive at the window and its delegate.
   EXPECT_EQ("1 1", delegate.GetMouseButtonCountsAndReset());
   // Also event_handler moves the window to another root at mouse release.
@@ -641,7 +660,7 @@ TEST_F(ExtendedDesktopTest, PostMoveParentTransientChild) {
   wm::ActivateWindow(window);
   // Create a transient child window of |window| without parenting to |window|
   // yet.
-  std::unique_ptr<aura::Window> child(new aura::Window(nullptr));
+  std::unique_ptr<aura::Window> child = window_factory::NewWindow();
   child->SetType(aura::client::WINDOW_TYPE_NORMAL);
   child->Init(ui::LAYER_TEXTURED);
   child->SetBounds(gfx::Rect(50, 50, 50, 50));
@@ -719,33 +738,32 @@ TEST_F(ExtendedDesktopTest, ConvertPoint) {
 
 TEST_F(ExtendedDesktopTest, OpenSystemTray) {
   UpdateDisplay("500x600,600x400");
-  SystemTray* tray = ash::Shell::Get()->GetPrimarySystemTray();
-  ASSERT_FALSE(tray->HasSystemBubble());
+  ASSERT_FALSE(IsBubbleShown());
 
-  ui::test::EventGenerator& event_generator(GetEventGenerator());
+  ui::test::EventGenerator* event_generator = GetEventGenerator();
 
   // Opens the tray by a dummy click event and makes sure that adding/removing
   // displays doesn't break anything.
-  event_generator.MoveMouseToCenterOf(tray->GetWidget()->GetNativeWindow());
-  event_generator.ClickLeftButton();
-  EXPECT_TRUE(tray->HasSystemBubble());
+  event_generator->MoveMouseTo(GetSystemTrayBoundsInScreen().CenterPoint());
+  event_generator->ClickLeftButton();
+  EXPECT_TRUE(IsBubbleShown());
 
   UpdateDisplay("500x600");
-  EXPECT_TRUE(tray->HasSystemBubble());
+  EXPECT_TRUE(IsBubbleShown());
   UpdateDisplay("500x600,600x400");
-  EXPECT_TRUE(tray->HasSystemBubble());
+  EXPECT_TRUE(IsBubbleShown());
 
   // Closes the tray and again makes sure that adding/removing displays doesn't
   // break anything.
-  event_generator.ClickLeftButton();
+  event_generator->ClickLeftButton();
   RunAllPendingInMessageLoop();
 
-  EXPECT_FALSE(tray->HasSystemBubble());
+  EXPECT_FALSE(IsBubbleShown());
 
   UpdateDisplay("500x600");
-  EXPECT_FALSE(tray->HasSystemBubble());
+  EXPECT_FALSE(IsBubbleShown());
   UpdateDisplay("500x600,600x400");
-  EXPECT_FALSE(tray->HasSystemBubble());
+  EXPECT_FALSE(IsBubbleShown());
 }
 
 TEST_F(ExtendedDesktopTest, StayInSameRootWindow) {
@@ -814,25 +832,25 @@ TEST_F(ExtendedDesktopTest, KeyEventsOnLockScreen) {
   EXPECT_EQ(lock_widget->GetNativeView(), focus_client->GetFocusedWindow());
 
   // The lock window should get events on both root windows.
-  ui::test::EventGenerator& event_generator(GetEventGenerator());
+  ui::test::EventGenerator* event_generator = GetEventGenerator();
 
-  event_generator.set_current_target(root_windows[0]);
-  event_generator.PressKey(ui::VKEY_A, 0);
-  event_generator.ReleaseKey(ui::VKEY_A, 0);
+  event_generator->set_current_target(root_windows[0]);
+  event_generator->PressKey(ui::VKEY_A, 0);
+  event_generator->ReleaseKey(ui::VKEY_A, 0);
   EXPECT_EQ(lock_widget->GetNativeView(), focus_client->GetFocusedWindow());
   EXPECT_EQ("a", base::UTF16ToASCII(textfield->text()));
 
-  event_generator.set_current_target(root_windows[1]);
-  event_generator.PressKey(ui::VKEY_B, 0);
-  event_generator.ReleaseKey(ui::VKEY_B, 0);
+  event_generator->set_current_target(root_windows[1]);
+  event_generator->PressKey(ui::VKEY_B, 0);
+  event_generator->ReleaseKey(ui::VKEY_B, 0);
   EXPECT_EQ(lock_widget->GetNativeView(), focus_client->GetFocusedWindow());
   EXPECT_EQ("ab", base::UTF16ToASCII(textfield->text()));
 
   // Deleting 2nd display. The lock window still should get the events.
   UpdateDisplay("100x100");
-  event_generator.set_current_target(root_windows[0]);
-  event_generator.PressKey(ui::VKEY_C, 0);
-  event_generator.ReleaseKey(ui::VKEY_C, 0);
+  event_generator->set_current_target(root_windows[0]);
+  event_generator->PressKey(ui::VKEY_C, 0);
+  event_generator->ReleaseKey(ui::VKEY_C, 0);
   EXPECT_EQ(lock_widget->GetNativeView(), focus_client->GetFocusedWindow());
   EXPECT_EQ("abc", base::UTF16ToASCII(textfield->text()));
 
@@ -840,48 +858,76 @@ TEST_F(ExtendedDesktopTest, KeyEventsOnLockScreen) {
   // on both root windows.
   UpdateDisplay("100x100,200x200");
   root_windows = Shell::GetAllRootWindows();
-  event_generator.set_current_target(root_windows[0]);
-  event_generator.PressKey(ui::VKEY_D, 0);
-  event_generator.ReleaseKey(ui::VKEY_D, 0);
+  event_generator->set_current_target(root_windows[0]);
+  event_generator->PressKey(ui::VKEY_D, 0);
+  event_generator->ReleaseKey(ui::VKEY_D, 0);
   EXPECT_EQ(lock_widget->GetNativeView(), focus_client->GetFocusedWindow());
   EXPECT_EQ("abcd", base::UTF16ToASCII(textfield->text()));
 
-  event_generator.set_current_target(root_windows[1]);
-  event_generator.PressKey(ui::VKEY_E, 0);
-  event_generator.ReleaseKey(ui::VKEY_E, 0);
+  event_generator->set_current_target(root_windows[1]);
+  event_generator->PressKey(ui::VKEY_E, 0);
+  event_generator->ReleaseKey(ui::VKEY_E, 0);
   EXPECT_EQ(lock_widget->GetNativeView(), focus_client->GetFocusedWindow());
   EXPECT_EQ("abcde", base::UTF16ToASCII(textfield->text()));
 }
 
+// Verifies that clicking in the primary display and dragging to the secondary
+// display correctly sets the event location (window local) and root_location
+// (in screen coordinates) for the mouse event. https://crrev.com/11691010
 TEST_F(ExtendedDesktopTest, PassiveGrab) {
   // This test deals with input events but not visuals so don't throttle input
   // on visuals.
-  aura::Env::GetInstance()->set_throttle_input_on_resize_for_testing(false);
+  Shell::Get()->aura_env()->set_throttle_input_on_resize_for_testing(false);
   EventLocationRecordingEventHandler event_handler;
-  ash::Shell::Get()->AddPreTargetHandler(&event_handler);
+  Shell::Get()->AddPreTargetHandler(&event_handler);
 
-  UpdateDisplay("300x300,200x200");
+  // Create large displays so the widget won't be moved after creation.
+  // https://crbug.com/890633
+  UpdateDisplay("1000x1000,1000x1000");
 
   views::Widget* widget = CreateTestWidget(gfx::Rect(50, 50, 200, 200));
   widget->Show();
   ASSERT_EQ("50,50 200x200", widget->GetWindowBoundsInScreen().ToString());
 
-  ui::test::EventGenerator& generator(GetEventGenerator());
-  generator.MoveMouseTo(150, 150);
-  EXPECT_EQ("100,100 150,150", event_handler.GetLocationsAndReset());
+  // Move the mouse to the center of the window.
+  ui::test::EventGenerator* generator = GetEventGenerator();
+  generator->MoveMouseTo(150, 150);
 
-  generator.PressLeftButton();
-  generator.MoveMouseTo(400, 150);
+  // Location is relative to the window.
+  EXPECT_EQ("100,100", event_handler.GetLocation());
 
-  EXPECT_EQ("350,100 400,150", event_handler.GetLocationsAndReset());
+  // Root location is relative to the display.
+  EXPECT_EQ("150,150", event_handler.GetRootLocation());
+  event_handler.Reset();
 
-  generator.ReleaseLeftButton();
-  EXPECT_EQ("-999,-999 -999,-999", event_handler.GetLocationsAndReset());
+  // Drag the mouse to the secondary display. Does not drag the window.
+  generator->PressLeftButton();
+  generator->MoveMouseBy(1000, 0);
 
-  generator.MoveMouseTo(400, 150);
-  EXPECT_EQ("100,150 100,150", event_handler.GetLocationsAndReset());
+  // Location is relative to the original window.
+  EXPECT_EQ("1100,100", event_handler.GetLocation());
 
-  ash::Shell::Get()->RemovePreTargetHandler(&event_handler);
+  // Root location is relative to the original display.
+  EXPECT_EQ("1150,150", event_handler.GetRootLocation());
+  event_handler.Reset();
+
+  // End the drag.
+  generator->ReleaseLeftButton();
+  EXPECT_EQ("-999,-999", event_handler.GetRootLocation());
+  EXPECT_EQ("-999,-999", event_handler.GetLocation());
+  event_handler.Reset();
+
+  // Move the mouse to the top-left of the secondary display.
+  generator->MoveMouseTo(1001, 1);
+
+  // Location is relative to the new display.
+  EXPECT_EQ("1,1", event_handler.GetLocation());
+
+  // Root location is relative to the new display.
+  EXPECT_EQ("1,1", event_handler.GetRootLocation());
+  event_handler.Reset();
+
+  Shell::Get()->RemovePreTargetHandler(&event_handler);
 }
 
 }  // namespace ash

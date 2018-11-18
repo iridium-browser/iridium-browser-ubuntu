@@ -5,7 +5,9 @@
 #include "components/subresource_filter/content/browser/subresource_filter_observer_test_utils.h"
 
 #include "base/logging.h"
+#include "components/subresource_filter/mojom/subresource_filter.mojom.h"
 #include "content/public/browser/navigation_handle.h"
+#include "content/public/browser/render_frame_host.h"
 
 namespace subresource_filter {
 
@@ -25,28 +27,27 @@ void TestSubresourceFilterObserver::OnSubresourceFilterGoingAway() {
   scoped_observer_.RemoveAll();
 }
 
-void TestSubresourceFilterObserver::OnSafeBrowsingCheckComplete(
-    content::NavigationHandle* navigation_handle,
-    safe_browsing::SBThreatType threat_type,
-    const safe_browsing::ThreatMetadata& threat_metadata) {
-  DCHECK(navigation_handle->IsInMainFrame());
-  safe_browsing_checks_[navigation_handle->GetURL()] =
-      std::make_pair(threat_type, threat_metadata);
-}
-
 void TestSubresourceFilterObserver::OnPageActivationComputed(
     content::NavigationHandle* navigation_handle,
-    ActivationDecision activation_decision,
-    const ActivationState& activation_state) {
+    const mojom::ActivationState& activation_state) {
   DCHECK(navigation_handle->IsInMainFrame());
-  page_activations_[navigation_handle->GetURL()] = activation_decision;
-  pending_activations_[navigation_handle] = activation_decision;
+  mojom::ActivationLevel level = activation_state.activation_level;
+  page_activations_[navigation_handle->GetURL()] = level;
+  pending_activations_[navigation_handle] = level;
 }
 
 void TestSubresourceFilterObserver::OnSubframeNavigationEvaluated(
     content::NavigationHandle* navigation_handle,
-    LoadPolicy load_policy) {
+    LoadPolicy load_policy,
+    bool is_ad_subframe) {
   subframe_load_evaluations_[navigation_handle->GetURL()] = load_policy;
+  ad_subframe_evaluations_[navigation_handle->GetFrameTreeNodeId()] =
+      is_ad_subframe;
+}
+
+void TestSubresourceFilterObserver::OnAdSubframeDetected(
+    content::RenderFrameHost* render_frame_host) {
+  ad_subframe_evaluations_[render_frame_host->GetFrameTreeNodeId()] = true;
 }
 
 void TestSubresourceFilterObserver::DidFinishNavigation(
@@ -64,16 +65,24 @@ void TestSubresourceFilterObserver::DidFinishNavigation(
     last_committed_activation_ = it->second;
     pending_activations_.erase(it);
   } else {
-    last_committed_activation_ = base::Optional<ActivationDecision>();
+    last_committed_activation_.reset();
   }
 }
 
-base::Optional<ActivationDecision>
+base::Optional<mojom::ActivationLevel>
 TestSubresourceFilterObserver::GetPageActivation(const GURL& url) const {
   auto it = page_activations_.find(url);
   if (it != page_activations_.end())
     return it->second;
-  return base::Optional<ActivationDecision>();
+  return base::nullopt;
+}
+
+base::Optional<bool> TestSubresourceFilterObserver::GetIsAdSubframe(
+    int frame_tree_node_id) const {
+  auto it = ad_subframe_evaluations_.find(frame_tree_node_id);
+  if (it != ad_subframe_evaluations_.end())
+    return it->second;
+  return base::Optional<bool>();
 }
 
 base::Optional<LoadPolicy> TestSubresourceFilterObserver::GetSubframeLoadPolicy(
@@ -84,7 +93,7 @@ base::Optional<LoadPolicy> TestSubresourceFilterObserver::GetSubframeLoadPolicy(
   return base::Optional<LoadPolicy>();
 }
 
-base::Optional<ActivationDecision>
+base::Optional<mojom::ActivationLevel>
 TestSubresourceFilterObserver::GetPageActivationForLastCommittedLoad() const {
   return last_committed_activation_;
 }

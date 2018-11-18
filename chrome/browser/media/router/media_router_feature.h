@@ -25,27 +25,38 @@ namespace prefs {
 // Pref name for the enterprise policy for allowing Cast devices on all IPs.
 constexpr char kMediaRouterCastAllowAllIPs[] =
     "media_router.cast_allow_all_ips";
+// Pref name for the per-profile randomly generated token to include with the
+// hash when externalizing MediaSink IDs.
+constexpr char kMediaRouterReceiverIdHashToken[] =
+    "media_router.receiver_id_hash_token";
 }  // namespace prefs
 
 // Registers |kMediaRouterCastAllowAllIPs| with local state pref |registry|.
 void RegisterLocalStatePrefs(PrefRegistrySimple* registry);
 
+// Registers Media Router related preferences with per-profile pref |registry|.
+void RegisterProfilePrefs(PrefRegistrySimple* registry);
+
 // If enabled, allows Media Router to connect to Cast devices on all IP
-// addresses, not just RFC1918/RFC4913 private addresses. Workaround for
+// addresses, not just RFC1918/RFC4193 private addresses. Workaround for
 // https://crbug.com/813974.
 extern const base::Feature kCastAllowAllIPsFeature;
 
-// Returns |true| if CastMediaSinkService can connect to Cast devices on
+// Returns true if CastMediaSinkService can connect to Cast devices on
 // all IPs, as determined by local state |pref_service| / feature flag.
 bool GetCastAllowAllIPsPref(PrefService* pref_service);
+
+// Returns the hash token to use for externalizing MediaSink IDs from
+// |pref_service|. If the token does not exist, the token will be created from a
+// randomly generated string and stored in |pref_service|.
+std::string GetReceiverIdHashToken(PrefService* pref_service);
 
 extern const base::Feature kEnableDialSinkQuery;
 extern const base::Feature kEnableCastDiscovery;
 extern const base::Feature kCastMediaRouteProvider;
-extern const base::Feature kEnableCastLocalMedia;
 
-// Returns true if browser side DIAL sink query is enabled.
-bool DialSinkQueryEnabled();
+// Returns true if browser side DIAL Media Route Provider is enabled.
+bool DialMediaRouteProviderEnabled();
 
 // Returns true if browser side Cast discovery is enabled.
 bool CastDiscoveryEnabled();
@@ -54,13 +65,12 @@ bool CastDiscoveryEnabled();
 // enabled.
 bool CastMediaRouteProviderEnabled();
 
-// Returns true if local media casting is enabled.
-bool CastLocalMediaEnabled();
+// Returns true if the Views implementation of the Cast dialog should be used.
+// Returns false if the WebUI implementation should be used.
+bool ShouldUseViewsDialog();
 
-// Returns true if the presentation receiver window for local media casting is
-// available on the current platform.
-// TODO(crbug.com/802332): Remove this when mac_views_browser=1 by default.
-bool PresentationReceiverWindowEnabled();
+// Returns true if Mirroring Service should be used for mirroring.
+bool ShouldUseMirroringService();
 
 #endif  // !defined(OS_ANDROID)
 

@@ -22,10 +22,10 @@ import android.os.Process;
 import android.util.SparseArray;
 import android.util.TypedValue;
 import android.view.View;
-import android.view.ViewGroup;
 import android.view.Window;
 import android.view.accessibility.AccessibilityManager;
 
+import org.chromium.base.ActivityState;
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.Callback;
 import org.chromium.base.ContextUtils;
@@ -35,6 +35,8 @@ import org.chromium.base.StrictModeContext;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.base.compat.ApiHelperForO;
+import org.chromium.ui.KeyboardVisibilityDelegate;
 import org.chromium.ui.VSyncMonitor;
 import org.chromium.ui.display.DisplayAndroid;
 import org.chromium.ui.widget.Toast;
@@ -47,7 +49,7 @@ import java.util.HashSet;
  * The window base class that has the minimum functionality.
  */
 @JNINamespace("ui")
-public class WindowAndroid {
+public class WindowAndroid implements AndroidPermissionDelegate {
     private static final String TAG = "WindowAndroid";
 
     @TargetApi(Build.VERSION_CODES.KITKAT)
@@ -85,7 +87,6 @@ public class WindowAndroid {
     // Error code returned when an Intent fails to start an Activity.
     public static final int START_INTENT_FAILURE = -1;
 
-    protected Context mApplicationContext;
     protected SparseArray<IntentCallback> mOutstandingIntents;
     // We use a weak reference here to prevent this from leaking in WebView.
     private WeakReference<Context> mContextRef;
@@ -98,8 +99,6 @@ public class WindowAndroid {
     // We track all animations over content and provide a drawing placeholder for them.
     private HashSet<Animator> mAnimationsOverContent = new HashSet<>();
     private View mAnimationPlaceholderView;
-
-    private ViewGroup mKeyboardAccessoryView;
 
     protected boolean mIsKeyboardShowing;
 
@@ -137,6 +136,23 @@ public class WindowAndroid {
          */
         void onContextMenuClosed();
     }
+
+    /**
+     * An interface to notify listeners of the changes in activity state.
+     */
+    public interface ActivityStateObserver {
+        /**
+         * Called when the activity goes into paused state.
+         */
+
+        void onActivityPaused();
+        /**
+         * Called when the activity goes into resumed state.
+         */
+        void onActivityResumed();
+    }
+
+    private ObserverList<ActivityStateObserver> mActivityStateObservers = new ObserverList<>();
 
     /**
      * Gets the view for readback.
@@ -210,7 +226,6 @@ public class WindowAndroid {
      */
     @SuppressLint("UseSparseArrays")
     protected WindowAndroid(Context context, DisplayAndroid display) {
-        mApplicationContext = context.getApplicationContext();
         // context does not have the same lifetime guarantees as an application context so we can't
         // hold a strong reference to it.
         mContextRef = new WeakReference<>(context);
@@ -219,8 +234,9 @@ public class WindowAndroid {
         // Temporary solution for flaky tests, see https://crbug.com/767624 for context
         try (StrictModeContext unused = StrictModeContext.allowDiskReads()) {
             mVSyncMonitor = new VSyncMonitor(context, mVSyncListener);
-            mAccessibilityManager = (AccessibilityManager) mApplicationContext.getSystemService(
-                    Context.ACCESSIBILITY_SERVICE);
+            mAccessibilityManager =
+                    (AccessibilityManager) ContextUtils.getApplicationContext().getSystemService(
+                            Context.ACCESSIBILITY_SERVICE);
         }
         mDisplayAndroid = display;
         // Configuration.isDisplayServerWideColorGamut must be queried from the window's context.
@@ -230,7 +246,7 @@ public class WindowAndroid {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !Build.VERSION.RELEASE.equals("8.0.0")
                 && activityFromContext(context) != null) {
             Configuration configuration = context.getResources().getConfiguration();
-            boolean isScreenWideColorGamut = configuration.isScreenWideColorGamut();
+            boolean isScreenWideColorGamut = ApiHelperForO.isScreenWideColorGamut(configuration);
             display.updateIsDisplayServerWideColorGamut(isScreenWideColorGamut);
         }
     }
@@ -247,10 +263,6 @@ public class WindowAndroid {
     @CalledByNative
     private void clearNativePointer() {
         mNativeWindowAndroid = 0;
-    }
-
-    protected AndroidPermissionDelegate getAndroidPermissionDelegate() {
-        return mPermissionDelegate;
     }
 
     /**
@@ -358,11 +370,12 @@ public class WindowAndroid {
      * @return Whether access to the permission is granted.
      */
     @CalledByNative
+    @Override
     public final boolean hasPermission(String permission) {
         if (mPermissionDelegate != null) return mPermissionDelegate.hasPermission(permission);
 
-        return ApiCompatibilityUtils.checkPermission(
-                mApplicationContext, permission, Process.myPid(), Process.myUid())
+        return ApiCompatibilityUtils.checkPermission(ContextUtils.getApplicationContext(),
+                       permission, Process.myPid(), Process.myUid())
                 == PackageManager.PERMISSION_GRANTED;
     }
 
@@ -379,6 +392,7 @@ public class WindowAndroid {
      * @return Whether the requesting the permission is allowed.
      */
     @CalledByNative
+    @Override
     public final boolean canRequestPermission(String permission) {
         if (mPermissionDelegate != null) {
             return mPermissionDelegate.canRequestPermission(permission);
@@ -397,6 +411,7 @@ public class WindowAndroid {
      * @param permission The permission name.
      * @return Whether the permission is revoked by policy and the user has no ability to change it.
      */
+    @Override
     public final boolean isPermissionRevokedByPolicy(String permission) {
         if (mPermissionDelegate != null) {
             return mPermissionDelegate.isPermissionRevokedByPolicy(permission);
@@ -414,6 +429,7 @@ public class WindowAndroid {
      * @param permissions The list of permissions to request access to.
      * @param callback The callback to be notified whether the permissions were granted.
      */
+    @Override
     public final void requestPermissions(String[] permissions, PermissionCallback callback) {
         if (mPermissionDelegate != null) {
             mPermissionDelegate.requestPermissions(permissions, callback);
@@ -424,13 +440,23 @@ public class WindowAndroid {
         assert false : "Failed to request permissions using a WindowAndroid without an Activity";
     }
 
+    @Override
+    public boolean handlePermissionResult(
+            int requestCode, String[] permissions, int[] grantResults) {
+        if (mPermissionDelegate != null) {
+            return mPermissionDelegate.handlePermissionResult(
+                    requestCode, permissions, grantResults);
+        }
+        return false;
+    }
+
     /**
      * Displays an error message with a provided error message string.
      * @param error The error message string to be displayed.
      */
     public void showError(String error) {
         if (error != null) {
-            Toast.makeText(mApplicationContext, error, Toast.LENGTH_SHORT).show();
+            Toast.makeText(ContextUtils.getApplicationContext(), error, Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -439,7 +465,7 @@ public class WindowAndroid {
      * @param resId The error message string's resource id.
      */
     public void showError(int resId) {
-        showError(mApplicationContext.getString(resId));
+        showError(ContextUtils.getApplicationContext().getString(resId));
     }
 
     /**
@@ -454,7 +480,7 @@ public class WindowAndroid {
      * Broadcasts the given intent to all interested BroadcastReceivers.
      */
     public void sendBroadcast(Intent intent) {
-        mApplicationContext.sendBroadcast(intent);
+        ContextUtils.getApplicationContext().sendBroadcast(intent);
     }
 
     /**
@@ -477,7 +503,7 @@ public class WindowAndroid {
      * @return The application context for this activity.
      */
     public Context getApplicationContext() {
-        return mApplicationContext;
+        return ContextUtils.getApplicationContext();
     }
 
     /**
@@ -533,6 +559,39 @@ public class WindowAndroid {
         nativeOnActivityStarted(mNativeWindowAndroid);
     }
 
+    protected void onActivityPaused() {
+        for (ActivityStateObserver observer : mActivityStateObservers) observer.onActivityPaused();
+    }
+
+    protected void onActivityResumed() {
+        for (ActivityStateObserver observer : mActivityStateObservers) observer.onActivityResumed();
+    }
+
+    /**
+     * Adds a new {@link ActivityStateObserver} instance.
+     */
+    public void addActivityStateObserver(ActivityStateObserver observer) {
+        assert !mActivityStateObservers.hasObserver(observer);
+        mActivityStateObservers.addObserver(observer);
+    }
+
+    /**
+     * Removes a new {@link ActivityStateObserver} instance.
+     */
+    public void removeActivityStateObserver(ActivityStateObserver observer) {
+        assert mActivityStateObservers.hasObserver(observer);
+        mActivityStateObservers.removeObserver(observer);
+    }
+
+    /**
+     * @return Current state of the associated {@link Activity}. Can be overriden
+     *         to return the correct state. {@code ActivityState.DESTROYED} by default.
+     */
+    @ActivityState
+    public int getActivityState() {
+        return ActivityState.DESTROYED;
+    }
+
     @CalledByNative
     private void requestVSyncUpdate() {
         if (mVSyncPaused) {
@@ -562,7 +621,11 @@ public class WindowAndroid {
      *         Context.startActivity will not throw ActivityNotFoundException.
      */
     public boolean canResolveActivity(Intent intent) {
-        return mApplicationContext.getPackageManager().queryIntentActivities(intent, 0).size() > 0;
+        return ContextUtils.getApplicationContext()
+                       .getPackageManager()
+                       .queryIntentActivities(intent, 0)
+                       .size()
+                > 0;
     }
 
     /**
@@ -628,22 +691,6 @@ public class WindowAndroid {
         }
     }
 
-    /**
-     * Sets the keyboard accessory view.
-     * @param view This view sits at the bottom of the content area and pushes the content up rather
-     *             than overlaying it. Currently used as a container for Autofill suggestions.
-     */
-    public void setKeyboardAccessoryView(ViewGroup view) {
-        mKeyboardAccessoryView = view;
-    }
-
-    /**
-     * @see #setKeyboardAccessoryView(ViewGroup)
-     */
-    public ViewGroup getKeyboardAccessoryView() {
-        return mKeyboardAccessoryView;
-    }
-
     protected void registerKeyboardVisibilityCallbacks() {
     }
 
@@ -653,7 +700,7 @@ public class WindowAndroid {
     /**
      * Adds a listener that is updated of keyboard visibility changes. This works as a best guess.
      *
-     * @see org.chromium.ui.UiUtils#isKeyboardShowing(Context, View)
+     * @see org.chromium.ui.KeyboardVisibilityDelegate#isKeyboardShowing(Context, View)
      */
     public void addKeyboardVisibilityListener(KeyboardVisibilityListener listener) {
         if (mKeyboardVisibilityListeners.isEmpty()) {
@@ -670,6 +717,14 @@ public class WindowAndroid {
         if (mKeyboardVisibilityListeners.isEmpty()) {
             unregisterKeyboardVisibilityCallbacks();
         }
+    }
+
+    /**
+     * The returned {@link KeyboardVisibilityDelegate} can read and influence the soft keyboard.
+     * @return a {@link KeyboardVisibilityDelegate} specific for this window.
+     */
+    public KeyboardVisibilityDelegate getKeyboardDelegate() {
+        return KeyboardVisibilityDelegate.getInstance();
     }
 
     /**

@@ -16,12 +16,9 @@ from dashboard import graph_revisions
 from dashboard import units_to_direction
 from dashboard.common import datastore_hooks
 from dashboard.common import request_handler
-from dashboard.common import stored_object
 from dashboard.common import utils
 from dashboard.models import anomaly
 from dashboard.models import graph_data
-
-BOT_WHITELIST_KEY = 'bot_whitelist'
 
 
 class AddPointQueueHandler(request_handler.RequestHandler):
@@ -48,18 +45,14 @@ class AddPointQueueHandler(request_handler.RequestHandler):
     data = json.loads(self.request.get('data'))
     _PrewarmGets(data)
 
-    bot_whitelist = stored_object.Get(BOT_WHITELIST_KEY)
-
     all_put_futures = []
     added_rows = []
-    monitored_test_keys = []
+    parent_tests = []
     for row_dict in data:
       try:
-        new_row, parent_test, put_futures = _AddRow(row_dict, bot_whitelist)
+        new_row, parent_test, put_futures = _AddRow(row_dict)
         added_rows.append(new_row)
-        is_monitored = parent_test.sheriff and parent_test.has_rows
-        if is_monitored:
-          monitored_test_keys.append(parent_test.key)
+        parent_tests.append(parent_test)
         all_put_futures.extend(put_futures)
 
       except add_point.BadRequestError as e:
@@ -71,6 +64,8 @@ class AddPointQueueHandler(request_handler.RequestHandler):
 
     ndb.Future.wait_all(all_put_futures)
 
+    monitored_test_keys = [
+        t.key for t in parent_tests if t.sheriff and t.has_rows]
     tests_keys = [k for k in monitored_test_keys if not IsRefBuild(k)]
 
     # Updating of the cached graph revisions should happen after put because
@@ -112,7 +107,7 @@ def _PrewarmGets(data):
   ndb.get_multi_async(list(master_keys) + list(bot_keys) + list(test_keys))
 
 
-def _AddRow(row_dict, bot_whitelist):
+def _AddRow(row_dict):
   """Adds a Row entity to the datastore.
 
   There are three main things that are needed in order to make a new entity;
@@ -122,7 +117,6 @@ def _AddRow(row_dict, bot_whitelist):
 
   Args:
     row_dict: A dictionary obtained from the JSON that was received.
-    bot_whitelist: A list of whitelisted bots names.
 
   Returns:
     A triple: The new row, the parent test, and a list of entity put futures.
@@ -131,11 +125,10 @@ def _AddRow(row_dict, bot_whitelist):
     add_point.BadRequestError: The input dict was invalid.
     RuntimeError: The required parent entities couldn't be created.
   """
-  parent_test = _GetParentTest(row_dict, bot_whitelist)
+  parent_test = _GetParentTest(row_dict)
   test_container_key = utils.GetTestContainerKey(parent_test.key)
 
   columns = add_point.GetAndValidateRowProperties(row_dict)
-  columns['internal_only'] = parent_test.internal_only
 
   row_id = add_point.GetAndValidateRowId(row_dict)
 
@@ -155,16 +148,16 @@ def _AddRow(row_dict, bot_whitelist):
   # Create the entity and add it asynchronously.
   new_row = graph_data.Row(id=row_id, parent=test_container_key, **columns)
   entity_put_futures.append(new_row.put_async())
+  entity_put_futures.append(new_row.UpdateParentAsync())
 
   return new_row, parent_test, entity_put_futures
 
 
-def _GetParentTest(row_dict, bot_whitelist):
+def _GetParentTest(row_dict):
   """Gets the parent test for a Row based on an input dictionary.
 
   Args:
     row_dict: A dictionary from the data parameter.
-    bot_whitelist: A list of whitelisted bot names.
 
   Returns:
     A TestMetadata entity.
@@ -178,7 +171,7 @@ def _GetParentTest(row_dict, bot_whitelist):
   units = row_dict.get('units')
   higher_is_better = row_dict.get('higher_is_better')
   improvement_direction = _ImprovementDirection(higher_is_better)
-  internal_only = BotInternalOnly(bot_name, bot_whitelist)
+  internal_only = graph_data.Bot.GetInternalOnlySync(master_name, bot_name)
   benchmark_description = row_dict.get('benchmark_description')
   unescaped_story_name = row_dict.get('unescaped_story_name')
 
@@ -196,20 +189,6 @@ def _ImprovementDirection(higher_is_better):
   if higher_is_better is None:
     return None
   return anomaly.UP if higher_is_better else anomaly.DOWN
-
-
-def BotInternalOnly(bot_name, bot_whitelist):
-  """Checks whether a given bot name is internal-only.
-
-  If a bot name is internal only, then new data for that bot should be marked
-  as internal-only.
-  """
-  if not bot_whitelist:
-    logging.warning(
-        'No bot whitelist available. All data will be internal-only. If this '
-        'is not intended, please add a bot whitelist using /edit_site_config.')
-    return True
-  return bot_name not in bot_whitelist
 
 
 def GetOrCreateAncestors(
@@ -308,6 +287,7 @@ def _GetOrCreateTest(name, parent_test_path, properties):
     elif 'units' not in properties or properties['units'] is None:
       properties['improvement_direction'] = anomaly.UNKNOWN
     new_entity = graph_data.TestMetadata(id=test_path, **properties)
+    new_entity.UpdateSheriff()
     new_entity.put()
     # TODO(sullivan): Consider putting back Test entity in a scoped down
     # form so we can check if it exists here.
@@ -340,6 +320,7 @@ def _GetOrCreateTest(name, parent_test_path, properties):
       properties_changed = True
 
   if properties_changed:
+    existing.UpdateSheriff()
     existing.put()
   return existing
 

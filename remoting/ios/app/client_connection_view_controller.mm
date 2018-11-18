@@ -8,7 +8,6 @@
 
 #import "remoting/ios/app/client_connection_view_controller.h"
 
-#import "base/mac/bind_objc_block.h"
 #import "ios/third_party/material_components_ios/src/components/ActivityIndicator/src/MDCActivityIndicator.h"
 #import "ios/third_party/material_components_ios/src/components/Buttons/src/MaterialButtons.h"
 #import "ios/third_party/material_components_ios/src/components/NavigationBar/src/MaterialNavigationBar.h"
@@ -47,6 +46,8 @@ static const CGFloat kKeyboardAnimationTime = 0.3;
 
 static NSString* const kConnectionErrorFeedbackContext =
     @"ConnectionErrorFeedbackContext";
+
+using EntryPoint = remoting::ChromotingEvent::SessionEntryPoint;
 
 @interface ClientConnectionViewController ()<PinEntryDelegate,
                                              SessionReconnectViewDelegate> {
@@ -179,7 +180,7 @@ static NSString* const kConnectionErrorFeedbackContext =
              name:kHostSessionStatusChanged
            object:nil];
 
-  [self attemptConnectionToHost];
+  [self attemptConnectionToHostWithEntryPoint:EntryPoint::CONNECT_BUTTON];
 
   // Although keyboard listeners are registered here, they won't work properly
   // if the keyboard shows/hides before the view appears.
@@ -383,7 +384,7 @@ static NSString* const kConnectionErrorFeedbackContext =
 #pragma mark - SessionReconnectViewDelegate
 
 - (void)didTapReconnect {
-  [self attemptConnectionToHost];
+  [self attemptConnectionToHostWithEntryPoint:EntryPoint::RECONNECT_BUTTON];
 }
 
 - (void)didTapReport {
@@ -397,7 +398,7 @@ static NSString* const kConnectionErrorFeedbackContext =
 
 #pragma mark - Private
 
-- (void)attemptConnectionToHost {
+- (void)attemptConnectionToHostWithEntryPoint:(EntryPoint)entryPoint {
   _client = [[RemotingClient alloc] init];
   __weak ClientConnectionViewController* weakSelf = self;
   __weak RemotingClient* weakClient = _client;
@@ -408,7 +409,8 @@ static NSString* const kConnectionErrorFeedbackContext =
         if (status == RemotingAuthenticationStatusSuccess) {
           [weakClient connectToHost:weakHostInfo
                            username:userEmail
-                        accessToken:accessToken];
+                        accessToken:accessToken
+                         entryPoint:entryPoint];
         } else {
           LOG(ERROR) << "Failed to fetch access token for connectToHost. ("
                      << status << ")";

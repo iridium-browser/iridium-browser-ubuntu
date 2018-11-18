@@ -12,13 +12,12 @@
 
 #include "xfa/fxfa/parser/cxfa_containerlayoutitem.h"
 #include "xfa/fxfa/parser/cxfa_contentlayoutitem.h"
-#include "xfa/fxfa/parser/cxfa_nodeiteratortemplate.h"
 #include "xfa/fxfa/parser/cxfa_traversestrategy_layoutitem.h"
 
 class CXFA_FFWidget;
 class CXFA_FFDocView;
 
-class CXFA_FFPageView : public CXFA_ContainerLayoutItem {
+class CXFA_FFPageView final : public CXFA_ContainerLayoutItem {
  public:
   CXFA_FFPageView(CXFA_FFDocView* pDocView, CXFA_Node* pPageArea);
   ~CXFA_FFPageView() override;
@@ -30,15 +29,11 @@ class CXFA_FFPageView : public CXFA_ContainerLayoutItem {
       uint32_t dwTraverseWay,
       uint32_t dwWidgetFilter);
 
- protected:
+ private:
   UnownedPtr<CXFA_FFDocView> const m_pDocView;
 };
 
-using CXFA_LayoutItemIterator =
-    CXFA_NodeIteratorTemplate<CXFA_LayoutItem,
-                              CXFA_TraverseStrategy_LayoutItem>;
-
-class CXFA_FFPageWidgetIterator : public IXFA_WidgetIterator {
+class CXFA_FFPageWidgetIterator final : public IXFA_WidgetIterator {
  public:
   CXFA_FFPageWidgetIterator(CXFA_FFPageView* pPageView, uint32_t dwFilter);
   ~CXFA_FFPageWidgetIterator() override;
@@ -51,11 +46,11 @@ class CXFA_FFPageWidgetIterator : public IXFA_WidgetIterator {
   CXFA_FFWidget* GetCurrentWidget() override;
   bool SetCurrentWidget(CXFA_FFWidget* hWidget) override;
 
- protected:
+ private:
   CXFA_FFWidget* GetWidget(CXFA_LayoutItem* pLayoutItem);
 
-  CXFA_FFPageView* m_pPageView;
-  CXFA_FFWidget* m_hCurWidget;
+  UnownedPtr<CXFA_FFPageView> m_pPageView;
+  UnownedPtr<CXFA_FFWidget> m_hCurWidget;
   uint32_t m_dwFilter;
   bool m_bIgnorerelevant;
   CXFA_LayoutItemIterator m_sIterator;
@@ -76,7 +71,7 @@ class CXFA_TabParam {
   std::vector<CXFA_FFWidget*> m_Children;
 };
 
-class CXFA_FFTabOrderPageWidgetIterator : public IXFA_WidgetIterator {
+class CXFA_FFTabOrderPageWidgetIterator final : public IXFA_WidgetIterator {
  public:
   CXFA_FFTabOrderPageWidgetIterator(CXFA_FFPageView* pPageView,
                                     uint32_t dwFilter);
@@ -90,7 +85,7 @@ class CXFA_FFTabOrderPageWidgetIterator : public IXFA_WidgetIterator {
   CXFA_FFWidget* GetCurrentWidget() override;
   bool SetCurrentWidget(CXFA_FFWidget* hWidget) override;
 
- protected:
+ private:
   CXFA_FFWidget* GetTraverseWidget(CXFA_FFWidget* pWidget);
   CXFA_FFWidget* FindWidgetByName(const WideString& wsWidgetName,
                                   CXFA_FFWidget* pRefWidget);
@@ -100,12 +95,12 @@ class CXFA_FFTabOrderPageWidgetIterator : public IXFA_WidgetIterator {
   void OrderContainer(CXFA_LayoutItemIterator* sIterator,
                       CXFA_LayoutItem* pContainerItem,
                       CXFA_TabParam* pContainer,
-                      bool& bCurrentItem,
-                      bool& bContentArea,
-                      bool bMarsterPage = false);
+                      bool* bCurrentItem,
+                      bool* bContentArea,
+                      bool bMasterPage);
 
-  std::vector<CXFA_FFWidget*> m_TabOrderWidgetArray;
-  CXFA_FFPageView* m_pPageView;
+  std::vector<UnownedPtr<CXFA_FFWidget>> m_TabOrderWidgetArray;
+  UnownedPtr<CXFA_FFPageView> m_pPageView;
   uint32_t m_dwFilter;
   int32_t m_iCurWidget;
   bool m_bIgnorerelevant;

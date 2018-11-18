@@ -19,6 +19,7 @@ namespace {
 
 bool IsRename(Node* node) {
   switch (node->opcode()) {
+    case IrOpcode::kCheckHeapObject:
     case IrOpcode::kFinishRegion:
     case IrOpcode::kTypeGuard:
       return true;
@@ -35,12 +36,14 @@ Node* ResolveRenames(Node* node) {
 }
 
 bool MayAlias(Node* a, Node* b) {
-  if (a == b) return true;
-  if (!NodeProperties::GetType(a)->Maybe(NodeProperties::GetType(b))) {
-    return false;
-  }
-  switch (b->opcode()) {
-    case IrOpcode::kAllocate: {
+  if (a != b) {
+    if (!NodeProperties::GetType(a).Maybe(NodeProperties::GetType(b))) {
+      return false;
+    } else if (IsRename(b)) {
+      return MayAlias(a, b->InputAt(0));
+    } else if (IsRename(a)) {
+      return MayAlias(a->InputAt(0), b);
+    } else if (b->opcode() == IrOpcode::kAllocate) {
       switch (a->opcode()) {
         case IrOpcode::kAllocate:
         case IrOpcode::kHeapConstant:
@@ -49,16 +52,7 @@ bool MayAlias(Node* a, Node* b) {
         default:
           break;
       }
-      break;
-    }
-    case IrOpcode::kFinishRegion:
-    case IrOpcode::kTypeGuard:
-      return MayAlias(a, b->InputAt(0));
-    default:
-      break;
-  }
-  switch (a->opcode()) {
-    case IrOpcode::kAllocate: {
+    } else if (a->opcode() == IrOpcode::kAllocate) {
       switch (b->opcode()) {
         case IrOpcode::kHeapConstant:
         case IrOpcode::kParameter:
@@ -66,13 +60,7 @@ bool MayAlias(Node* a, Node* b) {
         default:
           break;
       }
-      break;
     }
-    case IrOpcode::kFinishRegion:
-    case IrOpcode::kTypeGuard:
-      return MayAlias(a->InputAt(0), b);
-    default:
-      break;
   }
   return true;
 }
@@ -111,8 +99,6 @@ Reduction LoadElimination::Reduce(Node* node) {
     }
   }
   switch (node->opcode()) {
-    case IrOpcode::kArrayBufferWasNeutered:
-      return ReduceArrayBufferWasNeutered(node);
     case IrOpcode::kMapGuard:
       return ReduceMapGuard(node);
     case IrOpcode::kCheckMaps:
@@ -151,74 +137,6 @@ Reduction LoadElimination::Reduce(Node* node) {
 
 namespace {
 
-bool LoadEliminationIsCompatibleCheck(Node const* a, Node const* b) {
-  if (a->op() != b->op()) return false;
-  for (int i = a->op()->ValueInputCount(); --i >= 0;) {
-    if (!MustAlias(a->InputAt(i), b->InputAt(i))) return false;
-  }
-  return true;
-}
-
-}  // namespace
-
-Node* LoadElimination::AbstractChecks::Lookup(Node* node) const {
-  for (Node* const check : nodes_) {
-    if (check && !check->IsDead() &&
-        LoadEliminationIsCompatibleCheck(check, node)) {
-      return check;
-    }
-  }
-  return nullptr;
-}
-
-bool LoadElimination::AbstractChecks::Equals(AbstractChecks const* that) const {
-  if (this == that) return true;
-  for (size_t i = 0; i < arraysize(nodes_); ++i) {
-    if (Node* this_node = this->nodes_[i]) {
-      for (size_t j = 0;; ++j) {
-        if (j == arraysize(nodes_)) return false;
-        if (that->nodes_[j] == this_node) break;
-      }
-    }
-  }
-  for (size_t i = 0; i < arraysize(nodes_); ++i) {
-    if (Node* that_node = that->nodes_[i]) {
-      for (size_t j = 0;; ++j) {
-        if (j == arraysize(nodes_)) return false;
-        if (this->nodes_[j] == that_node) break;
-      }
-    }
-  }
-  return true;
-}
-
-LoadElimination::AbstractChecks const* LoadElimination::AbstractChecks::Merge(
-    AbstractChecks const* that, Zone* zone) const {
-  if (this->Equals(that)) return this;
-  AbstractChecks* copy = new (zone) AbstractChecks(zone);
-  for (Node* const this_node : this->nodes_) {
-    if (this_node == nullptr) continue;
-    for (Node* const that_node : that->nodes_) {
-      if (this_node == that_node) {
-        copy->nodes_[copy->next_index_++] = this_node;
-        break;
-      }
-    }
-  }
-  copy->next_index_ %= arraysize(nodes_);
-  return copy;
-}
-
-void LoadElimination::AbstractChecks::Print() const {
-  for (Node* const node : nodes_) {
-    if (node != nullptr) {
-      PrintF("    #%d:%s\n", node->id(), node->op()->mnemonic());
-    }
-  }
-}
-
-namespace {
-
 bool IsCompatible(MachineRepresentation r1, MachineRepresentation r2) {
   if (r1 == r2) return true;
   return IsAnyTagged(r1) && IsAnyTagged(r2);
@@ -252,7 +170,7 @@ LoadElimination::AbstractElements::Kill(Node* object, Node* index,
         DCHECK_NOT_NULL(element.index);
         DCHECK_NOT_NULL(element.value);
         if (!MayAlias(object, element.object) ||
-            !NodeProperties::GetType(index)->Maybe(
+            !NodeProperties::GetType(index).Maybe(
                 NodeProperties::GetType(element.index))) {
           that->elements_[that->next_index_++] = element;
         }
@@ -445,24 +363,19 @@ LoadElimination::AbstractMaps const* LoadElimination::AbstractMaps::Extend(
 }
 
 void LoadElimination::AbstractMaps::Print() const {
+  AllowHandleDereference allow_handle_dereference;
+  StdoutStream os;
   for (auto pair : info_for_node_) {
-    PrintF("    #%d:%s\n", pair.first->id(), pair.first->op()->mnemonic());
-    OFStream os(stdout);
+    os << "    #" << pair.first->id() << ":" << pair.first->op()->mnemonic()
+       << std::endl;
     ZoneHandleSet<Map> const& maps = pair.second;
     for (size_t i = 0; i < maps.size(); ++i) {
-      os << "     - " << Brief(*maps[i]) << "\n";
+      os << "     - " << Brief(*maps[i]) << std::endl;
     }
   }
 }
 
 bool LoadElimination::AbstractState::Equals(AbstractState const* that) const {
-  if (this->checks_) {
-    if (!that->checks_ || !that->checks_->Equals(this->checks_)) {
-      return false;
-    }
-  } else if (that->checks_) {
-    return false;
-  }
   if (this->elements_) {
     if (!that->elements_ || !that->elements_->Equals(this->elements_)) {
       return false;
@@ -491,12 +404,6 @@ bool LoadElimination::AbstractState::Equals(AbstractState const* that) const {
 
 void LoadElimination::AbstractState::Merge(AbstractState const* that,
                                            Zone* zone) {
-  // Merge the information we have about the checks.
-  if (this->checks_) {
-    this->checks_ =
-        that->checks_ ? that->checks_->Merge(this->checks_, zone) : nullptr;
-  }
-
   // Merge the information we have about the elements.
   if (this->elements_) {
     this->elements_ = that->elements_
@@ -519,21 +426,6 @@ void LoadElimination::AbstractState::Merge(AbstractState const* that,
   if (this->maps_) {
     this->maps_ = that->maps_ ? that->maps_->Merge(this->maps_, zone) : nullptr;
   }
-}
-
-Node* LoadElimination::AbstractState::LookupCheck(Node* node) const {
-  return this->checks_ ? this->checks_->Lookup(node) : nullptr;
-}
-
-LoadElimination::AbstractState const* LoadElimination::AbstractState::AddCheck(
-    Node* node, Zone* zone) const {
-  AbstractState* that = new (zone) AbstractState(*this);
-  if (that->checks_) {
-    that->checks_ = that->checks_->Extend(node, zone);
-  } else {
-    that->checks_ = new (zone) AbstractChecks(node, zone);
-  }
-  return that;
 }
 
 bool LoadElimination::AbstractState::LookupMaps(
@@ -675,6 +567,12 @@ Node* LoadElimination::AbstractState::LookupField(Node* object,
 }
 
 bool LoadElimination::AliasStateInfo::MayAlias(Node* other) const {
+  // If {object} is being initialized right here (indicated by {object} being
+  // an Allocate node instead of a FinishRegion node), we know that {other}
+  // can only alias with {object} if they refer to exactly the same node.
+  if (object_->opcode() == IrOpcode::kAllocate) {
+    return object_ == other;
+  }
   // Decide aliasing based on the node kinds.
   if (!compiler::MayAlias(object_, other)) {
     return false;
@@ -693,10 +591,6 @@ bool LoadElimination::AliasStateInfo::MayAlias(Node* other) const {
 }
 
 void LoadElimination::AbstractState::Print() const {
-  if (checks_) {
-    PrintF("   checks:\n");
-    checks_->Print();
-  }
   if (maps_) {
     PrintF("   maps:\n");
     maps_->Print();
@@ -725,18 +619,6 @@ void LoadElimination::AbstractStateForEffectNodes::Set(
   size_t const id = node->id();
   if (id >= info_for_node_.size()) info_for_node_.resize(id + 1, nullptr);
   info_for_node_[id] = state;
-}
-
-Reduction LoadElimination::ReduceArrayBufferWasNeutered(Node* node) {
-  Node* const effect = NodeProperties::GetEffectInput(node);
-  AbstractState const* state = node_states_.Get(effect);
-  if (state == nullptr) return NoChange();
-  if (Node* const check = state->LookupCheck(node)) {
-    ReplaceWithValue(node, check, effect);
-    return Replace(check);
-  }
-  state = state->AddCheck(node, zone());
-  return UpdateState(node, state);
 }
 
 Reduction LoadElimination::ReduceMapGuard(Node* node) {
@@ -904,8 +786,9 @@ Reduction LoadElimination::ReduceTransitionAndStoreElement(Node* node) {
 
 Reduction LoadElimination::ReduceLoadField(Node* node) {
   FieldAccess const& access = FieldAccessOf(node->op());
-  Node* const object = NodeProperties::GetValueInput(node, 0);
-  Node* const effect = NodeProperties::GetEffectInput(node);
+  Node* object = NodeProperties::GetValueInput(node, 0);
+  Node* effect = NodeProperties::GetEffectInput(node);
+  Node* control = NodeProperties::GetControlInput(node);
   AbstractState const* state = node_states_.Get(effect);
   if (state == nullptr) return NoChange();
   if (access.offset == HeapObject::kMapOffset &&
@@ -923,12 +806,19 @@ Reduction LoadElimination::ReduceLoadField(Node* node) {
     if (field_index >= 0) {
       if (Node* replacement = state->LookupField(object, field_index)) {
         // Make sure we don't resurrect dead {replacement} nodes.
-        // Skip lowering if the type of the {replacement} node is not a subtype
-        // of the original {node}'s type.
-        // TODO(tebbi): We should insert a {TypeGuard} for the intersection of
-        // these two types here once we properly handle {Type::None} everywhere.
-        if (!replacement->IsDead() && NodeProperties::GetType(replacement)
-                                          ->Is(NodeProperties::GetType(node))) {
+        if (!replacement->IsDead()) {
+          // Introduce a TypeGuard if the type of the {replacement} node is not
+          // a subtype of the original {node}'s type.
+          if (!NodeProperties::GetType(replacement)
+                   .Is(NodeProperties::GetType(node))) {
+            Type replacement_type = Type::Intersect(
+                NodeProperties::GetType(node),
+                NodeProperties::GetType(replacement), graph()->zone());
+            replacement = effect =
+                graph()->NewNode(common()->TypeGuard(replacement_type),
+                                 replacement, effect, control);
+            NodeProperties::SetType(replacement, replacement_type);
+          }
           ReplaceWithValue(node, replacement, effect);
           return Replace(replacement);
         }
@@ -955,11 +845,12 @@ Reduction LoadElimination::ReduceStoreField(Node* node) {
     DCHECK(IsAnyTagged(access.machine_type.representation()));
     // Kill all potential knowledge about the {object}s map.
     state = state->KillMaps(object, zone());
-    Type* const new_value_type = NodeProperties::GetType(new_value);
-    if (new_value_type->IsHeapConstant()) {
+    Type const new_value_type = NodeProperties::GetType(new_value);
+    if (new_value_type.IsHeapConstant()) {
       // Record the new {object} map information.
+      AllowHandleDereference handle_dereference;
       ZoneHandleSet<Map> object_maps(
-          bit_cast<Handle<Map>>(new_value_type->AsHeapConstant()->Value()));
+          Handle<Map>::cast(new_value_type.AsHeapConstant()->Value()));
       state = state->SetMaps(object, object_maps, zone());
     }
   } else {
@@ -1016,7 +907,7 @@ Reduction LoadElimination::ReduceLoadElement(Node* node) {
         // TODO(tebbi): We should insert a {TypeGuard} for the intersection of
         // these two types here once we properly handle {Type::None} everywhere.
         if (!replacement->IsDead() && NodeProperties::GetType(replacement)
-                                          ->Is(NodeProperties::GetType(node))) {
+                                          .Is(NodeProperties::GetType(node))) {
           ReplaceWithValue(node, replacement, effect);
           return Replace(replacement);
         }
@@ -1367,6 +1258,8 @@ CommonOperatorBuilder* LoadElimination::common() const {
 }
 
 Graph* LoadElimination::graph() const { return jsgraph()->graph(); }
+
+Isolate* LoadElimination::isolate() const { return jsgraph()->isolate(); }
 
 Factory* LoadElimination::factory() const { return jsgraph()->factory(); }
 

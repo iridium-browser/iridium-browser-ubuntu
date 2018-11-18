@@ -8,6 +8,7 @@
 #include "base/command_line.h"
 #include "base/macros.h"
 #include "base/sys_info.h"
+#include "chrome/browser/policy/cloud/policy_header_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/instant_service.h"
 #include "chrome/browser/search/instant_service_factory.h"
@@ -21,6 +22,8 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/network_session_configurator/common/network_switches.h"
+#include "components/policy/core/common/cloud/cloud_policy_constants.h"
+#include "components/policy/core/common/cloud/policy_header_service.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/render_frame_host.h"
@@ -29,11 +32,27 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/test/browser_test_utils.h"
+#include "content/public/test/test_navigation_observer.h"
 #include "net/dns/mock_host_resolver.h"
+#include "net/http/http_status_code.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
+#include "net/test/embedded_test_server/http_request.h"
+#include "net/test/embedded_test_server/http_response.h"
 #include "url/gurl.h"
 
 namespace content {
+
+namespace {
+
+const char kTestPolicyHeader[] = "test_header";
+const char kServerRedirectUrl[] = "/server-redirect";
+
+enum class NetworkServiceState {
+  kDisabled,
+  kEnabled,
+};
+
+}  // namespace
 
 // Use a test class with SetUpCommandLine to ensure the flag is sent to the
 // first renderer process.
@@ -279,6 +298,174 @@ IN_PROC_BROWSER_TEST_F(SitePerProcessMemoryThresholdBrowserTest,
   // (i.e. the memory threshold should be ignored).
   EXPECT_FALSE(
       content::SiteIsolationPolicy::UseDedicatedProcessesForAllSites());
+}
+
+class PolicyHeaderServiceBrowserTest : public InProcessBrowserTest {
+ public:
+  PolicyHeaderServiceBrowserTest() = default;
+
+  void SetUpOnMainThread() override {
+    embedded_test_server()->RegisterRequestHandler(
+        base::BindRepeating(&PolicyHeaderServiceBrowserTest::HandleTestRequest,
+                            base::Unretained(this)));
+    ASSERT_TRUE(embedded_test_server()->Start());
+
+    // Forge a dummy DMServer URL.
+    dm_url_ = embedded_test_server()->GetURL("/DeviceManagement");
+
+    // At this point, the Profile is already initialized and it's too
+    // late to set the DMServer URL via command line flags, so directly
+    // inject it to the PolicyHeaderService.
+    policy::PolicyHeaderService* policy_header_service =
+        policy::PolicyHeaderServiceFactory::GetForBrowserContext(
+            browser()->profile());
+    policy_header_service->SetServerURLForTest(dm_url_.spec());
+    policy_header_service->SetHeaderForTest(kTestPolicyHeader);
+  }
+
+  std::unique_ptr<net::test_server::HttpResponse> HandleTestRequest(
+      const net::test_server::HttpRequest& request) {
+    last_request_headers_ = request.headers;
+
+    if (base::StartsWith(request.relative_url, kServerRedirectUrl,
+                         base::CompareCase::SENSITIVE)) {
+      // Extract the target URL and redirect there.
+      size_t query_string_pos = request.relative_url.find('?');
+      std::string redirect_target =
+          request.relative_url.substr(query_string_pos + 1);
+
+      std::unique_ptr<net::test_server::BasicHttpResponse> http_response(
+          new net::test_server::BasicHttpResponse);
+      http_response->set_code(net::HTTP_MOVED_PERMANENTLY);
+      http_response->AddCustomHeader("Location", redirect_target);
+      return std::move(http_response);
+    } else if (request.relative_url == "/") {
+      std::unique_ptr<net::test_server::BasicHttpResponse> http_response(
+          new net::test_server::BasicHttpResponse);
+      http_response->set_code(net::HTTP_OK);
+      http_response->set_content("Success");
+      return std::move(http_response);
+    }
+    return nullptr;
+  }
+
+  const GURL& dm_url() const { return dm_url_; }
+
+  const net::test_server::HttpRequest::HeaderMap& last_request_headers() const {
+    return last_request_headers_;
+  }
+
+ private:
+  // The dummy URL for DMServer.
+  GURL dm_url_;
+
+  // List of request headers received by the embedded server.
+  net::test_server::HttpRequest::HeaderMap last_request_headers_;
+
+  DISALLOW_COPY_AND_ASSIGN(PolicyHeaderServiceBrowserTest);
+};
+
+IN_PROC_BROWSER_TEST_F(PolicyHeaderServiceBrowserTest, NoPolicyHeader) {
+  // When fetching non-DMServer URLs, we should not add a policy header to the
+  // request.
+  DCHECK(!embedded_test_server()->base_url().spec().empty());
+  ui_test_utils::NavigateToURL(browser(), embedded_test_server()->base_url());
+  auto iter = last_request_headers().find(policy::kChromePolicyHeader);
+  EXPECT_EQ(iter, last_request_headers().end());
+}
+
+IN_PROC_BROWSER_TEST_F(PolicyHeaderServiceBrowserTest, PolicyHeader) {
+  // When fetching a DMServer URL, we should add a policy header to the
+  // request.
+  ui_test_utils::NavigateToURL(browser(), dm_url());
+
+  auto iter = last_request_headers().find(policy::kChromePolicyHeader);
+  ASSERT_NE(iter, last_request_headers().end());
+  EXPECT_EQ(iter->second, kTestPolicyHeader);
+}
+
+IN_PROC_BROWSER_TEST_F(PolicyHeaderServiceBrowserTest,
+                       PolicyHeaderForRedirect) {
+  // Build up a URL that results in a redirect to the DMServer URL to make
+  // sure the policy header is still added.
+  std::string redirect_url;
+  redirect_url += kServerRedirectUrl;
+  redirect_url += "?";
+  redirect_url += dm_url().spec();
+  ui_test_utils::NavigateToURL(browser(),
+                               embedded_test_server()->GetURL(redirect_url));
+
+  auto iter = last_request_headers().find(policy::kChromePolicyHeader);
+  ASSERT_NE(iter, last_request_headers().end());
+  EXPECT_EQ(iter->second, kTestPolicyHeader);
+}
+
+// Helper class to test window creation from NTP.
+class OpenWindowFromNTPBrowserTest : public InProcessBrowserTest,
+                                     public InstantTestBase {
+ public:
+  OpenWindowFromNTPBrowserTest() {}
+
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    command_line->AppendSwitch(switches::kIgnoreCertificateErrors);
+  }
+
+  void SetUpOnMainThread() override {
+    InProcessBrowserTest::SetUpOnMainThread();
+    host_resolver()->AddRule("*", "127.0.0.1");
+    ASSERT_TRUE(https_test_server().InitializeAndListen());
+    https_test_server().StartAcceptingConnections();
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(OpenWindowFromNTPBrowserTest);
+};
+
+// Test checks that navigations from NTP tab to URLs with same host as NTP but
+// different path do not reuse NTP SiteInstance. See https://crbug.com/859062
+// for details.
+IN_PROC_BROWSER_TEST_F(OpenWindowFromNTPBrowserTest,
+                       TransferFromNTPCreateNewTab) {
+  GURL search_url =
+      https_test_server().GetURL("ntp.com", "/instant_extended.html");
+  GURL ntp_url =
+      https_test_server().GetURL("ntp.com", "/instant_extended_ntp.html");
+  InstantTestBase::Init(search_url, ntp_url, false);
+
+  SetupInstant(browser());
+
+  // Navigate to the NTP URL and verify that the resulting process is marked as
+  // an Instant process.
+  ui_test_utils::NavigateToURL(browser(), ntp_url);
+  content::WebContents* ntp_tab =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  InstantService* instant_service =
+      InstantServiceFactory::GetForProfile(browser()->profile());
+  EXPECT_TRUE(instant_service->IsInstantProcess(
+      ntp_tab->GetMainFrame()->GetProcess()->GetID()));
+
+  // Execute script that creates new window from ntp tab with
+  // ntp.com/title1.html as target url. Host is same as remote-ntp host, yet
+  // path is different.
+  GURL generic_url(https_test_server().GetURL("ntp.com", "/title1.html"));
+  content::TestNavigationObserver opened_tab_observer(nullptr);
+  opened_tab_observer.StartWatchingNewWebContents();
+  EXPECT_TRUE(
+      ExecuteScript(ntp_tab, "window.open('" + generic_url.spec() + "');"));
+  opened_tab_observer.Wait();
+  ASSERT_EQ(2, browser()->tab_strip_model()->count());
+
+  content::WebContents* opened_tab =
+      browser()->tab_strip_model()->GetActiveWebContents();
+
+  // Wait until newly opened tab is fully loaded.
+  EXPECT_TRUE(WaitForLoadStop(opened_tab));
+
+  EXPECT_NE(opened_tab, ntp_tab);
+  EXPECT_EQ(generic_url, opened_tab->GetLastCommittedURL());
+  // New created tab should not reside in an Instant process.
+  EXPECT_FALSE(instant_service->IsInstantProcess(
+      opened_tab->GetMainFrame()->GetProcess()->GetID()));
 }
 
 }  // namespace content

@@ -65,6 +65,7 @@ public class UrlUtilities {
      *         guaranteed.
      */
     public static String getTelNumber(String uri) {
+        if (uri == null || !uri.contains(":")) return "";
         return uri.split(":")[1];
     }
 
@@ -329,6 +330,32 @@ public class UrlUtilities {
         }
 
         return true;
+    }
+
+    /**
+     * @param url An HTTP or HTTPS URL.
+     * @return The URL without path and query.
+     */
+    public static String stripPath(String url) {
+        assert isHttpOrHttps(url);
+        Uri parsed = Uri.parse(url);
+
+        return parsed.getScheme() + "://" + ((parsed.getHost() != null) ? parsed.getHost() : "")
+                + ((parsed.getPort() != -1) ? (":" + parsed.getPort()) : "");
+    }
+
+    /**
+     * @param url An HTTP or HTTPS URL.
+     * @return The URL without the scheme.
+     */
+    public static String stripScheme(String url) {
+        String noScheme = url.trim();
+        if (noScheme.startsWith(UrlConstants.HTTPS_URL_PREFIX)) {
+            noScheme = noScheme.substring(8);
+        } else if (noScheme.startsWith(UrlConstants.HTTP_URL_PREFIX)) {
+            noScheme = noScheme.substring(7);
+        }
+        return noScheme;
     }
 
     private static native boolean nativeIsDownloadable(String url);

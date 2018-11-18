@@ -17,8 +17,10 @@ jumbo_component("mus") {
   sources = [
     "aura_init.cc",
     "aura_init.h",
-    "clipboard_mus.cc",
-    "clipboard_mus.h",
+    "ax_remote_host.cc",
+    "ax_remote_host.h",
+    "ax_tree_source_mus.cc",
+    "ax_tree_source_mus.h",
     "desktop_window_tree_host_mus.cc",
     "desktop_window_tree_host_mus.h",
     "mus_client.cc",
@@ -26,6 +28,8 @@ jumbo_component("mus") {
     "mus_client_observer.h",
     "mus_export.h",
     "mus_property_mirror.h",
+    "mus_views_delegate.cc",
+    "mus_views_delegate.h",
     "pointer_watcher_event_router.cc",
     "pointer_watcher_event_router.h",
     "screen_mus.cc",
@@ -41,7 +45,7 @@ jumbo_component("mus") {
 
   public_deps = [
     ":resources",
-    "//services/ui/public/cpp",
+    "//services/ws/public/cpp",
     "//ui/aura",
   ]
   deps = [
@@ -49,18 +53,21 @@ jumbo_component("mus") {
     "//base:i18n",
     "//base/third_party/dynamic_annotations",
     "//cc",
-    "//mojo/common",
     "//mojo/public/cpp/bindings",
     "//net",
     "//services/catalog/public/cpp",
     "//services/catalog/public/mojom:constants",
     "//services/service_manager/public/cpp",
     "//services/service_manager/public/mojom",
-    "//services/ui/public/cpp",
-    "//services/ui/public/interfaces",
+    "//services/ws/public/cpp",
+    "//services/ws/public/cpp/input_devices",
+    "//services/ws/public/mojom",
     "//skia",
     "//third_party/icu",
+    "//ui/accessibility",
+    "//ui/accessibility/mojom",
     "//ui/aura",
+    "//ui/base/mojo:lib",
     "//ui/compositor",
     "//ui/display",
     "//ui/events",
@@ -78,13 +85,6 @@ jumbo_component("mus") {
     "//ui/wm",
     "//ui/wm/public",
   ]
-
-  if (is_linux && !is_android) {
-    deps += [ "//components/services/font/public/cpp" ]
-    data_deps = [
-      "//components/services/font:font_service",
-    ]
-  }
 }
 
 repack("resources") {
@@ -113,7 +113,7 @@ jumbo_static_library("test_support") {
 
   sources = [
     "../test/native_widget_factory_aura_mus.cc",
-    "test_utils.h",
+    "mus_client_test_api.h",
     "views_mus_test_suite.cc",
     "views_mus_test_suite.h",
   ]
@@ -122,11 +122,11 @@ jumbo_static_library("test_support") {
     ":mus",
     "//base",
     "//base/test:test_support",
-    "//mojo/edk",
+    "//mojo/core/embedder",
     "//services/catalog:lib",
     "//services/service_manager/background:lib",
     "//services/service_manager/public/cpp",
-    "//services/ui/common:mus_common",
+    "//services/ws/common",
     "//testing/gtest",
     "//ui/aura",
     "//ui/aura:test_support",
@@ -144,7 +144,7 @@ jumbo_static_library("test_support") {
 
   data_deps = [
     ":views_mus_tests_catalog",
-    "//services/ui/ime/test_ime_driver",
+    "//services/ws/ime/test_ime_driver",
     "//ui/resources:ui_test_pak_data",
   ]
 }
@@ -153,6 +153,8 @@ test("views_mus_unittests") {
   testonly = true
 
   sources = [
+    "ax_remote_host_unittest.cc",
+    "ax_tree_source_mus_unittest.cc",
     "desktop_window_tree_host_mus_unittest.cc",
     "pointer_watcher_event_router_unittest.cc",
     "run_all_unittests_mus.cc",
@@ -169,11 +171,12 @@ test("views_mus_unittests") {
     "//base/test:test_support",
     "//cc",
     "//net",
-    "//services/ui/public/interfaces",
+    "//services/ws/public/mojom",
     "//skia",
     "//testing/gtest",
     "//third_party/icu",
     "//ui/accessibility",
+    "//ui/accessibility/mojom",
     "//ui/aura",
     "//ui/aura:test_support",
     "//ui/base",
@@ -199,8 +202,8 @@ test("views_mus_unittests") {
 
   data_deps = [
     ":views_mus_tests_catalog_copy",
-    "//services/ui/ime/test_ime_driver",
-    "//services/ui/test_wm",
+    "//services/ws/ime/test_ime_driver",
+    "//services/ws/test_ws",
   ]
 
   if (is_win) {
@@ -245,7 +248,7 @@ test("views_mus_interactive_ui_tests") {
     ":mus",
     ":test_support",
     "//base",
-    "//mojo/edk",
+    "//mojo/core/embedder",
     "//testing/gmock",
     "//testing/gtest",
     "//ui/aura",
@@ -253,6 +256,7 @@ test("views_mus_interactive_ui_tests") {
     "//ui/base",
     "//ui/base:test_support",
     "//ui/base/ime",
+    "//ui/base/mojo:lib",
     "//ui/events:events_base",
     "//ui/events:test_support",
     "//ui/gl:test_support",
@@ -265,7 +269,7 @@ test("views_mus_interactive_ui_tests") {
 
   data_deps = [
     ":views_mus_tests_catalog_copy",
-    "//services/ui/test_wm",
+    "//services/ws/test_ws",
   ]
 
   if (is_win) {
@@ -300,9 +304,10 @@ catalog("views_mus_tests_catalog") {
     ":interactive_ui_tests_manifest",
   ]
 
-  standalone_services = [ "//services/ui/test_wm:manifest" ]
-
-  catalog_deps = [ "//mash:catalog" ]
+  standalone_services = [
+    "//services/ws/test_ws:manifest",
+    "//services/ws/ime/test_ime_driver:manifest",
+  ]
 }
 
 copy("views_mus_tests_catalog_copy") {

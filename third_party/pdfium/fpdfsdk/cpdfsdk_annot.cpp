@@ -27,9 +27,13 @@ CPDFSDK_Annot::CPDFSDK_Annot(CPDFSDK_PageView* pPageView)
 
 CPDFSDK_Annot::~CPDFSDK_Annot() {}
 
+CPDFSDK_BAAnnot* CPDFSDK_Annot::AsBAAnnot() {
+  return nullptr;
+}
+
 #ifdef PDF_ENABLE_XFA
 
-bool CPDFSDK_Annot::IsXFAField() {
+bool CPDFSDK_Annot::IsXFAField() const {
   return false;
 }
 
@@ -73,12 +77,13 @@ CFX_FloatRect CPDFSDK_Annot::GetRect() const {
   return CFX_FloatRect();
 }
 
-UnderlyingPageType* CPDFSDK_Annot::GetUnderlyingPage() {
+IPDF_Page* CPDFSDK_Annot::GetPage() {
 #ifdef PDF_ENABLE_XFA
-  return GetPDFXFAPage();
-#else   // PDF_ENABLE_XFA
-  return GetPDFPage();
+  CPDFXFA_Page* pXFAPage = GetPDFXFAPage();
+  if (pXFAPage)
+    return pXFAPage;
 #endif  // PDF_ENABLE_XFA
+  return GetPDFPage();
 }
 
 CPDF_Page* CPDFSDK_Annot::GetPDFPage() {

@@ -4,12 +4,12 @@
 
 package org.chromium.chrome.browser.offlinepages.prefetch;
 
-import android.content.Context;
-import android.support.test.filters.SmallTest;
-
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
+
+import android.content.Context;
+import android.support.test.filters.SmallTest;
 
 import org.junit.Before;
 import org.junit.Rule;
@@ -19,6 +19,7 @@ import org.junit.runner.RunWith;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.CommandLineFlags;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
@@ -109,8 +110,8 @@ public class PrefetchBackgroundTaskTest {
     private static class TestBackgroundTaskScheduler implements BackgroundTaskScheduler {
         private HashMap<Integer, TestPrefetchBackgroundTask> mTasks = new HashMap<>();
         private Semaphore mStartSemaphore = new Semaphore(0);
-        private int mAddCount = 0;
-        private int mRemoveCount = 0;
+        private int mAddCount;
+        private int mRemoveCount;
 
         @Override
         public boolean schedule(final Context context, final TaskInfo taskInfo) {
@@ -235,6 +236,7 @@ public class PrefetchBackgroundTaskTest {
 
     @Test
     @SmallTest
+    @DisabledTest(message = "crbug.com/875433")
     public void testReschedule() throws Exception {
         PrefetchBackgroundTask.skipConditionCheckingForTesting();
         scheduleTask(0);
@@ -283,6 +285,7 @@ public class PrefetchBackgroundTaskTest {
 
     @Test
     @SmallTest
+    @DisabledTest(message = "https://crbug.com/870295")
     public void testSuspend() throws Exception {
         PrefetchBackgroundTask.skipConditionCheckingForTesting();
         scheduleTask(0);

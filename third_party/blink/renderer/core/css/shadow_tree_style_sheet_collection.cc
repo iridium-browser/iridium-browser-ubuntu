@@ -64,14 +64,13 @@ void ShadowTreeStyleSheetCollection::CollectStyleSheets(
           std::make_pair(css_sheet, master_engine.RuleSetForSheet(*css_sheet)));
     }
   }
-
-  if (!GetTreeScope().HasMoreStyleSheets())
+  if (!GetTreeScope().HasAdoptedStyleSheets())
     return;
 
-  StyleSheetList& more_style_sheets = GetTreeScope().MoreStyleSheets();
-  unsigned length = more_style_sheets.length();
+  StyleSheetList& adopted_style_sheets = GetTreeScope().AdoptedStyleSheets();
+  unsigned length = adopted_style_sheets.length();
   for (unsigned index = 0; index < length; ++index) {
-    StyleSheet* sheet = more_style_sheets.item(index);
+    StyleSheet* sheet = adopted_style_sheets.item(index);
     if (!sheet)
       continue;
     CSSStyleSheet* css_sheet = ToCSSStyleSheet(sheet);

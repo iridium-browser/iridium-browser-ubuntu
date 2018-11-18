@@ -41,6 +41,8 @@ std::string AutocompleteMatchType::ToString(AutocompleteMatchType::Type type) {
     "physical-web",
     "physical-web-overflow",
     "tab-search",
+    "document",
+    "pedal",
   };
   // clang-format on
   static_assert(arraysize(strings) == AutocompleteMatchType::NUM_TYPES,
@@ -59,9 +61,34 @@ static int AccessibilityLabelPrefixLength(base::string16 accessibility_label) {
 }
 
 // static
+base::string16 AddTabSwitchLabelTextIfNecessary(
+    base::string16 base_message,
+    bool has_tab_match,
+    bool is_tab_switch_button_focused,
+    int* label_prefix_length) {
+  if (!has_tab_match) {
+    return base_message;
+  }
+
+  if (is_tab_switch_button_focused) {
+    const int kButtonMessage = IDS_ACC_TAB_SWITCH_BUTTON_FOCUSED_PREFIX;
+    if (label_prefix_length) {
+      const base::string16 sentinal =
+          base::WideToUTF16(kAccessibilityLabelPrefixEndSentinal);
+      *label_prefix_length += AccessibilityLabelPrefixLength(
+          l10n_util::GetStringFUTF16(kButtonMessage, sentinal));
+    }
+    return l10n_util::GetStringFUTF16(kButtonMessage, base_message);
+  }
+
+  return l10n_util::GetStringFUTF16(IDS_ACC_TAB_SWITCH_SUFFIX, base_message);
+}
+
+// static
 base::string16 AutocompleteMatchType::ToAccessibilityLabel(
     const AutocompleteMatch& match,
     const base::string16& match_text,
+    bool is_tab_switch_button_focused,
     int* label_prefix_length) {
   // Types with a message ID of zero get |text| returned as-is.
   static constexpr int message_ids[] = {
@@ -72,13 +99,13 @@ base::string16 AutocompleteMatchType::ToAccessibilityLabel(
 
       // HISTORY_KEYWORD is a custom search engine with no %s in its string - so
       // more or less a regular URL.
-      0,                                      // HISTORY_KEYWORD
-      0,                                      // NAVSUGGEST
-      IDS_ACC_AUTOCOMPLETE_SEARCH,            // SEARCH_WHAT_YOU_TYPED
-      IDS_ACC_AUTOCOMPLETE_SEARCH_HISTORY,    // SEARCH_HISTORY
-      IDS_ACC_AUTOCOMPLETE_SUGGESTED_SEARCH,  // SEARCH_SUGGEST
-      IDS_ACC_AUTOCOMPLETE_SUGGESTED_SEARCH,  // SEARCH_SUGGEST_ENTITY
-      IDS_ACC_AUTOCOMPLETE_SUGGESTED_SEARCH,  // SEARCH_SUGGEST_TAIL
+      0,                                             // HISTORY_KEYWORD
+      0,                                             // NAVSUGGEST
+      IDS_ACC_AUTOCOMPLETE_SEARCH,                   // SEARCH_WHAT_YOU_TYPED
+      IDS_ACC_AUTOCOMPLETE_SEARCH_HISTORY,           // SEARCH_HISTORY
+      IDS_ACC_AUTOCOMPLETE_SUGGESTED_SEARCH,         // SEARCH_SUGGEST
+      IDS_ACC_AUTOCOMPLETE_SUGGESTED_SEARCH_ENTITY,  // SEARCH_SUGGEST_ENTITY
+      IDS_ACC_AUTOCOMPLETE_SUGGESTED_SEARCH,         // SEARCH_SUGGEST_TAIL
 
       // SEARCH_SUGGEST_PERSONALIZED are searches from history elsewhere, maybe
       // on other machines via Sync, or when signed in to Google.
@@ -95,9 +122,13 @@ base::string16 AutocompleteMatchType::ToAccessibilityLabel(
       0,                               // CALCULATOR
       IDS_ACC_AUTOCOMPLETE_CLIPBOARD,  // CLIPBOARD
       0,                               // VOICE_SUGGEST
-      0,                               // PHYSICAL_WEB
-      0,                               // PHYSICAL_WEB_OVERFLOW
+      0,                               // PHYSICAL_WEB_DEPRECATED
+      0,                               // PHYSICAL_WEB_OVERFLOW_DEPRECATED
       IDS_ACC_AUTOCOMPLETE_HISTORY,    // TAB_SEARCH_DEPRECATED
+      0,                               // DOCUMENT_SUGGESTION
+
+      // TODO(orinj): Determine appropriate accessibility labels for Pedals
+      0,  // PEDAL
   };
   static_assert(arraysize(message_ids) == AutocompleteMatchType::NUM_TYPES,
                 "message_ids must have NUM_TYPES elements");
@@ -106,8 +137,11 @@ base::string16 AutocompleteMatchType::ToAccessibilityLabel(
     *label_prefix_length = 0;
 
   int message = message_ids[match.type];
-  if (!message)
-    return match_text;
+  if (!message) {
+    return AddTabSwitchLabelTextIfNecessary(match_text, match.has_tab_match,
+                                            is_tab_switch_button_focused,
+                                            label_prefix_length);
+  }
 
   const base::string16 sentinal =
       base::WideToUTF16(kAccessibilityLabelPrefixEndSentinal);
@@ -126,7 +160,16 @@ base::string16 AutocompleteMatchType::ToAccessibilityLabel(
         message = IDS_ACC_AUTOCOMPLETE_QUICK_ANSWER;
       }
       break;
-
+    case IDS_ACC_AUTOCOMPLETE_SUGGESTED_SEARCH_ENTITY:
+      if (match.description.empty()) {
+        // No description, so fall back to ordinary search suggestion format.
+        message = IDS_ACC_AUTOCOMPLETE_SUGGESTED_SEARCH;
+      } else {
+        // Full entity search suggestion with description.
+        description = match.description;
+        has_description = true;
+      }
+      break;
     case IDS_ACC_AUTOCOMPLETE_HISTORY:
     case IDS_ACC_AUTOCOMPLETE_BOOKMARK:
     case IDS_ACC_AUTOCOMPLETE_CLIPBOARD:
@@ -150,9 +193,14 @@ base::string16 AutocompleteMatchType::ToAccessibilityLabel(
                   l10n_util::GetStringFUTF16(message, sentinal));
   }
 
-  return has_description
-             ? l10n_util::GetStringFUTF16(message, match_text, description)
-             : l10n_util::GetStringFUTF16(message, match_text);
+  const base::string16 base_message =
+      has_description
+          ? l10n_util::GetStringFUTF16(message, match_text, description)
+          : l10n_util::GetStringFUTF16(message, match_text);
+
+  return AddTabSwitchLabelTextIfNecessary(base_message, match.has_tab_match,
+                                          is_tab_switch_button_focused,
+                                          label_prefix_length);
 }
 
 // static
@@ -161,9 +209,13 @@ base::string16 AutocompleteMatchType::ToAccessibilityLabel(
     const base::string16& match_text,
     size_t match_index,
     size_t total_matches,
+    bool is_tab_switch_button_focused,
     int* label_prefix_length) {
-  base::string16 result =
-      ToAccessibilityLabel(match, match_text, label_prefix_length);
+  base::string16 result = ToAccessibilityLabel(
+      match, match_text, is_tab_switch_button_focused, label_prefix_length);
+
+  if (is_tab_switch_button_focused)
+    return result;  // Don't add "n of m" positional info when button focused.
 
   return l10n_util::GetStringFUTF16(IDS_ACC_AUTOCOMPLETE_N_OF_M, result,
                                     base::IntToString16(match_index + 1),

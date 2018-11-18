@@ -9,6 +9,7 @@
 
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "build/build_config.h"
 #include "chrome/browser/bitmap_fetcher/bitmap_fetcher.h"
 #include "chrome/browser/profiles/profile.h"
 #include "content/public/browser/storage_partition.h"
@@ -18,7 +19,19 @@
 namespace {
 
 const size_t kMaxRequests = 25;  // Maximum number of inflight requests allowed.
-const int kMaxCacheEntries = 5;  // Maximum number of cache entries.
+
+// Maximum number of cache entries. This was 5 before, which worked well enough
+// for few images like weather answers, but with rich entity suggestions showing
+// several images at once, even changing some while the user types, a larger
+// cache is necessary to avoid flickering. Each cache entry is expected to take
+// 16kb (64x64 @ 32bpp).  With 12, the total memory consumed would be ~192kb.
+// 12 is double the default number of maximum suggestions so this can
+// accommodate one match image plus one answer image for each result.
+#if defined(OS_ANDROID)
+const int kMaxCacheEntries = 5;
+#else
+const int kMaxCacheEntries = 12;
+#endif
 
 }  // namespace.
 

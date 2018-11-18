@@ -15,7 +15,6 @@
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "build/build_config.h"
-#include "components/viz/common/gl_helper.h"
 #include "content/browser/renderer_host/media/media_stream_manager.h"
 #include "content/browser/renderer_host/media/video_capture_manager.h"
 #include "content/public/browser/browser_thread.h"
@@ -48,9 +47,72 @@ static const int kInfiniteRatio = 99999;
   base::UmaHistogramSparse(                             \
       name, (height) ? ((width)*100) / (height) : kInfiniteRatio);
 
-void CallOnError(VideoCaptureControllerEventHandler* client,
+void LogVideoFrameDrop(media::VideoCaptureFrameDropReason reason,
+                       MediaStreamType stream_type) {
+  const int kEnumCount =
+      static_cast<int>(media::VideoCaptureFrameDropReason::kMaxValue) + 1;
+  UMA_HISTOGRAM_ENUMERATION("Media.VideoCapture.FrameDrop", reason, kEnumCount);
+  switch (stream_type) {
+    case MEDIA_DEVICE_VIDEO_CAPTURE:
+      UMA_HISTOGRAM_ENUMERATION("Media.VideoCapture.FrameDrop.DeviceCapture",
+                                reason, kEnumCount);
+      break;
+    case MEDIA_GUM_TAB_VIDEO_CAPTURE:
+      UMA_HISTOGRAM_ENUMERATION("Media.VideoCapture.FrameDrop.GumTabCapture",
+                                reason, kEnumCount);
+      break;
+    case MEDIA_GUM_DESKTOP_VIDEO_CAPTURE:
+      UMA_HISTOGRAM_ENUMERATION(
+          "Media.VideoCapture.FrameDrop.GumDesktopCapture", reason, kEnumCount);
+      break;
+    case MEDIA_DISPLAY_VIDEO_CAPTURE:
+      UMA_HISTOGRAM_ENUMERATION("Media.VideoCapture.FrameDrop.DisplayCapture",
+                                reason, kEnumCount);
+      break;
+    default:
+      // Do nothing
+      return;
+  }
+}
+
+void LogMaxConsecutiveVideoFrameDropCountExceeded(
+    media::VideoCaptureFrameDropReason reason,
+    MediaStreamType stream_type) {
+  const int kEnumCount =
+      static_cast<int>(media::VideoCaptureFrameDropReason::kMaxValue) + 1;
+  UMA_HISTOGRAM_ENUMERATION("Media.VideoCapture.MaxFrameDropExceeded", reason,
+                            kEnumCount);
+  switch (stream_type) {
+    case MEDIA_DEVICE_VIDEO_CAPTURE:
+      UMA_HISTOGRAM_ENUMERATION(
+          "Media.VideoCapture.MaxFrameDropExceeded.DeviceCapture", reason,
+          kEnumCount);
+      break;
+    case MEDIA_GUM_TAB_VIDEO_CAPTURE:
+      UMA_HISTOGRAM_ENUMERATION(
+          "Media.VideoCapture.MaxFrameDropExceeded.GumTabCapture", reason,
+          kEnumCount);
+      break;
+    case MEDIA_GUM_DESKTOP_VIDEO_CAPTURE:
+      UMA_HISTOGRAM_ENUMERATION(
+          "Media.VideoCapture.MaxFrameDropExceeded.GumDesktopCapture", reason,
+          kEnumCount);
+      break;
+    case MEDIA_DISPLAY_VIDEO_CAPTURE:
+      UMA_HISTOGRAM_ENUMERATION(
+          "Media.VideoCapture.MaxFrameDropExceeded.DisplayCapture", reason,
+          kEnumCount);
+      break;
+    default:
+      // Do nothing
+      return;
+  }
+}
+
+void CallOnError(media::VideoCaptureError error,
+                 VideoCaptureControllerEventHandler* client,
                  VideoCaptureControllerID id) {
-  client->OnError(id);
+  client->OnError(id, error);
 }
 
 void CallOnStarted(VideoCaptureControllerEventHandler* client,
@@ -111,13 +173,13 @@ VideoCaptureController::BufferContext::BufferContext(
     int buffer_context_id,
     int buffer_id,
     media::VideoFrameConsumerFeedbackObserver* consumer_feedback_observer,
-    mojo::ScopedSharedBufferHandle handle)
+    media::mojom::VideoBufferHandlePtr buffer_handle)
     : buffer_context_id_(buffer_context_id),
       buffer_id_(buffer_id),
       is_retired_(false),
       frame_feedback_id_(0),
       consumer_feedback_observer_(consumer_feedback_observer),
-      buffer_handle_(std::move(handle)),
+      buffer_handle_(std::move(buffer_handle)),
       max_consumer_utilization_(
           media::VideoFrameConsumerFeedbackObserver::kNoUtilizationRecorded),
       consumer_hold_count_(0) {}
@@ -157,17 +219,39 @@ void VideoCaptureController::BufferContext::DecreaseConsumerCount() {
   }
 }
 
-mojo::ScopedSharedBufferHandle
-VideoCaptureController::BufferContext::CloneHandle() {
-  // Special behavior here: If the handle was already read-only, the Clone()
-  // call here will maintain that read-only permission. If it was read-write,
-  // the cloned handle will have read-write permission.
-  //
-  // TODO(crbug.com/797470): We should be able to demote read-write to read-only
-  // permissions when Clone()'ing handles. Currently, this causes a crash.
-  return buffer_handle_->Clone(
-      mojo::SharedBufferHandle::AccessMode::READ_WRITE);
+media::mojom::VideoBufferHandlePtr
+VideoCaptureController::BufferContext::CloneBufferHandle() {
+  // Unable to use buffer_handle_->Clone(), because shared_buffer does not
+  // support the copy constructor.
+  media::mojom::VideoBufferHandlePtr result =
+      media::mojom::VideoBufferHandle::New();
+  if (buffer_handle_->is_shared_buffer_handle()) {
+    // Special behavior here: If the handle was already read-only, the Clone()
+    // call here will maintain that read-only permission. If it was read-write,
+    // the cloned handle will have read-write permission.
+    //
+    // TODO(crbug.com/797470): We should be able to demote read-write to
+    // read-only permissions when Clone()'ing handles. Currently, this causes a
+    // crash.
+    result->set_shared_buffer_handle(
+        buffer_handle_->get_shared_buffer_handle()->Clone(
+            mojo::SharedBufferHandle::AccessMode::READ_WRITE));
+  } else if (buffer_handle_->is_read_only_shmem_region()) {
+    result->set_read_only_shmem_region(
+        buffer_handle_->get_read_only_shmem_region().Duplicate());
+  } else if (buffer_handle_->is_mailbox_handles()) {
+    result->set_mailbox_handles(buffer_handle_->get_mailbox_handles()->Clone());
+  } else {
+    NOTREACHED() << "Unexpected video buffer handle type";
+  }
+  return result;
 }
+
+VideoCaptureController::FrameDropLogState::FrameDropLogState(
+    media::VideoCaptureFrameDropReason reason)
+    : drop_count((reason == media::VideoCaptureFrameDropReason::kNone) ? 0 : 1),
+      drop_reason(reason),
+      max_log_count_exceeded(false) {}
 
 VideoCaptureController::VideoCaptureController(
     const std::string& device_id,
@@ -212,13 +296,16 @@ void VideoCaptureController::AddClient(
   // report an error immediately and punt.
   if (!params.IsValid() ||
       !(params.requested_format.pixel_format == media::PIXEL_FORMAT_I420 ||
-        params.requested_format.pixel_format == media::PIXEL_FORMAT_Y16) ||
-      params.requested_format.pixel_storage != media::VideoPixelStorage::CPU) {
+        params.requested_format.pixel_format == media::PIXEL_FORMAT_Y16 ||
+        params.requested_format.pixel_format == media::PIXEL_FORMAT_ARGB)) {
     // Crash in debug builds since the renderer should not have asked for
     // invalid or unsupported parameters.
     LOG(DFATAL) << "Invalid or unsupported video capture parameters requested: "
                 << media::VideoCaptureFormat::ToString(params.requested_format);
-    event_handler->OnError(id);
+    event_handler->OnError(
+        id,
+        media::VideoCaptureError::
+            kVideoCaptureControllerInvalidOrUnsupportedVideoCaptureParametersRequested);
     return;
   }
 
@@ -228,7 +315,9 @@ void VideoCaptureController::AddClient(
 
   // Signal error in case device is already in error state.
   if (state_ == VIDEO_CAPTURE_STATE_ERROR) {
-    event_handler->OnError(id);
+    event_handler->OnError(
+        id,
+        media::VideoCaptureError::kVideoCaptureControllerIsAlreadyInErrorState);
     return;
   }
 
@@ -383,16 +472,15 @@ VideoCaptureController::GetVideoCaptureFormat() const {
   return video_capture_format_;
 }
 
-void VideoCaptureController::OnNewBufferHandle(
-    int buffer_id,
-    std::unique_ptr<media::VideoCaptureDevice::Client::Buffer::HandleProvider>
-        handle_provider) {
+void VideoCaptureController::OnNewBuffer(
+    int32_t buffer_id,
+    media::mojom::VideoBufferHandlePtr buffer_handle) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK(FindUnretiredBufferContextFromBufferId(buffer_id) ==
          buffer_contexts_.end());
-  buffer_contexts_.emplace_back(
-      next_buffer_context_id_++, buffer_id, launched_device_.get(),
-      handle_provider->GetHandleForInterProcessTransit(true /* read only */));
+  buffer_contexts_.emplace_back(next_buffer_context_id_++, buffer_id,
+                                launched_device_.get(),
+                                std::move(buffer_handle));
 }
 
 void VideoCaptureController::OnFrameReadyInBuffer(
@@ -404,6 +492,8 @@ void VideoCaptureController::OnFrameReadyInBuffer(
     media::mojom::VideoFrameInfoPtr frame_info) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK_NE(buffer_id, media::VideoCaptureBufferPool::kInvalidId);
+
+  frame_drop_log_state_ = FrameDropLogState();
 
   auto buffer_context_iter = FindUnretiredBufferContextFromBufferId(buffer_id);
   DCHECK(buffer_context_iter != buffer_contexts_.end());
@@ -421,14 +511,9 @@ void VideoCaptureController::OnFrameReadyInBuffer(
       if (!base::ContainsValue(client->known_buffer_context_ids,
                                buffer_context_id)) {
         client->known_buffer_context_ids.push_back(buffer_context_id);
-        const size_t mapped_size =
-            media::VideoCaptureFormat(frame_info->coded_size, 0.0f,
-                                      frame_info->pixel_format,
-                                      frame_info->storage_type)
-                .ImageAllocationSize();
-        client->event_handler->OnBufferCreated(
-            client->controller_id, buffer_context_iter->CloneHandle(),
-            mapped_size, buffer_context_id);
+        client->event_handler->OnNewBuffer(
+            client->controller_id, buffer_context_iter->CloneBufferHandle(),
+            buffer_context_id);
       }
 
       if (!base::ContainsValue(client->buffers_in_use, buffer_context_id))
@@ -447,10 +532,10 @@ void VideoCaptureController::OnFrameReadyInBuffer(
   }
 
   if (!has_received_frames_) {
-    UMA_HISTOGRAM_COUNTS("Media.VideoCapture.Width",
-                         frame_info->coded_size.width());
-    UMA_HISTOGRAM_COUNTS("Media.VideoCapture.Height",
-                         frame_info->coded_size.height());
+    UMA_HISTOGRAM_COUNTS_1M("Media.VideoCapture.Width",
+                            frame_info->coded_size.width());
+    UMA_HISTOGRAM_COUNTS_1M("Media.VideoCapture.Height",
+                            frame_info->coded_size.height());
     UMA_HISTOGRAM_ASPECT_RATIO("Media.VideoCapture.AspectRatio",
                                frame_info->coded_size.width(),
                                frame_info->coded_size.height());
@@ -462,7 +547,7 @@ void VideoCaptureController::OnFrameReadyInBuffer(
         frame_rate = video_capture_format_->frame_rate;
       }
     }
-    UMA_HISTOGRAM_COUNTS("Media.VideoCapture.FrameRate", frame_rate);
+    UMA_HISTOGRAM_COUNTS_1M("Media.VideoCapture.FrameRate", frame_rate);
     UMA_HISTOGRAM_TIMES("Media.VideoCapture.DelayUntilFirstFrame",
                         base::TimeTicks::Now() - time_of_start_request_);
     OnLog("First frame received at VideoCaptureController");
@@ -485,10 +570,39 @@ void VideoCaptureController::OnBufferRetired(int buffer_id) {
     buffer_context_iter->set_is_retired();
 }
 
-void VideoCaptureController::OnError() {
+void VideoCaptureController::OnError(media::VideoCaptureError error) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   state_ = VIDEO_CAPTURE_STATE_ERROR;
-  PerformForClientsWithOpenSession(base::Bind(&CallOnError));
+  PerformForClientsWithOpenSession(base::BindRepeating(&CallOnError, error));
+}
+
+void VideoCaptureController::OnFrameDropped(
+    media::VideoCaptureFrameDropReason reason) {
+  if (reason == frame_drop_log_state_.drop_reason) {
+    if (frame_drop_log_state_.max_log_count_exceeded)
+      return;
+
+    if (++frame_drop_log_state_.drop_count >
+        kMaxConsecutiveFrameDropForSameReasonCount) {
+      frame_drop_log_state_.max_log_count_exceeded = true;
+      LogMaxConsecutiveVideoFrameDropCountExceeded(reason, stream_type_);
+      std::ostringstream string_stream;
+      string_stream << "Too many consecutive frames dropped with reason code "
+                    << static_cast<int>(reason)
+                    << ". Stopping to log dropped frames for this reason in "
+                       "order to avoid log spam.";
+      EmitLogMessage(string_stream.str(), 1);
+      return;
+    }
+  } else {
+    frame_drop_log_state_ = FrameDropLogState(reason);
+  }
+
+  LogVideoFrameDrop(reason, stream_type_);
+  std::ostringstream string_stream;
+  string_stream << "Frame dropped with reason code "
+                << static_cast<int>(reason);
+  EmitLogMessage(string_stream.str(), 1);
 }
 
 void VideoCaptureController::OnLog(const std::string& message) {
@@ -499,13 +613,14 @@ void VideoCaptureController::OnLog(const std::string& message) {
 void VideoCaptureController::OnStarted() {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   state_ = VIDEO_CAPTURE_STATE_STARTED;
-  PerformForClientsWithOpenSession(base::Bind(&CallOnStarted));
+  PerformForClientsWithOpenSession(base::BindRepeating(&CallOnStarted));
 }
 
 void VideoCaptureController::OnStartedUsingGpuDecode() {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   OnLog("StartedUsingGpuDecode");
-  PerformForClientsWithOpenSession(base::Bind(&CallOnStartedUsingGpuDecode));
+  PerformForClientsWithOpenSession(
+      base::BindRepeating(&CallOnStartedUsingGpuDecode));
 }
 
 void VideoCaptureController::OnDeviceLaunched(
@@ -519,10 +634,11 @@ void VideoCaptureController::OnDeviceLaunched(
   }
 }
 
-void VideoCaptureController::OnDeviceLaunchFailed() {
+void VideoCaptureController::OnDeviceLaunchFailed(
+    media::VideoCaptureError error) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (device_launch_observer_) {
-    device_launch_observer_->OnDeviceLaunchFailed(this);
+    device_launch_observer_->OnDeviceLaunchFailed(this, error);
     device_launch_observer_ = nullptr;
   }
 }

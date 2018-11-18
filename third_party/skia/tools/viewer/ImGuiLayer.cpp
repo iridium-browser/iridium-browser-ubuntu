@@ -22,6 +22,7 @@ using namespace sk_app;
 
 ImGuiLayer::ImGuiLayer() {
     // ImGui initialization:
+    ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
 
     // Keymap...
@@ -57,6 +58,10 @@ ImGuiLayer::ImGuiLayer() {
     fFontPaint.setColor(SK_ColorWHITE);
     fFontPaint.setFilterQuality(kLow_SkFilterQuality);
     io.Fonts->TexID = &fFontPaint;
+}
+
+ImGuiLayer::~ImGuiLayer() {
+    ImGui::DestroyContext();
 }
 
 void ImGuiLayer::onAttach(Window* window) {
@@ -119,9 +124,9 @@ void ImGuiLayer::onPaint(SkCanvas* canvas) {
         pos.rewind(); uv.rewind(); color.rewind();
         for (int i = 0; i < drawList->VtxBuffer.size(); ++i) {
             const ImDrawVert& vert = drawList->VtxBuffer[i];
-            pos.push(SkPoint::Make(vert.pos.x, vert.pos.y));
-            uv.push(SkPoint::Make(vert.uv.x, vert.uv.y));
-            color.push(vert.col);
+            pos.push_back(SkPoint::Make(vert.pos.x, vert.pos.y));
+            uv.push_back(SkPoint::Make(vert.uv.x, vert.uv.y));
+            color.push_back(vert.col);
         }
         // ImGui colors are RGBA
         SkSwapRB(color.begin(), color.begin(), color.count());

@@ -15,6 +15,7 @@
 #include "base/callback_forward.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
+#include "base/sequence_checker.h"
 #include "components/sync/base/cryptographer.h"
 #include "components/sync/base/time.h"
 #include "components/sync/engine/sync_manager.h"
@@ -32,7 +33,7 @@
 #include "components/sync/syncable/change_reorder_buffer.h"
 #include "components/sync/syncable/directory_change_delegate.h"
 #include "components/sync/syncable/user_share.h"
-#include "net/base/network_change_notifier.h"
+#include "services/network/public/cpp/network_connection_tracker.h"
 
 namespace syncer {
 
@@ -50,7 +51,7 @@ class TypeDebugInfoObserver;
 // same thread.
 class SyncManagerImpl
     : public SyncManager,
-      public net::NetworkChangeNotifier::NetworkChangeObserver,
+      public network::NetworkConnectionTracker::NetworkConnectionObserver,
       public JsBackend,
       public SyncEngineEventListener,
       public ServerConnectionEventListener,
@@ -59,7 +60,10 @@ class SyncManagerImpl
       public NudgeHandler {
  public:
   // Create an uninitialized SyncManager.  Callers must Init() before using.
-  explicit SyncManagerImpl(const std::string& name);
+  // |network_connection_tracker| must not be null and must outlive this object.
+  SyncManagerImpl(
+      const std::string& name,
+      network::NetworkConnectionTracker* network_connection_tracker);
   ~SyncManagerImpl() override;
 
   // SyncManager implementation.
@@ -77,6 +81,7 @@ class SyncManagerImpl
   void StartConfiguration() override;
   void ConfigureSyncer(ConfigureReason reason,
                        ModelTypeSet to_download,
+                       SyncFeatureState sync_feature_state,
                        const base::Closure& ready_task,
                        const base::Closure& retry_task) override;
   void SetInvalidatorEnabled(bool invalidator_enabled) override;
@@ -87,13 +92,13 @@ class SyncManagerImpl
   void RemoveObserver(SyncManager::Observer* observer) override;
   SyncStatus GetDetailedStatus() const override;
   void SaveChanges() override;
-  void ShutdownOnSyncThread(ShutdownReason reason) override;
+  void ShutdownOnSyncThread() override;
   UserShare* GetUserShare() override;
   ModelTypeConnector* GetModelTypeConnector() override;
   std::unique_ptr<ModelTypeConnector> GetModelTypeConnectorProxy() override;
   const std::string cache_guid() override;
   bool ReceivedExperiment(Experiments* experiments) override;
-  bool HasUnsyncedItems() override;
+  bool HasUnsyncedItemsForTest() override;
   SyncEncryptionHandler* GetEncryptionHandler() override;
   std::vector<std::unique_ptr<ProtocolEvent>> GetBufferedProtocolEvents()
       override;
@@ -111,6 +116,7 @@ class SyncManagerImpl
   // SyncEncryptionHandler::Observer implementation.
   void OnPassphraseRequired(
       PassphraseRequiredReason reason,
+      const KeyDerivationParams& key_derivation_params,
       const sync_pb::EncryptedData& pending_keys) override;
   void OnPassphraseAccepted() override;
   void OnBootstrapTokenUpdated(const std::string& bootstrap_token,
@@ -161,9 +167,8 @@ class SyncManagerImpl
   // Handle explicit requests to fetch updates for the given types.
   void RefreshTypes(ModelTypeSet types) override;
 
-  // NetworkChangeNotifier::NetworkChangeObserver implementation.
-  void OnNetworkChanged(
-      net::NetworkChangeNotifier::ConnectionType type) override;
+  // NetworkConnectionTracker::NetworkConnectionObserver implementation.
+  void OnConnectionChanged(network::mojom::ConnectionType type) override;
 
   // NudgeHandler implementation.
   void NudgeForInitialDownload(ModelType type) override;
@@ -237,7 +242,9 @@ class SyncManagerImpl
 
   const std::string name_;
 
-  base::ThreadChecker thread_checker_;
+  network::NetworkConnectionTracker* network_connection_tracker_;
+
+  SEQUENCE_CHECKER(sequence_checker_);
 
   // Thread-safe handle used by
   // HandleCalculateChangesChangeEventFromSyncApi(), which can be
@@ -258,7 +265,7 @@ class SyncManagerImpl
   // OpenDirectory() and ShutdownOnSyncThread().
   WeakHandle<SyncManager::ChangeObserver> change_observer_;
 
-  base::ObserverList<SyncManager::Observer> observers_;
+  base::ObserverList<SyncManager::Observer>::Unchecked observers_;
 
   // The ServerConnectionManager used to abstract communication between the
   // client (the Syncer) and the sync server.

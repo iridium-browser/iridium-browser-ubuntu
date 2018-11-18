@@ -38,6 +38,7 @@
 #include "third_party/blink/renderer/core/layout/svg/layout_svg_root.h"
 #include "third_party/blink/renderer/core/layout/svg/line/svg_root_inline_box.h"
 #include "third_party/blink/renderer/core/layout/svg/svg_layout_support.h"
+#include "third_party/blink/renderer/core/layout/svg/svg_resources.h"
 #include "third_party/blink/renderer/core/layout/svg/svg_resources_cache.h"
 #include "third_party/blink/renderer/core/layout/svg/svg_text_layout_attributes_builder.h"
 #include "third_party/blink/renderer/core/paint/svg_text_painter.h"
@@ -71,9 +72,15 @@ LayoutSVGText::~LayoutSVGText() {
   DCHECK(descendant_text_nodes_.IsEmpty());
 }
 
+void LayoutSVGText::StyleDidChange(StyleDifference diff,
+                                   const ComputedStyle* old_style) {
+  LayoutSVGBlock::StyleDidChange(diff, old_style);
+  SVGResources::UpdatePaints(*GetElement(), old_style, StyleRef());
+}
+
 void LayoutSVGText::WillBeDestroyed() {
   descendant_text_nodes_.clear();
-
+  SVGResources::ClearPaints(*GetElement(), Style());
   LayoutSVGBlock::WillBeDestroyed();
 }
 
@@ -298,31 +305,36 @@ RootInlineBox* LayoutSVGText::CreateRootInlineBox() {
   return box;
 }
 
-bool LayoutSVGText::NodeAtFloatPoint(HitTestResult& result,
-                                     const FloatPoint& point_in_parent,
-                                     HitTestAction hit_test_action) {
+bool LayoutSVGText::NodeAtPoint(HitTestResult& result,
+                                const HitTestLocation& location_in_parent,
+                                const LayoutPoint& accumulated_offset,
+                                HitTestAction hit_test_action) {
+  DCHECK_EQ(accumulated_offset, LayoutPoint());
   // We only draw in the foreground phase, so we only hit-test then.
   if (hit_test_action != kHitTestForeground)
     return false;
 
-  FloatPoint local_point;
-  if (!SVGLayoutSupport::TransformToUserSpaceAndCheckClipping(
-          *this, LocalToSVGParentTransform(), point_in_parent, local_point))
+  base::Optional<HitTestLocation> local_storage;
+  const HitTestLocation* local_location =
+      SVGLayoutSupport::TransformToUserSpaceAndCheckClipping(
+          *this, LocalToSVGParentTransform(), location_in_parent,
+          local_storage);
+  if (!local_location)
     return false;
 
-  HitTestLocation hit_test_location(local_point);
-  if (LayoutBlock::NodeAtPoint(result, hit_test_location, LayoutPoint(),
+  if (LayoutBlock::NodeAtPoint(result, *local_location, accumulated_offset,
                                hit_test_action))
     return true;
 
   // Consider the bounding box if requested.
   if (StyleRef().PointerEvents() == EPointerEvents::kBoundingBox) {
     if (IsObjectBoundingBoxValid() &&
-        ObjectBoundingBox().Contains(local_point)) {
-      const LayoutPoint& local_layout_point = LayoutPoint(local_point);
+        local_location->Intersects(ObjectBoundingBox())) {
+      const LayoutPoint& local_layout_point =
+          LayoutPoint(local_location->TransformedPoint());
       UpdateHitTestResult(result, local_layout_point);
-      if (result.AddNodeToListBasedTestResult(
-              GetElement(), local_layout_point) == kStopHitTesting)
+      if (result.AddNodeToListBasedTestResult(GetElement(), *local_location) ==
+          kStopHitTesting)
         return true;
     }
   }
@@ -358,8 +370,7 @@ void LayoutSVGText::AbsoluteQuads(Vector<FloatQuad>& quads,
   quads.push_back(LocalToAbsoluteQuad(StrokeBoundingBox(), mode));
 }
 
-void LayoutSVGText::Paint(const PaintInfo& paint_info,
-                          const LayoutPoint&) const {
+void LayoutSVGText::Paint(const PaintInfo& paint_info) const {
   SVGTextPainter(*this).Paint(paint_info);
 }
 
@@ -371,7 +382,7 @@ FloatRect LayoutSVGText::ObjectBoundingBox() const {
 
 FloatRect LayoutSVGText::StrokeBoundingBox() const {
   FloatRect stroke_boundaries = ObjectBoundingBox();
-  const SVGComputedStyle& svg_style = Style()->SvgStyle();
+  const SVGComputedStyle& svg_style = StyleRef().SvgStyle();
   if (!svg_style.HasStroke())
     return stroke_boundaries;
 
@@ -384,9 +395,10 @@ FloatRect LayoutSVGText::StrokeBoundingBox() const {
 
 FloatRect LayoutSVGText::VisualRectInLocalSVGCoordinates() const {
   FloatRect visual_rect = StrokeBoundingBox();
-  SVGLayoutSupport::AdjustVisualRectWithResources(*this, visual_rect);
+  SVGLayoutSupport::AdjustVisualRectWithResources(*this, ObjectBoundingBox(),
+                                                  visual_rect);
 
-  if (const ShadowList* text_shadow = Style()->TextShadow())
+  if (const ShadowList* text_shadow = StyleRef().TextShadow())
     text_shadow->AdjustRectForShadow(visual_rect);
 
   return visual_rect;
@@ -394,7 +406,7 @@ FloatRect LayoutSVGText::VisualRectInLocalSVGCoordinates() const {
 
 void LayoutSVGText::AddOutlineRects(Vector<LayoutRect>& rects,
                                     const LayoutPoint&,
-                                    IncludeBlockVisualOverflowOrNot) const {
+                                    NGOutlineType) const {
   rects.push_back(LayoutRect(ObjectBoundingBox()));
 }
 

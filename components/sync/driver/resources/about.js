@@ -122,6 +122,11 @@ cr.define('chrome.sync.about_tab', function() {
 
     // Make the prototype jscontent element disappear.
     jstProcess({}, $('traffic-event-container'));
+
+    var triggerRefreshButton = $('trigger-refresh');
+    triggerRefreshButton.addEventListener('click', function(event) {
+      chrome.sync.triggerRefresh();
+    });
   }
 
   /**
@@ -186,7 +191,16 @@ cr.define('chrome.sync.about_tab', function() {
    * @param {MouseEvent} e the click event that triggered the toggle.
    */
   function expandListener(e) {
-    e.target.classList.toggle('traffic-event-entry-expanded');
+    if (e.target.classList.contains("proto")) {
+      // We ignore proto clicks to keep it copyable.
+      return;
+    }
+    var traffic_event_div = e.target;
+    // Click might be on div's child.
+    if (traffic_event_div.nodeName != "DIV") {
+      traffic_event_div = traffic_event_div.parentNode;
+    }
+    traffic_event_div.classList.toggle('traffic-event-entry-expanded');
   }
 
   /**
@@ -208,6 +222,16 @@ cr.define('chrome.sync.about_tab', function() {
     chrome.sync.events.addEventListener(
         'onCountersUpdated',
         onAboutInfoCountersUpdated);
+
+    $('request-start').addEventListener('click', function(event) {
+      chrome.sync.requestStart();
+    });
+    $('request-stop-keep-data').addEventListener('click', function(event) {
+      chrome.sync.requestStopKeepData();
+    });
+    $('request-stop-clear-data').addEventListener('click', function(event) {
+      chrome.sync.requestStopClearData();
+    });
 
     // Register to receive a stream of event notifications.
     chrome.sync.registerForEvents();

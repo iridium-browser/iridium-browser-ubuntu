@@ -413,6 +413,27 @@ NET_ERROR(NO_BUFFER_SPACE, -176)
 // private key and the server's preferences.
 NET_ERROR(SSL_CLIENT_AUTH_NO_COMMON_ALGORITHMS, -177)
 
+// TLS 1.3 early data was rejected by the server. This will be received before
+// any data is returned from the socket. The request should be retried with
+// early data disabled.
+NET_ERROR(EARLY_DATA_REJECTED, -178)
+
+// TLS 1.3 early data was offered, but the server responded with TLS 1.2 or
+// earlier. This is an internal error code to account for a
+// backwards-compatibility issue with early data and TLS 1.2. It will be
+// received before any data is returned from the socket. The request should be
+// retried with early data disabled.
+//
+// See https://tools.ietf.org/html/rfc8446#appendix-D.3 for details.
+NET_ERROR(WRONG_VERSION_ON_EARLY_DATA, -179)
+
+// TLS 1.3 was enabled, but a lower version was negotiated and the server
+// returned a value indicating it supported TLS 1.3. This is part of a security
+// check in TLS 1.3, but it may also indicate the user is behind a buggy
+// TLS-terminating proxy which implemented TLS 1.2 incorrectly. (See
+// https://crbug.com/boringssl/226.)
+NET_ERROR(TLS13_DOWNGRADE_DETECTED, -180)
+
 // Certificate error codes
 //
 // The values of certificate error codes must be consecutive.
@@ -748,6 +769,16 @@ NET_ERROR(SPDY_CLAIMED_PUSHED_STREAM_RESET_BY_SERVER, -374)
 // credentials or presents a fresh invalid certificate.
 NET_ERROR(TOO_MANY_RETRIES, -375)
 
+// Received an HTTP/2 frame on a closed stream.
+NET_ERROR(SPDY_STREAM_CLOSED, -376)
+
+// Client is refusing an HTTP/2 stream.
+NET_ERROR(SPDY_CLIENT_REFUSED_STREAM, -377)
+
+// A pushed HTTP/2 stream was claimed by a request based on matching URL and
+// request headers, but the pushed response headers do not match the request.
+NET_ERROR(SPDY_PUSHED_RESPONSE_DOES_NOT_MATCH, -378)
+
 // The cache does not have the requested entry.
 NET_ERROR(CACHE_MISS, -400)
 
@@ -804,6 +835,9 @@ NET_ERROR(NO_PRIVATE_KEY_FOR_CERT, -502)
 
 // An error adding a certificate to the OS certificate database.
 NET_ERROR(ADD_USER_CERT_FAILED, -503)
+
+// An error occurred while handling a signed exchange.
+NET_ERROR(INVALID_SIGNED_EXCHANGE, -504)
 
 // *** Code -600 is reserved (was FTP_PASV_COMMAND_FAILED). ***
 

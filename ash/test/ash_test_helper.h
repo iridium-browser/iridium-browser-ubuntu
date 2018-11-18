@@ -8,40 +8,37 @@
 #include <stdint.h>
 
 #include <memory>
-#include <string>
 #include <utility>
-#include <vector>
 
-#include "ash/app_list/test/app_list_test_helper.h"
 #include "ash/session/test_session_controller_client.h"
-#include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/test/scoped_command_line.h"
-#include "ui/aura/test/mus/test_window_tree_client_setup.h"
 
 class PrefService;
 
 namespace aura {
 class Window;
-class WindowTreeClientPrivate;
 namespace test {
 class EnvWindowTreeClientSetter;
 }
 }
 
+namespace chromeos {
+namespace system {
+class ScopedFakeStatisticsProvider;
+}  // namespace system
+}  // namespace chromeos
+
 namespace display {
 class Display;
 }
 
-namespace mash {
-namespace test {
-class MashTestSuite;
-}
+namespace service_manager {
+class Connector;
 }
 
 namespace ui {
 class ScopedAnimationDurationScaleMode;
-class InputDeviceClient;
 }
 
 namespace wm {
@@ -50,14 +47,11 @@ class WMState;
 
 namespace ash {
 
+class AppListTestHelper;
 class AshTestEnvironment;
 class AshTestViewsDelegate;
-class RootWindowController;
+class TestConnector;
 class TestShellDelegate;
-class TestSessionControllerClient;
-class WindowManagerService;
-
-enum class Config;
 
 // A helper class that does common initialization required for Ash. Creates a
 // root window and an ash::Shell instance with a test delegate.
@@ -65,13 +59,6 @@ class AshTestHelper {
  public:
   explicit AshTestHelper(AshTestEnvironment* ash_test_environment);
   ~AshTestHelper();
-
-  // This is intended to be called from TestSuites, not individual configs.
-  static void set_config(Config config) { config_ = config; }
-
-  // Returns the configuration that tests are run in. See ash::Config enum for
-  // details.
-  static Config config() { return config_; }
 
   // Creates the ash::Shell and performs associated initialization.  Set
   // |start_session| to true if the user should log in before the test is run.
@@ -82,14 +69,16 @@ class AshTestHelper {
   // Destroys the ash::Shell and performs associated cleanup.
   void TearDown();
 
+  // Call this only if this code is being run outside of ash, for example, in
+  // browser tests that use AshTestBase. This disables CHECKs that are
+  // applicable only when used inside ash.
+  // TODO: remove this and ban usage of AshTestHelper outside of ash.
+  void SetRunningOutsideAsh();
+
   // Returns a root Window. Usually this is the active root Window, but that
   // method can return NULL sometimes, and in those cases, we fall back on the
   // primary root Window.
   aura::Window* CurrentContext();
-
-  void RunAllPendingInMessageLoop();
-
-  void NotifyClientAboutAcceleratedWidgets();
 
   PrefService* GetLocalStatePrefService();
 
@@ -105,14 +94,6 @@ class AshTestHelper {
 
   display::Display GetSecondaryDisplay();
 
-  // Null in classic ash.
-  WindowManagerService* window_manager_service() {
-    return window_manager_service_.get();
-  }
-  aura::TestWindowTreeClientSetup* window_tree_client_setup() {
-    return &window_tree_client_setup_;
-  }
-
   TestSessionControllerClient* test_session_controller_client() {
     return session_controller_client_.get();
   }
@@ -127,24 +108,19 @@ class AshTestHelper {
 
   void reset_commandline() { command_line_.reset(); }
 
- private:
-  // These TestSuites need to manipulate |config_|.
-  friend class AshTestSuite;
-  friend class mash::test::MashTestSuite;
+  // Gets a Connector that talks directly to the WindowService.
+  service_manager::Connector* GetWindowServiceConnector();
 
-  // Called when running in mash to create the WindowManager.
-  void CreateMashWindowManager();
+ private:
+  // Forces creation of the WindowService. The WindowService is normally created
+  // on demand, this force the creation.
+  void CreateWindowService();
 
   // Called when running in ash to create Shell.
   void CreateShell();
 
-  // Creates a new RootWindowController based on |display_spec|. The origin is
-  // set to |next_x| and on exit |next_x| is set to the origin + the width.
-  RootWindowController* CreateRootWindowController(
-      const std::string& display_spec,
-      int* next_x);
-
-  static Config config_;
+  std::unique_ptr<chromeos::system::ScopedFakeStatisticsProvider>
+      statistics_provider_;
 
   std::unique_ptr<aura::test::EnvWindowTreeClientSetter>
       env_window_tree_client_setter_;
@@ -162,19 +138,15 @@ class AshTestHelper {
   // Check if PowerPolicyController was initialized here.
   bool power_policy_controller_initialized_ = false;
 
-  aura::TestWindowTreeClientSetup window_tree_client_setup_;
-  std::unique_ptr<WindowManagerService> window_manager_service_;
-  std::unique_ptr<aura::WindowTreeClientPrivate> window_tree_client_private_;
-  // Id for the next Display created by CreateRootWindowController().
-  int64_t next_display_id_ = 1;
-
   std::unique_ptr<TestSessionControllerClient> session_controller_client_;
-
-  std::unique_ptr<ui::InputDeviceClient> input_device_client_;
 
   std::unique_ptr<base::test::ScopedCommandLine> command_line_;
 
   std::unique_ptr<AppListTestHelper> app_list_test_helper_;
+
+  std::unique_ptr<TestConnector> test_connector_;
+
+  std::unique_ptr<service_manager::Connector> window_service_connector_;
 
   DISALLOW_COPY_AND_ASSIGN(AshTestHelper);
 };

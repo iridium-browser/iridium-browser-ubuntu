@@ -4,7 +4,6 @@
 
 #include "chrome/browser/extensions/external_component_loader.h"
 
-#include "base/command_line.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/component_extensions_whitelist/whitelist.h"
@@ -18,6 +17,7 @@
 #include "extensions/common/manifest.h"
 
 #if defined(OS_CHROMEOS)
+#include "chrome/browser/policy/profile_policy_connector_factory.h"
 #include "chromeos/chromeos_switches.h"
 #endif
 
@@ -37,10 +37,9 @@ void ExternalComponentLoader::StartLoading() {
 
 #if defined(OS_CHROMEOS)
   {
-    base::CommandLine* const command_line =
-        base::CommandLine::ForCurrentProcess();
-    if (!command_line->HasSwitch(chromeos::switches::kDisableNewZIPUnpacker))
-      AddExternalExtension(extension_misc::kZIPUnpackerExtensionId,
+    // Only load the Assessment Assistant if the current session is managed.
+    if (policy::ProfilePolicyConnectorFactory::IsProfileManaged(profile_))
+      AddExternalExtension(extension_misc::kAssessmentAssistantExtensionId,
                            prefs.get());
   }
 #endif

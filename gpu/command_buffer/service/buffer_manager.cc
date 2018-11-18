@@ -83,7 +83,7 @@ void BufferManager::CreateBuffer(GLuint client_id, GLuint service_id) {
 Buffer* BufferManager::GetBuffer(
     GLuint client_id) {
   BufferMap::iterator it = buffers_.find(client_id);
-  return it != buffers_.end() ? it->second.get() : NULL;
+  return it != buffers_.end() ? it->second.get() : nullptr;
 }
 
 void BufferManager::RemoveBuffer(GLuint client_id) {
@@ -129,8 +129,6 @@ Buffer::Buffer(BufferManager* manager, GLuint service_id)
       size_(0),
       deleted_(false),
       is_client_side_array_(false),
-      binding_count_(0),
-      transform_feedback_binding_count_(0),
       service_id_(service_id),
       initial_target_(0),
       usage_(GL_STATIC_DRAW) {
@@ -147,6 +145,28 @@ Buffer::~Buffer() {
     manager_->StopTracking(this);
     manager_ = nullptr;
   }
+}
+
+void Buffer::OnBind(GLenum target, bool indexed) {
+  if (target == GL_TRANSFORM_FEEDBACK_BUFFER && indexed) {
+    ++transform_feedback_indexed_binding_count_;
+  } else if (target != GL_TRANSFORM_FEEDBACK_BUFFER) {
+    ++non_transform_feedback_binding_count_;
+  }
+  // Note that the transform feedback generic (non-indexed) binding point does
+  // not count as a transform feedback indexed binding point *or* a non-
+  // transform- feedback binding point, so no reference counts need to change in
+  // that case. See https://crbug.com/853978
+}
+
+void Buffer::OnUnbind(GLenum target, bool indexed) {
+  if (target == GL_TRANSFORM_FEEDBACK_BUFFER && indexed) {
+    --transform_feedback_indexed_binding_count_;
+  } else if (target != GL_TRANSFORM_FEEDBACK_BUFFER) {
+    --non_transform_feedback_binding_count_;
+  }
+  DCHECK(transform_feedback_indexed_binding_count_ >= 0);
+  DCHECK(non_transform_feedback_binding_count_ >= 0);
 }
 
 const GLvoid* Buffer::StageShadow(bool use_shadow,
@@ -181,6 +201,8 @@ void Buffer::SetInfo(GLsizeiptr size,
   size_ = size;
 
   mapped_range_.reset(nullptr);
+  readback_shm_ = nullptr;
+  readback_shm_offset_ = 0;
 }
 
 bool Buffer::CheckRange(GLintptr offset, GLsizeiptr size) const {
@@ -204,10 +226,10 @@ void Buffer::SetRange(GLintptr offset, GLsizeiptr size, const GLvoid * data) {
 
 const void* Buffer::GetRange(GLintptr offset, GLsizeiptr size) const {
   if (shadow_.empty()) {
-    return NULL;
+    return nullptr;
   }
   if (!CheckRange(offset, size)) {
-    return NULL;
+    return nullptr;
   }
   DCHECK_LE(static_cast<size_t>(offset + size), shadow_.size());
   return shadow_.data() + offset;
@@ -345,6 +367,20 @@ void Buffer::RemoveMappedRange() {
   mapped_range_.reset(nullptr);
 }
 
+void Buffer::SetReadbackShadowAllocation(scoped_refptr<gpu::Buffer> shm,
+                                         uint32_t shm_offset) {
+  DCHECK(shm);
+  readback_shm_ = std::move(shm);
+  readback_shm_offset_ = shm_offset;
+}
+
+scoped_refptr<gpu::Buffer> Buffer::TakeReadbackShadowAllocation(void** data) {
+  DCHECK(readback_shm_);
+  *data = readback_shm_->GetDataAddress(readback_shm_offset_, size_);
+  readback_shm_offset_ = 0;
+  return std::move(readback_shm_);
+}
+
 bool BufferManager::GetClientId(GLuint service_id, GLuint* client_id) const {
   // This doesn't need to be fast. It's only used during slow queries.
   for (BufferMap::const_iterator it = buffers_.begin();
@@ -420,12 +456,6 @@ void BufferManager::ValidateAndDoBufferData(
   if (!buffer) {
     ERRORSTATE_SET_GL_ERROR(
         error_state, GL_INVALID_VALUE, "glBufferData", "unknown buffer");
-    return;
-  }
-
-  if (!memory_type_tracker_->EnsureGPUMemoryAvailable(size)) {
-    ERRORSTATE_SET_GL_ERROR(
-        error_state, GL_OUT_OF_MEMORY, "glBufferData", "out of memory");
     return;
   }
 
@@ -717,8 +747,8 @@ bool BufferManager::OnMemoryDump(const base::trace_event::MemoryDumpArgs& args,
 
   if (args.level_of_detail == MemoryDumpLevelOfDetail::BACKGROUND) {
     std::string dump_name =
-        base::StringPrintf("gpu/gl/buffers/share_group_0x%" PRIX64 "",
-                           memory_tracker_->ShareGroupTracingGUID());
+        base::StringPrintf("gpu/gl/buffers/context_group_0x%" PRIX64 "",
+                           memory_tracker_->ContextGroupTracingId());
     MemoryAllocatorDump* dump = pmd->CreateAllocatorDump(dump_name);
     dump->AddScalar(MemoryAllocatorDump::kNameSize,
                     MemoryAllocatorDump::kUnitsBytes, mem_represented());
@@ -727,15 +757,13 @@ bool BufferManager::OnMemoryDump(const base::trace_event::MemoryDumpArgs& args,
     return true;
   }
 
-  const uint64_t share_group_tracing_guid =
-      memory_tracker_->ShareGroupTracingGUID();
   for (const auto& buffer_entry : buffers_) {
     const auto& client_buffer_id = buffer_entry.first;
     const auto& buffer = buffer_entry.second;
 
     std::string dump_name = base::StringPrintf(
-        "gpu/gl/buffers/share_group_0x%" PRIX64 "/buffer_0x%" PRIX32,
-        share_group_tracing_guid, client_buffer_id);
+        "gpu/gl/buffers/context_group_0x%" PRIX64 "/buffer_0x%" PRIX32,
+        memory_tracker_->ContextGroupTracingId(), client_buffer_id);
     MemoryAllocatorDump* dump = pmd->CreateAllocatorDump(dump_name);
     dump->AddScalar(MemoryAllocatorDump::kNameSize,
                     MemoryAllocatorDump::kUnitsBytes,
@@ -744,14 +772,13 @@ bool BufferManager::OnMemoryDump(const base::trace_event::MemoryDumpArgs& args,
     auto* mapped_range = buffer->GetMappedRange();
     if (!mapped_range)
       continue;
-    auto shared_memory_guid =
-        mapped_range->shm->backing()->shared_memory_handle().GetGUID();
+    auto shared_memory_guid = mapped_range->shm->backing()->GetGUID();
     if (!shared_memory_guid.is_empty()) {
       pmd->CreateSharedMemoryOwnershipEdge(dump->guid(), shared_memory_guid,
                                            0 /* importance */);
     } else {
-      auto guid = gl::GetGLBufferGUIDForTracing(share_group_tracing_guid,
-                                                client_buffer_id);
+      auto guid = gl::GetGLBufferGUIDForTracing(
+          memory_tracker_->ContextGroupTracingId(), client_buffer_id);
       pmd->CreateSharedGlobalAllocatorDump(guid);
       pmd->AddOwnershipEdge(dump->guid(), guid);
     }

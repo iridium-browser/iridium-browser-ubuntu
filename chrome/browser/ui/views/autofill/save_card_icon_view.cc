@@ -12,20 +12,25 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/view_ids.h"
 #include "chrome/browser/ui/views/autofill/save_card_bubble_views.h"
-#include "chrome/browser/ui/views/location_bar/bubble_icon_view.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/strings/grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/material_design/material_design_controller.h"
 
 namespace autofill {
 
 SaveCardIconView::SaveCardIconView(CommandUpdater* command_updater,
                                    Browser* browser,
-                                   BubbleIconView::Delegate* delegate)
-    : BubbleIconView(command_updater, IDC_SAVE_CREDIT_CARD_FOR_PAGE, delegate),
+                                   PageActionIconView::Delegate* delegate,
+                                   const gfx::FontList& font_list)
+    : PageActionIconView(command_updater,
+                         IDC_SAVE_CREDIT_CARD_FOR_PAGE,
+                         delegate,
+                         font_list),
       browser_(browser) {
   DCHECK(delegate);
   set_id(VIEW_ID_SAVE_CREDIT_CARD_BUTTON);
+
+  SetUpForInOutAnimation();
 }
 
 SaveCardIconView::~SaveCardIconView() {}
@@ -39,7 +44,7 @@ views::BubbleDialogDelegateView* SaveCardIconView::GetBubble() const {
       controller->save_card_bubble_view());
 }
 
-bool SaveCardIconView::Refresh() {
+bool SaveCardIconView::Update() {
   if (!GetWebContents())
     return false;
 
@@ -51,15 +56,18 @@ bool SaveCardIconView::Refresh() {
 
   enabled &= SetCommandEnabled(enabled);
   SetVisible(enabled);
+
+  if (enabled && controller->CanAnimate()) {
+    AnimateIn(IDS_AUTOFILL_CARD_SAVED);
+  }
+
   return was_visible != visible();
 }
 
 void SaveCardIconView::OnExecuting(
-    BubbleIconView::ExecuteSource execute_source) {}
+    PageActionIconView::ExecuteSource execute_source) {}
 
 const gfx::VectorIcon& SaveCardIconView::GetVectorIcon() const {
-  if (ui::MaterialDesignController::IsTouchOptimizedUiEnabled())
-    return kCreditCard20Icon;
   return kCreditCardIcon;
 }
 
@@ -75,6 +83,19 @@ SaveCardBubbleControllerImpl* SaveCardIconView::GetController() const {
   if (!web_contents)
     return nullptr;
   return autofill::SaveCardBubbleControllerImpl::FromWebContents(web_contents);
+}
+
+bool SaveCardIconView::ShouldShowSeparator() const {
+  return false;
+}
+
+void SaveCardIconView::AnimationEnded(const gfx::Animation* animation) {
+  IconLabelBubbleView::AnimationEnded(animation);
+
+  // |controller| may be nullptr due to lazy initialization.
+  SaveCardBubbleControllerImpl* controller = GetController();
+  if (controller)
+    controller->OnAnimationEnded();
 }
 
 }  // namespace autofill

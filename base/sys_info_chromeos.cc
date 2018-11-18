@@ -6,6 +6,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <sys/utsname.h>
 
 #include "base/environment.h"
 #include "base/files/file.h"
@@ -18,6 +19,7 @@
 #include "base/strings/string_split.h"
 #include "base/strings/string_tokenizer.h"
 #include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/threading/thread_restrictions.h"
 
 namespace base {
@@ -86,7 +88,7 @@ class ChromeOSVersionInfo {
   }
 
   bool GetLsbReleaseValue(const std::string& key, std::string* value) {
-    SysInfo::LsbReleaseMap::const_iterator iter = lsb_release_map_.find(key);
+    LsbReleaseMap::const_iterator iter = lsb_release_map_.find(key);
     if (iter == lsb_release_map_.end())
       return false;
     *value = iter->second;
@@ -102,9 +104,6 @@ class ChromeOSVersionInfo {
   }
 
   const Time& lsb_release_time() const { return lsb_release_time_; }
-  const SysInfo::LsbReleaseMap& lsb_release_map() const {
-    return lsb_release_map_;
-  }
   bool is_running_on_chromeos() const { return is_running_on_chromeos_; }
 
  private:
@@ -131,16 +130,13 @@ class ChromeOSVersionInfo {
     }
     StringTokenizer tokenizer(version, ".");
     if (tokenizer.GetNext()) {
-      StringToInt(StringPiece(tokenizer.token_begin(), tokenizer.token_end()),
-                  &major_version_);
+      StringToInt(tokenizer.token_piece(), &major_version_);
     }
     if (tokenizer.GetNext()) {
-      StringToInt(StringPiece(tokenizer.token_begin(), tokenizer.token_end()),
-                  &minor_version_);
+      StringToInt(tokenizer.token_piece(), &minor_version_);
     }
     if (tokenizer.GetNext()) {
-      StringToInt(StringPiece(tokenizer.token_begin(), tokenizer.token_end()),
-                  &bugfix_version_);
+      StringToInt(tokenizer.token_piece(), &bugfix_version_);
     }
 
     // Check release name for Chrome OS.
@@ -155,8 +151,9 @@ class ChromeOSVersionInfo {
     }
   }
 
+  using LsbReleaseMap = std::map<std::string, std::string>;
   Time lsb_release_time_;
-  SysInfo::LsbReleaseMap lsb_release_map_;
+  LsbReleaseMap lsb_release_map_;
   int32_t major_version_;
   int32_t minor_version_;
   int32_t bugfix_version_;
@@ -181,8 +178,20 @@ void SysInfo::OperatingSystemVersionNumbers(int32_t* major_version,
 }
 
 // static
-const SysInfo::LsbReleaseMap& SysInfo::GetLsbReleaseMap() {
-  return GetChromeOSVersionInfo().lsb_release_map();
+std::string SysInfo::OperatingSystemVersion() {
+  int32_t major, minor, bugfix;
+  GetChromeOSVersionInfo().GetVersionNumbers(&major, &minor, &bugfix);
+  return base::StringPrintf("%d.%d.%d", major, minor, bugfix);
+}
+
+// static
+std::string SysInfo::KernelVersion() {
+  struct utsname info;
+  if (uname(&info) < 0) {
+    NOTREACHED();
+    return std::string();
+  }
+  return std::string(info.release);
 }
 
 // static
@@ -197,16 +206,6 @@ std::string SysInfo::GetLsbReleaseBoard() {
   if (!GetLsbReleaseValue(kMachineInfoBoard, &board))
     board = "unknown";
   return board;
-}
-
-// static
-std::string SysInfo::GetStrippedReleaseBoard() {
-  std::string board = GetLsbReleaseBoard();
-  const size_t index = board.find("-signed-");
-  if (index != std::string::npos)
-    board.resize(index);
-
-  return base::ToLowerASCII(board);
 }
 
 // static

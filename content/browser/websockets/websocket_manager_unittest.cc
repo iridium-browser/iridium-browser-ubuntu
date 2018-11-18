@@ -32,6 +32,7 @@ class TestWebSocketImpl : public network::WebSocket {
       base::TimeDelta delay)
       : network::WebSocket(std::move(delegate),
                            std::move(request),
+                           nullptr,
                            std::move(pending_connection_tracker),
                            process_id,
                            frame_id,
@@ -76,7 +77,7 @@ class TestWebSocketManager : public WebSocketManager {
   }
 
  private:
-  std::unique_ptr<network::WebSocket> CreateWebSocket(
+  std::unique_ptr<network::WebSocket> DoCreateWebSocketInternal(
       std::unique_ptr<network::WebSocket::Delegate> delegate,
       network::mojom::WebSocketRequest request,
       network::WebSocketThrottler::PendingConnection pending_connection_tracker,

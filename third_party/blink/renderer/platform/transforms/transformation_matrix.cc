@@ -35,12 +35,14 @@
 #include "third_party/blink/renderer/platform/geometry/float_rect.h"
 #include "third_party/blink/renderer/platform/geometry/int_rect.h"
 #include "third_party/blink/renderer/platform/geometry/layout_rect.h"
+#include "third_party/blink/renderer/platform/json/json_values.h"
 #include "third_party/blink/renderer/platform/transforms/affine_transform.h"
 #include "third_party/blink/renderer/platform/transforms/rotation.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/cpu.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
+#include "ui/gfx/transform.h"
 
 #if defined(ARCH_CPU_X86_64)
 #include <emmintrin.h>
@@ -75,8 +77,6 @@ namespace blink {
 
 typedef double Vector4[4];
 typedef double Vector3[3];
-
-const double kSmallNumber = 1.e-8;
 
 // inverse(original_matrix, inverse_matrix)
 //
@@ -223,7 +223,7 @@ static bool Inverse(const TransformationMatrix::Matrix4& matrix,
   // then the inverse matrix is not unique.
   double det = Determinant4x4(matrix);
 
-  if (fabs(det) < kSmallNumber)
+  if (det == 0)
     return false;
 
 #if defined(ARCH_CPU_ARM64)
@@ -1649,15 +1649,7 @@ void TransformationMatrix::MultVecMatrix(double x,
 }
 
 bool TransformationMatrix::IsInvertible() const {
-  if (IsIdentityOrTranslation())
-    return true;
-
-  double det = blink::Determinant4x4(matrix_);
-
-  if (fabs(det) < kSmallNumber)
-    return false;
-
-  return true;
+  return IsIdentityOrTranslation() || blink::Determinant4x4(matrix_) != 0;
 }
 
 TransformationMatrix TransformationMatrix::Inverse() const {
@@ -1835,6 +1827,56 @@ bool TransformationMatrix::IsIntegerTranslation() const {
   return true;
 }
 
+// This is the same as gfx::Transform::Preserves2dAxisAlignment().
+bool TransformationMatrix::Preserves2dAxisAlignment() const {
+  // Check whether an axis aligned 2-dimensional rect would remain axis-aligned
+  // after being transformed by this matrix (and implicitly projected by
+  // dropping any non-zero z-values).
+  //
+  // The 4th column can be ignored because translations don't affect axis
+  // alignment. The 3rd column can be ignored because we are assuming 2d
+  // inputs, where z-values will be zero. The 3rd row can also be ignored
+  // because we are assuming 2d outputs, and any resulting z-value is dropped
+  // anyway. For the inner 2x2 portion, the only effects that keep a rect axis
+  // aligned are (1) swapping axes and (2) scaling axes. This can be checked by
+  // verifying only 1 element of every column and row is non-zero.  Degenerate
+  // cases that project the x or y dimension to zero are considered to preserve
+  // axis alignment.
+  //
+  // If the matrix does have perspective component that is affected by x or y
+  // values: The current implementation conservatively assumes that axis
+  // alignment is not preserved.
+  bool has_x_or_y_perspective = M14() != 0 || M24() != 0;
+  if (has_x_or_y_perspective)
+    return false;
+
+  constexpr double kEpsilon = std::numeric_limits<double>::epsilon();
+
+  int num_non_zero_in_row_1 = 0;
+  int num_non_zero_in_row_2 = 0;
+  int num_non_zero_in_col_1 = 0;
+  int num_non_zero_in_col_2 = 0;
+  if (std::abs(M11()) > kEpsilon) {
+    num_non_zero_in_col_1++;
+    num_non_zero_in_row_1++;
+  }
+  if (std::abs(M12()) > kEpsilon) {
+    num_non_zero_in_col_1++;
+    num_non_zero_in_row_2++;
+  }
+  if (std::abs(M21()) > kEpsilon) {
+    num_non_zero_in_col_2++;
+    num_non_zero_in_row_1++;
+  }
+  if (std::abs(M22()) > kEpsilon) {
+    num_non_zero_in_col_2++;
+    num_non_zero_in_row_2++;
+  }
+
+  return num_non_zero_in_row_1 <= 1 && num_non_zero_in_row_2 <= 1 &&
+         num_non_zero_in_col_1 <= 1 && num_non_zero_in_col_2 <= 1;
+}
+
 FloatSize TransformationMatrix::To2DTranslation() const {
   DCHECK(IsIdentityOr2DTranslation());
   return FloatSize(matrix_[3][0], matrix_[3][1]);
@@ -1881,6 +1923,11 @@ SkMatrix44 TransformationMatrix::ToSkMatrix44(
   return ret;
 }
 
+gfx::Transform TransformationMatrix::ToTransform(
+    const TransformationMatrix& matrix) {
+  return gfx::Transform(TransformationMatrix::ToSkMatrix44(matrix));
+}
+
 String TransformationMatrix::ToString(bool as_matrix) const {
   if (as_matrix) {
     // Return as a matrix in row-major order.
@@ -1919,6 +1966,47 @@ String TransformationMatrix::ToString(bool as_matrix) const {
 std::ostream& operator<<(std::ostream& ostream,
                          const TransformationMatrix& transform) {
   return ostream << transform.ToString();
+}
+
+static double RoundCloseToZero(double number) {
+  return std::abs(number) < 1e-7 ? 0 : number;
+}
+
+std::unique_ptr<JSONArray> TransformAsJSONArray(const TransformationMatrix& t) {
+  std::unique_ptr<JSONArray> array = JSONArray::Create();
+  {
+    std::unique_ptr<JSONArray> row = JSONArray::Create();
+    row->PushDouble(RoundCloseToZero(t.M11()));
+    row->PushDouble(RoundCloseToZero(t.M12()));
+    row->PushDouble(RoundCloseToZero(t.M13()));
+    row->PushDouble(RoundCloseToZero(t.M14()));
+    array->PushArray(std::move(row));
+  }
+  {
+    std::unique_ptr<JSONArray> row = JSONArray::Create();
+    row->PushDouble(RoundCloseToZero(t.M21()));
+    row->PushDouble(RoundCloseToZero(t.M22()));
+    row->PushDouble(RoundCloseToZero(t.M23()));
+    row->PushDouble(RoundCloseToZero(t.M24()));
+    array->PushArray(std::move(row));
+  }
+  {
+    std::unique_ptr<JSONArray> row = JSONArray::Create();
+    row->PushDouble(RoundCloseToZero(t.M31()));
+    row->PushDouble(RoundCloseToZero(t.M32()));
+    row->PushDouble(RoundCloseToZero(t.M33()));
+    row->PushDouble(RoundCloseToZero(t.M34()));
+    array->PushArray(std::move(row));
+  }
+  {
+    std::unique_ptr<JSONArray> row = JSONArray::Create();
+    row->PushDouble(RoundCloseToZero(t.M41()));
+    row->PushDouble(RoundCloseToZero(t.M42()));
+    row->PushDouble(RoundCloseToZero(t.M43()));
+    row->PushDouble(RoundCloseToZero(t.M44()));
+    array->PushArray(std::move(row));
+  }
+  return array;
 }
 
 }  // namespace blink

@@ -5,7 +5,7 @@
 #ifndef V8_OBJECTS_JS_PROMISE_H_
 #define V8_OBJECTS_JS_PROMISE_H_
 
-#include "src/objects.h"
+#include "src/objects/js-objects.h"
 #include "src/objects/promise.h"
 
 // Has to be the last include (doesn't have include guards):
@@ -45,6 +45,9 @@ class JSPromise : public JSObject {
   // block in an async function.
   DECL_BOOLEAN_ACCESSORS(handled_hint)
 
+  int async_task_id() const;
+  void set_async_task_id(int id);
+
   static const char* Status(Promise::PromiseState status);
   Promise::PromiseState status() const;
   void set_status(Promise::PromiseState status);
@@ -58,12 +61,6 @@ class JSPromise : public JSObject {
   // ES section #sec-promise-resolve-functions
   V8_WARN_UNUSED_RESULT static MaybeHandle<Object> Resolve(
       Handle<JSPromise> promise, Handle<Object> resolution);
-
-  // This is a helper that extracts the JSPromise from the input
-  // {object}, which is used as a payload for PromiseReaction and
-  // PromiseReactionJobTask.
-  V8_WARN_UNUSED_RESULT static MaybeHandle<JSPromise> From(
-      Handle<HeapObject> object);
 
   DECL_CAST(JSPromise)
 
@@ -83,6 +80,7 @@ class JSPromise : public JSObject {
   static const int kStatusBits = 2;
   static const int kHasHandlerBit = 2;
   static const int kHandledHintBit = 3;
+  class AsyncTaskIdField : public BitField<int, kHandledHintBit + 1, 22> {};
 
   static const int kStatusShift = 0;
   static const int kStatusMask = 0x3;

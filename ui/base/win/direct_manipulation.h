@@ -15,7 +15,7 @@
 #include "base/macros.h"
 #include "ui/base/ui_base_export.h"
 #include "ui/base/win/window_event_target.h"
-#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/geometry/size.h"
 
 namespace content {
 class DirectManipulationBrowserTest;
@@ -40,7 +40,8 @@ class DirectManipulationHandler
               Microsoft::WRL::FtmBase,
               IDirectManipulationViewportEventHandler>> {
  public:
-  explicit DirectManipulationHandler(DirectManipulationHelper* helper);
+  explicit DirectManipulationHandler(DirectManipulationHelper* helper,
+                                     WindowEventTarget* event_target);
 
   // WindowEventTarget updates for every DM_POINTERHITTEST in case window
   // hierarchy changed.
@@ -99,7 +100,9 @@ class UI_BASE_EXPORT DirectManipulationHelper {
   // Creates and initializes an instance of this class if Direct Manipulation is
   // enabled on the platform. Returns nullptr if it disabled or failed on
   // initialization.
-  static std::unique_ptr<DirectManipulationHelper> CreateInstance(HWND window);
+  static std::unique_ptr<DirectManipulationHelper> CreateInstance(
+      HWND window,
+      WindowEventTarget* event_target);
 
   // Creates and initializes an instance for testing.
   static std::unique_ptr<DirectManipulationHelper> CreateInstanceForTesting(
@@ -114,6 +117,9 @@ class UI_BASE_EXPORT DirectManipulationHelper {
 
   // Deactivates Direct Manipulation processing on the passed in |window|.
   void Deactivate();
+
+  // Updates viewport size. Call it when window bounds updated.
+  void SetSize(const gfx::Size& size_in_pixels);
 
   // Reset the fake viewport for gesture end.
   HRESULT ResetViewport(bool need_animtation);
@@ -135,7 +141,7 @@ class UI_BASE_EXPORT DirectManipulationHelper {
 
   // This function instantiates Direct Manipulation and creates a viewport for
   // the passed in |window|. Return false if initialize failed.
-  bool Initialize();
+  bool Initialize(WindowEventTarget* event_target);
 
   void SetDeviceScaleFactorForTesting(float factor);
 
@@ -146,6 +152,7 @@ class UI_BASE_EXPORT DirectManipulationHelper {
   HWND window_;
   DWORD view_port_handler_cookie_;
   bool need_poll_events_ = false;
+  gfx::Size viewport_size_;
 
   DISALLOW_COPY_AND_ASSIGN(DirectManipulationHelper);
 };

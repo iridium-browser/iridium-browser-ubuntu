@@ -35,6 +35,10 @@ namespace {
 const char kApiKeyName[] = "key";
 #endif
 
+// Hostname used for the other bucket which consists of chrome-services traffic.
+// This should be in sync with the same in DataReductionSiteBreakdownView.java
+const char kOtherHostName[] = "Other";
+
 // Scales |byte_count| by the ratio of |numerator|:|denomenator|.
 int64_t ScaleByteCountByRatio(int64_t byte_count,
                               int64_t numerator,
@@ -162,7 +166,7 @@ GURL AddApiKeyToUrl(const GURL& url) {
   GURL new_url = url;
 #if defined(USE_GOOGLE_API_KEYS)
   std::string api_key = google_apis::GetAPIKey();
-  if (google_apis::HasKeysConfigured() && !api_key.empty()) {
+  if (google_apis::HasAPIKeyConfigured() && !api_key.empty()) {
     new_url = net::AppendOrReplaceQueryParameter(url, kApiKeyName, api_key);
   }
 #endif
@@ -284,6 +288,10 @@ ProxyScheme ConvertNetProxySchemeToProxyScheme(
   }
 }
 
+const char* GetSiteBreakdownOtherHostName() {
+  return kOtherHostName;
+}
+
 }  // namespace util
 
 namespace protobuf_parser {
@@ -307,6 +315,42 @@ ProtoEffectiveConnectionTypeFromEffectiveConnectionType(
     default:
       NOTREACHED();
       return PageloadMetrics_EffectiveConnectionType_EFFECTIVE_CONNECTION_TYPE_UNKNOWN;
+  }
+}
+
+PageloadMetrics_ConnectionType ProtoConnectionTypeFromConnectionType(
+    net::NetworkChangeNotifier::ConnectionType connection_type) {
+  switch (connection_type) {
+    case net::NetworkChangeNotifier::CONNECTION_UNKNOWN:
+      return PageloadMetrics_ConnectionType_CONNECTION_UNKNOWN;
+    case net::NetworkChangeNotifier::CONNECTION_ETHERNET:
+      return PageloadMetrics_ConnectionType_CONNECTION_ETHERNET;
+    case net::NetworkChangeNotifier::CONNECTION_WIFI:
+      return PageloadMetrics_ConnectionType_CONNECTION_WIFI;
+    case net::NetworkChangeNotifier::CONNECTION_2G:
+      return PageloadMetrics_ConnectionType_CONNECTION_2G;
+    case net::NetworkChangeNotifier::CONNECTION_3G:
+      return PageloadMetrics_ConnectionType_CONNECTION_3G;
+    case net::NetworkChangeNotifier::CONNECTION_4G:
+      return PageloadMetrics_ConnectionType_CONNECTION_4G;
+    case net::NetworkChangeNotifier::CONNECTION_NONE:
+      return PageloadMetrics_ConnectionType_CONNECTION_NONE;
+    case net::NetworkChangeNotifier::CONNECTION_BLUETOOTH:
+      return PageloadMetrics_ConnectionType_CONNECTION_BLUETOOTH;
+  }
+}
+
+RequestInfo_Protocol ProtoRequestInfoProtocolFromRequestInfoProtocol(
+    DataReductionProxyData::RequestInfo::Protocol protocol) {
+  switch (protocol) {
+    case DataReductionProxyData::RequestInfo::Protocol::HTTP:
+      return RequestInfo_Protocol_HTTP;
+    case DataReductionProxyData::RequestInfo::Protocol::HTTPS:
+      return RequestInfo_Protocol_HTTPS;
+    case DataReductionProxyData::RequestInfo::Protocol::QUIC:
+      return RequestInfo_Protocol_QUIC;
+    case DataReductionProxyData::RequestInfo::Protocol::UNKNOWN:
+      return RequestInfo_Protocol_UNKNOWN;
   }
 }
 

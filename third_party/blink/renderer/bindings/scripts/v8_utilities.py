@@ -35,6 +35,7 @@ import os
 import re
 import sys
 
+from blinkbuild.name_style_converter import NameStyleConverter
 from idl_types import IdlTypeBase
 import idl_types
 from idl_definitions import Exposure, IdlInterface, IdlAttribute
@@ -148,22 +149,19 @@ def v8_class_name_or_partial(interface):
     return class_name
 
 
-def build_basename(name, prefix=None, ext=None):
+def build_basename(name, prefix=None):
     basename = to_snake_case(name)
     if prefix:
         basename = prefix + basename
-    if not ext:
-        return basename
-    return basename + ext
+    return basename
 
 
-def binding_header_basename(name):
-    """Returns a binding header basename including an extension for the
-    specified interface name.
+def binding_header_filename(name):
+    """Returns a binding header filename for the specified interface name.
 
     E.g. 'NodeList' -> 'v8_node_list.h'
     """
-    return build_basename(name, prefix='v8_', ext='.h')
+    return build_basename(name, prefix='v8_') + '.h'
 
 
 ################################################################################
@@ -369,6 +367,12 @@ def cpp_name(definition_or_member):
     extended_attributes = definition_or_member.extended_attributes
     if extended_attributes and 'ImplementedAs' in extended_attributes:
         return extended_attributes['ImplementedAs']
+    # WebIDL identifiers can contain hyphens[1], but C++ identifiers cannot.
+    # Therefore camelCase hyphen-containing identifiers.
+    #
+    # [1] https://heycam.github.io/webidl/#prod-identifier
+    if '-' in definition_or_member.name:
+        return NameStyleConverter(definition_or_member.name).to_lower_camel_case()
     return definition_or_member.name
 
 
@@ -423,7 +427,7 @@ def origin_trial_feature_name(definition_or_member):
 def origin_trial_function_call(feature_name, execution_context=None):
     """Returns a function call to determine if an origin trial is enabled."""
     return 'OriginTrials::{feature_name}Enabled({context})'.format(
-        feature_name=uncapitalize(feature_name),
+        feature_name=feature_name,
         context=execution_context if execution_context else "execution_context")
 
 
@@ -452,10 +456,8 @@ def runtime_enabled_feature_name(definition_or_member):
 
 
 # [Unforgeable]
-def is_unforgeable(interface, member):
-    return (('Unforgeable' in interface.extended_attributes or
-             'Unforgeable' in member.extended_attributes) and
-            not member.is_static)
+def is_unforgeable(member):
+    return 'Unforgeable' in member.extended_attributes
 
 
 # [LegacyInterfaceTypeChecking]
@@ -488,8 +490,7 @@ def on_instance(interface, member):
 
     if ('PrimaryGlobal' in interface.extended_attributes or
             'Global' in interface.extended_attributes or
-            'Unforgeable' in member.extended_attributes or
-            'Unforgeable' in interface.extended_attributes):
+            'Unforgeable' in member.extended_attributes):
         return True
     return False
 
@@ -520,8 +521,7 @@ def on_prototype(interface, member):
 
     if ('PrimaryGlobal' in interface.extended_attributes or
             'Global' in interface.extended_attributes or
-            'Unforgeable' in member.extended_attributes or
-            'Unforgeable' in interface.extended_attributes):
+            'Unforgeable' in member.extended_attributes):
         return False
     return True
 

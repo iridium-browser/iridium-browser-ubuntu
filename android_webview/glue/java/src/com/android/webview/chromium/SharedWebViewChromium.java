@@ -4,7 +4,11 @@
 
 package com.android.webview.chromium;
 
+import android.webkit.WebChromeClient;
+import android.webkit.WebViewClient;
+
 import org.chromium.android_webview.AwContents;
+import org.chromium.android_webview.AwRenderProcess;
 import org.chromium.android_webview.WebViewChromiumRunQueue;
 import org.chromium.base.ThreadUtils;
 import org.chromium.content_public.browser.MessagePort;
@@ -18,12 +22,42 @@ import java.util.concurrent.Callable;
 public class SharedWebViewChromium {
     private final WebViewChromiumRunQueue mRunQueue;
     private final WebViewChromiumAwInit mAwInit;
-    // The WebView wrapper for ContentViewCore and required browser compontents.
+    // The WebView wrapper for WebContents and required browser components.
     private AwContents mAwContents;
+
+    // Default WebViewClient used to avoid null checks.
+    final static WebViewClient sNullWebViewClient = new WebViewClient();
+    // The WebViewClient instance that was passed to WebView.setWebViewClient().
+    private WebViewClient mWebViewClient = sNullWebViewClient;
+    private WebChromeClient mWebChromeClient;
 
     public SharedWebViewChromium(WebViewChromiumRunQueue runQueue, WebViewChromiumAwInit awInit) {
         mRunQueue = runQueue;
         mAwInit = awInit;
+    }
+
+    void setWebViewClient(WebViewClient client) {
+        mWebViewClient = client != null ? client : sNullWebViewClient;
+    }
+
+    public WebViewClient getWebViewClient() {
+        return mWebViewClient;
+    }
+
+    void setWebChromeClient(WebChromeClient client) {
+        mWebChromeClient = client;
+    }
+
+    public WebChromeClient getWebChromeClient() {
+        return mWebChromeClient;
+    }
+
+    public AwRenderProcess getRenderProcess() {
+        mAwInit.startYourEngines(true);
+        if (checkNeedsPost()) {
+            return mRunQueue.runOnUiThreadBlocking(() -> getRenderProcess());
+        }
+        return mAwContents.getRenderProcess();
     }
 
     public void setAwContentsOnUiThread(AwContents awContents) {

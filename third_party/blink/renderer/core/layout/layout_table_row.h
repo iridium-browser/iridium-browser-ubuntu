@@ -138,7 +138,7 @@ class CORE_EXPORT LayoutTableRow final : public LayoutTableBoxComponent {
 
   PaintLayerType LayerTypeRequired() const override {
     if (HasTransformRelatedProperty() || HasHiddenBackface() ||
-        CreatesGroup() || Style()->ShouldCompositeForCurrentAnimations() ||
+        CreatesGroup() || StyleRef().ShouldCompositeForCurrentAnimations() ||
         IsStickyPositioned())
       return kNormalPaintLayer;
 
@@ -148,7 +148,7 @@ class CORE_EXPORT LayoutTableRow final : public LayoutTableBoxComponent {
     return kNoPaintLayer;
   }
 
-  void Paint(const PaintInfo&, const LayoutPoint&) const override;
+  void Paint(const PaintInfo&) const override;
 
   void StyleDidChange(StyleDifference, const ComputedStyle* old_style) override;
 

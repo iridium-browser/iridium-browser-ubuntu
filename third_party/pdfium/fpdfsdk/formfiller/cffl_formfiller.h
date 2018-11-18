@@ -8,6 +8,7 @@
 #define FPDFSDK_FORMFILLER_CFFL_FORMFILLER_H_
 
 #include <map>
+#include <memory>
 
 #include "core/fxcrt/unowned_ptr.h"
 #include "fpdfsdk/cpdfsdk_fieldaction.h"
@@ -75,8 +76,14 @@ class CFFL_FormFiller : public CPWL_Wnd::ProviderIface,
                          uint32_t nFlags);
   virtual bool OnChar(CPDFSDK_Annot* pAnnot, uint32_t nChar, uint32_t nFlags);
 
+  WideString GetText(CPDFSDK_Annot* pAnnot);
   WideString GetSelectedText(CPDFSDK_Annot* pAnnot);
   void ReplaceSelection(CPDFSDK_Annot* pAnnot, const WideString& text);
+
+  bool CanUndo(CPDFSDK_Annot* pAnnot);
+  bool CanRedo(CPDFSDK_Annot* pAnnot);
+  bool Undo(CPDFSDK_Annot* pAnnot);
+  bool Redo(CPDFSDK_Annot* pAnnot);
 
   void SetFocusForAnnot(CPDFSDK_Annot* pAnnot, uint32_t nFlag);
   void KillFocusForAnnot(CPDFSDK_Annot* pAnnot, uint32_t nFlag);
@@ -98,19 +105,20 @@ class CFFL_FormFiller : public CPWL_Wnd::ProviderIface,
                                    const CPDFSDK_FieldAction& faOld,
                                    const CPDFSDK_FieldAction& faNew);
 
-  virtual void SaveState(CPDFSDK_PageView* pPageView);
-  virtual void RestoreState(CPDFSDK_PageView* pPageView);
-
+  virtual CPWL_Wnd::CreateParams GetCreateParam();
+  virtual std::unique_ptr<CPWL_Wnd> NewPDFWindow(
+      const CPWL_Wnd::CreateParams& cp) = 0;
   virtual CPWL_Wnd* ResetPDFWindow(CPDFSDK_PageView* pPageView,
                                    bool bRestoreValue);
+  virtual void SaveState(CPDFSDK_PageView* pPageView);
+  virtual void RestoreState(CPDFSDK_PageView* pPageView);
+  virtual CFX_FloatRect GetFocusBox(CPDFSDK_PageView* pPageView);
 
   CFX_Matrix GetCurMatrix();
-
   CFX_FloatRect FFLtoPWL(const CFX_FloatRect& rect);
   CFX_FloatRect PWLtoFFL(const CFX_FloatRect& rect);
   CFX_PointF FFLtoPWL(const CFX_PointF& point);
   CFX_PointF PWLtoFFL(const CFX_PointF& point);
-
   CFX_PointF WndtoPWL(CPDFSDK_PageView* pPageView, const CFX_PointF& pt);
   CFX_FloatRect FFLtoWnd(CPDFSDK_PageView* pPageView,
                          const CFX_FloatRect& rect);
@@ -127,9 +135,6 @@ class CFFL_FormFiller : public CPWL_Wnd::ProviderIface,
   void DestroyPDFWindow(CPDFSDK_PageView* pPageView);
   void EscapeFiller(CPDFSDK_PageView* pPageView, bool bDestroyPDFWindow);
 
-  virtual CPWL_Wnd::CreateParams GetCreateParam();
-  virtual CPWL_Wnd* NewPDFWindow(const CPWL_Wnd::CreateParams& cp) = 0;
-  virtual CFX_FloatRect GetFocusBox(CPDFSDK_PageView* pPageView);
 
   bool IsValid() const;
   CFX_FloatRect GetPDFWindowRect() const;
@@ -137,11 +142,9 @@ class CFFL_FormFiller : public CPWL_Wnd::ProviderIface,
   CPDFSDK_PageView* GetCurPageView(bool renew);
   void SetChangeMark();
 
-  CPDFSDK_Annot* GetSDKAnnot() { return m_pWidget.Get(); }
+  CPDFSDK_Annot* GetSDKAnnot() const { return m_pWidget.Get(); }
 
  protected:
-  using CFFL_PageView2PDFWindow = std::map<CPDFSDK_PageView*, CPWL_Wnd*>;
-
   // If the inheriting widget has its own fontmap and a PWL_Edit widget that
   // access that fontmap then you have to call DestroyWindows before destroying
   // the font map in order to not get a use-after-free.
@@ -152,10 +155,10 @@ class CFFL_FormFiller : public CPWL_Wnd::ProviderIface,
 
   void InvalidateRect(const FX_RECT& rect);
 
+  bool m_bValid = false;
   UnownedPtr<CPDFSDK_FormFillEnvironment> const m_pFormFillEnv;
   UnownedPtr<CPDFSDK_Widget> m_pWidget;
-  bool m_bValid;
-  CFFL_PageView2PDFWindow m_Maps;
+  std::map<CPDFSDK_PageView*, std::unique_ptr<CPWL_Wnd>> m_Maps;
 };
 
 #endif  // FPDFSDK_FORMFILLER_CFFL_FORMFILLER_H_

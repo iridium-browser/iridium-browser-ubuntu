@@ -39,13 +39,15 @@ NavigationItemStorageBuilder::BuildNavigationItemImpl(
   // GetVirtualURL() returns |url_| for the non-overridden case, this will also
   // update the virtual URL reported by this object.
   item->original_request_url_ = navigation_item_storage.virtualURL;
-  item->url_ = navigation_item_storage.virtualURL;
+  item->SetURL(navigation_item_storage.virtualURL);
   item->referrer_ = navigation_item_storage.referrer;
   item->timestamp_ = navigation_item_storage.timestamp;
   item->title_ = navigation_item_storage.title;
   item->page_display_state_ = navigation_item_storage.displayState;
   item->should_skip_repost_form_confirmation_ =
       navigation_item_storage.shouldSkipRepostFormConfirmation;
+  // Use reload transition type to avoid incorrect increase for typed count.
+  item->transition_type_ = ui::PAGE_TRANSITION_RELOAD;
   item->user_agent_type_ = navigation_item_storage.userAgentType;
   item->post_data_ = navigation_item_storage.POSTData;
   item->http_request_headers_ =

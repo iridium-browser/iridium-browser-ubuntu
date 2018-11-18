@@ -19,13 +19,19 @@ namespace ash {
 TopShortcutButton::TopShortcutButton(views::ButtonListener* listener,
                                      const gfx::VectorIcon& icon,
                                      int accessible_name_id)
+    : TopShortcutButton(listener, accessible_name_id) {
+  SetImage(views::Button::STATE_NORMAL,
+           gfx::CreateVectorIcon(icon, kTrayTopShortcutButtonIconSize,
+                                 kUnifiedMenuIconColor));
+  SetImage(views::Button::STATE_DISABLED,
+           gfx::CreateVectorIcon(icon, kTrayTopShortcutButtonIconSize,
+                                 kUnifiedMenuIconColorDisabled));
+}
+
+TopShortcutButton::TopShortcutButton(views::ButtonListener* listener,
+                                     int accessible_name_id)
     : views::ImageButton(listener) {
   SetPreferredSize(gfx::Size(kTrayItemSize, kTrayItemSize));
-
-  SetImage(views::Button::STATE_NORMAL,
-           gfx::CreateVectorIcon(icon, kUnifiedMenuIconColor));
-  SetImage(views::Button::STATE_DISABLED,
-           gfx::CreateVectorIcon(icon, kUnifiedMenuIconColorDisabled));
 
   SetImageAlignment(ALIGN_CENTER, ALIGN_MIDDLE);
   SetTooltipText(l10n_util::GetStringUTF16(accessible_name_id));

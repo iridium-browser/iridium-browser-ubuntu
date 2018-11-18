@@ -7,7 +7,6 @@
 typedef (double or CSSNumericValue) CSSNumberish;
 
 [
-  RuntimeEnabled=CSSTypedOM,
   Exposed=(Window,LayoutWorklet,PaintWorklet)
 ] interface CSSNumericValue : CSSStyleValue {
   [RaisesException, NewObject] CSSNumericValue add(CSSNumberish... values);
@@ -19,10 +18,10 @@ typedef (double or CSSNumericValue) CSSNumberish;
 
   boolean equals(CSSNumberish... values);
 
-  [RaisesException, NewObject] CSSUnitValue to(DOMString unit);
-  [RaisesException, NewObject] CSSMathSum toSum(DOMString... units);
+  [RaisesException, NewObject] CSSUnitValue to(CSSOMString unit);
+  [RaisesException, NewObject] CSSMathSum toSum(CSSOMString... units);
   CSSNumericType type();
 
   // Putting Exposed=Window in the next line makes |parse| not exposed to PaintWorklet.
-  [RaisesException, NewObject, Exposed=Window] static CSSNumericValue parse(DOMString cssText);
+  [RaisesException, NewObject, Exposed=Window] static CSSNumericValue parse(CSSOMString cssText);
 };

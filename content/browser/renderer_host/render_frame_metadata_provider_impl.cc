@@ -10,8 +10,10 @@
 namespace content {
 
 RenderFrameMetadataProviderImpl::RenderFrameMetadataProviderImpl(
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner,
     FrameTokenMessageQueue* frame_token_message_queue)
-    : frame_token_message_queue_(frame_token_message_queue),
+    : task_runner_(task_runner),
+      frame_token_message_queue_(frame_token_message_queue),
       render_frame_metadata_observer_client_binding_(this),
       weak_factory_(this) {}
 
@@ -30,13 +32,22 @@ void RenderFrameMetadataProviderImpl::Bind(
     mojom::RenderFrameMetadataObserverPtr observer) {
   render_frame_metadata_observer_ptr_ = std::move(observer);
   render_frame_metadata_observer_client_binding_.Close();
-  render_frame_metadata_observer_client_binding_.Bind(
-      std::move(client_request));
+  render_frame_metadata_observer_client_binding_.Bind(std::move(client_request),
+                                                      task_runner_);
+
+  if (pending_report_all_frame_submission_.has_value()) {
+    ReportAllFrameSubmissionsForTesting(*pending_report_all_frame_submission_);
+    pending_report_all_frame_submission_.reset();
+  }
 }
 
 void RenderFrameMetadataProviderImpl::ReportAllFrameSubmissionsForTesting(
     bool enabled) {
-  DCHECK(render_frame_metadata_observer_ptr_);
+  if (!render_frame_metadata_observer_ptr_) {
+    pending_report_all_frame_submission_ = enabled;
+    return;
+  }
+
   render_frame_metadata_observer_ptr_->ReportAllFrameSubmissionsForTesting(
       enabled);
 }
@@ -46,11 +57,12 @@ RenderFrameMetadataProviderImpl::LastRenderFrameMetadata() const {
   return last_render_frame_metadata_;
 }
 
-void RenderFrameMetadataProviderImpl::OnFrameTokenRenderFrameMetadataChanged(
-    cc::RenderFrameMetadata metadata) {
+void RenderFrameMetadataProviderImpl::
+    OnRenderFrameMetadataChangedAfterActivation(
+        cc::RenderFrameMetadata metadata) {
   last_render_frame_metadata_ = std::move(metadata);
   for (Observer& observer : observers_)
-    observer.OnRenderFrameMetadataChanged();
+    observer.OnRenderFrameMetadataChangedAfterActivation();
 }
 
 void RenderFrameMetadataProviderImpl::OnFrameTokenFrameSubmissionForTesting() {
@@ -66,13 +78,25 @@ void RenderFrameMetadataProviderImpl::SetLastRenderFrameMetadataForTest(
 void RenderFrameMetadataProviderImpl::OnRenderFrameMetadataChanged(
     uint32_t frame_token,
     const cc::RenderFrameMetadata& metadata) {
+  for (Observer& observer : observers_)
+    observer.OnRenderFrameMetadataChangedBeforeActivation(metadata);
+
+  if (metadata.local_surface_id != last_local_surface_id_) {
+    last_local_surface_id_ = metadata.local_surface_id;
+    for (Observer& observer : observers_)
+      observer.OnLocalSurfaceIdChanged(metadata);
+  }
+
+  if (!frame_token)
+    return;
+
   // Both RenderFrameMetadataProviderImpl and FrameTokenMessageQueue are owned
   // by the same RenderWidgetHostImpl. During shutdown the queue is cleared
   // without running the callbacks.
   frame_token_message_queue_->EnqueueOrRunFrameTokenCallback(
       frame_token,
       base::BindOnce(&RenderFrameMetadataProviderImpl::
-                         OnFrameTokenRenderFrameMetadataChanged,
+                         OnRenderFrameMetadataChangedAfterActivation,
                      weak_factory_.GetWeakPtr(), std::move(metadata)));
 }
 

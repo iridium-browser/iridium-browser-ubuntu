@@ -6,6 +6,8 @@ import logging
 
 from telemetry.core import exceptions
 from telemetry.internal.browser import web_contents
+from telemetry.internal.backends.chrome_inspector.inspector_websocket import \
+    WebSocketException
 
 import py_utils
 
@@ -18,16 +20,22 @@ class Oobe(web_contents.WebContents):
     webview_contexts = self.GetWebviewContexts()
     for webview in webview_contexts:
       try:
-        # GAIA webview has base.href accounts.google.com.
+        # GAIA webview has base.href accounts.google.com in production, and
+        # gaistaging.corp.google.com for QA.
         if webview.EvaluateJavaScript(
             """
             bases = document.getElementsByTagName('base');
-            bases.length > 0 ?
-                bases[0].href.indexOf('https://accounts.google.com/') == 0 : false;
+            if (bases.length > 0) {
+              href = bases[0].href;
+              href.indexOf('https://accounts.google.com/') == 0 ||
+                  href.indexOf('https://gaiastaging.corp.google.com/') == 0;
+            }
             """):
           py_utils.WaitFor(webview.HasReachedQuiescence, 20)
           return webview
-      except exceptions.DevtoolsTargetCrashException:
+      except (exceptions.DevtoolsTargetCrashException,
+              exceptions.TimeoutException,
+              WebSocketException):
         pass
     return None
 

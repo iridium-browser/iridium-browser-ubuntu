@@ -4,9 +4,11 @@
 
 #include "android_webview/browser/aw_web_ui_controller_factory.h"
 
+#include "base/memory/ptr_util.h"
 #include "components/safe_browsing/web_ui/constants.h"
 #include "components/safe_browsing/web_ui/safe_browsing_ui.h"
 #include "content/public/browser/web_ui.h"
+#include "url/gurl.h"
 
 using content::WebUI;
 using content::WebUIController;
@@ -73,14 +75,14 @@ bool AwWebUIControllerFactory::UseWebUIBindingsForURL(
   return UseWebUIForURL(browser_context, url);
 }
 
-WebUIController* AwWebUIControllerFactory::CreateWebUIControllerForURL(
-    WebUI* web_ui,
-    const GURL& url) const {
+std::unique_ptr<WebUIController>
+AwWebUIControllerFactory::CreateWebUIControllerForURL(WebUI* web_ui,
+                                                      const GURL& url) const {
   WebUIFactoryFunctionPointer function = GetWebUIFactoryFunctionPointer(url);
   if (!function)
     return nullptr;
 
-  return (*function)(web_ui, url);
+  return base::WrapUnique((*function)(web_ui, url));
 }
 
 }  // namespace android_webview

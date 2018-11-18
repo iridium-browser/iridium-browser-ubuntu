@@ -7,6 +7,7 @@
 #include <inttypes.h>
 #include <stddef.h>
 
+#include <utility>
 #include <vector>
 
 #include "base/files/file_util.h"
@@ -19,6 +20,7 @@
 #include "base/trace_event/memory_dump_manager.h"
 #include "base/trace_event/process_memory_dump.h"
 #include "build/build_config.h"
+#include "content/browser/dom_storage/session_storage_metadata.h"
 #include "third_party/leveldatabase/env_chromium.h"
 #include "third_party/leveldatabase/leveldb_chrome.h"
 #include "third_party/leveldatabase/src/include/leveldb/db.h"
@@ -191,6 +193,7 @@ bool SessionStorageDatabase::CommitAreaChanges(
   if (!GetMapForArea(namespace_id, origin.GetURL().spec(),
                      leveldb::ReadOptions(), &exists, &map_id))
     return false;
+
   if (exists) {
     int64_t ref_count;
     if (!GetMapRefCount(map_id, &ref_count))
@@ -398,6 +401,12 @@ void SessionStorageDatabase::OnMemoryDump(
                  tracker_dump->GetSizeInternal());
 }
 
+void SessionStorageDatabase::SetDatabaseForTesting(
+    std::unique_ptr<leveldb::DB> db) {
+  CHECK(!db_);
+  db_ = std::move(db);
+}
+
 bool SessionStorageDatabase::LazyOpen(bool create_if_needed) {
   base::AutoLock auto_lock(db_lock_);
   if (db_error_ || is_inconsistent_) {
@@ -422,7 +431,11 @@ bool SessionStorageDatabase::LazyOpen(bool create_if_needed) {
                  << ", error: " << s.ToString();
 
     // Clear the directory and try again.
-    base::DeleteFile(file_path_, true);
+    s = leveldb_chrome::DeleteDB(file_path_, leveldb_env::Options());
+    if (!s.ok()) {
+      LOG(WARNING) << "Failed to delete leveldb in " << file_path_.value()
+                   << ", error: " << s.ToString();
+    }
     s = TryToOpen(&db_);
     if (!s.ok()) {
       LOG(WARNING) << "Failed to open leveldb in " << file_path_.value()
@@ -485,7 +498,24 @@ leveldb::Status SessionStorageDatabase::TryToOpen(
   // delete the old database here before we open it.
   leveldb::DestroyDB(db_name, options);
 #endif
-  return leveldb_env::OpenDB(options, db_name, db);
+  leveldb::Status s = leveldb_env::OpenDB(options, db_name, db);
+  if (!s.ok())
+    return s;
+
+  // If there is a version entry from the new implementation, treat the database
+  // as corrupt.
+  leveldb::Slice version_key =
+      leveldb::Slice(reinterpret_cast<const char*>(
+                         SessionStorageMetadata::kDatabaseVersionBytes),
+                     sizeof(SessionStorageMetadata::kDatabaseVersionBytes));
+  std::string dummy;
+  s = (*db)->Get(leveldb::ReadOptions(), version_key, &dummy);
+  if (s.IsNotFound())
+    return leveldb::Status::OK();
+
+  db->reset();
+  return leveldb::Status::Corruption(
+      "Cannot read a database that is a higher schema version.", dummy);
 }
 
 bool SessionStorageDatabase::IsOpen() const {
@@ -700,9 +730,7 @@ bool SessionStorageDatabase::ReadMap(const std::string& map_id,
 void SessionStorageDatabase::WriteValuesToMap(const std::string& map_id,
                                               const DOMStorageValuesMap& values,
                                               leveldb::WriteBatch* batch) {
-  for (DOMStorageValuesMap::const_iterator it = values.begin();
-       it != values.end();
-       ++it) {
+  for (auto it = values.begin(); it != values.end(); ++it) {
     base::NullableString16 value = it->second;
     std::string key = MapKey(map_id, base::UTF16ToUTF8(it->first));
     if (value.is_null()) {

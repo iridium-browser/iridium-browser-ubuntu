@@ -11,15 +11,13 @@ import itertools
 
 from chromite.lib import chroot_util
 from chromite.lib import cros_build_lib
-from chromite.lib import cros_build_lib_unittest
+from chromite.lib import cros_test_lib
 
 if cros_build_lib.IsInsideChroot():
   from chromite.scripts import cros_list_modified_packages
 
-# pylint: disable=protected-access
 
-
-class ChrootUtilTest(cros_build_lib_unittest.RunCommandTempDirTestCase):
+class ChrootUtilTest(cros_test_lib.RunCommandTempDirTestCase):
   """Test class for the chroot_util functions."""
 
   def testEmerge(self):

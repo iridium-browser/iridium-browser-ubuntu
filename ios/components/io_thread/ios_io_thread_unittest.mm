@@ -11,8 +11,7 @@
 #include "components/prefs/pref_service_factory.h"
 #include "components/prefs/testing_pref_store.h"
 #include "components/proxy_config/pref_proxy_config_tracker_impl.h"
-#include "components/ssl_config/ssl_config_service_manager.h"
-#include "ios/web/public/test/test_web_thread.h"
+#include "ios/web/public/test/test_web_thread_bundle.h"
 #include "net/test/url_request/url_request_failed_job.h"
 #include "net/url_request/url_request_filter.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -28,7 +27,7 @@ namespace {
 // A concrete implementation of IOThread for testing.
 class TestIOThread : public io_thread::IOSIOThread {
  public:
-  TestIOThread(PrefService* local_state, net_log::ChromeNetLog* net_log)
+  TestIOThread(PrefService* local_state, net::NetLog* net_log)
       : IOSIOThread(local_state, net_log) {}
   ~TestIOThread() override {}
 
@@ -43,10 +42,7 @@ class TestIOThread : public io_thread::IOSIOThread {
 
 class IOSIOThreadTest : public PlatformTest {
  public:
-  IOSIOThreadTest()
-      : loop_(base::MessageLoop::TYPE_IO),
-        ui_thread_(web::WebThread::UI, &loop_),
-        io_thread_(web::WebThread::IO, &loop_) {
+  IOSIOThreadTest() : thread_bundle_(web::TestWebThreadBundle::IO_MAINLOOP) {
     net::URLRequestFailedJob::AddUrlHandler();
   }
 
@@ -55,9 +51,7 @@ class IOSIOThreadTest : public PlatformTest {
   }
 
  private:
-  base::MessageLoop loop_;
-  web::TestWebThread ui_thread_;
-  web::TestWebThread io_thread_;
+  web::TestWebThreadBundle thread_bundle_;
 };
 
 // Tests the creation of an IOSIOThread and verifies that it returns a system
@@ -68,7 +62,6 @@ TEST_F(IOSIOThreadTest, AssertSystemUrlRequestContext) {
 
   scoped_refptr<PrefRegistrySimple> pref_registry = new PrefRegistrySimple;
   PrefProxyConfigTrackerImpl::RegisterPrefs(pref_registry.get());
-  ssl_config::SSLConfigServiceManager::RegisterPrefs(pref_registry.get());
 
   std::unique_ptr<PrefService> pref_service(
       pref_service_factory.Create(pref_registry.get()));

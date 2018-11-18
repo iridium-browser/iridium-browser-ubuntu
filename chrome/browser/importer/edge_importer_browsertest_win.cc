@@ -198,7 +198,7 @@ IN_PROC_BROWSER_TEST_F(EdgeImporterBrowserTest, EdgeImporter) {
       kEdgeFaviconGroup, kEdgeFaviconGroup + arraysize(kEdgeFaviconGroup));
 
   base::FilePath data_path;
-  ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &data_path));
+  ASSERT_TRUE(base::PathService::Get(chrome::DIR_TEST_DATA, &data_path));
   data_path = data_path.AppendASCII("edge_profile");
 
   base::FilePath temp_path = temp_dir_.GetPath();
@@ -232,6 +232,10 @@ IN_PROC_BROWSER_TEST_F(EdgeImporterBrowserTest, EdgeImporter) {
 }
 
 IN_PROC_BROWSER_TEST_F(EdgeImporterBrowserTest, EdgeImporterLegacyFallback) {
+  // We only do legacy fallback on versions < VERSION_WIN10_TH2.
+  if (base::win::GetVersion() >= base::win::VERSION_WIN10_TH2)
+    return;
+
   const BookmarkInfo kEdgeBookmarks[] = {
       {false, 0, {}, L"Google", "http://www.google.com/"}};
   std::vector<BookmarkInfo> bookmark_entries(
@@ -242,7 +246,7 @@ IN_PROC_BROWSER_TEST_F(EdgeImporterBrowserTest, EdgeImporterLegacyFallback) {
       kEdgeFaviconGroup, kEdgeFaviconGroup + arraysize(kEdgeFaviconGroup));
 
   base::FilePath data_path;
-  ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &data_path));
+  ASSERT_TRUE(base::PathService::Get(chrome::DIR_TEST_DATA, &data_path));
   data_path = data_path.AppendASCII("edge_profile");
 
   {

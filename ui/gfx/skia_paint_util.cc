@@ -10,19 +10,22 @@
 #include "third_party/skia/include/effects/SkGradientShader.h"
 #include "third_party/skia/include/effects/SkLayerDrawLooper.h"
 #include "ui/gfx/image/image_skia_rep.h"
+#include "ui/gfx/switches.h"
 
 namespace gfx {
 
 sk_sp<cc::PaintShader> CreateImageRepShader(const gfx::ImageSkiaRep& image_rep,
-                                            SkShader::TileMode tile_mode,
+                                            SkShader::TileMode tile_mode_x,
+                                            SkShader::TileMode tile_mode_y,
                                             const SkMatrix& local_matrix) {
-  return CreateImageRepShaderForScale(image_rep, tile_mode, local_matrix,
-                                      image_rep.scale());
+  return CreateImageRepShaderForScale(image_rep, tile_mode_x, tile_mode_y,
+                                      local_matrix, image_rep.scale());
 }
 
 sk_sp<cc::PaintShader> CreateImageRepShaderForScale(
     const gfx::ImageSkiaRep& image_rep,
-    SkShader::TileMode tile_mode,
+    SkShader::TileMode tile_mode_x,
+    SkShader::TileMode tile_mode_y,
     const SkMatrix& local_matrix,
     SkScalar scale) {
   // Unscale matrix by |scale| such that the bitmap is drawn at the
@@ -37,13 +40,22 @@ sk_sp<cc::PaintShader> CreateImageRepShaderForScale(
   shader_scale.setScaleX(local_matrix.getScaleX() / scale);
   shader_scale.setScaleY(local_matrix.getScaleY() / scale);
 
-  return cc::PaintShader::MakeImage(
-      cc::PaintImageBuilder::WithDefault()
-          .set_id(cc::PaintImage::GetNextId())
-          .set_image(SkImage::MakeFromBitmap(image_rep.sk_bitmap()),
-                     cc::PaintImage::GetNextContentId())
-          .TakePaintImage(),
-      tile_mode, tile_mode, &shader_scale);
+  // TODO(malaykeshav): The check for has_paint_image was only added here to
+  // prevent generating a paint record in tests. Tests need an instance of
+  // base::DiscardableMemoryAllocator to generate the PaintRecord. However most
+  // test suites dont have this set. Ensure that the check is removed before
+  // enabling the |kUsePaintRecordForImageSkia| feature by default.
+  // https://crbug.com/891469
+  if (base::FeatureList::IsEnabled(features::kUsePaintRecordForImageSkia) &&
+      !image_rep.has_paint_image()) {
+    return cc::PaintShader::MakePaintRecord(
+        image_rep.GetPaintRecord(),
+        SkRect::MakeIWH(image_rep.pixel_width(), image_rep.pixel_height()),
+        tile_mode_x, tile_mode_y, &shader_scale);
+  } else {
+    return cc::PaintShader::MakeImage(image_rep.paint_image(), tile_mode_x,
+                                      tile_mode_y, &shader_scale);
+  }
 }
 
 sk_sp<cc::PaintShader> CreateGradientShader(int start_point,

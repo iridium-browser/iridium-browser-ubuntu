@@ -89,8 +89,8 @@ TEST_F(InstallerStateTest, WithProduct) {
   {
     RegistryOverrideManager override_manager;
     ASSERT_NO_FATAL_FAILURE(override_manager.OverrideRegistry(root));
-    BrowserDistribution* dist = BrowserDistribution::GetDistribution();
-    RegKey chrome_key(root, dist->GetVersionKey().c_str(), KEY_ALL_ACCESS);
+    RegKey chrome_key(root, install_static::GetClientsKeyPath().c_str(),
+                      KEY_ALL_ACCESS);
     EXPECT_TRUE(chrome_key.Valid());
     if (chrome_key.Valid()) {
       chrome_key.WriteValue(google_update::kRegVersionField,
@@ -133,9 +133,9 @@ TEST_F(InstallerStateTest, InstallerResult) {
     state.Initialize(cmd_line, prefs, machine_state);
     state.WriteInstallerResult(installer::FIRST_INSTALL_SUCCESS,
                                IDS_INSTALL_OS_ERROR_BASE, &launch_cmd);
-    BrowserDistribution* distribution = BrowserDistribution::GetDistribution();
     EXPECT_EQ(ERROR_SUCCESS,
-        key.Open(root, distribution->GetStateKey().c_str(), KEY_READ));
+              key.Open(root, install_static::GetClientStateKeyPath().c_str(),
+                       KEY_READ));
     EXPECT_EQ(ERROR_SUCCESS,
         key.ReadValueDW(installer::kInstallerResult, &dw_value));
     EXPECT_EQ(static_cast<DWORD>(0), dw_value);
@@ -155,13 +155,13 @@ TEST_F(InstallerStateTest, InitializeTwice) {
   // Override these paths so that they can be found after the registry override
   // manager is in place.
   base::FilePath temp;
-  PathService::Get(base::DIR_PROGRAM_FILES, &temp);
+  base::PathService::Get(base::DIR_PROGRAM_FILES, &temp);
   base::ScopedPathOverride program_files_override(base::DIR_PROGRAM_FILES,
                                                   temp);
-  PathService::Get(base::DIR_PROGRAM_FILESX86, &temp);
+  base::PathService::Get(base::DIR_PROGRAM_FILESX86, &temp);
   base::ScopedPathOverride program_filesx86_override(base::DIR_PROGRAM_FILESX86,
                                                      temp);
-  PathService::Get(base::DIR_LOCAL_APP_DATA, &temp);
+  base::PathService::Get(base::DIR_LOCAL_APP_DATA, &temp);
   base::ScopedPathOverride local_app_data_override(base::DIR_LOCAL_APP_DATA,
                                                    temp);
   registry_util::RegistryOverrideManager override_manager;
@@ -188,7 +188,7 @@ TEST_F(InstallerStateTest, InitializeTwice) {
                      install_static::GetChromeInstallSubDirectory().c_str()));
   EXPECT_FALSE(installer_state.verbose_logging());
   EXPECT_EQ(installer_state.state_key(),
-            BrowserDistribution::GetDistribution()->GetStateKey());
+            install_static::GetClientStateKeyPath());
 
   // Now initialize it to install system-level Chrome.
   {
@@ -206,7 +206,7 @@ TEST_F(InstallerStateTest, InitializeTwice) {
                      install_static::GetChromeInstallSubDirectory().c_str()));
   EXPECT_TRUE(installer_state.verbose_logging());
   EXPECT_EQ(installer_state.state_key(),
-            BrowserDistribution::GetDistribution()->GetStateKey());
+            install_static::GetClientStateKeyPath());
 }
 
 // A fixture for testing InstallerState::DetermineCriticalVersion.  Individual

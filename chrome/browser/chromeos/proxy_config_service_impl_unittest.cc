@@ -15,8 +15,8 @@
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
-#include "chrome/browser/chromeos/settings/cros_settings.h"
-#include "chrome/browser/chromeos/settings/device_settings_service.h"
+#include "base/task/post_task.h"
+#include "chrome/browser/chromeos/settings/scoped_cros_settings_test_helper.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/shill_profile_client.h"
 #include "chromeos/dbus/shill_service_client.h"
@@ -31,6 +31,7 @@
 #include "components/prefs/testing_pref_service.h"
 #include "components/proxy_config/proxy_config_pref_names.h"
 #include "components/sync_preferences/testing_pref_service_syncable.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/test/test_browser_thread.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "net/proxy_resolution/proxy_config.h"
@@ -252,7 +253,7 @@ class ProxyConfigServiceImplTest : public testing::Test {
   void SetUpProxyConfigService(PrefService* profile_prefs) {
     config_service_impl_.reset(new ProxyConfigServiceImpl(
         profile_prefs, &pref_service_,
-        BrowserThread::GetTaskRunnerForThread(BrowserThread::IO)));
+        base::CreateSingleThreadTaskRunnerWithTraits({BrowserThread::IO})));
     proxy_config_service_ =
         config_service_impl_->CreateTrackingProxyConfigService(
             std::unique_ptr<net::ProxyConfigService>());
@@ -317,30 +318,24 @@ class ProxyConfigServiceImplTest : public testing::Test {
     DBusThreadManager::Shutdown();
   }
 
-  void InitConfigWithTestInput(const Input& input,
-                               base::DictionaryValue* result) {
-    std::unique_ptr<base::DictionaryValue> new_config;
+  base::Value InitConfigWithTestInput(const Input& input) {
     switch (input.mode) {
       case MK_MODE(DIRECT):
-        new_config = ProxyConfigDictionary::CreateDirect();
-        break;
+        return ProxyConfigDictionary::CreateDirect();
       case MK_MODE(AUTO_DETECT):
-        new_config = ProxyConfigDictionary::CreateAutoDetect();
-        break;
+        return ProxyConfigDictionary::CreateAutoDetect();
       case MK_MODE(PAC_SCRIPT):
-        new_config =
-            ProxyConfigDictionary::CreatePacScript(input.pac_url, false);
-        break;
+        return ProxyConfigDictionary::CreatePacScript(input.pac_url, false);
       case MK_MODE(SINGLE_PROXY):
       case MK_MODE(PROXY_PER_SCHEME):
-        new_config = ProxyConfigDictionary::CreateFixedServers(
-            input.server, input.bypass_rules);
-        break;
+        return ProxyConfigDictionary::CreateFixedServers(input.server,
+                                                         input.bypass_rules);
     }
-    result->Swap(new_config.get());
+    NOTREACHED();
+    return base::Value();
   }
 
-  void SetUserConfigInShill(base::DictionaryValue* pref_proxy_config_dict) {
+  void SetUserConfigInShill(const base::Value* pref_proxy_config_dict) {
     std::string proxy_config;
     if (pref_proxy_config_dict)
       base::JSONWriter::Write(*pref_proxy_config_dict, &proxy_config);
@@ -376,8 +371,7 @@ class ProxyConfigServiceImplTest : public testing::Test {
   sync_preferences::TestingPrefServiceSyncable profile_prefs_;
 
  private:
-  ScopedTestDeviceSettingsService test_device_settings_service_;
-  ScopedTestCrosSettings test_cros_settings_;
+  ScopedCrosSettingsTestHelper cros_settings_test_helper_;
 };
 
 TEST_F(ProxyConfigServiceImplTest, NetworkProxy) {
@@ -388,8 +382,7 @@ TEST_F(ProxyConfigServiceImplTest, NetworkProxy) {
     SCOPED_TRACE(base::StringPrintf("Test[%" PRIuS "] %s", i,
                                     tests[i].description.c_str()));
 
-    base::DictionaryValue test_config;
-    InitConfigWithTestInput(tests[i].input, &test_config);
+    base::Value test_config = InitConfigWithTestInput(tests[i].input);
     SetUserConfigInShill(&test_config);
 
     net::ProxyConfigWithAnnotation config;
@@ -440,12 +433,10 @@ TEST_F(ProxyConfigServiceImplTest, DynamicPrefsOverride) {
         recommended_params.description.c_str(),
         network_params.description.c_str()));
 
-    base::DictionaryValue managed_config;
-    InitConfigWithTestInput(managed_params.input, &managed_config);
-    base::DictionaryValue recommended_config;
-    InitConfigWithTestInput(recommended_params.input, &recommended_config);
-    base::DictionaryValue network_config;
-    InitConfigWithTestInput(network_params.input, &network_config);
+    base::Value managed_config = InitConfigWithTestInput(managed_params.input);
+    base::Value recommended_config =
+        InitConfigWithTestInput(recommended_params.input);
+    base::Value network_config = InitConfigWithTestInput(network_params.input);
 
     // Managed proxy pref should take effect over recommended proxy and
     // non-existent network proxy.
@@ -514,8 +505,8 @@ TEST_F(ProxyConfigServiceImplTest, SharedEthernetAndUserPolicy) {
   SetUpSharedEthernet();
   SetUpProxyConfigService(&profile_prefs_);
 
-  std::unique_ptr<base::DictionaryValue> ethernet_policy(
-      chromeos::onc::ReadDictionaryFromJson(kEthernetPolicy));
+  std::unique_ptr<base::Value> ethernet_policy =
+      chromeos::onc::ReadDictionaryFromJson(kEthernetPolicy);
 
   std::unique_ptr<base::ListValue> network_configs(new base::ListValue);
   network_configs->Append(std::move(ethernet_policy));

@@ -29,6 +29,9 @@ namespace blink {
 namespace TraceEvent {
 
 using base::trace_event::TraceScopedTrackableObject;
+using AsyncEnabledStateObserver =
+    base::trace_event::TraceLog::AsyncEnabledStateObserver;
+using EnabledStateObserver = base::trace_event::TraceLog::EnabledStateObserver;
 
 inline base::TimeTicks ToTraceTimestamp(double seconds) {
   return base::TimeTicks() + base::TimeDelta::FromSecondsD(seconds);
@@ -39,6 +42,14 @@ void ToTraceTimestamp(int64_t);
 
 PLATFORM_EXPORT void EnableTracing(const String& category_filter);
 PLATFORM_EXPORT void DisableTracing();
+
+PLATFORM_EXPORT void AddAsyncEnabledStateObserver(
+    base::WeakPtr<AsyncEnabledStateObserver>);
+PLATFORM_EXPORT void RemoveAsyncEnabledStateObserver(
+    AsyncEnabledStateObserver*);
+
+PLATFORM_EXPORT void AddEnabledStateObserver(EnabledStateObserver*);
+PLATFORM_EXPORT void RemoveEnabledStateObserver(EnabledStateObserver*);
 
 }  // namespace TraceEvent
 }  // namespace blink

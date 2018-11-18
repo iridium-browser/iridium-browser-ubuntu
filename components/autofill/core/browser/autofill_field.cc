@@ -6,18 +6,20 @@
 
 #include <stdint.h>
 
+#include <utility>
+
 #include "base/feature_list.h"
 #include "base/strings/string_number_conversions.h"
-#include "components/autofill/core/browser/autofill_experiments.h"
-#include "components/autofill/core/browser/autofill_type.h"
 #include "components/autofill/core/browser/field_types.h"
 #include "components/autofill/core/browser/proto/server.pb.h"
+#include "components/autofill/core/common/autofill_features.h"
 
 namespace autofill {
 
 AutofillField::AutofillField()
-    : overall_server_type_(NO_SERVER_DATA),
+    : server_type_(NO_SERVER_DATA),
       heuristic_type_(UNKNOWN_TYPE),
+      overall_type_(AutofillType(NO_SERVER_DATA)),
       html_type_(HTML_TYPE_UNSPECIFIED),
       html_mode_(HTML_MODE_NONE),
       phone_part_(IGNORED),
@@ -26,15 +28,15 @@ AutofillField::AutofillField()
       only_fill_when_focused_(false),
       generation_type_(AutofillUploadContents::Field::NO_GENERATION),
       generated_password_changed_(false),
-      form_classifier_outcome_(AutofillUploadContents::Field::NO_OUTCOME),
-      username_vote_type_(AutofillUploadContents::Field::NO_INFORMATION) {}
+      vote_type_(AutofillUploadContents::Field::NO_INFORMATION) {}
 
 AutofillField::AutofillField(const FormFieldData& field,
                              const base::string16& unique_name)
     : FormFieldData(field),
       unique_name_(unique_name),
-      overall_server_type_(NO_SERVER_DATA),
+      server_type_(NO_SERVER_DATA),
       heuristic_type_(UNKNOWN_TYPE),
+      overall_type_(AutofillType(NO_SERVER_DATA)),
       html_type_(HTML_TYPE_UNSPECIFIED),
       html_mode_(HTML_MODE_NONE),
       phone_part_(IGNORED),
@@ -44,8 +46,7 @@ AutofillField::AutofillField(const FormFieldData& field,
       parseable_name_(field.name),
       generation_type_(AutofillUploadContents::Field::NO_GENERATION),
       generated_password_changed_(false),
-      form_classifier_outcome_(AutofillUploadContents::Field::NO_OUTCOME),
-      username_vote_type_(AutofillUploadContents::Field::NO_INFORMATION) {}
+      vote_type_(AutofillUploadContents::Field::NO_INFORMATION) {}
 
 AutofillField::~AutofillField() {}
 
@@ -59,19 +60,38 @@ void AutofillField::set_heuristic_type(ServerFieldType type) {
     // implications on data uploaded to the server, better safe than sorry.
     heuristic_type_ = UNKNOWN_TYPE;
   }
+  overall_type_ = AutofillType(NO_SERVER_DATA);
 }
 
-void AutofillField::set_overall_server_type(ServerFieldType type) {
+void AutofillField::set_server_type(ServerFieldType type) {
   // Chrome no longer supports fax numbers, but the server still does.
   if (type >= PHONE_FAX_NUMBER && type <= PHONE_FAX_WHOLE_NUMBER)
     return;
 
-  overall_server_type_ = type;
+  server_type_ = type;
+  overall_type_ = AutofillType(NO_SERVER_DATA);
+}
+
+void AutofillField::add_possible_types_validities(
+    const std::map<ServerFieldType, AutofillProfile::ValidityState>&
+        possible_types_validities) {
+  for (const auto& possible_type_validity : possible_types_validities) {
+    possible_types_validities_[possible_type_validity.first].push_back(
+        possible_type_validity.second);
+  }
+}
+
+std::vector<AutofillProfile::ValidityState>
+AutofillField::get_validities_for_possible_type(ServerFieldType type) {
+  if (possible_types_validities_.find(type) == possible_types_validities_.end())
+    return {AutofillProfile::UNVALIDATED};
+  return possible_types_validities_[type];
 }
 
 void AutofillField::SetHtmlType(HtmlFieldType type, HtmlFieldMode mode) {
   html_type_ = type;
   html_mode_ = mode;
+  overall_type_ = AutofillType(NO_SERVER_DATA);
 
   if (type == HTML_TYPE_TEL_LOCAL_PREFIX)
     phone_part_ = PHONE_PREFIX;
@@ -81,25 +101,19 @@ void AutofillField::SetHtmlType(HtmlFieldType type, HtmlFieldMode mode) {
     phone_part_ = IGNORED;
 }
 
-void AutofillField::SetTypeTo(ServerFieldType type) {
-  if (type == UNKNOWN_TYPE || type == NO_SERVER_DATA) {
-    heuristic_type_ = UNKNOWN_TYPE;
-    overall_server_type_ = NO_SERVER_DATA;
-  } else if (overall_server_type_ == NO_SERVER_DATA) {
-    heuristic_type_ = type;
-  } else {
-    overall_server_type_ = type;
-  }
+void AutofillField::SetTypeTo(const AutofillType& type) {
+  DCHECK(type.GetStorableType() != NO_SERVER_DATA);
+  overall_type_ = type;
 }
 
-AutofillType AutofillField::Type() const {
+AutofillType AutofillField::ComputedType() const {
   // If autocomplete=tel/tel-* and server confirms it really is a phone field,
   // we always user the server prediction as html types are not very reliable.
   if ((GroupTypeOfHtmlFieldType(html_type_, html_mode_) == PHONE_BILLING ||
        GroupTypeOfHtmlFieldType(html_type_, html_mode_) == PHONE_HOME) &&
-      (GroupTypeOfServerFieldType(overall_server_type_) == PHONE_BILLING ||
-       GroupTypeOfServerFieldType(overall_server_type_) == PHONE_HOME)) {
-    return AutofillType(overall_server_type_);
+      (GroupTypeOfServerFieldType(server_type_) == PHONE_BILLING ||
+       GroupTypeOfServerFieldType(server_type_) == PHONE_HOME)) {
+    return AutofillType(server_type_);
   }
 
   // Use the html type specified by the website unless it is unrecognized and
@@ -109,37 +123,44 @@ AutofillType AutofillField::Type() const {
     return AutofillType(html_type_, html_mode_);
   }
 
-  if (overall_server_type_ != NO_SERVER_DATA) {
+  if (server_type_ != NO_SERVER_DATA) {
     // Sometimes the server and heuristics disagree on whether a name field
     // should be associated with an address or a credit card. There was a
     // decision to prefer the heuristics in these cases, but it looks like
     // it might be better to fix this server-side.
     // See http://crbug.com/429236 for background.
     bool believe_server;
-    if (base::FeatureList::IsEnabled(kAutofillPreferServerNamePredictions)) {
+    if (base::FeatureList::IsEnabled(
+            features::kAutofillPreferServerNamePredictions)) {
       believe_server = true;
     } else {
-      believe_server = !(overall_server_type_ == NAME_FULL &&
+      believe_server = !(server_type_ == NAME_FULL &&
                          heuristic_type_ == CREDIT_CARD_NAME_FULL) &&
-                       !(overall_server_type_ == CREDIT_CARD_NAME_FULL &&
+                       !(server_type_ == CREDIT_CARD_NAME_FULL &&
                          heuristic_type_ == NAME_FULL) &&
-                       !(overall_server_type_ == NAME_FIRST &&
+                       !(server_type_ == NAME_FIRST &&
                          heuristic_type_ == CREDIT_CARD_NAME_FIRST) &&
-                       !(overall_server_type_ == NAME_LAST &&
+                       !(server_type_ == NAME_LAST &&
                          heuristic_type_ == CREDIT_CARD_NAME_LAST);
     }
 
     // Either way, retain a preference for the the CVC heuristic over the
     // server's password predictions (http://crbug.com/469007)
-    believe_server =
-        believe_server &&
-        !(AutofillType(overall_server_type_).group() == PASSWORD_FIELD &&
-          heuristic_type_ == CREDIT_CARD_VERIFICATION_CODE);
+    believe_server = believe_server &&
+                     !(AutofillType(server_type_).group() == PASSWORD_FIELD &&
+                       heuristic_type_ == CREDIT_CARD_VERIFICATION_CODE);
     if (believe_server)
-      return AutofillType(overall_server_type_);
+      return AutofillType(server_type_);
   }
 
   return AutofillType(heuristic_type_);
+}
+
+AutofillType AutofillField::Type() const {
+  if (overall_type_.GetStorableType() != NO_SERVER_DATA) {
+    return overall_type_;
+  }
+  return ComputedType();
 }
 
 bool AutofillField::IsEmpty() const {
@@ -158,8 +179,21 @@ bool AutofillField::IsFieldFillable() const {
   return !Type().IsUnknown();
 }
 
+void AutofillField::SetPasswordRequirements(PasswordRequirementsSpec spec) {
+  password_requirements_ = std::move(spec);
+}
+
+void AutofillField::NormalizePossibleTypesValidities() {
+  for (const auto& possible_type : possible_types_) {
+    if (possible_types_validities_[possible_type].empty()) {
+      possible_types_validities_[possible_type].push_back(
+          AutofillProfile::UNVALIDATED);
+    }
+  }
+}
+
 bool AutofillField::IsCreditCardPrediction() const {
-  return AutofillType(overall_server_type_).group() == CREDIT_CARD ||
+  return AutofillType(server_type_).group() == CREDIT_CARD ||
          AutofillType(heuristic_type_).group() == CREDIT_CARD;
 }
 

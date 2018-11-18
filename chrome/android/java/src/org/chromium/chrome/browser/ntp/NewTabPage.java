@@ -4,14 +4,18 @@
 
 package org.chromium.chrome.browser.ntp;
 
+import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Point;
 import android.graphics.Rect;
+import android.graphics.drawable.Drawable;
+import android.support.annotation.Nullable;
 import android.support.v4.view.ViewCompat;
 import android.support.v7.widget.RecyclerView;
 import android.text.TextUtils;
 import android.view.LayoutInflater;
 import android.view.View;
+import android.view.ViewGroup;
 
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.DiscardableReferencePool;
@@ -22,39 +26,41 @@ import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeActivity;
-import org.chromium.chrome.browser.NativePage;
-import org.chromium.chrome.browser.NativePageHost;
 import org.chromium.chrome.browser.UrlConstants;
 import org.chromium.chrome.browser.compositor.layouts.content.InvalidationAwareThumbnailProvider;
 import org.chromium.chrome.browser.download.DownloadManagerService;
-import org.chromium.chrome.browser.metrics.StartupMetrics;
+import org.chromium.chrome.browser.native_page.NativePage;
+import org.chromium.chrome.browser.native_page.NativePageHost;
 import org.chromium.chrome.browser.ntp.NewTabPageView.NewTabPageManager;
+import org.chromium.chrome.browser.ntp.cards.ItemViewType;
+import org.chromium.chrome.browser.ntp.cards.NewTabPageAdapter;
 import org.chromium.chrome.browser.ntp.snippets.SuggestionsSource;
 import org.chromium.chrome.browser.omnibox.LocationBarVoiceRecognitionHandler;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.search_engines.TemplateUrlService;
 import org.chromium.chrome.browser.search_engines.TemplateUrlService.TemplateUrlServiceObserver;
 import org.chromium.chrome.browser.snackbar.SnackbarManager;
-import org.chromium.chrome.browser.suggestions.SuggestionsConfig;
 import org.chromium.chrome.browser.suggestions.SuggestionsDependencyFactory;
 import org.chromium.chrome.browser.suggestions.SuggestionsEventReporter;
 import org.chromium.chrome.browser.suggestions.SuggestionsMetrics;
 import org.chromium.chrome.browser.suggestions.SuggestionsNavigationDelegate;
-import org.chromium.chrome.browser.suggestions.SuggestionsNavigationDelegateImpl;
 import org.chromium.chrome.browser.suggestions.SuggestionsUiDelegateImpl;
 import org.chromium.chrome.browser.suggestions.Tile;
 import org.chromium.chrome.browser.suggestions.TileGroup;
 import org.chromium.chrome.browser.suggestions.TileGroupDelegateImpl;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.tab.Tab.TabHidingType;
 import org.chromium.chrome.browser.tab.TabObserver;
+import org.chromium.chrome.browser.tabmodel.TabModel.TabSelectionType;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.util.ColorUtils;
 import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.chrome.browser.util.UrlUtilities;
-import org.chromium.chrome.browser.vr_shell.VrShellDelegate;
+import org.chromium.chrome.browser.vr.VrModuleProvider;
 import org.chromium.content_public.browser.NavigationController;
 import org.chromium.content_public.browser.NavigationEntry;
+import org.chromium.content_public.common.BrowserControlsState;
 import org.chromium.net.NetworkChangeNotifier;
 import org.chromium.ui.mojom.WindowOpenDisposition;
 
@@ -72,21 +78,26 @@ public class NewTabPage
 
     // Key for the scroll position data that may be stored in a navigation entry.
     private static final String NAVIGATION_ENTRY_SCROLL_POSITION_KEY = "NewTabPageScrollPosition";
+    public static final String CONTEXT_MENU_USER_ACTION_PREFIX = "Suggestions";
 
-    private final Tab mTab;
+    protected final Tab mTab;
 
     private final String mTitle;
     private final int mBackgroundColor;
     private final int mThemeColor;
-    private final NewTabPageView mNewTabPageView;
-    private final NewTabPageManagerImpl mNewTabPageManager;
-    private final TileGroup.Delegate mTileGroupDelegate;
+    protected final NewTabPageManagerImpl mNewTabPageManager;
+    protected final TileGroup.Delegate mTileGroupDelegate;
     private final boolean mIsTablet;
 
+    /**
+     * The {@link NewTabPageView} shown in this NewTabPageLayout. This may be null in sub-classes.
+     */
+    private @Nullable NewTabPageView mNewTabPageView;
+    protected NewTabPageLayout mNewTabPageLayout;
     private TabObserver mTabObserver;
-    private boolean mSearchProviderHasLogo;
+    protected boolean mSearchProviderHasLogo;
 
-    private FakeboxDelegate mFakeboxDelegate;
+    protected FakeboxDelegate mFakeboxDelegate;
     private LocationBarVoiceRecognitionHandler mVoiceRecognitionHandler;
 
     // The timestamp at which the constructor was called.
@@ -166,7 +177,7 @@ public class NewTabPage
         }
     }
 
-    private class NewTabPageManagerImpl
+    protected class NewTabPageManagerImpl
             extends SuggestionsUiDelegateImpl implements NewTabPageManager {
         public NewTabPageManagerImpl(SuggestionsSource suggestionsSource,
                 SuggestionsEventReporter eventReporter,
@@ -180,7 +191,7 @@ public class NewTabPage
         @Override
         public boolean isLocationBarShownInNTP() {
             if (mIsDestroyed) return false;
-            return isInSingleUrlBarMode() && !mNewTabPageView.urlFocusAnimationsDisabled();
+            return isInSingleUrlBarMode() && !mNewTabPageLayout.urlFocusAnimationsDisabled();
         }
 
         @Override
@@ -192,7 +203,7 @@ public class NewTabPage
         @Override
         public void focusSearchBox(boolean beginVoiceSearch, String pastedText) {
             if (mIsDestroyed) return;
-            if (VrShellDelegate.isInVr()) return;
+            if (VrModuleProvider.getDelegate().isInVr()) return;
             if (mVoiceRecognitionHandler != null && beginVoiceSearch) {
                 mVoiceRecognitionHandler.startVoiceRecognition(
                         LocationBarVoiceRecognitionHandler.VoiceInteractionSource.NTP);
@@ -216,7 +227,6 @@ public class NewTabPage
             RecordHistogram.recordTimesHistogram(
                     "Tab.NewTabOnload", loadTimeMs, TimeUnit.MILLISECONDS);
             mIsLoaded = true;
-            StartupMetrics.getInstance().recordOpenedNTP();
             NewTabPageUma.recordNTPImpression(NewTabPageUma.NTP_IMPRESSION_REGULAR);
             // If not visible when loading completes, wait until onShown is received.
             if (!mTab.isHidden()) recordNTPShown();
@@ -238,7 +248,7 @@ public class NewTabPage
             if (mIsDestroyed) return;
 
             super.onLoadingComplete(tiles);
-            mNewTabPageView.onTilesLoaded();
+            mNewTabPageLayout.onTilesLoaded();
         }
 
         @Override
@@ -273,69 +283,58 @@ public class NewTabPage
         SuggestionsSource suggestionsSource = depsFactory.createSuggestionSource(profile);
         SuggestionsEventReporter eventReporter = depsFactory.createEventReporter();
 
-        SuggestionsNavigationDelegateImpl navigationDelegate =
-                new SuggestionsNavigationDelegateImpl(
-                        activity, profile, nativePageHost, tabModelSelector);
+        SuggestionsNavigationDelegate navigationDelegate = new SuggestionsNavigationDelegate(
+                activity, profile, nativePageHost, tabModelSelector);
         mNewTabPageManager = new NewTabPageManagerImpl(suggestionsSource, eventReporter,
-                navigationDelegate, profile, nativePageHost, activity.getReferencePool(),
-                activity.getSnackbarManager());
+                navigationDelegate, profile, nativePageHost,
+                activity.getChromeApplication().getReferencePool(), activity.getSnackbarManager());
         mTileGroupDelegate = new NewTabPageTileGroupDelegate(activity, profile, navigationDelegate);
 
         mTitle = activity.getResources().getString(R.string.button_new_tab);
-        mBackgroundColor = ApiCompatibilityUtils.getColor(activity.getResources(),
-                SuggestionsConfig.useModernLayout() ? R.color.modern_primary_color
-                                                    : R.color.ntp_bg);
-        mThemeColor = ColorUtils.getDefaultThemeColor(
-                activity.getResources(), FeatureUtilities.isChromeModernDesignEnabled(), false);
+        mBackgroundColor = ApiCompatibilityUtils.getColor(
+                activity.getResources(), R.color.modern_primary_color);
+        mThemeColor = ColorUtils.getDefaultThemeColor(activity.getResources(), false);
         mIsTablet = activity.isTablet();
         TemplateUrlService.getInstance().addObserver(this);
 
         mTabObserver = new EmptyTabObserver() {
             @Override
-            public void onShown(Tab tab) {
+            public void onShown(Tab tab, @TabSelectionType int type) {
                 // Showing the NTP is only meaningful when the page has been loaded already.
                 if (mIsLoaded) recordNTPShown();
 
-                mNewTabPageView.getTileGroup().onSwitchToForeground(/* trackLoadTask = */ false);
+                mNewTabPageLayout.getTileGroup().onSwitchToForeground(/* trackLoadTask = */ false);
             }
 
             @Override
-            public void onHidden(Tab tab) {
+            public void onHidden(Tab tab, @TabHidingType int type) {
                 if (mIsLoaded) recordNTPHidden();
             }
 
             @Override
             public void onPageLoadStarted(Tab tab, String url) {
-                int scrollPosition = mNewTabPageView.getScrollPosition();
-                if (scrollPosition == RecyclerView.NO_POSITION) return;
+                saveLastScrollPosition();
+            }
 
-                if (mTab.getWebContents() == null) return;
-
-                NavigationController controller = mTab.getWebContents().getNavigationController();
-                int index = controller.getLastCommittedEntryIndex();
-                NavigationEntry entry = controller.getEntryAtIndex(index);
-                if (entry == null) return;
-
-                // At least under test conditions this method may be called initially for the load
-                // of the NTP itself, at which point the last committed entry is not for the NTP
-                // yet. This method will then be called a second time when the user navigates away,
-                // at which point the last committed entry is for the NTP. The extra data must only
-                // be set in the latter case.
-                if (!isNTPUrl(entry.getUrl())) return;
-
-                controller.setEntryExtraData(index, NAVIGATION_ENTRY_SCROLL_POSITION_KEY,
-                        Integer.toString(scrollPosition));
+            @Override
+            public void onBrowserControlsConstraintsUpdated(Tab tab, int constraints) {
+                updateMargins(constraints);
             }
         };
         mTab.addObserver(mTabObserver);
         updateSearchProviderHasLogo();
 
-        LayoutInflater inflater = LayoutInflater.from(activity);
-        mNewTabPageView = (NewTabPageView) inflater.inflate(R.layout.new_tab_page_view, null);
-        mNewTabPageView.initialize(mNewTabPageManager, mTab, mTileGroupDelegate,
-                mSearchProviderHasLogo,
-                TemplateUrlService.getInstance().isDefaultSearchEngineGoogle(),
-                getScrollPositionFromNavigationEntry());
+        initializeMainView(activity);
+        getView().addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
+            @Override
+            public void onViewAttachedToWindow(View view) {
+                updateMargins(mTab.getBrowserControlsStateConstraints());
+                getView().removeOnAttachStateChangeListener(this);
+            }
+
+            @Override
+            public void onViewDetachedFromWindow(View view) {}
+        });
 
         eventReporter.onSurfaceOpened();
 
@@ -348,10 +347,72 @@ public class NewTabPage
         TraceEvent.end(TAG);
     }
 
+    /**
+     * Create and initialize the main view contained in this NewTabPage.
+     * @param context The context used to inflate the view.
+     */
+    protected void initializeMainView(Context context) {
+        LayoutInflater inflater = LayoutInflater.from(context);
+        mNewTabPageView = (NewTabPageView) inflater.inflate(R.layout.new_tab_page_view, null);
+        mNewTabPageLayout = mNewTabPageView.getNewTabPageLayout();
+
+        mNewTabPageView.initialize(mNewTabPageManager, mTab, mTileGroupDelegate,
+                mSearchProviderHasLogo,
+                TemplateUrlService.getInstance().isDefaultSearchEngineGoogle(),
+                getScrollPositionFromNavigationEntry());
+    }
+
+    /**
+     * Save the last scroll position stored in the navigation entry if necessary.
+     */
+    protected void saveLastScrollPosition() {
+        int scrollPosition = mNewTabPageView.getScrollPosition();
+        if (scrollPosition == RecyclerView.NO_POSITION) return;
+
+        if (mTab.getWebContents() == null) return;
+
+        NavigationController controller = mTab.getWebContents().getNavigationController();
+        int index = controller.getLastCommittedEntryIndex();
+        NavigationEntry entry = controller.getEntryAtIndex(index);
+        if (entry == null) return;
+
+        // At least under test conditions this method may be called initially for the load of the
+        // NTP itself, at which point the last committed entry is not for the NTP yet. This method
+        // will then be called a second time when the user navigates away, at which point the last
+        // committed entry is for the NTP. The extra data must only be set in the latter case.
+        if (!isNTPUrl(entry.getUrl())) return;
+
+        controller.setEntryExtraData(
+                index, NAVIGATION_ENTRY_SCROLL_POSITION_KEY, Integer.toString(scrollPosition));
+    }
+
+    /** Update the margins for the content when browser controls constraints are changed. */
+    private void updateMargins(@BrowserControlsState int constraints) {
+        // TODO(mdjones): can this be merged with BasicNativePage's updateMargins?
+
+        View view = getView();
+        ViewGroup.MarginLayoutParams layoutParams =
+                ((ViewGroup.MarginLayoutParams) view.getLayoutParams());
+        if (layoutParams == null) return;
+
+        int bottomMargin = 0;
+        if (FeatureUtilities.isBottomToolbarEnabled()
+                && constraints != BrowserControlsState.HIDDEN) {
+            bottomMargin = mTab.getActivity().getFullscreenManager().getBottomControlsHeight();
+        }
+        layoutParams.bottomMargin = bottomMargin;
+    }
+
     /** @return The view container for the new tab page. */
     @VisibleForTesting
     public NewTabPageView getNewTabPageView() {
         return mNewTabPageView;
+    }
+
+    /** @return The view container for the new tab layout. */
+    @VisibleForTesting
+    public NewTabPageLayout getNewTabPageLayout() {
+        return mNewTabPageLayout;
     }
 
     /**
@@ -359,11 +420,11 @@ public class NewTabPage
      * @param disable Whether to disable the animations.
      */
     public void setUrlFocusAnimationsDisabled(boolean disable) {
-        mNewTabPageView.setUrlFocusAnimationsDisabled(disable);
+        mNewTabPageLayout.setUrlFocusAnimationsDisabled(disable);
     }
 
     private boolean isInSingleUrlBarMode() {
-        return !mIsTablet && !FeatureUtilities.isChromeHomeEnabled() && mSearchProviderHasLogo;
+        return !mIsTablet && mSearchProviderHasLogo;
     }
 
     private void updateSearchProviderHasLogo() {
@@ -372,9 +433,19 @@ public class NewTabPage
 
     private void onSearchEngineUpdated() {
         updateSearchProviderHasLogo();
-        mNewTabPageView.setSearchProviderInfo(mSearchProviderHasLogo,
+        setSearchProviderInfoOnView(mSearchProviderHasLogo,
                 TemplateUrlService.getInstance().isDefaultSearchEngineGoogle());
-        mNewTabPageView.loadSearchProviderLogo();
+        mNewTabPageLayout.loadSearchProviderLogo();
+    }
+
+    /**
+     * Set the search provider info on the main child view, so that it can change layouts if
+     * needed.
+     * @param hasLogo Whether the search provider has a logo.
+     * @param isGoogle Whether the search provider is Google.
+     */
+    private void setSearchProviderInfoOnView(boolean hasLogo, boolean isGoogle) {
+        mNewTabPageLayout.setSearchProviderInfo(hasLogo, isGoogle);
     }
 
     /**
@@ -385,7 +456,7 @@ public class NewTabPage
      * @param percent The percentage of the URL bar focus animation.
      */
     public void setUrlFocusChangeAnimationPercent(float percent) {
-        mNewTabPageView.setUrlFocusChangeAnimationPercent(percent);
+        mNewTabPageLayout.setUrlFocusChangeAnimationPercent(percent);
     }
 
     /**
@@ -396,7 +467,7 @@ public class NewTabPage
      *                    to the NewTabPage view.
      */
     public void getSearchBoxBounds(Rect bounds, Point translation) {
-        mNewTabPageView.getSearchBoxBounds(bounds, translation);
+        mNewTabPageLayout.getSearchBoxBounds(bounds, translation, getView());
     }
 
     /**
@@ -405,7 +476,7 @@ public class NewTabPage
      * @param alpha opacity (alpha) value to use.
      */
     public void setSearchBoxAlpha(float alpha) {
-        mNewTabPageView.setSearchBoxAlpha(alpha);
+        mNewTabPageLayout.setSearchBoxAlpha(alpha);
     }
 
     /**
@@ -414,7 +485,16 @@ public class NewTabPage
      * @param alpha opacity (alpha) value to use.
      */
     public void setSearchProviderLogoAlpha(float alpha) {
-        mNewTabPageView.setSearchProviderLogoAlpha(alpha);
+        mNewTabPageLayout.setSearchProviderLogoAlpha(alpha);
+    }
+
+    /**
+     * Set the search box background drawable.
+     *
+     * @param drawable The search box background.
+     */
+    public void setSearchBoxBackground(Drawable drawable) {
+        mNewTabPageLayout.setSearchBoxBackground(drawable);
     }
 
     /**
@@ -429,7 +509,7 @@ public class NewTabPage
      * @param listener The listener to be notified on changes.
      */
     public void setSearchBoxScrollListener(OnSearchBoxScrollListener listener) {
-        mNewTabPageView.setSearchBoxScrollListener(listener);
+        mNewTabPageLayout.setSearchBoxScrollListener(listener);
     }
 
     /**
@@ -437,12 +517,12 @@ public class NewTabPage
      */
     public void setFakeboxDelegate(FakeboxDelegate fakeboxDelegate) {
         mFakeboxDelegate = fakeboxDelegate;
-        mNewTabPageView.setFakeboxDelegate(fakeboxDelegate);
+        if (mNewTabPageView != null) mNewTabPageView.setFakeboxDelegate(fakeboxDelegate);
         if (mFakeboxDelegate != null) {
             // The toolbar can't get the reference to the native page until its initialization is
             // finished, so we can't cache it here and transfer it to the view later. We pull that
             // state from the location bar when we get a reference to it as a workaround.
-            mNewTabPageView.setUrlFocusChangeAnimationPercent(
+            mNewTabPageLayout.setUrlFocusChangeAnimationPercent(
                     fakeboxDelegate.isUrlBarFocused() ? 1f : 0f);
         }
     }
@@ -454,7 +534,7 @@ public class NewTabPage
             LocationBarVoiceRecognitionHandler voiceRecognitionHandler) {
         mVoiceRecognitionHandler = voiceRecognitionHandler;
         if (mVoiceRecognitionHandler != null) {
-            mNewTabPageView.updateVoiceSearchButtonVisibility();
+            mNewTabPageLayout.updateVoiceSearchButtonVisibility();
         }
     }
 
@@ -585,5 +665,23 @@ public class NewTabPage
     @VisibleForTesting
     public NewTabPageManager getManagerForTesting() {
         return mNewTabPageManager;
+    }
+
+    @VisibleForTesting
+    public View getSignInPromoViewForTesting() {
+        RecyclerView recyclerView = mNewTabPageView.getRecyclerView();
+        NewTabPageAdapter adapter = (NewTabPageAdapter) recyclerView.getAdapter();
+        return recyclerView
+                .findViewHolderForAdapterPosition(
+                        adapter.getFirstPositionForType(ItemViewType.PROMO))
+                .itemView;
+    }
+
+    @VisibleForTesting
+    public View getSectionHeaderViewForTesting() {
+        RecyclerView recyclerView = mNewTabPageView.getRecyclerView();
+        NewTabPageAdapter adapter = (NewTabPageAdapter) recyclerView.getAdapter();
+        return recyclerView.findViewHolderForAdapterPosition(adapter.getFirstHeaderPosition())
+                .itemView;
     }
 }

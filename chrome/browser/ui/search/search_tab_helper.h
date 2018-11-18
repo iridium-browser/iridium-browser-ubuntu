@@ -21,6 +21,7 @@
 #include "content/public/browser/reload_type.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/browser/web_contents_user_data.h"
+#include "ui/shell_dialogs/select_file_dialog.h"
 
 #if defined(OS_ANDROID)
 #error "Instant is only used on desktop";
@@ -42,7 +43,8 @@ class SearchIPCRouterTest;
 class SearchTabHelper : public content::WebContentsObserver,
                         public content::WebContentsUserData<SearchTabHelper>,
                         public InstantServiceObserver,
-                        public SearchIPCRouter::Delegate {
+                        public SearchIPCRouter::Delegate,
+                        public ui::SelectFileDialog::Listener {
  public:
   ~SearchTabHelper() override;
 
@@ -77,6 +79,8 @@ class SearchTabHelper : public content::WebContentsObserver,
                            ChromeIdentityCheckSignedOutMismatch);
   FRIEND_TEST_ALL_PREFIXES(SearchTabHelperTest, HistorySyncCheckSyncing);
   FRIEND_TEST_ALL_PREFIXES(SearchTabHelperTest, HistorySyncCheckNotSyncing);
+  FRIEND_TEST_ALL_PREFIXES(SearchTabHelperTest,
+                           FileSelectedUpdatesLastSelectedDirectory);
 
   explicit SearchTabHelper(content::WebContents* web_contents);
 
@@ -92,10 +96,20 @@ class SearchTabHelper : public content::WebContentsObserver,
       const content::LoadCommittedDetails& load_details) override;
 
   // Overridden from SearchIPCRouter::Delegate:
-  void FocusOmnibox(OmniboxFocusState state) override;
+  void FocusOmnibox(bool focus) override;
   void OnDeleteMostVisitedItem(const GURL& url) override;
   void OnUndoMostVisitedDeletion(const GURL& url) override;
   void OnUndoAllMostVisitedDeletions() override;
+  bool OnAddCustomLink(const GURL& url, const std::string& title) override;
+  bool OnUpdateCustomLink(const GURL& url,
+                          const GURL& new_url,
+                          const std::string& new_title) override;
+  bool OnDeleteCustomLink(const GURL& url) override;
+  void OnUndoCustomLinkAction() override;
+  void OnResetCustomLinks() override;
+  void OnDoesUrlResolve(
+      const GURL& url,
+      chrome::mojom::EmbeddedSearch::DoesUrlResolveCallback callback) override;
   void OnLogEvent(NTPLoggingEventType event, base::TimeDelta time) override;
   void OnLogMostVisitedImpression(
       const ntp_tiles::NTPTileImpression& impression) override;
@@ -104,11 +118,24 @@ class SearchTabHelper : public content::WebContentsObserver,
   void PasteIntoOmnibox(const base::string16& text) override;
   bool ChromeIdentityCheck(const base::string16& identity) override;
   bool HistorySyncCheck() override;
+  void OnSetCustomBackgroundURL(const GURL& url) override;
+  void OnSetCustomBackgroundURLWithAttributions(
+      const GURL& background_url,
+      const std::string& attribution_line_1,
+      const std::string& attribution_line_2,
+      const GURL& action_url) override;
+  void OnSelectLocalBackgroundImage() override;
 
   // Overridden from InstantServiceObserver:
   void ThemeInfoChanged(const ThemeBackgroundInfo& theme_info) override;
-  void MostVisitedItemsChanged(
-      const std::vector<InstantMostVisitedItem>& items) override;
+  void MostVisitedItemsChanged(const std::vector<InstantMostVisitedItem>& items,
+                               bool is_custom_links) override;
+
+  // Overridden from SelectFileDialog::Listener:
+  void FileSelected(const base::FilePath& path,
+                    int index,
+                    void* params) override;
+  void FileSelectionCanceled(void* params) override;
 
   OmniboxView* GetOmniboxView();
   const OmniboxView* GetOmniboxView() const;
@@ -126,6 +153,8 @@ class SearchTabHelper : public content::WebContentsObserver,
   InstantService* instant_service_;
 
   bool is_setting_title_ = false;
+
+  scoped_refptr<ui::SelectFileDialog> select_file_dialog_;
 
   DISALLOW_COPY_AND_ASSIGN(SearchTabHelper);
 };

@@ -84,7 +84,7 @@ Polymer({
       }
     },
 
-    /** @type {!Map<string, string>} */
+    /** @type {!Map<string, (string|Function)>} */
     focusConfig: {
       type: Object,
       observer: 'focusConfigChanged_',
@@ -130,14 +130,15 @@ Polymer({
       [R.SITE_SETTINGS_SENSORS, 'sensors'],
     ];
 
-    if (this.enablePaymentHandlerContentSetting_) {
-      pairs.push([R.SITE_SETTINGS_PAYMENT_HANDLER, 'payment-handler']);
-    }
+    if (this.enablePaymentHandlerContentSetting_)
+      pairs.push([R.SITE_SETTINGS_PAYMENT_HANDLER, 'paymentHandler']);
 
     pairs.forEach(pair => {
       const route = pair[0];
       const id = pair[1];
-      this.focusConfig.set(route.path, '* /deep/ #' + id + ' .subpage-arrow');
+      this.focusConfig.set(route.path, () => this.async(() => {
+        cr.ui.focusWithoutInk(assert(this.$$(`#${id} .subpage-arrow button`)));
+      }));
     });
   },
 

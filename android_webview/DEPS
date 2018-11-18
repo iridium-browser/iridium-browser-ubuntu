@@ -7,7 +7,8 @@ include_rules = [
   # lib is the top-level target, and must remain a leaf in the dependency tree.
   "-android_webview/lib",
 
-  "+components/google/core/browser",
+  "+components/heap_profiling",
+  "+components/google/core",
   "+components/network_session_configurator/common",
   "+components/metrics",
   "+components/prefs",
@@ -24,12 +25,15 @@ include_rules = [
   "+jni",
   # Only this one header in media which doesn't depend on anything else.
   "+media/media_buildflags.h",
+  "+mojo/public/cpp/bindings",
   "+net",
   "+services/network/public/cpp",
+  "+services/preferences/tracked",
   "+services/service_manager/public",
   "+services/viz/public/interfaces",
   "+skia",
   "+third_party/skia/include",
+  "+third_party/boringssl/src/include",
   "+ui/android",
   "+ui/base",
   "+ui/gfx",

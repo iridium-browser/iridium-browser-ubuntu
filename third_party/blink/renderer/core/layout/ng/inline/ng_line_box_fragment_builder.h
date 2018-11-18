@@ -9,19 +9,20 @@
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_inline_node.h"
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_line_height_metrics.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_container_fragment_builder.h"
-#include "third_party/blink/renderer/core/layout/ng/ng_positioned_float.h"
+#include "third_party/blink/renderer/core/layout/ng/ng_layout_result.h"
 #include "third_party/blink/renderer/platform/wtf/allocator.h"
 
 namespace blink {
 
 class ComputedStyle;
 class NGInlineBreakToken;
-class NGInlineNode;
 class NGPhysicalFragment;
+struct NGPositionedFloat;
 
 class CORE_EXPORT NGLineBoxFragmentBuilder final
     : public NGContainerFragmentBuilder {
   STACK_ALLOCATED();
+
  public:
   NGLineBoxFragmentBuilder(NGInlineNode,
                            scoped_refptr<const ComputedStyle>,
@@ -32,7 +33,6 @@ class CORE_EXPORT NGLineBoxFragmentBuilder final
   void Reset();
 
   LayoutUnit LineHeight() const;
-  LayoutUnit ComputeBlockSize() const;
 
   const NGLineHeightMetrics& Metrics() const { return metrics_; }
   void SetMetrics(const NGLineHeightMetrics&);
@@ -48,10 +48,10 @@ class CORE_EXPORT NGLineBoxFragmentBuilder final
   // A data struct to keep NGLayoutResult or fragment until the box tree
   // structures and child offsets are finalized.
   struct Child {
-    DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
+    DISALLOW_NEW();
 
     scoped_refptr<NGLayoutResult> layout_result;
-    scoped_refptr<NGPhysicalFragment> fragment;
+    scoped_refptr<const NGPhysicalFragment> fragment;
     LayoutObject* out_of_flow_positioned_box = nullptr;
     LayoutObject* out_of_flow_containing_box = nullptr;
     NGLogicalOffset offset;
@@ -77,7 +77,15 @@ class CORE_EXPORT NGLineBoxFragmentBuilder final
           inline_size(inline_size),
           bidi_level(bidi_level) {}
     // Create an in-flow |NGPhysicalFragment|.
-    Child(scoped_refptr<NGPhysicalFragment> fragment,
+    Child(scoped_refptr<const NGPhysicalFragment> fragment,
+          NGLogicalOffset offset,
+          LayoutUnit inline_size,
+          UBiDiLevel bidi_level)
+        : fragment(std::move(fragment)),
+          offset(offset),
+          inline_size(inline_size),
+          bidi_level(bidi_level) {}
+    Child(scoped_refptr<const NGPhysicalFragment> fragment,
           LayoutUnit block_offset,
           LayoutUnit inline_size,
           UBiDiLevel bidi_level)
@@ -99,6 +107,7 @@ class CORE_EXPORT NGLineBoxFragmentBuilder final
       return HasInFlowFragment() || HasOutOfFlowFragment();
     }
     bool HasBidiLevel() const { return bidi_level != 0xff; }
+    bool IsPlaceholder() const { return !HasFragment() && !HasBidiLevel(); }
     const NGPhysicalFragment* PhysicalFragment() const;
   };
 
@@ -130,11 +139,20 @@ class CORE_EXPORT NGLineBoxFragmentBuilder final
     using const_iterator = Vector<Child, 16>::const_iterator;
     const_iterator begin() const { return children_.begin(); }
     const_iterator end() const { return children_.end(); }
+    using reverse_iterator = Vector<Child, 16>::reverse_iterator;
+    reverse_iterator rbegin() { return children_.rbegin(); }
+    reverse_iterator rend() { return children_.rend(); }
+    using const_reverse_iterator = Vector<Child, 16>::const_reverse_iterator;
+    const_reverse_iterator rbegin() const { return children_.rbegin(); }
+    const_reverse_iterator rend() const { return children_.rend(); }
+
+    Child* FirstInFlowChild();
+    Child* LastInFlowChild();
 
     // Add a child. Accepts all constructor arguments for |Child|.
     template <class... Args>
     void AddChild(Args&&... args) {
-      children_.push_back(Child(std::forward<Args>(args)...));
+      children_.emplace_back(std::forward<Args>(args)...);
     }
     void InsertChild(unsigned,
                      scoped_refptr<NGLayoutResult>,
@@ -165,6 +183,8 @@ class CORE_EXPORT NGLineBoxFragmentBuilder final
   scoped_refptr<NGInlineBreakToken> break_token_;
 
   TextDirection base_direction_;
+
+  DISALLOW_COPY_AND_ASSIGN(NGLineBoxFragmentBuilder);
 };
 
 }  // namespace blink

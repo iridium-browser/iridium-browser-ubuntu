@@ -23,6 +23,8 @@
 #include "net/log/net_log_with_source.h"
 #include "net/url_request/url_request.h"
 #include "services/network/public/cpp/resource_response.h"
+#include "services/network/public/mojom/network_context.mojom.h"
+#include "services/network/url_loader.h"
 
 namespace keys = extension_web_request_api_constants;
 
@@ -173,8 +175,10 @@ bool CreateUploadDataSourcesFromResourceRequest(
         break;
 
       case network::DataElement::TYPE_FILE:
-        // Should not be hit in the Network Service case.
-        NOTREACHED();
+        // TODO(https://crbug.com/715679): This may not work when network
+        // process is sandboxed.
+        data_sources->push_back(
+            std::make_unique<FileUploadDataSource>(element.path()));
         break;
 
       default:
@@ -227,6 +231,8 @@ std::unique_ptr<base::DictionaryValue> CreateRequestBodyData(
 }  // namespace
 
 WebRequestInfo::WebRequestInfo() = default;
+WebRequestInfo::WebRequestInfo(WebRequestInfo&& other) = default;
+WebRequestInfo& WebRequestInfo::operator=(WebRequestInfo&& other) = default;
 
 WebRequestInfo::WebRequestInfo(net::URLRequest* url_request)
     : id(url_request->identifier()),
@@ -256,6 +262,17 @@ WebRequestInfo::WebRequestInfo(net::URLRequest* url_request)
     type = info->GetResourceType();
     web_request_type = ToWebRequestResourceType(type.value());
     is_async = info->IsAsync();
+    resource_context = info->GetContext();
+  } else if (auto* url_loader = network::URLLoader::ForRequest(*url_request)) {
+    // This is reached only in the SimpleURLLoader case (since network service
+    // is disabled if we're in this constructor). Only set the IDs if they're
+    // non-zero, since almost all requests come from the browser and aren't
+    // associated with a frame. In the case that the browser wants this
+    // SimpleURLLoader associated with a frame, the process ID will be non-zero.
+    if (url_loader->GetProcessId() != network::mojom::kBrowserProcessId) {
+      render_process_id = url_loader->GetProcessId();
+      frame_id = url_loader->GetRenderFrameId();
+    }
   } else {
     // There may be basic process and frame info associated with the request
     // even when |info| is null. Attempt to grab it as a last ditch effort. If
@@ -286,7 +303,9 @@ WebRequestInfo::WebRequestInfo(
     int render_frame_id,
     std::unique_ptr<ExtensionNavigationUIData> navigation_ui_data,
     int32_t routing_id,
-    const network::ResourceRequest& request)
+    content::ResourceContext* resource_context,
+    const network::ResourceRequest& request,
+    bool is_async)
     : id(request_id),
       url(request.url),
       site_for_cookies(request.site_for_cookies),
@@ -297,8 +316,10 @@ WebRequestInfo::WebRequestInfo(
       is_browser_side_navigation(!!navigation_ui_data),
       initiator(request.request_initiator),
       type(static_cast<content::ResourceType>(request.resource_type)),
+      is_async(is_async),
       extra_request_headers(request.headers),
-      logger(std::make_unique<NetworkServiceLogger>()) {
+      logger(std::make_unique<NetworkServiceLogger>()),
+      resource_context(resource_context) {
   if (url.SchemeIsWSOrWSS())
     web_request_type = WebRequestResourceType::WEB_SOCKET;
   else
@@ -333,11 +354,7 @@ void WebRequestInfo::AddResponseInfoFromResourceResponse(
   if (response_headers)
     response_code = response_headers->response_code();
   response_ip = response.socket_address.host();
-
-  // TODO(https://crbug.com/721414): We have no apparent source for this
-  // information yet in the Network Service case. Should indicate whether or not
-  // the response data came from cache.
-  response_from_cache = false;
+  response_from_cache = response.was_fetched_via_cache;
 }
 
 void WebRequestInfo::InitializeWebViewAndFrameData(
@@ -364,6 +381,11 @@ void WebRequestInfo::InitializeWebViewAndFrameData(
     ExtensionApiFrameIdMap::FrameData data;
     bool was_cached = ExtensionApiFrameIdMap::Get()->GetCachedFrameDataOnIO(
         render_process_id, frame_id, &data);
+    // TODO(crbug.com/843762): Investigate when |was_cached| can be false. It
+    // seems we are not tracking all WebContents or that the corresponding
+    // render frame was destroyed. Track where this can occur, this should help
+    // in minimizing IO->UI->IO thread that the web request API performs to
+    // fetch the frame data.
     if (was_cached)
       frame_data = data;
   }

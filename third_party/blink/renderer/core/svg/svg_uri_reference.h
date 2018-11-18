@@ -26,12 +26,15 @@
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/svg/svg_animated_href.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/weborigin/kurl.h"
 
 namespace blink {
 
 class Document;
 class Element;
 class IdTargetObserver;
+class SVGElement;
+class TreeScope;
 
 class CORE_EXPORT SVGURIReference : public GarbageCollectedMixin {
  public:
@@ -78,7 +81,7 @@ class CORE_EXPORT SVGURIReference : public GarbageCollectedMixin {
   // JS API
   SVGAnimatedHref* href() const { return href_.Get(); }
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  protected:
   explicit SVGURIReference(SVGElement*);

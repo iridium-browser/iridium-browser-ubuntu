@@ -19,10 +19,12 @@
 #include "base/values.h"
 #include "chrome/browser/chromeos/arc/arc_session_manager.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
+#include "chrome/browser/policy/developer_tools_policy_handler.h"
 #include "chrome/browser/policy/profile_policy_connector.h"
 #include "chrome/browser/policy/profile_policy_connector_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/common/pref_names.h"
 #include "chromeos/network/onc/onc_utils.h"
 #include "components/arc/arc_bridge_service.h"
 #include "components/arc/arc_browser_context_keyed_service_factory_base.h"
@@ -81,6 +83,21 @@ void MapIntToBool(const std::string& arc_policy_name,
   }
   int int_value;
   policy_value->GetAsInteger(&int_value);
+  filtered_policies->SetBoolean(arc_policy_name, int_value == int_true);
+}
+
+// |arc_policy_name| is only set if the |pref_name| pref is managed.
+// int_true: value of Chrome OS pref for which arc policy is set to true.
+// It is set to false for all other values.
+void MapManagedIntPrefToBool(const std::string& arc_policy_name,
+                             const std::string& pref_name,
+                             const PrefService* profile_prefs,
+                             int int_true,
+                             base::DictionaryValue* filtered_policies) {
+  if (!profile_prefs->IsManagedPreference(pref_name))
+    return;
+
+  int int_value = profile_prefs->GetInteger(pref_name);
   filtered_policies->SetBoolean(arc_policy_name, int_value == int_true);
 }
 
@@ -199,6 +216,7 @@ void AddOncCaCertsToPolicies(const policy::PolicyMap& policy_map,
 }
 
 std::string GetFilteredJSONPolicies(const policy::PolicyMap& policy_map,
+                                    const PrefService* profile_prefs,
                                     const std::string& guid,
                                     bool is_affiliated) {
   base::DictionaryValue filtered_policies;
@@ -224,21 +242,30 @@ std::string GetFilteredJSONPolicies(const policy::PolicyMap& policy_map,
 
   // Keep them sorted by the ARC policy names.
   MapBoolToBool("cameraDisabled", policy::key::kVideoCaptureAllowed, policy_map,
-                true, &filtered_policies);
-  MapBoolToBool("debuggingFeaturesDisabled",
-                policy::key::kDeveloperToolsDisabled, policy_map, false,
-                &filtered_policies);
+                /* invert_bool_value */ true, &filtered_policies);
+  // Use the pref for "debuggingFeaturesDisabled" to avoid duplicating the logic
+  // of handling DeveloperToolsDisabled / DeveloperToolsAvailability policies.
+  MapManagedIntPrefToBool(
+      "debuggingFeaturesDisabled", ::prefs::kDevToolsAvailability,
+      profile_prefs,
+      static_cast<int>(
+          policy::DeveloperToolsPolicyHandler::Availability::kDisallowed),
+      &filtered_policies);
+  MapBoolToBool("printingDisabled", policy::key::kPrintingEnabled, policy_map,
+                /* invert_bool_value */ true, &filtered_policies);
   MapBoolToBool("screenCaptureDisabled", policy::key::kDisableScreenshots,
                 policy_map, false, &filtered_policies);
   MapIntToBool("shareLocationDisabled", policy::key::kDefaultGeolocationSetting,
                policy_map, 2 /*BlockGeolocation*/, &filtered_policies);
   MapBoolToBool("unmuteMicrophoneDisabled", policy::key::kAudioCaptureAllowed,
-                policy_map, true, &filtered_policies);
+                policy_map, /* invert_bool_value */ true, &filtered_policies);
   MapBoolToBool("mountPhysicalMediaDisabled",
-                policy::key::kExternalStorageDisabled, policy_map, false,
-                &filtered_policies);
+                policy::key::kExternalStorageDisabled, policy_map,
+                /* invert_bool_value */ false, &filtered_policies);
   MapObjectToPresenceBool("setWallpaperDisabled", policy::key::kWallpaperImage,
                           policy_map, &filtered_policies, {"url", "hash"});
+  MapBoolToBool("vpnConfigDisabled", policy::key::kVpnConfigAllowed, policy_map,
+                /* invert_bool_value */ true, &filtered_policies);
 
   // Add CA certificates.
   AddOncCaCertsToPolicies(policy_map, &filtered_policies);
@@ -323,6 +350,16 @@ ArcPolicyBridge* ArcPolicyBridge::GetForBrowserContext(
   return ArcPolicyBridgeFactory::GetForBrowserContext(context);
 }
 
+// static
+ArcPolicyBridge* ArcPolicyBridge::GetForBrowserContextForTesting(
+    content::BrowserContext* context) {
+  return ArcPolicyBridgeFactory::GetForBrowserContextForTesting(context);
+}
+
+base::WeakPtr<ArcPolicyBridge> ArcPolicyBridge::GetWeakPtr() {
+  return weak_ptr_factory_.GetWeakPtr();
+}
+
 ArcPolicyBridge::ArcPolicyBridge(content::BrowserContext* context,
                                  ArcBridgeService* bridge_service)
     : ArcPolicyBridge(context, bridge_service, nullptr /* policy_service */) {}
@@ -369,6 +406,10 @@ void ArcPolicyBridge::OnConnectionReady() {
   }
   policy_service_->AddObserver(policy::POLICY_DOMAIN_CHROME, this);
   initial_policies_hash_ = GetPoliciesHash(GetCurrentJSONPolicies());
+
+  if (!on_arc_instance_ready_callback_.is_null()) {
+    std::move(on_arc_instance_ready_callback_).Run();
+  }
 }
 
 void ArcPolicyBridge::OnConnectionClosed() {
@@ -446,6 +487,29 @@ void ArcPolicyBridge::OnPolicyUpdated(const policy::PolicyNamespace& ns,
   instance->OnPolicyUpdated();
 }
 
+void ArcPolicyBridge::OnCommandReceived(
+    const std::string& command,
+    mojom::PolicyInstance::OnCommandReceivedCallback callback) {
+  VLOG(1) << "ArcPolicyBridge::OnCommandReceived";
+  auto* const instance = ARC_GET_INSTANCE_FOR_METHOD(
+      arc_bridge_service_->policy(), OnCommandReceived);
+
+  if (!instance) {
+    VLOG(1) << "ARC not ready yet, will retry remote command once it is ready.";
+    DCHECK(on_arc_instance_ready_callback_.is_null());
+
+    // base::Unretained is safe here since this class owns the callback's
+    // lifetime.
+    on_arc_instance_ready_callback_ =
+        base::BindOnce(&ArcPolicyBridge::OnCommandReceived,
+                       base::Unretained(this), command, std::move(callback));
+
+    return;
+  }
+
+  instance->OnCommandReceived(command, std::move(callback));
+}
+
 void ArcPolicyBridge::InitializePolicyService() {
   auto* profile_policy_connector =
       policy::ProfilePolicyConnectorFactory::GetForBrowserContext(context_);
@@ -465,8 +529,8 @@ std::string ArcPolicyBridge::GetCurrentJSONPolicies() const {
   const user_manager::User* const user =
       chromeos::ProfileHelper::Get()->GetUserByProfile(profile);
 
-  return GetFilteredJSONPolicies(policy_map, instance_guid_,
-                                 user->IsAffiliated());
+  return GetFilteredJSONPolicies(policy_map, profile->GetPrefs(),
+                                 instance_guid_, user->IsAffiliated());
 }
 
 void ArcPolicyBridge::OnReportComplianceParseSuccess(

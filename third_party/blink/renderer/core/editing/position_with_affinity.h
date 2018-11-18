@@ -1,6 +1,6 @@
 // Copyright 2014 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
-// found in the LICENSE file./*
+// found in the LICENSE file.
 
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_POSITION_WITH_AFFINITY_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_POSITION_WITH_AFFINITY_H_
@@ -8,20 +8,18 @@
 #include <iosfwd>
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/editing/position.h"
-#include "third_party/blink/renderer/core/editing/text_affinity.h"
 
 namespace blink {
 
+enum class TextAffinity;
+
 template <typename Strategy>
-class CORE_TEMPLATE_CLASS_EXPORT PositionWithAffinityTemplate {
+class PositionWithAffinityTemplate {
   DISALLOW_NEW();
 
  public:
-  // TODO(yosin) We should have single parameter constructor not to use
-  // default parameter for avoiding include "TextAffinity.h"
-  explicit PositionWithAffinityTemplate(
-      const PositionTemplate<Strategy>&,
-      TextAffinity = TextAffinity::kDownstream);
+  PositionWithAffinityTemplate(const PositionTemplate<Strategy>&, TextAffinity);
+  explicit PositionWithAffinityTemplate(const PositionTemplate<Strategy>&);
   PositionWithAffinityTemplate();
   ~PositionWithAffinityTemplate();
 
@@ -30,8 +28,8 @@ class CORE_TEMPLATE_CLASS_EXPORT PositionWithAffinityTemplate {
   TextAffinity Affinity() const { return affinity_; }
   const PositionTemplate<Strategy>& GetPosition() const { return position_; }
 
-  // Returns true if both |this| and |other| is null or both |m_position|
-  // and |m_affinity| equal.
+  // Returns true if both |this| and |other| is null or both |position_|
+  // and |affinity_| equal.
   bool operator==(const PositionWithAffinityTemplate& other) const;
   bool operator!=(const PositionWithAffinityTemplate& other) const {
     return !operator==(other);
@@ -64,6 +62,15 @@ extern template class CORE_EXTERN_TEMPLATE_EXPORT
 using PositionWithAffinity = PositionWithAffinityTemplate<EditingStrategy>;
 using PositionInFlatTreeWithAffinity =
     PositionWithAffinityTemplate<EditingInFlatTreeStrategy>;
+
+PositionWithAffinity ToPositionInDOMTreeWithAffinity(
+    const PositionWithAffinity&);
+PositionWithAffinity ToPositionInDOMTreeWithAffinity(
+    const PositionInFlatTreeWithAffinity&);
+PositionInFlatTreeWithAffinity ToPositionInFlatTreeWithAffinity(
+    const PositionWithAffinity&);
+PositionInFlatTreeWithAffinity ToPositionInFlatTreeWithAffinity(
+    const PositionInFlatTreeWithAffinity&);
 
 template <typename Strategy>
 PositionWithAffinityTemplate<Strategy> FromPositionInDOMTree(

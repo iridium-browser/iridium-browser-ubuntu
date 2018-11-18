@@ -5,6 +5,7 @@
 #ifndef CONTENT_RENDERER_INPUT_WIDGET_INPUT_HANDLER_IMPL_H_
 #define CONTENT_RENDERER_INPUT_WIDGET_INPUT_HANDLER_IMPL_H_
 
+#include "base/single_thread_task_runner.h"
 #include "content/common/input/input_handler.mojom.h"
 #include "mojo/public/cpp/bindings/associated_binding.h"
 #include "mojo/public/cpp/bindings/binding.h"
@@ -44,7 +45,8 @@ class WidgetInputHandlerImpl : public mojom::WidgetInputHandler {
   void ImeCommitText(const base::string16& text,
                      const std::vector<ui::ImeTextSpan>& ime_text_spans,
                      const gfx::Range& range,
-                     int32_t relative_cursor_position) override;
+                     int32_t relative_cursor_position,
+                     ImeCommitTextCallback callback) override;
   void ImeFinishComposingText(bool keep_selection) override;
   void RequestTextInputStateUpdate() override;
   void RequestCompositionUpdates(bool immediate_request,

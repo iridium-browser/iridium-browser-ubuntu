@@ -7,12 +7,9 @@
 
 #include "Test.h"
 
-#if SK_SUPPORT_GPU
-
 #include "GrBackendSurface.h"
 #include "GrContextPriv.h"
 #include "GrGpu.h"
-#include "GrTest.h"
 #include "SkDeferredDisplayListRecorder.h"
 #include "SkImage_Gpu.h"
 
@@ -104,10 +101,10 @@ DEF_GPUTEST_FOR_RENDERING_CONTEXTS(PromiseImageTest, reporter, ctxInfo) {
 
     for (bool releaseImageEarly : {true, false}) {
         GrBackendTexture backendTex = gpu->createTestingOnlyBackendTexture(
-                nullptr, kWidth, kHeight, kRGBA_8888_GrPixelConfig, true, GrMipMapped::kNo);
+                nullptr, kWidth, kHeight, GrColorType::kRGBA_8888, true, GrMipMapped::kNo);
         REPORTER_ASSERT(reporter, backendTex.isValid());
 
-        GrBackendFormat backendFormat = backendTex.format();
+        GrBackendFormat backendFormat = gpu->caps()->createFormatFromBackendTexture(backendTex);
         REPORTER_ASSERT(reporter, backendFormat.isValid());
 
         PromiseTextureChecker promiseChecker(backendTex);
@@ -240,5 +237,3 @@ DEF_GPUTEST_FOR_RENDERING_CONTEXTS(PromiseImageTest, reporter, ctxInfo) {
         gpu->deleteTestingOnlyBackendTexture(backendTex);
     }
 }
-
-#endif

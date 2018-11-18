@@ -123,7 +123,7 @@ class ResourceCreationProxy : public InterfaceProxy,
       PP_Resource share_context,
       const gpu::ContextCreationAttribs& attrib_helper,
       gpu::Capabilities* capabilities,
-      base::SharedMemoryHandle* shared_state,
+      const base::UnsafeSharedMemoryRegion** shared_state,
       gpu::CommandBufferId* command_buffer_id) override;
   PP_Resource CreateHostResolver(PP_Instance instance) override;
   PP_Resource CreateHostResolverPrivate(PP_Instance instance) override;
@@ -154,9 +154,7 @@ class ResourceCreationProxy : public InterfaceProxy,
   PP_Resource CreateUDPSocket(PP_Instance instance) override;
   PP_Resource CreateUDPSocketPrivate(PP_Instance instance) override;
   PP_Resource CreateVideoDecoder(PP_Instance instance) override;
-  PP_Resource CreateVideoDestination(PP_Instance instance) override;
   PP_Resource CreateVideoEncoder(PP_Instance instance) override;
-  PP_Resource CreateVideoSource(PP_Instance instance) override;
   PP_Resource CreateVpnProvider(PP_Instance instance) override;
   PP_Resource CreateWebSocket(PP_Instance instance) override;
   PP_Resource CreateX509CertificatePrivate(PP_Instance instance) override;

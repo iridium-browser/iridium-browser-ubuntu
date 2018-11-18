@@ -5,14 +5,17 @@
 #ifndef COMPONENTS_VARIATIONS_VARIATIONS_SEED_STORE_H_
 #define COMPONENTS_VARIATIONS_VARIATIONS_SEED_STORE_H_
 
+#include <memory>
 #include <string>
 
+#include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "components/variations/metrics.h"
+#include "components/variations/seed_response.h"
 
 class PrefService;
 class PrefRegistrySimple;
@@ -27,6 +30,13 @@ class VariationsSeed;
 class VariationsSeedStore {
  public:
   explicit VariationsSeedStore(PrefService* local_state);
+  // |initial_seed| may be null. If not null, then it will be stored in this
+  // seed store. This is used by Android Chrome to supply the first run seed,
+  // and by Android WebView to supply the seed on every run.
+  // |on_initial_seed_stored| will be called the first time a seed is stored.
+  VariationsSeedStore(PrefService* local_state,
+                      std::unique_ptr<SeedResponse> initial_seed,
+                      base::OnceCallback<void()> on_initial_seed_stored);
   virtual ~VariationsSeedStore();
 
   // Loads the variations seed data from local state into |seed|, as well as the
@@ -135,9 +145,12 @@ class VariationsSeedStore {
   void ClearPrefs(SeedType seed_type);
 
 #if defined(OS_ANDROID)
-  // Imports the variations seed data from Java side during the first
-  // Chrome for Android run.
-  void ImportFirstRunJavaSeed();
+  // Imports the variations seed from the Java side. Logs UMA on failure.
+  // Android Chrome uses this on first run; WebView uses this on every startup.
+  // In Chrome's case, it's important to set the first run seed as soon as
+  // possible, because some clients query the seed store prefs directly rather
+  // than accessing them via the seed store API: https://crbug.com/829527
+  void ImportInitialSeed(std::unique_ptr<SeedResponse> initial_seed);
 #endif  // OS_ANDROID
 
   // Loads the variations seed data from local state into |seed|, as well as the
@@ -196,6 +209,8 @@ class VariationsSeedStore {
 
   // Cached serial number from the most recently fetched variations seed.
   std::string latest_serial_number_;
+
+  base::OnceCallback<void()> on_initial_seed_stored_;
 
   DISALLOW_COPY_AND_ASSIGN(VariationsSeedStore);
 };

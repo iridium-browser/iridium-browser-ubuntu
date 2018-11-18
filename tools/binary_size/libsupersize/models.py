@@ -24,6 +24,8 @@ Description of common properties:
         are removed from both full_name and name during normalization).
   * section_name: E.g. ".text", ".rodata", ".data.rel.local"
   * section: The second character of |section_name|. E.g. "t", "r", "d".
+  * component: The team that owns this feature.
+        Never None, but will be '' when no component exists.
 """
 
 import collections
@@ -43,8 +45,10 @@ METADATA_ELF_FILENAME = 'elf_file_name'  # Path relative to output_directory.
 METADATA_ELF_MTIME = 'elf_mtime'  # int timestamp in utc.
 METADATA_ELF_BUILD_ID = 'elf_build_id'
 METADATA_GN_ARGS = 'gn_args'
+METADATA_LINKER_NAME = 'linker_name'
 METADATA_TOOL_PREFIX = 'tool_prefix'  # Path relative to SRC_ROOT.
 
+# New sections should also be added to the SuperSize UI.
 SECTION_BSS = '.bss'
 SECTION_DATA = '.data'
 SECTION_DATA_REL_RO = '.data.rel.ro'
@@ -58,6 +62,8 @@ SECTION_RODATA = '.rodata'
 SECTION_TEXT = '.text'
 # Used by SymbolGroup when they contain a mix of sections.
 SECTION_MULTIPLE = '.*'
+
+APK_PREFIX_PATH = '$APK'
 
 DEX_SECTIONS = (
     SECTION_DEX,
@@ -105,14 +111,40 @@ SECTION_TO_SECTION_NAME = collections.OrderedDict((
 ))
 
 
+# Relevant for native symbols. All anonymous:: namespaces are removed during
+# name normalization. This flag means that the name had one or more anonymous::
+# namespaces stripped from it.
 FLAG_ANONYMOUS = 1
+# Relevant for .text symbols. The actual symbol name had a "startup." prefix on
+# it, which was removed by name normalization.
 FLAG_STARTUP = 2
+# Relevant for .text symbols. The actual symbol name had a "unlikely." prefix on
+# it, which was removed by name normalization.
 FLAG_UNLIKELY = 4
+# Relevant to .data & .rodata symbols. The actual symbol name had a "rel."
+# prefix on it, which was removed by name normalization.
 FLAG_REL = 8
+# Relevant to .data & .rodata symbols. The actual symbol name had a "rel.local."
+# prefix on it, which was removed by name normalization.
 FLAG_REL_LOCAL = 16
+# The source path did not have the usual "../.." prefix, but instead had a
+# prefix of "gen", meaning that the symbol is from a source file that was
+# generated during the build (the "gen" prefix is removed during normalization).
 FLAG_GENERATED_SOURCE = 32
+# Relevant for .text symbols. The actual symbol name had a " [clone .####]"
+# suffix, which was removed by name normalization. Cloned symbols are created by
+# compiler optimizations (e.g. partial inlining).
 FLAG_CLONE = 64
+# Relevant for .text symbols. The actual symbol name had a "hot." prefix on it,
+# which was removed by name normalization. Occurs when an AFDO profile is
+# supplied to the linker.
 FLAG_HOT = 128
+# Relevant for .text symbols. If a method has this flag, then it was run
+# according to the code coverage.
+FLAG_COVERED = 256
+# Relevant for non-locale .pak symbols. Indicates a pak entry is stored
+# uncompressed.
+FLAG_UNCOMPRESSED = 512
 
 
 DIFF_STATUS_UNCHANGED = 0
@@ -120,6 +152,7 @@ DIFF_STATUS_CHANGED = 1
 DIFF_STATUS_ADDED = 2
 DIFF_STATUS_REMOVED = 3
 DIFF_PREFIX_BY_STATUS = ['= ', '~ ', '+ ', '- ']
+DIFF_COUNT_DELTA = [0, 0, 1, -1]
 
 
 STRING_LITERAL_NAME = 'string literal'
@@ -229,8 +262,7 @@ class BaseSymbol(object):
   @property
   def section(self):
     """Returns the one-letter section."""
-    # Fallback to section_name if there is no short-form defined.
-    return SECTION_NAME_TO_SECTION.get(self.section_name, self.section_name)
+    return SECTION_NAME_TO_SECTION[self.section_name]
 
   @property
   def size_without_padding(self):
@@ -281,6 +313,10 @@ class BaseSymbol(object):
       parts.append('clone')
     if flags & FLAG_HOT:
       parts.append('hot')
+    if flags & FLAG_COVERED:
+      parts.append('covered')
+    if flags & FLAG_UNCOMPRESSED:
+      parts.append('uncompressed')
     return '{%s}' % ','.join(parts)
 
   def IsBss(self):
@@ -336,6 +372,7 @@ class Symbol(BaseSymbol):
       'section_name',
       'source_path',
       'size',
+      'component',
   )
 
   def __init__(self, section_name, size_without_padding, address=None,
@@ -352,14 +389,16 @@ class Symbol(BaseSymbol):
     self.flags = flags
     self.aliases = aliases
     self.padding = 0
+    self.component = ''
 
   def __repr__(self):
     template = ('{}@{:x}(size_without_padding={},padding={},full_name={},'
-                'object_path={},source_path={},flags={},num_aliases={})')
+                'object_path={},source_path={},flags={},num_aliases={},'
+                'component={})')
     return template.format(
         self.section_name, self.address, self.size_without_padding,
         self.padding, self.full_name, self.object_path, self.source_path,
-        self.FlagsString(), self.num_aliases)
+        self.FlagsString(), self.num_aliases, self.component)
 
   @property
   def pss(self):
@@ -409,9 +448,16 @@ class DeltaSymbol(BaseSymbol):
       return DIFF_STATUS_ADDED
     if self.after_symbol is None:
       return DIFF_STATUS_REMOVED
-    if self.size == 0:
-      return DIFF_STATUS_UNCHANGED
-    return DIFF_STATUS_CHANGED
+    # Use delta size and delta PSS as indicators of change. Delta size = 0 with
+    # delta PSS != 0 can be caused by:
+    # (1) Alias addition / removal without actual binary change.
+    # (2) Alias merging / splitting along with binary changes, where matched
+    #     symbols all happen the same size (hence delta size = 0).
+    # The purpose of checking PSS is to account for (2). However, this means (1)
+    # would produce much more diffs than before!
+    if self.size != 0 or self.pss != 0:
+      return DIFF_STATUS_CHANGED
+    return DIFF_STATUS_UNCHANGED
 
   @property
   def address(self):
@@ -450,6 +496,10 @@ class DeltaSymbol(BaseSymbol):
   @property
   def section_name(self):
     return (self.after_symbol or self.before_symbol).section_name
+
+  @property
+  def component(self):
+    return (self.after_symbol or self.before_symbol).component
 
   @property
   def padding_pss(self):
@@ -527,12 +577,13 @@ class SymbolGroup(BaseSymbol):
       'template_name',
       'name',
       'section_name',
-      'is_sorted',
+      'is_default_sorted',  # True for groups created by Sorted()
   )
 
   # template_name and full_name are useful when clustering symbol clones.
   def __init__(self, symbols, filtered_symbols=None, full_name=None,
-               template_name=None, name='', section_name=None, is_sorted=False):
+               template_name=None, name='', section_name=None,
+               is_default_sorted=False):
     self._padding = None
     self._size = None
     self._pss = None
@@ -542,7 +593,7 @@ class SymbolGroup(BaseSymbol):
     self.template_name = template_name if template_name is not None else name
     self.name = name or ''
     self.section_name = section_name or SECTION_MULTIPLE
-    self.is_sorted = is_sorted
+    self.is_default_sorted = is_default_sorted
 
   def __repr__(self):
     return 'Group(full_name=%s,count=%d,size=%d)' % (
@@ -582,7 +633,7 @@ class SymbolGroup(BaseSymbol):
   def __add__(self, other):
     self_ids = set(id(s) for s in self)
     after_symbols = self._symbols + [s for s in other if id(s) not in self_ids]
-    return self._CreateTransformed(after_symbols, is_sorted=False)
+    return self._CreateTransformed(after_symbols, is_default_sorted=False)
 
   def index(self, item):
     return self._symbols.index(item)
@@ -616,6 +667,11 @@ class SymbolGroup(BaseSymbol):
         self._size = sum(
             s.size for s in self.IterUniqueSymbols() if not s.IsBss())
     return self._size
+
+  @property
+  def component(self):
+    first = self._symbols[0].component if self else ''
+    return first if all(s.component == first for s in self._symbols) else ''
 
   @property
   def pss(self):
@@ -665,25 +721,28 @@ class SymbolGroup(BaseSymbol):
 
   def _CreateTransformed(self, symbols, filtered_symbols=None, full_name=None,
                          template_name=None, name=None, section_name=None,
-                         is_sorted=None):
-    if is_sorted is None:
-      is_sorted = self.is_sorted
+                         is_default_sorted=None):
+    if is_default_sorted is None:
+      is_default_sorted = self.is_default_sorted
     if section_name is None:
       section_name = self.section_name
     return self.__class__(symbols, filtered_symbols=filtered_symbols,
                           full_name=full_name, template_name=template_name,
                           name=name, section_name=section_name,
-                          is_sorted=is_sorted)
+                          is_default_sorted=is_default_sorted)
 
   def Sorted(self, cmp_func=None, key=None, reverse=False):
+    """Sorts by abs(PSS)."""
+    is_default_sorted = False
     if cmp_func is None and key is None:
-      cmp_func = lambda a, b: cmp((a.IsBss(), abs(b.pss), a.name),
-                                  (b.IsBss(), abs(a.pss), b.name))
+      is_default_sorted = not reverse
+      # Sort by PSS, but ensure ties are broken in a consistent manner.
+      key = lambda s: (-abs(s.pss), s.full_name, s.object_path, s.section_name)
 
     after_symbols = sorted(self._symbols, cmp_func, key, reverse)
     return self._CreateTransformed(
         after_symbols, filtered_symbols=self._filtered_symbols,
-        is_sorted=True)
+        is_default_sorted=is_default_sorted)
 
   def SortedByName(self, reverse=False):
     return self.Sorted(key=(lambda s:s.name), reverse=reverse)
@@ -744,6 +803,9 @@ class SymbolGroup(BaseSymbol):
   def WhereIsTemplate(self):
     return self.Filter(lambda s: s.template_name is not s.name)
 
+  def WhereHasComponent(self):
+    return self.Filter(lambda s: s.component)
+
   def WhereSourceIsGenerated(self):
     return self.Filter(lambda s: s.generated_source)
 
@@ -774,6 +836,10 @@ class SymbolGroup(BaseSymbol):
     regex = re.compile(match_util.ExpandRegexIdentifierPlaceholder(pattern))
     return self.Filter(lambda s: (regex.search(s.source_path) or
                                   regex.search(s.object_path)))
+
+  def WhereComponentMatches(self, pattern):
+    regex = re.compile(match_util.ExpandRegexIdentifierPlaceholder(pattern))
+    return self.Filter(lambda s: regex.search(s.component))
 
   def WhereMatches(self, pattern):
     """Looks for |pattern| within all paths & names."""
@@ -815,7 +881,7 @@ class SymbolGroup(BaseSymbol):
     """
     return self._CreateTransformed(
         self._filtered_symbols, filtered_symbols=self._symbols,
-        section_name=SECTION_MULTIPLE, is_sorted=False)
+        section_name=SECTION_MULTIPLE)
 
   def GroupedBy(self, func, min_count=0, group_factory=None):
     """Returns a SymbolGroup of SymbolGroups, indexed by |func|.
@@ -831,6 +897,9 @@ class SymbolGroup(BaseSymbol):
           Use a negative value to omit symbols entirely rather than
           include them outside of a group.
       group_factory: Function to create SymbolGroup from a list of Symbols.
+
+    Returns:
+      SymbolGroup of SymbolGroups
     """
     if group_factory is None:
       group_factory = lambda token, symbols: self._CreateTransformed(
@@ -951,6 +1020,9 @@ class SymbolGroup(BaseSymbol):
 
   def GroupedBySectionName(self):
     return self.GroupedBy(lambda s: s.section_name)
+
+  def GroupedByComponent(self):
+    return self.GroupedBy(lambda s: s.component)
 
   def GroupedByFullName(self, min_count=2):
     """Groups by symbol.full_name.

@@ -9,7 +9,6 @@
 #include "ash/accessibility/accessibility_controller.h"
 #include "ash/ime/ime_controller.h"
 #include "ash/metrics/user_metrics_recorder.h"
-#include "ash/public/cpp/config.h"
 #include "ash/resources/vector_icons/vector_icons.h"
 #include "ash/session/session_controller.h"
 #include "ash/shell.h"
@@ -133,7 +132,9 @@ class CapsLockDefaultView : public ActionableView {
 };
 
 TrayCapsLock::TrayCapsLock(SystemTray* system_tray)
-    : TrayImageItem(system_tray, kSystemTrayCapsLockIcon, UMA_CAPS_LOCK),
+    : TrayImageItem(system_tray,
+                    kSystemTrayCapsLockIcon,
+                    SystemTrayItemUmaType::UMA_CAPS_LOCK),
       default_(nullptr),
       caps_lock_enabled_(IsCapsLockEnabled()) {
   Shell::Get()->ime_controller()->AddObserver(this);

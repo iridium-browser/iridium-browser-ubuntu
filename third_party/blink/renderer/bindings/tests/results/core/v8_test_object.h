@@ -11,30 +11,29 @@
 #ifndef V8TestObject_h
 #define V8TestObject_h
 
-#include "bindings/core/v8/array_buffer_or_array_buffer_view_or_dictionary.h"
-#include "bindings/core/v8/boolean_or_element_sequence.h"
-#include "bindings/core/v8/boolean_or_string_or_unrestricted_double.h"
-#include "bindings/core/v8/double_or_long_or_boolean_sequence.h"
-#include "bindings/core/v8/double_or_string.h"
-#include "bindings/core/v8/double_or_string_or_double_or_string_sequence.h"
-#include "bindings/core/v8/element_sequence_or_byte_string_double_or_string_record.h"
-#include "bindings/core/v8/generated_code_helper.h"
-#include "bindings/core/v8/native_value_traits.h"
-#include "bindings/core/v8/string_or_array_buffer_or_array_buffer_view.h"
-#include "bindings/core/v8/string_or_double.h"
-#include "bindings/core/v8/string_or_string_sequence.h"
-#include "bindings/core/v8/test_enum_or_double.h"
-#include "bindings/core/v8/test_interface_garbage_collected_or_string.h"
-#include "bindings/core/v8/test_interface_or_long.h"
-#include "bindings/core/v8/to_v8_for_core.h"
-#include "bindings/core/v8/unrestricted_double_or_string.h"
-#include "bindings/core/v8/v8_binding_for_core.h"
-#include "bindings/tests/idls/core/test_object.h"
-#include "core/core_export.h"
-#include "platform/bindings/script_wrappable.h"
-#include "platform/bindings/v8_dom_wrapper.h"
-#include "platform/bindings/wrapper_type_info.h"
-#include "platform/heap/handle.h"
+#include "third_party/blink/renderer/bindings/core/v8/array_buffer_or_array_buffer_view_or_dictionary.h"
+#include "third_party/blink/renderer/bindings/core/v8/boolean_or_element_sequence.h"
+#include "third_party/blink/renderer/bindings/core/v8/boolean_or_string_or_unrestricted_double.h"
+#include "third_party/blink/renderer/bindings/core/v8/double_or_long_or_boolean_sequence.h"
+#include "third_party/blink/renderer/bindings/core/v8/double_or_string.h"
+#include "third_party/blink/renderer/bindings/core/v8/double_or_string_or_double_or_string_sequence.h"
+#include "third_party/blink/renderer/bindings/core/v8/element_sequence_or_byte_string_double_or_string_record.h"
+#include "third_party/blink/renderer/bindings/core/v8/generated_code_helper.h"
+#include "third_party/blink/renderer/bindings/core/v8/native_value_traits.h"
+#include "third_party/blink/renderer/bindings/core/v8/string_or_array_buffer_or_array_buffer_view.h"
+#include "third_party/blink/renderer/bindings/core/v8/string_or_double.h"
+#include "third_party/blink/renderer/bindings/core/v8/string_or_string_sequence.h"
+#include "third_party/blink/renderer/bindings/core/v8/test_enum_or_double.h"
+#include "third_party/blink/renderer/bindings/core/v8/test_interface_or_long.h"
+#include "third_party/blink/renderer/bindings/core/v8/to_v8_for_core.h"
+#include "third_party/blink/renderer/bindings/core/v8/unrestricted_double_or_string.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
+#include "third_party/blink/renderer/bindings/tests/idls/core/test_object.h"
+#include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
+#include "third_party/blink/renderer/platform/bindings/v8_dom_wrapper.h"
+#include "third_party/blink/renderer/platform/bindings/wrapper_type_info.h"
+#include "third_party/blink/renderer/platform/heap/handle.h"
 
 namespace blink {
 
@@ -132,7 +131,6 @@ class V8TestObject {
   CORE_EXPORT static void xmlAttributeAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>&);
   CORE_EXPORT static void xmlAttributeAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Value>&);
   CORE_EXPORT static void nodeFilterAttributeAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>&);
-  CORE_EXPORT static void nodeFilterAttributeAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Value>&);
   CORE_EXPORT static void serializedScriptValueAttributeAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>&);
   CORE_EXPORT static void serializedScriptValueAttributeAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Value>&);
   CORE_EXPORT static void anyAttributeAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>&);
@@ -280,8 +278,6 @@ class V8TestObject {
   CORE_EXPORT static void locationWithPerWorldBindingsAttributeSetterCallbackForMainWorld(const v8::FunctionCallbackInfo<v8::Value>&);
   CORE_EXPORT static void locationLegacyInterfaceTypeCheckingAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>&);
   CORE_EXPORT static void locationLegacyInterfaceTypeCheckingAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Value>&);
-  CORE_EXPORT static void locationGarbageCollectedAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>&);
-  CORE_EXPORT static void locationGarbageCollectedAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Value>&);
   CORE_EXPORT static void raisesExceptionLongAttributeAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>&);
   CORE_EXPORT static void raisesExceptionLongAttributeAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Value>&);
   CORE_EXPORT static void raisesExceptionGetterLongAttributeAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>&);
@@ -370,10 +366,6 @@ class V8TestObject {
   CORE_EXPORT static void unscopableRuntimeEnabledLongAttributeAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Value>&);
   CORE_EXPORT static void testInterfaceAttributeAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>&);
   CORE_EXPORT static void testInterfaceAttributeAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Value>&);
-  CORE_EXPORT static void testInterfaceGarbageCollectedAttributeAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>&);
-  CORE_EXPORT static void testInterfaceGarbageCollectedAttributeAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Value>&);
-  CORE_EXPORT static void testInterfaceGarbageCollectedOrNullAttributeAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>&);
-  CORE_EXPORT static void testInterfaceGarbageCollectedOrNullAttributeAttributeSetterCallback(const v8::FunctionCallbackInfo<v8::Value>&);
   CORE_EXPORT static void sizeAttributeGetterCallback(const v8::FunctionCallbackInfo<v8::Value>&);
 
   CORE_EXPORT static void unscopableVoidMethodMethodCallback(const v8::FunctionCallbackInfo<v8::Value>&);
@@ -454,10 +446,8 @@ class V8TestObject {
   CORE_EXPORT static void nullableStringMethodMethodCallback(const v8::FunctionCallbackInfo<v8::Value>&);
   CORE_EXPORT static void nullableTestInterfaceMethodMethodCallback(const v8::FunctionCallbackInfo<v8::Value>&);
   CORE_EXPORT static void nullableLongSequenceMethodMethodCallback(const v8::FunctionCallbackInfo<v8::Value>&);
-  CORE_EXPORT static void testInterfaceGarbageCollectedOrDOMStringMethodMethodCallback(const v8::FunctionCallbackInfo<v8::Value>&);
   CORE_EXPORT static void booleanOrDOMStringOrUnrestrictedDoubleMethodMethodCallback(const v8::FunctionCallbackInfo<v8::Value>&);
   CORE_EXPORT static void testInterfaceOrLongMethodMethodCallback(const v8::FunctionCallbackInfo<v8::Value>&);
-  CORE_EXPORT static void staticTestInterfaceGarbageCollectedOrDOMStringMethodMethodCallback(const v8::FunctionCallbackInfo<v8::Value>&);
   CORE_EXPORT static void voidMethodDoubleOrDOMStringArgMethodCallback(const v8::FunctionCallbackInfo<v8::Value>&);
   CORE_EXPORT static void voidMethodDoubleOrDOMStringOrNullArgMethodCallback(const v8::FunctionCallbackInfo<v8::Value>&);
   CORE_EXPORT static void voidMethodDoubleOrNullOrDOMStringArgMethodCallback(const v8::FunctionCallbackInfo<v8::Value>&);
@@ -519,7 +509,6 @@ class V8TestObject {
   CORE_EXPORT static void voidMethodStringArgVariadicStringArgMethodCallback(const v8::FunctionCallbackInfo<v8::Value>&);
   CORE_EXPORT static void voidMethodVariadicTestInterfaceEmptyArgMethodCallback(const v8::FunctionCallbackInfo<v8::Value>&);
   CORE_EXPORT static void voidMethodTestInterfaceEmptyArgVariadicTestInterfaceEmptyArgMethodCallback(const v8::FunctionCallbackInfo<v8::Value>&);
-  CORE_EXPORT static void voidMethodVariadicTestInterfaceGarbageCollectedArgMethodCallback(const v8::FunctionCallbackInfo<v8::Value>&);
   CORE_EXPORT static void overloadedMethodAMethodCallback(const v8::FunctionCallbackInfo<v8::Value>&);
   CORE_EXPORT static void overloadedMethodBMethodCallback(const v8::FunctionCallbackInfo<v8::Value>&);
   CORE_EXPORT static void overloadedMethodCMethodCallback(const v8::FunctionCallbackInfo<v8::Value>&);
@@ -583,7 +572,6 @@ class V8TestObject {
   CORE_EXPORT static void perWorldBindingsVoidMethodMethodCallbackForMainWorld(const v8::FunctionCallbackInfo<v8::Value>&);
   CORE_EXPORT static void perWorldBindingsVoidMethodTestInterfaceEmptyArgMethodCallback(const v8::FunctionCallbackInfo<v8::Value>&);
   CORE_EXPORT static void perWorldBindingsVoidMethodTestInterfaceEmptyArgMethodCallbackForMainWorld(const v8::FunctionCallbackInfo<v8::Value>&);
-  CORE_EXPORT static void postMessageMethodCallback(const v8::FunctionCallbackInfo<v8::Value>&);
   CORE_EXPORT static void activityLoggingForAllWorldsPerWorldBindingsVoidMethodMethodCallback(const v8::FunctionCallbackInfo<v8::Value>&);
   CORE_EXPORT static void activityLoggingForAllWorldsPerWorldBindingsVoidMethodMethodCallbackForMainWorld(const v8::FunctionCallbackInfo<v8::Value>&);
   CORE_EXPORT static void activityLoggingForIsolatedWorldsPerWorldBindingsVoidMethodMethodCallback(const v8::FunctionCallbackInfo<v8::Value>&);
@@ -607,7 +595,6 @@ class V8TestObject {
   CORE_EXPORT static void useToImpl4ArgumentsCheckingIfPossibleWithNullableArgMethodCallback(const v8::FunctionCallbackInfo<v8::Value>&);
   CORE_EXPORT static void useToImpl4ArgumentsCheckingIfPossibleWithUndefinedArgMethodCallback(const v8::FunctionCallbackInfo<v8::Value>&);
   CORE_EXPORT static void unforgeableVoidMethodMethodCallback(const v8::FunctionCallbackInfo<v8::Value>&);
-  CORE_EXPORT static void voidMethodTestInterfaceGarbageCollectedSequenceArgMethodCallback(const v8::FunctionCallbackInfo<v8::Value>&);
   CORE_EXPORT static void newObjectTestInterfaceMethodMethodCallback(const v8::FunctionCallbackInfo<v8::Value>&);
   CORE_EXPORT static void newObjectTestInterfacePromiseMethodMethodCallback(const v8::FunctionCallbackInfo<v8::Value>&);
   CORE_EXPORT static void RuntimeCallStatsCounterMethodMethodCallback(const v8::FunctionCallbackInfo<v8::Value>&);

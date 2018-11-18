@@ -206,12 +206,13 @@ bool FileHandlersParser::Parse(Extension* extension, base::string16* error) {
   }
 
   extension->SetManifestData(keys::kFileHandlers, std::move(info));
-  extension->AddInstallWarnings(install_warnings);
+  extension->AddInstallWarnings(std::move(install_warnings));
   return true;
 }
 
-const std::vector<std::string> FileHandlersParser::Keys() const {
-  return SingleKey(keys::kFileHandlers);
+base::span<const char* const> FileHandlersParser::Keys() const {
+  static constexpr const char* kKeys[] = {keys::kFileHandlers};
+  return kKeys;
 }
 
 }  // namespace extensions

@@ -13,8 +13,6 @@
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "components/autofill/core/browser/autofill_client.h"
-#include "components/prefs/pref_registry_simple.h"
-#include "components/prefs/pref_service_factory.h"
 #include "content/public/browser/web_contents_user_data.h"
 #include "ui/android/view_android.h"
 
@@ -23,8 +21,9 @@ class AutofillPopupDelegate;
 class CardUnmaskDelegate;
 class CreditCard;
 class FormStructure;
+class MigratableCreditCard;
 class PersonalDataManager;
-class SaveCardBubbleController;
+class StrikeDatabase;
 }
 
 namespace content {
@@ -65,32 +64,46 @@ class AwAutofillClient : public autofill::AutofillClient,
   PrefService* GetPrefs() override;
   syncer::SyncService* GetSyncService() override;
   identity::IdentityManager* GetIdentityManager() override;
+  autofill::StrikeDatabase* GetStrikeDatabase() override;
   ukm::UkmRecorder* GetUkmRecorder() override;
+  ukm::SourceId GetUkmSourceId() override;
   autofill::AddressNormalizer* GetAddressNormalizer() override;
-  autofill::SaveCardBubbleController* GetSaveCardBubbleController() override;
-  void ShowAutofillSettings() override;
+  security_state::SecurityLevel GetSecurityLevelForUmaHistograms() override;
+  void ShowAutofillSettings(bool show_credit_card_settings) override;
   void ShowUnmaskPrompt(
       const autofill::CreditCard& card,
       UnmaskCardReason reason,
       base::WeakPtr<autofill::CardUnmaskDelegate> delegate) override;
   void OnUnmaskVerificationResult(PaymentsRpcResult result) override;
+  void ShowLocalCardMigrationDialog(
+      base::OnceClosure show_migration_dialog_closure) override;
+  void ConfirmMigrateLocalCardToCloud(
+      std::unique_ptr<base::DictionaryValue> legal_message,
+      const std::vector<autofill::MigratableCreditCard>&
+          migratable_credit_cards,
+      LocalCardMigrationCallback start_migrating_cards_callback) override;
+  void ConfirmSaveAutofillProfile(const autofill::AutofillProfile& profile,
+                                  base::OnceClosure callback) override;
   void ConfirmSaveCreditCardLocally(const autofill::CreditCard& card,
-                                    const base::Closure& callback) override;
+                                    bool show_prompt,
+                                    base::OnceClosure callback) override;
   void ConfirmSaveCreditCardToCloud(
       const autofill::CreditCard& card,
       std::unique_ptr<base::DictionaryValue> legal_message,
-      bool should_cvc_be_requested,
-      const base::Closure& callback) override;
+      bool should_request_name_from_user,
+      bool show_prompt,
+      base::OnceCallback<void(const base::string16&)> callback) override;
   void ConfirmCreditCardFillAssist(const autofill::CreditCard& card,
                                    const base::Closure& callback) override;
   void LoadRiskData(
-      const base::Callback<void(const std::string&)>& callback) override;
+      base::OnceCallback<void(const std::string&)> callback) override;
   bool HasCreditCardScanFeature() override;
   void ScanCreditCard(const CreditCardScanCallback& callback) override;
   void ShowAutofillPopup(
       const gfx::RectF& element_bounds,
       base::i18n::TextDirection text_direction,
       const std::vector<autofill::Suggestion>& suggestions,
+      bool /*unused_autoselect_first_suggestion*/,
       base::WeakPtr<autofill::AutofillPopupDelegate> delegate) override;
   void UpdateAutofillPopupDataListValues(
       const std::vector<base::string16>& values,
@@ -105,7 +118,7 @@ class AwAutofillClient : public autofill::AutofillClient,
   void DidInteractWithNonsecureCreditCardInput() override;
   bool IsContextSecure() override;
   bool ShouldShowSigninPromo() override;
-  bool IsAutofillSupported() override;
+  bool AreServerCardsSupported() override;
   void ExecuteCommand(int id) override;
 
   void Dismissed(JNIEnv* env, const base::android::JavaParamRef<jobject>& obj);
@@ -124,7 +137,7 @@ class AwAutofillClient : public autofill::AutofillClient,
 
   // The web_contents associated with this delegate.
   content::WebContents* web_contents_;
-  bool save_form_data_;
+  bool save_form_data_ = false;
   JavaObjectWeakGlobalRef java_ref_;
 
   ui::ViewAndroid::ScopedAnchorView anchor_view_;
@@ -132,6 +145,10 @@ class AwAutofillClient : public autofill::AutofillClient,
   // The current Autofill query values.
   std::vector<autofill::Suggestion> suggestions_;
   base::WeakPtr<autofill::AutofillPopupDelegate> delegate_;
+
+  // Tracks whether the autocomplete enabled metric has already been logged for
+  // this client.
+  bool autocomplete_uma_recorded_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(AwAutofillClient);
 };

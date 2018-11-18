@@ -1,4 +1,13 @@
+#if defined(__has_feature)
+#if __has_feature(memory_sanitizer) && !defined(OPENSSL_NO_ASM)
+#define OPENSSL_NO_ASM
+#endif
+#endif
+
 #if defined(__x86_64__) && !defined(OPENSSL_NO_ASM)
+#if defined(BORINGSSL_PREFIX)
+#include <boringssl_prefix_symbols_asm.h>
+#endif
 .text	
 
 .globl	rsaz_1024_sqr_avx2
@@ -1724,6 +1733,11 @@ rsaz_1024_gather5_avx2:
 rsaz_avx2_eligible:
 	leaq	OPENSSL_ia32cap_P(%rip),%rax
 	movl	8(%rax),%eax
+	movl	$524544,%ecx
+	movl	$0,%edx
+	andl	%eax,%ecx
+	cmpl	$524544,%ecx
+	cmovel	%edx,%eax
 	andl	$32,%eax
 	shrl	$5,%eax
 	.byte	0xf3,0xc3

@@ -45,14 +45,10 @@ void ViewsTestSuite::Initialize() {
   base::TestSuite::Initialize();
   gl::GLSurfaceTestSupport::InitializeOneOff();
 
-#if defined(OS_MACOSX)
-  gpu::ImageTransportSurface::SetAllowOSMesaForTesting(true);
-#endif
-
   ui::RegisterPathProvider();
 
   base::FilePath ui_test_pak_path;
-  ASSERT_TRUE(PathService::Get(ui::UI_TEST_PAK, &ui_test_pak_path));
+  ASSERT_TRUE(base::PathService::Get(ui::UI_TEST_PAK, &ui_test_pak_path));
   ui::ResourceBundle::InitSharedInstanceWithPakPath(ui_test_pak_path);
 #if defined(USE_AURA)
   InitializeEnv();

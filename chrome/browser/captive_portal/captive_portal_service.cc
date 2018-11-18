@@ -7,7 +7,6 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/time/tick_clock.h"
 #include "build/build_config.h"
@@ -279,8 +278,8 @@ void CaptivePortalService::DetectCaptivePortalInternal() {
         })");
   captive_portal_detector_->DetectCaptivePortal(
       test_url_,
-      base::Bind(&CaptivePortalService::OnPortalDetectionCompleted,
-                 base::Unretained(this)),
+      base::BindOnce(&CaptivePortalService::OnPortalDetectionCompleted,
+                     base::Unretained(this)),
       traffic_annotation);
 }
 

@@ -6,10 +6,11 @@
 #define CHROME_BROWSER_VR_ELEMENTS_LINEAR_LAYOUT_H_
 
 #include "chrome/browser/vr/elements/ui_element.h"
+#include "chrome/browser/vr/vr_ui_export.h"
 
 namespace vr {
 
-class LinearLayout : public UiElement {
+class VR_UI_EXPORT LinearLayout : public UiElement {
  public:
   enum Direction { kUp, kDown, kLeft, kRight };
 
@@ -18,11 +19,11 @@ class LinearLayout : public UiElement {
 
   void set_margin(float margin) { margin_ = margin; }
   void set_direction(Direction direction) { direction_ = direction; }
-  void set_layout_length(float extent) { layout_length = extent; }
+  void set_layout_length(float extent) { layout_length_ = extent; }
 
   // UiElement overrides.
-  bool SizeAndLayOut() override;
-  void LayOutChildren() override;
+  bool SizeAndLayOutChildren() override;
+  void LayOutContributingChildren() override;
 
  private:
   bool Horizontal() const;
@@ -39,12 +40,14 @@ class LinearLayout : public UiElement {
   bool AdjustResizableElement(UiElement* element_to_resize);
 
   Direction direction_;
+
+  // The spacing between elements.
   float margin_ = 0.0f;
 
   // If non-zero, LinearLayout will look for an element tagged as allowing
   // sizing by its parent, and set that element's size such that the total
   // layout's length is attained.
-  float layout_length = 0.0f;
+  float layout_length_ = 0.0f;
 };
 
 }  // namespace vr

@@ -26,11 +26,10 @@
 #include "third_party/blink/renderer/modules/webaudio/media_stream_audio_source_node.h"
 
 #include <memory>
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
+#include "third_party/blink/renderer/modules/webaudio/audio_context.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_node_output.h"
-#include "third_party/blink/renderer/modules/webaudio/base_audio_context.h"
 #include "third_party/blink/renderer/modules/webaudio/media_stream_audio_source_options.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/wtf/locker.h"
 
 namespace blink {
@@ -120,7 +119,7 @@ void MediaStreamAudioSourceHandler::Process(size_t number_of_frames) {
 // ----------------------------------------------------------------
 
 MediaStreamAudioSourceNode::MediaStreamAudioSourceNode(
-    BaseAudioContext& context,
+    AudioContext& context,
     MediaStream& media_stream,
     MediaStreamTrack* audio_track,
     std::unique_ptr<AudioSourceProvider> audio_source_provider)
@@ -132,7 +131,7 @@ MediaStreamAudioSourceNode::MediaStreamAudioSourceNode(
 }
 
 MediaStreamAudioSourceNode* MediaStreamAudioSourceNode::Create(
-    BaseAudioContext& context,
+    AudioContext& context,
     MediaStream& media_stream,
     ExceptionState& exception_state) {
   DCHECK(IsMainThread());
@@ -144,7 +143,7 @@ MediaStreamAudioSourceNode* MediaStreamAudioSourceNode::Create(
 
   MediaStreamTrackVector audio_tracks = media_stream.getAudioTracks();
   if (audio_tracks.IsEmpty()) {
-    exception_state.ThrowDOMException(kInvalidStateError,
+    exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
                                       "MediaStream has no audio track");
     return nullptr;
   }
@@ -170,7 +169,7 @@ MediaStreamAudioSourceNode* MediaStreamAudioSourceNode::Create(
 }
 
 MediaStreamAudioSourceNode* MediaStreamAudioSourceNode::Create(
-    BaseAudioContext* context,
+    AudioContext* context,
     const MediaStreamAudioSourceOptions& options,
     ExceptionState& exception_state) {
   return Create(*context, *options.mediaStream(), exception_state);

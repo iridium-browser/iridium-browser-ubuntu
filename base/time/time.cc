@@ -37,60 +37,17 @@ ThreadTicksNowFunction g_thread_ticks_now_function =
 
 // TimeDelta ------------------------------------------------------------------
 
-int TimeDelta::InDays() const {
+int TimeDelta::InDaysFloored() const {
   if (is_max()) {
     // Preserve max to prevent overflow.
     return std::numeric_limits<int>::max();
   }
-  return static_cast<int>(delta_ / Time::kMicrosecondsPerDay);
-}
-
-int TimeDelta::InHours() const {
-  if (is_max()) {
-    // Preserve max to prevent overflow.
-    return std::numeric_limits<int>::max();
+  int result = delta_ / Time::kMicrosecondsPerDay;
+  int64_t remainder = delta_ - (result * Time::kMicrosecondsPerDay);
+  if (remainder < 0) {
+    --result;  // Use floor(), not trunc() rounding behavior.
   }
-  return static_cast<int>(delta_ / Time::kMicrosecondsPerHour);
-}
-
-int TimeDelta::InMinutes() const {
-  if (is_max()) {
-    // Preserve max to prevent overflow.
-    return std::numeric_limits<int>::max();
-  }
-  return static_cast<int>(delta_ / Time::kMicrosecondsPerMinute);
-}
-
-double TimeDelta::InSecondsF() const {
-  if (is_max()) {
-    // Preserve max to prevent overflow.
-    return std::numeric_limits<double>::infinity();
-  }
-  return static_cast<double>(delta_) / Time::kMicrosecondsPerSecond;
-}
-
-int64_t TimeDelta::InSeconds() const {
-  if (is_max()) {
-    // Preserve max to prevent overflow.
-    return std::numeric_limits<int64_t>::max();
-  }
-  return delta_ / Time::kMicrosecondsPerSecond;
-}
-
-double TimeDelta::InMillisecondsF() const {
-  if (is_max()) {
-    // Preserve max to prevent overflow.
-    return std::numeric_limits<double>::infinity();
-  }
-  return static_cast<double>(delta_) / Time::kMicrosecondsPerMillisecond;
-}
-
-int64_t TimeDelta::InMilliseconds() const {
-  if (is_max()) {
-    // Preserve max to prevent overflow.
-    return std::numeric_limits<int64_t>::max();
-  }
-  return delta_ / Time::kMicrosecondsPerMillisecond;
+  return result;
 }
 
 int64_t TimeDelta::InMillisecondsRoundedUp() const {
@@ -98,24 +55,12 @@ int64_t TimeDelta::InMillisecondsRoundedUp() const {
     // Preserve max to prevent overflow.
     return std::numeric_limits<int64_t>::max();
   }
-  return (delta_ + Time::kMicrosecondsPerMillisecond - 1) /
-      Time::kMicrosecondsPerMillisecond;
-}
-
-int64_t TimeDelta::InMicroseconds() const {
-  if (is_max()) {
-    // Preserve max to prevent overflow.
-    return std::numeric_limits<int64_t>::max();
+  int64_t result = delta_ / Time::kMicrosecondsPerMillisecond;
+  int64_t remainder = delta_ - (result * Time::kMicrosecondsPerMillisecond);
+  if (remainder > 0) {
+    ++result;  // Use ceil(), not trunc() rounding behavior.
   }
-  return delta_;
-}
-
-int64_t TimeDelta::InNanoseconds() const {
-  if (is_max()) {
-    // Preserve max to prevent overflow.
-    return std::numeric_limits<int64_t>::max();
-  }
-  return delta_ * Time::kNanosecondsPerMicrosecond;
+  return result;
 }
 
 namespace time_internal {
@@ -267,15 +212,15 @@ Time Time::UnixEpoch() {
   return time;
 }
 
-Time Time::LocalMidnight() const {
+Time Time::Midnight(bool is_local) const {
   Exploded exploded;
-  LocalExplode(&exploded);
+  Explode(is_local, &exploded);
   exploded.hour = 0;
   exploded.minute = 0;
   exploded.second = 0;
   exploded.millisecond = 0;
   Time out_time;
-  if (FromLocalExploded(exploded, &out_time))
+  if (FromExploded(is_local, exploded, &out_time))
     return out_time;
   // This function must not fail.
   NOTREACHED();

@@ -9,32 +9,62 @@
 
 #include "base/format_macros.h"
 #include "base/logging.h"
+#include "base/no_destructor.h"
 #include "base/numerics/safe_math.h"
 #include "base/strings/stringprintf.h"
 
 namespace gpu {
 
-base::SharedMemoryHandle BufferBacking::shared_memory_handle() const {
-  return base::SharedMemoryHandle();
+const base::UnsafeSharedMemoryRegion& BufferBacking::shared_memory_region()
+    const {
+  static const base::NoDestructor<base::UnsafeSharedMemoryRegion>
+      kInvalidRegion;
+  return *kInvalidRegion;
+}
+
+base::UnguessableToken BufferBacking::GetGUID() const {
+  return base::UnguessableToken();
+}
+
+MemoryBufferBacking::MemoryBufferBacking(size_t size)
+    : memory_(new char[size]), size_(size) {}
+
+MemoryBufferBacking::~MemoryBufferBacking() = default;
+
+void* MemoryBufferBacking::GetMemory() const {
+  return memory_.get();
+}
+
+size_t MemoryBufferBacking::GetSize() const {
+  return size_;
 }
 
 SharedMemoryBufferBacking::SharedMemoryBufferBacking(
-    std::unique_ptr<base::SharedMemory> shared_memory,
-    size_t size)
-    : shared_memory_(std::move(shared_memory)), size_(size) {}
+    base::UnsafeSharedMemoryRegion shared_memory_region,
+    base::WritableSharedMemoryMapping shared_memory_mapping)
+    : shared_memory_region_(std::move(shared_memory_region)),
+      shared_memory_mapping_(std::move(shared_memory_mapping)) {
+  DCHECK_EQ(shared_memory_region_.GetGUID(), shared_memory_mapping_.guid());
+}
 
 SharedMemoryBufferBacking::~SharedMemoryBufferBacking() = default;
 
-base::SharedMemoryHandle SharedMemoryBufferBacking::shared_memory_handle()
-    const {
-  return shared_memory_->handle();
+const base::UnsafeSharedMemoryRegion&
+SharedMemoryBufferBacking::shared_memory_region() const {
+  return shared_memory_region_;
+}
+
+base::UnguessableToken SharedMemoryBufferBacking::GetGUID() const {
+  return shared_memory_region_.GetGUID();
 }
 
 void* SharedMemoryBufferBacking::GetMemory() const {
-  return shared_memory_->memory();
+  return shared_memory_mapping_.memory();
 }
 
-size_t SharedMemoryBufferBacking::GetSize() const { return size_; }
+size_t SharedMemoryBufferBacking::GetSize() const {
+  return shared_memory_mapping_.size();
+}
 
 Buffer::Buffer(std::unique_ptr<BufferBacking> backing)
     : backing_(std::move(backing)),
@@ -49,14 +79,14 @@ void* Buffer::GetDataAddress(uint32_t data_offset, uint32_t data_size) const {
   base::CheckedNumeric<uint32_t> end = data_offset;
   end += data_size;
   if (!end.IsValid() || end.ValueOrDie() > static_cast<uint32_t>(size_))
-    return NULL;
+    return nullptr;
   return static_cast<uint8_t*>(memory_) + data_offset;
 }
 
 void* Buffer::GetDataAddressAndSize(uint32_t data_offset,
                                     uint32_t* data_size) const {
   if (data_offset > static_cast<uint32_t>(size_))
-    return NULL;
+    return nullptr;
   *data_size = GetRemainingSize(data_offset);
   return static_cast<uint8_t*>(memory_) + data_offset;
 }

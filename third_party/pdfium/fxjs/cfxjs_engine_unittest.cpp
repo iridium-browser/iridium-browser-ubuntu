@@ -43,7 +43,7 @@ TEST_F(FXJSEngineUnitTest, GC) {
   engine()->DefineObj("perm", FXJSOBJTYPE_DYNAMIC,
                       [](CFXJS_Engine* pEngine, v8::Local<v8::Object> obj) {
                         pEngine->SetObjectPrivate(
-                            obj, pdfium::MakeUnique<CJS_Object>(obj));
+                            obj, pdfium::MakeUnique<CJS_Object>(obj, nullptr));
                         perm_created = true;
                       },
                       [](v8::Local<v8::Object> obj) {
@@ -55,7 +55,7 @@ TEST_F(FXJSEngineUnitTest, GC) {
   engine()->DefineObj("temp", FXJSOBJTYPE_DYNAMIC,
                       [](CFXJS_Engine* pEngine, v8::Local<v8::Object> obj) {
                         pEngine->SetObjectPrivate(
-                            obj, pdfium::MakeUnique<CJS_Object>(obj));
+                            obj, pdfium::MakeUnique<CJS_Object>(obj, nullptr));
                         temp_created = true;
                       },
                       [](v8::Local<v8::Object> obj) {
@@ -66,21 +66,24 @@ TEST_F(FXJSEngineUnitTest, GC) {
   engine()->InitializeEngine();
 
   v8::Context::Scope context_scope(engine()->GetV8Context());
-  v8::Local<v8::Object> perm = engine()->NewFXJSBoundObject(0, false);
+  v8::Local<v8::Object> perm =
+      engine()->NewFXJSBoundObject(0, FXJSOBJTYPE_DYNAMIC);
   EXPECT_FALSE(perm.IsEmpty());
   EXPECT_TRUE(perm_created);
   EXPECT_FALSE(perm_destroyed);
 
   {
     v8::HandleScope inner_handle_scope(isolate());
-    v8::Local<v8::Object> temp = engine()->NewFXJSBoundObject(1, false);
+    v8::Local<v8::Object> temp =
+        engine()->NewFXJSBoundObject(1, FXJSOBJTYPE_DYNAMIC);
     EXPECT_FALSE(temp.IsEmpty());
     EXPECT_TRUE(temp_created);
     EXPECT_FALSE(temp_destroyed);
   }
 
-  FXJSErr error;
-  engine()->Execute(L"gc();", &error);
+  Optional<IJS_Runtime::JS_Error> err = engine()->Execute(L"gc();");
+  EXPECT_FALSE(err);
+
   EXPECT_TRUE(perm_created);
   EXPECT_FALSE(perm_destroyed);
   EXPECT_TRUE(temp_created);

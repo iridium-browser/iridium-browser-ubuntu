@@ -38,7 +38,7 @@
 namespace blink {
 
 struct ShapeCacheEntry {
-  DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
+  DISALLOW_NEW();
   ShapeCacheEntry() { shape_result_ = nullptr; }
   scoped_refptr<const ShapeResult> shape_result_;
 };
@@ -49,7 +49,7 @@ class ShapeCache {
   // Used to optimize small strings as hash table keys. Avoids malloc'ing an
   // out-of-line StringImpl.
   class SmallStringKey {
-    DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
+    DISALLOW_NEW();
 
     void HashString();
 
@@ -110,7 +110,7 @@ class ShapeCache {
   };
 
  public:
-  ShapeCache() : weak_factory_(this), version_(0) {
+  ShapeCache() : weak_factory_(this) {
     // TODO(cavalcantii): Investigate tradeoffs of reserving space
     // in short_string_map.
   }
@@ -236,8 +236,8 @@ class ShapeCache {
 
   SingleCharMap single_char_map_;
   SmallStringMap short_string_map_;
+  unsigned version_ = 0;
   base::WeakPtrFactory<ShapeCache> weak_factory_;
-  unsigned version_;
 };
 
 inline bool operator==(const ShapeCache::SmallStringKey& a,

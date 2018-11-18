@@ -14,7 +14,10 @@
 #include "components/offline_pages/core/prefetch/prefetch_dispatcher.h"
 #include "components/offline_pages/core/prefetch/prefetch_network_request_factory.h"
 #include "components/version_info/channel.h"
-#include "net/url_request/url_request_context_getter.h"
+
+namespace network {
+class SharedURLLoaderFactory;
+}
 
 namespace offline_pages {
 class GeneratePageBundleRequest;
@@ -23,7 +26,7 @@ class GetOperationRequest;
 class PrefetchNetworkRequestFactoryImpl : public PrefetchNetworkRequestFactory {
  public:
   PrefetchNetworkRequestFactoryImpl(
-      net::URLRequestContextGetter* request_context,
+      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
       version_info::Channel channel,
       const std::string& user_agent);
 
@@ -34,13 +37,13 @@ class PrefetchNetworkRequestFactoryImpl : public PrefetchNetworkRequestFactory {
   void MakeGeneratePageBundleRequest(
       const std::vector<std::string>& prefetch_urls,
       const std::string& gcm_registration_id,
-      const PrefetchRequestFinishedCallback& callback) override;
+      PrefetchRequestFinishedCallback callback) override;
 
   std::unique_ptr<std::set<std::string>> GetAllUrlsRequested() const override;
 
   void MakeGetOperationRequest(
       const std::string& operation_name,
-      const PrefetchRequestFinishedCallback& callback) override;
+      PrefetchRequestFinishedCallback callback) override;
 
   GetOperationRequest* FindGetOperationRequestByName(
       const std::string& operation_name) const override;
@@ -49,14 +52,13 @@ class PrefetchNetworkRequestFactoryImpl : public PrefetchNetworkRequestFactory {
       const override;
 
  private:
-  void GeneratePageBundleRequestDone(
-      const PrefetchRequestFinishedCallback& callback,
-      uint64_t request_id,
-      PrefetchRequestStatus status,
-      const std::string& operation_name,
-      const std::vector<RenderPageInfo>& pages);
+  void GeneratePageBundleRequestDone(PrefetchRequestFinishedCallback callback,
+                                     uint64_t request_id,
+                                     PrefetchRequestStatus status,
+                                     const std::string& operation_name,
+                                     const std::vector<RenderPageInfo>& pages);
 
-  void GetOperationRequestDone(const PrefetchRequestFinishedCallback& callback,
+  void GetOperationRequestDone(PrefetchRequestFinishedCallback callback,
                                PrefetchRequestStatus status,
                                const std::string& operation_name,
                                const std::vector<RenderPageInfo>& pages);
@@ -71,7 +73,7 @@ class PrefetchNetworkRequestFactoryImpl : public PrefetchNetworkRequestFactory {
 
   uint64_t GetNextRequestId();
 
-  scoped_refptr<net::URLRequestContextGetter> request_context_;
+  scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory_;
   version_info::Channel channel_;
   std::string user_agent_;
 

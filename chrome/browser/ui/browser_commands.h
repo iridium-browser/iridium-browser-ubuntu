@@ -16,11 +16,6 @@
 #include "printing/buildflags/buildflags.h"
 #include "ui/base/window_open_disposition.h"
 
-#if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/apps/intent_helper/apps_navigation_types.h"
-#include "chrome/browser/ui/browser_dialogs.h"
-#endif
-
 class Browser;
 class CommandObserver;
 class GURL;
@@ -105,6 +100,7 @@ bool CanBookmarkCurrentPage(const Browser* browser);
 void BookmarkAllTabs(Browser* browser);
 bool CanBookmarkAllTabs(const Browser* browser);
 void SaveCreditCard(Browser* browser);
+void MigrateLocalCards(Browser* browser);
 void Translate(Browser* browser);
 void ManagePasswordsForPage(Browser* browser);
 void SavePage(Browser* browser);
@@ -112,10 +108,10 @@ bool CanSavePage(const Browser* browser);
 void ShowFindBar(Browser* browser);
 void Print(Browser* browser);
 bool CanPrint(Browser* browser);
-#if BUILDFLAG(ENABLE_BASIC_PRINTING)
+#if BUILDFLAG(ENABLE_PRINTING)
 void BasicPrint(Browser* browser);
 bool CanBasicPrint(Browser* browser);
-#endif  // ENABLE_BASIC_PRINTING
+#endif  // ENABLE_PRINTING
 bool CanRouteMedia(Browser* browser);
 void RouteMedia(Browser* browser);
 void EmailPageLocation(Browser* browser);
@@ -150,17 +146,17 @@ void ToggleFullscreenMode(Browser* browser);
 void ClearCache(Browser* browser);
 bool IsDebuggerAttachedToCurrentTab(Browser* browser);
 void CopyURL(Browser* browser);
-void OpenInChrome(Browser* browser);
-#if defined(OS_CHROMEOS)
-void QueryAndDisplayArcApps(const Browser* browser,
-                            std::vector<chromeos::IntentPickerAppInfo> app_info,
-                            IntentPickerResponse callback);
-void SetIntentPickerViewVisibility(Browser* browser, bool visible);
-#endif  // defined(OS_CHROMEOS)
-
+// Moves the WebContents of a hosted app Browser to a tabbed Browser. Returns
+// the tabbed Browser.
+Browser* OpenInChrome(Browser* hosted_app_browser);
 bool CanViewSource(const Browser* browser);
 
-void CreateBookmarkAppFromCurrentWebContents(Browser* browser);
+// Initiates user flow for creating a bookmark app for the current page.
+// Will install a PWA hosted app if the site meets installability requirements
+// (see |AppBannerManager::PerformInstallableCheck|) unless |force_shortcut_app|
+// is true.
+void CreateBookmarkAppFromCurrentWebContents(Browser* browser,
+                                             bool force_shortcut_app);
 bool CanCreateBookmarkApp(const Browser* browser);
 
 }  // namespace chrome

@@ -54,7 +54,6 @@ class MetaBuildWrapper(object):
     self.sep = os.sep
     self.args = argparse.Namespace()
     self.configs = {}
-    self.luci_tryservers = {}
     self.masters = {}
     self.mixins = {}
 
@@ -146,6 +145,15 @@ class MetaBuildWrapper(object):
                       help='path to generate build into')
     subp.set_defaults(func=self.CmdGen)
 
+    subp = subps.add_parser('isolate-everything',
+                            help='generates a .isolate for all targets. '
+                                 'Requires that mb.py gen has already been '
+                                 'run.')
+    AddCommonOptions(subp)
+    subp.set_defaults(func=self.CmdIsolateEverything)
+    subp.add_argument('path',
+                      help='path build was generated into')
+
     subp = subps.add_parser('isolate',
                             help='generate the .isolate files for a given'
                                  'binary')
@@ -221,14 +229,6 @@ class MetaBuildWrapper(object):
                       default=self.default_config,
                       help='path to config file (default is %(default)s)')
     subp.set_defaults(func=self.CmdValidate)
-
-    subp = subps.add_parser('gerrit-buildbucket-config',
-                            help='Print buildbucket.config for gerrit '
-                            '(see MB user guide)')
-    subp.add_argument('-f', '--config-file', metavar='PATH',
-                      default=self.default_config,
-                      help='path to config file (default is %(default)s)')
-    subp.set_defaults(func=self.CmdBuildbucket)
 
     subp = subps.add_parser('zip',
                             help='generate a .zip containing the files needed '
@@ -307,6 +307,10 @@ class MetaBuildWrapper(object):
   def CmdGen(self):
     vals = self.Lookup()
     return self.RunGNGen(vals)
+
+  def CmdIsolateEverything(self):
+    vals = self.Lookup()
+    return self.RunGNGenAllIsolates(vals)
 
   def CmdHelp(self):
     if self.args.subcommand:
@@ -394,9 +398,9 @@ class MetaBuildWrapper(object):
       ('infra/tools/luci/logdog/butler/${platform}',
        'git_revision:e1abc57be62d198b5c2f487bfb2fa2d2eb0e867c'),
       ('infra/tools/luci/vpython-native/${platform}',
-       'git_revision:e1abc57be62d198b5c2f487bfb2fa2d2eb0e867c'),
+       'git_revision:b6cdec8586c9f8d3d728b1bc0bd4331330ba66fc'),
       ('infra/tools/luci/vpython/${platform}',
-       'git_revision:e1abc57be62d198b5c2f487bfb2fa2d2eb0e867c'),
+       'git_revision:b6cdec8586c9f8d3d728b1bc0bd4331330ba66fc'),
     ]
     for pkg, vers in cipd_packages:
       cmd.append('--cipd-package=.swarming_module:%s:%s' % (pkg, vers))
@@ -482,25 +486,6 @@ class MetaBuildWrapper(object):
     return [('pool', 'Chrome'),
             ('cpu', 'x86-64'),
             os_dim]
-
-  def CmdBuildbucket(self):
-    self.ReadConfigFile()
-
-    self.Print('# This file was generated using '
-               '"tools/mb/mb.py gerrit-buildbucket-config".')
-
-    for luci_tryserver in sorted(self.luci_tryservers):
-      self.Print('[bucket "luci.%s"]' % luci_tryserver)
-      for bot in sorted(self.luci_tryservers[luci_tryserver]):
-        self.Print('\tbuilder = %s' % bot)
-
-    for master in sorted(self.masters):
-      if master.startswith('tryserver.'):
-        self.Print('[bucket "master.%s"]' % master)
-        for bot in sorted(self.masters[master]):
-          self.Print('\tbuilder = %s' % bot)
-
-    return 0
 
   def CmdValidate(self, print_ok=True):
     errs = []
@@ -665,7 +650,6 @@ class MetaBuildWrapper(object):
                  (self.args.config_file, e))
 
     self.configs = contents['configs']
-    self.luci_tryservers = contents.get('luci_tryservers', {})
     self.masters = contents['masters']
     self.mixins = contents['mixins']
 
@@ -768,13 +752,16 @@ class MetaBuildWrapper(object):
         self.FlattenMixins(mixin_vals['mixins'], vals, visited)
     return vals
 
-  def RunGNGen(self, vals, compute_grit_inputs_for_analyze=False):
+  def RunGNGen(self, vals, compute_inputs_for_analyze=False, check=True):
     build_dir = self.args.path
 
-    cmd = self.GNCmd('gen', build_dir, '--check')
+    if check:
+      cmd = self.GNCmd('gen', build_dir, '--check')
+    else:
+      cmd = self.GNCmd('gen', build_dir)
     gn_args = self.GNArgs(vals)
-    if compute_grit_inputs_for_analyze:
-      gn_args += ' compute_grit_inputs_for_analyze=true'
+    if compute_inputs_for_analyze:
+      gn_args += ' compute_inputs_for_analyze=true'
 
     # Since GN hasn't run yet, the build directory may not even exist.
     self.MaybeMakeDirectory(self.ToAbsPath(build_dir))
@@ -782,7 +769,6 @@ class MetaBuildWrapper(object):
     gn_args_path = self.ToAbsPath(build_dir, 'args.gn')
     self.WriteFile(gn_args_path, gn_args, force_verbose=True)
 
-    swarming_targets = []
     if getattr(self.args, 'swarming_targets_file', None):
       # We need GN to generate the list of runtime dependencies for
       # the compile targets listed (one per line) in the file so
@@ -793,10 +779,10 @@ class MetaBuildWrapper(object):
         self.WriteFailureAndRaise('"%s" does not exist' % path,
                                   output_path=None)
       contents = self.ReadFile(path)
-      swarming_targets = set(contents.splitlines())
+      isolate_targets = set(contents.splitlines())
 
       isolate_map = self.ReadIsolateMap()
-      err, labels = self.MapTargetsToLabels(isolate_map, swarming_targets)
+      err, labels = self.MapTargetsToLabels(isolate_map, isolate_targets)
       if err:
           raise MBErr(err)
 
@@ -811,11 +797,85 @@ class MetaBuildWrapper(object):
         self.Print('GN gen failed: %d' % ret)
         return ret
 
+    if getattr(self.args, 'swarming_targets_file', None):
+      return self.GenerateIsolates(vals, isolate_targets, isolate_map,
+                                   build_dir)
+
+    return 0
+
+  def RunGNGenAllIsolates(self, vals):
+    """
+    This command generates all .isolate files.
+
+    This command assumes that "mb.py gen" has already been run, as it relies on
+    "gn ls" to fetch all gn targets. If uses that output, combined with the
+    isolate_map, to determine all isolates that can be generated for the current
+    gn configuration.
+    """
+    build_dir = self.args.path
+    ret, output, _ = self.Run(self.GNCmd('ls', build_dir),
+                              force_verbose=False)
+    if ret:
+        # If `gn ls` failed, we should exit early rather than trying to
+        # generate isolates.
+        self.Print('GN ls failed: %d' % ret)
+        return ret
+
+    # Create a reverse map from isolate label to isolate dict.
+    isolate_map = self.ReadIsolateMap()
+    isolate_dict_map = {}
+    for key, isolate_dict in isolate_map.iteritems():
+      isolate_dict_map[isolate_dict['label']] = isolate_dict
+      isolate_dict_map[isolate_dict['label']]['isolate_key'] = key
+
+    runtime_deps = []
+
+    isolate_targets = []
+    # For every GN target, look up the isolate dict.
+    for line in output.splitlines():
+      target = line.strip()
+      if target in isolate_dict_map:
+        if isolate_dict_map[target]['type'] == 'additional_compile_target':
+          # By definition, additional_compile_targets are not tests, so we
+          # shouldn't generate isolates for them.
+          continue
+
+        isolate_targets.append(isolate_dict_map[target]['isolate_key'])
+        runtime_deps.append(target)
+
+    # Now we need to run "gn gen" again with --runtime-deps-list-file
+    gn_runtime_deps_path = self.ToAbsPath(build_dir, 'runtime_deps')
+    self.WriteFile(gn_runtime_deps_path, '\n'.join(runtime_deps) + '\n')
+    cmd = self.GNCmd('gen', build_dir)
+    cmd.append('--runtime-deps-list-file=%s' % gn_runtime_deps_path)
+    self.Run(cmd)
+
+    return self.GenerateIsolates(vals, isolate_targets, isolate_map, build_dir)
+
+  def GenerateIsolates(self, vals, ninja_targets, isolate_map, build_dir):
+    """
+    Generates isolates for a list of ninja targets.
+
+    Ninja targets are transformed to GN targets via isolate_map.
+
+    This function assumes that a previous invocation of "mb.py gen" has
+    generated runtime deps for all targets.
+    """
     android = 'target_os="android"' in vals['gn_args']
     fuchsia = 'target_os="fuchsia"' in vals['gn_args']
     win = self.platform == 'win32' or 'target_os="win"' in vals['gn_args']
-    for target in swarming_targets:
-      if android:
+    for target in ninja_targets:
+      # TODO(https://crbug.com/876065): 'official_tests' use
+      # type='additional_compile_target' to isolate tests. This is not the
+      # intended use for 'additional_compile_target'.
+      if (isolate_map[target]['type'] == 'additional_compile_target' and
+          target != 'official_tests'):
+        # By definition, additional_compile_targets are not tests, so we
+        # shouldn't generate isolates for them.
+        self.Print('Cannot generate isolate for %s since it is an '
+                   'additional_compile_target.' % target)
+        return 1
+      elif android:
         # Android targets may be either android_apk or executable. The former
         # will result in runtime_deps associated with the stamp file, while the
         # latter will result in runtime_deps associated with the executable.
@@ -855,10 +915,10 @@ class MetaBuildWrapper(object):
                     ', '.join(runtime_deps_targets))
 
       command, extra_files = self.GetIsolateCommand(target, vals)
-
       runtime_deps = self.ReadFile(runtime_deps_path).splitlines()
 
-      self.WriteIsolateFiles(build_dir, command, target, runtime_deps,
+      canonical_target = target.replace(':','_').replace('/','_')
+      self.WriteIsolateFiles(build_dir, command, canonical_target, runtime_deps,
                              extra_files)
 
     return 0
@@ -949,6 +1009,8 @@ class MetaBuildWrapper(object):
       subdir, exe = 'linux64', 'gn'
     elif self.platform == 'darwin':
       subdir, exe = 'mac', 'gn'
+    elif self.platform == 'aix6':
+      subdir, exe = 'aix', 'gn'
     else:
       subdir, exe = 'win', 'gn.exe'
 
@@ -964,6 +1026,8 @@ class MetaBuildWrapper(object):
       if not re.search('target_os.*=.*"chromeos"', gn_args):
         raise MBErr('GN_ARGS is missing target_os = "chromeos": (GN_ARGS=%s)' %
                     gn_args)
+      if vals['gn_args']:
+        gn_args += ' ' + vals['gn_args']
     else:
       gn_args = vals['gn_args']
 
@@ -992,6 +1056,7 @@ class MetaBuildWrapper(object):
     isolate_map = self.ReadIsolateMap()
 
     is_android = 'target_os="android"' in vals['gn_args']
+    is_simplechrome = vals.get('cros_passthrough', False)
     is_fuchsia = 'target_os="fuchsia"' in vals['gn_args']
     is_win = self.platform == 'win32' or 'target_os="win"' in vals['gn_args']
 
@@ -1036,6 +1101,11 @@ class MetaBuildWrapper(object):
           '../../testing/test_env.py',
           os.path.join('bin', 'run_%s' % target),
       ]
+    elif is_simplechrome and test_type != 'script':
+      cmdline = [
+          '../../testing/test_env.py',
+          os.path.join('bin', 'run_%s' % target),
+      ]
     elif use_xvfb and test_type == 'windowed_test_launcher':
       extra_files.append('../../testing/xvfb.py')
       cmdline = [
@@ -1060,7 +1130,13 @@ class MetaBuildWrapper(object):
           '--cfi-diag=%d' % cfi_diag,
       ]
     elif test_type == 'script':
-      cmdline = [
+      cmdline = []
+      # If we're testing a CrOS simplechrome build, assume we need to launch a
+      # VM first. So prepend the command to run with the VM launcher.
+      # TODO(bpastene): Differentiate between CrOS VM and hardware tests.
+      if is_simplechrome:
+        cmdline = [os.path.join('bin', 'launch_cros_vm')]
+      cmdline += [
           '../../testing/test_env.py',
           '../../' + self.ToSrcRelPath(isolate_map[target]['script'])
       ]
@@ -1095,7 +1171,7 @@ class MetaBuildWrapper(object):
   def RunGNAnalyze(self, vals):
     # Analyze runs before 'gn gen' now, so we need to run gn gen
     # in order to ensure that we have a build directory.
-    ret = self.RunGNGen(vals, compute_grit_inputs_for_analyze=True)
+    ret = self.RunGNGen(vals, compute_inputs_for_analyze=True, check=False)
     if ret:
       return ret
 

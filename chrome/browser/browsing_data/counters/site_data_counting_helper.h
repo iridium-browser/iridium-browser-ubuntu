@@ -24,6 +24,10 @@ struct LocalStorageUsageInfo;
 struct SessionStorageUsageInfo;
 }
 
+namespace url {
+class Origin;
+}
+
 namespace storage {
 class SpecialStoragePolicy;
 }
@@ -43,8 +47,6 @@ class SiteDataCountingHelper {
  private:
   void GetOriginsFromHostContentSettignsMap(HostContentSettingsMap* hcsm,
                                             ContentSettingsType type);
-  void GetCookiesOnIOThread(
-      const scoped_refptr<net::URLRequestContextGetter>& rq_context);
   void GetCookiesCallback(const net::CookieList& cookies);
   void GetSessionStorageUsageInfoCallback(
       const scoped_refptr<storage::SpecialStoragePolicy>&
@@ -54,7 +56,7 @@ class SiteDataCountingHelper {
       const scoped_refptr<storage::SpecialStoragePolicy>&
           special_storage_policy,
       const std::vector<content::LocalStorageUsageInfo>& infos);
-  void GetQuotaOriginsCallback(const std::set<GURL>& origin_set,
+  void GetQuotaOriginsCallback(const std::set<url::Origin>& origin_set,
                                blink::mojom::StorageType type);
   void SitesWithFlashDataCallback(const std::vector<std::string>& sites);
   void GetChannelIDsOnIOThread(

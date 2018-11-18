@@ -12,13 +12,19 @@
 #include "ash/public/cpp/immersive/immersive_revealed_lock.h"
 #include "base/macros.h"
 #include "base/timer/timer.h"
+#include "ui/aura/window_observer.h"
 #include "ui/gfx/animation/animation_delegate.h"
+#include "ui/gfx/animation/slide_animation.h"
 #include "ui/views/pointer_watcher.h"
+#include "ui/views/view_observer.h"
 #include "ui/views/widget/widget_observer.h"
+
+namespace aura {
+class WindowTargeter;
+}
 
 namespace gfx {
 class Point;
-class SlideAnimation;
 }  // namespace gfx
 
 namespace ui {
@@ -35,15 +41,17 @@ class Widget;
 
 namespace ash {
 
+class ImmersiveContext;
 class ImmersiveFocusWatcher;
 class ImmersiveFullscreenControllerDelegate;
 class ImmersiveFullscreenControllerTestApi;
 class ImmersiveGestureHandler;
 
 class ASH_PUBLIC_EXPORT ImmersiveFullscreenController
-    : public gfx::AnimationDelegate,
+    : public aura::WindowObserver,
+      public gfx::AnimationDelegate,
       public views::PointerWatcher,
-      public views::WidgetObserver,
+      public views::ViewObserver,
       public ImmersiveRevealedLock::Delegate {
  public:
   // The enum is used for an enumerated histogram. New items should be only
@@ -67,22 +75,17 @@ class ASH_PUBLIC_EXPORT ImmersiveFullscreenController
   // (primary display above/below secondary display).
   static const int kMouseRevealBoundsHeight;
 
-  ImmersiveFullscreenController();
+  explicit ImmersiveFullscreenController(ImmersiveContext* context);
   ~ImmersiveFullscreenController() override;
 
   // Initializes the controller. Must be called prior to enabling immersive
-  // fullscreen via SetEnabled(). |top_container| is used to keep the
+  // fullscreen via EnableForWidget(). |top_container| is used to keep the
   // top-of-window views revealed when a child of |top_container| has focus.
   // |top_container| does not affect which mouse and touch events keep the
   // top-of-window views revealed. |widget| is the widget to make fullscreen.
   void Init(ImmersiveFullscreenControllerDelegate* delegate,
             views::Widget* widget,
             views::View* top_container);
-
-  // Enables or disables immersive fullscreen.
-  // |window_type| is the type of window which is put in immersive fullscreen.
-  // It is only used for histogramming.
-  void SetEnabled(WindowType window_type, bool enable);
 
   // Returns true if in immersive fullscreen.
   bool IsEnabled() const;
@@ -113,16 +116,22 @@ class ASH_PUBLIC_EXPORT ImmersiveFullscreenController
   void OnTouchEvent(const ui::TouchEvent& event,
                     const gfx::Point& location_in_screen);
   // Processes a GestureEvent. This may call SetHandled() on the supplied event.
-  void OnGestureEvent(ui::GestureEvent* event,
-                      const gfx::Point& location_in_screen);
+  void OnGestureEvent(ui::GestureEvent* event);
 
   // views::PointerWatcher:
   void OnPointerEventObserved(const ui::PointerEvent& event,
                               const gfx::Point& location_in_screen,
                               gfx::NativeView target) override;
 
-  // views::WidgetObserver overrides:
-  void OnWidgetDestroying(views::Widget* widget) override;
+  // aura::WindowObserver:
+  void OnWindowPropertyChanged(aura::Window* window,
+                               const void* key,
+                               intptr_t old) override;
+  void OnWindowDestroying(aura::Window* window) override;
+
+  // views::ViewObserver:
+  void OnViewBoundsChanged(views::View* observed_view) override;
+  void OnViewIsDeleting(views::View* observed_view) override;
 
   // gfx::AnimationDelegate overrides:
   void AnimationEnded(const gfx::Animation* animation) override;
@@ -131,6 +140,8 @@ class ASH_PUBLIC_EXPORT ImmersiveFullscreenController
   // ash::ImmersiveRevealedLock::Delegate overrides:
   void LockRevealedState(AnimateReveal animate_reveal) override;
   void UnlockRevealedState() override;
+
+  static void EnableForWidget(views::Widget* widget, bool enabled);
 
  private:
   friend class ImmersiveFullscreenControllerTest;
@@ -149,8 +160,12 @@ class ASH_PUBLIC_EXPORT ImmersiveFullscreenController
   };
   enum SwipeType { SWIPE_OPEN, SWIPE_CLOSE, SWIPE_NONE };
 
-  // Enables or disables observers for mouse, touch, focus, and activation.
+  // Enables or disables observers for the widget's aura::Window and
+  // |top_container_|.
   void EnableWindowObservers(bool enable);
+
+  // Enables or disables observers for mouse, touch, focus, and activation.
+  void EnableEventObservers(bool enable);
 
   // Updates |top_edge_hover_timer_| based on a mouse |event|. If the mouse is
   // hovered at the top of the screen the timer is started. If the mouse moves
@@ -225,32 +240,43 @@ class ASH_PUBLIC_EXPORT ImmersiveFullscreenController
   // Test if the |widget| is the event target to control reveal state.
   bool IsTargetForWidget(views::Widget* widget) const;
 
+  // Enables or disables immersive fullscreen in accordance with the
+  // kImmersiveIsActive property.
+  void UpdateEnabled();
+
+  // Adds insets that redirect touch events at the top of the Widget to the
+  // Widget's window instead of a child window. These insets allow triggering
+  // immersive reveal and are not used when the immersive reveal is already
+  // active.
+  void EnableTouchInsets(bool enable);
+
   // Not owned.
-  ImmersiveFullscreenControllerDelegate* delegate_;
-  views::View* top_container_;
-  views::Widget* widget_;
+  ImmersiveContext* immersive_context_;
+  ImmersiveFullscreenControllerDelegate* delegate_ = nullptr;
+  views::View* top_container_ = nullptr;
+  views::Widget* widget_ = nullptr;
 
   // True if the observers have been enabled.
-  bool observers_enabled_;
+  bool event_observers_enabled_ = false;
 
   // True when in immersive fullscreen.
-  bool enabled_;
+  bool enabled_ = false;
 
   // State machine for the revealed/closed animations.
-  RevealState reveal_state_;
+  RevealState reveal_state_ = CLOSED;
 
-  int revealed_lock_count_;
+  int revealed_lock_count_ = 0;
 
   // Timer to track cursor being held at the top edge of the screen.
   base::OneShotTimer top_edge_hover_timer_;
 
   // The cursor x position in screen coordinates when the cursor first hit the
   // top edge of the screen.
-  int mouse_x_when_hit_top_in_screen_;
+  int mouse_x_when_hit_top_in_screen_ = -1;
 
   // Tracks if the controller has seen a ET_GESTURE_SCROLL_BEGIN, without the
   // following events.
-  bool gesture_begun_;
+  bool gesture_begun_ = false;
 
   // Lock which keeps the top-of-window views revealed based on the current
   // mouse state and the current touch state. Acquiring the lock is used to
@@ -259,7 +285,7 @@ class ASH_PUBLIC_EXPORT ImmersiveFullscreenController
   std::unique_ptr<ImmersiveRevealedLock> located_event_revealed_lock_;
 
   // The animation which controls sliding the top-of-window views in and out.
-  std::unique_ptr<gfx::SlideAnimation> animation_;
+  gfx::SlideAnimation animation_{this};
 
   // Whether the animations are disabled for testing.
   bool animations_disabled_for_test_;
@@ -267,7 +293,16 @@ class ASH_PUBLIC_EXPORT ImmersiveFullscreenController
   std::unique_ptr<ImmersiveFocusWatcher> immersive_focus_watcher_;
   std::unique_ptr<ImmersiveGestureHandler> immersive_gesture_handler_;
 
-  base::WeakPtrFactory<ImmersiveFullscreenController> weak_ptr_factory_;
+  // The window targeter that was in use before immersive fullscreen mode was
+  // entered, if any. Will be re-installed on the window after leaving immersive
+  // fullscreen.
+  std::unique_ptr<aura::WindowTargeter> normal_targeter_;
+
+  // |animations_disabled_for_test_| is initialized to this. See
+  // ImmersiveFullscreenControllerTestApi::GlobalAnimationDisabler for details.
+  static bool value_for_animations_disabled_for_test_;
+
+  base::WeakPtrFactory<ImmersiveFullscreenController> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(ImmersiveFullscreenController);
 };

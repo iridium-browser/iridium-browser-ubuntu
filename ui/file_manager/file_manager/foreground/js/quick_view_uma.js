@@ -5,15 +5,14 @@
 /**
  * UMA exporter for Quick View.
  *
- * @param {!VolumeManagerWrapper} volumeManager
+ * @param {!VolumeManager} volumeManager
  * @param {!DialogType} dialogType
  *
  * @constructor
  */
 function QuickViewUma(volumeManager, dialogType) {
-
   /**
-   * @type {!VolumeManagerWrapper}
+   * @type {!VolumeManager}
    * @private
    */
   this.volumeManager_ = volumeManager;
@@ -62,6 +61,8 @@ QuickViewUma.VolumeType = [
   VolumeManagerCommon.VolumeType.PROVIDED,
   VolumeManagerCommon.VolumeType.MTP,
   VolumeManagerCommon.VolumeType.MEDIA_VIEW,
+  VolumeManagerCommon.VolumeType.CROSTINI,
+  VolumeManagerCommon.VolumeType.ANDROID_FILES,
 ];
 
 /**

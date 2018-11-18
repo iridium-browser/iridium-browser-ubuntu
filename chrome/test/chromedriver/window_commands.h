@@ -127,6 +127,20 @@ Status ExecuteRefresh(Session* session,
                       std::unique_ptr<base::Value>* value,
                       Timeout* timeout);
 
+// Freeze the current page.
+Status ExecuteFreeze(Session* session,
+                     WebView* web_view,
+                     const base::DictionaryValue& params,
+                     std::unique_ptr<base::Value>* value,
+                     Timeout* timeout);
+
+// Resume the current page.
+Status ExecuteResume(Session* session,
+                     WebView* web_view,
+                     const base::DictionaryValue& params,
+                     std::unique_ptr<base::Value>* value,
+                     Timeout* timeout);
+
 // Move the mouse by an offset of the element if specified .
 Status ExecuteMouseMoveTo(Session* session,
                           WebView* web_view,
@@ -351,4 +365,12 @@ Status ExecutePerformActions(Session* session,
 Status ProcessInputActionSequence(Session* session,
                                   const base::DictionaryValue* action_sequence,
                                   std::unique_ptr<base::ListValue>* result);
+
+// Retrieve the handle of the target window.
+Status ExecuteGetCurrentWindowHandle(Session* session,
+                                     WebView* web_view,
+                                     const base::DictionaryValue& params,
+                                     std::unique_ptr<base::Value>* value,
+                                     Timeout* timeout);
+
 #endif  // CHROME_TEST_CHROMEDRIVER_WINDOW_COMMANDS_H_

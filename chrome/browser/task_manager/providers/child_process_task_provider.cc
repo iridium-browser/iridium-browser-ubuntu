@@ -5,8 +5,10 @@
 #include "chrome/browser/task_manager/providers/child_process_task_provider.h"
 
 #include "base/process/process.h"
+#include "base/task/post_task.h"
 #include "chrome/browser/task_manager/providers/child_process_task.h"
 #include "content/public/browser/browser_child_process_host_iterator.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_data.h"
 
@@ -31,10 +33,10 @@ std::unique_ptr<std::vector<ChildProcessData>> CollectChildProcessData() {
     const ChildProcessData& process_data = itr.GetData();
 
     // Only add processes that have already started, i.e. with valid handles.
-    if (process_data.handle == base::kNullProcessHandle)
+    if (!process_data.IsHandleValid())
       continue;
 
-    child_processes->push_back(process_data);
+    child_processes->push_back(process_data.Duplicate());
   }
 
   return child_processes;
@@ -62,7 +64,7 @@ Task* ChildProcessTaskProvider::GetTaskOfUrlRequest(int child_id,
 void ChildProcessTaskProvider::BrowserChildProcessLaunchedAndConnected(
     const content::ChildProcessData& data) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  if (data.handle == base::kNullProcessHandle)
+  if (!data.IsHandleValid())
     return;
 
   CreateTask(data);
@@ -71,19 +73,17 @@ void ChildProcessTaskProvider::BrowserChildProcessLaunchedAndConnected(
 void ChildProcessTaskProvider::BrowserChildProcessHostDisconnected(
     const content::ChildProcessData& data) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  DeleteTask(data.handle);
+  DeleteTask(data.GetHandle());
 }
 
 void ChildProcessTaskProvider::StartUpdating() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  DCHECK(tasks_by_handle_.empty());
+  DCHECK(tasks_by_processid_.empty());
   DCHECK(tasks_by_child_id_.empty());
 
   // First, get the pre-existing child processes data.
-  BrowserThread::PostTaskAndReplyWithResult(
-      BrowserThread::IO,
-      FROM_HERE,
-      base::Bind(&CollectChildProcessData),
+  base::PostTaskWithTraitsAndReplyWithResult(
+      FROM_HERE, {BrowserThread::IO}, base::Bind(&CollectChildProcessData),
       base::Bind(&ChildProcessTaskProvider::ChildProcessDataCollected,
                  weak_ptr_factory_.GetWeakPtr()));
 }
@@ -102,7 +102,7 @@ void ChildProcessTaskProvider::StopUpdating() {
   // StopUpdating() is called after the observer has been cleared.
 
   // Then delete all tasks (if any).
-  tasks_by_handle_.clear();
+  tasks_by_processid_.clear();
   tasks_by_child_id_.clear();
 }
 
@@ -120,7 +120,8 @@ void ChildProcessTaskProvider::ChildProcessDataCollected(
 
 void ChildProcessTaskProvider::CreateTask(
     const content::ChildProcessData& data) {
-  std::unique_ptr<ChildProcessTask>& task = tasks_by_handle_[data.handle];
+  std::unique_ptr<ChildProcessTask>& task =
+      tasks_by_processid_[base::GetProcId(data.GetHandle())];
   if (task) {
     // This task is already known to us. This case can happen when some of the
     // child process data we collect upon StartUpdating() might be of
@@ -136,13 +137,13 @@ void ChildProcessTaskProvider::CreateTask(
 }
 
 void ChildProcessTaskProvider::DeleteTask(base::ProcessHandle handle) {
-  auto itr = tasks_by_handle_.find(handle);
+  auto itr = tasks_by_processid_.find(base::GetProcId(handle));
 
   // The following case should never happen since we start observing
   // |BrowserChildProcessObserver| only after we collect all pre-existing child
   // processes and are notified (on the UI thread) that the collection is
   // completed at |ChildProcessDataCollected()|.
-  if (itr == tasks_by_handle_.end()) {
+  if (itr == tasks_by_processid_.end()) {
     // BUG(crbug.com/611067): Temporarily removing due to test flakes. The
     // reason why this happens is well understood (see bug), but there's no
     // quick and easy fix.
@@ -156,7 +157,7 @@ void ChildProcessTaskProvider::DeleteTask(base::ProcessHandle handle) {
   tasks_by_child_id_.erase(itr->second->GetChildProcessUniqueID());
 
   // Finally delete the task.
-  tasks_by_handle_.erase(itr);
+  tasks_by_processid_.erase(itr);
 }
 
 }  // namespace task_manager

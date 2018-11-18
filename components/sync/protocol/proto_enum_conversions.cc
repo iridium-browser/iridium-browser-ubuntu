@@ -21,12 +21,13 @@ namespace syncer {
 const char* ProtoEnumToString(
     sync_pb::AppListSpecifics::AppListItemType item_type) {
   ASSERT_ENUM_BOUNDS(sync_pb::AppListSpecifics, AppListItemType, TYPE_APP,
-                     TYPE_URL);
+                     TYPE_PAGE_BREAK);
   switch (item_type) {
     ENUM_CASE(sync_pb::AppListSpecifics, TYPE_APP);
     ENUM_CASE(sync_pb::AppListSpecifics, TYPE_REMOVE_DEFAULT_APP);
     ENUM_CASE(sync_pb::AppListSpecifics, TYPE_FOLDER);
     ENUM_CASE(sync_pb::AppListSpecifics, TYPE_URL);
+    ENUM_CASE(sync_pb::AppListSpecifics, TYPE_PAGE_BREAK);
   }
   NOTREACHED();
   return "";
@@ -47,11 +48,12 @@ const char* ProtoEnumToString(sync_pb::AppSpecifics::LaunchType launch_type) {
 const char* ProtoEnumToString(
     sync_pb::AutofillWalletSpecifics::WalletInfoType wallet_info_type) {
   ASSERT_ENUM_BOUNDS(sync_pb::AutofillWalletSpecifics, WalletInfoType, UNKNOWN,
-                     POSTAL_ADDRESS);
+                     CUSTOMER_DATA);
   switch (wallet_info_type) {
     ENUM_CASE(sync_pb::AutofillWalletSpecifics, UNKNOWN);
     ENUM_CASE(sync_pb::AutofillWalletSpecifics, MASKED_CREDIT_CARD);
     ENUM_CASE(sync_pb::AutofillWalletSpecifics, POSTAL_ADDRESS);
+    ENUM_CASE(sync_pb::AutofillWalletSpecifics, CUSTOMER_DATA);
   }
   NOTREACHED();
   return "";
@@ -295,6 +297,34 @@ const char* ProtoEnumToString(sync_pb::TabNavigation::PasswordState state) {
   return "";
 }
 
+const char* ProtoEnumToString(sync_pb::UserConsentSpecifics::Feature feature) {
+  ASSERT_ENUM_BOUNDS(sync_pb::UserConsentSpecifics, Feature,
+                     FEATURE_UNSPECIFIED, ASSISTANT_ACTIVITY_CONTROL);
+  switch (feature) {
+    ENUM_CASE(sync_pb::UserConsentSpecifics, FEATURE_UNSPECIFIED);
+    ENUM_CASE(sync_pb::UserConsentSpecifics, CHROME_SYNC);
+    ENUM_CASE(sync_pb::UserConsentSpecifics, PLAY_STORE);
+    ENUM_CASE(sync_pb::UserConsentSpecifics, BACKUP_AND_RESTORE);
+    ENUM_CASE(sync_pb::UserConsentSpecifics, GOOGLE_LOCATION_SERVICE);
+    ENUM_CASE(sync_pb::UserConsentSpecifics, CHROME_UNIFIED_CONSENT);
+    ENUM_CASE(sync_pb::UserConsentSpecifics, ASSISTANT_ACTIVITY_CONTROL);
+  }
+  NOTREACHED();
+  return "";
+}
+
+const char* ProtoEnumToString(sync_pb::UserConsentTypes::ConsentStatus status) {
+  ASSERT_ENUM_BOUNDS(sync_pb::UserConsentTypes, ConsentStatus,
+                     CONSENT_STATUS_UNSPECIFIED, GIVEN);
+  switch (status) {
+    ENUM_CASE(sync_pb::UserConsentTypes, CONSENT_STATUS_UNSPECIFIED);
+    ENUM_CASE(sync_pb::UserConsentTypes, NOT_GIVEN);
+    ENUM_CASE(sync_pb::UserConsentTypes, GIVEN);
+  }
+  NOTREACHED();
+  return "";
+}
+
 const char* ProtoEnumToString(
     sync_pb::UserEventSpecifics::Translation::Interaction interaction) {
   ASSERT_ENUM_BOUNDS(sync_pb::UserEventSpecifics::Translation, Interaction,
@@ -320,7 +350,7 @@ const char* ProtoEnumToString(
 const char* ProtoEnumToString(
     sync_pb::UserEventSpecifics::UserConsent::Feature feature) {
   ASSERT_ENUM_BOUNDS(sync_pb::UserEventSpecifics::UserConsent, Feature,
-                     FEATURE_UNSPECIFIED, GOOGLE_LOCATION_SERVICE);
+                     FEATURE_UNSPECIFIED, ASSISTANT_ACTIVITY_CONTROL);
   switch (feature) {
     ENUM_CASE(sync_pb::UserEventSpecifics::UserConsent, FEATURE_UNSPECIFIED);
     ENUM_CASE(sync_pb::UserEventSpecifics::UserConsent, CHROME_SYNC);
@@ -328,20 +358,9 @@ const char* ProtoEnumToString(
     ENUM_CASE(sync_pb::UserEventSpecifics::UserConsent, BACKUP_AND_RESTORE);
     ENUM_CASE(sync_pb::UserEventSpecifics::UserConsent,
               GOOGLE_LOCATION_SERVICE);
-  }
-  NOTREACHED();
-  return "";
-}
-
-const char* ProtoEnumToString(
-    sync_pb::UserEventSpecifics::UserConsent::ConsentStatus status) {
-  ASSERT_ENUM_BOUNDS(sync_pb::UserEventSpecifics::UserConsent, ConsentStatus,
-                     CONSENT_STATUS_UNSPECIFIED, GIVEN);
-  switch (status) {
+    ENUM_CASE(sync_pb::UserEventSpecifics::UserConsent, CHROME_UNIFIED_CONSENT);
     ENUM_CASE(sync_pb::UserEventSpecifics::UserConsent,
-              CONSENT_STATUS_UNSPECIFIED);
-    ENUM_CASE(sync_pb::UserEventSpecifics::UserConsent, NOT_GIVEN);
-    ENUM_CASE(sync_pb::UserEventSpecifics::UserConsent, GIVEN);
+              ASSISTANT_ACTIVITY_CONTROL);
   }
   NOTREACHED();
   return "";
@@ -378,7 +397,8 @@ const char* ProtoEnumToString(
         PasswordReuseDialogInteraction::InteractionResult interaction_result) {
   ASSERT_ENUM_BOUNDS(sync_pb::UserEventSpecifics::GaiaPasswordReuse::
                          PasswordReuseDialogInteraction,
-                     InteractionResult, UNSPECIFIED, WARNING_UI_IGNORED);
+                     InteractionResult, UNSPECIFIED,
+                     WARNING_ACTION_TAKEN_ON_SETTINGS);
   switch (interaction_result) {
     ENUM_CASE(sync_pb::UserEventSpecifics::GaiaPasswordReuse::
                   PasswordReuseDialogInteraction,
@@ -392,6 +412,9 @@ const char* ProtoEnumToString(
     ENUM_CASE(sync_pb::UserEventSpecifics::GaiaPasswordReuse::
                   PasswordReuseDialogInteraction,
               WARNING_UI_IGNORED);
+    ENUM_CASE(sync_pb::UserEventSpecifics::GaiaPasswordReuse::
+                  PasswordReuseDialogInteraction,
+              WARNING_ACTION_TAKEN_ON_SETTINGS);
   }
   NOTREACHED();
   return "";
@@ -402,7 +425,7 @@ const char* ProtoEnumToString(
         LookupResult lookup_result) {
   ASSERT_ENUM_BOUNDS(
       sync_pb::UserEventSpecifics::GaiaPasswordReuse::PasswordReuseLookup,
-      LookupResult, UNSPECIFIED, ENTERPRISE_WHITELIST_HIT);
+      LookupResult, UNSPECIFIED, TURNED_OFF_BY_POLICY);
   switch (lookup_result) {
     ENUM_CASE(
         sync_pb::UserEventSpecifics::GaiaPasswordReuse::PasswordReuseLookup,
@@ -425,6 +448,9 @@ const char* ProtoEnumToString(
     ENUM_CASE(
         sync_pb::UserEventSpecifics::GaiaPasswordReuse::PasswordReuseLookup,
         ENTERPRISE_WHITELIST_HIT);
+    ENUM_CASE(
+        sync_pb::UserEventSpecifics::GaiaPasswordReuse::PasswordReuseLookup,
+        TURNED_OFF_BY_POLICY);
   }
   NOTREACHED();
   return "";
@@ -449,6 +475,39 @@ const char* ProtoEnumToString(
     ENUM_CASE(
         sync_pb::UserEventSpecifics::GaiaPasswordReuse::PasswordReuseLookup,
         PHISHING);
+  }
+  NOTREACHED();
+  return "";
+}
+
+// TODO(markusheintz): Remove.
+const char* ProtoEnumToString(sync_pb::UserEventSpecifics::GaiaPasswordReuse::
+                                  PasswordCaptured::EventTrigger trigger) {
+  ASSERT_ENUM_BOUNDS(
+      sync_pb::UserEventSpecifics::GaiaPasswordReuse::PasswordCaptured,
+      EventTrigger, UNSPECIFIED, EXPIRED_28D_TIMER);
+  switch (trigger) {
+    ENUM_CASE(sync_pb::UserEventSpecifics::GaiaPasswordReuse::PasswordCaptured,
+              UNSPECIFIED);
+    ENUM_CASE(sync_pb::UserEventSpecifics::GaiaPasswordReuse::PasswordCaptured,
+              USER_LOGGED_IN);
+    ENUM_CASE(sync_pb::UserEventSpecifics::GaiaPasswordReuse::PasswordCaptured,
+              EXPIRED_28D_TIMER);
+  }
+  NOTREACHED();
+  return "";
+}
+
+const char* ProtoEnumToString(
+    sync_pb::UserEventSpecifics::GaiaPasswordCaptured::EventTrigger trigger) {
+  ASSERT_ENUM_BOUNDS(sync_pb::UserEventSpecifics::GaiaPasswordCaptured,
+                     EventTrigger, UNSPECIFIED, EXPIRED_28D_TIMER);
+  switch (trigger) {
+    ENUM_CASE(sync_pb::UserEventSpecifics::GaiaPasswordCaptured, UNSPECIFIED);
+    ENUM_CASE(sync_pb::UserEventSpecifics::GaiaPasswordCaptured,
+              USER_LOGGED_IN);
+    ENUM_CASE(sync_pb::UserEventSpecifics::GaiaPasswordCaptured,
+              EXPIRED_28D_TIMER);
   }
   NOTREACHED();
   return "";

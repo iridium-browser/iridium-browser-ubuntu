@@ -21,8 +21,8 @@
 class SimpleTextureCubemapSample : public SampleApplication
 {
   public:
-    SimpleTextureCubemapSample()
-        : SampleApplication("SimpleTextureCubemap", 1280, 720)
+    SimpleTextureCubemapSample(int argc, char **argv)
+        : SampleApplication("SimpleTextureCubemap", argc, argv)
     {
     }
 
@@ -129,6 +129,6 @@ class SimpleTextureCubemapSample : public SampleApplication
 
 int main(int argc, char **argv)
 {
-    SimpleTextureCubemapSample app;
+    SimpleTextureCubemapSample app(argc, argv);
     return app.run();
 }

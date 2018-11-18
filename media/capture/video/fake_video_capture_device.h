@@ -9,6 +9,7 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "base/threading/thread_checker.h"
 #include "media/capture/video/video_capture_device.h"
@@ -51,6 +52,8 @@ class FakeVideoCaptureDevice : public VideoCaptureDevice {
     USE_DEVICE_INTERNAL_BUFFERS,
     USE_CLIENT_PROVIDED_BUFFERS
   };
+
+  enum class DisplayMediaType { ANY, MONITOR, WINDOW, BROWSER };
 
   FakeVideoCaptureDevice(
       const VideoCaptureFormats& supported_formats,
@@ -100,8 +103,7 @@ class FakeVideoCaptureDevice : public VideoCaptureDevice {
 // collaborating classes.
 struct FakeDeviceState {
   FakeDeviceState(float zoom, float frame_rate, VideoPixelFormat pixel_format)
-      : zoom(zoom),
-        format(gfx::Size(), frame_rate, pixel_format, VideoPixelStorage::CPU) {}
+      : zoom(zoom), format(gfx::Size(), frame_rate, pixel_format) {}
 
   uint32_t zoom;
   VideoCaptureFormat format;

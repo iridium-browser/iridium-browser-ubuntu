@@ -12,14 +12,18 @@
 
 #include "base/macros.h"
 #include "base/metrics/field_trial.h"
+#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/scoped_task_environment.h"
 #include "build/build_config.h"
 #include "components/omnibox/browser/autocomplete_input.h"
 #include "components/omnibox/browser/autocomplete_match.h"
 #include "components/omnibox/browser/autocomplete_match_type.h"
 #include "components/omnibox/browser/autocomplete_provider.h"
+#include "components/omnibox/browser/autocomplete_provider_client.h"
+#include "components/omnibox/browser/fake_autocomplete_provider_client.h"
 #include "components/omnibox/browser/omnibox_field_trial.h"
 #include "components/omnibox/browser/test_scheme_classifier.h"
 #include "components/search_engines/template_url_service.h"
@@ -118,6 +122,8 @@ class AutocompleteResultTest : public testing::Test {
     template_url_service_->Load();
   }
 
+  void TearDown() override { scoped_task_environment_.RunUntilIdle(); }
+
   // Configures |match| from |data|.
   void PopulateAutocompleteMatch(const TestData& data,
                                  AutocompleteMatch* match);
@@ -148,6 +154,7 @@ class AutocompleteResultTest : public testing::Test {
   std::unique_ptr<TemplateURLService> template_url_service_;
 
  private:
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
   std::unique_ptr<base::FieldTrialList> field_trial_list_;
 
   // For every provider mentioned in TestData, we need a mock provider.
@@ -541,7 +548,7 @@ TEST_F(AutocompleteResultTest, SortAndCullDuplicateSearchURLs) {
   url_data.SetShortName(base::ASCIIToUTF16("unittest"));
   url_data.SetKeyword(base::ASCIIToUTF16("foo"));
   url_data.SetURL("http://www.foo.com/s?q={searchTerms}");
-  template_url_service_.get()->Add(std::make_unique<TemplateURL>(url_data));
+  template_url_service_->Add(std::make_unique<TemplateURL>(url_data));
 
   TestData data[] = {
     { 0, 1, 1300, true },
@@ -585,7 +592,7 @@ TEST_F(AutocompleteResultTest, SortAndCullWithMatchDups) {
   url_data.SetShortName(base::ASCIIToUTF16("unittest"));
   url_data.SetKeyword(base::ASCIIToUTF16("foo"));
   url_data.SetURL("http://www.foo.com/s?q={searchTerms}");
-  template_url_service_.get()->Add(std::make_unique<TemplateURL>(url_data));
+  template_url_service_->Add(std::make_unique<TemplateURL>(url_data));
 
   AutocompleteMatch dup_match;
   dup_match.destination_url = GURL("http://www.foo.com/s?q=foo&oq=dup");
@@ -774,6 +781,112 @@ TEST_F(AutocompleteResultTest, SortAndCullReorderForDefaultMatch) {
   }
 }
 
+TEST_F(AutocompleteResultTest, SortAndCullPromoteDefaultMatch) {
+  TestData data[] = {
+    { 0, 1, 1300, false },
+    { 1, 1, 1200, false },
+    { 2, 2, 1100, false },
+    { 2, 3, 1000, false },
+    { 2, 4, 900, true }
+  };
+  TestSchemeClassifier test_scheme_classifier;
+
+  // Check that reorder swaps up a result, and promotes relevance,
+  // appropriately.
+  ACMatches matches;
+  PopulateAutocompleteMatches(data, base::size(data), &matches);
+  AutocompleteInput input(base::ASCIIToUTF16("a"),
+                          metrics::OmniboxEventProto::HOME_PAGE,
+                          test_scheme_classifier);
+  AutocompleteResult result;
+  result.AppendMatches(input, matches);
+  result.SortAndCull(input, template_url_service_.get());
+  ASSERT_EQ(3U, result.size());
+  EXPECT_EQ("http://c/", result.match_at(0)->destination_url.spec());
+  EXPECT_EQ(1100, result.match_at(0)->relevance);
+  EXPECT_EQ(GetProvider(4), result.match_at(0)->provider);
+  EXPECT_EQ("http://a/", result.match_at(1)->destination_url.spec());
+  EXPECT_EQ("http://b/", result.match_at(2)->destination_url.spec());
+}
+
+TEST_F(AutocompleteResultTest, SortAndCullPromoteUnconsecutiveMatches) {
+  TestData data[] = {
+    { 0, 1, 1300, false },
+    { 1, 1, 1200, true },
+    { 3, 2, 1100, false },
+    { 2, 1, 1000, false },
+    { 3, 3, 900, true },
+    { 4, 1, 800, false },
+    { 3, 4, 700, false },
+  };
+  TestSchemeClassifier test_scheme_classifier;
+
+  // Check that reorder swaps up a result, and promotes relevance,
+  // even for a default match that isn't the best.
+  ACMatches matches;
+  PopulateAutocompleteMatches(data, base::size(data), &matches);
+  AutocompleteInput input(base::ASCIIToUTF16("a"),
+                          metrics::OmniboxEventProto::HOME_PAGE,
+                          test_scheme_classifier);
+  AutocompleteResult result;
+  result.AppendMatches(input, matches);
+  result.SortAndCull(input, template_url_service_.get());
+  ASSERT_EQ(5U, result.size());
+  EXPECT_EQ("http://b/", result.match_at(0)->destination_url.spec());
+  EXPECT_EQ(1200, result.match_at(0)->relevance);
+  EXPECT_EQ("http://a/", result.match_at(1)->destination_url.spec());
+  EXPECT_EQ("http://d/", result.match_at(2)->destination_url.spec());
+  EXPECT_EQ(1100, result.match_at(2)->relevance);
+  EXPECT_EQ(GetProvider(3), result.match_at(2)->provider);
+  EXPECT_EQ("http://c/", result.match_at(3)->destination_url.spec());
+  EXPECT_EQ("http://e/", result.match_at(4)->destination_url.spec());
+}
+
+TEST_F(AutocompleteResultTest, SortAndCullPromoteDuplicateSearchURLs) {
+  // Register a template URL that corresponds to 'foo' search engine.
+  TemplateURLData url_data;
+  url_data.SetShortName(base::ASCIIToUTF16("unittest"));
+  url_data.SetKeyword(base::ASCIIToUTF16("foo"));
+  url_data.SetURL("http://www.foo.com/s?q={searchTerms}");
+  template_url_service_->Add(std::make_unique<TemplateURL>(url_data));
+
+  TestData data[] = {
+    { 0, 1, 1300, false },
+    { 1, 1, 1200, true },
+    { 2, 1, 1100, true },
+    { 3, 1, 1000, true },
+    { 4, 2, 900,  true },
+  };
+
+  ACMatches matches;
+  PopulateAutocompleteMatches(data, base::size(data), &matches);
+  // Note that 0, 2 and 3 will compare equal after stripping.
+  matches[0].destination_url = GURL("http://www.foo.com/s?q=foo");
+  matches[1].destination_url = GURL("http://www.foo.com/s?q=foo2");
+  matches[2].destination_url = GURL("http://www.foo.com/s?q=foo&oq=f");
+  matches[3].destination_url = GURL("http://www.foo.com/s?q=foo&aqs=0");
+  matches[4].destination_url = GURL("http://www.foo.com/");
+
+  AutocompleteInput input(base::ASCIIToUTF16("a"),
+                          metrics::OmniboxEventProto::OTHER,
+                          TestSchemeClassifier());
+  AutocompleteResult result;
+  result.AppendMatches(input, matches);
+  result.SortAndCull(input, template_url_service_.get());
+
+  // We expect the 3rd and 4th results to be removed.
+  ASSERT_EQ(3U, result.size());
+  EXPECT_EQ("http://www.foo.com/s?q=foo&oq=f",
+            result.match_at(0)->destination_url.spec());
+  EXPECT_EQ(1300, result.match_at(0)->relevance);
+  EXPECT_EQ("http://www.foo.com/s?q=foo2",
+            result.match_at(1)->destination_url.spec());
+  EXPECT_EQ(1200, result.match_at(1)->relevance);
+  EXPECT_EQ("http://www.foo.com/",
+            result.match_at(2)->destination_url.spec());
+  EXPECT_EQ(900, result.match_at(2)->relevance);
+}
+
 TEST_F(AutocompleteResultTest, TopMatchIsStandaloneVerbatimMatch) {
   ACMatches matches;
   AutocompleteResult result;
@@ -865,4 +978,27 @@ TEST_F(AutocompleteResultTest, InlineTailPrefixes) {
     EXPECT_TRUE(EqualClassifications(result.match_at(i)->contents_class,
                                      cases[i].after_contents_class));
   }
+}
+
+TEST_F(AutocompleteResultTest, ConvertsOpenTabsCorrectly) {
+  AutocompleteResult result;
+  AutocompleteMatch match;
+  match.destination_url = GURL("http://this-site-matches.com");
+  result.matches_.push_back(match);
+  match.destination_url = GURL("http://other-site-matches.com");
+  match.description = base::UTF8ToUTF16("Some Other Site");
+  result.matches_.push_back(match);
+  match.destination_url = GURL("http://doesnt-match.com");
+  match.description = base::string16();
+  result.matches_.push_back(match);
+
+  // Have IsTabOpenWithURL() return true for some URLs.
+  FakeAutocompleteProviderClient client;
+  client.set_url_substring_match("matches");
+
+  result.ConvertOpenTabMatches(&client, nullptr);
+
+  EXPECT_TRUE(result.match_at(0)->has_tab_match);
+  EXPECT_TRUE(result.match_at(1)->has_tab_match);
+  EXPECT_FALSE(result.match_at(2)->has_tab_match);
 }

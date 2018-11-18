@@ -1,7 +1,7 @@
+# REQUIRES: ppc
 # # RUN: llvm-mc -filetype=obj -triple=powerpc64le-unknown-linux %s -o %t
 # RUN: ld.lld --hash-style=sysv -discard-all -shared %t -o %t2
 # RUN: llvm-readobj -file-headers -sections -section-data -program-headers %t2 | FileCheck %s
-# REQUIRES: ppc
 .abiversion 2
 # Exits with return code 55 on linux.
 .text
@@ -170,7 +170,7 @@
 // CHECK-NEXT:    AddressAlignment: 1
 // CHECK-NEXT:    EntrySize: 1
 // CHECK-NEXT:    SectionData (
-// CHECK-NEXT:      0000: 4C4C4420 312E3000 |LLD 1.0.|
+// CHECK-NEXT:      0000: 4C4C4420 312E3000                    |LLD 1.0.|
 // CHECK-NEXT:    )
 // CHECK-NEXT:  }
 // CHECK-NEXT:  Section {

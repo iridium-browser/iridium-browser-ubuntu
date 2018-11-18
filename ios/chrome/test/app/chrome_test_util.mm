@@ -4,6 +4,7 @@
 
 #import "ios/chrome/test/app/chrome_test_util.h"
 
+#include "base/logging.h"
 #include "base/mac/foundation_util.h"
 #include "components/metrics/metrics_pref_names.h"
 #include "components/metrics/metrics_service.h"
@@ -22,9 +23,10 @@
 #import "ios/chrome/browser/tabs/tab.h"
 #import "ios/chrome/browser/ui/browser_view_controller.h"
 #import "ios/chrome/browser/ui/main/bvc_container_view_controller.h"
+#import "ios/chrome/browser/ui/main/tab_switcher.h"
 #import "ios/chrome/browser/ui/main/view_controller_swapping.h"
 #import "ios/chrome/browser/ui/ntp/new_tab_page_controller.h"
-#import "ios/chrome/browser/ui/tab_switcher/tab_switcher.h"
+#include "ios/chrome/browser/ui/ui_util.h"
 #include "ios/chrome/test/app/navigation_test_util.h"
 #import "ios/chrome/test/app/tab_test_util.h"
 #import "ios/web/public/navigation_manager.h"
@@ -143,21 +145,11 @@ UIViewController* GetActiveViewController() {
   return active_view_controller;
 }
 
-id<ApplicationCommands, BrowserCommands> DispatcherForActiveViewController() {
+id<ApplicationCommands, BrowserCommands>
+DispatcherForActiveBrowserViewController() {
   UIViewController* vc = GetActiveViewController();
   BrowserViewController* bvc = base::mac::ObjCCast<BrowserViewController>(vc);
-  if (bvc)
-    return bvc.dispatcher;
-  if ([vc conformsToProtocol:@protocol(TabSwitcher)]) {
-    // In stack_view and the iPad tab switcher, the view controller has a
-    // dispatcher.
-    id<TabSwitcher> tabSwitcher = static_cast<id<TabSwitcher>>(vc);
-    return tabSwitcher.dispatcher;
-  }
-  // In tab grid, the TabSwitcher object is not in the view hierarchy so it must
-  // be gotten through the MainController.
-  return static_cast<id<ApplicationCommands, BrowserCommands>>(
-      GetMainController().tabSwitcher.dispatcher);
+  return bvc.dispatcher;
 }
 
 void RemoveAllInfoBars() {

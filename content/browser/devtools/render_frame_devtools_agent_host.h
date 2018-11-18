@@ -7,11 +7,13 @@
 
 #include <map>
 #include <memory>
+#include <vector>
 
 #include "base/compiler_specific.h"
 #include "base/containers/flat_map.h"
 #include "base/containers/flat_set.h"
 #include "base/macros.h"
+#include "base/optional.h"
 #include "build/build_config.h"
 #include "content/browser/devtools/devtools_agent_host_impl.h"
 #include "content/common/content_export.h"
@@ -19,12 +21,15 @@
 #include "content/public/browser/web_contents_observer.h"
 #include "net/base/net_errors.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
-#include "third_party/blink/public/web/devtools_agent.mojom.h"
 
 #if defined(OS_ANDROID)
 #include "services/device/public/mojom/wake_lock.mojom.h"
 #include "ui/android/view_android.h"
 #endif  // OS_ANDROID
+
+namespace base {
+class UnguessableToken;
+}
 
 namespace network {
 struct ResourceResponse;
@@ -32,6 +37,11 @@ struct ResourceResponse;
 
 namespace viz {
 class CompositorFrameMetadata;
+}
+
+namespace net {
+class SSLInfo;
+class X509Certificate;
 }
 
 namespace content {
@@ -43,6 +53,8 @@ class NavigationHandleImpl;
 class NavigationRequest;
 class NavigationThrottle;
 class RenderFrameHostImpl;
+class SignedExchangeEnvelope;
+struct SignedExchangeError;
 
 class CONTENT_EXPORT RenderFrameDevToolsAgentHost
     : public DevToolsAgentHostImpl,
@@ -73,6 +85,7 @@ class CONTENT_EXPORT RenderFrameDevToolsAgentHost
   static bool WillCreateURLLoaderFactory(
       RenderFrameHostImpl* rfh,
       bool is_navigation,
+      bool is_download,
       network::mojom::URLLoaderFactoryRequest* loader_factory_request);
 
   static void OnNavigationRequestWillBeSent(
@@ -80,8 +93,35 @@ class CONTENT_EXPORT RenderFrameDevToolsAgentHost
   static void OnNavigationResponseReceived(
       const NavigationRequest& nav_request,
       const network::ResourceResponse& response);
-  static void OnNavigationRequestFailed(const NavigationRequest& nav_request,
-                                        int error_code);
+  static void OnNavigationRequestFailed(
+      const NavigationRequest& nav_request,
+      const network::URLLoaderCompletionStatus& status);
+
+  static void OnSignedExchangeReceived(
+      FrameTreeNode* frame_tree_node,
+      base::Optional<const base::UnguessableToken> devtools_navigation_token,
+      const GURL& outer_request_url,
+      const network::ResourceResponseHead& outer_response,
+      const base::Optional<SignedExchangeEnvelope>& header,
+      const scoped_refptr<net::X509Certificate>& certificate,
+      const base::Optional<net::SSLInfo>& ssl_info,
+      const std::vector<SignedExchangeError>& errors);
+  static void OnSignedExchangeCertificateRequestSent(
+      FrameTreeNode* frame_tree_node,
+      const base::UnguessableToken& request_id,
+      const base::UnguessableToken& loader_id,
+      const network::ResourceRequest& request,
+      const GURL& signed_exchange_url);
+  static void OnSignedExchangeCertificateResponseReceived(
+      FrameTreeNode* frame_tree_node,
+      const base::UnguessableToken& request_id,
+      const base::UnguessableToken& loader_id,
+      const GURL& url,
+      const network::ResourceResponseHead& head);
+  static void OnSignedExchangeCertificateRequestCompleted(
+      FrameTreeNode* frame_tree_node,
+      const base::UnguessableToken& request_id,
+      const network::URLLoaderCompletionStatus& status);
 
   static std::vector<std::unique_ptr<NavigationThrottle>>
   CreateNavigationThrottles(NavigationHandleImpl* navigation_handle);
@@ -120,11 +160,11 @@ class CONTENT_EXPORT RenderFrameDevToolsAgentHost
   ~RenderFrameDevToolsAgentHost() override;
 
   // DevToolsAgentHostImpl overrides.
-  bool AttachSession(DevToolsSession* session) override;
+  bool AttachSession(DevToolsSession* session,
+                     TargetRegistry* registry) override;
   void DetachSession(DevToolsSession* session) override;
   void InspectElement(RenderFrameHost* frame_host, int x, int y) override;
-  void DispatchProtocolMessage(DevToolsSession* session,
-                               const std::string& message) override;
+  void UpdateRendererChannel(bool force) override;
 
   // WebContentsObserver overrides.
   void DidStartNavigation(NavigationHandle* navigation_handle) override;
@@ -138,19 +178,18 @@ class CONTENT_EXPORT RenderFrameDevToolsAgentHost
   void DidAttachInterstitialPage() override;
   void DidDetachInterstitialPage() override;
   void OnVisibilityChanged(content::Visibility visibility) override;
-  void DidReceiveCompositorFrame() override;
   void OnPageScaleFactorChanged(float page_scale_factor) override;
 
   bool IsChildFrame();
-  bool IsFrameHostAllowedForRestrictedSessions();
 
   void OnSwapCompositorFrame(const IPC::Message& message);
   void DestroyOnRenderFrameGone();
   void UpdateFrameHost(RenderFrameHostImpl* frame_host);
-  void MaybeReattachToRenderFrame();
   void GrantPolicy();
   void RevokePolicy();
   void SetFrameTreeNode(FrameTreeNode* frame_tree_node);
+
+  bool ShouldAllowSession(DevToolsSession* session);
 
 #if defined(OS_ANDROID)
   device::mojom::WakeLock* GetWakeLock();
@@ -158,7 +197,6 @@ class CONTENT_EXPORT RenderFrameDevToolsAgentHost
 
   void SynchronousSwapCompositorFrame(
       viz::CompositorFrameMetadata frame_metadata);
-  bool EnsureAgent();
 
   std::unique_ptr<DevToolsFrameTraceRecorder> frame_trace_recorder_;
 #if defined(OS_ANDROID)
@@ -167,7 +205,6 @@ class CONTENT_EXPORT RenderFrameDevToolsAgentHost
 
   // The active host we are talking to.
   RenderFrameHostImpl* frame_host_ = nullptr;
-  blink::mojom::DevToolsAgentAssociatedPtr agent_ptr_;
   base::flat_set<NavigationHandleImpl*> navigation_handles_;
   bool render_frame_alive_ = false;
 

@@ -4,79 +4,118 @@
 
 #include "third_party/blink/renderer/controller/oom_intervention_impl.h"
 
+#include "base/metrics/histogram_macros.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
 #include "third_party/blink/public/platform/platform.h"
-#include "third_party/blink/renderer/platform/bindings/v8_per_isolate_data.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_gc_for_context_dispose.h"
+#include "third_party/blink/renderer/controller/crash_memory_metrics_reporter_impl.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
+#include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/platform/web_task_runner.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/partitions.h"
 
 namespace blink {
 
-namespace {
-
-// Roughly caclculates amount of memory which is used to execute pages.
-size_t BlinkMemoryWorkloadCaculator() {
-  v8::Isolate* isolate = V8PerIsolateData::MainThreadIsolate();
-  DCHECK(isolate);
-  v8::HeapStatistics heap_statistics;
-  isolate->GetHeapStatistics(&heap_statistics);
-  // TODO: Add memory usage for worker threads.
-  size_t v8_size =
-      heap_statistics.total_heap_size() + heap_statistics.malloced_memory();
-  size_t blink_gc_size = ProcessHeap::TotalAllocatedObjectSize() +
-                         ProcessHeap::TotalMarkedObjectSize();
-  size_t partition_alloc_size = WTF::Partitions::TotalSizeOfCommittedPages();
-  return v8_size + blink_gc_size + partition_alloc_size;
-}
-
-}  // namespace
-
-// If memory workload is above this threshold, we assume that we are in a
-// near-OOM situation.
-const size_t OomInterventionImpl::kMemoryWorkloadThreshold = 80 * 1024 * 1024;
-
 // static
 void OomInterventionImpl::Create(mojom::blink::OomInterventionRequest request) {
-  mojo::MakeStrongBinding(
-      std::make_unique<OomInterventionImpl>(
-          WTF::BindRepeating(&BlinkMemoryWorkloadCaculator)),
-      std::move(request));
+  mojo::MakeStrongBinding(std::make_unique<OomInterventionImpl>(),
+                          std::move(request));
 }
 
-OomInterventionImpl::OomInterventionImpl(
-    MemoryWorkloadCaculator workload_calculator)
-    : workload_calculator_(std::move(workload_calculator)),
-      timer_(Platform::Current()->MainThread()->GetTaskRunner(),
+OomInterventionImpl::OomInterventionImpl()
+    : timer_(Platform::Current()->MainThread()->GetTaskRunner(),
              this,
-             &OomInterventionImpl::Check) {
-  DCHECK(workload_calculator_);
-}
+             &OomInterventionImpl::Check) {}
 
-OomInterventionImpl::~OomInterventionImpl() = default;
+OomInterventionImpl::~OomInterventionImpl() {}
 
 void OomInterventionImpl::StartDetection(
     mojom::blink::OomInterventionHostPtr host,
-    bool trigger_intervention) {
+    mojom::blink::DetectionArgsPtr detection_args,
+    bool renderer_pause_enabled,
+    bool navigate_ads_enabled) {
   host_ = std::move(host);
-  trigger_intervention_ = trigger_intervention;
+
+  // Disable intervention if we cannot get memory details of current process.
+  if (CrashMemoryMetricsReporterImpl::Instance().ResetFileDiscriptors())
+    return;
+
+  detection_args_ = std::move(detection_args);
+  renderer_pause_enabled_ = renderer_pause_enabled;
+  navigate_ads_enabled_ = navigate_ads_enabled;
 
   timer_.Start(TimeDelta(), TimeDelta::FromSeconds(1), FROM_HERE);
 }
 
+OomInterventionMetrics OomInterventionImpl::GetCurrentMemoryMetrics() {
+  return CrashMemoryMetricsReporterImpl::Instance().GetCurrentMemoryMetrics();
+}
+
 void OomInterventionImpl::Check(TimerBase*) {
   DCHECK(host_);
+  DCHECK(renderer_pause_enabled_ || navigate_ads_enabled_);
 
-  size_t workload = workload_calculator_.Run();
-  if (workload > kMemoryWorkloadThreshold) {
-    host_->OnHighMemoryUsage(trigger_intervention_);
+  OomInterventionMetrics current_memory = GetCurrentMemoryMetrics();
+  bool oom_detected = false;
 
-    if (trigger_intervention_) {
+  oom_detected |= detection_args_->blink_workload_threshold > 0 &&
+                  current_memory.current_blink_usage_kb * 1024 >
+                      detection_args_->blink_workload_threshold;
+  oom_detected |= detection_args_->private_footprint_threshold > 0 &&
+                  current_memory.current_private_footprint_kb * 1024 >
+                      detection_args_->private_footprint_threshold;
+  oom_detected |=
+      detection_args_->swap_threshold > 0 &&
+      current_memory.current_swap_kb * 1024 > detection_args_->swap_threshold;
+  oom_detected |= detection_args_->virtual_memory_thresold > 0 &&
+                  current_memory.current_vm_size_kb * 1024 >
+                      detection_args_->virtual_memory_thresold;
+
+  // Report memory stats every second to send UMA.
+  ReportMemoryStats(current_memory);
+
+  if (oom_detected) {
+    if (navigate_ads_enabled_) {
+      for (const auto& page : Page::OrdinaryPages()) {
+        if (page->MainFrame()->IsLocalFrame()) {
+          ToLocalFrame(page->MainFrame())
+              ->GetDocument()
+              ->NavigateLocalAdsFrames();
+        }
+      }
+    }
+
+    if (renderer_pause_enabled_) {
       // The ScopedPagePauser is destroyed when the intervention is declined and
       // mojo strong binding is disconnected.
       pauser_.reset(new ScopedPagePauser);
     }
+    host_->OnHighMemoryUsage();
+    timer_.Stop();
+    // Notify V8GCForContextDispose that page navigation gc is needed when
+    // intervention runs, as it indicates that memory usage is high.
+    V8GCForContextDispose::Instance().SetForcePageNavigationGC();
   }
+}
+
+void OomInterventionImpl::ReportMemoryStats(
+    OomInterventionMetrics& current_memory) {
+  UMA_HISTOGRAM_MEMORY_MB(
+      "Memory.Experimental.OomIntervention.RendererBlinkUsage",
+      current_memory.current_blink_usage_kb / 1024);
+  UMA_HISTOGRAM_MEMORY_LARGE_MB(
+      "Memory.Experimental.OomIntervention."
+      "RendererPrivateMemoryFootprint",
+      current_memory.current_private_footprint_kb / 1024);
+  UMA_HISTOGRAM_MEMORY_MB(
+      "Memory.Experimental.OomIntervention.RendererSwapFootprint",
+      current_memory.current_swap_kb / 1024);
+  UMA_HISTOGRAM_MEMORY_LARGE_MB(
+      "Memory.Experimental.OomIntervention.RendererVmSize",
+      current_memory.current_vm_size_kb / 1024);
+
+  CrashMemoryMetricsReporterImpl::Instance().WriteIntoSharedMemory(
+      current_memory);
 }
 
 }  // namespace blink

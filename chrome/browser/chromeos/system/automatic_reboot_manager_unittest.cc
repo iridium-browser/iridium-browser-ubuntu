@@ -14,7 +14,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/task_scheduler/task_scheduler.h"
+#include "base/task/task_scheduler/task_scheduler.h"
 #include "base/test/scoped_task_environment.h"
 #include "base/test/simple_test_tick_clock.h"
 #include "base/test/test_mock_time_task_runner.h"
@@ -319,9 +319,10 @@ void AutomaticRebootManagerBasicTest::SetUp() {
   update_reboot_needed_uptime_file_ =
       temp_dir.Append("update_reboot_needed_uptime");
   ASSERT_EQ(0, base::WriteFile(update_reboot_needed_uptime_file_, NULL, 0));
-  ASSERT_TRUE(PathService::Override(chromeos::FILE_UPTIME, uptime_file));
-  ASSERT_TRUE(PathService::Override(chromeos::FILE_UPDATE_REBOOT_NEEDED_UPTIME,
-                                    update_reboot_needed_uptime_file_));
+  ASSERT_TRUE(base::PathService::Override(chromeos::FILE_UPTIME, uptime_file));
+  ASSERT_TRUE(
+      base::PathService::Override(chromeos::FILE_UPDATE_REBOOT_NEEDED_UPTIME,
+                                  update_reboot_needed_uptime_file_));
 
   TestingBrowserProcess::GetGlobal()->SetLocalState(&local_state_);
   AutomaticRebootManager::RegisterPrefs(local_state_.registry());

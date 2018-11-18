@@ -36,7 +36,6 @@
 #include "ui/gfx/scoped_canvas.h"
 #include "ui/gfx/skia_paint_util.h"
 #include "ui/gfx/skia_util.h"
-#include "ui/gfx/switches.h"
 #include "ui/gfx/text_elider.h"
 #include "ui/gfx/text_utils.h"
 #include "ui/gfx/utf16_indexing.h"
@@ -241,11 +240,9 @@ void SkiaTextRenderer::DrawPosText(const SkPoint* pos,
   static_assert(sizeof(*pos) == 2 * sizeof(*run_buffer.pos), "");
   memcpy(run_buffer.pos, pos, glyph_count * sizeof(*pos));
 
-  // TODO(vmpstr): In order to OOP raster this, we would have to plumb PaintFont
-  // here instead of |flags_|.
   canvas_skia_->drawTextBlob(
       base::MakeRefCounted<cc::PaintTextBlob>(builder.make(),
-                                              std::vector<cc::PaintTypeface>{}),
+                                              std::vector<sk_sp<SkTypeface>>{}),
       0, 0, flags_);
 }
 
@@ -356,14 +353,6 @@ std::unique_ptr<RenderText> RenderText::CreateFor(Typesetter typesetter) {
   if (typesetter == Typesetter::NATIVE)
     return std::make_unique<RenderTextMac>();
 
-  if (typesetter == Typesetter::HARFBUZZ)
-    return CreateHarfBuzzInstance();
-
-  static const bool use_native =
-      !base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableHarfBuzzRenderText);
-  if (use_native)
-    return std::make_unique<RenderTextMac>();
 #endif  // defined(OS_MACOSX)
   return CreateHarfBuzzInstance();
 }
@@ -929,6 +918,10 @@ SelectionModel RenderText::GetSelectionModelForSelectionStart() const {
                         sel.is_reversed() ? CURSOR_BACKWARD : CURSOR_FORWARD);
 }
 
+RectF RenderText::GetStringRect() {
+  return RectF(PointF(ToViewPoint(Point())), GetStringSizeF());
+}
+
 const Vector2d& RenderText::GetUpdatedDisplayOffset() {
   UpdateCachedBoundsAndOffset();
   return display_offset_;
@@ -1065,6 +1058,18 @@ RenderText::RenderText()
       cached_bounds_and_offset_valid_(false),
       strike_thickness_factor_(kLineThicknessFactor) {}
 
+bool RenderText::IsHomogeneous() const {
+  if (colors().breaks().size() > 1 || baselines().breaks().size() > 1 ||
+      font_size_overrides().breaks().size() > 1 ||
+      weights().breaks().size() > 1)
+    return false;
+  for (size_t style = 0; style < NUM_TEXT_STYLES; ++style) {
+    if (styles()[style].breaks().size() > 1)
+      return false;
+  }
+  return true;
+}
+
 SelectionModel RenderText::GetAdjacentSelectionModel(
     const SelectionModel& current,
     BreakType break_type,
@@ -1144,6 +1149,7 @@ void RenderText::UpdateDisplayText(float text_width) {
     std::unique_ptr<RenderText> render_text(
         CreateInstanceOfSameStyle(layout_text_));
     render_text->SetMultiline(true);
+    render_text->SetWordWrapBehavior(word_wrap_behavior_);
     render_text->SetDisplayRect(display_rect_);
     // Have it arrange words on |lines_|.
     render_text->EnsureLayout();
@@ -1429,6 +1435,22 @@ int RenderText::DetermineBaselineCenteringText(const int display_height,
   return baseline + std::max(min_shift, std::min(max_shift, baseline_shift));
 }
 
+// static
+gfx::Rect RenderText::ExpandToBeVerticallySymmetric(
+    const gfx::Rect& rect,
+    const gfx::Rect& display_rect) {
+  // Mirror |rect| accross the horizontal line dividing |display_rect| in half.
+  gfx::Rect result = rect;
+  int mid_y = display_rect.CenterPoint().y();
+  // The top of the mirror rect must be equidistant with the bottom of the
+  // original rect from the mid-line.
+  result.set_y(mid_y + (mid_y - rect.bottom()));
+
+  // Now make a union with the original rect to ensure we are encompassing both.
+  result.Union(rect);
+  return result;
+}
+
 void RenderText::OnTextAttributeChanged() {
   layout_text_.clear();
   display_text_.clear();
@@ -1689,8 +1711,11 @@ void RenderText::UpdateCachedBoundsAndOffset() {
 }
 
 void RenderText::DrawSelection(Canvas* canvas) {
-  for (const Rect& s : GetSubstringBounds(selection()))
+  for (Rect s : GetSubstringBounds(selection())) {
+    if (symmetric_selection_visual_bounds() && !multiline())
+      s = ExpandToBeVerticallySymmetric(s, display_rect());
     canvas->FillRect(s, selection_background_focused_color_);
+  }
 }
 
 size_t RenderText::GetNearestWordStartBoundary(size_t index) const {

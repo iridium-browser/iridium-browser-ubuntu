@@ -6,6 +6,7 @@ package org.chromium.chrome.browser.permissions;
 
 import android.support.test.filters.MediumTest;
 
+import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -17,7 +18,7 @@ import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.permissions.PermissionTestRule.PermissionUpdateWaiter;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
-import org.chromium.content.common.ContentSwitches;
+import org.chromium.content_public.common.ContentSwitches;
 
 /**
  * Test suite for media permissions requests.
@@ -33,6 +34,11 @@ public class MediaTest {
     private static final String TEST_FILE = "/content/test/data/android/media_permissions.html";
 
     public MediaTest() {}
+
+    @Before
+    public void setUp() throws Exception {
+        mPermissionRule.setUpActivity();
+    }
 
     private void testMediaPermissionsPlumbing(String prefix, String script, int numUpdates,
             boolean withGesture, boolean isDialog) throws Exception {

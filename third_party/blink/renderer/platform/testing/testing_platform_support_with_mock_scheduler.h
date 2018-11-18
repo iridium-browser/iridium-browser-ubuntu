@@ -6,15 +6,20 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_TESTING_TESTING_PLATFORM_SUPPORT_WITH_MOCK_SCHEDULER_H_
 
 #include <memory>
-#include "base/test/simple_test_tick_clock.h"
-#include "third_party/blink/public/platform/web_thread.h"
-#include "third_party/blink/renderer/platform/scheduler/test/task_queue_manager_for_test.h"
+#include "base/test/test_mock_time_task_runner.h"
+#include "third_party/blink/renderer/platform/scheduler/public/thread.h"
 #include "third_party/blink/renderer/platform/testing/testing_platform_support.h"
 #include "third_party/blink/renderer/platform/wtf/noncopyable.h"
 
-namespace cc {
-class OrderedSimpleTaskRunner;
-}
+namespace base {
+
+class TestMockTimeTaskRunner;
+
+namespace sequence_manager {
+class SequenceManager;
+}  // namespace sequence_manager
+
+}  // namespace base
 
 namespace blink {
 
@@ -29,13 +34,11 @@ class TestingPlatformSupportWithMockScheduler : public TestingPlatformSupport {
 
  public:
   TestingPlatformSupportWithMockScheduler();
-  explicit TestingPlatformSupportWithMockScheduler(const Config&);
   ~TestingPlatformSupportWithMockScheduler() override;
 
-  // Platform:
-  std::unique_ptr<WebThread> CreateThread(
-      const WebThreadCreationParams&) override;
-  WebThread* CurrentThread() override;
+  scoped_refptr<base::TestMockTimeTaskRunner> test_task_runner() {
+    return test_task_runner_;
+  }
 
   // Runs a single task.
   void RunSingleTask();
@@ -53,9 +56,11 @@ class TestingPlatformSupportWithMockScheduler : public TestingPlatformSupport {
   // time elapsed will typically much less than |seconds| because delays between
   // timers are fast forwarded.
   void RunForPeriodSeconds(double seconds);
+  void RunForPeriod(base::TimeDelta period);
 
-  // Advances |m_clock| by |seconds|.
+  // Advances |clock_| by |seconds|.
   void AdvanceClockSeconds(double seconds);
+  void AdvanceClock(base::TimeDelta duration);
 
   scheduler::MainThreadSchedulerImpl* GetMainThreadScheduler() const;
 
@@ -66,12 +71,13 @@ class TestingPlatformSupportWithMockScheduler : public TestingPlatformSupport {
  protected:
   static double GetTestTime();
 
-  base::SimpleTestTickClock clock_;
-  scoped_refptr<cc::OrderedSimpleTaskRunner> mock_task_runner_;
+  scoped_refptr<base::TestMockTimeTaskRunner> test_task_runner_;
+  bool auto_advance_ = true;
+
   std::unique_ptr<scheduler::MainThreadSchedulerImpl> scheduler_;
-  scheduler::TaskQueueManagerForTest*
-      task_queue_manager_;  // Owned by scheduler_.
-  std::unique_ptr<WebThread> thread_;
+  base::sequence_manager::SequenceManager*
+      sequence_manager_;  // Owned by scheduler_.
+  std::unique_ptr<Thread> thread_;
 };
 
 }  // namespace blink

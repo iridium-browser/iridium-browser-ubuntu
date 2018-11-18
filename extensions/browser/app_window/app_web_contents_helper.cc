@@ -32,8 +32,18 @@ AppWebContentsHelper::AppWebContentsHelper(
 // static
 bool AppWebContentsHelper::ShouldSuppressGestureEvent(
     const blink::WebGestureEvent& event) {
+  // Disable "smart zoom" (double-tap with two fingers on Mac trackpad).
+  if (event.GetType() == blink::WebInputEvent::kGestureDoubleTap)
+    return true;
+
   // Disable pinch zooming in app windows.
-  return blink::WebInputEvent::IsPinchGestureEventType(event.GetType());
+  if (blink::WebInputEvent::IsPinchGestureEventType(event.GetType())) {
+    // Only suppress pinch events that cause a scale change. We still
+    // allow synthetic wheel events for touchpad pinch to go to the page.
+    return !event.NeedsWheelEvent();
+  }
+
+  return false;
 }
 
 content::WebContents* AppWebContentsHelper::OpenURLFromTab(
@@ -84,13 +94,13 @@ void AppWebContentsHelper::RequestToLockMouse() const {
 
 void AppWebContentsHelper::RequestMediaAccessPermission(
     const content::MediaStreamRequest& request,
-    const content::MediaResponseCallback& callback) const {
+    content::MediaResponseCallback callback) const {
   const Extension* extension = GetExtension();
   if (!extension)
     return;
 
-  app_delegate_->RequestMediaAccessPermission(
-      web_contents_, request, callback, extension);
+  app_delegate_->RequestMediaAccessPermission(web_contents_, request,
+                                              std::move(callback), extension);
 }
 
 bool AppWebContentsHelper::CheckMediaAccessPermission(

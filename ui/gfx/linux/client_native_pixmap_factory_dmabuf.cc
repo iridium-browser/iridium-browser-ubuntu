@@ -70,10 +70,11 @@ class ClientNativePixmapFactoryDmabuf : public ClientNativePixmapFactory {
         return
 #if defined(ARCH_CPU_X86_FAMILY)
             // Currently only Intel driver (i.e. minigbm and Mesa) supports R_8
-            // RG_88 and NV12. https://crbug.com/356871
+            // RG_88, NV12 and XB30. https://crbug.com/356871
             format == gfx::BufferFormat::R_8 ||
             format == gfx::BufferFormat::RG_88 ||
             format == gfx::BufferFormat::YUV_420_BIPLANAR ||
+            format == gfx::BufferFormat::RGBX_1010102 ||
 #endif
 
             format == gfx::BufferFormat::BGRX_8888 ||
@@ -110,6 +111,14 @@ class ClientNativePixmapFactoryDmabuf : public ClientNativePixmapFactory {
         return false;
 #endif
       }
+      case gfx::BufferUsage::CAMERA_AND_CPU_READ_WRITE: {
+#if defined(OS_CHROMEOS)
+        // R_8 is used as the underlying pixel format for BLOB buffers.
+        return format == gfx::BufferFormat::R_8;
+#else
+        return false;
+#endif
+      }
     }
     NOTREACHED();
     return false;
@@ -124,6 +133,7 @@ class ClientNativePixmapFactoryDmabuf : public ClientNativePixmapFactory {
       case gfx::BufferUsage::GPU_READ_CPU_READ_WRITE:
       case gfx::BufferUsage::GPU_READ_CPU_READ_WRITE_PERSISTENT:
       case gfx::BufferUsage::SCANOUT_CAMERA_READ_WRITE:
+      case gfx::BufferUsage::CAMERA_AND_CPU_READ_WRITE:
 #if defined(OS_CHROMEOS)
         return ClientNativePixmapDmaBuf::ImportFromDmabuf(handle, size);
 #else

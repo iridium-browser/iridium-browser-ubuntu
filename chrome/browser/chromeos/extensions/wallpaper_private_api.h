@@ -11,12 +11,13 @@
 
 #include "chrome/browser/chromeos/extensions/wallpaper_function_base.h"
 #include "chrome/common/extensions/api/wallpaper_private.h"
-#include "components/signin/core/account_id/account_id.h"
+#include "components/account_id/account_id.h"
 #include "net/url_request/url_fetcher_delegate.h"
 
 namespace backdrop_wallpaper_handlers {
 class CollectionInfoFetcher;
 class ImageInfoFetcher;
+class SurpriseMeImageFetcher;
 }  // namespace backdrop_wallpaper_handlers
 
 // Wallpaper manager strings.
@@ -32,9 +33,10 @@ class WallpaperPrivateGetStringsFunction : public UIThreadExtensionFunction {
   ResponseAction Run() override;
 
  private:
-  // Responds with the dictionary after getting the wallpaper location.
-  void OnWallpaperLocationReturned(std::unique_ptr<base::DictionaryValue> dict,
-                                   const std::string& location);
+  // Responds with the dictionary after getting the wallpaper info.
+  void OnWallpaperInfoReturned(std::unique_ptr<base::DictionaryValue> dict,
+                               const std::string& location,
+                               ash::WallpaperLayout layout);
 };
 
 // Check if sync themes setting is enabled.
@@ -56,11 +58,11 @@ class WallpaperPrivateGetSyncSettingFunction
   void CheckProfileSyncServiceStatus();
 
   // The retry number to check to profile sync service status.
-  int retry_number = 0;
+  int retry_number_ = 0;
 };
 
 class WallpaperPrivateSetWallpaperIfExistsFunction
-    : public WallpaperFunctionBase {
+    : public UIThreadExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("wallpaperPrivate.setWallpaperIfExists",
                              WALLPAPERPRIVATE_SETWALLPAPERIFEXISTS)
@@ -74,25 +76,13 @@ class WallpaperPrivateSetWallpaperIfExistsFunction
   ResponseAction Run() override;
 
  private:
-  void OnWallpaperDecoded(const gfx::ImageSkia& image) override;
+  // Responds with the |file_exists| result.
+  void OnSetOnlineWallpaperIfExistsCallback(bool file_exists);
 
-  // File doesn't exist. Sets javascript callback parameter to false.
-  void OnFileNotExists(const std::string& error);
-
-  // Reads file specified by |file_path|. If success, post a task to start
-  // decoding the file.
-  void ReadFileAndInitiateStartDecode(const base::FilePath& file_path,
-                                      const base::FilePath& fallback_path);
-
-  std::unique_ptr<
-      extensions::api::wallpaper_private::SetWallpaperIfExists::Params>
-      params;
-
-  // User id of the active user when this api is been called.
-  AccountId account_id_ = EmptyAccountId();
+  DISALLOW_COPY_AND_ASSIGN(WallpaperPrivateSetWallpaperIfExistsFunction);
 };
 
-class WallpaperPrivateSetWallpaperFunction : public WallpaperFunctionBase {
+class WallpaperPrivateSetWallpaperFunction : public UIThreadExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("wallpaperPrivate.setWallpaper",
                              WALLPAPERPRIVATE_SETWALLPAPER)
@@ -106,23 +96,10 @@ class WallpaperPrivateSetWallpaperFunction : public WallpaperFunctionBase {
   ResponseAction Run() override;
 
  private:
-  void OnWallpaperDecoded(const gfx::ImageSkia& image) override;
+  // Responds with the |success| status.
+  void OnSetWallpaperCallback(bool success);
 
-  // Saves the image data to a file.
-  void SaveToFile();
-
-  // Sets wallpaper to the decoded image.
-  void SetDecodedWallpaper(std::unique_ptr<gfx::ImageSkia> image);
-
-  std::unique_ptr<extensions::api::wallpaper_private::SetWallpaper::Params>
-      params;
-
-  // The decoded wallpaper. It may accessed from UI thread to set wallpaper or
-  // FILE thread to resize and save wallpaper to disk.
-  gfx::ImageSkia wallpaper_;
-
-  // User account id of the active user when this api is been called.
-  AccountId account_id_ = EmptyAccountId();
+  DISALLOW_COPY_AND_ASSIGN(WallpaperPrivateSetWallpaperFunction);
 };
 
 class WallpaperPrivateResetWallpaperFunction
@@ -259,7 +236,7 @@ class WallpaperPrivateSaveThumbnailFunction : public UIThreadExtensionFunction {
   void Success();
 
   // Saves thumbnail to thumbnail directory as |file_name|.
-  void Save(const std::vector<char>& data, const std::string& file_name);
+  void Save(const std::vector<uint8_t>& data, const std::string& file_name);
 };
 
 class WallpaperPrivateGetOfflineWallpaperListFunction
@@ -276,12 +253,10 @@ class WallpaperPrivateGetOfflineWallpaperListFunction
   ResponseAction Run() override;
 
  private:
-  // Enumerates the list of files in online wallpaper directory.
-  void GetList();
+  // Responds with the list of urls.
+  void OnOfflineWallpaperListReturned(const std::vector<std::string>& url_list);
 
-  // Sends the list of files to extension api caller. If no files or no
-  // directory, sends empty list.
-  void OnComplete(const std::vector<std::string>& file_list);
+  DISALLOW_COPY_AND_ASSIGN(WallpaperPrivateGetOfflineWallpaperListFunction);
 };
 
 // The wallpaper UMA is recorded when a new wallpaper is set, either by the
@@ -368,7 +343,7 @@ class WallpaperPrivateGetLocalImagePathsFunction
 
  private:
   // Responds with the list of collected image paths.
-  void OnGetImagePathsComplete(const std::vector<std::string>& image_Pathss);
+  void OnGetImagePathsComplete(const std::vector<std::string>& image_paths);
 
   DISALLOW_COPY_AND_ASSIGN(WallpaperPrivateGetLocalImagePathsFunction);
 };
@@ -426,6 +401,58 @@ class WallpaperPrivateCancelPreviewWallpaperFunction
 
  private:
   DISALLOW_COPY_AND_ASSIGN(WallpaperPrivateCancelPreviewWallpaperFunction);
+};
+
+class WallpaperPrivateGetCurrentWallpaperThumbnailFunction
+    : public WallpaperFunctionBase {
+ public:
+  DECLARE_EXTENSION_FUNCTION("wallpaperPrivate.getCurrentWallpaperThumbnail",
+                             WALLPAPERPRIVATE_GETCURRENTWALLPAPERTHUMBNAIL)
+  WallpaperPrivateGetCurrentWallpaperThumbnailFunction();
+
+ protected:
+  ~WallpaperPrivateGetCurrentWallpaperThumbnailFunction() override;
+
+  // UIThreadExtensionFunction:
+  ResponseAction Run() override;
+
+ private:
+  // Responds with the thumbnail data.
+  void OnWallpaperImageReturned(const gfx::Size& thumbnail_size,
+                                const gfx::ImageSkia& image);
+
+  // WallpaperFunctionBase:
+  void OnWallpaperDecoded(const gfx::ImageSkia& wallpaper) override;
+
+  DISALLOW_COPY_AND_ASSIGN(
+      WallpaperPrivateGetCurrentWallpaperThumbnailFunction);
+};
+
+class WallpaperPrivateGetSurpriseMeImageFunction
+    : public UIThreadExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("wallpaperPrivate.getSurpriseMeImage",
+                             WALLPAPERPRIVATE_GETSURPRISEMEIMAGE)
+  WallpaperPrivateGetSurpriseMeImageFunction();
+
+ protected:
+  ~WallpaperPrivateGetSurpriseMeImageFunction() override;
+
+  // UIThreadExtensionFunction:
+  ResponseAction Run() override;
+
+ private:
+  // Callback upon completion of fetching the surprise me image info.
+  void OnSurpriseMeImageFetched(
+      bool success,
+      const extensions::api::wallpaper_private::ImageInfo& image_info,
+      const std::string& next_resume_token);
+
+  // Fetcher for the surprise me image info.
+  std::unique_ptr<backdrop_wallpaper_handlers::SurpriseMeImageFetcher>
+      surprise_me_image_fetcher_;
+
+  DISALLOW_COPY_AND_ASSIGN(WallpaperPrivateGetSurpriseMeImageFunction);
 };
 
 #endif  // CHROME_BROWSER_CHROMEOS_EXTENSIONS_WALLPAPER_PRIVATE_API_H_

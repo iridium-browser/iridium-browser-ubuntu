@@ -54,7 +54,7 @@ void CFWL_Caret::DrawWidget(CXFA_Graphics* pGraphics,
   if (!m_pProperties->m_pThemeProvider)
     return;
 
-  DrawCaretBK(pGraphics, m_pProperties->m_pThemeProvider, &matrix);
+  DrawCaretBK(pGraphics, m_pProperties->m_pThemeProvider.Get(), &matrix);
 }
 
 void CFWL_Caret::ShowCaret() {
@@ -65,6 +65,7 @@ void CFWL_Caret::ShowCaret() {
 
   m_pTimerInfo = m_pTimer->StartTimer(kBlinkPeriodMs, true);
   RemoveStates(FWL_WGTSTATE_Invisible);
+  SetStates(kStateHighlight);
 }
 
 void CFWL_Caret::HideCaret() {

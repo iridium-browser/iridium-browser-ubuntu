@@ -7,6 +7,7 @@
 #include "base/strings/stringprintf.h"
 #include "extensions/common/api/storage.h"
 #include "extensions/renderer/bindings/api_binding_util.h"
+#include "extensions/renderer/bindings/api_invocation_errors.h"
 #include "extensions/renderer/bindings/api_request_handler.h"
 #include "extensions/renderer/bindings/api_signature.h"
 #include "extensions/renderer/bindings/api_type_reference_map.h"
@@ -21,6 +22,7 @@ namespace extensions {
 namespace {
 
 #define DEFINE_STORAGE_AREA_HANDLERS()                            \
+  const char* GetTypeName() override { return "StorageArea"; }    \
   void Get(gin::Arguments* arguments) {                           \
     storage_area_.HandleFunctionCall("get", arguments);           \
   }                                                               \
@@ -212,7 +214,8 @@ void StorageArea::HandleFunctionCall(const std::string& method_name,
   if (!signature->ParseArgumentsToJSON(context, argument_list, *type_refs_,
                                        &converted_arguments, &callback,
                                        &error)) {
-    arguments->ThrowTypeError("Invalid invocation");
+    arguments->ThrowTypeError(api_errors::InvocationError(
+        full_method_name, signature->GetExpectedSignature(), error));
     return;
   }
 

@@ -18,15 +18,14 @@
 #include "android_webview/renderer/aw_render_frame_ext.h"
 #include "android_webview/renderer/aw_render_view_ext.h"
 #include "android_webview/renderer/aw_url_loader_throttle_provider.h"
+#include "android_webview/renderer/aw_websocket_handshake_throttle_provider.h"
 #include "android_webview/renderer/print_render_frame_observer.h"
 #include "base/command_line.h"
 #include "base/i18n/rtl.h"
-#include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/printing/renderer/print_render_frame_helper.h"
-#include "components/safe_browsing/renderer/websocket_sb_handshake_throttle.h"
 #include "components/supervised_user_error_page/gin_wrapper.h"
 #include "components/supervised_user_error_page/supervised_user_error_page_android.h"
 #include "components/visitedlink/renderer/visitedlink_slave.h"
@@ -37,7 +36,6 @@
 #include "content/public/common/simple_connection_filter.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/renderer/document_state.h"
-#include "content/public/renderer/navigation_state.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_thread.h"
 #include "content/public/renderer/render_view.h"
@@ -284,58 +282,9 @@ void AwContentRendererClient::AddSupportedKeySystems(
   AwAddKeySystems(key_systems);
 }
 
-std::unique_ptr<blink::WebSocketHandshakeThrottle>
-AwContentRendererClient::CreateWebSocketHandshakeThrottle() {
-  if (!UsingSafeBrowsingMojoService())
-    return nullptr;
-  return std::make_unique<safe_browsing::WebSocketSBHandshakeThrottle>(
-      safe_browsing_.get());
-}
-
-bool AwContentRendererClient::ShouldUseMediaPlayerForURL(const GURL& url) {
-  // Android WebView needs to support codecs that Chrome does not, for these
-  // cases we must force the usage of Android MediaPlayer instead of Chrome's
-  // internal player.
-  //
-  // Note: Despite these extensions being forwarded for playback to MediaPlayer,
-  // HTMLMediaElement.canPlayType() will return empty for these containers.
-  // TODO(boliu): If this is important, extend media::MimeUtil for WebView.
-  //
-  // Format list mirrors:
-  // http://developer.android.com/guide/appendix/media-formats.html
-  //
-  // Enum and extension list are parallel arrays and must stay in sync. These
-  // enum values are written to logs. New enum values can be added, but existing
-  // enums must never be renumbered or deleted and reused.
-  enum MediaPlayerContainers {
-    CONTAINER_3GP = 0,
-    CONTAINER_TS = 1,
-    CONTAINER_MID = 2,
-    CONTAINER_XMF = 3,
-    CONTAINER_MXMF = 4,
-    CONTAINER_RTTTL = 5,
-    CONTAINER_RTX = 6,
-    CONTAINER_OTA = 7,
-    CONTAINER_IMY = 8,
-    MEDIA_PLAYER_CONTAINERS_COUNT,
-  };
-  static const char* kMediaPlayerExtensions[] = {
-      ".3gp", ".ts", ".mid", ".xmf", ".mxmf", ".rtttl", ".rtx", ".ota", ".imy"};
-  static_assert(arraysize(kMediaPlayerExtensions) ==
-                    MediaPlayerContainers::MEDIA_PLAYER_CONTAINERS_COUNT,
-                "Invalid enum or extension change.");
-
-  for (size_t i = 0; i < arraysize(kMediaPlayerExtensions); ++i) {
-    if (base::EndsWith(url.path(), kMediaPlayerExtensions[i],
-                       base::CompareCase::INSENSITIVE_ASCII)) {
-      UMA_HISTOGRAM_ENUMERATION(
-          "Media.WebView.UnsupportedContainer",
-          static_cast<MediaPlayerContainers>(i),
-          MediaPlayerContainers::MEDIA_PLAYER_CONTAINERS_COUNT);
-      return true;
-    }
-  }
-  return false;
+std::unique_ptr<content::WebSocketHandshakeThrottleProvider>
+AwContentRendererClient::CreateWebSocketHandshakeThrottleProvider() {
+  return std::make_unique<AwWebSocketHandshakeThrottleProvider>();
 }
 
 std::unique_ptr<content::URLLoaderThrottleProvider>
@@ -353,16 +302,6 @@ void AwContentRendererClient::GetInterface(
   RenderThread::Get()->GetConnector()->BindInterface(
       service_manager::Identity(content::mojom::kBrowserServiceName),
       interface_name, std::move(interface_pipe));
-}
-
-bool AwContentRendererClient::UsingSafeBrowsingMojoService() {
-  if (safe_browsing_)
-    return true;
-  if (!base::FeatureList::IsEnabled(network::features::kNetworkService))
-    return false;
-  RenderThread::Get()->GetConnector()->BindInterface(
-      content::mojom::kBrowserServiceName, &safe_browsing_);
-  return true;
 }
 
 }  // namespace android_webview

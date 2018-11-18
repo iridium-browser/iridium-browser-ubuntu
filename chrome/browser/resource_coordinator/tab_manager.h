@@ -11,7 +11,6 @@
 #include <string>
 #include <vector>
 
-#include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
@@ -20,12 +19,16 @@
 #include "base/strings/string16.h"
 #include "base/timer/timer.h"
 #include "build/build_config.h"
-#include "chrome/browser/resource_coordinator/discard_reason.h"
+#include "chrome/browser/metrics/desktop_session_duration/desktop_session_duration_tracker.h"
+#include "chrome/browser/resource_coordinator/intervention_policy_database.h"
 #include "chrome/browser/resource_coordinator/lifecycle_unit.h"
 #include "chrome/browser/resource_coordinator/lifecycle_unit_observer.h"
 #include "chrome/browser/resource_coordinator/lifecycle_unit_source_observer.h"
+#include "chrome/browser/resource_coordinator/lifecycle_unit_state.mojom.h"
 #include "chrome/browser/resource_coordinator/tab_lifecycle_observer.h"
 #include "chrome/browser/resource_coordinator/tab_load_tracker.h"
+#include "chrome/browser/resource_coordinator/tab_manager_features.h"
+#include "chrome/browser/resource_coordinator/usage_clock.h"
 #include "chrome/browser/sessions/session_restore_observer.h"
 #include "chrome/browser/ui/browser_tab_strip_tracker.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
@@ -38,7 +41,7 @@ class TabStripModel;
 namespace content {
 class NavigationHandle;
 class WebContents;
-}
+}  // namespace content
 
 namespace resource_coordinator {
 
@@ -78,12 +81,13 @@ class TabManagerStatsCollector;
 // TODO(fdoray): Rename to LifecycleManager. https://crbug.com/775644
 class TabManager : public LifecycleUnitObserver,
                    public LifecycleUnitSourceObserver,
-                   public TabStripModelObserver {
+                   public TabLoadTracker::Observer,
+                   public TabStripModelObserver,
+                   public metrics::DesktopSessionDurationTracker::Observer {
  public:
   // Forward declaration of resource coordinator signal observer.
   class ResourceCoordinatorSignalObserver;
 
-  // Needs to be public for DEFINE_WEB_CONTENTS_USER_DATA_KEY.
   class WebContentsData;
 
   TabManager();
@@ -103,18 +107,7 @@ class TabManager : public LifecycleUnitObserver,
   // urgent, an aggressive fast-kill will be attempted if the sudden termination
   // disablers are allowed to be ignored (e.g. On ChromeOS, we can ignore an
   // unload handler and fast-kill the tab regardless).
-  void DiscardTab(DiscardReason reason);
-
-  // Discards a tab with the given unique ID. The tab still exists in the
-  // tab-strip; clicking on it will reload it. Returns null if the tab cannot
-  // be found or cannot be discarded. Otherwise returns the new web_contents
-  // of the discarded tab.
-  void DiscardTabById(int32_t tab_id, DiscardReason reason);
-
-  // Freezes a tab with the given unique ID. Unlike discarding, freezing does
-  // not kill or change the tab other than stopping its task queues. Revisiting
-  // the tab causes it to unfreeze.
-  void FreezeTabById(int32_t tab_id);
+  void DiscardTab(LifecycleUnitDiscardReason reason);
 
   // Method used by the extensions API to discard tabs. If |contents| is null,
   // discards the least important tab using DiscardTab(). Otherwise discards
@@ -125,19 +118,15 @@ class TabManager : public LifecycleUnitObserver,
   // Log memory statistics for the running processes, then discards a tab.
   // Tab discard happens sometime later, as collecting the statistics touches
   // multiple threads and takes time.
-  void LogMemoryAndDiscardTab(DiscardReason reason);
+  void LogMemoryAndDiscardTab(LifecycleUnitDiscardReason reason);
 
-  // Log memory statistics for the running processes, then call the callback.
-  void LogMemory(const std::string& title, const base::Closure& callback);
+  // Log memory statistics for the running processes.
+  void LogMemory(const std::string& title);
 
   // TODO(fdoray): Remove these methods. TabManager shouldn't know about tabs.
   // https://crbug.com/775644
   void AddObserver(TabLifecycleObserver* observer);
   void RemoveObserver(TabLifecycleObserver* observer);
-
-  // Sets/clears the auto-discardable state of the tab.
-  void SetTabAutoDiscardableState(int32_t tab_id, bool state);
-  void SetTabAutoDiscardableState(content::WebContents* contents, bool state);
 
   // Returns true when a given renderer can be purged if the specified
   // renderer is eligible for purging.
@@ -160,10 +149,6 @@ class TabManager : public LifecycleUnitObserver,
   // before.
   void OnDidFinishNavigation(content::NavigationHandle* navigation_handle);
 
-  // Called by TabManager::WebContentsData to notify TabManager that one tab is
-  // considered loaded. TabManager can decide which tab to load next.
-  void OnTabIsLoaded(content::WebContents* contents);
-
   // Notifies TabManager that one tab WebContents has been destroyed. TabManager
   // needs to clean up data related to that tab.
   void OnWebContentsDestroyed(content::WebContents* contents);
@@ -172,14 +157,6 @@ class TabManager : public LifecycleUnitObserver,
   bool IsSessionRestoreLoadingTabs() const {
     return is_session_restore_loading_tabs_;
   }
-
-  // Returns true if the tab was created by session restore and has not finished
-  // the first navigation.
-  bool IsTabInSessionRestore(content::WebContents* web_contents) const;
-
-  // Returns true if the tab was created by session restore and initially in
-  // foreground.
-  bool IsTabRestoredInForeground(content::WebContents* web_contents) const;
 
   // Returns the number of background tabs that are loading in a background tab
   // opening session.
@@ -194,68 +171,90 @@ class TabManager : public LifecycleUnitObserver,
 
   // Returns the number of restored tabs during session restore. This is
   // non-zero only during session restore.
-  int restored_tab_count() const;
+  int restored_tab_count() const { return restored_tab_count_; }
 
-  // Accessor for the tab load tracker. This lets interested external classes
-  // add themselves as observers.
-  TabLoadTracker& tab_load_tracker() { return tab_load_tracker_; }
-  const TabLoadTracker& tab_load_tracker() const { return tab_load_tracker_; }
+  InterventionPolicyDatabase* intervention_policy_database() {
+    return intervention_policy_database_.get();
+  }
+
+  UsageClock* usage_clock() { return &usage_clock_; }
+
+  // Returns true if the tab was created by session restore and has not finished
+  // the first navigation.
+  static bool IsTabInSessionRestore(content::WebContents* web_contents);
+
+  // Returns true if the tab was created by session restore and initially in
+  // foreground.
+  static bool IsTabRestoredInForeground(content::WebContents* web_contents);
 
  private:
   friend class TabManagerStatsCollectorTest;
+  friend class TabManagerWithProactiveDiscardExperimentEnabledTest;
 
-  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, PurgeBackgroundRenderer);
   FRIEND_TEST_ALL_PREFIXES(TabManagerTest, ActivateTabResetPurgeState);
-  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, ShouldPurgeAtDefaultTime);
-  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, DefaultTimeToPurgeInCorrectRange);
   FRIEND_TEST_ALL_PREFIXES(TabManagerTest, AutoDiscardable);
+  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, BackgroundTabLoadingMode);
+  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, BackgroundTabLoadingSlots);
+  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, BackgroundTabsLoadingOrdering);
   FRIEND_TEST_ALL_PREFIXES(TabManagerTest, CanOnlyDiscardOnce);
   FRIEND_TEST_ALL_PREFIXES(TabManagerTest, ChildProcessNotifications);
+  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, DefaultTimeToPurgeInCorrectRange);
+  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, EnablePageAlmostIdleSignal);
+  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, FreezeTab);
   FRIEND_TEST_ALL_PREFIXES(TabManagerTest, InvalidOrEmptyURL);
+  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, IsInBackgroundTabOpeningSession);
   FRIEND_TEST_ALL_PREFIXES(TabManagerTest, IsInternalPage);
+  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, IsTabRestoredInForeground);
+  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, MaybeThrottleNavigation);
+  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, OnDelayedTabSelected);
+  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, OnDidFinishNavigation);
+  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, OnTabIsLoaded);
+  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, OnWebContentsDestroyed);
   FRIEND_TEST_ALL_PREFIXES(TabManagerTest, OomPressureListener);
+  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, PauseAndResumeBackgroundTabOpening);
+  FRIEND_TEST_ALL_PREFIXES(TabManagerTest,
+                           ProactiveFastShutdownSharedTabProcess);
+  FRIEND_TEST_ALL_PREFIXES(TabManagerTestWithTwoTabs,
+                           ProactiveFastShutdownSingleTabProcess);
+  FRIEND_TEST_ALL_PREFIXES(TabManagerTest,
+                           ProactiveFastShutdownWithBeforeunloadHandler);
+  FRIEND_TEST_ALL_PREFIXES(TabManagerTest,
+                           ProactiveFastShutdownWithUnloadHandler);
+  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, ProtectDevToolsTabsFromDiscarding);
   FRIEND_TEST_ALL_PREFIXES(TabManagerTest, ProtectPDFPages);
-  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, ProtectRecentlyUsedTabs);
+  FRIEND_TEST_ALL_PREFIXES(TabManagerTest,
+                           ProtectRecentlyUsedTabsFromUrgentDiscarding);
   FRIEND_TEST_ALL_PREFIXES(TabManagerTest, ProtectVideoTabs);
+  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, PurgeBackgroundRenderer);
+  FRIEND_TEST_ALL_PREFIXES(TabManagerTest,
+                           SessionRestoreAfterBackgroundTabOpeningSession);
+  FRIEND_TEST_ALL_PREFIXES(TabManagerTest,
+                           SessionRestoreBeforeBackgroundTabOpeningSession);
+  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, ShouldPurgeAtDefaultTime);
   FRIEND_TEST_ALL_PREFIXES(TabManagerTest, TabManagerBasics);
   FRIEND_TEST_ALL_PREFIXES(TabManagerTest, TabManagerWasDiscarded);
   FRIEND_TEST_ALL_PREFIXES(TabManagerTest,
                            TabManagerWasDiscardedCrossSiteSubFrame);
-  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, MaybeThrottleNavigation);
-  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, OnDidFinishNavigation);
-  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, OnTabIsLoaded);
-  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, OnWebContentsDestroyed);
-  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, OnDelayedTabSelected);
   FRIEND_TEST_ALL_PREFIXES(TabManagerTest, TimeoutWhenLoadingBackgroundTabs);
-  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, BackgroundTabLoadingMode);
-  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, BackgroundTabLoadingSlots);
-  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, BackgroundTabsLoadingOrdering);
-  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, PauseAndResumeBackgroundTabOpening);
-  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, IsInBackgroundTabOpeningSession);
-  FRIEND_TEST_ALL_PREFIXES(TabManagerWithExperimentDisabledTest,
-                           IsInBackgroundTabOpeningSession);
-  FRIEND_TEST_ALL_PREFIXES(TabManagerTest,
-                           SessionRestoreBeforeBackgroundTabOpeningSession);
-  FRIEND_TEST_ALL_PREFIXES(TabManagerTest,
-                           SessionRestoreAfterBackgroundTabOpeningSession);
-  FRIEND_TEST_ALL_PREFIXES(TabManagerTest,
-                           ProactiveFastShutdownSingleTabProcess);
-  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, UrgentFastShutdownSingleTabProcess);
-  FRIEND_TEST_ALL_PREFIXES(TabManagerTest,
-                           ProactiveFastShutdownSharedTabProcess);
-  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, UrgentFastShutdownSharedTabProcess);
-  FRIEND_TEST_ALL_PREFIXES(TabManagerTest,
-                           ProactiveFastShutdownWithUnloadHandler);
-  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, UrgentFastShutdownWithUnloadHandler);
-  FRIEND_TEST_ALL_PREFIXES(TabManagerTest,
-                           ProactiveFastShutdownWithBeforeunloadHandler);
-  FRIEND_TEST_ALL_PREFIXES(TabManagerTest,
-                           UrgentFastShutdownWithBeforeunloadHandler);
-  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, IsTabRestoredInForeground);
-  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, EnablePageAlmostIdleSignal);
-  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, FreezeTab);
   FRIEND_TEST_ALL_PREFIXES(TabManagerTest,
                            TrackingNumberOfLoadedLifecycleUnits);
+  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, UrgentFastShutdownSharedTabProcess);
+  FRIEND_TEST_ALL_PREFIXES(TabManagerTestWithTwoTabs,
+                           UrgentFastShutdownSingleTabProcess);
+  FRIEND_TEST_ALL_PREFIXES(TabManagerTest,
+                           UrgentFastShutdownWithBeforeunloadHandler);
+  FRIEND_TEST_ALL_PREFIXES(TabManagerTest, UrgentFastShutdownWithUnloadHandler);
+  FRIEND_TEST_ALL_PREFIXES(TabManagerWithExperimentDisabledTest,
+                           IsInBackgroundTabOpeningSession);
+  FRIEND_TEST_ALL_PREFIXES(TabManagerWithProactiveDiscardExperimentEnabledTest,
+                           GetTimeInBackgroundBeforeProactiveDiscardTest);
+  FRIEND_TEST_ALL_PREFIXES(
+      TabManagerWithProactiveDiscardExperimentEnabledTest,
+      NoProactiveDiscardWhenDiscardingVariationParamDisabled);
+  FRIEND_TEST_ALL_PREFIXES(TabManagerWithProactiveDiscardExperimentEnabledTest,
+                           FreezingWhenDiscardingVariationParamDisabled);
+  FRIEND_TEST_ALL_PREFIXES(TabManagerWithProactiveDiscardExperimentEnabledTest,
+                           NoUnfreezeWhenUnfreezingVariationParamDisabled);
 
   // The time of the first purging after a renderer is backgrounded.
   // The initial value was chosen because most of users activate backgrounded
@@ -267,7 +266,7 @@ class TabManager : public LifecycleUnitObserver,
   // min time to purge times this value.
   const int kDefaultMinMaxTimeToPurgeRatio = 4;
 
-  static void PurgeMemoryAndDiscardTab(DiscardReason reason);
+  static void PurgeMemoryAndDiscardTab(LifecycleUnitDiscardReason reason);
 
   // Returns true if the |url| represents an internal Chrome web UI page that
   // can be easily reloaded and hence makes a good choice to discard.
@@ -313,19 +312,28 @@ class TabManager : public LifecycleUnitObserver,
   void OnMemoryPressure(
       base::MemoryPressureListener::MemoryPressureLevel memory_pressure_level);
 
-  // TabStripModelObserver overrides.
-  void ActiveTabChanged(content::WebContents* old_contents,
-                        content::WebContents* new_contents,
-                        int index,
-                        int reason) override;
-  void TabInsertedAt(TabStripModel* tab_strip_model,
-                     content::WebContents* contents,
-                     int index,
-                     bool foreground) override;
-  void TabReplacedAt(TabStripModel* tab_strip_model,
-                     content::WebContents* old_contents,
-                     content::WebContents* new_contents,
-                     int index) override;
+  // Methods called by OnTabStripModelChanged()
+  void OnActiveTabChanged(content::WebContents* old_contents,
+                          content::WebContents* new_contents);
+  void OnTabInserted(content::WebContents* contents, bool foreground);
+
+  // TabStripModelObserver:
+  void OnTabStripModelChanged(
+      TabStripModel* tab_strip_model,
+      const TabStripModelChange& change,
+      const TabStripSelectionChange& selection) override;
+
+  // TabLoadTracker::Observer:
+  void OnStartTracking(content::WebContents* web_contents,
+                       LoadingState loading_state) override;
+  void OnLoadingStateChange(content::WebContents* web_contents,
+                            LoadingState old_loading_state,
+                            LoadingState new_loading_state) override;
+  void OnStopTracking(content::WebContents* web_contents,
+                      LoadingState loading_state) override;
+
+  // DesktopSessionDurationTracker::Observer:
+  void OnSessionStarted(base::TimeTicks session_start) override;
 
   // Returns the WebContentsData associated with |contents|. Also takes care of
   // creating one if needed.
@@ -333,7 +341,7 @@ class TabManager : public LifecycleUnitObserver,
 
   // Discards the less important LifecycleUnit that supports discarding under
   // |reason|.
-  content::WebContents* DiscardTabImpl(DiscardReason reason);
+  content::WebContents* DiscardTabImpl(LifecycleUnitDiscardReason reason);
 
   void OnSessionRestoreStartedLoadingTabs();
   void OnSessionRestoreFinishedLoadingTabs();
@@ -404,22 +412,82 @@ class TabManager : public LifecycleUnitObserver,
   // Returns true if the background tab force load timer is running.
   bool IsForceLoadTimerRunning() const;
 
+  // Returns the threshold after which a background LifecycleUnit gets
+  // discarded, given the current number of alive LifecycleUnits and experiment
+  // parameters.
+  base::TimeDelta GetTimeInBackgroundBeforeProactiveDiscard() const;
+
+  // Schedules a call to PerformStateTransitions() in |delay|. This overrides
+  // any previously scheduled call.
+  void SchedulePerformStateTransitions(base::TimeDelta delay);
+
+  // Performs LifecycleUnit state transitions.
+  //
+  // To avoid reentrancy, this is never called synchronously. When a state
+  // transition should happen in response to an event, an asynchronous call to
+  // this is scheduled via SchedulePerformStateTransitions(base::TimeDelta()).
+  // https://crbug.com/855053
+  void PerformStateTransitions();
+
+  // If |lifecycle_unit| can be frozen, freezes it. Returns the time at which
+  // this should be called again, or TimeTicks::Max() if no further call is
+  // needed. |now| is the current time.
+  base::TimeTicks MaybeFreezeLifecycleUnit(LifecycleUnit* lifecycle_unit,
+                                           base::TimeTicks now);
+
+  // If |lifecycle_unit| has been frozen long enough and a sufficient amount of
+  // time elapsed since the last unfreeze, unfreezes it and returns the time at
+  // which it should be frozen again. If |lifecycle_unit| can't be unfrozen now,
+  // returns the time at which this should be called again. |lifecycle_unit|
+  // must be FROZEN. |now| is the current time.
+  base::TimeTicks MaybeUnfreezeLifecycleUnit(LifecycleUnit* lifecycle_unit,
+                                             base::TimeTicks now);
+
+  // If enough Chrome usage time has elapsed since |lifecycle_unit| was hidden,
+  // proactively discards it. |lifecycle_unit| must be discardable. Returns the
+  // time at which this should be called again, or TimeTicks::Max() if no
+  // further call is needed. Always returns a zero TimeTicks when a discard
+  // happen, to check immediately if another discard should happen. |now| is the
+  // current time.
+  base::TimeTicks MaybeDiscardLifecycleUnit(LifecycleUnit* lifecycle_unit,
+                                            base::TimeTicks now);
+
   // LifecycleUnitObserver:
+  void OnLifecycleUnitVisibilityChanged(
+      LifecycleUnit* lifecycle_unit,
+      content::Visibility visibility) override;
   void OnLifecycleUnitDestroyed(LifecycleUnit* lifecycle_unit) override;
-  void OnLifecycleUnitStateChanged(LifecycleUnit* lifecycle_unit) override;
+  void OnLifecycleUnitStateChanged(
+      LifecycleUnit* lifecycle_unit,
+      LifecycleUnitState last_state,
+      LifecycleUnitStateChangeReason reason) override;
 
   // LifecycleUnitSourceObserver:
   void OnLifecycleUnitCreated(LifecycleUnit* lifecycle_unit) override;
 
+  // Indicates if TabManager should proactively discard tabs.
+  bool ShouldProactivelyDiscardTabs();
+
   // LifecycleUnits managed by this.
   LifecycleUnitSet lifecycle_units_;
 
-  // Number of LifecycleUnits in |lifecycle_units_| that are State::LOADED. Used
-  // to determine threshold for proactive tab discarding experiments.
+  // Number of LifecycleUnits in |lifecycle_units_| that are not discarded. Used
+  // to determine timeout threshold for proactive discarding.
   int num_loaded_lifecycle_units_ = 0;
+
+  // Parameters for proactive freezing and discarding.
+  ProactiveTabFreezeAndDiscardParams proactive_freeze_discard_params_;
 
   // Timer to periodically update the stats of the renderers.
   base::RepeatingTimer update_timer_;
+
+  // Timer to update the state of LifecycleUnits. This is an std::unique_ptr to
+  // allow initialization after mock time is setup in unit tests.
+  std::unique_ptr<base::OneShotTimer> state_transitions_timer_;
+
+  // Callback for |state_transitions_timer_|. Stored in a member to avoid
+  // repetitive binds.
+  const base::RepeatingClosure state_transitions_callback_;
 
   // A listener to global memory pressure events.
   std::unique_ptr<base::MemoryPressureListener> memory_pressure_listener_;
@@ -470,9 +538,15 @@ class TabManager : public LifecycleUnitObserver,
   // session restore.
   std::unique_ptr<TabManagerStatsCollector> stats_collector_;
 
-  // Tracks tab loads, taking into account PageAlmostIdle, NavigationThrottles
-  // and other complications.
-  TabLoadTracker tab_load_tracker_;
+  // The intervention policy database, should be initialized by
+  // InterventionPolicyDatabaseComponentInstallerPolicy.
+  std::unique_ptr<InterventionPolicyDatabase> intervention_policy_database_;
+
+  // Last time at which a LifecycleUnit was temporarily unfrozen.
+  base::TimeTicks last_unfreeze_time_;
+
+  // A clock that advances when Chrome is in use.
+  UsageClock usage_clock_;
 
   // Weak pointer factory used for posting delayed tasks.
   base::WeakPtrFactory<TabManager> weak_ptr_factory_;

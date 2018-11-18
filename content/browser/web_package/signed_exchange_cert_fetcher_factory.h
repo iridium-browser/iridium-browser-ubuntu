@@ -9,8 +9,9 @@
 #include <vector>
 
 #include "base/callback_forward.h"
+#include "base/optional.h"
+#include "base/unguessable_token.h"
 #include "content/browser/web_package/signed_exchange_cert_fetcher.h"
-#include "content/browser/web_package/signed_exchange_utils.h"
 #include "content/common/content_export.h"
 #include "url/origin.h"
 
@@ -20,6 +21,7 @@ class SharedURLLoaderFactory;
 
 namespace content {
 
+class SignedExchangeDevToolsProxy;
 class SignedExchangeCertFetcher;
 class URLLoaderThrottle;
 
@@ -32,15 +34,17 @@ class CONTENT_EXPORT SignedExchangeCertFetcherFactory {
   virtual std::unique_ptr<SignedExchangeCertFetcher> CreateFetcherAndStart(
       const GURL& cert_url,
       bool force_fetch,
+      SignedExchangeVersion version,
       SignedExchangeCertFetcher::CertificateCallback callback,
-      const signed_exchange_utils::LogCallback& error_message_callback) = 0;
+      SignedExchangeDevToolsProxy* devtools_proxy) = 0;
 
   using URLLoaderThrottlesGetter = base::RepeatingCallback<
       std::vector<std::unique_ptr<content::URLLoaderThrottle>>()>;
   static std::unique_ptr<SignedExchangeCertFetcherFactory> Create(
       url::Origin request_initiator,
       scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
-      URLLoaderThrottlesGetter url_loader_throttles_getter);
+      URLLoaderThrottlesGetter url_loader_throttles_getter,
+      const base::Optional<base::UnguessableToken>& throttling_profile_id);
 };
 
 }  // namespace content

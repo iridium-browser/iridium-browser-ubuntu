@@ -12,6 +12,7 @@
 
 #include "core/fxge/dib/cfx_imagestretcher.h"
 #include "core/fxge/fx_dib.h"
+#include "third_party/base/compiler_specific.h"
 #include "third_party/base/numerics/safe_conversions.h"
 #include "third_party/base/ptr_util.h"
 
@@ -98,7 +99,7 @@ void bicubic_get_pos_weight(int pos_pixel[],
   v_w[3] = SDP_Table[512 - res_y];
 }
 
-FXDIB_Format GetTransformedFormat(const RetainPtr<CFX_DIBSource>& pDrc) {
+FXDIB_Format GetTransformedFormat(const RetainPtr<CFX_DIBBase>& pDrc) {
   if (pDrc->IsAlphaMask())
     return FXDIB_8bppMask;
 
@@ -131,7 +132,7 @@ void WriteColorResult(std::function<uint8_t(int offset)> func,
   uint32_t* dest32 = reinterpret_cast<uint32_t*>(dest);
   if (bHasAlpha) {
     if (format == FXDIB_Argb) {
-      *dest32 = FXARGB_TODIB(FXARGB_MAKE(func(3), red_y, green_m, blue_c));
+      *dest32 = FXARGB_TODIB(ArgbEncode(func(3), red_y, green_m, blue_c));
     } else if (format == FXDIB_Rgba) {
       dest[0] = blue_c;
       dest[1] = green_m;
@@ -145,7 +146,7 @@ void WriteColorResult(std::function<uint8_t(int offset)> func,
   if (format == FXDIB_Cmyka) {
     *dest32 = FXCMYK_TODIB(CmykEncode(blue_c, green_m, red_y, func(3)));
   } else {
-    *dest32 = FXARGB_TODIB(FXARGB_MAKE(kOpaqueAlpha, red_y, green_m, blue_c));
+    *dest32 = FXARGB_TODIB(ArgbEncode(kOpaqueAlpha, red_y, green_m, blue_c));
   }
 }
 
@@ -179,7 +180,7 @@ class CPDF_FixedMatrix {
   const int f;
 };
 
-class CFX_BilinearMatrix : public CPDF_FixedMatrix {
+class CFX_BilinearMatrix final : public CPDF_FixedMatrix {
  public:
   explicit CFX_BilinearMatrix(const CFX_Matrix& src) : CPDF_FixedMatrix(src) {}
 
@@ -188,8 +189,8 @@ class CFX_BilinearMatrix : public CPDF_FixedMatrix {
     *x1 = pdfium::base::saturated_cast<int>(val.first / kBase);
     *y1 = pdfium::base::saturated_cast<int>(val.second / kBase);
 
-    *res_x = static_cast<int>(fmodf(val.first, kBase));
-    *res_y = static_cast<int>(fmodf(val.second, kBase));
+    *res_x = static_cast<int>(val.first) % kBase;
+    *res_y = static_cast<int>(val.second) % kBase;
     if (*res_x < 0 && *res_x > -kBase)
       *res_x = kBase + *res_x;
     if (*res_y < 0 && *res_y > -kBase)
@@ -199,7 +200,7 @@ class CFX_BilinearMatrix : public CPDF_FixedMatrix {
 
 }  // namespace
 
-CFX_ImageTransformer::CFX_ImageTransformer(const RetainPtr<CFX_DIBSource>& pSrc,
+CFX_ImageTransformer::CFX_ImageTransformer(const RetainPtr<CFX_DIBBase>& pSrc,
                                            const CFX_Matrix* pMatrix,
                                            int flags,
                                            const FX_RECT* pClip)
@@ -479,7 +480,7 @@ void CFX_ImageTransformer::DoBilinearLoop(
     std::function<void(const BilinearData&, uint8_t*)> func) {
   CFX_BilinearMatrix matrix_fix(cdata.matrix);
   for (int row = 0; row < m_result.Height(); row++) {
-    uint8_t* dest = const_cast<uint8_t*>(cdata.bitmap->GetScanline(row));
+    uint8_t* dest = cdata.bitmap->GetWritableScanline(row);
     for (int col = 0; col < m_result.Width(); col++) {
       BilinearData d;
       d.res_x = 0;
@@ -488,7 +489,7 @@ void CFX_ImageTransformer::DoBilinearLoop(
       d.src_row_l = 0;
       matrix_fix.Transform(col, row, &d.src_col_l, &d.src_row_l, &d.res_x,
                            &d.res_y);
-      if (InStretchBounds(d.src_col_l, d.src_row_l)) {
+      if (LIKELY(InStretchBounds(d.src_col_l, d.src_row_l))) {
         AdjustCoords(&d.src_col_l, &d.src_row_l);
         d.src_col_r = d.src_col_l + 1;
         d.src_row_r = d.src_row_l + 1;
@@ -508,7 +509,7 @@ void CFX_ImageTransformer::DoBicubicLoop(
     std::function<void(const BicubicData&, uint8_t*)> func) {
   CFX_BilinearMatrix matrix_fix(cdata.matrix);
   for (int row = 0; row < m_result.Height(); row++) {
-    uint8_t* dest = const_cast<uint8_t*>(cdata.bitmap->GetScanline(row));
+    uint8_t* dest = cdata.bitmap->GetWritableScanline(row);
     for (int col = 0; col < m_result.Width(); col++) {
       BicubicData d;
       d.res_x = 0;
@@ -517,7 +518,7 @@ void CFX_ImageTransformer::DoBicubicLoop(
       d.src_row_l = 0;
       matrix_fix.Transform(col, row, &d.src_col_l, &d.src_row_l, &d.res_x,
                            &d.res_y);
-      if (InStretchBounds(d.src_col_l, d.src_row_l)) {
+      if (LIKELY(InStretchBounds(d.src_col_l, d.src_row_l))) {
         AdjustCoords(&d.src_col_l, &d.src_row_l);
         bicubic_get_pos_weight(d.pos_pixel, d.u_w, d.v_w, d.src_col_l,
                                d.src_row_l, d.res_x, d.res_y, stretch_width(),
@@ -535,13 +536,13 @@ void CFX_ImageTransformer::DoDownSampleLoop(
     std::function<void(const DownSampleData&, uint8_t*)> func) {
   CPDF_FixedMatrix matrix_fix(cdata.matrix);
   for (int row = 0; row < m_result.Height(); row++) {
-    uint8_t* dest = const_cast<uint8_t*>(cdata.bitmap->GetScanline(row));
+    uint8_t* dest = cdata.bitmap->GetWritableScanline(row);
     for (int col = 0; col < m_result.Width(); col++) {
       DownSampleData d;
       d.src_col = 0;
       d.src_row = 0;
       matrix_fix.Transform(col, row, &d.src_col, &d.src_row);
-      if (InStretchBounds(d.src_col, d.src_row)) {
+      if (LIKELY(InStretchBounds(d.src_col, d.src_row))) {
         AdjustCoords(&d.src_col, &d.src_row);
         func(d, dest);
       }

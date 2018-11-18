@@ -50,7 +50,7 @@ from idl_types import IdlUnionType
 from utilities import to_snake_case
 import v8_attributes  # for IdlType.constructor_type_name
 from v8_globals import includes
-from v8_utilities import binding_header_basename, extended_attribute_value_contains
+from v8_utilities import binding_header_filename, extended_attribute_value_contains
 
 
 ################################################################################
@@ -86,7 +86,12 @@ ARRAY_BUFFER_AND_VIEW_TYPES = TYPED_ARRAY_TYPES.union(frozenset([
     'DataView',
     'SharedArrayBuffer',
 ]))
-
+# We have an unfortunate hack that treats types whose name ends with
+# 'Constructor' as aliases to IDL interface object. This white list is used to
+# disable the hack.
+_CALLBACK_CONSTRUCTORS = frozenset((
+    'CustomElementConstructor',
+))
 
 IdlType.is_array_buffer_or_view = property(
     lambda self: self.base_type in ARRAY_BUFFER_AND_VIEW_TYPES)
@@ -126,7 +131,6 @@ CPP_SPECIAL_CONVERSION_RULES = {
     'Dictionary': 'Dictionary',
     'EventHandler': 'EventListener*',
     'EventListener': 'EventListener*',
-    'NodeFilter': 'V8NodeFilterCondition*',
     'Promise': 'ScriptPromise',
     'ScriptValue': 'ScriptValue',
     # FIXME: Eliminate custom bindings for XPathNSResolver  http://crbug.com/345529
@@ -202,12 +206,12 @@ def cpp_type(idl_type, extended_attributes=None, raw_type=False, used_as_rvalue_
         if inner_type.is_dictionary or inner_type.is_sequence or inner_type.is_record_type:
             # TODO(jbroman, bashi): Implement this if needed.
             # This is non-trivial to support because HeapVector refuses to hold
-            # Optional<>, and IDLDictionaryBase (and subclasses) have no
+            # base::Optional<>, and IDLDictionaryBase (and subclasses) have no
             # integrated null state that can be distinguished from a present but
             # empty dictionary. It's unclear whether this will ever come up in
             # real spec WebIDL.
             raise NotImplementedError('Sequences of nullable dictionary, sequence or record types are not yet supported.')
-        return 'Optional<%s>' % inner_type.cpp_type_args(
+        return 'base::Optional<%s>' % inner_type.cpp_type_args(
             extended_attributes, raw_type, used_as_rvalue_type, used_as_variadic_argument, used_in_cpp_sequence)
 
     # Array or sequence types
@@ -268,8 +272,8 @@ def cpp_type(idl_type, extended_attributes=None, raw_type=False, used_as_rvalue_
         return cpp_template_type('Member', implemented_as_class)
     if idl_type.is_dictionary:
         if used_as_rvalue_type:
-            return 'const %s&' % base_idl_type
-        return base_idl_type
+            return 'const %s&' % idl_type.implemented_as
+        return idl_type.implemented_as
     if idl_type.is_union_type:
         # Avoid "AOrNullOrB" for cpp type of (A? or B) because we generate
         # V8AOrBOrNull to handle nulle for (A? or B), (A or B?) and (A or B)?
@@ -281,9 +285,12 @@ def cpp_type(idl_type, extended_attributes=None, raw_type=False, used_as_rvalue_
                                   for member in idl_type.member_types)
         return 'const %s&' % idl_type_name if used_as_rvalue_type else idl_type_name
     if idl_type.is_callback_function:
+        v8_type_name = 'V8' + base_idl_type
         if idl_type.is_custom_callback_function:
-            return 'V8%s' % base_idl_type
-        return 'V8%s*' % base_idl_type
+            return v8_type_name
+        if not used_in_cpp_sequence:
+            return v8_type_name + '*'
+        return cpp_template_type('TraceWrapperMember', v8_type_name)
 
     if base_idl_type == 'void':
         return base_idl_type
@@ -388,7 +395,7 @@ IdlTypeBase.is_gc_type = property(is_gc_type)
 
 
 def is_traceable(idl_type):
-    return (idl_type.is_garbage_collected or idl_type.is_dictionary)
+    return idl_type.is_garbage_collected or idl_type.is_dictionary or idl_type.is_callback_function
 
 IdlTypeBase.is_traceable = property(is_traceable)
 IdlUnionType.is_traceable = property(lambda self: True)
@@ -410,11 +417,8 @@ INCLUDES_FOR_TYPE = {
                             'core/typed_arrays/array_buffer_view_helpers.h',
                             'core/typed_arrays/flexible_array_buffer_view.h']),
     'Dictionary': set(['bindings/core/v8/dictionary.h']),
-    'EventHandler': set(['bindings/core/v8/v8_abstract_event_listener.h',
-                         'bindings/core/v8/v8_event_listener_helper.h']),
-    'EventListener': set(['bindings/core/v8/binding_security.h',
-                          'bindings/core/v8/v8_event_listener_helper.h',
-                          'core/frame/local_dom_window.h']),
+    'EventHandler': set(['bindings/core/v8/v8_event_listener_helper.h']),
+    'EventListener': set(['bindings/core/v8/v8_event_listener_helper.h']),
     'HTMLCollection': set(['bindings/core/v8/v8_html_collection.h',
                            'core/dom/class_collection.h',
                            'core/dom/tag_collection.h',
@@ -422,7 +426,6 @@ INCLUDES_FOR_TYPE = {
                            'core/html/html_table_rows_collection.h',
                            'core/html/forms/html_data_list_options_collection.h',
                            'core/html/forms/html_form_controls_collection.h']),
-    'NodeFilter': set(['bindings/core/v8/v8_node_filter_condition.h']),
     'NodeList': set(['bindings/core/v8/v8_node_list.h',
                      'core/dom/name_node_list.h',
                      'core/dom/node_list.h',
@@ -445,7 +448,7 @@ def includes_for_type(idl_type, extended_attributes=None):
         return INCLUDES_FOR_TYPE[base_idl_type]
     if base_idl_type in TYPED_ARRAY_TYPES:
         return INCLUDES_FOR_TYPE['ArrayBufferView'].union(
-            set(['bindings/%s/v8/%s' % (component_dir[base_idl_type], binding_header_basename(base_idl_type))])
+            set(['bindings/%s/v8/%s' % (component_dir[base_idl_type], binding_header_filename(base_idl_type))])
         )
     if idl_type.is_basic_type:
         return set(['bindings/core/v8/idl_types.h',
@@ -457,18 +460,19 @@ def includes_for_type(idl_type, extended_attributes=None):
         # and these do not have header files, as they are part of the generated
         # bindings for the interface
         return set()
-    if base_idl_type.endswith('Constructor'):
+    if (base_idl_type.endswith('Constructor') and
+            base_idl_type not in _CALLBACK_CONSTRUCTORS):
         # FIXME: replace with a [ConstructorAttribute] extended attribute
         base_idl_type = idl_type.constructor_type_name
     if idl_type.is_custom_callback_function:
         return set()
     if idl_type.is_callback_function:
         component = IdlType.callback_functions[base_idl_type]['component_dir']
-        return set(['bindings/%s/v8/%s' % (component, binding_header_basename(base_idl_type))])
+        return set(['bindings/%s/v8/%s' % (component, binding_header_filename(base_idl_type))])
     if base_idl_type not in component_dir:
         return set()
     return set(['bindings/%s/v8/%s' % (component_dir[base_idl_type],
-                                       binding_header_basename(base_idl_type))])
+                                       binding_header_filename(base_idl_type))])
 
 IdlType.includes_for_type = includes_for_type
 
@@ -522,6 +526,10 @@ def impl_includes_for_type(idl_type, interfaces_info):
     base_idl_type = idl_type.base_type
     if idl_type.is_string_type:
         includes_for_type.add('platform/wtf/text/wtf_string.h')
+    if idl_type.is_callback_function:
+        component = IdlType.callback_functions[base_idl_type]['component_dir']
+        return set(['bindings/%s/v8/%s' % (component, binding_header_filename(base_idl_type)),
+                    'platform/bindings/trace_wrapper_member.h'])
     if base_idl_type in interfaces_info:
         interface_info = interfaces_info[base_idl_type]
         includes_for_type.add(interface_info['include_path'])
@@ -1034,11 +1042,8 @@ CPP_VALUE_TO_V8_VALUE = {
     'StringOrNull': '{cpp_value}.IsNull() ? v8::Local<v8::Value>(v8::Null({isolate})) : V8String({isolate}, {cpp_value})',
     # Special cases
     'Dictionary': '{cpp_value}.V8Value()',
-    'EventHandler': (
-        '{cpp_value} ? ' +
-        'V8AbstractEventListener::Cast({cpp_value})->GetListenerOrNull(' +
-        '{isolate}, impl->GetExecutionContext()) : ' +
-        'v8::Null({isolate}).As<v8::Value>()'),
+    'EventHandler':
+        'JSBasedEventListener::GetListenerOrNull({isolate}, impl, {cpp_value})',
     'NodeFilter': 'ToV8({cpp_value}, {creation_context}, {isolate})',
     'Record': 'ToV8({cpp_value}, {creation_context}, {isolate})',
     'ScriptValue': '{cpp_value}.V8Value()',
@@ -1114,6 +1119,26 @@ IdlUnionType.literal_cpp_value = union_literal_cpp_value
 IdlArrayOrSequenceType.literal_cpp_value = array_or_sequence_literal_cpp_value
 
 
+_IDL_TYPE_TO_NATIVE_VALUE_TRAITS_TAG_MAP = {
+    'DOMString': 'IDLString',
+    'USVString': 'IDLUSVString',
+    'any': 'ScriptValue',
+    'boolean': 'IDLBoolean',
+    'long': 'IDLLong',
+    'sequence<DOMString>': 'IDLSequence<IDLString>',
+    'unsigned short': 'IDLUnsignedShort',
+    'void': None,
+}
+
+
+def idl_type_to_native_value_traits_tag(idl_type):
+    idl_type_str = str(idl_type)
+    if idl_type_str in _IDL_TYPE_TO_NATIVE_VALUE_TRAITS_TAG_MAP:
+        return _IDL_TYPE_TO_NATIVE_VALUE_TRAITS_TAG_MAP[idl_type_str]
+    else:
+        raise Exception("Type `%s' is not supported." % idl_type_str)
+
+
 ################################################################################
 # Utility properties for nullable types
 ################################################################################
@@ -1123,8 +1148,7 @@ def cpp_type_has_null_value(idl_type):
     # - String types (String/AtomicString) represent null as a null string,
     #   i.e. one for which String::IsNull() returns true.
     # - Enum types, as they are implemented as Strings.
-    # - Interface types (raw pointer or RefPtr) represent null as
-    #   a null pointer.
+    # - Interface types (raw pointer) represent null as a null pointer.
     # - Union types, as thier container classes can represent null value.
     # - 'Object' and 'any' type. We use ScriptValue for object type.
     return (idl_type.is_string_type
@@ -1146,7 +1170,7 @@ def is_implicit_nullable(idl_type):
 
 def is_explicit_nullable(idl_type):
     # Nullable type that isn't implicit nullable (see above.) For such types,
-    # we use WTF::Optional<T> or similar explicit ways to represent a null value.
+    # we use base::Optional<T> or similar explicit ways to represent a null value.
     return idl_type.is_nullable and not idl_type.is_implicit_nullable
 
 IdlTypeBase.is_implicit_nullable = property(is_implicit_nullable)

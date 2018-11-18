@@ -6,12 +6,10 @@ package org.chromium.chrome.browser.ntp.cards;
 
 import android.text.method.LinkMovementMethod;
 import android.view.LayoutInflater;
-import android.view.View;
 import android.view.ViewGroup;
 import android.widget.TextView;
 
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.suggestions.SuggestionsConfig;
 import org.chromium.chrome.browser.suggestions.SuggestionsNavigationDelegate;
 import org.chromium.ui.text.NoUnderlineClickableSpan;
 import org.chromium.ui.text.SpanApplier;
@@ -33,8 +31,8 @@ public class Footer extends OptionalLeaf {
     }
 
     @Override
-    public void visitOptionalItem(NodeVisitor visitor) {
-        visitor.visitFooter();
+    public String describeForTesting() {
+        return "FOOTER";
     }
 
     public void setVisible(boolean visible) {
@@ -49,27 +47,14 @@ public class Footer extends OptionalLeaf {
             super(LayoutInflater.from(root.getContext())
                             .inflate(R.layout.new_tab_page_footer, root, false));
 
-            NoUnderlineClickableSpan link = new NoUnderlineClickableSpan() {
-                @Override
-                public void onClick(View view) {
-                    navigationDelegate.navigateToHelpPage();
-                }
-            };
+            NoUnderlineClickableSpan link =
+                    new NoUnderlineClickableSpan((view) -> navigationDelegate.navigateToHelpPage());
 
             TextView textView = (TextView) itemView.findViewById(R.id.text);
             textView.setText(SpanApplier.applySpans(
                     root.getResources().getString(R.string.ntp_learn_more_about_suggested_content),
                     new SpanApplier.SpanInfo("<link>", "</link>", link)));
             textView.setMovementMethod(LinkMovementMethod.getInstance());
-
-            if (SuggestionsConfig.useModernLayout()) {
-                itemView.setPadding(itemView.getPaddingLeft(),
-                        root.getResources().getDimensionPixelSize(
-                                R.dimen.modern_suggestions_footer_padding_top),
-                        itemView.getPaddingRight(),
-                        root.getResources().getDimensionPixelSize(
-                                R.dimen.modern_suggestions_footer_padding_bottom));
-            }
         }
     }
 }

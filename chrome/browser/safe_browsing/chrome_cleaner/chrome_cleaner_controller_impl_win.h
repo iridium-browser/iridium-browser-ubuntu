@@ -44,9 +44,6 @@ class ChromeCleanerControllerDelegate {
 
   // Starts the reboot prompt flow if a cleanup requires a machine restart.
   virtual void StartRebootPromptFlow(ChromeCleanerController* controller);
-
-  // Returns true if the UserInitiatedCleanups feature is enabled.
-  virtual bool UserInitiatedCleanupsFeatureEnabled();
 };
 
 class ChromeCleanerControllerImpl : public ChromeCleanerController {
@@ -55,7 +52,6 @@ class ChromeCleanerControllerImpl : public ChromeCleanerController {
   static ChromeCleanerControllerImpl* GetInstance();
 
   // ChromeCleanerController overrides.
-  bool ShouldShowCleanupInSettingsUI() override;
   State state() const override;
   IdleReason idle_reason() const override;
   void SetLogsEnabled(bool logs_enabled) override;
@@ -69,8 +65,12 @@ class ChromeCleanerControllerImpl : public ChromeCleanerController {
   void OnSwReporterReady(SwReporterInvocationSequence&& invocations) override;
   void Scan(const SwReporterInvocation& reporter_invocation) override;
   void ReplyWithUserResponse(Profile* profile,
+                             extensions::ExtensionService* extension_service,
                              UserResponse user_response) override;
   void Reboot() override;
+  bool IsAllowedByPolicy() override;
+  bool IsReportingAllowedByPolicy() override;
+  bool IsReportingManagedByPolicy() override;
 
   static void ResetInstanceForTesting();
   // Passing in a nullptr as |delegate| resets the delegate to a default
@@ -84,6 +84,8 @@ class ChromeCleanerControllerImpl : public ChromeCleanerController {
  private:
   ChromeCleanerControllerImpl();
   ~ChromeCleanerControllerImpl() override;
+
+  void Init();
 
   void NotifyObserver(Observer* observer) const;
   void SetStateAndNotifyObservers(State state);
@@ -121,6 +123,8 @@ class ChromeCleanerControllerImpl : public ChromeCleanerController {
   // Pointer to either real_delegate_ or one set by tests.
   ChromeCleanerControllerDelegate* delegate_;
 
+  extensions::ExtensionService* extension_service_;
+
   State state_ = State::kIdle;
   // The logs permission checkboxes in the Chrome Cleaner dialog and webui page
   // are opt out.
@@ -138,7 +142,7 @@ class ChromeCleanerControllerImpl : public ChromeCleanerController {
   base::Time time_scanning_started_;
   base::Time time_cleanup_started_;
 
-  base::ObserverList<Observer> observer_list_;
+  base::ObserverList<Observer>::Unchecked observer_list_;
 
   // Mutex that guards |pending_invocation_type_|,
   // |on_demand_sw_reporter_fetcher_| and |cached_reporter_invocations_|.

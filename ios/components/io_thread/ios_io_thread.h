@@ -19,7 +19,6 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "components/prefs/pref_member.h"
-#include "components/ssl_config/ssl_config_service_manager.h"
 #include "ios/web/public/web_thread_delegate.h"
 #include "net/base/network_change_notifier.h"
 #include "net/http/http_network_session.h"
@@ -39,6 +38,8 @@ class HttpAuthPreferences;
 class HttpServerProperties;
 class HttpTransactionFactory;
 class HttpUserAgentSettings;
+class LoggingNetworkChangeObserver;
+class NetLog;
 class NetworkDelegate;
 class ProxyConfigService;
 class ProxyResolutionService;
@@ -48,10 +49,6 @@ class URLRequestContext;
 class URLRequestContextGetter;
 class URLRequestJobFactory;
 }  // namespace net
-
-namespace net_log {
-class ChromeNetLog;
-}  // namespace net_log
 
 namespace io_thread {
 
@@ -109,7 +106,7 @@ class IOSIOThread : public web::WebThreadDelegate {
     // pins.
     std::unique_ptr<net::TransportSecurityState> transport_security_state;
     std::unique_ptr<net::CTVerifier> cert_transparency_verifier;
-    scoped_refptr<net::SSLConfigService> ssl_config_service;
+    std::unique_ptr<net::SSLConfigService> ssl_config_service;
     std::unique_ptr<net::HttpAuthPreferences> http_auth_preferences;
     std::unique_ptr<net::HttpAuthHandlerFactory> http_auth_handler_factory;
     std::unique_ptr<net::HttpServerProperties> http_server_properties;
@@ -126,7 +123,7 @@ class IOSIOThread : public web::WebThreadDelegate {
   };
 
   // |net_log| must either outlive the IOSIOThread or be NULL.
-  IOSIOThread(PrefService* local_state, net_log::ChromeNetLog* net_log);
+  IOSIOThread(PrefService* local_state, net::NetLog* net_log);
   ~IOSIOThread() override;
 
   // Can only be called on the IO thread.
@@ -137,7 +134,7 @@ class IOSIOThread : public web::WebThreadDelegate {
   // into IOSIOThread global objects.
   void SetGlobalsForTesting(Globals* globals);
 
-  net_log::ChromeNetLog* net_log();
+  net::NetLog* net_log();
 
   // Handles changing to On The Record mode, discarding confidential data.
   void ChangedToOnTheRecord();
@@ -177,9 +174,6 @@ class IOSIOThread : public web::WebThreadDelegate {
   // Sets up HttpAuthPreferences and HttpAuthHandlerFactory on Globals.
   void CreateDefaultAuthHandlerFactory();
 
-  // Returns an SSLConfigService instance.
-  net::SSLConfigService* GetSSLConfigService();
-
   // Discards confidential data. To be called on IO thread only.
   void ChangedToOnTheRecordOnIOThread();
 
@@ -190,7 +184,7 @@ class IOSIOThread : public web::WebThreadDelegate {
 
   // The NetLog is owned by the application context, to allow logging from other
   // threads during shutdown, but is used most frequently on the IO thread.
-  net_log::ChromeNetLog* net_log_;
+  net::NetLog* net_log_;
 
   // These member variables are basically global, but their lifetimes are tied
   // to the IOSIOThread.  IOSIOThread owns them all, despite not using
@@ -204,14 +198,8 @@ class IOSIOThread : public web::WebThreadDelegate {
 
   net::HttpNetworkSession::Params params_;
 
-  // Observer that logs network changes to the ChromeNetLog.
-  class LoggingNetworkChangeObserver;
-  std::unique_ptr<LoggingNetworkChangeObserver> network_change_observer_;
-
-  // This is an instance of the default SSLConfigServiceManager for the current
-  // platform and it gets SSL preferences from local_state object.
-  std::unique_ptr<ssl_config::SSLConfigServiceManager>
-      ssl_config_service_manager_;
+  // Observer that logs network changes to the NetLog.
+  std::unique_ptr<net::LoggingNetworkChangeObserver> network_change_observer_;
 
   // These member variables are initialized by a task posted to the IO thread,
   // which gets posted by calling certain member functions of IOSIOThread.

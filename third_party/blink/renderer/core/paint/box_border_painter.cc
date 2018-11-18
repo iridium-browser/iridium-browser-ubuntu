@@ -12,6 +12,7 @@
 #include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context_state_saver.h"
+#include "third_party/blink/renderer/platform/graphics/skia/skia_utils.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
@@ -417,10 +418,10 @@ void ClipQuad(GraphicsContext& context,
               const FloatPoint quad[],
               bool antialiased) {
   SkPath path;
-  path.moveTo(quad[0]);
-  path.lineTo(quad[1]);
-  path.lineTo(quad[2]);
-  path.lineTo(quad[3]);
+  path.moveTo(FloatPointToSkPoint(quad[0]));
+  path.lineTo(FloatPointToSkPoint(quad[1]));
+  path.lineTo(FloatPointToSkPoint(quad[2]));
+  path.lineTo(FloatPointToSkPoint(quad[3]));
 
   context.ClipPath(path, antialiased ? kAntiAliased : kNotAntiAliased);
 }
@@ -516,21 +517,28 @@ void BoxBorderPainter::DrawDoubleBorder(GraphicsContext& context,
 
   const Color color = FirstEdge().color;
 
+  // When painting outlines, we ignore outer/inner radii.
+  const auto force_rectangular = !outer_.IsRounded() && !inner_.IsRounded();
+
   // outer stripe
   const LayoutRectOutsets outer_third_insets =
       DoubleStripeInsets(edges_, BorderEdge::kDoubleBorderStripeOuter);
-  const FloatRoundedRect outer_third_rect = style_.GetRoundedInnerBorderFor(
+  FloatRoundedRect outer_third_rect = style_.GetRoundedInnerBorderFor(
       border_rect, outer_third_insets, include_logical_left_edge_,
       include_logical_right_edge_);
+  if (force_rectangular)
+    outer_third_rect.SetRadii(FloatRoundedRect::Radii());
   DrawBleedAdjustedDRRect(context, bleed_avoidance_, outer_, outer_third_rect,
                           color);
 
   // inner stripe
   const LayoutRectOutsets inner_third_insets =
       DoubleStripeInsets(edges_, BorderEdge::kDoubleBorderStripeInner);
-  const FloatRoundedRect inner_third_rect = style_.GetRoundedInnerBorderFor(
+  FloatRoundedRect inner_third_rect = style_.GetRoundedInnerBorderFor(
       border_rect, inner_third_insets, include_logical_left_edge_,
       include_logical_right_edge_);
+  if (force_rectangular)
+    inner_third_rect.SetRadii(FloatRoundedRect::Radii());
   context.FillDRRect(inner_third_rect, inner_, color);
 }
 
@@ -655,7 +663,7 @@ BoxBorderPainter::BoxBorderPainter(const ComputedStyle& style,
 }
 
 void BoxBorderPainter::ComputeBorderProperties() {
-  for (unsigned i = 0; i < WTF_ARRAY_LENGTH(edges_); ++i) {
+  for (unsigned i = 0; i < arraysize(edges_); ++i) {
     const BorderEdge& edge = edges_[i];
 
     if (!edge.ShouldRender()) {
@@ -763,7 +771,7 @@ BorderEdgeFlags BoxBorderPainter::PaintOpacityGroup(
     float effective_opacity) const {
   DCHECK(effective_opacity > 0 && effective_opacity <= 1);
 
-  const size_t opacity_group_count = border_info.opacity_groups.size();
+  const wtf_size_t opacity_group_count = border_info.opacity_groups.size();
 
   // For overdraw logic purposes, treat missing/transparent edges as completed.
   if (index >= opacity_group_count)

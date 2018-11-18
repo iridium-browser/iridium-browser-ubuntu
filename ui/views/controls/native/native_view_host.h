@@ -49,14 +49,23 @@ class VIEWS_EXPORT NativeViewHost : public View {
 
   // Sets the corner radius for clipping gfx::NativeView. Returns true on
   // success or false if the platform doesn't support the operation.
-  // NB: This does not interact nicely with fast_resize.
+  // This method calls SetCustomMask internally.
   bool SetCornerRadius(int corner_radius);
+
+  // Sets the custom layer mask for clipping gfx::NativeView. Returns true on
+  // success or false if the platform doesn't support the operation.
+  // NB: This does not interact nicely with fast_resize.
+  bool SetCustomMask(std::unique_ptr<ui::LayerOwner> mask);
 
   // Sets the size for the NativeView that may or may not match the size of this
   // View when it is being captured. If the size does not match, scaling will
   // occur. Pass an empty size to revert to the default behavior, where the
   // NatieView's size always equals this View's size.
   void SetNativeViewSize(const gfx::Size& size);
+
+  // Returns the container that contains this host's native view. Returns null
+  // if there's no attached native view or it has no container.
+  gfx::NativeView GetNativeViewContainer() const;
 
   // Fast resizing will move the native view and clip its visible region, this
   // will result in white areas and will not resize the content (so scrollbars

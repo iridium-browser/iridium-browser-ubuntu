@@ -27,9 +27,9 @@
 
 #include "third_party/blink/renderer/core/layout/layout_scrollbar.h"
 #include "third_party/blink/renderer/core/paint/scrollbar_painter.h"
+#include "third_party/blink/renderer/core/scroll/scrollbar.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context.h"
 #include "third_party/blink/renderer/platform/graphics/paint/drawing_recorder.h"
-#include "third_party/blink/renderer/platform/scroll/scrollbar.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 
 namespace blink {
@@ -39,10 +39,9 @@ LayoutScrollbarTheme* LayoutScrollbarTheme::GetLayoutScrollbarTheme() {
   return &theme;
 }
 
-void LayoutScrollbarTheme::ButtonSizesAlongTrackAxis(
-    const ScrollbarThemeClient& scrollbar,
-    int& before_size,
-    int& after_size) {
+void LayoutScrollbarTheme::ButtonSizesAlongTrackAxis(const Scrollbar& scrollbar,
+                                                     int& before_size,
+                                                     int& after_size) {
   IntRect first_button = BackButtonRect(scrollbar, kBackButtonStartPart);
   IntRect second_button = ForwardButtonRect(scrollbar, kForwardButtonStartPart);
   IntRect third_button = BackButtonRect(scrollbar, kBackButtonEndPart);
@@ -56,7 +55,7 @@ void LayoutScrollbarTheme::ButtonSizesAlongTrackAxis(
   }
 }
 
-bool LayoutScrollbarTheme::HasButtons(const ScrollbarThemeClient& scrollbar) {
+bool LayoutScrollbarTheme::HasButtons(const Scrollbar& scrollbar) {
   int start_size;
   int end_size;
   ButtonSizesAlongTrackAxis(scrollbar, start_size, end_size);
@@ -65,31 +64,27 @@ bool LayoutScrollbarTheme::HasButtons(const ScrollbarThemeClient& scrollbar) {
                                                           : scrollbar.Height());
 }
 
-bool LayoutScrollbarTheme::HasThumb(const ScrollbarThemeClient& scrollbar) {
+bool LayoutScrollbarTheme::HasThumb(const Scrollbar& scrollbar) {
   return TrackLength(scrollbar) - ThumbLength(scrollbar) >= 0;
 }
 
-int LayoutScrollbarTheme::MinimumThumbLength(
-    const ScrollbarThemeClient& scrollbar) {
+int LayoutScrollbarTheme::MinimumThumbLength(const Scrollbar& scrollbar) {
   return ToLayoutScrollbar(scrollbar).MinimumThumbLength();
 }
 
-IntRect LayoutScrollbarTheme::BackButtonRect(
-    const ScrollbarThemeClient& scrollbar,
-    ScrollbarPart part_type,
-    bool) {
+IntRect LayoutScrollbarTheme::BackButtonRect(const Scrollbar& scrollbar,
+                                             ScrollbarPart part_type,
+                                             bool) {
   return ToLayoutScrollbar(scrollbar).ButtonRect(part_type);
 }
 
-IntRect LayoutScrollbarTheme::ForwardButtonRect(
-    const ScrollbarThemeClient& scrollbar,
-    ScrollbarPart part_type,
-    bool) {
+IntRect LayoutScrollbarTheme::ForwardButtonRect(const Scrollbar& scrollbar,
+                                                ScrollbarPart part_type,
+                                                bool) {
   return ToLayoutScrollbar(scrollbar).ButtonRect(part_type);
 }
 
-IntRect LayoutScrollbarTheme::TrackRect(const ScrollbarThemeClient& scrollbar,
-                                        bool) {
+IntRect LayoutScrollbarTheme::TrackRect(const Scrollbar& scrollbar, bool) {
   if (!HasButtons(scrollbar))
     return scrollbar.FrameRect();
 
@@ -101,7 +96,7 @@ IntRect LayoutScrollbarTheme::TrackRect(const ScrollbarThemeClient& scrollbar,
 }
 
 IntRect LayoutScrollbarTheme::ConstrainTrackRectToTrackPieces(
-    const ScrollbarThemeClient& scrollbar,
+    const Scrollbar& scrollbar,
     const IntRect& rect) {
   IntRect back_rect = ToLayoutScrollbar(scrollbar).TrackPieceRectWithMargins(
       kBackTrackPart, rect);

@@ -19,7 +19,7 @@ const char kAccessibilityStickyKeysEnabled[] =
     "settings.a11y.sticky_keys_enabled";
 // A boolean pref which determines whether spoken feedback is enabled.
 const char kAccessibilitySpokenFeedbackEnabled[] = "settings.accessibility";
-// A boolean pref which determines whether high conrast is enabled.
+// A boolean pref which determines whether high contrast is enabled.
 const char kAccessibilityHighContrastEnabled[] =
     "settings.a11y.high_contrast_enabled";
 // A boolean pref which determines whether screen magnifier is enabled.
@@ -63,6 +63,8 @@ const char kAccessibilitySelectToSpeakEnabled[] =
     "settings.a11y.select_to_speak";
 // A boolean pref which determines whether switch access is enabled.
 const char kAccessibilitySwitchAccessEnabled[] = "settings.a11y.switch_access";
+// A boolean pref which determines whether dictation is enabled.
+const char kAccessibilityDictationEnabled[] = "settings.a11y.dictation";
 // A boolean pref which determines whether the accessibility menu shows
 // regardless of the state of a11y features.
 const char kShouldAlwaysShowAccessibilityMenu[] = "settings.a11y.enable_menu";
@@ -72,6 +74,46 @@ const char kDockedMagnifierEnabled[] = "ash.docked_magnifier.enabled";
 // A double pref storing the scale value of the Docked Magnifier feature by
 // which the screen is magnified.
 const char kDockedMagnifierScale[] = "ash.docked_magnifier.scale";
+
+// A boolean pref which indicates whether the docked magnifier confirmation
+// dialog has ever been shown.
+const char kDockedMagnifierAcceleratorDialogHasBeenAccepted[] =
+    "settings.a11y.docked_magnifier_accelerator_dialog_has_been_accepted";
+// A boolean pref which indicates whether the high contrast magnifier
+// confirmation dialog has ever been shown.
+const char kHighContrastAcceleratorDialogHasBeenAccepted[] =
+    "settings.a11y.high_contrast_accelerator_dialog_has_been_accepted";
+// A boolean pref which indicates whether the screen magnifier confirmation
+// dialog has ever been shown.
+const char kScreenMagnifierAcceleratorDialogHasBeenAccepted[] =
+    "settings.a11y.screen_magnifier_accelerator_dialog_has_been_accepted";
+// A boolean pref which indicates whether the dictation confirmation dialog has
+// ever been shown.
+const char kDictationAcceleratorDialogHasBeenAccepted[] =
+    "settings.a11y.dictation_accelerator_dialog_has_been_accepted";
+
+// A dictionary pref that stores the mixed mirror mode parameters.
+const char kDisplayMixedMirrorModeParams[] =
+    "settings.display.mixed_mirror_mode_param";
+// Power state of the current displays from the last run.
+const char kDisplayPowerState[] = "settings.display.power_state";
+// A dictionary pref that stores per display preferences.
+const char kDisplayProperties[] = "settings.display.properties";
+// A dictionary pref that specifies the state of the rotation lock, and the
+// display orientation, for the internal display.
+const char kDisplayRotationLock[] = "settings.display.rotation_lock";
+// A dictionary pref that stores the touch associations for the device.
+const char kDisplayTouchAssociations[] = "settings.display.touch_associations";
+// A dictionary pref that stores the port mapping for touch devices.
+const char kDisplayTouchPortAssociations[] =
+    "settings.display.port_associations";
+// A list pref that stores the mirror info for each external display.
+const char kExternalDisplayMirrorInfo[] =
+    "settings.display.external_display_mirror_info";
+// A dictionary pref that specifies per-display layout/offset information.
+// Its key is the ID of the display and its value is a dictionary for the
+// layout/offset information.
+const char kSecondaryDisplays[] = "settings.display.secondary_displays";
 
 // A boolean pref which stores whether a stylus has been seen before.
 const char kHasSeenStylus[] = "ash.has_seen_stylus";
@@ -84,6 +126,20 @@ const char kEnableStylusTools[] = "settings.enable_stylus_tools";
 // eject input event has been received.
 const char kLaunchPaletteOnEjectEvent[] =
     "settings.launch_palette_on_eject_event";
+
+// A string pref storing the type of lock screen notification mode.
+// "show" -> show notifications on the lock screen
+// "hide" -> hide notifications at all on the lock screen (default)
+// "hideSensitive" -> hide sensitive content on the lock screen
+// (other values are treated as "hide")
+const char kMessageCenterLockScreenMode[] =
+    "ash.message_center.lock_screen_mode";
+
+// Value of each options of the lock screen notification settings. They are
+// used the pref of ash::prefs::kMessageCenterLockScreenMode.
+const char kMessageCenterLockScreenModeShow[] = "show";
+const char kMessageCenterLockScreenModeHide[] = "hide";
+const char kMessageCenterLockScreenModeHideSensitive[] = "hideSensitive";
 
 // A boolean pref storing the enabled status of the NightLight feature.
 const char kNightLightEnabled[] = "ash.night_light.enabled";
@@ -158,8 +214,14 @@ const char kPowerLidClosedAction[] = "power.lid_closed_action";
 const char kPowerUseAudioActivity[] = "power.use_audio_activity";
 const char kPowerUseVideoActivity[] = "power.use_video_activity";
 
-// Should extensions be able to use the chrome.power API to override
-// screen-related power management (including locking)?
+// Should extensions, ARC apps, and other code within Chrome be able to override
+// system power management (preventing automatic actions like sleeping, locking,
+// or screen dimming)?
+const char kPowerAllowWakeLocks[] = "power.allow_wake_locks";
+
+// Should extensions, ARC apps, and other code within Chrome be able to override
+// display-related power management? (Disallowing wake locks in general takes
+// precedence over this.)
 const char kPowerAllowScreenWakeLocks[] = "power.allow_screen_wake_locks";
 
 // Amount by which the screen-dim delay should be scaled while the system
@@ -182,6 +244,9 @@ const char kPowerWaitForInitialUserActivity[] =
 // nonzero level when user activity is observed.
 const char kPowerForceNonzeroBrightnessForUserActivity[] =
     "power.force_nonzero_brightness_for_user_activity";
+
+// Boolean controlling whether smart dim model is enabled.
+const char kPowerSmartDimEnabled[] = "power.smart_dim_enabled";
 
 // |kShelfAlignment| and |kShelfAutoHideBehavior| have a local variant. The
 // local variant is not synced and is used if set. If the local variant is not

@@ -1,4 +1,4 @@
-// Copyright 2016 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -7,28 +7,13 @@
 
 #import <UIKit/UIKit.h>
 
-@protocol BrowserCommands;
-
-// The a11y ID of the text input field in the find-in-page bar.
-extern NSString* const kFindInPageInputFieldId;
-
-// The a11y ID of the "next" button in the find-in-page bar.
-extern NSString* const kFindInPageNextButtonId;
-
-// The a11y ID of the "previous" button in the find-in-page bar.
-extern NSString* const kFindInPagePreviousButtonId;
-
-// The a11y ID of the "close" button in the find-in-page bar.
-extern NSString* const kFindInPageCloseButtonId;
-
 // Find bar view.
 // It shows a textfield that hosts the search term, a label with results count
 // in format of "1 of 13", and next/previous/close buttons.
 @interface FindBarView : UIView
 
-// Designated initializer.
-// |darkAppearance| makes the background to dark color and changes font colors
-// to lighter colors.
+// Designated initializer. |darkAppearance| makes the background to dark color
+// and changes font colors to lighter colors.
 - (instancetype)initWithDarkAppearance:(BOOL)darkAppearance
     NS_DESIGNATED_INITIALIZER;
 
@@ -40,13 +25,13 @@ extern NSString* const kFindInPageCloseButtonId;
 - (void)updateResultsLabelWithText:(NSString*)text;
 
 // The textfield with search term.
-@property(nonatomic, weak) UITextField* inputField;
+@property(nonatomic, strong) UITextField* inputField;
 // Button to go to previous search result.
-@property(nonatomic, weak) UIButton* previousButton;
+@property(nonatomic, strong) UIButton* previousButton;
 // Button to go to next search result.
-@property(nonatomic, weak) UIButton* nextButton;
+@property(nonatomic, strong) UIButton* nextButton;
 // Button to dismiss Find in Page.
-@property(nonatomic, weak) UIButton* closeButton;
+@property(nonatomic, strong) UIButton* closeButton;
 
 @end
 

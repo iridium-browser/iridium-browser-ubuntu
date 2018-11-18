@@ -298,16 +298,19 @@ basic_types_enumeration = [
     'SamplerExternal2DY2YEXT',
     'Sampler2DRect',
     'Sampler2DMS',
+    'Sampler2DMSArray',
     'ISampler2D',
     'ISampler3D',
     'ISamplerCube',
     'ISampler2DArray',
     'ISampler2DMS',
+    'ISampler2DMSArray',
     'USampler2D',
     'USampler3D',
     'USamplerCube',
     'USampler2DArray',
     'USampler2DMS',
+    'USampler2DMSArray',
     'Sampler2DShadow',
     'SamplerCubeShadow',
     'Sampler2DArrayShadow',
@@ -1133,7 +1136,7 @@ def process_single_variable_group(condition, group_name, group):
                 template_args['field_type'] = TType(field_type).get_dynamic_type_string()
                 template_name_declaration = 'constexpr const ImmutableString {field_name}("{field_name}");'
                 name_declarations.add(template_name_declaration.format(**template_args))
-                template_add_field = '    {fields}->push_back(new TField({field_type}, BuiltInName::{field_name}, zeroSourceLoc));'
+                template_add_field = '    {fields}->push_back(new TField({field_type}, BuiltInName::{field_name}, zeroSourceLoc, SymbolType::BuiltIn));'
                 init_member_variables.append(template_add_field.format(**template_args))
             template_init_temp_variable = '    {class} *{name_with_suffix} = new {class}(BuiltInId::{name_with_suffix}, BuiltInName::{name}, TExtension::{extension}, {fields});'
             init_member_variables.append(template_init_temp_variable.format(**template_args))

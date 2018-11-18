@@ -6,12 +6,11 @@
 
 #include <memory>
 
-#include "third_party/blink/public/platform/modules/screen_orientation/web_screen_orientation_type.h"
+#include "third_party/blink/public/common/screen_orientation/web_screen_orientation_type.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/modules/event_target_modules.h"
 #include "third_party/blink/renderer/modules/screen_orientation/lock_orientation_callback.h"
@@ -59,7 +58,7 @@ static ScreenOrientationInfo* OrientationsMap(unsigned& length) {
       {portrait, kWebScreenOrientationLockPortrait},
       {landscape, kWebScreenOrientationLockLandscape},
       {natural, kWebScreenOrientationLockNatural}};
-  length = WTF_ARRAY_LENGTH(orientation_map);
+  length = arraysize(orientation_map);
 
   return orientation_map;
 }
@@ -108,7 +107,7 @@ ScreenOrientation* ScreenOrientation::Create(LocalFrame* frame) {
   // created when the LocalFrame is created so we shouldn't be in that
   // situation.
   // In order to create the ScreenOrientationController lazily, we would need
-  // to be able to access WebFrameClient from modules/.
+  // to be able to access WebLocalFrameClient from modules/.
 
   orientation->Controller()->SetOrientation(orientation);
   return orientation;
@@ -154,7 +153,7 @@ ScriptPromise ScreenOrientation::lock(ScriptState* state,
 
   if (!document || !Controller()) {
     DOMException* exception = DOMException::Create(
-        kInvalidStateError,
+        DOMExceptionCode::kInvalidStateError,
         "The object is no longer associated to a document.");
     resolver->Reject(exception);
     return promise;
@@ -162,7 +161,7 @@ ScriptPromise ScreenOrientation::lock(ScriptState* state,
 
   if (document->IsSandboxed(kSandboxOrientationLock)) {
     DOMException* exception =
-        DOMException::Create(kSecurityError,
+        DOMException::Create(DOMExceptionCode::kSecurityError,
                              "The document is sandboxed and lacks the "
                              "'allow-orientation-lock' flag.");
     resolver->Reject(exception);

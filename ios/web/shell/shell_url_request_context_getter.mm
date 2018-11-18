@@ -12,7 +12,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/path_service.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #import "ios/net/cookies/cookie_store_ios_persistent.h"
 #import "ios/web/public/web_client.h"
 #include "ios/web/shell/shell_network_delegate.h"
@@ -73,17 +73,19 @@ net::URLRequestContext* ShellURLRequestContextGetter::GetURLRequestContext() {
 
     // Setup the cookie store.
     base::FilePath cookie_path;
-    bool cookie_path_found = PathService::Get(base::DIR_APP_DATA, &cookie_path);
+    bool cookie_path_found =
+        base::PathService::Get(base::DIR_APP_DATA, &cookie_path);
     DCHECK(cookie_path_found);
     cookie_path = cookie_path.Append("WebShell").Append("Cookies");
     scoped_refptr<net::CookieMonster::PersistentCookieStore> persistent_store =
         new net::SQLitePersistentCookieStore(
             cookie_path, network_task_runner_,
             base::CreateSequencedTaskRunnerWithTraits(
-                {base::MayBlock(), base::TaskPriority::BACKGROUND}),
+                {base::MayBlock(), base::TaskPriority::BEST_EFFORT}),
             true, nullptr);
     std::unique_ptr<net::CookieStoreIOS> cookie_store(
-        new net::CookieStoreIOSPersistent(persistent_store.get()));
+        new net::CookieStoreIOSPersistent(persistent_store.get(),
+                                          net_log_.get()));
     storage_->set_cookie_store(std::move(cookie_store));
 
     std::string user_agent =
@@ -94,7 +96,8 @@ net::URLRequestContext* ShellURLRequestContextGetter::GetURLRequestContext() {
     storage_->set_proxy_resolution_service(
         net::ProxyResolutionService::CreateUsingSystemProxyResolver(
             std::move(proxy_config_service_), url_request_context_->net_log()));
-    storage_->set_ssl_config_service(new net::SSLConfigServiceDefaults);
+    storage_->set_ssl_config_service(
+        std::make_unique<net::SSLConfigServiceDefaults>());
     storage_->set_cert_verifier(net::CertVerifier::CreateDefault());
 
     storage_->set_transport_security_state(
@@ -102,12 +105,12 @@ net::URLRequestContext* ShellURLRequestContextGetter::GetURLRequestContext() {
     storage_->set_cert_transparency_verifier(
         base::WrapUnique(new net::MultiLogCTVerifier));
     storage_->set_ct_policy_enforcer(
-        base::WrapUnique(new net::CTPolicyEnforcer));
+        base::WrapUnique(new net::DefaultCTPolicyEnforcer));
     transport_security_persister_ =
         std::make_unique<net::TransportSecurityPersister>(
             url_request_context_->transport_security_state(), base_path_,
             base::CreateSequencedTaskRunnerWithTraits(
-                {base::MayBlock(), base::TaskPriority::BACKGROUND}));
+                {base::MayBlock(), base::TaskPriority::BEST_EFFORT}));
     storage_->set_channel_id_service(std::make_unique<net::ChannelIDService>(
         new net::DefaultChannelIDStore(nullptr)));
     storage_->set_http_server_properties(

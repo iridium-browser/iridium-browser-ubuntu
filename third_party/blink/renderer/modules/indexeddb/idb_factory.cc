@@ -34,11 +34,9 @@
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/public/platform/web_security_origin.h"
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_binding_for_modules.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/use_counter.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_database.h"
@@ -46,6 +44,7 @@
 #include "third_party/blink/renderer/modules/indexeddb/idb_key.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_tracing.h"
 #include "third_party/blink/renderer/modules/indexeddb/indexed_db_client.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/histogram.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 
@@ -57,12 +56,16 @@ static const char kPermissionDeniedErrorMessage[] =
 IDBFactory::IDBFactory() = default;
 
 static bool IsContextValid(ExecutionContext* context) {
-  DCHECK(context->IsDocument() || context->IsWorkerGlobalScope());
-  if (context->IsDocument()) {
-    Document* document = ToDocument(context);
+  DCHECK(IsA<Document>(context) || context->IsWorkerGlobalScope());
+  if (auto* document = DynamicTo<Document>(context))
     return document->GetFrame() && document->GetPage();
-  }
   return true;
+}
+
+WebIDBFactory* IDBFactory::GetFactory() {
+  if (!web_idb_factory_)
+    web_idb_factory_ = Platform::Current()->CreateIdbFactory();
+  return web_idb_factory_.get();
 }
 
 IDBRequest* IDBFactory::GetDatabaseNames(ScriptState* script_state,
@@ -90,12 +93,12 @@ IDBRequest* IDBFactory::GetDatabaseNames(ScriptState* script_state,
   if (!IndexedDBClient::From(ExecutionContext::From(script_state))
            ->AllowIndexedDB(ExecutionContext::From(script_state),
                             "Database Listing")) {
-    request->HandleResponse(
-        DOMException::Create(kUnknownError, kPermissionDeniedErrorMessage));
+    request->HandleResponse(DOMException::Create(
+        DOMExceptionCode::kUnknownError, kPermissionDeniedErrorMessage));
     return request;
   }
 
-  Platform::Current()->IdbFactory()->GetDatabaseNames(
+  GetFactory()->GetDatabaseNames(
       request->CreateWebCallbacks().release(),
       WebSecurityOrigin(
           ExecutionContext::From(script_state)->GetSecurityOrigin()),
@@ -121,7 +124,6 @@ IDBOpenDBRequest* IDBFactory::OpenInternal(ScriptState* script_state,
                                            ExceptionState& exception_state) {
   IDB_TRACE1("IDBFactory::open", "name", name.Utf8());
   IDBRequest::AsyncTraceState metrics("IDBFactory::open");
-  IDBDatabase::RecordApiCallsHistogram(kIDBOpenCall);
   DCHECK(version >= 1 || version == IDBDatabaseMetadata::kNoVersion);
   if (!IsContextValid(ExecutionContext::From(script_state)))
     return nullptr;
@@ -146,12 +148,12 @@ IDBOpenDBRequest* IDBFactory::OpenInternal(ScriptState* script_state,
 
   if (!IndexedDBClient::From(ExecutionContext::From(script_state))
            ->AllowIndexedDB(ExecutionContext::From(script_state), name)) {
-    request->HandleResponse(
-        DOMException::Create(kUnknownError, kPermissionDeniedErrorMessage));
+    request->HandleResponse(DOMException::Create(
+        DOMExceptionCode::kUnknownError, kPermissionDeniedErrorMessage));
     return request;
   }
 
-  Platform::Current()->IdbFactory()->Open(
+  GetFactory()->Open(
       name, version, transaction_id, request->CreateWebCallbacks().release(),
       database_callbacks->CreateWebCallbacks().release(),
       WebSecurityOrigin(
@@ -191,7 +193,6 @@ IDBOpenDBRequest* IDBFactory::DeleteDatabaseInternal(
     bool force_close) {
   IDB_TRACE1("IDBFactory::deleteDatabase", "name", name.Utf8());
   IDBRequest::AsyncTraceState metrics("IDBFactory::deleteDatabase");
-  IDBDatabase::RecordApiCallsHistogram(kIDBDeleteDatabaseCall);
   if (!IsContextValid(ExecutionContext::From(script_state)))
     return nullptr;
   if (!ExecutionContext::From(script_state)
@@ -213,12 +214,12 @@ IDBOpenDBRequest* IDBFactory::DeleteDatabaseInternal(
 
   if (!IndexedDBClient::From(ExecutionContext::From(script_state))
            ->AllowIndexedDB(ExecutionContext::From(script_state), name)) {
-    request->HandleResponse(
-        DOMException::Create(kUnknownError, kPermissionDeniedErrorMessage));
+    request->HandleResponse(DOMException::Create(
+        DOMExceptionCode::kUnknownError, kPermissionDeniedErrorMessage));
     return request;
   }
 
-  Platform::Current()->IdbFactory()->DeleteDatabase(
+  GetFactory()->DeleteDatabase(
       name, request->CreateWebCallbacks().release(),
       WebSecurityOrigin(
           ExecutionContext::From(script_state)->GetSecurityOrigin()),
@@ -239,7 +240,7 @@ short IDBFactory::cmp(ScriptState* script_state,
     return 0;
   DCHECK(first);
   if (!first->IsValid()) {
-    exception_state.ThrowDOMException(kDataError,
+    exception_state.ThrowDOMException(DOMExceptionCode::kDataError,
                                       IDBDatabase::kNotValidKeyErrorMessage);
     return 0;
   }
@@ -251,7 +252,7 @@ short IDBFactory::cmp(ScriptState* script_state,
     return 0;
   DCHECK(second);
   if (!second->IsValid()) {
-    exception_state.ThrowDOMException(kDataError,
+    exception_state.ThrowDOMException(DOMExceptionCode::kDataError,
                                       IDBDatabase::kNotValidKeyErrorMessage);
     return 0;
   }

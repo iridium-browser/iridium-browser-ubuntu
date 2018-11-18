@@ -6,6 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LOADER_RESOURCE_IMAGE_RESOURCE_CONTENT_H_
 
 #include <memory>
+#include "base/auto_reset.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/loader/resource/image_resource_observer.h"
 #include "third_party/blink/renderer/platform/geometry/int_rect.h"
@@ -16,7 +17,6 @@
 #include "third_party/blink/renderer/platform/loader/fetch/resource_load_priority.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_status.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
-#include "third_party/blink/renderer/platform/wtf/auto_reset.h"
 #include "third_party/blink/renderer/platform/wtf/hash_counted_set.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
 
@@ -60,10 +60,6 @@ class CORE_EXPORT ImageResourceContent final
   // Returns the NullImage() if the image is not available yet.
   blink::Image* GetImage() const;
   bool HasImage() const { return image_.get(); }
-
-  // Returns an image and the image's resolution scale factor.
-  static std::pair<blink::Image*, float> BrokenCanvas(
-      float device_scale_factor);
 
   // The device pixel ratio we got from the server for this image, or 1.0.
   float DevicePixelRatioHeaderValue() const;
@@ -112,7 +108,7 @@ class CORE_EXPORT ImageResourceContent final
   const KURL& Url() const;
   bool IsAccessAllowed(const SecurityOrigin*);
   const ResourceResponse& GetResponse() const;
-  Optional<ResourceError> GetResourceError() const;
+  base::Optional<ResourceError> GetResourceError() const;
   // DEPRECATED: ImageResourceContents consumers shouldn't need to worry about
   // whether the underlying Resource is being revalidated.
   bool IsCacheValidator() const;
@@ -176,6 +172,14 @@ class CORE_EXPORT ImageResourceContent final
     return is_refetchable_data_from_disk_cache_;
   }
 
+  // Optimized image policies: These methods are used to determine whether the
+  // image resource violates any of the image policies in effect on the current
+  // page.
+  bool IsAcceptableContentType();
+  bool IsAcceptableCompressionRatio();
+
+  void LoadDeferredImage(ResourceFetcher* fetcher);
+
  private:
   using CanDeferInvalidation = ImageResourceObserver::CanDeferInvalidation;
 
@@ -185,7 +189,7 @@ class CORE_EXPORT ImageResourceContent final
   void DecodedSizeChangedTo(const blink::Image*, size_t new_size) override;
   bool ShouldPauseAnimation(const blink::Image*) override;
   void AnimationAdvanced(const blink::Image*) override;
-  void ChangedInRect(const blink::Image*, const IntRect&) override;
+  void Changed(const blink::Image*) override;
   void AsyncLoadCompleted(const blink::Image*) override;
 
   scoped_refptr<Image> CreateImage(bool is_multipart);
@@ -194,13 +198,11 @@ class CORE_EXPORT ImageResourceContent final
   enum NotifyFinishOption { kShouldNotifyFinish, kDoNotNotifyFinish };
 
   // If not null, changeRect is the changed part of the image.
-  void NotifyObservers(NotifyFinishOption,
-                       CanDeferInvalidation,
-                       const IntRect* change_rect = nullptr);
+  void NotifyObservers(NotifyFinishOption, CanDeferInvalidation);
   void MarkObserverFinished(ImageResourceObserver*);
   void UpdateToLoadedContentStatus(ResourceStatus);
 
-  class ProhibitAddRemoveObserverInScope : public AutoReset<bool> {
+  class ProhibitAddRemoveObserverInScope : public base::AutoReset<bool> {
    public:
     ProhibitAddRemoveObserverInScope(const ImageResourceContent* content)
         : AutoReset(&content->is_add_remove_observer_prohibited_, true) {}

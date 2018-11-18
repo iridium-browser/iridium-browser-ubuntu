@@ -16,6 +16,7 @@
 #include "ios/chrome/browser/reading_list/reading_list_distiller_page_factory.h"
 #include "ios/chrome/browser/reading_list/reading_list_download_service.h"
 #include "ios/chrome/browser/reading_list/reading_list_model_factory.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 
 // static
 ReadingListDownloadService*
@@ -55,7 +56,7 @@ ReadingListDownloadServiceFactory::BuildServiceInstanceFor(
 
   auto distiller_url_fetcher_factory =
       std::make_unique<dom_distiller::DistillerURLFetcherFactory>(
-          context->GetRequestContext());
+          context->GetSharedURLLoaderFactory());
 
   dom_distiller::proto::DomDistillerOptions options;
   auto distiller_factory =
@@ -65,8 +66,8 @@ ReadingListDownloadServiceFactory::BuildServiceInstanceFor(
   return std::make_unique<ReadingListDownloadService>(
       ReadingListModelFactory::GetForBrowserState(chrome_browser_state),
       chrome_browser_state->GetPrefs(), chrome_browser_state->GetStatePath(),
-      chrome_browser_state->GetRequestContext(), std::move(distiller_factory),
-      std::move(distiller_page_factory));
+      chrome_browser_state->GetSharedURLLoaderFactory(),
+      std::move(distiller_factory), std::move(distiller_page_factory));
 }
 
 web::BrowserState* ReadingListDownloadServiceFactory::GetBrowserStateToUse(

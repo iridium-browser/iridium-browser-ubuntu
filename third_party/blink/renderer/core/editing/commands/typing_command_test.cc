@@ -5,7 +5,6 @@
 #include "third_party/blink/renderer/core/editing/commands/typing_command.h"
 
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/editing/frame_selection.h"
 #include "third_party/blink/renderer/core/editing/position.h"
@@ -15,6 +14,7 @@
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/testing/dummy_page_holder.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 
 #include <memory>
 
@@ -45,10 +45,11 @@ TEST_F(TypingCommandTest, insertLineBreakWithIllFormedHTML) {
   div->AppendChild(tr);
 
   LocalFrame* frame = GetDocument().GetFrame();
-  frame->Selection().SetSelectionAndEndTyping(SelectionInDOMTree::Builder()
-                                                  .Collapse(Position(form, 0))
-                                                  .Extend(Position(header, 0))
-                                                  .Build());
+  frame->Selection().SetSelection(SelectionInDOMTree::Builder()
+                                      .Collapse(Position(form, 0))
+                                      .Extend(Position(header, 0))
+                                      .Build(),
+                                  SetSelectionOptions());
 
   // Inserting line break should not crash or hit assertion.
   TypingCommand::InsertLineBreak(GetDocument());
@@ -57,8 +58,9 @@ TEST_F(TypingCommandTest, insertLineBreakWithIllFormedHTML) {
 // http://crbug.com/767599
 TEST_F(TypingCommandTest,
        DontCrashWhenReplaceSelectionCommandLeavesBadSelection) {
-  Selection().SetSelectionAndEndTyping(
-      SetSelectionTextToBody("<div contenteditable>^<h1>H1</h1>ello|</div>"));
+  Selection().SetSelection(
+      SetSelectionTextToBody("<div contenteditable>^<h1>H1</h1>ello|</div>"),
+      SetSelectionOptions());
 
   // This call shouldn't crash.
   TypingCommand::InsertText(
@@ -71,13 +73,15 @@ TEST_F(TypingCommandTest,
 // crbug.com/794397
 TEST_F(TypingCommandTest, ForwardDeleteInvalidatesSelection) {
   GetDocument().setDesignMode("on");
-  Selection().SetSelectionAndEndTyping(SetSelectionTextToBody(
-      "<blockquote>^"
-      "<q>"
-      "<table contenteditable=\"false\"><colgroup width=\"-1\">\n</table>|"
-      "</q>"
-      "</blockquote>"
-      "<q>\n<svg></svg></q>"));
+  Selection().SetSelection(
+      SetSelectionTextToBody(
+          "<blockquote>^"
+          "<q>"
+          "<table contenteditable=\"false\"><colgroup width=\"-1\">\n</table>|"
+          "</q>"
+          "</blockquote>"
+          "<q>\n<svg></svg></q>"),
+      SetSelectionOptions());
 
   EditingState editing_state;
   TypingCommand::ForwardDeleteKeyPressed(GetDocument(), &editing_state);

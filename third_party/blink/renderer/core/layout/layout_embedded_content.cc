@@ -24,7 +24,7 @@
 
 #include "third_party/blink/renderer/core/layout/layout_embedded_content.h"
 
-#include "third_party/blink/renderer/core/dom/ax_object_cache.h"
+#include "third_party/blink/renderer/core/accessibility/ax_object_cache.h"
 #include "third_party/blink/renderer/core/exported/web_plugin_container_impl.h"
 #include "third_party/blink/renderer/core/frame/embedded_content_view.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
@@ -35,7 +35,6 @@
 #include "third_party/blink/renderer/core/layout/hit_test_result.h"
 #include "third_party/blink/renderer/core/layout/layout_analyzer.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
-#include "third_party/blink/renderer/core/page/scrolling/root_scroller_util.h"
 #include "third_party/blink/renderer/core/paint/embedded_content_painter.h"
 
 namespace blink {
@@ -112,6 +111,9 @@ EmbeddedContentView* LayoutEmbeddedContent::GetEmbeddedContentView() const {
 }
 
 PaintLayerType LayoutEmbeddedContent::LayerTypeRequired() const {
+  if (RequiresAcceleratedCompositing())
+    return kNormalPaintLayer;
+
   PaintLayerType type = LayoutReplaced::LayerTypeRequired();
   if (type != kNoPaintLayer)
     return type;
@@ -124,7 +126,7 @@ bool LayoutEmbeddedContent::RequiresAcceleratedCompositing() const {
   // Second, if this is a LayoutObject with a contentDocument and that document
   // needs a layer, then we need a layer.
   WebPluginContainerImpl* plugin_view = Plugin();
-  if (plugin_view && plugin_view->PlatformLayer())
+  if (plugin_view && plugin_view->CcLayer())
     return true;
 
   if (!GetNode() || !GetNode()->IsFrameOwnerElement())
@@ -154,10 +156,10 @@ bool LayoutEmbeddedContent::NodeAtPointOverEmbeddedContentView(
 
   // Check to see if we are really over the EmbeddedContentView itself (and not
   // just in the border/padding area).
-  if ((inside || result.IsRectBasedTest()) && !had_result &&
+  if ((inside || location_in_container.IsRectBasedTest()) && !had_result &&
       result.InnerNode() == GetNode()) {
     result.SetIsOverEmbeddedContentView(
-        ContentBoxRect().Contains(result.LocalPoint()));
+        PhysicalContentBoxRect().Contains(result.LocalPoint()));
   }
   return inside;
 }
@@ -168,8 +170,9 @@ bool LayoutEmbeddedContent::NodeAtPoint(
     const LayoutPoint& accumulated_offset,
     HitTestAction action) {
   FrameView* frame_view = ChildFrameView();
-  if (!frame_view || !frame_view->IsLocalFrameView() ||
-      !result.GetHitTestRequest().AllowsChildFrameContent()) {
+  bool skip_contents = (result.GetHitTestRequest().GetStopNode() == this ||
+                        !result.GetHitTestRequest().AllowsChildFrameContent());
+  if (!frame_view || !frame_view->IsLocalFrameView() || skip_contents) {
     return NodeAtPointOverEmbeddedContentView(result, location_in_container,
                                               accumulated_offset, action);
   }
@@ -193,19 +196,19 @@ bool LayoutEmbeddedContent::NodeAtPoint(
         child_layout_view) {
       LayoutPoint adjusted_location = accumulated_offset + Location();
       LayoutPoint content_offset =
-          LayoutPoint(BorderLeft() + PaddingLeft(),
-                      BorderTop() + PaddingTop()) -
-          LayoutSize(local_frame_view->ScrollOffsetInt());
+          LayoutPoint(BorderLeft() + PaddingLeft(), BorderTop() + PaddingTop());
       HitTestLocation new_hit_test_location(
           location_in_container, -adjusted_location - content_offset);
-      HitTestRequest new_hit_test_request(result.GetHitTestRequest().GetType() |
-                                          HitTestRequest::kChildFrameHitTest);
+      HitTestRequest new_hit_test_request(
+          result.GetHitTestRequest().GetType() |
+              HitTestRequest::kChildFrameHitTest,
+          result.GetHitTestRequest().GetStopNode());
       HitTestResult child_frame_result(new_hit_test_request,
                                        new_hit_test_location);
 
       // The frame's layout and style must be up to date if we reach here.
-      bool is_inside_child_frame =
-          child_layout_view->HitTestNoLifecycleUpdate(child_frame_result);
+      bool is_inside_child_frame = child_layout_view->HitTestNoLifecycleUpdate(
+          new_hit_test_location, child_frame_result);
 
       if (result.GetHitTestRequest().ListBased()) {
         result.Append(child_frame_result);
@@ -252,17 +255,18 @@ CompositingReasons LayoutEmbeddedContent::AdditionalCompositingReasons() const {
 void LayoutEmbeddedContent::StyleDidChange(StyleDifference diff,
                                            const ComputedStyle* old_style) {
   LayoutReplaced::StyleDidChange(diff, old_style);
+
+  if (!old_style || Style()->PointerEvents() != old_style->PointerEvents()) {
+    Node* node = GetNode();
+    if (node->IsFrameOwnerElement())
+      ToHTMLFrameOwnerElement(node)->PointerEventsChanged();
+  }
+
   EmbeddedContentView* embedded_content_view = GetEmbeddedContentView();
   if (!embedded_content_view)
     return;
 
-  // If the iframe has custom scrollbars, recalculate their style.
-  if (FrameView* frame_view = ChildFrameView()) {
-    if (frame_view->IsLocalFrameView())
-      ToLocalFrameView(frame_view)->RecalculateCustomScrollbarStyle();
-  }
-
-  if (Style()->Visibility() != EVisibility::kVisible) {
+  if (StyleRef().Visibility() != EVisibility::kVisible) {
     embedded_content_view->Hide();
   } else {
     embedded_content_view->Show();
@@ -276,15 +280,17 @@ void LayoutEmbeddedContent::UpdateLayout() {
   ClearNeedsLayout();
 }
 
-void LayoutEmbeddedContent::Paint(const PaintInfo& paint_info,
-                                  const LayoutPoint& paint_offset) const {
-  EmbeddedContentPainter(*this).Paint(paint_info, paint_offset);
-}
-
-void LayoutEmbeddedContent::PaintContents(
+void LayoutEmbeddedContent::PaintReplaced(
     const PaintInfo& paint_info,
     const LayoutPoint& paint_offset) const {
-  EmbeddedContentPainter(*this).PaintContents(paint_info, paint_offset);
+  EmbeddedContentPainter(*this).PaintReplaced(paint_info, paint_offset);
+}
+
+void LayoutEmbeddedContent::InvalidatePaint(
+    const PaintInvalidatorContext& context) const {
+  LayoutReplaced::InvalidatePaint(context);
+  if (auto* plugin = Plugin())
+    plugin->InvalidatePaint();
 }
 
 CursorDirective LayoutEmbeddedContent::GetCursor(const LayoutPoint& point,
@@ -298,19 +304,16 @@ CursorDirective LayoutEmbeddedContent::GetCursor(const LayoutPoint& point,
 }
 
 LayoutRect LayoutEmbeddedContent::ReplacedContentRect() const {
+  LayoutRect content_rect = PhysicalContentBoxRect();
+  // IFrames set as the root scroller should get their size from their parent.
+  if (ChildFrameView() && View() && IsEffectiveRootScroller())
+    content_rect = LayoutRect(LayoutPoint(), View()->ViewRect().Size());
+
   // We don't propagate sub-pixel into sub-frame layout, in other words, the
   // rect is snapped at the document boundary, and sub-pixel movement could
   // cause the sub-frame to layout due to the 1px snap difference. In order to
   // avoid that, the size of sub-frame is rounded in advance.
-  LayoutRect size_rounded_rect = ContentBoxRect();
-
-  // IFrames set as the root scroller should get their size from their parent.
-  if (ChildFrameView() && View() && RootScrollerUtil::IsEffective(*this))
-    size_rounded_rect = LayoutRect(LayoutPoint(), View()->ViewRect().Size());
-
-  size_rounded_rect.SetSize(
-      LayoutSize(RoundedIntSize(size_rounded_rect.Size())));
-  return size_rounded_rect;
+  return PreSnappedRectForPersistentSizing(content_rect);
 }
 
 void LayoutEmbeddedContent::UpdateOnEmbeddedContentViewChange() {
@@ -324,7 +327,7 @@ void LayoutEmbeddedContent::UpdateOnEmbeddedContentViewChange() {
   if (!NeedsLayout())
     UpdateGeometry(*embedded_content_view);
 
-  if (Style()->Visibility() != EVisibility::kVisible) {
+  if (StyleRef().Visibility() != EVisibility::kVisible) {
     embedded_content_view->Hide();
   } else {
     embedded_content_view->Show();

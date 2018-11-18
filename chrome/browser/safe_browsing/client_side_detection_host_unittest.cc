@@ -11,10 +11,10 @@
 #include "base/files/file_path.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/task/post_task.h"
 #include "chrome/browser/safe_browsing/browser_feature_extractor.h"
 #include "chrome/browser/safe_browsing/client_side_detection_service.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
@@ -22,9 +22,11 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/prefs/scoped_user_pref_update.h"
 #include "components/safe_browsing/db/database_manager.h"
 #include "components/safe_browsing/db/test_database_manager.h"
 #include "components/safe_browsing/proto/csd.pb.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
@@ -115,7 +117,7 @@ ACTION_P(InvokeMalwareCallback, verdict) {
 class MockClientSideDetectionService : public ClientSideDetectionService {
  public:
   MockClientSideDetectionService() : ClientSideDetectionService(NULL) {}
-  virtual ~MockClientSideDetectionService() {}
+  ~MockClientSideDetectionService() override {}
 
   MOCK_METHOD3(SendClientReportPhishingRequest,
                void(ClientPhishingRequest*,
@@ -153,7 +155,7 @@ class MockSafeBrowsingUIManager : public SafeBrowsingUIManager {
   }
 
  protected:
-  virtual ~MockSafeBrowsingUIManager() { }
+  ~MockSafeBrowsingUIManager() override {}
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockSafeBrowsingUIManager);
@@ -168,7 +170,7 @@ class MockSafeBrowsingDatabaseManager : public TestSafeBrowsingDatabaseManager {
   MOCK_METHOD1(MatchMalwareIP, bool(const std::string& ip_address));
 
  protected:
-  virtual ~MockSafeBrowsingDatabaseManager() {}
+  ~MockSafeBrowsingDatabaseManager() override {}
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockSafeBrowsingDatabaseManager);
@@ -177,7 +179,7 @@ class MockSafeBrowsingDatabaseManager : public TestSafeBrowsingDatabaseManager {
 class MockTestingProfile : public TestingProfile {
  public:
   MockTestingProfile() {}
-  virtual ~MockTestingProfile() {}
+  ~MockTestingProfile() override {}
 
   MOCK_CONST_METHOD0(IsOffTheRecord, bool());
 };
@@ -188,7 +190,7 @@ class MockBrowserFeatureExtractor : public BrowserFeatureExtractor {
       WebContents* tab,
       ClientSideDetectionHost* host)
       : BrowserFeatureExtractor(tab, host) {}
-  virtual ~MockBrowserFeatureExtractor() {}
+  ~MockBrowserFeatureExtractor() override {}
 
   MOCK_METHOD3(ExtractFeatures,
                void(const BrowseInfo*,
@@ -396,7 +398,7 @@ class ClientSideDetectionHostTest : public ChromeRenderViewHostTestHarness {
     resource.threat_type = SB_THREAT_TYPE_URL_MALWARE;
     resource.callback = base::DoNothing();
     resource.callback_thread =
-        BrowserThread::GetTaskRunnerForThread(BrowserThread::IO);
+        base::CreateSingleThreadTaskRunnerWithTraits({BrowserThread::IO});
     resource.web_contents_getter =
         SafeBrowsingUIManager::UnsafeResource::GetWebContentsGetter(
             web_contents()->GetMainFrame()->GetProcess()->GetID(),
@@ -428,7 +430,7 @@ class ClientSideDetectionHostTest : public ChromeRenderViewHostTestHarness {
     resource.threat_type = SB_THREAT_TYPE_URL_MALWARE;
     resource.callback = base::DoNothing();
     resource.callback_thread =
-        BrowserThread::GetTaskRunnerForThread(BrowserThread::IO);
+        base::CreateSingleThreadTaskRunnerWithTraits({BrowserThread::IO});
     resource.web_contents_getter =
         SafeBrowsingUIManager::UnsafeResource::GetWebContentsGetter(
             pending_rvh()->GetProcess()->GetID(),
@@ -600,8 +602,8 @@ TEST_F(ClientSideDetectionHostTest, PhishingDetectionDoneShowInterstitial) {
   EXPECT_EQ(web_contents(), resource.web_contents_getter.Run());
 
   // Make sure the client object will be deleted.
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::IO},
       base::BindOnce(&MockSafeBrowsingUIManager::InvokeOnBlockingPageComplete,
                      ui_manager_, resource.callback));
 }
@@ -686,8 +688,8 @@ TEST_F(ClientSideDetectionHostTest, PhishingDetectionDoneMultiplePings) {
   EXPECT_EQ(web_contents(), resource.web_contents_getter.Run());
 
   // Make sure the client object will be deleted.
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::IO},
       base::BindOnce(&MockSafeBrowsingUIManager::InvokeOnBlockingPageComplete,
                      ui_manager_, resource.callback));
 }
@@ -898,8 +900,8 @@ TEST_F(ClientSideDetectionHostTest,
   EXPECT_EQ(web_contents(), resource.web_contents_getter.Run());
 
   // Make sure the client object will be deleted.
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::IO},
       base::BindOnce(&MockSafeBrowsingUIManager::InvokeOnBlockingPageComplete,
                      ui_manager_, resource.callback));
 }
@@ -1236,6 +1238,23 @@ TEST_F(ClientSideDetectionHostTest, TestPreClassificationCheckValidCached) {
   ExpectShouldClassifyForMalwareResult(false);
 }
 
+TEST_F(ClientSideDetectionHostTest, TestPreClassificationWhitelistedByPolicy) {
+  // Configures enterprise whitelist.
+  ListPrefUpdate update(mock_profile_->GetPrefs(),
+                        prefs::kSafeBrowsingWhitelistDomains);
+  update->AppendString("example.com");
+
+  GURL url("http://example.com/");
+  ExpectPreClassificationChecks(url, &kFalse, &kFalse, NULL, NULL, NULL, NULL,
+                                NULL);
+
+  NavigateAndCommit(url);
+  WaitAndCheckPreClassificationChecks();
+
+  fake_phishing_detector_.CheckMessage(NULL);
+  ExpectShouldClassifyForMalwareResult(false);
+}
+
 TEST_F(ClientSideDetectionHostTest,
        SubresourceResponseStartedSkipsMissingIPAddress) {
   auto resource_load_info = content::mojom::ResourceLoadInfo::New();
@@ -1243,7 +1262,9 @@ TEST_F(ClientSideDetectionHostTest,
   resource_load_info->referrer = GURL("http://host2.com");
   resource_load_info->method = "GET";
   resource_load_info->resource_type = content::RESOURCE_TYPE_SUB_FRAME;
-  csd_host_->ResourceLoadComplete(*resource_load_info);
+  csd_host_->ResourceLoadComplete(/*render_frame_host=*/nullptr,
+                                  content::GlobalRequestID(),
+                                  *resource_load_info);
 
   EXPECT_EQ(0u, GetBrowseInfo()->ips.size());
 }

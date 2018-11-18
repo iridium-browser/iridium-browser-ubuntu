@@ -55,6 +55,7 @@ class ScreenLocker : public AuthStatusConsumer,
     kSignin,
     kFailed,
     kRemoved,
+    kTimeout,
   };
 
   // Delegate used to send internal state changes back to the UI.
@@ -206,7 +207,7 @@ class ScreenLocker : public AuthStatusConsumer,
   // fingerprint::mojom::FingerprintObserver:
   void OnAuthScanDone(
       uint32_t scan_result,
-      const std::unordered_map<std::string, std::vector<std::string>>& matches)
+      const base::flat_map<std::string, std::vector<std::string>>& matches)
       override;
   void OnSessionFailed() override;
   void OnRestarted() override {}
@@ -235,6 +236,17 @@ class ScreenLocker : public AuthStatusConsumer,
   // ash is fully locked and post lock animation finishes. Otherwise, the start
   // lock request is failed.
   void OnStartLockCallback(bool locked);
+
+  void OnPinAttemptDone(const UserContext& user_context, bool success);
+
+  // Called to continue authentication against cryptohome after the pin login
+  // check has completed.
+  void ContinueAuthenticate(const UserContext& user_context);
+
+  void UpdateFingerprintState(const std::string& source,
+                              const AccountId& account_id);
+
+  void OnPinCanAuthenticate(const AccountId& account_id, bool can_authenticate);
 
   // WebUIScreenLocker instance in use.
   std::unique_ptr<WebUIScreenLocker> web_ui_;
@@ -293,6 +305,10 @@ class ScreenLocker : public AuthStatusConsumer,
 
   // ViewsScreenLocker instance in use.
   std::unique_ptr<ViewsScreenLocker> views_screen_locker_;
+
+  // Password is required every 24 hours in order to use fingerprint unlock.
+  // This is used to update fingerprint state when password is required.
+  base::OneShotTimer update_fingerprint_state_timer_;
 
   base::WeakPtrFactory<ScreenLocker> weak_factory_;
 

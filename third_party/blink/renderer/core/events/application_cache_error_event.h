@@ -7,6 +7,7 @@
 
 #include "third_party/blink/public/platform/web_application_cache_host_client.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
+#include "third_party/blink/renderer/core/event_names.h"
 #include "third_party/blink/renderer/core/events/application_cache_error_event_init.h"
 #include "third_party/blink/renderer/core/loader/appcache/application_cache_host.h"
 
@@ -41,7 +42,7 @@ class ApplicationCacheErrorEvent final : public Event {
     return EventNames::ApplicationCacheErrorEvent;
   }
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  private:
   ApplicationCacheErrorEvent(WebApplicationCacheHost::ErrorReason,

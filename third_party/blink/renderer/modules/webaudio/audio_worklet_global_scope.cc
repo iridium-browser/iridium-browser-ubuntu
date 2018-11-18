@@ -17,10 +17,10 @@
 #include "third_party/blink/renderer/bindings/core/v8/worker_or_worklet_script_controller.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_audio_param_descriptor.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_audio_worklet_processor.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
 #include "third_party/blink/renderer/core/messaging/message_port.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_typed_array.h"
 #include "third_party/blink/renderer/core/workers/global_scope_creation_params.h"
+#include "third_party/blink/renderer/core/workers/worker_thread.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_buffer.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_param_descriptor.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_worklet_processor.h"
@@ -37,24 +37,23 @@ namespace blink {
 
 AudioWorkletGlobalScope* AudioWorkletGlobalScope::Create(
     std::unique_ptr<GlobalScopeCreationParams> creation_params,
-    v8::Isolate* isolate,
     WorkerThread* thread) {
-  return new AudioWorkletGlobalScope(std::move(creation_params), isolate,
-                                     thread);
+  return new AudioWorkletGlobalScope(std::move(creation_params), thread);
 }
 
 AudioWorkletGlobalScope::AudioWorkletGlobalScope(
     std::unique_ptr<GlobalScopeCreationParams> creation_params,
-    v8::Isolate* isolate,
     WorkerThread* thread)
-    : ThreadedWorkletGlobalScope(std::move(creation_params), isolate, thread) {}
+    : WorkletGlobalScope(std::move(creation_params),
+                         thread->GetWorkerReportingProxy(),
+                         thread) {}
 
 AudioWorkletGlobalScope::~AudioWorkletGlobalScope() = default;
 
 void AudioWorkletGlobalScope::Dispose() {
   DCHECK(IsContextThread());
   is_closing_ = true;
-  ThreadedWorkletGlobalScope::Dispose();
+  WorkletGlobalScope::Dispose();
 }
 
 void AudioWorkletGlobalScope::registerProcessor(
@@ -65,7 +64,7 @@ void AudioWorkletGlobalScope::registerProcessor(
 
   if (processor_definition_map_.Contains(name)) {
     exception_state.ThrowDOMException(
-        kNotSupportedError,
+        DOMExceptionCode::kNotSupportedError,
         "A class with name:'" + name + "' is already registered.");
     return;
   }
@@ -162,11 +161,9 @@ AudioWorkletProcessor* AudioWorkletGlobalScope::CreateProcessor(
   // the global scope to perform the construction properly.
   v8::Local<v8::Value> result;
   bool did_construct =
-      V8ScriptRunner::CallAsConstructor(isolate,
-                                        definition->ConstructorLocal(isolate),
-                                        ExecutionContext::From(script_state),
-                                        WTF_ARRAY_LENGTH(argv),
-                                        argv)
+      V8ScriptRunner::CallAsConstructor(
+          isolate, definition->ConstructorLocal(isolate),
+          ExecutionContext::From(script_state), arraysize(argv), argv)
           .ToLocal(&result);
   processor_creation_params_.reset();
 
@@ -215,7 +212,7 @@ bool AudioWorkletGlobalScope::Process(
   // 1st arg of JS callback: inputs
   v8::Local<v8::Array> inputs = v8::Array::New(isolate, input_buses->size());
   uint32_t input_bus_index = 0;
-  for (const auto input_bus : *input_buses) {
+  for (auto* const input_bus : *input_buses) {
     // If |input_bus| is null, then the input is not connected, and
     // the array for that input should have one channel and a length
     // of 0.
@@ -258,7 +255,7 @@ bool AudioWorkletGlobalScope::Process(
   // holding v8::ArrayBuffers.
   Vector<Vector<void*>> js_output_raw_ptrs;
   js_output_raw_ptrs.ReserveInitialCapacity(output_buses->size());
-  for (const auto& output_bus : *output_buses) {
+  for (auto* const output_bus : *output_buses) {
     js_output_raw_ptrs.UncheckedAppend(Vector<void*>());
     js_output_raw_ptrs.back().ReserveInitialCapacity(
         output_bus->NumberOfChannels());
@@ -292,10 +289,22 @@ bool AudioWorkletGlobalScope::Process(
   for (const auto& param : *param_value_map) {
     const String& param_name = param.key;
     const AudioFloatArray* param_array = param.value.get();
+
+    // If the AudioParam is constant, then the param array should have length 1.
+    // Manually check to see if the parameter is truly constant.
+    unsigned array_size = 1;
+
+    for (unsigned k = 1; k < param_array->size(); ++k) {
+      if (param_array->Data()[k] != param_array->Data()[0]) {
+        array_size = param_array->size();
+        break;
+      }
+    }
+
     v8::Local<v8::ArrayBuffer> array_buffer =
-        v8::ArrayBuffer::New(isolate, param_array->size() * sizeof(float));
+        v8::ArrayBuffer::New(isolate, array_size * sizeof(float));
     v8::Local<v8::Float32Array> float32_array =
-        v8::Float32Array::New(array_buffer, 0, param_array->size());
+        v8::Float32Array::New(array_buffer, 0, array_size);
     bool success;
     if (!param_values
              ->CreateDataProperty(current_context,
@@ -305,8 +314,7 @@ bool AudioWorkletGlobalScope::Process(
       return false;
     }
     const v8::ArrayBuffer::Contents& contents = array_buffer->GetContents();
-    memcpy(contents.Data(), param_array->Data(),
-           param_array->size() * sizeof(float));
+    memcpy(contents.Data(), param_array->Data(), array_size * sizeof(float));
   }
 
   v8::Local<v8::Value> argv[] = {inputs, outputs, param_values};
@@ -318,8 +326,8 @@ bool AudioWorkletGlobalScope::Process(
   v8::Local<v8::Value> local_result;
   if (!V8ScriptRunner::CallFunction(definition->ProcessLocal(isolate),
                                     ExecutionContext::From(script_state),
-                                    processor_handle, WTF_ARRAY_LENGTH(argv),
-                                    argv, isolate)
+                                    processor_handle, arraysize(argv), argv,
+                                    isolate)
            .ToLocal(&local_result) ||
       block.HasCaught()) {
     // process() method call method call failed for some reason or an exception
@@ -393,18 +401,7 @@ double AudioWorkletGlobalScope::currentTime() const {
 void AudioWorkletGlobalScope::Trace(blink::Visitor* visitor) {
   visitor->Trace(processor_definition_map_);
   visitor->Trace(processor_instances_);
-  ThreadedWorkletGlobalScope::Trace(visitor);
-}
-
-void AudioWorkletGlobalScope::TraceWrappers(
-    const ScriptWrappableVisitor* visitor) const {
-  for (auto definition : processor_definition_map_)
-    visitor->TraceWrappers(definition.value);
-
-  for (auto processor : processor_instances_)
-    visitor->TraceWrappers(processor);
-
-  ThreadedWorkletGlobalScope::TraceWrappers(visitor);
+  WorkletGlobalScope::Trace(visitor);
 }
 
 }  // namespace blink

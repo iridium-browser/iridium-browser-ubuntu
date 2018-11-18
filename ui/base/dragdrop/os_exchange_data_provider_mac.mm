@@ -15,6 +15,7 @@
 #import "ui/base/clipboard/clipboard_util_mac.h"
 #include "ui/base/clipboard/custom_data_helper.h"
 #import "ui/base/dragdrop/cocoa_dnd_util.h"
+#include "ui/base/dragdrop/file_info.h"
 #include "url/gurl.h"
 
 namespace ui {
@@ -64,7 +65,16 @@ void OSExchangeDataProviderMac::SetFilename(const base::FilePath& path) {
 
 void OSExchangeDataProviderMac::SetFilenames(
     const std::vector<FileInfo>& filenames) {
-  NOTIMPLEMENTED();
+  if (filenames.empty())
+    return;
+
+  NSMutableArray* paths = [NSMutableArray arrayWithCapacity:filenames.size()];
+
+  for (const auto& filename : filenames) {
+    NSString* path = base::SysUTF8ToNSString(filename.path.value());
+    [paths addObject:path];
+  }
+  [pasteboard_->get() setPropertyList:paths forType:NSFilenamesPboardType];
 }
 
 void OSExchangeDataProviderMac::SetPickledData(
@@ -100,17 +110,18 @@ bool OSExchangeDataProviderMac::GetURLAndTitle(
   DCHECK(url);
   DCHECK(title);
 
-  NSArray* urlArray = nil;
-  NSArray* titleArray = nil;
-  if (ClipboardUtil::URLsAndTitlesFromPasteboard(pasteboard_->get(), &urlArray,
-                                                 &titleArray)) {
-    *url = GURL(base::SysNSStringToUTF8([urlArray firstObject]));
-    *title = base::SysNSStringToUTF16([titleArray firstObject]);
+  if (ui::PopulateURLAndTitleFromPasteboard(url, title, pasteboard_->get(),
+                                            false)) {
     return true;
   }
 
-  // If there are no URLS, try to convert a filename to a URL if the policy
+  // If there are no URLs, try to convert a filename to a URL if the policy
   // allows it. The title remains blank.
+  //
+  // This could be done in the call to PopulateURLAndTitleFromPasteboard above
+  // if |true| were passed in as the last parameter, but that function strips
+  // the trailing slashes off of paths and always returns the last path element
+  // as the title whereas no path conversion nor title is wanted.
   base::FilePath path;
   if (policy != OSExchangeData::DO_NOT_CONVERT_FILENAMES &&
       GetFilename(&path)) {
@@ -136,8 +147,16 @@ bool OSExchangeDataProviderMac::GetFilename(base::FilePath* path) const {
 
 bool OSExchangeDataProviderMac::GetFilenames(
     std::vector<FileInfo>* filenames) const {
-  NOTIMPLEMENTED();
-  return false;
+  NSArray* paths =
+      [pasteboard_->get() propertyListForType:NSFilenamesPboardType];
+  if ([paths count] == 0)
+    return false;
+
+  for (NSString* path in paths)
+    filenames->push_back(
+        {base::FilePath(base::SysNSStringToUTF8(path)), base::FilePath()});
+
+  return true;
 }
 
 bool OSExchangeDataProviderMac::GetPickledData(
@@ -191,6 +210,10 @@ gfx::Vector2d OSExchangeDataProviderMac::GetDragImageOffset() const {
 
 NSData* OSExchangeDataProviderMac::GetNSDataForType(NSString* type) const {
   return [pasteboard_->get() dataForType:type];
+}
+
+NSPasteboard* OSExchangeDataProviderMac::GetPasteboard() const {
+  return pasteboard_->get();
 }
 
 NSArray* OSExchangeDataProviderMac::GetAvailableTypes() const {

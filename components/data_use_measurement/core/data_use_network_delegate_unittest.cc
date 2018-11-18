@@ -8,7 +8,7 @@
 
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
-#include "base/test/histogram_tester.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "components/data_use_measurement/core/data_use_ascriber.h"
 #include "components/data_use_measurement/core/url_request_classifier.h"
 #include "components/metrics/data_use_tracker.h"
@@ -27,15 +27,6 @@ class TestURLRequestClassifier : public base::SupportsUserData::Data,
                                  public URLRequestClassifier {
  public:
   static const void* const kUserDataKey;
-
-  bool IsUserRequest(const net::URLRequest& request) const override {
-    return request.GetUserData(kUserDataKey) != nullptr;
-  }
-
-  static void MarkAsUserRequest(net::URLRequest* request) {
-    request->SetUserData(kUserDataKey,
-                         std::make_unique<TestURLRequestClassifier>());
-  }
 
   DataUseUserData::DataUseContentType GetContentType(
       const net::URLRequest& request,
@@ -63,10 +54,27 @@ class TestDataUseAscriber : public DataUseAscriber {
     return nullptr;
   }
 
+  std::unique_ptr<net::NetworkDelegate> CreateNetworkDelegate(
+      std::unique_ptr<net::NetworkDelegate> wrapped_network_delegate) override {
+    return nullptr;
+  }
+
   std::unique_ptr<URLRequestClassifier> CreateURLRequestClassifier()
       const override {
     return nullptr;
   }
+};
+
+class TestDataUseMeasurement : public DataUseMeasurement {
+ public:
+  TestDataUseMeasurement(
+      std::unique_ptr<URLRequestClassifier> url_request_classifier,
+      DataUseAscriber* ascriber)
+      : DataUseMeasurement(std::move(url_request_classifier), ascriber) {}
+
+  void UpdateDataUseToMetricsService(int64_t total_bytes,
+                                     bool is_cellular,
+                                     bool is_metrics_service_usage) override {}
 };
 
 // static
@@ -91,7 +99,7 @@ std::unique_ptr<net::URLRequest> RequestURL(
       net::MockRead(net::SYNCHRONOUS, net::OK),
   };
   net::StaticSocketDataProvider redirect_socket_data_provider(
-      redirect_mock_reads, arraysize(redirect_mock_reads), nullptr, 0);
+      redirect_mock_reads, base::span<net::MockWrite>());
 
   if (redirect)
     socket_factory->AddSocketDataProvider(&redirect_socket_data_provider);
@@ -99,26 +107,28 @@ std::unique_ptr<net::URLRequest> RequestURL(
       net::MockRead("HTTP/1.1 200 OK\r\n\r\n"), net::MockRead("response body"),
       net::MockRead(net::SYNCHRONOUS, net::OK),
   };
+  const auto traffic_annotation =
+      from_user ? net::DefineNetworkTrafficAnnotation("blink_resource_loader",
+                                                      "blink resource loaded "
+                                                      "will be treated as "
+                                                      "user-initiated request")
+                : TRAFFIC_ANNOTATION_FOR_TESTS;
   net::StaticSocketDataProvider response_socket_data_provider(
-      response_mock_reads, arraysize(response_mock_reads), nullptr, 0);
+      response_mock_reads, base::span<net::MockWrite>());
   socket_factory->AddSocketDataProvider(&response_socket_data_provider);
   net::TestDelegate test_delegate;
-  test_delegate.set_quit_on_complete(true);
   std::unique_ptr<net::URLRequest> request(
       context->CreateRequest(GURL("http://example.com"), net::DEFAULT_PRIORITY,
-                             &test_delegate, TRAFFIC_ANNOTATION_FOR_TESTS));
+                             &test_delegate, traffic_annotation));
 
-  if (from_user) {
-    TestURLRequestClassifier::MarkAsUserRequest(request.get());
-  } else {
+  if (!from_user) {
     request->SetUserData(
         data_use_measurement::DataUseUserData::kUserDataKey,
         std::make_unique<data_use_measurement::DataUseUserData>(
-            data_use_measurement::DataUseUserData::SUGGESTIONS,
             data_use_measurement::DataUseUserData::FOREGROUND));
   }
   request->Start();
-  base::RunLoop().RunUntilIdle();
+  test_delegate.RunUntilComplete();
   return request;
 }
 
@@ -126,10 +136,12 @@ class DataUseNetworkDelegateTest : public testing::Test {
  public:
   DataUseNetworkDelegateTest()
       : context_(true),
-        data_use_network_delegate_(std::make_unique<net::TestNetworkDelegate>(),
-                                   &test_data_use_ascriber_,
-                                   std::make_unique<TestURLRequestClassifier>(),
-                                   metrics::UpdateUsagePrefCallbackType()) {
+        data_use_network_delegate_(
+            std::make_unique<net::TestNetworkDelegate>(),
+            &test_data_use_ascriber_,
+            std::make_unique<TestDataUseMeasurement>(
+                std::make_unique<TestURLRequestClassifier>(),
+                &test_data_use_ascriber_)) {
     context_.set_client_socket_factory(&mock_socket_factory_);
     context_.set_network_delegate(&data_use_network_delegate_);
     context_.Init();

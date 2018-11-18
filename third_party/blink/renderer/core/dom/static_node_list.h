@@ -29,6 +29,8 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_DOM_STATIC_NODE_LIST_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_DOM_STATIC_NODE_LIST_H_
 
+#include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/core/dom/node_child_removal_tracker.h"
 #include "third_party/blink/renderer/core/dom/node_list.h"
 #include "third_party/blink/renderer/platform/bindings/trace_wrapper_member.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
@@ -49,12 +51,7 @@ class StaticNodeTypeList final : public NodeList {
   unsigned length() const override;
   NodeType* item(unsigned index) const override;
 
-  virtual void Trace(blink::Visitor*);
-  virtual void TraceWrappers(const ScriptWrappableVisitor* visitor) const {
-    for (unsigned i = 0; i < length(); i++)
-      visitor->TraceWrappers(nodes_[i]);
-    NodeList::TraceWrappers(visitor);
-  }
+  void Trace(blink::Visitor*) override;
 
  private:
   HeapVector<TraceWrapperMember<NodeType>> nodes_;
@@ -80,8 +77,13 @@ unsigned StaticNodeTypeList<NodeType>::length() const {
 
 template <typename NodeType>
 NodeType* StaticNodeTypeList<NodeType>::item(unsigned index) const {
-  if (index < nodes_.size())
-    return nodes_[index].Get();
+  if (index < nodes_.size()) {
+    auto* node = nodes_[index].Get();
+    if (node->GetDocument().InDOMNodeRemovedHandler() &&
+        NodeChildRemovalTracker::IsBeingRemoved(node))
+      node->GetDocument().CountDetachingNodeAccessInDOMNodeRemovedHandler();
+    return node;
+  }
   return nullptr;
 }
 

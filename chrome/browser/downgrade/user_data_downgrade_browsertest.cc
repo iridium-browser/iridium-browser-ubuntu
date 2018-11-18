@@ -7,14 +7,14 @@
 #include "base/files/file_util.h"
 #include "base/path_service.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task_scheduler/task_scheduler.h"
+#include "base/task/task_scheduler/task_scheduler.h"
 #include "base/test/test_reg_util_win.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/version.h"
 #include "base/win/registry.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/installer/util/browser_distribution.h"
+#include "chrome/install_static/install_util.h"
 #include "chrome/installer/util/google_update_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "content/public/browser/browser_thread.h"
@@ -28,13 +28,13 @@ class UserDataDowngradeBrowserTestBase : public InProcessBrowserTest {
     HKEY root = HKEY_CURRENT_USER;
     ASSERT_NO_FATAL_FAILURE(registry_override_manager_.OverrideRegistry(root));
     key_.Create(root,
-                BrowserDistribution::GetDistribution()->GetStateKey().c_str(),
+                install_static::GetClientStateKeyPath().c_str(),
                 KEY_SET_VALUE | KEY_WOW64_32KEY);
   }
 
   // InProcessBrowserTest:
   bool SetUpUserDataDirectory() override {
-    if (!PathService::Get(chrome::DIR_USER_DATA, &user_data_dir_))
+    if (!base::PathService::Get(chrome::DIR_USER_DATA, &user_data_dir_))
       return false;
     if (!CreateTemporaryFileInDir(user_data_dir_, &other_file_))
       return false;

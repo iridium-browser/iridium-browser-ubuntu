@@ -14,7 +14,6 @@
 #include "base/command_line.h"
 #include "base/macros.h"
 #include "base/memory/discardable_memory.h"
-#include "base/memory/memory_coordinator_client_registry.h"
 #include "base/memory/shared_memory_tracker.h"
 #include "base/numerics/safe_math.h"
 #include "base/process/memory.h"
@@ -31,7 +30,6 @@
 #include "components/crash/core/common/crash_key.h"
 #include "components/discardable_memory/common/discardable_shared_memory_heap.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
-#include "mojo/public/cpp/system/platform_handle.h"
 
 #if defined(OS_LINUX)
 #include "base/files/file_path.h"
@@ -69,16 +67,12 @@ class MojoDiscardableSharedMemoryManagerImpl
       uint32_t size,
       int32_t id,
       AllocateLockedDiscardableSharedMemoryCallback callback) override {
-    base::SharedMemoryHandle handle;
-    mojo::ScopedSharedBufferHandle memory;
+    base::UnsafeSharedMemoryRegion region;
     if (manager_) {
       manager_->AllocateLockedDiscardableSharedMemoryForClient(client_id_, size,
-                                                               id, &handle);
-      memory = mojo::WrapSharedMemoryHandle(
-          handle, size,
-          mojo::UnwrappedSharedMemoryHandleProtection::kReadWrite);
+                                                               id, &region);
     }
-    std::move(callback).Run(std::move(memory));
+    std::move(callback).Run(std::move(region));
   }
 
   void DeletedDiscardableSharedMemory(int32_t id) override {
@@ -157,6 +151,12 @@ class DiscardableMemoryImpl : public base::DiscardableMemory {
 int64_t GetDefaultMemoryLimit() {
   const int kMegabyte = 1024 * 1024;
 
+#if defined(CHROMECAST_BUILD)
+  // Bypass IsLowEndDevice() check and fix max_default_memory_limit to 64MB on
+  // Chromecast devices. Set value here as IsLowEndDevice() is used on some, but
+  // not all Chromecast devices.
+  int64_t max_default_memory_limit = 64 * kMegabyte;
+#else
 #if defined(OS_ANDROID)
   // Limits the number of FDs used to 32, assuming a 4MB allocation size.
   int64_t max_default_memory_limit = 128 * kMegabyte;
@@ -167,6 +167,7 @@ int64_t GetDefaultMemoryLimit() {
   // Use 1/8th of discardable memory on low-end devices.
   if (base::SysInfo::IsLowEndDevice())
     max_default_memory_limit /= 8;
+#endif
 
 #if defined(OS_LINUX)
   base::FilePath shmem_dir;
@@ -233,11 +234,9 @@ DiscardableSharedMemoryManager::DiscardableSharedMemoryManager()
   base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
       this, "DiscardableSharedMemoryManager",
       base::ThreadTaskRunnerHandle::Get());
-  base::MemoryCoordinatorClientRegistry::GetInstance()->Register(this);
 }
 
 DiscardableSharedMemoryManager::~DiscardableSharedMemoryManager() {
-  base::MemoryCoordinatorClientRegistry::GetInstance()->Unregister(this);
   base::trace_event::MemoryDumpManager::GetInstance()->UnregisterDumpProvider(
       this);
 
@@ -270,7 +269,7 @@ void DiscardableSharedMemoryManager::Bind(
   DCHECK(!mojo_thread_message_loop_ ||
          mojo_thread_message_loop_ == base::MessageLoop::current());
   if (!mojo_thread_message_loop_) {
-    mojo_thread_message_loop_ = base::MessageLoop::current();
+    mojo_thread_message_loop_ = base::MessageLoopCurrent::Get();
     mojo_thread_message_loop_->AddDestructionObserver(this);
   }
 
@@ -288,11 +287,11 @@ DiscardableSharedMemoryManager::AllocateLockedDiscardableMemory(size_t size) {
 
   // Note: Use DiscardableSharedMemoryHeap for in-process allocation
   // of discardable memory if the cost of each allocation is too high.
-  base::SharedMemoryHandle handle;
+  base::UnsafeSharedMemoryRegion region;
   AllocateLockedDiscardableSharedMemory(kInvalidUniqueClientID, size, new_id,
-                                        &handle);
+                                        &region);
   std::unique_ptr<base::DiscardableSharedMemory> memory(
-      new base::DiscardableSharedMemory(handle));
+      new base::DiscardableSharedMemory(std::move(region)));
   if (!memory->Map(size))
     base::TerminateBecauseOutOfMemory(size);
   // Close file descriptor to avoid running out.
@@ -354,9 +353,9 @@ void DiscardableSharedMemoryManager::
         int client_id,
         size_t size,
         int32_t id,
-        base::SharedMemoryHandle* shared_memory_handle) {
+        base::UnsafeSharedMemoryRegion* shared_memory_region) {
   AllocateLockedDiscardableSharedMemory(client_id, size, id,
-                                        shared_memory_handle);
+                                        shared_memory_region);
 }
 
 void DiscardableSharedMemoryManager::ClientDeletedDiscardableSharedMemory(
@@ -403,36 +402,10 @@ size_t DiscardableSharedMemoryManager::GetBytesAllocated() {
   return bytes_allocated_;
 }
 
-void DiscardableSharedMemoryManager::OnMemoryStateChange(
-    base::MemoryState state) {
-  // Don't use SetMemoryLimit() as it frees up existing allocations.
-  // OnPurgeMemory() is called to actually free up memory.
-  base::AutoLock lock(lock_);
-  switch (state) {
-    case base::MemoryState::NORMAL:
-      memory_limit_ = default_memory_limit_;
-      break;
-    case base::MemoryState::THROTTLED:
-      memory_limit_ = 0;
-      break;
-    case base::MemoryState::SUSPENDED:
-    // Note that SUSPENDED never occurs in the main browser process so far.
-    // Fall through.
-    case base::MemoryState::UNKNOWN:
-      NOTREACHED();
-      break;
-  }
-}
-
-void DiscardableSharedMemoryManager::OnPurgeMemory() {
-  base::AutoLock lock(lock_);
-  ReduceMemoryUsageUntilWithinLimit(0);
-}
-
 void DiscardableSharedMemoryManager::WillDestroyCurrentMessageLoop() {
   // The mojo thead is going to be destroyed. We should invalidate all related
   // weak ptrs and remove the destrunction observer.
-  DCHECK_EQ(mojo_thread_message_loop_, base::MessageLoop::current());
+  DCHECK_EQ(mojo_thread_message_loop_, base::MessageLoopCurrent::Get());
   DLOG_IF(WARNING, mojo_thread_weak_ptr_factory_.HasWeakPtrs())
       << "Some MojoDiscardableSharedMemoryManagerImpls are still alive. They "
          "will be leaked.";
@@ -443,14 +416,14 @@ void DiscardableSharedMemoryManager::AllocateLockedDiscardableSharedMemory(
     int client_id,
     size_t size,
     int32_t id,
-    base::SharedMemoryHandle* shared_memory_handle) {
+    base::UnsafeSharedMemoryRegion* shared_memory_region) {
   base::AutoLock lock(lock_);
 
   // Make sure |id| is not already in use.
   MemorySegmentMap& client_segments = clients_[client_id];
   if (client_segments.find(id) != client_segments.end()) {
     LOG(ERROR) << "Invalid discardable shared memory ID";
-    *shared_memory_handle = base::SharedMemoryHandle();
+    *shared_memory_region = base::UnsafeSharedMemoryRegion();
     return;
   }
 
@@ -471,21 +444,21 @@ void DiscardableSharedMemoryManager::AllocateLockedDiscardableSharedMemory(
   std::unique_ptr<base::DiscardableSharedMemory> memory(
       new base::DiscardableSharedMemory);
   if (!memory->CreateAndMap(size)) {
-    *shared_memory_handle = base::SharedMemoryHandle();
+    *shared_memory_region = base::UnsafeSharedMemoryRegion();
     return;
   }
 
   base::CheckedNumeric<size_t> checked_bytes_allocated = bytes_allocated_;
   checked_bytes_allocated += memory->mapped_size();
   if (!checked_bytes_allocated.IsValid()) {
-    *shared_memory_handle = base::SharedMemoryHandle();
+    *shared_memory_region = base::UnsafeSharedMemoryRegion();
     return;
   }
 
   bytes_allocated_ = checked_bytes_allocated.ValueOrDie();
   BytesAllocatedChanged(bytes_allocated_);
 
-  *shared_memory_handle = base::SharedMemory::DuplicateHandle(memory->handle());
+  *shared_memory_region = memory->DuplicateRegion();
   // Close file descriptor to avoid running out.
   memory->Close();
 
@@ -505,7 +478,7 @@ void DiscardableSharedMemoryManager::DeletedDiscardableSharedMemory(
 
   MemorySegmentMap& client_segments = clients_[client_id];
 
-  MemorySegmentMap::iterator segment_it = client_segments.find(id);
+  auto segment_it = client_segments.find(id);
   if (segment_it == client_segments.end()) {
     LOG(ERROR) << "Invalid discardable shared memory ID";
     return;
@@ -642,7 +615,7 @@ void DiscardableSharedMemoryManager::ScheduleEnforceMemoryPolicy() {
 
 void DiscardableSharedMemoryManager::InvalidateMojoThreadWeakPtrs(
     base::WaitableEvent* event) {
-  DCHECK_EQ(mojo_thread_message_loop_, base::MessageLoop::current());
+  DCHECK_EQ(mojo_thread_message_loop_, base::MessageLoopCurrent::Get());
   mojo_thread_weak_ptr_factory_.InvalidateWeakPtrs();
   mojo_thread_message_loop_->RemoveDestructionObserver(this);
   mojo_thread_message_loop_ = nullptr;

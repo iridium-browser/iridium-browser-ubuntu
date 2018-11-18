@@ -141,6 +141,12 @@ CHROMEOS_EXPORT extern const char kDeviceHostnameTemplate[];
 
 CHROMEOS_EXPORT extern const char kVirtualMachinesAllowed[];
 
+CHROMEOS_EXPORT extern const char kSamlLoginAuthenticationType[];
+
+CHROMEOS_EXPORT extern const char kDeviceAutoUpdateTimeRestrictions[];
+
+CHROMEOS_EXPORT extern const char kDeviceUnaffiliatedCrostiniAllowed[];
+
 }  // namespace chromeos
 
 #endif  // CHROMEOS_SETTINGS_CROS_SETTINGS_NAMES_H_

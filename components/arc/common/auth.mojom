@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Next MinVersion: 13
+// Next MinVersion: 17
 
 module arc.mojom;
 
@@ -12,7 +12,7 @@ enum ArcSignInStatus {
   // Negative values are reserved for internal use.
   // The values are shuffled to keep the backward compatibility and don't match
   // ProvisioningResult in arc_optin_uma.h
-  // Next value: 19.
+  // Next value: 21.
   UNKNOWN_ERROR = 0,
 
   // Mojo errors:
@@ -75,6 +75,9 @@ enum ArcSignInStatus {
 
   // ARC was already provisioned.
   [MinVersion=11] SUCCESS_ALREADY_PROVISIONED = 19,
+
+  // Account type is not supported for authorization.
+  [MinVersion=16] UNSUPPORTED_ACCOUNT_TYPE = 20,
 };
 
 // These values describe account check status.
@@ -99,10 +102,36 @@ enum AccountCheckStatus {
     // corresponding UMA callsite in Chrome arc::UpdateAuthAccountCheckStatus.
 };
 
+// These values describe the result of ARC attempting to change supervision
+// state after an account type change.
+[Extensible]
+enum SupervisionChangeStatus {
+  // CloudDPC supervision was disabled successfully.
+  [MinVersion=13] CLOUD_DPC_DISABLED = 0,
+
+  // CloudDPC supervision was already disabled.
+  [MinVersion=13] CLOUD_DPC_ALREADY_DISABLED = 1,
+
+  // CloudDPC supervision was enabled successfully.
+  [MinVersion=13] CLOUD_DPC_ENABLED = 2,
+
+  // CloudDPC supervision was already enabled.
+  [MinVersion=13] CLOUD_DPC_ALREADY_ENABLED = 3,
+
+  // Invalid state returned from Chrome.
+  [MinVersion=13] INVALID_SUPERVISION_STATE = 4,
+
+  // Failed to disable CloudDPC due to an unspecified error.
+  [MinVersion=13] CLOUD_DPC_DISABLING_FAILED = 5,
+
+  // Failed to enable CloudDPC due to an unspecified error.
+  [MinVersion=13] CLOUD_DPC_ENABLING_FAILED = 6,
+};
+
 // These values describe the type of the Chrome account to provision.
 [Extensible]
 enum ChromeAccountType {
-  // Next value: 5
+  // Next value: 6
   UNKNOWN = 0,
 
   // Chrome login account type is a user account.
@@ -116,6 +145,11 @@ enum ChromeAccountType {
 
   // Chrome login account type is a child account.
   CHILD_ACCOUNT = 4,
+
+  // Chrome login account is a demo session account that was enrolled offline,
+  // using policies bundled with Chrome OS, and thus does not have a working
+  // robot account associated with it.
+  [MinVersion=14] OFFLINE_DEMO_ACCOUNT = 5,
 };
 
 // These values describe the type of the metrics to report.
@@ -144,8 +178,8 @@ struct AccountInfo {
   [MinVersion=9] string? account_name@4;
 
   // The authorization code that can be used in Android to sign in when
-  // account_type is USER_ACCOUNT or ROBOT_ACCOUNT. If it is null in these
-  // cases, sign-in will be skipped.
+  // account_type is USER_ACCOUNT, ROBOT_ACCOUNT or CHILD_ACCOUNT. If it is
+  // null in these cases, sign-in will be skipped.
   string? auth_code@0;
 
   // If account_type is ACTIVE_DIRECTORY_ACCOUNT, this contains an enrollment
@@ -160,7 +194,7 @@ struct AccountInfo {
   bool is_managed@2;
 };
 
-// Next Method ID: 11.
+// Next Method ID: 14.
 interface AuthHost {
   // Notifies Chrome that the authorization flow is completed and provides
   // resulting |status|. If |initial_signin| is true then this indicates that
@@ -178,13 +212,41 @@ interface AuthHost {
   // Asynchronously requests an authorization code, as well as the account
   // information. If |initial_signin| is true then that means request is for
   // initial signin flow. Otherwise it is used for reauthorization flow.
-  [MinVersion=5] RequestAccountInfo@7([MinVersion=11] bool initial_signin);
+  [MinVersion=5] RequestAccountInfoDeprecated@7(
+      [MinVersion=11] bool initial_signin);
 
   // Reports metrics to Chrome to be recorded in UMA.
   [MinVersion=7] ReportMetrics@8(MetricsType metrics_type, int32 value);
 
   // Reports result of account check.
   [MinVersion=9] ReportAccountCheckStatus@9(AccountCheckStatus status);
+
+  // Reports to Chrome the result of changing the supervision state.
+  // Chrome informs ARC on every boot if a supervision transition is necessary
+  // or not (see https://crrev.com/c/1069031). ARC should report back only if
+  // a transition was necessary.
+  [MinVersion=13] ReportSupervisionChangeStatus@11(
+      SupervisionChangeStatus status);
+
+  // Requests an authorization code, as well as the account information for the
+  // Primary/Device Account in Chrome OS Account Manager.
+  // This is called for ARC's initial provisioning flow.
+  // If the request completes successfully, |status| must be SUCCESS and
+  // |account_info| is not null.
+  // In case of an error, |status| must contain the reason of failure, other
+  // than SUCCESS, and |account_info| is null.
+  [MinVersion=15] RequestPrimaryAccountInfo@12()
+      => (ArcSignInStatus status, AccountInfo? account_info);
+
+  // Requests an authorization code, as well as the account information for an
+  // account in Chrome OS Account Manager.
+  // This must be called after ARC's initial provisioning flow is complete.
+  // If the request completes successfully, |status| must be SUCCESS and
+  // |account_info| is not null.
+  // In case of an error, |status| must contain the reason of failure, other
+  // than SUCCESS, and |account_info| is null.
+  [MinVersion=15] RequestAccountInfo@13(string account_name)
+      => (ArcSignInStatus status, AccountInfo? account_info);
 };
 
 // Next Method ID: 3
@@ -198,10 +260,11 @@ interface AuthInstance {
   // Callback from RequestAccountInfo. This cannot be a normal callback since
   // the result can sometimes take a few minutes in some cases (Kiosk mode),
   // and in other cases there is a UI that the user is shown and they can take
-  // an arbitrarily long amount of time to interact with. If request completes
-  // successfully, |account_info| is not null and |status| must be SUCCESS.
-  // In case of error |account_info| is null, |status| must contain the reason
-  // of failure, other than SUCCESS.
-  [MinVersion=5] OnAccountInfoReady@1(
+  // an arbitrarily long amount of time to interact with.
+  // If the request completes successfully, |status| must be SUCCESS and
+  // |account_info| is not null.
+  // In case of an error, |status| must contain the reason of failure, other
+  // than SUCCESS, and |account_info| is null.
+  [MinVersion=5] OnAccountInfoReadyDeprecated@1(
       AccountInfo? account_info, [MinVersion=10] ArcSignInStatus status);
 };

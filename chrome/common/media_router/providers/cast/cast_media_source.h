@@ -11,9 +11,20 @@
 
 #include "base/optional.h"
 #include "chrome/common/media_router/media_source.h"
+#include "components/cast_channel/cast_message_util.h"
 #include "components/cast_channel/cast_socket.h"
 
 namespace media_router {
+
+static constexpr char kCastStreamingAppId[] = "0F5096E8";
+static constexpr char kCastStreamingAudioAppId[] = "85CDB22F";
+
+// Placeholder app ID advertised by the multizone leader in a receiver status
+// message.
+static constexpr char kMultizoneLeaderAppId[] = "MultizoneLeader";
+
+static constexpr base::TimeDelta kDefaultLaunchTimeout =
+    base::TimeDelta::FromSeconds(60);
 
 // Represents a Cast app and its capabilitity requirements.
 struct CastAppInfo {
@@ -28,17 +39,6 @@ struct CastAppInfo {
   int required_capabilities = cast_channel::CastDeviceCapability::NONE;
 };
 
-// Represents a broadcast request. Currently it is used for precaching data
-// on a receiver.
-struct BroadcastRequest {
-  BroadcastRequest(const std::string& broadcast_namespace,
-                   const std::string& message);
-  ~BroadcastRequest();
-
-  std::string broadcast_namespace;
-  std::string message;
-};
-
 // Represents a MediaSource parsed into structured, Cast specific data. The
 // following MediaSources can be parsed into CastMediaSource:
 // - Cast Presentation URLs
@@ -49,10 +49,8 @@ class CastMediaSource {
   // Returns the parsed form of |source|, or nullptr if it cannot be parsed.
   static std::unique_ptr<CastMediaSource> From(const MediaSource::Id& source);
 
-  explicit CastMediaSource(const MediaSource::Id& source_id,
-                           const CastAppInfo& app_info);
-  explicit CastMediaSource(const MediaSource::Id& source_id,
-                           const std::vector<CastAppInfo>& app_infos);
+  CastMediaSource(const MediaSource::Id& source_id,
+                  const std::vector<CastAppInfo>& app_infos);
   CastMediaSource(const CastMediaSource& other);
   ~CastMediaSource();
 
@@ -60,13 +58,23 @@ class CastMediaSource {
   bool ContainsApp(const std::string& app_id) const;
   bool ContainsAnyAppFrom(const std::vector<std::string>& app_ids) const;
 
+  // Returns a list of App IDs in this CastMediaSource.
+  std::vector<std::string> GetAppIds() const;
+
   const MediaSource::Id& source_id() const { return source_id_; }
   const std::vector<CastAppInfo>& app_infos() const { return app_infos_; }
-  const base::Optional<BroadcastRequest>& broadcast_request() const {
+  const std::string& client_id() const { return client_id_; }
+  void set_client_id(const std::string& client_id) { client_id_ = client_id; }
+  base::TimeDelta launch_timeout() const { return launch_timeout_; }
+  void set_launch_timeout(base::TimeDelta launch_timeout) {
+    launch_timeout_ = launch_timeout;
+  }
+  const base::Optional<cast_channel::BroadcastRequest>& broadcast_request()
+      const {
     return broadcast_request_;
   }
 
-  void set_broadcast_request(const BroadcastRequest& request) {
+  void set_broadcast_request(const cast_channel::BroadcastRequest& request) {
     broadcast_request_ = request;
   }
 
@@ -74,7 +82,10 @@ class CastMediaSource {
   // TODO(imcheng): Fill in other parameters.
   MediaSource::Id source_id_;
   std::vector<CastAppInfo> app_infos_;
-  base::Optional<BroadcastRequest> broadcast_request_;
+  base::TimeDelta launch_timeout_ = kDefaultLaunchTimeout;
+  // Empty if not set.
+  std::string client_id_;
+  base::Optional<cast_channel::BroadcastRequest> broadcast_request_;
 };
 
 }  // namespace media_router

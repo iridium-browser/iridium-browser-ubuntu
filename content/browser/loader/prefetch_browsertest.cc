@@ -10,11 +10,13 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/post_task.h"
 #include "base/test/scoped_feature_list.h"
 #include "content/browser/loader/prefetch_url_loader_service.h"
 #include "content/browser/storage_partition_impl.h"
 #include "content/browser/web_package/mock_signed_exchange_handler.h"
-#include "content/browser/web_package/web_package_loader.h"
+#include "content/browser/web_package/signed_exchange_loader.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_features.h"
@@ -29,21 +31,18 @@
 namespace content {
 
 struct PrefetchBrowserTestParam {
-  PrefetchBrowserTestParam(bool network_service_enabled,
-                           bool signed_exchange_enabled)
-      : network_service_enabled(network_service_enabled),
-        signed_exchange_enabled(signed_exchange_enabled) {}
-  const bool network_service_enabled;
+  PrefetchBrowserTestParam(bool signed_exchange_enabled)
+      : signed_exchange_enabled(signed_exchange_enabled) {}
   const bool signed_exchange_enabled;
 };
 
 struct ScopedSignedExchangeHandlerFactory {
   explicit ScopedSignedExchangeHandlerFactory(
       SignedExchangeHandlerFactory* factory) {
-    WebPackageLoader::SetSignedExchangeHandlerFactoryForTest(factory);
+    SignedExchangeLoader::SetSignedExchangeHandlerFactoryForTest(factory);
   }
   ~ScopedSignedExchangeHandlerFactory() {
-    WebPackageLoader::SetSignedExchangeHandlerFactoryForTest(nullptr);
+    SignedExchangeLoader::SetSignedExchangeHandlerFactoryForTest(nullptr);
   }
 };
 
@@ -69,8 +68,6 @@ class PrefetchBrowserTest
 
   void SetUp() override {
     std::vector<base::Feature> enable_features;
-    if (GetParam().network_service_enabled)
-      enable_features.push_back(network::features::kNetworkService);
     if (GetParam().signed_exchange_enabled)
       enable_features.push_back(features::kSignedHTTPExchange);
     feature_list_.InitWithFeatures(enable_features, {});
@@ -82,8 +79,8 @@ class PrefetchBrowserTest
     StoragePartitionImpl* partition = static_cast<StoragePartitionImpl*>(
         BrowserContext::GetDefaultStoragePartition(
             shell()->web_contents()->GetBrowserContext()));
-    BrowserThread::PostTask(
-        BrowserThread::IO, FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, {BrowserThread::IO},
         BindOnce(
             &PrefetchURLLoaderService::RegisterPrefetchLoaderCallbackForTest,
             base::RetainedRef(partition->GetPrefetchURLLoaderService()),
@@ -110,10 +107,11 @@ class PrefetchBrowserTest
     return nullptr;
   }
 
-  void WatchURLAndRunClosure(const std::string& relative_url,
-                             int* visit_count,
-                             base::OnceClosure closure,
-                             const net::test_server::HttpRequest& request) {
+  void WatchURLAndRunClosure(
+      const std::string& relative_url,
+      int* visit_count,
+      base::OnceClosure closure,
+      const net::test_server::HttpRequest& request) {
     if (request.relative_url == relative_url) {
       (*visit_count)++;
       if (closure)
@@ -124,8 +122,7 @@ class PrefetchBrowserTest
   void OnPrefetchURLLoaderCalled() { prefetch_url_loader_called_++; }
 
   bool CheckPrefetchURLLoaderCountIfSupported(int expected) const {
-    if (!base::FeatureList::IsEnabled(features::kSignedHTTPExchange) &&
-        !base::FeatureList::IsEnabled(network::features::kNetworkService))
+    if (!base::FeatureList::IsEnabled(features::kSignedHTTPExchange))
       return true;
     return prefetch_url_loader_called_ == expected;
   }
@@ -333,41 +330,42 @@ IN_PROC_BROWSER_TEST_P(PrefetchBrowserTest, WebPackageWithPreload) {
   int target_fetch_count = 0;
   int preload_fetch_count = 0;
   const char* prefetch_url = "/prefetch.html";
-  const char* target_htxg = "/target.htxg";
+  const char* target_sxg = "/target.sxg";
   const char* target_url = "/target.html";
-  const char* preload_url_in_htxg = "/preload.js";
+  const char* preload_url_in_sxg = "/preload.js";
 
   RegisterResponse(
       prefetch_url,
       ResponseEntry(base::StringPrintf(
-          "<body><link rel='prefetch' href='%s'></body>", target_htxg)));
+          "<body><link rel='prefetch' href='%s'></body>", target_sxg)));
   RegisterResponse(
-      target_htxg,
+      target_sxg,
       // We mock the SignedExchangeHandler, so just return a HTML content
-      // as "application/signed-exchange;v=b0".
-      ResponseEntry("<head><title>Prefetch Target (HTXG)</title></head>",
-                    "application/signed-exchange;v=b0"));
-  RegisterResponse(preload_url_in_htxg,
+      // as "application/signed-exchange;v=b2".
+      ResponseEntry("<head><title>Prefetch Target (SXG)</title></head>",
+                    "application/signed-exchange;v=b2"));
+  RegisterResponse(preload_url_in_sxg,
                    ResponseEntry("function foo() {}", "text/javascript"));
 
   base::RunLoop preload_waiter;
   base::RunLoop prefetch_waiter;
   embedded_test_server()->RegisterRequestMonitor(base::BindRepeating(
       &PrefetchBrowserTest::WatchURLAndRunClosure, base::Unretained(this),
-      target_htxg, &target_fetch_count, prefetch_waiter.QuitClosure()));
+      target_sxg, &target_fetch_count, prefetch_waiter.QuitClosure()));
   embedded_test_server()->RegisterRequestMonitor(base::BindRepeating(
       &PrefetchBrowserTest::WatchURLAndRunClosure, base::Unretained(this),
-      preload_url_in_htxg, &preload_fetch_count, preload_waiter.QuitClosure()));
+      preload_url_in_sxg, &preload_fetch_count, preload_waiter.QuitClosure()));
   embedded_test_server()->RegisterRequestHandler(base::BindRepeating(
       &PrefetchBrowserTest::ServeResponses, base::Unretained(this)));
   ASSERT_TRUE(embedded_test_server()->Start());
   EXPECT_TRUE(CheckPrefetchURLLoaderCountIfSupported(0));
 
   MockSignedExchangeHandlerFactory factory(
-      net::OK, GURL(target_url), "text/html",
+      SignedExchangeLoadResult::kSuccess, net::OK,
+      GURL(embedded_test_server()->GetURL(target_url)), "text/html",
       {base::StringPrintf(
           "Link: <%s>;rel=\"preload\";as=\"script\"",
-          embedded_test_server()->GetURL(preload_url_in_htxg).spec().c_str())});
+          embedded_test_server()->GetURL(preload_url_in_sxg).spec().c_str())});
   ScopedSignedExchangeHandlerFactory scoped_factory(&factory);
 
   // Loading a page that prefetches the target URL would increment both
@@ -377,11 +375,11 @@ IN_PROC_BROWSER_TEST_P(PrefetchBrowserTest, WebPackageWithPreload) {
   EXPECT_EQ(1, target_fetch_count);
   EXPECT_TRUE(CheckPrefetchURLLoaderCountIfSupported(1));
 
-  // Test after this point requires SignedHTTPExchange support.
+  // Test after this point requires SignedHTTPExchange support
   if (!base::FeatureList::IsEnabled(features::kSignedHTTPExchange))
     return;
 
-  // If the header in the .htxg file is correctly extracted, we should
+  // If the header in the .sxg file is correctly extracted, we should
   // be able to also see the preload.
   preload_waiter.Run();
   EXPECT_EQ(1, preload_fetch_count);
@@ -389,10 +387,7 @@ IN_PROC_BROWSER_TEST_P(PrefetchBrowserTest, WebPackageWithPreload) {
 
 INSTANTIATE_TEST_CASE_P(PrefetchBrowserTest,
                         PrefetchBrowserTest,
-                        testing::Values(PrefetchBrowserTestParam(true, true),
-                                        PrefetchBrowserTestParam(true, false),
-                                        PrefetchBrowserTestParam(false, true),
-                                        PrefetchBrowserTestParam(false,
-                                                                 false)));
+                        testing::Values(PrefetchBrowserTestParam(true),
+                                        PrefetchBrowserTestParam(false)));
 
 }  // namespace content

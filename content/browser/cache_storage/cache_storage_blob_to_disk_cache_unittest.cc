@@ -144,15 +144,16 @@ class CacheStorageBlobToDiskCacheTest : public testing::Test {
 
     std::unique_ptr<disk_cache::Entry*> entry(new disk_cache::Entry*());
     disk_cache::Entry** entry_ptr = entry.get();
-    rv = cache_backend_->CreateEntry(kEntryKey, entry_ptr, base::DoNothing());
+    rv = cache_backend_->CreateEntry(kEntryKey, net::HIGHEST, entry_ptr,
+                                     base::DoNothing());
     EXPECT_EQ(net::OK, rv);
     disk_cache_entry_.reset(*entry);
   }
 
   std::string ReadCacheContent() {
     int bytes_to_read = disk_cache_entry_->GetDataSize(kCacheEntryIndex);
-    scoped_refptr<net::IOBufferWithSize> buffer(
-        new net::IOBufferWithSize(bytes_to_read));
+    scoped_refptr<net::IOBufferWithSize> buffer =
+        base::MakeRefCounted<net::IOBufferWithSize>(bytes_to_read);
 
     int rv = disk_cache_entry_->ReadData(kCacheEntryIndex, 0 /* offset */,
                                          buffer.get(), buffer->size(),
@@ -169,6 +170,7 @@ class CacheStorageBlobToDiskCacheTest : public testing::Test {
 
     cache_storage_blob_to_disk_cache_->StreamBlobToCache(
         std::move(disk_cache_entry_), kCacheEntryIndex, std::move(blob_ptr),
+        blob_handle_->size(),
         base::BindOnce(&CacheStorageBlobToDiskCacheTest::StreamCallback,
                        base::Unretained(this)));
 

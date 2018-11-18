@@ -12,6 +12,7 @@ import android.webkit.WebViewClient;
 
 import org.chromium.android_webview.AwContentsClient.AwWebResourceError;
 import org.chromium.android_webview.AwSafeBrowsingResponse;
+import org.chromium.android_webview.ScopedSysTraceEvent;
 import org.chromium.base.Callback;
 import org.chromium.support_lib_boundary.SafeBrowsingResponseBoundaryInterface;
 import org.chromium.support_lib_boundary.WebResourceErrorBoundaryInterface;
@@ -40,32 +41,27 @@ public class SupportLibWebViewContentsClientAdapter {
     }
 
     public void setWebViewClient(WebViewClient possiblyCompatClient) {
-        mWebViewClient = convertCompatClient(possiblyCompatClient);
-        mWebViewClientSupportedFeatures =
-                mWebViewClient == null ? EMPTY_FEATURE_LIST : mWebViewClient.getSupportedFeatures();
+        try (ScopedSysTraceEvent event = ScopedSysTraceEvent.scoped(
+                     "SupportLibWebViewContentsClientAdapter.setWebViewClient")) {
+            mWebViewClient = convertCompatClient(possiblyCompatClient);
+            mWebViewClientSupportedFeatures = mWebViewClient == null
+                    ? EMPTY_FEATURE_LIST
+                    : mWebViewClient.getSupportedFeatures();
+        }
     }
 
     @Nullable
     private WebViewClientBoundaryInterface convertCompatClient(WebViewClient possiblyCompatClient) {
-        if (!clientIsCompat(possiblyCompatClient)) return null;
+        if (!BoundaryInterfaceReflectionUtil.instanceOfInOwnClassLoader(
+                    possiblyCompatClient, WEBVIEW_CLIENT_COMPAT_NAME)) {
+            return null;
+        }
 
         InvocationHandler handler =
                 BoundaryInterfaceReflectionUtil.createInvocationHandlerFor(possiblyCompatClient);
 
         return BoundaryInterfaceReflectionUtil.castToSuppLibClass(
                 WebViewClientBoundaryInterface.class, handler);
-    }
-
-    private boolean clientIsCompat(WebViewClient possiblyCompatClient) {
-        try {
-            Class compatClass = Class.forName(WEBVIEW_CLIENT_COMPAT_NAME, false,
-                    possiblyCompatClient.getClass().getClassLoader());
-            return compatClass.isInstance(possiblyCompatClient);
-        } catch (ClassNotFoundException e) {
-            // If WEBVIEW_CLIENT_COMPAT_NAME is not in the ClassLoader, then this cannot be an
-            // instance of WebViewClientCompat.
-            return false;
-        }
     }
 
     /**

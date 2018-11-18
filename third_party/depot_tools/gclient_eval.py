@@ -5,7 +5,10 @@
 import ast
 import cStringIO
 import collections
+import logging
 import tokenize
+
+import gclient_utils
 
 from third_party import schema
 
@@ -139,6 +142,11 @@ _GCLIENT_SCHEMA = schema.Schema(_NodeDictSchema({
         schema.Optional(basestring): _GCLIENT_DEPS_SCHEMA,
     }),
 
+    # Dependency to get gclient_gn_args* settings from. This allows these values
+    # to be set in a recursedeps file, rather than requiring that they exist in
+    # the top-level solution.
+    schema.Optional('gclient_gn_args_from'): basestring,
+
     # Path to GN args file to write selected variables.
     schema.Optional('gclient_gn_args_file'): basestring,
 
@@ -188,8 +196,12 @@ _GCLIENT_SCHEMA = schema.Schema(_NodeDictSchema({
     schema.Optional('target_os'): [schema.Optional(basestring)],
 
     # For recursed-upon sub-dependencies, check out their own dependencies
-    # relative to the paren't path, rather than relative to the .gclient file.
+    # relative to the parent's path, rather than relative to the .gclient file.
     schema.Optional('use_relative_paths'): bool,
+
+    # For recursed-upon sub-dependencies, run their hooks relative to the
+    # parent's path instead of relative to the .gclient file.
+    schema.Optional('use_relative_hooks'): bool,
 
     # Variables that can be referenced using Var() - see 'deps'.
     schema.Optional('vars'): _NodeDictSchema({
@@ -198,8 +210,7 @@ _GCLIENT_SCHEMA = schema.Schema(_NodeDictSchema({
 }))
 
 
-def _gclient_eval(node_or_string, vars_dict=None, expand_vars=False,
-                  filename='<unknown>'):
+def _gclient_eval(node_or_string, filename='<unknown>', vars_dict=None):
   """Safely evaluates a single expression. Returns the result."""
   _allowed_names = {'None': None, 'True': True, 'False': False}
   if isinstance(node_or_string, basestring):
@@ -208,12 +219,12 @@ def _gclient_eval(node_or_string, vars_dict=None, expand_vars=False,
     node_or_string = node_or_string.body
   def _convert(node):
     if isinstance(node, ast.Str):
-      if not expand_vars:
+      if vars_dict is None:
         return node.s
       try:
         return node.s.format(**vars_dict)
       except KeyError as e:
-        raise ValueError(
+        raise KeyError(
             '%s was used as a variable, but was not declared in the vars dict '
             '(file %r, line %s)' % (
                 e.message, filename, getattr(node, 'lineno', '<unknown>')))
@@ -246,14 +257,10 @@ def _gclient_eval(node_or_string, vars_dict=None, expand_vars=False,
         raise ValueError(
             'Var\'s argument must be a variable name (file %r, line %s)' % (
                 filename, getattr(node, 'lineno', '<unknown>')))
-      if not expand_vars:
-        return '{%s}' % arg
       if vars_dict is None:
-        raise ValueError(
-            'vars must be declared before Var can be used (file %r, line %s)'
-            % (filename, getattr(node, 'lineno', '<unknown>')))
+        return '{' + arg + '}'
       if arg not in vars_dict:
-        raise ValueError(
+        raise KeyError(
             '%s was used as a variable, but was not declared in the vars dict '
             '(file %r, line %s)' % (
                 arg, filename, getattr(node, 'lineno', '<unknown>')))
@@ -270,7 +277,7 @@ def _gclient_eval(node_or_string, vars_dict=None, expand_vars=False,
   return _convert(node_or_string)
 
 
-def Exec(content, expand_vars=True, filename='<unknown>', vars_override=None):
+def Exec(content, filename='<unknown>', vars_override=None):
   """Safely execs a set of assignments."""
   def _validate_statement(node, local_scope):
     if not isinstance(node, ast.Assign):
@@ -322,7 +329,7 @@ def Exec(content, expand_vars=True, filename='<unknown>', vars_override=None):
   vars_dict = {}
   if 'vars' in statements:
     vars_statement = statements['vars']
-    value = _gclient_eval(vars_statement, None, False, filename)
+    value = _gclient_eval(vars_statement, filename)
     local_scope.SetNode('vars', value, vars_statement)
     # Update the parsed vars with the overrides, but only if they are already
     # present (overrides do not introduce new variables).
@@ -334,37 +341,14 @@ def Exec(content, expand_vars=True, filename='<unknown>', vars_override=None):
         if k in vars_dict})
 
   for name, node in statements.iteritems():
-    value = _gclient_eval(node, vars_dict, expand_vars, filename)
+    value = _gclient_eval(node, filename, vars_dict)
     local_scope.SetNode(name, value, node)
 
   return _GCLIENT_SCHEMA.validate(local_scope)
 
 
-def Parse(content, expand_vars, validate_syntax, filename, vars_override=None):
-  """Parses DEPS strings.
-
-  Executes the Python-like string stored in content, resulting in a Python
-  dictionary specifyied by the schema above. Supports syntax validation and
-  variable expansion.
-
-  Args:
-    content: str. DEPS file stored as a string.
-    expand_vars: bool. Whether variables should be expanded to their values.
-    validate_syntax: bool. Whether syntax should be validated using the schema
-      defined above.
-    filename: str. The name of the DEPS file, or a string describing the source
-      of the content, e.g. '<string>', '<unknown>'.
-    vars_override: dict, optional. A dictionary with overrides for the variables
-      defined by the DEPS file.
-
-  Returns:
-    A Python dict with the parsed contents of the DEPS file, as specified by the
-    schema above.
-  """
-  # TODO(ehmaldonado): Make validate_syntax = True the only case
-  if validate_syntax:
-    return Exec(content, expand_vars, filename, vars_override)
-
+def ExecLegacy(content, filename='<unknown>', vars_override=None):
+  """Executes a DEPS file |content| using exec."""
   local_scope = {}
   global_scope = {'Var': lambda var_name: '{%s}' % var_name}
 
@@ -374,7 +358,7 @@ def Parse(content, expand_vars, validate_syntax, filename, vars_override=None):
   # as "exec a in b, c" (See https://bugs.python.org/issue21591).
   eval(compile(content, filename, 'exec'), global_scope, local_scope)
 
-  if 'vars' not in local_scope or not expand_vars:
+  if 'vars' not in local_scope:
     return local_scope
 
   vars_dict = {}
@@ -402,6 +386,118 @@ def Parse(content, expand_vars, validate_syntax, filename, vars_override=None):
       return node
 
   return _DeepFormat(local_scope)
+
+
+def _StandardizeDeps(deps_dict, vars_dict):
+  """"Standardizes the deps_dict.
+
+  For each dependency:
+  - Expands the variable in the dependency name.
+  - Ensures the dependency is a dictionary.
+  - Set's the 'dep_type' to be 'git' by default.
+  """
+  new_deps_dict = {}
+  for dep_name, dep_info in deps_dict.items():
+    dep_name = dep_name.format(**vars_dict)
+    if not isinstance(dep_info, collections.Mapping):
+      dep_info = {'url': dep_info}
+    dep_info.setdefault('dep_type', 'git')
+    new_deps_dict[dep_name] = dep_info
+  return new_deps_dict
+
+
+def _MergeDepsOs(deps_dict, os_deps_dict, os_name):
+  """Merges the deps in os_deps_dict into conditional dependencies in deps_dict.
+
+  The dependencies in os_deps_dict are transformed into conditional dependencies
+  using |'checkout_' + os_name|.
+  If the dependency is already present, the URL and revision must coincide.
+  """
+  for dep_name, dep_info in os_deps_dict.items():
+    # Make this condition very visible, so it's not a silent failure.
+    # It's unclear how to support None override in deps_os.
+    if dep_info['url'] is None:
+      logging.error('Ignoring %r:%r in %r deps_os', dep_name, dep_info, os_name)
+      continue
+
+    os_condition = 'checkout_' + (os_name if os_name != 'unix' else 'linux')
+    UpdateCondition(dep_info, 'and', os_condition)
+
+    if dep_name in deps_dict:
+      if deps_dict[dep_name]['url'] != dep_info['url']:
+        raise gclient_utils.Error(
+            'Value from deps_os (%r; %r: %r) conflicts with existing deps '
+            'entry (%r).' % (
+                os_name, dep_name, dep_info, deps_dict[dep_name]))
+
+      UpdateCondition(dep_info, 'or', deps_dict[dep_name].get('condition'))
+
+    deps_dict[dep_name] = dep_info
+
+
+def UpdateCondition(info_dict, op, new_condition):
+  """Updates info_dict's condition with |new_condition|.
+
+  An absent value is treated as implicitly True.
+  """
+  curr_condition = info_dict.get('condition')
+  # Easy case: Both are present.
+  if curr_condition and new_condition:
+    info_dict['condition'] = '(%s) %s (%s)' % (
+        curr_condition, op, new_condition)
+  # If |op| == 'and', and at least one condition is present, then use it.
+  elif op == 'and' and (curr_condition or new_condition):
+    info_dict['condition'] = curr_condition or new_condition
+  # Otherwise, no condition should be set
+  elif curr_condition:
+    del info_dict['condition']
+
+
+def Parse(content, validate_syntax, filename, vars_override=None):
+  """Parses DEPS strings.
+
+  Executes the Python-like string stored in content, resulting in a Python
+  dictionary specifyied by the schema above. Supports syntax validation and
+  variable expansion.
+
+  Args:
+    content: str. DEPS file stored as a string.
+    validate_syntax: bool. Whether syntax should be validated using the schema
+      defined above.
+    filename: str. The name of the DEPS file, or a string describing the source
+      of the content, e.g. '<string>', '<unknown>'.
+    vars_override: dict, optional. A dictionary with overrides for the variables
+      defined by the DEPS file.
+
+  Returns:
+    A Python dict with the parsed contents of the DEPS file, as specified by the
+    schema above.
+  """
+  if validate_syntax:
+    result = Exec(content, filename, vars_override)
+  else:
+    result = ExecLegacy(content, filename, vars_override)
+
+  vars_dict = result.get('vars', {})
+  if 'deps' in result:
+    result['deps'] = _StandardizeDeps(result['deps'], vars_dict)
+
+  if 'deps_os' in result:
+    deps = result.setdefault('deps', {})
+    for os_name, os_deps in result['deps_os'].iteritems():
+      os_deps = _StandardizeDeps(os_deps, vars_dict)
+      _MergeDepsOs(deps, os_deps, os_name)
+    del result['deps_os']
+
+  if 'hooks_os' in result:
+    hooks = result.setdefault('hooks', [])
+    for os_name, os_hooks in result['hooks_os'].iteritems():
+      for hook in os_hooks:
+        UpdateCondition(hook, 'and', 'checkout_' + os_name)
+      hooks.extend(os_hooks)
+    del result['hooks_os']
+
+  return result
 
 
 def EvaluateCondition(condition, variables, referenced_variables=None):
@@ -510,7 +606,9 @@ def RenderDEPSFile(gclient_dict):
 
 def _UpdateAstString(tokens, node, value):
   position = node.lineno, node.col_offset
-  quote_char = tokens[position][1][0]
+  quote_char = ''
+  if isinstance(node, ast.Str):
+    quote_char = tokens[position][1][0]
   tokens[position][1] = quote_char + value + quote_char
   node.s = value
 
@@ -633,7 +731,6 @@ def SetCIPD(gclient_dict, dep_name, package_name, new_version):
         "The deps entry for %s:%s has no formatting information." %
         (dep_name, package_name))
 
-  new_version = 'version:' + new_version
   _UpdateAstString(tokens, node, new_version)
   packages[0].SetNode('version', new_version, node)
 
@@ -716,7 +813,7 @@ def GetCIPD(gclient_dict, dep_name, package_name):
         "There must be exactly one package with the given name (%s), "
         "%s were found." % (package_name, len(packages)))
 
-  return packages[0]['version'][len('version:'):]
+  return packages[0]['version']
 
 
 def GetRevision(gclient_dict, dep_name):

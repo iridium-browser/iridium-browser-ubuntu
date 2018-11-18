@@ -6,9 +6,12 @@
 
 #include "base/single_thread_task_runner.h"
 #include "base/strings/pattern.h"
+#include "base/task/post_task.h"
 #include "content/public/browser/browser_context.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/login_delegate.h"
+#include "content/public/browser/overlay_window.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/resource_dispatcher_host.h"
@@ -20,13 +23,15 @@
 #include "content/shell/browser/layout_test/layout_test_browser_context.h"
 #include "content/shell/browser/layout_test/layout_test_browser_main_parts.h"
 #include "content/shell/browser/layout_test/layout_test_message_filter.h"
-#include "content/shell/browser/layout_test/layout_test_notification_manager.h"
 #include "content/shell/browser/layout_test/mojo_layout_test_helper.h"
 #include "content/shell/browser/shell_browser_context.h"
 #include "content/shell/common/layout_test/layout_test_switches.h"
 #include "content/shell/common/shell_messages.h"
 #include "content/shell/renderer/layout_test/blink_test_helpers.h"
+#include "content/test/mock_clipboard_host.h"
+#include "content/test/mock_platform_notification_service.h"
 #include "device/bluetooth/test/fake_bluetooth.h"
+#include "gpu/config/gpu_switches.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
 #include "third_party/blink/public/mojom/web_package/web_package_internals.mojom.h"
@@ -69,12 +74,44 @@ class WebPackageInternalsImpl : public blink::test::mojom::WebPackageInternals {
   DISALLOW_COPY_AND_ASSIGN(WebPackageInternalsImpl);
 };
 
+class TestOverlayWindow : public OverlayWindow {
+ public:
+  TestOverlayWindow() = default;
+  ~TestOverlayWindow() override{};
+
+  static std::unique_ptr<OverlayWindow> Create(
+      PictureInPictureWindowController* controller) {
+    return std::unique_ptr<OverlayWindow>(new TestOverlayWindow());
+  }
+
+  bool IsActive() const override { return false; }
+  void Close() override {}
+  void Show() override {}
+  void Hide() override {}
+  void SetPictureInPictureCustomControls(
+      const std::vector<blink::PictureInPictureControlInfo>& controls)
+      override {}
+  bool IsVisible() const override { return false; }
+  bool IsAlwaysOnTop() const override { return false; }
+  ui::Layer* GetLayer() override { return nullptr; }
+  gfx::Rect GetBounds() const override { return gfx::Rect(); }
+  void UpdateVideoSize(const gfx::Size& natural_size) override {}
+  void SetPlaybackState(PlaybackState playback_state) override {}
+  void SetAlwaysHidePlayPauseButton(bool is_visible) override {}
+  ui::Layer* GetWindowBackgroundLayer() override { return nullptr; }
+  ui::Layer* GetVideoLayer() override { return nullptr; }
+  gfx::Rect GetVideoBounds() override { return gfx::Rect(); }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(TestOverlayWindow);
+};
+
 }  // namespace
 
-LayoutTestContentBrowserClient::LayoutTestContentBrowserClient() {
+LayoutTestContentBrowserClient::LayoutTestContentBrowserClient()
+    : mock_platform_notification_service_(
+          std::make_unique<MockPlatformNotificationService>()) {
   DCHECK(!g_layout_test_browser_client);
-
-  layout_test_notification_manager_.reset(new LayoutTestNotificationManager());
 
   g_layout_test_browser_client = this;
 }
@@ -97,14 +134,14 @@ void LayoutTestContentBrowserClient::SetPopupBlockingEnabled(
   block_popups_ = block_popups;
 }
 
+void LayoutTestContentBrowserClient::ResetMockClipboardHost() {
+  if (mock_clipboard_host_)
+    mock_clipboard_host_->Reset();
+}
+
 std::unique_ptr<FakeBluetoothChooser>
 LayoutTestContentBrowserClient::GetNextFakeBluetoothChooser() {
   return std::move(next_fake_bluetooth_chooser_);
-}
-
-LayoutTestNotificationManager*
-LayoutTestContentBrowserClient::GetLayoutTestNotificationManager() {
-  return layout_test_notification_manager_.get();
 }
 
 void LayoutTestContentBrowserClient::RenderProcessWillLaunch(
@@ -118,8 +155,6 @@ void LayoutTestContentBrowserClient::RenderProcessWillLaunch(
       host->GetID(), partition->GetDatabaseTracker(),
       partition->GetQuotaManager(), partition->GetURLRequestContext(),
       partition->GetNetworkContext()));
-
-  host->Send(new ShellViewMsg_SetWebKitSourceDir(GetWebKitRootDirFilePath()));
 }
 
 void LayoutTestContentBrowserClient::ExposeInterfacesToRenderer(
@@ -127,8 +162,8 @@ void LayoutTestContentBrowserClient::ExposeInterfacesToRenderer(
     blink::AssociatedInterfaceRegistry* associated_registry,
     RenderProcessHost* render_process_host) {
   scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner =
-      content::BrowserThread::GetTaskRunnerForThread(
-          content::BrowserThread::UI);
+      base::CreateSingleThreadTaskRunnerWithTraits(
+          {content::BrowserThread::UI});
   registry->AddInterface(
       base::BindRepeating(&LayoutTestBluetoothFakeAdapterSetterImpl::Create),
       ui_task_runner);
@@ -136,9 +171,9 @@ void LayoutTestContentBrowserClient::ExposeInterfacesToRenderer(
   registry->AddInterface(base::BindRepeating(&bluetooth::FakeBluetooth::Create),
                          ui_task_runner);
   // This class outlives |render_process_host|, which owns |registry|. Since
-  // CreateFakeBluetoothChooser will not be called after |registry| is deleted
+  // any binders will not be called after |registry| is deleted
   // and |registry| is outlived by this class, it is safe to use
-  // base::Unretained.
+  // base::Unretained in all binders.
   registry->AddInterface(
       base::BindRepeating(
           &LayoutTestContentBrowserClient::CreateFakeBluetoothChooser,
@@ -149,6 +184,17 @@ void LayoutTestContentBrowserClient::ExposeInterfacesToRenderer(
       base::Unretained(
           render_process_host->GetStoragePartition()->GetWebPackageContext())));
   registry->AddInterface(base::BindRepeating(&MojoLayoutTestHelper::Create));
+  registry->AddInterface(
+      base::BindRepeating(&LayoutTestContentBrowserClient::BindClipboardHost,
+                          base::Unretained(this)),
+      ui_task_runner);
+}
+
+void LayoutTestContentBrowserClient::BindClipboardHost(
+    blink::mojom::ClipboardHostRequest request) {
+  if (!mock_clipboard_host_)
+    mock_clipboard_host_ = std::make_unique<MockClipboardHost>();
+  mock_clipboard_host_->Bind(std::move(request));
 }
 
 void LayoutTestContentBrowserClient::OverrideWebkitPrefs(
@@ -161,7 +207,7 @@ void LayoutTestContentBrowserClient::OverrideWebkitPrefs(
 void LayoutTestContentBrowserClient::AppendExtraCommandLineSwitches(
     base::CommandLine* command_line,
     int child_process_id) {
-  command_line->AppendSwitch(switches::kRunLayoutTest);
+  command_line->AppendSwitch(switches::kRunWebTests);
   ShellContentBrowserClient::AppendExtraCommandLineSwitches(command_line,
                                                             child_process_id);
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
@@ -183,6 +229,10 @@ void LayoutTestContentBrowserClient::AppendExtraCommandLineSwitches(
         base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
             switches::kEnableLeakDetection));
   }
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableDisplayCompositorPixelDump)) {
+    command_line->AppendSwitch(switches::kEnableDisplayCompositorPixelDump);
+  }
 }
 
 BrowserMainParts* LayoutTestContentBrowserClient::CreateBrowserMainParts(
@@ -200,6 +250,12 @@ void LayoutTestContentBrowserClient::GetQuotaSettings(
   std::move(callback).Run(storage::GetHardCodedSettings(1024 * 1024 * 1024));
 }
 
+std::unique_ptr<OverlayWindow>
+LayoutTestContentBrowserClient::CreateWindowForPictureInPicture(
+    PictureInPictureWindowController* controller) {
+  return TestOverlayWindow::Create(controller);
+}
+
 bool LayoutTestContentBrowserClient::DoesSiteRequireDedicatedProcess(
     BrowserContext* browser_context,
     const GURL& effective_site_url) {
@@ -212,7 +268,7 @@ bool LayoutTestContentBrowserClient::DoesSiteRequireDedicatedProcess(
 
 PlatformNotificationService*
 LayoutTestContentBrowserClient::GetPlatformNotificationService() {
-  return layout_test_notification_manager_.get();
+  return mock_platform_notification_service_.get();
 }
 
 bool LayoutTestContentBrowserClient::CanCreateWindow(
@@ -233,6 +289,19 @@ bool LayoutTestContentBrowserClient::CanCreateWindow(
   return !block_popups_ || user_gesture;
 }
 
+bool LayoutTestContentBrowserClient::ShouldEnableStrictSiteIsolation() {
+  // TODO(lukasza, alexmos): Layout tests should have the same default state of
+  // site-per-process as everything else, but because of a backlog of layout
+  // test failures (see https://crbug.com/477150), layout tests still use no
+  // isolation by default.
+  return false;
+}
+
+bool LayoutTestContentBrowserClient::CanIgnoreCertificateErrorIfNeeded() {
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(
+      switches::kRunWebTests);
+}
+
 void LayoutTestContentBrowserClient::ExposeInterfacesToFrame(
     service_manager::BinderRegistryWithArgs<content::RenderFrameHost*>*
         registry) {
@@ -243,11 +312,12 @@ scoped_refptr<LoginDelegate>
 LayoutTestContentBrowserClient::CreateLoginDelegate(
     net::AuthChallengeInfo* auth_info,
     content::ResourceRequestInfo::WebContentsGetter web_contents_getter,
+    const content::GlobalRequestID& request_id,
     bool is_main_frame,
     const GURL& url,
+    scoped_refptr<net::HttpResponseHeaders> response_headers,
     bool first_auth_attempt,
-    const base::Callback<void(const base::Optional<net::AuthCredentials>&)>&
-        auth_required_callback) {
+    LoginAuthRequiredCallback auth_required_callback) {
   return nullptr;
 }
 

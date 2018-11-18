@@ -36,8 +36,7 @@ enum class OptInActionType : int {
   // ARC was opted out by user from session.
   SESSION_OPTED_OUT = 9,
 
-  // The size of this enum; keep last.
-  SIZE,
+  kMaxValue = SESSION_OPTED_OUT,
 };
 
 enum class OptInCancelReason {
@@ -63,8 +62,7 @@ enum class OptInCancelReason {
   // Cannot start ARC because it is busy.
   SESSION_BUSY = 8,
 
-  // The size of this enum; keep last.
-  SIZE,
+  kMaxValue = SESSION_BUSY,
 };
 
 enum class OptInSilentAuthCode {
@@ -95,13 +93,12 @@ enum class OptInSilentAuthCode {
   // No Auth code in response.
   NO_AUTH_CODE_IN_RESPONSE = 8,
 
-  // The size of this enum, keep last.
-  SIZE,
+  kMaxValue = NO_AUTH_CODE_IN_RESPONSE,
 };
 
-// The values should be listed in ascending order for SIZE a last, for safety.
-// They are also persisted to logs, and their values should therefore never be
-// renumbered nor reused. For detailed meaning, please consult auth.mojom.
+// The values should be listed in ascending order. They are also persisted to
+// logs, and their values should therefore never be renumbered nor reused. For
+// detailed meaning, please consult auth.mojom.
 enum class ProvisioningResult : int {
   // Provisioning was successful. Note, SUCCESS_ALREADY_PROVISIONED is also
   // successful state.
@@ -159,8 +156,10 @@ enum class ProvisioningResult : int {
   // Device was already provisioned.
   SUCCESS_ALREADY_PROVISIONED = 21,
 
-  // The size of this enum; keep last.
-  SIZE,
+  // Account type is not supported for authorization.
+  UNSUPPORTED_ACCOUNT_TYPE = 22,
+
+  kMaxValue = UNSUPPORTED_ACCOUNT_TYPE,
 };
 
 enum class OptInFlowResult : int {
@@ -179,14 +178,41 @@ enum class OptInFlowResult : int {
   // OptIn has been canceled after an error was reported.
   CANCELED_AFTER_ERROR = 4,
 
-  // The size of this enum; keep last.
-  SIZE,
+  kMaxValue = CANCELED_AFTER_ERROR,
+};
+
+enum class ArcEnabledState {
+  // ARC++ is enabled for non-managed case.
+  ENABLED_NOT_MANAGED = 0,
+
+  // ARC++ is disabled for non-managed case.
+  DISABLED_NOT_MANAGED = 1,
+
+  // ARC++ is enabled for managed case when ARC++ is forced on.
+  ENABLED_MANAGED_ON = 2,
+
+  // ARC++ is disabled for managed case when ARC++ is forced on. This can happen
+  // when user declines ToS even if ARC++ is forced on.
+  DISABLED_MANAGED_ON = 3,
+
+  // ARC++ is disabled for managed case when ARC++ is forced off.
+  DISABLED_MANAGED_OFF = 4,
+
+  // ARC++ is enabled in case ARC++ is not allowed for the device. This can
+  // happen for ARC++ kiosk mode.
+  ENABLED_NOT_ALLOWED = 5,
+
+  // ARC++ is disabled and ARC++ is not allowed for the device.
+  DISABLED_NOT_ALLOWED = 6,
+
+  kMaxValue = DISABLED_NOT_ALLOWED,
 };
 
 void UpdateOptInActionUMA(OptInActionType type);
 void UpdateOptInCancelUMA(OptInCancelReason reason);
 void UpdateOptInFlowResultUMA(OptInFlowResult result);
 void UpdateEnabledStateUMA(bool enabled);
+void UpdateEnabledStateByUserTypeUMA(bool enabled, const Profile* profile);
 void UpdateProvisioningResultUMA(ProvisioningResult result,
                                  const Profile* profile);
 void UpdateProvisioningTiming(const base::TimeDelta& elapsed_time,
@@ -197,6 +223,8 @@ void UpdateReauthorizationResultUMA(ProvisioningResult result,
 void UpdatePlayStoreShowTime(const base::TimeDelta& elapsed_time,
                              const Profile* profile);
 void UpdateSilentAuthCodeUMA(OptInSilentAuthCode state);
+void UpdateSupervisionTransitionResultUMA(
+    mojom::SupervisionChangeStatus result);
 void UpdateReauthorizationSilentAuthCodeUMA(OptInSilentAuthCode state);
 void UpdateAuthTiming(const char* histogram_name, base::TimeDelta elapsed_time);
 void UpdateAuthCheckinAttempts(int32_t num_attempts);

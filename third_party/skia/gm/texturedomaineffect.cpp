@@ -9,15 +9,13 @@
 
 #include "gm.h"
 
-#if SK_SUPPORT_GPU
-
 #include "GrContext.h"
 #include "GrContextPriv.h"
 #include "GrProxyProvider.h"
 #include "GrRenderTargetContextPriv.h"
-#include "SkBitmap.h"
-#include "SkGr.h"
 #include "SkGradientShader.h"
+#include "SkImage.h"
+#include "SkSurface.h"
 #include "effects/GrTextureDomain.h"
 #include "ops/GrDrawOp.h"
 #include "ops/GrRectOpFactory.h"
@@ -45,33 +43,35 @@ protected:
     }
 
     void onOnceBeforeDraw() override {
-        // TODO: do this with surfaces & images and gpu backend
+        // TODO: do this with gpu backend
         SkImageInfo ii = SkImageInfo::Make(kTargetWidth, kTargetHeight, kN32_SkColorType,
                                            kPremul_SkAlphaType);
-        fBmp.allocPixels(ii);
-        SkCanvas canvas(fBmp);
-        canvas.clear(0x00000000);
+        auto surface = SkSurface::MakeRaster(ii);
+        SkCanvas* canvas = surface->getCanvas();
+        canvas->clear(0x00000000);
         SkPaint paint;
 
         SkColor colors1[] = { SK_ColorCYAN, SK_ColorLTGRAY, SK_ColorGRAY };
         paint.setShader(SkGradientShader::MakeSweep(65.f, 75.f, colors1, nullptr,
                                                     SK_ARRAY_COUNT(colors1)));
-        canvas.drawOval(SkRect::MakeXYWH(-5.f, -5.f, fBmp.width() + 10.f, fBmp.height() + 10.f),
-                        paint);
+        canvas->drawOval(SkRect::MakeXYWH(-5.f, -5.f, kTargetWidth + 10.f, kTargetHeight + 10.f),
+                         paint);
 
         SkColor colors2[] = { SK_ColorMAGENTA, SK_ColorLTGRAY, SK_ColorYELLOW };
         paint.setShader(SkGradientShader::MakeSweep(45.f, 55.f, colors2, nullptr,
                                                     SK_ARRAY_COUNT(colors2)));
         paint.setBlendMode(SkBlendMode::kDarken);
-        canvas.drawOval(SkRect::MakeXYWH(-5.f, -5.f, fBmp.width() + 10.f, fBmp.height() + 10.f),
-                        paint);
+        canvas->drawOval(SkRect::MakeXYWH(-5.f, -5.f, kTargetWidth + 10.f, kTargetHeight + 10.f),
+                         paint);
 
         SkColor colors3[] = { SK_ColorBLUE, SK_ColorLTGRAY, SK_ColorGREEN };
         paint.setShader(SkGradientShader::MakeSweep(25.f, 35.f, colors3, nullptr,
                                                     SK_ARRAY_COUNT(colors3)));
         paint.setBlendMode(SkBlendMode::kLighten);
-        canvas.drawOval(SkRect::MakeXYWH(-5.f, -5.f, fBmp.width() + 10.f, fBmp.height() + 10.f),
-                        paint);
+        canvas->drawOval(SkRect::MakeXYWH(-5.f, -5.f, kTargetWidth + 10.f, kTargetHeight + 10.f),
+                         paint);
+
+        fImage = surface->makeImageSnapshot();
     }
 
     void onDraw(SkCanvas* canvas) override {
@@ -88,14 +88,8 @@ protected:
         }
 
         GrProxyProvider* proxyProvider = context->contextPriv().proxyProvider();
-        GrSurfaceDesc desc;
-        desc.fWidth = fBmp.width();
-        desc.fHeight = fBmp.height();
-        desc.fConfig = SkImageInfo2GrPixelConfig(fBmp.info(), *context->caps());
-        SkASSERT(kUnknown_GrPixelConfig != desc.fConfig);
-
         sk_sp<GrTextureProxy> proxy = proxyProvider->createTextureProxy(
-                desc, SkBudgeted::kYes, fBmp.getPixels(), fBmp.rowBytes());
+                fImage, kNone_GrSurfaceFlags, 1, SkBudgeted::kYes, SkBackingFit::kExact);
         if (!proxy) {
             return;
         }
@@ -106,13 +100,14 @@ protected:
         textureMatrices.push_back();
         textureMatrices.back().setRotate(45.f, proxy->width() / 2.f, proxy->height() / 2.f);
 
+
         const SkIRect texelDomains[] = {
-            fBmp.bounds(),
-            SkIRect::MakeXYWH(fBmp.width() / 4, fBmp.height() / 4,
-                              fBmp.width() / 2, fBmp.height() / 2),
+            fImage->bounds(),
+            SkIRect::MakeXYWH(fImage->width() / 4, fImage->height() / 4,
+                              fImage->width() / 2, fImage->height() / 2),
         };
 
-        SkRect renderRect = SkRect::Make(fBmp.bounds());
+        SkRect renderRect = SkRect::Make(fImage->bounds());
         renderRect.outset(kDrawPad, kDrawPad);
 
         SkScalar y = kDrawPad + kTestPad;
@@ -134,7 +129,7 @@ protected:
                     const SkMatrix viewMatrix = SkMatrix::MakeTrans(x, y);
                     grPaint.addColorFragmentProcessor(std::move(fp));
                     renderTargetContext->priv().testingOnly_addDrawOp(
-                            GrRectOpFactory::MakeNonAAFill(std::move(grPaint), viewMatrix,
+                            GrRectOpFactory::MakeNonAAFill(context, std::move(grPaint), viewMatrix,
                                                            renderRect, GrAAType::kNone));
                     x += renderRect.width() + kTestPad;
                 }
@@ -148,12 +143,10 @@ private:
     static constexpr SkScalar kTestPad = 10.f;;
     static constexpr int      kTargetWidth = 100;
     static constexpr int      kTargetHeight = 100;
-    SkBitmap fBmp;
+    sk_sp<SkImage> fImage;
 
     typedef GM INHERITED;
 };
 
 DEF_GM(return new TextureDomainEffect;)
 }
-
-#endif

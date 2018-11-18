@@ -29,6 +29,7 @@
 #include "third_party/blink/renderer/core/dom/element_rare_data.h"
 #include "third_party/blink/renderer/core/dom/first_letter_pseudo_element.h"
 #include "third_party/blink/renderer/core/frame/use_counter.h"
+#include "third_party/blink/renderer/core/layout/generated_children.h"
 #include "third_party/blink/renderer/core/layout/layout_object.h"
 #include "third_party/blink/renderer/core/layout/layout_quote.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
@@ -38,6 +39,8 @@
 namespace blink {
 
 PseudoElement* PseudoElement::Create(Element* parent, PseudoId pseudo_id) {
+  if (pseudo_id == kPseudoIdFirstLetter)
+    return FirstLetterPseudoElement::Create(parent);
   return new PseudoElement(parent, pseudo_id);
 }
 
@@ -102,10 +105,16 @@ PseudoElement::PseudoElement(Element* parent, PseudoId pseudo_id)
 
 scoped_refptr<ComputedStyle> PseudoElement::CustomStyleForLayoutObject() {
   scoped_refptr<ComputedStyle> original_style =
-      ParentOrShadowHostElement()->PseudoStyle(PseudoStyleRequest(pseudo_id_));
+      ParentOrShadowHostElement()->StyleForPseudoElement(
+          PseudoStyleRequest(pseudo_id_));
   if (!original_style || original_style->Display() != EDisplay::kContents)
     return original_style;
 
+  return StoreOriginalAndReturnLayoutStyle(std::move(original_style));
+}
+
+scoped_refptr<ComputedStyle> PseudoElement::StoreOriginalAndReturnLayoutStyle(
+    scoped_refptr<ComputedStyle> original_style) {
   // For display:contents we should not generate a box, but we generate a non-
   // observable inline box for pseudo elements to be able to locate the
   // anonymous layout objects for generated content during DetachLayoutTree().
@@ -117,7 +126,7 @@ scoped_refptr<ComputedStyle> PseudoElement::CustomStyleForLayoutObject() {
 
   // Store the actual ComputedStyle to be able to return the correct values from
   // getComputedStyle().
-  StoreNonLayoutObjectComputedStyle(original_style);
+  StoreNonLayoutObjectComputedStyle(std::move(original_style));
   return layout_style;
 }
 
@@ -133,7 +142,7 @@ void PseudoElement::Dispose() {
   Element* parent = ParentOrShadowHostElement();
   GetDocument().AdoptIfNeeded(*this);
   SetParentOrShadowHostNode(nullptr);
-  RemovedFrom(parent);
+  RemovedFrom(*parent);
 }
 
 void PseudoElement::AttachLayoutTree(AttachContext& context) {
@@ -144,6 +153,13 @@ void PseudoElement::AttachLayoutTree(AttachContext& context) {
   LayoutObject* layout_object = GetLayoutObject();
   if (!layout_object)
     return;
+
+  // This is to ensure that bypassing the CanHaveGeneratedChildren() check in
+  // LayoutTreeBuilderForElement::ShouldCreateLayoutObject() does not result in
+  // the backdrop pseudo element's layout object becoming the child of a layout
+  // object that doesn't allow children.
+  DCHECK(layout_object->Parent());
+  DCHECK(CanHaveGeneratedChildren(*layout_object->Parent()));
 
   ComputedStyle& style = layout_object->MutableStyleRef();
   if (style.StyleType() != kPseudoIdBefore &&
@@ -168,13 +184,18 @@ bool PseudoElement::LayoutObjectIsNeeded(const ComputedStyle& style) const {
   return PseudoElementLayoutObjectIsNeeded(&style);
 }
 
-void PseudoElement::DidRecalcStyle(StyleRecalcChange) {
+void PseudoElement::DidRecalcStyle(StyleRecalcChange change) {
+  // If the pseudo element is being re-attached, its anonymous LayoutObjects for
+  // generated content will be destroyed and possibly recreated during layout
+  // tree rebuild. Thus, propagating style to generated content now is futile.
+  if (change == kReattach)
+    return;
   if (!GetLayoutObject())
     return;
 
   // The layoutObjects inside pseudo elements are anonymous so they don't get
   // notified of recalcStyle and must have the style propagated downward
-  // manually similar to LayoutObject::propagateStyleToAnonymousChildren.
+  // manually similar to LayoutObject::PropagateStyleToAnonymousChildren.
   LayoutObject* layout_object = GetLayoutObject();
   for (LayoutObject* child = layout_object->NextInPreOrder(layout_object);
        child; child = child->NextInPreOrder(layout_object)) {
@@ -186,34 +207,8 @@ void PseudoElement::DidRecalcStyle(StyleRecalcChange) {
   }
 }
 
-// With PseudoElements the DOM tree and Layout tree can differ. When you attach
-// a, first-letter for example, into the DOM we walk down the Layout
-// tree to find the correct insertion point for the LayoutObject. But, this
-// means if we ask for the parentOrShadowHost Node from the first-letter
-// pseudo element we will get some arbitrary ancestor of the LayoutObject.
-//
-// For hit testing, we need the parent Node of the LayoutObject for the
-// first-letter pseudo element. So, by walking up the Layout tree we know
-// we will get the parent and not some other ancestor.
-Node* PseudoElement::FindAssociatedNode() const {
-  // The ::backdrop element is parented to the LayoutView, not to the node
-  // that it's associated with. We need to make sure ::backdrop sends the
-  // events to the parent node correctly.
-  if (GetPseudoId() == kPseudoIdBackdrop)
-    return ParentOrShadowHostNode();
-
-  DCHECK(GetLayoutObject());
-  DCHECK(GetLayoutObject()->Parent());
-
-  // We can have any number of anonymous layout objects inserted between
-  // us and our parent so make sure we skip over them.
-  LayoutObject* ancestor = GetLayoutObject()->Parent();
-  while (ancestor->IsAnonymous() ||
-         (ancestor->GetNode() && ancestor->GetNode()->IsPseudoElement())) {
-    DCHECK(ancestor->Parent());
-    ancestor = ancestor->Parent();
-  }
-  return ancestor->GetNode();
+Node* PseudoElement::InnerNodeForHitTesting() const {
+  return ParentOrShadowHostNode();
 }
 
 const ComputedStyle* PseudoElement::VirtualEnsureComputedStyle(

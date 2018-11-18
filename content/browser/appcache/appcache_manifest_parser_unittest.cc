@@ -5,6 +5,7 @@
 #include <stddef.h>
 
 #include <string>
+#include <vector>
 
 #include "base/macros.h"
 #include "content/browser/appcache/appcache_manifest_parser.h"
@@ -174,7 +175,8 @@ TEST(AppCacheManifestParserTest, WhitelistUrls) {
   EXPECT_FALSE(manifest.did_ignore_intercept_namespaces);
   EXPECT_FALSE(manifest.did_ignore_fallback_namespaces);
 
-  const AppCacheNamespaceVector& online = manifest.online_whitelist_namespaces;
+  const std::vector<AppCacheNamespace>& online =
+      manifest.online_whitelist_namespaces;
   const size_t kExpected = 6;
   ASSERT_EQ(kExpected, online.size());
   EXPECT_EQ(APPCACHE_NETWORK_NAMESPACE, online[0].type);
@@ -223,7 +225,8 @@ TEST(AppCacheManifestParserTest, FallbackUrls) {
   EXPECT_FALSE(manifest.did_ignore_intercept_namespaces);
   EXPECT_FALSE(manifest.did_ignore_fallback_namespaces);
 
-  const AppCacheNamespaceVector& fallbacks = manifest.fallback_namespaces;
+  const std::vector<AppCacheNamespace>& fallbacks =
+      manifest.fallback_namespaces;
   const size_t kExpected = 5;
   ASSERT_EQ(kExpected, fallbacks.size());
   EXPECT_EQ(APPCACHE_FALLBACK_NAMESPACE, fallbacks[0].type);
@@ -281,7 +284,8 @@ TEST(AppCacheManifestParserTest, FallbackUrlsWithPort) {
   EXPECT_TRUE(manifest.online_whitelist_namespaces.empty());
   EXPECT_FALSE(manifest.online_whitelist_all);
 
-  const AppCacheNamespaceVector& fallbacks = manifest.fallback_namespaces;
+  const std::vector<AppCacheNamespace>& fallbacks =
+      manifest.fallback_namespaces;
   const size_t kExpected = 3;
   ASSERT_EQ(kExpected, fallbacks.size());
   EXPECT_EQ(APPCACHE_FALLBACK_NAMESPACE, fallbacks[0].type);
@@ -334,7 +338,8 @@ TEST(AppCacheManifestParserTest, InterceptUrls) {
   EXPECT_FALSE(manifest.did_ignore_intercept_namespaces);
   EXPECT_FALSE(manifest.did_ignore_fallback_namespaces);
 
-  const AppCacheNamespaceVector& intercepts = manifest.intercept_namespaces;
+  const std::vector<AppCacheNamespace>& intercepts =
+      manifest.intercept_namespaces;
   const size_t kExpected = 3;
   ASSERT_EQ(kExpected, intercepts.size());
   EXPECT_EQ(APPCACHE_INTERCEPT_NAMESPACE, intercepts[0].type);
@@ -401,7 +406,8 @@ TEST(AppCacheManifestParserTest, ComboUrls) {
   EXPECT_TRUE(urls.find("http://combo.com:99/explicit-2") != urls.end());
   EXPECT_TRUE(urls.find("http://www.diff.com/explicit-3") != urls.end());
 
-  const AppCacheNamespaceVector& online = manifest.online_whitelist_namespaces;
+  const std::vector<AppCacheNamespace>& online =
+      manifest.online_whitelist_namespaces;
   expected = 4;
   ASSERT_EQ(expected, online.size());
   EXPECT_EQ(GURL("http://combo.com/whitelist-1"),
@@ -413,7 +419,8 @@ TEST(AppCacheManifestParserTest, ComboUrls) {
   EXPECT_EQ(GURL("http://combo.com:99/whitelist-4"),
                  online[3].namespace_url);
 
-  const AppCacheNamespaceVector& fallbacks = manifest.fallback_namespaces;
+  const std::vector<AppCacheNamespace>& fallbacks =
+      manifest.fallback_namespaces;
   expected = 2;
   ASSERT_EQ(expected, fallbacks.size());
   EXPECT_EQ(APPCACHE_FALLBACK_NAMESPACE, fallbacks[0].type);
@@ -440,7 +447,8 @@ TEST(AppCacheManifestParserTest, UnusualUtf8) {
                             PARSE_MANIFEST_ALLOWING_DANGEROUS_FEATURES,
                             manifest));
   base::hash_set<std::string> urls = manifest.explicit_urls;
-  EXPECT_TRUE(urls.find("http://bad.com/%EF%BF%BDinvalidutf8") != urls.end());
+  EXPECT_TRUE(urls.find("http://bad.com/%EF%BF%BDinvalidutf8") != urls.end())
+      << "manifest byte stream was passed through, not UTF-8-decoded";
   EXPECT_TRUE(urls.find("http://bad.com/nonbmp%F1%84%AB%BC") != urls.end());
 }
 

@@ -7,6 +7,7 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/stl_util.h"
 #include "base/strings/string_split.h"
 #include "chromeos/chromeos_switches.h"
 
@@ -17,7 +18,8 @@ namespace {
 // in the same order as the Screen enum.
 const char* kScreenNames[] = {
     "hid-detection",                   // SCREEN_OOBE_HID_DETECTION
-    "connect",                         // SCREEN_OOBE_NETWORK
+    "connect",                         // SCREEN_OOBE_WELCOME
+    "network-selection",               // SCREEN_OOBE_NETWORK
     "eula",                            // SCREEN_OOBE_EULA
     "update",                          // SCREEN_OOBE_UPDATE
     "debugging",                       // SCREEN_OOBE_ENABLE_DEBUGGING
@@ -51,11 +53,19 @@ const char* kScreenNames[] = {
     "voice-interaction-value-prop",  // SCREEN_VOICE_INTERACTION_VALUE_PROP
     "wait-for-container-ready",      // SCREEN_WAIT_FOR_CONTAINTER_READY
     "update-required",               // SCREEN_UPDATE_REQUIRED
+    "assistant-optin-flow",          // SCREEN_ASSISTANT_OPTIN_FLOW
     "login",                         // SCREEN_SPECIAL_LOGIN
     "oobe",                          // SCREEN_SPECIAL_OOBE
     "test:nowindow",                 // SCREEN_TEST_NO_WINDOW
     "sync-consent",                  // SCREEN_SYNC_CONSENT
+    "fingerprint-setup",             // SCREEN_FINGERPRINT_SETUP
     "demo-setup",                    // SCREEN_OOBE_DEMO_SETUP
+    "demo-preferences",              // SCREEN_OOBE_DEMO_PREFERENCES
+    "recommend-apps",                // SCREEN_RECOMMEND_APPS
+    "app-downloading",               // SCREEN_APP_DOWNLOADING
+    "discover",                      // SCREEN_DISCOVER
+    "marketing-opt-in",              // SCREEN_MARKETING_OPT_IN
+    "multidevice-setup",             // SCREEN_MULTIDEVICE_SETUP
     "unknown",                       // SCREEN_UNKNOWN
 };
 
@@ -88,7 +98,7 @@ bool ForceShowOobeScreen(OobeScreen screen) {
   std::vector<std::string> screens = base::SplitString(
       option_str, ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
   std::string name = GetOobeScreenName(screen);
-  return std::find(screens.begin(), screens.end(), name) != screens.end();
+  return base::ContainsValue(screens, name);
 }
 
 }  // namespace chromeos

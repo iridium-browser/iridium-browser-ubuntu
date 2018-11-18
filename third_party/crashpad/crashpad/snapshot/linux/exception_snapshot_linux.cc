@@ -41,6 +41,7 @@ ExceptionSnapshotLinux::ExceptionSnapshotLinux()
 ExceptionSnapshotLinux::~ExceptionSnapshotLinux() {}
 
 #if defined(ARCH_CPU_X86_FAMILY)
+
 template <>
 bool ExceptionSnapshotLinux::ReadContext<ContextTraits32>(
     ProcessReaderLinux* reader,
@@ -54,26 +55,35 @@ bool ExceptionSnapshotLinux::ReadContext<ContextTraits32>(
   context_.architecture = kCPUArchitectureX86;
   context_.x86 = &context_union_.x86;
 
-  if (ucontext.fprs.magic == X86_FXSR_MAGIC) {
-    if (!reader->Memory()->Read(context_address +
-                                    offsetof(UContext<ContextTraits32>, fprs) +
-                                    offsetof(SignalFloatContext32, fxsave),
-                                sizeof(CPUContextX86::Fxsave),
-                                &context_.x86->fxsave)) {
+  if (!ucontext.mcontext.fpptr) {
+    InitializeCPUContextX86_NoFloatingPoint(ucontext.mcontext.gprs,
+                                            context_.x86);
+    return true;
+  }
+
+  SignalFloatContext32 fprs;
+  if (!reader->Memory()->Read(ucontext.mcontext.fpptr, sizeof(fprs), &fprs)) {
+    LOG(ERROR) << "Couldn't read float context";
+    return false;
+  }
+
+  if (fprs.magic == X86_FXSR_MAGIC) {
+    InitializeCPUContextX86_NoFloatingPoint(ucontext.mcontext.gprs,
+                                            context_.x86);
+    if (!reader->Memory()->Read(
+            ucontext.mcontext.fpptr + offsetof(SignalFloatContext32, fxsave),
+            sizeof(CPUContextX86::Fxsave),
+            &context_.x86->fxsave)) {
       LOG(ERROR) << "Couldn't read fxsave";
       return false;
     }
-    InitializeCPUContextX86_NoFloatingPoint(ucontext.mcontext.gprs,
-                                            context_.x86);
-
+  } else if (fprs.magic == 0xffff) {
+    InitializeCPUContextX86(ucontext.mcontext.gprs, fprs, context_.x86);
   } else {
-    if (ucontext.fprs.magic != 0xffff) {
-      LOG(ERROR) << "unexpected magic 0x" << std::hex << ucontext.fprs.magic;
-      return false;
-    }
-    InitializeCPUContextX86(
-        ucontext.mcontext.gprs, ucontext.fprs, context_.x86);
+    LOG(ERROR) << "unexpected magic 0x" << std::hex << fprs.magic;
+    return false;
   }
+
   return true;
 }
 
@@ -90,8 +100,19 @@ bool ExceptionSnapshotLinux::ReadContext<ContextTraits64>(
   context_.architecture = kCPUArchitectureX86_64;
   context_.x86_64 = &context_union_.x86_64;
 
-  InitializeCPUContextX86_64(
-      ucontext.mcontext.gprs, ucontext.fprs, context_.x86_64);
+  if (!ucontext.mcontext.fpptr) {
+    InitializeCPUContextX86_64_NoFloatingPoint(ucontext.mcontext.gprs,
+                                               context_.x86_64);
+    return true;
+  }
+
+  SignalFloatContext64 fprs;
+  if (!reader->Memory()->Read(ucontext.mcontext.fpptr, sizeof(fprs), &fprs)) {
+    LOG(ERROR) << "Couldn't read float context";
+    return false;
+  }
+
+  InitializeCPUContextX86_64(ucontext.mcontext.gprs, fprs, context_.x86_64);
   return true;
 }
 
@@ -109,7 +130,7 @@ bool ExceptionSnapshotLinux::ReadContext<ContextTraits32>(
 
   LinuxVMAddress gprs_address =
       context_address + offsetof(UContext<ContextTraits32>, mcontext32) +
-      offsetof(MContext32, gprs);
+      offsetof(ContextTraits32::MContext32, gprs);
 
   SignalThreadContext32 thread_context;
   if (!memory->Read(gprs_address, sizeof(thread_context), &thread_context)) {
@@ -117,8 +138,6 @@ bool ExceptionSnapshotLinux::ReadContext<ContextTraits32>(
     return false;
   }
   InitializeCPUContextARM_NoFloatingPoint(thread_context, dest_context);
-
-  dest_context->have_fpa_regs = false;
 
   LinuxVMAddress reserved_address =
       context_address + offsetof(UContext<ContextTraits32>, reserved);
@@ -134,7 +153,6 @@ bool ExceptionSnapshotLinux::ReadContext<ContextTraits32>(
     return false;
   }
 
-  dest_context->have_vfp_regs = false;
   do {
     CoprocessorContextHead head;
     if (!range.Read(reserved_address, sizeof(head), &head)) {
@@ -189,7 +207,7 @@ bool ExceptionSnapshotLinux::ReadContext<ContextTraits64>(
 
   LinuxVMAddress gprs_address =
       context_address + offsetof(UContext<ContextTraits64>, mcontext64) +
-      offsetof(MContext64, gprs);
+      offsetof(ContextTraits64::MContext64, gprs);
 
   ThreadContext::t64_t thread_context;
   if (!memory->Read(gprs_address, sizeof(thread_context), &thread_context)) {
@@ -241,7 +259,6 @@ bool ExceptionSnapshotLinux::ReadContext<ContextTraits64>(
 
       case 0:
         LOG(WARNING) << "fpsimd not found";
-        InitializeCPUContextARM64_ClearFPSIMD(dest_context);
         return true;
 
       default:
@@ -249,6 +266,61 @@ bool ExceptionSnapshotLinux::ReadContext<ContextTraits64>(
         return false;
     }
   } while (true);
+}
+
+#elif defined(ARCH_CPU_MIPS_FAMILY)
+
+template <typename Traits>
+static bool ReadContext(ProcessReaderLinux* reader,
+                        LinuxVMAddress context_address,
+                        typename Traits::CPUContext* dest_context) {
+  ProcessMemory* memory = reader->Memory();
+
+  LinuxVMAddress gregs_address = context_address +
+                                 offsetof(UContext<Traits>, mcontext) +
+                                 offsetof(typename Traits::MContext, gregs);
+
+  typename Traits::SignalThreadContext thread_context;
+  if (!memory->Read(gregs_address, sizeof(thread_context), &thread_context)) {
+    LOG(ERROR) << "Couldn't read gregs";
+    return false;
+  }
+
+  LinuxVMAddress fpregs_address = context_address +
+                                  offsetof(UContext<Traits>, mcontext) +
+                                  offsetof(typename Traits::MContext, fpregs);
+
+  typename Traits::SignalFloatContext fp_context;
+  if (!memory->Read(fpregs_address, sizeof(fp_context), &fp_context)) {
+    LOG(ERROR) << "Couldn't read fpregs";
+    return false;
+  }
+
+  InitializeCPUContextMIPS<Traits>(thread_context, fp_context, dest_context);
+
+  return true;
+}
+
+template <>
+bool ExceptionSnapshotLinux::ReadContext<ContextTraits32>(
+    ProcessReaderLinux* reader,
+    LinuxVMAddress context_address) {
+  context_.architecture = kCPUArchitectureMIPSEL;
+  context_.mipsel = &context_union_.mipsel;
+
+  return internal::ReadContext<ContextTraits32>(
+      reader, context_address, context_.mipsel);
+}
+
+template <>
+bool ExceptionSnapshotLinux::ReadContext<ContextTraits64>(
+    ProcessReaderLinux* reader,
+    LinuxVMAddress context_address) {
+  context_.architecture = kCPUArchitectureMIPS64EL;
+  context_.mips64 = &context_union_.mips64;
+
+  return internal::ReadContext<ContextTraits64>(
+      reader, context_address, context_.mips64);
 }
 
 #endif  // ARCH_CPU_X86_FAMILY

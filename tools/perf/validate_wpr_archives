@@ -19,13 +19,15 @@ path_util.AddAndroidPylibToPath()
 def GetAllStorySets():
   story_sets = []
   benchmarks_to_skip = [
+      'analysis_metrics_ct',
       'skpicture_printer_ct',
       'screenshot_ct',
-      'smoothness_ct',
+      'rendering.cluster_telemetry',
       'repaint_ct',
       'rasterize_and_record_micro_ct',
       'multipage_skpicture_printer_ct',
       'loading.cluster_telemetry',
+      'v8.loading.cluster_telemetry',
       'memory.cluster_telemetry',
       'skpicture_printer',
       'cros_tab_switching.typical_24',

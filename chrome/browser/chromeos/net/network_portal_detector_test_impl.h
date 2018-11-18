@@ -34,10 +34,8 @@ class NetworkPortalDetectorTestImpl : public NetworkPortalDetector {
       const std::string& service_path) override;
   bool IsEnabled() override;
   void Enable(bool start_detection) override;
-  bool StartDetectionIfIdle() override;
-
+  bool StartPortalDetection(bool force) override;
   void SetStrategy(PortalDetectorStrategy::StrategyId id) override;
-  void OnLockScreenRequest() override;
 
   PortalDetectorStrategy::StrategyId strategy_id() const {
     return strategy_id_;
@@ -47,7 +45,7 @@ class NetworkPortalDetectorTestImpl : public NetworkPortalDetector {
   using NetworkId = std::string;
   using CaptivePortalStateMap = std::map<NetworkId, CaptivePortalState>;
 
-  base::ObserverList<Observer> observers_;
+  base::ObserverList<Observer>::Unchecked observers_;
   std::unique_ptr<NetworkState> default_network_;
   CaptivePortalStateMap portal_state_map_;
   PortalDetectorStrategy::StrategyId strategy_id_;

@@ -135,7 +135,9 @@ Extended attributes are generally not inherited: only extended attributes on the
 These are defined in the [ECMAScript-specific extended attributes](http://heycam.github.io/webidl/#es-extended-attributes) section of the [Web IDL spec](http://heycam.github.io/webidl/), and alter the binding behavior.
 
 *** note
-Unsupported: `[ArrayClass]`, `[ImplicitThis]`, `[LenientThis]`, `[NamedPropertiesObject]`, `[TreatNonCallableAsNull]`
+Unsupported: `[LenientThis]`
+
+Undocumented: `[TreatNonObjectAsNull]`
 ***
 
 ### [CEReactions] _(m, a)_
@@ -147,6 +149,11 @@ Summary: `[CEReactions]` indicates that
 are triggered for this method or attribute.
 
 Usage: `[CEReactions]` takes no arguments.
+
+`[CEReacionts]` doesn't work with `[Custom]`. Custom binding code should use
+`blink::CEReactionsScope` if the method or the attribute has `[CEReactions]`.
+
+Note that `blink::CEReactionsScope` must be constructed after `blink::ExceptionState`.
 
 ### [Clamp] _(a, p)_
 
@@ -307,6 +314,14 @@ Standard: [HTMLConstructor](https://html.spec.whatwg.org/multipage/dom.html#html
 Summary: HTML Elements have special constructor behavior. Interface object of given interface with the `[HTMLConstructor]` attribute will have specific behavior when called.
 
 Usage: Must take no arguments, and must not appear on anything other than an interface. It must appear once on an interface, and the interface cannot be annotated with `[Constructor]` or `[NoInterfaceObject]` extended attributes. It must not be used on a callback interface.
+
+### [LenientSetter] _(a)_
+
+Standard: [LenientSetter](https://heycam.github.io/webidl/#LenientSetter)
+
+Summary: `[LenientSetter]` indicates that a no-op setter will be generated for a readonly attribute’s accessor property. This results in erroneous assignments to the property in strict mode to be ignored rather than causing an exception to be thrown.
+
+`[LenientSetter]` must take no arguments, and must not appear on anything other than a readonly regular attribute.
 
 ### [LegacyUnenumerableNamedProperties] _(i)_
 
@@ -472,6 +487,34 @@ interface Window {
 }
 ```
 
+### [Serializable] _(i)_
+
+Standard: [Serializable](https://html.spec.whatwg.org/multipage/structured-data.html#serializable)
+
+Summary: Serializable objects support being serialized, and later deserialized, for persistence in storage APIs or for passing with `postMessage()`.
+
+```webidl
+[Serializable] interface Blob {
+    ...
+};
+```
+
+This attribute has no effect on code generation and should simply be used in Blink IDL files if the specification uses it. Code to perform the serialization/deserialization must be added to `V8ScriptValueSerializer` for types in `core/` or `V8ScriptValueDeserializerForModules` for types in `modules/`.
+
+### [Transferable] _(i)_
+
+Standard: [Transferable](https://html.spec.whatwg.org/multipage/structured-data.html#transferable)
+
+Summary: Transferable objects support being transferred across Realms with `postMessage()`.
+
+```webidl
+[Transferable] interface MessagePort {
+    ...
+};
+```
+
+This attribute has no effect on code generation and should simply be used in Blink IDL files if the specification uses it. Code to perform the transfer steps must be added to `V8ScriptValueSerializer` for types in `core/` or `V8ScriptValueDeserializerForModules` for types in `modules/`.
+
 ### [TreatNullAs] _(a,p)_
 
 Standard: [TreatNullAs](https://heycam.github.io/webidl/#TreatNullAs)
@@ -495,12 +538,11 @@ Standard: [Unforgeable](http://heycam.github.io/webidl/#Unforgeable)
 
 Summary: Makes interface members unconfigurable and also controls where the member is defined.
 
-Usage: Can be specified on methods, attributes or interfaces:
+Usage: Can be specified on interface methods or non-static interface attributes:
 
 ```webidl
 [Unforgeable] void func();
 [Unforgeable] attribute DOMString str;
-[Unforgeable] interface XXX { ... };
 ```
 
 By default, interface members are configurable (i.e. you can modify a property descriptor corresponding to the member and also you can delete the property). `[Unforgeable]` makes the member unconfiguable so that you cannot modify or delete the property corresponding to the member.
@@ -610,7 +652,7 @@ String Example::func(ScriptState* state, bool a, bool b);
 ```
 
 Be careful when you use `[CallWith=ScriptState]`.
-You should not store the passed-in ScriptState on a DOM object (using scoped_refptr<ScriptState>).
+You should not store the passed-in ScriptState on a DOM object.
 This is because if the stored ScriptState is used by some method called by a different
 world (note that the DOM object is shared among multiple worlds), it leaks the ScriptState
 to the world. ScriptState must be carefully maintained in a way that doesn't leak
@@ -696,7 +738,7 @@ scoped_refptr<XXX> XXX::create(ExecutionContext* context, float x, float y, Stri
 ```
 
 Be careful when you use `[ConstructorCallWith=ScriptState]`.
-You should not store the passed-in ScriptState on a DOM object (using scoped_refptr<ScriptState>).
+You should not store the passed-in ScriptState on a DOM object.
 This is because if the stored ScriptState is used by some method called by a different
 world (note that the DOM object is shared among multiple worlds), it leaks the ScriptState
 to the world. ScriptState must be carefully maintained in a way that doesn't leak
@@ -1022,16 +1064,6 @@ For more information, see [RuntimeEnabledFeatures](https://code.google.com/p/chr
 *** note
 **FIXME:** Currently, `[OriginTrialEnabled]` can only be applied to interfaces, attributes, and constants. Methods (including those generated by `iterable`, `setlike`, `maplike`, `serializer` and `stringifier`) are not supported. See [Bug 621641](https://crbug.com/621641).
 ***
-
-### [PostMessage] _(m)_
-
-Summary: Tells the code generator to generate postMessage method used in Workers, Service Workers etc.
-
-Usage: `[PostMessage]` can be specified on methods
-
-```webidl
-[PostMessage] void postMessage(any message, optional sequence<Transferable> transfer);
-```
 
 ### [RaisesException] _(i, m, a)_
 
@@ -1552,11 +1584,13 @@ V8PrivateProperty::getHTMLFooBarCachedAccessor().set(context, object, newValue);
 
 Summary: `[Affects=Nothing]` indicates that a function must not produce JS-observable side effects. Functions without this attribute are never invoked by V8 with throwOnSideEffect.
 
-Marked functions are allowed to be nondeterministic and throw exceptions, but must not set values, cache objects, or schedule execution that will be observable after the function completes. If a marked function calls into V8, it must properly handle cases when the V8 call returns an MaybeHandle.
+Marked functions are allowed to be nondeterministic, throw exceptions, force layout, and recalculate style, but must not set values, cache objects, or schedule execution that will be observable after the function completes. If a marked function calls into V8, it must properly handle cases when the V8 call returns an MaybeHandle.
+
+All DOM constructors are assumed to have side effects. However, an exception can be explicitly indicated when calling constructors using the V8 API method Function::NewInstanceWithSideEffectType().
 
 There is not yet support for marking SymbolKeyedMethodConfigurations as side-effect free. This requires additional support in V8 to whitelist Intrinsics.
 
-Usage: `[Affects=Nothing]` can be specified on a method, or on an attribute to indicate that its getter callback is side effect free:
+Usage for attributes and operations: `[Affects=Nothing]` can be specified on an operation, or on an attribute to indicate that its getter callback is side effect free:
 
 ```webidl
 interface HTMLFoo {
@@ -1629,8 +1663,12 @@ Added to members of a partial interface definition (and implemented interfaces w
 **FIXME:** The following need documentation:
 ***
 
-* `[PerWorldBindings]` :: interacts with `[LogActivity]`
+* `[ImmutablePrototype]`
+* `[LegacyInterfaceTypeChecking]`
+* `[LogAllWorlds]`
 * `[OverrideBuiltins]` :: used on named accessors
+* `[PerWorldBindings]` :: interacts with `[LogActivity]`
+* `[WebAgentAPI]`
 
 -------------
 

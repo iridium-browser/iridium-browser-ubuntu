@@ -12,9 +12,7 @@
 
 namespace blink {
 
-class ModuleScriptLoaderClient;
 class ScriptModuleResolver;
-class ModuleScriptFetchRequest;
 
 // DummyModulator provides empty Modulator interface implementation w/
 // NOTREACHED().
@@ -28,42 +26,45 @@ class DummyModulator : public Modulator {
 
  public:
   DummyModulator();
-  virtual ~DummyModulator();
-  void Trace(blink::Visitor*);
+  ~DummyModulator() override;
+  void Trace(blink::Visitor*) override;
 
   ScriptModuleResolver* GetScriptModuleResolver() override;
   base::SingleThreadTaskRunner* TaskRunner() override;
-  ReferrerPolicy GetReferrerPolicy() override;
-  const SecurityOrigin* GetSecurityOriginForFetch() override;
   ScriptState* GetScriptState() override;
+  bool IsScriptingDisabled() const override;
 
-  void FetchTree(const ModuleScriptFetchRequest&, ModuleTreeClient*) override;
-  void FetchSingle(const ModuleScriptFetchRequest&,
-                   ModuleGraphLevel,
-                   SingleModuleClient*) override;
-  void FetchDescendantsForInlineScript(ModuleScript*,
-                                       ModuleTreeClient*) override;
+  void FetchTree(
+      const KURL&,
+      FetchClientSettingsObjectSnapshot* fetch_client_settings_object,
+      mojom::RequestContextType destination,
+      const ScriptFetchOptions&,
+      ModuleScriptCustomFetchType,
+      ModuleTreeClient*) override;
+  void FetchSingle(
+      const ModuleScriptFetchRequest&,
+      FetchClientSettingsObjectSnapshot* fetch_client_settings_object,
+      ModuleGraphLevel,
+      ModuleScriptCustomFetchType,
+      SingleModuleClient*) override;
+  void FetchDescendantsForInlineScript(
+      ModuleScript*,
+      FetchClientSettingsObjectSnapshot* fetch_client_settings_object,
+      mojom::RequestContextType destination,
+      ModuleTreeClient*) override;
   ModuleScript* GetFetchedModuleScript(const KURL&) override;
-  void FetchNewSingleModule(const ModuleScriptFetchRequest&,
-                            ModuleGraphLevel,
-                            ModuleScriptLoaderClient*) override;
+  KURL ResolveModuleSpecifier(const String&, const KURL&, String*) override;
   bool HasValidContext() override;
   void ResolveDynamically(const String& specifier,
                           const KURL&,
                           const ReferrerScriptInfo&,
                           ScriptPromiseResolver*) override;
   ModuleImportMeta HostGetImportMetaProperties(ScriptModule) const override;
-  ScriptModule CompileModule(const String& script,
-                             const KURL& source_url,
-                             const KURL& base_url,
-                             const ScriptFetchOptions&,
-                             AccessControlStatus,
-                             const TextPosition&,
-                             ExceptionState&) override;
   ScriptValue InstantiateModule(ScriptModule) override;
   Vector<ModuleRequest> ModuleRequestsFromScriptModule(ScriptModule) override;
   ScriptValue ExecuteModule(const ModuleScript*, CaptureEvalErrorFlag) override;
-  ModuleScriptFetcher* CreateModuleScriptFetcher() override;
+  ModuleScriptFetcher* CreateModuleScriptFetcher(
+      ModuleScriptCustomFetchType) override;
 
   Member<ScriptModuleResolver> resolver_;
 };

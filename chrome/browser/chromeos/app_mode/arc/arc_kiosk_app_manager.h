@@ -14,7 +14,7 @@
 #include "chrome/browser/chromeos/app_mode/arc/arc_kiosk_app_data.h"
 #include "chrome/browser/chromeos/policy/device_local_account.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
-#include "components/signin/core/account_id/account_id.h"
+#include "components/account_id/account_id.h"
 
 class PrefRegistrySimple;
 
@@ -87,7 +87,7 @@ class ArcKioskAppManager {
   std::vector<std::unique_ptr<ArcKioskAppData>> apps_;
   AccountId auto_launch_account_id_;
   bool auto_launched_with_zero_delay_ = false;
-  base::ObserverList<ArcKioskAppManagerObserver, true> observers_;
+  base::ObserverList<ArcKioskAppManagerObserver, true>::Unchecked observers_;
 
   std::unique_ptr<CrosSettings::ObserverSubscription>
       local_accounts_subscription_;

@@ -93,7 +93,8 @@ bool MockInputMethodManager::State::ReplaceEnabledInputMethods(
 }
 
 bool MockInputMethodManager::State::SetAllowedInputMethods(
-    const std::vector<std::string>& new_allowed_input_method_ids) {
+    const std::vector<std::string>& new_allowed_input_method_ids,
+    bool enable_allowed_input_methods) {
   allowed_input_method_ids_ = new_allowed_input_method_ids;
   return true;
 }
@@ -214,6 +215,33 @@ bool MockInputMethodManager::GetImeMenuFeatureEnabled(
 }
 
 void MockInputMethodManager::NotifyObserversImeExtraInputStateChange() {}
+
+ui::InputMethodKeyboardController*
+MockInputMethodManager::GetInputMethodKeyboardController() {
+  return this;
+}
+
+void MockInputMethodManager::NotifyInputMethodExtensionAdded(
+    const std::string& extension_id) {}
+
+void MockInputMethodManager::NotifyInputMethodExtensionRemoved(
+    const std::string& extension_id) {}
+
+bool MockInputMethodManager::DisplayVirtualKeyboard() {
+  return false;
+}
+
+void MockInputMethodManager::DismissVirtualKeyboard() {}
+
+void MockInputMethodManager::AddObserver(
+    ui::InputMethodKeyboardControllerObserver* observer) {}
+
+void MockInputMethodManager::RemoveObserver(
+    ui::InputMethodKeyboardControllerObserver* observer) {}
+
+bool MockInputMethodManager::IsKeyboardVisible() {
+  return false;
+}
 
 }  // namespace input_method
 }  // namespace chromeos

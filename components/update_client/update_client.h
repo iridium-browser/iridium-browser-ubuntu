@@ -8,12 +8,12 @@
 #include <stdint.h>
 
 #include <map>
-#include <memory>
 #include <string>
 #include <vector>
 
 #include "base/callback_forward.h"
 #include "base/memory/ref_counted.h"
+#include "base/optional.h"
 #include "base/version.h"
 #include "components/update_client/update_client_errors.h"
 
@@ -136,6 +136,10 @@ namespace base {
 class FilePath;
 }
 
+namespace crx_file {
+enum class VerifierFormat;
+}
+
 namespace update_client {
 
 class Configurator;
@@ -211,7 +215,6 @@ class CrxInstaller : public base::RefCountedThreadSafe<CrxInstaller> {
 // may be used in the update checks requests.
 using InstallerAttributes = std::map<std::string, std::string>;
 
-// TODO(sorin): this structure will be refactored soon.
 struct CrxComponent {
   CrxComponent();
   CrxComponent(const CrxComponent& other);
@@ -245,6 +248,9 @@ struct CrxComponent {
   // which only returns secure download URLs in this case.
   bool requires_network_encryption;
 
+  // Specifies the strength of package validation required for the item.
+  crx_file::VerifierFormat crx_format_requirement;
+
   // True if the component allows enabling or disabling updates by group policy.
   // This member should be set to |false| for data, non-binary components, such
   // as CRLSet, Supervised User Whitelists, STH Set, Origin Trials, and File
@@ -258,6 +264,11 @@ struct CrxComponent {
   // For extension, this information is set from the update service, which
   // gets the install source from the update URL.
   std::string install_source;
+
+  // Information about where the component/extension was loaded from.
+  // For extensions, this information is inferred from the extension
+  // registry.
+  std::string install_location;
 };
 
 // Called when a non-blocking call of UpdateClient completes.
@@ -270,8 +281,8 @@ using Callback = base::OnceCallback<void(Error error)>;
 class UpdateClient : public base::RefCounted<UpdateClient> {
  public:
   using CrxDataCallback =
-      base::OnceCallback<void(const std::vector<std::string>& ids,
-                              std::vector<CrxComponent>* components)>;
+      base::OnceCallback<std::vector<base::Optional<CrxComponent>>(
+          const std::vector<std::string>& ids)>;
 
   // Defines an interface to observe the UpdateClient. It provides
   // notifications when state changes occur for the service itself or for the

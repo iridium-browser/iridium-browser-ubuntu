@@ -33,7 +33,9 @@
 
 #include "third_party/blink/public/platform/web_resource_timing_info.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_object_builder.h"
+#include "third_party/blink/renderer/core/performance_entry_names.h"
 #include "third_party/blink/renderer/core/timing/performance.h"
+#include "third_party/blink/renderer/platform/loader/fetch/fetch_initiator_type_names.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_request.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_response.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_timing_info.h"
@@ -45,24 +47,23 @@ PerformanceResourceTiming::PerformanceResourceTiming(
     TimeTicks time_origin,
     const AtomicString& initiator_type)
     : PerformanceEntry(info.name,
-                       "resource",
                        Performance::MonotonicTimeToDOMHighResTimeStamp(
                            time_origin,
-                           TimeTicksFromSeconds(info.start_time),
+                           info.start_time,
                            info.allow_negative_values),
                        Performance::MonotonicTimeToDOMHighResTimeStamp(
                            time_origin,
-                           TimeTicksFromSeconds(info.finish_time),
+                           info.finish_time,
                            info.allow_negative_values)),
-      initiator_type_(initiator_type),
+      initiator_type_(initiator_type.IsEmpty() ? FetchInitiatorTypeNames::other
+                                               : initiator_type),
       alpn_negotiated_protocol_(
           static_cast<String>(info.alpn_negotiated_protocol)),
       connection_info_(static_cast<String>(info.connection_info)),
       time_origin_(time_origin),
       timing_(info.timing),
-      last_redirect_end_time_(
-          TimeTicksFromSeconds(info.last_redirect_end_time)),
-      finish_time_(TimeTicksFromSeconds(info.finish_time)),
+      last_redirect_end_time_(info.last_redirect_end_time),
+      finish_time_(info.finish_time),
       transfer_size_(info.transfer_size),
       encoded_body_size_(info.encoded_body_size),
       decoded_body_size_(info.decoded_body_size),
@@ -76,16 +77,23 @@ PerformanceResourceTiming::PerformanceResourceTiming(
 
 // This constructor is for PerformanceNavigationTiming.
 PerformanceResourceTiming::PerformanceResourceTiming(
-    const String& name,
-    const String& entry_type,
+    const AtomicString& name,
     TimeTicks time_origin,
     const WebVector<WebServerTimingInfo>& server_timing)
-    : PerformanceEntry(name, entry_type, 0.0, 0.0),
+    : PerformanceEntry(name, 0.0, 0.0),
       time_origin_(time_origin),
       server_timing_(
           PerformanceServerTiming::FromParsedServerTiming(server_timing)) {}
 
 PerformanceResourceTiming::~PerformanceResourceTiming() = default;
+
+AtomicString PerformanceResourceTiming::entryType() const {
+  return PerformanceEntryNames::resource;
+}
+
+PerformanceEntryType PerformanceResourceTiming::EntryTypeEnum() const {
+  return PerformanceEntry::EntryType::kResource;
+}
 
 ResourceLoadTiming* PerformanceResourceTiming::GetResourceLoadTiming() const {
   return timing_.get();

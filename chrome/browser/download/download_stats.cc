@@ -6,21 +6,6 @@
 
 #include "base/metrics/histogram_macros.h"
 
-void RecordDownloadShelfClose(int size, int in_progress, bool autoclose) {
-  static const int kMaxShelfSize = 16;
-  if (autoclose) {
-    UMA_HISTOGRAM_ENUMERATION(
-        "Download.ShelfSizeOnAutoClose", size, kMaxShelfSize);
-    UMA_HISTOGRAM_ENUMERATION(
-        "Download.ShelfInProgressSizeOnAutoClose", in_progress, kMaxShelfSize);
-  } else {
-    UMA_HISTOGRAM_ENUMERATION(
-        "Download.ShelfSizeOnUserClose", size, kMaxShelfSize);
-    UMA_HISTOGRAM_ENUMERATION(
-        "Download.ShelfInProgressSizeOnUserClose", in_progress, kMaxShelfSize);
-  }
-}
-
 void RecordDownloadCount(ChromeDownloadCountTypes type) {
   UMA_HISTOGRAM_ENUMERATION(
       "Download.CountsChrome", type, CHROME_DOWNLOAD_COUNT_TYPES_LAST_ENTRY);
@@ -79,3 +64,20 @@ void RecordDownloadShelfDragEvent(DownloadShelfDragEvent drag_event) {
   UMA_HISTOGRAM_ENUMERATION("Download.Shelf.DragEvent", drag_event,
                             DownloadShelfDragEvent::COUNT);
 }
+
+#if defined(OS_ANDROID)
+void RecordMediaParserEvent(MediaParserEvent event) {
+  UMA_HISTOGRAM_ENUMERATION("Download.MediaParser.Event", event,
+                            MediaParserEvent::kCount);
+}
+
+void RecordMediaMetadataEvent(MediaMetadataEvent event) {
+  UMA_HISTOGRAM_ENUMERATION("Download.MediaMetadata.Event", event,
+                            MediaMetadataEvent::kCount);
+}
+
+void RecordVideoThumbnailEvent(VideoThumbnailEvent event) {
+  UMA_HISTOGRAM_ENUMERATION("Download.VideoThumbnail.Event", event,
+                            VideoThumbnailEvent::kCount);
+}
+#endif

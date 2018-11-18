@@ -24,10 +24,6 @@ namespace content {
 class NavigationData;
 }
 
-namespace extensions {
-class UserScriptListener;
-}
-
 namespace net {
 class URLRequest;
 }
@@ -49,10 +45,6 @@ class ChromeResourceDispatcherHostDelegate
   ~ChromeResourceDispatcherHostDelegate() override;
 
   // ResourceDispatcherHostDelegate implementation.
-  bool ShouldBeginRequest(const std::string& method,
-                          const GURL& url,
-                          content::ResourceType resource_type,
-                          content::ResourceContext* resource_context) override;
   void RequestBeginning(net::URLRequest* request,
                         content::ResourceContext* resource_context,
                         content::AppCacheService* appcache_service,
@@ -118,7 +110,6 @@ class ChromeResourceDispatcherHostDelegate
   scoped_refptr<DownloadRequestLimiter> download_request_limiter_;
   scoped_refptr<safe_browsing::SafeBrowsingService> safe_browsing_;
 #if BUILDFLAG(ENABLE_EXTENSIONS)
-  scoped_refptr<extensions::UserScriptListener> user_script_listener_;
   std::map<net::URLRequest*, StreamTargetInfo> stream_target_info_;
 #endif
 

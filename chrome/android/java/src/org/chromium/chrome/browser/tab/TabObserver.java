@@ -9,7 +9,9 @@ import android.support.annotation.Nullable;
 import android.view.ContextMenu;
 
 import org.chromium.chrome.browser.TabLoadStatus;
-import org.chromium.content_public.browser.ContentViewCore;
+import org.chromium.chrome.browser.fullscreen.FullscreenOptions;
+import org.chromium.chrome.browser.tab.Tab.TabHidingType;
+import org.chromium.chrome.browser.tabmodel.TabModel.TabSelectionType;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.WebContents;
 import org.chromium.content_public.common.BrowserControlsState;
@@ -18,18 +20,19 @@ import org.chromium.content_public.common.BrowserControlsState;
  * An observer that is notified of changes to a {@link Tab} object.
  */
 public interface TabObserver {
-
     /**
      * Called when a {@link Tab} is shown.
      * @param tab The notifying {@link Tab}.
+     * @param type Specifies how the tab was selected.
      */
-    void onShown(Tab tab);
+    void onShown(Tab tab, @TabSelectionType int type);
 
     /**
      * Called when a {@link Tab} is hidden.
      * @param tab The notifying {@link Tab}.
+     * @param type Specifies how the tab was hidden.
      */
-    void onHidden(Tab tab);
+    void onHidden(Tab tab, @TabHidingType int type);
 
     /**
      * Called when a {@link Tab}'s closing state has changed.
@@ -122,9 +125,14 @@ public interface TabObserver {
     /**
      * Called when the ContentView of a {@link Tab} crashes.
      * @param tab The notifying {@link Tab}.
-     * @param sadTabShown Whether or not the sad tab was shown
      */
-    void onCrash(Tab tab, boolean sadTabShown);
+    void onCrash(Tab tab);
+
+    /**
+     * Called when restore of the corresponding tab is triggered.
+     * @param tab The notifying {@link Tab}.
+     */
+    void onRestoreStarted(Tab tab);
 
     /**
      * Called when the WebContents of a {@link Tab} have been swapped.
@@ -136,7 +144,7 @@ public interface TabObserver {
     void onWebContentsSwapped(Tab tab, boolean didStartLoad, boolean didFinishLoad);
 
     /**
-     * Called when a context menu is shown for a {@link ContentViewCore} owned by a {@link Tab}.
+     * Called when a context menu is shown for a {@link WebContents} owned by a {@link Tab}.
      * @param tab  The notifying {@link Tab}.
      * @param menu The {@link ContextMenu} that is being shown.
      */
@@ -184,11 +192,17 @@ public interface TabObserver {
     void onUpdateUrl(Tab tab, String url);
 
     /**
-     * Called when the {@link Tab} should enter or leave fullscreen mode.
+     * Called when the {@link Tab} should enter fullscreen mode.
      * @param tab    The notifying {@link Tab}.
-     * @param enable Whether or not to enter fullscreen mode.
+     * @param options Options to adjust fullscreen mode.
      */
-    void onToggleFullscreenMode(Tab tab, boolean enable);
+    void onEnterFullscreenMode(Tab tab, FullscreenOptions options);
+
+    /**
+     * Called when the {@link Tab} should exit fullscreen mode.
+     * @param tab    The notifying {@link Tab}.
+     */
+    void onExitFullscreenMode(Tab tab);
 
     // WebContentsObserver methods ---------------------------------------------------------
 
@@ -300,6 +314,12 @@ public interface TabObserver {
     public void onInteractabilityChanged(boolean isInteractable);
 
     /**
+     * Called when renderer changes its state about being responsive to requests.
+     * @param {@code true} if the renderer becomes responsive, otherwise {@code false}.
+     */
+    public void onRendererResponsiveStateChanged(boolean isResponsive);
+
+    /**
      * Called when navigation entries of a tab have been deleted.
      * @param tab The notifying {@link Tab}.
      */
@@ -311,4 +331,9 @@ public interface TabObserver {
      * @param constraints The updated browser controls constraints.
      */
     public void onBrowserControlsConstraintsUpdated(Tab tab, @BrowserControlsState int constraints);
+
+    /**
+     * This method is invoked when the WebContents reloads the LoFi images on the page.
+     */
+    public void didReloadLoFiImages(Tab tab);
 }

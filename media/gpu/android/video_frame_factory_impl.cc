@@ -21,9 +21,8 @@
 #include "media/gpu/android/codec_image.h"
 #include "media/gpu/android/codec_image_group.h"
 #include "media/gpu/android/codec_wrapper.h"
-#include "media/gpu/android/command_buffer_stub_wrapper_impl.h"
 #include "media/gpu/android/texture_pool.h"
-#include "media/gpu/android/texture_wrapper.h"
+#include "media/gpu/command_buffer_helper.h"
 #include "mojo/public/cpp/bindings/callback_helpers.h"
 #include "ui/gl/android/surface_texture.h"
 #include "ui/gl/gl_bindings.h"
@@ -36,6 +35,8 @@ bool MakeContextCurrent(gpu::CommandBufferStub* stub) {
 }
 
 }  // namespace
+
+using gpu::gles2::AbstractTexture;
 
 VideoFrameFactoryImpl::VideoFrameFactoryImpl(
     scoped_refptr<base::SingleThreadTaskRunner> gpu_task_runner,
@@ -50,6 +51,7 @@ VideoFrameFactoryImpl::~VideoFrameFactoryImpl() {
 }
 
 void VideoFrameFactoryImpl::Initialize(bool wants_promotion_hint,
+                                       bool use_texture_owner_as_overlays,
                                        InitCb init_cb) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(!gpu_video_frame_factory_);
@@ -58,7 +60,8 @@ void VideoFrameFactoryImpl::Initialize(bool wants_promotion_hint,
       gpu_task_runner_.get(), FROM_HERE,
       base::Bind(&GpuVideoFrameFactory::Initialize,
                  base::Unretained(gpu_video_frame_factory_.get()),
-                 wants_promotion_hint, get_stub_cb_),
+                 wants_promotion_hint, use_texture_owner_as_overlays,
+                 get_stub_cb_),
       std::move(init_cb));
 }
 
@@ -67,11 +70,11 @@ void VideoFrameFactoryImpl::SetSurfaceBundle(
   scoped_refptr<CodecImageGroup> image_group;
   if (!surface_bundle) {
     // Clear everything, just so we're not holding a reference.
-    surface_texture_ = nullptr;
+    texture_owner_ = nullptr;
   } else {
-    // If |surface_bundle| is using a SurfaceTexture, then get it.
-    surface_texture_ =
-        surface_bundle->overlay ? nullptr : surface_bundle->surface_texture;
+    // If |surface_bundle| is using a TextureOwner, then get it.
+    texture_owner_ =
+        surface_bundle->overlay ? nullptr : surface_bundle->texture_owner_;
 
     // Start a new image group.  Note that there's no reason that we can't have
     // more than one group per surface bundle; it's okay if we're called
@@ -103,7 +106,7 @@ void VideoFrameFactoryImpl::CreateVideoFrame(
       FROM_HERE,
       base::Bind(&GpuVideoFrameFactory::CreateVideoFrame,
                  base::Unretained(gpu_video_frame_factory_.get()),
-                 base::Passed(&output_buffer), surface_texture_, timestamp,
+                 base::Passed(&output_buffer), texture_owner_, timestamp,
                  natural_size, std::move(promotion_hint_cb),
                  std::move(output_cb), base::ThreadTaskRunnerHandle::Get()));
 }
@@ -126,26 +129,27 @@ GpuVideoFrameFactory::~GpuVideoFrameFactory() {
     stub_->RemoveDestructionObserver(this);
 }
 
-scoped_refptr<SurfaceTextureGLOwner> GpuVideoFrameFactory::Initialize(
+scoped_refptr<TextureOwner> GpuVideoFrameFactory::Initialize(
     bool wants_promotion_hint,
+    bool use_texture_owner_as_overlays,
     VideoFrameFactoryImpl::GetStubCb get_stub_cb) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   wants_promotion_hint_ = wants_promotion_hint;
+  use_texture_owner_as_overlays_ = use_texture_owner_as_overlays;
   stub_ = get_stub_cb.Run();
   if (!MakeContextCurrent(stub_))
     return nullptr;
   stub_->AddDestructionObserver(this);
 
-  texture_pool_ =
-      new TexturePool(std::make_unique<CommandBufferStubWrapperImpl>(stub_));
+  texture_pool_ = new TexturePool(CommandBufferHelper::Create(stub_));
 
   decoder_helper_ = GLES2DecoderHelper::Create(stub_->decoder_context());
-  return SurfaceTextureGLOwnerImpl::Create();
+  return TextureOwner::Create();
 }
 
 void GpuVideoFrameFactory::CreateVideoFrame(
     std::unique_ptr<CodecOutputBuffer> output_buffer,
-    scoped_refptr<SurfaceTextureGLOwner> surface_texture,
+    scoped_refptr<TextureOwner> texture_owner_,
     base::TimeDelta timestamp,
     gfx::Size natural_size,
     PromotionHintAggregator::NotifyPromotionHintCB promotion_hint_cb,
@@ -153,27 +157,44 @@ void GpuVideoFrameFactory::CreateVideoFrame(
     scoped_refptr<base::SingleThreadTaskRunner> task_runner) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   scoped_refptr<VideoFrame> frame;
-  scoped_refptr<gpu::gles2::TextureRef> texture_ref;
-  CreateVideoFrameInternal(std::move(output_buffer), std::move(surface_texture),
+  std::unique_ptr<AbstractTexture> texture;
+  CodecImage* codec_image = nullptr;
+  CreateVideoFrameInternal(std::move(output_buffer), std::move(texture_owner_),
                            timestamp, natural_size,
-                           std::move(promotion_hint_cb), &frame, &texture_ref);
-  if (!frame || !texture_ref)
+                           std::move(promotion_hint_cb), &frame, &texture,
+                           &codec_image);
+  if (!frame || !texture)
     return;
 
   // Try to render this frame if possible.
   internal::MaybeRenderEarly(&images_);
 
-  std::unique_ptr<TextureWrapper> texture_wrapper =
-      std::make_unique<TextureWrapperImpl>(std::move(texture_ref));
-  auto drop_texture_ref = base::BindOnce(
-      [](scoped_refptr<TexturePool> texture_pool,
-         TextureWrapper* texture_wrapper, const gpu::SyncToken& sync_token) {
-        texture_pool->ReleaseTexture(texture_wrapper);
-      },
-      texture_pool_, base::Unretained(texture_wrapper.get()));
-  texture_pool_->AddTexture(std::move(texture_wrapper));
+  // Callback to notify us when |texture| is going to drop its ref to the
+  // underlying texture.  This happens when we (a) are notified that |frame|
+  // has been released by the renderer and the sync token has cleared, or (b)
+  // when the stub is destroyed.  In the former case, we want to release any
+  // codec resources as quickly as possible so that we can re-use them.  In
+  // the latter case, decoding has stopped and we want to release any buffers
+  // so that the MediaCodec instance can clean up.  Note that the texture will
+  // remain renderable, but it won't necessarily refer to the frame it was
+  // supposed to; it'll be the most recently rendered frame.
+  auto cleanup_cb = base::BindOnce([](AbstractTexture* texture) {
+    gl::GLImage* image = texture->GetImage();
+    if (image)
+      static_cast<CodecImage*>(image)->ReleaseCodecBuffer();
+  });
+  texture->SetCleanupCallback(std::move(cleanup_cb));
 
-  // Guarantee that the TextureRef is released even if the VideoFrame is
+  // Note that this keeps the pool around while any texture is.
+  auto drop_texture_ref = base::BindOnce(
+      [](scoped_refptr<TexturePool> texture_pool, AbstractTexture* texture,
+         const gpu::SyncToken& sync_token) {
+        texture_pool->ReleaseTexture(texture, sync_token);
+      },
+      texture_pool_, base::Unretained(texture.get()));
+  texture_pool_->AddTexture(std::move(texture));
+
+  // Guarantee that the AbstractTexture is released even if the VideoFrame is
   // dropped. Otherwise we could keep TextureRefs we don't need alive.
   auto release_cb = mojo::WrapCallbackWithDefaultInvokeIfNotRun(
       BindToCurrentLoop(std::move(drop_texture_ref)), gpu::SyncToken());
@@ -183,12 +204,13 @@ void GpuVideoFrameFactory::CreateVideoFrame(
 
 void GpuVideoFrameFactory::CreateVideoFrameInternal(
     std::unique_ptr<CodecOutputBuffer> output_buffer,
-    scoped_refptr<SurfaceTextureGLOwner> surface_texture,
+    scoped_refptr<TextureOwner> texture_owner_,
     base::TimeDelta timestamp,
     gfx::Size natural_size,
     PromotionHintAggregator::NotifyPromotionHintCB promotion_hint_cb,
     scoped_refptr<VideoFrame>* video_frame_out,
-    scoped_refptr<gpu::gles2::TextureRef>* texture_ref_out) {
+    std::unique_ptr<AbstractTexture>* texture_out,
+    CodecImage** codec_image_out) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   if (!MakeContextCurrent(stub_))
     return;
@@ -214,36 +236,34 @@ void GpuVideoFrameFactory::CreateVideoFrameInternal(
   }
 
   // Create a Texture and a CodecImage to back it.
-  scoped_refptr<gpu::gles2::TextureRef> texture_ref =
-      decoder_helper_->CreateTexture(GL_TEXTURE_EXTERNAL_OES, GL_RGBA,
-                                     size.width(), size.height(), GL_RGBA,
-                                     GL_UNSIGNED_BYTE);
+  std::unique_ptr<AbstractTexture> texture = decoder_helper_->CreateTexture(
+      GL_TEXTURE_EXTERNAL_OES, GL_RGBA, size.width(), size.height(), GL_RGBA,
+      GL_UNSIGNED_BYTE);
   auto image = base::MakeRefCounted<CodecImage>(
-      std::move(output_buffer), surface_texture, std::move(promotion_hint_cb));
+      std::move(output_buffer), texture_owner_, std::move(promotion_hint_cb));
   images_.push_back(image.get());
+  *codec_image_out = image.get();
 
-  // Add |image| to our current image group.  This makes suer that any overlay
-  // lasts as long as the images.  For SurfaceTexture, it doesn't do much.
+  // Add |image| to our current image group.  This makes sure that any overlay
+  // lasts as long as the images.  For TextureOwner, it doesn't do much.
   image_group_->AddCodecImage(image.get());
 
   // Attach the image to the texture.
-  // If we're attaching a SurfaceTexture backed image, we set the state to
-  // UNBOUND. This ensures that the implementation will call CopyTexImage()
-  // which lets us update the surface texture at the right time.
-  // For overlays we set the state to BOUND because it's required for
-  // ScheduleOverlayPlane() to be called. If something tries to sample from an
-  // overlay texture it won't work, but there's no way to make that work.
-  auto image_state = surface_texture ? gpu::gles2::Texture::UNBOUND
-                                     : gpu::gles2::Texture::BOUND;
-  GLuint surface_texture_service_id =
-      surface_texture ? surface_texture->GetTextureId() : 0;
-  texture_manager->SetLevelStreamTextureImage(
-      texture_ref.get(), GL_TEXTURE_EXTERNAL_OES, 0, image.get(), image_state,
-      surface_texture_service_id);
-  texture_manager->SetLevelCleared(texture_ref.get(), GL_TEXTURE_EXTERNAL_OES,
-                                   0, true);
+  // Either way, we expect this to be UNBOUND (i.e., decoder-managed).  For
+  // overlays, BindTexImage will return true, causing it to transition to the
+  // BOUND state, and thus receive ScheduleOverlayPlane calls.  For TextureOwner
+  // backed images, BindTexImage will return false, and CopyTexImage will be
+  // tried next.
+  // TODO(liberato): consider not binding this as a StreamTextureImage if we're
+  // using an overlay.  There's no advantage.  We'd likely want to create (and
+  // initialize to a 1x1 texture) a 2D texture above in that case, in case
+  // somebody tries to sample from it.  Be sure that promotion hints still
+  // work properly, though -- they might require a stream texture image.
+  GLuint texture_owner_service_id =
+      texture_owner_ ? texture_owner_->GetTextureId() : 0;
+  texture->BindStreamTextureImage(image.get(), texture_owner_service_id);
 
-  gpu::Mailbox mailbox = decoder_helper_->CreateMailbox(texture_ref.get());
+  gpu::Mailbox mailbox = decoder_helper_->CreateMailbox(texture.get());
   gpu::MailboxHolder mailbox_holders[VideoFrame::kMaxPlanes];
   mailbox_holders[0] =
       gpu::MailboxHolder(mailbox, gpu::SyncToken(), GL_TEXTURE_EXTERNAL_OES);
@@ -257,23 +277,29 @@ void GpuVideoFrameFactory::CreateVideoFrameInternal(
   if (group->gpu_preferences().enable_threaded_texture_mailboxes)
     frame->metadata()->SetBoolean(VideoFrameMetadata::COPY_REQUIRED, true);
 
-  // We unconditionally mark the picture as overlayable, even if
-  // |!surface_texture|, if we want to get hints.  It's required, else we won't
-  // get hints.
-  const bool allow_overlay = !surface_texture || wants_promotion_hint_;
+  bool allow_overlay = false;
+  if (use_texture_owner_as_overlays_) {
+    DCHECK(texture_owner_);
+    allow_overlay = true;
+  } else {
+    // We unconditionally mark the picture as overlayable, even if
+    // |!texture_owner_|, if we want to get hints.  It's required, else we won't
+    // get hints.
+    allow_overlay = !texture_owner_ || wants_promotion_hint_;
+  }
 
   frame->metadata()->SetBoolean(VideoFrameMetadata::ALLOW_OVERLAY,
                                 allow_overlay);
   frame->metadata()->SetBoolean(VideoFrameMetadata::WANTS_PROMOTION_HINT,
                                 wants_promotion_hint_);
-  frame->metadata()->SetBoolean(VideoFrameMetadata::SURFACE_TEXTURE,
-                                !!surface_texture);
+  frame->metadata()->SetBoolean(VideoFrameMetadata::TEXTURE_OWNER,
+                                !!texture_owner_);
 
   *video_frame_out = std::move(frame);
-  *texture_ref_out = std::move(texture_ref);
+  *texture_out = std::move(texture);
 }
 
-void GpuVideoFrameFactory::OnWillDestroyStub() {
+void GpuVideoFrameFactory::OnWillDestroyStub(bool have_context) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK(stub_);
   stub_ = nullptr;

@@ -18,9 +18,9 @@
 #include "base/trace_event/trace_event.h"
 #include "components/offline_pages/core/client_policy_controller.h"
 #include "components/offline_pages/core/offline_page_client_policy.h"
-#include "components/offline_pages/core/offline_page_metadata_store_sql.h"
+#include "components/offline_pages/core/offline_page_metadata_store.h"
 #include "components/offline_pages/core/offline_store_utils.h"
-#include "sql/connection.h"
+#include "sql/database.h"
 #include "sql/statement.h"
 #include "sql/transaction.h"
 
@@ -74,12 +74,12 @@ PageInfo MakePageInfo(sql::Statement* statement) {
 
 std::unique_ptr<std::vector<PageInfo>> GetAllTemporaryPageInfos(
     const std::map<std::string, LifetimePolicy>& temp_namespace_policy_map,
-    sql::Connection* db) {
+    sql::Database* db) {
   auto result = std::make_unique<std::vector<PageInfo>>();
 
-  const char kSql[] = "SELECT " PAGE_INFO_PROJECTION
-                      " FROM offlinepages_v1"
-                      " WHERE client_namespace = ?";
+  static const char kSql[] = "SELECT " PAGE_INFO_PROJECTION
+                             " FROM offlinepages_v1"
+                             " WHERE client_namespace = ?";
 
   for (const auto& temp_namespace_policy : temp_namespace_policy_map) {
     std::string name_space = temp_namespace_policy.first;
@@ -100,7 +100,7 @@ std::unique_ptr<std::vector<PageInfo>> GetPageInfosToClear(
     const std::map<std::string, LifetimePolicy>& temp_namespace_policy_map,
     const base::Time& start_time,
     const ArchiveManager::StorageStats& stats,
-    sql::Connection* db) {
+    sql::Database* db) {
   std::map<std::string, int> namespace_page_count;
   auto page_infos_to_delete = std::make_unique<std::vector<PageInfo>>();
   std::vector<PageInfo> pages_remaining;
@@ -173,7 +173,7 @@ bool DeleteArchiveSync(const base::FilePath& file_path) {
 }
 
 // Deletes a page from the store by |offline_id|.
-bool DeletePageEntryByOfflineIdSync(sql::Connection* db, int64_t offline_id) {
+bool DeletePageEntryByOfflineIdSync(sql::Database* db, int64_t offline_id) {
   static const char kSql[] = "DELETE FROM offlinepages_v1 WHERE offline_id = ?";
   sql::Statement statement(db->GetCachedStatement(SQL_FROM_HERE, kSql));
   statement.BindInt64(0, offline_id);
@@ -184,10 +184,7 @@ std::pair<size_t, DeletePageResult> ClearPagesSync(
     std::map<std::string, LifetimePolicy> temp_namespace_policy_map,
     const base::Time& start_time,
     const ArchiveManager::StorageStats& stats,
-    sql::Connection* db) {
-  if (!db)
-    return std::make_pair(0, DeletePageResult::STORE_FAILURE);
-
+    sql::Database* db) {
   std::unique_ptr<std::vector<PageInfo>> page_infos =
       GetPageInfosToClear(temp_namespace_policy_map, start_time, stats, db);
 
@@ -226,7 +223,7 @@ std::map<std::string, LifetimePolicy> GetTempNamespacePolicyMap(
 
 }  // namespace
 
-ClearStorageTask::ClearStorageTask(OfflinePageMetadataStoreSQL* store,
+ClearStorageTask::ClearStorageTask(OfflinePageMetadataStore* store,
                                    ArchiveManager* archive_manager,
                                    ClientPolicyController* policy_controller,
                                    const base::Time& clearup_time,
@@ -248,8 +245,8 @@ ClearStorageTask::~ClearStorageTask() {}
 void ClearStorageTask::Run() {
   TRACE_EVENT_ASYNC_BEGIN0("offline_pages", "ClearStorageTask running", this);
   archive_manager_->GetStorageStats(
-      base::Bind(&ClearStorageTask::OnGetStorageStatsDone,
-                 weak_ptr_factory_.GetWeakPtr()));
+      base::BindOnce(&ClearStorageTask::OnGetStorageStatsDone,
+                     weak_ptr_factory_.GetWeakPtr()));
 }
 
 void ClearStorageTask::OnGetStorageStatsDone(
@@ -259,7 +256,8 @@ void ClearStorageTask::OnGetStorageStatsDone(
   store_->Execute(base::BindOnce(&ClearPagesSync, temp_namespace_policy_map,
                                  clearup_time_, stats),
                   base::BindOnce(&ClearStorageTask::OnClearPagesDone,
-                                 weak_ptr_factory_.GetWeakPtr()));
+                                 weak_ptr_factory_.GetWeakPtr()),
+                  {0, DeletePageResult::STORE_FAILURE});
 }
 
 void ClearStorageTask::OnClearPagesDone(

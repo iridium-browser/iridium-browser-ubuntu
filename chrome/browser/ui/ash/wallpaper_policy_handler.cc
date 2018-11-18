@@ -9,7 +9,7 @@
 #include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/customization/customization_wallpaper_downloader.h"
@@ -63,8 +63,8 @@ WallpaperPolicyHandler::WallpaperPolicyHandler(Delegate* delegate)
   // Initialize the desired file path for device policy wallpaper. The path will
   // be used by WallpaperController to access the wallpaper file.
   base::FilePath chromeos_wallpapers_path;
-  CHECK(PathService::Get(chrome::DIR_CHROMEOS_WALLPAPERS,
-                         &chromeos_wallpapers_path));
+  CHECK(base::PathService::Get(chrome::DIR_CHROMEOS_WALLPAPERS,
+                               &chromeos_wallpapers_path));
   device_wallpaper_file_path_ =
       chromeos_wallpapers_path.Append(kDeviceWallpaperDir)
           .Append(kDeviceWallpaperFile);
@@ -115,7 +115,7 @@ void WallpaperPolicyHandler::DeviceWallpaperPolicyChanged() {
     // inform its delegate.
     base::PostTaskWithTraits(
         FROM_HERE,
-        {base::MayBlock(), base::TaskPriority::BACKGROUND,
+        {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
          base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
         base::BindOnce(base::IgnoreResult(&base::DeleteFile),
                        device_wallpaper_file_path_, false /*=recursive*/));
@@ -155,8 +155,8 @@ void WallpaperPolicyHandler::OnDeviceWallpaperFileExists(bool exists) {
     GURL wallpaper_url(url);
     device_wallpaper_downloader_.reset(
         new chromeos::CustomizationWallpaperDownloader(
-            g_browser_process->system_request_context(), wallpaper_url,
-            device_wallpaper_file_path_.DirName(), device_wallpaper_file_path_,
+            wallpaper_url, device_wallpaper_file_path_.DirName(),
+            device_wallpaper_file_path_,
             base::BindRepeating(
                 &WallpaperPolicyHandler::OnDeviceWallpaperDownloaded,
                 weak_factory_.GetWeakPtr(), hash)));
@@ -177,8 +177,8 @@ void WallpaperPolicyHandler::OnCheckExistingDeviceWallpaperMatchHash(
   GURL wallpaper_url(url);
   device_wallpaper_downloader_.reset(
       new chromeos::CustomizationWallpaperDownloader(
-          g_browser_process->system_request_context(), wallpaper_url,
-          device_wallpaper_file_path_.DirName(), device_wallpaper_file_path_,
+          wallpaper_url, device_wallpaper_file_path_.DirName(),
+          device_wallpaper_file_path_,
           base::BindRepeating(
               &WallpaperPolicyHandler::OnDeviceWallpaperDownloaded,
               weak_factory_.GetWeakPtr(), hash)));

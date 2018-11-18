@@ -7,9 +7,9 @@
 #include "base/bind.h"
 #include "base/files/file_util.h"
 #include "base/sys_info.h"
-#include "components/offline_pages/core/offline_page_metadata_store_sql.h"
+#include "components/offline_pages/core/offline_page_metadata_store.h"
 #include "components/offline_pages/core/offline_store_utils.h"
-#include "sql/connection.h"
+#include "sql/database.h"
 #include "sql/statement.h"
 #include "sql/transaction.h"
 
@@ -23,17 +23,14 @@ CompleteUpgradeStatus CompleteOfflinePageUpgradeSync(
     const base::FilePath& target_file_path,
     const std::string& digest,
     int64_t file_size,
-    sql::Connection* db) {
-  if (!db)
-    return CompleteUpgradeStatus::DB_ERROR;
-
+    sql::Database* db) {
   sql::Transaction transaction(db);
   if (!transaction.Begin())
     return CompleteUpgradeStatus::DB_ERROR;
 
   // We need to remember the old file path, so that we can remove that file
   // later on.
-  const char kSql[] =
+  static const char kSql[] =
       "SELECT file_path FROM offlinepages_v1 WHERE offline_id = ?";
   sql::Statement select_statement(db->GetCachedStatement(SQL_FROM_HERE, kSql));
   select_statement.BindInt64(0, offline_id);
@@ -62,7 +59,7 @@ CompleteUpgradeStatus CompleteOfflinePageUpgradeSync(
 
   // Conditions for upgrade are met here.
   // Update remaining attempts in DB and complete task.
-  const char kUpdateSql[] =
+  static const char kUpdateSql[] =
       "UPDATE offlinepages_v1"
       " SET upgrade_attempt = 0, file_path = ?, file_size = ?, digest = ?"
       " WHERE offline_id = ?";
@@ -89,7 +86,7 @@ CompleteUpgradeStatus CompleteOfflinePageUpgradeSync(
 }  // namespace
 
 CompleteOfflinePageUpgradeTask::CompleteOfflinePageUpgradeTask(
-    OfflinePageMetadataStoreSQL* store,
+    OfflinePageMetadataStore* store,
     int64_t offline_id,
     const base::FilePath& temporary_file_path,
     const base::FilePath& target_file_path,
@@ -116,7 +113,8 @@ void CompleteOfflinePageUpgradeTask::Run() {
                      temporary_file_path_, target_file_path_, digest_,
                      file_size_),
       base::BindOnce(&CompleteOfflinePageUpgradeTask::InformUpgradeAttemptDone,
-                     weak_ptr_factory_.GetWeakPtr()));
+                     weak_ptr_factory_.GetWeakPtr()),
+      CompleteUpgradeStatus::DB_ERROR);
 }
 
 void CompleteOfflinePageUpgradeTask::InformUpgradeAttemptDone(

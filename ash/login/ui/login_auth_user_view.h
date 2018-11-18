@@ -14,8 +14,13 @@
 #include "ash/login/ui/non_accessible_view.h"
 #include "ash/public/interfaces/user_info.mojom.h"
 #include "base/memory/weak_ptr.h"
+#include "base/scoped_observer.h"
 #include "ui/views/controls/button/button.h"
 #include "ui/views/view.h"
+
+namespace views {
+class LabelButton;
+}
 
 namespace ash {
 
@@ -28,7 +33,8 @@ class LoginPinView;
 // This class will make call mojo authentication APIs directly. The embedder can
 // receive some events about the results of those mojo
 // authentication attempts (ie, success/failure).
-class ASH_EXPORT LoginAuthUserView : public NonAccessibleView {
+class ASH_EXPORT LoginAuthUserView : public NonAccessibleView,
+                                     public views::ButtonListener {
  public:
   // TestApi is used for tests to get internal implementation details.
   class ASH_EXPORT TestApi {
@@ -39,6 +45,8 @@ class ASH_EXPORT LoginAuthUserView : public NonAccessibleView {
     LoginUserView* user_view() const;
     LoginPasswordView* password_view() const;
     LoginPinView* pin_view() const;
+    views::Button* online_sign_in_message() const;
+    views::View* disabled_auth_message() const;
 
    private:
     LoginAuthUserView* const view_;
@@ -71,10 +79,15 @@ class ASH_EXPORT LoginAuthUserView : public NonAccessibleView {
 
   // Flags which describe the set of currently visible auth methods.
   enum AuthMethods {
-    AUTH_NONE = 0,           // No extra auth methods.
-    AUTH_PASSWORD = 1 << 0,  // Display password.
-    AUTH_PIN = 1 << 1,       // Display PIN keyboard.
-    AUTH_TAP = 1 << 2,       // Tap to unlock.
+    AUTH_NONE = 0,                  // No extra auth methods.
+    AUTH_PASSWORD = 1 << 0,         // Display password.
+    AUTH_PIN = 1 << 1,              // Display PIN keyboard.
+    AUTH_TAP = 1 << 2,              // Tap to unlock.
+    AUTH_ONLINE_SIGN_IN = 1 << 3,   // Force online sign-in.
+    AUTH_FINGERPRINT = 1 << 4,      // Use fingerprint to unlock.
+    AUTH_EXTERNAL_BINARY = 1 << 5,  // Authenticate via an external binary.
+    AUTH_DISABLED = 1 << 6,         // Disable all the auth methods and show a
+                                    // message to user.
   };
 
   LoginAuthUserView(const mojom::LoginUserInfoPtr& user,
@@ -82,8 +95,9 @@ class ASH_EXPORT LoginAuthUserView : public NonAccessibleView {
   ~LoginAuthUserView() override;
 
   // Set the displayed set of auth methods. |auth_methods| contains or-ed
-  // together AuthMethod values.
-  void SetAuthMethods(uint32_t auth_methods);
+  // together AuthMethod values. |can_use_pin| should be true if the user can
+  // authenticate using PIN, even if the PIN keyboard is not displayed.
+  void SetAuthMethods(uint32_t auth_methods, bool can_use_pin);
   AuthMethods auth_methods() const { return auth_methods_; }
 
   // Add an easy unlock icon.
@@ -100,6 +114,12 @@ class ASH_EXPORT LoginAuthUserView : public NonAccessibleView {
   // Update the displayed name, icon, etc to that of |user|.
   void UpdateForUser(const mojom::LoginUserInfoPtr& user);
 
+  void SetFingerprintState(mojom::FingerprintUnlockState state);
+
+  // Set the time when auth will be reenabled. It will be included in the
+  // message shown to user when auth method is |AUTH_DISABLED|.
+  void SetAuthReenabledTime(const base::Time& auth_reenabled_time);
+
   const mojom::LoginUserInfoPtr& current_user() const;
 
   LoginPasswordView* password_view() { return password_view_; }
@@ -109,8 +129,13 @@ class ASH_EXPORT LoginAuthUserView : public NonAccessibleView {
   gfx::Size CalculatePreferredSize() const override;
   void RequestFocus() override;
 
+  // views::ButtonListener:
+  void ButtonPressed(views::Button* sender, const ui::Event& event) override;
+
  private:
   struct AnimationState;
+  class FingerprintView;
+  class DisabledAuthMessageView;
 
   // Called when the user submits an auth method. Runs mojo call.
   void OnAuthSubmit(const base::string16& password);
@@ -118,17 +143,35 @@ class ASH_EXPORT LoginAuthUserView : public NonAccessibleView {
   void OnAuthComplete(base::Optional<bool> auth_success);
 
   // Called when the user view has been tapped. This will run |on_auth_| if tap
-  // to unlock is enabled, otherwise it will run |on_tap_|.
+  // to unlock is enabled, or run |OnOnlineSignInMessageTap| if the online
+  // sign-in message is shown, otherwise it will run |on_tap_|.
   void OnUserViewTap();
+
+  // Called when the online sign-in message is tapped. It opens the Gaia screen.
+  void OnOnlineSignInMessageTap();
 
   // Helper method to check if an auth method is enable. Use it like this:
   // bool has_tap = HasAuthMethod(AUTH_TAP).
   bool HasAuthMethod(AuthMethods auth_method) const;
 
   AuthMethods auth_methods_ = AUTH_NONE;
+  // True if the user's password might be a PIN. PIN is hashed differently from
+  // password. The PIN keyboard may not always be visible even when the user
+  // wants to submit a PIN, eg. the virtual keyboard hides the PIN keyboard.
+  bool can_use_pin_ = false;
   LoginUserView* user_view_ = nullptr;
   LoginPasswordView* password_view_ = nullptr;
   LoginPinView* pin_view_ = nullptr;
+  views::LabelButton* online_sign_in_message_ = nullptr;
+  DisabledAuthMessageView* disabled_auth_message_ = nullptr;
+  FingerprintView* fingerprint_view_ = nullptr;
+  views::LabelButton* external_binary_auth_button_ = nullptr;
+
+  // Displays padding between:
+  // 1. Password field and pin keyboard
+  // 2. Password field and fingerprint view, when pin is not available.
+  // Preferred size will change base on current auth method.
+  NonAccessibleView* padding_below_password_view_ = nullptr;
   const OnAuthCallback on_auth_;
   const LoginUserView::OnTap on_tap_;
 
@@ -137,7 +180,7 @@ class ASH_EXPORT LoginAuthUserView : public NonAccessibleView {
   // |ApplyAnimationPostLayout|.
   std::unique_ptr<AnimationState> cached_animation_state_;
 
-  base::WeakPtrFactory<LoginAuthUserView> weak_factory_;
+  base::WeakPtrFactory<LoginAuthUserView> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(LoginAuthUserView);
 };

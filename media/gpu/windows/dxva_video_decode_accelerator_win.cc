@@ -44,8 +44,9 @@
 #include "base/win/scoped_co_mem.h"
 #include "base/win/windows_version.h"
 #include "build/build_config.h"
-#include "gpu/command_buffer/service/gpu_preferences.h"
 #include "gpu/config/gpu_driver_bug_workarounds.h"
+#include "gpu/config/gpu_preferences.h"
+#include "media/base/media_log.h"
 #include "media/base/media_switches.h"
 #include "media/base/win/mf_helpers.h"
 #include "media/base/win/mf_initializer.h"
@@ -184,12 +185,13 @@ static const uint16_t kLegacyAmdGpuList[] = {
     0x9990, 0x9991, 0x9992, 0x9993, 0x9994, 0x9995, 0x9996, 0x9997, 0x9998,
     0x9999, 0x999a, 0x999b, 0x999c, 0x999d, 0x99a0, 0x99a2, 0x99a4};
 
-// Legacy Intel GPUs (Second generation) which have trouble with resolutions
-// higher than 1920 x 1088
+// Legacy Intel GPUs which have trouble even querying if resolutions higher than
+// 1920 x 1088 are supported. Updated based on crash reports.
 //
 // NOTE: This list must be kept in sorted order.
 static const uint16_t kLegacyIntelGpuList[] = {
-    0x102, 0x106, 0x116, 0x126,
+    0x102, 0x106, 0x116, 0x126, 0x152, 0x156, 0x166,
+    0x402, 0x406, 0x416, 0x41e, 0xa06, 0xa16, 0xf31,
 };
 
 constexpr const wchar_t* const kMediaFoundationVideoDecoderDLLs[] = {
@@ -278,12 +280,14 @@ bool IsResolutionSupportedForDevice(const gfx::Size& resolution_to_test,
 
   D3D11_VIDEO_DECODER_CONFIG config = {};
   hr = video_device->GetVideoDecoderConfig(&desc, 0, &config);
+  UMA_HISTOGRAM_BOOLEAN("Media.DXVAVDA.GetDecoderConfigStatus", SUCCEEDED(hr));
   if (FAILED(hr))
     return false;
 
   Microsoft::WRL::ComPtr<ID3D11VideoDecoder> video_decoder;
   hr = video_device->CreateVideoDecoder(&desc, &config,
                                         video_decoder.GetAddressOf());
+  UMA_HISTOGRAM_BOOLEAN("Media.DXVAVDA.CreateDecoderStatus", !!video_decoder);
   return !!video_decoder;
 }
 
@@ -455,6 +459,8 @@ class H264ConfigChangeDetector : public ConfigChangeDetector {
   // Detects stream configuration changes.
   // Returns false on failure.
   bool DetectConfig(const uint8_t* stream, unsigned int size) override;
+  gfx::Rect current_visible_rect(
+      const gfx::Rect& container_visible_rect) const override;
   VideoColorSpace current_color_space(
       const VideoColorSpace& container_color_space) const override;
 
@@ -477,9 +483,7 @@ class H264ConfigChangeDetector : public ConfigChangeDetector {
 };
 
 H264ConfigChangeDetector::H264ConfigChangeDetector()
-    : last_sps_id_(0),
-      last_pps_id_(0),
-      pending_config_changed_(false) {}
+    : last_sps_id_(0), last_pps_id_(0), pending_config_changed_(false) {}
 
 H264ConfigChangeDetector::~H264ConfigChangeDetector() {}
 
@@ -582,6 +586,17 @@ bool H264ConfigChangeDetector::DetectConfig(const uint8_t* stream,
   return true;
 }
 
+gfx::Rect H264ConfigChangeDetector::current_visible_rect(
+    const gfx::Rect& container_visible_rect) const {
+  if (!parser_)
+    return container_visible_rect;
+  // TODO(hubbe): Is using last_sps_id_ correct here?
+  const H264SPS* sps = parser_->GetSPS(last_sps_id_);
+  if (!sps)
+    return container_visible_rect;
+  return sps->GetVisibleRect().value_or(container_visible_rect);
+}
+
 VideoColorSpace H264ConfigChangeDetector::current_color_space(
     const VideoColorSpace& container_color_space) const {
   if (!parser_)
@@ -594,7 +609,7 @@ VideoColorSpace H264ConfigChangeDetector::current_color_space(
   return container_color_space;
 }
 
-// Doesn't actually detect config changes, only color spaces.
+// Doesn't actually detect config changes, only stream metadata.
 class VP9ConfigChangeDetector : public ConfigChangeDetector {
  public:
   VP9ConfigChangeDetector() : ConfigChangeDetector(), parser_(false) {}
@@ -606,6 +621,8 @@ class VP9ConfigChangeDetector : public ConfigChangeDetector {
     parser_.SetStream(stream, size);
     Vp9FrameHeader fhdr;
     while (parser_.ParseNextFrame(&fhdr) == Vp9Parser::kOk) {
+      visible_rect_ = gfx::Rect(fhdr.render_width, fhdr.render_height);
+
       // TODO(hubbe): move the conversion from Vp9FrameHeader to VideoColorSpace
       // into a common, reusable location.
       color_space_.range = fhdr.color_range ? gfx::ColorSpace::RangeID::FULL
@@ -665,6 +682,12 @@ class VP9ConfigChangeDetector : public ConfigChangeDetector {
       DVLOG(3) << "Deferring config change until next keyframe...";
     return true;
   }
+
+  gfx::Rect current_visible_rect(
+      const gfx::Rect& container_visible_rect) const override {
+    return visible_rect_.IsEmpty() ? container_visible_rect : visible_rect_;
+  }
+
   VideoColorSpace current_color_space(
       const VideoColorSpace& container_color_space) const override {
     // For VP9, container color spaces override video stream color spaces.
@@ -677,6 +700,7 @@ class VP9ConfigChangeDetector : public ConfigChangeDetector {
  private:
   gfx::Size size_;
   bool pending_config_changed_ = false;
+  gfx::Rect visible_rect_;
   VideoColorSpace color_space_;
   Vp9Parser parser_;
 };
@@ -684,9 +708,11 @@ class VP9ConfigChangeDetector : public ConfigChangeDetector {
 DXVAVideoDecodeAccelerator::PendingSampleInfo::PendingSampleInfo(
     int32_t buffer_id,
     Microsoft::WRL::ComPtr<IMFSample> sample,
+    const gfx::Rect& visible_rect,
     const gfx::ColorSpace& color_space)
     : input_buffer_id(buffer_id),
       picture_buffer_id(-1),
+      visible_rect(visible_rect),
       color_space(color_space),
       output_sample(sample) {}
 
@@ -700,7 +726,8 @@ DXVAVideoDecodeAccelerator::DXVAVideoDecodeAccelerator(
     const MakeGLContextCurrentCallback& make_context_current_cb,
     const BindGLImageCallback& bind_image_cb,
     const gpu::GpuDriverBugWorkarounds& workarounds,
-    const gpu::GpuPreferences& gpu_preferences)
+    const gpu::GpuPreferences& gpu_preferences,
+    MediaLog* media_log)
     : client_(NULL),
       dev_manager_reset_token_(0),
       dx11_dev_manager_reset_token_(0),
@@ -712,6 +739,7 @@ DXVAVideoDecodeAccelerator::DXVAVideoDecodeAccelerator(
       get_gl_context_cb_(get_gl_context_cb),
       make_context_current_cb_(make_context_current_cb),
       bind_image_cb_(bind_image_cb),
+      media_log_(media_log),
       codec_(kUnknownVideoCodec),
       decoder_thread_("DXVAVideoDecoderThread"),
       pending_flush_(false),
@@ -725,7 +753,6 @@ DXVAVideoDecodeAccelerator::DXVAVideoDecodeAccelerator(
       support_copy_nv12_textures_(gpu_preferences.enable_nv12_dxgi_video &&
                                   !workarounds.disable_nv12_dxgi_video),
       support_delayed_copy_nv12_textures_(
-          !gpu_preferences.use_passthrough_cmd_decoder &&
           base::FeatureList::IsEnabled(kDelayCopyNV12Textures) &&
           !workarounds.disable_delayed_copy_nv12),
       use_dx11_(false),
@@ -749,7 +776,7 @@ DXVAVideoDecodeAccelerator::~DXVAVideoDecodeAccelerator() {
 
 bool DXVAVideoDecodeAccelerator::Initialize(const Config& config,
                                             Client* client) {
-  if (get_gl_context_cb_.is_null() || make_context_current_cb_.is_null()) {
+  if (!get_gl_context_cb_ || !make_context_current_cb_) {
     NOTREACHED() << "GL callbacks are required for this VDA";
     return false;
   }
@@ -1039,6 +1066,7 @@ bool DXVAVideoDecodeAccelerator::CreateDX11DevManager() {
   // The device may exist if the last state was a config change.
   if (D3D11Device())
     return true;
+
   HRESULT hr = create_dxgi_device_manager_(
       &dx11_dev_manager_reset_token_, d3d11_device_manager_.GetAddressOf());
   RETURN_ON_HR_FAILURE(hr, "MFCreateDXGIDeviceManager failed", false);
@@ -1146,44 +1174,40 @@ bool DXVAVideoDecodeAccelerator::CreateDX11DevManager() {
   return true;
 }
 
-void DXVAVideoDecodeAccelerator::Decode(
-    const BitstreamBuffer& bitstream_buffer) {
+void DXVAVideoDecodeAccelerator::Decode(const BitstreamBuffer& bitstream) {
+  Decode(bitstream.ToDecoderBuffer(), bitstream.id());
+}
+
+void DXVAVideoDecodeAccelerator::Decode(scoped_refptr<DecoderBuffer> buffer,
+                                        int32_t bitstream_id) {
   TRACE_EVENT0("media", "DXVAVideoDecodeAccelerator::Decode");
   DCHECK(main_thread_task_runner_->BelongsToCurrentThread());
 
-  // SharedMemory will take over the ownership of handle.
-  base::SharedMemory shm(bitstream_buffer.handle(), true);
+  RETURN_AND_NOTIFY_ON_FAILURE(bitstream_id >= 0,
+                               "Invalid bitstream, id: " << bitstream_id,
+                               INVALID_ARGUMENT, );
+
+  if (!buffer) {
+    if (client_)
+      client_->NotifyEndOfBitstreamBuffer(bitstream_id);
+    return;
+  }
 
   State state = GetState();
   RETURN_AND_NOTIFY_ON_FAILURE(
       (state == kNormal || state == kStopped || state == kFlushing),
       "Invalid state: " << state, ILLEGAL_STATE, );
-  if (bitstream_buffer.id() < 0) {
-    RETURN_AND_NOTIFY_ON_FAILURE(
-        false, "Invalid bitstream_buffer, id: " << bitstream_buffer.id(),
-        INVALID_ARGUMENT, );
-  }
-
-  if (bitstream_buffer.size() == 0) {
-    if (client_)
-      client_->NotifyEndOfBitstreamBuffer(bitstream_buffer.id());
-    return;
-  }
 
   Microsoft::WRL::ComPtr<IMFSample> sample;
-  RETURN_AND_NOTIFY_ON_FAILURE(shm.Map(bitstream_buffer.size()),
-                               "Failed in base::SharedMemory::Map",
-                               PLATFORM_FAILURE, );
-
   sample = CreateInputSample(
-      reinterpret_cast<const uint8_t*>(shm.memory()), bitstream_buffer.size(),
-      std::min<uint32_t>(bitstream_buffer.size(), input_stream_info_.cbSize),
+      buffer->data(), buffer->data_size(),
+      std::min<uint32_t>(buffer->data_size(), input_stream_info_.cbSize),
       input_stream_info_.cbAlignment);
   RETURN_AND_NOTIFY_ON_FAILURE(sample.Get(), "Failed to create input sample",
                                PLATFORM_FAILURE, );
 
   RETURN_AND_NOTIFY_ON_HR_FAILURE(
-      sample->SetSampleTime(bitstream_buffer.id()),
+      sample->SetSampleTime(bitstream_id),
       "Failed to associate input buffer id with sample", PLATFORM_FAILURE, );
 
   decoder_thread_task_runner_->PostTask(
@@ -1618,7 +1642,7 @@ bool DXVAVideoDecodeAccelerator::InitDecoder(VideoCodecProfile profile) {
         enable_accelerated_vpx_decode_ & gpu::GpuPreferences::VPX_VENDOR_AMD &&
         profile == VP9PROFILE_PROFILE0) {
       base::FilePath dll_path;
-      if (PathService::Get(program_files_key, &dll_path)) {
+      if (base::PathService::Get(program_files_key, &dll_path)) {
         codec_ = media::kCodecVP9;
         dll_path = dll_path.Append(kAMDVPXDecoderDLLPath);
         dll_path = dll_path.Append(kAMDVP9DecoderDLLName);
@@ -1633,8 +1657,8 @@ bool DXVAVideoDecodeAccelerator::InitDecoder(VideoCodecProfile profile) {
     RETURN_ON_FAILURE(false, "Unsupported codec.", false);
   }
 
-  HRESULT hr = CreateCOMObjectFromDll(decoder_dll, clsid,
-                                      IID_PPV_ARGS(&decoder_));
+  HRESULT hr =
+      CreateCOMObjectFromDll(decoder_dll, clsid, IID_PPV_ARGS(&decoder_));
   RETURN_ON_HR_FAILURE(hr, "Failed to create decoder instance", false);
 
   RETURN_ON_FAILURE(CheckDecoderDxvaSupport(),
@@ -1643,12 +1667,16 @@ bool DXVAVideoDecodeAccelerator::InitDecoder(VideoCodecProfile profile) {
   ULONG_PTR device_manager_to_use = NULL;
   if (use_dx11_) {
     CHECK(create_dxgi_device_manager_);
+    if (media_log_)
+      MEDIA_LOG(INFO, media_log_) << "Using D3D11 device for DXVA";
     RETURN_AND_NOTIFY_ON_FAILURE(CreateDX11DevManager(),
                                  "Failed to initialize DX11 device and manager",
                                  PLATFORM_FAILURE, false);
     device_manager_to_use =
         reinterpret_cast<ULONG_PTR>(d3d11_device_manager_.Get());
   } else {
+    if (media_log_)
+      MEDIA_LOG(INFO, media_log_) << "Using D3D9 device for DXVA";
     RETURN_AND_NOTIFY_ON_FAILURE(CreateD3DDevManager(),
                                  "Failed to initialize D3D device and manager",
                                  PLATFORM_FAILURE, false);
@@ -1893,7 +1921,8 @@ bool DXVAVideoDecodeAccelerator::GetStreamsInfoAndBufferReqs() {
   return true;
 }
 
-void DXVAVideoDecodeAccelerator::DoDecode(const gfx::ColorSpace& color_space) {
+void DXVAVideoDecodeAccelerator::DoDecode(const gfx::Rect& visible_rect,
+                                          const gfx::ColorSpace& color_space) {
   TRACE_EVENT0("media", "DXVAVideoDecodeAccelerator::DoDecode");
   DCHECK(decoder_thread_task_runner_->BelongsToCurrentThread());
   // This function is also called from FlushInternal in a loop which could
@@ -1971,13 +2000,14 @@ void DXVAVideoDecodeAccelerator::DoDecode(const gfx::ColorSpace& color_space) {
 
   inputs_before_decode_ = 0;
 
-  RETURN_AND_NOTIFY_ON_FAILURE(ProcessOutputSample(output_sample, color_space),
-                               "Failed to process output sample.",
-                               PLATFORM_FAILURE, );
+  RETURN_AND_NOTIFY_ON_FAILURE(
+      ProcessOutputSample(output_sample, visible_rect, color_space),
+      "Failed to process output sample.", PLATFORM_FAILURE, );
 }
 
 bool DXVAVideoDecodeAccelerator::ProcessOutputSample(
     Microsoft::WRL::ComPtr<IMFSample> sample,
+    const gfx::Rect& visible_rect,
     const gfx::ColorSpace& color_space) {
   RETURN_ON_FAILURE(sample, "Decode succeeded with NULL output sample", false);
 
@@ -1990,7 +2020,7 @@ bool DXVAVideoDecodeAccelerator::ProcessOutputSample(
     base::AutoLock lock(decoder_lock_);
     DCHECK(pending_output_samples_.empty());
     pending_output_samples_.push_back(
-        PendingSampleInfo(input_buffer_id, sample, color_space));
+        PendingSampleInfo(input_buffer_id, sample, visible_rect, color_space));
   }
 
   if (pictures_requested_) {
@@ -2062,6 +2092,7 @@ void DXVAVideoDecodeAccelerator::ProcessPendingSamples() {
 
       pending_sample->picture_buffer_id = index->second->id();
       index->second->set_bound();
+      index->second->set_visible_rect(pending_sample->visible_rect);
       index->second->set_color_space(pending_sample->color_space);
 
       if (index->second->CanBindSamples()) {
@@ -2248,14 +2279,13 @@ void DXVAVideoDecodeAccelerator::RequestPictureBuffers(int width, int height) {
 void DXVAVideoDecodeAccelerator::NotifyPictureReady(
     int picture_buffer_id,
     int input_buffer_id,
+    const gfx::Rect& visible_rect,
     const gfx::ColorSpace& color_space,
     bool allow_overlay) {
   DCHECK(main_thread_task_runner_->BelongsToCurrentThread());
   // This task could execute after the decoder has been torn down.
   if (GetState() != kUninitialized && client_) {
-    // TODO(henryhsu): Use correct visible size instead of (0, 0). We can't use
-    // coded size here so use (0, 0) intentionally to have the client choose.
-    Picture picture(picture_buffer_id, input_buffer_id, gfx::Rect(0, 0),
+    Picture picture(picture_buffer_id, input_buffer_id, visible_rect,
                     color_space, allow_overlay);
     client_->PictureReady(picture);
   }
@@ -2334,10 +2364,7 @@ void DXVAVideoDecodeAccelerator::FlushInternal() {
   // Attempt to retrieve an output frame from the decoder. If we have one,
   // return and proceed when the output frame is processed. If we don't have a
   // frame then we are done.
-  VideoColorSpace color_space = config_.container_color_space;
-  if (config_change_detector_)
-    color_space = config_change_detector_->current_color_space(color_space);
-  DoDecode(color_space.ToGfxColorSpace());
+  DoDecode(current_visible_rect_, current_color_space_.ToGfxColorSpace());
   if (OutputSamplesPresent())
     return;
 
@@ -2386,9 +2413,14 @@ void DXVAVideoDecodeAccelerator::DecodeInternal(
     return;
   }
 
+  gfx::Rect visible_rect;
   VideoColorSpace color_space = config_.container_color_space;
-  if (config_change_detector_)
+  if (config_change_detector_) {
+    visible_rect = config_change_detector_->current_visible_rect(visible_rect);
     color_space = config_change_detector_->current_color_space(color_space);
+  }
+  current_visible_rect_ = visible_rect;
+  current_color_space_ = color_space;
 
   if (!inputs_before_decode_) {
     TRACE_EVENT_ASYNC_BEGIN0("gpu", "DXVAVideoDecodeAccelerator.Decoding",
@@ -2406,7 +2438,7 @@ void DXVAVideoDecodeAccelerator::DecodeInternal(
   // process the input again. Failure in either of these steps is treated as a
   // decoder failure.
   if (hr == MF_E_NOTACCEPTING) {
-    DoDecode(color_space.ToGfxColorSpace());
+    DoDecode(visible_rect, color_space.ToGfxColorSpace());
     // If the DoDecode call resulted in an output frame then we should not
     // process any more input until that frame is copied to the target surface.
     if (!OutputSamplesPresent()) {
@@ -2438,7 +2470,7 @@ void DXVAVideoDecodeAccelerator::DecodeInternal(
   RETURN_AND_NOTIFY_ON_HR_FAILURE(hr, "Failed to process input sample",
                                   PLATFORM_FAILURE, );
 
-  DoDecode(color_space.ToGfxColorSpace());
+  DoDecode(visible_rect, color_space.ToGfxColorSpace());
 
   State state = GetState();
   RETURN_AND_NOTIFY_ON_FAILURE(
@@ -2672,9 +2704,9 @@ void DXVAVideoDecodeAccelerator::CopySurfaceComplete(
   RETURN_AND_NOTIFY_ON_FAILURE(result, "Failed to complete copying surface",
                                PLATFORM_FAILURE, );
 
-  NotifyPictureReady(picture_buffer->id(), input_buffer_id,
-                     picture_buffer->color_space(),
-                     picture_buffer->AllowOverlay());
+  NotifyPictureReady(
+      picture_buffer->id(), input_buffer_id, picture_buffer->visible_rect(),
+      picture_buffer->color_space(), picture_buffer->AllowOverlay());
 
   {
     base::AutoLock lock(decoder_lock_);
@@ -2726,9 +2758,9 @@ void DXVAVideoDecodeAccelerator::BindPictureBufferToSample(
   RETURN_AND_NOTIFY_ON_FAILURE(result, "Failed to complete copying surface",
                                PLATFORM_FAILURE, );
 
-  NotifyPictureReady(picture_buffer->id(), input_buffer_id,
-                     picture_buffer->color_space(),
-                     picture_buffer->AllowOverlay());
+  NotifyPictureReady(
+      picture_buffer->id(), input_buffer_id, picture_buffer->visible_rect(),
+      picture_buffer->color_space(), picture_buffer->AllowOverlay());
 
   {
     base::AutoLock lock(decoder_lock_);

@@ -15,6 +15,7 @@
 #include "ios/web/public/navigation_manager.h"
 #include "ios/web/public/web_state/navigation_context.h"
 #include "ios/web/public/web_state/web_state.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "skia/ext/skia_utils_ios.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/image/image.h"
@@ -36,16 +37,13 @@ using ImageDownloadCallback =
 namespace favicon {
 
 // static
-void WebFaviconDriver::CreateForWebState(
-    web::WebState* web_state,
-    FaviconService* favicon_service,
-    history::HistoryService* history_service) {
+void WebFaviconDriver::CreateForWebState(web::WebState* web_state,
+                                         FaviconService* favicon_service) {
   if (FromWebState(web_state))
     return;
 
-  web_state->SetUserData(UserDataKey(),
-                         base::WrapUnique(new WebFaviconDriver(
-                             web_state, favicon_service, history_service)));
+  web_state->SetUserData(UserDataKey(), base::WrapUnique(new WebFaviconDriver(
+                                            web_state, favicon_service)));
 }
 
 gfx::Image WebFaviconDriver::GetFavicon() const {
@@ -75,7 +73,7 @@ int WebFaviconDriver::DownloadImage(const GURL& url,
   GURL local_url(url);
   __block ImageDownloadCallback local_callback = std::move(callback);
 
-  image_fetcher::IOSImageDataFetcherCallback ios_callback =
+  image_fetcher::ImageDataFetcherBlock ios_callback =
       ^(NSData* data, const image_fetcher::RequestMetadata& metadata) {
         if (metadata.http_response_code ==
             image_fetcher::RequestMetadata::RESPONSE_CODE_INVALID)
@@ -151,10 +149,9 @@ void WebFaviconDriver::OnFaviconDeleted(
 }
 
 WebFaviconDriver::WebFaviconDriver(web::WebState* web_state,
-                                   FaviconService* favicon_service,
-                                   history::HistoryService* history_service)
-    : FaviconDriverImpl(favicon_service, history_service),
-      image_fetcher_(web_state->GetBrowserState()->GetRequestContext()),
+                                   FaviconService* favicon_service)
+    : FaviconDriverImpl(favicon_service),
+      image_fetcher_(web_state->GetBrowserState()->GetSharedURLLoaderFactory()),
       web_state_(web_state) {
   web_state_->AddObserver(this);
 }

@@ -15,8 +15,8 @@
       }
 
       .column-header {
-        -webkit-margin-start: 20px;
         margin-bottom: 15px;
+        margin-inline-start: 20px;
         margin-top: 15px;
       }
     </style>
@@ -31,7 +31,9 @@
         <div class="list-item">
           <div class="favicon-image"
               style$="[[computeSiteIcon(item.origin)]]"></div>
-          <div class="middle">[[item.origin]]</div>
+          <div class="middle">
+            <span class="url-directionality">[[item.origin]]</span>
+          </div>
 
           <paper-icon-button-light class="icon-more-vert">
             <button on-click="showMenu_" title="$i18n{moreActions}"></button>

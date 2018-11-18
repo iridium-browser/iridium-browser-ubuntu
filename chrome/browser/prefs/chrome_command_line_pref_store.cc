@@ -22,10 +22,9 @@
 #include "components/browser_sync/browser_sync_switches.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_pref_names.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_switches.h"
+#include "components/language/core/browser/pref_names.h"
 #include "components/proxy_config/proxy_config_dictionary.h"
 #include "components/proxy_config/proxy_config_pref_names.h"
-#include "components/ssl_config/ssl_config_prefs.h"
-#include "components/ssl_config/ssl_config_switches.h"
 #include "components/sync/base/pref_names.h"
 #include "content/public/common/content_switches.h"
 #include "services/network/public/cpp/network_switches.h"
@@ -38,12 +37,12 @@
 
 const CommandLinePrefStore::SwitchToPreferenceMapEntry
     ChromeCommandLinePrefStore::string_switch_map_[] = {
-        {switches::kLang, prefs::kApplicationLocale},
+        {switches::kLang, language::prefs::kApplicationLocale},
         {data_reduction_proxy::switches::kDataReductionProxy,
          data_reduction_proxy::prefs::kDataReductionProxy},
         {switches::kAuthServerWhitelist, prefs::kAuthServerWhitelist},
-        {switches::kSSLVersionMin, ssl_config::prefs::kSSLVersionMin},
-        {switches::kTLS13Variant, ssl_config::prefs::kTLS13Variant},
+        {switches::kSSLVersionMin, prefs::kSSLVersionMin},
+        {switches::kTLS13Variant, prefs::kTLS13Variant},
 #if defined(OS_ANDROID)
         {switches::kAuthAndroidNegotiateAccountType,
          prefs::kAuthAndroidNegotiateAccountType},
@@ -134,17 +133,21 @@ void ChromeCommandLinePrefStore::ApplySimpleSwitches() {
 
 void ChromeCommandLinePrefStore::ApplyProxyMode() {
   if (command_line()->HasSwitch(switches::kNoProxyServer)) {
-    SetValue(proxy_config::prefs::kProxy, ProxyConfigDictionary::CreateDirect(),
-             WriteablePrefStore::DEFAULT_PREF_WRITE_FLAGS);
+    SetValue(
+        proxy_config::prefs::kProxy,
+        std::make_unique<base::Value>(ProxyConfigDictionary::CreateDirect()),
+        WriteablePrefStore::DEFAULT_PREF_WRITE_FLAGS);
   } else if (command_line()->HasSwitch(switches::kProxyPacUrl)) {
     std::string pac_script_url =
         command_line()->GetSwitchValueASCII(switches::kProxyPacUrl);
     SetValue(proxy_config::prefs::kProxy,
-             ProxyConfigDictionary::CreatePacScript(pac_script_url, false),
+             std::make_unique<base::Value>(
+                 ProxyConfigDictionary::CreatePacScript(pac_script_url, false)),
              WriteablePrefStore::DEFAULT_PREF_WRITE_FLAGS);
   } else if (command_line()->HasSwitch(switches::kProxyAutoDetect)) {
     SetValue(proxy_config::prefs::kProxy,
-             ProxyConfigDictionary::CreateAutoDetect(),
+             std::make_unique<base::Value>(
+                 ProxyConfigDictionary::CreateAutoDetect()),
              WriteablePrefStore::DEFAULT_PREF_WRITE_FLAGS);
   } else if (command_line()->HasSwitch(switches::kProxyServer)) {
     std::string proxy_server =
@@ -153,7 +156,8 @@ void ChromeCommandLinePrefStore::ApplyProxyMode() {
         command_line()->GetSwitchValueASCII(switches::kProxyBypassList);
     SetValue(
         proxy_config::prefs::kProxy,
-        ProxyConfigDictionary::CreateFixedServers(proxy_server, bypass_list),
+        std::make_unique<base::Value>(ProxyConfigDictionary::CreateFixedServers(
+            proxy_server, bypass_list)),
         WriteablePrefStore::DEFAULT_PREF_WRITE_FLAGS);
   }
 }
@@ -164,7 +168,7 @@ void ChromeCommandLinePrefStore::ApplySSLSwitches() {
     list_value->AppendStrings(base::SplitString(
         command_line()->GetSwitchValueASCII(switches::kCipherSuiteBlacklist),
         ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL));
-    SetValue(ssl_config::prefs::kCipherSuiteBlacklist, std::move(list_value),
+    SetValue(prefs::kCipherSuiteBlacklist, std::move(list_value),
              WriteablePrefStore::DEFAULT_PREF_WRITE_FLAGS);
   }
 
@@ -173,7 +177,7 @@ void ChromeCommandLinePrefStore::ApplySSLSwitches() {
   if (command_line()->HasSwitch(switches::kTLS13Variant) &&
       command_line()->GetSwitchValueASCII(switches::kTLS13Variant) !=
           switches::kTLS13VariantDisabled) {
-    SetValue(ssl_config::prefs::kSSLVersionMax,
+    SetValue(prefs::kSSLVersionMax,
              std::make_unique<base::Value>(switches::kSSLVersionTLSv13),
              WriteablePrefStore::DEFAULT_PREF_WRITE_FLAGS);
   }

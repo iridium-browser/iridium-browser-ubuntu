@@ -36,12 +36,11 @@ void AudioMirroringManager::AddDiverter(
   }
 #endif
   routes_.push_back(StreamRoutingState(
-      SourceFrameRef(render_process_id, render_frame_id),
-      diverter));
+      GlobalFrameRoutingId(render_process_id, render_frame_id), diverter));
 
   // Query existing destinations to see whether to immediately start diverting
   // the stream.
-  std::set<SourceFrameRef> candidates;
+  std::set<GlobalFrameRoutingId> candidates;
   candidates.insert(routes_.back().source_render_frame);
   InitiateQueriesToFindNewDestination(nullptr, candidates);
 }
@@ -51,7 +50,7 @@ void AudioMirroringManager::RemoveDiverter(Diverter* diverter) {
 
   // Find and remove the entry from the routing table.  If the stream is being
   // diverted, it is stopped.
-  for (StreamRoutes::iterator it = routes_.begin(); it != routes_.end(); ++it) {
+  for (auto it = routes_.begin(); it != routes_.end(); ++it) {
     if (it->diverter == diverter) {
       // Stop the diverted flow.
       RouteDivertedFlow(&(*it), nullptr);
@@ -79,7 +78,7 @@ void AudioMirroringManager::StartMirroring(MirroringDestination* destination) {
     sessions_.push_back(destination);
   }
 
-  std::set<SourceFrameRef> candidates;
+  std::set<GlobalFrameRoutingId> candidates;
 
   // Query the MirroringDestination to see which of the audio streams should be
   // diverted.
@@ -103,8 +102,8 @@ void AudioMirroringManager::StopMirroring(MirroringDestination* destination) {
   // Stop diverting each audio stream in the mirroring session being stopped.
   // Each stopped stream becomes a candidate to be diverted to another
   // destination.
-  std::set<SourceFrameRef> redivert_candidates;
-  for (StreamRoutes::iterator it = routes_.begin(); it != routes_.end(); ++it) {
+  std::set<GlobalFrameRoutingId> redivert_candidates;
+  for (auto it = routes_.begin(); it != routes_.end(); ++it) {
     if (it->destination == destination) {
       RouteDivertedFlow(&(*it), nullptr);
       redivert_candidates.insert(it->source_render_frame);
@@ -158,7 +157,7 @@ base::UnguessableToken AudioMirroringManager::ToGroupId(int render_process_id,
 
 void AudioMirroringManager::InitiateQueriesToFindNewDestination(
     MirroringDestination* old_destination,
-    const std::set<SourceFrameRef>& candidates) {
+    const std::set<GlobalFrameRoutingId>& candidates) {
   lock_.AssertAcquired();
 
   for (Destinations::const_iterator it = sessions_.begin();
@@ -176,7 +175,7 @@ void AudioMirroringManager::InitiateQueriesToFindNewDestination(
 void AudioMirroringManager::UpdateRoutesToDestination(
     MirroringDestination* destination,
     bool add_only,
-    const std::set<SourceFrameRef>& matches,
+    const std::set<GlobalFrameRoutingId>& matches,
     bool is_duplicate) {
   base::AutoLock scoped_lock(lock_);
 
@@ -189,7 +188,7 @@ void AudioMirroringManager::UpdateRoutesToDestination(
 void AudioMirroringManager::UpdateRoutesToDivertDestination(
     MirroringDestination* destination,
     bool add_only,
-    const std::set<SourceFrameRef>& matches) {
+    const std::set<GlobalFrameRoutingId>& matches) {
   lock_.AssertAcquired();
 
   if (std::find(sessions_.begin(), sessions_.end(), destination) ==
@@ -202,8 +201,8 @@ void AudioMirroringManager::UpdateRoutesToDivertDestination(
 
   // Start/stop diverting based on |matches|.  Any stopped stream becomes a
   // candidate to be diverted to another destination.
-  std::set<SourceFrameRef> redivert_candidates;
-  for (StreamRoutes::iterator it = routes_.begin(); it != routes_.end(); ++it) {
+  std::set<GlobalFrameRoutingId> redivert_candidates;
+  for (auto it = routes_.begin(); it != routes_.end(); ++it) {
     if (matches.find(it->source_render_frame) != matches.end()) {
       // Only change the route if the stream is not already being diverted.
       if (!it->destination)
@@ -223,7 +222,7 @@ void AudioMirroringManager::UpdateRoutesToDivertDestination(
 void AudioMirroringManager::UpdateRoutesToDuplicateDestination(
     MirroringDestination* destination,
     bool add_only,
-    const std::set<SourceFrameRef>& matches) {
+    const std::set<GlobalFrameRoutingId>& matches) {
   lock_.AssertAcquired();
 
   if (std::find(sessions_.begin(), sessions_.end(), destination) ==
@@ -231,7 +230,7 @@ void AudioMirroringManager::UpdateRoutesToDuplicateDestination(
     return;  // Query result callback invoked after StopMirroring().
   }
 
-  for (StreamRoutes::iterator it = routes_.begin(); it != routes_.end(); ++it) {
+  for (auto it = routes_.begin(); it != routes_.end(); ++it) {
     if (matches.find(it->source_render_frame) != matches.end()) {
       // The same destination cannot have both a diverted audio flow and a
       // duplicated flow from the same source.
@@ -267,18 +266,18 @@ void AudioMirroringManager::RouteDivertedFlow(
 
   if (route->destination) {
     DVLOG(1) << "Stop diverting render_process_id:render_frame_id="
-             << route->source_render_frame.first << ':'
-             << route->source_render_frame.second
+             << route->source_render_frame.child_id << ':'
+             << route->source_render_frame.frame_routing_id
              << " --> MirroringDestination@" << route->destination;
     route->diverter->StopDiverting();
     route->destination = nullptr;
   }
 
   if (new_destination) {
-      DVLOG(1) << "Start diverting of render_process_id:render_frame_id="
-               << route->source_render_frame.first << ':'
-               << route->source_render_frame.second
-               << " --> MirroringDestination@" << new_destination;
+    DVLOG(1) << "Start diverting of render_process_id:render_frame_id="
+             << route->source_render_frame.child_id << ':'
+             << route->source_render_frame.frame_routing_id
+             << " --> MirroringDestination@" << new_destination;
     route->diverter->StartDiverting(
         new_destination->AddInput(route->diverter->GetAudioParameters()));
     route->destination = new_destination;
@@ -286,7 +285,7 @@ void AudioMirroringManager::RouteDivertedFlow(
 }
 
 AudioMirroringManager::StreamRoutingState::StreamRoutingState(
-    const SourceFrameRef& source_frame,
+    const GlobalFrameRoutingId& source_frame,
     Diverter* stream_diverter)
     : source_render_frame(source_frame),
       diverter(stream_diverter),

@@ -1,8 +1,4 @@
 estade@chromium.org
-mathp@chromium.org
-per-file *password*=dvadym@chromium.org
-per-file *password*=kolos@chromium.org
-per-file *password*=vabr@chromium.org
-per-file *password*=vasilii@chromium.org
+ftirelo@chromium.org
 
-# COMPONENT: UI>Browser>Autofill
+# COMPONENT: UI>Browser>Autofill>UI

@@ -10,7 +10,6 @@
 #include "chrome/browser/chromeos/login/oobe_screen.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/login/test/oobe_screen_waiter.h"
-#include "chrome/browser/chromeos/login/ui/login_display_host_webui.h"
 #include "chrome/browser/chromeos/login/ui/webui_login_view.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
@@ -34,7 +33,7 @@ constexpr char kTestUser1GaiaId[] = "test-user1@gmail.com";
 class ResetTest : public LoginManagerTest {
  public:
   ResetTest()
-      : LoginManagerTest(false),
+      : LoginManagerTest(false, true /* should_initialize_webui */),
         update_engine_client_(NULL),
         session_manager_client_(NULL),
         power_manager_client_(NULL) {}
@@ -84,21 +83,27 @@ class ResetTest : public LoginManagerTest {
   }
 
   void CloseResetScreen() {
-    ASSERT_TRUE(JSExecuted("$('reset-cancel-button').click();"));
+    ASSERT_TRUE(JSExecuted(
+        "chrome.send('login.ResetScreen.userActed', ['cancel-reset']);"));
   }
 
   void ClickResetButton() {
-    ASSERT_TRUE(JSExecuted("$('reset-confirm-commit').click();"));
+    ASSERT_TRUE(JSExecuted(
+        "chrome.send('login.ResetScreen.userActed', ['powerwash-pressed']);"));
   }
 
   void ClickRestartButton() {
-    ASSERT_TRUE(JSExecuted("$('reset-restart-button').click();"));
+    ASSERT_TRUE(JSExecuted(
+        "chrome.send('login.ResetScreen.userActed', ['restart-pressed']);"));
   }
   void ClickToConfirmButton() {
-    ASSERT_TRUE(JSExecuted("$('reset-toconfirm-button').click();"));
+    ASSERT_TRUE(JSExecuted(
+        "chrome.send('login.ResetScreen.userActed', ['show-confirmation']);"));
   }
   void ClickDismissConfirmationButton() {
-    ASSERT_TRUE(JSExecuted("$('reset-confirm-dismiss').click();"));
+    ASSERT_TRUE(
+        JSExecuted("chrome.send('login.ResetScreen.userActed', "
+                   "['reset-confirm-dismissed']);"));
   }
 
   FakeUpdateEngineClient* update_engine_client_;
@@ -211,7 +216,8 @@ IN_PROC_BROWSER_TEST_F(ResetFirstAfterBootTest, PRE_RollbackUnavailable) {
   RegisterSomeUser();
 }
 
-IN_PROC_BROWSER_TEST_F(ResetFirstAfterBootTest, RollbackUnavailable) {
+// Disabled due to flakiness (crbug.com/870284)
+IN_PROC_BROWSER_TEST_F(ResetFirstAfterBootTest, DISABLED_RollbackUnavailable) {
   update_engine_client_->set_can_rollback_check_result(false);
 
   InvokeResetScreen();

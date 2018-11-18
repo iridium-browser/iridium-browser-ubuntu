@@ -18,6 +18,11 @@ namespace content {
 
 class MockRenderWidgetHost;
 
+enum class FilterGestureEventResult {
+  kFilterGestureEventAllowed,
+  kFilterGestureEventFiltered
+};
+
 // The TouchActionFilter is responsible for filtering scroll and pinch gesture
 // events according to the CSS touch-action values the renderer has sent for
 // each touch point.
@@ -25,12 +30,14 @@ class MockRenderWidgetHost;
 class CONTENT_EXPORT TouchActionFilter {
  public:
   TouchActionFilter();
+  ~TouchActionFilter();
 
-  // Returns true if the supplied gesture event should be dropped based on the
-  // current touch-action state. Otherwise returns false, and possibly modifies
-  // the event's directional parameters to make the event compatible with
-  // the effective touch-action.
-  bool FilterGestureEvent(blink::WebGestureEvent* gesture_event);
+  // Returns kFilterGestureEventFiltered if the supplied gesture event should be
+  // dropped based on the current touch-action state. Otherwise returns
+  // kFilterGestureEventAllowed, and possibly modifies the event's directional
+  // parameters to make the event compatible with the effective touch-action.
+  FilterGestureEventResult FilterGestureEvent(
+      blink::WebGestureEvent* gesture_event);
 
   // Called when a set-touch-action message is received from the renderer
   // for a touch start event that is currently in flight.
@@ -51,15 +58,30 @@ class CONTENT_EXPORT TouchActionFilter {
   // renderer for a touch start event that is currently in flight.
   void OnSetWhiteListedTouchAction(cc::TouchAction white_listed_touch_action);
 
-  cc::TouchAction allowed_touch_action() const { return allowed_touch_action_; }
+  base::Optional<cc::TouchAction> allowed_touch_action() const {
+    return allowed_touch_action_;
+  }
 
   void SetForceEnableZoom(bool enabled) { force_enable_zoom_ = enabled; }
 
+  void OnHasTouchEventHandlers(bool has_handlers);
+
+  void IncreaseActiveTouches();
+  void DecreaseActiveTouches();
+
+  // Debugging only.
+  void AppendToGestureSequenceForDebugging(const char* str);
+
  private:
+  friend class InputRouterImplTest;
   friend class MockRenderWidgetHost;
+  friend class TouchActionFilterTest;
+  friend class SitePerProcessBrowserTouchActionTest;
 
   bool ShouldSuppressManipulation(const blink::WebGestureEvent&);
   bool FilterManipulationEventAndResetState();
+  void ReportTouchAction();
+  void SetTouchAction(cc::TouchAction touch_action);
 
   // Whether scroll and pinch gestures should be discarded due to touch-action.
   bool suppress_manipulation_events_;
@@ -77,11 +99,36 @@ class CONTENT_EXPORT TouchActionFilter {
   // Force enable zoom for Accessibility.
   bool force_enable_zoom_;
 
+  // Indicates whether this page has touch event handler or not. Set by
+  // InputRouterImpl::OnHasTouchEventHandlers. Default to false because one
+  // could not scroll anyways when there is no content, and this is consistent
+  // with the default state committed after DocumentLoader::DidCommitNavigation.
+  bool has_touch_event_handler_ = false;
+
+  // True if an active gesture sequence is in progress. i.e. after GTD and
+  // before GSE.
+  bool gesture_sequence_in_progress_ = false;
+
+  // True if we're between a GSB and a GSE.
+  bool gesture_scroll_in_progress_ = false;
+
+  // Increment at receiving ACK for touch start and decrement at touch end.
+  int num_of_active_touches_ = 0;
+
   // What touch actions are currently permitted.
-  cc::TouchAction allowed_touch_action_;
+  base::Optional<cc::TouchAction> allowed_touch_action_;
+
+  // The touch action that is used for the current scrolling gesture sequence.
+  // At the touch sequence end, the |allowed_touch_action| is reset while this
+  // remains set as the effective touch action, for the still in progress scroll
+  // sequence due to fling.
+  base::Optional<cc::TouchAction> scrolling_touch_action_;
 
   // Whitelisted touch action received from the compositor.
   base::Optional<cc::TouchAction> white_listed_touch_action_;
+
+  // Debugging only.
+  std::string gesture_sequence_;
 
   DISALLOW_COPY_AND_ASSIGN(TouchActionFilter);
 };

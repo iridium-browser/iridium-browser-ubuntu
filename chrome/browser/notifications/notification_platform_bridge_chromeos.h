@@ -12,6 +12,9 @@
 #include "base/macros.h"
 #include "chrome/browser/notifications/notification_platform_bridge.h"
 #include "chrome/browser/notifications/profile_notification.h"
+#include "components/keyed_service/core/keyed_service_shutdown_notifier.h"
+
+class ChromeAshMessageCenterClient;
 
 // The interface that a NotificationPlatformBridge uses to pass back information
 // and interactions from the native notification system. TODO(estade): this
@@ -43,8 +46,6 @@ class NotificationPlatformBridgeDelegate {
 };
 
 // A platform bridge that uses Ash's message center to display notifications.
-// Currently under development and controlled by feature:
-//   --enable-features=NativeNotifications
 class NotificationPlatformBridgeChromeOs
     : public NotificationPlatformBridge,
       public NotificationPlatformBridgeDelegate {
@@ -74,16 +75,27 @@ class NotificationPlatformBridgeChromeOs
   void DisableNotification(const std::string& id) override;
 
  private:
+  // Gets the ProfileNotification for the given identifier which has been
+  // mutated to uniquely identify the profile. This may return null if the
+  // notification has already been closed due to profile shutdown. Ash may
+  // asynchronously inform |this| of actions on notificationafter their
+  // associated profile has already been destroyed.
   ProfileNotification* GetProfileNotification(
       const std::string& profile_notification_id);
 
-  std::unique_ptr<NotificationPlatformBridge> impl_;
+  void OnProfileDestroying(Profile* profile);
+
+  std::unique_ptr<ChromeAshMessageCenterClient> impl_;
 
   // A container for all active notifications, where IDs are permuted to
   // uniquely identify both the notification and its source profile. The key is
   // the permuted ID.
   std::map<std::string, std::unique_ptr<ProfileNotification>>
       active_notifications_;
+
+  std::map<Profile*,
+           std::unique_ptr<KeyedServiceShutdownNotifier::Subscription>>
+      profile_shutdown_subscriptions_;
 
   DISALLOW_COPY_AND_ASSIGN(NotificationPlatformBridgeChromeOs);
 };

@@ -69,7 +69,8 @@ class CPDF_Annot {
   static ByteString AnnotSubtypeToString(CPDF_Annot::Subtype nSubtype);
   static CFX_FloatRect RectFromQuadPointsArray(const CPDF_Array* pArray,
                                                size_t nIndex);
-  static CFX_FloatRect BoundingRectFromQuadPoints(CPDF_Dictionary* pAnnotDict);
+  static CFX_FloatRect BoundingRectFromQuadPoints(
+      const CPDF_Dictionary* pAnnotDict);
   static CFX_FloatRect RectFromQuadPoints(CPDF_Dictionary* pAnnotDict,
                                           size_t nIndex);
   static size_t QuadPointCount(const CPDF_Array* pArray);
@@ -127,12 +128,12 @@ class CPDF_Annot {
 // Get the AP in an annotation dict for a given appearance mode.
 // If |eMode| is not Normal and there is not AP for that mode, falls back to
 // the Normal AP.
-CPDF_Stream* FPDFDOC_GetAnnotAP(const CPDF_Dictionary* pAnnotDict,
-                                CPDF_Annot::AppearanceMode eMode);
+CPDF_Stream* GetAnnotAP(CPDF_Dictionary* pAnnotDict,
+                        CPDF_Annot::AppearanceMode eMode);
 
 // Get the AP in an annotation dict for a given appearance mode.
-// No fallbacks to Normal like in FPDFDOC_GetAnnotAP.
-CPDF_Stream* FPDFDOC_GetAnnotAPNoFallback(const CPDF_Dictionary* pAnnotDict,
-                                          CPDF_Annot::AppearanceMode eMode);
+// No fallbacks to Normal like in GetAnnotAP.
+CPDF_Stream* GetAnnotAPNoFallback(CPDF_Dictionary* pAnnotDict,
+                                  CPDF_Annot::AppearanceMode eMode);
 
 #endif  // CORE_FPDFDOC_CPDF_ANNOT_H_

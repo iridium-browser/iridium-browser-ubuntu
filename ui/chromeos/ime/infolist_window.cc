@@ -57,10 +57,8 @@ class InfolistBorder : public views::BubbleBorder {
 
 InfolistBorder::InfolistBorder()
     : views::BubbleBorder(views::BubbleBorder::LEFT_CENTER,
-                          views::BubbleBorder::NO_SHADOW,
-                          SK_ColorTRANSPARENT) {
-  set_paint_arrow(views::BubbleBorder::PAINT_NONE);
-}
+                          views::BubbleBorder::BIG_SHADOW,
+                          SK_ColorTRANSPARENT) {}
 
 InfolistBorder::~InfolistBorder() {}
 
@@ -73,8 +71,7 @@ gfx::Rect InfolistBorder::GetBounds(const gfx::Rect& anchor_rect,
   // although it doesn't draw the arrow. The arrow offset is the half of
   // |contents_size| by default but can be modified through the off-screen logic
   // in BubbleFrameView.
-  bounds.set_y(anchor_rect.y() + contents_size.height() / 2 -
-               GetArrowOffset(contents_size));
+  bounds.set_y(anchor_rect.y() + contents_size.height() / 2);
   return bounds;
 }
 

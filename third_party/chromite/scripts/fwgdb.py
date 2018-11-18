@@ -8,6 +8,7 @@
 from __future__ import print_function
 
 import errno
+import glob
 import os
 import re
 import socket
@@ -24,7 +25,7 @@ cros_build_lib.AssertInsideChroot()
 
 # pylint: disable=import-error
 from servo import client
-from servo import multiservo
+from servo import servo_parsing
 from servo import terminal_freezer
 # pylint: enable=import-error
 
@@ -34,7 +35,6 @@ _SRC_DC = os.path.join(_SRC_ROOT, 'platform/depthcharge')
 _SRC_VB = os.path.join(_SRC_ROOT, 'platform/vboot_reference')
 _SRC_LP = os.path.join(_SRC_ROOT, 'third_party/coreboot/payloads/libpayload')
 
-_PTRN_DEVMODE = 'Entering VbBootDeveloper()'
 _PTRN_GDB = 'Ready for GDB connection'
 _PTRN_BOARD = 'Starting(?: read-only| read/write)? depthcharge on ([a-z_]+)...'
 
@@ -42,15 +42,9 @@ _PTRN_BOARD = 'Starting(?: read-only| read/write)? depthcharge on ([a-z_]+)...'
 def ParsePortage(board):
   """Parse some data from portage files. equery takes ages in comparison."""
   with open(os.path.join('/build', board, 'packages/Packages'), 'r') as f:
-    chost = None
-    use = None
     for line in f:
       if line[:7] == 'CHOST: ':
-        chost = line[7:].strip()
-      if line[:5] == 'USE: ':
-        use = line[5:].strip()
-      if chost and use:
-        return (chost, use)
+        return line[7:].strip()
 
 
 def ParseArgs(argv):
@@ -59,6 +53,8 @@ def ParseArgs(argv):
 
   parser.add_argument('-b', '--board',
                       help='The board overlay name (auto-detect by default)')
+  parser.add_argument('-c', '--cgdb', action='store_true',
+                      help='Use cgdb curses interface rather than plain gdb')
   parser.add_argument('-s', '--symbols',
                       help='Root directory or complete path to symbolized ELF '
                            '(defaults to /build/<BOARD>/firmware)')
@@ -70,16 +66,16 @@ def ParseArgs(argv):
                            'multiple times)')
 
   parser.add_argument('-n', '--servod-name', dest='name')
-  parser.add_argument('--servod-rcfile', default=multiservo.DEFAULT_RC_FILE)
+  parser.add_argument('--servod-rcfile', default=servo_parsing.DEFAULT_RC_FILE)
   parser.add_argument('--servod-server')
   parser.add_argument('-p', '--servod-port', type=int, dest='port')
   parser.add_argument('-t', '--tty',
                       help='TTY file to connect to (defaults to cpu_uart_pty)')
 
   opts = parser.parse_args(argv)
-  multiservo.get_env_options(logging, opts)
+  servo_parsing.get_env_options(logging, opts)
   if opts.name:
-    rc = multiservo.parse_rc(logging, opts.servod_rcfile)
+    rc = servo_parsing.parse_rc(logging, opts.servod_rcfile)
     if opts.name not in rc:
       raise parser.error('%s not in %s' % (opts.name, opts.servod_rcfile))
     if not opts.servod_server:
@@ -99,29 +95,42 @@ def ParseArgs(argv):
   return opts
 
 
-def FindSymbols(firmware_dir, board, use):
+def FindSymbols(firmware_dir, board):
   """Find the symbolized depthcharge ELF (may be supplied by -s flag)."""
-  if not firmware_dir:
-    firmware_dir = os.path.join(cros_build_lib.GetSysroot(board), 'firmware')
-  # Allow overriding the file directly just in case our detection screws up
-  if firmware_dir.endswith('.elf'):
+
+  # Allow overriding the file directly just in case our detection screws up.
+  if firmware_dir and firmware_dir.endswith('.elf'):
     return firmware_dir
 
-  if 'unified_depthcharge' in use:
-    basename = 'dev.elf'
-  else:
-    basename = 'dev.ro.elf'
+  if not firmware_dir:
+    # Unified builds have the format
+    # /build/<board|family>/firmware/<build_target|model>/. The board in
+    # depthcharge corresponds to the build_target in unified builds. For this
+    # reason we need to glob all boards to find the correct build_target.
+    unified_build_dirs = glob.glob('/build/*/firmware/%s' % board)
+    if len(unified_build_dirs) == 1:
+      firmware_dir = unified_build_dirs[0]
+    elif len(unified_build_dirs) > 1:
+      raise ValueError(
+          'Multiple boards were found (%s). Use -s to specify manually' %
+          (', '.join(unified_build_dirs)))
 
-  path = os.path.join(firmware_dir, 'depthcharge', basename)
-  if not os.path.exists(path):
-    path = os.path.join(firmware_dir, basename)
+  if not firmware_dir:
+    firmware_dir = os.path.join(cros_build_lib.GetSysroot(board), 'firmware')
 
-  if os.path.exists(path):
-    logging.warning('Auto-detected symbol file at %s... make sure that this '
-                    'matches the image on your DUT!', path)
-    return path
+  # Very old firmware you might still find on GoldenEye had dev.ro.elf.
+  basenames = ['dev.elf', 'dev.ro.elf']
+  for basename in basenames:
+    path = os.path.join(firmware_dir, 'depthcharge', basename)
+    if not os.path.exists(path):
+      path = os.path.join(firmware_dir, basename)
+    if os.path.exists(path):
+      logging.warning('Auto-detected symbol file at %s... make sure that this'
+                      ' matches the image on your DUT!', path)
+      return path
 
-  raise ValueError('Could not find %s symbol file!' % basename)
+  raise ValueError('Could not find depthcharge symbol file (dev.elf)! '
+                   '(You can use -s to supply it manually.)')
 
 
 # TODO(jwerner): Fine tune |wait| delay or maybe even make it configurable if
@@ -134,12 +143,15 @@ def ReadAll(fd, wait=0.03):
   try:
     while True:
       time.sleep(wait)
-      data += os.read(fd, 4096)
+      new_data = os.read(fd, 4096)
+      if not new_data:
+        break
+      data += new_data
   except OSError as e:
-    if e.errno == errno.EAGAIN:
-      logging.debug(data)
-      return data
-    raise
+    if e.errno != errno.EAGAIN:
+      raise
+  logging.debug(data)
+  return data
 
 
 def GdbChecksum(message):
@@ -197,20 +209,19 @@ def main(argv):
 
       # Throw away old data to avoid confusion from messages before the reboot
       data = ''
-      msg = ('Could not reboot into developer mode! '
-             '(Confirm that you have GBB_FLAG_FORCE_DEV_SWITCH_ON (0x8) set.)')
+      msg = ('Could not reboot into depthcharge!')
       with timeout_util.Timeout(10, msg):
-        while _PTRN_DEVMODE not in data:
+        while not re.search(_PTRN_BOARD, data):
           data += ReadAll(fd)
 
-      # Send a CTRL+G
-      logging.info('Developer mode detected, pressing CTRL+G...')
-      os.write(fd, chr(ord('G') & 0x1f))
-
       msg = ('Could not enter GDB mode with CTRL+G! '
-             '(Confirm that you flashed an "image.dev.bin" image to this DUT.)')
-      with timeout_util.Timeout(1, msg):
-        while _PTRN_GDB not in data:
+             '(Confirm that you flashed an "image.dev.bin" image to this DUT, '
+             'and that you have GBB_FLAG_FORCE_DEV_SWITCH_ON (0x8) set.)')
+      with timeout_util.Timeout(5, msg):
+        while not re.search(_PTRN_GDB, data):
+          # Send a CTRL+G to tell depthcharge to trap into GDB.
+          logging.debug('[Ctrl+G]')
+          os.write(fd, chr(ord('G') & 0x1f))
           data += ReadAll(fd)
 
     if not opts.board:
@@ -232,12 +243,21 @@ def main(argv):
     opts.execute.insert(0, 'target remote %s' % opts.tty)
     ex_args = sum([['--ex', cmd] for cmd in opts.execute], [])
 
-    chost, use = ParsePortage(opts.board)
+    chost = ParsePortage(opts.board)
     logging.info('Launching GDB...')
+
+    gdb_cmd = chost + '-gdb'
+    gdb_args = [
+        '--symbols', FindSymbols(opts.symbols, opts.board),
+        '--directory', _SRC_DC,
+        '--directory', _SRC_VB,
+        '--directory', _SRC_LP,
+    ] + ex_args
+
+    if opts.cgdb:
+      full_cmd = ['cgdb', '-d', gdb_cmd, '--'] + gdb_args
+    else:
+      full_cmd = [gdb_cmd] + gdb_args
+
     cros_build_lib.RunCommand(
-        [chost + '-gdb',
-         '--symbols', FindSymbols(opts.symbols, opts.board, use),
-         '--directory', _SRC_DC,
-         '--directory', _SRC_VB,
-         '--directory', _SRC_LP] + ex_args,
-        ignore_sigint=True, debug_level=logging.WARNING)
+        full_cmd, ignore_sigint=True, debug_level=logging.WARNING)

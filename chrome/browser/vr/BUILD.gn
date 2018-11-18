@@ -20,20 +20,26 @@ buildflag_header("vr_build_features") {
   flags = [ "USE_VR_ASSETS_COMPONENT=$use_vr_assets_component" ]
 }
 
-static_library("vr_common") {
+use_command_buffer = is_win
+
+config("vr_gl_mode") {
+  if (use_command_buffer) {
+    defines = [
+      "VR_USE_COMMAND_BUFFER",
+      "GL_GLEXT_PROTOTYPES",
+    ]
+  } else {
+    defines = [ "VR_USE_NATIVE_GL" ]
+  }
+}
+
+component("vr_ui") {
   sources = [
     "animation.cc",
     "animation.h",
-    "assets_component_update_status.h",
-    "assets_load_status.h",
-    "assets_loader.cc",
-    "assets_loader.h",
     "audio_delegate.h",
-    "browser_ui_interface.h",
     "content_input_delegate.cc",
     "content_input_delegate.h",
-    "cpu_surface_provider.cc",
-    "cpu_surface_provider.h",
     "databinding/binding.h",
     "databinding/binding_base.h",
     "databinding/vector_binding.h",
@@ -73,10 +79,12 @@ static_library("vr_common") {
     "elements/omnibox_text_field.h",
     "elements/oval.cc",
     "elements/oval.h",
-    "elements/prompt.cc",
-    "elements/prompt.h",
-    "elements/prompt_texture.cc",
-    "elements/prompt_texture.h",
+    "elements/paged_grid_layout.cc",
+    "elements/paged_grid_layout.h",
+    "elements/paged_scroll_view.cc",
+    "elements/paged_scroll_view.h",
+    "elements/platform_ui_element.cc",
+    "elements/platform_ui_element.h",
     "elements/rect.cc",
     "elements/rect.h",
     "elements/render_text_wrapper.cc",
@@ -89,12 +97,16 @@ static_library("vr_common") {
     "elements/reticle.h",
     "elements/scaled_depth_adjuster.cc",
     "elements/scaled_depth_adjuster.h",
+    "elements/scrollable_element.cc",
+    "elements/scrollable_element.h",
     "elements/shadow.cc",
     "elements/shadow.h",
     "elements/spinner.cc",
     "elements/spinner.h",
     "elements/text.cc",
     "elements/text.h",
+    "elements/text_button.cc",
+    "elements/text_button.h",
     "elements/text_input.cc",
     "elements/text_input.h",
     "elements/textured_element.cc",
@@ -119,88 +131,44 @@ static_library("vr_common") {
     "elements/vector_icon_button.h",
     "elements/viewport_aware_root.cc",
     "elements/viewport_aware_root.h",
-    "exit_vr_prompt_choice.h",
     "font_fallback.cc",
     "font_fallback.h",
-    "fps_meter.cc",
-    "fps_meter.h",
-    "ganesh_surface_provider.cc",
-    "ganesh_surface_provider.h",
-    "keyboard_delegate.h",
-    "keyboard_ui_interface.h",
-    "macros.h",
-    "metrics/metrics_helper.cc",
-    "metrics/metrics_helper.h",
-    "metrics/session_metrics_helper.cc",
-    "metrics/session_metrics_helper.h",
-    "mode.h",
-    "model/assets.cc",
-    "model/assets.h",
-    "model/camera_model.h",
-    "model/capturing_state_model.cc",
-    "model/capturing_state_model.h",
+    "frame_lifecycle.cc",
+    "frame_lifecycle.h",
     "model/color_scheme.cc",
     "model/color_scheme.h",
-    "model/controller_model.cc",
-    "model/controller_model.h",
-    "model/hosted_platform_ui.h",
     "model/modal_prompt_type.cc",
     "model/modal_prompt_type.h",
     "model/model.cc",
     "model/model.h",
-    "model/omnibox_suggestions.cc",
-    "model/omnibox_suggestions.h",
     "model/platform_toast.cc",
     "model/platform_toast.h",
-    "model/reticle_model.h",
-    "model/speech_recognition_model.h",
-    "model/text_input_info.cc",
-    "model/text_input_info.h",
-    "model/toolbar_state.cc",
-    "model/toolbar_state.h",
-    "model/ui_mode.h",
-    "model/web_vr_model.h",
-    "pose_util.cc",
-    "pose_util.h",
+    "model/tab_model.cc",
+    "model/tab_model.h",
     "renderers/base_quad_renderer.cc",
     "renderers/base_quad_renderer.h",
     "renderers/base_renderer.cc",
     "renderers/base_renderer.h",
     "renderers/external_textured_quad_renderer.cc",
     "renderers/external_textured_quad_renderer.h",
-    "renderers/gradient_quad_renderer.cc",
-    "renderers/gradient_quad_renderer.h",
+    "renderers/radial_gradient_quad_renderer.cc",
+    "renderers/radial_gradient_quad_renderer.h",
+    "renderers/texture_copy_renderer.cc",
+    "renderers/texture_copy_renderer.h",
     "renderers/textured_quad_renderer.cc",
     "renderers/textured_quad_renderer.h",
-    "renderers/web_vr_renderer.cc",
-    "renderers/web_vr_renderer.h",
-    "sample_queue.cc",
-    "sample_queue.h",
-    "service/vr_device_manager.cc",
-    "service/vr_device_manager.h",
-    "service/vr_display_host.cc",
-    "service/vr_display_host.h",
-    "service/vr_service_impl.cc",
-    "service/vr_service_impl.h",
-    "sliding_average.cc",
-    "sliding_average.h",
-    "sounds_manager_audio_delegate.cc",
-    "sounds_manager_audio_delegate.h",
-    "speech_recognizer.cc",
-    "speech_recognizer.h",
+    "renderers/transparent_quad_renderer.cc",
+    "renderers/transparent_quad_renderer.h",
+    "sequence.cc",
+    "sequence.h",
+    "skia_surface_provider.h",
+    "skia_surface_provider_factory.h",
     "target_property.cc",
     "target_property.h",
-    "text_edit_action.cc",
-    "text_edit_action.h",
-    "text_input_delegate.cc",
-    "text_input_delegate.h",
-    "toolbar_helper.cc",
-    "toolbar_helper.h",
     "transition.cc",
     "transition.h",
     "ui.cc",
     "ui.h",
-    "ui_browser_interface.h",
     "ui_element_renderer.cc",
     "ui_element_renderer.h",
     "ui_input_manager.cc",
@@ -211,34 +179,110 @@ static_library("vr_common") {
     "ui_scene.h",
     "ui_scene_creator.cc",
     "ui_scene_creator.h",
-    "ui_unsupported_mode.h",
-    "vr_features.h",
-    "vr_gl_util.cc",
-    "vr_gl_util.h",
-  ]
-
-  public_deps = [
-    "//ui/gl",
+    "vr_ui_export.h",
   ]
 
   deps = [
-    ":vr_build_features",
+    ":vr_base",
     "//base",
     "//cc/animation",
-    "//cc/paint",
     "//chrome/app:generated_resources",
     "//chrome/browser/vr/vector_icons",
     "//chrome/common:constants",
-    "//components/omnibox/browser",
-    "//components/security_state/core",
-    "//components/strings",
-    "//components/toolbar",
-    "//components/ukm/content",
+    "//components/toolbar:vector_icons",
     "//components/url_formatter",
     "//components/vector_icons",
+    "//media",
+    "//net",
+    "//skia",
+  ]
+
+  defines = [
+    "VR_IMPLEMENTATION",
+    "VR_UI_IMPLEMENTATION",
+  ]
+
+  if (use_command_buffer) {
+    sources += [
+      "cmd_buffer_surface_provider.cc",
+      "cmd_buffer_surface_provider.h",
+      "skia_surface_provider_factory_cmd_buffer.cc",
+    ]
+    deps += [
+      "//gpu/command_buffer/client:gles2_implementation",
+      "//gpu/skia_bindings",
+    ]
+  } else {
+    sources += [
+      "native_gl_surface_provider.cc",
+      "native_gl_surface_provider.h",
+      "skia_surface_provider_factory_native_gl.cc",
+    ]
+    deps += [ "//ui/gl/init" ]
+  }
+}
+
+component("vr_common") {
+  sources = [
+    "base_scheduler_delegate.cc",
+    "base_scheduler_delegate.h",
+    "browser_renderer.cc",
+    "browser_renderer.h",
+    "browser_renderer_browser_interface.h",
+    "fps_meter.cc",
+    "fps_meter.h",
+    "frame_type.h",
+    "gesture_detector.cc",
+    "gesture_detector.h",
+    "graphics_delegate.h",
+    "input_delegate.h",
+    "input_delegate_for_testing.cc",
+    "input_delegate_for_testing.h",
+    "platform_controller.h",
+    "sample_queue.cc",
+    "sample_queue.h",
+    "scheduler_browser_renderer_interface.h",
+    "scheduler_delegate.h",
+    "service/browser_xr_runtime.cc",
+    "service/browser_xr_runtime.h",
+    "service/vr_service_impl.cc",
+    "service/vr_service_impl.h",
+    "service/xr_device_impl.cc",
+    "service/xr_device_impl.h",
+    "service/xr_runtime_manager.cc",
+    "service/xr_runtime_manager.h",
+    "sliding_average.cc",
+    "sliding_average.h",
+    "sounds_manager_audio_delegate.cc",
+    "sounds_manager_audio_delegate.h",
+    "toolbar_helper.cc",
+    "toolbar_helper.h",
+    "ui_factory.cc",
+    "ui_factory.h",
+    "vr_web_contents_observer.cc",
+    "vr_web_contents_observer.h",
+  ]
+
+  public_deps = [
+    ":vr_base",
+  ]
+
+  deps = [
+    ":vr_ui",
+    "//base",
+    "//cc/animation",
+    "//cc/paint",
+    "//chrome/browser/vr/vector_icons",
+    "//chrome/common:constants",
+    "//components/omnibox/browser",
+    "//components/rappor/public:public",
+    "//components/toolbar",
+    "//components/toolbar:vector_icons",
+    "//components/ukm/content",
+    "//components/vector_icons",
     "//content/public/browser",
-    "//content/public/common",
     "//device/vr",
+    "//device/vr/buildflags:buildflags",
     "//device/vr/public/mojom",
     "//media",
     "//net",
@@ -246,13 +290,157 @@ static_library("vr_common") {
     "//skia",
     "//ui/base",
     "//ui/display",
-    "//ui/gl/init",
   ]
+
+  if (is_win) {
+    sources += [
+      "service/isolated_device_provider.cc",
+      "service/isolated_device_provider.h",
+      "win/simple_overlay_renderer_win.cc",
+      "win/simple_overlay_renderer_win.h",
+      "win/vr_browser_renderer_thread_win.cc",
+      "win/vr_browser_renderer_thread_win.h",
+      "win/vr_renderloop_host_win.cc",
+      "win/vr_renderloop_host_win.h",
+    ]
+
+    deps += [ "//services/ws/public/cpp/gpu" ]
+  }
+
+  defines = [
+    "VR_IMPLEMENTATION",
+    "VR_UI_IMPLEMENTATION",
+  ]
+
+  if (!use_command_buffer) {
+    sources += [
+      "base_graphics_delegate.cc",
+      "base_graphics_delegate.h",
+    ]
+    deps += [ "//ui/gl/init" ]
+  }
+}
+
+# vr_base contains common dependencies of vr_common and vr_ui. It exists because
+# vr_ui must not depend on vr_common.
+source_set("vr_base") {
+  sources = [
+    "assets_component_update_status.h",
+    "assets_load_status.h",
+    "assets_loader.cc",
+    "assets_loader.h",
+    "browser_ui_interface.h",
+    "exit_vr_prompt_choice.h",
+    "fov_rectangle.h",
+    "gl_bindings.h",
+    "gl_texture_location.h",
+    "input_event.cc",
+    "input_event.h",
+    "keyboard_delegate.h",
+    "keyboard_delegate_for_testing.cc",
+    "keyboard_delegate_for_testing.h",
+    "keyboard_ui_interface.h",
+    "macros.h",
+    "metrics/metrics_helper.cc",
+    "metrics/metrics_helper.h",
+    "metrics/session_metrics_helper.cc",
+    "metrics/session_metrics_helper.h",
+    "mode.h",
+    "model/assets.cc",
+    "model/assets.h",
+    "model/camera_model.h",
+    "model/capturing_state_model.h",
+    "model/controller_model.cc",
+    "model/controller_model.h",
+    "model/hosted_platform_ui.h",
+    "model/omnibox_suggestions.cc",
+    "model/omnibox_suggestions.h",
+    "model/reticle_model.h",
+    "model/speech_recognition_model.h",
+    "model/text_input_info.cc",
+    "model/text_input_info.h",
+    "model/toolbar_state.cc",
+    "model/toolbar_state.h",
+    "model/ui_mode.h",
+    "model/web_vr_model.h",
+    "platform_input_handler.h",
+    "platform_ui_input_delegate.cc",
+    "platform_ui_input_delegate.h",
+    "pose_util.cc",
+    "pose_util.h",
+    "render_info.h",
+    "scheduler_ui_interface.h",
+    "speech_recognizer.cc",
+    "speech_recognizer.h",
+    "text_edit_action.cc",
+    "text_edit_action.h",
+    "text_input_delegate.cc",
+    "text_input_delegate.h",
+    "ui_browser_interface.h",
+    "ui_initial_state.cc",
+    "ui_initial_state.h",
+    "ui_interface.h",
+    "ui_support.cc",
+    "ui_support.h",
+    "ui_test_input.h",
+    "ui_unsupported_mode.h",
+    "vr_export.h",
+    "vr_geometry_util.cc",
+    "vr_geometry_util.h",
+    "vr_gl_util.cc",
+    "vr_gl_util.h",
+  ]
+
+  defines = [
+    "VR_IMPLEMENTATION",
+    "VR_UI_IMPLEMENTATION",
+  ]
+
+  public_deps = [
+    ":vr_build_features",
+    ":vr_gl_bindings",
+    "//components/omnibox/browser",
+    "//components/strings:components_strings_grit",
+    "//content/public/common",
+    "//ui/base",
+  ]
+
+  deps = [
+    "//base",
+    "//chrome/app:generated_resources",
+    "//components/rappor:rappor",
+    "//components/security_state/core",
+    "//components/ukm/content",
+    "//components/url_formatter",
+    "//content/public/browser:browser",
+    "//media",
+    "//net",
+    "//services/metrics/public/cpp:ukm_builders",
+    "//skia",
+  ]
+}
+
+source_set("vr_gl_bindings") {
+  sources = [
+    "gl_bindings.h",
+  ]
+  public_configs = [ ":vr_gl_mode" ]
+  if (use_command_buffer) {
+    public_deps = [
+      "//gpu/command_buffer/client:gles2_c_lib",
+    ]
+  } else {
+    public_deps = [
+      "//ui/gl",
+    ]
+  }
 }
 
 test("vr_common_unittests") {
   sources = [
     "animation_unittest.cc",
+    "base_scheduler_delegate_unittest.cc",
+    "browser_renderer_unittest.cc",
     "databinding/binding_unittest.cc",
     "databinding/vector_binding_unittest.cc",
     "elements/button_unittest.cc",
@@ -262,11 +450,12 @@ test("vr_common_unittests") {
     "elements/omnibox_formatting_unittest.cc",
     "elements/omnibox_text_field_unittest.cc",
     "elements/oval_unittest.cc",
-    "elements/prompt_unittest.cc",
+    "elements/paged_grid_layout_unittest.cc",
     "elements/rect_unittest.cc",
     "elements/repositioner_unittest.cc",
     "elements/resizer_unittest.cc",
     "elements/scaled_depth_adjuster_unittest.cc",
+    "elements/scrollable_element_unittest.cc",
     "elements/shadow_unittest.cc",
     "elements/spinner_unittest.cc",
     "elements/text_input_unittest.cc",
@@ -279,13 +468,12 @@ test("vr_common_unittests") {
     "elements/vector_icon_unittest.cc",
     "elements/viewport_aware_root_unittest.cc",
     "fps_meter_unittest.cc",
+    "gesture_detector_unittest.cc",
     "model/text_input_info_unittest.cc",
-    "pose_util_unittest.cc",
-    "service/vr_device_manager_unittest.cc",
+    "platform_ui_input_delegate_unittest.cc",
+    "service/xr_runtime_manager_unittest.cc",
     "sliding_average_unittest.cc",
     "speech_recognizer_unittest.cc",
-    "test/fake_ui_element_renderer.cc",
-    "test/fake_ui_element_renderer.h",
     "test/paths.cc",
     "test/paths.h",
     "test/run_all_unittests.cc",
@@ -294,7 +482,7 @@ test("vr_common_unittests") {
     "ui_input_manager_unittest.cc",
     "ui_scene_unittest.cc",
     "ui_unittest.cc",
-    "vr_gl_util_unittest.cc",
+    "vr_geometry_util_unittest.cc",
   ]
 
   # TODO(mthiesse, crbug.com/769373): The dependency on device/vr:fakes requires
@@ -304,8 +492,10 @@ test("vr_common_unittests") {
 
   deps = [
     ":vr_test_support",
-    "//mojo/common",
+    "//components/url_formatter",
+    "//components/vector_icons",
     "//mojo/public/cpp/bindings",
+    "//services/network:test_support",
     "//testing/gmock",
     "//ui/gfx/geometry",
   ]
@@ -348,11 +538,8 @@ test("vr_common_perftests") {
   }
 
   # Needed for isolate script to execute
-  data = [
-    "//testing/scripts/common.py",
-    "//testing/xvfb.py",
-    "//testing/scripts/run_gtest_perf_test.py",
-    "//tools/perf/generate_legacy_perf_dashboard_json.py",
+  data_deps = [
+    "//testing:run_perf_test",
   ]
 }
 
@@ -362,6 +549,7 @@ source_set("vr_test_support") {
   sources = [
     "test/animation_utils.cc",
     "test/animation_utils.h",
+    "test/constants.cc",
     "test/constants.h",
     "test/mock_browser_ui_interface.cc",
     "test/mock_browser_ui_interface.h",
@@ -382,12 +570,14 @@ source_set("vr_test_support") {
   public_deps = [
     ":vr_common",
     ":vr_test_pak",
+    ":vr_ui",
     "//base/test:test_support",
     "//cc:test_support",
+    "//components/omnibox/browser:browser",
     "//components/security_state/core",
     "//components/toolbar:vector_icons",
     "//content/test:test_support",
-    "//mojo/edk",
+    "//mojo/core/embedder",
     "//skia",
     "//testing/gtest",
     "//ui/accessibility:ax_enums_mojo",
@@ -409,16 +599,34 @@ source_set("vr_gl_test_support") {
   testonly = true
 
   sources = [
-    "test/gl_test_environment.cc",
     "test/gl_test_environment.h",
     "test/gl_test_environment_unittest.cc",
+    "test/vr_gl_test_suite.cc",
+    "test/vr_gl_test_suite.h",
   ]
 
   public_deps = [
+    ":vr_gl_bindings",
     "//base/test:test_support",
     "//skia",
-    "//ui/gl",
+    "//testing/gtest",
   ]
+
+  deps = [
+    ":vr_test_support",
+    "//ui/gl:test_support",
+  ]
+
+  if (use_command_buffer) {
+    sources += [ "test/gl_test_environment_cmd_buffer.cc" ]
+    deps += [
+      "//gpu:gpu",
+      "//gpu/command_buffer/client:gles2_implementation",
+      "//gpu/ipc:gl_in_process_context",
+    ]
+  } else {
+    sources += [ "test/gl_test_environment_native_gl.cc" ]
+  }
 }
 
 repack("vr_test_pak") {

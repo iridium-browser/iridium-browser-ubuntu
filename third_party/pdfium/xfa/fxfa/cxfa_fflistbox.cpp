@@ -10,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include "third_party/base/ptr_util.h"
 #include "xfa/fwl/cfwl_listbox.h"
 #include "xfa/fwl/cfwl_notedriver.h"
 #include "xfa/fwl/cfwl_widget.h"
@@ -153,13 +154,6 @@ void CXFA_FFListBox::OnSelectChanged(CFWL_Widget* pWidget) {
   eParam.m_eType = XFA_EVENT_Change;
   eParam.m_pTarget = m_pNode.Get();
   eParam.m_wsPrevText = m_pNode->GetValue(XFA_VALUEPICTURE_Raw);
-
-  auto* pListBox = ToListBox(m_pNormalWidget.get());
-  int32_t iSels = pListBox->CountSelItems();
-  if (iSels > 0) {
-    CFWL_ListItem* item = pListBox->GetSelItem(0);
-    eParam.m_wsNewText = item ? item->GetText() : L"";
-  }
   m_pNode->ProcessEvent(GetDocView(), XFA_AttributeEnum::Change, &eParam);
 }
 

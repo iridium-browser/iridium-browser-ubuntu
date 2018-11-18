@@ -19,6 +19,7 @@
 #include "components/autofill/core/browser/autofill_client.h"
 #include "components/autofill/core/browser/credit_card.h"
 #include "components/autofill/core/browser/payments/full_card_request.h"
+#include "components/autofill/core/browser/personal_data_manager.h"
 #include "components/autofill/core/browser/validation.h"
 #include "components/autofill/core/common/autofill_clock.h"
 #include "components/grit/components_scaled_resources.h"
@@ -26,6 +27,8 @@
 #include "components/payments/core/payment_request_delegate.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/vector_icons/vector_icons.h"
+#include "content/public/browser/browser_context.h"
+#include "content/public/browser/storage_partition.h"
 #include "content/public/browser/web_contents.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -56,15 +59,17 @@ CvcUnmaskViewController::CvcUnmaskViewController(
       credit_card_(credit_card),
       web_contents_(web_contents),
       payments_client_(
-          Profile::FromBrowserContext(web_contents_->GetBrowserContext())
-              ->GetRequestContext(),
+          content::BrowserContext::GetDefaultStoragePartition(
+              web_contents_->GetBrowserContext())
+              ->GetURLLoaderFactoryForBrowserProcess(),
           Profile::FromBrowserContext(web_contents_->GetBrowserContext())
               ->GetPrefs(),
           IdentityManagerFactory::GetForProfile(
               Profile::FromBrowserContext(web_contents_->GetBrowserContext())
                   ->GetOriginalProfile()),
-          /*unmask_delegate=*/this,
-          /*save_delegate=*/nullptr),
+          state->GetPersonalDataManager(),
+          Profile::FromBrowserContext(web_contents_->GetBrowserContext())
+              ->IsOffTheRecord()),
       full_card_request_(this,
                          &payments_client_,
                          state->GetPersonalDataManager()),
@@ -77,15 +82,9 @@ CvcUnmaskViewController::CvcUnmaskViewController(
 
 CvcUnmaskViewController::~CvcUnmaskViewController() {}
 
-void CvcUnmaskViewController::OnDidGetRealPan(
-    autofill::AutofillClient::PaymentsRpcResult result,
-    const std::string& real_pan) {
-  full_card_request_.OnDidGetRealPan(result, real_pan);
-}
-
 void CvcUnmaskViewController::LoadRiskData(
-    const base::Callback<void(const std::string&)>& callback) {
-  autofill::LoadRiskData(0, web_contents_, callback);
+    base::OnceCallback<void(const std::string&)> callback) {
+  autofill::LoadRiskData(0, web_contents_, std::move(callback));
 }
 
 void CvcUnmaskViewController::ShowUnmaskPrompt(
@@ -141,10 +140,10 @@ void CvcUnmaskViewController::FillContentView(views::View* content_view) {
 
   views::ColumnSet* instructions_columns = layout->AddColumnSet(0);
   instructions_columns->AddColumn(views::GridLayout::Alignment::FILL,
-                                  views::GridLayout::Alignment::LEADING, 1,
+                                  views::GridLayout::Alignment::LEADING, 1.0,
                                   views::GridLayout::SizeType::USE_PREF, 0, 0);
 
-  layout->StartRow(0, 0);
+  layout->StartRow(views::GridLayout::kFixedSize, 0);
   // The prompt for server cards should reference Google Payments, whereas the
   // prompt for local cards should not.
   std::unique_ptr<views::Label> instructions =
@@ -157,7 +156,7 @@ void CvcUnmaskViewController::FillContentView(views::View* content_view) {
   layout->AddView(instructions.release());
 
   // Space between the instructions and the CVC field.
-  layout->AddPaddingRow(0, 16);
+  layout->AddPaddingRow(views::GridLayout::kFixedSize, 16);
 
   views::ColumnSet* cvc_field_columns = layout->AddColumnSet(1);
   constexpr int kPadding = 16;
@@ -167,26 +166,32 @@ void CvcUnmaskViewController::FillContentView(views::View* content_view) {
   if (requesting_expiration) {
     // Month dropdown column
     cvc_field_columns->AddColumn(views::GridLayout::Alignment::LEADING,
-                                 views::GridLayout::Alignment::BASELINE, 0,
+                                 views::GridLayout::Alignment::BASELINE,
+                                 views::GridLayout::kFixedSize,
                                  views::GridLayout::SizeType::USE_PREF, 0, 0);
-    cvc_field_columns->AddPaddingColumn(0, kPadding);
+    cvc_field_columns->AddPaddingColumn(views::GridLayout::kFixedSize,
+                                        kPadding);
     // Year dropdown column
     cvc_field_columns->AddColumn(views::GridLayout::Alignment::LEADING,
-                                 views::GridLayout::Alignment::BASELINE, 0,
+                                 views::GridLayout::Alignment::BASELINE,
+                                 views::GridLayout::kFixedSize,
                                  views::GridLayout::SizeType::USE_PREF, 0, 0);
-    cvc_field_columns->AddPaddingColumn(0, kPadding);
+    cvc_field_columns->AddPaddingColumn(views::GridLayout::kFixedSize,
+                                        kPadding);
   }
   // CVC image
   cvc_field_columns->AddColumn(views::GridLayout::Alignment::LEADING,
-                               views::GridLayout::Alignment::BASELINE, 0,
+                               views::GridLayout::Alignment::BASELINE,
+                               views::GridLayout::kFixedSize,
                                views::GridLayout::SizeType::FIXED, 32, 32);
-  cvc_field_columns->AddPaddingColumn(0, kPadding);
+  cvc_field_columns->AddPaddingColumn(views::GridLayout::kFixedSize, kPadding);
   // CVC field
   cvc_field_columns->AddColumn(views::GridLayout::Alignment::FILL,
-                               views::GridLayout::Alignment::BASELINE, 0,
+                               views::GridLayout::Alignment::BASELINE,
+                               views::GridLayout::kFixedSize,
                                views::GridLayout::SizeType::FIXED, 80, 80);
 
-  layout->StartRow(0, 1);
+  layout->StartRow(views::GridLayout::kFixedSize, 1);
   if (requesting_expiration) {
     auto month = std::make_unique<views::Combobox>(&month_combobox_model_);
     month->set_listener(this);
@@ -224,20 +229,21 @@ void CvcUnmaskViewController::FillContentView(views::View* content_view) {
   layout->AddView(cvc_field.release());
 
   // Space between the CVC field and the error field.
-  layout->AddPaddingRow(0, 16);
+  layout->AddPaddingRow(views::GridLayout::kFixedSize, 16);
 
   views::ColumnSet* error_columns = layout->AddColumnSet(2);
   // A column for the error icon
   error_columns->AddColumn(views::GridLayout::Alignment::LEADING,
-                           views::GridLayout::Alignment::LEADING, 0,
+                           views::GridLayout::Alignment::LEADING,
+                           views::GridLayout::kFixedSize,
                            views::GridLayout::SizeType::USE_PREF, 0, 0);
-  error_columns->AddPaddingColumn(0, kPadding);
+  error_columns->AddPaddingColumn(views::GridLayout::kFixedSize, kPadding);
   // A column for the error label
   error_columns->AddColumn(views::GridLayout::Alignment::LEADING,
-                           views::GridLayout::Alignment::LEADING, 1,
+                           views::GridLayout::Alignment::LEADING, 1.0,
                            views::GridLayout::SizeType::USE_PREF, 0, 0);
 
-  layout->StartRow(0, 2);
+  layout->StartRow(views::GridLayout::kFixedSize, 2);
   std::unique_ptr<views::ImageView> error_icon =
       std::make_unique<views::ImageView>();
   error_icon->set_id(static_cast<int>(DialogViewID::CVC_ERROR_ICON));

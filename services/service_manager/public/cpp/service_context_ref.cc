@@ -5,7 +5,6 @@
 #include "services/service_manager/public/cpp/service_context_ref.h"
 
 #include "base/bind.h"
-#include "base/message_loop/message_loop.h"
 #include "base/sequence_checker.h"
 #include "base/sequenced_task_runner.h"
 #include "base/threading/sequenced_task_runner_handle.h"
@@ -71,8 +70,15 @@ std::unique_ptr<ServiceContextRef> ServiceContextRefFactory::CreateRef() {
       weak_factory_.GetWeakPtr(), base::SequencedTaskRunnerHandle::Get());
 }
 
+void ServiceContextRefFactory::SetRefAddedCallback(
+    const base::RepeatingClosure& ref_added_closure) {
+  ref_added_closure_ = ref_added_closure;
+}
+
 void ServiceContextRefFactory::AddRef() {
   ++ref_count_;
+  if (ref_added_closure_)
+    ref_added_closure_.Run();
 }
 
 void ServiceContextRefFactory::Release() {

@@ -275,7 +275,8 @@ Persistence.Persistence = class extends Common.Object {
    * @param {!Workspace.UISourceCode} to
    */
   _moveBreakpoints(from, to) {
-    const breakpoints = this._breakpointManager.breakpointsForUISourceCode(from);
+    const breakpoints = this._breakpointManager.breakpointLocationsForUISourceCode(from).map(
+        breakpointLocation => breakpointLocation.breakpoint);
     for (const breakpoint of breakpoints) {
       breakpoint.remove(false /* keepInStorage */);
       this._breakpointManager.setBreakpoint(
@@ -339,6 +340,15 @@ Persistence.Persistence = class extends Common.Object {
   fileSystem(uiSourceCode) {
     const binding = this.binding(uiSourceCode);
     return binding ? binding.fileSystem : null;
+  }
+
+  /**
+   * @param {!Workspace.UISourceCode} uiSourceCode
+   * @return {?Workspace.UISourceCode}
+   */
+  network(uiSourceCode) {
+    const binding = this.binding(uiSourceCode);
+    return binding ? binding.network : null;
   }
 
   /**

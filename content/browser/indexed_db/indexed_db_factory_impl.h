@@ -32,6 +32,8 @@ class IndexedDBContextImpl;
 CONTENT_EXPORT extern const base::Feature kIDBTombstoneStatistics;
 CONTENT_EXPORT extern const base::Feature kIDBTombstoneDeletion;
 
+constexpr const char kIDBCloseImmediatelySwitch[] = "idb-close-immediately";
+
 class CONTENT_EXPORT IndexedDBFactoryImpl : public IndexedDBFactory {
  public:
   // Maximum time interval between runs of the IndexedDBSweeper. Sweeping only
@@ -53,18 +55,14 @@ class CONTENT_EXPORT IndexedDBFactoryImpl : public IndexedDBFactory {
 
   void GetDatabaseNames(scoped_refptr<IndexedDBCallbacks> callbacks,
                         const url::Origin& origin,
-                        const base::FilePath& data_directory,
-                        scoped_refptr<net::URLRequestContextGetter>
-                            request_context_getter) override;
+                        const base::FilePath& data_directory) override;
   void Open(const base::string16& name,
             std::unique_ptr<IndexedDBPendingConnection> connection,
-            scoped_refptr<net::URLRequestContextGetter> request_context_getter,
             const url::Origin& origin,
             const base::FilePath& data_directory) override;
 
   void DeleteDatabase(
       const base::string16& name,
-      scoped_refptr<net::URLRequestContextGetter> request_context_getter,
       scoped_refptr<IndexedDBCallbacks> callbacks,
       const url::Origin& origin,
       const base::FilePath& data_directory,
@@ -84,7 +82,11 @@ class CONTENT_EXPORT IndexedDBFactoryImpl : public IndexedDBFactory {
 
   OriginDBs GetOpenDatabasesForOrigin(const url::Origin& origin) const override;
 
-  void ForceClose(const url::Origin& origin) override;
+  void ForceClose(const url::Origin& origin,
+                  bool delete_in_memory_store) override;
+  void ForceSchemaDowngrade(const url::Origin& origin) override;
+  V2SchemaCorruptionStatus HasV2SchemaCorruption(
+      const url::Origin& origin) override;
 
   // Called by the IndexedDBContext destructor so the factory can do cleanup.
   void ContextDestroyed() override;
@@ -107,13 +109,16 @@ class CONTENT_EXPORT IndexedDBFactoryImpl : public IndexedDBFactory {
       const base::string16& database_name,
       const base::string16& object_store_name) override;
 
+  int64_t GetInMemoryDBSize(const url::Origin& origin) const override;
+
+  base::Time GetLastModified(const url::Origin& origin) const override;
+
  protected:
   ~IndexedDBFactoryImpl() override;
 
   scoped_refptr<IndexedDBBackingStore> OpenBackingStore(
       const url::Origin& origin,
       const base::FilePath& data_directory,
-      scoped_refptr<net::URLRequestContextGetter> request_context_getter,
       IndexedDBDataLossInfo* data_loss_info,
       bool* disk_full,
       leveldb::Status* s) override;
@@ -121,7 +126,6 @@ class CONTENT_EXPORT IndexedDBFactoryImpl : public IndexedDBFactory {
   scoped_refptr<IndexedDBBackingStore> OpenBackingStoreHelper(
       const url::Origin& origin,
       const base::FilePath& data_directory,
-      scoped_refptr<net::URLRequestContextGetter> request_context_getter,
       IndexedDBDataLossInfo* data_loss_info,
       bool* disk_full,
       bool first_time,
@@ -137,6 +141,8 @@ class CONTENT_EXPORT IndexedDBFactoryImpl : public IndexedDBFactory {
   FRIEND_TEST_ALL_PREFIXES(IndexedDBFactoryTest,
                            BackingStoreReleaseDelayedOnClose);
   FRIEND_TEST_ALL_PREFIXES(IndexedDBFactoryTest, BackingStoreRunPreCloseTasks);
+  FRIEND_TEST_ALL_PREFIXES(IndexedDBFactoryTest,
+                           BackingStoreCloseImmediatelySwitch);
   FRIEND_TEST_ALL_PREFIXES(IndexedDBFactoryTest, BackingStoreNoSweeping);
   FRIEND_TEST_ALL_PREFIXES(IndexedDBFactoryTest, DatabaseFailedOpen);
   FRIEND_TEST_ALL_PREFIXES(IndexedDBFactoryTest,
@@ -172,7 +178,10 @@ class CONTENT_EXPORT IndexedDBFactoryImpl : public IndexedDBFactory {
   std::map<url::Origin, scoped_refptr<IndexedDBBackingStore>>
       backing_store_map_;
 
-  std::set<scoped_refptr<IndexedDBBackingStore> > session_only_backing_stores_;
+  // In-memory (incognito) backing stores should live as long as the
+  // StoragePartition which owns the IndexedDBContext which owns this
+  // IndexedDBFactory.
+  std::set<scoped_refptr<IndexedDBBackingStore>> in_memory_backing_stores_;
   std::map<url::Origin, scoped_refptr<IndexedDBBackingStore>>
       backing_stores_with_active_blobs_;
   std::set<url::Origin> backends_opened_since_boot_;

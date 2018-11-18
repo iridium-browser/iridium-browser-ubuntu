@@ -18,7 +18,6 @@
 #include "base/trace_event/trace_event.h"
 #include "media/audio/audio_device_description.h"
 #include "media/audio/audio_features.h"
-#include "media/audio/win/audio_manager_win.h"
 #include "media/audio/win/avrt_wrapper_win.h"
 #include "media/audio/win/core_audio_util_win.h"
 #include "media/base/audio_block_fifo.h"
@@ -83,11 +82,13 @@ WASAPIAudioInputStream::WASAPIAudioInputStream(
   bool avrt_init = avrt::Initialize();
   DCHECK(avrt_init) << "Failed to load the Avrt.dll";
 
+  const SampleFormat kSampleFormat = kSampleFormatS16;
+
   // Set up the desired output format specified by the client.
   output_format_.wFormatTag = WAVE_FORMAT_PCM;
   output_format_.nChannels = params.channels();
   output_format_.nSamplesPerSec = params.sample_rate();
-  output_format_.wBitsPerSample = params.bits_per_sample();
+  output_format_.wBitsPerSample = SampleFormatToBitsPerChannel(kSampleFormat);
   output_format_.nBlockAlign =
       (output_format_.wBitsPerSample / 8) * output_format_.nChannels;
   output_format_.nAvgBytesPerSec =
@@ -99,13 +100,13 @@ WASAPIAudioInputStream::WASAPIAudioInputStream(
   input_format_ = output_format_;
 
   // Size in bytes of each audio frame.
-  frame_size_ = input_format_.nBlockAlign;
+  frame_size_bytes_ = input_format_.nBlockAlign;
 
   // Store size of audio packets which we expect to get from the audio
   // endpoint device in each capture event.
-  packet_size_frames_ = params.GetBytesPerBuffer() / input_format_.nBlockAlign;
-  packet_size_bytes_ = params.GetBytesPerBuffer();
-  DVLOG(1) << "Number of bytes per audio frame  : " << frame_size_;
+  packet_size_bytes_ = params.GetBytesPerBuffer(kSampleFormat);
+  packet_size_frames_ = packet_size_bytes_ / input_format_.nBlockAlign;
+  DVLOG(1) << "Number of bytes per audio frame  : " << frame_size_bytes_;
   DVLOG(1) << "Number of audio frames per packet: " << packet_size_frames_;
 
   // All events are auto-reset events and non-signaled initially.
@@ -363,6 +364,11 @@ bool WASAPIAudioInputStream::IsMuted() {
   return is_muted != FALSE;
 }
 
+void WASAPIAudioInputStream::SetOutputDeviceForAec(
+    const std::string& output_device_id) {
+  // Not supported. Do nothing.
+}
+
 void WASAPIAudioInputStream::Run() {
   ScopedCOMInitializer com_init(ScopedCOMInitializer::kMTA);
 
@@ -392,8 +398,8 @@ void WASAPIAudioInputStream::Run() {
   // be able to buffer up data in cases where a conversion requires two audio
   // buffers (and we need to be able to write to the third one).
   size_t capture_buffer_size =
-      std::max(2 * endpoint_buffer_size_frames_ * frame_size_,
-               2 * packet_size_frames_ * frame_size_);
+      std::max(2 * endpoint_buffer_size_frames_ * frame_size_bytes_,
+               2 * packet_size_frames_ * frame_size_bytes_);
   int buffers_required = capture_buffer_size / packet_size_bytes_;
   if (converter_ && imperfect_buffer_size_conversion_)
     ++buffers_required;
@@ -444,13 +450,10 @@ void WASAPIAudioInputStream::Run() {
 }
 
 void WASAPIAudioInputStream::PullCaptureDataAndPushToSink() {
-  TRACE_EVENT1("audio", "WASAPIAudioInputStream::Run_0", "sample rate",
-               input_format_.nSamplesPerSec);
+  TRACE_EVENT1("audio", "WASAPIAudioInputStream::PullCaptureDataAndPushToSink",
+               "sample rate", input_format_.nSamplesPerSec);
 
-  Microsoft::WRL::ComPtr<IAudioClock> audio_clock;
-  audio_client_->GetService(IID_PPV_ARGS(&audio_clock));
-  if (!audio_clock)
-    LOG(WARNING) << "IAudioClock unavailable, capture times may be inaccurate.";
+  UINT64 last_device_position = 0;
 
   // Pull data from the capture endpoint buffer until it's empty or an error
   // occurs.
@@ -475,12 +478,6 @@ void WASAPIAudioInputStream::PullCaptureDataAndPushToSink() {
     if (hr == AUDCLNT_S_BUFFER_EMPTY)
       break;
 
-    ReportDelayStatsAndUpdateGlitchCount(
-        num_frames_to_read, flags & AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY,
-        device_position,
-        base::TimeTicks() +
-            base::TimeDelta::FromMicroseconds(capture_time_100ns / 10.0));
-
     // TODO(grunell): Should we handle different errors explicitly? Perhaps exit
     // by setting |error = true|. What are the assumptions here that makes us
     // rely on the next WaitForMultipleObjects? Do we expect the next wait to be
@@ -490,14 +487,32 @@ void WASAPIAudioInputStream::PullCaptureDataAndPushToSink() {
       break;
     }
 
+    // If the device position has changed, we assume this data belongs to a new
+    // chunk, so we report delay and glitch stats and update the last and next
+    // expected device positions.
+    // If the device position has not changed we assume this data belongs to the
+    // previous chunk, and only update the expected next device position.
+    if (device_position != last_device_position) {
+      ReportDelayStatsAndUpdateGlitchCount(
+          flags & AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY, device_position,
+          base::TimeTicks() +
+              CoreAudioUtil::ReferenceTimeToTimeDelta(capture_time_100ns));
+      last_device_position = device_position;
+      expected_next_device_position_ = device_position + num_frames_to_read;
+    } else {
+      expected_next_device_position_ += num_frames_to_read;
+    }
+
     // TODO(dalecurtis, olka, grunell): Is this ever false? If it is, should we
     // handle |flags & AUDCLNT_BUFFERFLAGS_TIMESTAMP_ERROR|?
-    if (audio_clock) {
+    if (audio_clock_) {
       // The reported timestamp from GetBuffer is not as reliable as the clock
       // from the client.  We've seen timestamps reported for USB audio devices,
       // be off by several days.  Furthermore we've seen them jump back in time
       // every 2 seconds or so.
-      audio_clock->GetPosition(&device_position, &capture_time_100ns);
+      // TODO(grunell): Using the audio clock as capture time for the currently
+      // processed buffer seems incorrect. http://crbug.com/825744.
+      audio_clock_->GetPosition(&device_position, &capture_time_100ns);
     }
 
     base::TimeTicks capture_time;
@@ -729,45 +744,7 @@ bool WASAPIAudioInputStream::DesiredFormatIsSupported(HRESULT* hr) {
                << "\nblock align: " << input_format_.nBlockAlign
                << "\navg bytes per sec: " << input_format_.nAvgBytesPerSec;
 
-      // Ideally, we want a 1:1 ratio between the buffers we get and the buffers
-      // we give to OnData so that each buffer we receive from the OS can be
-      // directly converted to a buffer that matches with what was asked for.
-      const double buffer_ratio = output_format_.nSamplesPerSec /
-                                  static_cast<double>(packet_size_frames_);
-      double new_frames_per_buffer =
-          input_format_.nSamplesPerSec / buffer_ratio;
-
-      const auto input_layout = GuessChannelLayout(input_format_.nChannels);
-      DCHECK_NE(CHANNEL_LAYOUT_UNSUPPORTED, input_layout);
-      const auto output_layout = GuessChannelLayout(output_format_.nChannels);
-      DCHECK_NE(CHANNEL_LAYOUT_UNSUPPORTED, output_layout);
-
-      const AudioParameters input(AudioParameters::AUDIO_PCM_LOW_LATENCY,
-                                  input_layout, input_format_.nSamplesPerSec,
-                                  input_format_.wBitsPerSample,
-                                  static_cast<int>(new_frames_per_buffer));
-
-      const AudioParameters output(AudioParameters::AUDIO_PCM_LOW_LATENCY,
-                                   output_layout, output_format_.nSamplesPerSec,
-                                   output_format_.wBitsPerSample,
-                                   packet_size_frames_);
-
-      converter_.reset(new AudioConverter(input, output, false));
-      converter_->AddInput(this);
-      converter_->PrimeWithSilence();
-      convert_bus_ = AudioBus::Create(output);
-
-      // Update our packet size assumptions based on the new format.
-      const auto new_bytes_per_buffer =
-          static_cast<int>(new_frames_per_buffer) * input_format_.nBlockAlign;
-      packet_size_frames_ = new_bytes_per_buffer / input_format_.nBlockAlign;
-      packet_size_bytes_ = new_bytes_per_buffer;
-      frame_size_ = input_format_.nBlockAlign;
-
-      imperfect_buffer_size_conversion_ =
-          std::modf(new_frames_per_buffer, &new_frames_per_buffer) != 0.0;
-      DVLOG_IF(1, imperfect_buffer_size_conversion_)
-          << "Audio capture data conversion: Need to inject fifo";
+      SetupConverterAndStoreFormatInfo();
 
       // Indicate that we're good to go with a close match.
       hresult = S_OK;
@@ -780,6 +757,45 @@ bool WASAPIAudioInputStream::DesiredFormatIsSupported(HRESULT* hr) {
   // if the desired format is supported.
   *hr = hresult;
   return (hresult == S_OK);
+}
+
+void WASAPIAudioInputStream::SetupConverterAndStoreFormatInfo() {
+  // Ideally, we want a 1:1 ratio between the buffers we get and the buffers
+  // we give to OnData so that each buffer we receive from the OS can be
+  // directly converted to a buffer that matches with what was asked for.
+  const double buffer_ratio =
+      output_format_.nSamplesPerSec / static_cast<double>(packet_size_frames_);
+  double new_frames_per_buffer = input_format_.nSamplesPerSec / buffer_ratio;
+
+  const auto input_layout = GuessChannelLayout(input_format_.nChannels);
+  DCHECK_NE(CHANNEL_LAYOUT_UNSUPPORTED, input_layout);
+  const auto output_layout = GuessChannelLayout(output_format_.nChannels);
+  DCHECK_NE(CHANNEL_LAYOUT_UNSUPPORTED, output_layout);
+
+  const AudioParameters input(AudioParameters::AUDIO_PCM_LOW_LATENCY,
+                              input_layout, input_format_.nSamplesPerSec,
+                              static_cast<int>(new_frames_per_buffer));
+
+  const AudioParameters output(AudioParameters::AUDIO_PCM_LOW_LATENCY,
+                               output_layout, output_format_.nSamplesPerSec,
+                               packet_size_frames_);
+
+  converter_.reset(new AudioConverter(input, output, false));
+  converter_->AddInput(this);
+  converter_->PrimeWithSilence();
+  convert_bus_ = AudioBus::Create(output);
+
+  // Update our packet size assumptions based on the new format.
+  const auto new_bytes_per_buffer =
+      static_cast<int>(new_frames_per_buffer) * input_format_.nBlockAlign;
+  packet_size_frames_ = new_bytes_per_buffer / input_format_.nBlockAlign;
+  packet_size_bytes_ = new_bytes_per_buffer;
+  frame_size_bytes_ = input_format_.nBlockAlign;
+
+  imperfect_buffer_size_conversion_ =
+      std::modf(new_frames_per_buffer, &new_frames_per_buffer) != 0.0;
+  DVLOG_IF(1, imperfect_buffer_size_conversion_)
+      << "Audio capture data conversion: Need to inject fifo";
 }
 
 HRESULT WASAPIAudioInputStream::InitializeAudioEngine() {
@@ -932,6 +948,10 @@ HRESULT WASAPIAudioInputStream::InitializeAudioEngine() {
   if (FAILED(hr))
     open_result_ = OPEN_RESULT_NO_AUDIO_VOLUME;
 
+  audio_client_->GetService(IID_PPV_ARGS(&audio_clock_));
+  if (!audio_clock_)
+    LOG(WARNING) << "IAudioClock unavailable, capture times may be inaccurate.";
+
   return hr;
 }
 
@@ -985,7 +1005,6 @@ double WASAPIAudioInputStream::ProvideInput(AudioBus* audio_bus,
 }
 
 void WASAPIAudioInputStream::ReportDelayStatsAndUpdateGlitchCount(
-    UINT32 frames_in_buffer,
     bool discontinuity_flagged,
     UINT64 device_position,
     base::TimeTicks capture_time) {
@@ -1019,17 +1038,16 @@ void WASAPIAudioInputStream::ReportDelayStatsAndUpdateGlitchCount(
       ++total_concurrent_glitch_and_discontinuities_;
     }
   }
-
-  expected_next_device_position_ = device_position + frames_in_buffer;
 }
 
 void WASAPIAudioInputStream::ReportAndResetGlitchStats() {
-  UMA_HISTOGRAM_COUNTS("Media.Audio.Capture.Glitches", total_glitches_);
-  UMA_HISTOGRAM_COUNTS("Media.Audio.Capture.Win.DevicePositionLessThanExpected",
-                       total_device_position_less_than_expected_);
-  UMA_HISTOGRAM_COUNTS("Media.Audio.Capture.Win.Discontinuities",
-                       total_discontinuities_);
-  UMA_HISTOGRAM_COUNTS(
+  UMA_HISTOGRAM_COUNTS_1M("Media.Audio.Capture.Glitches", total_glitches_);
+  UMA_HISTOGRAM_COUNTS_1M(
+      "Media.Audio.Capture.Win.DevicePositionLessThanExpected",
+      total_device_position_less_than_expected_);
+  UMA_HISTOGRAM_COUNTS_1M("Media.Audio.Capture.Win.Discontinuities",
+                          total_discontinuities_);
+  UMA_HISTOGRAM_COUNTS_1M(
       "Media.Audio.Capture.Win.ConcurrentGlitchAndDiscontinuities",
       total_concurrent_glitch_and_discontinuities_);
 

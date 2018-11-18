@@ -29,7 +29,8 @@ class CPWLComboBoxEditEmbeddertest : public EmbedderTest {
     m_page = LoadPage(0);
     ASSERT_TRUE(m_page);
 
-    m_pFormFillEnv = static_cast<CPDFSDK_FormFillEnvironment*>(form_handle());
+    m_pFormFillEnv =
+        CPDFSDKFormFillEnvironmentFromFPDFFormHandle(form_handle());
     CPDFSDK_AnnotIterator iter(m_pFormFillEnv->GetPageView(0),
                                CPDF_Annot::Subtype::WIDGET);
 
@@ -64,7 +65,6 @@ class CPWLComboBoxEditEmbeddertest : public EmbedderTest {
     CPWL_Wnd* pWindow =
         m_pFormFiller->GetPDFWindow(m_pFormFillEnv->GetPageView(0), false);
     ASSERT_TRUE(pWindow);
-    ASSERT_EQ("CPWL_ComboBox", pWindow->GetClassName());
     m_pComboBox = static_cast<CPWL_ComboBox*>(pWindow);
   }
 

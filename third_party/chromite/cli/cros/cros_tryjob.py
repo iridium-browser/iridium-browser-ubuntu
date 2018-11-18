@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright 2017 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -8,18 +9,21 @@ from __future__ import print_function
 
 import json
 import os
+import time
 
 from chromite.lib import constants
 from chromite.cli import command
 from chromite.lib import config_lib
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_logging as logging
-from chromite.lib import remote_try
+from chromite.lib import git
+from chromite.lib import request_build
 
 from chromite.cbuildbot import trybot_patch_pool
 
 
 REMOTE = 'remote'
+STAGING = 'staging'
 LOCAL = 'local'
 CBUILDBOT = 'cbuildbot'
 
@@ -65,7 +69,7 @@ def PrintKnownConfigs(site_config, production, build_config_fragments):
   """
   configs = ConfigsToPrint(site_config, production, build_config_fragments)
 
-  COLUMN_WIDTH = max(len(c.name) for c in configs) + 1
+  COLUMN_WIDTH = max([0] + [len(c.name) for c in configs]) + 1
   if production:
     print('Production configs:')
   else:
@@ -91,7 +95,7 @@ def CbuildbotArgs(options):
   """
   args = []
 
-  if options.where == REMOTE:
+  if options.where in (REMOTE, STAGING):
     if options.production:
       args.append('--buildbot')
     else:
@@ -107,16 +111,19 @@ def CbuildbotArgs(options):
       args.append('--debug')
 
   elif options.where == CBUILDBOT:
-    args.extend(('--buildbot', '--nobootstrap', '--noreexec',
+    args.extend(('--debug', '--nobootstrap', '--noreexec',
                  '--no-buildbot-tags'))
-    if not options.production:
-      args.append('--debug')
+    if options.production:
+      # This is expected to fail on workstations without an explicit --debug,
+      # or running 'branch-util'.
+      args.append('--buildbot')
 
   else:
     raise Exception('Unknown options.where: %s', options.where)
 
   if options.buildroot:
-    args.extend(('--buildroot', options.buildroot))
+    args.extend(('--buildroot', options.buildroot,
+                 '--git-cache-dir', options.git_cache_dir))
 
   if options.branch:
     args.extend(('-b', options.branch))
@@ -219,6 +226,10 @@ def DisplayLabel(site_config, options, build_config_name):
   Returns:
     String to use as the cbb_build_label value.
   """
+  # Production tryjobs always display as production tryjobs.
+  if options.production:
+    return config_lib.DISPLAY_LABEL_PRODUCTION_TRYJOB
+
   # Our site_config is only valid for the current branch. If the build
   # config is known and has an explicit display_label, use it.
   # to be 'master'.
@@ -227,43 +238,99 @@ def DisplayLabel(site_config, options, build_config_name):
       site_config[build_config_name].display_label):
     return site_config[build_config_name].display_label
 
-  # Fall back to defaults.
-  if options.production:
-    return config_lib.DISPLAY_LABEL_UNKNOWN_PRODUCTION
-
+  # Fall back to default.
   return config_lib.DISPLAY_LABEL_TRYJOB
 
 
-def RunRemote(site_config, options, patch_pool):
+def FindUserEmail(options):
+  """Decide which email address is submitting the job.
+
+  Args:
+    options: Parsed command line options for cros tryjob.
+
+  Returns:
+    Email address for the tryjob as a string.
+  """
+
+  if options.committer_email:
+    return options.committer_email
+
+  cwd = os.path.dirname(os.path.realpath(__file__))
+  return git.GetProjectUserEmail(cwd)
+
+
+def PushLocalPatches(local_patches, user_email, dryrun=False):
+  """Push local changes to a remote ref, and generate args to send.
+
+  Args:
+    local_patches: patch_pool.local_patches from verified patch_pool.
+    user_email: Unique id for user submitting this tryjob.
+    dryrun: Is this a dryrun? If so, don't really push.
+
+  Returns:
+    List of strings to pass to builder to include these patches.
+  """
+  manifest = git.ManifestCheckout.Cached(constants.SOURCE_ROOT)
+
+  current_time = str(int(time.time()))
+  ref_base = os.path.join('refs/tryjobs', user_email, current_time)
+
+  extra_args = []
+  for patch in local_patches:
+    # Isolate the name; if it's a tag or a remote, let through.
+    # Else if it's a branch, get the full branch name minus refs/heads.
+    local_branch = git.StripRefsHeads(patch.ref, False)
+    ref_final = os.path.join(ref_base, local_branch, patch.sha1)
+
+    checkout = patch.GetCheckout(manifest)
+    checkout.AssertPushable()
+    print('Uploading patch %s' % patch)
+    patch.Upload(checkout['push_url'], ref_final, dryrun=dryrun)
+
+    # TODO(rcui): Pass in the remote instead of tag. https://crbug.com/216095.
+    tag = constants.EXTERNAL_PATCH_TAG
+    if checkout['remote'] == config_lib.GetSiteParams().INTERNAL_REMOTE:
+      tag = constants.INTERNAL_PATCH_TAG
+
+    extra_args.append('--remote-patches=%s:%s:%s:%s:%s'
+                      % (patch.project, local_branch, ref_final,
+                         patch.tracking_branch, tag))
+
+  return extra_args
+
+
+def RunRemote(site_config, options, patch_pool, staging=False):
   """Schedule remote tryjobs."""
   logging.info('Scheduling remote tryjob(s): %s',
                ', '.join(options.build_configs))
 
+  luci_builder = None
+  if staging:
+    luci_builder = config_lib.LUCI_BUILDER_STAGING
+
+  user_email = FindUserEmail(options)
+
   # Figure out the cbuildbot command line to pass in.
   args = CbuildbotArgs(options)
+  args += PushLocalPatches(patch_pool.local_patches, user_email)
 
-  # Figure out the tryjob description.
-  description = options.remote_description
-  if description is None:
-    description = remote_try.DefaultDescription(
-        options.branch,
-        options.gerrit_patches+options.local_patches)
+  email_template = None
+  if options.debug:
+    email_template = 'default_debug'
 
   logging.info('Submitting tryjob...')
   results = []
   for build_config in options.build_configs:
-    tryjob = remote_try.RemoteTryJob(
-        build_configs=[build_config],
+    tryjob = request_build.RequestBuild(
+        build_config=build_config,
+        luci_builder=luci_builder,
         display_label=DisplayLabel(site_config, options, build_config),
-        remote_description=description,
         branch=options.branch,
-        pass_through_args=args,
-        local_patches=patch_pool.local_patches,
-        committer_email=options.committer_email,
-        swarming=True,
-        master_buildbucket_id='',  # TODO: Add new option to populate.
+        extra_args=args,
+        user_email=user_email,
+        email_template=email_template,
     )
-    results.extend(tryjob.Submit(dryrun=False))
+    results.append(tryjob.Submit(dryrun=False))
 
   if options.json:
     # Just is a list of dicts, not a list of lists.
@@ -274,6 +341,7 @@ def RunRemote(site_config, options, patch_pool):
     for r in results:
       print('  %s' % r.url)
 
+
 def AdjustOptions(options):
   """Set defaults that require some logic.
 
@@ -281,16 +349,17 @@ def AdjustOptions(options):
     options: Parsed cros tryjob tryjob arguments.
     site_config: config_lib.SiteConfig containing all config info.
   """
-  if options.buildroot:
-    return
-
   if options.where == CBUILDBOT:
-    options.buildroot = os.path.join(
+    options.buildroot = options.buildroot or os.path.join(
         os.path.dirname(constants.SOURCE_ROOT), 'cbuild')
 
   if options.where == LOCAL:
-    options.buildroot = os.path.join(
+    options.buildroot = options.buildroot or os.path.join(
         os.path.dirname(constants.SOURCE_ROOT), 'tryjob')
+
+  if options.buildroot:
+    options.git_cache_dir = options.git_cache_dir or os.path.join(
+        options.buildroot, '.git_cache')
 
 
 def VerifyOptions(options, site_config):
@@ -311,16 +380,19 @@ def VerifyOptions(options, site_config):
   if not options.build_configs:
     cros_build_lib.Die('At least one build_config is required.')
 
-  unknown_build_configs = [b for b in options.build_configs
-                           if b not in site_config]
-  if unknown_build_configs and not options.yes:
-    prompt = ('Unknown build configs; are you sure you want to schedule '
-              'for %s?' % ', '.join(unknown_build_configs))
-    if not cros_build_lib.BooleanPrompt(prompt=prompt, default=False):
-      cros_build_lib.Die('No confirmation.')
+  on_branch = options.branch != 'master'
+
+  if not (options.yes or on_branch):
+    unknown_build_configs = [b for b in options.build_configs
+                             if b not in site_config]
+    if unknown_build_configs:
+      prompt = ('Unknown build configs; are you sure you want to schedule '
+                'for %s?' % ', '.join(unknown_build_configs))
+      if not cros_build_lib.BooleanPrompt(prompt=prompt, default=False):
+        cros_build_lib.Die('No confirmation.')
 
   # Ensure that production configs are only run with --production.
-  if not (options.production or options.where == CBUILDBOT):
+  if not (on_branch or options.production or options.where == CBUILDBOT):
     # We can't know if branched configs are tryjob safe.
     # It should always be safe to run a tryjob config with --production.
     prod_configs = []
@@ -361,11 +433,15 @@ def VerifyOptions(options, site_config):
       if not cros_build_lib.BooleanPrompt(prompt=prompt, default=False):
         cros_build_lib.Die('No confirmation.')
 
-  if options.where == REMOTE and options.buildroot:
-    cros_build_lib.Die('--buildroot is not used for remote tryjobs.')
+  if options.where in (REMOTE, STAGING):
+    if options.buildroot:
+      cros_build_lib.Die('--buildroot is not used for remote tryjobs.')
 
-  if options.where != REMOTE and options.json:
-    cros_build_lib.Die('--json can only be used for remote tryjobs.')
+    if options.git_cache_dir:
+      cros_build_lib.Die('--git-cache-dir is not used for remote tryjobs.')
+  else:
+    if options.json:
+      cros_build_lib.Die('--json can only be used for remote tryjobs.')
 
 
 @command.CommandDecorator('tryjob')
@@ -434,8 +510,11 @@ List Examples:
         default=REMOTE,
         help='Run the tryjob on a remote builder. (default)')
     where_ex.add_argument(
+        '--staging', dest='where', action='store_const', const=STAGING,
+        help='Run the tryjob against the staging swarming pool.')
+    where_ex.add_argument(
         '--swarming', dest='where', action='store_const', const=REMOTE,
-        help='Run the tryjob on a swarming builder.')
+        help='Run the tryjob on a swarming builder. (deprecated)')
     where_ex.add_argument(
         '--local', dest='where', action='store_const', const=LOCAL,
         help='Run the tryjob on your local machine.')
@@ -443,9 +522,12 @@ List Examples:
         '--cbuildbot', dest='where', action='store_const', const=CBUILDBOT,
         help='Run special local build from current checkout in buildroot.')
     where_group.add_argument(
-        '-r', '--buildroot', type='path', dest='buildroot',
+        '-r', '--buildroot', type='path',
         help='Root directory to use for the local tryjob. '
              'NOT the current checkout.')
+    where_group.add_argument(
+        '--git-cache-dir', type='path',
+        help='Git cache directory to use for local tryjobs.')
 
     # What patches do we include in the build?
     what_group = parser.add_argument_group(
@@ -476,11 +558,6 @@ List Examples:
     who_group.add_argument(
         '--committer-email',
         help='Override default git committer email.')
-    who_group.add_argument(
-        '--remote-description',
-        help='Attach an optional description to a --remote run '
-             'to make it easier to identify the results when it '
-             'finishes')
 
     # Modify the build.
     how_group = parser.add_argument_group(
@@ -589,6 +666,8 @@ List Examples:
 
     if self.options.where == REMOTE:
       return RunRemote(site_config, self.options, patch_pool)
+    elif self.options.where == STAGING:
+      return RunRemote(site_config, self.options, patch_pool, staging=True)
     elif self.options.where == LOCAL:
       return RunLocal(self.options)
     elif self.options.where == CBUILDBOT:

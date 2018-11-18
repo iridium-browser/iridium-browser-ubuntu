@@ -5,7 +5,6 @@
 #include "base/test/test_file_util.h"
 
 #include <aclapi.h>
-#include <shlwapi.h>
 #include <stddef.h>
 #include <wchar.h>
 #include <windows.h>
@@ -20,6 +19,7 @@
 #include "base/strings/string_split.h"
 #include "base/threading/platform_thread.h"
 #include "base/win/scoped_handle.h"
+#include "base/win/shlwapi.h"
 
 namespace base {
 
@@ -102,6 +102,12 @@ bool DieFileDie(const FilePath& file, bool recurse) {
     PlatformThread::Sleep(kTimeout);
   }
   return false;
+}
+
+void SyncPageCacheToDisk() {
+  // Approximating this with noop. The proper implementation would require
+  // administrator privilege:
+  // https://docs.microsoft.com/en-us/windows/desktop/api/FileAPI/nf-fileapi-flushfilebuffers
 }
 
 bool EvictFileFromSystemCache(const FilePath& file) {

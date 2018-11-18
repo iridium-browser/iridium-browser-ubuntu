@@ -62,9 +62,8 @@ void PartitionUpdatesByType(const sync_pb::GetUpdatesResponse& gu_response,
                             ModelTypeSet requested_types,
                             TypeSyncEntityMap* updates_by_type) {
   int update_count = gu_response.entries().size();
-  for (ModelTypeSet::Iterator it = requested_types.First(); it.Good();
-       it.Inc()) {
-    updates_by_type->insert(std::make_pair(it.Get(), SyncEntityList()));
+  for (ModelType type : requested_types) {
+    updates_by_type->insert(std::make_pair(type, SyncEntityList()));
   }
   for (int i = 0; i < update_count; ++i) {
     const sync_pb::SyncEntity& update = gu_response.entries(i);
@@ -74,7 +73,7 @@ void PartitionUpdatesByType(const sync_pb::GetUpdatesResponse& gu_response,
       continue;
     }
 
-    TypeSyncEntityMap::iterator it = updates_by_type->find(type);
+    auto it = updates_by_type->find(type);
     if (it == updates_by_type->end()) {
       DLOG(WARNING) << "Received update for unexpected type, or the type is "
                        "throttled or failed with partial failure:"
@@ -184,10 +183,10 @@ void GetUpdatesProcessor::PrepareGetUpdates(
     sync_pb::ClientToServerMessage* message) {
   sync_pb::GetUpdatesMessage* get_updates = message->mutable_get_updates();
 
-  for (ModelTypeSet::Iterator it = gu_types.First(); it.Good(); it.Inc()) {
-    UpdateHandlerMap::iterator handler_it = update_handler_map_->find(it.Get());
+  for (ModelType type : gu_types) {
+    auto handler_it = update_handler_map_->find(type);
     DCHECK(handler_it != update_handler_map_->end())
-        << "Failed to look up handler for " << ModelTypeToString(it.Get());
+        << "Failed to look up handler for " << ModelTypeToString(type);
     sync_pb::DataTypeProgressMarker* progress_marker =
         get_updates->add_from_progress_marker();
     handler_it->second->GetDownloadProgress(progress_marker);
@@ -318,20 +317,18 @@ SyncerError GetUpdatesProcessor::ProcessGetUpdatesResponse(
   PartitionContextMutationsByType(gu_response, gu_types, &context_by_type);
 
   // Iterate over these maps in parallel, processing updates for each type.
-  TypeToIndexMap::iterator progress_marker_iter =
-      progress_index_by_type.begin();
-  TypeSyncEntityMap::iterator updates_iter = updates_by_type.begin();
+  auto progress_marker_iter = progress_index_by_type.begin();
+  auto updates_iter = updates_by_type.begin();
   for (; (progress_marker_iter != progress_index_by_type.end() &&
           updates_iter != updates_by_type.end());
        ++progress_marker_iter, ++updates_iter) {
     DCHECK_EQ(progress_marker_iter->first, updates_iter->first);
     ModelType type = progress_marker_iter->first;
 
-    UpdateHandlerMap::iterator update_handler_iter =
-        update_handler_map_->find(type);
+    auto update_handler_iter = update_handler_map_->find(type);
 
     sync_pb::DataTypeContext context;
-    TypeToIndexMap::iterator context_iter = context_by_type.find(type);
+    auto context_iter = context_by_type.find(type);
     if (context_iter != context_by_type.end())
       context.CopyFrom(gu_response.context_mutations(context_iter->second));
 

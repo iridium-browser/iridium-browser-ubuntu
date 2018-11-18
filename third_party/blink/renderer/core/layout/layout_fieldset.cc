@@ -27,6 +27,7 @@
 #include "third_party/blink/renderer/core/html/forms/html_legend_element.h"
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/paint/fieldset_painter.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 
 namespace blink {
 
@@ -36,11 +37,15 @@ LayoutFieldset::LayoutFieldset(Element* element) : LayoutBlockFlow(element) {}
 
 void LayoutFieldset::ComputePreferredLogicalWidths() {
   LayoutBlockFlow::ComputePreferredLogicalWidths();
+  // Size-contained elements don't consider their contents for preferred sizing.
+  if (ShouldApplySizeContainment())
+    return;
+
   if (LayoutBox* legend = FindInFlowLegend()) {
     int legend_min_width = legend->MinPreferredLogicalWidth().ToInt();
 
-    Length legend_margin_left = legend->Style()->MarginLeft();
-    Length legend_margin_right = legend->Style()->MarginRight();
+    Length legend_margin_left = legend->StyleRef().MarginLeft();
+    Length legend_margin_right = legend->StyleRef().MarginRight();
 
     if (legend_margin_left.IsFixed())
       legend_min_width += legend_margin_left.Value();
@@ -66,8 +71,8 @@ LayoutObject* LayoutFieldset::LayoutSpecialExcludedChild(bool relayout_children,
     legend->LayoutIfNeeded();
 
     LayoutUnit logical_left;
-    if (Style()->IsLeftToRightDirection()) {
-      switch (legend->Style()->GetTextAlign()) {
+    if (StyleRef().IsLeftToRightDirection()) {
+      switch (legend->StyleRef().GetTextAlign()) {
         case ETextAlign::kCenter:
           logical_left = (LogicalWidth() - LogicalWidthForChild(*legend)) / 2;
           break;
@@ -81,7 +86,7 @@ LayoutObject* LayoutFieldset::LayoutSpecialExcludedChild(bool relayout_children,
           break;
       }
     } else {
-      switch (legend->Style()->GetTextAlign()) {
+      switch (legend->StyleRef().GetTextAlign()) {
         case ETextAlign::kLeft:
           logical_left = BorderStart() + PaddingStart();
           break;
@@ -136,8 +141,19 @@ LayoutObject* LayoutFieldset::LayoutSpecialExcludedChild(bool relayout_children,
   return legend;
 }
 
-LayoutBox* LayoutFieldset::FindInFlowLegend() const {
-  for (LayoutObject* legend = FirstChild(); legend;
+LayoutBox* LayoutFieldset::FindInFlowLegend(const LayoutBlock& fieldset) {
+  DCHECK(fieldset.IsFieldset() || fieldset.IsLayoutNGFieldset());
+  const LayoutBlock* parent = &fieldset;
+  if (RuntimeEnabledFeatures::LayoutNGFieldsetEnabled()) {
+    if (fieldset.IsLayoutNGFieldset()) {
+      // If there is a rendered legend, it will be found inside the anonymous
+      // fieldset wrapper.
+      parent = ToLayoutBlock(fieldset.FirstChild());
+      if (!parent)
+        return nullptr;
+    }
+  }
+  for (LayoutObject* legend = parent->FirstChild(); legend;
        legend = legend->NextSibling()) {
     if (legend->IsFloatingOrOutOfFlowPositioned())
       continue;

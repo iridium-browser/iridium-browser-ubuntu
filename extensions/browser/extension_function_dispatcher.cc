@@ -64,7 +64,7 @@ void NotifyApiFunctionCalled(const std::string& extension_id,
 bool IsRequestFromServiceWorker(
     const ExtensionHostMsg_Request_Params& request_params) {
   return request_params.service_worker_version_id !=
-         extensions::kInvalidServiceWorkerVersionId;
+         blink::mojom::kInvalidServiceWorkerVersionId;
 }
 
 // Separate copy of ExtensionAPI used for IO thread extension functions. We need
@@ -186,9 +186,9 @@ class ExtensionFunctionDispatcher::UIThreadWorkerResponseCallbackWrapper
   ~UIThreadWorkerResponseCallbackWrapper() override {}
 
   // content::RenderProcessHostObserver override.
-  void RenderProcessExited(content::RenderProcessHost* rph,
-                           base::TerminationStatus status,
-                           int exit_code) override {
+  void RenderProcessExited(
+      content::RenderProcessHost* rph,
+      const content::ChildProcessTerminationInfo& info) override {
     CleanUp();
   }
 
@@ -303,8 +303,8 @@ void ExtensionFunctionDispatcher::DispatchOnIOThread(
   function_io->set_ipc_sender(ipc_sender, routing_id);
   function_io->set_extension_info_map(extension_info_map);
   if (extension) {
-    function->set_include_incognito(
-        extension_info_map->IsIncognitoEnabled(extension->id()));
+    function->set_include_incognito_information(
+        extension_info_map->CanCrossIncognito(extension));
   }
 
   if (!CheckPermissions(function.get(), params, callback))
@@ -452,7 +452,7 @@ void ExtensionFunctionDispatcher::DispatchWithCallbackInternal(
   if (extension &&
       ExtensionsBrowserClient::Get()->CanExtensionCrossIncognito(
           extension, browser_context_)) {
-    function->set_include_incognito(true);
+    function->set_include_incognito_information(true);
   }
 
   if (!CheckPermissions(function.get(), params, callback))
@@ -511,7 +511,8 @@ void ExtensionFunctionDispatcher::DispatchWithCallbackInternal(
     // now, largely for simplicity's sake. This is OK because currently, only
     // the webRequest API uses IOThreadExtensionFunction, and that API is not
     // compatible with lazy background pages.
-    process_manager->IncrementLazyKeepaliveCount(function->extension());
+    process_manager->IncrementLazyKeepaliveCount(
+        function->extension(), Activity::API_FUNCTION, function->name());
   }
 }
 
@@ -519,8 +520,7 @@ void ExtensionFunctionDispatcher::RemoveWorkerCallbacksForProcess(
     int render_process_id) {
   UIThreadWorkerResponseCallbackWrapperMap& map =
       ui_thread_response_callback_wrappers_for_worker_;
-  for (UIThreadWorkerResponseCallbackWrapperMap::iterator it = map.begin();
-       it != map.end();) {
+  for (auto it = map.begin(); it != map.end();) {
     if (it->first.render_process_id == render_process_id) {
       it = map.erase(it);
       continue;
@@ -531,13 +531,14 @@ void ExtensionFunctionDispatcher::RemoveWorkerCallbacksForProcess(
 
 void ExtensionFunctionDispatcher::OnExtensionFunctionCompleted(
     const Extension* extension,
-    bool is_from_service_worker) {
+    bool is_from_service_worker,
+    const char* name) {
   if (extension && !is_from_service_worker) {
     // Decrement ref count for non-service worker extension API. Service
     // worker extension API ref counts are handled separately on IO thread
     // directly via IPC.
     ProcessManager::Get(browser_context_)
-        ->DecrementLazyKeepaliveCount(extension);
+        ->DecrementLazyKeepaliveCount(extension, Activity::API_FUNCTION, name);
   }
 }
 

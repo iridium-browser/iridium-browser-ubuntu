@@ -44,6 +44,10 @@
 #include "third_party/blink/renderer/platform/wtf/compiler.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
+namespace cc {
+class Layer;
+}
+
 namespace blink {
 
 class Event;
@@ -90,9 +94,8 @@ class CORE_EXPORT WebPluginContainerImpl final
   void FrameRectsChanged() override;
   void SetFrameRect(const IntRect&) override;
   IntRect FrameRect() const override;
-  // |paint_offset| is a workaround for SlimmingPaintV175 to paint the contents
-  // at the correct location. It should be issued as a transform operation
-  // before painting the contents.
+  // |paint_offset| is used to to paint the contents at the correct location.
+  // It should be issued as a transform operation before painting the contents.
   void Paint(GraphicsContext&,
              const GlobalPaintFlags,
              const CullRect&,
@@ -101,7 +104,8 @@ class CORE_EXPORT WebPluginContainerImpl final
   void Show() override;
   void Hide() override;
 
-  WebLayer* PlatformLayer() const;
+  cc::Layer* CcLayer() const;
+  bool PreventContentsOpaqueChangesToCcLayer() const;
   v8::Local<v8::Object> ScriptableObject(v8::Isolate*);
   bool SupportsKeyboardFocus() const;
   bool SupportsInputMethod() const;
@@ -110,7 +114,7 @@ class CORE_EXPORT WebPluginContainerImpl final
   void UpdateAllLifecyclePhases();
   void InvalidateRect(const IntRect&);
   void SetFocused(bool, WebFocusType);
-  void HandleEvent(Event*);
+  void HandleEvent(Event&);
   bool IsErrorplaceholder();
   void EventListenersRemoved();
   void InvalidatePaint() {}
@@ -143,11 +147,17 @@ class CORE_EXPORT WebPluginContainerImpl final
   WebPlugin* Plugin() override { return web_plugin_; }
   void SetPlugin(WebPlugin*) override;
 
+  void UsePluginAsFindHandler() override;
+  void ReportFindInPageMatchCount(int identifier,
+                                  int total,
+                                  bool final_update) override;
+  void ReportFindInPageSelection(int identifier, int index) override;
+
   float DeviceScaleFactor() override;
   float PageScaleFactor() override;
   float PageZoomFactor() override;
 
-  void SetWebLayer(WebLayer*) override;
+  void SetCcLayer(cc::Layer*, bool prevent_contents_opaque_changes) override;
 
   void RequestFullscreen() override;
   bool IsFullscreenElement() const override;
@@ -182,11 +192,11 @@ class CORE_EXPORT WebPluginContainerImpl final
 
   // Resource load events for the plugin's source data:
   void DidReceiveResponse(const ResourceResponse&);
-  void DidReceiveData(const char* data, int data_length);
+  void DidReceiveData(const char* data, size_t data_length);
   void DidFinishLoading();
   void DidFailLoading(const ResourceError&);
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
   // USING_PRE_FINALIZER does not allow for virtual dispatch from the finalizer
   // method. Here we call Dispose() which does the correct virtual dispatch.
   void PreFinalize() { Dispose(); }
@@ -211,15 +221,15 @@ class CORE_EXPORT WebPluginContainerImpl final
   WebCoalescedInputEvent TransformCoalescedTouchEvent(
       const WebCoalescedInputEvent&);
 
-  void HandleMouseEvent(MouseEvent*);
-  void HandleDragEvent(MouseEvent*);
-  void HandleWheelEvent(WheelEvent*);
-  void HandleKeyboardEvent(KeyboardEvent*);
+  void HandleMouseEvent(MouseEvent&);
+  void HandleDragEvent(MouseEvent&);
+  void HandleWheelEvent(WheelEvent&);
+  void HandleKeyboardEvent(KeyboardEvent&);
   bool HandleCutCopyPasteKeyboardEvent(const WebKeyboardEvent&);
-  void HandleTouchEvent(TouchEvent*);
-  void HandleGestureEvent(GestureEvent*);
+  void HandleTouchEvent(TouchEvent&);
+  void HandleGestureEvent(GestureEvent&);
 
-  void SynthesizeMouseEventIfPossible(TouchEvent*);
+  void SynthesizeMouseEventIfPossible(TouchEvent&);
 
   void FocusPlugin();
 
@@ -231,9 +241,10 @@ class CORE_EXPORT WebPluginContainerImpl final
 
   Member<HTMLPlugInElement> element_;
   WebPlugin* web_plugin_;
-  WebLayer* web_layer_;
+  cc::Layer* layer_;
   IntRect frame_rect_;
   TouchEventRequestType touch_event_request_type_;
+  bool prevent_contents_opaque_changes_;
   bool wants_wheel_events_;
   bool self_visible_;
   bool parent_visible_;

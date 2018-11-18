@@ -35,7 +35,6 @@
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/testing_pref_service.h"
 #include "net/base/network_delegate_impl.h"
-#include "net/nqe/network_quality_estimator_test_util.h"
 #include "net/proxy_resolution/proxy_config.h"
 #include "net/proxy_resolution/proxy_info.h"
 #include "net/proxy_resolution/proxy_list.h"
@@ -44,6 +43,10 @@
 #include "net/url_request/url_request_intercepting_job_factory.h"
 #include "net/url_request/url_request_job_factory_impl.h"
 #include "net/url_request/url_request_test_util.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
+#include "services/network/test/test_network_connection_tracker.h"
+#include "services/network/test/test_network_quality_tracker.h"
+#include "services/network/test/test_shared_url_loader_factory.h"
 #include "url/gurl.h"
 
 namespace {
@@ -130,15 +133,16 @@ TestDataReductionProxyConfigServiceClient::
         DataReductionProxyEventCreator* event_creator,
         DataReductionProxyIOData* io_data,
         net::NetLog* net_log,
+        network::NetworkConnectionTracker* network_connection_tracker,
         ConfigStorer config_storer)
-    : DataReductionProxyConfigServiceClient(std::move(params),
-                                            kTestBackoffPolicy,
+    : DataReductionProxyConfigServiceClient(kTestBackoffPolicy,
                                             request_options,
                                             config_values,
                                             config,
                                             event_creator,
                                             io_data,
                                             net_log,
+                                            network_connection_tracker,
                                             config_storer),
 #if defined(OS_ANDROID)
       is_application_state_background_(false),
@@ -198,8 +202,8 @@ TestDataReductionProxyConfigServiceClient::TestTickClock::NowTicks() const {
   return base::TimeTicks::UnixEpoch() + (time_ - base::Time::UnixEpoch());
 }
 
-base::Time
-TestDataReductionProxyConfigServiceClient::TestTickClock::Now() {
+base::Time TestDataReductionProxyConfigServiceClient::TestTickClock::Now()
+    const {
   return time_;
 }
 
@@ -235,14 +239,18 @@ bool TestDataReductionProxyConfigServiceClient::RemoteConfigApplied() const {
 
 MockDataReductionProxyService::MockDataReductionProxyService(
     DataReductionProxySettings* settings,
+    network::TestNetworkQualityTracker* test_network_quality_tracker,
     PrefService* prefs,
     net::URLRequestContextGetter* request_context,
+    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
     const scoped_refptr<base::SingleThreadTaskRunner>& task_runner)
     : DataReductionProxyService(settings,
                                 prefs,
                                 request_context,
+                                std::move(url_loader_factory),
                                 std::make_unique<TestDataStore>(),
                                 nullptr,
+                                test_network_quality_tracker,
                                 task_runner,
                                 task_runner,
                                 task_runner,
@@ -259,6 +267,7 @@ TestDataReductionProxyIOData::TestDataReductionProxyIOData(
     std::unique_ptr<TestDataReductionProxyRequestOptions> request_options,
     std::unique_ptr<DataReductionProxyConfigurator> configurator,
     net::NetLog* net_log,
+    network::NetworkConnectionTracker* network_connection_tracker,
     bool enabled)
     : DataReductionProxyIOData(prefs, task_runner, task_runner),
       service_set_(false),
@@ -271,9 +280,12 @@ TestDataReductionProxyIOData::TestDataReductionProxyIOData(
   request_options_ = std::move(request_options);
   configurator_ = std::move(configurator);
   net_log_ = net_log;
+  network_connection_tracker_ = network_connection_tracker;
   bypass_stats_.reset(new DataReductionProxyBypassStats(
-      config_.get(), base::Bind(&DataReductionProxyIOData::SetUnreachable,
-                                base::Unretained(this))));
+      config_.get(),
+      base::BindRepeating(&DataReductionProxyIOData::SetUnreachable,
+                          base::Unretained(this)),
+      network_connection_tracker));
   enabled_ = enabled;
 }
 
@@ -283,6 +295,11 @@ TestDataReductionProxyIOData::~TestDataReductionProxyIOData() {
 void TestDataReductionProxyIOData::SetPingbackReportingFraction(
     float pingback_reporting_fraction) {
   pingback_reporting_fraction_ = pingback_reporting_fraction;
+}
+
+void TestDataReductionProxyIOData::SetIgnoreLongTermBlackListRules(
+    bool ignore_long_term_black_list_rules) {
+  ignore_blacklist_ = ignore_long_term_black_list_rules;
 }
 
 void TestDataReductionProxyIOData::SetDataReductionProxyService(
@@ -345,6 +362,13 @@ DataReductionProxyTestContext::Builder&
 DataReductionProxyTestContext::Builder::WithURLRequestContext(
     net::URLRequestContext* request_context) {
   request_context_ = request_context;
+  return *this;
+}
+
+DataReductionProxyTestContext::Builder&
+DataReductionProxyTestContext::Builder::WithURLLoaderFactory(
+    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory) {
+  url_loader_factory_ = url_loader_factory;
   return *this;
 }
 
@@ -415,32 +439,34 @@ DataReductionProxyTestContext::Builder::Build() {
   scoped_refptr<base::SingleThreadTaskRunner> task_runner =
       base::ThreadTaskRunnerHandle::Get();
   scoped_refptr<net::URLRequestContextGetter> request_context_getter;
+  scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory;
   std::unique_ptr<TestingPrefServiceSimple> pref_service(
       new TestingPrefServiceSimple());
   std::unique_ptr<net::TestNetLog> net_log(new net::TestNetLog());
+  auto* test_network_connection_tracker =
+      network::TestNetworkConnectionTracker::GetInstance();
   std::unique_ptr<TestConfigStorer> config_storer(
       new TestConfigStorer(pref_service.get()));
-  std::unique_ptr<net::TestNetworkQualityEstimator> estimator;
 
   if (request_context_) {
     request_context_getter = new net::TrivialURLRequestContextGetter(
         request_context_, task_runner);
-    if (!request_context_->network_quality_estimator()) {
-      estimator.reset(new net::TestNetworkQualityEstimator());
-      request_context_->set_network_quality_estimator(estimator.get());
-    }
   } else {
     std::unique_ptr<net::TestURLRequestContext> test_request_context(
         new net::TestURLRequestContext(true));
     if (mock_socket_factory_)
       test_request_context->set_client_socket_factory(mock_socket_factory_);
-    if (!test_request_context->network_quality_estimator()) {
-      estimator.reset(new net::TestNetworkQualityEstimator());
-      test_request_context->set_network_quality_estimator(estimator.get());
-    }
+
     test_request_context->Init();
     request_context_getter = new net::TestURLRequestContextGetter(
         task_runner, std::move(test_request_context));
+  }
+
+  if (url_loader_factory_) {
+    url_loader_factory = url_loader_factory_;
+  } else {
+    url_loader_factory =
+        base::MakeRefCounted<network::TestSharedURLLoaderFactory>();
   }
 
   std::unique_ptr<TestDataReductionProxyEventStorageDelegate> storage_delegate(
@@ -512,7 +538,8 @@ DataReductionProxyTestContext::Builder::Build() {
       new TestDataReductionProxyIOData(
           pref_service.get(), task_runner, std::move(config),
           std::move(event_creator), std::move(request_options),
-          std::move(configurator), net_log.get(), true /* enabled */));
+          std::move(configurator), net_log.get(),
+          test_network_connection_tracker, true /* enabled */));
   io_data->SetSimpleURLRequestContextGetter(request_context_getter);
 
   if (use_test_config_client_) {
@@ -520,13 +547,14 @@ DataReductionProxyTestContext::Builder::Build() {
     config_client.reset(new TestDataReductionProxyConfigServiceClient(
         std::move(params), io_data->request_options(), raw_mutable_config,
         io_data->config(), io_data->event_creator(), io_data.get(),
-        net_log.get(), base::Bind(&TestConfigStorer::StoreSerializedConfig,
-                                  base::Unretained(config_storer.get()))));
+        net_log.get(), test_network_connection_tracker,
+        base::BindRepeating(&TestConfigStorer::StoreSerializedConfig,
+                            base::Unretained(config_storer.get()))));
   } else if (use_config_client_) {
     config_client.reset(new DataReductionProxyConfigServiceClient(
-        std::move(params), GetBackoffPolicy(), io_data->request_options(),
-        raw_mutable_config, io_data->config(), io_data->event_creator(),
-        io_data.get(), net_log.get(),
+        GetBackoffPolicy(), io_data->request_options(), raw_mutable_config,
+        io_data->config(), io_data->event_creator(), io_data.get(),
+        net_log.get(), test_network_connection_tracker,
         base::Bind(&TestConfigStorer::StoreSerializedConfig,
                    base::Unretained(config_storer.get()))));
   }
@@ -539,10 +567,9 @@ DataReductionProxyTestContext::Builder::Build() {
   std::unique_ptr<DataReductionProxyTestContext> test_context(
       new DataReductionProxyTestContext(
           task_runner, std::move(pref_service), std::move(net_log),
-          request_context_getter, mock_socket_factory_, std::move(io_data),
-          std::move(settings), std::move(storage_delegate),
-          std::move(config_storer), std::move(estimator), raw_params,
-          test_context_flags));
+          request_context_getter, url_loader_factory, mock_socket_factory_,
+          std::move(io_data), std::move(settings), std::move(storage_delegate),
+          std::move(config_storer), raw_params, test_context_flags));
 
   if (!skip_settings_initialization_)
     test_context->InitSettingsWithoutCheck();
@@ -555,13 +582,13 @@ DataReductionProxyTestContext::DataReductionProxyTestContext(
     std::unique_ptr<TestingPrefServiceSimple> simple_pref_service,
     std::unique_ptr<net::TestNetLog> net_log,
     scoped_refptr<net::URLRequestContextGetter> request_context_getter,
+    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
     net::MockClientSocketFactory* mock_socket_factory,
     std::unique_ptr<TestDataReductionProxyIOData> io_data,
     std::unique_ptr<DataReductionProxySettings> settings,
     std::unique_ptr<TestDataReductionProxyEventStorageDelegate>
         storage_delegate,
     std::unique_ptr<TestConfigStorer> config_storer,
-    std::unique_ptr<net::TestNetworkQualityEstimator> estimator,
     TestDataReductionProxyParams* params,
     unsigned int test_context_flags)
     : test_context_flags_(test_context_flags),
@@ -569,12 +596,14 @@ DataReductionProxyTestContext::DataReductionProxyTestContext(
       simple_pref_service_(std::move(simple_pref_service)),
       net_log_(std::move(net_log)),
       request_context_getter_(request_context_getter),
-      estimator_(std::move(estimator)),
+      url_loader_factory_(std::move(url_loader_factory)),
       mock_socket_factory_(mock_socket_factory),
       io_data_(std::move(io_data)),
       settings_(std::move(settings)),
       storage_delegate_(std::move(storage_delegate)),
       config_storer_(std::move(config_storer)),
+      test_network_quality_tracker_(
+          std::make_unique<network::TestNetworkQualityTracker>()),
       params_(params) {}
 
 DataReductionProxyTestContext::~DataReductionProxyTestContext() {
@@ -611,7 +640,7 @@ void DataReductionProxyTestContext::InitSettings() {
 void DataReductionProxyTestContext::DestroySettings() {
   // Force destruction of |DBDataOwner|, which lives on DB task runner and is
   // indirectly owned by |settings_|.
-  if (settings_.get()) {
+  if (settings_) {
     settings_.reset();
     storage_delegate_->SetStorageDelegate(nullptr);
     RunUntilIdle();
@@ -626,9 +655,6 @@ void DataReductionProxyTestContext::InitSettingsWithoutCheck() {
       settings_->data_reduction_proxy_service()->event_store());
   io_data_->SetDataReductionProxyService(
       settings_->data_reduction_proxy_service()->GetWeakPtr());
-  if (io_data_->config_client())
-    io_data_->config_client()->InitializeOnIOThread(
-        request_context_getter_.get());
   settings_->data_reduction_proxy_service()->SetIOData(io_data_->GetWeakPtr());
 }
 
@@ -644,13 +670,15 @@ DataReductionProxyTestContext::CreateDataReductionProxyServiceInternal(
     DataReductionProxySettings* settings) {
   if (test_context_flags_ & USE_MOCK_SERVICE) {
     return std::make_unique<MockDataReductionProxyService>(
-        settings, simple_pref_service_.get(), request_context_getter_.get(),
-        task_runner_);
+        settings, test_network_quality_tracker_.get(),
+        simple_pref_service_.get(), request_context_getter_.get(),
+        url_loader_factory_, task_runner_);
   }
   return std::make_unique<DataReductionProxyService>(
       settings, simple_pref_service_.get(), request_context_getter_.get(),
-      base::WrapUnique(new TestDataStore()), nullptr, task_runner_,
-      task_runner_, task_runner_, base::TimeDelta());
+      url_loader_factory_, base::WrapUnique(new TestDataStore()), nullptr,
+      test_network_quality_tracker_.get(), task_runner_, task_runner_,
+      task_runner_, base::TimeDelta());
 }
 
 void DataReductionProxyTestContext::AttachToURLRequestContext(
@@ -687,7 +715,7 @@ void DataReductionProxyTestContext::
       net::MockRead(net::SYNCHRONOUS, net::OK),
   };
   net::StaticSocketDataProvider socket_data_provider(
-      mock_reads, arraysize(mock_reads), nullptr, 0);
+      mock_reads, base::span<net::MockWrite>());
   mock_socket_factory_->AddSocketDataProvider(&socket_data_provider);
 
   // Set the pref to cause the secure proxy check to be issued.

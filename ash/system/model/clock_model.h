@@ -27,6 +27,15 @@ class ClockModel : public chromeos::SystemClockClient::Observer,
 
   void SetUse24HourClock(bool use_24_hour);
 
+  // Return true if the session is logged in.
+  bool IsLoggedIn() const;
+
+  // Return true if Web UI date time settings or time dialog is available.
+  bool IsSettingsAvailable() const;
+
+  void ShowDateSettings();
+  void ShowSetTimeDialog();
+
   // Force observers to refresh clock views e.g. system is resumed or timezone
   // is changed.
   void NotifyRefreshClock();
@@ -40,7 +49,7 @@ class ClockModel : public chromeos::SystemClockClient::Observer,
 
   base::HourClockType hour_clock_type() const { return hour_clock_type_; }
 
-  bool can_set_time() { return can_set_time_; }
+  bool can_set_time() const { return can_set_time_; }
 
  private:
   void NotifyDateFormatChanged();
@@ -48,12 +57,12 @@ class ClockModel : public chromeos::SystemClockClient::Observer,
   void NotifySystemClockCanSetTimeChanged(bool can_set_time);
 
   // The type of clock hour display: 12 or 24 hour.
-  base::HourClockType hour_clock_type_;
+  base::HourClockType hour_clock_type_ = base::k12HourClock;
 
   // If system clock can be configured by user through SetTimeDialog.
-  bool can_set_time_;
+  bool can_set_time_ = false;
 
-  base::ObserverList<ClockObserver> observers_;
+  base::ObserverList<ClockObserver>::Unchecked observers_;
 
   DISALLOW_COPY_AND_ASSIGN(ClockModel);
 };

@@ -2,10 +2,20 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+(function() {
+'use strict';
+
+/**
+ * Number of settings sections to show when "More settings" is collapsed.
+ * @type {number}
+ */
+const MAX_SECTIONS_TO_SHOW = 6;
+
 Polymer({
   is: 'print-preview-app',
 
-  behaviors: [SettingsBehavior],
+  behaviors: [SettingsBehavior, CrContainerShadowBehavior],
+
   properties: {
     /**
      * Object containing current settings of Print Preview, for use by Polymer
@@ -89,6 +99,47 @@ Polymer({
       notify: true,
       value: false,
     },
+
+    /** @private {!print_preview_new.PreviewAreaState} */
+    previewState_: {
+      type: String,
+      observer: 'onPreviewAreaStateChanged_',
+    },
+
+    /** @private {boolean} */
+    settingsExpandedByUser_: {
+      type: Boolean,
+      notify: true,
+      value: false,
+    },
+
+    /** @private {boolean} */
+    shouldShowMoreSettings_: {
+      type: Boolean,
+      notify: true,
+      computed: 'computeShouldShowMoreSettings_(settings.pages.available, ' +
+          'settings.copies.available, settings.layout.available, ' +
+          'settings.color.available, settings.mediaSize.available, ' +
+          'settings.dpi.available, settings.margins.available, ' +
+          'settings.pagesPerSheet.available, settings.scaling.available, ' +
+          'settings.otherOptions.available, settings.vendorItems.available)',
+    },
+
+    /**
+     * Whether to show pages per sheet feature or not.
+     * @private {boolean}
+     */
+    showPagesPerSheet_: {
+      type: Boolean,
+      value: function() {
+        return loadTimeData.getBoolean('pagesPerSheetEnabled');
+      },
+    },
+  },
+
+  listeners: {
+    'cr-dialog-open': 'onCrDialogOpen_',
+    'close': 'onCrDialogClose_',
   },
 
   /** @private {?WebUIListenerTracker} */
@@ -112,6 +163,17 @@ Polymer({
   /** @private {boolean} */
   openPdfInPreview_: false,
 
+  /** @private {boolean} */
+  isInKioskAutoPrintMode_: false,
+
+  /** @private {!Array<!CrDialogElement>} */
+  openDialogs_: [],
+
+  /** @override */
+  ready: function() {
+    cr.ui.FocusOutlineManager.forDocument(document);
+  },
+
   /** @override */
   attached: function() {
     this.nativeLayer_ = print_preview.NativeLayer.getInstance();
@@ -120,6 +182,9 @@ Polymer({
     this.listenerTracker_ = new WebUIListenerTracker();
     this.listenerTracker_.add(
         'use-cloud-print', this.onCloudPrintEnable_.bind(this));
+    this.listenerTracker_.add('print-failed', this.onPrintFailed_.bind(this));
+    this.listenerTracker_.add(
+        'print-preset-options', this.onPrintPresetOptions_.bind(this));
     this.destinationStore_ = new print_preview.DestinationStore(
         this.userInfo_, this.listenerTracker_);
     this.invitationStore_ = new print_preview.InvitationStore(this.userInfo_);
@@ -164,8 +229,20 @@ Polymer({
    * @private
    */
   onKeyDown_: function(e) {
-    // Escape key closes the dialog.
+    // Escape key closes the topmost dialog that is currently open within
+    // Print Preview. If no such dialog exists, then the Print Preview dialog
+    // itself is closed.
     if (e.code == 'Escape' && !hasKeyModifiers(e)) {
+      // Don't close the Print Preview dialog if there is a child dialog open.
+      if (this.openDialogs_.length != 0) {
+        // Manually cancel the dialog, since we call preventDefault() to prevent
+        // views from closing the Print Preview dialog.
+        const dialogToClose = this.openDialogs_[this.openDialogs_.length - 1];
+        dialogToClose.cancel();
+        e.preventDefault();
+        return;
+      }
+
       // On non-mac with toolkit-views, ESC key is handled by C++-side instead
       // of JS-side.
       if (cr.isMac) {
@@ -175,8 +252,8 @@ Polymer({
       return;
     }
 
-    // On Mac, Cmd-. should close the print dialog.
-    if (cr.isMac && e.code == 'Minus' && e.metaKey) {
+    // On Mac, Cmd+Period should close the print dialog.
+    if (cr.isMac && e.code == 'Period' && e.metaKey) {
       this.close_();
       e.preventDefault();
       return;
@@ -189,17 +266,20 @@ Polymer({
         // Don't try to print with system dialog on Windows if the document is
         // not ready, because we send the preview document to the printer on
         // Windows.
-        if (!cr.isWin || this.state == print_preview_new.State.READY)
+        if (!cr.isWindows || this.state == print_preview_new.State.READY)
           this.onPrintWithSystemDialog_();
         e.preventDefault();
         return;
       }
     }
 
-    if (e.code == 'Enter' && this.state == print_preview_new.State.READY) {
+    if (e.code == 'Enter' && this.state == print_preview_new.State.READY &&
+        this.openDialogs_.length === 0) {
       const activeElementTag = e.path[0].tagName;
-      if (['BUTTON', 'SELECT', 'A'].includes(activeElementTag))
+      if (['PAPER-BUTTON', 'BUTTON', 'SELECT', 'A', 'CR-CHECKBOX'].includes(
+              activeElementTag)) {
         return;
+      }
 
       this.onPrintRequested_();
       e.preventDefault();
@@ -208,6 +288,29 @@ Polymer({
 
     // Pass certain directional keyboard events to the PDF viewer.
     this.$.previewArea.handleDirectionalKeyEvent(e);
+  },
+
+  /**
+   * @param {!Event} e The cr-dialog-open event.
+   * @private
+   */
+  onCrDialogOpen_: function(e) {
+    this.openDialogs_.push(
+        /** @type {!CrDialogElement} */ (e.composedPath()[0]));
+  },
+
+  /**
+   * @param {!Event} e The close event.
+   * @private
+   */
+  onCrDialogClose_: function(e) {
+    // Note: due to event re-firing in cr_dialog.js, this event will always
+    // appear to be coming from the outermost child dialog.
+    // TODO(rbpotter): Fix event re-firing so that the event comes from the
+    // dialog that has been closed, and add an assertion that the removed
+    // dialog matches e.composedPath()[0].
+    if (e.composedPath()[0].nodeName == 'CR-DIALOG')
+      this.openDialogs_.pop();
   },
 
   /**
@@ -223,6 +326,8 @@ Polymer({
     this.notifyPath('documentInfo_.title');
     this.notifyPath('documentInfo_.pageCount');
     this.$.model.setStickySettings(settings.serializedAppStateStr);
+    this.$.model.setPolicySettings(
+        settings.headerFooter, settings.isHeaderFooterManaged);
     this.measurementSystem_ = new print_preview.MeasurementSystem(
         settings.thousandsDelimeter, settings.decimalDelimeter,
         settings.unitType);
@@ -232,6 +337,15 @@ Polymer({
         settings.serializedDefaultDestinationSelectionRulesStr,
         this.recentDestinations_);
     this.isInAppKioskMode_ = settings.isInAppKioskMode;
+    this.isInKioskAutoPrintMode_ = settings.isInKioskAutoPrintMode;
+
+    // This is only visible in the task manager.
+    let title = document.head.querySelector('title');
+    if (!title) {
+      title = document.createElement('title');
+      document.head.appendChild(title);
+    }
+    title.textContent = settings.documentTitle;
   },
 
   /**
@@ -271,19 +385,30 @@ Polymer({
 
   /** @private */
   onDestinationSelect_: function() {
+    // If the plugin does not exist do not attempt to load the preview.
+    if (this.state == print_preview_new.State.FATAL_ERROR)
+      return;
+
     this.$.state.transitTo(print_preview_new.State.NOT_READY);
     this.destination_ = this.destinationStore_.selectedDestination;
   },
 
   /** @private */
   onDestinationUpdated_: function() {
-    this.set(
-        'destination_.capabilities',
-        this.destinationStore_.selectedDestination.capabilities);
-    if (this.state != print_preview_new.State.READY)
-      this.$.state.transitTo(print_preview_new.State.READY);
+    // Notify observers, since destination_ ==
+    // destinationStore_.selectedDestination and this event indicates
+    // destinationStore_.selectedDestination.capabilities has been updated.
+    this.notifyPath('destination_.capabilities');
+
     if (!this.$.model.initialized())
       this.$.model.applyStickySettings();
+
+    if (this.state == print_preview_new.State.NOT_READY ||
+        this.state == print_preview_new.State.INVALID_PRINTER) {
+      this.$.state.transitTo(print_preview_new.State.READY);
+      if (this.isInKioskAutoPrintMode_)
+        this.onPrintRequested_();
+    }
   },
 
   /**
@@ -300,8 +425,21 @@ Polymer({
       this.remove();
       this.nativeLayer_.dialogClose(this.cancelled_);
     } else if (this.state == print_preview_new.State.HIDDEN) {
-      this.nativeLayer_.hidePreview();
+      if (this.destination_.isLocal &&
+          this.destination_.id !==
+              print_preview.Destination.GooglePromotedId.SAVE_AS_PDF) {
+        // Only hide the preview for local, non PDF destinations.
+        this.nativeLayer_.hidePreview();
+      }
     } else if (this.state == print_preview_new.State.PRINTING) {
+      if (this.shouldShowMoreSettings_) {
+        new print_preview.PrintSettingsUiMetricsContext().record(
+            this.settingsExpandedByUser_ ?
+                print_preview.Metrics.PrintSettingsUiBucket
+                    .PRINT_WITH_SETTINGS_EXPANDED :
+                print_preview.Metrics.PrintSettingsUiBucket
+                    .PRINT_WITH_SETTINGS_COLLAPSED);
+      }
       const destination = assert(this.destinationStore_.selectedDestination);
       const whenPrintDone =
           this.nativeLayer_.print(this.$.model.createPrintTicket(
@@ -321,12 +459,6 @@ Polymer({
             this.onPrintToCloud_.bind(this), this.onPrintFailed_.bind(this));
       }
     }
-  },
-
-  /** @private */
-  onPreviewLoaded_: function() {
-    if (this.state == print_preview_new.State.HIDDEN)
-      this.$.state.transitTo(print_preview_new.State.PRINTING);
   },
 
   /** @private */
@@ -409,13 +541,31 @@ Polymer({
   },
 
   /** @private */
-  onPreviewFailed_: function() {
-    this.$.state.transitTo(print_preview_new.State.FATAL_ERROR);
+  onInvalidPrinter_: function() {
+    this.previewState_ =
+        print_preview_new.PreviewAreaState.UNSUPPORTED_CLOUD_PRINTER;
   },
 
   /** @private */
-  onInvalidPrinter_: function() {
-    this.$.state.transitTo(print_preview_new.State.INVALID_PRINTER);
+  onPreviewAreaStateChanged_: function() {
+    switch (this.previewState_) {
+      case print_preview_new.PreviewAreaState.PREVIEW_FAILED:
+      case print_preview_new.PreviewAreaState.NO_PLUGIN:
+        this.$.state.transitTo(print_preview_new.State.FATAL_ERROR);
+        break;
+      case print_preview_new.PreviewAreaState.INVALID_SETTINGS:
+      case print_preview_new.PreviewAreaState.UNSUPPORTED_CLOUD_PRINTER:
+        if (this.state != print_preview_new.State.INVALID_PRINTER)
+          this.$.state.transitTo(print_preview_new.State.INVALID_PRINTER);
+        break;
+      case print_preview_new.PreviewAreaState.DISPLAY_PREVIEW:
+      case print_preview_new.PreviewAreaState.OPEN_IN_PREVIEW_LOADED:
+        if (this.state == print_preview_new.State.HIDDEN)
+          this.$.state.transitTo(print_preview_new.State.PRINTING);
+        break;
+      default:
+        break;
+    }
   },
 
   /**
@@ -443,8 +593,56 @@ Polymer({
     }
   },
 
+  /**
+   * Updates printing options according to source document presets.
+   * @param {boolean} disableScaling Whether the document disables scaling.
+   * @param {number} copies The default number of copies from the document.
+   * @param {!print_preview_new.DuplexMode} duplex The default duplex setting
+   *     from the document.
+   * @private
+   */
+  onPrintPresetOptions_: function(disableScaling, copies, duplex) {
+    if (disableScaling)
+      this.documentInfo_.updateIsScalingDisabled(true);
+
+    if (copies > 0 && this.getSetting('copies').available)
+      this.setSetting('copies', copies);
+
+    if (duplex !== print_preview_new.DuplexMode.UNKNOWN_DUPLEX_MODE &&
+        this.getSetting('duplex').available) {
+      this.setSetting(
+          'duplex', duplex === print_preview_new.DuplexMode.LONG_EDGE);
+    }
+  },
+
+  /**
+   * @return {boolean} Whether to show the "More settings" link.
+   * @private
+   */
+  computeShouldShowMoreSettings_: function() {
+    // Destination settings is always available. See if the total number of
+    // available sections exceeds the maximum number to show.
+    return [
+      'pages', 'copies', 'layout', 'color', 'mediaSize', 'margins', 'color',
+      'pagesPerSheet', 'scaling', 'otherOptions', 'vendorItems'
+    ].reduce((count, setting) => {
+      return this.getSetting(setting).available ? count + 1 : count;
+    }, 1) > MAX_SECTIONS_TO_SHOW;
+  },
+
+  /**
+   * @return {boolean} Whether the "more settings" collapse should be expanded.
+   * @private
+   */
+  shouldExpandSettings_: function() {
+    // Expand the settings if the user has requested them expanded or if more
+    // settings is not displayed (i.e. less than 6 total settings available).
+    return this.settingsExpandedByUser_ || !this.shouldShowMoreSettings_;
+  },
+
   /** @private */
   close_: function() {
     this.$.state.transitTo(print_preview_new.State.CLOSING);
   },
 });
+})();

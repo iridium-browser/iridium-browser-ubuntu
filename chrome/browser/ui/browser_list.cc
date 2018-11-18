@@ -10,9 +10,9 @@
 #include "base/logging.h"
 #include "base/metrics/user_metrics.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
+#include "chrome/browser/lifetime/browser_shutdown.h"
 #include "chrome/browser/lifetime/termination_notification.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -36,10 +36,19 @@ BrowserList::BrowserVector GetBrowsersToClose(Profile* profile) {
   return browsers_to_close;
 }
 
+BrowserList::BrowserVector GetIncognitoBrowsersToClose(Profile* profile) {
+  BrowserList::BrowserVector browsers_to_close;
+  for (auto* browser : *BrowserList::GetInstance()) {
+    if (browser->profile() == profile)
+      browsers_to_close.push_back(browser);
+  }
+  return browsers_to_close;
+}
+
 }  // namespace
 
 // static
-base::LazyInstance<base::ObserverList<BrowserListObserver>>::Leaky
+base::LazyInstance<base::ObserverList<BrowserListObserver>::Unchecked>::Leaky
     BrowserList::observers_ = LAZY_INSTANCE_INITIALIZER;
 
 // static
@@ -154,13 +163,25 @@ void BrowserList::CloseAllBrowsersWithProfile(
 }
 
 // static
+void BrowserList::CloseAllBrowsersWithIncognitoProfile(
+    Profile* profile,
+    const CloseCallback& on_close_success,
+    const CloseCallback& on_close_aborted,
+    bool skip_beforeunload) {
+  DCHECK(profile->IsOffTheRecord());
+  TryToCloseBrowserList(GetIncognitoBrowsersToClose(profile), on_close_success,
+                        on_close_aborted, profile->GetPath(),
+                        skip_beforeunload);
+}
+
+// static
 void BrowserList::TryToCloseBrowserList(const BrowserVector& browsers_to_close,
                                         const CloseCallback& on_close_success,
                                         const CloseCallback& on_close_aborted,
                                         const base::FilePath& profile_path,
                                         const bool skip_beforeunload) {
-  for (BrowserVector::const_iterator it = browsers_to_close.begin();
-       it != browsers_to_close.end(); ++it) {
+  for (auto it = browsers_to_close.begin(); it != browsers_to_close.end();
+       ++it) {
     if ((*it)->TryToCloseWindow(
             skip_beforeunload,
             base::Bind(&BrowserList::PostTryToCloseBrowserWindow,
@@ -199,8 +220,8 @@ void BrowserList::PostTryToCloseBrowserWindow(
                           profile_path, skip_beforeunload);
   } else if (!resetting_handlers) {
     base::AutoReset<bool> resetting_handlers_scoper(&resetting_handlers, true);
-    for (BrowserVector::const_iterator it = browsers_to_close.begin();
-         it != browsers_to_close.end(); ++it) {
+    for (auto it = browsers_to_close.begin(); it != browsers_to_close.end();
+         ++it) {
       (*it)->ResetTryToCloseWindow();
     }
     if (on_close_aborted)
@@ -312,7 +333,7 @@ BrowserList::~BrowserList() {
 // static
 void BrowserList::RemoveBrowserFrom(Browser* browser,
                                     BrowserVector* browser_list) {
-  BrowserVector::iterator remove_browser =
+  auto remove_browser =
       std::find(browser_list->begin(), browser_list->end(), browser);
   if (remove_browser != browser_list->end())
     browser_list->erase(remove_browser);

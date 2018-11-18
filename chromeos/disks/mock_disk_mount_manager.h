@@ -31,35 +31,40 @@ class MockDiskMountManager : public DiskMountManager {
   MOCK_METHOD1(AddObserver, void(DiskMountManager::Observer*));
   MOCK_METHOD1(RemoveObserver, void(DiskMountManager::Observer*));
   MOCK_CONST_METHOD0(disks, const DiskMountManager::DiskMap&(void));
-  MOCK_CONST_METHOD1(FindDiskBySourcePath,
-                     const DiskMountManager::Disk*(const std::string&));
+  MOCK_CONST_METHOD1(FindDiskBySourcePath, const Disk*(const std::string&));
   MOCK_CONST_METHOD0(mount_points,
                      const DiskMountManager::MountPointMap&(void));
   MOCK_METHOD2(EnsureMountInfoRefreshed,
-               void(const EnsureMountInfoRefreshedCallback&, bool));
-  MOCK_METHOD5(MountPath,
+               void(EnsureMountInfoRefreshedCallback, bool));
+  MOCK_METHOD6(MountPath,
                void(const std::string&,
                     const std::string&,
                     const std::string&,
+                    const std::vector<std::string>&,
                     MountType,
                     MountAccessMode));
-  MOCK_METHOD3(UnmountPath, void(const std::string&,
-                                 UnmountOptions,
-                                 const DiskMountManager::UnmountPathCallback&));
+  MOCK_METHOD3(UnmountPath,
+               void(const std::string&,
+                    UnmountOptions,
+                    DiskMountManager::UnmountPathCallback));
   MOCK_METHOD1(RemountAllRemovableDrives, void(MountAccessMode));
   MOCK_METHOD1(FormatMountedDevice, void(const std::string&));
   MOCK_METHOD2(RenameMountedDevice,
                void(const std::string&, const std::string&));
-  MOCK_METHOD2(
-      UnmountDeviceRecursively,
-      void(const std::string&,
-           const DiskMountManager::UnmountDeviceRecursivelyCallbackType&));
+  MOCK_METHOD2(UnmountDeviceRecursively,
+               void(const std::string&,
+                    DiskMountManager::UnmountDeviceRecursivelyCallbackType));
 
   // Invokes fake device insert events.
   void NotifyDeviceInsertEvents();
 
   // Invokes fake device remove events.
   void NotifyDeviceRemoveEvents();
+
+  // Invokes specified mount event.
+  void NotifyMountEvent(MountEvent event,
+                        MountError error_code,
+                        const MountPointInfo& mount_info);
 
   // Sets up default results for mock methods.
   void SetupDefaultReplies();
@@ -98,24 +103,18 @@ class MockDiskMountManager : public DiskMountManager {
   const DiskMountManager::MountPointMap& mountPointsInternal() const;
 
   // Returns Disk object associated with the |source_path| or NULL on failure.
-  const DiskMountManager::Disk* FindDiskBySourcePathInternal(
+  const Disk* FindDiskBySourcePathInternal(
       const std::string& source_path) const;
-
-  // Is used to implement EnsureMountInfoRefreshed.
-  void EnsureMountInfoRefreshedInternal(
-      const EnsureMountInfoRefreshedCallback& callback,
-      bool force);
 
   // Notifies observers about device status update.
   void NotifyDeviceChanged(DeviceEvent event,
                            const std::string& path);
 
   // Notifies observers about disk status update.
-  void NotifyDiskChanged(DiskEvent event,
-                         const DiskMountManager::Disk* disk);
+  void NotifyDiskChanged(DiskEvent event, const Disk* disk);
 
   // The list of observers.
-  base::ObserverList<DiskMountManager::Observer> observers_;
+  base::ObserverList<DiskMountManager::Observer>::Unchecked observers_;
 
   // The list of disks found.
   DiskMountManager::DiskMap disks_;

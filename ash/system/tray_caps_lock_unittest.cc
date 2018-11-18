@@ -4,9 +4,10 @@
 
 #include "ash/system/tray_caps_lock.h"
 
+#include "ash/public/cpp/ash_features.h"
+#include "ash/system/message_center/notification_tray.h"
 #include "ash/system/tray/system_tray.h"
 #include "ash/system/tray/system_tray_test_api.h"
-#include "ash/system/web_notification/web_notification_tray.h"
 #include "ash/test/ash_test_base.h"
 
 namespace ash {
@@ -18,11 +19,11 @@ class TrayCapsLockTest : public AshTestBase {
 
   void SetUp() override {
     AshTestBase::SetUp();
-    WebNotificationTray::DisableAnimationsForTest(true);
+    NotificationTray::DisableAnimationsForTest(true);
   }
 
   void TearDown() override {
-    WebNotificationTray::DisableAnimationsForTest(false);
+    NotificationTray::DisableAnimationsForTest(false);
     AshTestBase::TearDown();
   }
 
@@ -32,6 +33,11 @@ class TrayCapsLockTest : public AshTestBase {
 
 // Tests that the icon becomes visible when the tray controller toggles it.
 TEST_F(TrayCapsLockTest, Visibility) {
+  // TODO(tetsui): Remove the test after UnifiedSystemTray launch.
+  // https://crbug.com/847104
+  if (features::IsSystemTrayUnifiedEnabled())
+    return;
+
   SystemTray* tray = GetPrimarySystemTray();
   TrayCapsLock* caps_lock = SystemTrayTestApi(tray).tray_caps_lock();
 

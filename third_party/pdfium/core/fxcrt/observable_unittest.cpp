@@ -12,11 +12,11 @@
 namespace fxcrt {
 namespace {
 
-class PseudoObservable : public Observable<PseudoObservable> {
+class PseudoObservable final : public Observable<PseudoObservable> {
  public:
   PseudoObservable() {}
   int SomeMethod() { return 42; }
-  size_t ActiveObservedPtrs() const { return ActiveObservedPtrsForTesting(); }
+  size_t ActiveObservedPtrs() const { return ActiveObserversForTesting(); }
 };
 
 }  // namespace

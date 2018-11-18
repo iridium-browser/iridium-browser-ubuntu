@@ -178,7 +178,7 @@ void DriveWebContentsManager::StartLoad() {
   content::WebContents::CreateParams create_params(
         profile_, content::SiteInstance::CreateForURL(profile_, url));
 
-  web_contents_.reset(content::WebContents::Create(create_params));
+  web_contents_ = content::WebContents::Create(create_params);
   web_contents_->SetDelegate(this);
   extensions::ChromeExtensionWebContentsObserver::CreateForWebContents(
       web_contents_.get());
@@ -333,7 +333,7 @@ void DriveFirstRunController::EnableOfflineMode() {
     return;
   }
 
-  ExtensionService* extension_service =
+  extensions::ExtensionService* extension_service =
       extensions::ExtensionSystem::Get(profile_)->extension_service();
   if (!extension_service->GetExtensionById(drive_hosted_app_id_, false)) {
     LOG(WARNING) << "Drive app is not installed.";
@@ -413,7 +413,7 @@ void DriveFirstRunController::OnOfflineInit(bool success, UMAOutcome outcome) {
 }
 
 void DriveFirstRunController::ShowNotification() {
-  ExtensionService* service =
+  extensions::ExtensionService* service =
       extensions::ExtensionSystem::Get(profile_)->extension_service();
   DCHECK(service);
   const extensions::Extension* extension =

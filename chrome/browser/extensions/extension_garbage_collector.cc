@@ -42,12 +42,14 @@ namespace extensions {
 
 namespace {
 
-// Wait this many seconds before trying to garbage collect extensions again.
-const int kGarbageCollectRetryDelayInSeconds = 30;
+// Wait this long before trying to garbage collect extensions again.
+constexpr base::TimeDelta kGarbageCollectRetryDelay =
+    base::TimeDelta::FromSeconds(30);
 
-// Wait this many seconds after startup to see if there are any extensions
-// which can be garbage collected.
-const int kGarbageCollectStartupDelay = 30;
+// Wait this long after startup to see if there are any extensions which can be
+// garbage collected.
+constexpr base::TimeDelta kGarbageCollectStartupDelay =
+    base::TimeDelta::FromSeconds(30);
 
 typedef std::multimap<std::string, base::FilePath> ExtensionPathsMultimap;
 
@@ -93,7 +95,7 @@ void CheckExtensionDirectory(const base::FilePath& path,
        !version_dir.empty();
        version_dir = versions_enumerator.Next()) {
     bool known_version = false;
-    for (Iter iter = iter_pair.first; iter != iter_pair.second; ++iter) {
+    for (auto iter = iter_pair.first; iter != iter_pair.second; ++iter) {
       if (version_dir.BaseName() == iter->second.BaseName()) {
         known_version = true;
         break;
@@ -117,7 +119,7 @@ ExtensionGarbageCollector::ExtensionGarbageCollector(
       FROM_HERE,
       base::Bind(&ExtensionGarbageCollector::GarbageCollectExtensions,
                  weak_factory_.GetWeakPtr()),
-      base::TimeDelta::FromSeconds(kGarbageCollectStartupDelay));
+      kGarbageCollectStartupDelay);
 
   extension_system->ready().Post(
       FROM_HERE,
@@ -182,7 +184,7 @@ void ExtensionGarbageCollector::GarbageCollectExtensions() {
         FROM_HERE,
         base::BindOnce(&ExtensionGarbageCollector::GarbageCollectExtensions,
                        weak_factory_.GetWeakPtr()),
-        base::TimeDelta::FromSeconds(kGarbageCollectRetryDelayInSeconds));
+        kGarbageCollectRetryDelay);
     return;
   }
 

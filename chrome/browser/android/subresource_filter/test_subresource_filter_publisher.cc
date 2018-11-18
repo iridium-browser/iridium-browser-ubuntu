@@ -20,9 +20,8 @@
 #include "base/numerics/safe_conversions.h"
 #include "base/threading/thread_restrictions.h"
 #include "chrome/browser/browser_process.h"
-#include "components/subresource_filter/content/browser/content_ruleset_service.h"
-#include "components/subresource_filter/core/browser/ruleset_service.h"
-#include "components/url_pattern_index/unindexed_ruleset.h"
+#include "components/subresource_filter/content/browser/ruleset_service.h"
+#include "components/subresource_filter/core/common/unindexed_ruleset.h"
 #include "content/public/browser/browser_thread.h"
 #include "jni/TestSubresourceFilterPublisher_jni.h"
 #include "third_party/protobuf/src/google/protobuf/io/zero_copy_stream_impl_lite.h"
@@ -75,7 +74,7 @@ void JNI_TestSubresourceFilterPublisher_CreateAndPublishRulesetDisallowingSuffix
   // Create the ruleset contents.
   std::string ruleset_contents_str;
   google::protobuf::io::StringOutputStream output(&ruleset_contents_str);
-  url_pattern_index::UnindexedRulesetWriter ruleset_writer(&output);
+  subresource_filter::UnindexedRulesetWriter ruleset_writer(&output);
   ruleset_writer.AddUrlRule(
       CreateSuffixRule(base::android::ConvertJavaStringToUTF8(env, suffix)));
   ruleset_writer.Finish();

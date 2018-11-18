@@ -194,13 +194,14 @@ function defaultTaskDialog(expectedTaskId, windowId) {
                 'fakeMouseClick', windowId, ['#tasks']);
             // Wait for dropdown menu to show.
             return remoteCall.waitForElement(
-                windowId, '#tasks-menu cr-menu-item');
+                windowId, '#tasks-menu:not([hidden]) cr-menu-item');
           })
           .then(function(result) {
+            chrome.test.assertTrue(!!result);
             // Click on first menu item.
             remoteCall.callRemoteTestUtil(
                 'fakeMouseClick', windowId,
-                ['#tasks-menu cr-menu-item:nth-child(1)']);
+                ['#tasks-menu:not([hidden]) cr-menu-item:nth-child(1)']);
             // Wait dropdown menu to hide.
             return remoteCall.waitForElement(windowId, '#tasks-menu[hidden]');
           })
@@ -214,22 +215,22 @@ function defaultTaskDialog(expectedTaskId, windowId) {
   });
 }
 
-testcase.executeDefaultTaskOnDrive = function() {
+testcase.executeDefaultTaskDrive = function() {
   testPromise(setupTaskTest(RootPath.DRIVE, DRIVE_FAKE_TASKS).then(
       executeDefaultTask.bind(null, 'dummytaskid|drive|open-with')));
 };
 
-testcase.executeDefaultTaskOnDownloads = function() {
+testcase.executeDefaultTaskDownloads = function() {
   testPromise(setupTaskTest(RootPath.DOWNLOADS, DOWNLOADS_FAKE_TASKS).then(
       executeDefaultTask.bind(null, 'dummytaskid|open-with')));
 };
 
-testcase.defaultTaskDialogOnDrive = function() {
+testcase.defaultTaskDialogDrive = function() {
   testPromise(setupTaskTest(RootPath.DRIVE, DRIVE_FAKE_TASKS).then(
       defaultTaskDialog.bind(null, 'dummytaskid-2|drive|open-with')));
 };
 
-testcase.defaultTaskDialogOnDownloads = function() {
+testcase.defaultTaskDialogDownloads = function() {
   testPromise(setupTaskTest(RootPath.DOWNLOADS, DOWNLOADS_FAKE_TASKS).then(
       defaultTaskDialog.bind(null, 'dummytaskid-2|open-with')));
 };
@@ -253,7 +254,7 @@ testcase.genericTaskIsNotExecuted = function() {
     }));
 };
 
-testcase.genericAndNonGenericTasksAreMixed = function() {
+testcase.genericTaskAndNonGenericTask = function() {
   var tasks = [
     new FakeTask(false, 'dummytaskid|open-with', 'DummyTask1',
         true /* isGenericFileHandler */),

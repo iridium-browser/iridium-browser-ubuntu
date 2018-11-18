@@ -7,18 +7,18 @@
 
 from __future__ import print_function
 
-from chromite.lib import cros_build_lib
+from chromite.lib import cros_collections
 
 
 # firewall:!:236:236:firewall daemon:/dev/null:/bin/false
-UserEntry = cros_build_lib.Collection('UserEntry',
-                                      user=None, encpasswd='!',
-                                      uid=None, gid=None,
-                                      home='/dev/null', shell='/bin/false')
+UserEntry = cros_collections.Collection('UserEntry',
+                                        user=None, encpasswd='!',
+                                        uid=None, gid=None,
+                                        home='/dev/null', shell='/bin/false')
 
 # tty:!:5:xorg,power,brltty
-GroupEntry = cros_build_lib.Collection('GroupEntry', group=None, encpasswd='!',
-                                       gid=None, users=set())
+GroupEntry = cros_collections.Collection('GroupEntry', group=None,
+                                         encpasswd='!', gid=None, users=set())
 
 # For users that we allow to login to the system, whitelist a number of
 # alternative shells.  These are equivalent from a security POV.
@@ -86,6 +86,7 @@ GROUP_BASELINE = dict((e.group, e) for e in (
     GroupEntry(group='daemon', gid=2, users={'root', 'bin', 'daemon'}),
     GroupEntry(group='sys', gid=3, users={'root', 'bin', 'adm'}),
     GroupEntry(group='adm', gid=4, users={'root', 'adm', 'daemon'}),
+    GroupEntry(group='tty', gid=5, users={'power', 'brltty'}),
     GroupEntry(group='disk', gid=6, users={'root', 'adm', 'cros-disks'}),
     GroupEntry(group='lp', gid=7, users={'lp', 'lpadmin', 'cups', 'chronos'}),
     GroupEntry(group='mem', gid=8),
@@ -99,6 +100,8 @@ GROUP_BASELINE = dict((e.group, e) for e in (
                                              'midis', 'rtanalytics'}),
     GroupEntry(group='cdrom', gid=19, users={'cros-disks'}),
     GroupEntry(group='tape', gid=26, users={'root'}),
+    GroupEntry(group='video', gid=27, users={'root', 'chronos', 'arc-camera',
+                                             'dlm', 'rtanalytics', 'crosvm'}),
     GroupEntry(group='cdrw', gid=80, users={'cros-disks'}),
     GroupEntry(group='usb', gid=85, users={'mtp', 'brltty', 'dlm', 'modem'}),
     GroupEntry(group='users', gid=100),
@@ -108,15 +111,17 @@ GROUP_BASELINE = dict((e.group, e) for e in (
     GroupEntry(group='nobody', gid=65534),
     GroupEntry(group='chronos', gid=1000),
     GroupEntry(group='chronos-access', gid=1001,
-               users={'root', 'ipsec', 'chronos', 'ntfs-3g', 'avfs',
-                      'fuse-exfat', 'chaps', 'cros-disks', 'imageloaderd'}),
+               users={'root', 'ipsec', 'chronos',
+                      'chaps', 'cros-disks', 'imageloaderd'}),
     GroupEntry(group='tss', gid=207, users={'root', 'attestation',
                                             'bootlockboxd', 'chaps',
                                             'tpm_manager', 'trunks'}),
     GroupEntry(group='pkcs11', gid=208, users={'root', 'ipsec', 'chronos',
                                                'chaps', 'wpa', 'attestation'}),
     GroupEntry(group='wpa', gid=219, users={'root'}),
-    GroupEntry(group='cras', gid=600, users={'chronos', 'power'}),
+    GroupEntry(group='input', gid=222, users={'cras', 'power', 'chronos'}),
+    GroupEntry(group='cras', gid=600, users={'chronos', 'power',
+                                             'rtanalytics'}),
     GroupEntry(group='wayland', gid=601, users={'chronos', 'crosvm'}),
     GroupEntry(group='arc-bridge', gid=602, users={'chronos'}),
     GroupEntry(group='brltty', gid=240, users={'chronos'}),
@@ -135,15 +140,16 @@ GROUP_BASELINE = dict((e.group, e) for e in (
     GroupEntry(group='policy-readers', gid=303, users={'authpolicyd', 'chronos',
                                                        'u2f', 'shill'}),
     GroupEntry(group='ipsec', gid=212, users={'shill'}),
-    GroupEntry(group='debugfs-access', gid=605, users={'shill'}),
+    GroupEntry(group='debugfs-access', gid=605, users={'arc-camera', 'shill'}),
     GroupEntry(group='arc-camera', gid=603, users={'chronos'}),
     GroupEntry(group='daemon-store', gid=400, users={'biod', 'chaps',
-                                                     'crosvm'}),
+                                                     'crosvm', 'shill'}),
     GroupEntry(group='logs-access', gid=401, users={'debugd-logs'}),
     GroupEntry(group='serial', gid=402, users={'uucp'}),
     GroupEntry(group='devbroker-access', gid=403, users={'chronos'}),
     GroupEntry(group='i2c', gid=404, users={'power'}),
     GroupEntry(group='android-root', gid=655360, users={'android-root'}),
+    GroupEntry(group='android-everybody', gid=665357, users={'chronos'}),
     GroupEntry(group='user-containers', gid=10000, users={'user-containers'}),
     GroupEntry(group='midis', gid=608, users={'chronos'}),
     GroupEntry(group='avfs', gid=301, users={'cros-disks'}),
@@ -153,42 +159,31 @@ GROUP_BASELINE = dict((e.group, e) for e in (
                                                  'cups'}),
     GroupEntry(group='tun', gid=413, users={'crosvm', 'shill'}),
     GroupEntry(group='gpio', gid=414, users={'modem'}),
+    GroupEntry(group='shill', gid=20104, users={'shill', 'ipsec'}),
+    GroupEntry(group='fuse-drivefs', gid=304, users={'chronos'}),
+    GroupEntry(group='password-viewers', gid=611, users={'shill'}),
+    GroupEntry(group='apex-access', gid=405, users={'rtanalytics'}),
+    GroupEntry(group='modem', gid=241, users={'shill'}),
 ))
 
-GROUP_BASELINE_FREON = dict((e.group, e) for e in (
-    GroupEntry(group='tty', gid=5, users={'power', 'brltty'}),
-    GroupEntry(group='video', gid=27, users={'root', 'chronos', 'arc-camera',
-                                             'dlm', 'rtanalytics'}),
-    GroupEntry(group='input', gid=222, users={'cras', 'power', 'chronos'}),
-))
-
-GROUP_BASELINE_XORG = dict((e.group, e) for e in (
-    GroupEntry(group='tty', gid=5, users={'xorg', 'power', 'brltty'}),
-    GroupEntry(group='video', gid=27, users={'root', 'chronos', 'arc-camera',
-                                             'xorg', 'dlm', 'rtanalytics'}),
-    GroupEntry(group='input', gid=222, users={'cras', 'xorg', 'power'}),
-))
-
-GROUP_BASELINE_LAKITU = GROUP_BASELINE_XORG.copy()
-GROUP_BASELINE_LAKITU.update(dict((e.group, e) for e in (
+GROUP_BASELINE_LAKITU = dict((e.group, e) for e in (
     GroupEntry(group='systemd-journal', gid=270),
     GroupEntry(group='systemd-timesync', gid=271),
     GroupEntry(group='systemd-network', gid=274),
     GroupEntry(group='systemd-resolve', gid=275),
     GroupEntry(group='docker', gid=412),
     GroupEntry(group='google-sudoers', encpasswd='x', gid=1002),
-)))
+))
 
-GROUP_BASELINE_JETSTREAM = GROUP_BASELINE_XORG.copy()
-GROUP_BASELINE_JETSTREAM.update(dict((e.group, e) for e in (
+GROUP_BASELINE_JETSTREAM = dict((e.group, e) for e in (
     GroupEntry(group='leds', gid=1102, users={'ap-controller'}),
     GroupEntry(group='wpa_supplicant', gid=1114,
                users={'ap-wifi-diagnostics', 'wpa_supplicant',
-                      'ap-wifi-manager'}),
+                      'ap-wifi-manager', 'ap-hal'}),
     GroupEntry(group='hostapd', gid=1106,
                users={'hostapd', 'ap-wireless-optimizer', 'ap-monitor',
-                      'ap-wifi-manager', 'ap-wifi-diagnostics'}),
-)))
+                      'ap-wifi-manager', 'ap-wifi-diagnostics', 'ap-hal'}),
+))
 
 # rialtod:!:400:rialto
 GROUP_BASELINE_RIALTO = dict((e.group, e) for e in (

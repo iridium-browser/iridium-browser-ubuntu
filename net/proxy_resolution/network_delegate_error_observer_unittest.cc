@@ -9,6 +9,7 @@
 #include "base/location.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
+#include "base/test/scoped_task_environment.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "net/base/net_errors.h"
@@ -29,12 +30,12 @@ class TestNetworkDelegate : public NetworkDelegateImpl {
  private:
   // NetworkDelegate implementation.
   int OnBeforeURLRequest(URLRequest* request,
-                         const CompletionCallback& callback,
+                         CompletionOnceCallback callback,
                          GURL* new_url) override {
     return OK;
   }
   int OnBeforeStartTransaction(URLRequest* request,
-                               const CompletionCallback& callback,
+                               CompletionOnceCallback callback,
                                HttpRequestHeaders* headers) override {
     return OK;
   }
@@ -42,7 +43,7 @@ class TestNetworkDelegate : public NetworkDelegateImpl {
                           const HttpRequestHeaders& headers) override {}
   int OnHeadersReceived(
       URLRequest* request,
-      const CompletionCallback& callback,
+      CompletionOnceCallback callback,
       const HttpResponseHeaders* original_response_headers,
       scoped_refptr<HttpResponseHeaders>* override_response_headers,
       GURL* allowed_unsafe_redirect_url) override {
@@ -59,18 +60,20 @@ class TestNetworkDelegate : public NetworkDelegateImpl {
   }
   AuthRequiredResponse OnAuthRequired(URLRequest* request,
                                       const AuthChallengeInfo& auth_info,
-                                      const AuthCallback& callback,
+                                      AuthCallback callback,
                                       AuthCredentials* credentials) override {
     return AUTH_REQUIRED_RESPONSE_NO_ACTION;
   }
   bool OnCanGetCookies(const URLRequest& request,
-                       const CookieList& cookie_list) override {
-    return true;
+                       const CookieList& cookie_list,
+                       bool allowed_from_caller) override {
+    return allowed_from_caller;
   }
   bool OnCanSetCookie(const URLRequest& request,
                       const net::CanonicalCookie& cookie,
-                      CookieOptions* options) override {
-    return true;
+                      CookieOptions* options,
+                      bool allowed_from_caller) override {
+    return allowed_from_caller;
   }
   bool OnCanAccessFile(const URLRequest& request,
                        const base::FilePath& original_path,
@@ -84,6 +87,7 @@ class TestNetworkDelegate : public NetworkDelegateImpl {
 // Check that the OnPACScriptError method can be called from an arbitrary
 // thread.
 TEST(NetworkDelegateErrorObserverTest, CallOnThread) {
+  base::test::ScopedTaskEnvironment scoped_task_environment;
   base::Thread thread("test_thread");
   thread.Start();
   TestNetworkDelegate network_delegate;
@@ -99,6 +103,7 @@ TEST(NetworkDelegateErrorObserverTest, CallOnThread) {
 
 // Check that passing a NULL network delegate works.
 TEST(NetworkDelegateErrorObserverTest, NoDelegate) {
+  base::test::ScopedTaskEnvironment scoped_task_environment;
   base::Thread thread("test_thread");
   thread.Start();
   NetworkDelegateErrorObserver observer(

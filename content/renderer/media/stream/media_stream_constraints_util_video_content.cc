@@ -39,9 +39,11 @@ const double kDefaultScreenCastFrameRate =
 
 namespace {
 
+using ResolutionSet = media_constraints::ResolutionSet;
 using Point = ResolutionSet::Point;
-using StringSet = DiscreteSet<std::string>;
-using BoolSet = DiscreteSet<bool>;
+using StringSet = media_constraints::DiscreteSet<std::string>;
+using BoolSet = media_constraints::DiscreteSet<bool>;
+using DoubleRangeSet = media_constraints::NumericRangeSet<double>;
 
 constexpr double kMinScreenCastAspectRatio =
     static_cast<double>(kMinScreenCastDimension) /
@@ -50,7 +52,6 @@ constexpr double kMaxScreenCastAspectRatio =
     static_cast<double>(kMaxScreenCastDimension) /
     static_cast<double>(kMinScreenCastDimension);
 
-using DoubleRangeSet = NumericRangeSet<double>;
 
 class VideoContentCaptureCandidates {
  public:
@@ -69,9 +70,10 @@ class VideoContentCaptureCandidates {
             DoubleRangeSet::FromConstraint(constraint_set.frame_rate,
                                            0.0,
                                            kMaxScreenCastFrameRate)),
-        device_id_set_(StringSetFromConstraint(constraint_set.device_id)),
-        noise_reduction_set_(
-            BoolSetFromConstraint(constraint_set.goog_noise_reduction)) {}
+        device_id_set_(media_constraints::StringSetFromConstraint(
+            constraint_set.device_id)),
+        noise_reduction_set_(media_constraints::BoolSetFromConstraint(
+            constraint_set.goog_noise_reduction)) {}
 
   VideoContentCaptureCandidates(VideoContentCaptureCandidates&& other) =
       default;
@@ -258,7 +260,7 @@ int ClampToValidScreenCastDimension(int value) {
 VideoCaptureSettings SelectResultFromCandidates(
     const VideoContentCaptureCandidates& candidates,
     const blink::WebMediaTrackConstraintSet& basic_constraint_set,
-    const std::string& stream_source,
+    MediaStreamType stream_type,
     int screen_width,
     int screen_height) {
   std::string device_id = SelectDeviceIDFromCandidates(
@@ -298,7 +300,7 @@ VideoCaptureSettings SelectResultFromCandidates(
 
   // This default comes from the old algorithm.
   media::ResolutionChangePolicy default_resolution_policy =
-      stream_source == kMediaStreamSourceTab
+      stream_type == MEDIA_GUM_TAB_VIDEO_CAPTURE
           ? media::ResolutionChangePolicy::FIXED_RESOLUTION
           : media::ResolutionChangePolicy::ANY_WITHIN_LIMIT;
 
@@ -344,7 +346,7 @@ VideoCaptureSettings UnsatisfiedConstraintsResult(
 
 VideoCaptureSettings SelectSettingsVideoContentCapture(
     const blink::WebMediaConstraints& constraints,
-    const std::string& stream_source,
+    MediaStreamType stream_type,
     int screen_width,
     int screen_height) {
   VideoContentCaptureCandidates candidates;
@@ -365,7 +367,7 @@ VideoCaptureSettings SelectSettingsVideoContentCapture(
 
   DCHECK(!candidates.IsEmpty());
   return SelectResultFromCandidates(candidates, constraints.Basic(),
-                                    stream_source, screen_width, screen_height);
+                                    stream_type, screen_width, screen_height);
 }
 
 }  // namespace content

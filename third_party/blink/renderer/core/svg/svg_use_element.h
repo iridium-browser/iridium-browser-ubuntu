@@ -59,7 +59,7 @@ class SVGUseElement final : public SVGGraphicsElement,
   void DispatchPendingEvent();
   Path ToClipPath() const;
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  private:
   explicit SVGUseElement(Document&);
@@ -75,8 +75,8 @@ class SVGUseElement final : public SVGGraphicsElement,
 
   bool IsStructurallyExternal() const override;
 
-  InsertionNotificationRequest InsertedInto(ContainerNode*) override;
-  void RemovedFrom(ContainerNode*) override;
+  InsertionNotificationRequest InsertedInto(ContainerNode&) override;
+  void RemovedFrom(ContainerNode&) override;
 
   void SvgAttributeChanged(const QualifiedName&) override;
 
@@ -105,10 +105,9 @@ class SVGUseElement final : public SVGGraphicsElement,
   void ClearInstanceRoot();
   Element* CreateInstanceTree(SVGElement& target_root) const;
   void ClearResourceReference();
-  bool HasCycleUseReferencing(SVGUseElement&,
-                              const ContainerNode& target_instance,
-                              SVGElement*& new_target) const;
-  bool ExpandUseElementsInShadowTree();
+  bool HasCycleUseReferencing(const ContainerNode& target_instance,
+                              const SVGElement& new_target) const;
+  void ExpandUseElementsInShadowTree();
   void CloneNonMarkupEventListeners();
   void AddReferencesToFirstDegreeNestedUseElements(SVGElement& target);
 

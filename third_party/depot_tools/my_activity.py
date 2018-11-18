@@ -96,9 +96,7 @@ rietveld_instances = [
 
 gerrit_instances = [
   {
-    'url': 'chromium-review.googlesource.com',
-    'shorturl': 'crrev.com/c',
-    'short_url_protocol': 'https',
+    'url': 'android-review.googlesource.com',
   },
   {
     'url': 'chrome-internal-review.googlesource.com',
@@ -106,10 +104,15 @@ gerrit_instances = [
     'short_url_protocol': 'https',
   },
   {
-    'url': 'android-review.googlesource.com',
+    'url': 'chromium-review.googlesource.com',
+    'shorturl': 'crrev.com/c',
+    'short_url_protocol': 'https',
   },
   {
     'url': 'pdfium-review.googlesource.com',
+  },
+  {
+    'url': 'skia-review.googlesource.com',
   },
 ]
 
@@ -196,6 +199,7 @@ class MyActivity(object):
     self.referenced_issues = []
     self.check_cookies()
     self.google_code_auth_token = None
+    self.access_errors = set()
 
   def show_progress(self, how='.'):
     if sys.stdout.isatty():
@@ -268,7 +272,7 @@ class MyActivity(object):
 
     return issues
 
-  def extract_bug_number_from_description(self, issue):
+  def extract_bug_numbers_from_description(self, issue):
     description = None
 
     if 'description' in issue:
@@ -292,7 +296,7 @@ class MyActivity(object):
         # Add default chromium: prefix if none specified.
         bugs = [bug if ':' in bug else 'chromium:%s' % bug for bug in bugs]
 
-    return bugs
+    return sorted(set(bugs))
 
   def process_rietveld_issue(self, remote, instance, issue):
     ret = {}
@@ -335,7 +339,7 @@ class MyActivity(object):
     ret['created'] = datetime_from_rietveld(issue['created'])
     ret['replies'] = self.process_rietveld_replies(issue['messages'])
 
-    ret['bugs'] = self.extract_bug_number_from_description(issue)
+    ret['bugs'] = self.extract_bug_numbers_from_description(issue)
     ret['landed_days_ago'] = issue['landed_days_ago']
 
     return ret
@@ -351,8 +355,7 @@ class MyActivity(object):
       ret.append(r)
     return ret
 
-  @staticmethod
-  def gerrit_changes_over_rest(instance, filters):
+  def gerrit_changes_over_rest(self, instance, filters):
     # Convert the "key:value" filter to a list of (key, value) pairs.
     req = list(f.split(':', 1) for f in filters)
     try:
@@ -362,21 +365,29 @@ class MyActivity(object):
           o_params=['MESSAGES', 'LABELS', 'DETAILED_ACCOUNTS',
                     'CURRENT_REVISION', 'CURRENT_COMMIT']))
     except gerrit_util.GerritError, e:
-      logging.error('Looking up %r: %s', instance['url'], e)
+      error_message = 'Looking up %r: %s' % (instance['url'], e)
+      if error_message not in self.access_errors:
+        self.access_errors.add(error_message)
       return []
 
   def gerrit_search(self, instance, owner=None, reviewer=None):
     max_age = datetime.today() - self.modified_after
-    max_age = max_age.days * 24 * 3600 + max_age.seconds
-    user_filter = 'owner:%s' % owner if owner else 'reviewer:%s' % reviewer
-    filters = ['-age:%ss' % max_age, user_filter]
+    filters = ['-age:%ss' % (max_age.days * 24 * 3600 + max_age.seconds)]
+    if owner:
+      assert not reviewer
+      filters.append('owner:%s' % owner)
+    else:
+      filters.extend(('-owner:%s' % reviewer, 'reviewer:%s' % reviewer))
+    # TODO(cjhopman): Should abandoned changes be filtered out when
+    # merged_only is not enabled?
+    if self.options.merged_only:
+      filters.append('status:merged')
 
     issues = self.gerrit_changes_over_rest(instance, filters)
     self.show_progress()
     issues = [self.process_gerrit_issue(instance, issue)
               for issue in issues]
 
-    # TODO(cjhopman): should we filter abandoned changes?
     issues = filter(self.filter_issue, issues)
     issues = sorted(issues, key=lambda i: i['modified'], reverse=True)
 
@@ -398,7 +409,7 @@ class MyActivity(object):
     ret['review_url'] = '%s://%s/%s' % (protocol, url, issue['_number'])
 
     ret['header'] = issue['subject']
-    ret['owner'] = issue['owner']['email']
+    ret['owner'] = issue['owner'].get('email', '')
     ret['author'] = ret['owner']
     ret['created'] = datetime_from_gerrit(issue['created'])
     ret['modified'] = datetime_from_gerrit(issue['updated'])
@@ -408,7 +419,7 @@ class MyActivity(object):
       ret['replies'] = []
     ret['reviewers'] = set(r['author'] for r in ret['replies'])
     ret['reviewers'].discard(ret['author'])
-    ret['bugs'] = self.extract_bug_number_from_description(issue)
+    ret['bugs'] = self.extract_bug_numbers_from_description(issue)
     return ret
 
   @staticmethod
@@ -428,7 +439,10 @@ class MyActivity(object):
     auth_config = auth.extract_auth_config_from_options(self.options)
     authenticator = auth.get_authenticator_for_host(
         'bugs.chromium.org', auth_config)
-    return authenticator.authorize(httplib2.Http())
+    # Manually use a long timeout (10m); for some users who have a
+    # long history on the issue tracker, whatever the default timeout
+    # is is reached.
+    return authenticator.authorize(httplib2.Http(timeout=600))
 
   def filter_modified_monorail_issue(self, issue):
     """Precisely checks if an issue has been modified in the time range.
@@ -513,6 +527,7 @@ class MyActivity(object):
 
   def monorail_issue_search(self, project):
     epoch = datetime.utcfromtimestamp(0)
+    # TODO(tandrii): support non-chromium email, too.
     user_str = '%s@chromium.org' % self.user
 
     issues = self.monorail_query_issues(project, {
@@ -521,6 +536,13 @@ class MyActivity(object):
       'publishedMax': '%d' % (self.modified_before - epoch).total_seconds(),
       'updatedMin': '%d' % (self.modified_after - epoch).total_seconds(),
     })
+
+    if self.options.completed_issues:
+      return [
+          issue for issue in issues
+          if (self.match(issue['owner']) and
+              issue['status'].lower() in ('verified', 'fixed'))
+      ]
 
     return [
         issue for issue in issues
@@ -669,6 +691,12 @@ class MyActivity(object):
       for change in self.changes:
           self.print_change(change)
 
+  def print_access_errors(self):
+    if self.access_errors:
+      logging.error('Access Errors:')
+      for error in self.access_errors:
+        logging.error(error.rstrip())
+
   def get_reviews(self):
     num_instances = len(rietveld_instances) + len(gerrit_instances)
     with contextlib.closing(ThreadPool(num_instances)) as pool:
@@ -680,7 +708,6 @@ class MyActivity(object):
           gerrit_instances)
       rietveld_reviews = itertools.chain.from_iterable(rietveld_reviews.get())
       gerrit_reviews = itertools.chain.from_iterable(gerrit_reviews.get())
-      gerrit_reviews = [r for r in gerrit_reviews if r['owner'] != self.user]
       self.reviews = list(rietveld_reviews) + list(gerrit_reviews)
 
   def print_reviews(self):
@@ -694,6 +721,9 @@ class MyActivity(object):
       monorail_issues = pool.map(
           self.monorail_issue_search, monorail_projects.keys())
       monorail_issues = list(itertools.chain.from_iterable(monorail_issues))
+
+    if not monorail_issues:
+      return
 
     with contextlib.closing(ThreadPool(len(monorail_issues))) as pool:
       filtered_issues = pool.map(
@@ -752,9 +782,12 @@ class MyActivity(object):
     for issue_uid in issues:
       if changes_by_issue_uid[issue_uid] or not skip_empty_own:
         self.print_issue(issues[issue_uid])
-      for change in changes_by_issue_uid[issue_uid]:
-        print '',  # this prints one space due to comma, but no newline
-        self.print_change(change)
+      if changes_by_issue_uid[issue_uid]:
+        print
+        for change in changes_by_issue_uid[issue_uid]:
+          print '   ',  # this prints one space due to comma, but no newline
+          self.print_change(change)
+        print
 
     # Changes referencing others' issues.
     for issue_uid in ref_issues:
@@ -939,6 +972,19 @@ def main():
       help='Suppress non-error messages.'
   )
   parser.add_option(
+      '-M', '--merged-only',
+      action='store_true',
+      dest='merged_only',
+      default=False,
+      help='Shows only changes that have been merged.')
+  parser.add_option(
+      '-C', '--completed-issues',
+      action='store_true',
+      dest='completed_issues',
+      default=False,
+      help='Shows only monorail issues that have completed (Fixed|Verified) '
+           'by the user.')
+  parser.add_option(
       '-o', '--output', metavar='<file>',
       help='Where to output the results. By default prints to stdout.')
 
@@ -983,9 +1029,9 @@ def main():
   options.begin, options.end = begin, end
 
   if options.markdown:
-    options.output_format = ' * [{title}]({url})'
-    options.output_format_heading = '### {heading} ###'
-    options.output_format_no_url = ' * {title}'
+    options.output_format_heading = '### {heading}\n'
+    options.output_format = '  * [{title}]({url})'
+    options.output_format_no_url = '  * {title}'
   logging.info('Searching for activity by %s', options.user)
   logging.info('Using range %s to %s', options.begin, options.end)
 
@@ -1020,6 +1066,8 @@ def main():
     logging.error('auth.AuthenticationError: %s', e)
 
   my_activity.show_progress('\n')
+
+  my_activity.print_access_errors()
 
   output_file = None
   try:

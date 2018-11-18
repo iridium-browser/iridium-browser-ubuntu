@@ -4,8 +4,10 @@
 
 #include "components/sync/driver/fake_data_type_controller.h"
 
+#include <utility>
+
 #include "base/bind.h"
-#include "base/threading/thread_task_runner_handle.h"
+#include "base/threading/sequenced_task_runner_handle.h"
 #include "components/sync/model/data_type_error_handler_impl.h"
 #include "components/sync/model/sync_merge_result.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -22,7 +24,8 @@ FakeDataTypeController::FakeDataTypeController(ModelType type)
       model_load_delayed_(false),
       ready_for_start_(true),
       should_load_model_before_configure_(false),
-      register_with_backend_call_count_(0) {}
+      register_with_backend_call_count_(0),
+      clear_metadata_call_count_(0) {}
 
 FakeDataTypeController::~FakeDataTypeController() {}
 
@@ -32,6 +35,7 @@ bool FakeDataTypeController::ShouldLoadModelBeforeConfigure() const {
 
 // NOT_RUNNING ->MODEL_LOADED |MODEL_STARTING.
 void FakeDataTypeController::LoadModels(
+    const ConfigureContext& configure_context,
     const ModelLoadCallback& model_load_callback) {
   DCHECK(CalledOnValidThread());
   model_load_callback_ = model_load_callback;
@@ -42,7 +46,7 @@ void FakeDataTypeController::LoadModels(
 
   if (model_load_delayed_ == false) {
     if (load_error_.IsSet())
-      state_ = DISABLED;
+      state_ = FAILED;
     else
       state_ = MODEL_LOADED;
     model_load_callback.Run(type(), load_error_);
@@ -52,25 +56,24 @@ void FakeDataTypeController::LoadModels(
 }
 
 void FakeDataTypeController::RegisterWithBackend(
-    base::Callback<void(bool)> set_downloaded,
+    base::OnceCallback<void(bool)> set_downloaded,
     ModelTypeConfigurer* configurer) {
   ++register_with_backend_call_count_;
 }
 
 // MODEL_LOADED -> MODEL_STARTING.
-void FakeDataTypeController::StartAssociating(
-    const StartCallback& start_callback) {
+void FakeDataTypeController::StartAssociating(StartCallback start_callback) {
   DCHECK(CalledOnValidThread());
-  last_start_callback_ = start_callback;
+  last_start_callback_ = std::move(start_callback);
   state_ = ASSOCIATING;
 }
 
-// MODEL_STARTING | ASSOCIATING -> RUNNING | DISABLED | NOT_RUNNING
+// MODEL_STARTING | ASSOCIATING -> RUNNING | FAILED | NOT_RUNNING
 // (depending on |result|)
 void FakeDataTypeController::FinishStart(ConfigureResult result) {
   DCHECK(CalledOnValidThread());
   // We should have a callback from Start().
-  if (last_start_callback_.is_null()) {
+  if (!last_start_callback_) {
     ADD_FAILURE();
     return;
   }
@@ -81,7 +84,7 @@ void FakeDataTypeController::FinishStart(ConfigureResult result) {
   if (result <= OK_FIRST_RUN) {
     state_ = RUNNING;
   } else if (result == ASSOCIATION_FAILED) {
-    state_ = DISABLED;
+    state_ = FAILED;
     local_merge_result.set_error(SyncError(FROM_HERE, SyncError::DATATYPE_ERROR,
                                            "Association failed", type()));
   } else if (result == UNRECOVERABLE_ERROR) {
@@ -96,18 +99,23 @@ void FakeDataTypeController::FinishStart(ConfigureResult result) {
   } else {
     NOTREACHED();
   }
-  last_start_callback_.Run(result, local_merge_result, syncer_merge_result);
+  std::move(last_start_callback_)
+      .Run(result, local_merge_result, syncer_merge_result);
 }
 
 // * -> NOT_RUNNING
-void FakeDataTypeController::Stop() {
+void FakeDataTypeController::Stop(ShutdownReason shutdown_reason) {
   DCHECK(CalledOnValidThread());
-  if (!model_load_callback_.is_null()) {
+  if (state() == MODEL_STARTING) {
     // Real data type controllers run the callback and specify "ABORTED" as an
     // error.  We should probably find a way to use the real code and mock out
     // unnecessary pieces.
     SimulateModelLoadFinishing();
   }
+
+  if (shutdown_reason == DISABLE_SYNC)
+    ++clear_metadata_call_count_;
+
   state_ = NOT_RUNNING;
 }
 
@@ -133,7 +141,7 @@ void FakeDataTypeController::SetModelLoadError(SyncError error) {
 
 void FakeDataTypeController::SimulateModelLoadFinishing() {
   if (load_error_.IsSet())
-    state_ = DISABLED;
+    state_ = FAILED;
   else
     state_ = MODEL_LOADED;
   model_load_callback_.Run(type(), load_error_);
@@ -151,8 +159,8 @@ std::unique_ptr<DataTypeErrorHandler>
 FakeDataTypeController::CreateErrorHandler() {
   DCHECK(CalledOnValidThread());
   return std::make_unique<DataTypeErrorHandlerImpl>(
-      base::ThreadTaskRunnerHandle::Get(), base::Closure(),
-      base::Bind(model_load_callback_, type()));
+      base::SequencedTaskRunnerHandle::Get(), base::Closure(),
+      base::BindRepeating(model_load_callback_, type()));
 }
 
 }  // namespace syncer

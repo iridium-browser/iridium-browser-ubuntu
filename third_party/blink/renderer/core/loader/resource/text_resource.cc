@@ -12,7 +12,7 @@
 namespace blink {
 
 TextResource::TextResource(const ResourceRequest& resource_request,
-                           Resource::Type type,
+                           ResourceType type,
                            const ResourceLoaderOptions& options,
                            const TextResourceDecoderOptions& decoder_options)
     : Resource(resource_request, type, options),
@@ -33,12 +33,8 @@ String TextResource::DecodedText() const {
   DCHECK(Data());
 
   StringBuilder builder;
-  const char* segment;
-  size_t position = 0;
-  while (size_t length = Data()->GetSomeData(segment, position)) {
-    builder.Append(decoder_->Decode(segment, length));
-    position += length;
-  }
+  for (const auto& span : *Data())
+    builder.Append(decoder_->Decode(span.data(), span.size()));
   builder.Append(decoder_->Flush());
   return builder.ToString();
 }

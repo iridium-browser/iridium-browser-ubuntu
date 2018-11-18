@@ -5,11 +5,16 @@
 #ifndef SERVICES_DEVICE_DEVICE_SERVICE_H_
 #define SERVICES_DEVICE_DEVICE_SERVICE_H_
 
+#include <memory>
+#include <string>
+
 #include "base/memory/ref_counted.h"
 #include "build/build_config.h"
-#include "device/geolocation/geolocation_provider.h"
-#include "device/geolocation/geolocation_provider_impl.h"
+#include "device/usb/mojo/device_manager_impl.h"
+#include "device/usb/public/mojom/device_manager.mojom.h"
 #include "mojo/public/cpp/bindings/binding_set.h"
+#include "services/device/geolocation/geolocation_provider.h"
+#include "services/device/geolocation/geolocation_provider_impl.h"
 #include "services/device/geolocation/public_ip_address_geolocation_provider.h"
 #include "services/device/public/mojom/battery_monitor.mojom.h"
 #include "services/device/public/mojom/fingerprint.mojom.h"
@@ -36,6 +41,11 @@
 #include "services/device/public/mojom/hid.mojom.h"
 #endif
 
+#if defined(OS_CHROMEOS)
+#include "services/device/media_transfer_protocol/mtp_device_manager.h"
+#include "services/device/public/mojom/bluetooth_system.mojom.h"
+#endif
+
 #if defined(OS_LINUX) && defined(USE_UDEV)
 #include "services/device/public/mojom/input_service.mojom.h"
 #endif
@@ -43,6 +53,10 @@
 namespace base {
 class SingleThreadTaskRunner;
 }
+
+namespace network {
+class SharedURLLoaderFactory;
+}  // namespace network
 
 namespace device {
 
@@ -61,9 +75,9 @@ class TimeZoneMonitor;
 std::unique_ptr<service_manager::Service> CreateDeviceService(
     scoped_refptr<base::SingleThreadTaskRunner> file_task_runner,
     scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
-    GeolocationProvider::RequestContextProducer
-        geolocation_request_context_producer,
+    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
     const std::string& geolocation_api_key,
+    bool use_gms_core_location_provider,
     const WakeLockContextCallback& wake_lock_context_callback,
     const CustomLocationProviderCallback& custom_location_provider_callback,
     const base::android::JavaRef<jobject>& java_nfc_delegate);
@@ -71,8 +85,7 @@ std::unique_ptr<service_manager::Service> CreateDeviceService(
 std::unique_ptr<service_manager::Service> CreateDeviceService(
     scoped_refptr<base::SingleThreadTaskRunner> file_task_runner,
     scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
-    GeolocationProvider::RequestContextProducer
-        geolocation_request_context_producer,
+    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
     const std::string& geolocation_api_key,
     const CustomLocationProviderCallback& custom_location_provider_callback);
 #endif
@@ -80,19 +93,19 @@ std::unique_ptr<service_manager::Service> CreateDeviceService(
 class DeviceService : public service_manager::Service {
  public:
 #if defined(OS_ANDROID)
-  DeviceService(scoped_refptr<base::SingleThreadTaskRunner> file_task_runner,
-                scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
-                GeolocationProvider::RequestContextProducer
-                    geolocation_request_context_producer,
-                const std::string& geolocation_api_key,
-                const WakeLockContextCallback& wake_lock_context_callback,
-                const base::android::JavaRef<jobject>& java_nfc_delegate);
+  DeviceService(
+      scoped_refptr<base::SingleThreadTaskRunner> file_task_runner,
+      scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
+      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
+      const std::string& geolocation_api_key,
+      const WakeLockContextCallback& wake_lock_context_callback,
+      const base::android::JavaRef<jobject>& java_nfc_delegate);
 #else
-  DeviceService(scoped_refptr<base::SingleThreadTaskRunner> file_task_runner,
-                scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
-                GeolocationProvider::RequestContextProducer
-                    geolocation_request_context_producer,
-                const std::string& geolocation_api_key);
+  DeviceService(
+      scoped_refptr<base::SingleThreadTaskRunner> file_task_runner,
+      scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
+      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
+      const std::string& geolocation_api_key);
 #endif
   ~DeviceService() override;
 
@@ -119,6 +132,12 @@ class DeviceService : public service_manager::Service {
   void BindVibrationManagerRequest(mojom::VibrationManagerRequest request);
 #endif
 
+#if defined(OS_CHROMEOS)
+  void BindBluetoothSystemFactoryRequest(
+      mojom::BluetoothSystemFactoryRequest request);
+  void BindMtpManagerRequest(mojom::MtpManagerRequest request);
+#endif
+
   void BindPowerMonitorRequest(mojom::PowerMonitorRequest request);
 
   void BindPublicIpAddressGeolocationProviderRequest(
@@ -138,16 +157,18 @@ class DeviceService : public service_manager::Service {
 
   void BindSerialIoHandlerRequest(mojom::SerialIoHandlerRequest request);
 
+  void BindUsbDeviceManagerRequest(mojom::UsbDeviceManagerRequest request);
+
   std::unique_ptr<PowerMonitorMessageBroadcaster>
       power_monitor_message_broadcaster_;
   std::unique_ptr<PublicIpAddressGeolocationProvider>
       public_ip_address_geolocation_provider_;
   std::unique_ptr<TimeZoneMonitor> time_zone_monitor_;
+  std::unique_ptr<usb::DeviceManagerImpl> usb_device_manager_;
   scoped_refptr<base::SingleThreadTaskRunner> file_task_runner_;
   scoped_refptr<base::SingleThreadTaskRunner> io_task_runner_;
+  scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory_;
 
-  GeolocationProvider::RequestContextProducer
-      geolocation_request_context_producer_;
   const std::string geolocation_api_key_;
   WakeLockContextCallback wake_lock_context_callback_;
 
@@ -164,6 +185,10 @@ class DeviceService : public service_manager::Service {
   base::android::ScopedJavaGlobalRef<jobject> java_nfc_delegate_;
 #else
   std::unique_ptr<HidManagerImpl> hid_manager_;
+#endif
+
+#if defined(OS_CHROMEOS)
+  std::unique_ptr<MtpDeviceManager> mtp_device_manager_;
 #endif
 
   service_manager::BinderRegistry registry_;

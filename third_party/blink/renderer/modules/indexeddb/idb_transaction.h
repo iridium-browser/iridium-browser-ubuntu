@@ -28,8 +28,8 @@
 
 #include <memory>
 
+#include "third_party/blink/public/common/indexeddb/web_idb_types.h"
 #include "third_party/blink/public/platform/modules/indexeddb/web_idb_database.h"
-#include "third_party/blink/public/platform/modules/indexeddb/web_idb_types.h"
 #include "third_party/blink/renderer/bindings/core/v8/active_script_wrappable.h"
 #include "third_party/blink/renderer/core/dom/context_lifecycle_observer.h"
 #include "third_party/blink/renderer/core/dom/dom_string_list.h"
@@ -47,6 +47,7 @@
 namespace blink {
 
 class DOMException;
+class EventQueue;
 class ExecutionContext;
 class ExceptionState;
 class IDBDatabase;
@@ -82,7 +83,7 @@ class MODULES_EXPORT IDBTransaction final
       IDBOpenDBRequest*,
       const IDBDatabaseMetadata& old_metadata);
   ~IDBTransaction() override;
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
   static WebIDBTransactionMode StringToMode(const String&);
 
@@ -160,7 +161,7 @@ class MODULES_EXPORT IDBTransaction final
 
  protected:
   // EventTarget
-  DispatchEventResult DispatchEventInternal(Event*) override;
+  DispatchEventResult DispatchEventInternal(Event&) override;
 
  private:
   using IDBObjectStoreMap = HeapHashMap<String, Member<IDBObjectStore>>;
@@ -280,6 +281,8 @@ class MODULES_EXPORT IDBTransaction final
   //
   // Only valid for versionchange transactions.
   IDBDatabaseMetadata old_database_metadata_;
+
+  Member<EventQueue> event_queue_;
 };
 
 }  // namespace blink

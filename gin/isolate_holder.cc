@@ -12,7 +12,7 @@
 #include <utility>
 
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop/message_loop_current.h"
 #include "base/single_thread_task_runner.h"
 #include "base/sys_info.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -20,7 +20,6 @@
 #include "gin/debug_impl.h"
 #include "gin/function_template.h"
 #include "gin/per_isolate_data.h"
-#include "gin/run_microtasks_observer.h"
 #include "gin/v8_initializer.h"
 #include "gin/v8_isolate_memory_dump_provider.h"
 
@@ -32,34 +31,44 @@ const intptr_t* g_reference_table = nullptr;
 }  // namespace
 
 IsolateHolder::IsolateHolder(
-    scoped_refptr<base::SingleThreadTaskRunner> task_runner)
-    : IsolateHolder(std::move(task_runner), AccessMode::kSingleThread) {}
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+    IsolateType isolate_type)
+    : IsolateHolder(std::move(task_runner),
+                    AccessMode::kSingleThread,
+                    isolate_type) {}
 
 IsolateHolder::IsolateHolder(
     scoped_refptr<base::SingleThreadTaskRunner> task_runner,
-    AccessMode access_mode)
+    AccessMode access_mode,
+    IsolateType isolate_type)
     : IsolateHolder(std::move(task_runner),
                     access_mode,
                     kAllowAtomicsWait,
+                    isolate_type,
                     IsolateCreationMode::kNormal) {}
 
 IsolateHolder::IsolateHolder(
     scoped_refptr<base::SingleThreadTaskRunner> task_runner,
     AccessMode access_mode,
     AllowAtomicsWaitMode atomics_wait_mode,
+    IsolateType isolate_type,
     IsolateCreationMode isolate_creation_mode)
-    : access_mode_(access_mode) {
+    : access_mode_(access_mode), isolate_type_(isolate_type) {
   DCHECK(task_runner);
   DCHECK(task_runner->BelongsToCurrentThread());
 
   v8::ArrayBuffer::Allocator* allocator = g_array_buffer_allocator;
   CHECK(allocator) << "You need to invoke gin::IsolateHolder::Initialize first";
 
+  isolate_ = v8::Isolate::Allocate();
+  isolate_data_.reset(
+      new PerIsolateData(isolate_, allocator, access_mode_, task_runner));
   if (isolate_creation_mode == IsolateCreationMode::kCreateSnapshot) {
     // This branch is called when creating a V8 snapshot for Blink.
     // Note SnapshotCreator calls isolate->Enter() in its construction.
-    snapshot_creator_.reset(new v8::SnapshotCreator(g_reference_table));
-    isolate_ = snapshot_creator_->GetIsolate();
+    snapshot_creator_.reset(
+        new v8::SnapshotCreator(isolate_, g_reference_table));
+    DCHECK_EQ(isolate_, snapshot_creator_->GetIsolate());
   } else {
     v8::Isolate::CreateParams params;
     params.entry_hook = DebugImpl::GetFunctionEntryHook();
@@ -71,12 +80,11 @@ IsolateHolder::IsolateHolder(
     params.allow_atomics_wait =
         atomics_wait_mode == AllowAtomicsWaitMode::kAllowAtomicsWait;
     params.external_references = g_reference_table;
+    params.only_terminate_in_safe_scope = true;
 
-    isolate_ = v8::Isolate::New(params);
+    v8::Isolate::Initialize(isolate_, params);
   }
 
-  isolate_data_.reset(
-      new PerIsolateData(isolate_, allocator, access_mode_, task_runner));
   isolate_memory_dump_provider_.reset(
       new V8IsolateMemoryDumpProvider(this, task_runner));
 #if defined(OS_WIN)
@@ -93,8 +101,6 @@ IsolateHolder::IsolateHolder(
 }
 
 IsolateHolder::~IsolateHolder() {
-  if (task_observer_.get())
-    base::MessageLoop::current()->RemoveTaskObserver(task_observer_.get());
 #if defined(OS_WIN)
   {
     void* code_range;
@@ -121,18 +127,6 @@ void IsolateHolder::Initialize(ScriptMode mode,
   V8Initializer::Initialize(mode, v8_extras_mode);
   g_array_buffer_allocator = allocator;
   g_reference_table = reference_table;
-}
-
-void IsolateHolder::AddRunMicrotasksObserver() {
-  DCHECK(!task_observer_.get());
-  task_observer_.reset(new RunMicrotasksObserver(isolate_));
-  base::MessageLoop::current()->AddTaskObserver(task_observer_.get());
-}
-
-void IsolateHolder::RemoveRunMicrotasksObserver() {
-  DCHECK(task_observer_.get());
-  base::MessageLoop::current()->RemoveTaskObserver(task_observer_.get());
-  task_observer_.reset();
 }
 
 void IsolateHolder::EnableIdleTasks(

@@ -5,12 +5,13 @@
 #include "ui/base/ime/input_method_base.h"
 
 #include "base/bind.h"
+#include "base/bind_helpers.h"
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "ui/base/ime/ime_bridge.h"
 #include "ui/base/ime/input_method_delegate.h"
+#include "ui/base/ime/input_method_keyboard_controller_stub.h"
 #include "ui/base/ime/input_method_observer.h"
 #include "ui/base/ime/text_input_client.h"
 #include "ui/events/event.h"
@@ -24,9 +25,15 @@ ui::IMEEngineHandlerInterface* InputMethodBase::GetEngine() {
 }
 
 InputMethodBase::InputMethodBase(internal::InputMethodDelegate* delegate)
+    : InputMethodBase(delegate, nullptr) {}
+
+InputMethodBase::InputMethodBase(
+    internal::InputMethodDelegate* delegate,
+    std::unique_ptr<InputMethodKeyboardController> keyboard_controller)
     : sending_key_event_(false),
       delegate_(delegate),
-      text_input_client_(nullptr) {}
+      text_input_client_(nullptr),
+      keyboard_controller_(std::move(keyboard_controller)) {}
 
 InputMethodBase::~InputMethodBase() {
   for (InputMethodObserver& observer : observer_list_)
@@ -115,9 +122,16 @@ bool InputMethodBase::CanComposeInline() const {
   return client ? client->CanComposeInline() : true;
 }
 
-void InputMethodBase::ShowImeIfNeeded() {
+bool InputMethodBase::GetClientShouldDoLearning() {
+  TextInputClient* client = GetTextInputClient();
+  return client && client->ShouldDoLearning();
+}
+
+void InputMethodBase::ShowVirtualKeyboardIfEnabled() {
   for (InputMethodObserver& observer : observer_list_)
-    observer.OnShowImeIfNeeded();
+    observer.OnShowVirtualKeyboardIfEnabled();
+  if (auto* keyboard = GetInputMethodKeyboardController())
+    keyboard->DisplayVirtualKeyboard();
 }
 
 void InputMethodBase::AddObserver(InputMethodObserver* observer) {
@@ -126,6 +140,11 @@ void InputMethodBase::AddObserver(InputMethodObserver* observer) {
 
 void InputMethodBase::RemoveObserver(InputMethodObserver* observer) {
   observer_list_.RemoveObserver(observer);
+}
+
+InputMethodKeyboardController*
+InputMethodBase::GetInputMethodKeyboardController() {
+  return keyboard_controller_.get();
 }
 
 bool InputMethodBase::IsTextInputClientFocused(const TextInputClient* client) {
@@ -143,23 +162,10 @@ void InputMethodBase::OnInputMethodChanged() const {
 }
 
 ui::EventDispatchDetails InputMethodBase::DispatchKeyEventPostIME(
-    ui::KeyEvent* event) const {
-  ui::EventDispatchDetails details;
-  if (delegate_)
-    details = delegate_->DispatchKeyEventPostIME(event);
-  return details;
-}
-
-ui::EventDispatchDetails InputMethodBase::DispatchKeyEventPostIME(
     ui::KeyEvent* event,
     base::OnceCallback<void(bool)> ack_callback) const {
-  if (delegate_) {
-    ui::EventDispatchDetails details =
-        delegate_->DispatchKeyEventPostIME(event);
-    if (ack_callback)
-      std::move(ack_callback).Run(event->stopped_propagation());
-    return details;
-  }
+  if (delegate_)
+    return delegate_->DispatchKeyEventPostIME(event, std::move(ack_callback));
 
   if (ack_callback)
     std::move(ack_callback).Run(false);
@@ -213,7 +219,7 @@ std::vector<gfx::Rect> InputMethodBase::GetCompositionBounds(
 bool InputMethodBase::SendFakeProcessKeyEvent(bool pressed) const {
   KeyEvent evt(pressed ? ET_KEY_PRESSED : ET_KEY_RELEASED,
                pressed ? VKEY_PROCESSKEY : VKEY_UNKNOWN, EF_IME_FABRICATED_KEY);
-  ignore_result(DispatchKeyEventPostIME(&evt));
+  ignore_result(DispatchKeyEventPostIME(&evt, base::NullCallback()));
   return evt.stopped_propagation();
 }
 
@@ -246,6 +252,18 @@ void InputMethodBase::UpdateCompositionText(const CompositionText& composition_,
 }
 
 void InputMethodBase::DeleteSurroundingText(int32_t offset, uint32_t length) {}
+
+SurroundingTextInfo InputMethodBase::GetSurroundingTextInfo() {
+  gfx::Range text_range;
+  SurroundingTextInfo info;
+  TextInputClient* client = GetTextInputClient();
+  if (!client->GetTextRange(&text_range) ||
+      !client->GetTextFromRange(text_range, &info.surrounding_text) ||
+      !client->GetSelectionRange(&info.selection_range)) {
+    return SurroundingTextInfo();
+  }
+  return info;
+}
 
 void InputMethodBase::SendKeyEvent(KeyEvent* event) {
   sending_key_event_ = true;

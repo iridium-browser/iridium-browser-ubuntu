@@ -25,6 +25,8 @@ class StubWebView : public WebView {
   Status GetUrl(std::string* url) override;
   Status Load(const std::string& url, const Timeout* timeout) override;
   Status Reload(const Timeout* timeout) override;
+  Status Freeze(const Timeout* timeout) override;
+  Status Resume(const Timeout* timeout) override;
   Status SendCommand(const std::string& cmd,
                      const base::DictionaryValue& params) override;
   Status SendCommandAndGetResult(const std::string& cmd,
@@ -81,7 +83,9 @@ class StubWebView : public WebView {
   Status OverrideGeolocation(const Geoposition& geoposition) override;
   Status OverrideNetworkConditions(
       const NetworkConditions& network_conditions) override;
-  Status CaptureScreenshot(std::string* screenshot) override;
+  Status CaptureScreenshot(
+      std::string* screenshot,
+      const base::DictionaryValue& params) override;
   Status SetFileInputFiles(const std::string& frame,
                            const base::DictionaryValue& element,
                            const std::vector<base::FilePath>& files) override;

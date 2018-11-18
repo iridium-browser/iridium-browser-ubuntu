@@ -60,8 +60,14 @@ DEFINE_NODE_FACTORY(HTMLTrackElement)
 
 HTMLTrackElement::~HTMLTrackElement() = default;
 
+const HashSet<AtomicString>& HTMLTrackElement::GetCheckedAttributeNames()
+    const {
+  DEFINE_STATIC_LOCAL(HashSet<AtomicString>, attribute_set, ({"src"}));
+  return attribute_set;
+}
+
 Node::InsertionNotificationRequest HTMLTrackElement::InsertedInto(
-    ContainerNode* insertion_point) {
+    ContainerNode& insertion_point) {
   DVLOG(TRACK_LOG_LEVEL) << "insertedInto";
 
   // Since we've moved to a new parent, we may now be able to load.
@@ -69,14 +75,14 @@ Node::InsertionNotificationRequest HTMLTrackElement::InsertedInto(
 
   HTMLElement::InsertedInto(insertion_point);
   HTMLMediaElement* parent = MediaElement();
-  if (insertion_point == parent)
+  if (&insertion_point == parent)
     parent->DidAddTrackElement(this);
   return kInsertionDone;
 }
 
-void HTMLTrackElement::RemovedFrom(ContainerNode* insertion_point) {
-  if (!parentNode() && IsHTMLMediaElement(*insertion_point))
-    ToHTMLMediaElement(insertion_point)->DidRemoveTrackElement(this);
+void HTMLTrackElement::RemovedFrom(ContainerNode& insertion_point) {
+  if (!parentNode() && IsHTMLMediaElement(insertion_point))
+    ToHTMLMediaElement(insertion_point).DidRemoveTrackElement(this);
   HTMLElement::RemovedFrom(insertion_point);
 }
 
@@ -244,7 +250,7 @@ void HTMLTrackElement::DidCompleteLoad(LoadStatus status) {
   // track element. This task must use the DOM manipulation task source.
   //
   // (Note: We don't "queue a task" here because this method will only be called
-  // from a timer - m_loadTimer or TextTrackLoader::m_cueLoadTimer - which
+  // from a timer - load_timer_ or TextTrackLoader::cue_load_timer_ - which
   // should be a reasonable, and hopefully non-observable, approximation of the
   // spec text. I.e we could consider this to be run from the "networking task
   // source".)
@@ -259,7 +265,7 @@ void HTMLTrackElement::DidCompleteLoad(LoadStatus status) {
   // simple event named error at the track element.
   if (status == kFailure) {
     SetReadyState(kError);
-    DispatchEvent(Event::Create(EventTypeNames::error));
+    DispatchEvent(*Event::Create(EventTypeNames::error));
     return;
   }
 
@@ -269,7 +275,7 @@ void HTMLTrackElement::DidCompleteLoad(LoadStatus status) {
   // readiness state to loaded, and fire a simple event named load at the track
   // element.
   SetReadyState(kLoaded);
-  DispatchEvent(Event::Create(EventTypeNames::load));
+  DispatchEvent(*Event::Create(EventTypeNames::load));
 }
 
 void HTMLTrackElement::NewCuesAvailable(TextTrackLoader* loader) {

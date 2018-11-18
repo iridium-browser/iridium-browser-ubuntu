@@ -16,6 +16,7 @@
 #include "third_party/blink/renderer/core/frame/csp/content_security_policy.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
+#include "third_party/blink/renderer/core/script/script.h"
 #include "third_party/blink/renderer/core/workers/global_scope_creation_params.h"
 #include "third_party/blink/renderer/core/workers/parent_execution_context_task_runners.h"
 #include "third_party/blink/renderer/core/workers/worker_backing_thread.h"
@@ -24,9 +25,9 @@
 #include "third_party/blink/renderer/core/workers/worker_global_scope.h"
 #include "third_party/blink/renderer/core/workers/worker_reporting_proxy.h"
 #include "third_party/blink/renderer/core/workers/worker_thread.h"
-#include "third_party/blink/renderer/core/workers/worker_thread_lifecycle_observer.h"
 #include "third_party/blink/renderer/platform/cross_thread_functional.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/loader/fetch/access_control_status.h"
 #include "third_party/blink/renderer/platform/network/content_security_policy_parsers.h"
 #include "third_party/blink/renderer/platform/waitable_event.h"
 #include "third_party/blink/renderer/platform/web_thread_supporting_gc.h"
@@ -39,22 +40,6 @@
 
 namespace blink {
 
-class MockWorkerThreadLifecycleObserver final
-    : public GarbageCollectedFinalized<MockWorkerThreadLifecycleObserver>,
-      public WorkerThreadLifecycleObserver {
-  USING_GARBAGE_COLLECTED_MIXIN(MockWorkerThreadLifecycleObserver);
-
- public:
-  explicit MockWorkerThreadLifecycleObserver(
-      WorkerThreadLifecycleContext* context)
-      : WorkerThreadLifecycleObserver(context) {}
-
-  MOCK_METHOD1(ContextDestroyed, void(WorkerThreadLifecycleContext*));
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(MockWorkerThreadLifecycleObserver);
-};
-
 class FakeWorkerGlobalScope : public WorkerGlobalScope {
  public:
   FakeWorkerGlobalScope(
@@ -62,7 +47,7 @@ class FakeWorkerGlobalScope : public WorkerGlobalScope {
       WorkerThread* thread)
       : WorkerGlobalScope(std::move(creation_params),
                           thread,
-                          CurrentTimeTicksInSeconds()) {}
+                          CurrentTimeTicks()) {}
 
   ~FakeWorkerGlobalScope() override = default;
 
@@ -71,16 +56,24 @@ class FakeWorkerGlobalScope : public WorkerGlobalScope {
     return EventTargetNames::DedicatedWorkerGlobalScope;
   }
 
+  // WorkerGlobalScope
+  void ImportModuleScript(
+      const KURL& module_url_record,
+      FetchClientSettingsObjectSnapshot* outside_settings_object,
+      network::mojom::FetchCredentialsMode) override {
+    NOTREACHED();
+  }
+
   void ExceptionThrown(ErrorEvent*) override {}
 };
 
 class WorkerThreadForTest : public WorkerThread {
  public:
-  WorkerThreadForTest(ThreadableLoadingContext* loading_context,
-                      WorkerReportingProxy& mock_worker_reporting_proxy)
-      : WorkerThread(loading_context, mock_worker_reporting_proxy),
-        worker_backing_thread_(WorkerBackingThread::CreateForTest(
-            WebThreadCreationParams(WebThreadType::kTestThread))) {}
+  explicit WorkerThreadForTest(
+      WorkerReportingProxy& mock_worker_reporting_proxy)
+      : WorkerThread(mock_worker_reporting_proxy),
+        worker_backing_thread_(WorkerBackingThread::Create(
+            ThreadCreationParams(WebThreadType::kTestThread))) {}
 
   ~WorkerThreadForTest() override = default;
 
@@ -95,24 +88,24 @@ class WorkerThreadForTest : public WorkerThread {
       ParentExecutionContextTaskRunners* parent_execution_context_task_runners,
       const KURL& script_url = KURL("http://fake.url/"),
       WorkerClients* worker_clients = nullptr) {
-    auto headers = std::make_unique<Vector<CSPHeaderAndType>>();
-    CSPHeaderAndType header_and_type("contentSecurityPolicy",
-                                     kContentSecurityPolicyHeaderTypeReport);
-    headers->push_back(header_and_type);
-
+    Vector<CSPHeaderAndType> headers{
+        {"contentSecurityPolicy", kContentSecurityPolicyHeaderTypeReport}};
     auto creation_params = std::make_unique<GlobalScopeCreationParams>(
-        script_url, "fake user agent", headers.get(), kReferrerPolicyDefault,
-        security_origin, false /* starter_secure_context */, worker_clients,
+        script_url, ScriptType::kClassic, "fake user agent", headers,
+        kReferrerPolicyDefault, security_origin,
+        false /* starter_secure_context */,
+        CalculateHttpsState(security_origin), worker_clients,
         mojom::IPAddressSpace::kLocal, nullptr,
         base::UnguessableToken::Create(),
         std::make_unique<WorkerSettings>(Settings::Create().get()),
-        kV8CacheOptionsDefault, nullptr /* module_fetch_coordinator */);
+        kV8CacheOptionsDefault, nullptr /* worklet_module_responses_map */);
 
     Start(std::move(creation_params),
           WorkerBackingThreadStartupData::CreateDefault(),
           WorkerInspectorProxy::PauseOnWorkerStart::kDontPause,
           parent_execution_context_task_runners);
-    EvaluateClassicScript(script_url, source, nullptr /* cached_meta_data */,
+    EvaluateClassicScript(script_url, kOpaqueResource, source,
+                          nullptr /* cached_meta_data */,
                           v8_inspector::V8StackTraceId());
   }
 

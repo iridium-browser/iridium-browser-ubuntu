@@ -28,8 +28,8 @@
 
 #include <memory>
 #include "base/memory/scoped_refptr.h"
+#include "third_party/blink/public/common/indexeddb/web_idb_types.h"
 #include "third_party/blink/public/platform/modules/indexeddb/web_idb_cursor.h"
-#include "third_party/blink/public/platform/modules/indexeddb/web_idb_types.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_value.h"
 #include "third_party/blink/renderer/bindings/modules/v8/idb_object_store_or_idb_index.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_key.h"
@@ -58,8 +58,8 @@ class IDBCursor : public ScriptWrappable {
                            IDBRequest*,
                            const Source&,
                            IDBTransaction*);
-  virtual ~IDBCursor();
-  void Trace(blink::Visitor*);
+  ~IDBCursor() override;
+  void Trace(blink::Visitor*) override;
   void ContextWillBeDestroyed() { backend_.reset(); }
 
   WARN_UNUSED_RESULT v8::Local<v8::Object> AssociateWithWrapper(

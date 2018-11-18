@@ -130,11 +130,6 @@ class CONTENT_EXPORT SiteInstance : public base::RefCounted<SiteInstance> {
   // process. This only returns true under the "site per process" process model.
   virtual bool RequiresDedicatedProcess() = 0;
 
-  // Returns true if this SiteInstance is used as the default SiteInstance for
-  // cross-site subframes. This only returns true if "top document isolation" is
-  // used.
-  virtual bool IsDefaultSubframeSiteInstance() const = 0;
-
   // Factory method to create a new SiteInstance.  This will create a new
   // new BrowsingInstance, so it should only be used when creating a new tab
   // from scratch (or similar circumstances).
@@ -170,7 +165,9 @@ class CONTENT_EXPORT SiteInstance : public base::RefCounted<SiteInstance> {
                             const GURL& dest_url);
 
   // Returns the site for the given URL, which includes only the scheme and
-  // registered domain.  Returns an empty GURL if the URL has no host.
+  // registered domain.  Returns an empty GURL if the URL has no host. Prior to
+  // determining the site, |url| is resolved to an effective URL via
+  // ContentBrowserClient::GetEffectiveURL().
   static GURL GetSiteForURL(BrowserContext* context, const GURL& url);
 
  protected:

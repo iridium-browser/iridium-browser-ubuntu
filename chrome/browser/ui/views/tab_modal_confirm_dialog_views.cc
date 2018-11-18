@@ -9,8 +9,7 @@
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/views/harmony/chrome_layout_provider.h"
-#include "chrome/browser/ui/views_mode_controller.h"
+#include "chrome/browser/ui/views/chrome_layout_provider.h"
 #include "chrome/common/chrome_switches.h"
 #include "components/constrained_window/constrained_window_views.h"
 #include "content/public/browser/web_contents.h"
@@ -23,11 +22,6 @@
 TabModalConfirmDialog* TabModalConfirmDialog::Create(
     TabModalConfirmDialogDelegate* delegate,
     content::WebContents* web_contents) {
-#if defined(OS_MACOSX)
-  if (views_mode_controller::IsViewsBrowserCocoa())
-    return CreateCocoa(delegate, web_contents);
-#endif
-
   return new TabModalConfirmDialogViews(delegate, web_contents);
 }
 

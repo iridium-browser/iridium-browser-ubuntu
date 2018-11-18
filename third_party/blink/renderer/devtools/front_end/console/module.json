@@ -60,6 +60,14 @@
             "className": "Console.ConsoleView.ActionDelegate"
         },
         {
+            "type": "action",
+            "category": "Console",
+            "actionId": "console.create-pin",
+            "iconClass": "largeicon-visibility",
+            "className": "Console.ConsoleView.ActionDelegate",
+            "title": "Create live expression"
+        },
+        {
             "type": "setting",
             "category": "Console",
             "title": "Hide network messages",
@@ -157,6 +165,24 @@
                     "title": "Do not group similar messages in console"
                 }
             ]
+        },
+        {
+            "type": "setting",
+            "category": "Console",
+            "title": "Eager evaluation",
+            "settingName": "consoleEagerEval",
+            "settingType": "boolean",
+            "defaultValue": true,
+            "options": [
+                {
+                    "value": true,
+                    "title": "Eagerly evaluate console prompt text"
+                },
+                {
+                    "value": false,
+                    "title": "Do not eagerly evaluate console prompt text"
+                }
+            ]
         }
     ],
     "dependencies": [
@@ -170,6 +196,7 @@
     "scripts": [
         "ConsoleContextSelector.js",
         "ConsoleFilter.js",
+        "ConsolePinPane.js",
         "ConsoleSidebar.js",
         "ConsoleViewport.js",
         "ConsoleViewMessage.js",
@@ -179,6 +206,8 @@
     ],
     "resources": [
         "consoleContextSelector.css",
+        "consolePinPane.css",
+        "consolePrompt.css",
         "consoleSidebar.css",
         "consoleView.css"
     ]

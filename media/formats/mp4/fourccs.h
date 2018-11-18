@@ -8,7 +8,7 @@
 #include <string>
 
 #include "media/media_buildflags.h"
-#include "third_party/libaom/av1_features.h"
+#include "third_party/libaom/av1_buildflags.h"
 
 namespace media {
 namespace mp4 {
@@ -21,6 +21,7 @@ enum FourCC {
 #endif
 #if BUILDFLAG(ENABLE_AV1_DECODER)
   FOURCC_AV01 = 0x61763031,  // "av01"
+  FOURCC_AV1C = 0x61763143,  // "av1C"
 #endif
   FOURCC_AVC1 = 0x61766331,
   FOURCC_AVC3 = 0x61766333,
@@ -32,6 +33,7 @@ enum FourCC {
   FOURCC_CTTS = 0x63747473,
   FOURCC_DFLA = 0x64664c61,  // "dfLa"
   FOURCC_DINF = 0x64696e66,
+  FOURCC_DOPS = 0x644f7073,  // "dOps"
 #if BUILDFLAG(ENABLE_DOLBY_VISION_DEMUXING)
   FOURCC_DVA1 = 0x64766131,
   FOURCC_DVAV = 0x64766176,
@@ -67,6 +69,9 @@ enum FourCC {
   FOURCC_META = 0x6d657461,
   FOURCC_MFHD = 0x6d666864,
   FOURCC_MFRA = 0x6d667261,
+#if BUILDFLAG(ENABLE_MPEG_H_AUDIO_DEMUXING)
+  FOURCC_MHM1 = 0x6d686d31,
+#endif
   FOURCC_MINF = 0x6d696e66,
   FOURCC_MOOF = 0x6d6f6f66,
   FOURCC_MOOV = 0x6d6f6f76,
@@ -74,6 +79,7 @@ enum FourCC {
   FOURCC_MP4V = 0x6d703476,
   FOURCC_MVEX = 0x6d766578,
   FOURCC_MVHD = 0x6d766864,
+  FOURCC_OPUS = 0x4f707573,  // "Opus"
   FOURCC_PASP = 0x70617370,
   FOURCC_PDIN = 0x7064696e,
   FOURCC_PRFT = 0x70726674,

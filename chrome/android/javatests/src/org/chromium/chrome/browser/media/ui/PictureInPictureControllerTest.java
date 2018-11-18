@@ -26,11 +26,12 @@ import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
-import org.chromium.content.browser.test.util.Criteria;
-import org.chromium.content.browser.test.util.CriteriaHelper;
-import org.chromium.content.browser.test.util.DOMUtils;
-import org.chromium.content.browser.test.util.JavaScriptUtils;
 import org.chromium.content_public.browser.WebContents;
+import org.chromium.content_public.browser.test.util.Criteria;
+import org.chromium.content_public.browser.test.util.CriteriaHelper;
+import org.chromium.content_public.browser.test.util.DOMUtils;
+import org.chromium.content_public.browser.test.util.JavaScriptUtils;
+import org.chromium.content_public.browser.test.util.WebContentsUtils;
 import org.chromium.media.MediaSwitches;
 import org.chromium.net.test.EmbeddedTestServer;
 
@@ -132,8 +133,7 @@ public class PictureInPictureControllerTest {
     @MediumTest
     @MinAndroidSdkLevel(Build.VERSION_CODES.O)
     public void testExitOnCrash() throws Throwable {
-        testExitOn(() -> ThreadUtils.runOnUiThreadBlocking(
-                () -> getWebContents().simulateRendererKilledForTesting(false)));
+        testExitOn(() -> WebContentsUtils.simulateRendererKilled(getWebContents(), false));
     }
 
     /** Tests that PiP is left when a new Tab is created in the foreground. */
@@ -193,7 +193,7 @@ public class PictureInPictureControllerTest {
     }
 
     private WebContents getWebContents() {
-        return mActivity.getCurrentContentViewCore().getWebContents();
+        return mActivity.getCurrentWebContents();
     }
 
     private void triggerAutoPiP() throws Throwable{
@@ -213,7 +213,7 @@ public class PictureInPictureControllerTest {
         DOMUtils.waitForMediaPlay(getWebContents(), VIDEO_ID);
 
         // Trigger requestFullscreen() via a click on a button.
-        Assert.assertTrue(DOMUtils.clickNode(mActivity.getCurrentContentViewCore(), "fullscreen"));
+        Assert.assertTrue(DOMUtils.clickNode(getWebContents(), "fullscreen"));
 
         // We use the web contents fullscreen heuristic.
         CriteriaHelper.pollUiThread(

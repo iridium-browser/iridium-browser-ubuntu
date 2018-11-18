@@ -82,7 +82,7 @@ class WTF_EXPORT PartitionAllocator {
     memset(result, 0, size);
     return reinterpret_cast<T*>(result);
   }
-  static void FreeHashTableBacking(void* address, bool is_weak_table);
+  static void FreeHashTableBacking(void* address);
 
   template <typename Return, typename Metadata>
   static Return Malloc(size_t size, const char* type_name) {
@@ -100,10 +100,12 @@ class WTF_EXPORT PartitionAllocator {
     Free(ptr);  // Not the system free, the one from this class.
   }
 
+  static void TraceMarkedBackingStore(void*) {}
   static void BackingWriteBarrier(void*) {}
 
   static bool IsAllocationAllowed() { return true; }
   static bool IsObjectResurrectionForbidden() { return false; }
+  static bool IsSweepForbidden() { return false; }
 
   static void EnterGCForbiddenScope() {}
   static void LeaveGCForbiddenScope() {}

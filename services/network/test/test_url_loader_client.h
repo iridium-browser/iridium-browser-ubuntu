@@ -33,11 +33,9 @@ class TestURLLoaderClient final : public mojom::URLLoaderClient {
   TestURLLoaderClient();
   ~TestURLLoaderClient() override;
 
-  void OnReceiveResponse(const ResourceResponseHead& response_head,
-                         mojom::DownloadedTempFilePtr downloaded_file) override;
+  void OnReceiveResponse(const ResourceResponseHead& response_head) override;
   void OnReceiveRedirect(const net::RedirectInfo& redirect_info,
                          const ResourceResponseHead& response_head) override;
-  void OnDataDownloaded(int64_t data_length, int64_t encoded_length) override;
   void OnReceiveCachedMetadata(const std::vector<uint8_t>& data) override;
   void OnTransferSizeUpdated(int32_t transfer_size_diff) override;
   void OnUploadProgress(int64_t current_position,
@@ -49,7 +47,6 @@ class TestURLLoaderClient final : public mojom::URLLoaderClient {
 
   bool has_received_response() const { return has_received_response_; }
   bool has_received_redirect() const { return has_received_redirect_; }
-  bool has_data_downloaded() const { return has_data_downloaded_; }
   bool has_received_upload_progress() const {
     return has_received_upload_progress_;
   }
@@ -57,6 +54,9 @@ class TestURLLoaderClient final : public mojom::URLLoaderClient {
     return has_received_cached_metadata_;
   }
   bool has_received_completion() const { return has_received_completion_; }
+  bool has_received_connection_error() const {
+    return has_received_connection_error_;
+  }
   const ResourceResponseHead& response_head() const { return response_head_; }
   const base::Optional<net::SSLInfo>& ssl_info() const {
     return response_head_.ssl_info;
@@ -70,10 +70,6 @@ class TestURLLoaderClient final : public mojom::URLLoaderClient {
   const URLLoaderCompletionStatus& completion_status() const {
     return completion_status_;
   }
-  int64_t download_data_length() const { return download_data_length_; }
-  int64_t encoded_download_data_length() const {
-    return encoded_download_data_length_;
-  }
   int64_t body_transfer_size() const { return body_transfer_size_; }
   int64_t current_upload_position() const { return current_upload_position_; }
   int64_t total_upload_size() const { return total_upload_size_; }
@@ -82,7 +78,6 @@ class TestURLLoaderClient final : public mojom::URLLoaderClient {
     has_received_upload_progress_ = false;
   }
 
-  mojom::DownloadedTempFilePtr TakeDownloadedTempFile();
   void ClearHasReceivedRedirect();
   // Creates an InterfacePtr, binds it to |*this| and returns it.
   mojom::URLLoaderClientPtr CreateInterfacePtr();
@@ -91,41 +86,37 @@ class TestURLLoaderClient final : public mojom::URLLoaderClient {
 
   void RunUntilResponseReceived();
   void RunUntilRedirectReceived();
-  void RunUntilDataDownloaded();
   void RunUntilCachedMetadataReceived();
   void RunUntilResponseBodyArrived();
   void RunUntilComplete();
   void RunUntilConnectionError();
+  void RunUntilTransferSizeUpdated();
 
  private:
   void OnConnectionError();
 
   mojo::Binding<mojom::URLLoaderClient> binding_;
   ResourceResponseHead response_head_;
-  mojom::DownloadedTempFilePtr downloaded_file_;
   net::RedirectInfo redirect_info_;
   std::string cached_metadata_;
   mojo::ScopedDataPipeConsumerHandle response_body_;
   URLLoaderCompletionStatus completion_status_;
   bool has_received_response_ = false;
   bool has_received_redirect_ = false;
-  bool has_data_downloaded_ = false;
   bool has_received_upload_progress_ = false;
   bool has_received_cached_metadata_ = false;
   bool has_received_completion_ = false;
   bool has_received_connection_error_ = false;
 
-  base::Closure quit_closure_for_on_receive_response_;
-  base::Closure quit_closure_for_on_receive_redirect_;
-  base::Closure quit_closure_for_on_data_downloaded_;
-  base::Closure quit_closure_for_on_receive_cached_metadata_;
-  base::Closure quit_closure_for_on_start_loading_response_body_;
-  base::Closure quit_closure_for_on_complete_;
-  base::Closure quit_closure_for_on_connection_error_;
+  base::OnceClosure quit_closure_for_on_receive_response_;
+  base::OnceClosure quit_closure_for_on_receive_redirect_;
+  base::OnceClosure quit_closure_for_on_receive_cached_metadata_;
+  base::OnceClosure quit_closure_for_on_start_loading_response_body_;
+  base::OnceClosure quit_closure_for_on_complete_;
+  base::OnceClosure quit_closure_for_on_connection_error_;
+  base::OnceClosure quit_closure_for_on_transfer_size_updated_;
 
   mojom::URLLoaderFactoryPtr url_loader_factory_;
-  int64_t download_data_length_ = 0;
-  int64_t encoded_download_data_length_ = 0;
   int64_t body_transfer_size_ = 0;
   int64_t current_upload_position_ = 0;
   int64_t total_upload_size_ = 0;

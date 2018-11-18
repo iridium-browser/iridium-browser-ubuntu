@@ -443,7 +443,7 @@ AlphaThresholdPaintFilter::~AlphaThresholdPaintFilter() = default;
 size_t AlphaThresholdPaintFilter::SerializedSize() const {
   size_t region_size = region_.writeToMemory(nullptr);
   base::CheckedNumeric<size_t> total_size;
-  total_size = BaseSerializedSize() + sizeof(region_size) + region_size +
+  total_size = BaseSerializedSize() + sizeof(uint64_t) + region_size +
                sizeof(inner_min_) + sizeof(outer_max_);
   total_size += GetFilterSize(input_.get());
   return total_size.ValueOrDefault(0u);
@@ -980,8 +980,7 @@ PaintFlagsPaintFilter::PaintFlagsPaintFilter(PaintFlags flags,
     : PaintFilter(kType, crop_rect, flags.HasDiscardableImages()),
       flags_(std::move(flags)) {
   if (image_provider) {
-    raster_flags_.emplace(&flags_, image_provider, SkMatrix::I(), 255u,
-                          true /* create_skia_shaders */);
+    raster_flags_.emplace(&flags_, image_provider, SkMatrix::I(), 255u);
   }
   cached_sk_filter_ = SkPaintImageFilter::Make(
       raster_flags_ ? raster_flags_->flags()->ToSkPaint() : flags_.ToSkPaint(),

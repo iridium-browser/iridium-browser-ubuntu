@@ -11,7 +11,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "components/google/core/browser/google_util.h"
+#include "components/google/core/common/google_util.h"
 #include "components/search_engines/search_engines_switches.h"
 #include "components/search_engines/search_terms_data.h"
 #include "components/search_engines/template_url.h"
@@ -221,9 +221,8 @@ TEST_F(TemplateURLTest, URLRefTestImageURLWithPOST) {
   const TemplateURLRef::PostParams& post_params =
       url.image_url_ref().post_params_;
   EXPECT_EQ(7U, post_params.size());
-  for (TemplateURLRef::PostParams::const_iterator i = post_params.begin();
-       i != post_params.end(); ++i) {
-    TemplateURLRef::Replacements::const_iterator j = replacements.begin();
+  for (auto i = post_params.begin(); i != post_params.end(); ++i) {
+    auto j = replacements.begin();
     for (; j != replacements.end(); ++j) {
       if (j->is_post_param && j->index ==
           static_cast<size_t>(i - post_params.begin())) {
@@ -1499,7 +1498,7 @@ TEST_F(TemplateURLTest, ReplaceSearchTermsInNonUTF8URL) {
             result);
 }
 
-// Test the |suggest_query_params| field of SearchTermsArgs.
+// Test the |additional_query_params| field of SearchTermsArgs.
 TEST_F(TemplateURLTest, SuggestQueryParams) {
   TemplateURLData data;
   // Pick a URL with replacements before, during, and after the query, to ensure
@@ -1508,27 +1507,29 @@ TEST_F(TemplateURLTest, SuggestQueryParams) {
       "#{google:originalQueryForSuggestion}x");
   TemplateURL url(data);
 
-  // Baseline: no |suggest_query_params| field.
+  // Baseline: no |additional_query_params| field.
   TemplateURLRef::SearchTermsArgs search_terms(ASCIIToUTF16("abc"));
   search_terms.original_query = ASCIIToUTF16("def");
   search_terms.accepted_suggestion = 0;
   EXPECT_EQ("http://www.google.com/search?q=abc#oq=def&x",
             url.url_ref().ReplaceSearchTerms(search_terms, search_terms_data_));
 
-  // Set the suggest_query_params.
-  search_terms.suggest_query_params = "pq=xyz";
+  // Set the |additional_query_params|.
+  search_terms.additional_query_params = "pq=xyz";
   EXPECT_EQ("http://www.google.com/search?pq=xyz&q=abc#oq=def&x",
             url.url_ref().ReplaceSearchTerms(search_terms, search_terms_data_));
 
-  // Add extra_query_params in the mix, and ensure it works.
-  search_terms.append_extra_query_params = true;
+  // Add |append_extra_query_params_from_command_line| into the mix, and ensure
+  // it works.
+  search_terms.append_extra_query_params_from_command_line = true;
   base::CommandLine::ForCurrentProcess()->AppendSwitchASCII(
       switches::kExtraSearchQueryParams, "a=b");
   EXPECT_EQ("http://www.google.com/search?a=b&pq=xyz&q=abc#oq=def&x",
             url.url_ref().ReplaceSearchTerms(search_terms, search_terms_data_));
 }
 
-// Test the |append_extra_query_params| field of SearchTermsArgs.
+// Test the |search_terms.append_extra_query_params_from_command_line| field of
+// SearchTermsArgs.
 TEST_F(TemplateURLTest, ExtraQueryParams) {
   TemplateURLData data;
   // Pick a URL with replacements before, during, and after the query, to ensure
@@ -1537,7 +1538,8 @@ TEST_F(TemplateURLTest, ExtraQueryParams) {
       "#{google:originalQueryForSuggestion}x");
   TemplateURL url(data);
 
-  // Baseline: no command-line args, no |append_extra_query_params| flag.
+  // Baseline: no command-line args, no
+  // |search_terms.append_extra_query_params_from_command_line| flag.
   TemplateURLRef::SearchTermsArgs search_terms(ASCIIToUTF16("abc"));
   search_terms.original_query = ASCIIToUTF16("def");
   search_terms.accepted_suggestion = 0;
@@ -1546,7 +1548,7 @@ TEST_F(TemplateURLTest, ExtraQueryParams) {
 
   // Set the flag.  Since there are no command-line args, this should have no
   // effect.
-  search_terms.append_extra_query_params = true;
+  search_terms.append_extra_query_params_from_command_line = true;
   EXPECT_EQ("http://www.google.com/search?q=abc#oq=def&x",
             url.url_ref().ReplaceSearchTerms(search_terms, search_terms_data_));
 
@@ -1557,7 +1559,7 @@ TEST_F(TemplateURLTest, ExtraQueryParams) {
             url.url_ref().ReplaceSearchTerms(search_terms, search_terms_data_));
 
   // Turn off the flag.  Now the command-line arg should be ignored again.
-  search_terms.append_extra_query_params = false;
+  search_terms.append_extra_query_params_from_command_line = false;
   EXPECT_EQ("http://www.google.com/search?q=abc#oq=def&x",
             url.url_ref().ReplaceSearchTerms(search_terms, search_terms_data_));
 }
@@ -1666,9 +1668,10 @@ TEST_F(TemplateURLTest, ContextualSearchParameters) {
                                                         search_terms_data_);
   EXPECT_EQ("http://bar/_/contextualsearch?", result);
 
-  // Test the current common case, which uses no home country.
-  TemplateURLRef::SearchTermsArgs::ContextualSearchParams params(2, 1,
-                                                                 std::string());
+  // Test the current common case, which uses no home country or previous
+  // event.
+  TemplateURLRef::SearchTermsArgs::ContextualSearchParams params(
+      2, 1, std::string(), 0, 0);
   search_terms_args.contextual_search_params = params;
   result = url.url_ref().ReplaceSearchTerms(search_terms_args,
                                             search_terms_data_);
@@ -1678,9 +1681,10 @@ TEST_F(TemplateURLTest, ContextualSearchParameters) {
       "ctxsl_coca=1",
       result);
 
-  // Test the home country case.
+  // Test the home country and non-zero event data case.
   search_terms_args.contextual_search_params =
-      TemplateURLRef::SearchTermsArgs::ContextualSearchParams(2, 2, "CH");
+      TemplateURLRef::SearchTermsArgs::ContextualSearchParams(2, 2, "CH",
+                                                              1657713458, 5);
   result =
       url.url_ref().ReplaceSearchTerms(search_terms_args, search_terms_data_);
 
@@ -1688,7 +1692,9 @@ TEST_F(TemplateURLTest, ContextualSearchParameters) {
       "http://bar/_/contextualsearch?"
       "ctxs=2&"
       "ctxsl_coca=2&"
-      "ctxs_hc=CH",
+      "ctxs_hc=CH&"
+      "ctxsl_pid=1657713458&"
+      "ctxsl_per=5",
       result);
 }
 
@@ -1842,4 +1848,55 @@ TEST_F(TemplateURLTest, InvalidateCachedValues) {
   EXPECT_EQ(base::ASCIIToUTF16("123"), search_terms);
 
   search_terms_data_.set_google_base_url("http://www.google.com/");
+}
+
+// Tests the use of wildcards in the path to ensure both extracting search terms
+// and generating a search URL work correctly.
+TEST_F(TemplateURLTest, PathWildcard) {
+  TemplateURLData data;
+  data.SetURL(
+      "https://www.google.com/search{google:pathWildcard}?q={searchTerms}");
+  TemplateURL url(data);
+
+  // Test extracting search terms from a URL.
+  base::string16 search_terms;
+  url.ExtractSearchTermsFromURL(GURL("https://www.google.com/search?q=testing"),
+                                search_terms_data_, &search_terms);
+  EXPECT_EQ(base::ASCIIToUTF16("testing"), search_terms);
+  url.ExtractSearchTermsFromURL(
+      GURL("https://www.google.com/search;_this_is_a_test;_?q=testing"),
+      search_terms_data_, &search_terms);
+  EXPECT_EQ(base::ASCIIToUTF16("testing"), search_terms);
+
+  // Tests overlapping prefix/suffix.
+  data.SetURL(
+      "https://www.google.com/search{google:pathWildcard}rch?q={searchTerms}");
+  TemplateURL overlap_url(data);
+  overlap_url.ExtractSearchTermsFromURL(
+      GURL("https://www.google.com/search?q=testing"), search_terms_data_,
+      &search_terms);
+  EXPECT_TRUE(search_terms.empty());
+
+  // Tests wildcard at beginning of path so we only have a suffix.
+  data.SetURL(
+      "https://www.google.com/{google:pathWildcard}rch?q={searchTerms}");
+  TemplateURL suffix_url(data);
+  suffix_url.ExtractSearchTermsFromURL(
+      GURL("https://www.google.com/search?q=testing"), search_terms_data_,
+      &search_terms);
+  EXPECT_EQ(base::ASCIIToUTF16("testing"), search_terms);
+
+  // Tests wildcard between prefix/suffix.
+  overlap_url.ExtractSearchTermsFromURL(
+      GURL("https://www.google.com/search_testing_rch?q=testing"),
+      search_terms_data_, &search_terms);
+  EXPECT_EQ(base::ASCIIToUTF16("testing"), search_terms);
+
+  // Test generating a URL.
+  TemplateURLRef::SearchTermsArgs search_terms_args(ASCIIToUTF16("foo"));
+  GURL generated_url;
+  url.ReplaceSearchTermsInURL(url.GenerateSearchURL(search_terms_data_),
+                              search_terms_args, search_terms_data_,
+                              &generated_url);
+  EXPECT_EQ("https://www.google.com/search?q=foo", generated_url.spec());
 }

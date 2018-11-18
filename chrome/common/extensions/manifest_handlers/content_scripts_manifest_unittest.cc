@@ -26,22 +26,19 @@ class ContentScriptsManifestTest : public ChromeManifestTest {
 
 TEST_F(ContentScriptsManifestTest, MatchPattern) {
   Testcase testcases[] = {
-    // chrome:// urls are not allowed.
-    Testcase("content_script_chrome_url_invalid.json",
-             ErrorUtils::FormatErrorMessage(
-                 errors::kInvalidMatch,
-                 base::IntToString(0),
-                 base::IntToString(0),
-                 URLPattern::GetParseResultString(
-                     URLPattern::PARSE_ERROR_INVALID_SCHEME))),
+      // chrome:// urls are not allowed.
+      Testcase(
+          "content_script_chrome_url_invalid.json",
+          ErrorUtils::FormatErrorMessage(
+              errors::kInvalidMatch, base::IntToString(0), base::IntToString(0),
+              URLPattern::GetParseResultString(
+                  URLPattern::ParseResult::kInvalidScheme))),
 
-    // Match paterns must be strings.
-    Testcase("content_script_match_pattern_not_string.json",
-             ErrorUtils::FormatErrorMessage(errors::kInvalidMatch,
-                                            base::IntToString(0),
-                                            base::IntToString(0),
-                                            errors::kExpectString))
-  };
+      // Match paterns must be strings.
+      Testcase("content_script_match_pattern_not_string.json",
+               ErrorUtils::FormatErrorMessage(
+                   errors::kInvalidMatch, base::IntToString(0),
+                   base::IntToString(0), errors::kExpectString))};
   RunTestcases(testcases, arraysize(testcases),
                EXPECT_TYPE_ERROR);
 
@@ -90,7 +87,7 @@ TEST_F(ContentScriptsManifestTest, ContentScriptIds) {
 
 TEST_F(ContentScriptsManifestTest, FailLoadingNonUTF8Scripts) {
   base::FilePath install_dir;
-  ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &install_dir));
+  ASSERT_TRUE(base::PathService::Get(chrome::DIR_TEST_DATA, &install_dir));
   install_dir = install_dir.AppendASCII("extensions")
                     .AppendASCII("bad")
                     .AppendASCII("bad_encoding");

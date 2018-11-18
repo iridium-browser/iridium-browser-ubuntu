@@ -18,9 +18,9 @@
 #include "base/memory/weak_ptr.h"
 #include "base/threading/thread.h"
 #include "base/time/time.h"
+#include "media/gpu/image_processor.h"
 #include "media/gpu/media_gpu_export.h"
 #include "media/gpu/v4l2/v4l2_device.h"
-#include "media/gpu/v4l2/v4l2_image_processor.h"
 #include "media/video/video_encode_accelerator.h"
 #include "ui/gfx/geometry/size.h"
 
@@ -36,7 +36,7 @@ namespace media {
 // device exposed by the codec hardware driver. The threading model of this
 // class is the same as in the V4L2VideoDecodeAccelerator (from which class this
 // was designed).
-// This class may try to instantiate and use a V4L2ImageProcessor for input
+// This class may try to instantiate and use a ImageProcessor for input
 // format conversion, if the input format requested via Initialize() is not
 // accepted by the hardware codec.
 class MEDIA_GPU_EXPORT V4L2VideoEncodeAccelerator
@@ -47,11 +47,7 @@ class MEDIA_GPU_EXPORT V4L2VideoEncodeAccelerator
 
   // VideoEncodeAccelerator implementation.
   VideoEncodeAccelerator::SupportedProfiles GetSupportedProfiles() override;
-  bool Initialize(VideoPixelFormat format,
-                  const gfx::Size& input_visible_size,
-                  VideoCodecProfile output_profile,
-                  uint32_t initial_bitrate,
-                  Client* client) override;
+  bool Initialize(const Config& config, Client* client) override;
   void Encode(const scoped_refptr<VideoFrame>& frame,
               bool force_keyframe) override;
   void UseOutputBitstreamBuffer(const BitstreamBuffer& buffer) override;
@@ -59,6 +55,7 @@ class MEDIA_GPU_EXPORT V4L2VideoEncodeAccelerator
                                        uint32_t framerate) override;
   void Destroy() override;
   void Flush(FlushCallback flush_callback) override;
+  bool IsFlushSupported() override;
 
  private:
   // Auto-destroy reference for BitstreamBuffer, for tracking buffers passed to
@@ -95,12 +92,10 @@ class MEDIA_GPU_EXPORT V4L2VideoEncodeAccelerator
   };
 
   enum {
-    kInitialFramerate = 30,
     // These are rather subjectively tuned.
     kInputBufferCount = 2,
     kOutputBufferCount = 2,
     kImageProcBufferCount = 2,
-    kOutputBufferSize = (2 * 1024 * 1024),
   };
 
   // Internal state of the encoder.
@@ -116,10 +111,12 @@ class MEDIA_GPU_EXPORT V4L2VideoEncodeAccelerator
   // Callbacks for the image processor, if one is used.
   //
 
-  // Callback run by the image processor when a frame is ready for us to encode.
+  // Callback run by the image processor when a |frame| is ready for us to
+  // encode.
   void FrameProcessed(bool force_keyframe,
                       base::TimeDelta timestamp,
-                      int output_buffer_index);
+                      int output_buffer_index,
+                      scoped_refptr<VideoFrame> frame);
 
   // Error callback for handling image processor errors.
   void ImageProcessorError();
@@ -190,14 +187,14 @@ class MEDIA_GPU_EXPORT V4L2VideoEncodeAccelerator
 
   // Try to set up the device to the input format we were Initialized() with,
   // or if the device doesn't support it, use one it can support, so that we
-  // can later instantiate a V4L2ImageProcessor to convert to it.
+  // can later instantiate an ImageProcessor to convert to it.
   bool NegotiateInputFormat(VideoPixelFormat input_format);
 
   // Set up the device to the output format requested in Initialize().
   bool SetOutputFormat(VideoCodecProfile output_profile);
 
-  // Initialize device controls with default values.
-  bool InitControls();
+  // Initialize device controls with |config| or default values.
+  bool InitControls(const Config& config);
 
   // Create the buffers we need.
   bool CreateInputBuffers();
@@ -293,15 +290,17 @@ class MEDIA_GPU_EXPORT V4L2VideoEncodeAccelerator
   // The completion callback of the Flush() function.
   FlushCallback flush_callback_;
 
+  // Indicates whether the V4L2 device supports flush.
+  // This is set in Initialize().
+  bool is_flush_supported_;
+
   // Image processor, if one is in use.
-  std::unique_ptr<V4L2ImageProcessor> image_processor_;
+  std::unique_ptr<ImageProcessor> image_processor_;
   // Indexes of free image processor output buffers. Only accessed on child
   // thread.
   std::vector<int> free_image_processor_output_buffers_;
   // Video frames ready to be processed. Only accessed on child thread.
   base::queue<InputFrameInfo> image_processor_input_queue_;
-  // Mapping of int index to fds of image processor output buffer.
-  std::vector<std::vector<base::ScopedFD>> image_processor_output_buffer_map_;
 
   // This thread services tasks posted from the VEA API entry points by the
   // child thread and device service callbacks posted from the device thread.

@@ -70,7 +70,7 @@ InputStream::StreamState StreamHandleInputStream::Read(
     return InputStream::EMPTY;
 
   *length = kBytesToRead;
-  *data = new net::IOBuffer(kBytesToRead);
+  *data = base::MakeRefCounted<net::IOBuffer>(kBytesToRead);
   MojoResult mojo_result = stream_handle_->stream->ReadData(
       (*data)->data(), (uint32_t*)length, MOJO_READ_DATA_FLAG_NONE);
   // TODO(qinmin): figure out when COMPLETE should be returned.
@@ -100,6 +100,11 @@ DownloadInterruptReason StreamHandleInputStream::GetCompletionStatus() {
 
 void StreamHandleInputStream::OnStreamCompleted(
     mojom::NetworkRequestStatus status) {
+  // This method could get called again when the URLLoader is being destroyed.
+  // However, if the response is already completed, don't set the
+  // |completion_status_| again.
+  if (is_response_completed_)
+    return;
   // This can be called before or after data pipe is completely drained.
   completion_status_ = ConvertMojoNetworkRequestStatusToInterruptReason(status);
   is_response_completed_ = true;

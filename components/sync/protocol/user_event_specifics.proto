@@ -4,14 +4,16 @@
 //
 // Sync protocol datatype extension for user events.
 
-// Update proto_value_conversions{.h,.cc,_unittest.cc} if you change
-// any fields in this file.
+// If you change or add any fields in this file, update proto_visitors.h and
+// potentially proto_enum_conversions.{h, cc}.
 
 syntax = "proto2";
 
 option optimize_for = LITE_RUNTIME;
 
 package sync_pb;
+
+import "user_consent_types.proto";
 
 message UserEventSpecifics {
   // Time of event, as measured by client in microseconds since Windows epoch.
@@ -88,32 +90,52 @@ message UserEventSpecifics {
   }
 
   // User consented to the usage of a feature or denied/revoked a consent.
+  // Next id: 14
   message UserConsent {
-    // Which feature does the consent apply to?
-    enum Feature {
-      FEATURE_UNSPECIFIED = 0;
-      CHROME_SYNC = 1;
-      PLAY_STORE = 2;
-      BACKUP_AND_RESTORE = 3;
-      GOOGLE_LOCATION_SERVICE = 4;
-    }
-    optional Feature feature = 1;
-    // Ids of the strings of the consent text presented to the user.
-    repeated int32 description_grd_ids = 2;
-    // Id of the string of the UI element the user clicked when consenting.
-    optional int32 confirmation_grd_id = 3;
+    // =========================================================================
+    // Fields common to all Chrome User Consents.
+    // =========================================================================
+
     // The UI language Chrome is using, represented as the IETF language tag
     // defined in BCP 47. The region subtag is not included when it adds no
     // distinguishing information to the language tag (e.g. both "en-US"
     // and "fr" are correct here).
     optional string locale = 4;
-    // Was the consent for |feature| given or not given (denied/revoked)?
-    enum ConsentStatus {
-      CONSENT_STATUS_UNSPECIFIED = 0;
-      NOT_GIVEN = 1;
-      GIVEN = 2;
+
+    // The local time on the client when the user consent was recorded. The time
+    // as measured by client is given in microseconds since Windows epoch. This
+    // is needed since user consent recording may happen when a client is
+    // offline.
+    optional int64 client_consent_time_usec = 12;
+
+    // =========================================================================
+    // The specific consent type. Add new User Consent types to
+    // user_consent_types.proto.
+    // =========================================================================
+
+    oneof consent {
+      UserConsentTypes.SyncConsent sync_consent = 7;
+
+      UserConsentTypes.ArcBackupAndRestoreConsent
+          arc_backup_and_restore_consent = 8;
+
+      UserConsentTypes.ArcGoogleLocationServiceConsent
+          arc_location_service_consent = 9;
+
+      UserConsentTypes.ArcPlayTermsOfServiceConsent
+          arc_play_terms_of_service_consent = 10;
+
+      UserConsentTypes.ArcMetricsAndUsageConsent arc_metrics_and_usage_consent =
+          11;
+
+      UserConsentTypes.UnifiedConsent unified_consent = 13;
     }
-    optional ConsentStatus status = 5;
+
+    // =========================================================================
+    // Client only fields. TODO(markusheintz): Refactor the code so that these
+    // fields can be moved out of this message.
+    // =========================================================================
+
     // The account ID of the user who gave the consent. This field is used
     // by UserEventService to distinguish consents from different users,
     // as UserConsent does not get deleted when a user signs out. However,
@@ -125,6 +147,31 @@ message UserEventSpecifics {
     // see SigninManagerBase::GetAuthenticatedAccountId()
     // or AccountInfo::account_id.
     optional string account_id = 6;
+
+    // =========================================================================
+    // Deprecated fields. Please do not use them !
+    // =========================================================================
+    // TODO (markusheintz): Deprecate them completely once there few clients with <= M67.
+
+    // Which feature does the consent apply to?
+    enum Feature {
+      FEATURE_UNSPECIFIED = 0;
+      CHROME_SYNC = 1;
+      PLAY_STORE = 2;
+      BACKUP_AND_RESTORE = 3;
+      GOOGLE_LOCATION_SERVICE = 4;
+      CHROME_UNIFIED_CONSENT = 5;
+      // TODO(markusheintz): ASSISTANT_ACTIVITY_CONTROL was only added as
+      // emergency fallback. Remove if not needed.
+      ASSISTANT_ACTIVITY_CONTROL = 6;
+    }
+    optional Feature feature = 1 [deprecated = true];
+    // Ids of the strings of the consent text presented to the user.
+    repeated int32 description_grd_ids = 2 [deprecated = true];
+    // Id of the string of the UI element the user clicked when consenting.
+    optional int32 confirmation_grd_id = 3 [deprecated = true];
+    // Was the consent for |feature| given or not given (denied/revoked)?
+    optional UserConsentTypes.ConsentStatus status = 5 [deprecated = true];
   }
 
   // User reused their GAIA password on another website.
@@ -170,6 +217,9 @@ message UserEventSpecifics {
         // URL did match enterprise whitelist.
         // No further action required related to this re-use event.
         ENTERPRISE_WHITELIST_HIT = 6;
+        // Password reuse lookup is turned off by enterprise policy.
+        // No further action required related to this re-use event.
+        TURNED_OFF_BY_POLICY = 7;
       }
       optional LookupResult lookup_result = 1;
 
@@ -191,7 +241,7 @@ message UserEventSpecifics {
     // Phishing or a Low-reputation site.
     optional PasswordReuseLookup reuse_lookup = 2;
 
-    // Logged when the user interacts with the dialog shown to encourage
+    // Logged when the user interacts with the warning UI shown to encourage
     // password change if the site is Phishing or Low-reputation.
     message PasswordReuseDialogInteraction {
       enum InteractionResult {
@@ -203,10 +253,39 @@ message UserEventSpecifics {
         // The warning UI was ignored, i.e. not interacted with by the user.
         // This could happen if the user navigates away from the page.
         WARNING_UI_IGNORED = 3;
+        // The user clicked "Change Password" on chrome://settings page.
+        WARNING_ACTION_TAKEN_ON_SETTINGS = 4;
       }
       optional InteractionResult interaction_result = 1;
     }
     optional PasswordReuseDialogInteraction dialog_interaction = 3;
+
+    // TODO(markusheintz): Remove
+    // DEPRECATED: DO NOT USE!
+    // Logged when the user logs into Google, and at least once per 28d.
+    message PasswordCaptured {
+      enum EventTrigger {
+        UNSPECIFIED = 0;
+        // Event added because user logged in.
+        USER_LOGGED_IN = 1;
+        // Event added because 28d timer fired.
+        EXPIRED_28D_TIMER = 2;
+      }
+      optional EventTrigger event_trigger = 1;
+    }
+    optional PasswordCaptured password_captured = 4;
+  }
+
+  // Logged when the user logs into Google, and at least once per 28d.
+  message GaiaPasswordCaptured {
+    enum EventTrigger {
+      UNSPECIFIED = 0;
+      // Event added because user logged in.
+      USER_LOGGED_IN = 1;
+      // Event added because 28d timer fired.
+      EXPIRED_28D_TIMER = 2;
+    }
+    optional EventTrigger event_trigger = 1;
   }
 
   oneof event {
@@ -217,5 +296,6 @@ message UserEventSpecifics {
     UserConsent user_consent = 12;
     // Happens when a user types their Google account password on another site.
     GaiaPasswordReuse gaia_password_reuse_event = 104;
+    GaiaPasswordCaptured gaia_password_captured_event = 15;
   }
 }

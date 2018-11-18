@@ -33,7 +33,6 @@
 #include <string>
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/platform/web_string.h"
-#include "third_party/blink/public/platform/web_thread.h"
 #include "third_party/blink/public/platform/web_url.h"
 #include "third_party/blink/public/platform/web_url_loader_mock_factory.h"
 #include "third_party/blink/public/platform/web_url_request.h"
@@ -46,6 +45,7 @@
 #include "third_party/blink/renderer/core/frame/frame_test_helpers.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_error.h"
+#include "third_party/blink/renderer/platform/scheduler/public/thread.h"
 #include "third_party/blink/renderer/platform/serialized_resource.h"
 #include "third_party/blink/renderer/platform/testing/testing_platform_support.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
@@ -149,7 +149,7 @@ class FrameSerializerTest : public testing::Test,
   String GetSerializedData(const char* url, const char* mime_type = nullptr) {
     const SerializedResource* resource = GetResource(url, mime_type);
     if (resource) {
-      const Vector<char> data = resource->data->Copy();
+      const Vector<char> data = resource->data->CopyAs<Vector<char>>();
       return String(data.data(), data.size());
     }
     return String();
@@ -163,7 +163,7 @@ class FrameSerializerTest : public testing::Test,
   }
 
   // FrameSerializer::Delegate implementation.
-  bool RewriteLink(const Element& element, String& rewritten_link) {
+  bool RewriteLink(const Element& element, String& rewritten_link) override {
     String complete_url;
     for (const auto& attribute : element.Attributes()) {
       if (element.HasLegalLinkAttribute(attribute.GetName())) {
@@ -183,7 +183,7 @@ class FrameSerializerTest : public testing::Test,
     return true;
   }
 
-  bool ShouldSkipResourceWithURL(const KURL& url) {
+  bool ShouldSkipResourceWithURL(const KURL& url) override {
     return skip_urls_.Contains(url);
   }
 

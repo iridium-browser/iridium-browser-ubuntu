@@ -24,7 +24,7 @@
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/public/web/web_navigation_policy.h"
 #include "third_party/blink/public/web/web_triggering_event_info.h"
-#include "ui/accessibility/ax_modes.h"
+#include "ui/accessibility/ax_mode.h"
 
 namespace blink {
 class AssociatedInterfaceProvider;
@@ -230,6 +230,12 @@ class CONTENT_EXPORT RenderFrame : public IPC::Listener,
   virtual void SetSelectedText(const base::string16& selection_text,
                                size_t offset,
                                const gfx::Range& range) = 0;
+
+  // Notifies the frame's RenderView that the zoom has changed.
+  virtual void SetZoomLevel(double zoom_level) = 0;
+
+  // Returns the page's zoom level from the frame's RenderView.
+  virtual double GetZoomLevel() const = 0;
 
   // Adds |message| to the DevTools console.
   virtual void AddMessageToConsole(ConsoleMessageLevel level,

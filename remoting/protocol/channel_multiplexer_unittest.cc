@@ -42,7 +42,7 @@ const char kTestChannelName2[] = "test2";
 
 void QuitCurrentThread() {
   base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::MessageLoop::QuitWhenIdleClosure());
+      FROM_HERE, base::RunLoop::QuitCurrentWhenIdleClosureDeprecated());
 }
 
 class MockConnectCallback {
@@ -114,7 +114,7 @@ class ChannelMultiplexerTest : public testing::Test {
 
   scoped_refptr<net::IOBufferWithSize> CreateTestBuffer(int size) {
     scoped_refptr<net::IOBufferWithSize> result =
-        new net::IOBufferWithSize(size);
+        base::MakeRefCounted<net::IOBufferWithSize>(size);
     for (int i = 0; i< size; ++i) {
       result->data()[i] = rand() % 256;
     }

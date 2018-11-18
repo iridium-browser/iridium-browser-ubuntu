@@ -8,16 +8,20 @@
 
 #include <utility>
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/macros.h"
+#include "base/task/post_task.h"
 #include "components/guest_view/browser/guest_view_message_filter.h"
 #include "components/nacl/common/buildflags.h"
 #include "content/public/browser/browser_main_runner.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/site_instance.h"
 #include "content/public/browser/storage_partition.h"
+#include "content/public/browser/web_contents.h"
 #include "content/public/common/content_descriptors.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/url_constants.h"
@@ -30,9 +34,11 @@
 #include "extensions/browser/extension_protocols.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/guest_view/extensions_guest_view_message_filter.h"
+#include "extensions/browser/guest_view/web_view/web_view_guest.h"
 #include "extensions/browser/info_map.h"
 #include "extensions/browser/io_thread_extension_message_filter.h"
 #include "extensions/browser/process_map.h"
+#include "extensions/browser/url_loader_factory_manager.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/switches.h"
@@ -109,10 +115,8 @@ void ShellContentBrowserClient::RenderProcessWillLaunch(
   // the concept of disabled plugins.
 #if BUILDFLAG(ENABLE_NACL)
   host->AddFilter(new nacl::NaClHostMessageFilter(
-      render_process_id,
-      browser_context->IsOffTheRecord(),
-      browser_context->GetPath(),
-      host->GetStoragePartition()->GetURLRequestContext()));
+      render_process_id, browser_context->IsOffTheRecord(),
+      browser_context->GetPath()));
 #endif
 }
 
@@ -168,13 +172,11 @@ void ShellContentBrowserClient::SiteInstanceGotProcess(
                site_instance->GetProcess()->GetID(),
                site_instance->GetId());
 
-  BrowserThread::PostTask(
-      BrowserThread::IO,
-      FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::IO},
       base::Bind(&InfoMap::RegisterExtensionProcess,
                  browser_main_parts_->extension_system()->info_map(),
-                 extension->id(),
-                 site_instance->GetProcess()->GetID(),
+                 extension->id(), site_instance->GetProcess()->GetID(),
                  site_instance->GetId()));
 }
 
@@ -194,13 +196,11 @@ void ShellContentBrowserClient::SiteInstanceDeleting(
                site_instance->GetProcess()->GetID(),
                site_instance->GetId());
 
-  BrowserThread::PostTask(
-      BrowserThread::IO,
-      FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::IO},
       base::Bind(&InfoMap::UnregisterExtensionProcess,
                  browser_main_parts_->extension_system()->info_map(),
-                 extension->id(),
-                 site_instance->GetProcess()->GetID(),
+                 extension->id(), site_instance->GetProcess()->GetID(),
                  site_instance->GetId()));
 }
 
@@ -264,39 +264,42 @@ ShellContentBrowserClient::GetNavigationUIData(
 }
 
 void ShellContentBrowserClient::RegisterNonNetworkNavigationURLLoaderFactories(
-    content::RenderFrameHost* frame_host,
+    int frame_tree_node_id,
     NonNetworkURLLoaderFactoryMap* factories) {
-  content::BrowserContext* browser_context =
-      frame_host->GetProcess()->GetBrowserContext();
+  content::WebContents* web_contents =
+      content::WebContents::FromFrameTreeNodeId(frame_tree_node_id);
   factories->emplace(
       extensions::kExtensionScheme,
       extensions::CreateExtensionNavigationURLLoaderFactory(
-          frame_host,
-          extensions::ExtensionSystem::Get(browser_context)->info_map()));
+          web_contents->GetBrowserContext(),
+          !!extensions::WebViewGuest::FromWebContents(web_contents)));
 }
 
 void ShellContentBrowserClient::RegisterNonNetworkSubresourceURLLoaderFactories(
-    content::RenderFrameHost* frame_host,
-    const GURL& frame_url,
+    int render_process_id,
+    int render_frame_id,
     NonNetworkURLLoaderFactoryMap* factories) {
-  content::BrowserContext* browser_context =
-      frame_host->GetProcess()->GetBrowserContext();
-  auto factory = extensions::MaybeCreateExtensionSubresourceURLLoaderFactory(
-      frame_host, frame_url,
-      extensions::ExtensionSystem::Get(browser_context)->info_map());
+  auto factory = extensions::CreateExtensionURLLoaderFactory(render_process_id,
+                                                             render_frame_id);
   if (factory)
     factories->emplace(extensions::kExtensionScheme, std::move(factory));
 }
 
 bool ShellContentBrowserClient::WillCreateURLLoaderFactory(
+    content::BrowserContext* browser_context,
     content::RenderFrameHost* frame,
     bool is_navigation,
-    network::mojom::URLLoaderFactoryRequest* factory_request) {
+    const url::Origin& request_initiator,
+    network::mojom::URLLoaderFactoryRequest* factory_request,
+    bool* bypass_redirect_checks) {
   auto* web_request_api =
       extensions::BrowserContextKeyedAPIFactory<extensions::WebRequestAPI>::Get(
-          frame->GetProcess()->GetBrowserContext());
-  return web_request_api->MaybeProxyURLLoaderFactory(frame, is_navigation,
-                                                     factory_request);
+          browser_context);
+  bool use_proxy = web_request_api->MaybeProxyURLLoaderFactory(
+      frame, is_navigation, factory_request);
+  if (bypass_redirect_checks)
+    *bypass_redirect_checks = use_proxy;
+  return use_proxy;
 }
 
 bool ShellContentBrowserClient::HandleExternalProtocol(
@@ -308,6 +311,19 @@ bool ShellContentBrowserClient::HandleExternalProtocol(
     ui::PageTransition page_transition,
     bool has_user_gesture) {
   return false;
+}
+
+network::mojom::URLLoaderFactoryPtrInfo
+ShellContentBrowserClient::CreateURLLoaderFactoryForNetworkRequests(
+    content::RenderProcessHost* process,
+    network::mojom::NetworkContext* network_context,
+    const url::Origin& request_initiator) {
+  // TODO(lukasza): https://crbug.com/894766: Re-enable after a real fix for
+  // this bug.  For now, let's just avoid using separate URLLoaderFactories
+  // for extensions.
+  // return URLLoaderFactoryManager::CreateFactory(process, network_context,
+  //                                              request_initiator);
+  return network::mojom::URLLoaderFactoryPtrInfo();
 }
 
 ShellBrowserMainParts* ShellContentBrowserClient::CreateShellBrowserMainParts(

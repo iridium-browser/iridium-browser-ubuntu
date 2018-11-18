@@ -8,7 +8,6 @@
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/navigator.h"
@@ -69,13 +68,14 @@ void NavigatorShare::ShareClientImpl::Callback(mojom::blink::ShareError error) {
   if (error == mojom::blink::ShareError::OK) {
     resolver_->Resolve();
   } else {
-    resolver_->Reject(DOMException::Create(kAbortError, ErrorToString(error)));
+    resolver_->Reject(DOMException::Create(DOMExceptionCode::kAbortError,
+                                           ErrorToString(error)));
   }
 }
 
 void NavigatorShare::ShareClientImpl::OnConnectionError() {
   resolver_->Reject(DOMException::Create(
-      kAbortError,
+      DOMExceptionCode::kAbortError,
       "Internal error: could not connect to Web Share interface."));
 }
 
@@ -102,8 +102,7 @@ const char NavigatorShare::kSupplementName[] = "NavigatorShare";
 
 ScriptPromise NavigatorShare::share(ScriptState* script_state,
                                     const ShareData& share_data) {
-  Document* doc = ToDocument(ExecutionContext::From(script_state));
-  DCHECK(doc);
+  Document* doc = To<Document>(ExecutionContext::From(script_state));
 
   if (!share_data.hasTitle() && !share_data.hasText() && !share_data.hasURL()) {
     v8::Local<v8::Value> error = V8ThrowException::CreateTypeError(
@@ -120,9 +119,9 @@ ScriptPromise NavigatorShare::share(ScriptState* script_state,
     return ScriptPromise::Reject(script_state, error);
   }
 
-  if (!Frame::HasTransientUserActivation(doc ? doc->GetFrame() : nullptr)) {
+  if (!LocalFrame::HasTransientUserActivation(doc->GetFrame())) {
     DOMException* error = DOMException::Create(
-        kNotAllowedError,
+        DOMExceptionCode::kNotAllowedError,
         "Must be handling a user gesture to perform a share request.");
     return ScriptPromise::RejectWithDOMException(script_state, error);
   }
@@ -131,7 +130,7 @@ ScriptPromise NavigatorShare::share(ScriptState* script_state,
     LocalFrame* frame = doc->GetFrame();
     if (!frame) {
       DOMException* error =
-          DOMException::Create(kAbortError,
+          DOMException::Create(DOMExceptionCode::kAbortError,
                                "Internal error: document frame is missing (the "
                                "navigator may be detached).");
       return ScriptPromise::RejectWithDOMException(script_state, error);

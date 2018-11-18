@@ -25,25 +25,34 @@ class MockDeviceClient : public media::VideoCaptureDevice::Client {
                     base::TimeTicks reference_time,
                     base::TimeDelta tiemstamp,
                     int frame_feedback_id));
+  MOCK_METHOD6(OnIncomingCapturedGfxBuffer,
+               void(gfx::GpuMemoryBuffer* buffer,
+                    const media::VideoCaptureFormat& frame_format,
+                    int clockwise_rotation,
+                    base::TimeTicks reference_time,
+                    base::TimeDelta timestamp,
+                    int frame_feedback_id));
   MOCK_METHOD0(DoReserveOutputBuffer, void(void));
   MOCK_METHOD0(DoOnIncomingCapturedBuffer, void(void));
   MOCK_METHOD0(DoOnIncomingCapturedVideoFrame, void(void));
   MOCK_METHOD0(DoResurrectLastOutputBuffer, void(void));
-  MOCK_METHOD2(OnError,
-               void(const base::Location& from_here,
+  MOCK_METHOD3(OnError,
+               void(media::VideoCaptureError error,
+                    const base::Location& from_here,
                     const std::string& reason));
+  MOCK_METHOD1(OnFrameDropped, void(media::VideoCaptureFrameDropReason reason));
   MOCK_CONST_METHOD0(GetBufferPoolUtilization, double(void));
   MOCK_METHOD0(OnStarted, void(void));
 
   // Trampoline methods to workaround GMOCK problems with std::unique_ptr<>.
-  Buffer ReserveOutputBuffer(const gfx::Size& dimensions,
-                             media::VideoPixelFormat format,
-                             media::VideoPixelStorage storage,
-                             int frame_feedback_id) override {
+  media::VideoCaptureDevice::Client::ReserveResult ReserveOutputBuffer(
+      const gfx::Size& dimensions,
+      media::VideoPixelFormat format,
+      int frame_feedback_id,
+      Buffer* buffer) override {
     EXPECT_EQ(media::PIXEL_FORMAT_I420, format);
-    EXPECT_EQ(media::VideoPixelStorage::CPU, storage);
     DoReserveOutputBuffer();
-    return Buffer();
+    return media::VideoCaptureDevice::Client::ReserveResult::kSucceeded;
   }
   void OnIncomingCapturedBuffer(Buffer buffer,
                                 const media::VideoCaptureFormat& frame_format,
@@ -59,15 +68,6 @@ class MockDeviceClient : public media::VideoCaptureDevice::Client {
       gfx::Rect visible_rect,
       const media::VideoFrameMetadata& additional_metadata) override {
     DoOnIncomingCapturedVideoFrame();
-  }
-  Buffer ResurrectLastOutputBuffer(const gfx::Size& dimensions,
-                                   media::VideoPixelFormat format,
-                                   media::VideoPixelStorage storage,
-                                   int frame_feedback_id) override {
-    EXPECT_EQ(media::PIXEL_FORMAT_I420, format);
-    EXPECT_EQ(media::VideoPixelStorage::CPU, storage);
-    DoResurrectLastOutputBuffer();
-    return Buffer();
   }
 };
 
@@ -92,7 +92,7 @@ TEST_F(ScreenCaptureDeviceAndroidTest, DISABLED_StartAndStop) {
   ASSERT_TRUE(capture_device);
 
   std::unique_ptr<MockDeviceClient> client(new MockDeviceClient());
-  EXPECT_CALL(*client, OnError(_, _)).Times(0);
+  EXPECT_CALL(*client, OnError(_, _, _)).Times(0);
   // |STARTED| is reported asynchronously, which may not be received if capture
   // is stopped immediately.
   EXPECT_CALL(*client, OnStarted()).Times(AtMost(1));

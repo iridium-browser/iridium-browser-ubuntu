@@ -29,111 +29,47 @@
 #include "third_party/blink/renderer/platform/weborigin/security_policy.h"
 
 #include <memory>
+
+#include "base/strings/pattern.h"
+#include "services/network/public/cpp/cors/origin_access_list.h"
+#include "services/network/public/mojom/cors_origin_pattern.mojom-shared.h"
 #include "third_party/blink/public/platform/web_referrer_policy.h"
+#include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
-#include "third_party/blink/renderer/platform/weborigin/origin_access_entry.h"
 #include "third_party/blink/renderer/platform/weborigin/scheme_registry.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
-#include "third_party/blink/renderer/platform/wtf/hash_map.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
+#include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "third_party/blink/renderer/platform/wtf/text/parsing_utilities.h"
-#include "third_party/blink/renderer/platform/wtf/text/string_hash.h"
+#include "third_party/blink/renderer/platform/wtf/text/string_utf8_adaptor.h"
 #include "third_party/blink/renderer/platform/wtf/threading.h"
+#include "third_party/blink/renderer/platform/wtf/threading_primitives.h"
+#include "third_party/blink/renderer/platform/wtf/wtf.h"
+#include "url/gurl.h"
 
 namespace blink {
 
-using OriginAccessList = Vector<OriginAccessEntry>;
-using OriginAccessMap = HashMap<String, std::unique_ptr<OriginAccessList>>;
+static Mutex& GetMutex() {
+  DEFINE_THREAD_SAFE_STATIC_LOCAL(Mutex, mutex, ());
+  return mutex;
+}
+
+static network::cors::OriginAccessList& GetOriginAccessList() {
+  DEFINE_THREAD_SAFE_STATIC_LOCAL(network::cors::OriginAccessList,
+                                  origin_access_list, ());
+  return origin_access_list;
+}
+
 using OriginSet = HashSet<String>;
-
-static OriginAccessMap& GetOriginAccessWhitelistMap() {
-  DEFINE_STATIC_LOCAL(OriginAccessMap, origin_access_whitelist_map, ());
-  return origin_access_whitelist_map;
-}
-
-static OriginAccessMap& GetOriginAccessBlacklistMap() {
-  DEFINE_STATIC_LOCAL(OriginAccessMap, origin_access_blacklist_map, ());
-  return origin_access_blacklist_map;
-}
 
 static OriginSet& TrustworthyOriginSet() {
   DEFINE_STATIC_LOCAL(OriginSet, trustworthy_origin_set, ());
   return trustworthy_origin_set;
 }
 
-static void AddOriginAccessEntry(const SecurityOrigin& source_origin,
-                                 const String& destination_protocol,
-                                 const String& destination_domain,
-                                 bool allow_destination_subdomains,
-                                 OriginAccessMap& access_map) {
-  DCHECK(IsMainThread());
-  DCHECK(!source_origin.IsUnique());
-  if (source_origin.IsUnique())
-    return;
-
-  String source_string = source_origin.ToString();
-  OriginAccessMap::AddResult result = access_map.insert(source_string, nullptr);
-  if (result.is_new_entry)
-    result.stored_value->value = std::make_unique<OriginAccessList>();
-
-  OriginAccessList* list = result.stored_value->value.get();
-  list->push_back(OriginAccessEntry(
-      destination_protocol, destination_domain,
-      allow_destination_subdomains ? OriginAccessEntry::kAllowSubdomains
-                                   : OriginAccessEntry::kDisallowSubdomains));
-}
-
-static void RemoveOriginAccessEntry(const SecurityOrigin& source_origin,
-                                    const String& destination_protocol,
-                                    const String& destination_domain,
-                                    bool allow_destination_subdomains,
-                                    OriginAccessMap& access_map) {
-  DCHECK(IsMainThread());
-  DCHECK(!source_origin.IsUnique());
-  if (source_origin.IsUnique())
-    return;
-
-  String source_string = source_origin.ToString();
-  OriginAccessMap::iterator it = access_map.find(source_string);
-  if (it == access_map.end())
-    return;
-
-  OriginAccessList* list = it->value.get();
-  size_t index = list->Find(OriginAccessEntry(
-      destination_protocol, destination_domain,
-      allow_destination_subdomains ? OriginAccessEntry::kAllowSubdomains
-                                   : OriginAccessEntry::kDisallowSubdomains));
-
-  if (index == kNotFound)
-    return;
-
-  list->EraseAt(index);
-
-  if (list->IsEmpty())
-    access_map.erase(it);
-}
-
-static bool IsOriginPairInAccessMap(const SecurityOrigin* active_origin,
-                                    const SecurityOrigin* target_origin,
-                                    const OriginAccessMap& access_map) {
-  if (access_map.IsEmpty())
-    return false;
-
-  if (OriginAccessList* list = access_map.at(active_origin->ToString())) {
-    for (size_t i = 0; i < list->size(); ++i) {
-      if (list->at(i).MatchesOrigin(*target_origin) !=
-          OriginAccessEntry::kDoesNotMatchOrigin)
-        return true;
-    }
-  }
-  return false;
-}
-
 void SecurityPolicy::Init() {
-  GetOriginAccessWhitelistMap();
-  GetOriginAccessBlacklistMap();
   TrustworthyOriginSet();
 }
 
@@ -242,24 +178,39 @@ Referrer SecurityPolicy::GenerateReferrer(ReferrerPolicy referrer_policy,
       referrer_policy_no_default);
 }
 
-void SecurityPolicy::AddOriginTrustworthyWhiteList(
-    const SecurityOrigin& origin) {
+void SecurityPolicy::AddOriginTrustworthyWhiteList(const String& origin) {
 #if DCHECK_IS_ON()
   // Must be called before we start other threads.
   DCHECK(WTF::IsBeforeThreadCreated());
 #endif
-  if (origin.IsUnique())
-    return;
-  TrustworthyOriginSet().insert(origin.ToRawString());
+  TrustworthyOriginSet().insert(origin);
 }
 
 bool SecurityPolicy::IsOriginWhiteListedTrustworthy(
     const SecurityOrigin& origin) {
   // Early return if there are no whitelisted origins to avoid unnecessary
   // allocations, copies, and frees.
-  if (origin.IsUnique() || TrustworthyOriginSet().IsEmpty())
+  if (origin.IsOpaque() || TrustworthyOriginSet().IsEmpty())
     return false;
-  return TrustworthyOriginSet().Contains(origin.ToRawString());
+  if (TrustworthyOriginSet().Contains(origin.ToRawString()))
+    return true;
+
+  // KURL and SecurityOrigin hosts should be canonicalized to 8-bit strings.
+  CHECK(origin.Host().Is8Bit());
+  StringUTF8Adaptor host_adaptor(origin.Host());
+  for (const auto& origin_or_pattern : TrustworthyOriginSet()) {
+    // Origins and hostname patterns are expected to be canonicalized (including
+    // canonicalization to 8-bit strings) before being inserted into the
+    // TrustworthyOriginSet().
+    CHECK(origin_or_pattern.Is8Bit());
+    StringUTF8Adaptor origin_or_pattern_adaptor(origin_or_pattern);
+    if (base::MatchPattern(host_adaptor.AsStringPiece(),
+                           origin_or_pattern_adaptor.AsStringPiece())) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 bool SecurityPolicy::IsUrlWhiteListedTrustworthy(const KURL& url) {
@@ -269,70 +220,71 @@ bool SecurityPolicy::IsUrlWhiteListedTrustworthy(const KURL& url) {
   return IsOriginWhiteListedTrustworthy(*SecurityOrigin::Create(url).get());
 }
 
-bool SecurityPolicy::IsAccessWhiteListed(const SecurityOrigin* active_origin,
-                                         const SecurityOrigin* target_origin) {
-  return IsOriginPairInAccessMap(active_origin, target_origin,
-                                 GetOriginAccessWhitelistMap()) &&
-         !IsOriginPairInAccessMap(active_origin, target_origin,
-                                  GetOriginAccessBlacklistMap());
+bool SecurityPolicy::IsOriginAccessAllowed(
+    const SecurityOrigin* active_origin,
+    const SecurityOrigin* target_origin) {
+  MutexLocker lock(GetMutex());
+  return GetOriginAccessList().IsAllowed(active_origin->ToUrlOrigin(),
+                                         target_origin->ToUrlOrigin().GetURL());
 }
 
-bool SecurityPolicy::IsAccessToURLWhiteListed(
+bool SecurityPolicy::IsOriginAccessToURLAllowed(
     const SecurityOrigin* active_origin,
     const KURL& url) {
-  scoped_refptr<const SecurityOrigin> target_origin =
-      SecurityOrigin::Create(url);
-  return IsAccessWhiteListed(active_origin, target_origin.get());
+  MutexLocker lock(GetMutex());
+  return GetOriginAccessList().IsAllowed(active_origin->ToUrlOrigin(), url);
 }
 
-void SecurityPolicy::AddOriginAccessWhitelistEntry(
+void SecurityPolicy::AddOriginAccessAllowListEntry(
     const SecurityOrigin& source_origin,
     const String& destination_protocol,
     const String& destination_domain,
-    bool allow_destination_subdomains) {
-  AddOriginAccessEntry(source_origin, destination_protocol, destination_domain,
-                       allow_destination_subdomains,
-                       GetOriginAccessWhitelistMap());
+    bool allow_destination_subdomains,
+    const network::mojom::CORSOriginAccessMatchPriority priority) {
+  MutexLocker lock(GetMutex());
+  GetOriginAccessList().AddAllowListEntryForOrigin(
+      source_origin.ToUrlOrigin(), WebString(destination_protocol).Utf8(),
+      WebString(destination_domain).Utf8(), allow_destination_subdomains,
+      priority);
 }
 
-void SecurityPolicy::RemoveOriginAccessWhitelistEntry(
+void SecurityPolicy::ClearOriginAccessAllowListForOrigin(
+    const SecurityOrigin& source_origin) {
+  MutexLocker lock(GetMutex());
+  GetOriginAccessList().SetAllowListForOrigin(
+      source_origin.ToUrlOrigin(),
+      std::vector<network::mojom::CorsOriginPatternPtr>());
+}
+
+void SecurityPolicy::ClearOriginAccessBlockListForOrigin(
+    const SecurityOrigin& source_origin) {
+  MutexLocker lock(GetMutex());
+  GetOriginAccessList().SetBlockListForOrigin(
+      source_origin.ToUrlOrigin(),
+      std::vector<network::mojom::CorsOriginPatternPtr>());
+}
+
+void SecurityPolicy::ClearOriginAccessAllowList() {
+  MutexLocker lock(GetMutex());
+  GetOriginAccessList().ClearAllowList();
+}
+
+void SecurityPolicy::AddOriginAccessBlockListEntry(
     const SecurityOrigin& source_origin,
     const String& destination_protocol,
     const String& destination_domain,
-    bool allow_destination_subdomains) {
-  RemoveOriginAccessEntry(source_origin, destination_protocol,
-                          destination_domain, allow_destination_subdomains,
-                          GetOriginAccessWhitelistMap());
+    bool allow_destination_subdomains,
+    const network::mojom::CORSOriginAccessMatchPriority priority) {
+  MutexLocker lock(GetMutex());
+  GetOriginAccessList().AddBlockListEntryForOrigin(
+      source_origin.ToUrlOrigin(), WebString(destination_protocol).Utf8(),
+      WebString(destination_domain).Utf8(), allow_destination_subdomains,
+      priority);
 }
 
-void SecurityPolicy::ResetOriginAccessWhitelists() {
-  DCHECK(IsMainThread());
-  GetOriginAccessWhitelistMap().clear();
-}
-
-void SecurityPolicy::AddOriginAccessBlacklistEntry(
-    const SecurityOrigin& source_origin,
-    const String& destination_protocol,
-    const String& destination_domain,
-    bool allow_destination_subdomains) {
-  AddOriginAccessEntry(source_origin, destination_protocol, destination_domain,
-                       allow_destination_subdomains,
-                       GetOriginAccessBlacklistMap());
-}
-
-void SecurityPolicy::RemoveOriginAccessBlacklistEntry(
-    const SecurityOrigin& source_origin,
-    const String& destination_protocol,
-    const String& destination_domain,
-    bool allow_destination_subdomains) {
-  RemoveOriginAccessEntry(source_origin, destination_protocol,
-                          destination_domain, allow_destination_subdomains,
-                          GetOriginAccessBlacklistMap());
-}
-
-void SecurityPolicy::ResetOriginAccessBlacklists() {
-  DCHECK(IsMainThread());
-  GetOriginAccessBlacklistMap().clear();
+void SecurityPolicy::ClearOriginAccessBlockList() {
+  MutexLocker lock(GetMutex());
+  GetOriginAccessList().ClearBlockList();
 }
 
 bool SecurityPolicy::ReferrerPolicyFromString(

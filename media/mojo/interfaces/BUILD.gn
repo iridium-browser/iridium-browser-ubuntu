@@ -21,6 +21,7 @@ mojom("interfaces") {
     "content_decryption_module.mojom",
     "decryptor.mojom",
     "demuxer_stream.mojom",
+    "display_media_information.mojom",
     "interface_factory.mojom",
     "jpeg_decode_accelerator.mojom",
     "jpeg_encode_accelerator.mojom",
@@ -47,11 +48,16 @@ mojom("interfaces") {
     ]
   }
 
+  if (is_chromecast) {
+    sources += [ "application_session_id_manager.mojom" ]
+  }
+
   public_deps = [
     "//gpu/ipc/common:interfaces",
     "//mojo/public/mojom/base",
     "//services/service_manager/public/mojom",
     "//ui/gfx/geometry/mojo",
+    "//ui/gfx/mojo",
     "//url/mojom:url_mojom_gurl",
     "//url/mojom:url_mojom_origin",
   ]

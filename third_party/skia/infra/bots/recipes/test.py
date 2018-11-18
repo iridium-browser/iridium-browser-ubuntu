@@ -7,12 +7,10 @@
 
 
 DEPS = [
-  'core',
   'env',
   'flavor',
   'recipe_engine/context',
   'recipe_engine/file',
-  'recipe_engine/json',
   'recipe_engine/path',
   'recipe_engine/platform',
   'recipe_engine/properties',
@@ -24,13 +22,29 @@ DEPS = [
 ]
 
 
+def upload_dm_results(buildername):
+  skip_upload_bots = [
+    'ASAN',
+    'Coverage',
+    'MSAN',
+    'TSAN',
+    'UBSAN',
+    'Valgrind',
+  ]
+  for s in skip_upload_bots:
+    if s in buildername:
+      return False
+  return True
+
+
 def dm_flags(api, bot):
   args = []
   configs = []
   blacklisted = []
 
   def blacklist(quad):
-    config, src, options, name = quad.split(' ') if type(quad) is str else quad
+    config, src, options, name = (
+        quad.split(' ') if isinstance(quad, str) else quad)
     if (config == '_' or
         config in configs or
         (config[0] == '~' and config[1:] in configs)):
@@ -63,6 +77,10 @@ def dm_flags(api, bot):
   if 'CPU' in bot and 'Nexus7' in bot:
     args.extend(['--threads', '2'])
 
+  # MotoG4 occasionally fails when multiple threads read the same image file.
+  if 'CPU' in bot and 'MotoG4' in bot:
+    args.extend(['--threads', '0'])
+
   if 'Chromecast' in bot:
     args.extend(['--threads', '0'])
 
@@ -79,45 +97,26 @@ def dm_flags(api, bot):
   # is ignored and dm will keep attempting to proceed until we actually
   # exhaust the available resources.
   if ('NexusPlayer' in bot or
-      'PixelC' in bot or
       'Chromecast' in bot):
     args.append('--ignoreSigInt')
 
-  if api.vars.builder_cfg.get('cpu_or_gpu') == 'CPU':
+  if 'SwiftShader' in api.vars.extra_tokens:
+    configs.extend(['gles', 'glesdft'])
+    args.append('--disableDriverCorrectnessWorkarounds')
+
+  elif api.vars.builder_cfg.get('cpu_or_gpu') == 'CPU':
     args.append('--nogpu')
 
-    # These are the canonical configs that we would ideally run on all bots. We
-    # may opt out or substitute some below for specific bots
-    configs.extend(['8888', 'srgb', 'pdf'])
+    configs.append('8888')
 
-    # Runs out of memory on Android bots. Everyone else seems fine.
-    if 'Android' in bot:
-      configs.remove('pdf')
-
-    if '-GCE-' in bot:
-      configs.extend(['g8'])
-      configs.extend(['565'])
-      configs.extend(['f16'])
-      configs.extend(['lite-8888'])              # Experimental display list.
-      configs.extend(['gbr-8888'])
-
-    configs.extend(mode + '-8888' for mode in ['serialize', 'tiles_rt', 'pic'])
-
-    # This bot only differs from vanilla CPU bots in 8888 config.
-    if 'SK_FORCE_RASTER_PIPELINE_BLITTER' in bot:
-      configs = ['8888', 'srgb']
-
-    if 'FSAA' in bot or 'FAAA' in bot or 'FDAA' in bot:
-      # Scan converters shouldn't really be sensitive to different color
-      # configurations.
-      configs = ['8888', 'tiles_rt-8888']
-
-    if 'NativeFonts' in bot:
-      configs = ['8888']
-
-    # Just do the basic config on Chromecast to avoid OOM.
-    if 'Chromecast' in bot:
-      configs = ['8888']
+    if 'BonusConfigs' in bot or ('SAN' in bot and 'GCE' in bot):
+      configs.extend([
+        'pdf',
+        'g8', '565',
+        'pic-8888', 'tiles_rt-8888', 'lite-8888', 'serialize-8888',
+        'gbr-8888',
+        'f16', 'srgb', 'esrgb', 'narrow', 'enarrow',
+        'p3', 'ep3', 'rec2020', 'erec2020'])
 
   elif api.vars.builder_cfg.get('cpu_or_gpu') == 'GPU':
     args.append('--nocpu')
@@ -138,7 +137,9 @@ def dm_flags(api, bot):
     if 'NativeFonts' in bot:
       configs.append(gl_prefix)
     else:
-      configs.extend([gl_prefix, gl_prefix + 'dft', gl_prefix + 'srgb'])
+      configs.extend([gl_prefix,
+                      gl_prefix + 'dft',
+                      gl_prefix + 'srgb'])
       if sample_count is not '':
         configs.append(gl_prefix + 'msaa' + sample_count)
 
@@ -165,7 +166,10 @@ def dm_flags(api, bot):
     # Also do the Ganesh threading verification test (render with and without
     # worker threads, using only the SW path renderer, and compare the results).
     if 'Intel' in bot and api.vars.is_linux:
-      configs.extend(['gles', 'glesdft', 'glessrgb', 'gltestthreading'])
+      configs.extend(['gles',
+                      'glesdft',
+                      'glessrgb',
+                      'gltestthreading'])
       # skbug.com/6333, skbug.com/6419, skbug.com/6702
       blacklist('gltestthreading gm _ lcdblendmodes')
       blacklist('gltestthreading gm _ lcdoverlap')
@@ -181,21 +185,6 @@ def dm_flags(api, bot):
       # skbug.com/7523 - Flaky on various GPUs
       blacklist('gltestthreading gm _ orientation')
 
-    # The following devices do not support glessrgb.
-    if 'glessrgb' in configs:
-      if ('IntelHD405'    in bot or
-          'IntelIris640'  in bot or
-          'IntelBayTrail' in bot or
-          'IntelHD2000'   in bot or
-          'AndroidOne'    in bot or
-          'Nexus7'        in bot or
-          'NexusPlayer'   in bot):
-        configs.remove('glessrgb')
-
-    # Test SkColorSpaceXformCanvas on a few bots
-    if 'GTX1070' in bot:
-      configs.append('gbr-gl')
-
     # CommandBuffer bot *only* runs the command_buffer config.
     if 'CommandBuffer' in bot:
       configs = ['commandbuffer']
@@ -209,21 +198,44 @@ def dm_flags(api, bot):
       if sample_count is not '':
         configs.append('angle_d3d11_es2_msaa' + sample_count)
         configs.append('angle_d3d11_es3_msaa' + sample_count)
+      if 'GTX' in bot or 'Quadro' in bot:
+        # See skia:7823 and chromium:693090.
+        configs.append('angle_gl_es3')
+        if sample_count is not '':
+          configs.append('angle_gl_es2_msaa' + sample_count)
+          configs.append('angle_gl_es3_msaa' + sample_count)
+      if 'NUC5i7RYH' in bot:
+        # skbug.com/7376
+        blacklist('_ test _ ProcessorCloneTest')
 
     # Vulkan bot *only* runs the vk config.
     if 'Vulkan' in bot:
       configs = ['vk']
 
-    # Test 1010102 on our Linux/NVIDIA bots
-    if 'QuadroP400' in bot and api.vars.is_linux:
+    if 'Metal' in bot:
+      configs = ['mtl']
+
+    # Test 1010102 on our Linux/NVIDIA bots and the persistent cache config
+    # on the GL bots.
+    if ('QuadroP400' in bot and 'PreAbandonGpuContext' not in bot and
+        'TSAN' not in bot and api.vars.is_linux):
       if 'Vulkan' in bot:
         configs.append('vk1010102')
         # Decoding transparent images to 1010102 just looks bad
         blacklist('vk1010102 image _ _')
       else:
-        configs.append('gl1010102')
+        configs.extend(['gl1010102', 'gltestpersistentcache'])
         # Decoding transparent images to 1010102 just looks bad
         blacklist('gl1010102 image _ _')
+        # These tests produce slightly different pixels run to run on NV.
+        blacklist('gltestpersistentcache gm _ atlastext')
+        blacklist('gltestpersistentcache gm _ dftext')
+        blacklist('gltestpersistentcache gm _ glyph_pos_h_b')
+
+    # Test SkColorSpaceXformCanvas and rendering to wrapped dsts on a few bots
+    if 'BonusConfigs' in api.vars.extra_tokens:
+      configs = ['gbr-gl', 'glbetex', 'glbert']
+
 
     if 'ChromeOS' in bot:
       # Just run GLES for now - maybe add gles_msaa4 in the future
@@ -242,11 +254,16 @@ def dm_flags(api, bot):
       # This bot generates gl and vk comparison images for the large skps
       configs = [c for c in configs if c == 'gl' or c == 'vk']
       args.extend(['--skpViewportSize', "2048"])
+      args.extend(['--pr', '~small'])
     if 'DDL3' in bot:
       # This bot generates the ddl-gl and ddl-vk images for the
       # large skps and the gms
       configs = ['ddl-' + c for c in configs if c == 'gl' or c == 'vk']
       args.extend(['--skpViewportSize', "2048"])
+      args.extend(['--gpuThreads', "0"])
+
+    if 'Lottie' in bot:
+      configs = ['gl']
 
   tf = api.vars.builder_cfg.get('test_filter')
   if 'All' != tf:
@@ -255,14 +272,14 @@ def dm_flags(api, bot):
     if len(parts) == 3:
       args.extend(['--shard', parts[1]])
       args.extend(['--shards', parts[2]])
-    else:
-      raise Exception('Invalid task name - bad shards') #pragma: nocover
+    else: # pragma: nocover
+      raise Exception('Invalid task name - bad shards: %s' % tf)
 
   args.append('--config')
   args.extend(configs)
 
   # Run tests, gms, and image decoding tests everywhere.
-  args.extend('--src tests gm image colorImage svg skp'.split(' '))
+  args.extend('--src tests gm image lottie colorImage svg skp'.split(' '))
   if api.vars.builder_cfg.get('cpu_or_gpu') == 'GPU':
     # Don't run the 'svgparse_*' svgs on GPU.
     blacklist('_ svg _ svgparse_')
@@ -281,22 +298,30 @@ def dm_flags(api, bot):
     args.remove('image')
     args.remove('colorImage')
 
-  if 'DDL1' in bot:
-    # The DDL1 bot just renders large skp images as a baseline for full DDL
-    args.remove('tests')
-    args.remove('gm')
-    args.remove('image')
-    args.remove('colorImage')
-    args.remove('svg')
-  elif 'DDL3' in bot:
-    # The DDL3 bot renders large skps and gms in full DDL mode
-    args.remove('tests')
-    args.remove('image')
-    args.remove('colorImage')
-    args.remove('svg')
+  def remove_from_args(arg):
+    if arg in args:
+      args.remove(arg)
+
+  if 'DDL' in bot:
+    # The DDL bots just render the large skps and the gms
+    remove_from_args('tests')
+    remove_from_args('image')
+    remove_from_args('colorImage')
+    remove_from_args('svg')
   else:
     # Currently, only the DDL bots render skps
-    args.remove('skp')
+    remove_from_args('skp')
+
+  if 'Lottie' in api.vars.builder_cfg.get('extra_config', ''):
+    # Only run the lotties on Lottie bots.
+    remove_from_args('tests')
+    remove_from_args('gm')
+    remove_from_args('image')
+    remove_from_args('colorImage')
+    remove_from_args('svg')
+    remove_from_args('skp')
+  else:
+    remove_from_args('lottie')
 
   # TODO: ???
   blacklist('f16 _ _ dstreadshuffle')
@@ -389,16 +414,7 @@ def dm_flags(api, bot):
     # Android and iOS. skia:5438
     blacklist('_ test _ GrShape')
 
-  if api.vars.internal_hardware_label == 1:
-    # skia:7046
-    blacklist('_ test _ WritePixelsNonTexture_Gpu')
-    blacklist('_ test _ WritePixelsNonTextureMSAA_Gpu')
-    blacklist('_ test _ WritePixels_Gpu')
-    blacklist('_ test _ WritePixelsMSAA_Gpu')
-    blacklist('_ test _ GrSurfaceRenderability')
-    blacklist('_ test _ ES2BlendWithNoTexture')
-
-  if api.vars.internal_hardware_label == 2:
+  if api.vars.internal_hardware_label == '2':
     # skia:7160
     blacklist('_ test _ SRGBReadWritePixels')
     blacklist('_ test _ SRGBMipMap')
@@ -446,9 +462,13 @@ def dm_flags(api, bot):
   # skia:6189
   bad_serialize_gms.append('shadow_utils')
 
+  # skia:7938
+  bad_serialize_gms.append('persp_images')
+
   # Not expected to round trip encoding/decoding.
   bad_serialize_gms.append('all_bitmap_configs')
   bad_serialize_gms.append('makecolorspace')
+  bad_serialize_gms.append('readpixels')
 
   # This GM forces a path to be convex. That property doesn't survive
   # serialization.
@@ -481,7 +501,7 @@ def dm_flags(api, bot):
     blacklist(['serialize-8888', 'gm', '_', test])
 
   # GM that requires raster-backed canvas
-  for test in ['gamut', 'complexclip4_bw', 'complexclip4_aa']:
+  for test in ['gamut', 'complexclip4_bw', 'complexclip4_aa', 'p3']:
     blacklist([      'pic-8888', 'gm', '_', test])
     blacklist([     'lite-8888', 'gm', '_', test])
     blacklist(['serialize-8888', 'gm', '_', test])
@@ -513,11 +533,6 @@ def dm_flags(api, bot):
     blacklist('_ image _ interlaced3.png')
     for raw_ext in r:
       blacklist('_ image _ .%s' % raw_ext)
-
-  if 'IntelHD405' in bot and 'Ubuntu16' in bot:
-    # skia:6331
-    blacklist(['glmsaa8',   'image', 'gen_codec_gpu', 'abnormal.wbmp'])
-    blacklist(['glesmsaa4', 'image', 'gen_codec_gpu', 'abnormal.wbmp'])
 
   if 'Nexus5' in bot and 'GPU' in bot:
     # skia:5876
@@ -559,13 +574,7 @@ def dm_flags(api, bot):
   if 'AndroidOne' in bot:
     match.append('~WritePixels')  # skia:4711
     match.append('~PremulAlphaRoundTrip_Gpu')  # skia:7501
-
-  if 'DDL3' in bot:
-    match.append('~shadermaskfilter_image') # skia:7751
-    match.append('~persp_shaders_bw')       # skia:7751
-    match.append('~persp_shaders_aa')       # skia:7751
-    match.append('~imagefilterscropped')    # skia:7755
-    match.append('~animated-image-blurs')   # skia:7755
+    match.append('~ReimportImageTextureWithMipLevels')  # skia:8090
 
   if 'Chromecast' in bot:
     if 'GPU' in bot:
@@ -573,6 +582,7 @@ def dm_flags(api, bot):
       match.append('~animated-image-blurs')
       match.append('~blur_0.01')
       match.append('~blur_image_filter')
+      match.append('~check_small_sigma_offset')
       match.append('~imageblur2')
       match.append('~lighting')
       match.append('~longpathdash')
@@ -592,9 +602,6 @@ def dm_flags(api, bot):
   if 'GalaxyS6' in bot:
     match.append('~SpecialImage') # skia:6338
     match.append('~skbug6653') # skia:6653
-
-  if 'GalaxyS7_G930A' in bot:
-    match.append('~WritePixels') # skia:6427
 
   if 'MSAN' in bot:
     match.extend(['~Once', '~Shared'])  # Not sure what's up with these tests.
@@ -618,37 +625,16 @@ def dm_flags(api, bot):
       match.extend(['~WritePixelsNonTextureMSAA_Gpu'])
       match.extend(['~WritePixelsMSAA_Gpu'])
 
-  if 'Vulkan' in bot and 'NexusPlayer' in bot:
-    # skia:6132
-    match.append('~^tilemodes$')
-    match.append('~tilemodes_npot$')
-    match.append('~scaled_tilemodes$')
-    match.append('~emboss')
-    match.append('~^bitmapfilters$')
-    match.append('~^shadertext$')
-    match.append('~^FullScreenClearWithLayers$') #skia:7191
-    match.append('~^GrDefaultPathRendererTest$') #skia:7244
-    match.append('~^GrMSAAPathRendererTest$') #skia:7244
-    # skia:7018
-    match.extend(['~^ClearOp$',
-                  '~^ComposedImageFilterBounds_Gpu$',
-                  '~^ImageEncode_Gpu$',
-                  '~^ImageFilterFailAffectsTransparentBlack_Gpu$',
-                  '~^ImageFilterZeroBlurSigma_Gpu$',
-                  '~^ImageNewShader_GPU$',
-                  '~^ImageReadPixels_Gpu$',
-                  '~^ImageScalePixels_Gpu$',
-                  '~^ReadWriteAlpha$',
-                  '~^SpecialImage_DeferredGpu$',
-                  '~^SpecialImage_Gpu$',
-                  '~^SurfaceSemaphores$'])
-
   if 'Vulkan' in bot and api.vars.is_linux and 'IntelIris640' in bot:
     match.extend(['~VkHeapTests']) # skia:6245
+
+  if api.vars.is_linux and 'IntelIris640' in bot:
+    match.extend(['~GLPrograms']) # skia:7849
 
   if 'Vulkan' in bot and api.vars.is_linux and 'IntelHD405' in bot:
     # skia:7322
     blacklist(['vk', 'gm', '_', 'skbug_257'])
+    blacklist(['vk', 'gm', '_', 'filltypespersp'])
     match.append('~^ClearOp$')
     match.append('~^CopySurface$')
     match.append('~^ImageNewShader_GPU$')
@@ -662,7 +648,6 @@ def dm_flags(api, bot):
     match.append('~^WritePixelsNonTextureMSAA_Gpu$')
     match.append('~^WritePixels_Gpu$')
     match.append('~^WritePixelsMSAA_Gpu$')
-    match.append('~^skbug6653$')
 
   if 'Vulkan' in bot and 'IntelIris540' in bot and 'Win' in bot:
     # skia:6398
@@ -670,6 +655,7 @@ def dm_flags(api, bot):
     blacklist(['vk', 'gm', '_', 'aaxfermodes'])
     blacklist(['vk', 'gm', '_', 'dont_clip_to_layer'])
     blacklist(['vk', 'gm', '_', 'dftext'])
+    blacklist(['vk', 'gm', '_', 'dftext_blob_persp'])
     blacklist(['vk', 'gm', '_', 'drawregionmodes'])
     blacklist(['vk', 'gm', '_', 'filterfastbounds'])
     blacklist(['vk', 'gm', '_', 'fontmgr_iter'])
@@ -707,20 +693,26 @@ def dm_flags(api, bot):
     blacklist(['vk', 'gm', '_', 'varied_text_clipped_lcd'])
     blacklist(['vk', 'gm', '_', 'varied_text_ignorable_clip_lcd'])
 
-  if (('RadeonR9M470X' in bot or 'RadeonHD7770' in bot) and 'ANGLE' in bot):
-    # skia:7096
-    match.append('~PinnedImageTest')
+  if 'Vulkan' in bot and 'GTX660' in bot and 'Win' in bot:
+    # skbug.com/8047
+    match.append('~FloatingPointTextureTest$')
 
-  if 'IntelIris540' in bot and 'ANGLE' in bot:
-    for config in ['angle_d3d9_es2', 'angle_d3d11_es2', 'angle_gl_es2']:
-      # skia:6103
-      blacklist([config, 'gm', '_', 'multipicturedraw_invpathclip_simple'])
-      blacklist([config, 'gm', '_', 'multipicturedraw_noclip_simple'])
-      blacklist([config, 'gm', '_', 'multipicturedraw_pathclip_simple'])
-      blacklist([config, 'gm', '_', 'multipicturedraw_rectclip_simple'])
-      blacklist([config, 'gm', '_', 'multipicturedraw_rrectclip_simple'])
-      # skia:6141
-      blacklist([config, 'gm', '_', 'discard'])
+  if 'MoltenVK' in bot:
+    # skbug.com/7959
+    blacklist(['_', 'gm', '_', 'vertices_scaled_shader'])
+    blacklist(['_', 'gm', '_', 'vertices'])
+    match.append('~^InitialTextureClear$')
+    match.append('~^RGB565TextureTest$')
+    match.append('~^RGBA4444TextureTest$')
+    match.append('~^WritePixelsNonTextureMSAA_Gpu$')
+
+  if 'ANGLE' in bot:
+    # skia:7835
+    match.append('~BlurMaskBiggerThanDest')
+
+  if 'IntelIris6100' in bot and 'ANGLE' in bot and 'Release' in bot:
+    # skia:7376
+    match.append('~^ProcessorOptimizationValidationTest$')
 
   if ('IntelIris6100' in bot or 'IntelHD4400' in bot) and 'ANGLE' in bot:
     # skia:6857
@@ -742,8 +734,28 @@ def dm_flags(api, bot):
     # skia:7603
     match.append('~^GrMeshTest$')
 
-  if api.vars.internal_hardware_label == 1:
-    match.append('~skbug6653') # skia:6653
+  if 'Metal' in bot:
+    # skia:8243
+    match.append('~^ClearOp$')
+    match.append('~^DDLSurfaceCharacterizationTest$')
+    match.append('~^DDLOperatorEqTest$')
+    match.append('~^DeferredProxyTest$')
+    match.append('~^GPUMemorySize$')
+    match.append('~^GrContext_colorTypeSupportedAsImage$')
+    match.append('~^GrContext_colorTypeSupportedAsSurface$')
+    match.append('~^GrContext_maxSurfaceSamplesForColorType$')
+    match.append('~^GrContextFactory_sharedContexts$')
+    match.append('~^GrPipelineDynamicStateTest$')
+    match.append('~^InitialTextureClear$')
+    match.append('~^PromiseImageTest$')
+    match.append('~^ResourceAllocatorTest$')
+    match.append('~^RGB565TextureTest$')
+    match.append('~^RGBA4444TextureTest$')
+    match.append('~^TransferPixelsTest$')
+    match.append('~^SurfaceCreationWithColorSpace_Gpu$')
+    match.append('~^SurfaceSemaphores$')
+    match.append('~^VertexAttributeCount$')
+    match.append('~^WrappedProxyTest$')
 
   if blacklisted:
     args.append('--blacklist')
@@ -771,6 +783,9 @@ def dm_flags(api, bot):
   if 'GDI' in bot:
     args.append('--gdi')
 
+  if 'QuadroP400' in bot or 'Adreno540' in bot:
+    args.extend(['--reduceOpListSplitting'])
+
   # Let's make all bots produce verbose output by default.
   args.append('--verbose')
 
@@ -790,25 +805,23 @@ def key_params(api):
     if k not in blacklist:
       flat.append(k)
       flat.append(api.vars.builder_cfg[k])
+
   return flat
 
 
 def test_steps(api):
   """Run the DM test."""
+  b = api.properties['buildername']
   use_hash_file = False
-  if api.vars.upload_dm_results:
-    host_dm_dir = str(api.vars.dm_dir)
+  if upload_dm_results(b):
+    host_dm_dir = str(api.flavor.host_dirs.dm_dir)
+    api.flavor.create_clean_host_dir(api.path['start_dir'].join('test'))
     device_dm_dir = str(api.flavor.device_dirs.dm_dir)
     if host_dm_dir != device_dm_dir:
       api.flavor.create_clean_device_dir(device_dm_dir)
 
     # Obtain the list of already-generated hashes.
     hash_filename = 'uninteresting_hashes.txt'
-
-    # Ensure that the tmp_dir exists.
-    api.run.run_once(api.file.ensure_directory,
-                     'makedirs tmp_dir',
-                     api.vars.tmp_dir)
 
     host_hashes_file = api.vars.tmp_dir.join(hash_filename)
     hashes_file = api.flavor.device_path_join(
@@ -824,7 +837,7 @@ def test_steps(api):
         import time
         import urllib2
 
-        HASHES_URL = 'https://storage.googleapis.com/skia-infra-gm/hash_files/gold-prod-hashes.txt'
+        HASHES_URL = sys.argv[1]
         RETRIES = 5
         TIMEOUT = 60
         WAIT_BASE = 15
@@ -835,7 +848,7 @@ def test_steps(api):
             with contextlib.closing(
                 urllib2.urlopen(HASHES_URL, timeout=TIMEOUT)) as w:
               hashes = w.read()
-              with open(sys.argv[1], 'w') as f:
+              with open(sys.argv[2], 'w') as f:
                 f.write(hashes)
                 break
           except Exception as e:
@@ -847,7 +860,7 @@ def test_steps(api):
             print 'Retry in %d seconds.' % waittime
             time.sleep(waittime)
         """,
-        args=[host_hashes_file],
+        args=[api.properties['gold_hashes_url'], host_hashes_file],
         abort_on_failure=False,
         fail_build_on_failure=False,
         infra_step=True)
@@ -858,7 +871,7 @@ def test_steps(api):
 
   # Run DM.
   properties = [
-    'gitHash',              api.vars.got_revision,
+    'gitHash',              api.properties['revision'],
     'builder',              api.vars.builder_name,
     'buildbucket_build_id', api.properties.get('buildbucket_build_id', ''),
   ]
@@ -896,13 +909,20 @@ def test_steps(api):
     ] + properties
 
     args.extend(['--svgs', api.flavor.device_dirs.svg_dir])
+    if 'Lottie' in api.vars.builder_cfg.get('extra_config', ''):
+      args.extend(['--lotties', api.flavor.device_dirs.lotties_dir])
 
   args.append('--key')
-  args.extend(key_params(api))
+  keys = key_params(api)
+
+  if 'Lottie' in api.vars.builder_cfg.get('extra_config', ''):
+    keys.extend(['renderer', 'skottie'])
+
+  args.extend(keys)
 
   if use_hash_file:
     args.extend(['--uninterestingHashesFile', hashes_file])
-  if api.vars.upload_dm_results:
+  if upload_dm_results(b):
     args.extend(['--writePath', api.flavor.device_dirs.dm_dir])
 
   args.extend(dm_flags(api, api.vars.builder_name))
@@ -917,14 +937,17 @@ def test_steps(api):
 
   api.run(api.flavor.step, 'dm', cmd=args, abort_on_failure=False)
 
-  if api.vars.upload_dm_results:
+  if upload_dm_results(b):
     # Copy images and JSON to host machine if needed.
     api.flavor.copy_directory_contents_to_host(
-        api.flavor.device_dirs.dm_dir, api.vars.dm_dir)
+        api.flavor.device_dirs.dm_dir, api.flavor.host_dirs.dm_dir)
 
 
 def RunSteps(api):
-  api.core.setup()
+  api.vars.setup()
+  api.file.ensure_directory('makedirs tmp_dir', api.vars.tmp_dir)
+  api.flavor.setup()
+
   env = {}
   if 'iOS' in api.vars.builder_name:
     env['IOS_BUNDLE_ID'] = 'com.google.dm'
@@ -933,8 +956,10 @@ def RunSteps(api):
     try:
       if 'Chromecast' in api.vars.builder_name:
         api.flavor.install(resources=True, skps=True)
+      elif 'Lottie' in api.vars.builder_name:
+        api.flavor.install(resources=True, lotties=True)
       else:
-        api.flavor.install_everything()
+        api.flavor.install(skps=True, images=True, svgs=True, resources=True)
       test_steps(api)
     finally:
       api.flavor.cleanup_steps()
@@ -944,71 +969,63 @@ def RunSteps(api):
 TEST_BUILDERS = [
   'Test-Android-Clang-AndroidOne-GPU-Mali400MP2-arm-Release-All-Android',
   'Test-Android-Clang-GalaxyS6-GPU-MaliT760-arm64-Debug-All-Android',
-  'Test-Android-Clang-GalaxyS7_G930A-GPU-Adreno530-arm64-Debug-All-Android',
-  'Test-Android-Clang-NVIDIA_Shield-GPU-TegraX1-arm64-Debug-All-Android',
+  ('Test-Android-Clang-GalaxyS6-GPU-MaliT760-arm64-Debug-All'
+   '-Android_NoGPUThreads'),
+  ('Test-Android-Clang-GalaxyS7_G930FD-GPU-MaliT880-arm64-Release-All'
+   '-Android_Vulkan'),
+  'Test-Android-Clang-MotoG4-CPU-Snapdragon617-arm-Release-All-Android',
   'Test-Android-Clang-NVIDIA_Shield-GPU-TegraX1-arm64-Debug-All-Android_CCPR',
   'Test-Android-Clang-Nexus5-GPU-Adreno330-arm-Release-All-Android',
-  'Test-Android-Clang-Nexus5x-GPU-Adreno418-arm-Debug-All-Android_ASAN',
-  'Test-Android-Clang-Nexus5x-GPU-Adreno418-arm64-Debug-All-Android_ASAN',
-  ('Test-Android-Clang-Nexus5x-GPU-Adreno418-arm64-Debug-All'
-   '-Android_NoGPUThreads'),
   'Test-Android-Clang-Nexus7-CPU-Tegra3-arm-Release-All-Android',
-  'Test-Android-Clang-Nexus7-GPU-Tegra3-arm-Debug-All-Android',
-  'Test-Android-Clang-NexusPlayer-CPU-Moorefield-x86-Release-All-Android',
-  'Test-Android-Clang-NexusPlayer-GPU-PowerVR-x86-Release-All-Android_Vulkan',
-  'Test-Android-Clang-Pixel-GPU-Adreno530-arm64-Debug-All-Android_CCPR',
+  'Test-Android-Clang-NexusPlayer-GPU-PowerVRG6430-x86-Release-All-Android',
   'Test-Android-Clang-Pixel-GPU-Adreno530-arm64-Debug-All-Android_Vulkan',
-  'Test-ChromeOS-Clang-ASUSChromebookFlipC100-GPU-MaliT764-arm-Debug-All',
+  'Test-Android-Clang-Pixel-GPU-Adreno530-arm-Debug-All-Android_ASAN',
   ('Test-ChromeOS-Clang-AcerChromebookR13Convertible-GPU-PowerVRGX6250-'
    'arm-Debug-All'),
-  'Test-Chromecast-GCC-Chorizo-CPU-Cortex_A7-arm-Release-All',
-  'Test-Chromecast-GCC-Chorizo-GPU-Cortex_A7-arm-Release-All',
+  'Test-Chromecast-Clang-Chorizo-CPU-Cortex_A7-arm-Release-All',
+  'Test-Chromecast-Clang-Chorizo-GPU-Cortex_A7-arm-Release-All',
   'Test-Debian9-Clang-GCE-CPU-AVX2-x86_64-Debug-All-ASAN',
+  'Test-Debian9-Clang-GCE-CPU-AVX2-x86_64-Debug-All-BonusConfigs',
   'Test-Debian9-Clang-GCE-CPU-AVX2-x86_64-Debug-shard_00_10-Coverage',
   'Test-Debian9-Clang-GCE-CPU-AVX2-x86_64-Debug-All-MSAN',
   ('Test-Debian9-Clang-GCE-CPU-AVX2-x86_64-Debug-All'
    '-SK_USE_DISCARDABLE_SCALEDIMAGECACHE'),
+  'Test-Debian9-Clang-GCE-CPU-AVX2-x86_64-Release-All-Lottie',
   ('Test-Debian9-Clang-GCE-CPU-AVX2-x86_64-Release-All'
    '-SK_FORCE_RASTER_PIPELINE_BLITTER'),
   'Test-Debian9-Clang-GCE-CPU-AVX2-x86_64-Release-All-TSAN',
-  'Test-Debian9-GCC-GCE-CPU-AVX2-x86-Debug-All',
-  'Test-Debian9-GCC-GCE-CPU-AVX2-x86_64-Debug-All',
-  'Test-Mac-Clang-MacBook10.1-GPU-IntelHD615-x86_64-Debug-All',
-  'Test-Mac-Clang-MacBookAir7.2-GPU-IntelHD6000-x86_64-Debug-All',
-  'Test-Mac-Clang-MacMini7.1-CPU-AVX-x86_64-Release-All',
-  'Test-Mac-Clang-MacMini7.1-GPU-IntelIris5100-x86_64-Debug-All-CommandBuffer',
+  'Test-Debian9-Clang-GCE-GPU-SwiftShader-x86_64-Release-All-SwiftShader',
+  'Test-Debian9-Clang-NUC5PPYH-GPU-IntelHD405-x86_64-Release-All-Vulkan',
+  'Test-Debian9-Clang-NUC7i5BNK-GPU-IntelIris640-x86_64-Debug-All-Vulkan',
   'Test-Mac-Clang-MacBook10.1-GPU-IntelHD615-x86_64-Release-All-NativeFonts',
-  'Test-Ubuntu16-Clang-NUC5PPYH-GPU-IntelHD405-x86_64-Debug-All',
-  'Test-Ubuntu16-Clang-NUC5PPYH-GPU-IntelHD405-x86_64-Release-All-Vulkan',
-  'Test-Ubuntu16-Clang-NUC7i5BNK-GPU-IntelIris640-x86_64-Debug-All-Vulkan',
-  'Test-Ubuntu16-Clang-NUCDE3815TYKHE-GPU-IntelBayTrail-x86_64-Debug-All',
+  'Test-Mac-Clang-MacBookAir7.2-GPU-IntelHD6000-x86_64-Debug-All',
+  'Test-Mac-Clang-MacBookPro11.5-CPU-AVX2-x86_64-Release-All',
+  'Test-Mac-Clang-MacBookPro11.5-GPU-RadeonHD8870M-x86_64-Debug-All-Metal',
+  ('Test-Mac-Clang-MacBookPro11.5-GPU-RadeonHD8870M-x86_64-Release-All-'
+   'MoltenVK_Vulkan'),
+  'Test-Mac-Clang-MacMini7.1-GPU-IntelIris5100-x86_64-Debug-All-CommandBuffer',
   'Test-Ubuntu17-Clang-Golo-GPU-QuadroP400-x86_64-Debug-All-Vulkan_Coverage',
   ('Test-Ubuntu17-GCC-Golo-GPU-QuadroP400-x86_64-Release-All'
    '-Valgrind_AbandonGpuContext_SK_CPU_LIMIT_SSE41'),
   ('Test-Ubuntu17-GCC-Golo-GPU-QuadroP400-x86_64-Release-All'
    '-Valgrind_PreAbandonGpuContext_SK_CPU_LIMIT_SSE41'),
-  ('Test-Ubuntu17-Clang-Golo-GPU-QuadroP400-x86_64-Debug-All-DDL1'),
-  ('Test-Ubuntu17-Clang-Golo-GPU-QuadroP400-x86_64-Debug-All-DDL3'),
-  ('Test-Ubuntu17-GCC-Golo-GPU-QuadroP400-x86_64-Release-All'
-   '-Valgrind_SK_CPU_LIMIT_SSE41'),
-  'Test-Win10-Clang-AlphaR2-GPU-RadeonR9M470X-x86_64-Debug-All-ANGLE',
-  'Test-Win10-Clang-AlphaR2-GPU-RadeonR9M470X-x86_64-Debug-All-Vulkan',
+  'Test-Ubuntu17-Clang-Golo-GPU-QuadroP400-x86_64-Debug-All-DDL1',
+  'Test-Ubuntu17-Clang-Golo-GPU-QuadroP400-x86_64-Debug-All-DDL3',
+  'Test-Ubuntu17-Clang-Golo-GPU-QuadroP400-x86_64-Debug-All-Lottie',
+  'Test-Win10-Clang-Golo-GPU-QuadroP400-x86_64-Release-All-BonusConfigs',
   ('Test-Win10-Clang-Golo-GPU-QuadroP400-x86_64-Release-All'
    '-ReleaseAndAbandonGpuContext'),
-  'Test-Win10-Clang-NUC5i7RYH-CPU-AVX2-x86_64-Debug-All-NativeFonts',
   'Test-Win10-Clang-NUC5i7RYH-CPU-AVX2-x86_64-Debug-All-NativeFonts_GDI',
+  'Test-Win10-Clang-NUC5i7RYH-GPU-IntelIris6100-x86_64-Release-All-ANGLE',
   'Test-Win10-Clang-NUC6i5SYK-GPU-IntelIris540-x86_64-Debug-All-ANGLE',
   'Test-Win10-Clang-NUC6i5SYK-GPU-IntelIris540-x86_64-Debug-All-Vulkan',
   'Test-Win10-Clang-NUCD34010WYKH-GPU-IntelHD4400-x86_64-Release-All-ANGLE',
-  'Test-Win10-Clang-ShuttleA-GPU-GTX660-x86_64-Debug-All-Vulkan',
+  'Test-Win10-Clang-ShuttleA-GPU-GTX660-x86_64-Release-All-Vulkan',
   'Test-Win10-Clang-ShuttleC-GPU-GTX960-x86_64-Debug-All-ANGLE',
-  'Test-Win10-Clang-ZBOX-GPU-GTX1070-x86_64-Debug-All',
-  'Test-Win10-Clang-ZBOX-GPU-GTX1070-x86_64-Debug-All-Vulkan',
   'Test-Win2016-Clang-GCE-CPU-AVX2-x86_64-Debug-All-FAAA',
   'Test-Win2016-Clang-GCE-CPU-AVX2-x86_64-Debug-All-FDAA',
   'Test-Win2016-Clang-GCE-CPU-AVX2-x86_64-Debug-All-FSAA',
-  'Test-Win8-Clang-Golo-CPU-AVX-x86-Debug-All',
-  'Test-iOS-Clang-iPadPro-GPU-GT7800-arm64-Release-All',
+  'Test-iOS-Clang-iPadPro-GPU-PowerVRGT7800-arm64-Release-All',
 ]
 
 
@@ -1020,6 +1037,7 @@ def GenTests(api):
                      buildbucket_build_id='123454321',
                      revision='abc123',
                      path_config='kitchen',
+                     gold_hashes_url='https://example.com/hashes.txt',
                      swarm_out_dir='[SWARM_OUT_DIR]') +
       api.path.exists(
           api.path['start_dir'].join('skia'),
@@ -1051,13 +1069,14 @@ def GenTests(api):
 
     yield test
 
-  builder = 'Test-Win2k8-MSVC-GCE-CPU-AVX2-x86_64-Release-All'
+  builder = 'Test-Win8-Clang-Golo-CPU-AVX-x86-Debug-All'
   yield (
     api.test('trybot') +
     api.properties(buildername=builder,
                    buildbucket_build_id='123454321',
                    revision='abc123',
                    path_config='kitchen',
+                   gold_hashes_url='https://example.com/hashes.txt',
                    swarm_out_dir='[SWARM_OUT_DIR]') +
     api.properties(patch_storage='gerrit') +
     api.properties.tryserver(
@@ -1084,6 +1103,7 @@ def GenTests(api):
                    buildbucket_build_id='123454321',
                    revision='abc123',
                    path_config='kitchen',
+                   gold_hashes_url='https://example.com/hashes.txt',
                    swarm_out_dir='[SWARM_OUT_DIR]') +
     api.path.exists(
         api.path['start_dir'].join('skia'),
@@ -1105,6 +1125,7 @@ def GenTests(api):
                    buildbucket_build_id='123454321',
                    revision='abc123',
                    path_config='kitchen',
+                   gold_hashes_url='https://example.com/hashes.txt',
                    swarm_out_dir='[SWARM_OUT_DIR]') +
     api.path.exists(
         api.path['start_dir'].join('skia'),
@@ -1127,6 +1148,7 @@ def GenTests(api):
                    buildbucket_build_id='123454321',
                    revision='abc123',
                    path_config='kitchen',
+                   gold_hashes_url='https://example.com/hashes.txt',
                    swarm_out_dir='[SWARM_OUT_DIR]') +
     api.path.exists(
         api.path['start_dir'].join('skia'),
@@ -1145,12 +1167,14 @@ def GenTests(api):
   )
 
   builder = 'Test-Android-Clang-Nexus7-GPU-Tegra3-arm-Debug-All-Android'
+  retry_step_name = 'adb pull.pull /sdcard/revenge_of_the_skiabot/dm_out'
   yield (
     api.test('failed_pull') +
     api.properties(buildername=builder,
                    buildbucket_build_id='123454321',
                    revision='abc123',
                    path_config='kitchen',
+                   gold_hashes_url='https://example.com/hashes.txt',
                    swarm_out_dir='[SWARM_OUT_DIR]') +
     api.path.exists(
         api.path['start_dir'].join('skia'),
@@ -1163,28 +1187,9 @@ def GenTests(api):
         api.path['start_dir'].join('tmp', 'uninteresting_hashes.txt')
     ) +
     api.step_data('dm', retcode=1) +
-    api.step_data('pull /sdcard/revenge_of_the_skiabot/dm_out '+
-                  '[CUSTOM_[SWARM_OUT_DIR]]/dm', retcode=1)
-  )
-
-  yield (
-    api.test('internal_bot_1') +
-    api.properties(buildername=builder,
-                   buildbucket_build_id='123454321',
-                   revision='abc123',
-                   path_config='kitchen',
-                   swarm_out_dir='[SWARM_OUT_DIR]',
-                   internal_hardware_label=1) +
-    api.path.exists(
-        api.path['start_dir'].join('skia'),
-        api.path['start_dir'].join('skia', 'infra', 'bots', 'assets',
-                                     'skimage', 'VERSION'),
-        api.path['start_dir'].join('skia', 'infra', 'bots', 'assets',
-                                     'skp', 'VERSION'),
-        api.path['start_dir'].join('skia', 'infra', 'bots', 'assets',
-                                     'svg', 'VERSION'),
-        api.path['start_dir'].join('tmp', 'uninteresting_hashes.txt')
-    )
+    api.step_data(retry_step_name, retcode=1) +
+    api.step_data(retry_step_name + ' (attempt 2)', retcode=1) +
+    api.step_data(retry_step_name + ' (attempt 3)', retcode=1)
   )
 
   yield (
@@ -1194,7 +1199,8 @@ def GenTests(api):
                    revision='abc123',
                    path_config='kitchen',
                    swarm_out_dir='[SWARM_OUT_DIR]',
-                   internal_hardware_label=2) +
+                   gold_hashes_url='https://example.com/hashes.txt',
+                   internal_hardware_label='2') +
     api.path.exists(
         api.path['start_dir'].join('skia'),
         api.path['start_dir'].join('skia', 'infra', 'bots', 'assets',

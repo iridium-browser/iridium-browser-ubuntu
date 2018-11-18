@@ -57,6 +57,11 @@ void WebUserMediaRequest::Reset() {
   private_.Reset();
 }
 
+WebUserMediaRequest::MediaType WebUserMediaRequest::MediaRequestType() const {
+  DCHECK(!IsNull());
+  return private_->MediaRequestType();
+}
+
 bool WebUserMediaRequest::Audio() const {
   DCHECK(!IsNull());
   return private_->Audio();
@@ -80,12 +85,6 @@ WebMediaConstraints WebUserMediaRequest::VideoConstraints() const {
 bool WebUserMediaRequest::ShouldDisableHardwareNoiseSuppression() const {
   DCHECK(!IsNull());
   return private_->ShouldDisableHardwareNoiseSuppression();
-}
-
-bool WebUserMediaRequest::ShouldEnableExperimentalHardwareEchoCancellation()
-    const {
-  DCHECK(!IsNull());
-  return private_->ShouldEnableExperimentalHardwareEchoCancellation();
 }
 
 WebSecurityOrigin WebUserMediaRequest::GetSecurityOrigin() const {

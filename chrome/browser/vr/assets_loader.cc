@@ -6,13 +6,15 @@
 
 #include "base/files/file_util.h"
 #include "base/memory/singleton.h"
-#include "base/task_scheduler/post_task.h"
-#include "base/task_scheduler/task_traits.h"
+#include "base/single_thread_task_runner.h"
+#include "base/task/post_task.h"
+#include "base/task/task_traits.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
 #include "chrome/browser/vr/metrics/metrics_helper.h"
 #include "chrome/browser/vr/model/assets.h"
 #include "chrome/browser/vr/vr_features.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "media/audio/sounds/wav_audio_handler.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -241,8 +243,8 @@ void AssetsLoader::LoadAssetsTask(
 }
 
 AssetsLoader::AssetsLoader()
-    : main_thread_task_runner_(content::BrowserThread::GetTaskRunnerForThread(
-          content::BrowserThread::UI)),
+    : main_thread_task_runner_(base::CreateSingleThreadTaskRunnerWithTraits(
+          {content::BrowserThread::UI})),
       weak_ptr_factory_(this) {
   DCHECK(main_thread_task_runner_.get());
 }
@@ -267,7 +269,7 @@ void AssetsLoader::LoadInternal(
   DCHECK(main_thread_task_runner_->BelongsToCurrentThread());
   DCHECK(component_ready_);
   base::PostTaskWithTraits(
-      FROM_HERE, {base::TaskPriority::BACKGROUND, base::MayBlock()},
+      FROM_HERE, {base::TaskPriority::BEST_EFFORT, base::MayBlock()},
       base::BindOnce(&AssetsLoader::LoadAssetsTask, task_runner,
                      component_version_, component_install_dir_,
                      std::move(on_loaded)));

@@ -9,8 +9,8 @@
 
 #include "base/base64.h"
 #include "base/callback.h"
-#include "base/message_loop/message_loop.h"
 #include "base/strings/stringprintf.h"
+#include "base/task/post_task.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/attestation/attestation_ca_client.h"
@@ -23,21 +23,22 @@
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/common/extensions/api/enterprise_platform_keys_private.h"
 #include "chrome/common/pref_names.h"
-#include "chromeos/attestation/attestation_constants.h"
 #include "chromeos/attestation/attestation_flow.h"
 #include "chromeos/cryptohome/async_method_caller.h"
 #include "chromeos/cryptohome/cryptohome_parameters.h"
+#include "chromeos/dbus/attestation_constants.h"
 #include "chromeos/dbus/cryptohome_client.h"
 #include "chromeos/dbus/dbus_method_call_status.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/settings/cros_settings_names.h"
+#include "components/account_id/account_id.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
-#include "components/signin/core/account_id/account_id.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/user_manager/known_user.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "extensions/common/manifest.h"
 #include "google_apis/gaia/gaia_auth_util.h"
@@ -148,6 +149,11 @@ bool EPKPChallengeKeyBase::IsExtensionWhitelisted() const {
     // TODO(drcrash): Use a separate device-wide policy for the API.
     return Manifest::IsPolicyLocation(extension_->location());
   }
+  if (Manifest::IsComponentLocation(extension_->location())) {
+    // Note: For this to even be called, the component extension must also be
+    // whitelisted in chrome/common/extensions/api/_permission_features.json
+    return true;
+  }
   const base::ListValue* list =
       profile_->GetPrefs()->GetList(prefs::kAttestationExtensionWhitelist);
   base::Value value(extension_->id());
@@ -220,7 +226,8 @@ void EPKPChallengeKeyBase::IsAttestationPreparedCallback(
   }
   // Attestation is available, see if the key we need already exists.
   cryptohome_client_->TpmAttestationDoesKeyExist(
-      context.key_type, cryptohome::Identification(context.account_id),
+      context.key_type,
+      cryptohome::CreateAccountIdentifierFromAccountId(context.account_id),
       context.key_name,
       base::BindOnce(&EPKPChallengeKeyBase::DoesKeyExistCallback,
                      base::Unretained(this), context));
@@ -627,7 +634,7 @@ EnterprisePlatformKeysPrivateChallengeMachineKeyFunction::Run() {
       &EPKPChallengeMachineKey::DecodeAndRun, base::Unretained(impl_),
       scoped_refptr<UIThreadExtensionFunction>(AsUIThreadExtensionFunction()),
       callback, params->challenge, false);
-  content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE, task);
+  base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI}, task);
   return RespondLater();
 }
 
@@ -670,7 +677,7 @@ EnterprisePlatformKeysPrivateChallengeUserKeyFunction::Run() {
       &EPKPChallengeUserKey::DecodeAndRun, base::Unretained(impl_),
       scoped_refptr<UIThreadExtensionFunction>(AsUIThreadExtensionFunction()),
       callback, params->challenge, params->register_key);
-  content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE, task);
+  base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI}, task);
   return RespondLater();
 }
 

@@ -30,7 +30,6 @@
 
 #include "third_party/blink/renderer/core/html/forms/color_input_type.h"
 
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_controller.h"
 #include "third_party/blink/renderer/core/css_property_names.h"
 #include "third_party/blink/renderer/core/dom/events/scoped_event_queue.h"
@@ -48,6 +47,7 @@
 #include "third_party/blink/renderer/core/input_type_names.h"
 #include "third_party/blink/renderer/core/layout/layout_theme.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/graphics/color.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
@@ -145,26 +145,26 @@ void ColorInputType::DidSetValue(const String&, bool value_changed) {
     chooser_->SetSelectedColor(ValueAsColor());
 }
 
-void ColorInputType::HandleDOMActivateEvent(Event* event) {
+void ColorInputType::HandleDOMActivateEvent(Event& event) {
   if (GetElement().IsDisabledFormControl())
     return;
 
   Document& document = GetElement().GetDocument();
-  if (!Frame::HasTransientUserActivation(document.GetFrame()))
+  if (!LocalFrame::HasTransientUserActivation(document.GetFrame()))
     return;
 
   ChromeClient* chrome_client = GetChromeClient();
   if (chrome_client && !chooser_) {
     UseCounter::Count(
         document,
-        (event->UnderlyingEvent() && event->UnderlyingEvent()->isTrusted())
+        (event.UnderlyingEvent() && event.UnderlyingEvent()->isTrusted())
             ? WebFeature::kColorInputTypeChooserByTrustedClick
             : WebFeature::kColorInputTypeChooserByUntrustedClick);
     chooser_ = chrome_client->OpenColorChooser(document.GetFrame(), this,
                                                ValueAsColor());
   }
 
-  event->SetDefaultHandled();
+  event.SetDefaultHandled();
 }
 
 void ColorInputType::ClosePopupView() {
@@ -234,7 +234,7 @@ Element& ColorInputType::OwnerElement() const {
 }
 
 IntRect ColorInputType::ElementRectRelativeToViewport() const {
-  return GetElement().GetDocument().View()->ContentsToViewport(
+  return GetElement().GetDocument().View()->FrameToViewport(
       GetElement().PixelSnappedBoundingBox());
 }
 

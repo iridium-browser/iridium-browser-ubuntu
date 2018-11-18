@@ -8,6 +8,7 @@
 #include <jni.h>
 #include <map>
 #include <memory>
+#include <string>
 
 #include "base/android/scoped_java_ref.h"
 #include "base/callback.h"
@@ -18,8 +19,6 @@
 #include "chrome/browser/android/shortcut_info.h"
 #include "chrome/browser/android/webapk/webapk_install_service.h"
 #include "chrome/browser/android/webapk/webapk_types.h"
-#include "net/url_request/url_fetcher.h"
-#include "net/url_request/url_fetcher_delegate.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
 namespace base {
@@ -29,6 +28,10 @@ class FilePath;
 
 namespace content {
 class BrowserContext;
+}
+
+namespace network {
+class SimpleURLLoader;
 }
 
 // The enum values are persisted to logs |WebApkInstallSpaceStatus| in
@@ -45,11 +48,11 @@ enum class SpaceStatus {
 // Talks to Chrome WebAPK server to download metadata about a WebAPK and issue
 // a request for it to be installed. The native WebApkInstaller owns the Java
 // WebApkInstaller counterpart.
-class WebApkInstaller : public net::URLFetcherDelegate {
+class WebApkInstaller {
  public:
   using FinishCallback = WebApkInstallService::FinishCallback;
 
-  ~WebApkInstaller() override;
+  virtual ~WebApkInstaller();
 
   // Creates a self-owned WebApkInstaller instance and talks to the Chrome
   // WebAPK server to generate a WebAPK on the server and locally requests the
@@ -58,7 +61,7 @@ class WebApkInstaller : public net::URLFetcherDelegate {
                            const ShortcutInfo& shortcut_info,
                            const SkBitmap& primary_icon,
                            const SkBitmap& badge_icon,
-                           const FinishCallback& finish_callback);
+                           FinishCallback finish_callback);
 
   // Creates a self-owned WebApkInstaller instance and talks to the Chrome
   // WebAPK server to update a WebAPK on the server and locally requests the
@@ -66,7 +69,7 @@ class WebApkInstaller : public net::URLFetcherDelegate {
   // |update_request_path| is the path of the file with the update request.
   static void UpdateAsync(content::BrowserContext* context,
                           const base::FilePath& update_request_path,
-                          const FinishCallback& callback);
+                          FinishCallback callback);
 
   // Calls the private function |InstallAsync| for testing.
   // Should be used only for testing.
@@ -74,13 +77,13 @@ class WebApkInstaller : public net::URLFetcherDelegate {
                                      const ShortcutInfo& shortcut_info,
                                      const SkBitmap& primary_icon,
                                      const SkBitmap& badge_icon,
-                                     const FinishCallback& callback);
+                                     FinishCallback callback);
 
   // Calls the private function |UpdateAsync| for testing.
   // Should be used only for testing.
   static void UpdateAsyncForTesting(WebApkInstaller* installer,
                                     const base::FilePath& update_request_path,
-                                    const FinishCallback& callback);
+                                    FinishCallback callback);
 
   // Sets the timeout for the server requests.
   void SetTimeoutMs(int timeout_ms);
@@ -108,7 +111,7 @@ class WebApkInstaller : public net::URLFetcherDelegate {
       const std::string& version,
       const std::map<std::string, std::string>& icon_url_to_murmur2_hash,
       bool is_manifest_stale,
-      const base::Callback<void(std::unique_ptr<std::string>)>& callback);
+      base::OnceCallback<void(std::unique_ptr<std::string>)> callback);
 
   // Builds the WebAPK proto for an update or an install request and stores it
   // to |update_request_path|. Runs |callback| with a boolean indicating
@@ -123,7 +126,7 @@ class WebApkInstaller : public net::URLFetcherDelegate {
       const std::map<std::string, std::string>& icon_url_to_murmur2_hash,
       bool is_manifest_stale,
       WebApkUpdateReason update_reason,
-      const base::Callback<void(bool)> callback);
+      base::OnceCallback<void(bool)> callback);
 
  protected:
   explicit WebApkInstaller(content::BrowserContext* browser_context);
@@ -156,14 +159,14 @@ class WebApkInstaller : public net::URLFetcherDelegate {
   void InstallAsync(const ShortcutInfo& shortcut_info,
                     const SkBitmap& primary_icon,
                     const SkBitmap& badge_icon,
-                    const FinishCallback& finish_callback);
+                    FinishCallback finish_callback);
 
   // Talks to the Chrome WebAPK server to update a WebAPK on the server and to
   // the Google Play server to install the downloaded WebAPK.
   // |update_request_path| is the path of the file with the update request.
   // Calls |finish_callback| once the update completed or failed.
   void UpdateAsync(const base::FilePath& update_request_path,
-                   const FinishCallback& finish_callback);
+                   FinishCallback finish_callback);
 
   // Called once there is sufficient space on the user's device to install a
   // WebAPK. The user may already have had sufficient space on their device
@@ -174,8 +177,7 @@ class WebApkInstaller : public net::URLFetcherDelegate {
   // Called with the contents of the update request file.
   void OnReadUpdateRequest(std::unique_ptr<std::string> update_request);
 
-  // net::URLFetcherDelegate:
-  void OnURLFetchComplete(const net::URLFetcher* source) override;
+  void OnURLLoaderComplete(std::unique_ptr<std::string> response_body);
 
   // Called with the computed Murmur2 hash for the primary icon.
   void OnGotPrimaryIconMurmur2Hash(const std::string& primary_icon_hash);
@@ -195,7 +197,7 @@ class WebApkInstaller : public net::URLFetcherDelegate {
   content::BrowserContext* browser_context_;
 
   // Sends HTTP request to WebAPK server.
-  std::unique_ptr<net::URLFetcher> url_fetcher_;
+  std::unique_ptr<network::SimpleURLLoader> loader_;
 
   // Fails WebApkInstaller if WebAPK server takes too long to respond or if the
   // download takes too long.

@@ -13,7 +13,6 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/power_monitor/power_monitor.h"
 #include "base/single_thread_task_runner.h"
@@ -72,8 +71,8 @@ class AudioManagerHelper : public base::PowerObserver {
         base::Bind(&AudioManagerHelper::UpdateLastAudioThreadTimeTick,
                    base::Unretained(this)));
     monitor_task_runner_->PostTask(
-        FROM_HERE, base::Bind(&AudioManagerHelper::RecordAudioThreadStatus,
-                              base::Unretained(this)));
+        FROM_HERE, base::BindOnce(&AudioManagerHelper::RecordAudioThreadStatus,
+                                  base::Unretained(this)));
   }
 
   bool IsAudioThreadHung() {
@@ -131,8 +130,9 @@ class AudioManagerHelper : public base::PowerObserver {
 
       base::AutoUnlock unlock(hang_lock_);
       monitor_task_runner_->PostTask(
-          FROM_HERE, base::Bind(&AudioManagerHelper::RecordAudioThreadStatus,
-                                base::Unretained(this)));
+          FROM_HERE,
+          base::BindOnce(&AudioManagerHelper::RecordAudioThreadStatus,
+                         base::Unretained(this)));
     }
   }
 
@@ -173,8 +173,9 @@ class AudioManagerHelper : public base::PowerObserver {
 
     // Don't hold the lock while posting the next task.
     monitor_task_runner_->PostDelayedTask(
-        FROM_HERE, base::Bind(&AudioManagerHelper::RecordAudioThreadStatus,
-                              base::Unretained(this)),
+        FROM_HERE,
+        base::BindOnce(&AudioManagerHelper::RecordAudioThreadStatus,
+                       base::Unretained(this)),
         max_hung_task_time_);
   }
 
@@ -286,9 +287,7 @@ std::unique_ptr<AudioManager> AudioManager::Create(
     AudioLogFactory* audio_log_factory) {
   std::unique_ptr<AudioManager> manager =
       CreateAudioManager(std::move(audio_thread), audio_log_factory);
-#if BUILDFLAG(ENABLE_WEBRTC)
   manager->InitializeDebugRecording();
-#endif
   return manager;
 }
 
@@ -345,8 +344,8 @@ bool AudioManager::Shutdown() {
     ShutdownOnAudioThread();
   } else {
     audio_thread_->GetTaskRunner()->PostTask(
-        FROM_HERE, base::Bind(&AudioManager::ShutdownOnAudioThread,
-                              base::Unretained(this)));
+        FROM_HERE, base::BindOnce(&AudioManager::ShutdownOnAudioThread,
+                                  base::Unretained(this)));
   }
   audio_thread_->Stop();
   shutdown_ = true;

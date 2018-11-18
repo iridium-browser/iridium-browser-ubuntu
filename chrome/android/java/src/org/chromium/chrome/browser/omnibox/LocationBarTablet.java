@@ -9,7 +9,6 @@ import android.animation.AnimatorListenerAdapter;
 import android.animation.ObjectAnimator;
 import android.content.Context;
 import android.graphics.Rect;
-import android.text.Selection;
 import android.util.AttributeSet;
 import android.util.Property;
 import android.view.MotionEvent;
@@ -23,7 +22,6 @@ import org.chromium.chrome.browser.ntp.NewTabPage;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.toolbar.ToolbarTablet;
 import org.chromium.chrome.browser.widget.animation.CancelAwareAnimatorListener;
-import org.chromium.ui.UiUtils;
 import org.chromium.ui.base.LocalizationUtils;
 import org.chromium.ui.interpolators.BakedBezierInterpolator;
 
@@ -207,7 +205,7 @@ public class LocationBarTablet extends LocationBarLayout {
                 getWindowDelegate().setWindowSoftInputMode(
                         WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN);
             }
-            UiUtils.showKeyboard(mUrlBar);
+            getWindowAndroid().getKeyboardDelegate().showKeyboard(mUrlBar);
         } else {
             if (mSecurityButton.getVisibility() == GONE
                     && mSecurityButton.getDrawable() != null
@@ -215,8 +213,7 @@ public class LocationBarTablet extends LocationBarLayout {
                     && mSecurityButton.getDrawable().getIntrinsicHeight() > 0) {
                 mSecurityButton.setVisibility(VISIBLE);
             }
-            UiUtils.hideKeyboard(mUrlBar);
-            Selection.setSelection(mUrlBar.getText(), 0);
+            getWindowAndroid().getKeyboardDelegate().hideKeyboard(mUrlBar);
             // Convert the keyboard back to resize mode (delay the change for an arbitrary
             // amount of time in hopes the keyboard will be completely hidden before making
             // this change).
@@ -277,11 +274,6 @@ public class LocationBarTablet extends LocationBarLayout {
         if (mAnimatingWidthChange) {
             setWidthChangeAnimationPercent(mWidthChangePercent);
         }
-    }
-
-    @Override
-    public boolean useModernDesign() {
-        return false;
     }
 
     /**

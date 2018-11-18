@@ -10,8 +10,8 @@
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/test/base/in_process_browser_test.h"
+#include "components/account_id/account_id.h"
 #include "components/session_manager/core/session_manager.h"
-#include "components/signin/core/account_id/account_id.h"
 #include "components/user_manager/known_user.h"
 #include "components/user_manager/user_manager.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -50,8 +50,10 @@ using ChromeNewWindowClientBrowserTest = InProcessBrowserTest;
 // Tests that when we open a new window by pressing 'Ctrl-N', we should use the
 // current active window's profile to determine on which profile's desktop we
 // should open a new window.
+//
+// Test is flaky. See https://crbug.com/884118
 IN_PROC_BROWSER_TEST_F(ChromeNewWindowClientBrowserTest,
-                       NewWindowForActiveWindowProfileTest) {
+                       DISABLED_NewWindowForActiveWindowProfileTest) {
   CreateAndStartUserSession(
       AccountId::FromUserEmailGaiaId(kTestUserName1, kTestUser1GaiaId));
   Profile* profile1 = ProfileManager::GetActiveUserProfile();

@@ -14,13 +14,19 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
+#include "components/bookmarks/browser/bookmark_model.h"
 #include "components/omnibox/browser/autocomplete_match.h"
 #include "components/omnibox/browser/omnibox_edit_controller.h"
 #include "components/omnibox/browser/omnibox_edit_model.h"
 #include "components/omnibox/browser/omnibox_field_trial.h"
+#include "components/omnibox/browser/query_in_omnibox.h"
 #include "components/toolbar/toolbar_model.h"
 #include "extensions/common/constants.h"
 #include "ui/base/l10n/l10n_util.h"
+
+#if !defined(OS_ANDROID) && !defined(OS_IOS)
+#include "ui/gfx/paint_vector_icon.h"
+#endif
 
 // static
 base::string16 OmniboxView::StripJavascriptSchemas(const base::string16& text) {
@@ -83,23 +89,13 @@ void OmniboxView::OpenMatch(const AutocompleteMatch& match,
                             WindowOpenDisposition disposition,
                             const GURL& alternate_nav_url,
                             const base::string16& pasted_text,
-                            size_t selected_line) {
+                            size_t selected_line,
+                            base::TimeTicks match_selection_timestamp) {
   // Invalid URLs such as chrome://history can end up here.
   if (!match.destination_url.is_valid() || !model_)
     return;
-  // Unless user requests navigation, change disposition for this match type
-  // so downstream will switch tabs.
-  if (match.has_tab_match) {
-    // "with-button" option inverts default action.
-    bool invert = OmniboxFieldTrial::InTabSwitchSuggestionWithButtonTrial();
-    if (disposition == WindowOpenDisposition::CURRENT_TAB &&
-        // i.e. If shift is not pressed without button, or down with it,
-        // change it to switch tabs.
-        invert == shift_key_down_)
-      disposition = WindowOpenDisposition::SWITCH_TO_TAB;
-  }
-  model_->OpenMatch(
-      match, disposition, alternate_nav_url, pasted_text, selected_line);
+  model_->OpenMatch(match, disposition, alternate_nav_url, pasted_text,
+                    selected_line, match_selection_timestamp);
 }
 
 bool OmniboxView::IsEditingOrEmpty() const {
@@ -107,14 +103,72 @@ bool OmniboxView::IsEditingOrEmpty() const {
       (GetOmniboxTextLength() == 0);
 }
 
-const gfx::VectorIcon& OmniboxView::GetVectorIcon() const {
-  if (!IsEditingOrEmpty())
-    return controller_->GetToolbarModel()->GetVectorIcon();
+// TODO (manukh) OmniboxView::GetIcon is very similar to
+// OmniboxPopupModel::GetMatchIcon. They contain certain inconsistencies
+// concerning what flags are required to display url favicons and bookmark star
+// icons. OmniboxPopupModel::GetMatchIcon also doesn't display default search
+// provider icons. It's possible they have other inconsistencies as well. We may
+// want to consider reusing the same code for both the popup and omnibox icons.
+gfx::ImageSkia OmniboxView::GetIcon(int dip_size,
+                                    SkColor color,
+                                    IconFetchedCallback on_icon_fetched) const {
+#if defined(OS_ANDROID) || defined(OS_IOS)
+  // This is used on desktop only.
+  NOTREACHED();
+  return gfx::ImageSkia();
+#else
+  if (!IsEditingOrEmpty()) {
+    // Query in Omnibox.
+    if (model_ &&
+        model_->GetQueryInOmniboxSearchTerms(nullptr /* search_terms */)) {
+      gfx::Image icon = model_->client()->GetFaviconForDefaultSearchProvider(
+          std::move(on_icon_fetched));
+      if (!icon.IsEmpty())
+        return model_->client()->GetSizedIcon(icon).AsImageSkia();
+    }
 
-  return AutocompleteMatch::TypeToVectorIcon(
-      model_ ? model_->CurrentTextType()
-             : AutocompleteMatchType::URL_WHAT_YOU_TYPED,
-      /*is_bookmark=*/false, /*is_tab_match=*/false);
+    return gfx::CreateVectorIcon(
+        controller_->GetToolbarModel()->GetVectorIcon(), dip_size, color);
+  }
+
+  // For tests, model_ will be null.
+  if (!model_) {
+    const gfx::VectorIcon& vector_icon = AutocompleteMatch::TypeToVectorIcon(
+        AutocompleteMatchType::URL_WHAT_YOU_TYPED, false /*is_bookmark*/,
+        AutocompleteMatch::DocumentType::NONE);
+    return gfx::CreateVectorIcon(vector_icon, dip_size, color);
+  }
+
+  gfx::Image favicon;
+
+  AutocompleteMatch match = model_->CurrentMatch(nullptr);
+  if (AutocompleteMatch::IsSearchType(match.type)) {
+    // For search queries, display default search engine's favicon.
+    favicon = model_->client()->GetFaviconForDefaultSearchProvider(
+        std::move(on_icon_fetched));
+
+  } else if (OmniboxFieldTrial::IsShowSuggestionFaviconsEnabled()) {
+    // For site suggestions, display site's favicon.
+    favicon = model_->client()->GetFaviconForPageUrl(
+        match.destination_url, std::move(on_icon_fetched));
+  }
+
+  if (!favicon.IsEmpty())
+    return model_->client()->GetSizedIcon(favicon).AsImageSkia();
+  // If the client returns an empty favicon, fall through to provide the
+  // generic vector icon. |on_icon_fetched| may or may not be called later.
+  // If it's never called, the vector icon we provide below should remain.
+
+  // For bookmarked suggestions, display bookmark icon.
+  bookmarks::BookmarkModel* bookmark_model =
+      model_->client()->GetBookmarkModel();
+  const bool is_bookmarked =
+      bookmark_model && bookmark_model->IsBookmarked(match.destination_url);
+
+  const gfx::VectorIcon& vector_icon = AutocompleteMatch::TypeToVectorIcon(
+      match.type, is_bookmarked, match.document_type);
+  return gfx::CreateVectorIcon(vector_icon, dip_size, color);
+#endif  // defined(OS_ANDROID) || defined(OS_IOS)
 }
 
 void OmniboxView::SetUserText(const base::string16& text) {
@@ -123,20 +177,20 @@ void OmniboxView::SetUserText(const base::string16& text) {
 
 void OmniboxView::SetUserText(const base::string16& text,
                               bool update_popup) {
-  if (model_.get())
+  if (model_)
     model_->SetUserText(text);
   SetWindowTextAndCaretPos(text, text.length(), update_popup, true);
 }
 
 void OmniboxView::RevertAll() {
   CloseOmniboxPopup();
-  if (model_.get())
+  if (model_)
     model_->Revert();
   TextChanged();
 }
 
 void OmniboxView::CloseOmniboxPopup() {
-  if (model_.get())
+  if (model_)
     model_->StopAutocomplete();
 }
 
@@ -147,8 +201,9 @@ bool OmniboxView::IsImeShowingPopup() const {
   return false;
 }
 
-void OmniboxView::ShowImeIfNeeded() {
-}
+void OmniboxView::ShowVirtualKeyboardIfEnabled() {}
+
+void OmniboxView::HideImeIfNeeded() {}
 
 bool OmniboxView::IsIndicatingQueryRefinement() const {
   // The default implementation always returns false.  Mobile ports can override
@@ -199,7 +254,7 @@ OmniboxView::StateChanges OmniboxView::GetStateChanges(const State& before,
 
 OmniboxView::OmniboxView(OmniboxEditController* controller,
                          std::unique_ptr<OmniboxClient> client)
-    : controller_(controller), shift_key_down_(false) {
+    : controller_(controller) {
   // |client| can be null in tests.
   if (client) {
     model_.reset(new OmniboxEditModel(this, controller, std::move(client)));
@@ -208,7 +263,7 @@ OmniboxView::OmniboxView(OmniboxEditController* controller,
 
 void OmniboxView::TextChanged() {
   EmphasizeURLComponents();
-  if (model_.get())
+  if (model_)
     model_->OnChanged();
 }
 

@@ -94,7 +94,7 @@ function cropImage(testVolumeName, volumeType) {
         }).
         then(function() {
           return gallery.fakeKeyDown(
-              appId, 'body', 'Enter', 'Enter', false, false, false);
+              appId, 'body', 'Enter', false, false, false);
         }).
         then(function(ret) {
           chrome.test.assertTrue(ret);
@@ -105,8 +105,8 @@ function cropImage(testVolumeName, volumeType) {
         then(function() {
           return gallery.waitForSlideImage(
               appId,
-              532,
-              398,
+              534,
+              400,
               'My Desktop Background');
         }).
         then(function() {
@@ -158,8 +158,7 @@ function exposureImage(testVolumeName, volumeType) {
       origMetadata = metadata;
 
       // Push the Enter key.
-      return gallery.fakeKeyDown(appId, 'body', 'Enter', 'Enter', false, false,
-                                 false);
+      return gallery.fakeKeyDown(appId, 'body', 'Enter', false, false, false);
     }).then(function() {
       // Wait until the image is updated.
       return repeatUntil(function() {
@@ -194,57 +193,71 @@ function resizeImage(testVolumeName, volumeType) {
   return launchedPromise.then(function(args) {
     var appId = args.appId;
 
-    return gallery.waitAndClickElement(
-        appId, '.gallery:not([locked]) button.resize').
-        then(function() {
+    return gallery
+        .waitAndClickElement(appId, '.gallery:not([locked]) button.resize')
+        .then(function() {
           return Promise.all([
-            gallery.waitForElement(appId, '.width > paper-input'),
-            gallery.waitForElement(appId, '.height > paper-input'),
+            gallery.waitForElement(appId, '.width > cr-input'),
+            gallery.waitForElement(appId, '.height > cr-input'),
             gallery.waitForElement(appId, '.lockicon[locked]'),
           ]);
-        }).then(function() {
+        })
+        .then(function() {
           return gallery.callRemoteTestUtil(
-              'changeValue', appId, ['.height > paper-input', 500]);
-        }).then(function() {
+              'changeValue', appId, ['.height > cr-input', 500]);
+        })
+        .then(function() {
           return gallery.fakeKeyDown(
-              appId, 'body', 'Enter', 'Enter', false, false, false);
-        }).then(function() {
+              appId, 'body', 'Enter', false, false, false);
+        })
+        .then(function() {
           return gallery.waitForSlideImage(appId, 667, 500,
               'My Desktop Background');
-        }).then(function() {
+        })
+        .then(function() {
           return gallery.waitAndClickElement(
               appId, '.gallery:not([locked]) button.undo');
-        }).then(function() {
+        })
+        .then(function() {
           return gallery.waitForSlideImage(appId, 800, 600,
               'My Desktop Background');
-        }).then(function() {
+        })
+        .then(function() {
           return gallery.waitAndClickElement(
               appId, '.gallery:not([locked]) button.resize');
-        }).then(function() {
+        })
+        .then(function() {
           return Promise.all([
-            gallery.waitForElement(appId, '.width > paper-input'),
-            gallery.waitForElement(appId, '.height > paper-input'),
+            gallery.waitForElement(appId, '.width > cr-input'),
+            gallery.waitForElement(appId, '.height > cr-input'),
             gallery.waitForElement(appId, '.lockicon[locked]'),
           ]);
-        }).then(function() {
+        })
+        .then(function() {
           return gallery.waitAndClickElement(
               appId, '.gallery:not([locked]) .lockicon[locked]');
-        }).then(function() {
+        })
+        .then(function() {
           return gallery.callRemoteTestUtil(
-              'changeValue', appId, ['.width > paper-input', 500]);
-        }).then(function() {
+              'changeValue', appId, ['.width > cr-input', 500]);
+        })
+        .then(function() {
           return gallery.callRemoteTestUtil(
-              'changeValue', appId, ['.height > paper-input', 300]);
-        }).then(function() {
+              'changeValue', appId, ['.height > cr-input', 300]);
+        })
+        .then(function() {
           return gallery.fakeKeyDown(
-              appId, 'body', 'Enter', 'Enter', false, false, false);
-        }).then(function() {
+              appId, 'body', 'Enter', false, false, false);
+        })
+        .then(function() {
           return gallery.waitForSlideImage(appId, 500, 300,
               'My Desktop Background');
-        }).then(function() {
+        })
+        .then(function() {
           return gallery.waitAndClickElement(
               appId, '.gallery:not([locked]) button.undo');
-        }).then(function() {
+        })
+        .then(function() {
           return gallery.waitForSlideImage(appId, 800, 600,
               'My Desktop Background');
         });
@@ -375,7 +388,7 @@ testcase.resizeImageOnDownloads = function() {
  */
 testcase.resizeImageOnDrive = function() {
   return resizeImage('drive', 'drive');
-}
+};
 
 /**
  * The enableDisableOverwriteOriginalCheckbox test for Downloads.

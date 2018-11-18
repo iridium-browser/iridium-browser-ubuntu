@@ -14,7 +14,7 @@ from chromite.lib import builder_status_lib
 from chromite.lib import clactions
 from chromite.lib import constants
 from chromite.lib import config_lib
-from chromite.lib import cros_build_lib
+from chromite.lib import cros_collections
 from chromite.lib import cros_logging as logging
 from chromite.lib import patch as cros_patch
 from chromite.lib import triage_lib
@@ -23,9 +23,6 @@ from chromite.lib import triage_lib
 # Limit (hours) for looking back cl actions in the history for history-aware
 # submission.
 CQ_HISTORY_LOOKBACK_LIMIT_HOUR = 48
-
-
-site_config = config_lib.GetConfig()
 
 
 class RelevantChanges(object):
@@ -117,34 +114,6 @@ class RelevantChanges(object):
       changes_by_config[config] = set(changes)
 
     return changes_by_config
-
-  @classmethod
-  def GetSubsysResultForSlaves(cls, master_build_id, db):
-    """Get the pass/fail HWTest subsystems results for each slave.
-
-    Returns:
-      A dictionary mapping a slave config name to a dictionary of the pass/fail
-      subsystems. E.g.
-      {'foo-paladin': {'pass_subsystems':{'A', 'B'},
-                       'fail_subsystems':{'C'}}}
-    """
-    assert db, 'No database connection to use.'
-    slave_msgs = db.GetSlaveBuildMessages(master_build_id)
-    slave_subsys_msgs = ([m for m in slave_msgs
-                          if m['message_type'] == constants.SUBSYSTEMS])
-    subsys_by_config = dict()
-    group_msg_by_config = cros_build_lib.GroupByKey(slave_subsys_msgs,
-                                                    'build_config')
-    for config, dict_list in group_msg_by_config.iteritems():
-      d = subsys_by_config.setdefault(config, {})
-      subsys_groups = cros_build_lib.GroupByKey(dict_list, 'message_subtype')
-      for k, v in subsys_groups.iteritems():
-        if k == constants.SUBSYSTEM_PASS:
-          d['pass_subsystems'] = set([x['message_value'] for x in v])
-        if k == constants.SUBSYSTEM_FAIL:
-          d['fail_subsystems'] = set([x['message_value'] for x in v])
-        # If message_subtype==subsystem_unused, keep d as an empty dict.
-    return subsys_by_config
 
   @classmethod
   def GetPreviouslyPassedSlavesForChanges(
@@ -290,8 +259,6 @@ class TriageRelevantChanges(object):
     self.slave_stages_dict = None
     # Dict mapping slave config names to relevant change sets.
     self.slave_changes_dict = None
-    # Dict mapping slave config names to subsys sets.
-    self.slave_subsys_dict = None
 
     # A set of changes which will be submitted by the master.
     self.will_submit = set()
@@ -318,9 +285,7 @@ class TriageRelevantChanges(object):
         self.master_build_id, self.db, self.buildbucket_info_dict)
     self.slave_changes_dict = self._GetRelevantChanges(
         self.slave_stages_dict)
-    self.slave_subsys_dict = RelevantChanges.GetSubsysResultForSlaves(
-        self.master_build_id, self.db)
-    self.change_relevant_slaves_dict = cros_build_lib.InvertDictionary(
+    self.change_relevant_slaves_dict = cros_collections.InvertDictionary(
         self.slave_changes_dict)
     self.change_passed_slaves_dict = (
         RelevantChanges.GetPreviouslyPassedSlavesForChanges(
@@ -480,8 +445,7 @@ class TriageRelevantChanges(object):
       ignoreable_changes = set()
       for change in relevant_changes:
         ignore_result = triage_lib.CalculateSuspects.CanIgnoreFailures(
-            [builder_status.message], change, self.build_root,
-            self.slave_subsys_dict)
+            [builder_status.message], change, self.build_root)
 
         if ignore_result[0]:
           logging.debug('change %s is ignoreable for failures of %s.',
@@ -704,6 +668,7 @@ class TriageRelevantChanges(object):
 
   def _AllCompletedSlavesPassedUploadPrebuiltsStage(self):
     """Check if all completed slaves have passed the UploadPrebuiltsStage."""
+    site_config = config_lib.GetConfig()
     for build_config in self.completed_builds:
       # compilecheck builds don't run UploadPrebuiltsStage
       if (not site_config[build_config].compilecheck and
@@ -718,6 +683,7 @@ class TriageRelevantChanges(object):
 
   def _AllUncompletedSlavesPassedUploadPrebuiltsStage(self):
     """Check if all uncompleted slaves have passed the UploadPrebuiltsStage."""
+    site_config = config_lib.GetConfig()
     for build_config in set(self.builders_array) - self.completed_builds:
       # compilecheck builds don't run UploadPrebuiltsStage
       if (not site_config[build_config].compilecheck and

@@ -18,7 +18,7 @@
 #define _SKIA_SUPPORT_
 #endif
 
-#include "public/cpp/fpdf_deleters.h"
+#include "public/cpp/fpdf_scopers.h"
 #include "public/fpdf_annot.h"
 #include "public/fpdf_attachment.h"
 #include "public/fpdf_dataavail.h"
@@ -33,6 +33,7 @@
 #include "samples/pdfium_test_event_helper.h"
 #include "samples/pdfium_test_write_helper.h"
 #include "testing/test_support.h"
+#include "testing/utils/path_service.h"
 #include "third_party/base/logging.h"
 #include "third_party/base/optional.h"
 
@@ -88,40 +89,33 @@ enum OutputFormat {
 namespace {
 
 struct Options {
-  Options()
-      : show_config(false),
-        show_metadata(false),
-        send_events(false),
-        render_oneshot(false),
-        save_attachments(false),
-        save_images(false),
-#ifdef ENABLE_CALLGRIND
-        callgrind_delimiters(false),
-#endif  // ENABLE_CALLGRIND
-        pages(false),
-        md5(false),
-        output_format(OUTPUT_NONE) {
-  }
+  Options() = default;
 
-  bool show_config;
-  bool show_metadata;
-  bool send_events;
-  bool render_oneshot;
-  bool save_attachments;
-  bool save_images;
+  bool show_config = false;
+  bool show_metadata = false;
+  bool send_events = false;
+  bool render_oneshot = false;
+  bool save_attachments = false;
+  bool save_images = false;
+#ifdef PDF_ENABLE_V8
+  bool disable_javascript = false;
+#ifdef PDF_ENABLE_XFA
+  bool disable_xfa = false;
+#endif  // PDF_ENABLE_XFA
+#endif  // PDF_ENABLE_V8
+  bool pages = false;
+  bool md5 = false;
 #ifdef ENABLE_CALLGRIND
-  bool callgrind_delimiters;
+  bool callgrind_delimiters = false;
 #endif  // ENABLE_CALLGRIND
-  bool pages;
-  bool md5;
-  OutputFormat output_format;
+  OutputFormat output_format = OUTPUT_NONE;
   std::string scale_factor_as_string;
   std::string exe_path;
   std::string bin_directory;
   std::string font_directory;
-  // 0-based page numbers to be rendered.
-  int first_page;
-  int last_page;
+  int first_page = 0;  // First 0-based page number to renderer.
+  int last_page = 0;   // Last 0-based page number to renderer.
+  time_t time = -1;
 };
 
 Optional<std::string> ExpandDirectoryPath(const std::string& path) {
@@ -141,10 +135,10 @@ Optional<std::string> ExpandDirectoryPath(const std::string& path) {
 #endif  // WORDEXP_AVAILABLE
 }
 
-struct FPDF_FORMFILLINFO_PDFiumTest : public FPDF_FORMFILLINFO {
+struct FPDF_FORMFILLINFO_PDFiumTest final : public FPDF_FORMFILLINFO {
   // Hold a map of the currently loaded pages in order to avoid them
   // to get loaded twice.
-  std::map<int, std::unique_ptr<void, FPDFPageDeleter>> loaded_pages;
+  std::map<int, ScopedFPDFPage> loaded_pages;
 
   // Hold a pointer of FPDF_FORMHANDLE so that PDFium app hooks can
   // make use of it.
@@ -163,6 +157,7 @@ void OutputMD5Hash(const char* file_name, const char* buffer, int len) {
   printf("MD5:%s:%s\n", file_name, hash.c_str());
 }
 
+#ifdef PDF_ENABLE_V8
 // These example JS platform callback handlers are entirely optional,
 // and exist here to show the flow of information from a document back
 // to the embedder.
@@ -201,6 +196,10 @@ int ExampleAppResponse(IPDF_JSPLATFORM*,
   return 4;
 }
 
+void ExampleAppBeep(IPDF_JSPLATFORM*, int type) {
+  printf("BEEP!!! %d\n", type);
+}
+
 void ExampleDocGotoPage(IPDF_JSPLATFORM*, int page_number) {
   printf("Goto Page: %d\n", page_number);
 }
@@ -219,6 +218,7 @@ void ExampleDocMail(IPDF_JSPLATFORM*,
          GetPlatformWString(BCC).c_str(), GetPlatformWString(Subject).c_str(),
          GetPlatformWString(Msg).c_str());
 }
+#endif  // PDF_ENABLE_V8
 
 void ExampleUnsupportedHandler(UNSUPPORT_INFO*, int type) {
   std::string feature = "Unknown";
@@ -286,6 +286,14 @@ bool ParseCommandLine(const std::vector<std::string>& args,
       options->save_attachments = true;
     } else if (cur_arg == "--save-images") {
       options->save_images = true;
+#ifdef PDF_ENABLE_V8
+    } else if (cur_arg == "--disable-javascript") {
+      options->disable_javascript = true;
+#ifdef PDF_ENABLE_XFA
+    } else if (cur_arg == "--disable-xfa") {
+      options->disable_xfa = true;
+#endif  // PDF_ENABLE_XFA
+#endif  // PDF_ENABLE_V8
 #ifdef ENABLE_CALLGRIND
     } else if (cur_arg == "--callgrind-delim") {
       options->callgrind_delimiters = true;
@@ -321,7 +329,7 @@ bool ParseCommandLine(const std::vector<std::string>& args,
         return false;
       }
       options->output_format = OUTPUT_SKP;
-#endif
+#endif  // PDF_ENABLE_SKIA
     } else if (cur_arg.size() > 11 &&
                cur_arg.compare(0, 11, "--font-dir=") == 0) {
       if (!options->font_directory.empty()) {
@@ -334,6 +342,13 @@ bool ParseCommandLine(const std::vector<std::string>& args,
         fprintf(stderr, "Failed to expand --font-dir, %s\n", path.c_str());
         return false;
       }
+
+      if (!PathService::DirectoryExists(expanded_path.value())) {
+        fprintf(stderr, "--font-dir, %s, appears to not be a directory\n",
+                path.c_str());
+        return false;
+      }
+
       options->font_directory = expanded_path.value();
 
 #ifdef _WIN32
@@ -412,6 +427,17 @@ bool ParseCommandLine(const std::vector<std::string>& args,
       }
     } else if (cur_arg == "--md5") {
       options->md5 = true;
+    } else if (cur_arg.size() > 7 && cur_arg.compare(0, 7, "--time=") == 0) {
+      if (options->time > -1) {
+        fprintf(stderr, "Duplicate --time argument\n");
+        return false;
+      }
+      const std::string time_string = cur_arg.substr(7);
+      std::stringstream(time_string) >> options->time;
+      if (options->time < 0) {
+        fprintf(stderr, "Invalid --time argument, must be non-negative\n");
+        return false;
+      }
     } else if (cur_arg.size() >= 2 && cur_arg[0] == '-' && cur_arg[1] == '-') {
       fprintf(stderr, "Unrecognized argument %s\n", cur_arg.c_str());
       return false;
@@ -473,7 +499,7 @@ FPDF_PAGE GetPageForIndex(FPDF_FORMFILLINFO* param,
   if (iter != loaded_pages.end())
     return iter->second.get();
 
-  std::unique_ptr<void, FPDFPageDeleter> page(FPDF_LoadPage(doc, index));
+  ScopedFPDFPage page(FPDF_LoadPage(doc, index));
   if (!page)
     return nullptr;
 
@@ -513,8 +539,7 @@ bool RenderPage(const std::string& name,
     return true;
   }
 
-  std::unique_ptr<void, FPDFTextPageDeleter> text_page(FPDFText_LoadPage(page));
-
+  ScopedFPDFTextPage text_page(FPDFText_LoadPage(page));
   double scale = 1.0;
   if (!options.scale_factor_as_string.empty())
     std::stringstream(options.scale_factor_as_string) >> scale;
@@ -522,8 +547,7 @@ bool RenderPage(const std::string& name,
   auto width = static_cast<int>(FPDF_GetPageWidth(page) * scale);
   auto height = static_cast<int>(FPDF_GetPageHeight(page) * scale);
   int alpha = FPDFPage_HasTransparency(page) ? 1 : 0;
-  std::unique_ptr<void, FPDFBitmapDeleter> bitmap(
-      FPDFBitmap_Create(width, height, alpha));
+  ScopedFPDFBitmap bitmap(FPDFBitmap_Create(width, height, alpha));
 
   if (bitmap) {
     FPDF_DWORD fill_color = alpha ? 0x00000000 : 0xFFFFFFFF;
@@ -542,7 +566,7 @@ bool RenderPage(const std::string& name,
 
       int rv = FPDF_RenderPageBitmap_Start(bitmap.get(), page, 0, 0, width,
                                            height, 0, FPDF_ANNOT, &pause);
-      while (rv == FPDF_RENDER_TOBECOUNTINUED)
+      while (rv == FPDF_RENDER_TOBECONTINUED)
         rv = FPDF_RenderPage_Continue(page, &pause);
     }
 
@@ -637,11 +661,10 @@ void RenderPdf(const std::string& name,
   hints.AddSegment = Add_Segment;
 
   // The pdf_avail must outlive doc.
-  std::unique_ptr<void, FPDFAvailDeleter> pdf_avail(
-      FPDFAvail_Create(&file_avail, &file_access));
+  ScopedFPDFAvail pdf_avail(FPDFAvail_Create(&file_avail, &file_access));
 
   // The document must outlive |form_callbacks.loaded_pages|.
-  std::unique_ptr<void, FPDFDocumentDeleter> doc;
+  ScopedFPDFDocument doc;
 
   int nRet = PDF_DATA_NOTAVAIL;
   bool bIsLinearized = false;
@@ -681,12 +704,15 @@ void RenderPdf(const std::string& name,
   if (options.save_attachments)
     WriteAttachments(doc.get(), name);
 
+#ifdef PDF_ENABLE_V8
   IPDF_JSPLATFORM platform_callbacks = {};
   platform_callbacks.version = 3;
   platform_callbacks.app_alert = ExampleAppAlert;
   platform_callbacks.app_response = ExampleAppResponse;
+  platform_callbacks.app_beep = ExampleAppBeep;
   platform_callbacks.Doc_gotoPage = ExampleDocGotoPage;
   platform_callbacks.Doc_mail = ExampleDocMail;
+#endif  // PDF_ENABLE_V8
 
   FPDF_FORMFILLINFO_PDFiumTest form_callbacks = {};
 #ifdef PDF_ENABLE_XFA
@@ -695,17 +721,23 @@ void RenderPdf(const std::string& name,
   form_callbacks.version = 1;
 #endif  // PDF_ENABLE_XFA
   form_callbacks.FFI_GetPage = GetPageForIndex;
-  form_callbacks.m_pJsPlatform = &platform_callbacks;
 
-  std::unique_ptr<void, FPDFFormHandleDeleter> form(
+#ifdef PDF_ENABLE_V8
+  if (!options.disable_javascript)
+    form_callbacks.m_pJsPlatform = &platform_callbacks;
+#endif  // PDF_ENABLE_V8
+
+  ScopedFPDFFormHandle form(
       FPDFDOC_InitFormFillEnvironment(doc.get(), &form_callbacks));
   form_callbacks.form_handle = form.get();
 
 #ifdef PDF_ENABLE_XFA
-  int doc_type = FPDF_GetFormType(doc.get());
-  if (doc_type == FORMTYPE_XFA_FULL || doc_type == FORMTYPE_XFA_FOREGROUND) {
-    if (!FPDF_LoadXFA(doc.get()))
-      fprintf(stderr, "LoadXFA unsuccessful, continuing anyway.\n");
+  if (!options.disable_xfa && !options.disable_javascript) {
+    int doc_type = FPDF_GetFormType(doc.get());
+    if (doc_type == FORMTYPE_XFA_FULL || doc_type == FORMTYPE_XFA_FOREGROUND) {
+      if (!FPDF_LoadXFA(doc.get()))
+        fprintf(stderr, "LoadXFA unsuccessful, continuing anyway.\n");
+    }
   }
 #endif  // PDF_ENABLE_XFA
 
@@ -755,7 +787,7 @@ void RenderPdf(const std::string& name,
 void ShowConfig() {
   std::string config;
   std::string maybe_comma;
-#if PDF_ENABLE_V8
+#ifdef PDF_ENABLE_V8
   config.append(maybe_comma);
   config.append("V8");
   maybe_comma = ",";
@@ -789,6 +821,12 @@ constexpr char kUsageString[] =
     "<pdf-name>.attachment.<attachment-name>\n"
     "  --save-images       - write embedded images "
     "<pdf-name>.<page-number>.<object-number>.png\n"
+#ifdef PDF_ENABLE_V8
+    "  --disable-javascript- do not execute JS in PDF files\n"
+#ifdef PDF_ENABLE_XFA
+    "  --disable-xfa       - do not process XFA forms\n"
+#endif  // PDF_ENABLE_XFA
+#endif  // PDF_ENABLE_V8
 #ifdef ENABLE_CALLGRIND
     "  --callgrind-delim   - delimit interesting section when using callgrind\n"
 #endif  // ENABLE_CALLGRIND
@@ -812,6 +850,7 @@ constexpr char kUsageString[] =
     "  --skp   - write page images <pdf-name>.<page-number>.skp\n"
 #endif
     "  --md5   - write output image paths and their md5 hashes to stdout.\n"
+    "  --time=<number> - Seconds since the epoch to set system time.\n"
     "";
 
 }  // namespace
@@ -866,6 +905,13 @@ int main(int argc, const char* argv[]) {
   unsupported_info.FSDK_UnSupport_Handler = ExampleUnsupportedHandler;
 
   FSDK_SetUnSpObjProcessHandler(&unsupported_info);
+
+  if (options.time > -1) {
+    // This must be a static var to avoid explicit capture, so the lambda can be
+    // converted to a function ptr.
+    static time_t time_ret = options.time;
+    FSDK_SetTimeFunction([]() -> time_t { return time_ret; });
+  }
 
   for (const std::string& filename : files) {
     size_t file_length = 0;

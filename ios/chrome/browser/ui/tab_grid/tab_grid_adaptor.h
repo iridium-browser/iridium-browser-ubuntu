@@ -7,10 +7,11 @@
 
 #import <Foundation/Foundation.h>
 
+#import "ios/chrome/browser/ui/main/tab_switcher.h"
 #import "ios/chrome/browser/ui/tab_grid/tab_grid_mediator.h"
-#import "ios/chrome/browser/ui/tab_switcher/tab_switcher.h"
 
 @protocol TabGridPaging;
+@class TabGridURLLoader;
 
 // An opque adaptor for the TabSwitcher protocol into the TabGrid.
 // Consuming objects should be passed instances of this object as an
@@ -22,12 +23,14 @@
 // Dispatcher object this adaptor will expose as the dispacther for the
 // TabSwitcher protocol.
 @property(nonatomic, weak)
-    id<ApplicationCommands, BrowserCommands, OmniboxFocuser, ToolbarCommands>
+    id<ApplicationCommands, OmniboxFocuser, ToolbarCommands>
         adaptedDispatcher;
 // Object that can set the current page of the tab grid.
 @property(nonatomic, weak) id<TabGridPaging> tabGridPager;
 // The mediator for the incognito grid.
 @property(nonatomic, weak) TabGridMediator* incognitoMediator;
+// Specialized URL loader for tab grid.
+@property(nonatomic, weak) TabGridURLLoader* loader;
 @end
 
 #endif  // IOS_CHROME_BROWSER_UI_TAB_GRID_TAB_GRID_ADAPTOR_H_

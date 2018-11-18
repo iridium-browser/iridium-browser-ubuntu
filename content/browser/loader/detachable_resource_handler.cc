@@ -38,6 +38,12 @@ class DetachableResourceHandler::Controller : public ResourceController {
     detachable_handler_->ResumeInternal();
   }
 
+  void ResumeForRedirect(const base::Optional<net::HttpRequestHeaders>&
+                             modified_request_headers) override {
+    MarkAsUsed();
+    detachable_handler_->ResumeForRedirect(modified_request_headers);
+  }
+
   void Cancel() override {
     MarkAsUsed();
     detachable_handler_->Cancel();
@@ -202,7 +208,7 @@ void DetachableResourceHandler::OnWillRead(
     std::unique_ptr<ResourceController> controller) {
   if (!next_handler_) {
     if (!read_buffer_.get())
-      read_buffer_ = new net::IOBuffer(kReadBufSize);
+      read_buffer_ = base::MakeRefCounted<net::IOBuffer>(kReadBufSize);
     *buf = read_buffer_;
     *buf_size = kReadBufSize;
     controller->Resume();
@@ -247,13 +253,6 @@ void DetachableResourceHandler::OnResponseCompleted(
   HoldController(std::move(controller));
   next_handler_->OnResponseCompleted(status,
                                      std::make_unique<Controller>(this));
-}
-
-void DetachableResourceHandler::OnDataDownloaded(int bytes_downloaded) {
-  if (!next_handler_)
-    return;
-
-  next_handler_->OnDataDownloaded(bytes_downloaded);
 }
 
 void DetachableResourceHandler::ResumeInternal() {

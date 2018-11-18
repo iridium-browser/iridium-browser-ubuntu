@@ -52,12 +52,6 @@ TextFormatting ConvertClassification(
   return formatting;
 }
 
-url_formatter::FormatUrlTypes GetVrFormatUrlTypes() {
-  return url_formatter::kFormatUrlOmitDefaults |
-         url_formatter::kFormatUrlOmitHTTPS |
-         url_formatter::kFormatUrlOmitTrivialSubdomains;
-}
-
 ElisionParameters GetElisionParameters(const GURL& gurl,
                                        const url::Parsed& parsed,
                                        gfx::RenderText* render_text,

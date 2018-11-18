@@ -5,12 +5,12 @@
 package org.chromium.chrome.browser.tabmodel.document;
 
 import android.content.Context;
-import android.os.AsyncTask;
 import android.util.SparseArray;
 
 import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
 import org.chromium.base.StreamUtil;
+import org.chromium.base.task.AsyncTask;
 import org.chromium.chrome.browser.TabState;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabPersister;
@@ -44,7 +44,7 @@ public class StorageDelegate extends TabPersister {
 
     /** Cached base state directory to prevent main-thread filesystem access in getStateDirectory().
      */
-    private static AsyncTask<Void, Void, File> sBaseStateDirectoryFetchTask;
+    private static AsyncTask<File> sBaseStateDirectoryFetchTask;
 
     public StorageDelegate() {
         // Warm up the state directory to prevent it from using filesystem on main thread in the
@@ -115,9 +115,9 @@ public class StorageDelegate extends TabPersister {
     private void preloadStateDirectory() {
         if (sBaseStateDirectoryFetchTask != null) return;
 
-        sBaseStateDirectoryFetchTask = new AsyncTask<Void, Void, File>() {
+        sBaseStateDirectoryFetchTask = new AsyncTask<File>() {
             @Override
-            protected File doInBackground(Void... params) {
+            protected File doInBackground() {
                 return ContextUtils.getApplicationContext().getDir(
                         STATE_DIRECTORY, Context.MODE_PRIVATE);
             }
@@ -219,9 +219,9 @@ public class StorageDelegate extends TabPersister {
             entry.canGoBack = true;
         }
 
-        new AsyncTask<Void, Void, byte[]>() {
+        new AsyncTask<byte[]>() {
             @Override
-            protected byte[] doInBackground(Void... params) {
+            protected byte[] doInBackground() {
                 return readMetadataFileBytes(isIncognito);
             }
 
@@ -229,7 +229,8 @@ public class StorageDelegate extends TabPersister {
             protected void onPostExecute(byte[] metadataBytes) {
                 updateTabEntriesFromMetadata(metadataBytes, entryMap, recentlyClosedTabIdList);
             }
-        // Run on serial executor to ensure that this is done before other start-up tasks.
-        }.executeOnExecutor(AsyncTask.SERIAL_EXECUTOR);
+            // Run on serial executor to ensure that this is done before other start-up tasks.
+        }
+                .executeOnExecutor(AsyncTask.SERIAL_EXECUTOR);
     }
 }

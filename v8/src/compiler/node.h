@@ -159,9 +159,6 @@ class V8_EXPORT_PRIVATE Node final {
   // Returns true if {owner1} and {owner2} are the only users of {this} node.
   bool OwnedBy(Node const* owner1, Node const* owner2) const;
 
-  // Returns true if addressing related operands (such as load, store, lea)
-  // are the only users of {this} node.
-  bool OwnedByAddressingOperand() const;
   void Print() const;
 
  private:
@@ -264,8 +261,8 @@ class V8_EXPORT_PRIVATE Node final {
   void set_op(const Operator* op) { op_ = op; }
 
   // Only NodeProperties should manipulate the type.
-  Type* type() const { return type_; }
-  void set_type(Type* type) { type_ = type; }
+  Type type() const { return type_; }
+  void set_type(Type type) { type_ = type; }
 
   // Only NodeMarkers should manipulate the marks on nodes.
   Mark mark() const { return mark_; }
@@ -285,7 +282,7 @@ class V8_EXPORT_PRIVATE Node final {
   static const int kMaxInlineCapacity = InlineCapacityField::kMax - 1;
 
   const Operator* op_;
-  Type* type_;
+  Type type_;
   Mark mark_;
   uint32_t bit_field_;
   Use* first_use_;
@@ -432,8 +429,7 @@ class Node::InputEdges::iterator final {
   typedef Edge& reference;
 
   iterator() : use_(nullptr), input_ptr_(nullptr) {}
-  iterator(const iterator& other)
-      : use_(other.use_), input_ptr_(other.input_ptr_) {}
+  iterator(const iterator& other) = default;
 
   Edge operator*() const { return Edge(use_, input_ptr_); }
   bool operator==(const iterator& other) const {
@@ -491,7 +487,7 @@ class Node::Inputs::const_iterator final {
   typedef const value_type* pointer;
   typedef value_type& reference;
 
-  const_iterator(const const_iterator& other) : input_ptr_(other.input_ptr_) {}
+  const_iterator(const const_iterator& other) = default;
 
   Node* operator*() const { return *input_ptr_; }
   bool operator==(const const_iterator& other) const {
@@ -539,8 +535,7 @@ Node* Node::Inputs::operator[](int index) const { return input_root_[index]; }
 // A forward iterator to visit the uses edges of a node.
 class Node::UseEdges::iterator final {
  public:
-  iterator(const iterator& other)
-      : current_(other.current_), next_(other.next_) {}
+  iterator(const iterator& other) = default;
 
   Edge operator*() const { return Edge(current_, current_->input_ptr()); }
   bool operator==(const iterator& other) const {
@@ -586,15 +581,6 @@ class Node::Uses::const_iterator final {
   typedef Node* value_type;
   typedef Node** pointer;
   typedef Node*& reference;
-
-  const_iterator(const const_iterator& other)
-      : current_(other.current_)
-#ifdef DEBUG
-        ,
-        next_(other.next_)
-#endif
-  {
-  }
 
   Node* operator*() const { return current_->from(); }
   bool operator==(const const_iterator& other) const {

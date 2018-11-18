@@ -5,13 +5,14 @@
 #include "third_party/blink/renderer/core/css/cssom/css_math_negate.h"
 
 #include "third_party/blink/renderer/core/css/cssom/css_numeric_sum_value.h"
+#include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
 namespace blink {
 
-WTF::Optional<CSSNumericSumValue> CSSMathNegate::SumValue() const {
+base::Optional<CSSNumericSumValue> CSSMathNegate::SumValue() const {
   auto maybe_sum = value_->SumValue();
   if (!maybe_sum)
-    return WTF::nullopt;
+    return base::nullopt;
 
   std::for_each(maybe_sum->terms.begin(), maybe_sum->terms.end(),
                 [](auto& term) { term.value *= -1; });

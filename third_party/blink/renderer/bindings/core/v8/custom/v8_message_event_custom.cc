@@ -38,6 +38,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_event_target.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_message_port.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_window.h"
+#include "third_party/blink/renderer/platform/bindings/exception_messages.h"
 #include "third_party/blink/renderer/platform/bindings/v8_private_property.h"
 
 namespace blink {
@@ -58,6 +59,10 @@ void V8MessageEvent::dataAttributeGetterCustom(
 
   v8::Local<v8::Value> result;
   switch (event->GetDataType()) {
+    case MessageEvent::kDataTypeNull:
+      result = v8::Null(isolate);
+      break;
+
     case MessageEvent::kDataTypeScriptValue:
       result =
           event->DataAsScriptValue().V8ValueFor(ScriptState::Current(isolate));

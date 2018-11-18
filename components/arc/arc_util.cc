@@ -72,26 +72,7 @@ bool IsArcAvailable() {
 }
 
 bool IsWebstoreSearchEnabled() {
-  const auto* command_line = base::CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(chromeos::switches::kArcAvailability)) {
-    const std::string value =
-        command_line->GetSwitchValueASCII(chromeos::switches::kArcAvailability);
-
-    return value == kAvailabilityNone;
-  }
-  return true;
-}
-
-bool IsPlayStoreAvailable() {
-  if (IsRobotAccountMode())
-    return false;
-  const auto* command_line = base::CommandLine::ForCurrentProcess();
-  if (!command_line->HasSwitch(chromeos::switches::kArcStartMode))
-    return true;
-
-  const std::string value =
-      command_line->GetSwitchValueASCII(chromeos::switches::kArcStartMode);
-  return value != kAlwaysStartWithNoPlayStore;
+  return false;
 }
 
 bool ShouldArcAlwaysStart() {
@@ -101,6 +82,16 @@ bool ShouldArcAlwaysStart() {
   const std::string value =
       command_line->GetSwitchValueASCII(chromeos::switches::kArcStartMode);
   return value == kAlwaysStartWithNoPlayStore || value == kAlwaysStart;
+}
+
+bool ShouldArcAlwaysStartWithNoPlayStore() {
+  return base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
+             chromeos::switches::kArcStartMode) == kAlwaysStartWithNoPlayStore;
+}
+
+bool ShouldShowOptInForTesting() {
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(
+      chromeos::switches::kArcForceShowOptInUi);
 }
 
 void SetArcAlwaysStartForTesting(bool play_store_available) {
@@ -138,7 +129,7 @@ bool IsArcKioskMode() {
          user_manager::UserManager::Get()->IsLoggedInAsArcKioskApp();
 }
 
-bool IsRobotAccountMode() {
+bool IsRobotOrOfflineDemoAccountMode() {
   return user_manager::UserManager::IsInitialized() &&
          (user_manager::UserManager::Get()->IsLoggedInAsArcKioskApp() ||
           user_manager::UserManager::Get()->IsLoggedInAsPublicAccount());
@@ -176,12 +167,11 @@ bool IsArcAllowedForUser(const user_manager::User* user) {
 }
 
 bool IsArcOptInVerificationDisabled() {
-  const auto* command_line = base::CommandLine::ForCurrentProcess();
-  return command_line->HasSwitch(
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(
       chromeos::switches::kDisableArcOptInVerification);
 }
 
-bool IsArcAppWindow(aura::Window* window) {
+bool IsArcAppWindow(const aura::Window* window) {
   if (!window)
     return false;
   return window->GetProperty(aura::client::kAppType) ==
@@ -200,6 +190,28 @@ void SetArcCpuRestriction(bool do_restrict) {
                   : login_manager::CONTAINER_CPU_RESTRICTION_FOREGROUND;
   session_manager_client->SetArcCpuRestriction(
       state, base::BindOnce(SetArcCpuRestrictionCallback, state));
+}
+
+bool IsArcDataCleanupOnStartRequested() {
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(
+      chromeos::switches::kArcDataCleanupOnStart);
+}
+
+// static
+int32_t GetLcdDensityForDeviceScaleFactor(float device_scale_factor) {
+  // Keep this consistent with wayland_client.cpp on Android side.
+  // TODO(oshima): Consider sending this through wayland.
+  constexpr float kEpsilon = 0.001;
+  if (std::abs(device_scale_factor - 2.25f) < kEpsilon)
+    return 280;
+  if (std::abs(device_scale_factor - 1.6f) < kEpsilon)
+    return 213;  // TVDPI
+
+  constexpr float kChromeScaleToAndroidScaleRatio = 0.75f;
+  constexpr int32_t kDefaultDensityDpi = 160;
+  return static_cast<int32_t>(
+      std::max(1.0f, device_scale_factor * kChromeScaleToAndroidScaleRatio) *
+      kDefaultDensityDpi);
 }
 
 }  // namespace arc

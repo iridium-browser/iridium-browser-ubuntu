@@ -32,6 +32,7 @@
 
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/frame/content_settings_client.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 
 namespace blink {
@@ -80,7 +81,7 @@ class ContextFeaturesCache final
 
   void ValidateAgainst(Document*);
 
-  virtual void Trace(blink::Visitor* visitor) {
+  void Trace(blink::Visitor* visitor) override {
     Supplement<Document>::Trace(visitor);
   }
 

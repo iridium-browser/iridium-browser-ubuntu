@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_SYNC_TEST_INTEGRATION_SYNC_TEST_H_
 #define CHROME_BROWSER_SYNC_TEST_INTEGRATION_SYNC_TEST_H_
 
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -24,6 +25,7 @@
 #include "components/sync/test/local_sync_test_server.h"
 #include "net/http/http_status_code.h"
 #include "net/url_request/url_request_status.h"
+#include "services/network/test/test_url_loader_factory.h"
 
 #if BUILDFLAG(ENABLE_APP_LIST)
 #include "chrome/browser/ui/app_list/app_list_syncable_service.h"
@@ -71,6 +73,10 @@ namespace net {
 class FakeURLFetcherFactory;
 class URLFetcherImplFactory;
 }  // namespace net
+
+namespace network {
+class WeakWrapperSharedURLLoaderFactory;
+}  // namespace network
 
 // This is the base class for integration tests for all sync data types. Derived
 // classes must be defined for each sync data type. Individual tests are defined
@@ -250,6 +256,11 @@ class SyncTest : public InProcessBrowserTest {
   // Triggers a sync for the given |model_types| for the Profile at |index|.
   void TriggerSyncForModelTypes(int index, syncer::ModelTypeSet model_types);
 
+  // The configuration refresher is triggering refreshes after the configuration
+  // phase is done (during start-up). Call this function before SetupSync() to
+  // avoid its effects.
+  void StopConfigurationRefresher();
+
   arc::SyncArcPackageHelper* sync_arc_helper();
 
  protected:
@@ -269,13 +280,22 @@ class SyncTest : public InProcessBrowserTest {
   void DisableNotificationsImpl();
   void EnableNotificationsImpl();
 
-  // If non-empty, |contents| will be written to a profile's Preferences file
-  // before the Profile object is created.
-  void SetPreexistingPreferencesFileContents(const std::string& contents);
+  // If non-empty, |contents| will be written to the Preferences file of the
+  // profile at |index| before that Profile object is created.
+  void SetPreexistingPreferencesFileContents(int index,
+                                             const std::string& contents);
 
   // Helper to ProfileManager::CreateProfileAsync that creates a new profile
   // used for UI Signin. Blocks until profile is created.
   static Profile* MakeProfileForUISignin(base::FilePath profile_path);
+
+  // Stops notificatinos being sent to a client.
+  void DisableNotificationsForClient(int index);
+
+  // Sets up fake responses for kClientLoginUrl, kIssueAuthTokenUrl,
+  // kGetUserInfoUrl and kSearchDomainCheckUrl in order to mock out calls to
+  // GAIA servers.
+  void SetupMockGaiaResponsesForProfile(Profile* profile);
 
   base::test::ScopedFeatureList feature_list_;
 
@@ -302,8 +322,9 @@ class SyncTest : public InProcessBrowserTest {
                                     Profile* profile,
                                     Profile::CreateStatus status);
 
-  // Helper to Profile::CreateProfile that handles path creation. It creates
-  // a profile then registers it as a testing profile.
+  // Helper to Profile::CreateProfile that handles path creation, setting up
+  // preexisting pref files, and registering the created profile  as a testing
+  // profile.
   Profile* MakeTestProfile(base::FilePath profile_path, int index);
 
   // Helper method used to create a Gaia account at runtime.
@@ -366,6 +387,9 @@ class SyncTest : public InProcessBrowserTest {
 
   // Sets up the client-side invalidations infrastructure depending on the
   // value of |server_type_|.
+  void SetUpInvalidations(int index);
+
+  // Initializes the invalidations that were set up in SetUpInvalidations.
   void InitializeInvalidations(int index);
 
   // Clear server data, and restart sync.
@@ -452,6 +476,13 @@ class SyncTest : public InProcessBrowserTest {
   // Used to start and stop the local test server.
   base::Process test_server_;
 
+  // The factory used to mock out GAIA signin.
+  network::TestURLLoaderFactory test_url_loader_factory_;
+
+  // The shared URLLoaderFactory backed by |test_url_loader_factory_|.
+  scoped_refptr<network::WeakWrapperSharedURLLoaderFactory>
+      test_shared_url_loader_factory_;
+
   // Fake URLFetcher factory used to mock out GAIA signin.
   std::unique_ptr<net::FakeURLFetcherFactory> fake_factory_;
 
@@ -460,7 +491,8 @@ class SyncTest : public InProcessBrowserTest {
 
   // The contents to be written to a profile's Preferences file before the
   // Profile object is created. If empty, no preexisting file will be written.
-  std::string preexisting_preferences_file_contents_;
+  // The map key corresponds to the profile's index.
+  std::map<int, std::string> preexisting_preferences_file_contents_;
 
   // Disable extension install verification.
   extensions::ScopedInstallVerifierBypassForTest ignore_install_verification_;

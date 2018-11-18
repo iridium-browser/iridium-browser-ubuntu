@@ -32,6 +32,9 @@
 #define THIRD_PARTY_BLINK_PUBLIC_PLATFORM_WEB_URL_LOADER_CLIENT_H_
 
 #include <memory>
+#include "base/time/time.h"
+#include "mojo/public/cpp/system/data_pipe.h"
+#include "services/network/public/cpp/cors/preflight_timing_info.h"
 #include "third_party/blink/public/platform/web_common.h"
 #include "third_party/blink/public/platform/web_data_consumer_handle.h"
 #include "third_party/blink/public/platform/web_referrer_policy.h"
@@ -83,10 +86,6 @@ class BLINK_PLATFORM_EXPORT WebURLLoaderClient {
   virtual void DidStartLoadingResponseBody(
       mojo::ScopedDataPipeConsumerHandle body) {}
 
-  // Called when a chunk of response data is downloaded. This is only called
-  // if WebURLRequest's DownloadToFile flag was set to true.
-  virtual void DidDownloadData(int data_length, int encoded_data_length) {}
-
   // Called when a chunk of response data is received. |data_length| is the
   // number of bytes pointed to by |data|. |encoded_data_length| is the number
   // of bytes actually received from network to serve this chunk, including
@@ -104,16 +103,18 @@ class BLINK_PLATFORM_EXPORT WebURLLoaderClient {
 
   // Called when the load completes successfully.
   // |total_encoded_data_length| may be equal to kUnknownEncodedDataLength.
-  // |blocked_cross_site_document| is used to report that cross-site document
+  // |should_report_corb_blocking| is used to report that cross-site document
   // request response was blocked from entering renderer. Corresponding message
   // will be generated in devtools console if this flag is set to true.
   // TODO(crbug.com/798625): use different callback for subresources
   // with responses blocked due to document protection.
-  virtual void DidFinishLoading(double finish_time,
-                                int64_t total_encoded_data_length,
-                                int64_t total_encoded_body_length,
-                                int64_t total_decoded_body_length,
-                                bool blocked_cross_site_document) {}
+  virtual void DidFinishLoading(
+      base::TimeTicks finish_time,
+      int64_t total_encoded_data_length,
+      int64_t total_encoded_body_length,
+      int64_t total_decoded_body_length,
+      bool should_report_corb_blocking,
+      const std::vector<network::cors::PreflightTimingInfo>&) {}
 
   // Called when the load completes with an error.
   // |total_encoded_data_length| may be equal to kUnknownEncodedDataLength.

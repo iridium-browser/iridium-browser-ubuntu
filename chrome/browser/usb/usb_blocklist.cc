@@ -10,7 +10,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "components/variations/variations_associated_data.h"
-#include "device/usb/usb_device.h"
+#include "device/usb/public/mojom/device.mojom.h"
 
 namespace {
 
@@ -66,6 +66,8 @@ const UsbBlocklist::Entry kStaticEntries[] = {
     {0x096e, 0x085a, kMaxVersion},  // Feitian
     {0x096e, 0x085b, kMaxVersion},  // Feitian
     {0x096e, 0x0880, kMaxVersion},  // HyperFIDO
+
+    {0x09c3, 0x0023, kMaxVersion},  // HID Global BlueTrust Token
 
     // Yubikey devices. https://crbug.com/818807
     {0x1050, 0x0010, kMaxVersion},
@@ -124,9 +126,12 @@ bool UsbBlocklist::IsExcluded(const Entry& entry) const {
 }
 
 bool UsbBlocklist::IsExcluded(
-    const scoped_refptr<const device::UsbDevice>& device) const {
-  return IsExcluded(Entry(device->vendor_id(), device->product_id(),
-                          device->device_version()));
+    const device::mojom::UsbDeviceInfo& device_info) const {
+  uint16_t device_version = device_info.device_version_major << 8 |
+                            device_info.device_version_minor << 4 |
+                            device_info.device_version_subminor;
+  return IsExcluded(
+      Entry(device_info.vendor_id, device_info.product_id, device_version));
 }
 
 void UsbBlocklist::ResetToDefaultValuesForTest() {

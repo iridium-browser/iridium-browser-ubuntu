@@ -36,6 +36,29 @@ int simple_unroll2() {
   return 0;
 }
 
+int simple_unroll3_unsigned() {
+  int a[9];
+  int k = 42;
+  for (unsigned i = 0; i < 9; i++) {
+    clang_analyzer_numTimesReached(); // expected-warning {{9}}
+    a[i] = 42;
+  }
+  int b = 22 / (k - 42); // expected-warning {{Division by zero}}
+  return 0;
+}
+
+int simple_unroll4_unsigned() {
+  int a[9];
+  int k = 42;
+  unsigned i;
+  for (i = (0); i < 9; i++) {
+    clang_analyzer_numTimesReached(); // expected-warning {{9}}
+    a[i] = 42;
+  }
+  int b = 22 / (k - 42); // expected-warning {{Division by zero}}
+  return 0;
+}
+
 int simple_no_unroll1() {
   int a[9];
   int k = 42;
@@ -345,7 +368,11 @@ int nested_inlined_unroll1() {
 int nested_inlined_no_unroll1() {
   int k;
   for (int i = 0; i < 9; i++) {
+#ifdef ANALYZER_CM_Z3
+    clang_analyzer_numTimesReached(); // expected-warning {{13}}
+#else
     clang_analyzer_numTimesReached(); // expected-warning {{15}}
+#endif
     k = simple_unknown_bound_loop();  // reevaluation without inlining, splits the state as well
   }
   int a = 22 / k; // no-warning

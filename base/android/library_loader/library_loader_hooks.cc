@@ -8,6 +8,7 @@
 #include "base/android/library_loader/anchor_functions_buildflags.h"
 #include "base/android/library_loader/library_load_from_apk_status_codes.h"
 #include "base/android/library_loader/library_prefetcher.h"
+#include "base/android/orderfile/orderfile_buildflags.h"
 #include "base/at_exit.h"
 #include "base/base_switches.h"
 #include "base/command_line.h"
@@ -15,6 +16,10 @@
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "jni/LibraryLoader_jni.h"
+
+#if BUILDFLAG(ORDERFILE_INSTRUMENTATION)
+#include "base/android/orderfile/orderfile_instrumentation.h"
+#endif
 
 namespace base {
 namespace android {
@@ -174,14 +179,21 @@ void SetLibraryLoadedHook(LibraryLoadedHook* func) {
 
 static jboolean JNI_LibraryLoader_LibraryLoaded(
     JNIEnv* env,
-    const JavaParamRef<jobject>& jcaller) {
+    const JavaParamRef<jobject>& jcaller,
+    jint library_process_type) {
+#if BUILDFLAG(ORDERFILE_INSTRUMENTATION)
+  orderfile::StartDelayedDump();
+#endif
+
 #if BUILDFLAG(SUPPORTS_CODE_ORDERING)
   if (ShouldDoOrderfileMemoryOptimization()) {
     NativeLibraryPrefetcher::MadviseForOrderfile();
   }
 #endif
 
-  if (g_native_initialization_hook && !g_native_initialization_hook())
+  if (g_native_initialization_hook &&
+      !g_native_initialization_hook(
+          static_cast<LibraryProcessType>(library_process_type)))
     return false;
   if (g_registration_callback && !g_registration_callback(env, nullptr))
     return false;
@@ -195,19 +207,13 @@ void LibraryLoaderExitHook() {
   }
 }
 
-static jboolean JNI_LibraryLoader_ForkAndPrefetchNativeLibrary(
+static void JNI_LibraryLoader_ForkAndPrefetchNativeLibrary(
     JNIEnv* env,
     const JavaParamRef<jclass>& clazz) {
 #if BUILDFLAG(SUPPORTS_CODE_ORDERING)
-  if (!ShouldDoOrderfileMemoryOptimization() ||
-      CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kForceNativePrefetch)) {
-    return NativeLibraryPrefetcher::ForkAndPrefetchNativeLibrary(
-        CommandLine::ForCurrentProcess()->HasSwitch(
-            switches::kNativePrefetchOrderedOnly));
-  }
+  return NativeLibraryPrefetcher::ForkAndPrefetchNativeLibrary(
+      ShouldDoOrderfileMemoryOptimization());
 #endif
-  return false;
 }
 
 static jint JNI_LibraryLoader_PercentageOfResidentNativeLibraryCode(
@@ -238,11 +244,6 @@ ScopedJavaLocalRef<jstring> JNI_LibraryLoader_GetVersionNumber(
     JNIEnv* env,
     const JavaParamRef<jobject>& jcaller) {
   return ConvertUTF8ToJavaString(env, g_library_version_number);
-}
-
-LibraryProcessType GetLibraryProcessType(JNIEnv* env) {
-  return static_cast<LibraryProcessType>(
-      Java_LibraryLoader_getLibraryProcessType(env));
 }
 
 void InitAtExitManager() {

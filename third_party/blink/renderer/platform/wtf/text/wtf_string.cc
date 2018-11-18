@@ -58,6 +58,11 @@ String::String(const char* characters, unsigned length)
                                      length)
                 : nullptr) {}
 
+#if defined(ARCH_CPU_64_BITS)
+String::String(const char* characters, size_t length)
+    : String(characters, SafeCast<unsigned>(length)) {}
+#endif  // defined(ARCH_CPU_64_BITS)
+
 void String::append(const StringView& string) {
   if (string.IsEmpty())
     return;
@@ -533,7 +538,7 @@ void String::Split(const StringView& separator,
   result.clear();
 
   unsigned start_pos = 0;
-  size_t end_pos;
+  wtf_size_t end_pos;
   while ((end_pos = Find(separator, start_pos)) != kNotFound) {
     if (allow_empty_entries || start_pos != end_pos)
       result.push_back(Substring(start_pos, end_pos - start_pos));
@@ -549,7 +554,7 @@ void String::Split(UChar separator,
   result.clear();
 
   unsigned start_pos = 0;
-  size_t end_pos;
+  wtf_size_t end_pos;
   while ((end_pos = find(separator, start_pos)) != kNotFound) {
     if (allow_empty_entries || start_pos != end_pos)
       result.push_back(Substring(start_pos, end_pos - start_pos));
@@ -721,7 +726,7 @@ CString String::Utf8(UTF8ConversionMode mode) const {
   return CString(buffer_vector.data(), buffer - buffer_vector.data());
 }
 
-String String::Make8BitFrom16BitSource(const UChar* source, size_t length) {
+String String::Make8BitFrom16BitSource(const UChar* source, wtf_size_t length) {
   if (!length)
     return g_empty_string;
 
@@ -733,7 +738,7 @@ String String::Make8BitFrom16BitSource(const UChar* source, size_t length) {
   return result;
 }
 
-String String::Make16BitFrom8BitSource(const LChar* source, size_t length) {
+String String::Make16BitFrom8BitSource(const LChar* source, wtf_size_t length) {
   if (!length)
     return g_empty_string16_bit;
 
@@ -745,8 +750,8 @@ String String::Make16BitFrom8BitSource(const LChar* source, size_t length) {
   return result;
 }
 
-String String::FromUTF8(const LChar* string_start, size_t length) {
-  CHECK_LE(length, std::numeric_limits<unsigned>::max());
+String String::FromUTF8(const LChar* string_start, size_t string_length) {
+  wtf_size_t length = SafeCast<wtf_size_t>(string_length);
 
   if (!string_start)
     return String();
@@ -768,7 +773,8 @@ String String::FromUTF8(const LChar* string_start, size_t length) {
           buffer_current + buffer.size()) != Unicode::kConversionOK)
     return String();
 
-  unsigned utf16_length = buffer_current - buffer_start;
+  unsigned utf16_length =
+      static_cast<wtf_size_t>(buffer_current - buffer_start);
   DCHECK_LT(utf16_length, length);
   return StringImpl::Create(buffer_start, utf16_length);
 }
@@ -786,7 +792,7 @@ String String::FromUTF8(const CString& s) {
 String String::FromUTF8WithLatin1Fallback(const LChar* string, size_t size) {
   String utf8 = FromUTF8(string, size);
   if (!utf8)
-    return String(string, size);
+    return String(string, SafeCast<wtf_size_t>(size));
   return utf8;
 }
 

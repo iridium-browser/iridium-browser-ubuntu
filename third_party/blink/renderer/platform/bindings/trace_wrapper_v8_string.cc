@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/platform/bindings/trace_wrapper_v8_string.h"
 #include "third_party/blink/renderer/platform/bindings/v8_binding.h"
+#include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
 
@@ -11,9 +12,10 @@ void TraceWrapperV8String::Concat(v8::Isolate* isolate, const String& string) {
   DCHECK(isolate);
   v8::HandleScope handle_scope(isolate);
   v8::Local<v8::String> target_string =
-      (string_.IsEmpty()) ? V8String(isolate, string)
-                          : v8::String::Concat(string_.NewLocal(isolate),
-                                               V8String(isolate, string));
+      (string_.IsEmpty())
+          ? V8String(isolate, string)
+          : v8::String::Concat(isolate, string_.NewLocal(isolate),
+                               V8String(isolate, string));
   string_.Set(isolate, target_string);
 }
 
@@ -22,8 +24,7 @@ String TraceWrapperV8String::Flatten(v8::Isolate* isolate) const {
     return String();
   DCHECK(isolate);
   v8::HandleScope handle_scope(isolate);
-  return V8StringToWebCoreString<String>(string_.NewLocal(isolate),
-                                         kExternalize);
+  return ToBlinkString<String>(string_.NewLocal(isolate), kExternalize);
 }
 
 }  // namespace blink

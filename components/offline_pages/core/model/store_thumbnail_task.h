@@ -10,17 +10,17 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "components/offline_pages/core/offline_page_thumbnail.h"
-#include "components/offline_pages/core/task.h"
+#include "components/offline_pages/task/task.h"
 
 namespace offline_pages {
-class OfflinePageMetadataStoreSQL;
+class OfflinePageMetadataStore;
 
 // StoreThumbnailTask stores a thumbnail in the page_thumbnails table.
 class StoreThumbnailTask : public Task {
  public:
   typedef base::OnceCallback<void(bool)> CompleteCallback;
 
-  StoreThumbnailTask(OfflinePageMetadataStoreSQL* store,
+  StoreThumbnailTask(OfflinePageMetadataStore* store,
                      OfflinePageThumbnail thumbnail,
                      CompleteCallback complete_callback);
   ~StoreThumbnailTask() override;
@@ -31,7 +31,7 @@ class StoreThumbnailTask : public Task {
  private:
   void Complete(bool success);
 
-  OfflinePageMetadataStoreSQL* store_;
+  OfflinePageMetadataStore* store_;
   OfflinePageThumbnail thumbnail_;
   CompleteCallback complete_callback_;
   base::WeakPtrFactory<StoreThumbnailTask> weak_ptr_factory_;

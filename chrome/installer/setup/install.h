@@ -20,7 +20,6 @@ namespace installer {
 class InstallationState;
 class InstallerState;
 class MasterPreferences;
-class Product;
 
 enum InstallShortcutOperation {
   // Create all shortcuts (potentially skipping those explicitly stated not to
@@ -45,25 +44,10 @@ enum InstallShortcutLevel {
 };
 
 // Creates chrome.VisualElementsManifest.xml in |src_path| if
-// |src_path|\VisualElements exists. |supports_dark_text| indicates whether or
-// not the OS supports drawing dark text on light assets. When true, and such
-// light assets are present, the generated manifest references those light
-// assets. Returns true unless the manifest is supposed to be created, but fails
-// to be.
+// |src_path|\VisualElements exists. Returns true unless the manifest is
+// supposed to be created, but fails to be.
 bool CreateVisualElementsManifest(const base::FilePath& src_path,
-                                  const base::Version& version,
-                                  bool supports_dark_text);
-
-// Updates chrome.VisualElementsManifest.xml in |target_path| if
-// |target_path|\VisualElements exists. |supports_dark_text| indicates whether
-// or not the OS supports drawing dark text on light assets. When true, and such
-// light assets are present, the generated manifest references those light
-// assets. The file is not modified if no changes are needed. If it is modified,
-// Chrome's start menu shortcut is touched so that the Start Menu refreshes its
-// representation of the tile.
-void UpdateVisualElementsManifest(const base::FilePath& target_path,
-                                  const base::Version& version,
-                                  bool supports_dark_text);
+                                  const base::Version& version);
 
 // Overwrites shortcuts (desktop, quick launch, and start menu) if they are
 // present on the system.
@@ -79,7 +63,6 @@ void UpdateVisualElementsManifest(const base::FilePath& target_path,
 // taskbar.
 void CreateOrUpdateShortcuts(
     const base::FilePath& target,
-    const Product& product,
     const MasterPreferences& prefs,
     InstallShortcutLevel install_level,
     InstallShortcutOperation install_operation);
@@ -89,7 +72,6 @@ void CreateOrUpdateShortcuts(
 // requires no more user interaction than a UAC prompt. In practice, this means
 // on versions of Windows prior to Windows 8.
 void RegisterChromeOnMachine(const InstallerState& installer_state,
-                             const Product& product,
                              bool make_chrome_default);
 
 // This function installs or updates a new version of Chrome. It returns
@@ -130,7 +112,6 @@ void LaunchDeleteOldVersionsProcess(const base::FilePath& setup_path,
 // |chrome| The installed product (must be a browser).
 // |installed_version| the current version of this install.
 void HandleOsUpgradeForBrowser(const InstallerState& installer_state,
-                               const Product& chrome,
                                const base::Version& installed_version);
 
 // Performs per-user installation-related tasks on Active Setup (ran on first

@@ -7,7 +7,7 @@
 #include "base/logging.h"
 #include "content/browser/indexed_db/indexed_db_tracing.h"
 #include "content/browser/indexed_db/indexed_db_transaction.h"
-#include "third_party/blink/public/platform/modules/indexeddb/web_idb_types.h"
+#include "third_party/blink/public/common/indexeddb/web_idb_types.h"
 
 namespace content {
 namespace {
@@ -147,8 +147,8 @@ void IndexedDBTransactionCoordinator::ProcessQueuedTransactions() {
 template<typename T>
 static bool DoSetsIntersect(const std::set<T>& set1,
                             const std::set<T>& set2) {
-  typename std::set<T>::const_iterator it1 = set1.begin();
-  typename std::set<T>::const_iterator it2 = set2.begin();
+  auto it1 = set1.begin();
+  auto it2 = set2.begin();
   while (it1 != set1.end() && it2 != set2.end()) {
     if (*it1 < *it2)
       ++it1;

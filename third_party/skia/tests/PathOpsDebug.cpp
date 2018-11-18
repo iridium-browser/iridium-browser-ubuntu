@@ -5,6 +5,7 @@
  * found in the LICENSE file.
  */
 
+#include "PathOpsDebug.h"
 #include "PathOpsTSectDebug.h"
 #include "SkOpCoincidence.h"
 #include "SkOpContour.h"
@@ -12,6 +13,13 @@
 #include "SkMutex.h"
 #include "SkOpSegment.h"
 #include "SkString.h"
+
+bool PathOpsDebug::gJson;
+bool PathOpsDebug::gMarkJsonFlaky;
+bool PathOpsDebug::gOutFirst;
+bool PathOpsDebug::gCheckForDuplicateNames;
+bool PathOpsDebug::gOutputSVG;
+FILE* PathOpsDebug::gOut;
 
 inline void DebugDumpDouble(double x) {
     if (x == floor(x)) {
@@ -1637,6 +1645,10 @@ namespace SkOpDebug {
 
     void Dump(const SkDPoint& point) {
         point.dump();
+    }
+
+    void Dump(const SkOpAngle& angle) {
+        angle.dump();
     }
 
 // dummy definitions to fool msvs Visual Studio 2018 Immediate Window

@@ -31,9 +31,12 @@ class EventPageRequestManager;
 // the requests.
 class ExtensionMediaRouteProviderProxy : public mojom::MediaRouteProvider {
  public:
-  ExtensionMediaRouteProviderProxy(content::BrowserContext* context,
-                                   mojom::MediaRouteProviderRequest request);
+  explicit ExtensionMediaRouteProviderProxy(content::BrowserContext* context);
   ~ExtensionMediaRouteProviderProxy() override;
+
+  // Binds |request| to |this|. If |this| is already bound to a previous
+  // request, that previous request will be dropped.
+  void Bind(mojom::MediaRouteProviderRequest request);
 
   // mojom::MediaRouteProvider implementation. Forwards the calls to
   // |media_route_provider_| through |request_manager_|.
@@ -63,11 +66,9 @@ class ExtensionMediaRouteProviderProxy : public mojom::MediaRouteProvider {
   void TerminateRoute(const std::string& route_id,
                       TerminateRouteCallback callback) override;
   void SendRouteMessage(const std::string& media_route_id,
-                        const std::string& message,
-                        SendRouteMessageCallback callback) override;
+                        const std::string& message) override;
   void SendRouteBinaryMessage(const std::string& media_route_id,
-                              const std::vector<uint8_t>& data,
-                              SendRouteBinaryMessageCallback callback) override;
+                              const std::vector<uint8_t>& data) override;
   void StartObservingMediaSinks(const std::string& media_source) override;
   void StopObservingMediaSinks(const std::string& media_source) override;
   void StartObservingMediaRoutes(const std::string& media_source) override;
@@ -102,6 +103,9 @@ class ExtensionMediaRouteProviderProxy : public mojom::MediaRouteProvider {
   void SetExtensionId(const std::string& extension_id);
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(MediaRouterDesktopTest,
+                           ExtensionMrpRecoversFromConnectionError);
+
   // These methods call the corresponding |media_route_provider_| methods.
   // Passed to |request_manager_| as requests to be run when the Mojo connection
   // to the provider is established.
@@ -131,11 +135,9 @@ class ExtensionMediaRouteProviderProxy : public mojom::MediaRouteProvider {
   void DoTerminateRoute(const std::string& route_id,
                         TerminateRouteCallback callback);
   void DoSendRouteMessage(const std::string& media_route_id,
-                          const std::string& message,
-                          SendRouteMessageCallback callback);
+                          const std::string& message);
   void DoSendRouteBinaryMessage(const std::string& media_route_id,
-                                const std::vector<uint8_t>& data,
-                                SendRouteBinaryMessageCallback callback);
+                                const std::vector<uint8_t>& data);
   void DoStartObservingMediaSinks(const std::string& media_source);
   void DoStopObservingMediaSinks(const std::string& media_source);
   void DoStartObservingMediaRoutes(const std::string& media_source);

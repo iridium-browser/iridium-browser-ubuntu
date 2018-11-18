@@ -84,6 +84,14 @@
       "session_types": ["kiosk"]
     },
     {
+      "channel": "stable",
+      "extension_types": ["extension"],
+      "platforms": ["chromeos"],
+      "whitelist": [
+        "75C7F4B720314B6CB1B5817CD86089DB95CD2461"  // http://crbug.com/874102
+      ]
+    },
+    {
       "channel": "dev",
       "extension_types": ["platform_app"]
     },
@@ -146,7 +154,8 @@
       "2F6F6FDB84E0290ABAB7A9D7571EB344821E5F12",  // http://crbug.com/610452
       "5B9E39EA374B136CBE7AED2D872003107642EAD5",  // http://crbug.com/610452
       "E0E94FB0C01FFB9CDC7A5F098C99B5A8D2F95902",  // http://crbug.com/610452
-      "52E0557059A7A28F74ED1D92DDD997E0CCD37806"   // http://crbug.com/610452
+      "52E0557059A7A28F74ED1D92DDD997E0CCD37806",  // http://crbug.com/610452
+      "A9A9FC0228ADF541F0334F22BEFB8F9C245B21D7"   // http://crbug.com/839189
     ]
   },
   "cast": {
@@ -158,13 +167,30 @@
       "226CF815E39A363090A1E547D53063472B8279FA"   // Media Router Stable
     ]
   },
+  "cecPrivate": {
+    "channel": "stable",
+    "extension_types": ["platform_app"],
+    "platforms": ["chromeos"],
+    "session_types": ["kiosk"],
+    "whitelist": [
+      "1C93BD3CF875F4A73C0B2A163BB8FBDA8B8B3D80",  // http://crbug.com/824667#c15
+      "A3BC37E2148AC4E99BE4B16AF9D42DD1E592BBBE",  // http://crbug.com/824667#c15
+      "307E96539209F95A1A8740C713E6998A73657D96",  // http://crbug.com/824667#c15
+      "E703483CEF33DEC18B4B6DD84B5C776FB9182BDB",  // http://crbug.com/824667#c15
+      "4F25792AF1AA7483936DE29C07806F203C7170A0",  // http://crbug.com/824667#c15
+      "BD8781D757D830FC2E85470A1B6E8A718B7EE0D9",  // http://crbug.com/824667#c15
+      "4AC2B6C63C6480D150DFDA13E4A5956EB1D0DDBB",  // http://crbug.com/824667#c15
+      "81986D4F846CEDDDB962643FA501D1780DD441BB",  // http://crbug.com/824667#c15
+      "A9A9FC0228ADF541F0334F22BEFB8F9C245B21D7"   // http://crbug.com/839189
+    ]
+  },
   "clipboard": {
     "channel": "dev",
     "extension_types": ["platform_app"],
     "platforms": ["chromeos"]
   },
   "declarativeNetRequest": {
-    "channel": "trunk",
+    "channel": "dev",
     "extension_types": ["extension"],
     "min_manifest_version": 2
   },
@@ -243,7 +269,8 @@
       "4F25792AF1AA7483936DE29C07806F203C7170A0",  // http://crbug.com/407693
       "BD8781D757D830FC2E85470A1B6E8A718B7EE0D9",  // http://crbug.com/407693
       "4AC2B6C63C6480D150DFDA13E4A5956EB1D0DDBB",  // http://crbug.com/407693
-      "81986D4F846CEDDDB962643FA501D1780DD441BB"   // http://crbug.com/407693
+      "81986D4F846CEDDDB962643FA501D1780DD441BB",  // http://crbug.com/407693
+      "A9A9FC0228ADF541F0334F22BEFB8F9C245B21D7"   // http://crbug.com/839189
     ]
   },
   "fileSystem": [{
@@ -286,6 +313,16 @@
       "3F65507A3B39259B38C8173C6FFA3D12DF64CCE9"   // http://crbug.com/371562
     ]
   }],
+  "fileSystem.requestDownloads": {
+    "channel": "stable",
+    "extension_types": ["platform_app"],
+    "platforms": ["chromeos"],
+    "whitelist": [
+      "A3E3DE9E9F16B41D4A2FAD106BD6CA76B94A0C94",  // http://crbug.com/845423
+      "C2ABD68C33A5B485971C9638B80D6A2E9CBA78C4",  // http://crbug.com/845423
+      "B41E7F08E1179CC03CBD1F49E57CF353A40ADE07"   // http://crbug.com/845423
+    ]
+  },
   "fileSystem.requestFileSystem": {
     "platforms": ["chromeos"]
   },
@@ -341,7 +378,8 @@
       "4F25792AF1AA7483936DE29C07806F203C7170A0",  // http://crbug.com/720495
       "BD8781D757D830FC2E85470A1B6E8A718B7EE0D9",  // http://crbug.com/720495
       "4AC2B6C63C6480D150DFDA13E4A5956EB1D0DDBB",  // http://crbug.com/720495
-      "81986D4F846CEDDDB962643FA501D1780DD441BB"   // http://crbug.com/720495
+      "81986D4F846CEDDDB962643FA501D1780DD441BB",  // http://crbug.com/720495
+      "A9A9FC0228ADF541F0334F22BEFB8F9C245B21D7"   // http://crbug.com/839189
     ]
   },
   {
@@ -401,7 +439,11 @@
       "B6C2EFAB3EC3BF6EF03701408B6B09A67B2D0069",  // http://crbug.com/642141
       "96FF2FFA5C9173C76D47184B3E86D267B37781DE",  // http://crbug.com/642141
       "0136FCB13DB29FD5CD442F56E59E53B61F1DF96F",  // http://crbug.com/642141
-      "CBCC42ABED43A4B58FE3810E62AFFA010EB0349F"   // PDF Viewer
+      "CBCC42ABED43A4B58FE3810E62AFFA010EB0349F",  // PDF Viewer
+      "75C7F4B720314B6CB1B5817CD86089DB95CD2461",  // Chromevox on chromecast
+      "46578A13607D38F1DC8E280C4F499FB0A2F9565C",  // http://crbug.com/819404
+      "898FB5A39687D210766B8998BA4530B99C9E6586",  // http://crbug.com/819404
+      "82F30B65397BC3E4ADE627BBD857AB8A58210648"   // http://crbug.com/819404
     ]
   },
   "nativeMessaging": {
@@ -447,7 +489,8 @@
       "52E0557059A7A28F74ED1D92DDD997E0CCD37806",  // http://crbug.com/610452
       "61FF4757F9420B62B19BA5C96084649339DB31F5",  // http://crbug.com/731941
       "6FB7E1B6C0247B687AC14772E87A117F5F5E4497",  // http://crbug.com/731941
-      "9834387FDA1F66A1B5CA06CB442137B556F12F2A"   // http://crbug.com/772346
+      "9834387FDA1F66A1B5CA06CB442137B556F12F2A",  // http://crbug.com/772346
+      "A9A9FC0228ADF541F0334F22BEFB8F9C245B21D7"   // http://crbug.com/839189
     ]
   }],
   "networkingPrivate": {
@@ -480,7 +523,8 @@
       "2F6F6FDB84E0290ABAB7A9D7571EB344821E5F12",  // http://crbug.com/610452
       "5B9E39EA374B136CBE7AED2D872003107642EAD5",  // http://crbug.com/610452
       "E0E94FB0C01FFB9CDC7A5F098C99B5A8D2F95902",  // http://crbug.com/610452
-      "52E0557059A7A28F74ED1D92DDD997E0CCD37806"   // http://crbug.com/610452
+      "52E0557059A7A28F74ED1D92DDD997E0CCD37806",  // http://crbug.com/610452
+      "A9A9FC0228ADF541F0334F22BEFB8F9C245B21D7"   // http://crbug.com/839189
     ]
   },
   "power": {
@@ -577,6 +621,12 @@
       "whitelist": ["B44D08FD98F1523ED5837D78D0A606EA9D6206E5"]  // Web Store
     }
   ],
+  "system.powerSource": {
+    "channel": "stable",
+    "extension_types": ["platform_app"],
+    "platforms": ["chromeos"],
+    "session_types": ["kiosk"]
+  },
   "u2fDevices": {
     "channel": "stable",
     "extension_types": ["extension", "platform_app"],
@@ -668,7 +718,8 @@
       "4F25792AF1AA7483936DE29C07806F203C7170A0",  // Stable internal hotrod app
       "BD8781D757D830FC2E85470A1B6E8A718B7EE0D9",  // Beta internal hotrod app
       "4AC2B6C63C6480D150DFDA13E4A5956EB1D0DDBB",  // Alpha internal hotrod app
-      "81986D4F846CEDDDB962643FA501D1780DD441BB"   // Dev internal hotrod app
+      "81986D4F846CEDDDB962643FA501D1780DD441BB",  // Dev internal hotrod app
+      "A9A9FC0228ADF541F0334F22BEFB8F9C245B21D7"   // http://crbug.com/839189
     ]
   },
   "vpnProvider": {

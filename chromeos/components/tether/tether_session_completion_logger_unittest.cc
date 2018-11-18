@@ -6,7 +6,7 @@
 
 #include <memory>
 
-#include "base/test/histogram_tester.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace chromeos {
@@ -87,6 +87,18 @@ TEST_F(TetherSessionCompletionLoggerTest, TestBluetoothControllerDisappeared) {
   TestSessionCompletionReasonRecorded(
       TetherSessionCompletionLogger::SessionCompletionReason::
           BLUETOOTH_CONTROLLER_DISAPPEARED);
+}
+
+TEST_F(TetherSessionCompletionLoggerTest, TestMultiDeviceHostUnverified) {
+  TestSessionCompletionReasonRecorded(
+      TetherSessionCompletionLogger::SessionCompletionReason::
+          MULTIDEVICE_HOST_UNVERIFIED);
+}
+
+TEST_F(TetherSessionCompletionLoggerTest, TestBetterTogetherSuiteDisabled) {
+  TestSessionCompletionReasonRecorded(
+      TetherSessionCompletionLogger::SessionCompletionReason::
+          BETTER_TOGETHER_SUITE_DISABLED);
 }
 
 }  // namespace tether

@@ -30,18 +30,17 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/extensions/app_launch_params.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
-#include "chrome/browser/web_applications/web_app.h"
-#include "chrome/browser/web_applications/web_app_win.h"
+#include "chrome/browser/web_applications/components/web_app_shortcut.h"
+#include "chrome/browser/web_applications/components/web_app_shortcut_win.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_constants.h"
-#include "chrome/installer/util/browser_distribution.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "ui/views/win/hwnd_util.h"
 
-typedef ExtensionBrowserTest BrowserWindowPropertyManagerTest;
+typedef extensions::ExtensionBrowserTest BrowserWindowPropertyManagerTest;
 
 namespace {
 
@@ -70,11 +69,11 @@ void ValidateBrowserWindowProperties(
   EXPECT_EQ(S_OK, pps->GetValue(PKEY_AppUserModel_RelaunchDisplayNameResource,
                                 prop_var.Receive()));
   EXPECT_EQ(VT_LPWSTR, prop_var.get().vt);
-  EXPECT_EQ(
-      base::FilePath(profiles::internal::GetShortcutFilenameForProfile(
-          expected_profile_name,
-          BrowserDistribution::GetDistribution())).RemoveExtension().value(),
-      prop_var.get().pwszVal);
+  EXPECT_EQ(base::FilePath(profiles::internal::GetShortcutFilenameForProfile(
+                               expected_profile_name))
+                .RemoveExtension()
+                .value(),
+            prop_var.get().pwszVal);
   prop_var.Reset();
 
   // The relaunch command should specify the profile.
@@ -178,9 +177,9 @@ IN_PROC_BROWSER_TEST_F(BrowserTestWithProfileShortcutManager,
 
   base::FilePath path_profile2 =
       profile_manager->GenerateNextProfileDirectoryPath();
-  profile_manager->CreateProfileAsync(
-      path_profile2, ProfileManager::CreateCallback(), base::string16(),
-      std::string(), std::string());
+  profile_manager->CreateProfileAsync(path_profile2,
+                                      ProfileManager::CreateCallback(),
+                                      base::string16(), std::string());
   // The default profile's name should be part of the relaunch name.
   ValidateBrowserWindowProperties(
       browser(), base::UTF8ToUTF16(browser()->profile()->GetProfileUserName()));

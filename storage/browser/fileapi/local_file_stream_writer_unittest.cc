@@ -28,8 +28,7 @@ namespace content {
 
 class LocalFileStreamWriterTest : public testing::Test {
  public:
-  LocalFileStreamWriterTest()
-      : file_thread_("FileUtilProxyTestFileThread") {}
+  LocalFileStreamWriterTest() : file_thread_("TestFileThread") {}
 
   void SetUp() override {
     ASSERT_TRUE(file_thread_.Start());
@@ -50,9 +49,11 @@ class LocalFileStreamWriterTest : public testing::Test {
 
   int WriteStringToWriter(LocalFileStreamWriter* writer,
                           const std::string& data) {
-    scoped_refptr<net::StringIOBuffer> buffer(new net::StringIOBuffer(data));
-    scoped_refptr<net::DrainableIOBuffer> drainable(
-        new net::DrainableIOBuffer(buffer.get(), buffer->size()));
+    scoped_refptr<net::StringIOBuffer> buffer =
+        base::MakeRefCounted<net::StringIOBuffer>(data);
+    scoped_refptr<net::DrainableIOBuffer> drainable =
+        base::MakeRefCounted<net::DrainableIOBuffer>(std::move(buffer),
+                                                     data.size());
 
     while (drainable->BytesRemaining() > 0) {
       net::TestCompletionCallback callback;
@@ -169,7 +170,8 @@ TEST_F(LocalFileStreamWriterTest, CancelWrite) {
   base::FilePath path = CreateFileWithContent("file_a", "foobar");
   std::unique_ptr<LocalFileStreamWriter> writer(CreateWriter(path, 0));
 
-  scoped_refptr<net::StringIOBuffer> buffer(new net::StringIOBuffer("xxx"));
+  scoped_refptr<net::StringIOBuffer> buffer(
+      base::MakeRefCounted<net::StringIOBuffer>("xxx"));
   int result =
       writer->Write(buffer.get(), buffer->size(), base::Bind(&NeverCalled));
   ASSERT_EQ(net::ERR_IO_PENDING, result);

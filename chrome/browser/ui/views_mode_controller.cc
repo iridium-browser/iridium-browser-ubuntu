@@ -4,15 +4,17 @@
 
 #include "chrome/browser/ui/views_mode_controller.h"
 
-#include "chrome/common/chrome_features.h"
+#include "base/feature_list.h"
 #include "ui/base/ui_base_features.h"
 
-#if defined(OS_MACOSX) && BUILDFLAG(MAC_VIEWS_BROWSER)
+#if defined(OS_MACOSX)
 
 namespace views_mode_controller {
 
 bool IsViewsBrowserCocoa() {
-  return features::IsViewsBrowserCocoa();
+  // TODO(https://crbug.com/832676): Delete all code guarded on this function
+  // returning true and then remove this function.
+  return false;
 }
 
 }  // namespace views_mode_controller

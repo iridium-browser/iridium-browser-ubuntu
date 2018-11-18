@@ -64,7 +64,7 @@ void PSCompressData(int PSLevel,
       *filter = "/FlateDecode filter ";
     }
   } else {
-    if (pEncoders->GetBasicModule()->RunLengthEncode(src_buf, src_size,
+    if (pEncoders->GetBasicModule()->RunLengthEncode({src_buf, src_size},
                                                      &dest_buf, &dest_size)) {
       *filter = "/RunLengthDecode filter ";
     }
@@ -311,13 +311,10 @@ void CFX_PSRenderer::SetGraphState(const CFX_GraphStateData* pGraphState) {
     buf << pGraphState->m_LineCap << " J\n";
   }
   if (!m_bGraphStateSet ||
-      m_CurGraphState.m_DashCount != pGraphState->m_DashCount ||
-      memcmp(m_CurGraphState.m_DashArray, pGraphState->m_DashArray,
-             sizeof(float) * m_CurGraphState.m_DashCount)) {
+      m_CurGraphState.m_DashArray != pGraphState->m_DashArray) {
     buf << "[";
-    for (int i = 0; i < pGraphState->m_DashCount; ++i)
-      buf << pGraphState->m_DashArray[i] << " ";
-
+    for (const auto& dash : pGraphState->m_DashArray)
+      buf << dash << " ";
     buf << "]" << pGraphState->m_DashPhase << " d\n";
   }
   if (!m_bGraphStateSet ||
@@ -332,12 +329,12 @@ void CFX_PSRenderer::SetGraphState(const CFX_GraphStateData* pGraphState) {
       m_CurGraphState.m_MiterLimit != pGraphState->m_MiterLimit) {
     buf << pGraphState->m_MiterLimit << " M\n";
   }
-  m_CurGraphState.Copy(*pGraphState);
+  m_CurGraphState = *pGraphState;
   m_bGraphStateSet = true;
   WriteToStream(&buf);
 }
 
-bool CFX_PSRenderer::SetDIBits(const RetainPtr<CFX_DIBSource>& pSource,
+bool CFX_PSRenderer::SetDIBits(const RetainPtr<CFX_DIBBase>& pSource,
                                uint32_t color,
                                int left,
                                int top) {
@@ -348,7 +345,7 @@ bool CFX_PSRenderer::SetDIBits(const RetainPtr<CFX_DIBSource>& pSource,
   return DrawDIBits(pSource, color, &matrix, 0);
 }
 
-bool CFX_PSRenderer::StretchDIBits(const RetainPtr<CFX_DIBSource>& pSource,
+bool CFX_PSRenderer::StretchDIBits(const RetainPtr<CFX_DIBBase>& pSource,
                                    uint32_t color,
                                    int dest_left,
                                    int dest_top,
@@ -361,7 +358,7 @@ bool CFX_PSRenderer::StretchDIBits(const RetainPtr<CFX_DIBSource>& pSource,
   return DrawDIBits(pSource, color, &matrix, flags);
 }
 
-bool CFX_PSRenderer::DrawDIBits(const RetainPtr<CFX_DIBSource>& pSource,
+bool CFX_PSRenderer::DrawDIBits(const RetainPtr<CFX_DIBBase>& pSource,
                                 uint32_t color,
                                 const CFX_Matrix* pMatrix,
                                 uint32_t flags) {
@@ -423,7 +420,7 @@ bool CFX_PSRenderer::DrawDIBits(const RetainPtr<CFX_DIBSource>& pSource,
     output_buf.release();
   } else {
     CFX_DIBExtractor source_extractor(pSource);
-    RetainPtr<CFX_DIBSource> pConverted = source_extractor.GetBitmap();
+    RetainPtr<CFX_DIBBase> pConverted = source_extractor.GetBitmap();
     if (!pConverted)
       return false;
     switch (pSource->GetFormat()) {
@@ -689,8 +686,8 @@ void CFX_PSRenderer::WritePSBinary(const uint8_t* data, int len) {
   uint8_t* dest_buf;
   uint32_t dest_size;
   CCodec_ModuleMgr* pEncoders = CPDF_ModuleMgr::Get()->GetCodecModule();
-  if (pEncoders->GetBasicModule()->A85Encode(data, len, &dest_buf,
-                                             &dest_size)) {
+  if (pEncoders->GetBasicModule()->A85Encode({data, static_cast<size_t>(len)},
+                                             &dest_buf, &dest_size)) {
     m_pStream->WriteBlock(dest_buf, dest_size);
     FX_Free(dest_buf);
   } else {

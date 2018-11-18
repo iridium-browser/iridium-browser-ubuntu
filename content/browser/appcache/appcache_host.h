@@ -191,10 +191,6 @@ class CONTENT_EXPORT AppCacheHost
 
   const GURL& first_party_url() const { return first_party_url_; }
 
-  // Methods to support cross site navigations.
-  void PrepareForTransfer();
-  void CompleteTransfer(int host_id, AppCacheFrontend* frontend);
-
   // Returns a weak pointer reference to the host.
   base::WeakPtr<AppCacheHost> GetWeakPtr();
 
@@ -344,7 +340,7 @@ class CONTENT_EXPORT AppCacheHost
   bool associated_cache_info_pending_;
 
   // List of objects observing us.
-  base::ObserverList<Observer> observers_;
+  base::ObserverList<Observer>::Unchecked observers_;
 
   // Used to inform the QuotaManager of what origins are currently in use.
   url::Origin origin_in_use_;

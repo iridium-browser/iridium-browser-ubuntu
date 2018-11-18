@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_BINDINGS_CORE_V8_SCRIPT_STREAMER_H_
 #define THIRD_PARTY_BLINK_RENDERER_BINDINGS_CORE_V8_SCRIPT_STREAMER_H_
 
+#include <atomic>
 #include <memory>
 
 #include "base/single_thread_task_runner.h"
@@ -18,8 +19,6 @@ namespace blink {
 
 class ClassicPendingScript;
 class ScriptResource;
-class ScriptState;
-class Settings;
 class SourceStream;
 
 // ScriptStreamer streams incomplete script data to V8 so that it can be parsed
@@ -32,9 +31,32 @@ class SourceStream;
 class CORE_EXPORT ScriptStreamer final
     : public GarbageCollectedFinalized<ScriptStreamer> {
   WTF_MAKE_NONCOPYABLE(ScriptStreamer);
+  USING_PRE_FINALIZER(ScriptStreamer, Prefinalize);
 
  public:
-  enum Type { kParsingBlocking, kDeferred, kAsync };
+  // For tracking why some scripts are not streamed. Not streaming is part of
+  // normal operation (e.g., script already loaded, script too small) and
+  // doesn't necessarily indicate a failure.
+  enum NotStreamingReason {
+    kAlreadyLoaded,  // DEPRECATED
+    kNotHTTP,
+    kReload,
+    kContextNotValid,  // DEPRECATED
+    kEncodingNotSupported,
+    kThreadBusy,
+    kV8CannotStream,
+    kScriptTooSmall,
+    kNoResourceBuffer,
+    kHasCodeCache,
+    kStreamerNotReadyOnGetSource,
+    kInlineScript,
+    kDidntTryToStartStreaming,
+    kErrorOccurred,
+
+    // Pseudo values that should never be seen in reported metrics
+    kCount,
+    kInvalid = -1,
+  };
 
   ~ScriptStreamer();
   void Trace(blink::Visitor*);
@@ -42,10 +64,8 @@ class CORE_EXPORT ScriptStreamer final
   // Launches a task (on a background thread) which will stream the given
   // ClassicPendingScript into V8 as it loads.
   static void StartStreaming(ClassicPendingScript*,
-                             Type,
-                             Settings*,
-                             ScriptState*,
-                             scoped_refptr<base::SingleThreadTaskRunner>);
+                             scoped_refptr<base::SingleThreadTaskRunner>,
+                             NotStreamingReason* not_streaming_reason);
 
   // Returns false if we cannot stream the given encoding.
   static bool ConvertEncoding(const char* encoding_name,
@@ -68,8 +88,15 @@ class CORE_EXPORT ScriptStreamer final
   // started streaming but then we detect we don't want to stream (e.g., when
   // we have the code cache for the script) and we still want to parse and
   // execute it when it has finished loading.
-  void SuppressStreaming();
-  bool StreamingSuppressed() const { return streaming_suppressed_; }
+  void SuppressStreaming(NotStreamingReason reason);
+  bool StreamingSuppressed() const {
+    DCHECK(!streaming_suppressed_ || suppressed_reason_ != kInvalid);
+    return streaming_suppressed_;
+  }
+  NotStreamingReason StreamingSuppressedReason() const {
+    DCHECK(streaming_suppressed_ || suppressed_reason_ == kInvalid);
+    return suppressed_reason_;
+  }
 
   // Called by ClassicPendingScript when data arrives from the network.
   void NotifyAppendData(ScriptResource*);
@@ -92,15 +119,18 @@ class CORE_EXPORT ScriptStreamer final
   // Scripts whose first data chunk is smaller than this constant won't be
   // streamed. Non-const for testing.
   static size_t small_script_threshold_;
+  // Maximum size of the BOM marker.
+  static constexpr size_t kMaximumLengthOfBOM = 4;
 
   ScriptStreamer(ClassicPendingScript*,
-                 Type,
-                 ScriptState*,
                  v8::ScriptCompiler::CompileOptions,
                  scoped_refptr<base::SingleThreadTaskRunner>);
 
+  void Prefinalize();
+
   void StreamingComplete();
   void NotifyFinishedToClient();
+  bool HasEnoughDataForStreaming(size_t resource_buffer_size);
 
   Member<ClassicPendingScript> pending_script_;
   // Whether ScriptStreamer is detached from the Resource. In those cases, the
@@ -115,17 +145,18 @@ class CORE_EXPORT ScriptStreamer final
   // Whether we have received enough data to start the streaming.
   bool have_enough_data_for_streaming_;
 
+  // Flag used to allow atomic cancelling and reposting of the streaming task
+  // when the load completes without the task yet starting.
+  // TODO(874080): Remove once we can mutate task traits.
+  std::atomic_flag blocking_task_started_or_cancelled_ = ATOMIC_FLAG_INIT;
+
   // Whether the script source code should be retrieved from the Resource
   // instead of the ScriptStreamer.
   bool streaming_suppressed_;
+  NotStreamingReason suppressed_reason_;
 
   // What kind of cached data V8 produces during streaming.
   v8::ScriptCompiler::CompileOptions compile_options_;
-
-  scoped_refptr<ScriptState> script_state_;
-
-  // For recording metrics for different types of scripts separately.
-  Type script_type_;
 
   // Keep the script URL string for event tracing.
   const String script_url_string_;
@@ -137,6 +168,12 @@ class CORE_EXPORT ScriptStreamer final
   v8::ScriptCompiler::StreamedSource::Encoding encoding_;
 
   scoped_refptr<base::SingleThreadTaskRunner> loading_task_runner_;
+
+  // This is a temporary flag to confirm that ScriptStreamer is not
+  // touched after its refinalizer call and thus https://crbug.com/715309
+  // doesn't break assumptions.
+  // TODO(hiroshige): Check the state in more general way.
+  bool prefinalizer_called_ = false;
 };
 
 }  // namespace blink

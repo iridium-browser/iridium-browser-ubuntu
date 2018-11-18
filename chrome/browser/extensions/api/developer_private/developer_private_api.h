@@ -23,6 +23,8 @@
 #include "chrome/common/extensions/api/developer_private.h"
 #include "chrome/common/extensions/webstore_install_result.h"
 #include "components/prefs/pref_change_registrar.h"
+#include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 #include "extensions/browser/api/file_system/file_system_api.h"
 #include "extensions/browser/app_window/app_window_registry.h"
 #include "extensions/browser/browser_context_keyed_api_factory.h"
@@ -59,7 +61,8 @@ class DeveloperPrivateEventRouter : public ExtensionRegistryObserver,
                                     public CommandService::Observer,
                                     public ExtensionPrefsObserver,
                                     public ExtensionManagement::Observer,
-                                    public WarningService::Observer {
+                                    public WarningService::Observer,
+                                    public content::NotificationObserver {
  public:
   explicit DeveloperPrivateEventRouter(Profile* profile);
   ~DeveloperPrivateEventRouter() override;
@@ -107,6 +110,8 @@ class DeveloperPrivateEventRouter : public ExtensionRegistryObserver,
   // ExtensionPrefsObserver:
   void OnExtensionDisableReasonsChanged(const std::string& extension_id,
                                         int disable_reasons) override;
+  void OnExtensionRuntimePermissionsChanged(
+      const std::string& extension_id) override;
 
   // ExtensionManagement::Observer:
   void OnExtensionManagementSettingsChanged() override;
@@ -114,6 +119,11 @@ class DeveloperPrivateEventRouter : public ExtensionRegistryObserver,
   // WarningService::Observer:
   void ExtensionWarningsChanged(
       const ExtensionIdSet& affected_extensions) override;
+
+  // content::NotificationObserver:
+  void Observe(int notification_type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   // Handles a profile preferance change.
   void OnProfilePrefChanged();
@@ -156,6 +166,8 @@ class DeveloperPrivateEventRouter : public ExtensionRegistryObserver,
   std::set<std::string> extension_ids_;
 
   PrefChangeRegistrar pref_change_registrar_;
+
+  content::NotificationRegistrar notification_registrar_;
 
   base::WeakPtrFactory<DeveloperPrivateEventRouter> weak_factory_;
 
@@ -266,6 +278,10 @@ class DeveloperPrivateAPI : public BrowserContextKeyedAPI,
 
   DISALLOW_COPY_AND_ASSIGN(DeveloperPrivateAPI);
 };
+
+template <>
+void BrowserContextKeyedAPIFactory<
+    DeveloperPrivateAPI>::DeclareFactoryDependencies();
 
 namespace api {
 
@@ -614,7 +630,7 @@ class DeveloperPrivateLoadDirectoryFunction
   // ExtensionFunction:
   bool RunAsync() override;
 
-  bool LoadByFileSystemAPI(const storage::FileSystemURL& directory_url);
+  bool LoadByFileSystemAPI(const ::storage::FileSystemURL& directory_url);
 
   void ClearExistingDirectoryContent(const base::FilePath& project_path);
 
@@ -625,7 +641,7 @@ class DeveloperPrivateLoadDirectoryFunction
       const base::FilePath& project_path,
       const base::FilePath& destination_path,
       base::File::Error result,
-      storage::FileSystemOperation::FileEntryList file_list,
+      ::storage::FileSystemOperation::FileEntryList file_list,
       bool has_more);
 
   void SnapshotFileCallback(
@@ -633,14 +649,14 @@ class DeveloperPrivateLoadDirectoryFunction
       base::File::Error result,
       const base::File::Info& file_info,
       const base::FilePath& platform_path,
-      scoped_refptr<storage::ShareableFileReference> file_ref);
+      scoped_refptr<::storage::ShareableFileReference> file_ref);
 
   void CopyFile(const base::FilePath& src_path,
                 const base::FilePath& dest_path);
 
   void Load();
 
-  scoped_refptr<storage::FileSystemContext> context_;
+  scoped_refptr<::storage::FileSystemContext> context_;
 
   // syncfs url representing the root of the folder to be copied.
   std::string project_base_url_;
@@ -751,6 +767,36 @@ class DeveloperPrivateUpdateExtensionCommandFunction
  protected:
   ~DeveloperPrivateUpdateExtensionCommandFunction() override;
   ResponseAction Run() override;
+};
+
+class DeveloperPrivateAddHostPermissionFunction
+    : public DeveloperPrivateAPIFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("developerPrivate.addHostPermission",
+                             DEVELOPERPRIVATE_ADDHOSTPERMISSION);
+  DeveloperPrivateAddHostPermissionFunction();
+
+ private:
+  ~DeveloperPrivateAddHostPermissionFunction() override;
+
+  ResponseAction Run() override;
+
+  DISALLOW_COPY_AND_ASSIGN(DeveloperPrivateAddHostPermissionFunction);
+};
+
+class DeveloperPrivateRemoveHostPermissionFunction
+    : public DeveloperPrivateAPIFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("developerPrivate.removeHostPermission",
+                             DEVELOPERPRIVATE_REMOVEHOSTPERMISSION);
+  DeveloperPrivateRemoveHostPermissionFunction();
+
+ private:
+  ~DeveloperPrivateRemoveHostPermissionFunction() override;
+
+  ResponseAction Run() override;
+
+  DISALLOW_COPY_AND_ASSIGN(DeveloperPrivateRemoveHostPermissionFunction);
 };
 
 }  // namespace api

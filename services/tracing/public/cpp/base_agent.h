@@ -25,21 +25,22 @@ class COMPONENT_EXPORT(TRACING_CPP) BaseAgent : public mojom::Agent {
   BaseAgent(service_manager::Connector* connector,
             const std::string& label,
             mojom::TraceDataType type,
-            bool supports_explicit_clock_sync);
+            bool supports_explicit_clock_sync,
+            base::ProcessId pid);
   ~BaseAgent() override;
 
  private:
   // tracing::mojom::Agent:
   void StartTracing(const std::string& config,
                     base::TimeTicks coordinator_time,
-                    const Agent::StartTracingCallback& callback) override;
+                    Agent::StartTracingCallback callback) override;
   void StopAndFlush(tracing::mojom::RecorderPtr recorder) override;
   void RequestClockSyncMarker(
       const std::string& sync_id,
-      const Agent::RequestClockSyncMarkerCallback& callback) override;
-  void GetCategories(const Agent::GetCategoriesCallback& callback) override;
+      Agent::RequestClockSyncMarkerCallback callback) override;
+  void GetCategories(Agent::GetCategoriesCallback callback) override;
   void RequestBufferStatus(
-      const Agent::RequestBufferStatusCallback& callback) override;
+      Agent::RequestBufferStatusCallback callback) override;
 
   mojo::Binding<tracing::mojom::Agent> binding_;
 

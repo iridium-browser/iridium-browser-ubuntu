@@ -20,17 +20,17 @@
 namespace webrtc {
 
 namespace {
-int16_t MapSetting(EchoControlMobile::RoutingMode mode) {
+int16_t MapSetting(EchoControlMobileImpl::RoutingMode mode) {
   switch (mode) {
-    case EchoControlMobile::kQuietEarpieceOrHeadset:
+    case EchoControlMobileImpl::kQuietEarpieceOrHeadset:
       return 0;
-    case EchoControlMobile::kEarpiece:
+    case EchoControlMobileImpl::kEarpiece:
       return 1;
-    case EchoControlMobile::kLoudEarpiece:
+    case EchoControlMobileImpl::kLoudEarpiece:
       return 2;
-    case EchoControlMobile::kSpeakerphone:
+    case EchoControlMobileImpl::kSpeakerphone:
       return 3;
-    case EchoControlMobile::kLoudSpeakerphone:
+    case EchoControlMobileImpl::kLoudSpeakerphone:
       return 4;
   }
   RTC_NOTREACHED();
@@ -55,7 +55,7 @@ AudioProcessing::Error MapError(int err) {
 }
 }  // namespace
 
-size_t EchoControlMobile::echo_path_size_bytes() {
+size_t EchoControlMobileImpl::echo_path_size_bytes() {
   return WebRtcAecm_echo_path_size_bytes();
 }
 
@@ -113,17 +113,17 @@ EchoControlMobileImpl::EchoControlMobileImpl(rtc::CriticalSection* crit_render,
     : crit_render_(crit_render),
       crit_capture_(crit_capture),
       routing_mode_(kSpeakerphone),
-      comfort_noise_enabled_(true),
+      comfort_noise_enabled_(false),
       external_echo_path_(NULL) {
   RTC_DCHECK(crit_render);
   RTC_DCHECK(crit_capture);
 }
 
 EchoControlMobileImpl::~EchoControlMobileImpl() {
-    if (external_echo_path_ != NULL) {
-      delete [] external_echo_path_;
-      external_echo_path_ = NULL;
-    }
+  if (external_echo_path_ != NULL) {
+    delete[] external_echo_path_;
+    external_echo_path_ = NULL;
+  }
 }
 
 void EchoControlMobileImpl::ProcessRenderAudio(
@@ -218,8 +218,7 @@ int EchoControlMobileImpl::ProcessCaptureAudio(AudioBuffer* audio,
       ++handle_index;
     }
     for (size_t band = 1u; band < audio->num_bands(); ++band) {
-      memset(audio->split_bands(capture)[band],
-             0,
+      memset(audio->split_bands(capture)[band], 0,
              audio->num_frames_per_band() *
                  sizeof(audio->split_bands(capture)[band][0]));
     }
@@ -269,8 +268,7 @@ int EchoControlMobileImpl::set_routing_mode(RoutingMode mode) {
   return Configure();
 }
 
-EchoControlMobile::RoutingMode EchoControlMobileImpl::routing_mode()
-    const {
+EchoControlMobileImpl::RoutingMode EchoControlMobileImpl::routing_mode() const {
   rtc::CritScope cs(crit_capture_);
   return routing_mode_;
 }

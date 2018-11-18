@@ -12,16 +12,16 @@ namespace scheduler {
 
 class FakePageScheduler final : public PageScheduler {
  public:
-  FakePageScheduler(bool is_playing_audio, bool is_throttling_exempt)
-      : is_playing_audio_(is_playing_audio),
+  FakePageScheduler(bool is_audio_playing, bool is_throttling_exempt)
+      : is_audio_playing_(is_audio_playing),
         is_throttling_exempt_(is_throttling_exempt) {}
 
   class Builder {
    public:
     Builder() = default;
 
-    Builder& SetIsPlayingAudio(bool is_playing_audio) {
-      is_playing_audio_ = is_playing_audio;
+    Builder& SetIsAudioPlaying(bool is_audio_playing) {
+      is_audio_playing_ = is_audio_playing;
       return *this;
     }
 
@@ -31,18 +31,18 @@ class FakePageScheduler final : public PageScheduler {
     }
 
     std::unique_ptr<FakePageScheduler> Build() {
-      return std::make_unique<FakePageScheduler>(is_playing_audio_,
+      return std::make_unique<FakePageScheduler>(is_audio_playing_,
                                                  is_throttling_exempt_);
     }
 
    private:
-    bool is_playing_audio_ = false;
+    bool is_audio_playing_ = false;
     bool is_throttling_exempt_ = false;
 
     DISALLOW_COPY_AND_ASSIGN(Builder);
   };
 
-  bool IsPlayingAudio() const override { return is_playing_audio_; }
+  bool IsAudioPlaying() const override { return is_audio_playing_; }
 
   bool IsExemptFromBudgetBasedThrottling() const override {
     return is_throttling_exempt_;
@@ -56,6 +56,7 @@ class FakePageScheduler final : public PageScheduler {
   void SetIsMainFrameLocal(bool is_local) override {}
 
   std::unique_ptr<FrameScheduler> CreateFrameScheduler(
+      FrameScheduler::Delegate* delegate,
       BlameContext* blame_context,
       FrameScheduler::FrameType frame_type) override {
     return nullptr;
@@ -66,16 +67,19 @@ class FakePageScheduler final : public PageScheduler {
   void SetVirtualTimePolicy(VirtualTimePolicy policy) override {}
   void AddVirtualTimeObserver(VirtualTimeObserver* observer) override {}
   void RemoveVirtualTimeObserver(VirtualTimeObserver* observer) override {}
+  void SetInitialVirtualTime(base::Time time) override {}
   void SetInitialVirtualTimeOffset(base::TimeDelta offset) override {}
   void GrantVirtualTimeBudget(base::TimeDelta budget,
                               base::OnceClosure callback) override {}
   void SetMaxVirtualTimeTaskStarvationCount(int count) override {}
   void AudioStateChanged(bool is_audio_playing) override {}
   bool HasActiveConnectionForTest() const override { return false; }
-  void RequestBeginMainFrameNotExpected(bool new_state) override {}
+  bool RequestBeginMainFrameNotExpected(bool new_state) override {
+    return false;
+  }
 
  private:
-  bool is_playing_audio_;
+  bool is_audio_playing_;
   bool is_throttling_exempt_;
 
   DISALLOW_COPY_AND_ASSIGN(FakePageScheduler);

@@ -26,7 +26,7 @@
 #include "third_party/blink/renderer/core/html/forms/text_control_element.h"
 #include "third_party/blink/renderer/core/layout/hit_test_result.h"
 #include "third_party/blink/renderer/core/page/page.h"
-#include "third_party/blink/renderer/platform/scroll/scrollbar_theme.h"
+#include "third_party/blink/renderer/core/scroll/scrollbar_theme.h"
 
 namespace blink {
 
@@ -41,24 +41,19 @@ TextControlElement* LayoutTextControl::GetTextControlElement() const {
   return ToTextControl(GetNode());
 }
 
-HTMLElement* LayoutTextControl::InnerEditorElement() const {
+TextControlInnerEditorElement* LayoutTextControl::InnerEditorElement() const {
   return GetTextControlElement()->InnerEditorElement();
 }
 
 void LayoutTextControl::StyleDidChange(StyleDifference diff,
                                        const ComputedStyle* old_style) {
   LayoutBlockFlow::StyleDidChange(diff, old_style);
-  Element* inner_editor = InnerEditorElement();
+  TextControlInnerEditorElement* inner_editor = InnerEditorElement();
   if (!inner_editor)
     return;
   LayoutBlock* inner_editor_layout_object =
       ToLayoutBlock(inner_editor->GetLayoutObject());
   if (inner_editor_layout_object) {
-    // We may have set the width and the height in the old style in layout().
-    // Reset them now to avoid getting a spurious layout hint.
-    inner_editor_layout_object->MutableStyleRef().SetHeight(Length());
-    inner_editor_layout_object->MutableStyleRef().SetWidth(Length());
-    inner_editor_layout_object->SetStyle(CreateInnerEditorStyle(StyleRef()));
     inner_editor->SetNeedsStyleRecalc(
         kSubtreeStyleChange,
         StyleChangeReasonForTracing::Create(StyleChangeReason::kControl));
@@ -69,29 +64,9 @@ void LayoutTextControl::StyleDidChange(StyleDifference diff,
     // ::selection style is or was present on LayoutTextControl.
     if (StyleRef().HasPseudoStyle(kPseudoIdSelection) ||
         (old_style && old_style->HasPseudoStyle(kPseudoIdSelection))) {
-      inner_editor_layout_object->InvalidateSelectionOfSelectedChildren();
+      inner_editor_layout_object->InvalidateSelectedChildrenOnStyleChange();
     }
   }
-  GetTextControlElement()->UpdatePlaceholderVisibility();
-}
-
-static inline void UpdateUserModifyProperty(TextControlElement& node,
-                                            ComputedStyle& style) {
-  style.SetUserModify(node.IsDisabledOrReadOnly()
-                          ? EUserModify::kReadOnly
-                          : EUserModify::kReadWritePlaintextOnly);
-}
-
-void LayoutTextControl::AdjustInnerEditorStyle(
-    ComputedStyle& text_block_style) const {
-  // The inner block, if present, always has its direction set to LTR,
-  // so we need to inherit the direction and unicode-bidi style from the
-  // element.
-  text_block_style.SetDirection(Style()->Direction());
-  text_block_style.SetUnicodeBidi(Style()->GetUnicodeBidi());
-  text_block_style.SetUserSelect(EUserSelect::kText);
-
-  UpdateUserModifyProperty(*GetTextControlElement(), text_block_style);
 }
 
 int LayoutTextControl::TextBlockLogicalHeight() const {
@@ -108,14 +83,6 @@ int LayoutTextControl::TextBlockLogicalWidth() const {
                   inner_editor->GetLayoutBox()->PaddingEnd();
 
   return unit_width.ToInt();
-}
-
-void LayoutTextControl::UpdateFromElement() {
-  Element* inner_editor = InnerEditorElement();
-  if (inner_editor && inner_editor->GetLayoutObject())
-    UpdateUserModifyProperty(
-        *GetTextControlElement(),
-        inner_editor->GetLayoutObject()->MutableStyleRef());
 }
 
 int LayoutTextControl::ScrollbarThickness() const {
@@ -140,9 +107,9 @@ void LayoutTextControl::ComputeLogicalHeight(
 
     // We are able to have a horizontal scrollbar if the overflow style is
     // scroll, or if its auto and there's no word wrap.
-    if (Style()->OverflowInlineDirection() == EOverflow::kScroll ||
-        (Style()->OverflowInlineDirection() == EOverflow::kAuto &&
-         inner_editor->GetLayoutObject()->Style()->OverflowWrap() ==
+    if (StyleRef().OverflowInlineDirection() == EOverflow::kScroll ||
+        (StyleRef().OverflowInlineDirection() == EOverflow::kAuto &&
+         inner_editor->GetLayoutObject()->StyleRef().OverflowWrap() ==
              EOverflowWrap::kNormal))
       logical_height += ScrollbarThickness();
 
@@ -237,8 +204,7 @@ bool LayoutTextControl::HasValidAvgCharWidth(const SimpleFontData* font_data,
   if (!font_families_with_invalid_char_width_map) {
     font_families_with_invalid_char_width_map = new HashSet<AtomicString>;
 
-    for (size_t i = 0; i < WTF_ARRAY_LENGTH(kFontFamiliesWithInvalidCharWidth);
-         ++i)
+    for (size_t i = 0; i < arraysize(kFontFamiliesWithInvalidCharWidth); ++i)
       font_families_with_invalid_char_width_map->insert(
           AtomicString(kFontFamiliesWithInvalidCharWidth[i]));
   }
@@ -247,7 +213,7 @@ bool LayoutTextControl::HasValidAvgCharWidth(const SimpleFontData* font_data,
 }
 
 float LayoutTextControl::GetAvgCharWidth(const AtomicString& family) const {
-  const Font& font = Style()->GetFont();
+  const Font& font = StyleRef().GetFont();
 
   const SimpleFontData* primary_font = font.PrimaryFont();
   if (primary_font && HasValidAvgCharWidth(primary_font, family))
@@ -264,7 +230,7 @@ float LayoutTextControl::ScaleEmToUnits(int x) const {
   // This matches the unitsPerEm value for MS Shell Dlg and Courier New from the
   // "head" font table.
   float units_per_em = 2048.0f;
-  return roundf(Style()->GetFont().GetFontDescription().ComputedSize() * x /
+  return roundf(StyleRef().GetFont().GetFontDescription().ComputedSize() * x /
                 units_per_em);
 }
 
@@ -273,7 +239,7 @@ void LayoutTextControl::ComputeIntrinsicLogicalWidths(
     LayoutUnit& max_logical_width) const {
   // Use average character width. Matches IE.
   AtomicString family =
-      Style()->GetFont().GetFontDescription().Family().Family();
+      StyleRef().GetFont().GetFontDescription().Family().Family();
   max_logical_width = PreferredContentLogicalWidth(
       const_cast<LayoutTextControl*>(this)->GetAvgCharWidth(family));
   if (InnerEditorElement()) {
@@ -282,7 +248,7 @@ void LayoutTextControl::ComputeIntrinsicLogicalWidths(
       max_logical_width += inner_editor_layout_box->PaddingStart() +
                            inner_editor_layout_box->PaddingEnd();
   }
-  if (!Style()->LogicalWidth().IsPercentOrCalc())
+  if (!StyleRef().LogicalWidth().IsPercentOrCalc())
     min_logical_width = max_logical_width;
 }
 
@@ -335,7 +301,7 @@ void LayoutTextControl::ComputePreferredLogicalWidths() {
 
 void LayoutTextControl::AddOutlineRects(Vector<LayoutRect>& rects,
                                         const LayoutPoint& additional_offset,
-                                        IncludeBlockVisualOverflowOrNot) const {
+                                        NGOutlineType) const {
   rects.push_back(LayoutRect(additional_offset, Size()));
 }
 

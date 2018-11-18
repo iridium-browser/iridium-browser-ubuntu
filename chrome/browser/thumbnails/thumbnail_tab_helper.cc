@@ -6,18 +6,16 @@
 
 #include "base/feature_list.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/task_scheduler/post_task.h"
-#include "base/task_scheduler/task_traits.h"
+#include "base/task/post_task.h"
+#include "base/task/task_traits.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/thumbnails/thumbnail_service.h"
 #include "chrome/browser/thumbnails/thumbnail_service_factory.h"
 #include "chrome/browser/thumbnails/thumbnail_utils.h"
 #include "chrome/common/chrome_features.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_handle.h"
-#include "content/public/browser/notification_details.h"
-#include "content/public/browser/notification_source.h"
-#include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/render_widget_host_view.h"
@@ -50,8 +48,6 @@ void ComputeThumbnailScore(const SkBitmap& thumbnail,
 
 }  // namespace
 
-DEFINE_WEB_CONTENTS_USER_DATA_KEY(ThumbnailTabHelper);
-
 // Overview
 // --------
 // This class provides a service for updating thumbnails to be used in the
@@ -66,6 +62,7 @@ DEFINE_WEB_CONTENTS_USER_DATA_KEY(ThumbnailTabHelper);
 
 ThumbnailTabHelper::ThumbnailTabHelper(content::WebContents* contents)
     : content::WebContentsObserver(contents),
+      observer_(this),
       did_navigation_finish_(false),
       has_received_document_since_navigation_finished_(false),
       has_painted_since_document_received_(false),
@@ -76,19 +73,16 @@ ThumbnailTabHelper::ThumbnailTabHelper(content::WebContents* contents)
 
 ThumbnailTabHelper::~ThumbnailTabHelper() = default;
 
-void ThumbnailTabHelper::Observe(int type,
-                                 const content::NotificationSource& source,
-                                 const content::NotificationDetails& details) {
-  switch (type) {
-    case content::NOTIFICATION_RENDER_WIDGET_VISIBILITY_CHANGED:
-      // |details| is the new visibility state.
-      if (!*content::Details<bool>(details).ptr())
-        TabHidden();
-      break;
+void ThumbnailTabHelper::RenderWidgetHostVisibilityChanged(
+    content::RenderWidgetHost* widget_host,
+    bool became_visible) {
+  if (!became_visible)
+    TabHidden();
+}
 
-    default:
-      NOTREACHED() << "Unexpected notification type: " << type;
-  }
+void ThumbnailTabHelper::RenderWidgetHostDestroyed(
+    content::RenderWidgetHost* widget_host) {
+  observer_.Remove(widget_host);
 }
 
 void ThumbnailTabHelper::RenderViewCreated(
@@ -190,15 +184,9 @@ void ThumbnailTabHelper::StartWatchingRenderViewHost(
   // necessarily come with a new RenderViewHost, and there is no good way to get
   // notifications of new RenderViewHosts only. So just be tolerant of
   // re-registrations.
-  bool registered = registrar_.IsRegistered(
-      this, content::NOTIFICATION_RENDER_WIDGET_VISIBILITY_CHANGED,
-      content::Source<content::RenderWidgetHost>(
-          render_view_host->GetWidget()));
-  if (!registered) {
-    registrar_.Add(this, content::NOTIFICATION_RENDER_WIDGET_VISIBILITY_CHANGED,
-                   content::Source<content::RenderWidgetHost>(
-                       render_view_host->GetWidget()));
-  }
+  content::RenderWidgetHost* render_widget_host = render_view_host->GetWidget();
+  if (!observer_.IsObserving(render_widget_host))
+    observer_.Add(render_widget_host);
 }
 
 void ThumbnailTabHelper::StopWatchingRenderViewHost(
@@ -207,16 +195,9 @@ void ThumbnailTabHelper::StopWatchingRenderViewHost(
     return;
   }
 
-  bool registered = registrar_.IsRegistered(
-      this, content::NOTIFICATION_RENDER_WIDGET_VISIBILITY_CHANGED,
-      content::Source<content::RenderWidgetHost>(
-          render_view_host->GetWidget()));
-  if (registered) {
-    registrar_.Remove(this,
-                      content::NOTIFICATION_RENDER_WIDGET_VISIBILITY_CHANGED,
-                      content::Source<content::RenderWidgetHost>(
-                          render_view_host->GetWidget()));
-  }
+  content::RenderWidgetHost* render_widget_host = render_view_host->GetWidget();
+  if (observer_.IsObserving(render_widget_host))
+    observer_.Remove(render_widget_host);
 }
 
 void ThumbnailTabHelper::StartThumbnailCaptureIfNecessary(
@@ -321,7 +302,7 @@ void ThumbnailTabHelper::ProcessCapturedBitmap(TriggerReason trigger,
     LogThumbnailingOutcome(trigger, Outcome::SUCCESS);
     base::PostTaskWithTraitsAndReply(
         FROM_HERE,
-        {base::TaskPriority::BACKGROUND,
+        {base::TaskPriority::BEST_EFFORT,
          base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},
         base::Bind(&ComputeThumbnailScore, bitmap, thumbnailing_context_),
         base::Bind(&ThumbnailTabHelper::StoreThumbnail,
@@ -333,9 +314,8 @@ void ThumbnailTabHelper::ProcessCapturedBitmap(TriggerReason trigger,
     // that cleanup happens on that thread.
     // TODO(treib): Figure out whether it actually happen that we get called
     // back on something other than the UI thread.
-    content::BrowserThread::PostTask(
-        content::BrowserThread::UI,
-        FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, {content::BrowserThread::UI},
         base::Bind(&ThumbnailTabHelper::CleanUpFromThumbnailGeneration,
                    weak_factory_.GetWeakPtr()));
   }

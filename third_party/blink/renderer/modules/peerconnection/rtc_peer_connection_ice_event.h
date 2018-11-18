@@ -32,7 +32,7 @@ namespace blink {
 class RTCIceCandidate;
 class RTCPeerConnectionIceEventInit;
 
-class RTCPeerConnectionIceEvent final : public Event {
+class MODULES_EXPORT RTCPeerConnectionIceEvent final : public Event {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
@@ -48,7 +48,7 @@ class RTCPeerConnectionIceEvent final : public Event {
 
   const AtomicString& InterfaceName() const override;
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  private:
   RTCPeerConnectionIceEvent(RTCIceCandidate*);

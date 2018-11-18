@@ -35,7 +35,6 @@
 #include "chrome/installer/setup/update_active_setup_version_work_item.h"
 #include "chrome/installer/setup/user_experiment.h"
 #include "chrome/installer/util/beacons.h"
-#include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/create_reg_key_work_item.h"
 #include "chrome/installer/util/delete_after_reboot_helper.h"
 #include "chrome/installer/util/delete_old_versions.h"
@@ -54,7 +53,6 @@ namespace installer {
 namespace {
 
 void LogShortcutOperation(ShellUtil::ShortcutLocation location,
-                          BrowserDistribution* dist,
                           const ShellUtil::ShortcutProperties& properties,
                           ShellUtil::ShortcutOperation operation,
                           bool failed) {
@@ -83,16 +81,12 @@ void LogShortcutOperation(ShellUtil::ShortcutLocation location,
       message.append("Start menu ");
       break;
     case ShellUtil::SHORTCUT_LOCATION_START_MENU_CHROME_DIR_DEPRECATED:
-      message.append("Start menu/" +
-                     base::UTF16ToUTF8(dist->GetStartMenuShortcutSubfolder(
-                                     BrowserDistribution::SUBFOLDER_CHROME)) +
-                      " ");
+      NOTREACHED();
       break;
     case ShellUtil::SHORTCUT_LOCATION_START_MENU_CHROME_APPS_DIR:
-      message.append("Start menu/" +
-                     base::UTF16ToUTF8(dist->GetStartMenuShortcutSubfolder(
-                                     BrowserDistribution::SUBFOLDER_APPS)) +
-                     " ");
+      message.append(
+          "Start menu/" +
+          base::UTF16ToUTF8(InstallUtil::GetChromeAppsShortcutDirName()) + " ");
       break;
     default:
       NOTREACHED();
@@ -102,7 +96,7 @@ void LogShortcutOperation(ShellUtil::ShortcutLocation location,
   if (properties.has_shortcut_name())
     message.append(base::UTF16ToUTF8(properties.shortcut_name));
   else
-    message.append(base::UTF16ToUTF8(dist->GetDisplayName()));
+    message.append(base::UTF16ToUTF8(InstallUtil::GetDisplayName()));
   message.push_back('"');
 
   message.append(" shortcut to ");
@@ -123,13 +117,11 @@ void LogShortcutOperation(ShellUtil::ShortcutLocation location,
 
 void ExecuteAndLogShortcutOperation(
     ShellUtil::ShortcutLocation location,
-    BrowserDistribution* dist,
     const ShellUtil::ShortcutProperties& properties,
     ShellUtil::ShortcutOperation operation) {
-  LogShortcutOperation(location, dist, properties, operation, false);
-  if (!ShellUtil::CreateOrUpdateShortcut(location, dist, properties,
-                                         operation)) {
-    LogShortcutOperation(location, dist, properties, operation, true);
+  LogShortcutOperation(location, properties, operation, false);
+  if (!ShellUtil::CreateOrUpdateShortcut(location, properties, operation)) {
+    LogShortcutOperation(location, properties, operation, true);
   }
 }
 
@@ -264,26 +256,21 @@ InstallStatus InstallNewVersion(const InstallationState& original_state,
   return INSTALL_FAILED;
 }
 
-std::string GenerateVisualElementsManifest(const base::Version& version,
-                                           bool use_light_assets) {
+std::string GenerateVisualElementsManifest(const base::Version& version) {
   // A printf-style format string for generating the visual elements manifest.
   // Required arguments, in order, are thrice:
   //   - Relative path to the VisualElements directory.
   //   - Logo suffix for the channel.
-  //   - "Light" or "", according to |use_light_assets|.
-  // followed by:
-  //   - Foreground text value (light or dark).
   static constexpr char kManifestTemplate[] =
       "<Application xmlns:xsi='http://www.w3.org/2001/XMLSchema-instance'>\r\n"
       "  <VisualElements\r\n"
       "      ShowNameOnSquare150x150Logo='on'\r\n"
-      "      Square150x150Logo='%ls\\Logo%ls%ls.png'\r\n"
-      "      Square70x70Logo='%ls\\SmallLogo%ls%ls.png'\r\n"
-      "      Square44x44Logo='%ls\\SmallLogo%ls%ls.png'\r\n"
-      "      ForegroundText='%ls'\r\n"
-      "      BackgroundColor='#212121'/>\r\n"
+      "      Square150x150Logo='%ls\\Logo%ls.png'\r\n"
+      "      Square70x70Logo='%ls\\SmallLogo%ls.png'\r\n"
+      "      Square44x44Logo='%ls\\SmallLogo%ls.png'\r\n"
+      "      ForegroundText='light'\r\n"
+      "      BackgroundColor='#5F6368'/>\r\n"
       "</Application>\r\n";
-  static constexpr wchar_t kLight[] = L"Light";
 
   // Construct the relative path to the versioned VisualElements directory.
   base::string16 elements_dir(base::ASCIIToUTF16(version.GetString()));
@@ -295,61 +282,45 @@ std::string GenerateVisualElementsManifest(const base::Version& version,
   // Fill the manifest with the desired values.
   const base::char16* logo_suffix =
       install_static::InstallDetails::Get().logo_suffix();
-  const wchar_t* const light_suffix = use_light_assets ? kLight : L"";
   base::string16 manifest16(base::StringPrintf(
       manifest_template.c_str(), elements_dir.c_str(), logo_suffix,
-      light_suffix, elements_dir.c_str(), logo_suffix, light_suffix,
-      elements_dir.c_str(), logo_suffix, light_suffix,
-      use_light_assets ? L"dark" : L"light"));
+      elements_dir.c_str(), logo_suffix, elements_dir.c_str(), logo_suffix));
 
   return base::UTF16ToUTF8(manifest16);
 }
 
-enum class VEAssetType {
-  kNone,          // No VisualElements for this install.
-  kDarkOnly,      // No "light" assets that require dark text.
-  kDarkAndLight,  // "light" and "dark" assets are present.
-};
-
-// Returns the type of VisualElements assets present for this brand and mode.
-VEAssetType DetermineVisualElementAssetType(const base::FilePath& base_path,
-                                            const base::Version& version) {
+// Whether VisualElements assets exist for this brand and mode.
+bool HasVisualElementAssets(const base::FilePath& base_path,
+                            const base::Version& version) {
   // There are no assets at all if there's no VisualElements directory.
   base::FilePath visual_elements_dir =
       base_path.AppendASCII(version.GetString()).Append(kVisualElements);
   if (!base::DirectoryExists(visual_elements_dir))
-    return VEAssetType::kNone;
+    return false;
 
-  // Dark assets are unconditionally required.
+// Assets are unconditionally required if there is a VisualElements directory.
+#if DCHECK_IS_ON()
   const wchar_t* const logo_suffix =
       install_static::InstallDetails::Get().logo_suffix();
   DCHECK(base::PathExists(visual_elements_dir.Append(
       base::StringPrintf(L"Logo%ls.png", logo_suffix))));
+#endif
 
-  // Check for light assets that require dark text.
-  base::string16 light_logo_file_name =
-      base::StringPrintf(L"Logo%lsLight.png", logo_suffix);
-  return base::PathExists(visual_elements_dir.Append(light_logo_file_name))
-             ? VEAssetType::kDarkAndLight
-             : VEAssetType::kDarkOnly;
+  return true;
 }
 
 }  // namespace
 
 bool CreateVisualElementsManifest(const base::FilePath& src_path,
-                                  const base::Version& version,
-                                  bool supports_dark_text) {
-  VEAssetType asset_type = DetermineVisualElementAssetType(src_path, version);
-  if (asset_type == VEAssetType::kNone) {
+                                  const base::Version& version) {
+  if (!HasVisualElementAssets(src_path, version)) {
     VLOG(1) << "No visual elements found, not writing "
             << kVisualElementsManifest << " to " << src_path.value();
     return true;
   }
 
-  // Generate the manifest, using "light" assets if and only if the OS supports
-  // drawing dark text.
-  const std::string manifest(GenerateVisualElementsManifest(
-      version, supports_dark_text && asset_type == VEAssetType::kDarkAndLight));
+  // Generate the manifest.
+  const std::string manifest(GenerateVisualElementsManifest(version));
 
   // Write the manifest to |src_path|.
   int size = base::checked_cast<int>(manifest.size());
@@ -364,66 +335,7 @@ bool CreateVisualElementsManifest(const base::FilePath& src_path,
   return false;
 }
 
-void UpdateVisualElementsManifest(const base::FilePath& target_path,
-                                  const base::Version& version,
-                                  bool supports_dark_text) {
-  VEAssetType asset_type =
-      DetermineVisualElementAssetType(target_path, version);
-  if (asset_type == VEAssetType::kNone) {
-    VLOG(1) << "No visual elements found, not updating "
-            << kVisualElementsManifest << " in " << target_path.value();
-    return;
-  }
-
-  // Generate the manifest, using "light" assets if and only if the OS supports
-  // drawing dark text.
-  const std::string manifest(GenerateVisualElementsManifest(
-      version, supports_dark_text && asset_type == VEAssetType::kDarkAndLight));
-
-  // Load existing manifest.
-  base::FilePath manifest_path(target_path.Append(kVisualElementsManifest));
-  std::string old_manifest;
-
-  // Nothing to do if the manifest hasn't changed.
-  if (base::ReadFileToString(manifest_path, &old_manifest) &&
-      manifest == old_manifest) {
-    VLOG(1) << "No need to update " << kVisualElementsManifest << " in "
-            << target_path.value();
-    return;
-  }
-
-  if (!base::ImportantFileWriter::WriteFileAtomically(manifest_path,
-                                                      manifest)) {
-    PLOG(ERROR) << "Error updating " << kVisualElementsManifest << " in "
-                << target_path.value();
-    return;
-  }
-  VLOG(1) << "Successfully updated " << kVisualElementsManifest << " in "
-          << target_path.value();
-
-  // Touch the shortcut to force the Start Menu to refresh the tile.
-  base::FilePath start_menu_shortcut;
-  base::Time now(base::Time::Now());
-  BrowserDistribution* dist = BrowserDistribution::GetDistribution();
-  if (!ShellUtil::GetShortcutPath(
-          ShellUtil::SHORTCUT_LOCATION_START_MENU_ROOT, dist,
-          install_static::IsSystemInstall() ? ShellUtil::SYSTEM_LEVEL
-                                            : ShellUtil::CURRENT_USER,
-          &start_menu_shortcut)) {
-    LOG(ERROR) << "Failed finding the Start Menu shortcut directory.";
-    return;
-  }
-  start_menu_shortcut =
-      start_menu_shortcut.Append(dist->GetShortcutName() + kLnkExt);
-  if (base::TouchFile(start_menu_shortcut, now, now)) {
-    VLOG(1) << "Successfully touched " << start_menu_shortcut.value();
-  } else {
-    PLOG(ERROR) << "Error touching " << start_menu_shortcut.value();
-  }
-}
-
 void CreateOrUpdateShortcuts(const base::FilePath& target,
-                             const Product& product,
                              const MasterPreferences& prefs,
                              InstallShortcutLevel install_level,
                              InstallShortcutOperation install_operation) {
@@ -443,8 +355,6 @@ void CreateOrUpdateShortcuts(const base::FilePath& target,
                 &do_not_create_quick_launch_shortcut);
   prefs.GetBool(master_preferences::kDoNotCreateTaskbarShortcut,
                 &do_not_create_taskbar_shortcut);
-
-  BrowserDistribution* dist = product.distribution();
 
   // The default operation on update is to overwrite shortcuts with the
   // currently desired properties, but do so only for shortcuts that still
@@ -470,13 +380,12 @@ void CreateOrUpdateShortcuts(const base::FilePath& target,
   // |base_properties|: The basic properties to set on every shortcut installed
   // (to be refined on a per-shortcut basis).
   ShellUtil::ShortcutProperties base_properties(shortcut_level);
-  product.AddDefaultShortcutProperties(target, &base_properties);
+  ShellUtil::AddDefaultShortcutProperties(target, &base_properties);
 
   if (!do_not_create_desktop_shortcut ||
       shortcut_operation == ShellUtil::SHELL_SHORTCUT_REPLACE_EXISTING) {
-    ExecuteAndLogShortcutOperation(
-        ShellUtil::SHORTCUT_LOCATION_DESKTOP, dist, base_properties,
-        shortcut_operation);
+    ExecuteAndLogShortcutOperation(ShellUtil::SHORTCUT_LOCATION_DESKTOP,
+                                   base_properties, shortcut_operation);
   }
 
   if (!do_not_create_quick_launch_shortcut ||
@@ -485,9 +394,8 @@ void CreateOrUpdateShortcuts(const base::FilePath& target,
     // install the per-user shortcut.
     ShellUtil::ShortcutProperties quick_launch_properties(base_properties);
     quick_launch_properties.level = ShellUtil::CURRENT_USER;
-    ExecuteAndLogShortcutOperation(
-        ShellUtil::SHORTCUT_LOCATION_QUICK_LAUNCH, dist,
-        quick_launch_properties, shortcut_operation);
+    ExecuteAndLogShortcutOperation(ShellUtil::SHORTCUT_LOCATION_QUICK_LAUNCH,
+                                   quick_launch_properties, shortcut_operation);
   }
 
   ShellUtil::ShortcutProperties start_menu_properties(base_properties);
@@ -507,22 +415,19 @@ void CreateOrUpdateShortcuts(const base::FilePath& target,
   // location.
   base::FilePath old_shortcut_path;
   ShellUtil::GetShortcutPath(
-      ShellUtil::SHORTCUT_LOCATION_START_MENU_CHROME_DIR_DEPRECATED, dist,
+      ShellUtil::SHORTCUT_LOCATION_START_MENU_CHROME_DIR_DEPRECATED,
       shortcut_level, &old_shortcut_path);
   if (base::PathExists(old_shortcut_path)) {
     ShellUtil::MoveExistingShortcut(
         ShellUtil::SHORTCUT_LOCATION_START_MENU_CHROME_DIR_DEPRECATED,
-        ShellUtil::SHORTCUT_LOCATION_START_MENU_ROOT,
-        dist, start_menu_properties);
+        ShellUtil::SHORTCUT_LOCATION_START_MENU_ROOT, start_menu_properties);
   }
 
-  ExecuteAndLogShortcutOperation(
-      ShellUtil::SHORTCUT_LOCATION_START_MENU_ROOT, dist,
-      start_menu_properties, shortcut_operation);
+  ExecuteAndLogShortcutOperation(ShellUtil::SHORTCUT_LOCATION_START_MENU_ROOT,
+                                 start_menu_properties, shortcut_operation);
 }
 
 void RegisterChromeOnMachine(const InstallerState& installer_state,
-                             const Product& product,
                              bool make_chrome_default,
                              const base::Version& version) {
   // Try to add Chrome to Media Player shim inclusion list. We don't do any
@@ -537,7 +442,6 @@ void RegisterChromeOnMachine(const InstallerState& installer_state,
 
   // Make Chrome the default browser if desired when possible. Otherwise, only
   // register it with Windows.
-  BrowserDistribution* dist = product.distribution();
   const base::FilePath chrome_exe(
       installer_state.target_path().Append(kChromeExe));
   VLOG(1) << "Registering Chrome as browser: " << chrome_exe.value();
@@ -546,9 +450,9 @@ void RegisterChromeOnMachine(const InstallerState& installer_state,
     int level = ShellUtil::CURRENT_USER;
     if (installer_state.system_install())
       level = level | ShellUtil::SYSTEM_LEVEL;
-    ShellUtil::MakeChromeDefault(dist, level, chrome_exe, true);
+    ShellUtil::MakeChromeDefault(level, chrome_exe, true);
   } else {
-    ShellUtil::RegisterChromeBrowser(dist, chrome_exe, base::string16(), false);
+    ShellUtil::RegisterChromeBrowser(chrome_exe, base::string16(), false);
   }
 }
 
@@ -573,8 +477,7 @@ InstallStatus InstallOrUpdateProduct(const InstallationState& original_state,
   // looks as if it had been extracted from the archive when calling
   // InstallNewVersion() below.
   installer_state.SetStage(CREATING_VISUAL_MANIFEST);
-  CreateVisualElementsManifest(src_path, new_version,
-                               OsSupportsDarkTextTiles());
+  CreateVisualElementsManifest(src_path, new_version);
 
   std::unique_ptr<base::Version> existing_version;
   InstallStatus result =
@@ -600,7 +503,6 @@ InstallStatus InstallOrUpdateProduct(const InstallationState& original_state,
     installer_state.SetStage(CREATING_SHORTCUTS);
 
     // Creates shortcuts for Chrome.
-    const Product& chrome_product = installer_state.product();
     const base::FilePath chrome_exe(
         installer_state.target_path().Append(kChromeExe));
 
@@ -620,7 +522,7 @@ InstallStatus InstallOrUpdateProduct(const InstallationState& original_state,
       install_operation = INSTALL_SHORTCUT_CREATE_ALL;
     }
 
-    CreateOrUpdateShortcuts(chrome_exe, chrome_product, prefs, install_level,
+    CreateOrUpdateShortcuts(chrome_exe, prefs, install_level,
                             install_operation);
 
     // Register Chrome and, if requested, make Chrome the default browser.
@@ -641,12 +543,10 @@ InstallStatus InstallOrUpdateProduct(const InstallationState& original_state,
     }
 
     RegisterChromeOnMachine(
-        installer_state, chrome_product,
-        make_chrome_default || force_chrome_default_for_user, new_version);
+        installer_state, make_chrome_default || force_chrome_default_for_user,
+        new_version);
 
     if (!installer_state.system_install()) {
-      DCHECK_EQ(chrome_product.distribution(),
-                BrowserDistribution::GetDistribution());
       UpdateDefaultBrowserBeaconForPath(
           installer_state.target_path().Append(kChromeExe));
     }
@@ -696,7 +596,6 @@ void LaunchDeleteOldVersionsProcess(const base::FilePath& setup_path,
 }
 
 void HandleOsUpgradeForBrowser(const InstallerState& installer_state,
-                               const Product& chrome,
                                const base::Version& installed_version) {
   VLOG(1) << "Updating and registering shortcuts for --on-os-upgrade.";
 
@@ -704,22 +603,17 @@ void HandleOsUpgradeForBrowser(const InstallerState& installer_state,
   const MasterPreferences prefs(
       installer_state.target_path().AppendASCII(kDefaultMasterPrefs));
 
-  // Update chrome.VisualElementsManifest.xml in case the upgrade was to an OS
-  // version that supports dark text on light backgrounds.
-  UpdateVisualElementsManifest(installer_state.target_path(), installed_version,
-                               OsSupportsDarkTextTiles());
-
   // Update shortcuts at this install level (per-user shortcuts on system-level
   // installs will be updated through Active Setup).
   const InstallShortcutLevel level =
       installer_state.system_install() ? ALL_USERS : CURRENT_USER;
   const base::FilePath chrome_exe(
       installer_state.target_path().Append(kChromeExe));
-  CreateOrUpdateShortcuts(chrome_exe, chrome, prefs, level,
+  CreateOrUpdateShortcuts(chrome_exe, prefs, level,
                           INSTALL_SHORTCUT_REPLACE_EXISTING);
 
   // Adapt Chrome registrations to this new OS.
-  RegisterChromeOnMachine(installer_state, chrome, false, installed_version);
+  RegisterChromeOnMachine(installer_state, false, installed_version);
 
   // Active Setup registrations are sometimes lost across OS update, make sure
   // they're back in place. Note: when Active Setup registrations in HKLM are
@@ -730,7 +624,7 @@ void HandleOsUpgradeForBrowser(const InstallerState& installer_state,
   // something between InstallOrUpdateProduct and AddActiveSetupWorkItems, but
   // this takes care of what is most required for now).
   std::unique_ptr<WorkItemList> work_item_list(WorkItem::CreateWorkItemList());
-  AddActiveSetupWorkItems(installer_state, installed_version, chrome,
+  AddActiveSetupWorkItems(installer_state, installed_version,
                           work_item_list.get());
   if (!work_item_list->Do()) {
     LOG(WARNING) << "Failed to reinstall Active Setup keys.";
@@ -766,8 +660,7 @@ void HandleActiveSetupForBrowser(const InstallerState& installer_state,
   cleanup_list->set_log_message("Cleanup deprecated per-user registrations");
   cleanup_list->set_rollback_enabled(false);
   cleanup_list->set_best_effort(true);
-  AddCleanupDeprecatedPerUserRegistrationsWorkItems(installer_state.product(),
-                                                    cleanup_list.get());
+  AddCleanupDeprecatedPerUserRegistrationsWorkItems(cleanup_list.get());
   cleanup_list->Do();
 
   // Only create shortcuts on Active Setup if the first run sentinel is not
@@ -787,8 +680,7 @@ void HandleActiveSetupForBrowser(const InstallerState& installer_state,
   const base::FilePath installation_root = installer_state.target_path();
   MasterPreferences prefs(installation_root.AppendASCII(kDefaultMasterPrefs));
   base::FilePath chrome_exe(installation_root.Append(kChromeExe));
-  CreateOrUpdateShortcuts(chrome_exe, installer_state.product(), prefs,
-                          CURRENT_USER, install_operation);
+  CreateOrUpdateShortcuts(chrome_exe, prefs, CURRENT_USER, install_operation);
 
   UpdateDefaultBrowserBeaconForPath(chrome_exe);
 

@@ -5,26 +5,34 @@
 #include "third_party/blink/renderer/core/script/worker_modulator_impl.h"
 
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
-#include "third_party/blink/renderer/core/loader/modulescript/worker_or_worklet_module_script_fetcher.h"
+#include "third_party/blink/renderer/core/loader/modulescript/document_module_script_fetcher.h"
+#include "third_party/blink/renderer/core/loader/modulescript/worker_module_script_fetcher.h"
 #include "third_party/blink/renderer/core/workers/worker_global_scope.h"
 #include "third_party/blink/renderer/platform/bindings/v8_throw_exception.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 
 namespace blink {
 
-ModulatorImplBase* WorkerModulatorImpl::Create(
-    scoped_refptr<ScriptState> script_state) {
-  return new WorkerModulatorImpl(std::move(script_state));
+ModulatorImplBase* WorkerModulatorImpl::Create(ScriptState* script_state) {
+  return new WorkerModulatorImpl(script_state);
 }
 
-WorkerModulatorImpl::WorkerModulatorImpl(
-    scoped_refptr<ScriptState> script_state)
-    : ModulatorImplBase(std::move(script_state)) {}
+WorkerModulatorImpl::WorkerModulatorImpl(ScriptState* script_state)
+    : ModulatorImplBase(script_state) {}
 
-ModuleScriptFetcher* WorkerModulatorImpl::CreateModuleScriptFetcher() {
+ModuleScriptFetcher* WorkerModulatorImpl::CreateModuleScriptFetcher(
+    ModuleScriptCustomFetchType custom_fetch_type) {
   auto* global_scope = ToWorkerGlobalScope(GetExecutionContext());
-  return new WorkerOrWorkletModuleScriptFetcher(
-      global_scope->ModuleFetchCoordinatorProxy());
+  switch (custom_fetch_type) {
+    case ModuleScriptCustomFetchType::kNone:
+      return new DocumentModuleScriptFetcher(global_scope->EnsureFetcher());
+    case ModuleScriptCustomFetchType::kWorkerConstructor:
+      return new WorkerModuleScriptFetcher(global_scope);
+    case ModuleScriptCustomFetchType::kWorkletAddModule:
+      break;
+  }
+  NOTREACHED();
+  return nullptr;
 }
 
 bool WorkerModulatorImpl::IsDynamicImportForbidden(String* reason) {

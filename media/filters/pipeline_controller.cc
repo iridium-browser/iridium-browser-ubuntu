@@ -26,12 +26,12 @@ PipelineController::PipelineController(
       error_cb_(error_cb),
       weak_factory_(this) {
   DCHECK(pipeline_);
-  DCHECK(!renderer_factory_cb_.is_null());
-  DCHECK(!seeked_cb_.is_null());
-  DCHECK(!suspended_cb_.is_null());
-  DCHECK(!before_resume_cb_.is_null());
-  DCHECK(!resumed_cb_.is_null());
-  DCHECK(!error_cb_.is_null());
+  DCHECK(renderer_factory_cb_);
+  DCHECK(seeked_cb_);
+  DCHECK(suspended_cb_);
+  DCHECK(before_resume_cb_);
+  DCHECK(resumed_cb_);
+  DCHECK(error_cb_);
 }
 
 PipelineController::~PipelineController() {
@@ -72,6 +72,7 @@ void PipelineController::Seek(base::TimeDelta time, bool time_updated) {
   if (time_updated)
     pending_time_updated_ = true;
   pending_seeked_cb_ = true;
+  pending_seek_except_start_ = true;
 
   // If we are already seeking to |time|, and the media is static, elide the
   // seek.
@@ -109,6 +110,11 @@ void PipelineController::Resume() {
 bool PipelineController::IsStable() {
   DCHECK(thread_checker_.CalledOnValidThread());
   return state_ == State::PLAYING;
+}
+
+bool PipelineController::IsPendingSeek() {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  return pending_seek_except_start_;
 }
 
 bool PipelineController::IsSuspended() {
@@ -215,7 +221,9 @@ void PipelineController::Dispatch() {
   }
 
   // If we have pending operations, and a seek is ongoing, abort it.
-  if ((pending_seek_ || pending_suspend_) && waiting_for_seek_) {
+  if ((pending_seek_ || pending_suspend_ || pending_audio_track_change_ ||
+       pending_video_track_change_) &&
+      waiting_for_seek_) {
     // If there is no pending seek, return the current seek to pending status.
     if (!pending_seek_) {
       pending_seek_time_ = seek_time_;
@@ -227,6 +235,34 @@ void PipelineController::Dispatch() {
     waiting_for_seek_ = false;
     demuxer_->CancelPendingSeek(pending_seek_time_);
     return;
+  }
+
+  // We can only switch tracks if we are not in a transitioning state already.
+  if ((pending_audio_track_change_ || pending_video_track_change_) &&
+      (state_ == State::PLAYING || state_ == State::SUSPENDED)) {
+    State old_state = state_;
+    state_ = State::SWITCHING_TRACKS;
+
+    // Attempt to do a track change _before_ attempting a seek operation,
+    // otherwise the seek will apply to the old tracks instead of the new
+    // one(s). Also attempt audio before video.
+    if (pending_audio_track_change_) {
+      pending_audio_track_change_ = false;
+      pipeline_->OnEnabledAudioTracksChanged(
+          pending_audio_track_change_ids_,
+          base::BindOnce(&PipelineController::OnTrackChangeComplete,
+                         weak_factory_.GetWeakPtr(), old_state));
+      return;
+    }
+
+    if (pending_video_track_change_) {
+      pending_video_track_change_ = false;
+      pipeline_->OnSelectedVideoTrackChanged(
+          pending_video_track_change_id_,
+          base::BindOnce(&PipelineController::OnTrackChangeComplete,
+                         weak_factory_.GetWeakPtr(), old_state));
+      return;
+    }
   }
 
   // Ordinary seeking.
@@ -257,6 +293,7 @@ void PipelineController::Dispatch() {
     // immediately.
     pending_startup_ = false;
     pending_seeked_cb_ = false;
+    pending_seek_except_start_ = false;
     bool was_pending_time_updated = pending_time_updated_;
     pending_time_updated_ = false;
     seeked_cb_.Run(was_pending_time_updated);
@@ -271,10 +308,13 @@ void PipelineController::Stop() {
   demuxer_ = nullptr;
   waiting_for_seek_ = false;
   pending_seeked_cb_ = false;
+  pending_seek_except_start_ = false;
   pending_time_updated_ = false;
   pending_seek_ = false;
   pending_suspend_ = false;
   pending_resume_ = false;
+  pending_audio_track_change_ = false;
+  pending_video_track_change_ = false;
   state_ = State::STOPPED;
 
   pipeline_->Stop();
@@ -326,13 +366,37 @@ void PipelineController::SetCdm(CdmContext* cdm_context,
 }
 
 void PipelineController::OnEnabledAudioTracksChanged(
-    const std::vector<MediaTrack::Id>& enabledTrackIds) {
-  pipeline_->OnEnabledAudioTracksChanged(enabledTrackIds);
+    const std::vector<MediaTrack::Id>& enabled_track_ids) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+
+  pending_audio_track_change_ = true;
+  pending_audio_track_change_ids_ = enabled_track_ids;
+
+  Dispatch();
 }
 
 void PipelineController::OnSelectedVideoTrackChanged(
     base::Optional<MediaTrack::Id> selected_track_id) {
-  pipeline_->OnSelectedVideoTrackChanged(selected_track_id);
+  DCHECK(thread_checker_.CalledOnValidThread());
+
+  pending_video_track_change_ = true;
+  pending_video_track_change_id_ = selected_track_id;
+
+  Dispatch();
+}
+
+void PipelineController::FireOnTrackChangeCompleteForTesting(State set_to) {
+  OnTrackChangeComplete(set_to);
+}
+
+void PipelineController::OnTrackChangeComplete(State previous_state) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+
+  if (state_ == State::SWITCHING_TRACKS)
+    state_ = previous_state;
+
+  // Other track changed or seek/suspend/resume, etc may be waiting.
+  Dispatch();
 }
 
 }  // namespace media

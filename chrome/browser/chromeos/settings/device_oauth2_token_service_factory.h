@@ -9,6 +9,13 @@
 #include <string>
 
 #include "base/macros.h"
+#include "base/memory/ref_counted.h"
+
+class PrefService;
+
+namespace network {
+class SharedURLLoaderFactory;
+}
 
 namespace chromeos {
 
@@ -26,8 +33,10 @@ class DeviceOAuth2TokenServiceFactory {
 
   // Called by ChromeBrowserMainPartsChromeOS in order to bootstrap the
   // DeviceOAuth2TokenService instance after the required global data is
-  // available (local state, request context getter and CrosSettings).
-  static void Initialize();
+  // available (local state, url loader and CrosSettings).
+  static void Initialize(
+      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
+      PrefService* local_state);
 
   // Called by ChromeBrowserMainPartsChromeOS in order to shutdown the
   // DeviceOAuth2TokenService instance and cancel all in-flight requests before

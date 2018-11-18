@@ -10,7 +10,6 @@
 #include <memory>
 #include <utility>
 
-#include "third_party/base/ptr_util.h"
 #include "third_party/base/stl_util.h"
 #include "xfa/fwl/cfwl_messagemouse.h"
 #include "xfa/fwl/cfwl_messagemousewheel.h"
@@ -81,7 +80,7 @@ void CFWL_ScrollBar::DrawWidget(CXFA_Graphics* pGraphics,
   if (!m_pProperties->m_pThemeProvider)
     return;
 
-  IFWL_ThemeProvider* pTheme = m_pProperties->m_pThemeProvider;
+  IFWL_ThemeProvider* pTheme = m_pProperties->m_pThemeProvider.Get();
   if (HasBorder())
     DrawBorder(pGraphics, CFWL_Part::Border, pTheme, matrix);
   DrawTrack(pGraphics, pTheme, true, &matrix);

@@ -32,7 +32,8 @@
 
 #include "base/memory/ptr_util.h"
 #include "third_party/blink/public/platform/web_layer_tree_view.h"
-#include "third_party/blink/public/web/web_frame_client.h"
+#include "third_party/blink/public/web/web_fullscreen_options.h"
+#include "third_party/blink/public/web/web_local_frame_client.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/exported/web_view_impl.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
@@ -40,15 +41,15 @@
 #include "third_party/blink/renderer/core/frame/page_scale_constraints_set.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
 #include "third_party/blink/renderer/core/fullscreen/fullscreen.h"
+#include "third_party/blink/renderer/core/fullscreen/fullscreen_options.h"
 #include "third_party/blink/renderer/core/html/media/html_video_element.h"
-#include "third_party/blink/renderer/core/layout/layout_full_screen.h"
 #include "third_party/blink/renderer/core/page/page.h"
 
 namespace blink {
 
 namespace {
 
-WebFrameClient& GetWebFrameClient(LocalFrame& frame) {
+WebLocalFrameClient& GetWebFrameClient(LocalFrame& frame) {
   WebLocalFrameImpl* web_frame = WebLocalFrameImpl::FromFrame(frame);
   DCHECK(web_frame);
   DCHECK(web_frame->Client());
@@ -63,7 +64,8 @@ std::unique_ptr<FullscreenController> FullscreenController::Create(
 }
 
 FullscreenController::FullscreenController(WebViewImpl* web_view_base)
-    : web_view_base_(web_view_base) {}
+    : web_view_base_(web_view_base),
+      pending_frames_(new PendingFullscreenSet) {}
 
 void FullscreenController::DidEnterFullscreen() {
   // |Browser::EnterFullscreenModeForTab()| can enter fullscreen without going
@@ -74,22 +76,27 @@ void FullscreenController::DidEnterFullscreen() {
 
   UpdatePageScaleConstraints(false);
   web_view_base_->SetPageScaleFactor(1.0f);
-  if (web_view_base_->MainFrame()->IsWebLocalFrame())
-    web_view_base_->MainFrame()->ToWebLocalFrame()->SetScrollOffset(WebSize());
   web_view_base_->SetVisualViewportOffset(FloatPoint());
 
   state_ = State::kFullscreen;
+
+  // Notify all pending local frames in order that we have entered fullscreen.
+  for (LocalFrame* frame : *pending_frames_) {
+    if (frame) {
+      if (Document* document = frame->GetDocument())
+        Fullscreen::DidEnterFullscreen(*document);
+    }
+  }
 
   // Notify all local frames that we have entered fullscreen.
   for (Frame* frame = web_view_base_->GetPage()->MainFrame(); frame;
        frame = frame->Tree().TraverseNext()) {
     if (!frame->IsLocalFrame())
       continue;
-    if (Document* document = ToLocalFrame(frame)->GetDocument()) {
-      if (Fullscreen* fullscreen = Fullscreen::FromIfExists(*document))
-        fullscreen->DidEnterFullscreen();
-    }
+    if (Document* document = ToLocalFrame(frame)->GetDocument())
+      Fullscreen::DidEnterFullscreen(*document);
   }
+  pending_frames_->clear();
 
   // TODO(foolip): If the top level browsing context (main frame) ends up with
   // no fullscreen element, exit fullscreen again to recover.
@@ -105,10 +112,7 @@ void FullscreenController::DidExitFullscreen() {
 
   UpdatePageScaleConstraints(true);
 
-  // We need to wait until style and layout are updated in order to properly
-  // restore scroll offsets since content may not be overflowing in the same way
-  // until they are.
-  state_ = State::kNeedsScrollAndScaleRestore;
+  state_ = State::kInitial;
 
   // Notify the topmost local frames that we have exited fullscreen.
   // |Fullscreen::DidExitFullscreen()| will take care of descendant frames.
@@ -121,10 +125,8 @@ void FullscreenController::DidExitFullscreen() {
     }
 
     DCHECK(frame->IsLocalFrame() && ToLocalFrame(frame)->IsLocalRoot());
-    if (Document* document = ToLocalFrame(frame)->GetDocument()) {
-      if (Fullscreen* fullscreen = Fullscreen::FromIfExists(*document))
-        fullscreen->DidExitFullscreen();
-    }
+    if (Document* document = ToLocalFrame(frame)->GetDocument())
+      Fullscreen::DidExitFullscreen(*document);
 
     // Skip over all descendant frames.
     while (next_frame && next_frame->Tree().IsDescendantOf(frame))
@@ -133,7 +135,11 @@ void FullscreenController::DidExitFullscreen() {
   }
 }
 
-void FullscreenController::EnterFullscreen(LocalFrame& frame) {
+void FullscreenController::EnterFullscreen(LocalFrame& frame,
+                                           const FullscreenOptions& options) {
+  // TODO(dtapuska): If we are already in fullscreen. If the options are
+  // different than the currently requested one we may wish to request
+  // fullscreen mode again.
   // If already fullscreen or exiting fullscreen, synchronously call
   // |DidEnterFullscreen()|. When exiting, the coming |DidExitFullscreen()| call
   // will again notify all frames.
@@ -151,25 +157,24 @@ void FullscreenController::EnterFullscreen(LocalFrame& frame) {
   // restore a previous set. This can happen if we exit and quickly reenter
   // fullscreen without performing a layout.
   if (state_ == State::kInitial) {
-    initial_page_scale_factor_ = web_view_base_->PageScaleFactor();
-    initial_scroll_offset_ =
-        web_view_base_->MainFrame()->IsWebLocalFrame()
-            ? web_view_base_->MainFrame()->ToWebLocalFrame()->GetScrollOffset()
-            : WebSize();
-    initial_visual_viewport_offset_ = web_view_base_->VisualViewportOffset();
     initial_background_color_override_enabled_ =
         web_view_base_->BackgroundColorOverrideEnabled();
     initial_background_color_override_ =
         web_view_base_->BackgroundColorOverride();
   }
 
+  pending_frames_->insert(&frame);
+
   // If already entering fullscreen, just wait.
   if (state_ == State::kEnteringFullscreen)
     return;
 
-  DCHECK(state_ == State::kInitial ||
-         state_ == State::kNeedsScrollAndScaleRestore);
-  GetWebFrameClient(frame).EnterFullscreen();
+  DCHECK(state_ == State::kInitial);
+  blink::WebFullscreenOptions blink_options;
+  // Only clone options if the feature is enabled.
+  if (RuntimeEnabledFeatures::FullscreenOptionsEnabled())
+    blink_options.prefers_navigation_bar = options.navigationUI() != "hide";
+  GetWebFrameClient(frame).EnterFullscreen(blink_options);
 
   state_ = State::kEnteringFullscreen;
 }
@@ -214,6 +219,12 @@ void FullscreenController::FullscreenElementChanged(Element* old_element,
     if (auto* video_element = ToHTMLVideoElementOrNull(*old_element))
       video_element->DidExitFullscreen();
   }
+
+  // Tell the browser the fullscreen state has changed.
+  if (Element* owner = new_element ? new_element : old_element) {
+    if (LocalFrame* frame = owner->GetDocument().GetFrame())
+      GetWebFrameClient(*frame).FullscreenStateChanged(!!new_element);
+  }
 }
 
 void FullscreenController::RestoreBackgroundColorOverride() {
@@ -237,41 +248,13 @@ void FullscreenController::UpdateSize() {
     return;
 
   UpdatePageScaleConstraints(false);
-
-  // Traverse all local frames and notify the LayoutFullScreen object, if any.
-  for (Frame* frame = web_view_base_->GetPage()->MainFrame(); frame;
-       frame = frame->Tree().TraverseNext()) {
-    if (!frame->IsLocalFrame())
-      continue;
-    if (Document* document = ToLocalFrame(frame)->GetDocument()) {
-      if (Fullscreen* fullscreen = Fullscreen::FromIfExists(*document)) {
-        if (LayoutFullScreen* layout_object =
-                fullscreen->FullScreenLayoutObject())
-          layout_object->UpdateStyle();
-      }
-    }
-  }
 }
 
-void FullscreenController::DidUpdateLayout() {
-  if (state_ != State::kNeedsScrollAndScaleRestore)
-    return;
-
-  web_view_base_->SetPageScaleFactor(initial_page_scale_factor_);
-  if (web_view_base_->MainFrame()->IsWebLocalFrame()) {
-    web_view_base_->MainFrame()->ToWebLocalFrame()->SetScrollOffset(
-        WebSize(initial_scroll_offset_));
-  }
-  web_view_base_->SetVisualViewportOffset(initial_visual_viewport_offset_);
-  // Background color override was already restored when
-  // FullscreenElementChanged([..], nullptr) was called while exiting.
-
-  state_ = State::kInitial;
-}
-
-void FullscreenController::UpdatePageScaleConstraints(bool remove_constraints) {
+void FullscreenController::UpdatePageScaleConstraints(bool reset_constraints) {
   PageScaleConstraints fullscreen_constraints;
-  if (!remove_constraints) {
+  if (reset_constraints) {
+    web_view_base_->GetPageScaleConstraintsSet().SetNeedsReset(true);
+  } else {
     fullscreen_constraints = PageScaleConstraints(1.0, 1.0, 1.0);
     fullscreen_constraints.layout_size = FloatSize(web_view_base_->Size());
   }

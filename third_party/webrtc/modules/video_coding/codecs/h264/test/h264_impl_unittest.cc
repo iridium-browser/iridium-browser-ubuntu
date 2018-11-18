@@ -8,6 +8,7 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include "api/video/color_space.h"
 #include "common_video/libyuv/include/webrtc_libyuv.h"
 #include "modules/video_coding/codecs/h264/include/h264.h"
 #include "modules/video_coding/codecs/test/video_codec_unittest.h"
@@ -48,12 +49,18 @@ TEST_F(TestH264Impl, MAYBE_EncodeDecode) {
   // First frame should be a key frame.
   encoded_frame._frameType = kVideoFrameKey;
   EXPECT_EQ(WEBRTC_VIDEO_CODEC_OK,
-            decoder_->Decode(encoded_frame, false, nullptr));
+            decoder_->Decode(encoded_frame, false, nullptr, 0));
   std::unique_ptr<VideoFrame> decoded_frame;
-  rtc::Optional<uint8_t> decoded_qp;
+  absl::optional<uint8_t> decoded_qp;
   ASSERT_TRUE(WaitForDecodedFrame(&decoded_frame, &decoded_qp));
   ASSERT_TRUE(decoded_frame);
   EXPECT_GT(I420PSNR(input_frame, decoded_frame.get()), 36);
+
+  const ColorSpace color_space = decoded_frame->color_space().value();
+  EXPECT_EQ(ColorSpace::PrimaryID::kInvalid, color_space.primaries());
+  EXPECT_EQ(ColorSpace::TransferID::kInvalid, color_space.transfer());
+  EXPECT_EQ(ColorSpace::MatrixID::kInvalid, color_space.matrix());
+  EXPECT_EQ(ColorSpace::RangeID::kLimited, color_space.range());
 }
 
 TEST_F(TestH264Impl, MAYBE_DecodedQpEqualsEncodedQp) {
@@ -65,9 +72,9 @@ TEST_F(TestH264Impl, MAYBE_DecodedQpEqualsEncodedQp) {
   // First frame should be a key frame.
   encoded_frame._frameType = kVideoFrameKey;
   EXPECT_EQ(WEBRTC_VIDEO_CODEC_OK,
-            decoder_->Decode(encoded_frame, false, nullptr));
+            decoder_->Decode(encoded_frame, false, nullptr, 0));
   std::unique_ptr<VideoFrame> decoded_frame;
-  rtc::Optional<uint8_t> decoded_qp;
+  absl::optional<uint8_t> decoded_qp;
   ASSERT_TRUE(WaitForDecodedFrame(&decoded_frame, &decoded_qp));
   ASSERT_TRUE(decoded_frame);
   ASSERT_TRUE(decoded_qp);

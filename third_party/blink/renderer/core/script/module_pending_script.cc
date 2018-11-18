@@ -37,13 +37,6 @@ void ModulePendingScriptTreeClient::Trace(blink::Visitor* visitor) {
   ModuleTreeClient::Trace(visitor);
 }
 
-void ModulePendingScriptTreeClient::TraceWrappers(
-    const ScriptWrappableVisitor* visitor) const {
-  visitor->TraceWrappers(module_script_);
-  visitor->TraceWrappers(pending_script_);
-  ModuleTreeClient::TraceWrappers(visitor);
-}
-
 ModulePendingScript::ModulePendingScript(ScriptElementBase* element,
                                          ModulePendingScriptTreeClient* client,
                                          bool is_external)
@@ -66,36 +59,15 @@ void ModulePendingScript::Trace(blink::Visitor* visitor) {
   PendingScript::Trace(visitor);
 }
 
-void ModulePendingScript::TraceWrappers(
-    const ScriptWrappableVisitor* visitor) const {
-  visitor->TraceWrappers(module_tree_client_);
-  PendingScript::TraceWrappers(visitor);
-}
-
 void ModulePendingScript::NotifyModuleTreeLoadFinished() {
   CHECK(!IsReady());
   ready_ = true;
-
-  if (Client())
-    Client()->PendingScriptFinished(this);
+  PendingScriptFinished();
 }
 
-bool ModulePendingScript::CheckMIMETypeBeforeRunScript(Document*) const {
-  // We don't check MIME type here because we check the MIME type in
-  // ModuleScriptLoader::WasModuleLoadSuccessful().
-  return true;
-}
-
-Script* ModulePendingScript::GetSource(const KURL& document_url,
-                                       bool& error_occurred) const {
+Script* ModulePendingScript::GetSource(const KURL& document_url) const {
   CHECK(IsReady());
-  error_occurred = ErrorOccurred();
   return GetModuleScript();
-}
-
-bool ModulePendingScript::ErrorOccurred() const {
-  CHECK(IsReady());
-  return !GetModuleScript();
 }
 
 }  // namespace blink

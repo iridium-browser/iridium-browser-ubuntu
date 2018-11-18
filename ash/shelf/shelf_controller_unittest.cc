@@ -7,7 +7,6 @@
 #include <string>
 
 #include "ash/public/cpp/ash_pref_names.h"
-#include "ash/public/cpp/config.h"
 #include "ash/public/cpp/shelf_model.h"
 #include "ash/public/cpp/shelf_model_observer.h"
 #include "ash/public/cpp/shelf_prefs.h"
@@ -216,8 +215,9 @@ class ShelfControllerTouchableContextMenuTest : public AshTestBase {
   ~ShelfControllerTouchableContextMenuTest() override = default;
 
   void SetUp() override {
-    scoped_feature_list_.InitAndEnableFeature(
-        features::kTouchableAppContextMenu);
+    scoped_feature_list_.InitWithFeatures(
+        {features::kTouchableAppContextMenu, features::kNotificationIndicator},
+        {});
     AshTestBase::SetUp();
   }
 
@@ -433,23 +433,44 @@ TEST_F(ShelfControllerPrefsTest, ShelfSettingsInTabletMode) {
   ASSERT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS, shelf->auto_hide_behavior());
 
   // Verify after entering tablet mode, the shelf alignment is bottom and the
-  // auto hide behavior is never.
+  // auto hide behavior has not changed.
   Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(true);
   EXPECT_EQ(SHELF_ALIGNMENT_BOTTOM, shelf->alignment());
-  EXPECT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_NEVER, shelf->auto_hide_behavior());
+  EXPECT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS, shelf->auto_hide_behavior());
 
   // Verify that screen rotation does not change alignment or auto-hide.
   display_manager()->SetDisplayRotation(
       display::Screen::GetScreen()->GetPrimaryDisplay().id(),
       display::Display::ROTATE_90, display::Display::RotationSource::ACTIVE);
   EXPECT_EQ(SHELF_ALIGNMENT_BOTTOM, shelf->alignment());
-  EXPECT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_NEVER, shelf->auto_hide_behavior());
+  EXPECT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS, shelf->auto_hide_behavior());
 
   // Verify after exiting tablet mode, the shelf alignment and auto hide
   // behavior get their stored pref values.
   Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(false);
   EXPECT_EQ(SHELF_ALIGNMENT_LEFT, shelf->alignment());
   EXPECT_EQ(SHELF_AUTO_HIDE_BEHAVIOR_ALWAYS, shelf->auto_hide_behavior());
+}
+
+using ShelfControllerAppModeTest = NoSessionAshTestBase;
+
+// Tests that shelf auto hide behavior is always hidden in app mode.
+TEST_F(ShelfControllerAppModeTest, AutoHideBehavior) {
+  SimulateKioskMode(user_manager::USER_TYPE_KIOSK_APP);
+
+  Shelf* shelf = GetPrimaryShelf();
+  EXPECT_EQ(SHELF_AUTO_HIDE_ALWAYS_HIDDEN, shelf->auto_hide_behavior());
+
+  Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(true);
+  EXPECT_EQ(SHELF_AUTO_HIDE_ALWAYS_HIDDEN, shelf->auto_hide_behavior());
+
+  display_manager()->SetDisplayRotation(
+      display::Screen::GetScreen()->GetPrimaryDisplay().id(),
+      display::Display::ROTATE_90, display::Display::RotationSource::ACTIVE);
+  EXPECT_EQ(SHELF_AUTO_HIDE_ALWAYS_HIDDEN, shelf->auto_hide_behavior());
+
+  Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(false);
+  EXPECT_EQ(SHELF_AUTO_HIDE_ALWAYS_HIDDEN, shelf->auto_hide_behavior());
 }
 
 }  // namespace

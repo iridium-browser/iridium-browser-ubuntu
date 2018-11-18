@@ -8,7 +8,6 @@ import android.content.ComponentName;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.Uri;
-import android.os.AsyncTask;
 import android.os.ParcelFileDescriptor;
 import android.support.test.filters.LargeTest;
 
@@ -19,6 +18,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.task.AsyncTask;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.share.ShareHelper;
@@ -51,8 +51,8 @@ public class ShareIntentTest {
      */
     private static class MockChromeActivity extends ChromeTabbedActivity {
         private final Object mLock = new Object();
-        private boolean mCheckCompleted = false;
-        private ChromeActivity mActivity = null;
+        private boolean mCheckCompleted;
+        private ChromeActivity mActivity;
 
         public MockChromeActivity(ChromeActivity activity) {
             mActivity = activity;
@@ -66,9 +66,9 @@ public class ShareIntentTest {
         @Override
         public void startActivity(Intent intent) {
             final Uri uri = intent.getClipData().getItemAt(0).getUri();
-            new AsyncTask<Void, Void, Void>() {
+            new AsyncTask<Void>() {
                 @Override
-                protected Void doInBackground(Void... params) {
+                protected Void doInBackground() {
                     ChromeFileProvider provider = new ChromeFileProvider();
                     ParcelFileDescriptor file = null;
                     try {
@@ -83,7 +83,8 @@ public class ShareIntentTest {
                     }
                     return null;
                 }
-            }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+            }
+                    .executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
         }
 
         /**

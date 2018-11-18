@@ -16,7 +16,6 @@ from chromite.lib import constants
 from chromite.cli import command_unittest
 from chromite.cli.cros import cros_chrome_sdk
 from chromite.lib import cache
-from chromite.lib import cros_build_lib_unittest
 from chromite.lib import cros_test_lib
 from chromite.lib import gs
 from chromite.lib import gs_unittest
@@ -25,7 +24,7 @@ from chromite.lib import partial_mock
 from gn_helpers import gn_helpers
 
 
-# pylint: disable=W0212
+# pylint: disable=protected-access
 
 
 class MockChromeSDKCommand(command_unittest.MockCommand):
@@ -33,10 +32,10 @@ class MockChromeSDKCommand(command_unittest.MockCommand):
   TARGET = 'chromite.cli.cros.cros_chrome_sdk.ChromeSDKCommand'
   TARGET_CLASS = cros_chrome_sdk.ChromeSDKCommand
   COMMAND = 'chrome-sdk'
-  ATTRS = (('_GOMA_URL', '_SetupEnvironment') +
+  ATTRS = (('_GOMA_DOWNLOAD_URL', '_SetupEnvironment') +
            command_unittest.MockCommand.ATTRS)
 
-  _GOMA_URL = 'Invalid URL'
+  _GOMA_DOWNLOAD_URL = 'Invalid URL'
 
   def __init__(self, *args, **kwargs):
     command_unittest.MockCommand.__init__(self, *args, **kwargs)
@@ -103,17 +102,17 @@ class SDKFetcherMock(partial_mock.PartialMock):
 
   FAKE_METADATA = """
 {
-  "boards": ["x86-alex"],
+  "boards": ["eve"],
   "cros-version": "25.3543.2",
   "metadata-version": "1",
   "bot-hostname": "build82-m2.golo.chromium.org",
-  "bot-config": "x86-alex-release",
+  "bot-config": "eve-release",
   "toolchain-tuple": ["i686-pc-linux-gnu"],
   "toolchain-url": "2013/01/%(target)s-2013.01.23.003823.tar.xz",
   "sdk-version": "2013.01.23.003823"
 }"""
 
-  BOARD = 'x86-alex'
+  BOARD = 'eve'
   VERSION = 'XXXX.X.X'
 
   def __init__(self, external_mocks=None):
@@ -176,18 +175,19 @@ class RunThroughTest(cros_test_lib.MockTempDirTestCase,
       'CXX': 'x86_64-cros-linux-gnu-clang++ -B /path/to/gold',
       'CC': 'x86_64-cros-linux-gnu-clang -B /path/to/gold',
       'LD': 'x86_64-cros-linux-gnu-clang++ -B /path/to/gold',
+      'NM': 'x86_64-cros-linux-gnu-nm',
       'CFLAGS': '-O2',
       'CXXFLAGS': '-O2',
   }
 
-  def SetupCommandMock(self, extra_args=None):
+  def SetupCommandMock(self, extra_args=None, default_cache_dir=False):
     cmd_args = ['--board', SDKFetcherMock.BOARD, '--chrome-src',
                 self.chrome_src_dir, 'true']
     if extra_args:
       cmd_args.extend(extra_args)
 
-    self.cmd_mock = MockChromeSDKCommand(
-        cmd_args, base_args=['--cache-dir', self.tempdir])
+    base_args = None if default_cache_dir else ['--cache-dir', self.tempdir]
+    self.cmd_mock = MockChromeSDKCommand(cmd_args, base_args=base_args)
     self.StartPatcher(self.cmd_mock)
     self.cmd_mock.UnMockAttr('Run')
 
@@ -197,7 +197,7 @@ class RunThroughTest(cros_test_lib.MockTempDirTestCase,
     return {}
 
   def setUp(self):
-    self.rc_mock = cros_build_lib_unittest.RunCommandMock()
+    self.rc_mock = cros_test_lib.RunCommandMock()
     self.rc_mock.SetDefaultCmdResult()
     self.StartPatcher(self.rc_mock)
 
@@ -362,12 +362,32 @@ class RunThroughTest(cros_test_lib.MockTempDirTestCase,
 
     self.assertEquals(out_dir, self.cmd_mock.env['CHROMIUM_OUT_DIR'])
 
+  def testClearSDKCache(self):
+    """Verifies cache directories are removed with --clear-sdk-cache."""
+    # Ensure we have checkout type GCLIENT.
+    self.PatchObject(os, 'getcwd', return_value=self.chrome_root)
+
+    # Use the default cache location.
+    self.SetupCommandMock(extra_args=['--clear-sdk-cache'],
+                          default_cache_dir=True)
+    # Old chrome cache location.
+    old_chrome_cache = os.path.join(self.chrome_root, '.cros_cache')
+    chrome_cache = os.path.join(self.chrome_src_dir, 'build/cros_cache')
+    osutils.SafeMakedirs(old_chrome_cache)
+    self.assertFalse(os.path.exists(chrome_cache))
+
+    self.cmd_mock.inst.Run()
+    # Old chrome cache should be gone and the new one should now exist.
+    self.assertFalse(os.path.exists(old_chrome_cache))
+    self.assertTrue(os.path.exists(chrome_cache))
+
+
 class GomaTest(cros_test_lib.MockTempDirTestCase,
                cros_test_lib.LoggingTestCase):
   """Test Goma setup functionality."""
 
   def setUp(self):
-    self.rc_mock = cros_build_lib_unittest.RunCommandMock()
+    self.rc_mock = cros_test_lib.RunCommandMock()
     self.rc_mock.SetDefaultCmdResult()
     self.StartPatcher(self.rc_mock)
 

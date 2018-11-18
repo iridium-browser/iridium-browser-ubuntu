@@ -39,8 +39,8 @@ class ControllerServiceWorkerImpl : public mojom::ControllerServiceWorker {
 
   // mojom::ControllerServiceWorker:
   void DispatchFetchEvent(
-      mojom::DispatchFetchEventParamsPtr params,
-      mojom::ServiceWorkerFetchResponseCallbackPtr response_callback,
+      blink::mojom::DispatchFetchEventParamsPtr params,
+      blink::mojom::ServiceWorkerFetchResponseCallbackPtr response_callback,
       DispatchFetchEventCallback callback) override;
   void Clone(mojom::ControllerServiceWorkerRequest request) override;
 

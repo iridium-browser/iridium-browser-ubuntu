@@ -109,9 +109,9 @@ void SetExportsProperty(
   v8::Local<v8::Object> obj = args.This();
   CHECK_EQ(2, args.Length());
   CHECK(args[0]->IsString());
-  v8::Maybe<bool> result =
-      obj->DefineOwnProperty(args.GetIsolate()->GetCurrentContext(),
-                             args[0]->ToString(), args[1], v8::ReadOnly);
+  v8::Maybe<bool> result = obj->DefineOwnProperty(
+      args.GetIsolate()->GetCurrentContext(),
+      args[0]->ToString(args.GetIsolate()), args[1], v8::ReadOnly);
   if (!result.FromMaybe(false))
     LOG(ERROR) << "Failed to set private property on the export.";
 }
@@ -122,7 +122,7 @@ bool ContextNeedsMojoBindings(ScriptContext* context) {
   //
   // Prefer to use Mojo from C++ if possible rather than adding to this list.
   static const char* const kApisRequiringMojo[] = {
-      "mimeHandlerPrivate", "mojoPrivate",
+      "mediaPerceptionPrivate", "mimeHandlerPrivate", "mojoPrivate",
   };
 
   for (const auto* api : kApisRequiringMojo) {
@@ -171,8 +171,8 @@ ModuleSystem::ModuleSystem(ScriptContext* context, const SourceMap* source_map)
       source_map_(source_map),
       natives_enabled_(0),
       exception_handler_(new DefaultExceptionHandler(context)),
-      lazily_initialize_handlers_(
-          base::FeatureList::IsEnabled(features::kNativeCrxBindings)) {
+      lazily_initialize_handlers_(base::FeatureList::IsEnabled(
+          extensions_features::kNativeCrxBindings)) {
   v8::Local<v8::Object> global(context->v8_context()->Global());
   v8::Isolate* isolate = context->isolate();
   SetPrivate(global, kModulesField, v8::Object::New(isolate));
@@ -612,7 +612,7 @@ v8::MaybeLocal<v8::Object> ModuleSystem::RequireNativeFromString(
     return value.As<v8::Object>();
   }
 
-  NativeHandlerMap::iterator i = native_handler_map_.find(native_name);
+  auto i = native_handler_map_.find(native_name);
   if (i == native_handler_map_.end()) {
     Fatal(context_,
           "Couldn't find native for requireNative(" + native_name + ")");
@@ -656,8 +656,8 @@ v8::Local<v8::String> ModuleSystem::WrapSource(v8::Local<v8::String> source) {
       "$JSON, $Object, $RegExp, $String, $Error) {"
       "'use strict';");
   v8::Local<v8::String> right = ToV8StringUnsafe(GetIsolate(), "\n})");
-  return handle_scope.Escape(v8::Local<v8::String>(
-      v8::String::Concat(left, v8::String::Concat(source, right))));
+  return handle_scope.Escape(v8::Local<v8::String>(v8::String::Concat(
+      GetIsolate(), left, v8::String::Concat(GetIsolate(), source, right))));
 }
 
 void ModuleSystem::Private(const v8::FunctionCallbackInfo<v8::Value>& args) {
@@ -808,7 +808,7 @@ v8::Local<v8::Value> ModuleSystem::LoadModuleWithNativeAPIBridge(
 }
 
 void ModuleSystem::ClobberExistingNativeHandler(const std::string& name) {
-  NativeHandlerMap::iterator existing_handler = native_handler_map_.find(name);
+  auto existing_handler = native_handler_map_.find(name);
   if (existing_handler != native_handler_map_.end()) {
     clobbered_native_handlers_.push_back(std::move(existing_handler->second));
     native_handler_map_.erase(existing_handler);

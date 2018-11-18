@@ -10,11 +10,11 @@
 #include <string>
 #include <unordered_map>
 
+#include "base/bind.h"
 #include "base/feature_list.h"
 #include "base/ios/block_types.h"
 #include "base/json/json_reader.h"
 #include "base/logging.h"
-#import "base/mac/bind_objc_block.h"
 #include "base/mac/foundation_util.h"
 #include "base/strings/string16.h"
 #include "base/strings/sys_string_conversions.h"
@@ -66,7 +66,10 @@
 #import "ios/web/public/web_state/navigation_context.h"
 #import "ios/web/public/web_state/ui/crw_web_view_proxy.h"
 #include "ios/web/public/web_state/url_verification_constants.h"
-#include "ios/web/public/web_state/web_state.h"
+#include "ios/web/public/web_state/web_frame.h"
+#include "ios/web/public/web_state/web_frame_util.h"
+#import "ios/web/public/web_state/web_frames_manager.h"
+#import "ios/web/public/web_state/web_state.h"
 #import "ios/web/public/web_state/web_state_observer_bridge.h"
 #include "third_party/libaddressinput/chromium/chrome_metadata_source.h"
 #include "third_party/libaddressinput/chromium/chrome_storage_impl.h"
@@ -325,12 +328,16 @@ struct PendingPaymentResponse {
 
   if (_activeWebState) {
     __weak PaymentRequestManager* weakSelf = self;
-    auto callback = base::BindBlockArc(^bool(const base::DictionaryValue& JSON,
-                                             const GURL& originURL,
-                                             bool userIsInteracting) {
-      // |originURL| and |userIsInteracting| aren't used.
-      return [weakSelf handleScriptCommand:JSON];
-    });
+    auto callback = base::BindRepeating(
+        ^bool(const base::DictionaryValue& JSON, const GURL& originURL,
+              bool interacting, bool isMainFrame, web::WebFrame* senderFrame) {
+          if (!isMainFrame) {
+            // Payment request is only supported on main frame.
+            return false;
+          }
+          // |originURL| and |userIsInteracting| aren't used.
+          return [weakSelf handleScriptCommand:JSON];
+        });
     _activeWebState->AddObserver(_activeWebStateObserver.get());
     _activeWebState->AddScriptCommandCallback(callback, kCommandPrefix);
 
@@ -661,8 +668,11 @@ paymentRequestFromMessage:(const base::DictionaryValue&)message
           _activeWebState->GetLastCommittedURL()));
   BOOL connectionSecure =
       _activeWebState->GetLastCommittedURL().SchemeIs(url::kHttpsScheme);
+  // Payment Request is only enabled in main frame.
+  web::WebFrame* main_frame = web::GetMainWebFrame(_activeWebState);
   autofill::AutofillManager* autofillManager =
-      autofill::AutofillDriverIOS::FromWebState(_activeWebState)
+      autofill::AutofillDriverIOS::FromWebStateAndWebFrame(_activeWebState,
+                                                           main_frame)
           ->autofill_manager();
   _paymentRequestCoordinator = [[PaymentRequestCoordinator alloc]
       initWithBaseViewController:_baseViewController];
@@ -758,11 +768,10 @@ paymentRequestFromMessage:(const base::DictionaryValue&)message
           GURL(url_formatter::FormatUrlForSecurityDisplay(
               _activeWebState->GetLastCommittedURL())),
           paymentRequest->stringified_method_data())) {
-    if (paymentRequest->IsIncognito()) {
-      canMakePayment = !paymentRequest->supported_card_networks_set().empty() ||
-                       base::FeatureList::IsEnabled(
-                           payments::features::kWebPaymentsNativeApps);
-    }
+    // canMakePayment should return false if user has not allowed canMakePayment
+    // to return a truthful value.
+    canMakePayment &=
+        _browserState->GetPrefs()->GetBoolean(payments::kCanMakePaymentEnabled);
 
     [_paymentRequestJsManager
         resolveCanMakePaymentPromiseWithValue:canMakePayment

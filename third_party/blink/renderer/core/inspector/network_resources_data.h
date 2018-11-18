@@ -30,7 +30,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_INSPECTOR_NETWORK_RESOURCES_DATA_H_
 
 #include "third_party/blink/renderer/core/html/parser/text_resource_decoder.h"
-#include "third_party/blink/renderer/core/inspector/InspectorPageAgent.h"
+#include "third_party/blink/renderer/core/inspector/inspector_page_agent.h"
 #include "third_party/blink/renderer/platform/blob/blob_data.h"
 #include "third_party/blink/renderer/platform/network/http_header_map.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
@@ -145,8 +145,8 @@ class NetworkResourcesData final
       downloaded_file_blob_ = std::move(blob);
     }
 
-    int RawHeaderSize() const { return raw_header_size_; }
-    void SetRawHeaderSize(int size) { raw_header_size_ = size; }
+    int64_t RawHeaderSize() const { return raw_header_size_; }
+    void SetRawHeaderSize(int64_t size) { raw_header_size_ = size; }
 
     Vector<AtomicString> Certificate() { return certificate_; }
     void SetCertificate(const Vector<AtomicString>& certificate) {
@@ -188,7 +188,7 @@ class NetworkResourcesData final
 
     String mime_type_;
     String text_encoding_name_;
-    int raw_header_size_;
+    int64_t raw_header_size_;
     int pending_encoded_data_length_;
 
     scoped_refptr<SharedBuffer> buffer_;

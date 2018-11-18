@@ -11,6 +11,7 @@
 #include "base/command_line.h"
 #include "base/feature_list.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/stl_util.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/banners/app_banner_manager_desktop.h"
@@ -400,7 +401,7 @@ void AppBannerManager::ResetBindings() {
 
 void AppBannerManager::ResetCurrentPageData() {
   active_media_players_.clear();
-  manifest_ = content::Manifest();
+  manifest_ = blink::Manifest();
   manifest_url_ = GURL();
   validated_url_ = GURL();
   referrer_.erase();
@@ -472,6 +473,7 @@ void AppBannerManager::SendBannerPromptRequest() {
   blink::mojom::AppBannerController* controller_ptr = controller.get();
   controller_ptr->BannerPromptRequest(
       std::move(banner_proxy), mojo::MakeRequest(&event_), {GetBannerType()},
+      IsExperimentalAppBannersEnabled(),
       base::BindOnce(&AppBannerManager::OnBannerPromptReply, GetWeakPtr(),
                      std::move(controller)));
 }
@@ -534,9 +536,7 @@ void AppBannerManager::MediaStoppedPlaying(
     const MediaPlayerInfo& media_info,
     const MediaPlayerId& id,
     WebContentsObserver::MediaStoppedReason reason) {
-  active_media_players_.erase(std::remove(active_media_players_.begin(),
-                                          active_media_players_.end(), id),
-                              active_media_players_.end());
+  base::Erase(active_media_players_, id);
 }
 
 void AppBannerManager::WebContentsDestroyed() {
@@ -717,12 +717,7 @@ void AppBannerManager::ShowBanner() {
   UpdateState(State::COMPLETE);
 }
 
-void AppBannerManager::DisplayAppBanner(bool user_gesture) {
-  if (IsExperimentalAppBannersEnabled() && !user_gesture) {
-    Stop(NO_GESTURE);
-    return;
-  }
-
+void AppBannerManager::DisplayAppBanner() {
   if (state_ == State::PENDING_PROMPT) {
     ShowBanner();
   } else if (state_ == State::SENDING_EVENT) {

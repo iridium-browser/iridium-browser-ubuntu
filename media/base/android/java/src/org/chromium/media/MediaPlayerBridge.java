@@ -8,7 +8,6 @@ import android.annotation.SuppressLint;
 import android.media.MediaPlayer;
 import android.media.MediaPlayer.TrackInfo;
 import android.net.Uri;
-import android.os.AsyncTask;
 import android.os.Build;
 import android.os.ParcelFileDescriptor;
 import android.text.TextUtils;
@@ -22,6 +21,7 @@ import org.chromium.base.Log;
 import org.chromium.base.StreamUtil;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
+import org.chromium.base.task.AsyncTask;
 
 import java.io.ByteArrayInputStream;
 import java.io.File;
@@ -230,7 +230,7 @@ public class MediaPlayerBridge {
         return true;
     }
 
-    private class LoadDataUriTask extends AsyncTask<Void, Void, Boolean> {
+    private class LoadDataUriTask extends AsyncTask<Boolean> {
         private final String mData;
         private File mTempFile;
 
@@ -239,7 +239,7 @@ public class MediaPlayerBridge {
         }
 
         @Override
-        protected Boolean doInBackground(Void... params) {
+        protected Boolean doInBackground() {
             FileOutputStream fos = null;
             try {
                 mTempFile = File.createTempFile("decoded", "mediadata");

@@ -7,12 +7,12 @@
 #include <memory>
 
 #include "base/memory/ref_counted.h"
-#include "base/message_loop/message_loop.h"
+#include "base/test/scoped_task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "google_apis/gaia/fake_oauth2_token_service.h"
 #include "google_apis/gaia/gaia_constants.h"
-#include "net/url_request/test_url_fetcher_factory.h"
-#include "net/url_request/url_request_test_util.h"
+#include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
+#include "services/network/test/test_url_loader_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
@@ -48,22 +48,26 @@ class MockUbertokenConsumer : public UbertokenConsumer {
 
 class UbertokenFetcherTest : public testing::Test {
  public:
+  UbertokenFetcherTest()
+      : scoped_task_environment_(
+            base::test::ScopedTaskEnvironment::MainThreadType::UI),
+        test_shared_loader_factory_(
+            base::MakeRefCounted<network::WeakWrapperSharedURLLoaderFactory>(
+                &url_loader_factory_)) {}
+
   void SetUp() override {
-    request_context_getter_ = new net::TestURLRequestContextGetter(
-        base::ThreadTaskRunnerHandle::Get());
-    fetcher_.reset(new UbertokenFetcher(&token_service_,
-                                        &consumer_,
-                                        GaiaConstants::kChromeSource,
-                                        request_context_getter_.get()));
+    fetcher_ = std::make_unique<UbertokenFetcher>(&token_service_, &consumer_,
+                                                  GaiaConstants::kChromeSource,
+                                                  test_shared_loader_factory_);
   }
 
   void TearDown() override { fetcher_.reset(); }
 
  protected:
-  base::MessageLoop message_loop_;
-  net::TestURLFetcherFactory factory_;
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
   FakeOAuth2TokenService token_service_;
-  scoped_refptr<net::URLRequestContextGetter> request_context_getter_;
+  network::TestURLLoaderFactory url_loader_factory_;
+  scoped_refptr<network::SharedURLLoaderFactory> test_shared_loader_factory_;
   MockUbertokenConsumer consumer_;
   std::unique_ptr<UbertokenFetcher> fetcher_;
 };
@@ -73,7 +77,9 @@ TEST_F(UbertokenFetcherTest, Basic) {
 
 TEST_F(UbertokenFetcherTest, Success) {
   fetcher_->StartFetchingToken(kTestAccountId);
-  fetcher_->OnGetTokenSuccess(NULL, "accessToken", base::Time());
+  fetcher_->OnGetTokenSuccess(NULL,
+                              OAuth2AccessTokenConsumer::TokenResponse(
+                                  "accessToken", base::Time(), std::string()));
   fetcher_->OnUberAuthTokenSuccess("uberToken");
 
   EXPECT_EQ(0, consumer_.nb_error_);
@@ -103,7 +109,9 @@ TEST_F(UbertokenFetcherTest, FailureToGetAccessToken) {
 TEST_F(UbertokenFetcherTest, TransientFailureEventualFailure) {
   fetcher_->StartFetchingToken(kTestAccountId);
   GoogleServiceAuthError error(GoogleServiceAuthError::CONNECTION_FAILED);
-  fetcher_->OnGetTokenSuccess(NULL, "accessToken", base::Time());
+  fetcher_->OnGetTokenSuccess(NULL,
+                              OAuth2AccessTokenConsumer::TokenResponse(
+                                  "accessToken", base::Time(), std::string()));
 
   for (int i = 0; i < UbertokenFetcher::kMaxRetries; ++i) {
     fetcher_->OnUberAuthTokenFailure(error);
@@ -121,7 +129,9 @@ TEST_F(UbertokenFetcherTest, TransientFailureEventualFailure) {
 TEST_F(UbertokenFetcherTest, TransientFailureEventualSuccess) {
   fetcher_->StartFetchingToken(kTestAccountId);
   GoogleServiceAuthError error(GoogleServiceAuthError::CONNECTION_FAILED);
-  fetcher_->OnGetTokenSuccess(NULL, "accessToken", base::Time());
+  fetcher_->OnGetTokenSuccess(NULL,
+                              OAuth2AccessTokenConsumer::TokenResponse(
+                                  "accessToken", base::Time(), std::string()));
 
   for (int i = 0; i < UbertokenFetcher::kMaxRetries; ++i) {
     fetcher_->OnUberAuthTokenFailure(error);
@@ -138,7 +148,9 @@ TEST_F(UbertokenFetcherTest, TransientFailureEventualSuccess) {
 
 TEST_F(UbertokenFetcherTest, PermanentFailureEventualFailure) {
   fetcher_->StartFetchingToken(kTestAccountId);
-  fetcher_->OnGetTokenSuccess(NULL, "accessToken", base::Time());
+  fetcher_->OnGetTokenSuccess(NULL,
+                              OAuth2AccessTokenConsumer::TokenResponse(
+                                  "accessToken", base::Time(), std::string()));
 
   GoogleServiceAuthError error(GoogleServiceAuthError::USER_NOT_SIGNED_UP);
   fetcher_->OnUberAuthTokenFailure(error);
@@ -146,7 +158,9 @@ TEST_F(UbertokenFetcherTest, PermanentFailureEventualFailure) {
   EXPECT_EQ(0, consumer_.nb_correct_token_);
   EXPECT_EQ("", consumer_.last_token_);
 
-  fetcher_->OnGetTokenSuccess(NULL, "accessToken", base::Time());
+  fetcher_->OnGetTokenSuccess(NULL,
+                              OAuth2AccessTokenConsumer::TokenResponse(
+                                  "accessToken", base::Time(), std::string()));
   fetcher_->OnUberAuthTokenFailure(error);
   EXPECT_EQ(1, consumer_.nb_error_);
   EXPECT_EQ(0, consumer_.nb_correct_token_);
@@ -156,14 +170,18 @@ TEST_F(UbertokenFetcherTest, PermanentFailureEventualFailure) {
 TEST_F(UbertokenFetcherTest, PermanentFailureEventualSuccess) {
   fetcher_->StartFetchingToken(kTestAccountId);
   GoogleServiceAuthError error(GoogleServiceAuthError::USER_NOT_SIGNED_UP);
-  fetcher_->OnGetTokenSuccess(NULL, "accessToken", base::Time());
+  fetcher_->OnGetTokenSuccess(NULL,
+                              OAuth2AccessTokenConsumer::TokenResponse(
+                                  "accessToken", base::Time(), std::string()));
 
   fetcher_->OnUberAuthTokenFailure(error);
   EXPECT_EQ(0, consumer_.nb_error_);
   EXPECT_EQ(0, consumer_.nb_correct_token_);
   EXPECT_EQ("", consumer_.last_token_);
 
-  fetcher_->OnGetTokenSuccess(NULL, "accessToken", base::Time());
+  fetcher_->OnGetTokenSuccess(NULL,
+                              OAuth2AccessTokenConsumer::TokenResponse(
+                                  "accessToken", base::Time(), std::string()));
   fetcher_->OnUberAuthTokenSuccess("uberToken");
   EXPECT_EQ(0, consumer_.nb_error_);
   EXPECT_EQ(1, consumer_.nb_correct_token_);

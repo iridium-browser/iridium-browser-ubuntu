@@ -15,12 +15,12 @@
 #include "base/files/file_util.h"
 #include "base/json/json_reader.h"
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/scoped_task_environment.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 #include "cc/animation/animation_events.h"
@@ -130,8 +130,10 @@ class DrawFadedStringLayerDelegate : public LayerDelegate {
 
 class LayerWithRealCompositorTest : public testing::Test {
  public:
-  LayerWithRealCompositorTest() {
-    if (PathService::Get(gfx::DIR_TEST_DATA, &test_data_directory_)) {
+  LayerWithRealCompositorTest()
+      : scoped_task_environment_(
+            base::test::ScopedTaskEnvironment::MainThreadType::UI) {
+    if (base::PathService::Get(gfx::DIR_TEST_DATA, &test_data_directory_)) {
       test_data_directory_ = test_data_directory_.AppendASCII("compositor");
     } else {
       LOG(ERROR) << "Could not open test data directory.";
@@ -272,6 +274,7 @@ class LayerWithRealCompositorTest : public testing::Test {
     std::unique_ptr<base::RunLoop> run_loop_;
   };
 
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
   std::unique_ptr<TestCompositorHost> compositor_host_;
 
   // The root directory for test files.
@@ -317,6 +320,7 @@ class TestLayerDelegate : public LayerDelegate {
   MOCK_METHOD2(OnLayerTransformed,
                void(const gfx::Transform&, PropertyChangeReason));
   MOCK_METHOD1(OnLayerOpacityChanged, void(PropertyChangeReason));
+  MOCK_METHOD0(OnLayerAlphaShapeChanged, void());
 
   void reset() {
     color_index_ = 0;
@@ -408,8 +412,6 @@ class TestCompositorObserver : public CompositorObserver {
 
   void OnCompositingEnded(Compositor* compositor) override { ended_ = true; }
 
-  void OnCompositingLockStateChanged(Compositor* compositor) override {}
-
   void OnCompositingChildResizing(Compositor* compositor) override {}
 
   void OnCompositingShuttingDown(Compositor* compositor) override {}
@@ -491,7 +493,9 @@ TEST_F(LayerWithRealCompositorTest, Hierarchy) {
 
 class LayerWithDelegateTest : public testing::Test {
  public:
-  LayerWithDelegateTest() {}
+  LayerWithDelegateTest()
+      : scoped_task_environment_(
+            base::test::ScopedTaskEnvironment::MainThreadType::UI) {}
   ~LayerWithDelegateTest() override {}
 
   // Overridden from testing::Test:
@@ -558,6 +562,7 @@ class LayerWithDelegateTest : public testing::Test {
   }
 
  private:
+  base::test::ScopedTaskEnvironment scoped_task_environment_;
   std::unique_ptr<TestCompositorHost> compositor_host_;
 
   DISALLOW_COPY_AND_ASSIGN(LayerWithDelegateTest);
@@ -905,34 +910,22 @@ TEST_F(LayerWithDelegateTest, SurfaceLayerCloneAndMirror) {
   layer->SetShowPrimarySurface(surface_id_one, gfx::Size(10, 10), SK_ColorWHITE,
                                cc::DeadlinePolicy::UseDefaultDeadline(), false);
   EXPECT_FALSE(layer->StretchContentToFillBounds());
-  EXPECT_TRUE(static_cast<cc::SurfaceLayer*>(layer->cc_layer_for_testing())
-                  ->hit_testable());
 
   auto clone = layer->Clone();
   EXPECT_FALSE(clone->StretchContentToFillBounds());
-  EXPECT_TRUE(static_cast<cc::SurfaceLayer*>(clone->cc_layer_for_testing())
-                  ->hit_testable());
   auto mirror = layer->Mirror();
   EXPECT_FALSE(mirror->StretchContentToFillBounds());
-  EXPECT_TRUE(static_cast<cc::SurfaceLayer*>(mirror->cc_layer_for_testing())
-                  ->hit_testable());
 
   local_surface_id = allocator.GenerateId();
   viz::SurfaceId surface_id_two(arbitrary_frame_sink, local_surface_id);
   layer->SetShowPrimarySurface(surface_id_two, gfx::Size(10, 10), SK_ColorWHITE,
                                cc::DeadlinePolicy::UseDefaultDeadline(), true);
   EXPECT_TRUE(layer->StretchContentToFillBounds());
-  EXPECT_TRUE(static_cast<cc::SurfaceLayer*>(layer->cc_layer_for_testing())
-                  ->hit_testable());
 
   clone = layer->Clone();
   EXPECT_TRUE(clone->StretchContentToFillBounds());
-  EXPECT_TRUE(static_cast<cc::SurfaceLayer*>(clone->cc_layer_for_testing())
-                  ->hit_testable());
   mirror = layer->Mirror();
   EXPECT_TRUE(mirror->StretchContentToFillBounds());
-  EXPECT_TRUE(static_cast<cc::SurfaceLayer*>(mirror->cc_layer_for_testing())
-                  ->hit_testable());
 }
 
 class LayerWithNullDelegateTest : public LayerWithDelegateTest {
@@ -1341,8 +1334,8 @@ TEST_F(LayerWithRealCompositorTest, DrawAlphaBlendedPixels) {
   EXPECT_GE(viewport_size.height(), test_size);
 
   // Blue with a wee bit of transparency.
-  SkColor blue_with_alpha = SkColorSetARGBInline(40, 10, 20, 200);
-  SkColor blend_color = SkColorSetARGBInline(255, 216, 3, 32);
+  SkColor blue_with_alpha = SkColorSetARGB(40, 10, 20, 200);
+  SkColor blend_color = SkColorSetARGB(255, 216, 3, 32);
 
   std::unique_ptr<Layer> background_layer(
       CreateColorLayer(SK_ColorRED, gfx::Rect(viewport_size)));
@@ -1377,8 +1370,8 @@ TEST_F(LayerWithRealCompositorTest, DrawAlphaThresholdFilterPixels) {
   EXPECT_GE(viewport_size.height(), test_size);
 
   int blue_height = 10;
-  SkColor blue_with_alpha = SkColorSetARGBInline(40, 0, 0, 255);
-  SkColor blend_color = SkColorSetARGBInline(255, 215, 0, 40);
+  SkColor blue_with_alpha = SkColorSetARGB(40, 0, 0, 255);
+  SkColor blend_color = SkColorSetARGB(255, 215, 0, 40);
 
   std::unique_ptr<Layer> background_layer(
       CreateColorLayer(SK_ColorRED, gfx::Rect(viewport_size)));
@@ -1442,7 +1435,8 @@ TEST_F(LayerWithRealCompositorTest, SetRootLayer) {
 // - Whenever SetBounds, SetOpacity or SetTransform are called.
 // TODO(vollick): could be reorganized into compositor_unittest.cc
 // Flaky on Windows. See https://crbug.com/784563.
-#if defined(OS_WIN)
+// Flaky on Linux tsan. See https://crbug.com/834026.
+#if defined(OS_WIN) || defined(OS_LINUX)
 #define MAYBE_CompositorObservers DISABLED_CompositorObservers
 #else
 #define MAYBE_CompositorObservers CompositorObservers
@@ -1892,10 +1886,12 @@ TEST_F(LayerWithDelegateTest, ExternalContent) {
   EXPECT_EQ(before.get(), child->cc_layer_for_testing());
 
   // Showing surface content changes the underlying cc layer.
+  viz::FrameSinkId frame_sink_id(1u, 1u);
+  viz::ParentLocalSurfaceIdAllocator allocator;
   before = child->cc_layer_for_testing();
-  child->SetShowPrimarySurface(viz::SurfaceId(), gfx::Size(10, 10),
-                               SK_ColorWHITE,
-                               cc::DeadlinePolicy::UseDefaultDeadline(), false);
+  child->SetShowPrimarySurface(
+      viz::SurfaceId(frame_sink_id, allocator.GenerateId()), gfx::Size(10, 10),
+      SK_ColorWHITE, cc::DeadlinePolicy::UseDefaultDeadline(), false);
   scoped_refptr<cc::Layer> after = child->cc_layer_for_testing();
   const auto* surface = static_cast<cc::SurfaceLayer*>(after.get());
   EXPECT_TRUE(after.get());
@@ -1903,8 +1899,8 @@ TEST_F(LayerWithDelegateTest, ExternalContent) {
   EXPECT_EQ(base::nullopt, surface->deadline_in_frames());
 
   child->SetShowPrimarySurface(
-      viz::SurfaceId(), gfx::Size(10, 10), SK_ColorWHITE,
-      cc::DeadlinePolicy::UseSpecifiedDeadline(4u), false);
+      viz::SurfaceId(frame_sink_id, allocator.GenerateId()), gfx::Size(10, 10),
+      SK_ColorWHITE, cc::DeadlinePolicy::UseSpecifiedDeadline(4u), false);
   EXPECT_EQ(4u, surface->deadline_in_frames());
 }
 
@@ -2637,6 +2633,26 @@ TEST(LayerDelegateTest, OnLayerOpacityChangedAnimation) {
   testing::Mock::VerifyAndClear(&delegate);
 }
 
+// Verify that LayerDelegate::OnLayerAlphaShapeChanged() is called when the
+// alpha shape of a layer is set.
+TEST(LayerDelegateTest, OnLayerAlphaShapeChanged) {
+  auto layer = std::make_unique<Layer>(LAYER_TEXTURED);
+  testing::StrictMock<TestLayerDelegate> delegate;
+  layer->set_delegate(&delegate);
+
+  // Set an alpha shape for the layer. Expect the delegate to be notified.
+  auto shape = std::make_unique<Layer::ShapeRects>();
+  shape->emplace_back(0, 0, 10, 20);
+  EXPECT_CALL(delegate, OnLayerAlphaShapeChanged());
+  layer->SetAlphaShape(std::move(shape));
+  testing::Mock::VerifyAndClear(&delegate);
+
+  // Clear the alpha shape for the layer. Expect the delegate to be notified.
+  EXPECT_CALL(delegate, OnLayerAlphaShapeChanged());
+  layer->SetAlphaShape(nullptr);
+  testing::Mock::VerifyAndClear(&delegate);
+}
+
 TEST_F(LayerWithRealCompositorTest, CompositorAnimationObserverTest) {
   std::unique_ptr<Layer> root(CreateLayer(LAYER_TEXTURED));
 
@@ -2652,53 +2668,6 @@ TEST_F(LayerWithRealCompositorTest, CompositorAnimationObserverTest) {
   EXPECT_FALSE(animation_observer.shutdown());
   ResetCompositor();
   EXPECT_TRUE(animation_observer.shutdown());
-}
-
-// A simple AnimationMetricsReporter class that remembers smoothness metric
-// when animation completes.
-class TestMetricsReporter : public ui::AnimationMetricsReporter {
- public:
-  TestMetricsReporter() {}
-  ~TestMetricsReporter() override {}
-
-  bool report_called() { return report_called_; }
-  int value() const { return value_; }
-
- protected:
-  void Report(int value) override {
-    value_ = value;
-    report_called_ = true;
-  }
-
- private:
-  bool report_called_ = false;
-  int value_ = -1;
-
-  DISALLOW_COPY_AND_ASSIGN(TestMetricsReporter);
-};
-
-// Starts an animation and tests that incrementing compositor frame count can
-// be used to report animation smoothness metrics.
-// Flaky test crbug.com/709080
-TEST_F(LayerWithRealCompositorTest, DISABLED_ReportMetrics) {
-  std::unique_ptr<Layer> root(CreateLayer(LAYER_SOLID_COLOR));
-  GetCompositor()->SetRootLayer(root.get());
-  LayerAnimator* animator = root->GetAnimator();
-  std::unique_ptr<ui::LayerAnimationElement> animation_element =
-      ui::LayerAnimationElement::CreateColorElement(
-          SK_ColorRED, base::TimeDelta::FromMilliseconds(100));
-  ui::LayerAnimationSequence* animation_sequence =
-      new ui::LayerAnimationSequence(std::move(animation_element));
-  TestMetricsReporter reporter;
-  animation_sequence->SetAnimationMetricsReporter(&reporter);
-  animator->StartAnimation(animation_sequence);
-  while (!reporter.report_called())
-    WaitForSwap();
-  ResetCompositor();
-  // Even though most of the time 100% smooth animations are expected, on the
-  // test bots this cannot be guaranteed. Therefore simply check that some
-  // value was reported.
-  EXPECT_GT(reporter.value(), 0);
 }
 
 TEST(LayerDebugInfoTest, LayerNameDoesNotClobber) {

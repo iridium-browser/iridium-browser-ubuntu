@@ -15,9 +15,9 @@ import string
 import subprocess
 import sys
 
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..', '..', '..', '..',
-                             'third_party', 'blink', 'tools'))
-from blinkpy.common.name_style_converter import NameStyleConverter
+sys.path.append(os.path.join(os.path.dirname(__file__),
+                             '..', '..', 'build', 'scripts'))
+from blinkbuild.name_style_converter import NameStyleConverter
 
 
 KNOWN_COMPONENTS = frozenset(['core', 'modules'])
@@ -432,13 +432,19 @@ def shorten_union_name(union_type):
     aliases = {
         # modules/canvas2d/CanvasRenderingContext2D.idl
         'CSSImageValueOrHTMLImageElementOrSVGImageElementOrHTMLVideoElementOrHTMLCanvasElementOrImageBitmapOrOffscreenCanvas': 'CanvasImageSource',
-        # modules/canvas/HTMLCanvasElementModule.idl
+        # modules/canvas/htmlcanvas/html_canvas_element_module_support_webgl2_compute.idl
+        # Due to html_canvas_element_module_support_webgl2_compute.idl and html_canvas_element_module.idl are exclusive in modules_idl_files.gni, they have same shorten name.
+        'CanvasRenderingContext2DOrWebGLRenderingContextOrWebGL2RenderingContextOrWebGL2ComputeRenderingContextOrImageBitmapRenderingContextOrXRPresentationContext': 'RenderingContext',
+        # modules/canvas/htmlcanvas/html_canvas_element_module.idl
         'CanvasRenderingContext2DOrWebGLRenderingContextOrWebGL2RenderingContextOrImageBitmapRenderingContextOrXRPresentationContext': 'RenderingContext',
         # core/imagebitmap/ImageBitmapFactories.idl
         'HTMLImageElementOrSVGImageElementOrHTMLVideoElementOrHTMLCanvasElementOrBlobOrImageDataOrImageBitmapOrOffscreenCanvas': 'ImageBitmapSource',
         # bindings/tests/idls/core/TestTypedefs.idl
         'NodeOrLongSequenceOrEventOrXMLHttpRequestOrStringOrStringByteStringOrNodeListRecord': 'NestedUnionType',
-        # modules/offscreencanvas/OffscreenCanvasModules.idl
+        # modules/canvas/offscreencanvas/offscreen_canvas_module_support_webgl2_compute.idl.
+        # Due to offscreen_canvas_module_support_webgl2_compute.idl and offscreen_canvas_module.idl are exclusive in modules_idl_files.gni, they have same shorten name.
+        'OffscreenCanvasRenderingContext2DOrWebGLRenderingContextOrWebGL2RenderingContextOrWebGL2ComputeRenderingContext': 'OffscreenRenderingContext',
+        # modules/canvas/offscreencanvas/offscreen_canvas_module.idl
         'OffscreenCanvasRenderingContext2DOrWebGLRenderingContextOrWebGL2RenderingContext': 'OffscreenRenderingContext',
     }
 
@@ -456,8 +462,6 @@ def shorten_union_name(union_type):
 
 
 def to_snake_case(name):
-    if name.lower() == name:
-        return name
     return NameStyleConverter(name).to_snake_case()
 
 

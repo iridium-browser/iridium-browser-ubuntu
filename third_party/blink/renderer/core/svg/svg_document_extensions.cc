@@ -21,10 +21,10 @@
 
 #include "third_party/blink/renderer/core/svg/svg_document_extensions.h"
 
+#include "base/auto_reset.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/svg/animation/smil_time_container.h"
 #include "third_party/blink/renderer/core/svg/svg_svg_element.h"
-#include "third_party/blink/renderer/platform/wtf/auto_reset.h"
 
 namespace blink {
 
@@ -127,16 +127,11 @@ void SVGDocumentExtensions::RemoveSVGRootWithRelativeLengthDescendents(
   relative_length_svg_roots_.erase(svg_root);
 }
 
-bool SVGDocumentExtensions::IsSVGRootWithRelativeLengthDescendents(
-    SVGSVGElement* svg_root) const {
-  return relative_length_svg_roots_.Contains(svg_root);
-}
-
 void SVGDocumentExtensions::InvalidateSVGRootsWithRelativeLengthDescendents(
     SubtreeLayoutScope* scope) {
 #if DCHECK_IS_ON()
   DCHECK(!in_relative_length_svg_roots_invalidation_);
-  AutoReset<bool> in_relative_length_svg_roots_change(
+  base::AutoReset<bool> in_relative_length_svg_roots_change(
       &in_relative_length_svg_roots_invalidation_, true);
 #endif
 
@@ -145,9 +140,8 @@ void SVGDocumentExtensions::InvalidateSVGRootsWithRelativeLengthDescendents(
 }
 
 bool SVGDocumentExtensions::ZoomAndPanEnabled() const {
-  if (SVGSVGElement* svg = rootElement(*document_))
-    return svg->ZoomAndPanEnabled();
-  return false;
+  SVGSVGElement* svg = rootElement(*document_);
+  return !svg || svg->ZoomAndPanEnabled();
 }
 
 void SVGDocumentExtensions::StartPan(const FloatPoint& start) {

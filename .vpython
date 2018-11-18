@@ -25,6 +25,7 @@
 python_version: "2.7"
 
 # Used by:
+#   build/chromeos/run_vm_test.py
 #   third_party/catapult
 #
 # This version must be compatible with the version range specified by
@@ -173,4 +174,23 @@ wheel: <
   name: "infra/python/wheels/pyobjc/${vpython_platform}"
   version: "version:4.1"
   match_tag: < platform: "macosx_10_10_intel" >
+>
+
+# Used by:
+#   third_party/catapult
+wheel: <
+  name: "infra/python/wheels/six-py2_py3"
+  version: "version:1.10.0"
+>
+wheel: <
+  name: "infra/python/wheels/pbr-py2_py3"
+  version: "version:3.0.0"
+>
+wheel: <
+  name: "infra/python/wheels/funcsigs-py2_py3"
+  version: "version:1.0.2"
+>
+wheel: <
+  name: "infra/python/wheels/mock-py2_py3"
+  version: "version:2.0.0"
 >

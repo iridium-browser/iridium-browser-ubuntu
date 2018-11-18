@@ -57,6 +57,9 @@ class CORE_EXPORT PerformanceResourceTiming : public PerformanceEntry {
     return new PerformanceResourceTiming(info, time_origin, initiator_type);
   }
 
+  AtomicString entryType() const override;
+  PerformanceEntryType EntryTypeEnum() const override;
+
   // Related doc: https://goo.gl/uNecAj.
   virtual AtomicString initiatorType() const;
   AtomicString nextHopProtocol() const;
@@ -77,21 +80,19 @@ class CORE_EXPORT PerformanceResourceTiming : public PerformanceEntry {
   unsigned long long decodedBodySize() const;
   const HeapVector<Member<PerformanceServerTiming>>& serverTiming() const;
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  protected:
   void BuildJSONValue(V8ObjectBuilder&) const override;
 
   // This constructor is for PerformanceNavigationTiming.
   // Related doc: https://goo.gl/uNecAj.
-  PerformanceResourceTiming(const String& name,
-                            const String& entry_type,
+  PerformanceResourceTiming(const AtomicString& name,
                             TimeTicks time_origin,
                             const WebVector<WebServerTimingInfo>&);
   virtual AtomicString AlpnNegotiatedProtocol() const;
   virtual AtomicString ConnectionInfo() const;
 
- protected:
   TimeTicks TimeOrigin() const { return time_origin_; }
 
  private:

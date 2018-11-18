@@ -270,7 +270,7 @@ bool AccessibilityControlPredicate(
   if (node->HasState(ax::mojom::State::kFocusable) &&
       node->GetRole() != ax::mojom::Role::kIframe &&
       node->GetRole() != ax::mojom::Role::kIframePresentational &&
-      node->GetRole() != ax::mojom::Role::kLink &&
+      !ui::IsLink(node->GetRole()) &&
       node->GetRole() != ax::mojom::Role::kWebArea &&
       node->GetRole() != ax::mojom::Role::kRootWebArea) {
     return true;
@@ -292,52 +292,52 @@ bool AccessibilityFocusablePredicate(
 
 bool AccessibilityGraphicPredicate(
     BrowserAccessibility* start, BrowserAccessibility* node) {
-  return node->GetRole() == ax::mojom::Role::kImage;
+  return ui::IsImage(node->GetRole());
 }
 
 bool AccessibilityHeadingPredicate(
     BrowserAccessibility* start, BrowserAccessibility* node) {
-  return (node->GetRole() == ax::mojom::Role::kHeading);
+  return ui::IsHeading(node->GetRole());
 }
 
 bool AccessibilityH1Predicate(
     BrowserAccessibility* start, BrowserAccessibility* node) {
-  return (node->GetRole() == ax::mojom::Role::kHeading &&
+  return (ui::IsHeading(node->GetRole()) &&
           node->GetIntAttribute(ax::mojom::IntAttribute::kHierarchicalLevel) ==
               1);
 }
 
 bool AccessibilityH2Predicate(
     BrowserAccessibility* start, BrowserAccessibility* node) {
-  return (node->GetRole() == ax::mojom::Role::kHeading &&
+  return (ui::IsHeading(node->GetRole()) &&
           node->GetIntAttribute(ax::mojom::IntAttribute::kHierarchicalLevel) ==
               2);
 }
 
 bool AccessibilityH3Predicate(
     BrowserAccessibility* start, BrowserAccessibility* node) {
-  return (node->GetRole() == ax::mojom::Role::kHeading &&
+  return (ui::IsHeading(node->GetRole()) &&
           node->GetIntAttribute(ax::mojom::IntAttribute::kHierarchicalLevel) ==
               3);
 }
 
 bool AccessibilityH4Predicate(
     BrowserAccessibility* start, BrowserAccessibility* node) {
-  return (node->GetRole() == ax::mojom::Role::kHeading &&
+  return (ui::IsHeading(node->GetRole()) &&
           node->GetIntAttribute(ax::mojom::IntAttribute::kHierarchicalLevel) ==
               4);
 }
 
 bool AccessibilityH5Predicate(
     BrowserAccessibility* start, BrowserAccessibility* node) {
-  return (node->GetRole() == ax::mojom::Role::kHeading &&
+  return (ui::IsHeading(node->GetRole()) &&
           node->GetIntAttribute(ax::mojom::IntAttribute::kHierarchicalLevel) ==
               5);
 }
 
 bool AccessibilityH6Predicate(
     BrowserAccessibility* start, BrowserAccessibility* node) {
-  return (node->GetRole() == ax::mojom::Role::kHeading &&
+  return (ui::IsHeading(node->GetRole()) &&
           node->GetIntAttribute(ax::mojom::IntAttribute::kHierarchicalLevel) ==
               6);
 }
@@ -381,21 +381,17 @@ bool AccessibilityLandmarkPredicate(
 
 bool AccessibilityLinkPredicate(
     BrowserAccessibility* start, BrowserAccessibility* node) {
-  return node->GetRole() == ax::mojom::Role::kLink;
+  return ui::IsLink(node->GetRole());
 }
 
 bool AccessibilityListPredicate(
     BrowserAccessibility* start, BrowserAccessibility* node) {
-  return (node->GetRole() == ax::mojom::Role::kListBox ||
-          node->GetRole() == ax::mojom::Role::kList ||
-          node->GetRole() == ax::mojom::Role::kDescriptionList);
+  return ui::IsList(node->GetRole());
 }
 
 bool AccessibilityListItemPredicate(
     BrowserAccessibility* start, BrowserAccessibility* node) {
-  return (node->GetRole() == ax::mojom::Role::kListItem ||
-          node->GetRole() == ax::mojom::Role::kDescriptionListTerm ||
-          node->GetRole() == ax::mojom::Role::kListBoxOption);
+  return ui::IsListItem(node->GetRole());
 }
 
 bool AccessibilityLiveRegionPredicate(
@@ -447,7 +443,7 @@ bool AccessibilityTextStyleItalicPredicate(
     BrowserAccessibility* start, BrowserAccessibility* node) {
   int32_t style = node->GetIntAttribute(ax::mojom::IntAttribute::kTextStyle);
   return 0 !=
-         (style & static_cast<int32_t>(ax::mojom::TextStyle::kTextStyleBold));
+         (style & static_cast<int32_t>(ax::mojom::TextStyle::kTextStyleItalic));
 }
 
 bool AccessibilityTextStyleUnderlinePredicate(

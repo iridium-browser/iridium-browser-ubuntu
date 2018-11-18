@@ -7,12 +7,16 @@
 
 #include "base/callback.h"
 #include "base/macros.h"
+#include "base/memory/ref_counted.h"
+#include "base/memory/weak_ptr.h"
+#include "media/base/cdm_context.h"
+#include "media/cdm/aes_decryptor.h"
 #include "media/cdm/cdm_proxy.h"
 
 namespace media {
 
 // CdmProxy implementation for Clear Key CDM to test CDM Proxy support.
-class ClearKeyCdmProxy : public CdmProxy {
+class ClearKeyCdmProxy : public CdmProxy, public CdmContext {
  public:
   ClearKeyCdmProxy();
   ~ClearKeyCdmProxy() final;
@@ -30,11 +34,23 @@ class ClearKeyCdmProxy : public CdmProxy {
       CreateMediaCryptoSessionCB create_media_crypto_session_cb) final;
   void SetKey(uint32_t crypto_session_id,
               const std::vector<uint8_t>& key_id,
-              const std::vector<uint8_t>& key_blob) final;
+              KeyType key_type,
+              const std::vector<uint8_t>& key_blob,
+              SetKeyCB set_key_cb) final;
   void RemoveKey(uint32_t crypto_session_id,
-                 const std::vector<uint8_t>& key_id) final;
+                 const std::vector<uint8_t>& key_id,
+                 RemoveKeyCB remove_key_cb) final;
+
+  // CdmContext implementation.
+  Decryptor* GetDecryptor() final;
 
  private:
+  void CreateDecryptor();
+
+  scoped_refptr<AesDecryptor> aes_decryptor_;
+
+  base::WeakPtrFactory<ClearKeyCdmProxy> weak_factory_;
+
   DISALLOW_COPY_AND_ASSIGN(ClearKeyCdmProxy);
 };
 

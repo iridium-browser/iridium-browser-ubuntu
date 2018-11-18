@@ -7,12 +7,12 @@
 
 from __future__ import print_function
 
-import argparse
 import distutils.version
 import os
 
 from chromite.cbuildbot import manifest_version
 from chromite.lib import chrome_committer
+from chromite.lib import commandline
 from chromite.lib import constants
 from chromite.lib import cros_logging as logging
 from chromite.lib import osutils
@@ -31,6 +31,13 @@ class ChromeLKGMCommitter(object):
 
   _COMMIT_MSG_TEMPLATE = ('LKGM %(version)s for chromeos.'
                           '\n\nBUG=762641')
+  # Files needed in a local checkout to successfully update the LKGM. The OWNERS
+  # file allows the --tbr-owners mechanism to select an appropriate OWNER to
+  # TBR.
+  _NEEDED_FILES = [
+      constants.PATH_TO_CHROME_CHROMEOS_OWNERS,
+      constants.PATH_TO_CHROME_LKGM,
+  ]
 
   def __init__(self, args):
     self._committer = chrome_committer.ChromeCommitter(args)
@@ -46,14 +53,14 @@ class ChromeLKGMCommitter(object):
 
   def Run(self):
     self._committer.Cleanup()
-    self._committer.Checkout([constants.PATH_TO_CHROME_LKGM])
+    self._committer.Checkout(self._NEEDED_FILES)
     self.UpdateLKGM()
     self.CommitNewLKGM()
     self._committer.Upload()
 
   def CheckoutChrome(self):
     """Checks out chrome into tmp checkout_dir."""
-    self._committer.Checkout([constants.PATH_TO_CHROME_LKGM])
+    self._committer.Checkout(self._NEEDED_FILES)
 
   @property
   def lkgm_file(self):
@@ -68,7 +75,7 @@ class ChromeLKGMCommitter(object):
     self._old_lkgm = osutils.ReadFile(lkgm_file)
 
     lv = distutils.version.LooseVersion
-    if self._old_lkgm is not None and not lv(self._lkgm) > lv(self._old_lkgm):
+    if self._old_lkgm is not None and lv(self._lkgm) <= lv(self._old_lkgm):
       raise LKGMNotValid(
           'LKGM version (%s) is not newer than current version (%s).' %
           (self._lkgm, self._old_lkgm))
@@ -93,8 +100,9 @@ def GetArgs(argv):
     Dictionary of parsed args.
   """
   committer_parser = chrome_committer.ChromeCommitter.GetParser()
-  parser = argparse.ArgumentParser(usage=__doc__,
-                                   parents=[committer_parser])
+  parser = commandline.ArgumentParser(description=__doc__,
+                                      parents=[committer_parser],
+                                      add_help=False, logging=False)
   parser.add_argument('--lkgm', required=True,
                       help="LKGM version to update to.")
   return parser.parse_args(argv)

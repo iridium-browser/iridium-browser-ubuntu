@@ -25,7 +25,6 @@
 #include "third_party/blink/renderer/core/html/image_document.h"
 
 #include <limits>
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
 #include "third_party/blink/renderer/core/dom/events/event_listener.h"
 #include "third_party/blink/renderer/core/dom/raw_data_document_parser.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
@@ -50,8 +49,10 @@
 #include "third_party/blink/renderer/core/loader/document_loader.h"
 #include "third_party/blink/renderer/core/loader/frame_loader.h"
 #include "third_party/blink/renderer/core/loader/resource/image_resource.h"
+#include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/page/page.h"
-#include "third_party/blink/renderer/platform/platform_chrome_client.h"
+#include "third_party/blink/renderer/core/paint/paint_layer_scrollable_area.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
 namespace blink {
@@ -71,7 +72,7 @@ class ImageEventListener : public EventListener {
 
   bool operator==(const EventListener& other) const override;
 
-  virtual void Trace(blink::Visitor* visitor) {
+  void Trace(blink::Visitor* visitor) override {
     visitor->Trace(doc_);
     EventListener::Trace(visitor);
   }
@@ -80,7 +81,7 @@ class ImageEventListener : public EventListener {
   ImageEventListener(ImageDocument* document)
       : EventListener(kImageEventListenerType), doc_(document) {}
 
-  virtual void handleEvent(ExecutionContext*, Event*);
+  void handleEvent(ExecutionContext*, Event*) override;
 
   Member<ImageDocument> doc_;
 };
@@ -100,7 +101,7 @@ class ImageDocumentParser : public RawDataDocumentParser {
       : RawDataDocumentParser(document) {}
 
   void AppendBytes(const char*, size_t) override;
-  virtual void Finish();
+  void Finish() override;
 };
 
 // --------
@@ -120,6 +121,9 @@ static String ImageTitle(const String& filename, const IntSize& size) {
 
 void ImageDocumentParser::AppendBytes(const char* data, size_t length) {
   if (!length)
+    return;
+
+  if (IsDetached())
     return;
 
   LocalFrame* frame = GetDocument()->GetFrame();
@@ -150,7 +154,7 @@ void ImageDocumentParser::Finish() {
     DocumentLoader* loader = GetDocument()->Loader();
     cached_image->SetResponse(loader->GetResponse());
     cached_image->Finish(
-        TimeTicksInSeconds(loader->GetTiming().ResponseEnd()),
+        loader->GetTiming().ResponseEnd(),
         GetDocument()->GetTaskRunner(TaskType::kInternalLoading).get());
 
     // Report the natural image size in the page title, regardless of zoom
@@ -173,8 +177,10 @@ void ImageDocumentParser::Finish() {
     GetDocument()->ImageLoaded();
   }
 
-  if (!IsDetached())
+  if (!IsDetached()) {
+    GetDocument()->SetReadyState(Document::kInteractive);
     GetDocument()->FinishedParsing();
+  }
 }
 
 // --------
@@ -350,7 +356,7 @@ void ImageDocument::ImageClicked(int x, int y) {
     float scroll_y = (image_y * device_scale_factor) / scale -
                      static_cast<float>(GetFrame()->View()->Height()) / 2;
 
-    GetFrame()->View()->LayoutViewportScrollableArea()->SetScrollOffset(
+    GetFrame()->View()->LayoutViewport()->SetScrollOffset(
         ScrollOffset(scroll_x, scroll_y), kProgrammaticScroll);
   }
 }
@@ -451,7 +457,8 @@ int ImageDocument::CalculateDivWidth() {
   //   of the frame.
   // * Images smaller in either dimension are centered along that axis.
   int viewport_width =
-      GetFrame()->GetPage()->GetVisualViewport().Size().Width();
+      GetFrame()->GetPage()->GetVisualViewport().Size().Width() /
+      GetFrame()->PageZoomFactor();
 
   // For huge images, minimum-scale=0.1 is still too big on small screens.
   // Set the <div> width so that the image will shrink to fit the width of the

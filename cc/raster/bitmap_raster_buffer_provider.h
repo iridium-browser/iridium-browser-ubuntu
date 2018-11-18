@@ -32,9 +32,9 @@ class CC_EXPORT BitmapRasterBufferProvider : public RasterBufferProvider {
       uint64_t resource_content_id,
       uint64_t previous_content_id) override;
   void Flush() override;
-  viz::ResourceFormat GetResourceFormat(bool must_support_alpha) const override;
-  bool IsResourceSwizzleRequired(bool must_support_alpha) const override;
-  bool IsResourcePremultiplied(bool must_support_alpha) const override;
+  viz::ResourceFormat GetResourceFormat() const override;
+  bool IsResourceSwizzleRequired() const override;
+  bool IsResourcePremultiplied() const override;
   bool CanPartialRasterIntoProvidedResource() const override;
   bool IsResourceReadyToDraw(
       const ResourcePool::InUsePoolResource& resource) const override;
@@ -43,6 +43,7 @@ class CC_EXPORT BitmapRasterBufferProvider : public RasterBufferProvider {
       const base::Closure& callback,
       uint64_t pending_callback_id) const override;
   void Shutdown() override;
+  bool CheckRasterFinishedQueries() override;
 
  private:
   std::unique_ptr<base::trace_event::ConvertableToTraceFormat> StateAsValue()

@@ -59,20 +59,28 @@ sk_sp<PaintImageGenerator> CreatePaintImageGenerator(const gfx::Size& size) {
 
 PaintImage CreateDiscardablePaintImage(const gfx::Size& size,
                                        sk_sp<SkColorSpace> color_space,
-                                       bool allocate_encoded_data) {
+                                       bool allocate_encoded_data,
+                                       PaintImage::Id id,
+                                       SkColorType color_type) {
   if (!color_space)
     color_space = SkColorSpace::MakeSRGB();
+  if (id == PaintImage::kInvalidId)
+    id = PaintImage::GetNextId();
 
-  return PaintImageBuilder::WithDefault()
-      .set_id(PaintImage::GetNextId())
-      .set_paint_image_generator(sk_make_sp<FakePaintImageGenerator>(
-          SkImageInfo::MakeN32Premul(size.width(), size.height(), color_space),
-          std::vector<FrameMetadata>{FrameMetadata()}, allocate_encoded_data))
-      // For simplicity, assume that any paint image created for testing is
-      // unspecified decode mode as would be the case with most img tags on the
-      // web.
-      .set_decoding_mode(PaintImage::DecodingMode::kUnspecified)
-      .TakePaintImage();
+  SkImageInfo info = SkImageInfo::Make(size.width(), size.height(), color_type,
+                                       kPremul_SkAlphaType, color_space);
+  auto paint_image =
+      PaintImageBuilder::WithDefault()
+          .set_id(id)
+          .set_paint_image_generator(sk_make_sp<FakePaintImageGenerator>(
+              info, std::vector<FrameMetadata>{FrameMetadata()},
+              allocate_encoded_data))
+          // For simplicity, assume that any paint image created for testing is
+          // unspecified decode mode as would be the case with most img tags on
+          // the web.
+          .set_decoding_mode(PaintImage::DecodingMode::kUnspecified)
+          .TakePaintImage();
+  return paint_image;
 }
 
 DrawImage CreateDiscardableDrawImage(const gfx::Size& size,
@@ -90,7 +98,6 @@ DrawImage CreateDiscardableDrawImage(const gfx::Size& size,
 PaintImage CreateAnimatedImage(const gfx::Size& size,
                                std::vector<FrameMetadata> frames,
                                int repetition_count,
-                               size_t frame_index,
                                PaintImage::Id id) {
   return PaintImageBuilder::WithDefault()
       .set_id(id)
@@ -99,13 +106,14 @@ PaintImage CreateAnimatedImage(const gfx::Size& size,
           std::move(frames)))
       .set_animation_type(PaintImage::AnimationType::ANIMATED)
       .set_repetition_count(repetition_count)
-      .set_frame_index(frame_index)
       .TakePaintImage();
 }
 
-PaintImage CreateBitmapImage(const gfx::Size& size) {
+PaintImage CreateBitmapImage(const gfx::Size& size, SkColorType color_type) {
   SkBitmap bitmap;
-  bitmap.allocN32Pixels(size.width(), size.height());
+  auto info = SkImageInfo::Make(size.width(), size.height(), color_type,
+                                kPremul_SkAlphaType, nullptr /* color_space */);
+  bitmap.allocPixels(info);
   bitmap.eraseColor(SK_AlphaTRANSPARENT);
   return PaintImageBuilder::WithDefault()
       .set_id(PaintImage::GetNextId())

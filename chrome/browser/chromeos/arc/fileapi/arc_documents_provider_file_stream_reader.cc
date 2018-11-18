@@ -4,10 +4,15 @@
 
 #include "chrome/browser/chromeos/arc/fileapi/arc_documents_provider_file_stream_reader.h"
 
+#include <utility>
+
 #include "base/bind.h"
+#include "base/callback_helpers.h"
+#include "base/task/post_task.h"
 #include "chrome/browser/chromeos/arc/fileapi/arc_content_file_system_file_stream_reader.h"
 #include "chrome/browser/chromeos/arc/fileapi/arc_documents_provider_root.h"
 #include "chrome/browser/chromeos/arc/fileapi/arc_documents_provider_root_map.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
@@ -24,8 +29,8 @@ void OnResolveToContentUrlOnUIThread(
     const ArcDocumentsProviderRoot::ResolveToContentUrlCallback& callback,
     const GURL& url) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
-                          base::BindOnce(callback, url));
+  base::PostTaskWithTraits(FROM_HERE, {BrowserThread::IO},
+                           base::BindOnce(callback, url));
 }
 
 void ResolveToContentUrlOnUIThread(
@@ -59,8 +64,8 @@ ArcDocumentsProviderFileStreamReader::ArcDocumentsProviderFileStreamReader(
     : offset_(offset), content_url_resolved_(false), weak_ptr_factory_(this) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::UI},
       base::BindOnce(
           &ResolveToContentUrlOnUIThread, url,
           base::Bind(
@@ -75,32 +80,32 @@ ArcDocumentsProviderFileStreamReader::~ArcDocumentsProviderFileStreamReader() {
 int ArcDocumentsProviderFileStreamReader::Read(
     net::IOBuffer* buffer,
     int buffer_length,
-    const net::CompletionCallback& callback) {
+    net::CompletionOnceCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (!content_url_resolved_) {
-    pending_operations_.emplace_back(base::Bind(
+    pending_operations_.emplace_back(base::BindOnce(
         &ArcDocumentsProviderFileStreamReader::RunPendingRead,
         base::Unretained(this), base::Passed(base::WrapRefCounted(buffer)),
-        buffer_length, callback));
+        buffer_length, std::move(callback)));
     return net::ERR_IO_PENDING;
   }
   if (!underlying_reader_)
     return net::ERR_FILE_NOT_FOUND;
-  return underlying_reader_->Read(buffer, buffer_length, callback);
+  return underlying_reader_->Read(buffer, buffer_length, std::move(callback));
 }
 
 int64_t ArcDocumentsProviderFileStreamReader::GetLength(
-    const net::Int64CompletionCallback& callback) {
+    net::Int64CompletionOnceCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (!content_url_resolved_) {
-    pending_operations_.emplace_back(
-        base::Bind(&ArcDocumentsProviderFileStreamReader::RunPendingGetLength,
-                   base::Unretained(this), callback));
+    pending_operations_.emplace_back(base::BindOnce(
+        &ArcDocumentsProviderFileStreamReader::RunPendingGetLength,
+        base::Unretained(this), std::move(callback)));
     return net::ERR_IO_PENDING;
   }
   if (!underlying_reader_)
     return net::ERR_FILE_NOT_FOUND;
-  return underlying_reader_->GetLength(callback);
+  return underlying_reader_->GetLength(std::move(callback));
 }
 
 void ArcDocumentsProviderFileStreamReader::OnResolveToContentUrl(
@@ -114,35 +119,44 @@ void ArcDocumentsProviderFileStreamReader::OnResolveToContentUrl(
   }
   content_url_resolved_ = true;
 
-  std::vector<base::Closure> pending_operations;
+  std::vector<base::OnceClosure> pending_operations;
   pending_operations.swap(pending_operations_);
-  for (const base::Closure& callback : pending_operations) {
-    callback.Run();
+  for (base::OnceClosure& callback : pending_operations) {
+    std::move(callback).Run();
   }
 }
 
 void ArcDocumentsProviderFileStreamReader::RunPendingRead(
     scoped_refptr<net::IOBuffer> buffer,
     int buffer_length,
-    const net::CompletionCallback& callback) {
+    net::CompletionOnceCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK(content_url_resolved_);
-  int result =
-      underlying_reader_
-          ? underlying_reader_->Read(buffer.get(), buffer_length, callback)
-          : net::ERR_FILE_NOT_FOUND;
+  // Create |copyable_callback| which is copyable, though it can still only
+  // called at most once.  This is safe, because Read() is guaranteed not to
+  // call |callback| if it returns synchronously.
+  auto copyable_callback = base::AdaptCallbackForRepeating(std::move(callback));
+  int result = underlying_reader_
+                   ? underlying_reader_->Read(buffer.get(), buffer_length,
+                                              copyable_callback)
+                   : net::ERR_FILE_NOT_FOUND;
   if (result != net::ERR_IO_PENDING)
-    callback.Run(result);
+    copyable_callback.Run(result);
 }
 
 void ArcDocumentsProviderFileStreamReader::RunPendingGetLength(
-    const net::Int64CompletionCallback& callback) {
+    net::Int64CompletionOnceCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DCHECK(content_url_resolved_);
-  int64_t result = underlying_reader_ ? underlying_reader_->GetLength(callback)
-                                      : net::ERR_FILE_NOT_FOUND;
+  // Create |copyable_callback| which is copyable, though it can still only
+  // called at most once.  This is safe, because GetLength() is guaranteed not
+  // to call |callback| if it returns synchronously.
+  auto copyable_callback = base::AdaptCallbackForRepeating(std::move(callback));
+  int64_t result = underlying_reader_
+                       ? underlying_reader_->GetLength(copyable_callback)
+                       : net::ERR_FILE_NOT_FOUND;
   if (result != net::ERR_IO_PENDING)
-    callback.Run(result);
+    copyable_callback.Run(result);
 }
 
 }  // namespace arc

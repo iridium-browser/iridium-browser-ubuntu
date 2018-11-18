@@ -94,14 +94,12 @@ const GUID kChromeTraceProviderName = {
 // Assertion handler for logging errors that occur when dialogs are
 // silenced.  To record a new error, pass the log string associated
 // with that error in the str parameter.
-MSVC_DISABLE_OPTIMIZE();
-void SilentRuntimeAssertHandler(const char* file,
-                                int line,
-                                const base::StringPiece message,
-                                const base::StringPiece stack_trace) {
+NOINLINE void SilentRuntimeAssertHandler(const char* file,
+                                         int line,
+                                         const base::StringPiece message,
+                                         const base::StringPiece stack_trace) {
   base::debug::BreakDebugger();
 }
-MSVC_ENABLE_OPTIMIZE();
 
 // Suppresses error/assertion dialogs and enables the logging of
 // those errors into silenced_errors_.
@@ -237,7 +235,7 @@ base::FilePath GetSessionLogDir(const base::CommandLine& command_line) {
       !log_dir_str.empty()) {
     log_dir = base::FilePath(log_dir_str);
   } else if (command_line.HasSwitch(chromeos::switches::kLoginProfile)) {
-    PathService::Get(chrome::DIR_USER_DATA, &log_dir);
+    base::PathService::Get(chrome::DIR_USER_DATA, &log_dir);
     base::FilePath profile_dir;
     std::string login_profile_value =
         command_line.GetSwitchValueASCII(chromeos::switches::kLoginProfile);
@@ -403,7 +401,7 @@ base::FilePath GetLogFileName(const base::CommandLine& command_line) {
   const base::FilePath log_filename(FILE_PATH_LITERAL("chrome_debug.log"));
   base::FilePath log_path;
 
-  if (PathService::Get(chrome::DIR_LOGS, &log_path)) {
+  if (base::PathService::Get(chrome::DIR_LOGS, &log_path)) {
     log_path = log_path.Append(log_filename);
     return log_path;
   } else {

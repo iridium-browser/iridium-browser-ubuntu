@@ -25,11 +25,10 @@
 
 #include "third_party/blink/renderer/core/dom/named_node_map.h"
 
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
 #include "third_party/blink/renderer/core/dom/attr.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
@@ -47,11 +46,12 @@ Attr* NamedNodeMap::getNamedItemNS(const AtomicString& namespace_uri,
 
 Attr* NamedNodeMap::removeNamedItem(const AtomicString& name,
                                     ExceptionState& exception_state) {
-  size_t index =
+  wtf_size_t index =
       element_->Attributes().FindIndex(element_->LowercaseIfNecessary(name));
   if (index == kNotFound) {
     exception_state.ThrowDOMException(
-        kNotFoundError, "No item with name '" + name + "' was found.");
+        DOMExceptionCode::kNotFoundError,
+        "No item with name '" + name + "' was found.");
     return nullptr;
   }
   return element_->DetachAttribute(index);
@@ -60,10 +60,10 @@ Attr* NamedNodeMap::removeNamedItem(const AtomicString& name,
 Attr* NamedNodeMap::removeNamedItemNS(const AtomicString& namespace_uri,
                                       const AtomicString& local_name,
                                       ExceptionState& exception_state) {
-  size_t index = element_->Attributes().FindIndex(
+  wtf_size_t index = element_->Attributes().FindIndex(
       QualifiedName(g_null_atom, local_name, namespace_uri));
   if (index == kNotFound) {
-    exception_state.ThrowDOMException(kNotFoundError,
+    exception_state.ThrowDOMException(DOMExceptionCode::kNotFoundError,
                                       "No item with name '" + namespace_uri +
                                           "::" + local_name + "' was found.");
     return nullptr;
@@ -82,14 +82,14 @@ Attr* NamedNodeMap::setNamedItemNS(Attr* attr,
   return element_->setAttributeNodeNS(attr, exception_state);
 }
 
-Attr* NamedNodeMap::item(unsigned index) const {
+Attr* NamedNodeMap::item(uint32_t index) const {
   AttributeCollection attributes = element_->Attributes();
   if (index >= attributes.size())
     return nullptr;
   return element_->EnsureAttr(attributes[index].GetName());
 }
 
-size_t NamedNodeMap::length() const {
+uint32_t NamedNodeMap::length() const {
   return element_->Attributes().size();
 }
 

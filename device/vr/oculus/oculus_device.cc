@@ -48,10 +48,10 @@ mojom::VREyeParametersPtr GetEyeDetails(ovrSession session,
   return eye_parameters;
 }
 
-mojom::VRDisplayInfoPtr CreateVRDisplayInfo(unsigned int id,
+mojom::VRDisplayInfoPtr CreateVRDisplayInfo(mojom::XRDeviceId id,
                                             ovrSession session) {
   mojom::VRDisplayInfoPtr display_info = mojom::VRDisplayInfo::New();
-  display_info->index = id;
+  display_info->id = id;
   display_info->displayName = std::string("Oculus");
   display_info->capabilities = mojom::VRDisplayCapabilities::New();
   display_info->capabilities->hasPosition = true;
@@ -83,60 +83,205 @@ mojom::VRDisplayInfoPtr CreateVRDisplayInfo(unsigned int id,
 
 }  // namespace
 
-OculusDevice::OculusDevice(ovrSession session, ovrGraphicsLuid luid)
-    : session_(session),
+OculusDevice::OculusDevice()
+    : VRDeviceBase(mojom::XRDeviceId::OCULUS_DEVICE_ID),
       main_thread_task_runner_(base::ThreadTaskRunnerHandle::Get()),
+      exclusive_controller_binding_(this),
+      gamepad_provider_factory_binding_(this),
+      compositor_host_binding_(this),
       weak_ptr_factory_(this) {
-  SetVRDisplayInfo(CreateVRDisplayInfo(GetId(), session_));
-
-  render_loop_ = std::make_unique<OculusRenderLoop>(session_, luid);
-}
-
-OculusDevice::~OculusDevice() {}
-
-void OculusDevice::RequestPresent(
-    VRDisplayImpl* display,
-    mojom::VRSubmitFrameClientPtr submit_client,
-    mojom::VRPresentationProviderRequest request,
-    mojom::VRRequestPresentOptionsPtr present_options,
-    mojom::VRDisplayHost::RequestPresentCallback callback) {
-  if (!render_loop_->IsRunning())
-    render_loop_->Start();
-
-  if (!render_loop_->IsRunning()) {
-    std::move(callback).Run(false, nullptr);
+  StartOvrSession();
+  if (!session_) {
     return;
   }
 
+  SetVRDisplayInfo(CreateVRDisplayInfo(GetId(), session_));
+
+  render_loop_ = std::make_unique<OculusRenderLoop>();
+}
+
+mojom::IsolatedXRGamepadProviderFactoryPtr OculusDevice::BindGamepadFactory() {
+  mojom::IsolatedXRGamepadProviderFactoryPtr ret;
+  gamepad_provider_factory_binding_.Bind(mojo::MakeRequest(&ret));
+  return ret;
+}
+
+mojom::XRCompositorHostPtr OculusDevice::BindCompositorHost() {
+  mojom::XRCompositorHostPtr ret;
+  compositor_host_binding_.Bind(mojo::MakeRequest(&ret));
+  return ret;
+}
+
+OculusDevice::~OculusDevice() {
+  // Wait for the render loop to stop before completing destruction. This will
+  // ensure that bindings are closed on the correct thread.
+  if (render_loop_ && render_loop_->IsRunning())
+    render_loop_->Stop();
+
+  StopOvrSession();
+}
+
+void OculusDevice::RequestSession(
+    mojom::XRRuntimeSessionOptionsPtr options,
+    mojom::XRRuntime::RequestSessionCallback callback) {
+  if (!options->immersive) {
+    ReturnNonImmersiveSession(std::move(callback));
+    return;
+  }
+
+  StopOvrSession();
+
+  if (!render_loop_->IsRunning()) {
+    render_loop_->Start();
+
+    if (!render_loop_->IsRunning()) {
+      std::move(callback).Run(nullptr, nullptr);
+      StartOvrSession();
+      return;
+    }
+
+    // If we have a pending gamepad provider request when starting the render
+    // loop, post the request over to the render loop to be bound.
+    if (provider_request_) {
+      render_loop_->task_runner()->PostTask(
+          FROM_HERE, base::BindOnce(&XRCompositorCommon::RequestGamepadProvider,
+                                    base::Unretained(render_loop_.get()),
+                                    std::move(provider_request_)));
+    }
+
+    if (overlay_request_) {
+      render_loop_->task_runner()->PostTask(
+          FROM_HERE, base::BindOnce(&XRCompositorCommon::RequestOverlay,
+                                    base::Unretained(render_loop_.get()),
+                                    std::move(overlay_request_)));
+    }
+  }
+
   auto on_request_present_result =
-      base::BindOnce(&OculusDevice::OnRequestPresentResult,
+      base::BindOnce(&OculusDevice::OnRequestSessionResult,
                      weak_ptr_factory_.GetWeakPtr(), std::move(callback));
+
+  auto on_presentation_ended = base::BindOnce(
+      &OculusDevice::OnPresentationEnded, weak_ptr_factory_.GetWeakPtr());
+
   render_loop_->task_runner()->PostTask(
       FROM_HERE,
-      base::BindOnce(&OculusRenderLoop::RequestPresent,
-                     render_loop_->GetWeakPtr(), submit_client.PassInterface(),
-                     std::move(request), std::move(present_options),
+      base::BindOnce(&XRCompositorCommon::RequestSession,
+                     base::Unretained(render_loop_.get()),
+                     std::move(on_presentation_ended), std::move(options),
                      std::move(on_request_present_result)));
 }
 
-void OculusDevice::OnRequestPresentResult(
-    mojom::VRDisplayHost::RequestPresentCallback callback,
+void OculusDevice::OnRequestSessionResult(
+    mojom::XRRuntime::RequestSessionCallback callback,
     bool result,
-    mojom::VRDisplayFrameTransportOptionsPtr transport_options) {
-  std::move(callback).Run(result, std::move(transport_options));
+    mojom::XRSessionPtr session) {
+  if (!result) {
+    std::move(callback).Run(nullptr, nullptr);
+
+    // Start magic window again.
+    StartOvrSession();
+    return;
+  }
+
+  OnStartPresenting();
+
+  mojom::XRSessionControllerPtr session_controller;
+  exclusive_controller_binding_.Bind(mojo::MakeRequest(&session_controller));
+
+  // Unretained is safe because the error handler won't be called after the
+  // binding has been destroyed.
+  exclusive_controller_binding_.set_connection_error_handler(
+      base::BindOnce(&OculusDevice::OnPresentingControllerMojoConnectionError,
+                     base::Unretained(this)));
+
+  session->display_info = display_info_.Clone();
+
+  std::move(callback).Run(std::move(session), std::move(session_controller));
 }
 
-void OculusDevice::ExitPresent() {
+// XRSessionController
+void OculusDevice::SetFrameDataRestricted(bool restricted) {
+  // Presentation sessions can not currently be restricted.
+  DCHECK(false);
+}
+
+void OculusDevice::OnPresentingControllerMojoConnectionError() {
   render_loop_->task_runner()->PostTask(
-      FROM_HERE, base::BindOnce(&OculusRenderLoop::ExitPresent,
-                                render_loop_->GetWeakPtr()));
+      FROM_HERE, base::BindOnce(&XRCompositorCommon::ExitPresent,
+                                base::Unretained(render_loop_.get())));
+  OnExitPresent();
+  exclusive_controller_binding_.Close();
 }
 
-void OculusDevice::OnMagicWindowPoseRequest(
-    mojom::VRMagicWindowProvider::GetPoseCallback callback) {
+void OculusDevice::OnPresentationEnded() {
+  StartOvrSession();
+}
+
+void OculusDevice::StartOvrSession() {
+  ovrInitParams initParams = {ovrInit_RequestVersion | ovrInit_Invisible,
+                              OVR_MINOR_VERSION, NULL, 0, 0};
+  ovrResult result = ovr_Initialize(&initParams);
+  if (OVR_FAILURE(result)) {
+    return;
+  }
+
+  ovrGraphicsLuid luid;
+  result = ovr_Create(&session_, &luid);
+  if (OVR_FAILURE(result)) {
+    return;
+  }
+}
+
+void OculusDevice::StopOvrSession() {
+  if (session_) {
+    // Shut down our current session so the presentation session can begin.
+    ovr_Destroy(session_);
+    session_ = nullptr;
+    ovr_Shutdown();
+  }
+}
+
+void OculusDevice::OnMagicWindowFrameDataRequest(
+    mojom::XRFrameDataProvider::GetFrameDataCallback callback) {
+  if (!session_) {
+    std::move(callback).Run(nullptr);
+    return;
+  }
+
   ovrTrackingState state = ovr_GetTrackingState(session_, 0, false);
-  std::move(callback).Run(
-      mojo::ConvertTo<mojom::VRPosePtr>(state.HeadPose.ThePose));
+
+  mojom::XRFrameDataPtr frame_data = mojom::XRFrameData::New();
+  frame_data->pose = mojo::ConvertTo<mojom::VRPosePtr>(state.HeadPose.ThePose);
+  std::move(callback).Run(std::move(frame_data));
+}
+
+void OculusDevice::GetIsolatedXRGamepadProvider(
+    mojom::IsolatedXRGamepadProviderRequest provider_request) {
+  // We bind the provider_request on the render loop thread, so gamepad data is
+  // updated at the rendering rate.
+  // If we haven't started the render loop yet, postpone binding the request
+  // until we do.
+  if (render_loop_->IsRunning()) {
+    render_loop_->task_runner()->PostTask(
+        FROM_HERE, base::BindOnce(&XRCompositorCommon::RequestGamepadProvider,
+                                  base::Unretained(render_loop_.get()),
+                                  std::move(provider_request)));
+  } else {
+    provider_request_ = std::move(provider_request);
+  }
+}
+
+void OculusDevice::CreateImmersiveOverlay(
+    mojom::ImmersiveOverlayRequest overlay_request) {
+  if (render_loop_->IsRunning()) {
+    render_loop_->task_runner()->PostTask(
+        FROM_HERE, base::BindOnce(&XRCompositorCommon::RequestOverlay,
+                                  base::Unretained(render_loop_.get()),
+                                  std::move(overlay_request)));
+  } else {
+    overlay_request_ = std::move(overlay_request);
+  }
 }
 
 }  // namespace device

@@ -6,8 +6,8 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_SCROLLBAR_PAINTER_H_
 
 #include "base/macros.h"
+#include "third_party/blink/renderer/core/scroll/scrollbar.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/scroll/scrollbar.h"
 
 namespace blink {
 
@@ -29,7 +29,8 @@ class ScrollbarPainter {
   static void PaintIntoRect(const LayoutScrollbarPart&,
                             GraphicsContext&,
                             const LayoutPoint& paint_offset,
-                            const LayoutRect&);
+                            const LayoutRect&,
+                            const LayoutScrollbar* = nullptr);
 
  private:
   Member<const LayoutScrollbar> layout_scrollbar_;

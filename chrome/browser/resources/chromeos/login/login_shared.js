@@ -108,7 +108,7 @@ cr.define('cr.ui', function() {
           chrome.send('headerBarVisible');
         });
       };
-      // Start asynchronously so the OOBE network screen comes in first.
+      // Start asynchronously so the OOBE welcome screen comes in first.
       window.setTimeout(showHeaderBar, HEADER_BAR_DELAY_MS);
     } else {
       document.body.classList.remove('oobe-display');
@@ -180,13 +180,6 @@ cr.define('cr.ui', function() {
    */
   Oobe.showPasswordChangedScreen = function(showError, email) {
     DisplayManager.showPasswordChangedScreen(showError, email);
-  };
-
-  /**
-   * Shows dialog to create a supervised user.
-   */
-  Oobe.showSupervisedUserCreationScreen = function() {
-    DisplayManager.showSupervisedUserCreationScreen();
   };
 
   /**

@@ -5,7 +5,6 @@
 import json
 import logging
 import os
-import re
 import shutil
 import tempfile
 import time
@@ -53,7 +52,7 @@ class WprArchiveInfo(object):
         return cls(file_path, data, bucket)
     return cls(file_path, {'archives': {}, 'platform_specific': True}, bucket)
 
-  def DownloadArchivesIfNeeded(self, target_platforms=None):
+  def DownloadArchivesIfNeeded(self, target_platforms=None, story_names=None):
     """Downloads archives iff the Archive has a bucket parameter and the user
     has permission to access the bucket.
 
@@ -64,6 +63,10 @@ class WprArchiveInfo(object):
     Warns when a bucket is not specified or when the user doesn't have
     permission to access the archive's bucket but a local copy of the archive
     exists.
+
+    Args:
+      target_platform: only downloads archives for these platforms
+      story_names: only downloads archives for these story names
     """
     logging.info('Downloading WPR archives. This can take a long time.')
     start_time = time.time()
@@ -97,13 +100,17 @@ class WprArchiveInfo(object):
                         "http://www.chromium.org/developers/telemetry/"
                         "upload_to_cloud_storage")
           raise
+
     try:
       story_archives = self._data['archives']
-      for story in story_archives:
+      download_names = set(story_archives.iterkeys())
+      if story_names is not None:
+        download_names.intersection_update(story_names)
+      for story_name in download_names:
         for target_platform in target_platforms:
-          if story_archives[story].get(target_platform):
+          if story_archives[story_name].get(target_platform):
             archive_path = self._WprFileNameToPath(
-                story_archives[story][target_platform])
+                story_archives[story_name][target_platform])
             download_if_needed(archive_path)
     finally:
       logging.info('All WPR archives are downloaded, took %s seconds.',
@@ -114,10 +121,6 @@ class WprArchiveInfo(object):
       return self.temp_target_wpr_file_path
 
     wpr_file = self._story_name_to_wpr_file.get(story.name, None)
-    if wpr_file is None and hasattr(story, 'url'):
-      # Some old pages always use the URL to identify a page rather than the
-      # name, so try to look for that.
-      wpr_file = self._story_name_to_wpr_file.get(story.url, None)
     if wpr_file:
       if target_platform in wpr_file:
         return self._WprFileNameToPath(wpr_file[target_platform])
@@ -136,7 +139,10 @@ class WprArchiveInfo(object):
       os.remove(self.temp_target_wpr_file_path)
       return
 
-    (target_wpr_file, target_wpr_file_path) = self._NextWprFileName()
+    target_wpr_file_hash = cloud_storage.CalculateHash(
+        self.temp_target_wpr_file_path)
+    (target_wpr_file, target_wpr_file_path) = self._NextWprFileName(
+        target_wpr_file_hash)
     for story in stories:
       # Check to see if the platform has been manually overrided.
       if not story.platform_specific:
@@ -148,7 +154,6 @@ class WprArchiveInfo(object):
     shutil.move(self.temp_target_wpr_file_path, target_wpr_file_path)
 
     # Update the hash file.
-    target_wpr_file_hash = cloud_storage.CalculateHash(target_wpr_file_path)
     with open(target_wpr_file_path + '.sha1', 'wb') as f:
       f.write(target_wpr_file_hash)
       f.flush()
@@ -184,34 +189,10 @@ class WprArchiveInfo(object):
   def _WprFileNameToPath(self, wpr_file):
     return os.path.abspath(os.path.join(self._base_dir, wpr_file))
 
-  def _NextWprFileName(self):
+  def _NextWprFileName(self, file_hash):
     """Creates a new file name for a wpr archive file."""
-    # The names are of the format "some_thing_number.wpr" or
-    # "some_thing_number.wprgo". Read the numbers.
-    highest_number = -1
-    base = None
-    wpr_files = []
-    extension = 'wprgo'
-    for story in self._data['archives']:
-      for p in self._data['archives'][story]:
-        wpr_files.append(self._data['archives'][story][p])
-
-    for wpr_file in wpr_files:
-      pattern = r'(?P<BASE>.*)_(?P<NUMBER>[0-9]+).{extension}'.format(
-          extension=extension)
-      match = re.match(pattern, wpr_file)
-      if not match:
-        raise Exception('Illegal wpr file name ' + wpr_file)
-      highest_number = max(int(match.groupdict()['NUMBER']), highest_number)
-      if base and match.groupdict()['BASE'] != base:
-        raise Exception('Illegal wpr file name ' + wpr_file +
-                        ', doesn\'t begin with ' + base)
-      base = match.groupdict()['BASE']
-    if not base:
-      # If we're creating a completely new info file, use the base name of the
-      # story set file.
-      base = os.path.splitext(os.path.basename(self._file_path))[0]
-    new_filename = '%s_%03d.%s' % (base, highest_number + 1, extension)
+    base = os.path.splitext(os.path.basename(self._file_path))[0]
+    new_filename = '%s_%s.%s' % (base, file_hash[:10], 'wprgo')
     return new_filename, self._WprFileNameToPath(new_filename)
 
   def _SetWprFileForStory(self, story_name, wpr_file, target_platform):

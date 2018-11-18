@@ -14,6 +14,7 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
+#include "base/single_thread_task_runner.h"
 #include "base/test/mock_callback.h"
 #include "base/test/scoped_task_environment.h"
 #include "base/time/time.h"
@@ -21,6 +22,7 @@
 #include "media/base/decode_status.h"
 #include "media/base/decoder_buffer.h"
 #include "media/base/gmock_callback_support.h"
+#include "media/base/media_log.h"
 #include "media/base/mock_media_log.h"
 #include "media/base/test_helpers.h"
 #include "media/base/video_decoder.h"
@@ -32,9 +34,11 @@
 #include "mojo/public/cpp/bindings/strong_binding.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/gfx/color_space.h"
 
 using ::testing::_;
 using ::testing::AtLeast;
+using ::testing::HasSubstr;
 using ::testing::Invoke;
 using ::testing::InSequence;
 using ::testing::Mock;
@@ -64,7 +68,6 @@ class MockVideoDecoder : public VideoDecoder {
         .WillRepeatedly(Return(kMaxDecodeRequests));
 
     // For regular methods, only configure a default action.
-    ON_CALL(*this, DoInitialize(_)).WillByDefault(RunCallback<0>(true));
     ON_CALL(*this, Decode(_, _))
         .WillByDefault(Invoke(this, &MockVideoDecoder::DoDecode));
     ON_CALL(*this, Reset(_))
@@ -116,14 +119,16 @@ class MockVideoDecoder : public VideoDecoder {
     if (!buffer->end_of_stream()) {
       gpu::MailboxHolder mailbox_holders[VideoFrame::kMaxPlanes];
       mailbox_holders[0].mailbox.name[0] = 1;
-      output_cb_.Run(VideoFrame::WrapNativeTextures(
+      scoped_refptr<VideoFrame> frame = VideoFrame::WrapNativeTextures(
           PIXEL_FORMAT_ARGB, mailbox_holders, GetReleaseMailboxCB(),
           config_.coded_size(), config_.visible_rect(), config_.natural_size(),
-          buffer->timestamp()));
+          buffer->timestamp());
+      frame->metadata()->SetBoolean(VideoFrameMetadata::POWER_EFFICIENT, true);
+      output_cb_.Run(frame);
     }
     // |decode_cb| must not be called from the same stack.
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::Bind(decode_cb, DecodeStatus::OK));
+        FROM_HERE, base::BindOnce(decode_cb, DecodeStatus::OK));
   }
 
   void DoReset(const base::Closure& reset_cb) {
@@ -156,7 +161,8 @@ class FakeMojoMediaClient : public MojoMediaClient {
       scoped_refptr<base::SingleThreadTaskRunner> task_runner,
       MediaLog* media_log,
       mojom::CommandBufferIdPtr command_buffer_id,
-      RequestOverlayInfoCB request_overlay_info_cb) override {
+      RequestOverlayInfoCB request_overlay_info_cb,
+      const gfx::ColorSpace& target_color_space) override {
     return create_video_decoder_cb_.Run(media_log);
   }
 
@@ -173,16 +179,7 @@ class MojoVideoDecoderIntegrationTest : public ::testing::Test {
   MojoVideoDecoderIntegrationTest()
       : mojo_media_client_(
             base::Bind(&MojoVideoDecoderIntegrationTest::CreateVideoDecoder,
-                       base::Unretained(this))) {
-    mojom::VideoDecoderPtr remote_video_decoder;
-    binding_ = mojo::MakeStrongBinding(
-        std::make_unique<MojoVideoDecoderService>(&mojo_media_client_,
-                                                  &mojo_cdm_service_context_),
-        mojo::MakeRequest(&remote_video_decoder));
-    client_ = std::make_unique<MojoVideoDecoder>(
-        base::ThreadTaskRunnerHandle::Get(), nullptr, &client_media_log_,
-        std::move(remote_video_decoder), RequestOverlayInfoCB());
-  }
+                       base::Unretained(this))) {}
 
   void TearDown() override {
     if (client_) {
@@ -194,21 +191,39 @@ class MojoVideoDecoderIntegrationTest : public ::testing::Test {
  protected:
   void RunUntilIdle() { scoped_task_environment_.RunUntilIdle(); }
 
-  void SetWriterCapacity(uint32_t capacity) {
-    client_->set_writer_capacity_for_testing(capacity);
+  void SetWriterCapacity(uint32_t capacity) { writer_capacity_ = capacity; }
+
+  mojom::VideoDecoderPtr CreateRemoteVideoDecoder() {
+    mojom::VideoDecoderPtr remote_video_decoder;
+    mojo::MakeStrongBinding(
+        std::make_unique<MojoVideoDecoderService>(&mojo_media_client_,
+                                                  &mojo_cdm_service_context_),
+        mojo::MakeRequest(&remote_video_decoder));
+    return remote_video_decoder;
+  }
+
+  void CreateClient() {
+    DCHECK(!client_);
+    // TODO(sandersd): Pass a GpuVideoAcceleratorFactories so that the cache can
+    // be tested.
+    client_ = std::make_unique<MojoVideoDecoder>(
+        base::ThreadTaskRunnerHandle::Get(), nullptr, &client_media_log_,
+        CreateRemoteVideoDecoder(), RequestOverlayInfoCB(), gfx::ColorSpace());
+    if (writer_capacity_)
+      client_->set_writer_capacity_for_testing(writer_capacity_);
   }
 
   bool Initialize() {
+    CreateClient();
+
+    EXPECT_CALL(*decoder_, DoInitialize(_)).WillOnce(RunCallback<0>(true));
+
     bool result = false;
-
-    EXPECT_CALL(*decoder_, DoInitialize(_));
-
     StrictMock<base::MockCallback<VideoDecoder::InitCB>> init_cb;
     EXPECT_CALL(init_cb, Run(_)).WillOnce(SaveArg<0>(&result));
 
-    client_->Initialize(TestVideoConfig::Normal(), false, nullptr,
-                        init_cb.Get(), output_cb_.Get(),
-                        VideoDecoder::WaitingForDecryptionKeyCB());
+    client_->Initialize(TestVideoConfig::NormalH264(), false, nullptr,
+                        init_cb.Get(), output_cb_.Get(), base::NullCallback());
     RunUntilIdle();
 
     return result;
@@ -277,18 +292,30 @@ class MojoVideoDecoderIntegrationTest : public ::testing::Test {
 
   base::test::ScopedTaskEnvironment scoped_task_environment_;
 
+  // Capacity that will be used for the MojoDecoderBufferWriter.
+  uint32_t writer_capacity_ = 0;
+
   MojoCdmServiceContext mojo_cdm_service_context_;
 
   // Provides |decoder_| to the service.
   FakeMojoMediaClient mojo_media_client_;
 
-  // Owns the service, bound to |client_|.
-  mojo::StrongBindingPtr<mojom::VideoDecoder> binding_;
-
   DISALLOW_COPY_AND_ASSIGN(MojoVideoDecoderIntegrationTest);
 };
 
 TEST_F(MojoVideoDecoderIntegrationTest, CreateAndDestroy) {}
+
+TEST_F(MojoVideoDecoderIntegrationTest, GetSupportedConfigs) {
+  mojom::VideoDecoderPtr remote_video_decoder = CreateRemoteVideoDecoder();
+  StrictMock<
+      base::MockCallback<mojom::VideoDecoder::GetSupportedConfigsCallback>>
+      callback;
+
+  // TODO(sandersd): Expect there to be an entry.
+  EXPECT_CALL(callback, Run(_));
+  remote_video_decoder->GetSupportedConfigs(callback.Get());
+  RunUntilIdle();
+}
 
 TEST_F(MojoVideoDecoderIntegrationTest, Initialize) {
   ASSERT_TRUE(Initialize());
@@ -296,6 +323,13 @@ TEST_F(MojoVideoDecoderIntegrationTest, Initialize) {
   EXPECT_EQ(client_->NeedsBitstreamConversion(), false);
   EXPECT_EQ(client_->CanReadWithoutStalling(), true);
   EXPECT_EQ(client_->GetMaxDecodeRequests(), kMaxDecodeRequests);
+}
+
+TEST_F(MojoVideoDecoderIntegrationTest, MediaLogIsProxied) {
+  ASSERT_TRUE(Initialize());
+  EXPECT_MEDIA_LOG_ON(client_media_log_, HasSubstr("\"test\""));
+  MEDIA_LOG(DEBUG, decoder_media_log_) << "test";
+  RunUntilIdle();
 }
 
 TEST_F(MojoVideoDecoderIntegrationTest, Decode) {
@@ -369,7 +403,6 @@ TEST_F(MojoVideoDecoderIntegrationTest, ResetDuringDecode) {
 TEST_F(MojoVideoDecoderIntegrationTest, ResetDuringDecode_ChunkedWrite) {
   // Use a small writer capacity to force chunked write.
   SetWriterCapacity(10);
-
   ASSERT_TRUE(Initialize());
 
   VideoFrame::ReleaseMailboxCB release_cb = VideoFrame::ReleaseMailboxCB();

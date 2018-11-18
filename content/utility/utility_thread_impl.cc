@@ -8,12 +8,10 @@
 
 #include "base/command_line.h"
 #include "build/build_config.h"
-#include "content/child/blink_platform_impl.h"
 #include "content/child/child_process.h"
 #include "content/public/common/service_manager_connection.h"
 #include "content/public/common/simple_connection_filter.h"
 #include "content/public/utility/content_utility_client.h"
-#include "content/utility/utility_blink_platform_impl.h"
 #include "content/utility/utility_blink_platform_with_sandbox_support_impl.h"
 #include "content/utility/utility_service_factory.h"
 #include "ipc/ipc_sync_channel.h"
@@ -61,15 +59,17 @@ void CreateResourceUsageReporter(mojom::ResourceUsageReporterRequest request) {
 }
 #endif  // !defined(OS_ANDROID)
 
-UtilityThreadImpl::UtilityThreadImpl()
-    : ChildThreadImpl(ChildThreadImpl::Options::Builder()
+UtilityThreadImpl::UtilityThreadImpl(base::RepeatingClosure quit_closure)
+    : ChildThreadImpl(std::move(quit_closure),
+                      ChildThreadImpl::Options::Builder()
                           .AutoStartServiceManagerConnection(false)
                           .Build()) {
   Init();
 }
 
 UtilityThreadImpl::UtilityThreadImpl(const InProcessChildThreadParams& params)
-    : ChildThreadImpl(ChildThreadImpl::Options::Builder()
+    : ChildThreadImpl(base::DoNothing(),
+                      ChildThreadImpl::Options::Builder()
                           .AutoStartServiceManagerConnection(false)
                           .InBrowserProcess(params)
                           .Build()) {
@@ -99,7 +99,7 @@ void UtilityThreadImpl::EnsureBlinkInitialized() {
   EnsureBlinkInitializedInternal(/*sandbox_support=*/false);
 }
 
-#if defined(OS_POSIX) && !defined(OS_ANDROID) && !defined(OS_FUCHSIA)
+#if defined(OS_POSIX) && !defined(OS_ANDROID)
 void UtilityThreadImpl::EnsureBlinkInitializedWithSandboxSupport() {
   EnsureBlinkInitializedInternal(/*sandbox_support=*/true);
 }
@@ -118,9 +118,10 @@ void UtilityThreadImpl::EnsureBlinkInitializedInternal(bool sandbox_support) {
 
   blink_platform_impl_ =
       sandbox_support
-          ? std::make_unique<UtilityBlinkPlatformWithSandboxSupportImpl>()
-          : std::make_unique<UtilityBlinkPlatformImpl>();
-  blink::Platform::Initialize(blink_platform_impl_.get());
+          ? std::make_unique<UtilityBlinkPlatformWithSandboxSupportImpl>(
+                GetConnector())
+          : std::make_unique<blink::Platform>();
+  blink::Platform::CreateMainThreadAndInitialize(blink_platform_impl_.get());
 }
 
 void UtilityThreadImpl::Init() {
@@ -149,8 +150,10 @@ void UtilityThreadImpl::Init() {
 
   service_factory_.reset(new UtilityServiceFactory);
 
-  if (connection)
+  if (connection) {
     connection->Start();
+    GetContentClient()->OnServiceManagerConnected(connection);
+  }
 }
 
 bool UtilityThreadImpl::OnControlMessageReceived(const IPC::Message& msg) {

@@ -14,7 +14,7 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
-#include "base/system_monitor/system_monitor.h"
+#include "base/system/system_monitor.h"
 #include "base/test/scoped_task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
@@ -267,7 +267,7 @@ class FakeVideoCaptureManager {
   }
 
  private:
-  base::ObserverList<media::VideoCaptureObserver> observers_;
+  base::ObserverList<media::VideoCaptureObserver>::Unchecked observers_;
   DISALLOW_COPY_AND_ASSIGN(FakeVideoCaptureManager);
 };
 

@@ -15,6 +15,7 @@
 #include "build/build_config.h"
 #include "third_party/blink/public/platform/web_input_event.h"
 #include "third_party/blink/public/platform/web_mouse_wheel_event.h"
+#include "third_party/blink/public/platform/web_pointer_event.h"
 #include "ui/events/android/gesture_event_android.h"
 #include "ui/events/android/gesture_event_type.h"
 #include "ui/events/base_event_utils.h"
@@ -32,6 +33,7 @@ using blink::WebGestureEvent;
 using blink::WebInputEvent;
 using blink::WebMouseEvent;
 using blink::WebMouseWheelEvent;
+using blink::WebPointerEvent;
 using blink::WebPointerProperties;
 using blink::WebTouchEvent;
 using blink::WebTouchPoint;
@@ -167,6 +169,7 @@ WebTouchPoint CreateWebTouchPoint(const MotionEvent& event,
       touch, event.GetPointerId(pointer_index),
       event.GetPressure(pointer_index), event.GetOrientation(pointer_index),
       event.GetTiltX(pointer_index), event.GetTiltY(pointer_index),
+      event.GetTwist(pointer_index), event.GetTangentialPressure(pointer_index),
       0 /* no button changed */, event.GetToolType(pointer_index));
 
   touch.state = ToWebTouchPointState(event, pointer_index);
@@ -260,10 +263,35 @@ WebInputEvent::DispatchType MergeDispatchTypes(
       std::min(static_cast<int>(type_1), static_cast<int>(type_2)));
 }
 
+bool CanCoalesce(const WebPointerEvent& event_to_coalesce,
+                 const WebPointerEvent& event) {
+  return (event.GetType() == WebInputEvent::kPointerMove ||
+          event.GetType() == WebInputEvent::kPointerRawMove) &&
+         event.GetType() == event_to_coalesce.GetType() &&
+         event.id == event_to_coalesce.id &&
+         event.pointer_type == event_to_coalesce.pointer_type;
+}
+
+void Coalesce(const WebPointerEvent& event_to_coalesce,
+              WebPointerEvent* event) {
+  DCHECK(CanCoalesce(event_to_coalesce, *event));
+  // Accumulate movement deltas.
+  int x = event->movement_x;
+  int y = event->movement_y;
+  *event = event_to_coalesce;
+  event->movement_x += x;
+  event->movement_y += y;
+}
+
 bool CanCoalesce(const WebMouseEvent& event_to_coalesce,
                  const WebMouseEvent& event) {
-  return event.GetType() == event_to_coalesce.GetType() &&
-         event.GetType() == WebInputEvent::kMouseMove;
+  // Since we start supporting the stylus input and they are constructed as
+  // mouse events or touch events, we should check the ID and pointer type when
+  // coalescing mouse events.
+  return event.GetType() == WebInputEvent::kMouseMove &&
+         event.GetType() == event_to_coalesce.GetType() &&
+         event.id == event_to_coalesce.id &&
+         event.pointer_type == event_to_coalesce.pointer_type;
 }
 
 void Coalesce(const WebMouseEvent& event_to_coalesce, WebMouseEvent* event) {
@@ -383,6 +411,9 @@ bool CanCoalesce(const WebTouchEvent& event_to_coalesce,
       return false;
     if (!unmatched_event_touches[event_touch_index])
       return false;
+    if (event.touches[event_touch_index].pointer_type !=
+        event_to_coalesce.touches[i].pointer_type)
+      return false;
     unmatched_event_touches[event_touch_index] = false;
   }
   return unmatched_event_touches.none();
@@ -478,6 +509,12 @@ gfx::Transform GetTransformForEvent(const WebGestureEvent& gesture_event) {
 
 bool CanCoalesce(const blink::WebInputEvent& event_to_coalesce,
                  const blink::WebInputEvent& event) {
+  if (blink::WebInputEvent::IsPointerEventType(event_to_coalesce.GetType()) &&
+      blink::WebInputEvent::IsPointerEventType(event.GetType())) {
+    return CanCoalesce(
+        static_cast<const blink::WebPointerEvent&>(event_to_coalesce),
+        static_cast<const blink::WebPointerEvent&>(event));
+  }
   if (blink::WebInputEvent::IsGestureEventType(event_to_coalesce.GetType()) &&
       blink::WebInputEvent::IsGestureEventType(event.GetType())) {
     return CanCoalesce(
@@ -507,6 +544,12 @@ bool CanCoalesce(const blink::WebInputEvent& event_to_coalesce,
 
 void Coalesce(const blink::WebInputEvent& event_to_coalesce,
               blink::WebInputEvent* event) {
+  if (blink::WebInputEvent::IsPointerEventType(event_to_coalesce.GetType()) &&
+      blink::WebInputEvent::IsPointerEventType(event->GetType())) {
+    Coalesce(static_cast<const blink::WebPointerEvent&>(event_to_coalesce),
+             static_cast<blink::WebPointerEvent*>(event));
+    return;
+  }
   if (blink::WebInputEvent::IsGestureEventType(event_to_coalesce.GetType()) &&
       blink::WebInputEvent::IsGestureEventType(event->GetType())) {
     Coalesce(static_cast<const blink::WebGestureEvent&>(event_to_coalesce),
@@ -541,8 +584,7 @@ bool IsCompatibleScrollorPinch(const WebGestureEvent& new_event,
          new_event.GetType() == WebInputEvent::kGesturePinchUpdate)
       << "Invalid event type for pinch/scroll coalescing: "
       << WebInputEvent::GetName(new_event.GetType());
-  DLOG_IF(WARNING,
-          new_event.TimeStampSeconds() < event_in_queue.TimeStampSeconds())
+  DLOG_IF(WARNING, new_event.TimeStamp() < event_in_queue.TimeStamp())
       << "Event time not monotonic?\n";
   return (event_in_queue.GetType() == WebInputEvent::kGestureScrollUpdate ||
           event_in_queue.GetType() == WebInputEvent::kGesturePinchUpdate) &&
@@ -561,9 +603,9 @@ std::pair<WebGestureEvent, WebGestureEvent> CoalesceScrollAndPinch(
   DCHECK(!second_last_event ||
          IsCompatibleScrollorPinch(new_event, *second_last_event));
 
-  WebGestureEvent scroll_event(
-      WebInputEvent::kGestureScrollUpdate, new_event.GetModifiers(),
-      new_event.TimeStampSeconds(), new_event.SourceDevice());
+  WebGestureEvent scroll_event(WebInputEvent::kGestureScrollUpdate,
+                               new_event.GetModifiers(), new_event.TimeStamp(),
+                               new_event.SourceDevice());
   WebGestureEvent pinch_event;
   scroll_event.primary_pointer_type = new_event.primary_pointer_type;
   pinch_event = scroll_event;
@@ -607,10 +649,9 @@ blink::WebTouchEvent CreateWebTouchEventFromMotionEvent(
                     static_cast<int>(blink::WebTouchEvent::kTouchesLengthCap),
                 "inconsistent maximum number of active touch points");
 
-  blink::WebTouchEvent result(
-      ToWebTouchEventType(event.GetAction()),
-      EventFlagsToWebEventModifiers(event.GetFlags()),
-      ui::EventTimeStampToSeconds(event.GetEventTime()));
+  blink::WebTouchEvent result(ToWebTouchEventType(event.GetAction()),
+                              EventFlagsToWebEventModifiers(event.GetFlags()),
+                              event.GetEventTime());
   result.dispatch_type = result.GetType() == WebInputEvent::kTouchCancel
                              ? WebInputEvent::kEventNonBlocking
                              : WebInputEvent::kBlocking;
@@ -688,9 +729,9 @@ WebGestureEvent CreateWebGestureEvent(const GestureEventDetails& details,
       NOTREACHED() << "Unknown device type is not allowed";
       break;
   }
-  WebGestureEvent gesture(
-      WebInputEvent::kUndefined, EventFlagsToWebEventModifiers(flags),
-      ui::EventTimeStampToSeconds(timestamp), source_device);
+  WebGestureEvent gesture(WebInputEvent::kUndefined,
+                          EventFlagsToWebEventModifiers(flags), timestamp,
+                          source_device);
 
   gesture.SetPositionInWidget(location);
   gesture.SetPositionInScreen(raw_location);
@@ -777,13 +818,19 @@ WebGestureEvent CreateWebGestureEvent(const GestureEventDetails& details,
       break;
     case ET_GESTURE_PINCH_BEGIN:
       gesture.SetType(WebInputEvent::kGesturePinchBegin);
+      gesture.SetNeedsWheelEvent(source_device ==
+                                 blink::kWebGestureDeviceTouchpad);
       break;
     case ET_GESTURE_PINCH_UPDATE:
       gesture.SetType(WebInputEvent::kGesturePinchUpdate);
       gesture.data.pinch_update.scale = details.scale();
+      gesture.SetNeedsWheelEvent(source_device ==
+                                 blink::kWebGestureDeviceTouchpad);
       break;
     case ET_GESTURE_PINCH_END:
       gesture.SetType(WebInputEvent::kGesturePinchEnd);
+      gesture.SetNeedsWheelEvent(source_device ==
+                                 blink::kWebGestureDeviceTouchpad);
       break;
     case ET_GESTURE_TAP_CANCEL:
       gesture.SetType(WebInputEvent::kGestureTapCancel);
@@ -1049,6 +1096,8 @@ void SetWebPointerPropertiesFromMotionEventData(
     float orientation_rad,
     float tilt_x,
     float tilt_y,
+    float twist,
+    float tangential_pressure,
     int android_buttons_changed,
     MotionEvent::ToolType tool_type) {
   webPointerProperties.id = pointer_id;
@@ -1059,8 +1108,12 @@ void SetWebPointerPropertiesFromMotionEventData(
     // the opposite direction. Coordinate system is left-handed.
     webPointerProperties.tilt_x = tilt_x;
     webPointerProperties.tilt_y = tilt_y;
+    webPointerProperties.twist = twist;
+    webPointerProperties.tangential_pressure = tangential_pressure;
   } else {
     webPointerProperties.tilt_x = webPointerProperties.tilt_y = 0;
+    webPointerProperties.twist = 0;
+    webPointerProperties.tangential_pressure = 0;
   }
 
   webPointerProperties.button = ToWebPointerButton(android_buttons_changed);
@@ -1116,16 +1169,25 @@ blink::WebInputEvent::Modifiers DomCodeToWebInputEventModifiers(DomCode code) {
   return static_cast<blink::WebInputEvent::Modifiers>(0);
 }
 
-bool IsGestureScrollOrFlingOrPinch(WebInputEvent::Type type) {
+bool IsGestureScrollOrPinch(WebInputEvent::Type type) {
   switch (type) {
     case blink::WebGestureEvent::kGestureScrollBegin:
     case blink::WebGestureEvent::kGestureScrollUpdate:
     case blink::WebGestureEvent::kGestureScrollEnd:
-    case blink::WebGestureEvent::kGestureFlingStart:
-    case blink::WebGestureEvent::kGestureFlingCancel:
     case blink::WebGestureEvent::kGesturePinchBegin:
     case blink::WebGestureEvent::kGesturePinchUpdate:
     case blink::WebGestureEvent::kGesturePinchEnd:
+      return true;
+    default:
+      return false;
+  }
+}
+
+bool IsGestureScroll(WebInputEvent::Type type) {
+  switch (type) {
+    case blink::WebGestureEvent::kGestureScrollBegin:
+    case blink::WebGestureEvent::kGestureScrollUpdate:
+    case blink::WebGestureEvent::kGestureScrollEnd:
       return true;
     default:
       return false;
@@ -1197,7 +1259,8 @@ std::unique_ptr<WebGestureEvent> CreateWebGestureEventFromGestureEventAndroid(
       return std::make_unique<WebGestureEvent>();
   }
   auto web_event = std::make_unique<WebGestureEvent>(
-      event_type, WebInputEvent::kNoModifiers, event.time() / 1000.0);
+      event_type, WebInputEvent::kNoModifiers,
+      base::TimeTicks() + base::TimeDelta::FromMilliseconds(event.time()));
   // NOTE: Source gesture events are synthetic ones that simulate
   // gesture from keyboard (zoom in/out) for now. Should populate Blink
   // event's fields better when extended to handle more cases.
@@ -1220,7 +1283,7 @@ std::unique_ptr<WebGestureEvent> CreateWebGestureEventFromGestureEventAndroid(
     web_event->data.fling_start.velocity_y = event.velocity_y();
     web_event->data.fling_start.target_viewport = event.target_viewport();
   } else if (event_type == WebInputEvent::kGestureFlingCancel) {
-    web_event->data.fling_cancel.prevent_boosting = true;
+    web_event->data.fling_cancel.prevent_boosting = event.prevent_boosting();
     if (event.synthetic_scroll())
       web_event->data.fling_cancel.target_viewport = true;
   } else if (event_type == WebInputEvent::kGestureDoubleTap) {

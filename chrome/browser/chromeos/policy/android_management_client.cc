@@ -10,9 +10,11 @@
 #include "base/guid.h"
 #include "base/logging.h"
 #include "components/policy/core/common/cloud/device_management_service.h"
+#include "components/policy/core/common/cloud/dm_auth.h"
 #include "components/policy/proto/device_management_backend.pb.h"
 #include "google_apis/gaia/gaia_constants.h"
 #include "google_apis/gaia/google_service_auth_error.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 
 namespace em = enterprise_management;
 
@@ -20,12 +22,12 @@ namespace policy {
 
 AndroidManagementClient::AndroidManagementClient(
     DeviceManagementService* device_management_service,
-    scoped_refptr<net::URLRequestContextGetter> request_context,
+    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
     const std::string& account_id,
     OAuth2TokenService* token_service)
     : OAuth2TokenService::Consumer("android_management_client"),
       device_management_service_(device_management_service),
-      request_context_(request_context),
+      url_loader_factory_(url_loader_factory),
       account_id_(account_id),
       token_service_(token_service),
       weak_ptr_factory_(this) {}
@@ -43,12 +45,11 @@ void AndroidManagementClient::StartCheckAndroidManagement(
 
 void AndroidManagementClient::OnGetTokenSuccess(
     const OAuth2TokenService::Request* request,
-    const std::string& access_token,
-    const base::Time& expiration_time) {
+    const OAuth2AccessTokenConsumer::TokenResponse& token_response) {
   DCHECK_EQ(token_request_.get(), request);
   token_request_.reset();
 
-  CheckAndroidManagement(access_token);
+  CheckAndroidManagement(token_response.access_token);
 }
 
 void AndroidManagementClient::OnGetTokenFailure(
@@ -77,8 +78,8 @@ void AndroidManagementClient::CheckAndroidManagement(
     const std::string& access_token) {
   request_job_.reset(device_management_service_->CreateJob(
       DeviceManagementRequestJob::TYPE_ANDROID_MANAGEMENT_CHECK,
-      request_context_.get()));
-  request_job_->SetOAuthToken(access_token);
+      url_loader_factory_));
+  request_job_->SetAuthData(DMAuth::FromOAuthToken(access_token));
   request_job_->SetClientID(base::GenerateGUID());
   request_job_->GetRequest()->mutable_check_android_management_request();
 

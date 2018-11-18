@@ -70,13 +70,15 @@ class CORE_EXPORT WheelEvent final : public MouseEvent {
   bool IsMouseEvent() const override;
   bool IsWheelEvent() const override;
 
+  void preventDefault() override;
+
   const WebMouseWheelEvent& NativeEvent() const { return native_event_; }
 
   // WheelEvent doesn't modify the event path, but its parent MouseEvent does.
   // So we need to override its parent's DispatchEvent.
   DispatchEventResult DispatchEvent(EventDispatcher&) override;
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  private:
   WheelEvent();

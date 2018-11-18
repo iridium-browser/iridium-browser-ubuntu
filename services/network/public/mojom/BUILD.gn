@@ -13,10 +13,6 @@ mojom("data_pipe_interfaces") {
     "data_pipe_getter.mojom",
   ]
 
-  public_deps = [
-    "//mojo/common:common_custom_types",
-  ]
-
   # TODO(crbug/598073): When moving the service implementation to
   # //services/network, add the correct values for export_class_attribute /
   # export_define / export_header here. Context in https://crrev.com/2225673002.
@@ -55,6 +51,7 @@ mojom("udp_socket_interface") {
 # cause problems. See https://crbug.com/822732.
 mojom("websocket_mojom") {
   sources = [
+    "network_param.mojom",
     "websocket.mojom",
   ]
 
@@ -79,18 +76,31 @@ mojom("mojom") {
   sources = [
     "cookie_manager.mojom",
     "cors.mojom",
+    "cors_origin_pattern.mojom",
+    "ct_log_info.mojom",
+    "digitally_signed.mojom",
     "fetch_api.mojom",
+    "host_resolver.mojom",
     "http_request_headers.mojom",
+    "net_log.mojom",
     "network_change_manager.mojom",
-    "network_param.mojom",
+    "network_context.mojom",
+    "network_quality_estimator_manager.mojom",
     "network_service.mojom",
     "network_service_test.mojom",
     "network_types.mojom",
+    "p2p.mojom",
+    "p2p_trusted.mojom",
     "proxy_config.mojom",
     "proxy_config_with_annotation.mojom",
+    "proxy_lookup_client.mojom",
+    "proxy_resolving_socket.mojom",
     "request_context_frame_type.mojom",
     "restricted_cookie_manager.mojom",
+    "signed_tree_head.mojom",
+    "ssl_config.mojom",
     "tcp_socket.mojom",
+    "tls_socket.mojom",
     "url_loader.mojom",
     "url_loader_factory.mojom",
   ]
@@ -100,7 +110,9 @@ mojom("mojom") {
     ":mutable_network_traffic_annotation_interface",
     ":udp_socket_interface",
     ":websocket_mojom",
+    "//components/content_settings/core/common:mojo_bindings",
     "//mojo/public/mojom/base",
+    "//mojo/public/mojom/base:read_only_buffer",
     "//net/interfaces",
     "//services/proxy_resolver/public/mojom",
     "//url/mojom:url_mojom_gurl",
@@ -115,5 +127,11 @@ mojom("mojom") {
     export_class_attribute_blink = "BLINK_PLATFORM_EXPORT"
     export_define_blink = "BLINK_PLATFORM_IMPLEMENTATION=1"
     export_header_blink = "third_party/blink/public/platform/web_common.h"
+  }
+
+  # This is only needed on desktop linux, but the defines make this difficult
+  # because IS_CHROMECAST is not available in build/build_config.h.
+  if (is_linux && !is_chromeos) {
+    enabled_features = [ "needs_crypt_config" ]
   }
 }

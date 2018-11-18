@@ -15,7 +15,7 @@ BrowserConsole.BrowserConsole = class {
    */
   appendApplicableItems(event, contextMenu, object) {
     const consoleMessage = /** @type {!SDK.ConsoleMessage} */ (object);
-    const request = BrowserSDK.NetworkLog.requestForConsoleMessage(consoleMessage);
+    const request = SDK.NetworkLog.requestForConsoleMessage(consoleMessage);
     if (request && SDK.NetworkManager.canReplayRequest(request)) {
       contextMenu.debugSection().appendItem(
           Common.UIString('Replay XHR'), SDK.NetworkManager.replayRequest.bind(null, request));
@@ -30,14 +30,19 @@ BrowserConsole.BrowserConsole = class {
    */
   render(object, options) {
     const consoleMessage = /** @type {!SDK.ConsoleMessage} */ (object);
-    const request = BrowserSDK.NetworkLog.requestForConsoleMessage(consoleMessage);
+    const request = SDK.NetworkLog.requestForConsoleMessage(consoleMessage);
     let messageElement = null;
     if (request) {
       messageElement = createElement('span');
       if (consoleMessage.level === SDK.ConsoleMessage.MessageLevel.Error) {
         messageElement.createTextChild(request.requestMethod + ' ');
         messageElement.appendChild(Components.Linkifier.linkifyRevealable(request, request.url(), request.url()));
-        messageElement.createTextChildren(' ', String(request.statusCode), ' (', request.statusText, ')');
+        if (request.failed)
+          messageElement.createTextChildren(' ', request.localizedFailDescription);
+        if (request.statusCode !== 0)
+          messageElement.createTextChildren(' ', String(request.statusCode));
+        if (request.statusText)
+          messageElement.createTextChildren(' (', request.statusText, ')');
       } else {
         const fragment = Console.ConsoleViewMessage.linkifyWithCustomLinkifier(
             consoleMessage.messageText,

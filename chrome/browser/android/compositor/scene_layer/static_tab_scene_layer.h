@@ -19,10 +19,6 @@
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/geometry/size_f.h"
 
-namespace cc {
-class Layer;
-}
-
 namespace android {
 
 class ContentLayer;
@@ -42,7 +38,6 @@ class StaticTabSceneLayer : public SceneLayer {
       const base::android::JavaParamRef<jobject>& jobj,
       const base::android::JavaParamRef<jobject>& jtab_content_manager,
       jint id,
-      jint toolbar_resource_id,
       jboolean can_use_live_layer,
       jint default_background_color,
       jfloat x,
@@ -53,7 +48,6 @@ class StaticTabSceneLayer : public SceneLayer {
 
  private:
   scoped_refptr<android::ContentLayer> content_layer_;
-  scoped_refptr<cc::Layer> content_scene_layer_;
 
   int last_set_tab_id_;
   int background_color_;

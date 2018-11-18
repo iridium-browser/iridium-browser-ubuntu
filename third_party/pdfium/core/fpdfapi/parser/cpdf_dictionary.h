@@ -21,7 +21,7 @@
 
 class CPDF_IndirectObjectHolder;
 
-class CPDF_Dictionary : public CPDF_Object {
+class CPDF_Dictionary final : public CPDF_Object {
  public:
   using const_iterator =
       std::map<ByteString, std::unique_ptr<CPDF_Object>>::const_iterator;
@@ -33,32 +33,38 @@ class CPDF_Dictionary : public CPDF_Object {
   // CPDF_Object:
   Type GetType() const override;
   std::unique_ptr<CPDF_Object> Clone() const override;
-  CPDF_Dictionary* GetDict() const override;
+  CPDF_Dictionary* GetDict() override;
+  const CPDF_Dictionary* GetDict() const override;
   bool IsDictionary() const override;
   CPDF_Dictionary* AsDictionary() override;
   const CPDF_Dictionary* AsDictionary() const override;
-  bool WriteTo(IFX_ArchiveStream* archive) const override;
+  bool WriteTo(IFX_ArchiveStream* archive,
+               const CPDF_Encryptor* encryptor) const override;
 
   size_t GetCount() const { return m_Map.size(); }
-  CPDF_Object* GetObjectFor(const ByteString& key) const;
-  CPDF_Object* GetDirectObjectFor(const ByteString& key) const;
+  const CPDF_Object* GetObjectFor(const ByteString& key) const;
+  CPDF_Object* GetObjectFor(const ByteString& key);
+  const CPDF_Object* GetDirectObjectFor(const ByteString& key) const;
+  CPDF_Object* GetDirectObjectFor(const ByteString& key);
   ByteString GetStringFor(const ByteString& key) const;
   ByteString GetStringFor(const ByteString& key,
                           const ByteString& default_str) const;
   WideString GetUnicodeTextFor(const ByteString& key) const;
   int GetIntegerFor(const ByteString& key) const;
   int GetIntegerFor(const ByteString& key, int default_int) const;
-  bool GetBooleanFor(const ByteString& key, bool bDefault = false) const;
+  bool GetBooleanFor(const ByteString& key, bool bDefault) const;
   float GetNumberFor(const ByteString& key) const;
-  CPDF_Dictionary* GetDictFor(const ByteString& key) const;
-  CPDF_Stream* GetStreamFor(const ByteString& key) const;
-  CPDF_Array* GetArrayFor(const ByteString& key) const;
+  const CPDF_Dictionary* GetDictFor(const ByteString& key) const;
+  CPDF_Dictionary* GetDictFor(const ByteString& key);
+  const CPDF_Stream* GetStreamFor(const ByteString& key) const;
+  CPDF_Stream* GetStreamFor(const ByteString& key);
+  const CPDF_Array* GetArrayFor(const ByteString& key) const;
+  CPDF_Array* GetArrayFor(const ByteString& key);
   CFX_FloatRect GetRectFor(const ByteString& key) const;
   CFX_Matrix GetMatrixFor(const ByteString& key) const;
   float GetFloatFor(const ByteString& key) const { return GetNumberFor(key); }
 
   bool KeyExist(const ByteString& key) const;
-  bool IsSignatureDict() const;
 
   // Set* functions invalidate iterators for the element with the key |key|.
   // Takes ownership of |pObj|, returns an unowned pointer to it.
@@ -99,7 +105,7 @@ class CPDF_Dictionary : public CPDF_Object {
 
   WeakPtr<ByteStringPool> GetByteStringPool() const { return m_pPool; }
 
- protected:
+ private:
   ByteString MaybeIntern(const ByteString& str);
   std::unique_ptr<CPDF_Object> CloneNonCyclic(
       bool bDirect,

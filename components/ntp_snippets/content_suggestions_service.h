@@ -294,10 +294,7 @@ class ContentSuggestionsService : public KeyedService,
 
   // history::HistoryServiceObserver implementation.
   void OnURLsDeleted(history::HistoryService* history_service,
-                     bool all_history,
-                     bool expired,
-                     const history::URLRows& deleted_rows,
-                     const std::set<GURL>& favicon_urls) override;
+                     const history::DeletionInfo& deletion_info) override;
   void HistoryServiceBeingDeleted(
       history::HistoryService* history_service) override;
 
@@ -397,7 +394,7 @@ class ContentSuggestionsService : public KeyedService,
   ScopedObserver<history::HistoryService, history::HistoryServiceObserver>
       history_service_observer_;
 
-  base::ObserverList<Observer> observers_;
+  base::ObserverList<Observer>::Unchecked observers_;
 
   const std::vector<ContentSuggestion> no_suggestions_;
 

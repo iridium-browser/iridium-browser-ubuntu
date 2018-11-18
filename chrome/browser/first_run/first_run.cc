@@ -35,7 +35,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profiles_state.h"
 #include "chrome/browser/shell_integration.h"
-#include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/chrome_pages.h"
@@ -51,7 +50,6 @@
 #include "chrome/installer/util/master_preferences_constants.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
-#include "components/signin/core/browser/signin_manager.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
@@ -162,7 +160,7 @@ class FirstRunDelayedTasks : public content::NotificationObserver {
 
   void OnExtensionSystemReady(content::BrowserContext* context) {
     // Process the notification and delete this.
-    ExtensionService* service =
+    extensions::ExtensionService* service =
         extensions::ExtensionSystem::Get(context)->extension_service();
     if (service) {
       // Trigger an extension update check. If the extension specified in the
@@ -372,7 +370,7 @@ void SetupMasterPrefsFromInstallPrefs(
 
 bool GetFirstRunSentinelFilePath(base::FilePath* path) {
   base::FilePath user_data_dir;
-  if (!PathService::Get(chrome::DIR_USER_DATA, &user_data_dir))
+  if (!base::PathService::Get(chrome::DIR_USER_DATA, &user_data_dir))
     return false;
   *path = user_data_dir.Append(chrome::kFirstRunSentinel);
   return true;

@@ -12,11 +12,11 @@
 #include "base/optional.h"
 #include "chrome/common/page_load_metrics/page_load_timing.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_data.h"
-#include "components/ukm/ukm_source.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/resource_type.h"
 #include "net/base/host_port_pair.h"
+#include "services/metrics/public/cpp/ukm_source.h"
 #include "third_party/blink/public/platform/web_input_event.h"
 #include "url/gurl.h"
 
@@ -318,6 +318,13 @@ class PageLoadMetricsObserver {
   virtual ObservePolicy OnCommit(content::NavigationHandle* navigation_handle,
                                  ukm::SourceId source_id);
 
+  // OnDidInternalNavigationAbort is triggered when the main frame navigation
+  // aborts with HTTP responses that don't commit, such as HTTP 204 responses
+  // and downloads. Note that |navigation_handle| will be destroyed
+  // soon after this call. Don't hold a reference to it.
+  virtual void OnDidInternalNavigationAbort(
+      content::NavigationHandle* navigation_handle) {}
+
   // OnDidFinishSubFrameNavigation is triggered when a sub-frame of the
   // committed page has finished navigating. It has either committed, aborted,
   // was a same document navigation, or has been replaced. It is up to the
@@ -419,6 +426,12 @@ class PageLoadMetricsObserver {
   // Invoked when new use counter features are observed across all frames.
   virtual void OnFeaturesUsageObserved(const mojom::PageLoadFeatures& features,
                                        const PageLoadExtraInfo& extra_info) {}
+
+  // Invoked when there is data use for loading a resource on the page
+  // acrosss all frames. This only contains resources that have had new
+  // data use since the last callback.
+  virtual void OnResourceDataUseObserved(
+      const std::vector<mojom::ResourceDataUpdatePtr>& resources) {}
 
   // Invoked when a media element starts playing.
   virtual void MediaStartedPlaying(

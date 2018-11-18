@@ -14,14 +14,21 @@
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
 #include "base/test/scoped_task_environment.h"
+#include "base/test/simple_test_tick_clock.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "base/time/time.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "components/cronet/url_request_context_config.h"
+#include "net/base/mock_network_change_notifier.h"
 #include "net/base/net_errors.h"
 #include "net/base/network_change_notifier.h"
 #include "net/cert/cert_verifier.h"
+#include "net/dns/dns_config.h"
+#include "net/dns/dns_hosts.h"
+#include "net/dns/dns_test_util.h"
+#include "net/dns/host_resolver_impl.h"
 #include "net/dns/host_resolver_proc.h"
 #include "net/http/http_network_session.h"
 #include "net/log/net_log.h"
@@ -32,10 +39,6 @@
 #include "net/url_request/url_request_context_builder.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if defined(OS_ANDROID)
-#include "net/android/network_change_notifier_factory_android.h"
-#endif
-
 namespace cronet {
 
 namespace {
@@ -44,6 +47,7 @@ const char kHostname[] = "example.com";
 const char kCacheAddress[] = "1.1.1.1";
 const char kNetworkAddress[] = "2.2.2.2";
 const char kUninitializedAddress[] = "3.3.3.3";
+const char kHostsAddress[] = "4.4.4.4";
 const int kCacheEntryTTLSec = 300;
 
 const int kNoStaleDelaySec = 0;
@@ -67,9 +71,20 @@ net::AddressList MakeAddressList(const char* ip_address_str) {
   return address_list;
 }
 
+std::unique_ptr<net::DnsClient> CreateMockDnsClientForHosts() {
+  net::DnsConfig config;
+  config.nameservers.push_back(net::IPEndPoint());
+  net::ParseHosts("4.4.4.4 example.com", &config.hosts);
+
+  return std::make_unique<net::MockDnsClient>(config,
+                                              net::MockDnsClientRuleList());
+}
+
 class MockHostResolverProc : public net::HostResolverProc {
  public:
-  MockHostResolverProc() : HostResolverProc(nullptr) {}
+  // |result| is the net error code to return from resolution attempts.
+  MockHostResolverProc(int result)
+      : HostResolverProc(nullptr), result_(result) {}
 
   int Resolve(const std::string& hostname,
               net::AddressFamily address_family,
@@ -77,11 +92,15 @@ class MockHostResolverProc : public net::HostResolverProc {
               net::AddressList* address_list,
               int* os_error) override {
     *address_list = MakeAddressList(kNetworkAddress);
-    return net::OK;
+    return result_;
   }
 
  protected:
   ~MockHostResolverProc() override {}
+
+ private:
+  // Result code to return from Resolve().
+  const int result_;
 };
 
 class StaleHostResolverTest : public testing::Test {
@@ -89,10 +108,13 @@ class StaleHostResolverTest : public testing::Test {
   StaleHostResolverTest()
       : scoped_task_environment_(
             base::test::ScopedTaskEnvironment::MainThreadType::IO),
-        mock_proc_(new MockHostResolverProc()),
+        mock_proc_(new MockHostResolverProc(net::OK)),
         resolver_(nullptr),
         resolve_pending_(false),
-        resolve_complete_(false) {}
+        resolve_complete_(false) {
+    // Make value clock not empty.
+    tick_clock_.Advance(base::TimeDelta::FromMicroseconds(1));
+  }
 
   ~StaleHostResolverTest() override {}
 
@@ -100,6 +122,12 @@ class StaleHostResolverTest : public testing::Test {
     DCHECK(!resolver_);
 
     options_.delay = base::TimeDelta::FromSeconds(stale_delay_sec);
+  }
+
+  void SetUseStaleOnNameNotResolved() {
+    DCHECK(!resolver_);
+
+    options_.use_stale_on_name_not_resolved = true;
   }
 
   void SetStaleUsability(int max_expired_time_sec,
@@ -113,19 +141,33 @@ class StaleHostResolverTest : public testing::Test {
     options_.allow_other_network = allow_other_network;
   }
 
-  void CreateResolver() {
+  void SetNetResult(int result) {
     DCHECK(!resolver_);
 
+    mock_proc_ = new MockHostResolverProc(result);
+  }
+
+  std::unique_ptr<net::HostResolverImpl> CreateMockInnerResolverWithDnsClient(
+      std::unique_ptr<net::DnsClient> dns_client) {
     std::unique_ptr<net::HostResolverImpl> inner_resolver(
         net::HostResolver::CreateDefaultResolverImpl(nullptr));
 
     net::HostResolverImpl::ProcTaskParams proc_params(mock_proc_.get(), 1u);
     inner_resolver->set_proc_params_for_test(proc_params);
+    inner_resolver->SetDnsClient(std::move(dns_client));
+    return inner_resolver;
+  }
+
+  void CreateResolverWithDnsClient(std::unique_ptr<net::DnsClient> dns_client) {
+    DCHECK(!resolver_);
 
     stale_resolver_ = std::make_unique<StaleHostResolver>(
-        std::move(inner_resolver), options_);
+        CreateMockInnerResolverWithDnsClient(std::move(dns_client)), options_);
+    stale_resolver_->SetTickClockForTesting(&tick_clock_);
     resolver_ = stale_resolver_.get();
   }
+
+  void CreateResolver() { CreateResolverWithDnsClient(nullptr); }
 
   void DestroyResolver() {
     DCHECK(stale_resolver_);
@@ -134,25 +176,11 @@ class StaleHostResolverTest : public testing::Test {
     resolver_ = nullptr;
   }
 
-  void SetResolver(net::HostResolver* resolver) {
+  void SetResolver(StaleHostResolver* stale_resolver) {
     DCHECK(!resolver_);
-
-    resolver_ = resolver;
-  }
-
-  void ClearResolver() {
-    DCHECK(resolver_);
-    DCHECK(!stale_resolver_);
-
-    resolver_ = nullptr;
-  }
-
-  void CreateNetworkChangeNotifier() {
-#if defined(OS_ANDROID)
-    net::NetworkChangeNotifier::SetFactory(
-        new net::NetworkChangeNotifierFactoryAndroid());
-#endif
-    net::NetworkChangeNotifier::Create();
+    stale_resolver->inner_resolver_ =
+        CreateMockInnerResolverWithDnsClient(nullptr);
+    resolver_ = stale_resolver;
   }
 
   // Creates a cache entry for |kHostname| that is |age_sec| seconds old.
@@ -167,7 +195,7 @@ class StaleHostResolverTest : public testing::Test {
         error == net::OK ? MakeAddressList(kCacheAddress) : net::AddressList(),
         net::HostCache::Entry::SOURCE_UNKNOWN, ttl);
     base::TimeDelta age = base::TimeDelta::FromSeconds(age_sec);
-    base::TimeTicks then = base::TimeTicks::Now() - age;
+    base::TimeTicks then = tick_clock_.NowTicks() - age;
     resolver_->GetHostCache()->Set(key, entry, then, ttl);
   }
 
@@ -183,7 +211,7 @@ class StaleHostResolverTest : public testing::Test {
     DCHECK(resolver_->GetHostCache());
 
     net::HostCache::Key key(kHostname, net::ADDRESS_FAMILY_IPV4, 0);
-    base::TimeTicks now = base::TimeTicks::Now();
+    base::TimeTicks now = tick_clock_.NowTicks();
     const net::HostCache::Entry* entry;
     net::HostCache::EntryStaleness stale;
     entry = resolver_->GetHostCache()->LookupStale(key, now, &stale);
@@ -203,11 +231,11 @@ class StaleHostResolverTest : public testing::Test {
     resolve_addresses_ = MakeAddressList(kUninitializedAddress);
     resolve_error_ = net::ERR_UNEXPECTED;
 
-    int rv =
-        resolver_->Resolve(info, net::DEFAULT_PRIORITY, &resolve_addresses_,
-                           base::Bind(&StaleHostResolverTest::OnResolveComplete,
-                                      base::Unretained(this)),
-                           &request_, net::NetLogWithSource());
+    int rv = resolver_->Resolve(
+        info, net::DEFAULT_PRIORITY, &resolve_addresses_,
+        base::BindOnce(&StaleHostResolverTest::OnResolveComplete,
+                       base::Unretained(this)),
+        &request_, net::NetLogWithSource());
     if (rv != net::ERR_IO_PENDING) {
       resolve_pending_ = false;
       resolve_complete_ = true;
@@ -237,6 +265,18 @@ class StaleHostResolverTest : public testing::Test {
     run_loop.Run();
   }
 
+  void WaitForNetworkResolveComplete() {
+    // The stale host resolver cache is initially setup with |kCacheAddress|,
+    // so getting that address means that network resolve is still pending.
+    // The network resolve is guaranteed to return |kNetworkAddress| at some
+    // point because inner resolver is using MockHostResolverProc that always
+    // returns |kNetworkAddress|.
+    while (resolve_addresses()[0].ToStringWithoutPort() != kNetworkAddress) {
+      Resolve();
+      WaitForResolve();
+    }
+  }
+
   void Cancel() {
     DCHECK(resolver_);
     EXPECT_TRUE(resolve_pending_);
@@ -259,6 +299,8 @@ class StaleHostResolverTest : public testing::Test {
       base::ResetAndReturn(&resolve_closure_).Run();
   }
 
+  void AdvanceTickClock(base::TimeDelta delta) { tick_clock_.Advance(delta); }
+
   bool resolve_complete() const { return resolve_complete_; }
   int resolve_error() const { return resolve_error_; }
   const net::AddressList& resolve_addresses() const {
@@ -268,6 +310,8 @@ class StaleHostResolverTest : public testing::Test {
  private:
   // Needed for HostResolver to run HostResolverProc callbacks.
   base::test::ScopedTaskEnvironment scoped_task_environment_;
+  base::SimpleTestTickClock tick_clock_;
+  net::test::MockNetworkChangeNotifier mock_network_change_notifier_;
 
   scoped_refptr<MockHostResolverProc> mock_proc_;
 
@@ -305,6 +349,18 @@ TEST_F(StaleHostResolverTest, Network) {
   EXPECT_EQ(kNetworkAddress, resolve_addresses()[0].ToStringWithoutPort());
 }
 
+TEST_F(StaleHostResolverTest, Hosts) {
+  CreateResolverWithDnsClient(CreateMockDnsClientForHosts());
+
+  Resolve();
+  WaitForResolve();
+
+  EXPECT_TRUE(resolve_complete());
+  EXPECT_EQ(net::OK, resolve_error());
+  EXPECT_EQ(1u, resolve_addresses().size());
+  EXPECT_EQ(kHostsAddress, resolve_addresses()[0].ToStringWithoutPort());
+}
+
 TEST_F(StaleHostResolverTest, FreshCache) {
   CreateResolver();
   CreateCacheEntry(kAgeFreshSec, net::OK);
@@ -319,7 +375,13 @@ TEST_F(StaleHostResolverTest, FreshCache) {
   WaitForIdle();
 }
 
-TEST_F(StaleHostResolverTest, StaleCache) {
+// Flaky on Linux ASan, crbug.com/838524.
+#if defined(ADDRESS_SANITIZER)
+#define MAYBE_StaleCache DISABLED_StaleCache
+#else
+#define MAYBE_StaleCache StaleCache
+#endif
+TEST_F(StaleHostResolverTest, MAYBE_StaleCache) {
   SetStaleDelay(kNoStaleDelaySec);
   CreateResolver();
   CreateCacheEntry(kAgeExpiredSec, net::OK);
@@ -331,6 +393,39 @@ TEST_F(StaleHostResolverTest, StaleCache) {
   EXPECT_EQ(net::OK, resolve_error());
   EXPECT_EQ(1u, resolve_addresses().size());
   EXPECT_EQ(kCacheAddress, resolve_addresses()[0].ToStringWithoutPort());
+}
+
+// Ensure that |use_stale_on_name_not_resolved| causes stale results to be
+// returned when ERR_NAME_NOT_RESOLVED is returned from network resolution.
+TEST_F(StaleHostResolverTest, StaleCacheNameNotResolvedEnabled) {
+  SetStaleDelay(kLongStaleDelaySec);
+  SetUseStaleOnNameNotResolved();
+  SetNetResult(net::ERR_NAME_NOT_RESOLVED);
+  CreateResolver();
+  CreateCacheEntry(kAgeExpiredSec, net::OK);
+
+  Resolve();
+  WaitForResolve();
+
+  EXPECT_TRUE(resolve_complete());
+  EXPECT_EQ(net::OK, resolve_error());
+  EXPECT_EQ(1u, resolve_addresses().size());
+  EXPECT_EQ(kCacheAddress, resolve_addresses()[0].ToStringWithoutPort());
+}
+
+// Ensure that without |use_stale_on_name_not_resolved| network resolution
+// failing causes StaleHostResolver jobs to fail with the same error code.
+TEST_F(StaleHostResolverTest, StaleCacheNameNotResolvedDisabled) {
+  SetStaleDelay(kLongStaleDelaySec);
+  SetNetResult(net::ERR_NAME_NOT_RESOLVED);
+  CreateResolver();
+  CreateCacheEntry(kAgeExpiredSec, net::OK);
+
+  Resolve();
+  WaitForResolve();
+
+  EXPECT_TRUE(resolve_complete());
+  EXPECT_EQ(net::ERR_NAME_NOT_RESOLVED, resolve_error());
 }
 
 TEST_F(StaleHostResolverTest, NetworkWithStaleCache) {
@@ -379,11 +474,9 @@ TEST_F(StaleHostResolverTest, CancelWithStaleCache) {
 // CancelWithFreshCache makes no sense; the request would've returned
 // synchronously.
 
-// Limited expired time cases are flaky under iOS and MACOS (crbug.com/792173).
 // Disallow other networks cases fail under Fuchsia (crbug.com/816143).
-// TODO(https://crbug.com/829097): Fix memory leaks and re-enable under ASAN.
-#if defined(OS_IOS) || defined(OS_FUCHSIA) || defined(OS_MACOSX) || \
-    defined(ADDRESS_SANITIZER)
+// Flaky on Win buildbots. See crbug.com/836106
+#if defined(OS_WIN)
 #define MAYBE_StaleUsability DISABLED_StaleUsability
 #else
 #define MAYBE_StaleUsability StaleUsability
@@ -444,7 +537,6 @@ TEST_F(StaleHostResolverTest, MAYBE_StaleUsability) {
   };
 
   SetStaleDelay(kNoStaleDelaySec);
-  CreateNetworkChangeNotifier();
 
   for (size_t i = 0; i < arraysize(kUsabilityTestCases); ++i) {
     const auto& test_case = kUsabilityTestCases[i];
@@ -453,11 +545,16 @@ TEST_F(StaleHostResolverTest, MAYBE_StaleUsability) {
                       test_case.allow_other_network);
     CreateResolver();
     CreateCacheEntry(kCacheEntryTTLSec + test_case.age_sec, test_case.error);
+
+    AdvanceTickClock(base::TimeDelta::FromMilliseconds(1));
     for (int j = 0; j < test_case.network_changes; ++j)
       OnNetworkChange();
+
+    AdvanceTickClock(base::TimeDelta::FromMilliseconds(1));
     for (int j = 0; j < test_case.stale_use - 1; ++j)
       LookupStale();
 
+    AdvanceTickClock(base::TimeDelta::FromMilliseconds(1));
     Resolve();
     WaitForResolve();
     EXPECT_TRUE(resolve_complete()) << i;
@@ -480,13 +577,16 @@ TEST_F(StaleHostResolverTest, MAYBE_StaleUsability) {
             << i;
       }
     }
+    // Make sure that all tasks complete so jobs are freed properly.
+    AdvanceTickClock(base::TimeDelta::FromSeconds(kLongStaleDelaySec));
+    WaitForNetworkResolveComplete();
+    base::RunLoop run_loop;
+    run_loop.RunUntilIdle();
 
     DestroyResolver();
   }
 }
 
-#if !defined(ADDRESS_SANITIZER)
-// TODO(https://crbug.com/829097): Fix memory leaks and re-enable under ASAN.
 TEST_F(StaleHostResolverTest, CreatedByContext) {
   URLRequestContextConfig config(
       // Enable QUIC.
@@ -522,8 +622,8 @@ TEST_F(StaleHostResolverTest, CreatedByContext) {
       false,
       // Enable Public Key Pinning bypass for local trust anchors.
       true,
-      // Certificate verifier cache data.
-      "");
+      // Optional network thread priority.
+      base::Optional<double>());
 
   net::URLRequestContextBuilder builder;
   net::NetLog net_log;
@@ -534,10 +634,9 @@ TEST_F(StaleHostResolverTest, CreatedByContext) {
           net::ProxyConfigWithAnnotation::CreateDirect())));
   std::unique_ptr<net::URLRequestContext> context(builder.Build());
 
-  // Duplicate StaleCache test case to ensure StaleHostResolver was created:
-
+  // Experimental options ensure context's resolver is a StaleHostResolver.
+  SetResolver(reinterpret_cast<StaleHostResolver*>(context->host_resolver()));
   // Note: Experimental config above sets 0ms stale delay.
-  SetResolver(context->host_resolver());
   CreateCacheEntry(kAgeExpiredSec, net::OK);
 
   Resolve();
@@ -548,8 +647,8 @@ TEST_F(StaleHostResolverTest, CreatedByContext) {
   EXPECT_EQ(net::OK, resolve_error());
   EXPECT_EQ(1u, resolve_addresses().size());
   EXPECT_EQ(kCacheAddress, resolve_addresses()[0].ToStringWithoutPort());
+  WaitForNetworkResolveComplete();
 }
-#endif  // !defined(ADDRESS_SANITIZER)
 
 }  // namespace
 

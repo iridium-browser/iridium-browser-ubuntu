@@ -34,6 +34,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/dictionary.h"
 #include "third_party/blink/renderer/bindings/core/v8/idl_types.h"
 #include "third_party/blink/renderer/bindings/core/v8/native_value_traits_impl.h"
+#include "third_party/blink/renderer/bindings/core/v8/script_iterator.h"
 #include "third_party/blink/renderer/bindings/core/v8/string_or_string_sequence.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_base_keyframe.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_base_property_indexed_keyframe.h"
@@ -47,43 +48,35 @@
 #include "third_party/blink/renderer/core/css/css_style_sheet.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
 #include "third_party/blink/renderer/core/frame/frame_console.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/platform/wtf/ascii_ctype.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
+#include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
+#include "v8/include/v8.h"
 
 namespace blink {
 
 namespace {
 
 // Converts the composite property of a BasePropertyIndexedKeyframe into a
-// vector of EffectModel::CompositeOperation enums.
-Vector<WTF::Optional<EffectModel::CompositeOperation>> ParseCompositeProperty(
+// vector of base::Optional<EffectModel::CompositeOperation> enums.
+Vector<base::Optional<EffectModel::CompositeOperation>> ParseCompositeProperty(
     const BasePropertyIndexedKeyframe& keyframe) {
-  const CompositeOperationOrCompositeOperationOrNullSequence& composite =
+  const CompositeOperationOrAutoOrCompositeOperationOrAutoSequence& composite =
       keyframe.composite();
 
-  // This handles the case where we have 'composite: null'. The null value is
-  // lifted to the union level in the bindings code.
-  if (composite.IsNull())
-    return {WTF::nullopt};
-
-  if (composite.IsCompositeOperation()) {
+  if (composite.IsCompositeOperationOrAuto()) {
     return {EffectModel::StringToCompositeOperation(
-        composite.GetAsCompositeOperation())};
+        composite.GetAsCompositeOperationOrAuto())};
   }
 
-  Vector<WTF::Optional<EffectModel::CompositeOperation>> result;
+  Vector<base::Optional<EffectModel::CompositeOperation>> result;
   for (const String& composite_operation_string :
-       composite.GetAsCompositeOperationOrNullSequence()) {
-    if (composite_operation_string.IsNull()) {
-      result.push_back(WTF::nullopt);
-    } else {
-      result.push_back(
-          EffectModel::StringToCompositeOperation(composite_operation_string));
-    }
+       composite.GetAsCompositeOperationOrAutoSequence()) {
+    result.push_back(
+        EffectModel::StringToCompositeOperation(composite_operation_string));
   }
   return result;
 }
@@ -156,7 +149,7 @@ bool ValidatePartialKeyframes(const StringKeyframeVector& keyframes) {
 
   PropertyHandleSet properties_with_offset_0;
   PropertyHandleSet properties_with_offset_1;
-  for (size_t i = 0; i < keyframes.size(); i++) {
+  for (wtf_size_t i = 0; i < keyframes.size(); i++) {
     for (const PropertyHandle& property : keyframes[i]->Properties()) {
       if (!property.IsCSSProperty())
         continue;
@@ -184,7 +177,7 @@ bool ValidatePartialKeyframes(const StringKeyframeVector& keyframes) {
 // StringKeyframe and the current runtime flags.
 EffectModel::CompositeOperation ResolveCompositeOperationForKeyframe(
     EffectModel::CompositeOperation composite,
-    const scoped_refptr<StringKeyframe>& keyframe) {
+    StringKeyframe* keyframe) {
   if (!RuntimeEnabledFeatures::CSSAdditiveAnimationsEnabled() &&
       keyframe->HasCssProperty() && composite == EffectModel::kCompositeAdd) {
     return EffectModel::kCompositeReplace;
@@ -218,72 +211,103 @@ struct KeyframeOutput {
   Vector<std::pair<String, String>> property_value_pairs;
 };
 
+void AddPropertyValuePairsForKeyframe(
+    v8::Isolate* isolate,
+    v8::Local<v8::Object> keyframe_obj,
+    Element* element,
+    const Document& document,
+    Vector<std::pair<String, String>>& property_value_pairs,
+    ExceptionState& exception_state) {
+  Vector<String> keyframe_properties =
+      GetOwnPropertyNames(isolate, keyframe_obj, exception_state);
+  if (exception_state.HadException())
+    return;
+
+  // By spec, we must sort the properties in "ascending order by the Unicode
+  // codepoints that define each property name."
+  std::sort(keyframe_properties.begin(), keyframe_properties.end(),
+            WTF::CodePointCompareLessThan);
+
+  v8::TryCatch try_catch(isolate);
+  for (const auto& property : keyframe_properties) {
+    if (property == "offset" || property == "composite" ||
+        property == "easing") {
+      continue;
+    }
+
+    // By spec, we are not allowed to access any non-animatable property.
+    if (!IsAnimatableKeyframeAttribute(property, element, document))
+      continue;
+
+    // By spec, we are only allowed to access a given (property, value) pair
+    // once. This is observable by the web client, so we take care to adhere
+    // to that.
+    v8::Local<v8::Value> v8_value;
+    if (!keyframe_obj
+             ->Get(isolate->GetCurrentContext(), V8String(isolate, property))
+             .ToLocal(&v8_value)) {
+      exception_state.RethrowV8Exception(try_catch.Exception());
+      return;
+    }
+
+    if (v8_value->IsArray()) {
+      // Since allow-lists is false, array values should be ignored.
+      continue;
+    }
+
+    String string_value = NativeValueTraits<IDLString>::NativeValue(
+        isolate, v8_value, exception_state);
+    if (exception_state.HadException())
+      return;
+    property_value_pairs.push_back(std::make_pair(property, string_value));
+  }
+}
+
 StringKeyframeVector ConvertArrayForm(Element* element,
                                       Document& document,
-                                      DictionaryIterator iterator,
+                                      const v8::Local<v8::Object>& iterator_obj,
                                       ScriptState* script_state,
                                       ExceptionState& exception_state) {
+  v8::Isolate* isolate = script_state->GetIsolate();
+  ScriptIterator iterator(iterator_obj, isolate);
+
   // This loop captures step 5 of the procedure to process a keyframes argument,
   // in the case where the argument is iterable.
   Vector<KeyframeOutput> processed_keyframes;
   ExecutionContext* execution_context = ExecutionContext::From(script_state);
-  v8::Isolate* isolate = script_state->GetIsolate();
   while (iterator.Next(execution_context, exception_state)) {
-    KeyframeOutput keyframe_output;
+    if (exception_state.HadException())
+      return {};
 
-    Dictionary keyframe_dictionary;
-    if (!iterator.ValueAsDictionary(keyframe_dictionary, exception_state)) {
-      exception_state.ThrowTypeError("Keyframes must be objects.");
+    // The value should already be non-empty, as guaranteed by the call to Next
+    // and the exception_state check above.
+    v8::Local<v8::Value> keyframe = iterator.GetValue().ToLocalChecked();
+
+    if (!keyframe->IsObject() && !keyframe->IsNullOrUndefined()) {
+      exception_state.ThrowTypeError(
+          "Keyframes must be objects, or null or undefined");
       return {};
     }
 
-    // Extract the offset, easing, and composite as per step 1 of the 'procedure
-    // to process a keyframe-like object'.
-    V8BaseKeyframe::ToImpl(keyframe_dictionary.GetIsolate(),
-                           keyframe_dictionary.V8Value(),
-                           keyframe_output.base_keyframe, exception_state);
+    KeyframeOutput keyframe_output;
+    keyframe_output.base_keyframe =
+        NativeValueTraits<BaseKeyframe>::NativeValue(isolate, keyframe,
+                                                     exception_state);
     if (exception_state.HadException())
       return {};
 
-    const Vector<String>& keyframe_properties =
-        keyframe_dictionary.GetPropertyNames(exception_state);
-    if (exception_state.HadException())
-      return {};
-
-    for (const auto& property : keyframe_properties) {
-      if (property == "offset" || property == "composite" ||
-          property == "easing") {
-        continue;
-      }
-
-      // By spec, we are not allowed to access any non-animatable property.
-      if (!IsAnimatableKeyframeAttribute(property, element, document))
-        continue;
-
-      // By spec, we are only allowed to access a given (property, value) pair
-      // once. This is observable by the web client, so we take care to adhere
-      // to that.
-      v8::Local<v8::Value> v8_value;
-      if (!keyframe_dictionary.Get(property, v8_value)) {
-        // TODO(crbug.com/666661): Propagate exceptions from Dictionary::Get.
-        return {};
-      }
-
-      if (v8_value->IsArray()) {
-        exception_state.ThrowTypeError(
-            "Lists of values not permitted in array-form list of keyframes");
-        return {};
-      }
-
-      String string_value = NativeValueTraits<IDLString>::NativeValue(
-          isolate, v8_value, exception_state);
+    if (!keyframe->IsNullOrUndefined()) {
+      AddPropertyValuePairsForKeyframe(
+          isolate, v8::Local<v8::Object>::Cast(keyframe), element, document,
+          keyframe_output.property_value_pairs, exception_state);
       if (exception_state.HadException())
         return {};
-      keyframe_output.property_value_pairs.push_back(
-          std::make_pair(property, string_value));
     }
+
     processed_keyframes.push_back(keyframe_output);
   }
+  // If the very first call to next() throws the above loop will never be
+  // entered, so we have to catch that here.
   if (exception_state.HadException())
     return {};
 
@@ -321,7 +345,7 @@ StringKeyframeVector ConvertArrayForm(Element* element,
     // Now we create the actual Keyframe object. We start by assigning the
     // offset and composite values; conceptually these were actually added in
     // step 5 above but we didn't have a keyframe object then.
-    scoped_refptr<StringKeyframe> keyframe = StringKeyframe::Create();
+    StringKeyframe* keyframe = StringKeyframe::Create();
     if (processed_keyframe.base_keyframe.hasOffset()) {
       keyframe->SetOffset(processed_keyframe.base_keyframe.offset());
     }
@@ -330,15 +354,16 @@ StringKeyframeVector ConvertArrayForm(Element* element,
     // using the syntax specified for that property.
     for (const auto& pair : processed_keyframe.property_value_pairs) {
       // TODO(crbug.com/777971): Make parsing of property values spec-compliant.
-      SetKeyframeValue(element, document, *keyframe.get(), pair.first,
-                       pair.second, execution_context);
+      SetKeyframeValue(element, document, *keyframe, pair.first, pair.second,
+                       execution_context);
     }
 
-    if (processed_keyframe.base_keyframe.hasComposite()) {
-      keyframe->SetComposite(ResolveCompositeOperationForKeyframe(
-          EffectModel::StringToCompositeOperation(
-              processed_keyframe.base_keyframe.composite()),
-          keyframe));
+    base::Optional<EffectModel::CompositeOperation> composite =
+        EffectModel::StringToCompositeOperation(
+            processed_keyframe.base_keyframe.composite());
+    if (composite) {
+      keyframe->SetComposite(
+          ResolveCompositeOperationForKeyframe(composite.value(), keyframe));
     }
 
     // 8.2. Let the timing function of frame be the result of parsing the
@@ -365,20 +390,22 @@ StringKeyframeVector ConvertArrayForm(Element* element,
 // Extracts the values for a given property in the input keyframes. As per the
 // spec property values for the object-notation form have type (DOMString or
 // sequence<DOMString>).
-static bool GetPropertyIndexedKeyframeValues(
-    const Dictionary& keyframe_dictionary,
-    const String& property,
-    ScriptState* script_state,
-    ExceptionState& exception_state,
-    Vector<String>& result) {
+bool GetPropertyIndexedKeyframeValues(const v8::Local<v8::Object>& keyframe,
+                                      const String& property,
+                                      ScriptState* script_state,
+                                      ExceptionState& exception_state,
+                                      Vector<String>& result) {
   DCHECK(result.IsEmpty());
 
   // By spec, we are only allowed to access a given (property, value) pair once.
   // This is observable by the web client, so we take care to adhere to that.
   v8::Local<v8::Value> v8_value;
-  if (!keyframe_dictionary.Get(property, v8_value)) {
-    // TODO(crbug.com/666661): Get() should rethrow internal exceptions.
-    return false;
+  v8::TryCatch try_catch(script_state->GetIsolate());
+  v8::Local<v8::Context> context = script_state->GetContext();
+  v8::Isolate* isolate = script_state->GetIsolate();
+  if (!keyframe->Get(context, V8String(isolate, property)).ToLocal(&v8_value)) {
+    exception_state.RethrowV8Exception(try_catch.Exception());
+    return {};
   }
 
   StringOrStringSequence string_or_string_sequence;
@@ -402,7 +429,7 @@ static bool GetPropertyIndexedKeyframeValues(
 // See https://drafts.csswg.org/web-animations/#processing-a-keyframes-argument
 StringKeyframeVector ConvertObjectForm(Element* element,
                                        Document& document,
-                                       const Dictionary& dictionary,
+                                       const v8::Local<v8::Object>& keyframe,
                                        ScriptState* script_state,
                                        ExceptionState& exception_state) {
   // We implement much of this procedure out of order from the way the spec is
@@ -411,16 +438,15 @@ StringKeyframeVector ConvertObjectForm(Element* element,
 
   // Extract the offset, easing, and composite as per step 1 of the 'procedure
   // to process a keyframe-like object'.
-  BasePropertyIndexedKeyframe property_indexed_keyframe;
-  V8BasePropertyIndexedKeyframe::ToImpl(
-      dictionary.GetIsolate(), dictionary.V8Value(), property_indexed_keyframe,
-      exception_state);
+  BasePropertyIndexedKeyframe property_indexed_keyframe =
+      NativeValueTraits<BasePropertyIndexedKeyframe>::NativeValue(
+          script_state->GetIsolate(), keyframe, exception_state);
   if (exception_state.HadException())
     return {};
 
-  Vector<WTF::Optional<double>> offsets;
+  Vector<base::Optional<double>> offsets;
   if (property_indexed_keyframe.offset().IsNull())
-    offsets.push_back(WTF::nullopt);
+    offsets.push_back(base::nullopt);
   else if (property_indexed_keyframe.offset().IsDouble())
     offsets.push_back(property_indexed_keyframe.offset().GetAsDouble());
   else
@@ -434,7 +460,7 @@ StringKeyframeVector ConvertObjectForm(Element* element,
   else
     easings = property_indexed_keyframe.easing().GetAsStringSequence();
 
-  Vector<WTF::Optional<EffectModel::CompositeOperation>> composite_operations =
+  Vector<base::Optional<EffectModel::CompositeOperation>> composite_operations =
       ParseCompositeProperty(property_indexed_keyframe);
 
   // Next extract all animatable properties from the input argument and iterate
@@ -442,8 +468,8 @@ StringKeyframeVector ConvertObjectForm(Element* element,
   // implements both steps 2-7 of the 'procedure to process a keyframe-like
   // object' and step 5.2 of the 'procedure to process a keyframes argument'.
 
-  const Vector<String>& keyframe_properties =
-      dictionary.GetPropertyNames(exception_state);
+  Vector<String> keyframe_properties = GetOwnPropertyNames(
+      script_state->GetIsolate(), keyframe, exception_state);
   if (exception_state.HadException())
     return {};
 
@@ -455,7 +481,12 @@ StringKeyframeVector ConvertObjectForm(Element* element,
   //
   // This is equivalent to just keeping a hashmap from computed offset to a
   // single keyframe, which simplifies the parsing logic.
-  HashMap<double, scoped_refptr<StringKeyframe>> keyframes;
+  HeapHashMap<double, Member<StringKeyframe>> keyframes;
+
+  // By spec, we must sort the properties in "ascending order by the Unicode
+  // codepoints that define each property name."
+  std::sort(keyframe_properties.begin(), keyframe_properties.end(),
+            WTF::CodePointCompareLessThan);
 
   for (const auto& property : keyframe_properties) {
     if (property == "offset" || property == "composite" ||
@@ -468,7 +499,7 @@ StringKeyframeVector ConvertObjectForm(Element* element,
       continue;
 
     Vector<String> values;
-    if (!GetPropertyIndexedKeyframeValues(dictionary, property, script_state,
+    if (!GetPropertyIndexedKeyframeValues(keyframe, property, script_state,
                                           exception_state, values)) {
       return {};
     }
@@ -476,9 +507,9 @@ StringKeyframeVector ConvertObjectForm(Element* element,
     // Now create a keyframe (or retrieve and augment an existing one) for each
     // value this property maps to. As explained above, this loop performs both
     // the initial creation and merging mentioned in the spec.
-    size_t num_keyframes = values.size();
+    wtf_size_t num_keyframes = values.size();
     ExecutionContext* execution_context = ExecutionContext::From(script_state);
-    for (size_t i = 0; i < num_keyframes; ++i) {
+    for (wtf_size_t i = 0; i < num_keyframes; ++i) {
       // As all offsets are null for these 'property keyframes', the computed
       // offset is just the fractional position of each keyframe in the array.
       //
@@ -491,8 +522,8 @@ StringKeyframeVector ConvertObjectForm(Element* element,
       if (result.is_new_entry)
         result.stored_value->value = StringKeyframe::Create();
 
-      SetKeyframeValue(element, document, *result.stored_value->value.get(),
-                       property, values[i], execution_context);
+      SetKeyframeValue(element, document, *result.stored_value->value, property,
+                       values[i], execution_context);
     }
   }
 
@@ -516,11 +547,11 @@ StringKeyframeVector ConvertObjectForm(Element* element,
   //     being > 1 before we throw due to the offsets not being loosely ordered.
   StringKeyframeVector results;
   double previous_offset = 0.0;
-  for (size_t i = 0; i < keys.size(); i++) {
-    auto keyframe = keyframes.at(keys[i]);
+  for (wtf_size_t i = 0; i < keys.size(); i++) {
+    auto* keyframe = keyframes.at(keys[i]);
 
     if (i < offsets.size()) {
-      WTF::Optional<double> offset = offsets[i];
+      base::Optional<double> offset = offsets[i];
       // 6. If processed keyframes is not loosely sorted by offset, throw a
       // TypeError and abort these steps.
       if (offset.has_value()) {
@@ -573,7 +604,7 @@ StringKeyframeVector ConvertObjectForm(Element* element,
       // property keyframes, repeat the elements in composite modes successively
       // starting from the beginning of the list until composite modes has as
       // many items as property keyframes.
-      WTF::Optional<EffectModel::CompositeOperation> composite =
+      base::Optional<EffectModel::CompositeOperation> composite =
           composite_operations[i % composite_operations.size()];
       if (composite) {
         keyframe->SetComposite(
@@ -593,7 +624,7 @@ StringKeyframeVector ConvertObjectForm(Element* element,
   // for easing property of the AnimationEffectTimingReadOnly interface, and if
   // any of the values fail to parse, throw a TypeError and abort this
   // procedure.
-  for (size_t i = results.size(); i < easings.size(); i++) {
+  for (wtf_size_t i = results.size(); i < easings.size(); i++) {
     scoped_refptr<TimingFunction> timing_function =
         AnimationInputHelpers::ParseTimingFunction(easings[i], &document,
                                                    exception_state);
@@ -653,32 +684,38 @@ StringKeyframeVector EffectInput::ParseKeyframesArgument(
     ScriptState* script_state,
     ExceptionState& exception_state) {
   // Per the spec, a null keyframes object maps to a valid but empty sequence.
-  if (keyframes.IsNull())
+  v8::Local<v8::Value> keyframes_value = keyframes.V8Value();
+  if (keyframes_value->IsNullOrUndefined())
     return {};
+  v8::Local<v8::Object> keyframes_obj = keyframes_value.As<v8::Object>();
 
+  // 3. Let method be the result of GetMethod(object, @@iterator).
   v8::Isolate* isolate = script_state->GetIsolate();
-  Dictionary dictionary(isolate, keyframes.V8Value(), exception_state);
+  v8::Local<v8::Function> iterator_method =
+      GetEsIteratorMethod(isolate, keyframes_obj, exception_state);
   if (exception_state.HadException())
     return {};
 
   // TODO(crbug.com/816934): Get spec to specify what parsing context to use.
-  Document& document = element
-                           ? element->GetDocument()
-                           : *ToDocument(ExecutionContext::From(script_state));
+  Document& document =
+      element ? element->GetDocument()
+              : *To<Document>(ExecutionContext::From(script_state));
 
   StringKeyframeVector parsed_keyframes;
-  DictionaryIterator iterator =
-      dictionary.GetIterator(ExecutionContext::From(script_state));
-  if (iterator.IsNull()) {
-    parsed_keyframes = ConvertObjectForm(element, document, dictionary,
+  if (iterator_method.IsEmpty()) {
+    parsed_keyframes = ConvertObjectForm(element, document, keyframes_obj,
                                          script_state, exception_state);
   } else {
+    v8::Local<v8::Object> iterator = GetEsIteratorWithMethod(
+        isolate, iterator_method, keyframes_obj, exception_state);
+    if (exception_state.HadException())
+      return {};
     parsed_keyframes = ConvertArrayForm(element, document, iterator,
                                         script_state, exception_state);
   }
 
   if (!ValidatePartialKeyframes(parsed_keyframes)) {
-    exception_state.ThrowDOMException(kNotSupportedError,
+    exception_state.ThrowDOMException(DOMExceptionCode::kNotSupportedError,
                                       "Partial keyframes are not supported.");
     return {};
   }
@@ -689,7 +726,7 @@ EffectModel::CompositeOperation EffectInput::ResolveCompositeOperation(
     EffectModel::CompositeOperation composite,
     const StringKeyframeVector& keyframes) {
   EffectModel::CompositeOperation result = composite;
-  for (const scoped_refptr<StringKeyframe>& keyframe : keyframes) {
+  for (const Member<StringKeyframe>& keyframe : keyframes) {
     // Replace is always supported, so we can early-exit if and when we have
     // that as our composite value.
     if (result == EffectModel::kCompositeReplace)

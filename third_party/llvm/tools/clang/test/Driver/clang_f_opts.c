@@ -276,6 +276,7 @@
 // RUN:     -fno-inline-small-functions -finline-small-functions              \
 // RUN:     -fno-fat-lto-objects -ffat-lto-objects                            \
 // RUN:     -fno-merge-constants -fmerge-constants                            \
+// RUN:     -fno-merge-all-constants -fmerge-all-constants                    \
 // RUN:     -fno-caller-saves -fcaller-saves                                  \
 // RUN:     -fno-reorder-blocks -freorder-blocks                              \
 // RUN:     -fno-schedule-insns2 -fschedule-insns2                            \
@@ -301,8 +302,6 @@
 // RUN: -fkeep-inline-functions                                               \
 // RUN: -fno-keep-inline-functions                                            \
 // RUN: -freorder-blocks                                                      \
-// RUN: -falign-functions                                                     \
-// RUN: -falign-functions=1                                                   \
 // RUN: -ffloat-store                                                         \
 // RUN: -fgcse                                                                \
 // RUN: -fivopts                                                              \
@@ -349,7 +348,6 @@
 // RUN: -fwhole-program                                                       \
 // RUN: -fcaller-saves                                                        \
 // RUN: -freorder-blocks                                                      \
-// RUN: -fdelete-null-pointer-checks                                          \
 // RUN: -ffat-lto-objects                                                     \
 // RUN: -fmerge-constants                                                     \
 // RUN: -finline-small-functions                                              \
@@ -369,8 +367,6 @@
 // CHECK-WARNING-DAG: optimization flag '-fkeep-inline-functions' is not supported
 // CHECK-WARNING-DAG: optimization flag '-fno-keep-inline-functions' is not supported
 // CHECK-WARNING-DAG: optimization flag '-freorder-blocks' is not supported
-// CHECK-WARNING-DAG: optimization flag '-falign-functions' is not supported
-// CHECK-WARNING-DAG: optimization flag '-falign-functions=1' is not supported
 // CHECK-WARNING-DAG: optimization flag '-ffloat-store' is not supported
 // CHECK-WARNING-DAG: optimization flag '-fgcse' is not supported
 // CHECK-WARNING-DAG: optimization flag '-fivopts' is not supported
@@ -417,7 +413,6 @@
 // CHECK-WARNING-DAG: optimization flag '-fwhole-program' is not supported
 // CHECK-WARNING-DAG: optimization flag '-fcaller-saves' is not supported
 // CHECK-WARNING-DAG: optimization flag '-freorder-blocks' is not supported
-// CHECK-WARNING-DAG: optimization flag '-fdelete-null-pointer-checks' is not supported
 // CHECK-WARNING-DAG: optimization flag '-ffat-lto-objects' is not supported
 // CHECK-WARNING-DAG: optimization flag '-fmerge-constants' is not supported
 // CHECK-WARNING-DAG: optimization flag '-finline-small-functions' is not supported
@@ -522,3 +517,22 @@
 // RUN: %clang -### -S -fno-discard-value-names %s 2>&1 | FileCheck -check-prefix=CHECK-NO-DISCARD-NAMES %s
 // CHECK-DISCARD-NAMES: "-discard-value-names"
 // CHECK-NO-DISCARD-NAMES-NOT: "-discard-value-names"
+//
+// RUN: %clang -### -S -fmerge-all-constants %s 2>&1 | FileCheck -check-prefix=CHECK-MERGE-ALL-CONSTANTS %s
+// RUN: %clang -### -S -fno-merge-all-constants %s 2>&1 | FileCheck -check-prefix=CHECK-NO-MERGE-ALL-CONSTANTS %s
+// RUN: %clang -### -S -fmerge-all-constants -fno-merge-all-constants %s 2>&1 | FileCheck -check-prefix=CHECK-NO-MERGE-ALL-CONSTANTS %s
+// RUN: %clang -### -S -fno-merge-all-constants -fmerge-all-constants %s 2>&1 | FileCheck -check-prefix=CHECK-MERGE-ALL-CONSTANTS %s
+// CHECK-NO-MERGE-ALL-CONSTANTS-NOT: "-fmerge-all-constants"
+// CHECK-MERGE-ALL-CONSTANTS: "-fmerge-all-constants"
+
+// RUN: %clang -### -S -fdelete-null-pointer-checks %s 2>&1 | FileCheck -check-prefix=CHECK-NULL-POINTER-CHECKS %s
+// RUN: %clang -### -S -fno-delete-null-pointer-checks %s 2>&1 | FileCheck -check-prefix=CHECK-NO-NULL-POINTER-CHECKS %s
+// RUN: %clang -### -S -fdelete-null-pointer-checks -fno-delete-null-pointer-checks %s 2>&1 | FileCheck -check-prefix=CHECK-NO-NULL-POINTER-CHECKS %s
+// RUN: %clang -### -S -fno-delete-null-pointer-checks -fdelete-null-pointer-checks %s 2>&1 | FileCheck -check-prefix=CHECK-NULL-POINTER-CHECKS %s
+// CHECK-NO-NULL-POINTER-CHECKS: "-fno-delete-null-pointer-checks"
+// CHECK-NULL-POINTER-CHECKS-NOT: "-fno-delete-null-pointer-checks"
+
+// RUN: %clang -### -S -fomit-frame-pointer -pg %s 2>&1 | FileCheck -check-prefix=CHECK-NO-MIX-OMIT-FP-PG %s
+// RUN: %clang -### -S -fomit-frame-pointer -fno-omit-frame-pointer -pg %s 2>&1 | FileCheck -check-prefix=CHECK-MIX-NO-OMIT-FP-PG %s
+// CHECK-NO-MIX-OMIT-FP-PG: '-fomit-frame-pointer' not allowed with '-pg'
+// CHECK-MIX-NO-OMIT-FP-PG-NOT: '-fomit-frame-pointer' not allowed with '-pg'

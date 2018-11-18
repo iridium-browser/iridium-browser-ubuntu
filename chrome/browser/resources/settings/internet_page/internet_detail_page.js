@@ -85,7 +85,18 @@ Polymer({
     },
 
     /** @type {!chrome.networkingPrivate.GlobalPolicy|undefined} */
-    globalPolicy: Object,
+    globalPolicy: {
+      type: Object,
+      value: null,
+    },
+
+    /** Whether a managed network is available in the visible network list.
+     * @private {boolean}
+     */
+    managedNetworkAvailable: {
+      type: Boolean,
+      value: false,
+    },
 
     /**
      * Interface for networkingPrivate calls, passed from internet_page.
@@ -134,7 +145,7 @@ Polymer({
 
   listeners: {
     'network-list-changed': 'checkNetworkExists_',
-    'networks-changed': 'updateNetworkDetails_',
+    'networks-changed': 'updateNetworkDetails_'
   },
 
   /** @private {boolean} */
@@ -246,10 +257,10 @@ Polymer({
     if (!this.didSetFocus_) {
       // Focus a button once the initial state is set.
       this.didSetFocus_ = true;
-      const button = this.$$('#titleDiv .primary-button:not([hidden])') ||
+      const button = this.$$('#titleDiv .action-button:not([hidden])') ||
           this.$$('#titleDiv paper-button:not([hidden])');
       if (button)
-        button.focus();
+        setTimeout(() => button.focus());
     }
 
     if (this.shouldShowConfigureWhenNetworkLoaded_ &&
@@ -401,7 +412,9 @@ Polymer({
    * @private
    */
   getEmptyNetworkProperties_: function() {
-    return {Type: this.networkProperties.Type};
+    const type =
+        this.networkProperties ? this.networkProperties.Type : CrOnc.Type.WI_FI;
+    return {Type: type};
   },
 
   /**
@@ -411,7 +424,7 @@ Polymer({
    * @private
    */
   getStateText_: function(networkProperties, outOfRange) {
-    if (!networkProperties.ConnectionState)
+    if (networkProperties === undefined || !networkProperties.ConnectionState)
       return '';
 
     if (outOfRange) {
@@ -438,7 +451,7 @@ Polymer({
    * @private
    */
   isRemembered_: function(networkProperties) {
-    const source = networkProperties.Source;
+    const source = networkProperties ? networkProperties.Source : null;
     return !!source && source != CrOnc.Source.NONE;
   },
 
@@ -458,30 +471,48 @@ Polymer({
    * @private
    */
   isCellular_: function(networkProperties) {
-    return networkProperties.Type == CrOnc.Type.CELLULAR &&
+    return networkProperties !== undefined &&
+        networkProperties.Type == CrOnc.Type.CELLULAR &&
         !!networkProperties.Cellular;
   },
 
   /**
    * @param {!CrOnc.NetworkProperties} networkProperties
    * @param {!chrome.networkingPrivate.GlobalPolicy} globalPolicy
+   * @param {boolean} managedNetworkAvailable
    * @return {boolean}
    * @private
    */
-  connectNotAllowed_: function(networkProperties, globalPolicy) {
-    return networkProperties.Type == CrOnc.Type.WI_FI &&
-        !!globalPolicy.AllowOnlyPolicyNetworksToConnect &&
-        !this.isPolicySource(networkProperties.Source);
+  isBlockedByPolicy_: function(
+      networkProperties, globalPolicy, managedNetworkAvailable) {
+    if (networkProperties === undefined ||
+        networkProperties.Type != CrOnc.Type.WI_FI ||
+        this.isPolicySource(networkProperties.Source) || !globalPolicy) {
+      return false;
+    }
+    return !!globalPolicy.AllowOnlyPolicyNetworksToConnect ||
+        (!!globalPolicy.AllowOnlyPolicyNetworksToConnectIfAvailable &&
+         !!managedNetworkAvailable) ||
+        (!!networkProperties.WiFi && !!networkProperties.WiFi.HexSSID &&
+         !!globalPolicy.BlacklistedHexSSIDs &&
+         globalPolicy.BlacklistedHexSSIDs.includes(
+             CrOnc.getStateOrActiveString(networkProperties.WiFi.HexSSID)));
   },
 
   /**
    * @param {!CrOnc.NetworkProperties} networkProperties
    * @param {!chrome.networkingPrivate.GlobalPolicy} globalPolicy
+   * @param {boolean} managedNetworkAvailable
    * @return {boolean}
    * @private
    */
-  showConnect_: function(networkProperties, globalPolicy) {
-    if (this.connectNotAllowed_(networkProperties, globalPolicy))
+  showConnect_: function(
+      networkProperties, globalPolicy, managedNetworkAvailable) {
+    if (networkProperties === undefined)
+      return false;
+
+    if (this.isBlockedByPolicy_(
+            networkProperties, globalPolicy, managedNetworkAvailable))
       return false;
     // TODO(lgcheng@) support connect Arc VPN from UI once Android support API
     // to initiate a VPN session.
@@ -499,7 +530,8 @@ Polymer({
    * @private
    */
   showDisconnect_: function(networkProperties) {
-    return networkProperties.Type != CrOnc.Type.ETHERNET &&
+    return networkProperties !== undefined &&
+        networkProperties.Type != CrOnc.Type.ETHERNET &&
         networkProperties.ConnectionState !=
         CrOnc.ConnectionState.NOT_CONNECTED;
   },
@@ -510,6 +542,8 @@ Polymer({
    * @private
    */
   showForget_: function(networkProperties) {
+    if (this.isSecondaryUser_ || networkProperties === undefined)
+      return false;
     const type = networkProperties.Type;
     if (type != CrOnc.Type.WI_FI && type != CrOnc.Type.VPN)
       return false;
@@ -525,6 +559,8 @@ Polymer({
    * @private
    */
   showActivate_: function(networkProperties) {
+    if (this.isSecondaryUser_)
+      return false;
     if (!this.isCellular_(networkProperties))
       return false;
     const activation = networkProperties.Cellular.ActivationState;
@@ -535,15 +571,26 @@ Polymer({
   /**
    * @param {!CrOnc.NetworkProperties} networkProperties
    * @param {!chrome.networkingPrivate.GlobalPolicy} globalPolicy
+   * @param {boolean} managedNetworkAvailable
    * @return {boolean}
    * @private
    */
-  showConfigure_: function(networkProperties, globalPolicy) {
-    if (this.connectNotAllowed_(networkProperties, globalPolicy))
+  showConfigure_: function(
+      networkProperties, globalPolicy, managedNetworkAvailable) {
+    if (this.isSecondaryUser_ || networkProperties === undefined)
+      return false;
+    if (this.isBlockedByPolicy_(
+            networkProperties, globalPolicy, managedNetworkAvailable))
       return false;
     const type = networkProperties.Type;
     if (type == CrOnc.Type.CELLULAR || type == CrOnc.Type.TETHER)
       return false;
+    if (type == CrOnc.Type.WI_FI) {
+      const security = networkProperties.WiFi &&
+          CrOnc.getActiveValue(networkProperties.WiFi.Security);
+      if (!security || security == CrOnc.Security.NONE)
+        return false;
+    }
     if ((type == CrOnc.Type.WI_FI || type == CrOnc.Type.WI_MAX) &&
         networkProperties.ConnectionState !=
             CrOnc.ConnectionState.NOT_CONNECTED) {
@@ -561,7 +608,37 @@ Polymer({
    * @return {boolean}
    * @private
    */
+  disableConfigure_: function(networkProperties) {
+    return this.isPolicySource(networkProperties.Source) &&
+        !this.hasRecommendedFields_(networkProperties);
+  },
+
+
+  /**
+   * @param {!Object} networkProperties
+   * @return {boolean}
+   */
+  hasRecommendedFields_: function(networkProperties) {
+    for (let property in networkProperties) {
+      let propertyValue = networkProperties[property];
+      if (this.isNetworkPolicyRecommended(propertyValue) ||
+          (typeof propertyValue == 'object' &&
+           this.hasRecommendedFields_(propertyValue))) {
+        return true;
+      }
+    }
+    return false;
+  },
+
+  /**
+   * @param {!CrOnc.NetworkProperties} networkProperties
+   * @return {boolean}
+   * @private
+   */
   showViewAccount_: function(networkProperties) {
+    if (this.isSecondaryUser_)
+      return false;
+
     // Show either the 'Activate' or the 'View Account' button (Cellular only).
     if (!this.isCellular_(networkProperties) ||
         this.showActivate_(networkProperties)) {
@@ -593,18 +670,22 @@ Polymer({
   /**
    * @param {!CrOnc.NetworkProperties} networkProperties
    * @param {?CrOnc.NetworkStateProperties} defaultNetwork
-   * @param {!chrome.networkingPrivate.GlobalPolicy} globalPolicy
    * @param {boolean} networkPropertiesReceived
    * @param {boolean} outOfRange
+   * @param {!chrome.networkingPrivate.GlobalPolicy} globalPolicy
+   * @param {boolean} managedNetworkAvailable
    * @return {boolean} Whether or not to enable the network connect button.
    * @private
    */
   enableConnect_: function(
-      networkProperties, defaultNetwork, globalPolicy,
-      networkPropertiesReceived, outOfRange) {
-    if (!this.showConnect_(networkProperties, globalPolicy))
+      networkProperties, defaultNetwork, networkPropertiesReceived, outOfRange,
+      globalPolicy, managedNetworkAvailable) {
+    if (!this.showConnect_(
+            networkProperties, globalPolicy, managedNetworkAvailable))
       return false;
     if (!networkPropertiesReceived || outOfRange)
+      return false;
+    if (this.isSecondaryUser_ && this.networkProperties.Connectable === false)
       return false;
     if ((networkProperties.Type == CrOnc.Type.CELLULAR) &&
         (CrOnc.isSimLocked(networkProperties) ||
@@ -661,15 +742,14 @@ Polymer({
 
   /** @private */
   onConfigureTap_: function() {
-    if (this.networkProperties && this.isArcVpn_(this.networkProperties)) {
-      this.browserProxy_.showNetworkConfigure(this.guid);
+    if (this.networkProperties &&
+        (this.isThirdPartyVpn_(this.networkProperties) ||
+         this.isArcVpn_(this.networkProperties))) {
+      this.browserProxy_.configureThirdPartyVpn(this.guid);
       return;
     }
 
-    if (loadTimeData.getBoolean('networkSettingsConfig'))
-      this.fire('show-config', this.networkProperties);
-    else
-      chrome.send('configureNetwork', [this.guid]);
+    this.fire('show-config', this.networkProperties);
   },
 
   /** @private */
@@ -853,23 +933,35 @@ Polymer({
 
   /**
    * @param {!CrOnc.NetworkProperties} networkProperties
+   * @param {!chrome.networkingPrivate.GlobalPolicy} globalPolicy
+   * @param {boolean} managedNetworkAvailable
    * @return {boolean} True if the shared message should be shown.
    * @private
    */
-  showShared_: function(networkProperties) {
-    return networkProperties.Source == 'Device' ||
-        networkProperties.Source == 'DevicePolicy';
+  showShared_: function(
+      networkProperties, globalPolicy, managedNetworkAvailable) {
+    return networkProperties !== undefined &&
+        (networkProperties.Source == 'Device' ||
+         networkProperties.Source == 'DevicePolicy') &&
+        !this.isBlockedByPolicy_(
+            networkProperties, globalPolicy, managedNetworkAvailable);
   },
 
   /**
    * @param {!CrOnc.NetworkProperties} networkProperties
+   * @param {!chrome.networkingPrivate.GlobalPolicy} globalPolicy
+   * @param {boolean} managedNetworkAvailable
    * @return {boolean} True if the AutoConnect checkbox should be shown.
    * @private
    */
-  showAutoConnect_: function(networkProperties) {
-    return networkProperties.Type != CrOnc.Type.ETHERNET &&
+  showAutoConnect_: function(
+      networkProperties, globalPolicy, managedNetworkAvailable) {
+    return networkProperties !== undefined &&
+        networkProperties.Type != CrOnc.Type.ETHERNET &&
         this.isRemembered_(networkProperties) &&
-        !this.isArcVpn_(networkProperties);
+        !this.isArcVpn_(networkProperties) &&
+        !this.isBlockedByPolicy_(
+            networkProperties, globalPolicy, managedNetworkAvailable);
   },
 
   /**
@@ -879,7 +971,8 @@ Polymer({
    * @private
    */
   enableAutoConnect_: function(networkProperties, globalPolicy) {
-    if (networkProperties.Type == CrOnc.Type.WI_FI &&
+    if (networkProperties !== undefined &&
+        networkProperties.Type == CrOnc.Type.WI_FI && !!globalPolicy &&
         !!globalPolicy.AllowOnlyPolicyNetworksToAutoconnect &&
         !this.isPolicySource(networkProperties.Source)) {
       return false;
@@ -899,14 +992,19 @@ Polymer({
 
   /**
    * @param {!CrOnc.NetworkProperties} networkProperties
+   * @param {!chrome.networkingPrivate.GlobalPolicy} globalPolicy
+   * @param {boolean} managedNetworkAvailable
    * @return {boolean} True if the prefer network checkbox should be shown.
    * @private
    */
-  showPreferNetwork_: function(networkProperties) {
+  showPreferNetwork_: function(
+      networkProperties, globalPolicy, managedNetworkAvailable) {
     // TODO(stevenjb): Resolve whether or not we want to allow "preferred" for
     // networkProperties.Type == CrOnc.Type.ETHERNET.
     return this.isRemembered_(networkProperties) &&
-        !this.isArcVpn_(networkProperties);
+        !this.isArcVpn_(networkProperties) &&
+        !this.isBlockedByPolicy_(
+            networkProperties, globalPolicy, managedNetworkAvailable);
   },
 
   /**
@@ -937,6 +1035,9 @@ Polymer({
    * @private
    */
   getInfoFields_: function() {
+    if (this.networkProperties === undefined)
+      return [];
+
     /** @type {!Array<string>} */ const fields = [];
     const type = this.networkProperties.Type;
     if (type == CrOnc.Type.CELLULAR && !!this.networkProperties.Cellular) {
@@ -978,6 +1079,9 @@ Polymer({
    * @private
    */
   getInfoEditFieldTypes_: function() {
+    if (this.networkProperties === undefined)
+      return [];
+
     /** @dict */ const editFields = {};
     const type = this.networkProperties.Type;
     if (type == CrOnc.Type.VPN && !!this.networkProperties.VPN) {
@@ -997,6 +1101,9 @@ Polymer({
    * @private
    */
   getAdvancedFields_: function() {
+    if (this.networkProperties === undefined)
+      return [];
+
     /** @type {!Array<string>} */ const fields = [];
     const type = this.networkProperties.Type;
     if (type != CrOnc.Type.TETHER)
@@ -1021,17 +1128,18 @@ Polymer({
    * @private
    */
   getDeviceFields_: function() {
-    /** @type {!Array<string>} */ const fields = [];
-    if (this.networkProperties.Type == CrOnc.Type.CELLULAR) {
-      fields.push(
-          'Cellular.HomeProvider.Name', 'Cellular.HomeProvider.Country',
-          'Cellular.HomeProvider.Code', 'Cellular.Manufacturer',
-          'Cellular.ModelID', 'Cellular.FirmwareRevision',
-          'Cellular.HardwareRevision', 'Cellular.ESN', 'Cellular.ICCID',
-          'Cellular.IMEI', 'Cellular.IMSI', 'Cellular.MDN', 'Cellular.MEID',
-          'Cellular.MIN', 'Cellular.PRLVersion');
+    if (this.networkProperties === undefined ||
+        this.networkProperties.Type !== CrOnc.Type.CELLULAR) {
+      return [];
     }
-    return fields;
+
+    return [
+      'Cellular.HomeProvider.Name', 'Cellular.HomeProvider.Country',
+      'Cellular.HomeProvider.Code', 'Cellular.Manufacturer', 'Cellular.ModelID',
+      'Cellular.FirmwareRevision', 'Cellular.HardwareRevision', 'Cellular.ESN',
+      'Cellular.ICCID', 'Cellular.IMEI', 'Cellular.IMSI', 'Cellular.MDN',
+      'Cellular.MEID', 'Cellular.MIN', 'Cellular.PRLVersion'
+    ];
   },
 
   /**
@@ -1040,7 +1148,8 @@ Polymer({
    * @private
    */
   showAdvanced_: function(networkProperties) {
-    if (networkProperties.Type == CrOnc.Type.TETHER) {
+    if (networkProperties === undefined ||
+        networkProperties.Type == CrOnc.Type.TETHER) {
       // These settings apply to the underlying WiFi network, not the Tether
       // network.
       return false;
@@ -1076,16 +1185,21 @@ Polymer({
 
   /**
    * @param {!CrOnc.NetworkProperties} networkProperties
+   * @param {!chrome.networkingPrivate.GlobalPolicy} globalPolicy
+   * @param {boolean} managedNetworkAvailable
    * @return {boolean}
    * @private
    */
-  hasNetworkSection_: function(networkProperties) {
-    if (networkProperties.Type == CrOnc.Type.TETHER) {
+  hasNetworkSection_: function(
+      networkProperties, globalPolicy, managedNetworkAvailable) {
+    if (networkProperties === undefined ||
+        networkProperties.Type == CrOnc.Type.TETHER) {
       // These settings apply to the underlying WiFi network, not the Tether
       // network.
       return false;
     }
-    if (networkProperties.Type == CrOnc.Type.VPN)
+    if (this.isBlockedByPolicy_(
+            networkProperties, globalPolicy, managedNetworkAvailable))
       return false;
     if (networkProperties.Type == CrOnc.Type.CELLULAR)
       return true;
@@ -1094,15 +1208,22 @@ Polymer({
 
   /**
    * @param {!CrOnc.NetworkProperties} networkProperties
+   * @param {!chrome.networkingPrivate.GlobalPolicy} globalPolicy
+   * @param {boolean} managedNetworkAvailable
    * @return {boolean}
    * @private
    */
-  hasProxySection_: function(networkProperties) {
-    if (networkProperties.Type == CrOnc.Type.TETHER) {
+  hasProxySection_: function(
+      networkProperties, globalPolicy, managedNetworkAvailable) {
+    if (networkProperties === undefined ||
+        networkProperties.Type == CrOnc.Type.TETHER) {
       // Proxy settings apply to the underlying WiFi network, not the Tether
       // network.
       return false;
     }
+    if (this.isBlockedByPolicy_(
+            networkProperties, globalPolicy, managedNetworkAvailable))
+      return false;
     return this.isRememberedOrConnected_(networkProperties);
   },
 
@@ -1112,7 +1233,8 @@ Polymer({
    * @private
    */
   showCellularChooseNetwork_: function(networkProperties) {
-    return networkProperties.Type == CrOnc.Type.CELLULAR &&
+    return networkProperties !== undefined &&
+        networkProperties.Type == CrOnc.Type.CELLULAR &&
         !!this.get('Cellular.SupportNetworkScan', this.networkProperties);
   },
 
@@ -1122,7 +1244,8 @@ Polymer({
    * @private
    */
   showCellularSim_: function(networkProperties) {
-    return networkProperties.Type == CrOnc.Type.CELLULAR &&
+    return networkProperties !== undefined &&
+        networkProperties.Type == CrOnc.Type.CELLULAR &&
         !!networkProperties.Cellular &&
         networkProperties.Cellular.Family != 'CDMA';
   },
@@ -1133,8 +1256,20 @@ Polymer({
    * @private
    */
   isArcVpn_: function(networkProperties) {
-    return !!networkProperties.VPN &&
-        CrOnc.getActiveValue(networkProperties.VPN.Type) == 'ARCVPN';
+    return networkProperties !== undefined && !!networkProperties.VPN &&
+        CrOnc.getActiveValue(networkProperties.VPN.Type) ==
+        CrOnc.VPNType.ARCVPN;
+  },
+
+  /**
+   * @param {!CrOnc.NetworkProperties} networkProperties
+   * @return {boolean}
+   * @private
+   */
+  isThirdPartyVpn_: function(networkProperties) {
+    return networkProperties !== undefined && !!networkProperties.VPN &&
+        CrOnc.getActiveValue(networkProperties.VPN.Type) ==
+        CrOnc.VPNType.THIRD_PARTY_VPN;
   },
 
   /**
@@ -1169,6 +1304,6 @@ Polymer({
         return false;
     }
     return true;
-  }
+  },
 });
 })();

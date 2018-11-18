@@ -163,13 +163,20 @@ class LastWindowClosedTest : public NoSessionAshTestBase {
   LastWindowClosedTest() = default;
   ~LastWindowClosedTest() override = default;
 
-  // Simulate a public account signing in.
+  // Simulate a public account (non-demo session) signing in.
   void StartPublicAccountSession() {
     TestSessionControllerClient* session = GetSessionControllerClient();
     session->Reset();
     session->AddUserSession("user1@test.com",
                             user_manager::USER_TYPE_PUBLIC_ACCOUNT);
     session->SetSessionState(session_manager::SessionState::ACTIVE);
+  }
+
+  // Simulate a demo session signing in.
+  void StartDemoSession() {
+    GetSessionControllerClient()->SetIsDemoSession();
+    // Demo session is implemented as a public session.
+    StartPublicAccountSession();
   }
 
  private:
@@ -194,6 +201,23 @@ TEST_F(LastWindowClosedTest, RegularSession) {
   EXPECT_FALSE(controller->dialog_for_testing());
 }
 
+TEST_F(LastWindowClosedTest, DemoSession) {
+  // Dialog is not visible at startup.
+  LogoutConfirmationController* controller =
+      Shell::Get()->logout_confirmation_controller();
+  EXPECT_FALSE(controller->dialog_for_testing());
+
+  // Dialog is not visible after demo session starts.
+  StartDemoSession();
+  EXPECT_FALSE(controller->dialog_for_testing());
+
+  // Creating and closing a window does not show the dialog.
+  std::unique_ptr<aura::Window> window = CreateToplevelTestWindow();
+  EXPECT_FALSE(controller->dialog_for_testing());
+  window.reset();
+  EXPECT_FALSE(controller->dialog_for_testing());
+}
+
 TEST_F(LastWindowClosedTest, PublicSession) {
   LogoutConfirmationController* controller =
       Shell::Get()->logout_confirmation_controller();
@@ -211,6 +235,30 @@ TEST_F(LastWindowClosedTest, PublicSession) {
   widget1.reset();
   EXPECT_FALSE(controller->dialog_for_testing());
   widget2.reset();
+  EXPECT_TRUE(controller->dialog_for_testing());
+}
+
+// Test ARC++ window hierarchy where window minimize, restore and go in/out full
+// screen causes a window removing deep inside the top window hierarchy. Actions
+// above should no cause logout timer and only closing the last top window
+// triggers the logout timer.
+TEST_F(LastWindowClosedTest, PublicSessionComplexHierarchy) {
+  LogoutConfirmationController* controller =
+      Shell::Get()->logout_confirmation_controller();
+
+  StartPublicAccountSession();
+  EXPECT_FALSE(controller->dialog_for_testing());
+
+  std::unique_ptr<aura::Window> window = CreateToplevelTestWindow();
+  EXPECT_FALSE(controller->dialog_for_testing());
+
+  std::unique_ptr<aura::Window> window_child = CreateChildWindow(window.get());
+  EXPECT_FALSE(controller->dialog_for_testing());
+
+  window_child.reset();
+  EXPECT_FALSE(controller->dialog_for_testing());
+
+  window.reset();
   EXPECT_TRUE(controller->dialog_for_testing());
 }
 

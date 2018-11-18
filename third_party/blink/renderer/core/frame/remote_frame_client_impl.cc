@@ -108,21 +108,14 @@ base::UnguessableToken RemoteFrameClientImpl::GetDevToolsFrameToken() const {
   return base::UnguessableToken::Create();
 }
 
-void RemoteFrameClientImpl::Navigate(const ResourceRequest& request,
-                                     bool should_replace_current_entry) {
+void RemoteFrameClientImpl::Navigate(
+    const ResourceRequest& request,
+    bool should_replace_current_entry,
+    mojom::blink::BlobURLTokenPtr blob_url_token) {
   if (web_frame_->Client()) {
     web_frame_->Client()->Navigate(WrappedResourceRequest(request),
-                                   should_replace_current_entry);
-  }
-}
-
-void RemoteFrameClientImpl::Reload(
-    FrameLoadType load_type,
-    ClientRedirectPolicy client_redirect_policy) {
-  DCHECK(IsReloadLoadType(load_type));
-  if (web_frame_->Client()) {
-    web_frame_->Client()->Reload(static_cast<WebFrameLoadType>(load_type),
-                                 client_redirect_policy);
+                                   should_replace_current_entry,
+                                   blob_url_token.PassInterface().PassHandle());
   }
 }
 
@@ -158,8 +151,10 @@ void RemoteFrameClientImpl::FrameRectsChanged(
 }
 
 void RemoteFrameClientImpl::UpdateRemoteViewportIntersection(
-    const IntRect& viewport_intersection) {
-  web_frame_->Client()->UpdateRemoteViewportIntersection(viewport_intersection);
+    const IntRect& viewport_intersection,
+    bool occluded_or_obscured) {
+  web_frame_->Client()->UpdateRemoteViewportIntersection(viewport_intersection,
+                                                         occluded_or_obscured);
 }
 
 void RemoteFrameClientImpl::AdvanceFocus(WebFocusType type,
@@ -176,6 +171,11 @@ void RemoteFrameClientImpl::SetIsInert(bool inert) {
   web_frame_->Client()->SetIsInert(inert);
 }
 
+void RemoteFrameClientImpl::SetInheritedEffectiveTouchAction(
+    TouchAction touch_action) {
+  web_frame_->Client()->SetInheritedEffectiveTouchAction(touch_action);
+}
+
 void RemoteFrameClientImpl::UpdateRenderThrottlingStatus(
     bool is_throttled,
     bool subtree_throttled) {
@@ -184,7 +184,7 @@ void RemoteFrameClientImpl::UpdateRenderThrottlingStatus(
 }
 
 uint32_t RemoteFrameClientImpl::Print(const IntRect& rect,
-                                      WebCanvas* canvas) const {
+                                      cc::PaintCanvas* canvas) const {
   return web_frame_->Client()->Print(rect, canvas);
 }
 

@@ -9,6 +9,10 @@ blink_core_sources("html") {
   split_count = 4
 
   sources = [
+    "anchor_element_metrics.cc",
+    "anchor_element_metrics.h",
+    "anchor_element_metrics_sender.cc",
+    "anchor_element_metrics_sender.h",
     "canvas/canvas_async_blob_creator.cc",
     "canvas/canvas_async_blob_creator.h",
     "canvas/canvas_context_creation_attributes_core.cc",
@@ -451,6 +455,10 @@ blink_core_sources("html") {
     "imports/html_imports_controller.h",
     "imports/link_import.cc",
     "imports/link_import.h",
+    "lazy_load_frame_observer.cc",
+    "lazy_load_frame_observer.h",
+    "lazy_load_image_observer.cc",
+    "lazy_load_image_observer.h",
     "link_manifest.cc",
     "link_manifest.h",
     "link_rel_attribute.cc",
@@ -481,6 +489,8 @@ blink_core_sources("html") {
     "media/media_custom_controls_fullscreen_detector.h",
     "media/media_document.cc",
     "media/media_document.h",
+    "media/media_element_parser_helpers.cc",
+    "media/media_element_parser_helpers.h",
     "media/media_error.h",
     "media/media_fragment_uri_parser.cc",
     "media/media_fragment_uri_parser.h",
@@ -490,6 +500,8 @@ blink_core_sources("html") {
     "media/picture_in_picture_interstitial.h",
     "plugin_document.cc",
     "plugin_document.h",
+    "portal/html_portal_element.cc",
+    "portal/html_portal_element.h",
     "rel_list.cc",
     "rel_list.h",
     "shadow/details_marker_control.cc",
@@ -561,6 +573,7 @@ blink_core_sources("html") {
 
   deps = [
     "//services/metrics/public/cpp:metrics_cpp",
+    "//skia:skcms",
     "//third_party/blink/renderer/core/html/parser:parser",
   ]
 }

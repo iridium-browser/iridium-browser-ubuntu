@@ -48,6 +48,10 @@ class CORE_EXPORT HTMLFormControlElementWithState
   bool CanContainRangeEndPoint() const final { return false; }
 
   virtual bool ShouldAutocomplete() const;
+  // Implementations of 'autocomplete' IDL attribute.
+  String IDLExposedAutofillValue() const;
+  void setIDLExposedAutofillValue(const String& autocomplete_value);
+
   virtual bool ShouldSaveAndRestoreFormControlState() const;
   virtual FormControlState SaveFormControlState() const;
   // The specified FormControlState must have at least one string value.
@@ -55,17 +59,24 @@ class CORE_EXPORT HTMLFormControlElementWithState
   void NotifyFormStateChanged();
 
   void Trace(Visitor*) override;
+  bool UserHasEditedTheField() const { return user_has_edited_the_field_; }
+  // This is only used in tests, to fake the user's action
+  void SetUserHasEditedTheFieldForTest() { user_has_edited_the_field_ = true; }
 
  protected:
+  bool user_has_edited_the_field_ = false;
   HTMLFormControlElementWithState(const QualifiedName& tag_name, Document&);
 
   void FinishParsingChildren() override;
-  InsertionNotificationRequest InsertedInto(ContainerNode*) override;
-  void RemovedFrom(ContainerNode*) override;
+  InsertionNotificationRequest InsertedInto(ContainerNode&) override;
+  void RemovedFrom(ContainerNode&) override;
   bool IsFormControlElementWithState() const final;
 
  private:
   bool ShouldForceLegacyLayout() const final { return true; }
+
+  // https://html.spec.whatwg.org/multipage/form-control-infrastructure.html#autofill-anchor-mantle
+  bool IsWearingAutofillAnchorMantle() const;
 
   // Pointers for DoublyLinkedListNode<HTMLFormControlElementWithState>. This
   // is used for adding an instance to a list of form controls stored in

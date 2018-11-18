@@ -133,24 +133,16 @@ tr.exportTo('tr.model', function() {
      * its palette id (see base/color_scheme.html).
      */
     beginSlice(category, title, ts, opt_args, opt_tts,
-        opt_argsStripped, opt_colorId) {
-      if (this.openPartialSlices_.length) {
-        const prevSlice = this.openPartialSlices_[
-            this.openPartialSlices_.length - 1];
-        if (ts < prevSlice.start) {
-          throw new Error('Slices must be added in increasing timestamp order');
-        }
-      }
-
+        opt_argsStripped, opt_colorId, opt_bindId) {
       const colorId = opt_colorId ||
           ColorScheme.getColorIdForGeneralPurposeString(title);
       const sliceConstructorSubTypes = this.sliceConstructorSubTypes;
       const sliceType = sliceConstructorSubTypes.getConstructor(
           category, title);
       const slice = new sliceType(category, title, colorId, ts,
-                                opt_args ? opt_args : {}, null,
-                                opt_tts, undefined,
-                                opt_argsStripped);
+          opt_args ? opt_args : {}, null,
+          opt_tts, undefined,
+          opt_argsStripped, opt_bindId);
       this.openPartialSlices_.push(slice);
       slice.didNotFinish = true;
       this.pushSlice(slice);
@@ -231,9 +223,9 @@ tr.exportTo('tr.model', function() {
       const sliceType = sliceConstructorSubTypes.getConstructor(
           category, title);
       const slice = new sliceType(category, title, colorId, ts,
-                                opt_args ? opt_args : {},
-                                duration, tts, cpuDuration,
-                                opt_argsStripped, opt_bindId);
+          opt_args ? opt_args : {},
+          duration, tts, cpuDuration,
+          opt_argsStripped, opt_bindId);
       if (duration === undefined) {
         slice.didNotFinish = true;
       }
@@ -307,6 +299,26 @@ tr.exportTo('tr.model', function() {
     },
 
     * childEventContainers() {
+    },
+
+    /**
+     * Provides a more efficient implementation than the default implementation
+     * in event_container.html, since child events are sorted.
+     */
+    * getDescendantEventsInSortedRanges(ranges, opt_containerPredicate) {
+      if (opt_containerPredicate === undefined ||
+          opt_containerPredicate(this)) {
+        let rangeIndex = 0;
+        let range = ranges[rangeIndex];
+        for (const event of this.childEvents()) {
+          while (event.start > range.max) {
+            rangeIndex++;
+            if (rangeIndex >= ranges.length) return;
+            range = ranges[rangeIndex];
+          }
+          if (event.end >= range.min) yield event;
+        }
+      }
     },
 
     getSlicesOfName(title) {
@@ -617,8 +629,8 @@ tr.exportTo('tr.model', function() {
     }
 
     const result = new SliceGroup(groupA.parentContainer,
-                                groupA.sliceConstructor,
-                                groupA.name_);
+        groupA.sliceConstructor,
+        groupA.name_);
 
     const slicesA = groupA.slices;
     const slicesB = groupB.slices;

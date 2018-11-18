@@ -8,7 +8,7 @@
 #include "base/macros.h"
 #include "base/optional.h"
 #include "chrome/browser/page_load_metrics/page_load_metrics_observer.h"
-#include "components/ukm/ukm_source.h"
+#include "services/metrics/public/cpp/ukm_source.h"
 #include "url/gurl.h"
 
 namespace internal {
@@ -22,6 +22,7 @@ extern const char kHistogramFromGWSFirstContentfulPaint[];
 extern const char kHistogramFromGWSParseStartToFirstContentfulPaint[];
 extern const char kHistogramFromGWSParseDuration[];
 extern const char kHistogramFromGWSParseStart[];
+extern const char kHistogramFromGWSFirstInputDelay[];
 extern const char kHistogramFromGWSAbortStopBeforePaint[];
 extern const char kHistogramFromGWSAbortStopBeforeInteraction[];
 extern const char kHistogramFromGWSAbortStopBeforeCommit[];
@@ -35,8 +36,6 @@ extern const char kHistogramFromGWSAbortReloadBeforeInteraction[];
 extern const char kHistogramFromGWSForegroundDuration[];
 extern const char kHistogramFromGWSForegroundDurationAfterPaint[];
 extern const char kHistogramFromGWSForegroundDurationNoCommit[];
-
-extern const char kUkmFromGoogleSearchName[];
 
 }  // namespace internal
 
@@ -95,6 +94,9 @@ class FromGWSPageLoadMetricsLogger {
   void OnParseStop(const page_load_metrics::mojom::PageLoadTiming& timing,
                    const page_load_metrics::PageLoadExtraInfo& extra_info);
   void OnUserInput(const blink::WebInputEvent& event);
+  void OnFirstInputInPage(
+      const page_load_metrics::mojom::PageLoadTiming& timing,
+      const page_load_metrics::PageLoadExtraInfo& extra_info);
   void FlushMetricsOnAppEnterBackground(
       const page_load_metrics::mojom::PageLoadTiming& timing,
       const page_load_metrics::PageLoadExtraInfo& extra_info);
@@ -155,6 +157,9 @@ class FromGWSPageLoadMetricsObserver
       const page_load_metrics::mojom::PageLoadTiming& timing,
       const page_load_metrics::PageLoadExtraInfo& extra_info) override;
   void OnFirstContentfulPaintInPage(
+      const page_load_metrics::mojom::PageLoadTiming& timing,
+      const page_load_metrics::PageLoadExtraInfo& extra_info) override;
+  void OnFirstInputInPage(
       const page_load_metrics::mojom::PageLoadTiming& timing,
       const page_load_metrics::PageLoadExtraInfo& extra_info) override;
   void OnParseStart(

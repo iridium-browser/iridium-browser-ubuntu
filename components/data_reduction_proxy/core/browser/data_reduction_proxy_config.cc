@@ -6,7 +6,6 @@
 
 #include <stddef.h>
 
-#include <algorithm>
 #include <utility>
 
 #include "base/bind.h"
@@ -24,6 +23,7 @@
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/task/lazy_task_runner.h"
 #include "base/task_runner_util.h"
 #include "base/time/default_tick_clock.h"
 #include "build/build_config.h"
@@ -33,6 +33,7 @@
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_event_creator.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_features.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
+#include "components/data_reduction_proxy/core/common/data_reduction_proxy_type_info.h"
 #include "components/data_use_measurement/core/data_use_user_data.h"
 #include "components/previews/core/previews_decider.h"
 #include "components/variations/variations_associated_data.h"
@@ -50,6 +51,7 @@
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "net/url_request/url_request_status.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 
 #if defined(OS_ANDROID)
 #include "net/android/network_library.h"
@@ -59,16 +61,16 @@ using base::FieldTrialList;
 
 namespace {
 
-// Values of the UMA DataReductionProxy.Protocol.NotAcceptingTransform histogram
-// defined in metrics/histograms/histograms.xml. This enum must remain
-// synchronized with DataReductionProxyProtocolNotAcceptingTransformReason in
-// tools/metrics/histograms/enums.xml.
-enum NotAcceptingTransformReason {
-  NOT_ACCEPTING_TRANSFORM_DISABLED = 0,
-  NOT_ACCEPTING_TRANSFORM_BLACKLISTED = 1,
-  NOT_ACCEPTING_TRANSFORM_CELLULAR_ONLY = 2,
-  NOT_ACCEPTING_TRANSFORM_REASON_BOUNDARY
-};
+#if defined(OS_CHROMEOS)
+// SequencedTaskRunner to get the network id. A SequencedTaskRunner is used
+// rather than parallel tasks to avoid having many threads getting the network
+// id concurrently.
+base::LazySequencedTaskRunner g_get_network_id_task_runner =
+    LAZY_SEQUENCED_TASK_RUNNER_INITIALIZER(
+        base::TaskTraits(base::MayBlock(),
+                         base::TaskPriority::BEST_EFFORT,
+                         base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN));
+#endif
 
 // Values of the UMA DataReductionProxy.NetworkChangeEvents histograms.
 // This enum must remain synchronized with the enum of the same
@@ -120,7 +122,18 @@ void RecordWarmupURLFetchAttemptEvent(
                             WarmupURLFetchAttemptEvent::kCount);
 }
 
-std::string DoGetCurrentNetworkID() {
+// Returns the current connection type if known, otherwise returns
+// CONNECTION_UNKNOWN.
+network::mojom::ConnectionType GetConnectionType(
+    network::NetworkConnectionTracker* network_connection_tracker) {
+  auto connection_type = network::mojom::ConnectionType::CONNECTION_UNKNOWN;
+  network_connection_tracker->GetConnectionType(&connection_type,
+                                                base::DoNothing());
+  return connection_type;
+}
+
+std::string DoGetCurrentNetworkID(
+    network::NetworkConnectionTracker* network_connection_tracker) {
   // It is possible that the connection type changed between when
   // GetConnectionType() was called and when the API to determine the
   // network name was called. Check if that happened and retry until the
@@ -129,38 +142,38 @@ std::string DoGetCurrentNetworkID() {
   // (that are approximate to begin with).
 
   while (true) {
-    net::NetworkChangeNotifier::ConnectionType connection_type =
-        net::NetworkChangeNotifier::GetConnectionType();
+    auto connection_type = GetConnectionType(network_connection_tracker);
     std::string ssid_mccmnc;
 
     switch (connection_type) {
-      case net::NetworkChangeNotifier::ConnectionType::CONNECTION_UNKNOWN:
-      case net::NetworkChangeNotifier::ConnectionType::CONNECTION_NONE:
-      case net::NetworkChangeNotifier::ConnectionType::CONNECTION_BLUETOOTH:
-      case net::NetworkChangeNotifier::ConnectionType::CONNECTION_ETHERNET:
+      case network::mojom::ConnectionType::CONNECTION_UNKNOWN:
+      case network::mojom::ConnectionType::CONNECTION_NONE:
+      case network::mojom::ConnectionType::CONNECTION_BLUETOOTH:
+      case network::mojom::ConnectionType::CONNECTION_ETHERNET:
         break;
-      case net::NetworkChangeNotifier::ConnectionType::CONNECTION_WIFI:
+      case network::mojom::ConnectionType::CONNECTION_WIFI:
 #if defined(OS_ANDROID) || defined(OS_LINUX) || defined(OS_WIN)
         ssid_mccmnc = net::GetWifiSSID();
 #endif
         break;
-      case net::NetworkChangeNotifier::ConnectionType::CONNECTION_2G:
-      case net::NetworkChangeNotifier::ConnectionType::CONNECTION_3G:
-      case net::NetworkChangeNotifier::ConnectionType::CONNECTION_4G:
+      case network::mojom::ConnectionType::CONNECTION_2G:
+      case network::mojom::ConnectionType::CONNECTION_3G:
+      case network::mojom::ConnectionType::CONNECTION_4G:
 #if defined(OS_ANDROID)
         ssid_mccmnc = net::android::GetTelephonyNetworkOperator();
 #endif
         break;
     }
 
-    if (connection_type == net::NetworkChangeNotifier::GetConnectionType()) {
-      if (connection_type >= net::NetworkChangeNotifier::CONNECTION_2G &&
-          connection_type <= net::NetworkChangeNotifier::CONNECTION_4G) {
+    if (connection_type == GetConnectionType(network_connection_tracker)) {
+      if (connection_type >= network::mojom::ConnectionType::CONNECTION_2G &&
+          connection_type <= network::mojom::ConnectionType::CONNECTION_4G) {
         // No need to differentiate cellular connections by the exact
         // connection type.
         return "cell," + ssid_mccmnc;
       }
-      return base::IntToString(connection_type) + "," + ssid_mccmnc;
+      return base::IntToString(static_cast<int>(connection_type)) + "," +
+             ssid_mccmnc;
     }
   }
   NOTREACHED();
@@ -173,6 +186,7 @@ namespace data_reduction_proxy {
 DataReductionProxyConfig::DataReductionProxyConfig(
     scoped_refptr<base::SingleThreadTaskRunner> io_task_runner,
     net::NetLog* net_log,
+    network::NetworkConnectionTracker* network_connection_tracker,
     std::unique_ptr<DataReductionProxyConfigValues> config_values,
     DataReductionProxyConfigurator* configurator,
     DataReductionProxyEventCreator* event_creator)
@@ -181,27 +195,29 @@ DataReductionProxyConfig::DataReductionProxyConfig(
       config_values_(std::move(config_values)),
       io_task_runner_(io_task_runner),
       net_log_(net_log),
+      network_connection_tracker_(network_connection_tracker),
       configurator_(configurator),
       event_creator_(event_creator),
-      connection_type_(net::NetworkChangeNotifier::GetConnectionType()),
+      connection_type_(network::mojom::ConnectionType::CONNECTION_UNKNOWN),
       network_properties_manager_(nullptr),
       weak_factory_(this) {
   DCHECK(io_task_runner_);
+  DCHECK(network_connection_tracker_);
   DCHECK(configurator);
   DCHECK(event_creator);
+
   // Constructed on the UI thread, but should be checked on the IO thread.
   thread_checker_.DetachFromThread();
 }
 
 DataReductionProxyConfig::~DataReductionProxyConfig() {
-  net::NetworkChangeNotifier::RemoveNetworkChangeObserver(this);
+  network_connection_tracker_->RemoveNetworkConnectionObserver(this);
 }
 
 void DataReductionProxyConfig::InitializeOnIOThread(
     const scoped_refptr<net::URLRequestContextGetter>&
         basic_url_request_context_getter,
-    const scoped_refptr<net::URLRequestContextGetter>&
-        url_request_context_getter,
+    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
     NetworkPropertiesManager* manager) {
   DCHECK(thread_checker_.CalledOnValidThread());
   network_properties_manager_ = manager;
@@ -210,14 +226,21 @@ void DataReductionProxyConfig::InitializeOnIOThread(
   secure_proxy_checker_.reset(
       new SecureProxyChecker(basic_url_request_context_getter));
   warmup_url_fetcher_.reset(new WarmupURLFetcher(
-      url_request_context_getter,
+      std::move(url_loader_factory),
       base::BindRepeating(
           &DataReductionProxyConfig::HandleWarmupFetcherResponse,
-          base::Unretained(this))));
+          base::Unretained(this)),
+      base::BindRepeating(&DataReductionProxyConfig::GetHttpRttEstimate,
+                          base::Unretained(this))));
 
   if (ShouldAddDefaultProxyBypassRules())
     AddDefaultProxyBypassRules();
-  net::NetworkChangeNotifier::AddNetworkChangeObserver(this);
+
+  network_connection_tracker_->AddNetworkConnectionObserver(this);
+  network_connection_tracker_->GetConnectionType(
+      &connection_type_,
+      base::BindOnce(&DataReductionProxyConfig::OnConnectionChanged,
+                     weak_factory_.GetWeakPtr()));
 }
 
 bool DataReductionProxyConfig::ShouldAddDefaultProxyBypassRules() const {
@@ -247,73 +270,11 @@ void DataReductionProxyConfig::ReloadConfig() {
   }
 }
 
-bool DataReductionProxyConfig::WasDataReductionProxyUsed(
-    const net::URLRequest* request,
-    DataReductionProxyTypeInfo* proxy_info) const {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK(request);
-  return IsDataReductionProxy(request->proxy_server(), proxy_info);
-}
-
-bool DataReductionProxyConfig::IsDataReductionProxyServerCore(
+base::Optional<DataReductionProxyTypeInfo>
+DataReductionProxyConfig::FindConfiguredDataReductionProxy(
     const net::ProxyServer& proxy_server) const {
   DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK(IsDataReductionProxy(proxy_server, nullptr /* proxy_info */));
-
-  const net::HostPortPair& host_port_pair = proxy_server.host_port_pair();
-
-  const std::vector<DataReductionProxyServer>& data_reduction_proxy_servers =
-      config_values_->proxies_for_http();
-
-  const auto proxy_it = std::find_if(
-      data_reduction_proxy_servers.begin(), data_reduction_proxy_servers.end(),
-      [&host_port_pair](const DataReductionProxyServer& proxy) {
-        return proxy.proxy_server().is_valid() &&
-               proxy.proxy_server().host_port_pair().Equals(host_port_pair);
-      });
-
-  return proxy_it->IsCoreProxy();
-}
-
-bool DataReductionProxyConfig::IsDataReductionProxy(
-    const net::ProxyServer& proxy_server,
-    DataReductionProxyTypeInfo* proxy_info) const {
-  DCHECK(thread_checker_.CalledOnValidThread());
-
-  if (!proxy_server.is_valid() || proxy_server.is_direct())
-    return false;
-
-  // Only compare the host port pair of the |proxy_server| since the proxy
-  // scheme of the stored data reduction proxy may be different than the proxy
-  // scheme of |proxy_server|. This may happen even when the |proxy_server| is a
-  // valid data reduction proxy. As an example, the stored data reduction proxy
-  // may have a proxy scheme of HTTPS while |proxy_server| may have QUIC as the
-  // proxy scheme.
-  const net::HostPortPair& host_port_pair = proxy_server.host_port_pair();
-
-  const std::vector<DataReductionProxyServer>& data_reduction_proxy_servers =
-      config_values_->proxies_for_http();
-
-  const auto proxy_it = std::find_if(
-      data_reduction_proxy_servers.begin(), data_reduction_proxy_servers.end(),
-      [&host_port_pair](const DataReductionProxyServer& proxy) {
-        return proxy.proxy_server().is_valid() &&
-               proxy.proxy_server().host_port_pair().Equals(host_port_pair);
-      });
-
-  if (proxy_it == data_reduction_proxy_servers.end())
-    return false;
-
-  if (!proxy_info)
-    return true;
-
-  proxy_info->proxy_servers =
-      DataReductionProxyServer::ConvertToNetProxyServers(
-          std::vector<DataReductionProxyServer>(
-              proxy_it, data_reduction_proxy_servers.end()));
-  proxy_info->proxy_index =
-      static_cast<size_t>(proxy_it - data_reduction_proxy_servers.begin());
-  return true;
+  return config_values_->FindConfiguredDataReductionProxy(proxy_server);
 }
 
 bool DataReductionProxyConfig::IsBypassedByDataReductionProxyLocalRules(
@@ -329,7 +290,7 @@ bool DataReductionProxyConfig::IsBypassedByDataReductionProxyLocalRules(
     return true;
   if (result.proxy_server().is_direct())
     return true;
-  return !IsDataReductionProxy(result.proxy_server(), nullptr);
+  return !FindConfiguredDataReductionProxy(result.proxy_server());
 }
 
 bool DataReductionProxyConfig::AreDataReductionProxiesBypassed(
@@ -374,7 +335,7 @@ bool DataReductionProxyConfig::AreProxiesBypassed(
       continue;
 
     base::TimeDelta delay;
-    if (IsDataReductionProxy(proxy, nullptr)) {
+    if (FindConfiguredDataReductionProxy(proxy)) {
       if (!IsProxyBypassed(retry_map, proxy, &delay))
         return false;
       if (delay < min_delay)
@@ -394,8 +355,7 @@ bool DataReductionProxyConfig::IsProxyBypassed(
     const net::ProxyServer& proxy_server,
     base::TimeDelta* retry_delay) const {
   DCHECK(thread_checker_.CalledOnValidThread());
-  net::ProxyRetryInfoMap::const_iterator found =
-      retry_map.find(proxy_server.ToURI());
+  auto found = retry_map.find(proxy_server.ToURI());
 
   if (found == retry_map.end() || found->second.bad_until < GetTicksNow()) {
     return false;
@@ -418,7 +378,7 @@ bool DataReductionProxyConfig::ContainsDataReductionProxy(
       proxy_rules.MapUrlSchemeToProxyList("http");
   if (http_proxy_list && !http_proxy_list->IsEmpty() &&
       // Sufficient to check only the first proxy.
-      IsDataReductionProxy(http_proxy_list->Get(), nullptr)) {
+      FindConfiguredDataReductionProxy(http_proxy_list->Get())) {
     return true;
   }
 
@@ -451,8 +411,6 @@ void DataReductionProxyConfig::HandleCaptivePortal() {
   DCHECK(thread_checker_.CalledOnValidThread());
 
   bool is_captive_portal = GetIsCaptivePortal();
-  UMA_HISTOGRAM_BOOLEAN("DataReductionProxy.CaptivePortalDetected.Platform",
-                        is_captive_portal);
   if (is_captive_portal == network_properties_manager_->IsCaptivePortal())
     return;
   network_properties_manager_->SetIsCaptivePortal(is_captive_portal);
@@ -503,7 +461,7 @@ DataReductionProxyConfig::GetProxyConnectionToProbe() const {
   const std::vector<DataReductionProxyServer>& proxies =
       DataReductionProxyConfig::GetProxiesForHttp();
 
-  for (const auto proxy_server : proxies) {
+  for (const DataReductionProxyServer& proxy_server : proxies) {
     // First find a proxy server that has never been probed before. Proxies that
     // have been probed before successfully do not need to be probed. On the
     // other hand, proxies that have been probed before unsuccessfully are
@@ -518,7 +476,7 @@ DataReductionProxyConfig::GetProxyConnectionToProbe() const {
     }
   }
 
-  for (const auto proxy_server : proxies) {
+  for (const DataReductionProxyServer& proxy_server : proxies) {
     // Now find any proxy server that can be probed. This would return proxies
     // that were probed before, the result was unsuccessful, but they have not
     // yet hit the maximum probe retry limit.
@@ -540,34 +498,37 @@ void DataReductionProxyConfig::HandleWarmupFetcherResponse(
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(IsFetchInFlight());
 
-  // If the probe times out, then proxy server information may not have been
-  // set by the URL fetcher.
-  bool timed_out_with_no_proxy_data =
-      (success_response == WarmupURLFetcher::FetchResult::kTimedOut &&
-       !proxy_server.is_valid());
+  base::Optional<DataReductionProxyTypeInfo> proxy_type_info =
+      FindConfiguredDataReductionProxy(proxy_server);
 
   // Check the proxy server used.
-  if (!timed_out_with_no_proxy_data &&
-      !IsDataReductionProxy(proxy_server, nullptr)) {
-    // No need to do anything here since the warmup fetch did not go through
-    // the data saver proxy.
+  if (!proxy_type_info && proxy_server.is_valid() &&
+      !proxy_server.is_direct()) {
+    // No need to do anything here since the warmup fetch went through
+    // a non-datasaver proxy.
     return;
   }
 
   bool is_secure_proxy = false;
   bool is_core_proxy = false;
 
-  if (!timed_out_with_no_proxy_data) {
+  if (proxy_type_info) {
+    DCHECK(proxy_server.is_valid());
+    DCHECK(!proxy_server.is_direct());
     is_secure_proxy = proxy_server.is_https() || proxy_server.is_quic();
-    is_core_proxy = IsDataReductionProxyServerCore(proxy_server);
+    is_core_proxy = proxy_type_info->proxy_servers[proxy_type_info->proxy_index]
+                        .IsCoreProxy();
+
     // The proxy server through which the warmup URL was fetched should match
     // the proxy server for which the warmup URL is in-flight.
     DCHECK(GetInFlightWarmupProxyDetails());
     DCHECK_EQ(is_secure_proxy, GetInFlightWarmupProxyDetails()->first);
     DCHECK_EQ(is_core_proxy, GetInFlightWarmupProxyDetails()->second);
   } else {
-    // When the probe times out, the proxy information may not be set. Fill-in
-    // the missing data using the proxy that was being probed.
+    DCHECK(!proxy_server.is_valid() || proxy_server.is_direct());
+    // When the probe times out or if the warmup URL was fetched via DIRECT
+    // proxy, the data reduction proxy information may not be set. Fill-in the
+    // missing data using the proxy that was being probed.
     is_secure_proxy = warmup_url_fetch_in_flight_secure_proxy_;
     is_core_proxy = warmup_url_fetch_in_flight_core_proxy_;
   }
@@ -670,23 +631,26 @@ void DataReductionProxyConfig::HandleSecureProxyCheckResponse(
   }
 }
 
-void DataReductionProxyConfig::OnNetworkChanged(
-    net::NetworkChangeNotifier::ConnectionType type) {
+void DataReductionProxyConfig::OnConnectionChanged(
+    network::mojom::ConnectionType type) {
   DCHECK(thread_checker_.CalledOnValidThread());
 
   connection_type_ = type;
   RecordNetworkChangeEvent(NETWORK_CHANGED);
 
-  if (!get_network_id_task_runner_) {
-    ContinueNetworkChanged(GetCurrentNetworkID());
+#if defined(OS_CHROMEOS)
+  if (get_network_id_asynchronously_) {
+    base::PostTaskAndReplyWithResult(
+        g_get_network_id_task_runner.Get().get(), FROM_HERE,
+        base::BindOnce(&DoGetCurrentNetworkID,
+                       base::Unretained(network_connection_tracker_)),
+        base::BindOnce(&DataReductionProxyConfig::ContinueNetworkChanged,
+                       weak_factory_.GetWeakPtr()));
     return;
   }
+#endif  // defined(OS_CHROMEOS)
 
-  base::PostTaskAndReplyWithResult(
-      get_network_id_task_runner_.get(), FROM_HERE,
-      base::BindOnce(&DoGetCurrentNetworkID),
-      base::BindOnce(&DataReductionProxyConfig::ContinueNetworkChanged,
-                     weak_factory_.GetWeakPtr()));
+  ContinueNetworkChanged(GetCurrentNetworkID());
 }
 
 void DataReductionProxyConfig::ContinueNetworkChanged(
@@ -764,7 +728,7 @@ void DataReductionProxyConfig::FetchWarmupProbeURL() {
     return;
   }
 
-  if (connection_type_ == net::NetworkChangeNotifier::CONNECTION_NONE) {
+  if (connection_type_ == network::mojom::ConnectionType::CONNECTION_NONE) {
     RecordWarmupURLFetchAttemptEvent(
         WarmupURLFetchAttemptEvent::kConnectionTypeNone);
     return;
@@ -798,49 +762,21 @@ size_t DataReductionProxyConfig::GetWarmupURLFetchAttemptCounts() const {
       warmup_url_fetch_in_flight_core_proxy_);
 }
 
+void DataReductionProxyConfig::OnRTTOrThroughputEstimatesComputed(
+    base::TimeDelta http_rtt) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  http_rtt_ = http_rtt;
+}
+
+base::Optional<base::TimeDelta> DataReductionProxyConfig::GetHttpRttEstimate()
+    const {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  return http_rtt_;
+}
+
 bool DataReductionProxyConfig::enabled_by_user_and_reachable() const {
   DCHECK(thread_checker_.CalledOnValidThread());
   return enabled_by_user_ && !unreachable_;
-}
-
-bool DataReductionProxyConfig::IsBlackListedOrDisabled(
-    const net::URLRequest& request,
-    const previews::PreviewsDecider& previews_decider,
-    previews::PreviewsType previews_type) const {
-  // Make sure request is not locally blacklisted.
-  // Pass in net::EFFECTIVE_CONNECTION_TYPE_4G as the threshold since we
-  // just want to check blacklisting here.
-  // TODO(crbug.com/720102): Consider new method to just check blacklist.
-  return !previews_decider.ShouldAllowPreviewAtECT(
-      request, previews_type, net::EFFECTIVE_CONNECTION_TYPE_4G,
-      std::vector<std::string>());
-}
-
-bool DataReductionProxyConfig::ShouldAcceptServerPreview(
-    const net::URLRequest& request,
-    const previews::PreviewsDecider& previews_decider) const {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK((request.load_flags() & net::LOAD_MAIN_FRAME_DEPRECATED) != 0);
-  DCHECK(!request.url().SchemeIsCryptographic());
-
-  if (!previews::params::ArePreviewsAllowed() ||
-      !base::FeatureList::IsEnabled(
-          features::kDataReductionProxyDecidesTransform)) {
-    return false;
-  }
-
-  if (IsBlackListedOrDisabled(request, previews_decider,
-                              previews::PreviewsType::LITE_PAGE) ||
-      IsBlackListedOrDisabled(request, previews_decider,
-                              previews::PreviewsType::LOFI)) {
-    UMA_HISTOGRAM_ENUMERATION(
-        "DataReductionProxy.Protocol.NotAcceptingTransform",
-        NOT_ACCEPTING_TRANSFORM_BLACKLISTED,
-        NOT_ACCEPTING_TRANSFORM_REASON_BOUNDARY);
-    return false;
-  }
-
-  return true;
 }
 
 base::TimeTicks DataReductionProxyConfig::GetTicksNow() const {
@@ -868,7 +804,7 @@ DataReductionProxyConfig::GetProxiesForHttp() const {
 
 std::string DataReductionProxyConfig::GetCurrentNetworkID() const {
   DCHECK(thread_checker_.CalledOnValidThread());
-  return DoGetCurrentNetworkID();
+  return DoGetCurrentNetworkID(network_connection_tracker_);
 }
 
 const NetworkPropertiesManager&
@@ -892,5 +828,11 @@ DataReductionProxyConfig::GetInFlightWarmupProxyDetails() const {
   return std::make_pair(warmup_url_fetch_in_flight_secure_proxy_,
                         warmup_url_fetch_in_flight_core_proxy_);
 }
+
+#if defined(OS_CHROMEOS)
+void DataReductionProxyConfig::EnableGetNetworkIdAsynchronously() {
+  get_network_id_asynchronously_ = true;
+}
+#endif  // defined(OS_CHROMEOS)
 
 }  // namespace data_reduction_proxy

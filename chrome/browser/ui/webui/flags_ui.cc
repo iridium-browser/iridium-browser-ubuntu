@@ -46,8 +46,8 @@
 #include "chrome/browser/chromeos/ownership/owner_settings_service_chromeos_factory.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/owner_flags_storage.h"
+#include "components/account_id/account_id.h"
 #include "components/pref_registry/pref_registry_syncable.h"
-#include "components/signin/core/account_id/account_id.h"
 #include "components/user_manager/user_manager.h"
 #endif
 
@@ -59,6 +59,8 @@ namespace {
 content::WebUIDataSource* CreateFlagsUIHTMLSource() {
   content::WebUIDataSource* source =
       content::WebUIDataSource::Create(chrome::kChromeUIFlagsHost);
+  source->OverrideContentSecurityPolicyScriptSrc(
+      "script-src chrome://resources 'self' 'unsafe-eval';");
 
   source->AddLocalizedString(flags_ui::kFlagsRestartNotice,
                              IDS_FLAGS_UI_RELAUNCH_NOTICE);
@@ -113,6 +115,9 @@ class FlagsDOMHandler : public WebUIMessageHandler {
   // Callback for the "enableExperimentalFeature" message.
   void HandleEnableExperimentalFeatureMessage(const base::ListValue* args);
 
+  // Callback for the "setOriginListFlag" message.
+  void HandleSetOriginListFlagMessage(const base::ListValue* args);
+
   // Callback for the "restartBrowser" message. Restores all tabs on restart.
   void HandleRestartBrowser(const base::ListValue* args);
 
@@ -137,6 +142,10 @@ void FlagsDOMHandler::RegisterMessages() {
       base::BindRepeating(
           &FlagsDOMHandler::HandleEnableExperimentalFeatureMessage,
           base::Unretained(this)));
+  web_ui()->RegisterMessageCallback(
+      flags_ui::kSetOriginListFlag,
+      base::BindRepeating(&FlagsDOMHandler::HandleSetOriginListFlagMessage,
+                          base::Unretained(this)));
   web_ui()->RegisterMessageCallback(
       flags_ui::kRestartBrowser,
       base::BindRepeating(&FlagsDOMHandler::HandleRestartBrowser,
@@ -210,6 +219,26 @@ void FlagsDOMHandler::HandleEnableExperimentalFeatureMessage(
                                       enable_str == "true");
 }
 
+void FlagsDOMHandler::HandleSetOriginListFlagMessage(
+    const base::ListValue* args) {
+  DCHECK(flags_storage_);
+  if (args->GetSize() != 2) {
+    NOTREACHED();
+    return;
+  }
+
+  std::string entry_internal_name;
+  std::string value_str;
+  if (!args->GetString(0, &entry_internal_name) ||
+      !args->GetString(1, &value_str) || entry_internal_name.empty()) {
+    NOTREACHED();
+    return;
+  }
+
+  about_flags::SetOriginListFlag(entry_internal_name, value_str,
+                                 flags_storage_.get());
+}
+
 void FlagsDOMHandler::HandleRestartBrowser(const base::ListValue* args) {
   DCHECK(flags_storage_);
 #if defined(OS_CHROMEOS)
@@ -255,6 +284,7 @@ void FinishInitialization(base::WeakPtr<FlagsUI> flags_ui,
                           Profile* profile,
                           FlagsDOMHandler* dom_handler,
                           bool current_user_is_owner) {
+  DCHECK(!profile->IsOffTheRecord());
   // If the flags_ui has gone away, there's nothing to do.
   if (!flags_ui)
     return;
@@ -296,16 +326,19 @@ FlagsUI::FlagsUI(content::WebUI* web_ui)
   web_ui->AddMessageHandler(std::move(handler_owner));
 
 #if defined(OS_CHROMEOS)
+  // Bypass possible incognito profile.
+  Profile* original_profile = profile->GetOriginalProfile();
   if (base::SysInfo::IsRunningOnChromeOS() &&
       chromeos::OwnerSettingsServiceChromeOSFactory::GetForBrowserContext(
-          profile)) {
+          original_profile)) {
     chromeos::OwnerSettingsServiceChromeOS* service =
         chromeos::OwnerSettingsServiceChromeOSFactory::GetForBrowserContext(
-            profile);
-    service->IsOwnerAsync(base::Bind(
-        &FinishInitialization, weak_factory_.GetWeakPtr(), profile, handler));
+            original_profile);
+    service->IsOwnerAsync(base::Bind(&FinishInitialization,
+                                     weak_factory_.GetWeakPtr(),
+                                     original_profile, handler));
   } else {
-    FinishInitialization(weak_factory_.GetWeakPtr(), profile, handler,
+    FinishInitialization(weak_factory_.GetWeakPtr(), original_profile, handler,
                          false /* current_user_is_owner */);
   }
 #else

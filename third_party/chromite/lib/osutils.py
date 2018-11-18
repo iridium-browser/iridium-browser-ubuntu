@@ -79,6 +79,21 @@ def ExpandPath(path):
   return os.path.realpath(os.path.expanduser(path))
 
 
+def AllocateFile(path, size, makedirs=False):
+  """Allocates a file of a certain |size| in |path|.
+
+  Args:
+    path: Path to allocate the file.
+    size: The length, in bytes, of the desired file.
+    makedirs: If True, create missing leading directories in the path.
+  """
+  if makedirs:
+    SafeMakedirs(os.path.dirname(path))
+
+  with open(path, 'w') as out:
+    out.truncate(size)
+
+
 def WriteFile(path, content, mode='w', atomic=False, makedirs=False,
               sudo=False):
   """Write the given content to disk.
@@ -111,8 +126,7 @@ def WriteFile(path, content, mode='w', atomic=False, makedirs=False,
       mv_target = path if not atomic else path + '.tmp'
       cros_build_lib.SudoRunCommand(['mv', write_path, mv_target],
                                     print_cmd=False, redirect_stderr=True)
-      cros_build_lib.SudoRunCommand(['chown', 'root:root', mv_target],
-                                    print_cmd=False, redirect_stderr=True)
+      Chown(mv_target, user='root', group='root')
       if atomic:
         cros_build_lib.SudoRunCommand(['mv', mv_target, path],
                                       print_cmd=False, redirect_stderr=True)
@@ -158,6 +172,30 @@ def Touch(path, makedirs=False, mode=None):
     os.chmod(path, mode)
   # Update timestamp to right now.
   os.utime(path, None)
+
+
+def Chown(path, user=None, group=None):
+  """Simple sudo chown path to the user.
+
+  Defaults to user running command. Does nothing if run as root user unless
+  a new owner is provided.
+
+  Args:
+    path: str - File/directory to chown.
+    user: str|int|None - User to chown the file to. Defaults to current user.
+    group: str|int|None - Group to assign the file to.
+  """
+  if user is None:
+    user = GetNonRootUser() or ''
+  else:
+    user = str(user)
+
+  group = '' if group is None else str(group)
+
+  if user or group:
+    owner = '%s:%s' % (user, group)
+    cros_build_lib.SudoRunCommand(['chown', owner, path], print_cmd=False,
+                                  redirect_stderr=True, redirect_stdout=True)
 
 
 def ReadFile(path, mode='r'):
@@ -277,11 +315,10 @@ def SafeMakedirsNonRoot(path, mode=0o775, user=None):
       created = should_chown = SafeMakedirs(path, mode=mode, sudo=True)
 
   if should_chown:
-    cros_build_lib.SudoRunCommand(['chown', user, path],
-                                  print_cmd=False,
-                                  redirect_stderr=True,
-                                  redirect_stdout=True)
+    Chown(path, user=user)
+
   return created
+
 
 class BadPathsException(Exception):
   """Raised by various osutils path manipulation functions on bad input."""
@@ -637,7 +674,6 @@ class TempDir(object):
       prefix: See tempfile.mkdtemp documentation.
       base_dir: The directory to place the temporary directory.
       set_global: Set this directory as the global temporary directory.
-      storage: The object that will have its 'tempdir' attribute set.
       delete: Whether the temporary dir should be deleted as part of cleanup.
           (default: True)
       sudo_rm: Whether the temporary dir will need root privileges to remove.
@@ -1101,7 +1137,8 @@ def ChdirContext(target_dir):
 class MountImageContext(object):
   """A context manager to mount an image."""
 
-  def __init__(self, image_file, destination, part_selects=(1, 3)):
+  def __init__(self, image_file, destination, part_selects=(1, 3),
+               mount_opts=('ro',)):
     """Construct a context manager object to actually do the job.
 
     Specified partitions will be mounted under |destination| according to the
@@ -1127,6 +1164,7 @@ class MountImageContext(object):
       part_selects: A list of partition numbers or labels to be mounted. If an
         element is an integer, it is matched as partition number, otherwise
         a partition label.
+      mount_opts: Tuple of options to mount with.
     """
     self._image_file = image_file
     self._gpt_table = cros_build_lib.GetImageDiskPartitionInfo(
@@ -1136,6 +1174,7 @@ class MountImageContext(object):
     # CWD being changed later.
     self._target_dir = ExpandPath(destination)
     self._part_selects = part_selects
+    self._mount_opts = mount_opts
     self._mounted = set()
     self._linked_labels = set()
 
@@ -1171,8 +1210,8 @@ class MountImageContext(object):
     if os.path.exists(dest_number):
       raise ValueError('Mount point %s already exists.' % dest_number)
 
-    MountImagePartition(self._image_file, part.number,
-                        dest_number, self._gpt_table)
+    MountImagePartition(self._image_file, part.number, dest_number,
+                        self._gpt_table, mount_opts=self._mount_opts)
     self._mounted.add(part)
 
     if not os.path.exists(dest_label):
@@ -1339,10 +1378,21 @@ def IterateMountPoints(proc_file='/proc/mounts'):
       yield mtab
 
 
-def ResolveSymlink(file_name, root='/'):
+def IsMounted(path):
+  """Determine if |path| is already mounted or not."""
+  path = os.path.realpath(path).rstrip('/')
+  mounts = [mtab.destination for mtab in IterateMountPoints()]
+  if path in mounts:
+    return True
+
+  return False
+
+
+def ResolveSymlinkInRoot(file_name, root):
   """Resolve a symlink |file_name| relative to |root|.
 
-  For example:
+  This can be used to resolve absolute symlinks within an alternative root
+  path (i.e. chroot). For example:
 
     ROOT-A/absolute_symlink --> /an/abs/path
     ROOT-A/relative_symlink --> a/relative/path

@@ -16,7 +16,7 @@ function openSingleImage(testVolumeName, volumeType) {
   var launchedPromise = launch(testVolumeName, volumeType, [ENTRIES.desktop]);
   return launchedPromise.then(function(args) {
     var WIDTH = 880;
-    var HEIGHT = 603; /* Inner height 570px + native header 33px. */
+    var HEIGHT = 602; /* Inner height 570px + native header 32px. */
     var appId = args.appId;
     var resizedWindowPromise = gallery.callRemoteTestUtil(
         'resizeWindow', appId, [WIDTH, HEIGHT]
@@ -43,8 +43,8 @@ function openSingleImage(testVolumeName, volumeType) {
     return resizedWindowPromise.then(function() {
       var rootElementPromise =
           gallery.waitForElement(appId, '.gallery[mode="slide"]');
-      var fullImagePromsie = gallery.waitForElement(
-          appId, '.gallery .image-container > .image');
+      var fullImagePromsie = gallery.waitForElementStyles(
+          appId, '.gallery .image-container > .image', ['any']);
       return Promise.all([rootElementPromise, fullImagePromsie]).
           then(function(args) {
             chrome.test.assertEq(760, args[1].renderedWidth);
@@ -114,7 +114,7 @@ function openMultipleImagesAndChangeToSlideMode(testVolumeName, volumeType) {
       // Press Enter key and mode should be changed to slide mode.
       return gallery.callRemoteTestUtil(
           'fakeKeyDown', appId,
-          [null /* active element */, 'Enter', 'Enter', false, false, false]);
+          [null /* active element */, 'Enter', false, false, false]);
     }).then(function() {
       // Wait until it changes to slide mode.
       return gallery.waitForElement(appId, '.gallery[mode="slide"]');
@@ -160,4 +160,28 @@ testcase.openMultipleImagesOnDrive = function() {
  */
 testcase.openMultipleImagesAndChangeToSlideModeOnDownloads = function() {
   return openMultipleImagesAndChangeToSlideMode('local', 'downloads');
+};
+
+/**
+ * Runs a test to check whether the rename-input field is hidden after
+ * deleting the only selected image in the gallery.
+ * @return {Promise} Promise to be fulfilled with on success.
+ */
+testcase.deleteSingleOpenPhotoOnDownloads = () => {
+  const launchedPromise = launch('local', 'downloads', [ENTRIES.desktop]);
+  let appId;
+  return launchedPromise.then(args => {
+    appId = args.appId;
+    return gallery.waitForSlideImage(appId, 800, 600, 'My Desktop Background');
+  }).then(() => {
+    // Click the delete button.
+    return gallery.waitAndClickElement(appId, 'button.delete');
+  }).then(result => {
+      chrome.test.assertTrue(!!result);
+    // Wait and click delete button of confirmation dialog.
+    return gallery.waitAndClickElement(appId, '.cr-dialog-ok');
+  }).then(() => {
+    // Check: The edit name field should hide.
+    return gallery.waitForElement(appId, '#rename-input[hidden]');
+  });
 };

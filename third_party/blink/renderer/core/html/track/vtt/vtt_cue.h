@@ -47,6 +47,8 @@ using VTTRegionMap = HeapHashMap<String, Member<VTTRegion>>;
 
 struct VTTDisplayParameters {
   STACK_ALLOCATED();
+
+ public:
   VTTDisplayParameters();
 
   FloatPoint position;
@@ -152,7 +154,7 @@ class VTTCue final : public TextTrackCue {
   String ToString() const override;
 #endif
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  private:
   VTTCue(Document&, double start_time, double end_time, const String& text);

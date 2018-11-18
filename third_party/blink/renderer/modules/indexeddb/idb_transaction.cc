@@ -25,10 +25,8 @@
 
 #include "third_party/blink/renderer/modules/indexeddb/idb_transaction.h"
 
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/dom/events/event_queue.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/modules/indexed_db_names.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_database.h"
@@ -38,8 +36,10 @@
 #include "third_party/blink/renderer/modules/indexeddb/idb_open_db_request.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_request_queue_item.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_tracing.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/bindings/v8_per_isolate_data.h"
+#include "third_party/blink/renderer/platform/wtf/functional.h"
 
 #include <memory>
 
@@ -90,7 +90,9 @@ IDBTransaction::IDBTransaction(ExecutionContext* execution_context,
       database_(db),
       mode_(kWebIDBTransactionModeReadOnly),
       scope_(scope),
-      state_(kActive) {
+      state_(kActive),
+      event_queue_(
+          EventQueue::Create(execution_context, TaskType::kInternalIndexedDB)) {
   DCHECK(database_);
   DCHECK(!scope_.IsEmpty()) << "Observer transactions must operate "
                                "on a well-defined set of stores";
@@ -106,7 +108,9 @@ IDBTransaction::IDBTransaction(ScriptState* script_state,
       id_(id),
       database_(db),
       mode_(mode),
-      scope_(scope) {
+      scope_(scope),
+      event_queue_(EventQueue::Create(ExecutionContext::From(script_state),
+                                      TaskType::kInternalIndexedDB)) {
   DCHECK(database_);
   DCHECK(!scope_.IsEmpty()) << "Non-versionchange transactions must operate "
                                "on a well-defined set of stores";
@@ -133,7 +137,9 @@ IDBTransaction::IDBTransaction(ExecutionContext* execution_context,
       open_db_request_(open_db_request),
       mode_(kWebIDBTransactionModeVersionChange),
       state_(kInactive),
-      old_database_metadata_(old_metadata) {
+      old_database_metadata_(old_metadata),
+      event_queue_(
+          EventQueue::Create(execution_context, TaskType::kInternalIndexedDB)) {
   DCHECK(database_);
   DCHECK(open_db_request_);
   DCHECK(scope_.IsEmpty());
@@ -157,6 +163,7 @@ void IDBTransaction::Trace(blink::Visitor* visitor) {
   visitor->Trace(object_store_map_);
   visitor->Trace(old_store_metadata_);
   visitor->Trace(deleted_indexes_);
+  visitor->Trace(event_queue_);
   EventTargetWithInlineData::Trace(visitor);
   ContextLifecycleObserver::Trace(visitor);
 }
@@ -175,7 +182,8 @@ IDBObjectStore* IDBTransaction::objectStore(const String& name,
                                             ExceptionState& exception_state) {
   if (IsFinished() || IsFinishing()) {
     exception_state.ThrowDOMException(
-        kInvalidStateError, IDBDatabase::kTransactionFinishedErrorMessage);
+        DOMExceptionCode::kInvalidStateError,
+        IDBDatabase::kTransactionFinishedErrorMessage);
     return nullptr;
   }
 
@@ -185,7 +193,8 @@ IDBObjectStore* IDBTransaction::objectStore(const String& name,
 
   if (!IsVersionChange() && !scope_.Contains(name)) {
     exception_state.ThrowDOMException(
-        kNotFoundError, IDBDatabase::kNoSuchObjectStoreErrorMessage);
+        DOMExceptionCode::kNotFoundError,
+        IDBDatabase::kNoSuchObjectStoreErrorMessage);
     return nullptr;
   }
 
@@ -193,7 +202,8 @@ IDBObjectStore* IDBTransaction::objectStore(const String& name,
   if (object_store_id == IDBObjectStoreMetadata::kInvalidId) {
     DCHECK(IsVersionChange());
     exception_state.ThrowDOMException(
-        kNotFoundError, IDBDatabase::kNoSuchObjectStoreErrorMessage);
+        DOMExceptionCode::kNotFoundError,
+        IDBDatabase::kNoSuchObjectStoreErrorMessage);
     return nullptr;
   }
 
@@ -333,7 +343,8 @@ void IDBTransaction::SetActive(bool active) {
 void IDBTransaction::abort(ExceptionState& exception_state) {
   if (state_ == kFinishing || state_ == kFinished) {
     exception_state.ThrowDOMException(
-        kInvalidStateError, IDBDatabase::kTransactionFinishedErrorMessage);
+        DOMExceptionCode::kInvalidStateError,
+        IDBDatabase::kTransactionFinishedErrorMessage);
     return;
   }
 
@@ -390,7 +401,7 @@ void IDBTransaction::OnResultReady() {
 }
 
 void IDBTransaction::OnAbort(DOMException* error) {
-  IDB_TRACE("IDBTransaction::onAbort");
+  IDB_TRACE1("IDBTransaction::onAbort", "txn.id", id_);
   if (!GetExecutionContext()) {
     Finished();
     return;
@@ -418,7 +429,7 @@ void IDBTransaction::OnAbort(DOMException* error) {
 }
 
 void IDBTransaction::OnComplete() {
-  IDB_TRACE("IDBTransaction::onComplete");
+  IDB_TRACE1("IDBTransaction::onComplete", "txn.id", id_);
   if (!GetExecutionContext()) {
     Finished();
     return;
@@ -507,8 +518,8 @@ const char* IDBTransaction::InactiveErrorMessage() const {
   return nullptr;
 }
 
-DispatchEventResult IDBTransaction::DispatchEventInternal(Event* event) {
-  IDB_TRACE("IDBTransaction::dispatchEvent");
+DispatchEventResult IDBTransaction::DispatchEventInternal(Event& event) {
+  IDB_TRACE1("IDBTransaction::dispatchEvent", "txn.id", id_);
   if (!GetExecutionContext()) {
     state_ = kFinished;
     return DispatchEventResult::kCanceledBeforeDispatch;
@@ -516,7 +527,7 @@ DispatchEventResult IDBTransaction::DispatchEventInternal(Event* event) {
   DCHECK_NE(state_, kFinished);
   DCHECK(has_pending_activity_);
   DCHECK(GetExecutionContext());
-  DCHECK_EQ(event->target(), this);
+  DCHECK_EQ(event.target(), this);
   state_ = kFinished;
 
   HeapVector<Member<EventTarget>> targets;
@@ -525,8 +536,8 @@ DispatchEventResult IDBTransaction::DispatchEventInternal(Event* event) {
 
   // FIXME: When we allow custom event dispatching, this will probably need to
   // change.
-  DCHECK(event->type() == EventTypeNames::complete ||
-         event->type() == EventTypeNames::abort);
+  DCHECK(event.type() == EventTypeNames::complete ||
+         event.type() == EventTypeNames::abort);
   DispatchEventResult dispatch_result =
       IDBEventDispatcher::Dispatch(event, targets);
   // FIXME: Try to construct a test where |this| outlives openDBRequest and we
@@ -546,9 +557,8 @@ void IDBTransaction::EnqueueEvent(Event* event) {
   if (!GetExecutionContext())
     return;
 
-  EventQueue* event_queue = GetExecutionContext()->GetEventQueue();
   event->SetTarget(this);
-  event_queue->EnqueueEvent(FROM_HERE, event);
+  event_queue_->EnqueueEvent(FROM_HERE, *event);
 }
 
 void IDBTransaction::AbortOutstandingRequests() {

@@ -9,7 +9,6 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop/message_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/scoped_task_environment.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -18,6 +17,7 @@
 #include "components/rlz/rlz_tracker_delegate.h"
 #include "net/url_request/url_request_test_util.h"
 #include "rlz/test/rlz_test_helpers.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if defined(OS_IOS)
@@ -72,8 +72,10 @@ class TestRLZTrackerDelegate : public RLZTrackerDelegate {
 
   bool IsOnUIThread() override { return true; }
 
-  net::URLRequestContextGetter* GetRequestContext() override {
-    return request_context_getter_.get();
+  scoped_refptr<network::SharedURLLoaderFactory> GetURLLoaderFactory()
+      override {
+    NOTIMPLEMENTED() << "If this is called, it needs an implementation.";
+    return nullptr;
   }
 
   bool GetBrand(std::string* brand) override {
@@ -340,13 +342,13 @@ void RlzLibTest::ExpectEventRecorded(const char* event_name, bool expected) {
 void RlzLibTest::ExpectRlzPingSent(bool expected) {
   std::string brand;
   delegate_->GetBrand(&brand);
-  EXPECT_EQ(expected, tracker_->was_ping_sent_for_brand(brand.c_str()));
+  EXPECT_EQ(expected, tracker_->was_ping_sent_for_brand(brand));
 }
 
 void RlzLibTest::ExpectReactivationRlzPingSent(bool expected) {
   std::string brand;
   delegate_->GetReactivationBrand(&brand);
-  EXPECT_EQ(expected, tracker_->was_ping_sent_for_brand(brand.c_str()));
+  EXPECT_EQ(expected, tracker_->was_ping_sent_for_brand(brand));
 }
 
 // The events that affect the different RLZ scenarios are the following:

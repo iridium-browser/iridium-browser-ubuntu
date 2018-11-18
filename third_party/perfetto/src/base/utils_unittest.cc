@@ -23,11 +23,13 @@
 
 #include "gtest/gtest.h"
 
+#include "perfetto/base/file_utils.h"
+
 namespace perfetto {
 namespace base {
 namespace {
 
-TEST(Utils, ArraySize) {
+TEST(UtilsTest, ArraySize) {
   char char_arr_1[1];
   char char_arr_4[4];
   EXPECT_EQ(1u, ArraySize(char_arr_1));
@@ -58,7 +60,7 @@ TEST(Utils, ArraySize) {
 
 int pipe_fd[2];
 
-TEST(Utils, EintrWrapper) {
+TEST(UtilsTest, EintrWrapper) {
   ASSERT_EQ(0, pipe(pipe_fd));
 
   struct sigaction sa = {};
@@ -79,7 +81,7 @@ TEST(Utils, EintrWrapper) {
   if (pid == 0 /* child */) {
     usleep(5000);
     kill(parent_pid, SIGUSR2);
-    ignore_result(write(pipe_fd[1], "foo\0", 4));
+    ignore_result(WriteAll(pipe_fd[1], "foo\0", 4));
     _exit(0);
   }
 
@@ -97,6 +99,20 @@ TEST(Utils, EintrWrapper) {
 
   // Restore the old handler.
   sigaction(SIGUSR2, &old_sa, nullptr);
+}
+
+TEST(UtilsTest, Align) {
+  EXPECT_EQ(0u, AlignUp<4>(0));
+  EXPECT_EQ(4u, AlignUp<4>(1));
+  EXPECT_EQ(4u, AlignUp<4>(3));
+  EXPECT_EQ(4u, AlignUp<4>(4));
+  EXPECT_EQ(8u, AlignUp<4>(5));
+  EXPECT_EQ(0u, AlignUp<16>(0));
+  EXPECT_EQ(16u, AlignUp<16>(1));
+  EXPECT_EQ(16u, AlignUp<16>(15));
+  EXPECT_EQ(16u, AlignUp<16>(16));
+  EXPECT_EQ(32u, AlignUp<16>(17));
+  EXPECT_EQ(0xffffff00u, AlignUp<16>(0xffffff00 - 1));
 }
 
 }  // namespace

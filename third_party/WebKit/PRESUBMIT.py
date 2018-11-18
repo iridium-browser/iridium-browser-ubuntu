@@ -8,26 +8,7 @@ See http://dev.chromium.org/developers/how-tos/depottools/presubmit-scripts
 for more details about the presubmit API built into gcl.
 """
 
-import imp
-import inspect
 import os
-import re
-
-try:
-    # pylint: disable=C0103
-    audit_non_blink_usage = imp.load_source(
-        'audit_non_blink_usage',
-        os.path.join(os.path.dirname(inspect.stack()[0][1]), 'Tools/Scripts/audit-non-blink-usage.py'))
-except IOError:
-    # One of the presubmit upload tests tries to exec this script, which doesn't interact so well
-    # with the import hack... just ignore the exception here and hope for the best.
-    pass
-
-
-_EXCLUDED_PATHS = (
-    # This directory is created and updated via a script.
-    r'^third_party[\\\/]WebKit[\\\/]Tools[\\\/]Scripts[\\\/]webkitpy[\\\/]thirdparty[\\\/]wpt[\\\/]wpt[\\\/].*',
-)
 
 
 def _CommonChecks(input_api, output_api):
@@ -37,14 +18,13 @@ def _CommonChecks(input_api, output_api):
 
     results = []
     results.extend(input_api.canned_checks.PanProjectChecks(
-        input_api, output_api, excluded_paths=_EXCLUDED_PATHS,
-        maxlen=800, license_header=license_header))
+        input_api, output_api, maxlen=800, license_header=license_header))
     return results
 
 
 def _CheckStyle(input_api, output_api):
-    style_checker_path = input_api.os_path.join(input_api.PresubmitLocalPath(),
-                                                'Tools', 'Scripts', 'check-webkit-style')
+    style_checker_path = input_api.os_path.join(input_api.PresubmitLocalPath(), '..', 'blink',
+                                                'tools', 'check_blink_style.py')
     args = [input_api.python_executable, style_checker_path, '--diff-files']
     files = []
     for f in input_api.AffectedFiles():
@@ -53,7 +33,7 @@ def _CheckStyle(input_api, output_api):
         if 'LayoutTests' + input_api.os_path.sep in file_path and 'TestExpectations' not in file_path:
             continue
         files.append(input_api.os_path.join('..', '..', file_path))
-    # Do not call check-webkit-style with empty affected file list if all
+    # Do not call check_blink_style.py with empty affected file list if all
     # input_api.AffectedFiles got filtered.
     if not files:
         return []
@@ -66,10 +46,10 @@ def _CheckStyle(input_api, output_api):
         _, stderrdata = child.communicate()
         if child.returncode != 0:
             results.append(output_api.PresubmitError(
-                'check-webkit-style failed', [stderrdata]))
+                'check_blink_style.py failed', [stderrdata]))
     except Exception as e:
         results.append(output_api.PresubmitNotifyResult(
-            'Could not run check-webkit-style', [str(e)]))
+            'Could not run check_blink_style.py', [str(e)]))
 
     return results
 
@@ -100,13 +80,28 @@ def _ArePaintOrCompositingDirectoriesModified(change):  # pylint: disable=C0103
         os.path.join('third_party', 'WebKit', 'LayoutTests', 'flag-specific',
                      'enable-slimming-paint-v2'),
         os.path.join('third_party', 'WebKit', 'LayoutTests', 'FlagExpectations',
-                     'enable-slimming-paint-v175'),
+                     'enable-blink-gen-property-trees'),
         os.path.join('third_party', 'WebKit', 'LayoutTests', 'flag-specific',
-                     'enable-slimming-paint-v175'),
+                     'enable-blink-gen-property-trees'),
     ]
     for affected_file in change.AffectedFiles():
         file_path = affected_file.LocalPath()
         if any(x in file_path for x in paint_or_compositing_paths):
+            return True
+    return False
+
+
+def __ArePropertyTreeGenerationExpectationsModified(change):  # pylint: disable=C0103
+    """Checks whether CL has changes to paint or compositing directories."""
+    interesting_paths = [
+        os.path.join('third_party', 'WebKit', 'LayoutTests', 'FlagExpectations',
+                     'enable-blink-gen-property-trees'),
+        os.path.join('third_party', 'WebKit', 'LayoutTests', 'flag-specific',
+                     'enable-blink-gen-property-trees'),
+    ]
+    for affected_file in change.AffectedFiles():
+        file_path = affected_file.LocalPath()
+        if any(x in file_path for x in interesting_paths):
             return True
     return False
 
@@ -141,16 +136,23 @@ def PostUploadHook(cl, change, output_api):  # pylint: disable=C0103
     if _ArePaintOrCompositingDirectoriesModified(change):
         results.extend(output_api.EnsureCQIncludeTrybotsAreAdded(
             cl,
-            ['master.tryserver.chromium.linux:'
+            ['luci.chromium.try:'
              'linux_layout_tests_slimming_paint_v2',
+             # TODO(kojii): Update linux_trusty_blink_rel to luci when migrated.
              'master.tryserver.blink:linux_trusty_blink_rel'],
             'Automatically added linux_layout_tests_slimming_paint_v2 and '
             'linux_trusty_blink_rel to run on CQ due to changes in paint or '
             'compositing directories.'))
+    if __ArePropertyTreeGenerationExpectationsModified(change):
+        results.extend(output_api.EnsureCQIncludeTrybotsAreAdded(
+            cl,
+            ['luci.chromium.try:linux-blink-gen-property-trees'],
+            'Automatically added linux-blink-gen-property-trees and '
+            'run on CQ due to changes in expectations'))
     if _AreLayoutNGDirectoriesModified(change):
         results.extend(output_api.EnsureCQIncludeTrybotsAreAdded(
             cl,
-            ['master.tryserver.chromium.linux:'
+            ['luci.chromium.try:'
              'linux_layout_tests_layout_ng'],
             'Automatically added linux_layout_tests_layout_ng to run on CQ due '
             'to changes in LayoutNG directories.'))

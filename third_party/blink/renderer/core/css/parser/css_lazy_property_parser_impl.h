@@ -16,18 +16,18 @@ class CSSLazyParsingState;
 // This class is responsible for lazily parsing a single CSS declaration list.
 class CSSLazyPropertyParserImpl : public CSSLazyPropertyParser {
  public:
-  CSSLazyPropertyParserImpl(size_t offset, CSSLazyParsingState*);
+  CSSLazyPropertyParserImpl(wtf_size_t offset, CSSLazyParsingState*);
 
   // CSSLazyPropertyParser:
   CSSPropertyValueSet* ParseProperties() override;
 
-  void Trace(blink::Visitor* visitor) {
+  void Trace(blink::Visitor* visitor) override {
     visitor->Trace(lazy_state_);
     CSSLazyPropertyParser::Trace(visitor);
   }
 
  private:
-  size_t offset_;
+  wtf_size_t offset_;
   Member<CSSLazyParsingState> lazy_state_;
 };
 

@@ -57,8 +57,7 @@ PepperURLLoaderHost::PepperURLLoaderHost(RendererPpapiHostImpl* host,
       total_bytes_to_be_sent_(-1),
       bytes_received_(0),
       total_bytes_to_be_received_(-1),
-      pending_response_(false),
-      weak_factory_(this) {
+      pending_response_(false) {
   DCHECK((main_document_loader && !resource) ||
          (!main_document_loader && resource));
 }
@@ -167,7 +166,7 @@ void PepperURLLoaderHost::DidReceiveData(const char* data, int data_length) {
   SendUpdateToPlugin(std::move(message));
 }
 
-void PepperURLLoaderHost::DidFinishLoading(double finish_time) {
+void PepperURLLoaderHost::DidFinishLoading() {
   // Note that |loader| will be NULL for document loads.
   SendUpdateToPlugin(
       std::make_unique<PpapiPluginMsg_URLLoader_FinishedLoading>(PP_OK));
@@ -253,7 +252,7 @@ int32_t PepperURLLoaderHost::InternalOnHostMsgOpen(
     return PP_ERROR_FAILED;
   }
 
-  web_request.SetRequestContext(WebURLRequest::kRequestContextPlugin);
+  web_request.SetRequestContext(blink::mojom::RequestContextType::PLUGIN);
   web_request.SetPluginChildID(renderer_ppapi_host_->GetPluginChildId());
 
   // Requests from plug-ins must skip service workers, see the comment in
@@ -261,7 +260,9 @@ int32_t PepperURLLoaderHost::InternalOnHostMsgOpen(
   DCHECK(web_request.GetSkipServiceWorker());
 
   WebAssociatedURLLoaderOptions options;
-  if (!has_universal_access_) {
+  if (has_universal_access_) {
+    options.grant_universal_access = true;
+  } else {
     // All other HTTP requests are untrusted.
     options.untrusted_http = true;
     if (filled_in_request_data.allow_cross_origin_requests) {
@@ -405,19 +406,10 @@ void PepperURLLoaderHost::SaveResponse(const WebURLResponse& response) {
     DCHECK(!pending_response_);
     pending_response_ = true;
 
-    DataFromWebURLResponse(
-        renderer_ppapi_host_,
-        pp_instance(),
-        response,
-        base::Bind(&PepperURLLoaderHost::DidDataFromWebURLResponse,
-                   weak_factory_.GetWeakPtr()));
+    SendUpdateToPlugin(
+        std::make_unique<PpapiPluginMsg_URLLoader_ReceivedResponse>(
+            DataFromWebURLResponse(response)));
   }
-}
-
-void PepperURLLoaderHost::DidDataFromWebURLResponse(
-    const ppapi::URLResponseInfoData& data) {
-  SendUpdateToPlugin(
-      std::make_unique<PpapiPluginMsg_URLLoader_ReceivedResponse>(data));
 }
 
 void PepperURLLoaderHost::UpdateProgress() {

@@ -45,10 +45,6 @@ ModulePass *createStripSymbolsPass(bool OnlyDebugInfo = false);
 //
 ModulePass *createStripNonDebugSymbolsPass();
 
-/// This function returns a new pass that downgrades the debug info in the
-/// module to line tables only.
-ModulePass *createStripNonLineTableDebugInfoPass();
-
 //===----------------------------------------------------------------------===//
 //
 // This pass removes llvm.dbg.declare intrinsics.
@@ -206,14 +202,14 @@ Pass *createReversePostOrderFunctionAttrsPass();
 ModulePass *createMergeFunctionsPass();
 
 //===----------------------------------------------------------------------===//
+/// createHotColdSplittingPass - This pass outlines cold blocks into a separate
+/// function(s).
+ModulePass *createHotColdSplittingPass();
+
+//===----------------------------------------------------------------------===//
 /// createPartialInliningPass - This pass inlines parts of functions.
 ///
 ModulePass *createPartialInliningPass();
-
-//===----------------------------------------------------------------------===//
-// createMetaRenamerPass - Rename everything with metasyntatic names.
-//
-ModulePass *createMetaRenamerPass();
 
 //===----------------------------------------------------------------------===//
 /// createBarrierNoopPass - This pass is purely a module pass barrier in a pass
@@ -231,7 +227,7 @@ enum class PassSummaryAction {
   Export, ///< Export information to summary.
 };
 
-/// \brief This pass lowers type metadata and the llvm.type.test intrinsic to
+/// This pass lowers type metadata and the llvm.type.test intrinsic to
 /// bitsets.
 ///
 /// The behavior depends on the summary arguments:
@@ -244,10 +240,10 @@ enum class PassSummaryAction {
 ModulePass *createLowerTypeTestsPass(ModuleSummaryIndex *ExportSummary,
                                      const ModuleSummaryIndex *ImportSummary);
 
-/// \brief This pass export CFI checks for use by external modules.
+/// This pass export CFI checks for use by external modules.
 ModulePass *createCrossDSOCFIPass();
 
-/// \brief This pass implements whole-program devirtualization using type
+/// This pass implements whole-program devirtualization using type
 /// metadata.
 ///
 /// The behavior depends on the summary arguments:

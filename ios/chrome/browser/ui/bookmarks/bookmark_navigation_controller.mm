@@ -12,14 +12,6 @@
 
 @implementation BookmarkNavigationController
 
-- (id)initWithRootViewController:(UIViewController*)rootViewController {
-  self = [super initWithRootViewController:rootViewController];
-  if (self) {
-    [self setNavigationBarHidden:YES];
-  }
-  return self;
-}
-
 - (void)viewDidLoad {
   [super viewDidLoad];
   self.view.backgroundColor = [UIColor whiteColor];

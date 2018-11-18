@@ -79,12 +79,23 @@ class TemplateURLRef {
       ContextualSearchParams();
       // Modern constructor, used when the content is sent in the HTTP header
       // instead of as CGI parameters.
+      // The |version| tell the server which version of the client is making
+      // this request.
+      // The |contextual_cards_version| tells the server which version of
+      // contextual cards integration is being used by the client.
       // The |home_country| is an ISO country code for the country that the user
       // considers their permanent home (which may be different from the country
       // they are currently visiting).  Pass an empty string if none available.
+      // The |previous_event_id| is an identifier previously returned by the
+      // server to identify that user interaction.
+      // The |previous_event_results| are the results of the user-interaction of
+      // that previous request.
+      // The "previous_xyz" parameters are documented in go/cs-sanitized.
       ContextualSearchParams(int version,
                              int contextual_cards_version,
-                             const std::string& home_country);
+                             const std::string& home_country,
+                             int64_t previous_event_id,
+                             int previous_event_results);
       ContextualSearchParams(const ContextualSearchParams& other);
       ~ContextualSearchParams();
 
@@ -103,6 +114,14 @@ class TemplateURLRef {
       // or an empty string if not available.  This indicates where the user
       // resides, not where they currently are.
       std::string home_country;
+
+      // An EventID from a previous interaction (sent by server, recorded by
+      // client).
+      int64_t previous_event_id;
+
+      // An encoded set of booleans that represent the interaction results from
+      // the previous event.
+      int previous_event_results;
     };
 
     // Estimates dynamic memory usage.
@@ -147,8 +166,8 @@ class TemplateURLRef {
     std::string prefetch_query;
     std::string prefetch_query_type;
 
-    // Additional query params provided by the suggest server.
-    std::string suggest_query_params;
+    // Additional query params to append to the request.
+    std::string additional_query_params;
 
     // If set, ReplaceSearchTerms() will automatically append any extra query
     // params specified via the --extra-search-query-params command-line
@@ -157,7 +176,7 @@ class TemplateURLRef {
     // about the query portion of the URL.  Since neither TemplateURLRef nor
     // indeed TemplateURL know whether a TemplateURL is the default search
     // engine, callers instead must set this manually.
-    bool append_extra_query_params;
+    bool append_extra_query_params_from_command_line;
 
     // The raw content of an image thumbnail that will be used as a query for
     // search-by-image frontend.
@@ -230,7 +249,7 @@ class TemplateURLRef {
   // If this TemplateURLRef is valid and contains one search term, this returns
   // the host/path of the URL, otherwise this returns an empty string.
   const std::string& GetHost(const SearchTermsData& search_terms_data) const;
-  const std::string& GetPath(const SearchTermsData& search_terms_data) const;
+  std::string GetPath(const SearchTermsData& search_terms_data) const;
 
   // If this TemplateURLRef is valid and contains one search term
   // in its query or ref, this returns the key of the search term,
@@ -396,6 +415,18 @@ class TemplateURLRef {
   // search_offset_.
   void ParseIfNecessary(const SearchTermsData& search_terms_data) const;
 
+  // Parses a wildcard out of |path|, putting the parsed path in |path_prefix_|
+  // and |path_suffix_| and setting |path_wildcard_present_| to true.
+  // In the absence of a wildcard, the full path will be contained in
+  // |path_prefix_| and |path_wildcard_present_| will be false.
+  void ParsePath(const std::string& path) const;
+
+  // Returns whether the path portion of this template URL is equal to the path
+  // in |url|, checking that URL is prefixed/suffixed by
+  // |path_prefix_|/|path_suffix_| if |path_wildcard_present_| is true, or equal
+  // to |path_prefix_| otherwise.
+  bool PathIsEqual(const GURL& url) const;
+
   // Extracts the query key and host from the url.
   void ParseHostAndSearchTermKey(
       const SearchTermsData& search_terms_data) const;
@@ -431,39 +462,44 @@ class TemplateURLRef {
 
   // If |type_| is |INDEXED|, this |index_in_owner_| is used instead to refer to
   // a url within our owner.
-  size_t index_in_owner_;
+  size_t index_in_owner_ = 0;
 
   // Whether the URL has been parsed.
-  mutable bool parsed_;
+  mutable bool parsed_ = false;
 
   // Whether the url was successfully parsed.
-  mutable bool valid_;
+  mutable bool valid_ = false;
 
   // The parsed URL. All terms have been stripped out of this with
   // replacements_ giving the index of the terms to replace.
   mutable std::string parsed_url_;
 
   // Do we support search term replacement?
-  mutable bool supports_replacements_;
+  mutable bool supports_replacements_ = false;
 
   // The replaceable parts of url (parsed_url_). These are ordered by index
   // into the string, and may be empty.
   mutable Replacements replacements_;
 
+  // Whether the path contains a wildcard.
+  mutable bool path_wildcard_present_ = false;
+
   // Host, port, path, key and location of the search term. These are only set
   // if the url contains one search term.
   mutable std::string host_;
   mutable std::string port_;
-  mutable std::string path_;
+  mutable std::string path_prefix_;
+  mutable std::string path_suffix_;
   mutable std::string search_term_key_;
-  mutable url::Parsed::ComponentType search_term_key_location_;
+  mutable url::Parsed::ComponentType search_term_key_location_ =
+      url::Parsed::QUERY;
   mutable std::string search_term_value_prefix_;
   mutable std::string search_term_value_suffix_;
 
   mutable PostParams post_params_;
 
   // Whether the contained URL is a pre-populated URL.
-  bool prepopulated_;
+  bool prepopulated_ = false;
 };
 
 
@@ -481,6 +517,9 @@ class TemplateURLRef {
 // is made a friend so that it can be the exception to this pattern.
 class TemplateURL {
  public:
+  using TemplateURLVector = std::vector<TemplateURL*>;
+  using OwnedTemplateURLVector = std::vector<std::unique_ptr<TemplateURL>>;
+
   enum Type {
     // Regular search engine.
     NORMAL,

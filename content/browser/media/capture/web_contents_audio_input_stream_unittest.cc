@@ -16,10 +16,12 @@
 #include "base/macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/task/post_task.h"
 #include "base/threading/thread.h"
 #include "base/time/time.h"
 #include "content/browser/media/capture/audio_mirroring_manager.h"
 #include "content/browser/media/capture/web_contents_tracker.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "media/audio/simple_sources.h"
@@ -55,9 +57,8 @@ const int kAnotherRenderFrameId = 1;
 
 const AudioParameters& TestAudioParameters() {
   static const AudioParameters params(
-      AudioParameters::AUDIO_FAKE,
-      media::CHANNEL_LAYOUT_STEREO,
-      AudioParameters::kAudioCDSampleRate, 16,
+      AudioParameters::AUDIO_FAKE, media::CHANNEL_LAYOUT_STEREO,
+      AudioParameters::kAudioCDSampleRate,
       AudioParameters::kAudioCDSampleRate / 100);
   return params;
 }
@@ -65,7 +66,7 @@ const AudioParameters& TestAudioParameters() {
 class MockAudioMirroringManager : public AudioMirroringManager {
  public:
   MockAudioMirroringManager() : AudioMirroringManager() {}
-  virtual ~MockAudioMirroringManager() {}
+  ~MockAudioMirroringManager() override {}
 
   MOCK_METHOD1(StartMirroring, void(MirroringDestination* destination));
   MOCK_METHOD1(StopMirroring, void(MirroringDestination* destination));
@@ -84,7 +85,7 @@ class MockWebContentsTracker : public WebContentsTracker {
   MOCK_METHOD0(Stop, void());
 
  private:
-  virtual ~MockWebContentsTracker() {}
+  ~MockWebContentsTracker() override {}
 
   DISALLOW_COPY_AND_ASSIGN(MockWebContentsTracker);
 };
@@ -131,9 +132,7 @@ class MockVirtualAudioInputStream : public VirtualAudioInputStream {
             Invoke(&real_, &VirtualAudioInputStream::RemoveInputProvider));
   }
 
-  ~MockVirtualAudioInputStream() {
-    DCHECK(real_stream_is_closed_);
-  }
+  ~MockVirtualAudioInputStream() override { DCHECK(real_stream_is_closed_); }
 
   MOCK_METHOD0(Open, bool());
   MOCK_METHOD1(Start, void(AudioInputStream::AudioInputCallback*));
@@ -284,8 +283,8 @@ class WebContentsAudioInputStreamTest : public testing::TestWithParam<bool> {
     // causes our mock to set |destination_|.  Block until that has happened.
     base::WaitableEvent done(base::WaitableEvent::ResetPolicy::AUTOMATIC,
                              base::WaitableEvent::InitialState::NOT_SIGNALED);
-    BrowserThread::PostTask(
-        BrowserThread::IO, FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, {BrowserThread::IO},
         base::BindOnce(&base::WaitableEvent::Signal, base::Unretained(&done)));
     done.Wait();
     ASSERT_TRUE(destination_);
@@ -474,7 +473,9 @@ TEST_P(WebContentsAudioInputStreamTest, MirroringOutputWithinSession) {
   RUN_ON_AUDIO_THREAD(Close);
 }
 
-TEST_P(WebContentsAudioInputStreamTest, MirroringNothingWithTargetChange) {
+// TODO(https://crbug.com/872340): Test appears to have timing-dependent flake.
+TEST_P(WebContentsAudioInputStreamTest,
+       DISABLED_MirroringNothingWithTargetChange) {
   RUN_ON_AUDIO_THREAD(Open);
   RUN_ON_AUDIO_THREAD(Start);
   RUN_ON_AUDIO_THREAD(ChangeMirroringTarget);

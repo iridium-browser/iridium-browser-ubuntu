@@ -38,6 +38,11 @@ public class AwMetricsServiceClient {
     private static boolean sIsClientReady; // Is the native AwMetricsServiceClient initialized?
     private static boolean sShouldEnable; // Have steps 1 and 2 passed?
 
+    // A GUID in text form is composed of 32 hex digits and 4 hyphens. These values must match those
+    // in aw_metrics_service_client.cc.
+    private static final int GUID_SIZE = 32 + 4;
+    private static final String GUID_FILE_NAME = "metrics_guid";
+
     private static boolean isAppOptedOut(Context appContext) {
         try {
             ApplicationInfo info = appContext.getPackageManager().getApplicationInfo(

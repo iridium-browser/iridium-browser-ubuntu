@@ -12,6 +12,7 @@
 #include "base/strings/string_split.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
+#include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_paths_internal.h"
 #include "chrome/common/chrome_result_codes.h"
@@ -19,6 +20,7 @@
 #include "chrome/installer/util/google_update_settings.h"
 #include "components/crash/core/common/crash_keys.h"
 #include "content/public/common/content_switches.h"
+#include "services/service_manager/embedder/switches.h"
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
 #include "components/upload_list/crash_upload_list.h"
@@ -71,6 +73,18 @@ void ChromeCrashReporterClient::GetProductNameAndVersion(
   *version = PRODUCT_VERSION;
 }
 
+void ChromeCrashReporterClient::GetProductNameAndVersion(
+    std::string* product_name,
+    std::string* version,
+    std::string* channel) {
+  const char* c_product_name;
+  const char* c_version;
+  GetProductNameAndVersion(&c_product_name, &c_version);
+  *product_name = c_product_name;
+  *version = c_version;
+  *channel = chrome::GetChannelName();
+}
+
 base::FilePath ChromeCrashReporterClient::GetReporterLogFilename() {
   return base::FilePath(CrashUploadList::kReporterLogFilename);
 }
@@ -85,9 +99,9 @@ bool ChromeCrashReporterClient::GetCrashDumpLocation(
   if (env->GetVar("BREAKPAD_DUMP_LOCATION", &alternate_crash_dump_location)) {
     base::FilePath crash_dumps_dir_path =
         base::FilePath::FromUTF8Unsafe(alternate_crash_dump_location);
-    PathService::Override(chrome::DIR_CRASH_DUMPS, crash_dumps_dir_path);
+    base::PathService::Override(chrome::DIR_CRASH_DUMPS, crash_dumps_dir_path);
   }
-  return PathService::Get(chrome::DIR_CRASH_DUMPS, crash_dir);
+  return base::PathService::Get(chrome::DIR_CRASH_DUMPS, crash_dir);
 }
 
 bool ChromeCrashReporterClient::IsRunningUnattended() {
@@ -133,7 +147,7 @@ bool ChromeCrashReporterClient::EnableBreakpadForProcess(
     const std::string& process_type) {
   return process_type == switches::kRendererProcess ||
          process_type == switches::kPpapiPluginProcess ||
-         process_type == switches::kZygoteProcess ||
+         process_type == service_manager::switches::kZygoteProcess ||
          process_type == switches::kGpuProcess ||
          process_type == switches::kUtilityProcess;
 }

@@ -31,7 +31,6 @@
 #import "third_party/blink/renderer/platform/mac/local_current_graphics_context.h"
 #import "third_party/blink/renderer/platform/mac/version_util_mac.h"
 #import "third_party/blink/renderer/platform/mac/web_core_ns_cell_extras.h"
-#import "third_party/blink/renderer/platform/scroll/scrollable_area.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 
 // This is a view whose sole purpose is to tell AppKit that it's flipped.
@@ -154,11 +153,10 @@ static void UpdateStates(NSCell* cell, ControlStates states) {
 }
 
 // Return a fake NSView whose sole purpose is to tell AppKit that it's flipped.
-NSView* ThemeMac::EnsuredView(ScrollableArea* scrollable_area) {
+NSView* ThemeMac::EnsuredView(const IntSize& size) {
   // Use a fake flipped view.
   static NSView* flipped_view = [[BlinkFlippedControl alloc] init];
-  [flipped_view
-      setFrameSize:NSSizeFromCGSize(CGSize(scrollable_area->ContentsSize()))];
+  [flipped_view setFrameSize:NSSizeFromCGSize(CGSize(size))];
 
   return flipped_view;
 }

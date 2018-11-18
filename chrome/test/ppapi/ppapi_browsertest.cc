@@ -4,7 +4,11 @@
 
 #include <stddef.h>
 
+#include <vector>
+
+#include "base/callback.h"
 #include "base/macros.h"
+#include "base/optional.h"
 #include "base/path_service.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/thread_restrictions.h"
@@ -21,18 +25,37 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "chrome/test/nacl/nacl_browsertest_util.h"
 #include "chrome/test/ppapi/ppapi_test.h"
+#include "chrome/test/ppapi/ppapi_test_select_file_dialog_factory.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/nacl/common/buildflags.h"
 #include "components/nacl/common/nacl_switches.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/common/service_manager_connection.h"
+#include "content/public/common/service_names.mojom.h"
 #include "content/public/common/url_constants.h"
+#include "content/public/test/browser_test_utils.h"
 #include "content/public/test/javascript_test_observer.h"
+#include "content/public/test/ppapi_test_utils.h"
 #include "content/public/test/test_renderer_host.h"
 #include "extensions/common/constants.h"
 #include "extensions/test/extension_test_message_listener.h"
+#include "mojo/public/cpp/bindings/binding.h"
+#include "mojo/public/cpp/bindings/interface_request.h"
+#include "mojo/public/cpp/system/data_pipe.h"
+#include "net/base/net_errors.h"
+#include "net/ssl/ssl_info.h"
 #include "ppapi/shared_impl/test_utils.h"
 #include "rlz/buildflags/buildflags.h"
+#include "services/network/public/cpp/features.h"
+#include "services/network/public/mojom/host_resolver.mojom.h"
+#include "services/network/public/mojom/network_context.mojom.h"
+#include "services/network/public/mojom/network_service_test.mojom.h"
+#include "services/network/public/mojom/tcp_socket.mojom.h"
+#include "services/network/public/mojom/tls_socket.mojom.h"
+#include "services/network/public/mojom/udp_socket.mojom.h"
+#include "services/network/test/test_network_context.h"
+#include "services/service_manager/public/cpp/connector.h"
 
 #if defined(OS_MACOSX)
 #include "base/mac/mac_util.h"
@@ -284,70 +307,715 @@ TEST_PPAPI_NACL(MAYBE_NACL_Graphics3D)
 TEST_PPAPI_NACL(ImageData)
 
 // TCPSocket and TCPSocketPrivate tests.
-#define RUN_TCPSOCKET_SUBTESTS \
-  RunTestViaHTTP( \
-      LIST_TEST(TCPSocket_Connect) \
-      LIST_TEST(TCPSocket_ReadWrite) \
-      LIST_TEST(TCPSocket_SetOption) \
-      LIST_TEST(TCPSocket_Listen) \
-      LIST_TEST(TCPSocket_Backlog) \
-      LIST_TEST(TCPSocket_Interface_1_0) \
-  )
+#define PPAPI_SOCKET_TEST(_test)                                         \
+  IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, _test) {                 \
+    RunTestViaHTTP(LIST_TEST(_test));                                    \
+  }                                                                      \
+  IN_PROC_BROWSER_TEST_F(PPAPINaClNewlibTest, MAYBE_PPAPI_NACL(_test)) { \
+    RunTestViaHTTP(LIST_TEST(_test));                                    \
+  }                                                                      \
+  IN_PROC_BROWSER_TEST_F(PPAPINaClGLibcTest, MAYBE_GLIBC(_test)) {       \
+    RunTestViaHTTP(LIST_TEST(_test));                                    \
+  }                                                                      \
+  IN_PROC_BROWSER_TEST_F(PPAPINaClPNaClTest, MAYBE_PPAPI_PNACL(_test)) { \
+    RunTestViaHTTP(LIST_TEST(_test));                                    \
+  }                                                                      \
+  IN_PROC_BROWSER_TEST_F(PPAPINaClPNaClNonSfiTest,                       \
+                         MAYBE_PNACL_NONSFI(_test)) {                    \
+    RunTestViaHTTP(LIST_TEST(_test));                                    \
+  }
 
-IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, TCPSocket) {
-  RUN_TCPSOCKET_SUBTESTS;
-}
-IN_PROC_BROWSER_TEST_F(PPAPINaClNewlibTest, MAYBE_PPAPI_NACL(TCPSocket)) {
-  RUN_TCPSOCKET_SUBTESTS;
-}
-IN_PROC_BROWSER_TEST_F(PPAPINaClPNaClTest, MAYBE_PPAPI_PNACL(TCPSocket)) {
-  RUN_TCPSOCKET_SUBTESTS;
-}
-IN_PROC_BROWSER_TEST_F(PPAPINaClPNaClNonSfiTest,
-                       MAYBE_PNACL_NONSFI(TCPSocket)) {
-  RUN_TCPSOCKET_SUBTESTS;
-}
+// Split tests into multiple tests, making it easier to isolate which tests are
+// failing, and reducing chance of timeout.
+PPAPI_SOCKET_TEST(TCPSocket_Connect);
+PPAPI_SOCKET_TEST(TCPSocket_ReadWrite);
+PPAPI_SOCKET_TEST(TCPSocket_SetOption);
+PPAPI_SOCKET_TEST(TCPSocket_Listen);
+PPAPI_SOCKET_TEST(TCPSocket_Backlog);
+PPAPI_SOCKET_TEST(TCPSocket_Interface_1_0);
+PPAPI_SOCKET_TEST(TCPSocket_UnexpectedCalls);
 
+TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(TCPServerSocketPrivate_Listen)
+TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(TCPServerSocketPrivate_Backlog)
+TEST_PPAPI_NACL(TCPServerSocketPrivate_Listen)
+TEST_PPAPI_NACL(TCPServerSocketPrivate_Backlog)
 
-TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(TCPServerSocketPrivate)
-TEST_PPAPI_NACL(TCPServerSocketPrivate)
+TEST_PPAPI_OUT_OF_PROCESS_WITH_SSL_SERVER(TCPSocketPrivate_Basic)
+TEST_PPAPI_OUT_OF_PROCESS_WITH_SSL_SERVER(TCPSocketPrivate_ReadWrite)
+TEST_PPAPI_OUT_OF_PROCESS_WITH_SSL_SERVER(TCPSocketPrivate_ReadWriteSSL)
+TEST_PPAPI_OUT_OF_PROCESS_WITH_SSL_SERVER(TCPSocketPrivate_ConnectAddress)
+TEST_PPAPI_OUT_OF_PROCESS_WITH_SSL_SERVER(TCPSocketPrivate_SetOption)
+TEST_PPAPI_OUT_OF_PROCESS_WITH_SSL_SERVER(TCPSocketPrivate_LargeRead)
 
-TEST_PPAPI_OUT_OF_PROCESS_WITH_SSL_SERVER(TCPSocketPrivate)
-
-TEST_PPAPI_NACL_WITH_SSL_SERVER(TCPSocketPrivate)
+TEST_PPAPI_NACL_WITH_SSL_SERVER(TCPSocketPrivate_Basic)
+TEST_PPAPI_NACL_WITH_SSL_SERVER(TCPSocketPrivate_ReadWrite)
+TEST_PPAPI_NACL_WITH_SSL_SERVER(TCPSocketPrivate_ReadWriteSSL)
+TEST_PPAPI_NACL_WITH_SSL_SERVER(TCPSocketPrivate_ConnectAddress)
+TEST_PPAPI_NACL_WITH_SSL_SERVER(TCPSocketPrivate_SetOption)
+TEST_PPAPI_NACL_WITH_SSL_SERVER(TCPSocketPrivate_LargeRead)
 
 TEST_PPAPI_OUT_OF_PROCESS_WITH_SSL_SERVER(TCPSocketPrivateTrusted)
 
-// UDPSocket tests.
+IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, TCPSocketPrivateCrash_Resolve) {
+  if (!base::FeatureList::IsEnabled(network::features::kNetworkService) ||
+      content::IsNetworkServiceRunningInProcess())
+    return;
 
-#define UDPSOCKET_TEST(_test) \
-  IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, _test) { \
-    RunTestViaHTTP(LIST_TEST(_test)); \
-  } \
-  IN_PROC_BROWSER_TEST_F(PPAPINaClNewlibTest, MAYBE_PPAPI_NACL(_test)) { \
-    RunTestViaHTTP(LIST_TEST(_test)); \
-  } \
-  IN_PROC_BROWSER_TEST_F(PPAPINaClGLibcTest, MAYBE_GLIBC(_test)) { \
-    RunTestViaHTTP(LIST_TEST(_test)); \
-  } \
-  IN_PROC_BROWSER_TEST_F(PPAPINaClPNaClTest, MAYBE_PPAPI_PNACL(_test)) { \
-    RunTestViaHTTP(LIST_TEST(_test)); \
-  } \
-  IN_PROC_BROWSER_TEST_F(PPAPINaClPNaClNonSfiTest, \
-                         MAYBE_PNACL_NONSFI(_test)) { \
-    RunTestViaHTTP(LIST_TEST(_test)); \
+  network::mojom::NetworkServiceTestPtr network_service_test;
+  content::ServiceManagerConnection::GetForProcess()
+      ->GetConnector()
+      ->BindInterface(content::mojom::kNetworkServiceName,
+                      &network_service_test);
+  network_service_test->CrashOnResolveHost("crash.com");
+
+  RunTestViaHTTP(STRIP_PREFIXES(TCPSocketPrivateCrash_Resolve));
+}
+
+namespace {
+
+// Different types of TCPSocket failures to simulate. *Error means to keep the
+// pipe alive while invoking the callback with an error code, and *PipeError
+// means to close the pipe that the method was invoked on (not the pipe passed
+// to the callback, if there was one) without invoking the callback.
+//
+// Note that closing a pipe after a successful operation isn't too interesting,
+// as it looks just like closing the pipe on the next operation, since the
+// message filter classes don't generally watch for pipe closure.
+enum class TCPFailureType {
+  // Makes creation calls for all socket types (server, connected, and bound)
+  // close all Mojo pipes without doing anything.
+  kClosePipeOnCreate,
+
+  kBindClosePipe,
+  kBindError,
+  kBindHangs,
+
+  // These apply to both CreateTCPServerSocket and TCPBoundSocket::Listen().
+  kCreateTCPServerSocketClosePipe,
+  kCreateTCPServerSocketError,
+  kCreateTCPServerSocketHangs,
+
+  kAcceptDropPipe,
+  kAcceptError,
+  kAcceptHangs,
+
+  kConnectClosePipe,
+  kConnectError,
+  kConnectHangs,
+  kWriteClosePipe,
+  kWriteError,
+  kReadClosePipe,
+  kReadError,
+
+  // These apply to all TCPConnectedSocket configuration methods.
+  kSetOptionsClosePipe,
+  kSetOptionsError,
+
+  kUpgradeToTLSClosePipe,
+  kUpgradeToTLSError,
+  kUpgradeToTLSHangs,
+  kSSLWriteClosePipe,
+  kSSLWriteError,
+  kSSLReadClosePipe,
+  kSSLReadError,
+};
+
+net::IPEndPoint LocalAddress() {
+  return net::IPEndPoint(net::IPAddress::IPv4Localhost(), 1234);
+}
+
+net::IPEndPoint RemoteAddress() {
+  return net::IPEndPoint(net::IPAddress::IPv4Localhost(), 12345);
+}
+
+// Use the same class for TCPConnectedSocket and, if it's upgraded,
+// TLSClientSocket, since the TLSClientSocket interface doesn't do anything.
+class MockTCPConnectedSocket : public network::mojom::TCPConnectedSocket,
+                               public network::mojom::TLSClientSocket {
+ public:
+  MockTCPConnectedSocket(
+      TCPFailureType tcp_failure_type,
+      network::mojom::TCPConnectedSocketRequest request,
+      network::mojom::SocketObserverPtr observer,
+      network::mojom::NetworkContext::CreateTCPConnectedSocketCallback callback)
+      : tcp_failure_type_(tcp_failure_type),
+        observer_(std::move(observer)),
+        binding_(this, std::move(request)),
+        tls_client_socket_binding_(this) {
+    if (tcp_failure_type_ == TCPFailureType::kConnectError) {
+      std::move(callback).Run(
+          net::ERR_FAILED, base::nullopt /* local_addr */,
+          base::nullopt /* peer_addr */,
+          mojo::ScopedDataPipeConsumerHandle() /* receive_stream */,
+          mojo::ScopedDataPipeProducerHandle() /* send_stream */);
+      return;
+    }
+
+    if (tcp_failure_type_ == TCPFailureType::kConnectHangs) {
+      create_connected_socket_callback_ = std::move(callback);
+      return;
+    }
+
+    mojo::DataPipe send_pipe;
+    mojo::DataPipe receive_pipe;
+
+    receive_pipe_handle_ = std::move(receive_pipe.producer_handle);
+    send_pipe_handle_ = std::move(send_pipe.consumer_handle);
+
+    std::move(callback).Run(net::OK, LocalAddress(), RemoteAddress(),
+                            std::move(receive_pipe.consumer_handle),
+                            std::move(send_pipe.producer_handle));
+    ClosePipeIfNeeded();
   }
 
-// Instead of one single test for all UDPSocket features (like it is done for
-// TCPSocket), split them into multiple, making it easier to isolate which tests
-// are failing.
-UDPSOCKET_TEST(UDPSocket_ReadWrite)
-UDPSOCKET_TEST(UDPSocket_SetOption)
-UDPSOCKET_TEST(UDPSocket_SetOption_1_0)
-UDPSOCKET_TEST(UDPSocket_SetOption_1_1)
-UDPSOCKET_TEST(UDPSocket_Broadcast)
-UDPSOCKET_TEST(UDPSocket_ParallelSend)
-UDPSOCKET_TEST(UDPSocket_Multicast)
+  MockTCPConnectedSocket(
+      TCPFailureType tcp_failure_type,
+      network::mojom::SocketObserverPtr observer,
+      network::mojom::TCPServerSocket::AcceptCallback callback)
+      : tcp_failure_type_(tcp_failure_type),
+        observer_(std::move(observer)),
+        binding_(this),
+        tls_client_socket_binding_(this) {
+    if (tcp_failure_type_ == TCPFailureType::kAcceptError) {
+      std::move(callback).Run(
+          net::ERR_FAILED, base::nullopt /* remote_addr */,
+          nullptr /* connected_socket */,
+          mojo::ScopedDataPipeConsumerHandle() /* receive_stream */,
+          mojo::ScopedDataPipeProducerHandle() /* send_stream */);
+      return;
+    }
+
+    if (tcp_failure_type_ == TCPFailureType::kAcceptHangs) {
+      accept_callback_ = std::move(callback);
+      return;
+    }
+
+    mojo::DataPipe send_pipe;
+    mojo::DataPipe receive_pipe;
+
+    receive_pipe_handle_ = std::move(receive_pipe.producer_handle);
+    send_pipe_handle_ = std::move(send_pipe.consumer_handle);
+
+    network::mojom::TCPConnectedSocketPtr connected_socket;
+    binding_.Bind(mojo::MakeRequest(&connected_socket));
+    std::move(callback).Run(net::OK, RemoteAddress(),
+                            std::move(connected_socket),
+                            std::move(receive_pipe.consumer_handle),
+                            std::move(send_pipe.producer_handle));
+    ClosePipeIfNeeded();
+  }
+
+  ~MockTCPConnectedSocket() override {}
+
+  // mojom::TCPConnectedSocket implementation:
+
+  void UpgradeToTLS(
+      const net::HostPortPair& host_port_pair,
+      network::mojom::TLSClientSocketOptionsPtr socket_options,
+      const net::MutableNetworkTrafficAnnotationTag& traffic_annotation,
+      network::mojom::TLSClientSocketRequest request,
+      network::mojom::SocketObserverPtr observer,
+      network::mojom::TCPConnectedSocket::UpgradeToTLSCallback callback)
+      override {
+    // Succeed or fail, keep these pipes open (Their state shouldn't matter when
+    // checking for failures).
+    observer_ = std::move(observer);
+    tls_client_socket_binding_.Bind(std::move(request));
+
+    if (tcp_failure_type_ == TCPFailureType::kUpgradeToTLSClosePipe) {
+      binding_.Close();
+      return;
+    }
+    if (tcp_failure_type_ == TCPFailureType::kUpgradeToTLSError) {
+      std::move(callback).Run(
+          net::ERR_FAILED, mojo::ScopedDataPipeConsumerHandle(),
+          mojo::ScopedDataPipeProducerHandle(), base::nullopt /* ssl_info */);
+      return;
+    }
+
+    if (tcp_failure_type_ == TCPFailureType::kUpgradeToTLSHangs) {
+      upgrade_to_tls_callback_ = std::move(callback);
+      return;
+    }
+
+    // Invoke callback immediately, without waiting for pipes to close - tests
+    // that use a real NetworkContext already make sure that the class correctly
+    // closes the sockets when upgrading.
+
+    mojo::DataPipe send_pipe;
+    mojo::DataPipe receive_pipe;
+    receive_pipe_handle_ = std::move(receive_pipe.producer_handle);
+    send_pipe_handle_ = std::move(send_pipe.consumer_handle);
+
+    std::move(callback).Run(net::OK, std::move(receive_pipe.consumer_handle),
+                            std::move(send_pipe.producer_handle),
+                            net::SSLInfo());
+
+    if (tcp_failure_type_ == TCPFailureType::kSSLWriteClosePipe) {
+      observer_.reset();
+      send_pipe_handle_.reset();
+    } else if (tcp_failure_type_ == TCPFailureType::kSSLWriteError) {
+      observer_->OnWriteError(net::ERR_FAILED);
+      send_pipe_handle_.reset();
+    } else if (tcp_failure_type_ == TCPFailureType::kSSLReadClosePipe) {
+      observer_.reset();
+      receive_pipe_handle_.reset();
+    } else if (tcp_failure_type_ == TCPFailureType::kSSLReadError) {
+      observer_->OnReadError(net::ERR_FAILED);
+      receive_pipe_handle_.reset();
+    }
+  }
+
+  void SetSendBufferSize(int send_buffer_size,
+                         SetSendBufferSizeCallback callback) override {
+    if (tcp_failure_type_ == TCPFailureType::kSetOptionsClosePipe) {
+      binding_.Close();
+      return;
+    }
+    DCHECK_EQ(tcp_failure_type_, TCPFailureType::kSetOptionsError);
+    std::move(callback).Run(net::ERR_FAILED);
+  }
+
+  void SetReceiveBufferSize(int send_buffer_size,
+                            SetSendBufferSizeCallback callback) override {
+    if (tcp_failure_type_ == TCPFailureType::kSetOptionsClosePipe) {
+      binding_.Close();
+      return;
+    }
+    DCHECK_EQ(tcp_failure_type_, TCPFailureType::kSetOptionsError);
+    std::move(callback).Run(net::ERR_FAILED);
+  }
+
+  void SetNoDelay(bool no_delay, SetNoDelayCallback callback) override {
+    if (tcp_failure_type_ == TCPFailureType::kSetOptionsClosePipe) {
+      binding_.Close();
+      return;
+    }
+    DCHECK_EQ(tcp_failure_type_, TCPFailureType::kSetOptionsError);
+    std::move(callback).Run(false);
+  }
+
+  void SetKeepAlive(bool enable,
+                    int32_t delay_secs,
+                    SetKeepAliveCallback callback) override {
+    NOTREACHED();
+  }
+
+ private:
+  void ClosePipeIfNeeded() {
+    if (tcp_failure_type_ == TCPFailureType::kWriteClosePipe) {
+      observer_.reset();
+      send_pipe_handle_.reset();
+    } else if (tcp_failure_type_ == TCPFailureType::kWriteError) {
+      observer_->OnWriteError(net::ERR_FAILED);
+      send_pipe_handle_.reset();
+    } else if (tcp_failure_type_ == TCPFailureType::kReadClosePipe) {
+      observer_.reset();
+      receive_pipe_handle_.reset();
+    } else if (tcp_failure_type_ == TCPFailureType::kReadError) {
+      observer_->OnReadError(net::ERR_FAILED);
+      receive_pipe_handle_.reset();
+    }
+  }
+
+  const TCPFailureType tcp_failure_type_;
+
+  network::mojom::SocketObserverPtr observer_;
+
+  // Callbacks held onto when simulating a hang.
+  network::mojom::NetworkContext::CreateTCPConnectedSocketCallback
+      create_connected_socket_callback_;
+  network::mojom::TCPServerSocket::AcceptCallback accept_callback_;
+  network::mojom::TCPConnectedSocket::UpgradeToTLSCallback
+      upgrade_to_tls_callback_;
+
+  mojo::ScopedDataPipeProducerHandle receive_pipe_handle_;
+  mojo::ScopedDataPipeConsumerHandle send_pipe_handle_;
+
+  mojo::Binding<network::mojom::TCPConnectedSocket> binding_;
+  mojo::Binding<network::mojom::TLSClientSocket> tls_client_socket_binding_;
+
+  DISALLOW_COPY_AND_ASSIGN(MockTCPConnectedSocket);
+};
+
+class MockTCPServerSocket : public network::mojom::TCPServerSocket {
+ public:
+  // CreateTCPServerSocket constructor.
+  MockTCPServerSocket(
+      TCPFailureType tcp_failure_type,
+      network::mojom::TCPServerSocketRequest request,
+      network::mojom::NetworkContext::CreateTCPServerSocketCallback callback)
+      : tcp_failure_type_(tcp_failure_type), binding_(this) {
+    binding_.Bind(std::move(request));
+    if (tcp_failure_type_ == TCPFailureType::kCreateTCPServerSocketError) {
+      std::move(callback).Run(net::ERR_FAILED, base::nullopt /* local_addr */);
+      return;
+    }
+    if (tcp_failure_type_ == TCPFailureType::kCreateTCPServerSocketHangs) {
+      create_server_socket_callback_ = std::move(callback);
+      return;
+    }
+    std::move(callback).Run(net::OK, LocalAddress());
+  }
+
+  // TCPBoundSocket::Listen constructor.
+  MockTCPServerSocket(TCPFailureType tcp_failure_type,
+                      network::mojom::TCPServerSocketRequest request,
+                      network::mojom::TCPBoundSocket::ListenCallback callback)
+      : tcp_failure_type_(tcp_failure_type), binding_(this) {
+    binding_.Bind(std::move(request));
+    if (tcp_failure_type_ == TCPFailureType::kCreateTCPServerSocketError) {
+      std::move(callback).Run(net::ERR_FAILED);
+      return;
+    }
+    if (tcp_failure_type_ == TCPFailureType::kCreateTCPServerSocketHangs) {
+      listen_callback_ = std::move(callback);
+      return;
+    }
+    std::move(callback).Run(net::OK);
+  }
+
+  ~MockTCPServerSocket() override {}
+
+  // TCPServerSocket implementation:
+  void Accept(network::mojom::SocketObserverPtr observer,
+              AcceptCallback callback) override {
+    // This falls through just to keep the observer alive.
+    if (tcp_failure_type_ == TCPFailureType::kAcceptDropPipe)
+      binding_.Close();
+    connected_socket_ = std::make_unique<MockTCPConnectedSocket>(
+        tcp_failure_type_, std::move(observer), std::move(callback));
+  }
+
+ private:
+  const TCPFailureType tcp_failure_type_;
+
+  std::unique_ptr<MockTCPConnectedSocket> connected_socket_;
+
+  // Callbacks held onto when simulating a hang.
+  network::mojom::NetworkContext::CreateTCPServerSocketCallback
+      create_server_socket_callback_;
+  network::mojom::TCPBoundSocket::ListenCallback listen_callback_;
+
+  mojo::Binding<network::mojom::TCPServerSocket> binding_;
+
+  DISALLOW_COPY_AND_ASSIGN(MockTCPServerSocket);
+};
+
+class MockTCPBoundSocket : public network::mojom::TCPBoundSocket {
+ public:
+  MockTCPBoundSocket(
+      TCPFailureType tcp_failure_type,
+      network::mojom::TCPBoundSocketRequest request,
+      network::mojom::NetworkContext::CreateTCPBoundSocketCallback callback)
+      : tcp_failure_type_(tcp_failure_type), binding_(this) {
+    binding_.Bind(std::move(request));
+    if (tcp_failure_type_ == TCPFailureType::kBindError) {
+      std::move(callback).Run(net::ERR_FAILED, base::nullopt /* local_addr */);
+      return;
+    }
+    if (tcp_failure_type_ == TCPFailureType::kBindHangs) {
+      callback_ = std::move(callback);
+      return;
+    }
+    std::move(callback).Run(net::OK, LocalAddress());
+  }
+
+  ~MockTCPBoundSocket() override {}
+
+  // mojom::TCPBoundSocket implementation:
+  void Listen(uint32_t backlog,
+              network::mojom::TCPServerSocketRequest request,
+              ListenCallback callback) override {
+    // If closing the pipe, create ServerSocket anyways, to keep |request|
+    // alive. The callback invocation will have no effect, since it uses the
+    // TCPBoundSocket's pipe, which was just closed.
+    if (tcp_failure_type_ == TCPFailureType::kCreateTCPServerSocketClosePipe)
+      binding_.Close();
+    server_socket_ = std::make_unique<MockTCPServerSocket>(
+        tcp_failure_type_, std::move(request), std::move(callback));
+  }
+
+  void Connect(
+      const net::AddressList& remote_addr,
+      network::mojom::TCPConnectedSocketOptionsPtr tcp_connected_socket_options,
+      network::mojom::TCPConnectedSocketRequest request,
+      network::mojom::SocketObserverPtr observer,
+      ConnectCallback callback) override {
+    if (tcp_failure_type_ == TCPFailureType::kConnectClosePipe)
+      binding_.Close();
+    connected_socket_ = std::make_unique<MockTCPConnectedSocket>(
+        tcp_failure_type_, std::move(request), std::move(observer),
+        std::move(callback));
+  }
+
+ private:
+  const TCPFailureType tcp_failure_type_;
+
+  // Needs to be destroyed after |binding_|, as it may be holding onto a
+  // callback bound to the Binding.
+  std::unique_ptr<MockTCPServerSocket> server_socket_;
+  std::unique_ptr<MockTCPConnectedSocket> connected_socket_;
+
+  // Callback held onto when simulating a hang.
+  network::mojom::NetworkContext::CreateTCPBoundSocketCallback callback_;
+
+  mojo::Binding<network::mojom::TCPBoundSocket> binding_;
+
+  DISALLOW_COPY_AND_ASSIGN(MockTCPBoundSocket);
+};
+
+class MockNetworkContext : public network::TestNetworkContext {
+ public:
+  explicit MockNetworkContext(TCPFailureType tcp_failure_type,
+                              network::mojom::NetworkContextRequest request)
+      : tcp_failure_type_(tcp_failure_type),
+        binding_(this, std::move(request)) {}
+
+  ~MockNetworkContext() override {}
+
+  // network::mojom::NetworkContext implementation:
+
+  void CreateTCPServerSocket(
+      const net::IPEndPoint& local_addr,
+      uint32_t backlog,
+      const net::MutableNetworkTrafficAnnotationTag& traffic_annotation,
+      network::mojom::TCPServerSocketRequest request,
+      CreateTCPServerSocketCallback callback) override {
+    // If closing the pipe, create ServerSocket anyways, to keep |request|
+    // alive. The callback invocation will have no effect, since it uses the
+    // TCPBoundSocket's pipe, which was just closed.
+    if (tcp_failure_type_ == TCPFailureType::kCreateTCPServerSocketClosePipe)
+      binding_.Close();
+    server_sockets_.emplace_back(std::make_unique<MockTCPServerSocket>(
+        tcp_failure_type_, std::move(request), std::move(callback)));
+  }
+
+  void CreateTCPConnectedSocket(
+      const base::Optional<net::IPEndPoint>& local_addr,
+      const net::AddressList& remote_addr_list,
+      network::mojom::TCPConnectedSocketOptionsPtr tcp_connected_socket_options,
+      const net::MutableNetworkTrafficAnnotationTag& traffic_annotation,
+      network::mojom::TCPConnectedSocketRequest socket,
+      network::mojom::SocketObserverPtr observer,
+      CreateTCPConnectedSocketCallback callback) override {
+    if (tcp_failure_type_ == TCPFailureType::kConnectClosePipe)
+      binding_.Close();
+    connected_sockets_.emplace_back(std::make_unique<MockTCPConnectedSocket>(
+        tcp_failure_type_, std::move(socket), std::move(observer),
+        std::move(callback)));
+  }
+
+  void CreateTCPBoundSocket(
+      const net::IPEndPoint& local_addr,
+      const net::MutableNetworkTrafficAnnotationTag& traffic_annotation,
+      network::mojom::TCPBoundSocketRequest request,
+      CreateTCPBoundSocketCallback callback) override {
+    if (tcp_failure_type_ == TCPFailureType::kBindClosePipe)
+      binding_.Close();
+    // These tests only create at most one object of a given type at a time.
+    bound_sockets_.emplace_back(std::make_unique<MockTCPBoundSocket>(
+        tcp_failure_type_, std::move(request), std::move(callback)));
+  }
+
+  void ResolveHost(
+      const net::HostPortPair& host,
+      network::mojom::ResolveHostParametersPtr optional_parameters,
+      network::mojom::ResolveHostClientPtr response_client) override {
+    response_client->OnComplete(net::OK, net::AddressList(LocalAddress()));
+  }
+
+ private:
+  TCPFailureType tcp_failure_type_;
+
+  std::vector<std::unique_ptr<MockTCPServerSocket>> server_sockets_;
+  std::vector<std::unique_ptr<MockTCPBoundSocket>> bound_sockets_;
+  std::vector<std::unique_ptr<MockTCPConnectedSocket>> connected_sockets_;
+
+  mojo::Binding<network::mojom::NetworkContext> binding_;
+
+  DISALLOW_COPY_AND_ASSIGN(MockNetworkContext);
+};
+
+// Runs a TCP test using a MockNetworkContext, through a Mojo pipe. Using a Mojo
+// pipe makes sure that everything happens asynchronously through a pipe.
+#define RUN_TCP_FAILURE_TEST(test_name, failure_type)                         \
+  do {                                                                        \
+    network::mojom::NetworkContextPtr network_context_proxy;                  \
+    MockNetworkContext network_context(                                       \
+        failure_type, mojo::MakeRequest(&network_context_proxy));             \
+    ppapi::SetPepperTCPNetworkContextForTesting(network_context_proxy.get()); \
+    RunTestViaHTTP(LIST_TEST(test_name));                                     \
+    ppapi::SetPepperTCPNetworkContextForTesting(nullptr);                     \
+  } while (false)
+
+}  // namespace
+
+// Macro for tests that use |WrappedUDPSocket| to simulate errors. |test_name|
+// and |_test| are separate values because there are often multiple ways to get
+// the same error pattern (Dropped mojo pipe and failed call, generally).
+#define TCP_SOCKET_FAILURE_TEST(test_name, _test, failure_type)              \
+  IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, test_name) {                 \
+    RUN_TCP_FAILURE_TEST(_test, failure_type);                               \
+  }                                                                          \
+  IN_PROC_BROWSER_TEST_F(PPAPINaClNewlibTest, MAYBE_PPAPI_NACL(test_name)) { \
+    RUN_TCP_FAILURE_TEST(_test, failure_type);                               \
+  }                                                                          \
+  IN_PROC_BROWSER_TEST_F(PPAPINaClGLibcTest, MAYBE_GLIBC(test_name)) {       \
+    RUN_TCP_FAILURE_TEST(_test, failure_type);                               \
+  }                                                                          \
+  IN_PROC_BROWSER_TEST_F(PPAPINaClPNaClTest, MAYBE_PPAPI_PNACL(test_name)) { \
+    RUN_TCP_FAILURE_TEST(_test, failure_type);                               \
+  }                                                                          \
+  IN_PROC_BROWSER_TEST_F(PPAPINaClPNaClNonSfiTest,                           \
+                         MAYBE_PNACL_NONSFI(test_name)) {                    \
+    RUN_TCP_FAILURE_TEST(_test, failure_type);                               \
+  }
+
+TCP_SOCKET_FAILURE_TEST(TCPSocket_ConnectClosePipe,
+                        TCPSocket_ConnectFails,
+                        TCPFailureType::kConnectClosePipe);
+TCP_SOCKET_FAILURE_TEST(TCPSocket_ConnectError,
+                        TCPSocket_ConnectFails,
+                        TCPFailureType::kConnectError);
+TCP_SOCKET_FAILURE_TEST(TCPSocket_ConnectHangs,
+                        TCPSocket_ConnectHangs,
+                        TCPFailureType::kConnectHangs);
+TCP_SOCKET_FAILURE_TEST(TCPSocket_WriteClosePipe,
+                        TCPSocket_WriteFails,
+                        TCPFailureType::kWriteClosePipe);
+TCP_SOCKET_FAILURE_TEST(TCPSocket_WriteError,
+                        TCPSocket_WriteFails,
+                        TCPFailureType::kWriteError);
+TCP_SOCKET_FAILURE_TEST(TCPSocket_ReadClosePipe,
+                        TCPSocket_ReadFails,
+                        TCPFailureType::kReadClosePipe);
+TCP_SOCKET_FAILURE_TEST(TCPSocket_ReadError,
+                        TCPSocket_ReadFails,
+                        TCPFailureType::kReadError);
+
+TCP_SOCKET_FAILURE_TEST(TCPSocket_SetSendBufferSizeClosePipe,
+                        TCPSocket_SetSendBufferSizeFails,
+                        TCPFailureType::kSetOptionsClosePipe);
+TCP_SOCKET_FAILURE_TEST(TCPSocket_SetSendBufferSizeError,
+                        TCPSocket_SetSendBufferSizeFails,
+                        TCPFailureType::kSetOptionsError);
+TCP_SOCKET_FAILURE_TEST(TCPSocket_SetReceiveBufferSizeClosePipe,
+                        TCPSocket_SetReceiveBufferSizeFails,
+                        TCPFailureType::kSetOptionsClosePipe);
+TCP_SOCKET_FAILURE_TEST(TCPSocket_SetReceiveBufferSizeError,
+                        TCPSocket_SetReceiveBufferSizeFails,
+                        TCPFailureType::kSetOptionsError);
+TCP_SOCKET_FAILURE_TEST(TCPSocket_SetNoDelayClosePipe,
+                        TCPSocket_SetNoDelayFails,
+                        TCPFailureType::kSetOptionsClosePipe);
+TCP_SOCKET_FAILURE_TEST(TCPSocket_SetNoDelayError,
+                        TCPSocket_SetNoDelayFails,
+                        TCPFailureType::kSetOptionsError);
+
+// Can't use TCPSocket_BindFailsConnectSucceeds for this one, because
+// BindClosePipe has to close the NetworkContext pipe.
+TCP_SOCKET_FAILURE_TEST(TCPSocket_BindClosePipe,
+                        TCPSocket_BindFails,
+                        TCPFailureType::kBindClosePipe);
+TCP_SOCKET_FAILURE_TEST(TCPSocket_BindError,
+                        TCPSocket_BindFailsConnectSucceeds,
+                        TCPFailureType::kBindError);
+TCP_SOCKET_FAILURE_TEST(TCPSocket_BindHangs,
+                        TCPSocket_BindHangs,
+                        TCPFailureType::kBindHangs);
+TCP_SOCKET_FAILURE_TEST(TCPSocket_ListenClosePipe,
+                        TCPSocket_ListenFails,
+                        TCPFailureType::kCreateTCPServerSocketClosePipe);
+TCP_SOCKET_FAILURE_TEST(TCPSocket_ListenError,
+                        TCPSocket_ListenFails,
+                        TCPFailureType::kCreateTCPServerSocketError);
+TCP_SOCKET_FAILURE_TEST(TCPSocket_ListenHangs,
+                        TCPSocket_ListenHangs,
+                        TCPFailureType::kCreateTCPServerSocketHangs);
+TCP_SOCKET_FAILURE_TEST(TCPSocket_AcceptClosePipe,
+                        TCPSocket_AcceptFails,
+                        TCPFailureType::kAcceptDropPipe);
+TCP_SOCKET_FAILURE_TEST(TCPSocket_AcceptError,
+                        TCPSocket_AcceptFails,
+                        TCPFailureType::kAcceptError);
+TCP_SOCKET_FAILURE_TEST(TCPSocket_AcceptHangs,
+                        TCPSocket_AcceptHangs,
+                        TCPFailureType::kAcceptHangs);
+TCP_SOCKET_FAILURE_TEST(TCPSocket_AcceptedSocketWriteClosePipe,
+                        TCPSocket_AcceptedSocketWriteFails,
+                        TCPFailureType::kWriteClosePipe);
+TCP_SOCKET_FAILURE_TEST(TCPSocket_AcceptedSocketWriteError,
+                        TCPSocket_AcceptedSocketWriteFails,
+                        TCPFailureType::kWriteError);
+TCP_SOCKET_FAILURE_TEST(TCPSocket_AcceptedSocketReadClosePipe,
+                        TCPSocket_AcceptedSocketReadFails,
+                        TCPFailureType::kReadClosePipe);
+TCP_SOCKET_FAILURE_TEST(TCPSocket_AcceptedSocketReadError,
+                        TCPSocket_AcceptedSocketReadFails,
+                        TCPFailureType::kReadError);
+TCP_SOCKET_FAILURE_TEST(TCPSocket_BindConnectClosePipe,
+                        TCPSocket_BindConnectFails,
+                        TCPFailureType::kConnectClosePipe);
+TCP_SOCKET_FAILURE_TEST(TCPSocket_BindConnectError,
+                        TCPSocket_BindConnectFails,
+                        TCPFailureType::kConnectError);
+TCP_SOCKET_FAILURE_TEST(TCPSocket_BindConnectHangs,
+                        TCPSocket_BindConnectHangs,
+                        TCPFailureType::kConnectHangs);
+
+TCP_SOCKET_FAILURE_TEST(TCPSocketPrivate_SSLHandshakeClosePipe,
+                        TCPSocketPrivate_SSLHandshakeFails,
+                        TCPFailureType::kUpgradeToTLSClosePipe);
+TCP_SOCKET_FAILURE_TEST(TCPSocketPrivate_SSLHandshakeError,
+                        TCPSocketPrivate_SSLHandshakeFails,
+                        TCPFailureType::kUpgradeToTLSError);
+TCP_SOCKET_FAILURE_TEST(TCPSocketPrivate_SSLHandshakeHangs,
+                        TCPSocketPrivate_SSLHandshakeHangs,
+                        TCPFailureType::kUpgradeToTLSHangs);
+TCP_SOCKET_FAILURE_TEST(TCPSocketPrivate_SSLWriteClosePipe,
+                        TCPSocketPrivate_SSLWriteFails,
+                        TCPFailureType::kSSLWriteClosePipe);
+TCP_SOCKET_FAILURE_TEST(TCPSocketPrivate_SSLWriteError,
+                        TCPSocketPrivate_SSLWriteFails,
+                        TCPFailureType::kSSLWriteError);
+TCP_SOCKET_FAILURE_TEST(TCPSocketPrivate_SSLReadClosePipe,
+                        TCPSocketPrivate_SSLReadFails,
+                        TCPFailureType::kSSLReadClosePipe);
+TCP_SOCKET_FAILURE_TEST(TCPSocketPrivate_SSLReadError,
+                        TCPSocketPrivate_SSLReadFails,
+                        TCPFailureType::kSSLReadError);
+
+TCP_SOCKET_FAILURE_TEST(TCPServerSocketPrivate_ListenClosePipe,
+                        TCPServerSocketPrivate_ListenFails,
+                        TCPFailureType::kCreateTCPServerSocketClosePipe);
+TCP_SOCKET_FAILURE_TEST(TCPServerSocketPrivate_ListenError,
+                        TCPServerSocketPrivate_ListenFails,
+                        TCPFailureType::kCreateTCPServerSocketError);
+TCP_SOCKET_FAILURE_TEST(TCPServerSocketPrivate_ListenHangs,
+                        TCPServerSocketPrivate_ListenHangs,
+                        TCPFailureType::kCreateTCPServerSocketHangs);
+TCP_SOCKET_FAILURE_TEST(TCPServerSocketPrivate_AcceptClosePipe,
+                        TCPServerSocketPrivate_AcceptFails,
+                        TCPFailureType::kAcceptDropPipe);
+TCP_SOCKET_FAILURE_TEST(TCPServerSocketPrivate_AcceptError,
+                        TCPServerSocketPrivate_AcceptFails,
+                        TCPFailureType::kAcceptError);
+TCP_SOCKET_FAILURE_TEST(TCPServerSocketPrivate_AcceptHangs,
+                        TCPServerSocketPrivate_AcceptHangs,
+                        TCPFailureType::kAcceptHangs);
+
+// UDPSocket tests.
+
+// Split tests into multiple tests, making it easier to isolate which tests are
+// failing.
+PPAPI_SOCKET_TEST(UDPSocket_ReadWrite)
+PPAPI_SOCKET_TEST(UDPSocket_SetOption)
+PPAPI_SOCKET_TEST(UDPSocket_SetOption_1_0)
+PPAPI_SOCKET_TEST(UDPSocket_SetOption_1_1)
+PPAPI_SOCKET_TEST(UDPSocket_Broadcast)
+PPAPI_SOCKET_TEST(UDPSocket_ParallelSend)
+PPAPI_SOCKET_TEST(UDPSocket_Multicast)
 
 // UDPSocketPrivate tests.
 TEST_PPAPI_OUT_OF_PROCESS_VIA_HTTP(UDPSocketPrivate_Connect)
@@ -358,6 +1026,222 @@ TEST_PPAPI_NACL(UDPSocketPrivate_Connect)
 TEST_PPAPI_NACL(UDPSocketPrivate_ConnectFailure)
 TEST_PPAPI_NACL(UDPSocketPrivate_Broadcast)
 TEST_PPAPI_NACL(UDPSocketPrivate_SetSocketFeatureErrors)
+
+namespace {
+
+// UDPSocket subclass that wraps a real network::mojom::UDPSocket, and can
+// simulate certain failures. Owns itself, and destroys itself when one of
+// its Mojo pipes is closed.
+class WrappedUDPSocket : public network::mojom::UDPSocket {
+ public:
+  // Type of failure to simulate. "DropPipe" failures correspond to dropping a
+  // Mojo pipe (Which typically happens if the network service crashes, or the
+  // parent NetworkContext is torn down). "Error" failures correspond to
+  // returning net::ERR_FAILED.
+  enum class FailureType {
+    kBindError,
+    kBindDropPipe,
+    kBroadcastError,
+    kBroadcastDropPipe,
+    kSendToDropPipe,
+    kSendToError,
+    kDropReceiverPipeOnConstruction,
+    kDropReceiverPipeOnReceiveMore,
+    kReadError,
+  };
+  WrappedUDPSocket(FailureType failure_type,
+                   network::mojom::NetworkContext* network_context,
+                   network::mojom::UDPSocketRequest socket_request,
+                   network::mojom::UDPSocketReceiverPtr socket_receiver)
+      : failure_type_(failure_type), binding_(this, std::move(socket_request)) {
+    if (failure_type == FailureType::kDropReceiverPipeOnConstruction)
+      socket_receiver.reset();
+    socket_receiver_ = std::move(socket_receiver);
+    network_context->CreateUDPSocket(mojo::MakeRequest(&wrapped_socket_),
+                                     nullptr);
+    binding_.set_connection_error_handler(
+        base::BindOnce(&WrappedUDPSocket::Close, base::Unretained(this)));
+    wrapped_socket_.set_connection_error_handler(
+        base::BindOnce(&WrappedUDPSocket::Close, base::Unretained(this)));
+  }
+
+  // network::mojom::UDPSocket implementation.
+  void Connect(const net::IPEndPoint& remote_addr,
+               network::mojom::UDPSocketOptionsPtr options,
+               ConnectCallback callback) override {
+    NOTREACHED();
+  }
+  void Bind(const net::IPEndPoint& local_addr,
+            network::mojom::UDPSocketOptionsPtr options,
+            BindCallback callback) override {
+    if (failure_type_ == FailureType::kBindError) {
+      std::move(callback).Run(net::ERR_FAILED, base::nullopt);
+      return;
+    }
+    if (failure_type_ == FailureType::kBindDropPipe) {
+      Close();
+      return;
+    }
+    wrapped_socket_->Bind(local_addr, std::move(options), std::move(callback));
+  }
+  void SetBroadcast(bool broadcast, SetBroadcastCallback callback) override {
+    if (failure_type_ == FailureType::kBroadcastError) {
+      std::move(callback).Run(net::ERR_FAILED);
+      return;
+    }
+    if (failure_type_ == FailureType::kBroadcastDropPipe) {
+      Close();
+      return;
+    }
+    wrapped_socket_->SetBroadcast(broadcast, std::move(callback));
+  }
+  void SetSendBufferSize(int32_t send_buffer_size,
+                         SetSendBufferSizeCallback callback) override {
+    wrapped_socket_->SetSendBufferSize(send_buffer_size, std::move(callback));
+  }
+  void SetReceiveBufferSize(int32_t receive_buffer_size,
+                            SetReceiveBufferSizeCallback callback) override {
+    wrapped_socket_->SetReceiveBufferSize(receive_buffer_size,
+                                          std::move(callback));
+  }
+  void JoinGroup(const net::IPAddress& group_address,
+                 JoinGroupCallback callback) override {
+    wrapped_socket_->JoinGroup(group_address, std::move(callback));
+  }
+  void LeaveGroup(const net::IPAddress& group_address,
+                  LeaveGroupCallback callback) override {
+    wrapped_socket_->LeaveGroup(group_address, std::move(callback));
+  }
+  void ReceiveMore(uint32_t num_additional_datagrams) override {
+    if (failure_type_ == FailureType::kDropReceiverPipeOnReceiveMore) {
+      socket_receiver_.reset();
+      return;
+    }
+    if (failure_type_ == FailureType::kReadError) {
+      for (uint32_t i = 0; i < num_additional_datagrams; ++i) {
+        socket_receiver_->OnReceived(net::ERR_FAILED, base::nullopt,
+                                     base::nullopt);
+      }
+      return;
+    }
+    // None of the tests using this fixture expect to read anything
+    // successfully, so just ignore this call if it isn't supposed to result in
+    // an error of some sort.
+  }
+  void ReceiveMoreWithBufferSize(uint32_t num_additional_datagrams,
+                                 uint32_t buffer_size) override {
+    NOTREACHED();
+  }
+  void SendTo(const net::IPEndPoint& dest_addr,
+              base::span<const uint8_t> data,
+              const net::MutableNetworkTrafficAnnotationTag& traffic_annotation,
+              SendToCallback callback) override {
+    if (failure_type_ == FailureType::kSendToError) {
+      std::move(callback).Run(net::ERR_FAILED);
+      return;
+    }
+    if (failure_type_ == FailureType::kSendToDropPipe) {
+      Close();
+      return;
+    }
+    wrapped_socket_->SendTo(dest_addr, data, traffic_annotation,
+                            std::move(callback));
+  }
+  void Send(base::span<const uint8_t> data,
+            const net::MutableNetworkTrafficAnnotationTag& traffic_annotation,
+            SendCallback callback) override {
+    NOTREACHED();
+  }
+  void Close() override {
+    // Deleting |this| before closing the bindings can cause Mojo to DCHECK if
+    // there's a pending callback.
+    binding_.Close();
+    socket_receiver_.reset();
+    delete this;
+  }
+
+ private:
+  const FailureType failure_type_;
+  mojo::Binding<network::mojom::UDPSocket> binding_;
+  network::mojom::UDPSocketPtr wrapped_socket_;
+
+  // Only populated on certain read FailureTypes.
+  network::mojom::UDPSocketReceiverPtr socket_receiver_;
+
+  DISALLOW_COPY_AND_ASSIGN(WrappedUDPSocket);
+};
+
+void TestCreateUDPSocketCallback(
+    WrappedUDPSocket::FailureType failure_type,
+    network::mojom::NetworkContext* network_context,
+    network::mojom::UDPSocketRequest socket_request,
+    network::mojom::UDPSocketReceiverPtr socket_receiver) {
+  // This will delete itself when one of its Mojo pipes is closed.
+  new WrappedUDPSocket(failure_type, network_context, std::move(socket_request),
+                       std::move(socket_receiver));
+}
+
+#define RUN_UDP_FAILURE_TEST(test_name, failure_type)                    \
+  do {                                                                   \
+    auto callback =                                                      \
+        base::BindRepeating(&TestCreateUDPSocketCallback, failure_type); \
+    ppapi::SetPepperUDPSocketCallackForTesting(&callback);               \
+    RunTestViaHTTP(LIST_TEST(test_name));                                \
+    ppapi::SetPepperUDPSocketCallackForTesting(nullptr);                 \
+  } while (false)
+
+}  // namespace
+
+// Macro for tests that use |WrappedUDPSocket| to simulate errors. |test_name|
+// and |_test| are separate values because there are often multiple ways to get
+// the same error pattern (Dropped mojo pipe and failed call, generally).
+#define UDPSOCKET_FAILURE_TEST(test_name, _test, failure_type)               \
+  IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, test_name) {                 \
+    RUN_UDP_FAILURE_TEST(_test, failure_type);                               \
+  }                                                                          \
+  IN_PROC_BROWSER_TEST_F(PPAPINaClNewlibTest, MAYBE_PPAPI_NACL(test_name)) { \
+    RUN_UDP_FAILURE_TEST(_test, failure_type);                               \
+  }                                                                          \
+  IN_PROC_BROWSER_TEST_F(PPAPINaClGLibcTest, MAYBE_GLIBC(test_name)) {       \
+    RUN_UDP_FAILURE_TEST(_test, failure_type);                               \
+  }                                                                          \
+  IN_PROC_BROWSER_TEST_F(PPAPINaClPNaClTest, MAYBE_PPAPI_PNACL(test_name)) { \
+    RUN_UDP_FAILURE_TEST(_test, failure_type);                               \
+  }                                                                          \
+  IN_PROC_BROWSER_TEST_F(PPAPINaClPNaClNonSfiTest,                           \
+                         MAYBE_PNACL_NONSFI(test_name)) {                    \
+    RUN_UDP_FAILURE_TEST(_test, failure_type);                               \
+  }
+
+UDPSOCKET_FAILURE_TEST(UDPSocket_BindError,
+                       UDPSocket_BindFails,
+                       WrappedUDPSocket::FailureType::kBindError);
+UDPSOCKET_FAILURE_TEST(UDPSocket_BindDropPipe,
+                       UDPSocket_BindFails,
+                       WrappedUDPSocket::FailureType::kBindDropPipe);
+UDPSOCKET_FAILURE_TEST(UDPSocket_SetBroadcastError,
+                       UDPSocket_SetBroadcastFails,
+                       WrappedUDPSocket::FailureType::kBroadcastError);
+UDPSOCKET_FAILURE_TEST(UDPSocket_SetBroadcastDropPipe,
+                       UDPSocket_SetBroadcastFails,
+                       WrappedUDPSocket::FailureType::kBroadcastDropPipe);
+UDPSOCKET_FAILURE_TEST(UDPSocket_SendToBeforeDropPipeFails,
+                       UDPSocket_SendToFails,
+                       WrappedUDPSocket::FailureType::kSendToDropPipe);
+UDPSOCKET_FAILURE_TEST(UDPSocket_DropPipeAfterBindSendToFails,
+                       UDPSocket_SendToFails,
+                       WrappedUDPSocket::FailureType::kSendToError);
+UDPSOCKET_FAILURE_TEST(UDPSocket_ReadError,
+                       UDPSocket_ReadFails,
+                       WrappedUDPSocket::FailureType::kReadError);
+UDPSOCKET_FAILURE_TEST(
+    UDPSocket_DropReceiverPipeOnConstruction,
+    UDPSocket_ReadFails,
+    WrappedUDPSocket::FailureType::kDropReceiverPipeOnConstruction);
+UDPSOCKET_FAILURE_TEST(
+    UDPSocket_DropReceiverPipeOnReceiveMore,
+    UDPSocket_ReadFails,
+    WrappedUDPSocket::FailureType::kDropReceiverPipeOnReceiveMore);
 
 // Disallowed socket tests.
 TEST_PPAPI_NACL_DISALLOWED_SOCKETS(HostResolverPrivateDisallowed)
@@ -372,6 +1256,21 @@ TEST_PPAPI_NACL_DISALLOWED_SOCKETS(UDPSocketPrivateDisallowed)
       LIST_TEST(HostResolver_Resolve) \
       LIST_TEST(HostResolver_ResolveIPv4) \
   )
+
+IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, HostResolverCrash_Basic) {
+  if (!base::FeatureList::IsEnabled(network::features::kNetworkService) ||
+      content::IsNetworkServiceRunningInProcess())
+    return;
+
+  network::mojom::NetworkServiceTestPtr network_service_test;
+  content::ServiceManagerConnection::GetForProcess()
+      ->GetConnector()
+      ->BindInterface(content::mojom::kNetworkServiceName,
+                      &network_service_test);
+  network_service_test->CrashOnResolveHost("crash.com");
+
+  RunTestViaHTTP(STRIP_PREFIXES(HostResolverCrash_Basic));
+}
 
 IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, HostResolver) {
   RUN_HOST_RESOLVER_SUBTESTS;
@@ -419,6 +1318,7 @@ TEST_PPAPI_NACL(HostResolverPrivate_ResolveIPv4)
   RunTestViaHTTP( \
       LIST_TEST(URLLoader_UntrustedSameOriginRestriction) \
       LIST_TEST(URLLoader_UntrustedCrossOriginRequest) \
+      LIST_TEST(URLLoader_UntrustedCorbEligibleRequest) \
       LIST_TEST(URLLoader_UntrustedJavascriptURLRestriction) \
       LIST_TEST(DISABLED_URLLoader_TrustedJavascriptURLRestriction) \
   )
@@ -427,6 +1327,7 @@ TEST_PPAPI_NACL(HostResolverPrivate_ResolveIPv4)
   RunTestViaHTTP( \
       LIST_TEST(URLLoader_UntrustedSameOriginRestriction) \
       LIST_TEST(URLLoader_UntrustedCrossOriginRequest) \
+      LIST_TEST(URLLoader_UntrustedCorbEligibleRequest) \
       LIST_TEST(URLLoader_UntrustedJavascriptURLRestriction) \
       LIST_TEST(DISABLED_URLLoader_TrustedJavascriptURLRestriction) \
   )
@@ -448,6 +1349,7 @@ TEST_PPAPI_NACL(HostResolverPrivate_ResolveIPv4)
   RunTestViaHTTP( \
       LIST_TEST(URLLoader_TrustedSameOriginRestriction) \
       LIST_TEST(URLLoader_TrustedCrossOriginRequest) \
+      LIST_TEST(URLLoader_TrustedCorbEligibleRequest) \
       LIST_TEST(URLLoader_TrustedHttpRequests) \
       LIST_TEST(URLLoader_XRequestedWithHeader) \
   )
@@ -674,8 +1576,25 @@ IN_PROC_BROWSER_TEST_F(PPAPIPrivateNaClPNaClNonSfiTest,
   RUN_FILEIO_PRIVATE_SUBTESTS;
 }
 
+#define SETUP_FOR_FILEREF_TESTS                                              \
+  const char kContents[] = "Hello from browser";                             \
+  base::ScopedAllowBlockingForTesting allow_blocking;                        \
+  base::ScopedTempDir temp_dir;                                              \
+  ASSERT_TRUE(temp_dir.CreateUniqueTempDir());                               \
+  base::FilePath existing_filename = temp_dir.GetPath().AppendASCII("foo");  \
+  ASSERT_EQ(                                                                 \
+      static_cast<int>(sizeof(kContents) - 1),                               \
+      base::WriteFile(existing_filename, kContents, sizeof(kContents) - 1)); \
+  PPAPITestSelectFileDialogFactory::SelectedFileInfoList file_info_list;     \
+  file_info_list.push_back(                                                  \
+      ui::SelectedFileInfo(existing_filename, existing_filename));           \
+  PPAPITestSelectFileDialogFactory test_dialog_factory(                      \
+      PPAPITestSelectFileDialogFactory::RESPOND_WITH_FILE_LIST,              \
+      file_info_list);
+
 // FileRef tests.
 #define RUN_FILEREF_SUBTESTS_1 \
+  SETUP_FOR_FILEREF_TESTS \
   RunTestViaHTTP( \
       LIST_TEST(FileRef_Create) \
       LIST_TEST(FileRef_GetFileSystemType) \
@@ -686,6 +1605,7 @@ IN_PROC_BROWSER_TEST_F(PPAPIPrivateNaClPNaClNonSfiTest,
   )
 
 #define RUN_FILEREF_SUBTESTS_2 \
+  SETUP_FOR_FILEREF_TESTS \
   RunTestViaHTTP( \
       LIST_TEST(FileRef_QueryAndTouchFile) \
       LIST_TEST(FileRef_DeleteFileAndDirectory) \
@@ -1200,14 +2120,6 @@ TEST_PPAPI_NACL(MAYBE_VideoDecoder)
 
 TEST_PPAPI_NACL(VideoEncoder)
 
-// VideoDestination doesn't work in content_browsertests.
-TEST_PPAPI_OUT_OF_PROCESS(VideoDestination)
-TEST_PPAPI_NACL(VideoDestination)
-
-// VideoSource doesn't work in content_browsertests.
-TEST_PPAPI_OUT_OF_PROCESS(VideoSource)
-TEST_PPAPI_NACL(VideoSource)
-
 // Printing doesn't work in content_browsertests.
 TEST_PPAPI_OUT_OF_PROCESS(Printing)
 
@@ -1222,7 +2134,7 @@ TEST_PPAPI_OUT_OF_PROCESS(Flash_GetProxyForURL)
 TEST_PPAPI_OUT_OF_PROCESS(Flash_GetSetting)
 TEST_PPAPI_OUT_OF_PROCESS(Flash_SetCrashData)
 // http://crbug.com/176822
-#if !defined(OS_WIN)
+#if !defined(OS_WIN) && !defined(OS_MACOSX)
 TEST_PPAPI_OUT_OF_PROCESS(FlashClipboard)
 #endif
 TEST_PPAPI_OUT_OF_PROCESS(FlashFile)
@@ -1250,7 +2162,7 @@ IN_PROC_BROWSER_TEST_F(OutOfProcessPPAPITest, FlashDRM) {
 }
 
 #if BUILDFLAG(ENABLE_NACL)
-class PackagedAppTest : public ExtensionBrowserTest {
+class PackagedAppTest : public extensions::ExtensionBrowserTest {
  public:
   explicit PackagedAppTest(const std::string& toolchain)
       : toolchain_(toolchain) { }
@@ -1259,7 +2171,7 @@ class PackagedAppTest : public ExtensionBrowserTest {
     base::FilePath data_dir;
     {
       base::ScopedAllowBlockingForTesting allow_blocking;
-      ASSERT_TRUE(PathService::Get(chrome::DIR_GEN_TEST_DATA, &data_dir));
+      ASSERT_TRUE(base::PathService::Get(chrome::DIR_GEN_TEST_DATA, &data_dir));
     }
     base::FilePath app_dir = data_dir.AppendASCII("ppapi")
                                      .AppendASCII("tests")
@@ -1304,7 +2216,7 @@ class NonSfiPackagedAppTest : public PackagedAppTest {
 
 // Load a packaged app, and wait for it to successfully post a "hello" message
 // back.
-#if defined(OS_WIN) || !defined(NDEBUG)
+#if defined(OS_WIN) || !defined(NDEBUG) || defined(OS_MACOSX)
 // flaky: crbug.com/707068
 // flaky on debug builds: crbug.com/709447
 IN_PROC_BROWSER_TEST_F(NewlibPackagedAppTest, DISABLED_SuccessfulLoad) {

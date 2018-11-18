@@ -30,10 +30,8 @@
 
 #include "third_party/blink/renderer/core/fileapi/file_error.h"
 
-#include "third_party/blink/public/platform/web_file_error.h"
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
 
 namespace blink {
@@ -74,37 +72,37 @@ const char kTypeMismatchErrorMessage[] =
 
 namespace {
 
-ExceptionCode ErrorCodeToExceptionCode(ErrorCode code) {
+DOMExceptionCode ErrorCodeToExceptionCode(ErrorCode code) {
   switch (code) {
     case kOK:
-      return 0;
+      return DOMExceptionCode::kNoError;
     case kNotFoundErr:
-      return kNotFoundError;
+      return DOMExceptionCode::kNotFoundError;
     case kSecurityErr:
-      return kSecurityError;
+      return DOMExceptionCode::kSecurityError;
     case kAbortErr:
-      return kAbortError;
+      return DOMExceptionCode::kAbortError;
     case kNotReadableErr:
-      return kNotReadableError;
+      return DOMExceptionCode::kNotReadableError;
     case kEncodingErr:
-      return kEncodingError;
+      return DOMExceptionCode::kEncodingError;
     case kNoModificationAllowedErr:
-      return kNoModificationAllowedError;
+      return DOMExceptionCode::kNoModificationAllowedError;
     case kInvalidStateErr:
-      return kInvalidStateError;
+      return DOMExceptionCode::kInvalidStateError;
     case kSyntaxErr:
-      return kSyntaxError;
+      return DOMExceptionCode::kSyntaxError;
     case kInvalidModificationErr:
-      return kInvalidModificationError;
+      return DOMExceptionCode::kInvalidModificationError;
     case kQuotaExceededErr:
-      return kQuotaExceededError;
+      return DOMExceptionCode::kQuotaExceededError;
     case kTypeMismatchErr:
-      return kTypeMismatchError;
+      return DOMExceptionCode::kTypeMismatchError;
     case kPathExistsErr:
-      return kPathExistsError;
+      return DOMExceptionCode::kPathExistsError;
     default:
       NOTREACHED();
-      return code;
+      return DOMExceptionCode::kUnknownError;
   }
 }
 
@@ -144,21 +142,130 @@ const char* ErrorCodeToMessage(ErrorCode code) {
   }
 }
 
+DOMExceptionCode FileErrorToExceptionCode(base::File::Error code) {
+  switch (code) {
+    case base::File::FILE_OK:
+      return DOMExceptionCode::kNoError;
+    case base::File::FILE_ERROR_FAILED:
+      return DOMExceptionCode::kInvalidStateError;
+    // TODO(https://crbug.com/883062): base::File::FILE_ERROR_EXISTS should map
+    // to kPathExistsError, but that currently breaks tests. Fix the test
+    // expectations and make the change.
+    case base::File::FILE_ERROR_EXISTS:
+    case base::File::FILE_ERROR_NOT_EMPTY:
+    case base::File::FILE_ERROR_INVALID_OPERATION:
+      return DOMExceptionCode::kInvalidModificationError;
+    case base::File::FILE_ERROR_TOO_MANY_OPENED:
+    case base::File::FILE_ERROR_NO_MEMORY:
+      return DOMExceptionCode::kUnknownError;
+    case base::File::FILE_ERROR_NOT_FOUND:
+      return DOMExceptionCode::kNotFoundError;
+    case base::File::FILE_ERROR_IN_USE:
+    case base::File::FILE_ERROR_ACCESS_DENIED:
+      return DOMExceptionCode::kNoModificationAllowedError;
+    case base::File::FILE_ERROR_NO_SPACE:
+      return DOMExceptionCode::kQuotaExceededError;
+    case base::File::FILE_ERROR_NOT_A_DIRECTORY:
+    case base::File::FILE_ERROR_NOT_A_FILE:
+      return DOMExceptionCode::kTypeMismatchError;
+    case base::File::FILE_ERROR_ABORT:
+      return DOMExceptionCode::kAbortError;
+    case base::File::FILE_ERROR_SECURITY:
+      return DOMExceptionCode::kSecurityError;
+    case base::File::FILE_ERROR_INVALID_URL:
+      return DOMExceptionCode::kEncodingError;
+    case base::File::FILE_ERROR_IO:
+      return DOMExceptionCode::kNotReadableError;
+    case base::File::FILE_ERROR_MAX:
+      NOTREACHED();
+      return DOMExceptionCode::kUnknownError;
+  }
+  NOTREACHED();
+  return DOMExceptionCode::kUnknownError;
+}
+
+const char* FileErrorToMessage(base::File::Error code) {
+  // Note that some of these do not set message. If message is null then the
+  // default message is used.
+  switch (code) {
+    case base::File::FILE_ERROR_NOT_FOUND:
+      return kNotFoundErrorMessage;
+    case base::File::FILE_ERROR_ACCESS_DENIED:
+      return kNoModificationAllowedErrorMessage;
+    case base::File::FILE_ERROR_FAILED:
+      return kInvalidStateErrorMessage;
+    case base::File::FILE_ERROR_ABORT:
+      return kAbortErrorMessage;
+    case base::File::FILE_ERROR_SECURITY:
+      return kSecurityErrorMessage;
+    case base::File::FILE_ERROR_NO_SPACE:
+      return kQuotaExceededErrorMessage;
+    case base::File::FILE_ERROR_INVALID_URL:
+      return kEncodingErrorMessage;
+    case base::File::FILE_ERROR_IO:
+      return kNotReadableErrorMessage;
+    case base::File::FILE_ERROR_EXISTS:
+      return kPathExistsErrorMessage;
+    case base::File::FILE_ERROR_NOT_A_DIRECTORY:
+    case base::File::FILE_ERROR_NOT_A_FILE:
+      return kTypeMismatchErrorMessage;
+    case base::File::FILE_OK:
+    case base::File::FILE_ERROR_INVALID_OPERATION:
+    case base::File::FILE_ERROR_NOT_EMPTY:
+    case base::File::FILE_ERROR_NO_MEMORY:
+    case base::File::FILE_ERROR_TOO_MANY_OPENED:
+    case base::File::FILE_ERROR_IN_USE:
+      // TODO(mek): More specific error messages for at least some of these
+      // errors.
+      return nullptr;
+    case base::File::FILE_ERROR_MAX:
+      NOTREACHED();
+      return nullptr;
+  }
+  NOTREACHED();
+  return nullptr;
+}
+
 }  // namespace
 
-void ThrowDOMException(ExceptionState& exception_state, ErrorCode code) {
+void ThrowDOMException(ExceptionState& exception_state,
+                       ErrorCode code,
+                       String message) {
   if (code == kOK)
     return;
 
   // SecurityError is special-cased, as we want to route those exceptions
-  // through ExceptionState::throwSecurityError.
+  // through ExceptionState::ThrowSecurityError.
   if (code == kSecurityErr) {
     exception_state.ThrowSecurityError(kSecurityErrorMessage);
     return;
   }
 
-  exception_state.ThrowDOMException(ErrorCodeToExceptionCode(code),
-                                    ErrorCodeToMessage(code));
+  if (message.IsNull()) {
+    message = ErrorCodeToMessage(code);
+  }
+
+  exception_state.ThrowDOMException(ErrorCodeToExceptionCode(code), message);
+}
+
+void ThrowDOMException(ExceptionState& exception_state,
+                       base::File::Error error,
+                       String message) {
+  if (error == base::File::FILE_OK)
+    return;
+
+  // SecurityError is special-cased, as we want to route those exceptions
+  // through ExceptionState::ThrowSecurityError.
+  if (error == base::File::FILE_ERROR_SECURITY) {
+    exception_state.ThrowSecurityError(kSecurityErrorMessage);
+    return;
+  }
+
+  if (message.IsNull()) {
+    message = FileErrorToMessage(error);
+  }
+
+  exception_state.ThrowDOMException(FileErrorToExceptionCode(error), message);
 }
 
 DOMException* CreateDOMException(ErrorCode code) {
@@ -167,19 +274,11 @@ DOMException* CreateDOMException(ErrorCode code) {
                               ErrorCodeToMessage(code));
 }
 
-STATIC_ASSERT_ENUM(kWebFileErrorNotFound, kNotFoundErr);
-STATIC_ASSERT_ENUM(kWebFileErrorSecurity, kSecurityErr);
-STATIC_ASSERT_ENUM(kWebFileErrorAbort, kAbortErr);
-STATIC_ASSERT_ENUM(kWebFileErrorNotReadable, kNotReadableErr);
-STATIC_ASSERT_ENUM(kWebFileErrorEncoding, kEncodingErr);
-STATIC_ASSERT_ENUM(kWebFileErrorNoModificationAllowed,
-                   kNoModificationAllowedErr);
-STATIC_ASSERT_ENUM(kWebFileErrorInvalidState, kInvalidStateErr);
-STATIC_ASSERT_ENUM(kWebFileErrorSyntax, kSyntaxErr);
-STATIC_ASSERT_ENUM(kWebFileErrorInvalidModification, kInvalidModificationErr);
-STATIC_ASSERT_ENUM(kWebFileErrorQuotaExceeded, kQuotaExceededErr);
-STATIC_ASSERT_ENUM(kWebFileErrorTypeMismatch, kTypeMismatchErr);
-STATIC_ASSERT_ENUM(kWebFileErrorPathExists, kPathExistsErr);
+DOMException* CreateDOMException(base::File::Error code) {
+  DCHECK_NE(code, base::File::FILE_OK);
+  return DOMException::Create(FileErrorToExceptionCode(code),
+                              FileErrorToMessage(code));
+}
 
 }  // namespace FileError
 

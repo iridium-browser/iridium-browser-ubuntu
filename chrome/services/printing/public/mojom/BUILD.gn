@@ -7,17 +7,21 @@ import("//mojo/public/tools/bindings/mojom.gni")
 mojom("mojom") {
   sources = [
     "constants.mojom",
+    "pdf_nup_converter.mojom",
     "pdf_render_settings.mojom",
     "pdf_to_pwg_raster_converter.mojom",
   ]
 
   deps = [
-    "//mojo/common:common_custom_types",
     "//ui/gfx/geometry/mojo",
+  ]
+
+  public_deps = [
+    "//mojo/public/mojom/base",
+    "//url/mojom:url_mojom_gurl",
   ]
 
   if (is_win) {
     sources += [ "pdf_to_emf_converter.mojom" ]
-    deps += [ "//mojo/public/mojom/base" ]
   }
 }

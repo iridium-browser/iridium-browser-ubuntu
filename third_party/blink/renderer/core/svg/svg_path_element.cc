@@ -70,7 +70,15 @@ float SVGPathElement::getTotalLength() {
 
 SVGPointTearOff* SVGPathElement::getPointAtLength(float length) {
   GetDocument().UpdateStyleAndLayoutIgnorePendingStylesheets();
-  FloatPoint point = SVGPathQuery(PathByteStream()).GetPointAtLength(length);
+  SVGPathQuery path_query(PathByteStream());
+  if (length < 0) {
+    length = 0;
+  } else {
+    float computed_length = path_query.GetTotalLength();
+    if (length > computed_length)
+      length = computed_length;
+  }
+  FloatPoint point = path_query.GetPointAtLength(length);
   return SVGPointTearOff::CreateDetached(point);
 }
 
@@ -115,13 +123,13 @@ void SVGPathElement::InvalidateMPathDependencies() {
 }
 
 Node::InsertionNotificationRequest SVGPathElement::InsertedInto(
-    ContainerNode* root_parent) {
+    ContainerNode& root_parent) {
   SVGGeometryElement::InsertedInto(root_parent);
   InvalidateMPathDependencies();
   return kInsertionDone;
 }
 
-void SVGPathElement::RemovedFrom(ContainerNode* root_parent) {
+void SVGPathElement::RemovedFrom(ContainerNode& root_parent) {
   SVGGeometryElement::RemovedFrom(root_parent);
   InvalidateMPathDependencies();
 }

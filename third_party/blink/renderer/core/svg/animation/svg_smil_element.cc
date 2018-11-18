@@ -54,7 +54,7 @@ class RepeatEvent final : public Event {
 
   int Repeat() const { return repeat_; }
 
-  virtual void Trace(blink::Visitor* visitor) { Event::Trace(visitor); }
+  void Trace(blink::Visitor* visitor) override { Event::Trace(visitor); }
 
  protected:
   RepeatEvent(const AtomicString& type,
@@ -92,7 +92,7 @@ class ConditionEventListener final : public EventListener {
 
   void DisconnectAnimation() { animation_ = nullptr; }
 
-  virtual void Trace(blink::Visitor* visitor) {
+  void Trace(blink::Visitor* visitor) override {
     visitor->Trace(animation_);
     visitor->Trace(condition_);
     EventListener::Trace(visitor);
@@ -302,10 +302,10 @@ void SVGSMILElement::Reset() {
 }
 
 Node::InsertionNotificationRequest SVGSMILElement::InsertedInto(
-    ContainerNode* root_parent) {
+    ContainerNode& root_parent) {
   SVGElement::InsertedInto(root_parent);
 
-  if (!root_parent->isConnected())
+  if (!root_parent.isConnected())
     return kInsertionDone;
 
   UseCounter::Count(GetDocument(), WebFeature::kSVGSMILElementInDocument);
@@ -338,8 +338,8 @@ Node::InsertionNotificationRequest SVGSMILElement::InsertedInto(
   return kInsertionDone;
 }
 
-void SVGSMILElement::RemovedFrom(ContainerNode* root_parent) {
-  if (root_parent->isConnected()) {
+void SVGSMILElement::RemovedFrom(ContainerNode& root_parent) {
+  if (root_parent.isConnected()) {
     ClearResourceAndEventBaseReferences();
     ClearConditions();
     SetTargetElement(nullptr);
@@ -381,8 +381,8 @@ SMILTime SVGSMILElement::ParseClockValue(const String& data) {
 
   double result = 0;
   bool ok;
-  size_t double_point_one = parse.find(':');
-  size_t double_point_two = parse.find(':', double_point_one + 1);
+  wtf_size_t double_point_one = parse.find(':');
+  wtf_size_t double_point_two = parse.find(':', double_point_one + 1);
   if (double_point_one == 2 && double_point_two == 5 && parse.length() >= 8) {
     result += parse.Substring(0, 2).ToUIntStrict(&ok) * 60 * 60;
     if (!ok)
@@ -415,7 +415,7 @@ bool SVGSMILElement::ParseCondition(const String& value,
 
   double sign = 1.;
   bool ok;
-  size_t pos = parse_string.find('+');
+  wtf_size_t pos = parse_string.find('+');
   if (pos == kNotFound) {
     pos = parse_string.find('-');
     if (pos != kNotFound)
@@ -533,17 +533,14 @@ void SVGSMILElement::ParseAttribute(const AttributeModificationParams& params) {
     }
     AnimationAttributeChanged();
   } else if (name == SVGNames::onbeginAttr) {
-    SetAttributeEventListener(
-        EventTypeNames::beginEvent,
-        CreateAttributeEventListener(this, name, value, EventParameterName()));
+    SetAttributeEventListener(EventTypeNames::beginEvent,
+                              CreateAttributeEventListener(this, name, value));
   } else if (name == SVGNames::onendAttr) {
-    SetAttributeEventListener(
-        EventTypeNames::endEvent,
-        CreateAttributeEventListener(this, name, value, EventParameterName()));
+    SetAttributeEventListener(EventTypeNames::endEvent,
+                              CreateAttributeEventListener(this, name, value));
   } else if (name == SVGNames::onrepeatAttr) {
-    SetAttributeEventListener(
-        EventTypeNames::repeatEvent,
-        CreateAttributeEventListener(this, name, value, EventParameterName()));
+    SetAttributeEventListener(EventTypeNames::repeatEvent,
+                              CreateAttributeEventListener(this, name, value));
   } else if (name == SVGNames::restartAttr) {
     if (value == "never")
       restart_ = kRestartNever;
@@ -743,7 +740,7 @@ SMILTime SVGSMILElement::FindInstanceTime(BeginOrEnd begin_or_end,
       minimum_time, SMILTimeWithOrigin::kParserOrigin);
   const SMILTimeWithOrigin* result = std::lower_bound(
       list.begin(), list.end(), dummy_time_with_origin, CompareTimes);
-  int index_of_result = result - list.begin();
+  int index_of_result = static_cast<int>(result - list.begin());
   if (index_of_result == size_of_list)
     return SMILTime::Unresolved();
   const SMILTime& current_time = list[index_of_result].Time();
@@ -1253,9 +1250,9 @@ void SVGSMILElement::DispatchPendingEvent(const AtomicString& event_type) {
   if (event_type == "repeatn") {
     unsigned repeat_event_count = repeat_event_count_list_.front();
     repeat_event_count_list_.EraseAt(0);
-    DispatchEvent(RepeatEvent::Create(event_type, repeat_event_count));
+    DispatchEvent(*RepeatEvent::Create(event_type, repeat_event_count));
   } else {
-    DispatchEvent(Event::Create(event_type));
+    DispatchEvent(*Event::Create(event_type));
   }
 }
 

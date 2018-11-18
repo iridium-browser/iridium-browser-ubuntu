@@ -9,6 +9,7 @@
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
+#include "base/message_loop/message_loop_current.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
@@ -18,7 +19,6 @@
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/main_function_params.h"
-#include "content/public/common/result_codes.h"
 #include "content/public/common/url_constants.h"
 #include "content/shell/android/shell_descriptors.h"
 #include "content/shell/browser/shell.h"
@@ -30,14 +30,14 @@
 #include "net/base/filename_util.h"
 #include "net/base/net_module.h"
 #include "net/grit/net_resources.h"
+#include "services/service_manager/embedder/result_codes.h"
 #include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "url/gurl.h"
 
 #if defined(OS_ANDROID)
-#include "base/message_loop/message_loop.h"
+#include "components/crash/content/browser/child_exit_observer_android.h"
 #include "components/crash/content/browser/child_process_crash_observer_android.h"
-#include "components/crash/content/browser/crash_dump_observer_android.h"
 #include "net/android/network_change_notifier_factory_android.h"
 #include "net/base/network_change_notifier.h"
 #endif
@@ -64,7 +64,7 @@ namespace {
 
 GURL GetStartupURL() {
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
-  if (command_line->HasSwitch(switches::kContentBrowserTest))
+  if (command_line->HasSwitch(switches::kBrowserTest))
     return GURL();
   const base::CommandLine::StringVector& args = command_line->GetArgs();
 
@@ -114,15 +114,9 @@ void ShellBrowserMainParts::PreMainMessageLoopStart() {
 #endif
 
 void ShellBrowserMainParts::PostMainMessageLoopStart() {
-#if defined(OS_ANDROID)
-  base::MessageLoopForUI::current()->Start();
-#endif
-
 #if defined(OS_CHROMEOS)
   chromeos::DBusThreadManager::Initialize();
-  bluez::BluezDBusManager::Initialize(
-      chromeos::DBusThreadManager::Get()->GetSystemBus(),
-      chromeos::DBusThreadManager::Get()->IsUsingFakes());
+  bluez::BluezDBusManager::Initialize();
 #elif defined(OS_LINUX)
   bluez::DBusBluezManagerWrapperLinux::Initialize();
 #endif
@@ -139,8 +133,7 @@ int ShellBrowserMainParts::PreEarlyInitialization() {
   net::NetworkChangeNotifier::SetFactory(
       new net::NetworkChangeNotifierFactoryAndroid());
 #endif
-  SetupFieldTrials();
-  return RESULT_CODE_NORMAL_EXIT;
+  return service_manager::RESULT_CODE_NORMAL_EXIT;
 }
 
 void ShellBrowserMainParts::InitializeBrowserContexts() {
@@ -155,43 +148,25 @@ void ShellBrowserMainParts::InitializeMessageLoopContext() {
                          gfx::Size());
 }
 
-void ShellBrowserMainParts::SetupFieldTrials() {
-  DCHECK(!field_trial_list_);
-  field_trial_list_.reset(new base::FieldTrialList(nullptr));
-
-  const base::CommandLine* command_line =
-      base::CommandLine::ForCurrentProcess();
-
-  // Ensure any field trials specified on the command line are initialized.
-  if (command_line->HasSwitch(::switches::kForceFieldTrials)) {
-    // Create field trials without activating them, so that this behaves in a
-    // consistent manner with field trials created from the server.
-    bool result = base::FieldTrialList::CreateTrialsFromString(
-        command_line->GetSwitchValueASCII(::switches::kForceFieldTrials),
-        std::set<std::string>());
-    CHECK(result) << "Invalid --" << ::switches::kForceFieldTrials
-                  << " list specified.";
-  }
-}
-
 int ShellBrowserMainParts::PreCreateThreads() {
 #if defined(OS_ANDROID)
   const base::CommandLine* command_line =
       base::CommandLine::ForCurrentProcess();
-  breakpad::CrashDumpObserver::Create();
+  crash_reporter::ChildExitObserver::Create();
   if (command_line->HasSwitch(switches::kEnableCrashReporter)) {
     base::FilePath crash_dumps_dir =
         command_line->GetSwitchValuePath(switches::kCrashDumpsDir);
-    breakpad::CrashDumpObserver::GetInstance()->RegisterClient(
-        std::make_unique<breakpad::ChildProcessCrashObserver>(
+    crash_reporter::ChildExitObserver::GetInstance()->RegisterClient(
+        std::make_unique<crash_reporter::ChildProcessCrashObserver>(
             crash_dumps_dir, kAndroidMinidumpDescriptor));
   }
 #endif
+
+  net_log_ = std::make_unique<ShellNetLog>("content_shell");
   return 0;
 }
 
 void ShellBrowserMainParts::PreMainMessageLoopRun() {
-  net_log_.reset(new ShellNetLog("content_shell"));
   InitializeBrowserContexts();
   Shell::Initialize();
   net::NetModule::SetResourceProvider(PlatformResourceProvider);
@@ -213,6 +188,11 @@ void ShellBrowserMainParts::PostMainMessageLoopRun() {
   ShellDevToolsManagerDelegate::StopHttpHandler();
   browser_context_.reset();
   off_the_record_browser_context_.reset();
+}
+
+void ShellBrowserMainParts::PreDefaultMainMessageLoopRun(
+    base::OnceClosure quit_closure) {
+  Shell::SetMainMessageLoopQuitClosure(std::move(quit_closure));
 }
 
 void ShellBrowserMainParts::PostDestroyThreads() {

@@ -135,8 +135,7 @@ class ExtensionTabUtil {
 
   // Platform specific logic moved to delegate. This should be set during
   // startup.
-  // |delegate| is a singleton instance and is leaked.
-  static void SetPlatformDelegate(Delegate* delegate);
+  static void SetPlatformDelegate(std::unique_ptr<Delegate> delegate);
 
   // Removes any privacy-sensitive fields from a Tab object if appropriate,
   // given the permissions of the extension and the tab in question.  The
@@ -179,7 +178,7 @@ class ExtensionTabUtil {
   static bool IsKillURL(const GURL& url);
 
   // Opens a tab for the specified |web_contents|.
-  static void CreateTab(content::WebContents* web_contents,
+  static void CreateTab(std::unique_ptr<content::WebContents> web_contents,
                         const std::string& extension_id,
                         WindowOpenDisposition disposition,
                         const gfx::Rect& initial_rect,

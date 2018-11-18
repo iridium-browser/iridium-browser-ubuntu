@@ -33,6 +33,7 @@
 #include "third_party/blink/renderer/core/fileapi/file_error.h"
 #include "third_party/blink/renderer/modules/filesystem/entry.h"
 #include "third_party/blink/renderer/modules/filesystem/file_system_callbacks.h"
+#include "third_party/blink/renderer/platform/wtf/functional.h"
 
 namespace blink {
 
@@ -76,7 +77,7 @@ class DirectoryReader::ErrorCallbackHelper final : public ErrorCallbackBase {
     return new ErrorCallbackHelper(reader);
   }
 
-  void Invoke(FileError::ErrorCode error) override { reader_->OnError(error); }
+  void Invoke(base::File::Error error) override { reader_->OnError(error); }
 
   void Trace(blink::Visitor* visitor) override {
     visitor->Trace(reader_);
@@ -102,7 +103,7 @@ void DirectoryReader::readEntries(V8EntriesCallback* entries_callback,
                                 ErrorCallbackHelper::Create(this));
   }
 
-  if (error_) {
+  if (error_ != base::File::FILE_OK) {
     Filesystem()->ReportError(ScriptErrorCallback::Wrap(error_callback),
                               error_);
     return;
@@ -112,7 +113,7 @@ void DirectoryReader::readEntries(V8EntriesCallback* entries_callback,
     // Non-null entries_callback_ means multiple readEntries() calls are made
     // concurrently. We don't allow doing it.
     Filesystem()->ReportError(ScriptErrorCallback::Wrap(error_callback),
-                              FileError::kInvalidStateErr);
+                              base::File::FILE_ERROR_FAILED);
     return;
   }
 
@@ -141,7 +142,7 @@ void DirectoryReader::AddEntries(const EntryHeapVector& entries) {
   }
 }
 
-void DirectoryReader::OnError(FileError::ErrorCode error) {
+void DirectoryReader::OnError(base::File::Error error) {
   error_ = error;
   entries_callback_ = nullptr;
   if (auto* error_callback = error_callback_.Release()) {

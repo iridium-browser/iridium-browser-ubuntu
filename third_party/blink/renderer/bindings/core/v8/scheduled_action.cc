@@ -33,6 +33,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/binding_security.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_controller.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_source_code.h"
+#include "third_party/blink/renderer/bindings/core/v8/script_value.h"
 #include "third_party/blink/renderer/bindings/core/v8/source_location.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_gc_controller.h"
@@ -44,7 +45,9 @@
 #include "third_party/blink/renderer/core/frame/use_counter.h"
 #include "third_party/blink/renderer/core/workers/worker_global_scope.h"
 #include "third_party/blink/renderer/core/workers/worker_thread.h"
+#include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
+#include "third_party/blink/renderer/platform/wtf/casting.h"
 
 namespace blink {
 
@@ -56,7 +59,7 @@ ScheduledAction* ScheduledAction::Create(ScriptState* script_state,
   if (!script_state->World().IsWorkerWorld()) {
     if (!BindingSecurity::ShouldAllowAccessToFrame(
             EnteredDOMWindow(script_state->GetIsolate()),
-            ToDocument(target)->GetFrame(),
+            To<Document>(target)->GetFrame(),
             BindingSecurity::ErrorReportOption::kDoNotReport)) {
       UseCounter::Count(target, WebFeature::kScheduledActionIgnored);
       return new ScheduledAction(script_state);
@@ -71,7 +74,7 @@ ScheduledAction* ScheduledAction::Create(ScriptState* script_state,
   if (!script_state->World().IsWorkerWorld()) {
     if (!BindingSecurity::ShouldAllowAccessToFrame(
             EnteredDOMWindow(script_state->GetIsolate()),
-            ToDocument(target)->GetFrame(),
+            To<Document>(target)->GetFrame(),
             BindingSecurity::ErrorReportOption::kDoNotReport)) {
       UseCounter::Count(target, WebFeature::kScheduledActionIgnored);
       return new ScheduledAction(script_state);
@@ -89,12 +92,25 @@ void ScheduledAction::Dispose() {
   code_ = String();
   info_.Clear();
   function_.Clear();
+  script_state_->Reset();
   script_state_.Clear();
 }
 
+void ScheduledAction::Trace(blink::Visitor* visitor) {
+  visitor->Trace(script_state_);
+}
+
 void ScheduledAction::Execute(ExecutionContext* context) {
-  if (context->IsDocument()) {
-    LocalFrame* frame = ToDocument(context)->GetFrame();
+  if (!script_state_->ContextIsValid()) {
+    DVLOG(1) << "ScheduledAction::execute " << this << ": context is empty";
+    return;
+  }
+  // ExecutionContext::CanExecuteScripts() relies on the current context to
+  // determine if it is allowed. Enter the scope here.
+  ScriptState::Scope scope(script_state_->Get());
+
+  if (auto* document = DynamicTo<Document>(context)) {
+    LocalFrame* frame = document->GetFrame();
     if (!frame) {
       DVLOG(1) << "ScheduledAction::execute " << this << ": no frame";
       return;
@@ -114,7 +130,7 @@ void ScheduledAction::Execute(ExecutionContext* context) {
 ScheduledAction::ScheduledAction(ScriptState* script_state,
                                  const ScriptValue& function,
                                  const Vector<ScriptValue>& arguments)
-    : script_state_(script_state), info_(script_state->GetIsolate()) {
+    : ScheduledAction(script_state) {
   DCHECK(function.IsFunction());
   function_.Set(script_state->GetIsolate(),
                 v8::Local<v8::Function>::Cast(function.V8Value()));
@@ -124,21 +140,18 @@ ScheduledAction::ScheduledAction(ScriptState* script_state,
 }
 
 ScheduledAction::ScheduledAction(ScriptState* script_state, const String& code)
-    : script_state_(script_state),
-      info_(script_state->GetIsolate()),
-      code_(code) {}
+    : ScheduledAction(script_state) {
+  code_ = code;
+}
 
 ScheduledAction::ScheduledAction(ScriptState* script_state)
-    : script_state_(script_state), info_(script_state->GetIsolate()) {}
+    : script_state_(ScriptStateProtectingContext::Create(script_state)),
+      info_(script_state->GetIsolate()) {}
 
 void ScheduledAction::Execute(LocalFrame* frame) {
-  if (!script_state_->ContextIsValid()) {
-    DVLOG(1) << "ScheduledAction::execute " << this << ": context is empty";
-    return;
-  }
+  DCHECK(script_state_->ContextIsValid());
 
   TRACE_EVENT0("v8", "ScheduledAction::execute");
-  ScriptState::Scope scope(script_state_.Get());
   if (!function_.IsEmpty()) {
     DVLOG(1) << "ScheduledAction::execute " << this << ": have function";
     v8::Local<v8::Function> function =
@@ -158,10 +171,15 @@ void ScheduledAction::Execute(LocalFrame* frame) {
   } else {
     DVLOG(1) << "ScheduledAction::execute " << this
              << ": executing from source";
+    // We're using |kSharableCrossOrigin| to keep the existing behavior, but
+    // this causes failures on
+    // wpt/html/webappapis/scripting/processing-model-2/compile-error-cross-origin-setTimeout.html
+    // and friends.
     frame->GetScriptController().ExecuteScriptAndReturnValue(
         script_state_->GetContext(),
         ScriptSourceCode(code_,
-                         ScriptSourceLocationType::kEvalForScheduledAction));
+                         ScriptSourceLocationType::kEvalForScheduledAction),
+        KURL(), kSharableCrossOrigin);
   }
 
   // The frame might be invalid at this point because JavaScript could have
@@ -177,7 +195,7 @@ void ScheduledAction::Execute(WorkerGlobalScope* worker) {
   }
 
   if (!function_.IsEmpty()) {
-    ScriptState::Scope scope(script_state_.Get());
+    ScriptState::Scope scope(script_state_->Get());
     v8::Local<v8::Function> function =
         function_.NewLocal(script_state_->GetIsolate());
     ScriptState* script_state_for_func =
@@ -193,15 +211,22 @@ void ScheduledAction::Execute(WorkerGlobalScope* worker) {
         function, worker, script_state_->GetContext()->Global(), info.size(),
         info.data(), script_state_->GetIsolate());
   } else {
-    worker->ScriptController()->Evaluate(ScriptSourceCode(
-        code_, ScriptSourceLocationType::kEvalForScheduledAction));
+    // We're using |kSharableCrossOrigin| to keep the existing behavior, but
+    // this causes failures on
+    // wpt/html/webappapis/scripting/processing-model-2/compile-error-cross-origin-setTimeout.html
+    // and friends.
+    worker->ScriptController()->Evaluate(
+        ScriptSourceCode(code_,
+                         ScriptSourceLocationType::kEvalForScheduledAction),
+        kSharableCrossOrigin);
   }
 }
 
 void ScheduledAction::CreateLocalHandlesForArgs(
     Vector<v8::Local<v8::Value>>* handles) {
-  handles->ReserveCapacity(info_.Size());
-  for (size_t i = 0; i < info_.Size(); ++i)
+  wtf_size_t handle_count = SafeCast<wtf_size_t>(info_.Size());
+  handles->ReserveCapacity(handle_count);
+  for (wtf_size_t i = 0; i < handle_count; ++i)
     handles->push_back(info_.Get(i));
 }
 

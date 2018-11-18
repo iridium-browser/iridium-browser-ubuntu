@@ -16,19 +16,21 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
+#include "base/single_thread_task_runner.h"
 #include "base/threading/thread.h"
 #include "base/time/time.h"
 #include "chromecast/media/cma/backend/mixer_input.h"
+#include "chromecast/media/cma/backend/mixer_pipeline.h"
 #include "chromecast/public/cast_media_shlib.h"
+#include "chromecast/public/media/external_audio_pipeline_shlib.h"
 #include "chromecast/public/media/media_pipeline_backend.h"
 #include "chromecast/public/volume_control.h"
 
 namespace chromecast {
 namespace media {
 
-class FilterGroup;
+class AudioOutputRedirector;
 class MixerOutputStream;
-class PostProcessingPipelineParser;
 class PostProcessingPipelineFactory;
 
 // Mixer implementation. The mixer has zero or more inputs; these can be added
@@ -92,6 +94,13 @@ class StreamMixer {
   void RemoveLoopbackAudioObserver(
       CastMediaShlib::LoopbackAudioObserver* observer);
 
+  // Adds/removes an output redirector. Output redirectors take audio from
+  // matching inputs and pass them to secondary output instead of the normal
+  // mixer output.
+  void AddAudioOutputRedirector(
+      std::unique_ptr<AudioOutputRedirector> redirector);
+  void RemoveAudioOutputRedirector(AudioOutputRedirector* redirector);
+
   // Sets the volume multiplier for the given content |type|.
   void SetVolume(AudioContentType type, float level);
 
@@ -107,6 +116,8 @@ class StreamMixer {
   // Sends configuration string |config| to processor |name|.
   void SetPostProcessorConfig(const std::string& name,
                               const std::string& config);
+
+  void ResetPostProcessors(CastMediaShlib::ResultCallback callback);
 
   // Test-only methods.
   StreamMixer(std::unique_ptr<MixerOutputStream> output,
@@ -124,6 +135,15 @@ class StreamMixer {
   }
 
  private:
+  class ExternalLoopbackAudioObserver;
+  class BaseExternalMediaVolumeChangeRequestObserver
+      : public ExternalAudioPipelineShlib::
+            ExternalMediaVolumeChangeRequestObserver {
+   public:
+    ~BaseExternalMediaVolumeChangeRequestObserver() override = default;
+  };
+  class ExternalMediaVolumeChangeRequestObserver;
+
   enum State {
     kStateStopped,
     kStateRunning,
@@ -138,8 +158,11 @@ class StreamMixer {
     bool muted = false;
   };
 
-  void CreatePostProcessors(PostProcessingPipelineParser* pipeline_parser);
-  void ValidatePostProcessors();
+  void ResetPostProcessorsOnThread(CastMediaShlib::ResultCallback callback,
+                                   const std::string& override_config);
+  void CreatePostProcessors(CastMediaShlib::ResultCallback callback,
+                            const std::string& override_config);
+  bool PostProcessorsHaveCorrectNumOutputs();
   void FinalizeOnMixerThread();
   void Start();
   void Stop();
@@ -149,8 +172,6 @@ class StreamMixer {
   void RemoveInputOnThread(MixerInput::Source* input_source);
   void SetCloseTimeout();
   void UpdatePlayoutChannel();
-  MediaPipelineBackend::AudioDecoder::RenderingDelay GetTotalRenderingDelay(
-      FilterGroup* filter_group);
 
   void PlaybackLoop();
   void WriteOneBuffer();
@@ -168,22 +189,42 @@ class StreamMixer {
       CastMediaShlib::LoopbackAudioObserver* observer);
   void RemoveLoopbackAudioObserverOnShimThread(
       CastMediaShlib::LoopbackAudioObserver* observer);
-  void SendLoopbackData(int64_t expected_playback_time,
+
+  void AddAudioOutputRedirectorOnThread(
+      std::unique_ptr<AudioOutputRedirector> redirector);
+  void RemoveAudioOutputRedirectorOnThread(AudioOutputRedirector* redirector);
+
+  void PostLoopbackData(int64_t expected_playback_time,
+                        SampleFormat sample_format,
                         int sample_rate,
-                        int frames,
                         int channels,
-                        std::unique_ptr<float[]> data);
+                        std::unique_ptr<uint8_t[]> data,
+                        int length);
+  void PostLoopbackInterrupted();
+
+  void SendLoopbackData(int64_t expected_playback_time,
+                        SampleFormat sample_format,
+                        int sample_rate,
+                        int channels,
+                        std::unique_ptr<uint8_t[]> data,
+                        int length);
   void LoopbackInterrupted();
+
+  MediaPipelineBackend::AudioDecoder::RenderingDelay GetTotalRenderingDelay(
+      FilterGroup* filter_group);
 
   std::unique_ptr<MixerOutputStream> output_;
   std::unique_ptr<PostProcessingPipelineFactory>
       post_processing_pipeline_factory_;
+  std::unique_ptr<MixerPipeline> mixer_pipeline_;
   std::unique_ptr<base::Thread> mixer_thread_;
   scoped_refptr<base::SingleThreadTaskRunner> mixer_task_runner_;
 
   // Special thread to avoid underruns due to priority inversion.
   std::unique_ptr<base::Thread> shim_thread_;
   scoped_refptr<base::SingleThreadTaskRunner> shim_task_runner_;
+  std::unique_ptr<base::Thread> input_thread_;
+  scoped_refptr<base::SingleThreadTaskRunner> input_task_runner_;
 
   int num_output_channels_;
   const int low_sample_rate_cutoff_;
@@ -201,11 +242,6 @@ class StreamMixer {
   State state_;
   base::TimeTicks close_timestamp_;
 
-  std::vector<std::unique_ptr<FilterGroup>> filter_groups_;
-  FilterGroup* default_filter_ = nullptr;
-  FilterGroup* mix_filter_ = nullptr;
-  FilterGroup* linearize_filter_ = nullptr;
-
   base::flat_map<MixerInput::Source*, std::unique_ptr<MixerInput>> inputs_;
   base::flat_map<MixerInput::Source*, std::unique_ptr<MixerInput>>
       ignored_inputs_;
@@ -213,6 +249,15 @@ class StreamMixer {
   base::flat_set<CastMediaShlib::LoopbackAudioObserver*> loopback_observers_;
 
   base::flat_map<AudioContentType, VolumeInfo> volume_info_;
+
+  base::flat_map<AudioOutputRedirector*, std::unique_ptr<AudioOutputRedirector>>
+      audio_output_redirectors_;
+
+  const bool external_audio_pipeline_supported_;
+  std::unique_ptr<BaseExternalMediaVolumeChangeRequestObserver>
+      external_volume_observer_;
+  std::unique_ptr<ExternalLoopbackAudioObserver>
+      external_loopback_audio_observer_;
 
   base::WeakPtrFactory<StreamMixer> weak_factory_;
 

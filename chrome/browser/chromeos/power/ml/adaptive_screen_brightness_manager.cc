@@ -8,15 +8,15 @@
 #include <utility>
 
 #include "ash/public/cpp/ash_pref_names.h"
+#include "ash/shell.h"
 #include "base/process/launch.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "base/time/clock.h"
 #include "base/time/default_clock.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
 #include "chrome/browser/chromeos/accessibility/magnification_manager.h"
-#include "chrome/browser/chromeos/ash_config.h"
 #include "chrome/browser/chromeos/power/ml/adaptive_screen_brightness_ukm_logger.h"
 #include "chrome/browser/chromeos/power/ml/adaptive_screen_brightness_ukm_logger_impl.h"
 #include "chrome/browser/chromeos/power/ml/real_boot_clock.h"
@@ -37,6 +37,7 @@
 #include "services/metrics/public/cpp/ukm_source_id.h"
 #include "services/viz/public/interfaces/compositing/video_detector_observer.mojom.h"
 #include "ui/aura/env.h"
+#include "ui/base/ui_base_features.h"
 #include "ui/base/user_activity/user_activity_detector.h"
 
 namespace chromeos {
@@ -51,9 +52,6 @@ constexpr base::TimeDelta kUserInputEventsDuration =
 // Granularity of input events is per minute.
 constexpr int kNumUserInputEventsBuckets =
     kUserInputEventsDuration / base::TimeDelta::FromMinutes(1);
-
-// Log data every 10 minutes.
-constexpr base::TimeDelta kLoggingInterval = base::TimeDelta::FromMinutes(10);
 
 // Returns the focused visible browser unless no visible browser is focused,
 // then returns the topmost visible browser.
@@ -106,6 +104,7 @@ const std::pair<ukm::SourceId, bool> GetActiveTabData() {
 }  // namespace
 
 constexpr base::TimeDelta AdaptiveScreenBrightnessManager::kInactivityDuration;
+constexpr base::TimeDelta AdaptiveScreenBrightnessManager::kLoggingInterval;
 
 AdaptiveScreenBrightnessManager::AdaptiveScreenBrightnessManager(
     std::unique_ptr<AdaptiveScreenBrightnessUkmLogger> ukm_logger,
@@ -163,8 +162,9 @@ std::unique_ptr<AdaptiveScreenBrightnessManager>
 AdaptiveScreenBrightnessManager::CreateInstance() {
   // TODO(jiameng): video detector below doesn't work with MASH. Temporary
   // solution is to disable logging if we're under MASH env.
+  // https://crbug.com/871914
   if (chromeos::GetDeviceType() != chromeos::DeviceType::kChromebook ||
-      chromeos::GetAshConfig() == ash::Config::MASH) {
+      features::IsMultiProcessMash()) {
     return nullptr;
   }
 
@@ -188,7 +188,8 @@ AdaptiveScreenBrightnessManager::CreateInstance() {
           mojo::MakeRequest(&video_observer_screen_brightness_logger),
           std::make_unique<base::RepeatingTimer>(),
           base::DefaultClock::GetInstance(), std::make_unique<RealBootClock>());
-  aura::Env::GetInstance()
+  ash::Shell::Get()
+      ->aura_env()
       ->context_factory_private()
       ->GetHostFrameSinkManager()
       ->AddVideoDetectorObserver(
@@ -268,6 +269,7 @@ void AdaptiveScreenBrightnessManager::ScreenBrightnessChanged(
     default:
       reason_ = ScreenBrightnessEvent::Event::OTHER;
   }
+  previous_screen_brightness_percent_ = screen_brightness_percent_;
   screen_brightness_percent_ = change.percent();
   LogEvent();
 }
@@ -311,6 +313,7 @@ void AdaptiveScreenBrightnessManager::OnVideoActivityEnded() {
 
 void AdaptiveScreenBrightnessManager::OnTimerFired() {
   reason_ = ScreenBrightnessEvent::Event::PERIODIC;
+  previous_screen_brightness_percent_ = screen_brightness_percent_;
   LogEvent();
 }
 
@@ -326,6 +329,7 @@ void AdaptiveScreenBrightnessManager::OnReceiveSwitchStates(
 void AdaptiveScreenBrightnessManager::OnReceiveScreenBrightnessPercent(
     const base::Optional<double> screen_brightness_percent) {
   if (screen_brightness_percent.has_value()) {
+    previous_screen_brightness_percent_ = screen_brightness_percent_;
     screen_brightness_percent_ = *screen_brightness_percent;
   }
 }
@@ -350,12 +354,19 @@ void AdaptiveScreenBrightnessManager::LogEvent() {
   if (!screen_brightness_percent_.has_value()) {
     return;
   }
+
+  const base::TimeDelta time_since_boot = boot_clock_->GetTimeSinceBoot();
+
   ScreenBrightnessEvent screen_brightness;
   ScreenBrightnessEvent::Event* const event = screen_brightness.mutable_event();
   event->set_brightness(*screen_brightness_percent_);
   if (reason_.has_value()) {
     event->set_reason(*reason_);
     reason_ = base::nullopt;
+  }
+  if (last_event_time_since_boot_.has_value()) {
+    event->set_time_since_last_event_sec(
+        (time_since_boot - *last_event_time_since_boot_).InSeconds());
   }
 
   ScreenBrightnessEvent::Features* const features =
@@ -373,7 +384,6 @@ void AdaptiveScreenBrightnessManager::LogEvent() {
       static_cast<ScreenBrightnessEvent_Features_ActivityData_DayOfWeek>(
           exploded.day_of_week));
 
-  const base::TimeDelta time_since_boot = boot_clock_->GetTimeSinceBoot();
   activity_data->set_num_recent_mouse_events(
       mouse_counter_->GetTotal(time_since_boot));
   activity_data->set_num_recent_key_events(
@@ -433,6 +443,11 @@ void AdaptiveScreenBrightnessManager::LogEvent() {
         *temperature);
   }
 
+  if (previous_screen_brightness_percent_.has_value()) {
+    features->mutable_env_data()->set_previous_brightness(
+        *previous_screen_brightness_percent_);
+  }
+
   ScreenBrightnessEvent::Features::AccessibilityData* const accessibility_data =
       features->mutable_accessibility_data();
 
@@ -472,6 +487,8 @@ void AdaptiveScreenBrightnessManager::LogEvent() {
 
   // Log to metrics.
   ukm_logger_->LogActivity(screen_brightness, tab_data.first, tab_data.second);
+
+  last_event_time_since_boot_ = time_since_boot;
 }
 
 }  // namespace ml

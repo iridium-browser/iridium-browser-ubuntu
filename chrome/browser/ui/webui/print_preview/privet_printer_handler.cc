@@ -19,10 +19,11 @@
 #include "base/timer/timer.h"
 #include "chrome/browser/printing/cloud_print/privet_constants.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/signin/signin_manager_factory.h"
+#include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/browser/ui/webui/print_preview/print_preview_utils.h"
 #include "chrome/common/chrome_switches.h"
-#include "components/signin/core/browser/signin_manager.h"
+#include "services/identity/public/cpp/identity_manager.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "ui/gfx/geometry/size.h"
 
 namespace {
@@ -140,7 +141,7 @@ void PrivetPrinterHandler::StartLister(
          service_discovery_client_.get() == client.get());
   service_discovery_client_ = client;
   printer_lister_ = std::make_unique<cloud_print::PrivetLocalPrinterLister>(
-      service_discovery_client_.get(), profile_->GetRequestContext(), this);
+      service_discovery_client_.get(), profile_->GetURLLoaderFactory(), this);
   privet_lister_timer_ = std::make_unique<base::OneShotTimer>();
   privet_lister_timer_->Start(FROM_HERE,
                               base::TimeDelta::FromSeconds(kSearchTimeoutSec),
@@ -251,11 +252,11 @@ void PrivetPrinterHandler::StartPrint(
   privet_local_print_operation_->SetPageSize(page_size);
   privet_local_print_operation_->SetData(print_data);
 
-  SigninManagerBase* signin_manager =
-      SigninManagerFactory::GetForProfileIfExists(profile_);
-  if (signin_manager) {
+  identity::IdentityManager* identity_manager =
+      IdentityManagerFactory::GetForProfileIfExists(profile_);
+  if (identity_manager) {
     privet_local_print_operation_->SetUsername(
-        signin_manager->GetAuthenticatedAccountInfo().email);
+        identity_manager->GetPrimaryAccountInfo().email);
   }
 
   privet_local_print_operation_->Start();
@@ -274,7 +275,7 @@ void PrivetPrinterHandler::CreateHTTP(
 
   privet_http_factory_ =
       cloud_print::PrivetHTTPAsynchronousFactory::CreateInstance(
-          profile_->GetRequestContext());
+          profile_->GetURLLoaderFactory());
   privet_http_resolution_ = privet_http_factory_->CreatePrivetHTTP(name);
   privet_http_resolution_->Start(device_description->address, callback);
 }

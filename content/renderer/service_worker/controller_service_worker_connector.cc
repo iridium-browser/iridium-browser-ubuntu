@@ -11,31 +11,30 @@
 namespace content {
 
 ControllerServiceWorkerConnector::ControllerServiceWorkerConnector(
-    mojom::ServiceWorkerContainerHost* container_host)
-    : container_host_(container_host) {}
-
-ControllerServiceWorkerConnector::ControllerServiceWorkerConnector(
-    mojom::ServiceWorkerContainerHost* container_host,
+    mojom::ServiceWorkerContainerHostPtrInfo container_host_info,
     mojom::ControllerServiceWorkerPtr controller_ptr,
     const std::string& client_id)
-    : container_host_(container_host) {
-  ResetControllerConnection(std::move(controller_ptr), client_id);
+    : client_id_(client_id) {
+  container_host_ptr_.Bind(std::move(container_host_info));
+  container_host_ptr_.set_connection_error_handler(base::BindOnce(
+      &ControllerServiceWorkerConnector::OnContainerHostConnectionClosed,
+      base::Unretained(this)));
+  SetControllerServiceWorkerPtr(std::move(controller_ptr));
 }
 
 mojom::ControllerServiceWorker*
 ControllerServiceWorkerConnector::GetControllerServiceWorker(
     mojom::ControllerServiceWorkerPurpose purpose) {
   switch (state_) {
-    case State::kDisconnected:
+    case State::kDisconnected: {
       DCHECK(!controller_service_worker_);
-      DCHECK(container_host_);
-      container_host_->EnsureControllerServiceWorker(
-          mojo::MakeRequest(&controller_service_worker_), purpose);
-      controller_service_worker_.set_connection_error_handler(base::BindOnce(
-          &ControllerServiceWorkerConnector::OnControllerConnectionClosed,
-          base::Unretained(this)));
-      state_ = State::kConnected;
+      DCHECK(container_host_ptr_);
+      mojom::ControllerServiceWorkerPtr controller_ptr;
+      container_host_ptr_->EnsureControllerServiceWorker(
+          mojo::MakeRequest(&controller_ptr), purpose);
+      SetControllerServiceWorkerPtr(std::move(controller_ptr));
       return controller_service_worker_.get();
+    }
     case State::kConnected:
       DCHECK(controller_service_worker_.is_bound());
       return controller_service_worker_.get();
@@ -44,7 +43,7 @@ ControllerServiceWorkerConnector::GetControllerServiceWorker(
       return nullptr;
     case State::kNoContainerHost:
       DCHECK(!controller_service_worker_);
-      DCHECK(!container_host_);
+      DCHECK(!container_host_ptr_);
       return nullptr;
   }
   NOTREACHED();
@@ -61,7 +60,7 @@ void ControllerServiceWorkerConnector::RemoveObserver(Observer* observer) {
 
 void ControllerServiceWorkerConnector::OnContainerHostConnectionClosed() {
   state_ = State::kNoContainerHost;
-  container_host_ = nullptr;
+  container_host_ptr_.reset();
   controller_service_worker_.reset();
 }
 
@@ -73,21 +72,28 @@ void ControllerServiceWorkerConnector::OnControllerConnectionClosed() {
     observer.OnConnectionClosed();
 }
 
-void ControllerServiceWorkerConnector::ResetControllerConnection(
-    mojom::ControllerServiceWorkerPtr controller_ptr,
-    const std::string& client_id) {
+void ControllerServiceWorkerConnector::AddBinding(
+    mojom::ControllerServiceWorkerConnectorRequest request) {
+  bindings_.AddBinding(this, std::move(request));
+}
+
+void ControllerServiceWorkerConnector::UpdateController(
+    mojom::ControllerServiceWorkerPtr controller_ptr) {
   if (state_ == State::kNoContainerHost)
     return;
+  SetControllerServiceWorkerPtr(std::move(controller_ptr));
+  if (!controller_service_worker_)
+    state_ = State::kNoController;
+}
+
+void ControllerServiceWorkerConnector::SetControllerServiceWorkerPtr(
+    mojom::ControllerServiceWorkerPtr controller_ptr) {
   controller_service_worker_ = std::move(controller_ptr);
   if (controller_service_worker_) {
-    DCHECK(client_id_.empty() || client_id_ == client_id);
-    client_id_ = client_id;
-    state_ = State::kConnected;
     controller_service_worker_.set_connection_error_handler(base::BindOnce(
         &ControllerServiceWorkerConnector::OnControllerConnectionClosed,
         base::Unretained(this)));
-  } else {
-    state_ = State::kNoController;
+    state_ = State::kConnected;
   }
 }
 

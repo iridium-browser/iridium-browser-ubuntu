@@ -4,7 +4,6 @@
 
 #include "third_party/blink/renderer/core/css/cssom/css_unit_value.h"
 
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
 #include "third_party/blink/renderer/core/animation/length_property_functions.h"
 #include "third_party/blink/renderer/core/css/css_calculation_value.h"
 #include "third_party/blink/renderer/core/css/css_resolution_units.h"
@@ -15,7 +14,9 @@
 #include "third_party/blink/renderer/core/css/cssom/css_math_sum.h"
 #include "third_party/blink/renderer/core/css/cssom/css_numeric_sum_value.h"
 #include "third_party/blink/renderer/core/css/properties/css_property.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
+#include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
 namespace blink {
 
@@ -141,7 +142,7 @@ CSSUnitValue* CSSUnitValue::ConvertTo(
   return CSSUnitValue::Create(value_ * scale_factor, target_unit);
 }
 
-WTF::Optional<CSSNumericSumValue> CSSUnitValue::SumValue() const {
+base::Optional<CSSNumericSumValue> CSSUnitValue::SumValue() const {
   CSSNumericSumValue sum;
   CSSNumericSumValue::UnitMap unit_map;
   if (unit_ != CSSPrimitiveValue::UnitType::kNumber)

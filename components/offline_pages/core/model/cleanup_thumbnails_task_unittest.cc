@@ -7,7 +7,7 @@
 #include <memory>
 
 #include "base/test/bind_test_util.h"
-#include "base/test/histogram_tester.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "base/test/mock_callback.h"
 #include "components/offline_pages/core/model/get_thumbnail_task.h"
 #include "components/offline_pages/core/model/model_task_test_base.h"
@@ -37,6 +37,14 @@ class CleanupThumbnailsTaskTest : public ModelTaskTestBase {
     return *thumb;
   }
 };
+
+TEST_F(CleanupThumbnailsTaskTest, DbConnectionIsNull) {
+  base::MockCallback<StoreThumbnailTask::CompleteCallback> callback;
+  EXPECT_CALL(callback, Run(false)).Times(1);
+  store()->SetStateForTesting(StoreState::FAILED_LOADING, true);
+  RunTask(std::make_unique<CleanupThumbnailsTask>(
+      store(), store_utils::FromDatabaseTime(1000), callback.Get()));
+}
 
 TEST_F(CleanupThumbnailsTaskTest, CleanupNoThumbnails) {
   base::MockCallback<StoreThumbnailTask::CompleteCallback> callback;

@@ -18,7 +18,7 @@ class CFX_DIBitmap;
 class CFX_Matrix;
 class CFX_RenderDevice;
 
-class CBC_OnedUPCAWriter : public CBC_OneDimWriter {
+class CBC_OnedUPCAWriter final : public CBC_OneDimWriter {
  public:
   CBC_OnedUPCAWriter();
   ~CBC_OnedUPCAWriter() override;
@@ -36,14 +36,13 @@ class CBC_OnedUPCAWriter : public CBC_OneDimWriter {
   void Init();
   int32_t CalcChecksum(const ByteString& contents);
 
- protected:
+ private:
   bool ShowChars(const WideStringView& contents,
                  CFX_RenderDevice* device,
                  const CFX_Matrix* matrix,
                  int32_t barWidth,
                  int32_t multiple) override;
 
- private:
   std::unique_ptr<CBC_OnedEAN13Writer> m_subWriter;
 };
 

@@ -18,6 +18,7 @@ class BrowserProcessImpl;
 class ChromeMetricsServiceClient;
 class ChromePasswordManagerClient;
 class NavigationMetricsRecorder;
+class PrefService;
 class Profile;
 
 namespace {
@@ -32,6 +33,11 @@ class ExternalDataUseObserverBridge;
 namespace chrome {
 void AttemptRestart();
 }
+
+namespace contextual_suggestions {
+struct ContextualSuggestionsResult;
+void RegisterSyntheticFieldTrials(const ContextualSuggestionsResult& result);
+}  // namespace contextual_suggestions
 
 namespace domain_reliability {
 class DomainReliabilityServiceFactory;
@@ -106,6 +112,8 @@ class ChromeMetricsServiceAccessor : public metrics::MetricsServiceAccessor {
   friend class ChromeBrowserMainParts;
   friend class ChromeMetricsServicesManagerClient;
   friend class ChromeRenderMessageFilter;
+  friend void contextual_suggestions::RegisterSyntheticFieldTrials(
+      const contextual_suggestions::ContextualSuggestionsResult& result);
   friend class DataReductionProxyChromeSettings;
   friend class domain_reliability::DomainReliabilityServiceFactory;
   friend class extensions::ChromeExtensionWebContentsObserver;
@@ -132,6 +140,7 @@ class ChromeMetricsServiceAccessor : public metrics::MetricsServiceAccessor {
   friend class ChromeMetricsServiceClient;
   friend class ChromePasswordManagerClient;
   friend class NavigationMetricsRecorder;
+  friend class ChromeUnifiedConsentServiceClient;
 
   // Testing related friends.
   friend class MetricsReportingStateTest;
@@ -146,6 +155,11 @@ class ChromeMetricsServiceAccessor : public metrics::MetricsServiceAccessor {
   // TODO(gayane): Consolidate metric prefs on all platforms.
   // http://crbug.com/362192,  http://crbug.com/532084
   static bool IsMetricsAndCrashReportingEnabled();
+
+  // This is identical to the function without the |local_state| param but can
+  // be called before |g_browser_process| has been created by specifying the
+  // Local State pref service.
+  static bool IsMetricsAndCrashReportingEnabled(PrefService* local_state);
 
   // Calls metrics::MetricsServiceAccessor::RegisterSyntheticFieldTrial() with
   // g_browser_process->metrics_service(). See that function's declaration for

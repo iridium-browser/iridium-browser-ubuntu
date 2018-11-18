@@ -8,11 +8,13 @@
 #include <limits>
 
 #include "base/feature_list.h"
+#include "base/ios/ios_util.h"
 #include "base/logging.h"
 #include "ios/chrome/app/tests_hook.h"
-#import "ios/chrome/browser/ui/toolbar/public/toolbar_controller_base_feature.h"
+#import "ios/chrome/browser/ui/toolbar/public/features.h"
 #import "ios/chrome/browser/ui/ui_feature_flags.h"
 #import "ios/chrome/browser/ui/uikit_ui_util.h"
+#include "ios/web/public/features.h"
 #include "ui/base/device_form_factor.h"
 #include "ui/gfx/ios/uikit_util.h"
 
@@ -53,25 +55,36 @@ CGFloat CurrentScreenWidth() {
 
 bool IsIPhoneX() {
   UIUserInterfaceIdiom idiom = [[UIDevice currentDevice] userInterfaceIdiom];
+  CGFloat height = CGRectGetHeight([[UIScreen mainScreen] nativeBounds]);
   return (idiom == UIUserInterfaceIdiomPhone &&
-          CGRectGetHeight([[UIScreen mainScreen] nativeBounds]) == 2436);
+          (height == 2436 || height == 2688 || height == 1792));
+}
+
+// TODO(crbug.com/893314) : Remove this flag.
+bool IsClosingLastIncognitoTabEnabled() {
+  return base::FeatureList::IsEnabled(kClosingLastIncognitoTab);
 }
 
 bool IsRefreshLocationBarEnabled() {
-  return base::FeatureList::IsEnabled(kUIRefreshLocationBar);
-}
-
-bool IsRefreshPopupPresentationEnabled() {
-  return base::FeatureList::IsEnabled(kRefreshPopupPresentation);
+  return true;
 }
 
 bool IsUIRefreshPhase1Enabled() {
-  if (tests_hook::ForceUIRefreshPhase1())
-    return true;
-  return base::FeatureList::IsEnabled(kUIRefreshPhase1);
+  return true;
+}
+
+// TODO(crbug.com/885003) : Remove this flag.
+bool IsWKWebViewSnapshotsEnabled() {
+  return base::FeatureList::IsEnabled(kWKWebViewSnapshots);
 }
 
 CGFloat StatusBarHeight() {
+  if (base::FeatureList::IsEnabled(
+          web::features::kBrowserContainerFullscreen) &&
+      base::FeatureList::IsEnabled(web::features::kOutOfWebFullscreen)) {
+    DCHECK(!base::ios::IsRunningOnIOS11OrLater());
+  }
+
   // This is a temporary solution until usage of StatusBarHeight has been
   // replaced with topLayoutGuide.
 
@@ -91,6 +104,10 @@ CGFloat StatusBarHeight() {
                              .keyWindow.traitCollection.verticalSizeClass ==
                          UIUserInterfaceSizeClassCompact;
   return isCompactHeight ? 0 : 20;
+}
+
+CGFloat DeviceCornerRadius() {
+  return IsIPhoneX() ? 40.0 : 0.0;
 }
 
 CGFloat AlignValueToPixel(CGFloat value) {

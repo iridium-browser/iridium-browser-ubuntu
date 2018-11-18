@@ -8,9 +8,14 @@
 #include <memory>
 
 #include "base/memory/scoped_refptr.h"
+#include "third_party/blink/public/mojom/service_worker/service_worker_object.mojom-shared.h"
+#include "third_party/blink/public/platform/code_cache_loader.h"
 #include "third_party/blink/public/platform/web_application_cache_host.h"
 #include "third_party/blink/public/platform/web_document_subresource_filter.h"
+#include "third_party/blink/public/platform/web_security_origin.h"
 #include "third_party/blink/public/platform/web_url.h"
+#include "third_party/blink/public/platform/web_url_loader_factory.h"
+#include "third_party/blink/public/platform/websocket_handshake_throttle.h"
 
 namespace base {
 class WaitableEvent;
@@ -18,7 +23,6 @@ class WaitableEvent;
 
 namespace blink {
 
-class WebURLLoaderFactory;
 class WebURLRequest;
 class WebDocumentSubresourceFilter;
 
@@ -30,6 +34,11 @@ class WebDocumentSubresourceFilter;
 class WebWorkerFetchContext {
  public:
   virtual ~WebWorkerFetchContext() = default;
+
+  // Used to copy a worker fetch context between worker threads.
+  virtual std::unique_ptr<WebWorkerFetchContext> CloneForNestedWorker() {
+    return nullptr;
+  }
 
   // Set a raw pointer of a WaitableEvent which will be signaled from the main
   // thread when the worker's GlobalScope is terminated, which will terminate
@@ -48,13 +57,28 @@ class WebWorkerFetchContext {
   virtual std::unique_ptr<WebURLLoaderFactory> WrapURLLoaderFactory(
       mojo::ScopedMessagePipeHandle url_loader_factory_handle) = 0;
 
+  // Returns a CodeCacheLoader that fetches data from code caches. If
+  // a nullptr is returned then data would not be fetched from the code
+  // cache.
+  virtual std::unique_ptr<CodeCacheLoader> CreateCodeCacheLoader() {
+    return nullptr;
+  };
+
+  // Returns a new WebURLLoaderFactory for loading scripts in this worker
+  // context. Unlike CreateURLLoaderFactory(), this may return nullptr even on
+  // the first call.
+  virtual std::unique_ptr<WebURLLoaderFactory> CreateScriptLoaderFactory() {
+    return nullptr;
+  }
+
   // Called when a request is about to be sent out to modify the request to
   // handle the request correctly in the loading stack later. (Example: service
   // worker)
   virtual void WillSendRequest(WebURLRequest&) = 0;
 
   // Whether the fetch context is controlled by a service worker.
-  virtual bool IsControlledByServiceWorker() const = 0;
+  virtual blink::mojom::ControllerServiceWorkerMode
+  IsControlledByServiceWorker() const = 0;
 
   // This flag is used to block all mixed content in subframes.
   virtual void SetIsOnSubframe(bool) {}
@@ -91,6 +115,12 @@ class WebWorkerFetchContext {
   // This method should only be called once.
   virtual std::unique_ptr<WebDocumentSubresourceFilter>
   TakeSubresourceFilter() {
+    return nullptr;
+  }
+
+  // Creates a WebSocketHandshakeThrottle on the worker thread.
+  virtual std::unique_ptr<blink::WebSocketHandshakeThrottle>
+  CreateWebSocketHandshakeThrottle() {
     return nullptr;
   }
 };

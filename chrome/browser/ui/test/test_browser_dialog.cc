@@ -12,9 +12,8 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if defined(OS_CHROMEOS)
-#include "ash/public/cpp/config.h"
 #include "ash/shell.h"  // mash-ok
-#include "chrome/browser/chromeos/ash_config.h"
+#include "ui/base/ui_base_features.h"
 #endif
 
 #if defined(OS_MACOSX)
@@ -22,6 +21,8 @@
 #endif
 
 #if defined(TOOLKIT_VIEWS)
+#include "ui/display/display.h"
+#include "ui/display/screen.h"
 #include "ui/views/test/widget_test.h"
 #include "ui/views/widget/widget_observer.h"
 #endif
@@ -29,42 +30,10 @@
 namespace {
 
 #if defined(TOOLKIT_VIEWS)
-// Helper to return when a Widget has been closed.
-// TODO(pkasting): This is pretty similar to views::test::WidgetClosingObserver
-// in ui/views/test/widget_test.h but keys off widget destruction rather than
-// closing.  Can the two be combined?
-class WidgetCloseObserver : public views::WidgetObserver {
+// Helper to close a Widget.
+class WidgetCloser {
  public:
-  explicit WidgetCloseObserver(views::Widget* widget) : widget_(widget) {
-    widget->AddObserver(this);
-  }
-
-  // views::WidgetObserver:
-  void OnWidgetDestroyed(views::Widget* widget) override {
-    widget_->RemoveObserver(this);
-    widget_ = nullptr;
-    run_loop_.Quit();
-  }
-
-  void WaitForDestroy() { run_loop_.Run(); }
-
- protected:
-  views::Widget* widget() { return widget_; }
-
- private:
-  views::Widget* widget_;
-  base::RunLoop run_loop_;
-
-  DISALLOW_COPY_AND_ASSIGN(WidgetCloseObserver);
-};
-
-// Helper to close a Widget.  Inherits from WidgetCloseObserver since regardless
-// of whether the close is done synchronously, we always want callers to wait
-// for it to complete.
-class WidgetCloser : public WidgetCloseObserver {
- public:
-  WidgetCloser(views::Widget* widget, bool async)
-      : WidgetCloseObserver(widget) {
+  WidgetCloser(views::Widget* widget, bool async) : widget_(widget) {
     base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE, base::BindOnce(&WidgetCloser::CloseWidget,
                                   weak_ptr_factory_.GetWeakPtr(), async));
@@ -72,14 +41,13 @@ class WidgetCloser : public WidgetCloseObserver {
 
  private:
   void CloseWidget(bool async) {
-    if (!widget())
-      return;
-
     if (async)
-      widget()->Close();
+      widget_->Close();
     else
-      widget()->CloseNow();
+      widget_->CloseNow();
   }
+
+  views::Widget* widget_;
 
   base::WeakPtrFactory<WidgetCloser> weak_ptr_factory_{this};
 
@@ -93,18 +61,6 @@ TestBrowserDialog::TestBrowserDialog() = default;
 TestBrowserDialog::~TestBrowserDialog() = default;
 
 void TestBrowserDialog::PreShow() {
-// The rest of this class assumes the child dialog is toolkit-views. So, for
-// Mac, it will only work when MD for secondary UI is enabled. Without this, a
-// Cocoa dialog will be created, which TestBrowserDialog doesn't support.
-// Force kSecondaryUiMd on Mac to get coverage on the bots. Leave it optional
-// elsewhere so that the non-MD dialog can be invoked to compare.
-#if defined(OS_MACOSX)
-  // Note that since SetUp() has already been called, some parts of the toolkit
-  // may already be initialized without MD - this is just to ensure Cocoa
-  // dialogs are not selected.
-  UseMdOnly();
-#endif
-
   UpdateWidgets();
 }
 
@@ -127,7 +83,24 @@ bool TestBrowserDialog::VerifyUi() {
   }
   widgets_ = added;
 
-  return added.size() == 1;
+  if (added.size() != 1)
+    return false;
+
+  if (!should_verify_dialog_bounds_)
+    return true;
+
+  // Verify that the dialog's dimensions do not exceed the display's work area
+  // bounds, which may be smaller than its bounds(), e.g. in the case of the
+  // docked magnifier or Chromevox being enabled.
+  views::Widget* dialog_widget = *(added.begin());
+  const gfx::Rect dialog_bounds = dialog_widget->GetWindowBoundsInScreen();
+  auto* native_window = dialog_widget->GetNativeWindow();
+  DCHECK(native_window);
+  display::Screen* screen = display::Screen::GetScreen();
+  const gfx::Rect display_work_area =
+      screen->GetDisplayNearestWindow(native_window).work_area();
+
+  return display_work_area.Contains(dialog_bounds);
 #else
   NOTIMPLEMENTED();
   return false;
@@ -141,8 +114,8 @@ void TestBrowserDialog::WaitForUserDismissal() {
 
 #if defined(TOOLKIT_VIEWS)
   ASSERT_FALSE(widgets_.empty());
-  WidgetCloseObserver observer(*widgets_.begin());
-  observer.WaitForDestroy();
+  views::test::WidgetDestroyedWaiter waiter(*widgets_.begin());
+  waiter.Wait();
 #else
   NOTIMPLEMENTED();
 #endif
@@ -151,8 +124,9 @@ void TestBrowserDialog::WaitForUserDismissal() {
 void TestBrowserDialog::DismissUi() {
 #if defined(TOOLKIT_VIEWS)
   ASSERT_FALSE(widgets_.empty());
+  views::test::WidgetDestroyedWaiter waiter(*widgets_.begin());
   WidgetCloser closer(*widgets_.begin(), AlwaysCloseAsynchronously());
-  closer.WaitForDestroy();
+  waiter.Wait();
 #else
   NOTIMPLEMENTED();
 #endif
@@ -169,7 +143,7 @@ void TestBrowserDialog::UpdateWidgets() {
   // Under mash, GetAllWidgets() uses MusClient to get the list of root windows.
   // Otherwise, GetAllWidgets() relies on AuraTestHelper to get the root window,
   // but that is not available in browser_tests, so use ash::Shell directly.
-  if (chromeos::GetAshConfig() == ash::Config::MASH) {
+  if (features::IsUsingWindowService()) {
     widgets_ = views::test::WidgetTest::GetAllWidgets();
   } else {
     for (aura::Window* root_window : ash::Shell::GetAllRootWindows())

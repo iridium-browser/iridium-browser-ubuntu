@@ -11,11 +11,14 @@
 #include "third_party/blink/renderer/core/frame/frame.h"
 #include "third_party/blink/renderer/core/frame/remote_frame_view.h"
 
+namespace cc {
+class Layer;
+}
+
 namespace blink {
 
 class LocalFrame;
 class RemoteFrameClient;
-class WebLayer;
 struct FrameLoadRequest;
 
 class CORE_EXPORT RemoteFrame final : public Frame {
@@ -25,14 +28,12 @@ class CORE_EXPORT RemoteFrame final : public Frame {
   ~RemoteFrame() override;
 
   // Frame overrides:
-  virtual void Trace(blink::Visitor*);
-  void Navigate(Document& origin_document,
-                const KURL&,
-                bool replace_current_item,
-                UserGestureStatus) override;
-  void Navigate(const FrameLoadRequest& passed_request) override;
-  void Reload(FrameLoadType, ClientRedirectPolicy) override;
-  void Detach(FrameDetachType) override;
+  void Trace(blink::Visitor*) override;
+  void ScheduleNavigation(Document& origin_document,
+                          const KURL&,
+                          WebFrameLoadType,
+                          UserGestureStatus) override;
+  void Navigate(const FrameLoadRequest&, WebFrameLoadType) override;
   RemoteSecurityContext* GetSecurityContext() const override;
   bool PrepareForCommit() override;
   void CheckCompleted() override;
@@ -40,9 +41,18 @@ class CORE_EXPORT RemoteFrame final : public Frame {
   void DidFreeze() override;
   void DidResume() override;
   void SetIsInert(bool) override;
+  void SetInheritedEffectiveTouchAction(TouchAction) override;
+  bool BubbleLogicalScrollFromChildFrame(ScrollDirection direction,
+                                         ScrollGranularity granularity,
+                                         Frame* child) override;
 
-  void SetWebLayer(WebLayer*);
-  WebLayer* GetWebLayer() const { return web_layer_; }
+  void SetCcLayer(cc::Layer*,
+                  bool prevent_contents_opaque_changes,
+                  bool is_surface_layer);
+  cc::Layer* GetCcLayer() const { return cc_layer_; }
+  bool WebLayerHasFixedContentsOpaque() const {
+    return prevent_contents_opaque_changes_;
+  }
 
   void AdvanceFocus(WebFocusType, LocalFrame* source);
 
@@ -53,8 +63,14 @@ class CORE_EXPORT RemoteFrame final : public Frame {
 
   RemoteFrameClient* Client() const;
 
+  void PointerEventsChanged();
+  bool IsIgnoredForHitTest() const;
+
  private:
   RemoteFrame(RemoteFrameClient*, Page&, FrameOwner*);
+
+  // Frame protected overrides:
+  void DetachImpl(FrameDetachType) override;
 
   // Intentionally private to prevent redundant checks when the type is
   // already RemoteFrame.
@@ -65,7 +81,9 @@ class CORE_EXPORT RemoteFrame final : public Frame {
 
   Member<RemoteFrameView> view_;
   Member<RemoteSecurityContext> security_context_;
-  WebLayer* web_layer_ = nullptr;
+  cc::Layer* cc_layer_ = nullptr;
+  bool prevent_contents_opaque_changes_ = false;
+  bool is_surface_layer_ = false;
 };
 
 inline RemoteFrameView* RemoteFrame::View() const {

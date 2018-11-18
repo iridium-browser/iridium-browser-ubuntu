@@ -32,6 +32,16 @@ class CompositingReasonFinderTestPlatform : public TestingPlatformSupport {
   bool IsLowEndDevice() override { return true; }
 };
 
+TEST_F(CompositingReasonFinderTest, CompositingReasonDependencies) {
+  EXPECT_FALSE(CompositingReason::kComboAllDirectNonStyleDeterminedReasons &
+               (~CompositingReason::kComboAllDirectReasons));
+  EXPECT_EQ(CompositingReason::kComboAllDirectReasons,
+            CompositingReason::kComboAllDirectStyleDeterminedReasons |
+                CompositingReason::kComboAllDirectNonStyleDeterminedReasons);
+  EXPECT_FALSE(CompositingReason::kComboAllDirectNonStyleDeterminedReasons &
+               CompositingReason::kComboAllStyleDeterminedReasons);
+}
+
 TEST_F(CompositingReasonFinderTest, DontPromoteTrivial3DLowEnd) {
   ScopedTestingPlatformSupport<CompositingReasonFinderTestPlatform> platform;
 
@@ -186,7 +196,6 @@ TEST_F(CompositingReasonFinderTest, OnlyNonTransformedFixedLayersPromoted) {
     </div>
   )HTML");
 
-  EXPECT_TRUE(RuntimeEnabledFeatures::CompositeOpaqueScrollersEnabled());
   Element* parent = GetDocument().getElementById("parent");
   Element* fixed = GetDocument().getElementById("fixed");
   PaintLayer* paint_layer =
@@ -235,7 +244,6 @@ TEST_F(CompositingReasonFinderTest, OnlyOpaqueFixedLayersPromoted) {
     </div>
   )HTML");
 
-  EXPECT_TRUE(RuntimeEnabledFeatures::CompositeOpaqueScrollersEnabled());
   Element* parent = GetDocument().getElementById("parent");
   Element* fixed = GetDocument().getElementById("fixed");
   PaintLayer* paint_layer =

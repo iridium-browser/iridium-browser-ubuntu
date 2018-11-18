@@ -54,6 +54,18 @@ class NetworkScannerTest : public testing::Test {
     scanner_.FindHostsInNetwork(base::BindOnce(&ExpectFailure));
   }
 
+  void ExpectResolvedHostEquals(const std::string& expected,
+                                const std::string& host) {
+    EXPECT_EQ(expected, scanner_.ResolveHost(host));
+  }
+
+  // Registers |hosts| with a host locator and call FindHostsInNetwork() which
+  // caches the results.
+  void RegisterAndCacheHosts(const HostMap& hosts) {
+    RegisterHostLocatorWithHosts(hosts);
+    ExpectHostMapEqual(hosts);
+  }
+
  private:
   NetworkScanner scanner_;
 
@@ -132,6 +144,55 @@ TEST_F(NetworkScannerTest, ShouldResolveMultipleHostsWithSameAddress) {
   expected["share3"] = "15.16.17.18";
 
   ExpectHostMapEqual(expected);
+}
+
+TEST_F(NetworkScannerTest, ResolveHostReturnsEmptyStringIfNoHostFound) {
+  HostMap hosts;
+  // Register a hostlocator with no hosts.
+  RegisterAndCacheHosts(hosts);
+
+  // Returns an empty string since host could not be resolved.
+  ExpectResolvedHostEquals("", "server");
+}
+
+TEST_F(NetworkScannerTest, ResolveHostResolvesHostsFound) {
+  HostMap hosts;
+  hosts["share1"] = "1.2.3.4";
+  hosts["share2"] = "4.5.6.7";
+  RegisterAndCacheHosts(hosts);
+
+  ExpectResolvedHostEquals("1.2.3.4", "share1");
+  ExpectResolvedHostEquals("4.5.6.7", "share2");
+
+  // Returns an empty string since host could not be resolved.
+  ExpectResolvedHostEquals("", "share3");
+}
+
+TEST_F(NetworkScannerTest, ResolveHostWithUppercaseHost) {
+  HostMap hosts;
+  hosts["share1"] = "1.2.3.4";
+  RegisterAndCacheHosts(hosts);
+
+  ExpectResolvedHostEquals("1.2.3.4", "SHARE1");
+}
+
+TEST_F(NetworkScannerTest, HostsAreStoredAsLowercase) {
+  HostMap hosts;
+  hosts["SHARE1"] = "1.2.3.4";
+  hosts["sHaRe2"] = "11.12.13.14";
+  hosts["Share3"] = "21.22.23.24";
+  RegisterHostLocatorWithHosts(hosts);
+
+  // expected_hosts should have all lowercase hosts.
+  HostMap expected_hosts;
+  expected_hosts["share1"] = "1.2.3.4";
+  expected_hosts["share2"] = "11.12.13.14";
+  expected_hosts["share3"] = "21.22.23.24";
+  ExpectHostMapEqual(expected_hosts);
+
+  ExpectResolvedHostEquals("1.2.3.4", "share1");
+  ExpectResolvedHostEquals("11.12.13.14", "share2");
+  ExpectResolvedHostEquals("21.22.23.24", "share3");
 }
 
 }  // namespace smb_client

@@ -31,9 +31,7 @@
 #include "third_party/blink/renderer/modules/webmidi/midi_output.h"
 
 #include "media/midi/midi_service.mojom-blink.h"
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
 #include "third_party/blink/renderer/core/dom/document.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/use_counter.h"
@@ -42,6 +40,7 @@
 #include "third_party/blink/renderer/core/timing/worker_global_scope_performance.h"
 #include "third_party/blink/renderer/core/workers/worker_global_scope.h"
 #include "third_party/blink/renderer/modules/webmidi/midi_access.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 
 using midi::mojom::PortState;
 
@@ -54,7 +53,7 @@ DOMUint8Array* ConvertUnsignedDataToUint8Array(
     ExceptionState& exception_state) {
   DOMUint8Array* array = DOMUint8Array::Create(unsigned_data.size());
   DOMUint8Array::ValueType* array_data = array->Data();
-  for (size_t i = 0; i < unsigned_data.size(); ++i) {
+  for (wtf_size_t i = 0; i < unsigned_data.size(); ++i) {
     if (unsigned_data[i] > 0xff) {
       exception_state.ThrowTypeError("The value at index " + String::Number(i) +
                                      " (" + String::Number(unsigned_data[i]) +
@@ -116,7 +115,7 @@ class MessageValidator {
       if (IsSysex()) {
         if (!sysex_enabled) {
           exception_state.ThrowDOMException(
-              kInvalidAccessError,
+              DOMExceptionCode::kInvalidAccessError,
               "System exclusive message is not allowed " + GetPositionString());
           return false;
         }

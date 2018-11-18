@@ -6,6 +6,8 @@
 #define ASH_SYSTEM_TRAY_TRAY_CONSTANTS_H_
 
 #include "ash/ash_export.h"
+#include "base/macros.h"
+#include "chromeos/chromeos_switches.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/geometry/size.h"
@@ -71,21 +73,34 @@ extern const SkColor kHeaderBackgroundColor;
 
 extern const SkColor kHeaderTextColorNormal;
 
+// Constants for the title row.
+constexpr int kTitleRowVerticalPadding = 4;
+constexpr int kTitleRowProgressBarHeight = 2;
+constexpr int kTitleRowPaddingTop = kTitleRowVerticalPadding;
+constexpr int kTitleRowPaddingBottom =
+    kTitleRowVerticalPadding - kTitleRowProgressBarHeight;
+
 extern const SkColor kMobileNotConnectedXIconColor;
 
 // Extra padding used to adjust hitting region around tray items.
 extern const int kHitRegionPadding;
 
 // Width of a line used to separate tray items in the shelf.
-ASH_EXPORT extern const int kSeparatorWidth;
+ASH_EXPORT const int kSeparatorWidth = 1;
+const int kSeparatorWidthNewUi = 0;
 
 // The color of the separators used in the system menu.
 extern const SkColor kMenuSeparatorColor;
 
 // The size and foreground color of the icons appearing in the material design
 // system tray.
-extern const int kTrayIconSize;
+constexpr int kTrayIconSize = 16;
 extern const SkColor kTrayIconColor;
+extern const SkColor kOobeTrayIconColor;
+
+// The padding around network tray icon in dip.
+constexpr int kTrayNetworkIconPadding = 2;
+constexpr int kUnifiedTrayNetworkIconPadding = 4;
 
 // The total visual padding at the start and end of the icon/label section
 // of the tray.
@@ -126,50 +141,111 @@ extern const int kTrayPopupInkDropCornerRadius;
 extern const int kTrayPopupSystemInfoRowHeight;
 
 // The colors used when --enable-features=SystemTrayUnified flag is enabled.
-constexpr SkColor kUnifiedMenuBackgroundColor = SkColorSetRGB(0x20, 0x21, 0x24);
+constexpr SkColor kUnifiedMenuBackgroundColor =
+    SkColorSetARGB(0xf2, 0x20, 0x21, 0x24);
 constexpr SkColor kUnifiedMenuBackgroundColorWithBlur =
-    SkColorSetA(kUnifiedMenuBackgroundColor, 0xB3);
+    SkColorSetA(kUnifiedMenuBackgroundColor, 0x99);
 constexpr float kUnifiedMenuBackgroundBlur = 30.f;
-constexpr SkColor kUnifiedMenuTextColor = SkColorSetRGB(0xf1, 0xf2, 0xf3);
-constexpr SkColor kUnifiedMenuIconColor = SkColorSetRGB(0xf1, 0xf2, 0xf3);
+constexpr SkColor kUnifiedMenuTextColor = SkColorSetRGB(0xf1, 0xf3, 0xf4);
+constexpr SkColor kUnifiedMenuIconColor = SkColorSetRGB(0xe8, 0xea, 0xed);
 constexpr SkColor kUnifiedMenuSecondaryTextColor =
     SkColorSetA(kUnifiedMenuIconColor, 0xa3);
 constexpr SkColor kUnifiedMenuIconColorDisabled =
-    SkColorSetA(kUnifiedMenuIconColor, 0xa3);
+    SkColorSetRGB(0x5f, 0x63, 0x68);
+constexpr SkColor kUnifiedMenuTextColorDisabled =
+    SkColorSetRGB(0x5f, 0x63, 0x68);
 constexpr SkColor kUnifiedMenuButtonColor =
     SkColorSetA(kUnifiedMenuIconColor, 0x14);
+constexpr SkColor kUnifiedMenuSeparatorColor =
+    SkColorSetA(kUnifiedMenuIconColor, 0x23);
 constexpr SkColor kUnifiedMenuButtonColorActive =
     SkColorSetRGB(0x25, 0x81, 0xdf);
+constexpr SkColor kUnifiedMenuButtonColorDisabled =
+    SkColorSetA(kUnifiedMenuButtonColor, 0xa);
+constexpr SkColor kUnifiedNotificationSeparatorColor =
+    SkColorSetRGB(0xdf, 0xe0, 0xe0);
 constexpr SkColor kUnifiedFeaturePodHoverColor =
     SkColorSetRGB(0xff, 0xff, 0xff);
 
 constexpr gfx::Insets kUnifiedMenuItemPadding(0, 16, 16, 16);
 constexpr gfx::Insets kUnifiedSliderPadding(0, 16);
 
+constexpr int kUnifiedMenuVerticalPadding = 8;
 constexpr int kUnifiedNotificationCenterSpacing = 16;
+constexpr int kUnifiedTrayIconSize = 20;
+constexpr int kUnifiedTraySpacingBetweenIcons = 2;
 constexpr int kUnifiedTrayCornerRadius = 20;
+constexpr int kUnifiedTrayContentPadding = 5;
 constexpr int kUnifiedTopShortcutSpacing = 16;
+constexpr int kUnifiedNotificationHiddenLineHeight = 20;
 constexpr gfx::Insets kUnifiedTopShortcutPadding(0, 16);
+constexpr gfx::Insets kUnifiedNotificationHiddenPadding(6, 16);
+
+constexpr int kStackingNotificationCounterMax = 8;
+constexpr int kStackingNotificationCounterRadius = 2;
+constexpr int kStackingNotificationCounterStartX = 18;
+constexpr int kStackingNotificationCounterDistanceX = 10;
+constexpr int kStackingNotificationCounterHeight = 20;
+constexpr SkColor kStackingNotificationCounterColor =
+    SkColorSetRGB(0x5f, 0x63, 0x68);
+constexpr SkColor kStackingNotificationCounterBorderColor =
+    SkColorSetRGB(0xe0, 0xe0, 0xe0);
+
+// Size of an icon drawn inside top shortcut buttons.
+// A dark disc with |kTrayItemSize| diameter is drawn in the background.
+constexpr int kTrayTopShortcutButtonIconSize = 20;
 
 constexpr int kUnifiedSystemInfoHeight = 16;
 constexpr int kUnifiedSystemInfoSpacing = 8;
 
 // Constants used in FeaturePodsView of UnifiedSystemTray.
 constexpr gfx::Size kUnifiedFeaturePodIconSize(48, 48);
-constexpr gfx::Size kUnifiedFeaturePodSize(80, 88);
+constexpr gfx::Size kUnifiedFeaturePodSize(112, 88);
 constexpr gfx::Size kUnifiedFeaturePodCollapsedSize(48, 48);
-constexpr gfx::Size kUnifiedFeaturePodHoverSize(80, 36);
 constexpr gfx::Insets kUnifiedFeaturePodIconPadding(4);
 constexpr gfx::Insets kUnifiedFeaturePodHoverPadding(2);
+constexpr int kUnifiedFeaturePodVectorIconSize = 24;
+constexpr int kUnifiedFeaturePodLabelWidth = 80;
 constexpr int kUnifiedFeaturePodSpacing = 6;
 constexpr int kUnifiedFeaturePodHoverRadius = 4;
 constexpr int kUnifiedFeaturePodVerticalPadding = 28;
-constexpr int kUnifiedFeaturePodHorizontalSidePadding = 28;
-constexpr int kUnifiedFeaturePodHorizontalMiddlePadding = 32;
+constexpr int kUnifiedFeaturePodHorizontalSidePadding = 12;
+constexpr int kUnifiedFeaturePodHorizontalMiddlePadding = 0;
 constexpr int kUnifiedFeaturePodCollapsedVerticalPadding = 16;
 constexpr int kUnifiedFeaturePodCollapsedHorizontalPadding = 24;
+constexpr int kUnifiedFeaturePodArrowSpacing = 4;
 constexpr int kUnifiedFeaturePodItemsInRow = 3;
 constexpr int kUnifiedFeaturePodMaxItemsInCollapsed = 5;
+constexpr int kUnifiedNotificationSeparatorThickness = 1;
+
+// Separators between multiple users are shorter than the full width.
+constexpr int kUnifiedUserChooserSeparatorSideMargin = 64;
+// Additional gap above and below the longer separator between user list and
+// "Sign in another user..." button.
+constexpr int kUnifiedUserChooserLargeSeparatorVerticalSpacing = 8;
+//
+constexpr int kUnifiedUserChooserRowHeight = 64;
+constexpr int kUnifiedUserChooserAvatorIconColumnWidth = 64;
+constexpr int kUnifiedUserChooserCloseIconColumnWidth = 64;
+
+// Gap between the buttons on the top shortcut row, other than the
+// expand/collapse button.
+constexpr int kUnifiedTopShortcutButtonDefaultSpacing = 16;
+constexpr int kUnifiedTopShortcutButtonMinSpacing = 4;
+
+// Constants used in the title row of a detailed view in UnifiedSystemTray.
+constexpr gfx::Insets kUnifiedDetailedViewTitlePadding(0, 0, 0, 16);
+constexpr int kUnifiedDetailedViewTitleRowHeight = 64;
+
+class TrayConstants {
+ public:
+  // Returns the width of a line used to separate tray items in the shelf.
+  static int separator_width() { return kSeparatorWidthNewUi; }
+
+  static int GetTrayIconSize();
+
+  DISALLOW_IMPLICIT_CONSTRUCTORS(TrayConstants);
+};
 
 }  // namespace ash
 

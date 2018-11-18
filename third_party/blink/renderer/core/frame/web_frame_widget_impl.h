@@ -34,6 +34,8 @@
 #include <memory>
 
 #include "base/memory/scoped_refptr.h"
+#include "base/optional.h"
+#include "base/single_thread_task_runner.h"
 #include "third_party/blink/public/platform/web_coalesced_input_event.h"
 #include "third_party/blink/public/platform/web_point.h"
 #include "third_party/blink/public/platform/web_size.h"
@@ -41,37 +43,37 @@
 #include "third_party/blink/renderer/core/frame/web_frame_widget_base.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
 #include "third_party/blink/renderer/core/page/page_widget_delegate.h"
-#include "third_party/blink/renderer/platform/graphics/compositor_mutator_impl.h"
+#include "third_party/blink/renderer/platform/graphics/apply_viewport_changes.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_layer.h"
 #include "third_party/blink/renderer/platform/heap/member.h"
 #include "third_party/blink/renderer/platform/heap/self_keep_alive.h"
 #include "third_party/blink/renderer/platform/scroll/scroll_types.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
-#include "third_party/blink/renderer/platform/wtf/optional.h"
+
+namespace cc {
+class Layer;
+}
 
 namespace blink {
 
+class AnimationWorkletMutatorDispatcherImpl;
 class CompositorAnimationHost;
 class Frame;
 class Element;
 class LocalFrame;
 class PaintLayerCompositor;
 class UserGestureToken;
-class WebLayer;
 class WebLayerTreeView;
 class WebMouseEvent;
 class WebMouseWheelEvent;
 class WebFrameWidgetImpl;
 
-using WebFrameWidgetsSet =
-    PersistentHeapHashSet<WeakMember<WebFrameWidgetImpl>>;
-
 class WebFrameWidgetImpl final : public WebFrameWidgetBase,
                                  public PageWidgetEventHandler {
  public:
-  static WebFrameWidgetImpl* Create(WebWidgetClient*, WebLocalFrame*);
+  static WebFrameWidgetImpl* Create(WebWidgetClient&);
 
-  ~WebFrameWidgetImpl();
+  ~WebFrameWidgetImpl() override;
 
   // WebWidget functions:
   void Close() override;
@@ -81,43 +83,39 @@ class WebFrameWidgetImpl final : public WebFrameWidgetBase,
   void DidEnterFullscreen() override;
   void DidExitFullscreen() override;
   void SetSuppressFrameRequestsWorkaroundFor704763Only(bool) final;
-  void BeginFrame(double last_frame_time_monotonic) override;
+  void BeginFrame(base::TimeTicks last_frame_time) override;
   void UpdateLifecycle(LifecycleUpdate requested_update) override;
-  void UpdateAllLifecyclePhasesAndCompositeForTesting() override;
-  void Paint(WebCanvas*, const WebRect&) override;
-  void LayoutAndPaintAsync(WebLayoutAndPaintAsyncCallback*) override;
+  void PaintContent(cc::PaintCanvas*, const WebRect&) override;
+  void LayoutAndPaintAsync(base::OnceClosure callback) override;
   void CompositeAndReadbackAsync(
-      WebCompositeAndReadbackAsyncCallback*) override;
+      base::OnceCallback<void(const SkBitmap&)> callback) override;
   void ThemeChanged() override;
   WebHitTestResult HitTestResultAt(const WebPoint&) override;
   WebInputEventResult DispatchBufferedTouchEvents() override;
   WebInputEventResult HandleInputEvent(const WebCoalescedInputEvent&) override;
   void SetCursorVisibilityState(bool is_visible) override;
 
-  void ApplyViewportDeltas(const WebFloatSize& visual_viewport_delta,
-                           const WebFloatSize& main_frame_delta,
-                           const WebFloatSize& elastic_overscroll_delta,
-                           float page_scale_delta,
-                           float browser_controls_delta) override;
+  void ApplyViewportChanges(const ApplyViewportChangesArgs&) override;
   void MouseCaptureLost() override;
   void SetFocus(bool enable) override;
-  WebColor BackgroundColor() const override;
+  SkColor BackgroundColor() const override;
   bool SelectionBounds(WebRect& anchor, WebRect& focus) const override;
   bool IsAcceleratedCompositingActive() const override;
   void WillCloseLayerTreeView() override;
-  void SetRemoteViewportIntersection(const WebRect&) override;
+  void SetRemoteViewportIntersection(const WebRect&, bool) override;
   void SetIsInert(bool) override;
+  void SetInheritedEffectiveTouchAction(TouchAction) override;
   void UpdateRenderThrottlingStatus(bool is_throttled,
                                     bool subtree_throttled) override;
+  WebURL GetURLForDebugTrace() override;
 
   // WebFrameWidget implementation.
-  WebLocalFrameImpl* LocalRoot() const override { return local_root_; }
   void SetVisibilityState(mojom::PageVisibilityState) override;
-  void SetBackgroundColorOverride(WebColor) override;
+  void SetBackgroundColorOverride(SkColor) override;
   void ClearBackgroundColorOverride() override;
-  void SetBaseBackgroundColorOverride(WebColor) override;
+  void SetBaseBackgroundColorOverride(SkColor) override;
   void ClearBaseBackgroundColorOverride() override;
-  void SetBaseBackgroundColor(WebColor) override;
+  void SetBaseBackgroundColor(SkColor) override;
   WebInputMethodController* GetActiveWebInputMethodController() const override;
   bool ScrollFocusedEditableElementIntoView() override;
 
@@ -130,19 +128,20 @@ class WebFrameWidgetImpl final : public WebFrameWidgetBase,
   // Create or return cached mutation distributor.  This usually requires a
   // round trip to the compositor.  The output task runner is the one to use
   // for sending mutations using the WeakPtr.
-  base::WeakPtr<CompositorMutatorImpl> EnsureCompositorMutator(
-      scoped_refptr<base::SingleThreadTaskRunner>* mutator_task_runner)
-      override;
+  base::WeakPtr<AnimationWorkletMutatorDispatcherImpl>
+  EnsureCompositorMutatorDispatcher(scoped_refptr<base::SingleThreadTaskRunner>*
+                                        mutator_task_runner) override;
 
   // WebFrameWidgetBase overrides:
+  void Initialize() override;
+  void SetLayerTreeView(WebLayerTreeView*) override;
   bool ForSubframe() const override { return true; }
   void ScheduleAnimation() override;
   void IntrinsicSizingInfoChanged(const IntrinsicSizingInfo&) override;
   void DidCreateLocalRootView() override;
 
-  WebWidgetClient* Client() const override { return client_; }
   void SetRootGraphicsLayer(GraphicsLayer*) override;
-  void SetRootLayer(WebLayer*) override;
+  void SetRootLayer(scoped_refptr<cc::Layer>) override;
   WebLayerTreeView* GetLayerTreeView() const override;
   CompositorAnimationHost* AnimationHost() const override;
   HitTestResult CoreHitTestResultAt(const WebPoint&) override;
@@ -161,18 +160,16 @@ class WebFrameWidgetImpl final : public WebFrameWidgetBase,
 
   Color BaseBackgroundColor() const;
 
-  void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  private:
   friend class WebFrameWidget;  // For WebFrameWidget::create.
 
-  explicit WebFrameWidgetImpl(WebWidgetClient*, WebLocalFrame*);
+  explicit WebFrameWidgetImpl(WebWidgetClient&);
 
   // Perform a hit test for a point relative to the root frame of the page.
   HitTestResult HitTestResultForRootFramePos(
       const LayoutPoint& pos_in_root_frame);
-
-  void InitializeLayerTreeView();
 
   void SetIsAcceleratedCompositingActive(bool);
   void UpdateLayerTreeViewport();
@@ -202,14 +199,7 @@ class WebFrameWidgetImpl final : public WebFrameWidgetBase,
       LayoutRect& rect_to_scroll,
       WebScrollIntoViewParams& params);
 
-  WebWidgetClient* client_;
-
-  // WebFrameWidget is associated with a subtree of the frame tree,
-  // corresponding to a maximal connected tree of LocalFrames. This member
-  // points to the root of that subtree.
-  Member<WebLocalFrameImpl> local_root_;
-
-  WTF::Optional<WebSize> size_;
+  base::Optional<WebSize> size_;
 
   // If set, the (plugin) node which has mouse capture.
   Member<Node> mouse_capture_node_;
@@ -218,11 +208,11 @@ class WebFrameWidgetImpl final : public WebFrameWidgetBase,
   // This is owned by the LayerTreeHostImpl, and should only be used on the
   // compositor thread, so we keep the TaskRunner where you post tasks to
   // make that happen.
-  base::WeakPtr<CompositorMutatorImpl> mutator_;
+  base::WeakPtr<AnimationWorkletMutatorDispatcherImpl> mutator_dispatcher_;
   scoped_refptr<base::SingleThreadTaskRunner> mutator_task_runner_;
 
   WebLayerTreeView* layer_tree_view_;
-  WebLayer* root_layer_;
+  scoped_refptr<cc::Layer> root_layer_;
   GraphicsLayer* root_graphics_layer_;
   std::unique_ptr<CompositorAnimationHost> animation_host_;
   bool is_accelerated_compositing_active_;
@@ -233,16 +223,16 @@ class WebFrameWidgetImpl final : public WebFrameWidgetBase,
   bool did_suspend_parsing_ = false;
 
   bool background_color_override_enabled_;
-  WebColor background_color_override_;
+  SkColor background_color_override_;
   bool base_background_color_override_enabled_;
-  WebColor base_background_color_override_;
+  SkColor base_background_color_override_;
 
   // TODO(ekaramad): Can we remove this and make sure IME events are not called
   // when there is no page focus?
   // Represents whether or not this object should process incoming IME events.
   bool ime_accept_events_;
 
-  WebColor base_background_color_;
+  SkColor base_background_color_;
 
   SelfKeepAlive<WebFrameWidgetImpl> self_keep_alive_;
 };

@@ -78,6 +78,11 @@ class PLATFORM_EXPORT KURL {
 
   KURL();
   KURL(const KURL&);
+
+  // This should only be used to convert a GURL returned from a layer which
+  // operates in the base terms (e.g. from common/* code).
+  explicit KURL(const GURL&);
+
   KURL& operator=(const KURL&);
 
   // The argument is an absolute URL string. The string is assumed to be
@@ -130,9 +135,13 @@ class PLATFORM_EXPORT KURL {
   bool HasPath() const;
 
   // Returns true if you can set the host and port for the URL.
-  // Non-hierarchical URLs don't have a host and port.
+  // Non-hierarchical URLs don't have a host and port. This is equivalent to
+  // GURL::IsStandard().
+  //
+  // Note: this returns true for "filesystem" and false for "blob" currently,
+  // due to peculiarities of how schemes are registered in url/ -- neither
+  // of these schemes can have hostnames on the outer URL.
   bool CanSetHostOrPort() const { return IsHierarchical(); }
-
   bool CanSetPathname() const { return IsHierarchical(); }
   bool IsHierarchical() const;
 
@@ -142,6 +151,12 @@ class PLATFORM_EXPORT KURL {
 
   String Protocol() const;
   String Host() const;
+
+  // Returns 0 when there is no port or the default port was specified, or the
+  // URL is invalid.
+  //
+  // We treat URLs with out-of-range port numbers as invalid URLs, and they
+  // will be rejected by the canonicalizer.
   unsigned short Port() const;
   bool HasPort() const;
   String User() const;
@@ -218,6 +233,7 @@ class PLATFORM_EXPORT KURL {
   // Returns a GURL with the same properties. This can be used in platform/ and
   // web/. However, in core/ and modules/, this should only be used to pass
   // a GURL to a layer that is expecting one instead of a KURL or a WebURL.
+  // TODO(crbug.com/862940): Make this conversion explicit.
   operator GURL() const;
 
  private:

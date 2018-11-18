@@ -5,6 +5,9 @@
 #ifndef CONTENT_BROWSER_RENDERER_HOST_MEDIA_IN_PROCESS_VIDEO_CAPTURE_DEVICE_LAUNCHER_H_
 #define CONTENT_BROWSER_RENDERER_HOST_MEDIA_IN_PROCESS_VIDEO_CAPTURE_DEVICE_LAUNCHER_H_
 
+#include <memory>
+#include <string>
+
 #include "base/single_thread_task_runner.h"
 #include "content/browser/renderer_host/media/video_capture_controller.h"
 #include "content/browser/renderer_host/media/video_capture_provider.h"
@@ -51,6 +54,7 @@ class InProcessVideoCaptureDeviceLauncher : public VideoCaptureDeviceLauncher {
   };
 
   std::unique_ptr<media::VideoCaptureDeviceClient> CreateDeviceClient(
+      media::VideoCaptureBufferType requested_buffer_type,
       int buffer_pool_max_buffer_count,
       std::unique_ptr<media::VideoFrameReceiver> receiver,
       base::WeakPtr<media::VideoFrameReceiver> receiver_on_io_thread);
@@ -71,7 +75,19 @@ class InProcessVideoCaptureDeviceLauncher : public VideoCaptureDeviceLauncher {
       std::unique_ptr<media::VideoFrameReceiver> receiver,
       ReceiveDeviceCallback result_callback);
 
+  void DoStartAuraWindowCaptureOnDeviceThread(
+      const DesktopMediaID& device_id,
+      const media::VideoCaptureParams& params,
+      std::unique_ptr<media::VideoFrameReceiver> receiver,
+      ReceiveDeviceCallback result_callback);
+
   void DoStartDesktopCaptureOnDeviceThread(
+      const DesktopMediaID& desktop_id,
+      const media::VideoCaptureParams& params,
+      std::unique_ptr<media::VideoCaptureDeviceClient> client,
+      ReceiveDeviceCallback result_callback);
+
+  void DoStartFakeDisplayCaptureOnDeviceThread(
       const DesktopMediaID& desktop_id,
       const media::VideoCaptureParams& params,
       std::unique_ptr<media::VideoCaptureDeviceClient> client,

@@ -12,16 +12,20 @@
 #include "base/command_line.h"
 #include "base/run_loop.h"
 #include "base/values.h"
+#include "chrome/browser/chromeos/crostini/crostini_mime_types_service.h"
+#include "chrome/browser/chromeos/crostini/crostini_mime_types_service_factory.h"
+#include "chrome/browser/chromeos/crostini/crostini_test_helper.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
 #include "chrome/browser/chromeos/file_manager/app_id.h"
+#include "chrome/browser/chromeos/file_manager/path_util.h"
 #include "chrome/browser/chromeos/login/users/scoped_test_user_manager.h"
-#include "chrome/browser/chromeos/settings/cros_settings.h"
-#include "chrome/browser/chromeos/settings/device_settings_service.h"
+#include "chrome/browser/chromeos/settings/scoped_cros_settings_test_helper.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/test_extension_system.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
-#include "components/drive/drive_app_registry.h"
+#include "chromeos/dbus/dbus_thread_manager.h"
+#include "chromeos/dbus/fake_concierge_client.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/testing_pref_service.h"
 #include "content/public/test/test_browser_thread_bundle.h"
@@ -64,8 +68,7 @@ void UpdateDefaultTaskPreferences(TestingPrefServiceSimple* pref_service,
 
 }  // namespace
 
-TEST(FileManagerFileTasksTest,
-     FullTaskDescriptor_NonDriveAppWithIconAndDefault) {
+TEST(FileManagerFileTasksTest, FullTaskDescriptor_WithIconAndDefault) {
   FullTaskDescriptor full_descriptor(
       TaskDescriptor("app-id", TASK_TYPE_FILE_BROWSER_HANDLER, "action-id"),
       "task title", Verb::VERB_OPEN_WITH, GURL("http://example.com/icon.png"),
@@ -80,30 +83,11 @@ TEST(FileManagerFileTasksTest,
   EXPECT_TRUE(full_descriptor.is_default());
 }
 
-TEST(FileManagerFileTasksTest,
-     FullTaskDescriptor_DriveAppWithoutIconAndNotDefault) {
-  FullTaskDescriptor full_descriptor(
-      TaskDescriptor("app-id", TASK_TYPE_DRIVE_APP, "action-id"), "task title",
-      Verb::VERB_OPEN_WITH,
-      GURL(),  // No icon URL.
-      false /* is_default */, false /* is_generic_file_handler */);
-
-  const std::string task_id =
-      TaskDescriptorToId(full_descriptor.task_descriptor());
-  EXPECT_EQ("app-id|drive|action-id", task_id);
-  EXPECT_TRUE(full_descriptor.icon_url().is_empty());
-  EXPECT_EQ("task title", full_descriptor.task_title());
-  EXPECT_EQ(Verb::VERB_OPEN_WITH, full_descriptor.task_verb());
-  EXPECT_FALSE(full_descriptor.is_default());
-}
-
 TEST(FileManagerFileTasksTest, MakeTaskID) {
   EXPECT_EQ("app-id|file|action-id",
             MakeTaskID("app-id", TASK_TYPE_FILE_BROWSER_HANDLER, "action-id"));
   EXPECT_EQ("app-id|app|action-id",
             MakeTaskID("app-id", TASK_TYPE_FILE_HANDLER, "action-id"));
-  EXPECT_EQ("app-id|drive|action-id",
-            MakeTaskID("app-id", TASK_TYPE_DRIVE_APP, "action-id"));
 }
 
 TEST(FileManagerFileTasksTest, TaskDescriptorToId) {
@@ -129,14 +113,6 @@ TEST(FileManagerFileTasksTest, ParseTaskID_FileHandler) {
   EXPECT_EQ("action-id", task.action_id);
 }
 
-TEST(FileManagerFileTasksTest, ParseTaskID_DriveApp) {
-  TaskDescriptor task;
-  EXPECT_TRUE(ParseTaskID("app-id|drive|action-id", &task));
-  EXPECT_EQ("app-id", task.app_id);
-  EXPECT_EQ(TASK_TYPE_DRIVE_APP, task.task_type);
-  EXPECT_EQ("action-id", task.action_id);
-}
-
 TEST(FileManagerFileTasksTest, ParseTaskID_Legacy) {
   TaskDescriptor task;
   // A legacy task ID only has two parts. The task type should be
@@ -144,16 +120,6 @@ TEST(FileManagerFileTasksTest, ParseTaskID_Legacy) {
   EXPECT_TRUE(ParseTaskID("app-id|action-id", &task));
   EXPECT_EQ("app-id", task.app_id);
   EXPECT_EQ(TASK_TYPE_FILE_BROWSER_HANDLER, task.task_type);
-  EXPECT_EQ("action-id", task.action_id);
-}
-
-TEST(FileManagerFileTasksTest, ParseTaskID_LegacyDrive) {
-  TaskDescriptor task;
-  // A legacy task ID only has two parts. For Drive app, the app ID is
-  // prefixed with "drive-app:".
-  EXPECT_TRUE(ParseTaskID("drive-app:app-id|action-id", &task));
-  EXPECT_EQ("app-id", task.app_id);
-  EXPECT_EQ(TASK_TYPE_DRIVE_APP, task.task_type);
   EXPECT_EQ("action-id", task.action_id);
 }
 
@@ -165,86 +131,6 @@ TEST(FileManagerFileTasksTest, ParseTaskID_Invalid) {
 TEST(FileManagerFileTasksTest, ParseTaskID_UnknownTaskType) {
   TaskDescriptor task;
   EXPECT_FALSE(ParseTaskID("app-id|unknown|action-id", &task));
-}
-
-TEST(FileManagerFileTasksTest, FindDriveAppTasks) {
-  // For DriveAppRegistry and TestingProfile, which check
-  // CurrentlyOn(BrowserThread::UI).
-  content::TestBrowserThreadBundle thread_bundle;
-
-  TestingProfile profile;
-
-  // Foo.app can handle "text/plain" and "text/html"
-  std::unique_ptr<google_apis::AppResource> foo_app(
-      new google_apis::AppResource);
-  foo_app->set_product_id("foo_app_id");
-  foo_app->set_application_id("foo_app_id");
-  foo_app->set_name("Foo");
-  foo_app->set_object_type("foo_object_type");
-  std::vector<std::unique_ptr<std::string>> foo_mime_types;
-  foo_mime_types.push_back(std::make_unique<std::string>("text/plain"));
-  foo_mime_types.push_back(std::make_unique<std::string>("text/html"));
-  foo_app->set_primary_mimetypes(std::move(foo_mime_types));
-
-  // Bar.app can only handle "text/plain".
-  std::unique_ptr<google_apis::AppResource> bar_app(
-      new google_apis::AppResource);
-  bar_app->set_product_id("bar_app_id");
-  bar_app->set_application_id("bar_app_id");
-  bar_app->set_name("Bar");
-  bar_app->set_object_type("bar_object_type");
-  std::vector<std::unique_ptr<std::string>> bar_mime_types;
-  bar_mime_types.push_back(std::make_unique<std::string>("text/plain"));
-  bar_app->set_primary_mimetypes(std::move(bar_mime_types));
-
-  // Prepare DriveAppRegistry from Foo.app and Bar.app.
-  std::vector<std::unique_ptr<google_apis::AppResource>> app_resources;
-  app_resources.push_back(std::move(foo_app));
-  app_resources.push_back(std::move(bar_app));
-  google_apis::AppList app_list;
-  app_list.set_items(std::move(app_resources));
-  drive::DriveAppRegistry drive_app_registry(NULL);
-  drive_app_registry.UpdateFromAppList(app_list);
-
-  // Find apps for a "text/plain" file. Foo.app and Bar.app should be found.
-  std::vector<extensions::EntryInfo> entries;
-  entries.push_back(extensions::EntryInfo(
-      drive::util::GetDriveMountPointPath(&profile).AppendASCII("foo.txt"),
-      "text/plain", false));
-  std::vector<FullTaskDescriptor> tasks;
-  FindDriveAppTasks(drive_app_registry, entries, &tasks);
-  ASSERT_EQ(2U, tasks.size());
-  // Sort the app IDs, as the order is not guaranteed.
-  std::vector<std::string> app_ids;
-  app_ids.push_back(tasks[0].task_descriptor().app_id);
-  app_ids.push_back(tasks[1].task_descriptor().app_id);
-  std::sort(app_ids.begin(), app_ids.end());
-  // Confirm that both Foo.app and Bar.app are found.
-  EXPECT_EQ("bar_app_id", app_ids[0]);
-  EXPECT_EQ("foo_app_id", app_ids[1]);
-
-  // Find apps for "text/plain" and "text/html" files. Only Foo.app should be
-  // found.
-  entries.clear();
-  entries.push_back(extensions::EntryInfo(
-      drive::util::GetDriveMountPointPath(&profile).AppendASCII("foo.txt"),
-      "text/plain", false));
-  entries.push_back(extensions::EntryInfo(
-      drive::util::GetDriveMountPointPath(&profile).AppendASCII("foo.html"),
-      "text/html", false));
-  tasks.clear();
-  FindDriveAppTasks(drive_app_registry, entries, &tasks);
-  ASSERT_EQ(1U, tasks.size());
-  // Confirm that only Foo.app is found.
-  EXPECT_EQ("foo_app_id", tasks[0].task_descriptor().app_id);
-
-  // Add a "text/plain" file not on Drive. No tasks should be found.
-  entries.push_back(extensions::EntryInfo(
-      base::FilePath::FromUTF8Unsafe("not_on_drive.txt"), "text/plain", false));
-  tasks.clear();
-  FindDriveAppTasks(drive_app_registry, entries, &tasks);
-  // Confirm no tasks are found.
-  ASSERT_TRUE(tasks.empty());
 }
 
 // Test that the right task is chosen from multiple choices per mime types
@@ -261,17 +147,17 @@ TEST(FileManagerFileTasksTest, ChooseAndSetDefaultTask_MultipleTasks) {
                                TASK_TYPE_FILE_HANDLER,
                                "action-id");
   std::vector<FullTaskDescriptor> tasks;
-  tasks.push_back(FullTaskDescriptor(
-      text_app_task, "Text.app", Verb::VERB_OPEN_WITH,
-      GURL("http://example.com/text_app.png"), false /* is_default */,
-      false /* is_generic_file_handler */));
-  tasks.push_back(FullTaskDescriptor(
-      nice_app_task, "Nice.app", Verb::VERB_ADD_TO,
-      GURL("http://example.com/nice_app.png"), false /* is_default */,
-      false /* is_generic_file_handler */));
+  tasks.emplace_back(text_app_task, "Text.app", Verb::VERB_OPEN_WITH,
+                     GURL("http://example.com/text_app.png"),
+                     false /* is_default */,
+                     false /* is_generic_file_handler */);
+  tasks.emplace_back(nice_app_task, "Nice.app", Verb::VERB_ADD_TO,
+                     GURL("http://example.com/nice_app.png"),
+                     false /* is_default */,
+                     false /* is_generic_file_handler */);
   std::vector<extensions::EntryInfo> entries;
-  entries.push_back(extensions::EntryInfo(
-      base::FilePath::FromUTF8Unsafe("foo.txt"), "text/plain", false));
+  entries.emplace_back(base::FilePath::FromUTF8Unsafe("foo.txt"), "text/plain",
+                       false);
 
   // None of them should be chosen as default, as nothing is set in the
   // preferences.
@@ -322,13 +208,13 @@ TEST(FileManagerFileTasksTest, ChooseAndSetDefaultTask_FallbackFileBrowser) {
                                 TASK_TYPE_FILE_BROWSER_HANDLER,
                                 "view-in-browser");
   std::vector<FullTaskDescriptor> tasks;
-  tasks.push_back(FullTaskDescriptor(
-      files_app_task, "View in browser", Verb::VERB_OPEN_WITH,
-      GURL("http://example.com/some_icon.png"), false /* is_default */,
-      false /* is_generic_file_handler */));
+  tasks.emplace_back(files_app_task, "View in browser", Verb::VERB_OPEN_WITH,
+                     GURL("http://example.com/some_icon.png"),
+                     false /* is_default */,
+                     false /* is_generic_file_handler */);
   std::vector<extensions::EntryInfo> entries;
-  entries.push_back(extensions::EntryInfo(
-      base::FilePath::FromUTF8Unsafe("foo.txt"), "text/plain", false));
+  entries.emplace_back(base::FilePath::FromUTF8Unsafe("foo.txt"), "text/plain",
+                       false);
 
   // The internal file browser handler should be chosen as default, as it's a
   // fallback file browser handler.
@@ -346,13 +232,13 @@ TEST(FileManagerFileTasksTest, ChooseAndSetDefaultTask_FallbackTextApp) {
   TaskDescriptor files_app_task(kTextEditorAppId, TASK_TYPE_FILE_HANDLER,
                                 "Text");
   std::vector<FullTaskDescriptor> tasks;
-  tasks.push_back(FullTaskDescriptor(
+  tasks.emplace_back(
       files_app_task, "Text", Verb::VERB_OPEN_WITH,
       GURL("chrome://extension-icon/mmfbcljfglbokpmkimbfghdkjmjhdgbg/16/1"),
-      false /* is_default */, false /* is_generic_file_handler */));
+      false /* is_default */, false /* is_generic_file_handler */);
   std::vector<extensions::EntryInfo> entries;
-  entries.push_back(extensions::EntryInfo(
-      base::FilePath::FromUTF8Unsafe("foo.txt"), "text/plain", false));
+  entries.emplace_back(base::FilePath::FromUTF8Unsafe("foo.txt"), "text/plain",
+                       false);
 
   // The text editor app should be chosen as default, as it's a fallback file
   // browser handler.
@@ -370,13 +256,13 @@ TEST(FileManagerFileTasksTest, ChooseAndSetDefaultTask_FallbackAudioPlayer) {
   TaskDescriptor files_app_task(kAudioPlayerAppId, TASK_TYPE_FILE_HANDLER,
                                 "Audio Player");
   std::vector<FullTaskDescriptor> tasks;
-  tasks.push_back(FullTaskDescriptor(
+  tasks.emplace_back(
       files_app_task, "Audio Player", Verb::VERB_OPEN_WITH,
       GURL("chrome://extension-icon/cjbfomnbifhcdnihkgipgfcihmgjfhbf/32/1"),
-      false /* is_default */, false /* is_generic_file_handler */));
+      false /* is_default */, false /* is_generic_file_handler */);
   std::vector<extensions::EntryInfo> entries;
-  entries.push_back(extensions::EntryInfo(
-      base::FilePath::FromUTF8Unsafe("sound.wav"), "audio/wav", false));
+  entries.emplace_back(base::FilePath::FromUTF8Unsafe("sound.wav"), "audio/wav",
+                       false);
 
   // The Audio Player app should be chosen as default, as it's a fallback file
   // browser handler.
@@ -395,14 +281,14 @@ TEST(FileManagerFileTasksTest, ChooseAndSetDefaultTask_FallbackOfficeEditing) {
       extension_misc::kQuickOfficeComponentExtensionId, TASK_TYPE_FILE_HANDLER,
       "Office Editing for Docs, Sheets & Slides");
   std::vector<FullTaskDescriptor> tasks;
-  tasks.push_back(FullTaskDescriptor(
+  tasks.emplace_back(
       files_app_task, "Office Editing for Docs, Sheets & Slides",
       Verb::VERB_OPEN_WITH,
       GURL("chrome://extension-icon/bpmcpldpdmajfigpchkicefoigmkfalc/32/1"),
-      false /* is_default */, false /* is_generic_file_handler */));
+      false /* is_default */, false /* is_generic_file_handler */);
   std::vector<extensions::EntryInfo> entries;
-  entries.push_back(extensions::EntryInfo(
-      base::FilePath::FromUTF8Unsafe("slides.pptx"), "", false));
+  entries.emplace_back(base::FilePath::FromUTF8Unsafe("slides.pptx"), "",
+                       false);
 
   // The Office Editing app should be chosen as default, as it's a fallback
   // file browser handler.
@@ -416,14 +302,14 @@ TEST(FileManagerFileTasksTest, IsGoodMatchFileHandler) {
   using FileHandlerInfo = extensions::FileHandlerInfo;
 
   std::vector<extensions::EntryInfo> entries_1;
-  entries_1.push_back(extensions::EntryInfo(
-      base::FilePath(FILE_PATH_LITERAL("foo.jpg")), "image/jpeg", false));
-  entries_1.push_back(extensions::EntryInfo(
-      base::FilePath(FILE_PATH_LITERAL("bar.txt")), "text/plain", false));
+  entries_1.emplace_back(base::FilePath(FILE_PATH_LITERAL("foo.jpg")),
+                         "image/jpeg", false);
+  entries_1.emplace_back(base::FilePath(FILE_PATH_LITERAL("bar.txt")),
+                         "text/plain", false);
 
   std::vector<extensions::EntryInfo> entries_2;
-  entries_2.push_back(extensions::EntryInfo(
-      base::FilePath(FILE_PATH_LITERAL("foo.ics")), "text/calendar", false));
+  entries_2.emplace_back(base::FilePath(FILE_PATH_LITERAL("foo.ics")),
+                         "text/calendar", false);
 
   // extensions: ["*"]
   FileHandlerInfo file_handler_info_1;
@@ -484,8 +370,7 @@ TEST(FileManagerFileTasksTest, IsGoodMatchFileHandler) {
   // path_directory_set not empty.
   FileHandlerInfo file_handler_info_11;
   std::vector<extensions::EntryInfo> entries_3;
-  entries_3.push_back(extensions::EntryInfo(
-      base::FilePath(FILE_PATH_LITERAL("dir1")), "", true));
+  entries_3.emplace_back(base::FilePath(FILE_PATH_LITERAL("dir1")), "", true);
   EXPECT_FALSE(IsGoodMatchFileHandler(file_handler_info_11, entries_3));
 }
 
@@ -493,7 +378,8 @@ TEST(FileManagerFileTasksTest, IsGoodMatchFileHandler) {
 class FileManagerFileTasksComplexTest : public testing::Test {
  protected:
   FileManagerFileTasksComplexTest()
-      : command_line_(base::CommandLine::NO_PROGRAM), extension_service_(NULL) {
+      : command_line_(base::CommandLine::NO_PROGRAM),
+        extension_service_(nullptr) {
     extensions::TestExtensionSystem* test_extension_system =
         static_cast<extensions::TestExtensionSystem*>(
             extensions::ExtensionSystem::Get(&test_profile_));
@@ -507,14 +393,13 @@ class FileManagerFileTasksComplexTest : public testing::Test {
   class FindAllTypesOfTasksSynchronousWrapper {
    public:
     void Call(Profile* profile,
-              const drive::DriveAppRegistry* drive_app_registry,
               const std::vector<extensions::EntryInfo>& entries,
               const std::vector<GURL>& file_urls,
               std::vector<FullTaskDescriptor>* result) {
       FindAllTypesOfTasks(
-          profile, drive_app_registry, entries, file_urls,
-          base::Bind(&FindAllTypesOfTasksSynchronousWrapper::OnReply,
-                     base::Unretained(this), result));
+          profile, entries, file_urls,
+          base::BindOnce(&FindAllTypesOfTasksSynchronousWrapper::OnReply,
+                         base::Unretained(this), result));
       run_loop_.Run();
     }
 
@@ -529,15 +414,13 @@ class FileManagerFileTasksComplexTest : public testing::Test {
   };
 
   content::TestBrowserThreadBundle thread_bundle_;
-  chromeos::ScopedTestDeviceSettingsService test_device_settings_service_;
-  chromeos::ScopedTestCrosSettings test_cros_settings_;
+  chromeos::ScopedCrosSettingsTestHelper cros_settings_test_helper_;
   chromeos::ScopedTestUserManager test_user_manager_;
   TestingProfile test_profile_;
   base::CommandLine command_line_;
-  ExtensionService* extension_service_;  // Owned by test_profile_;
+  extensions::ExtensionService* extension_service_;  // Owned by test_profile_;
 };
 
-// The basic logic is similar to a test case for FindDriveAppTasks above.
 TEST_F(FileManagerFileTasksComplexTest, FindFileHandlerTasks) {
   // Random IDs generated by
   // % ruby -le 'print (0...32).to_a.map{(?a + rand(16)).chr}.join'
@@ -603,10 +486,9 @@ TEST_F(FileManagerFileTasksComplexTest, FindFileHandlerTasks) {
 
   // Find apps for a "text/plain" file. Foo.app and Bar.app should be found.
   std::vector<extensions::EntryInfo> entries;
-  entries.push_back(
-      extensions::EntryInfo(drive::util::GetDriveMountPointPath(&test_profile_)
-                                .AppendASCII("foo.txt"),
-                            "text/plain", false));
+  entries.emplace_back(drive::util::GetDriveMountPointPath(&test_profile_)
+                           .AppendASCII("foo.txt"),
+                       "text/plain", false);
 
   std::vector<FullTaskDescriptor> tasks;
   FindFileHandlerTasks(&test_profile_, entries, &tasks);
@@ -623,14 +505,12 @@ TEST_F(FileManagerFileTasksComplexTest, FindFileHandlerTasks) {
   // Find apps for "text/plain" and "text/html" files. Only Foo.app should be
   // found.
   entries.clear();
-  entries.push_back(
-      extensions::EntryInfo(drive::util::GetDriveMountPointPath(&test_profile_)
-                                .AppendASCII("foo.txt"),
-                            "text/plain", false));
-  entries.push_back(
-      extensions::EntryInfo(drive::util::GetDriveMountPointPath(&test_profile_)
-                                .AppendASCII("foo.html"),
-                            "text/html", false));
+  entries.emplace_back(drive::util::GetDriveMountPointPath(&test_profile_)
+                           .AppendASCII("foo.txt"),
+                       "text/plain", false);
+  entries.emplace_back(drive::util::GetDriveMountPointPath(&test_profile_)
+                           .AppendASCII("foo.html"),
+                       "text/html", false);
   tasks.clear();
   FindFileHandlerTasks(&test_profile_, entries, &tasks);
   ASSERT_EQ(1U, tasks.size());
@@ -638,15 +518,15 @@ TEST_F(FileManagerFileTasksComplexTest, FindFileHandlerTasks) {
   EXPECT_EQ(kFooId, tasks[0].task_descriptor().app_id);
 
   // Add an "image/png" file. No tasks should be found.
-  entries.push_back(extensions::EntryInfo(
-      base::FilePath::FromUTF8Unsafe("foo.png"), "image/png", false));
+  entries.emplace_back(base::FilePath::FromUTF8Unsafe("foo.png"), "image/png",
+                       false);
   tasks.clear();
   FindFileHandlerTasks(&test_profile_, entries, &tasks);
   // Confirm no tasks are found.
   ASSERT_TRUE(tasks.empty());
 }
 
-// The basic logic is similar to a test case for FindDriveAppTasks above.
+// The basic logic is similar to a test case for FindFileHandlerTasks above.
 TEST_F(FileManagerFileTasksComplexTest, FindFileBrowserHandlerTasks) {
   // Copied from FindFileHandlerTasks test above.
   const char kFooId[] = "hhgbjpmdppecanaaogonaigmmifgpaph";
@@ -704,7 +584,7 @@ TEST_F(FileManagerFileTasksComplexTest, FindFileBrowserHandlerTasks) {
 
   // Find apps for a ".txt" file. Foo.app and Bar.app should be found.
   std::vector<GURL> file_urls;
-  file_urls.push_back(GURL("filesystem:chrome-extension://id/dir/foo.txt"));
+  file_urls.emplace_back("filesystem:chrome-extension://id/dir/foo.txt");
 
   std::vector<FullTaskDescriptor> tasks;
   FindFileBrowserHandlerTasks(&test_profile_, file_urls, &tasks);
@@ -720,8 +600,8 @@ TEST_F(FileManagerFileTasksComplexTest, FindFileBrowserHandlerTasks) {
 
   // Find apps for ".txt" and ".html" files. Only Foo.app should be found.
   file_urls.clear();
-  file_urls.push_back(GURL("filesystem:chrome-extension://id/dir/foo.txt"));
-  file_urls.push_back(GURL("filesystem:chrome-extension://id/dir/foo.html"));
+  file_urls.emplace_back("filesystem:chrome-extension://id/dir/foo.txt");
+  file_urls.emplace_back("filesystem:chrome-extension://id/dir/foo.html");
   tasks.clear();
   FindFileBrowserHandlerTasks(&test_profile_, file_urls, &tasks);
   ASSERT_EQ(1U, tasks.size());
@@ -729,20 +609,19 @@ TEST_F(FileManagerFileTasksComplexTest, FindFileBrowserHandlerTasks) {
   EXPECT_EQ(kFooId, tasks[0].task_descriptor().app_id);
 
   // Add an ".png" file. No tasks should be found.
-  file_urls.push_back(GURL("filesystem:chrome-extension://id/dir/foo.png"));
+  file_urls.emplace_back("filesystem:chrome-extension://id/dir/foo.png");
   tasks.clear();
   FindFileBrowserHandlerTasks(&test_profile_, file_urls, &tasks);
   // Confirm no tasks are found.
   ASSERT_TRUE(tasks.empty());
 }
 
-// Test that all kinds of apps (file handler, file browser handler, and Drive
-// app) are returned.
+// Test that all kinds of apps (file handler and file browser handler) are
+// returned.
 TEST_F(FileManagerFileTasksComplexTest, FindAllTypesOfTasks) {
   // kFooId and kBarId copied from FindFileHandlerTasks test above.
   const char kFooId[] = "hhgbjpmdppecanaaogonaigmmifgpaph";
   const char kBarId[] = "odlhccgofgkadkkhcmhgnhgahonahoca";
-  const char kBazId[] = "plifkpkakemokpflgbnnigcoldgcbdmc";
 
   // Foo.app can handle "text/plain".
   // This is a packaged app (file handler).
@@ -798,75 +677,32 @@ TEST_F(FileManagerFileTasksComplexTest, FindAllTypesOfTasks) {
   bar_app.SetID(kBarId);
   extension_service_->AddExtension(bar_app.Build().get());
 
-  // Baz.app can handle "text/plain".
-  // This is a Drive app.
-  std::unique_ptr<google_apis::AppResource> baz_app(
-      new google_apis::AppResource);
-  baz_app->set_product_id("baz_app_id");
-  baz_app->set_application_id(kBazId);
-  baz_app->set_name("Baz");
-  baz_app->set_object_type("baz_object_type");
-  std::vector<std::unique_ptr<std::string>> baz_mime_types;
-  baz_mime_types.push_back(std::make_unique<std::string>("text/plain"));
-  baz_app->set_primary_mimetypes(std::move(baz_mime_types));
-  // Set up DriveAppRegistry.
-  std::vector<std::unique_ptr<google_apis::AppResource>> app_resources;
-  app_resources.push_back(std::move(baz_app));
-  google_apis::AppList app_list;
-  app_list.set_items(std::move(app_resources));
-  drive::DriveAppRegistry drive_app_registry(NULL);
-  drive_app_registry.UpdateFromAppList(app_list);
-
   // Find apps for "foo.txt". All apps should be found.
   std::vector<extensions::EntryInfo> entries;
   std::vector<GURL> file_urls;
-  entries.push_back(
-      extensions::EntryInfo(drive::util::GetDriveMountPointPath(&test_profile_)
-                                .AppendASCII("foo.txt"),
-                            "text/plain", false));
-  file_urls.push_back(GURL("filesystem:chrome-extension://id/dir/foo.txt"));
+  entries.emplace_back(drive::util::GetDriveMountPointPath(&test_profile_)
+                           .AppendASCII("foo.txt"),
+                       "text/plain", false);
+  file_urls.emplace_back("filesystem:chrome-extension://id/dir/foo.txt");
 
   std::vector<FullTaskDescriptor> tasks;
-  FindAllTypesOfTasksSynchronousWrapper().Call(
-      &test_profile_, &drive_app_registry, entries, file_urls, &tasks);
-  ASSERT_EQ(3U, tasks.size());
+  FindAllTypesOfTasksSynchronousWrapper().Call(&test_profile_, entries,
+                                               file_urls, &tasks);
+  ASSERT_EQ(2U, tasks.size());
 
   // Sort the app IDs, as the order is not guaranteed.
   std::vector<std::string> app_ids;
   app_ids.push_back(tasks[0].task_descriptor().app_id);
   app_ids.push_back(tasks[1].task_descriptor().app_id);
-  app_ids.push_back(tasks[2].task_descriptor().app_id);
   std::sort(app_ids.begin(), app_ids.end());
   // Confirm that all apps are found.
   EXPECT_EQ(kFooId, app_ids[0]);
   EXPECT_EQ(kBarId, app_ids[1]);
-  EXPECT_EQ(kBazId, app_ids[2]);
 }
 
 TEST_F(FileManagerFileTasksComplexTest, FindAllTypesOfTasks_GoogleDocument) {
   // kFooId and kBarId copied from FindFileHandlerTasks test above.
-  const char kFooId[] = "hhgbjpmdppecanaaogonaigmmifgpaph";
   const char kBarId[] = "odlhccgofgkadkkhcmhgnhgahonahoca";
-
-  // Foo.app can handle ".gdoc" files.
-  std::unique_ptr<google_apis::AppResource> foo_app(
-      new google_apis::AppResource);
-  foo_app->set_product_id("foo_app");
-  foo_app->set_application_id(kFooId);
-  foo_app->set_name("Foo");
-  foo_app->set_object_type("foo_object_type");
-  std::vector<std::unique_ptr<std::string>> foo_extensions;
-  foo_extensions.push_back(
-      std::make_unique<std::string>("gdoc"));  // Not ".gdoc"
-  foo_app->set_primary_file_extensions(std::move(foo_extensions));
-
-  // Prepare DriveAppRegistry from Foo.app.
-  std::vector<std::unique_ptr<google_apis::AppResource>> app_resources;
-  app_resources.push_back(std::move(foo_app));
-  google_apis::AppList app_list;
-  app_list.set_items(std::move(app_resources));
-  drive::DriveAppRegistry drive_app_registry(NULL);
-  drive_app_registry.UpdateFromAppList(app_list);
 
   // Bar.app can handle ".gdoc" files.
   // This is an extension (file browser handler).
@@ -923,15 +759,14 @@ TEST_F(FileManagerFileTasksComplexTest, FindAllTypesOfTasks_GoogleDocument) {
   // should be found.
   std::vector<extensions::EntryInfo> entries;
   std::vector<GURL> file_urls;
-  entries.push_back(
-      extensions::EntryInfo(drive::util::GetDriveMountPointPath(&test_profile_)
-                                .AppendASCII("foo.gdoc"),
-                            "application/vnd.google-apps.document", false));
-  file_urls.push_back(GURL("filesystem:chrome-extension://id/dir/foo.gdoc"));
+  entries.emplace_back(drive::util::GetDriveMountPointPath(&test_profile_)
+                           .AppendASCII("foo.gdoc"),
+                       "application/vnd.google-apps.document", false);
+  file_urls.emplace_back("filesystem:chrome-extension://id/dir/foo.gdoc");
 
   std::vector<FullTaskDescriptor> tasks;
-  FindAllTypesOfTasksSynchronousWrapper().Call(
-      &test_profile_, &drive_app_registry, entries, file_urls, &tasks);
+  FindAllTypesOfTasksSynchronousWrapper().Call(&test_profile_, entries,
+                                               file_urls, &tasks);
   ASSERT_EQ(1U, tasks.size());
   EXPECT_EQ(kFileManagerAppId, tasks[0].task_descriptor().app_id);
 }
@@ -998,7 +833,7 @@ TEST_F(FileManagerFileTasksComplexTest, FindFileHandlerTask_Generic) {
               extensions::DictionaryBuilder()
                   .Set("text",
                        extensions::DictionaryBuilder()
-                           .SetBoolean("include_directories", true)
+                           .Set("include_directories", true)
                            .Set("extensions",
                                 extensions::ListBuilder().Append("txt").Build())
                            .Build())
@@ -1069,10 +904,9 @@ TEST_F(FileManagerFileTasksComplexTest, FindFileHandlerTask_Generic) {
 
   // Test case with .txt file
   std::vector<extensions::EntryInfo> txt_entries;
-  txt_entries.push_back(
-      extensions::EntryInfo(drive::util::GetDriveMountPointPath(&test_profile_)
-                                .AppendASCII("foo.txt"),
-                            "text/plain", false));
+  txt_entries.emplace_back(drive::util::GetDriveMountPointPath(&test_profile_)
+                               .AppendASCII("foo.txt"),
+                           "text/plain", false);
   std::vector<FullTaskDescriptor> txt_result;
   FindFileHandlerTasks(&test_profile_, txt_entries, &txt_result);
   EXPECT_EQ(4U, txt_result.size());
@@ -1091,10 +925,9 @@ TEST_F(FileManagerFileTasksComplexTest, FindFileHandlerTask_Generic) {
 
   // Test case with .jpg file
   std::vector<extensions::EntryInfo> jpg_entries;
-  jpg_entries.push_back(
-      extensions::EntryInfo(drive::util::GetDriveMountPointPath(&test_profile_)
-                                .AppendASCII("foo.jpg"),
-                            "image/jpeg", false));
+  jpg_entries.emplace_back(drive::util::GetDriveMountPointPath(&test_profile_)
+                               .AppendASCII("foo.jpg"),
+                           "image/jpeg", false);
   std::vector<FullTaskDescriptor> jpg_result;
   FindFileHandlerTasks(&test_profile_, jpg_entries, &jpg_result);
   EXPECT_EQ(3U, jpg_result.size());
@@ -1111,9 +944,9 @@ TEST_F(FileManagerFileTasksComplexTest, FindFileHandlerTask_Generic) {
 
   // Test case with directories.
   std::vector<extensions::EntryInfo> dir_entries;
-  dir_entries.push_back(extensions::EntryInfo(
+  dir_entries.emplace_back(
       drive::util::GetDriveMountPointPath(&test_profile_).AppendASCII("dir"),
-      "", true));
+      "", true);
   std::vector<FullTaskDescriptor> dir_result;
   FindFileHandlerTasks(&test_profile_, dir_entries, &dir_result);
   ASSERT_EQ(1U, dir_result.size());
@@ -1122,7 +955,7 @@ TEST_F(FileManagerFileTasksComplexTest, FindFileHandlerTask_Generic) {
   EXPECT_TRUE(dir_result[0].is_generic_file_handler());
 }
 
-// The basic logic is similar to a test case for FindDriveAppTasks above.
+// The basic logic is similar to a test case for FindFileHandlerTasks above.
 TEST_F(FileManagerFileTasksComplexTest, FindFileHandlerTask_Verbs) {
   // kFooId copied from FindFileHandlerTasks test above.
   const char kFooId[] = "hhgbjpmdppecanaaogonaigmmifgpaph";
@@ -1153,7 +986,7 @@ TEST_F(FileManagerFileTasksComplexTest, FindFileHandlerTask_Verbs) {
                            .Build())
                   .Set("any_with_directories",
                        extensions::DictionaryBuilder()
-                           .SetBoolean("include_directories", true)
+                           .Set("include_directories", true)
                            .Set("types",
                                 extensions::ListBuilder().Append("*").Build())
                            .Set("verb", "pack_with")
@@ -1199,10 +1032,9 @@ TEST_F(FileManagerFileTasksComplexTest, FindFileHandlerTask_Verbs) {
   // but only one ADD_TO that is not a generic handler will be taken into
   // account, even though there are 2 ADD_TO matches for "text/plain".
   std::vector<extensions::EntryInfo> entries;
-  entries.push_back(
-      extensions::EntryInfo(drive::util::GetDriveMountPointPath(&test_profile_)
-                                .AppendASCII("foo.txt"),
-                            "text/plain", false));
+  entries.emplace_back(drive::util::GetDriveMountPointPath(&test_profile_)
+                           .AppendASCII("foo.txt"),
+                       "text/plain", false);
 
   std::vector<FullTaskDescriptor> tasks;
   FindFileHandlerTasks(&test_profile_, entries, &tasks);
@@ -1226,10 +1058,9 @@ TEST_F(FileManagerFileTasksComplexTest, FindFileHandlerTask_Verbs) {
   // ADD_TO that is a good match will be taken into account, even though there
   // are 3 ADD_TO matches for "text/html".
   entries.clear();
-  entries.push_back(
-      extensions::EntryInfo(drive::util::GetDriveMountPointPath(&test_profile_)
-                                .AppendASCII("foo.html"),
-                            "text/html", false));
+  entries.emplace_back(drive::util::GetDriveMountPointPath(&test_profile_)
+                           .AppendASCII("foo.html"),
+                       "text/html", false);
   tasks.clear();
   FindFileHandlerTasks(&test_profile_, entries, &tasks);
 
@@ -1244,9 +1075,9 @@ TEST_F(FileManagerFileTasksComplexTest, FindFileHandlerTask_Verbs) {
   // Find app with corresponding verbs for directories.
   // Foo.app with only PACK_WITH should be found.
   entries.clear();
-  entries.push_back(extensions::EntryInfo(
+  entries.emplace_back(
       drive::util::GetDriveMountPointPath(&test_profile_).AppendASCII("dir"),
-      "", true));
+      "", true);
   tasks.clear();
   FindFileHandlerTasks(&test_profile_, entries, &tasks);
 
@@ -1254,6 +1085,155 @@ TEST_F(FileManagerFileTasksComplexTest, FindFileHandlerTask_Verbs) {
   EXPECT_EQ(kFooId, tasks[0].task_descriptor().app_id);
   EXPECT_EQ("Foo", tasks[0].task_title());
   EXPECT_EQ(Verb::VERB_PACK_WITH, tasks[0].task_verb());
+}
+
+// Test using the test extension system, which needs lots of setup.
+class FileManagerFileTasksCrostiniTest
+    : public FileManagerFileTasksComplexTest {
+ protected:
+  FileManagerFileTasksCrostiniTest()
+      : crostini_test_helper_(&test_profile_),
+        crostini_folder_(util::GetCrostiniMountDirectory(&test_profile_)) {
+    chromeos::DBusThreadManager::GetSetterForTesting()->SetConciergeClient(
+        std::make_unique<chromeos::FakeConciergeClient>());
+
+    vm_tools::apps::App text_app =
+        crostini::CrostiniTestHelper::BasicApp("text_app");
+    *text_app.add_mime_types() = "text/plain";
+    crostini_test_helper_.AddApp(text_app);
+
+    vm_tools::apps::App image_app =
+        crostini::CrostiniTestHelper::BasicApp("image_app");
+    *image_app.add_mime_types() = "image/gif";
+    *image_app.add_mime_types() = "image/jpeg";
+    *image_app.add_mime_types() = "image/jpg";
+    *image_app.add_mime_types() = "image/png";
+    crostini_test_helper_.AddApp(image_app);
+
+    vm_tools::apps::App gif_app =
+        crostini::CrostiniTestHelper::BasicApp("gif_app");
+    *gif_app.add_mime_types() = "image/gif";
+    crostini_test_helper_.AddApp(gif_app);
+
+    vm_tools::apps::App alt_mime_app =
+        crostini::CrostiniTestHelper::BasicApp("alt_mime_app");
+    *alt_mime_app.add_mime_types() = "foo/x-bar";
+    crostini_test_helper_.AddApp(alt_mime_app);
+
+    text_app_id_ = crostini::CrostiniTestHelper::GenerateAppId("text_app");
+    image_app_id_ = crostini::CrostiniTestHelper::GenerateAppId("image_app");
+    gif_app_id_ = crostini::CrostiniTestHelper::GenerateAppId("gif_app");
+    alt_mime_app_id_ =
+        crostini::CrostiniTestHelper::GenerateAppId("alt_mime_app");
+
+    // Setup the custom MIME type mapping.
+    vm_tools::apps::MimeTypes mime_types_list;
+    mime_types_list.set_vm_name(crostini::kCrostiniDefaultVmName);
+    mime_types_list.set_container_name(crostini::kCrostiniDefaultContainerName);
+    (*mime_types_list.mutable_mime_type_mappings())["foo"] = "foo/x-bar";
+
+    crostini::CrostiniMimeTypesServiceFactory::GetForProfile(&test_profile_)
+        ->UpdateMimeTypes(mime_types_list);
+  }
+
+  crostini::CrostiniTestHelper crostini_test_helper_;
+  base::FilePath crostini_folder_;
+  std::string text_app_id_;
+  std::string image_app_id_;
+  std::string gif_app_id_;
+  std::string alt_mime_app_id_;
+};
+
+TEST_F(FileManagerFileTasksCrostiniTest, BasicFiles) {
+  std::vector<extensions::EntryInfo> entries{
+      {crostini_folder_.Append("foo.txt"), "text/plain", false}};
+  std::vector<GURL> file_urls{
+      GURL("filesystem:chrome-extension://id/dir/foo.txt")};
+
+  std::vector<FullTaskDescriptor> tasks;
+  FindAllTypesOfTasksSynchronousWrapper().Call(&test_profile_, entries,
+                                               file_urls, &tasks);
+  ASSERT_EQ(1U, tasks.size());
+  EXPECT_EQ(text_app_id_, tasks[0].task_descriptor().app_id);
+
+  // Multiple text files
+  entries.emplace_back(crostini_folder_.Append("bar.txt"), "text/plain", false);
+  file_urls.emplace_back("filesystem:chrome-extension://id/dir/bar.txt");
+  FindAllTypesOfTasksSynchronousWrapper().Call(&test_profile_, entries,
+                                               file_urls, &tasks);
+  ASSERT_EQ(1U, tasks.size());
+  EXPECT_EQ(text_app_id_, tasks[0].task_descriptor().app_id);
+}
+
+TEST_F(FileManagerFileTasksCrostiniTest, Directories) {
+  std::vector<extensions::EntryInfo> entries{
+      {crostini_folder_.Append("dir"), "", true}};
+  std::vector<GURL> file_urls{GURL("filesystem:chrome-extension://id/dir/dir")};
+  std::vector<FullTaskDescriptor> tasks;
+  FindAllTypesOfTasksSynchronousWrapper().Call(&test_profile_, entries,
+                                               file_urls, &tasks);
+  EXPECT_EQ(0U, tasks.size());
+
+  entries.emplace_back(crostini_folder_.Append("foo.txt"), "text/plain", false);
+  file_urls.emplace_back("filesystem:chrome-extension://id/dir/foo.txt");
+  FindAllTypesOfTasksSynchronousWrapper().Call(&test_profile_, entries,
+                                               file_urls, &tasks);
+  EXPECT_EQ(0U, tasks.size());
+}
+
+TEST_F(FileManagerFileTasksCrostiniTest, MultipleMatches) {
+  std::vector<extensions::EntryInfo> entries{
+      {crostini_folder_.Append("foo.gif"), "image/gif", false},
+      {crostini_folder_.Append("bar.gif"), "image/gif", false}};
+  std::vector<GURL> file_urls{
+      GURL("filesystem:chrome-extension://id/dir/foo.gif"),
+      GURL("filesystem:chrome-extension://id/dir/bar.gif")};
+
+  std::vector<FullTaskDescriptor> tasks;
+  FindAllTypesOfTasksSynchronousWrapper().Call(&test_profile_, entries,
+                                               file_urls, &tasks);
+  // The returned values happen to be ordered alphabetically by app_id, so we
+  // rely on this to keep the test simple.
+  EXPECT_LT(gif_app_id_, image_app_id_);
+  ASSERT_EQ(2U, tasks.size());
+  EXPECT_EQ(gif_app_id_, tasks[0].task_descriptor().app_id);
+  EXPECT_EQ(image_app_id_, tasks[1].task_descriptor().app_id);
+}
+
+TEST_F(FileManagerFileTasksCrostiniTest, MultipleTypes) {
+  std::vector<extensions::EntryInfo> entries{
+      {crostini_folder_.Append("foo.gif"), "image/gif", false},
+      {crostini_folder_.Append("bar.png"), "image/png", false}};
+  std::vector<GURL> file_urls{
+      GURL("filesystem:chrome-extension://id/dir/foo.gif"),
+      GURL("filesystem:chrome-extension://id/dir/bar.png")};
+
+  std::vector<FullTaskDescriptor> tasks;
+  FindAllTypesOfTasksSynchronousWrapper().Call(&test_profile_, entries,
+                                               file_urls, &tasks);
+  ASSERT_EQ(1U, tasks.size());
+  EXPECT_EQ(image_app_id_, tasks[0].task_descriptor().app_id);
+
+  entries.emplace_back(crostini_folder_.Append("qux.mp4"), "video/mp4", false);
+  file_urls.emplace_back("filesystem:chrome-extension://id/dir/qux.mp4");
+  FindAllTypesOfTasksSynchronousWrapper().Call(&test_profile_, entries,
+                                               file_urls, &tasks);
+  EXPECT_EQ(0U, tasks.size());
+}
+
+TEST_F(FileManagerFileTasksCrostiniTest, AlternateMimeTypes) {
+  std::vector<extensions::EntryInfo> entries{
+      {crostini_folder_.Append("bar1.foo"), "text/plain", false},
+      {crostini_folder_.Append("bar2.foo"), "application/octet-stream", false}};
+  std::vector<GURL> file_urls{
+      GURL("filesystem:chrome-extension://id/dir/bar1.foo"),
+      GURL("filesystem:chrome-extension://id/dir/bar2.foo")};
+
+  std::vector<FullTaskDescriptor> tasks;
+  FindAllTypesOfTasksSynchronousWrapper().Call(&test_profile_, entries,
+                                               file_urls, &tasks);
+  ASSERT_EQ(1U, tasks.size());
+  EXPECT_EQ(alt_mime_app_id_, tasks[0].task_descriptor().app_id);
 }
 
 }  // namespace file_tasks

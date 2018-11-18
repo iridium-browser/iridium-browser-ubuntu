@@ -5,9 +5,12 @@
 #ifndef UI_AURA_WINDOW_OCCLUSION_TRACKER_H_
 #define UI_AURA_WINDOW_OCCLUSION_TRACKER_H_
 
+#include <memory>
+
 #include "base/containers/flat_map.h"
 #include "base/containers/flat_set.h"
 #include "base/macros.h"
+#include "base/scoped_observer.h"
 #include "ui/aura/aura_export.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_observer.h"
@@ -26,10 +29,12 @@ namespace test {
 class WindowOcclusionTrackerTestApi;
 }
 
+class Env;
+
 // Notifies tracked Windows when their occlusion state change.
 //
 // To start tracking the occlusion state of a Window, call
-// WindowOcclusionTracker::Track().
+//   aura::Window::TrackOcclusionState()
 //
 // A Window is occluded if its bounds and transform are not animated and one of
 // these conditions is true:
@@ -43,22 +48,25 @@ class AURA_EXPORT WindowOcclusionTracker : public ui::LayerAnimationObserver,
  public:
   // Prevents window occlusion state computations within its scope. If an event
   // that could cause window occlusion states to change occurs within the scope
-  // of a ScopedPauseOcclusionTracking, window occlusion state computations are
-  // delayed until all ScopedPauseOcclusionTracking objects have been destroyed.
-  class AURA_EXPORT ScopedPauseOcclusionTracking {
+  // of a ScopedPause, window occlusion state computations are delayed until all
+  // ScopedPause objects have been destroyed.
+  class AURA_EXPORT ScopedPause {
    public:
-    ScopedPauseOcclusionTracking();
-    ~ScopedPauseOcclusionTracking();
+    explicit ScopedPause(Env* env);
+    ~ScopedPause();
 
    private:
-    DISALLOW_COPY_AND_ASSIGN(ScopedPauseOcclusionTracking);
+    WindowOcclusionTracker* const tracker_;
+    DISALLOW_COPY_AND_ASSIGN(ScopedPause);
   };
 
   // Start tracking the occlusion state of |window|.
-  static void Track(Window* window);
+  void Track(Window* window);
 
  private:
   friend class test::WindowOcclusionTrackerTestApi;
+  friend class Env;
+  friend std::unique_ptr<WindowOcclusionTracker>::deleter_type;
 
   struct RootWindowState {
     // Number of Windows whose occlusion state is tracked under this root
@@ -72,11 +80,8 @@ class AURA_EXPORT WindowOcclusionTracker : public ui::LayerAnimationObserver,
   WindowOcclusionTracker();
   ~WindowOcclusionTracker() override;
 
-  static WindowOcclusionTracker* GetInstance();
-
   // Recomputes the occlusion state of tracked windows under roots marked as
-  // dirty in |root_windows_| if there are no active
-  // ScopedPauseOcclusionTracking instance.
+  // dirty in |root_windows_| if there are no active ScopedPause instance.
   void MaybeComputeOcclusion();
 
   // Recomputes the occlusion state of |window| and its descendants.
@@ -141,6 +146,10 @@ class AURA_EXPORT WindowOcclusionTracker : public ui::LayerAnimationObserver,
                                   bool assume_parent_opaque = false,
                                   bool assume_window_opaque = false) const;
 
+  // Returns true if changing the opacity or alpha state of |window| could
+  // affect the occlusion state of a tracked window.
+  bool WindowOpacityChangeMayAffectOcclusionStates(Window* window) const;
+
   // Returns true if changing the transform, bounds or stacking order of
   // |window| could affect the occlusion state of a tracked window.
   bool WindowMoveMayAffectOcclusionStates(Window* window) const;
@@ -174,6 +183,7 @@ class AURA_EXPORT WindowOcclusionTracker : public ui::LayerAnimationObserver,
                              ui::PropertyChangeReason reason) override;
   void OnWindowOpacitySet(Window* window,
                           ui::PropertyChangeReason reason) override;
+  void OnWindowAlphaShapeSet(Window* window) override;
   void OnWindowTransformed(Window* window,
                            ui::PropertyChangeReason reason) override;
   void OnWindowStackingChanged(Window* window) override;
@@ -198,14 +208,19 @@ class AURA_EXPORT WindowOcclusionTracker : public ui::LayerAnimationObserver,
   // Root Windows of Windows in |tracked_windows_|.
   base::flat_map<Window*, RootWindowState> root_windows_;
 
-  // Number of times that the current call to MaybeComputeOcclusion() has
-  // recomputed occlusion states. Always 0 when not in MaybeComputeOcclusion().
+  // Number of times that occlusion has been recomputed in this process. We keep
+  // track of this for tests.
   int num_times_occlusion_recomputed_ = 0;
 
-  // Set to true when occlusion is recomputed too many times before it becomes
-  // stable. Reset in
-  // WindowOcclusionTrackerTestApi::WasOcclusionRecomputedTooManyTimes().
-  bool was_occlusion_recomputed_too_many_times_ = false;
+  // Number of times that the current call to MaybeComputeOcclusion() has
+  // recomputed occlusion states. Always 0 when not in MaybeComputeOcclusion().
+  int num_times_occlusion_recomputed_in_current_step_ = 0;
+
+  // Counter of the current occlusion tracking pause.
+  int num_pause_occlusion_tracking_ = 0;
+
+  // Tracks the observed windows.
+  ScopedObserver<Window, WindowObserver> window_observer_{this};
 
   DISALLOW_COPY_AND_ASSIGN(WindowOcclusionTracker);
 };

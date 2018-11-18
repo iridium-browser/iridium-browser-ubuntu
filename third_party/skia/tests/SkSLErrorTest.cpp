@@ -9,14 +9,16 @@
 
 #include "Test.h"
 
-#if SK_SUPPORT_GPU
-
 static void test_failure(skiatest::Reporter* r, const char* src, const char* error) {
     SkSL::Compiler compiler;
     SkSL::Program::Settings settings;
     sk_sp<GrShaderCaps> caps = SkSL::ShaderCapsFactory::Default();
     settings.fCaps = caps.get();
-    compiler.convertProgram(SkSL::Program::kFragment_Kind, SkSL::String(src), settings);
+    std::unique_ptr<SkSL::Program> program = compiler.convertProgram(SkSL::Program::kFragment_Kind,
+                                                                     SkSL::String(src), settings);
+    if (!compiler.errorCount()) {
+        compiler.optimize(*program);
+    }
     SkSL::String skError(error);
     if (compiler.errorText() != skError) {
         SkDebugf("SKSL ERROR:\n    source: %s\n    expected: %s    received: %s", src, error,
@@ -508,4 +510,3 @@ DEF_TEST(SkSLDuplicateOutput, r) {
                  "layout (location=0, index=0) out half4 duplicateOutput;",
                  "error: 1: out location=0, index=0 is reserved for sk_FragColor\n1 error\n");
 }
-#endif

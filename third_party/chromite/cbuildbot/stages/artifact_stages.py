@@ -56,6 +56,7 @@ class ArchiveStage(generic_stages.BoardSpecificBuilderStage,
 
   option_name = 'archive'
   config_name = 'archive'
+  category = constants.CI_INFRA_STAGE
 
   # This stage is intended to run in the background, in parallel with tests.
   def __init__(self, builder_run, board, chrome_version=None, **kwargs):
@@ -93,21 +94,6 @@ class ArchiveStage(generic_stages.BoardSpecificBuilderStage,
         self.archive_path)
     if tarball is not None:
       self._upload_queue.put([tarball])
-
-  def BuildAndArchiveDeltaSysroot(self):
-    """Generate and upload delta sysroot for initial build_packages."""
-    extra_env = {}
-    if self._run.config.useflags:
-      extra_env['USE'] = ' '.join(self._run.config.useflags)
-    in_chroot_path = path_util.ToChrootPath(self.archive_path)
-    cmd = ['generate_delta_sysroot', '--out-dir', in_chroot_path,
-           '--board', self._current_board]
-    # TODO(mtennant): Make this condition into one run param.
-    if not self._run.options.tests:
-      cmd.append('--skip-tests')
-    cros_build_lib.RunCommand(cmd, cwd=self._build_root, enter_chroot=True,
-                              extra_env=extra_env)
-    self._upload_queue.put([constants.DELTA_SYSROOT_TAR])
 
   def LoadArtifactsList(self, board, image_dir):
     """Load the list of artifacts to upload for this board.
@@ -189,7 +175,6 @@ class ArchiveStage(generic_stages.BoardSpecificBuilderStage,
     #    \- ArchiveManifest
     #    \- ArchiveStrippedPackages
     #    \- ArchiveImageScripts
-    #    \- BuildAndArchiveDeltaSysroot
     #    \- ArchiveEbuildLogs
 
     def ArchiveManifest():
@@ -249,16 +234,10 @@ class ArchiveStage(generic_stages.BoardSpecificBuilderStage,
 
       This includes:
         - image.zip (all images in one big zip file)
-        - the au-generator.zip used for update payload generation.
       """
       # Zip up everything in the image directory.
       image_zip = commands.BuildImageZip(archive_path, image_dir)
       self._release_upload_queue.put([image_zip])
-
-      # Archive au-generator.zip.
-      filename = 'au-generator.zip'
-      shutil.copy(os.path.join(image_dir, filename), archive_path)
-      self._release_upload_queue.put([filename])
 
     def ArchiveHWQual():
       """Build and archive the HWQual images."""
@@ -374,8 +353,6 @@ class ArchiveStage(generic_stages.BoardSpecificBuilderStage,
                self.ArchiveStrippedPackages, ArchiveEbuildLogs]
       if config['images']:
         steps.append(ArchiveImageScripts)
-      if config['create_delta_sysroot']:
-        steps.append(self.BuildAndArchiveDeltaSysroot)
 
       with self.ArtifactUploader(self._upload_queue, archive=False):
         parallel.RunParallelSteps(steps)
@@ -401,6 +378,7 @@ class CPEExportStage(generic_stages.BoardSpecificBuilderStage,
   """Handles generation & upload of package CPE information."""
 
   config_name = 'cpe_export'
+  category = constants.CI_INFRA_STAGE
 
   @failures_lib.SetFailureType(failures_lib.InfrastructureFailure)
   def PerformStage(self):
@@ -431,6 +409,19 @@ class DebugSymbolsStage(generic_stages.BoardSpecificBuilderStage,
   """Handles generation & upload of debug symbols."""
 
   config_name = 'debug_symbols'
+  category = constants.PRODUCT_OS_STAGE
+
+  def WaitUntilReady(self):
+    """Block until UnitTest completes.
+
+    The attribute 'unittest_completed' is set by UnitTestStage.
+
+    Returns:
+      Boolean that authorizes running of this stage.
+    """
+    return self.board_runattrs.GetParallel('unittest_completed',
+                                           timeout=None)
+
 
   @failures_lib.SetFailureType(failures_lib.InfrastructureFailure)
   def PerformStage(self):
@@ -480,7 +471,8 @@ class DebugSymbolsStage(generic_stages.BoardSpecificBuilderStage,
 
   def UploadSymbols(self, buildroot, board):
     """Upload generated debug symbols."""
-    failed_list = os.path.join(self.archive_path, 'failed_upload_symbols.list')
+    failed_name = 'failed_upload_symbols.list'
+    failed_list = os.path.join(self.archive_path, failed_name)
 
     if self._run.options.remote_trybot or self._run.debug:
       # For debug builds, limit ourselves to just uploading 1 symbol.
@@ -491,13 +483,24 @@ class DebugSymbolsStage(generic_stages.BoardSpecificBuilderStage,
       cnt = None
       official = self._run.config.chromeos_official
 
+    upload_passed = True
     try:
       commands.UploadSymbols(buildroot, board, official, cnt, failed_list)
     except failures_lib.BuildScriptFailure:
-      raise DebugSymbolsUploadException('Failed to upload all symbols.')
+      upload_passed = False
 
     if os.path.exists(failed_list):
-      self.UploadArtifact(os.path.basename(failed_list), archive=False)
+      self.UploadArtifact(failed_name, archive=False)
+
+      logging.notice('To upload the missing symbols from this build, run:')
+      for url in self._GetUploadUrls(filename=failed_name):
+        logging.notice('upload_symbols --failed-list %s %s',
+                       os.path.join(url, failed_name),
+                       os.path.join(url, 'debug_breakpad.tar.xz'))
+
+    # Delay throwing the exception until after we uploaded the list.
+    if not upload_passed:
+      raise DebugSymbolsUploadException('Failed to upload all symbols.')
 
   def _SymbolsNotGenerated(self):
     """Tell other stages that our symbols were not generated."""
@@ -528,6 +531,7 @@ class UploadPrebuiltsStage(generic_stages.BoardSpecificBuilderStage):
 
   option_name = 'prebuilts'
   config_name = 'prebuilts'
+  category = constants.CI_INFRA_STAGE
 
   def __init__(self, builder_run, board, version=None, **kwargs):
     self.prebuilts_version = version
@@ -657,6 +661,7 @@ class DevInstallerPrebuiltsStage(UploadPrebuiltsStage):
   """Stage that uploads DevInstaller prebuilts."""
 
   config_name = 'dev_installer_prebuilts'
+  category = constants.CI_INFRA_STAGE
 
   @failures_lib.SetFailureType(failures_lib.InfrastructureFailure)
   def PerformStage(self):
@@ -673,6 +678,8 @@ class DevInstallerPrebuiltsStage(UploadPrebuiltsStage):
 class UploadTestArtifactsStage(generic_stages.BoardSpecificBuilderStage,
                                generic_stages.ArchivingStageMixin):
   """Upload needed hardware test artifacts."""
+
+  category = constants.CI_INFRA_STAGE
 
   def BuildAutotestTarballs(self):
     """Build the autotest tarballs."""
@@ -760,6 +767,8 @@ class ArchivingStage(generic_stages.BoardSpecificBuilderStage,
     archive_stage: The ArchiveStage instance for this board.
   """
 
+  category = constants.CI_INFRA_STAGE
+
   def __init__(self, builder_run, board, archive_stage, **kwargs):
     super(ArchivingStage, self).__init__(builder_run, board, **kwargs)
     self.archive_stage = archive_stage
@@ -769,6 +778,8 @@ class ArchivingStage(generic_stages.BoardSpecificBuilderStage,
 class GenerateSysrootStage(generic_stages.BoardSpecificBuilderStage,
                            generic_stages.ArchivingStageMixin):
   """Generate and upload the sysroot for the board."""
+
+  category = constants.CI_INFRA_STAGE
 
   def __init__(self, *args, **kwargs):
     super(GenerateSysrootStage, self).__init__(*args, **kwargs)
@@ -801,22 +812,14 @@ class GenerateTidyWarningsStage(generic_stages.BoardSpecificBuilderStage,
                                 generic_stages.ArchivingStageMixin):
   """Generate and upload the warnings files for the board."""
 
+  category = constants.CI_INFRA_STAGE
+
   CLANG_TIDY_TAR = 'clang_tidy_warnings.tar.xz'
-  GS_URL = 'gs://chromeos-clang-tidy-artifacts/clang-tidy-1/'
+  GS_URL = 'gs://chromeos-clang-tidy-artifacts/clang-tidy-1'
 
   def __init__(self, *args, **kwargs):
     super(GenerateTidyWarningsStage, self).__init__(*args, **kwargs)
     self._upload_queue = multiprocessing.Queue()
-
-  def _GetListOfFilesToProcess(self):
-    """Find the list of build log files that contain clang tidy warnings"""
-    logs_dir = '/tmp/clang-tidy-logs/%s' % self._current_board
-    cmd = ['find', logs_dir, '-name', '"*.log"']
-    file_list = cros_build_lib.RunCommand(cmd, cwd=self._build_root,
-                                          enter_chroot=True,
-                                          capture_output=True)
-    files = file_list.split('\n')
-    return files
 
   def _UploadTidyWarnings(self, path, tar_file):
     """Upload the warnings tarball to the clang-tidy gs bucket."""
@@ -841,17 +844,18 @@ class GenerateTidyWarningsStage(generic_stages.BoardSpecificBuilderStage,
   def _GenerateTidyWarnings(self):
     """Generate and upload the tidy warnings files for the board."""
     assert self.archive_path.startswith(self._build_root)
-    files = self._GetListOfFilesToProcess()
+    logs_dir = os.path.join('/tmp', 'clang-tidy-logs', self._current_board)
     timestamp = datetime.datetime.strftime(datetime.datetime.now(), '%Y%m%d')
     clang_tidy_tarball = "%s.%s.%s" % (self._current_board, timestamp,
                                        self.CLANG_TIDY_TAR)
     in_chroot_path = path_util.ToChrootPath(self.archive_path)
+    out_chroot_path = os.path.abspath(
+        os.path.join(self._build_root, 'chroot', self.archive_path))
     cmd = ['cros_generate_tidy_warnings', '--out-file', clang_tidy_tarball,
            '--out-dir', in_chroot_path, '--board', self._current_board,
-           '--files',
-           ' '.join(files)]
+           '--logs-dir', logs_dir]
     cros_build_lib.RunCommand(cmd, cwd=self._build_root, enter_chroot=True)
-    self._UploadTidyWarnings(in_chroot_path, clang_tidy_tarball)
+    self._UploadTidyWarnings(out_chroot_path, clang_tidy_tarball)
     self._upload_queue.put([clang_tidy_tarball])
 
   def PerformStage(self):

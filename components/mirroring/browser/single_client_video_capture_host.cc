@@ -30,9 +30,9 @@ class DeviceLauncherCallbacks final
       video_capture_host_->OnDeviceLaunched(std::move(device));
   }
 
-  void OnDeviceLaunchFailed() override {
+  void OnDeviceLaunchFailed(media::VideoCaptureError error) override {
     if (video_capture_host_)
-      video_capture_host_->OnDeviceLaunchFailed();
+      video_capture_host_->OnDeviceLaunchFailed(error);
   }
 
   void OnDeviceLaunchAborted() override {
@@ -51,11 +51,9 @@ class DeviceLauncherCallbacks final
 SingleClientVideoCaptureHost::SingleClientVideoCaptureHost(
     const std::string& device_id,
     content::MediaStreamType type,
-    const VideoCaptureParams& params,
     DeviceLauncherCreateCallback callback)
     : device_id_(device_id),
       type_(type),
-      params_(params),
       device_launcher_callback_(std::move(callback)),
       weak_factory_(this) {
   DCHECK(!device_launcher_callback_.is_null());
@@ -86,9 +84,11 @@ void SingleClientVideoCaptureHost::Start(
       device_launcher_callback_.Run();
   content::VideoCaptureDeviceLauncher* launcher = device_launcher.get();
   launcher->LaunchDeviceAsync(
-      device_id_, type_, params_, weak_factory_.GetWeakPtr(),
+      device_id_, type_, params, weak_factory_.GetWeakPtr(),
       base::BindOnce(&SingleClientVideoCaptureHost::OnError,
-                     weak_factory_.GetWeakPtr()),
+                     weak_factory_.GetWeakPtr(),
+                     media::VideoCaptureError::
+                         kSingleClientVideoCaptureHostLostConnectionToDevice),
       callbacks,
       // The |device_launcher| and |device_launcher_callbacks| must be kept
       // alive until the device launching completes.
@@ -106,11 +106,16 @@ void SingleClientVideoCaptureHost::Stop(int32_t device_id) {
     return;
 
   // Returns all the buffers.
-  for (const auto& entry : buffer_context_map_) {
+  std::vector<int> buffers_in_use;
+  buffers_in_use.reserve(buffer_context_map_.size());
+  for (const auto& entry : buffer_context_map_)
+    buffers_in_use.push_back(entry.first);
+  for (int buffer_id : buffers_in_use) {
     OnFinishedConsumingBuffer(
-        entry.first,
+        buffer_id,
         media::VideoFrameConsumerFeedbackObserver::kNoUtilizationRecorded);
   }
+  DCHECK(buffer_context_map_.empty());
   observer_->OnStateChanged(media::mojom::VideoCaptureState::ENDED);
   observer_ = nullptr;
   weak_factory_.InvalidateWeakPtrs();
@@ -167,9 +172,9 @@ void SingleClientVideoCaptureHost::GetDeviceFormatsInUse(
   std::move(callback).Run(media::VideoCaptureFormats());
 }
 
-void SingleClientVideoCaptureHost::OnNewBufferHandle(
+void SingleClientVideoCaptureHost::OnNewBuffer(
     int buffer_id,
-    std::unique_ptr<Buffer::HandleProvider> handle_provider) {
+    media::mojom::VideoBufferHandlePtr buffer_handle) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DVLOG(3) << __func__ << ": buffer_id=" << buffer_id;
   DCHECK(observer_);
@@ -177,9 +182,7 @@ void SingleClientVideoCaptureHost::OnNewBufferHandle(
   const auto insert_result =
       id_map_.emplace(std::make_pair(buffer_id, next_buffer_context_id_));
   DCHECK(insert_result.second);
-  observer_->OnBufferCreated(
-      next_buffer_context_id_++,
-      handle_provider->GetHandleForInterProcessTransit(true /* read only */));
+  observer_->OnNewBuffer(next_buffer_context_id_++, std::move(buffer_handle));
 }
 
 void SingleClientVideoCaptureHost::OnFrameReadyInBuffer(
@@ -220,11 +223,16 @@ void SingleClientVideoCaptureHost::OnBufferRetired(int buffer_id) {
   }
 }
 
-void SingleClientVideoCaptureHost::OnError() {
+void SingleClientVideoCaptureHost::OnError(media::VideoCaptureError) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   VLOG(1) << __func__;
   if (observer_)
     observer_->OnStateChanged(media::mojom::VideoCaptureState::FAILED);
+}
+
+void SingleClientVideoCaptureHost::OnFrameDropped(
+    media::VideoCaptureFrameDropReason reason) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 }
 
 void SingleClientVideoCaptureHost::OnLog(const std::string& message) {
@@ -250,16 +258,18 @@ void SingleClientVideoCaptureHost::OnDeviceLaunched(
   launched_device_ = std::move(device);
 }
 
-void SingleClientVideoCaptureHost::OnDeviceLaunchFailed() {
+void SingleClientVideoCaptureHost::OnDeviceLaunchFailed(
+    media::VideoCaptureError error) {
   DVLOG(1) << __func__;
   launched_device_ = nullptr;
-  OnError();
+  OnError(error);
 }
 
 void SingleClientVideoCaptureHost::OnDeviceLaunchAborted() {
   DVLOG(1) << __func__;
   launched_device_ = nullptr;
-  OnError();
+  OnError(
+      media::VideoCaptureError::kSingleClientVideoCaptureDeviceLaunchAborted);
 }
 
 void SingleClientVideoCaptureHost::OnFinishedConsumingBuffer(

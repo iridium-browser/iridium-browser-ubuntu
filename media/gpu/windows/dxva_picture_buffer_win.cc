@@ -49,7 +49,8 @@ class DummyGLImage : public gl::GLImage {
                             gfx::OverlayTransform transform,
                             const gfx::Rect& bounds_rect,
                             const gfx::RectF& crop_rect,
-                            bool enable_blend) override {
+                            bool enable_blend,
+                            std::unique_ptr<gfx::GpuFence> gpu_fence) override {
     return false;
   }
   void SetColorSpace(const gfx::ColorSpace& color_space) override {}
@@ -290,7 +291,7 @@ bool PbufferPictureBuffer::InitializeTexture(
 void PbufferPictureBuffer::ResetReuseFence() {
   DCHECK_EQ(IN_CLIENT, state_);
   if (!reuse_fence_ || !reuse_fence_->ResetSupported())
-    reuse_fence_.reset(gl::GLFence::Create());
+    reuse_fence_ = gl::GLFence::Create();
   else
     reuse_fence_->ResetState();
   state_ = WAITING_TO_REUSE;

@@ -11,8 +11,8 @@
 #include "chrome/app/vector_icons/vector_icons.h"
 #include "chrome/browser/ui/passwords/manage_passwords_bubble_model.h"
 #include "chrome/browser/ui/passwords/manage_passwords_view_utils.h"
-#include "chrome/browser/ui/views/harmony/chrome_layout_provider.h"
-#include "chrome/browser/ui/views/harmony/chrome_typography.h"
+#include "chrome/browser/ui/views/chrome_layout_provider.h"
+#include "chrome/browser/ui/views/chrome_typography.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/password_manager/core/common/password_manager_ui.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -37,9 +37,10 @@ constexpr int kUndoButtonTag = 2;
 
 // Column set identifiers for displaying or undoing removal of credentials.
 // They both allocate space differently.
-enum ColumnSetType { PASSWORD_COLUMN_SET, UNDO_COLUMN_SET };
+enum PasswordItemsViewColumnSetType { PASSWORD_COLUMN_SET, UNDO_COLUMN_SET };
 
-void BuildColumnSet(views::GridLayout* layout, ColumnSetType type_id) {
+void BuildColumnSet(views::GridLayout* layout,
+                    PasswordItemsViewColumnSetType type_id) {
   DCHECK(!layout->GetColumnSet(type_id));
   views::ColumnSet* column_set = layout->AddColumnSet(type_id);
   // Passwords are split 60/40 (6:4) as the username is more important
@@ -53,20 +54,24 @@ void BuildColumnSet(views::GridLayout* layout, ColumnSetType type_id) {
                         kFirstColumnWeight, views::GridLayout::FIXED, 0, 0);
 
   if (type_id == PASSWORD_COLUMN_SET) {
-    column_set->AddPaddingColumn(0, between_column_padding);
+    column_set->AddPaddingColumn(views::GridLayout::kFixedSize,
+                                 between_column_padding);
     column_set->AddColumn(views::GridLayout::FILL, views::GridLayout::FILL,
                           kSecondColumnWeight, views::GridLayout::FIXED, 0, 0);
   }
   // All rows end with a trailing column for the undo/trash button.
-  column_set->AddPaddingColumn(0, between_column_padding);
-  column_set->AddColumn(views::GridLayout::TRAILING, views::GridLayout::FILL, 0,
+  column_set->AddPaddingColumn(views::GridLayout::kFixedSize,
+                               between_column_padding);
+  column_set->AddColumn(views::GridLayout::TRAILING, views::GridLayout::FILL,
+                        views::GridLayout::kFixedSize,
                         views::GridLayout::USE_PREF, 0, 0);
 }
 
-void StartRow(views::GridLayout* layout, ColumnSetType type_id) {
+void StartRow(views::GridLayout* layout,
+              PasswordItemsViewColumnSetType type_id) {
   if (!layout->GetColumnSet(type_id))
     BuildColumnSet(layout, type_id);
-  layout->StartRow(0, type_id);
+  layout->StartRow(views::GridLayout::kFixedSize, type_id);
 }
 
 std::unique_ptr<views::ImageButton> CreateDeleteButton(
@@ -121,7 +126,7 @@ std::unique_ptr<views::Label> CreatePasswordLabel(
     int federation_message_id,
     bool are_passwords_revealed) {
   base::string16 text =
-      form.federation_origin.unique()
+      form.federation_origin.opaque()
           ? form.password_value
           : l10n_util::GetStringFUTF16(
                 federation_message_id,
@@ -129,9 +134,9 @@ std::unique_ptr<views::Label> CreatePasswordLabel(
   auto label = std::make_unique<views::Label>(text, CONTEXT_BODY_TEXT_LARGE,
                                               STYLE_SECONDARY);
   label->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-  if (form.federation_origin.unique() && !are_passwords_revealed)
+  if (form.federation_origin.opaque() && !are_passwords_revealed)
     label->SetObscured(true);
-  if (!form.federation_origin.unique())
+  if (!form.federation_origin.opaque())
     label->SetElideBehavior(gfx::ELIDE_HEAD);
 
   return label;
@@ -246,7 +251,8 @@ void PasswordItemsView::RecreateLayout() {
   bool first_row = true;
   for (auto& row : password_rows_) {
     if (!first_row)
-      grid_layout->AddPaddingRow(0, vertical_padding);
+      grid_layout->AddPaddingRow(views::GridLayout::kFixedSize,
+                                 vertical_padding);
 
     row->AddToLayout(grid_layout);
     first_row = false;

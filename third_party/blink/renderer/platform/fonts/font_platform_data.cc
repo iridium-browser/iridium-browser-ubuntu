@@ -27,11 +27,9 @@
 #include "third_party/blink/public/platform/linux/web_sandbox_support.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/platform/fonts/font_cache.h"
-#include "third_party/blink/renderer/platform/fonts/shaping/harf_buzz_face.h"
-#include "third_party/blink/renderer/platform/graphics/skia/skia_utils.h"
+#include "third_party/blink/renderer/platform/fonts/shaping/harfbuzz_face.h"
 #include "third_party/blink/renderer/platform/layout_test_support.h"
 #include "third_party/blink/renderer/platform/text/character.h"
-#include "third_party/blink/renderer/platform/wtf/byte_swap.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
 #include "third_party/blink/renderer/platform/wtf/text/character_names.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_hash.h"
@@ -89,7 +87,7 @@ FontPlatformData::FontPlatformData(float size,
 }
 
 FontPlatformData::FontPlatformData(const FontPlatformData& source)
-    : paint_typeface_(source.paint_typeface_),
+    : typeface_(source.typeface_),
 #if !defined(OS_WIN)
       family_(source.family_),
 #endif
@@ -101,7 +99,7 @@ FontPlatformData::FontPlatformData(const FontPlatformData& source)
 #if !defined(OS_WIN) && !defined(OS_MACOSX)
       style_(source.style_),
 #endif
-      harf_buzz_face_(nullptr),
+      harfbuzz_face_(nullptr),
       is_hash_table_deleted_value_(false)
 #if defined(OS_WIN)
       ,
@@ -111,7 +109,7 @@ FontPlatformData::FontPlatformData(const FontPlatformData& source)
 }
 
 FontPlatformData::FontPlatformData(const FontPlatformData& src, float text_size)
-    : FontPlatformData(src.paint_typeface_,
+    : FontPlatformData(src.typeface_,
 #if !defined(OS_WIN)
                        src.family_.data(),
 #else
@@ -123,13 +121,13 @@ FontPlatformData::FontPlatformData(const FontPlatformData& src, float text_size)
                        src.orientation_) {
 }
 
-FontPlatformData::FontPlatformData(const PaintTypeface& paint_tf,
+FontPlatformData::FontPlatformData(sk_sp<SkTypeface> typeface,
                                    const CString& family,
                                    float text_size,
                                    bool synthetic_bold,
                                    bool synthetic_italic,
                                    FontOrientation orientation)
-    : paint_typeface_(paint_tf),
+    : typeface_(typeface),
 #if !defined(OS_WIN)
       family_(family),
 #endif
@@ -146,8 +144,8 @@ FontPlatformData::FontPlatformData(const PaintTypeface& paint_tf,
 {
 #if !defined(OS_WIN) && !defined(OS_MACOSX)
   style_ = WebFontRenderStyle::GetDefault();
-  auto system_style = QuerySystemRenderStyle(
-      family_, text_size_, paint_typeface_.ToSkTypeface()->fontStyle());
+  auto system_style =
+      QuerySystemRenderStyle(family_, text_size_, typeface_->fontStyle());
 
   // In layout tests, ignore system preference for subpixel positioning,
   // or explicitly disable if requested.
@@ -170,7 +168,7 @@ FontPlatformData::~FontPlatformData() = default;
 
 #if defined(OS_MACOSX)
 CTFontRef FontPlatformData::CtFont() const {
-  return SkTypeface_GetCTFontRef(paint_typeface_.ToSkTypeface().get());
+  return SkTypeface_GetCTFontRef(typeface_.get());
 };
 
 CGFontRef FontPlatformData::CgFont() const {
@@ -186,7 +184,7 @@ const FontPlatformData& FontPlatformData::operator=(
   if (this == &other)
     return *this;
 
-  paint_typeface_ = other.paint_typeface_;
+  typeface_ = other.typeface_;
 #if !defined(OS_WIN)
   family_ = other.family_;
 #endif
@@ -194,7 +192,7 @@ const FontPlatformData& FontPlatformData::operator=(
   synthetic_bold_ = other.synthetic_bold_;
   synthetic_italic_ = other.synthetic_italic_;
   avoid_embedded_bitmaps_ = other.avoid_embedded_bitmaps_;
-  harf_buzz_face_ = nullptr;
+  harfbuzz_face_ = nullptr;
   orientation_ = other.orientation_;
 #if !defined(OS_WIN) && !defined(OS_MACOSX)
   style_ = other.style_;
@@ -244,15 +242,15 @@ String FontPlatformData::FontFamilyName() const {
 }
 
 SkTypeface* FontPlatformData::Typeface() const {
-  return paint_typeface_.ToSkTypeface().get();
+  return typeface_.get();
 }
 
 HarfBuzzFace* FontPlatformData::GetHarfBuzzFace() const {
-  if (!harf_buzz_face_)
-    harf_buzz_face_ =
+  if (!harfbuzz_face_)
+    harfbuzz_face_ =
         HarfBuzzFace::Create(const_cast<FontPlatformData*>(this), UniqueID());
 
-  return harf_buzz_face_.get();
+  return harfbuzz_face_.get();
 }
 
 bool FontPlatformData::HasSpaceInLigaturesOrKerning(
@@ -301,16 +299,15 @@ WebFontRenderStyle FontPlatformData::QuerySystemRenderStyle(
     SkFontStyle font_style) {
   WebFontRenderStyle result;
 
-#if !defined(OS_ANDROID)
+#if !defined(OS_ANDROID) && !defined(OS_FUCHSIA)
   // If the font name is missing (i.e. probably a web font) or the sandbox is
   // disabled, use the system defaults.
   if (family.length() && Platform::Current()->GetSandboxSupport()) {
     bool is_bold = font_style.weight() >= SkFontStyle::kSemiBold_Weight;
     bool is_italic = font_style.slant() != SkFontStyle::kUpright_Slant;
-    const int size_and_style = (((int)text_size) << 2) | (((int)is_bold) << 1) |
-                               (((int)is_italic) << 0);
     Platform::Current()->GetSandboxSupport()->GetWebFontRenderStyleForStrike(
-        family.data(), size_and_style, &result);
+        family.data(), text_size, is_bold, is_italic,
+        FontCache::DeviceScaleFactor(), &result);
   }
 #endif
 
@@ -324,16 +321,12 @@ void FontPlatformData::SetupPaintFont(PaintFont* font,
 
   const float ts = text_size_ >= 0 ? text_size_ : 12;
   font->SetTextSize(SkFloatToScalar(ts));
-  font->SetTypeface(paint_typeface_);
+  font->SetTypeface(typeface_);
   font->SetFakeBoldText(synthetic_bold_);
   font->SetTextSkewX(synthetic_italic_ ? -SK_Scalar1 / 4 : 0);
 
   font->SetEmbeddedBitmapText(!avoid_embedded_bitmaps_);
 }
 #endif
-
-const PaintTypeface& FontPlatformData::GetPaintTypeface() const {
-  return paint_typeface_;
-}
 
 }  // namespace blink

@@ -18,7 +18,8 @@ namespace content {
 class SingleRequestURLLoaderFactory : public network::SharedURLLoaderFactory {
  public:
   using RequestHandler =
-      base::OnceCallback<void(network::mojom::URLLoaderRequest,
+      base::OnceCallback<void(const network::ResourceRequest& resource_request,
+                              network::mojom::URLLoaderRequest,
                               network::mojom::URLLoaderClientPtr)>;
 
   explicit SingleRequestURLLoaderFactory(RequestHandler handler);
@@ -32,6 +33,7 @@ class SingleRequestURLLoaderFactory : public network::SharedURLLoaderFactory {
                             network::mojom::URLLoaderClientPtr client,
                             const net::MutableNetworkTrafficAnnotationTag&
                                 traffic_annotation) override;
+  void Clone(network::mojom::URLLoaderFactoryRequest request) override;
   std::unique_ptr<network::SharedURLLoaderFactoryInfo> Clone() override;
 
  private:

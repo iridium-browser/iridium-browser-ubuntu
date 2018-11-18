@@ -14,7 +14,8 @@
 #include <list>
 #include <memory>
 
-#include "api/optional.h"
+#include "absl/types/optional.h"
+#include "api/video/video_stream_encoder_observer.h"
 #include "modules/video_coding/utility/quality_scaler.h"
 #include "rtc_base/constructormagic.h"
 #include "rtc_base/numerics/exp_filter.h"
@@ -34,7 +35,7 @@ struct CpuOveruseOptions {
   // General settings.
   int frame_timeout_interval_ms;  // The maximum allowed interval between two
                                   // frames before resetting estimations.
-  int min_frame_samples;  // The minimum number of frames required.
+  int min_frame_samples;          // The minimum number of frames required.
   int min_process_count;  // The number of initial process times required before
                           // triggering an overuse/underuse.
   int high_threshold_consecutive_count;  // The number of consecutive checks
@@ -42,20 +43,6 @@ struct CpuOveruseOptions {
                                          // triggering an overuse.
   // New estimator enabled if this is set non-zero.
   int filter_time_ms;  // Time constant for averaging
-};
-
-struct CpuOveruseMetrics {
-  CpuOveruseMetrics() : encode_usage_percent(-1) {}
-
-  int encode_usage_percent;  // Average encode time divided by the average time
-                             // difference between incoming captured frames.
-};
-
-class CpuOveruseMetricsObserver {
- public:
-  virtual ~CpuOveruseMetricsObserver() {}
-  virtual void OnEncodedFrameTimeMeasured(int encode_duration_ms,
-                                          const CpuOveruseMetrics& metrics) = 0;
 };
 
 // Use to detect system overuse based on the send-side processing time of
@@ -90,7 +77,7 @@ class OveruseFrameDetector {
   void FrameSent(uint32_t timestamp,
                  int64_t time_sent_in_us,
                  int64_t capture_time_us,
-                 rtc::Optional<int> encode_duration_us);
+                 absl::optional<int> encode_duration_us);
 
   // Interface for cpu load estimation. Intended for internal use only.
   class ProcessingUsage {
@@ -101,13 +88,13 @@ class OveruseFrameDetector {
                                int64_t time_when_first_seen_us,
                                int64_t last_capture_time_us) = 0;
     // Returns encode_time in us, if there's a new measurement.
-    virtual rtc::Optional<int> FrameSent(
+    virtual absl::optional<int> FrameSent(
         // These two argument used by old estimator.
         uint32_t timestamp,
         int64_t time_sent_in_us,
         // And these two by the new estimator.
         int64_t capture_time_us,
-        rtc::Optional<int> encode_duration_us) = 0;
+        absl::optional<int> encode_duration_us) = 0;
 
     virtual int Value() = 0;
     virtual ~ProcessingUsage() = default;
@@ -118,12 +105,14 @@ class OveruseFrameDetector {
   void CheckForOveruse(AdaptationObserverInterface* overuse_observer);
   void SetOptions(const CpuOveruseOptions& options);
 
+  CpuOveruseOptions options_;
+
  private:
   class CheckOveruseTask;
 
   void EncodedFrameTimeMeasured(int encode_duration_ms);
-  bool IsOverusing(const CpuOveruseMetrics& metrics);
-  bool IsUnderusing(const CpuOveruseMetrics& metrics, int64_t time_now);
+  bool IsOverusing(int encode_usage_percent);
+  bool IsUnderusing(int encode_usage_percent, int64_t time_now);
 
   bool FrameTimeoutDetected(int64_t now) const;
   bool FrameSizeChanged(int num_pixels) const;
@@ -137,11 +126,9 @@ class OveruseFrameDetector {
   // Owned by the task queue from where StartCheckForOveruse is called.
   CheckOveruseTask* check_overuse_task_;
 
-  CpuOveruseOptions options_;
-
   // Stats metrics.
   CpuOveruseMetricsObserver* const metrics_observer_;
-  rtc::Optional<CpuOveruseMetrics> metrics_ RTC_GUARDED_BY(task_checker_);
+  absl::optional<int> encode_usage_percent_ RTC_GUARDED_BY(task_checker_);
 
   int64_t num_process_times_ RTC_GUARDED_BY(task_checker_);
 

@@ -38,7 +38,7 @@ const CommandLine::CharType kSwitchValueSeparator[] = FILE_PATH_LITERAL("=");
 // value by changing the value of switch_prefix_count to be one less than
 // the array size.
 const CommandLine::CharType* const kSwitchPrefixes[] = {L"--", L"-", L"/"};
-#elif defined(OS_POSIX)
+#elif defined(OS_POSIX) || defined(OS_FUCHSIA)
 // Unixes don't use slash as a switch.
 const CommandLine::CharType* const kSwitchPrefixes[] = {"--", "-"};
 #endif
@@ -79,7 +79,7 @@ void AppendSwitchesAndArguments(CommandLine* command_line,
     CommandLine::StringType arg = argv[i];
 #if defined(OS_WIN)
     TrimWhitespace(arg, TRIM_ALL, &arg);
-#else
+#elif defined(OS_POSIX) || defined(OS_FUCHSIA)
     TrimWhitespaceASCII(arg, TRIM_ALL, &arg);
 #endif
 
@@ -90,8 +90,10 @@ void AppendSwitchesAndArguments(CommandLine* command_line,
 #if defined(OS_WIN)
       command_line->AppendSwitchNative(UTF16ToASCII(switch_string),
                                        switch_value);
-#elif defined(OS_POSIX)
+#elif defined(OS_POSIX) || defined(OS_FUCHSIA)
       command_line->AppendSwitchNative(switch_string, switch_value);
+#else
+#error Unsupported platform
 #endif
     } else {
       command_line->AppendArgNative(arg);
@@ -212,8 +214,10 @@ bool CommandLine::Init(int argc, const char* const* argv) {
   current_process_commandline_ = new CommandLine(NO_PROGRAM);
 #if defined(OS_WIN)
   current_process_commandline_->ParseFromString(::GetCommandLineW());
-#elif defined(OS_POSIX)
+#elif defined(OS_POSIX) || defined(OS_FUCHSIA)
   current_process_commandline_->InitFromArgv(argc, argv);
+#else
+#error Unsupported platform
 #endif
 
   return true;
@@ -269,8 +273,10 @@ FilePath CommandLine::GetProgram() const {
 void CommandLine::SetProgram(const FilePath& program) {
 #if defined(OS_WIN)
   TrimWhitespace(program.value(), TRIM_ALL, &argv_[0]);
-#else
+#elif defined(OS_POSIX) || defined(OS_FUCHSIA)
   TrimWhitespaceASCII(program.value(), TRIM_ALL, &argv_[0]);
+#else
+#error Unsupported platform
 #endif
 }
 
@@ -292,7 +298,7 @@ std::string CommandLine::GetSwitchValueASCII(
   }
 #if defined(OS_WIN)
   return UTF16ToASCII(value);
-#else
+#elif defined(OS_POSIX) || defined(OS_FUCHSIA)
   return value;
 #endif
 }
@@ -323,7 +329,7 @@ void CommandLine::AppendSwitchNative(const std::string& switch_string,
 #if defined(OS_WIN)
   const std::string switch_key = ToLowerASCII(switch_string);
   StringType combined_switch_string(ASCIIToUTF16(switch_key));
-#elif defined(OS_POSIX)
+#elif defined(OS_POSIX) || defined(OS_FUCHSIA)
   const std::string& switch_key = switch_string;
   StringType combined_switch_string(switch_key);
 #endif
@@ -345,8 +351,10 @@ void CommandLine::AppendSwitchASCII(const std::string& switch_string,
                                     const std::string& value_string) {
 #if defined(OS_WIN)
   AppendSwitchNative(switch_string, ASCIIToUTF16(value_string));
-#elif defined(OS_POSIX)
+#elif defined(OS_POSIX) || defined(OS_FUCHSIA)
   AppendSwitchNative(switch_string, value_string);
+#else
+#error Unsupported platform
 #endif
 }
 
@@ -363,7 +371,7 @@ CommandLine::StringVector CommandLine::GetArgs() const {
   // Gather all arguments after the last switch (may include kSwitchTerminator).
   StringVector args(argv_.begin() + begin_args_, argv_.end());
   // Erase only the first kSwitchTerminator (maybe "--" is a legitimate page?)
-  StringVector::iterator switch_terminator =
+  auto switch_terminator =
       std::find(args.begin(), args.end(), kSwitchTerminator);
   if (switch_terminator != args.end())
     args.erase(switch_terminator);
@@ -374,8 +382,10 @@ void CommandLine::AppendArg(const std::string& value) {
 #if defined(OS_WIN)
   DCHECK(IsStringUTF8(value));
   AppendArgNative(UTF8ToWide(value));
-#elif defined(OS_POSIX)
+#elif defined(OS_POSIX) || defined(OS_FUCHSIA)
   AppendArgNative(value);
+#else
+#error Unsupported platform
 #endif
 }
 

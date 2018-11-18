@@ -69,8 +69,7 @@ MIDIAccess::MIDIAccess(
       sysex_enabled_(sysex_enabled),
       has_pending_activity_(false) {
   accessor_->SetClient(this);
-  for (size_t i = 0; i < ports.size(); ++i) {
-    const MIDIAccessInitializer::PortDescriptor& port = ports[i];
+  for (const auto& port : ports) {
     if (port.type == MIDIPort::kTypeInput) {
       inputs_.push_back(MIDIInput::Create(this, port.id, port.manufacturer,
                                           port.name, port.version,
@@ -106,8 +105,7 @@ bool MIDIAccess::HasPendingActivity() const {
 MIDIInputMap* MIDIAccess::inputs() const {
   HeapVector<Member<MIDIInput>> inputs;
   HashSet<String> ids;
-  for (size_t i = 0; i < inputs_.size(); ++i) {
-    MIDIInput* input = inputs_[i];
+  for (MIDIInput* input : inputs_) {
     if (input->GetState() != PortState::DISCONNECTED) {
       inputs.push_back(input);
       ids.insert(input->id());
@@ -123,8 +121,7 @@ MIDIInputMap* MIDIAccess::inputs() const {
 MIDIOutputMap* MIDIAccess::outputs() const {
   HeapVector<Member<MIDIOutput>> outputs;
   HashSet<String> ids;
-  for (size_t i = 0; i < outputs_.size(); ++i) {
-    MIDIOutput* output = outputs_[i];
+  for (MIDIOutput* output : outputs_) {
     if (output->GetState() != PortState::DISCONNECTED) {
       outputs.push_back(output);
       ids.insert(output->id());
@@ -146,7 +143,7 @@ void MIDIAccess::DidAddInputPort(const String& id,
   MIDIInput* port = MIDIInput::Create(this, id, manufacturer, name, version,
                                       ToDeviceState(state));
   inputs_.push_back(port);
-  DispatchEvent(MIDIConnectionEvent::Create(port));
+  DispatchEvent(*MIDIConnectionEvent::Create(port));
 }
 
 void MIDIAccess::DidAddOutputPort(const String& id,
@@ -159,7 +156,7 @@ void MIDIAccess::DidAddOutputPort(const String& id,
   MIDIOutput* port = MIDIOutput::Create(this, port_index, id, manufacturer,
                                         name, version, ToDeviceState(state));
   outputs_.push_back(port);
-  DispatchEvent(MIDIConnectionEvent::Create(port));
+  DispatchEvent(*MIDIConnectionEvent::Create(port));
 }
 
 void MIDIAccess::DidSetInputPortState(unsigned port_index, PortState state) {

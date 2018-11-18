@@ -68,6 +68,11 @@ void RecordLookupByPathPosition(int position) {
   UMA_HISTOGRAM_COUNTS_100("Net.HttpAuthCacheLookupByPathPosition", position);
 }
 
+void RecordEntriesExaminedWhenNoMatch(int num_examined_entries) {
+  UMA_HISTOGRAM_COUNTS_100("Net.HttpAuthCacheEntriesExaminedWhenNoMatch",
+                           num_examined_entries);
+}
+
 }  // namespace
 
 namespace net {
@@ -84,17 +89,18 @@ HttpAuthCache::Entry* HttpAuthCache::Lookup(const GURL& origin,
 
   int entries_examined = 0;
   // Linear scan through the realm entries.
-  for (EntryList::iterator it = entries_.begin(); it != entries_.end(); ++it) {
+  for (auto it = entries_.begin(); it != entries_.end(); ++it) {
     ++entries_examined;
     if (it->origin() == origin && it->realm() == realm &&
         it->scheme() == scheme) {
-      it->last_use_time_ = base::TimeTicks::Now();
+      it->last_use_time_ticks_ = tick_clock_->NowTicks();
       RecordLookupPosition(entries_examined);
-      return &(*it);
+      return MoveEntryTowardsBeginning(it);
     }
   }
   RecordLookupPosition(0);
-  return NULL;  // No realm entry found.
+  RecordEntriesExaminedWhenNoMatch(entries_examined);
+  return nullptr;  // No realm entry found.
 }
 
 // Performance: O(n*m), where n is the number of realm entries, m is the number
@@ -102,7 +108,7 @@ HttpAuthCache::Entry* HttpAuthCache::Lookup(const GURL& origin,
 // kept small because AddPath() only keeps the shallowest entry.
 HttpAuthCache::Entry* HttpAuthCache::LookupByPath(const GURL& origin,
                                                   const std::string& path) {
-  HttpAuthCache::Entry* best_match = NULL;
+  auto best_match_it = entries_.end();
   size_t best_match_length = 0;
   int best_match_position = 0;
   CheckOriginIsValid(origin);
@@ -116,20 +122,23 @@ HttpAuthCache::Entry* HttpAuthCache::LookupByPath(const GURL& origin,
 
   int entries_examined = 0;
   // Linear scan through the realm entries.
-  for (EntryList::iterator it = entries_.begin(); it != entries_.end(); ++it) {
+  for (auto it = entries_.begin(); it != entries_.end(); ++it) {
     ++entries_examined;
     size_t len = 0;
     if (it->origin() == origin && it->HasEnclosingPath(parent_dir, &len) &&
-        (!best_match || len > best_match_length)) {
-      best_match = &(*it);
+        (best_match_it == entries_.end() || len > best_match_length)) {
+      best_match_it = it;
       best_match_length = len;
       best_match_position = entries_examined;
     }
   }
-  if (best_match)
-    best_match->last_use_time_ = base::TimeTicks::Now();
   RecordLookupByPathPosition(best_match_position);
-  return best_match;
+  if (best_match_it != entries_.end()) {
+    best_match_it->last_use_time_ticks_ = tick_clock_->NowTicks();
+    return MoveEntryTowardsBeginning(best_match_it);
+  }
+  RecordEntriesExaminedWhenNoMatch(entries_examined);
+  return nullptr;
 }
 
 HttpAuthCache::Entry* HttpAuthCache::Add(const GURL& origin,
@@ -141,7 +150,7 @@ HttpAuthCache::Entry* HttpAuthCache::Add(const GURL& origin,
   CheckOriginIsValid(origin);
   CheckPathIsValid(path);
 
-  base::TimeTicks now = base::TimeTicks::Now();
+  base::TimeTicks now_ticks = tick_clock_->NowTicks();
 
   // Check for existing entry (we will re-use it if present).
   HttpAuthCache::Entry* entry = Lookup(origin, realm, scheme);
@@ -150,10 +159,12 @@ HttpAuthCache::Entry* HttpAuthCache::Add(const GURL& origin,
     // Failsafe to prevent unbounded memory growth of the cache.
     if (entries_.size() >= kMaxNumRealmEntries) {
       LOG(WARNING) << "Num auth cache entries reached limit -- evicting";
-      UMA_HISTOGRAM_LONG_TIMES("Net.HttpAuthCacheAddEvictedCreation",
-          now - entries_.back().creation_time_);
-      UMA_HISTOGRAM_LONG_TIMES("Net.HttpAuthCacheAddEvictedLastUse",
-          now - entries_.back().last_use_time_);
+      UMA_HISTOGRAM_LONG_TIMES(
+          "Net.HttpAuthCacheAddEvictedCreation",
+          now_ticks - entries_.back().creation_time_ticks_);
+      UMA_HISTOGRAM_LONG_TIMES(
+          "Net.HttpAuthCacheAddEvictedLastUse",
+          now_ticks - entries_.back().last_use_time_ticks_);
       entries_.pop_back();
       evicted = true;
     }
@@ -164,7 +175,8 @@ HttpAuthCache::Entry* HttpAuthCache::Add(const GURL& origin,
     entry->origin_ = origin;
     entry->realm_ = realm;
     entry->scheme_ = scheme;
-    entry->creation_time_ = now;
+    entry->creation_time_ticks_ = now_ticks;
+    entry->creation_time_ = clock_->Now();
   }
   DCHECK_EQ(origin, entry->origin_);
   DCHECK_EQ(realm, entry->realm_);
@@ -174,7 +186,7 @@ HttpAuthCache::Entry* HttpAuthCache::Add(const GURL& origin,
   entry->credentials_ = credentials;
   entry->nonce_count_ = 1;
   entry->AddPath(path);
-  entry->last_use_time_ = now;
+  entry->last_use_time_ticks_ = now_ticks;
 
   return entry;
 }
@@ -189,6 +201,24 @@ void HttpAuthCache::Entry::UpdateStaleChallenge(
   nonce_count_ = 1;
 }
 
+bool HttpAuthCache::Entry::IsEqualForTesting(const Entry& other) const {
+  if (origin() != other.origin())
+    return false;
+  if (realm() != other.realm())
+    return false;
+  if (scheme() != other.scheme())
+    return false;
+  if (auth_challenge() != other.auth_challenge())
+    return false;
+  if (!credentials().Equals(other.credentials()))
+    return false;
+  std::set<std::string> lhs_paths(paths_.begin(), paths_.end());
+  std::set<std::string> rhs_paths(other.paths_.begin(), other.paths_.end());
+  if (lhs_paths != rhs_paths)
+    return false;
+  return true;
+}
+
 HttpAuthCache::Entry::Entry()
     : scheme_(HttpAuth::AUTH_SCHEME_MAX),
       nonce_count_(0) {
@@ -196,7 +226,7 @@ HttpAuthCache::Entry::Entry()
 
 void HttpAuthCache::Entry::AddPath(const std::string& path) {
   std::string parent_dir = GetParentDirectory(path);
-  if (!HasEnclosingPath(parent_dir, NULL)) {
+  if (!HasEnclosingPath(parent_dir, nullptr)) {
     // Remove any entries that have been subsumed by the new entry.
     base::EraseIf(paths_, IsEnclosedBy(parent_dir));
 
@@ -218,8 +248,7 @@ void HttpAuthCache::Entry::AddPath(const std::string& path) {
 bool HttpAuthCache::Entry::HasEnclosingPath(const std::string& dir,
                                             size_t* path_len) {
   DCHECK(GetParentDirectory(dir) == dir);
-  for (PathList::const_iterator it = paths_.begin(); it != paths_.end();
-       ++it) {
+  for (PathList::iterator it = paths_.begin(); it != paths_.end(); ++it) {
     if (IsEnclosingPath(*it, dir)) {
       // No element of paths_ may enclose any other element.
       // Therefore this path is the tightest bound.  Important because
@@ -227,6 +256,10 @@ bool HttpAuthCache::Entry::HasEnclosingPath(const std::string& dir,
       // has the closest enclosing path in LookupByPath().
       if (path_len)
         *path_len = it->length();
+      // Move the found path up by one place so that more frequently used paths
+      // migrate towards the beginning of the list of paths.
+      if (it != paths_.begin())
+        std::iter_swap(it, std::prev(it));
       return true;
     }
   }
@@ -237,7 +270,7 @@ bool HttpAuthCache::Remove(const GURL& origin,
                            const std::string& realm,
                            HttpAuth::Scheme scheme,
                            const AuthCredentials& credentials) {
-  for (EntryList::iterator it = entries_.begin(); it != entries_.end(); ++it) {
+  for (auto it = entries_.begin(); it != entries_.end(); ++it) {
     if (it->origin() == origin && it->realm() == realm &&
         it->scheme() == scheme) {
       if (credentials.Equals(it->credentials())) {
@@ -250,11 +283,18 @@ bool HttpAuthCache::Remove(const GURL& origin,
   return false;
 }
 
-void HttpAuthCache::ClearEntriesAddedWithin(base::TimeDelta duration) {
-  base::TimeTicks begin_time = base::TimeTicks::Now() - duration;
-  base::EraseIf(entries_, [begin_time](const Entry& entry) {
-    return entry.creation_time_ >= begin_time;
-  });
+void HttpAuthCache::ClearEntriesAddedSince(base::Time begin_time) {
+  if (begin_time.is_null()) {
+    ClearAllEntries();
+  } else {
+    base::EraseIf(entries_, [begin_time](const Entry& entry) {
+      return entry.creation_time_ >= begin_time;
+    });
+  }
+}
+
+void HttpAuthCache::ClearAllEntries() {
+  entries_.clear();
 }
 
 bool HttpAuthCache::UpdateStaleChallenge(const GURL& origin,
@@ -265,25 +305,36 @@ bool HttpAuthCache::UpdateStaleChallenge(const GURL& origin,
   if (!entry)
     return false;
   entry->UpdateStaleChallenge(auth_challenge);
-  entry->last_use_time_ = base::TimeTicks::Now();
+  entry->last_use_time_ticks_ = tick_clock_->NowTicks();
   return true;
 }
 
 void HttpAuthCache::UpdateAllFrom(const HttpAuthCache& other) {
-  for (EntryList::const_iterator it = other.entries_.begin();
-       it != other.entries_.end(); ++it) {
+  for (auto it = other.entries_.begin(); it != other.entries_.end(); ++it) {
     // Add an Entry with one of the original entry's paths.
     DCHECK(it->paths_.size() > 0);
     Entry* entry = Add(it->origin(), it->realm(), it->scheme(),
                        it->auth_challenge(), it->credentials(),
                        it->paths_.back());
     // Copy all other paths.
-    for (Entry::PathList::const_reverse_iterator it2 = ++it->paths_.rbegin();
-         it2 != it->paths_.rend(); ++it2)
+    for (auto it2 = ++it->paths_.rbegin(); it2 != it->paths_.rend(); ++it2)
       entry->AddPath(*it2);
     // Copy nonce count (for digest authentication).
     entry->nonce_count_ = it->nonce_count_;
   }
+}
+
+size_t HttpAuthCache::GetEntriesSizeForTesting() {
+  return entries_.size();
+}
+
+HttpAuthCache::Entry* HttpAuthCache::MoveEntryTowardsBeginning(
+    EntryList::iterator entry_it) {
+  if (entry_it != entries_.begin()) {
+    std::iter_swap(entry_it, std::prev(entry_it));
+    return &(*std::prev(entry_it));
+  }
+  return &(*entry_it);
 }
 
 }  // namespace net

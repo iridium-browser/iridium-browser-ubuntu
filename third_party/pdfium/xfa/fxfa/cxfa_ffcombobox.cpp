@@ -9,6 +9,7 @@
 #include <utility>
 #include <vector>
 
+#include "third_party/base/ptr_util.h"
 #include "xfa/fwl/cfwl_combobox.h"
 #include "xfa/fwl/cfwl_eventselectchanged.h"
 #include "xfa/fwl/cfwl_notedriver.h"
@@ -29,8 +30,10 @@ CXFA_FFComboBox::CXFA_FFComboBox(CXFA_Node* pNode)
 
 CXFA_FFComboBox::~CXFA_FFComboBox() {}
 
-CFX_RectF CXFA_FFComboBox::GetBBox(uint32_t dwStatus, bool bDrawFocus) {
-  return bDrawFocus ? CFX_RectF() : CXFA_FFWidget::GetBBox(dwStatus);
+CFX_RectF CXFA_FFComboBox::GetBBox(uint32_t dwStatus, FocusOption focus) {
+  if (focus == kDrawFocus)
+    return CFX_RectF();
+  return CXFA_FFWidget::GetBBox(dwStatus, kDoNotDrawFocus);
 }
 
 bool CXFA_FFComboBox::PtInActiveRect(const CFX_PointF& point) {
@@ -116,6 +119,22 @@ bool CXFA_FFComboBox::CommitData() {
 }
 
 bool CXFA_FFComboBox::IsDataChanged() {
+  WideString wsText = GetCurrentText();
+  if (m_pNode->GetValue(XFA_VALUEPICTURE_Raw) == wsText)
+    return false;
+
+  m_wsNewValue = std::move(wsText);
+  return true;
+}
+
+void CXFA_FFComboBox::FWLEventSelChange(CXFA_EventParam* pParam) {
+  pParam->m_eType = XFA_EVENT_Change;
+  pParam->m_pTarget = m_pNode.Get();
+  pParam->m_wsPrevText = ToComboBox(m_pNormalWidget.get())->GetEditText();
+  m_pNode->ProcessEvent(GetDocView(), XFA_AttributeEnum::Change, pParam);
+}
+
+WideString CXFA_FFComboBox::GetCurrentText() const {
   auto* pFWLcombobox = ToComboBox(m_pNormalWidget.get());
   WideString wsText = pFWLcombobox->GetEditText();
   int32_t iCursel = pFWLcombobox->GetCurSel();
@@ -124,18 +143,7 @@ bool CXFA_FFComboBox::IsDataChanged() {
     if (wsSel == wsText)
       wsText = m_pNode->GetChoiceListItem(iCursel, true).value_or(L"");
   }
-  if (m_pNode->GetValue(XFA_VALUEPICTURE_Raw) == wsText)
-    return false;
-
-  m_wsNewValue = wsText;
-  return true;
-}
-
-void CXFA_FFComboBox::FWLEventSelChange(CXFA_EventParam* pParam) {
-  pParam->m_eType = XFA_EVENT_Change;
-  pParam->m_pTarget = m_pNode.Get();
-  pParam->m_wsNewText = ToComboBox(m_pNormalWidget.get())->GetEditText();
-  m_pNode->ProcessEvent(GetDocView(), XFA_AttributeEnum::Change, pParam);
+  return wsText;
 }
 
 uint32_t CXFA_FFComboBox::GetAlignment() {
@@ -257,6 +265,10 @@ void CXFA_FFComboBox::Delete() {
 
 void CXFA_FFComboBox::DeSelect() {
   ToComboBox(m_pNormalWidget.get())->EditDeSelect();
+}
+
+WideString CXFA_FFComboBox::GetText() {
+  return GetCurrentText();
 }
 
 FormFieldType CXFA_FFComboBox::GetFormFieldType() {

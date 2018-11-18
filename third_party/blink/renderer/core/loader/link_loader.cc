@@ -47,15 +47,17 @@
 #include "third_party/blink/renderer/core/html/parser/html_srcset_parser.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/core/loader/document_loader.h"
+#include "third_party/blink/renderer/core/loader/importance_attribute.h"
 #include "third_party/blink/renderer/core/loader/modulescript/module_script_fetch_request.h"
 #include "third_party/blink/renderer/core/loader/network_hints_interface.h"
 #include "third_party/blink/renderer/core/loader/private/prerender_handle.h"
+#include "third_party/blink/renderer/core/loader/resource/css_style_sheet_resource.h"
 #include "third_party/blink/renderer/core/loader/resource/link_fetch_resource.h"
 #include "third_party/blink/renderer/core/loader/subresource_integrity_helper.h"
 #include "third_party/blink/renderer/core/script/module_script.h"
 #include "third_party/blink/renderer/core/script/script_loader.h"
+#include "third_party/blink/renderer/platform/loader/fetch/fetch_client_settings_object_snapshot.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_initiator_type_names.h"
-#include "third_party/blink/renderer/platform/loader/fetch/fetch_parameters.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_client.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_finish_observer.h"
@@ -83,6 +85,11 @@ static unsigned PrerenderRelTypesFromRelAttribute(
   return result;
 }
 
+// TODO(domfarolino)
+// Eventually we'll want to support an |importance| value on
+// LinkHeaders. We can communicate a header's importance value
+// to LinkLoadParameters here, likely after modifying the LinkHeader
+// class. See https://crbug.com/821464 for info on Priority Hints.
 LinkLoadParameters::LinkLoadParameters(const LinkHeader& header,
                                        const KURL& base_url)
     : rel(LinkRelAttribute(header.Rel())),
@@ -265,52 +272,52 @@ static void PreconnectIfNeeded(
   }
 }
 
-WTF::Optional<Resource::Type> LinkLoader::GetResourceTypeFromAsAttribute(
+base::Optional<ResourceType> LinkLoader::GetResourceTypeFromAsAttribute(
     const String& as) {
   DCHECK_EQ(as.DeprecatedLower(), as);
   if (as == "image") {
-    return Resource::kImage;
+    return ResourceType::kImage;
   } else if (as == "script") {
-    return Resource::kScript;
+    return ResourceType::kScript;
   } else if (as == "style") {
-    return Resource::kCSSStyleSheet;
+    return ResourceType::kCSSStyleSheet;
   } else if (as == "video") {
-    return Resource::kVideo;
+    return ResourceType::kVideo;
   } else if (as == "audio") {
-    return Resource::kAudio;
+    return ResourceType::kAudio;
   } else if (as == "track") {
-    return Resource::kTextTrack;
+    return ResourceType::kTextTrack;
   } else if (as == "font") {
-    return Resource::kFont;
+    return ResourceType::kFont;
   } else if (as == "fetch") {
-    return Resource::kRaw;
+    return ResourceType::kRaw;
   }
-  return WTF::nullopt;
+  return base::nullopt;
 }
 
 Resource* LinkLoader::GetResourceForTesting() {
   return finish_observer_ ? finish_observer_->GetResource() : nullptr;
 }
 
-static bool IsSupportedType(Resource::Type resource_type,
+static bool IsSupportedType(ResourceType resource_type,
                             const String& mime_type) {
   if (mime_type.IsEmpty())
     return true;
   switch (resource_type) {
-    case Resource::kImage:
+    case ResourceType::kImage:
       return MIMETypeRegistry::IsSupportedImagePrefixedMIMEType(mime_type);
-    case Resource::kScript:
+    case ResourceType::kScript:
       return MIMETypeRegistry::IsSupportedJavaScriptMIMEType(mime_type);
-    case Resource::kCSSStyleSheet:
+    case ResourceType::kCSSStyleSheet:
       return MIMETypeRegistry::IsSupportedStyleSheetMIMEType(mime_type);
-    case Resource::kFont:
+    case ResourceType::kFont:
       return MIMETypeRegistry::IsSupportedFontMIMEType(mime_type);
-    case Resource::kAudio:
-    case Resource::kVideo:
+    case ResourceType::kAudio:
+    case ResourceType::kVideo:
       return MIMETypeRegistry::IsSupportedMediaMIMEType(mime_type, String());
-    case Resource::kTextTrack:
+    case ResourceType::kTextTrack:
       return MIMETypeRegistry::IsSupportedTextTrackMIMEType(mime_type);
-    case Resource::kRaw:
+    case ResourceType::kRaw:
       return true;
     default:
       NOTREACHED();
@@ -345,16 +352,17 @@ static Resource* PreloadIfNeeded(const LinkLoadParameters& params,
                                  Document& document,
                                  const KURL& base_url,
                                  LinkCaller caller,
-                                 ViewportDescription* viewport_description) {
+                                 ViewportDescription* viewport_description,
+                                 ParserDisposition parser_disposition) {
   if (!document.Loader() || !params.rel.IsLinkPreload())
     return nullptr;
 
-  Optional<Resource::Type> resource_type =
+  base::Optional<ResourceType> resource_type =
       LinkLoader::GetResourceTypeFromAsAttribute(params.as);
 
   MediaValues* media_values = nullptr;
   KURL url;
-  if (resource_type == Resource::kImage && !params.srcset.IsEmpty() &&
+  if (resource_type == ResourceType::kImage && !params.srcset.IsEmpty() &&
       RuntimeEnabledFeatures::PreloadImageSrcSetEnabled()) {
     media_values = CreateMediaValues(document, viewport_description);
     float source_size =
@@ -386,7 +394,7 @@ static Resource* PreloadIfNeeded(const LinkLoadParameters& params,
 
   if (caller == kLinkCalledFromHeader)
     UseCounter::Count(document, WebFeature::kLinkHeaderPreload);
-  if (resource_type == WTF::nullopt) {
+  if (resource_type == base::nullopt) {
     document.AddConsoleMessage(ConsoleMessage::Create(
         kOtherMessageSource, kWarningMessageLevel,
         String("<link rel=preload> must have a valid `as` value")));
@@ -403,13 +411,14 @@ static Resource* PreloadIfNeeded(const LinkLoadParameters& params,
   resource_request.SetRequestContext(ResourceFetcher::DetermineRequestContext(
       resource_type.value(), ResourceFetcher::kImageNotImageSet, false));
 
-  if (params.referrer_policy != kReferrerPolicyDefault) {
-    resource_request.SetHTTPReferrer(SecurityPolicy::GenerateReferrer(
-        params.referrer_policy, url, document.OutgoingReferrer()));
-  }
+  resource_request.SetReferrerPolicy(params.referrer_policy);
+
+  resource_request.SetFetchImportanceMode(
+      GetFetchImportanceAttributeValue(params.importance));
 
   ResourceLoaderOptions options;
   options.initiator_info.name = FetchInitiatorTypeNames::link;
+  options.parser_disposition = parser_disposition;
   FetchParameters link_fetch_params(resource_request, options);
   link_fetch_params.SetCharset(document.Encoding());
 
@@ -426,10 +435,10 @@ static Resource* PreloadIfNeeded(const LinkLoadParameters& params,
   }
   link_fetch_params.SetLinkPreload(true);
   return document.Loader()->StartPreload(resource_type.value(),
-                                         link_fetch_params, nullptr);
+                                         link_fetch_params);
 }
 
-// https://html.spec.whatwg.org/#link-type-modulepreload
+// https://html.spec.whatwg.org/multipage/links.html#link-type-modulepreload
 static void ModulePreloadIfNeeded(const LinkLoadParameters& params,
                                   Document& document,
                                   ViewportDescription* viewport_description,
@@ -463,6 +472,7 @@ static void ModulePreloadIfNeeded(const LinkLoadParameters& params,
       link_loader->DispatchLinkLoadingErroredAsync();
     return;
   }
+  mojom::RequestContextType destination = mojom::RequestContextType::SCRIPT;
 
   // Step 4. "Parse the URL given by the href attribute, relative to the
   // element's node document. If that fails, then return. Otherwise, let url be
@@ -490,6 +500,8 @@ static void ModulePreloadIfNeeded(const LinkLoadParameters& params,
   // |document| is the node document here, and its context document is the
   // relevant settings object.
   Document* context_document = document.ContextDocument();
+  auto* settings_object =
+      context_document->CreateFetchClientSettingsObjectSnapshot();
 
   Modulator* modulator =
       Modulator::From(ToScriptStateForMainWorld(context_document->GetFrame()));
@@ -518,21 +530,28 @@ static void ModulePreloadIfNeeded(const LinkLoadParameters& params,
     SubresourceIntegrityHelper::DoReport(document, report_info);
   }
 
-  // Step 9. "Let options be a script fetch options whose cryptographic nonce is
-  // cryptographic nonce, integrity metadata is integrity metadata, parser
-  // metadata is "not-parser-inserted", and credentials mode is credentials
-  // mode." [spec text]
-  ModuleScriptFetchRequest request(
-      params.href, params.referrer_policy,
-      ScriptFetchOptions(params.nonce, integrity_metadata, params.integrity,
-                         kNotParserInserted, credentials_mode));
+  // Step 9. "Let referrer policy be the current state of the element's
+  // referrerpolicy attribute." [spec text]
+  // |referrer_policy| parameter is the value of the referrerpolicy attribute.
 
-  // Step 10. "Fetch a single module script given url, settings object,
+  // Step 10. "Let options be a script fetch options whose cryptographic nonce
+  // is cryptographic nonce, integrity metadata is integrity metadata, parser
+  // metadata is "not-parser-inserted", credentials mode is credentials mode,
+  // and referrer policy is referrer policy." [spec text]
+  ModuleScriptFetchRequest request(
+      params.href, destination,
+      ScriptFetchOptions(params.nonce, integrity_metadata, params.integrity,
+                         kNotParserInserted, credentials_mode,
+                         params.referrer_policy),
+      Referrer::NoReferrer(), TextPosition::MinimumPosition());
+
+  // Step 11. "Fetch a single module script given url, settings object,
   // destination, options, settings object, "client", and with the top-level
   // module fetch flag set. Wait until algorithm asynchronously completes with
   // result." [spec text]
-  modulator->FetchSingle(request, ModuleGraphLevel::kDependentModuleFetch,
-                         link_loader);
+  modulator->FetchSingle(request, settings_object,
+                         ModuleGraphLevel::kDependentModuleFetch,
+                         ModuleScriptCustomFetchType::kNone, link_loader);
 
   Settings* settings = document.GetSettings();
   if (settings && settings->GetLogPreload()) {
@@ -553,29 +572,20 @@ static Resource* PrefetchIfNeeded(const LinkLoadParameters& params,
     UseCounter::Count(document, WebFeature::kLinkRelPrefetch);
 
     ResourceRequest resource_request(params.href);
-    if (params.referrer_policy != kReferrerPolicyDefault) {
-      resource_request.SetHTTPReferrer(SecurityPolicy::GenerateReferrer(
-          params.referrer_policy, params.href, document.OutgoingReferrer()));
-    }
+    resource_request.SetReferrerPolicy(params.referrer_policy);
+    resource_request.SetFetchImportanceMode(
+        GetFetchImportanceAttributeValue(params.importance));
 
     ResourceLoaderOptions options;
     options.initiator_info.name = FetchInitiatorTypeNames::link;
-    auto service = document.GetFrame()->PrefetchURLLoaderService();
-    if (service) {
-      network::mojom::blink::URLLoaderFactoryPtr prefetch_url_loader_factory;
-      service->GetFactory(mojo::MakeRequest(&prefetch_url_loader_factory));
-      options.url_loader_factory = base::MakeRefCounted<
-          base::RefCountedData<network::mojom::blink::URLLoaderFactoryPtr>>(
-          std::move(prefetch_url_loader_factory));
-    }
 
     FetchParameters link_fetch_params(resource_request, options);
     if (params.cross_origin != kCrossOriginAttributeNotSet) {
       link_fetch_params.SetCrossOriginAccessControl(
           document.GetSecurityOrigin(), params.cross_origin);
     }
-    return LinkFetchResource::Fetch(Resource::kLinkPrefetch, link_fetch_params,
-                                    document.Fetcher());
+    return LinkFetchResource::Fetch(ResourceType::kLinkPrefetch,
+                                    link_fetch_params, document.Fetcher());
   }
   return nullptr;
 }
@@ -620,7 +630,7 @@ void LinkLoader::LoadLinksFromHeader(
               : nullptr;
 
       PreloadIfNeeded(params, *document, base_url, kLinkCalledFromHeader,
-                      viewport_description);
+                      viewport_description, kNotParserInserted);
       PrefetchIfNeeded(params, *document);
       ModulePreloadIfNeeded(params, *document, viewport_description, nullptr);
     }
@@ -647,8 +657,9 @@ bool LinkLoader::LoadLink(
   PreconnectIfNeeded(params, &document, document.GetFrame(),
                      network_hints_interface, kLinkCalledFromMarkup);
 
-  Resource* resource = PreloadIfNeeded(params, document, NullURL(),
-                                       kLinkCalledFromMarkup, nullptr);
+  Resource* resource = PreloadIfNeeded(
+      params, document, NullURL(), kLinkCalledFromMarkup, nullptr,
+      client_->IsLinkCreatedByParser() ? kParserInserted : kNotParserInserted);
   if (!resource) {
     resource = PrefetchIfNeeded(params, document);
   }
@@ -673,6 +684,51 @@ bool LinkLoader::LoadLink(
     prerender_.Clear();
   }
   return true;
+}
+
+void LinkLoader::LoadStylesheet(const LinkLoadParameters& params,
+                                const AtomicString& local_name,
+                                const WTF::TextEncoding& charset,
+                                FetchParameters::DeferOption defer_option,
+                                Document& document,
+                                ResourceClient* link_client) {
+  ResourceRequest resource_request(document.CompleteURL(params.href));
+  resource_request.SetReferrerPolicy(params.referrer_policy);
+
+  mojom::FetchImportanceMode importance_mode =
+      GetFetchImportanceAttributeValue(params.importance);
+  DCHECK(importance_mode == mojom::FetchImportanceMode::kImportanceAuto ||
+         RuntimeEnabledFeatures::PriorityHintsEnabled());
+  resource_request.SetFetchImportanceMode(importance_mode);
+
+  ResourceLoaderOptions options;
+  options.initiator_info.name = local_name;
+  FetchParameters link_fetch_params(resource_request, options);
+  link_fetch_params.SetCharset(charset);
+
+  link_fetch_params.SetDefer(defer_option);
+
+  link_fetch_params.SetContentSecurityPolicyNonce(params.nonce);
+
+  CrossOriginAttributeValue cross_origin = params.cross_origin;
+  if (cross_origin != kCrossOriginAttributeNotSet) {
+    link_fetch_params.SetCrossOriginAccessControl(document.GetSecurityOrigin(),
+                                                  cross_origin);
+  }
+
+  String integrity_attr = params.integrity;
+  if (!integrity_attr.IsEmpty()) {
+    IntegrityMetadataSet metadata_set;
+    SubresourceIntegrity::ParseIntegrityAttribute(
+        integrity_attr, SubresourceIntegrityHelper::GetFeatures(&document),
+        metadata_set);
+    link_fetch_params.SetIntegrityMetadata(metadata_set);
+    link_fetch_params.MutableResourceRequest().SetFetchIntegrity(
+        integrity_attr);
+  }
+
+  CSSStyleSheetResource::Fetch(link_fetch_params, document.Fetcher(),
+                               link_client);
 }
 
 void LinkLoader::DispatchLinkLoadingErroredAsync() {

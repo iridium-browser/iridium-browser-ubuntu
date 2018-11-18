@@ -23,6 +23,7 @@
 #include "content/renderer/media/stream/media_stream_audio_processor_options.h"
 #include "content/renderer/media/webrtc/webrtc_audio_device_impl.h"
 #include "media/base/audio_converter.h"
+#include "media/webrtc/audio_delay_stats_reporter.h"
 #include "third_party/webrtc/api/mediastreaminterface.h"
 #include "third_party/webrtc/modules/audio_processing/include/audio_processing.h"
 #include "third_party/webrtc/rtc_base/task_queue.h"
@@ -30,6 +31,7 @@
 namespace media {
 class AudioBus;
 class AudioParameters;
+class EchoInformation;
 }  // namespace media
 
 namespace webrtc {
@@ -38,7 +40,6 @@ class TypingDetection;
 
 namespace content {
 
-class EchoInformation;
 class MediaStreamAudioBus;
 class MediaStreamAudioFifo;
 
@@ -120,10 +121,6 @@ class CONTENT_EXPORT MediaStreamAudioProcessor
  protected:
   ~MediaStreamAudioProcessor() override;
 
-  // True if AEC3 is used, false if it's not or no AEC is used at all. Used for
-  // verification in tests.
-  bool using_aec3_ = false;
-
  private:
   friend class MediaStreamAudioProcessorTest;
 
@@ -151,11 +148,6 @@ class CONTENT_EXPORT MediaStreamAudioProcessor
   // Helper to initialize the capture converter.
   void InitializeCaptureFifo(const media::AudioParameters& input_format);
 
-  // Helper to initialize the render converter.
-  void InitializeRenderFifoIfNeeded(int sample_rate,
-                                    int number_of_channels,
-                                    int frames_per_buffer);
-
   // Called by ProcessAndConsumeData().
   // Returns the new microphone volume in the range of |0, 255].
   // When the volume does not need to be updated, it returns 0.
@@ -172,6 +164,9 @@ class CONTENT_EXPORT MediaStreamAudioProcessor
   // Cached value for the render delay latency. This member is accessed by
   // both the capture audio thread and the render audio thread.
   base::subtle::Atomic32 render_delay_ms_;
+
+  // For reporting audio delay stats.
+  media::AudioDelayStatsReporter audio_delay_stats_reporter_;
 
   // Low-priority task queue for doing AEC dump recordings. It has to
   // out-live audio_processing_ and be created/destroyed from the same
@@ -222,10 +217,11 @@ class CONTENT_EXPORT MediaStreamAudioProcessor
   // Counters to avoid excessively logging errors in OnPlayoutData.
   size_t unsupported_buffer_size_log_count_ = 0;
   size_t apm_playout_error_code_log_count_ = 0;
+  size_t large_delay_log_count_ = 0;
 
   // Object for logging UMA stats for echo information when the AEC is enabled.
   // Accessed on the main render thread.
-  std::unique_ptr<EchoInformation> echo_information_;
+  std::unique_ptr<media::EchoInformation> echo_information_;
 
   DISALLOW_COPY_AND_ASSIGN(MediaStreamAudioProcessor);
 };

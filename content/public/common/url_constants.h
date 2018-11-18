@@ -41,6 +41,7 @@ CONTENT_EXPORT extern const char kChromeUIMediaInternalsHost[];
 CONTENT_EXPORT extern const char kChromeUIMemoryExhaustHost[];
 CONTENT_EXPORT extern const char kChromeUINetworkErrorHost[];
 CONTENT_EXPORT extern const char kChromeUINetworkErrorsListingHost[];
+CONTENT_EXPORT extern const char kChromeUIProcessInternalsHost[];
 CONTENT_EXPORT extern const char kChromeUIResourcesHost[];
 CONTENT_EXPORT extern const char kChromeUIServiceWorkerInternalsHost[];
 CONTENT_EXPORT extern const char kChromeUITracingHost[];
@@ -64,8 +65,13 @@ CONTENT_EXPORT extern const char kChromeUINetworkErrorsListingURL[];
 CONTENT_EXPORT extern const char kChromeUINetworkErrorURL[];
 CONTENT_EXPORT extern const char kChromeUIPpapiFlashCrashURL[];
 CONTENT_EXPORT extern const char kChromeUIPpapiFlashHangURL[];
+CONTENT_EXPORT extern const char kChromeUIProcessInternalsURL[];
 #if defined(OS_ANDROID)
 CONTENT_EXPORT extern const char kChromeUIGpuJavaCrashURL[];
+#endif
+#if defined(OS_WIN)
+CONTENT_EXPORT extern const char kChromeUIBrowserHeapCorruptionURL[];
+CONTENT_EXPORT extern const char kChromeUIHeapCorruptionCrashURL[];
 #endif
 #if defined(ADDRESS_SANITIZER)
 CONTENT_EXPORT extern const char kChromeUICrashHeapOverflowURL[];

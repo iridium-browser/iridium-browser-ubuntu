@@ -92,7 +92,7 @@ class StylePendingImage final : public StyleImage {
     return false;
   }
 
-  virtual void Trace(blink::Visitor* visitor) {
+  void Trace(blink::Visitor* visitor) override {
     visitor->Trace(value_);
     StyleImage::Trace(visitor);
   }
@@ -103,12 +103,21 @@ class StylePendingImage final : public StyleImage {
     is_pending_image_ = true;
   }
 
+  bool IsEqual(const StyleImage& other) const override;
+
   // TODO(sashab): Replace this with <const CSSValue> once Member<>
   // supports const types.
   Member<CSSValue> value_;
 };
 
 DEFINE_STYLE_IMAGE_TYPE_CASTS(StylePendingImage, IsPendingImage());
+
+inline bool StylePendingImage::IsEqual(const StyleImage& other) const {
+  if (!other.IsPendingImage())
+    return false;
+  const auto& other_pending = ToStylePendingImage(other);
+  return value_ == other_pending.value_;
+}
 
 }  // namespace blink
 #endif

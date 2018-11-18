@@ -9,17 +9,20 @@
 #include <stdint.h>
 #include <sys/sysctl.h>
 
+#include "base/bind.h"
 #include "base/logging.h"
-#import "base/mac/bind_objc_block.h"
 #include "base/memory/ref_counted.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/net/cookies/cookie_store_ios_persistent.h"
 #import "ios/net/cookies/system_cookie_store.h"
+#include "ios/web/public/features.h"
+#include "ios/web/public/web_task_traits.h"
 #include "ios/web/public/web_thread.h"
 #include "net/cookies/cookie_monster.h"
 #include "net/cookies/cookie_store.h"
 #include "net/extras/sqlite/sqlite_persistent_cookie_store.h"
+#include "net/log/net_log.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
 
@@ -41,18 +44,21 @@ scoped_refptr<net::SQLitePersistentCookieStore> CreatePersistentCookieStore(
     net::CookieCryptoDelegate* crypto_delegate) {
   return scoped_refptr<net::SQLitePersistentCookieStore>(
       new net::SQLitePersistentCookieStore(
-          path, web::WebThread::GetTaskRunnerForThread(web::WebThread::IO),
+          path,
+          base::CreateSingleThreadTaskRunnerWithTraits({web::WebThread::IO}),
           base::CreateSequencedTaskRunnerWithTraits(
-              {base::MayBlock(), base::TaskPriority::BACKGROUND}),
+              {base::MayBlock(), base::TaskPriority::BEST_EFFORT}),
           restore_old_session_cookies, crypto_delegate));
 }
 
 // Creates a CookieMonster configured by |config|.
 std::unique_ptr<net::CookieMonster> CreateCookieMonster(
-    const CookieStoreConfig& config) {
+    const CookieStoreConfig& config,
+    net::NetLog* net_log) {
   if (config.path.empty()) {
     // Empty path means in-memory store.
-    return std::make_unique<net::CookieMonster>(nullptr);
+    return std::make_unique<net::CookieMonster>(
+        nullptr /* store */, nullptr /* channel_id_service */, net_log);
   }
 
   const bool restore_old_session_cookies =
@@ -60,8 +66,8 @@ std::unique_ptr<net::CookieMonster> CreateCookieMonster(
   scoped_refptr<net::SQLitePersistentCookieStore> persistent_store =
       CreatePersistentCookieStore(config.path, restore_old_session_cookies,
                                   config.crypto_delegate);
-  std::unique_ptr<net::CookieMonster> cookie_monster(
-      new net::CookieMonster(persistent_store.get()));
+  std::unique_ptr<net::CookieMonster> cookie_monster(new net::CookieMonster(
+      persistent_store.get(), nullptr /* channel_id_service */, net_log));
   if (restore_old_session_cookies)
     cookie_monster->SetPersistSessionCookies(true);
   return cookie_monster;
@@ -84,9 +90,21 @@ CookieStoreConfig::~CookieStoreConfig() {}
 
 std::unique_ptr<net::CookieStore> CreateCookieStore(
     const CookieStoreConfig& config,
-    std::unique_ptr<net::SystemCookieStore> system_cookie_store) {
+    std::unique_ptr<net::SystemCookieStore> system_cookie_store,
+    net::NetLog* net_log) {
   if (config.cookie_store_type == CookieStoreConfig::COOKIE_MONSTER)
-    return CreateCookieMonster(config);
+    return CreateCookieMonster(config, net_log);
+
+  // On iOS 11, there is no need to use PersistentCookieStore or CookieMonster
+  // because there is a way to access cookies in WKHTTPCookieStore. This will
+  // allow URLFetcher and anyother users of net:CookieStore to in iOS to set
+  // and get cookies directly in WKHTTPCookieStore.
+  if (@available(iOS 11, *)) {
+    if (base::FeatureList::IsEnabled(web::features::kWKHTTPSystemCookieStore)) {
+      return std::make_unique<net::CookieStoreIOS>(
+          std::move(system_cookie_store), net_log);
+    }
+  }
 
   scoped_refptr<net::SQLitePersistentCookieStore> persistent_store = nullptr;
   if (config.session_cookie_mode ==
@@ -97,7 +115,7 @@ std::unique_ptr<net::CookieStore> CreateCookieStore(
         config.crypto_delegate);
   }
   return std::make_unique<net::CookieStoreIOSPersistent>(
-      persistent_store.get(), std::move(system_cookie_store));
+      persistent_store.get(), std::move(system_cookie_store), net_log);
 }
 
 bool ShouldClearSessionCookies() {
@@ -123,7 +141,7 @@ bool ShouldClearSessionCookies() {
 void ClearSessionCookies(ios::ChromeBrowserState* browser_state) {
   scoped_refptr<net::URLRequestContextGetter> getter =
       browser_state->GetRequestContext();
-  web::WebThread::PostTask(web::WebThread::IO, FROM_HERE, base::BindBlockArc(^{
+  base::PostTaskWithTraits(FROM_HERE, {web::WebThread::IO}, base::BindOnce(^{
                              getter->GetURLRequestContext()
                                  ->cookie_store()
                                  ->DeleteSessionCookiesAsync(base::DoNothing());

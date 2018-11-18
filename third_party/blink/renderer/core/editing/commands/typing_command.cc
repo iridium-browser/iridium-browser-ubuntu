@@ -37,6 +37,7 @@
 #include "third_party/blink/renderer/core/editing/commands/insert_line_break_command.h"
 #include "third_party/blink/renderer/core/editing/commands/insert_paragraph_separator_command.h"
 #include "third_party/blink/renderer/core/editing/commands/insert_text_command.h"
+#include "third_party/blink/renderer/core/editing/editing_behavior.h"
 #include "third_party/blink/renderer/core/editing/editing_utilities.h"
 #include "third_party/blink/renderer/core/editing/editor.h"
 #include "third_party/blink/renderer/core/editing/ephemeral_range.h"
@@ -49,6 +50,7 @@
 #include "third_party/blink/renderer/core/editing/visible_units.h"
 #include "third_party/blink/renderer/core/events/before_text_inserted_event.h"
 #include "third_party/blink/renderer/core/events/text_event.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/html/html_br_element.h"
 #include "third_party/blink/renderer/core/html_names.h"
@@ -73,7 +75,7 @@ String DispatchBeforeTextInsertedEvent(const String& text,
   // necessary.
   const Document& document = start_node->GetDocument();
   BeforeTextInsertedEvent* evt = BeforeTextInsertedEvent::Create(text);
-  RootEditableElement(*start_node)->DispatchEvent(evt);
+  RootEditableElement(*start_node)->DispatchEvent(*evt);
   if (IsValidDocument(document) && selection.IsValidFor(document))
     return evt->GetText();
   // editing/inserting/webkitBeforeTextInserted-removes-frame.html
@@ -97,7 +99,7 @@ DispatchEventResult DispatchTextInputEvent(LocalFrame* frame,
   TextEvent* event = TextEvent::Create(frame->DomWindow(), text,
                                        kTextEventInputIncrementalInsertion);
   event->SetUnderlyingEvent(nullptr);
-  DispatchEventResult result = target->DispatchEvent(event);
+  DispatchEventResult result = target->DispatchEvent(*event);
   if (IsValidDocument(document))
     return result;
   // editing/inserting/insert-text-remove-iframe-on-textInput-event.html
@@ -117,8 +119,8 @@ PlainTextRange GetSelectionOffsets(const SelectionInDOMTree& selection) {
   return PlainTextRange::Create(*editable, range);
 }
 
-SelectionInDOMTree CreateSelection(const size_t start,
-                                   const size_t end,
+SelectionInDOMTree CreateSelection(const wtf_size_t start,
+                                   const wtf_size_t end,
                                    Element* element) {
   const EphemeralRange& start_range =
       PlainTextRange(0, static_cast<int>(start)).CreateRange(*element);
@@ -146,7 +148,7 @@ bool CanAppendNewLineFeedToSelection(const VisibleSelection& selection,
   const Document& document = element->GetDocument();
   BeforeTextInsertedEvent* event =
       BeforeTextInsertedEvent::Create(String("\n"));
-  element->DispatchEvent(event);
+  element->DispatchEvent(*event);
   // event may invalidate frame or selection
   if (IsValidDocument(document) && selection.IsValidFor(document))
     return event->GetText().length();
@@ -208,14 +210,19 @@ void TypingCommand::DeleteSelectionIfRange(const VisibleSelection& selection,
                                            EditingState* editing_state) {
   if (!selection.IsRange())
     return;
-  ApplyCommandToComposite(DeleteSelectionCommand::Create(
-                              selection, DeleteSelectionOptions::Builder()
-                                             .SetSmartDelete(smart_delete_)
-                                             .SetMergeBlocksAfterDelete(true)
-                                             .SetExpandForSpecialElements(true)
-                                             .SetSanitizeMarkup(true)
-                                             .Build()),
-                          editing_state);
+  // Although the 'selection' to delete is indeed a Range, it may have been
+  // built from a Caret selection; in that case we don't want to expand so that
+  // the table structure is deleted as well.
+  bool expand_for_special = EndingSelection().IsRange();
+  ApplyCommandToComposite(
+      DeleteSelectionCommand::Create(
+          selection, DeleteSelectionOptions::Builder()
+                         .SetSmartDelete(smart_delete_)
+                         .SetMergeBlocksAfterDelete(true)
+                         .SetExpandForSpecialElements(expand_for_special)
+                         .SetSanitizeMarkup(true)
+                         .Build()),
+      editing_state);
 }
 
 void TypingCommand::DeleteKeyPressed(Document& document,
@@ -300,8 +307,8 @@ void TypingCommand::InsertText(Document& document,
 
 void TypingCommand::AdjustSelectionAfterIncrementalInsertion(
     LocalFrame* frame,
-    const size_t selection_start,
-    const size_t text_length,
+    const wtf_size_t selection_start,
+    const wtf_size_t text_length,
     EditingState* editing_state) {
   if (!IsIncrementalInsertion())
     return;
@@ -323,7 +330,7 @@ void TypingCommand::AdjustSelectionAfterIncrementalInsertion(
     return;
   }
 
-  const size_t new_end = selection_start + text_length;
+  const wtf_size_t new_end = selection_start + text_length;
   const SelectionInDOMTree& selection =
       CreateSelection(new_end, new_end, element);
   SetEndingSelection(SelectionForUndoStep::From(selection));
@@ -381,7 +388,7 @@ void TypingCommand::InsertText(
       GetSelectionOffsets(selection_for_insertion.AsSelection());
   if (selection_offsets.IsNull())
     return;
-  const size_t selection_start = selection_offsets.Start();
+  const wtf_size_t selection_start = selection_offsets.Start();
 
   // Set the starting and ending selection appropriately if we are using a
   // selection that is different from the current selection.  In the future, we
@@ -545,7 +552,7 @@ InputEvent::InputType TypingCommand::GetInputType() const {
     return input_type_;
 
   switch (command_type_) {
-    // TODO(chongz): |DeleteSelection| is used by IME but we don't have
+    // TODO(editing-dev): |DeleteSelection| is used by IME but we don't have
     // direction info.
     case kDeleteSelection:
       return InputType::kDeleteContentBackward;
@@ -588,12 +595,12 @@ void TypingCommand::InsertTextInternal(const String& text,
     InsertTextRunWithoutNewlines(text, editing_state);
     return;
   }
-  size_t selection_start = selection_start_;
+  wtf_size_t selection_start = selection_start_;
   unsigned offset = 0;
-  size_t newline;
+  wtf_size_t newline;
   while ((newline = text.find('\n', offset)) != kNotFound) {
     if (newline > offset) {
-      const size_t insertion_length = newline - offset;
+      const wtf_size_t insertion_length = newline - offset;
       InsertTextRunWithoutNewlines(text.Substring(offset, insertion_length),
                                    editing_state);
       if (editing_state->IsAborted())
@@ -614,7 +621,7 @@ void TypingCommand::InsertTextInternal(const String& text,
   }
 
   if (text.length() > offset) {
-    const size_t insertion_length = text.length() - offset;
+    const wtf_size_t insertion_length = text.length() - offset;
     InsertTextRunWithoutNewlines(text.Substring(offset, insertion_length),
                                  editing_state);
     if (editing_state->IsAborted())

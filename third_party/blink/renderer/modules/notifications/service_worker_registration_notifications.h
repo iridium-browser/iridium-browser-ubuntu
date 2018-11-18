@@ -7,12 +7,11 @@
 
 #include <memory>
 #include "base/memory/scoped_refptr.h"
-#include "third_party/blink/public/platform/modules/notifications/web_notification_manager.h"
+#include "third_party/blink/public/mojom/notifications/notification.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/core/dom/context_lifecycle_observer.h"
 #include "third_party/blink/renderer/platform/heap/garbage_collected.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/heap/heap_allocator.h"
 #include "third_party/blink/renderer/platform/heap/visitor.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
 #include "third_party/blink/renderer/platform/wtf/noncopyable.h"
@@ -24,10 +23,10 @@ class ExceptionState;
 class GetNotificationOptions;
 class NotificationOptions;
 class NotificationResourcesLoader;
+class ScriptPromiseResolver;
 class ScriptState;
 class SecurityOrigin;
 class ServiceWorkerRegistration;
-struct WebNotificationData;
 
 class ServiceWorkerRegistrationNotifications final
     : public GarbageCollected<ServiceWorkerRegistrationNotifications>,
@@ -51,7 +50,7 @@ class ServiceWorkerRegistrationNotifications final
   // ContextLifecycleObserver interface.
   void ContextDestroyed(ExecutionContext* context) override;
 
-  virtual void Trace(blink::Visitor* visitor);
+  void Trace(blink::Visitor* visitor) override;
 
  private:
   ServiceWorkerRegistrationNotifications(ExecutionContext*,
@@ -61,11 +60,12 @@ class ServiceWorkerRegistrationNotifications final
       ExecutionContext* context,
       ServiceWorkerRegistration& registration);
 
-  void PrepareShow(const WebNotificationData& data,
-                   std::unique_ptr<WebNotificationShowCallbacks> callbacks);
+  void PrepareShow(mojom::blink::NotificationDataPtr data,
+                   ScriptPromiseResolver* resolver);
+
   void DidLoadResources(scoped_refptr<const SecurityOrigin> origin,
-                        const WebNotificationData& data,
-                        std::unique_ptr<WebNotificationShowCallbacks> callbacks,
+                        mojom::blink::NotificationDataPtr data,
+                        ScriptPromiseResolver* resolver,
                         NotificationResourcesLoader* loader);
 
   Member<ServiceWorkerRegistration> registration_;

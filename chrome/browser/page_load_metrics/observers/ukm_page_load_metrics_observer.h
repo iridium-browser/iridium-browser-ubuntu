@@ -9,37 +9,18 @@
 #include "base/optional.h"
 #include "base/time/time.h"
 #include "chrome/browser/page_load_metrics/page_load_metrics_observer.h"
-#include "components/ukm/ukm_source.h"
-#include "net/nqe/network_quality_estimator.h"
+#include "services/metrics/public/cpp/ukm_source.h"
 #include "ui/base/page_transition_types.h"
 
-namespace content {
-class WebContents;
+namespace network {
+class NetworkQualityTracker;
 }
 
-namespace internal {
-
-// Name constants are exposed here so they can be referenced from tests.
-extern const char kUkmPageLoadEventName[];
-extern const char kUkmParseStartName[];
-extern const char kUkmDomContentLoadedName[];
-extern const char kUkmLoadEventName[];
-extern const char kUkmFirstPaintName[];
-extern const char kUkmFirstContentfulPaintName[];
-extern const char kUkmFirstMeaningfulPaintName[];
-extern const char kUkmInteractiveName[];
-extern const char kUkmFirstInputDelayName[];
-extern const char kUkmFirstInputTimestampName[];
-extern const char kUkmForegroundDurationName[];
-extern const char kUkmFailedProvisionaLoadName[];
-extern const char kUkmNetErrorCode[];
-extern const char kUkmEffectiveConnectionType[];
-extern const char kUkmHttpRttEstimate[];
-extern const char kUkmTransportRttEstimate[];
-extern const char kUkmDownstreamKbpsEstimate[];
-extern const char kUkmPageTransition[];
-
-}  // namespace internal
+namespace ukm {
+namespace builders {
+class PageLoad;
+}
+}  // namespace ukm
 
 // If URL-Keyed-Metrics (UKM) is enabled in the system, this is used to
 // populate it with top-level page-load metrics.
@@ -48,11 +29,10 @@ class UkmPageLoadMetricsObserver
  public:
   // Returns a UkmPageLoadMetricsObserver, or nullptr if it is not needed.
   static std::unique_ptr<page_load_metrics::PageLoadMetricsObserver>
-  CreateIfNeeded(content::WebContents* web_contents);
+  CreateIfNeeded();
 
   explicit UkmPageLoadMetricsObserver(
-      net::NetworkQualityEstimator::NetworkQualityProvider*
-          network_quality_provider);
+      network::NetworkQualityTracker* network_quality_tracker);
   ~UkmPageLoadMetricsObserver() override;
 
   // page_load_metrics::PageLoadMetricsObserver implementation:
@@ -95,8 +75,11 @@ class UkmPageLoadMetricsObserver
       const page_load_metrics::PageLoadExtraInfo& info,
       base::TimeTicks app_background_time);
 
-  net::NetworkQualityEstimator::NetworkQualityProvider* const
-      network_quality_provider_;
+  // Adds main resource timing metrics to |builder|.
+  void ReportMainResourceTimingMetrics(ukm::builders::PageLoad* builder);
+
+  // Guaranteed to be non-null during the lifetime of |this|.
+  network::NetworkQualityTracker* network_quality_tracker_;
 
   // The number of body (not header) prefilter bytes consumed by requests for
   // the page.
@@ -106,9 +89,13 @@ class UkmPageLoadMetricsObserver
   // Network quality estimates.
   net::EffectiveConnectionType effective_connection_type_ =
       net::EFFECTIVE_CONNECTION_TYPE_UNKNOWN;
+  base::Optional<int32_t> http_response_code_;
   base::Optional<base::TimeDelta> http_rtt_estimate_;
   base::Optional<base::TimeDelta> transport_rtt_estimate_;
   base::Optional<int32_t> downstream_kbps_estimate_;
+
+  // Load timing metrics of the main frame resource request.
+  base::Optional<net::LoadTimingInfo> main_frame_timing_;
 
   // PAGE_TRANSITION_LINK is the default PageTransition value.
   ui::PageTransition page_transition_ = ui::PAGE_TRANSITION_LINK;

@@ -29,6 +29,14 @@ class InterceptingResourceHandler::Controller : public ResourceController {
     intercepting_handler_->ResumeInternal();
   }
 
+  void ResumeForRedirect(const base::Optional<net::HttpRequestHeaders>&
+                             modified_request_headers) override {
+    DCHECK(!modified_request_headers.has_value())
+        << "Redirect with modified headers was not supported yet. "
+           "crbug.com/845683";
+    Resume();
+  }
+
   void Cancel() override {
     MarkAsUsed();
     intercepting_handler_->Cancel();
@@ -277,8 +285,8 @@ void InterceptingResourceHandler::OnBufferReceived() {
   // already handles that case, anyways, so could share that code with the
   // no-swap path as well. Or better, just have MimeSniffingResourceHandler
   // create and manage the buffer itself.
-  first_read_buffer_double_ =
-      new net::IOBuffer(static_cast<size_t>(first_read_buffer_size_));
+  first_read_buffer_double_ = base::MakeRefCounted<net::IOBuffer>(
+      static_cast<size_t>(first_read_buffer_size_));
   *parent_read_buffer_ = first_read_buffer_double_;
   *parent_read_buffer_size_ = first_read_buffer_size_;
 

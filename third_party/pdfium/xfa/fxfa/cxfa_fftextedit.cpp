@@ -8,10 +8,11 @@
 
 #include <utility>
 
+#include "third_party/base/ptr_util.h"
 #include "xfa/fwl/cfwl_datetimepicker.h"
 #include "xfa/fwl/cfwl_edit.h"
 #include "xfa/fwl/cfwl_eventtarget.h"
-#include "xfa/fwl/cfwl_eventtextchanged.h"
+#include "xfa/fwl/cfwl_eventtextwillchange.h"
 #include "xfa/fwl/cfwl_messagekillfocus.h"
 #include "xfa/fwl/cfwl_messagesetfocus.h"
 #include "xfa/fwl/cfwl_notedriver.h"
@@ -63,7 +64,7 @@ bool CXFA_FFTextEdit::LoadWidget() {
 }
 
 void CXFA_FFTextEdit::UpdateWidgetProperty() {
-  CFWL_Edit* pWidget = static_cast<CFWL_Edit*>(m_pNormalWidget.get());
+  CFWL_Edit* pWidget = ToEdit(m_pNormalWidget.get());
   if (!pWidget)
     return;
 
@@ -185,7 +186,7 @@ bool CXFA_FFTextEdit::OnKillFocus(CXFA_FFWidget* pNewWidget) {
 }
 
 bool CXFA_FFTextEdit::CommitData() {
-  WideString wsText = static_cast<CFWL_Edit*>(m_pNormalWidget.get())->GetText();
+  WideString wsText = ToEdit(m_pNormalWidget.get())->GetText();
   if (m_pNode->SetValue(XFA_VALUEPICTURE_Edit, wsText)) {
     m_pNode->UpdateUIDisplay(GetDoc()->GetDocView(), this);
     return true;
@@ -203,10 +204,10 @@ void CXFA_FFTextEdit::ValidateNumberField(const WideString& wsText) {
     return;
 
   WideString wsSomField = GetNode()->GetSOMExpression();
-  pAppProvider->MsgBox(WideString::Format(L"%ls can not contain %ls",
-                                          wsText.c_str(), wsSomField.c_str()),
-                       pAppProvider->GetAppTitle(), XFA_MBICON_Error,
-                       XFA_MB_OK);
+  pAppProvider->MsgBox(wsText + L" can not contain " + wsSomField,
+                       pAppProvider->GetAppTitle(),
+                       static_cast<uint32_t>(AlertIcon::kError),
+                       static_cast<uint32_t>(AlertButton::kOK));
 }
 
 bool CXFA_FFTextEdit::IsDataChanged() {
@@ -255,7 +256,7 @@ bool CXFA_FFTextEdit::UpdateFWLData() {
   if (!m_pNormalWidget)
     return false;
 
-  CFWL_Edit* pEdit = static_cast<CFWL_Edit*>(m_pNormalWidget.get());
+  CFWL_Edit* pEdit = ToEdit(m_pNormalWidget.get());
   XFA_VALUEPICTURE eType = XFA_VALUEPICTURE_Display;
   if (IsFocused())
     eType = XFA_VALUEPICTURE_Edit;
@@ -287,7 +288,7 @@ bool CXFA_FFTextEdit::UpdateFWLData() {
   WideString wsText = m_pNode->GetValue(eType);
   WideString wsOldText = pEdit->GetText();
   if (wsText != wsOldText || (eType == XFA_VALUEPICTURE_Edit && bUpdate)) {
-    pEdit->SetText(wsText);
+    pEdit->SetText(wsText, CFDE_TextEditEngine::RecordOperation::kSkipNotify);
     bUpdate = true;
   }
   if (bUpdate)
@@ -296,30 +297,26 @@ bool CXFA_FFTextEdit::UpdateFWLData() {
   return true;
 }
 
-void CXFA_FFTextEdit::OnTextChanged(CFWL_Widget* pWidget,
-                                    const WideString& wsChanged,
-                                    const WideString& wsPrevText) {
+void CXFA_FFTextEdit::OnTextWillChange(CFWL_Widget* pWidget,
+                                       CFWL_EventTextWillChange* event) {
   m_dwStatus |= XFA_WidgetStatus_TextEditValueChanged;
+
   CXFA_EventParam eParam;
   eParam.m_eType = XFA_EVENT_Change;
-  eParam.m_wsChange = wsChanged;
+  eParam.m_wsChange = event->change_text;
   eParam.m_pTarget = m_pNode.Get();
-  eParam.m_wsPrevText = wsPrevText;
-  CFWL_Edit* pEdit = static_cast<CFWL_Edit*>(m_pNormalWidget.get());
-  if (m_pNode->GetFFWidgetType() == XFA_FFWidgetType::kDateTimeEdit) {
-    CFWL_DateTimePicker* pDateTime = (CFWL_DateTimePicker*)pEdit;
-    eParam.m_wsNewText = pDateTime->GetEditText();
-    if (pDateTime->HasSelection()) {
-      size_t count;
-      std::tie(eParam.m_iSelStart, count) = pDateTime->GetSelection();
-      eParam.m_iSelEnd = eParam.m_iSelStart + count;
-    }
-  } else {
-    eParam.m_wsNewText = pEdit->GetText();
-    if (pEdit->HasSelection())
-      std::tie(eParam.m_iSelStart, eParam.m_iSelEnd) = pEdit->GetSelection();
-  }
+  eParam.m_wsPrevText = event->previous_text;
+  eParam.m_iSelStart = static_cast<int32_t>(event->selection_start);
+  eParam.m_iSelEnd = static_cast<int32_t>(event->selection_end);
+
   m_pNode->ProcessEvent(GetDocView(), XFA_AttributeEnum::Change, &eParam);
+
+  // Copy the data back out of the EventParam and into the TextChanged event so
+  // it can propagate back to the calling widget.
+  event->cancelled = eParam.m_bCancelAction;
+  event->change_text = std::move(eParam.m_wsChange);
+  event->selection_start = static_cast<size_t>(eParam.m_iSelStart);
+  event->selection_end = static_cast<size_t>(eParam.m_iSelEnd);
 }
 
 void CXFA_FFTextEdit::OnTextFull(CFWL_Widget* pWidget) {
@@ -336,17 +333,13 @@ void CXFA_FFTextEdit::OnProcessMessage(CFWL_Message* pMessage) {
 void CXFA_FFTextEdit::OnProcessEvent(CFWL_Event* pEvent) {
   CXFA_FFField::OnProcessEvent(pEvent);
   switch (pEvent->GetType()) {
-    case CFWL_Event::Type::TextChanged: {
-      CFWL_EventTextChanged* event =
-          static_cast<CFWL_EventTextChanged*>(pEvent);
-      WideString wsChange;
-      OnTextChanged(m_pNormalWidget.get(), wsChange, event->wsPrevText);
+    case CFWL_Event::Type::TextWillChange:
+      OnTextWillChange(m_pNormalWidget.get(),
+                       static_cast<CFWL_EventTextWillChange*>(pEvent));
       break;
-    }
-    case CFWL_Event::Type::TextFull: {
+    case CFWL_Event::Type::TextFull:
       OnTextFull(m_pNormalWidget.get());
       break;
-    }
     default:
       break;
   }
@@ -415,6 +408,10 @@ void CXFA_FFTextEdit::Delete() {
 
 void CXFA_FFTextEdit::DeSelect() {
   ToEdit(m_pNormalWidget.get())->ClearSelection();
+}
+
+WideString CXFA_FFTextEdit::GetText() {
+  return ToEdit(m_pNormalWidget.get())->GetText();
 }
 
 FormFieldType CXFA_FFTextEdit::GetFormFieldType() {

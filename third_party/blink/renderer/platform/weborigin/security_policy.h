@@ -29,6 +29,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_WEBORIGIN_SECURITY_POLICY_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_WEBORIGIN_SECURITY_POLICY_H_
 
+#include "services/network/public/mojom/cors.mojom-shared.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/weborigin/referrer.h"
 #include "third_party/blink/renderer/platform/weborigin/referrer_policy.h"
@@ -65,34 +66,32 @@ class PLATFORM_EXPORT SecurityPolicy {
                                    const KURL&,
                                    const String& referrer);
 
-  static void AddOriginAccessWhitelistEntry(const SecurityOrigin& source_origin,
-                                            const String& destination_protocol,
-                                            const String& destination_domain,
-                                            bool allow_destination_subdomains);
-  static void RemoveOriginAccessWhitelistEntry(
+  static void AddOriginAccessAllowListEntry(
       const SecurityOrigin& source_origin,
       const String& destination_protocol,
       const String& destination_domain,
-      bool allow_destination_subdomains);
-  static void ResetOriginAccessWhitelists();
+      bool allow_destination_subdomains,
+      const network::mojom::CORSOriginAccessMatchPriority priority);
+  static void ClearOriginAccessAllowListForOrigin(
+      const SecurityOrigin& source_origin);
+  static void ClearOriginAccessBlockListForOrigin(
+      const SecurityOrigin& source_origin);
+  static void ClearOriginAccessAllowList();
 
-  static void AddOriginAccessBlacklistEntry(const SecurityOrigin& source_origin,
-                                            const String& destination_protocol,
-                                            const String& destination_domain,
-                                            bool allow_destination_subdomains);
-  static void RemoveOriginAccessBlacklistEntry(
+  static void AddOriginAccessBlockListEntry(
       const SecurityOrigin& source_origin,
       const String& destination_protocol,
       const String& destination_domain,
-      bool allow_destination_subdomains);
-  static void ResetOriginAccessBlacklists();
+      bool allow_destination_subdomains,
+      const network::mojom::CORSOriginAccessMatchPriority priority);
+  static void ClearOriginAccessBlockList();
 
-  static bool IsAccessWhiteListed(const SecurityOrigin* active_origin,
-                                  const SecurityOrigin* target_origin);
-  static bool IsAccessToURLWhiteListed(const SecurityOrigin* active_origin,
-                                       const KURL&);
+  static bool IsOriginAccessAllowed(const SecurityOrigin* active_origin,
+                                    const SecurityOrigin* target_origin);
+  static bool IsOriginAccessToURLAllowed(const SecurityOrigin* active_origin,
+                                         const KURL&);
 
-  static void AddOriginTrustworthyWhiteList(const SecurityOrigin&);
+  static void AddOriginTrustworthyWhiteList(const String&);
   static bool IsOriginWhiteListedTrustworthy(const SecurityOrigin&);
   static bool IsUrlWhiteListedTrustworthy(const KURL&);
 

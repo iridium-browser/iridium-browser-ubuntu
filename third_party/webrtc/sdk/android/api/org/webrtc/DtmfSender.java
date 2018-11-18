@@ -11,9 +11,8 @@
 package org.webrtc;
 
 /** Java wrapper for a C++ DtmfSenderInterface. */
-@JNINamespace("webrtc::jni")
 public class DtmfSender {
-  final long nativeDtmfSender;
+  private long nativeDtmfSender;
 
   public DtmfSender(long nativeDtmfSender) {
     this.nativeDtmfSender = nativeDtmfSender;
@@ -23,6 +22,7 @@ public class DtmfSender {
    * @return true if this DtmfSender is capable of sending DTMF. Otherwise false.
    */
   public boolean canInsertDtmf() {
+    checkDtmfSenderExists();
     return nativeCanInsertDtmf(nativeDtmfSender);
   }
 
@@ -44,6 +44,7 @@ public class DtmfSender {
    * @return             true on success and false on failure.
    */
   public boolean insertDtmf(String tones, int duration, int interToneGap) {
+    checkDtmfSenderExists();
     return nativeInsertDtmf(nativeDtmfSender, tones, duration, interToneGap);
   }
 
@@ -51,6 +52,7 @@ public class DtmfSender {
    * @return The tones remaining to be played out
    */
   public String tones() {
+    checkDtmfSenderExists();
     return nativeTones(nativeDtmfSender);
   }
 
@@ -59,6 +61,7 @@ public class DtmfSender {
    *         insertDtmf() method, or the default value of 100 ms if insertDtmf() was never called.
    */
   public int duration() {
+    checkDtmfSenderExists();
     return nativeDuration(nativeDtmfSender);
   }
 
@@ -68,11 +71,20 @@ public class DtmfSender {
    *         called.
    */
   public int interToneGap() {
+    checkDtmfSenderExists();
     return nativeInterToneGap(nativeDtmfSender);
   }
 
   public void dispose() {
+    checkDtmfSenderExists();
     JniCommon.nativeReleaseRef(nativeDtmfSender);
+    nativeDtmfSender = 0;
+  }
+
+  private void checkDtmfSenderExists() {
+    if (nativeDtmfSender == 0) {
+      throw new IllegalStateException("DtmfSender has been disposed.");
+    }
   }
 
   private static native boolean nativeCanInsertDtmf(long dtmfSender);

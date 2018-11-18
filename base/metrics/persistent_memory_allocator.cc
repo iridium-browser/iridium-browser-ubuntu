@@ -10,10 +10,11 @@
 #if defined(OS_WIN)
 #include <windows.h>
 #include "winbase.h"
-#elif defined(OS_POSIX)
+#elif defined(OS_POSIX) || defined(OS_FUCHSIA)
 #include <sys/mman.h>
 #endif
 
+#include "base/debug/alias.h"
 #include "base/files/memory_mapped_file.h"
 #include "base/logging.h"
 #include "base/memory/shared_memory.h"
@@ -817,17 +818,15 @@ void PersistentMemoryAllocator::MakeIterable(Reference ref) {
                                                      std::memory_order_release,
                                                      std::memory_order_relaxed);
       return;
-    } else {
-      // In the unlikely case that a thread crashed or was killed between the
-      // update of "next" and the update of "tailptr", it is necessary to
-      // perform the operation that would have been done. There's no explicit
-      // check for crash/kill which means that this operation may also happen
-      // even when the other thread is in perfect working order which is what
-      // necessitates the CompareAndSwap above.
-      shared_meta()->tailptr.compare_exchange_strong(tail, next,
-                                                     std::memory_order_acq_rel,
-                                                     std::memory_order_acquire);
     }
+    // In the unlikely case that a thread crashed or was killed between the
+    // update of "next" and the update of "tailptr", it is necessary to
+    // perform the operation that would have been done. There's no explicit
+    // check for crash/kill which means that this operation may also happen
+    // even when the other thread is in perfect working order which is what
+    // necessitates the CompareAndSwap above.
+    shared_meta()->tailptr.compare_exchange_strong(
+        tail, next, std::memory_order_acq_rel, std::memory_order_acquire);
   }
 }
 
@@ -969,7 +968,7 @@ LocalPersistentMemoryAllocator::AllocateLocalMemory(size_t size) {
     return Memory(address, MEM_VIRTUAL);
   UmaHistogramSparse("UMA.LocalPersistentMemoryAllocator.Failures.Win",
                      ::GetLastError());
-#elif defined(OS_POSIX)
+#elif defined(OS_POSIX) || defined(OS_FUCHSIA)
   // MAP_ANON is deprecated on Linux but MAP_ANONYMOUS is not universal on Mac.
   // MAP_SHARED is not available on Linux <2.4 but required on Mac.
   address = ::mmap(nullptr, size, PROT_READ | PROT_WRITE,
@@ -1005,7 +1004,7 @@ void LocalPersistentMemoryAllocator::DeallocateLocalMemory(void* memory,
 #if defined(OS_WIN)
   BOOL success = ::VirtualFree(memory, 0, MEM_DECOMMIT);
   DCHECK(success);
-#elif defined(OS_POSIX)
+#elif defined(OS_POSIX) || defined(OS_FUCHSIA)
   int result = ::munmap(memory, size);
   DCHECK_EQ(0, result);
 #else
@@ -1066,6 +1065,32 @@ bool FilePersistentMemoryAllocator::IsFileAcceptable(
   return IsMemoryAcceptable(file.data(), file.length(), 0, read_only);
 }
 
+void FilePersistentMemoryAllocator::Cache() {
+  // Since this method is expected to load data from permanent storage
+  // into memory, blocking I/O may occur.
+  AssertBlockingAllowed();
+
+  // Calculate begin/end addresses so that the first byte of every page
+  // in that range can be read. Keep within the used space. The |volatile|
+  // keyword makes it so the compiler can't make assumptions about what is
+  // in a given memory location and thus possibly avoid the read.
+  const volatile char* mem_end = mem_base_ + used();
+  const volatile char* mem_begin = mem_base_;
+
+  // Iterate over the memory a page at a time, reading the first byte of
+  // every page. The values are added to a |total| so that the compiler
+  // can't omit the read.
+  int total = 0;
+  for (const volatile char* memory = mem_begin; memory < mem_end;
+       memory += vm_page_size_) {
+    total += *memory;
+  }
+
+  // Tell the compiler that |total| is used so that it can't optimize away
+  // the memory accesses above.
+  debug::Alias(&total);
+}
+
 void FilePersistentMemoryAllocator::FlushPartial(size_t length, bool sync) {
   if (sync)
     AssertBlockingAllowed();
@@ -1083,7 +1108,7 @@ void FilePersistentMemoryAllocator::FlushPartial(size_t length, bool sync) {
   int result =
       ::msync(const_cast<void*>(data()), length, sync ? MS_SYNC : MS_ASYNC);
   DCHECK_NE(EINVAL, result);
-#elif defined(OS_POSIX)
+#elif defined(OS_POSIX) || defined(OS_FUCHSIA)
   // On POSIX, "invalidate" forces _other_ processes to recognize what has
   // been written to disk and so is applicable to "flush".
   int result = ::msync(const_cast<void*>(data()), length,

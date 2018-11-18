@@ -15,12 +15,14 @@
 #include "components/signin/core/browser/profile_management_switches.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_error_controller.h"
+#include "components/signin/core/browser/webdata/token_web_data.h"
 #include "components/webdata/common/web_data_service_base.h"
 #include "components/webdata/common/web_data_service_consumer.h"
 #include "google_apis/gaia/oauth2_token_service_delegate.h"
 #include "net/base/backoff_entry.h"
-#include "net/base/network_change_notifier.h"
+#include "services/network/public/cpp/network_connection_tracker.h"
 
+class SigninClient;
 namespace user_prefs {
 class PrefRegistrySyncable;
 }
@@ -28,18 +30,16 @@ class PrefRegistrySyncable;
 class MutableProfileOAuth2TokenServiceDelegate
     : public OAuth2TokenServiceDelegate,
       public WebDataServiceConsumer,
-      public net::NetworkChangeNotifier::NetworkChangeObserver {
+      public network::NetworkConnectionTracker::NetworkConnectionObserver {
  public:
-  // Refresh token guaranteed to be invalid. Can be passed to
-  // UpdateCredentials() to force an authentication error.
-  static const char kInvalidRefreshToken[];
-
   MutableProfileOAuth2TokenServiceDelegate(
       SigninClient* client,
       SigninErrorController* signin_error_controller,
       AccountTrackerService* account_tracker_service,
+      scoped_refptr<TokenWebData> token_web_data,
       signin::AccountConsistencyMethod account_consistency,
-      bool revoke_all_tokens_on_load = false);
+      bool revoke_all_tokens_on_load,
+      bool can_revoke_credentials);
   ~MutableProfileOAuth2TokenServiceDelegate() override;
 
   static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
@@ -47,7 +47,7 @@ class MutableProfileOAuth2TokenServiceDelegate
   // OAuth2TokenServiceDelegate overrides.
   OAuth2AccessTokenFetcher* CreateAccessTokenFetcher(
       const std::string& account_id,
-      net::URLRequestContextGetter* getter,
+      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
       OAuth2AccessTokenConsumer* consumer) override;
 
   // Updates the internal cache of the result from the most-recently-completed
@@ -59,7 +59,8 @@ class MutableProfileOAuth2TokenServiceDelegate
   GoogleServiceAuthError GetAuthError(
       const std::string& account_id) const override;
   std::vector<std::string> GetAccounts() override;
-  net::URLRequestContextGetter* GetRequestContext() const override;
+  scoped_refptr<network::SharedURLLoaderFactory> GetURLLoaderFactory()
+      const override;
 
   void LoadCredentials(const std::string& primary_account_id) override;
   void UpdateCredentials(const std::string& account_id,
@@ -71,11 +72,9 @@ class MutableProfileOAuth2TokenServiceDelegate
 
   // Overridden from OAuth2TokenServiceDelegate.
   void Shutdown() override;
-  LoadCredentialsState GetLoadCredentialsState() const override;
 
-  // Overridden from NetworkChangeObserver.
-  void OnNetworkChanged(net::NetworkChangeNotifier::ConnectionType type)
-      override;
+  // Overridden from NetworkConnectionTracker::NetworkConnectionObserver.
+  void OnConnectionChanged(network::mojom::ConnectionType type) override;
 
   // Overridden from OAuth2TokenServiceDelegate.
   const net::BackoffEntry* BackoffEntry() const override;
@@ -123,12 +122,17 @@ class MutableProfileOAuth2TokenServiceDelegate
   FRIEND_TEST_ALL_PREFIXES(
       MutableProfileOAuth2TokenServiceDelegateTest,
       PersistenceLoadCredentialsEmptyPrimaryAccountId_DiceEnabled);
+  FRIEND_TEST_ALL_PREFIXES(
+      MutableProfileOAuth2TokenServiceDelegateTest,
+      LoadCredentialsClearsTokenDBWhenNoPrimaryAccount_DiceDisabled);
   FRIEND_TEST_ALL_PREFIXES(MutableProfileOAuth2TokenServiceDelegateTest,
                            PersistenceLoadCredentials);
   FRIEND_TEST_ALL_PREFIXES(MutableProfileOAuth2TokenServiceDelegateTest,
                            RevokeOnUpdate);
   FRIEND_TEST_ALL_PREFIXES(MutableProfileOAuth2TokenServiceDelegateTest,
                            DelayedRevoke);
+  FRIEND_TEST_ALL_PREFIXES(MutableProfileOAuth2TokenServiceDelegateTest,
+                           DiceMigrationHostedDomainPrimaryAccount);
   FRIEND_TEST_ALL_PREFIXES(MutableProfileOAuth2TokenServiceDelegateTest,
                            ShutdownDuringRevoke);
   FRIEND_TEST_ALL_PREFIXES(MutableProfileOAuth2TokenServiceDelegateTest,
@@ -184,6 +188,10 @@ class MutableProfileOAuth2TokenServiceDelegate
                         const std::string& refresh_token,
                         const GoogleServiceAuthError& error);
 
+  // Called at when tokens are loaded. Performs housekeeping tasks and notifies
+  // the observers.
+  void FinishLoadingCredentials();
+
   // Maps the |account_id| of accounts known to ProfileOAuth2TokenService
   // to information about the account.
   typedef std::map<std::string, std::unique_ptr<AccountStatus>>
@@ -197,9 +205,6 @@ class MutableProfileOAuth2TokenServiceDelegate
   // The primary account id of this service's profile during the loading of
   // credentials.  This member is empty otherwise.
   std::string loading_primary_account_id_;
-
-  // The state of the load credentials operation.
-  LoadCredentialsState load_credentials_state_;
 
   std::vector<std::unique_ptr<RevokeServerRefreshToken>> server_revokes_;
 
@@ -215,12 +220,18 @@ class MutableProfileOAuth2TokenServiceDelegate
   SigninClient* client_;
   SigninErrorController* signin_error_controller_;
   AccountTrackerService* account_tracker_service_;
+  scoped_refptr<TokenWebData> token_web_data_;
   signin::AccountConsistencyMethod account_consistency_;
 
   // Revokes all the tokens after loading them. Secondary accounts will be
   // completely removed, and the primary account will be kept in authentication
   // error state.
   const bool revoke_all_tokens_on_load_;
+
+  // Supervised users cannot revoke credentials.
+  // TODO(droger): remove this when supervised users are no longer supported on
+  // any platform.
+  const bool can_revoke_credentials_;
 
   DISALLOW_COPY_AND_ASSIGN(MutableProfileOAuth2TokenServiceDelegate);
 };

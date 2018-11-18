@@ -5,6 +5,7 @@
 #include "content/test/web_contents_observer_sanity_checker.h"
 
 #include "base/memory/ptr_util.h"
+#include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "build/build_config.h"
 #include "content/browser/frame_host/render_frame_host_impl.h"
@@ -53,7 +54,7 @@ void WebContentsObserverSanityChecker::RenderFrameCreated(
                  << Format(render_frame_host);
   }
 
-  CHECK(render_frame_host->GetProcess()->HasConnection())
+  CHECK(render_frame_host->GetProcess()->IsInitializedAndNotDead())
       << "RenderFrameCreated was called for a RenderFrameHost whose render "
          "process is not currently live, so there's no way for the RenderFrame "
          "to have been created.";
@@ -99,7 +100,7 @@ void WebContentsObserverSanityChecker::RenderFrameDeleted(
 
   // All players should have been paused by this point.
   for (const auto& id : active_media_players_)
-    CHECK_NE(id.first, render_frame_host);
+    CHECK_NE(id.render_frame_host, render_frame_host);
 }
 
 void WebContentsObserverSanityChecker::RenderFrameForInterstitialPageCreated(
@@ -280,9 +281,7 @@ void WebContentsObserverSanityChecker::MediaStoppedPlaying(
   CHECK(!web_contents_destroyed_);
   CHECK(std::find(active_media_players_.begin(), active_media_players_.end(),
                   id) != active_media_players_.end());
-  active_media_players_.erase(std::remove(active_media_players_.begin(),
-                                          active_media_players_.end(), id),
-                              active_media_players_.end());
+  base::Erase(active_media_players_, id);
 }
 
 bool WebContentsObserverSanityChecker::OnMessageReceived(

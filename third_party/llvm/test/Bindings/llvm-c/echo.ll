@@ -6,6 +6,8 @@ source_filename = "/test/Bindings/echo.ll"
 target datalayout = "e-m:o-i64:64-f80:128-n8:16:32:64-S128"
 target triple = "x86_64-apple-macosx10.11.0"
 
+module asm "classical GAS"
+
 %S = type { i64, %S* }
 
 @var = global i32 42
@@ -19,6 +21,12 @@ target triple = "x86_64-apple-macosx10.11.0"
 @protected = protected global i32 23
 @section = global i32 27, section ".custom"
 @align = global i32 31, align 4
+
+@aliased1 = alias i32, i32* @var
+@aliased2 = internal alias i32, i32* @var
+@aliased3 = external alias i32, i32* @var
+@aliased4 = weak alias i32, i32* @var
+@aliased5 = weak_odr alias i32, i32* @var
 
 define { i64, %S* } @unpackrepack(%S %s) {
   %1 = extractvalue %S %s, 0
@@ -122,3 +130,58 @@ do:
 done:
   ret i32 %p
 }
+
+declare void @personalityFn()
+
+define void @exn() personality void ()* @personalityFn {
+entry:
+  invoke void @decl()
+          to label %via.cleanup unwind label %exn.dispatch
+via.cleanup:
+  invoke void @decl()
+          to label %via.catchswitch unwind label %cleanup.inner
+cleanup.inner:
+  %cp.inner = cleanuppad within none []
+  cleanupret from %cp.inner unwind label %exn.dispatch
+via.catchswitch:
+  invoke void @decl()
+          to label %exit unwind label %dispatch.inner
+dispatch.inner:
+  %cs.inner = catchswitch within none [label %pad.inner] unwind label %exn.dispatch
+pad.inner:
+  %catch.inner = catchpad within %cs.inner [i32 0]
+  catchret from %catch.inner to label %exit
+exn.dispatch:
+  %cs = catchswitch within none [label %pad1, label %pad2] unwind label %cleanup
+pad1:
+  catchpad within %cs [i32 1]
+  unreachable
+pad2:
+  catchpad within %cs [i32 2]
+  unreachable
+cleanup:
+  %cp = cleanuppad within none []
+  cleanupret from %cp unwind to caller
+exit:
+  ret void
+}
+
+define void @with_debuginfo() !dbg !4 {
+  ret void, !dbg !7
+}
+
+!llvm.dbg.cu = !{!0, !2}
+!llvm.module.flags = !{!3}
+
+!0 = distinct !DICompileUnit(language: DW_LANG_C, file: !1, producer: "", isOptimized: true, runtimeVersion: 0, emissionKind: FullDebug)
+!1 = !DIFile(filename: "echo.ll", directory: "/llvm/test/Bindings/llvm-c/echo.ll")
+!2 = distinct !DICompileUnit(language: DW_LANG_C, file: !1, producer: "", isOptimized: true, runtimeVersion: 0, emissionKind: FullDebug)
+!3 = !{i32 2, !"Debug Info Version", i32 3}
+!4 = distinct !DISubprogram(name: "with_debuginfo", linkageName: "_with_debuginfo", scope: null, file: !1, line: 42, type: !5, isLocal: false, isDefinition: true, scopeLine: 1519, flags: DIFlagPrototyped, isOptimized: true, unit: !0, templateParams: !6, retainedNodes: !6)
+!5 = !DISubroutineType(types: !6)
+!6 = !{}
+!7 = !DILocation(line: 42, scope: !8, inlinedAt: !11)
+!8 = distinct !DILexicalBlock(scope: !9, file: !1, line: 42, column: 12)
+!9 = distinct !DISubprogram(name: "fake_inlined_block", linkageName: "_fake_inlined_block", scope: null, file: !1, line: 82, type: !5, isLocal: false, isDefinition: true, scopeLine: 82, flags: DIFlagPrototyped, isOptimized: true, unit: !2, templateParams: !6, retainedNodes: !6)
+!10 = distinct !DILocation(line: 84, scope: !8, inlinedAt: !11)
+!11 = !DILocation(line: 42, scope: !4)

@@ -49,10 +49,9 @@ const char kCOntentChars[] = {'0', '1', '2', '3', '4', '5', '6', '7',
 
 }  // namespace
 
-CBC_OnedCodaBarWriter::CBC_OnedCodaBarWriter()
-    : m_chStart('A'), m_chEnd('B'), m_iWideNarrRatio(2) {}
+CBC_OnedCodaBarWriter::CBC_OnedCodaBarWriter() = default;
 
-CBC_OnedCodaBarWriter::~CBC_OnedCodaBarWriter() {}
+CBC_OnedCodaBarWriter::~CBC_OnedCodaBarWriter() = default;
 
 bool CBC_OnedCodaBarWriter::SetStartChar(char start) {
   if (!pdfium::ContainsValue(kStartEndChars, start))
@@ -109,6 +108,7 @@ bool CBC_OnedCodaBarWriter::CheckContentValidity(
 WideString CBC_OnedCodaBarWriter::FilterContents(
     const WideStringView& contents) {
   WideString filtercontents;
+  filtercontents.Reserve(contents.GetLength());
   wchar_t ch;
   for (size_t index = 0; index < contents.GetLength(); index++) {
     ch = contents[index];

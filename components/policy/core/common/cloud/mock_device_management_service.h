@@ -9,6 +9,7 @@
 
 #include "base/macros.h"
 #include "components/policy/core/common/cloud/device_management_service.h"
+#include "components/policy/core/common/cloud/dm_auth.h"
 #include "components/policy/proto/device_management_backend.pb.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
@@ -44,19 +45,20 @@ class MockDeviceManagementServiceConfiguration
 class MockDeviceManagementService : public DeviceManagementService {
  public:
   MockDeviceManagementService();
-  virtual ~MockDeviceManagementService();
+  ~MockDeviceManagementService() override;
 
   typedef DeviceManagementRequestJob* CreateJobFunction(
       DeviceManagementRequestJob::JobType,
-      const scoped_refptr<net::URLRequestContextGetter>&);
+      scoped_refptr<network::SharedURLLoaderFactory>);
 
   MOCK_METHOD2(CreateJob, CreateJobFunction);
-  MOCK_METHOD6(
+  MOCK_METHOD7(
       StartJob,
       void(const std::string& request_type,
            const std::string& gaia_token,
            const std::string& oauth_token,
            const std::string& dm_token,
+           const std::string& enrollment_token,
            const std::string& client_id,
            const enterprise_management::DeviceManagementRequest& request));
 

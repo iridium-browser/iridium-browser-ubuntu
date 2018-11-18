@@ -63,9 +63,9 @@ RemoteFrameView* RemoteFrameView::Create(RemoteFrame* remote_frame) {
   return view;
 }
 
-void RemoteFrameView::UpdateViewportIntersectionsForSubtree(
-    DocumentLifecycle::LifecycleState target_state) {
-  if (!remote_frame_->OwnerLayoutObject())
+void RemoteFrameView::UpdateViewportIntersectionsForSubtree() {
+  LayoutEmbeddedContent* owner = remote_frame_->OwnerLayoutObject();
+  if (!owner)
     return;
 
   LocalFrameView* local_root_view =
@@ -73,41 +73,69 @@ void RemoteFrameView::UpdateViewportIntersectionsForSubtree(
   if (!local_root_view)
     return;
 
-  // Start with rect in remote frame's coordinate space. Then
-  // mapToVisualRectInAncestorSpace will move it to the local root's coordinate
-  // space and account for any clip from containing elements such as a
-  // scrollable div. Passing nullptr as an argument to
-  // mapToVisualRectInAncestorSpace causes it to be clipped to the viewport,
-  // even if there are RemoteFrame ancestors in the frame tree.
-  LayoutRect rect(0, 0, frame_rect_.Width(), frame_rect_.Height());
-  rect.Move(remote_frame_->OwnerLayoutObject()->ContentBoxOffset());
   IntRect viewport_intersection;
-  if (remote_frame_->OwnerLayoutObject()->MapToVisualRectInAncestorSpace(
-          nullptr, rect)) {
-    IntRect root_visible_rect = local_root_view->VisibleContentRect();
-    IntRect intersected_rect = EnclosingIntRect(rect);
-    intersected_rect.Intersect(root_visible_rect);
-    intersected_rect.Move(-local_root_view->ScrollOffsetInt());
+  bool occluded_or_obscured = false;
+  DocumentLifecycle::LifecycleState parent_state =
+      owner->GetDocument().Lifecycle().GetState();
 
-    // Translate the intersection rect from the root frame's coordinate space
-    // to the remote frame's coordinate space.
-    FloatRect viewport_intersection_float =
-        remote_frame_->OwnerLayoutObject()
-            ->AncestorToLocalQuad(local_root_view->GetLayoutView(),
-                                  FloatQuad(intersected_rect),
-                                  kTraverseDocumentBoundaries | kUseTransforms)
-            .BoundingBox();
-    viewport_intersection_float.Move(
-        -remote_frame_->OwnerLayoutObject()->ContentBoxOffset());
-    viewport_intersection = EnclosingIntRect(viewport_intersection_float);
+  // If the parent LocalFrameView is throttled and out-of-date, then we can't
+  // get any useful information.
+  if (parent_state >= DocumentLifecycle::kLayoutClean) {
+    // Start with rect in remote frame's coordinate space. Then
+    // mapToVisualRectInAncestorSpace will move it to the local root's
+    // coordinate space and account for any clip from containing elements such
+    // as a scrollable div. Passing nullptr as an argument to
+    // mapToVisualRectInAncestorSpace causes it to be clipped to the viewport,
+    // even if there are RemoteFrame ancestors in the frame tree.
+    LayoutRect rect(0, 0, frame_rect_.Width(), frame_rect_.Height());
+    rect.Move(owner->PhysicalContentBoxOffset());
+    if (owner->MapToVisualRectInAncestorSpace(nullptr, rect,
+                                              kUseGeometryMapper)) {
+      IntRect root_visible_rect(IntPoint(), local_root_view->Size());
+      IntRect intersected_rect = EnclosingIntRect(rect);
+      intersected_rect.Intersect(root_visible_rect);
+
+      // Translate the intersection rect from the root frame's coordinate space
+      // to the remote frame's coordinate space.
+      FloatRect viewport_intersection_float =
+          remote_frame_->OwnerLayoutObject()
+              ->AncestorToLocalQuad(
+                  local_root_view->GetLayoutView(), FloatQuad(intersected_rect),
+                  kTraverseDocumentBoundaries | kUseTransforms)
+              .BoundingBox();
+      viewport_intersection_float.Move(
+          -remote_frame_->OwnerLayoutObject()->PhysicalContentBoxOffset());
+      viewport_intersection = EnclosingIntRect(viewport_intersection_float);
+    }
   }
 
-  if (viewport_intersection == last_viewport_intersection_)
+  if (parent_state >= DocumentLifecycle::kPrePaintClean &&
+      RuntimeEnabledFeatures::IntersectionObserverV2Enabled()) {
+    // TODO(layout-dev): As an optimization, we should only check for
+    // occlusion and effects if the remote frame needs it, i.e., if it has at
+    // least one active IntersectionObserver with trackVisibility:true.
+    if (owner->GetDocument()
+            .GetFrame()
+            ->LocalFrameRoot()
+            .MayBeOccludedOrObscuredByRemoteAncestor() ||
+        owner->HasDistortingVisualEffects()) {
+      occluded_or_obscured = true;
+    } else {
+      HitTestResult result(owner->HitTestForOcclusion());
+      occluded_or_obscured =
+          result.InnerNode() && result.InnerNode() != owner->GetNode();
+    }
+  }
+
+  if (viewport_intersection == last_viewport_intersection_ &&
+      occluded_or_obscured == last_occluded_or_obscured_) {
     return;
+  }
 
   last_viewport_intersection_ = viewport_intersection;
+  last_occluded_or_obscured_ = occluded_or_obscured;
   remote_frame_->Client()->UpdateRemoteViewportIntersection(
-      viewport_intersection);
+      viewport_intersection, occluded_or_obscured);
 }
 
 IntRect RemoteFrameView::GetCompositingRect() {
@@ -122,7 +150,8 @@ IntRect RemoteFrameView::GetCompositingRect() {
   // that needs to be rastered by the OOPIF compositor.
   IntSize viewport_size = local_root_view->FrameRect().Size();
   if (local_root_view->GetPage()->MainFrame() != local_root_view->GetFrame()) {
-    viewport_size = local_root_view->RemoteViewportIntersection().Size();
+    viewport_size =
+        local_root_view->GetFrame().RemoteViewportIntersection().Size();
   }
 
   // The viewport size needs to account for intermediate CSS transforms before
@@ -199,8 +228,10 @@ IntRect RemoteFrameView::FrameRect() const {
   if (owner) {
     LayoutView* owner_layout_view = owner->View();
     DCHECK(owner_layout_view);
-    if (owner_layout_view->HasOverflowClip())
-      location.Move(-owner_layout_view->ScrolledContentOffset());
+    if (owner_layout_view->HasOverflowClip()) {
+      IntSize scroll_offset(owner_layout_view->ScrolledContentOffset());
+      location.SaturatedMove(-scroll_offset.Width(), -scroll_offset.Height());
+    }
   }
 
   return IntRect(location, frame_rect_.Size());
@@ -214,8 +245,7 @@ void RemoteFrameView::FrameRectsChanged() {
   IntRect screen_space_rect = frame_rect;
 
   if (LocalFrameView* parent = ParentFrameView()) {
-    screen_space_rect =
-        parent->ConvertToRootFrame(parent->ContentsToFrame(screen_space_rect));
+    screen_space_rect = parent->ConvertToRootFrame(screen_space_rect);
   }
   remote_frame_->Client()->FrameRectsChanged(frame_rect, screen_space_rect);
 }
@@ -338,7 +368,8 @@ bool RemoteFrameView::HasIntrinsicSizingInfo() const {
   return has_intrinsic_sizing_info_;
 }
 
-uint32_t RemoteFrameView::Print(const IntRect& rect, WebCanvas* canvas) const {
+uint32_t RemoteFrameView::Print(const IntRect& rect,
+                                cc::PaintCanvas* canvas) const {
   return remote_frame_->Client()->Print(rect, canvas);
 }
 

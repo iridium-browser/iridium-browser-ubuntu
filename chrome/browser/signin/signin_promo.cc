@@ -15,6 +15,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/search_engines/ui_thread_search_terms_data.h"
+#include "chrome/browser/signin/account_consistency_mode_manager.h"
 #include "chrome/browser/signin/account_tracker_service_factory.h"
 #include "chrome/browser/signin/signin_error_controller_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
@@ -23,7 +24,7 @@
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
-#include "components/google/core/browser/google_util.h"
+#include "components/google/core/common/google_util.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
 #include "components/signin/core/browser/account_tracker_service.h"
@@ -80,12 +81,9 @@ bool HasUserSkippedPromo(Profile* profile) {
 // |access_point| indicates where the sign in is being initiated.
 // |reason| indicates the purpose of using this URL.
 // |auto_close| whether to close the sign in promo automatically when done.
-// |is_constrained| whether to load the URL in a constrained window, false
-// by default.
 GURL GetPromoURL(signin_metrics::AccessPoint access_point,
                  signin_metrics::Reason reason,
-                 bool auto_close,
-                 bool is_constrained) {
+                 bool auto_close) {
   CHECK_LT(static_cast<int>(access_point),
            static_cast<int>(signin_metrics::AccessPoint::ACCESS_POINT_MAX));
   CHECK_NE(static_cast<int>(access_point),
@@ -105,20 +103,14 @@ GURL GetPromoURL(signin_metrics::AccessPoint access_point,
     url = net::AppendQueryParameter(url, signin::kSignInPromoQueryKeyAutoClose,
                                     "1");
   }
-  if (is_constrained) {
-    url = net::AppendQueryParameter(
-        url, signin::kSignInPromoQueryKeyConstrained, "1");
-  }
-
   return url;
 }
 
 GURL GetReauthURL(signin_metrics::AccessPoint access_point,
                   signin_metrics::Reason reason,
                   const std::string& email,
-                  bool auto_close,
-                  bool is_constrained) {
-  GURL url = GetPromoURL(access_point, reason, auto_close, is_constrained);
+                  bool auto_close) {
+  GURL url = GetPromoURL(access_point, reason, auto_close);
   url = net::AppendQueryParameter(url, "email", email);
   url = net::AppendQueryParameter(url, "validateEmail", "1");
   return net::AppendQueryParameter(url, "readOnlyEmail", "1");
@@ -127,6 +119,14 @@ GURL GetReauthURL(signin_metrics::AccessPoint access_point,
 }  // namespace
 
 namespace signin {
+
+const char kSignInPromoQueryKeyAccessPoint[] = "access_point";
+const char kSignInPromoQueryKeyAutoClose[] = "auto_close";
+const char kSignInPromoQueryKeyContinue[] = "continue";
+const char kSignInPromoQueryKeyForceKeepData[] = "force_keep_data";
+const char kSignInPromoQueryKeyReason[] = "reason";
+const char kSignInPromoQueryKeySource[] = "source";
+const char kSigninPromoLandingURLSuccessPage[] = "success.html";
 
 bool ShouldShowPromoAtStartup(Profile* profile, bool is_new_profile) {
   DCHECK(profile);
@@ -219,23 +219,13 @@ GURL GetLandingURL(signin_metrics::AccessPoint access_point) {
 GURL GetPromoURLForTab(signin_metrics::AccessPoint access_point,
                        signin_metrics::Reason reason,
                        bool auto_close) {
-  if (base::FeatureList::IsEnabled(
-          features::kRemoveUsageOfDeprecatedGaiaSigninEndpoint)) {
-    // The full-tab sign-in endpoint is deprecated. Use the constrained page for
-    // the full-tab URL as well.
-    return GetPromoURL(access_point, reason, auto_close,
-                       true /* is_constrained */);
-  }
-
-  return GetPromoURL(access_point, reason, auto_close,
-                     false /* is_constrained */);
+  return GetPromoURL(access_point, reason, auto_close);
 }
 
 GURL GetPromoURLForDialog(signin_metrics::AccessPoint access_point,
                           signin_metrics::Reason reason,
                           bool auto_close) {
-  return GetPromoURL(access_point, reason, auto_close,
-                     true /* is_constrained */);
+  return GetPromoURL(access_point, reason, auto_close);
 }
 
 GURL GetReauthURLForDialog(signin_metrics::AccessPoint access_point,
@@ -244,8 +234,7 @@ GURL GetReauthURLForDialog(signin_metrics::AccessPoint access_point,
                            const std::string& account_id) {
   AccountInfo info = AccountTrackerServiceFactory::GetForProfile(profile)
                          ->GetAccountInfo(account_id);
-  return GetReauthURL(access_point, reason, info.email, true /* auto_close */,
-                      true /* is_constrained */);
+  return GetReauthURL(access_point, reason, info.email, true /* auto_close */);
 }
 
 GURL GetReauthURLForTab(signin_metrics::AccessPoint access_point,
@@ -255,28 +244,19 @@ GURL GetReauthURLForTab(signin_metrics::AccessPoint access_point,
   AccountInfo info =
       AccountTrackerServiceFactory::GetForProfile(profile)->GetAccountInfo(
           account_id);
-
-  if (base::FeatureList::IsEnabled(
-          features::kRemoveUsageOfDeprecatedGaiaSigninEndpoint)) {
-    // The full-tab sign-in endpoint is deprecated. Use the constrained page for
-    // the full-tab URL as well.
-    return GetReauthURL(access_point, reason, info.email, true /* auto_close */,
-                        true /* is_constrained */);
-  }
-
-  return GetReauthURL(access_point, reason, info.email, true /* auto_close */,
-                      false /* is_constrained */);
+  return GetReauthURL(access_point, reason, info.email, true /* auto_close */);
 }
 
 GURL GetReauthURLWithEmailForDialog(signin_metrics::AccessPoint access_point,
                                     signin_metrics::Reason reason,
                                     const std::string& email) {
-  return GetReauthURL(access_point, reason, email, true /* auto_close */,
-                      true /* is_constrained */);
+  return GetReauthURL(access_point, reason, email, true /* auto_close */);
 }
 
 GURL GetSigninURLForDice(Profile* profile, const std::string& email) {
-  DCHECK(signin::IsDicePrepareMigrationEnabled());
+  DCHECK(signin::DiceMethodGreaterOrEqual(
+      AccountConsistencyModeManager::GetMethodForProfile(profile),
+      signin::AccountConsistencyMethod::kDiceMigration));
   GURL url = GaiaUrls::GetInstance()->signin_chrome_sync_dice();
   if (!email.empty())
     url = net::AppendQueryParameter(url, "email_hint", email);
@@ -362,17 +342,6 @@ bool IsAutoCloseEnabledInURL(const GURL& url) {
     int enabled = 0;
     if (base::StringToInt(value, &enabled) && enabled == 1)
       return true;
-  }
-  return false;
-}
-
-bool ShouldShowAccountManagement(const GURL& url) {
-  std::string value;
-  if (net::GetValueForKeyInQuery(
-          url, kSignInPromoQueryKeyShowAccountManagement, &value)) {
-    int enabled = 0;
-    if (base::StringToInt(value, &enabled) && enabled == 1)
-      return IsAccountConsistencyMirrorEnabled();
   }
   return false;
 }

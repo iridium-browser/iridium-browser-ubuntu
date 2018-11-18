@@ -38,7 +38,6 @@
 #include "third_party/blink/renderer/modules/event_modules.h"
 #include "third_party/blink/renderer/modules/event_target_modules.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_database_callbacks.h"
-#include "third_party/blink/renderer/modules/indexeddb/idb_histograms.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_metadata.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_object_store.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_object_store_parameters.h"
@@ -70,8 +69,7 @@ class MODULES_EXPORT IDBDatabase final
                              IDBDatabaseCallbacks*,
                              v8::Isolate*);
   ~IDBDatabase() override;
-  virtual void Trace(blink::Visitor*);
-  virtual void TraceWrappers(const ScriptWrappableVisitor*) const;
+  void Trace(blink::Visitor*) override;
 
   // Overwrites the database metadata, including object store and index
   // metadata. Used to pass metadata to the database when it is opened.
@@ -172,11 +170,9 @@ class MODULES_EXPORT IDBDatabase final
   static const char kTransactionReadOnlyErrorMessage[];
   static const char kDatabaseClosedErrorMessage[];
 
-  static void RecordApiCallsHistogram(IndexedDatabaseMethods);
-
  protected:
   // EventTarget
-  DispatchEventResult DispatchEventInternal(Event*) override;
+  DispatchEventResult DispatchEventInternal(Event&) override;
 
  private:
   IDBDatabase(ExecutionContext*,
@@ -198,9 +194,7 @@ class MODULES_EXPORT IDBDatabase final
 
   bool close_pending_ = false;
 
-  // Keep track of the versionchange events waiting to be fired on this
-  // database so that we can cancel them if the database closes.
-  HeapVector<Member<Event>> enqueued_events_;
+  Member<EventQueue> event_queue_;
 
   Member<IDBDatabaseCallbacks> database_callbacks_;
   // Maintain the isolate so that all externally allocated memory can be

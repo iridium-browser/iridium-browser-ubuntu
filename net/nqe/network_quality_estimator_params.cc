@@ -238,6 +238,24 @@ void ObtainDefaultObservations(
   }
 }
 
+// Typical HTTP RTT value corresponding to a given WebEffectiveConnectionType
+// value. Taken from
+// https://cs.chromium.org/chromium/src/net/nqe/network_quality_estimator_params.cc.
+const base::TimeDelta kTypicalHttpRttEffectiveConnectionType
+    [net::EFFECTIVE_CONNECTION_TYPE_LAST] = {
+        base::TimeDelta::FromMilliseconds(0),
+        base::TimeDelta::FromMilliseconds(0),
+        base::TimeDelta::FromMilliseconds(3600),
+        base::TimeDelta::FromMilliseconds(1800),
+        base::TimeDelta::FromMilliseconds(450),
+        base::TimeDelta::FromMilliseconds(175)};
+
+// Typical downlink throughput (in Mbps) value corresponding to a given
+// WebEffectiveConnectionType value. Taken from
+// https://cs.chromium.org/chromium/src/net/nqe/network_quality_estimator_params.cc.
+const int32_t kTypicalDownlinkKbpsEffectiveConnectionType
+    [net::EFFECTIVE_CONNECTION_TYPE_LAST] = {0, 0, 40, 75, 400, 1600};
+
 // Sets |typical_network_quality| to typical network quality for different
 // effective connection types.
 void ObtainTypicalNetworkQualities(
@@ -257,30 +275,39 @@ void ObtainTypicalNetworkQualities(
           // Set to the 77.5th percentile of 2G RTT observations on Android.
           // This corresponds to the median RTT observation when effective
           // connection type is Slow 2G.
-          base::TimeDelta::FromMilliseconds(3600),
-          base::TimeDelta::FromMilliseconds(3000), 40);
+          kTypicalHttpRttEffectiveConnectionType
+              [EFFECTIVE_CONNECTION_TYPE_SLOW_2G],
+          base::TimeDelta::FromMilliseconds(3000),
+          kTypicalDownlinkKbpsEffectiveConnectionType
+              [EFFECTIVE_CONNECTION_TYPE_SLOW_2G]);
 
   typical_network_quality[EFFECTIVE_CONNECTION_TYPE_2G] =
       nqe::internal::NetworkQuality(
           // Set to the 58th percentile of 2G RTT observations on Android. This
           // corresponds to the median RTT observation when effective connection
           // type is 2G.
-          base::TimeDelta::FromMilliseconds(1800),
-          base::TimeDelta::FromMilliseconds(1500), 75);
+          kTypicalHttpRttEffectiveConnectionType[EFFECTIVE_CONNECTION_TYPE_2G],
+          base::TimeDelta::FromMilliseconds(1500),
+          kTypicalDownlinkKbpsEffectiveConnectionType
+              [EFFECTIVE_CONNECTION_TYPE_2G]);
 
   typical_network_quality[EFFECTIVE_CONNECTION_TYPE_3G] =
       nqe::internal::NetworkQuality(
           // Set to the 75th percentile of 3G RTT observations on Android. This
           // corresponds to the median RTT observation when effective connection
           // type is 3G.
-          base::TimeDelta::FromMilliseconds(450),
-          base::TimeDelta::FromMilliseconds(400), 400);
+          kTypicalHttpRttEffectiveConnectionType[EFFECTIVE_CONNECTION_TYPE_3G],
+          base::TimeDelta::FromMilliseconds(400),
+          kTypicalDownlinkKbpsEffectiveConnectionType
+              [EFFECTIVE_CONNECTION_TYPE_3G]);
 
   // Set to the 25th percentile of 3G RTT observations on Android.
   typical_network_quality[EFFECTIVE_CONNECTION_TYPE_4G] =
-      nqe::internal::NetworkQuality(base::TimeDelta::FromMilliseconds(175),
-                                    base::TimeDelta::FromMilliseconds(125),
-                                    1600);
+      nqe::internal::NetworkQuality(
+          kTypicalHttpRttEffectiveConnectionType[EFFECTIVE_CONNECTION_TYPE_4G],
+          base::TimeDelta::FromMilliseconds(125),
+          kTypicalDownlinkKbpsEffectiveConnectionType
+              [EFFECTIVE_CONNECTION_TYPE_4G]);
 
   static_assert(
       EFFECTIVE_CONNECTION_TYPE_4G + 1 == EFFECTIVE_CONNECTION_TYPE_LAST,
@@ -303,8 +330,7 @@ void ObtainConnectionThresholds(
           // Set to the 66th percentile of 2G RTT observations on Android.
           kHttpRttEffectiveConnectionTypeThresholds
               [EFFECTIVE_CONNECTION_TYPE_SLOW_2G],
-          base::TimeDelta::FromMilliseconds(1870),
-          nqe::internal::INVALID_RTT_THROUGHPUT);
+          nqe::internal::InvalidRTT(), nqe::internal::INVALID_RTT_THROUGHPUT);
 
   DCHECK_LT(
       base::TimeDelta(),
@@ -314,8 +340,7 @@ void ObtainConnectionThresholds(
           // Set to the 50th percentile of RTT observations on Android.
           kHttpRttEffectiveConnectionTypeThresholds
               [EFFECTIVE_CONNECTION_TYPE_2G],
-          base::TimeDelta::FromMilliseconds(1280),
-          nqe::internal::INVALID_RTT_THROUGHPUT);
+          nqe::internal::InvalidRTT(), nqe::internal::INVALID_RTT_THROUGHPUT);
 
   DCHECK_LT(
       base::TimeDelta(),
@@ -325,8 +350,7 @@ void ObtainConnectionThresholds(
           // Set to the 50th percentile of 3G RTT observations on Android.
           kHttpRttEffectiveConnectionTypeThresholds
               [EFFECTIVE_CONNECTION_TYPE_3G],
-          base::TimeDelta::FromMilliseconds(204),
-          nqe::internal::INVALID_RTT_THROUGHPUT);
+          nqe::internal::InvalidRTT(), nqe::internal::INVALID_RTT_THROUGHPUT);
 
   // Connection threshold should not be set for 4G effective connection type
   // since it is the fastest.
@@ -358,11 +382,7 @@ void ObtainConnectionThresholds(
                 .InMilliseconds())));
 
     connection_thresholds[i].set_transport_rtt(
-        base::TimeDelta::FromMilliseconds(GetValueForVariationParam(
-            params, connection_type_name + ".ThresholdMedianTransportRTTMsec",
-            default_effective_connection_type_thresholds[i]
-                .transport_rtt()
-                .InMilliseconds())));
+        default_effective_connection_type_thresholds[i].transport_rtt());
 
     connection_thresholds[i].set_downstream_throughput_kbps(
         GetValueForVariationParam(
@@ -450,10 +470,7 @@ NetworkQualityEstimatorParams::NetworkQualityEstimatorParams(
               "hanging_request_http_rtt_upper_bound_http_rtt_multiplier",
               6)),
       hanging_request_upper_bound_min_http_rtt_(
-          base::TimeDelta::FromMilliseconds(GetValueForVariationParam(
-              params_,
-              "hanging_request_upper_bound_min_http_rtt_msec",
-              500))),
+          base::TimeDelta::FromMilliseconds(500)),
       http_rtt_transport_rtt_min_count_(
           GetValueForVariationParam(params_,
                                     "http_rtt_transport_rtt_min_count",
@@ -478,10 +495,7 @@ NetworkQualityEstimatorParams::NetworkQualityEstimatorParams(
           params_,
           "hanging_request_duration_http_rtt_multiplier",
           5)),
-      hanging_request_min_duration_(base::TimeDelta::FromMilliseconds(
-          GetValueForVariationParam(params_,
-                                    "hanging_request_min_duration_msec",
-                                    3000))),
+      hanging_request_min_duration_(base::TimeDelta::FromMilliseconds(3000)),
       add_default_platform_observations_(
           GetStringValueForVariationParamWithDefaultValue(
               params_,
@@ -492,6 +506,10 @@ NetworkQualityEstimatorParams::NetworkQualityEstimatorParams(
               params_,
               "socket_watchers_min_notification_interval_msec",
               200))),
+      use_end_to_end_rtt_(
+          GetStringValueForVariationParamWithDefaultValue(params_,
+                                                          "use_end_to_end_rtt",
+                                                          "false") == "true"),
       use_small_responses_(false) {
   DCHECK(hanging_request_http_rtt_upper_bound_transport_rtt_multiplier_ == -1 ||
          hanging_request_http_rtt_upper_bound_transport_rtt_multiplier_ > 0);
@@ -505,14 +523,9 @@ NetworkQualityEstimatorParams::NetworkQualityEstimatorParams(
   DCHECK_GE(1.0, weight_multiplier_per_signal_strength_level_);
   DCHECK_LE(0.0, weight_multiplier_per_signal_strength_level_);
 
-  const auto algorithm_it = params_.find("effective_connection_type_algorithm");
-  effective_connection_type_algorithm_ =
-      GetEffectiveConnectionTypeAlgorithmFromString(
-          algorithm_it == params_.end() ? std::string() : algorithm_it->second);
-
-  DCHECK_NE(EffectiveConnectionTypeAlgorithm::
-                EFFECTIVE_CONNECTION_TYPE_ALGORITHM_LAST,
-            effective_connection_type_algorithm_);
+  DCHECK_LT(0, hanging_request_duration_http_rtt_multiplier());
+  DCHECK_LT(0, hanging_request_http_rtt_upper_bound_http_rtt_multiplier());
+  DCHECK_LT(0, hanging_request_http_rtt_upper_bound_transport_rtt_multiplier());
 
   ObtainDefaultObservations(params_, default_observations_);
   ObtainTypicalNetworkQualities(params_, typical_network_quality_);
@@ -532,6 +545,25 @@ bool NetworkQualityEstimatorParams::use_small_responses() const {
   return use_small_responses_;
 };
 
+// static
+base::TimeDelta NetworkQualityEstimatorParams::GetDefaultTypicalHttpRtt(
+    EffectiveConnectionType effective_connection_type) {
+  return kTypicalHttpRttEffectiveConnectionType[effective_connection_type];
+}
+
+// static
+int32_t NetworkQualityEstimatorParams::GetDefaultTypicalDownlinkKbps(
+    EffectiveConnectionType effective_connection_type) {
+  return kTypicalDownlinkKbpsEffectiveConnectionType[effective_connection_type];
+}
+
+void NetworkQualityEstimatorParams::SetForcedEffectiveConnectionTypeForTesting(
+    EffectiveConnectionType type) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  DCHECK(!forced_effective_connection_type_on_cellular_only_);
+  forced_effective_connection_type_ = type;
+}
+
 base::Optional<EffectiveConnectionType>
 NetworkQualityEstimatorParams::GetForcedEffectiveConnectionType(
     NetworkChangeNotifier::ConnectionType connection_type) {
@@ -545,38 +577,6 @@ NetworkQualityEstimatorParams::GetForcedEffectiveConnectionType(
     return EFFECTIVE_CONNECTION_TYPE_SLOW_2G;
   }
   return base::nullopt;
-}
-
-// static
-NetworkQualityEstimatorParams::EffectiveConnectionTypeAlgorithm
-NetworkQualityEstimatorParams::GetEffectiveConnectionTypeAlgorithmFromString(
-    const std::string& algorithm_param_value) {
-  // The default algorithm to be used if the algorithm value is not available
-  // through field trial parameters.
-  static const EffectiveConnectionTypeAlgorithm
-      kDefaultEffectiveConnectionTypeAlgorithm =
-          EffectiveConnectionTypeAlgorithm::HTTP_RTT_AND_DOWNSTREAM_THROUGHOUT;
-
-  if (algorithm_param_value.empty())
-    return kDefaultEffectiveConnectionTypeAlgorithm;
-
-  if (algorithm_param_value == "HttpRTTAndDownstreamThroughput") {
-    return EffectiveConnectionTypeAlgorithm::HTTP_RTT_AND_DOWNSTREAM_THROUGHOUT;
-  }
-  if (algorithm_param_value == "TransportRTTOrDownstreamThroughput") {
-    return EffectiveConnectionTypeAlgorithm::
-        TRANSPORT_RTT_OR_DOWNSTREAM_THROUGHOUT;
-  }
-  static_assert(
-      static_cast<int>(EffectiveConnectionTypeAlgorithm::
-                           TRANSPORT_RTT_OR_DOWNSTREAM_THROUGHOUT) +
-              1 ==
-          static_cast<int>(EffectiveConnectionTypeAlgorithm::
-                               EFFECTIVE_CONNECTION_TYPE_ALGORITHM_LAST),
-      "Not all algorithms are accounted for.");
-
-  NOTREACHED();
-  return kDefaultEffectiveConnectionTypeAlgorithm;
 }
 
 size_t NetworkQualityEstimatorParams::throughput_min_requests_in_flight()
@@ -614,12 +614,6 @@ NetworkQualityEstimatorParams::ConnectionThreshold(
     EffectiveConnectionType type) const {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return connection_thresholds_[type];
-}
-
-NetworkQualityEstimatorParams::EffectiveConnectionTypeAlgorithm
-NetworkQualityEstimatorParams::GetEffectiveConnectionTypeAlgorithm() const {
-  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  return effective_connection_type_algorithm_;
 }
 
 }  // namespace net

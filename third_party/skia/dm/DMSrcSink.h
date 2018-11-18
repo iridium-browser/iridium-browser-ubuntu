@@ -8,7 +8,6 @@
 #ifndef DMSrcSink_DEFINED
 #define DMSrcSink_DEFINED
 
-#include "DMGpuSupport.h"
 #include "SkBBHFactory.h"
 #include "SkBBoxHierarchy.h"
 #include "SkBitmap.h"
@@ -21,8 +20,6 @@
 #include "gm.h"
 
 //#define TEST_VIA_SVG
-
-namespace skottie { class Animation; }
 
 namespace DM {
 
@@ -103,7 +100,7 @@ struct Sink {
 
 class GMSrc : public Src {
 public:
-    explicit GMSrc(skiagm::GMRegistry::Factory);
+    explicit GMSrc(skiagm::GMFactory);
 
     Error draw(SkCanvas*) const override;
     SkISize size() const override;
@@ -111,7 +108,7 @@ public:
     void modifyGrContextOptions(GrContextOptions* options) const override;
 
 private:
-    skiagm::GMRegistry::Factory fFactory;
+    skiagm::GMFactory fFactory;
 };
 
 class CodecSrc : public Src {
@@ -251,8 +248,23 @@ private:
     Path fPath;
 };
 
+// This class extracts all the paths from an SKP and then removes unwanted paths according to the
+// provided l/r trail. It then just draws the remaining paths. (Non-path draws are thrown out.) It
+// is useful for finding a reduced repo case for path drawing bugs.
+class BisectSrc : public SKPSrc {
+public:
+    explicit BisectSrc(Path path, const char* trail);
 
-#if !defined(SK_BUILD_FOR_GOOGLE3)
+    Error draw(SkCanvas*) const override;
+
+private:
+    SkString fTrail;
+
+    typedef SKPSrc INHERITED;
+};
+
+
+#if defined(SK_ENABLE_SKOTTIE)
 class SkottieSrc final : public Src {
 public:
     explicit SkottieSrc(Path path);
@@ -266,9 +278,11 @@ private:
     // Generates a kTileCount x kTileCount filmstrip with evenly distributed frames.
     static constexpr int      kTileCount = 5;
 
-    Name                      fName;
-    SkISize                   fTileSize = SkISize::MakeEmpty();
-    sk_sp<skottie::Animation> fAnimation;
+    // Fit kTileCount x kTileCount frames to a 1000x1000 film strip.
+    static constexpr SkScalar kTargetSize = 1000;
+    static constexpr SkScalar kTileSize = kTargetSize / kTileCount;
+
+    Path                      fPath;
 };
 #endif
 
@@ -387,6 +401,26 @@ private:
     typedef GPUSink INHERITED;
 };
 
+class GPUPersistentCacheTestingSink : public GPUSink {
+public:
+    GPUPersistentCacheTestingSink(sk_gpu_test::GrContextFactory::ContextType,
+                                  sk_gpu_test::GrContextFactory::ContextOverrides,
+                                  SkCommandLineConfigGpu::SurfType surfType, int samples,
+                                  bool diText, SkColorType colorType, SkAlphaType alphaType,
+                                  sk_sp<SkColorSpace> colorSpace, bool threaded,
+                                  const GrContextOptions& grCtxOptions);
+
+    Error draw(const Src&, SkBitmap*, SkWStream*, SkString*) const override;
+
+    const char* fileExtension() const override {
+        // Suppress writing out results from this config - we just want to do our matching test
+        return nullptr;
+    }
+
+private:
+    typedef GPUSink INHERITED;
+};
+
 class PDFSink : public Sink {
 public:
     PDFSink(bool pdfa, SkScalar rasterDpi) : fPDFA(pdfa), fRasterDpi(rasterDpi) {}
@@ -422,9 +456,8 @@ public:
     Error draw(const Src&, SkBitmap*, SkWStream*, SkString*) const override;
     const char* fileExtension() const override { return "png"; }
     SinkFlags flags() const override { return SinkFlags{ SinkFlags::kRaster, SinkFlags::kDirect }; }
-protected:
-    void allocPixels(const Src& src, SkBitmap*) const;
 
+private:
     SkColorType         fColorType;
     sk_sp<SkColorSpace> fColorSpace;
 };
@@ -433,9 +466,6 @@ class ThreadedSink : public RasterSink {
 public:
     explicit ThreadedSink(SkColorType, sk_sp<SkColorSpace> = nullptr);
     Error draw(const Src&, SkBitmap*, SkWStream*, SkString*) const override;
-
-private:
-    std::unique_ptr<SkExecutor> fExecutor;
 };
 
 class SKPSink : public Sink {
@@ -531,12 +561,7 @@ public:
     ViaDDL(int numDivisions, Sink* sink);
     Error draw(const Src&, SkBitmap*, SkWStream*, SkString*) const override;
 private:
-#if SK_SUPPORT_GPU
-    class PromiseImageHelper;
-    class TileData;
-
     const int fNumDivisions;
-#endif
 };
 
 class ViaSVG : public Via {

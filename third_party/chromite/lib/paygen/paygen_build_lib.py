@@ -26,11 +26,10 @@ from chromite.lib import config_lib
 from chromite.lib import failures_lib
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_logging as logging
+from chromite.lib import gs
 from chromite.lib import parallel
 from chromite.lib import retry_util
 from chromite.lib.paygen import download_cache
-from chromite.lib.paygen import dryrun_lib
-from chromite.lib.paygen import gslib
 from chromite.lib.paygen import gslock
 from chromite.lib.paygen import gspaths
 from chromite.lib.paygen import paygen_payload_lib
@@ -48,10 +47,9 @@ sys.path.insert(0, AUTOTEST_DIR)
 # will fail. We quietly ignore the failure, but leave bombs around that will
 # explode if people try to really use this library.
 try:
-  # pylint: disable=F0401
+  # pylint: disable=import-error
   from site_utils.autoupdate.lib import test_params
   from site_utils.autoupdate.lib import test_control
-  # pylint: enable=F0401
 
 except ImportError:
   test_params = None
@@ -219,14 +217,13 @@ def _FilterForTest(artifacts):
           if i.image_type == 'test']
 
 
-def _GenerateSinglePayload(payload, work_dir, sign, dry_run):
+def _GenerateSinglePayload(payload, sign, dry_run):
   """Generate a single payload.
 
   This is intended to be safe to call inside a new process.
 
   Args:
     payload: gspath.Payload object defining the payloads to generate.
-    work_dir: Working directory for payload generation.
     sign: boolean to decide if payload should be signed.
     dry_run: boolean saying if this is a dry run.
   """
@@ -239,7 +236,6 @@ def _GenerateSinglePayload(payload, work_dir, sign, dry_run):
     paygen_payload_lib.CreateAndUploadPayload(
         payload,
         cache,
-        work_dir=work_dir,
         sign=sign,
         dry_run=dry_run)
 
@@ -315,7 +311,8 @@ class PaygenBuild(object):
     self._build = build
     self._work_dir = work_dir
     self._site_config = site_config
-    self._drm = dryrun_lib.DryRunMgr(dry_run)
+    self._dry_run = dry_run
+    self._ctx = gs.GSContext(dry_run=dry_run)
     self._skip_delta_payloads = skip_delta_payloads
     self._archive_board = None
     self._archive_build = None
@@ -683,9 +680,8 @@ class PaygenBuild(object):
       Any arbitrary exception raised by CreateAndUploadPayload.
     """
     payloads_args = [(payload,
-                      self._work_dir,
                       isinstance(payload.tgt_image, gspaths.Image),
-                      bool(self._drm))
+                      self._dry_run)
                      for payload in payloads]
 
     parallel.RunTasksInProcessPool(_GenerateSinglePayload, payloads_args)
@@ -757,7 +753,7 @@ class PaygenBuild(object):
 
     # TODO(dgarrett): Remove if block after finishing crbug.com/523122
     stateful_uri = os.path.join(release_archive_uri, 'stateful.tgz')
-    if not urilib.Exists(stateful_uri):
+    if not self._ctx.Exists(stateful_uri):
       logging.error('%s does not exist.', stateful_uri)
       logging.error('Full test payload for source version (%s) exists, but '
                     'stateful.tgz does not. Control file not generated',
@@ -825,7 +821,7 @@ class PaygenBuild(object):
     # Upload the tarball, be sure to make it world-readable.
     upload_target = os.path.join(self._archive_build_uri, tarball_name)
     logging.info('Uploading autotest control tarball to %s', upload_target)
-    gslib.Copy(tarball_path, upload_target, acl='public-read')
+    self._ctx.Copy(tarball_path, upload_target, acl='public-read')
 
     # Do not run the suite for older builds whose suite staging logic is
     # broken.  We use the build's milestone number as a rough estimate to
@@ -851,11 +847,11 @@ class PaygenBuild(object):
     """Clean up any leaked temp files associated with this build in GS."""
     # Clean up any signer client files that leaked on this or previous
     # runs.
-    self._drm(gslib.Remove,
-              gspaths.ChromeosReleases.BuildPayloadsSigningUri(
-                  self._build.channel, self._build.board, self._build.version,
-                  bucket=self._build.bucket),
-              recurse=True, ignore_no_match=True)
+    self._ctx.Remove(
+        gspaths.ChromeosReleases.BuildPayloadsSigningUri(
+            self._build.channel, self._build.board, self._build.version,
+            bucket=self._build.bucket),
+        recursive=True, ignore_missing=True)
 
   def CreatePayloads(self):
     """Get lock on this build, and Process if we succeed.
@@ -872,7 +868,7 @@ class PaygenBuild(object):
     logging.info('Examining: %s', self._build)
 
     try:
-      with gslock.Lock(lock_uri, dry_run=bool(self._drm)):
+      with gslock.Lock(lock_uri, dry_run=self._dry_run):
         logging.info('Starting: %s', self._build)
 
         payloads, payload_tests = self._DiscoverRequiredPayloads()
@@ -917,7 +913,7 @@ class PaygenBuild(object):
         # We have a control file directory and all payloads have been
         # generated. Lets create the list of tests to conduct.
         logging.info('Uploading %d payload tests', len(payload_tests))
-        suite_name = self._drm(self._AutotestPayloads, payload_tests)
+        suite_name = self._AutotestPayloads(payload_tests)
 
     except gslock.LockNotAcquired as e:
       logging.info('Build already being processed: %s', e)
@@ -955,13 +951,13 @@ def ScheduleAutotestTests(suite_name, board, model, build, skip_duts_check,
   """Run the appropriate command to schedule the Autotests we have prepped.
 
   Args:
-  suite_name: The name of the test suite.
-  board: A string representing the name of the archive board.
-  model: The model that will be tested against.
-  build: A string representing the name of the archive build.
-  skip_duts_check: A boolean indicating to not check minimum available DUTs.
-  debug: A boolean indicating whether or not we are in debug mode.
-  job_keyvals: A dict of job keyvals to be injected to suite control file.
+    suite_name: The name of the test suite.
+    board: A string representing the name of the archive board.
+    model: The model that will be tested against.
+    build: A string representing the name of the archive build.
+    skip_duts_check: A boolean indicating to not check minimum available DUTs.
+    debug: A boolean indicating whether or not we are in debug mode.
+    job_keyvals: A dict of job keyvals to be injected to suite control file.
   """
   timeout_mins = config_lib.HWTestConfig.SHARED_HW_TEST_TIMEOUT / 60
   cmd_result = commands.RunHWTestSuite(
@@ -999,5 +995,6 @@ def _GetJson(uri):
   Returns:
     Valid JSON retrieved from given uri.
   """
-  downloaded_json = gslib.Cat(uri)
+  ctx = gs.GSContext()
+  downloaded_json = ctx.Cat(uri)
   return json.loads(downloaded_json)

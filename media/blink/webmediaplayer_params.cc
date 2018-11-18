@@ -21,20 +21,14 @@ WebMediaPlayerParams::WebMediaPlayerParams(
         video_frame_compositor_task_runner,
     const AdjustAllocatedMemoryCB& adjust_allocated_memory_cb,
     blink::WebContentDecryptionModule* initial_cdm,
-    SurfaceManager* surface_manager,
     RequestRoutingTokenCallback request_routing_token_cb,
     base::WeakPtr<MediaObserver> media_observer,
-    base::TimeDelta max_keyframe_distance_to_disable_background_video,
-    base::TimeDelta max_keyframe_distance_to_disable_background_video_mse,
     bool enable_instant_source_buffer_gc,
     bool embedded_media_experience_enabled,
     mojom::MediaMetricsProviderPtr metrics_provider,
-    base::Callback<std::unique_ptr<blink::WebSurfaceLayerBridge>(
-        blink::WebSurfaceLayerBridgeObserver*)> create_bridge_callback,
+    CreateSurfaceLayerBridgeCB create_bridge_callback,
     scoped_refptr<viz::ContextProvider> context_provider,
-    bool use_surface_layer_for_video,
-    const PipSurfaceInfoCB& pip_surface_info_cb,
-    const ExitPipCB& exit_pip_cb)
+    blink::WebMediaPlayer::SurfaceLayerMode use_surface_layer_for_video)
     : defer_load_cb_(defer_load_cb),
       audio_renderer_sink_(audio_renderer_sink),
       media_log_(std::move(media_log)),
@@ -44,21 +38,14 @@ WebMediaPlayerParams::WebMediaPlayerParams(
       video_frame_compositor_task_runner_(video_frame_compositor_task_runner),
       adjust_allocated_memory_cb_(adjust_allocated_memory_cb),
       initial_cdm_(initial_cdm),
-      surface_manager_(surface_manager),
       request_routing_token_cb_(std::move(request_routing_token_cb)),
       media_observer_(media_observer),
-      max_keyframe_distance_to_disable_background_video_(
-          max_keyframe_distance_to_disable_background_video),
-      max_keyframe_distance_to_disable_background_video_mse_(
-          max_keyframe_distance_to_disable_background_video_mse),
       enable_instant_source_buffer_gc_(enable_instant_source_buffer_gc),
       embedded_media_experience_enabled_(embedded_media_experience_enabled),
       metrics_provider_(std::move(metrics_provider)),
-      create_bridge_callback_(create_bridge_callback),
+      create_bridge_callback_(std::move(create_bridge_callback)),
       context_provider_(std::move(context_provider)),
-      use_surface_layer_for_video_(use_surface_layer_for_video),
-      pip_surface_info_cb_(pip_surface_info_cb),
-      exit_pip_cb_(exit_pip_cb) {}
+      use_surface_layer_for_video_(use_surface_layer_for_video) {}
 
 WebMediaPlayerParams::~WebMediaPlayerParams() = default;
 

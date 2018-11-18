@@ -53,6 +53,7 @@ DownloadResponseHandler::DownloadResponseHandler(
     bool is_parallel_request,
     bool is_transient,
     bool fetch_error_body,
+    bool follow_cross_origin_redirects,
     const DownloadUrlParameters::RequestHeadersType& request_headers,
     const std::string& request_origin,
     DownloadSource download_source,
@@ -63,13 +64,17 @@ DownloadResponseHandler::DownloadResponseHandler(
       url_chain_(std::move(url_chain)),
       method_(resource_request->method),
       referrer_(resource_request->referrer),
+      referrer_policy_(resource_request->referrer_policy),
       is_transient_(is_transient),
       fetch_error_body_(fetch_error_body),
+      follow_cross_origin_redirects_(follow_cross_origin_redirects),
+      first_origin_(url::Origin::Create(resource_request->url)),
       request_headers_(request_headers),
       request_origin_(request_origin),
       download_source_(download_source),
       has_strong_validators_(false),
       is_partial_request_(save_info_->offset > 0),
+      completed_(false),
       abort_reason_(DOWNLOAD_INTERRUPT_REASON_NONE) {
   if (!is_parallel_request) {
     RecordDownloadCountWithSource(UNTHROTTLED_COUNT, download_source);
@@ -81,8 +86,7 @@ DownloadResponseHandler::DownloadResponseHandler(
 DownloadResponseHandler::~DownloadResponseHandler() = default;
 
 void DownloadResponseHandler::OnReceiveResponse(
-    const network::ResourceResponseHead& head,
-    network::mojom::DownloadedTempFilePtr downloaded_file) {
+    const network::ResourceResponseHead& head) {
   create_info_ = CreateDownloadCreateInfo(head);
   cert_status_ = head.cert_status;
 
@@ -130,6 +134,7 @@ DownloadResponseHandler::CreateDownloadCreateInfo(
   create_info->connection_info = head.connection_info;
   create_info->url_chain = url_chain_;
   create_info->referrer_url = referrer_;
+  create_info->referrer_policy = referrer_policy_;
   create_info->transient = is_transient_;
   create_info->response_headers = head.headers;
   create_info->offset = create_info->save_info->offset;
@@ -146,6 +151,17 @@ DownloadResponseHandler::CreateDownloadCreateInfo(
 void DownloadResponseHandler::OnReceiveRedirect(
     const net::RedirectInfo& redirect_info,
     const network::ResourceResponseHead& head) {
+  if (!follow_cross_origin_redirects_ &&
+      !first_origin_.IsSameOriginWith(
+          url::Origin::Create(redirect_info.new_url))) {
+    abort_reason_ = DOWNLOAD_INTERRUPT_REASON_SERVER_CROSS_ORIGIN_REDIRECT;
+    url_chain_.push_back(redirect_info.new_url);
+    method_ = redirect_info.new_method;
+    referrer_ = GURL(redirect_info.new_referrer);
+    referrer_policy_ = redirect_info.new_referrer_policy;
+    OnComplete(network::URLLoaderCompletionStatus(net::OK));
+    return;
+  }
   if (is_partial_request_) {
     // A redirect while attempting a partial resumption indicates a potential
     // middle box. Trigger another interruption so that the
@@ -157,11 +173,9 @@ void DownloadResponseHandler::OnReceiveRedirect(
   url_chain_.push_back(redirect_info.new_url);
   method_ = redirect_info.new_method;
   referrer_ = GURL(redirect_info.new_referrer);
+  referrer_policy_ = redirect_info.new_referrer_policy;
   delegate_->OnReceiveRedirect();
 }
-
-void DownloadResponseHandler::OnDataDownloaded(int64_t data_length,
-                                               int64_t encoded_length) {}
 
 void DownloadResponseHandler::OnUploadProgress(
     int64_t current_position,
@@ -188,6 +202,10 @@ void DownloadResponseHandler::OnStartLoadingResponseBody(
 
 void DownloadResponseHandler::OnComplete(
     const network::URLLoaderCompletionStatus& status) {
+  if (completed_)
+    return;
+
+  completed_ = true;
   DownloadInterruptReason reason = HandleRequestCompletionStatus(
       static_cast<net::Error>(status.error_code), has_strong_validators_,
       cert_status_, abort_reason_);
@@ -197,15 +215,19 @@ void DownloadResponseHandler::OnComplete(
         ConvertInterruptReasonToMojoNetworkRequestStatus(reason));
   }
 
-  if (started_)
+  if (started_) {
+    delegate_->OnResponseCompleted();
     return;
+  }
 
-  // OnComplete() called without OnReceiveResponse(). This should only
+  // OnComplete() called without OnResponseStarted(). This should only
   // happen when the request was aborted.
-  create_info_ = CreateDownloadCreateInfo(network::ResourceResponseHead());
+  if (!create_info_)
+    create_info_ = CreateDownloadCreateInfo(network::ResourceResponseHead());
   create_info_->result = reason;
 
   OnResponseStarted(mojom::DownloadStreamHandlePtr());
+  delegate_->OnResponseCompleted();
 }
 
 void DownloadResponseHandler::OnResponseStarted(

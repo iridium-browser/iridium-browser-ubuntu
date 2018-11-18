@@ -32,6 +32,7 @@
 #define THIRD_PARTY_BLINK_PUBLIC_WEB_WEB_FORM_CONTROL_ELEMENT_H_
 
 #include "third_party/blink/public/platform/web_string.h"
+#include "third_party/blink/public/web/web_autofill_state.h"
 #include "third_party/blink/public/web/web_element.h"
 #include "third_party/blink/public/web/web_form_element.h"
 
@@ -61,8 +62,17 @@ class BLINK_EXPORT WebFormControlElement : public WebElement {
   // that have been a password in the past.
   WebString FormControlTypeForAutofill() const;
 
+  enum WebAutofillState GetAutofillState() const;
   bool IsAutofilled() const;
-  void SetAutofilled(bool);
+  void SetAutofillState(enum WebAutofillState);
+  bool UserHasEditedTheField() const;
+  // This is only used for simulating the user's action in tests.
+  void SetUserHasEditedTheFieldForTest();
+
+  // The autofill section to which this element belongs (e.g. billing address,
+  // shipping address, .. .)
+  WebString AutofillSection() const;
+  void SetAutofillSection(const WebString&);
 
   // Returns true if autocomplete attribute of the element is not set as "off".
   bool AutoComplete() const;
@@ -118,6 +128,12 @@ class BLINK_EXPORT WebFormControlElement : public WebElement {
   WebString NameForAutofill() const;
 
   WebFormElement Form() const;
+
+  // Returns the identifier which is unique among all form control elements in
+  // the current renderer process. In the current implementation ids are
+  // consecutive numbers so their uniqueness might be broken in case of
+  // overflow.
+  unsigned UniqueRendererFormControlId() const;
 
 #if INSIDE_BLINK
   WebFormControlElement(HTMLFormControlElement*);

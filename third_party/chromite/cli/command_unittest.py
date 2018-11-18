@@ -14,7 +14,6 @@ import os
 from chromite.lib import constants
 from chromite.cli import command
 from chromite.lib import commandline
-from chromite.lib import cros_build_lib_unittest
 from chromite.lib import cros_import
 from chromite.lib import cros_test_lib
 from chromite.lib import partial_mock
@@ -50,7 +49,7 @@ class TestCommandTest(cros_test_lib.MockTestCase):
   def testBadUseOfCommandDecorator(self):
     """Tests that our decorator correctly rejects bad test commands."""
     try:
-      # pylint: disable=W0612
+      # pylint: disable=unused-variable
       @command.CommandDecorator('bad')
       class BadTestCommand(object):
         """A command that wasn't implemented correctly."""
@@ -78,7 +77,7 @@ class MockCommand(partial_mock.PartialMock):
   def __init__(self, args, base_args=None):
     partial_mock.PartialMock.__init__(self)
     self.args = args
-    self.rc_mock = cros_build_lib_unittest.RunCommandMock()
+    self.rc_mock = cros_test_lib.RunCommandMock()
     self.rc_mock.SetDefaultCmdResult()
     parser = commandline.ArgumentParser(caching=True)
     subparsers = parser.add_subparsers()
@@ -98,7 +97,7 @@ class MockCommand(partial_mock.PartialMock):
 class CommandTest(cros_test_lib.MockTestCase):
   """This test class tests that we can load modules correctly."""
 
-  # pylint: disable=W0212
+  # pylint: disable=protected-access
 
   def testFindModules(self):
     """Tests that we can return modules correctly when mocking out glob."""

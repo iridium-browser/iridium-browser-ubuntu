@@ -17,7 +17,7 @@
 #include "chrome/browser/media/router/media_router.h"
 #include "chrome/browser/media/router/media_routes_observer.h"
 #include "chrome/common/media_router/media_route.h"
-#include "content/public/browser/media_controller.h"
+#include "third_party/blink/public/mojom/presentation/presentation.mojom.h"
 
 namespace media_router {
 
@@ -34,7 +34,7 @@ class MediaRouterBase : public MediaRouter {
   void OnIncognitoProfileShutdown() override;
   IssueManager* GetIssueManager() final;
   std::vector<MediaRoute> GetCurrentRoutes() const override;
-  std::unique_ptr<content::MediaController> GetMediaController(
+  std::unique_ptr<media::FlingingController> GetFlingingController(
       const MediaRoute::Id& route_id) override;
 #if !defined(OS_ANDROID)
   scoped_refptr<MediaRouteController> GetRouteController(
@@ -60,10 +60,10 @@ class MediaRouterBase : public MediaRouter {
 
   void NotifyPresentationConnectionStateChange(
       const MediaRoute::Id& route_id,
-      content::PresentationConnectionState state);
+      blink::mojom::PresentationConnectionState state);
   void NotifyPresentationConnectionClose(
       const MediaRoute::Id& route_id,
-      content::PresentationConnectionCloseReason reason,
+      blink::mojom::PresentationConnectionCloseReason reason,
       const std::string& message);
 
   // Returns true when there is at least one MediaRoute that can be returned by

@@ -9,8 +9,10 @@
 #include "base/bind.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
+#include "base/task/post_task.h"
 #include "content/browser/utility_process_host.h"
 #include "content/browser/utility_process_host_client.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/bind_interface_helpers.h"
 #include "content/public/test/content_browser_test.h"
@@ -28,8 +30,8 @@ class MojoSandboxTest : public ContentBrowserTest {
 
   void SetUpOnMainThread() override {
     base::RunLoop run_loop;
-    BrowserThread::PostTaskAndReply(
-        BrowserThread::IO, FROM_HERE,
+    base::PostTaskWithTraitsAndReply(
+        FROM_HERE, {BrowserThread::IO},
         base::BindOnce(&MojoSandboxTest::StartUtilityProcessOnIoThread,
                        base::Unretained(this)),
         run_loop.QuitClosure());
@@ -38,8 +40,8 @@ class MojoSandboxTest : public ContentBrowserTest {
 
   void TearDownOnMainThread() override {
     base::RunLoop run_loop;
-    BrowserThread::PostTaskAndReply(
-        BrowserThread::IO, FROM_HERE,
+    base::PostTaskWithTraitsAndReply(
+        FROM_HERE, {BrowserThread::IO},
         base::BindOnce(&MojoSandboxTest::StopUtilityProcessOnIoThread,
                        base::Unretained(this)),
         run_loop.QuitClosure());
@@ -52,6 +54,7 @@ class MojoSandboxTest : public ContentBrowserTest {
  private:
   void StartUtilityProcessOnIoThread() {
     host_.reset(new UtilityProcessHost(nullptr, nullptr));
+    host_->SetMetricsName("mojo_sandbox_test_process");
     ASSERT_TRUE(host_->Start());
   }
 

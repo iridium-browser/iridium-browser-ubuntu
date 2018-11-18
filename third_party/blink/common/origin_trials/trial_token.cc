@@ -56,7 +56,7 @@ TrialToken::~TrialToken() = default;
 
 // static
 std::unique_ptr<TrialToken> TrialToken::From(
-    const std::string& token_text,
+    base::StringPiece token_text,
     base::StringPiece public_key,
     OriginTrialTokenStatus* out_status) {
   DCHECK(out_status);
@@ -91,7 +91,7 @@ OriginTrialTokenStatus TrialToken::IsValid(const url::Origin& origin,
 }
 
 // static
-OriginTrialTokenStatus TrialToken::Extract(const std::string& token_text,
+OriginTrialTokenStatus TrialToken::Extract(base::StringPiece token_text,
                                            base::StringPiece public_key,
                                            std::string* out_token_payload,
                                            std::string* out_token_signature) {
@@ -181,9 +181,9 @@ std::unique_ptr<TrialToken> TrialToken::Parse(
   datadict->GetString("feature", &feature_name);
   datadict->GetInteger("expiry", &expiry_timestamp);
 
-  // Ensure that the origin is a valid (non-unique) origin URL.
+  // Ensure that the origin is a valid (non-opaque) origin URL.
   url::Origin origin = url::Origin::Create(GURL(origin_string));
-  if (origin.unique()) {
+  if (origin.opaque()) {
     return nullptr;
   }
 

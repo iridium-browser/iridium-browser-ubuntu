@@ -145,11 +145,11 @@ void ErrorThrower::Reset() {
   error_msg_.clear();
 }
 
-ErrorThrower::ErrorThrower(ErrorThrower&& other)
+ErrorThrower::ErrorThrower(ErrorThrower&& other) V8_NOEXCEPT
     : isolate_(other.isolate_),
       context_(other.context_),
       error_type_(other.error_type_),
-      error_msg_(other.error_msg_) {
+      error_msg_(std::move(other.error_msg_)) {
   other.error_type_ = kNone;
 }
 

@@ -15,6 +15,9 @@
 #ifndef CRASHPAD_HANDLER_FUCHSIA_EXCEPTION_HANDLER_SERVER_H_
 #define CRASHPAD_HANDLER_FUCHSIA_EXCEPTION_HANDLER_SERVER_H_
 
+#include <lib/zx/job.h>
+#include <lib/zx/port.h>
+
 #include "base/macros.h"
 
 namespace crashpad {
@@ -22,11 +25,17 @@ namespace crashpad {
 class CrashReportExceptionHandler;
 
 //! \brief Runs the main exception-handling server in Crashpad's handler
-//!     process. This class is not yet implemented.
+//!     process.
 class ExceptionHandlerServer {
  public:
   //! \brief Constructs an ExceptionHandlerServer object.
-  ExceptionHandlerServer();
+  //!
+  //! \param[in] root_job The root of the tree of processes that will be handled
+  //!     by this server. It is assumed that \a exception_port is the exception
+  //!     port of this job.
+  //! \param[in] exception_port The exception port that this server will
+  //!     monitor.
+  ExceptionHandlerServer(zx::job root_job, zx::port exception_port);
   ~ExceptionHandlerServer();
 
   //! \brief Runs the exception-handling server.
@@ -36,6 +45,9 @@ class ExceptionHandlerServer {
   void Run(CrashReportExceptionHandler* handler);
 
  private:
+  zx::job root_job_;
+  zx::port exception_port_;
+
   DISALLOW_COPY_AND_ASSIGN(ExceptionHandlerServer);
 };
 

@@ -4,13 +4,16 @@
 
 #include "chrome/browser/ui/toolbar/media_router_action_controller.h"
 
+#include "base/task/post_task.h"
 #include "chrome/browser/media/router/media_router.h"
 #include "chrome/browser/media/router/media_router_factory.h"
+#include "chrome/browser/media/router/media_router_feature.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/toolbar/component_action_delegate.h"
 #include "chrome/browser/ui/toolbar/component_toolbar_actions_factory.h"
 #include "chrome/browser/ui/toolbar/toolbar_actions_model.h"
 #include "chrome/common/pref_names.h"
+#include "content/public/browser/browser_task_traits.h"
 
 MediaRouterActionController::MediaRouterActionController(Profile* profile)
     : MediaRouterActionController(
@@ -73,13 +76,63 @@ void MediaRouterActionController::OnRoutesUpdated(
 void MediaRouterActionController::OnDialogShown() {
   dialog_count_++;
   MaybeAddOrRemoveAction();
+  for (Observer& observer : observers_)
+    observer.ActivateIcon();
 }
 
 void MediaRouterActionController::OnDialogHidden() {
   DCHECK_GT(dialog_count_, 0u);
   if (dialog_count_)
     dialog_count_--;
+  if (dialog_count_ == 0) {
+    for (Observer& observer : observers_)
+      observer.DeactivateIcon();
+    // Call MaybeAddOrRemoveAction() asynchronously, so that the action icon
+    // doesn't get hidden until we have a chance to show a context menu.
+    base::PostTaskWithTraits(
+        FROM_HERE, {content::BrowserThread::UI},
+        base::BindOnce(&MediaRouterActionController::MaybeAddOrRemoveAction,
+                       weak_factory_.GetWeakPtr()));
+  }
+}
+
+void MediaRouterActionController::OnContextMenuShown() {
+  DCHECK(!context_menu_shown_);
+  context_menu_shown_ = true;
+  // If the context menu was shown, right mouse button must have been released.
+  keep_visible_for_right_mouse_button_ = false;
   MaybeAddOrRemoveAction();
+}
+
+void MediaRouterActionController::OnContextMenuHidden() {
+  DCHECK(context_menu_shown_);
+  context_menu_shown_ = false;
+  MaybeAddOrRemoveAction();
+}
+
+void MediaRouterActionController::KeepIconOnRightMousePressed() {
+  DCHECK(!keep_visible_for_right_mouse_button_);
+  keep_visible_for_right_mouse_button_ = true;
+}
+
+void MediaRouterActionController::MaybeHideIconOnRightMouseReleased() {
+  keep_visible_for_right_mouse_button_ = false;
+  MaybeAddOrRemoveAction();
+}
+
+void MediaRouterActionController::AddObserver(Observer* observer) {
+  observers_.AddObserver(observer);
+}
+
+void MediaRouterActionController::RemoveObserver(Observer* observer) {
+  observers_.RemoveObserver(observer);
+}
+
+bool MediaRouterActionController::ShouldEnableAction() const {
+  return shown_by_policy_ || has_local_display_route_ || has_issue_ ||
+         dialog_count_ || context_menu_shown_ ||
+         keep_visible_for_right_mouse_button_ ||
+         GetAlwaysShowActionPref(profile_);
 }
 
 MediaRouterActionController::MediaRouterActionController(
@@ -91,7 +144,8 @@ MediaRouterActionController::MediaRouterActionController(
       profile_(profile),
       component_action_delegate_(component_action_delegate),
       shown_by_policy_(
-          MediaRouterActionController::IsActionShownByPolicy(profile)) {
+          MediaRouterActionController::IsActionShownByPolicy(profile)),
+      weak_factory_(this) {
   CHECK(profile_);
   media_router::IssuesObserver::Init();
   pref_change_registrar_.Init(profile->GetPrefs());
@@ -102,6 +156,14 @@ MediaRouterActionController::MediaRouterActionController(
 }
 
 void MediaRouterActionController::MaybeAddOrRemoveAction() {
+  if (media_router::ShouldUseViewsDialog()) {
+    MaybeAddOrRemoveTrustedAreaIcon();
+  } else {
+    MaybeAddOrRemoveComponentAction();
+  }
+}
+
+void MediaRouterActionController::MaybeAddOrRemoveComponentAction() {
   if (ShouldEnableAction()) {
     if (!component_action_delegate_->HasComponentAction(
             ComponentToolbarActionsFactory::kMediaRouterActionId)) {
@@ -115,7 +177,12 @@ void MediaRouterActionController::MaybeAddOrRemoveAction() {
   }
 }
 
-bool MediaRouterActionController::ShouldEnableAction() const {
-  return shown_by_policy_ || has_local_display_route_ || has_issue_ ||
-         dialog_count_ || GetAlwaysShowActionPref(profile_);
+void MediaRouterActionController::MaybeAddOrRemoveTrustedAreaIcon() {
+  if (ShouldEnableAction()) {
+    for (Observer& observer : observers_)
+      observer.ShowIcon();
+  } else {
+    for (Observer& observer : observers_)
+      observer.HideIcon();
+  }
 }

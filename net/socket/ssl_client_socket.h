@@ -18,15 +18,6 @@
 #include "net/base/net_export.h"
 #include "net/socket/ssl_socket.h"
 #include "net/socket/stream_socket.h"
-#include "net/ssl/token_binding.h"
-
-namespace base {
-class FilePath;
-}
-
-namespace crypto {
-class ECPrivateKey;
-}
 
 namespace net {
 
@@ -34,7 +25,7 @@ class CTPolicyEnforcer;
 class CertVerifier;
 class ChannelIDService;
 class CTVerifier;
-class SSLCertRequestInfo;
+class SSLKeyLogger;
 class TransportSecurityState;
 
 // This struct groups together several fields which are used by various
@@ -75,19 +66,12 @@ class NET_EXPORT SSLClientSocket : public SSLSocket {
  public:
   SSLClientSocket();
 
-  // Gets the SSL CertificateRequest info of the socket after Connect failed
-  // with ERR_SSL_CLIENT_AUTH_CERT_NEEDED.
-  virtual void GetSSLCertRequestInfo(
-      SSLCertRequestInfo* cert_request_info) = 0;
-
-  // Log SSL key material to |path|. Must be called before any
+  // Log SSL key material to |logger|. Must be called before any
   // SSLClientSockets are created.
   //
   // TODO(davidben): Switch this to a parameter on the SSLClientSocketContext
-  // once https://crbug.com/458365 is resolved. To avoid a dependency from
-  // OS_NACL to file I/O logic, this will require splitting SSLKeyLogger into an
-  // interface, built with OS_NACL and a non-NaCl SSLKeyLoggerImpl.
-  static void SetSSLKeyLogFile(const base::FilePath& path);
+  // once https://crbug.com/458365 is resolved.
+  static void SetSSLKeyLogger(std::unique_ptr<SSLKeyLogger> logger);
 
   // Returns true if |error| is OK or |load_flags| ignores certificate errors
   // and |error| is a certificate error.
@@ -96,22 +80,6 @@ class NET_EXPORT SSLClientSocket : public SSLSocket {
   // ClearSessionCache clears the SSL session cache, used to resume SSL
   // sessions.
   static void ClearSessionCache();
-
-  // Returns the ChannelIDService used by this socket, or NULL if
-  // channel ids are not supported.
-  virtual ChannelIDService* GetChannelIDService() const = 0;
-
-  // Generates the signature used in Token Binding using key |*key| and for a
-  // Token Binding of type |tb_type|, putting the signature in |*out|. Returns a
-  // net error code.
-  virtual Error GetTokenBindingSignature(crypto::ECPrivateKey* key,
-                                         TokenBindingType tb_type,
-                                         std::vector<uint8_t>* out) = 0;
-
-  // This method is only for debugging crbug.com/548423 and will be removed when
-  // that bug is closed. This returns the channel ID key that was used when
-  // establishing the connection (or NULL if no channel ID was used).
-  virtual crypto::ECPrivateKey* GetChannelIDKey() const = 0;
 
  protected:
   void set_signed_cert_timestamps_received(

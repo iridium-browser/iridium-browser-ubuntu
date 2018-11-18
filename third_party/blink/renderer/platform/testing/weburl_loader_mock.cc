@@ -12,6 +12,7 @@
 #include "third_party/blink/public/platform/web_url_loader_client.h"
 #include "third_party/blink/renderer/platform/shared_buffer.h"
 #include "third_party/blink/renderer/platform/testing/weburl_loader_mock_factory_impl.h"
+#include "third_party/blink/renderer/platform/wtf/time.h"
 
 namespace blink {
 
@@ -41,7 +42,7 @@ void WebURLLoaderMock::ServeAsynchronousRequest(
     WebURLLoaderTestDelegate* delegate,
     const WebURLResponse& response,
     const WebData& data,
-    const Optional<WebURLError>& error) {
+    const base::Optional<WebURLError>& error) {
   DCHECK(!using_default_loader_);
   if (!client_)
     return;
@@ -79,7 +80,8 @@ void WebURLLoaderMock::ServeAsynchronousRequest(
   if (!self)
     return;
 
-  delegate->DidFinishLoading(client_, 0, data.size(), data.size(), data.size());
+  delegate->DidFinishLoading(client_, TimeTicks(), data.size(), data.size(),
+                             data.size());
 }
 
 WebURL WebURLLoaderMock::ServeRedirect(
@@ -105,12 +107,12 @@ WebURL WebURLLoaderMock::ServeRedirect(
 
 void WebURLLoaderMock::LoadSynchronously(
     const WebURLRequest& request,
+    WebURLLoaderClient* client,
     WebURLResponse& response,
     base::Optional<WebURLError>& error,
     WebData& data,
     int64_t& encoded_data_length,
     int64_t& encoded_body_length,
-    base::Optional<int64_t>& downloaded_file_length,
     blink::WebBlobInfo& downloaded_blob) {
   if (factory_->IsMockedURL(request.Url())) {
     factory_->LoadSynchronously(request, &response, &error, &data,
@@ -119,9 +121,9 @@ void WebURLLoaderMock::LoadSynchronously(
   }
   AssertFallbackLoaderAvailability(request.Url(), default_loader_.get());
   using_default_loader_ = true;
-  default_loader_->LoadSynchronously(request, response, error, data,
+  default_loader_->LoadSynchronously(request, client, response, error, data,
                                      encoded_data_length, encoded_body_length,
-                                     downloaded_file_length, downloaded_blob);
+                                     downloaded_blob);
 }
 
 void WebURLLoaderMock::LoadAsynchronously(const WebURLRequest& request,

@@ -12,6 +12,7 @@
 #include "base/stl_util.h"
 #include "base/threading/thread_local.h"
 #include "base/trace_event/trace_event.h"
+#include "ui/gfx/gpu_fence.h"
 #include "ui/gfx/swap_result.h"
 #include "ui/gl/gl_context.h"
 #include "ui/gl/gl_image.h"
@@ -35,6 +36,8 @@ bool GLSurface::Initialize() {
 bool GLSurface::Initialize(GLSurfaceFormat format) {
   return true;
 }
+
+void GLSurface::PrepareToDestroy(bool have_context) {}
 
 bool GLSurface::Resize(const gfx::Size& size,
                        float scale_factor,
@@ -153,12 +156,15 @@ gfx::VSyncProvider* GLSurface::GetVSyncProvider() {
   return NULL;
 }
 
+void GLSurface::SetVSyncEnabled(bool enabled) {}
+
 bool GLSurface::ScheduleOverlayPlane(int z_order,
                                      gfx::OverlayTransform transform,
                                      GLImage* image,
                                      const gfx::Rect& bounds_rect,
                                      const gfx::RectF& crop_rect,
-                                     bool enable_blend) {
+                                     bool enable_blend,
+                                     std::unique_ptr<gfx::GpuFence> gpu_fence) {
   NOTIMPLEMENTED();
   return false;
 }
@@ -203,16 +209,16 @@ bool GLSurface::UseOverlaysForVideo() const {
   return false;
 }
 
+bool GLSurface::SupportsProtectedVideo() const {
+  return false;
+}
+
 bool GLSurface::SetDrawRectangle(const gfx::Rect& rect) {
   return false;
 }
 
 gfx::Vector2d GLSurface::GetDrawOffset() const {
   return gfx::Vector2d();
-}
-
-void GLSurface::WaitForSnapshotRendering() {
-  // By default, just executing the SwapBuffers is normally enough.
 }
 
 void GLSurface::SetRelyOnImplicitSync() {
@@ -227,6 +233,18 @@ bool GLSurface::SupportsSwapTimestamps() const {
 
 void GLSurface::SetEnableSwapTimestamps() {
   NOTREACHED();
+}
+
+int GLSurface::GetBufferCount() const {
+  return 2;
+}
+
+bool GLSurface::SupportsPlaneGpuFences() const {
+  return false;
+}
+
+EGLTimestampClient* GLSurface::GetEGLTimestampClient() {
+  return nullptr;
 }
 
 GLSurface* GLSurface::GetCurrent() {
@@ -401,14 +419,21 @@ gfx::VSyncProvider* GLSurfaceAdapter::GetVSyncProvider() {
   return surface_->GetVSyncProvider();
 }
 
-bool GLSurfaceAdapter::ScheduleOverlayPlane(int z_order,
-                                            gfx::OverlayTransform transform,
-                                            GLImage* image,
-                                            const gfx::Rect& bounds_rect,
-                                            const gfx::RectF& crop_rect,
-                                            bool enable_blend) {
+void GLSurfaceAdapter::SetVSyncEnabled(bool enabled) {
+  surface_->SetVSyncEnabled(enabled);
+}
+
+bool GLSurfaceAdapter::ScheduleOverlayPlane(
+    int z_order,
+    gfx::OverlayTransform transform,
+    GLImage* image,
+    const gfx::Rect& bounds_rect,
+    const gfx::RectF& crop_rect,
+    bool enable_blend,
+    std::unique_ptr<gfx::GpuFence> gpu_fence) {
   return surface_->ScheduleOverlayPlane(z_order, transform, image, bounds_rect,
-                                        crop_rect, enable_blend);
+                                        crop_rect, enable_blend,
+                                        std::move(gpu_fence));
 }
 
 bool GLSurfaceAdapter::ScheduleDCLayer(
@@ -440,16 +465,16 @@ bool GLSurfaceAdapter::UseOverlaysForVideo() const {
   return surface_->UseOverlaysForVideo();
 }
 
+bool GLSurfaceAdapter::SupportsProtectedVideo() const {
+  return surface_->SupportsProtectedVideo();
+}
+
 bool GLSurfaceAdapter::SetDrawRectangle(const gfx::Rect& rect) {
   return surface_->SetDrawRectangle(rect);
 }
 
 gfx::Vector2d GLSurfaceAdapter::GetDrawOffset() const {
   return surface_->GetDrawOffset();
-}
-
-void GLSurfaceAdapter::WaitForSnapshotRendering() {
-  surface_->WaitForSnapshotRendering();
 }
 
 void GLSurfaceAdapter::SetRelyOnImplicitSync() {
@@ -462,6 +487,14 @@ bool GLSurfaceAdapter::SupportsSwapTimestamps() const {
 
 void GLSurfaceAdapter::SetEnableSwapTimestamps() {
   return surface_->SetEnableSwapTimestamps();
+}
+
+int GLSurfaceAdapter::GetBufferCount() const {
+  return surface_->GetBufferCount();
+}
+
+bool GLSurfaceAdapter::SupportsPlaneGpuFences() const {
+  return surface_->SupportsPlaneGpuFences();
 }
 
 GLSurfaceAdapter::~GLSurfaceAdapter() {}

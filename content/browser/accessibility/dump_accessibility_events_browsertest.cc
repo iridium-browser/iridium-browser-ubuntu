@@ -69,7 +69,7 @@ class DumpAccessibilityEventsTest : public DumpAccessibilityTestBase {
         base::ASCIIToUTF16("EVENT_OBJECT_FOCUS*DOCUMENT*"), Filter::DENY));
   }
 
-  std::vector<std::string> Dump() override;
+  std::vector<std::string> Dump(std::vector<std::string>& run_until) override;
 
   void OnDiffFailed() override;
   void RunEventTest(const base::FilePath::CharType* file_path);
@@ -79,7 +79,24 @@ class DumpAccessibilityEventsTest : public DumpAccessibilityTestBase {
   base::string16 final_tree_;
 };
 
-std::vector<std::string> DumpAccessibilityEventsTest::Dump() {
+bool IsRecordingComplete(AccessibilityEventRecorder& event_recorder,
+                         std::vector<std::string>& run_until) {
+  // If no @RUN-UNTIL-EVENT directives, then having any events is enough.
+  if (run_until.empty())
+    return true;
+
+  std::vector<std::string> event_logs = event_recorder.event_logs();
+
+  for (size_t i = 0; i < event_logs.size(); ++i)
+    for (size_t j = 0; j < run_until.size(); ++j)
+      if (event_logs[i].find(run_until[j]) != std::string::npos)
+        return true;
+
+  return false;
+}
+
+std::vector<std::string> DumpAccessibilityEventsTest::Dump(
+    std::vector<std::string>& run_until) {
   WebContentsImpl* web_contents = static_cast<WebContentsImpl*>(
       shell()->web_contents());
   base::ProcessId pid = base::GetCurrentProcId();
@@ -103,9 +120,11 @@ std::vector<std::string> DumpAccessibilityEventsTest::Dump() {
   web_contents->GetMainFrame()->ExecuteJavaScriptForTests(
       base::ASCIIToUTF16("go()"));
 
-  // Wait for at least one accessibility event generated in response to
-  // that function.
-  waiter->WaitForNotification();
+  for (;;) {
+    waiter->WaitForNotification();  // Run at least once.
+    if (IsRecordingComplete(*event_recorder, run_until))
+      break;
+  }
 
   // More than one accessibility event could have been generated.
   // To make sure we've received all accessibility events, add a
@@ -156,7 +175,7 @@ void DumpAccessibilityEventsTest::RunEventTest(
   base::FilePath test_path = GetTestFilePath("accessibility", "event");
 
   {
-    base::ThreadRestrictions::ScopedAllowIO allow_io_for_test_verification;
+    base::ScopedAllowBlockingForTesting allow_blocking;
     ASSERT_TRUE(base::PathExists(test_path)) << test_path.LossyDisplayName();
   }
 
@@ -189,10 +208,19 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
   RunEventTest(FILE_PATH_LITERAL("aria-treeitem-focus.html"));
 }
 
-// http:/crbug.com/791268
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
-                       DISABLED_AccessibilityEventsAriaComboBoxFocus) {
+                       AccessibilityEventsAriaComboBoxFocus) {
   RunEventTest(FILE_PATH_LITERAL("aria-combo-box-focus.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
+                       AccessibilityEventsAriaComboBoxDelayAddList) {
+  RunEventTest(FILE_PATH_LITERAL("aria-combo-box-delay-add-list.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
+                       AccessibilityEventsAriaComboBoxDelayShowList) {
+  RunEventTest(FILE_PATH_LITERAL("aria-combo-box-delay-show-list.html"));
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
@@ -258,6 +286,18 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
                        AccessibilityEventsCheckedStateChanged) {
   RunEventTest(FILE_PATH_LITERAL("checked-state-changed.html"));
+}
+
+// http:/crbug.com/889013
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
+                       DISABLED_AccessibilityEventsCaretHide) {
+  RunEventTest(FILE_PATH_LITERAL("caret-hide.html"));
+}
+
+// http:/crbug.com/889013
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
+                       DISABLED_AccessibilityEventsCaretMove) {
+  RunEventTest(FILE_PATH_LITERAL("caret-move.html"));
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
@@ -331,6 +371,11 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
 }
 
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
+                       AccessibilityEventsLiveRegionElemReparent) {
+  RunEventTest(FILE_PATH_LITERAL("live-region-elem-reparent.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
                        AccessibilityEventsLiveRegionIgnoresClick) {
   RunEventTest(FILE_PATH_LITERAL("live-region-ignores-click.html"));
 }
@@ -344,6 +389,11 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
                        AccessibilityEventsMenuListCollapse) {
   RunEventTest(FILE_PATH_LITERAL("menulist-collapse.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
+                       AccessibilityEventsMenuListCollapseNext) {
+  RunEventTest(FILE_PATH_LITERAL("menulist-collapse-next.html"));
 }
 
 // https://crbug.com/719030
@@ -403,6 +453,16 @@ IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
 IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
                        AccessibilityEventsTextChanged) {
   RunEventTest(FILE_PATH_LITERAL("text-changed.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
+                       AccessibilityEventsAriaCheckedChanged) {
+  RunEventTest(FILE_PATH_LITERAL("aria-checked-changed.html"));
+}
+
+IN_PROC_BROWSER_TEST_F(DumpAccessibilityEventsTest,
+                       AccessibilityEventsAriaPressedChanged) {
+  RunEventTest(FILE_PATH_LITERAL("aria-pressed-changed.html"));
 }
 
 }  // namespace content

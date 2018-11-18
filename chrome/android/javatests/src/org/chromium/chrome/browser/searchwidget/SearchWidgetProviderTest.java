@@ -36,7 +36,7 @@ import org.chromium.chrome.browser.searchwidget.SearchActivity.SearchActivityDel
 import org.chromium.chrome.browser.util.IntentUtils;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.util.ApplicationTestUtils;
-import org.chromium.content.browser.test.util.CriteriaHelper;
+import org.chromium.content_public.browser.test.util.CriteriaHelper;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -249,7 +249,7 @@ public class SearchWidgetProviderTest {
                     // Confirm that the string is correct.
                     TextView titleView = (TextView) view.findViewById(R.id.title);
                     Assert.assertEquals(View.VISIBLE, titleView.getVisibility());
-                    Assert.assertEquals(expectedString, titleView.getText());
+                    Assert.assertEquals(expectedString, titleView.getHint());
 
                     // Confirm the visibility of the microphone.
                     View microphoneView = view.findViewById(R.id.microphone_icon);

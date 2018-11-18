@@ -28,12 +28,26 @@
 #include "third_party/blink/renderer/core/style/svg_computed_style_defs.h"
 
 #include "third_party/blink/renderer/core/style/data_equivalency.h"
+#include "third_party/blink/renderer/core/style/style_svg_resource.h"
 #include "third_party/blink/renderer/core/style/svg_computed_style.h"
 
 namespace blink {
 
+SVGPaint::SVGPaint() : type(SVG_PAINTTYPE_NONE) {}
+SVGPaint::SVGPaint(Color color) : color(color), type(SVG_PAINTTYPE_RGBCOLOR) {}
+SVGPaint::SVGPaint(const SVGPaint& paint) = default;
+
+SVGPaint::~SVGPaint() = default;
+
+SVGPaint& SVGPaint::operator=(const SVGPaint& paint) = default;
+
 bool SVGPaint::operator==(const SVGPaint& other) const {
-  return type == other.type && color == other.color && url == other.url;
+  return type == other.type && color == other.color &&
+         DataEquivalent(resource, other.resource);
+}
+
+const AtomicString& SVGPaint::GetUrl() const {
+  return Resource()->Url();
 }
 
 StyleFillData::StyleFillData()
@@ -90,23 +104,30 @@ bool StyleStopData::operator==(const StyleStopData& other) const {
 }
 
 StyleMiscData::StyleMiscData()
-    : flood_color(SVGComputedStyle::InitialFloodColor()),
-      flood_opacity(SVGComputedStyle::InitialFloodOpacity()),
+    : baseline_shift_value(SVGComputedStyle::InitialBaselineShiftValue()),
+      flood_color(SVGComputedStyle::InitialFloodColor()),
       lighting_color(SVGComputedStyle::InitialLightingColor()),
-      baseline_shift_value(SVGComputedStyle::InitialBaselineShiftValue()) {}
+      flood_opacity(SVGComputedStyle::InitialFloodOpacity()),
+      flood_color_is_current_color(false),
+      lighting_color_is_current_color(false) {}
 
 StyleMiscData::StyleMiscData(const StyleMiscData& other)
     : RefCounted<StyleMiscData>(),
+      baseline_shift_value(other.baseline_shift_value),
       flood_color(other.flood_color),
-      flood_opacity(other.flood_opacity),
       lighting_color(other.lighting_color),
-      baseline_shift_value(other.baseline_shift_value) {}
+      flood_opacity(other.flood_opacity),
+      flood_color_is_current_color(other.flood_color_is_current_color),
+      lighting_color_is_current_color(other.lighting_color_is_current_color) {}
 
 bool StyleMiscData::operator==(const StyleMiscData& other) const {
-  return flood_opacity == other.flood_opacity &&
-         flood_color == other.flood_color &&
+  return flood_color == other.flood_color &&
          lighting_color == other.lighting_color &&
-         baseline_shift_value == other.baseline_shift_value;
+         baseline_shift_value == other.baseline_shift_value &&
+         flood_opacity == other.flood_opacity &&
+         flood_color_is_current_color == other.flood_color_is_current_color &&
+         lighting_color_is_current_color ==
+             other.lighting_color_is_current_color;
 }
 
 StyleResourceData::StyleResourceData()
@@ -115,8 +136,10 @@ StyleResourceData::StyleResourceData()
 StyleResourceData::StyleResourceData(const StyleResourceData& other)
     : RefCounted<StyleResourceData>(), masker(other.masker) {}
 
+StyleResourceData::~StyleResourceData() = default;
+
 bool StyleResourceData::operator==(const StyleResourceData& other) const {
-  return masker == other.masker;
+  return DataEquivalent(masker, other.masker);
 }
 
 StyleInheritedResourceData::StyleInheritedResourceData()
@@ -131,10 +154,13 @@ StyleInheritedResourceData::StyleInheritedResourceData(
       marker_mid(other.marker_mid),
       marker_end(other.marker_end) {}
 
+StyleInheritedResourceData::~StyleInheritedResourceData() = default;
+
 bool StyleInheritedResourceData::operator==(
     const StyleInheritedResourceData& other) const {
-  return marker_start == other.marker_start && marker_mid == other.marker_mid &&
-         marker_end == other.marker_end;
+  return DataEquivalent(marker_start, other.marker_start) &&
+         DataEquivalent(marker_mid, other.marker_mid) &&
+         DataEquivalent(marker_end, other.marker_end);
 }
 
 StyleGeometryData::StyleGeometryData()

@@ -8,9 +8,8 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/path_service.h"
+#include "base/task/post_task.h"
 #include "base/task_runner_util.h"
-#include "base/task_scheduler/post_task.h"
-#include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/firewall_manager_win.h"
 
 namespace media_router {
@@ -23,8 +22,7 @@ bool DoCanFirewallUseLocalPorts() {
     LOG(WARNING) << "Couldn't get path of current executable.";
     return false;
   }
-  auto firewall_manager = installer::FirewallManager::Create(
-      BrowserDistribution::GetDistribution(), exe_path);
+  auto firewall_manager = installer::FirewallManager::Create(exe_path);
   if (!firewall_manager) {
     LOG(WARNING) << "Couldn't get FirewallManager instance.";
     return false;

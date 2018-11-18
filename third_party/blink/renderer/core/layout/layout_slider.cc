@@ -24,7 +24,6 @@
 #include "third_party/blink/renderer/core/html/forms/slider_thumb_element.h"
 #include "third_party/blink/renderer/core/html/shadow/shadow_element_names.h"
 #include "third_party/blink/renderer/core/input_type_names.h"
-#include "third_party/blink/renderer/core/layout/layout_slider_thumb.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
 
 namespace blink {
@@ -53,8 +52,8 @@ void LayoutSlider::ComputeIntrinsicLogicalWidths(
     LayoutUnit& min_logical_width,
     LayoutUnit& max_logical_width) const {
   max_logical_width =
-      LayoutUnit(kDefaultTrackLength * Style()->EffectiveZoom());
-  if (!Style()->Width().IsPercentOrCalc())
+      LayoutUnit(kDefaultTrackLength * StyleRef().EffectiveZoom());
+  if (!StyleRef().Width().IsPercentOrCalc())
     min_logical_width = max_logical_width;
 }
 
@@ -62,16 +61,6 @@ inline SliderThumbElement* LayoutSlider::GetSliderThumbElement() const {
   return ToSliderThumbElement(
       ToElement(GetNode())->UserAgentShadowRoot()->getElementById(
           ShadowElementNames::SliderThumb()));
-}
-
-void LayoutSlider::UpdateLayout() {
-  // FIXME: Find a way to cascade appearance.
-  // http://webkit.org/b/62535
-  LayoutBox* thumb_box = GetSliderThumbElement()->GetLayoutBox();
-  if (thumb_box && thumb_box->IsSliderThumb())
-    ToLayoutSliderThumb(thumb_box)->UpdateAppearance(StyleRef());
-
-  LayoutFlexibleBox::UpdateLayout();
 }
 
 bool LayoutSlider::InDragMode() const {

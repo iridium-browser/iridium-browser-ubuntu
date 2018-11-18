@@ -100,6 +100,9 @@ class ASH_EXPORT WindowTreeHostManager
   // TODO(oshima): Move this out from WindowTreeHostManager;
   static int64_t GetPrimaryDisplayId();
 
+  // Returns true if the current primary display ID is valid.
+  static bool HasValidPrimaryDisplayId();
+
   CursorWindowController* cursor_window_controller() {
     return cursor_window_controller_.get();
   }
@@ -125,8 +128,8 @@ class ASH_EXPORT WindowTreeHostManager
   // Returns the root window for |display_id|.
   aura::Window* GetRootWindowForDisplayId(int64_t id);
 
-  // Returns AshWTH for given display |id|. Call results in CHECK failure
-  // if the WTH does not exist.
+  // Returns AshWTH for given display |id|. Returns nullptr if the WTH does not
+  // exist.
   AshWindowTreeHost* GetAshWindowTreeHostForDisplayId(int64_t id);
 
   // Sets the primary display by display id. This re-assigns the current primary
@@ -175,7 +178,8 @@ class ASH_EXPORT WindowTreeHostManager
 
   // ui::internal::InputMethodDelegate overrides:
   ui::EventDispatchDetails DispatchKeyEventPostIME(
-      ui::KeyEvent* event) override;
+      ui::KeyEvent* event,
+      base::OnceCallback<void(bool)> ack_callback) override;
 
  private:
   FRIEND_TEST_ALL_PREFIXES(WindowTreeHostManagerTest, BoundsUpdated);
@@ -196,7 +200,7 @@ class ASH_EXPORT WindowTreeHostManager
   // The mapping from display ID to its window tree host.
   WindowTreeHostMap window_tree_hosts_;
 
-  base::ObserverList<Observer, true> observers_;
+  base::ObserverList<Observer, true>::Unchecked observers_;
 
   // Store the primary window tree host temporarily while replacing
   // display.

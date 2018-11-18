@@ -5,14 +5,15 @@
 #include "ui/base/clipboard/clipboard_util_mac.h"
 
 #include "base/mac/foundation_util.h"
+#import "base/mac/mac_util.h"
 #include "base/mac/scoped_cftyperef.h"
 
 namespace ui {
 
+NSString* const kUTTypeURLName = @"public.url-name";
+
 namespace {
 NSString* const kWebURLsWithTitlesPboardType = @"WebURLsWithTitlesPboardType";
-NSString* const kPublicUrl = @"public.url";
-NSString* const kPublicUrlName = @"public.url-name";
 
 // It's much more convenient to return an NSString than a
 // base::ScopedCFTypeRef<CFStringRef>, since the methods on NSPasteboardItem
@@ -29,6 +30,14 @@ UniquePasteboard::UniquePasteboard()
 
 UniquePasteboard::~UniquePasteboard() {
   [pasteboard_ releaseGlobally];
+
+  if (base::mac::IsOS10_12()) {
+    // On 10.12, move ownership to the autorelease pool rather than possibly
+    // triggering -[NSPasteboard dealloc] here. This is a speculative workaround
+    // for https://crbug.com/877979 where a call to __CFPasteboardDeallocate
+    // from here is triggering "Semaphore object deallocated while in use".
+    pasteboard_.autorelease();
+  }
 }
 
 // static
@@ -66,8 +75,8 @@ base::scoped_nsobject<NSPasteboardItem> ClipboardUtil::PasteboardItemFromUrl(
   }
 
   [item setString:urlString forType:NSPasteboardTypeString];
-  [item setString:urlString forType:kPublicUrl];
-  [item setString:title forType:kPublicUrlName];
+  [item setString:urlString forType:base::mac::CFToNSCast(kUTTypeURL)];
+  [item setString:title forType:kUTTypeURLName];
   return item;
 }
 
@@ -95,12 +104,12 @@ base::scoped_nsobject<NSPasteboardItem> ClipboardUtil::PasteboardItemFromString(
 
 //static
 NSString* ClipboardUtil::GetTitleFromPasteboardURL(NSPasteboard* pboard) {
-  return [pboard stringForType:kPublicUrlName];
+  return [pboard stringForType:kUTTypeURLName];
 }
 
 //static
 NSString* ClipboardUtil::GetURLFromPasteboardURL(NSPasteboard* pboard) {
-  return [pboard stringForType:kPublicUrl];
+  return [pboard stringForType:base::mac::CFToNSCast(kUTTypeURL)];
 }
 
 // static
@@ -166,6 +175,24 @@ bool ClipboardUtil::URLsAndTitlesFromPasteboard(NSPasteboard* pboard,
   *urls = urlsArr;
   *titles = titlesArr;
   return true;
+}
+
+// static
+NSPasteboard* ClipboardUtil::PasteboardFromType(ui::ClipboardType type) {
+  NSString* type_string = nil;
+  switch (type) {
+    case ui::CLIPBOARD_TYPE_COPY_PASTE:
+      type_string = NSGeneralPboard;
+      break;
+    case ui::CLIPBOARD_TYPE_DRAG:
+      type_string = NSDragPboard;
+      break;
+    case ui::CLIPBOARD_TYPE_SELECTION:
+      NOTREACHED();
+      break;
+  }
+
+  return [NSPasteboard pasteboardWithName:type_string];
 }
 
 }  // namespace ui

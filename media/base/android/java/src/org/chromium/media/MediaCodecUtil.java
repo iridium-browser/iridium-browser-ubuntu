@@ -20,6 +20,7 @@ import org.chromium.base.Log;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
 import org.chromium.base.annotations.MainDex;
+import org.chromium.base.compat.ApiHelperForN;
 
 import java.util.Arrays;
 import java.util.Iterator;
@@ -104,7 +105,7 @@ class MediaCodecUtil {
         private MediaCodecInfo[] mCodecList;
 
         private class CodecInfoIterator implements Iterator<MediaCodecInfo> {
-            private int mPosition = 0;
+            private int mPosition;
 
             @Override
             public boolean hasNext() {
@@ -502,6 +503,8 @@ class MediaCodecUtil {
         ExynosVp8(MimeTypes.VIDEO_VP8, "OMX.Exynos.", Build.VERSION_CODES.M,
                 BitrateAdjuster.NO_ADJUSTMENT),
         ExynosH264(MimeTypes.VIDEO_H264, "OMX.Exynos.", Build.VERSION_CODES.LOLLIPOP,
+                BitrateAdjuster.FRAMERATE_ADJUSTMENT),
+        MediatekH264(MimeTypes.VIDEO_H264, "OMX.MTK.", Build.VERSION_CODES.O_MR1,
                 BitrateAdjuster.FRAMERATE_ADJUSTMENT);
 
         private final String mMime;
@@ -671,7 +674,7 @@ class MediaCodecUtil {
      */
     static void setPatternIfSupported(CryptoInfo cryptoInfo, int encrypt, int skip) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            cryptoInfo.setPattern(new CryptoInfo.Pattern(encrypt, skip));
+            ApiHelperForN.setCryptoInfoPattern(cryptoInfo, encrypt, skip);
         }
     }
 }

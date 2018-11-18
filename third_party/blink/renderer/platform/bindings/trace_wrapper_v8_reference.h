@@ -6,13 +6,13 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_BINDINGS_TRACE_WRAPPER_V8_REFERENCE_H_
 
 #include "third_party/blink/renderer/platform/bindings/script_wrappable_marking_visitor.h"
+#include "third_party/blink/renderer/platform/heap/unified_heap_marking_visitor.h"
 
 namespace blink {
 
 /**
- * TraceWrapperV8Reference is used to trace from Blink to V8. If wrapper
- * tracing is disabled, the reference is a weak v8::Persistent. Otherwise,
- * the reference is (strongly) traced by wrapper tracing.
+ * TraceWrapperV8Reference is used to trace from Blink to V8. The reference is
+ * (strongly) traced by wrapper tracing.
  *
  * TODO(mlippautz): Use a better handle type than v8::Persistent.
  */
@@ -27,6 +27,10 @@ class TraceWrapperV8Reference {
   }
 
   ~TraceWrapperV8Reference() { Clear(); }
+
+  bool operator==(const TraceWrapperV8Reference& other) const {
+    return handle_ == other.handle_;
+  }
 
   void Set(v8::Isolate* isolate, v8::Local<T> handle) {
     InternalSet(isolate, handle);
@@ -58,8 +62,7 @@ class TraceWrapperV8Reference {
     return reinterpret_cast<const TraceWrapperV8Reference<S>&>(
         const_cast<const TraceWrapperV8Reference<T>&>(*this));
   }
-  // TODO(mlippautz): Support TraceWrappers(const
-  // TraceWrapperV8Reference<v8::Module>&) and remove UnsafeCast.
+
   template <typename S>
   const TraceWrapperV8Reference<S>& UnsafeCast() const {
     return reinterpret_cast<const TraceWrapperV8Reference<S>&>(
@@ -71,6 +74,7 @@ class TraceWrapperV8Reference {
     handle_.Reset(isolate, handle);
     ScriptWrappableMarkingVisitor::WriteBarrier(isolate,
                                                 UnsafeCast<v8::Value>());
+    UnifiedHeapMarkingVisitor::WriteBarrier(isolate, UnsafeCast<v8::Value>());
   }
 
   v8::Persistent<T> handle_;

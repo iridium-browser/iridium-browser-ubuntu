@@ -51,24 +51,27 @@ class CORE_EXPORT PerformanceEntry : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  virtual ~PerformanceEntry();
+  ~PerformanceEntry() override;
 
   enum EntryType : PerformanceEntryType {
     kInvalid = 0,
     kNavigation = 1 << 0,
-    kComposite = 1 << 1,
-    kMark = 1 << 2,
-    kMeasure = 1 << 3,
-    kRender = 1 << 4,
-    kResource = 1 << 5,
-    kLongTask = 1 << 6,
-    kTaskAttribution = 1 << 7,
-    kPaint = 1 << 8
+    kMark = 1 << 1,
+    kMeasure = 1 << 2,
+    kResource = 1 << 3,
+    kLongTask = 1 << 4,
+    kTaskAttribution = 1 << 5,
+    kPaint = 1 << 6,
+    kEvent = 1 << 7,
+    kFirstInput = 1 << 8,
+    kElement = 1 << 9,
+    kLayoutJank = 1 << 10,
   };
 
-  String name() const;
-  String entryType() const;
+  const AtomicString& name() const { return name_; }
   DOMHighResTimeStamp startTime() const;
+  virtual AtomicString entryType() const = 0;
+  virtual PerformanceEntryType EntryTypeEnum() const = 0;
   // PerformanceNavigationTiming will override this due to
   // the nature of reporting it early, which means not having a
   // finish time available at construction time.
@@ -77,13 +80,9 @@ class CORE_EXPORT PerformanceEntry : public ScriptWrappable {
 
   ScriptValue toJSONForBinding(ScriptState*) const;
 
-  PerformanceEntryType EntryTypeEnum() const { return entry_type_enum_; }
-
-  bool IsResource() const { return entry_type_enum_ == kResource; }
-  bool IsRender() const { return entry_type_enum_ == kRender; }
-  bool IsComposite() const { return entry_type_enum_ == kComposite; }
-  bool IsMark() const { return entry_type_enum_ == kMark; }
-  bool IsMeasure() const { return entry_type_enum_ == kMeasure; }
+  bool IsResource() const { return EntryTypeEnum() == kResource; }
+  bool IsMark() const { return EntryTypeEnum() == kMark; }
+  bool IsMeasure() const { return EntryTypeEnum() == kMeasure; }
 
   static bool StartTimeCompareLessThan(PerformanceEntry* a,
                                        PerformanceEntry* b) {
@@ -92,21 +91,21 @@ class CORE_EXPORT PerformanceEntry : public ScriptWrappable {
     return a->startTime() < b->startTime();
   }
 
-  static PerformanceEntry::EntryType ToEntryTypeEnum(const String& entry_type);
+  static PerformanceEntry::EntryType ToEntryTypeEnum(
+      const AtomicString& entry_type);
 
  protected:
-  PerformanceEntry(const String& name,
-                   const String& entry_type,
+  PerformanceEntry(const AtomicString& name,
                    double start_time,
                    double finish_time);
   virtual void BuildJSONValue(V8ObjectBuilder&) const;
 
+  // Protected and not const because PerformanceEventTiming needs to modify it.
+  double duration_;
+
  private:
-  const String name_;
-  const String entry_type_;
+  const AtomicString name_;
   const double start_time_;
-  const double duration_;
-  const PerformanceEntryType entry_type_enum_;
   const int index_;
 };
 

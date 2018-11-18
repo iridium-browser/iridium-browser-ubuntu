@@ -65,31 +65,31 @@ class CXFA_TextLayout {
   void InitBreak(CFX_CSSComputedStyle* pStyle,
                  CFX_CSSDisplay eDisplay,
                  float fLineWidth,
-                 CFX_XMLNode* pXMLNode,
+                 const CFX_XMLNode* pXMLNode,
                  CFX_CSSComputedStyle* pParentStyle);
-  bool Loader(float textWidth, float& fLinePos, bool bSavePieces);
+  void Loader(float textWidth, float* pLinePos, bool bSavePieces);
   void LoadText(CXFA_Node* pNode,
                 float textWidth,
-                float& fLinePos,
+                float* pLinePos,
                 bool bSavePieces);
-  bool LoadRichText(CFX_XMLNode* pXMLNode,
+  bool LoadRichText(const CFX_XMLNode* pXMLNode,
                     float textWidth,
-                    float& fLinePos,
+                    float* pLinePos,
                     const RetainPtr<CFX_CSSComputedStyle>& pParentStyle,
                     bool bSavePieces,
                     RetainPtr<CXFA_LinkUserData> pLinkData,
-                    bool bEndBreak = true,
-                    bool bIsOl = false,
-                    int32_t iLiCount = 0);
+                    bool bEndBreak,
+                    bool bIsOl,
+                    int32_t iLiCount);
   bool AppendChar(const WideString& wsText,
-                  float& fLinePos,
+                  float* pLinePos,
                   float fSpaceAbove,
                   bool bSavePieces);
   void AppendTextLine(CFX_BreakType dwStatus,
-                      float& fLinePos,
+                      float* pLinePos,
                       bool bSavePieces,
-                      bool bEndBreak = false);
-  void EndBreak(CFX_BreakType dwStatus, float& fLinePos, bool bDefault);
+                      bool bEndBreak);
+  void EndBreak(CFX_BreakType dwStatus, float* pLinePos, bool bDefault);
   bool IsEnd(bool bSavePieces);
   void ProcessText(WideString& wsText);
   void UpdateAlign(float fHeight, float fBottom);
@@ -103,17 +103,15 @@ class CXFA_TextLayout {
                   int32_t iPiece,
                   FXTEXT_CHARPOS* pCharPos,
                   const CFX_Matrix& tmDoc2Device);
-  int32_t GetDisplayPos(const CXFA_TextPiece* pPiece,
-                        FXTEXT_CHARPOS* pCharPos,
-                        bool bCharCode = false);
+  int32_t GetDisplayPos(const CXFA_TextPiece* pPiece, FXTEXT_CHARPOS* pCharPos);
   bool ToRun(const CXFA_TextPiece* pPiece, FX_RTFTEXTOBJ* tr);
   void DoTabstops(CFX_CSSComputedStyle* pStyle, CXFA_PieceLine* pPieceLine);
   bool Layout(int32_t iBlock);
   int32_t CountBlocks() const;
 
-  CXFA_FFDoc* m_pDoc;
-  CXFA_TextProvider* m_pTextProvider;
-  CXFA_Node* m_pTextDataNode;
+  UnownedPtr<CXFA_FFDoc> m_pDoc;
+  CXFA_TextProvider* m_pTextProvider;  // Raw, TextProvider owned by tree node.
+  CXFA_Node* m_pTextDataNode;          // Raw, this class owned by tree node.
   bool m_bRichText;
   std::unique_ptr<CFX_RTFBreak> m_pBreak;
   std::unique_ptr<CXFA_LoaderContext> m_pLoader;

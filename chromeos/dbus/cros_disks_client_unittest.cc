@@ -63,6 +63,7 @@ TEST(CrosDisksClientTest, DiskInfo) {
   const std::string kVendorId = "0000";
   const std::string kVendorName = "Vendor Name";
   const std::string kFileSystemType = "exfat";
+  const bool kIsAutoMountable = true;
 
   // Construct a fake response of GetDeviceProperties().
   std::unique_ptr<dbus::Response> response(dbus::Response::CreateEmpty());
@@ -84,6 +85,8 @@ TEST(CrosDisksClientTest, DiskInfo) {
                         kDeviceIsOnRemovableDevice);
     AppendBoolDictEntry(&array_writer, cros_disks::kDeviceIsReadOnly,
                         kDeviceIsReadOnly);
+    AppendBoolDictEntry(&array_writer, cros_disks::kIsAutoMountable,
+                        kIsAutoMountable);
     {
       dbus::MessageWriter entry_writer(NULL);
       array_writer.OpenDictEntry(&entry_writer);
@@ -157,44 +160,46 @@ TEST(CrosDisksClientTest, DiskInfo) {
   EXPECT_EQ(DEVICE_TYPE_SD, result.device_type());
   EXPECT_EQ(kMountPath, result.mount_path());
   EXPECT_EQ(kFileSystemType, result.file_system_type());
+  EXPECT_EQ(kIsAutoMountable, result.is_auto_mountable());
 }
 
 TEST(CrosDisksClientTest, ComposeMountOptions) {
   std::string kExpectedMountLabelOption =
       std::string("mountlabel=") + kMountLabel;
   std::vector<std::string> rw_mount_options =
-      CrosDisksClient::ComposeMountOptions(kMountLabel,
+      CrosDisksClient::ComposeMountOptions({}, kMountLabel,
                                            MOUNT_ACCESS_MODE_READ_WRITE,
                                            REMOUNT_OPTION_MOUNT_NEW_DEVICE);
-  ASSERT_EQ(5U, rw_mount_options.size());
-  EXPECT_EQ("nodev", rw_mount_options[0]);
-  EXPECT_EQ("noexec", rw_mount_options[1]);
-  EXPECT_EQ("nosuid", rw_mount_options[2]);
-  EXPECT_EQ("rw", rw_mount_options[3]);
-  EXPECT_EQ(kExpectedMountLabelOption, rw_mount_options[4]);
+  ASSERT_EQ(2U, rw_mount_options.size());
+  EXPECT_EQ("rw", rw_mount_options[0]);
+  EXPECT_EQ(kExpectedMountLabelOption, rw_mount_options[1]);
 
   std::vector<std::string> ro_mount_options =
-      CrosDisksClient::ComposeMountOptions(kMountLabel,
+      CrosDisksClient::ComposeMountOptions({}, kMountLabel,
                                            MOUNT_ACCESS_MODE_READ_ONLY,
                                            REMOUNT_OPTION_MOUNT_NEW_DEVICE);
-  ASSERT_EQ(5U, ro_mount_options.size());
-  EXPECT_EQ("nodev", ro_mount_options[0]);
-  EXPECT_EQ("noexec", ro_mount_options[1]);
-  EXPECT_EQ("nosuid", ro_mount_options[2]);
-  EXPECT_EQ("ro", ro_mount_options[3]);
-  EXPECT_EQ(kExpectedMountLabelOption, ro_mount_options[4]);
+  ASSERT_EQ(2U, ro_mount_options.size());
+  EXPECT_EQ("ro", ro_mount_options[0]);
+  EXPECT_EQ(kExpectedMountLabelOption, ro_mount_options[1]);
 
   std::vector<std::string> remount_mount_options =
       CrosDisksClient::ComposeMountOptions(
-          kMountLabel, MOUNT_ACCESS_MODE_READ_WRITE,
+          {}, kMountLabel, MOUNT_ACCESS_MODE_READ_WRITE,
           REMOUNT_OPTION_REMOUNT_EXISTING_DEVICE);
-  ASSERT_EQ(6U, remount_mount_options.size());
-  EXPECT_EQ("nodev", remount_mount_options[0]);
-  EXPECT_EQ("noexec", remount_mount_options[1]);
-  EXPECT_EQ("nosuid", remount_mount_options[2]);
-  EXPECT_EQ("rw", remount_mount_options[3]);
-  EXPECT_EQ("remount", remount_mount_options[4]);
-  EXPECT_EQ(kExpectedMountLabelOption, remount_mount_options[5]);
+  ASSERT_EQ(3U, remount_mount_options.size());
+  EXPECT_EQ("rw", remount_mount_options[0]);
+  EXPECT_EQ("remount", remount_mount_options[1]);
+  EXPECT_EQ(kExpectedMountLabelOption, remount_mount_options[2]);
+
+  std::vector<std::string> custom_mount_options =
+      CrosDisksClient::ComposeMountOptions({"foo", "bar=baz"}, kMountLabel,
+                                           MOUNT_ACCESS_MODE_READ_WRITE,
+                                           REMOUNT_OPTION_MOUNT_NEW_DEVICE);
+  ASSERT_EQ(4U, custom_mount_options.size());
+  EXPECT_EQ("foo", custom_mount_options[0]);
+  EXPECT_EQ("bar=baz", custom_mount_options[1]);
+  EXPECT_EQ("rw", custom_mount_options[2]);
+  EXPECT_EQ(kExpectedMountLabelOption, custom_mount_options[3]);
 }
 
 }  // namespace chromeos

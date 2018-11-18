@@ -59,7 +59,6 @@ class MODULES_EXPORT EventSource final
       public EventSourceParser::Client {
   DEFINE_WRAPPERTYPEINFO();
   USING_GARBAGE_COLLECTED_MIXIN(EventSource);
-  USING_PRE_FINALIZER(EventSource, Dispose);
 
  public:
   static EventSource* Create(ExecutionContext*,
@@ -98,18 +97,16 @@ class MODULES_EXPORT EventSource final
   // ScriptWrappable
   bool HasPendingActivity() const final;
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  private:
   EventSource(ExecutionContext*, const KURL&, const EventSourceInit&);
-
-  void Dispose();
 
   void DidReceiveResponse(unsigned long,
                           const ResourceResponse&,
                           std::unique_ptr<WebDataConsumerHandle>) override;
   void DidReceiveData(const char*, unsigned) override;
-  void DidFinishLoading(unsigned long, double) override;
+  void DidFinishLoading(unsigned long) override;
   void DidFail(const ResourceError&) override;
   void DidFailRedirectCheck() override;
 
@@ -140,6 +137,7 @@ class MODULES_EXPORT EventSource final
 
   unsigned long long reconnect_delay_;
   String event_stream_origin_;
+  unsigned long resource_identifier_ = 0;
 };
 
 }  // namespace blink

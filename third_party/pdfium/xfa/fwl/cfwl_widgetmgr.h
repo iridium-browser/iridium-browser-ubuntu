@@ -14,8 +14,6 @@
 #include "core/fxcrt/fx_system.h"
 #include "xfa/fxgraphics/cxfa_graphics.h"
 
-#define FWL_WGTMGR_DisableForm 0x00000002
-
 class CFWL_Message;
 class CXFA_FFApp;
 class CXFA_FWLAdapterWidgetMgr;
@@ -33,8 +31,8 @@ class CFWL_WidgetMgr {
                     CXFA_Graphics* pGraphics,
                     const CFX_Matrix& matrix);
 
-  CFWL_Widget* GetParentWidget(CFWL_Widget* pWidget) const;
-  CFWL_Widget* GetOwnerWidget(CFWL_Widget* pWidget) const;
+  CFWL_Widget* GetParentWidget(const CFWL_Widget* pWidget) const;
+  CFWL_Widget* GetOwnerWidget(const CFWL_Widget* pWidget) const;
   CFWL_Widget* GetNextSiblingWidget(CFWL_Widget* pWidget) const;
   CFWL_Widget* GetFirstChildWidget(CFWL_Widget* pWidget) const;
   CFWL_Widget* GetSystemFormWidget(CFWL_Widget* pWidget) const;
@@ -56,15 +54,11 @@ class CFWL_WidgetMgr {
   CFWL_Widget* GetDefaultButton(CFWL_Widget* pParent) const;
   void AddRedrawCounts(CFWL_Widget* pWidget);
 
-  bool IsFormDisabled() const {
-    return !!(m_dwCapability & FWL_WGTMGR_DisableForm);
-  }
-
   void GetAdapterPopupPos(CFWL_Widget* pWidget,
                           float fMinHeight,
                           float fMaxHeight,
                           const CFX_RectF& rtAnchor,
-                          CFX_RectF& rtPopup) const;
+                          CFX_RectF* pPopupRect) const;
 
  private:
   class Item {
@@ -81,15 +75,12 @@ class CFWL_WidgetMgr {
     CFWL_Widget* const pWidget;
     std::unique_ptr<CXFA_Graphics> pOffscreen;
     int32_t iRedrawCounter;
-#if _FX_PLATFORM_ == _FX_PLATFORM_WINDOWS_
-    bool bOutsideChanged;
-#endif  // _FX_PLATFORM_ == _FX_PLATFORM_WINDOWS_
   };
 
   CFWL_Widget* GetFirstSiblingWidget(CFWL_Widget* pWidget) const;
   CFWL_Widget* GetPriorSiblingWidget(CFWL_Widget* pWidget) const;
   CFWL_Widget* GetLastChildWidget(CFWL_Widget* pWidget) const;
-  Item* GetWidgetMgrItem(CFWL_Widget* pWidget) const;
+  Item* GetWidgetMgrItem(const CFWL_Widget* pWidget) const;
 
   void AppendWidget(CFWL_Widget* pWidget);
 
@@ -102,21 +93,11 @@ class CFWL_WidgetMgr {
                  const CFX_RectF& rtClip,
                  CXFA_Graphics* pGraphics,
                  const CFX_Matrix* pMatrix);
-  CXFA_Graphics* DrawWidgetBefore(CFWL_Widget* pWidget,
-                                  CXFA_Graphics* pGraphics,
-                                  const CFX_Matrix* pMatrix);
-  bool IsNeedRepaint(CFWL_Widget* pWidget,
-                     CFX_Matrix* pMatrix,
-                     const CFX_RectF& rtDirty);
 
   bool IsAbleNative(CFWL_Widget* pWidget) const;
 
-  uint32_t m_dwCapability;
-  std::map<CFWL_Widget*, std::unique_ptr<Item>> m_mapWidgetItem;
+  std::map<const CFWL_Widget*, std::unique_ptr<Item>> m_mapWidgetItem;
   UnownedPtr<CXFA_FWLAdapterWidgetMgr> const m_pAdapter;
-#if _FX_PLATFORM_ == _FX_PLATFORM_WINDOWS_
-  CFX_RectF m_rtScreen;
-#endif  // _FX_PLATFORM_ == _FX_PLATFORM_WINDOWS_
 };
 
 #endif  // XFA_FWL_CFWL_WIDGETMGR_H_

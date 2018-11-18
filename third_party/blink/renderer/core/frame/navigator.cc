@@ -32,6 +32,7 @@
 #include "third_party/blink/renderer/core/loader/frame_loader.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/page/page.h"
+#include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/platform/language.h"
 #include "third_party/blink/renderer/platform/memory_coordinator.h"
 
@@ -91,13 +92,15 @@ Vector<String> Navigator::languages() {
         GetFrame()->GetPage()->GetChromeClient().AcceptLanguages();
   }
 
+  probe::applyAcceptLanguageOverride(GetFrame(), &accept_languages);
+
   Vector<String> languages;
   accept_languages.Split(',', languages);
 
   // Sanitizing tokens. We could do that more extensively but we should assume
   // that the accept languages are already sane and support BCP47. It is
   // likely a waste of time to make sure the tokens matches that spec here.
-  for (size_t i = 0; i < languages.size(); ++i) {
+  for (wtf_size_t i = 0; i < languages.size(); ++i) {
     String& token = languages[i];
     token = token.StripWhiteSpace();
     if (token.length() >= 3 && token[2] == '_')
@@ -114,11 +117,6 @@ void Navigator::Trace(blink::Visitor* visitor) {
   ScriptWrappable::Trace(visitor);
   DOMWindowClient::Trace(visitor);
   Supplementable<Navigator>::Trace(visitor);
-}
-
-void Navigator::TraceWrappers(const ScriptWrappableVisitor* visitor) const {
-  ScriptWrappable::TraceWrappers(visitor);
-  Supplementable<Navigator>::TraceWrappers(visitor);
 }
 
 }  // namespace blink

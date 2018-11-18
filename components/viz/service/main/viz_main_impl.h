@@ -6,14 +6,18 @@
 #define COMPONENTS_VIZ_SERVICE_MAIN_VIZ_MAIN_IMPL_H_
 
 #include "base/power_monitor/power_monitor.h"
+#include "base/single_thread_task_runner.h"
 #include "base/threading/thread.h"
+#include "build/build_config.h"
 #include "components/discardable_memory/client/client_discardable_shared_memory_manager.h"
+#include "components/viz/service/main/viz_compositor_thread_runner.h"
 #include "gpu/ipc/in_process_command_buffer.h"
 #include "gpu/ipc/service/gpu_init.h"
 #include "mojo/public/cpp/bindings/associated_binding_set.h"
 #include "mojo/public/cpp/bindings/binding.h"
 #include "services/viz/privileged/interfaces/gl/gpu_service.mojom.h"
 #include "services/viz/privileged/interfaces/viz_main.mojom.h"
+#include "ui/gfx/font_render_params.h"
 
 namespace gpu {
 class SyncPointManager;
@@ -28,9 +32,13 @@ class MojoUkmRecorder;
 }
 
 namespace viz {
-class DisplayProvider;
-class FrameSinkManagerImpl;
 class GpuServiceImpl;
+
+#if defined(OS_ANDROID)
+using CompositorThreadType = base::android::JavaHandlerThread;
+#else
+using CompositorThreadType = base::Thread;
+#endif
 
 class VizMainImpl : public gpu::GpuSandboxHelper, public mojom::VizMain {
  public:
@@ -49,6 +57,7 @@ class VizMainImpl : public gpu::GpuSandboxHelper, public mojom::VizMain {
     virtual void OnGpuServiceConnection(GpuServiceImpl* gpu_service) = 0;
     virtual void PostCompositorThreadCreated(
         base::SingleThreadTaskRunner* task_runner) = 0;
+    virtual void QuitMainMessageLoop() = 0;
   };
 
   struct ExternalDependencies {
@@ -86,21 +95,28 @@ class VizMainImpl : public gpu::GpuSandboxHelper, public mojom::VizMain {
       mojom::GpuHostPtr gpu_host,
       discardable_memory::mojom::DiscardableSharedMemoryManagerPtr
           discardable_memory_manager,
-      mojo::ScopedSharedBufferHandle activity_flags) override;
+      mojo::ScopedSharedBufferHandle activity_flags,
+      gfx::FontRenderParams::SubpixelRendering subpixel_rendering) override;
   void CreateFrameSinkManager(mojom::FrameSinkManagerParamsPtr params) override;
 
   GpuServiceImpl* gpu_service() { return gpu_service_.get(); }
   const GpuServiceImpl* gpu_service() const { return gpu_service_.get(); }
+
+  // Note that this may be null if viz is running in the browser process and
+  // using the ServiceDiscardableSharedMemoryManager.
+  discardable_memory::ClientDiscardableSharedMemoryManager*
+  discardable_shared_memory_manager() {
+    return discardable_shared_memory_manager_.get();
+  }
 
  private:
   // Initializes GPU's UkmRecorder if GPU is running in it's own process.
   void CreateUkmRecorderIfNeeded(service_manager::Connector* connector);
 
   void CreateFrameSinkManagerInternal(mojom::FrameSinkManagerParamsPtr params);
-  void CreateFrameSinkManagerOnCompositorThread(
-      mojom::FrameSinkManagerParamsPtr params);
 
-  void TearDownOnCompositorThread();
+  // Cleanly exits the process.
+  void ExitProcess();
 
   // gpu::GpuSandboxHelper:
   void PreSandboxStartup() override;
@@ -127,23 +143,26 @@ class VizMainImpl : public gpu::GpuSandboxHelper, public mojom::VizMain {
   std::unique_ptr<gpu::GpuInit> gpu_init_;
   std::unique_ptr<GpuServiceImpl> gpu_service_;
 
-  // The InCommandCommandBuffer::Service used by the frame sink manager.
-  scoped_refptr<gpu::InProcessCommandBuffer::Service> gpu_command_service_;
+  // This is created for OOP-D only. It allows the display compositor to use
+  // InProcessCommandBuffer to send GPU commands to the GPU thread from the
+  // compositor thread.
+  // TODO(kylechar): The only reason this member variable exists is so the last
+  // reference is released and the object is destroyed on the GPU thread. This
+  // works because |task_executor_| is destroyed after the VizCompositorThread
+  // has been shutdown. All usage of CommandBufferTaskExecutor has the same
+  // pattern, where the last scoped_refptr is released on the GPU thread after
+  // all InProcessCommandBuffers are destroyed, so the class doesn't need to be
+  // RefCountedThreadSafe.
+  scoped_refptr<gpu::CommandBufferTaskExecutor> task_executor_;
 
   // If the gpu service is not yet ready then we stash pending
   // FrameSinkManagerParams.
   mojom::FrameSinkManagerParamsPtr pending_frame_sink_manager_params_;
 
-  // Provides mojo interfaces for creating and managing FrameSinks. These live
-  // on the compositor thread.
-  std::unique_ptr<FrameSinkManagerImpl> frame_sink_manager_;
-  std::unique_ptr<DisplayProvider> display_provider_;
+  // Runs the VizCompositorThread for the display compositor with OOP-D.
+  std::unique_ptr<VizCompositorThreadRunner> viz_compositor_thread_runner_;
 
   const scoped_refptr<base::SingleThreadTaskRunner> gpu_thread_task_runner_;
-
-  // The main thread for the display compositor.
-  std::unique_ptr<base::Thread> compositor_thread_;
-  scoped_refptr<base::SingleThreadTaskRunner> compositor_thread_task_runner_;
 
   std::unique_ptr<ukm::MojoUkmRecorder> ukm_recorder_;
   std::unique_ptr<base::PowerMonitor> power_monitor_;

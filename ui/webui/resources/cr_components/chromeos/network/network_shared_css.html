@@ -1,21 +1,13 @@
 <link rel="import" href="chrome://resources/cr_elements/shared_style_css.html">
-<link rel="import" href="chrome://resources/html/md_select_css.html">
 
  <!-- Common styles for network elements. -->
 
 <dom-module id="network-shared">
   <template>
-    <style include="cr-shared-style md-select">
-      :root {
+    <style include="cr-shared-style">
+      :host {
         /* Margin for the show/hide password icon */
         --network-control-margin: 40px;
-      }
-
-      .control-box {
-        align-items: center;
-        display: flex;
-        height: 58px;  /* Matches height of paper-input */
-        padding: 0;
       }
 
       .property-box {
@@ -30,7 +22,7 @@
       }
 
       .property-box.indented {
-        -webkit-margin-start: var(--cr-section-padding);
+        margin-inline-start: var(--cr-section-padding);
       }
 
       .property-box.single-column {
@@ -53,23 +45,18 @@
       }
 
       .property-box > .middle {
-        -webkit-padding-start: 16px;
         align-items: center;
         flex: auto;
+        padding-inline-start: 16px;
       }
 
       .secondary {
         @apply --cr-secondary-text;
       }
 
-      paper-input-container {
-        --paper-input-container-input: {
-          font-size: inherit;
-          font-weight: 400;
-        };
-        --paper-input-container-input-color: var(--secondary-text-color);
-        margin-bottom: 0;
-        margin-top: -9px;
+      cr-input {
+        --cr-input-error-display: none;
+        margin-bottom: var(--cr-form-field-bottom-spacing);
       }
     </style>
   </template>

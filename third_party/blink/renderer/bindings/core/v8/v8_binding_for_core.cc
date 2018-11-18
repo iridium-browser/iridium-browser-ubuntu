@@ -31,8 +31,9 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 
 #include "third_party/blink/renderer/bindings/core/v8/custom/v8_custom_xpath_ns_resolver.h"
+#include "third_party/blink/renderer/bindings/core/v8/idl_types.h"
+#include "third_party/blink/renderer/bindings/core/v8/native_value_traits_impl.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_controller.h"
-#include "third_party/blink/renderer/bindings/core/v8/v8_abstract_event_listener.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_array_buffer_view.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_element.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_event_target.h"
@@ -50,7 +51,7 @@
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_client.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
-#include "third_party/blink/renderer/core/inspector/InspectorTraceEvents.h"
+#include "third_party/blink/renderer/core/inspector/inspector_trace_events.h"
 #include "third_party/blink/renderer/core/loader/frame_loader.h"
 #include "third_party/blink/renderer/core/typed_arrays/flexible_array_buffer_view.h"
 #include "third_party/blink/renderer/core/workers/worker_or_worklet_global_scope.h"
@@ -65,6 +66,7 @@
 #include "third_party/blink/renderer/platform/wtf/text/character_names.h"
 #include "third_party/blink/renderer/platform/wtf/text/cstring.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_buffer.h"
+#include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_hash.h"
 #include "third_party/blink/renderer/platform/wtf/text/unicode.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
@@ -410,13 +412,7 @@ int64_t ToInt64Slow(v8::Isolate* isolate,
                         "long long", exception_state);
   }
 
-  if (std::isnan(number_value) || std::isinf(number_value))
-    return 0;
-
-  // NaNs and +/-Infinity should be 0, otherwise modulo 2^64.
-  unsigned long long integer;
-  doubleToInteger(number_value, integer);
-  return integer;
+  return DoubleToInteger(number_value);
 }
 
 uint64_t ToUInt64Slow(v8::Isolate* isolate,
@@ -460,13 +456,7 @@ uint64_t ToUInt64Slow(v8::Isolate* isolate,
   if (configuration == kClamp)
     return clampTo<uint64_t>(number_value);
 
-  if (std::isinf(number_value))
-    return 0;
-
-  // NaNs and +/-Infinity should be 0, otherwise modulo 2^64.
-  unsigned long long integer;
-  doubleToInteger(number_value, integer);
-  return integer;
+  return DoubleToInteger(number_value);
 }
 
 float ToRestrictedFloat(v8::Isolate* isolate,
@@ -723,12 +713,11 @@ static ScriptState* ToScriptStateImpl(LocalFrame* frame,
 v8::Local<v8::Context> ToV8Context(ExecutionContext* context,
                                    DOMWrapperWorld& world) {
   DCHECK(context);
-  if (context->IsDocument()) {
-    if (LocalFrame* frame = ToDocument(context)->GetFrame())
+  if (auto* document = DynamicTo<Document>(context)) {
+    if (LocalFrame* frame = document->GetFrame())
       return ToV8Context(frame, world);
-  } else if (context->IsWorkerOrWorkletGlobalScope()) {
-    if (WorkerOrWorkletScriptController* script =
-            ToWorkerOrWorkletGlobalScope(context)->ScriptController()) {
+  } else if (auto* scope = DynamicTo<WorkerOrWorkletGlobalScope>(context)) {
+    if (WorkerOrWorkletScriptController* script = scope->ScriptController()) {
       if (script->GetScriptState()->ContextIsValid())
         return script->GetScriptState()->GetContext();
     }
@@ -788,27 +777,40 @@ bool IsValidEnum(const Vector<String>& values,
   return true;
 }
 
-v8::Local<v8::Object> GetEsIterator(v8::Isolate* isolate,
-                                    v8::Local<v8::Object> object,
-                                    ExceptionState& exception_state) {
-  v8::TryCatch block(isolate);
-  v8::Local<v8::Context> context = isolate->GetCurrentContext();
-  v8::Local<v8::Value> iterator_getter;
-  if (!object->Get(context, v8::Symbol::GetIterator(isolate))
-           .ToLocal(&iterator_getter)) {
-    exception_state.RethrowV8Exception(block.Exception());
-    return v8::Local<v8::Object>();
-  }
-  if (!iterator_getter->IsFunction()) {
-    exception_state.ThrowTypeError("Iterator getter is not callable.");
-    return v8::Local<v8::Object>();
+v8::Local<v8::Function> GetEsIteratorMethod(v8::Isolate* isolate,
+                                            v8::Local<v8::Object> object,
+                                            ExceptionState& exception_state) {
+  const v8::Local<v8::Value> key = v8::Symbol::GetIterator(isolate);
+
+  v8::TryCatch try_catch(isolate);
+  v8::Local<v8::Value> iterator_method;
+  if (!object->Get(isolate->GetCurrentContext(), key)
+           .ToLocal(&iterator_method)) {
+    exception_state.RethrowV8Exception(try_catch.Exception());
+    return v8::Local<v8::Function>();
   }
 
-  v8::Local<v8::Function> getter_function = iterator_getter.As<v8::Function>();
+  if (iterator_method->IsNullOrUndefined())
+    return v8::Local<v8::Function>();
+
+  if (!iterator_method->IsFunction()) {
+    exception_state.ThrowTypeError("Iterator must be callable function");
+    return v8::Local<v8::Function>();
+  }
+
+  return iterator_method.As<v8::Function>();
+}
+
+v8::Local<v8::Object> GetEsIteratorWithMethod(
+    v8::Isolate* isolate,
+    v8::Local<v8::Function> getter_function,
+    v8::Local<v8::Object> object,
+    ExceptionState& exception_state) {
+  v8::TryCatch block(isolate);
   v8::Local<v8::Value> iterator;
-  if (!V8ScriptRunner::CallFunction(getter_function,
-                                    ToExecutionContext(context), object, 0,
-                                    nullptr, isolate)
+  if (!V8ScriptRunner::CallFunction(
+           getter_function, ToExecutionContext(isolate->GetCurrentContext()),
+           object, 0, nullptr, isolate)
            .ToLocal(&iterator)) {
     exception_state.RethrowV8Exception(block.Exception());
     return v8::Local<v8::Object>();
@@ -818,6 +820,23 @@ v8::Local<v8::Object> GetEsIterator(v8::Isolate* isolate,
     return v8::Local<v8::Object>();
   }
   return iterator.As<v8::Object>();
+}
+
+v8::Local<v8::Object> GetEsIterator(v8::Isolate* isolate,
+                                    v8::Local<v8::Object> object,
+                                    ExceptionState& exception_state) {
+  v8::Local<v8::Function> iterator_getter =
+      GetEsIteratorMethod(isolate, object, exception_state);
+  if (exception_state.HadException())
+    return v8::Local<v8::Object>();
+
+  if (iterator_getter.IsEmpty()) {
+    exception_state.ThrowTypeError("Iterator getter is not callable.");
+    return v8::Local<v8::Object>();
+  }
+
+  return GetEsIteratorWithMethod(isolate, iterator_getter, object,
+                                 exception_state);
 }
 
 bool HasCallableIteratorSymbol(v8::Isolate* isolate,
@@ -861,6 +880,24 @@ v8::Local<v8::Value> FromJSONString(v8::Isolate* isolate,
   }
 
   return parsed;
+}
+
+Vector<String> GetOwnPropertyNames(v8::Isolate* isolate,
+                                   const v8::Local<v8::Object>& object,
+                                   ExceptionState& exception_state) {
+  if (object.IsEmpty())
+    return Vector<String>();
+
+  v8::TryCatch try_catch(isolate);
+  v8::Local<v8::Array> property_names;
+  if (!object->GetOwnPropertyNames(isolate->GetCurrentContext())
+           .ToLocal(&property_names)) {
+    exception_state.RethrowV8Exception(try_catch.Exception());
+    return Vector<String>();
+  }
+
+  return NativeValueTraits<IDLSequence<IDLString>>::NativeValue(
+      isolate, property_names, exception_state);
 }
 
 }  // namespace blink

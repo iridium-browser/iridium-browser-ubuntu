@@ -20,7 +20,7 @@
 
 #include "third_party/blink/renderer/core/html/forms/radio_button_group_scope.h"
 
-#include "third_party/blink/renderer/core/dom/ax_object_cache.h"
+#include "third_party/blink/renderer/core/accessibility/ax_object_cache.h"
 #include "third_party/blink/renderer/core/html/forms/html_input_element.h"
 #include "third_party/blink/renderer/core/input_type_names.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
@@ -288,7 +288,7 @@ void RadioButtonGroupScope::RemoveButton(HTMLInputElement* element) {
     return;
   group->Remove(element);
   if (group->IsEmpty()) {
-    // We don't remove an empty RadioButtonGroup from m_nameToGroupMap for
+    // We don't remove an empty RadioButtonGroup from name_to_group_map_ for
     // better performance.
     DCHECK(!group->IsRequired());
     SECURITY_DCHECK(!group->CheckedButton());

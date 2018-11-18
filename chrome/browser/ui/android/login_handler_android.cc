@@ -27,9 +27,10 @@ class LoginHandlerAndroid : public LoginHandler {
   LoginHandlerAndroid(
       net::AuthChallengeInfo* auth_info,
       content::ResourceRequestInfo::WebContentsGetter web_contents_getter,
-      const base::Callback<void(const base::Optional<net::AuthCredentials>&)>&
-          auth_required_callback)
-      : LoginHandler(auth_info, web_contents_getter, auth_required_callback) {}
+      LoginAuthRequiredCallback auth_required_callback)
+      : LoginHandler(auth_info,
+                     web_contents_getter,
+                     std::move(auth_required_callback)) {}
 
   // LoginHandler methods:
 
@@ -86,7 +87,10 @@ class LoginHandlerAndroid : public LoginHandler {
  protected:
   ~LoginHandlerAndroid() override {}
 
-  void CloseDialog() override {}
+  void CloseDialog() override {
+    if (chrome_http_auth_handler_)
+      chrome_http_auth_handler_->CloseDialog();
+  }
 
  private:
   std::unique_ptr<ChromeHttpAuthHandler> chrome_http_auth_handler_;
@@ -96,8 +100,7 @@ class LoginHandlerAndroid : public LoginHandler {
 scoped_refptr<LoginHandler> LoginHandler::Create(
     net::AuthChallengeInfo* auth_info,
     content::ResourceRequestInfo::WebContentsGetter web_contents_getter,
-    const base::Callback<void(const base::Optional<net::AuthCredentials>&)>&
-        auth_required_callback) {
+    LoginAuthRequiredCallback auth_required_callback) {
   return base::MakeRefCounted<LoginHandlerAndroid>(
-      auth_info, web_contents_getter, auth_required_callback);
+      auth_info, web_contents_getter, std::move(auth_required_callback));
 }

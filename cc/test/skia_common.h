@@ -40,7 +40,9 @@ sk_sp<PaintImageGenerator> CreatePaintImageGenerator(const gfx::Size& size);
 PaintImage CreateDiscardablePaintImage(
     const gfx::Size& size,
     sk_sp<SkColorSpace> color_space = nullptr,
-    bool allocate_encoded_memory = true);
+    bool allocate_encoded_memory = true,
+    PaintImage::Id id = PaintImage::kInvalidId,
+    SkColorType color_type = kN32_SkColorType);
 
 DrawImage CreateDiscardableDrawImage(const gfx::Size& size,
                                      sk_sp<SkColorSpace> color_space,
@@ -52,10 +54,10 @@ PaintImage CreateAnimatedImage(
     const gfx::Size& size,
     std::vector<FrameMetadata> frames,
     int repetition_count = kAnimationLoopInfinite,
-    size_t frame_index = PaintImage::kDefaultFrameIndex,
     PaintImage::Id id = PaintImage::GetNextId());
 
-PaintImage CreateBitmapImage(const gfx::Size& size);
+PaintImage CreateBitmapImage(const gfx::Size& size,
+                             SkColorType color_type = kN32_SkColorType);
 
 }  // namespace cc
 

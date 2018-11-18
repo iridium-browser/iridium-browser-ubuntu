@@ -23,33 +23,28 @@
   <template>
     <style include="settings-shared md-select iron-flex">
       .secondary-button ~ .secondary-button {
-        -webkit-margin-start: 12px;
+        margin-inline-start: 12px;
       }
 
+      /* Lines up with cr-input. */
       #custom-input {
-        margin-bottom: 1rem;
-      }
-
-      #customHomePage {
-        --paper-input-container: {
-          width: 200px;
-        };
-        width: 100%;  /* Pushes policy indicators to end. */
+        --cr-radio-button-disc: {
+          /* (cr-input line-height + cr-input top/bottom padding) / 2 -
+             cr-radio disc-wrapper height / 2 */
+          margin-top: calc((1.54em + 12px) / 2 - 8px);
+        }
+        align-items: start;
       }
 
       /* The theme mixes a link and a paper-button divided by a separator with
        * grit expressions and dom-if templates. That leads to a tricky thing
        * to style correctly, these are a workaround. */
       #themeRow paper-button {
-        -webkit-margin-end: 8px;
+        margin-inline-end: 20px;
       }
 
       #themeRow .separator {
-         -webkit-margin-start: 0;
-      }
-
-      #useSystem {
-        -webkit-margin-start: calc(var(--cr-button-edge-spacing) * -1);
+         margin-inline-start: 0;
       }
     </style>
     <settings-animated-pages id="pages" section="appearance"
@@ -170,18 +165,15 @@
         </cr-link-row>
         <div class="settings-box" hidden="[[!pageVisibility.pageZoom]]">
           <div id="pageZoom" class="start">$i18n{pageZoom}</div>
-          <div class="md-select-wrapper">
-            <select id="zoomLevel" class="md-select" aria-labelledby="pageZoom"
-                on-change="onZoomLevelChange_">
-              <template is="dom-repeat" items="[[pageZoomLevels_]]">
-                <option value="[[item]]"
-                    selected="[[zoomValuesEqual_(item, defaultZoom_)]]">
-                  [[formatZoom_(item)]]%
-                </option>
-              </template>
-            </select>
-            <span class="md-select-underline"></span>
-          </div>
+          <select id="zoomLevel" class="md-select" aria-labelledby="pageZoom"
+              on-change="onZoomLevelChange_">
+            <template is="dom-repeat" items="[[pageZoomLevels_]]">
+              <option value="[[item]]"
+                  selected="[[zoomValuesEqual_(item, defaultZoom_)]]">
+                [[formatZoom_(item)]]%
+              </option>
+            </template>
+          </select>
         </div>
 <if expr="is_macosx">
         <settings-toggle-button pref="{{prefs.webkit.webprefs.tabs_to_links}}"

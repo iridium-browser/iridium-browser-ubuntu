@@ -6,7 +6,6 @@ package org.chromium.chrome.browser.util;
 
 import android.content.Context;
 import android.net.Uri;
-import android.os.AsyncTask;
 import android.os.ParcelFileDescriptor;
 import android.support.test.InstrumentationRegistry;
 import android.support.test.filters.LargeTest;
@@ -17,8 +16,9 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 
+import org.chromium.base.task.AsyncTask;
 import org.chromium.base.test.BaseJUnit4ClassRunner;
-import org.chromium.content.browser.test.NativeLibraryTestRule;
+import org.chromium.content_public.browser.test.NativeLibraryTestRule;
 
 import java.io.FileNotFoundException;
 

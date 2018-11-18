@@ -8,6 +8,8 @@
 #include <stdint.h>
 
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "base/bind.h"
 #include "base/logging.h"
@@ -42,6 +44,15 @@ void WebUIDataSource::Update(BrowserContext* browser_context,
   URLDataManager::UpdateWebUIDataSource(browser_context, source_name,
                                         std::move(update));
 }
+
+namespace {
+
+std::string CleanUpPath(const std::string& path) {
+  // Remove the query string for named resource lookups.
+  return path.substr(0, path.find_first_of('?'));
+}
+
+}  // namespace
 
 // Internal class to hide the fact that WebUIDataSourceImpl implements
 // URLDataSource.
@@ -88,8 +99,7 @@ class WebUIDataSourceImpl::InternalDataSource : public URLDataSource {
     return parent_->deny_xframe_options_;
   }
   bool IsGzipped(const std::string& path) const override {
-    return parent_->use_gzip_ &&
-        parent_->excluded_paths_.find(path) == parent_->excluded_paths_.end();
+    return parent_->IsGzipped(path);
   }
 
  private:
@@ -97,7 +107,8 @@ class WebUIDataSourceImpl::InternalDataSource : public URLDataSource {
 };
 
 WebUIDataSourceImpl::WebUIDataSourceImpl(const std::string& source_name)
-    : URLDataSourceImpl(source_name, new InternalDataSource(this)),
+    : URLDataSourceImpl(source_name,
+                        std::make_unique<InternalDataSource>(this)),
       source_name_(source_name),
       default_resource_(-1),
       add_csp_(true),
@@ -275,8 +286,7 @@ void WebUIDataSourceImpl::StartDataRequest(
   int resource_id = default_resource_;
   std::map<std::string, int>::iterator result;
   // Remove the query string for named resource lookups.
-  std::string file_path = path.substr(0, path.find_first_of('?'));
-  result = path_to_idr_map_.find(file_path);
+  result = path_to_idr_map_.find(CleanUpPath(path));
   if (result != path_to_idr_map_.end())
     resource_id = result->second;
   DCHECK_NE(resource_id, -1);
@@ -290,6 +300,10 @@ void WebUIDataSourceImpl::SendLocalizedStringsAsJSON(
   std::string template_data;
   webui::AppendJsonJS(&localized_strings_, &template_data);
   callback.Run(base::RefCountedString::TakeString(&template_data));
+}
+
+bool WebUIDataSourceImpl::IsGzipped(const std::string& path) const {
+  return use_gzip_ && excluded_paths_.count(CleanUpPath(path)) == 0;
 }
 
 }  // namespace content

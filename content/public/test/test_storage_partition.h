@@ -113,6 +113,11 @@ class TestStoragePartition : public StoragePartition {
   }
   CacheStorageContext* GetCacheStorageContext() override;
 
+  void set_generated_code_cache_context(GeneratedCodeCacheContext* context) {
+    generated_code_cache_context_ = context;
+  }
+  GeneratedCodeCacheContext* GetGeneratedCodeCacheContext() override;
+
   void set_platform_notification_context(PlatformNotificationContext* context) {
     platform_notification_context_ = context;
   }
@@ -153,7 +158,7 @@ class TestStoragePartition : public StoragePartition {
   void ClearData(uint32_t remove_mask,
                  uint32_t quota_storage_remove_mask,
                  const OriginMatcherFunction& origin_matcher,
-                 const CookieMatcherFunction& cookie_matcher,
+                 network::mojom::CookieDeletionFilterPtr cookie_deletion_filter,
                  const base::Time begin,
                  const base::Time end,
                  base::OnceClosure callback) override;
@@ -165,6 +170,8 @@ class TestStoragePartition : public StoragePartition {
       base::OnceClosure callback) override;
 
   void Flush() override;
+
+  void ResetURLLoaderFactories() override;
 
   void ClearBluetoothAllowedDevicesMapForTesting() override;
   void FlushNetworkInterfaceForTesting() override;
@@ -185,6 +192,7 @@ class TestStoragePartition : public StoragePartition {
   ServiceWorkerContext* service_worker_context_ = nullptr;
   SharedWorkerService* shared_worker_service_ = nullptr;
   CacheStorageContext* cache_storage_context_ = nullptr;
+  GeneratedCodeCacheContext* generated_code_cache_context_ = nullptr;
   PlatformNotificationContext* platform_notification_context_ = nullptr;
   WebPackageContext* web_package_context_ = nullptr;
 #if !defined(OS_ANDROID)

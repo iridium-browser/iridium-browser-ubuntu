@@ -39,7 +39,6 @@ class TokenCore : public base::RefCounted<TokenCore> {
 enum SwapBehavior {
   USE_DEFAULT_SWAP,
   USE_FAST_SWAP_VIA_ADL,
-  USE_FAST_SWAP_VIA_SPECIALIZATION
 };
 
 const char kEmptyToken[] = "<empty token>";
@@ -89,25 +88,11 @@ class TokenBase {
 
 using Token = TokenBase<USE_DEFAULT_SWAP>;
 using ADLToken = TokenBase<USE_FAST_SWAP_VIA_ADL>;
-using SpecializationToken = TokenBase<USE_FAST_SWAP_VIA_SPECIALIZATION>;
 
 void swap(ADLToken& t1, ADLToken& t2) {
   t1.Swap(&t2);
 }
 
-}  // namespace syncer
-
-// Allowed by the standard (17.4.3.1/1).
-namespace std {
-
-template <>
-void swap(syncer::SpecializationToken& t1, syncer::SpecializationToken& t2) {
-  t1.Swap(&t2);
-}
-
-}  // namespace std
-
-namespace syncer {
 namespace {
 
 class ImmutableTest : public ::testing::Test {};
@@ -175,11 +160,6 @@ TEST_F(ImmutableTest, ADLToken) {
                                               false /* expect_copies */);
 }
 
-TEST_F(ImmutableTest, SpecializationToken) {
-  RunTokenTest<SpecializationToken, Immutable<SpecializationToken>>(
-      "SpecializationToken", false /* expect_copies */);
-}
-
 template <typename C, typename ImmutableC>
 void RunTokenContainerTest(const char* token) {
   SCOPED_TRACE(token);
@@ -188,7 +168,7 @@ void RunTokenContainerTest(const char* token) {
   C c(tokens, tokens + token_count);
   const int copy_count = c.begin()->GetCopyCount();
   EXPECT_GT(copy_count, 0);
-  for (typename C::const_iterator it = c.begin(); it != c.end(); ++it) {
+  for (auto it = c.begin(); it != c.end(); ++it) {
     EXPECT_EQ(copy_count, it->GetCopyCount());
   }
 
@@ -198,7 +178,7 @@ void RunTokenContainerTest(const char* token) {
   EXPECT_TRUE(c.empty());
   ASSERT_EQ(token_count, immutable_c.Get().size());
   int i = 0;
-  for (typename C::const_iterator it = c.begin(); it != c.end(); ++it) {
+  for (auto it = c.begin(); it != c.end(); ++it) {
     EXPECT_EQ(tokens[i].GetToken(), it->GetToken());
     EXPECT_EQ(copy_count, it->GetCopyCount());
     ++i;

@@ -27,10 +27,11 @@
 
 #include "third_party/blink/renderer/platform/fonts/character_range.h"
 #include "third_party/blink/renderer/platform/fonts/shaping/caching_word_shape_iterator.h"
-#include "third_party/blink/renderer/platform/fonts/shaping/harf_buzz_shaper.h"
+#include "third_party/blink/renderer/platform/fonts/shaping/harfbuzz_shaper.h"
 #include "third_party/blink/renderer/platform/fonts/shaping/shape_cache.h"
 #include "third_party/blink/renderer/platform/fonts/shaping/shape_result_buffer.h"
 #include "third_party/blink/renderer/platform/fonts/simple_font_data.h"
+#include "third_party/blink/renderer/platform/fonts/text_run_paint_info.h"
 #include "third_party/blink/renderer/platform/wtf/text/character_names.h"
 
 namespace blink {
@@ -39,6 +40,8 @@ ShapeCache* CachingWordShaper::GetShapeCache() const {
   return font_.font_fallback_list_->GetShapeCache(font_.font_description_);
 }
 
+// Returns the total advance width of the TextRun run. If glyph_bounds
+// is specified it constructs on it the smallest bounding box covering all ink.
 float CachingWordShaper::Width(const TextRun& run,
                                HashSet<const SimpleFontData*>* fallback_fonts,
                                FloatRect* glyph_bounds) {
@@ -47,6 +50,11 @@ float CachingWordShaper::Width(const TextRun& run,
   CachingWordShapeIterator iterator(GetShapeCache(), run, &font_);
   while (iterator.Next(&word_result)) {
     if (word_result) {
+      // For every word_result we need to accumulate its width to adjust the
+      // glyph_bounds. When the word_result is in RTL we accumulate in the
+      // opposite direction (negative).
+      if (run.Rtl())
+        width -= word_result->Width();
       if (glyph_bounds) {
         FloatRect adjusted_bounds = word_result->Bounds();
         // Translate glyph bounds to the current glyph position which
@@ -54,9 +62,18 @@ float CachingWordShaper::Width(const TextRun& run,
         adjusted_bounds.SetX(adjusted_bounds.X() + width);
         glyph_bounds->Unite(adjusted_bounds);
       }
-      width += word_result->Width();
+      if (!run.Rtl())
+        width += word_result->Width();
       if (fallback_fonts)
         word_result->FallbackFonts(fallback_fonts);
+    }
+  }
+
+  if (run.Rtl()) {
+    // Finally, convert width back to positive if run is RTL.
+    width = -width;
+    if (glyph_bounds) {
+      glyph_bounds->SetX(glyph_bounds->X() + width);
     }
   }
 
@@ -79,13 +96,15 @@ static inline float ShapeResultsForRun(ShapeCache* shape_cache,
   return total_width;
 }
 
-int CachingWordShaper::OffsetForPosition(const TextRun& run,
-                                         float target_x,
-                                         bool include_partial_glyphs) {
+int CachingWordShaper::OffsetForPosition(
+    const TextRun& run,
+    float target_x,
+    IncludePartialGlyphsOption partial_glyphs,
+    BreakGlyphsOption break_glyphs) {
   ShapeResultBuffer buffer;
   ShapeResultsForRun(GetShapeCache(), &font_, run, &buffer);
 
-  return buffer.OffsetForPosition(run, target_x, include_partial_glyphs);
+  return buffer.OffsetForPosition(run, target_x, partial_glyphs, break_glyphs);
 }
 
 void CachingWordShaper::FillResultBuffer(const TextRunPaintInfo& run_info,
@@ -100,14 +119,14 @@ CharacterRange CachingWordShaper::GetCharacterRange(const TextRun& run,
   ShapeResultBuffer buffer;
   float total_width = ShapeResultsForRun(GetShapeCache(), &font_, run, &buffer);
 
-  return buffer.GetCharacterRange(run.Direction(), total_width, from, to);
+  return buffer.GetCharacterRange(run.ToStringView(), run.Direction(),
+                                  total_width, from, to);
 }
 
 Vector<CharacterRange> CachingWordShaper::IndividualCharacterRanges(
     const TextRun& run) {
   ShapeResultBuffer buffer;
   float total_width = ShapeResultsForRun(GetShapeCache(), &font_, run, &buffer);
-
   auto ranges = buffer.IndividualCharacterRanges(run.Direction(), total_width);
   // The shaper can fail to return glyph metrics for all characters (see
   // crbug.com/613915 and crbug.com/615661) so add empty ranges to ensure all
@@ -115,6 +134,14 @@ Vector<CharacterRange> CachingWordShaper::IndividualCharacterRanges(
   while (ranges.size() < static_cast<unsigned>(run.length()))
     ranges.push_back(CharacterRange(0, 0, 0, 0));
   return ranges;
+}
+
+Vector<double> CachingWordShaper::IndividualCharacterAdvances(
+    const TextRun& run) {
+  ShapeResultBuffer buffer;
+  float total_width = ShapeResultsForRun(GetShapeCache(), &font_, run, &buffer);
+  return buffer.IndividualCharacterAdvances(run.ToStringView(), run.Direction(),
+                                            total_width);
 }
 
 Vector<ShapeResult::RunFontData> CachingWordShaper::GetRunFontData(

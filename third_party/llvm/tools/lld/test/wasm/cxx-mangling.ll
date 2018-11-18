@@ -1,10 +1,10 @@
 ; RUN: llc -filetype=obj %s -o %t.o
-; RUN: wasm-ld --demangle --check-signatures -o %t_demangle.wasm %t.o
+; RUN: wasm-ld --export=_Z3fooi --demangle -o %t_demangle.wasm %t.o
 ; RUN: obj2yaml %t_demangle.wasm | FileCheck %s
-; RUN: wasm-ld --no-demangle --check-signatures -o %t_nodemangle.wasm %t.o
+; RUN: wasm-ld --export=_Z3fooi --no-demangle -o %t_nodemangle.wasm %t.o
 ; RUN: obj2yaml %t_nodemangle.wasm | FileCheck %s
 
-target triple = "wasm32-unknown-unknown-wasm"
+target triple = "wasm32-unknown-unknown"
 
 ; Check that the EXPORT name is still mangled, but that the "name" custom
 ; section contains the unmangled name.
@@ -32,12 +32,12 @@ define void @_start() {
 ; CHECK-NEXT:       - Name:            __data_end
 ; CHECK-NEXT:         Kind:            GLOBAL
 ; CHECK-NEXT:         Index:           2
-; CHECK-NEXT:       - Name:            _start
-; CHECK-NEXT:         Kind:            FUNCTION
-; CHECK-NEXT:         Index:           3
 ; CHECK-NEXT:       - Name:            _Z3fooi
 ; CHECK-NEXT:         Kind:            FUNCTION
 ; CHECK-NEXT:         Index:           2
+; CHECK-NEXT:       - Name:            _start
+; CHECK-NEXT:         Kind:            FUNCTION
+; CHECK-NEXT:         Index:           3
 ; CHECK-NEXT:   - Type:            CODE
 ; CHECK-NEXT:     Functions:
 ; CHECK-NEXT:       - Index:           0

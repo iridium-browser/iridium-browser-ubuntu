@@ -7,6 +7,7 @@
 #include <string>
 
 #include "base/memory/ref_counted_memory.h"
+#include "base/stl_util.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
@@ -16,7 +17,7 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/signin/signin_manager_factory.h"
+#include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/browser/themes/theme_properties.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
@@ -32,15 +33,15 @@
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/theme_resources.h"
 #include "components/bookmarks/common/bookmark_pref_names.h"
-#include "components/google/core/browser/google_util.h"
+#include "components/google/core/common/google_util.h"
 #include "components/prefs/pref_service.h"
-#include "components/signin/core/browser/signin_manager.h"
 #include "components/strings/grit/components_strings.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_urls.h"
+#include "services/identity/public/cpp/identity_manager.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/template_expressions.h"
@@ -51,8 +52,8 @@
 #include "ui/gfx/color_utils.h"
 
 #if defined(OS_CHROMEOS)
-#include "ash/strings/grit/ash_strings.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
+#include "chromeos/strings/grit/chromeos_strings.h"
 #endif
 
 #if defined(OS_MACOSX)
@@ -357,7 +358,7 @@ void NTPResourceCache::CreateNewTabGuestHTML() {
 // keys. This functionality is not implemented for NTP.
 static base::string16 GetLocalizedString(int message_id) {
   base::string16 result = l10n_util::GetStringUTF16(message_id);
-  result.erase(std::remove(result.begin(), result.end(), '&'), result.end());
+  base::Erase(result, '&');
   return result;
 }
 
@@ -457,7 +458,7 @@ void NTPResourceCache::CreateNewTabHTML() {
 
   load_time_data.SetBoolean(
       "isUserSignedIn",
-      SigninManagerFactory::GetForProfile(profile_)->IsAuthenticated());
+      IdentityManagerFactory::GetForProfile(profile_)->HasPrimaryAccount());
 
   // Load the new tab page appropriate for this build.
   base::StringPiece new_tab_html(

@@ -48,7 +48,7 @@ class LayoutSVGText final : public LayoutSVGBlock {
 
   void AddOutlineRects(Vector<LayoutRect>&,
                        const LayoutPoint& additional_offset,
-                       IncludeBlockVisualOverflowOrNot) const override;
+                       NGOutlineType) const override;
 
   static LayoutSVGText* LocateLayoutSVGTextAncestor(LayoutObject*);
   static const LayoutSVGText* LocateLayoutSVGTextAncestor(const LayoutObject*);
@@ -71,10 +71,11 @@ class LayoutSVGText final : public LayoutSVGBlock {
     return type == kLayoutObjectSVGText || LayoutSVGBlock::IsOfType(type);
   }
 
-  void Paint(const PaintInfo&, const LayoutPoint&) const override;
-  bool NodeAtFloatPoint(HitTestResult&,
-                        const FloatPoint& point_in_parent,
-                        HitTestAction) override;
+  void Paint(const PaintInfo&) const override;
+  bool NodeAtPoint(HitTestResult&,
+                   const HitTestLocation& location_in_parent,
+                   const LayoutPoint& accumulated_offset,
+                   HitTestAction) override;
   PositionWithAffinity PositionForPoint(const LayoutPoint&) const override;
 
   void UpdateLayout() override;
@@ -85,6 +86,8 @@ class LayoutSVGText final : public LayoutSVGBlock {
   void AddChild(LayoutObject* child,
                 LayoutObject* before_child = nullptr) override;
   void RemoveChild(LayoutObject*) override;
+
+  void StyleDidChange(StyleDifference, const ComputedStyle* old_style) override;
   void WillBeDestroyed() override;
 
   RootInlineBox* CreateRootInlineBox() override;

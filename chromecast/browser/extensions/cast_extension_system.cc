@@ -11,7 +11,10 @@
 #include "base/json/json_string_value_serializer.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/task/post_task.h"
+#include "chromecast/browser/extensions/api/tts/tts_extension_api.h"
 #include "content/public/browser/browser_context.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
@@ -127,9 +130,17 @@ const Extension* CastExtensionSystem::LoadExtension(
       LOG(WARNING) << warning.message;
   }
 
-  PostLoadExtension(extension);
+  base::PostTaskWithTraits(
+      FROM_HERE, {content::BrowserThread::UI},
+      base::BindOnce(&CastExtensionSystem::PostLoadExtension,
+                     base::Unretained(this), extension));
 
   return extension.get();
+}
+
+void CastExtensionSystem::UnloadExtension(const std::string& extension_id,
+                                          UnloadedExtensionReason reason) {
+  extension_registrar_->RemoveExtension(extension_id, reason);
 }
 
 void CastExtensionSystem::PostLoadExtension(
@@ -143,6 +154,9 @@ const Extension* CastExtensionSystem::LoadApp(const base::FilePath& app_dir) {
 
 void CastExtensionSystem::Init() {
   extensions::ProcessManager::Get(browser_context_);
+
+  // Prime the tts extension API.
+  extensions::TtsAPI::GetFactoryInstance();
 
   // Inform the rest of the extensions system to start.
   ready_.Signal();
@@ -236,8 +250,8 @@ AppSorting* CastExtensionSystem::app_sorting() {
 void CastExtensionSystem::RegisterExtensionWithRequestContexts(
     const Extension* extension,
     const base::Closure& callback) {
-  BrowserThread::PostTaskAndReply(
-      BrowserThread::IO, FROM_HERE,
+  base::PostTaskWithTraitsAndReply(
+      FROM_HERE, {BrowserThread::IO},
       base::BindOnce(&InfoMap::AddExtension, info_map(),
                      base::RetainedRef(extension), base::Time::Now(), false,
                      false),
@@ -265,6 +279,7 @@ void CastExtensionSystem::InstallUpdate(
     const std::string& extension_id,
     const std::string& public_key,
     const base::FilePath& unpacked_dir,
+    bool install_immediately,
     InstallUpdateCallback install_update_callback) {
   NOTREACHED();
 }

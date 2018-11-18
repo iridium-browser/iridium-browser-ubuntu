@@ -12,8 +12,10 @@
 #include "core/fpdfapi/page/cpdf_page.h"
 #include "core/fpdfapi/page/cpdf_pageobject.h"
 #include "core/fpdfapi/parser/cpdf_array.h"
+#include "core/fpdfapi/parser/cpdf_dictionary.h"
 #include "core/fpdfapi/parser/cpdf_name.h"
-#include "core/fpdfapi/render/cpdf_dibsource.h"
+#include "core/fpdfapi/parser/cpdf_stream_acc.h"
+#include "core/fpdfapi/render/cpdf_dibbase.h"
 #include "fpdfsdk/cpdfsdk_customaccess.h"
 #include "fpdfsdk/cpdfsdk_helpers.h"
 #include "third_party/base/ptr_util.h"
@@ -57,17 +59,20 @@ bool LoadJpegHelper(FPDF_PAGE* pages,
   if (!image_object || !fileAccess)
     return false;
 
-  RetainPtr<IFX_SeekableReadStream> pFile = MakeSeekableReadStream(fileAccess);
-  CPDF_ImageObject* pImgObj = static_cast<CPDF_ImageObject*>(image_object);
+  CPDF_ImageObject* pImgObj =
+      CPDFPageObjectFromFPDFPageObject(image_object)->AsImage();
+  if (!pImgObj)
+    return false;
 
   if (pages) {
     for (int index = 0; index < nCount; index++) {
       CPDF_Page* pPage = CPDFPageFromFPDFPage(pages[index]);
       if (pPage)
-        pImgObj->GetImage()->ResetCache(pPage, nullptr);
+        pImgObj->GetImage()->ResetCache(pPage);
     }
   }
 
+  RetainPtr<IFX_SeekableReadStream> pFile = MakeSeekableReadStream(fileAccess);
   if (inlineJpeg)
     pImgObj->GetImage()->SetJpegImageInline(pFile);
   else
@@ -86,7 +91,9 @@ FPDFPageObj_NewImageObj(FPDF_DOCUMENT document) {
 
   auto pImageObj = pdfium::MakeUnique<CPDF_ImageObject>();
   pImageObj->SetImage(pdfium::MakeRetain<CPDF_Image>(pDoc));
-  return pImageObj.release();
+
+  // Caller takes ownership.
+  return FPDFPageObjectFromCPDFPageObject(pImageObj.release());
 }
 
 FPDF_EXPORT FPDF_BOOL FPDF_CALLCONV
@@ -116,7 +123,11 @@ FPDFImageObj_SetMatrix(FPDF_PAGEOBJECT image_object,
   if (!image_object)
     return false;
 
-  CPDF_ImageObject* pImgObj = static_cast<CPDF_ImageObject*>(image_object);
+  CPDF_ImageObject* pImgObj =
+      CPDFPageObjectFromFPDFPageObject(image_object)->AsImage();
+  if (!pImgObj)
+    return false;
+
   pImgObj->set_matrix(CFX_Matrix(static_cast<float>(a), static_cast<float>(b),
                                  static_cast<float>(c), static_cast<float>(d),
                                  static_cast<float>(e), static_cast<float>(f)));
@@ -133,13 +144,17 @@ FPDFImageObj_SetBitmap(FPDF_PAGE* pages,
   if (!image_object || !bitmap || !pages)
     return false;
 
-  CPDF_ImageObject* pImgObj = static_cast<CPDF_ImageObject*>(image_object);
+  CPDF_ImageObject* pImgObj =
+      CPDFPageObjectFromFPDFPageObject(image_object)->AsImage();
+  if (!pImgObj)
+    return false;
+
   for (int index = 0; index < nCount; index++) {
     CPDF_Page* pPage = CPDFPageFromFPDFPage(pages[index]);
     if (pPage)
-      pImgObj->GetImage()->ResetCache(pPage, nullptr);
+      pImgObj->GetImage()->ResetCache(pPage);
   }
-  RetainPtr<CFX_DIBitmap> holder(CFXBitmapFromFPDFBitmap(bitmap));
+  RetainPtr<CFX_DIBitmap> holder(CFXDIBitmapFromFPDFBitmap(bitmap));
   pImgObj->GetImage()->SetImage(holder);
   pImgObj->CalcBoundingBox();
   pImgObj->SetDirty(true);
@@ -156,7 +171,7 @@ FPDFImageObj_GetBitmap(FPDF_PAGEOBJECT image_object) {
   if (!pImg)
     return nullptr;
 
-  RetainPtr<CFX_DIBSource> pSource = pImg->LoadDIBSource();
+  RetainPtr<CFX_DIBBase> pSource = pImg->LoadDIBBase();
   if (!pSource)
     return nullptr;
 
@@ -170,7 +185,7 @@ FPDFImageObj_GetBitmap(FPDF_PAGEOBJECT image_object) {
   else
     pBitmap = pSource->Clone(nullptr);
 
-  return pBitmap.Leak();
+  return FPDFBitmapFromCFXDIBitmap(pBitmap.Leak());
 }
 
 FPDF_EXPORT unsigned long FPDF_CALLCONV
@@ -208,10 +223,14 @@ FPDFImageObj_GetImageDataRaw(FPDF_PAGEOBJECT image_object,
   if (!pImgStream)
     return 0;
 
-  uint32_t len = pImgStream->GetRawSize();
-  if (buffer && buflen >= len)
-    memcpy(buffer, pImgStream->GetRawData(), len);
+  auto streamAcc = pdfium::MakeRetain<CPDF_StreamAcc>(pImgStream);
+  streamAcc->LoadAllDataRaw();
 
+  const uint32_t len = streamAcc->GetSize();
+  if (!buffer || buflen < len)
+    return len;
+
+  memcpy(buffer, streamAcc->GetData(), len);
   return len;
 }
 
@@ -273,15 +292,15 @@ FPDFImageObj_GetImageMetadata(FPDF_PAGEOBJECT image_object,
   if (!pImg)
     return false;
 
-  metadata->marked_content_id = pObj->m_ContentMark.GetMarkedContentID();
+  metadata->marked_content_id = pObj->m_ContentMarks.GetMarkedContentID();
 
   const int nPixelWidth = pImg->GetPixelWidth();
   const int nPixelHeight = pImg->GetPixelHeight();
   metadata->width = nPixelWidth;
   metadata->height = nPixelHeight;
 
-  const float nWidth = pObj->m_Right - pObj->m_Left;
-  const float nHeight = pObj->m_Top - pObj->m_Bottom;
+  const float nWidth = pObj->GetRect().Width();
+  const float nHeight = pObj->GetRect().Height();
   constexpr int nPointsPerInch = 72;
   if (nWidth != 0 && nHeight != 0) {
     metadata->horizontal_dpi = nPixelWidth / nWidth * nPointsPerInch;
@@ -292,14 +311,14 @@ FPDFImageObj_GetImageMetadata(FPDF_PAGEOBJECT image_object,
   metadata->colorspace = FPDF_COLORSPACE_UNKNOWN;
 
   CPDF_Page* pPage = CPDFPageFromFPDFPage(page);
-  if (!pPage || !pPage->m_pDocument.Get() || !pImg->GetStream())
+  if (!pPage || !pPage->GetDocument() || !pImg->GetStream())
     return true;
 
-  auto pSource = pdfium::MakeRetain<CPDF_DIBSource>();
-  CPDF_DIBSource::LoadState ret = pSource->StartLoadDIBSource(
-      pPage->m_pDocument.Get(), pImg->GetStream(), false, nullptr,
-      pPage->m_pPageResources.Get());
-  if (ret == CPDF_DIBSource::LoadState::kFail)
+  auto pSource = pdfium::MakeRetain<CPDF_DIBBase>();
+  CPDF_DIBBase::LoadState ret = pSource->StartLoadDIBBase(
+      pPage->GetDocument(), pImg->GetStream(), false, nullptr,
+      pPage->m_pPageResources.Get(), false, 0, false);
+  if (ret == CPDF_DIBBase::LoadState::kFail)
     return true;
 
   metadata->bits_per_pixel = pSource->GetBPP();

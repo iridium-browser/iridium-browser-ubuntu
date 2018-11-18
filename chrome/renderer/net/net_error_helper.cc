@@ -12,10 +12,13 @@
 #include "base/feature_list.h"
 #include "base/i18n/rtl.h"
 #include "base/json/json_writer.h"
+#include "base/metrics/field_trial_params.h"
 #include "base/metrics/histogram.h"
+#include "base/strings/strcat.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "build/build_config.h"
+#include "chrome/common/chrome_features.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/renderer/chrome_render_thread_observer.h"
@@ -44,6 +47,7 @@
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_registry.h"
 #include "third_party/blink/public/platform/modules/fetch/fetch_api_request.mojom-shared.h"
+#include "third_party/blink/public/platform/web_data.h"
 #include "third_party/blink/public/platform/web_security_origin.h"
 #include "third_party/blink/public/platform/web_url.h"
 #include "third_party/blink/public/platform/web_url_request.h"
@@ -51,6 +55,7 @@
 #include "third_party/blink/public/web/web_document.h"
 #include "third_party/blink/public/web/web_document_loader.h"
 #include "third_party/blink/public/web/web_frame.h"
+#include "third_party/blink/public/web/web_history_item.h"
 #include "third_party/blink/public/web/web_local_frame.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/base/webui/jstemplate_builder.h"
@@ -66,6 +71,8 @@ using error_page::DnsProbeStatus;
 using error_page::DnsProbeStatusToString;
 using error_page::ErrorPageParams;
 using error_page::LocalizedError;
+using OfflineContentOnNetErrorFeatureState =
+    LocalizedError::OfflineContentOnNetErrorFeatureState;
 
 namespace {
 
@@ -86,6 +93,24 @@ NetErrorHelperCore::FrameType GetFrameType(RenderFrame* render_frame) {
     return NetErrorHelperCore::MAIN_FRAME;
   return NetErrorHelperCore::SUB_FRAME;
 }
+
+#if defined(OS_ANDROID)
+OfflineContentOnNetErrorFeatureState GetOfflineContentOnNetErrorFeatureState() {
+  if (!base::FeatureList::IsEnabled(features::kNewNetErrorPageUI))
+    return OfflineContentOnNetErrorFeatureState::kDisabled;
+  const std::string alternate_ui_name = base::GetFieldTrialParamValueByFeature(
+      features::kNewNetErrorPageUI,
+      features::kNewNetErrorPageUIAlternateParameterName);
+  if (alternate_ui_name == features::kNewNetErrorPageUIAlternateContentList) {
+    return OfflineContentOnNetErrorFeatureState::kEnabledList;
+  }
+  return OfflineContentOnNetErrorFeatureState::kEnabledSummary;
+}
+#else   // OS_ANDROID
+OfflineContentOnNetErrorFeatureState GetOfflineContentOnNetErrorFeatureState() {
+  return OfflineContentOnNetErrorFeatureState::kDisabled;
+}
+#endif  // OS_ANDROID
 
 const net::NetworkTrafficAnnotationTag& GetNetworkTrafficAnnotationTag() {
   static const net::NetworkTrafficAnnotationTag network_traffic_annotation_tag =
@@ -155,6 +180,15 @@ void NetErrorHelper::ButtonPressed(NetErrorHelperCore::Button button) {
 
 void NetErrorHelper::TrackClick(int tracking_id) {
   core_->TrackClick(tracking_id);
+}
+
+void NetErrorHelper::LaunchOfflineItem(const std::string& id,
+                                       const std::string& name_space) {
+  core_->LaunchOfflineItem(id, name_space);
+}
+
+void NetErrorHelper::LaunchDownloadsPage() {
+  core_->LaunchDownloadsPage();
 }
 
 void NetErrorHelper::SendCommand(
@@ -239,14 +273,14 @@ void NetErrorHelper::Feedback() {
 }
 
 void NetErrorHelper::DidStartProvisionalLoad(
-    blink::WebDocumentLoader* document_loader) {
+    blink::WebDocumentLoader* document_loader,
+    bool is_content_initiated) {
   core_->OnStartLoad(GetFrameType(render_frame()),
                      GetLoadingPageType(document_loader));
 }
 
-void NetErrorHelper::DidCommitProvisionalLoad(
-    bool is_new_navigation,
-    bool is_same_document_navigation) {
+void NetErrorHelper::DidCommitProvisionalLoad(bool is_same_document_navigation,
+                                              ui::PageTransition transition) {
   // If this is a "same-document" navigation, it's not a real navigation.  There
   // wasn't a start event for it, either, so just ignore it.
   if (is_same_document_navigation)
@@ -317,6 +351,7 @@ void NetErrorHelper::GenerateLocalizedErrorPage(
     bool* show_saved_copy_button_shown,
     bool* show_cached_copy_button_shown,
     bool* download_button_shown,
+    OfflineContentOnNetErrorFeatureState* offline_content_feature_state,
     std::string* error_html) const {
   error_html->clear();
 
@@ -327,11 +362,13 @@ void NetErrorHelper::GenerateLocalizedErrorPage(
     NOTREACHED() << "unable to load template.";
   } else {
     base::DictionaryValue error_strings;
+    *offline_content_feature_state = GetOfflineContentOnNetErrorFeatureState();
     LocalizedError::GetStrings(
         error.reason(), error.domain(), error.url(), is_failed_post,
         error.stale_copy_in_cache(), can_show_network_diagnostics_dialog,
         ChromeRenderThreadObserver::is_incognito_process(),
-        RenderThread::Get()->GetLocale(), std::move(params), &error_strings);
+        *offline_content_feature_state, RenderThread::Get()->GetLocale(),
+        std::move(params), &error_strings);
     *reload_button_shown = error_strings.Get("reloadButton", nullptr);
     *show_saved_copy_button_shown =
         error_strings.Get("showSavedCopyButton", nullptr);
@@ -339,6 +376,12 @@ void NetErrorHelper::GenerateLocalizedErrorPage(
         error_strings.Get("cacheButton", nullptr);
     *download_button_shown =
         error_strings.Get("downloadButton", nullptr);
+    if (!error_strings.Get("suggestedOfflineContentPresentationMode",
+                           nullptr)) {
+      *offline_content_feature_state =
+          OfflineContentOnNetErrorFeatureState::kDisabled;
+    }
+
     // "t" is the id of the template's root node.
     *error_html = webui::GetTemplatesHtml(template_html, &error_strings, "t");
   }
@@ -346,8 +389,12 @@ void NetErrorHelper::GenerateLocalizedErrorPage(
 
 void NetErrorHelper::LoadErrorPage(const std::string& html,
                                    const GURL& failed_url) {
-  render_frame()->GetWebFrame()->LoadHTMLString(
-      html, GURL(kUnreachableWebDataURL), failed_url, true);
+  render_frame()->GetWebFrame()->CommitDataNavigation(
+      blink::WebURLRequest(GURL(kUnreachableWebDataURL)), blink::WebData(html),
+      blink::WebString::FromUTF8("text/html"),
+      blink::WebString::FromUTF8("UTF-8"), failed_url,
+      blink::WebFrameLoadType::kReplaceCurrentItem, blink::WebHistoryItem(),
+      false /* is_client_redirect */, nullptr, nullptr);
 }
 
 void NetErrorHelper::EnablePageHelperFunctions(net::Error net_error) {
@@ -375,6 +422,7 @@ void NetErrorHelper::UpdateErrorPage(const error_page::Error& error,
       error.reason(), error.domain(), error.url(), is_failed_post,
       error.stale_copy_in_cache(), can_show_network_diagnostics_dialog,
       ChromeRenderThreadObserver::is_incognito_process(),
+      GetOfflineContentOnNetErrorFeatureState(),
       RenderThread::Get()->GetLocale(), std::unique_ptr<ErrorPageParams>(),
       &error_strings);
 
@@ -407,8 +455,7 @@ void NetErrorHelper::FetchNavigationCorrections(
   correction_fetcher_->SetHeader("Origin", "null");
 
   correction_fetcher_->Start(
-      render_frame()->GetWebFrame(),
-      blink::WebURLRequest::kRequestContextInternal,
+      render_frame()->GetWebFrame(), blink::mojom::RequestContextType::INTERNAL,
       render_frame()->GetURLLoaderFactory(), GetNetworkTrafficAnnotationTag(),
       base::BindOnce(&NetErrorHelper::OnNavigationCorrectionsFetched,
                      base::Unretained(this)));
@@ -431,15 +478,14 @@ void NetErrorHelper::SendTrackingRequest(
   tracking_fetcher_->SetHeader("Content-Type", "application/json");
 
   tracking_fetcher_->Start(
-      render_frame()->GetWebFrame(),
-      blink::WebURLRequest::kRequestContextInternal,
+      render_frame()->GetWebFrame(), blink::mojom::RequestContextType::INTERNAL,
       render_frame()->GetURLLoaderFactory(), GetNetworkTrafficAnnotationTag(),
       base::BindOnce(&NetErrorHelper::OnTrackingRequestComplete,
                      base::Unretained(this)));
 }
 
 void NetErrorHelper::ReloadPage(bool bypass_cache) {
-  render_frame()->GetWebFrame()->Reload(
+  render_frame()->GetWebFrame()->StartReload(
       bypass_cache ? blink::WebFrameLoadType::kReloadBypassingCache
                    : blink::WebFrameLoadType::kReload);
 }
@@ -452,7 +498,7 @@ void NetErrorHelper::LoadPageFromCache(const GURL& page_url) {
   blink::WebURLRequest request(page_url);
   request.SetCacheMode(blink::mojom::FetchCacheMode::kOnlyIfCached);
   request.SetRequestorOrigin(blink::WebSecurityOrigin::Create(page_url));
-  web_frame->LoadRequest(request);
+  web_frame->StartNavigation(request);
 }
 
 void NetErrorHelper::DiagnoseError(const GURL& page_url) {
@@ -472,6 +518,27 @@ void NetErrorHelper::SetIsShowingDownloadButton(bool show) {
       new ChromeViewHostMsg_SetIsShowingDownloadButtonInErrorPage(
           render_frame()->GetRoutingID(), show));
 #endif  // defined(OS_ANDROID)
+}
+
+void NetErrorHelper::OfflineContentAvailable(
+    const std::string& offline_content_json) {
+#if defined(OS_ANDROID)
+  if (!offline_content_json.empty()) {
+    render_frame()->ExecuteJavaScript(base::UTF8ToUTF16(base::StrCat(
+        {"offlineContentAvailable(", offline_content_json, ");"})));
+  }
+#endif
+}
+
+void NetErrorHelper::OfflineContentSummaryAvailable(
+    const std::string& offline_content_summary_json) {
+#if defined(OS_ANDROID)
+  if (!offline_content_summary_json.empty()) {
+    render_frame()->ExecuteJavaScript(
+        base::UTF8ToUTF16(base::StrCat({"offlineContentSummaryAvailable(",
+                                        offline_content_summary_json, ");"})));
+  }
+#endif
 }
 
 void NetErrorHelper::DNSProbeStatus(int32_t status_num) {

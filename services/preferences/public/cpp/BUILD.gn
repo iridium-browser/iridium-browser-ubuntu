@@ -20,6 +20,8 @@ source_set("cpp") {
     "scoped_pref_update.h",
   ]
 
+  configs += [ "//build/config/compiler:wexit_time_destructors" ]
+
   public_deps = [
     "//base",
     "//components/prefs",
@@ -28,7 +30,6 @@ source_set("cpp") {
   ]
 
   deps = [
-    "//mojo/common:values_struct_traits",
     "//mojo/public/cpp/bindings",
     "//services/preferences/public/cpp/lib",
   ]
@@ -48,4 +49,5 @@ source_set("service_main") {
     "pref_service_main.cc",
     "pref_service_main.h",
   ]
+  configs += [ "//build/config/compiler:wexit_time_destructors" ]
 }

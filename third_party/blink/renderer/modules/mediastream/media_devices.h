@@ -13,6 +13,7 @@
 #include "third_party/blink/renderer/core/dom/pausable_object.h"
 #include "third_party/blink/renderer/modules/event_target_modules.h"
 #include "third_party/blink/renderer/modules/mediastream/media_device_info.h"
+#include "third_party/blink/renderer/modules/mediastream/user_media_request.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/platform/async_method_runner.h"
 #include "third_party/blink/renderer/platform/heap/heap_allocator.h"
@@ -44,6 +45,10 @@ class MODULES_EXPORT MediaDevices final
   ScriptPromise getUserMedia(ScriptState*,
                              const MediaStreamConstraints&,
                              ExceptionState&);
+  ScriptPromise SendUserMediaRequest(ScriptState*,
+                                     WebUserMediaRequest::MediaType,
+                                     const MediaStreamConstraints&,
+                                     ExceptionState&);
 
   // EventTarget overrides.
   const AtomicString& InterfaceName() const override;
@@ -81,7 +86,7 @@ class MODULES_EXPORT MediaDevices final
     device_change_test_callback_ = std::move(test_callback);
   }
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
   DEFINE_ATTRIBUTE_EVENT_LISTENER(devicechange);
 

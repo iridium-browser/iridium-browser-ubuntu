@@ -7,6 +7,7 @@
 #include <vector>
 
 #import "base/mac/foundation_util.h"
+#include "base/mac/mac_util.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/strings/stringprintf.h"
@@ -370,8 +371,8 @@ TEST_F(SelectFileDialogMacTest, SelectionType) {
     std::string prompt;
   } test_cases[] = {
       {SelectFileDialog::SELECT_FOLDER, PICK_DIRS | CREATE_DIRS, "Select"},
-      {SelectFileDialog::SELECT_UPLOAD_FOLDER, PICK_DIRS | CREATE_DIRS,
-       "Upload"},
+      {SelectFileDialog::SELECT_UPLOAD_FOLDER, PICK_DIRS, "Upload"},
+      {SelectFileDialog::SELECT_EXISTING_FOLDER, PICK_DIRS, "Select"},
       {SelectFileDialog::SELECT_SAVEAS_FILE, HAS_ACCESSORY_VIEW | CREATE_DIRS,
        "Save"},
       {SelectFileDialog::SELECT_OPEN_FILE, HAS_ACCESSORY_VIEW | PICK_FILES,
@@ -420,6 +421,10 @@ TEST_F(SelectFileDialogMacTest, DialogMessage) {
 
 // Verify that multiple file dialogs are corrected handled.
 TEST_F(SelectFileDialogMacTest, MultipleDialogs) {
+  // TODO(https://crbug.com/852536): Test fails on 10.10.
+  if (base::mac::IsOS10_10())
+    return;
+
   FileDialogArguments args(GetDefaultArguments());
   SelectFileWithParams(args);
   SelectFileWithParams(args);

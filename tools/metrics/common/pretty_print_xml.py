@@ -56,7 +56,9 @@ def SplitParagraphs(text):
     if paragraphs[-1] and not l.strip():
       paragraphs.append([])
     else:
-      paragraphs[-1].append(l)
+      # Replace runs of repeated whitespace with a single space.
+      transformed_line = ' '.join(l.split())
+      paragraphs[-1].append(transformed_line)
   # Remove trailing empty paragraph if present.
   if paragraphs and not paragraphs[-1]:
     paragraphs = paragraphs[:-1]
@@ -115,16 +117,21 @@ class XmlStyle(object):
       return node
 
     # Element node with a tag name that we alphabetize the children of?
-    if node.tagName in self.tags_alphabetization_rules:
+    alpha_rules = self.tags_alphabetization_rules
+    if node.tagName in alpha_rules:
       # Put subnodes in a list of node, key pairs to allow for custom sorting.
-      subtag, key_function = self.tags_alphabetization_rules[node.tagName]
+      subtags = {}
+      for index, (subtag, key_function) in enumerate(alpha_rules[node.tagName]):
+        subtags[subtag] = (index, key_function)
+
       subnodes = []
       sort_key = -1
       pending_node_indices = []
       for c in node.childNodes:
         if (c.nodeType == xml.dom.minidom.Node.ELEMENT_NODE and
-            c.tagName == subtag):
-          sort_key = key_function(c)
+            c.tagName in subtags):
+          subtag_sort_index, key_function = subtags[c.tagName]
+          sort_key = (subtag_sort_index, key_function(c))
           # Replace sort keys for delayed nodes.
           for idx in pending_node_indices:
             subnodes[idx][1] = sort_key
@@ -134,7 +141,7 @@ class XmlStyle(object):
           # so they stay in the same relative position.
           # Therefore we delay setting key until the next node is found.
           pending_node_indices.append(len(subnodes))
-        subnodes.append( [c, sort_key] )
+        subnodes.append([c, sort_key])
 
       # Sort the subnode list.
       subnodes.sort(key=lambda pair: pair[1])

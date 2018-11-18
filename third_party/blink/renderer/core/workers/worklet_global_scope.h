@@ -13,17 +13,25 @@
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/core/workers/worker_or_worklet_global_scope.h"
-#include "third_party/blink/renderer/core/workers/worker_or_worklet_module_fetch_coordinator_proxy.h"
+#include "third_party/blink/renderer/core/workers/worklet_module_responses_map.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/bindings/trace_wrapper_member.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 
 namespace blink {
 
+class FetchClientSettingsObjectSnapshot;
 class WorkletPendingTasks;
 class WorkerReportingProxy;
 struct GlobalScopeCreationParams;
 
+// This is an implementation of the web-exposed WorkletGlobalScope interface
+// defined in the Worklets spec:
+// https://drafts.css-houdini.org/worklets/#workletglobalscope
+//
+// This instance lives either on the main thread (main thread worklet) or a
+// worker thread (threaded worklet). It's determined by constructors. See
+// comments on the constructors.
 class CORE_EXPORT WorkletGlobalScope
     : public WorkerOrWorkletGlobalScope,
       public ActiveScriptWrappable<WorkletGlobalScope> {
@@ -33,14 +41,16 @@ class CORE_EXPORT WorkletGlobalScope
  public:
   ~WorkletGlobalScope() override;
 
+  bool IsMainThreadWorkletGlobalScope() const final;
+  bool IsThreadedWorkletGlobalScope() const final;
   bool IsWorkletGlobalScope() const final { return true; }
 
   // Always returns false here as PaintWorkletGlobalScope and
   // AnimationWorkletGlobalScope don't have a #close() method on the global.
   // Note that AudioWorkletGlobal overrides this behavior.
-  bool IsClosing() const { return false; }
+  bool IsClosing() const override { return false; }
 
-  ExecutionContext* GetExecutionContext() const;
+  ExecutionContext* GetExecutionContext() const override;
 
   // ExecutionContext
   const KURL& Url() const final { return url_; }
@@ -49,6 +59,29 @@ class CORE_EXPORT WorkletGlobalScope
   String UserAgent() const final { return user_agent_; }
   SecurityContext& GetSecurityContext() final { return *this; }
   bool IsSecureContext(String& error_message) const final;
+  bool IsContextThread() const final;
+  void AddConsoleMessage(ConsoleMessage*) final;
+  void ExceptionThrown(ErrorEvent*) final;
+  CoreProbeSink* GetProbeSink() final;
+  scoped_refptr<base::SingleThreadTaskRunner> GetTaskRunner(TaskType) final;
+
+  // WorkerOrWorkletGlobalScope
+  void Dispose() override;
+  WorkerThread* GetThread() const final;
+
+  virtual LocalFrame* GetFrame() const;
+
+  const base::UnguessableToken& GetAgentClusterID() const final {
+    // Currently, worklet agents have no clearly defined owner. See
+    // https://html.spec.whatwg.org/multipage/webappapis.html#integration-with-the-javascript-agent-cluster-formalism
+    //
+    // However, it is intended that a SharedArrayBuffer can be shared with a
+    // worklet, e.g. the AudioWorklet. If this WorkletGlobalScope's creation
+    // params included an agent cluster ID, we'll assume that this worklet is
+    // in the same agent cluster. See
+    // https://bugs.chromium.org/p/chromium/issues/detail?id=892067.
+    return agent_cluster_id_;
+  }
 
   DOMTimerCoordinator* Timers() final {
     // WorkletGlobalScopes don't have timers.
@@ -64,11 +97,13 @@ class CORE_EXPORT WorkletGlobalScope
   void FetchAndInvokeScript(
       const KURL& module_url_record,
       network::mojom::FetchCredentialsMode,
+      FetchClientSettingsObjectSnapshot* outside_settings_object,
       scoped_refptr<base::SingleThreadTaskRunner> outside_settings_task_runner,
       WorkletPendingTasks*);
 
-  WorkerOrWorkletModuleFetchCoordinatorProxy* ModuleFetchCoordinatorProxy()
-      const;
+  WorkletModuleResponsesMap* GetModuleResponsesMap() const {
+    return module_responses_map_.Get();
+  }
 
   const SecurityOrigin* DocumentSecurityOrigin() const {
     return document_security_origin_.get();
@@ -84,21 +119,42 @@ class CORE_EXPORT WorkletGlobalScope
   bool DocumentSecureContext() const { return document_secure_context_; }
 
   void Trace(blink::Visitor*) override;
-  void TraceWrappers(const ScriptWrappableVisitor*) const override;
 
- protected:
-  // Partial implementation of the "set up a worklet environment settings
-  // object" algorithm:
-  // https://drafts.css-houdini.org/worklets/#script-settings-for-worklets
-  WorkletGlobalScope(
-      std::unique_ptr<GlobalScopeCreationParams>,
-      v8::Isolate*,
-      WorkerReportingProxy&,
-      scoped_refptr<base::SingleThreadTaskRunner> document_loading_task_runner,
-      scoped_refptr<base::SingleThreadTaskRunner> worklet_loading_task_runner);
+  HttpsState GetHttpsState() const override { return https_state_; }
+
+  // Constructs an instance as a main thread worklet. Must be called on the main
+  // thread.
+  WorkletGlobalScope(std::unique_ptr<GlobalScopeCreationParams>,
+                     WorkerReportingProxy&,
+                     LocalFrame*);
+  // Constructs an instance as a threaded worklet. Must be called on a worker
+  // thread.
+  WorkletGlobalScope(std::unique_ptr<GlobalScopeCreationParams>,
+                     WorkerReportingProxy&,
+                     WorkerThread*);
 
  private:
+  enum class ThreadType {
+    // Indicates this global scope lives on the main thread.
+    kMainThread,
+    // Indicates this global scope lives on a worker thread.
+    kOffMainThread
+  };
+
+  // The base constructor delegated from other public constructors. This
+  // partially implements the "set up a worklet environment settings object"
+  // algorithm defined in the Worklets spec:
+  // https://drafts.css-houdini.org/worklets/#script-settings-for-worklets
+  WorkletGlobalScope(std::unique_ptr<GlobalScopeCreationParams>,
+                     WorkerReportingProxy&,
+                     v8::Isolate*,
+                     ThreadType,
+                     LocalFrame*,
+                     WorkerThread*);
+
   EventTarget* ErrorEventTarget() final { return nullptr; }
+
+  void BindContentSecurityPolicyToExecutionContext() override;
 
   // The |url_| and |user_agent_| are inherited from the parent Document.
   const KURL url_;
@@ -111,7 +167,17 @@ class CORE_EXPORT WorkletGlobalScope
   // Used for origin trials, inherited from the parent Document.
   const bool document_secure_context_;
 
-  Member<WorkerOrWorkletModuleFetchCoordinatorProxy> fetch_coordinator_proxy_;
+  CrossThreadPersistent<WorkletModuleResponsesMap> module_responses_map_;
+
+  const HttpsState https_state_;
+
+  const base::UnguessableToken agent_cluster_id_;
+
+  const ThreadType thread_type_;
+  // |frame_| is available only when |thread_type_| is kMainThread.
+  Member<LocalFrame> frame_;
+  // |worker_thread_| is available only when |thread_type_| is kOffMainThread.
+  WorkerThread* worker_thread_;
 };
 
 DEFINE_TYPE_CASTS(WorkletGlobalScope,

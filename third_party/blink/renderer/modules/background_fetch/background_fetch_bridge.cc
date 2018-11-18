@@ -6,12 +6,12 @@
 
 #include <utility>
 #include "services/service_manager/public/cpp/interface_provider.h"
-#include "third_party/blink/public/platform/modules/serviceworker/web_service_worker_registration.h"
-#include "third_party/blink/public/platform/modules/serviceworker/web_service_worker_request.h"
+#include "third_party/blink/public/platform/modules/service_worker/web_service_worker_registration.h"
+#include "third_party/blink/public/platform/modules/service_worker/web_service_worker_request.h"
 #include "third_party/blink/renderer/modules/background_fetch/background_fetch_options.h"
 #include "third_party/blink/renderer/modules/background_fetch/background_fetch_registration.h"
 #include "third_party/blink/renderer/modules/background_fetch/background_fetch_type_converters.h"
-#include "third_party/blink/renderer/modules/background_fetch/icon_definition.h"
+#include "third_party/blink/renderer/modules/manifest/image_resource.h"
 
 namespace blink {
 
@@ -46,15 +46,29 @@ void BackgroundFetchBridge::GetIconDisplaySize(
   GetService()->GetIconDisplaySize(std::move(callback));
 }
 
+void BackgroundFetchBridge::MatchRequests(
+    const String& developer_id,
+    const String& unique_id,
+    base::Optional<WebServiceWorkerRequest> request_to_match,
+    mojom::blink::QueryParamsPtr cache_query_params,
+    bool match_all,
+    mojom::blink::BackgroundFetchService::MatchRequestsCallback callback) {
+  GetService()->MatchRequests(
+      GetSupplementable()->WebRegistration()->RegistrationId(), developer_id,
+      unique_id, std::move(request_to_match), std::move(cache_query_params),
+      match_all, std::move(callback));
+}
+
 void BackgroundFetchBridge::Fetch(
     const String& developer_id,
     Vector<WebServiceWorkerRequest> requests,
     mojom::blink::BackgroundFetchOptionsPtr options,
     const SkBitmap& icon,
+    mojom::blink::BackgroundFetchUkmDataPtr ukm_data,
     RegistrationCallback callback) {
   GetService()->Fetch(
       GetSupplementable()->WebRegistration()->RegistrationId(), developer_id,
-      std::move(requests), std::move(options), icon,
+      std::move(requests), std::move(options), icon, std::move(ukm_data),
       WTF::Bind(&BackgroundFetchBridge::DidGetRegistration,
                 WrapPersistent(this), WTF::Passed(std::move(callback))));
 }
@@ -69,10 +83,17 @@ void BackgroundFetchBridge::Abort(const String& developer_id,
 void BackgroundFetchBridge::UpdateUI(const String& developer_id,
                                      const String& unique_id,
                                      const String& title,
+                                     const SkBitmap& icon,
                                      UpdateUICallback callback) {
+  if (title.IsNull() && icon.isNull()) {
+    std::move(callback).Run(
+        mojom::blink::BackgroundFetchError::INVALID_ARGUMENT);
+    return;
+  }
+
   GetService()->UpdateUI(
       GetSupplementable()->WebRegistration()->RegistrationId(), developer_id,
-      unique_id, title, std::move(callback));
+      unique_id, title, icon, std::move(callback));
 }
 
 void BackgroundFetchBridge::GetRegistration(const String& developer_id,
@@ -92,6 +113,7 @@ void BackgroundFetchBridge::DidGetRegistration(
 
   if (registration) {
     DCHECK_EQ(error, mojom::blink::BackgroundFetchError::NONE);
+    DCHECK_EQ(registration->result(), "");
     registration->Initialize(GetSupplementable());
   }
 

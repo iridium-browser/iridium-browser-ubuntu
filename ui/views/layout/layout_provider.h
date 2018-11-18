@@ -7,6 +7,8 @@
 
 #include "base/macros.h"
 #include "ui/gfx/geometry/insets.h"
+#include "ui/gfx/geometry/size.h"
+#include "ui/gfx/shadow_value.h"
 #include "ui/views/style/typography_provider.h"
 #include "ui/views/views_export.h"
 
@@ -110,6 +112,20 @@ enum DistanceMetric {
 // elements that only show text. Otherwise CONTROL should be used.
 enum DialogContentType { CONTROL, TEXT };
 
+enum EmphasisMetric {
+  // No emphasis needed for shadows, corner radius, etc.
+  EMPHASIS_NONE,
+  // Use this to indicate low-emphasis interactive elements such as buttons and
+  // text fields.
+  EMPHASIS_LOW,
+  // Use this for components with medium emphasis, such the autofill dropdown.
+  EMPHASIS_MEDIUM,
+  // High-emphasis components, such as tabs or dialogs.
+  EMPHASIS_HIGH,
+  // Maximum emphasis components like the omnibox or rich suggestions.
+  EMPHASIS_MAXIMUM,
+};
+
 class VIEWS_EXPORT LayoutProvider {
  public:
   LayoutProvider();
@@ -144,6 +160,23 @@ class VIEWS_EXPORT LayoutProvider {
   // element in the content  and |trailing| is the type of the final element.
   gfx::Insets GetDialogInsetsForContentType(DialogContentType leading,
                                             DialogContentType trailing) const;
+
+  // TODO (https://crbug.com/822000): Possibly combine the following two
+  // functions into a single function returning a struct. Keeping them separate
+  // for now in case different emphasis is needed for different elements in the
+  // same context. Delete this TODO in Q4 2018.
+
+  // Returns the corner radius specific to the given emphasis metric.
+  virtual int GetCornerRadiusMetric(EmphasisMetric emphasis_metric,
+                                    const gfx::Size& size = gfx::Size()) const;
+
+  // Returns the shadow elevation metric for the given emphasis.
+  virtual int GetShadowElevationMetric(EmphasisMetric emphasis_metric) const;
+
+  // Creates shadows for the given elevation. Use GetShadowElevationMetric for
+  // the appropriate elevation.
+  virtual gfx::ShadowValues MakeShadowValues(int elevation,
+                                             SkColor color) const;
 
  private:
   DefaultTypographyProvider typography_provider_;

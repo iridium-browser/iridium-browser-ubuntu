@@ -10,7 +10,7 @@ assert(is_fuchsia)
 assert(!is_posix)
 
 config("compiler") {
-  sdk_version_file = rebase_path("$fuchsia_sdk/.hash")
+  sdk_version_file = rebase_path("${fuchsia_sdk}/.hash")
   sdk_version = read_file(sdk_version_file, "trim string")
   defines = [
     # To force full builds after SDK updates in case of ABI changes.
@@ -30,16 +30,6 @@ config("compiler") {
   asmflags = cflags
 
   ldflags += [
-    # TODO(thakis): Once Fuchsia's libclang_rt.builtin no longer has upstream
-    # patches, we might want to make tools/clang/scripts/update.py build it
-    # and bundle it with the clang package instead of using the library from
-    # the SDK, https://crbug.com/724204
-    # Note: Intentionally 7.0.0 instead of $clang_version because the clang
-    # version of the toolchain_libs directory in the Fuchsia SDK can be
-    # different from the version of Chromium's clang.
-    "-resource-dir",
-    rebase_path(fuchsia_sdk, root_build_dir) + "/toolchain_libs/clang/7.0.0",
-
     # The stack defaults to 256k on Fuchsia (see
     # https://fuchsia.googlesource.com/zircon/+/master/system/private/zircon/stack.h#9),
     # but on other platforms it's much higher, so a variety of code assumes more
@@ -56,6 +46,9 @@ config("compiler") {
     "-Wl,--as-needed",
   ]
 
+  # Add SDK lib dir for -lfdio above.
+  lib_dirs = [ rebase_path("${fuchsia_sdk}/arch/${current_cpu}/lib") ]
+
   # TODO(crbug.com/821951): Clang enables SafeStack by default when targeting
   # Fuchsia, but it breaks some tests, notably in V8.
   cflags += [ "-fno-sanitize=safe-stack" ]
@@ -66,20 +59,18 @@ config("compiler") {
 # Writes an extended version of fvm.blk to fvm.extended.blk.
 blobstore_extended_path = "$root_out_dir/fvm.extended.blk"
 action("blobstore_extended_fvm") {
-  # The file is grown by 500MB, which should be large enough to hold packaged
+  # The file is grown by 1GB, which should be large enough to hold packaged
   # binaries and assets. The value should be increased if the size becomes a
   # limitation in the future.
-  _extend_size = "524288000"  # 500MB = 500 * 1024 * 1024
+  _extend_size = "1073741824"  # 1GB
+
+  _target_dir = "${fuchsia_sdk}/target/${current_cpu}"
 
   script = "//build/config/fuchsia/extend_fvm.py"
 
-  if (current_cpu == "arm64") {
-    _blobstore_src_path = "//third_party/fuchsia-sdk/sdk/target/aarch64/fvm.blk"
-  } else if (current_cpu == "x64") {
-    _blobstore_src_path = "//third_party/fuchsia-sdk/sdk/target/x86_64/fvm.blk"
-  }
   inputs = [
-    _blobstore_src_path,
+    "${fuchsia_sdk}/tools/fvm",
+    "${_target_dir}/fvm.blk",
   ]
   outputs = [
     blobstore_extended_path,
@@ -87,7 +78,7 @@ action("blobstore_extended_fvm") {
 
   args = [
     rebase_path("${fuchsia_sdk}/tools/fvm"),
-    rebase_path(_blobstore_src_path),
+    rebase_path("${_target_dir}/fvm.blk"),
     rebase_path(blobstore_extended_path),
     _extend_size,
   ]
@@ -119,8 +110,7 @@ action("blobstore_extended_qcow2") {
   ]
 
   args = [
-    rebase_path("//third_party/fuchsia-sdk/sdk/qemu/bin/qemu-img",
-                root_build_dir),
+    rebase_path("${qemu_root}/bin/qemu-img", root_build_dir),
     "convert",
     "-f",
     "raw",

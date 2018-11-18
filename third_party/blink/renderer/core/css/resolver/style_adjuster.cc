@@ -56,7 +56,6 @@
 #include "third_party/blink/renderer/core/style/computed_style_constants.h"
 #include "third_party/blink/renderer/core/svg/svg_svg_element.h"
 #include "third_party/blink/renderer/core/svg_names.h"
-#include "third_party/blink/renderer/platform/feature_policy/feature_policy.h"
 #include "third_party/blink/renderer/platform/length.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/transforms/transform_operations.h"
@@ -79,14 +78,57 @@ TouchAction AdjustTouchActionForElement(TouchAction touch_action,
   return touch_action;
 }
 
-// Returns true for elements that are either <img> or <svg> image or <video>
-// that are not in an image or media document; returns false otherwise.
-bool IsImageOrVideoElement(const Element* element) {
-  if ((IsHTMLImageElement(element) || IsSVGImageElement(element)) &&
-      !element->GetDocument().IsImageDocument())
+bool ShouldForceLegacyLayout(const ComputedStyle& style,
+                             const ComputedStyle& layout_parent_style,
+                             const Element& element) {
+  // Form controls are not supported yet.
+  if (element.ShouldForceLegacyLayout())
     return true;
-  if (IsHTMLVideoElement(element) && !element->GetDocument().IsMediaDocument())
+
+  // When the actual parent (to inherit style from) doesn't have a layout box
+  // (display:contents), it may not have been switched over to forcing legacy
+  // layout, even if it's inside a subtree that should use legacy. Check with
+  // the layout parent as well, so that we don't risk switching back to LayoutNG
+  // when we shouldn't.
+  if (layout_parent_style.ForceLegacyLayout())
     return true;
+
+  const Document& document = element.GetDocument();
+
+  // TODO(layout-dev): Once LayoutNG handles inline content editable, we
+  // should get rid of following code fragment.
+  if (!RuntimeEnabledFeatures::EditingNGEnabled()) {
+    if (style.UserModify() != EUserModify::kReadOnly || document.InDesignMode())
+      return true;
+  }
+
+  if (style.Display() == EDisplay::kWebkitBox ||
+      style.Display() == EDisplay::kWebkitInlineBox)
+    return true;
+
+  if (!RuntimeEnabledFeatures::LayoutNGBlockFragmentationEnabled()) {
+    // Disable NG for the entire subtree if we're establishing a block
+    // fragmentation context.
+    if (style.SpecifiesColumns() || style.IsOverflowPaged())
+      return true;
+    if (document.Printing()) {
+      // This needs to be discovered on the root element.
+      DCHECK_EQ(element, document.documentElement());
+      return true;
+    }
+  }
+
+  // The custom container is laid out by the legacy engine. Its children may
+  // not establish new formatting contexts, so we need to protect against
+  // re-entering LayoutNG there.
+  if (style.Display() == EDisplay::kLayoutCustom ||
+      style.Display() == EDisplay::kInlineLayoutCustom)
+    return true;
+
+  // 'text-combine-upright' property is not supported yet.
+  if (style.HasTextCombine() && !style.IsHorizontalWritingMode())
+    return true;
+
   return false;
 }
 
@@ -237,9 +279,10 @@ static void AdjustStyleForHTMLElement(ComputedStyle& style,
   if (IsHTMLFrameElement(element) || IsHTMLFrameSetElement(element)) {
     // Frames and framesets never honor position:relative or position:absolute.
     // This is necessary to fix a crash where a site tries to position these
-    // objects. They also never honor display.
+    // objects. They also never honor display nor floating.
     style.SetPosition(EPosition::kStatic);
     style.SetDisplay(EDisplay::kBlock);
+    style.SetFloating(EFloat::kNone);
     return;
   }
 
@@ -264,7 +307,14 @@ static void AdjustStyleForHTMLElement(ComputedStyle& style,
   }
 
   if (IsHTMLLegendElement(element) && style.Display() != EDisplay::kContents) {
-    style.SetDisplay(EDisplay::kBlock);
+    // Allow any blockified display value for legends. Note that according to
+    // the spec, this shouldn't affect computed style (like we do here).
+    // Instead, the display override should be determined during box creation,
+    // and even then only be applied to the rendered legend inside a
+    // fieldset. However, Blink determines the rendered legend during layout
+    // instead of during layout object creation, and also generally makes
+    // assumptions that the computed display value is the one to use.
+    style.SetDisplay(EquivalentBlockDisplay(style.Display()));
     return;
   }
 
@@ -397,16 +447,20 @@ static void AdjustStyleForDisplay(ComputedStyle& style,
       style.Display() == EDisplay::kTableHeaderGroup ||
       style.Display() == EDisplay::kTableRow ||
       style.Display() == EDisplay::kTableRowGroup ||
-      style.Display() == EDisplay::kTableCell)
+      style.Display() == EDisplay::kTableCell) {
     style.SetWritingMode(layout_parent_style.GetWritingMode());
+    style.UpdateFontOrientation();
+  }
 
   // FIXME: Since we don't support block-flow on flexible boxes yet, disallow
   // setting of block-flow to anything other than TopToBottomWritingMode.
   // https://bugs.webkit.org/show_bug.cgi?id=46418 - Flexible box support.
   if (style.GetWritingMode() != WritingMode::kHorizontalTb &&
       (style.Display() == EDisplay::kWebkitBox ||
-       style.Display() == EDisplay::kWebkitInlineBox))
+       style.Display() == EDisplay::kWebkitInlineBox)) {
     style.SetWritingMode(WritingMode::kHorizontalTb);
+    style.UpdateFontOrientation();
+  }
 
   if (layout_parent_style.IsDisplayFlexibleOrGridBox()) {
     style.SetFloating(EFloat::kNone);
@@ -457,15 +511,18 @@ static void AdjustEffectiveTouchAction(ComputedStyle& style,
     element_touch_action = style.GetTouchAction();
   }
 
-  bool is_child_document =
-      element && element == element->GetDocument().documentElement() &&
-      element->GetDocument().LocalOwner();
+  if (!element) {
+    style.SetEffectiveTouchAction(element_touch_action & inherited_action);
+    return;
+  }
 
-  if (is_child_document) {
-    const ComputedStyle* frame_style =
-        element->GetDocument().LocalOwner()->GetComputedStyle();
-    if (frame_style)
-      inherited_action = frame_style->GetEffectiveTouchAction();
+  bool is_child_document = element == element->GetDocument().documentElement();
+
+  // Apply touch action inherited from parent frame.
+  if (is_child_document && element->GetDocument().GetFrame()) {
+    inherited_action &=
+        TouchAction::kTouchActionPan |
+        element->GetDocument().GetFrame()->InheritedEffectiveTouchAction();
   }
 
   // The effective touch action is the intersection of the touch-action values
@@ -478,37 +535,20 @@ static void AdjustEffectiveTouchAction(ComputedStyle& style,
   inherited_action =
       AdjustTouchActionForElement(inherited_action, style, element);
 
-  // Apply the adjusted parent effective touch actions.
-  style.SetEffectiveTouchAction(element_touch_action & inherited_action);
+  TouchAction enforced_by_policy = TouchAction::kTouchActionNone;
+  if (element->GetDocument().IsVerticalScrollEnforced())
+    enforced_by_policy = TouchAction::kTouchActionPanY;
 
-  // Touch action is inherited across frames.
-  if (element && element->IsFrameOwnerElement() &&
-      ToHTMLFrameOwnerElement(element)->contentDocument()) {
-    Element* content_document_element =
-        ToHTMLFrameOwnerElement(element)->contentDocument()->documentElement();
-    if (content_document_element) {
-      // Actively trigger recalc for child document if the document does not
-      // have computed style created, or its effective touch action is out of
-      // date.
-      bool child_document_needs_recalc = true;
-      if (const ComputedStyle* content_document_style =
-              content_document_element->GetComputedStyle()) {
-        TouchAction document_touch_action =
-            content_document_style->GetEffectiveTouchAction();
-        TouchAction expected_document_touch_action =
-            AdjustTouchActionForElement(style.GetEffectiveTouchAction(),
-                                        *content_document_style,
-                                        content_document_element) &
-            content_document_style->GetTouchAction();
-        child_document_needs_recalc =
-            document_touch_action != expected_document_touch_action;
-      }
-      if (child_document_needs_recalc) {
-        content_document_element->SetNeedsStyleRecalc(
-            kSubtreeStyleChange,
-            StyleChangeReasonForTracing::Create(
-                StyleChangeReason::kInheritedStyleChangeFromParentFrame));
-      }
+  // Apply the adjusted parent effective touch actions.
+  style.SetEffectiveTouchAction((element_touch_action & inherited_action) |
+                                enforced_by_policy);
+
+  // Propagate touch action to child frames.
+  if (element->IsFrameOwnerElement()) {
+    Frame* content_frame = ToHTMLFrameOwnerElement(element)->ContentFrame();
+    if (content_frame) {
+      content_frame->SetInheritedEffectiveTouchAction(
+          style.GetEffectiveTouchAction());
     }
   }
 }
@@ -517,18 +557,23 @@ void StyleAdjuster::AdjustComputedStyle(StyleResolverState& state,
                                         Element* element) {
   DCHECK(state.LayoutParentStyle());
   DCHECK(state.ParentStyle());
-  ComputedStyle& style = state.MutableStyleRef();
+  ComputedStyle& style = state.StyleRef();
   const ComputedStyle& parent_style = *state.ParentStyle();
   const ComputedStyle& layout_parent_style = *state.LayoutParentStyle();
 
-  if (style.Display() != EDisplay::kNone && element &&
-      element->IsHTMLElement()) {
+  if (element && element->IsHTMLElement() &&
+      (style.Display() != EDisplay::kNone ||
+       element->LayoutObjectIsNeeded(style))) {
     AdjustStyleForHTMLElement(style, ToHTMLElement(*element));
   }
   if (style.Display() != EDisplay::kNone) {
+    bool is_document_element =
+        element && element->GetDocument().documentElement() == element;
     // Per the spec, position 'static' and 'relative' in the top layer compute
-    // to 'absolute'.
-    if (IsInTopLayer(element, style) &&
+    // to 'absolute'. Root elements that are in the top layer should just
+    // be left alone because the fullscreen.css doesn't apply any style to
+    // them.
+    if (IsInTopLayer(element, style) && !is_document_element &&
         (style.GetPosition() == EPosition::kStatic ||
          style.GetPosition() == EPosition::kRelative))
       style.SetPosition(EPosition::kAbsolute);
@@ -539,7 +584,7 @@ void StyleAdjuster::AdjustComputedStyle(StyleResolverState& state,
         (style.HasOutOfFlowPosition() || style.IsFloating()))
       style.SetDisplay(EquivalentBlockDisplay(style.Display()));
 
-    if (element && element->GetDocument().documentElement() == element)
+    if (is_document_element)
       style.SetDisplay(EquivalentBlockDisplay(style.Display()));
 
     // We don't adjust the first letter style earlier because we may change the
@@ -548,11 +593,6 @@ void StyleAdjuster::AdjustComputedStyle(StyleResolverState& state,
 
     AdjustStyleForDisplay(style, layout_parent_style,
                           element ? &element->GetDocument() : nullptr);
-
-    // Paint containment forces a block formatting context, so we must coerce
-    // from inline.  https://drafts.csswg.org/css-containment/#containment-paint
-    if (style.ContainsPaint() && style.Display() == EDisplay::kInline)
-      style.SetDisplay(EDisplay::kBlock);
 
     // If this is a child of a LayoutCustom, we need the name of the parent
     // layout function for invalidation purposes.
@@ -596,12 +636,6 @@ void StyleAdjuster::AdjustComputedStyle(StyleResolverState& state,
   // Let the theme also have a crack at adjusting the style.
   if (style.HasAppearance())
     LayoutTheme::GetTheme().AdjustStyle(style, element);
-
-  // If we have first-letter pseudo style, transitions, or animations, do not
-  // share this style.
-  if (style.HasPseudoStyle(kPseudoIdFirstLetter) || style.Transitions() ||
-      style.Animations())
-    style.SetUnique();
 
   AdjustStyleForEditing(style);
 
@@ -667,50 +701,28 @@ void StyleAdjuster::AdjustComputedStyle(StyleResolverState& state,
     }
   }
 
-  if (RuntimeEnabledFeatures::LayoutNGEnabled() && !style.ForceLegacyLayout() &&
-      element) {
-    const Document& document = element->GetDocument();
-    if (element->ShouldForceLegacyLayout()) {
-      // Form controls are not supported yet.
-      style.SetForceLegacyLayout(true);
-    } else if (style.UserModify() != EUserModify::kReadOnly ||
-               document.InDesignMode()) {
-      // TODO(layout-dev): Once LayoutNG handles inline content editable, we
-      // should get rid of following code fragment.
-      style.SetForceLegacyLayout(true);
-
-      if (style.Display() == EDisplay::kInline &&
-          parent_style.UserModify() == EUserModify::kReadOnly) {
-        style.SetDisplay(EDisplay::kInlineBlock);
-      }
-    } else if (!RuntimeEnabledFeatures::LayoutNGBlockFragmentationEnabled()) {
-      // Disable NG for the entire subtree if we're establishing a block
-      // fragmentation context.
-      if (style.SpecifiesColumns() ||
-          (style.IsOverflowPaged() &&
-           element != document.ViewportDefiningElement())) {
-        style.SetForceLegacyLayout(true);
-      } else if (document.Paginated()) {
-        // This needs to be discovered on the root element.
-        DCHECK_EQ(element, document.documentElement());
-        style.SetForceLegacyLayout(true);
-      }
+  if (element && style.TextOverflow() == ETextOverflow::kEllipsis) {
+    const AtomicString& pseudo_id = element->ShadowPseudoId();
+    if (pseudo_id == "-webkit-input-placeholder" ||
+        pseudo_id == "-internal-input-suggested") {
+      TextControlElement* text_control =
+          ToTextControl(element->OwnerShadowHost());
+      DCHECK(text_control);
+      // TODO(futhark@chromium.org): We force clipping text overflow for focused
+      // input elements since we don't want to render ellipsis during editing.
+      // We should do this as a general solution which also includes
+      // contenteditable elements being edited. The computed style should not
+      // change, but LayoutBlockFlow::ShouldTruncateOverflowingText() should
+      // instead return false when text is being edited inside that block.
+      // https://crbug.com/814954
+      style.SetTextOverflow(text_control->ValueForTextOverflow());
     }
   }
 
-  // If intrinsically sized images or videos are disallowed by feature policy,
-  // use default size (300 x 150) instead.
-  if (IsImageOrVideoElement(element)) {
-    if (IsSupportedInFeaturePolicy(
-            mojom::FeaturePolicyFeature::kUnsizedMedia) &&
-        element->GetDocument().GetFrame() &&
-        !element->GetDocument().GetFrame()->IsFeatureEnabled(
-            mojom::FeaturePolicyFeature::kUnsizedMedia)) {
-      if (!style.Width().IsSpecified())
-        style.SetLogicalWidth(Length(LayoutReplaced::kDefaultWidth, kFixed));
-      if (!style.Height().IsSpecified())
-        style.SetLogicalHeight(Length(LayoutReplaced::kDefaultHeight, kFixed));
-    }
+  if (RuntimeEnabledFeatures::LayoutNGEnabled() && !style.ForceLegacyLayout() &&
+      element &&
+      ShouldForceLegacyLayout(style, layout_parent_style, *element)) {
+    style.SetForceLegacyLayout(true);
   }
 }
 }  // namespace blink

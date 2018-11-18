@@ -30,19 +30,25 @@ void test_ds(){
 /// ========= In the worker function ========= ///
 // CK1: {{.*}}define internal void @__omp_offloading{{.*}}test_ds{{.*}}_worker()
 // CK1: call void @llvm.nvvm.barrier0()
-// CK1: call void @__kmpc_data_sharing_init_stack
+// CK1-NOT: call void @__kmpc_data_sharing_init_stack
 
 /// ========= In the kernel function ========= ///
 
-// CK1: {{.*}}define void @__omp_offloading{{.*}}test_ds{{.*}}()
+// CK1: {{.*}}define weak void @__omp_offloading{{.*}}test_ds{{.*}}()
 // CK1: [[SHAREDARGS1:%.+]] = alloca i8**
 // CK1: [[SHAREDARGS2:%.+]] = alloca i8**
 // CK1: call void @__kmpc_kernel_init
 // CK1: call void @__kmpc_data_sharing_init_stack
-// CK1: [[GLOBALSTACK:%.+]] = call i8* @__kmpc_data_sharing_push_stack(i64 8, i16 0)
+// CK1: [[GLOBALSTACK:%.+]] = call i8* @__kmpc_data_sharing_push_stack(i64 256, i16 0)
 // CK1: [[GLOBALSTACK2:%.+]] = bitcast i8* [[GLOBALSTACK]] to %struct._globalized_locals_ty*
-// CK1: [[A:%.+]] = getelementptr inbounds %struct._globalized_locals_ty, %struct._globalized_locals_ty* [[GLOBALSTACK2]], i32 0, i32 0
-// CK1: [[B:%.+]] = getelementptr inbounds %struct._globalized_locals_ty, %struct._globalized_locals_ty* [[GLOBALSTACK2]], i32 0, i32 1
+// CK1: [[A_ARR:%.+]] = getelementptr inbounds %struct._globalized_locals_ty, %struct._globalized_locals_ty* [[GLOBALSTACK2]], i32 0, i32 0
+// CK1: [[TID:%.+]] = call i32 @llvm.nvvm.read.ptx.sreg.tid.x()
+// CK1: [[LID:%.+]] = and i32 [[TID]], 31
+// CK1: [[A:%.+]] = getelementptr inbounds [32 x i32], [32 x i32]* [[A_ARR]], i32 0, i32 [[LID]]
+// CK1: [[B_ARR:%.+]] = getelementptr inbounds %struct._globalized_locals_ty, %struct._globalized_locals_ty* [[GLOBALSTACK2]], i32 0, i32 1
+// CK1: [[TID:%.+]] = call i32 @llvm.nvvm.read.ptx.sreg.tid.x()
+// CK1: [[LID:%.+]] = and i32 [[TID]], 31
+// CK1: [[B:%.+]] = getelementptr inbounds [32 x i32], [32 x i32]* [[B_ARR]], i32 0, i32 [[LID]]
 // CK1: store i32 10, i32* [[A]]
 // CK1: call void @__kmpc_kernel_prepare_parallel({{.*}}, i16 1)
 // CK1: call void @__kmpc_begin_sharing_variables(i8*** [[SHAREDARGS1]], i64 1)
@@ -83,11 +89,10 @@ void test_ds(){
 /// outlined function for the second parallel region ///
 
 // CK1: define internal void @{{.+}}(i32* noalias %{{.+}}, i32* noalias %{{.+}}, i32* dereferenceable{{.+}}, i32* dereferenceable{{.+}})
-// CK1: [[RES:%.+]] = call i8* @__kmpc_data_sharing_push_stack(i64 4, i16 0)
-// CK1: [[GLOBALS:%.+]] = bitcast i8* [[RES]] to [[GLOBAL_TY:%.+]]*
-// CK1: [[C_ADDR:%.+]] = getelementptr inbounds [[GLOBAL_TY]], [[GLOBAL_TY]]* [[GLOBALS]], i32 0, i32 0
+// CK1-NOT: call i8* @__kmpc_data_sharing_push_stack(
+// CK1: [[C_ADDR:%.+]] = alloca i32,
 // CK1: store i32* [[C_ADDR]], i32** %
-// CK1: call void @__kmpc_data_sharing_pop_stack(i8* [[RES]])
+// CK1i-NOT: call void @__kmpc_data_sharing_pop_stack(
 
 /// ========= In the data sharing wrapper function ========= ///
 

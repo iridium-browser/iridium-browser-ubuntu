@@ -106,9 +106,14 @@ bool WebUIImpl::OnMessageReceived(const IPC::Message& message,
 }
 
 void WebUIImpl::OnWebUISend(RenderFrameHost* sender,
-                            const GURL& source_url,
                             const std::string& message,
                             const base::ListValue& args) {
+  // Ignore IPCs from frames that are pending deletion.  See also
+  // https://crbug.com/780920.
+  if (!sender->IsCurrent())
+    return;
+
+  const GURL& source_url = sender->GetLastCommittedURL();
   if (!ChildProcessSecurityPolicyImpl::GetInstance()->HasWebUIBindings(
           sender->GetProcess()->GetID()) ||
       !WebUIControllerFactoryRegistry::GetInstance()->IsURLAcceptableForWebUI(
@@ -118,10 +123,6 @@ void WebUIImpl::OnWebUISend(RenderFrameHost* sender,
         bad_message::WEBUI_SEND_FROM_UNAUTHORIZED_PROCESS);
     return;
   }
-
-  // Ignore IPCs from swapped-out frames.  See also https://crbug.com/780920.
-  if (!sender->IsCurrent())
-    return;
 
   if (base::EndsWith(message, "RequiringGesture",
                      base::CompareCase::SENSITIVE) &&
@@ -176,8 +177,9 @@ WebUIController* WebUIImpl::GetController() const {
   return controller_.get();
 }
 
-void WebUIImpl::SetController(WebUIController* controller) {
-  controller_.reset(controller);
+void WebUIImpl::SetController(std::unique_ptr<WebUIController> controller) {
+  DCHECK(controller);
+  controller_ = std::move(controller);
 }
 
 bool WebUIImpl::CanCallJavascript() {
@@ -249,7 +251,7 @@ void WebUIImpl::CallJavascriptFunctionUnsafe(
 
 void WebUIImpl::RegisterMessageCallback(base::StringPiece message,
                                         const MessageCallback& callback) {
-  message_callbacks_.emplace(message, callback);
+  message_callbacks_.emplace(message.as_string(), callback);
 }
 
 void WebUIImpl::ProcessWebUIMessage(const GURL& source_url,

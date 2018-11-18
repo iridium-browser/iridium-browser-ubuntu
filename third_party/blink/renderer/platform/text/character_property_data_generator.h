@@ -223,6 +223,32 @@ static const UChar32 kIsPotentialCustomElementNameCharRanges[] = {
     0xF900, 0xFDCF, 0xFDF0, 0xFFFD, 0x10000, 0xEFFFF,
 };
 
+// http://unicode.org/reports/tr9/#Directional_Formatting_Characters
+static const UChar32 kIsBidiControlArray[] = {0x061C, 0x200E, 0x200F};
+
+static const UChar32 kIsBidiControlRanges[] = {
+    0x202A, 0x202E, 0x2066, 0x2069,
+};
+
+// https://unicode.org/Public/UNIDATA/Blocks.txt
+static const UChar32 kIsHangulRanges[] = {
+    // Hangul Jamo
+    0x1100, 0x11FF,
+    // Hangul Compatibility Jamo
+    0x3130, 0x318F,
+    // Hangul Jamo Extended-A
+    0xA960, 0xA97F,
+    // Hangul Syllables
+    0xAC00, 0xD7AF,
+    // Hangul Jamo Extended-B
+    0xD7B0, 0xD7FF,
+    // Halfwidth Hangul Jamo
+    // https://www.unicode.org/charts/nameslist/c_FF00.html
+    0xFFA0, 0xFFDC,
+};
+
+static const UChar32 kIsHangulArray[] = {};
+
 }  // namespace blink
 
 #endif

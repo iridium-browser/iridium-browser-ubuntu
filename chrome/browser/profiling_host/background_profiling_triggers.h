@@ -31,6 +31,12 @@ class BackgroundProfilingTriggers {
   // Register a periodic timer calling |PerformMemoryUsageChecks|.
   void StartTimer();
 
+ protected:
+  // High water mark for private footprint of each profiled pid at time of
+  // upload. Results are stored in |kb|.
+  // Exposed to subclasses for testing.
+  std::map<base::ProcessId, uint32_t> pmf_at_last_upload_;
+
  private:
   friend class FakeBackgroundProfilingTriggers;
   FRIEND_TEST_ALL_PREFIXES(BackgroundProfilingTriggersTest,
@@ -40,6 +46,11 @@ class BackgroundProfilingTriggers {
 
   // Returns true if trace uploads are allowed.
   bool IsAllowedToUpload() const;
+
+  // Returns true if a control report should be sent for the given
+  // |content_process_type|.
+  // Virtual for testing.
+  virtual bool ShouldTriggerControlReport(int content_process_type) const;
 
   // Returns true if |private_footprint_kb| is large enough to trigger
   // a report for the given |content_process_type|.
@@ -58,7 +69,7 @@ class BackgroundProfilingTriggers {
       std::unique_ptr<memory_instrumentation::GlobalMemoryDump> dump);
 
   // Virtual for testing. Called when a memory report needs to be send.
-  virtual void TriggerMemoryReport();
+  virtual void TriggerMemoryReport(std::string trigger_name);
 
   ProfilingProcessHost* host_;
 

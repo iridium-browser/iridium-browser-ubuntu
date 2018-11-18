@@ -11,8 +11,9 @@
 #include "base/bind_helpers.h"
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
+#include "base/task/post_task.h"
 #include "base/task_runner_util.h"
-#include "base/task_scheduler/post_task.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -69,8 +70,8 @@ class AfterStartupTaskTest : public testing::Test {
  public:
   AfterStartupTaskTest() {
     ui_thread_ = base::MakeRefCounted<WrappedTaskRunner>(
-        content::BrowserThread::GetTaskRunnerForThread(
-            content::BrowserThread::UI));
+        base::CreateSingleThreadTaskRunnerWithTraits(
+            {content::BrowserThread::UI}));
     background_sequence_ = base::MakeRefCounted<WrappedTaskRunner>(
         base::CreateSequencedTaskRunnerWithTraits(base::TaskTraits()));
     AfterStartupTaskUtils::UnsafeResetForTesting();

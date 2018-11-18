@@ -25,6 +25,7 @@
 
 #include "third_party/blink/renderer/core/css/css_image_value.h"
 #include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/loader/resource/image_resource_content.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/core/svg/graphics/svg_image.h"
@@ -34,9 +35,12 @@
 namespace blink {
 
 StyleFetchedImage::StyleFetchedImage(const Document& document,
-                                     FetchParameters& params)
+                                     FetchParameters& params,
+                                     bool is_lazyload_possibly_deferred)
     : document_(&document), url_(params.Url()) {
   is_image_resource_ = true;
+  is_lazyload_possibly_deferred_ = is_lazyload_possibly_deferred;
+
   image_ = ImageResourceContent::Fetch(params, document_->Fetcher());
   image_->AddObserver(this);
   // ResourceFetcher is not determined from StyleFetchedImage and it is
@@ -49,6 +53,15 @@ StyleFetchedImage::~StyleFetchedImage() = default;
 void StyleFetchedImage::Dispose() {
   image_->RemoveObserver(this);
   image_ = nullptr;
+}
+
+bool StyleFetchedImage::IsEqual(const StyleImage& other) const {
+  if (!other.IsImageResource())
+    return false;
+  const auto& other_image = ToStyleFetchedImage(other);
+  if (image_ != other_image.image_)
+    return false;
+  return url_ == other_image.url_;
 }
 
 WrappedImagePtr StyleFetchedImage::Data() const {
@@ -93,7 +106,7 @@ FloatSize StyleFetchedImage::ImageSize(
   // border-image, etc.)
   //
   // https://drafts.csswg.org/css-images-3/#the-image-orientation
-  FloatSize size(image_->IntrinsicSize(kDoNotRespectImageOrientation));
+  FloatSize size(image->Size());
   return ApplyZoom(size, multiplier);
 }
 
@@ -116,10 +129,11 @@ void StyleFetchedImage::RemoveClient(ImageResourceObserver* observer) {
 void StyleFetchedImage::ImageNotifyFinished(ImageResourceContent*) {
   if (image_ && image_->HasImage()) {
     Image& image = *image_->GetImage();
-    Image::RecordCheckerableImageUMA(image, Image::ImageType::kCss);
 
     if (document_ && image.IsSVGImage())
       ToSVGImage(image).UpdateUseCounters(*document_);
+
+    image_->UpdateImageAnimationPolicy();
   }
 
   // Oilpan: do not prolong the Document's lifetime.
@@ -141,6 +155,21 @@ scoped_refptr<Image> StyleFetchedImage::GetImage(
 bool StyleFetchedImage::KnownToBeOpaque(const Document&,
                                         const ComputedStyle&) const {
   return image_->GetImage()->CurrentFrameKnownToBeOpaque();
+}
+
+void StyleFetchedImage::LoadDeferredImage(const Document& document) {
+  DCHECK(is_lazyload_possibly_deferred_);
+  is_lazyload_possibly_deferred_ = false;
+  document_ = &document;
+  image_->LoadDeferredImage(document_->Fetcher());
+}
+
+bool StyleFetchedImage::GetImageAnimationPolicy(ImageAnimationPolicy& policy) {
+  if (!document_ || !document_->GetSettings()) {
+    return false;
+  }
+  policy = document_->GetSettings()->GetImageAnimationPolicy();
+  return true;
 }
 
 void StyleFetchedImage::Trace(blink::Visitor* visitor) {

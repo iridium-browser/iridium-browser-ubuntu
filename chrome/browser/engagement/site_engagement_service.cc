@@ -12,6 +12,7 @@
 #include "base/command_line.h"
 #include "base/metrics/field_trial.h"
 #include "base/strings/string_util.h"
+#include "base/task/post_task.h"
 #include "base/time/clock.h"
 #include "base/time/default_clock.h"
 #include "base/time/time.h"
@@ -31,6 +32,7 @@
 #include "components/content_settings/core/common/content_settings_pattern.h"
 #include "components/history/core/browser/history_service.h"
 #include "components/prefs/pref_service.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
@@ -126,8 +128,8 @@ SiteEngagementService::SiteEngagementService(Profile* profile)
     : SiteEngagementService(profile, base::DefaultClock::GetInstance()) {
   content::BrowserThread::PostAfterStartupTask(
       FROM_HERE,
-      content::BrowserThread::GetTaskRunnerForThread(
-          content::BrowserThread::UI),
+      base::CreateSingleThreadTaskRunnerWithTraits(
+          {content::BrowserThread::UI}),
       base::BindOnce(&SiteEngagementService::AfterStartupTask,
                      weak_factory_.GetWeakPtr()));
 
@@ -248,16 +250,6 @@ void SiteEngagementService::SetLastShortcutLaunchTime(
   OnEngagementEvent(web_contents, url, ENGAGEMENT_WEBAPP_SHORTCUT_LAUNCH);
 }
 
-void SiteEngagementService::HelperCreated(
-    SiteEngagementService::Helper* helper) {
-  helpers_.insert(helper);
-}
-
-void SiteEngagementService::HelperDeleted(
-    SiteEngagementService::Helper* helper) {
-  helpers_.erase(helper);
-}
-
 double SiteEngagementService::GetScore(const GURL& url) const {
   return GetDetails(url).total_score;
 }
@@ -319,16 +311,10 @@ void SiteEngagementService::AddPoints(const GURL& url, double points) {
     CleanupEngagementScores(true);
 
   SiteEngagementScore score = CreateEngagementScore(url);
-  blink::mojom::EngagementLevel old_level = score.GetEngagementLevel();
-
   score.AddPoints(points);
   score.Commit();
 
   SetLastEngagementTime(score.last_engagement_time());
-
-  blink::mojom::EngagementLevel new_level = score.GetEngagementLevel();
-  if (old_level != new_level)
-    SendLevelChangeToHelpers(url, new_level);
 }
 
 void SiteEngagementService::AfterStartupTask() {
@@ -553,13 +539,6 @@ void SiteEngagementService::OnEngagementEvent(
     observer.OnEngagementEvent(web_contents, url, score, type);
 }
 
-void SiteEngagementService::SendLevelChangeToHelpers(
-    const GURL& url,
-    blink::mojom::EngagementLevel level) {
-  for (SiteEngagementService::Helper* helper : helpers_)
-    helper->OnEngagementLevelChanged(url, level);
-}
-
 bool SiteEngagementService::IsLastEngagementStale() const {
   // Only happens on first run when no engagement has ever been recorded.
   base::Time last_engagement_time = GetLastEngagementTime();
@@ -574,21 +553,13 @@ bool SiteEngagementService::IsLastEngagementStale() const {
 
 void SiteEngagementService::OnURLsDeleted(
     history::HistoryService* history_service,
-    bool all_history,
-    bool expired,
-    const history::URLRows& deleted_rows,
-    const std::set<GURL>& favicon_urls) {
+    const history::DeletionInfo& deletion_info) {
   std::multiset<GURL> origins;
-  for (const history::URLRow& row : deleted_rows)
+  for (const history::URLRow& row : deletion_info.deleted_rows())
     origins.insert(row.url().GetOrigin());
 
-  history::HistoryService* hs = HistoryServiceFactory::GetForProfile(
-      profile_, ServiceAccessType::EXPLICIT_ACCESS);
-  hs->GetCountsAndLastVisitForOrigins(
-      std::set<GURL>(origins.begin(), origins.end()),
-      base::Bind(
-          &SiteEngagementService::GetCountsAndLastVisitForOriginsComplete,
-          weak_factory_.GetWeakPtr(), hs, origins, expired));
+  UpdateEngagementScores(origins, deletion_info.is_from_expiration(),
+                         deletion_info.deleted_urls_origin_map());
 }
 
 SiteEngagementScore SiteEngagementService::CreateEngagementScore(
@@ -629,8 +600,7 @@ int SiteEngagementService::OriginsWithMaxEngagement(
   return total_origins;
 }
 
-void SiteEngagementService::GetCountsAndLastVisitForOriginsComplete(
-    history::HistoryService* history_service,
+void SiteEngagementService::UpdateEngagementScores(
     const std::multiset<GURL>& deleted_origins,
     bool expired,
     const history::OriginCountAndLastVisitMap& remaining_origins) {
@@ -640,6 +610,9 @@ void SiteEngagementService::GetCountsAndLastVisitForOriginsComplete(
   base::Time now = clock_->Now();
   base::Time four_weeks_ago =
       now - base::TimeDelta::FromDays(FOUR_WEEKS_IN_DAYS);
+
+  HostContentSettingsMap* settings_map =
+      HostContentSettingsMapFactory::GetForProfile(profile_);
 
   for (const auto& origin_to_count : remaining_origins) {
     GURL origin = origin_to_count.first;
@@ -656,6 +629,14 @@ void SiteEngagementService::GetCountsAndLastVisitForOriginsComplete(
     // URL still has entries in history.
     if ((expired && remaining != 0) || deleted == 0)
       continue;
+
+    // Remove origins that have no urls left.
+    if (remaining == 0) {
+      settings_map->SetWebsiteSettingDefaultScope(
+          origin, GURL(), CONTENT_SETTINGS_TYPE_SITE_ENGAGEMENT,
+          content_settings::ResourceIdentifier(), nullptr);
+      continue;
+    }
 
     // Remove engagement proportional to the urls expired from the origin's
     // entire history.

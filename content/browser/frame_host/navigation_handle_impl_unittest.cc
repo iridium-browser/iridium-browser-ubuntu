@@ -8,7 +8,6 @@
 #include "content/public/browser/navigation_throttle.h"
 #include "content/public/browser/ssl_status.h"
 #include "content/public/common/browser_side_navigation_policy.h"
-#include "content/public/common/request_context_type.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/test/browser_side_navigation_test_utils.h"
 #include "content/public/test/test_navigation_throttle.h"
@@ -16,6 +15,7 @@
 #include "content/test/test_render_frame_host.h"
 #include "content/test/test_web_contents.h"
 #include "net/ssl/ssl_connection_status_flags.h"
+#include "third_party/blink/public/platform/modules/fetch/fetch_api_request.mojom.h"
 
 namespace content {
 
@@ -146,7 +146,7 @@ class NavigationHandleImplTest : public RenderViewHostImplTestHarness {
     // It's safe to use base::Unretained since the NavigationHandle is owned by
     // the NavigationHandleImplTest.
     test_handle_->WillFailRequest(
-        ssl_info,
+        main_test_rfh(), ssl_info,
         base::Bind(&NavigationHandleImplTest::UpdateThrottleCheckResult,
                    base::Unretained(this)));
   }
@@ -167,7 +167,7 @@ class NavigationHandleImplTest : public RenderViewHostImplTestHarness {
     test_handle_->WillProcessResponse(
         main_test_rfh(), scoped_refptr<net::HttpResponseHeaders>(),
         net::HttpResponseInfo::CONNECTION_INFO_QUIC_35, net::HostPortPair(),
-        net::SSLInfo(), GlobalRequestID(), false, false, false,
+        net::SSLInfo(), GlobalRequestID(), false, false, false, false,
         base::Bind(&NavigationHandleImplTest::UpdateThrottleCheckResult,
                    base::Unretained(this)));
   }
@@ -258,7 +258,6 @@ class NavigationHandleImplTest : public RenderViewHostImplTestHarness {
         false,                  // started_from_context_menu
         CSPDisposition::CHECK,  // should_check_main_world_csp
         false,                  // is_form_submission
-        base::nullopt,          // suggested_filename
         nullptr,                // navigation_ui_data
         "GET", net::HttpRequestHeaders(),
         nullptr,  // resource_request_body
@@ -266,7 +265,7 @@ class NavigationHandleImplTest : public RenderViewHostImplTestHarness {
         false,  // has_user_gesture
         ui::PAGE_TRANSITION_LINK,
         false,  // is_external_protocol
-        REQUEST_CONTEXT_TYPE_LOCATION);
+        blink::mojom::RequestContextType::LOCATION);
   }
 
  private:
@@ -344,19 +343,19 @@ TEST_F(NavigationHandleImplThrottleInsertionTest,
 // Note: can be extended to cover more internal members.
 TEST_F(NavigationHandleImplTest, SimpleDataChecksRedirectAndProcess) {
   SimulateWillStartRequest();
-  EXPECT_EQ(REQUEST_CONTEXT_TYPE_LOCATION,
+  EXPECT_EQ(blink::mojom::RequestContextType::LOCATION,
             test_handle()->request_context_type());
   EXPECT_EQ(net::HttpResponseInfo::CONNECTION_INFO_UNKNOWN,
             test_handle()->GetConnectionInfo());
 
   SimulateWillRedirectRequest();
-  EXPECT_EQ(REQUEST_CONTEXT_TYPE_LOCATION,
+  EXPECT_EQ(blink::mojom::RequestContextType::LOCATION,
             test_handle()->request_context_type());
   EXPECT_EQ(net::HttpResponseInfo::CONNECTION_INFO_HTTP1_1,
             test_handle()->GetConnectionInfo());
 
   SimulateWillProcessResponse();
-  EXPECT_EQ(REQUEST_CONTEXT_TYPE_LOCATION,
+  EXPECT_EQ(blink::mojom::RequestContextType::LOCATION,
             test_handle()->request_context_type());
   EXPECT_EQ(net::HttpResponseInfo::CONNECTION_INFO_QUIC_35,
             test_handle()->GetConnectionInfo());
@@ -374,13 +373,13 @@ TEST_F(NavigationHandleImplTest, SimpleDataCheckNoRedirect) {
 
 TEST_F(NavigationHandleImplTest, SimpleDataChecksFailure) {
   SimulateWillStartRequest();
-  EXPECT_EQ(REQUEST_CONTEXT_TYPE_LOCATION,
+  EXPECT_EQ(blink::mojom::RequestContextType::LOCATION,
             test_handle()->request_context_type());
   EXPECT_EQ(net::HttpResponseInfo::CONNECTION_INFO_UNKNOWN,
             test_handle()->GetConnectionInfo());
 
   SimulateWillFailRequest(net::ERR_CERT_DATE_INVALID);
-  EXPECT_EQ(REQUEST_CONTEXT_TYPE_LOCATION,
+  EXPECT_EQ(blink::mojom::RequestContextType::LOCATION,
             test_handle()->request_context_type());
   EXPECT_EQ(net::ERR_CERT_DATE_INVALID, test_handle()->GetNetErrorCode());
 }
@@ -1134,6 +1133,44 @@ TEST_F(NavigationHandleImplTest, WillFailRequestSetsSSLInfo) {
   EXPECT_EQ(net::CERT_STATUS_AUTHORITY_INVALID,
             test_handle()->GetSSLInfo().cert_status);
   EXPECT_EQ(connection_status, test_handle()->GetSSLInfo().connection_status);
+}
+
+// Helper throttle which checks that it can access NavigationHandle's
+// RenderFrameHost in WillFailRequest() and then defers the failure.
+class GetRenderFrameHostOnFailureNavigationThrottle
+    : public NavigationThrottle {
+ public:
+  GetRenderFrameHostOnFailureNavigationThrottle(NavigationHandle* handle)
+      : NavigationThrottle(handle) {}
+  ~GetRenderFrameHostOnFailureNavigationThrottle() override {}
+
+  NavigationThrottle::ThrottleCheckResult WillFailRequest() override {
+    EXPECT_TRUE(navigation_handle()->GetRenderFrameHost());
+    return NavigationThrottle::DEFER;
+  }
+
+  const char* GetNameForLogging() override {
+    return "GetRenderFrameHostOnFailureNavigationThrottle";
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(GetRenderFrameHostOnFailureNavigationThrottle);
+};
+
+// Verify that the NavigationHandle::GetRenderFrameHost() can be retrieved by a
+// throttle in WillFailRequest(), as well as after deferring the failure.  This
+// is allowed, since at that point the final RenderFrameHost will have already
+// been chosen. See https://crbug.com/817881.
+TEST_F(NavigationHandleImplTest, WillFailRequestCanAccessRenderFrameHost) {
+  test_handle()->RegisterThrottleForTesting(
+      std::make_unique<GetRenderFrameHostOnFailureNavigationThrottle>(
+          test_handle()));
+  SimulateWillStartRequest();
+  SimulateWillFailRequest(net::ERR_CERT_DATE_INVALID);
+  EXPECT_EQ(NavigationHandleImpl::DEFERRING_FAILURE, state());
+  EXPECT_TRUE(test_handle()->GetRenderFrameHost());
+  Resume();
+  EXPECT_TRUE(test_handle()->GetRenderFrameHost());
 }
 
 }  // namespace content

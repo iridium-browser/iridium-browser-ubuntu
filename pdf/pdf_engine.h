@@ -7,20 +7,16 @@
 
 #include <stdint.h>
 
-#include "build/build_config.h"
-
-#if defined(OS_WIN)
-#include <windows.h>
-#endif
-
 #include <memory>
 #include <set>
 #include <string>
 #include <vector>
 
+#include "base/containers/span.h"
 #include "base/optional.h"
 #include "base/strings/string16.h"
 #include "base/time/time.h"
+#include "build/build_config.h"
 #include "ppapi/c/dev/pp_cursor_type_dev.h"
 #include "ppapi/c/dev/ppp_printing_dev.h"
 #include "ppapi/c/ppb_input_event.h"
@@ -34,10 +30,21 @@
 #include "ui/gfx/geometry/point_f.h"
 
 #if defined(OS_WIN)
+#include <windows.h>
+#endif
+
+#if defined(OS_WIN)
 typedef void (*PDFEnsureTypefaceCharactersAccessible)(const LOGFONT* font,
                                                       const wchar_t* text,
                                                       size_t text_length);
 #endif
+
+struct PP_PdfPrintSettings_Dev;
+
+namespace gfx {
+class Rect;
+class Size;
+}
 
 namespace pp {
 class InputEvent;
@@ -129,60 +136,63 @@ class PDFEngine {
     virtual ~Client() {}
 
     // Informs the client about the document's size in pixels.
-    virtual void DocumentSizeUpdated(const pp::Size& size) = 0;
+    virtual void DocumentSizeUpdated(const pp::Size& size) {}
 
     // Informs the client that the given rect needs to be repainted.
-    virtual void Invalidate(const pp::Rect& rect) = 0;
+    virtual void Invalidate(const pp::Rect& rect) {}
 
     // Informs the client to scroll the plugin area by the given offset.
-    virtual void DidScroll(const pp::Point& point) = 0;
+    virtual void DidScroll(const pp::Point& point) {}
 
     // Scroll the horizontal/vertical scrollbars to a given position.
     // Values are in screen coordinates, where 0 is the top/left of the document
     // and a positive value is the distance in pixels from that line.
     // For ScrollToY, setting |compensate_for_toolbar| will align the position
     // with the bottom of the toolbar so the given position is always visible.
-    virtual void ScrollToX(int x_in_screen_coords) = 0;
+    virtual void ScrollToX(int x_in_screen_coords) {}
     virtual void ScrollToY(int y_in_screen_coords,
-                           bool compensate_for_toolbar) = 0;
+                           bool compensate_for_toolbar) {}
 
     // Scroll by a given delta relative to the current position.
-    virtual void ScrollBy(const pp::Point& point) = 0;
+    virtual void ScrollBy(const pp::Point& point) {}
 
     // Scroll to zero-based |page|.
-    virtual void ScrollToPage(int page) = 0;
+    virtual void ScrollToPage(int page) {}
 
     // Navigate to the given url.
     virtual void NavigateTo(const std::string& url,
-                            WindowOpenDisposition disposition) = 0;
+                            WindowOpenDisposition disposition) {}
 
     // Updates the cursor.
-    virtual void UpdateCursor(PP_CursorType_Dev cursor) = 0;
+    virtual void UpdateCursor(PP_CursorType_Dev cursor) {}
 
     // Updates the tick marks in the vertical scrollbar.
-    virtual void UpdateTickMarks(const std::vector<pp::Rect>& tickmarks) = 0;
+    virtual void UpdateTickMarks(const std::vector<pp::Rect>& tickmarks) {}
 
     // Updates the number of find results for the current search term.  If
     // there are no matches 0 should be passed in.  Only when the plugin has
     // finished searching should it pass in the final count with final_result
     // set to true.
     virtual void NotifyNumberOfFindResultsChanged(int total,
-                                                  bool final_result) = 0;
+                                                  bool final_result) {}
 
     // Updates the index of the currently selected search item.
-    virtual void NotifySelectedFindResultChanged(int current_find_index) = 0;
+    virtual void NotifySelectedFindResultChanged(int current_find_index) {}
 
     // Notifies a page became visible.
     virtual void NotifyPageBecameVisible(
-        const PDFEngine::PageFeatures* page_features) = 0;
+        const PDFEngine::PageFeatures* page_features) {}
 
     // Prompts the user for a password to open this document. The callback is
     // called when the password is retrieved.
     virtual void GetDocumentPassword(
-        pp::CompletionCallbackWithOutput<pp::Var> callback) = 0;
+        pp::CompletionCallbackWithOutput<pp::Var> callback) {}
+
+    // Play a "beeping" sound.
+    virtual void Beep() {}
 
     // Puts up an alert with the given message.
-    virtual void Alert(const std::string& message) = 0;
+    virtual void Alert(const std::string& message) {}
 
     // Puts up a confirm with the given message, and returns true if the user
     // presses OK, or false if they press cancel.
@@ -201,24 +211,18 @@ class PDFEngine {
                        const std::string& cc,
                        const std::string& bcc,
                        const std::string& subject,
-                       const std::string& body) = 0;
+                       const std::string& body) {}
 
     // Put up the print dialog.
-    virtual void Print() = 0;
+    virtual void Print() {}
 
     // Submit the data using HTTP POST.
     virtual void SubmitForm(const std::string& url,
                             const void* data,
-                            int length) = 0;
+                            int length) {}
 
     // Creates and returns new URL loader for partial document requests.
     virtual pp::URLLoader CreateURLLoader() = 0;
-
-    // Calls the client's OnCallback() function in |delay| with the given |id|.
-    virtual void ScheduleCallback(int id, base::TimeDelta delay) = 0;
-    // Calls the client's OnTouchTimerCallback() function in |delay| with the
-    // given |id|.
-    virtual void ScheduleTouchTimerCallback(int id, base::TimeDelta delay) = 0;
 
     // Searches the given string for "term" and returns the results.  Unicode-
     // aware.
@@ -232,29 +236,28 @@ class PDFEngine {
         bool case_sensitive) = 0;
 
     // Notifies the client that the engine has painted a page from the document.
-    virtual void DocumentPaintOccurred() = 0;
+    virtual void DocumentPaintOccurred() {}
 
     // Notifies the client that the document has finished loading.
     virtual void DocumentLoadComplete(const DocumentFeatures& document_features,
-                                      uint32_t file_size) = 0;
+                                      uint32_t file_size) {}
 
     // Notifies the client that the document has failed to load.
-    virtual void DocumentLoadFailed() = 0;
+    virtual void DocumentLoadFailed() {}
 
     // Notifies the client that the document has requested substitute fonts.
-    virtual void FontSubstituted() = 0;
+    virtual void FontSubstituted() {}
 
     virtual pp::Instance* GetPluginInstance() = 0;
 
     // Notifies that an unsupported feature in the PDF was encountered.
-    virtual void DocumentHasUnsupportedFeature(const std::string& feature) = 0;
+    virtual void DocumentHasUnsupportedFeature(const std::string& feature) {}
 
     // Notifies the client about document load progress.
-    virtual void DocumentLoadProgress(uint32_t available,
-                                      uint32_t doc_size) = 0;
+    virtual void DocumentLoadProgress(uint32_t available, uint32_t doc_size) {}
 
     // Notifies the client about focus changes for form text fields.
-    virtual void FormTextFieldFocusChange(bool in_focus) = 0;
+    virtual void FormTextFieldFocusChange(bool in_focus) {}
 
     // Returns true if the plugin has been opened within print preview.
     virtual bool IsPrintPreview() = 0;
@@ -263,7 +266,7 @@ class PDFEngine {
     virtual uint32_t GetBackgroundColor() = 0;
 
     // Cancel browser initiated document download.
-    virtual void CancelBrowserDownload() = 0;
+    virtual void CancelBrowserDownload() {}
 
     // Sets selection status.
     virtual void IsSelectingChanged(bool is_selecting) {}
@@ -280,7 +283,8 @@ class PDFEngine {
   };
 
   // Factory method to create an instance of the PDF Engine.
-  static std::unique_ptr<PDFEngine> Create(Client* client);
+  static std::unique_ptr<PDFEngine> Create(Client* client,
+                                           bool enable_javascript);
 
   virtual ~PDFEngine() {}
 
@@ -306,7 +310,8 @@ class PDFEngine {
   virtual pp::Resource PrintPages(
       const PP_PrintPageNumberRange_Dev* page_ranges,
       uint32_t page_range_count,
-      const PP_PrintSettings_Dev& print_settings) = 0;
+      const PP_PrintSettings_Dev& print_settings,
+      const PP_PdfPrintSettings_Dev& pdf_print_settings) = 0;
   virtual void PrintEnd() = 0;
   virtual void StartFind(const std::string& text, bool case_sensitive) = 0;
   virtual bool SelectFindResult(bool forward) = 0;
@@ -315,13 +320,20 @@ class PDFEngine {
   virtual void RotateClockwise() = 0;
   virtual void RotateCounterclockwise() = 0;
   virtual std::string GetSelectedText() = 0;
-  // Returns true if focus is within an editable form text area, and false
-  // otherwise.
+  // Returns true if focus is within an editable form text area.
   virtual bool CanEditText() = 0;
+  // Returns true if focus is within an editable form text area and the text
+  // area has text.
+  virtual bool HasEditableText() = 0;
   // Replace selected text within an editable form text area with another
   // string. If there is no selected text, append the replacement text after the
   // current caret position.
   virtual void ReplaceSelection(const std::string& text) = 0;
+  // Methods to check if undo/redo is possible, and to perform them.
+  virtual bool CanUndo() = 0;
+  virtual bool CanRedo() = 0;
+  virtual void Undo() = 0;
+  virtual void Redo() = 0;
   virtual std::string GetLinkAtPosition(const pp::Point& point) = 0;
   // Checks the permissions associated with this document.
   virtual bool HasPermission(DocumentPermission permission) const = 0;
@@ -350,10 +362,6 @@ class PDFEngine {
   virtual int GetVerticalScrollbarYPosition() = 0;
   // Set color / grayscale rendering modes.
   virtual void SetGrayscale(bool grayscale) = 0;
-  // Callback for timer that's set with ScheduleCallback().
-  virtual void OnCallback(int id) = 0;
-  // Callback for timer that's set with ScheduleTouchTimerCallback().
-  virtual void OnTouchTimerCallback(int id) = 0;
   // Get the number of characters on a given page.
   virtual int GetCharCount(int page_index) = 0;
   // Get the bounds in page pixels of a character on a given page.
@@ -393,14 +401,8 @@ class PDFEngine {
   // document at page |index|.
   virtual void AppendPage(PDFEngine* engine, int index) = 0;
 
-#if defined(PDF_ENABLE_XFA)
-  // Allow client to set scroll positions in document coordinates. Note that
-  // this is meant for cases where the device scale factor changes, and not for
-  // general scrolling - the engine will not repaint due to this.
-  virtual void SetScrollPosition(const pp::Point& position) = 0;
-#endif
-
   virtual std::string GetMetadata(const std::string& key) = 0;
+  virtual std::vector<uint8_t> GetSaveData() = 0;
 
   virtual void SetCaretPosition(const pp::Point& position) = 0;
   virtual void MoveRangeSelectionExtent(const pp::Point& extent) = 0;
@@ -443,12 +445,12 @@ class PDFEngineExports {
 
   PDFEngineExports() {}
   virtual ~PDFEngineExports() {}
+
   static PDFEngineExports* Get();
 
 #if defined(OS_WIN)
   // See the definition of RenderPDFPageToDC in pdf.cc for details.
-  virtual bool RenderPDFPageToDC(const void* pdf_buffer,
-                                 int buffer_size,
+  virtual bool RenderPDFPageToDC(base::span<const uint8_t> pdf_buffer,
                                  int page_number,
                                  const RenderingSettings& settings,
                                  HDC dc) = 0;
@@ -461,20 +463,31 @@ class PDFEngineExports {
 #endif  // defined(OS_WIN)
 
   // See the definition of RenderPDFPageToBitmap in pdf.cc for details.
-  virtual bool RenderPDFPageToBitmap(const void* pdf_buffer,
-                                     int pdf_buffer_size,
+  virtual bool RenderPDFPageToBitmap(base::span<const uint8_t> pdf_buffer,
                                      int page_number,
                                      const RenderingSettings& settings,
                                      void* bitmap_buffer) = 0;
 
-  virtual bool GetPDFDocInfo(const void* pdf_buffer,
-                             int buffer_size,
+  // See the definition of ConvertPdfPagesToNupPdf in pdf.cc for details.
+  virtual std::vector<uint8_t> ConvertPdfPagesToNupPdf(
+      std::vector<base::span<const uint8_t>> input_buffers,
+      size_t pages_per_sheet,
+      const gfx::Size& page_size,
+      const gfx::Rect& printable_area) = 0;
+
+  // See the definition of ConvertPdfDocumentToNupPdf in pdf.cc for details.
+  virtual std::vector<uint8_t> ConvertPdfDocumentToNupPdf(
+      base::span<const uint8_t> input_buffer,
+      size_t pages_per_sheet,
+      const gfx::Size& page_size,
+      const gfx::Rect& printable_area) = 0;
+
+  virtual bool GetPDFDocInfo(base::span<const uint8_t> pdf_buffer,
                              int* page_count,
                              double* max_page_width) = 0;
 
   // See the definition of GetPDFPageSizeByIndex in pdf.cc for details.
-  virtual bool GetPDFPageSizeByIndex(const void* pdf_buffer,
-                                     int pdf_buffer_size,
+  virtual bool GetPDFPageSizeByIndex(base::span<const uint8_t> pdf_buffer,
                                      int page_number,
                                      double* width,
                                      double* height) = 0;

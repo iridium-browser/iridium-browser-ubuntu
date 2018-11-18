@@ -46,12 +46,13 @@ _AddDirToPythonPath(_CATAPULT_DIR, 'devil')
 _AddDirToPythonPath(_CATAPULT_DIR, 'systrace')
 _AddDirToPythonPath(_CATAPULT_DIR, 'tracing')
 _AddDirToPythonPath(_CATAPULT_DIR, 'common', 'py_trace_event')
-_AddDirToPythonPath(_CATAPULT_DIR, 'common', 'battor')
 _AddDirToPythonPath(_CATAPULT_DIR, 'common', 'py_vulcanize')
 _AddDirToPythonPath(_CATAPULT_DIR, 'tracing', 'tracing_build')
 
+# pylint: disable=wrong-import-position
 from telemetry.core import util
 from telemetry.internal.util import global_hooks
+# pylint: enable=wrong-import-position
 
 # Add Catapult third party dependencies into our path.
 _AddDirToPythonPath(util.GetCatapultThirdPartyDir(), 'typ')

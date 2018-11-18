@@ -8,6 +8,7 @@
 #include <utility>
 
 #include "base/run_loop.h"
+#include "base/single_thread_task_runner.h"
 #include "base/test/scoped_task_environment.h"
 #include "media/capture/video/chromeos/mojo/cros_camera_service.mojom.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
@@ -32,6 +33,8 @@ class MockCameraHalServer : public cros::mojom::CameraHalServer {
   }
   MOCK_METHOD1(DoCreateChannel,
                void(cros::mojom::CameraModuleRequest& camera_module_request));
+
+  MOCK_METHOD1(SetTracingEnabled, void(bool enabled));
 
   cros::mojom::CameraHalServerPtrInfo GetInterfacePtrInfo() {
     cros::mojom::CameraHalServerPtrInfo camera_hal_server_ptr_info;

@@ -23,8 +23,8 @@ bool TabCaptureAccessHandler::SupportsStreamType(
     content::WebContents* web_contents,
     const content::MediaStreamType type,
     const extensions::Extension* extension) {
-  return type == content::MEDIA_TAB_VIDEO_CAPTURE ||
-         type == content::MEDIA_TAB_AUDIO_CAPTURE;
+  return type == content::MEDIA_GUM_TAB_VIDEO_CAPTURE ||
+         type == content::MEDIA_GUM_TAB_AUDIO_CAPTURE;
 }
 
 bool TabCaptureAccessHandler::CheckMediaAccessPermission(
@@ -38,16 +38,10 @@ bool TabCaptureAccessHandler::CheckMediaAccessPermission(
 void TabCaptureAccessHandler::HandleRequest(
     content::WebContents* web_contents,
     const content::MediaStreamRequest& request,
-    const content::MediaResponseCallback& callback,
+    content::MediaResponseCallback callback,
     const extensions::Extension* extension) {
   content::MediaStreamDevices devices;
   std::unique_ptr<content::MediaStreamUI> ui;
-
-  if (!extension) {
-    callback.Run(devices, content::MEDIA_DEVICE_TAB_CAPTURE_FAILURE,
-                 std::move(ui));
-    return;
-  }
 
   Profile* profile =
       Profile::FromBrowserContext(web_contents->GetBrowserContext());
@@ -55,26 +49,27 @@ void TabCaptureAccessHandler::HandleRequest(
       extensions::TabCaptureRegistry::Get(profile);
   if (!tab_capture_registry) {
     NOTREACHED();
-    callback.Run(devices, content::MEDIA_DEVICE_INVALID_STATE, std::move(ui));
+    std::move(callback).Run(devices, content::MEDIA_DEVICE_INVALID_STATE,
+                            std::move(ui));
     return;
   }
+  // |extension| may be null if the tabCapture starts with
+  // tabCapture.getMediaStreamId().
+  // TODO(crbug.com/831722): Deprecate tabCaptureRegistry soon.
+  const std::string extension_id = extension ? extension->id() : "";
   const bool tab_capture_allowed = tab_capture_registry->VerifyRequest(
-      request.render_process_id, request.render_frame_id, extension->id());
+      request.render_process_id, request.render_frame_id, extension_id);
 
-  if (request.audio_type == content::MEDIA_TAB_AUDIO_CAPTURE &&
-      tab_capture_allowed &&
-      extension->permissions_data()->HasAPIPermission(
-          extensions::APIPermission::kTabCapture)) {
+  if (request.audio_type == content::MEDIA_GUM_TAB_AUDIO_CAPTURE &&
+      tab_capture_allowed) {
     devices.push_back(content::MediaStreamDevice(
-        content::MEDIA_TAB_AUDIO_CAPTURE, std::string(), std::string()));
+        content::MEDIA_GUM_TAB_AUDIO_CAPTURE, std::string(), std::string()));
   }
 
-  if (request.video_type == content::MEDIA_TAB_VIDEO_CAPTURE &&
-      tab_capture_allowed &&
-      extension->permissions_data()->HasAPIPermission(
-          extensions::APIPermission::kTabCapture)) {
+  if (request.video_type == content::MEDIA_GUM_TAB_VIDEO_CAPTURE &&
+      tab_capture_allowed) {
     devices.push_back(content::MediaStreamDevice(
-        content::MEDIA_TAB_VIDEO_CAPTURE, std::string(), std::string()));
+        content::MEDIA_GUM_TAB_VIDEO_CAPTURE, std::string(), std::string()));
   }
 
   if (!devices.empty()) {
@@ -83,7 +78,8 @@ void TabCaptureAccessHandler::HandleRequest(
              ->RegisterMediaStream(web_contents, devices);
   }
   UpdateExtensionTrusted(request, extension);
-  callback.Run(devices, devices.empty() ? content::MEDIA_DEVICE_INVALID_STATE
-                                        : content::MEDIA_DEVICE_OK,
-               std::move(ui));
+  std::move(callback).Run(devices,
+                          devices.empty() ? content::MEDIA_DEVICE_INVALID_STATE
+                                          : content::MEDIA_DEVICE_OK,
+                          std::move(ui));
 }

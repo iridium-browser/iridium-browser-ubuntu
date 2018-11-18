@@ -14,7 +14,7 @@
 #include "base/files/file_path.h"
 #include "base/path_service.h"
 #include "base/process/memory.h"
-#include "base/test/histogram_tester.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/scoped_task_environment.h"
 #include "base/threading/thread_restrictions.h"
@@ -122,7 +122,7 @@ class MetricsServiceBrowserTest : public InProcessBrowserTest {
         ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION;
 
     base::FilePath test_directory;
-    ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_directory));
+    ASSERT_TRUE(base::PathService::Get(chrome::DIR_TEST_DATA, &test_directory));
 
     base::FilePath page1_path = test_directory.AppendASCII("title2.html");
     ui_test_utils::NavigateToURLWithDisposition(
@@ -178,6 +178,27 @@ IN_PROC_BROWSER_TEST_F(MetricsServiceBrowserTest, MAYBE_CrashRenderers) {
 #endif
   histogram_tester.ExpectUniqueSample("Tabs.SadTab.CrashCreated", 1, 1);
 }
+
+#if defined(OS_WIN)
+IN_PROC_BROWSER_TEST_F(MetricsServiceBrowserTest, HeapCorruptionInRenderer) {
+  base::HistogramTester histogram_tester;
+
+  OpenTabsAndNavigateToCrashyUrl(content::kChromeUIHeapCorruptionCrashURL);
+
+  // Verify that the expected stability metrics were recorded.
+  const PrefService* prefs = g_browser_process->local_state();
+  EXPECT_EQ(1, prefs->GetInteger(metrics::prefs::kStabilityLaunchCount));
+  // The three tabs from OpenTabs() and the one tab to open chrome://crash/.
+  EXPECT_EQ(4, prefs->GetInteger(metrics::prefs::kStabilityPageLoadCount));
+  EXPECT_EQ(1, prefs->GetInteger(metrics::prefs::kStabilityRendererCrashCount));
+
+  histogram_tester.ExpectUniqueSample(
+      "CrashExitCodes.Renderer",
+      std::abs(static_cast<int32_t>(STATUS_HEAP_CORRUPTION)), 1);
+  histogram_tester.ExpectUniqueSample("Tabs.SadTab.CrashCreated", 1, 1);
+  LOG(INFO) << histogram_tester.GetAllHistogramsRecorded();
+}
+#endif  // OS_WIN
 
 IN_PROC_BROWSER_TEST_F(MetricsServiceBrowserTest, MAYBE_CheckCrashRenderers) {
   base::HistogramTester histogram_tester;

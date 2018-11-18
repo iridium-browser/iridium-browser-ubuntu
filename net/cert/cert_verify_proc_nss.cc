@@ -19,6 +19,7 @@
 #include "base/macros.h"
 #include "base/memory/protected_memory.h"
 #include "base/memory/protected_memory_cfi.h"
+#include "base/stl_util.h"
 #include "build/build_config.h"
 #include "crypto/nss_util.h"
 #include "crypto/scoped_nss_types.h"
@@ -289,8 +290,7 @@ CRLSetResult CheckRevocationWithCRLSet(const CERTCertList* cert_list,
   // We iterate from the root certificate down to the leaf, keeping track of
   // the issuer's SPKI at each step.
   std::string issuer_spki_hash;
-  for (std::vector<CERTCertificate*>::reverse_iterator i = certs.rbegin();
-       i != certs.rend(); ++i) {
+  for (auto i = certs.rbegin(); i != certs.rend(); ++i) {
     CERTCertificate* cert = *i;
 
     base::StringPiece der(reinterpret_cast<char*>(cert->derCert.data),
@@ -461,19 +461,19 @@ SECStatus PKIXVerifyCert(CERTCertificate* cert_handle,
 
   CERTRevocationFlags revocation_flags;
   revocation_flags.leafTests.number_of_defined_methods =
-      arraysize(method_flags);
+      base::size(method_flags);
   revocation_flags.leafTests.cert_rev_flags_per_method = method_flags;
   revocation_flags.leafTests.number_of_preferred_methods =
-      arraysize(preferred_revocation_methods);
+      base::size(preferred_revocation_methods);
   revocation_flags.leafTests.preferred_methods = preferred_revocation_methods;
   revocation_flags.leafTests.cert_rev_method_independent_flags =
       revocation_method_independent_flags;
 
   revocation_flags.chainTests.number_of_defined_methods =
-      arraysize(method_flags);
+      base::size(method_flags);
   revocation_flags.chainTests.cert_rev_flags_per_method = method_flags;
   revocation_flags.chainTests.number_of_preferred_methods =
-      arraysize(preferred_revocation_methods);
+      base::size(preferred_revocation_methods);
   revocation_flags.chainTests.preferred_methods = preferred_revocation_methods;
   revocation_flags.chainTests.cert_rev_method_independent_flags =
       revocation_method_independent_flags;
@@ -813,10 +813,6 @@ bool CertVerifyProcNSS::SupportsAdditionalTrustAnchors() const {
   return true;
 }
 
-bool CertVerifyProcNSS::SupportsOCSPStapling() const {
-  return *ResolveCacheOCSPResponse() != nullptr;
-}
-
 int CertVerifyProcNSS::VerifyInternalImpl(
     X509Certificate* cert,
     const std::string& hostname,
@@ -842,7 +838,7 @@ int CertVerifyProcNSS::VerifyInternalImpl(
   }
   CERTCertificate* cert_handle = input_chain[0].get();
 
-  if (!ocsp_response.empty() && SupportsOCSPStapling()) {
+  if (!ocsp_response.empty() && *ResolveCacheOCSPResponse() != nullptr) {
     // Note: NSS uses a thread-safe global hash table, so this call will
     // affect any concurrent verification operations on |cert| or copies of
     // the same certificate. This is an unavoidable limitation of NSS's OCSP
@@ -895,8 +891,7 @@ int CertVerifyProcNSS::VerifyInternalImpl(
   SECOidTag ev_policy_oid = SEC_OID_UNKNOWN;
   bool is_ev_candidate =
       IsEVCandidate(metadata, cert_handle, &ev_policy_oid);
-  bool check_revocation =
-      (flags & CertVerifier::VERIFY_REV_CHECKING_ENABLED);
+  bool check_revocation = (flags & VERIFY_REV_CHECKING_ENABLED);
   if (check_revocation)
     verify_result->cert_status |= CERT_STATUS_REV_CHECKING_ENABLED;
 
@@ -920,8 +915,7 @@ int CertVerifyProcNSS::VerifyInternalImpl(
   }
 
   if (status == SECSuccess &&
-      (flags & CertVerifier::VERIFY_REV_CHECKING_REQUIRED_LOCAL_ANCHORS) &&
-      !known_root) {
+      (flags & VERIFY_REV_CHECKING_REQUIRED_LOCAL_ANCHORS) && !known_root) {
     // TODO(rsleevi): Optimize this by supplying the constructed chain to
     // libpkix via cvin. Omitting for now, due to lack of coverage in upstream
     // NSS tests for that feature.

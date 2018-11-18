@@ -15,7 +15,7 @@
 #include "content/public/test/test_browser_context.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/public/platform/modules/payments/payment_app.mojom.h"
+#include "third_party/blink/public/mojom/payments/payment_app.mojom.h"
 #include "third_party/blink/public/platform/modules/permissions/permission_status.mojom.h"
 #include "url/gurl.h"
 
@@ -65,7 +65,7 @@ class PaymentAppProviderTest : public PaymentAppContentUnitTestBase {
         .WillByDefault(
             testing::Return(blink::mojom::PermissionStatus::GRANTED));
     static_cast<TestBrowserContext*>(browser_context())
-        ->SetPermissionManager(std::move(mock_permission_manager));
+        ->SetPermissionControllerDelegate(std::move(mock_permission_manager));
   }
   ~PaymentAppProviderTest() override {}
 
@@ -108,6 +108,12 @@ class PaymentAppProviderTest : public PaymentAppContentUnitTestBase {
                     PaymentAppProvider::PaymentEventResultCallback callback) {
     PaymentAppProviderImpl::GetInstance()->AbortPayment(
         browser_context(), registration_id, std::move(callback));
+  }
+
+  void OnClosingOpenedWindow() {
+    PaymentAppProviderImpl::GetInstance()->OnClosingOpenedWindow(
+        browser_context());
+    base::RunLoop().RunUntilIdle();
   }
 
  private:
@@ -153,7 +159,7 @@ TEST_F(PaymentAppProviderTest, CanMakePaymentTest) {
       payments::mojom::CanMakePaymentEventData::New();
   payments::mojom::PaymentMethodDataPtr methodData =
       payments::mojom::PaymentMethodData::New();
-  methodData->supported_methods.push_back("test-method");
+  methodData->supported_method = "test-method";
   event_data->method_data.push_back(std::move(methodData));
 
   bool can_make_payment = false;
@@ -264,6 +270,53 @@ TEST_F(PaymentAppProviderTest, GetAllPaymentAppsFromTheSameOriginTest) {
   ASSERT_EQ(2U, apps.size());
   ASSERT_EQ(1U, apps[bobpay_a_registration_id]->enabled_methods.size());
   ASSERT_EQ(2U, apps[bobpay_b_registration_id]->enabled_methods.size());
+}
+
+TEST_F(PaymentAppProviderTest, AbortPaymentWhenClosingOpenedWindow) {
+  PaymentManager* manager1 = CreatePaymentManager(
+      GURL("https://hellopay.com/a"), GURL("https://hellopay.com/a/script.js"));
+  PaymentManager* manager2 = CreatePaymentManager(
+      GURL("https://bobpay.com/b"), GURL("https://bobpay.com/b/script.js"));
+
+  PaymentHandlerStatus status;
+  SetPaymentInstrument(manager1, "test_key1",
+                       payments::mojom::PaymentInstrument::New(),
+                       base::BindOnce(&SetPaymentInstrumentCallback, &status));
+  SetPaymentInstrument(manager2, "test_key2",
+                       payments::mojom::PaymentInstrument::New(),
+                       base::BindOnce(&SetPaymentInstrumentCallback, &status));
+  SetPaymentInstrument(manager2, "test_key3",
+                       payments::mojom::PaymentInstrument::New(),
+                       base::BindOnce(&SetPaymentInstrumentCallback, &status));
+
+  PaymentAppProvider::PaymentApps apps;
+  GetAllPaymentApps(base::BindOnce(&GetAllPaymentAppsCallback, &apps));
+  ASSERT_EQ(2U, apps.size());
+
+  int64_t bobpay_registration_id = last_sw_registration_id();
+  EXPECT_EQ(apps[bobpay_registration_id]->scope.spec(), "https://bobpay.com/b");
+
+  payments::mojom::PaymentRequestEventDataPtr event_data =
+      payments::mojom::PaymentRequestEventData::New();
+  event_data->method_data.push_back(payments::mojom::PaymentMethodData::New());
+  event_data->total = payments::mojom::PaymentCurrencyAmount::New();
+
+  SetNoPaymentRequestResponseImmediately();
+
+  bool called = false;
+  InvokePaymentApp(bobpay_registration_id, std::move(event_data),
+                   base::BindOnce(&InvokePaymentAppCallback, &called));
+  ASSERT_FALSE(called);
+
+  // Abort payment request as closing opened window.
+  OnClosingOpenedWindow();
+  ASSERT_TRUE(called);
+
+  // Response after abort should not crash and take effect.
+  called = false;
+  RespondPendingPaymentRequest();
+  base::RunLoop().RunUntilIdle();
+  ASSERT_FALSE(called);
 }
 
 }  // namespace content

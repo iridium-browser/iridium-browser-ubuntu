@@ -38,20 +38,24 @@ namespace {
 
 const char kProductName[] = "Eureka";
 
-const char kCrashServerStaging[] =
-    "https://clients2.google.com/cr/staging_report";
 const char kCrashServerProduction[] = "https://clients2.google.com/cr/report";
+
+const char kVirtualChannel[] = "virtual-channel";
+
+const char kLatestUiVersion[] = "latest-ui-version";
 
 typedef std::vector<std::unique_ptr<DumpInfo>> DumpList;
 
 std::unique_ptr<PrefService> CreatePrefService() {
   base::FilePath prefs_path;
-  CHECK(PathService::Get(chromecast::FILE_CAST_CONFIG, &prefs_path));
+  CHECK(base::PathService::Get(chromecast::FILE_CAST_CONFIG, &prefs_path));
   VLOG(1) << "Loading prefs from " << prefs_path.value();
 
   PrefRegistrySimple* registry = new PrefRegistrySimple;
   registry->RegisterBooleanPref(prefs::kOptInStats, true);
   registry->RegisterStringPref(::metrics::prefs::kMetricsClientID, "");
+  registry->RegisterStringPref(kVirtualChannel, "");
+  registry->RegisterForeignPref(kLatestUiVersion);
 
   PrefServiceFactory prefServiceFactory;
   prefServiceFactory.SetUserPrefsFile(
@@ -77,11 +81,8 @@ MinidumpUploader::MinidumpUploader(CastSysInfo* sys_info,
       board_revision_(sys_info->GetBoardRevision()),
       manufacturer_(sys_info->GetManufacturer()),
       system_version_(sys_info->GetSystemBuildNumber()),
-      upload_location_(!server_url.empty()
-                           ? server_url
-                           : (sys_info->GetBuildType() == CastSysInfo::BUILD_ENG
-                                  ? kCrashServerStaging
-                                  : kCrashServerProduction)),
+      upload_location_(!server_url.empty() ? server_url
+                                           : kCrashServerProduction),
       last_upload_ratelimited_(true),
       reboot_scheduled_(false),
       filestate_initialized_(false),
@@ -128,6 +129,10 @@ bool MinidumpUploader::DoWork() {
   std::unique_ptr<PrefService> pref_service = pref_service_generator_.Run();
   const std::string& client_id(
       pref_service->GetString(::metrics::prefs::kMetricsClientID));
+  std::string virtual_channel(pref_service->GetString(kVirtualChannel));
+  if (virtual_channel.empty()) {
+    virtual_channel = release_channel_;
+  }
   bool opt_in_stats = pref_service->GetBoolean(prefs::kOptInStats);
   // Handle each dump and consume it out of the structure.
   while (dumps.size()) {
@@ -231,7 +236,11 @@ bool MinidumpUploader::DoWork() {
     g.SetParameter("ro.product.model", device_model_);
     g.SetParameter("ro.product.manufacturer", manufacturer_);
     g.SetParameter("ro.system.version", system_version_);
-
+    g.SetParameter("release.virtual-channel", virtual_channel);
+    if (pref_service->HasPrefPath(kLatestUiVersion)) {
+      g.SetParameter("ui.version",
+                     pref_service->GetString(kLatestUiVersion));
+    }
     // Add app state information
     if (!dump.params().previous_app_name.empty()) {
       g.SetParameter("previous_app", dump.params().previous_app_name);

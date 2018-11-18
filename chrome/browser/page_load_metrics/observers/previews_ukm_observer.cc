@@ -12,19 +12,19 @@
 #include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings_factory.h"
 #include "chrome/browser/page_load_metrics/page_load_metrics_observer.h"
 #include "chrome/browser/page_load_metrics/page_load_metrics_util.h"
-#include "chrome/browser/previews/previews_infobar_delegate.h"
+#include "chrome/browser/previews/previews_ui_tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/page_load_metrics/page_load_timing.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_data.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_settings.h"
 #include "components/previews/content/previews_content_util.h"
-#include "components/ukm/ukm_source.h"
+#include "components/previews/core/previews_experiments.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/previews_state.h"
 #include "services/metrics/public/cpp/ukm_builders.h"
-#include "services/metrics/public/cpp/ukm_entry_builder.h"
 #include "services/metrics/public/cpp/ukm_recorder.h"
+#include "services/metrics/public/cpp/ukm_source.h"
 
 namespace previews {
 
@@ -51,7 +51,7 @@ PreviewsUKMObserver::OnCommit(content::NavigationHandle* navigation_handle,
     return STOP_OBSERVING;
   data_reduction_proxy::DataReductionProxyData* data =
       chrome_navigation_data->GetDataReductionProxyData();
-  if (data && data->used_data_reduction_proxy() && data->lite_page_received()) {
+  if (data && data->lite_page_received()) {
     lite_page_seen_ = true;
   }
   content::PreviewsState previews_state =
@@ -59,6 +59,10 @@ PreviewsUKMObserver::OnCommit(content::NavigationHandle* navigation_handle,
   if (previews_state && previews::GetMainFramePreviewsType(previews_state) ==
                             previews::PreviewsType::NOSCRIPT) {
     noscript_seen_ = true;
+  }
+  if (previews_state && previews::GetMainFramePreviewsType(previews_state) ==
+                            previews::PreviewsType::RESOURCE_LOADING_HINTS) {
+    resource_loading_hints_seen_ = true;
   }
   previews::PreviewsUserData* previews_user_data =
       chrome_navigation_data->previews_user_data();
@@ -89,6 +93,15 @@ PreviewsUKMObserver::FlushMetricsOnAppEnterBackground(
   return STOP_OBSERVING;
 }
 
+page_load_metrics::PageLoadMetricsObserver::ObservePolicy
+PreviewsUKMObserver::OnHidden(
+    const page_load_metrics::mojom::PageLoadTiming& timing,
+    const page_load_metrics::PageLoadExtraInfo& info) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  RecordPreviewsTypes(info);
+  return STOP_OBSERVING;
+}
+
 void PreviewsUKMObserver::OnComplete(
     const page_load_metrics::mojom::PageLoadTiming& timing,
     const page_load_metrics::PageLoadExtraInfo& info) {
@@ -100,7 +113,8 @@ void PreviewsUKMObserver::RecordPreviewsTypes(
     const page_load_metrics::PageLoadExtraInfo& info) {
   // Only record previews types when they are active.
   if (!server_lofi_seen_ && !client_lofi_seen_ && !lite_page_seen_ &&
-      !noscript_seen_ && !origin_opt_out_occurred_ && !save_data_enabled_) {
+      !noscript_seen_ && !resource_loading_hints_seen_ &&
+      !origin_opt_out_occurred_ && !save_data_enabled_) {
     return;
   }
 
@@ -113,8 +127,10 @@ void PreviewsUKMObserver::RecordPreviewsTypes(
     builder.Setlite_page(1);
   if (noscript_seen_)
     builder.Setnoscript(1);
+  if (resource_loading_hints_seen_)
+    builder.Setresource_loading_hints(1);
   if (opt_out_occurred_)
-    builder.Setopt_out(1);
+    builder.Setopt_out(previews::params::IsPreviewsOmniboxUiEnabled() ? 2 : 1);
   if (origin_opt_out_occurred_)
     builder.Setorigin_opt_out(1);
   if (save_data_enabled_)
@@ -140,7 +156,7 @@ void PreviewsUKMObserver::OnLoadedResource(
 
 void PreviewsUKMObserver::OnEventOccurred(const void* const event_key) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  if (event_key == PreviewsInfoBarDelegate::OptOutEventKey())
+  if (event_key == PreviewsUITabHelper::OptOutEventKey())
     opt_out_occurred_ = true;
 }
 

@@ -11,7 +11,7 @@
 
 #include "base/bind.h"
 #include "base/location.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "device/bluetooth/bluetooth_device.h"
 #include "device/bluetooth/bluetooth_discovery_filter.h"
 #include "device/bluetooth/bluetooth_discovery_session_outcome.h"
@@ -22,6 +22,21 @@
 #include "device/bluetooth/test/fake_remote_gatt_service.h"
 
 namespace bluetooth {
+
+namespace {
+
+template <typename Optional, typename T = typename Optional::value_type>
+T ValueOrDefault(Optional&& opt) {
+  return std::forward<Optional>(opt).value_or(T{});
+}
+
+device::BluetoothDevice::ManufacturerDataMap ToManufacturerDataMap(
+    base::flat_map<uint8_t, std::vector<uint8_t>>&& map) {
+  return device::BluetoothDevice::ManufacturerDataMap(
+      std::make_move_iterator(map.begin()), std::make_move_iterator(map.end()));
+}
+
+}  // namespace
 
 FakeCentral::FakeCentral(mojom::CentralState state,
                          mojom::FakeCentralRequest request)
@@ -66,35 +81,17 @@ void FakeCentral::SimulateAdvertisementReceived(
     DCHECK(pair.second);
   }
 
-  if (scan_result_ptr->scan_record->name) {
-    fake_peripheral->SetName(scan_result_ptr->scan_record->name.value());
-  }
-
-  device::BluetoothDevice::UUIDList uuids =
-      (scan_result_ptr->scan_record->uuids)
-          ? device::BluetoothDevice::UUIDList(
-                scan_result_ptr->scan_record->uuids.value().begin(),
-                scan_result_ptr->scan_record->uuids.value().end())
-          : device::BluetoothDevice::UUIDList();
-  device::BluetoothDevice::ServiceDataMap service_data =
-      (scan_result_ptr->scan_record->service_data)
-          ? device::BluetoothDevice::ServiceDataMap(
-                scan_result_ptr->scan_record->service_data.value().begin(),
-                scan_result_ptr->scan_record->service_data.value().end())
-          : device::BluetoothDevice::ServiceDataMap();
-  device::BluetoothDevice::ManufacturerDataMap manufacturer_data =
-      (scan_result_ptr->scan_record->manufacturer_data)
-          ? device::BluetoothDevice::ManufacturerDataMap(
-                scan_result_ptr->scan_record->manufacturer_data.value().begin(),
-                scan_result_ptr->scan_record->manufacturer_data.value().end())
-          : device::BluetoothDevice::ManufacturerDataMap();
-
+  auto& scan_record = scan_result_ptr->scan_record;
+  fake_peripheral->SetName(std::move(scan_record->name));
   fake_peripheral->UpdateAdvertisementData(
-      scan_result_ptr->rssi, std::move(uuids), std::move(service_data),
-      std::move(manufacturer_data),
-      (scan_result_ptr->scan_record->tx_power->has_value)
-          ? &scan_result_ptr->scan_record->tx_power->value
-          : nullptr);
+      scan_result_ptr->rssi, base::nullopt /* flags */,
+      ValueOrDefault(std::move(scan_record->uuids)),
+      scan_record->tx_power->has_value
+          ? base::make_optional(scan_record->tx_power->value)
+          : base::nullopt,
+      ValueOrDefault(std::move(scan_record->service_data)),
+      ToManufacturerDataMap(
+          ValueOrDefault(std::move(scan_record->manufacturer_data))));
 
   if (is_new_device) {
     // Call DeviceAdded on observers because it is a newly detected peripheral.
@@ -545,12 +542,12 @@ bool FakeCentral::SetPoweredImpl(bool powered) {
 void FakeCentral::AddDiscoverySession(
     device::BluetoothDiscoveryFilter* discovery_filter,
     const base::Closure& callback,
-    const DiscoverySessionErrorCallback& error_callback) {
+    DiscoverySessionErrorCallback error_callback) {
   if (!IsPresent()) {
     base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
         base::BindOnce(
-            error_callback,
+            std::move(error_callback),
             device::UMABluetoothDiscoverySessionOutcome::ADAPTER_NOT_PRESENT));
     return;
   }
@@ -567,12 +564,12 @@ void FakeCentral::AddDiscoverySession(
 void FakeCentral::RemoveDiscoverySession(
     device::BluetoothDiscoveryFilter* discovery_filter,
     const base::Closure& callback,
-    const DiscoverySessionErrorCallback& error_callback) {
+    DiscoverySessionErrorCallback error_callback) {
   if (!IsPresent()) {
     base::ThreadTaskRunnerHandle::Get()->PostTask(
         FROM_HERE,
         base::BindOnce(
-            error_callback,
+            std::move(error_callback),
             device::UMABluetoothDiscoverySessionOutcome::ADAPTER_NOT_PRESENT));
     return;
   }
@@ -589,7 +586,7 @@ void FakeCentral::RemoveDiscoverySession(
 void FakeCentral::SetDiscoveryFilter(
     std::unique_ptr<device::BluetoothDiscoveryFilter> discovery_filter,
     const base::Closure& callback,
-    const DiscoverySessionErrorCallback& error_callback) {
+    DiscoverySessionErrorCallback error_callback) {
   NOTREACHED();
 }
 

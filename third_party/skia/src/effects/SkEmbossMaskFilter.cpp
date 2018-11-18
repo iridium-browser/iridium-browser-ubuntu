@@ -72,6 +72,10 @@ SkMask::Format SkEmbossMaskFilter::getFormat() const {
 
 bool SkEmbossMaskFilter::filterMask(SkMask* dst, const SkMask& src,
                                     const SkMatrix& matrix, SkIPoint* margin) const {
+    if (src.fFormat != SkMask::kA8_Format) {
+        return false;
+    }
+
     SkScalar sigma = matrix.mapRadius(fBlurSigma);
 
     if (!SkBlurMask::BoxBlur(dst, src, sigma, kInner_SkBlurStyle)) {
@@ -135,23 +139,4 @@ void SkEmbossMaskFilter::flatten(SkWriteBuffer& buffer) const {
     tmpLight.fPad = 0;    // for the font-cache lookup to be clean
     buffer.writeByteArray(&tmpLight, sizeof(tmpLight));
     buffer.writeScalar(fBlurSigma);
-}
-
-void SkEmbossMaskFilter::toString(SkString* str) const {
-    str->append("SkEmbossMaskFilter: (");
-
-    str->append("direction: (");
-    str->appendScalar(fLight.fDirection[0]);
-    str->append(", ");
-    str->appendScalar(fLight.fDirection[1]);
-    str->append(", ");
-    str->appendScalar(fLight.fDirection[2]);
-    str->append(") ");
-
-    str->appendf("ambient: %d specular: %d ",
-        fLight.fAmbient, fLight.fSpecular);
-
-    str->append("blurSigma: ");
-    str->appendScalar(fBlurSigma);
-    str->append(")");
 }

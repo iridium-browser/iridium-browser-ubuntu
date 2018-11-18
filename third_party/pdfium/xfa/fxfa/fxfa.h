@@ -7,11 +7,11 @@
 #ifndef XFA_FXFA_FXFA_H_
 #define XFA_FXFA_FXFA_H_
 
-#include <vector>
+#include <memory>
 
 #include "core/fxcrt/fx_coordinates.h"
 #include "core/fxcrt/retain_ptr.h"
-#include "core/fxge/dib/cfx_dibsource.h"
+#include "core/fxge/dib/cfx_dibbase.h"
 #include "core/fxge/fx_dib.h"
 #include "xfa/fxfa/fxfa_basic.h"
 
@@ -22,18 +22,32 @@ class CXFA_Submit;
 class IFWL_AdapterTimerMgr;
 class IFX_SeekableReadStream;
 
-#define XFA_MBICON_Error 0
-#define XFA_MBICON_Warning 1
-#define XFA_MBICON_Question 2
-#define XFA_MBICON_Status 3
-#define XFA_MB_OK 0
-#define XFA_MB_OKCancel 1
-#define XFA_MB_YesNo 2
-#define XFA_MB_YesNoCancel 3
-#define XFA_IDOK 1
-#define XFA_IDCancel 2
-#define XFA_IDNo 3
-#define XFA_IDYes 4
+// Note, values must match fpdf_formfill.h JSPLATFORM_ALERT_BUTTON_* flags.
+enum class AlertButton {
+  kDefault = 0,
+  kOK = 0,
+  kOKCancel = 1,
+  kYesNo = 2,
+  kYesNoCancel = 3,
+};
+
+// Note, values must match fpdf_formfill.h JSPLATFORM_ALERT_ICON_* flags.
+enum class AlertIcon {
+  kDefault = 0,
+  kError = 0,
+  kWarning = 1,
+  kQuestion = 2,
+  kStatus = 3,
+  kAsterisk = 4,
+};
+
+// Note, values must match fpdf_formfill.h JSPLATFORM_ALERT_RETURN_* flags.
+enum class AlertReturn {
+  kOK = 1,
+  kCancel = 2,
+  kNo = 3,
+  kYes = 4,
+};
 
 // Note, values must match fpdf_formfill.h FORMTYPE_* flags.
 enum class FormType {
@@ -49,6 +63,7 @@ enum class FormType {
 #define XFA_PRINTOPT_AsImage 0x00000008
 #define XFA_PRINTOPT_ReverseOrder 0x00000010
 #define XFA_PRINTOPT_PrintAnnot 0x00000020
+
 #define XFA_PAGEVIEWEVENT_PostAdded 1
 #define XFA_PAGEVIEWEVENT_PostRemoved 3
 #define XFA_PAGEVIEWEVENT_StopLayout 4
@@ -103,7 +118,7 @@ enum XFA_WIDGETTYPE {
 // Probably should be called IXFA_AppDelegate.
 class IXFA_AppProvider {
  public:
-  virtual ~IXFA_AppProvider() {}
+  virtual ~IXFA_AppProvider() = default;
 
   /**
    * Returns the language of the running host application. Such as zh_CN
@@ -142,9 +157,9 @@ class IXFA_AppProvider {
    * user, refer to XFA_ID.
    */
   virtual int32_t MsgBox(const WideString& wsMessage,
-                         const WideString& wsTitle = L"",
-                         uint32_t dwIconType = 0,
-                         uint32_t dwButtonType = 0) = 0;
+                         const WideString& wsTitle,
+                         uint32_t dwIconType,
+                         uint32_t dwButtonType) = 0;
 
   /**
    * Get a response from the user.
@@ -155,9 +170,9 @@ class IXFA_AppProvider {
    * @return A string containing the user's response.
    */
   virtual WideString Response(const WideString& wsQuestion,
-                              const WideString& wsTitle = L"",
-                              const WideString& wsDefaultAnswer = L"",
-                              bool bMask = true) = 0;
+                              const WideString& wsTitle,
+                              const WideString& wsDefaultAnswer,
+                              bool bMask) = 0;
 
   /**
    * Download something from somewhere.
@@ -201,12 +216,12 @@ class IXFA_AppProvider {
                              const WideString& wsData,
                              const WideString& wsEncode) = 0;
 
-  virtual IFWL_AdapterTimerMgr* GetTimerMgr() = 0;
+  virtual std::unique_ptr<IFWL_AdapterTimerMgr> NewTimerMgr() = 0;
 };
 
 class IXFA_DocEnvironment {
  public:
-  virtual ~IXFA_DocEnvironment() {}
+  virtual ~IXFA_DocEnvironment() = default;
 
   virtual void SetChangeMark(CXFA_FFDoc* hDoc) = 0;
   virtual void InvalidateRect(CXFA_FFPageView* pPageView,
@@ -218,7 +233,7 @@ class IXFA_DocEnvironment {
                            float fMinPopup,
                            float fMaxPopup,
                            const CFX_RectF& rtAnchor,
-                           CFX_RectF& rtPopup) = 0;
+                           CFX_RectF* pPopupRect) = 0;
   virtual bool PopupMenu(CXFA_FFWidget* hWidget, CFX_PointF ptPopup) = 0;
   virtual void PageViewEvent(CXFA_FFPageView* pPageView, uint32_t dwFlags) = 0;
   virtual void WidgetPostAdd(CXFA_FFWidget* hWidget) = 0;
@@ -244,7 +259,10 @@ class IXFA_DocEnvironment {
                      uint32_t dwOptions) = 0;
   virtual FX_ARGB GetHighlightColor(CXFA_FFDoc* hDoc) = 0;
 
+#ifdef PDF_XFA_ELEMENT_SUBMIT_ENABLED
   virtual bool Submit(CXFA_FFDoc* hDoc, CXFA_Submit* submit) = 0;
+#endif  // PDF_XFA_ELEMENT_SUBMIT_ENABLED
+
   virtual bool GetPropertyFromNonXFAGlobalObject(
       CXFA_FFDoc* hDoc,
       const ByteStringView& szPropName,
@@ -259,7 +277,7 @@ class IXFA_DocEnvironment {
 
 class IXFA_WidgetIterator {
  public:
-  virtual ~IXFA_WidgetIterator() {}
+  virtual ~IXFA_WidgetIterator() = default;
 
   virtual void Reset() = 0;
   virtual CXFA_FFWidget* MoveToFirst() = 0;

@@ -176,27 +176,33 @@ AdbClientSocket::AdbClientSocket(int port)
 AdbClientSocket::~AdbClientSocket() {
 }
 
-void AdbClientSocket::Connect(const net::CompletionCallback& callback) {
+void AdbClientSocket::RunConnectCallback(int result) {
+  std::move(connect_callback_).Run(result);
+}
+
+void AdbClientSocket::Connect(net::CompletionOnceCallback callback) {
   net::IPAddress ip_address;
   if (!ip_address.AssignFromIPLiteral(host_)) {
-    callback.Run(net::ERR_FAILED);
+    std::move(callback).Run(net::ERR_FAILED);
     return;
   }
 
   net::AddressList address_list =
       net::AddressList::CreateFromIPAddress(ip_address, port_);
-  socket_.reset(new net::TCPClientSocket(address_list, NULL, NULL,
-                                         net::NetLogSource()));
-  int result = socket_->Connect(callback);
+  socket_.reset(
+      new net::TCPClientSocket(address_list, NULL, NULL, net::NetLogSource()));
+  connect_callback_ = std::move(callback);
+  int result = socket_->Connect(base::BindOnce(
+      &AdbClientSocket::RunConnectCallback, base::Unretained(this)));
   if (result != net::ERR_IO_PENDING)
-    callback.Run(result);
+    AdbClientSocket::RunConnectCallback(result);
 }
 
 void AdbClientSocket::SendCommand(const std::string& command,
                                   bool is_void,
                                   const CommandCallback& callback) {
   scoped_refptr<net::StringIOBuffer> request_buffer =
-      new net::StringIOBuffer(EncodeMessage(command));
+      base::MakeRefCounted<net::StringIOBuffer>(EncodeMessage(command));
   net::NetworkTrafficAnnotationTag traffic_annotation =
       net::DefineNetworkTrafficAnnotation("adb_client_socket", R"(
         semantics {
@@ -237,7 +243,7 @@ void AdbClientSocket::ReadResponse(const CommandCallback& callback,
     return;
   }
   scoped_refptr<net::IOBuffer> response_buffer =
-      new net::IOBuffer(kBufferSize);
+      base::MakeRefCounted<net::IOBuffer>(kBufferSize);
   result = socket_->Read(response_buffer.get(),
                          kBufferSize,
                          base::Bind(&AdbClientSocket::OnResponseHeader,

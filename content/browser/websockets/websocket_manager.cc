@@ -9,20 +9,25 @@
 #include <vector>
 
 #include "base/callback.h"
+#include "base/feature_list.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/weak_ptr.h"
 #include "base/numerics/safe_conversions.h"
+#include "base/task/post_task.h"
 #include "content/browser/bad_message.h"
 #include "content/browser/child_process_security_policy_impl.h"
 #include "content/browser/ssl/ssl_error_handler.h"
 #include "content/browser/ssl/ssl_manager.h"
 #include "content/browser/websockets/websocket_handshake_request_info_impl.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_process_host_observer.h"
 #include "content/public/browser/storage_partition.h"
+#include "services/network/network_context.h"
+#include "services/network/public/cpp/features.h"
 
 namespace content {
 
@@ -63,11 +68,8 @@ class WebSocketManager::Delegate final : public network::WebSocket::Delegate {
   void ReportBadMessage(BadMessageReason reason,
                         network::WebSocket* impl) override {
     bad_message::BadMessageReason reason_to_pass =
-        bad_message::WSI_INVALID_HEADER_VALUE;
+        bad_message::WSI_UNEXPECTED_ADD_CHANNEL_REQUEST;
     switch (reason) {
-      case BadMessageReason::kInvalidHeaderValue:
-        reason_to_pass = bad_message::WSI_INVALID_HEADER_VALUE;
-        break;
       case BadMessageReason::kUnexpectedAddChannelRequest:
         reason_to_pass = bad_message::WSI_UNEXPECTED_ADD_CHANNEL_REQUEST;
         break;
@@ -157,30 +159,27 @@ class WebSocketManager::Handle : public base::SupportsUserData::Data,
 };
 
 // static
-void WebSocketManager::CreateWebSocketForFrame(
+void WebSocketManager::CreateWebSocket(
     int process_id,
     int frame_id,
-    network::mojom::WebSocketRequest request) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
-  // ForFrame() implies a frame: DCHECK this pre-condition.
-  RenderFrameHost* frame = RenderFrameHost::FromID(process_id, frame_id);
-  DCHECK(frame);
-
-  CreateWebSocketWithOrigin(process_id, frame->GetLastCommittedOrigin(),
-                            std::move(request), frame_id);
-}
-
-// static
-void WebSocketManager::CreateWebSocketWithOrigin(
-    int process_id,
     url::Origin origin,
-    network::mojom::WebSocketRequest request,
-    int frame_id) {
+    network::mojom::AuthenticationHandlerPtr auth_handler,
+    network::mojom::WebSocketRequest request) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
 
   RenderProcessHost* host = RenderProcessHost::FromID(process_id);
   DCHECK(host);
+
+  if (base::FeatureList::IsEnabled(network::features::kNetworkService)) {
+    StoragePartition* storage_partition = host->GetStoragePartition();
+    network::mojom::NetworkContext* network_context =
+        storage_partition->GetNetworkContext();
+    network_context->CreateWebSocket(std::move(request), process_id, frame_id,
+                                     origin, std::move(auth_handler));
+    return;
+  }
+  // |auth_handler| is provided only for the network service path.
+  DCHECK(!auth_handler);
 
   // Maintain a WebSocketManager per RenderProcessHost. While the instance of
   // WebSocketManager is allocated on the UI thread, it must only be used and
@@ -197,8 +196,8 @@ void WebSocketManager::CreateWebSocketWithOrigin(
     DCHECK(handle->manager());
   }
 
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::IO},
       base::BindOnce(&WebSocketManager::DoCreateWebSocket,
                      base::Unretained(handle->manager()), frame_id,
                      std::move(origin), std::move(request)));
@@ -213,8 +212,8 @@ WebSocketManager::WebSocketManager(int process_id,
     // This unretained pointer is safe because we destruct a WebSocketManager
     // only via WebSocketManager::Handle::RenderProcessHostDestroyed which
     // posts a deletion task to the IO thread.
-    BrowserThread::PostTask(
-        BrowserThread::IO, FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, {BrowserThread::IO},
         base::BindOnce(&WebSocketManager::ObserveURLRequestContextGetter,
                        base::Unretained(this)));
   }
@@ -255,7 +254,7 @@ void WebSocketManager::DoCreateWebSocket(
   // Keep all network::WebSockets alive until either the client drops its
   // connection (see OnLostConnectionToClient) or we need to shutdown.
 
-  impls_.insert(CreateWebSocket(
+  impls_.insert(DoCreateWebSocketInternal(
       std::make_unique<Delegate>(this), std::move(request),
       throttler_.IssuePendingConnectionTracker(), process_id_, frame_id,
       std::move(origin), throttler_.CalculateDelay()));
@@ -275,7 +274,7 @@ void WebSocketManager::ThrottlingPeriodTimerCallback() {
     throttling_period_timer_.Stop();
 }
 
-std::unique_ptr<network::WebSocket> WebSocketManager::CreateWebSocket(
+std::unique_ptr<network::WebSocket> WebSocketManager::DoCreateWebSocketInternal(
     std::unique_ptr<network::WebSocket::Delegate> delegate,
     network::mojom::WebSocketRequest request,
     network::WebSocketThrottler::PendingConnection pending_connection_tracker,
@@ -284,7 +283,7 @@ std::unique_ptr<network::WebSocket> WebSocketManager::CreateWebSocket(
     url::Origin origin,
     base::TimeDelta delay) {
   return std::make_unique<network::WebSocket>(
-      std::move(delegate), std::move(request),
+      std::move(delegate), std::move(request), nullptr,
       std::move(pending_connection_tracker), child_id, frame_id,
       std::move(origin), delay);
 }

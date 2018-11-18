@@ -6,6 +6,7 @@
 
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
+#include "base/no_destructor.h"
 #include "base/path_service.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
@@ -27,8 +28,8 @@ namespace first_run {
 
 #if !defined(OS_CHROMEOS)
 base::OnceClosure& GetBeforeShowFirstRunDialogHookForTesting() {
-  CR_DEFINE_STATIC_LOCAL(base::OnceClosure, closure, ());
-  return closure;
+  static base::NoDestructor<base::OnceClosure> closure;
+  return *closure;
 }
 #endif  // OS_CHROMEOS
 
@@ -52,7 +53,7 @@ bool ShouldShowFirstRunDialog() {
 #endif
 
   base::FilePath local_state_path;
-  PathService::Get(chrome::FILE_LOCAL_STATE, &local_state_path);
+  base::PathService::Get(chrome::FILE_LOCAL_STATE, &local_state_path);
   if (base::PathExists(local_state_path))
     return false;
 

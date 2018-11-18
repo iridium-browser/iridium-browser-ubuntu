@@ -4,9 +4,6 @@
 
 package org.chromium.chrome.browser.ntp;
 
-import static org.hamcrest.CoreMatchers.is;
-import static org.junit.Assert.assertThat;
-
 import android.support.test.InstrumentationRegistry;
 import android.support.test.filters.MediumTest;
 import android.view.View;
@@ -19,44 +16,28 @@ import org.junit.rules.TestRule;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.ThreadUtils;
-import org.chromium.base.test.params.ParameterAnnotations.ClassParameter;
-import org.chromium.base.test.params.ParameterAnnotations.UseRunnerDelegate;
-import org.chromium.base.test.params.ParameterSet;
-import org.chromium.base.test.params.ParameterizedRunner;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
-import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.UrlConstants;
 import org.chromium.chrome.browser.ntp.cards.NewTabPageRecyclerView;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.test.ScreenShooter;
-import org.chromium.chrome.test.ChromeJUnit4RunnerDelegate;
+import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 import org.chromium.chrome.test.util.NewTabPageTestUtils;
-import org.chromium.chrome.test.util.browser.Features;
 import org.chromium.chrome.test.util.browser.RecyclerViewTestUtils;
 import org.chromium.chrome.test.util.browser.compositor.layouts.DisableChromeAnimations;
 import org.chromium.chrome.test.util.browser.suggestions.SuggestionsDependenciesRule;
 
-import java.util.Arrays;
-import java.util.List;
-
 /**
  * Capture the New Tab Page UI for UX review.
  */
-@RunWith(ParameterizedRunner.class)
-@UseRunnerDelegate(ChromeJUnit4RunnerDelegate.class)
+@RunWith(ChromeJUnit4ClassRunner.class)
 @CommandLineFlags.Add({
         ChromeSwitches.DISABLE_FIRST_RUN_EXPERIENCE,
 })
 public class NewTabPageUiCaptureTest {
-    @ClassParameter
-    private static List<ParameterSet> sClassParams =
-            Arrays.asList(new ParameterSet().value(false).name("DisableNTPModernLayout"),
-                    new ParameterSet().value(true).name("EnableNTPModernLayout"));
-    @Rule
-    public TestRule mFeaturesProcessor = new Features.InstrumentationProcessor();
     @Rule
     public ChromeTabbedActivityTestRule mActivityTestRule = new ChromeTabbedActivityTestRule();
     @Rule
@@ -69,19 +50,8 @@ public class NewTabPageUiCaptureTest {
 
     private NewTabPage mNtp;
 
-    private final boolean mEnableNTPModernLayout;
-
-    public NewTabPageUiCaptureTest(boolean enableNTPModernLayout) {
-        mEnableNTPModernLayout = enableNTPModernLayout;
-    }
-
     @Before
     public void setUp() throws Exception {
-        if (mEnableNTPModernLayout) {
-            Features.getInstance().enable(ChromeFeatureList.NTP_MODERN_LAYOUT);
-        } else {
-            Features.getInstance().disable(ChromeFeatureList.NTP_MODERN_LAYOUT);
-        }
         mActivityTestRule.startMainActivityWithURL(UrlConstants.NTP_URL);
         // TODO(aberent): this sequence or similar is used in a number of tests, extract to common
         // test method?
@@ -89,14 +59,23 @@ public class NewTabPageUiCaptureTest {
         NewTabPageTestUtils.waitForNtpLoaded(tab);
         Assert.assertTrue(tab.getNativePage() instanceof NewTabPage);
         mNtp = (NewTabPage) tab.getNativePage();
+
+        // When scrolling to a View, we wait until the View is no longer updating - when it is no
+        // longer dirty. If scroll to load is triggered, the animated progress spinner will keep
+        // the RecyclerView dirty as it is constantly updating.
+        //
+        // We do not want to disable the Scroll to Load feature entirely because its presence
+        // effects other elements of the UI - it moves the Learn More link into the Context Menu.
+        // Removing the ScrollToLoad listener from the RecyclerView allows us to prevent scroll to
+        // load triggering while maintaining the UI otherwise.
+        ThreadUtils.runOnUiThreadBlocking(
+                () -> mNtp.getNewTabPageView().getRecyclerView().clearScrollToLoadListener());
     }
 
     @Test
     @MediumTest
     @Feature({"NewTabPage", "UiCatalogue"})
     public void testCaptureNewTabPage() {
-        assertThat(ChromeFeatureList.isEnabled(ChromeFeatureList.NTP_MODERN_LAYOUT),
-                is(mEnableNTPModernLayout));
         shoot("New Tab Page");
 
         // Scroll to search bar
@@ -131,6 +110,6 @@ public class NewTabPageUiCaptureTest {
      * @param shotName The shot name.
      */
     private void shoot(String shotName) {
-        mScreenShooter.shoot(shotName + (mEnableNTPModernLayout ? "_modern" : ""));
+        mScreenShooter.shoot(shotName);
     }
 }

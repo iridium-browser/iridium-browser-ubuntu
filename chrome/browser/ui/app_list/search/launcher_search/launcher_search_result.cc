@@ -6,12 +6,12 @@
 
 #include <utility>
 
+#include "ash/public/cpp/app_list/app_list_config.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/chromeos/launcher_search_provider/launcher_search_provider_service.h"
 #include "chrome/browser/ui/app_list/search/launcher_search/launcher_search_icon_image_loader_impl.h"
 #include "chrome/browser/ui/app_list/search/search_util.h"
-#include "ui/app_list/app_list_util.h"
 
 using chromeos::launcher_search_provider::Service;
 
@@ -39,25 +39,25 @@ LauncherSearchResult::LauncherSearchResult(
   DCHECK_LE(discrete_value_relevance,
             chromeos::launcher_search_provider::kMaxSearchResultScore);
 
-  icon_image_loader_.reset(new LauncherSearchIconImageLoaderImpl(
-      icon_url, profile, extension, GetPreferredIconDimension(display_type()),
-      std::move(error_reporter)));
+  icon_image_loader_ = base::MakeRefCounted<LauncherSearchIconImageLoaderImpl>(
+      icon_url, profile, extension,
+      AppListConfig::instance().GetPreferredIconDimension(display_type()),
+      std::move(error_reporter));
   icon_image_loader_->LoadResources();
 
   Initialize();
 }
 
 LauncherSearchResult::~LauncherSearchResult() {
-  if (icon_image_loader_ != nullptr)
-    icon_image_loader_->RemoveObserver(this);
+  icon_image_loader_->RemoveObserver(this);
 }
 
-std::unique_ptr<ChromeSearchResult> LauncherSearchResult::Duplicate() const {
+std::unique_ptr<LauncherSearchResult> LauncherSearchResult::Duplicate() const {
   LauncherSearchResult* duplicated_result =
       new LauncherSearchResult(item_id_, discrete_value_relevance_, profile_,
                                extension_, icon_image_loader_);
-  duplicated_result->set_title(title());
-  duplicated_result->set_title_tags(title_tags());
+  duplicated_result->set_model_updater(model_updater());
+  duplicated_result->SetMetadata(CloneMetadata());
   return base::WrapUnique(duplicated_result);
 }
 
@@ -77,7 +77,7 @@ void LauncherSearchResult::OnIconImageChanged(
 void LauncherSearchResult::OnBadgeIconImageChanged(
     LauncherSearchIconImageLoader* image_loader) {
   DCHECK_EQ(image_loader, icon_image_loader_.get());
-  SetBadgeIcon(icon_image_loader_->GetBadgeIconImage());
+  // No badging is required.
 }
 
 LauncherSearchResult::LauncherSearchResult(
@@ -85,13 +85,13 @@ LauncherSearchResult::LauncherSearchResult(
     const int discrete_value_relevance,
     Profile* profile,
     const extensions::Extension* extension,
-    const linked_ptr<LauncherSearchIconImageLoader>& icon_image_loader)
+    const scoped_refptr<LauncherSearchIconImageLoader>& icon_image_loader)
     : item_id_(item_id),
       discrete_value_relevance_(discrete_value_relevance),
       profile_(profile),
       extension_(extension),
       icon_image_loader_(icon_image_loader) {
-  DCHECK(icon_image_loader_ != nullptr);
+  DCHECK(icon_image_loader_);
   Initialize();
 }
 
@@ -100,12 +100,12 @@ void LauncherSearchResult::Initialize() {
   set_relevance(static_cast<double>(discrete_value_relevance_) /
                 static_cast<double>(
                     chromeos::launcher_search_provider::kMaxSearchResultScore));
-  set_details(base::UTF8ToUTF16(extension_->name()));
+  SetDetails(base::UTF8ToUTF16(extension_->name()));
+  SetResultType(ResultType::kLauncher);
 
   icon_image_loader_->AddObserver(this);
 
   SetIcon(icon_image_loader_->GetIconImage());
-  SetBadgeIcon(icon_image_loader_->GetBadgeIconImage());
 }
 
 std::string LauncherSearchResult::GetSearchResultId() {

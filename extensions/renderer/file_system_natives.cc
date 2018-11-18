@@ -92,8 +92,9 @@ void FileSystemNatives::GetFileEntry(
 
   CHECK(args[4]->IsBoolean());
   blink::WebDOMFileSystem::EntryType entry_type =
-      args[4]->BooleanValue() ? blink::WebDOMFileSystem::kEntryTypeDirectory
-                              : blink::WebDOMFileSystem::kEntryTypeFile;
+      args[4].As<v8::Boolean>()->Value()
+          ? blink::WebDOMFileSystem::kEntryTypeDirectory
+          : blink::WebDOMFileSystem::kEntryTypeFile;
 
   blink::WebLocalFrame* webframe =
       blink::WebLocalFrame::FrameForContext(context()->v8_context());
@@ -119,7 +120,8 @@ void FileSystemNatives::CrackIsolatedFileSystemName(
 
   args.GetReturnValue().Set(
       v8::String::NewFromUtf8(isolate, filesystem_id.c_str(),
-                              v8::String::kNormalString, filesystem_id.size()));
+                              v8::NewStringType::kNormal, filesystem_id.size())
+          .ToLocalChecked());
 }
 
 }  // namespace extensions

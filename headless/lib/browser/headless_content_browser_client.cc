@@ -13,6 +13,7 @@
 #include "base/json/json_reader.h"
 #include "base/path_service.h"
 #include "base/strings/string_number_conversions.h"
+#include "build/build_config.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/client_certificate_delegate.h"
@@ -45,16 +46,14 @@
 #include "content/public/common/content_descriptors.h"
 #endif  // defined(HEADLESS_USE_BREAKPAD)
 
-#if BUILDFLAG(ENABLE_BASIC_PRINTING) && !defined(CHROME_MULTIPLE_DLL_CHILD)
+#if BUILDFLAG(ENABLE_PRINTING) && !defined(CHROME_MULTIPLE_DLL_CHILD)
 #include "base/strings/utf_string_conversions.h"
-#include "components/printing/service/public/interfaces/pdf_compositor.mojom.h"
+#include "components/services/pdf_compositor/public/interfaces/pdf_compositor.mojom.h"
 #endif
 
 namespace headless {
 
 namespace {
-const char kCapabilityPath[] =
-    "interface_provider_specs.navigation:frame.provides.renderer";
 
 #if defined(HEADLESS_USE_BREAKPAD)
 breakpad::CrashHandlerHostLinux* CreateCrashHandlerHost(
@@ -62,7 +61,7 @@ breakpad::CrashHandlerHostLinux* CreateCrashHandlerHost(
     const HeadlessBrowser::Options& options) {
   base::FilePath dumps_path = options.crash_dumps_dir;
   if (dumps_path.empty()) {
-    bool ok = PathService::Get(base::DIR_MODULE, &dumps_path);
+    bool ok = base::PathService::Get(base::DIR_MODULE, &dumps_path);
     DCHECK(ok);
   }
 
@@ -163,9 +162,9 @@ HeadlessContentBrowserClient::GetServiceManifestOverlay(
 
 void HeadlessContentBrowserClient::RegisterOutOfProcessServices(
     OutOfProcessServiceMap* services) {
-#if BUILDFLAG(ENABLE_BASIC_PRINTING) && !defined(CHROME_MULTIPLE_DLL_CHILD)
+#if BUILDFLAG(ENABLE_PRINTING) && !defined(CHROME_MULTIPLE_DLL_CHILD)
   (*services)[printing::mojom::kServiceName] =
-      base::ASCIIToUTF16("PDF Compositor Service");
+      base::BindRepeating(&base::ASCIIToUTF16, "PDF Compositor Service");
 #endif
 }
 
@@ -174,21 +173,7 @@ HeadlessContentBrowserClient::GetBrowserServiceManifestOverlay() {
   base::StringPiece manifest_template =
       ui::ResourceBundle::GetSharedInstance().GetRawDataResource(
           IDR_HEADLESS_BROWSER_MANIFEST_OVERLAY);
-  std::unique_ptr<base::Value> manifest =
-      base::JSONReader::Read(manifest_template);
-
-  // Add mojo_service_names to renderer capability specified in options.
-  base::DictionaryValue* manifest_dictionary = nullptr;
-  CHECK(manifest->GetAsDictionary(&manifest_dictionary));
-
-  base::ListValue* capability_list = nullptr;
-  CHECK(manifest_dictionary->GetList(kCapabilityPath, &capability_list));
-
-  for (std::string service_name : browser_->options()->mojo_service_names) {
-    capability_list->AppendString(service_name);
-  }
-
-  return manifest;
+  return base::JSONReader::Read(manifest_template);
 }
 
 std::unique_ptr<base::Value>
@@ -215,8 +200,8 @@ HeadlessContentBrowserClient::CreateQuotaPermissionContext() {
 void HeadlessContentBrowserClient::GetQuotaSettings(
     content::BrowserContext* context,
     content::StoragePartition* partition,
-    storage::OptionalQuotaSettingsCallback callback) {
-  storage::GetNominalDynamicSettings(
+    ::storage::OptionalQuotaSettingsCallback callback) {
+  ::storage::GetNominalDynamicSettings(
       partition->GetPath(), context->IsOffTheRecord(), std::move(callback));
 }
 
@@ -228,7 +213,7 @@ void HeadlessContentBrowserClient::GetAdditionalMappedFilesForChildProcess(
 #if defined(HEADLESS_USE_BREAKPAD)
   int crash_signal_fd = GetCrashSignalFD(command_line, *browser_->options());
   if (crash_signal_fd >= 0)
-    mappings->Share(kCrashDumpSignal, crash_signal_fd);
+    mappings->Share(service_manager::kCrashDumpSignal, crash_signal_fd);
 #endif  // defined(HEADLESS_USE_BREAKPAD)
 }
 #endif  // defined(OS_POSIX) && !defined(OS_MACOSX)
@@ -265,14 +250,6 @@ void HeadlessContentBrowserClient::AppendExtraCommandLineSwitches(
           HeadlessBrowserContextImpl::From(
               render_process_host->GetBrowserContext());
 
-      if (headless_browser_context_impl->options()->initial_virtual_time()) {
-        command_line->AppendSwitchASCII(
-            ::switches::kInitialVirtualTime,
-            base::NumberToString(headless_browser_context_impl->options()
-                                     ->initial_virtual_time()
-                                     ->ToDoubleT()));
-      }
-
       std::vector<base::StringPiece> languages = base::SplitStringPiece(
           headless_browser_context_impl->options()->accept_language(), ",",
           base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
@@ -298,6 +275,11 @@ void HeadlessContentBrowserClient::AppendExtraCommandLineSwitches(
                                             headless_browser_context_impl,
                                             process_type, child_process_id);
   }
+}
+
+std::string HeadlessContentBrowserClient::GetAcceptLangs(
+    content::BrowserContext* context) {
+  return browser_->options()->accept_language;
 }
 
 void HeadlessContentBrowserClient::AllowCertificateError(
@@ -339,49 +321,30 @@ void HeadlessContentBrowserClient::ResourceDispatcherHostCreated() {
       resource_dispatcher_host_delegate_.get());
 }
 
-net::NetLog* HeadlessContentBrowserClient::GetNetLog() {
-  return browser_->net_log();
-}
-
-bool HeadlessContentBrowserClient::AllowGetCookie(
-    const GURL& url,
-    const GURL& first_party,
-    const net::CookieList& cookie_list,
-    content::ResourceContext* context,
-    int render_process_id,
-    int render_frame_id) {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
-  LockedPtr<HeadlessBrowserContextImpl> browser_context =
-      browser_->GetBrowserContextForRenderFrame(render_process_id,
-                                                render_frame_id);
-  if (!browser_context)
-    return false;
-  return browser_context->options()->allow_cookies();
-}
-
-bool HeadlessContentBrowserClient::AllowSetCookie(
-    const GURL& url,
-    const GURL& first_party,
-    const net::CanonicalCookie& cookie,
-    content::ResourceContext* context,
-    int render_process_id,
-    int render_frame_id,
-    const net::CookieOptions& options) {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
-  LockedPtr<HeadlessBrowserContextImpl> browser_context =
-      browser_->GetBrowserContextForRenderFrame(render_process_id,
-                                                render_frame_id);
-  if (!browser_context)
-    return false;
-  return browser_context->options()->allow_cookies();
-}
-
 bool HeadlessContentBrowserClient::DoesSiteRequireDedicatedProcess(
     content::BrowserContext* browser_context,
     const GURL& effective_site_url) {
   return HeadlessBrowserContextImpl::From(browser_context)
       ->options()
       ->site_per_process();
+}
+
+bool HeadlessContentBrowserClient::ShouldEnableStrictSiteIsolation() {
+  // TODO(lukasza): https://crbug.com/869494: Instead of overriding
+  // ShouldEnableStrictSiteIsolation, //headless should inherit the default
+  // site-per-process setting from //content - this way tools (tests, but also
+  // production cases like screenshot or pdf generation) based on //headless
+  // will use a mode that is actually shipping in Chrome.
+  return false;
+}
+
+::network::mojom::NetworkContextPtr
+HeadlessContentBrowserClient::CreateNetworkContext(
+    content::BrowserContext* context,
+    bool in_memory,
+    const base::FilePath& relative_partition_path) {
+  return HeadlessBrowserContextImpl::From(context)->CreateNetworkContext(
+      in_memory, relative_partition_path);
 }
 
 }  // namespace headless

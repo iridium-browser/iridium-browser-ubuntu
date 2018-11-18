@@ -15,7 +15,7 @@
 #include "base/bind.h"
 #include "base/callback_helpers.h"
 #include "base/memory/ptr_util.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
 #include "net/base/io_buffer.h"
@@ -89,6 +89,7 @@ BlobReader::BlobReader(const BlobDataHandle* blob_handle)
 BlobReader::~BlobReader() = default;
 
 BlobReader::Status BlobReader::CalculateSize(net::CompletionOnceCallback done) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(!total_size_calculated_);
   DCHECK(size_callback_.is_null());
   if (!blob_handle_.get())
@@ -110,6 +111,8 @@ BlobReader::Status BlobReader::CalculateSize(net::CompletionOnceCallback done) {
 }
 
 bool BlobReader::has_side_data() const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
   if (!blob_data_.get())
     return false;
   const auto& items = blob_data_->items();
@@ -121,17 +124,21 @@ bool BlobReader::has_side_data() const {
   const int disk_cache_side_stream_index = item.disk_cache_side_stream_index();
   if (disk_cache_side_stream_index < 0)
     return false;
+  if (!item.disk_cache_entry())
+    return false;
   return item.disk_cache_entry()->GetDataSize(disk_cache_side_stream_index) > 0;
 }
 
 BlobReader::Status BlobReader::ReadSideData(const StatusCallback& done) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
   if (!has_side_data())
     return ReportError(net::ERR_FILE_NOT_FOUND);
   const BlobDataItem* item = blob_data_->items()[0].get();
   const int disk_cache_side_stream_index = item->disk_cache_side_stream_index();
   const int side_data_size =
       item->disk_cache_entry()->GetDataSize(disk_cache_side_stream_index);
-  side_data_ = new net::IOBufferWithSize(side_data_size);
+  side_data_ = base::MakeRefCounted<net::IOBufferWithSize>(side_data_size);
   net_error_ = net::OK;
   const int result = item->disk_cache_entry()->ReadData(
       disk_cache_side_stream_index, 0, side_data_.get(), side_data_size,
@@ -149,6 +156,7 @@ BlobReader::Status BlobReader::ReadSideData(const StatusCallback& done) {
 void BlobReader::DidReadDiskCacheEntrySideData(const StatusCallback& done,
                                                int expected_size,
                                                int result) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (result >= 0) {
     DCHECK_EQ(expected_size, result);
     if (result > 0)
@@ -161,6 +169,8 @@ void BlobReader::DidReadDiskCacheEntrySideData(const StatusCallback& done,
 }
 
 BlobReader::Status BlobReader::SetReadRange(uint64_t offset, uint64_t length) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
   if (!blob_handle_.get())
     return ReportError(net::ERR_FILE_NOT_FOUND);
   if (blob_handle_->IsBroken()) {
@@ -200,6 +210,7 @@ BlobReader::Status BlobReader::Read(net::IOBuffer* buffer,
                                     size_t dest_size,
                                     int* bytes_read,
                                     net::CompletionOnceCallback done) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(bytes_read);
   DCHECK_GE(remaining_bytes_, 0ul);
   DCHECK(read_callback_.is_null());
@@ -227,7 +238,7 @@ BlobReader::Status BlobReader::Read(net::IOBuffer* buffer,
 
   // Keep track of the buffer.
   DCHECK(!read_buf_.get());
-  read_buf_ = new net::DrainableIOBuffer(buffer, dest_size);
+  read_buf_ = base::MakeRefCounted<net::DrainableIOBuffer>(buffer, dest_size);
 
   Status status = ReadLoop(bytes_read);
   if (status == Status::IO_PENDING)
@@ -236,11 +247,15 @@ BlobReader::Status BlobReader::Read(net::IOBuffer* buffer,
 }
 
 void BlobReader::Kill() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
   DeleteCurrentFileReader();
   weak_factory_.InvalidateWeakPtrs();
 }
 
 bool BlobReader::IsInMemory() const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
   if (blob_handle_ && blob_handle_->IsBeingBuilt()) {
     return false;
   }
@@ -257,6 +272,8 @@ bool BlobReader::IsInMemory() const {
 
 void BlobReader::InvalidateCallbacksAndDone(int net_error,
                                             net::CompletionOnceCallback done) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
   net_error_ = net_error;
   weak_factory_.InvalidateWeakPtrs();
   size_callback_.Reset();
@@ -266,12 +283,16 @@ void BlobReader::InvalidateCallbacksAndDone(int net_error,
 }
 
 BlobReader::Status BlobReader::ReportError(int net_error) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
   net_error_ = net_error;
   return Status::NET_ERROR;
 }
 
 void BlobReader::AsyncCalculateSize(net::CompletionOnceCallback done,
                                     BlobStatus status) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
   if (BlobStatusIsError(status)) {
     InvalidateCallbacksAndDone(ConvertBlobErrorToNetError(status),
                                std::move(done));
@@ -296,6 +317,7 @@ void BlobReader::AsyncCalculateSize(net::CompletionOnceCallback done,
 
 BlobReader::Status BlobReader::CalculateSizeImpl(
     net::CompletionOnceCallback* done) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(!total_size_calculated_);
   DCHECK(size_callback_.is_null());
 
@@ -342,6 +364,8 @@ BlobReader::Status BlobReader::CalculateSizeImpl(
 }
 
 bool BlobReader::AddItemLength(size_t index, uint64_t item_length) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
   if (item_length > std::numeric_limits<uint64_t>::max() - total_size_)
     return false;
 
@@ -355,6 +379,7 @@ bool BlobReader::AddItemLength(size_t index, uint64_t item_length) {
 bool BlobReader::ResolveFileItemLength(const BlobDataItem& item,
                                        int64_t total_length,
                                        uint64_t* output_length) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(IsFileType(item.type()));
   DCHECK(output_length);
   uint64_t file_length = total_length;
@@ -378,6 +403,8 @@ bool BlobReader::ResolveFileItemLength(const BlobDataItem& item,
 }
 
 void BlobReader::DidGetFileItemLength(size_t index, int64_t result) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
   // Do nothing if we have encountered an error.
   if (net_error_)
     return;
@@ -406,6 +433,7 @@ void BlobReader::DidGetFileItemLength(size_t index, int64_t result) {
 }
 
 void BlobReader::DidCountSize() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(!net_error_);
   total_size_calculated_ = true;
   remaining_bytes_ = total_size_;
@@ -415,6 +443,8 @@ void BlobReader::DidCountSize() {
 }
 
 BlobReader::Status BlobReader::ReadLoop(int* bytes_read) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
   // Read until we encounter an error or could not get the data immediately.
   while (remaining_bytes_ > 0 && read_buf_->BytesRemaining() > 0) {
     Status read_status = ReadItem();
@@ -428,6 +458,8 @@ BlobReader::Status BlobReader::ReadLoop(int* bytes_read) {
 }
 
 BlobReader::Status BlobReader::ReadItem() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
   // Are we done with reading all the blob data?
   if (remaining_bytes_ == 0)
     return Status::DONE;
@@ -468,6 +500,8 @@ BlobReader::Status BlobReader::ReadItem() {
 }
 
 void BlobReader::AdvanceItem() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
   // Close the file if the current item is a file.
   DeleteCurrentFileReader();
 
@@ -477,6 +511,7 @@ void BlobReader::AdvanceItem() {
 }
 
 void BlobReader::AdvanceBytesRead(int result) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK_GT(result, 0);
 
   // Do we finish reading the current item?
@@ -494,6 +529,7 @@ void BlobReader::AdvanceBytesRead(int result) {
 }
 
 void BlobReader::ReadBytesItem(const BlobDataItem& item, int bytes_to_read) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   TRACE_EVENT1("Blob", "BlobReader::ReadBytesItem", "uuid", blob_data_->uuid());
   DCHECK_GE(read_buf_->BytesRemaining(), bytes_to_read);
 
@@ -506,6 +542,7 @@ void BlobReader::ReadBytesItem(const BlobDataItem& item, int bytes_to_read) {
 
 BlobReader::Status BlobReader::ReadFileItem(FileStreamReader* reader,
                                             int bytes_to_read) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(!io_pending_)
       << "Can't begin IO while another IO operation is pending.";
   DCHECK_GE(read_buf_->BytesRemaining(), bytes_to_read);
@@ -527,12 +564,15 @@ BlobReader::Status BlobReader::ReadFileItem(FileStreamReader* reader,
 }
 
 void BlobReader::DidReadFile(int result) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   TRACE_EVENT_ASYNC_END1("Blob", "BlobRequest::ReadFileItem", this, "uuid",
                          blob_data_->uuid());
   DidReadItem(result);
 }
 
 void BlobReader::ContinueAsyncReadLoop() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
   int bytes_read = 0;
   Status read_status = ReadLoop(&bytes_read);
   switch (read_status) {
@@ -554,12 +594,15 @@ void BlobReader::DeleteCurrentFileReader() {
 
 BlobReader::Status BlobReader::ReadDiskCacheEntryItem(const BlobDataItem& item,
                                                       int bytes_to_read) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(!io_pending_)
       << "Can't begin IO while another IO operation is pending.";
   TRACE_EVENT_ASYNC_BEGIN1("Blob", "BlobRequest::ReadDiskCacheItem", this,
                            "uuid", blob_data_->uuid());
   DCHECK_GE(read_buf_->BytesRemaining(), bytes_to_read);
 
+  if (!item.disk_cache_entry())
+    return ReportError(net::ERR_CACHE_READ_FAILURE);
   const int result = item.disk_cache_entry()->ReadData(
       item.disk_cache_stream_index(), item.offset() + current_item_offset_,
       read_buf_.get(), bytes_to_read,
@@ -577,6 +620,7 @@ BlobReader::Status BlobReader::ReadDiskCacheEntryItem(const BlobDataItem& item,
 }
 
 void BlobReader::DidReadDiskCacheEntry(int result) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   TRACE_EVENT_ASYNC_END1("Blob", "BlobRequest::ReadDiskCacheItem", this, "uuid",
                          blob_data_->uuid());
   if (result > 0)
@@ -585,6 +629,7 @@ void BlobReader::DidReadDiskCacheEntry(int result) {
 }
 
 void BlobReader::DidReadItem(int result) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(io_pending_) << "Asynchronous IO completed while IO wasn't pending?";
   io_pending_ = false;
   if (result <= 0) {
@@ -596,12 +641,14 @@ void BlobReader::DidReadItem(int result) {
 }
 
 int BlobReader::BytesReadCompleted() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   int bytes_read = read_buf_->BytesConsumed();
   read_buf_ = nullptr;
   return bytes_read;
 }
 
 int BlobReader::ComputeBytesToRead() const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   uint64_t current_item_length = item_length_list_[current_item_index_];
 
   uint64_t item_remaining = current_item_length - current_item_offset_;
@@ -616,6 +663,8 @@ int BlobReader::ComputeBytesToRead() const {
 }
 
 FileStreamReader* BlobReader::GetOrCreateFileReaderAtIndex(size_t index) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
   const auto& items = blob_data_->items();
   DCHECK_LT(index, items.size());
   const BlobDataItem& item = *items.at(index);
@@ -637,6 +686,7 @@ FileStreamReader* BlobReader::GetOrCreateFileReaderAtIndex(size_t index) {
 std::unique_ptr<FileStreamReader> BlobReader::CreateFileStreamReader(
     const BlobDataItem& item,
     uint64_t additional_offset) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(IsFileType(item.type()));
 
   switch (item.type()) {
@@ -680,6 +730,7 @@ std::unique_ptr<FileStreamReader> BlobReader::CreateFileStreamReader(
 void BlobReader::SetFileReaderAtIndex(
     size_t index,
     std::unique_ptr<FileStreamReader> reader) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   if (reader)
     index_to_reader_[index] = std::move(reader);
   else

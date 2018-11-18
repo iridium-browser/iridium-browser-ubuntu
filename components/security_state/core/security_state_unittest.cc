@@ -10,7 +10,7 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/test/histogram_tester.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "components/security_state/core/features.h"
 #include "components/security_state/core/insecure_input_event_data.h"
@@ -339,16 +339,14 @@ TEST(SecurityStateTest, PasswordFieldWarning) {
   EXPECT_EQ(HTTP_SHOW_WARNING, security_info.security_level);
 }
 
-// Tests that password fields cause the security level to be downgraded
-// to HTTP_SHOW_WARNING on pseudo URLs.
-TEST(SecurityStateTest, PasswordFieldWarningOnPseudoUrls) {
+// Tests that the security level is downgraded to HTTP_SHOW_WARNING on pseudo
+// URLs.
+TEST(SecurityStateTest, WarningOnPseudoUrls) {
   for (const char* const url : kPseudoUrls) {
     TestSecurityStateHelper helper;
     helper.SetUrl(GURL(url));
-    helper.set_password_field_shown(true);
     SecurityInfo security_info;
     helper.GetSecurityInfo(&security_info);
-    EXPECT_TRUE(security_info.insecure_input_events.password_field_shown);
     EXPECT_EQ(HTTP_SHOW_WARNING, security_info.security_level);
   }
 }
@@ -365,20 +363,6 @@ TEST(SecurityStateTest, CreditCardFieldWarning) {
   EXPECT_EQ(HTTP_SHOW_WARNING, security_info.security_level);
 }
 
-// Tests that credit card fields cause the security level to be downgraded
-// to HTTP_SHOW_WARNING on pseudo URLs.
-TEST(SecurityStateTest, CreditCardFieldWarningOnPseudoUrls) {
-  for (const char* const url : kPseudoUrls) {
-    TestSecurityStateHelper helper;
-    helper.SetUrl(GURL(url));
-    helper.set_credit_card_field_edited(true);
-    SecurityInfo security_info;
-    helper.GetSecurityInfo(&security_info);
-    EXPECT_TRUE(security_info.insecure_input_events.credit_card_field_edited);
-    EXPECT_EQ(HTTP_SHOW_WARNING, security_info.security_level);
-  }
-}
-
 // Tests that neither |password_field_shown| nor
 // |credit_card_field_edited| is set when the corresponding
 // VisibleSecurityState flags are not set.
@@ -389,7 +373,7 @@ TEST(SecurityStateTest, PrivateUserDataNotSet) {
   helper.GetSecurityInfo(&security_info);
   EXPECT_FALSE(security_info.insecure_input_events.password_field_shown);
   EXPECT_FALSE(security_info.insecure_input_events.credit_card_field_edited);
-  EXPECT_EQ(NONE, security_info.security_level);
+  EXPECT_EQ(HTTP_SHOW_WARNING, security_info.security_level);
 }
 
 // Tests that neither |password_field_shown| nor
@@ -403,7 +387,7 @@ TEST(SecurityStateTest, PrivateUserDataNotSetOnPseudoUrls) {
     helper.GetSecurityInfo(&security_info);
     EXPECT_FALSE(security_info.insecure_input_events.password_field_shown);
     EXPECT_FALSE(security_info.insecure_input_events.credit_card_field_edited);
-    EXPECT_EQ(NONE, security_info.security_level);
+    EXPECT_EQ(HTTP_SHOW_WARNING, security_info.security_level);
   }
 }
 
@@ -434,29 +418,33 @@ TEST(SecurityStateTest, ViewSourceKeepsWarning) {
 }
 
 // Tests that |incognito_downgraded_security_level| is set only when the
-// corresponding VisibleSecurityState flag is set and the HTTPBad Phase 2
-// experiment is enabled.
+// corresponding VisibleSecurityState flag is set. The incognito downgrade is
+// only performed when the HTTP-Bad feature is disabled.
 TEST(SecurityStateTest, IncognitoFlagPropagates) {
   TestSecurityStateHelper helper;
   helper.SetUrl(GURL(kHttpUrl));
   SecurityInfo security_info;
 
-  // Test the default non-secure-while-incognito-or-editing configuration.
-  helper.set_is_incognito(false);
-  helper.GetSecurityInfo(&security_info);
-  EXPECT_FALSE(security_info.incognito_downgraded_security_level);
+  {
+    // When the feature is disabled, the downgraded flag should be set for
+    // incognito http pages.
+    base::test::ScopedFeatureList scoped_feature_list;
+    scoped_feature_list.InitAndDisableFeature(
+        security_state::features::kMarkHttpAsFeature);
+    helper.set_is_incognito(false);
+    helper.GetSecurityInfo(&security_info);
+    EXPECT_FALSE(security_info.incognito_downgraded_security_level);
 
-  helper.set_is_incognito(true);
-  helper.GetSecurityInfo(&security_info);
-  EXPECT_TRUE(security_info.incognito_downgraded_security_level);
+    helper.set_is_incognito(true);
+    helper.GetSecurityInfo(&security_info);
+    EXPECT_TRUE(security_info.incognito_downgraded_security_level);
+  }
 
   {
-    // Disable the "non-secure-while-incognito" configuration.
+    // When the feature is enabled, the downgraded flag should never be set.
     base::test::ScopedFeatureList scoped_feature_list;
-    scoped_feature_list.InitAndEnableFeatureWithParameters(
-        security_state::features::kMarkHttpAsFeature,
-        {{security_state::features::kMarkHttpAsFeatureParameterName,
-          security_state::features::kMarkHttpAsParameterDangerous}});
+    scoped_feature_list.InitAndEnableFeature(
+        security_state::features::kMarkHttpAsFeature);
     helper.set_is_incognito(false);
     helper.GetSecurityInfo(&security_info);
     EXPECT_FALSE(security_info.incognito_downgraded_security_level);
@@ -574,30 +562,38 @@ TEST(SecurityStateTest, FieldEdit) {
   TestSecurityStateHelper helper;
   helper.SetUrl(GURL(kHttpUrl));
 
-  SecurityInfo no_field_edit_security_info;
-  helper.GetSecurityInfo(&no_field_edit_security_info);
-  EXPECT_FALSE(
-      no_field_edit_security_info.insecure_input_events.insecure_field_edited);
-  EXPECT_FALSE(
-      no_field_edit_security_info.field_edit_downgraded_security_level);
-  EXPECT_EQ(NONE, no_field_edit_security_info.security_level);
+  {
+    // Test that a warning is shown on field edits, when the feature is
+    // disabled.
+    base::test::ScopedFeatureList scoped_feature_list;
+    scoped_feature_list.InitAndDisableFeature(
+        security_state::features::kMarkHttpAsFeature);
 
-  helper.set_insecure_field_edit(true);
+    SecurityInfo no_field_edit_security_info;
+    helper.GetSecurityInfo(&no_field_edit_security_info);
+    EXPECT_FALSE(no_field_edit_security_info.insecure_input_events
+                     .insecure_field_edited);
+    EXPECT_FALSE(
+        no_field_edit_security_info.field_edit_downgraded_security_level);
+    EXPECT_EQ(NONE, no_field_edit_security_info.security_level);
 
-  SecurityInfo security_info;
-  helper.GetSecurityInfo(&security_info);
-  EXPECT_TRUE(security_info.insecure_input_events.insecure_field_edited);
-  EXPECT_TRUE(security_info.field_edit_downgraded_security_level);
-  EXPECT_EQ(HTTP_SHOW_WARNING, security_info.security_level);
+    helper.set_insecure_field_edit(true);
+
+    SecurityInfo security_info;
+    helper.GetSecurityInfo(&security_info);
+    EXPECT_TRUE(security_info.insecure_input_events.insecure_field_edited);
+    EXPECT_TRUE(security_info.field_edit_downgraded_security_level);
+    EXPECT_EQ(HTTP_SHOW_WARNING, security_info.security_level);
+  }
 
   {
-    // Test the "dangerous" configuration.
+    // Test that the default enabled configuration shows the dangerous warning
+    // on field edits.
     base::test::ScopedFeatureList scoped_feature_list;
-    scoped_feature_list.InitAndEnableFeatureWithParameters(
-        security_state::features::kMarkHttpAsFeature,
-        {{security_state::features::kMarkHttpAsFeatureParameterName,
-          security_state::features::kMarkHttpAsParameterDangerous}});
+    scoped_feature_list.InitAndEnableFeature(
+        security_state::features::kMarkHttpAsFeature);
 
+    SecurityInfo security_info;
     helper.GetSecurityInfo(&security_info);
     EXPECT_TRUE(security_info.insecure_input_events.insecure_field_edited);
     EXPECT_FALSE(security_info.field_edit_downgraded_security_level);
@@ -652,56 +648,14 @@ TEST(SecurityStateTest, IncognitoErrorPage) {
   helper.set_is_error_page(false);
   helper.GetSecurityInfo(&security_info);
   EXPECT_EQ(SecurityLevel::HTTP_SHOW_WARNING, security_info.security_level);
-  EXPECT_TRUE(security_info.incognito_downgraded_security_level);
-}
-
-// Tests that HTTP_SHOW_WARNING is set when the 'warning' field trial
-// configuration is enabled.
-TEST(SecurityStateTest, AlwaysShowWarning) {
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitAndEnableFeatureWithParameters(
-      security_state::features::kMarkHttpAsFeature,
-      {{security_state::features::kMarkHttpAsFeatureParameterName,
-        security_state::features::kMarkHttpAsParameterWarning}});
-
-  TestSecurityStateHelper helper;
-  helper.SetUrl(GURL(kHttpUrl));
-
-  {
-    SecurityInfo security_info;
-    helper.GetSecurityInfo(&security_info);
-    EXPECT_EQ(security_state::HTTP_SHOW_WARNING, security_info.security_level);
-  }
-
-  {
-    // Use a fresh SecurityInfo to make sure to check the output of this
-    // GetSecurityInfo() call, not the previous one (e.g. to catch a
-    // hypothetical bug where GetSecurityInfo() doesn't set a |security_level|).
-    SecurityInfo security_info;
-    helper.set_insecure_field_edit(true);
-    helper.GetSecurityInfo(&security_info);
-    EXPECT_EQ(security_state::HTTP_SHOW_WARNING, security_info.security_level);
-  }
-
-  {
-    SecurityInfo security_info;
-    helper.set_insecure_field_edit(true);
-    helper.set_password_field_shown(true);
-    helper.GetSecurityInfo(&security_info);
-    EXPECT_EQ(security_state::HTTP_SHOW_WARNING, security_info.security_level);
-  }
 }
 
 // Tests that HTTP_SHOW_WARNING is set on normal http pages but DANGEROUS on
-// form edits when the 'warning-and-dangerous-on-form-edits' field trial
-// configuration is enabled.
+// form edits when the default feature configuration is enabled.
 TEST(SecurityStateTest, WarningAndDangerousOnFormEdits) {
   base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitAndEnableFeatureWithParameters(
-      security_state::features::kMarkHttpAsFeature,
-      {{security_state::features::kMarkHttpAsFeatureParameterName,
-        security_state::features::
-            kMarkHttpAsParameterWarningAndDangerousOnFormEdits}});
+  scoped_feature_list.InitAndEnableFeature(
+      security_state::features::kMarkHttpAsFeature);
 
   TestSecurityStateHelper helper;
   helper.SetUrl(GURL(kHttpUrl));

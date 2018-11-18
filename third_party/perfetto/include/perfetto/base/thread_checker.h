@@ -17,13 +17,24 @@
 #ifndef INCLUDE_PERFETTO_BASE_THREAD_CHECKER_H_
 #define INCLUDE_PERFETTO_BASE_THREAD_CHECKER_H_
 
+#include "perfetto/base/build_config.h"
+
+#if !PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
 #include <pthread.h>
+#endif
 #include <atomic>
 
 #include "perfetto/base/logging.h"
+#include "perfetto/base/utils.h"
 
 namespace perfetto {
 namespace base {
+
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
+using ThreadID = unsigned long;
+#else
+using ThreadID = pthread_t;
+#endif
 
 class ThreadChecker {
  public:
@@ -31,14 +42,15 @@ class ThreadChecker {
   ~ThreadChecker();
   ThreadChecker(const ThreadChecker&);
   ThreadChecker& operator=(const ThreadChecker&);
-  bool CalledOnValidThread() const __attribute__((warn_unused_result));
+  bool CalledOnValidThread() const PERFETTO_WARN_UNUSED_RESULT;
   void DetachFromThread();
 
  private:
-  mutable std::atomic<pthread_t> thread_id_;
+  mutable std::atomic<ThreadID> thread_id_;
 };
 
-#if PERFETTO_DCHECK_IS_ON()
+#if PERFETTO_DCHECK_IS_ON() && !defined(PERFETTO_BUILD_WITH_CHROMIUM)
+// TODO(primiano) Use Chromium's thread checker in Chromium.
 #define PERFETTO_THREAD_CHECKER(name) base::ThreadChecker name;
 #define PERFETTO_DCHECK_THREAD(name) \
   PERFETTO_DCHECK((name).CalledOnValidThread())

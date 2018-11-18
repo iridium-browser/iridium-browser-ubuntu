@@ -30,13 +30,14 @@ class MockTextureImpl : public TextureImpl
                            GLenum,
                            const gl::PixelUnpackState &,
                            const uint8_t *));
-    MOCK_METHOD7(setSubImage,
+    MOCK_METHOD8(setSubImage,
                  gl::Error(const gl::Context *,
                            const gl::ImageIndex &,
                            const gl::Box &,
                            GLenum,
                            GLenum,
                            const gl::PixelUnpackState &,
+                           gl::Buffer *,
                            const uint8_t *));
     MOCK_METHOD7(setCompressedImage,
                  gl::Error(const gl::Context *,
@@ -81,7 +82,7 @@ class MockTextureImpl : public TextureImpl
                            const gl::ImageIndex &,
                            const gl::Offset &,
                            size_t,
-                           const gl::Rectangle &,
+                           const gl::Box &,
                            bool,
                            bool,
                            bool,
@@ -101,10 +102,10 @@ class MockTextureImpl : public TextureImpl
     MOCK_METHOD1(releaseTexImage, gl::Error(const gl::Context *));
 
     MOCK_METHOD4(getAttachmentRenderTarget,
-                 gl::Error(const gl::Context *,
-                           GLenum,
-                           const gl::ImageIndex &,
-                           FramebufferAttachmentRenderTarget **));
+                 angle::Result(const gl::Context *,
+                               GLenum,
+                               const gl::ImageIndex &,
+                               FramebufferAttachmentRenderTarget **));
 
     MOCK_METHOD6(
         setStorageMultisample,
@@ -112,7 +113,7 @@ class MockTextureImpl : public TextureImpl
 
     MOCK_METHOD2(setBaseLevel, gl::Error(const gl::Context *, GLuint));
 
-    MOCK_METHOD1(syncState, void(const gl::Texture::DirtyBits &));
+    MOCK_METHOD2(syncState, angle::Result(const gl::Context *, const gl::Texture::DirtyBits &));
 
     MOCK_METHOD0(destructor, void());
 

@@ -19,26 +19,27 @@ class USBConfiguration : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  static USBConfiguration* Create(const USBDevice*, size_t configuration_index);
   static USBConfiguration* Create(const USBDevice*,
-                                  size_t configuration_value,
+                                  wtf_size_t configuration_index);
+  static USBConfiguration* Create(const USBDevice*,
+                                  uint8_t configuration_value,
                                   ExceptionState&);
 
-  USBConfiguration(const USBDevice*, size_t configuration_index);
+  USBConfiguration(const USBDevice*, wtf_size_t configuration_index);
 
   const USBDevice* Device() const;
-  size_t Index() const;
+  wtf_size_t Index() const;
   const device::mojom::blink::UsbConfigurationInfo& Info() const;
 
   uint8_t configurationValue() const { return Info().configuration_value; }
   String configurationName() const { return Info().configuration_name; }
   HeapVector<Member<USBInterface>> interfaces() const;
 
-  void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  private:
   Member<const USBDevice> device_;
-  const size_t configuration_index_;
+  const wtf_size_t configuration_index_;
 };
 
 }  // namespace blink

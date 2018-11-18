@@ -1,11 +1,11 @@
 include_rules = [
   "+third_party/libyuv",
-  "+common_video",
   "+media",
   "+p2p",
   "+pc",
   "+logging/rtc_event_log/rtc_event_log_factory_interface.h",
   "+modules/audio_processing/include",
+  "+system_wrappers/include",
 ]
 
 specific_include_rules = {
@@ -23,5 +23,7 @@ specific_include_rules = {
   ".*\.cc": [
     "+modules/audio_coding",
     "+modules/audio_processing",
+    "+modules/video_coding",
+    "+modules/congestion_controller",
   ],
 }

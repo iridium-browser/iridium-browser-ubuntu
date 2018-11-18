@@ -10,9 +10,9 @@
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "net/base/url_util.h"
 #include "net/http/http_response_headers.h"
+#include "net/http/http_util.h"
 #include "net/url_request/url_request_data_job.h"
 #include "third_party/blink/public/common/mime_util/mime_util.h"
-#include "third_party/blink/public/platform/url_conversion.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_response.h"
 #include "third_party/blink/renderer/platform/shared_buffer.h"
@@ -49,7 +49,7 @@ bool IsReservedIPAddress(const String& host) {
   StringUTF8Adaptor utf8(host);
   if (!net::ParseURLHostnameToAddress(utf8.AsStringPiece(), &address))
     return false;
-  return address.IsReserved();
+  return !address.IsPubliclyRoutable();
 }
 
 bool IsLocalHostname(const String& host, bool* is_local6) {
@@ -78,8 +78,7 @@ scoped_refptr<SharedBuffer> ParseDataURLAndPopulateResponse(
       new net::HttpResponseHeaders(std::string()));
 
   int result = net::URLRequestDataJob::BuildResponse(
-      WebStringToGURL(url.GetString()), &utf8_mime_type, &utf8_charset,
-      &data_string, headers.get());
+      GURL(url), &utf8_mime_type, &utf8_charset, &data_string, headers.get());
   if (result != net::OK)
     return nullptr;
 
@@ -108,8 +107,7 @@ scoped_refptr<SharedBuffer> ParseDataURLAndPopulateResponse(
 bool IsDataURLMimeTypeSupported(const KURL& url) {
   std::string utf8_mime_type;
   std::string utf8_charset;
-  if (net::DataURL::Parse(WebStringToGURL(url.GetString()), &utf8_mime_type,
-                          &utf8_charset, nullptr)) {
+  if (net::DataURL::Parse(GURL(url), &utf8_mime_type, &utf8_charset, nullptr)) {
     return blink::IsSupportedMimeType(utf8_mime_type);
   }
   return false;
@@ -125,6 +123,13 @@ bool IsCertificateTransparencyRequiredError(int error_code) {
 
 bool IsLegacySymantecCertError(int error_code) {
   return error_code == net::ERR_CERT_SYMANTEC_LEGACY;
+}
+
+String GenerateAcceptLanguageHeader(const String& lang) {
+  CString cstring(lang.Utf8());
+  std::string string(cstring.data(), cstring.length());
+  return WebString::FromUTF8(
+      net::HttpUtil::GenerateAcceptLanguageHeader(string));
 }
 
 }  // NetworkUtils

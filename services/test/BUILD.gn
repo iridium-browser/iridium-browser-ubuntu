@@ -35,11 +35,7 @@ source_set("run_all_service_tests") {
   ]
 
   if (is_android) {
-    deps += [ "//mojo/android:libsystem_java" ]
-  }
-
-  if (use_ozone) {
-    deps += [ "//ui/ozone" ]
+    deps += [ "//mojo/public/java/system:native_support" ]
   }
 }
 
@@ -56,6 +52,7 @@ bundle_data("tests_bundle_data") {
     "//services/test/data/content-sniffer-test4.html",
     "//services/test/data/content-sniffer-test4.html.mock-http-headers",
     "//services/test/data/empty.html",
+    "//services/test/data/has_favicon.html",
     "//services/test/data/hello.html",
     "//services/test/data/hello.html.mock-http-headers",
     "//services/test/data/nocache.html",

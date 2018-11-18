@@ -5,9 +5,8 @@
 // https://html.spec.whatwg.org/multipage/workers.html#workeroptions
 dictionary WorkerOptions {
     WorkerType type = "classic";
-    RequestCredentials credentials = "omit";
-    // TODO(nhiroki): Implement "name" option (https://crbug.com/721219)
-    // DOMString name = "";
+    RequestCredentials credentials = "same-origin";
+    DOMString name = "";
 };
 
 enum WorkerType { "classic", "module" };

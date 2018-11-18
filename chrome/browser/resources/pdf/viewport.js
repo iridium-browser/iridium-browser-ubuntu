@@ -20,6 +20,7 @@ let PartialPoint;
 
 /**
  * Returns the height of the intersection of two rectangles.
+ *
  * @param {Object} rect1 the first rect
  * @param {Object} rect2 the second rect
  * @return {number} the height of the intersection of the rects
@@ -33,6 +34,7 @@ function getIntersectionHeight(rect1, rect2) {
 
 /**
  * Computes vector between two points.
+ *
  * @param {!Object} p1 The first point.
  * @param {!Object} p2 The second point.
  * @return {!Object} The vector.
@@ -51,7 +53,7 @@ function frameToPluginCoordinate(coordinateInFrame) {
 
 /**
  * Create a new viewport.
- * @constructor
+ *
  * @param {Window} window the window
  * @param {Object} sizer is the element which represents the size of the
  *     document in the viewport
@@ -64,6 +66,7 @@ function frameToPluginCoordinate(coordinateInFrame) {
  * @param {number} defaultZoom The default zoom level.
  * @param {number} topToolbarHeight The number of pixels that should initially
  *     be left blank above the document for the toolbar.
+ * @constructor
  */
 function Viewport(
     window, sizer, viewportChangedCallback, beforeZoomCallback,
@@ -136,6 +139,7 @@ Viewport.ZOOM_FACTOR_RANGE = {
 
 /**
  * Clamps the zoom factor (or page scale factor) to be within the limits.
+ *
  * @param {number} factor The zoom/scale factor.
  * @return {number} The factor clamped within the limits.
  */
@@ -161,6 +165,7 @@ Viewport.prototype = {
    * Rounding is necessary when interacting with the renderer which tends to
    * operate in integral values (for example for determining if scrollbars
    * should be shown).
+   *
    * @param {number} zoom The zoom to use to compute the scaled dimensions.
    * @return {Object} A dictionary with scaled 'width'/'height' of the document.
    * @private
@@ -175,12 +180,13 @@ Viewport.prototype = {
   },
 
   /**
-   * @private
    * Returns true if the document needs scrollbars at the given zoom level.
+   *
    * @param {number} zoom compute whether scrollbars are needed at this zoom
    * @return {Object} with 'horizontal' and 'vertical' keys which map to bool
    *     values indicating if the horizontal and vertical scrollbars are needed
    *     respectively.
+   * @private
    */
   documentNeedsScrollbars_: function(zoom) {
     var zoomedDimensions = this.getZoomedDocumentDimensions_(zoom);
@@ -204,6 +210,7 @@ Viewport.prototype = {
 
   /**
    * Returns true if the document needs scrollbars at the current zoom level.
+   *
    * @return {Object} with 'x' and 'y' keys which map to bool values
    *     indicating if the horizontal and vertical scrollbars are needed
    *     respectively.
@@ -213,8 +220,9 @@ Viewport.prototype = {
   },
 
   /**
-   * @private
    * Helper function called when the zoomed document size changes.
+   *
+   * @private
    */
   contentSizeChanged_: function() {
     var zoomedDimensions = this.getZoomedDocumentDimensions_(this.zoom);
@@ -226,16 +234,18 @@ Viewport.prototype = {
   },
 
   /**
-   * @private
    * Called when the viewport should be updated.
+   *
+   * @private
    */
   updateViewport_: function() {
     this.viewportChangedCallback_();
   },
 
   /**
-   * @private
    * Called when the browser window size changes.
+   *
+   * @private
    */
   resizeWrapper_: function() {
     this.setUserInitiatedCallback_(false);
@@ -244,8 +254,9 @@ Viewport.prototype = {
   },
 
   /**
-   * @private
    * Called when the viewport size changes.
+   *
+   * @private
    */
   resize_: function() {
     if (this.fittingType_ == FittingType.FIT_TO_PAGE)
@@ -254,6 +265,8 @@ Viewport.prototype = {
       this.fitToWidth();
     else if (this.fittingType_ == FittingType.FIT_TO_HEIGHT)
       this.fitToHeightInternal_(false);
+    else if (this.internalZoom_ == 0)
+      this.fitToNone();
     else
       this.updateViewport_();
   },
@@ -270,6 +283,7 @@ Viewport.prototype = {
 
   /**
    * Scroll the viewport to the specified position.
+   *
    * @type {Object} position The position to scroll to.
    */
   set position(position) {
@@ -298,6 +312,7 @@ Viewport.prototype = {
 
   /**
    * Set the zoom manager.
+   *
    * @type {ZoomManager} manager the zoom manager to set.
    */
   set zoomManager(manager) {
@@ -328,12 +343,13 @@ Viewport.prototype = {
   },
 
   /**
-   * @private
-   * @param {function} f Function to wrap
    * Used to wrap a function that might perform zooming on the viewport. This is
    * required so that we can notify the plugin that zooming is in progress
    * so that while zooming is taking place it can stop reacting to scroll events
    * from the viewport. This is to avoid flickering.
+   *
+   * @param {function} f Function to wrap
+   * @private
    */
   mightZoom_: function(f) {
     this.beforeZoomCallback_();
@@ -344,20 +360,23 @@ Viewport.prototype = {
   },
 
   /**
-   * @private
    * Sets the zoom of the viewport.
+   *
    * @param {number} newZoom the zoom level to zoom to.
+   * @private
    */
   setZoomInternal_: function(newZoom) {
     if (!this.allowedToChangeZoom_) {
-      throw 'Called Viewport.setZoomInternal_ without calling ' +
-          'Viewport.mightZoom_.';
+      throw new Error(
+          'Called Viewport.setZoomInternal_ without calling ' +
+          'Viewport.mightZoom_.');
     }
     // Record the scroll position (relative to the top-left of the window).
     var currentScrollPos = {
       x: this.position.x / this.zoom,
       y: this.position.y / this.zoom
     };
+
     this.internalZoom_ = newZoom;
     this.contentSizeChanged_();
     // Scroll to the scaled scroll position.
@@ -368,11 +387,12 @@ Viewport.prototype = {
   },
 
   /**
-   * @private
    * Sets the zoom of the viewport.
    * Same as setZoomInternal_ but for pinch zoom we have some more operations.
+   *
    * @param {number} scaleDelta The zoom delta.
    * @param {!Object} center The pinch center in content coordinates.
+   * @private
    */
   setPinchZoomInternal_: function(scaleDelta, center) {
     assert(
@@ -399,10 +419,11 @@ Viewport.prototype = {
   },
 
   /**
-   *  @private
    *  Converts a point from frame to content coordinates.
+   *
    *  @param {!Object} framePoint The frame coordinates.
    *  @return {!Object} The content coordinates.
+   *  @private
    */
   frameToContent: function(framePoint) {
     // TODO(mcnee) Add a helper Point class to avoid duplicating operations
@@ -415,6 +436,7 @@ Viewport.prototype = {
 
   /**
    * Sets the zoom to the given zoom level.
+   *
    * @param {number} newZoom the zoom level to zoom to.
    */
   setZoom: function(newZoom) {
@@ -428,6 +450,7 @@ Viewport.prototype = {
   /**
    * Gets notified of the browser zoom changing seperately from the
    * internal zoom.
+   *
    * @param {number} oldBrowserZoom the previous value of the browser zoom.
    */
   updateZoomFromBrowserChange: function(oldBrowserZoom) {
@@ -463,9 +486,11 @@ Viewport.prototype = {
   },
 
   /**
-   * @private
+   * Get the which page is at a given y position.
+   *
    * @param {number} y the y-coordinate to get the page at.
    * @return {number} the index of a page overlapping the given y-coordinate.
+   * @private
    */
   getPageAtY_: function(y) {
     var min = 0;
@@ -496,6 +521,7 @@ Viewport.prototype = {
   /**
    * Returns the page with the greatest proportion of its height in the current
    * viewport.
+   *
    * @return {number} the index of the most visible page.
    */
   getMostVisiblePage: function() {
@@ -523,7 +549,6 @@ Viewport.prototype = {
   },
 
   /**
-   * @private
    * Compute the zoom level for fit-to-page, fit-to-width or fit-to-height.
    *
    * At least one of {fitWidth, fitHeight} must be true.
@@ -534,6 +559,7 @@ Viewport.prototype = {
    * @param {boolean} fitHeight a bool indicating whether the whole height of
    *     the page needs to be in the viewport.
    * @return {number} the internal zoom to set
+   * @private
    */
   computeFittingZoom_: function(pageDimensions, fitWidth, fitHeight) {
     assert(
@@ -586,7 +612,6 @@ Viewport.prototype = {
   },
 
   /**
-   * @private
    * Compute a zoom level given the dimensions to fit and the actual numbers
    * in those dimensions.
    *
@@ -599,6 +624,7 @@ Viewport.prototype = {
    * @param {number} pageWidth the width of the page in px.
    * @param {number} pageHeight the height of the page in px.
    * @return {number} the internal zoom to set
+   * @private
    */
   computeFittingZoomGivenDimensions_: function(
       fitWidth, fitHeight, windowWidth, windowHeight, pageWidth, pageHeight) {
@@ -612,13 +638,17 @@ Viewport.prototype = {
     if (fitHeight)
       zoomHeight = windowHeight / pageHeight;
 
-    if (!fitWidth && fitHeight)
-      return zoomHeight;
-    if (fitWidth && !fitHeight)
-      return zoomWidth;
+    var zoom;
+    if (!fitWidth && fitHeight) {
+      zoom = zoomHeight;
+    } else if (fitWidth && !fitHeight) {
+      zoom = zoomWidth;
+    } else {
+      // Assume fitWidth && fitHeight
+      zoom = Math.min(zoomWidth, zoomHeight);
+    }
 
-    // Assume fitWidth && fitHeight
-    return Math.min(zoomWidth, zoomHeight);
+    return Math.max(zoom, 0);
   },
 
   /**
@@ -638,11 +668,12 @@ Viewport.prototype = {
   },
 
   /**
-   * @private
    * Zoom the viewport so that the page height consumes the entire viewport.
+   *
    * @param {boolean} scrollToTopOfPage Set to true if the viewport should be
    *     scrolled to the top of the current page. Set to false if the viewport
    *     should remain at the current scroll position.
+   * @private
    */
   fitToHeightInternal_: function(scrollToTopOfPage) {
     this.mightZoom_(() => {
@@ -672,11 +703,12 @@ Viewport.prototype = {
   },
 
   /**
-   * @private
    * Zoom the viewport so that a page consumes as much as possible of the it.
+   *
    * @param {boolean} scrollToTopOfPage Set to true if the viewport should be
    *     scrolled to the top of the current page. Set to false if the viewport
    *     should remain at the current scroll position.
+   * @private
    */
   fitToPageInternal_: function(scrollToTopOfPage) {
     this.mightZoom_(() => {
@@ -703,6 +735,21 @@ Viewport.prototype = {
    */
   fitToPage: function() {
     this.fitToPageInternal_(true);
+  },
+
+  /**
+   * Zoom the viewport to the default zoom policy.
+   */
+  fitToNone: function() {
+    this.mightZoom_(() => {
+      this.fittingType_ = FittingType.NONE;
+      if (!this.documentDimensions_)
+        return;
+      this.setZoomInternal_(Math.min(
+          this.defaultZoom_,
+          this.computeFittingZoom_(this.documentDimensions_, true, false)));
+      this.updateViewport_();
+    });
   },
 
   /**
@@ -739,6 +786,7 @@ Viewport.prototype = {
 
   /**
    * Pinch zoom event handler.
+   *
    * @param {!Object} e The pinch event.
    */
   pinchZoom: function(e) {
@@ -811,6 +859,7 @@ Viewport.prototype = {
 
   /**
    * Go to the given page index.
+   *
    * @param {number} page the index of the page to go to. zero-based.
    */
   goToPage: function(page) {
@@ -819,6 +868,7 @@ Viewport.prototype = {
 
   /**
    * Go to the given y position in the given page index.
+   *
    * @param {number} page the index of the page to go to. zero-based.
    * @param {number} x the x position in the page to go to.
    * @param {number} y the y position in the page to go to.
@@ -848,6 +898,7 @@ Viewport.prototype = {
 
   /**
    * Set the dimensions of the document.
+   *
    * @param {Object} documentDimensions the dimensions of the document
    */
   setDocumentDimensions: function(documentDimensions) {
@@ -869,6 +920,7 @@ Viewport.prototype = {
   /**
    * Get the coordinates of the page contents (excluding the page shadow)
    * relative to the screen.
+   *
    * @param {number} page the index of the page to get the rect for.
    * @return {Object} a rect representing the page in screen coordinates.
    */

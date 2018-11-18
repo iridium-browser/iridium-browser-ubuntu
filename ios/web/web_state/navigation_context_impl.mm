@@ -31,20 +31,24 @@ std::unique_ptr<NavigationContextImpl>
 NavigationContextImpl::CreateNavigationContext(
     WebState* web_state,
     const GURL& url,
+    bool has_user_gesture,
     ui::PageTransition page_transition,
     bool is_renderer_initiated) {
-  std::unique_ptr<NavigationContextImpl> result(new NavigationContextImpl(
-      web_state, url, page_transition, is_renderer_initiated));
+  std::unique_ptr<NavigationContextImpl> result(
+      new NavigationContextImpl(web_state, url, has_user_gesture,
+                                page_transition, is_renderer_initiated));
   return result;
 }
 
 #ifndef NDEBUG
 NSString* NavigationContextImpl::GetDescription() const {
-  return [NSString stringWithFormat:
-                       @"web::WebState: %ld, url: %s, "
-                        "is_same_document: %@, error: %@",
-                       reinterpret_cast<long>(web_state_), url_.spec().c_str(),
-                       is_same_document_ ? @"true" : @"false", error_];
+  return [NSString
+      stringWithFormat:
+          @"web::WebState: %ld, url: %s, "
+           "is_same_document: %@, error: %@ is_loading_error_page: %@",
+          reinterpret_cast<long>(web_state_), url_.spec().c_str(),
+          is_same_document_ ? @"true" : @"false", error_,
+          is_loading_error_page_ ? @"true" : @"false"];
 }
 #endif  // NDEBUG
 
@@ -58,6 +62,10 @@ int64_t NavigationContextImpl::GetNavigationId() const {
 
 const GURL& NavigationContextImpl::GetUrl() const {
   return url_;
+}
+
+bool NavigationContextImpl::HasUserGesture() const {
+  return has_user_gesture_;
 }
 
 ui::PageTransition NavigationContextImpl::GetPageTransition() const {
@@ -142,13 +150,40 @@ WKNavigationType NavigationContextImpl::GetWKNavigationType() const {
   return wk_navigation_type_;
 }
 
+bool NavigationContextImpl::IsLoadingErrorPage() const {
+  return is_loading_error_page_;
+}
+
+void NavigationContextImpl::SetLoadingErrorPage(bool is_loading_error_page) {
+  is_loading_error_page_ = is_loading_error_page;
+}
+
+bool NavigationContextImpl::IsLoadingHtmlString() const {
+  return is_loading_html_string_;
+}
+
+void NavigationContextImpl::SetLoadingHtmlString(bool is_loading_html_string) {
+  is_loading_html_string_ = is_loading_html_string;
+}
+
+bool NavigationContextImpl::IsNativeContentPresented() const {
+  return is_native_content_presented_;
+}
+
+void NavigationContextImpl::SetIsNativeContentPresented(
+    bool is_native_content_presented) {
+  is_native_content_presented_ = is_native_content_presented;
+}
+
 NavigationContextImpl::NavigationContextImpl(WebState* web_state,
                                              const GURL& url,
+                                             bool has_user_gesture,
                                              ui::PageTransition page_transition,
                                              bool is_renderer_initiated)
     : web_state_(web_state),
       navigation_id_(CreateUniqueContextId()),
       url_(url),
+      has_user_gesture_(has_user_gesture),
       page_transition_(page_transition),
       is_same_document_(false),
       error_(nil),

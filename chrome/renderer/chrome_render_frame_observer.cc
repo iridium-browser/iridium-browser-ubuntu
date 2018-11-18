@@ -100,20 +100,20 @@ namespace {
 // |thumbnail_min_area_pixels|, we return the image unmodified.  Otherwise, we
 // scale down the image so that the width and height do not exceed
 // |thumbnail_max_size_pixels|, preserving the original aspect ratio.
-SkBitmap Downscale(const blink::WebImage& image,
+SkBitmap Downscale(const SkBitmap& image,
                    int thumbnail_min_area_pixels,
                    const gfx::Size& thumbnail_max_size_pixels) {
-  if (image.IsNull())
+  if (image.isNull())
     return SkBitmap();
 
-  gfx::Size image_size = image.Size();
+  gfx::Size image_size(image.width(), image.height());
 
   if (image_size.GetArea() < thumbnail_min_area_pixels)
-    return image.GetSkBitmap();
+    return image;
 
   if (image_size.width() <= thumbnail_max_size_pixels.width() &&
       image_size.height() <= thumbnail_max_size_pixels.height())
-    return image.GetSkBitmap();
+    return image;
 
   gfx::SizeF scaled_size = gfx::SizeF(image_size);
 
@@ -126,7 +126,7 @@ SkBitmap Downscale(const blink::WebImage& image,
         thumbnail_max_size_pixels.height() / scaled_size.height());
   }
 
-  return skia::ImageOperations::Resize(image.GetSkBitmap(),
+  return skia::ImageOperations::Resize(image,
                                        skia::ImageOperations::RESIZE_GOOD,
                                        static_cast<int>(scaled_size.width()),
                                        static_cast<int>(scaled_size.height()));
@@ -163,6 +163,12 @@ void ChromeRenderFrameObserver::OnInterfaceRequestForFrame(
     const std::string& interface_name,
     mojo::ScopedMessagePipeHandle* interface_pipe) {
   registry_.TryBindInterface(interface_name, interface_pipe);
+}
+
+bool ChromeRenderFrameObserver::OnAssociatedInterfaceRequestForFrame(
+    const std::string& interface_name,
+    mojo::ScopedInterfaceEndpointHandle* handle) {
+  return associated_interfaces_.TryBindInterface(interface_name, handle);
 }
 
 bool ChromeRenderFrameObserver::OnMessageReceived(const IPC::Message& message) {
@@ -217,14 +223,13 @@ void ChromeRenderFrameObserver::RequestThumbnailForContextNode(
     int32_t thumbnail_min_area_pixels,
     const gfx::Size& thumbnail_max_size_pixels,
     chrome::mojom::ImageFormat image_format,
-    const RequestThumbnailForContextNodeCallback& callback) {
+    RequestThumbnailForContextNodeCallback callback) {
   WebNode context_node = render_frame()->GetWebFrame()->ContextMenuNode();
   SkBitmap thumbnail;
   gfx::Size original_size;
   if (!context_node.IsNull() && context_node.IsElementNode()) {
-    blink::WebImage image =
-        context_node.To<WebElement>().ImageContents();
-    original_size = image.Size();
+    SkBitmap image = context_node.To<WebElement>().ImageContents();
+    original_size = gfx::Size(image.width(), image.height());
     thumbnail = Downscale(image,
                           thumbnail_min_area_pixels,
                           thumbnail_max_size_pixels);
@@ -256,7 +261,7 @@ void ChromeRenderFrameObserver::RequestThumbnailForContextNode(
         thumbnail_data.swap(data);
       break;
   }
-  callback.Run(thumbnail_data, original_size);
+  std::move(callback).Run(thumbnail_data, original_size);
 }
 
 void ChromeRenderFrameObserver::OnPrintNodeUnderContextMenu() {
@@ -269,7 +274,7 @@ void ChromeRenderFrameObserver::OnPrintNodeUnderContextMenu() {
 }
 
 void ChromeRenderFrameObserver::GetWebApplicationInfo(
-    const GetWebApplicationInfoCallback& callback) {
+    GetWebApplicationInfoCallback callback) {
   WebLocalFrame* frame = render_frame()->GetWebFrame();
 
   WebApplicationInfo web_app_info;
@@ -291,9 +296,7 @@ void ChromeRenderFrameObserver::GetWebApplicationInfo(
   // any icon with a data URL to have originated from a favicon.  We don't want
   // to decode arbitrary data URLs in the browser process.  See
   // http://b/issue?id=1162972
-  for (std::vector<WebApplicationInfo::IconInfo>::iterator it =
-           web_app_info.icons.begin();
-       it != web_app_info.icons.end();) {
+  for (auto it = web_app_info.icons.begin(); it != web_app_info.icons.end();) {
     if (it->url.SchemeIs(url::kDataScheme))
       it = web_app_info.icons.erase(it);
     else
@@ -370,7 +373,8 @@ void ChromeRenderFrameObserver::DidCreateNewDocument() {
 }
 
 void ChromeRenderFrameObserver::DidStartProvisionalLoad(
-    WebDocumentLoader* document_loader) {
+    WebDocumentLoader* document_loader,
+    bool is_content_initiated) {
   // Let translate_helper do any preparatory work for loading a URL.
   if (!translate_helper_)
     return;
@@ -380,8 +384,8 @@ void ChromeRenderFrameObserver::DidStartProvisionalLoad(
 }
 
 void ChromeRenderFrameObserver::DidCommitProvisionalLoad(
-    bool is_new_navigation,
-    bool is_same_document_navigation) {
+    bool is_same_document_navigation,
+    ui::PageTransition transition) {
   WebLocalFrame* frame = render_frame()->GetWebFrame();
 
   // Don't do anything for subframes.
@@ -393,8 +397,8 @@ void ChromeRenderFrameObserver::DidCommitProvisionalLoad(
       base::NumberToString(content::RenderView::GetRenderViewCount()));
 
 #if !defined(OS_ANDROID)
-  if ((render_frame()->GetEnabledBindings() &
-       content::BINDINGS_POLICY_WEB_UI)) {
+  if (render_frame()->GetEnabledBindings() &
+      content::kWebUIBindingsPolicyMask) {
     for (const auto& script : webui_javascript_)
       render_frame()->ExecuteJavaScript(script);
     webui_javascript_.clear();
@@ -496,12 +500,12 @@ void ChromeRenderFrameObserver::SetWindowFeatures(
       content::ConvertMojoWindowFeaturesToWebWindowFeatures(*window_features));
 }
 
-#if defined(OS_ANDROID)
 void ChromeRenderFrameObserver::UpdateBrowserControlsState(
     content::BrowserControlsState constraints,
     content::BrowserControlsState current,
     bool animate) {
+#if defined(OS_ANDROID) || defined(OS_CHROMEOS)
   render_frame()->GetRenderView()->UpdateBrowserControlsState(constraints,
                                                               current, animate);
-}
 #endif
+}

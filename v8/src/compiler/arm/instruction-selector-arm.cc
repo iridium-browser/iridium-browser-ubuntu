@@ -73,6 +73,17 @@ class ArmOperandGenerator : public OperandGenerator {
     }
     return false;
   }
+
+  // Use the stack pointer if the node is LoadStackPointer, otherwise assign a
+  // register.
+  InstructionOperand UseRegisterOrStackPointer(Node* node) {
+    if (node->opcode() == IrOpcode::kLoadStackPointer) {
+      return LocationOperand(LocationOperand::EXPLICIT,
+                             LocationOperand::REGISTER,
+                             MachineRepresentation::kWord32, sp.code());
+    }
+    return UseRegister(node);
+  }
 };
 
 
@@ -392,6 +403,43 @@ void EmitStore(InstructionSelector* selector, InstructionCode opcode,
   selector->Emit(opcode, 0, nullptr, input_count, inputs);
 }
 
+void VisitPairAtomicBinOp(InstructionSelector* selector, Node* node,
+                          ArchOpcode opcode) {
+  ArmOperandGenerator g(selector);
+  Node* base = node->InputAt(0);
+  Node* index = node->InputAt(1);
+  Node* value = node->InputAt(2);
+  Node* value_high = node->InputAt(3);
+  AddressingMode addressing_mode = kMode_Offset_RR;
+  InstructionOperand inputs[] = {
+      g.UseUniqueRegister(value), g.UseUniqueRegister(value_high),
+      g.UseUniqueRegister(base), g.UseUniqueRegister(index)};
+  Node* projection0 = NodeProperties::FindProjection(node, 0);
+  Node* projection1 = NodeProperties::FindProjection(node, 1);
+  InstructionCode code = opcode | AddressingModeField::encode(addressing_mode);
+  if (projection1) {
+    InstructionOperand outputs[] = {g.DefineAsFixed(projection0, r2),
+                                    g.DefineAsFixed(projection1, r3)};
+    InstructionOperand temps[] = {g.TempRegister(), g.TempRegister(r6),
+                                  g.TempRegister(r7), g.TempRegister()};
+    selector->Emit(code, arraysize(outputs), outputs, arraysize(inputs), inputs,
+                   arraysize(temps), temps);
+  } else if (projection0) {
+    InstructionOperand outputs[] = {g.DefineAsFixed(projection0, r2)};
+    InstructionOperand temps[] = {g.TempRegister(), g.TempRegister(r6),
+                                  g.TempRegister(r7), g.TempRegister(),
+                                  g.TempRegister(r3)};
+    selector->Emit(code, arraysize(outputs), outputs, arraysize(inputs), inputs,
+                   arraysize(temps), temps);
+  } else {
+    InstructionOperand temps[] = {g.TempRegister(),   g.TempRegister(r6),
+                                  g.TempRegister(r7), g.TempRegister(),
+                                  g.TempRegister(r2), g.TempRegister(r3)};
+    selector->Emit(code, 0, nullptr, arraysize(inputs), inputs,
+                   arraysize(temps), temps);
+  }
+}
+
 }  // namespace
 
 void InstructionSelector::VisitStackSlot(Node* node) {
@@ -444,7 +492,7 @@ void InstructionSelector::VisitLoad(Node* node) {
       return;
   }
   if (node->opcode() == IrOpcode::kPoisonedLoad) {
-    CHECK_EQ(poisoning_enabled_, PoisoningMitigationLevel::kOn);
+    CHECK_NE(poisoning_level_, PoisoningMitigationLevel::kDontPoison);
     opcode |= MiscField::encode(kMemoryAccessPoisoned);
   }
 
@@ -1089,7 +1137,9 @@ void InstructionSelector::VisitWord32ReverseBits(Node* node) {
 
 void InstructionSelector::VisitWord64ReverseBytes(Node* node) { UNREACHABLE(); }
 
-void InstructionSelector::VisitWord32ReverseBytes(Node* node) { UNREACHABLE(); }
+void InstructionSelector::VisitWord32ReverseBytes(Node* node) {
+  VisitRR(this, kArmRev, node);
+}
 
 void InstructionSelector::VisitWord32Popcnt(Node* node) { UNREACHABLE(); }
 
@@ -1679,17 +1729,17 @@ void VisitWordCompare(InstructionSelector* selector, Node* node,
 
   if (TryMatchImmediateOrShift(selector, &opcode, m.right().node(),
                                &input_count, &inputs[1])) {
-    inputs[0] = g.UseRegister(m.left().node());
+    inputs[0] = g.UseRegisterOrStackPointer(m.left().node());
     input_count++;
   } else if (TryMatchImmediateOrShift(selector, &opcode, m.left().node(),
                                       &input_count, &inputs[1])) {
     if (!node->op()->HasProperty(Operator::kCommutative)) cont->Commute();
-    inputs[0] = g.UseRegister(m.right().node());
+    inputs[0] = g.UseRegisterOrStackPointer(m.right().node());
     input_count++;
   } else {
     opcode |= AddressingModeField::encode(kMode_Operand2_R);
-    inputs[input_count++] = g.UseRegister(m.left().node());
-    inputs[input_count++] = g.UseRegister(m.right().node());
+    inputs[input_count++] = g.UseRegisterOrStackPointer(m.left().node());
+    inputs[input_count++] = g.UseRegisterOrStackPointer(m.right().node());
   }
 
   if (has_result) {
@@ -1886,10 +1936,9 @@ void InstructionSelector::VisitSwitch(Node* node, const SwitchInfo& sw) {
     }
   }
 
-  // Generate a sequence of conditional jumps.
-  return EmitLookupSwitch(sw, value_operand);
+  // Generate a tree of conditional jumps.
+  return EmitBinarySearchSwitch(sw, value_operand);
 }
-
 
 void InstructionSelector::VisitWord32Equal(Node* const node) {
   FlagsContinuation cont = FlagsContinuation::ForSet(kEqual, node);
@@ -2090,7 +2139,7 @@ void InstructionSelector::VisitWord32AtomicExchange(Node* node) {
   Node* index = node->InputAt(1);
   Node* value = node->InputAt(2);
   ArchOpcode opcode = kArchNop;
-  MachineType type = AtomicOpRepresentationOf(node->op());
+  MachineType type = AtomicOpType(node->op());
   if (type == MachineType::Int8()) {
     opcode = kWord32AtomicExchangeInt8;
   } else if (type == MachineType::Uint8()) {
@@ -2126,7 +2175,7 @@ void InstructionSelector::VisitWord32AtomicCompareExchange(Node* node) {
   Node* old_value = node->InputAt(2);
   Node* new_value = node->InputAt(3);
   ArchOpcode opcode = kArchNop;
-  MachineType type = AtomicOpRepresentationOf(node->op());
+  MachineType type = AtomicOpType(node->op());
   if (type == MachineType::Int8()) {
     opcode = kWord32AtomicCompareExchangeInt8;
   } else if (type == MachineType::Uint8()) {
@@ -2157,7 +2206,7 @@ void InstructionSelector::VisitWord32AtomicCompareExchange(Node* node) {
   Emit(code, 1, outputs, input_count, inputs, arraysize(temps), temps);
 }
 
-void InstructionSelector::VisitAtomicBinaryOperation(
+void InstructionSelector::VisitWord32AtomicBinaryOperation(
     Node* node, ArchOpcode int8_op, ArchOpcode uint8_op, ArchOpcode int16_op,
     ArchOpcode uint16_op, ArchOpcode word32_op) {
   ArmOperandGenerator g(this);
@@ -2165,7 +2214,7 @@ void InstructionSelector::VisitAtomicBinaryOperation(
   Node* index = node->InputAt(1);
   Node* value = node->InputAt(2);
   ArchOpcode opcode = kArchNop;
-  MachineType type = AtomicOpRepresentationOf(node->op());
+  MachineType type = AtomicOpType(node->op());
   if (type == MachineType::Int8()) {
     opcode = int8_op;
   } else if (type == MachineType::Uint8()) {
@@ -2197,7 +2246,7 @@ void InstructionSelector::VisitAtomicBinaryOperation(
 
 #define VISIT_ATOMIC_BINOP(op)                                   \
   void InstructionSelector::VisitWord32Atomic##op(Node* node) {  \
-    VisitAtomicBinaryOperation(                                  \
+    VisitWord32AtomicBinaryOperation(                            \
         node, kWord32Atomic##op##Int8, kWord32Atomic##op##Uint8, \
         kWord32Atomic##op##Int16, kWord32Atomic##op##Uint16,     \
         kWord32Atomic##op##Word32);                              \
@@ -2208,6 +2257,138 @@ VISIT_ATOMIC_BINOP(And)
 VISIT_ATOMIC_BINOP(Or)
 VISIT_ATOMIC_BINOP(Xor)
 #undef VISIT_ATOMIC_BINOP
+
+void InstructionSelector::VisitWord32AtomicPairLoad(Node* node) {
+  ArmOperandGenerator g(this);
+  Node* base = node->InputAt(0);
+  Node* index = node->InputAt(1);
+  AddressingMode addressing_mode = kMode_Offset_RR;
+  InstructionCode code =
+      kArmWord32AtomicPairLoad | AddressingModeField::encode(addressing_mode);
+  InstructionOperand inputs[] = {g.UseUniqueRegister(base),
+                                 g.UseUniqueRegister(index)};
+  Node* projection0 = NodeProperties::FindProjection(node, 0);
+  Node* projection1 = NodeProperties::FindProjection(node, 1);
+  if (projection1) {
+    InstructionOperand outputs[] = {g.DefineAsFixed(projection0, r0),
+                                    g.DefineAsFixed(projection1, r1)};
+    InstructionOperand temps[] = {g.TempRegister()};
+    Emit(code, arraysize(outputs), outputs, arraysize(inputs), inputs,
+         arraysize(temps), temps);
+  } else if (projection0) {
+    InstructionOperand outputs[] = {g.DefineAsFixed(projection0, r0)};
+    InstructionOperand temps[] = {g.TempRegister(), g.TempRegister(r1)};
+    Emit(code, arraysize(outputs), outputs, arraysize(inputs), inputs,
+         arraysize(temps), temps);
+  } else {
+    InstructionOperand temps[] = {g.TempRegister(), g.TempRegister(r0),
+                                  g.TempRegister(r1)};
+    Emit(code, 0, nullptr, arraysize(inputs), inputs, arraysize(temps), temps);
+  }
+}
+
+void InstructionSelector::VisitWord32AtomicPairStore(Node* node) {
+  ArmOperandGenerator g(this);
+  Node* base = node->InputAt(0);
+  Node* index = node->InputAt(1);
+  Node* value_low = node->InputAt(2);
+  Node* value_high = node->InputAt(3);
+  AddressingMode addressing_mode = kMode_Offset_RR;
+  InstructionOperand inputs[] = {
+      g.UseUniqueRegister(base), g.UseUniqueRegister(index),
+      g.UseFixed(value_low, r2), g.UseFixed(value_high, r3)};
+  InstructionOperand temps[] = {g.TempRegister(), g.TempRegister(r0),
+                                g.TempRegister(r1)};
+  InstructionCode code =
+      kArmWord32AtomicPairStore | AddressingModeField::encode(addressing_mode);
+  Emit(code, 0, nullptr, arraysize(inputs), inputs, arraysize(temps), temps);
+}
+
+void InstructionSelector::VisitWord32AtomicPairAdd(Node* node) {
+  VisitPairAtomicBinOp(this, node, kArmWord32AtomicPairAdd);
+}
+
+void InstructionSelector::VisitWord32AtomicPairSub(Node* node) {
+  VisitPairAtomicBinOp(this, node, kArmWord32AtomicPairSub);
+}
+
+void InstructionSelector::VisitWord32AtomicPairAnd(Node* node) {
+  VisitPairAtomicBinOp(this, node, kArmWord32AtomicPairAnd);
+}
+
+void InstructionSelector::VisitWord32AtomicPairOr(Node* node) {
+  VisitPairAtomicBinOp(this, node, kArmWord32AtomicPairOr);
+}
+
+void InstructionSelector::VisitWord32AtomicPairXor(Node* node) {
+  VisitPairAtomicBinOp(this, node, kArmWord32AtomicPairXor);
+}
+
+void InstructionSelector::VisitWord32AtomicPairExchange(Node* node) {
+  ArmOperandGenerator g(this);
+  Node* base = node->InputAt(0);
+  Node* index = node->InputAt(1);
+  Node* value = node->InputAt(2);
+  Node* value_high = node->InputAt(3);
+  AddressingMode addressing_mode = kMode_Offset_RR;
+  InstructionOperand inputs[] = {
+      g.UseFixed(value, r0), g.UseFixed(value_high, r1),
+      g.UseUniqueRegister(base), g.UseUniqueRegister(index)};
+  InstructionCode code = kArmWord32AtomicPairExchange |
+                         AddressingModeField::encode(addressing_mode);
+  Node* projection0 = NodeProperties::FindProjection(node, 0);
+  Node* projection1 = NodeProperties::FindProjection(node, 1);
+  if (projection1) {
+    InstructionOperand outputs[] = {g.DefineAsFixed(projection0, r6),
+                                    g.DefineAsFixed(projection1, r7)};
+    InstructionOperand temps[] = {g.TempRegister(), g.TempRegister()};
+    Emit(code, arraysize(outputs), outputs, arraysize(inputs), inputs,
+         arraysize(temps), temps);
+  } else if (projection0) {
+    InstructionOperand outputs[] = {g.DefineAsFixed(projection0, r6)};
+    InstructionOperand temps[] = {g.TempRegister(), g.TempRegister(),
+                                  g.TempRegister(r7)};
+    Emit(code, arraysize(outputs), outputs, arraysize(inputs), inputs,
+         arraysize(temps), temps);
+  } else {
+    InstructionOperand temps[] = {g.TempRegister(), g.TempRegister(),
+                                  g.TempRegister(r6), g.TempRegister(r7)};
+    Emit(code, 0, nullptr, arraysize(inputs), inputs, arraysize(temps), temps);
+  }
+}
+
+void InstructionSelector::VisitWord32AtomicPairCompareExchange(Node* node) {
+  ArmOperandGenerator g(this);
+  AddressingMode addressing_mode = kMode_Offset_RR;
+  InstructionOperand inputs[] = {g.UseFixed(node->InputAt(2), r4),
+                                 g.UseFixed(node->InputAt(3), r5),
+                                 g.UseFixed(node->InputAt(4), r8),
+                                 g.UseFixed(node->InputAt(5), r9),
+                                 g.UseUniqueRegister(node->InputAt(0)),
+                                 g.UseUniqueRegister(node->InputAt(1))};
+  InstructionCode code = kArmWord32AtomicPairCompareExchange |
+                         AddressingModeField::encode(addressing_mode);
+  Node* projection0 = NodeProperties::FindProjection(node, 0);
+  Node* projection1 = NodeProperties::FindProjection(node, 1);
+  if (projection1) {
+    InstructionOperand outputs[] = {g.DefineAsFixed(projection0, r2),
+                                    g.DefineAsFixed(projection1, r3)};
+    InstructionOperand temps[] = {g.TempRegister(), g.TempRegister()};
+    Emit(code, arraysize(outputs), outputs, arraysize(inputs), inputs,
+         arraysize(temps), temps);
+  } else if (projection0) {
+    InstructionOperand outputs[] = {
+        g.DefineAsFixed(NodeProperties::FindProjection(node, 0), r2)};
+    InstructionOperand temps[] = {g.TempRegister(), g.TempRegister(),
+                                  g.TempRegister(r3)};
+    Emit(code, arraysize(outputs), outputs, arraysize(inputs), inputs,
+         arraysize(temps), temps);
+  } else {
+    InstructionOperand temps[] = {g.TempRegister(), g.TempRegister(),
+                                  g.TempRegister(r2), g.TempRegister(r3)};
+    Emit(code, 0, nullptr, arraysize(inputs), inputs, arraysize(temps), temps);
+  }
+}
 
 #define SIMD_TYPE_LIST(V) \
   V(F32x4)                \
@@ -2434,7 +2615,9 @@ static const ShuffleEntry arch_shuffles[] = {
     {{1, 0, 3, 2, 5, 4, 7, 6, 9, 8, 11, 10, 13, 12, 15, 14}, kArmS8x2Reverse}};
 
 bool TryMatchArchShuffle(const uint8_t* shuffle, const ShuffleEntry* table,
-                         size_t num_entries, uint8_t mask, ArchOpcode* opcode) {
+                         size_t num_entries, bool is_swizzle,
+                         ArchOpcode* opcode) {
+  uint8_t mask = is_swizzle ? kSimd128Size - 1 : 2 * kSimd128Size - 1;
   for (size_t i = 0; i < num_entries; ++i) {
     const ShuffleEntry& entry = table[i];
     int j = 0;
@@ -2466,48 +2649,51 @@ void ArrangeShuffleTable(ArmOperandGenerator* g, Node* input0, Node* input1,
 }  // namespace
 
 void InstructionSelector::VisitS8x16Shuffle(Node* node) {
-  const uint8_t* shuffle = OpParameter<uint8_t*>(node->op());
-  uint8_t mask = CanonicalizeShuffle(node);
+  uint8_t shuffle[kSimd128Size];
+  bool is_swizzle;
+  CanonicalizeShuffle(node, shuffle, &is_swizzle);
+  Node* input0 = node->InputAt(0);
+  Node* input1 = node->InputAt(1);
   uint8_t shuffle32x4[4];
   ArmOperandGenerator g(this);
   int index = 0;
   if (TryMatch32x4Shuffle(shuffle, shuffle32x4)) {
     if (TryMatchDup<4>(shuffle, &index)) {
-      InstructionOperand src = index < 4 ? g.UseRegister(node->InputAt(0))
-                                         : g.UseRegister(node->InputAt(1));
-      Emit(kArmS128Dup, g.DefineAsRegister(node), src, g.UseImmediate(Neon32),
-           g.UseImmediate(index % 4));
+      DCHECK_GT(4, index);
+      Emit(kArmS128Dup, g.DefineAsRegister(node), g.UseRegister(input0),
+           g.UseImmediate(Neon32), g.UseImmediate(index % 4));
+    } else if (TryMatchIdentity(shuffle)) {
+      EmitIdentity(node);
     } else {
-      Emit(kArmS32x4Shuffle, g.DefineAsRegister(node),
-           g.UseRegister(node->InputAt(0)), g.UseRegister(node->InputAt(1)),
-           g.UseImmediate(Pack4Lanes(shuffle32x4, mask)));
+      // 32x4 shuffles are implemented as s-register moves. To simplify these,
+      // make sure the destination is distinct from both sources.
+      InstructionOperand src0 = g.UseUniqueRegister(input0);
+      InstructionOperand src1 = is_swizzle ? src0 : g.UseUniqueRegister(input1);
+      Emit(kArmS32x4Shuffle, g.DefineAsRegister(node), src0, src1,
+           g.UseImmediate(Pack4Lanes(shuffle32x4)));
     }
     return;
   }
   if (TryMatchDup<8>(shuffle, &index)) {
-    InstructionOperand src = index < 8 ? g.UseRegister(node->InputAt(0))
-                                       : g.UseRegister(node->InputAt(1));
-    Emit(kArmS128Dup, g.DefineAsRegister(node), src, g.UseImmediate(Neon16),
-         g.UseImmediate(index % 8));
+    DCHECK_GT(8, index);
+    Emit(kArmS128Dup, g.DefineAsRegister(node), g.UseRegister(input0),
+         g.UseImmediate(Neon16), g.UseImmediate(index % 8));
     return;
   }
   if (TryMatchDup<16>(shuffle, &index)) {
-    InstructionOperand src = index < 16 ? g.UseRegister(node->InputAt(0))
-                                        : g.UseRegister(node->InputAt(1));
-    Emit(kArmS128Dup, g.DefineAsRegister(node), src, g.UseImmediate(Neon8),
-         g.UseImmediate(index % 16));
+    DCHECK_GT(16, index);
+    Emit(kArmS128Dup, g.DefineAsRegister(node), g.UseRegister(input0),
+         g.UseImmediate(Neon8), g.UseImmediate(index % 16));
     return;
   }
   ArchOpcode opcode;
   if (TryMatchArchShuffle(shuffle, arch_shuffles, arraysize(arch_shuffles),
-                          mask, &opcode)) {
+                          is_swizzle, &opcode)) {
     VisitRRRShuffle(this, opcode, node);
     return;
   }
-  Node* input0 = node->InputAt(0);
-  Node* input1 = node->InputAt(1);
   uint8_t offset;
-  if (TryMatchConcat(shuffle, mask, &offset)) {
+  if (TryMatchConcat(shuffle, &offset)) {
     Emit(kArmS8x16Concat, g.DefineAsRegister(node), g.UseRegister(input0),
          g.UseRegister(input1), g.UseImmediate(offset));
     return;
@@ -2516,10 +2702,10 @@ void InstructionSelector::VisitS8x16Shuffle(Node* node) {
   InstructionOperand src0, src1;
   ArrangeShuffleTable(&g, input0, input1, &src0, &src1);
   Emit(kArmS8x16Shuffle, g.DefineAsRegister(node), src0, src1,
-       g.UseImmediate(Pack4Lanes(shuffle, mask)),
-       g.UseImmediate(Pack4Lanes(shuffle + 4, mask)),
-       g.UseImmediate(Pack4Lanes(shuffle + 8, mask)),
-       g.UseImmediate(Pack4Lanes(shuffle + 12, mask)));
+       g.UseImmediate(Pack4Lanes(shuffle)),
+       g.UseImmediate(Pack4Lanes(shuffle + 4)),
+       g.UseImmediate(Pack4Lanes(shuffle + 8)),
+       g.UseImmediate(Pack4Lanes(shuffle + 12)));
 }
 
 void InstructionSelector::VisitSignExtendWord8ToInt32(Node* node) {

@@ -4,7 +4,8 @@
 
 #include "third_party/blink/renderer/core/layout/ng/ng_out_of_flow_layout_part.h"
 
-#include "third_party/blink/renderer/core/layout/ng/layout_ng_block_flow.h"
+#include "third_party/blink/renderer/core/layout/layout_block_flow.h"
+#include "third_party/blink/renderer/core/layout/ng/ng_constraint_space.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_layout_result.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_layout_test.h"
 
@@ -57,9 +58,7 @@ TEST_F(NGOutOfFlowLayoutPartTest, FixedInsideAbs) {
   // Test whether the oof fragments have been collected at NG->Legacy boundary.
   Element* rel = GetDocument().getElementById("rel");
   LayoutBlockFlow* block_flow = ToLayoutBlockFlow(rel->GetLayoutObject());
-  scoped_refptr<NGConstraintSpace> space =
-      NGConstraintSpace::CreateFromLayoutObject(*block_flow);
-  scoped_refptr<NGLayoutResult> result =
+  scoped_refptr<const NGLayoutResult> result =
       block_flow->CachedLayoutResultForTesting();
   EXPECT_TRUE(result);
   EXPECT_EQ(result->OutOfFlowPositionedDescendants().size(), (size_t)2);

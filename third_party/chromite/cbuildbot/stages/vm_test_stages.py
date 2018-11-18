@@ -72,6 +72,7 @@ class VMTestStage(generic_stages.BoardSpecificBuilderStage,
 
   option_name = 'tests'
   config_name = 'vm_tests'
+  category = constants.TEST_INFRA_STAGE
 
   def __init__(self, builder_run, board, vm_tests=None, ssh_port=9228,
                test_basename=None, **kwargs):
@@ -89,6 +90,8 @@ class VMTestStage(generic_stages.BoardSpecificBuilderStage,
     self._vm_tests = vm_tests
     self._ssh_port = ssh_port
     self._test_basename = test_basename
+    self._stage_exception_handler = super(
+        VMTestStage, self)._HandleStageException
     super(VMTestStage, self).__init__(builder_run, board, **kwargs)
 
   def _PrintFailedTests(self, results_path, test_basename):
@@ -260,6 +263,7 @@ class VMTestStage(generic_stages.BoardSpecificBuilderStage,
       if not self._vm_tests:
         self._vm_tests = self._run.config.vm_tests
 
+      failed_tests = []
       for vm_test in self._vm_tests:
         logging.info('Running VM test %s.', vm_test.test_type)
         if vm_test.test_type == constants.VM_SUITE_TEST_TYPE:
@@ -268,14 +272,29 @@ class VMTestStage(generic_stages.BoardSpecificBuilderStage,
         else:
           per_test_results_dir = os.path.join(test_results_root,
                                               vm_test.test_type)
-        with cgroups.SimpleContainChildren('VMTest'):
-          r = ' Reached VMTestStage test run timeout.'
-          with timeout_util.Timeout(vm_test.timeout, reason_message=r):
-            self._RunTest(vm_test, per_test_results_dir)
+        try:
+          with cgroups.SimpleContainChildren('VMTest'):
+            r = ' Reached VMTestStage test run timeout.'
+            with timeout_util.Timeout(vm_test.timeout, reason_message=r):
+              self._RunTest(vm_test, per_test_results_dir)
+        except Exception:
+          failed_tests.append(vm_test)
+          if vm_test.warn_only:
+            logging.warning('Optional test failed. Forgiving the failure.')
+          else:
+            raise
 
-    except Exception:
-      logging.error(_ERROR_MSG % dict(test_name='VMTests',
-                                      test_results=test_basename))
+      if failed_tests:
+        # If any of the tests failed but not raise an exception, mark
+        # the stage as warning.
+        self._stage_exception_handler = self._HandleExceptionAsWarning
+        raise failures_lib.TestWarning(
+            'VMTestStage succeeded, but some optional tests failed.')
+    except Exception as e:
+      if not isinstance(e, failures_lib.TestWarning):
+        # pylint: disable=logging-not-lazy
+        logging.error(_ERROR_MSG % dict(test_name='VMTests',
+                                        test_results=test_basename))
       self._ArchiveVMFiles(test_results_root)
       raise
     finally:
@@ -283,11 +302,15 @@ class VMTestStage(generic_stages.BoardSpecificBuilderStage,
         self._ReportResultsToDashboards(test_results_root)
       self._ArchiveTestResults(test_results_root, test_basename)
 
+  def _HandleStageException(self, exc_info):
+    return self._stage_exception_handler(exc_info)
+
 
 class ForgivenVMTestStage(VMTestStage, generic_stages.ForgivingBuilderStage):
   """Stage that forgives vm test failures."""
 
   stage_name = "ForgivenVMTest"
+  category = constants.TEST_INFRA_STAGE
 
   def __init__(self, *args, **kwargs):
     super(ForgivenVMTestStage, self).__init__(*args, **kwargs)
@@ -297,6 +320,7 @@ class GCETestStage(VMTestStage):
   """Run autotests on a GCE VM instance."""
 
   config_name = 'gce_tests'
+  category = constants.CI_INFRA_STAGE
 
   TEST_TIMEOUT = 90 * 60
 
@@ -365,6 +389,7 @@ class GCETestStage(VMTestStage):
             self._RunTest(gce_test, per_test_results_dir)
 
     except Exception:
+      # pylint: disable=logging-not-lazy
       logging.error(_ERROR_MSG % dict(test_name='GCETests',
                                       test_results=test_basename))
       raise
@@ -383,6 +408,7 @@ class MoblabVMTestStage(generic_stages.BoardSpecificBuilderStage,
 
   option_name = 'tests'
   config_name = 'moblab_vm_tests'
+  category = constants.TEST_INFRA_STAGE
 
   # This includes the time we expect to take to prepare and run the tests. It
   # excludes the time required to archive the results at the end.
@@ -402,6 +428,7 @@ class MoblabVMTestStage(generic_stages.BoardSpecificBuilderStage,
     try:
       self._PerformStage(work_dir, results_dir)
     except:
+      # pylint: disable=logging-not-lazy
       logging.error(_ERROR_MSG % dict(test_name='MoblabVMTest',
                                       test_results='directory'))
       raise
@@ -756,6 +783,63 @@ def RunTestSuite(buildroot, board, image_path, results_dir, test_config,
                  whitelist_chrome_crashes, archive_dir, ssh_private_key=None,
                  ssh_port=9228):
   """Runs the test harness suite."""
+  if (test_config.use_ctest or
+      test_config.test_type != constants.VM_SUITE_TEST_TYPE):
+    _RunTestSuiteUsingCtest(buildroot, board, image_path, results_dir,
+                            test_config, whitelist_chrome_crashes, archive_dir,
+                            ssh_private_key, ssh_port)
+  else:
+    _RunTestSuiteUsingChromite(board, image_path, results_dir, test_config,
+                               whitelist_chrome_crashes, ssh_private_key,
+                               ssh_port)
+
+
+# TODO(zamorzaev): absorb this function into RunTestSuite after deprecating
+# ctest.
+def _RunTestSuiteUsingChromite(board, image_path, results_dir, test_config,
+                               whitelist_chrome_crashes, ssh_private_key=None,
+                               ssh_port=9228):
+  """Runs the test harness suite using the chromite code path."""
+  image_dir = os.path.dirname(image_path)
+  vm_image_path = os.path.join(image_dir, constants.VM_IMAGE_BIN)
+
+  cmd = ['cros_run_vm_test',
+         '--debug',
+         '--board=%s' % board,
+         '--image-path=%s' % path_util.ToChrootPath(vm_image_path),
+         '--ssh-port=%s' % ssh_port,
+         '--autotest=suite:%s' % test_config.test_suite,
+         '--results-dir=%s' % results_dir,
+        ]
+
+  if whitelist_chrome_crashes:
+    cmd.append('--test_that-args=--whitelist-chrome-crashes')
+
+  if ssh_private_key is not None:
+    cmd.append('--private-key=%s' % path_util.ToChrootPath(ssh_private_key))
+
+  # Give tests 10 minutes to clean up before shutting down.
+  result = cros_build_lib.RunCommand(cmd,
+                                     error_code_ok=True,
+                                     kill_timeout=10 * 60,
+                                     enter_chroot=True)
+  if result.returncode:
+    results_dir_in_chroot = os.path.join(constants.SOURCE_ROOT,
+                                         constants.DEFAULT_CHROOT_DIR,
+                                         results_dir.lstrip('/'))
+    if os.path.exists(results_dir_in_chroot):
+      error = '%s exited with code %d' % (' '.join(cmd), result.returncode)
+      with open(results_dir_in_chroot + '/failed_test_command', 'w') as failed:
+        failed.write(error)
+
+    raise failures_lib.TestFailure(
+        '** VMTests failed with code %d **' % result.returncode)
+
+
+def _RunTestSuiteUsingCtest(buildroot, board, image_path, results_dir,
+                            test_config, whitelist_chrome_crashes, archive_dir,
+                            ssh_private_key=None, ssh_port=9228):
+  """Runs the test harness suite using the ctest code path."""
   results_dir_in_chroot = os.path.join(buildroot, 'chroot',
                                        results_dir.lstrip('/'))
   osutils.RmDir(results_dir_in_chroot, ignore_missing=True)

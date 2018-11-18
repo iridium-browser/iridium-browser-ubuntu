@@ -70,6 +70,8 @@ void VideoCaptureDeviceFactoryAndroid::GetDeviceDescriptors(
 
     const int capture_api_type =
         Java_VideoCaptureFactory_getCaptureApiType(env, camera_id);
+    const int facing_mode =
+        Java_VideoCaptureFactory_getFacingMode(env, camera_id);
     const std::string display_name =
         base::android::ConvertJavaStringToUTF8(device_name);
     const std::string device_id = base::IntToString(camera_id);
@@ -77,9 +79,20 @@ void VideoCaptureDeviceFactoryAndroid::GetDeviceDescriptors(
     // Android cameras are not typically USB devices, and the model_id is
     // currently only used for USB model identifiers, so this implementation
     // just indicates an unknown device model (by not providing one).
-    device_descriptors->emplace_back(
-        display_name, device_id,
-        static_cast<VideoCaptureApi>(capture_api_type));
+    VideoCaptureDeviceDescriptor descriptor(
+        display_name, device_id, "" /*model_id*/,
+        static_cast<VideoCaptureApi>(capture_api_type),
+        VideoCaptureTransportType::OTHER_TRANSPORT,
+        static_cast<VideoFacingMode>(facing_mode));
+
+    // We put user-facing devices to the front of the list in order to make
+    // them by-default preferred over environment-facing ones when no other
+    // constraints for device selection are given.
+    if (facing_mode == MEDIA_VIDEO_FACING_USER)
+      device_descriptors->insert(device_descriptors->begin(),
+                                 std::move(descriptor));
+    else
+      device_descriptors->emplace_back(std::move(descriptor));
 
     DVLOG(1) << __func__ << ": camera "
              << "device_name=" << display_name << ", unique_id=" << device_id;
@@ -139,16 +152,6 @@ bool VideoCaptureDeviceFactoryAndroid::IsLegacyOrDeprecatedDevice(
     return true;
   return (Java_VideoCaptureFactory_isLegacyOrDeprecatedDevice(
       AttachCurrentThread(), id));
-}
-
-// static
-VideoCaptureDeviceFactory*
-VideoCaptureDeviceFactory::CreateVideoCaptureDeviceFactory(
-    scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner,
-    gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
-    MojoJpegDecodeAcceleratorFactoryCB jda_factory,
-    MojoJpegEncodeAcceleratorFactoryCB jea_factory) {
-  return new VideoCaptureDeviceFactoryAndroid();
 }
 
 }  // namespace media

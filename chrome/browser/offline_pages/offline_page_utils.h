@@ -6,6 +6,8 @@
 #define CHROME_BROWSER_OFFLINE_PAGES_OFFLINE_PAGE_UTILS_H_
 
 #include <stdint.h>
+#include <string>
+#include <vector>
 
 #include "base/callback.h"
 #include "base/files/file_util.h"
@@ -58,18 +60,17 @@ class OfflinePageUtils {
   // Callback to inform the duplicate checking result.
   using DuplicateCheckCallback = base::Callback<void(DuplicateCheckResult)>;
 
-  // Returns via callback all offline pages related to |url|. The offline page
-  // captured from last visit in the tab will be excluded if its tab id does not
-  // match the provided |tab_id|. The returned list is sorted based creation
-  // date in descending order. That is, the most recently created offline will
-  // appear as the first element of the list.
+  // Returns via callback all offline pages related to |url|. The provided URL
+  // is matched both against the original and the actual URL fields (they
+  // sometimes differ because of possible redirects). If |tab_id| is provided
+  // with a valid ID, offline pages bound to that tab will also be included in
+  // the search. The returned list is sorted by descending creation date so that
+  // the most recent offline page will be the first element of the list.
   static void SelectPagesForURL(
       content::BrowserContext* browser_context,
       const GURL& url,
-      URLSearchMode url_search_mode,
       int tab_id,
-      const base::Callback<void(const std::vector<OfflinePageItem>&)>&
-          callback);
+      base::OnceCallback<void(const std::vector<OfflinePageItem>&)> callback);
 
   // Gets the offline page corresponding to the given web contents.  The
   // returned pointer is owned by the web_contents and may be deleted by user
@@ -151,7 +152,7 @@ class OfflinePageUtils {
   // means no callback should be expected.
   static bool GetCachedOfflinePageSizeBetween(
       content::BrowserContext* browser_context,
-      const SizeInBytesCallback& callback,
+      SizeInBytesCallback callback,
       const base::Time& begin_time,
       const base::Time& end_time);
 
@@ -169,7 +170,7 @@ class OfflinePageUtils {
   // to inform if the file access permission is granted.
   static void AcquireFileAccessPermission(
       content::WebContents* web_contents,
-      const base::Callback<void(bool)>& callback);
+      base::OnceCallback<void(bool)> callback);
 };
 
 }  // namespace offline_pages

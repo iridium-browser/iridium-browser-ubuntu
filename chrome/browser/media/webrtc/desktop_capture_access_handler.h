@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_MEDIA_WEBRTC_DESKTOP_CAPTURE_ACCESS_HANDLER_H_
 
 #include <list>
+#include <utility>
 
 #include "chrome/browser/media/capture_access_handler_base.h"
 #include "chrome/browser/media/media_access_handler.h"
@@ -14,7 +15,9 @@ namespace extensions {
 class Extension;
 }
 
-// MediaAccessHandler for DesktopCapture API.
+// MediaAccessHandler for DesktopCapture API requests that originate from
+// getUserMedia() calls. Note that getDisplayMedia() calls are handled in
+// DisplayMediaAccessHandler.
 class DesktopCaptureAccessHandler : public CaptureAccessHandlerBase {
  public:
   DesktopCaptureAccessHandler();
@@ -31,14 +34,14 @@ class DesktopCaptureAccessHandler : public CaptureAccessHandlerBase {
       const extensions::Extension* extension) override;
   void HandleRequest(content::WebContents* web_contents,
                      const content::MediaStreamRequest& request,
-                     const content::MediaResponseCallback& callback,
+                     content::MediaResponseCallback callback,
                      const extensions::Extension* extension) override;
 
  private:
   void ProcessScreenCaptureAccessRequest(
       content::WebContents* web_contents,
       const content::MediaStreamRequest& request,
-      const content::MediaResponseCallback& callback,
+      content::MediaResponseCallback callback,
       const extensions::Extension* extension);
 
   // Returns whether desktop capture is always approved for |extension|.

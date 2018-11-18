@@ -44,7 +44,7 @@ TextEditor.CodeMirrorTextEditor = class extends UI.VBox {
 
     TextEditor.CodeMirrorUtils.appendThemeStyle(this.element);
 
-    this._codeMirror = new window.CodeMirror(this.element, {
+    this._codeMirror = new CodeMirror(this.element, {
       lineNumbers: options.lineNumbers,
       matchBrackets: true,
       smartIndent: true,
@@ -54,7 +54,9 @@ TextEditor.CodeMirrorTextEditor = class extends UI.VBox {
       indentUnit: 4,
       lineWrapping: options.lineWrapping,
       lineWiseCopyCut: false,
-      tabIndex: 0
+      tabIndex: 0,
+      pollInterval: Math.pow(2, 31) - 1,  // ~25 days
+      inputStyle: 'devToolsAccessibleTextArea'
     });
     this._codeMirrorElement = this.element.lastElementChild;
 
@@ -72,7 +74,7 @@ TextEditor.CodeMirrorTextEditor = class extends UI.VBox {
       'Delete': 'delCharAfter',
       'Backspace': 'delCharBefore',
       'Tab': 'defaultTab',
-      'Shift-Tab': 'indentLess',
+      'Shift-Tab': 'indentLessOrPass',
       'Enter': 'newlineAndIndent',
       'Ctrl-Space': 'autocomplete',
       'Esc': 'dismiss',
@@ -636,14 +638,18 @@ TextEditor.CodeMirrorTextEditor = class extends UI.VBox {
   }
 
   /**
+   * @param {number} generation
    * @return {boolean}
    */
-  isClean() {
-    return this._codeMirror.isClean();
+  isClean(generation) {
+    return this._codeMirror.isClean(generation);
   }
 
+  /**
+   * @return {number}
+   */
   markClean() {
-    this._codeMirror.markClean();
+    return this._codeMirror.changeGeneration(true);
   }
 
   /**
@@ -1163,15 +1169,16 @@ TextEditor.CodeMirrorTextEditor = class extends UI.VBox {
   /**
    * @override
    * @param {!TextUtils.TextRange} textRange
+   * @param {boolean=} dontScroll
    */
-  setSelection(textRange) {
+  setSelection(textRange, dontScroll) {
     this._lastSelection = textRange;
     if (!this._editorSizeInSync) {
       this._selectionSetScheduled = true;
       return;
     }
     const pos = TextEditor.CodeMirrorUtils.toPos(textRange);
-    this._codeMirror.setSelection(pos.start, pos.end);
+    this._codeMirror.setSelection(pos.start, pos.end, {scroll: !dontScroll});
   }
 
   /**
@@ -1215,6 +1222,9 @@ TextEditor.CodeMirrorTextEditor = class extends UI.VBox {
       this._enableLongLinesMode();
     else
       this._disableLongLinesMode();
+
+    if (!this.isShowing())
+      this.refresh();
   }
 
   /**
@@ -1227,6 +1237,16 @@ TextEditor.CodeMirrorTextEditor = class extends UI.VBox {
       return this._codeMirror.getValue(this._lineSeparator);
     const pos = TextEditor.CodeMirrorUtils.toPos(textRange.normalize());
     return this._codeMirror.getRange(pos.start, pos.end, this._lineSeparator);
+  }
+
+  /**
+   * @override
+   * @return {string}
+   */
+  textWithCurrentSuggestion() {
+    if (!this._autocompleteController)
+      return this.text();
+    return this._autocompleteController.textWithCurrentSuggestion();
   }
 
   /**
@@ -1306,6 +1326,20 @@ CodeMirror.commands.selectCamelRight = TextEditor.CodeMirrorTextEditor.moveCamel
 
 /**
  * @param {!CodeMirror} codeMirror
+ * @return {!Object|undefined}
+ */
+CodeMirror.commands.indentLessOrPass = function(codeMirror) {
+  const selections = codeMirror.listSelections();
+  if (selections.length === 1) {
+    const range = TextEditor.CodeMirrorUtils.toRange(selections[0].anchor, selections[0].head);
+    if (range.isEmpty() && !/^\s/.test(codeMirror.getLine(range.startLine)))
+      return CodeMirror.Pass;
+  }
+  codeMirror.execCommand('indentLess');
+};
+
+/**
+ * @param {!CodeMirror} codeMirror
  */
 CodeMirror.commands.gotoMatchingBracket = function(codeMirror) {
   const updatedSelections = [];
@@ -1351,6 +1385,7 @@ CodeMirror.commands.redoAndReveal = function(codemirror) {
 };
 
 /**
+ * @param {!CodeMirror} codemirror
  * @return {!Object|undefined}
  */
 CodeMirror.commands.dismiss = function(codemirror) {
@@ -1369,6 +1404,7 @@ CodeMirror.commands.dismiss = function(codemirror) {
 };
 
 /**
+ * @param {!CodeMirror} codemirror
  * @return {!Object|undefined}
  */
 CodeMirror.commands.goSmartPageUp = function(codemirror) {
@@ -1378,6 +1414,7 @@ CodeMirror.commands.goSmartPageUp = function(codemirror) {
 };
 
 /**
+ * @param {!CodeMirror} codemirror
  * @return {!Object|undefined}
  */
 CodeMirror.commands.goSmartPageDown = function(codemirror) {
@@ -1672,5 +1709,95 @@ TextEditor.CodeMirrorTextEditorFactory = class {
    */
   createEditor(options) {
     return new TextEditor.CodeMirrorTextEditor(options);
+  }
+};
+
+// CodeMirror uses an offscreen <textarea> to detect input. Due to inconsistencies in the many browsers it supports,
+// it simplifies things by regularly checking if something is in the textarea, adding those characters to the document,
+// and then clearing the textarea. This breaks assistive technology that wants to read from CodeMirror, because the
+// <textarea> that they interact with is constantly empty.
+// Because we target up-to-date Chrome, we can gaurantee consistent input events. This lets us leave the current
+// line from the editor in our <textarea>. CodeMirror still expects a mostly empty <textarea>, so we pass CodeMirror a
+// fake <textarea> that only contains the users input.
+CodeMirror.inputStyles.devToolsAccessibleTextArea = class extends CodeMirror.inputStyles.textarea {
+  /**
+   * @override
+   * @param {!Object} display
+   */
+  init(display) {
+    super.init(display);
+    UI.ARIAUtils.setAccessibleName(this.textarea, ls`Code editor`);
+    this.textarea.addEventListener('compositionstart', this._onCompositionStart.bind(this));
+  }
+
+  _onCompositionStart() {
+    if (this.textarea.selectionEnd === this.textarea.value.length)
+      return;
+    // CodeMirror always expects the caret to be at the end of the textarea
+    // When in IME composition mode, clip the textarea to how CodeMirror expects it,
+    // and then let CodeMirror do it's thing.
+    this.textarea.value = this.textarea.value.substring(0, this.textarea.selectionEnd);
+    this.textarea.setSelectionRange(this.textarea.value.length, this.textarea.value.length);
+    this.prevInput = this.textarea.value;
+  }
+
+  /**
+   * @override
+   * @param {boolean=} typing
+   */
+  reset(typing) {
+    if (typing || this.contextMenuPending || this.composing || this.cm.somethingSelected()) {
+      super.reset(typing);
+      return;
+    }
+
+    // When navigating around the document, keep the current visual line in the textarea.
+    const cursor = this.cm.getCursor();
+    let start, end;
+    if (this.cm.options.lineWrapping) {
+      // To get the visual line, compute the leftmost and rightmost character positions.
+      const top = this.cm.charCoords(cursor, 'page').top;
+      start = this.cm.coordsChar({left: -Infinity, top});
+      end = this.cm.coordsChar({left: Infinity, top});
+    } else {
+      // Limit the line to 1000 characters to prevent lag.
+      const offset = Math.floor(cursor.ch / 1000) * 1000;
+      start = {ch: offset, line: cursor.line};
+      end = {ch: offset + 1000, line: cursor.line};
+    }
+    this.textarea.value = this.cm.getRange(start, end);
+    const caretPosition = cursor.ch - start.ch;
+    this.textarea.setSelectionRange(caretPosition, caretPosition);
+    this.prevInput = this.textarea.value;
+  }
+
+  /**
+   * @override
+   * @return {boolean}
+   */
+  poll() {
+    if (this.contextMenuPending || this.composing)
+      return super.poll();
+    const text = this.textarea.value;
+    let start = 0;
+    const length = Math.min(this.prevInput.length, text.length);
+    while (start < length && this.prevInput[start] === text[start])
+      ++start;
+    let end = 0;
+    while (end < length - start && this.prevInput[this.prevInput.length - end - 1] === text[text.length - end - 1])
+      ++end;
+
+    // CodeMirror expects the user to be typing into a blank <textarea>.
+    // Pass a fake textarea into super.poll that only contains the users input.
+    /** @type {!HTMLTextAreaElement} */
+    const placeholder = this.textarea;
+    this.textarea = /** @type {!HTMLTextAreaElement} */ (createElement('textarea'));
+    this.textarea.value = text.substring(start, text.length - end);
+    this.textarea.setSelectionRange(placeholder.selectionStart - start, placeholder.selectionEnd - start);
+    this.prevInput = '';
+    const result = super.poll();
+    this.prevInput = text;
+    this.textarea = placeholder;
+    return result;
   }
 };

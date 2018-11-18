@@ -16,6 +16,8 @@
 #include "base/i18n/case_conversion.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
+#include "base/stl_util.h"
+#include "base/strings/strcat.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -103,7 +105,7 @@ ShortcutsProvider::ShortcutsProvider(AutocompleteProviderClient* client)
       client_(client),
       initialized_(false) {
   scoped_refptr<ShortcutsBackend> backend = client_->GetShortcutsBackend();
-  if (backend.get()) {
+  if (backend) {
     backend->AddObserver(this);
     if (backend->initialized())
       initialized_ = true;
@@ -141,12 +143,10 @@ void ShortcutsProvider::DeleteMatch(const AutocompleteMatch& match) {
   // out of history entirely. So nuke all shortcuts that map to this URL.
   scoped_refptr<ShortcutsBackend> backend =
       client_->GetShortcutsBackendIfExists();
-  if (backend.get())  // Can be NULL in Incognito.
+  if (backend)  // Can be NULL in Incognito.
     backend->DeleteShortcutsWithURL(url);
 
-  matches_.erase(std::remove_if(matches_.begin(), matches_.end(),
-                                DestinationURLEqualsURL(url)),
-                 matches_.end());
+  base::EraseIf(matches_, DestinationURLEqualsURL(url));
   // NOTE: |match| is now dead!
 
   // Delete the match from the history DB. This will eventually result in a
@@ -159,7 +159,7 @@ void ShortcutsProvider::DeleteMatch(const AutocompleteMatch& match) {
 ShortcutsProvider::~ShortcutsProvider() {
   scoped_refptr<ShortcutsBackend> backend =
       client_->GetShortcutsBackendIfExists();
-  if (backend.get())
+  if (backend)
     backend->RemoveObserver(this);
 }
 
@@ -251,7 +251,7 @@ ACMatchClassifications ShortcutsProvider::ClassifyAllMatchesInString(
     std::pair<WordMap::const_iterator, WordMap::const_iterator> range(
         find_words.equal_range(text_lowercase[last_position]));
     size_t next_character = last_position + 1;
-    for (WordMap::const_iterator i(range.first); i != range.second; ++i) {
+    for (auto i(range.first); i != range.second; ++i) {
       const base::string16& word = i->second;
       size_t word_end = last_position + word.length();
       if ((word_end <= text_lowercase.length()) &&
@@ -283,7 +283,7 @@ void ShortcutsProvider::OnShortcutsLoaded() {
 void ShortcutsProvider::GetMatches(const AutocompleteInput& input) {
   scoped_refptr<ShortcutsBackend> backend =
       client_->GetShortcutsBackendIfExists();
-  if (!backend.get())
+  if (!backend)
     return;
   // Get the URLs from the shortcuts database with keys that partially or
   // completely match the search term.
@@ -298,11 +298,9 @@ void ShortcutsProvider::GetMatches(const AutocompleteInput& input) {
   const base::string16 fixed_up_input(FixupUserInput(input).second);
 
   std::vector<ShortcutMatch> shortcut_matches;
-  for (ShortcutsBackend::ShortcutMap::const_iterator it =
-           FindFirstMatch(term_string, backend.get());
+  for (auto it = FindFirstMatch(term_string, backend.get());
        it != backend->shortcuts_map().end() &&
-           base::StartsWith(it->first, term_string,
-                            base::CompareCase::SENSITIVE);
+       base::StartsWith(it->first, term_string, base::CompareCase::SENSITIVE);
        ++it) {
     // Don't return shortcuts with zero relevance.
     int relevance = CalculateScore(term_string, it->second, max_relevance);
@@ -391,41 +389,56 @@ AutocompleteMatch ShortcutsProvider::ShortcutToACMatch(
                              base::UTF16ToUTF8(shortcut.text));
 
   // Set |inline_autocompletion| and |allowed_to_be_default_match| if possible.
-  // If the match is a search query this is easy: simply check whether the
-  // user text is a prefix of the query.  If the match is a navigation, we
-  // assume the fill_into_edit looks something like a URL, so we use
-  // URLPrefix::GetInlineAutocompleteOffset() to try and strip off any prefixes
-  // that the user might not think would change the meaning, but would
-  // otherwise prevent inline autocompletion.  This allows, for example, the
-  // input of "foo.c" to autocomplete to "foo.com" for a fill_into_edit of
-  // "http://foo.com".
+  // If the input is in keyword mode, navigation matches cannot be the default
+  // match, and search query matches can only be the default match if their
+  // keywords matches the input's keyword, as otherwise, default,
+  // different-keyword matches may result in leaving keyword mode. Additionally,
+  // if the match is a search query, check whether the user text is a prefix of
+  // the query. If the match is a navigation, we assume the fill_into_edit looks
+  // something like a URL, so we use URLPrefix::GetInlineAutocompleteOffset() to
+  // try and strip off any prefixes that the user might not think would change
+  // the meaning, but would otherwise prevent inline autocompletion. This
+  // allows, for example, the input of "foo.c" to autocomplete to "foo.com" for
+  // a fill_into_edit of "http://foo.com".
   const bool is_search_type = AutocompleteMatch::IsSearchType(match.type);
-  if (is_search_type) {
-    if (match.fill_into_edit.size() >= input.text().size() &&
-        std::equal(match.fill_into_edit.begin(),
-                   match.fill_into_edit.begin() + input.text().size(),
-                   input.text().begin(),
-                   SimpleCaseInsensitiveCompareUCS2())) {
-      match.inline_autocompletion =
-          match.fill_into_edit.substr(input.text().length());
-      match.allowed_to_be_default_match =
-          !input.prevent_inline_autocomplete() ||
-          match.inline_autocompletion.empty();
-    }
-  } else {
-    const size_t inline_autocomplete_offset =
-        URLPrefix::GetInlineAutocompleteOffset(
-            input.text(), fixed_up_input_text, true, match.fill_into_edit);
-    if (inline_autocomplete_offset != base::string16::npos) {
-      match.inline_autocompletion =
-          match.fill_into_edit.substr(inline_autocomplete_offset);
-      match.allowed_to_be_default_match =
-          !HistoryProvider::PreventInlineAutocomplete(input) ||
-          match.inline_autocompletion.empty();
+
+  DCHECK(is_search_type != match.keyword.empty());
+
+  // True if input is in keyword mode and the match is a URL suggestion or the
+  // match has a different keyword.
+  bool would_cause_leaving_keyboard_mode =
+      input.prefer_keyword() &&
+      (!is_search_type ||
+       !base::StartsWith(base::UTF16ToUTF8(input.text()),
+                         base::StrCat({base::UTF16ToUTF8(match.keyword), " "}),
+                         base::CompareCase::INSENSITIVE_ASCII));
+
+  if (!would_cause_leaving_keyboard_mode) {
+    if (is_search_type) {
+      if (match.fill_into_edit.size() >= input.text().size() &&
+          std::equal(match.fill_into_edit.begin(),
+                     match.fill_into_edit.begin() + input.text().size(),
+                     input.text().begin(),
+                     SimpleCaseInsensitiveCompareUCS2())) {
+        match.inline_autocompletion =
+            match.fill_into_edit.substr(input.text().length());
+        match.allowed_to_be_default_match =
+            !input.prevent_inline_autocomplete() ||
+            match.inline_autocompletion.empty();
+      }
+    } else {
+      const size_t inline_autocomplete_offset =
+          URLPrefix::GetInlineAutocompleteOffset(
+              input.text(), fixed_up_input_text, true, match.fill_into_edit);
+      if (inline_autocomplete_offset != base::string16::npos) {
+        match.inline_autocompletion =
+            match.fill_into_edit.substr(inline_autocomplete_offset);
+        match.allowed_to_be_default_match =
+            !HistoryProvider::PreventInlineAutocomplete(input) ||
+            match.inline_autocompletion.empty();
+      }
     }
   }
-
-  match.EnsureUWYTIsAllowedToBeDefault(input, client_->GetTemplateURLService());
 
   // Try to mark pieces of the contents and description as matches if they
   // appear in |input.text()|.
@@ -444,8 +457,7 @@ ShortcutsBackend::ShortcutMap::const_iterator ShortcutsProvider::FindFirstMatch(
     const base::string16& keyword,
     ShortcutsBackend* backend) {
   DCHECK(backend);
-  ShortcutsBackend::ShortcutMap::const_iterator it =
-      backend->shortcuts_map().lower_bound(keyword);
+  auto it = backend->shortcuts_map().lower_bound(keyword);
   // Lower bound not necessarily matches the keyword, check for item pointed by
   // the lower bound iterator to at least start with keyword.
   return ((it == backend->shortcuts_map().end()) ||

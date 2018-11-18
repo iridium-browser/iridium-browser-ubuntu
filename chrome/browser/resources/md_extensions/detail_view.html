@@ -4,22 +4,24 @@
 <link rel="import" href="chrome://resources/cr_elements/cr_icons_css.html">
 <link rel="import" href="chrome://resources/cr_elements/cr_link_row/cr_link_row.html">
 <link rel="import" href="chrome://resources/cr_elements/cr_toggle/cr_toggle.html">
-<link rel="import" href="chrome://resources/cr_elements/shared_style_css.html">
+<link rel="import" href="chrome://resources/cr_elements/icons.html">
 <link rel="import" href="chrome://resources/cr_elements/paper_button_style_css.html">
 <link rel="import" href="chrome://resources/cr_elements/policy/cr_tooltip_icon.html">
+<link rel="import" href="chrome://resources/cr_elements/shared_style_css.html">
+<link rel="import" href="chrome://resources/cr_elements/shared_vars_css.html">
 <link rel="import" href="chrome://resources/html/action_link.html">
 <link rel="import" href="chrome://resources/html/action_link_css.html">
 <link rel="import" href="chrome://resources/html/cr.html">
+<link rel="import" href="chrome://resources/html/cr/ui/focus_without_ink.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/iron-flex-layout/iron-flex-layout-classes.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/iron-icon/iron-icon.html">
-<link rel="import" href="chrome://resources/polymer/v1_0/iron-icons/iron-icons.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-icon-button/paper-icon-button-light.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-spinner/paper-spinner-lite.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-styles/color.html">
-<link rel="import" href="chrome://resources/polymer/v1_0/paper-styles/shadow.html">
 <link rel="import" href="item_behavior.html">
 <link rel="import" href="item_util.html">
 <link rel="import" href="navigation_helper.html">
+<link rel="import" href="runtime_host_permissions.html">
 <link rel="import" href="strings.html">
 <link rel="import" href="toggle_row.html">
 
@@ -27,7 +29,7 @@
   <template>
     <style include="iron-flex cr-shared-style cr-icons action-link paper-button-style">
       :host {
-        --iron-icon-fill-color: var(--paper-grey-600);
+        --iron-icon-fill-color: var(--google-grey-refresh-700);
         display: block;
         height: 100%;
       }
@@ -37,11 +39,11 @@
       }
 
       #enable-section cr-tooltip-icon {
-        -webkit-margin-end: 20px;
+        margin-inline-end: 20px;
       }
 
       #enable-section span {
-        color: var(--paper-grey-600);
+        color: var(--cr-secondary-text-color);
         font-weight: 500;
       }
 
@@ -55,7 +57,7 @@
       }
 
       #main {
-        @apply --shadow-elevation-2dp;
+        @apply --cr-card-elevation;
         background-color: white;
         margin: auto;
         min-height: 100%;
@@ -72,9 +74,9 @@
       }
 
       #icon {
-        -webkit-margin-end: 12px;
-        -webkit-margin-start: 16px;
         height: 24px;
+        margin-inline-end: 12px;
+        margin-inline-start: 16px;
         width: 24px;
       }
 
@@ -119,7 +121,7 @@
       }
 
       .section-content {
-        color: var(--paper-grey-600);
+        color: var(--cr-secondary-text-color);
       }
 
       .actionable {
@@ -148,15 +150,15 @@
 
       .warning-icon {
         --iron-icon-fill-color: var(--google-red-700);
-        -webkit-margin-end: 8px;
         flex-shrink: 0;
         height: 18px;
+        margin-inline-end: 8px;
         width: 18px;
       }
 
       ul {
-        -webkit-padding-start: 20px;
         margin: 0;
+        padding-inline-start: 20px;
       }
 
       #options-section .control-line:first-child {
@@ -184,7 +186,7 @@
       <div id="main">
         <div id="top-bar">
           <paper-icon-button-light class="icon-arrow-back no-overlap">
-            <button id="close-button" aria-label="$i18n{back}"
+            <button id="closeButton" aria-label="$i18n{back}"
                 on-click="onCloseButtonTap_"></button>
           </paper-icon-button-light>
           <img id="icon" src="[[data.iconUrl]]"
@@ -221,7 +223,7 @@
           <div id="runtime-warnings" aria-describedby="a11yAssociation"
               hidden$="[[!data.runtimeWarnings.length]]"
               class="section continuation warning control-line">
-            <iron-icon class="warning-icon" icon="error"></iron-icon>
+            <iron-icon class="warning-icon" icon="cr:error"></iron-icon>
             <span>
               <template is="dom-repeat" items="[[data.runtimeWarnings]]">
                 [[item]]
@@ -309,11 +311,13 @@
         <div class="section block">
           <div class="section-title">$i18n{itemPermissions}</div>
           <div class="section-content">
-            <span id="no-permissions" hidden="[[data.permissions.length]]">
+            <span id="no-permissions" hidden$="[[hasPermissions_(data.*)]]">
               $i18n{itemPermissionsEmpty}
             </span>
-            <ul id="permissions-list" hidden="[[!data.permissions.length]]">
-              <template is="dom-repeat" items="[[data.permissions]]">
+            <ul id="permissions-list"
+                hidden$="[[!data.permissions.simplePermissions.length]]">
+              <template is="dom-repeat"
+                  items="[[data.permissions.simplePermissions]]">
                 <li>
                   [[item.message]]
                   <ul hidden="[[!item.submessages.length]]">
@@ -324,6 +328,13 @@
                 </li>
               </template>
             </ul>
+            <template is="dom-if" if="[[showRuntimeHostPermissions_(data.*)]]">
+              <extensions-runtime-host-permissions
+                  permissions="[[data.permissions]]"
+                  delegate="[[delegate]]"
+                  item-id="[[data.id]]">
+              </extensions-runtime-host-permissions>
+            </template>
           </div>
         </div>
         <template is="dom-if"
@@ -358,13 +369,6 @@
                   checked="[[data.fileAccess.isActive]]"
                   on-change="onAllowOnFileUrlsChange_">
                 <span>$i18n{itemAllowOnFileUrls}</span>
-              </extensions-toggle-row>
-            </template>
-            <template is="dom-if" if="[[data.runOnAllUrls.isEnabled]]">
-              <extensions-toggle-row id="allow-on-all-sites"
-                  checked="[[data.runOnAllUrls.isActive]]"
-                  on-change="onAllowOnAllSitesChange_">
-                <span>$i18n{itemAllowOnAllSites}</span>
               </extensions-toggle-row>
             </template>
             <template is="dom-if" if="[[data.errorCollection.isEnabled]]">

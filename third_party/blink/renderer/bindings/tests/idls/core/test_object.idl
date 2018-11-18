@@ -80,7 +80,7 @@ interface TestObject {
     attribute long svgAttribute;
     attribute long xmlAttribute;
     // Non-wrapper types
-    attribute NodeFilter nodeFilterAttribute;
+    readonly attribute NodeFilter nodeFilterAttribute;
     attribute SerializedScriptValue serializedScriptValueAttribute;
     attribute any anyAttribute;
     // Custom type conversions
@@ -168,7 +168,6 @@ interface TestObject {
     [PutForwards=hrefByteString] readonly attribute TestNode locationByteString;
     [PerWorldBindings, PutForwards=href] readonly attribute TestNode locationWithPerWorldBindings;
     [PutForwards=href, LegacyInterfaceTypeChecking] readonly attribute TestNode locationLegacyInterfaceTypeChecking;
-    [PutForwards=attr1] readonly attribute TestInterfaceGarbageCollected locationGarbageCollected;
     [RaisesException] attribute long raisesExceptionLongAttribute;
     [RaisesException=Getter] attribute long raisesExceptionGetterLongAttribute;
     [RaisesException=Setter] attribute long setterRaisesExceptionLongAttribute;
@@ -317,10 +316,8 @@ interface TestObject {
     TestInterface? nullableTestInterfaceMethod();
     sequence<long>? nullableLongSequenceMethod();
     // Union types
-    (TestInterfaceGarbageCollected or DOMString) testInterfaceGarbageCollectedOrDOMStringMethod();
     (boolean or DOMString or unrestricted double) booleanOrDOMStringOrUnrestrictedDoubleMethod();
     (TestInterface or long) testInterfaceOrLongMethod();
-    static (TestInterfaceGarbageCollected or DOMString) staticTestInterfaceGarbageCollectedOrDOMStringMethod();
     void voidMethodDoubleOrDOMStringArg((double or DOMString) arg);
     void voidMethodDoubleOrDOMStringOrNullArg((double or DOMString)? arg);
     void voidMethodDoubleOrNullOrDOMStringArg((double? or DOMString) arg);
@@ -400,7 +397,6 @@ interface TestObject {
     void voidMethodStringArgVariadicStringArg(DOMString stringArg, DOMString... variadicStringArgs);
     void voidMethodVariadicTestInterfaceEmptyArg(TestInterfaceEmpty... variadicTestInterfaceEmptyArgs);
     void voidMethodTestInterfaceEmptyArgVariadicTestInterfaceEmptyArg(TestInterfaceEmpty testInterfaceEmptyArg, TestInterfaceEmpty... variadicTestInterfaceEmptyArgs);
-    void voidMethodVariadicTestInterfaceGarbageCollectedArg(TestInterfaceGarbageCollected... variadicTestInterfaceGarbageCollectedArg);
 
     // Overloaded methods
     void overloadedMethodA(long longArg);
@@ -423,7 +419,7 @@ interface TestObject {
     void overloadedMethodI(double doubleArg);
     void overloadedMethodJ(DOMString stringArg);
     void overloadedMethodJ(TestDictionary testDictionaryArg);
-    void overloadedMethodK(Function functionArg);
+    void overloadedMethodK(CallbackFunctionTreatedAsScriptValue functionArg);
     void overloadedMethodK(DOMString stringArg);
     void overloadedMethodL(long longArg, any... restArgs);
     void overloadedMethodL(DOMString stringArg, any... restArgs);
@@ -517,7 +513,6 @@ interface TestObject {
     // [OriginTrialEnabled=FeatureName3] void partiallyOriginTrialEnabledOverloadedVoidMethod(long longArg, DOMString stringArg, TestInterface testInterfaceArg);
     [PerWorldBindings] void perWorldBindingsVoidMethod();
     [PerWorldBindings] void perWorldBindingsVoidMethodTestInterfaceEmptyArg(TestInterfaceEmpty testInterfaceEmptyArg);
-    [PostMessage, RaisesException] void postMessage(SerializedScriptValue message, optional sequence<object> transfer);
     [LogActivity, LogAllWorlds, PerWorldBindings] void activityLoggingForAllWorldsPerWorldBindingsVoidMethod();
     [LogActivity, PerWorldBindings] void activityLoggingForIsolatedWorldsPerWorldBindingsVoidMethod();
     [RaisesException] void raisesExceptionVoidMethod();
@@ -543,7 +538,6 @@ interface TestObject {
     void useToImpl4ArgumentsCheckingIfPossibleWithNullableArg(Node node1, Node? node2);
     void useToImpl4ArgumentsCheckingIfPossibleWithUndefinedArg(Node node1, [Default=Undefined] optional Node node2);
     [Unforgeable] void unforgeableVoidMethod();
-    void voidMethodTestInterfaceGarbageCollectedSequenceArg(sequence<TestInterfaceGarbageCollected> testInterfaceGarbageCollectedSequenceArg);
     [NewObject] TestInterface newObjectTestInterfaceMethod();
     [NewObject] Promise<TestInterface> newObjectTestInterfacePromiseMethod();
     [RuntimeCallStatsCounter=RuntimeCallStatsCounterMethod] void RuntimeCallStatsCounterMethod();
@@ -553,8 +547,6 @@ interface TestObject {
     // Extended attributes on referenced interfaces
     // (not self; self-reference tests at interface themselves)
     attribute TestInterface testInterfaceAttribute; // [ImplementedAs]
-    attribute TestInterfaceGarbageCollected testInterfaceGarbageCollectedAttribute; // [GarbageCollected]
-    attribute TestInterfaceGarbageCollected? testInterfaceGarbageCollectedOrNullAttribute; // [GarbageCollected]
 
     maplike<[EnforceRange] long, DOMStringOrDouble>;
     [RuntimeEnabled=FeatureName, CallWith=ScriptState, RaisesException, ImplementedAs=myMaplikeClear] boolean clear();

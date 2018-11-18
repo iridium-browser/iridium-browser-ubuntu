@@ -27,6 +27,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_SCROLL_SCROLL_TYPES_H_
 
 #include "third_party/blink/public/platform/web_gesture_event.h"
+#include "third_party/blink/public/platform/web_scroll_types.h"
 #include "third_party/blink/renderer/platform/geometry/float_point.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
 
@@ -52,17 +53,8 @@ enum OverlayScrollbarClipBehavior {
   kExcludeOverlayScrollbarSizeForHitTesting
 };
 
-enum ScrollDirection {
-  kScrollUpIgnoringWritingMode,
-  kScrollDownIgnoringWritingMode,
-  kScrollLeftIgnoringWritingMode,
-  kScrollRightIgnoringWritingMode,
-
-  kScrollBlockDirectionBackward,
-  kScrollBlockDirectionForward,
-  kScrollInlineDirectionBackward,
-  kScrollInlineDirectionForward
-};
+using ScrollDirection = WebScrollDirection;
+using ScrollGranularity = WebScrollGranularity;
 
 enum ScrollDirectionPhysical {
   kScrollUp,
@@ -169,14 +161,6 @@ inline ScrollDirection ToScrollDirection(ScrollDirectionPhysical direction) {
   return kScrollUpIgnoringWritingMode;
 }
 
-enum ScrollGranularity {
-  kScrollByLine,
-  kScrollByPage,
-  kScrollByDocument,
-  kScrollByPixel,
-  kScrollByPrecisePixel
-};
-
 enum ScrollInertialPhase {
   kScrollInertialPhaseUnknown,
   kScrollInertialPhaseNonMomentum,
@@ -229,6 +213,8 @@ enum ScrollBehavior {
 // by scrolling.
 struct ScrollResult {
   STACK_ALLOCATED();
+
+ public:
   explicit ScrollResult()
       : did_scroll_x(false),
         did_scroll_y(false),
@@ -280,16 +266,6 @@ inline ScrollGranularity ToPlatformScrollGranularity(
       NOTREACHED();
       return ScrollGranularity::kScrollByPrecisePixel;
   }
-}
-
-inline ScrollOffset ScrollPositionToOffset(FloatPoint position,
-                                           FloatPoint origin) {
-  return position - origin;
-}
-
-inline FloatPoint ScrollOffsetToPosition(ScrollOffset offset,
-                                         FloatPoint origin) {
-  return origin + offset;
 }
 
 typedef unsigned ScrollbarControlPartMask;

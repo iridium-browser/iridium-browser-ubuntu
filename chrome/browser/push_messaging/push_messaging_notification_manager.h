@@ -12,14 +12,18 @@
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "chrome/browser/push_messaging/budget_database.h"
 
 class GURL;
 class Profile;
 
 namespace content {
 struct NotificationDatabaseData;
-struct PlatformNotificationData;
 class WebContents;
+}
+
+namespace blink {
+struct PlatformNotificationData;
 }
 
 // Developers may be required to display a Web Notification in response to an
@@ -81,20 +85,22 @@ class PushMessagingNotificationManager {
   static void DidWriteNotificationDataIOProxy(
       const base::WeakPtr<PushMessagingNotificationManager>& ui_weak_ptr,
       const GURL& origin,
-      const content::PlatformNotificationData& notification_data,
+      const blink::PlatformNotificationData& notification_data,
       const base::Closure& message_handled_closure,
       bool success,
       const std::string& notification_id);
 
   void DidWriteNotificationData(
       const GURL& origin,
-      const content::PlatformNotificationData& notification_data,
+      const blink::PlatformNotificationData& notification_data,
       const base::Closure& message_handled_closure,
       bool success,
       const std::string& notification_id);
 
   // Weak. This manager is owned by a keyed service on this profile.
   Profile* profile_;
+
+  BudgetDatabase budget_database_;
 
   base::WeakPtrFactory<PushMessagingNotificationManager> weak_factory_;
 

@@ -7,7 +7,7 @@
 
 namespace switches {
 
-// Delays execution of base::TaskPriority::BACKGROUND tasks until shutdown.
+// Delays execution of base::TaskPriority::BEST_EFFORT tasks until shutdown.
 const char kDisableBackgroundTasks[] = "disable-background-tasks";
 
 // Disables the crash reporting.
@@ -23,25 +23,6 @@ const char kEnableCrashReporter[]           = "enable-crash-reporter";
 
 // Comma-separated list of feature names to enable. See also kDisableFeatures.
 const char kEnableFeatures[] = "enable-features";
-
-// Makes memory allocators keep track of their allocations and context, so a
-// detailed breakdown of memory usage can be presented in chrome://tracing when
-// the memory-infra category is enabled.
-const char kEnableHeapProfiling[]           = "enable-heap-profiling";
-
-// Report pseudo allocation traces. Pseudo traces are derived from currently
-// active trace events.
-const char kEnableHeapProfilingModePseudo[] = "";
-
-// Report native (walk the stack) allocation traces. By default pseudo stacks
-// derived from trace events are reported.
-const char kEnableHeapProfilingModeNative[] = "native";
-
-// Report per-task heap usage and churn in the task profiler.
-// Does not keep track of individual allocations unlike the default and native
-// mode. Keeps only track of summarized churn stats in the task profiler
-// (chrome://profiler).
-const char kEnableHeapProfilingTaskProfiler[] = "task-profiler";
 
 // Generates full memory crash dump.
 const char kFullMemoryCrashReport[]         = "full-memory-crash-report";
@@ -135,12 +116,6 @@ const char kEnableCrashReporterForTesting[] =
 // given in base/android/library_loader/anchor_functions.h, via madvise and
 // changing the library prefetch behavior.
 const char kOrderfileMemoryOptimization[] = "orderfile-memory-optimization";
-// Force prefetching of the native library even if otherwise disabled, eg by
-// --orderfile-memory-optimization.
-const char kForceNativePrefetch[] = "force-native-prefetch";
-// If prefetching is enabled, only prefetch the ordered part of the native
-// library. Has no effect if prefetching is disabled.
-const char kNativePrefetchOrderedOnly[] = "native-prefetch-ordered-only";
 #endif
 
 }  // namespace switches

@@ -51,9 +51,7 @@ class MockTtsPlatformImpl : public TtsPlatformImpl {
       : should_fake_get_voices_(false),
         ptr_factory_(this) {}
 
-  virtual bool PlatformImplAvailable() {
-    return true;
-  }
+  bool PlatformImplAvailable() override { return true; }
 
   MOCK_METHOD5(Speak,
                bool(int utterance_id,
@@ -71,7 +69,7 @@ class MockTtsPlatformImpl : public TtsPlatformImpl {
   MOCK_METHOD0(IsSpeaking, bool(void));
 
   // Fake this method to add a native voice.
-  void GetVoices(std::vector<VoiceData>* voices) {
+  void GetVoices(std::vector<VoiceData>* voices) override {
     if (!should_fake_get_voices_)
       return;
 
@@ -182,7 +180,7 @@ class FakeNetworkOnlineStateForTest : public net::NetworkChangeNotifier {
 
 class TtsApiTest : public ExtensionApiTest {
  public:
-  virtual void SetUpInProcessBrowserTestFixture() {
+  void SetUpInProcessBrowserTestFixture() override {
     ExtensionApiTest::SetUpInProcessBrowserTestFixture();
     TtsController::GetInstance()->SetPlatformImpl(&mock_platform_impl_);
   }
@@ -408,7 +406,11 @@ IN_PROC_BROWSER_TEST_F(TtsApiTest, RegisterEngine) {
           Return(true)));
   }
 
-  ASSERT_TRUE(RunExtensionTest("tts_engine/register_engine")) << message_;
+  // TODO(katie): Expect the deprecated gender warning rather than ignoring
+  // warnings.
+  ASSERT_TRUE(RunExtensionTestWithFlags("tts_engine/register_engine",
+                                        kFlagIgnoreManifestWarnings))
+      << message_;
 }
 
 // https://crbug.com/709115 tracks test flakiness.

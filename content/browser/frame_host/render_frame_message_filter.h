@@ -18,6 +18,7 @@
 #include "net/cookies/canonical_cookie.h"
 #include "ppapi/buildflags/buildflags.h"
 #include "services/network/public/mojom/network_service.mojom.h"
+#include "third_party/blink/public/mojom/blob/blob_url_store.mojom.h"
 #include "third_party/blink/public/web/web_tree_scope_type.h"
 #include "url/origin.h"
 
@@ -34,7 +35,6 @@ class MessagePipeHandle;
 }
 
 namespace net {
-class URLRequestContext;
 class URLRequestContextGetter;
 }
 
@@ -72,17 +72,22 @@ class CONTENT_EXPORT RenderFrameMessageFilter
   bool OnMessageReceived(const IPC::Message& message) override;
   void OnDestruct() const override;
 
+  network::mojom::CookieManagerPtr* GetCookieManager();
+
  protected:
   friend class TestSaveImageFromDataURL;
 
   // This method will be overridden by TestSaveImageFromDataURL class for test.
-  virtual void DownloadUrl(int render_view_id,
-                           int render_frame_id,
-                           const GURL& url,
-                           const Referrer& referrer,
-                           const url::Origin& initiator,
-                           const base::string16& suggested_name,
-                           const bool use_prompt) const;
+  virtual void DownloadUrl(
+      int render_view_id,
+      int render_frame_id,
+      const GURL& url,
+      const Referrer& referrer,
+      const url::Origin& initiator,
+      const base::string16& suggested_name,
+      const bool use_prompt,
+      const bool follow_cross_origin_redirects,
+      blink::mojom::BlobURLTokenPtrInfo blob_url_token) const;
 
  private:
   friend class BrowserThread;
@@ -93,7 +98,8 @@ class CONTENT_EXPORT RenderFrameMessageFilter
 
   ~RenderFrameMessageFilter() override;
 
-  void InitializeOnIO(network::mojom::CookieManagerPtrInfo cookie_manager);
+  void InitializeCookieManager(
+      network::mojom::CookieManagerRequest cookie_manager_request);
 
   // |new_render_frame_id| and |devtools_frame_token| are out parameters.
   // Browser process defines them for the renderer process.
@@ -138,12 +144,6 @@ class CONTENT_EXPORT RenderFrameMessageFilter
                   GetCookiesCallback callback) override;
 
 #if BUILDFLAG(ENABLE_PLUGINS)
-  void OnGetPlugins(bool refresh,
-                    const url::Origin& main_frame_origin,
-                    IPC::Message* reply_msg);
-  void GetPluginsCallback(IPC::Message* reply_msg,
-                          const url::Origin& main_frame_origin,
-                          const std::vector<WebPluginInfo>& plugins);
   void OnGetPluginInfo(int render_frame_id,
                        const GURL& url,
                        const url::Origin& main_frame_origin,
@@ -169,11 +169,6 @@ class CONTENT_EXPORT RenderFrameMessageFilter
                                            int32_t pp_instance,
                                            bool is_throttled);
 #endif  // ENABLE_PLUGINS
-
-  // Returns the correct net::URLRequestContext depending on what type of url is
-  // given.
-  // Only call on the IO thread.
-  net::URLRequestContext* GetRequestContextForURL(const GURL& url);
 
 #if BUILDFLAG(ENABLE_PLUGINS)
   PluginServiceImpl* plugin_service_;

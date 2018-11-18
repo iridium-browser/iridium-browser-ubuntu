@@ -6,7 +6,6 @@
 
 #include <memory>
 
-#include "base/memory/memory_coordinator_client_registry.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/trace_event/memory_dump_manager.h"
@@ -14,6 +13,8 @@
 #include "components/viz/common/gpu/raster_context_provider.h"
 #include "components/viz/common/resources/resource_sizes.h"
 #include "gpu/command_buffer/client/raster_interface.h"
+#include "third_party/khronos/GLES2/gl2.h"
+#include "third_party/khronos/GLES2/gl2ext.h"
 #include "ui/gfx/gpu_memory_buffer.h"
 
 using base::trace_event::MemoryAllocatorDump;
@@ -33,14 +34,16 @@ const int kMaxCheckForQueryResultAvailableAttempts = 256;
 // Delay before a staging buffer might be released.
 const int kStagingBufferExpirationDelayMs = 1000;
 
-bool CheckForQueryResult(gpu::raster::RasterInterface* ri, unsigned query_id) {
-  unsigned complete = 1;
+bool CheckForQueryResult(gpu::raster::RasterInterface* ri, GLuint query_id) {
+  DCHECK(query_id);
+  GLuint complete = 1;
   ri->GetQueryObjectuivEXT(query_id, GL_QUERY_RESULT_AVAILABLE_EXT, &complete);
   return !!complete;
 }
 
-void WaitForQueryResult(gpu::raster::RasterInterface* ri, unsigned query_id) {
+void WaitForQueryResult(gpu::raster::RasterInterface* ri, GLuint query_id) {
   TRACE_EVENT0("cc", "WaitForQueryResult");
+  DCHECK(query_id);
 
   int attempts_left = kMaxCheckForQueryResultAvailableAttempts;
   while (attempts_left--) {
@@ -55,19 +58,14 @@ void WaitForQueryResult(gpu::raster::RasterInterface* ri, unsigned query_id) {
         kCheckForQueryResultAvailableTickRateMs));
   }
 
-  unsigned result = 0;
+  GLuint result = 0;
   ri->GetQueryObjectuivEXT(query_id, GL_QUERY_RESULT_EXT, &result);
 }
 
 }  // namespace
 
 StagingBuffer::StagingBuffer(const gfx::Size& size, viz::ResourceFormat format)
-    : size(size),
-      format(format),
-      texture_id(0),
-      image_id(0),
-      query_id(0),
-      content_id(0) {}
+    : size(size), format(format) {}
 
 StagingBuffer::~StagingBuffer() {
   DCHECK_EQ(texture_id, 0u);
@@ -113,28 +111,18 @@ void StagingBuffer::OnMemoryDump(base::trace_event::ProcessMemoryDump* pmd,
   const uint64_t tracing_process_id =
       base::trace_event::MemoryDumpManager::GetInstance()
           ->GetTracingProcessId();
-  auto shared_memory_guid = gpu_memory_buffer->GetHandle().handle.GetGUID();
   const int kImportance = 2;
-  if (!shared_memory_guid.is_empty()) {
-    pmd->CreateSharedMemoryOwnershipEdge(buffer_dump->guid(),
-                                         shared_memory_guid, kImportance);
-  } else {
-    auto shared_buffer_guid =
-        gpu_memory_buffer->GetGUIDForTracing(tracing_process_id);
-    pmd->CreateSharedGlobalAllocatorDump(shared_buffer_guid);
-    pmd->AddOwnershipEdge(buffer_dump->guid(), shared_buffer_guid, kImportance);
-  }
+  gpu_memory_buffer->OnMemoryDump(pmd, buffer_dump->guid(), tracing_process_id,
+                                  kImportance);
 }
 
 StagingBufferPool::StagingBufferPool(
     scoped_refptr<base::SequencedTaskRunner> task_runner,
     viz::RasterContextProvider* worker_context_provider,
-    LayerTreeResourceProvider* resource_provider,
     bool use_partial_raster,
     int max_staging_buffer_usage_in_bytes)
     : task_runner_(std::move(task_runner)),
       worker_context_provider_(worker_context_provider),
-      resource_provider_(resource_provider),
       use_partial_raster_(use_partial_raster),
       max_staging_buffer_usage_in_bytes_(max_staging_buffer_usage_in_bytes),
       staging_buffer_usage_in_bytes_(0),
@@ -146,13 +134,16 @@ StagingBufferPool::StagingBufferPool(
   DCHECK(worker_context_provider_);
   base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
       this, "cc::StagingBufferPool", base::ThreadTaskRunnerHandle::Get());
-  base::MemoryCoordinatorClientRegistry::GetInstance()->Register(this);
+
+  memory_pressure_listener_.reset(new base::MemoryPressureListener(
+      base::BindRepeating(&StagingBufferPool::OnMemoryPressure,
+                          weak_ptr_factory_.GetWeakPtr())));
+
   reduce_memory_usage_callback_ = base::Bind(
       &StagingBufferPool::ReduceMemoryUsage, weak_ptr_factory_.GetWeakPtr());
 }
 
 StagingBufferPool::~StagingBufferPool() {
-  base::MemoryCoordinatorClientRegistry::GetInstance()->Unregister(this);
   base::trace_event::MemoryDumpManager::GetInstance()->UnregisterDumpProvider(
       this);
 }
@@ -260,14 +251,15 @@ std::unique_ptr<StagingBuffer> StagingBufferPool::AcquireStagingBuffer(
   DCHECK(ri);
 
   // Check if any busy buffers have become available.
-  if (resource_provider_->use_sync_query()) {
-    while (!busy_buffers_.empty()) {
-      if (!CheckForQueryResult(ri, busy_buffers_.front()->query_id))
-        break;
+  while (!busy_buffers_.empty()) {
+    // Early out if query isn't used, or if query isn't complete yet.  Query is
+    // created in OneCopyRasterBufferProvider::CopyOnWorkerThread().
+    if (!busy_buffers_.front()->query_id ||
+        !CheckForQueryResult(ri, busy_buffers_.front()->query_id))
+      break;
 
-      MarkStagingBufferAsFree(busy_buffers_.front().get());
-      free_buffers_.push_back(PopFront(&busy_buffers_));
-    }
+    MarkStagingBufferAsFree(busy_buffers_.front().get());
+    free_buffers_.push_back(PopFront(&busy_buffers_));
   }
 
   // Wait for memory usage of non-free buffers to become less than the limit.
@@ -278,12 +270,12 @@ std::unique_ptr<StagingBuffer> StagingBufferPool::AcquireStagingBuffer(
     if (busy_buffers_.empty())
       break;
 
-    if (resource_provider_->use_sync_query()) {
+    if (busy_buffers_.front()->query_id) {
       WaitForQueryResult(ri, busy_buffers_.front()->query_id);
       MarkStagingBufferAsFree(busy_buffers_.front().get());
       free_buffers_.push_back(PopFront(&busy_buffers_));
     } else {
-      // Fall-back to glFinish if CHROMIUM_sync_query is not available.
+      // Fall back to glFinish if query isn't used.
       ri->Finish();
       while (!busy_buffers_.empty()) {
         MarkStagingBufferAsFree(busy_buffers_.front().get());
@@ -427,10 +419,18 @@ void StagingBufferPool::ReleaseBuffersNotUsedSince(base::TimeTicks time) {
   }
 }
 
-void StagingBufferPool::OnPurgeMemory() {
+void StagingBufferPool::OnMemoryPressure(
+    base::MemoryPressureListener::MemoryPressureLevel level) {
   base::AutoLock lock(lock_);
-  // Release all buffers, regardless of how recently they were used.
-  ReleaseBuffersNotUsedSince(base::TimeTicks() + base::TimeDelta::Max());
+  switch (level) {
+    case base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_NONE:
+    case base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_MODERATE:
+      break;
+    case base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_CRITICAL:
+      // Release all buffers, regardless of how recently they were used.
+      ReleaseBuffersNotUsedSince(base::TimeTicks() + base::TimeDelta::Max());
+      break;
+  }
 }
 
 }  // namespace cc

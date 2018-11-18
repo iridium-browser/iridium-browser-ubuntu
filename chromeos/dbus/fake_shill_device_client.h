@@ -78,11 +78,10 @@ class CHROMEOS_EXPORT FakeShillDeviceClient
                             const std::string& peer,
                             const StringCallback& callback,
                             const ErrorCallback& error_callback) override;
-  void AddWakeOnPacketConnection(
-      const dbus::ObjectPath& device_path,
-      const net::IPEndPoint& ip_endpoint,
-      const base::Closure& callback,
-      const ErrorCallback& error_callback) override;
+  void AddWakeOnPacketConnection(const dbus::ObjectPath& device_path,
+                                 const net::IPEndPoint& ip_endpoint,
+                                 const base::Closure& callback,
+                                 const ErrorCallback& error_callback) override;
   void RemoveWakeOnPacketConnection(
       const dbus::ObjectPath& device_path,
       const net::IPEndPoint& ip_endpoint,
@@ -103,7 +102,8 @@ class CHROMEOS_EXPORT FakeShillDeviceClient
   void ClearDevices() override;
   void SetDeviceProperty(const std::string& device_path,
                          const std::string& name,
-                         const base::Value& value) override;
+                         const base::Value& value,
+                         bool notify_changed) override;
   std::string GetDevicePathForType(const std::string& type) override;
   void SetTDLSBusyCount(int count) override;
   void SetTDLSState(const std::string& state) override;
@@ -119,7 +119,8 @@ class CHROMEOS_EXPORT FakeShillDeviceClient
     int retries_left = 0;
     bool lock_enabled = true;
   };
-  typedef base::ObserverList<ShillPropertyChangedObserver> PropertyObserverList;
+  typedef base::ObserverList<ShillPropertyChangedObserver>::Unchecked
+      PropertyObserverList;
 
   SimLockStatus GetSimLockStatus(const std::string& device_path);
   void SetSimLockStatus(const std::string& device_path,
@@ -132,11 +133,14 @@ class CHROMEOS_EXPORT FakeShillDeviceClient
   // Posts a task to run a void callback with status code |result|.
   void PostVoidCallback(VoidDBusMethodCallback callback, bool result);
 
+  // If |notify_changed| is true, NotifyObserversPropertyChanged is called,
+  // otherwise it is not (e.g. when setting up initial properties).
   void SetPropertyInternal(const dbus::ObjectPath& device_path,
                            const std::string& name,
                            const base::Value& value,
                            const base::Closure& callback,
-                           const ErrorCallback& error_callback);
+                           const ErrorCallback& error_callback,
+                           bool notify_changed);
 
   void NotifyObserversPropertyChanged(const dbus::ObjectPath& device_path,
                                       const std::string& property);
@@ -160,7 +164,7 @@ class CHROMEOS_EXPORT FakeShillDeviceClient
   std::string tdls_state_;
 
   // Wake on packet connections for each device.
-  std::map<dbus::ObjectPath, std::set<net::IPEndPoint> >
+  std::map<dbus::ObjectPath, std::set<net::IPEndPoint>>
       wake_on_packet_connections_;
 
   // Current SIM PIN per device path.

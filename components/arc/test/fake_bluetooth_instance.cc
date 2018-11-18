@@ -122,12 +122,22 @@ void FakeBluetoothInstance::RequestGattWrite(
     int32_t offset,
     const std::vector<uint8_t>& value,
     mojom::BluetoothGattDBAttributeType attribute_type,
+    bool is_prepare,
     RequestGattWriteCallback callback) {}
+
+void FakeBluetoothInstance::RequestGattExecuteWrite(
+    mojom::BluetoothAddressPtr address,
+    bool execute,
+    RequestGattExecuteWriteCallback callback) {}
 
 void FakeBluetoothInstance::OnGetSdpRecords(
     mojom::BluetoothStatus status,
-    mojom::BluetoothAddressPtr remove_addr,
+    mojom::BluetoothAddressPtr remote_addr,
     const device::BluetoothUUID& target_uuid,
     std::vector<mojom::BluetoothSdpRecordPtr> records) {}
+
+void FakeBluetoothInstance::OnMTUReceived(
+    mojom::BluetoothAddressPtr remote_addr,
+    uint16_t mtu) {}
 
 }  // namespace arc

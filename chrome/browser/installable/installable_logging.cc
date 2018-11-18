@@ -5,6 +5,7 @@
 #include "chrome/browser/installable/installable_logging.h"
 
 #include "base/macros.h"
+#include "base/no_destructor.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/installable/installable_manager.h"
 #include "content/public/browser/render_frame_host.h"
@@ -13,9 +14,9 @@
 namespace {
 
 const std::string& GetMessagePrefix() {
-  CR_DEFINE_STATIC_LOCAL(std::string, message_prefix,
-                         ("Site cannot be installed: "));
-  return message_prefix;
+  static base::NoDestructor<std::string> message_prefix(
+      "Site cannot be installed: ");
+  return *message_prefix;
 }
 
 // Error message strings corresponding to the InstallableStatusCode enum.
@@ -66,8 +67,6 @@ static const char kUrlNotSupportedForWebApkMessage[] =
 static const char kInIncognitoMessage[] =
     "the page is loaded in an incognito window";
 static const char kNotOfflineCapable[] = "the page does not work offline";
-static const char kNoGesture[] =
-    "beforeinstallpromptevent.prompt() was not called with a user gesture";
 }  // namespace
 
 void LogErrorToConsole(content::WebContents* web_contents,
@@ -90,6 +89,7 @@ void LogErrorToConsole(content::WebContents* web_contents,
     case FAILED_TO_CREATE_BANNER:
     case WAITING_FOR_MANIFEST:
     case WAITING_FOR_INSTALLABLE_CHECK:
+    case NO_GESTURE:
     case WAITING_FOR_NATIVE_DATA:
     case SHOWING_APP_INSTALLATION_DIALOG:
     case MAX_ERROR_CODE:
@@ -163,9 +163,6 @@ void LogErrorToConsole(content::WebContents* web_contents,
       break;
     case NOT_OFFLINE_CAPABLE:
       message = kNotOfflineCapable;
-      break;
-    case NO_GESTURE:
-      message = kNoGesture;
       break;
   }
 

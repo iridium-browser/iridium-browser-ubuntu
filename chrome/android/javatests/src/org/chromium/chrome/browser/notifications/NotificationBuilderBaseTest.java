@@ -22,7 +22,7 @@ import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.browser.notifications.channels.ChannelDefinitions;
 import org.chromium.chrome.browser.util.UrlUtilities;
 import org.chromium.chrome.browser.widget.RoundedIconGenerator;
-import org.chromium.content.browser.test.NativeLibraryTestRule;
+import org.chromium.content_public.browser.test.NativeLibraryTestRule;
 
 /**
  * Instrumentation unit tests for NotificationBuilderBase.
@@ -72,7 +72,7 @@ public class NotificationBuilderBaseTest {
                 return null;
             }
         };
-        notificationBuilder.setChannelId(ChannelDefinitions.CHANNEL_ID_BROWSER);
+        notificationBuilder.setChannelId(ChannelDefinitions.ChannelId.BROWSER);
         Bitmap fromNullIcon = notificationBuilder.ensureNormalizedIcon(null, origin);
         Assert.assertNotNull(fromNullIcon);
         Assert.assertEquals(largeIconWidthPx, fromNullIcon.getWidth());

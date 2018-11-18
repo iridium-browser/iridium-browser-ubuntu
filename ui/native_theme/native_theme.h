@@ -311,6 +311,8 @@ class NATIVE_THEME_EXPORT NativeTheme {
     kColorId_ProminentButtonColor,
     kColorId_TextOnProminentButtonColor,
     // MenuItem
+    kColorId_TouchableMenuItemLabelColor,
+    kColorId_ActionableSubmenuVerticalSeparatorColor,
     kColorId_EnabledMenuItemForegroundColor,
     kColorId_DisabledMenuItemForegroundColor,
     kColorId_SelectedMenuItemForegroundColor,
@@ -366,26 +368,8 @@ class NATIVE_THEME_EXPORT NativeTheme {
     // Results Tables, such as the omnibox.
     kColorId_ResultsTableNormalBackground,
     kColorId_ResultsTableHoveredBackground,
-    kColorId_ResultsTableSelectedBackground,
     kColorId_ResultsTableNormalText,
-    kColorId_ResultsTableHoveredText,
-    kColorId_ResultsTableSelectedText,
-    kColorId_ResultsTableNormalDimmedText,
-    kColorId_ResultsTableHoveredDimmedText,
-    kColorId_ResultsTableSelectedDimmedText,
-    kColorId_ResultsTableNormalUrl,
-    kColorId_ResultsTableHoveredUrl,
-    kColorId_ResultsTableSelectedUrl,
-    // Positive text refers to good (often rendered in green) text, such as the
-    // stock value went up.
-    kColorId_ResultsTablePositiveText,
-    kColorId_ResultsTablePositiveHoveredText,
-    kColorId_ResultsTablePositiveSelectedText,
-    // Negative text refers to something alarming (often rendered in red), such
-    // as the stock value went down.
-    kColorId_ResultsTableNegativeText,
-    kColorId_ResultsTableNegativeHoveredText,
-    kColorId_ResultsTableNegativeSelectedText,
+    kColorId_ResultsTableDimmedText,
     // Colors for the material spinner (aka throbber).
     kColorId_ThrobberSpinningColor,
     kColorId_ThrobberWaitingColor,
@@ -434,7 +418,7 @@ class NATIVE_THEME_EXPORT NativeTheme {
 
  private:
   // Observers to notify when the native theme changes.
-  base::ObserverList<NativeThemeObserver> native_theme_observers_;
+  base::ObserverList<NativeThemeObserver>::Unchecked native_theme_observers_;
 
   DISALLOW_COPY_AND_ASSIGN(NativeTheme);
 };

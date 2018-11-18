@@ -8,7 +8,6 @@
 #include "base/bind_helpers.h"
 #include "base/callback.h"
 #include "base/compiler_specific.h"
-#include "base/message_loop/message_loop.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
@@ -406,7 +405,8 @@ int BaseScrollBar::GetScrollIncrement(bool is_page, bool is_positive) {
 
 #if !defined(OS_MACOSX)
 // static
-base::Timer* BaseScrollBar::GetHideTimerForTest(BaseScrollBar* scroll_bar) {
+base::RetainingOneShotTimer* BaseScrollBar::GetHideTimerForTest(
+    BaseScrollBar* scroll_bar) {
   return nullptr;
 }
 #endif

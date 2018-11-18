@@ -5,27 +5,26 @@
 #include "third_party/blink/renderer/core/paint/scrollable_area_painter.h"
 
 #include "third_party/blink/renderer/core/layout/layout_view.h"
+#include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/paint/object_paint_properties.h"
 #include "third_party/blink/renderer/core/paint/paint_info.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
 #include "third_party/blink/renderer/core/paint/paint_layer_scrollable_area.h"
 #include "third_party/blink/renderer/core/paint/scrollbar_painter.h"
-#include "third_party/blink/renderer/core/paint/transform_recorder.h"
+#include "third_party/blink/renderer/core/scroll/scrollbar_theme.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context_state_saver.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_layer.h"
-#include "third_party/blink/renderer/platform/graphics/paint/clip_recorder.h"
 #include "third_party/blink/renderer/platform/graphics/paint/drawing_recorder.h"
 #include "third_party/blink/renderer/platform/graphics/paint/scoped_paint_chunk_properties.h"
-#include "third_party/blink/renderer/platform/platform_chrome_client.h"
 
 namespace blink {
 
 void ScrollableAreaPainter::PaintResizer(GraphicsContext& context,
                                          const IntPoint& paint_offset,
                                          const CullRect& cull_rect) {
-  if (GetScrollableArea().GetLayoutBox()->Style()->Resize() == EResize::kNone)
+  if (GetScrollableArea().GetLayoutBox()->StyleRef().Resize() == EResize::kNone)
     return;
 
   IntRect abs_rect = GetScrollableArea().ResizerCornerRect(
@@ -172,42 +171,31 @@ void ScrollableAreaPainter::PaintOverflowControls(
     return;
 
   GraphicsContext& context = paint_info.context;
+  const auto& box = *GetScrollableArea().GetLayoutBox();
+  const auto* fragment = paint_info.FragmentToPaint(box);
+  if (!fragment)
+    return;
 
-  Optional<ClipRecorder> clip_recorder;
-  Optional<ScopedPaintChunkProperties> scoped_paint_chunk_properties;
-  if (RuntimeEnabledFeatures::SlimmingPaintV175Enabled()) {
-    const auto& box = *GetScrollableArea().GetLayoutBox();
-    if (const auto* fragment = paint_info.FragmentToPaint(box)) {
-      const auto* properties = fragment->PaintProperties();
-      DCHECK(properties);
-      if (const auto* clip = properties->OverflowControlsClip()) {
-        scoped_paint_chunk_properties.emplace(
-            context.GetPaintController(), clip, box,
-            DisplayItem::kClipLayerOverflowControls);
-      }
+  base::Optional<ScopedPaintChunkProperties> scoped_paint_chunk_properties;
+  const auto* properties = fragment->PaintProperties();
+  // TODO(crbug.com/849278): Remove either the DCHECK or the if condition
+  // when we figure out in what cases that the box doesn't have properties.
+  DCHECK(properties);
+  if (properties) {
+    if (const auto* clip = properties->OverflowControlsClip()) {
+      scoped_paint_chunk_properties.emplace(context.GetPaintController(), clip,
+                                            box,
+                                            DisplayItem::kOverflowControls);
     }
-  } else {
-    IntRect clip_rect(adjusted_paint_offset,
-                      GetScrollableArea().Layer()->PixelSnappedSize());
-    clip_recorder.emplace(context, *GetScrollableArea().GetLayoutBox(),
-                          DisplayItem::kClipLayerOverflowControls, clip_rect);
   }
 
   if (GetScrollableArea().HorizontalScrollbar() &&
       !GetScrollableArea().LayerForHorizontalScrollbar()) {
-    TransformRecorder translate_recorder(
-        context, *GetScrollableArea().HorizontalScrollbar(),
-        AffineTransform::Translation(adjusted_paint_offset.X(),
-                                     adjusted_paint_offset.Y()));
     GetScrollableArea().HorizontalScrollbar()->Paint(context,
                                                      adjusted_cull_rect);
   }
   if (GetScrollableArea().VerticalScrollbar() &&
       !GetScrollableArea().LayerForVerticalScrollbar()) {
-    TransformRecorder translate_recorder(
-        context, *GetScrollableArea().VerticalScrollbar(),
-        AffineTransform::Translation(adjusted_paint_offset.X(),
-                                     adjusted_paint_offset.Y()));
     GetScrollableArea().VerticalScrollbar()->Paint(context, adjusted_cull_rect);
   }
   if (!GetScrollableArea().LayerForScrollCorner()) {
@@ -261,18 +249,23 @@ void ScrollableAreaPainter::PaintScrollCorner(
     return;
   }
 
-  // We don't want to paint white if we have overlay scrollbars, since we need
+  // We don't want to paint opaque if we have overlay scrollbars, since we need
   // to see what is behind it.
   if (GetScrollableArea().HasOverlayScrollbars())
     return;
 
-  const auto& client = DisplayItemClientForCorner();
-  if (DrawingRecorder::UseCachedDrawingIfPossible(
-          context, client, DisplayItem::kScrollbarCorner))
-    return;
+  ScrollbarTheme* theme = nullptr;
 
-  DrawingRecorder recorder(context, client, DisplayItem::kScrollbarCorner);
-  context.FillRect(abs_rect, Color::kWhite);
+  if (GetScrollableArea().HorizontalScrollbar()) {
+    theme = &GetScrollableArea().HorizontalScrollbar()->GetTheme();
+  } else if (GetScrollableArea().VerticalScrollbar()) {
+    theme = &GetScrollableArea().VerticalScrollbar()->GetTheme();
+  } else {
+    NOTREACHED();
+  }
+
+  const auto& client = DisplayItemClientForCorner();
+  theme->PaintScrollCorner(context, client, abs_rect);
 }
 
 PaintLayerScrollableArea& ScrollableAreaPainter::GetScrollableArea() const {

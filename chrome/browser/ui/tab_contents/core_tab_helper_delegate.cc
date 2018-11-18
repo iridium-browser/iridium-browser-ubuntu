@@ -4,14 +4,9 @@
 
 #include "chrome/browser/ui/tab_contents/core_tab_helper_delegate.h"
 
-CoreTabHelperDelegate::~CoreTabHelperDelegate() {
-}
+#include "content/public/browser/web_contents.h"
 
-void CoreTabHelperDelegate::SwapTabContents(
-    content::WebContents* old_contents,
-    content::WebContents* new_contents,
-    bool did_start_load,
-    bool did_finish_load) {
+CoreTabHelperDelegate::~CoreTabHelperDelegate() {
 }
 
 bool CoreTabHelperDelegate::CanReloadContents(

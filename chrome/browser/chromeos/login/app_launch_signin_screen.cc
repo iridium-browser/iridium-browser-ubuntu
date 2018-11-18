@@ -7,6 +7,7 @@
 #include <memory>
 #include <utility>
 
+#include "base/task/post_task.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/login/help_app_launcher.h"
 #include "chrome/browser/chromeos/login/screens/user_selection_screen.h"
@@ -16,6 +17,7 @@
 #include "chromeos/components/proximity_auth/screenlock_bridge.h"
 #include "chromeos/login/auth/user_context.h"
 #include "components/user_manager/user_manager.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_ui.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -67,10 +69,6 @@ user_manager::UserManager* AppLaunchSigninScreen::GetUserManager() {
                             : user_manager::UserManager::Get();
 }
 
-void AppLaunchSigninScreen::CancelPasswordChangedFlow() {
-  NOTREACHED();
-}
-
 void AppLaunchSigninScreen::CancelUserAdding() {
   NOTREACHED();
 }
@@ -80,14 +78,9 @@ void AppLaunchSigninScreen::Login(const UserContext& user_context,
   // Note: CreateAuthenticator doesn't necessarily create
   // a new Authenticator object, and could reuse an existing one.
   authenticator_ = UserSessionManager::GetInstance()->CreateAuthenticator(this);
-  content::BrowserThread::PostTask(
-      content::BrowserThread::UI, FROM_HERE,
-      base::BindOnce(&Authenticator::AuthenticateToUnlock, authenticator_.get(),
-                     user_context));
-}
-
-void AppLaunchSigninScreen::MigrateUserData(const std::string& old_password) {
-  NOTREACHED();
+  base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI},
+                           base::BindOnce(&Authenticator::AuthenticateToUnlock,
+                                          authenticator_.get(), user_context));
 }
 
 void AppLaunchSigninScreen::OnSigninScreenReady() {}
@@ -96,19 +89,11 @@ void AppLaunchSigninScreen::RemoveUser(const AccountId& account_id) {
   NOTREACHED();
 }
 
-void AppLaunchSigninScreen::ResyncUserData() {
-  NOTREACHED();
-}
-
 void AppLaunchSigninScreen::ShowEnterpriseEnrollmentScreen() {
   NOTREACHED();
 }
 
 void AppLaunchSigninScreen::ShowEnableDebuggingScreen() {
-  NOTREACHED();
-}
-
-void AppLaunchSigninScreen::ShowDemoModeSetupScreen() {
   NOTREACHED();
 }
 

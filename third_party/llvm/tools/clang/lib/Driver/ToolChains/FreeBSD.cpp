@@ -57,11 +57,10 @@ void freebsd::Assembler::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back("-mabi");
     CmdArgs.push_back(mips::getGnuCompatibleMipsABIName(ABIName).data());
 
-    if (getToolChain().getArch() == llvm::Triple::mips ||
-        getToolChain().getArch() == llvm::Triple::mips64)
-      CmdArgs.push_back("-EB");
-    else
+    if (getToolChain().getTriple().isLittleEndian())
       CmdArgs.push_back("-EL");
+    else
+      CmdArgs.push_back("-EB");
 
     if (Arg *A = Args.getLastArg(options::OPT_G)) {
       StringRef v = A->getValue();
@@ -117,30 +116,6 @@ void freebsd::Assembler::ConstructJob(Compilation &C, const JobAction &JA,
   C.addCommand(llvm::make_unique<Command>(JA, *this, Exec, CmdArgs, Inputs));
 }
 
-static bool addXRayRuntime(const ToolChain &TC, const ArgList &Args,
-                           ArgStringList &CmdArgs) {
-  if (Args.hasArg(options::OPT_shared))
-    return false;
-
-  if (Args.hasFlag(options::OPT_fxray_instrument,
-                   options::OPT_fnoxray_instrument, false)) {
-    CmdArgs.push_back("-whole-archive");
-    CmdArgs.push_back(TC.getCompilerRTArgString(Args, "xray", false));
-    CmdArgs.push_back("-no-whole-archive");
-    return true;
-  }
-  
-  return false;
-}
-
-static void linkXRayRuntimeDeps(const ToolChain &TC, const ArgList &Args,
-                                ArgStringList &CmdArgs) {
-  CmdArgs.push_back("--no-as-needed");
-  CmdArgs.push_back("-lrt");
-  CmdArgs.push_back("-lm");
-  CmdArgs.push_back("-lpthread");
-} 
-
 void freebsd::Linker::ConstructJob(Compilation &C, const JobAction &JA,
                                    const InputInfo &Output,
                                    const InputInfoList &Inputs,
@@ -190,23 +165,45 @@ void freebsd::Linker::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back("--enable-new-dtags");
   }
 
-  // When building 32-bit code on FreeBSD/amd64, we have to explicitly
-  // instruct ld in the base system to link 32-bit code.
-  if (Arch == llvm::Triple::x86) {
+  // Explicitly set the linker emulation for platforms that might not
+  // be the default emulation for the linker.
+  switch (Arch) {
+  case llvm::Triple::x86:
     CmdArgs.push_back("-m");
     CmdArgs.push_back("elf_i386_fbsd");
-  }
-
-  if (Arch == llvm::Triple::ppc) {
+    break;
+  case llvm::Triple::ppc:
     CmdArgs.push_back("-m");
     CmdArgs.push_back("elf32ppc_fbsd");
+    break;
+  case llvm::Triple::mips:
+    CmdArgs.push_back("-m");
+    CmdArgs.push_back("elf32btsmip_fbsd");
+    break;
+  case llvm::Triple::mipsel:
+    CmdArgs.push_back("-m");
+    CmdArgs.push_back("elf32ltsmip_fbsd");
+    break;
+  case llvm::Triple::mips64:
+    CmdArgs.push_back("-m");
+    if (tools::mips::hasMipsAbiArg(Args, "n32"))
+      CmdArgs.push_back("elf32btsmipn32_fbsd");
+    else
+      CmdArgs.push_back("elf64btsmip_fbsd");
+    break;
+  case llvm::Triple::mips64el:
+    CmdArgs.push_back("-m");
+    if (tools::mips::hasMipsAbiArg(Args, "n32"))
+      CmdArgs.push_back("elf32ltsmipn32_fbsd");
+    else
+      CmdArgs.push_back("elf64ltsmip_fbsd");
+    break;
+  default:
+    break;
   }
 
   if (Arg *A = Args.getLastArg(options::OPT_G)) {
-    if (ToolChain.getArch() == llvm::Triple::mips ||
-      ToolChain.getArch() == llvm::Triple::mipsel ||
-      ToolChain.getArch() == llvm::Triple::mips64 ||
-      ToolChain.getArch() == llvm::Triple::mips64el) {
+    if (ToolChain.getTriple().isMIPS()) {
       StringRef v = A->getValue();
       CmdArgs.push_back(Args.MakeArgString("-G" + v));
       A->claim();
@@ -255,8 +252,11 @@ void freebsd::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   Args.AddAllArgs(CmdArgs, options::OPT_Z_Flag);
   Args.AddAllArgs(CmdArgs, options::OPT_r);
 
-  if (D.isUsingLTO())
-    AddGoldPlugin(ToolChain, Args, CmdArgs, D.getLTOMode() == LTOK_Thin, D);
+  if (D.isUsingLTO()) {
+    assert(!Inputs.empty() && "Must have at least one input.");
+    AddGoldPlugin(ToolChain, Args, CmdArgs, Output, Inputs[0],
+                  D.getLTOMode() == LTOK_Thin);
+  }
 
   bool NeedsSanitizerDeps = addSanitizerRuntimes(ToolChain, Args, CmdArgs);
   bool NeedsXRayDeps = addXRayRuntime(ToolChain, Args, CmdArgs);
@@ -275,7 +275,7 @@ void freebsd::Linker::ConstructJob(Compilation &C, const JobAction &JA,
     if (NeedsSanitizerDeps)
       linkSanitizerRuntimeDeps(ToolChain, CmdArgs);
     if (NeedsXRayDeps)
-      linkXRayRuntimeDeps(ToolChain, Args, CmdArgs);
+      linkXRayRuntimeDeps(ToolChain, CmdArgs);
     // FIXME: For some reason GCC passes -lgcc and -lgcc_s before adding
     // the default system libraries. Just mimic this for now.
     if (Args.hasArg(options::OPT_pg))
@@ -343,9 +343,7 @@ FreeBSD::FreeBSD(const Driver &D, const llvm::Triple &Triple,
 
   // When targeting 32-bit platforms, look for '/usr/lib32/crt1.o' and fall
   // back to '/usr/lib' if it doesn't exist.
-  if ((Triple.getArch() == llvm::Triple::x86 ||
-       Triple.getArch() == llvm::Triple::mips ||
-       Triple.getArch() == llvm::Triple::mipsel ||
+  if ((Triple.getArch() == llvm::Triple::x86 || Triple.isMIPS32() ||
        Triple.getArch() == llvm::Triple::ppc) &&
       D.getVFS().exists(getDriver().SysRoot + "/usr/lib32/crt1.o"))
     getFilePaths().push_back(getDriver().SysRoot + "/usr/lib32");
@@ -410,8 +408,7 @@ bool FreeBSD::isPIEDefault() const { return getSanitizerArgs().requiresPIE(); }
 SanitizerMask FreeBSD::getSupportedSanitizers() const {
   const bool IsX86 = getTriple().getArch() == llvm::Triple::x86;
   const bool IsX86_64 = getTriple().getArch() == llvm::Triple::x86_64;
-  const bool IsMIPS64 = getTriple().getArch() == llvm::Triple::mips64 ||
-                        getTriple().getArch() == llvm::Triple::mips64el;
+  const bool IsMIPS64 = getTriple().isMIPS64();
   SanitizerMask Res = ToolChain::getSupportedSanitizers();
   Res |= SanitizerKind::Address;
   Res |= SanitizerKind::Vptr;
@@ -420,6 +417,7 @@ SanitizerMask FreeBSD::getSupportedSanitizers() const {
     Res |= SanitizerKind::Thread;
   }
   if (IsX86 || IsX86_64) {
+    Res |= SanitizerKind::Function;
     Res |= SanitizerKind::SafeStack;
     Res |= SanitizerKind::Fuzzer;
     Res |= SanitizerKind::FuzzerNoLink;

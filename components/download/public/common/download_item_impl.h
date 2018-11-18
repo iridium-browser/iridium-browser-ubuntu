@@ -23,9 +23,9 @@
 #include "components/download/public/common/download_interrupt_reasons.h"
 #include "components/download/public/common/download_item.h"
 #include "components/download/public/common/download_request_handle_interface.h"
+#include "components/download/public/common/download_url_loader_factory_getter.h"
 #include "components/download/public/common/download_url_parameters.h"
 #include "components/download/public/common/resume_mode.h"
-#include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "url/gurl.h"
 
 namespace net {
@@ -33,7 +33,6 @@ class URLRequestContextGetter;
 }
 
 namespace download {
-
 class DownloadFile;
 class DownloadItemImplDelegate;
 class DownloadJob;
@@ -249,6 +248,7 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadItemImpl
   const base::FilePath& GetFullPath() const override;
   const base::FilePath& GetTargetFilePath() const override;
   const base::FilePath& GetForcedFilePath() const override;
+  base::FilePath GetTemporaryFilePath() const override;
   base::FilePath GetFileNameToReportUser() const override;
   TargetDisposition GetTargetDisposition() const override;
   const std::string& GetHash() const override;
@@ -275,6 +275,7 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadItemImpl
   bool GetOpened() const override;
   base::Time GetLastAccessTime() const override;
   bool IsTransient() const override;
+  bool IsParallelDownload() const override;
   void OnContentCheckCompleted(DownloadDangerType danger_type,
                                DownloadInterruptReason reason) override;
   void SetOpenWhenComplete(bool open) override;
@@ -296,14 +297,12 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadItemImpl
   // parameters. It may be different from the DownloadCreateInfo used to create
   // the DownloadItem if Start() is being called in response for a
   // download resumption request.
-  // TODO(qinmin): Remove |url_request_context_getter| once network service is
-  // enabled.
-  virtual void Start(
-      std::unique_ptr<DownloadFile> download_file,
-      std::unique_ptr<DownloadRequestHandleInterface> req_handle,
-      const DownloadCreateInfo& new_create_info,
-      scoped_refptr<network::SharedURLLoaderFactory> shared_url_loader_factory,
-      net::URLRequestContextGetter* url_request_context_getter);
+  virtual void Start(std::unique_ptr<DownloadFile> download_file,
+                     std::unique_ptr<DownloadRequestHandleInterface> req_handle,
+                     const DownloadCreateInfo& new_create_info,
+                     scoped_refptr<download::DownloadURLLoaderFactoryGetter>
+                         url_loader_factory_getter,
+                     net::URLRequestContextGetter* url_request_context_getter);
 
   // Needed because of intertwining with DownloadManagerImpl -------------------
 
@@ -343,6 +342,8 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadItemImpl
   void DestinationCompleted(
       int64_t total_bytes,
       std::unique_ptr<crypto::SecureHash> hash_state) override;
+
+  void SetDelegate(DownloadItemImplDelegate* delegate);
 
  private:
   // Fine grained states of a download.
@@ -677,7 +678,7 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadItemImpl
   DownloadDangerType danger_type_ = DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS;
 
   // The views of this item in the download shelf and download contents.
-  base::ObserverList<Observer> observers_;
+  base::ObserverList<Observer>::Unchecked observers_;
 
   // Our delegate.
   DownloadItemImplDelegate* delegate_ = nullptr;

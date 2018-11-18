@@ -37,6 +37,7 @@
 #include "third_party/blink/renderer/platform/fonts/font_metrics.h"
 #include "third_party/blink/renderer/platform/fonts/font_platform_data.h"
 #include "third_party/blink/renderer/platform/fonts/font_vertical_position_type.h"
+#include "third_party/blink/renderer/platform/fonts/glyph.h"
 #include "third_party/blink/renderer/platform/fonts/typesetting_features.h"
 #include "third_party/blink/renderer/platform/geometry/float_rect.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
@@ -53,6 +54,8 @@ namespace blink {
 // character.
 struct GlyphData {
   STACK_ALLOCATED();
+
+ public:
   GlyphData(
       Glyph g = 0,
       const SimpleFontData* f = nullptr,
@@ -109,6 +112,7 @@ class PLATFORM_EXPORT SimpleFontData : public FontData {
   }
 
   FloatRect BoundsForGlyph(Glyph) const;
+  void BoundsForGlyphs(const Vector<Glyph, 256>&, Vector<SkRect, 256>*) const;
   FloatRect PlatformBoundsForGlyph(Glyph) const;
   float WidthForGlyph(Glyph) const;
   float PlatformWidthForGlyph(Glyph) const;

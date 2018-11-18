@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "base/bind.h"
 #include "base/guid.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/values.h"
@@ -141,7 +142,7 @@ class ProfileSyncServiceMockForExtensionTests
  public:
   explicit ProfileSyncServiceMockForExtensionTests(Profile* p)
       : ProfileSyncServiceMock(CreateProfileSyncServiceParamsForTest(p)) {}
-  ~ProfileSyncServiceMockForExtensionTests() {}
+  ~ProfileSyncServiceMockForExtensionTests() override {}
 
   MOCK_METHOD0(Shutdown, void());
   MOCK_CONST_METHOD0(GetDeviceInfoTracker, DeviceInfoTracker*());
@@ -157,7 +158,7 @@ class ExtensionSignedInDevicesTest : public ExtensionApiUnittest {
  private:
   TestingProfile::TestingFactories GetTestingFactories() override {
     return {{ProfileSyncServiceFactory::GetInstance(),
-             CreateProfileSyncServiceMock}};
+             base::BindRepeating(&CreateProfileSyncServiceMock)}};
   }
 };
 

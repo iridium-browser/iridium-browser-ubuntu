@@ -23,7 +23,7 @@ ar{
             patterns{
                 currencyFormat{"#,##0.00 ¤"}
                 decimalFormat{"#,##0.###"}
-                percentFormat{"#,##0 %"}
+                percentFormat{"#,##0%"}
                 scientificFormat{"#E0"}
             }
             symbols{
@@ -41,7 +41,7 @@ ar{
                 timeSeparator{":"}
             }
         }
-        default{"arab"}
+        default{"latn"}
         latn{
             miscPatterns{
                 atLeast{"+{0}"}
@@ -383,7 +383,7 @@ ar{
         minimumGroupingDigits{"1"}
         native{"arab"}
     }
-    Version{"2.1.36.86"}
+    Version{"2.1.41.97"}
     calendar{
         buddhist{
             eras{

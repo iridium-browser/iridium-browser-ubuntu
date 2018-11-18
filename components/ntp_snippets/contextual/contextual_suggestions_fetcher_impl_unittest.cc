@@ -12,20 +12,23 @@
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/test/bind_test_util.h"
-#include "base/test/histogram_tester.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_task_environment.h"
+#include "components/ntp_snippets/contextual/contextual_suggestions_result.h"
+#include "components/ntp_snippets/contextual/contextual_suggestions_test_utils.h"
 #include "components/ntp_snippets/contextual/proto/chrome_search_api_request_context.pb.h"
 #include "components/ntp_snippets/contextual/proto/get_pivots_request.pb.h"
 #include "components/ntp_snippets/contextual/proto/get_pivots_response.pb.h"
 #include "net/http/http_status_code.h"
-#include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "services/network/public/cpp/url_loader_completion_status.h"
+#include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
 #include "services/network/test/test_url_loader_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-namespace ntp_snippets {
+namespace contextual_suggestions {
 
+using contextual_suggestions::AutoPeekConditions;
 using contextual_suggestions::ClusterBuilder;
 using contextual_suggestions::ContextualSuggestionsEvent;
 using contextual_suggestions::ExploreContext;
@@ -33,6 +36,9 @@ using contextual_suggestions::GetPivotsQuery;
 using contextual_suggestions::GetPivotsRequest;
 using contextual_suggestions::GetPivotsResponse;
 using contextual_suggestions::ImageId;
+using contextual_suggestions::MockClustersCallback;
+using contextual_suggestions::MockMetricsCallback;
+using contextual_suggestions::PeekConditions;
 using contextual_suggestions::PivotCluster;
 using contextual_suggestions::PivotClusteringParams;
 using contextual_suggestions::PivotDocument;
@@ -44,58 +50,6 @@ using network::TestURLLoaderFactory;
 using testing::ElementsAre;
 
 namespace {
-
-class MockClustersCallback {
- public:
-  void Done(std::string peek_text, std::vector<Cluster> clusters) {
-    EXPECT_FALSE(has_run);
-    has_run = true;
-    response_peek_text = peek_text;
-    response_clusters = std::move(clusters);
-  }
-
-  bool has_run = false;
-  std::string response_peek_text;
-  std::vector<Cluster> response_clusters;
-};
-
-class MockMetricsCallback {
- public:
-  void Report(ContextualSuggestionsEvent event) { events.push_back(event); }
-
-  std::vector<ContextualSuggestionsEvent> events;
-};
-
-// TODO(pnoland): de-dupe this and the identical class in
-// feed_networking_host_unittest.cc
-class TestSharedURLLoaderFactory : public SharedURLLoaderFactory {
- public:
-  void CreateLoaderAndStart(network::mojom::URLLoaderRequest request,
-                            int32_t routing_id,
-                            int32_t request_id,
-                            uint32_t options,
-                            const network::ResourceRequest& url_request,
-                            network::mojom::URLLoaderClientPtr client,
-                            const net::MutableNetworkTrafficAnnotationTag&
-                                traffic_annotation) override {
-    test_factory_.CreateLoaderAndStart(std::move(request), routing_id,
-                                       request_id, options, url_request,
-                                       std::move(client), traffic_annotation);
-  }
-
-  std::unique_ptr<network::SharedURLLoaderFactoryInfo> Clone() override {
-    NOTREACHED();
-    return nullptr;
-  }
-
-  TestURLLoaderFactory* test_factory() { return &test_factory_; }
-
- protected:
-  ~TestSharedURLLoaderFactory() override = default;
-
- private:
-  TestURLLoaderFactory test_factory_;
-};
 
 Cluster DefaultCluster() {
   return ClusterBuilder("Articles")
@@ -127,12 +81,28 @@ void PopulateDocument(PivotDocument* document,
   image_id->set_encrypted_docid(suggestion.image_id);
 }
 
+void PopulatePeekConditions(AutoPeekConditions* proto_conditions,
+                            const PeekConditions& peek_conditions) {
+  proto_conditions->set_confidence(peek_conditions.confidence);
+  proto_conditions->set_page_scroll_percentage(
+      peek_conditions.page_scroll_percentage);
+  proto_conditions->set_minimum_seconds_on_page(
+      peek_conditions.minimum_seconds_on_page);
+  proto_conditions->set_maximum_number_of_peeks(
+      peek_conditions.maximum_number_of_peeks);
+}
+
 // Populates a GetPivotsResponse proto using |peek_text| and |clusters| and
 // returns that proto as a serialized string.
-std::string SerializedResponseProto(const std::string& peek_text,
-                                    std::vector<Cluster> clusters) {
+std::string SerializedResponseProto(
+    const std::string& peek_text,
+    std::vector<Cluster> clusters,
+    PeekConditions peek_conditions = PeekConditions(),
+    ServerExperimentInfos experiment_infos = ServerExperimentInfos()) {
   GetPivotsResponse response_proto;
   Pivots* pivots = response_proto.mutable_pivots();
+  PopulatePeekConditions(pivots->mutable_auto_peek_conditions(),
+                         peek_conditions);
   pivots->mutable_peek_text()->set_text(peek_text);
 
   for (const auto& cluster : clusters) {
@@ -143,6 +113,12 @@ std::string SerializedResponseProto(const std::string& peek_text,
       PopulateDocument(pivot_cluster->add_item()->mutable_document(),
                        suggestion);
     }
+  }
+
+  for (const auto& experiment_info : experiment_infos) {
+    ExperimentInfo* experiment = pivots->add_experiment_info();
+    experiment->set_experiment_group_name(experiment_info.name);
+    experiment->set_experiment_arm_name(experiment_info.group);
   }
 
   // The fetch parsing logic expects the response to come as (length, bytes)
@@ -169,47 +145,37 @@ std::string SerializedResponseProto(const std::string& peek_text,
   return " " + response_proto.SerializeAsString();
 }
 
-void ExpectSuggestionsMatch(ContextualSuggestion actual,
-                            ContextualSuggestion expected) {
-  EXPECT_EQ(actual.id, expected.id);
-  EXPECT_EQ(actual.title, expected.title);
-  EXPECT_EQ(actual.url, expected.url);
-  EXPECT_EQ(actual.snippet, expected.snippet);
-  EXPECT_EQ(actual.publisher_name, expected.publisher_name);
-  EXPECT_EQ(actual.image_id, expected.image_id);
-  EXPECT_EQ(actual.favicon_image_id, expected.favicon_image_id);
-}
-
-void ExpectClustersMatch(Cluster actual, Cluster expected) {
-  EXPECT_EQ(actual.title, expected.title);
-  for (size_t i = 0; i < actual.suggestions.size(); i++) {
-    ExpectSuggestionsMatch(std::move(actual.suggestions[i]),
-                           std::move(expected.suggestions[i]));
-  }
-}
-
-void ExpectResponsesMatch(MockClustersCallback callback,
-                          std::string expected_peek_text,
-                          std::vector<Cluster> expected_clusters) {
-  EXPECT_EQ(callback.response_peek_text, expected_peek_text);
-  ASSERT_EQ(callback.response_clusters.size(), expected_clusters.size());
-  for (size_t i = 0; i < callback.response_clusters.size(); i++) {
-    ExpectClustersMatch(std::move(callback.response_clusters[i]),
-                        std::move(expected_clusters[i]));
-  }
-}
-
 }  // namespace
+
+class TestUrlKeyedDataCollectionConsentHelper
+    : public unified_consent::UrlKeyedDataCollectionConsentHelper {
+ public:
+  TestUrlKeyedDataCollectionConsentHelper() = default;
+  ~TestUrlKeyedDataCollectionConsentHelper() override = default;
+
+  bool IsEnabled() override { return is_enabled_; }
+  void SetIsEnabled(bool enabled) { is_enabled_ = enabled; }
+
+ private:
+  bool is_enabled_ = false;
+};
 
 class ContextualSuggestionsFetcherTest : public testing::Test {
  public:
   ContextualSuggestionsFetcherTest() {
-    loader_factory_ = base::MakeRefCounted<TestSharedURLLoaderFactory>();
+    shared_url_loader_factory_ =
+        base::MakeRefCounted<network::WeakWrapperSharedURLLoaderFactory>(
+            &test_factory_);
+    auto consent_helper =
+        std::make_unique<TestUrlKeyedDataCollectionConsentHelper>();
+    consent_helper_ = consent_helper.get();
     fetcher_ = std::make_unique<ContextualSuggestionsFetcherImpl>(
-        loader_factory_, "en");
+        shared_url_loader_factory_, std::move(consent_helper), "en");
   }
 
   ~ContextualSuggestionsFetcherTest() override {}
+
+  void SetUp() override { consent_helper()->SetIsEnabled(true); }
 
   void SetFakeResponse(const std::string& response_data,
                        net::HttpStatusCode response_code = net::HTTP_OK,
@@ -223,8 +189,7 @@ class ContextualSuggestionsFetcherTest : public testing::Test {
       status.decoded_body_length = response_data.length();
     }
 
-    loader_factory_->test_factory()->AddResponse(fetch_url, head, response_data,
-                                                 status);
+    test_factory_.AddResponse(fetch_url, head, response_data, status);
   }
 
   void SendAndAwaitResponse(
@@ -237,21 +202,23 @@ class ContextualSuggestionsFetcherTest : public testing::Test {
                                   base::Unretained(mock_metrics_callback))
             : base::DoNothing();
     fetcher().FetchContextualSuggestionsClusters(
-        context_url,
-        base::BindOnce(&MockClustersCallback::Done, base::Unretained(callback)),
-        metrics_callback);
+        context_url, callback->ToOnceCallback(), metrics_callback);
     base::RunLoop().RunUntilIdle();
   }
 
   ContextualSuggestionsFetcher& fetcher() { return *fetcher_; }
 
-  TestURLLoaderFactory* test_factory() {
-    return loader_factory_->test_factory();
+  TestURLLoaderFactory* test_factory() { return &test_factory_; }
+
+  TestUrlKeyedDataCollectionConsentHelper* consent_helper() {
+    return consent_helper_;
   }
 
  private:
   base::test::ScopedTaskEnvironment scoped_task_environment_;
-  scoped_refptr<TestSharedURLLoaderFactory> loader_factory_;
+  network::TestURLLoaderFactory test_factory_;
+  scoped_refptr<network::SharedURLLoaderFactory> shared_url_loader_factory_;
+  TestUrlKeyedDataCollectionConsentHelper* consent_helper_;
   std::unique_ptr<ContextualSuggestionsFetcherImpl> fetcher_;
 
   DISALLOW_COPY_AND_ASSIGN(ContextualSuggestionsFetcherTest);
@@ -266,7 +233,10 @@ TEST_F(ContextualSuggestionsFetcherTest, SingleSuggestionResponse) {
                        &metrics_callback);
 
   EXPECT_TRUE(callback.has_run);
-  ExpectResponsesMatch(std::move(callback), "Peek Text", DefaultClusters());
+  ExpectResponsesMatch(
+      std::move(callback),
+      ContextualSuggestionsResult("Peek Text", DefaultClusters(),
+                                  PeekConditions(), ServerExperimentInfos()));
   EXPECT_EQ(metrics_callback.events,
             std::vector<ContextualSuggestionsEvent>(
                 {contextual_suggestions::FETCH_COMPLETED}));
@@ -327,11 +297,15 @@ TEST_F(ContextualSuggestionsFetcherTest,
   SendAndAwaitResponse(GURL("http://www.article.com/"), &callback);
 
   EXPECT_TRUE(callback.has_run);
-  ExpectResponsesMatch(std::move(callback), "Peek Text",
-                       std::move(clusters_copy));
+  ExpectResponsesMatch(
+      std::move(callback),
+      ContextualSuggestionsResult("Peek Text", std::move(clusters_copy),
+                                  PeekConditions(), ServerExperimentInfos()));
 
-  histogram_tester.ExpectTotalCount("ContextualSuggestions.FetchResponseSizeKB",
-                                    1);
+  histogram_tester.ExpectTotalCount(
+      "ContextualSuggestions.FetchResponseNetworkBytes", 1);
+  histogram_tester.ExpectTotalCount(
+      "ContextualSuggestions.FetchLatencyMilliseconds", 1);
 }
 
 TEST_F(ContextualSuggestionsFetcherTest, FlatResponse) {
@@ -344,8 +318,54 @@ TEST_F(ContextualSuggestionsFetcherTest, FlatResponse) {
   // PivotCluster to copy it from. So we clear the expected title.
   std::vector<Cluster> expected_clusters = DefaultClusters();
   expected_clusters[0].title = "";
-  ExpectResponsesMatch(std::move(callback), "Peek Text",
-                       std::move(expected_clusters));
+  ExpectResponsesMatch(
+      std::move(callback),
+      ContextualSuggestionsResult("Peek Text", std::move(expected_clusters),
+                                  PeekConditions(), ServerExperimentInfos()));
+}
+
+TEST_F(ContextualSuggestionsFetcherTest, PeekConditionsAreParsed) {
+  MockClustersCallback callback;
+  MockMetricsCallback metrics_callback;
+  PeekConditions peek_conditions;
+  peek_conditions.confidence = 0.7;
+  peek_conditions.page_scroll_percentage = 35.0;
+  peek_conditions.minimum_seconds_on_page = 4.5;
+  peek_conditions.maximum_number_of_peeks = 5.0;
+
+  SetFakeResponse(
+      SerializedResponseProto("Peek Text", DefaultClusters(), peek_conditions));
+
+  SendAndAwaitResponse(GURL("http://www.article.com"), &callback,
+                       &metrics_callback);
+
+  EXPECT_TRUE(callback.has_run);
+  ExpectResponsesMatch(
+      std::move(callback),
+      ContextualSuggestionsResult("Peek Text", DefaultClusters(),
+                                  peek_conditions, ServerExperimentInfos()));
+}
+
+TEST_F(ContextualSuggestionsFetcherTest, ServerExperimentInfosAreParsed) {
+  MockClustersCallback callback;
+  MockMetricsCallback metrics_callback;
+  ServerExperimentInfos experiment_infos;
+  experiment_infos.emplace_back("trial1", "group1");
+  experiment_infos.emplace_back("trial2", "group2");
+  SetFakeResponse(SerializedResponseProto("Peek Text", DefaultClusters(),
+                                          PeekConditions(), experiment_infos));
+
+  SendAndAwaitResponse(GURL("http://www.article.com"), &callback,
+                       &metrics_callback);
+
+  EXPECT_TRUE(callback.has_run);
+  ExpectResponsesMatch(
+      std::move(callback),
+      ContextualSuggestionsResult("Peek Text", DefaultClusters(),
+                                  PeekConditions(), experiment_infos));
+  EXPECT_EQ(metrics_callback.events,
+            std::vector<ContextualSuggestionsEvent>(
+                {contextual_suggestions::FETCH_COMPLETED}));
 }
 
 TEST_F(ContextualSuggestionsFetcherTest, HtmlEntitiesAreUnescaped) {
@@ -371,8 +391,10 @@ TEST_F(ContextualSuggestionsFetcherTest, HtmlEntitiesAreUnescaped) {
   // entities we added.
   expected_clusters[0].suggestions[0].title = "\"foobar\"";
   expected_clusters[0].suggestions[0].snippet = "\'barbaz\'";
-  ExpectResponsesMatch(std::move(callback), "Peek Text",
-                       std::move(expected_clusters));
+  ExpectResponsesMatch(
+      std::move(callback),
+      ContextualSuggestionsResult("Peek Text", std::move(expected_clusters),
+                                  PeekConditions(), ServerExperimentInfos()));
 }
 
 TEST_F(ContextualSuggestionsFetcherTest, RequestHeaderSetCorrectly) {
@@ -411,6 +433,42 @@ TEST_F(ContextualSuggestionsFetcherTest, RequestHeaderSetCorrectly) {
 
   histogram_tester.ExpectTotalCount(
       "ContextualSuggestions.FetchRequestProtoSizeKB", 1);
+}
+
+TEST_F(ContextualSuggestionsFetcherTest, CookiesIncludedWhenConsentIsEnabled) {
+  network::ResourceRequest last_resource_request;
+
+  test_factory()->SetInterceptor(
+      base::BindLambdaForTesting([&](const network::ResourceRequest& request) {
+        last_resource_request = request;
+      }));
+
+  SetFakeResponse(SerializedResponseProto("Peek Text", DefaultClusters()));
+
+  MockClustersCallback callback;
+  SendAndAwaitResponse(GURL("http://www.article.com/"), &callback);
+
+  int load_flags = last_resource_request.load_flags;
+  EXPECT_EQ(0, load_flags & net::LOAD_DO_NOT_SEND_COOKIES);
+}
+
+TEST_F(ContextualSuggestionsFetcherTest, CookiesExcludedWhenConsentIsDisabled) {
+  consent_helper()->SetIsEnabled(false);
+  network::ResourceRequest last_resource_request;
+
+  test_factory()->SetInterceptor(
+      base::BindLambdaForTesting([&](const network::ResourceRequest& request) {
+        last_resource_request = request;
+      }));
+
+  SetFakeResponse(SerializedResponseProto("Peek Text", DefaultClusters()));
+
+  MockClustersCallback callback;
+  SendAndAwaitResponse(GURL("http://www.article.com/"), &callback);
+
+  int load_flags = last_resource_request.load_flags;
+  EXPECT_EQ(net::LOAD_DO_NOT_SEND_COOKIES,
+            load_flags & net::LOAD_DO_NOT_SEND_COOKIES);
 }
 
 TEST_F(ContextualSuggestionsFetcherTest, ProtocolError) {
@@ -509,7 +567,10 @@ TEST_F(ContextualSuggestionsFetcherTest, ResponseWithUnsetFields) {
 
   EXPECT_TRUE(callback.has_run);
   EXPECT_EQ(callback.response_clusters.size(), 1u);
-  ExpectResponsesMatch(std::move(callback), "", std::move(expected_clusters));
+  ExpectResponsesMatch(
+      std::move(callback),
+      ContextualSuggestionsResult("", std::move(expected_clusters),
+                                  PeekConditions(), ServerExperimentInfos()));
 }
 
 TEST_F(ContextualSuggestionsFetcherTest, CorruptResponse) {
@@ -521,4 +582,4 @@ TEST_F(ContextualSuggestionsFetcherTest, CorruptResponse) {
   EXPECT_EQ(callback.response_clusters.size(), 0u);
 }
 
-}  // namespace ntp_snippets
+}  // namespace contextual_suggestions

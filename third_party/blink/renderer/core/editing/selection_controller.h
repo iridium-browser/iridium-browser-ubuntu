@@ -29,6 +29,7 @@
 
 #include "base/macros.h"
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/document_shutdown_observer.h"
 #include "third_party/blink/renderer/core/editing/frame_selection.h"
 #include "third_party/blink/renderer/core/editing/position_with_affinity.h"
@@ -49,13 +50,13 @@ class CORE_EXPORT SelectionController final
  public:
   static SelectionController* Create(LocalFrame&);
   virtual ~SelectionController();
-  void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
   bool HandleMousePressEvent(const MouseEventWithHitTestResults&);
   void HandleMouseDraggedEvent(const MouseEventWithHitTestResults&,
                                const IntPoint&,
                                const LayoutPoint&,
-                               const IntPoint&);
+                               const LayoutPoint&);
   bool HandleMouseReleaseEvent(const MouseEventWithHitTestResults&,
                                const LayoutPoint&);
   bool HandlePasteGlobalSelection(const WebMouseEvent&);
@@ -63,10 +64,10 @@ class CORE_EXPORT SelectionController final
   void HandleGestureTwoFingerTap(const GestureEventWithHitTestResults&);
   void HandleGestureLongTap(const GestureEventWithHitTestResults&);
 
-  void UpdateSelectionForMouseDrag(const LayoutPoint&, const IntPoint&);
+  void UpdateSelectionForMouseDrag(const LayoutPoint&, const LayoutPoint&);
   void UpdateSelectionForMouseDrag(const HitTestResult&,
                                    const LayoutPoint&,
-                                   const IntPoint&);
+                                   const LayoutPoint&);
   void SendContextMenuEvent(const MouseEventWithHitTestResults&,
                             const LayoutPoint&);
   void PassMousePressEventToSubframe(const MouseEventWithHitTestResults&);
@@ -118,7 +119,7 @@ class CORE_EXPORT SelectionController final
   FrameSelection& Selection() const;
 
   // Implements |DocumentShutdownObserver|.
-  // TODO(yosin): We should relocate |m_originalBaseInFlatTree| when DOM tree
+  // TODO(yosin): We should relocate |original_base_in_flat_tree_| when DOM tree
   // changed.
   void ContextDestroyed(Document*) final;
 

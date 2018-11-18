@@ -12,6 +12,7 @@ cr.exportPath('print_preview_new');
  *   unavailableValue: *,
  *   valid: boolean,
  *   available: boolean,
+ *   setByPolicy: boolean,
  *   key: string,
  * }}
  */
@@ -37,6 +38,7 @@ print_preview_new.Setting;
  *   vendorItems: !print_preview_new.Setting,
  *   otherOptions: !print_preview_new.Setting,
  *   ranges: !print_preview_new.Setting,
+ *   pagesPerSheet: !print_preview_new.Setting,
  * }}
  */
 print_preview_new.Settings;
@@ -73,11 +75,12 @@ const SettingsBehavior = {
 
   /**
    * @param {string} settingName Name of the setting to set
-   * @param {boolean | string | number | Array | Object} value The value to set
-   *     the setting to.
+   * @param {*} value The value to set the setting to.
    */
   setSetting: function(settingName, value) {
     const setting = this.getSetting(settingName);
+    if (setting.setByPolicy)
+      return;
     this.set(`settings.${settingName}.value`, value);
   },
 
@@ -91,8 +94,9 @@ const SettingsBehavior = {
     // is no way for the user to change the value in this case.
     if (!valid)
       assert(setting.available, 'Setting is not available: ' + settingName);
-    if (valid != setting.valid)
-      this.fire('setting-valid-changed', valid);
+    const shouldFireEvent = valid != setting.valid;
     this.set(`settings.${settingName}.valid`, valid);
+    if (shouldFireEvent)
+      this.fire('setting-valid-changed', valid);
   }
 };

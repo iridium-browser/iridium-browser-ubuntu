@@ -11,6 +11,7 @@
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
 
 namespace content {
+class URLLoaderFactoryBundleInfo;
 
 class SharedWorkerFactoryImpl : public mojom::SharedWorkerFactory {
  public:
@@ -24,11 +25,17 @@ class SharedWorkerFactoryImpl : public mojom::SharedWorkerFactory {
       mojom::SharedWorkerInfoPtr info,
       bool pause_on_start,
       const base::UnguessableToken& devtools_worker_token,
+      const RendererPreferences& renderer_preferences,
+      mojom::RendererPreferenceWatcherRequest preference_watcher_request,
       blink::mojom::WorkerContentSettingsProxyPtr content_settings,
       mojom::ServiceWorkerProviderInfoForSharedWorkerPtr
           service_worker_provider_info,
+      int appcache_host_id,
       network::mojom::URLLoaderFactoryAssociatedPtrInfo
-          script_loader_factory_ptr_info,
+          main_script_loader_factory,
+      blink::mojom::SharedWorkerMainScriptLoadParamsPtr main_script_load_params,
+      std::unique_ptr<URLLoaderFactoryBundleInfo> subresource_loader_factories,
+      mojom::ControllerServiceWorkerInfoPtr controller_info,
       mojom::SharedWorkerHostPtr host,
       mojom::SharedWorkerRequest request,
       service_manager::mojom::InterfaceProviderPtr interface_provider) override;

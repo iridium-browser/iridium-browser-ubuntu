@@ -20,7 +20,7 @@
 
 #if defined(OS_CHROMEOS)
 #include "chromeos/dbus/power_manager_client.h"
-#include "ui/display/manager/chromeos/display_configurator.h"
+#include "ui/display/manager/display_configurator.h"
 #endif
 
 namespace aura {
@@ -97,7 +97,8 @@ class ShellDesktopControllerAura
 
   // ui::internal::InputMethodDelegate:
   ui::EventDispatchDetails DispatchKeyEventPostIME(
-      ui::KeyEvent* key_event) override;
+      ui::KeyEvent* key_event,
+      base::OnceCallback<void(bool)> ack_callback) override;
 
   // KeepAliveStateObserver:
   void OnKeepAliveStateChanged(bool is_keeping_alive) override;

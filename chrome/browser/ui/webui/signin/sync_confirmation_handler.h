@@ -11,6 +11,7 @@
 #include "base/macros.h"
 #include "chrome/browser/ui/browser_list_observer.h"
 #include "chrome/browser/ui/webui/signin/login_ui_service.h"
+#include "components/consent_auditor/consent_auditor.h"
 #include "components/signin/core/browser/account_tracker_service.h"
 #include "content/public/browser/web_ui_message_handler.h"
 
@@ -27,7 +28,8 @@ class SyncConfirmationHandler : public content::WebUIMessageHandler,
   // mapped to their GRD IDs.
   explicit SyncConfirmationHandler(
       Browser* browser,
-      const std::unordered_map<std::string, int>& string_to_grd_id_map);
+      const std::unordered_map<std::string, int>& string_to_grd_id_map,
+      consent_auditor::Feature consent_feature);
   ~SyncConfirmationHandler() override;
 
   // content::WebUIMessageHandler:
@@ -61,6 +63,11 @@ class SyncConfirmationHandler : public content::WebUIMessageHandler,
   // a single integer value for the height the native view should resize to.
   virtual void HandleInitializedWithSize(const base::ListValue* args);
 
+  // Handles the "accountImageRequest" message sent after the
+  // "account-image-changed" WebUIListener was added. This method calls
+  // |SetUserImageURL| with the signed-in user's picture url.
+  virtual void HandleAccountImageRequest(const base::ListValue* args);
+
   // Records the user's consent to sync. Called from |HandleConfirm| and
   // |HandleGoToSettings|, and expects two parameters to be passed through
   // these methods from the WebUI:
@@ -80,6 +87,10 @@ class SyncConfirmationHandler : public content::WebUIMessageHandler,
   void CloseModalSigninWindow(
       LoginUIService::SyncConfirmationUIClosedResult result);
 
+  // Returns true if this is a unified consent bump dialog, and false if this is
+  // a regular sync confirmation.
+  bool IsUnifiedConsentBumpDialog();
+
  private:
   Profile* profile_;
 
@@ -92,6 +103,9 @@ class SyncConfirmationHandler : public content::WebUIMessageHandler,
   // Mapping between strings displayed in the UI corresponding to this handler
   // and their respective GRD IDs.
   std::unordered_map<std::string, int> string_to_grd_id_map_;
+
+  // Contains the features to use when the user consent decision is recorded.
+  consent_auditor::Feature consent_feature_;
 
   DISALLOW_COPY_AND_ASSIGN(SyncConfirmationHandler);
 };

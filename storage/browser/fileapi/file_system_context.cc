@@ -37,6 +37,7 @@
 #include "storage/browser/quota/special_storage_policy.h"
 #include "storage/common/fileapi/file_system_info.h"
 #include "storage/common/fileapi/file_system_util.h"
+#include "third_party/leveldatabase/leveldb_chrome.h"
 #include "url/gurl.h"
 
 using storage::QuotaClient;
@@ -99,6 +100,7 @@ int FileSystemContext::GetPermissionPolicy(FileSystemType type) {
     case kFileSystemTypeCloudDevice:
     case kFileSystemTypeProvided:
     case kFileSystemTypeDeviceMediaAsFileStorage:
+    case kFileSystemTypeDriveFs:
       return FILE_PERMISSION_USE_FILE_PERMISSION;
 
     case kFileSystemTypeRestrictedNativeLocal:
@@ -146,7 +148,10 @@ FileSystemContext::FileSystemContext(
     const std::vector<URLRequestAutoMountHandler>& auto_mount_handlers,
     const base::FilePath& partition_path,
     const FileSystemOptions& options)
-    : io_task_runner_(io_task_runner),
+    : env_override_(options.is_in_memory()
+                        ? leveldb_chrome::NewMemEnv("FileSystem")
+                        : nullptr),
+      io_task_runner_(io_task_runner),
       default_file_task_runner_(file_task_runner),
       quota_manager_proxy_(quota_manager_proxy),
       sandbox_delegate_(
@@ -154,13 +159,15 @@ FileSystemContext::FileSystemContext(
                                                file_task_runner,
                                                partition_path,
                                                special_storage_policy,
-                                               options)),
+                                               options,
+                                               env_override_.get())),
       sandbox_backend_(new SandboxFileSystemBackend(sandbox_delegate_.get())),
       plugin_private_backend_(
           new PluginPrivateFileSystemBackend(file_task_runner,
                                              partition_path,
                                              special_storage_policy,
-                                             options)),
+                                             options,
+                                             env_override_.get())),
       additional_backends_(std::move(additional_backends)),
       auto_mount_handlers_(auto_mount_handlers),
       external_mount_points_(external_mount_points),
@@ -209,15 +216,13 @@ bool FileSystemContext::DeleteDataForOriginOnFileTaskRunner(
   DCHECK(origin_url == origin_url.GetOrigin());
 
   bool success = true;
-  for (FileSystemBackendMap::iterator iter = backend_map_.begin();
-       iter != backend_map_.end();
-       ++iter) {
-    FileSystemBackend* backend = iter->second;
+  for (auto& type_backend_pair : backend_map_) {
+    FileSystemBackend* backend = type_backend_pair.second;
     if (!backend->GetQuotaUtil())
       continue;
     if (backend->GetQuotaUtil()->DeleteOriginDataOnFileTaskRunner(
-            this, quota_manager_proxy(), origin_url, iter->first)
-            != base::File::FILE_OK) {
+            this, quota_manager_proxy(), origin_url, type_backend_pair.first) !=
+        base::File::FILE_OK) {
       // Continue the loop, but record the failure.
       success = false;
     }
@@ -252,7 +257,7 @@ FileSystemQuotaUtil*
 FileSystemContext::GetQuotaUtil(FileSystemType type) const {
   FileSystemBackend* backend = GetFileSystemBackend(type);
   if (!backend)
-    return NULL;
+    return nullptr;
   return backend->GetQuotaUtil();
 }
 
@@ -260,7 +265,7 @@ AsyncFileUtil* FileSystemContext::GetAsyncFileUtil(
     FileSystemType type) const {
   FileSystemBackend* backend = GetFileSystemBackend(type);
   if (!backend)
-    return NULL;
+    return nullptr;
   return backend->GetAsyncFileUtil(type);
 }
 
@@ -271,30 +276,30 @@ FileSystemContext::GetCopyOrMoveFileValidatorFactory(
   *error_code = base::File::FILE_OK;
   FileSystemBackend* backend = GetFileSystemBackend(type);
   if (!backend)
-    return NULL;
+    return nullptr;
   return backend->GetCopyOrMoveFileValidatorFactory(
       type, error_code);
 }
 
 FileSystemBackend* FileSystemContext::GetFileSystemBackend(
     FileSystemType type) const {
-  FileSystemBackendMap::const_iterator found = backend_map_.find(type);
+  auto found = backend_map_.find(type);
   if (found != backend_map_.end())
     return found->second;
   NOTREACHED() << "Unknown filesystem type: " << type;
-  return NULL;
+  return nullptr;
 }
 
 WatcherManager* FileSystemContext::GetWatcherManager(
     FileSystemType type) const {
   FileSystemBackend* backend = GetFileSystemBackend(type);
   if (!backend)
-    return NULL;
+    return nullptr;
   return backend->GetWatcherManager(type);
 }
 
 bool FileSystemContext::IsSandboxFileSystem(FileSystemType type) const {
-  FileSystemBackendMap::const_iterator found = backend_map_.find(type);
+  auto found = backend_map_.find(type);
   return found != backend_map_.end() && found->second->GetQuotaUtil();
 }
 
@@ -316,12 +321,12 @@ const AccessObserverList* FileSystemContext::GetAccessObservers(
   return backend->GetAccessObservers(type);
 }
 
-void FileSystemContext::GetFileSystemTypes(
-    std::vector<FileSystemType>* types) const {
-  types->clear();
-  for (FileSystemBackendMap::const_iterator iter = backend_map_.begin();
-       iter != backend_map_.end(); ++iter)
-    types->push_back(iter->first);
+std::vector<FileSystemType> FileSystemContext::GetFileSystemTypes() const {
+  std::vector<FileSystemType> types;
+  types.reserve(backend_map_.size());
+  for (const auto& type_backend_pair : backend_map_)
+    types.push_back(type_backend_pair.first);
+  return types;
 }
 
 ExternalFileSystemBackend*
@@ -501,7 +506,11 @@ void FileSystemContext::OpenPluginPrivateFileSystem(
       origin_url, type, filesystem_id, plugin_id, mode, std::move(callback));
 }
 
-FileSystemContext::~FileSystemContext() = default;
+FileSystemContext::~FileSystemContext() {
+  // TODO(crbug.com/823854) This is a leak. Delete env after the backends have
+  // been deleted.
+  env_override_.release();
+}
 
 void FileSystemContext::DeleteOnCorrectSequence() const {
   if (!io_task_runner_->RunsTasksInCurrentSequence() &&
@@ -516,14 +525,14 @@ FileSystemOperation* FileSystemContext::CreateFileSystemOperation(
   if (!url.is_valid()) {
     if (error_code)
       *error_code = base::File::FILE_ERROR_INVALID_URL;
-    return NULL;
+    return nullptr;
   }
 
   FileSystemBackend* backend = GetFileSystemBackend(url.type());
   if (!backend) {
     if (error_code)
       *error_code = base::File::FILE_ERROR_FAILED;
-    return NULL;
+    return nullptr;
   }
 
   base::File::Error fs_error = base::File::FILE_OK;

@@ -33,6 +33,7 @@ extern "C" {
  * - @subpage page_iface_zcr_remote_shell_v1 - remote_shell
  * - @subpage page_iface_zcr_remote_surface_v1 - A desktop window
  * - @subpage page_iface_zcr_notification_surface_v1 - A notification window
+ * - @subpage page_iface_zcr_input_method_surface_v1 - An input method window
  * @section page_copyright_remote_shell_unstable_v1 Copyright
  * <pre>
  *
@@ -59,6 +60,7 @@ extern "C" {
  * </pre>
  */
 struct wl_surface;
+struct zcr_input_method_surface_v1;
 struct zcr_notification_surface_v1;
 struct zcr_remote_shell_v1;
 struct zcr_remote_surface_v1;
@@ -133,6 +135,20 @@ extern const struct wl_interface zcr_remote_surface_v1_interface;
  * notification contents.
  */
 extern const struct wl_interface zcr_notification_surface_v1_interface;
+/**
+ * @page page_iface_zcr_input_method_surface_v1 zcr_input_method_surface_v1
+ * @section page_iface_zcr_input_method_surface_v1_desc Description
+ *
+ * An interface that may be implemented by a wl_surface to host IME contents.
+ * @section page_iface_zcr_input_method_surface_v1_api API
+ * See @ref iface_zcr_input_method_surface_v1.
+ */
+/**
+ * @defgroup iface_zcr_input_method_surface_v1 The zcr_input_method_surface_v1 interface
+ *
+ * An interface that may be implemented by a wl_surface to host IME contents.
+ */
+extern const struct wl_interface zcr_input_method_surface_v1_interface;
 
 #ifndef ZCR_REMOTE_SHELL_V1_CONTAINER_ENUM
 #define ZCR_REMOTE_SHELL_V1_CONTAINER_ENUM
@@ -204,6 +220,10 @@ enum zcr_remote_shell_v1_state_type {
 	 * right snapped window state
 	 */
 	ZCR_REMOTE_SHELL_V1_STATE_TYPE_RIGHT_SNAPPED = 10,
+	/**
+	 * pip window state
+	 */
+	ZCR_REMOTE_SHELL_V1_STATE_TYPE_PIP = 11,
 };
 #endif /* ZCR_REMOTE_SHELL_V1_STATE_TYPE_ENUM */
 
@@ -282,8 +302,8 @@ struct zcr_remote_shell_v1_listener {
 	 */
 	void (*workspace)(void *data,
 			  struct zcr_remote_shell_v1 *zcr_remote_shell_v1,
-			  uint32_t id_hi,
-			  uint32_t id_lo,
+			  uint32_t display_id_hi,
+			  uint32_t display_id_lo,
 			  int32_t x,
 			  int32_t y,
 			  int32_t width,
@@ -315,6 +335,21 @@ struct zcr_remote_shell_v1_listener {
 	void (*default_device_scale_factor)(void *data,
 					    struct zcr_remote_shell_v1 *zcr_remote_shell_v1,
 					    int32_t scale);
+	/**
+	 * extra display information
+	 *
+	 * Sends display size in pixels and display identification data,
+	 * typically in EDID format. Preceded by a "workspace" event for
+	 * the same display.
+	 * @since 19
+	 */
+	void (*display_info)(void *data,
+			     struct zcr_remote_shell_v1 *zcr_remote_shell_v1,
+			     uint32_t display_id_hi,
+			     uint32_t display_id_lo,
+			     int32_t width,
+			     int32_t height,
+			     struct wl_array *identification_data);
 };
 
 /**
@@ -331,6 +366,7 @@ zcr_remote_shell_v1_add_listener(struct zcr_remote_shell_v1 *zcr_remote_shell_v1
 #define ZCR_REMOTE_SHELL_V1_DESTROY 0
 #define ZCR_REMOTE_SHELL_V1_GET_REMOTE_SURFACE 1
 #define ZCR_REMOTE_SHELL_V1_GET_NOTIFICATION_SURFACE 2
+#define ZCR_REMOTE_SHELL_V1_GET_INPUT_METHOD_SURFACE 3
 
 /**
  * @ingroup iface_zcr_remote_shell_v1
@@ -352,6 +388,10 @@ zcr_remote_shell_v1_add_listener(struct zcr_remote_shell_v1 *zcr_remote_shell_v1
  * @ingroup iface_zcr_remote_shell_v1
  */
 #define ZCR_REMOTE_SHELL_V1_DEFAULT_DEVICE_SCALE_FACTOR_SINCE_VERSION 8
+/**
+ * @ingroup iface_zcr_remote_shell_v1
+ */
+#define ZCR_REMOTE_SHELL_V1_DISPLAY_INFO_SINCE_VERSION 19
 
 /**
  * @ingroup iface_zcr_remote_shell_v1
@@ -365,6 +405,10 @@ zcr_remote_shell_v1_add_listener(struct zcr_remote_shell_v1 *zcr_remote_shell_v1
  * @ingroup iface_zcr_remote_shell_v1
  */
 #define ZCR_REMOTE_SHELL_V1_GET_NOTIFICATION_SURFACE_SINCE_VERSION 1
+/**
+ * @ingroup iface_zcr_remote_shell_v1
+ */
+#define ZCR_REMOTE_SHELL_V1_GET_INPUT_METHOD_SURFACE_SINCE_VERSION 17
 
 /** @ingroup iface_zcr_remote_shell_v1 */
 static inline void
@@ -442,6 +486,23 @@ zcr_remote_shell_v1_get_notification_surface(struct zcr_remote_shell_v1 *zcr_rem
 			 ZCR_REMOTE_SHELL_V1_GET_NOTIFICATION_SURFACE, &zcr_notification_surface_v1_interface, NULL, surface, notification_key);
 
 	return (struct zcr_notification_surface_v1 *) id;
+}
+
+/**
+ * @ingroup iface_zcr_remote_shell_v1
+ *
+ * Creates an input_method_surface for the given surface, gives it
+ * the input_method_surface role.
+ */
+static inline struct zcr_input_method_surface_v1 *
+zcr_remote_shell_v1_get_input_method_surface(struct zcr_remote_shell_v1 *zcr_remote_shell_v1, struct wl_surface *surface)
+{
+	struct wl_proxy *id;
+
+	id = wl_proxy_marshal_constructor((struct wl_proxy *) zcr_remote_shell_v1,
+			 ZCR_REMOTE_SHELL_V1_GET_INPUT_METHOD_SURFACE, &zcr_input_method_surface_v1_interface, NULL, surface);
+
+	return (struct zcr_input_method_surface_v1 *) id;
 }
 
 #ifndef ZCR_REMOTE_SURFACE_V1_SYSTEMUI_VISIBILITY_STATE_ENUM
@@ -660,6 +721,50 @@ enum zcr_remote_surface_v1_frame_button_type {
 };
 #endif /* ZCR_REMOTE_SURFACE_V1_FRAME_BUTTON_TYPE_ENUM */
 
+#ifndef ZCR_REMOTE_SURFACE_V1_ORIENTATION_LOCK_ENUM
+#define ZCR_REMOTE_SURFACE_V1_ORIENTATION_LOCK_ENUM
+/**
+ * @ingroup iface_zcr_remote_surface_v1
+ * orientation lock request for remote surfaces
+ *
+ * Defines orientation request when a remote surface is in foreground.
+ */
+enum zcr_remote_surface_v1_orientation_lock {
+	/**
+	 * no orientation lock
+	 */
+	ZCR_REMOTE_SURFACE_V1_ORIENTATION_LOCK_NONE = 1,
+	/**
+	 * primary or secondary portrait
+	 */
+	ZCR_REMOTE_SURFACE_V1_ORIENTATION_LOCK_PORTRAIT = 2,
+	/**
+	 * primary or secondary landscape
+	 */
+	ZCR_REMOTE_SURFACE_V1_ORIENTATION_LOCK_LANDSCAPE = 3,
+	/**
+	 * keep current orientation
+	 */
+	ZCR_REMOTE_SURFACE_V1_ORIENTATION_LOCK_CURRENT = 4,
+	/**
+	 * primary portrait
+	 */
+	ZCR_REMOTE_SURFACE_V1_ORIENTATION_LOCK_PORTRAIT_PRIMARY = 5,
+	/**
+	 * primary landscape
+	 */
+	ZCR_REMOTE_SURFACE_V1_ORIENTATION_LOCK_LANDSCAPE_PRIMARY = 6,
+	/**
+	 * secondary portrait
+	 */
+	ZCR_REMOTE_SURFACE_V1_ORIENTATION_LOCK_PORTRAIT_SECONDARY = 7,
+	/**
+	 * secondary landscape
+	 */
+	ZCR_REMOTE_SURFACE_V1_ORIENTATION_LOCK_LANDSCAPE_SECONDARY = 8,
+};
+#endif /* ZCR_REMOTE_SURFACE_V1_ORIENTATION_LOCK_ENUM */
+
 /**
  * @ingroup iface_zcr_remote_surface_v1
  * @struct zcr_remote_surface_v1_listener
@@ -757,8 +862,8 @@ struct zcr_remote_surface_v1_listener {
 	 */
 	void (*bounds_changed)(void *data,
 			       struct zcr_remote_surface_v1 *zcr_remote_surface_v1,
-			       uint32_t workspace_id_hi,
-			       uint32_t workspace_id_lo,
+			       uint32_t display_id_hi,
+			       uint32_t display_id_lo,
 			       int32_t x,
 			       int32_t y,
 			       int32_t width,
@@ -846,6 +951,9 @@ zcr_remote_surface_v1_add_listener(struct zcr_remote_surface_v1 *zcr_remote_surf
 #define ZCR_REMOTE_SURFACE_V1_SET_FRAME 36
 #define ZCR_REMOTE_SURFACE_V1_SET_FRAME_BUTTONS 37
 #define ZCR_REMOTE_SURFACE_V1_SET_EXTRA_TITLE 38
+#define ZCR_REMOTE_SURFACE_V1_SET_ORIENTATION_LOCK 39
+#define ZCR_REMOTE_SURFACE_V1_PIP 40
+#define ZCR_REMOTE_SURFACE_V1_SET_BOUNDS 41
 
 /**
  * @ingroup iface_zcr_remote_surface_v1
@@ -1032,6 +1140,18 @@ zcr_remote_surface_v1_add_listener(struct zcr_remote_surface_v1 *zcr_remote_surf
  * @ingroup iface_zcr_remote_surface_v1
  */
 #define ZCR_REMOTE_SURFACE_V1_SET_EXTRA_TITLE_SINCE_VERSION 13
+/**
+ * @ingroup iface_zcr_remote_surface_v1
+ */
+#define ZCR_REMOTE_SURFACE_V1_SET_ORIENTATION_LOCK_SINCE_VERSION 14
+/**
+ * @ingroup iface_zcr_remote_surface_v1
+ */
+#define ZCR_REMOTE_SURFACE_V1_PIP_SINCE_VERSION 15
+/**
+ * @ingroup iface_zcr_remote_surface_v1
+ */
+#define ZCR_REMOTE_SURFACE_V1_SET_BOUNDS_SINCE_VERSION 18
 
 /** @ingroup iface_zcr_remote_surface_v1 */
 static inline void
@@ -1083,9 +1203,9 @@ zcr_remote_surface_v1_set_app_id(struct zcr_remote_surface_v1 *zcr_remote_surfac
 /**
  * @ingroup iface_zcr_remote_surface_v1
  *
- * The window geometry of a window is its "visible bounds" from the
- * user's perspective. Client-side decorations often have invisible
- * portions like drop-shadows which should be ignored for the
+ * [Deprecated] The window geometry of a window is its "visible bounds"
+ * from the user's perspective. Client-side decorations often have
+ * invisible portions like drop-shadows which should be ignored for the
  * purposes of aligning, placing and constraining windows.
  *
  * The window geometry is double buffered, and will be applied at the
@@ -1441,7 +1561,7 @@ zcr_remote_surface_v1_ack_configure(struct zcr_remote_surface_v1 *zcr_remote_sur
 /**
  * @ingroup iface_zcr_remote_surface_v1
  *
- * Start an interactive, user-driven move of the surface.
+ * [Deprecated] Start an interactive, user-driven move of the surface.
  *
  * The compositor responds to this request with a configure event that
  * transitions to the "moving" state. The client must only initiate motion
@@ -1695,13 +1815,72 @@ zcr_remote_surface_v1_set_extra_title(struct zcr_remote_surface_v1 *zcr_remote_s
 			 ZCR_REMOTE_SURFACE_V1_SET_EXTRA_TITLE, extra_title);
 }
 
+/**
+ * @ingroup iface_zcr_remote_surface_v1
+ *
+ * Request a specific orientation behavior when this surface is in foreground.
+ */
+static inline void
+zcr_remote_surface_v1_set_orientation_lock(struct zcr_remote_surface_v1 *zcr_remote_surface_v1, uint32_t orientation_lock)
+{
+	wl_proxy_marshal((struct wl_proxy *) zcr_remote_surface_v1,
+			 ZCR_REMOTE_SURFACE_V1_SET_ORIENTATION_LOCK, orientation_lock);
+}
+
+/**
+ * @ingroup iface_zcr_remote_surface_v1
+ *
+ * Request that surface is set to Picture-in-Picture (PIP).
+ */
+static inline void
+zcr_remote_surface_v1_pip(struct zcr_remote_surface_v1 *zcr_remote_surface_v1)
+{
+	wl_proxy_marshal((struct wl_proxy *) zcr_remote_surface_v1,
+			 ZCR_REMOTE_SURFACE_V1_PIP);
+}
+
+/**
+ * @ingroup iface_zcr_remote_surface_v1
+ *
+ * Set the "visible bounds" of a window from the user's perspective.
+ * Client-side decorations often have invisible portions like drop shadows
+ * which should be ignored for the purposes of aligning, placing and
+ * constraining windows.
+ *
+ * The bounds are double buffered, and will be applied at the
+ * time wl_surface.commit of the corresponding wl_surface is called.
+ *
+ * Once the bounds are set, it is not possible to unset them, and they will
+ * remain the same until set_bounds is called again, even if a new sub-
+ * surface or buffer is attached.
+ *
+ * If never set, the value is the surface content bounds. This updates
+ * dynamically on every commit.
+ *
+ * The bounds are relative to the given display. If the display is invalid,
+ * they are assumed to be relative to the primary display.
+ *
+ * The width and height must be greater than zero.
+ */
+static inline void
+zcr_remote_surface_v1_set_bounds(struct zcr_remote_surface_v1 *zcr_remote_surface_v1, uint32_t display_id_hi, uint32_t display_id_lo, int32_t x, int32_t y, int32_t width, int32_t height)
+{
+	wl_proxy_marshal((struct wl_proxy *) zcr_remote_surface_v1,
+			 ZCR_REMOTE_SURFACE_V1_SET_BOUNDS, display_id_hi, display_id_lo, x, y, width, height);
+}
+
 #define ZCR_NOTIFICATION_SURFACE_V1_DESTROY 0
+#define ZCR_NOTIFICATION_SURFACE_V1_SET_APP_ID 1
 
 
 /**
  * @ingroup iface_zcr_notification_surface_v1
  */
 #define ZCR_NOTIFICATION_SURFACE_V1_DESTROY_SINCE_VERSION 1
+/**
+ * @ingroup iface_zcr_notification_surface_v1
+ */
+#define ZCR_NOTIFICATION_SURFACE_V1_SET_APP_ID_SINCE_VERSION 16
 
 /** @ingroup iface_zcr_notification_surface_v1 */
 static inline void
@@ -1735,6 +1914,60 @@ zcr_notification_surface_v1_destroy(struct zcr_notification_surface_v1 *zcr_noti
 			 ZCR_NOTIFICATION_SURFACE_V1_DESTROY);
 
 	wl_proxy_destroy((struct wl_proxy *) zcr_notification_surface_v1);
+}
+
+/**
+ * @ingroup iface_zcr_notification_surface_v1
+ *
+ * Set an application identifier for the notification surface.
+ */
+static inline void
+zcr_notification_surface_v1_set_app_id(struct zcr_notification_surface_v1 *zcr_notification_surface_v1, const char *app_id)
+{
+	wl_proxy_marshal((struct wl_proxy *) zcr_notification_surface_v1,
+			 ZCR_NOTIFICATION_SURFACE_V1_SET_APP_ID, app_id);
+}
+
+#define ZCR_INPUT_METHOD_SURFACE_V1_DESTROY 0
+
+
+/**
+ * @ingroup iface_zcr_input_method_surface_v1
+ */
+#define ZCR_INPUT_METHOD_SURFACE_V1_DESTROY_SINCE_VERSION 1
+
+/** @ingroup iface_zcr_input_method_surface_v1 */
+static inline void
+zcr_input_method_surface_v1_set_user_data(struct zcr_input_method_surface_v1 *zcr_input_method_surface_v1, void *user_data)
+{
+	wl_proxy_set_user_data((struct wl_proxy *) zcr_input_method_surface_v1, user_data);
+}
+
+/** @ingroup iface_zcr_input_method_surface_v1 */
+static inline void *
+zcr_input_method_surface_v1_get_user_data(struct zcr_input_method_surface_v1 *zcr_input_method_surface_v1)
+{
+	return wl_proxy_get_user_data((struct wl_proxy *) zcr_input_method_surface_v1);
+}
+
+static inline uint32_t
+zcr_input_method_surface_v1_get_version(struct zcr_input_method_surface_v1 *zcr_input_method_surface_v1)
+{
+	return wl_proxy_get_version((struct wl_proxy *) zcr_input_method_surface_v1);
+}
+
+/**
+ * @ingroup iface_zcr_input_method_surface_v1
+ *
+ * Unmap and destroy the input mtehod surface.
+ */
+static inline void
+zcr_input_method_surface_v1_destroy(struct zcr_input_method_surface_v1 *zcr_input_method_surface_v1)
+{
+	wl_proxy_marshal((struct wl_proxy *) zcr_input_method_surface_v1,
+			 ZCR_INPUT_METHOD_SURFACE_V1_DESTROY);
+
+	wl_proxy_destroy((struct wl_proxy *) zcr_input_method_surface_v1);
 }
 
 #ifdef  __cplusplus

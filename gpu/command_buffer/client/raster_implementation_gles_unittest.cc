@@ -8,12 +8,16 @@
 #include <GLES2/gl2ext.h>
 #include <GLES2/gl2extchromium.h>
 #include <GLES3/gl3.h>
+#include <memory>
+#include <utility>
+#include <vector>
 
 #include "base/containers/flat_map.h"
 #include "cc/paint/color_space_transfer_cache_entry.h"
 #include "cc/paint/display_item_list.h"
 #include "components/viz/common/resources/resource_format_utils.h"
 #include "gpu/GLES2/gl2extchromium.h"
+#include "gpu/command_buffer/client/client_test_helper.h"
 #include "gpu/command_buffer/client/context_support.h"
 #include "gpu/command_buffer/client/gles2_interface_stub.h"
 #include "gpu/command_buffer/common/capabilities.h"
@@ -74,9 +78,8 @@ class RasterMockGLES2Interface : public gles2::GLES2InterfaceStub {
   MOCK_METHOD3(TexParameteri, void(GLenum target, GLenum pname, GLint param));
 
   // Mailboxes.
-  MOCK_METHOD1(GenMailboxCHROMIUM, void(GLbyte*));
   MOCK_METHOD2(ProduceTextureDirectCHROMIUM,
-               void(GLuint texture, const GLbyte* mailbox));
+               void(GLuint texture, GLbyte* mailbox));
   MOCK_METHOD1(CreateAndConsumeTextureCHROMIUM, GLuint(const GLbyte* mailbox));
 
   // Image objects.
@@ -119,8 +122,6 @@ class RasterMockGLES2Interface : public gles2::GLES2InterfaceStub {
                     GLint border,
                     GLsizei imageSize,
                     const void* data));
-  MOCK_METHOD2(CompressedCopyTextureCHROMIUM,
-               void(GLuint source_id, GLuint dest_id));
   MOCK_METHOD5(TexStorage2DEXT,
                void(GLenum target,
                     GLsizei levels,
@@ -133,11 +134,6 @@ class RasterMockGLES2Interface : public gles2::GLES2InterfaceStub {
                     GLenum bufferUsage,
                     GLsizei width,
                     GLsizei height));
-
-  // Discardable textures.
-  MOCK_METHOD1(InitializeDiscardableTextureCHROMIUM, void(GLuint texture_id));
-  MOCK_METHOD1(UnlockDiscardableTextureCHROMIUM, void(GLuint texture_id));
-  MOCK_METHOD1(LockDiscardableTextureCHROMIUM, bool(GLuint texture_id));
 
   // OOP-Raster
   MOCK_METHOD6(BeginRasterCHROMIUM,
@@ -175,20 +171,32 @@ class ContextSupportStub : public ContextSupport {
   void SetAggressivelyFreeResources(bool aggressively_free_resources) override {
   }
 
-  void Swap() override {}
-  void SwapWithBounds(const std::vector<gfx::Rect>& rects) override {}
-  void PartialSwapBuffers(const gfx::Rect& sub_buffer) override {}
-  void CommitOverlayPlanes() override {}
+  void Swap(uint32_t flags,
+            SwapCompletedCallback swap_completed,
+            PresentationCallback presentation_callback) override {}
+  void SwapWithBounds(const std::vector<gfx::Rect>& rects,
+                      uint32_t flags,
+                      SwapCompletedCallback swap_completed,
+                      PresentationCallback presentation_callback) override {}
+  void PartialSwapBuffers(const gfx::Rect& sub_buffer,
+                          uint32_t flags,
+                          SwapCompletedCallback swap_completed,
+                          PresentationCallback presentation_callback) override {
+  }
+  void CommitOverlayPlanes(
+      uint32_t flags,
+      SwapCompletedCallback swap_completed,
+      PresentationCallback presentation_callback) override {}
   void ScheduleOverlayPlane(int plane_z_order,
                             gfx::OverlayTransform plane_transform,
                             unsigned overlay_texture_id,
                             const gfx::Rect& display_bounds,
                             const gfx::RectF& uv_rect,
-                            bool enable_blend) override {}
+                            bool enable_blend,
+                            unsigned gpu_fence_id) override {}
   uint64_t ShareGroupTracingGUID() const override { return 0; }
   void SetErrorMessageCallback(
       base::RepeatingCallback<void(const char*, int32_t)> callback) override {}
-  void SetSnapshotRequested() override {}
   bool ThreadSafeShallowLockDiscardableTexture(uint32_t texture_id) override {
     return true;
   }
@@ -237,14 +245,15 @@ class RasterImplementationGLESTest : public testing::Test {
   void SetUp() override {
     gl_.reset(new RasterMockGLES2Interface());
 
-    ri_.reset(new RasterImplementationGLES(gl_.get(), &support_,
+    ri_.reset(new RasterImplementationGLES(gl_.get(), &command_buffer_,
                                            gpu::Capabilities()));
   }
 
   void TearDown() override {}
 
   void SetUpWithCapabilities(const gpu::Capabilities& capabilities) {
-    ri_.reset(new RasterImplementationGLES(gl_.get(), &support_, capabilities));
+    ri_.reset(new RasterImplementationGLES(gl_.get(), &command_buffer_,
+                                           capabilities));
   }
 
   void ExpectBindTexture(GLenum target, GLuint texture_id) {
@@ -266,6 +275,7 @@ class RasterImplementationGLESTest : public testing::Test {
   }
 
   ContextSupportStub support_;
+  MockClientCommandBuffer command_buffer_;
   std::unique_ptr<RasterMockGLES2Interface> gl_;
   std::unique_ptr<RasterImplementationGLES> ri_;
 
@@ -437,23 +447,15 @@ TEST_F(RasterImplementationGLESTest, TexParameteri) {
   ri_->TexParameteri(kTextureId, kPname, kParam);
 }
 
-TEST_F(RasterImplementationGLESTest, GenMailbox) {
-  gpu::Mailbox mailbox;
-  EXPECT_CALL(*gl_, GenMailboxCHROMIUM(mailbox.name)).Times(1);
-  ri_->GenMailbox(mailbox.name);
-}
-
 TEST_F(RasterImplementationGLESTest, ProduceTextureDirect) {
   const GLuint kTextureId = 23;
   gpu::Mailbox mailbox;
 
   AllocTextureId(false, gfx::BufferUsage::GPU_READ, viz::RGBA_8888, kTextureId);
 
-  EXPECT_CALL(*gl_, GenMailboxCHROMIUM(mailbox.name)).Times(1);
   EXPECT_CALL(*gl_, ProduceTextureDirectCHROMIUM(kTextureId, mailbox.name))
       .Times(1);
 
-  ri_->GenMailbox(mailbox.name);
   ri_->ProduceTextureDirect(kTextureId, mailbox.name);
 }
 
@@ -512,26 +514,15 @@ TEST_F(RasterImplementationGLESTest, DestroyImageCHROMIUM) {
   ri_->DestroyImageCHROMIUM(kImageId);
 }
 
-TEST_F(RasterImplementationGLESTest, CompressedCopyTextureCHROMIUM) {
-  const GLuint source_id = 23;
-  const GLuint dest_id = 24;
-
-  AllocTextureId(false, gfx::BufferUsage::GPU_READ, viz::RGBA_8888, source_id);
-  AllocTextureId(false, gfx::BufferUsage::GPU_READ, viz::RGBA_8888, dest_id);
-
-  EXPECT_CALL(*gl_, CompressedCopyTextureCHROMIUM(source_id, dest_id)).Times(1);
-  ri_->CompressedCopyTextureCHROMIUM(source_id, dest_id);
-}
-
 TEST_F(RasterImplementationGLESTest, TexStorage2D) {
   const GLenum kTarget = GL_TEXTURE_2D;
   const GLsizei kWidth = 2;
   const GLsizei kHeight = 8;
   const int kNumTestFormats = 11;
   viz::ResourceFormat test_formats[kNumTestFormats] = {
-      viz::RGBA_8888,     viz::RGBA_4444, viz::BGRA_8888, viz::ALPHA_8,
-      viz::LUMINANCE_8,   viz::RGB_565,   viz::ETC1,      viz::RED_8,
-      viz::LUMINANCE_F16, viz::RGBA_F16,  viz::R16_EXT};
+      viz::RGBA_8888,   viz::RGBA_4444, viz::BGRA_8888, viz::ALPHA_8,
+      viz::LUMINANCE_8, viz::RGB_565,   viz::RED_8,     viz::LUMINANCE_F16,
+      viz::RGBA_F16,    viz::R16_EXT};
 
   for (int i = 0; i < kNumTestFormats; i++) {
     const GLuint kTextureId = 23 + i;
@@ -542,7 +533,7 @@ TEST_F(RasterImplementationGLESTest, TexStorage2D) {
                                  kWidth, kHeight, 0, viz::GLDataFormat(format),
                                  viz::GLDataType(format), nullptr))
         .Times(1);
-    ri_->TexStorage2D(kTextureId, 1, kWidth, kHeight);
+    ri_->TexStorage2D(kTextureId, kWidth, kHeight);
   }
 }
 
@@ -570,7 +561,7 @@ TEST_F(RasterImplementationGLESTest, TexStorage2DTexStorage2DEXT) {
                                       viz::TextureStorageFormat(format), kWidth,
                                       kHeight))
         .Times(1);
-    ri_->TexStorage2D(kTextureId, 1, kWidth, kHeight);
+    ri_->TexStorage2D(kTextureId, kWidth, kHeight);
   }
 }
 
@@ -596,7 +587,7 @@ TEST_F(RasterImplementationGLESTest, TexStorage2DOverlay) {
                           kTarget, viz::TextureStorageFormat(format),
                           GL_SCANOUT_CHROMIUM, kWidth, kHeight))
         .Times(1);
-    ri_->TexStorage2D(kTextureId, 1, kWidth, kHeight);
+    ri_->TexStorage2D(kTextureId, kWidth, kHeight);
   }
 }
 
@@ -626,93 +617,8 @@ TEST_F(RasterImplementationGLESTest, TexStorage2DOverlayNative) {
                           target, viz::TextureStorageFormat(format),
                           GL_SCANOUT_CHROMIUM, kWidth, kHeight))
         .Times(1);
-    ri_->TexStorage2D(kTextureId, 1, kWidth, kHeight);
+    ri_->TexStorage2D(kTextureId, kWidth, kHeight);
   }
-}
-
-TEST_F(RasterImplementationGLESTest, InitializeDiscardableTextureCHROMIUM) {
-  const GLuint kTextureId = 23;
-
-  AllocTextureId(false, gfx::BufferUsage::GPU_READ, viz::RGBA_8888, kTextureId);
-
-  EXPECT_CALL(*gl_, InitializeDiscardableTextureCHROMIUM(kTextureId)).Times(1);
-  ri_->InitializeDiscardableTextureCHROMIUM(kTextureId);
-}
-
-TEST_F(RasterImplementationGLESTest, UnlockDiscardableTextureCHROMIUM) {
-  const GLuint kTextureId = 23;
-
-  AllocTextureId(false, gfx::BufferUsage::GPU_READ, viz::RGBA_8888, kTextureId);
-
-  EXPECT_CALL(*gl_, UnlockDiscardableTextureCHROMIUM(kTextureId)).Times(1);
-  ri_->UnlockDiscardableTextureCHROMIUM(kTextureId);
-}
-
-TEST_F(RasterImplementationGLESTest, LockDiscardableTextureCHROMIUM) {
-  const GLuint kTextureId = 23;
-  bool ret = false;
-
-  AllocTextureId(false, gfx::BufferUsage::GPU_READ, viz::RGBA_8888, kTextureId);
-
-  EXPECT_CALL(*gl_, LockDiscardableTextureCHROMIUM(kTextureId))
-      .WillOnce(Return(true));
-  ret = ri_->LockDiscardableTextureCHROMIUM(kTextureId);
-  EXPECT_EQ(true, ret);
-
-  EXPECT_CALL(*gl_, LockDiscardableTextureCHROMIUM(kTextureId))
-      .WillOnce(Return(false));
-  ret = ri_->LockDiscardableTextureCHROMIUM(kTextureId);
-  EXPECT_EQ(false, ret);
-}
-
-TEST_F(RasterImplementationGLESTest, BeginRasterCHROMIUM) {
-  const GLuint texture_id = 23;
-  const GLuint sk_color = 0x226688AAu;
-  const GLuint msaa_sample_count = 4;
-  const GLboolean can_use_lcd_text = GL_TRUE;
-  const GLint color_type = kRGBA_8888_SkColorType;
-  const auto raster_color_space =
-      cc::RasterColorSpace(gfx::ColorSpace::CreateSRGB(), 2);
-
-  AllocTextureId(false, gfx::BufferUsage::GPU_READ, viz::RGBA_8888, texture_id);
-
-  EXPECT_CALL(*gl_, BeginRasterCHROMIUM(texture_id, sk_color, msaa_sample_count,
-                                        can_use_lcd_text, color_type, 2))
-      .Times(1);
-  ri_->BeginRasterCHROMIUM(texture_id, sk_color, msaa_sample_count,
-                           can_use_lcd_text, color_type, raster_color_space);
-}
-
-TEST_F(RasterImplementationGLESTest, RasterCHROMIUM) {
-  scoped_refptr<cc::DisplayItemList> display_list = new cc::DisplayItemList;
-  display_list->StartPaint();
-  display_list->push<cc::DrawColorOp>(SK_ColorRED, SkBlendMode::kSrc);
-  display_list->EndPaintOfUnpaired(gfx::Rect(100, 100));
-  display_list->Finalize();
-
-  ImageProviderStub image_provider;
-  const gfx::Size content_size(100, 200);
-  const gfx::Rect full_raster_rect(2, 3, 8, 9);
-  const gfx::Rect playback_rect(3, 4, 5, 6);
-  const gfx::Vector2dF post_translate(7.0f, 8.0f);
-  const GLfloat post_scale = 9.0f;
-  bool requires_clear = false;
-
-  constexpr const GLsizeiptr kBufferSize = 16 << 10;
-  char buffer[kBufferSize];
-
-  EXPECT_CALL(*gl_, MapRasterCHROMIUM(Le(kBufferSize)))
-      .WillOnce(Return(buffer));
-  EXPECT_CALL(*gl_, UnmapRasterCHROMIUM(Gt(0))).Times(1);
-
-  ri_->RasterCHROMIUM(display_list.get(), &image_provider, content_size,
-                      full_raster_rect, playback_rect, post_translate,
-                      post_scale, requires_clear);
-}
-
-TEST_F(RasterImplementationGLESTest, EndRasterCHROMIUM) {
-  EXPECT_CALL(*gl_, EndRasterCHROMIUM()).Times(1);
-  ri_->EndRasterCHROMIUM();
 }
 
 TEST_F(RasterImplementationGLESTest, BeginGpuRaster) {

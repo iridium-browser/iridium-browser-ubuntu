@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/ash/launcher/arc_app_window.h"
 
+#include "base/auto_reset.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_icon.h"
@@ -12,21 +13,25 @@
 #include "chrome/browser/ui/ash/launcher/arc_app_window_launcher_item_controller.h"
 #include "components/exo/shell_surface_base.h"
 #include "extensions/common/constants.h"
-#include "ui/app_list/app_list_constants.h"
 #include "ui/aura/window.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/image/image_skia_operations.h"
 #include "ui/views/widget/native_widget_aura.h"
 #include "ui/views/widget/widget.h"
 
+namespace {
+constexpr base::TimeDelta kSetDefaultIconDelayMs =
+    base::TimeDelta::FromMilliseconds(1000);
+}  // namespace
+
 ArcAppWindow::ArcAppWindow(int task_id,
                            const arc::ArcAppShelfId& app_shelf_id,
                            views::Widget* widget,
                            ArcAppWindowLauncherController* owner,
                            Profile* profile)
-    : task_id_(task_id),
+    : AppWindowBase(ash::ShelfID(app_shelf_id.app_id()), widget),
+      task_id_(task_id),
       app_shelf_id_(app_shelf_id),
-      widget_(widget),
       owner_(owner),
       profile_(profile) {
   SetDefaultAppIcon();
@@ -34,12 +39,6 @@ ArcAppWindow::ArcAppWindow(int task_id,
 
 ArcAppWindow::~ArcAppWindow() {
   ImageDecoder::Cancel(this);
-}
-
-void ArcAppWindow::SetController(
-    ArcAppWindowLauncherItemController* controller) {
-  DCHECK(!controller_ || !controller);
-  controller_ = controller;
 }
 
 void ArcAppWindow::SetFullscreenMode(FullScreenMode mode) {
@@ -73,116 +72,41 @@ void ArcAppWindow::SetDescription(
 }
 
 bool ArcAppWindow::IsActive() const {
-  return widget_->IsActive() && owner_->active_task_id() == task_id_;
-}
-
-bool ArcAppWindow::IsMaximized() const {
-  NOTREACHED();
-  return false;
-}
-
-bool ArcAppWindow::IsMinimized() const {
-  NOTREACHED();
-  return false;
-}
-
-bool ArcAppWindow::IsFullscreen() const {
-  NOTREACHED();
-  return false;
-}
-
-gfx::NativeWindow ArcAppWindow::GetNativeWindow() const {
-  return widget_->GetNativeWindow();
-}
-
-gfx::Rect ArcAppWindow::GetRestoredBounds() const {
-  NOTREACHED();
-  return gfx::Rect();
-}
-
-ui::WindowShowState ArcAppWindow::GetRestoredState() const {
-  NOTREACHED();
-  return ui::SHOW_STATE_NORMAL;
-}
-
-gfx::Rect ArcAppWindow::GetBounds() const {
-  NOTREACHED();
-  return gfx::Rect();
-}
-
-void ArcAppWindow::Show() {
-  widget_->Show();
-}
-
-void ArcAppWindow::ShowInactive() {
-  NOTREACHED();
-}
-
-void ArcAppWindow::Hide() {
-  NOTREACHED();
-}
-
-bool ArcAppWindow::IsVisible() const {
-  NOTREACHED();
-  return true;
+  return widget()->IsActive() && owner_->active_task_id() == task_id_;
 }
 
 void ArcAppWindow::Close() {
   arc::CloseTask(task_id_);
 }
 
-void ArcAppWindow::Activate() {
-  widget_->Activate();
-}
-
-void ArcAppWindow::Deactivate() {
-  NOTREACHED();
-}
-
-void ArcAppWindow::Maximize() {
-  NOTREACHED();
-}
-
-void ArcAppWindow::Minimize() {
-  widget_->Minimize();
-}
-
-void ArcAppWindow::Restore() {
-  NOTREACHED();
-}
-
-void ArcAppWindow::SetBounds(const gfx::Rect& bounds) {
-  NOTREACHED();
-}
-
-void ArcAppWindow::FlashFrame(bool flash) {
-  NOTREACHED();
-}
-
-bool ArcAppWindow::IsAlwaysOnTop() const {
-  NOTREACHED();
-  return false;
-}
-
-void ArcAppWindow::SetAlwaysOnTop(bool always_on_top) {
-  NOTREACHED();
-}
-
-void ArcAppWindow::OnIconUpdated(ArcAppIcon* icon) {
-  SetIcon(icon->image_skia());
+void ArcAppWindow::OnAppImageUpdated(const std::string& app_id,
+                                     const gfx::ImageSkia& image) {
+  if (image_fetching_) {
+    // This is default app icon. Don't assign it right now to avoid flickering.
+    // Wait for another image is loaded and only in case next image is not
+    // coming set this as a fallback.
+    apply_default_image_timer_.Start(
+        FROM_HERE, kSetDefaultIconDelayMs,
+        base::BindOnce(&ArcAppWindow::SetIcon, base::Unretained(this), image));
+  } else {
+    SetIcon(image);
+  }
 }
 
 void ArcAppWindow::SetDefaultAppIcon() {
-  if (!app_icon_) {
-    app_icon_ = std::make_unique<ArcAppIcon>(
-        profile_, app_shelf_id_.ToString(), app_list::kGridIconDimension, this);
+  if (!app_icon_loader_) {
+    app_icon_loader_ = std::make_unique<ArcAppIconLoader>(
+        profile_, extension_misc::EXTENSION_ICON_SMALL, this);
   }
-  // Apply default image now and in case icon is updated then OnIconUpdated()
-  // will be called additionally.
-  OnIconUpdated(app_icon_.get());
+  DCHECK(!image_fetching_);
+  base::AutoReset<bool> auto_image_fetching(&image_fetching_, true);
+  app_icon_loader_->FetchImage(app_shelf_id_.ToString());
 }
 
 void ArcAppWindow::SetIcon(const gfx::ImageSkia& icon) {
+  // Reset any pending request to set default app icon.
+  apply_default_image_timer_.Stop();
+
   if (!exo::ShellSurfaceBase::GetMainSurface(GetNativeWindow())) {
     // Support unit tests where we don't have exo system initialized.
     views::NativeWidgetAura::AssignIconToAuraWindow(
@@ -191,7 +115,7 @@ void ArcAppWindow::SetIcon(const gfx::ImageSkia& icon) {
     return;
   }
   exo::ShellSurfaceBase* shell_surface = static_cast<exo::ShellSurfaceBase*>(
-      widget_->widget_delegate()->GetContentsView());
+      widget()->widget_delegate()->GetContentsView());
   if (!shell_surface)
     return;
   shell_surface->SetIcon(icon);
@@ -199,7 +123,7 @@ void ArcAppWindow::SetIcon(const gfx::ImageSkia& icon) {
 
 void ArcAppWindow::OnImageDecoded(const SkBitmap& decoded_image) {
   // Use the custom icon and stop observing updates.
-  app_icon_.reset();
+  app_icon_loader_.reset();
   SetIcon(gfx::ImageSkiaOperations::CreateResizedImage(
       gfx::ImageSkia(gfx::ImageSkiaRep(decoded_image, 1.0f)),
       skia::ImageOperations::RESIZE_BEST,

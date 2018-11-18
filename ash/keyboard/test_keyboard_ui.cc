@@ -5,6 +5,7 @@
 #include "ash/keyboard/test_keyboard_ui.h"
 
 #include "ash/shell.h"
+#include "ash/window_factory.h"
 #include "ash/wm/window_util.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_tree_host.h"
@@ -15,20 +16,16 @@ namespace ash {
 TestKeyboardUI::TestKeyboardUI() = default;
 TestKeyboardUI::~TestKeyboardUI() = default;
 
-bool TestKeyboardUI::HasContentsWindow() const {
-  return !!keyboard_;
+bool TestKeyboardUI::HasKeyboardWindow() const {
+  return !!keyboard_window_;
 }
 
-bool TestKeyboardUI::ShouldWindowOverscroll(aura::Window* window) const {
-  return true;
-}
-
-aura::Window* TestKeyboardUI::GetContentsWindow() {
-  if (!keyboard_) {
-    keyboard_.reset(new aura::Window(&delegate_));
-    keyboard_->Init(ui::LAYER_NOT_DRAWN);
+aura::Window* TestKeyboardUI::GetKeyboardWindow() {
+  if (!keyboard_window_) {
+    keyboard_window_ = window_factory::NewWindow(&delegate_);
+    keyboard_window_->Init(ui::LAYER_NOT_DRAWN);
   }
-  return keyboard_.get();
+  return keyboard_window_.get();
 }
 
 ui::InputMethod* TestKeyboardUI::GetInputMethod() {

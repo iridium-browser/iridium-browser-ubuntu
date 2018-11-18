@@ -1,5 +1,5 @@
 <!doctype html>
-<html>
+<html lang="en">
   <head>
     <title>drive-internals</title>
     <meta charset="utf-8">
@@ -44,9 +44,6 @@
       <span id="reset-status-text"></span>
     </div>
     <ul>
-      <li>Local Changestamp:
-        <span id="account-largest-changestamp-local"></span>
-      </li>
       <li>Local Free Space:
         <span id="local-storage-freespace"></span> MB
       </li>
@@ -56,11 +53,19 @@
     <ul>
       <li>Push notification is enabled:
         <span id="push-notification-enabled"></span></li>
-      <li>Last update check time:
-        <span id="last-update-check-time"></span></li>
-      <li>Last update check result:
-        <span id="last-update-check-error"></span></li>
     </ul>
+    <table>
+      <tbody id="delta-update-status">
+        <tr>
+          <th>Source</th>
+          <th>Virtual Path</th>
+          <th>Start Page Token</th>
+          <th>Last Update Check Time</th>
+          <th>Last Update Check Result</th>
+          <th>Refreshing</th>
+        </tr>
+      </tbody>
+    </table>
 
     <h2 id="in-flight-operations-section">In-flight Operations</h2>
     <table>
@@ -119,23 +124,12 @@
     <ul id="drive-related-preferences">
     </ul>
 
-    <h2 id="app-list-section">Application List</h2>
-    <ul>
-      <li>ETag: <span id="app-list-etag"></span></li>
-    </ul>
-    <table>
-      <tbody id="app-list-items">
-        <tr>
-          <th>App Name</th>
-          <th>App ID</th>
-          <th>Object Type</th>
-          <th>Support Create</th>
-        </tr>
-      </tbody>
-    </table>
-
     <h2 id="event-log-section">Event Log</h2>
     <ul id="event-log">
+    </ul>
+
+    <h2 id="service-log-section">Service Log</h2>
+    <ul id="service-log">
     </ul>
   </body>
 </html>

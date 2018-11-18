@@ -41,6 +41,14 @@ class CONTENT_EXPORT WebContentsAndroid
   base::android::ScopedJavaLocalRef<jobject> GetTopLevelNativeWindow(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj);
+  void SetTopLevelNativeWindow(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj,
+      const base::android::JavaParamRef<jobject>& jwindow_android);
+  void SetViewAndroidDelegate(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj,
+      const base::android::JavaParamRef<jobject>& jview_delegate);
   base::android::ScopedJavaLocalRef<jobject> GetMainFrame(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj) const;
@@ -92,10 +100,6 @@ class CONTENT_EXPORT WebContentsAndroid
                      const base::android::JavaParamRef<jobject>& jobj,
                      jboolean mute);
 
-  void ShowInterstitialPage(JNIEnv* env,
-                            const base::android::JavaParamRef<jobject>& obj,
-                            const base::android::JavaParamRef<jstring>& jurl,
-                            jlong delegate_ptr);
   jboolean IsShowingInterstitialPage(
       JNIEnv* env,
       const base::android::JavaParamRef<jobject>& obj);
@@ -174,12 +178,13 @@ class CONTENT_EXPORT WebContentsAndroid
       const base::android::JavaParamRef<jobject>& overscroll_refresh_handler);
 
   // Relay the access from Java layer to RWHV::CopyFromSurface() through JNI.
-  void GetContentBitmap(JNIEnv* env,
-                        const base::android::JavaParamRef<jobject>& obj,
-                        jint width,
-                        jint height,
-                        const base::android::JavaParamRef<jstring>& jpath,
-                        const base::android::JavaParamRef<jobject>& jcallback);
+  void WriteContentBitmapToDisk(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj,
+      jint width,
+      jint height,
+      const base::android::JavaParamRef<jstring>& jpath,
+      const base::android::JavaParamRef<jobject>& jcallback);
 
   void ReloadLoFiImages(JNIEnv* env,
                         const base::android::JavaParamRef<jobject>& obj);
@@ -225,9 +230,29 @@ class CONTENT_EXPORT WebContentsAndroid
   void SetMediaSession(
       const base::android::ScopedJavaLocalRef<jobject>& j_media_session);
 
- private:
+  void SendOrientationChangeEvent(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj,
+      jint orientation);
+
+  void OnScaleFactorChanged(JNIEnv* env,
+                            const base::android::JavaParamRef<jobject>& obj);
+  void SetFocus(JNIEnv* env,
+                const base::android::JavaParamRef<jobject>& obj,
+                jboolean focused);
+  bool IsBeingDestroyed(JNIEnv* env,
+                        const base::android::JavaParamRef<jobject>& obj);
+
+  void SetDisplayCutoutSafeArea(JNIEnv* env,
+                                const base::android::JavaParamRef<jobject>& obj,
+                                int top,
+                                int left,
+                                int bottom,
+                                int right);
+
   RenderWidgetHostViewAndroid* GetRenderWidgetHostViewAndroid();
 
+ private:
   void OnFinishGetContentBitmap(const base::android::JavaRef<jobject>& obj,
                                 const base::android::JavaRef<jobject>& callback,
                                 const std::string& path,
@@ -240,8 +265,12 @@ class CONTENT_EXPORT WebContentsAndroid
                              const GURL& url,
                              const std::vector<SkBitmap>& bitmaps,
                              const std::vector<gfx::Size>& sizes);
+  void SelectWordAroundCaretAck(bool did_select,
+                                int start_adjust,
+                                int end_adjust);
 
   WebContentsImpl* web_contents_;
+
   NavigationControllerAndroid navigation_controller_;
   base::android::ScopedJavaGlobalRef<jobject> obj_;
 

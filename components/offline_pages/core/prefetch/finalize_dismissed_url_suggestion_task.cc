@@ -9,7 +9,7 @@
 #include "base/bind.h"
 #include "components/offline_pages/core/client_id.h"
 #include "components/offline_pages/core/prefetch/store/prefetch_store.h"
-#include "sql/connection.h"
+#include "sql/database.h"
 #include "sql/statement.h"
 
 namespace offline_pages {
@@ -17,10 +17,7 @@ namespace offline_pages {
 namespace {
 
 bool DeletePageByClientIdIfNotDownloadedSync(const ClientId& client_id,
-                                             sql::Connection* db) {
-  if (!db)
-    return false;
-
+                                             sql::Database* db) {
   static const std::array<PrefetchItemState, 6>& finalizable_states =
       FinalizeDismissedUrlSuggestionTask::kFinalizableStates;
 
@@ -57,10 +54,11 @@ FinalizeDismissedUrlSuggestionTask::FinalizeDismissedUrlSuggestionTask(
 FinalizeDismissedUrlSuggestionTask::~FinalizeDismissedUrlSuggestionTask() {}
 
 void FinalizeDismissedUrlSuggestionTask::Run() {
-  prefetch_store_->Execute<bool>(
+  prefetch_store_->Execute(
       base::BindOnce(&DeletePageByClientIdIfNotDownloadedSync, client_id_),
       base::BindOnce(&FinalizeDismissedUrlSuggestionTask::OnComplete,
-                     weak_ptr_factory_.GetWeakPtr()));
+                     weak_ptr_factory_.GetWeakPtr()),
+      false);
 }
 
 void FinalizeDismissedUrlSuggestionTask::OnComplete(bool result) {

@@ -12,7 +12,6 @@
 #include "base/containers/adapters.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
 #include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -52,6 +51,7 @@
 #include "ui/views/drag_controller.h"
 #include "ui/views/layout/layout_manager.h"
 #include "ui/views/view_observer.h"
+#include "ui/views/view_tracker.h"
 #include "ui/views/views_delegate.h"
 #include "ui/views/views_switches.h"
 #include "ui/views/widget/native_widget_private.h"
@@ -311,7 +311,7 @@ bool View::Contains(const View* view) const {
 }
 
 int View::GetIndexOf(const View* view) const {
-  Views::const_iterator i(std::find(children_.begin(), children_.end(), view));
+  auto i(std::find(children_.begin(), children_.end(), view));
   return i != children_.end() ? static_cast<int>(i - children_.begin()) : -1;
 }
 
@@ -325,6 +325,8 @@ void View::SetBoundsRect(const gfx::Rect& bounds) {
   if (bounds == bounds_) {
     if (needs_layout_) {
       needs_layout_ = false;
+      TRACE_EVENT1("views", "View::Layout(set_bounds)", "class",
+                   GetClassName());
       Layout();
     }
     return;
@@ -415,6 +417,10 @@ gfx::Rect View::GetBoundsInScreen() const {
   gfx::Point origin;
   View::ConvertPointToScreen(this, &origin);
   return gfx::Rect(origin, size());
+}
+
+gfx::Rect View::GetAnchorBoundsInScreen() const {
+  return GetBoundsInScreen();
 }
 
 gfx::Size View::GetPreferredSize() const {
@@ -515,7 +521,10 @@ gfx::Transform View::GetTransform() const {
 
   gfx::Transform transform = layer()->transform();
   gfx::ScrollOffset scroll_offset = layer()->CurrentScrollOffset();
-  transform.Translate(-scroll_offset.x(), -scroll_offset.y());
+  // Offsets for layer-based scrolling are never negative, but the horizontal
+  // scroll direction is reversed in RTL via canvas flipping.
+  transform.Translate((base::i18n::IsRTL() ? 1 : -1) * scroll_offset.x(),
+                      -scroll_offset.y());
   return transform;
 }
 
@@ -1182,6 +1191,13 @@ void View::ConvertEventToTarget(ui::EventTarget* target,
   event->ConvertLocationToTarget(this, static_cast<View*>(target));
 }
 
+gfx::PointF View::GetScreenLocationF(const ui::LocatedEvent& event) const {
+  DCHECK_EQ(this, event.target());
+  gfx::Point screen_location(event.location());
+  ConvertPointToScreen(this, &screen_location);
+  return gfx::PointF(screen_location);
+}
+
 // Accelerators ----------------------------------------------------------------
 
 void View::AddAccelerator(const ui::Accelerator& accelerator) {
@@ -1200,8 +1216,7 @@ void View::RemoveAccelerator(const ui::Accelerator& accelerator) {
     return;
   }
 
-  std::vector<ui::Accelerator>::iterator i(
-      std::find(accelerators_->begin(), accelerators_->end(), accelerator));
+  auto i(std::find(accelerators_->begin(), accelerators_->end(), accelerator));
   if (i == accelerators_->end()) {
     NOTREACHED() << "Removing non-existing accelerator";
     return;
@@ -1416,12 +1431,14 @@ bool View::HandleAccessibleAction(const ui::AXActionData& action_data) {
       break;
     case ax::mojom::Action::kDoDefault: {
       const gfx::Point center = GetLocalBounds().CenterPoint();
-      OnMousePressed(ui::MouseEvent(
-          ui::ET_MOUSE_PRESSED, center, center, ui::EventTimeForNow(),
-          ui::EF_LEFT_MOUSE_BUTTON, ui::EF_LEFT_MOUSE_BUTTON));
-      OnMouseReleased(ui::MouseEvent(
-          ui::ET_MOUSE_RELEASED, center, center, ui::EventTimeForNow(),
-          ui::EF_LEFT_MOUSE_BUTTON, ui::EF_LEFT_MOUSE_BUTTON));
+      ui::MouseEvent press(ui::ET_MOUSE_PRESSED, center, center,
+                           ui::EventTimeForNow(), ui::EF_LEFT_MOUSE_BUTTON,
+                           ui::EF_LEFT_MOUSE_BUTTON);
+      OnEvent(&press);
+      ui::MouseEvent release(ui::ET_MOUSE_RELEASED, center, center,
+                             ui::EventTimeForNow(), ui::EF_LEFT_MOUSE_BUTTON,
+                             ui::EF_LEFT_MOUSE_BUTTON);
+      OnEvent(&release);
       return true;
     }
     case ax::mojom::Action::kFocus:
@@ -1465,13 +1482,8 @@ void View::OnAccessibilityEvent(ax::mojom::Event event_type) {}
 // Scrolling -------------------------------------------------------------------
 
 void View::ScrollRectToVisible(const gfx::Rect& rect) {
-  // We must take RTL UI mirroring into account when adjusting the position of
-  // the region.
-  if (parent_) {
-    gfx::Rect scroll_rect(rect);
-    scroll_rect.Offset(GetMirroredX(), y());
-    parent_->ScrollRectToVisible(scroll_rect);
-  }
+  if (parent_)
+    parent_->ScrollRectToVisible(rect + bounds().OffsetFromOrigin());
 }
 
 void View::ScrollViewToVisible() {
@@ -1800,10 +1812,19 @@ void View::OnBlur() {
 void View::Focus() {
   OnFocus();
   ScrollViewToVisible();
+
+  for (ViewObserver& observer : observers_)
+    observer.OnViewFocused(this);
 }
 
 void View::Blur() {
+  ViewTracker tracker(this);
   OnBlur();
+
+  if (tracker.view()) {
+    for (ViewObserver& observer : observers_)
+      observer.OnViewBlurred(this);
+  }
 }
 
 // Tooltips --------------------------------------------------------------------
@@ -1848,112 +1869,6 @@ int View::GetVerticalDragThreshold() {
 PaintInfo::ScaleType View::GetPaintScaleType() const {
   return PaintInfo::ScaleType::kScaleWithEdgeSnapping;
 }
-
-// Debugging -------------------------------------------------------------------
-
-#if !defined(NDEBUG)
-
-std::string View::PrintViewGraph(bool first) {
-  return DoPrintViewGraph(first, this);
-}
-
-std::string View::DoPrintViewGraph(bool first, View* view_with_children) {
-  // 64-bit pointer = 16 bytes of hex + "0x" + '\0' = 19.
-  const size_t kMaxPointerStringLength = 19;
-
-  std::string result;
-
-  if (first)
-    result.append("digraph {\n");
-
-  // Node characteristics.
-  char p[kMaxPointerStringLength];
-
-  const std::string class_name(GetClassName());
-  size_t base_name_index = class_name.find_last_of('/');
-  if (base_name_index == std::string::npos)
-    base_name_index = 0;
-  else
-    base_name_index++;
-
-  char bounds_buffer[512];
-
-  // Information about current node.
-  base::snprintf(p, arraysize(bounds_buffer), "%p", view_with_children);
-  result.append("  N");
-  result.append(p + 2);
-  result.append(" [label=\"");
-
-  result.append(class_name.substr(base_name_index).c_str());
-
-  base::snprintf(bounds_buffer,
-                 arraysize(bounds_buffer),
-                 "\\n bounds: (%d, %d), (%dx%d)",
-                 bounds().x(),
-                 bounds().y(),
-                 bounds().width(),
-                 bounds().height());
-  result.append(bounds_buffer);
-
-  gfx::DecomposedTransform decomp;
-  if (!GetTransform().IsIdentity() &&
-      gfx::DecomposeTransform(&decomp, GetTransform())) {
-    base::snprintf(bounds_buffer,
-                   arraysize(bounds_buffer),
-                   "\\n translation: (%f, %f)",
-                   decomp.translate[0],
-                   decomp.translate[1]);
-    result.append(bounds_buffer);
-
-    base::snprintf(bounds_buffer, arraysize(bounds_buffer),
-                   "\\n rotation: %3.2f",
-                   gfx::RadToDeg(std::acos(decomp.quaternion.w()) * 2));
-    result.append(bounds_buffer);
-
-    base::snprintf(bounds_buffer,
-                   arraysize(bounds_buffer),
-                   "\\n scale: (%2.4f, %2.4f)",
-                   decomp.scale[0],
-                   decomp.scale[1]);
-    result.append(bounds_buffer);
-  }
-
-  result.append("\"");
-  if (!parent_)
-    result.append(", shape=box");
-  if (layer()) {
-    if (layer()->has_external_content())
-      result.append(", color=green");
-    else
-      result.append(", color=red");
-
-    if (layer()->fills_bounds_opaquely())
-      result.append(", style=filled");
-  }
-  result.append("]\n");
-
-  // Link to parent.
-  if (parent_) {
-    char pp[kMaxPointerStringLength];
-
-    base::snprintf(pp, kMaxPointerStringLength, "%p", parent_);
-    result.append("  N");
-    result.append(pp + 2);
-    result.append(" -> N");
-    result.append(p + 2);
-    result.append("\n");
-  }
-
-  // Children.
-  for (auto* child : view_with_children->children_)
-    result.append(child->PrintViewGraph(false));
-
-  if (first)
-    result.append("}\n");
-
-  return result;
-}
-#endif
 
 ////////////////////////////////////////////////////////////////////////////////
 // View, private:
@@ -2284,6 +2199,8 @@ void View::BoundsChanged(const gfx::Rect& previous_bounds) {
 
   if (needs_layout_ || previous_bounds.size() != size()) {
     needs_layout_ = false;
+    TRACE_EVENT1("views", "View::Layout(bounds_changed)", "class",
+                 GetClassName());
     Layout();
   }
 
@@ -2293,7 +2210,7 @@ void View::BoundsChanged(const gfx::Rect& previous_bounds) {
   // Notify interested Views that visible bounds within the root view may have
   // changed.
   if (descendants_to_notify_.get()) {
-    for (Views::iterator i(descendants_to_notify_->begin());
+    for (auto i(descendants_to_notify_->begin());
          i != descendants_to_notify_->end(); ++i) {
       (*i)->OnVisibleBoundsChanged();
     }
@@ -2343,8 +2260,8 @@ void View::AddDescendantToNotify(View* view) {
 
 void View::RemoveDescendantToNotify(View* view) {
   DCHECK(view && descendants_to_notify_.get());
-  Views::iterator i(std::find(
-      descendants_to_notify_->begin(), descendants_to_notify_->end(), view));
+  auto i(std::find(descendants_to_notify_->begin(),
+                   descendants_to_notify_->end(), view));
   DCHECK(i != descendants_to_notify_->end());
   descendants_to_notify_->erase(i);
   if (descendants_to_notify_->empty())

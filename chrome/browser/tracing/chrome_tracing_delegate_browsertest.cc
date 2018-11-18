@@ -7,6 +7,7 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/run_loop.h"
+#include "base/task/post_task.h"
 #include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
@@ -20,6 +21,7 @@
 #include "components/variations/variations_params_manager.h"
 #include "content/public/browser/background_tracing_config.h"
 #include "content/public/browser/background_tracing_manager.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/test/test_utils.h"
 
@@ -65,11 +67,11 @@ class ChromeTracingDelegateBrowserTest : public InProcessBrowserTest {
 
     DCHECK(config);
     content::BackgroundTracingManager::ReceiveCallback receive_callback =
-        base::Bind(&ChromeTracingDelegateBrowserTest::OnUpload,
-                   base::Unretained(this));
+        base::BindRepeating(&ChromeTracingDelegateBrowserTest::OnUpload,
+                            base::Unretained(this));
 
     return content::BackgroundTracingManager::GetInstance()->SetActiveScenario(
-        std::move(config), receive_callback, data_filtering);
+        std::move(config), std::move(receive_callback), data_filtering);
   }
 
   void TriggerPreemptiveScenario(
@@ -98,13 +100,14 @@ class ChromeTracingDelegateBrowserTest : public InProcessBrowserTest {
  private:
   void OnUpload(const scoped_refptr<base::RefCountedString>& file_contents,
                 std::unique_ptr<const base::DictionaryValue> metadata,
-                base::Callback<void()> done_callback) {
+                content::BackgroundTracingManager::FinishedProcessingCallback
+                    done_callback) {
     receive_count_ += 1;
 
-    content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
-                                     done_callback);
-    content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
-                                     on_upload_callback_);
+    base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI},
+                             base::BindOnce(std::move(done_callback), true));
+    base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI},
+                             on_upload_callback_);
   }
 
   void OnStartedFinalizing(bool success) {
@@ -112,8 +115,8 @@ class ChromeTracingDelegateBrowserTest : public InProcessBrowserTest {
     last_on_started_finalizing_success_ = success;
 
     if (!on_started_finalization_callback_.is_null()) {
-      content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
-                                       on_started_finalization_callback_);
+      base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI},
+                               on_started_finalization_callback_);
     }
   }
 
@@ -259,14 +262,13 @@ class ChromeTracingDelegateBrowserTestOnStartup
   }
 };
 
-#if !defined(OS_CHROMEOS) && defined(OFFICIAL_BUILD)
 IN_PROC_BROWSER_TEST_F(ChromeTracingDelegateBrowserTestOnStartup,
                        PRE_ScenarioSetFromFieldtrial) {
-  // At this point the metrics pref is not set.
-  EXPECT_FALSE(
-      content::BackgroundTracingManager::GetInstance()->HasActiveScenario());
+  // This test exists just to make sure the browser is created at least once and
+  // so a default profile is created. Then, the next time the browser is
+  // created, kMetricsReportingEnabled is explicitly read from the profile and
+  // the startup scenario can be activated.
 }
-#endif // !OS_CHROMEOS && !OFFICIAL_BUILD
 
 IN_PROC_BROWSER_TEST_F(ChromeTracingDelegateBrowserTestOnStartup,
                        ScenarioSetFromFieldtrial) {
@@ -275,14 +277,13 @@ IN_PROC_BROWSER_TEST_F(ChromeTracingDelegateBrowserTestOnStartup,
       content::BackgroundTracingManager::GetInstance()->HasActiveScenario());
 }
 
-#if !defined(OS_CHROMEOS) && defined(OFFICIAL_BUILD)
 IN_PROC_BROWSER_TEST_F(ChromeTracingDelegateBrowserTestOnStartup,
                        PRE_PRE_StartupTracingThrottle) {
-  // At this point the metrics pref is not set.
-  EXPECT_FALSE(
-      content::BackgroundTracingManager::GetInstance()->HasActiveScenario());
+  // This test exists just to make sure the browser is created at least once and
+  // so a default profile is created. Then, the next time the browser is
+  // created, kMetricsReportingEnabled is explicitly read from the profile and
+  // the startup scenario can be activated.
 }
-#endif // !OS_CHROMEOS && !OFFICIAL_BUILD
 
 IN_PROC_BROWSER_TEST_F(ChromeTracingDelegateBrowserTestOnStartup,
                        PRE_StartupTracingThrottle) {
@@ -296,8 +297,9 @@ IN_PROC_BROWSER_TEST_F(ChromeTracingDelegateBrowserTestOnStartup,
                         base::Time::Now().ToInternalValue());
 }
 
+// https://crbug.com/832981
 IN_PROC_BROWSER_TEST_F(ChromeTracingDelegateBrowserTestOnStartup,
-                       StartupTracingThrottle) {
+                       DISABLED_StartupTracingThrottle) {
   // The startup scenario should *not* be started, since not enough
   // time has elapsed since the last upload (set in the PRE_ above).
   EXPECT_FALSE(

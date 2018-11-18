@@ -115,7 +115,8 @@ void VpnService::VpnConfiguration::OnPacketReceived(
     pepper_vpn_provider_proxy_->SendOnPacketReceived(data);
   } else {
     std::unique_ptr<base::ListValue> event_args =
-        api_vpn::OnPacketReceived::Create(data);
+        api_vpn::OnPacketReceived::Create(
+            std::vector<uint8_t>(data.begin(), data.end()));
     vpn_service_->SendSignalToExtension(
         extension_id_, extensions::events::VPN_PROVIDER_ON_PACKET_RECEIVED,
         api_vpn::OnPacketReceived::kEventName, std::move(event_args));
@@ -278,25 +279,13 @@ std::string VpnService::GetKey(const std::string& extension_id,
   return base::HexEncode(key.data(), key.size());
 }
 
-void VpnService::OnConfigurationCreated(const std::string& service_path,
-                                        const std::string& profile_path,
-                                        const base::DictionaryValue& properties,
-                                        Source source) {
-}
-
 void VpnService::OnConfigurationRemoved(const std::string& service_path,
-                                        const std::string& guid,
-                                        Source source) {
-  if (source == SOURCE_EXTENSION_INSTALL) {
-    // No need to process if the configuration was removed using an extension
-    // API since the API would have already done the cleanup.
-    return;
-  }
-
+                                        const std::string& guid) {
   if (service_path_to_configuration_map_.find(service_path) ==
       service_path_to_configuration_map_.end()) {
     // Ignore removal of a configuration unknown to VPN service, which means the
-    // configuration was created internally by the platform.
+    // configuration was created internally by the platform or already removed
+    // by the extension.
     return;
   }
 
@@ -310,17 +299,6 @@ void VpnService::OnConfigurationRemoved(const std::string& service_path,
                         std::move(event_args));
 
   DestroyConfigurationInternal(configuration);
-}
-
-void VpnService::OnPropertiesSet(const std::string& service_path,
-                                 const std::string& guid,
-                                 const base::DictionaryValue& set_properties,
-                                 Source source) {
-}
-
-void VpnService::OnConfigurationProfileChanged(const std::string& service_path,
-                                               const std::string& profile_path,
-                                               Source source) {
 }
 
 void VpnService::OnGetPropertiesSuccess(
@@ -423,7 +401,7 @@ void VpnService::CreateConfiguration(const std::string& extension_id,
   properties.SetKey(shill::kGuidProperty, base::Value(guid));
 
   network_configuration_handler_->CreateShillConfiguration(
-      properties, NetworkConfigurationObserver::SOURCE_EXTENSION_INSTALL,
+      properties,
       base::Bind(&VpnService::OnCreateConfigurationSuccess,
                  weak_factory_.GetWeakPtr(), success, configuration),
       base::Bind(&VpnService::OnCreateConfigurationFailure,
@@ -453,7 +431,7 @@ void VpnService::DestroyConfiguration(const std::string& extension_id,
   DestroyConfigurationInternal(configuration);
 
   network_configuration_handler_->RemoveConfiguration(
-      service_path, NetworkConfigurationObserver::SOURCE_EXTENSION_INSTALL,
+      service_path,
       base::Bind(&VpnService::OnRemoveConfigurationSuccess,
                  weak_factory_.GetWeakPtr(), success),
       base::Bind(&VpnService::OnRemoveConfigurationFailure,
@@ -693,6 +671,12 @@ void VpnService::Bind(
 
 std::unique_ptr<content::VpnServiceProxy> VpnService::GetVpnServiceProxy() {
   return base::WrapUnique(new VpnServiceProxyImpl(weak_factory_.GetWeakPtr()));
+}
+
+const std::string VpnService::GetSingleServicepathForTesting() {
+  if (service_path_to_configuration_map_.size() == 1)
+    return service_path_to_configuration_map_.begin()->first;
+  return std::string();
 }
 
 }  // namespace chromeos

@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/bindings/core/v8/serialization/v8_script_value_serializer.h"
 
+#include "base/auto_reset.h"
 #include "third_party/blink/public/platform/web_blob_info.h"
 #include "third_party/blink/renderer/bindings/core/v8/to_v8_for_core.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_blob.h"
@@ -19,6 +20,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_image_bitmap.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_image_data.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_message_port.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_mojo_handle.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_offscreen_canvas.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_shared_array_buffer.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_throw_dom_exception.h"
@@ -30,9 +32,10 @@
 #include "third_party/blink/renderer/core/geometry/dom_rect.h"
 #include "third_party/blink/renderer/core/geometry/dom_rect_read_only.h"
 #include "third_party/blink/renderer/core/html/canvas/image_data.h"
+#include "third_party/blink/renderer/core/mojo/mojo_handle.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer_base.h"
+#include "third_party/blink/renderer/platform/file_metadata.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/partitions.h"
-#include "third_party/blink/renderer/platform/wtf/auto_reset.h"
 #include "third_party/blink/renderer/platform/wtf/date_math.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_utf8_adaptor.h"
 
@@ -55,10 +58,9 @@ namespace blink {
 // made to how Blink writes data. Purely V8-side changes do not require an
 // adjustment to this value.
 
-V8ScriptValueSerializer::V8ScriptValueSerializer(
-    scoped_refptr<ScriptState> script_state,
-    const Options& options)
-    : script_state_(std::move(script_state)),
+V8ScriptValueSerializer::V8ScriptValueSerializer(ScriptState* script_state,
+                                                 const Options& options)
+    : script_state_(script_state),
       serialized_script_value_(SerializedScriptValue::Create()),
       serializer_(script_state_->GetIsolate(), this),
       transferables_(options.transferables),
@@ -74,7 +76,8 @@ scoped_refptr<SerializedScriptValue> V8ScriptValueSerializer::Serialize(
   serialize_invoked_ = true;
 #endif
   DCHECK(serialized_script_value_);
-  AutoReset<const ExceptionState*> reset(&exception_state_, &exception_state);
+  base::AutoReset<const ExceptionState*> reset(&exception_state_,
+                                               &exception_state);
 
   // Prepare to transfer the provided transferables.
   PrepareTransfer(exception_state);
@@ -119,12 +122,13 @@ void V8ScriptValueSerializer::PrepareTransfer(ExceptionState& exception_state) {
   for (uint32_t i = 0; i < transferables_->array_buffers.size(); i++) {
     DOMArrayBufferBase* array_buffer = transferables_->array_buffers[i].Get();
     if (!array_buffer->IsShared()) {
-      v8::Local<v8::Value> wrapper = ToV8(array_buffer, script_state_.get());
+      v8::Local<v8::Value> wrapper = ToV8(array_buffer, script_state_);
       serializer_.TransferArrayBuffer(
           i, v8::Local<v8::ArrayBuffer>::Cast(wrapper));
     } else {
       exception_state.ThrowDOMException(
-          kDataCloneError, "SharedArrayBuffer can not be in transfer list.");
+          DOMExceptionCode::kDataCloneError,
+          "SharedArrayBuffer can not be in transfer list.");
       return;
     }
   }
@@ -166,7 +170,6 @@ void V8ScriptValueSerializer::WriteUTF8String(const String& string) {
   // TODO(jbroman): Ideally this method would take a WTF::StringView, but the
   // StringUTF8Adaptor trick doesn't yet work with StringView.
   StringUTF8Adaptor utf8(string);
-  DCHECK_LT(utf8.length(), std::numeric_limits<uint32_t>::max());
   WriteUint32(utf8.length());
   WriteRawBytes(utf8.Data(), utf8.length());
 }
@@ -214,7 +217,7 @@ bool V8ScriptValueSerializer::WriteDOMObject(ScriptWrappable* wrappable,
     ImageBitmap* image_bitmap = wrappable->ToImpl<ImageBitmap>();
     if (image_bitmap->IsNeutered()) {
       exception_state.ThrowDOMException(
-          kDataCloneError,
+          DOMExceptionCode::kDataCloneError,
           "An ImageBitmap is detached and could not be cloned.");
       return false;
     }
@@ -264,8 +267,10 @@ bool V8ScriptValueSerializer::WriteDOMObject(ScriptWrappable* wrappable,
     WriteUint32(image_data->width());
     WriteUint32(image_data->height());
     DOMArrayBufferBase* pixel_buffer = image_data->BufferBase();
-    WriteUint32(pixel_buffer->ByteLength());
-    WriteRawBytes(pixel_buffer->Data(), pixel_buffer->ByteLength());
+    uint32_t pixel_buffer_length =
+        SafeCast<uint32_t>(pixel_buffer->ByteLength());
+    WriteUint32(pixel_buffer_length);
+    WriteRawBytes(pixel_buffer->Data(), pixel_buffer_length);
     return true;
   }
   if (wrapper_type_info == &V8DOMPoint::wrapperTypeInfo) {
@@ -385,12 +390,32 @@ bool V8ScriptValueSerializer::WriteDOMObject(ScriptWrappable* wrappable,
       index = transferables_->message_ports.Find(message_port);
     if (index == kNotFound) {
       exception_state.ThrowDOMException(
-          kDataCloneError,
+          DOMExceptionCode::kDataCloneError,
           "A MessagePort could not be cloned because it was not transferred.");
       return false;
     }
     DCHECK_LE(index, std::numeric_limits<uint32_t>::max());
     WriteTag(kMessagePortTag);
+    WriteUint32(static_cast<uint32_t>(index));
+    return true;
+  }
+  if (wrapper_type_info == &V8MojoHandle::wrapperTypeInfo &&
+      RuntimeEnabledFeatures::MojoJSEnabled()) {
+    MojoHandle* mojo_handle = wrappable->ToImpl<MojoHandle>();
+    size_t index = kNotFound;
+    if (transferables_)
+      index = transferables_->mojo_handles.Find(mojo_handle);
+    if (index == kNotFound) {
+      exception_state.ThrowDOMException(
+          DOMExceptionCode::kDataCloneError,
+          "A MojoHandle could not be cloned because it was not transferred.");
+      return false;
+    }
+    DCHECK_LE(index, std::numeric_limits<uint32_t>::max());
+    serialized_script_value_->MojoHandles().push_back(
+        mojo_handle->TakeHandle());
+    index = serialized_script_value_->MojoHandles().size() - 1;
+    WriteTag(kMojoHandleTag);
     WriteUint32(static_cast<uint32_t>(index));
     return true;
   }
@@ -401,20 +426,20 @@ bool V8ScriptValueSerializer::WriteDOMObject(ScriptWrappable* wrappable,
       index = transferables_->offscreen_canvases.Find(canvas);
     if (index == kNotFound) {
       exception_state.ThrowDOMException(
-          kDataCloneError,
+          DOMExceptionCode::kDataCloneError,
           "An OffscreenCanvas could not be cloned "
           "because it was not transferred.");
       return false;
     }
     if (canvas->IsNeutered()) {
       exception_state.ThrowDOMException(
-          kDataCloneError,
+          DOMExceptionCode::kDataCloneError,
           "An OffscreenCanvas could not be cloned because it was detached.");
       return false;
     }
     if (canvas->RenderingContext()) {
       exception_state.ThrowDOMException(
-          kDataCloneError,
+          DOMExceptionCode::kDataCloneError,
           "An OffscreenCanvas could not be cloned "
           "because it had a rendering context.");
       return false;
@@ -422,7 +447,7 @@ bool V8ScriptValueSerializer::WriteDOMObject(ScriptWrappable* wrappable,
     WriteTag(kOffscreenCanvasTransferTag);
     WriteUint32(canvas->width());
     WriteUint32(canvas->height());
-    WriteUint32(canvas->PlaceholderCanvasId());
+    WriteUint64(canvas->PlaceholderCanvasId());
     WriteUint32(canvas->ClientId());
     WriteUint32(canvas->SinkId());
     return true;
@@ -473,10 +498,12 @@ bool V8ScriptValueSerializer::WriteFile(File* file,
 void V8ScriptValueSerializer::ThrowDataCloneError(
     v8::Local<v8::String> v8_message) {
   DCHECK(exception_state_);
-  String message = exception_state_->AddExceptionContext(
-      V8StringToWebCoreString<String>(v8_message, kDoNotExternalize));
-  V8ThrowDOMException::ThrowDOMException(script_state_->GetIsolate(),
-                                         kDataCloneError, message);
+  ExceptionState exception_state(
+      script_state_->GetIsolate(), exception_state_->Context(),
+      exception_state_->InterfaceName(), exception_state_->PropertyName());
+  exception_state.ThrowDOMException(
+      DOMExceptionCode::kDataCloneError,
+      ToBlinkString<String>(v8_message, kDoNotExternalize));
 }
 
 v8::Maybe<bool> V8ScriptValueSerializer::WriteHostObject(
@@ -489,7 +516,7 @@ v8::Maybe<bool> V8ScriptValueSerializer::WriteHostObject(
                                  exception_state_->PropertyName());
 
   if (!V8DOMWrapper::IsWrapper(isolate, object)) {
-    exception_state.ThrowDOMException(kDataCloneError,
+    exception_state.ThrowDOMException(DOMExceptionCode::kDataCloneError,
                                       "An object could not be cloned.");
     return v8::Nothing<bool>();
   }
@@ -502,7 +529,8 @@ v8::Maybe<bool> V8ScriptValueSerializer::WriteHostObject(
   if (!exception_state.HadException()) {
     StringView interface = wrappable->GetWrapperTypeInfo()->interface_name;
     exception_state.ThrowDOMException(
-        kDataCloneError, interface + " object could not be cloned.");
+        DOMExceptionCode::kDataCloneError,
+        interface + " object could not be cloned.");
   }
   return v8::Nothing<bool>();
 }
@@ -517,7 +545,7 @@ v8::Maybe<uint32_t> V8ScriptValueSerializer::GetSharedArrayBufferId(
                                    exception_state_->InterfaceName(),
                                    exception_state_->PropertyName());
     exception_state.ThrowDOMException(
-        kDataCloneError,
+        DOMExceptionCode::kDataCloneError,
         "A SharedArrayBuffer can not be serialized for storage.");
     return v8::Nothing<uint32_t>();
   }
@@ -528,7 +556,7 @@ v8::Maybe<uint32_t> V8ScriptValueSerializer::GetSharedArrayBufferId(
   // The index returned from this function will be serialized into the data
   // stream. When deserializing, this will be used to index into the
   // sharedArrayBufferContents array of the SerializedScriptValue.
-  size_t index = shared_array_buffers_.Find(shared_array_buffer);
+  uint32_t index = shared_array_buffers_.Find(shared_array_buffer);
   if (index == kNotFound) {
     shared_array_buffers_.push_back(shared_array_buffer);
     index = shared_array_buffers_.size() - 1;
@@ -539,6 +567,18 @@ v8::Maybe<uint32_t> V8ScriptValueSerializer::GetSharedArrayBufferId(
 v8::Maybe<uint32_t> V8ScriptValueSerializer::GetWasmModuleTransferId(
     v8::Isolate* isolate,
     v8::Local<v8::WasmCompiledModule> module) {
+  if (for_storage_) {
+    DCHECK(exception_state_);
+    DCHECK_EQ(isolate, script_state_->GetIsolate());
+    ExceptionState exception_state(isolate, exception_state_->Context(),
+                                   exception_state_->InterfaceName(),
+                                   exception_state_->PropertyName());
+    exception_state.ThrowDOMException(
+        DOMExceptionCode::kDataCloneError,
+        "A WebAssembly.Module can not be serialized for storage.");
+    return v8::Nothing<uint32_t>();
+  }
+
   switch (wasm_policy_) {
     case Options::kSerialize:
       return v8::Nothing<uint32_t>();
@@ -549,7 +589,7 @@ v8::Maybe<uint32_t> V8ScriptValueSerializer::GetWasmModuleTransferId(
       ExceptionState exception_state(isolate, exception_state_->Context(),
                                      exception_state_->InterfaceName(),
                                      exception_state_->PropertyName());
-      exception_state.ThrowDOMException(kDataCloneError,
+      exception_state.ThrowDOMException(DOMExceptionCode::kDataCloneError,
                                         "Serializing WebAssembly modules in "
                                         "non-secure contexts is not allowed.");
       return v8::Nothing<uint32_t>();
@@ -577,8 +617,8 @@ void* V8ScriptValueSerializer::ReallocateBufferMemory(void* old_buffer,
                                                       size_t size,
                                                       size_t* actual_size) {
   *actual_size = WTF::Partitions::BufferActualSize(size);
-  return WTF::Partitions::BufferRealloc(old_buffer, *actual_size,
-                                        "SerializedScriptValue buffer");
+  return WTF::Partitions::BufferTryRealloc(old_buffer, *actual_size,
+                                           "SerializedScriptValue buffer");
 }
 
 void V8ScriptValueSerializer::FreeBufferMemory(void* buffer) {

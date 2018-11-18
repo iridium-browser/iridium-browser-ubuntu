@@ -17,6 +17,9 @@
 #include "third_party/blink/public/mojom/service_worker/service_worker_registration.mojom.h"
 
 namespace content {
+namespace service_worker_registration_unittest {
+class ServiceWorkerRegistrationObjectHostTest;
+}  // namespace service_worker_registration_unittest
 
 class ServiceWorkerContextCore;
 class ServiceWorkerVersion;
@@ -46,11 +49,19 @@ class CONTENT_EXPORT ServiceWorkerRegistrationObjectHost
   ServiceWorkerRegistration* registration() { return registration_.get(); }
 
  private:
+  friend class service_worker_registration_unittest::
+      ServiceWorkerRegistrationObjectHostTest;
+
+  using StatusCallback =
+      base::OnceCallback<void(blink::ServiceWorkerStatusCode status)>;
+
   // ServiceWorkerRegistration::Listener overrides.
   void OnVersionAttributesChanged(
       ServiceWorkerRegistration* registration,
-      ChangedVersionAttributesMask changed_mask,
+      blink::mojom::ChangedServiceWorkerObjectsMaskPtr changed_mask,
       const ServiceWorkerRegistrationInfo& info) override;
+  void OnUpdateViaCacheChanged(
+      ServiceWorkerRegistration* registration) override;
   void OnRegistrationFailed(ServiceWorkerRegistration* registration) override;
   void OnUpdateFound(ServiceWorkerRegistration* registration) override;
 
@@ -66,34 +77,49 @@ class CONTENT_EXPORT ServiceWorkerRegistrationObjectHost
       const std::string& value,
       SetNavigationPreloadHeaderCallback callback) override;
 
+  // Delays an update if it is called by a worker without controllee, to prevent
+  // workers from running forever (see https://crbug.com/805496).
+  // Calls |update_function| with blink::ServiceWorkerStatusCode::kOk if the
+  // update should procceed, and blink::ServiceWorkerStatusCode::kTimeout
+  // otherwise.
+  // If there is no delay, or if the delay is very long, |update_function| is
+  // executed synchronously (before this method returns).
+  //
+  // TODO(falken): See if tests can call |Update| directly, then this separate
+  // function isn't needed.
+  static void DelayUpdate(blink::mojom::ServiceWorkerProviderType provider_type,
+                          ServiceWorkerRegistration* registration,
+                          ServiceWorkerVersion* version,
+                          StatusCallback update_function);
   // Called back from ServiceWorkerContextCore when an update is complete.
   void UpdateComplete(UpdateCallback callback,
-                      ServiceWorkerStatusCode status,
+                      blink::ServiceWorkerStatusCode status,
                       const std::string& status_message,
                       int64_t registration_id);
   // Called back from ServiceWorkerContextCore when the unregistration is
   // complete.
   void UnregistrationComplete(UnregisterCallback callback,
-                              ServiceWorkerStatusCode status);
+                              blink::ServiceWorkerStatusCode status);
   // Called back from ServiceWorkerStorage when setting navigation preload is
   // complete.
   void DidUpdateNavigationPreloadEnabled(
       bool enable,
       EnableNavigationPreloadCallback callback,
-      ServiceWorkerStatusCode status);
+      blink::ServiceWorkerStatusCode status);
   // Called back from ServiceWorkerStorage when setting navigation preload
   // header is complete.
   void DidUpdateNavigationPreloadHeader(
       const std::string& value,
       SetNavigationPreloadHeaderCallback callback,
-      ServiceWorkerStatusCode status);
+      blink::ServiceWorkerStatusCode status);
 
   // Sets the corresponding version field to the given version or if the given
   // version is nullptr, clears the field.
-  void SetVersionAttributes(ChangedVersionAttributesMask changed_mask,
-                            ServiceWorkerVersion* installing_version,
-                            ServiceWorkerVersion* waiting_version,
-                            ServiceWorkerVersion* active_version);
+  void SetServiceWorkerObjects(
+      blink::mojom::ChangedServiceWorkerObjectsMaskPtr changed_mask,
+      ServiceWorkerVersion* installing_version,
+      ServiceWorkerVersion* waiting_version,
+      ServiceWorkerVersion* active_version);
 
   void OnConnectionError();
 
@@ -110,6 +136,8 @@ class CONTENT_EXPORT ServiceWorkerRegistrationObjectHost
   // |this|.
   ServiceWorkerProviderHost* provider_host_;
   base::WeakPtr<ServiceWorkerContextCore> context_;
+  scoped_refptr<ServiceWorkerRegistration> registration_;
+
   mojo::AssociatedBindingSet<blink::mojom::ServiceWorkerRegistrationObjectHost>
       bindings_;
   // Mojo connection to the content::WebServiceWorkerRegistrationImpl in the
@@ -117,8 +145,6 @@ class CONTENT_EXPORT ServiceWorkerRegistrationObjectHost
   // object.
   blink::mojom::ServiceWorkerRegistrationObjectAssociatedPtr
       remote_registration_;
-
-  scoped_refptr<ServiceWorkerRegistration> registration_;
 
   base::WeakPtrFactory<ServiceWorkerRegistrationObjectHost> weak_ptr_factory_;
 

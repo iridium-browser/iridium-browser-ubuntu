@@ -22,7 +22,6 @@ PaymentCurrencyAmount ToPaymentCurrencyAmount(
   PaymentCurrencyAmount amount;
   amount.setCurrency(web_amount.currency);
   amount.setValue(web_amount.value);
-  amount.setCurrencySystem(web_amount.currency_system);
   return amount;
 }
 
@@ -38,12 +37,7 @@ PaymentDetailsModifier ToPaymentDetailsModifier(
     ScriptState* script_state,
     const WebPaymentDetailsModifier& web_modifier) {
   PaymentDetailsModifier modifier;
-  Vector<String> supported_methods;
-  for (const auto& web_method : web_modifier.supported_methods) {
-    supported_methods.push_back(web_method);
-  }
-  modifier.setSupportedMethods(
-      StringOrStringSequence::FromStringSequence(supported_methods));
+  modifier.setSupportedMethod(web_modifier.supported_method);
   modifier.setTotal(ToPaymentItem(web_modifier.total));
   HeapVector<PaymentItem> additional_display_items;
   for (const auto& web_item : web_modifier.additional_display_items) {
@@ -72,12 +66,7 @@ PaymentMethodData ToPaymentMethodData(
     ScriptState* script_state,
     const WebPaymentMethodData& web_method_data) {
   PaymentMethodData method_data;
-  Vector<String> supported_methods;
-  for (const auto& method : web_method_data.supported_methods) {
-    supported_methods.push_back(method);
-  }
-  method_data.setSupportedMethods(
-      StringOrStringSequence::FromStringSequence(supported_methods));
+  method_data.setSupportedMethod(web_method_data.supported_method);
   method_data.setData(
       StringDataToScriptValue(script_state, web_method_data.stringified_data));
   return method_data;
@@ -96,7 +85,7 @@ PaymentRequestEventInit PaymentEventDataConversion::ToPaymentRequestEventInit(
 
   ScriptState::Scope scope(script_state);
 
-  event_data.setTopLevelOrigin(web_event_data.top_level_origin);
+  event_data.setTopOrigin(web_event_data.top_origin);
   event_data.setPaymentRequestOrigin(web_event_data.payment_request_origin);
   event_data.setPaymentRequestId(web_event_data.payment_request_id);
   HeapVector<PaymentMethodData> method_data;
@@ -125,7 +114,7 @@ CanMakePaymentEventInit PaymentEventDataConversion::ToCanMakePaymentEventInit(
 
   ScriptState::Scope scope(script_state);
 
-  event_data.setTopLevelOrigin(web_event_data.top_level_origin);
+  event_data.setTopOrigin(web_event_data.top_origin);
   event_data.setPaymentRequestOrigin(web_event_data.payment_request_origin);
   HeapVector<PaymentMethodData> method_data;
   for (const auto& md : web_event_data.method_data) {

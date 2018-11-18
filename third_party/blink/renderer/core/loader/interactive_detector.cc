@@ -22,6 +22,10 @@ constexpr auto kTimeToInteractiveWindow = TimeDelta::FromSeconds(5);
 // requests for this duration of time.
 constexpr int kNetworkQuietMaximumConnections = 2;
 
+const char kHistogramInputDelay[] = "PageLoad.InteractiveTiming.InputDelay";
+const char kHistogramInputTimestamp[] =
+    "PageLoad.InteractiveTiming.InputTimestamp";
+
 // static
 const char InteractiveDetector::kSupplementName[] = "InteractiveDetector";
 
@@ -44,15 +48,13 @@ InteractiveDetector::InteractiveDetector(
     Document& document,
     NetworkActivityChecker* network_activity_checker)
     : Supplement<Document>(document),
+      ContextLifecycleObserver(&document),
       network_activity_checker_(network_activity_checker),
       time_to_interactive_timer_(
-          document.GetTaskRunner(TaskType::kUnspecedTimer),
+          document.GetTaskRunner(TaskType::kInternalDefault),
           this,
-          &InteractiveDetector::TimeToInteractiveTimerFired) {}
-
-InteractiveDetector::~InteractiveDetector() {
-  LongTaskDetector::Instance().UnregisterObserver(this);
-}
+          &InteractiveDetector::TimeToInteractiveTimerFired),
+      initial_visibility_(document.GetPageVisibilityState()) {}
 
 void InteractiveDetector::SetNavigationStartTime(
     TimeTicks navigation_start_time) {
@@ -136,21 +138,52 @@ TimeTicks InteractiveDetector::GetFirstInputTimestamp() const {
   return page_event_times_.first_input_timestamp;
 }
 
+TimeDelta InteractiveDetector::GetLongestInputDelay() const {
+  return page_event_times_.longest_input_delay;
+}
+
+TimeTicks InteractiveDetector::GetLongestInputTimestamp() const {
+  return page_event_times_.longest_input_timestamp;
+}
+
+bool InteractiveDetector::PageWasBackgroundedSinceEvent(TimeTicks event_time) {
+  DCHECK(GetSupplementable());
+  if (GetSupplementable()->GetPageVisibilityState() ==
+      mojom::PageVisibilityState::kHidden) {
+    return true;
+  }
+
+  mojom::PageVisibilityState curr_visibility = initial_visibility_;
+  TimeTicks visibility_start = page_event_times_.nav_start;
+  for (auto change_event : visibility_change_events_) {
+    TimeTicks visibility_end = change_event.timestamp;
+    if (curr_visibility == mojom::PageVisibilityState::kHidden &&
+        event_time < visibility_end) {
+      // [event_time, now] intersects a backgrounded range.
+      return true;
+    }
+    curr_visibility = change_event.visibility;
+    visibility_start = visibility_end;
+  }
+
+  return false;
+}  // namespace blink
+
 // This is called early enough in the pipeline that we don't need to worry about
 // javascript dispatching untrusted input events.
-void InteractiveDetector::HandleForFirstInputDelay(const WebInputEvent& event) {
-  if (!page_event_times_.first_input_delay.is_zero())
-    return;
-
+void InteractiveDetector::HandleForInputDelay(const WebInputEvent& event) {
   DCHECK(event.GetType() != WebInputEvent::kTouchStart);
+
+  // This only happens sometimes on tests unrelated to InteractiveDetector. It
+  // is safe to ignore events that are not properly initialized.
+  if (event.TimeStamp().is_null())
+    return;
 
   // We can't report a pointerDown until the pointerUp, in case it turns into a
   // scroll.
   if (event.GetType() == WebInputEvent::kPointerDown) {
-    pending_pointerdown_delay_ = TimeDelta::FromSecondsD(
-        CurrentTimeTicksInSeconds() - event.TimeStampSeconds());
-    pending_pointerdown_timestamp_ =
-        TimeTicksFromSeconds(event.TimeStampSeconds());
+    pending_pointerdown_delay_ = CurrentTimeTicks() - event.TimeStamp();
+    pending_pointerdown_timestamp_ = event.TimeStamp();
     return;
   }
 
@@ -169,6 +202,10 @@ void InteractiveDetector::HandleForFirstInputDelay(const WebInputEvent& event) {
   TimeDelta delay;
   TimeTicks event_timestamp;
   if (event.GetType() == WebInputEvent::kPointerUp) {
+    // PointerUp by itself is not considered a significant input.
+    if (pending_pointerdown_timestamp_.is_null())
+      return;
+
     // It is possible that this pointer up doesn't match with the pointer down
     // whose delay is stored in pending_pointerdown_delay_. In this case, the
     // user gesture started by this event contained some non-scroll input, so we
@@ -176,18 +213,38 @@ void InteractiveDetector::HandleForFirstInputDelay(const WebInputEvent& event) {
     delay = pending_pointerdown_delay_;
     event_timestamp = pending_pointerdown_timestamp_;
   } else {
-    delay = TimeDelta::FromSecondsD(CurrentTimeTicksInSeconds() -
-                                    event.TimeStampSeconds());
-    event_timestamp = TimeTicksFromSeconds(event.TimeStampSeconds());
+    delay = CurrentTimeTicks() - event.TimeStamp();
+    event_timestamp = event.TimeStamp();
   }
 
   pending_pointerdown_delay_ = base::TimeDelta();
   pending_pointerdown_timestamp_ = base::TimeTicks();
+  bool input_delay_metrics_changed = false;
 
-  page_event_times_.first_input_delay = delay;
-  page_event_times_.first_input_timestamp = event_timestamp;
+  if (page_event_times_.first_input_delay.is_zero()) {
+    page_event_times_.first_input_delay = delay;
+    page_event_times_.first_input_timestamp = event_timestamp;
+    input_delay_metrics_changed = true;
+  }
 
-  if (GetSupplementable()->Loader())
+  UMA_HISTOGRAM_CUSTOM_TIMES(kHistogramInputDelay, delay,
+                             base::TimeDelta::FromMilliseconds(1),
+                             base::TimeDelta::FromSeconds(60), 50);
+  UMA_HISTOGRAM_CUSTOM_TIMES(kHistogramInputTimestamp,
+                             event_timestamp - page_event_times_.nav_start,
+                             base::TimeDelta::FromMilliseconds(10),
+                             base::TimeDelta::FromMinutes(10), 100);
+
+  // Only update longest input delay if page was not backgrounded while the
+  // input was queued.
+  if (delay > page_event_times_.longest_input_delay &&
+      !PageWasBackgroundedSinceEvent(event_timestamp)) {
+    page_event_times_.longest_input_delay = delay;
+    page_event_times_.longest_input_timestamp = event_timestamp;
+    input_delay_metrics_changed = true;
+  }
+
+  if (GetSupplementable()->Loader() && input_delay_metrics_changed)
     GetSupplementable()->Loader()->DidChangePerformanceTiming();
 }
 
@@ -214,7 +271,7 @@ void InteractiveDetector::EndNetworkQuietPeriod(TimeTicks current_time) {
 // CurrentTimeTicksInSeconds.
 void InteractiveDetector::UpdateNetworkQuietState(
     double request_count,
-    WTF::Optional<TimeTicks> opt_current_time) {
+    base::Optional<TimeTicks> opt_current_time) {
   if (request_count <= kNetworkQuietMaximumConnections &&
       active_network_quiet_window_start_.is_null()) {
     // Not using `value_or(CurrentTimeTicksInSeconds())` here because
@@ -232,7 +289,7 @@ void InteractiveDetector::UpdateNetworkQuietState(
 }
 
 void InteractiveDetector::OnResourceLoadBegin(
-    WTF::Optional<TimeTicks> load_begin_time) {
+    base::Optional<TimeTicks> load_begin_time) {
   if (!GetSupplementable())
     return;
   if (!interactive_time_.is_null())
@@ -245,7 +302,7 @@ void InteractiveDetector::OnResourceLoadBegin(
 // The optional load_finish_time, if provided, saves us a call to
 // CurrentTimeTicksInSeconds.
 void InteractiveDetector::OnResourceLoadEnd(
-    WTF::Optional<TimeTicks> load_finish_time) {
+    base::Optional<TimeTicks> load_finish_time) {
   if (!GetSupplementable())
     return;
   if (!interactive_time_.is_null())
@@ -308,13 +365,9 @@ void InteractiveDetector::OnInvalidatingInputEvent(
     GetSupplementable()->Loader()->DidChangePerformanceTiming();
 }
 
-void InteractiveDetector::OnFirstInputDelay(TimeDelta delay) {
-  if (!page_event_times_.first_input_delay.is_zero())
-    return;
-
-  page_event_times_.first_input_delay = delay;
-  if (GetSupplementable()->Loader())
-    GetSupplementable()->Loader()->DidChangePerformanceTiming();
+void InteractiveDetector::OnPageVisibilityChanged(
+    mojom::PageVisibilityState visibility) {
+  visibility_change_events_.push_back({CurrentTimeTicks(), visibility});
 }
 
 void InteractiveDetector::TimeToInteractiveTimerFired(TimerBase*) {
@@ -471,8 +524,13 @@ void InteractiveDetector::OnTimeToInteractiveDetected() {
   }
 }
 
+void InteractiveDetector::ContextDestroyed(ExecutionContext*) {
+  LongTaskDetector::Instance().UnregisterObserver(this);
+}
+
 void InteractiveDetector::Trace(Visitor* visitor) {
   Supplement<Document>::Trace(visitor);
+  ContextLifecycleObserver::Trace(visitor);
 }
 
 }  // namespace blink

@@ -146,10 +146,9 @@ void ProxyMain::BeginMainFrame(
   max_requested_pipeline_stage_ = NO_PIPELINE_STAGE;
 
   // When we don't need to produce a CompositorFrame, there's also no need to
-  // paint or commit our updates. We still need to run layout though, as it can
+  // commit our updates. We still need to run layout and paint though, as it can
   // have side effects on page loading behavior.
-  bool skip_paint_and_commit =
-      begin_main_frame_state->begin_frame_args.animate_only;
+  bool skip_commit = begin_main_frame_state->begin_frame_args.animate_only;
 
   // If commits are deferred, skip the entire pipeline.
   bool skip_full_pipeline = defer_commits_;
@@ -158,7 +157,7 @@ void ProxyMain::BeginMainFrame(
   // now, and there was no intermediate request for a commit since the last
   // BeginMainFrame, we can skip the full pipeline.
   skip_full_pipeline |=
-      skip_paint_and_commit && final_pipeline_stage_ == NO_PIPELINE_STAGE;
+      skip_commit && final_pipeline_stage_ == NO_PIPELINE_STAGE;
 
   if (skip_full_pipeline) {
     TRACE_EVENT_INSTANT0("cc", "EarlyOut_DeferCommit",
@@ -220,17 +219,16 @@ void ProxyMain::BeginMainFrame(
 
   // See LayerTreeHostClient::MainFrameUpdate for more documentation on
   // what this does.
-  layer_tree_host_->RequestMainFrameUpdate(
-      skip_paint_and_commit ? LayerTreeHost::VisualStateUpdate::kPrePaint
-                            : LayerTreeHost::VisualStateUpdate::kAll);
+  layer_tree_host_->RequestMainFrameUpdate();
 
   // At this point the main frame may have deferred commits to avoid committing
   // right now.
-  skip_paint_and_commit |= defer_commits_;
+  skip_commit |= defer_commits_;
 
-  if (skip_paint_and_commit) {
+  if (skip_commit) {
     TRACE_EVENT_INSTANT0("cc", "EarlyOut_DeferCommit_InsideBeginMainFrame",
                          TRACE_EVENT_SCOPE_THREAD);
+    layer_tree_host_->RecordEndOfFrameMetrics(begin_main_frame_start_time);
     std::vector<std::unique_ptr<SwapPromise>> empty_swap_promises;
     ImplThreadTaskRunner()->PostTask(
         FROM_HERE, base::BindOnce(&ProxyImpl::BeginMainFrameAbortedOnImpl,
@@ -277,6 +275,7 @@ void ProxyMain::BeginMainFrame(
   current_pipeline_stage_ = COMMIT_PIPELINE_STAGE;
   if (final_pipeline_stage_ < COMMIT_PIPELINE_STAGE) {
     TRACE_EVENT_INSTANT0("cc", "EarlyOut_NoUpdates", TRACE_EVENT_SCOPE_THREAD);
+    layer_tree_host_->RecordEndOfFrameMetrics(begin_main_frame_start_time);
     std::vector<std::unique_ptr<SwapPromise>> swap_promises =
         layer_tree_host_->GetSwapPromiseManager()->TakeSwapPromises();
     ImplThreadTaskRunner()->PostTask(
@@ -300,7 +299,7 @@ void ProxyMain::BeginMainFrame(
   // commit.
   ui::LatencyInfo new_latency_info(ui::SourceEventType::FRAME);
   new_latency_info.AddLatencyNumberWithTimestamp(
-      ui::LATENCY_BEGIN_FRAME_RENDERER_MAIN_COMPONENT, 0, 0,
+      ui::LATENCY_BEGIN_FRAME_RENDERER_MAIN_COMPONENT,
       begin_main_frame_state->begin_frame_args.frame_time, 1);
   layer_tree_host_->QueueSwapPromise(
       std::make_unique<LatencyInfoSwapPromise>(new_latency_info));
@@ -311,6 +310,7 @@ void ProxyMain::BeginMainFrame(
   // coordinated by the Scheduler.
   {
     TRACE_EVENT0("cc", "ProxyMain::BeginMainFrame::commit");
+    layer_tree_host_->RecordEndOfFrameMetrics(begin_main_frame_start_time);
 
     DebugScopedSetMainThreadBlocked main_thread_blocked(task_runner_provider_);
 
@@ -331,12 +331,12 @@ void ProxyMain::BeginMainFrame(
   layer_tree_host_->DidBeginMainFrame();
 }
 
-void ProxyMain::DidPresentCompositorFrame(const std::vector<int>& source_frames,
-                                          base::TimeTicks time,
-                                          base::TimeDelta refresh,
-                                          uint32_t flags) {
-  layer_tree_host_->DidPresentCompositorFrame(source_frames, time, refresh,
-                                              flags);
+void ProxyMain::DidPresentCompositorFrame(
+    uint32_t frame_token,
+    std::vector<LayerTreeHost::PresentationTimeCallback> callbacks,
+    const gfx::PresentationFeedback& feedback) {
+  layer_tree_host_->DidPresentCompositorFrame(frame_token, std::move(callbacks),
+                                              feedback);
 }
 
 bool ProxyMain::IsStarted() const {
@@ -418,6 +418,10 @@ void ProxyMain::SetNextCommitWaitsForActivation() {
   commit_waits_for_activation_ = true;
 }
 
+bool ProxyMain::RequestedAnimatePending() {
+  return max_requested_pipeline_stage_ >= ANIMATE_PIPELINE_STAGE;
+}
+
 void ProxyMain::NotifyInputThrottledUntilCommit() {
   DCHECK(IsMainThread());
   ImplThreadTaskRunner()->PostTask(
@@ -448,13 +452,6 @@ bool ProxyMain::CommitRequested() const {
   // CommitInProgress().
   return current_pipeline_stage_ != NO_PIPELINE_STAGE ||
          max_requested_pipeline_stage_ >= COMMIT_PIPELINE_STAGE;
-}
-
-void ProxyMain::MainThreadHasStoppedFlinging() {
-  DCHECK(IsMainThread());
-  ImplThreadTaskRunner()->PostTask(
-      FROM_HERE, base::BindOnce(&ProxyImpl::MainThreadHasStoppedFlingingOnImpl,
-                                base::Unretained(proxy_impl_.get())));
 }
 
 void ProxyMain::Start() {
@@ -597,11 +594,11 @@ void ProxyMain::SetURLForUkm(const GURL& url) {
                                 base::Unretained(proxy_impl_.get()), url));
 }
 
-void ProxyMain::ClearHistoryOnNavigation() {
+void ProxyMain::ClearHistory() {
   // Must only be called from the impl thread during commit.
   DCHECK(task_runner_provider_->IsImplThread());
   DCHECK(task_runner_provider_->IsMainThreadBlocked());
-  proxy_impl_->ClearHistoryOnNavigation();
+  proxy_impl_->ClearHistory();
 }
 
 void ProxyMain::SetRenderFrameObserver(

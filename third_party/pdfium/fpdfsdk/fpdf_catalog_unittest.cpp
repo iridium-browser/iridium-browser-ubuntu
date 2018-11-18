@@ -7,20 +7,20 @@
 #include <memory>
 
 #include "core/fpdfapi/cpdf_modulemgr.h"
+#include "core/fpdfapi/parser/cpdf_dictionary.h"
 #include "core/fpdfapi/parser/cpdf_document.h"
 #include "core/fpdfapi/parser/cpdf_number.h"
 #include "core/fpdfapi/parser/cpdf_parser.h"
 #include "core/fpdfapi/parser/cpdf_string.h"
+#include "fpdfsdk/cpdfsdk_helpers.h"
+#include "public/cpp/fpdf_scopers.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/test_support.h"
+#include "third_party/base/ptr_util.h"
 
-#ifdef PDF_ENABLE_XFA
-#include "fpdfsdk/fpdfxfa/cpdfxfa_context.h"
-#endif  // PDF_ENABLE_XFA
-
-class CPDF_TestDocument : public CPDF_Document {
+class CPDF_TestDocument final : public CPDF_Document {
  public:
-  CPDF_TestDocument() : CPDF_Document(nullptr) {}
+  CPDF_TestDocument() : CPDF_Document() {}
 
   void SetRoot(CPDF_Dictionary* root) {
     m_pRootDict = root;
@@ -28,31 +28,12 @@ class CPDF_TestDocument : public CPDF_Document {
   }
 };
 
-#ifdef PDF_ENABLE_XFA
-class CPDF_TestXFAContext : public CPDFXFA_Context {
- public:
-  CPDF_TestXFAContext()
-      : CPDFXFA_Context(pdfium::MakeUnique<CPDF_TestDocument>()) {}
-
-  void SetRoot(CPDF_Dictionary* root) {
-    reinterpret_cast<CPDF_TestDocument*>(GetPDFDoc())->SetRoot(root);
-  }
-
-  CPDF_IndirectObjectHolder* GetHolder() { return GetPDFDoc(); }
-};
-using CPDF_TestPdfDocument = CPDF_TestXFAContext;
-#else   // PDF_ENABLE_XFA
-using CPDF_TestPdfDocument = CPDF_TestDocument;
-#endif  // PDF_ENABLE_XFA
-
 class PDFCatalogTest : public testing::Test {
  public:
   void SetUp() override {
     CPDF_ModuleMgr::Get()->Init();
-
-    m_pDoc = pdfium::MakeUnique<CPDF_TestPdfDocument>();
-
-    // Setup the root directory.
+    auto pTestDoc = pdfium::MakeUnique<CPDF_TestDocument>();
+    m_pDoc.reset(FPDFDocumentFromCPDFDocument(pTestDoc.release()));
     m_pRootObj = pdfium::MakeUnique<CPDF_Dictionary>();
   }
 
@@ -62,7 +43,7 @@ class PDFCatalogTest : public testing::Test {
   }
 
  protected:
-  std::unique_ptr<CPDF_TestPdfDocument> m_pDoc;
+  ScopedFPDFDocument m_pDoc;
   std::unique_ptr<CPDF_Dictionary> m_pRootObj;
 };
 
@@ -70,12 +51,15 @@ TEST_F(PDFCatalogTest, IsTagged) {
   // Null doc
   EXPECT_FALSE(FPDFCatalog_IsTagged(nullptr));
 
+  CPDF_TestDocument* pTestDoc = static_cast<CPDF_TestDocument*>(
+      CPDFDocumentFromFPDFDocument(m_pDoc.get()));
+
   // No root
-  m_pDoc->SetRoot(nullptr);
+  pTestDoc->SetRoot(nullptr);
   EXPECT_FALSE(FPDFCatalog_IsTagged(m_pDoc.get()));
 
   // Empty root
-  m_pDoc->SetRoot(m_pRootObj.get());
+  pTestDoc->SetRoot(m_pRootObj.get());
   EXPECT_FALSE(FPDFCatalog_IsTagged(m_pDoc.get()));
 
   // Root with other key

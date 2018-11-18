@@ -25,7 +25,8 @@ class PLATFORM_EXPORT PropertyTreeState {
                     const EffectPaintPropertyNode* effect)
       : transform_(transform), clip_(clip), effect_(effect) {}
 
-  bool HasDirectCompositingReasons() const;
+  // Returns an unaliased property tree state.
+  PropertyTreeState Unalias() const;
 
   const TransformPaintPropertyNode* Transform() const { return transform_; }
   void SetTransform(const TransformPaintPropertyNode* node) {
@@ -57,6 +58,10 @@ class PLATFORM_EXPORT PropertyTreeState {
   // Dumps the tree from this state up to the root as a string.
   String ToTreeString() const;
 #endif
+
+  // Returns memory usage of the transform & clip caches of this state plus
+  // ancestors.
+  size_t CacheMemoryUsageInBytes() const;
 
  private:
   const TransformPaintPropertyNode* transform_;

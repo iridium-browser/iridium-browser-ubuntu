@@ -31,8 +31,6 @@
 #include "chrome/browser/chromeos/login/session/user_session_manager.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
-#include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
@@ -45,6 +43,7 @@
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/power_manager_client.h"
 #include "chromeos/login/auth/user_context.h"
+#include "components/account_id/account_id.h"
 #include "components/cryptauth/cryptauth_client_impl.h"
 #include "components/cryptauth/cryptauth_device_manager.h"
 #include "components/cryptauth/cryptauth_enrollment_manager.h"
@@ -53,9 +52,6 @@
 #include "components/prefs/pref_service.h"
 #include "components/prefs/scoped_user_pref_update.h"
 #include "components/session_manager/core/session_manager.h"
-#include "components/signin/core/account_id/account_id.h"
-#include "components/signin/core/browser/profile_oauth2_token_service.h"
-#include "components/signin/core/browser/signin_manager.h"
 #include "components/user_manager/user.h"
 #include "components/version_info/version_info.h"
 #include "device/bluetooth/bluetooth_adapter.h"
@@ -219,8 +215,11 @@ class EasyUnlockService::PowerMonitor : public PowerManagerClient::Observer {
   DISALLOW_COPY_AND_ASSIGN(PowerMonitor);
 };
 
-EasyUnlockService::EasyUnlockService(Profile* profile)
+EasyUnlockService::EasyUnlockService(
+    Profile* profile,
+    secure_channel::SecureChannelClient* secure_channel_client)
     : profile_(profile),
+      secure_channel_client_(secure_channel_client),
       proximity_auth_client_(profile),
       bluetooth_detector_(new BluetoothDetector(this)),
       shut_down_(false),
@@ -294,6 +293,10 @@ bool EasyUnlockService::IsChromeOSLoginEnabled() const {
   return false;
 }
 
+bool EasyUnlockService::IsInLegacyHostMode() const {
+  return false;
+}
+
 void EasyUnlockService::OpenSetupApp() {
   app_manager_->LaunchSetup();
 }
@@ -364,7 +367,7 @@ bool EasyUnlockService::UpdateScreenlockState(ScreenlockState state) {
   if (state == ScreenlockState::AUTHENTICATED) {
     if (power_monitor_)
       power_monitor_->RecordStartUpTime();
-  } else if (auth_attempt_.get()) {
+  } else if (auth_attempt_) {
     // Clean up existing auth attempt if we can no longer authenticate the
     // remote device.
     auth_attempt_.reset();
@@ -382,8 +385,13 @@ void EasyUnlockService::AttemptAuth(const AccountId& account_id) {
   const EasyUnlockAuthAttempt::Type auth_attempt_type =
       GetType() == TYPE_REGULAR ? EasyUnlockAuthAttempt::TYPE_UNLOCK
                                 : EasyUnlockAuthAttempt::TYPE_SIGNIN;
+  if (auth_attempt_) {
+    PA_LOG(INFO) << "Already attempting auth, skipping this request.";
+    return;
+  }
+
   if (!GetAccountId().is_valid()) {
-    LOG(ERROR) << "Empty user account. Refresh token might go bad.";
+    PA_LOG(ERROR) << "Empty user account. Auth attempt failed.";
     return;
   }
 
@@ -404,7 +412,7 @@ void EasyUnlockService::AttemptAuth(const AccountId& account_id) {
 }
 
 void EasyUnlockService::FinalizeUnlock(bool success) {
-  if (!auth_attempt_.get())
+  if (!auth_attempt_)
     return;
 
   this->OnWillFinalizeUnlock(success);
@@ -422,8 +430,9 @@ void EasyUnlockService::FinalizeUnlock(bool success) {
 }
 
 void EasyUnlockService::FinalizeSignin(const std::string& key) {
-  if (!auth_attempt_.get())
+  if (!auth_attempt_)
     return;
+
   std::string wrapped_secret = GetWrappedSecret();
   if (!wrapped_secret.empty())
     auth_attempt_->FinalizeSignin(GetAccountId(), wrapped_secret, key);
@@ -456,8 +465,8 @@ void EasyUnlockService::CheckCryptohomeKeysAndMaybeHardlock() {
   std::set<std::string> paired_devices;
   if (device_list) {
     EasyUnlockDeviceKeyDataList parsed_paired;
-    EasyUnlockKeyManager::RemoteDeviceListToDeviceDataList(*device_list,
-                                                           &parsed_paired);
+    EasyUnlockKeyManager::RemoteDeviceRefListToDeviceDataList(*device_list,
+                                                              &parsed_paired);
     for (const auto& device_key_data : parsed_paired)
       paired_devices.insert(device_key_data.psk);
   }
@@ -476,8 +485,11 @@ void EasyUnlockService::CheckCryptohomeKeysAndMaybeHardlock() {
       UserSessionManager::GetInstance()->GetEasyUnlockKeyManager();
   DCHECK(key_manager);
 
+  const user_manager::User* const user =
+      user_manager::UserManager::Get()->FindUser(account_id);
+  DCHECK(user);
   key_manager->GetDeviceDataList(
-      UserContext(account_id),
+      UserContext(*user),
       base::Bind(&EasyUnlockService::OnCryptohomeKeysFetchedForChecking,
                  weak_ptr_factory_.GetWeakPtr(), account_id, paired_devices));
 }
@@ -667,7 +679,11 @@ EasyUnlockAuthEvent EasyUnlockService::GetPasswordAuthEvent() const {
 
 void EasyUnlockService::SetProximityAuthDevices(
     const AccountId& account_id,
-    const cryptauth::RemoteDeviceList& remote_devices) {
+    const cryptauth::RemoteDeviceRefList& remote_devices,
+    base::Optional<cryptauth::RemoteDeviceRef> local_device) {
+  UMA_HISTOGRAM_COUNTS_100("SmartLock.EnabledDevicesCount",
+                           remote_devices.size());
+
   if (remote_devices.size() == 0) {
     proximity_auth_system_.reset();
     return;
@@ -679,10 +695,11 @@ void EasyUnlockService::SetProximityAuthDevices(
         GetType() == TYPE_SIGNIN
             ? proximity_auth::ProximityAuthSystem::SIGN_IN
             : proximity_auth::ProximityAuthSystem::SESSION_LOCK,
-        proximity_auth_client()));
+        proximity_auth_client(), secure_channel_client_));
   }
 
-  proximity_auth_system_->SetRemoteDevicesForUser(account_id, remote_devices);
+  proximity_auth_system_->SetRemoteDevicesForUser(account_id, remote_devices,
+                                                  local_device);
   proximity_auth_system_->Start();
 }
 

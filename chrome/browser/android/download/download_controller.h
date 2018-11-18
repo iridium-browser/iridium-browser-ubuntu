@@ -20,6 +20,7 @@
 #define CHROME_BROWSER_ANDROID_DOWNLOAD_DOWNLOAD_CONTROLLER_H_
 
 #include <map>
+#include <string>
 #include <utility>
 
 #include "base/android/scoped_java_ref.h"
@@ -37,7 +38,7 @@ class DownloadController : public DownloadControllerBase {
   // DownloadControllerBase implementation.
   void AcquireFileAccessPermission(
       const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
-      const AcquireFileAccessPermissionCallback& callback) override;
+      AcquireFileAccessPermissionCallback callback) override;
   void CreateAndroidDownload(
       const content::ResourceRequestInfo::WebContentsGetter& wc_getter,
       const DownloadInfo& info) override;
@@ -76,8 +77,8 @@ class DownloadController : public DownloadControllerBase {
 
   // Callback when user permission prompt finishes. Args: whether file access
   // permission is acquired, which permission to update.
-  typedef base::Callback<void(bool, const std::string&)>
-      AcquirePermissionCallback;
+  using AcquirePermissionCallback =
+      base::OnceCallback<void(bool, const std::string&)>;
 
  private:
   friend struct base::DefaultSingletonTraits<DownloadController>;
@@ -99,9 +100,6 @@ class DownloadController : public DownloadControllerBase {
 
   // The download item contains dangerous file types.
   void OnDangerousDownload(download::DownloadItem* item);
-
-  base::android::ScopedJavaLocalRef<jobject> GetContentViewCoreFromWebContents(
-      content::WebContents* web_contents);
 
   // Helper methods to start android download on UI thread.
   void StartAndroidDownload(

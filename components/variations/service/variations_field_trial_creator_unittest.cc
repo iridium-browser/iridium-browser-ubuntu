@@ -6,11 +6,14 @@
 
 #include <stddef.h>
 #include <memory>
+#include <utility>
 
+#include "base/bind_helpers.h"
+#include "base/callback.h"
 #include "base/feature_list.h"
 #include "base/macros.h"
 #include "base/strings/stringprintf.h"
-#include "base/test/histogram_tester.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "base/version.h"
 #include "build/build_config.h"
 #include "components/prefs/testing_pref_service.h"
@@ -20,11 +23,15 @@
 #include "components/variations/service/safe_seed_manager.h"
 #include "components/variations/service/variations_service.h"
 #include "components/variations/service/variations_service_client.h"
+#include "components/variations/variations_seed_store.h"
+#include "components/variations/variations_switches.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 #if defined(OS_ANDROID)
 #include "components/variations/android/variations_seed_bridge.h"
+#include "components/variations/seed_response.h"
 #endif  // OS_ANDROID
 
 using testing::_;
@@ -71,6 +78,13 @@ VariationsSeed CreateTestSafeSeed() {
   study->set_default_experiment_name(kTestSafeSeedExperimentName);
   study->mutable_experiment(0)->set_name(kTestSafeSeedExperimentName);
   return seed;
+}
+
+void DisableTestingConfig() {
+  // If the testing config is in use, the seed will not be used to set up field
+  // trials. Disable the testing config to exercise CreateTrialsFromSeed().
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kDisableFieldTrialTestingConfig);
 }
 
 #if defined(OS_ANDROID)
@@ -152,12 +166,12 @@ class TestVariationsServiceClient : public VariationsServiceClient {
   ~TestVariationsServiceClient() override = default;
 
   // VariationsServiceClient:
-  std::string GetApplicationLocale() override { return std::string(); }
   base::Callback<base::Version(void)> GetVersionForSimulationCallback()
       override {
     return base::Callback<base::Version(void)>();
   }
-  net::URLRequestContextGetter* GetURLRequestContext() override {
+  scoped_refptr<network::SharedURLLoaderFactory> GetURLLoaderFactory()
+      override {
     return nullptr;
   }
   network_time::NetworkTimeTracker* GetNetworkTimeTracker() override {
@@ -185,7 +199,7 @@ class TestVariationsServiceClient : public VariationsServiceClient {
 
 class TestVariationsSeedStore : public VariationsSeedStore {
  public:
-  TestVariationsSeedStore(PrefService* local_state)
+  explicit TestVariationsSeedStore(PrefService* local_state)
       : VariationsSeedStore(local_state), local_state_(local_state) {}
   ~TestVariationsSeedStore() override = default;
 
@@ -228,7 +242,11 @@ class TestVariationsFieldTrialCreator : public VariationsFieldTrialCreator {
   TestVariationsFieldTrialCreator(PrefService* local_state,
                                   TestVariationsServiceClient* client,
                                   SafeSeedManager* safe_seed_manager)
-      : VariationsFieldTrialCreator(local_state, client, UIStringOverrider()),
+      : VariationsFieldTrialCreator(
+            local_state,
+            client,
+            std::make_unique<VariationsSeedStore>(local_state),
+            UIStringOverrider()),
         seed_store_(local_state),
         safe_seed_manager_(safe_seed_manager) {}
 
@@ -286,6 +304,8 @@ class FieldTrialCreatorTest : public ::testing::Test {
 };
 
 TEST_F(FieldTrialCreatorTest, SetupFieldTrials_ValidSeed) {
+  DisableTestingConfig();
+
   // With a valid seed, the safe seed manager should be informed of the active
   // seed state.
   const base::Time now = base::Time::Now();
@@ -319,6 +339,8 @@ TEST_F(FieldTrialCreatorTest, SetupFieldTrials_ValidSeed) {
 }
 
 TEST_F(FieldTrialCreatorTest, SetupFieldTrials_NoLastFetchTime) {
+  DisableTestingConfig();
+
   // With a valid seed on first run, the safe seed manager should be informed of
   // the active seed state. The last fetch time in this case is expected to be
   // inferred to be recent.
@@ -353,6 +375,8 @@ TEST_F(FieldTrialCreatorTest, SetupFieldTrials_NoLastFetchTime) {
 }
 
 TEST_F(FieldTrialCreatorTest, SetupFieldTrials_ExpiredSeed) {
+  DisableTestingConfig();
+
   // With an expired seed, there should be no field trials created, and hence no
   // active state should be passed to the safe seed manager.
   testing::NiceMock<MockSafeSeedManager> safe_seed_manager(&prefs_);
@@ -382,6 +406,8 @@ TEST_F(FieldTrialCreatorTest, SetupFieldTrials_ExpiredSeed) {
 }
 
 TEST_F(FieldTrialCreatorTest, SetupFieldTrials_ValidSafeSeed) {
+  DisableTestingConfig();
+
   // With a valid safe seed, the safe seed manager should *not* be informed of
   // the active seed state. This is an optimization to avoid saving a safe seed
   // when already running in safe mode.
@@ -413,6 +439,8 @@ TEST_F(FieldTrialCreatorTest, SetupFieldTrials_ValidSafeSeed) {
 
 TEST_F(FieldTrialCreatorTest,
        SetupFieldTrials_CorruptedSafeSeed_FallsBackToLatestSeed) {
+  DisableTestingConfig();
+
   // With a corrupted safe seed, the field trial creator should fall back to the
   // latest seed. Hence, the safe seed manager *should* be informed of the
   // active seed state.
@@ -450,18 +478,17 @@ TEST_F(FieldTrialCreatorTest,
 #if defined(OS_ANDROID)
 // This is a regression test for https://crbug.com/829527
 TEST_F(FieldTrialCreatorTest, SetupFieldTrials_LoadsCountryOnFirstRun) {
+  DisableTestingConfig();
+
   // Simulate having received a seed in Java during First Run.
   const base::Time one_day_ago =
       base::Time::Now() - base::TimeDelta::FromDays(1);
-  const std::string test_seed_data =
-      SerializeSeed(CreateTestSeedWithCountryFilter());
-  const std::string test_seed_signature = kTestSeedSignature;
-  const std::string test_seed_country = kTestSeedCountry;
-  const std::string test_response_date = ToUTCString(one_day_ago);
-  const bool test_is_gzip_compressed = false;
-  android::SetJavaFirstRunPrefsForTesting(test_seed_data, test_seed_signature,
-                                          test_seed_country, test_response_date,
-                                          test_is_gzip_compressed);
+  auto initial_seed = std::make_unique<SeedResponse>();
+  initial_seed->data = SerializeSeed(CreateTestSeedWithCountryFilter());
+  initial_seed->signature = kTestSeedSignature;
+  initial_seed->country = kTestSeedCountry;
+  initial_seed->date = ToUTCString(one_day_ago);
+  initial_seed->is_gzip_compressed = false;
 
   TestVariationsServiceClient variations_service_client;
   TestPlatformFieldTrials platform_field_trials;
@@ -471,12 +498,16 @@ TEST_F(FieldTrialCreatorTest, SetupFieldTrials_LoadsCountryOnFirstRun) {
 
   // Note: Unlike other tests, this test does not mock out the seed store, since
   // the interaction between these two classes is what's being tested.
+  auto seed_store = std::make_unique<VariationsSeedStore>(
+      &prefs_, std::move(initial_seed),
+      /*on_initial_seed_stored=*/base::DoNothing());
   VariationsFieldTrialCreator field_trial_creator(
-      &prefs_, &variations_service_client, UIStringOverrider());
+      &prefs_, &variations_service_client, std::move(seed_store),
+      UIStringOverrider());
 
   // Check that field trials are created from the seed. The test seed contains a
-  // single study with an experiment targeting 100% of users in India. Since the
-  // First Run prefs included the country code for India, this study should be
+  // single study with an experiment targeting 100% of users in India. Since
+  // |initial_seed| included the country code for India, this study should be
   // active.
   EXPECT_TRUE(field_trial_creator.SetupFieldTrials(
       "", "", "", std::set<std::string>(), std::vector<std::string>(), nullptr,

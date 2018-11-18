@@ -16,7 +16,6 @@
 
 namespace syncer {
 
-class SyncService;
 struct UserShare;
 
 // Interface for anything that wants to know when the migrator's state
@@ -36,20 +35,18 @@ class BackendMigrator {
   enum State {
     IDLE,
     WAITING_TO_START,  // Waiting for previous configuration to finish.
-    DISABLING_TYPES,   // Exit criteria: SYNC_CONFIGURE_DONE for
-                       // enabled types _excluding_ |to_migrate_| and
-                       // empty download progress markers for types
-                       // in |to_migrate_|.
-    REENABLING_TYPES,  // Exit criteria: SYNC_CONFIGURE_DONE for enabled
-                       // types.
+    DISABLING_TYPES,   // Exit criteria: OnConfigureDone for enabled types
+                       // _excluding_ |to_migrate_| and empty download progress
+                       // markers for types in |to_migrate_|.
+    REENABLING_TYPES,  // Exit criteria: OnConfigureDone for enabled types.
   };
 
   // TODO(akalin): Remove the dependency on |user_share|.
   BackendMigrator(const std::string& name,
                   UserShare* user_share,
-                  SyncService* service,
                   DataTypeManager* manager,
-                  const base::Closure& migration_done_callback);
+                  const base::RepeatingClosure& reconfigure_callback,
+                  const base::RepeatingClosure& migration_done_callback);
   virtual ~BackendMigrator();
 
   // Starts a sequence of events that will disable and reenable |types|.
@@ -84,16 +81,16 @@ class BackendMigrator {
 
   const std::string name_;
   UserShare* user_share_;
-  SyncService* service_;
   DataTypeManager* manager_;
+
+  const base::RepeatingClosure reconfigure_callback_;
+  const base::RepeatingClosure migration_done_callback_;
 
   State state_;
 
-  base::ObserverList<MigrationObserver> migration_observers_;
+  base::ObserverList<MigrationObserver>::Unchecked migration_observers_;
 
   ModelTypeSet to_migrate_;
-
-  base::Closure migration_done_callback_;
 
   base::WeakPtrFactory<BackendMigrator> weak_ptr_factory_;
 

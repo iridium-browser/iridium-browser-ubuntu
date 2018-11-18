@@ -2,9 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "cc/layers/picture_layer.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/public/platform/web_display_item_list.h"
-#include "third_party/blink/public/platform/web_layer.h"
 #include "third_party/blink/public/web/web_frame_content_dumper.h"
 #include "third_party/blink/public/web/web_hit_test_result.h"
 #include "third_party/blink/public/web/web_settings.h"
@@ -22,10 +21,12 @@
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/paint/compositing/composited_layer_mapping.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
+#include "third_party/blink/renderer/core/paint/paint_layer_scrollable_area.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_compositor.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_request.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_test.h"
 #include "third_party/blink/renderer/platform/graphics/paint/transform_paint_property_node.h"
+#include "third_party/blink/renderer/platform/loader/fetch/access_control_status.h"
 #include "third_party/blink/renderer/platform/testing/paint_test_configurations.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 #include "third_party/blink/renderer/platform/testing/url_test_helpers.h"
@@ -38,7 +39,7 @@ using namespace HTMLNames;
 
 // NOTE: This test uses <iframe sandbox> to create cross origin iframes.
 
-class FrameThrottlingTest : public SimTest, public PaintTestConfigurations {
+class FrameThrottlingTest : public PaintTestConfigurations, public SimTest {
  protected:
   void SetUp() override {
     SimTest::SetUp();
@@ -60,22 +61,23 @@ class FrameThrottlingTest : public SimTest, public PaintTestConfigurations {
     GraphicsLayer* own_graphics_layer =
         layer->GraphicsLayerBacking(&layer->GetLayoutObject());
     if (own_graphics_layer) {
-      result +=
-          own_graphics_layer->PlatformLayer()->TouchEventHandlerRegion().size();
+      result += own_graphics_layer->CcLayer()
+                    ->touch_action_region()
+                    .region()
+                    .GetRegionComplexity();
     }
     GraphicsLayer* child_graphics_layer = layer->GraphicsLayerBacking();
     if (child_graphics_layer && child_graphics_layer != own_graphics_layer) {
-      result += child_graphics_layer->PlatformLayer()
-                    ->TouchEventHandlerRegion()
-                    .size();
+      result += child_graphics_layer->CcLayer()
+                    ->touch_action_region()
+                    .region()
+                    .GetRegionComplexity();
     }
     return result;
   }
 };
 
-INSTANTIATE_TEST_CASE_P(All,
-                        FrameThrottlingTest,
-                        testing::ValuesIn(kAllSlimmingPaintTestConfigurations));
+INSTANTIATE_PAINT_TEST_CASE_P(FrameThrottlingTest);
 
 TEST_P(FrameThrottlingTest, ThrottleInvisibleFrames) {
   SimRequest main_resource("https://example.com/", "text/html");
@@ -190,7 +192,8 @@ TEST_P(FrameThrottlingTest, IntersectionObservationOverridesThrottling) {
   EXPECT_TRUE(inner_frame_document->View()->ShouldThrottleRendering());
 
   // An intersection observation overrides...
-  inner_frame_document->View()->SetNeedsIntersectionObservation();
+  inner_frame_document->View()->SetIntersectionObservationState(
+      LocalFrameView::kRequired);
   EXPECT_FALSE(inner_frame_document->View()->ShouldThrottleRendering());
   inner_frame_document->View()->ScheduleAnimation();
 
@@ -202,10 +205,9 @@ TEST_P(FrameThrottlingTest, IntersectionObservationOverridesThrottling) {
   inner_view->SetShouldDoFullPaintInvalidation(
       PaintInvalidationReason::kForTesting);
   inner_view->Layer()->SetNeedsRepaint();
-  EXPECT_FALSE(inner_frame_document->View()
-                   ->GetLayoutView()
-                   ->FullPaintInvalidationReason() ==
-               PaintInvalidationReason::kNone);
+  EXPECT_TRUE(inner_frame_document->View()
+                  ->GetLayoutView()
+                  ->ShouldDoFullPaintInvalidation());
   inner_view->Compositor()->SetNeedsCompositingUpdate(
       kCompositingUpdateRebuildTree);
   EXPECT_EQ(kCompositingUpdateRebuildTree,
@@ -217,10 +219,9 @@ TEST_P(FrameThrottlingTest, IntersectionObservationOverridesThrottling) {
   EXPECT_TRUE(inner_frame_document->View()->ShouldThrottleRendering());
 
   EXPECT_FALSE(inner_view->NeedsLayout());
-  EXPECT_FALSE(inner_frame_document->View()
-                   ->GetLayoutView()
-                   ->FullPaintInvalidationReason() ==
-               PaintInvalidationReason::kNone);
+  EXPECT_TRUE(inner_frame_document->View()
+                  ->GetLayoutView()
+                  ->ShouldDoFullPaintInvalidation());
   EXPECT_EQ(kCompositingUpdateRebuildTree,
             inner_view->Compositor()->pending_update_type_);
   EXPECT_TRUE(inner_view->Layer()->NeedsRepaint());
@@ -395,11 +396,8 @@ TEST_P(FrameThrottlingTest, UnthrottlingTriggersRepaint) {
 
   // Scroll down to unthrottle the frame. The first frame we composite after
   // scrolling won't contain the frame yet, but will schedule another repaint.
-  WebView()
-      .MainFrameImpl()
-      ->GetFrameView()
-      ->LayoutViewportScrollableArea()
-      ->SetScrollOffset(ScrollOffset(0, 480), kProgrammaticScroll);
+  WebView().MainFrameImpl()->GetFrameView()->LayoutViewport()->SetScrollOffset(
+      ScrollOffset(0, 480), kProgrammaticScroll);
   auto commands = CompositeFrame();
   EXPECT_FALSE(commands.Contains(SimCanvas::kRect, "green"));
 
@@ -437,11 +435,8 @@ TEST_P(FrameThrottlingTest, UnthrottlingTriggersRepaintInCompositedChild) {
 
   // Scroll down to unthrottle the frame. The first frame we composite after
   // scrolling won't contain the frame yet, but will schedule another repaint.
-  WebView()
-      .MainFrameImpl()
-      ->GetFrameView()
-      ->LayoutViewportScrollableArea()
-      ->SetScrollOffset(ScrollOffset(0, 480), kProgrammaticScroll);
+  WebView().MainFrameImpl()->GetFrameView()->LayoutViewport()->SetScrollOffset(
+      ScrollOffset(0, 480), kProgrammaticScroll);
   auto commands = CompositeFrame();
   EXPECT_FALSE(commands.Contains(SimCanvas::kRect, "green"));
 
@@ -473,11 +468,8 @@ TEST_P(FrameThrottlingTest, ChangeStyleInThrottledFrame) {
                                                          "background: green");
 
   // Scroll down to unthrottle the frame.
-  WebView()
-      .MainFrameImpl()
-      ->GetFrameView()
-      ->LayoutViewportScrollableArea()
-      ->SetScrollOffset(ScrollOffset(0, 480), kProgrammaticScroll);
+  WebView().MainFrameImpl()->GetFrameView()->LayoutViewport()->SetScrollOffset(
+      ScrollOffset(0, 480), kProgrammaticScroll);
   auto commands = CompositeFrame();
   EXPECT_FALSE(commands.Contains(SimCanvas::kRect, "red"));
   EXPECT_FALSE(commands.Contains(SimCanvas::kRect, "green"));
@@ -529,7 +521,6 @@ TEST_P(FrameThrottlingTest, ChangeOriginInThrottledFrame) {
 
 TEST_P(FrameThrottlingTest, ThrottledFrameWithFocus) {
   WebView().GetSettings()->SetJavaScriptEnabled(true);
-  WebView().GetSettings()->SetAcceleratedCompositingEnabled(true);
   ScopedCompositedSelectionUpdateForTest composited_selection_update(true);
 
   // Create a hidden frame which is throttled and has a text selection.
@@ -571,8 +562,6 @@ TEST_P(FrameThrottlingTest, ScrollingCoordinatorShouldSkipThrottledFrame) {
   if (RuntimeEnabledFeatures::SlimmingPaintV2Enabled())
     return;
 
-  WebView().GetSettings()->SetAcceleratedCompositingEnabled(true);
-
   // Create a hidden frame which is throttled.
   SimRequest main_resource("https://example.com/", "text/html");
   SimRequest frame_resource("https://example.com/iframe.html", "text/html");
@@ -597,26 +586,24 @@ TEST_P(FrameThrottlingTest, ScrollingCoordinatorShouldSkipThrottledFrame) {
   frame_element->contentDocument()->body()->setAttribute(styleAttr,
                                                          "background: green");
   // Change root frame's layout so that the next lifecycle update will call
-  // ScrollingCoordinator::updateAfterCompositingChangeIfNeeded().
+  // ScrollingCoordinator::UpdateAfterPaint().
   GetDocument().body()->setAttribute(styleAttr, "margin: 20px");
   EXPECT_EQ(DocumentLifecycle::kVisualUpdatePending,
             frame_element->contentDocument()->Lifecycle().GetState());
 
   DocumentLifecycle::AllowThrottlingScope throttling_scope(
       GetDocument().Lifecycle());
-  // This will call ScrollingCoordinator::updateAfterCompositingChangeIfNeeded()
-  // and should not cause assert failure about
-  // isAllowedToQueryCompositingState() in the throttled frame.
+  // This will call ScrollingCoordinator::UpdateAfterPaint() and should not
+  // cause assert failure about isAllowedToQueryCompositingState() in the
+  // throttled frame.
   GetDocument().View()->UpdateAllLifecyclePhases();
   test::RunPendingTasks();
   EXPECT_EQ(DocumentLifecycle::kVisualUpdatePending,
             frame_element->contentDocument()->Lifecycle().GetState());
   // The fixed background in the throttled sub frame should not cause main
   // thread scrolling.
-  EXPECT_FALSE(GetDocument()
-                   .View()
-                   ->LayoutViewportScrollableArea()
-                   ->ShouldScrollOnMainThread());
+  EXPECT_FALSE(
+      GetDocument().View()->LayoutViewport()->ShouldScrollOnMainThread());
 
   // Make the frame visible by changing its transform. This doesn't cause a
   // layout, but should still unthrottle the frame.
@@ -627,17 +614,14 @@ TEST_P(FrameThrottlingTest, ScrollingCoordinatorShouldSkipThrottledFrame) {
   // The fixed background in the throttled sub frame should be considered.
   EXPECT_TRUE(frame_element->contentDocument()
                   ->View()
-                  ->LayoutViewportScrollableArea()
+                  ->LayoutViewport()
                   ->ShouldScrollOnMainThread());
-  EXPECT_FALSE(GetDocument()
-                   .View()
-                   ->LayoutViewportScrollableArea()
-                   ->ShouldScrollOnMainThread());
+  EXPECT_FALSE(
+      GetDocument().View()->LayoutViewport()->ShouldScrollOnMainThread());
 }
 
 TEST_P(FrameThrottlingTest, ScrollingCoordinatorShouldSkipThrottledLayer) {
   WebView().GetSettings()->SetJavaScriptEnabled(true);
-  WebView().GetSettings()->SetAcceleratedCompositingEnabled(true);
   WebView().GetSettings()->SetPreferCompositingToLCDTextEnabled(true);
 
   // Create a hidden frame which is throttled and has a touch handler inside a
@@ -666,16 +650,16 @@ TEST_P(FrameThrottlingTest, ScrollingCoordinatorShouldSkipThrottledLayer) {
   frame_element->contentDocument()->body()->setAttribute(styleAttr,
                                                          "background: green");
   // Change root frame's layout so that the next lifecycle update will call
-  // ScrollingCoordinator::updateAfterCompositingChangeIfNeeded().
+  // ScrollingCoordinator::UpdateAfterPaint().
   GetDocument().body()->setAttribute(styleAttr, "margin: 20px");
   EXPECT_EQ(DocumentLifecycle::kVisualUpdatePending,
             frame_element->contentDocument()->Lifecycle().GetState());
 
   DocumentLifecycle::AllowThrottlingScope throttling_scope(
       GetDocument().Lifecycle());
-  // This will call ScrollingCoordinator::updateAfterCompositingChangeIfNeeded()
-  // and should not cause assert failure about
-  // isAllowedToQueryCompositingState() in the throttled frame.
+  // This will call ScrollingCoordinator::UpdateAfterPaint() and should not
+  // cause an assert failure about isAllowedToQueryCompositingState() in the
+  // throttled frame.
   GetDocument().View()->UpdateAllLifecyclePhases();
   test::RunPendingTasks();
   EXPECT_EQ(DocumentLifecycle::kVisualUpdatePending,
@@ -684,7 +668,6 @@ TEST_P(FrameThrottlingTest, ScrollingCoordinatorShouldSkipThrottledLayer) {
 
 TEST_P(FrameThrottlingTest,
        ScrollingCoordinatorShouldSkipCompositedThrottledFrame) {
-  WebView().GetSettings()->SetAcceleratedCompositingEnabled(true);
   WebView().GetSettings()->SetPreferCompositingToLCDTextEnabled(true);
 
   // Create a hidden frame which is throttled.
@@ -709,16 +692,16 @@ TEST_P(FrameThrottlingTest,
   frame_element->contentDocument()->body()->setAttribute(styleAttr,
                                                          "background: green");
   // Change root frame's layout so that the next lifecycle update will call
-  // ScrollingCoordinator::updateAfterCompositingChangeIfNeeded().
+  // ScrollingCoordinator::UpdateAfterPaint().
   GetDocument().body()->setAttribute(styleAttr, "margin: 20px");
   EXPECT_EQ(DocumentLifecycle::kVisualUpdatePending,
             frame_element->contentDocument()->Lifecycle().GetState());
 
   DocumentLifecycle::AllowThrottlingScope throttling_scope(
       GetDocument().Lifecycle());
-  // This will call ScrollingCoordinator::updateAfterCompositingChangeIfNeeded()
-  // and should not cause assert failure about
-  // isAllowedToQueryCompositingState() in the throttled frame.
+  // This will call ScrollingCoordinator::UpdateAfterPaint() and should not
+  // cause an assert failure about isAllowedToQueryCompositingState() in the
+  // throttled frame.
   CompositeFrame();
   EXPECT_EQ(DocumentLifecycle::kVisualUpdatePending,
             frame_element->contentDocument()->Lifecycle().GetState());
@@ -727,17 +710,24 @@ TEST_P(FrameThrottlingTest,
   // layout, but should still unthrottle the frame.
   frame_element->setAttribute(styleAttr, "transform: translateY(0px)");
   CompositeFrame();  // Unthrottle the frame.
+
+  EXPECT_FALSE(
+      frame_element->contentDocument()->View()->ShouldThrottleRendering());
   CompositeFrame();  // Handle the pending visual update of the unthrottled
                      // frame.
   EXPECT_EQ(DocumentLifecycle::kPaintClean,
             frame_element->contentDocument()->Lifecycle().GetState());
-  EXPECT_TRUE(
-      frame_element->contentDocument()->View()->UsesCompositedScrolling());
+  // TODO(szager): Re-enable this check for SPv2 when it properly sets the
+  // bits for composited scrolling.
+  if (!RuntimeEnabledFeatures::SlimmingPaintV2Enabled()) {
+    EXPECT_TRUE(frame_element->contentDocument()
+                    ->View()
+                    ->LayoutViewport()
+                    ->UsesCompositedScrolling());
+  }
 }
 
 TEST_P(FrameThrottlingTest, UnthrottleByTransformingWithoutLayout) {
-  WebView().GetSettings()->SetAcceleratedCompositingEnabled(true);
-
   // Create a hidden frame which is throttled.
   SimRequest main_resource("https://example.com/", "text/html");
   SimRequest frame_resource("https://example.com/iframe.html", "text/html");
@@ -768,7 +758,6 @@ TEST_P(FrameThrottlingTest, ThrottledTopLevelEventHandlerIgnored) {
   if (RuntimeEnabledFeatures::SlimmingPaintV2Enabled())
     return;
 
-  WebView().GetSettings()->SetAcceleratedCompositingEnabled(true);
   WebView().GetSettings()->SetJavaScriptEnabled(true);
   EXPECT_EQ(0u, TouchHandlerRegionSize());
 
@@ -789,11 +778,31 @@ TEST_P(FrameThrottlingTest, ThrottledTopLevelEventHandlerIgnored) {
   auto* frame_element =
       ToHTMLIFrameElement(GetDocument().getElementById("frame"));
   frame_element->setAttribute(styleAttr, "transform: translateY(480px)");
+  DocumentLifecycle::AllowThrottlingScope throttling_scope(
+      GetDocument().Lifecycle());
   CompositeFrame();  // Throttle the frame.
   CompositeFrame();  // Update touch handler regions.
 
-  // The touch handlers in the throttled frame should have been ignored.
-  EXPECT_EQ(0u, TouchHandlerRegionSize());
+  // In here, throttle iframe doesn't throttle the main frame.
+  EXPECT_TRUE(
+      frame_element->contentDocument()->View()->ShouldThrottleRendering());
+  EXPECT_FALSE(GetDocument().View()->ShouldThrottleRendering());
+
+  // In this test, the iframe has the same origin as the main frame, so we have
+  // two documents but one graphics layer tree. The test throttles the iframe
+  // document only. In ScrollingCoordinator::UpdateLayerTouchActionRects, we
+  // check whether the document associated with a certain grahpics layer is
+  // throttled or not. Since the layers are associated with the main document
+  // which is not throttled, we expect the main document to have one touch
+  // handler region.
+  // In the Non-PaintTouchActionRects world, the
+  // AccumulateDocumentTouchEventTargetRects goes through every document and
+  // check whether the document is throttled or not. So we expect no touch
+  // handler region.
+  if (RuntimeEnabledFeatures::PaintTouchActionRectsEnabled())
+    EXPECT_EQ(1u, TouchHandlerRegionSize());
+  else
+    EXPECT_EQ(0u, TouchHandlerRegionSize());
 
   // Unthrottling the frame makes the touch handlers active again. Note that
   // both handlers get combined into the same rectangle in the region, so
@@ -809,7 +818,6 @@ TEST_P(FrameThrottlingTest, ThrottledEventHandlerIgnored) {
   if (RuntimeEnabledFeatures::SlimmingPaintV2Enabled())
     return;
 
-  WebView().GetSettings()->SetAcceleratedCompositingEnabled(true);
   WebView().GetSettings()->SetJavaScriptEnabled(true);
   EXPECT_EQ(0u, TouchHandlerRegionSize());
 
@@ -831,11 +839,31 @@ TEST_P(FrameThrottlingTest, ThrottledEventHandlerIgnored) {
   auto* frame_element =
       ToHTMLIFrameElement(GetDocument().getElementById("frame"));
   frame_element->setAttribute(styleAttr, "transform: translateY(480px)");
+  DocumentLifecycle::AllowThrottlingScope throttling_scope(
+      GetDocument().Lifecycle());
   CompositeFrame();  // Throttle the frame.
   CompositeFrame();  // Update touch handler regions.
 
-  // The touch handler in the throttled frame should have been ignored.
-  EXPECT_EQ(0u, TouchHandlerRegionSize());
+  // In here, throttle iframe doesn't throttle the main frame.
+  EXPECT_TRUE(
+      frame_element->contentDocument()->View()->ShouldThrottleRendering());
+  EXPECT_FALSE(GetDocument().View()->ShouldThrottleRendering());
+
+  // In this test, the iframe has the same origin as the main frame, so we have
+  // two documents but one graphics layer tree. The test throttles the iframe
+  // document only. In ScrollingCoordinator::UpdateLayerTouchActionRects, we
+  // check whether the document associated with a certain grahpics layer is
+  // throttled or not. Since the layers are associated with the main document
+  // which is not throttled, we expect the main document to have one touch
+  // handler region.
+  // In the Non-PaintTouchActionRects world, the
+  // AccumulateDocumentTouchEventTargetRects goes through every document and
+  // check whether the document is throttled or not. So we expect no touch
+  // handler region.
+  if (RuntimeEnabledFeatures::PaintTouchActionRectsEnabled())
+    EXPECT_EQ(1u, TouchHandlerRegionSize());
+  else
+    EXPECT_EQ(0u, TouchHandlerRegionSize());
 
   // Unthrottling the frame makes the touch handler active again.
   frame_element->setAttribute(styleAttr, "transform: translateY(0px)");
@@ -878,7 +906,6 @@ TEST_P(FrameThrottlingTest, PaintingViaGraphicsLayerIsThrottled) {
   if (RuntimeEnabledFeatures::SlimmingPaintV2Enabled())
     return;
 
-  WebView().GetSettings()->SetAcceleratedCompositingEnabled(true);
   WebView().GetSettings()->SetPreferCompositingToLCDTextEnabled(true);
 
   // Create a hidden frame which is throttled.
@@ -915,7 +942,6 @@ TEST_P(FrameThrottlingTest, ThrottleInnerCompositedLayer) {
   if (RuntimeEnabledFeatures::SlimmingPaintV2Enabled())
     return;
 
-  WebView().GetSettings()->SetAcceleratedCompositingEnabled(true);
   WebView().GetSettings()->SetPreferCompositingToLCDTextEnabled(true);
 
   // Create a hidden frame which is throttled.
@@ -1061,7 +1087,6 @@ TEST_P(FrameThrottlingTest, ThrottleSubtreeAtomically) {
 }
 
 TEST_P(FrameThrottlingTest, SkipPaintingLayersInThrottledFrames) {
-  WebView().GetSettings()->SetAcceleratedCompositingEnabled(true);
   WebView().GetSettings()->SetPreferCompositingToLCDTextEnabled(true);
 
   SimRequest main_resource("https://example.com/", "text/html");
@@ -1172,7 +1197,7 @@ TEST_P(FrameThrottlingTest, AllowOneAnimationFrame) {
   v8::HandleScope scope(v8::Isolate::GetCurrent());
   v8::Local<v8::Value> result =
       local_frame->GetScriptController().ExecuteScriptInMainWorldAndReturnValue(
-          ScriptSourceCode("window.didRaf;"));
+          ScriptSourceCode("window.didRaf;"), KURL(), kOpaqueResource);
   EXPECT_TRUE(result->IsTrue());
 }
 

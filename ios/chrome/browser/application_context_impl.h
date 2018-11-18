@@ -18,6 +18,10 @@ class CommandLine;
 class SequencedTaskRunner;
 }
 
+namespace network {
+class NetworkChangeManager;
+}
+
 class ApplicationContextImpl : public ApplicationContext {
  public:
   ApplicationContextImpl(base::SequencedTaskRunner* local_state_task_runner,
@@ -45,6 +49,9 @@ class ApplicationContextImpl : public ApplicationContext {
   bool WasLastShutdownClean() override;
   PrefService* GetLocalState() override;
   net::URLRequestContextGetter* GetSystemURLRequestContext() override;
+  scoped_refptr<network::SharedURLLoaderFactory> GetSharedURLLoaderFactory()
+      override;
+  network::mojom::NetworkContext* GetSystemNetworkContext() override;
   const std::string& GetApplicationLocale() override;
   ios::ChromeBrowserStateManager* GetChromeBrowserStateManager() override;
   metrics_services_manager::MetricsServicesManager* GetMetricsServicesManager()
@@ -53,12 +60,14 @@ class ApplicationContextImpl : public ApplicationContext {
   ukm::UkmRecorder* GetUkmRecorder() override;
   variations::VariationsService* GetVariationsService() override;
   rappor::RapporServiceImpl* GetRapporServiceImpl() override;
-  net_log::ChromeNetLog* GetNetLog() override;
+  net::NetLog* GetNetLog() override;
+  net_log::NetExportFileWriter* GetNetExportFileWriter() override;
   network_time::NetworkTimeTracker* GetNetworkTimeTracker() override;
   IOSChromeIOThread* GetIOSChromeIOThread() override;
   gcm::GCMDriver* GetGCMDriver() override;
   component_updater::ComponentUpdateService* GetComponentUpdateService()
       override;
+  network::NetworkConnectionTracker* GetNetworkConnectionTracker() override;
 
  private:
   // Sets the locale used by the application.
@@ -72,7 +81,8 @@ class ApplicationContextImpl : public ApplicationContext {
 
   base::ThreadChecker thread_checker_;
   std::unique_ptr<PrefService> local_state_;
-  std::unique_ptr<net_log::ChromeNetLog> net_log_;
+  std::unique_ptr<net::NetLog> net_log_;
+  std::unique_ptr<net_log::NetExportFileWriter> net_export_file_writer_;
   std::unique_ptr<network_time::NetworkTimeTracker> network_time_tracker_;
   std::unique_ptr<IOSChromeIOThread> ios_chrome_io_thread_;
   std::unique_ptr<metrics_services_manager::MetricsServicesManager>
@@ -84,6 +94,10 @@ class ApplicationContextImpl : public ApplicationContext {
 
   // Sequenced task runner for local state related I/O tasks.
   const scoped_refptr<base::SequencedTaskRunner> local_state_task_runner_;
+
+  std::unique_ptr<network::NetworkChangeManager> network_change_manager_;
+  std::unique_ptr<network::NetworkConnectionTracker>
+      network_connection_tracker_;
 
   bool was_last_shutdown_clean_;
 

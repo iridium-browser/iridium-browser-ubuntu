@@ -7,12 +7,11 @@
 #include <algorithm>
 
 #include "base/i18n/time_formatting.h"
-#include "base/message_loop/message_loop.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/browsing_data/cookies_tree_model.h"
-#include "chrome/browser/ui/views/harmony/chrome_layout_provider.h"
+#include "chrome/browser/ui/views/chrome_layout_provider.h"
 #include "chrome/grit/generated_resources.h"
 #include "net/cookies/canonical_cookie.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -104,7 +103,7 @@ void CookieInfoView::AddLabelRow(int layout_id,
                                  views::GridLayout* layout,
                                  views::Label* label,
                                  views::Textfield* textfield) {
-  layout->StartRow(0, layout_id);
+  layout->StartRow(views::GridLayout::kFixedSize, layout_id);
   layout->AddView(label);
   layout->AddView(
       textfield, 2, 1, views::GridLayout::FILL, views::GridLayout::CENTER);
@@ -165,14 +164,16 @@ void CookieInfoView::Init() {
 
   int three_column_layout_id = 0;
   views::ColumnSet* column_set = layout->AddColumnSet(three_column_layout_id);
-  column_set->AddColumn(provider->GetControlLabelGridAlignment(),
-                        views::GridLayout::CENTER, 0,
-                        views::GridLayout::USE_PREF, 0, 0);
-  column_set->AddPaddingColumn(0, kLabelValuePadding);
+  column_set->AddColumn(
+      provider->GetControlLabelGridAlignment(), views::GridLayout::CENTER,
+      views::GridLayout::kFixedSize, views::GridLayout::USE_PREF, 0, 0);
+  column_set->AddPaddingColumn(views::GridLayout::kFixedSize,
+                               kLabelValuePadding);
   column_set->AddColumn(views::GridLayout::TRAILING, views::GridLayout::CENTER,
-                        0, views::GridLayout::USE_PREF, 0, 0);
-  column_set->AddColumn(views::GridLayout::FILL, views::GridLayout::CENTER,
-                        1, views::GridLayout::USE_PREF, 0, 0);
+                        views::GridLayout::kFixedSize,
+                        views::GridLayout::USE_PREF, 0, 0);
+  column_set->AddColumn(views::GridLayout::FILL, views::GridLayout::CENTER, 1.0,
+                        views::GridLayout::USE_PREF, 0, 0);
 
   AddLabelRow(three_column_layout_id, layout, name_label_, name_value_field_);
   AddLabelRow(three_column_layout_id, layout, content_label_,

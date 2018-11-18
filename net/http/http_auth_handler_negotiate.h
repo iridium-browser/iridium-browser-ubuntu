@@ -10,6 +10,7 @@
 
 #include "build/build_config.h"
 #include "net/base/address_list.h"
+#include "net/base/completion_once_callback.h"
 #include "net/base/net_export.h"
 #include "net/dns/host_resolver.h"
 #include "net/http/http_auth_handler.h"
@@ -57,7 +58,18 @@ class NET_EXPORT_PRIVATE HttpAuthHandlerNegotiate : public HttpAuthHandler {
     void set_library(std::unique_ptr<AuthLibrary> auth_provider) {
       auth_library_ = std::move(auth_provider);
     }
-#endif
+
+#if defined(OS_POSIX)
+    const std::string& GetLibraryNameForTesting() const;
+
+    void set_allow_gssapi_library_load(bool allow_gssapi_library_load) {
+      allow_gssapi_library_load_ = allow_gssapi_library_load;
+    }
+    bool allow_gssapi_library_load_for_testing() const {
+      return allow_gssapi_library_load_;
+    }
+#endif  // defined(OS_POSIX)
+#endif  // !defined(OS_ANDROID)
 
     // HttpAuthHandlerFactory overrides
     int CreateAuthHandler(HttpAuthChallengeTokenizer* challenge,
@@ -70,14 +82,17 @@ class NET_EXPORT_PRIVATE HttpAuthHandlerNegotiate : public HttpAuthHandler {
                           std::unique_ptr<HttpAuthHandler>* handler) override;
 
    private:
-    HostResolver* resolver_;
+    HostResolver* resolver_ = nullptr;
 #if defined(OS_WIN)
-    ULONG max_token_length_;
+    ULONG max_token_length_ = 0;
 #endif
-    bool is_unsupported_;
+    bool is_unsupported_ = false;
 #if !defined(OS_ANDROID)
     std::unique_ptr<AuthLibrary> auth_library_;
-#endif
+#if defined(OS_POSIX)
+    bool allow_gssapi_library_load_ = true;
+#endif  // defined(OS_POSIX)
+#endif  // !defined(OS_ANDROID)
   };
 
   HttpAuthHandlerNegotiate(
@@ -109,7 +124,7 @@ class NET_EXPORT_PRIVATE HttpAuthHandlerNegotiate : public HttpAuthHandler {
 
   int GenerateAuthTokenImpl(const AuthCredentials* credentials,
                             const HttpRequestInfo* request,
-                            const CompletionCallback& callback,
+                            CompletionOnceCallback callback,
                             std::string* auth_token) override;
 
  private:
@@ -146,7 +161,7 @@ class NET_EXPORT_PRIVATE HttpAuthHandlerNegotiate : public HttpAuthHandler {
   std::string channel_bindings_;
 
   // Things which vary each round.
-  CompletionCallback callback_;
+  CompletionOnceCallback callback_;
   std::string* auth_token_;
 
   State next_state_;

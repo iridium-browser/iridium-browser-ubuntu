@@ -10,7 +10,8 @@
 #include "base/macros.h"
 #include "base/metrics/field_trial.h"
 #include "base/run_loop.h"
-#include "base/test/histogram_tester.h"
+#include "base/task/post_task.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/simple_test_clock.h"
 #include "base/test/simple_test_tick_clock.h"
@@ -19,6 +20,7 @@
 #include "chrome/browser/captive_portal/captive_portal_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ssl/common_name_mismatch_handler.h"
+#include "chrome/browser/ssl/ssl_error_assistant.h"
 #include "chrome/browser/ssl/ssl_error_assistant.pb.h"
 #include "chrome/common/buildflags.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
@@ -28,6 +30,7 @@
 #include "components/network_time/network_time_tracker.h"
 #include "components/prefs/testing_pref_service.h"
 #include "components/security_interstitials/core/ssl_error_ui.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "net/base/net_errors.h"
@@ -41,6 +44,7 @@
 #include "net/test/test_certificate_data.h"
 #include "net/test/test_data_directory.h"
 #include "net/url_request/url_request_test_util.h"
+#include "services/network/test/test_shared_url_loader_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
@@ -119,8 +123,8 @@ const char kCertWithoutOrganizationOrCommonName[] =
 std::unique_ptr<net::test_server::HttpResponse> WaitForRequest(
     const base::Closure& quit_closure,
     const net::test_server::HttpRequest& request) {
-  content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
-                                   quit_closure);
+  base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI},
+                           quit_closure);
   return std::make_unique<net::test_server::HungResponse>();
 }
 
@@ -365,6 +369,9 @@ class SSLErrorAssistantProtoTest : public ChromeRenderViewHostTestHarness {
   void SetUp() override {
     ChromeRenderViewHostTestHarness::SetUp();
     SSLErrorHandler::ResetConfigForTesting();
+    SSLErrorHandler::SetErrorAssistantProto(
+        SSLErrorAssistant::GetErrorAssistantProtoFromResourceBundle());
+
     SSLErrorHandler::SetInterstitialDelayForTesting(base::TimeDelta());
     ResetErrorHandlerFromFile(kOkayCertName,
                               net::CERT_STATUS_COMMON_NAME_INVALID);
@@ -610,13 +617,23 @@ class SSLErrorHandlerDateInvalidTest : public ChromeRenderViewHostTestHarness {
     field_trial_test()->SetNetworkQueriesWithVariationsService(
         false, 0.0,
         network_time::NetworkTimeTracker::FETCHES_IN_BACKGROUND_ONLY);
+
+    base::RunLoop run_loop;
+    std::unique_ptr<network::SharedURLLoaderFactoryInfo>
+        url_loader_factory_info;
+    base::PostTaskWithTraitsAndReply(
+        FROM_HERE, {content::BrowserThread::IO},
+        base::BindOnce(CreateURLLoaderFactory, &url_loader_factory_info),
+        run_loop.QuitClosure());
+    run_loop.Run();
+
+    shared_url_loader_factory_ = network::SharedURLLoaderFactory::Create(
+        std::move(url_loader_factory_info));
+
     tracker_.reset(new network_time::NetworkTimeTracker(
         std::unique_ptr<base::Clock>(clock_),
         std::unique_ptr<base::TickClock>(tick_clock_), &pref_service_,
-        new net::TestURLRequestContextGetter(
-            content::BrowserThread::GetTaskRunnerForThread(
-                content::BrowserThread::IO))));
-
+        shared_url_loader_factory_));
     // Do this to be sure that |is_null| returns false.
     clock_->Advance(base::TimeDelta::FromDays(111));
     tick_clock_->Advance(base::TimeDelta::FromDays(222));
@@ -642,6 +659,10 @@ class SSLErrorHandlerDateInvalidTest : public ChromeRenderViewHostTestHarness {
   }
 
   void TearDown() override {
+    // Release the reference on TestSharedURLLoaderFactory before the test
+    // thread bundle flushes the IO thread so that it's destructed.
+    shared_url_loader_factory_ = nullptr;
+
     if (error_handler()) {
       EXPECT_FALSE(error_handler()->IsTimerRunningForTesting());
       error_handler_.reset(nullptr);
@@ -671,6 +692,15 @@ class SSLErrorHandlerDateInvalidTest : public ChromeRenderViewHostTestHarness {
   void ClearErrorHandler() { error_handler_.reset(nullptr); }
 
  private:
+  static void CreateURLLoaderFactory(
+      std::unique_ptr<network::SharedURLLoaderFactoryInfo>*
+          url_loader_factory_info) {
+    scoped_refptr<network::TestSharedURLLoaderFactory> factory =
+        base::MakeRefCounted<network::TestSharedURLLoaderFactory>();
+    // Holds a reference to |factory|.
+    *url_loader_factory_info = factory->Clone();
+  }
+
   net::SSLInfo ssl_info_;
   std::unique_ptr<TestSSLErrorHandler> error_handler_;
   TestSSLErrorHandlerDelegate* delegate_;
@@ -679,6 +709,7 @@ class SSLErrorHandlerDateInvalidTest : public ChromeRenderViewHostTestHarness {
   base::SimpleTestClock* clock_;
   base::SimpleTestTickClock* tick_clock_;
   TestingPrefServiceSimple pref_service_;
+  scoped_refptr<network::SharedURLLoaderFactory> shared_url_loader_factory_;
   std::unique_ptr<network_time::NetworkTimeTracker> tracker_;
   std::unique_ptr<net::EmbeddedTestServer> test_server_;
 

@@ -14,7 +14,7 @@
 #include "base/process/process_handle.h"
 #include "base/sequence_checker.h"
 #include "chrome/browser/page_load_metrics/page_load_metrics_observer.h"
-#include "components/ukm/ukm_source.h"
+#include "services/metrics/public/cpp/ukm_source.h"
 #include "services/resource_coordinator/public/cpp/memory_instrumentation/memory_instrumentation.h"
 
 namespace content {
@@ -30,7 +30,7 @@ namespace internal {
 
 // Various UMA histogram names for DataReductionProxy core page load metrics.
 extern const char kHistogramDataReductionProxyPrefix[];
-extern const char kHistogramDataReductionProxyLoFiOnPrefix[];
+extern const char kHistogramDataReductionProxyLitePagePrefix[];
 
 // Byte and request specific histogram suffixes.
 extern const char kResourcesPercentProxied[];
@@ -98,6 +98,11 @@ class DataReductionProxyMetricsObserver
   void OnLoadedResource(const page_load_metrics::ExtraRequestCompleteInfo&
                             extra_request_compelte_info) override;
   void OnEventOccurred(const void* const event_key) override;
+  void OnUserInput(const blink::WebInputEvent& event) override;
+
+  // Exponentially bucket the number of bytes for privacy-implicated resources.
+  // Input below 10KB returns 0.
+  static int64_t ExponentiallyBucketBytes(int64_t bytes);
 
  private:
   // Sends the page load information to the pingback client.
@@ -139,14 +144,28 @@ class DataReductionProxyMetricsObserver
   int num_network_resources_;
 
   // The total content network bytes that the user would have downloaded if they
-  // were not using data reduction proxy.
-  int64_t original_network_bytes_;
+  // were not using data reduction proxy for HTTP resources.
+  int64_t insecure_original_network_bytes_;
 
-  // The total network bytes loaded through data reduction proxy.
+  // The total content network bytes that the user would have downloaded if they
+  // were not using data reduction proxy for HTTPS resources.
+  int64_t secure_original_network_bytes_;
+
+  // The total network bytes loaded through data reduction proxy. This value
+  // only concerns HTTP traffic.
   int64_t network_bytes_proxied_;
 
-  // The total network bytes used.
-  int64_t network_bytes_;
+  // The total network bytes used for HTTP resources.
+  int64_t insecure_network_bytes_;
+
+  // The total network bytes used for HTTPS resources.
+  int64_t secure_network_bytes_;
+
+  // The total cached bytes used for HTTP resources.
+  int64_t insecure_cached_bytes_;
+
+  // The total cached bytes used for HTTPS resources.
+  int64_t secure_cached_bytes_;
 
   // The process ID of the main frame renderer during OnCommit.
   base::ProcessId process_id_;
@@ -159,6 +178,12 @@ class DataReductionProxyMetricsObserver
   // case of a renderer crash.
   // Set at navigation commit time.
   int render_process_host_id_;
+
+  // The number of touch events on the page.
+  uint32_t touch_count_;
+
+  // The number of scroll events on the page.
+  uint32_t scroll_count_;
 
   SEQUENCE_CHECKER(sequence_checker_);
 

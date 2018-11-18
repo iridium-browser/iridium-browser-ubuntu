@@ -25,10 +25,8 @@ public:
 
         fShaderCaps.reset(new GrShaderCaps(contextOptions));
         fShaderCaps->fGeometryShaderSupport = options.fGeometryShaderSupport;
-        fShaderCaps->fTexelBufferSupport = options.fTexelBufferSupport;
         fShaderCaps->fIntegerSupport = options.fIntegerSupport;
         fShaderCaps->fFlatInterpolationSupport = options.fFlatInterpolationSupport;
-        fShaderCaps->fMaxVertexSamplers = options.fMaxVertexSamplers;
         fShaderCaps->fMaxFragmentSamplers = options.fMaxFragmentSamplers;
         fShaderCaps->fShaderDerivativeSupport = options.fShaderDerivativeSupport;
 
@@ -70,6 +68,11 @@ public:
     bool surfaceSupportsWritePixels(const GrSurface*) const override { return true; }
     bool surfaceSupportsReadPixels(const GrSurface*) const override { return true; }
 
+    bool canCopySurface(const GrSurfaceProxy* dst, const GrSurfaceProxy* src,
+                        const SkIRect& srcRect, const SkIPoint& dstPoint) const override {
+        return true;
+    }
+
     bool initDescForDstCopy(const GrRenderTargetProxy* src, GrSurfaceDesc* desc, GrSurfaceOrigin*,
                             bool* rectsMustMatch, bool* disallowSubrect) const override {
         return false;
@@ -102,6 +105,15 @@ public:
     }
 
 private:
+#ifdef GR_TEST_UTILS
+    GrBackendFormat onCreateFormatFromBackendTexture(
+            const GrBackendTexture& backendTex) const override {
+        GrMockTextureInfo mockInfo;
+        SkAssertResult(backendTex.getMockTextureInfo(&mockInfo));
+        return GrBackendFormat::MakeMock(mockInfo.fConfig);
+    }
+#endif
+
     static const int kMaxSampleCnt = 16;
 
     GrMockOptions fOptions;

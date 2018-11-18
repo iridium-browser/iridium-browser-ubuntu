@@ -28,14 +28,6 @@ TEST_F(ModelTypeTest, ModelTypeToValue) {
   base::ExpectStringValue("Unspecified", *ModelTypeToValue(UNSPECIFIED));
 }
 
-TEST_F(ModelTypeTest, ModelTypeFromValue) {
-  for (int i = FIRST_REAL_MODEL_TYPE; i < MODEL_TYPE_COUNT; ++i) {
-    ModelType model_type = ModelTypeFromInt(i);
-    std::unique_ptr<base::Value> value(ModelTypeToValue(model_type));
-    EXPECT_EQ(model_type, ModelTypeFromValue(*value));
-  }
-}
-
 TEST_F(ModelTypeTest, ModelTypeSetToValue) {
   const ModelTypeSet model_types(BOOKMARKS, APPS);
 
@@ -46,19 +38,6 @@ TEST_F(ModelTypeTest, ModelTypeSetToValue) {
   EXPECT_TRUE(value->GetString(1, &types[1]));
   EXPECT_EQ("Bookmarks", types[0]);
   EXPECT_EQ("Apps", types[1]);
-}
-
-TEST_F(ModelTypeTest, ModelTypeSetFromValue) {
-  // Try empty set first.
-  ModelTypeSet model_types;
-  std::unique_ptr<base::ListValue> value(ModelTypeSetToValue(model_types));
-  EXPECT_EQ(model_types, ModelTypeSetFromValue(*value));
-
-  // Now try with a few random types.
-  model_types.Put(BOOKMARKS);
-  model_types.Put(APPS);
-  value = ModelTypeSetToValue(model_types);
-  EXPECT_EQ(model_types, ModelTypeSetFromValue(*value));
 }
 
 TEST_F(ModelTypeTest, IsRealDataType) {
@@ -83,10 +62,9 @@ TEST_F(ModelTypeTest, IsProxyType) {
 // numbers.
 TEST_F(ModelTypeTest, ModelTypeToFromSpecificsFieldNumber) {
   ModelTypeSet protocol_types = ProtocolTypes();
-  for (ModelTypeSet::Iterator iter = protocol_types.First(); iter.Good();
-       iter.Inc()) {
-    int field_number = GetSpecificsFieldNumberFromModelType(iter.Get());
-    EXPECT_EQ(iter.Get(), GetModelTypeFromSpecificsFieldNumber(field_number));
+  for (ModelType type : protocol_types) {
+    int field_number = GetSpecificsFieldNumberFromModelType(type);
+    EXPECT_EQ(type, GetModelTypeFromSpecificsFieldNumber(field_number));
   }
 }
 
@@ -97,9 +75,9 @@ TEST_F(ModelTypeTest, ModelTypeOfInvalidSpecificsFieldNumber) {
 TEST_F(ModelTypeTest, ModelTypeHistogramMapping) {
   std::set<int> histogram_values;
   ModelTypeSet all_types = ModelTypeSet::All();
-  for (ModelTypeSet::Iterator it = all_types.First(); it.Good(); it.Inc()) {
-    SCOPED_TRACE(ModelTypeToString(it.Get()));
-    int histogram_value = ModelTypeToHistogramInt(it.Get());
+  for (ModelType type : all_types) {
+    SCOPED_TRACE(ModelTypeToString(type));
+    int histogram_value = ModelTypeToHistogramInt(type);
 
     EXPECT_TRUE(histogram_values.insert(histogram_value).second)
         << "Expected histogram values to be unique";
@@ -110,6 +88,24 @@ TEST_F(ModelTypeTest, ModelTypeHistogramMapping) {
     // those histograms.
     EXPECT_LT(histogram_value, MODEL_TYPE_COUNT);
   }
+}
+
+TEST_F(ModelTypeTest, ModelTypeToStableIdentifier) {
+  std::set<int> identifiers;
+  ModelTypeSet all_types = ModelTypeSet::All();
+  for (ModelType type : all_types) {
+    SCOPED_TRACE(ModelTypeToString(type));
+    int stable_identifier = ModelTypeToStableIdentifier(type);
+    EXPECT_GT(stable_identifier, 0);
+    EXPECT_TRUE(identifiers.insert(stable_identifier).second)
+        << "Expected identifier values to be unique";
+  }
+
+  // Hard code a few example model_types to make it harder to break that the
+  // identifiers are stable.
+  EXPECT_EQ(3, ModelTypeToStableIdentifier(BOOKMARKS));
+  EXPECT_EQ(7, ModelTypeToStableIdentifier(AUTOFILL));
+  EXPECT_EQ(9, ModelTypeToStableIdentifier(TYPED_URLS));
 }
 
 TEST_F(ModelTypeTest, ModelTypeSetFromString) {
@@ -124,11 +120,11 @@ TEST_F(ModelTypeTest, ModelTypeSetFromString) {
 
 TEST_F(ModelTypeTest, DefaultFieldValues) {
   ModelTypeSet types = ProtocolTypes();
-  for (ModelTypeSet::Iterator it = types.First(); it.Good(); it.Inc()) {
-    SCOPED_TRACE(ModelTypeToString(it.Get()));
+  for (ModelType type : types) {
+    SCOPED_TRACE(ModelTypeToString(type));
 
     sync_pb::EntitySpecifics specifics;
-    AddDefaultFieldValue(it.Get(), &specifics);
+    AddDefaultFieldValue(type, &specifics);
     EXPECT_TRUE(specifics.IsInitialized());
 
     std::string tmp;
@@ -138,14 +134,13 @@ TEST_F(ModelTypeTest, DefaultFieldValues) {
     EXPECT_TRUE(from_string.ParseFromString(tmp));
     EXPECT_TRUE(from_string.IsInitialized());
 
-    EXPECT_EQ(it.Get(), GetModelTypeFromSpecifics(from_string));
+    EXPECT_EQ(type, GetModelTypeFromSpecifics(from_string));
   }
 }
 
 TEST_F(ModelTypeTest, ModelTypeToRootTagValues) {
   ModelTypeSet all_types = ModelTypeSet::All();
-  for (ModelTypeSet::Iterator it = all_types.First(); it.Good(); it.Inc()) {
-    ModelType model_type = it.Get();
+  for (ModelType model_type : all_types) {
     std::string root_tag = ModelTypeToRootTag(model_type);
     if (IsProxyType(model_type)) {
       EXPECT_EQ(root_tag, std::string());
@@ -160,8 +155,7 @@ TEST_F(ModelTypeTest, ModelTypeToRootTagValues) {
 
 TEST_F(ModelTypeTest, ModelTypeStringMapping) {
   ModelTypeSet all_types = ModelTypeSet::All();
-  for (ModelTypeSet::Iterator it = all_types.First(); it.Good(); it.Inc()) {
-    ModelType model_type = it.Get();
+  for (ModelType model_type : all_types) {
     const char* model_type_string = ModelTypeToString(model_type);
     ModelType converted_model_type = ModelTypeFromString(model_type_string);
     if (IsRealDataType(model_type))
@@ -173,8 +167,7 @@ TEST_F(ModelTypeTest, ModelTypeStringMapping) {
 
 TEST_F(ModelTypeTest, ModelTypeNotificationTypeMapping) {
   ModelTypeSet all_types = ModelTypeSet::All();
-  for (ModelTypeSet::Iterator it = all_types.First(); it.Good(); it.Inc()) {
-    ModelType model_type = it.Get();
+  for (ModelType model_type : all_types) {
     std::string notification_type;
     bool ret = RealModelTypeToNotificationType(model_type, &notification_type);
     if (ret) {

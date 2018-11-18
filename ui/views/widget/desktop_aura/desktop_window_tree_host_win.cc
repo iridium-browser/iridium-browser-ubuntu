@@ -20,6 +20,8 @@
 #include "ui/display/win/dpi.h"
 #include "ui/display/win/screen_win.h"
 #include "ui/events/keyboard_hook.h"
+#include "ui/events/keycodes/dom/dom_code.h"
+#include "ui/events/keycodes/dom/dom_keyboard_layout_map.h"
 #include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/geometry/vector2d.h"
 #include "ui/gfx/native_widget_types.h"
@@ -172,6 +174,8 @@ DesktopWindowTreeHostWin::CreateDragDropClient(
 }
 
 void DesktopWindowTreeHostWin::Close() {
+  content_window()->Hide();
+
   // TODO(beng): Move this entire branch to DNWA so it can be shared with X11.
   if (should_animate_window_close_) {
     pending_close_ = true;
@@ -195,20 +199,19 @@ aura::WindowTreeHost* DesktopWindowTreeHostWin::AsWindowTreeHost() {
   return this;
 }
 
-void DesktopWindowTreeHostWin::ShowWindowWithState(
-    ui::WindowShowState show_state) {
+void DesktopWindowTreeHostWin::Show(ui::WindowShowState show_state,
+                                    const gfx::Rect& restore_bounds) {
   if (compositor())
     compositor()->SetVisible(true);
-  message_handler_->ShowWindowWithState(show_state);
-}
 
-void DesktopWindowTreeHostWin::ShowMaximizedWithBounds(
-    const gfx::Rect& restored_bounds) {
-  if (compositor())
-    compositor()->SetVisible(true);
-  gfx::Rect pixel_bounds =
-      display::win::ScreenWin::DIPToScreenRect(GetHWND(), restored_bounds);
-  message_handler_->ShowMaximizedWithBounds(pixel_bounds);
+  gfx::Rect pixel_restore_bounds;
+  if (show_state == ui::SHOW_STATE_MAXIMIZED) {
+    pixel_restore_bounds =
+        display::win::ScreenWin::DIPToScreenRect(GetHWND(), restore_bounds);
+  }
+  message_handler_->Show(show_state, pixel_restore_bounds);
+
+  content_window()->Show();
 }
 
 bool DesktopWindowTreeHostWin::IsVisible() const {
@@ -445,6 +448,12 @@ void DesktopWindowTreeHostWin::SetOpacity(float opacity) {
   content_window()->layer()->SetOpacity(opacity);
 }
 
+void DesktopWindowTreeHostWin::SetAspectRatio(const gfx::SizeF& aspect_ratio) {
+  DCHECK(!aspect_ratio.IsEmpty());
+  message_handler_->SetAspectRatio(aspect_ratio.width() /
+                                   aspect_ratio.height());
+}
+
 void DesktopWindowTreeHostWin::SetWindowIcons(
     const gfx::ImageSkia& window_icon, const gfx::ImageSkia& app_icon) {
   message_handler_->SetWindowIcons(window_icon, app_icon);
@@ -494,7 +503,7 @@ gfx::AcceleratedWidget DesktopWindowTreeHostWin::GetAcceleratedWidget() {
 }
 
 void DesktopWindowTreeHostWin::ShowImpl() {
-  message_handler_->Show();
+  Show(ui::SHOW_STATE_NORMAL, gfx::Rect());
 }
 
 void DesktopWindowTreeHostWin::HideImpl() {
@@ -521,7 +530,14 @@ gfx::Rect DesktopWindowTreeHostWin::GetBoundsInPixels() const {
   return without_expansion;
 }
 
-void DesktopWindowTreeHostWin::SetBoundsInPixels(const gfx::Rect& bounds) {
+void DesktopWindowTreeHostWin::SetBoundsInPixels(
+    const gfx::Rect& bounds,
+    const viz::LocalSurfaceId& local_surface_id) {
+  // On Windows, the callers of SetBoundsInPixels() shouldn't need to (or be
+  // able to) allocate LocalSurfaceId for the compositor. Aura itself should
+  // allocate the new ids as needed, instead.
+  DCHECK(!local_surface_id.is_valid());
+
   // If the window bounds have to be expanded we need to subtract the
   // window_expansion_top_left_delta_ from the origin and add the
   // window_expansion_bottom_right_delta_ to the width and height
@@ -556,15 +572,16 @@ void DesktopWindowTreeHostWin::ReleaseCapture() {
 }
 
 bool DesktopWindowTreeHostWin::CaptureSystemKeyEventsImpl(
-    base::Optional<base::flat_set<int>> key_codes) {
+    base::Optional<base::flat_set<ui::DomCode>> dom_codes) {
   // Only one KeyboardHook should be active at a time, otherwise there will be
   // problems with event routing (i.e. which Hook takes precedence) and
   // destruction ordering.
   DCHECK(!keyboard_hook_);
   keyboard_hook_ = ui::KeyboardHook::Create(
-      std::move(key_codes),
+      std::move(dom_codes), GetAcceleratedWidget(),
       base::BindRepeating(&DesktopWindowTreeHostWin::HandleKeyEvent,
                           base::Unretained(this)));
+
   return keyboard_hook_ != nullptr;
 }
 
@@ -572,8 +589,13 @@ void DesktopWindowTreeHostWin::ReleaseSystemKeyEventCapture() {
   keyboard_hook_.reset();
 }
 
-bool DesktopWindowTreeHostWin::IsKeyLocked(int native_key_code) {
-  return keyboard_hook_ && keyboard_hook_->IsKeyLocked(native_key_code);
+bool DesktopWindowTreeHostWin::IsKeyLocked(ui::DomCode dom_code) {
+  return keyboard_hook_ && keyboard_hook_->IsKeyLocked(dom_code);
+}
+
+base::flat_map<std::string, std::string>
+DesktopWindowTreeHostWin::GetKeyboardLayoutMap() {
+  return ui::GenerateDomKeyboardLayoutMap();
 }
 
 void DesktopWindowTreeHostWin::SetCursorNative(gfx::NativeCursor cursor) {
@@ -706,7 +728,8 @@ void DesktopWindowTreeHostWin::GetWindowMask(const gfx::Size& size,
   }
 }
 
-bool DesktopWindowTreeHostWin::GetClientAreaInsets(gfx::Insets* insets) const {
+bool DesktopWindowTreeHostWin::GetClientAreaInsets(gfx::Insets* insets,
+                                                   HMONITOR monitor) const {
   return false;
 }
 

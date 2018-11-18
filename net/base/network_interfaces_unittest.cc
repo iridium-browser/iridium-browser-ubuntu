@@ -28,8 +28,7 @@ namespace {
 TEST(NetworkInterfacesTest, GetNetworkList) {
   NetworkInterfaceList list;
   ASSERT_TRUE(GetNetworkList(&list, INCLUDE_HOST_SCOPE_VIRTUAL_INTERFACES));
-  for (NetworkInterfaceList::iterator it = list.begin();
-       it != list.end(); ++it) {
+  for (auto it = list.begin(); it != list.end(); ++it) {
     // Verify that the names are not empty.
     EXPECT_FALSE(it->name.empty());
     EXPECT_FALSE(it->friendly_name.empty());
@@ -57,7 +56,7 @@ TEST(NetworkInterfacesTest, GetNetworkList) {
     if (it->type == NetworkChangeNotifier::CONNECTION_WIFI) {
       EXPECT_NE(WIFI_PHY_LAYER_PROTOCOL_NONE, GetWifiPHYLayerProtocol());
     }
-#elif defined(OS_POSIX) && !defined(OS_ANDROID) && !defined(OS_FUCHSIA)
+#elif defined(OS_POSIX) && !defined(OS_ANDROID)
     char name[IF_NAMESIZE];
     EXPECT_TRUE(if_indextoname(it->interface_index, name));
     EXPECT_STREQ(it->name.c_str(), name);

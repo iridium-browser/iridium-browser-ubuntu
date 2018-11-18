@@ -24,7 +24,6 @@
 
 #include "third_party/blink/renderer/core/css/css_computed_style_declaration.h"
 
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
 #include "third_party/blink/renderer/core/css/computed_style_css_value_mapping.h"
 #include "third_party/blink/renderer/core/css/css_identifier_value.h"
 #include "third_party/blink/renderer/core/css/css_primitive_value.h"
@@ -37,12 +36,12 @@
 #include "third_party/blink/renderer/core/css/zoom_adjusted_pixel_value.h"
 #include "third_party/blink/renderer/core/css_property_names.h"
 #include "third_party/blink/renderer/core/dom/document.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
 #include "third_party/blink/renderer/core/dom/pseudo_element.h"
 #include "third_party/blink/renderer/core/frame/use_counter.h"
 #include "third_party/blink/renderer/core/html/html_frame_owner_element.h"
 #include "third_party/blink/renderer/core/layout/layout_object.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
 namespace blink {
@@ -113,7 +112,7 @@ const CSSPropertyID kComputedPropertyArray[] = {
     CSSPropertyUnicodeBidi, CSSPropertyVerticalAlign, CSSPropertyVisibility,
     CSSPropertyWhiteSpace, CSSPropertyWidows, CSSPropertyWidth,
     CSSPropertyWillChange, CSSPropertyWordBreak, CSSPropertyWordSpacing,
-    CSSPropertyWordWrap, CSSPropertyZIndex, CSSPropertyZoom,
+    CSSPropertyZIndex, CSSPropertyZoom,
 
     CSSPropertyWebkitAppearance, CSSPropertyBackfaceVisibility,
     CSSPropertyWebkitBorderHorizontalSpacing, CSSPropertyWebkitBorderImage,
@@ -197,8 +196,7 @@ CSSComputedStyleDeclaration::ComputableProperties() {
   DEFINE_STATIC_LOCAL(Vector<const CSSProperty*>, properties, ());
   if (properties.IsEmpty()) {
     CSSProperty::FilterEnabledCSSPropertiesIntoVector(
-        kComputedPropertyArray, WTF_ARRAY_LENGTH(kComputedPropertyArray),
-        properties);
+        kComputedPropertyArray, arraysize(kComputedPropertyArray), properties);
   }
   return properties;
 }
@@ -234,7 +232,7 @@ void CSSComputedStyleDeclaration::setCSSText(const ExecutionContext*,
                                              const String&,
                                              ExceptionState& exception_state) {
   exception_state.ThrowDOMException(
-      kNoModificationAllowedError,
+      DOMExceptionCode::kNoModificationAllowedError,
       "These styles are computed, and therefore read-only.");
 }
 
@@ -318,12 +316,14 @@ const CSSValue* CSSComputedStyleDeclaration::GetPropertyCSSValue(
       StyledNode()->GetDocument().GetPropertyRegistry());
 }
 
-std::unique_ptr<HashMap<AtomicString, scoped_refptr<CSSVariableData>>>
+HeapHashMap<AtomicString, Member<const CSSValue>>
 CSSComputedStyleDeclaration::GetVariables() const {
   const ComputedStyle* style = ComputeComputedStyle();
   if (!style)
-    return nullptr;
-  return ComputedStyleCSSValueMapping::GetVariables(*style);
+    return {};
+  DCHECK(StyledNode());
+  return ComputedStyleCSSValueMapping::GetVariables(
+      *style, StyledNode()->GetDocument().GetPropertyRegistry());
 }
 
 const CSSValue* CSSComputedStyleDeclaration::GetPropertyCSSValue(
@@ -381,6 +381,11 @@ const CSSValue* CSSComputedStyleDeclaration::GetPropertyCSSValue(
 
 String CSSComputedStyleDeclaration::GetPropertyValue(
     CSSPropertyID property_id) const {
+  // allow_visited_style_ is true only for access from DevTools.
+  if (!allow_visited_style_ && property_id == CSSPropertyWebkitAppearance) {
+    UseCounter::Count(node_->GetDocument(),
+                      WebFeature::kGetComputedStyleWebkitAppearance);
+  }
   const CSSValue* value = GetPropertyCSSValue(CSSProperty::Get(property_id));
   if (value)
     return value->CssText();
@@ -480,7 +485,7 @@ void CSSComputedStyleDeclaration::setProperty(const ExecutionContext*,
                                               const String&,
                                               ExceptionState& exception_state) {
   exception_state.ThrowDOMException(
-      kNoModificationAllowedError,
+      DOMExceptionCode::kNoModificationAllowedError,
       "These styles are computed, and therefore the '" + name +
           "' property is read-only.");
 }
@@ -489,7 +494,7 @@ String CSSComputedStyleDeclaration::removeProperty(
     const String& name,
     ExceptionState& exception_state) {
   exception_state.ThrowDOMException(
-      kNoModificationAllowedError,
+      DOMExceptionCode::kNoModificationAllowedError,
       "These styles are computed, and therefore the '" + name +
           "' property is read-only.");
   return String();
@@ -521,11 +526,10 @@ void CSSComputedStyleDeclaration::SetPropertyInternal(
     bool,
     SecureContextMode,
     ExceptionState& exception_state) {
-  // TODO(leviw): This code is currently unreachable, but shouldn't be.
   exception_state.ThrowDOMException(
-      kNoModificationAllowedError,
+      DOMExceptionCode::kNoModificationAllowedError,
       "These styles are computed, and therefore the '" +
-          CSSProperty::Get(id).GetPropertyNameString() +
+          CSSUnresolvedProperty::Get(id).GetPropertyNameString() +
           "' property is read-only.");
 }
 

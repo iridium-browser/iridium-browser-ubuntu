@@ -186,7 +186,6 @@ IGNORED_PATHS = (
   'third_party/lcov/contrib/galaxy/gen_makefile.sh',
   'third_party/libxml/linux/xml2-config',
   'third_party/libxml/src/ltmain.sh',
-  'third_party/mesa/',
   'third_party/protobuf/',
   'third_party/sqlite/',
   'third_party/talloc/script/mksyms.sh',
@@ -321,7 +320,8 @@ def check_file(root_path, rel_path):
 
 
 def check_files(root, files):
-  gen = (check_file(root, f) for f in files if not is_ignored(f))
+  gen = (check_file(root, f) for f in files
+         if not is_ignored(f) and not os.path.isdir(f))
   return filter(None, gen)
 
 

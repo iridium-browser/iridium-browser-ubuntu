@@ -19,8 +19,6 @@
 #include "android_webview/browser/gl_view_renderer_manager.h"
 #include "android_webview/browser/icon_helper.h"
 #include "android_webview/browser/permission/permission_request_handler_client.h"
-#include "android_webview/browser/render_thread_manager.h"
-#include "android_webview/browser/render_thread_manager_client.h"
 #include "android_webview/browser/renderer_host/aw_render_view_host_ext.h"
 #include "base/android/jni_weak_ref.h"
 #include "base/android/scoped_java_ref.h"
@@ -114,6 +112,10 @@ class AwContents : public FindHelper::Listener,
                       const base::android::JavaParamRef<jobject>& obj,
                       jlong gl_functor);
 
+  base::android::ScopedJavaLocalRef<jobject> GetRenderProcess(
+      JNIEnv* env,
+      const base::android::JavaParamRef<jobject>& obj);
+
   void Destroy(JNIEnv* env, const base::android::JavaParamRef<jobject>& obj);
   void DocumentHasImages(JNIEnv* env,
                          const base::android::JavaParamRef<jobject>& obj,
@@ -191,6 +193,8 @@ class AwContents : public FindHelper::Listener,
               jint visible_right,
               jint visible_bottom,
               jboolean force_auxiliary_bitmap_rendering);
+  bool NeedToDrawBackgroundColor(JNIEnv* env,
+                               const base::android::JavaParamRef<jobject>& obj);
   jlong CapturePicture(JNIEnv* env,
                        const base::android::JavaParamRef<jobject>& obj,
                        int width,

@@ -20,7 +20,10 @@ public:
     std::unique_ptr<GrFragmentProcessor> asFragmentProcessor(const GrFPArgs&) const override;
 #endif
 
-    void toString(SkString* str) const override;
+    SkScalar getTBias() const { return fTBias; }
+
+    SkScalar getTScale() const { return fTScale; }
+
     SK_DECLARE_PUBLIC_FLATTENABLE_DESERIALIZATION_PROCS(SkSweepGradient)
 
 protected:

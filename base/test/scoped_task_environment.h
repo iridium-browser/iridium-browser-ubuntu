@@ -8,7 +8,7 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/single_thread_task_runner.h"
-#include "base/task_scheduler/lazy_task_runner.h"
+#include "base/task/lazy_task_runner.h"
 #include "build/build_config.h"
 
 namespace base {
@@ -28,7 +28,7 @@ namespace test {
 
 // ScopedTaskEnvironment allows usage of these APIs within its scope:
 // - (Thread|Sequenced)TaskRunnerHandle, on the thread where it lives
-// - base/task_scheduler/post_task.h, on any thread
+// - base/task/post_task.h, on any thread
 //
 // Tests that need either of these APIs should instantiate a
 // ScopedTaskEnvironment.
@@ -37,10 +37,10 @@ namespace test {
 // RunLoop::Run(UntilIdle) or ScopedTaskEnvironment::RunUntilIdle is called on
 // the thread where the ScopedTaskEnvironment lives.
 //
-// Tasks posted through base/task_scheduler/post_task.h run on dedicated
-// threads. If ExecutionMode is QUEUED, they run when RunUntilIdle() or
-// ~ScopedTaskEnvironment is called. If ExecutionMode is ASYNC, they run
-// as they are posted.
+// Tasks posted through base/task/post_task.h run on dedicated threads. If
+// ExecutionMode is QUEUED, they run when RunUntilIdle() or
+// ~ScopedTaskEnvironment is called. If ExecutionMode is ASYNC, they run as they
+// are posted.
 //
 // All methods of ScopedTaskEnvironment must be called from the same thread.
 //
@@ -101,6 +101,9 @@ class ScopedTaskEnvironment {
   // Returns a TaskRunner that schedules tasks on the main thread.
   scoped_refptr<base::SingleThreadTaskRunner> GetMainThreadTaskRunner();
 
+  // Returns whether the main thread's TaskRunner has pending tasks.
+  bool MainThreadHasPendingTask() const;
+
   // Runs tasks until both the (Thread|Sequenced)TaskRunnerHandle and the
   // TaskScheduler's non-delayed queues are empty.
   void RunUntilIdle();
@@ -117,10 +120,23 @@ class ScopedTaskEnvironment {
   // Short for FastForwardBy(TimeDelta::Max()).
   void FastForwardUntilNoTasksRemain();
 
-  // Returns a TickClock whose time is updated by
-  // FastForward(By|UntilNoTasksRemain).
+  // Only valid for instances with a MOCK_TIME MainThreadType.  Returns a
+  // TickClock whose time is updated by FastForward(By|UntilNoTasksRemain).
   const TickClock* GetMockTickClock();
   std::unique_ptr<TickClock> DeprecatedGetMockTickClock();
+
+  // Only valid for instances with a MOCK_TIME MainThreadType.
+  // Returns the current virtual tick time (initially starting at 0).
+  base::TimeTicks NowTicks() const;
+
+  // Only valid for instances with a MOCK_TIME MainThreadType.
+  // Returns the number of pending tasks of the main thread's TaskRunner.
+  size_t GetPendingMainThreadTaskCount() const;
+
+  // Only valid for instances with a MOCK_TIME MainThreadType.
+  // Returns the delay until the next delayed pending task of the main thread's
+  // TaskRunner.
+  TimeDelta NextMainThreadPendingTaskDelay() const;
 
  private:
   class TestTaskTracker;

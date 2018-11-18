@@ -21,6 +21,8 @@ class AFDODataGenerateStage(generic_stages.BoardSpecificBuilderStage,
                             generic_stages.ForgivingBuilderStage):
   """Stage that generates AFDO profile data from a perf profile."""
 
+  category = constants.CI_INFRA_STAGE
+
   def _GetCurrentArch(self):
     """Get architecture for the current board being built."""
     return self._GetPortageEnvVar('ARCH', self._current_board)
@@ -37,9 +39,33 @@ class AFDODataGenerateStage(generic_stages.BoardSpecificBuilderStage,
     arch = self._GetCurrentArch()
     buildroot = self._build_root
     gs_context = gs.GSContext()
-    cpv = portage_util.BestVisible(constants.CHROME_CP,
-                                   buildroot=buildroot)
+    cpv = portage_util.PortageqBestVisible(constants.CHROME_CP, cwd=buildroot)
     afdo_file = None
+
+    # We have a mismatch between how we version the perf.data we collect and
+    # how we version our AFDO profiles.
+    #
+    # This mismatch can cause us to generate garbage profiles, so we skip
+    # profile updates for non-r1 revisions of Chrome.
+    #
+    # Going into more detail, a perf.data file looks like:
+    # chromeos-chrome-amd64-68.0.3440.9.perf.data.bz2
+    #
+    # An AFDO profile looks like:
+    # chromeos-chrome-amd64-68.0.3440.9_rc-r1.afdo.bz2
+    #
+    # And an unstripped Chrome looks like:
+    # chromeos-chrome-amd64-68.0.3440.9_rc-r1.debug.bz2
+    #
+    # Notably, the perf.data is lacking the revision number of the Chrome it
+    # was gathered on. This is problematic, since if there's a rev bump, we'll
+    # end up using the perf.data collected on Chrome version $N-r1 with a
+    # Chrome binary built from Chrome version $N-r2, which may have an entirely
+    # different layout than Chrome version $N-r1.
+    if cpv.rev != 'r1':
+      logging.warning(
+          'Non-r1 version of Chrome detected; skipping AFDO generation')
+      return
 
     # Generation of AFDO could fail for different reasons.
     # We will ignore the failures and let the master PFQ builder try
@@ -78,40 +104,37 @@ class AFDODataGenerateStage(generic_stages.BoardSpecificBuilderStage,
 class AFDOUpdateChromeEbuildStage(generic_stages.BuilderStage):
   """Updates the Chrome ebuild with the names of the AFDO profiles."""
 
+  category = constants.CI_INFRA_STAGE
+
   def PerformStage(self):
     buildroot = self._build_root
     gs_context = gs.GSContext()
-    cpv = portage_util.BestVisible(constants.CHROME_CP,
-                                   buildroot=buildroot)
-    version_number = cpv.version
+    cpv = portage_util.PortageqBestVisible(constants.CHROME_CP, cwd=buildroot)
 
     # We need the name of one board that has been setup in this
     # builder to find the Chrome ebuild. The chrome ebuild should be
     # the same for all the boards, so just use the first one.
     # If we don't have any boards, leave the called function to guess.
     board = self._boards[0] if self._boards else None
-    bench_profiles = {}
-    cwp_profiles = {}
-    for arch in afdo.AFDO_ARCH_GENERATORS:
-      afdo_file = afdo.GetBenchmarkProfile(cpv, arch, buildroot, gs_context)
-      if not afdo_file:
-        raise afdo.MissingAFDOData('Could not find appropriate AFDO profile')
-      state = 'current' if version_number in afdo_file else 'previous'
-      logging.info('Found %s %s AFDO profile %s', state, arch, afdo_file)
-      bench_profiles[arch] = afdo_file
+    profiles = {}
 
-      cwp_profile = afdo.GetCWPProfile(cpv, arch, buildroot, gs_context)
-      if not cwp_profile:
-        raise afdo.MissingAFDOData('Could not find appropriate cwp profile')
-      cwp_profiles[arch] = cwp_profile
+    for source, getter in afdo.PROFILE_SOURCES.iteritems():
+      profile = getter(cpv, source, buildroot, gs_context)
+      if not profile:
+        raise afdo.MissingAFDOData(
+            'Could not find appropriate profile for %s' % source)
+      logging.info('Found AFDO profile %s for %s', profile, source)
+      profiles[source] = profile
 
     # Now update the Chrome ebuild file with the AFDO profiles we found
-    # for each architecture.
-    afdo.UpdateChromeEbuildAFDOFile(board, bench_profiles, cwp_profiles)
+    # for each source.
+    afdo.UpdateChromeEbuildAFDOFile(board, profiles)
 
 
 class AFDOUpdateKernelEbuildStage(generic_stages.BuilderStage):
   """Updates the Kernel ebuild with the names of the AFDO profiles."""
+
+  category = constants.CI_INFRA_STAGE
 
   def _WarnSheriff(self, versions):
     subject_msg = ('Kernel AutoFDO profile too old for builder %s' %

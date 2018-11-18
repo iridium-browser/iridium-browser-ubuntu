@@ -20,6 +20,7 @@
 #include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_service.h"
+#include "chrome/browser/policy/chrome_browser_policy_connector.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/constants.mojom.h"
 #include "chrome/common/pref_names.h"
@@ -28,6 +29,7 @@
 #include "components/prefs/pref_service.h"
 #include "components/safe_browsing/common/safe_browsing.mojom.h"
 #include "components/safe_browsing/common/safe_browsing_prefs.h"
+#include "components/safe_browsing/common/utils.h"
 #include "components/safe_browsing/proto/csd.pb.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
@@ -231,6 +233,8 @@ void ClientSideDetectionService::Observe(
 
 void ClientSideDetectionService::SendModelToProcess(
     content::RenderProcessHost* process) {
+  DCHECK(process->IsInitializedAndNotDead());
+
   // The ClientSideDetectionService is enabled if _any_ active profile has
   // SafeBrowsing turned on.  Here we check the profile for each renderer
   // process and only send the model to those that have SafeBrowsing enabled,
@@ -268,7 +272,9 @@ void ClientSideDetectionService::SendModelToRenderers() {
   for (content::RenderProcessHost::iterator i(
            content::RenderProcessHost::AllHostsIterator());
        !i.IsAtEnd(); i.Advance()) {
-    SendModelToProcess(i.GetCurrentValue());
+    content::RenderProcessHost* process = i.GetCurrentValue();
+    if (process->IsInitializedAndNotDead())
+      SendModelToProcess(process);
   }
 }
 
@@ -301,9 +307,13 @@ void ClientSideDetectionService::StartClientReportPhishingRequest(
   }
   DVLOG(2) << "Starting report for hit on model " << request->model_filename();
 
+  request->mutable_population()->set_profile_management_status(
+      GetProfileManagementStatus(
+          g_browser_process->browser_policy_connector()));
+
   std::string request_data;
   if (!request->SerializeToString(&request_data)) {
-    UMA_HISTOGRAM_COUNTS("SBClientPhishing.RequestNotSerialized", 1);
+    UMA_HISTOGRAM_COUNTS_1M("SBClientPhishing.RequestNotSerialized", 1);
     DVLOG(1) << "Unable to serialize the CSD request. Proto file changed?";
     if (!callback.is_null())
       callback.Run(GURL(request->url()), false);
@@ -450,8 +460,8 @@ void ClientSideDetectionService::StartClientReportMalwareRequest(
   UMA_HISTOGRAM_ENUMERATION("SBClientMalware.SentReports", REPORT_SENT,
                             REPORT_RESULT_MAX);
 
-  UMA_HISTOGRAM_COUNTS("SBClientMalware.IPBlacklistRequestPayloadSize",
-                       request_data.size());
+  UMA_HISTOGRAM_COUNTS_1M("SBClientMalware.IPBlacklistRequestPayloadSize",
+                          request_data.size());
 
   // Record that we made a malware request
   malware_report_times_.push(base::Time::Now());

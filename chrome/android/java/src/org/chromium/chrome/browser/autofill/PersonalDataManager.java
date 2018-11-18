@@ -12,7 +12,8 @@ import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ResourceId;
-import org.chromium.chrome.browser.preferences.autofill.AutofillAndPaymentsPreferences;
+import org.chromium.chrome.browser.preferences.MainPreferences;
+import org.chromium.chrome.browser.preferences.Pref;
 import org.chromium.content_public.browser.WebContents;
 
 import java.util.ArrayList;
@@ -155,10 +156,10 @@ public class PersonalDataManager {
          * locale. All other fields are empty strings, because JNI does not handle null strings.
          */
         public AutofillProfile() {
-            this("" /* guid */, AutofillAndPaymentsPreferences.SETTINGS_ORIGIN /* origin */,
-                    true /* isLocal */, "" /* fullName */, "" /* companyName */,
-                    "" /* streetAddress */, "" /* region */, "" /* locality */,
-                    "" /* dependentLocality */, "" /* postalCode */, "" /* sortingCode */,
+            this("" /* guid */, MainPreferences.SETTINGS_ORIGIN /* origin */, true /* isLocal */,
+                    "" /* fullName */, "" /* companyName */, "" /* streetAddress */,
+                    "" /* region */, "" /* locality */, "" /* dependentLocality */,
+                    "" /* postalCode */, "" /* sortingCode */,
                     Locale.getDefault().getCountry() /* country */, "" /* phoneNumber */,
                     "" /* emailAddress */, "" /* languageCode */);
         }
@@ -401,11 +402,11 @@ public class PersonalDataManager {
         }
 
         public CreditCard() {
-            this("" /* guid */, AutofillAndPaymentsPreferences.SETTINGS_ORIGIN /*origin */,
-                    true /* isLocal */, false /* isCached */, "" /* name */, "" /* number */,
-                    "" /* obfuscatedNumber */, "" /* month */, "" /* year */,
-                    "" /* basicCardIssuerNetwork */, 0 /* issuerIconDrawableId */, CardType.UNKNOWN,
-                    "" /* billingAddressId */, "" /* serverId */);
+            this("" /* guid */, MainPreferences.SETTINGS_ORIGIN /*origin */, true /* isLocal */,
+                    false /* isCached */, "" /* name */, "" /* number */, "" /* obfuscatedNumber */,
+                    "" /* month */, "" /* year */, "" /* basicCardIssuerNetwork */,
+                    0 /* issuerIconDrawableId */, CardType.UNKNOWN, "" /* billingAddressId */,
+                    "" /* serverId */);
         }
 
         /** TODO(estade): remove this constructor. */
@@ -614,7 +615,7 @@ public class PersonalDataManager {
      * @param includeNameInLabel Whether to include the name in the profile's label.
      * @return The list of profiles to suggest to the user.
      */
-    public List<AutofillProfile> getProfilesToSuggest(boolean includeNameInLabel) {
+    public ArrayList<AutofillProfile> getProfilesToSuggest(boolean includeNameInLabel) {
         ThreadUtils.assertOnUiThread();
         return getProfilesWithLabels(
                 nativeGetProfileLabelsToSuggest(
@@ -631,7 +632,7 @@ public class PersonalDataManager {
      *
      * @return The list of billing addresses to suggest to the user.
      */
-    public List<AutofillProfile> getBillingAddressesToSuggest() {
+    public ArrayList<AutofillProfile> getBillingAddressesToSuggest() {
         ThreadUtils.assertOnUiThread();
         return getProfilesWithLabels(
                 nativeGetProfileLabelsToSuggest(
@@ -640,9 +641,9 @@ public class PersonalDataManager {
                 nativeGetProfileGUIDsToSuggest(mPersonalDataManagerAndroid));
     }
 
-    private List<AutofillProfile> getProfilesWithLabels(
+    private ArrayList<AutofillProfile> getProfilesWithLabels(
             String[] profileLabels, String[] profileGUIDs) {
-        List<AutofillProfile> profiles = new ArrayList<AutofillProfile>(profileGUIDs.length);
+        ArrayList<AutofillProfile> profiles = new ArrayList<AutofillProfile>(profileGUIDs.length);
         for (int i = 0; i < profileGUIDs.length; i++) {
             AutofillProfile profile =
                     nativeGetProfileByGUID(mPersonalDataManagerAndroid, profileGUIDs[i]);
@@ -685,14 +686,16 @@ public class PersonalDataManager {
     /**
      * Gets the credit cards to suggest when filling a form or completing a transaction. The cards
      * will have been processed to be more relevant to the user.
+     * @param includeServerCards Whether server cards should be included in the response.
      */
-    public List<CreditCard> getCreditCardsToSuggest() {
+    public ArrayList<CreditCard> getCreditCardsToSuggest(boolean includeServerCards) {
         ThreadUtils.assertOnUiThread();
-        return getCreditCards(nativeGetCreditCardGUIDsToSuggest(mPersonalDataManagerAndroid));
+        return getCreditCards(
+                nativeGetCreditCardGUIDsToSuggest(mPersonalDataManagerAndroid, includeServerCards));
     }
 
-    private List<CreditCard> getCreditCards(String[] creditCardGUIDs) {
-        List<CreditCard> cards = new ArrayList<CreditCard>(creditCardGUIDs.length);
+    private ArrayList<CreditCard> getCreditCards(String[] creditCardGUIDs) {
+        ArrayList<CreditCard> cards = new ArrayList<CreditCard>(creditCardGUIDs.length);
         for (int i = 0; i < creditCardGUIDs.length; i++) {
             cards.add(nativeGetCreditCardByGUID(mPersonalDataManagerAndroid, creditCardGUIDs[i]));
         }
@@ -906,18 +909,33 @@ public class PersonalDataManager {
     }
 
     /**
-     * @return Whether the Autofill feature is enabled.
+     * @return Whether the Autofill feature for Profiles (addresses) is enabled.
      */
-    public static boolean isAutofillEnabled() {
-        return nativeIsAutofillEnabled();
+    public static boolean isAutofillProfileEnabled() {
+        return nativeGetPref(Pref.AUTOFILL_PROFILE_ENABLED);
     }
 
     /**
-     * Enables or disables the Autofill feature.
-     * @param enable True to disable Autofill, false otherwise.
+     * @return Whether the Autofill feature for Credit Cards is enabled.
      */
-    public static void setAutofillEnabled(boolean enable) {
-        nativeSetAutofillEnabled(enable);
+    public static boolean isAutofillCreditCardEnabled() {
+        return nativeGetPref(Pref.AUTOFILL_CREDIT_CARD_ENABLED);
+    }
+
+    /**
+     * Enables or disables the Autofill feature for Profiles.
+     * @param enable True to disable profile Autofill, false otherwise.
+     */
+    public static void setAutofillProfileEnabled(boolean enable) {
+        nativeSetPref(Pref.AUTOFILL_PROFILE_ENABLED, enable);
+    }
+
+    /**
+     * Enables or disables the Autofill feature for Credit Cards.
+     * @param enable True to disable credit card Autofill, false otherwise.
+     */
+    public static void setAutofillCreditCardEnabled(boolean enable) {
+        nativeSetPref(Pref.AUTOFILL_CREDIT_CARD_ENABLED, enable);
     }
 
     /**
@@ -925,6 +943,20 @@ public class PersonalDataManager {
      */
     public static boolean isAutofillManaged() {
         return nativeIsAutofillManaged();
+    }
+
+    /**
+     * @return Whether the Autofill feature for Profiles (addresses) is managed.
+     */
+    public static boolean isAutofillProfileManaged() {
+        return nativeIsAutofillProfileManaged();
+    }
+
+    /**
+     * @return Whether the Autofill feature for Credit Cards is managed.
+     */
+    public static boolean isAutofillCreditCardManaged() {
+        return nativeIsAutofillCreditCardManaged();
     }
 
     /**
@@ -983,7 +1015,7 @@ public class PersonalDataManager {
     private native String[] nativeGetCreditCardGUIDsForSettings(
             long nativePersonalDataManagerAndroid);
     private native String[] nativeGetCreditCardGUIDsToSuggest(
-            long nativePersonalDataManagerAndroid);
+            long nativePersonalDataManagerAndroid, boolean includeServerCards);
     private native CreditCard nativeGetCreditCardByGUID(long nativePersonalDataManagerAndroid,
             String guid);
     private native CreditCard nativeGetCreditCardForNumber(long nativePersonalDataManagerAndroid,
@@ -1028,13 +1060,15 @@ public class PersonalDataManager {
             String regionCode, int timeoutSeconds, GetSubKeysRequestDelegate delegate);
     private static native boolean nativeHasProfiles(long nativePersonalDataManagerAndroid);
     private static native boolean nativeHasCreditCards(long nativePersonalDataManagerAndroid);
-    private static native boolean nativeIsAutofillEnabled();
-    private static native void nativeSetAutofillEnabled(boolean enable);
     private static native boolean nativeIsAutofillManaged();
+    private static native boolean nativeIsAutofillProfileManaged();
+    private static native boolean nativeIsAutofillCreditCardManaged();
     private static native boolean nativeIsPaymentsIntegrationEnabled();
     private static native void nativeSetPaymentsIntegrationEnabled(boolean enable);
     private static native String nativeToCountryCode(String countryName);
     private static native void nativeCancelPendingGetSubKeys(long nativePersonalDataManagerAndroid);
     private static native void nativeSetSyncServiceForTesting(
             long nativePersonalDataManagerAndroid);
+    private static native boolean nativeGetPref(int preference);
+    private static native void nativeSetPref(int preference, boolean enable);
 }

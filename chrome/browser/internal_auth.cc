@@ -110,10 +110,8 @@ bool IsVarSane(const std::string& var) {
       sizeof(kAllowedChars) == 26 + 26 + 10 + 1 + 1, "some mess with chars");
   // We must not allow kItemSeparator in anything used as an input to construct
   // message to sign.
-  DCHECK(std::find(kAllowedChars, kAllowedChars + arraysize(kAllowedChars),
-      kItemSeparator) == kAllowedChars + arraysize(kAllowedChars));
-  DCHECK(std::find(kAllowedChars, kAllowedChars + arraysize(kAllowedChars),
-      kVarValueSeparator) == kAllowedChars + arraysize(kAllowedChars));
+  DCHECK(!base::ContainsValue(kAllowedChars, kItemSeparator));
+  DCHECK(!base::ContainsValue(kAllowedChars, kVarValueSeparator));
   return !var.empty() &&
       var.size() <= kStringLengthLimit &&
       base::IsStringASCII(var) &&
@@ -130,7 +128,7 @@ bool IsValueSane(const std::string& value) {
 bool IsVarValueMapSane(const VarValueMap& map) {
   if (map.size() > kVarsLimit)
     return false;
-  for (VarValueMap::const_iterator it = map.begin(); it != map.end(); ++it) {
+  for (auto it = map.begin(); it != map.end(); ++it) {
     const std::string& var = it->first;
     const std::string& value = it->second;
     if (!IsVarSane(var) || !IsValueSane(value))
@@ -142,7 +140,7 @@ bool IsVarValueMapSane(const VarValueMap& map) {
 void ConvertVarValueMapToBlob(const VarValueMap& map, std::string* out) {
   out->clear();
   DCHECK(IsVarValueMapSane(map));
-  for (VarValueMap::const_iterator it = map.begin(); it != map.end(); ++it)
+  for (auto it = map.begin(); it != map.end(); ++it)
     *out += it->first + kVarValueSeparator + it->second + kItemSeparator;
 }
 

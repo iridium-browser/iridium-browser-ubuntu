@@ -4,18 +4,11 @@
 # found in the LICENSE file.
 
 """Wrapper around
-   third_party/WebKit/Tools/Scripts/run-webkit-tests"""
-import os
-import subprocess
+   third_party/blink/tools/run_web_tests.py"""
+
 import sys
 
-def main():
-    src_dir = os.path.abspath(os.path.join(sys.path[0], '..', '..'))
-    script_dir=os.path.join(src_dir, "third_party", "WebKit", "Tools",
-                            "Scripts")
-    script = os.path.join(script_dir, 'run-webkit-tests')
-    cmd = [sys.executable, script] + sys.argv[1:]
-    return subprocess.call(cmd)
-
 if __name__ == '__main__':
-    sys.exit(main())
+    print '\n    Please use third_party/blink/tools/run_web_tests.*.  ' \
+        'This command will be removed.\n'
+    sys.exit(1)

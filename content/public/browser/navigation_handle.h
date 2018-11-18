@@ -75,12 +75,19 @@ class CONTENT_EXPORT NavigationHandle {
   // of the main frame. This remains constant over the navigation lifetime.
   virtual bool IsParentMainFrame() = 0;
 
-  // Whether the navigation was initated by the renderer process. Examples of
+  // Whether the navigation was initiated by the renderer process. Examples of
   // renderer-initiated navigations include:
   //  * <a> link click
   //  * changing window.location.href
   //  * redirect via the <meta http-equiv="refresh"> tag
   //  * using window.history.pushState
+  //
+  // This method returns false for browser-initiated navigations, including:
+  //  * any navigation initiated from the omnibox
+  //  * navigations via suggestions in browser UI
+  //  * navigations via browser UI: Ctrl-R, refresh/forward/back/home buttons
+  //  * using window.history.forward() or window.history.back()
+  //  * any other "explicit" URL navigations, e.g. bookmarks
   virtual bool IsRendererInitiated() = 0;
 
   // Returns the FrameTreeNode ID for the frame in which the navigation is
@@ -99,7 +106,11 @@ class CONTENT_EXPORT NavigationHandle {
 
   // The time the navigation started, recorded either in the renderer or in the
   // browser process. Corresponds to Navigation Timing API.
-  virtual const base::TimeTicks& NavigationStart() = 0;
+  virtual base::TimeTicks NavigationStart() = 0;
+
+  // The time the input leading to the navigation started. Will not be
+  // set if unknown.
+  virtual base::TimeTicks NavigationInputStart() = 0;
 
   // Whether or not the navigation was started within a context menu.
   virtual bool WasStartedFromContextMenu() const = 0;
@@ -161,13 +172,10 @@ class CONTENT_EXPORT NavigationHandle {
   // be net::OK.
   virtual net::Error GetNetErrorCode() = 0;
 
-  // Returns the RenderFrameHost this navigation is taking place in. This can
-  // only be accessed after a response has been delivered for processing.
-  //
-  // If PlzNavigate is active, the RenderFrameHost returned will be the final
-  // host for the navigation. If PlzNavigate is inactive, the navigation may
-  // transfer to a new host up until the point that DidFinishNavigation is
-  // called.
+  // Returns the RenderFrameHost this navigation is committing in.  The
+  // RenderFrameHost returned will be the final host for the navigation.  This
+  // can only be accessed after a response has been delivered for processing,
+  // or after the navigation fails with an error page.
   virtual RenderFrameHost* GetRenderFrameHost() = 0;
 
   // Whether the navigation happened without changing document. Examples of
@@ -262,9 +270,8 @@ class CONTENT_EXPORT NavigationHandle {
   // Returns true if this navigation was initiated by a form submission.
   virtual bool IsFormSubmission() = 0;
 
-  // If this navigation was triggered by an anchor with a download attribute,
-  // this returns the (possibly empty) value of that attribute.
-  virtual const base::Optional<std::string>& GetSuggestedFilename() = 0;
+  // Returns true if the target is an inner response of a signed exchange.
+  virtual bool IsSignedExchangeInnerResponse() = 0;
 
   // Testing methods ----------------------------------------------------------
   //
@@ -303,6 +310,7 @@ class CONTENT_EXPORT NavigationHandle {
 
   // Simulates the network request failing.
   virtual NavigationThrottle::ThrottleCheckResult CallWillFailRequestForTesting(
+      RenderFrameHost* render_frame_host,
       base::Optional<net::SSLInfo> ssl_info) = 0;
 
   // Simulates the reception of the network response.
@@ -317,6 +325,9 @@ class CONTENT_EXPORT NavigationHandle {
   // Simulates the navigation resuming. Most callers should just let the
   // deferring NavigationThrottle do the resuming.
   virtual void CallResumeForTesting() = 0;
+
+  // Returns whether this navigation is currently deferred.
+  virtual bool IsDeferredForTesting() = 0;
 
   // The NavigationData that the embedder returned from
   // ResourceDispatcherHostDelegate::GetNavigationData during commit. This will

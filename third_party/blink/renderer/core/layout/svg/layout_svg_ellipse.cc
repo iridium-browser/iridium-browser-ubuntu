@@ -75,7 +75,7 @@ void LayoutSVGEllipse::UpdateShapeFromElement() {
 
   fill_bounding_box_ = FloatRect(center_ - radii_, radii_.ScaledBy(2));
   stroke_bounding_box_ = fill_bounding_box_;
-  if (Style()->SvgStyle().HasStroke())
+  if (StyleRef().SvgStyle().HasStroke())
     stroke_bounding_box_.Inflate(StrokeWidth() / 2);
 }
 
@@ -94,18 +94,21 @@ void LayoutSVGEllipse::CalculateRadiiAndCenter() {
   } else {
     radii_ = ToFloatSize(length_context.ResolveLengthPair(
         svg_style.Rx(), svg_style.Ry(), style));
+    if (svg_style.Rx().IsAuto())
+      radii_.SetWidth(radii_.Height());
+    else if (svg_style.Ry().IsAuto())
+      radii_.SetHeight(radii_.Width());
   }
 }
 
 bool LayoutSVGEllipse::ShapeDependentStrokeContains(const FloatPoint& point) {
-  // The optimized check below for circles does not support non-scaling or
-  // discontinuous strokes.
-  if (use_path_fallback_ || !HasContinuousStroke() ||
-      radii_.Width() != radii_.Height()) {
-    if (!HasPath())
-      CreatePath();
+  if (radii_.Width() < 0 || radii_.Height() < 0)
+    return false;
+
+  // The optimized check below for circles does not support non-circular and
+  // the cases that we set use_path_fallback_ in UpdateShapeFromElement().
+  if (use_path_fallback_ || radii_.Width() != radii_.Height())
     return LayoutSVGShape::ShapeDependentStrokeContains(point);
-  }
 
   const FloatPoint center =
       FloatPoint(center_.X() - point.X(), center_.Y() - point.Y());
@@ -128,7 +131,7 @@ bool LayoutSVGEllipse::ShapeDependentFillContains(
 }
 
 bool LayoutSVGEllipse::HasContinuousStroke() const {
-  const SVGComputedStyle& svg_style = Style()->SvgStyle();
+  const SVGComputedStyle& svg_style = StyleRef().SvgStyle();
   return svg_style.StrokeDashArray()->IsEmpty();
 }
 

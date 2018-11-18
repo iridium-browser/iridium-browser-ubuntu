@@ -28,7 +28,7 @@ CXFA_FFImageEdit::CXFA_FFImageEdit(CXFA_Node* pNode)
     : CXFA_FFField(pNode), m_pOldDelegate(nullptr) {}
 
 CXFA_FFImageEdit::~CXFA_FFImageEdit() {
-  CXFA_FFImageEdit::UnloadWidget();
+  m_pNode->SetImageEditImage(nullptr);
 }
 
 bool CXFA_FFImageEdit::LoadWidget() {
@@ -49,11 +49,6 @@ bool CXFA_FFImageEdit::LoadWidget() {
     UpdateFWLData();
 
   return true;
-}
-
-void CXFA_FFImageEdit::UnloadWidget() {
-  m_pNode->SetImageEditImage(nullptr);
-  CXFA_FFField::UnloadWidget();
 }
 
 void CXFA_FFImageEdit::RenderWidget(CXFA_Graphics* pGS,
@@ -89,11 +84,8 @@ void CXFA_FFImageEdit::RenderWidget(CXFA_Graphics* pGS,
       iAspect = image->GetAspect();
   }
 
-  int32_t iImageXDpi = 0;
-  int32_t iImageYDpi = 0;
-  m_pNode->GetImageEditDpi(iImageXDpi, iImageYDpi);
-  XFA_DrawImage(pGS, rtImage, mtRotate, pDIBitmap, iAspect, iImageXDpi,
-                iImageYDpi, iHorzAlign, iVertAlign);
+  XFA_DrawImage(pGS, rtImage, mtRotate, pDIBitmap, iAspect,
+                m_pNode->GetImageEditDpi(), iHorzAlign, iVertAlign);
 }
 
 bool CXFA_FFImageEdit::AcceptsFocusOnButtonDown(uint32_t dwFlags,

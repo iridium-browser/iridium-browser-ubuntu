@@ -29,19 +29,23 @@ inline SVGEllipseElement::SVGEllipseElement(Document& document)
     : SVGGeometryElement(SVGNames::ellipseTag, document),
       cx_(SVGAnimatedLength::Create(this,
                                     SVGNames::cxAttr,
-                                    SVGLength::Create(SVGLengthMode::kWidth),
+                                    SVGLengthMode::kWidth,
+                                    SVGLength::Initial::kUnitlessZero,
                                     CSSPropertyCx)),
       cy_(SVGAnimatedLength::Create(this,
                                     SVGNames::cyAttr,
-                                    SVGLength::Create(SVGLengthMode::kHeight),
+                                    SVGLengthMode::kHeight,
+                                    SVGLength::Initial::kUnitlessZero,
                                     CSSPropertyCy)),
       rx_(SVGAnimatedLength::Create(this,
                                     SVGNames::rxAttr,
-                                    SVGLength::Create(SVGLengthMode::kWidth),
+                                    SVGLengthMode::kWidth,
+                                    SVGLength::Initial::kUnitlessZero,
                                     CSSPropertyRx)),
       ry_(SVGAnimatedLength::Create(this,
                                     SVGNames::ryAttr,
-                                    SVGLength::Create(SVGLengthMode::kHeight),
+                                    SVGLengthMode::kHeight,
+                                    SVGLength::Initial::kUnitlessZero,
                                     CSSPropertyRy)) {
   AddToPropertyMap(cx_);
   AddToPropertyMap(cy_);
@@ -69,6 +73,10 @@ Path SVGEllipseElement::AsPath() const {
 
   FloatSize radii(ToFloatSize(
       length_context.ResolveLengthPair(svg_style.Rx(), svg_style.Ry(), style)));
+  if (svg_style.Rx().IsAuto())
+    radii.SetWidth(radii.Height());
+  else if (svg_style.Ry().IsAuto())
+    radii.SetHeight(radii.Width());
   if (radii.Width() < 0 || radii.Height() < 0 ||
       (!radii.Width() && !radii.Height()))
     return path;

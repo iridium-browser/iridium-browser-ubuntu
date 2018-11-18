@@ -12,9 +12,11 @@
 #include <string>
 
 #include "base/command_line.h"
+#include "base/stl_util.h"
 #include "gpu/command_buffer/common/gles2_cmd_utils.h"
 #include "gpu/config/gpu_driver_bug_workarounds.h"
 #include "gpu/config/gpu_info_collector.h"
+#include "gpu/config/gpu_preferences.h"
 #include "gpu/config/gpu_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/gfx/geometry/size.h"
@@ -49,14 +51,10 @@ bool GLTestHelper::InitializeGL(gl::GLImplementation gl_impl) {
 
   gpu::GPUInfo gpu_info;
   gpu::CollectGraphicsInfoForTesting(&gpu_info);
-  gpu::GLManager::g_gpu_feature_info =
-      gpu::ComputeGpuFeatureInfo(gpu_info,
-                                 false,  // ignore_gpu_blacklist
-                                 false,  // disable_gpu_driver_bug_workarounds
-                                 false,  // log_gpu_control_list_decisions
-                                 base::CommandLine::ForCurrentProcess(),
-                                 nullptr  // needs_more_info
-                                 );
+  gpu::GLManager::g_gpu_feature_info = gpu::ComputeGpuFeatureInfo(
+      gpu_info, gpu::GpuPreferences(), base::CommandLine::ForCurrentProcess(),
+      nullptr  // needs_more_info
+      );
 
   gl::init::SetDisabledExtensionsPlatform(
       gpu::GLManager::g_gpu_feature_info.disabled_extensions);
@@ -92,7 +90,7 @@ bool GLTestHelper::CheckGLError(const char* msg, int line) {
 GLuint GLTestHelper::CompileShader(GLenum type, const char* shaderSrc) {
   GLuint shader = glCreateShader(type);
   // Load the shader source
-  glShaderSource(shader, 1, &shaderSrc, NULL);
+  glShaderSource(shader, 1, &shaderSrc, nullptr);
   // Compile the shader
   glCompileShader(shader);
 
@@ -283,7 +281,7 @@ struct BitmapInfoHeader{
 bool GLTestHelper::SaveBackbufferAsBMP(
     const char* filename, int width, int height) {
   FILE* fp = fopen(filename, "wb");
-  EXPECT_TRUE(fp != NULL);
+  EXPECT_TRUE(fp != nullptr);
   glPixelStorei(GL_PACK_ALIGNMENT, 1);
   int num_pixels = width * height;
   int size = num_pixels * 4;
@@ -368,15 +366,14 @@ bool GpuCommandBufferTestEGL::InitializeEGLGLES2(int width, int height) {
   if (gl::GetGLImplementation() !=
       gl::GLImplementation::kGLImplementationEGLGLES2) {
     const auto impls = gl::init::GetAllowedGLImplementations();
-    if (std::find(impls.begin(), impls.end(),
-                  gl::GLImplementation::kGLImplementationEGLGLES2) ==
-        impls.end()) {
+    if (!base::ContainsValue(impls,
+          gl::GLImplementation::kGLImplementationEGLGLES2)) {
       LOG(INFO) << "Skip test, implementation EGLGLES2 is not available";
       return false;
     }
 
     gpu::GPUInfo gpu_info;
-    gpu::CollectContextGraphicsInfo(&gpu_info);
+    gpu::CollectContextGraphicsInfo(&gpu_info, gpu::GpuPreferences());
     // See crbug.com/822716, the ATI proprietary driver has eglGetProcAddress
     // but eglInitialize crashes with x11.
     if (gpu_info.gl_vendor.find("ATI Technologies Inc.") != std::string::npos) {
@@ -407,9 +404,9 @@ bool GpuCommandBufferTestEGL::InitializeEGLGLES2(int width, int height) {
   DCHECK(result);
 
   egl_extensions_ =
-      gl::MakeExtensionSet(window_system_binding_info_.extensions);
+      gfx::MakeExtensionSet(window_system_binding_info_.extensions);
   gl_extensions_ =
-      gl::MakeExtensionSet(gl::GetGLExtensionsFromCurrentContext());
+      gfx::MakeExtensionSet(gl::GetGLExtensionsFromCurrentContext());
 
   return true;
 }

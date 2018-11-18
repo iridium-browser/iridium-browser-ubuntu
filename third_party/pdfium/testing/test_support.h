@@ -13,8 +13,8 @@
 
 #include "public/fpdfview.h"
 
-#if PDF_ENABLE_XFA
-#include "xfa/fgas/font/cfgas_fontmgr.h"
+#ifdef PDF_ENABLE_XFA
+class CFGAS_FontMgr;
 #endif  // PDF_ENABLE_XFA
 
 namespace pdfium {
@@ -118,7 +118,7 @@ class TestLoader {
   const size_t m_Len;
 };
 
-#if PDF_ENABLE_XFA
+#ifdef PDF_ENABLE_XFA
 CFGAS_FontMgr* GetGlobalFontManager();
 #endif  // PDF_ENABLE_XFA
 

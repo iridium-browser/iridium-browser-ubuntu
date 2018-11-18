@@ -23,7 +23,7 @@ class CPDFSDK_PageView;
 class CXFA_FFWidget;
 #endif  // PDF_ENABLE_XFA
 
-class CPDFSDK_WidgetHandler : public IPDFSDK_AnnotHandler {
+class CPDFSDK_WidgetHandler final : public IPDFSDK_AnnotHandler {
  public:
   explicit CPDFSDK_WidgetHandler(CPDFSDK_FormFillEnvironment* pApp);
   ~CPDFSDK_WidgetHandler() override;
@@ -37,15 +37,20 @@ class CPDFSDK_WidgetHandler : public IPDFSDK_AnnotHandler {
   void ReleaseAnnot(CPDFSDK_Annot* pAnnot) override;
   CFX_FloatRect GetViewBBox(CPDFSDK_PageView* pPageView,
                             CPDFSDK_Annot* pAnnot) override;
+  WideString GetText(CPDFSDK_Annot* pAnnot) override;
   WideString GetSelectedText(CPDFSDK_Annot* pAnnot) override;
   void ReplaceSelection(CPDFSDK_Annot* pAnnot, const WideString& text) override;
+  bool CanUndo(CPDFSDK_Annot* pAnnot) override;
+  bool CanRedo(CPDFSDK_Annot* pAnnot) override;
+  bool Undo(CPDFSDK_Annot* pAnnot) override;
+  bool Redo(CPDFSDK_Annot* pAnnot) override;
   bool HitTest(CPDFSDK_PageView* pPageView,
                CPDFSDK_Annot* pAnnot,
                const CFX_PointF& point) override;
   void OnDraw(CPDFSDK_PageView* pPageView,
               CPDFSDK_Annot* pAnnot,
               CFX_RenderDevice* pDevice,
-              CFX_Matrix* pUser2Device,
+              const CFX_Matrix& mtUser2Device,
               bool bDrawAnnots) override;
   void OnLoad(CPDFSDK_Annot* pAnnot) override;
 
@@ -97,10 +102,6 @@ class CPDFSDK_WidgetHandler : public IPDFSDK_AnnotHandler {
   bool OnXFAChangedFocus(CPDFSDK_Annot::ObservedPtr* pOldAnnot,
                          CPDFSDK_Annot::ObservedPtr* pNewAnnot) override;
 #endif  // PDF_ENABLE_XFA
-
-  CFFL_InteractiveFormFiller* GetFormFiller() const {
-    return m_pFormFiller.Get();
-  }
 
  private:
   UnownedPtr<CPDFSDK_FormFillEnvironment> const m_pFormFillEnv;

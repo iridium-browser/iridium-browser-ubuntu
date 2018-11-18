@@ -82,15 +82,14 @@ public interface MediaRouteProvider {
      * Sends a message to the route with the given id. The route must be created by this provider.
      * @param routeId The id of the route to send the message to.
      * @param message The message to send.
-     * @param nativeCallbackId The id of the result callback tracked by the native side.
      */
-    void sendStringMessage(String routeId, String message, int nativeCallbackId);
+    void sendStringMessage(String routeId, String message);
 
     /**
-     * Returns a MediaController for the given route ID.
-     * Returns null if no MediaController can be retrieved from the given route ID.
+     * Returns a FlingingController for the given route ID.
+     * Returns null if no FlingingController can be retrieved from the given route ID.
      * @param routeId The id of the route.
      */
     @Nullable
-    MediaController getMediaController(String routeId);
+    FlingingController getFlingingController(String routeId);
 }

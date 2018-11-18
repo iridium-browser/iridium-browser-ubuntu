@@ -5,13 +5,14 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_GPU_WEBGL_IMAGE_CONVERSION_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_GPU_WEBGL_IMAGE_CONVERSION_H_
 
+#include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
+#include "base/optional.h"
 #include "third_party/blink/renderer/platform/graphics/image.h"
 #include "third_party/blink/renderer/platform/graphics/skia/image_pixel_locker.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/wtf/allocator.h"
-#include "third_party/blink/renderer/platform/wtf/optional.h"
 #include "third_party/khronos/GLES2/gl2.h"
 #include "third_party/khronos/GLES2/gl2ext.h"
 #include "third_party/khronos/GLES3/gl3.h"
@@ -129,7 +130,6 @@ class PLATFORM_EXPORT WebGLImageConversion final {
 
   class PLATFORM_EXPORT ImageExtractor final {
     STACK_ALLOCATED();
-    WTF_MAKE_NONCOPYABLE(ImageExtractor);
 
    public:
     ImageExtractor(Image*,
@@ -155,13 +155,15 @@ class PLATFORM_EXPORT WebGLImageConversion final {
     void ExtractImage(bool premultiply_alpha, bool ignore_color_space);
 
     Image* image_;
-    Optional<ImagePixelLocker> image_pixel_locker_;
+    base::Optional<ImagePixelLocker> image_pixel_locker_;
     ImageHtmlDomSource image_html_dom_source_;
     unsigned image_width_;
     unsigned image_height_;
     DataFormat image_source_format_;
     AlphaOp alpha_op_;
     unsigned image_source_unpack_alignment_;
+
+    DISALLOW_COPY_AND_ASSIGN(ImageExtractor);
   };
 
   // Computes the components per pixel and bytes per component

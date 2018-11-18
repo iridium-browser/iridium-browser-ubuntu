@@ -17,11 +17,11 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "content/browser/frame_host/render_frame_host_impl.h"
-#include "content/browser/renderer_host/render_view_host_delegate.h"
 #include "content/browser/site_instance_impl.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/global_request_id.h"
 #include "content/public/common/referrer.h"
+#include "third_party/blink/public/common/frame/user_activation_update_type.h"
 #include "ui/base/page_transition_types.h"
 #include "url/origin.h"
 
@@ -33,12 +33,10 @@ class NavigationControllerImpl;
 class NavigationEntry;
 class NavigationRequest;
 class NavigatorTestWithBrowserSideNavigation;
-class RenderFrameHostDelegate;
 class RenderFrameHostManagerTest;
 class RenderFrameProxyHost;
 class RenderViewHost;
 class RenderViewHostImpl;
-class RenderWidgetHostDelegate;
 class RenderWidgetHostView;
 class TestWebContents;
 class WebUIImpl;
@@ -139,8 +137,8 @@ class CONTENT_EXPORT RenderFrameHostManager
     // TODO(nasko): This should be removed once extensions no longer use
     // NotificationService. See https://crbug.com/462682.
     virtual void NotifyMainFrameSwappedFromRenderManager(
-        RenderViewHost* old_host,
-        RenderViewHost* new_host) = 0;
+        RenderFrameHost* old_host,
+        RenderFrameHost* new_host) = 0;
     virtual NavigationControllerImpl&
         GetControllerForRenderManager() = 0;
 
@@ -175,17 +173,11 @@ class CONTENT_EXPORT RenderFrameHostManager
     virtual ~Delegate() {}
   };
 
-  // All three delegate pointers must be non-NULL and are not owned by this
-  // class. They must outlive this class. The RenderViewHostDelegate and
-  // RenderWidgetHostDelegate are what will be installed into all
-  // RenderViewHosts that are created.
+  // The delegate pointer must be non-NULL and is not owned by this class. It
+  // must outlive this class.
   //
   // You must call Init() before using this class.
-  RenderFrameHostManager(
-      FrameTreeNode* frame_tree_node,
-      RenderFrameHostDelegate* render_frame_delegate,
-      RenderWidgetHostDelegate* render_widget_delegate,
-      Delegate* delegate);
+  RenderFrameHostManager(FrameTreeNode* frame_tree_node, Delegate* delegate);
   ~RenderFrameHostManager();
 
   // For arguments, see WebContentsImpl constructor.
@@ -283,7 +275,8 @@ class CONTENT_EXPORT RenderFrameHostManager
 
   // Called when a renderer's frame navigates.
   void DidNavigateFrame(RenderFrameHostImpl* render_frame_host,
-                        bool was_caused_by_user_gesture);
+                        bool was_caused_by_user_gesture,
+                        bool is_same_document_navigation);
 
   // Called when this frame's opener is changed to the frame specified by
   // |opener_routing_id| in |source_site_instance|'s process.  This change
@@ -466,7 +459,10 @@ class CONTENT_EXPORT RenderFrameHostManager
   // match the provided |render_frame_host|.
   void CancelPendingIfNecessary(RenderFrameHostImpl* render_frame_host);
 
-  void OnSetHasReceivedUserGesture();
+  // Updates the user activation state in all proxies of this frame.  For
+  // more details, see the comment on FrameTreeNode::user_activation_state_.
+  void UpdateUserActivationState(blink::UserActivationUpdateType update_type);
+
   void OnSetHasReceivedUserGestureBeforeNavigation(bool value);
 
   // Sets up the necessary state for a new RenderViewHost.  If |proxy| is not
@@ -499,8 +495,6 @@ class CONTENT_EXPORT RenderFrameHostManager
     UNRELATED,
     // A SiteInstance in the same browsing instance as the current.
     RELATED,
-    // The default subframe SiteInstance for the current browsing instance.
-    RELATED_DEFAULT_SUBFRAME,
   };
 
   // Stores information regarding a SiteInstance targeted at a specific URL to
@@ -560,7 +554,8 @@ class CONTENT_EXPORT RenderFrameHostManager
       bool current_is_view_source_mode,
       SiteInstance* new_site_instance,
       const GURL& new_effective_url,
-      bool new_is_view_source_mode) const;
+      bool new_is_view_source_mode,
+      bool is_failure) const;
 
   // Returns the SiteInstance to use for the navigation.
   scoped_refptr<SiteInstance> GetSiteInstanceForNavigation(
@@ -569,6 +564,7 @@ class CONTENT_EXPORT RenderFrameHostManager
       SiteInstance* dest_instance,
       SiteInstance* candidate_instance,
       ui::PageTransition transition,
+      bool is_failure,
       bool dest_is_restore,
       bool dest_is_view_source_mode,
       bool was_server_redirect);
@@ -593,6 +589,7 @@ class CONTENT_EXPORT RenderFrameHostManager
       SiteInstance* current_instance,
       SiteInstance* dest_instance,
       ui::PageTransition transition,
+      bool is_failure,
       bool dest_is_restore,
       bool dest_is_view_source_mode,
       bool force_browsing_instance_swap,
@@ -691,7 +688,9 @@ class CONTENT_EXPORT RenderFrameHostManager
 
   // Helper to call CommitPending() in all necessary cases.
   void CommitPendingIfNecessary(RenderFrameHostImpl* render_frame_host,
-                                bool was_caused_by_user_gesture);
+                                bool was_caused_by_user_gesture,
+                                bool is_same_document_navigation);
+
   // Commits any pending sandbox flag or feature policy updates when the
   // renderer's frame navigates.
   void CommitPendingFramePolicy();
@@ -720,8 +719,7 @@ class CONTENT_EXPORT RenderFrameHostManager
   // Returns true if a subframe can navigate cross-process.
   bool CanSubframeSwapProcess(const GURL& dest_url,
                               SiteInstance* source_instance,
-                              SiteInstance* dest_instance,
-                              bool was_server_redirect);
+                              SiteInstance* dest_instance);
 
   // After a renderer process crash we'd have marked the host as invisible, so
   // we need to set the visibility of the new View to the correct value here
@@ -737,11 +735,6 @@ class CONTENT_EXPORT RenderFrameHostManager
 
   // Our delegate, not owned by us. Guaranteed non-NULL.
   Delegate* delegate_;
-
-  // Implemented by the owner of this class.  These delegates are installed into
-  // all the RenderFrameHosts that we create.
-  RenderFrameHostDelegate* render_frame_delegate_;
-  RenderWidgetHostDelegate* render_widget_delegate_;
 
   // Our RenderFrameHost which is responsible for all communication with a child
   // RenderFrame instance.

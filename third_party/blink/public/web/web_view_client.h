@@ -36,7 +36,6 @@
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/web/web_ax_enums.h"
 #include "third_party/blink/public/web/web_frame.h"
-#include "third_party/blink/public/web/web_popup_type.h"
 #include "third_party/blink/public/web/web_text_direction.h"
 #include "third_party/blink/public/web/web_widget_client.h"
 
@@ -55,12 +54,9 @@ struct WebRect;
 struct WebSize;
 struct WebWindowFeatures;
 
-// Since a WebView is a WebWidget, a WebViewClient is a WebWidgetClient.
-// Virtual inheritance allows an implementation of WebWidgetClient to be
-// easily reused as part of an implementation of WebViewClient.
-class WebViewClient : protected WebWidgetClient {
+class WebViewClient {
  public:
-  ~WebViewClient() override = default;
+  virtual ~WebViewClient() = default;
   // Factory methods -----------------------------------------------------
 
   // Create a new related WebView.  This method must clone its session storage
@@ -81,9 +77,7 @@ class WebViewClient : protected WebWidgetClient {
   }
 
   // Create a new popup WebWidget.
-  virtual WebWidget* CreatePopup(WebLocalFrame*, WebPopupType) {
-    return nullptr;
-  }
+  virtual WebWidget* CreatePopup(WebLocalFrame*) { return nullptr; }
 
   // Returns the session storage namespace id associated with this WebView.
   virtual base::StringPiece GetSessionStorageNamespaceId() {
@@ -153,10 +147,10 @@ class WebViewClient : protected WebWidgetClient {
 
   // Indicates two things:
   //   1) This view may have a new layout now.
-  //   2) Calling layout() is a no-op.
-  // After calling WebWidget::layout(), expect to get this notification
-  // unless the view did not need a layout.
-  virtual void DidUpdateLayout() {}
+  //   2) Layout is up-to-date.
+  // After calling WebWidget::updateAllLifecyclePhases(), expect to get this
+  // notification unless the view did not need a layout.
+  virtual void DidUpdateMainFrameLayout() {}
 
   // Return true to swallow the input event if the embedder will start a
   // disambiguation popup
@@ -179,8 +173,9 @@ class WebViewClient : protected WebWidgetClient {
 
   // Tells the embedder to navigate back or forward in session history by
   // the given offset (relative to the current position in session
-  // history).
-  virtual void NavigateBackForwardSoon(int offset) {}
+  // history). |has_user_gesture| tells whether or not this is the consequence
+  // of a user action.
+  virtual void NavigateBackForwardSoon(int offset, bool has_user_gesture) {}
 
   // Returns the number of history items before/after the current
   // history item.
@@ -209,27 +204,7 @@ class WebViewClient : protected WebWidgetClient {
 
   virtual bool CanHandleGestureEvent() { return false; }
 
-  // TODO(lfg): These methods are only exposed through WebViewClient while we
-  // refactor WebView to not inherit from WebWidget.
-  // WebWidgetClient overrides.
-  void CloseWidgetSoon() override {}
-  void ConvertViewportToWindow(WebRect* rect) override {}
-  void ConvertWindowToViewport(WebFloatRect* rect) override {}
-  void DidHandleGestureEvent(const WebGestureEvent& event,
-                             bool event_cancelled) override {}
-  void DidOverscroll(const WebFloatSize& overscroll_delta,
-                     const WebFloatSize& accumulated_overscroll,
-                     const WebFloatPoint& position_in_viewport,
-                     const WebFloatSize& velocity_in_viewport,
-                     const WebOverscrollBehavior& behavior) override {}
-  void HasTouchEventHandlers(bool) override {}
-  WebLayerTreeView* InitializeLayerTreeView() override { return nullptr; }
-  WebScreenInfo GetScreenInfo() override { return WebScreenInfo(); }
-  void SetTouchAction(WebTouchAction touch_action) override {}
-  void Show(WebNavigationPolicy) override {}
-  virtual WebWidgetClient* WidgetClient() { return this; }
-
- protected:
+  virtual WebWidgetClient* WidgetClient() = 0;
 };
 
 }  // namespace blink

@@ -26,6 +26,10 @@ class DictionaryValue;
 class RefCountedString;
 }  // namespace base
 
+namespace tracing {
+class TraceEventAgent;
+}  // namespace tracing
+
 namespace content {
 
 class TracingDelegate;
@@ -43,24 +47,25 @@ class TracingControllerImpl : public TracingController,
   CreateCompressedStringEndpoint(scoped_refptr<TraceDataEndpoint> endpoint,
                                  bool compress_with_background_priority);
 
-  static TracingControllerImpl* GetInstance();
+  CONTENT_EXPORT static TracingControllerImpl* GetInstance();
 
   // Should be called on the UI thread.
   TracingControllerImpl();
 
   // TracingController implementation.
-  bool GetCategories(const GetCategoriesDoneCallback& callback) override;
+  bool GetCategories(GetCategoriesDoneCallback callback) override;
   bool StartTracing(const base::trace_event::TraceConfig& trace_config,
-                    const StartTracingDoneCallback& callback) override;
+                    StartTracingDoneCallback callback) override;
   bool StopTracing(const scoped_refptr<TraceDataEndpoint>& endpoint) override;
   bool StopTracing(const scoped_refptr<TraceDataEndpoint>& endpoint,
                    const std::string& agent_label) override;
-  bool GetTraceBufferUsage(
-      const GetTraceBufferUsageCallback& callback) override;
+  bool GetTraceBufferUsage(GetTraceBufferUsageCallback callback) override;
   bool IsTracing() const override;
 
   void RegisterTracingUI(TracingUI* tracing_ui);
   void UnregisterTracingUI(TracingUI* tracing_ui);
+
+  CONTENT_EXPORT tracing::TraceEventAgent* GetTraceEventAgent() const;
 
  private:
   friend std::default_delete<TracingControllerImpl>;
@@ -73,13 +78,14 @@ class TracingControllerImpl : public TracingController,
   void OnDataAvailable(const void* data, size_t num_bytes) override;
   void OnDataComplete() override;
 
-  void OnMetadataAvailable(std::unique_ptr<base::DictionaryValue> metadata);
+  void OnMetadataAvailable(base::Value metadata);
 
   void CompleteFlush();
 
   tracing::mojom::AgentRegistryPtr agent_registry_;
   tracing::mojom::CoordinatorPtr coordinator_;
   std::vector<std::unique_ptr<tracing::mojom::Agent>> agents_;
+  std::unique_ptr<tracing::TraceEventAgent> trace_event_agent_;
   std::unique_ptr<TracingDelegate> delegate_;
   std::unique_ptr<base::trace_event::TraceConfig> trace_config_;
   std::unique_ptr<mojo::DataPipeDrainer> drainer_;

@@ -58,10 +58,12 @@ class ConcurrentMarking {
   // task 0, reserved for the main thread).
   static constexpr int kMaxTasks = 7;
   using MarkingWorklist = Worklist<HeapObject*, 64 /* segment size */>;
+  using EmbedderTracingWorklist = Worklist<HeapObject*, 16 /* segment size */>;
 
   ConcurrentMarking(Heap* heap, MarkingWorklist* shared,
                     MarkingWorklist* bailout, MarkingWorklist* on_hold,
-                    WeakObjects* weak_objects);
+                    WeakObjects* weak_objects,
+                    EmbedderTracingWorklist* embedder_objects);
 
   // Schedules asynchronous tasks to perform concurrent marking. Objects in the
   // heap should not be moved while these are active (can be stopped safely via
@@ -81,13 +83,21 @@ class ConcurrentMarking {
 
   int TaskCount() { return task_count_; }
 
+  // Checks if all threads are stopped.
+  bool IsStopped();
+
   size_t TotalMarkedBytes();
+
+  void set_ephemeron_marked(bool ephemeron_marked) {
+    ephemeron_marked_.store(ephemeron_marked);
+  }
+  bool ephemeron_marked() { return ephemeron_marked_.load(); }
 
  private:
   struct TaskState {
     // The main thread sets this flag to true when it wants the concurrent
     // marker to give up the worker thread.
-    base::AtomicValue<bool> preemption_request;
+    std::atomic<bool> preemption_request;
 
     LiveBytesMap live_bytes;
     size_t marked_bytes = 0;
@@ -100,8 +110,10 @@ class ConcurrentMarking {
   MarkingWorklist* const bailout_;
   MarkingWorklist* const on_hold_;
   WeakObjects* const weak_objects_;
+  EmbedderTracingWorklist* const embedder_objects_;
   TaskState task_state_[kMaxTasks + 1];
-  base::AtomicNumber<size_t> total_marked_bytes_{0};
+  std::atomic<size_t> total_marked_bytes_{0};
+  std::atomic<bool> ephemeron_marked_{false};
   base::Mutex pending_lock_;
   base::ConditionVariable pending_condition_;
   int pending_task_count_ = 0;

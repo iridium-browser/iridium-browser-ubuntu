@@ -40,15 +40,15 @@ class SVGMPathElement final : public SVGElement, public SVGURIReference {
 
   void TargetPathChanged();
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  private:
   explicit SVGMPathElement(Document&);
 
   void BuildPendingResource() override;
   void ClearResourceReferences();
-  InsertionNotificationRequest InsertedInto(ContainerNode*) override;
-  void RemovedFrom(ContainerNode*) override;
+  InsertionNotificationRequest InsertedInto(ContainerNode&) override;
+  void RemovedFrom(ContainerNode&) override;
 
   void SvgAttributeChanged(const QualifiedName&) override;
 

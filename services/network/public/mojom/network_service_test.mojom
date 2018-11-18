@@ -6,8 +6,17 @@ module network.mojom;
 
 import "services/network/public/mojom/network_change_manager.mojom";
 import "services/network/public/mojom/network_param.mojom";
+import "services/network/public/mojom/network_types.mojom";
+
+// Maps to net::RuleBasedHostResolverProc::Rule::ResolverType.
+enum ResolverType {
+  kResolverTypeFail,
+  kResolverTypeSystem,
+  kResolverTypeIPLiteral,
+};
 
 struct Rule {
+  ResolverType resolver_type;
   string host_pattern;
   string replacement;
 };
@@ -25,6 +34,11 @@ interface NetworkServiceTest {
   // updated to |type| and broadcasts will be sent to
   // NetworkConnectionManagerClient implementations.
   SimulateNetworkChange(ConnectionType type) => ();
+
+  // Simulates a network quality change. The new effective connection type will
+  // be updated to |type| and broadcasts will be sent to
+  // NetworkQualityEstimatorManagerClient implementations.
+  SimulateNetworkQualityChange(EffectiveConnectionType type) => ();
 
   // Crash the process where network service is running.
   SimulateCrash();
@@ -49,4 +63,7 @@ interface NetworkServiceTest {
 
   [Sync]
   SetShouldRequireCT(ShouldRequireCT required) => ();
+
+  // Causes the next host resolve to the given hostname to crash the process.
+  CrashOnResolveHost(string host);
 };

@@ -5,6 +5,8 @@
 #include <memory>
 
 #include "base/logging.h"
+#include "base/macros.h"
+#include "base/test/scoped_feature_list.h"
 #include "chrome/browser/extensions/extension_action_runner.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -14,14 +16,17 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "content/public/test/browser_test_utils.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/test_extension_registry_observer.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/extension_features.h"
 #include "extensions/test/extension_test_message_listener.h"
 #include "extensions/test/result_catcher.h"
 #include "net/base/filename_util.h"
+#include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 
 #if defined(OS_CHROMEOS)
@@ -32,21 +37,68 @@
 namespace extensions {
 namespace {
 
-IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ActiveTab) {
+class ExtensionActiveTabTest : public ExtensionApiTest,
+                               public testing::WithParamInterface<bool> {
+ public:
+  ExtensionActiveTabTest() = default;
+
+  // ExtensionApiTest override:
+  void SetUp() override {
+    if (ShouldEnableRuntimeHostPermissions()) {
+      scoped_feature_list_.InitAndEnableFeature(
+          extensions_features::kRuntimeHostPermissions);
+    } else {
+      scoped_feature_list_.InitAndDisableFeature(
+          extensions_features::kRuntimeHostPermissions);
+    }
+    ExtensionApiTest::SetUp();
+  }
+
+  void SetUpOnMainThread() override {
+    ExtensionApiTest::SetUpOnMainThread();
+
+    // Map all hosts to localhost.
+    host_resolver()->AddRule("*", "127.0.0.1");
+
+    ASSERT_EQ(ShouldEnableRuntimeHostPermissions(),
+              base::FeatureList::IsEnabled(
+                  extensions_features::kRuntimeHostPermissions));
+
+    const char* runtime_host_permissions_arg =
+        ShouldEnableRuntimeHostPermissions() ? "RuntimeHostPermissionsEnabled"
+                                             : "RuntimeHostPermissionsDisabled";
+    SetCustomArg(runtime_host_permissions_arg);
+  }
+
+ private:
+  bool ShouldEnableRuntimeHostPermissions() const { return GetParam(); }
+
+  base::test::ScopedFeatureList scoped_feature_list_;
+
+  DISALLOW_COPY_AND_ASSIGN(ExtensionActiveTabTest);
+};
+
+IN_PROC_BROWSER_TEST_P(ExtensionActiveTabTest, ActiveTab) {
   ASSERT_TRUE(StartEmbeddedTestServer());
 
+  ExtensionTestMessageListener background_page_ready("ready",
+                                                     false /*will_reply*/);
   const Extension* extension =
       LoadExtension(test_data_dir_.AppendASCII("active_tab"));
   ASSERT_TRUE(extension);
+  ASSERT_TRUE(background_page_ready.WaitUntilSatisfied());
 
   // Shouldn't be initially granted based on activeTab.
   {
+    ExtensionTestMessageListener navigation_count_listener(
+        "1", false /*will_reply*/);
     ResultCatcher catcher;
     ui_test_utils::NavigateToURL(
         browser(),
         embedded_test_server()->GetURL(
-            "/extensions/api_test/active_tab/page.html"));
+            "google.com", "/extensions/api_test/active_tab/page.html"));
     EXPECT_TRUE(catcher.GetNextResult()) << message_;
+    EXPECT_TRUE(navigation_count_listener.WaitUntilSatisfied());
   }
 
   // Do one pass of BrowserAction without granting activeTab permission,
@@ -74,8 +126,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ActiveTab) {
   {
     // Setup state.
     chromeos::ScopedTestPublicSessionLoginState login_state;
-    auto delegate = std::make_unique<ExtensionTabUtilDelegateChromeOS>();
-    ExtensionTabUtil::SetPlatformDelegate(delegate.get());
+    ExtensionTabUtil::SetPlatformDelegate(
+        std::make_unique<ExtensionTabUtilDelegateChromeOS>());
 
     ExtensionTestMessageListener listener(false);
     ResultCatcher catcher;
@@ -90,16 +142,38 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, ActiveTab) {
   }
 #endif
 
-  // Changing page should go back to it not having access.
+  // Navigating to a different page on the same origin should revoke extension's
+  // access to the tab, unless the runtime host permissions feature is enabled.
   {
+    ExtensionTestMessageListener navigation_count_listener(
+        "2", false /*will_reply*/);
     ResultCatcher catcher;
     ui_test_utils::NavigateToURL(
         browser(),
         embedded_test_server()->GetURL(
-            "/extensions/api_test/active_tab/final_page.html"));
+            "google.com", "/extensions/api_test/active_tab/final_page.html"));
     EXPECT_TRUE(catcher.GetNextResult()) << message_;
+    EXPECT_TRUE(navigation_count_listener.WaitUntilSatisfied());
+  }
+
+  // Navigating to a different origin should revoke extension's access to the
+  // tab.
+  {
+    ExtensionTestMessageListener navigation_count_listener(
+        "3", false /*will_reply*/);
+    ResultCatcher catcher;
+    ui_test_utils::NavigateToURL(
+        browser(),
+        embedded_test_server()->GetURL(
+            "example.com", "/extensions/api_test/active_tab/final_page.html"));
+    EXPECT_TRUE(catcher.GetNextResult()) << message_;
+    EXPECT_TRUE(navigation_count_listener.WaitUntilSatisfied());
   }
 }
+
+INSTANTIATE_TEST_CASE_P(ExtensionActiveTabTest,
+                        ExtensionActiveTabTest,
+                        testing::Bool());
 
 // Tests the behavior of activeTab and its relation to an extension's ability to
 // xhr file urls and inject scripts in file frames.
@@ -150,6 +224,36 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, FileURLs) {
 
     EXPECT_TRUE(result == "true" || result == "false");
     return result == "true";
+  };
+
+  auto can_load_file_iframe = [this, &extension_id]() {
+    const Extension* extension =
+        extension_service()->GetExtensionById(extension_id, false);
+
+    // Load an extension page with a file iframe.
+    GURL page = extension->GetResourceURL("file_iframe.html");
+    ExtensionTestMessageListener listener(false /*will_reply*/);
+    ui_test_utils::NavigateToURLWithDisposition(
+        browser(), page, WindowOpenDisposition::NEW_FOREGROUND_TAB,
+        ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+    EXPECT_TRUE(listener.WaitUntilSatisfied());
+
+    EXPECT_TRUE(listener.message() == "allowed" ||
+                listener.message() == "denied")
+        << "Unexpected message " << listener.message();
+    bool allowed = listener.message() == "allowed";
+
+    // Sanity check the last committed url on the |file_iframe|.
+    content::RenderFrameHost* file_iframe = content::FrameMatchingPredicate(
+        browser()->tab_strip_model()->GetActiveWebContents(),
+        base::Bind(&content::FrameMatchesName, "file_iframe"));
+    bool is_file_url = file_iframe->GetLastCommittedURL() == GURL("file:///");
+    EXPECT_EQ(allowed, is_file_url)
+        << "Unexpected committed url: "
+        << file_iframe->GetLastCommittedURL().spec();
+
+    browser()->tab_strip_model()->CloseSelectedTabs();
+    return allowed;
   };
 
   auto can_script_tab = [this, &extension_id](int tab_id) {
@@ -212,14 +316,15 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, FileURLs) {
   // By default the extension should have file access enabled. However, since it
   // does not have host permissions to the localhost on the file scheme, it
   // should not be able to xhr file urls. For the same reason, it should not be
-  // able to execute script in the two tabs.
+  // able to execute script in the two tabs or embed file iframes.
   EXPECT_TRUE(util::AllowFileAccess(extension_id, profile()));
   EXPECT_FALSE(can_xhr_file_urls());
   EXPECT_FALSE(can_script_tab(active_tab_id));
   EXPECT_FALSE(can_script_tab(inactive_tab_id));
+  EXPECT_FALSE(can_load_file_iframe());
 
   // First don't grant the tab permission. Verify that the extension can't xhr
-  // file urls and can't script the two tabs.
+  // file urls, can't script the two tabs and can't embed file iframes.
   content::WebContents* web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
   ExtensionActionRunner::GetForWebContents(web_contents)
@@ -227,14 +332,16 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, FileURLs) {
   EXPECT_FALSE(can_xhr_file_urls());
   EXPECT_FALSE(can_script_tab(active_tab_id));
   EXPECT_FALSE(can_script_tab(inactive_tab_id));
+  EXPECT_FALSE(can_load_file_iframe());
 
-  // Now grant the tab permission. Ensure the extension can now xhr file urls
-  // and script the active tab. It should still not be able to script the
-  // background tab.
+  // Now grant the tab permission. Ensure the extension can now xhr file urls ,
+  // script the active tab and embed file iframes. It should still not be able
+  // to script the background tab.
   ExtensionActionRunner::GetForWebContents(web_contents)
       ->RunAction(extension, true /*grant_tab_permissions*/);
   EXPECT_TRUE(can_xhr_file_urls());
   EXPECT_TRUE(can_script_tab(active_tab_id));
+  EXPECT_TRUE(can_load_file_iframe());
   EXPECT_FALSE(can_script_tab(inactive_tab_id));
 
   // Revoke extension's access to file urls. This will cause the extension to
@@ -251,13 +358,14 @@ IN_PROC_BROWSER_TEST_F(ExtensionApiTest, FileURLs) {
   EXPECT_TRUE(background_page_ready.WaitUntilSatisfied());
 
   // Grant the tab permission for the active url to the extension. Ensure it
-  // still can't xhr file urls and script the active tab (since it does not
-  // have file access).
+  // still can't xhr file urls, script the active tab or embed file iframes
+  // (since it does not have file access).
   ExtensionActionRunner::GetForWebContents(web_contents)
       ->RunAction(extension, true /*grant_tab_permissions*/);
   EXPECT_FALSE(can_xhr_file_urls());
   EXPECT_FALSE(can_script_tab(active_tab_id));
   EXPECT_FALSE(can_script_tab(inactive_tab_id));
+  EXPECT_FALSE(can_load_file_iframe());
 }
 
 }  // namespace

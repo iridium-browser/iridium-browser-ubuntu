@@ -26,12 +26,11 @@
 #include "components/sync/engine/model_safe_worker.h"
 #include "components/sync/engine/model_type_connector.h"
 #include "components/sync/engine/net/http_post_provider_factory.h"
-#include "components/sync/engine/shutdown_reason.h"
+#include "components/sync/engine/sync_credentials.h"
 #include "components/sync/engine/sync_encryption_handler.h"
 #include "components/sync/engine/sync_status.h"
 #include "components/sync/protocol/sync_protocol_error.h"
 #include "components/sync/syncable/change_record.h"
-#include "google_apis/gaia/oauth2_token_service.h"
 
 class GURL;
 
@@ -58,25 +57,6 @@ class TypeDebugInfoObserver;
 class UnrecoverableErrorHandler;
 struct Experiments;
 struct UserShare;
-
-// Contains everything needed to talk to and identify a user account.
-struct SyncCredentials {
-  SyncCredentials();
-  SyncCredentials(const SyncCredentials& other);
-  ~SyncCredentials();
-
-  // Account_id of signed in account.
-  std::string account_id;
-
-  // The email associated with this account.
-  std::string email;
-
-  // The raw authentication token's bytes.
-  std::string sync_token;
-
-  // The set of scopes to use when talking to sync server.
-  OAuth2TokenService::ScopeSet scope_set;
-};
 
 // SyncManager encapsulates syncable::Directory and serves as the parent of all
 // other objects in the sync API.  If multiple threads interact with the same
@@ -267,7 +247,16 @@ class SyncManager {
 
     // Optional nigori state to be restored.
     std::unique_ptr<SyncEncryptionHandler::NigoriState> saved_nigori_state;
+
+    // Define the polling intervals. Must not be zero.
+    base::TimeDelta short_poll_interval;
+    base::TimeDelta long_poll_interval;
   };
+
+  // The state of sync the feature. If the user turned on sync explicitly, it
+  // will be set to ON. Will be set to INITIALIZING until we know the actual
+  // state.
+  enum class SyncFeatureState { INITIALIZING, ON, OFF };
 
   SyncManager();
   virtual ~SyncManager();
@@ -321,6 +310,7 @@ class SyncManager {
   //              does finish.
   virtual void ConfigureSyncer(ConfigureReason reason,
                                ModelTypeSet to_download,
+                               SyncFeatureState sync_feature_state,
                                const base::Closure& ready_task,
                                const base::Closure& retry_task) = 0;
 
@@ -350,7 +340,7 @@ class SyncManager {
   virtual void SaveChanges() = 0;
 
   // Issue a final SaveChanges, and close sqlite handles.
-  virtual void ShutdownOnSyncThread(ShutdownReason reason) = 0;
+  virtual void ShutdownOnSyncThread() = 0;
 
   // May be called from any thread.
   virtual UserShare* GetUserShare() = 0;
@@ -373,9 +363,8 @@ class SyncManager {
   // Note: opens a transaction.  May be called on any thread.
   virtual bool ReceivedExperiment(Experiments* experiments) = 0;
 
-  // Uses a read-only transaction to determine if the directory being synced has
-  // any remaining unsynced items.  May be called on any thread.
-  virtual bool HasUnsyncedItems() = 0;
+  // Returns whether there are remaining unsynced items.
+  virtual bool HasUnsyncedItemsForTest() = 0;
 
   // Returns the SyncManager's encryption handler.
   virtual SyncEncryptionHandler* GetEncryptionHandler() = 0;

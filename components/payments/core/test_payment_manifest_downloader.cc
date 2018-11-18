@@ -8,24 +8,37 @@
 
 #include "base/memory/ref_counted.h"
 #include "base/strings/string_util.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "url/gurl.h"
 
 namespace payments {
 
 TestDownloader::TestDownloader(
-    const scoped_refptr<net::URLRequestContextGetter>& context)
-    : PaymentManifestDownloader(context) {}
+    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory)
+    : PaymentManifestDownloader(url_loader_factory) {}
 
 TestDownloader::~TestDownloader() {}
+
+void TestDownloader::DownloadPaymentMethodManifest(
+    const GURL& url,
+    PaymentManifestDownloadCallback callback) {
+  PaymentManifestDownloader::DownloadPaymentMethodManifest(
+      FindTestServerURL(url), std::move(callback));
+}
+
+void TestDownloader::DownloadWebAppManifest(
+    const GURL& url,
+    PaymentManifestDownloadCallback callback) {
+  PaymentManifestDownloader::DownloadWebAppManifest(FindTestServerURL(url),
+                                                    std::move(callback));
+}
 
 void TestDownloader::AddTestServerURL(const std::string& prefix,
                                       const GURL& test_server_url) {
   test_server_url_[prefix] = test_server_url;
 }
 
-void TestDownloader::DownloadPaymentMethodManifest(
-    const GURL& url,
-    PaymentManifestDownloadCallback callback) {
+GURL TestDownloader::FindTestServerURL(const GURL& url) const {
   GURL actual_url = url;
 
   // Find the first key in |test_server_url_| that is a prefix of |url|. If
@@ -41,8 +54,7 @@ void TestDownloader::DownloadPaymentMethodManifest(
     }
   }
 
-  PaymentManifestDownloader::DownloadPaymentMethodManifest(actual_url,
-                                                           std::move(callback));
+  return actual_url;
 }
 
 }  // namespace payments

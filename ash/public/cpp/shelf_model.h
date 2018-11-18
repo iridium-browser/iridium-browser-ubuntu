@@ -14,6 +14,8 @@
 #include "base/macros.h"
 #include "base/observer_list.h"
 
+class AppWindowLauncherItemController;
+
 namespace ash {
 
 class ShelfItemDelegate;
@@ -63,6 +65,17 @@ class ASH_PUBLIC_EXPORT ShelfModel {
   // Resets the item at the specified index. The item's id should not change.
   void Set(int index, const ShelfItem& item);
 
+  // Returns the ID of the currently active item, or an empty ShelfID if
+  // nothing is currently active.
+  const ShelfID& active_shelf_id() const { return active_shelf_id_; }
+
+  // Sets |shelf_id| to be the newly active shelf item.
+  void SetActiveShelfID(const ShelfID& shelf_id);
+
+  // Notifies observers that the status of the item corresponding to |id|
+  // has changed.
+  void OnItemStatusChanged(const ShelfID& id);
+
   // Adds a record of the notification with this app id and notifies observers.
   void AddNotificationRecord(const std::string& app_id,
                              const std::string& notification_id);
@@ -83,10 +96,6 @@ class ASH_PUBLIC_EXPORT ShelfModel {
   // applications yet.
   int FirstRunningAppIndex() const;
 
-  // Returns the index of the first panel or the index where the first panel
-  // would go if there are no panels.
-  int FirstPanelIndex() const;
-
   // Returns an iterator into items() for the item with the specified id, or
   // items().end() if there is no item with the specified id.
   ShelfItems::const_iterator ItemByID(const ShelfID& shelf_id) const;
@@ -105,6 +114,11 @@ class ASH_PUBLIC_EXPORT ShelfModel {
   // Returns ShelfItemDelegate for |shelf_id|, or nullptr if none exists.
   ShelfItemDelegate* GetShelfItemDelegate(const ShelfID& shelf_id) const;
 
+  // Returns AppWindowLauncherItemController for |shelf_id|, or nullptr if none
+  // exists.
+  AppWindowLauncherItemController* GetAppWindowLauncherItemController(
+      const ShelfID& shelf_id);
+
   void AddObserver(ShelfModelObserver* observer);
   void RemoveObserver(ShelfModelObserver* observer);
 
@@ -120,12 +134,16 @@ class ASH_PUBLIC_EXPORT ShelfModel {
 
   ShelfItems items_;
 
+  // The shelf ID of the currently active shelf item, or an empty ID if
+  // nothing is active.
+  ShelfID active_shelf_id_;
+
   // Maps one app id to a set of all matching notification ids.
   std::map<std::string, std::set<std::string>> app_id_to_notification_id_;
   // Maps one notification id to one app id.
   std::map<std::string, std::string> notification_id_to_app_id_;
 
-  base::ObserverList<ShelfModelObserver> observers_;
+  base::ObserverList<ShelfModelObserver>::Unchecked observers_;
 
   std::map<ShelfID, std::unique_ptr<ShelfItemDelegate>>
       id_to_item_delegate_map_;

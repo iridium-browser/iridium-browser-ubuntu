@@ -56,15 +56,6 @@ DEFINE_int(output_sample_rate_hz,
 DEFINE_int(reverse_output_sample_rate_hz,
            kParameterNotSpecifiedValue,
            "Reverse stream output sample rate in Hz");
-DEFINE_string(mic_positions,
-              "",
-              "Space delimited cartesian coordinates of microphones in "
-              "meters. The coordinates of each point are contiguous. For a "
-              "two element array: \"x1 y1 z1 x2 y2 z2\"");
-DEFINE_float(target_angle_degrees,
-             90.f,
-             "The azimuth of the target in degrees (0-360). Only applies to "
-             "beamforming.");
 DEFINE_bool(fixed_interface,
             false,
             "Use the fixed interface when operating on wav files");
@@ -84,6 +75,9 @@ DEFINE_int(agc,
 DEFINE_int(agc2,
            kParameterNotSpecifiedValue,
            "Activate (1) or deactivate(0) the AGC2");
+DEFINE_int(pre_amplifier,
+           kParameterNotSpecifiedValue,
+           "Activate (1) or deactivate(0) the pre amplifier");
 DEFINE_int(hpf,
            kParameterNotSpecifiedValue,
            "Activate (1) or deactivate(0) the high-pass filter");
@@ -93,12 +87,6 @@ DEFINE_int(ns,
 DEFINE_int(ts,
            kParameterNotSpecifiedValue,
            "Activate (1) or deactivate(0) the transient suppressor");
-DEFINE_int(bf,
-           kParameterNotSpecifiedValue,
-           "Activate (1) or deactivate(0) the beamformer");
-DEFINE_int(ie,
-           kParameterNotSpecifiedValue,
-           "Activate (1) or deactivate(0) the intelligibility enhancer");
 DEFINE_int(vad,
            kParameterNotSpecifiedValue,
            "Activate (1) or deactivate(0) the voice activity detector");
@@ -118,28 +106,30 @@ DEFINE_int(delay_agnostic,
 DEFINE_int(extended_filter,
            kParameterNotSpecifiedValue,
            "Activate (1) or deactivate(0) the AEC extended filter mode");
-DEFINE_int(drift_compensation,
-           kParameterNotSpecifiedValue,
-           "Activate (1) or deactivate(0) the drift compensation");
 DEFINE_int(aec3,
            kParameterNotSpecifiedValue,
            "Activate (1) or deactivate(0) the experimental AEC mode AEC3");
 DEFINE_int(experimental_agc,
            kParameterNotSpecifiedValue,
            "Activate (1) or deactivate(0) the experimental AGC");
+DEFINE_int(experimental_agc_disable_digital_adaptive,
+           kParameterNotSpecifiedValue,
+           "Force-deactivate (1) digital adaptation in "
+           "experimental AGC. Digital adaptation is active by default (0).");
+DEFINE_int(experimental_agc_analyze_before_aec,
+           kParameterNotSpecifiedValue,
+           "Make level estimation happen before AEC"
+           " in the experimental AGC. After AEC is the default (0)");
+DEFINE_int(
+    experimental_agc_agc2_level_estimator,
+    kParameterNotSpecifiedValue,
+    "AGC2 level estimation"
+    " in the experimental AGC. AGC1 level estimation is the default (0)");
 DEFINE_int(
     refined_adaptive_filter,
     kParameterNotSpecifiedValue,
     "Activate (1) or deactivate(0) the refined adaptive filter functionality");
-DEFINE_int(aecm_routing_mode,
-           kParameterNotSpecifiedValue,
-           "Specify the AECM routing mode (0-4)");
-DEFINE_int(aecm_comfort_noise,
-           kParameterNotSpecifiedValue,
-           "Activate (1) or deactivate(0) the AECM comfort noise");
-DEFINE_int(agc_mode,
-           kParameterNotSpecifiedValue,
-           "Specify the AGC mode (0-2)");
+DEFINE_int(agc_mode, kParameterNotSpecifiedValue, "Specify the AGC mode (0-2)");
 DEFINE_int(agc_target_level,
            kParameterNotSpecifiedValue,
            "Specify the AGC target level (0-31)");
@@ -149,16 +139,23 @@ DEFINE_int(agc_limiter,
 DEFINE_int(agc_compression_gain,
            kParameterNotSpecifiedValue,
            "Specify the AGC compression gain (0-90)");
+DEFINE_float(agc2_enable_adaptive_gain,
+             kParameterNotSpecifiedValue,
+             "Activate (1) or deactivate(0) the AGC2 adaptive gain");
 DEFINE_float(agc2_fixed_gain_db, 0.f, "AGC2 fixed gain (dB) to apply");
+DEFINE_float(pre_amplifier_gain_factor,
+             1.f,
+             "Pre-amplifier gain factor (linear) to apply");
 DEFINE_int(vad_likelihood,
            kParameterNotSpecifiedValue,
            "Specify the VAD likelihood (0-3)");
-DEFINE_int(ns_level,
-           kParameterNotSpecifiedValue,
-           "Specify the NS level (0-3)");
+DEFINE_int(ns_level, kParameterNotSpecifiedValue, "Specify the NS level (0-3)");
 DEFINE_int(stream_delay,
            kParameterNotSpecifiedValue,
            "Specify the stream delay in ms to use");
+DEFINE_int(use_stream_delay,
+           kParameterNotSpecifiedValue,
+           "Activate (1) or deactivate(0) reporting the stream delay");
 DEFINE_int(stream_drift_samples,
            kParameterNotSpecifiedValue,
            "Specify the number of stream drift samples to use");
@@ -171,6 +168,7 @@ DEFINE_int(simulated_mic_kind,
            "Specify which microphone kind to use for microphone simulation");
 DEFINE_bool(performance_report, false, "Report the APM performance ");
 DEFINE_bool(verbose, false, "Produce verbose output");
+DEFINE_bool(quiet, false, "Avoid producing information about the progress.");
 DEFINE_bool(bitexactness_report,
             false,
             "Report bitexactness for aec dump result reproduction");
@@ -181,25 +179,28 @@ DEFINE_bool(store_intermediate_output,
             false,
             "Creates new output files after each init");
 DEFINE_string(custom_call_order_file, "", "Custom process API call order file");
+DEFINE_bool(print_aec3_parameter_values,
+            false,
+            "Print parameter values used in AEC3 in JSON-format");
 DEFINE_string(aec3_settings,
               "",
               "File in JSON-format with custom AEC3 settings");
 DEFINE_bool(help, false, "Print this message");
 
 void SetSettingIfSpecified(const std::string& value,
-                           rtc::Optional<std::string>* parameter) {
+                           absl::optional<std::string>* parameter) {
   if (value.compare("") != 0) {
     *parameter = value;
   }
 }
 
-void SetSettingIfSpecified(int value, rtc::Optional<int>* parameter) {
+void SetSettingIfSpecified(int value, absl::optional<int>* parameter) {
   if (value != kParameterNotSpecifiedValue) {
     *parameter = value;
   }
 }
 
-void SetSettingIfFlagSet(int32_t flag, rtc::Optional<bool>* parameter) {
+void SetSettingIfFlagSet(int32_t flag, absl::optional<bool>* parameter) {
   if (flag == 0) {
     *parameter = false;
   } else if (flag == 1) {
@@ -213,12 +214,12 @@ SimulationSettings CreateSettings() {
     settings.use_le = true;
     settings.use_vad = true;
     settings.use_ie = false;
-    settings.use_bf = false;
     settings.use_ts = true;
     settings.use_ns = true;
     settings.use_hpf = true;
     settings.use_agc = true;
     settings.use_agc2 = false;
+    settings.use_pre_amplifier = false;
     settings.use_aec = true;
     settings.use_aecm = false;
     settings.use_ed = false;
@@ -239,44 +240,46 @@ SimulationSettings CreateSettings() {
                         &settings.output_sample_rate_hz);
   SetSettingIfSpecified(FLAG_reverse_output_sample_rate_hz,
                         &settings.reverse_output_sample_rate_hz);
-  SetSettingIfSpecified(FLAG_mic_positions, &settings.microphone_positions);
-  settings.target_angle_degrees = FLAG_target_angle_degrees;
   SetSettingIfFlagSet(FLAG_aec, &settings.use_aec);
   SetSettingIfFlagSet(FLAG_aecm, &settings.use_aecm);
   SetSettingIfFlagSet(FLAG_ed, &settings.use_ed);
   SetSettingIfSpecified(FLAG_ed_graph, &settings.ed_graph_output_filename);
   SetSettingIfFlagSet(FLAG_agc, &settings.use_agc);
   SetSettingIfFlagSet(FLAG_agc2, &settings.use_agc2);
+  SetSettingIfFlagSet(FLAG_pre_amplifier, &settings.use_pre_amplifier);
   SetSettingIfFlagSet(FLAG_hpf, &settings.use_hpf);
   SetSettingIfFlagSet(FLAG_ns, &settings.use_ns);
   SetSettingIfFlagSet(FLAG_ts, &settings.use_ts);
-  SetSettingIfFlagSet(FLAG_bf, &settings.use_bf);
-  SetSettingIfFlagSet(FLAG_ie, &settings.use_ie);
   SetSettingIfFlagSet(FLAG_vad, &settings.use_vad);
   SetSettingIfFlagSet(FLAG_le, &settings.use_le);
   SetSettingIfSpecified(FLAG_aec_suppression_level,
                         &settings.aec_suppression_level);
   SetSettingIfFlagSet(FLAG_delay_agnostic, &settings.use_delay_agnostic);
   SetSettingIfFlagSet(FLAG_extended_filter, &settings.use_extended_filter);
-  SetSettingIfFlagSet(FLAG_drift_compensation,
-                      &settings.use_drift_compensation);
   SetSettingIfFlagSet(FLAG_refined_adaptive_filter,
                       &settings.use_refined_adaptive_filter);
 
   SetSettingIfFlagSet(FLAG_aec3, &settings.use_aec3);
   SetSettingIfFlagSet(FLAG_experimental_agc, &settings.use_experimental_agc);
-  SetSettingIfSpecified(FLAG_aecm_routing_mode, &settings.aecm_routing_mode);
-  SetSettingIfFlagSet(FLAG_aecm_comfort_noise,
-                      &settings.use_aecm_comfort_noise);
+  SetSettingIfFlagSet(FLAG_experimental_agc_disable_digital_adaptive,
+                      &settings.experimental_agc_disable_digital_adaptive);
+  SetSettingIfFlagSet(FLAG_experimental_agc_analyze_before_aec,
+                      &settings.experimental_agc_analyze_before_aec);
+  SetSettingIfFlagSet(FLAG_experimental_agc_agc2_level_estimator,
+                      &settings.use_experimental_agc_agc2_level_estimator);
   SetSettingIfSpecified(FLAG_agc_mode, &settings.agc_mode);
   SetSettingIfSpecified(FLAG_agc_target_level, &settings.agc_target_level);
   SetSettingIfFlagSet(FLAG_agc_limiter, &settings.use_agc_limiter);
   SetSettingIfSpecified(FLAG_agc_compression_gain,
                         &settings.agc_compression_gain);
+  SetSettingIfFlagSet(FLAG_agc2_enable_adaptive_gain,
+                      &settings.agc2_use_adaptive_gain);
   settings.agc2_fixed_gain_db = FLAG_agc2_fixed_gain_db;
+  settings.pre_amplifier_gain_factor = FLAG_pre_amplifier_gain_factor;
   SetSettingIfSpecified(FLAG_vad_likelihood, &settings.vad_likelihood);
   SetSettingIfSpecified(FLAG_ns_level, &settings.ns_level);
   SetSettingIfSpecified(FLAG_stream_delay, &settings.stream_delay);
+  SetSettingIfFlagSet(FLAG_use_stream_delay, &settings.use_stream_delay);
   SetSettingIfSpecified(FLAG_stream_drift_samples,
                         &settings.stream_drift_samples);
   SetSettingIfSpecified(FLAG_custom_call_order_file,
@@ -287,10 +290,12 @@ SimulationSettings CreateSettings() {
   SetSettingIfSpecified(FLAG_simulated_mic_kind, &settings.simulated_mic_kind);
   settings.report_performance = FLAG_performance_report;
   settings.use_verbose_logging = FLAG_verbose;
+  settings.use_quiet_output = FLAG_quiet;
   settings.report_bitexactness = FLAG_bitexactness_report;
   settings.discard_all_settings_in_aecdump = FLAG_discard_settings_in_aecdump;
   settings.fixed_interface = FLAG_fixed_interface;
   settings.store_intermediate_output = FLAG_store_intermediate_output;
+  settings.print_aec3_parameter_values = FLAG_print_aec3_parameter_values;
 
   return settings;
 }
@@ -351,26 +356,12 @@ void PerformBasicParameterSanityChecks(const SimulationSettings& settings) {
           *settings.reverse_output_num_channels <= 0,
       "Error: --reverse_output_num_channels must be positive!\n");
 
-  ReportConditionalErrorAndExit(
-      settings.use_bf && *settings.use_bf && !settings.microphone_positions,
-      "Error: --mic_positions must be specified when the beamformer is "
-      "activated.\n");
-
-  ReportConditionalErrorAndExit(
-      settings.target_angle_degrees < 0.f ||
-          settings.target_angle_degrees >= 360.f,
-      "Error: -target_angle_degrees must be specified between 0 and 360.\n");
-
-  ReportConditionalErrorAndExit(
-      settings.aec_suppression_level &&
-          ((*settings.aec_suppression_level) < 0 ||
-           (*settings.aec_suppression_level) > 2),
-      "Error: --aec_suppression_level must be specified between 0 and 2.\n");
-
-  ReportConditionalErrorAndExit(
-      settings.aecm_routing_mode && ((*settings.aecm_routing_mode) < 0 ||
-                                     (*settings.aecm_routing_mode) > 4),
-      "Error: --aecm_routing_mode must be specified between 0 and 4.\n");
+  ReportConditionalErrorAndExit(settings.aec_suppression_level &&
+                                    ((*settings.aec_suppression_level) < 1 ||
+                                     (*settings.aec_suppression_level) > 2),
+                                "Error: --aec_suppression_level must be "
+                                "specified between 1 and 2. 0 is "
+                                "deprecated.\n");
 
   ReportConditionalErrorAndExit(
       settings.agc_target_level && ((*settings.agc_target_level) < 0 ||
@@ -381,11 +372,6 @@ void PerformBasicParameterSanityChecks(const SimulationSettings& settings) {
       settings.agc_compression_gain && ((*settings.agc_compression_gain) < 0 ||
                                         (*settings.agc_compression_gain) > 90),
       "Error: --agc_compression_gain must be specified between 0 and 90.\n");
-
-  ReportConditionalErrorAndExit(
-      settings.use_agc && *settings.use_agc && settings.use_agc2 &&
-          *settings.use_agc2,
-      "Error: --agc and --agc2 cannot be both active.\n");
 
   ReportConditionalErrorAndExit(
       settings.use_agc2 && *settings.use_agc2 &&
@@ -467,8 +453,8 @@ void PerformBasicParameterSanityChecks(const SimulationSettings& settings) {
 int AudioprocFloatImpl(std::unique_ptr<AudioProcessingBuilder> ap_builder,
                        int argc,
                        char* argv[]) {
-  if (rtc::FlagList::SetFlagsFromCommandLine(&argc, argv, true) ||
-      FLAG_help || argc != 1) {
+  if (rtc::FlagList::SetFlagsFromCommandLine(&argc, argv, true) || FLAG_help ||
+      argc != 1) {
     printf("%s", kUsageDescription);
     if (FLAG_help) {
       rtc::FlagList::Print(nullptr, false);

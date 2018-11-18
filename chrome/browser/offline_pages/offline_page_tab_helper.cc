@@ -4,6 +4,8 @@
 
 #include "chrome/browser/offline_pages/offline_page_tab_helper.h"
 
+#include <utility>
+
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/guid.h"
@@ -11,7 +13,7 @@
 #include "base/metrics/histogram_macros.h"
 #include "build/build_config.h"
 #include "chrome/browser/offline_pages/offline_page_model_factory.h"
-#include "chrome/browser/offline_pages/offline_page_request_job.h"
+#include "chrome/browser/offline_pages/offline_page_request_handler.h"
 #include "chrome/browser/offline_pages/offline_page_utils.h"
 #include "chrome/browser/offline_pages/prefetch/prefetch_service_factory.h"
 #include "chrome/browser/offline_pages/request_coordinator_factory.h"
@@ -30,8 +32,6 @@
 #include "content/public/browser/web_contents.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
 #include "ui/base/page_transition_types.h"
-
-DEFINE_WEB_CONTENTS_USER_DATA_KEY(offline_pages::OfflinePageTabHelper);
 
 namespace offline_pages {
 
@@ -267,8 +267,9 @@ void OfflinePageTabHelper::TryLoadingOfflinePageOnNetError(
     // Do not report aborted error since the error page is not shown on this
     // error.
     if (error_code != net::ERR_ABORTED) {
-      OfflinePageRequestJob::ReportAggregatedRequestResult(
-          OfflinePageRequestJob::AggregatedRequestResult::SHOW_NET_ERROR_PAGE);
+      OfflinePageRequestHandler::ReportAggregatedRequestResult(
+          OfflinePageRequestHandler::AggregatedRequestResult::
+              SHOW_NET_ERROR_PAGE);
     }
     return;
   }
@@ -283,18 +284,17 @@ void OfflinePageTabHelper::TryLoadingOfflinePageOnNetError(
   }
 
   OfflinePageUtils::SelectPagesForURL(
-      web_contents()->GetBrowserContext(), navigation_handle->GetURL(),
-      URLSearchMode::SEARCH_BY_ALL_URLS, tab_id,
-      base::Bind(&OfflinePageTabHelper::SelectPagesForURLDone,
-                 weak_ptr_factory_.GetWeakPtr()));
+      web_contents()->GetBrowserContext(), navigation_handle->GetURL(), tab_id,
+      base::BindOnce(&OfflinePageTabHelper::SelectPagesForURLDone,
+                     weak_ptr_factory_.GetWeakPtr()));
 }
 
 void OfflinePageTabHelper::SelectPagesForURLDone(
     const std::vector<OfflinePageItem>& offline_pages) {
   // Bails out if no offline page is found.
   if (offline_pages.empty()) {
-    OfflinePageRequestJob::ReportAggregatedRequestResult(
-        OfflinePageRequestJob::AggregatedRequestResult::
+    OfflinePageRequestHandler::ReportAggregatedRequestResult(
+        OfflinePageRequestHandler::AggregatedRequestResult::
             PAGE_NOT_FOUND_ON_FLAKY_NETWORK);
     return;
   }

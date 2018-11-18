@@ -12,9 +12,9 @@
 #include "base/single_thread_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "content/common/gpu_stream_constants.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/common/gpu_stream_constants.h"
 #include "content/public/common/web_preferences.h"
 #include "content/renderer/pepper/host_globals.h"
 #include "content/renderer/pepper/pepper_plugin_instance_impl.h"
@@ -68,7 +68,7 @@ PP_Resource PPB_Graphics3D_Impl::CreateRaw(
     PP_Resource share_context,
     const gpu::ContextCreationAttribs& attrib_helper,
     gpu::Capabilities* capabilities,
-    base::SharedMemoryHandle* shared_state_handle,
+    const base::UnsafeSharedMemoryRegion** shared_state_region,
     gpu::CommandBufferId* command_buffer_id) {
   PPB_Graphics3D_API* share_api = nullptr;
   if (share_context) {
@@ -80,7 +80,7 @@ PP_Resource PPB_Graphics3D_Impl::CreateRaw(
   scoped_refptr<PPB_Graphics3D_Impl> graphics_3d(
       new PPB_Graphics3D_Impl(instance));
   if (!graphics_3d->InitRaw(share_api, attrib_helper, capabilities,
-                            shared_state_handle, command_buffer_id))
+                            shared_state_region, command_buffer_id))
     return 0;
   return graphics_3d->GetReference();
 }
@@ -125,11 +125,6 @@ void PPB_Graphics3D_Impl::EnsureWorkVisible() {
 }
 
 void PPB_Graphics3D_Impl::TakeFrontBuffer() {
-  if (!taken_front_buffer_.IsZero()) {
-    DLOG(ERROR)
-        << "TakeFrontBuffer should only be called once before DoSwapBuffers";
-    return;
-  }
   taken_front_buffer_ = GenerateMailbox();
   command_buffer_->TakeFrontBuffer(taken_front_buffer_);
 }
@@ -195,7 +190,6 @@ int32_t PPB_Graphics3D_Impl::DoSwapBuffers(const gpu::SyncToken& sync_token,
         viz::TransferableResource::MakeGLOverlay(taken_front_buffer_, GL_LINEAR,
                                                  target, sync_token, size,
                                                  is_overlay_candidate);
-    taken_front_buffer_.SetZero();
     HostGlobals::Get()
         ->GetInstance(pp_instance())
         ->CommitTransferableResource(resource);
@@ -214,7 +208,7 @@ bool PPB_Graphics3D_Impl::InitRaw(
     PPB_Graphics3D_API* share_context,
     const gpu::ContextCreationAttribs& requested_attribs,
     gpu::Capabilities* capabilities,
-    base::SharedMemoryHandle* shared_state_handle,
+    const base::UnsafeSharedMemoryRegion** shared_state_region,
     gpu::CommandBufferId* command_buffer_id) {
   PepperPluginInstanceImpl* plugin_instance =
       HostGlobals::Get()->GetInstance(pp_instance());
@@ -279,8 +273,8 @@ bool PPB_Graphics3D_Impl::InitRaw(
 
   command_buffer_->SetGpuControlClient(this);
 
-  if (shared_state_handle)
-    *shared_state_handle = command_buffer_->GetSharedStateHandle();
+  if (shared_state_region)
+    *shared_state_region = &command_buffer_->GetSharedStateRegion();
   if (capabilities)
     *capabilities = command_buffer_->GetCapabilities();
   if (command_buffer_id)
@@ -329,6 +323,9 @@ void PPB_Graphics3D_Impl::OnGpuControlLostContext() {
 void PPB_Graphics3D_Impl::OnGpuControlLostContextMaybeReentrant() {
   // No internal state to update on lost context.
 }
+
+void PPB_Graphics3D_Impl::OnGpuControlSwapBuffersCompleted(
+    const gpu::SwapBuffersCompleteParams& params) {}
 
 void PPB_Graphics3D_Impl::OnSwapBuffers() {
   if (HasPendingSwap()) {

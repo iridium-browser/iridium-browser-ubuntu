@@ -15,8 +15,10 @@
 
 namespace bookmarks {
 
+#if !defined(OS_MACOSX)
 const char BookmarkNodeData::kClipboardFormatString[] =
     "chromium/x-bookmark-entries";
+#endif
 
 BookmarkNodeData::Element::Element() : is_url(false), id_(0) {
 }
@@ -39,21 +41,20 @@ BookmarkNodeData::Element::Element(const Element& other) = default;
 BookmarkNodeData::Element::~Element() {
 }
 
+#if !defined(OS_MACOSX)
 void BookmarkNodeData::Element::WriteToPickle(base::Pickle* pickle) const {
   pickle->WriteBool(is_url);
   pickle->WriteString(url.spec());
   pickle->WriteString16(title);
   pickle->WriteInt64(id_);
   pickle->WriteUInt32(static_cast<uint32_t>(meta_info_map.size()));
-  for (BookmarkNode::MetaInfoMap::const_iterator it = meta_info_map.begin();
-      it != meta_info_map.end(); ++it) {
+  for (auto it = meta_info_map.begin(); it != meta_info_map.end(); ++it) {
     pickle->WriteString(it->first);
     pickle->WriteString(it->second);
   }
   if (!is_url) {
     pickle->WriteUInt32(static_cast<uint32_t>(children.size()));
-    for (std::vector<Element>::const_iterator i = children.begin();
-         i != children.end(); ++i) {
+    for (auto i = children.begin(); i != children.end(); ++i) {
       i->WriteToPickle(pickle);
     }
   }
@@ -97,6 +98,7 @@ bool BookmarkNodeData::Element::ReadFromPickle(base::PickleIterator* iterator) {
   }
   return true;
 }
+#endif
 
 // BookmarkNodeData -----------------------------------------------------------
 
@@ -162,6 +164,12 @@ void BookmarkNodeData::WriteToClipboard(ui::ClipboardType clipboard_type) {
          clipboard_type == ui::CLIPBOARD_TYPE_SELECTION);
   ui::ScopedClipboardWriter scw(clipboard_type);
 
+#if defined(OS_WIN)
+  const base::string16 kEOL(L"\r\n");
+#else
+  const base::string16 kEOL = base::ASCIIToUTF16("\n");
+#endif
+
   // If there is only one element and it is a URL, write the URL to the
   // clipboard.
   if (has_single_url()) {
@@ -185,7 +193,7 @@ void BookmarkNodeData::WriteToClipboard(ui::ClipboardType clipboard_type) {
     // and folders.
     base::string16 text;
     for (size_t i = 0; i < size(); i++) {
-      text += i == 0 ? base::ASCIIToUTF16("") : base::ASCIIToUTF16("\n");
+      text += i == 0 ? base::ASCIIToUTF16("") : kEOL;
       if (!elements[i].is_url) {
         // Then it's a folder. Only copy the name of the folder.
         const base::string16 title = elements[i].title;
@@ -233,7 +241,6 @@ bool BookmarkNodeData::ReadFromClipboard(ui::ClipboardType type) {
 
   return false;
 }
-#endif
 
 void BookmarkNodeData::WriteToPickle(const base::FilePath& profile_path,
                                      base::Pickle* pickle) const {
@@ -261,6 +268,8 @@ bool BookmarkNodeData::ReadFromPickle(base::Pickle* pickle) {
 
   return true;
 }
+
+#endif  // OS_MACOSX
 
 std::vector<const BookmarkNode*> BookmarkNodeData::GetNodes(
     BookmarkModel* model,

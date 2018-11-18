@@ -16,7 +16,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
@@ -191,9 +191,10 @@ class HttpRequest {
 
     std::string request = base::StrCat(pieces);
     scoped_refptr<net::IOBuffer> base_buffer =
-        new net::IOBuffer(request.size());
+        base::MakeRefCounted<net::IOBuffer>(request.size());
     memcpy(base_buffer->data(), request.data(), request.size());
-    request_ = new net::DrainableIOBuffer(base_buffer.get(), request.size());
+    request_ = base::MakeRefCounted<net::DrainableIOBuffer>(
+        std::move(base_buffer), request.size());
 
     DoSendRequest(net::OK);
   }
@@ -202,7 +203,7 @@ class HttpRequest {
     if (!CheckNetResultOrDie(result))
       return;
 
-    response_buffer_ = new net::IOBuffer(kBufferSize);
+    response_buffer_ = base::MakeRefCounted<net::IOBuffer>(kBufferSize);
 
     result = socket_->Read(
         response_buffer_.get(),
@@ -338,8 +339,7 @@ class DevicesRequest : public base::RefCountedThreadSafe<DevicesRequest> {
     DevicesRequest* request = new DevicesRequest(callback);
     // Avoid destruction while sending requests
     request->AddRef();
-    for (DeviceProviders::const_iterator it = providers.begin();
-         it != providers.end(); ++it) {
+    for (auto it = providers.begin(); it != providers.end(); ++it) {
       device_task_runner->PostTask(
           FROM_HERE, base::BindOnce(&DeviceProvider::QueryDevices, *it,
                                     base::Bind(&DevicesRequest::ProcessSerials,
@@ -364,8 +364,7 @@ class DevicesRequest : public base::RefCountedThreadSafe<DevicesRequest> {
 
   void ProcessSerials(scoped_refptr<DeviceProvider> provider,
                       const Serials& serials) {
-    for (Serials::const_iterator it = serials.begin(); it != serials.end();
-         ++it) {
+    for (auto it = serials.begin(); it != serials.end(); ++it) {
       descriptors_->resize(descriptors_->size() + 1);
       descriptors_->back().provider = provider;
       descriptors_->back().serial = *it;
@@ -534,7 +533,7 @@ AndroidDeviceManager::HandlerThread::~HandlerThread() {
     return;
   // Shut down thread on a thread other than UI so it can join a thread.
   base::PostTaskWithTraits(FROM_HERE,
-                           {base::MayBlock(), base::TaskPriority::BACKGROUND},
+                           {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
                            base::BindOnce(&HandlerThread::StopThread, thread_));
 }
 
@@ -545,8 +544,7 @@ std::unique_ptr<AndroidDeviceManager> AndroidDeviceManager::Create() {
 
 void AndroidDeviceManager::SetDeviceProviders(
     const DeviceProviders& providers) {
-  for (DeviceProviders::iterator it = providers_.begin();
-      it != providers_.end(); ++it) {
+  for (auto it = providers_.begin(); it != providers_.end(); ++it) {
     (*it)->AddRef();
     DeviceProvider* raw_ptr = it->get();
     *it = nullptr;
@@ -579,7 +577,7 @@ void AndroidDeviceManager::UpdateDevices(
   for (DeviceDescriptors::const_iterator it = descriptors->begin();
        it != descriptors->end();
        ++it) {
-    DeviceWeakMap::iterator found = devices_.find(it->serial);
+    auto found = devices_.find(it->serial);
     scoped_refptr<Device> device;
     if (found == devices_.end() || !found->second ||
         found->second->provider_.get() != it->provider.get()) {

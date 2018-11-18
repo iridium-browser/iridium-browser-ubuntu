@@ -58,6 +58,9 @@ class Commit(collections.namedtuple('Commit', ('repository', 'git_hash'))):
     for deps_os in deps_data.get('deps_os', {}).itervalues():
       deps_dict.update(deps_os)
 
+    # Pull out vars dict to format brace variables.
+    vars_dict = deps_data.get('vars', {})
+
     # Convert deps strings to repository and git hash.
     commits = []
     for dep_value in deps_dict.itervalues():
@@ -68,8 +71,10 @@ class Commit(collections.namedtuple('Commit', ('repository', 'git_hash'))):
           # We don't support DEPS that are CIPD packages.
           continue
         dep_string = dep_value['url']
+        if 'revision' in dep_value:
+          dep_string += '@' + dep_value['revision']
 
-      dep_string_parts = dep_string.split('@')
+      dep_string_parts = dep_string.format(**vars_dict).split('@')
       if len(dep_string_parts) < 2:
         continue  # Dep is not pinned to any particular revision.
       if len(dep_string_parts) > 2:
@@ -87,17 +92,23 @@ class Commit(collections.namedtuple('Commit', ('repository', 'git_hash'))):
     commit_info = gitiles_service.CommitInfo(self.repository_url, self.git_hash)
     details = {
         'repository': self.repository,
-        'git_hash': self.git_hash,
-
+        'git_hash': commit_info['commit'],
         'url': self.repository_url + '/+/' + commit_info['commit'],
         'subject': commit_info['message'].split('\n', 1)[0],
         'author': commit_info['author']['email'],
-        'reviewers': _ParseReviewers(commit_info['message']),
         'time': commit_info['committer']['time'],
     }
     commit_position = _ParseCommitPosition(commit_info['message'])
     if commit_position:
       details['commit_position'] = commit_position
+    author = details['author']
+    if (author == 'v8-autoroll@chromium.org' or
+        author.endswith('skia-buildbots.google.com.iam.gserviceaccount.com')):
+      message = commit_info['message']
+      if message:
+        m = re.search(r'TBR=([^,^\s]*)', message)
+        if m:
+          details['tbr'] = m.group(1)
     return details
 
   @classmethod
@@ -112,9 +123,42 @@ class Commit(collections.namedtuple('Commit', ('repository', 'git_hash'))):
     Returns:
       A Commit.
     """
-    repository = repository_module.Repository(dep.repository_url,
-                                              add_if_missing=True)
+    repository = repository_module.RepositoryName(
+        dep.repository_url, add_if_missing=True)
     return cls(repository, dep.git_hash)
+
+  @classmethod
+  def FromData(cls, data):
+    """Create a Commit from the given request data.
+
+    Raises:
+      KeyError: The repository name is not in the local datastore,
+                or the git hash is not valid.
+      ValueError: The URL has an unrecognized format.
+    """
+    if isinstance(data, basestring):
+      return cls.FromUrl(data)
+    else:
+      return cls.FromDict(data)
+
+  @classmethod
+  def FromUrl(cls, url):
+    """Create a Commit from a Gitiles URL.
+
+    Raises:
+      KeyError: The URL's repository or commit doesn't exist.
+      ValueError: The URL has an unrecognized format.
+    """
+    url_parts = url.split('+')
+    if len(url_parts) != 2:
+      raise ValueError('Unknown commit URL format: ' + url)
+
+    repository, git_hash = url_parts
+
+    return cls.FromDict({
+        'repository': repository[:-1],
+        'git_hash': git_hash[1:],
+    })
 
   @classmethod
   def FromDict(cls, data):
@@ -128,12 +172,11 @@ class Commit(collections.namedtuple('Commit', ('repository', 'git_hash'))):
                 or the git hash is not valid.
     """
     repository = data['repository']
+    git_hash = data['git_hash']
 
     # Translate repository if it's a URL.
     if repository.startswith('https://'):
-      repository = repository_module.Repository(repository)
-
-    git_hash = data['git_hash']
+      repository = repository_module.RepositoryName(repository)
 
     try:
       # If they send in something like HEAD, resolve to a hash.
@@ -187,25 +230,11 @@ class Commit(collections.namedtuple('Commit', ('repository', 'git_hash'))):
     return cls(commit_a.repository, commits[len(commits) / 2]['commit'])
 
 
-def _ParseReviewers(commit_message):
-  """Parses a commit message for the emails of all reviewers.
-
-  If the commit is a revert, this includes
-  all the reviewers from the original commit.
-
-  Args:
-    commit_message:: The commit message as a string.
-
-  Returns:
-    A list of reviewers."""
-  return re.findall('Reviewed-by: .+ <(.+?)>', commit_message)
-
-
 def _ParseCommitPosition(commit_message):
   """Parses a commit message for the commit position.
 
   Args:
-    commit_message:: The commit message as a string.
+    commit_message: The commit message as a string.
 
   Returns:
     An int if there is a commit position, or None otherwise."""

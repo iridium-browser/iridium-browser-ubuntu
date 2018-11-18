@@ -16,9 +16,12 @@
 
 namespace blink {
 
+class CacheQueryOptions;
 class ScriptPromiseResolver;
 class ScriptState;
 class ServiceWorkerRegistration;
+class RequestOrUSVString;
+struct WebBackgroundFetchRegistration;
 
 // Represents an individual Background Fetch registration. Gives developers
 // access to its properties, options, and enables them to abort the fetch.
@@ -29,12 +32,20 @@ class BackgroundFetchRegistration final
   USING_PRE_FINALIZER(BackgroundFetchRegistration, Dispose);
 
  public:
-  BackgroundFetchRegistration(const String& developer_id,
-                              const String& unique_id,
-                              unsigned long long upload_total,
-                              unsigned long long uploaded,
-                              unsigned long long download_total,
-                              unsigned long long downloaded);
+  BackgroundFetchRegistration(
+      const String& developer_id,
+      const String& unique_id,
+      unsigned long long upload_total,
+      unsigned long long uploaded,
+      unsigned long long download_total,
+      unsigned long long downloaded,
+      mojom::BackgroundFetchResult result,
+      mojom::BackgroundFetchFailureReason failure_reason);
+
+  BackgroundFetchRegistration(
+      ServiceWorkerRegistration* registration,
+      const WebBackgroundFetchRegistration& web_registration);
+
   ~BackgroundFetchRegistration() override;
 
   // Initializes the BackgroundFetchRegistration to be associated with the given
@@ -46,16 +57,34 @@ class BackgroundFetchRegistration final
   void OnProgress(uint64_t upload_total,
                   uint64_t uploaded,
                   uint64_t download_total,
-                  uint64_t downloaded) override;
+                  uint64_t downloaded,
+                  mojom::BackgroundFetchResult result,
+                  mojom::BackgroundFetchFailureReason failure_reason) override;
+  void OnRecordsUnavailable() override;
 
   // Web Exposed attribute defined in the IDL file. Corresponds to the
   // |developer_id| used elsewhere in the codebase.
   String id() const;
+  ScriptPromise match(ScriptState* script_state,
+                      const RequestOrUSVString& request,
+                      const CacheQueryOptions& options,
+                      ExceptionState& exception_state);
+  ScriptPromise matchAll(ScriptState* scrip_state,
+                         ExceptionState& exception_state);
+  ScriptPromise matchAll(ScriptState* script_state,
+                         const RequestOrUSVString& request,
+                         const CacheQueryOptions& options,
+                         ExceptionState& exception_state);
 
   unsigned long long uploadTotal() const;
   unsigned long long uploaded() const;
   unsigned long long downloadTotal() const;
   unsigned long long downloaded() const;
+  bool recordsAvailable() const;
+  const String result() const;
+  const String failureReason() const;
+
+  const String& unique_id() const { return unique_id_; }
 
   DEFINE_ATTRIBUTE_EVENT_LISTENER(progress);
 
@@ -72,6 +101,15 @@ class BackgroundFetchRegistration final
  private:
   void DidAbort(ScriptPromiseResolver* resolver,
                 mojom::blink::BackgroundFetchError error);
+  ScriptPromise MatchImpl(ScriptState* script_state,
+                          base::Optional<RequestOrUSVString> request,
+                          mojom::blink::QueryParamsPtr cache_query_params,
+                          ExceptionState& exception_state,
+                          bool match_all);
+  void DidGetMatchingRequests(
+      ScriptPromiseResolver* resolver,
+      bool return_all,
+      Vector<mojom::blink::BackgroundFetchSettledFetchPtr> settled_fetches);
 
   Member<ServiceWorkerRegistration> registration_;
 
@@ -88,6 +126,9 @@ class BackgroundFetchRegistration final
   unsigned long long uploaded_;
   unsigned long long download_total_;
   unsigned long long downloaded_;
+  bool records_available_ = true;
+  mojom::BackgroundFetchResult result_;
+  mojom::BackgroundFetchFailureReason failure_reason_;
 
   mojo::Binding<blink::mojom::blink::BackgroundFetchRegistrationObserver>
       observer_binding_;

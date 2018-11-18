@@ -7,21 +7,25 @@
 
 #include <memory>
 #include "base/macros.h"
+#include "base/optional.h"
 #include "base/unguessable_token.h"
 #include "services/service_manager/public/mojom/interface_provider.mojom-blink.h"
+#include "third_party/blink/public/common/feature_policy/feature_policy.h"
 #include "third_party/blink/public/mojom/net/ip_address_space.mojom-blink.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_cache_options.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/frame/csp/content_security_policy.h"
+#include "third_party/blink/renderer/core/script/script.h"
 #include "third_party/blink/renderer/core/workers/worker_clients.h"
-#include "third_party/blink/renderer/core/workers/worker_or_worklet_module_fetch_coordinator.h"
 #include "third_party/blink/renderer/core/workers/worker_settings.h"
+#include "third_party/blink/renderer/core/workers/worklet_module_responses_map.h"
+#include "third_party/blink/renderer/platform/graphics/begin_frame_provider.h"
+#include "third_party/blink/renderer/platform/loader/fetch/https_state.h"
 #include "third_party/blink/renderer/platform/network/content_security_policy_parsers.h"
 #include "third_party/blink/renderer/platform/network/content_security_policy_response_headers.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/weborigin/referrer_policy.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
-#include "third_party/blink/renderer/platform/wtf/optional.h"
 
 namespace blink {
 
@@ -35,32 +39,51 @@ struct CORE_EXPORT GlobalScopeCreationParams final {
  public:
   GlobalScopeCreationParams(
       const KURL& script_url,
+      // TODO(asamidoi): Replace ScriptType to mojom::ScriptType
+      ScriptType script_type,
       const String& user_agent,
-      const Vector<CSPHeaderAndType>* content_security_policy_parsed_headers,
+      const Vector<CSPHeaderAndType>& content_security_policy_parsed_headers,
       ReferrerPolicy referrer_policy,
       const SecurityOrigin*,
       bool starter_secure_context,
+      HttpsState starter_https_state,
       WorkerClients*,
       mojom::IPAddressSpace,
       const Vector<String>* origin_trial_tokens,
       const base::UnguessableToken& parent_devtools_token,
       std::unique_ptr<WorkerSettings>,
       V8CacheOptions,
-      WorkerOrWorkletModuleFetchCoordinator*,
-      service_manager::mojom::blink::InterfaceProviderPtrInfo = {});
+      WorkletModuleResponsesMap*,
+      service_manager::mojom::blink::InterfaceProviderPtrInfo = {},
+      BeginFrameProviderParams begin_frame_provider_params = {},
+      const FeaturePolicy* parent_feature_policy = nullptr,
+      base::UnguessableToken agent_cluster_id = {});
 
   ~GlobalScopeCreationParams() = default;
 
+  // The URL to be used as the worker global scope's URL.
+  // According to the spec, this should be response URL of the top-level
+  // worker script after the top-level worker script is loaded.
+  // https://html.spec.whatwg.org/multipage/workers.html#run-a-worker
+  //
+  // However, this can't be set to response URL in case of module workers or
+  // off-the-main-thread fetch, because at the time of GlobalScopeCreationParams
+  // creation the response of worker script is not yet received. Therefore,
+  // the worker global scope's URL should be set to the response URL outside
+  // GlobalScopeCreationParams, but this mechanism is not yet implemented.
+  // TODO(crbug/861564): implement this and set the response URL to module
+  // workers.
   KURL script_url;
+
+  ScriptType script_type;
   String user_agent;
 
   // |content_security_policy_parsed_headers| and
   // |content_security_policy_raw_headers| are mutually exclusive.
   // |content_security_policy_parsed_headers| is an empty vector
   // when |content_security_policy_raw_headers| is set.
-  std::unique_ptr<Vector<CSPHeaderAndType>>
-      content_security_policy_parsed_headers;
-  WTF::Optional<ContentSecurityPolicyResponseHeaders>
+  Vector<CSPHeaderAndType> content_security_policy_parsed_headers;
+  base::Optional<ContentSecurityPolicyResponseHeaders>
       content_security_policy_raw_headers;
 
   ReferrerPolicy referrer_policy;
@@ -89,6 +112,8 @@ struct CORE_EXPORT GlobalScopeCreationParams final {
   // The value should be supplied as the result of Document.IsSecureContext().
   bool starter_secure_context;
 
+  HttpsState starter_https_state;
+
   // This object is created and initialized on the thread creating
   // a new worker context, but ownership of it and this
   // GlobalScopeCreationParams structure is passed along to the new worker
@@ -108,10 +133,18 @@ struct CORE_EXPORT GlobalScopeCreationParams final {
 
   V8CacheOptions v8_cache_options;
 
-  CrossThreadPersistent<WorkerOrWorkletModuleFetchCoordinator>
-      module_fetch_coordinator;
+  CrossThreadPersistent<WorkletModuleResponsesMap> module_responses_map;
 
   service_manager::mojom::blink::InterfaceProviderPtrInfo interface_provider;
+
+  BeginFrameProviderParams begin_frame_provider_params;
+
+  std::unique_ptr<FeaturePolicy> worker_feature_policy;
+
+  // Set when the worker/worklet has the same AgentClusterID as the execution
+  // context that created it (e.g. for a dedicated worker).
+  // See https://tc39.github.io/ecma262/#sec-agent-clusters
+  base::UnguessableToken agent_cluster_id;
 
   DISALLOW_COPY_AND_ASSIGN(GlobalScopeCreationParams);
 };

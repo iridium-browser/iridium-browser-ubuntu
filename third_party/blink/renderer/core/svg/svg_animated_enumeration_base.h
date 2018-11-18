@@ -53,18 +53,16 @@ class SVGAnimatedEnumerationBase
     ScriptWrappable::Trace(visitor);
   }
 
-  void TraceWrappers(const ScriptWrappableVisitor* visitor) const override {
-    SVGAnimatedProperty<SVGEnumerationBase>::TraceWrappers(visitor);
-    ScriptWrappable::TraceWrappers(visitor);
-  }
-
  protected:
   SVGAnimatedEnumerationBase(SVGElement* context_element,
                              const QualifiedName& attribute_name,
-                             SVGEnumerationBase* initial_value)
+                             SVGEnumerationBase* initial_value,
+                             unsigned initial_enum_value)
       : SVGAnimatedProperty<SVGEnumerationBase>(context_element,
                                                 attribute_name,
-                                                initial_value) {}
+                                                initial_value,
+                                                CSSPropertyInvalid,
+                                                initial_enum_value) {}
 };
 
 }  // namespace blink

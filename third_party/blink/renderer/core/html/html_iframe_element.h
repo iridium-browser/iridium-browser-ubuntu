@@ -41,15 +41,17 @@ class CORE_EXPORT HTMLIFrameElement final
 
  public:
   DECLARE_NODE_FACTORY(HTMLIFrameElement);
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
   ~HTMLIFrameElement() override;
   DOMTokenList* sandbox() const;
   // Support JS introspection of frame policy (e.g. feature policy)
   Policy* policy();
 
+  // Returns attributes that should be checked against Trusted Types
+  const HashSet<AtomicString>& GetCheckedAttributeNames() const override;
+
   ParsedFeaturePolicy ConstructContainerPolicy(
-      Vector<String>* /* messages */,
-      bool* /* old_syntax */) const override;
+      Vector<String>* /* messages */) const override;
 
  private:
   explicit HTMLIFrameElement(Document&);
@@ -63,8 +65,8 @@ class CORE_EXPORT HTMLIFrameElement final
       const AtomicString&,
       MutableCSSPropertyValueSet*) override;
 
-  InsertionNotificationRequest InsertedInto(ContainerNode*) override;
-  void RemovedFrom(ContainerNode*) override;
+  InsertionNotificationRequest InsertedInto(ContainerNode&) override;
+  void RemovedFrom(ContainerNode&) override;
 
   bool LayoutObjectIsNeeded(const ComputedStyle&) const override;
   LayoutObject* CreateLayoutObject(const ComputedStyle&) override;

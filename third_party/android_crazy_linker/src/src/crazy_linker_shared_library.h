@@ -7,10 +7,13 @@
 
 #include <link.h>
 
+#include <utility>
+
 #include "crazy_linker_elf_relro.h"
 #include "crazy_linker_elf_symbols.h"
 #include "crazy_linker_elf_view.h"
 #include "crazy_linker_error.h"
+#include "crazy_linker_memory_mapping.h"
 #include "crazy_linker_rdebug.h"
 #include "crazy_linker_util.h"
 #include "elf_traits.h"
@@ -40,6 +43,10 @@ class SharedLibrary {
   size_t phdr_count() const { return view_.phdr_count(); }
   const char* base_name() const { return base_name_; }
 
+  // Return name of the library as found in DT_SONAME entry, or same
+  // as base_name() if not available.
+  const char* soname() const { return soname_; }
+
   // Load a library (without its dependents) from an ELF file.
   // Note: This does not apply relocations, nor runs constructors.
   // |full_path| if the file full path.
@@ -59,8 +66,8 @@ class SharedLibrary {
   // loaded in |lib_list|. On failure, return false and set |error|
   // message.
   bool Relocate(LibraryList* lib_list,
-                Vector<LibraryView*>* preloads,
-                Vector<LibraryView*>* dependencies,
+                const Vector<LibraryView*>* preloads,
+                const Vector<LibraryView*>* dependencies,
                 Error* error);
 
   void GetInfo(size_t* load_address,
@@ -137,6 +144,11 @@ class SharedLibrary {
   // callback, if it is present in the library.
   void CallJniOnUnload();
 
+  // Release reserved memory mapping. Caller takes ownership. Used to delay
+  // the unmapping of the library segments in the case of delayed RDebug
+  // operations.
+  MemoryMapping ReleaseMapping() { return std::move(reserved_map_); }
+
   // Helper class to iterate over dependencies in a given SharedLibrary.
   // Usage:
   //    SharedLibary::DependencyIterator iter(lib);
@@ -170,37 +182,38 @@ class SharedLibrary {
 
   ElfView view_;
   ElfSymbols symbols_;
+  MemoryMapping reserved_map_;
 
-  ELF::Addr relro_start_;
-  ELF::Addr relro_size_;
-  bool relro_used_;
+  ELF::Addr relro_start_ = 0;
+  ELF::Addr relro_size_ = 0;
+  bool relro_used_ = false;
 
-  SharedLibrary* list_next_;
-  SharedLibrary* list_prev_;
-  unsigned flags_;
+  SharedLibrary* list_next_ = nullptr;
+  SharedLibrary* list_prev_ = nullptr;
+  unsigned flags_ = 0;
 
-  linker_function_t* preinit_array_;
-  size_t preinit_array_count_;
-  linker_function_t* init_array_;
-  size_t init_array_count_;
-  linker_function_t* fini_array_;
-  size_t fini_array_count_;
-  linker_function_t init_func_;
-  linker_function_t fini_func_;
-
+  linker_function_t* preinit_array_ = nullptr;
+  size_t preinit_array_count_ = 0;
+  linker_function_t* init_array_ = nullptr;
+  size_t init_array_count_ = 0;
+  linker_function_t* fini_array_ = nullptr;
+  size_t fini_array_count_ = 0;
+  linker_function_t init_func_ = nullptr;
+  linker_function_t fini_func_ = nullptr;
 #ifdef __arm__
   // ARM EABI section used for stack unwinding.
-  unsigned* arm_exidx_;
-  size_t arm_exidx_count_;
+  unsigned* arm_exidx_ = nullptr;
+  size_t arm_exidx_count_ = 0;
 #endif
 
-  link_map_t link_map_;
+  link_map_t link_map_ = {};
 
-  bool has_DT_SYMBOLIC_;
+  bool has_DT_SYMBOLIC_ = false;
 
-  void* java_vm_;
+  void* java_vm_ = nullptr;
 
-  const char* base_name_;
+  const char* soname_ = nullptr;
+  const char* base_name_ = nullptr;
   char full_path_[512];
 };
 

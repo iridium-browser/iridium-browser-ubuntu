@@ -7,65 +7,16 @@
 #include <algorithm>
 #include <utility>
 
+#include "ash/public/interfaces/ash_message_center_controller.mojom.h"
+#include "ash/public/interfaces/constants.mojom.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "components/arc/arc_bridge_service.h"
+#include "components/arc/mojo_channel.h"
+#include "content/public/common/service_manager_connection.h"
+#include "services/service_manager/public/cpp/connector.h"
 
 namespace arc {
-
-// Thin interface to wrap InterfacePtr<T> with type erasure.
-class ArcBridgeHostImpl::MojoChannel {
- public:
-  virtual ~MojoChannel() = default;
-
- protected:
-  MojoChannel() = default;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(MojoChannel);
-};
-
-namespace {
-
-// The thin wrapper for InterfacePtr<T>, where T is one of ARC mojo Instance
-// class.
-template <typename InstanceType, typename HostType>
-class MojoChannelImpl : public ArcBridgeHostImpl::MojoChannel {
- public:
-  MojoChannelImpl(ConnectionHolder<InstanceType, HostType>* holder,
-                  mojo::InterfacePtr<InstanceType> ptr)
-      : holder_(holder), ptr_(std::move(ptr)) {
-    // Delay registration to the ConnectionHolder until the version is ready.
-  }
-
-  ~MojoChannelImpl() override { holder_->CloseInstance(ptr_.get()); }
-
-  void set_connection_error_handler(base::OnceClosure error_handler) {
-    ptr_.set_connection_error_handler(std::move(error_handler));
-  }
-
-  void QueryVersion() {
-    // Note: the callback will not be called if |ptr_| is destroyed.
-    ptr_.QueryVersion(
-        base::Bind(&MojoChannelImpl::OnVersionReady, base::Unretained(this)));
-  }
-
- private:
-  void OnVersionReady(uint32_t unused_version) {
-    holder_->SetInstance(ptr_.get(), ptr_.version());
-  }
-
-  // Owned by ArcBridgeService.
-  ConnectionHolder<InstanceType, HostType>* const holder_;
-
-  // Put as a last member to ensure that any callback tied to the |ptr_|
-  // is not invoked.
-  mojo::InterfacePtr<InstanceType> ptr_;
-
-  DISALLOW_COPY_AND_ASSIGN(MojoChannelImpl);
-};
-
-}  // namespace
 
 ArcBridgeHostImpl::ArcBridgeHostImpl(ArcBridgeService* arc_bridge_service,
                                      mojom::ArcBridgeInstancePtr instance)
@@ -93,6 +44,11 @@ void ArcBridgeHostImpl::OnAccessibilityHelperInstanceReady(
 
 void ArcBridgeHostImpl::OnAppInstanceReady(mojom::AppInstancePtr app_ptr) {
   OnInstanceReady(arc_bridge_service_->app(), std::move(app_ptr));
+}
+
+void ArcBridgeHostImpl::OnAppfuseInstanceReady(
+    mojom::AppfuseInstancePtr appfuse_ptr) {
+  OnInstanceReady(arc_bridge_service_->appfuse(), std::move(appfuse_ptr));
 }
 
 void ArcBridgeHostImpl::OnAudioInstanceReady(
@@ -143,6 +99,11 @@ void ArcBridgeHostImpl::OnCrashCollectorInstanceReady(
                   std::move(crash_collector_ptr));
 }
 
+void ArcBridgeHostImpl::OnDiskQuotaInstanceReady(
+    mojom::DiskQuotaInstancePtr disk_quota_ptr) {
+  OnInstanceReady(arc_bridge_service_->disk_quota(), std::move(disk_quota_ptr));
+}
+
 void ArcBridgeHostImpl::OnEnterpriseReportingInstanceReady(
     mojom::EnterpriseReportingInstancePtr enterprise_reporting_ptr) {
   OnInstanceReady(arc_bridge_service_->enterprise_reporting(),
@@ -157,6 +118,12 @@ void ArcBridgeHostImpl::OnFileSystemInstanceReady(
 
 void ArcBridgeHostImpl::OnImeInstanceReady(mojom::ImeInstancePtr ime_ptr) {
   OnInstanceReady(arc_bridge_service_->ime(), std::move(ime_ptr));
+}
+
+void ArcBridgeHostImpl::OnInputMethodManagerInstanceReady(
+    mojom::InputMethodManagerInstancePtr input_method_manager_ptr) {
+  OnInstanceReady(arc_bridge_service_->input_method_manager(),
+                  std::move(input_method_manager_ptr));
 }
 
 void ArcBridgeHostImpl::OnIntentHelperInstanceReady(
@@ -176,6 +143,12 @@ void ArcBridgeHostImpl::OnLockScreenInstanceReady(
                   std::move(lock_screen_ptr));
 }
 
+void ArcBridgeHostImpl::OnMediaSessionInstanceReady(
+    mojom::MediaSessionInstancePtr media_session_ptr) {
+  OnInstanceReady(arc_bridge_service_->media_session(),
+                  std::move(media_session_ptr));
+}
+
 void ArcBridgeHostImpl::OnMetricsInstanceReady(
     mojom::MetricsInstancePtr metrics_ptr) {
   OnInstanceReady(arc_bridge_service_->metrics(), std::move(metrics_ptr));
@@ -192,8 +165,13 @@ void ArcBridgeHostImpl::OnNetInstanceReady(mojom::NetInstancePtr net_ptr) {
 
 void ArcBridgeHostImpl::OnNotificationsInstanceReady(
     mojom::NotificationsInstancePtr notifications_ptr) {
-  OnInstanceReady(arc_bridge_service_->notifications(),
-                  std::move(notifications_ptr));
+  // Forward notification instance to ash.
+  ash::mojom::AshMessageCenterControllerPtr ash_message_center_controller;
+  content::ServiceManagerConnection::GetForProcess()
+      ->GetConnector()
+      ->BindInterface(ash::mojom::kServiceName, &ash_message_center_controller);
+  ash_message_center_controller->SetArcNotificationsInstance(
+      std::move(notifications_ptr));
 }
 
 void ArcBridgeHostImpl::OnObbMounterInstanceReady(
@@ -205,6 +183,10 @@ void ArcBridgeHostImpl::OnObbMounterInstanceReady(
 void ArcBridgeHostImpl::OnOemCryptoInstanceReady(
     mojom::OemCryptoInstancePtr oemcrypto_ptr) {
   OnInstanceReady(arc_bridge_service_->oemcrypto(), std::move(oemcrypto_ptr));
+}
+
+void ArcBridgeHostImpl::OnPipInstanceReady(mojom::PipInstancePtr pip_ptr) {
+  OnInstanceReady(arc_bridge_service_->pip(), std::move(pip_ptr));
 }
 
 void ArcBridgeHostImpl::OnPolicyInstanceReady(
@@ -225,6 +207,11 @@ void ArcBridgeHostImpl::OnPrintInstanceReady(
 void ArcBridgeHostImpl::OnProcessInstanceReady(
     mojom::ProcessInstancePtr process_ptr) {
   OnInstanceReady(arc_bridge_service_->process(), std::move(process_ptr));
+}
+
+void ArcBridgeHostImpl::OnPropertyInstanceReady(
+    mojom::PropertyInstancePtr property_ptr) {
+  OnInstanceReady(arc_bridge_service_->property(), std::move(property_ptr));
 }
 
 void ArcBridgeHostImpl::OnRotationLockInstanceReady(
@@ -320,7 +307,7 @@ void ArcBridgeHostImpl::OnInstanceReady(
   // closed on ArcBridgeHost/Instance closing or the ArcBridgeHostImpl's
   // destruction.
   auto* channel =
-      new MojoChannelImpl<InstanceType, HostType>(holder, std::move(ptr));
+      new MojoChannel<InstanceType, HostType>(holder, std::move(ptr));
   mojo_channels_.emplace_back(channel);
 
   // Since |channel| is managed by |mojo_channels_|, its lifetime is shorter
@@ -334,11 +321,11 @@ void ArcBridgeHostImpl::OnInstanceReady(
   channel->QueryVersion();
 }
 
-void ArcBridgeHostImpl::OnChannelClosed(MojoChannel* channel) {
+void ArcBridgeHostImpl::OnChannelClosed(MojoChannelBase* channel) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   mojo_channels_.erase(
       std::find_if(mojo_channels_.begin(), mojo_channels_.end(),
-                   [channel](std::unique_ptr<MojoChannel>& ptr) {
+                   [channel](std::unique_ptr<MojoChannelBase>& ptr) {
                      return ptr.get() == channel;
                    }));
 }

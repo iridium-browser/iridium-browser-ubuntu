@@ -10,6 +10,7 @@
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "chromecast/media/cma/backend/video_decoder_for_mixer.h"
 #include "chromecast/public/media/media_pipeline_backend.h"
 #include "chromecast/public/media/media_pipeline_device_params.h"
 #include "chromecast/public/volume_control.h"
@@ -21,11 +22,13 @@ class SingleThreadTaskRunner;
 namespace chromecast {
 namespace media {
 
+class AvSync;
 class AudioDecoderForMixer;
 class VideoDecoderForMixer;
 
 // CMA Backend implementation for audio devices.
-class MediaPipelineBackendForMixer : public MediaPipelineBackend {
+class MediaPipelineBackendForMixer : public MediaPipelineBackend,
+                                     public VideoDecoderForMixer::Observer {
  public:
   explicit MediaPipelineBackendForMixer(
       const MediaPipelineDeviceParams& params);
@@ -42,15 +45,28 @@ class MediaPipelineBackendForMixer : public MediaPipelineBackend {
   bool SetPlaybackRate(float rate) override;
   int64_t GetCurrentPts() override;
 
+  // VideoDecoderForMixer::Observer implementation:
+  void VideoReadyToPlay() override;
+
   bool Primary() const;
   std::string DeviceId() const;
   AudioContentType ContentType() const;
+  AudioChannel AudioChannel() const;
   const scoped_refptr<base::SingleThreadTaskRunner>& GetTaskRunner() const;
   VideoDecoderForMixer* video_decoder() const { return video_decoder_.get(); }
   AudioDecoderForMixer* audio_decoder() const { return audio_decoder_.get(); }
+  void OnAudioReadyForPlayback();
+  void NewAudioPlaybackRateInEffect(float rate);
 
   // Gets current time on the same clock as the rendering delay timestamp.
   virtual int64_t MonotonicClockNow() const;
+
+  int64_t GetPlaybackStartTimeForTesting() const {
+    return start_playback_timestamp_us_;
+  }
+  int64_t GetPlaybackStartPtsForTesting() const {
+    return start_playback_pts_us_;
+  }
 
  protected:
   std::unique_ptr<VideoDecoderForMixer> video_decoder_;
@@ -66,7 +82,22 @@ class MediaPipelineBackendForMixer : public MediaPipelineBackend {
   };
   State state_;
 
+  void OnVideoReadyToPlay();
+  bool IsIgnorePtsMode() const;
+  void TryStartPlayback();
+
   const MediaPipelineDeviceParams params_;
+
+  std::unique_ptr<AvSync> av_sync_;
+  int64_t start_playback_timestamp_us_ = INT64_MIN;
+  int64_t start_playback_pts_us_ = INT64_MIN;
+
+  // The media pipeline doesn't start playback until these 3 conditions are
+  // met.
+  bool audio_ready_to_play_ = false;
+  bool video_ready_to_play_ = false;
+  bool playback_started_ = false;
+  float starting_playback_rate_ = 1.0;
 
   DISALLOW_COPY_AND_ASSIGN(MediaPipelineBackendForMixer);
 };

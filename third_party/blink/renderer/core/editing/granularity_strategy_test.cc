@@ -5,7 +5,6 @@
 #include <memory>
 #include "base/memory/scoped_refptr.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/dom/text.h"
@@ -19,6 +18,7 @@
 #include "third_party/blink/renderer/core/html/html_body_element.h"
 #include "third_party/blink/renderer/core/html/html_span_element.h"
 #include "third_party/blink/renderer/core/testing/page_test_base.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 
@@ -41,13 +41,9 @@ class GranularityStrategyTest : public PageTestBase {
  protected:
   void SetUp() override;
 
-  void SetSelectionAndEndTyping(const VisibleSelection&);
   Text* AppendTextNode(const String& data);
-  int LayoutCount() const {
-    return GetDummyPageHolder().GetFrameView().LayoutCount();
-  }
   void SetInnerHTML(const char*);
-  // Parses the text node, appending the info to m_letterPos and m_wordMiddles.
+  // Parses the text node, appending the info to letter_pos_ and word_middles_.
   void ParseText(Text*);
   void ParseText(const TextNodeVector&);
 
@@ -57,18 +53,18 @@ class GranularityStrategyTest : public PageTestBase {
   void SetupTextSpan(String str1,
                      String str2,
                      String str3,
-                     size_t sel_begin,
-                     size_t sel_end);
+                     wtf_size_t sel_begin,
+                     wtf_size_t sel_end);
   void SetupVerticalAlign(String str1,
                           String str2,
                           String str3,
-                          size_t sel_begin,
-                          size_t sel_end);
+                          wtf_size_t sel_begin,
+                          wtf_size_t sel_end);
   void SetupFontSize(String str1,
                      String str2,
                      String str3,
-                     size_t sel_begin,
-                     size_t sel_end);
+                     wtf_size_t sel_begin,
+                     wtf_size_t sel_end);
 
   void TestDirectionExpand();
   void TestDirectionShrink();
@@ -78,7 +74,7 @@ class GranularityStrategyTest : public PageTestBase {
   // tested.
   Vector<IntPoint> letter_pos_;
   // Pixel coordinates of the middles of the words in the text being tested.
-  // (y coordinate is based on y coordinates of m_letterPos)
+  // (y coordinate is based on y coordinates of letter_pos_)
   Vector<IntPoint> word_middles_;
 };
 
@@ -86,11 +82,6 @@ void GranularityStrategyTest::SetUp() {
   PageTestBase::SetUp();
   GetFrame().GetSettings()->SetDefaultFontSize(12);
   GetFrame().GetSettings()->SetSelectionStrategy(SelectionStrategy::kDirection);
-}
-
-void GranularityStrategyTest::SetSelectionAndEndTyping(
-    const VisibleSelection& new_selection) {
-  Selection().SetSelectionAndEndTyping(new_selection.AsSelection());
 }
 
 Text* GranularityStrategyTest::AppendTextNode(const String& data) {
@@ -115,9 +106,9 @@ void GranularityStrategyTest::ParseText(const TextNodeVector& text_nodes) {
   bool word_started = false;
   int word_start_index = 0;
   for (auto& text : text_nodes) {
-    int word_start_index_offset = letter_pos_.size();
+    wtf_size_t word_start_index_offset = letter_pos_.size();
     String str = text->wholeText();
-    for (size_t i = 0; i < str.length(); i++) {
+    for (wtf_size_t i = 0; i < str.length(); i++) {
       letter_pos_.push_back(VisiblePositionToContentsPoint(
           CreateVisiblePosition(Position(text, i))));
       char c = str[i];
@@ -224,8 +215,8 @@ Text* GranularityStrategyTest::SetupRotate(String str) {
 void GranularityStrategyTest::SetupTextSpan(String str1,
                                             String str2,
                                             String str3,
-                                            size_t sel_begin,
-                                            size_t sel_end) {
+                                            wtf_size_t sel_begin,
+                                            wtf_size_t sel_end) {
   Text* text1 = GetDocument().createTextNode(str1);
   Text* text2 = GetDocument().createTextNode(str2);
   Text* text3 = GetDocument().createTextNode(str3);
@@ -262,15 +253,16 @@ void GranularityStrategyTest::SetupTextSpan(String str1,
   else
     p2 = Position(text3, sel_end - str1.length() - str2.length());
 
-  Selection().SetSelectionAndEndTyping(
-      SelectionInDOMTree::Builder().SetBaseAndExtent(p1, p2).Build());
+  Selection().SetSelection(
+      SelectionInDOMTree::Builder().SetBaseAndExtent(p1, p2).Build(),
+      SetSelectionOptions());
 }
 
 void GranularityStrategyTest::SetupVerticalAlign(String str1,
                                                  String str2,
                                                  String str3,
-                                                 size_t sel_begin,
-                                                 size_t sel_end) {
+                                                 wtf_size_t sel_begin,
+                                                 wtf_size_t sel_end) {
   SetInnerHTML(
       "<html>"
       "<head>"
@@ -291,8 +283,8 @@ void GranularityStrategyTest::SetupVerticalAlign(String str1,
 void GranularityStrategyTest::SetupFontSize(String str1,
                                             String str2,
                                             String str3,
-                                            size_t sel_begin,
-                                            size_t sel_end) {
+                                            wtf_size_t sel_begin,
+                                            wtf_size_t sel_end) {
   SetInnerHTML(
       "<html>"
       "<head>"
@@ -489,10 +481,11 @@ TEST_F(GranularityStrategyTest, Character) {
 
   // "Foo B^a|>r Baz," (^ means base, | means extent, , < means start, and >
   // means end).
-  Selection().SetSelectionAndEndTyping(
+  Selection().SetSelection(
       SelectionInDOMTree::Builder()
           .SetBaseAndExtent(Position(text, 5), Position(text, 6))
-          .Build());
+          .Build(),
+      SetSelectionOptions());
   EXPECT_EQ_SELECTED_TEXT("a");
   // "Foo B^ar B|>az,"
   Selection().MoveRangeSelectionExtent(
@@ -510,10 +503,11 @@ TEST_F(GranularityStrategyTest, DirectionRotate) {
   Text* text = SetupRotate("Foo Bar Baz,");
   // "Foo B^a|>r Baz," (^ means base, | means extent, , < means start, and >
   // means end).
-  Selection().SetSelectionAndEndTyping(
+  Selection().SetSelection(
       SelectionInDOMTree::Builder()
           .SetBaseAndExtent(Position(text, 5), Position(text, 6))
-          .Build());
+          .Build(),
+      SetSelectionOptions());
   EXPECT_EQ_SELECTED_TEXT("a");
   IntPoint p = letter_pos_[9];
   // Need to move by one pixel, otherwise this point is not evaluated
@@ -533,10 +527,11 @@ TEST_F(GranularityStrategyTest, DirectionExpandTranslateZ) {
   Text* text = SetupTranslateZ("abcdef ghij kl mnopqr stuvwi inm mnii,");
   // "abcdef ghij kl mno^p|>qr stuvwi inm  mnii," (^ means base, | means extent,
   // < means start, and > means end).
-  Selection().SetSelectionAndEndTyping(
+  Selection().SetSelection(
       SelectionInDOMTree::Builder()
           .SetBaseAndExtent(Position(text, 18), Position(text, 19))
-          .Build());
+          .Build(),
+      SetSelectionOptions());
   EXPECT_EQ_SELECTED_TEXT("p");
   TestDirectionExpand();
 }
@@ -545,10 +540,11 @@ TEST_F(GranularityStrategyTest, DirectionExpandTransform) {
   Text* text = SetupTransform("abcdef ghij kl mnopqr stuvwi inm mnii,");
   // "abcdef ghij kl mno^p|>qr stuvwi inm  mnii," (^ means base, | means extent,
   // < means start, and > means end).
-  Selection().SetSelectionAndEndTyping(
+  Selection().SetSelection(
       SelectionInDOMTree::Builder()
           .SetBaseAndExtent(Position(text, 18), Position(text, 19))
-          .Build());
+          .Build(),
+      SetSelectionOptions());
   EXPECT_EQ_SELECTED_TEXT("p");
   TestDirectionExpand();
 }
@@ -569,20 +565,22 @@ TEST_F(GranularityStrategyTest, DirectionExpandFontSizes) {
 
 TEST_F(GranularityStrategyTest, DirectionShrinkTranslateZ) {
   Text* text = SetupTranslateZ("abcdef ghij kl mnopqr iiinmni, abc");
-  Selection().SetSelectionAndEndTyping(
+  Selection().SetSelection(
       SelectionInDOMTree::Builder()
           .SetBaseAndExtent(Position(text, 18), Position(text, 21))
-          .Build());
+          .Build(),
+      SetSelectionOptions());
   EXPECT_EQ_SELECTED_TEXT("pqr");
   TestDirectionShrink();
 }
 
 TEST_F(GranularityStrategyTest, DirectionShrinkTransform) {
   Text* text = SetupTransform("abcdef ghij kl mnopqr iiinmni, abc");
-  Selection().SetSelectionAndEndTyping(
+  Selection().SetSelection(
       SelectionInDOMTree::Builder()
           .SetBaseAndExtent(Position(text, 18), Position(text, 21))
-          .Build());
+          .Build(),
+      SetSelectionOptions());
   EXPECT_EQ_SELECTED_TEXT("pqr");
   TestDirectionShrink();
 }
@@ -601,20 +599,22 @@ TEST_F(GranularityStrategyTest, DirectionShrinkFontSizes) {
 
 TEST_F(GranularityStrategyTest, DirectionSwitchSideTranslateZ) {
   Text* text = SetupTranslateZ("abcd efgh ijkl mnopqr iiinmni, abc");
-  Selection().SetSelectionAndEndTyping(
+  Selection().SetSelection(
       SelectionInDOMTree::Builder()
           .SetBaseAndExtent(Position(text, 18), Position(text, 21))
-          .Build());
+          .Build(),
+      SetSelectionOptions());
   EXPECT_EQ_SELECTED_TEXT("pqr");
   TestDirectionSwitchSide();
 }
 
 TEST_F(GranularityStrategyTest, DirectionSwitchSideTransform) {
   Text* text = SetupTransform("abcd efgh ijkl mnopqr iiinmni, abc");
-  Selection().SetSelectionAndEndTyping(
+  Selection().SetSelection(
       SelectionInDOMTree::Builder()
           .SetBaseAndExtent(Position(text, 18), Position(text, 21))
-          .Build());
+          .Build(),
+      SetSelectionOptions());
   EXPECT_EQ_SELECTED_TEXT("pqr");
   TestDirectionSwitchSide();
 }
@@ -646,10 +646,11 @@ TEST_F(GranularityStrategyTest, DirectionSwitchSideWordGranularityThenShrink) {
 
   // "abcd efgh ijkl mno^pqr|> iiin, abc" (^ means base, | means extent, < means
   // start, and > means end).
-  Selection().SetSelectionAndEndTyping(
+  Selection().SetSelection(
       SelectionInDOMTree::Builder()
           .SetBaseAndExtent(Position(text, 18), Position(text, 21))
-          .Build());
+          .Build(),
+      SetSelectionOptions());
   EXPECT_EQ_SELECTED_TEXT("pqr");
   // Move to the middle of word #4 selecting it - this will set the offset to
   // be half the width of "iiin".
@@ -684,10 +685,11 @@ TEST_F(GranularityStrategyTest, DirectionSwitchStartOnBoundary) {
 
   // "ab cd efghijkl ^mnopqr |>stuvwi inm," (^ means base and | means extent,
   // > means end).
-  Selection().SetSelectionAndEndTyping(
+  Selection().SetSelection(
       SelectionInDOMTree::Builder()
           .SetBaseAndExtent(Position(text, 15), Position(text, 22))
-          .Build());
+          .Build(),
+      SetSelectionOptions());
   EXPECT_EQ_SELECTED_TEXT("mnopqr ");
   Selection().MoveRangeSelectionExtent(word_middles_[4]);
   EXPECT_EQ_SELECTED_TEXT("mnopqr iiin");

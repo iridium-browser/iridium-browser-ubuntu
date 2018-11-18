@@ -32,6 +32,7 @@
 #include "cc/tiles/tile_draw_info.h"
 #include "cc/tiles/tile_manager_settings.h"
 #include "cc/tiles/tile_task_manager.h"
+#include "url/gurl.h"
 
 namespace base {
 namespace trace_event {
@@ -194,7 +195,7 @@ class CC_EXPORT TileManager : CheckerImageTrackerClient {
       ResourcePool::InUsePoolResource resource =
           resource_pool_->AcquireResource(
               tiles[i]->desired_texture_size(),
-              raster_buffer_provider_->GetResourceFormat(false),
+              raster_buffer_provider_->GetResourceFormat(),
               client_->GetRasterColorSpace().color_space);
       raster_buffer_provider_->AcquireBufferForRaster(resource, 0, 0);
       // The raster here never really happened, cuz tests. So just add an
@@ -260,8 +261,6 @@ class CC_EXPORT TileManager : CheckerImageTrackerClient {
                              ResourcePool::InUsePoolResource resource,
                              bool was_canceled);
 
-  void SetDecodedImageTracker(DecodedImageTracker* decoded_image_tracker);
-
   // CheckerImageTrackerClient implementation.
   void NeedsInvalidationForCheckerImagedTiles() override;
 
@@ -278,10 +277,15 @@ class CC_EXPORT TileManager : CheckerImageTrackerClient {
   CheckerImageTracker& checker_image_tracker() {
     return checker_image_tracker_;
   }
+  DecodedImageTracker& decoded_image_tracker() {
+    return decoded_image_tracker_;
+  }
 
   const std::vector<DrawImage>& decode_tasks_for_testing(Tile::Id id) {
     return scheduled_draw_images_[id];
   }
+
+  void set_active_url(const GURL& url) { active_url_ = url; }
 
  protected:
   friend class Tile;
@@ -365,7 +369,7 @@ class CC_EXPORT TileManager : CheckerImageTrackerClient {
 
   void DidFinishRunningTileTasksRequiredForActivation();
   void DidFinishRunningTileTasksRequiredForDraw();
-  void DidFinishRunningAllTileTasks();
+  void DidFinishRunningAllTileTasks(bool has_pending_queries);
 
   scoped_refptr<TileTask> CreateTaskSetFinishedTask(
       void (TileManager::*callback)());
@@ -393,6 +397,8 @@ class CC_EXPORT TileManager : CheckerImageTrackerClient {
   void FlushAndIssueSignals();
   void CheckPendingGpuWorkAndIssueSignals();
   void IssueSignals();
+  void ScheduleCheckRasterFinishedQueries();
+  void CheckRasterFinishedQueries();
 
   TileManagerClient* client_;
   base::SequencedTaskRunner* task_runner_;
@@ -414,6 +420,7 @@ class CC_EXPORT TileManager : CheckerImageTrackerClient {
   bool did_oom_on_last_assign_;
 
   ImageController image_controller_;
+  DecodedImageTracker decoded_image_tracker_;
   CheckerImageTracker checker_image_tracker_;
 
   RasterTaskCompletionStats raster_task_completion_stats_;
@@ -444,6 +451,13 @@ class CC_EXPORT TileManager : CheckerImageTrackerClient {
   // Number of tiles with a checker-imaged resource or active raster tasks which
   // will create a checker-imaged resource.
   int num_of_tiles_with_checker_images_ = 0;
+
+  GURL active_url_;
+
+  // The callback scheduled to poll whether the GPU side work for pending tiles
+  // has completed.
+  bool has_pending_queries_ = false;
+  base::CancelableClosure check_pending_tile_queries_callback_;
 
   // We need two WeakPtrFactory objects as the invalidation pattern of each is
   // different. The |task_set_finished_weak_ptr_factory_| is invalidated any

@@ -23,19 +23,18 @@
 #include "content/common/child_process_host_impl.h"
 #include "content/common/content_switches_internal.h"
 #include "content/public/browser/content_browser_client.h"
+#include "content/public/browser/network_service_instance.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/common/content_switches.h"
-#include "content/public/common/mojo_channel_switches.h"
 #include "content/public/common/pepper_plugin_info.h"
 #include "content/public/common/process_type.h"
 #include "content/public/common/sandboxed_process_launcher_delegate.h"
 #include "content/public/common/service_names.mojom.h"
-#include "content/public/common/zygote_buildflags.h"
-#include "mojo/edk/embedder/embedder.h"
-#include "net/base/network_change_notifier.h"
 #include "ppapi/proxy/ppapi_messages.h"
+#include "services/network/public/cpp/network_connection_tracker.h"
 #include "services/service_manager/sandbox/sandbox_type.h"
 #include "services/service_manager/sandbox/switches.h"
+#include "services/service_manager/zygote/common/zygote_buildflags.h"
 #include "ui/base/ui_base_switches.h"
 
 #if defined(OS_WIN)
@@ -48,7 +47,7 @@
 #endif
 
 #if BUILDFLAG(USE_ZYGOTE_HANDLE)
-#include "content/public/common/zygote_handle.h"
+#include "services/service_manager/zygote/common/zygote_handle.h"  // nogncheck
 #endif
 
 namespace content {
@@ -58,8 +57,7 @@ class PpapiPluginSandboxedProcessLauncherDelegate
     : public content::SandboxedProcessLauncherDelegate {
  public:
   explicit PpapiPluginSandboxedProcessLauncherDelegate(bool is_broker)
-#if (defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)) || \
-    defined(OS_WIN)
+#if BUILDFLAG(USE_ZYGOTE_HANDLE) || defined(OS_WIN)
       : is_broker_(is_broker)
 #endif
   {
@@ -104,14 +102,14 @@ class PpapiPluginSandboxedProcessLauncherDelegate
 #endif  // OS_WIN
 
 #if BUILDFLAG(USE_ZYGOTE_HANDLE)
-  ZygoteHandle GetZygote() override {
+  service_manager::ZygoteHandle GetZygote() override {
     const base::CommandLine& browser_command_line =
         *base::CommandLine::ForCurrentProcess();
     base::CommandLine::StringType plugin_launcher = browser_command_line
         .GetSwitchValueNative(switches::kPpapiPluginLauncher);
     if (is_broker_ || !plugin_launcher.empty())
       return nullptr;
-    return GetGenericZygote();
+    return service_manager::GetGenericZygote();
   }
 #endif  // BUILDFLAG(USE_ZYGOTE_HANDLE)
 
@@ -124,8 +122,7 @@ class PpapiPluginSandboxedProcessLauncherDelegate
   }
 
  private:
-#if (defined(OS_POSIX) && !defined(OS_MACOSX) && !defined(OS_ANDROID)) || \
-    defined(OS_WIN)
+#if BUILDFLAG(USE_ZYGOTE_HANDLE) || defined(OS_WIN)
   bool is_broker_;
 #endif
 
@@ -133,25 +130,38 @@ class PpapiPluginSandboxedProcessLauncherDelegate
 };
 
 class PpapiPluginProcessHost::PluginNetworkObserver
-    : public net::NetworkChangeNotifier::NetworkChangeObserver {
+    : public network::NetworkConnectionTracker::NetworkConnectionObserver {
  public:
   explicit PluginNetworkObserver(PpapiPluginProcessHost* process_host)
-      : process_host_(process_host) {
-    net::NetworkChangeNotifier::AddNetworkChangeObserver(this);
+      : process_host_(process_host),
+        network_connection_tracker_(nullptr),
+        weak_factory_(this) {
+    GetNetworkConnectionTrackerFromUIThread(
+        base::BindOnce(&PluginNetworkObserver::SetNetworkConnectionTracker,
+                       weak_factory_.GetWeakPtr()));
+  }
+
+  void SetNetworkConnectionTracker(
+      network::NetworkConnectionTracker* network_connection_tracker) {
+    DCHECK(network_connection_tracker);
+    network_connection_tracker_ = network_connection_tracker;
+    network_connection_tracker_->AddNetworkConnectionObserver(this);
   }
 
   ~PluginNetworkObserver() override {
-    net::NetworkChangeNotifier::RemoveNetworkChangeObserver(this);
+    if (network_connection_tracker_)
+      network_connection_tracker_->RemoveNetworkConnectionObserver(this);
   }
 
-  void OnNetworkChanged(
-      net::NetworkChangeNotifier::ConnectionType type) override {
+  void OnConnectionChanged(network::mojom::ConnectionType type) override {
     process_host_->Send(new PpapiMsg_SetNetworkState(
-        type != net::NetworkChangeNotifier::CONNECTION_NONE));
+        type != network::mojom::ConnectionType::CONNECTION_NONE));
   }
 
  private:
   PpapiPluginProcessHost* const process_host_;
+  network::NetworkConnectionTracker* network_connection_tracker_;
+  base::WeakPtrFactory<PluginNetworkObserver> weak_factory_;
 };
 
 PpapiPluginProcessHost::~PpapiPluginProcessHost() {
@@ -367,10 +377,10 @@ bool PpapiPluginProcessHost::Init(const PepperPluginInfo& info) {
   if (!is_broker_) {
     static const char* const kPluginForwardSwitches[] = {
       service_manager::switches::kDisableSeccompFilterSandbox,
+      service_manager::switches::kNoSandbox,
 #if defined(OS_MACOSX)
-      switches::kEnableSandboxLogging,
+      service_manager::switches::kEnableSandboxLogging,
 #endif
-      switches::kNoSandbox,
       switches::kPpapiStartupDialog,
     };
     cmd_line->CopySwitchesFrom(browser_command_line, kPluginForwardSwitches,
@@ -513,8 +523,8 @@ void PpapiPluginProcessHost::OnRendererPluginChannelCreated(
   sent_requests_.pop();
 
   const ChildProcessData& data = process_->GetData();
-  client->OnPpapiChannelOpened(channel_handle, base::GetProcId(data.handle),
-                               data.id);
+  client->OnPpapiChannelOpened(channel_handle,
+                               base::GetProcId(data.GetHandle()), data.id);
 }
 
 }  // namespace content

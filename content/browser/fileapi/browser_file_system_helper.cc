@@ -5,6 +5,7 @@
 #include "content/browser/fileapi/browser_file_system_helper.h"
 
 #include <stddef.h>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -13,9 +14,11 @@
 #include "base/files/file_path.h"
 #include "base/sequenced_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task_scheduler/lazy_task_runner.h"
+#include "base/task/lazy_task_runner.h"
+#include "base/task/post_task.h"
 #include "content/browser/child_process_security_policy_impl.h"
 #include "content/public/browser/browser_context.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/content_browser_client.h"
@@ -62,11 +65,8 @@ FileSystemOptions CreateBrowserFileSystemOptions(bool is_incognito) {
           switches::kAllowFileAccessFromFiles)) {
     additional_allowed_schemes.push_back(url::kFileScheme);
   }
-  leveldb::Env* env_override = nullptr;
-  if (is_incognito)
-    env_override = leveldb_chrome::NewMemEnv(leveldb::Env::Default());
-  return FileSystemOptions(profile_mode, additional_allowed_schemes,
-                           env_override);
+  return FileSystemOptions(profile_mode, is_incognito,
+                           additional_allowed_schemes);
 }
 
 }  // namespace
@@ -91,20 +91,19 @@ scoped_refptr<storage::FileSystemContext> CreateFileSystemContext(
 
   scoped_refptr<storage::FileSystemContext> file_system_context =
       new storage::FileSystemContext(
-          BrowserThread::GetTaskRunnerForThread(BrowserThread::IO).get(),
+          base::CreateSingleThreadTaskRunnerWithTraits({BrowserThread::IO})
+              .get(),
           g_fileapi_task_runner.Get().get(),
           BrowserContext::GetMountPoints(browser_context),
           browser_context->GetSpecialStoragePolicy(), quota_manager_proxy,
           std::move(additional_backends), url_request_auto_mount_handlers,
           profile_path, CreateBrowserFileSystemOptions(is_incognito));
 
-  std::vector<storage::FileSystemType> types;
-  file_system_context->GetFileSystemTypes(&types);
-  for (size_t i = 0; i < types.size(); ++i) {
+  for (const storage::FileSystemType& type :
+       file_system_context->GetFileSystemTypes()) {
     ChildProcessSecurityPolicyImpl::GetInstance()
         ->RegisterFileSystemPermissionPolicy(
-            types[i],
-            storage::FileSystemContext::GetPermissionPolicy(types[i]));
+            type, storage::FileSystemContext::GetPermissionPolicy(type));
   }
 
   return file_system_context;
@@ -155,8 +154,12 @@ void PrepareDropDataForChildProcess(
 #if defined(OS_CHROMEOS)
   // The externalfile:// scheme is used in Chrome OS to open external files in a
   // browser tab.
+  // TODO(https://crbug.com/858972): This seems like it could be forged by the
+  // renderer. This probably needs to check that this didn't originate from the
+  // renderer... Also, this probably can just be GrantRequestURL (which doesn't
+  // yet exist) instead of GrantCommitURL.
   if (drop_data->url.SchemeIs(content::kExternalFileScheme))
-    security_policy->GrantRequestURL(child_id, drop_data->url);
+    security_policy->GrantCommitURL(child_id, drop_data->url);
 #endif
 
   // The filenames vector represents a capability to access the given files.

@@ -13,7 +13,6 @@
 #include "base/time/clock.h"
 #include "base/time/default_clock.h"
 #include "build/build_config.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_compression_stats.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_config.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_io_data.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_service.h"
@@ -24,6 +23,8 @@
 #include "components/prefs/pref_member.h"
 #include "components/prefs/pref_service.h"
 #include "net/base/network_change_notifier.h"
+#include "net/http/http_request_headers.h"
+#include "services/network/public/cpp/features.h"
 
 namespace {
 
@@ -52,7 +53,7 @@ namespace data_reduction_proxy {
 DataReductionProxySettings::DataReductionProxySettings()
     : unreachable_(false),
       deferred_initialization_(false),
-      data_reduction_proxy_enabled_pref_name_(),
+
       prefs_(nullptr),
       config_(nullptr),
       clock_(base::DefaultClock::GetInstance()) {}
@@ -79,7 +80,7 @@ void DataReductionProxySettings::InitDataReductionProxySettings(
   DCHECK(prefs);
   DCHECK(io_data);
   DCHECK(io_data->config());
-  DCHECK(data_reduction_proxy_service.get());
+  DCHECK(data_reduction_proxy_service);
   data_reduction_proxy_enabled_pref_name_ =
       data_reduction_proxy_enabled_pref_name;
   prefs_ = prefs;
@@ -95,6 +96,9 @@ void DataReductionProxySettings::InitDataReductionProxySettings(
         ->SetDataUsageReportingEnabled(true);
   }
 #endif  // defined(OS_ANDROID)
+
+  for (auto& observer : observers_)
+    observer.OnSettingsInitialized();
 }
 
 void DataReductionProxySettings::OnServiceInitialized() {
@@ -105,6 +109,10 @@ void DataReductionProxySettings::OnServiceInitialized() {
   // Technically, this is not "at startup", but this is the first chance that
   // IO data objects can be called.
   UpdateIOData(true);
+  if (proxy_config_client_) {
+    data_reduction_proxy_service_->SetCustomProxyConfigClient(
+        std::move(proxy_config_client_));
+  }
 }
 
 void DataReductionProxySettings::SetCallbackToRegisterSyntheticFieldTrial(
@@ -115,6 +123,11 @@ void DataReductionProxySettings::SetCallbackToRegisterSyntheticFieldTrial(
 }
 
 bool DataReductionProxySettings::IsDataReductionProxyEnabled() const {
+  if (base::FeatureList::IsEnabled(network::features::kNetworkService) &&
+      !params::IsEnabledWithNetworkService()) {
+    return false;
+  }
+
   if (spdy_proxy_auth_enabled_.GetPrefName().empty())
     return false;
   return spdy_proxy_auth_enabled_.GetValue() ||
@@ -151,11 +164,12 @@ int64_t DataReductionProxySettings::GetDataReductionLastUpdateTime() {
       data_reduction_proxy_service_->compression_stats()->GetLastUpdateTime();
 }
 
-void DataReductionProxySettings::ClearDataSavingStatistics() {
+void DataReductionProxySettings::ClearDataSavingStatistics(
+    DataReductionProxySavingsClearedReason reason) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(data_reduction_proxy_service_->compression_stats());
-  data_reduction_proxy_service_->compression_stats()
-      ->ClearDataSavingStatistics();
+  data_reduction_proxy_service_->compression_stats()->ClearDataSavingStatistics(
+      reason);
 }
 
 int64_t DataReductionProxySettings::GetTotalHttpContentLengthSaved() {
@@ -270,12 +284,44 @@ void DataReductionProxySettings::MaybeActivateDataReductionProxy(
     UpdateIOData(at_startup);
 }
 
+const net::HttpRequestHeaders&
+DataReductionProxySettings::GetProxyRequestHeaders() const {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  return proxy_request_headers_;
+};
+
+void DataReductionProxySettings::SetProxyRequestHeaders(
+    const net::HttpRequestHeaders& headers) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  proxy_request_headers_ = headers;
+  for (auto& observer : observers_)
+    observer.OnProxyRequestHeadersChanged(headers);
+}
+
+void DataReductionProxySettings::AddDataReductionProxySettingsObserver(
+    DataReductionProxySettingsObserver* observer) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  observers_.AddObserver(observer);
+}
+
+void DataReductionProxySettings::RemoveDataReductionProxySettingsObserver(
+    DataReductionProxySettingsObserver* observer) {
+  DCHECK(thread_checker_.CalledOnValidThread());
+  observers_.RemoveObserver(observer);
+}
+
 DataReductionProxyEventStore* DataReductionProxySettings::GetEventStore()
     const {
   if (data_reduction_proxy_service_)
     return data_reduction_proxy_service_->event_store();
 
   return nullptr;
+}
+
+void DataReductionProxySettings::SetCustomProxyConfigClient(
+    network::mojom::CustomProxyConfigClientPtrInfo proxy_config_client) {
+  DCHECK(!data_reduction_proxy_service_);
+  proxy_config_client_ = std::move(proxy_config_client);
 }
 
 // Metrics methods

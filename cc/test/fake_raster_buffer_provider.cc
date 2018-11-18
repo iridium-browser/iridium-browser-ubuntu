@@ -10,11 +10,11 @@ namespace cc {
 
 class StubGpuBacking : public ResourcePool::GpuBacking {
  public:
-  base::trace_event::MemoryAllocatorDumpGuid MemoryDumpGuid(
-      uint64_t tracing_process_id) override {
-    return {};
-  }
-  base::UnguessableToken SharedMemoryGuid() override { return {}; }
+  void OnMemoryDump(
+      base::trace_event::ProcessMemoryDump* pmd,
+      const base::trace_event::MemoryAllocatorDumpGuid& buffer_dump_guid,
+      uint64_t tracing_process_id,
+      int importance) const override {}
 };
 
 FakeRasterBufferProviderImpl::FakeRasterBufferProviderImpl() = default;
@@ -34,18 +34,15 @@ FakeRasterBufferProviderImpl::AcquireBufferForRaster(
 
 void FakeRasterBufferProviderImpl::Flush() {}
 
-viz::ResourceFormat FakeRasterBufferProviderImpl::GetResourceFormat(
-    bool must_support_alpha) const {
+viz::ResourceFormat FakeRasterBufferProviderImpl::GetResourceFormat() const {
   return viz::ResourceFormat::RGBA_8888;
 }
 
-bool FakeRasterBufferProviderImpl::IsResourceSwizzleRequired(
-    bool must_support_alpha) const {
-  return ResourceFormatRequiresSwizzle(GetResourceFormat(must_support_alpha));
+bool FakeRasterBufferProviderImpl::IsResourceSwizzleRequired() const {
+  return false;
 }
 
-bool FakeRasterBufferProviderImpl::IsResourcePremultiplied(
-    bool must_support_alpha) const {
+bool FakeRasterBufferProviderImpl::IsResourcePremultiplied() const {
   return true;
 }
 
@@ -67,5 +64,9 @@ uint64_t FakeRasterBufferProviderImpl::SetReadyToDrawCallback(
 }
 
 void FakeRasterBufferProviderImpl::Shutdown() {}
+
+bool FakeRasterBufferProviderImpl::CheckRasterFinishedQueries() {
+  return false;
+}
 
 }  // namespace cc

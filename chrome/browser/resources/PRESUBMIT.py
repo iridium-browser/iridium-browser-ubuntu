@@ -8,8 +8,6 @@ See http://dev.chromium.org/developers/how-tos/depottools/presubmit-scripts
 for more details about the presubmit API built into depot_tools.
 """
 
-import os
-
 ACTION_XML_PATH = '../../../tools/metrics/actions/actions.xml'
 
 
@@ -125,8 +123,8 @@ def _CheckChangeOnUploadOrCommit(input_api, output_api):
     results += CheckHtml(input_api, output_api)
 
   webui_sources = set(['optimize_webui.py', 'unpack_pak.py'])
-  affected_filenames = set([os.path.basename(f.LocalPath()) for f in affected])
-  if webui_sources.intersection(affected_filenames):
+  affected_files = [input_api.os_path.basename(f.LocalPath()) for f in affected]
+  if webui_sources.intersection(set(affected_files)):
     results += RunOptimizeWebUiTests(input_api, output_api)
   results += _CheckWebDevStyle(input_api, output_api)
   results += input_api.canned_checks.CheckPatchFormatted(input_api, output_api,
@@ -140,12 +138,3 @@ def CheckChangeOnUpload(input_api, output_api):
 
 def CheckChangeOnCommit(input_api, output_api):
   return _CheckChangeOnUploadOrCommit(input_api, output_api)
-
-
-def PostUploadHook(cl, change, output_api):
-  return output_api.EnsureCQIncludeTrybotsAreAdded(
-    cl,
-    [
-      'master.tryserver.chromium.linux:closure_compilation',
-    ],
-    'Automatically added optional Closure bots to run on CQ.')

@@ -5,6 +5,9 @@
 #include "third_party/blink/renderer/modules/payments/payments_validators.h"
 
 #include "third_party/blink/renderer/bindings/core/v8/script_regexp.h"
+#include "third_party/blink/renderer/modules/payments/address_errors.h"
+#include "third_party/blink/renderer/modules/payments/payer_errors.h"
+#include "third_party/blink/renderer/modules/payments/payment_validation_errors.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_impl.h"
 
@@ -15,36 +18,15 @@ static const int kMaxiumStringLength = 2048;
 
 bool PaymentsValidators::IsValidCurrencyCodeFormat(
     const String& code,
-    const String& system,
     String* optional_error_message) {
-  if (system == "urn:iso:std:iso:4217") {
-    if (ScriptRegexp("^[A-Z]{3}$", kTextCaseUnicodeInsensitive).Match(code) ==
-        0)
-      return true;
-
-    if (optional_error_message) {
-      *optional_error_message =
-          "'" + code +
-          "' is not a valid ISO 4217 currency code, should "
-          "be well-formed 3-letter alphabetic code.";
-    }
-
-    return false;
-  }
-
-  if (!KURL(NullURL(), system).IsValid()) {
-    if (optional_error_message)
-      *optional_error_message = "The currency system is not a valid URL";
-
-    return false;
-  }
-
-  if (code.length() <= kMaxiumStringLength)
+  if (ScriptRegexp("^[A-Z]{3}$", kTextCaseUnicodeInsensitive).Match(code) == 0)
     return true;
 
-  if (optional_error_message)
-    *optional_error_message =
-        "The currency code should be at most 2048 characters long";
+  if (optional_error_message) {
+    *optional_error_message = "'" + code +
+                              "' is not a valid ISO 4217 currency code, should "
+                              "be well-formed 3-letter alphabetic code.";
+  }
 
   return false;
 }
@@ -143,6 +125,63 @@ bool PaymentsValidators::IsValidErrorMsgFormat(const String& error,
         "Error message should be at most 2048 characters long";
 
   return false;
+}
+
+// static
+bool PaymentsValidators::IsValidAddressErrorsFormat(
+    const AddressErrors& errors,
+    String* optional_error_message) {
+  return (!errors.hasAddressLine() ||
+          IsValidErrorMsgFormat(errors.addressLine(),
+                                optional_error_message)) &&
+         (!errors.hasCity() ||
+          IsValidErrorMsgFormat(errors.city(), optional_error_message)) &&
+         (!errors.hasCountry() ||
+          IsValidErrorMsgFormat(errors.country(), optional_error_message)) &&
+         (!errors.hasDependentLocality() ||
+          IsValidErrorMsgFormat(errors.dependentLocality(),
+                                optional_error_message)) &&
+         (!errors.hasLanguageCode() ||
+          IsValidErrorMsgFormat(errors.languageCode(),
+                                optional_error_message)) &&
+         (!errors.hasOrganization() ||
+          IsValidErrorMsgFormat(errors.organization(),
+                                optional_error_message)) &&
+         (!errors.hasPhone() ||
+          IsValidErrorMsgFormat(errors.phone(), optional_error_message)) &&
+         (!errors.hasPostalCode() ||
+          IsValidErrorMsgFormat(errors.postalCode(), optional_error_message)) &&
+         (!errors.hasRecipient() ||
+          IsValidErrorMsgFormat(errors.recipient(), optional_error_message)) &&
+         (!errors.hasRegion() ||
+          IsValidErrorMsgFormat(errors.region(), optional_error_message)) &&
+         (!errors.hasRegionCode() ||
+          IsValidErrorMsgFormat(errors.regionCode(), optional_error_message)) &&
+         (!errors.hasSortingCode() ||
+          IsValidErrorMsgFormat(errors.sortingCode(), optional_error_message));
+}
+
+// static
+bool PaymentsValidators::IsValidPayerErrorsFormat(
+    const PayerErrors& errors,
+    String* optional_error_message) {
+  return (!errors.hasEmail() ||
+          IsValidErrorMsgFormat(errors.email(), optional_error_message)) &&
+         (!errors.hasName() ||
+          IsValidErrorMsgFormat(errors.name(), optional_error_message)) &&
+         (!errors.hasPhone() ||
+          IsValidErrorMsgFormat(errors.phone(), optional_error_message));
+}
+
+// static
+bool PaymentsValidators::IsValidPaymentValidationErrorsFormat(
+    const PaymentValidationErrors& errors,
+    String* optional_error_message) {
+  return (!errors.hasPayer() ||
+          IsValidPayerErrorsFormat(errors.payer(), optional_error_message)) &&
+         (!errors.hasShippingAddress() ||
+          IsValidAddressErrorsFormat(errors.shippingAddress(),
+                                     optional_error_message));
 }
 
 }  // namespace blink

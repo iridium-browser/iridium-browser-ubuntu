@@ -11,7 +11,7 @@
 #include <unordered_map>
 
 #include "base/containers/mru_cache.h"
-#include "base/memory/memory_coordinator_client.h"
+#include "base/memory/memory_pressure_listener.h"
 #include "base/memory/ref_counted.h"
 #include "base/numerics/safe_math.h"
 #include "base/trace_event/memory_dump_provider.h"
@@ -24,8 +24,7 @@ namespace cc {
 
 class CC_EXPORT SoftwareImageDecodeCache
     : public ImageDecodeCache,
-      public base::trace_event::MemoryDumpProvider,
-      public base::MemoryCoordinatorClient {
+      public base::trace_event::MemoryDumpProvider {
  public:
   using Utils = SoftwareImageDecodeCacheUtils;
   using CacheKey = Utils::CacheKey;
@@ -34,7 +33,8 @@ class CC_EXPORT SoftwareImageDecodeCache
   enum class DecodeTaskType { USE_IN_RASTER_TASKS, USE_OUT_OF_RASTER_TASKS };
 
   SoftwareImageDecodeCache(SkColorType color_type,
-                           size_t locked_memory_limit_bytes);
+                           size_t locked_memory_limit_bytes,
+                           PaintImage::GeneratorClientId generator_client_id);
   ~SoftwareImageDecodeCache() override;
 
   // ImageDecodeCache overrides.
@@ -52,7 +52,7 @@ class CC_EXPORT SoftwareImageDecodeCache
       bool aggressively_free_resources) override {}
   void ClearCache() override;
   size_t GetMaximumMemoryLimitBytes() const override;
-  void NotifyImageUnused(const PaintImage::FrameKey& frame_key) override;
+  bool UseCacheForDrawImage(const DrawImage& image) const override;
 
   // Decode the given image and store it in the cache. This is only called by an
   // image decode task from a worker thread.
@@ -112,9 +112,8 @@ class CC_EXPORT SoftwareImageDecodeCache
   // reduced within the given limit.
   void ReduceCacheUsageUntilWithinLimit(size_t limit);
 
-  // Overriden from base::MemoryCoordinatorClient.
-  void OnMemoryStateChange(base::MemoryState state) override;
-  void OnPurgeMemory() override;
+  void OnMemoryPressure(
+      base::MemoryPressureListener::MemoryPressureLevel level);
 
   // Helper method to get the different tasks. Note that this should be used as
   // if it was public (ie, all of the locks need to be properly acquired).
@@ -129,6 +128,7 @@ class CC_EXPORT SoftwareImageDecodeCache
                               CacheEntry* cache_entry);
   void AddBudgetForImage(const CacheKey& key, CacheEntry* entry);
   void RemoveBudgetForImage(const CacheKey& key, CacheEntry* entry);
+  base::Optional<CacheKey> FindCachedCandidate(const CacheKey& key);
 
   void UnrefImage(const CacheKey& key);
 
@@ -141,6 +141,8 @@ class CC_EXPORT SoftwareImageDecodeCache
   // Decoded images and ref counts (predecode path).
   ImageMRUCache decoded_images_;
 
+  std::unique_ptr<base::MemoryPressureListener> memory_pressure_listener_;
+
   // A map of PaintImage::FrameKey to the ImageKeys for cached decodes of this
   // PaintImage.
   std::unordered_map<PaintImage::FrameKey,
@@ -150,7 +152,9 @@ class CC_EXPORT SoftwareImageDecodeCache
 
   MemoryBudget locked_images_budget_;
 
-  SkColorType color_type_;
+  const SkColorType color_type_;
+  const PaintImage::GeneratorClientId generator_client_id_;
+
   size_t max_items_in_cache_;
   // Records the maximum number of items in the cache over the lifetime of the
   // cache. This is updated anytime we are requested to reduce cache usage.

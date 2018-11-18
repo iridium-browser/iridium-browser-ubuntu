@@ -14,18 +14,16 @@
 
 class CBC_OnedCode128Writer;
 
-class CBC_Code128 : public CBC_OneCode {
+class CBC_Code128 final : public CBC_OneCode {
  public:
   explicit CBC_Code128(BC_TYPE type);
   ~CBC_Code128() override;
 
   // CBC_OneCode:
+  BC_TYPE GetType() override;
   bool Encode(const WideStringView& contents) override;
   bool RenderDevice(CFX_RenderDevice* device,
                     const CFX_Matrix* matrix) override;
-  BC_TYPE GetType() override;
-
-  bool SetTextLocation(BC_TEXT_LOC loction);
 
  private:
   CBC_OnedCode128Writer* GetOnedCode128Writer();

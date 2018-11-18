@@ -4,6 +4,9 @@
 
 #include "chrome/browser/chromeos/policy/policy_cert_verifier.h"
 
+#include <utility>
+
+#include "base/bind.h"
 #include "base/logging.h"
 #include "chrome/browser/browser_process.h"
 #include "content/public/browser/browser_thread.h"
@@ -27,15 +30,23 @@ void MaybeSignalAnchorUse(int error,
   anchor_used_callback.Run();
 }
 
-void CompleteAndSignalAnchorUse(
-    const base::Closure& anchor_used_callback,
-    const net::CompletionCallback& completion_callback,
-    const net::CertVerifyResult* verify_result,
-    int error) {
+void CompleteAndSignalAnchorUse(const base::Closure& anchor_used_callback,
+                                net::CompletionOnceCallback completion_callback,
+                                const net::CertVerifyResult* verify_result,
+                                int error) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
   MaybeSignalAnchorUse(error, anchor_used_callback, *verify_result);
-  if (!completion_callback.is_null())
-    completion_callback.Run(error);
+  std::move(completion_callback).Run(error);
+}
+
+net::CertVerifier::Config ExtendTrustAnchors(
+    const net::CertVerifier::Config& config,
+    const net::CertificateList& trust_anchors) {
+  net::CertVerifier::Config new_config = config;
+  new_config.additional_trust_anchors.insert(
+      new_config.additional_trust_anchors.begin(), trust_anchors.begin(),
+      trust_anchors.end());
+  return new_config;
 }
 
 }  // namespace
@@ -59,44 +70,42 @@ void PolicyCertVerifier::InitializeOnIOThread(
   }
   delegate_ = std::make_unique<net::CachingCertVerifier>(
       std::make_unique<net::MultiThreadedCertVerifier>(verify_proc.get()));
+  delegate_->SetConfig(ExtendTrustAnchors(orig_config_, trust_anchors_));
 }
 
 void PolicyCertVerifier::SetTrustAnchors(
     const net::CertificateList& trust_anchors) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
+  if (trust_anchors == trust_anchors_)
+    return;
   trust_anchors_ = trust_anchors;
+  if (!delegate_)
+    return;
+  delegate_->SetConfig(ExtendTrustAnchors(orig_config_, trust_anchors_));
 }
 
-int PolicyCertVerifier::Verify(
-    const RequestParams& params,
-    net::CRLSet* crl_set,
-    net::CertVerifyResult* verify_result,
-    const net::CompletionCallback& completion_callback,
-    std::unique_ptr<Request>* out_req,
-    const net::NetLogWithSource& net_log) {
+int PolicyCertVerifier::Verify(const RequestParams& params,
+                               net::CertVerifyResult* verify_result,
+                               net::CompletionOnceCallback completion_callback,
+                               std::unique_ptr<Request>* out_req,
+                               const net::NetLogWithSource& net_log) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
   DCHECK(delegate_);
-  net::CompletionCallback wrapped_callback =
-      base::Bind(&CompleteAndSignalAnchorUse,
-                 anchor_used_callback_,
-                 completion_callback,
-                 verify_result);
+  DCHECK(completion_callback);
+  net::CompletionOnceCallback wrapped_callback =
+      base::BindOnce(&CompleteAndSignalAnchorUse, anchor_used_callback_,
+                     std::move(completion_callback), verify_result);
 
-  net::CertificateList merged_trust_anchors(params.additional_trust_anchors());
-  merged_trust_anchors.insert(merged_trust_anchors.begin(),
-                              trust_anchors_.begin(), trust_anchors_.end());
-  net::CertVerifier::RequestParams new_params(
-      params.certificate(), params.hostname(), params.flags(),
-      params.ocsp_response(), merged_trust_anchors);
-  int error = delegate_->Verify(new_params, crl_set, verify_result,
-                                wrapped_callback, out_req, net_log);
+  int error = delegate_->Verify(params, verify_result,
+                                std::move(wrapped_callback), out_req, net_log);
   MaybeSignalAnchorUse(error, anchor_used_callback_, *verify_result);
   return error;
 }
 
-bool PolicyCertVerifier::SupportsOCSPStapling() {
+void PolicyCertVerifier::SetConfig(const Config& config) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
-  return delegate_->SupportsOCSPStapling();
+  orig_config_ = config;
+  delegate_->SetConfig(ExtendTrustAnchors(orig_config_, trust_anchors_));
 }
 
 }  // namespace policy

@@ -4,10 +4,11 @@
 
 #include "chrome/browser/media/media_engagement_service.h"
 
+#include "base/bind.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/run_loop.h"
-#include "base/test/histogram_tester.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/simple_test_clock.h"
 #include "base/values.h"
@@ -56,10 +57,11 @@ class MediaEngagementChangeWaiter : public content_settings::Observer {
   }
 
   // Overridden from content_settings::Observer:
-  void OnContentSettingChanged(const ContentSettingsPattern& primary_pattern,
-                               const ContentSettingsPattern& secondary_pattern,
-                               ContentSettingsType content_type,
-                               std::string resource_identifier) override {
+  void OnContentSettingChanged(
+      const ContentSettingsPattern& primary_pattern,
+      const ContentSettingsPattern& secondary_pattern,
+      ContentSettingsType content_type,
+      const std::string& resource_identifier) override {
     if (content_type == CONTENT_SETTINGS_TYPE_MEDIA_ENGAGEMENT)
       Proceed();
   }
@@ -128,7 +130,7 @@ class MediaEngagementServiceTest : public ChromeRenderViewHostTestHarness {
 
   void ConfigureHistoryService() {
     HistoryServiceFactory::GetInstance()->SetTestingFactory(
-        profile(), &BuildTestHistoryService);
+        profile(), base::BindRepeating(&BuildTestHistoryService));
   }
 
   void RestartHistoryService() {
@@ -151,8 +153,8 @@ class MediaEngagementServiceTest : public ChromeRenderViewHostTestHarness {
 
   void TearDown() override {
     service_->Shutdown();
-    service_.reset();
     ChromeRenderViewHostTestHarness::TearDown();
+    service_.reset();
   }
 
   void AdvanceClock() {
@@ -161,7 +163,16 @@ class MediaEngagementServiceTest : public ChromeRenderViewHostTestHarness {
 
   void RecordVisit(GURL url) { service_->RecordVisit(url); }
 
-  void RecordPlayback(GURL url) { service_->RecordPlayback(url); }
+  void RecordPlayback(GURL url) {
+    RecordPlaybackForService(service_.get(), url);
+  }
+
+  void RecordPlaybackForService(MediaEngagementService* service, GURL url) {
+    MediaEngagementScore score = service->CreateEngagementScore(url);
+    score.IncrementMediaPlaybacks();
+    score.set_last_media_playback_time(service->clock()->Now());
+    score.Commit();
+  }
 
   void ExpectScores(MediaEngagementService* service,
                     GURL url,
@@ -369,7 +380,7 @@ TEST_F(MediaEngagementServiceTest, IncognitoOverrideRegularProfile) {
   }
 
   incognito_service->RecordVisit(kUrl1);
-  incognito_service->RecordPlayback(kUrl2);
+  RecordPlaybackForService(incognito_service, kUrl2);
 
   // Score shouldn't have changed in regular profile.
   {
@@ -714,8 +725,11 @@ TEST_F(MediaEngagementServiceTest, HistoryExpirationIsNoOp) {
 
     history::HistoryService* history = HistoryServiceFactory::GetForProfile(
         profile(), ServiceAccessType::IMPLICIT_ACCESS);
-    service()->OnURLsDeleted(history, false, true, history::URLRows(),
-                             std::set<GURL>());
+
+    service()->OnURLsDeleted(
+        history, history::DeletionInfo(history::DeletionTimeRange::Invalid(),
+                                       true, history::URLRows(),
+                                       std::set<GURL>(), base::nullopt));
 
     // Same as above, nothing should have changed.
     ExpectScores(origin1, 7.0 / 11.0,

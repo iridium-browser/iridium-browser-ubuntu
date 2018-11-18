@@ -8,24 +8,21 @@
 from __future__ import print_function
 
 import collections
-import constants
 import cPickle
 
 from chromite.lib import buildbucket_lib
 from chromite.lib import build_failure_message
 from chromite.lib import config_lib
 from chromite.lib import constants
-from chromite.lib import cros_build_lib
+from chromite.lib import cros_collections
 from chromite.lib import cros_logging as logging
 from chromite.lib import failure_message_lib
 from chromite.lib import metrics
 from chromite.lib import tree_status
 
 
-site_config = config_lib.GetConfig()
-
 BUILD_STATUS_URL = (
-    '%s/builder-status' % site_config.params.MANIFEST_VERSIONS_GS_URL)
+    '%s/builder-status' % config_lib.GetSiteParams().MANIFEST_VERSIONS_GS_URL)
 NUM_RETRIES = 20
 
 # Namedtupe to store CIDB status info.
@@ -110,6 +107,11 @@ def GetSlavesAbortedBySelfDestructedMaster(master_build_id, db):
       master_build_id,
       message_type=constants.MESSAGE_TYPE_IGNORED_REASON,
       message_subtype=constants.MESSAGE_SUBTYPE_SELF_DESTRUCTION)
+  # tentative fix for crbug.com/890651
+  if not messages:
+    logging.warning("No build message retrieved for master_build_id=%s" %
+                    master_build_id)
+    return set()
   slave_build_ids = [int(m['message_value']) for m in messages]
   build_statuses = db.GetBuildStatuses(slave_build_ids)
   return set(b['build_config'] for b in build_statuses)
@@ -241,9 +243,10 @@ class BuilderStatusManager(object):
       build_id: The build ID (int) of the build to get status of
       master_build_id: The build ID (int) of the master build which may
         have aborted it.
+
     Retuns:
-      A boolean for whether the build was canceled by master
-        during self-destruction.
+      A boolean for whether the build was canceled by master during
+      self-destruction.
     """
     if master_build_id is None:
       # Builds without master_build_id can't be aborted by self-destruction.
@@ -321,7 +324,7 @@ class SlaveBuilderStatus(object):
 
     stage_failures = self.db.GetSlaveFailures(
         self.master_build_id, buildbucket_ids=slave_buildbucket_ids)
-    stage_failures_by_build = cros_build_lib.GroupNamedtuplesByKey(
+    stage_failures_by_build = cros_collections.GroupNamedtuplesByKey(
         stage_failures, 'build_config')
 
     failure_msg_manager = failure_message_lib.FailureMessageManager()
@@ -335,12 +338,12 @@ class SlaveBuilderStatus(object):
     """Get slaves aborted by self-destruction of the master.
 
     Args:
-    cidb_info_dict: A dict mapping slave build config names (strings) to their
+      cidb_info_dict: A dict mapping slave build config names (strings) to their
         cidb infos (in the format of CIDBStatusInfo).
 
     Returns:
       A set of build config names (strings) of slaves aborted by
-    self-destruction.
+      self-destruction.
     """
     return set(build_config
                for build_config, cidb_info in cidb_info_dict.iteritems()
@@ -349,13 +352,12 @@ class SlaveBuilderStatus(object):
 
   def _InitSlaveInfo(self):
     """Init slave info including buildbucket info, cidb info and failures."""
-    if config_lib.UseBuildbucketScheduler(self.config):
-      scheduled_buildbucket_info_dict = buildbucket_lib.GetBuildInfoDict(
-          self.metadata, exclude_experimental=self.exclude_experimental)
-      self.buildbucket_info_dict = self.GetAllSlaveBuildbucketInfo(
-          self.buildbucket_client, scheduled_buildbucket_info_dict,
-          dry_run=self.dry_run)
-      self.builders_array = self.buildbucket_info_dict.keys()
+    scheduled_buildbucket_info_dict = buildbucket_lib.GetBuildInfoDict(
+        self.metadata, exclude_experimental=self.exclude_experimental)
+    self.buildbucket_info_dict = self.GetAllSlaveBuildbucketInfo(
+        self.buildbucket_client, scheduled_buildbucket_info_dict,
+        dry_run=self.dry_run)
+    self.builders_array = self.buildbucket_info_dict.keys()
 
     self.cidb_info_dict = self.GetAllSlaveCIDBStatusInfo(
         self.db, self.master_build_id, self.buildbucket_info_dict)
@@ -411,6 +413,7 @@ class SlaveBuilderStatus(object):
       Dashboard url of the given build. None if no entry found for this given
       build in CIDB and buildbucket_info_dict is None.
     """
+    site_config = config_lib.GetConfig()
     if build_config in cidb_info_dict:
       build_number = cidb_info_dict[build_config].build_number
 
@@ -439,6 +442,7 @@ class SlaveBuilderStatus(object):
       A build_failure_message.BuildFailureMessage object if the status is
       constants.BUILDER_STATUS_FAILED; else, None.
     """
+    site_config = config_lib.GetConfig()
     if status == constants.BUILDER_STATUS_FAILED:
       failure_messages = slave_failures_dict.get(build_config)
       overlays = site_config[build_config].overlays
@@ -623,9 +627,9 @@ class BuilderStatusesFetcher(object):
                  if builder_status.message is not None else None)
       logging.info(
           'Builder %s BuilderStatus.status %s BuilderStatus.message %s'
-          ' BuilderStatus.dashboard_url %s ' %
-          (builder, builder_status.status, message,
-           builder_status.dashboard_url))
+          ' BuilderStatus.dashboard_url %s ',
+          builder, builder_status.status, message,
+          builder_status.dashboard_url)
     return slave_builder_status_dict
 
   def GetBuilderStatuses(self):

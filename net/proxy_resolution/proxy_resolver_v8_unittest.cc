@@ -9,11 +9,11 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "net/base/completion_callback.h"
 #include "net/base/net_errors.h"
 #include "net/proxy_resolution/pac_file_data.h"
 #include "net/proxy_resolution/proxy_info.h"
 #include "net/test/gtest_util.h"
+#include "net/test/test_with_scoped_task_environment.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
@@ -101,13 +101,13 @@ class MockJSBindings : public ProxyResolverV8::JSBindings {
   bool should_terminate;
 };
 
-class ProxyResolverV8Test : public testing::Test {
+class ProxyResolverV8Test : public TestWithScopedTaskEnvironment {
  public:
   // Creates a ProxyResolverV8 using the PAC script contained in |filename|. If
   // called more than once, the previous ProxyResolverV8 is deleted.
   int CreateResolver(const char* filename) {
     base::FilePath path;
-    PathService::Get(base::DIR_SOURCE_ROOT, &path);
+    base::PathService::Get(base::DIR_SOURCE_ROOT, &path);
     path = path.AppendASCII("net");
     path = path.AppendASCII("data");
     path = path.AppendASCII("proxy_resolver_v8_unittest");
@@ -250,7 +250,7 @@ TEST_F(ProxyResolverV8Test, ParseError) {
 
   EXPECT_EQ("Uncaught SyntaxError: Unexpected end of input",
             bindings()->errors[0]);
-  EXPECT_EQ(5, bindings()->errors_line_number[0]);
+  EXPECT_EQ(7, bindings()->errors_line_number[0]);
 }
 
 // Run a PAC script several times, which has side-effects.

@@ -58,9 +58,9 @@ cr.define('extensions', function() {
      * @private
      */
     updateDialogSize_: function(width, height) {
-      const HEADER_HEIGHT = 64;
+      const headerHeight = this.$.body.offsetTop;
       const maxHeight = Math.min(0.9 * window.innerHeight, MAX_HEIGHT);
-      const effectiveHeight = Math.min(maxHeight, HEADER_HEIGHT + height);
+      const effectiveHeight = Math.min(maxHeight, headerHeight + height);
       const effectiveWidth = Math.max(MIN_WIDTH, width);
 
       // Get a reference to the inner native <dialog>.
@@ -82,9 +82,15 @@ cr.define('extensions', function() {
         let preferredSize = null;
         this.extensionOptions_.onpreferredsizechanged = e => {
           preferredSize = e;
-          this.updateDialogSize_(preferredSize.width, preferredSize.height);
           if (!this.$.dialog.open)
             this.$.dialog.showModal();
+          // Updating the dialog size can result in a preferred size change, so
+          // wait until request animation frame fires before updating the dialog
+          // size. This hysteresis prevents the preferred size from oscillating
+          // (see: https://crbug.com/882835).
+          requestAnimationFrame(() => {
+            this.updateDialogSize_(preferredSize.width, preferredSize.height);
+          });
         };
 
         this.boundResizeListener_ = () => {

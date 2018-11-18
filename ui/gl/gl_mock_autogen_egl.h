@@ -8,6 +8,10 @@
 //    clang-format -i -style=chromium filename
 // DO NOT EDIT!
 
+// The following line silences a presubmit warning that would otherwise be
+// triggered by this:
+// no-include-guard-because-multiply-included
+
 MOCK_METHOD1(BindAPI, EGLBoolean(EGLenum api));
 MOCK_METHOD3(BindTexImage,
              EGLBoolean(EGLDisplay dpy, EGLSurface surface, EGLint buffer));
@@ -65,6 +69,8 @@ MOCK_METHOD4(CreateWindowSurface,
                         EGLConfig config,
                         EGLNativeWindowType win,
                         const EGLint* attrib_list));
+MOCK_METHOD2(DebugMessageControlKHR,
+             EGLint(EGLDEBUGPROCKHR callback, const EGLAttrib* attrib_list));
 MOCK_METHOD2(DestroyContext, EGLBoolean(EGLDisplay dpy, EGLContext ctx));
 MOCK_METHOD2(DestroyImageKHR, EGLBoolean(EGLDisplay dpy, EGLImageKHR image));
 MOCK_METHOD2(DestroyStreamKHR, EGLBoolean(EGLDisplay dpy, EGLStreamKHR stream));
@@ -144,6 +150,11 @@ MOCK_METHOD3(ImageFlushExternalEXT,
                         const EGLAttrib* attrib_list));
 MOCK_METHOD3(Initialize,
              EGLBoolean(EGLDisplay dpy, EGLint* major, EGLint* minor));
+MOCK_METHOD4(LabelObjectKHR,
+             EGLint(EGLDisplay display,
+                    EGLenum objectType,
+                    EGLObjectKHR object,
+                    EGLLabelKHR label));
 MOCK_METHOD4(MakeCurrent,
              EGLBoolean(EGLDisplay dpy,
                         EGLSurface draw,
@@ -156,29 +167,13 @@ MOCK_METHOD6(PostSubBufferNV,
                         EGLint y,
                         EGLint width,
                         EGLint height));
-MOCK_METHOD2(ProgramCacheGetAttribANGLE,
-             EGLint(EGLDisplay dpy, EGLenum attrib));
-MOCK_METHOD5(ProgramCachePopulateANGLE,
-             void(EGLDisplay dpy,
-                  const void* key,
-                  EGLint keysize,
-                  const void* binary,
-                  EGLint binarysize));
-MOCK_METHOD6(ProgramCacheQueryANGLE,
-             void(EGLDisplay dpy,
-                  EGLint index,
-                  void* key,
-                  EGLint* keysize,
-                  void* binary,
-                  EGLint* binarysize));
-MOCK_METHOD3(ProgramCacheResizeANGLE,
-             EGLint(EGLDisplay dpy, EGLint limit, EGLenum mode));
 MOCK_METHOD0(QueryAPI, EGLenum());
 MOCK_METHOD4(QueryContext,
              EGLBoolean(EGLDisplay dpy,
                         EGLContext ctx,
                         EGLint attribute,
                         EGLint* value));
+MOCK_METHOD2(QueryDebugKHR, EGLBoolean(EGLint attribute, EGLAttrib* value));
 MOCK_METHOD4(QueryStreamKHR,
              EGLBoolean(EGLDisplay dpy,
                         EGLStreamKHR stream,
@@ -203,6 +198,10 @@ MOCK_METHOD4(QuerySurfacePointerANGLE,
 MOCK_METHOD3(ReleaseTexImage,
              EGLBoolean(EGLDisplay dpy, EGLSurface surface, EGLint buffer));
 MOCK_METHOD0(ReleaseThread, EGLBoolean());
+MOCK_METHOD3(SetBlobCacheFuncsANDROID,
+             void(EGLDisplay dpy,
+                  EGLSetBlobFuncANDROID set,
+                  EGLGetBlobFuncANDROID get));
 MOCK_METHOD4(StreamAttribKHR,
              EGLBoolean(EGLDisplay dpy,
                         EGLStreamKHR stream,

@@ -5,16 +5,16 @@
 #include "chrome/browser/sync/test/integration/profile_sync_service_harness.h"
 
 #include <cstddef>
-#include <iterator>
-#include <ostream>
 #include <sstream>
 
 #include "base/json/json_writer.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
-#include "base/strings/stringprintf.h"
+#include "base/test/bind_test_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/signin/identity_manager_factory.h"
+#include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
+#include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/sync/test/integration/quiesce_status_change_checker.h"
 #include "chrome/browser/sync/test/integration/single_client_status_change_checker.h"
@@ -23,15 +23,15 @@
 #include "chrome/browser/ui/webui/signin/login_ui_service.h"
 #include "chrome/browser/ui/webui/signin/login_ui_service_factory.h"
 #include "chrome/browser/ui/webui/signin/login_ui_test_utils.h"
+#include "chrome/browser/unified_consent/unified_consent_service_factory.h"
 #include "chrome/common/channel_info.h"
-#include "chrome/common/chrome_switches.h"
-#include "components/browser_sync/profile_sync_service.h"
-#include "components/invalidation/impl/p2p_invalidation_service.h"
-#include "components/sync/base/progress_marker_map.h"
+#include "components/signin/core/browser/signin_manager.h"
 #include "components/sync/driver/about_sync_util.h"
 #include "components/sync/engine/sync_string_conversions.h"
-#include "google_apis/gaia/gaia_constants.h"
+#include "components/unified_consent/feature.h"
+#include "components/unified_consent/unified_consent_service.h"
 #include "services/identity/public/cpp/identity_manager.h"
+#include "services/identity/public/cpp/identity_test_utils.h"
 
 using browser_sync::ProfileSyncService;
 using syncer::SyncCycleSnapshot;
@@ -74,16 +74,19 @@ class SyncSetupChecker : public SingleClientStatusChangeChecker {
       : SingleClientStatusChangeChecker(service) {}
 
   bool IsExitConditionSatisfied() override {
-    if (!service()->IsSyncActive())
-      return false;
-    if (service()->ConfigurationDone())
-      return true;
-    // Sync is blocked because a custom passphrase is required.
-    if (service()->passphrase_required_reason() == syncer::REASON_DECRYPTION)
+    syncer::SyncService::TransportState state = service()->GetTransportState();
+    if (state == syncer::SyncService::TransportState::ACTIVE)
       return true;
     // Sync is blocked by an auth error.
     if (HasAuthError(service()))
       return true;
+    if (state != syncer::SyncService::TransportState::CONFIGURING)
+      return false;
+    // Sync is blocked because a custom passphrase is required.
+    if (service()->passphrase_required_reason_for_test() ==
+        syncer::REASON_DECRYPTION) {
+      return true;
+    }
     // Still waiting on sync setup.
     return false;
   }
@@ -97,29 +100,86 @@ class SyncSetupChecker : public SingleClientStatusChangeChecker {
 std::unique_ptr<ProfileSyncServiceHarness> ProfileSyncServiceHarness::Create(
     Profile* profile,
     const std::string& username,
-    const std::string& gaia_id,
     const std::string& password,
     SigninType signin_type) {
-  return base::WrapUnique(new ProfileSyncServiceHarness(
-      profile, username, gaia_id, password, signin_type));
+  return base::WrapUnique(
+      new ProfileSyncServiceHarness(profile, username, password, signin_type));
 }
 
 ProfileSyncServiceHarness::ProfileSyncServiceHarness(
     Profile* profile,
     const std::string& username,
-    const std::string& gaia_id,
     const std::string& password,
     SigninType signin_type)
     : profile_(profile),
       service_(ProfileSyncServiceFactory::GetForProfile(profile)),
       username_(username),
-      gaia_id_(gaia_id),
       password_(password),
       signin_type_(signin_type),
-      oauth2_refesh_token_number_(0),
       profile_debug_name_(profile->GetDebugName()) {}
 
 ProfileSyncServiceHarness::~ProfileSyncServiceHarness() { }
+
+bool ProfileSyncServiceHarness::SignInPrimaryAccount() {
+  // TODO(crbug.com/871221): This function should distinguish primary account
+  // (aka sync account) from secondary accounts (content area signin). Let's
+  // migrate tests that exercise transport-only sync to secondary accounts.
+  DCHECK(!username_.empty());
+
+  switch (signin_type_) {
+    case SigninType::UI_SIGNIN: {
+      Browser* browser = chrome::FindBrowserWithProfile(profile_);
+      DCHECK(browser);
+      if (!login_ui_test_utils::SignInWithUI(browser, username_, password_)) {
+        LOG(ERROR) << "Could not sign in to GAIA servers.";
+        return false;
+      }
+      return true;
+    }
+
+    case SigninType::FAKE_SIGNIN: {
+      identity::IdentityManager* identity_manager =
+          IdentityManagerFactory::GetForProfile(profile_);
+      ProfileOAuth2TokenService* token_service =
+          ProfileOAuth2TokenServiceFactory::GetForProfile(profile_);
+
+      // Verify HasPrimaryAccount() separately because
+      // MakePrimaryAccountAvailable() below DCHECK fails if there is already
+      // an authenticated account.
+      if (identity_manager->HasPrimaryAccount()) {
+        DCHECK_EQ(identity_manager->GetPrimaryAccountInfo().email, username_);
+        // Don't update the refresh token if we already have one. The reason is
+        // that doing so causes Sync (ServerConnectionManager in particular) to
+        // mark the current access token as invalid. Since tests typically
+        // always hand out the same access token string, any new access token
+        // acquired later would also be considered invalid.
+        if (!identity_manager->HasPrimaryAccountWithRefreshToken()) {
+          identity::SetRefreshTokenForPrimaryAccount(token_service,
+                                                     identity_manager);
+        }
+      } else {
+        // Authenticate sync client using GAIA credentials.
+        identity::MakePrimaryAccountAvailable(
+            SigninManagerFactory::GetForProfile(profile_), token_service,
+            identity_manager, username_);
+      }
+      return true;
+    }
+  }
+
+  NOTREACHED();
+  return false;
+}
+
+#if !defined(OS_CHROMEOS)
+void ProfileSyncServiceHarness::SignOutPrimaryAccount() {
+  DCHECK(!username_.empty());
+  identity::ClearPrimaryAccount(
+      SigninManagerFactory::GetForProfile(profile_),
+      IdentityManagerFactory::GetForProfile(profile_),
+      identity::ClearPrimaryAccountPolicy::REMOVE_ALL_ACCOUNTS);
+}
+#endif  // !OS_CHROMEOS
 
 bool ProfileSyncServiceHarness::SetupSync() {
   bool result = SetupSync(syncer::UserSelectableTypes(), false);
@@ -149,7 +209,6 @@ bool ProfileSyncServiceHarness::SetupSync(syncer::ModelTypeSet synced_datatypes,
   DCHECK(!profile_->IsLegacySupervised())
       << "SetupSync should not be used for legacy supervised users.";
 
-  // Initialize the sync client's profile sync service object.
   if (service() == nullptr) {
     LOG(ERROR) << "SetupSync(): service() is null.";
     return false;
@@ -159,28 +218,8 @@ bool ProfileSyncServiceHarness::SetupSync(syncer::ModelTypeSet synced_datatypes,
   // until we've finished configuration.
   sync_blocker_ = service()->GetSetupInProgressHandle();
 
-  DCHECK(!username_.empty());
-  if (signin_type_ == SigninType::UI_SIGNIN) {
-    Browser* browser = chrome::FindBrowserWithProfile(profile_);
-    DCHECK(browser);
-    if (!login_ui_test_utils::SignInWithUI(browser, username_, password_)) {
-      LOG(ERROR) << "Could not sign in to GAIA servers.";
-      return false;
-    }
-  } else if (signin_type_ == SigninType::FAKE_SIGNIN) {
-    // Authenticate sync client using GAIA credentials.
-    // TODO(https://crbug.com/814307): This ideally should go through
-    // identity_test_utils.h (and in the long run IdentityTestEnvironment), but
-    // making that change is complex for reasons described in the bug.
-    identity::IdentityManager* identity_manager =
-        IdentityManagerFactory::GetForProfile(profile_);
-    identity_manager->SetPrimaryAccountSynchronouslyForTests(
-        gaia_id_, username_, GenerateFakeOAuth2RefreshTokenString());
-    std::string account_id =
-        identity_manager->GetPrimaryAccountInfo().account_id;
-    service()->GoogleSigninSucceeded(account_id, username_);
-  } else {
-    LOG(ERROR) << "Unsupported profile signin type.";
+  if (!SignInPrimaryAccount()) {
+    return false;
   }
 
   // Now that auth is completed, request that sync actually start.
@@ -192,7 +231,17 @@ bool ProfileSyncServiceHarness::SetupSync(syncer::ModelTypeSet synced_datatypes,
   // Choose the datatypes to be synced. If all datatypes are to be synced,
   // set sync_everything to true; otherwise, set it to false.
   bool sync_everything = (synced_datatypes == syncer::UserSelectableTypes());
-  service()->OnUserChoseDatatypes(sync_everything, synced_datatypes);
+  if (unified_consent::IsUnifiedConsentFeatureEnabled()) {
+    // When unified consent given is set to |true|, the unified consent service
+    // enables syncing all datatypes.
+    UnifiedConsentServiceFactory::GetForProfile(profile_)
+        ->SetUnifiedConsentGiven(sync_everything);
+    if (!sync_everything) {
+      service()->OnUserChoseDatatypes(sync_everything, synced_datatypes);
+    }
+  } else {
+    service()->OnUserChoseDatatypes(sync_everything, synced_datatypes);
+  }
 
   // Notify ProfileSyncService that we are done with configuration.
   if (skip_passphrase_verification) {
@@ -219,33 +268,41 @@ bool ProfileSyncServiceHarness::SetupSync(syncer::ModelTypeSet synced_datatypes,
         LoginUIService::SYNC_WITH_DEFAULT_SETTINGS);
   }
 
-  if (skip_passphrase_verification) {
-    return true;
-  }
-
-  // Set an implicit passphrase for encryption if an explicit one hasn't already
-  // been set. If an explicit passphrase has been set, immediately return false,
-  // since a decryption passphrase is required.
-  if (!service()->IsUsingSecondaryPassphrase()) {
-    service()->SetEncryptionPassphrase(password_, ProfileSyncService::IMPLICIT);
-  } else {
-    LOG(ERROR) << "A passphrase is required for decryption. Sync cannot proceed"
-                  " until SetDecryptionPassphrase is called.";
-    return false;
+  if (!skip_passphrase_verification) {
+    // Set an implicit passphrase for encryption if an explicit one hasn't
+    // already been set. If an explicit passphrase has been set, immediately
+    // return false, since a decryption passphrase is required.
+    if (!service()->IsUsingSecondaryPassphrase()) {
+      service()->SetEncryptionPassphrase(password_,
+                                         ProfileSyncService::IMPLICIT);
+    } else {
+      LOG(ERROR)
+          << "A passphrase is required for decryption. Sync cannot proceed"
+             " until SetDecryptionPassphrase is called.";
+      return false;
+    }
   }
 
   // Wait for initial sync cycle to be completed.
-  if (!AwaitSyncSetupCompletion()) {
+  if (!AwaitSyncSetupCompletion(skip_passphrase_verification)) {
     return false;
   }
 
   return true;
 }
 
-bool ProfileSyncServiceHarness::RestartSyncService() {
-  DVLOG(1) << "Requesting stop for service.";
-  service()->RequestStop(ProfileSyncService::CLEAR_DATA);
+void ProfileSyncServiceHarness::FinishSyncSetup() {
+  sync_blocker_.reset();
+  service()->SetFirstSetupComplete();
+}
 
+void ProfileSyncServiceHarness::StopSyncService(
+    syncer::SyncService::SyncStopDataFate data_fate) {
+  DVLOG(1) << "Requesting stop for service.";
+  service()->RequestStop(data_fate);
+}
+
+bool ProfileSyncServiceHarness::StartSyncService() {
   std::unique_ptr<syncer::SyncSetupInProgressHandle> blocker =
       service()->GetSetupInProgressHandle();
   DVLOG(1) << "Requesting start for service";
@@ -271,7 +328,7 @@ bool ProfileSyncServiceHarness::RestartSyncService() {
   blocker.reset();
   service()->SetFirstSetupComplete();
 
-  if (!AwaitSyncSetupCompletion()) {
+  if (!AwaitSyncSetupCompletion(/*skip_passphrase_verification=*/false)) {
     LOG(FATAL) << "AwaitSyncSetupCompletion failed.";
     return false;
   }
@@ -279,10 +336,16 @@ bool ProfileSyncServiceHarness::RestartSyncService() {
   return true;
 }
 
-void ProfileSyncServiceHarness::SignoutSyncService() {
-  DCHECK(!username_.empty());
-  service()->GoogleSignedOut(
-      service()->GetAuthenticatedAccountInfo().account_id, username_);
+bool ProfileSyncServiceHarness::HasUnsyncedItems() {
+  base::RunLoop loop;
+  bool result = false;
+  service()->HasUnsyncedItemsForTest(
+      base::BindLambdaForTesting([&](bool has_unsynced_items) {
+        result = has_unsynced_items;
+        loop.Quit();
+      }));
+  loop.Run();
+  return result;
 }
 
 bool ProfileSyncServiceHarness::AwaitMutualSyncCycleCompletion(
@@ -293,19 +356,14 @@ bool ProfileSyncServiceHarness::AwaitMutualSyncCycleCompletion(
   return AwaitQuiescence(harnesses);
 }
 
-bool ProfileSyncServiceHarness::AwaitGroupSyncCycleCompletion(
-    const std::vector<ProfileSyncServiceHarness*>& partners) {
-  return AwaitQuiescence(partners);
-}
-
 // static
 bool ProfileSyncServiceHarness::AwaitQuiescence(
     const std::vector<ProfileSyncServiceHarness*>& clients) {
-  std::vector<ProfileSyncService*> services;
   if (clients.empty()) {
     return true;
   }
 
+  std::vector<ProfileSyncService*> services;
   for (const ProfileSyncServiceHarness* harness : clients) {
     services.push_back(harness->service());
   }
@@ -326,7 +384,8 @@ bool ProfileSyncServiceHarness::AwaitEngineInitialization(
 
   // Make sure that initial sync wasn't blocked by a missing passphrase.
   if (!skip_passphrase_verification &&
-      service()->passphrase_required_reason() == syncer::REASON_DECRYPTION) {
+      service()->passphrase_required_reason_for_test() ==
+          syncer::REASON_DECRYPTION) {
     LOG(ERROR) << "A passphrase is required for decryption. Sync cannot proceed"
                   " until SetDecryptionPassphrase is called.";
     return false;
@@ -340,14 +399,18 @@ bool ProfileSyncServiceHarness::AwaitEngineInitialization(
   return true;
 }
 
-bool ProfileSyncServiceHarness::AwaitSyncSetupCompletion() {
+bool ProfileSyncServiceHarness::AwaitSyncSetupCompletion(
+    bool skip_passphrase_verification) {
   if (!SyncSetupChecker(service()).Wait()) {
     LOG(ERROR) << "SyncSetupChecker timed out.";
     return false;
   }
 
-  // Make sure that initial sync wasn't blocked by a missing passphrase.
-  if (service()->passphrase_required_reason() == syncer::REASON_DECRYPTION) {
+  // If passphrase verification is not skipped, make sure that initial sync
+  // wasn't blocked by a missing passphrase.
+  if (!skip_passphrase_verification &&
+      service()->passphrase_required_reason_for_test() ==
+          syncer::REASON_DECRYPTION) {
     LOG(ERROR) << "A passphrase is required for decryption. Sync cannot proceed"
                   " until SetDecryptionPassphrase is called.";
     return false;
@@ -359,28 +422,6 @@ bool ProfileSyncServiceHarness::AwaitSyncSetupCompletion() {
   }
 
   return true;
-}
-
-std::string ProfileSyncServiceHarness::GenerateFakeOAuth2RefreshTokenString() {
-  return base::StringPrintf("oauth2_refresh_token_%d",
-                            ++oauth2_refesh_token_number_);
-}
-
-bool ProfileSyncServiceHarness::IsSyncDisabled() const {
-  return !service()->IsSetupInProgress() && !service()->IsFirstSetupComplete();
-}
-
-void ProfileSyncServiceHarness::FinishSyncSetup() {
-  sync_blocker_.reset();
-  service()->SetFirstSetupComplete();
-}
-
-SyncCycleSnapshot ProfileSyncServiceHarness::GetLastCycleSnapshot() const {
-  DCHECK(service() != nullptr) << "Sync service has not yet been set up.";
-  if (service()->IsSyncActive()) {
-    return service()->GetLastCycleSnapshot();
-  }
-  return SyncCycleSnapshot();
 }
 
 bool ProfileSyncServiceHarness::EnableSyncForDatatype(
@@ -389,8 +430,12 @@ bool ProfileSyncServiceHarness::EnableSyncForDatatype(
       "EnableSyncForDatatype("
       + std::string(syncer::ModelTypeToString(datatype)) + ")");
 
-  if (IsSyncDisabled())
-    return SetupSync(syncer::ModelTypeSet(datatype));
+  if (!IsSyncEnabledByUser()) {
+    bool result = SetupSync(syncer::ModelTypeSet(datatype));
+    // If SetupSync() succeeded, then Sync must now be enabled.
+    DCHECK(!result || IsSyncEnabledByUser());
+    return result;
+  }
 
   if (service() == nullptr) {
     LOG(ERROR) << "EnableSyncForDatatype(): service() is null.";
@@ -414,7 +459,7 @@ bool ProfileSyncServiceHarness::EnableSyncForDatatype(
   synced_datatypes.Put(syncer::ModelTypeFromInt(datatype));
   synced_datatypes.RetainAll(syncer::UserSelectableTypes());
   service()->OnUserChoseDatatypes(false, synced_datatypes);
-  if (AwaitSyncSetupCompletion()) {
+  if (AwaitSyncSetupCompletion(/*skip_passphrase_verification=*/false)) {
     DVLOG(1) << "EnableSyncForDatatype(): Enabled sync for datatype "
              << syncer::ModelTypeToString(datatype)
              << " on " << profile_debug_name_ << ".";
@@ -450,10 +495,16 @@ bool ProfileSyncServiceHarness::DisableSyncForDatatype(
     return true;
   }
 
+  // Disable unified consent first as otherwise disabling sync is not possible.
+  if (unified_consent::IsUnifiedConsentFeatureEnabled()) {
+    UnifiedConsentServiceFactory::GetForProfile(profile_)
+        ->SetUnifiedConsentGiven(false);
+  }
+
   synced_datatypes.RetainAll(syncer::UserSelectableTypes());
   synced_datatypes.Remove(datatype);
   service()->OnUserChoseDatatypes(false, synced_datatypes);
-  if (AwaitSyncSetupCompletion()) {
+  if (AwaitSyncSetupCompletion(/*skip_passphrase_verification=*/false)) {
     DVLOG(1) << "DisableSyncForDatatype(): Disabled sync for datatype "
              << syncer::ModelTypeToString(datatype)
              << " on " << profile_debug_name_ << ".";
@@ -467,16 +518,26 @@ bool ProfileSyncServiceHarness::DisableSyncForDatatype(
 bool ProfileSyncServiceHarness::EnableSyncForAllDatatypes() {
   DVLOG(1) << GetClientInfoString("EnableSyncForAllDatatypes");
 
-  if (IsSyncDisabled())
-    return SetupSync();
+  if (!IsSyncEnabledByUser()) {
+    bool result = SetupSync();
+    // If SetupSync() succeeded, then Sync must now be enabled.
+    DCHECK(!result || IsSyncEnabledByUser());
+    return result;
+  }
 
   if (service() == nullptr) {
     LOG(ERROR) << "EnableSyncForAllDatatypes(): service() is null.";
     return false;
   }
 
-  service()->OnUserChoseDatatypes(true, syncer::UserSelectableTypes());
-  if (AwaitSyncSetupCompletion()) {
+  if (unified_consent::IsUnifiedConsentFeatureEnabled()) {
+    // Setting unified consent given to true will enable all sync data types.
+    UnifiedConsentServiceFactory::GetForProfile(profile_)
+        ->SetUnifiedConsentGiven(true);
+  } else {
+    service()->OnUserChoseDatatypes(true, syncer::UserSelectableTypes());
+  }
+  if (AwaitSyncSetupCompletion(/*skip_passphrase_verification=*/false)) {
     DVLOG(1) << "EnableSyncForAllDatatypes(): Enabled sync for all datatypes "
              << "on " << profile_debug_name_ << ".";
     return true;
@@ -501,6 +562,24 @@ bool ProfileSyncServiceHarness::DisableSyncForAllDatatypes() {
   return true;
 }
 
+SyncCycleSnapshot ProfileSyncServiceHarness::GetLastCycleSnapshot() const {
+  DCHECK(service() != nullptr) << "Sync service has not yet been set up.";
+  if (service()->IsSyncFeatureActive()) {
+    return service()->GetLastCycleSnapshot();
+  }
+  return SyncCycleSnapshot();
+}
+
+std::string ProfileSyncServiceHarness::GetServiceStatus() {
+  std::unique_ptr<base::DictionaryValue> value(
+      syncer::sync_ui_util::ConstructAboutInformation(service(),
+                                                      chrome::GetChannel()));
+  std::string service_status;
+  base::JSONWriter::WriteWithOptions(
+      *value, base::JSONWriter::OPTIONS_PRETTY_PRINT, &service_status);
+  return service_status;
+}
+
 // TODO(sync): Clean up this method in a separate CL. Remove all snapshot fields
 // and log shorter, more meaningful messages.
 std::string ProfileSyncServiceHarness::GetClientInfoString(
@@ -509,48 +588,31 @@ std::string ProfileSyncServiceHarness::GetClientInfoString(
   os << profile_debug_name_ << ": " << message << ": ";
   if (service()) {
     const SyncCycleSnapshot& snap = GetLastCycleSnapshot();
-    ProfileSyncService::Status status;
+    syncer::SyncStatus status;
     service()->QueryDetailedSyncStatus(&status);
     // Capture select info from the sync session snapshot and syncer status.
-    os << ", has_unsynced_items: "
-       << (service()->IsSyncActive() ? service()->HasUnsyncedItems() : 0)
+    os << ", has_unsynced_items: " << snap.has_remaining_local_changes()
        << ", did_commit: "
        << (snap.model_neutral_state().num_successful_commits == 0 &&
            snap.model_neutral_state().commit_result == syncer::SYNCER_OK)
-       << ", encryption conflicts: "
-       << snap.num_encryption_conflicts()
-       << ", hierarchy conflicts: "
-       << snap.num_hierarchy_conflicts()
-       << ", server conflicts: "
-       << snap.num_server_conflicts()
+       << ", encryption conflicts: " << snap.num_encryption_conflicts()
+       << ", hierarchy conflicts: " << snap.num_hierarchy_conflicts()
+       << ", server conflicts: " << snap.num_server_conflicts()
        << ", num_updates_downloaded : "
        << snap.model_neutral_state().num_updates_downloaded_total
        << ", passphrase_required_reason: "
        << syncer::PassphraseRequiredReasonToString(
-           service()->passphrase_required_reason())
-       << ", notifications_enabled: "
-       << status.notifications_enabled
-       << ", service_is_active: "
-       << service()->IsSyncActive();
+              service()->passphrase_required_reason_for_test())
+       << ", notifications_enabled: " << status.notifications_enabled
+       << ", service_is_active: " << service()->IsSyncFeatureActive();
   } else {
     os << "Sync service not available";
   }
   return os.str();
 }
 
-bool ProfileSyncServiceHarness::IsTypePreferred(syncer::ModelType type) {
-  return service()->GetPreferredDataTypes().Has(type);
-}
-
-std::string ProfileSyncServiceHarness::GetServiceStatus() {
-  AccountInfo primary_account_info;
-  primary_account_info.email = username_;
-  primary_account_info.gaia = gaia_id_;
-  std::unique_ptr<base::DictionaryValue> value(
-      syncer::sync_ui_util::ConstructAboutInformation(
-          service(), primary_account_info, chrome::GetChannel()));
-  std::string service_status;
-  base::JSONWriter::WriteWithOptions(
-      *value, base::JSONWriter::OPTIONS_PRETTY_PRINT, &service_status);
-  return service_status;
+bool ProfileSyncServiceHarness::IsSyncEnabledByUser() const {
+  return service()->IsFirstSetupComplete() &&
+         !service()->HasDisableReason(
+             ProfileSyncService::DISABLE_REASON_USER_CHOICE);
 }

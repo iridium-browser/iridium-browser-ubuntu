@@ -5,6 +5,9 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_HEAP_GC_INFO_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_HEAP_GC_INFO_H_
 
+#include "base/gtest_prod_util.h"
+#include "third_party/blink/renderer/platform/heap/finalizer_traits.h"
+#include "third_party/blink/renderer/platform/heap/name_traits.h"
 #include "third_party/blink/renderer/platform/heap/visitor.h"
 #include "third_party/blink/renderer/platform/wtf/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
@@ -21,119 +24,6 @@
 
 namespace blink {
 
-// The FinalizerTraitImpl specifies how to finalize objects. Objects that
-// inherit from GarbageCollectedFinalized are finalized by calling their
-// |Finalize| method which by default will call the destructor on the object.
-template <typename T, bool isGarbageCollectedFinalized>
-struct FinalizerTraitImpl;
-
-template <typename T>
-struct FinalizerTraitImpl<T, true> {
-  STATIC_ONLY(FinalizerTraitImpl);
-  static void Finalize(void* obj) {
-    static_assert(sizeof(T), "T must be fully defined");
-    static_cast<T*>(obj)->FinalizeGarbageCollectedObject();
-  };
-};
-
-template <typename T>
-struct FinalizerTraitImpl<T, false> {
-  STATIC_ONLY(FinalizerTraitImpl);
-  static void Finalize(void* obj) {
-    static_assert(sizeof(T), "T must be fully defined");
-  };
-};
-
-// The FinalizerTrait is used to determine if a type requires finalization and
-// what finalization means.
-//
-// By default classes that inherit from GarbageCollectedFinalized need
-// finalization and finalization means calling the |Finalize| method of the
-// object. The FinalizerTrait can be specialized if the default behavior is not
-// desired.
-template <typename T>
-struct FinalizerTrait {
-  STATIC_ONLY(FinalizerTrait);
-  static const bool kNonTrivialFinalizer =
-      WTF::IsSubclassOfTemplate<typename std::remove_const<T>::type,
-                                GarbageCollectedFinalized>::value;
-  static void Finalize(void* obj) {
-    FinalizerTraitImpl<T, kNonTrivialFinalizer>::Finalize(obj);
-  }
-};
-
-class HeapAllocator;
-template <typename ValueArg, size_t inlineCapacity>
-class HeapListHashSetAllocator;
-template <typename T, typename Traits>
-class HeapVectorBacking;
-template <typename Table>
-class HeapHashTableBacking;
-
-template <typename T, typename U, typename V>
-struct FinalizerTrait<LinkedHashSet<T, U, V, HeapAllocator>> {
-  STATIC_ONLY(FinalizerTrait);
-  static const bool kNonTrivialFinalizer = true;
-  static void Finalize(void* obj) {
-    FinalizerTraitImpl<LinkedHashSet<T, U, V, HeapAllocator>,
-                       kNonTrivialFinalizer>::Finalize(obj);
-  }
-};
-
-template <typename T, typename Allocator>
-struct FinalizerTrait<WTF::ListHashSetNode<T, Allocator>> {
-  STATIC_ONLY(FinalizerTrait);
-  static const bool kNonTrivialFinalizer =
-      !WTF::IsTriviallyDestructible<T>::value;
-  static void Finalize(void* obj) {
-    FinalizerTraitImpl<WTF::ListHashSetNode<T, Allocator>,
-                       kNonTrivialFinalizer>::Finalize(obj);
-  }
-};
-
-template <typename T, size_t inlineCapacity>
-struct FinalizerTrait<Vector<T, inlineCapacity, HeapAllocator>> {
-  STATIC_ONLY(FinalizerTrait);
-  static const bool kNonTrivialFinalizer =
-      inlineCapacity && VectorTraits<T>::kNeedsDestruction;
-  static void Finalize(void* obj) {
-    FinalizerTraitImpl<Vector<T, inlineCapacity, HeapAllocator>,
-                       kNonTrivialFinalizer>::Finalize(obj);
-  }
-};
-
-template <typename T, size_t inlineCapacity>
-struct FinalizerTrait<Deque<T, inlineCapacity, HeapAllocator>> {
-  STATIC_ONLY(FinalizerTrait);
-  static const bool kNonTrivialFinalizer =
-      inlineCapacity && VectorTraits<T>::kNeedsDestruction;
-  static void Finalize(void* obj) {
-    FinalizerTraitImpl<Deque<T, inlineCapacity, HeapAllocator>,
-                       kNonTrivialFinalizer>::Finalize(obj);
-  }
-};
-
-template <typename Table>
-struct FinalizerTrait<HeapHashTableBacking<Table>> {
-  STATIC_ONLY(FinalizerTrait);
-  static const bool kNonTrivialFinalizer =
-      !WTF::IsTriviallyDestructible<typename Table::ValueType>::value;
-  static void Finalize(void* obj) {
-    FinalizerTraitImpl<HeapHashTableBacking<Table>,
-                       kNonTrivialFinalizer>::Finalize(obj);
-  }
-};
-
-template <typename T, typename Traits>
-struct FinalizerTrait<HeapVectorBacking<T, Traits>> {
-  STATIC_ONLY(FinalizerTrait);
-  static const bool kNonTrivialFinalizer = Traits::kNeedsDestruction;
-  static void Finalize(void* obj) {
-    FinalizerTraitImpl<HeapVectorBacking<T, Traits>,
-                       kNonTrivialFinalizer>::Finalize(obj);
-  }
-};
-
 // GCInfo contains meta-data associated with object classes allocated in the
 // Blink heap. This meta-data consists of a function pointer used to trace the
 // pointers in the class instance during garbage collection, an indication of
@@ -145,44 +35,72 @@ struct FinalizerTrait<HeapVectorBacking<T, Traits>> {
 struct GCInfo {
   bool HasFinalizer() const { return non_trivial_finalizer_; }
   bool HasVTable() const { return has_v_table_; }
+
   TraceCallback trace_;
   FinalizationCallback finalize_;
+  NameCallback name_;
   bool non_trivial_finalizer_;
   bool has_v_table_;
 };
 
-// s_gcInfoTable holds the per-class GCInfo descriptors; each HeapObjectHeader
-// keeps an index into this table.
-extern PLATFORM_EXPORT GCInfo const** g_gc_info_table;
-
 #if DCHECK_IS_ON()
-PLATFORM_EXPORT void AssertObjectHasGCInfo(const void*, size_t gc_info_index);
+PLATFORM_EXPORT void AssertObjectHasGCInfo(const void*, uint32_t gc_info_index);
 #endif
 
-class GCInfoTable {
-  STATIC_ONLY(GCInfoTable);
-
+class PLATFORM_EXPORT GCInfoTable {
  public:
-  PLATFORM_EXPORT static void EnsureGCInfoIndex(const GCInfo*, size_t*);
-
-  static void Init();
-
-  static size_t GcInfoIndex() { return gc_info_index_; }
-
-  // The (max + 1) GCInfo index supported.
+  // At maximum |kMaxIndex - 1| indices are supported.
   //
   // We assume that 14 bits is enough to represent all possible types: during
   // telemetry runs, we see about 1,000 different types; looking at the output
   // of the Oilpan GC Clang plugin, there appear to be at most about 6,000
   // types. Thus 14 bits should be more than twice as many bits as we will ever
   // need.
-  static const size_t kMaxIndex = 1 << 14;
+  static constexpr uint32_t kMaxIndex = 1 << 14;
+
+  // Sets up a singleton table that can be acquired using Get().
+  static void CreateGlobalTable();
+
+  static GCInfoTable& Get() { return *global_table_; }
+
+  inline const GCInfo* GCInfoFromIndex(uint32_t index) {
+    DCHECK_GE(index, 1u);
+    DCHECK(index < kMaxIndex);
+    DCHECK(table_);
+    const GCInfo* info = table_[index];
+    DCHECK(info);
+    return info;
+  }
+
+  void EnsureGCInfoIndex(const GCInfo*, uint32_t*);
+
+  uint32_t GcInfoIndex() { return current_index_; }
 
  private:
-  static void Resize();
+  FRIEND_TEST_ALL_PREFIXES(GCInfoTest, InitialEmpty);
+  FRIEND_TEST_ALL_PREFIXES(GCInfoTest, ResizeToMaxIndex);
 
-  static size_t gc_info_index_;
-  static size_t gc_info_table_size_;
+  // Use GCInfoTable::Get() for retrieving the global table outside of testing
+  // code.
+  GCInfoTable();
+
+  void Resize();
+
+  // Singleton for each process. Retrieved through Get().
+  static GCInfoTable* global_table_;
+
+  // Holds the per-class GCInfo descriptors; each HeapObjectHeader keeps an
+  // index into this table.
+  const GCInfo** table_ = nullptr;
+
+  // GCInfo indices start from 1 for heap objects, with 0 being treated
+  // specially as the index for freelist entries and large heap objects.
+  uint32_t current_index_ = 0;
+
+  // The limit (exclusive) of the currently allocated table.
+  uint32_t limit_ = 0;
+
+  Mutex table_mutex_;
 };
 
 // GCInfoAtBaseType should be used when returning a unique 14 bit integer
@@ -190,17 +108,16 @@ class GCInfoTable {
 template <typename T>
 struct GCInfoAtBaseType {
   STATIC_ONLY(GCInfoAtBaseType);
-  static size_t Index() {
+  static uint32_t Index() {
     static_assert(sizeof(T), "T must be fully defined");
     static const GCInfo kGcInfo = {
-        TraceTrait<T>::Trace, FinalizerTrait<T>::Finalize,
-        FinalizerTrait<T>::kNonTrivialFinalizer, std::is_polymorphic<T>::value,
+        TraceTrait<T>::Trace,          FinalizerTrait<T>::Finalize,
+        NameTrait<T>::GetName,         FinalizerTrait<T>::kNonTrivialFinalizer,
+        std::is_polymorphic<T>::value,
     };
-
-    static size_t gc_info_index = 0;
-    DCHECK(g_gc_info_table);
+    static uint32_t gc_info_index = 0;
     if (!AcquireLoad(&gc_info_index))
-      GCInfoTable::EnsureGCInfoIndex(&kGcInfo, &gc_info_index);
+      GCInfoTable::Get().EnsureGCInfoIndex(&kGcInfo, &gc_info_index);
     DCHECK_GE(gc_info_index, 1u);
     DCHECK(gc_info_index < GCInfoTable::kMaxIndex);
     return gc_info_index;
@@ -227,7 +144,7 @@ struct GetGarbageCollectedType<T, false> {
 template <typename T>
 struct GCInfoTrait {
   STATIC_ONLY(GCInfoTrait);
-  static size_t Index() {
+  static uint32_t Index() {
     return GCInfoAtBaseType<typename GetGarbageCollectedType<T>::type>::Index();
   }
 };
@@ -241,11 +158,13 @@ template <typename T, typename U, typename V>
 class HeapHashSet;
 template <typename T, typename U, typename V>
 class HeapLinkedHashSet;
-template <typename T, size_t inlineCapacity, typename U>
+template <typename T, wtf_size_t inlineCapacity, typename U>
 class HeapListHashSet;
-template <typename T, size_t inlineCapacity>
+template <typename ValueArg, wtf_size_t inlineCapacity>
+class HeapListHashSetAllocator;
+template <typename T, wtf_size_t inlineCapacity>
 class HeapVector;
-template <typename T, size_t inlineCapacity>
+template <typename T, wtf_size_t inlineCapacity>
 class HeapDeque;
 template <typename T, typename U, typename V>
 class HeapHashCountedSet;
@@ -259,17 +178,17 @@ struct GCInfoTrait<HeapHashSet<T, U, V>>
 template <typename T, typename U, typename V>
 struct GCInfoTrait<HeapLinkedHashSet<T, U, V>>
     : public GCInfoTrait<LinkedHashSet<T, U, V, HeapAllocator>> {};
-template <typename T, size_t inlineCapacity, typename U>
+template <typename T, wtf_size_t inlineCapacity, typename U>
 struct GCInfoTrait<HeapListHashSet<T, inlineCapacity, U>>
     : public GCInfoTrait<
           ListHashSet<T,
                       inlineCapacity,
                       U,
                       HeapListHashSetAllocator<T, inlineCapacity>>> {};
-template <typename T, size_t inlineCapacity>
+template <typename T, wtf_size_t inlineCapacity>
 struct GCInfoTrait<HeapVector<T, inlineCapacity>>
     : public GCInfoTrait<Vector<T, inlineCapacity, HeapAllocator>> {};
-template <typename T, size_t inlineCapacity>
+template <typename T, wtf_size_t inlineCapacity>
 struct GCInfoTrait<HeapDeque<T, inlineCapacity>>
     : public GCInfoTrait<Deque<T, inlineCapacity, HeapAllocator>> {};
 template <typename T, typename U, typename V>

@@ -5,8 +5,9 @@
 // https://wicg.github.io/webusb/#usbisochronousintransferpacket
 
 [
-    RuntimeEnabled=WebUSB,
-    Constructor(USBTransferStatus status, optional DataView? data)
+    Constructor(USBTransferStatus status, optional DataView? data),
+    Exposed(DedicatedWorker WebUSBOnDedicatedWorkers, Window WebUSB),
+    SecureContext
 ] interface USBIsochronousInTransferPacket {
     readonly attribute USBTransferStatus status;
     readonly attribute DataView? data;

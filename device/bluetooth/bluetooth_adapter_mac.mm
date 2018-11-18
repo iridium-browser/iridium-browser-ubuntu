@@ -25,11 +25,13 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "device/bluetooth/bluetooth_adapter_mac_metrics.h"
+#include "device/bluetooth/bluetooth_advertisement_mac.h"
 #include "device/bluetooth/bluetooth_classic_device_mac.h"
 #include "device/bluetooth/bluetooth_common.h"
 #include "device/bluetooth/bluetooth_discovery_session.h"
 #include "device/bluetooth/bluetooth_discovery_session_outcome.h"
 #include "device/bluetooth/bluetooth_low_energy_central_manager_delegate.h"
+#include "device/bluetooth/bluetooth_low_energy_peripheral_manager_delegate.h"
 #include "device/bluetooth/bluetooth_socket_mac.h"
 
 extern "C" {
@@ -65,7 +67,7 @@ CBCentralManagerState GetCBManagerState(CBCentralManager* manager) {
 
 // static
 base::WeakPtr<BluetoothAdapter> BluetoothAdapter::CreateAdapter(
-    const InitCallback& init_callback) {
+    InitCallback init_callback) {
   return BluetoothAdapterMac::CreateAdapter();
 }
 
@@ -136,6 +138,16 @@ BluetoothAdapterMac::BluetoothAdapterMac()
                    queue:dispatch_get_main_queue()]);
     low_energy_discovery_manager_->SetCentralManager(
         low_energy_central_manager_);
+
+    low_energy_advertisement_manager_.reset(
+        new BluetoothLowEnergyAdvertisementManagerMac());
+    low_energy_peripheral_manager_delegate_.reset(
+        [[BluetoothLowEnergyPeripheralManagerDelegate alloc]
+            initWithAdvertisementManager:low_energy_advertisement_manager_.get()
+                              andAdapter:this]);
+    low_energy_peripheral_manager_.reset([[CBPeripheralManager alloc]
+        initWithDelegate:low_energy_peripheral_manager_delegate_
+                   queue:dispatch_get_main_queue()]);
   }
   DCHECK(classic_discovery_manager_);
 }
@@ -145,6 +157,9 @@ BluetoothAdapterMac::~BluetoothAdapterMac() {
   // disconnect the gatt connection. To make sure they don't use the mac
   // adapter, they should be explicitly destroyed here.
   devices_.clear();
+  // Explicitly clear out delegates, which might outlive the Adapter.
+  [low_energy_peripheral_manager_ setDelegate:nil];
+  [low_energy_central_manager_ setDelegate:nil];
   // Set low_energy_central_manager_ to nil so no devices will try to use it
   // while being destroyed after this method. |devices_| is owned by
   // BluetoothAdapter.
@@ -265,8 +280,8 @@ void BluetoothAdapterMac::RegisterAdvertisement(
     std::unique_ptr<BluetoothAdvertisement::Data> advertisement_data,
     const CreateAdvertisementCallback& callback,
     const AdvertisementErrorCallback& error_callback) {
-  NOTIMPLEMENTED();
-  error_callback.Run(BluetoothAdvertisement::ERROR_UNSUPPORTED_PLATFORM);
+  low_energy_advertisement_manager_->RegisterAdvertisement(
+      std::move(advertisement_data), callback, error_callback);
 }
 
 BluetoothLocalGattService* BluetoothAdapterMac::GetGattService(
@@ -337,6 +352,10 @@ CBCentralManager* BluetoothAdapterMac::GetCentralManager() {
   return low_energy_central_manager_;
 }
 
+CBPeripheralManager* BluetoothAdapterMac::GetPeripheralManager() {
+  return low_energy_peripheral_manager_;
+}
+
 void BluetoothAdapterMac::SetHostControllerStateFunctionForTesting(
     HostControllerStateFunction controller_state_function) {
   controller_state_function_ = std::move(controller_state_function);
@@ -350,7 +369,7 @@ void BluetoothAdapterMac::SetPowerStateFunctionForTesting(
 void BluetoothAdapterMac::AddDiscoverySession(
     BluetoothDiscoveryFilter* discovery_filter,
     const base::Closure& callback,
-    const DiscoverySessionErrorCallback& error_callback) {
+    DiscoverySessionErrorCallback error_callback) {
   DVLOG(1) << __func__;
   if (num_discovery_sessions_ > 0) {
     DCHECK(IsDiscovering());
@@ -361,7 +380,7 @@ void BluetoothAdapterMac::AddDiscoverySession(
       // TODO: Provide a more precise error here.
       ui_task_runner_->PostTask(
           FROM_HERE,
-          base::BindOnce(error_callback,
+          base::BindOnce(std::move(error_callback),
                          UMABluetoothDiscoverySessionOutcome::UNKNOWN));
       return;
     }
@@ -375,7 +394,7 @@ void BluetoothAdapterMac::AddDiscoverySession(
     // TODO: Provide a more precise error here.
     ui_task_runner_->PostTask(
         FROM_HERE,
-        base::BindOnce(error_callback,
+        base::BindOnce(std::move(error_callback),
                        UMABluetoothDiscoverySessionOutcome::UNKNOWN));
     return;
   }
@@ -390,7 +409,7 @@ void BluetoothAdapterMac::AddDiscoverySession(
 void BluetoothAdapterMac::RemoveDiscoverySession(
     BluetoothDiscoveryFilter* discovery_filter,
     const base::Closure& callback,
-    const DiscoverySessionErrorCallback& error_callback) {
+    DiscoverySessionErrorCallback error_callback) {
   DVLOG(1) << __func__;
 
   if (num_discovery_sessions_ > 1) {
@@ -403,7 +422,8 @@ void BluetoothAdapterMac::RemoveDiscoverySession(
 
   if (num_discovery_sessions_ == 0) {
     DVLOG(1) << "No active discovery sessions. Returning error.";
-    error_callback.Run(UMABluetoothDiscoverySessionOutcome::NOT_ACTIVE);
+    std::move(error_callback)
+        .Run(UMABluetoothDiscoverySessionOutcome::NOT_ACTIVE);
     return;
   }
 
@@ -416,7 +436,8 @@ void BluetoothAdapterMac::RemoveDiscoverySession(
     if (!classic_discovery_manager_->StopDiscovery()) {
       DVLOG(1) << "Failed to stop classic discovery";
       // TODO: Provide a more precise error here.
-      error_callback.Run(UMABluetoothDiscoverySessionOutcome::UNKNOWN);
+      std::move(error_callback)
+          .Run(UMABluetoothDiscoverySessionOutcome::UNKNOWN);
       return;
     }
   }
@@ -437,9 +458,10 @@ void BluetoothAdapterMac::RemoveDiscoverySession(
 void BluetoothAdapterMac::SetDiscoveryFilter(
     std::unique_ptr<BluetoothDiscoveryFilter> discovery_filter,
     const base::Closure& callback,
-    const DiscoverySessionErrorCallback& error_callback) {
+    DiscoverySessionErrorCallback error_callback) {
   NOTIMPLEMENTED();
-  error_callback.Run(UMABluetoothDiscoverySessionOutcome::NOT_IMPLEMENTED);
+  std::move(error_callback)
+      .Run(UMABluetoothDiscoverySessionOutcome::NOT_IMPLEMENTED);
 }
 
 bool BluetoothAdapterMac::StartDiscovery(
@@ -471,6 +493,8 @@ bool BluetoothAdapterMac::StartDiscovery(
 
 void BluetoothAdapterMac::Init() {
   ui_task_runner_ = base::ThreadTaskRunnerHandle::Get();
+  low_energy_advertisement_manager_->Init(ui_task_runner_,
+                                          low_energy_peripheral_manager_);
   PollAdapter();
 }
 
@@ -494,7 +518,7 @@ void BluetoothAdapterMac::PollAdapter() {
 
   if (classic_powered_ != state.classic_powered) {
     classic_powered_ = state.classic_powered;
-    DidChangePoweredState();
+    RunPendingPowerCallbacks();
     NotifyAdapterPoweredChanged(classic_powered_);
   }
 
@@ -618,9 +642,10 @@ void BluetoothAdapterMac::LowEnergyDeviceUpdated(
   int8_t clamped_tx_power = BluetoothDevice::ClampPower([tx_power intValue]);
 
   device_mac->UpdateAdvertisementData(
-      BluetoothDevice::ClampPower(rssi), std::move(advertised_uuids),
-      std::move(service_data_map), std::move(manufacturer_data_map),
-      tx_power == nil ? nullptr : &clamped_tx_power);
+      BluetoothDevice::ClampPower(rssi), base::nullopt /* flags */,
+      std::move(advertised_uuids),
+      tx_power == nil ? base::nullopt : base::make_optional(clamped_tx_power),
+      std::move(service_data_map), std::move(manufacturer_data_map));
 
   if (is_new_device) {
     std::string device_address =

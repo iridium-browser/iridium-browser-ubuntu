@@ -87,14 +87,6 @@ void EndQueryEXT(GLenum target, GLuint submit_count) {
   }
 }
 
-void CompressedCopyTextureCHROMIUM(GLuint source_id, GLuint dest_id) {
-  raster::cmds::CompressedCopyTextureCHROMIUM* c =
-      GetCmdSpace<raster::cmds::CompressedCopyTextureCHROMIUM>();
-  if (c) {
-    c->Init(source_id, dest_id);
-  }
-}
-
 void LoseContextCHROMIUM(GLenum current, GLenum other) {
   raster::cmds::LoseContextCHROMIUM* c =
       GetCmdSpace<raster::cmds::LoseContextCHROMIUM>();
@@ -134,51 +126,33 @@ void UnpremultiplyAndDitherCopyCHROMIUM(GLuint source_id,
   }
 }
 
-void InitializeDiscardableTextureCHROMIUM(GLuint texture_id,
-                                          uint32_t shm_id,
-                                          uint32_t shm_offset) {
-  raster::cmds::InitializeDiscardableTextureCHROMIUM* c =
-      GetCmdSpace<raster::cmds::InitializeDiscardableTextureCHROMIUM>();
+void BeginRasterCHROMIUMImmediate(GLuint sk_color,
+                                  GLuint msaa_sample_count,
+                                  GLboolean can_use_lcd_text,
+                                  GLint color_type,
+                                  GLuint color_space_transfer_cache_id,
+                                  const GLbyte* mailbox) {
+  const uint32_t size =
+      raster::cmds::BeginRasterCHROMIUMImmediate::ComputeSize();
+  raster::cmds::BeginRasterCHROMIUMImmediate* c =
+      GetImmediateCmdSpaceTotalSize<raster::cmds::BeginRasterCHROMIUMImmediate>(
+          size);
   if (c) {
-    c->Init(texture_id, shm_id, shm_offset);
+    c->Init(sk_color, msaa_sample_count, can_use_lcd_text, color_type,
+            color_space_transfer_cache_id, mailbox);
   }
 }
 
-void UnlockDiscardableTextureCHROMIUM(GLuint texture_id) {
-  raster::cmds::UnlockDiscardableTextureCHROMIUM* c =
-      GetCmdSpace<raster::cmds::UnlockDiscardableTextureCHROMIUM>();
-  if (c) {
-    c->Init(texture_id);
-  }
-}
-
-void LockDiscardableTextureCHROMIUM(GLuint texture_id) {
-  raster::cmds::LockDiscardableTextureCHROMIUM* c =
-      GetCmdSpace<raster::cmds::LockDiscardableTextureCHROMIUM>();
-  if (c) {
-    c->Init(texture_id);
-  }
-}
-
-void BeginRasterCHROMIUM(GLuint texture_id,
-                         GLuint sk_color,
-                         GLuint msaa_sample_count,
-                         GLboolean can_use_lcd_text,
-                         GLint color_type) {
-  raster::cmds::BeginRasterCHROMIUM* c =
-      GetCmdSpace<raster::cmds::BeginRasterCHROMIUM>();
-  if (c) {
-    c->Init(texture_id, sk_color, msaa_sample_count, can_use_lcd_text,
-            color_type);
-  }
-}
-
-void RasterCHROMIUM(GLsizeiptr size,
-                    uint32_t list_shm_id,
-                    uint32_t list_shm_offset) {
+void RasterCHROMIUM(GLuint raster_shm_id,
+                    GLuint raster_shm_offset,
+                    GLsizeiptr raster_shm_size,
+                    GLuint font_shm_id,
+                    GLuint font_shm_offset,
+                    GLsizeiptr font_shm_size) {
   raster::cmds::RasterCHROMIUM* c = GetCmdSpace<raster::cmds::RasterCHROMIUM>();
   if (c) {
-    c->Init(size, list_shm_id, list_shm_offset);
+    c->Init(raster_shm_id, raster_shm_offset, raster_shm_size, font_shm_id,
+            font_shm_offset, font_shm_size);
   }
 }
 
@@ -242,7 +216,7 @@ void SetColorSpaceMetadata(GLuint texture_id,
   }
 }
 
-void ProduceTextureDirectImmediate(GLuint texture, const GLbyte* mailbox) {
+void ProduceTextureDirectImmediate(GLuint texture, GLbyte* mailbox) {
   const uint32_t size =
       raster::cmds::ProduceTextureDirectImmediate::ComputeSize();
   raster::cmds::ProduceTextureDirectImmediate* c =
@@ -291,13 +265,10 @@ void ReleaseTexImage2DCHROMIUM(GLuint texture_id, GLint image_id) {
   }
 }
 
-void TexStorage2D(GLuint texture_id,
-                  GLsizei levels,
-                  GLsizei width,
-                  GLsizei height) {
+void TexStorage2D(GLuint texture_id, GLsizei width, GLsizei height) {
   raster::cmds::TexStorage2D* c = GetCmdSpace<raster::cmds::TexStorage2D>();
   if (c) {
-    c->Init(texture_id, levels, width, height);
+    c->Init(texture_id, width, height);
   }
 }
 
@@ -312,6 +283,38 @@ void CopySubTexture(GLuint source_id,
   raster::cmds::CopySubTexture* c = GetCmdSpace<raster::cmds::CopySubTexture>();
   if (c) {
     c->Init(source_id, dest_id, xoffset, yoffset, x, y, width, height);
+  }
+}
+
+void TraceBeginCHROMIUM(GLuint category_bucket_id, GLuint name_bucket_id) {
+  raster::cmds::TraceBeginCHROMIUM* c =
+      GetCmdSpace<raster::cmds::TraceBeginCHROMIUM>();
+  if (c) {
+    c->Init(category_bucket_id, name_bucket_id);
+  }
+}
+
+void TraceEndCHROMIUM() {
+  raster::cmds::TraceEndCHROMIUM* c =
+      GetCmdSpace<raster::cmds::TraceEndCHROMIUM>();
+  if (c) {
+    c->Init();
+  }
+}
+
+void SetActiveURLCHROMIUM(GLuint url_bucket_id) {
+  raster::cmds::SetActiveURLCHROMIUM* c =
+      GetCmdSpace<raster::cmds::SetActiveURLCHROMIUM>();
+  if (c) {
+    c->Init(url_bucket_id);
+  }
+}
+
+void ResetActiveURLCHROMIUM() {
+  raster::cmds::ResetActiveURLCHROMIUM* c =
+      GetCmdSpace<raster::cmds::ResetActiveURLCHROMIUM>();
+  if (c) {
+    c->Init();
   }
 }
 

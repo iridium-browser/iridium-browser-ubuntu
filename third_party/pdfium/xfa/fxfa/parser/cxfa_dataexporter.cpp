@@ -18,36 +18,28 @@ CXFA_DataExporter::CXFA_DataExporter() = default;
 
 CXFA_DataExporter::~CXFA_DataExporter() = default;
 
-bool CXFA_DataExporter::Export(const RetainPtr<IFX_SeekableStream>& pWrite,
+bool CXFA_DataExporter::Export(const RetainPtr<IFX_SeekableStream>& pStream,
                                CXFA_Node* pNode) {
-  ASSERT(pWrite);
-  if (!pWrite)
+  ASSERT(pStream);
+
+  if (!pStream)
     return false;
 
-  auto pStream = pdfium::MakeRetain<CFX_SeekableStreamProxy>(pWrite, true);
-  pStream->SetCodePage(FX_CODEPAGE_UTF8);
-  return Export(pStream, pNode);
-}
-
-bool CXFA_DataExporter::Export(
-    const RetainPtr<CFX_SeekableStreamProxy>& pStream,
-    CXFA_Node* pNode) {
   if (pNode->IsModelNode()) {
     switch (pNode->GetPacketType()) {
       case XFA_PacketType::Xdp: {
         pStream->WriteString(
-            L"<xdp:xdp xmlns:xdp=\"http://ns.adobe.com/xdp/\">");
+            "<xdp:xdp xmlns:xdp=\"http://ns.adobe.com/xdp/\">");
         for (CXFA_Node* pChild = pNode->GetFirstChild(); pChild;
              pChild = pChild->GetNextSibling()) {
           Export(pStream, pChild);
         }
-        pStream->WriteString(L"</xdp:xdp\n>");
+        pStream->WriteString("</xdp:xdp\n>");
         break;
       }
       case XFA_PacketType::Datasets: {
-        CFX_XMLElement* pElement =
-            static_cast<CFX_XMLElement*>(pNode->GetXMLMappingNode());
-        if (!pElement || pElement->GetType() != FX_XMLNODE_Element)
+        CFX_XMLElement* pElement = ToXMLElement(pNode->GetXMLMappingNode());
+        if (!pElement)
           return false;
 
         CXFA_Node* pDataNode = pNode->GetFirstChild();
@@ -56,15 +48,13 @@ bool CXFA_DataExporter::Export(
         pElement->Save(pStream);
         break;
       }
-      case XFA_PacketType::Form: {
+      case XFA_PacketType::Form:
         XFA_DataExporter_RegenerateFormFile(pNode, pStream, false);
         break;
-      }
       case XFA_PacketType::Template:
       default: {
-        CFX_XMLElement* pElement =
-            static_cast<CFX_XMLElement*>(pNode->GetXMLMappingNode());
-        if (!pElement || pElement->GetType() != FX_XMLNODE_Element)
+        CFX_XMLElement* pElement = ToXMLElement(pNode->GetXMLMappingNode());
+        if (!pElement)
           return false;
 
         pElement->Save(pStream);
@@ -83,15 +73,14 @@ bool CXFA_DataExporter::Export(
       break;
     }
   }
-  CFX_XMLElement* pElement =
-      static_cast<CFX_XMLElement*>(pExportNode->GetXMLMappingNode());
-  if (!pElement || pElement->GetType() != FX_XMLNODE_Element)
+  CFX_XMLElement* pElement = ToXMLElement(pExportNode->GetXMLMappingNode());
+  if (!pElement)
     return false;
 
   XFA_DataExporter_DealWithDataGroupNode(pExportNode);
-  pElement->SetString(L"xmlns:xfa", L"http://www.xfa.org/schema/xfa-data/1.0/");
+  pElement->SetAttribute(L"xmlns:xfa",
+                         L"http://www.xfa.org/schema/xfa-data/1.0/");
   pElement->Save(pStream);
   pElement->RemoveAttribute(L"xmlns:xfa");
-
   return true;
 }

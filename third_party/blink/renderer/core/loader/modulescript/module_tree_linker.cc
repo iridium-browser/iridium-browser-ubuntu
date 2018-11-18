@@ -7,56 +7,76 @@
 #include "third_party/blink/renderer/bindings/core/v8/script_module.h"
 #include "third_party/blink/renderer/core/loader/modulescript/module_script_fetch_request.h"
 #include "third_party/blink/renderer/core/loader/modulescript/module_tree_linker_registry.h"
+#include "third_party/blink/renderer/core/script/layered_api.h"
 #include "third_party/blink/renderer/core/script/module_script.h"
 #include "third_party/blink/renderer/platform/bindings/v8_throw_exception.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_loading_log.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
+#include "third_party/blink/renderer/platform/weborigin/security_policy.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 #include "v8/include/v8.h"
 
 namespace blink {
 
-ModuleTreeLinker* ModuleTreeLinker::Fetch(
-    const ModuleScriptFetchRequest& request,
+void ModuleTreeLinker::Fetch(
+    const KURL& url,
+    FetchClientSettingsObjectSnapshot* fetch_client_settings_object,
+    mojom::RequestContextType destination,
+    const ScriptFetchOptions& options,
     Modulator* modulator,
+    ModuleScriptCustomFetchType custom_fetch_type,
     ModuleTreeLinkerRegistry* registry,
     ModuleTreeClient* client) {
-  ModuleTreeLinker* fetcher = new ModuleTreeLinker(modulator, registry, client);
-  fetcher->FetchRoot(request);
-  return fetcher;
+  ModuleTreeLinker* fetcher =
+      new ModuleTreeLinker(fetch_client_settings_object, destination, modulator,
+                           custom_fetch_type, registry, client);
+  registry->AddFetcher(fetcher);
+  fetcher->FetchRoot(url, options);
+  DCHECK(fetcher->IsFetching());
 }
 
-ModuleTreeLinker* ModuleTreeLinker::FetchDescendantsForInlineScript(
+void ModuleTreeLinker::FetchDescendantsForInlineScript(
     ModuleScript* module_script,
+    FetchClientSettingsObjectSnapshot* fetch_client_settings_object,
+    mojom::RequestContextType destination,
     Modulator* modulator,
+    ModuleScriptCustomFetchType custom_fetch_type,
     ModuleTreeLinkerRegistry* registry,
     ModuleTreeClient* client) {
   DCHECK(module_script);
-  ModuleTreeLinker* fetcher = new ModuleTreeLinker(modulator, registry, client);
+  ModuleTreeLinker* fetcher =
+      new ModuleTreeLinker(fetch_client_settings_object, destination, modulator,
+                           custom_fetch_type, registry, client);
+  registry->AddFetcher(fetcher);
   fetcher->FetchRootInline(module_script);
-  return fetcher;
+  DCHECK(fetcher->IsFetching());
 }
 
-ModuleTreeLinker::ModuleTreeLinker(Modulator* modulator,
-                                   ModuleTreeLinkerRegistry* registry,
-                                   ModuleTreeClient* client)
-    : modulator_(modulator), registry_(registry), client_(client) {
+ModuleTreeLinker::ModuleTreeLinker(
+    FetchClientSettingsObjectSnapshot* fetch_client_settings_object,
+    mojom::RequestContextType destination,
+    Modulator* modulator,
+    ModuleScriptCustomFetchType custom_fetch_type,
+    ModuleTreeLinkerRegistry* registry,
+    ModuleTreeClient* client)
+    : fetch_client_settings_object_(fetch_client_settings_object),
+      destination_(destination),
+      modulator_(modulator),
+      custom_fetch_type_(custom_fetch_type),
+      registry_(registry),
+      client_(client) {
   CHECK(modulator);
   CHECK(registry);
   CHECK(client);
 }
 
 void ModuleTreeLinker::Trace(blink::Visitor* visitor) {
+  visitor->Trace(fetch_client_settings_object_);
   visitor->Trace(modulator_);
   visitor->Trace(registry_);
   visitor->Trace(client_);
   visitor->Trace(result_);
   SingleModuleClient::Trace(visitor);
-}
-
-void ModuleTreeLinker::TraceWrappers(
-    const ScriptWrappableVisitor* visitor) const {
-  visitor->TraceWrappers(result_);
-  SingleModuleClient::TraceWrappers(visitor);
 }
 
 #if DCHECK_IS_ON()
@@ -128,20 +148,50 @@ void ModuleTreeLinker::AdvanceState(State new_state) {
   }
 }
 
-void ModuleTreeLinker::FetchRoot(const ModuleScriptFetchRequest& request) {
-  // https://html.spec.whatwg.org/multipage/webappapis.html#fetch-a-module-script-tree
+// https://html.spec.whatwg.org/multipage/webappapis.html#fetch-a-module-script-tree
+void ModuleTreeLinker::FetchRoot(const KURL& original_url,
+                                 const ScriptFetchOptions& options) {
 #if DCHECK_IS_ON()
-  url_ = request.Url();
+  original_url_ = original_url;
   root_is_inline_ = false;
 #endif
 
   AdvanceState(State::kFetchingSelf);
 
+  KURL url = original_url;
+  // <spec
+  // href="https://github.com/drufball/layered-apis/blob/master/spec.md#fetch-a-module-script-graph"
+  // step="1">Set url to the layered API fetching URL given url and the current
+  // settings object's API base URL.</spec>
+  if (RuntimeEnabledFeatures::LayeredAPIEnabled())
+    url = blink::layered_api::ResolveFetchingURL(url);
+
+#if DCHECK_IS_ON()
+  url_ = url;
+#endif
+
+  // <spec
+  // href="https://github.com/drufball/layered-apis/blob/master/spec.md#fetch-a-module-script-graph"
+  // step="2">If url is failure, asynchronously complete this algorithm with
+  // null.</spec>
+  if (!url.IsValid()) {
+    result_ = nullptr;
+    modulator_->TaskRunner()->PostTask(
+        FROM_HERE, WTF::Bind(&ModuleTreeLinker::AdvanceState,
+                             WrapPersistent(this), State::kFinished));
+    return;
+  }
+
   // Step 1. Let visited set be << url >>.
-  visited_set_.insert(request.Url());
+  visited_set_.insert(url);
 
   // Step 2. Perform the internal module script graph fetching procedure given
-  // ... with the top-level module fetch flag set. ...
+  // url, settings object, destination, options, settings object, visited set,
+  // "client", and with the top-level module fetch flag set.
+  ModuleScriptFetchRequest request(url, destination_, options,
+                                   Referrer::ClientReferrerString(),
+                                   TextPosition::MinimumPosition());
+
   InitiateInternalModuleScriptGraphFetching(
       request, ModuleGraphLevel::kTopLevelModuleFetch);
 }
@@ -150,7 +200,8 @@ void ModuleTreeLinker::FetchRootInline(ModuleScript* module_script) {
   // Top-level entry point for [FDaI] for an inline module script.
   DCHECK(module_script);
 #if DCHECK_IS_ON()
-  url_ = module_script->BaseURL();
+  original_url_ = module_script->BaseURL();
+  url_ = original_url_;
   root_is_inline_ = true;
 #endif
 
@@ -158,7 +209,7 @@ void ModuleTreeLinker::FetchRootInline(ModuleScript* module_script) {
 
   // Store the |module_script| here which will be used as result of the
   // algorithm when success. Also, this ensures that the |module_script| is
-  // TraceWrappers()ed via ModuleTreeLinker.
+  // traced via ModuleTreeLinker.
   result_ = module_script;
   AdvanceState(State::kFetchingDependencies);
 
@@ -177,7 +228,8 @@ void ModuleTreeLinker::InitiateInternalModuleScriptGraphFetching(
   ++num_incomplete_fetches_;
 
   // [IMSGF] Step 2. Fetch a single module script given ...
-  modulator_->FetchSingle(request, level, this);
+  modulator_->FetchSingle(request, fetch_client_settings_object_.Get(), level,
+                          custom_fetch_type_, this);
 
   // [IMSGF] Step 3-- are executed when NotifyModuleLoadFinished() is called.
 }
@@ -318,7 +370,8 @@ void ModuleTreeLinker::FetchDescendants(ModuleScript* module_script) {
   ScriptFetchOptions options(module_script->FetchOptions().Nonce(),
                              IntegrityMetadataSet(), String(),
                              module_script->FetchOptions().ParserState(),
-                             module_script->FetchOptions().CredentialsMode());
+                             module_script->FetchOptions().CredentialsMode(),
+                             module_script->FetchOptions().GetReferrerPolicy());
 
   // [FD] Step 7. For each url in urls, ...
   //
@@ -326,10 +379,12 @@ void ModuleTreeLinker::FetchDescendants(ModuleScript* module_script) {
   // procedure should be performed in parallel to each other.
   for (size_t i = 0; i < urls.size(); ++i) {
     // [FD] Step 7. ... perform the internal module script graph fetching
-    // procedure given ... with the top-level module fetch flag unset. ...
-    ModuleScriptFetchRequest request(
-        urls[i], options, module_script->BaseURL().GetString(),
-        modulator_->GetReferrerPolicy(), positions[i]);
+    // procedure given url, fetch client settings object, destination, options,
+    // module script's settings object, visited set, module script's base URL,
+    // and with the top-level module fetch flag unset. ...
+    ModuleScriptFetchRequest request(urls[i], destination_, options,
+                                     module_script->BaseURL().GetString(),
+                                     positions[i]);
     InitiateInternalModuleScriptGraphFetching(
         request, ModuleGraphLevel::kDependentModuleFetch);
   }
@@ -483,6 +538,7 @@ ScriptValue ModuleTreeLinker::FindFirstParseError(
 #if DCHECK_IS_ON()
 std::ostream& operator<<(std::ostream& stream, const ModuleTreeLinker& linker) {
   stream << "ModuleTreeLinker[" << &linker
+         << ", original_url=" << linker.original_url_.GetString()
          << ", url=" << linker.url_.GetString()
          << ", inline=" << linker.root_is_inline_ << "]";
   return stream;

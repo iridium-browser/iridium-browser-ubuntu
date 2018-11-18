@@ -9,7 +9,6 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/time/time.h"
 #include "base/timer/timer.h"
@@ -19,11 +18,11 @@
 #include "chrome/browser/permissions/permission_manager.h"
 #include "chrome/browser/permissions/permission_result.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chromeos/attestation/attestation.pb.h"
 #include "chromeos/attestation/attestation_flow.h"
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/cryptohome/async_method_caller.h"
 #include "chromeos/cryptohome/cryptohome_parameters.h"
+#include "chromeos/dbus/attestation/attestation.pb.h"
 #include "chromeos/dbus/cryptohome_client.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
@@ -263,8 +262,7 @@ void PlatformVerificationFlow::OnAttestationPrepared(
 void PlatformVerificationFlow::GetCertificate(const ChallengeContext& context,
                                               const AccountId& account_id,
                                               bool force_new_key) {
-  std::unique_ptr<base::Timer> timer(new base::Timer(false,    // Don't retain.
-                                                     false));  // Don't repeat.
+  std::unique_ptr<base::OneShotTimer> timer(new base::OneShotTimer());
   base::Closure timeout_callback = base::Bind(
       &PlatformVerificationFlow::OnCertificateTimeout,
       this,
@@ -282,7 +280,7 @@ void PlatformVerificationFlow::GetCertificate(const ChallengeContext& context,
 void PlatformVerificationFlow::OnCertificateReady(
     const ChallengeContext& context,
     const AccountId& account_id,
-    std::unique_ptr<base::Timer> timer,
+    std::unique_ptr<base::OneShotTimer> timer,
     AttestationStatus operation_status,
     const std::string& certificate_chain) {
   // Log failure before checking the timer so all failures are logged, even if

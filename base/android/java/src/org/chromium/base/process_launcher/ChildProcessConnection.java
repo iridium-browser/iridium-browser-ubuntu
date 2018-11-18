@@ -14,6 +14,7 @@ import android.os.IBinder;
 import android.os.Looper;
 import android.os.RemoteException;
 
+import org.chromium.base.ChildBindingState;
 import org.chromium.base.Log;
 import org.chromium.base.MemoryPressureLevel;
 import org.chromium.base.MemoryPressureListener;
@@ -22,15 +23,18 @@ import org.chromium.base.TraceEvent;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.memory.MemoryPressureCallback;
 
+import java.util.Arrays;
 import java.util.List;
 
 import javax.annotation.Nullable;
+import javax.annotation.concurrent.GuardedBy;
 
 /**
  * Manages a connection between the browser activity and a child service.
  */
 public class ChildProcessConnection {
     private static final String TAG = "ChildProcessConn";
+    private static final int NUM_BINDING_STATES = ChildBindingState.MAX_VALUE + 1;
 
     /**
      * Used to notify the consumer about the process start. These callbacks will be invoked before
@@ -148,6 +152,21 @@ public class ChildProcessConnection {
         }
     }
 
+    // Global lock to protect all the fields that can be accessed outside launcher thread.
+    private static final Object sBindingStateLock = new Object();
+
+    @GuardedBy("sBindingStateLock")
+    private static final int[] sAllBindingStateCounts = new int[NUM_BINDING_STATES];
+
+    @VisibleForTesting
+    static void resetBindingStateCountsForTesting() {
+        synchronized (sBindingStateLock) {
+            for (int i = 0; i < NUM_BINDING_STATES; ++i) {
+                sAllBindingStateCounts[i] = 0;
+            }
+        }
+    }
+
     private final Handler mLauncherHandler;
     private final ComponentName mServiceName;
 
@@ -199,14 +218,12 @@ public class ChildProcessConnection {
     // Process ID of the corresponding child process.
     private int mPid;
 
-    // Inital moderate binding.
-    private final ChildServiceConnection mInitialBinding;
-
     // Strong binding will make the service priority equal to the priority of the activity.
     private final ChildServiceConnection mStrongBinding;
 
     // Moderate binding will make the service priority equal to the priority of a visible process
     // while the app is in the foreground.
+    // This is also used as the initial binding before any priorities are set.
     private final ChildServiceConnection mModerateBinding;
 
     // Low priority binding maintained in the entire lifetime of the connection, i.e. between calls
@@ -217,12 +234,24 @@ public class ChildProcessConnection {
     private int mStrongBindingCount;
     private int mModerateBindingCount;
 
-    // Indicates whether the connection only has the waived binding (if the connection is unbound,
-    // it contains the state at time of unbinding).
-    private boolean mWaivedBoundOnly;
-
     // Set to true once unbind() was called.
     private boolean mUnbound;
+
+    // Binding state of this connection.
+    @GuardedBy("sBindingStateLock")
+    private @ChildBindingState int mBindingState;
+
+    // Same as above except it no longer updates after |unbind()|.
+    @GuardedBy("sBindingStateLock")
+    private @ChildBindingState int mBindingStateCurrentOrWhenDied;
+
+    // Indicate |kill()| was called to intentionally kill this process.
+    @GuardedBy("sBindingStateLock")
+    private boolean mKilledByUs;
+
+    // Copy of |sAllBindingStateCounts| at the time this is unbound.
+    @GuardedBy("sBindingStateLock")
+    private int[] mAllBindingStateCountsWhenDied;
 
     private MemoryPressureCallback mMemoryPressureCallback;
 
@@ -284,7 +313,6 @@ public class ChildProcessConnection {
         int defaultFlags = Context.BIND_AUTO_CREATE
                 | (bindAsExternalService ? Context.BIND_EXTERNAL_SERVICE : 0);
 
-        mInitialBinding = connectionFactory.createConnection(intent, defaultFlags, delegate);
         mModerateBinding = connectionFactory.createConnection(intent, defaultFlags, delegate);
         mStrongBinding = connectionFactory.createConnection(
                 intent, defaultFlags | Context.BIND_IMPORTANT, delegate);
@@ -386,7 +414,23 @@ public class ChildProcessConnection {
         notifyChildProcessDied();
     }
 
-    private void onServiceConnectedOnLauncherThread(IBinder service) {
+    public void kill() {
+        assert isRunningOnLauncherThread();
+        IChildProcessService service = mService;
+        unbind();
+        try {
+            if (service != null) service.forceKill();
+        } catch (RemoteException e) {
+            // Intentionally ignore since we are killing it anyway.
+        }
+        synchronized (sBindingStateLock) {
+            mKilledByUs = true;
+        }
+        notifyChildProcessDied();
+    }
+
+    @VisibleForTesting
+    protected void onServiceConnectedOnLauncherThread(IBinder service) {
         assert isRunningOnLauncherThread();
         // A flag from the parent class ensures we run the post-connection logic only once
         // (instead of once per each ChildServiceConnection).
@@ -437,7 +481,8 @@ public class ChildProcessConnection {
         }
     }
 
-    private void onServiceDisconnectedOnLauncherThread() {
+    @VisibleForTesting
+    protected void onServiceDisconnectedOnLauncherThread() {
         assert isRunningOnLauncherThread();
         // Ensure that the disconnection logic runs only once (instead of once per each
         // ChildServiceConnection).
@@ -504,11 +549,17 @@ public class ChildProcessConnection {
         assert isRunningOnLauncherThread();
         assert !mUnbound;
 
-        boolean success = useStrongBinding ? mStrongBinding.bind() : mInitialBinding.bind();
+        boolean success;
+        if (useStrongBinding) {
+            success = mStrongBinding.bind();
+        } else {
+            mModerateBindingCount++;
+            success = mModerateBinding.bind();
+        }
         if (!success) return false;
 
-        updateWaivedBoundOnlyState();
         mWaivedBinding.bind();
+        updateBindingState();
         return true;
     }
 
@@ -521,9 +572,12 @@ public class ChildProcessConnection {
         mStrongBinding.unbind();
         mWaivedBinding.unbind();
         mModerateBinding.unbind();
-        mInitialBinding.unbind();
-        // Note that we don't update the waived bound only state here as to preserve the state when
-        // disconnected.
+        updateBindingState();
+
+        synchronized (sBindingStateLock) {
+            mAllBindingStateCountsWhenDied =
+                    Arrays.copyOf(sAllBindingStateCounts, NUM_BINDING_STATES);
+        }
 
         if (mMemoryPressureCallback != null) {
             final MemoryPressureCallback callback = mMemoryPressureCallback;
@@ -532,26 +586,9 @@ public class ChildProcessConnection {
         }
     }
 
-    public boolean isInitialBindingBound() {
-        assert isRunningOnLauncherThread();
-        return mInitialBinding.isBound();
-    }
-
-    public void addInitialBinding() {
-        assert isRunningOnLauncherThread();
-        mInitialBinding.bind();
-        updateWaivedBoundOnlyState();
-    }
-
     public boolean isStrongBindingBound() {
         assert isRunningOnLauncherThread();
         return mStrongBinding.isBound();
-    }
-
-    public void removeInitialBinding() {
-        assert isRunningOnLauncherThread();
-        mInitialBinding.unbind();
-        updateWaivedBoundOnlyState();
     }
 
     public void addStrongBinding() {
@@ -562,7 +599,7 @@ public class ChildProcessConnection {
         }
         if (mStrongBindingCount == 0) {
             mStrongBinding.bind();
-            updateWaivedBoundOnlyState();
+            updateBindingState();
         }
         mStrongBindingCount++;
     }
@@ -577,7 +614,7 @@ public class ChildProcessConnection {
         mStrongBindingCount--;
         if (mStrongBindingCount == 0) {
             mStrongBinding.unbind();
-            updateWaivedBoundOnlyState();
+            updateBindingState();
         }
     }
 
@@ -594,7 +631,7 @@ public class ChildProcessConnection {
         }
         if (mModerateBindingCount == 0) {
             mModerateBinding.bind();
-            updateWaivedBoundOnlyState();
+            updateBindingState();
         }
         mModerateBindingCount++;
     }
@@ -609,7 +646,7 @@ public class ChildProcessConnection {
         mModerateBindingCount--;
         if (mModerateBindingCount == 0) {
             mModerateBinding.unbind();
-            updateWaivedBoundOnlyState();
+            updateBindingState();
         }
     }
 
@@ -617,18 +654,80 @@ public class ChildProcessConnection {
      * @return true if the connection is bound and only bound with the waived binding or if the
      * connection is unbound and was only bound with the waived binding when it disconnected.
      */
-    public boolean isWaivedBoundOnlyOrWasWhenDied() {
+    public @ChildBindingState int bindingStateCurrentOrWhenDied() {
         // WARNING: this method can be called from a thread other than the launcher thread.
         // Note that it returns the current waived bound only state and is racy. This not really
         // preventable without changing the caller's API, short of blocking.
-        return mWaivedBoundOnly;
+        synchronized (sBindingStateLock) {
+            return mBindingStateCurrentOrWhenDied;
+        }
     }
 
-    // Should be called every time the mInitialBinding or mStrongBinding are bound/unbound.
-    private void updateWaivedBoundOnlyState() {
-        if (!mUnbound) {
-            mWaivedBoundOnly = !mInitialBinding.isBound() && !mStrongBinding.isBound()
-                    && !mModerateBinding.isBound();
+    /**
+     * @return true if the connection is intentionally killed by calling kill().
+     */
+    public boolean isKilledByUs() {
+        // WARNING: this method can be called from a thread other than the launcher thread.
+        // Note that it returns the current waived bound only state and is racy. This not really
+        // preventable without changing the caller's API, short of blocking.
+        synchronized (sBindingStateLock) {
+            return mKilledByUs;
+        }
+    }
+
+    /**
+     * Returns the binding state of remaining processes, excluding the current connection.
+     *
+     * If the current process is dead then returns the binding state of all processes when it died.
+     * Otherwise returns current state.
+     */
+    public int[] remainingBindingStateCountsCurrentOrWhenDied() {
+        // WARNING: this method can be called from a thread other than the launcher thread.
+        // Note that it returns the current waived bound only state and is racy. This not really
+        // preventable without changing the caller's API, short of blocking.
+        synchronized (sBindingStateLock) {
+            if (mAllBindingStateCountsWhenDied != null) {
+                return Arrays.copyOf(mAllBindingStateCountsWhenDied, NUM_BINDING_STATES);
+            }
+
+            int[] counts = Arrays.copyOf(sAllBindingStateCounts, NUM_BINDING_STATES);
+            // If current process is still bound then remove it from the counts.
+            if (mBindingState != ChildBindingState.UNBOUND) {
+                assert counts[mBindingState] > 0;
+                counts[mBindingState]--;
+            }
+            return counts;
+        }
+    }
+
+    // Should be called any binding is bound or unbound.
+    private void updateBindingState() {
+        int newBindingState;
+        if (mUnbound) {
+            newBindingState = ChildBindingState.UNBOUND;
+        } else if (mStrongBinding.isBound()) {
+            newBindingState = ChildBindingState.STRONG;
+        } else if (mModerateBinding.isBound()) {
+            newBindingState = ChildBindingState.MODERATE;
+        } else {
+            assert mWaivedBinding.isBound();
+            newBindingState = ChildBindingState.WAIVED;
+        }
+
+        synchronized (sBindingStateLock) {
+            if (newBindingState != mBindingState) {
+                if (mBindingState != ChildBindingState.UNBOUND) {
+                    assert sAllBindingStateCounts[mBindingState] > 0;
+                    sAllBindingStateCounts[mBindingState]--;
+                }
+                if (newBindingState != ChildBindingState.UNBOUND) {
+                    sAllBindingStateCounts[newBindingState]++;
+                }
+            }
+            mBindingState = newBindingState;
+            if (!mUnbound) {
+                mBindingStateCurrentOrWhenDied = mBindingState;
+            }
         }
     }
 
@@ -646,8 +745,12 @@ public class ChildProcessConnection {
     }
 
     @VisibleForTesting
-    public void crashServiceForTesting() throws RemoteException {
-        mService.crashIntentionallyForTesting();
+    public void crashServiceForTesting() {
+        try {
+            mService.forceKill();
+        } catch (RemoteException e) {
+            // Expected. Ignore.
+        }
     }
 
     @VisibleForTesting

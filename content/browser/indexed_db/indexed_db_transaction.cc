@@ -111,7 +111,7 @@ IndexedDBTransaction::IndexedDBTransaction(
     : id_(id),
       object_store_ids_(object_store_ids),
       mode_(mode),
-      connection_(connection),
+      connection_(connection->GetWeakPtr()),
       transaction_(backing_store_transaction),
       ptr_factory_(this) {
   IDB_ASYNC_TRACE_BEGIN("IndexedDBTransaction::lifetime", this);
@@ -222,7 +222,10 @@ void IndexedDBTransaction::Abort(const IndexedDBDatabaseError& error) {
   database_->TransactionFinished(this, false);
 
   // RemoveTransaction will delete |this|.
-  connection_->RemoveTransaction(id_);
+  // Note: During force-close situations, the connection can be destroyed during
+  // the |IndexedDBDatabase::TransactionFinished| call
+  if (connection_)
+    connection_->RemoveTransaction(id_);
 }
 
 bool IndexedDBTransaction::IsTaskQueueEmpty() const {
@@ -523,9 +526,9 @@ void IndexedDBTransaction::ProcessTaskQueue() {
   // never requests further activity. Read-only transactions don't
   // block other transactions, so don't time those out.
   if (mode_ != blink::kWebIDBTransactionModeReadOnly) {
-    timeout_timer_.Start(
-        FROM_HERE, GetInactivityTimeout(),
-        base::Bind(&IndexedDBTransaction::Timeout, ptr_factory_.GetWeakPtr()));
+    timeout_timer_.Start(FROM_HERE, GetInactivityTimeout(),
+                         base::BindOnce(&IndexedDBTransaction::Timeout,
+                                        ptr_factory_.GetWeakPtr()));
   }
   processing_event_queue_ = false;
 }
@@ -568,18 +571,18 @@ void IndexedDBTransaction::RemovePendingObservers(
 
 void IndexedDBTransaction::AddObservation(
     int32_t connection_id,
-    ::indexed_db::mojom::ObservationPtr observation) {
+    blink::mojom::IDBObservationPtr observation) {
   auto it = connection_changes_map_.find(connection_id);
   if (it == connection_changes_map_.end()) {
     it = connection_changes_map_
-             .insert(std::make_pair(
-                 connection_id, ::indexed_db::mojom::ObserverChanges::New()))
+             .insert(std::make_pair(connection_id,
+                                    blink::mojom::IDBObserverChanges::New()))
              .first;
   }
   it->second->observations.push_back(std::move(observation));
 }
 
-::indexed_db::mojom::ObserverChangesPtr*
+blink::mojom::IDBObserverChangesPtr*
 IndexedDBTransaction::GetPendingChangesForConnection(int32_t connection_id) {
   auto it = connection_changes_map_.find(connection_id);
   if (it != connection_changes_map_.end())

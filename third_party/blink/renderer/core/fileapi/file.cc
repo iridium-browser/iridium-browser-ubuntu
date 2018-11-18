@@ -26,12 +26,12 @@
 #include "third_party/blink/renderer/core/fileapi/file.h"
 
 #include <memory>
+
+#include "third_party/blink/public/platform/file_path_conversion.h"
 #include "third_party/blink/public/platform/platform.h"
-#include "third_party/blink/public/platform/web_file_utilities.h"
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
 #include "third_party/blink/renderer/core/fileapi/file_property_bag.h"
 #include "third_party/blink/renderer/core/frame/use_counter.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/blob/blob_data.h"
 #include "third_party/blink/renderer/platform/file_metadata.h"
@@ -70,6 +70,11 @@ static std::unique_ptr<BlobData> CreateBlobDataForFileWithType(
 static std::unique_ptr<BlobData> CreateBlobDataForFile(
     const String& path,
     File::ContentTypeLookupPolicy policy) {
+  if (path.IsEmpty()) {
+    std::unique_ptr<BlobData> blob_data = BlobData::Create();
+    blob_data->SetContentType("application/octet-stream");
+    return blob_data;
+  }
   return CreateBlobDataForFileWithType(
       path, GetContentTypeFromFileName(path, policy));
 }
@@ -159,7 +164,7 @@ File::File(const String& path,
       has_backing_file_(true),
       user_visibility_(user_visibility),
       path_(path),
-      name_(Platform::Current()->GetFileUtilities()->BaseName(path)),
+      name_(FilePathToWebString(WebStringToFilePath(path).BaseName())),
       snapshot_size_(-1),
       snapshot_modification_time_ms_(InvalidFileTime()) {}
 

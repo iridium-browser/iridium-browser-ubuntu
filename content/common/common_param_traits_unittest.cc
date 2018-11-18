@@ -12,6 +12,7 @@
 
 #include "base/macros.h"
 #include "base/values.h"
+#include "components/viz/common/surfaces/surface_info.h"
 #include "content/common/resource_messages.h"
 #include "content/public/common/content_constants.h"
 #include "ipc/ipc_message.h"
@@ -172,8 +173,6 @@ TEST(IPCMessageTest, SSLInfo) {
   in.pkp_bypassed = true;
   in.client_cert_sent = true;
   in.channel_id_sent = true;
-  in.token_binding_negotiated = true;
-  in.token_binding_key_param = net::TB_PARAM_ECDSAP256;
   in.handshake_type = net::SSLInfo::HANDSHAKE_FULL;
   const net::SHA256HashValue kCertPublicKeyHashValue = {{0x01, 0x02}};
   in.public_key_hashes.push_back(net::HashValue(kCertPublicKeyHashValue));
@@ -217,8 +216,6 @@ TEST(IPCMessageTest, SSLInfo) {
   ASSERT_EQ(in.pkp_bypassed, out.pkp_bypassed);
   ASSERT_EQ(in.client_cert_sent, out.client_cert_sent);
   ASSERT_EQ(in.channel_id_sent, out.channel_id_sent);
-  ASSERT_EQ(in.token_binding_negotiated, out.token_binding_negotiated);
-  ASSERT_EQ(in.token_binding_key_param, out.token_binding_key_param);
   ASSERT_EQ(in.handshake_type, out.handshake_type);
   ASSERT_EQ(in.public_key_hashes, out.public_key_hashes);
   ASSERT_EQ(in.pinning_failure_log, out.pinning_failure_log);
@@ -255,9 +252,9 @@ TEST(IPCMessageTest, RenderWidgetSurfaceProperties) {
   content::RenderWidgetSurfaceProperties input;
   input.size = gfx::Size(23, 45);
   input.device_scale_factor = 0.8;
-#ifdef OS_ANDROID
   input.top_controls_height = 16.5;
   input.top_controls_shown_ratio = 0.4;
+#ifdef OS_ANDROID
   input.bottom_controls_height = 23.4;
   input.bottom_controls_shown_ratio = 0.8;
   input.selection.start.set_type(gfx::SelectionBound::Type::CENTER);
@@ -274,9 +271,9 @@ TEST(IPCMessageTest, RenderWidgetSurfaceProperties) {
 
   EXPECT_EQ(input.size, output.size);
   EXPECT_EQ(input.device_scale_factor, output.device_scale_factor);
-#ifdef OS_ANDROID
   EXPECT_EQ(input.top_controls_height, output.top_controls_height);
   EXPECT_EQ(input.top_controls_shown_ratio, output.top_controls_shown_ratio);
+#ifdef OS_ANDROID
   EXPECT_EQ(input.bottom_controls_height, output.bottom_controls_height);
   EXPECT_EQ(input.bottom_controls_shown_ratio,
             output.bottom_controls_shown_ratio);
@@ -284,4 +281,25 @@ TEST(IPCMessageTest, RenderWidgetSurfaceProperties) {
   EXPECT_EQ(input.has_transparent_background,
             output.has_transparent_background);
 #endif
+}
+
+static constexpr viz::FrameSinkId kArbitraryFrameSinkId(1, 1);
+
+TEST(IPCMessageTest, SurfaceInfo) {
+  IPC::Message msg(1, 2, IPC::Message::PRIORITY_NORMAL);
+  const viz::SurfaceId kArbitrarySurfaceId(
+      kArbitraryFrameSinkId,
+      viz::LocalSurfaceId(3, base::UnguessableToken::Create()));
+  constexpr float kArbitraryDeviceScaleFactor = 0.9f;
+  const gfx::Size kArbitrarySize(65, 321);
+  const viz::SurfaceInfo surface_info_in(
+      kArbitrarySurfaceId, kArbitraryDeviceScaleFactor, kArbitrarySize);
+  IPC::ParamTraits<viz::SurfaceInfo>::Write(&msg, surface_info_in);
+
+  viz::SurfaceInfo surface_info_out;
+  base::PickleIterator iter(msg);
+  EXPECT_TRUE(
+      IPC::ParamTraits<viz::SurfaceInfo>::Read(&msg, &iter, &surface_info_out));
+
+  ASSERT_EQ(surface_info_in, surface_info_out);
 }

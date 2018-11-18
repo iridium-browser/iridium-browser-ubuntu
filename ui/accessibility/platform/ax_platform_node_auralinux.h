@@ -2,10 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef UI_ACCESSIBILITY_AX_PLATFORM_NODE_AURALINUX_H_
-#define UI_ACCESSIBILITY_AX_PLATFORM_NODE_AURALINUX_H_
+#ifndef UI_ACCESSIBILITY_PLATFORM_AX_PLATFORM_NODE_AURALINUX_H_
+#define UI_ACCESSIBILITY_PLATFORM_AX_PLATFORM_NODE_AURALINUX_H_
 
 #include <atk/atk.h>
+
+#include <string>
 
 #include "base/macros.h"
 #include "base/strings/utf_string_conversions.h"
@@ -25,24 +27,24 @@
 namespace ui {
 
 // Implements accessibility on Aura Linux using ATK.
-class AXPlatformNodeAuraLinux : public AXPlatformNodeBase {
+class AX_EXPORT AXPlatformNodeAuraLinux : public AXPlatformNodeBase {
  public:
   AXPlatformNodeAuraLinux();
   ~AXPlatformNodeAuraLinux() override;
 
   // Set or get the root-level Application object that's the parent of all
   // top-level windows.
-  AX_EXPORT static void SetApplication(AXPlatformNode* application);
+  static void SetApplication(AXPlatformNode* application);
   static AXPlatformNode* application() { return application_; }
 
   static void EnsureGTypeInit();
 
   // Do asynchronous static initialization.
-  AX_EXPORT static void StaticInitialize();
+  static void StaticInitialize();
 
-  AX_EXPORT void DataChanged();
+  void DataChanged();
   void Destroy() override;
-  AX_EXPORT void AddAccessibilityTreeProperties(base::DictionaryValue* dict);
+  void AddAccessibilityTreeProperties(base::DictionaryValue* dict);
 
   AtkRole GetAtkRole();
   void GetAtkState(AtkStateSet* state_set);
@@ -57,10 +59,13 @@ class AXPlatformNodeAuraLinux : public AXPlatformNodeBase {
   bool GrabFocus();
   bool DoDefaultAction();
   const gchar* GetDefaultActionName();
+  AtkAttributeSet* GetAtkAttributes();
 
   void SetExtentsRelativeToAtkCoordinateType(
       gint* x, gint* y, gint* width, gint* height,
       AtkCoordType coord_type);
+
+  static AXPlatformNodeAuraLinux* GetFromUniqueId(int32_t unique_id);
 
   // AtkDocument helpers
   const gchar* GetDocumentAttributeValue(const gchar* attribute) const;
@@ -73,7 +78,13 @@ class AXPlatformNodeAuraLinux : public AXPlatformNodeBase {
   void GetFloatAttributeInGValue(ax::mojom::FloatAttribute attr, GValue* value);
 
   // Event helpers
+  void OnCheckedStateChanged();
+  void OnExpandedStateChanged(bool is_expanded);
   void OnFocused();
+  void OnSelected();
+  void OnValueChanged();
+
+  bool SelectionAndFocusAreTheSame();
 
   // AXPlatformNode overrides.
   gfx::NativeViewAccessible GetNativeViewAccessible() override;
@@ -82,6 +93,18 @@ class AXPlatformNodeAuraLinux : public AXPlatformNodeBase {
   // AXPlatformNodeBase overrides.
   void Init(AXPlatformNodeDelegate* delegate) override;
   int GetIndexInParent() override;
+
+  std::string GetTextForATK();
+
+  void UpdateHypertext();
+  const AXHypertext& GetHypertext();
+
+ protected:
+  AXHypertext hypertext_;
+
+  void AddAttributeToList(const char* name,
+                          const char* value,
+                          PlatformAttributeList* attributes) override;
 
  private:
   enum AtkInterfaces {
@@ -103,6 +126,9 @@ class AXPlatformNodeAuraLinux : public AXPlatformNodeBase {
   AtkObject* CreateAtkObject();
   void DestroyAtkObjects();
 
+  // The AtkStateType for a checkable node can vary depending on the role.
+  AtkStateType GetAtkStateTypeForCheckableNode();
+
   // Keep information of latest AtkInterfaces mask to refresh atk object
   // interfaces accordingly if needed.
   int interface_mask_;
@@ -119,9 +145,16 @@ class AXPlatformNodeAuraLinux : public AXPlatformNodeBase {
   // to emit the ATK_STATE_FOCUSED change to false.
   static AtkObject* current_focused_;
 
+  // The last object which was selected. Tracking this is required because
+  // widgets in the browser UI only emit notifications upon becoming selected,
+  // but clients also expect notifications when items become unselected.
+  static base::WeakPtr<AXPlatformNodeAuraLinux> current_selected_;
+
+  base::WeakPtrFactory<AXPlatformNodeAuraLinux> weak_factory_;
+
   DISALLOW_COPY_AND_ASSIGN(AXPlatformNodeAuraLinux);
 };
 
 }  // namespace ui
 
-#endif  // UI_ACCESSIBILITY_AX_PLATFORM_NODE_AURALINUX_H_
+#endif  // UI_ACCESSIBILITY_PLATFORM_AX_PLATFORM_NODE_AURALINUX_H_

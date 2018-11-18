@@ -30,9 +30,8 @@ FileError FinishRevert(ResourceMetadata* metadata,
   FileError error = GDataToFileError(status);
   switch (error) {
     case FILE_ERROR_OK:
-      if (!ConvertFileResourceToResourceEntry(*file_resource, &entry,
-                                              &parent_resource_id))
-        return FILE_ERROR_NOT_A_FILE;
+      ConvertFileResourceToResourceEntry(*file_resource, &entry,
+                                         &parent_resource_id);
       break;
 
     case FILE_ERROR_NOT_FOUND:
@@ -96,14 +95,14 @@ EntryRevertPerformer::EntryRevertPerformer(
 }
 
 EntryRevertPerformer::~EntryRevertPerformer() {
-  DCHECK(thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 }
 
 void EntryRevertPerformer::RevertEntry(const std::string& local_id,
                                        const ClientContext& context,
                                        const FileOperationCallback& callback) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK(!callback.is_null());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  DCHECK(callback);
 
   std::unique_ptr<ResourceEntry> entry(new ResourceEntry);
   ResourceEntry* entry_ptr = entry.get();
@@ -121,8 +120,8 @@ void EntryRevertPerformer::RevertEntryAfterPrepare(
     const FileOperationCallback& callback,
     std::unique_ptr<ResourceEntry> entry,
     FileError error) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK(!callback.is_null());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  DCHECK(callback);
 
   if (error == FILE_ERROR_OK && entry->resource_id().empty())
     error = FILE_ERROR_INVALID_OPERATION;
@@ -144,8 +143,8 @@ void EntryRevertPerformer::RevertEntryAfterGetFileResource(
     const std::string& local_id,
     google_apis::DriveApiErrorCode status,
     std::unique_ptr<google_apis::FileResource> entry) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK(!callback.is_null());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  DCHECK(callback);
 
   FileChange* changed_files = new FileChange;
   base::PostTaskAndReplyWithResult(
@@ -161,8 +160,8 @@ void EntryRevertPerformer::RevertEntryAfterFinishRevert(
     const FileOperationCallback& callback,
     const FileChange* changed_files,
     FileError error) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK(!callback.is_null());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  DCHECK(callback);
 
   delegate_->OnFileChangedByOperation(*changed_files);
 

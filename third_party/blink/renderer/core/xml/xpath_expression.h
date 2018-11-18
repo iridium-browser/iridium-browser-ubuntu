@@ -38,7 +38,7 @@ class ScriptValue;
 class XPathNSResolver;
 class XPathResult;
 
-namespace XPath {
+namespace xpath {
 class Expression;
 }
 
@@ -56,12 +56,12 @@ class XPathExpression : public ScriptWrappable {
                         const ScriptValue&,
                         ExceptionState&);
 
-  void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  private:
   XPathExpression();
 
-  Member<XPath::Expression> top_expression_;
+  Member<xpath::Expression> top_expression_;
 };
 
 }  // namespace blink

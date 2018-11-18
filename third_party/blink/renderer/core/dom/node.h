@@ -31,14 +31,14 @@
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
 #include "third_party/blink/renderer/core/dom/events/simulated_click_options.h"
-#include "third_party/blink/renderer/core/dom/mutation_observer.h"
+#include "third_party/blink/renderer/core/dom/mutation_observer_options.h"
 #include "third_party/blink/renderer/core/dom/node_rare_data.h"
 #include "third_party/blink/renderer/core/dom/tree_scope.h"
 #include "third_party/blink/renderer/core/style/computed_style_constants.h"
 #include "third_party/blink/renderer/platform/bindings/trace_wrapper_member.h"
 #include "third_party/blink/renderer/platform/geometry/layout_rect.h"
 
-// This needs to be here because Element.cpp also depends on it.
+// This needs to be here because element.cc also depends on it.
 #define DUMP_NODE_STATISTICS 0
 
 namespace blink {
@@ -58,6 +58,8 @@ class KURL;
 class LayoutBox;
 class LayoutBoxModelObject;
 class LayoutObject;
+class MutationObserver;
+class MutationObserverRegistration;
 class NodeList;
 class NodeListsNodeData;
 class NodeOrString;
@@ -70,16 +72,22 @@ template <typename NodeType>
 class StaticNodeTypeList;
 using StaticNodeList = StaticNodeTypeList<Node>;
 class StyleChangeReasonForTracing;
-class WebMouseEvent;
 class WebPluginContainerImpl;
 
 const int kNodeStyleChangeShift = 18;
 const int kNodeCustomElementShift = 20;
 
+// Values for kChildNeedsStyleRecalcFlag, controlling whether a node gets its
+// style recalculated.
 enum StyleChangeType {
+  // This node does not need style recalculation.
   kNoStyleChange = 0,
+  // This node needs style recalculation.
   kLocalStyleChange = 1 << kNodeStyleChangeShift,
+  // This node and all of its flat-tree descendeants need style recalculation.
   kSubtreeStyleChange = 2 << kNodeStyleChangeShift,
+  // This node and all of its descendants are detached and need style
+  // recalculation.
   kNeedsReattachStyleChange = 3 << kNodeStyleChangeShift,
 };
 
@@ -172,6 +180,7 @@ class CORE_EXPORT Node : public EventTarget {
   virtual void setNodeValue(const String&);
   virtual NodeType getNodeType() const = 0;
   ContainerNode* parentNode() const;
+  ContainerNode* ParentNodeWithCounting() const;
   Element* parentElement() const;
   ContainerNode* ParentElementOrShadowRoot() const;
   ContainerNode* ParentElementOrDocumentFragment() const;
@@ -318,9 +327,6 @@ class CORE_EXPORT Node : public EventTarget {
 
   // If this node is in a shadow tree, returns its shadow host. Otherwise,
   // returns nullptr.
-  // TODO(kochi): crbug.com/507413 ownerShadowHost() can return nullptr even
-  // when it is in a shadow tree but its root is detached from its host. This
-  // can happen when handling queued events (e.g. during execCommand()).
   Element* OwnerShadowHost() const;
   // crbug.com/569532: containingShadowRoot() can return nullptr even if
   // isInShadowTree() returns true.
@@ -349,12 +355,8 @@ class CORE_EXPORT Node : public EventTarget {
 
   // These low-level calls give the caller responsibility for maintaining the
   // integrity of the tree.
-  void SetPreviousSibling(Node* previous) {
-    previous_ = previous;
-  }
-  void SetNextSibling(Node* next) {
-    next_ = next;
-  }
+  void SetPreviousSibling(Node* previous) { previous_ = previous; }
+  void SetNextSibling(Node* next) { next_ = next; }
 
   virtual bool CanContainRangeEndPoint() const { return false; }
 
@@ -401,19 +403,24 @@ class CORE_EXPORT Node : public EventTarget {
   bool HasFocusWithin() const {
     return IsUserActionElement() && IsUserActionElementHasFocusWithin();
   }
-  bool WasFocusedByMouse() const {
-    return IsUserActionElement() && IsUserActionElementWasFocusedByMouse();
-  }
 
   bool NeedsAttach() const {
     return GetStyleChangeType() == kNeedsReattachStyleChange;
   }
+  // True if the style recalc process should recalculate style for this node.
   bool NeedsStyleRecalc() const {
-    return GetStyleChangeType() != kNoStyleChange;
+    // We do not ClearNeedsStyleRecalc() if the recalc triggers a layout re-
+    // attachment (see Element::RecalcStyle()). In order to avoid doing an extra
+    // StyleForLayoutObject for slotted elements, also check if we have been
+    // marked for re-attachment (which mean we have already gone through
+    // RecalcStyleForReattachment as a slot-assigned element).
+    return GetStyleChangeType() != kNoStyleChange && !NeedsReattachLayoutTree();
   }
   StyleChangeType GetStyleChangeType() const {
     return static_cast<StyleChangeType>(node_flags_ & kStyleChangeMask);
   }
+  // True if the style recalculation process should traverse this node's
+  // children when looking for nodes that need recalculation.
   bool ChildNeedsStyleRecalc() const {
     return GetFlag(kChildNeedsStyleRecalcFlag);
   }
@@ -430,6 +437,8 @@ class CORE_EXPORT Node : public EventTarget {
   void SetChildNeedsStyleRecalc() { SetFlag(kChildNeedsStyleRecalcFlag); }
   void ClearChildNeedsStyleRecalc() { ClearFlag(kChildNeedsStyleRecalcFlag); }
 
+  // Sets the flag for the current node and also calls
+  // MarkAncestorsWithChildNeedsStyleRecalc
   void SetNeedsStyleRecalc(StyleChangeType, const StyleChangeReasonForTracing&);
   void ClearNeedsStyleRecalc();
 
@@ -465,6 +474,8 @@ class CORE_EXPORT Node : public EventTarget {
   }
   void MarkAncestorsWithChildNeedsDistributionRecalc();
 
+  // True if the style invalidation process should traverse this node's children
+  // when looking for pending invalidations.
   bool ChildNeedsStyleInvalidation() const {
     return GetFlag(kChildNeedsStyleInvalidationFlag);
   }
@@ -475,13 +486,38 @@ class CORE_EXPORT Node : public EventTarget {
     ClearFlag(kChildNeedsStyleInvalidationFlag);
   }
   void MarkAncestorsWithChildNeedsStyleInvalidation();
+
+  // True if there are pending invalidations against this node.
   bool NeedsStyleInvalidation() const {
     return GetFlag(kNeedsStyleInvalidationFlag);
   }
   void ClearNeedsStyleInvalidation() { ClearFlag(kNeedsStyleInvalidationFlag); }
+  // Sets the flag for the current node and also calls
+  // MarkAncestorsWithChildNeedsStyleInvalidation
   void SetNeedsStyleInvalidation();
 
-  void UpdateDistribution();
+  // This needs to be called before using FlatTreeTraversal.
+  // Once Shadow DOM v0 is removed, this function can be removed.
+  void UpdateDistributionForFlatTreeTraversal() {
+    UpdateDistributionInternal();
+  }
+
+  // This is not what you might want to call in most cases.
+  // You should call UpdateDistributionForFlatTreeTraversal, instead.
+  // Only the implementation of v0 shadow trees uses this.
+  void UpdateDistributionForLegacyDistributedNodes() {
+    // The implementation is same to UpdateDistributionForFlatTreeTraversal.
+    UpdateDistributionInternal();
+  }
+
+  // Please don't use this function.
+  // Background: When we investigated the usage of (old) UpdateDistribution,
+  // some caller's intents were unclear. Thus, we had to introduce this funtion
+  // for the sake of safety. If we can figure out the intent of each caller, we
+  // can replace that with calling UpdateDistributionForFlatTreeTraversal (or
+  // just RecalcSlotAssignments()) on a case-by-case basis.
+  void UpdateDistributionForUnknownReasons();
+
   bool MayContainLegacyNodeTreeWhereDistributionShouldBeSupported() const;
 
   void SetIsLink(bool f);
@@ -496,7 +532,6 @@ class CORE_EXPORT Node : public EventTarget {
   virtual void SetActive(bool flag = true);
   virtual void SetDragged(bool flag);
   virtual void SetHovered(bool flag = true);
-  void SetWasFocusedByMouse(bool flag);
 
   virtual int tabIndex() const;
 
@@ -560,6 +595,7 @@ class CORE_EXPORT Node : public EventTarget {
   bool IsChildOfV1ShadowHost() const;
   bool IsChildOfV0ShadowHost() const;
   ShadowRoot* V1ShadowRootOfParent() const;
+  ContainerNode* GetReattachParent() const;
 
   bool IsDocumentTypeNode() const { return getNodeType() == kDocumentTypeNode; }
   virtual bool ChildTypeAllowed(NodeType) const { return false; }
@@ -594,6 +630,8 @@ class CORE_EXPORT Node : public EventTarget {
 
   struct AttachContext {
     STACK_ALLOCATED();
+
+   public:
     // Keep track of previously attached in-flow box during attachment so that
     // we don't need to backtrack past display:none/contents and out of flow
     // objects when we need to do whitespace re-attachment.
@@ -642,7 +680,7 @@ class CORE_EXPORT Node : public EventTarget {
   }
 
   // -----------------------------------------------------------------------------
-  // Notification of document structure changes (see ContainerNode.h for more
+  // Notification of document structure changes (see container_node.h for more
   // notification methods)
   //
   // At first, Blinkt notifies the node that it has been inserted into the
@@ -670,7 +708,7 @@ class CORE_EXPORT Node : public EventTarget {
   };
 
   virtual InsertionNotificationRequest InsertedInto(
-      ContainerNode* insertion_point);
+      ContainerNode& insertion_point);
   virtual void DidNotifySubtreeInsertionsToDocument() {}
 
   // Notifies the node that it is no longer part of the tree.
@@ -679,7 +717,7 @@ class CORE_EXPORT Node : public EventTarget {
   // DOMNodeRemovedFromDocument DOM event, but does not require the overhead of
   // event dispatching, and is called _after_ the node is removed from the tree.
   //
-  virtual void RemovedFrom(ContainerNode* insertion_point);
+  virtual void RemovedFrom(ContainerNode& insertion_point);
 
   // FIXME(dominicc): This method is not debug-only--it is used by
   // Tracing--rename it to something indicative.
@@ -729,24 +767,18 @@ class CORE_EXPORT Node : public EventTarget {
   // Handlers to do/undo actions on the target node before an event is
   // dispatched to it and after the event has been dispatched.  The data pointer
   // is handed back by the preDispatch and passed to postDispatch.
-  virtual EventDispatchHandlingState* PreDispatchEventHandler(Event*) {
+  virtual EventDispatchHandlingState* PreDispatchEventHandler(Event&) {
     return nullptr;
   }
-  virtual void PostDispatchEventHandler(Event*, EventDispatchHandlingState*) {}
+  virtual void PostDispatchEventHandler(Event&, EventDispatchHandlingState*) {}
 
-  void DispatchScopedEvent(Event*);
+  void DispatchScopedEvent(Event&);
 
   virtual void HandleLocalEvents(Event&);
 
   void DispatchSubtreeModifiedEvent();
   DispatchEventResult DispatchDOMActivateEvent(int detail,
                                                Event& underlying_event);
-
-  void DispatchMouseEvent(const WebMouseEvent&,
-                          const AtomicString& event_type,
-                          int click_count = 0,
-                          const String& canvas_node_id = String(),
-                          Node* related_target = nullptr);
 
   void DispatchSimulatedClick(Event* underlying_event,
                               SimulatedClickMouseEventOptions = kSendNoEvents,
@@ -756,7 +788,7 @@ class CORE_EXPORT Node : public EventTarget {
   void DispatchInputEvent();
 
   // Perform the default action for an event.
-  virtual void DefaultEventHandler(Event*);
+  virtual void DefaultEventHandler(Event&);
   virtual void WillCallDefaultEventHandler(const Event&);
   // Should return true if this Node has activation behavior.
   // https://dom.spec.whatwg.org/#eventtarget-activation-behavior
@@ -767,7 +799,7 @@ class CORE_EXPORT Node : public EventTarget {
 
   void GetRegisteredMutationObserversOfType(
       HeapHashMap<Member<MutationObserver>, MutationRecordDeliveryOptions>&,
-      MutationObserver::MutationType,
+      MutationType,
       const QualifiedName* attribute_name);
   void RegisterMutationObserver(MutationObserver&,
                                 MutationObserverOptions,
@@ -803,12 +835,17 @@ class CORE_EXPORT Node : public EventTarget {
     return GetFlag(kHasDuplicateAttributes);
   }
 
+  void SetInDOMNodeRemovedHandler(bool flag) {
+    SetFlag(flag, kInDOMNodeRemovedHandler);
+  }
+  bool InDOMNodeRemovedHandler() const {
+    return GetFlag(kInDOMNodeRemovedHandler);
+  }
+
   // If the node is a plugin, then this returns its WebPluginContainer.
   WebPluginContainerImpl* GetWebPluginContainer() const;
 
-  virtual void Trace(blink::Visitor*);
-
-  virtual void TraceWrappers(const ScriptWrappableVisitor*) const;
+  void Trace(blink::Visitor*) override;
 
  private:
   enum NodeFlags {
@@ -860,11 +897,14 @@ class CORE_EXPORT Node : public EventTarget {
 
     kHasDuplicateAttributes = 1 << 28,
 
+    // Temporary flag for some UseCounter items. crbug.com/859391.
+    kInDOMNodeRemovedHandler = 1 << 29,
+
     kDefaultNodeFlags =
         kIsFinishedParsingChildrenFlag | kNeedsReattachStyleChange
   };
 
-  // 4 bits remaining.
+  // 3 bits remaining.
 
   bool GetFlag(NodeFlags mask) const { return node_flags_ & mask; }
   void SetFlag(bool f, NodeFlags mask) {
@@ -873,16 +913,9 @@ class CORE_EXPORT Node : public EventTarget {
   void SetFlag(NodeFlags mask) { node_flags_ |= mask; }
   void ClearFlag(NodeFlags mask) { node_flags_ &= ~mask; }
 
-  // TODO(mustaq): This is a hack to fix sites with flash objects. We should
-  // instead route all WebMouseEvents through EventHandler. See
-  // crbug.com/665924.
-  void CreateAndDispatchPointerEvent(const AtomicString& mouse_event_name,
-                                     const WebMouseEvent&,
-                                     LocalDOMWindow* view);
-
  protected:
   enum ConstructionType {
-    kCreateOther = kDefaultNodeFlags,
+    kCreateOther = kIsFinishedParsingChildrenFlag,
     kCreateText = kDefaultNodeFlags | kIsTextFlag,
     kCreateContainer =
         kDefaultNodeFlags | kChildNeedsStyleRecalcFlag | kIsContainerFlag,
@@ -909,7 +942,7 @@ class CORE_EXPORT Node : public EventTarget {
                           RegisteredEventListener&) override;
   void RemovedEventListener(const AtomicString& event_type,
                             const RegisteredEventListener&) override;
-  DispatchEventResult DispatchEventInternal(Event*) override;
+  DispatchEventResult DispatchEventInternal(Event&) override;
 
   bool HasRareData() const { return GetFlag(kHasRareDataFlag); }
 
@@ -931,6 +964,9 @@ class CORE_EXPORT Node : public EventTarget {
   void SetTreeScope(TreeScope* scope) { tree_scope_ = scope; }
 
   void MarkAncestorsWithChildNeedsStyleRecalc();
+  static void MarkAncestorsWithChildNeedsStyleRecalc(Node* child) {
+    child->MarkAncestorsWithChildNeedsStyleRecalc();
+  }
 
   void SetIsFinishedParsingChildren(bool value) {
     SetFlag(value, kIsFinishedParsingChildrenFlag);
@@ -950,8 +986,8 @@ class CORE_EXPORT Node : public EventTarget {
   bool IsUserActionElementHovered() const;
   bool IsUserActionElementFocused() const;
   bool IsUserActionElementHasFocusWithin() const;
-  bool IsUserActionElementWasFocusedByMouse() const;
 
+  void UpdateDistributionInternal();
   void RecalcDistribution();
 
   void SetStyleChange(StyleChangeType);
@@ -993,10 +1029,6 @@ inline ContainerNode* Node::ParentOrShadowHostNode() const {
   return reinterpret_cast<ContainerNode*>(parent_or_shadow_host_node_.Get());
 }
 
-inline ContainerNode* Node::parentNode() const {
-  return IsShadowRoot() ? nullptr : ParentOrShadowHostNode();
-}
-
 inline void Node::LazyReattachIfAttached() {
   if (NeedsAttach())
     return;
@@ -1007,10 +1039,14 @@ inline void Node::LazyReattachIfAttached() {
   context.performing_reattach = true;
 
   DetachLayoutTree(context);
-  MarkAncestorsWithChildNeedsStyleRecalc();
+  // Comments and processing instructions are never marked dirty.
+  if (NeedsStyleRecalc())
+    MarkAncestorsWithChildNeedsStyleRecalc();
 }
 
 inline bool Node::ShouldCallRecalcStyle(StyleRecalcChange change) {
+  if (NeedsReattachLayoutTree())
+    return false;
   return change >= kIndependentInherit || NeedsStyleRecalc() ||
          ChildNeedsStyleRecalc();
 }

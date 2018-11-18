@@ -33,13 +33,11 @@
 #include <limits>
 #include <memory>
 #include <sstream>
+
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/public/platform/web_source_buffer.h"
-#include "third_party/blink/renderer/bindings/core/v8/exception_messages.h"
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
-#include "third_party/blink/renderer/core/dom/events/media_element_event_queue.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
+#include "third_party/blink/renderer/core/dom/events/event_queue.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/deprecation.h"
 #include "third_party/blink/renderer/core/frame/use_counter.h"
@@ -53,7 +51,10 @@
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer_view.h"
 #include "third_party/blink/renderer/modules/mediasource/media_source.h"
 #include "third_party/blink/renderer/modules/mediasource/source_buffer_track_base_supplement.h"
+#include "third_party/blink/renderer/platform/bindings/exception_messages.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
+#include "third_party/blink/renderer/platform/network/mime/content_type.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
 
@@ -72,13 +73,13 @@ static bool ThrowExceptionIfRemovedOrUpdating(bool is_removed,
                                               ExceptionState& exception_state) {
   if (is_removed) {
     MediaSource::LogAndThrowDOMException(
-        exception_state, kInvalidStateError,
+        exception_state, DOMExceptionCode::kInvalidStateError,
         "This SourceBuffer has been removed from the parent media source.");
     return true;
   }
   if (is_updating) {
     MediaSource::LogAndThrowDOMException(
-        exception_state, kInvalidStateError,
+        exception_state, DOMExceptionCode::kInvalidStateError,
         "This SourceBuffer is still processing an 'appendBuffer' or "
         "'remove' operation.");
     return true;
@@ -106,7 +107,7 @@ WTF::String WebTimeRangesToString(const WebTimeRanges& ranges) {
 SourceBuffer* SourceBuffer::Create(
     std::unique_ptr<WebSourceBuffer> web_source_buffer,
     MediaSource* source,
-    MediaElementEventQueue* async_event_queue) {
+    EventQueue* async_event_queue) {
   SourceBuffer* source_buffer =
       new SourceBuffer(std::move(web_source_buffer), source, async_event_queue);
   source_buffer->PauseIfNeeded();
@@ -115,7 +116,7 @@ SourceBuffer* SourceBuffer::Create(
 
 SourceBuffer::SourceBuffer(std::unique_ptr<WebSourceBuffer> web_source_buffer,
                            MediaSource* source,
-                           MediaElementEventQueue* async_event_queue)
+                           EventQueue* async_event_queue)
     : PausableObject(source->GetExecutionContext()),
       web_source_buffer_(std::move(web_source_buffer)),
       source_(source),
@@ -172,40 +173,54 @@ void SourceBuffer::setMode(const AtomicString& new_mode,
                            ExceptionState& exception_state) {
   BLINK_SBLOG << __func__ << " this=" << this << " newMode=" << new_mode;
   // Section 3.1 On setting mode attribute steps.
-  // 1. Let new mode equal the new value being assigned to this attribute.
-  // 2. If this object has been removed from the sourceBuffers attribute of the
+  // https://www.w3.org/TR/media-source/#dom-sourcebuffer-mode
+  // 1. If this object has been removed from the sourceBuffers attribute of the
   //    parent media source, then throw an INVALID_STATE_ERR exception and abort
   //    these steps.
-  // 3. If the updating attribute equals true, then throw an INVALID_STATE_ERR
+  // 2. If the updating attribute equals true, then throw an INVALID_STATE_ERR
   //    exception and abort these steps.
+  // 3. Let new mode equal the new value being assigned to this attribute.
   if (ThrowExceptionIfRemovedOrUpdating(IsRemoved(), updating_,
-                                        exception_state))
+                                        exception_state)) {
     return;
+  }
 
-  // 4. If the readyState attribute of the parent media source is in the "ended"
+  // 4. If generate timestamps flag equals true and new mode equals "segments",
+  //    then throw a TypeError exception and abort these steps.
+  if (web_source_buffer_->GetGenerateTimestampsFlag() &&
+      new_mode == SegmentsKeyword()) {
+    MediaSource::LogAndThrowTypeError(
+        exception_state, "The mode value provided (" + SegmentsKeyword() +
+                             ") is invalid for a byte stream format that uses "
+                             "generated timestamps.");
+    return;
+  }
+
+  // 5. If the readyState attribute of the parent media source is in the "ended"
   //    state then run the following steps:
-  // 4.1 Set the readyState attribute of the parent media source to "open"
-  // 4.2 Queue a task to fire a simple event named sourceopen at the parent
+  // 5.1 Set the readyState attribute of the parent media source to "open"
+  // 5.2 Queue a task to fire a simple event named sourceopen at the parent
   //     media source.
   source_->OpenIfInEndedState();
 
-  // 5. If the append state equals PARSING_MEDIA_SEGMENT, then throw an
+  // 6. If the append state equals PARSING_MEDIA_SEGMENT, then throw an
   //    INVALID_STATE_ERR and abort these steps.
-  // 6. If the new mode equals "sequence", then set the group start timestamp to
+  // 7. If the new mode equals "sequence", then set the group start timestamp to
   //    the highest presentation end timestamp.
   WebSourceBuffer::AppendMode append_mode =
       WebSourceBuffer::kAppendModeSegments;
   if (new_mode == SequenceKeyword())
     append_mode = WebSourceBuffer::kAppendModeSequence;
   if (!web_source_buffer_->SetMode(append_mode)) {
-    MediaSource::LogAndThrowDOMException(exception_state, kInvalidStateError,
+    MediaSource::LogAndThrowDOMException(exception_state,
+                                         DOMExceptionCode::kInvalidStateError,
                                          "The mode may not be set while the "
                                          "SourceBuffer's append state is "
                                          "'PARSING_MEDIA_SEGMENT'.");
     return;
   }
 
-  // 7. Update the attribute to new mode.
+  // 8. Update the attribute to new mode.
   mode_ = new_mode;
 }
 
@@ -216,7 +231,7 @@ TimeRanges* SourceBuffer::buffered(ExceptionState& exception_state) const {
   //    these steps.
   if (IsRemoved()) {
     MediaSource::LogAndThrowDOMException(
-        exception_state, kInvalidStateError,
+        exception_state, DOMExceptionCode::kInvalidStateError,
         "This SourceBuffer has been removed from the parent media source.");
     return nullptr;
   }
@@ -258,7 +273,8 @@ void SourceBuffer::setTimestampOffset(double offset,
   // 6. If the mode attribute equals "sequence", then set the group start
   //    timestamp to new timestamp offset.
   if (!web_source_buffer_->SetTimestampOffset(offset)) {
-    MediaSource::LogAndThrowDOMException(exception_state, kInvalidStateError,
+    MediaSource::LogAndThrowDOMException(exception_state,
+                                         DOMExceptionCode::kInvalidStateError,
                                          "The timestamp offset may not be set "
                                          "while the SourceBuffer's append "
                                          "state is 'PARSING_MEDIA_SEGMENT'.");
@@ -389,13 +405,13 @@ void SourceBuffer::abort(ExceptionState& exception_state) {
   //    steps.
   if (IsRemoved()) {
     MediaSource::LogAndThrowDOMException(
-        exception_state, kInvalidStateError,
+        exception_state, DOMExceptionCode::kInvalidStateError,
         "This SourceBuffer has been removed from the parent media source.");
     return;
   }
   if (!source_->IsOpen()) {
     MediaSource::LogAndThrowDOMException(
-        exception_state, kInvalidStateError,
+        exception_state, DOMExceptionCode::kInvalidStateError,
         "The parent media source's readyState is not 'open'.");
     return;
   }
@@ -409,7 +425,7 @@ void SourceBuffer::abort(ExceptionState& exception_state) {
     // RuntimeEnabledFeature.
     if (RuntimeEnabledFeatures::MediaSourceNewAbortAndDurationEnabled()) {
       MediaSource::LogAndThrowDOMException(
-          exception_state, kInvalidStateError,
+          exception_state, DOMExceptionCode::kInvalidStateError,
           "Aborting asynchronous remove() operation is disallowed.");
       return;
     }
@@ -499,6 +515,73 @@ void SourceBuffer::remove(double start,
   pending_remove_start_ = start;
   pending_remove_end_ = end;
   remove_async_part_runner_->RunAsync();
+}
+
+void SourceBuffer::changeType(const String& type,
+                              ExceptionState& exception_state) {
+  BLINK_SBLOG << __func__ << " this=" << this << " type=" << type;
+
+  // Per 30 May 2018 Codec Switching feature incubation spec:
+  // https://rawgit.com/WICG/media-source/3b3742ea788999bb7ae4a4553ac7d574b0547dbe/index.html#dom-sourcebuffer-changetype
+  // 1. If type is an empty string then throw a TypeError exception and abort
+  //    these steps.
+  if (type.IsEmpty()) {
+    MediaSource::LogAndThrowTypeError(exception_state,
+                                      "The type provided is empty");
+    return;
+  }
+
+  // 2. If this object has been removed from the sourceBuffers attribute of the
+  //    parent media source, then throw an InvalidStateError exception and abort
+  //    these steps.
+  // 3. If the updating attribute equals true, then throw an InvalidStateError
+  //    exception and abort these steps.
+  if (ThrowExceptionIfRemovedOrUpdating(IsRemoved(), updating_,
+                                        exception_state))
+    return;
+
+  // 4. If type contains a MIME type that is not supported or contains a MIME
+  //    type that is not supported with the types specified (currently or
+  //    previously) of SourceBuffer objects in the sourceBuffers attribute of
+  //    the parent media source, then throw a NotSupportedError exception and
+  //    abort these steps.
+  ContentType content_type(type);
+  String codecs = content_type.Parameter("codecs");
+  if (!MediaSource::isTypeSupported(type) ||
+      !web_source_buffer_->CanChangeType(content_type.GetType(), codecs)) {
+    MediaSource::LogAndThrowDOMException(
+        exception_state, DOMExceptionCode::kNotSupportedError,
+        "Changing to the type provided ('" + type + "') is not supported.");
+    return;
+  }
+
+  // 5. If the readyState attribute of the parent media source is in the "ended"
+  //    state then run the following steps:
+  //    1. Set the readyState attribute of the parent media source to "open"
+  //    2. Queue a task to fire a simple event named sourceopen at the parent
+  //       media source.
+  source_->OpenIfInEndedState();
+
+  // 6. Run the reset parser state algorithm.
+  web_source_buffer_->ResetParserState();
+
+  // 7. Update the generate timestamps flag on this SourceBuffer object to the
+  //    value in the "Generate Timestamps Flag" column of the byte stream format
+  //    registry entry that is associated with type.
+  // This call also updates the pipeline to switch bytestream parser and codecs.
+  web_source_buffer_->ChangeType(content_type.GetType(), codecs);
+
+  // 8. If the generate timestamps flag equals true: Set the mode attribute on
+  //    this SourceBuffer object to "sequence", including running the associated
+  //    steps for that attribute being set. Otherwise: keep the previous value
+  //    of the mode attribute on this SourceBuffer object, without running any
+  //    associated steps for that attribute being set.
+  if (web_source_buffer_->GetGenerateTimestampsFlag())
+    setMode(SequenceKeyword(), exception_state);
+
+  // 9. Set pending initialization segment for changeType flag to true.
+  // The logic for this flag is handled by the pipeline (the new bytestream
+  // parser will expect an initialization segment first).
 }
 
 void SourceBuffer::setTrackDefaults(TrackDefaultList* track_defaults,
@@ -856,7 +939,7 @@ bool SourceBuffer::InitializationSegmentReceived(
     //   tracks), then the Track IDs match the ones in the first initialization
     //   segment.
     if (tracks_match_first_init_segment && new_audio_tracks.size() > 1) {
-      for (size_t i = 0; i < new_audio_tracks.size(); ++i) {
+      for (wtf_size_t i = 0; i < new_audio_tracks.size(); ++i) {
         const String& new_track_id = new_video_tracks[i].id;
         if (new_track_id !=
             String(audioTracks().AnonymousIndexedGetter(i)->id())) {
@@ -867,7 +950,7 @@ bool SourceBuffer::InitializationSegmentReceived(
     }
 
     if (tracks_match_first_init_segment && new_video_tracks.size() > 1) {
-      for (size_t i = 0; i < new_video_tracks.size(); ++i) {
+      for (wtf_size_t i = 0; i < new_video_tracks.size(); ++i) {
         const String& new_track_id = new_video_tracks[i].id;
         if (new_track_id !=
             String(videoTracks().AnonymousIndexedGetter(i)->id())) {
@@ -1105,7 +1188,7 @@ void SourceBuffer::ScheduleEvent(const AtomicString& event_name) {
   Event* event = Event::Create(event_name);
   event->SetTarget(this);
 
-  async_event_queue_->EnqueueEvent(FROM_HERE, event);
+  async_event_queue_->EnqueueEvent(FROM_HERE, *event);
 }
 
 bool SourceBuffer::PrepareAppend(double media_time,
@@ -1131,7 +1214,7 @@ bool SourceBuffer::PrepareAppend(double media_time,
   DCHECK(source_->MediaElement());
   if (source_->MediaElement()->error()) {
     MediaSource::LogAndThrowDOMException(
-        exception_state, kInvalidStateError,
+        exception_state, DOMExceptionCode::kInvalidStateError,
         "The HTMLMediaElement.error attribute is not null.");
     TRACE_EVENT_ASYNC_END0("media", "SourceBuffer::prepareAppend", this);
     return false;
@@ -1150,7 +1233,8 @@ bool SourceBuffer::PrepareAppend(double media_time,
     //    exception and abort these steps.
     BLINK_SBLOG << __func__ << " this=" << this
                 << " -> throw QuotaExceededError";
-    MediaSource::LogAndThrowDOMException(exception_state, kQuotaExceededError,
+    MediaSource::LogAndThrowDOMException(exception_state,
+                                         DOMExceptionCode::kQuotaExceededError,
                                          "The SourceBuffer is full, and cannot "
                                          "free space to append additional "
                                          "buffers.");
@@ -1228,7 +1312,7 @@ void SourceBuffer::AppendBufferAsyncPart() {
   // 1. Run the segment parser loop algorithm.
   // Step 2 doesn't apply since we run Step 1 synchronously here.
   DCHECK_GE(pending_append_data_.size(), pending_append_data_offset_);
-  size_t append_size =
+  wtf_size_t append_size =
       pending_append_data_.size() - pending_append_data_offset_;
 
   // Impose an arbitrary max size for a single append() call so that an append
@@ -1236,13 +1320,12 @@ void SourceBuffer::AppendBufferAsyncPart() {
   // by looking at YouTube SourceBuffer usage across a variety of bitrates.
   // This value allows relatively large appends while keeping append() call
   // duration in the  ~5-15ms range.
-  const size_t kMaxAppendSize = 128 * 1024;
+  const wtf_size_t kMaxAppendSize = 128 * 1024;
   if (append_size > kMaxAppendSize)
     append_size = kMaxAppendSize;
 
   TRACE_EVENT_ASYNC_STEP_INTO1("media", "SourceBuffer::appendBuffer", this,
-                               "appending", "appendSize",
-                               static_cast<unsigned>(append_size));
+                               "appending", "appendSize", append_size);
 
   // |zero| is used for 0 byte appends so we always have a valid pointer.
   // We need to convey all appends, even 0 byte ones to |m_webSourceBuffer|

@@ -14,13 +14,12 @@
 #include "content/public/renderer/render_accessibility.h"
 #include "content/public/renderer/render_frame_observer.h"
 #include "content/renderer/accessibility/blink_ax_tree_source.h"
+#include "third_party/blink/public/web/web_ax_context.h"
 #include "third_party/blink/public/web/web_ax_object.h"
 #include "ui/accessibility/ax_relative_bounds.h"
 #include "ui/accessibility/ax_tree.h"
 #include "ui/accessibility/ax_tree_serializer.h"
 #include "ui/gfx/geometry/rect_f.h"
-
-struct AccessibilityHostMsg_EventParams;
 
 namespace blink {
 class WebDocument;
@@ -29,6 +28,7 @@ class WebNode;
 
 namespace ui {
 struct AXActionData;
+struct AXEvent;
 }
 
 namespace content {
@@ -74,12 +74,14 @@ class CONTENT_EXPORT RenderAccessibilityImpl
   void OnPluginRootNodeUpdated() override;
 
   // RenderFrameObserver implementation.
+  void DidCreateNewDocument() override;
   void AccessibilityModeChanged() override;
   bool OnMessageReceived(const IPC::Message& message) override;
 
   // Called when an accessibility notification occurs in Blink.
   void HandleWebAccessibilityEvent(const blink::WebAXObject& obj,
-                                   blink::WebAXEvent event);
+                                   ax::mojom::Event event);
+  void MarkWebAXObjectDirty(const blink::WebAXObject& obj, bool subtree);
 
   // Called when a new find in page result is highlighted.
   void HandleAccessibilityFindInPageResult(
@@ -91,11 +93,6 @@ class CONTENT_EXPORT RenderAccessibilityImpl
       int end_offset);
 
   void AccessibilityFocusedNodeChanged(const blink::WebNode& node);
-
-  // This can be called before deleting a RenderAccessibilityImpl instance due
-  // to the accessibility mode changing, as opposed to during frame destruction
-  // (when there'd be no point).
-  void DisableAccessibility();
 
   void HandleAXEvent(const blink::WebAXObject& obj,
                      ax::mojom::Event event,
@@ -115,6 +112,11 @@ class CONTENT_EXPORT RenderAccessibilityImpl
   void SendLocationChanges();
 
  private:
+  struct DirtyObject {
+    blink::WebAXObject obj;
+    ax::mojom::EventFrom event_from;
+  };
+
   // RenderFrameObserver implementation.
   void OnDestruct() override;
 
@@ -130,14 +132,26 @@ class CONTENT_EXPORT RenderAccessibilityImpl
   void OnLoadInlineTextBoxes(const blink::WebAXObject& obj);
   void OnGetImageData(const blink::WebAXObject& obj, const gfx::Size& max_size);
   void AddPluginTreeToUpdate(AXContentTreeUpdate* update);
+  void Scroll(const blink::WebAXObject& target,
+              ax::mojom::Action scroll_action);
   void ScrollPlugin(int id_to_make_visible);
+  ax::mojom::EventFrom GetEventFrom();
+  void ScheduleSendAccessibilityEventsIfNeeded();
 
   // The RenderFrameImpl that owns us.
   RenderFrameImpl* render_frame_;
 
+  // This keeps accessibility enabled as long as it lives.
+  std::unique_ptr<blink::WebAXContext> ax_context_;
+
   // Events from Blink are collected until they are ready to be
   // sent to the browser.
-  std::vector<AccessibilityHostMsg_EventParams> pending_events_;
+  std::vector<ui::AXEvent> pending_events_;
+
+  // Objects that need to be re-serialized, the next time
+  // we send an event bundle to the browser - but don't specifically need
+  // an event fired.
+  std::vector<DirtyObject> dirty_objects_;
 
   // The adapter that exposes Blink's accessibility tree to AXTreeSerializer.
   BlinkAXTreeSource tree_source_;

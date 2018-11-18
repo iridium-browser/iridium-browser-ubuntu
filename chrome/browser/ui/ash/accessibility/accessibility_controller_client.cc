@@ -21,7 +21,7 @@ void SetAutomationManagerEnabled(content::BrowserContext* context,
   DCHECK(context);
   AutomationManagerAura* manager = AutomationManagerAura::GetInstance();
   if (enabled)
-    manager->Enable(context);
+    manager->Enable();
   else
     manager->Disable();
 }
@@ -85,7 +85,7 @@ void AccessibilityControllerClient::TriggerAccessibilityAlert(
 
   if (msg) {
     AutomationManagerAura::GetInstance()->HandleAlert(
-        profile, l10n_util::GetStringUTF8(msg));
+        l10n_util::GetStringUTF8(msg));
     // After handling the alert, if the alert is screen-off, we should
     // disable automation manager to handle any following a11y events.
     if (alert == ash::mojom::AccessibilityAlert::SCREEN_OFF)
@@ -110,8 +110,11 @@ void AccessibilityControllerClient::HandleAccessibilityGesture(
   chromeos::AccessibilityManager::Get()->HandleAccessibilityGesture(gesture);
 }
 
-void AccessibilityControllerClient::ToggleDictation() {
-  chromeos::AccessibilityManager::Get()->ToggleDictation();
+void AccessibilityControllerClient::ToggleDictation(
+    ToggleDictationCallback callback) {
+  bool dictation_active =
+      chromeos::AccessibilityManager::Get()->ToggleDictation();
+  std::move(callback).Run(dictation_active);
 }
 
 void AccessibilityControllerClient::SilenceSpokenFeedback() {
@@ -136,6 +139,10 @@ void AccessibilityControllerClient::PlaySpokenFeedbackToggleCountdown(
     int tick_count) {
   chromeos::AccessibilityManager::Get()->PlaySpokenFeedbackToggleCountdown(
       tick_count);
+}
+
+void AccessibilityControllerClient::RequestSelectToSpeakStateChange() {
+  chromeos::AccessibilityManager::Get()->RequestSelectToSpeakStateChange();
 }
 
 void AccessibilityControllerClient::FlushForTesting() {

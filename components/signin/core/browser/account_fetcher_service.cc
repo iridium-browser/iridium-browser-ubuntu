@@ -12,7 +12,7 @@
 #include "build/build_config.h"
 #include "components/image_fetcher/core/image_decoder.h"
 #include "components/image_fetcher/core/image_fetcher_impl.h"
-#include "components/pref_registry/pref_registry_syncable.h"
+#include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
 #include "components/signin/core/browser/account_info_fetcher.h"
 #include "components/signin/core/browser/account_tracker_service.h"
@@ -20,14 +20,12 @@
 #include "components/signin/core/browser/child_account_info_fetcher.h"
 #include "components/signin/core/browser/signin_client.h"
 #include "components/signin/core/browser/signin_switches.h"
-#include "net/url_request/url_request_context_getter.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 
 namespace {
 
 const base::TimeDelta kRefreshFromTokenServiceDelay =
     base::TimeDelta::FromHours(24);
-
-constexpr int kAccountImageDownloadSize = 64;
 
 bool AccountSupportsUserInfo(const std::string& account_id) {
   // Supervised users use a specially scoped token which when used for general
@@ -42,6 +40,8 @@ bool AccountSupportsUserInfo(const std::string& account_id) {
 // This pref used to be in the AccountTrackerService, hence its string value.
 const char AccountFetcherService::kLastUpdatePref[] =
     "account_tracker_service_last_update";
+
+const int AccountFetcherService::kAccountImageDownloadSize = 64;
 
 // AccountFetcherService implementation
 AccountFetcherService::AccountFetcherService()
@@ -62,9 +62,9 @@ AccountFetcherService::~AccountFetcherService() {
 }
 
 // static
-void AccountFetcherService::RegisterPrefs(
-    user_prefs::PrefRegistrySyncable* user_prefs) {
-  user_prefs->RegisterInt64Pref(kLastUpdatePref, 0);
+void AccountFetcherService::RegisterPrefs(PrefRegistrySimple* user_prefs) {
+  user_prefs->RegisterTimePref(AccountFetcherService::kLastUpdatePref,
+                               base::Time());
 }
 
 void AccountFetcherService::Initialize(
@@ -85,9 +85,8 @@ void AccountFetcherService::Initialize(
   DCHECK(image_decoder);
   DCHECK(!image_decoder_);
   image_decoder_ = std::move(image_decoder);
-
-  last_updated_ = base::Time::FromInternalValue(
-      signin_client_->GetPrefs()->GetInt64(kLastUpdatePref));
+  last_updated_ = signin_client_->GetPrefs()->GetTime(
+      AccountFetcherService::kLastUpdatePref);
 }
 
 void AccountFetcherService::Shutdown() {
@@ -176,8 +175,8 @@ void AccountFetcherService::RefreshAllAccountsAndScheduleNext() {
   DCHECK(network_fetches_enabled_);
   RefreshAllAccountInfo(false);
   last_updated_ = base::Time::Now();
-  signin_client_->GetPrefs()->SetInt64(kLastUpdatePref,
-                                       last_updated_.ToInternalValue());
+  signin_client_->GetPrefs()->SetTime(AccountFetcherService::kLastUpdatePref,
+                                      last_updated_);
   ScheduleNextRefresh();
 }
 
@@ -209,7 +208,7 @@ void AccountFetcherService::StartFetchingUserInfo(
     DVLOG(1) << "StartFetching " << account_id;
     std::unique_ptr<AccountInfoFetcher> fetcher =
         std::make_unique<AccountInfoFetcher>(
-            token_service_, signin_client_->GetURLRequestContext(), this,
+            token_service_, signin_client_->GetURLLoaderFactory(), this,
             account_id);
     request = std::move(fetcher);
     request->Start();
@@ -221,7 +220,7 @@ void AccountFetcherService::StartFetchingChildInfo(
     const std::string& account_id) {
   child_info_request_ = ChildAccountInfoFetcher::CreateFrom(
       child_request_account_id_, this, token_service_,
-      signin_client_->GetURLRequestContext(), invalidation_service_);
+      signin_client_->GetURLLoaderFactory(), invalidation_service_);
 }
 
 void AccountFetcherService::ResetChildInfo() {
@@ -266,7 +265,7 @@ AccountFetcherService::GetOrCreateImageFetcher() {
   // not be available yet when |Initialize| is called.
   if (!image_fetcher_) {
     image_fetcher_ = std::make_unique<image_fetcher::ImageFetcherImpl>(
-        std::move(image_decoder_), signin_client_->GetURLRequestContext());
+        std::move(image_decoder_), signin_client_->GetURLLoaderFactory());
   }
   return image_fetcher_.get();
 }

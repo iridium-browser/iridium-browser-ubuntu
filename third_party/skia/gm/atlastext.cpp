@@ -8,6 +8,7 @@
 #include "gm.h"
 
 #if SK_SUPPORT_ATLAS_TEXT
+#include "GrContext.h"
 
 #include "SkAtlasTextContext.h"
 #include "SkAtlasTextFont.h"
@@ -15,7 +16,7 @@
 #include "SkBitmap.h"
 #include "SkCanvas.h"
 #include "SkTypeface.h"
-#include "SkUtils.h"
+#include "SkUTF.h"
 #include "gpu/TestContext.h"
 #include "gpu/atlastext/GLTestAtlasTextRenderer.h"
 #include "gpu/atlastext/TestAtlasTextRenderer.h"
@@ -29,7 +30,7 @@ static SkScalar draw_string(SkAtlasTextTarget* target, const SkString& text, SkS
         return x;
     }
     auto font = SkAtlasTextFont::Make(typeface, size);
-    int cnt = SkUTF8_CountUnichars(text.c_str());
+    int cnt = SkUTF::CountUTF8(text.c_str(), text.size());
     std::unique_ptr<SkGlyphID[]> glyphs(new SkGlyphID[cnt]);
     typeface->charsToGlyphs(text.c_str(), SkTypeface::Encoding::kUTF8_Encoding, glyphs.get(), cnt);
 
@@ -72,6 +73,7 @@ protected:
         if (!targetHandle) {
             return;
         }
+
         fTarget = SkAtlasTextTarget::Make(fContext, kSize, kSize, targetHandle);
 
         fTypefaces[0] = sk_tool_utils::create_portable_typeface("serif", SkFontStyle::Italic());

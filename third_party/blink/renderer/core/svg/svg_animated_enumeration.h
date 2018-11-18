@@ -44,15 +44,17 @@ class SVGAnimatedEnumeration : public SVGAnimatedEnumerationBase {
       Enum initial_value) {
     return new SVGAnimatedEnumeration(
         context_element, attribute_name,
-        SVGEnumeration<Enum>::Create(initial_value));
+        SVGEnumeration<Enum>::Create(initial_value),
+        static_cast<unsigned>(initial_value));
   }
 
   static SVGAnimatedEnumeration<Enum>* Create(
       SVGElement* context_element,
       const QualifiedName& attribute_name,
       SVGEnumeration<Enum>* initial_value) {
-    return new SVGAnimatedEnumeration(context_element, attribute_name,
-                                      initial_value);
+    return new SVGAnimatedEnumeration(
+        context_element, attribute_name, initial_value,
+        static_cast<unsigned>(initial_value->EnumValue()));
   }
 
   SVGEnumeration<Enum>* BaseValue() {
@@ -70,17 +72,15 @@ class SVGAnimatedEnumeration : public SVGAnimatedEnumerationBase {
         SVGAnimatedEnumerationBase::CurrentValue());
   }
 
-  virtual void TraceWrappers(const ScriptWrappableVisitor* visitor) const {
-    SVGAnimatedEnumerationBase::TraceWrappers(visitor);
-  }
-
  protected:
   SVGAnimatedEnumeration(SVGElement* context_element,
                          const QualifiedName& attribute_name,
-                         SVGEnumeration<Enum>* initial_value)
+                         SVGEnumeration<Enum>* initial_value,
+                         unsigned initial_enum_value)
       : SVGAnimatedEnumerationBase(context_element,
                                    attribute_name,
-                                   initial_value) {}
+                                   initial_value,
+                                   initial_enum_value) {}
 };
 
 }  // namespace blink

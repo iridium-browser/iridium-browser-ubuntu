@@ -3,7 +3,6 @@
 // found in the LICENSE file.
 
 #include "base/command_line.h"
-#include "base/test/scoped_feature_list.h"
 #include "build/build_config.h"
 #include "content/browser/media/media_browsertest.h"
 #include "media/base/media_switches.h"
@@ -24,18 +23,20 @@ const char kWebMOpusAudioOnly[] = "audio/webm; codecs=\"opus\"";
 #endif
 const char kWebMVideoOnly[] = "video/webm; codecs=\"vp8\"";
 const char kWebMAudioVideo[] = "video/webm; codecs=\"vorbis, vp8\"";
+const char kMp4FlacAudioOnly[] = "audio/mp4; codecs=\"flac\"";
 
 #if BUILDFLAG(USE_PROPRIETARY_CODECS)
-const char kMp4FlacAudioOnly[] = "audio/mp4; codecs=\"flac\"";
+const char kMp4AudioOnly[] = "audio/mp4; codecs=\"mp4a.40.2\"'";
+const char kMp4VideoOnly[] = "video/mp4; codecs=\"avc1.4D4041\"'";
 
 #if BUILDFLAG(ENABLE_MSE_MPEG2TS_STREAM_PARSER)
 const char kMp2tAudioVideo[] = "video/mp2t; codecs=\"mp4a.40.2, avc1.42E01E\"";
-#endif
-#endif
+#endif  // BUILDFLAG(ENABLE_MSE_MPEG2TS_STREAM_PARSER)
+#endif  // BUILDFLAG(USE_PROPRIETARY_CODECS)
 
 namespace content {
 
-class MediaSourceTest : public content::MediaBrowserTest {
+class MediaSourceTest : public MediaBrowserTest {
  public:
   void TestSimplePlayback(const std::string& media_file,
                           const std::string& media_type,
@@ -46,16 +47,6 @@ class MediaSourceTest : public content::MediaBrowserTest {
     RunMediaTestPage("media_source_player.html", query_params, expectation,
                      false);
   }
-
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    command_line->AppendSwitchASCII(
-        switches::kAutoplayPolicy,
-        switches::autoplay::kNoUserGestureRequiredPolicy);
-    scoped_feature_list_.InitAndDisableFeature(media::kMseFlacInIsobmff);
-  }
-
- protected:
-  base::test::ScopedFeatureList scoped_feature_list_;
 };
 
 IN_PROC_BROWSER_TEST_F(MediaSourceTest, Playback_VideoAudio_WebM) {
@@ -101,32 +92,35 @@ IN_PROC_BROWSER_TEST_F(MediaSourceTest, ConfigChangeVideo) {
 }
 
 #if BUILDFLAG(USE_PROPRIETARY_CODECS)
-
-// TODO(chcunningham): Figure out why this is flaky on android. crbug/607841
-#if !defined(OS_ANDROID)
 IN_PROC_BROWSER_TEST_F(MediaSourceTest, Playback_Video_MP4_Audio_WEBM) {
   base::StringPairs query_params;
-  query_params.push_back(std::make_pair("videoFormat", "CLEAR_MP4"));
-  query_params.push_back(std::make_pair("audioFormat", "CLEAR_WEBM"));
+  query_params.push_back(
+      std::make_pair("videoFile", "bear-640x360-v_frag.mp4"));
+  query_params.push_back(std::make_pair("videoFormat", kMp4VideoOnly));
+  query_params.push_back(
+      std::make_pair("audioFile", "bear-320x240-audio-only.webm"));
+  query_params.push_back(std::make_pair("audioFormat", kWebMAudioOnly));
   RunMediaTestPage("mse_different_containers.html", query_params, media::kEnded,
                    true);
 }
-#endif  // !defined(OS_ANDROID)
 
 IN_PROC_BROWSER_TEST_F(MediaSourceTest, Playback_Video_WEBM_Audio_MP4) {
   base::StringPairs query_params;
-  query_params.push_back(std::make_pair("videoFormat", "CLEAR_WEBM"));
-  query_params.push_back(std::make_pair("audioFormat", "CLEAR_MP4"));
+  query_params.push_back(
+      std::make_pair("videoFile", "bear-320x240-video-only.webm"));
+  query_params.push_back(std::make_pair("videoFormat", kWebMVideoOnly));
+  query_params.push_back(
+      std::make_pair("audioFile", "bear-640x360-a_frag.mp4"));
+  query_params.push_back(std::make_pair("audioFormat", kMp4AudioOnly));
   RunMediaTestPage("mse_different_containers.html", query_params, media::kEnded,
                    true);
 }
 
-IN_PROC_BROWSER_TEST_F(MediaSourceTest,
-                       Playback_AudioOnly_FLAC_MP4_Unsupported) {
-  // The feature is disabled by test setup, so verify playback failure.
-  TestSimplePlayback("bear-flac_frag.mp4", kMp4FlacAudioOnly, media::kFailed);
+#endif  // BUILDFLAG(USE_PROPRIETARY_CODECS)
+
+IN_PROC_BROWSER_TEST_F(MediaSourceTest, Playback_AudioOnly_FLAC_MP4) {
+  TestSimplePlayback("bear-flac_frag.mp4", kMp4FlacAudioOnly, media::kEnded);
 }
-#endif
 
 #if BUILDFLAG(USE_PROPRIETARY_CODECS)
 #if BUILDFLAG(ENABLE_MSE_MPEG2TS_STREAM_PARSER)
@@ -134,26 +128,6 @@ IN_PROC_BROWSER_TEST_F(MediaSourceTest, Playback_AudioVideo_Mp2t) {
   TestSimplePlayback("bear-1280x720.ts", kMp2tAudioVideo, media::kEnded);
 }
 #endif
-#endif
-
-#if BUILDFLAG(USE_PROPRIETARY_CODECS)
-class MediaSourceFlacInIsobmffTest : public content::MediaSourceTest {
- public:
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    command_line->AppendSwitchASCII(
-        switches::kAutoplayPolicy,
-        switches::autoplay::kNoUserGestureRequiredPolicy);
-
-    // Enable MSE FLAC-in-MP4 feature.
-    scoped_feature_list_.InitAndEnableFeature(media::kMseFlacInIsobmff);
-  }
-};
-
-IN_PROC_BROWSER_TEST_F(MediaSourceFlacInIsobmffTest,
-                       Playback_AudioOnly_FLAC_MP4_Supported) {
-  // The feature is enabled by test setup, so verify playback success.
-  TestSimplePlayback("bear-flac_frag.mp4", kMp4FlacAudioOnly, media::kEnded);
-}
 #endif
 
 }  // namespace content

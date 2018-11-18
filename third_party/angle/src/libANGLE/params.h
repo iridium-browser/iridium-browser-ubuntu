@@ -12,6 +12,7 @@
 
 #include "angle_gl.h"
 #include "common/Optional.h"
+#include "common/PackedEnums.h"
 #include "common/angleutils.h"
 #include "common/mathutil.h"
 #include "libANGLE/Error.h"
@@ -77,28 +78,63 @@ class DrawCallParams final : angle::NonCopyable
 {
   public:
     // Called by DrawArrays.
-    DrawCallParams(GLenum mode, GLint firstVertex, GLsizei vertexCount, GLsizei instances);
+    DrawCallParams(PrimitiveMode mode, GLint firstVertex, GLsizei vertexCount, GLsizei instances)
+        : mMode(mode),
+          mFirstVertex(firstVertex),
+          mVertexCount(vertexCount),
+          mIndexCount(0),
+          mBaseVertex(0),
+          mType(GL_NONE),
+          mIndices(nullptr),
+          mInstances(instances),
+          mIndirect(nullptr)
+    {
+    }
 
     // Called by DrawElements.
-    DrawCallParams(GLenum mode,
+    DrawCallParams(PrimitiveMode mode,
                    GLint indexCount,
                    GLenum type,
                    const void *indices,
                    GLint baseVertex,
-                   GLsizei instances);
+                   GLsizei instances)
+        : mMode(mode),
+          mFirstVertex(0),
+          mVertexCount(0),
+          mIndexCount(indexCount),
+          mBaseVertex(baseVertex),
+          mType(type),
+          mIndices(indices),
+          mInstances(instances),
+          mIndirect(nullptr)
+    {
+    }
 
     // Called by DrawArraysIndirect.
-    DrawCallParams(GLenum mode, const void *indirect);
+    DrawCallParams(PrimitiveMode mode, const void *indirect);
 
     // Called by DrawElementsIndirect.
-    DrawCallParams(GLenum mode, GLenum type, const void *indirect);
+    DrawCallParams(PrimitiveMode mode, GLenum type, const void *indirect);
 
-    GLenum mode() const;
+    PrimitiveMode mode() const { return mMode; }
 
     // This value is the sum of 'baseVertex' and the first indexed vertex for DrawElements calls.
-    GLint firstVertex() const;
+    GLint firstVertex() const
+    {
+        // In some cases we can know the first vertex will be fixed at zero, if we're on the "fast
+        // path". In these cases the index range is not resolved. If the first vertex is not zero,
+        // however, then it must be because the index range is resolved. This only applies to the
+        // D3D11 back-end currently.
+        ASSERT(mFirstVertex == 0 || (!isDrawElements() || mIndexRange.valid()));
+        return mFirstVertex;
+    }
 
-    GLsizei vertexCount() const;
+    size_t vertexCount() const
+    {
+        ASSERT(!isDrawElements() || mIndexRange.valid());
+        return mVertexCount;
+    }
+
     GLsizei indexCount() const;
     GLint baseVertex() const;
     GLenum type() const;
@@ -107,11 +143,15 @@ class DrawCallParams final : angle::NonCopyable
     const void *indirect() const;
 
     Error ensureIndexRangeResolved(const Context *context) const;
-    bool isDrawElements() const;
+    bool isDrawElements() const { return (mType != GL_NONE); }
+
     bool isDrawIndirect() const;
 
     // ensureIndexRangeResolved must be called first.
     const IndexRange &getIndexRange() const;
+
+    template <typename T>
+    T getClampedVertexCount() const;
 
     template <EntryPoint EP, typename... ArgsT>
     static void Factory(DrawCallParams *objBuffer, ArgsT... args);
@@ -119,10 +159,10 @@ class DrawCallParams final : angle::NonCopyable
     ANGLE_PARAM_TYPE_INFO(DrawCallParams, ParamsBase);
 
   private:
-    GLenum mMode;
+    PrimitiveMode mMode;
     mutable Optional<IndexRange> mIndexRange;
     mutable GLint mFirstVertex;
-    mutable GLsizei mVertexCount;
+    mutable size_t mVertexCount;
     GLint mIndexCount;
     GLint mBaseVertex;
     GLenum mType;
@@ -130,6 +170,13 @@ class DrawCallParams final : angle::NonCopyable
     GLsizei mInstances;
     const void *mIndirect;
 };
+
+template <typename T>
+T DrawCallParams::getClampedVertexCount() const
+{
+    constexpr size_t kMax = static_cast<size_t>(std::numeric_limits<T>::max());
+    return static_cast<T>(mVertexCount > kMax ? kMax : mVertexCount);
+}
 
 // Entry point funcs essentially re-map different entry point parameter arrays into
 // the format the parameter type class expects. For example, for HasIndexRange, for the
@@ -148,7 +195,7 @@ ANGLE_ENTRY_POINT_FUNC(DrawArrays,
                        DrawCallParams,
                        DrawCallParams *objBuffer,
                        Context *context,
-                       GLenum mode,
+                       PrimitiveMode mode,
                        GLint first,
                        GLsizei count)
 {
@@ -159,7 +206,7 @@ ANGLE_ENTRY_POINT_FUNC(DrawArraysInstanced,
                        DrawCallParams,
                        DrawCallParams *objBuffer,
                        Context *context,
-                       GLenum mode,
+                       PrimitiveMode mode,
                        GLint first,
                        GLsizei count,
                        GLsizei instanceCount)
@@ -172,7 +219,7 @@ ANGLE_ENTRY_POINT_FUNC(DrawArraysInstancedANGLE,
                        DrawCallParams,
                        DrawCallParams *objBuffer,
                        Context *context,
-                       GLenum mode,
+                       PrimitiveMode mode,
                        GLint first,
                        GLsizei count,
                        GLsizei instanceCount)
@@ -185,7 +232,7 @@ ANGLE_ENTRY_POINT_FUNC(DrawArraysIndirect,
                        DrawCallParams,
                        DrawCallParams *objBuffer,
                        Context *context,
-                       GLenum mode,
+                       PrimitiveMode mode,
                        const void *indirect)
 {
     return ParamsBase::Factory<EntryPoint::DrawArraysIndirect>(objBuffer, mode, indirect);
@@ -195,7 +242,7 @@ ANGLE_ENTRY_POINT_FUNC(DrawElementsIndirect,
                        DrawCallParams,
                        DrawCallParams *objBuffer,
                        Context *context,
-                       GLenum mode,
+                       PrimitiveMode mode,
                        GLenum type,
                        const void *indirect)
 {
@@ -206,7 +253,7 @@ ANGLE_ENTRY_POINT_FUNC(DrawElements,
                        DrawCallParams,
                        DrawCallParams *objBuffer,
                        Context *context,
-                       GLenum mode,
+                       PrimitiveMode mode,
                        GLsizei count,
                        GLenum type,
                        const void *indices)
@@ -219,7 +266,7 @@ ANGLE_ENTRY_POINT_FUNC(DrawElementsInstanced,
                        DrawCallParams,
                        DrawCallParams *objBuffer,
                        Context *context,
-                       GLenum mode,
+                       PrimitiveMode mode,
                        GLsizei count,
                        GLenum type,
                        const void *indices,
@@ -233,7 +280,7 @@ ANGLE_ENTRY_POINT_FUNC(DrawElementsInstancedANGLE,
                        DrawCallParams,
                        DrawCallParams *objBuffer,
                        Context *context,
-                       GLenum mode,
+                       PrimitiveMode mode,
                        GLsizei count,
                        GLenum type,
                        const void *indices,
@@ -247,7 +294,7 @@ ANGLE_ENTRY_POINT_FUNC(DrawRangeElements,
                        DrawCallParams,
                        DrawCallParams *objBuffer,
                        Context *context,
-                       GLenum mode,
+                       PrimitiveMode mode,
                        GLuint /*start*/,
                        GLuint /*end*/,
                        GLsizei count,

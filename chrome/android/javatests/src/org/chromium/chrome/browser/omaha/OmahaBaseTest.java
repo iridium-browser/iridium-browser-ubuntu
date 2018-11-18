@@ -6,6 +6,7 @@ package org.chromium.chrome.browser.omaha;
 
 import android.content.Context;
 import android.content.SharedPreferences;
+import android.support.annotation.IntDef;
 import android.support.test.InstrumentationRegistry;
 import android.support.test.filters.SmallTest;
 
@@ -28,6 +29,8 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
 import java.net.HttpURLConnection;
 import java.net.MalformedURLException;
 import java.net.SocketTimeoutException;
@@ -72,7 +75,8 @@ public class OmahaBaseTest {
         private TimestampPair mTimestampsOnRegisterNewRequest;
         private TimestampPair mTimestampsOnSaveState;
 
-        MockOmahaDelegate(Context context, DeviceType deviceType, InstallSource installSource) {
+        MockOmahaDelegate(
+                Context context, DeviceType deviceType, @InstallSource int installSource) {
             mContext = context;
             mIsOnTablet = deviceType == DeviceType.TABLET;
             mIsInForeground = true;
@@ -143,11 +147,40 @@ public class OmahaBaseTest {
         }
     }
 
-    private enum InstallSource { SYSTEM_IMAGE, ORGANIC }
-    private enum ServerResponse { SUCCESS, FAILURE }
-    private enum ConnectionStatus { RESPONDS, TIMES_OUT }
-    private enum InstallEvent { SEND, DONT_SEND }
-    private enum PostStatus { DUE, NOT_DUE }
+    @IntDef({InstallSource.SYSTEM_IMAGE, InstallSource.ORGANIC})
+    @Retention(RetentionPolicy.SOURCE)
+    private @interface InstallSource {
+        int SYSTEM_IMAGE = 0;
+        int ORGANIC = 1;
+    }
+
+    @IntDef({ServerResponse.SUCCESS, ServerResponse.FAILURE})
+    @Retention(RetentionPolicy.SOURCE)
+    private @interface ServerResponse {
+        int SUCCESS = 0;
+        int FAILURE = 1;
+    }
+
+    @IntDef({ConnectionStatus.RESPONDS, ConnectionStatus.TIMES_OUT})
+    @Retention(RetentionPolicy.SOURCE)
+    private @interface ConnectionStatus {
+        int RESPONDS = 0;
+        int TIMES_OUT = 1;
+    }
+
+    @IntDef({InstallEvent.SEND, InstallEvent.DONT_SEND})
+    @Retention(RetentionPolicy.SOURCE)
+    private @interface InstallEvent {
+        int SEND = 0;
+        int DONT_SEND = 1;
+    }
+
+    @IntDef({PostStatus.DUE, PostStatus.NOT_DUE})
+    @Retention(RetentionPolicy.SOURCE)
+    private @interface PostStatus {
+        int DUE = 0;
+        int NOT_DUE = 1;
+    }
 
     private AdvancedMockContext mContext;
     private MockOmahaDelegate mDelegate;
@@ -159,7 +192,7 @@ public class OmahaBaseTest {
     }
 
     private MockOmahaBase createOmahaBase(
-            ServerResponse response, ConnectionStatus status, DeviceType deviceType) {
+            @ServerResponse int response, @ConnectionStatus int status, DeviceType deviceType) {
         MockOmahaBase omahaClient = new MockOmahaBase(mDelegate, response, status, deviceType);
         return omahaClient;
     }
@@ -183,8 +216,8 @@ public class OmahaBaseTest {
         private final boolean mConnectionTimesOut;
         private final boolean mIsOnTablet;
 
-        public MockOmahaBase(OmahaDelegate delegate, ServerResponse serverResponse,
-                ConnectionStatus connectionStatus, DeviceType deviceType) {
+        public MockOmahaBase(OmahaDelegate delegate, @ServerResponse int serverResponse,
+                @ConnectionStatus int connectionStatus, DeviceType deviceType) {
             super(delegate);
             mSendValidResponse = serverResponse == ServerResponse.SUCCESS;
             mConnectionTimesOut = connectionStatus == ConnectionStatus.TIMES_OUT;
@@ -252,7 +285,7 @@ public class OmahaBaseTest {
         // and one for the ping request.
         Assert.assertTrue(mDelegate.mInstallEventWasSent);
         Assert.assertEquals(1, mDelegate.mPostResults.size());
-        Assert.assertEquals(OmahaBase.POST_RESULT_SENT, mDelegate.mPostResults.get(0).intValue());
+        Assert.assertEquals(OmahaBase.PostResult.SENT, mDelegate.mPostResults.get(0).intValue());
         Assert.assertEquals(2, mDelegate.mGenerateAndPostRequestResults.size());
         Assert.assertTrue(mDelegate.mGenerateAndPostRequestResults.get(0));
         Assert.assertTrue(mDelegate.mGenerateAndPostRequestResults.get(1));
@@ -287,7 +320,7 @@ public class OmahaBaseTest {
         // Only the regular ping should have been sent.
         Assert.assertFalse(mDelegate.mInstallEventWasSent);
         Assert.assertEquals(1, mDelegate.mPostResults.size());
-        Assert.assertEquals(OmahaBase.POST_RESULT_SENT, mDelegate.mPostResults.get(0).intValue());
+        Assert.assertEquals(OmahaBase.PostResult.SENT, mDelegate.mPostResults.get(0).intValue());
         Assert.assertEquals(1, mDelegate.mGenerateAndPostRequestResults.size());
         Assert.assertTrue(mDelegate.mGenerateAndPostRequestResults.get(0));
 
@@ -361,7 +394,7 @@ public class OmahaBaseTest {
         // Should be too early to post, causing it to be rescheduled.
         Assert.assertEquals(1, mDelegate.mPostResults.size());
         Assert.assertEquals(
-                OmahaBase.POST_RESULT_SCHEDULED, mDelegate.mPostResults.get(0).intValue());
+                OmahaBase.PostResult.SCHEDULED, mDelegate.mPostResults.get(0).intValue());
         Assert.assertEquals(0, mDelegate.mGenerateAndPostRequestResults.size());
 
         // The next scheduled event is the POST.  Because request generation code wasn't run, the
@@ -404,7 +437,7 @@ public class OmahaBaseTest {
 
         // Because we didn't send an install event, only one POST should have occurred.
         Assert.assertEquals(1, mDelegate.mPostResults.size());
-        Assert.assertEquals(OmahaBase.POST_RESULT_SENT, mDelegate.mPostResults.get(0).intValue());
+        Assert.assertEquals(OmahaBase.PostResult.SENT, mDelegate.mPostResults.get(0).intValue());
         Assert.assertEquals(1, mDelegate.mGenerateAndPostRequestResults.size());
         Assert.assertTrue(mDelegate.mGenerateAndPostRequestResults.get(0));
 
@@ -450,7 +483,7 @@ public class OmahaBaseTest {
 
         // Because we didn't send an install event, only one POST should have occurred.
         Assert.assertEquals(1, mDelegate.mPostResults.size());
-        Assert.assertEquals(OmahaBase.POST_RESULT_FAILED, mDelegate.mPostResults.get(0).intValue());
+        Assert.assertEquals(OmahaBase.PostResult.FAILED, mDelegate.mPostResults.get(0).intValue());
         Assert.assertEquals(1, mDelegate.mGenerateAndPostRequestResults.size());
         Assert.assertFalse(mDelegate.mGenerateAndPostRequestResults.get(0));
 
@@ -489,7 +522,7 @@ public class OmahaBaseTest {
 
         // Because we didn't send an install event, only one POST should have occurred.
         Assert.assertEquals(1, mDelegate.mPostResults.size());
-        Assert.assertEquals(OmahaBase.POST_RESULT_SENT, mDelegate.mPostResults.get(0).intValue());
+        Assert.assertEquals(OmahaBase.PostResult.SENT, mDelegate.mPostResults.get(0).intValue());
         Assert.assertEquals(1, mDelegate.mGenerateAndPostRequestResults.size());
         Assert.assertTrue(mDelegate.mGenerateAndPostRequestResults.get(0));
 
@@ -534,7 +567,7 @@ public class OmahaBaseTest {
 
         // Because we didn't send an install event, only one POST should have occurred.
         Assert.assertEquals(1, mDelegate.mPostResults.size());
-        Assert.assertEquals(OmahaBase.POST_RESULT_SENT, mDelegate.mPostResults.get(0).intValue());
+        Assert.assertEquals(OmahaBase.PostResult.SENT, mDelegate.mPostResults.get(0).intValue());
         Assert.assertEquals(1, mDelegate.mGenerateAndPostRequestResults.size());
         Assert.assertTrue(mDelegate.mGenerateAndPostRequestResults.get(0));
 
@@ -588,9 +621,9 @@ public class OmahaBaseTest {
             mConnectionTimesOut = connectionTimesOut;
 
             if (sendValidResponse) {
-                mHTTPResponseCode = 200;
+                mHTTPResponseCode = HttpURLConnection.HTTP_OK; // 200
             } else {
-                mHTTPResponseCode = 404;
+                mHTTPResponseCode = HttpURLConnection.HTTP_NOT_FOUND; // 404
             }
         }
 

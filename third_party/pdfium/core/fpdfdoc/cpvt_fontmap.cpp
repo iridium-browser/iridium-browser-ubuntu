@@ -10,7 +10,7 @@
 #include "core/fpdfapi/parser/cpdf_dictionary.h"
 #include "core/fpdfapi/parser/cpdf_document.h"
 #include "core/fpdfapi/parser/cpdf_reference.h"
-#include "core/fpdfdoc/cpdf_interform.h"
+#include "core/fpdfdoc/cpdf_interactiveform.h"
 #include "core/fxcrt/fx_codepage.h"
 #include "third_party/base/logging.h"
 
@@ -25,21 +25,23 @@ CPVT_FontMap::CPVT_FontMap(CPDF_Document* pDoc,
 
 CPVT_FontMap::~CPVT_FontMap() {}
 
+// static
 CPDF_Font* CPVT_FontMap::GetAnnotSysPDFFont(CPDF_Document* pDoc,
-                                            const CPDF_Dictionary* pResDict,
+                                            CPDF_Dictionary* pResDict,
                                             ByteString* sSysFontAlias) {
   if (!pDoc || !pResDict)
     return nullptr;
 
   CPDF_Dictionary* pFormDict = pDoc->GetRoot()->GetDictFor("AcroForm");
-  CPDF_Font* pPDFFont = AddNativeInterFormFont(pFormDict, pDoc, sSysFontAlias);
+  CPDF_Font* pPDFFont =
+      AddNativeInteractiveFormFont(pFormDict, pDoc, sSysFontAlias);
   if (!pPDFFont)
     return nullptr;
 
   CPDF_Dictionary* pFontList = pResDict->GetDictFor("Font");
   if (pFontList && !pFontList->KeyExist(*sSysFontAlias)) {
-    pFontList->SetNewFor<CPDF_Reference>(*sSysFontAlias, pDoc,
-                                         pPDFFont->GetFontDict()->GetObjNum());
+    pFontList->SetFor(*sSysFontAlias,
+                      pPDFFont->GetFontDict()->MakeReference(pDoc));
   }
   return pPDFFont;
 }

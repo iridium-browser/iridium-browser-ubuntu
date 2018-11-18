@@ -134,7 +134,7 @@ egl::Error GetD3D9TextureInfo(EGLenum buftype,
     if (angleFormat)
     {
         const auto &d3dFormatInfo = d3d9::GetD3DFormatInfo(surfaceDesc.Format);
-        ASSERT(d3dFormatInfo.info().id != angle::Format::ID::NONE);
+        ASSERT(d3dFormatInfo.info().id != angle::FormatID::NONE);
         *angleFormat = &d3dFormatInfo.info();
     }
 
@@ -230,7 +230,7 @@ egl::Error GetD3DTextureInfo(EGLenum buftype,
 }  // anonymous namespace
 
 D3DTextureSurfaceWGL::D3DTextureSurfaceWGL(const egl::SurfaceState &state,
-                                           RendererGL *renderer,
+                                           StateManagerGL *stateManager,
                                            EGLenum buftype,
                                            EGLClientBuffer clientBuffer,
                                            DisplayWGL *display,
@@ -238,14 +238,12 @@ D3DTextureSurfaceWGL::D3DTextureSurfaceWGL(const egl::SurfaceState &state,
                                            ID3D11Device *displayD3D11Device,
                                            const FunctionsGL *functionsGL,
                                            const FunctionsWGL *functionsWGL)
-    : SurfaceWGL(state, renderer),
+    : SurfaceWGL(state),
       mBuftype(buftype),
       mClientBuffer(clientBuffer),
-      mRenderer(renderer),
       mDisplayD3D11Device(displayD3D11Device),
       mDisplay(display),
-      mStateManager(renderer->getStateManager()),
-      mWorkarounds(renderer->getWorkarounds()),
+      mStateManager(stateManager),
       mFunctionsGL(functionsGL),
       mFunctionsWGL(functionsWGL),
       mDeviceContext(deviceContext),
@@ -258,8 +256,7 @@ D3DTextureSurfaceWGL::D3DTextureSurfaceWGL(const egl::SurfaceState &state,
       mBoundObjectTextureHandle(nullptr),
       mBoundObjectRenderbufferHandle(nullptr),
       mColorRenderbufferID(0),
-      mDepthStencilRenderbufferID(0),
-      mFramebufferID(0)
+      mDepthStencilRenderbufferID(0)
 {
 }
 
@@ -286,9 +283,6 @@ D3DTextureSurfaceWGL::~D3DTextureSurfaceWGL()
             mBoundObjectTextureHandle = nullptr;
         }
 
-        // GL framebuffer is deleted by the default framebuffer object
-        mFramebufferID = 0;
-
         mDisplay->releaseD3DDevice(mDeviceHandle);
         mDeviceHandle = nullptr;
     }
@@ -312,8 +306,8 @@ egl::Error D3DTextureSurfaceWGL::initialize(const egl::Display *display)
     {
         if (mState.attributes.contains(EGL_GL_COLORSPACE))
         {
-            if (mColorFormat->id != angle::Format::ID::R8G8B8A8_TYPELESS &&
-                mColorFormat->id != angle::Format::ID::B8G8R8A8_TYPELESS)
+            if (mColorFormat->id != angle::FormatID::R8G8B8A8_TYPELESS &&
+                mColorFormat->id != angle::FormatID::B8G8R8A8_TYPELESS)
             {
                 return egl::EglBadMatch()
                        << "EGL_GL_COLORSPACE may only be specified for TYPELESS textures";
@@ -350,21 +344,6 @@ egl::Error D3DTextureSurfaceWGL::initialize(const egl::Display *display)
         mFunctionsGL->renderbufferStorage(GL_RENDERBUFFER, config->depthStencilFormat,
                                           static_cast<GLsizei>(mWidth),
                                           static_cast<GLsizei>(mHeight));
-    }
-
-    mFunctionsGL->genFramebuffers(1, &mFramebufferID);
-    mStateManager->bindFramebuffer(GL_FRAMEBUFFER, mFramebufferID);
-    mFunctionsGL->framebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER,
-                                          mColorRenderbufferID);
-    if (config->depthSize > 0)
-    {
-        mFunctionsGL->framebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER,
-                                              mDepthStencilRenderbufferID);
-    }
-    if (config->stencilSize > 0)
-    {
-        mFunctionsGL->framebufferRenderbuffer(GL_FRAMEBUFFER, GL_STENCIL_ATTACHMENT,
-                                              GL_RENDERBUFFER, mDepthStencilRenderbufferID);
     }
 
     return egl::NoError();
@@ -426,7 +405,9 @@ egl::Error D3DTextureSurfaceWGL::querySurfacePointerANGLE(EGLint attribute, void
     return egl::NoError();
 }
 
-egl::Error D3DTextureSurfaceWGL::bindTexImage(gl::Texture *texture, EGLint buffer)
+egl::Error D3DTextureSurfaceWGL::bindTexImage(const gl::Context *context,
+                                              gl::Texture *texture,
+                                              EGLint buffer)
 {
     ASSERT(mBoundObjectTextureHandle == nullptr);
 
@@ -451,7 +432,7 @@ egl::Error D3DTextureSurfaceWGL::bindTexImage(gl::Texture *texture, EGLint buffe
     return egl::NoError();
 }
 
-egl::Error D3DTextureSurfaceWGL::releaseTexImage(EGLint buffer)
+egl::Error D3DTextureSurfaceWGL::releaseTexImage(const gl::Context *context, EGLint buffer)
 {
     ASSERT(mBoundObjectTextureHandle != nullptr);
     if (!mFunctionsWGL->dxUnlockObjectsNV(mDeviceHandle, 1, &mBoundObjectTextureHandle))
@@ -496,11 +477,29 @@ EGLint D3DTextureSurfaceWGL::getSwapBehavior() const
     return EGL_BUFFER_PRESERVED;
 }
 
-FramebufferImpl *D3DTextureSurfaceWGL::createDefaultFramebuffer(const gl::FramebufferState &data)
+FramebufferImpl *D3DTextureSurfaceWGL::createDefaultFramebuffer(const gl::Context *context,
+                                                                const gl::FramebufferState &data)
 {
-    return new FramebufferGL(mFramebufferID, data, mFunctionsGL, mWorkarounds,
-                             mRenderer->getBlitter(), mRenderer->getMultiviewClearer(),
-                             mStateManager);
+    const FunctionsGL *functions = GetFunctionsGL(context);
+    StateManagerGL *stateManager = GetStateManagerGL(context);
+
+    GLuint framebufferID = 0;
+    functions->genFramebuffers(1, &framebufferID);
+    stateManager->bindFramebuffer(GL_FRAMEBUFFER, framebufferID);
+    functions->framebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER,
+                                       mColorRenderbufferID);
+    if (mState.config->depthSize > 0)
+    {
+        functions->framebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER,
+                                           mDepthStencilRenderbufferID);
+    }
+    if (mState.config->stencilSize > 0)
+    {
+        functions->framebufferRenderbuffer(GL_FRAMEBUFFER, GL_STENCIL_ATTACHMENT, GL_RENDERBUFFER,
+                                           mDepthStencilRenderbufferID);
+    }
+
+    return new FramebufferGL(data, framebufferID, true);
 }
 
 HDC D3DTextureSurfaceWGL::getDC() const

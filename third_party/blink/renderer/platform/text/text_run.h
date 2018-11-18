@@ -24,15 +24,13 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_TEXT_TEXT_RUN_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_TEXT_TEXT_RUN_H_
 
-#include "third_party/blink/renderer/platform/fonts/glyph.h"
-#include "third_party/blink/renderer/platform/geometry/float_rect.h"
+#include "base/optional.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/text/tab_size.h"
 #include "third_party/blink/renderer/platform/text/text_direction.h"
 #include "third_party/blink/renderer/platform/text/text_justify.h"
 #include "third_party/blink/renderer/platform/wtf/allocator.h"
-#include "third_party/blink/renderer/platform/wtf/optional.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_view.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
@@ -176,6 +174,11 @@ class PLATFORM_EXPORT TextRun final {
     return data_.characters16;
   }
 
+  StringView ToStringView() const {
+    return Is8Bit() ? StringView(data_.characters8, len_)
+                    : StringView(data_.characters16, len_);
+  }
+
   UChar32 CodepointAt(unsigned i) const {
     SECURITY_DCHECK(i < len_);
     if (Is8Bit())
@@ -264,7 +267,7 @@ class PLATFORM_EXPORT TextRun final {
   // Up-converts to UTF-16 as needed and normalizes spaces and Unicode control
   // characters as per the CSS Text Module Level 3 specification.
   // https://drafts.csswg.org/css-text-3/#white-space-processing
-  std::unique_ptr<UChar[]> NormalizedUTF16(unsigned* result_length) const;
+  String NormalizedUTF16() const;
 
  private:
   union {
@@ -300,19 +303,6 @@ inline void TextRun::SetTabSize(bool allow, TabSize size) {
   tab_size_ = size;
 }
 
-// Container for parameters needed to paint TextRun.
-struct TextRunPaintInfo {
-  STACK_ALLOCATED();
-
- public:
-  explicit TextRunPaintInfo(const TextRun& r)
-      : run(r), from(0), to(r.length()) {}
-
-  const TextRun& run;
-  unsigned from;
-  unsigned to;
-  FloatRect bounds;
-};
-
 }  // namespace blink
+
 #endif

@@ -4,8 +4,8 @@
 
 #include "chromecast/media/cma/backend/filter_group.h"
 
+#include "base/containers/flat_set.h"
 #include "base/memory/ptr_util.h"
-#include "base/message_loop/message_loop.h"
 #include "chromecast/media/cma/backend/mixer_input.h"
 #include "chromecast/media/cma/backend/mock_mixer_source.h"
 #include "chromecast/media/cma/backend/post_processing_pipeline.h"
@@ -171,10 +171,10 @@ class FilterGroupTest : public testing::Test {
     EXPECT_CALL(*post_processor_, SetContentType(kDefaultContentType));
     EXPECT_CALL(*post_processor_, UpdatePlayoutChannel(kDefaultPlayoutChannel));
     filter_group_ = std::make_unique<FilterGroup>(
-        kNumInputChannels, type, mix_to_mono, "test_filter",
-        std::move(post_processor),
-        std::unordered_set<std::string>() /* device_ids */,
+        kNumInputChannels, type, "test_filter", std::move(post_processor),
+        base::flat_set<std::string>() /* device_ids */,
         std::vector<FilterGroup*>());
+    filter_group_->SetMixToMono(mix_to_mono);
     filter_group_->Initialize(kInputSampleRate);
     filter_group_->AddInput(&input_);
     filter_group_->UpdatePlayoutChannel(kChannelAll);
@@ -191,7 +191,8 @@ class FilterGroupTest : public testing::Test {
     float* interleaved_data = filter_group_->GetOutputBuffer();
     for (int f = 0; f < kInputFrames; ++f) {
       for (int ch = 0; ch < kNumInputChannels; ++ch) {
-        ASSERT_EQ(Input(ch, f), interleaved_data[f * kNumInputChannels + ch]);
+        ASSERT_EQ(Input(ch, f), interleaved_data[f * kNumInputChannels + ch])
+            << f;
       }
     }
   }
@@ -374,6 +375,7 @@ TEST_F(FilterGroupTest, ChecksContentType) {
   filter_group_->AddInput(&tts_input);
   EXPECT_CALL(*post_processor_,
               SetContentType(AudioContentType::kCommunication));
+  tts_source.SetData(GetTestData());
   filter_group_->MixAndFilter(kInputFrames, RenderingDelay());
 
   // Media input + tts input + alarm input -> tts content type (no update).
@@ -381,16 +383,22 @@ TEST_F(FilterGroupTest, ChecksContentType) {
   EXPECT_CALL(*post_processor_,
               SetContentType(AudioContentType::kCommunication))
       .Times(0);
+  source_.SetData(GetTestData());
+  tts_source.SetData(GetTestData());
+  alarm_source.SetData(GetTestData());
   filter_group_->MixAndFilter(kInputFrames, RenderingDelay());
 
   // Media input + alarm input -> alarm content type.
   filter_group_->RemoveInput(&tts_input);
   EXPECT_CALL(*post_processor_, SetContentType(AudioContentType::kAlarm));
+  source_.SetData(GetTestData());
+  alarm_source.SetData(GetTestData());
   filter_group_->MixAndFilter(kInputFrames, RenderingDelay());
 
   // Media input stream -> media input
   EXPECT_CALL(*post_processor_, SetContentType(AudioContentType::kMedia));
   filter_group_->RemoveInput(&alarm_input);
+  source_.SetData(GetTestData());
   filter_group_->MixAndFilter(kInputFrames, RenderingDelay());
 }
 

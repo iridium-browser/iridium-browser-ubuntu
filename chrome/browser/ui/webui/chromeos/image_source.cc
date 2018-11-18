@@ -15,8 +15,8 @@
 #include "base/memory/ref_counted_memory.h"
 #include "base/sequenced_task_runner.h"
 #include "base/single_thread_task_runner.h"
-#include "base/task_scheduler/post_task.h"
-#include "base/task_scheduler/task_scheduler.h"
+#include "base/task/post_task.h"
+#include "base/task/task_scheduler/task_scheduler.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/chromeos/login/users/avatar/user_image_loader.h"
 #include "chrome/common/url_constants.h"
@@ -26,9 +26,7 @@
 namespace chromeos {
 namespace {
 
-const char* kWhitelistedDirectories[] = {
-  "regulatory_labels"
-};
+const char* const kWhitelistedDirectories[] = {"regulatory_labels"};
 
 // Callback for user_manager::UserImageLoader.
 void ImageLoaded(
@@ -64,7 +62,7 @@ void ImageSource::StartDataRequest(
     return;
   }
 
-  const base::FilePath asset_dir(FILE_PATH_LITERAL(chrome::kChromeOSAssetPath));
+  const base::FilePath asset_dir(chrome::kChromeOSAssetPath);
   const base::FilePath image_path = asset_dir.AppendASCII(path);
   base::PostTaskWithTraitsAndReplyWithResult(
       FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_VISIBLE},

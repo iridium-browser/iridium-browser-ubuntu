@@ -4,7 +4,6 @@
 
 package org.chromium.content_shell;
 
-import android.app.Activity;
 import android.content.Context;
 import android.graphics.drawable.ClipDrawable;
 import android.text.TextUtils;
@@ -27,17 +26,14 @@ import android.widget.TextView.OnEditorActionListener;
 import org.chromium.base.Callback;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
-import org.chromium.components.content_view.ContentView;
-import org.chromium.content.browser.ActivityContentVideoViewEmbedder;
-import org.chromium.content.browser.ContentVideoViewEmbedder;
-import org.chromium.content.browser.ContentViewCoreImpl;
-import org.chromium.content.browser.ContentViewRenderView;
+import org.chromium.components.embedder_support.view.ContentView;
+import org.chromium.components.embedder_support.view.ContentViewRenderView;
 import org.chromium.content_public.browser.ActionModeCallbackHelper;
-import org.chromium.content_public.browser.ContentViewCore;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.NavigationController;
 import org.chromium.content_public.browser.SelectionPopupController;
 import org.chromium.content_public.browser.WebContents;
+import org.chromium.ui.base.ViewAndroidDelegate;
 import org.chromium.ui.base.WindowAndroid;
 
 /**
@@ -55,7 +51,6 @@ public class Shell extends LinearLayout {
         }
     };
 
-    private ContentViewCoreImpl mContentViewCore;
     private WebContents mWebContents;
     private NavigationController mNavigationController;
     private EditText mUrlTextView;
@@ -124,7 +119,6 @@ public class Shell extends LinearLayout {
     private void onNativeDestroyed() {
         mWindow = null;
         mNativeShell = 0;
-        mContentViewCore.destroy();
         mWebContents = null;
     }
 
@@ -165,7 +159,7 @@ public class Shell extends LinearLayout {
                 }
                 loadUrl(mUrlTextView.getText().toString());
                 setKeyboardVisibilityForUrl(false);
-                mContentViewCore.getContainerView().requestFocus();
+                getContentView().requestFocus();
                 return true;
             }
         });
@@ -185,7 +179,7 @@ public class Shell extends LinearLayout {
             @Override
             public boolean onKey(View v, int keyCode, KeyEvent event) {
                 if (keyCode == KeyEvent.KEYCODE_BACK) {
-                    mContentViewCore.getContainerView().requestFocus();
+                    getContentView().requestFocus();
                     return true;
                 }
                 return false;
@@ -209,8 +203,8 @@ public class Shell extends LinearLayout {
         }
         mUrlTextView.clearFocus();
         // TODO(aurimas): Remove this when crbug.com/174541 is fixed.
-        mContentViewCore.getContainerView().clearFocus();
-        mContentViewCore.getContainerView().requestFocus();
+        getContentView().clearFocus();
+        getContentView().requestFocus();
     }
 
     /**
@@ -302,11 +296,11 @@ public class Shell extends LinearLayout {
         Context context = getContext();
         ContentView cv = ContentView.createContentView(context, webContents);
         mViewAndroidDelegate = new ShellViewAndroidDelegate(cv);
-        mContentViewCore = (ContentViewCoreImpl) ContentViewCore.create(
-                context, "", webContents, mViewAndroidDelegate, cv, mWindow);
+        webContents.initialize(
+                "", mViewAndroidDelegate, cv, mWindow, WebContents.createDefaultInternalsHolder());
         mWebContents = webContents;
-        SelectionPopupController controller = SelectionPopupController.fromWebContents(webContents);
-        controller.setActionModeCallback(defaultActionCallback());
+        SelectionPopupController.fromWebContents(webContents)
+                .setActionModeCallback(defaultActionCallback());
         mNavigationController = mWebContents.getNavigationController();
         if (getParent() != null) mWebContents.onShow();
         if (mWebContents.getVisibleUrl() != null) {
@@ -354,27 +348,6 @@ public class Shell extends LinearLayout {
     }
 
     @CalledByNative
-    public ContentVideoViewEmbedder getContentVideoViewEmbedder() {
-        return new ActivityContentVideoViewEmbedder((Activity) getContext()) {
-            @Override
-            public void enterFullscreenVideo(View view, boolean isVideoLoaded) {
-                super.enterFullscreenVideo(view, isVideoLoaded);
-                if (mContentViewRenderView != null) {
-                    mContentViewRenderView.setOverlayVideoMode(true);
-                }
-            }
-
-            @Override
-            public void exitFullscreenVideo() {
-                super.exitFullscreenVideo();
-                if (mContentViewRenderView != null) {
-                    mContentViewRenderView.setOverlayVideoMode(false);
-                }
-            }
-        };
-    }
-
-    @CalledByNative
     public void setOverlayMode(boolean useOverlayMode) {
         mContentViewRenderView.setOverlayVideoMode(useOverlayMode);
         if (mOverlayModeChangedCallbackForTesting != null) {
@@ -410,14 +383,8 @@ public class Shell extends LinearLayout {
      * @return The {@link ViewGroup} currently shown by this Shell.
      */
     public ViewGroup getContentView() {
-        return mContentViewCore.getContainerView();
-    }
-
-    /**
-     * @return The {@link ContentViewCore} currently managing the view shown by this Shell.
-     */
-    public ContentViewCore getContentViewCore() {
-        return mContentViewCore;
+        ViewAndroidDelegate viewDelegate = mWebContents.getViewAndroidDelegate();
+        return viewDelegate != null ? viewDelegate.getContainerView() : null;
     }
 
      /**

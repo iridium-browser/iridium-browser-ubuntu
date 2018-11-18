@@ -11,6 +11,8 @@
 #include "ash/login/ui/login_display_style.h"
 #include "ash/login/ui/login_user_view.h"
 #include "ash/public/interfaces/login_user_info.mojom.h"
+#include "ash/wallpaper/wallpaper_controller_observer.h"
+#include "base/scoped_observer.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/views/controls/scroll_view.h"
 
@@ -21,13 +23,13 @@ class BoxLayout;
 
 namespace ash {
 
-class HoverNotifier;
-class ScrollBar;
+class WallpaperController;
 
 // Scrollable list of the users. Stores the list of login user views. Can be
 // styled with GradientParams that define gradient tinting at the top and at the
 // bottom. Can be styled with LayoutParams that define spacing and sizing.
-class ASH_EXPORT ScrollableUsersListView : public views::ScrollView {
+class ASH_EXPORT ScrollableUsersListView : public views::ScrollView,
+                                           public WallpaperControllerObserver {
  public:
   // TestApi is used for tests to get internal implementation details.
   class ASH_EXPORT TestApi {
@@ -67,46 +69,37 @@ class ASH_EXPORT ScrollableUsersListView : public views::ScrollView {
   void Layout() override;
   void OnPaintBackground(gfx::Canvas* canvas) override;
 
+  // WallpaperControllerObserver:
+  void OnWallpaperColorsChanged() override;
+  void OnWallpaperBlurChanged() override;
+
  private:
   struct GradientParams {
+    static GradientParams BuildForStyle(LoginDisplayStyle style);
+
     // Start color for drawing linear gradient.
-    SkColor color_from;
+    SkColor color_from = SK_ColorTRANSPARENT;
     // End color for drawing linear gradient.
-    SkColor color_to;
+    SkColor color_to = SK_ColorTRANSPARENT;
     // Height of linear gradient.
-    SkScalar height;
+    SkScalar height = 0;
   };
 
-  struct LayoutParams {
-    // Display style to determine layout and sizing of users list.
-    LoginDisplayStyle display_style;
-    // Spacing between user entries on users list.
-    int between_child_spacing;
-    // Insets around users list used in landscape orientation.
-    gfx::Insets insets_landscape;
-    // Insets around users list used in portrait orientation.
-    gfx::Insets insets_portrait;
-  };
+  // Display style to determine layout and sizing of users list.
+  const LoginDisplayStyle display_style_;
 
-  // Updates visibility of scroll bar thumb. Called when hover state changes.
-  void OnHover(bool has_hover);
+  // The view which contains all of the user views.
+  views::View* user_view_host_ = nullptr;
 
-  // Returns parameters of the layout for given display |style|.
-  LayoutParams GetLayoutParams(LoginDisplayStyle style);
-  // Returns parameters of the gradient for given display |style|.
-  GradientParams GetGradientParams(LoginDisplayStyle style);
-
-  views::BoxLayout* layout_ = nullptr;
-
-  // Owned by ScrollView.
-  ScrollBar* scroll_bar_ = nullptr;
+  // Layout for |user_view_host_|.
+  views::BoxLayout* user_view_host_layout_ = nullptr;
 
   std::vector<LoginUserView*> user_views_;
 
-  std::unique_ptr<HoverNotifier> hover_notifier_;
-
   GradientParams gradient_params_;
-  LayoutParams layout_params_;
+
+  ScopedObserver<WallpaperController, WallpaperControllerObserver> observer_{
+      this};
 
   DISALLOW_COPY_AND_ASSIGN(ScrollableUsersListView);
 };

@@ -26,40 +26,16 @@ extern const CGFloat kTopButtonsBottomMargin;
 extern const CGFloat kBottomButtonsBottomMargin;
 extern const CGFloat kAdaptiveToolbarMargin;
 extern const CGFloat kAdaptiveToolbarStackViewSpacing;
-// TODO(crbug.com/800266): Remove those properties.
-extern const CGFloat kButtonVerticalMargin;
-extern const CGFloat kLocationBarVerticalMargin;
-extern const CGFloat kLeadingMarginIPad;
-extern const CGFloat kHorizontalMargin;
-extern const CGFloat kStackViewSpacing;
-
-// Location bar styling.
-extern const CGFloat kLocationBarBorderWidth;
-extern const CGFloat kLocationBarBorderColor;
-extern const CGFloat kIncognitoLocationBarBorderColor;
-extern const CGFloat kLocationBarCornerRadius;
-extern const CGFloat kLocationBarShadowHeight;
-extern const CGFloat kLocationBarShadowInset;
-extern const CGFloat kIcongnitoLocationBackgroundColor;
 
 // Progress Bar Height.
 extern const CGFloat kProgressBarHeight;
 
 // Toolbar Buttons.
-extern const CGFloat kToolsMenuButtonWidth;
 extern const CGFloat kAdaptiveToolbarButtonHeight;
 extern const CGFloat kAdaptiveToolbarButtonWidth;
 extern const CGFloat kOmniboxButtonWidth;
-extern const CGFloat kToolbarButtonWidth;
-extern const CGFloat kLeadingLocationBarButtonWidth;
-extern const CGFloat kToolbarButtonTitleNormalColor;
-extern const CGFloat kToolbarButtonTitleHighlightedColor;
-extern const CGFloat kIncognitoToolbarButtonTitleNormalColor;
-extern const CGFloat kIncognitoToolbarButtonTitleHighlightedColor;
-extern const CGFloat kBackButtonImageInset;
-extern const CGFloat kForwardButtonImageInset;
-extern const CGFloat kLeadingLocationBarButtonImageInset;
 extern const CGFloat kCancelButtonHorizontalInset;
+extern const CGFloat kToolbarDimmedButtonAlpha;
 
 // Background color of the blur view.
 extern const CGFloat kBlurBackgroundGrayscaleComponent;
@@ -67,12 +43,12 @@ extern const CGFloat kBlurBackgroundAlpha;
 
 // Alpha for the tint color of the buttons.
 extern const CGFloat kToolbarButtonTintColorAlpha;
-
-// Maximum number of tabs displayed by the button containing the tab count.
-extern const NSInteger kShowTabStripButtonMaxTabCount;
-
-// Animation constants.
-extern const LayoutOffset kToolbarButtonAnimationOffset;
+// Alpha for the tint color of the buttons when in the highlighted state.
+extern const CGFloat kToolbarButtonTintColorAlphaHighlighted;
+extern const CGFloat kIncognitoToolbarButtonTintColorAlphaHighlighted;
+// Alpha for the spotlight view's background, when the toolbar is dimmed or not.
+extern const CGFloat kToolbarSpotlightAlpha;
+extern const CGFloat kDimmedToolbarSpotlightAlpha;
 
 // Adaptive toolbar position constants.
 extern const CGFloat kExpandedLocationBarHorizontalMargin;
@@ -80,12 +56,13 @@ extern const CGFloat kContractedLocationBarHorizontalMargin;
 
 // Adaptive Location bar constants.
 extern const CGFloat kAdaptiveLocationBarCornerRadius;
-extern const CGFloat kIcongnitoAdaptiveLocationBackgroundColor;
 extern const CGFloat kAdaptiveLocationBarBackgroundAlpha;
+extern const CGFloat kAdaptiveLocationBarBackgroundAlphaIncognito;
 extern const CGFloat kAdaptiveLocationBarVerticalMargin;
+extern const CGFloat kAdaptiveLocationBarVerticalMarginFullscreen;
+// Extra margin for the location bar vertical margin.
+extern const CGFloat kAdaptiveLocationBarExtraVerticalMargin;
 
-// Height of the toolbar.
-extern const CGFloat kToolbarHeight;
 // Top margin of the top toolbar when the adaptive toolbar is unsplit.
 extern const CGFloat kTopToolbarUnsplitMargin;
 // Height of the adaptive toolbars.
@@ -104,30 +81,15 @@ extern NSString* const kToolbarOmniboxButtonIdentifier;
 // Accessibility identifier of the cancel omnibox edit button.
 extern NSString* const kToolbarCancelOmniboxEditButtonIdentifier;
 
-// The maximum number to display in the tab switcher button.
-extern NSInteger const kStackButtonMaxTabCount;
-
 // Font size for the TabGrid button containing the tab count.
 extern const NSInteger kTabGridButtonFontSize;
 
-// TODO(crbug.com/800266): Remove those properties.
-// Font sizes for the button containing the tab count
-extern const NSInteger kFontSizeFewerThanTenTabs;
-extern const NSInteger kFontSizeTenTabsOrMore;
+// Tint color for location bar and omnibox.
+extern const CGFloat kLocationBarTintBlue;
 
-// Height of the shadow displayed below the toolbar when the omnibox is
-// contracted.
-extern const CGFloat kToolbarShadowHeight;
-// Height of the shadow displayed below the toolbar when the omnibox is
-// expanded.
-extern const CGFloat kToolbarFullBleedShadowHeight;
-
-// Toolbar style. Determines which button images are used.
-enum ToolbarControllerStyle {
-  ToolbarControllerStyleLightMode = 0,
-  ToolbarControllerStyleDarkMode,
-  ToolbarControllerStyleIncognitoMode,
-  ToolbarControllerStyleMaxStyles
-};
+// Font sizes used in omnibox and location bar.
+extern const CGFloat kLocationBarFontSize;
+extern const CGFloat kLocationBarRegularRegularFontSize;
+extern const CGFloat kLocationBarSteadyFontSize;
 
 #endif  // IOS_CHROME_BROWSER_UI_TOOLBAR_BUTTONS_TOOLBAR_CONSTANTS_H_

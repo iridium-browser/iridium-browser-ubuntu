@@ -81,7 +81,7 @@ void ServiceWorkerInstalledScriptsSender::StartSendingScript(
 
 void ServiceWorkerInstalledScriptsSender::OnStarted(
     std::string encoding,
-    std::unordered_map<std::string, std::string> headers,
+    base::flat_map<std::string, std::string> headers,
     mojo::ScopedDataPipeConsumerHandle body_handle,
     uint64_t body_size,
     mojo::ScopedDataPipeConsumerHandle meta_data_handle,
@@ -166,7 +166,8 @@ void ServiceWorkerInstalledScriptsSender::Abort(
     case ServiceWorkerInstalledScriptReader::FinishedReason::kNoHttpInfoError:
     case ServiceWorkerInstalledScriptReader::FinishedReason::
         kResponseReaderError:
-      owner_->SetStartWorkerStatusCode(SERVICE_WORKER_ERROR_DISK_CACHE);
+      owner_->SetStartWorkerStatusCode(
+          blink::ServiceWorkerStatusCode::kErrorDiskCache);
       // Abort the worker by deleting from the registration since the data was
       // corrupted.
       if (owner_->context()) {

@@ -5,7 +5,7 @@
 #include "chrome/browser/favicon/large_icon_service_factory.h"
 
 #include "base/memory/singleton.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/profiles/incognito_helpers.h"
 #include "chrome/browser/profiles/profile.h"
@@ -16,6 +16,7 @@
 #include "components/image_fetcher/core/image_fetcher_impl.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "content/public/browser/browser_context.h"
+#include "content/public/browser/storage_partition.h"
 
 // static
 favicon::LargeIconService* LargeIconServiceFactory::GetForBrowserContext(
@@ -53,7 +54,8 @@ KeyedService* LargeIconServiceFactory::BuildServiceInstanceFor(
       favicon_service,
       std::make_unique<image_fetcher::ImageFetcherImpl>(
           std::make_unique<suggestions::ImageDecoderImpl>(),
-          profile->GetRequestContext()));
+          content::BrowserContext::GetDefaultStoragePartition(profile)
+              ->GetURLLoaderFactoryForBrowserProcess()));
 }
 
 bool LargeIconServiceFactory::ServiceIsNULLWhileTesting() const {

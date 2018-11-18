@@ -20,6 +20,7 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "components/bookmarks/browser/bookmark_model.h"
+#include "content/public/browser/storage_partition.h"
 #include "content/public/test/browser_test_utils.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
@@ -361,6 +362,9 @@ IN_PROC_BROWSER_TEST_F(DeclarativeContentApiTest, ReusedActionInstance) {
   ExtensionTestMessageListener ready("ready", false);
   const Extension* extension = LoadExtension(ext_dir_.UnpackedPath());
   ASSERT_TRUE(extension);
+  // Wait for declarative rules to be set up.
+  content::BrowserContext::GetDefaultStoragePartition(profile())
+      ->FlushNetworkInterfaceForTesting();
   const ExtensionAction* page_action =
       ExtensionActionManager::Get(browser()->profile())
           ->GetPageAction(*extension);
@@ -523,17 +527,11 @@ IN_PROC_BROWSER_TEST_F(DeclarativeContentApiTest,
   EXPECT_TRUE(incognito_page_action->GetIsVisible(incognito_tab_id));
 }
 
-// Frequently times out on ChromiumOS debug builders: https://crbug.com/512431.
-#if defined(OS_CHROMEOS) && !defined(NDEBUG)
-#define MAYBE_PRE_RulesPersistence DISABLED_PRE_RulesPersistence
-#define MAYBE_RulesPersistence DISABLED_RulesPersistence
-#else
-#define MAYBE_PRE_RulesPersistence PRE_RulesPersistence
-#define MAYBE_RulesPersistence RulesPersistence
-#endif
-
 // Sets up rules matching http://test1/ in a normal and incognito browser.
-IN_PROC_BROWSER_TEST_F(DeclarativeContentApiTest, MAYBE_PRE_RulesPersistence) {
+// Frequently times out on ChromiumOS, Linux ASan, and Windows:
+// https://crbug.com/512431.
+IN_PROC_BROWSER_TEST_F(DeclarativeContentApiTest,
+                       DISABLED_PRE_RulesPersistence) {
   ExtensionTestMessageListener ready("ready", false);
   ExtensionTestMessageListener ready_split("ready (split)", false);
   // An on-disk extension is required so that it can be reloaded later in the
@@ -550,7 +548,7 @@ IN_PROC_BROWSER_TEST_F(DeclarativeContentApiTest, MAYBE_PRE_RulesPersistence) {
 
 // Reloads the extension from PRE_RulesPersistence and checks that the rules
 // continue to work as expected after being persisted and reloaded.
-IN_PROC_BROWSER_TEST_F(DeclarativeContentApiTest, MAYBE_RulesPersistence) {
+IN_PROC_BROWSER_TEST_F(DeclarativeContentApiTest, DISABLED_RulesPersistence) {
   ExtensionTestMessageListener ready("second run ready", false);
   ExtensionTestMessageListener ready_split("second run ready (split)", false);
   ASSERT_TRUE(ready.WaitUntilSatisfied());
@@ -611,6 +609,9 @@ IN_PROC_BROWSER_TEST_F(DeclarativeContentApiTest,
   ext_dir_.WriteFile(FILE_PATH_LITERAL("background.js"), kBackgroundHelpers);
   const Extension* extension = LoadExtension(ext_dir_.UnpackedPath());
   ASSERT_TRUE(extension);
+  // Wait for declarative rules to be set up.
+  content::BrowserContext::GetDefaultStoragePartition(profile())
+      ->FlushNetworkInterfaceForTesting();
   const std::string extension_id = extension->id();
   const ExtensionAction* page_action = ExtensionActionManager::Get(
       browser()->profile())->GetPageAction(*extension);
@@ -637,6 +638,9 @@ IN_PROC_BROWSER_TEST_F(DeclarativeContentApiTest,
   EXPECT_EQ(1u, extension_action_test_util::GetTotalPageActionCount(tab));
 
   ReloadExtension(extension_id);  // Invalidates page_action and extension.
+  // Wait for declarative rules to be removed.
+  content::BrowserContext::GetDefaultStoragePartition(profile())
+      ->FlushNetworkInterfaceForTesting();
   EXPECT_EQ("test_rule",
             ExecuteScriptInBackgroundPage(extension_id, kTestRule));
   // TODO(jyasskin): Apply new rules to existing tabs, without waiting for a
@@ -647,6 +651,9 @@ IN_PROC_BROWSER_TEST_F(DeclarativeContentApiTest,
   EXPECT_EQ(1u, extension_action_test_util::GetTotalPageActionCount(tab));
 
   UnloadExtension(extension_id);
+  // Wait for declarative rules to be removed.
+  content::BrowserContext::GetDefaultStoragePartition(profile())
+      ->FlushNetworkInterfaceForTesting();
   NavigateInRenderer(tab, GURL("http://test/"));
   EXPECT_TRUE(WaitForPageActionVisibilityChangeTo(0));
   EXPECT_EQ(0u, extension_action_test_util::GetVisiblePageActionCount(tab));
@@ -728,6 +735,9 @@ IN_PROC_BROWSER_TEST_P(ShowPageActionWithoutPageActionTest, Test) {
   scoped_refptr<const Extension> extension =
       loader.LoadExtension(ext_dir_.UnpackedPath());
   ASSERT_TRUE(extension);
+  // Wait for declarative rules to be set up.
+  content::BrowserContext::GetDefaultStoragePartition(profile())
+      ->FlushNetworkInterfaceForTesting();
 
   const char kScript[] =
       "setRules([{\n"
@@ -841,9 +851,9 @@ IN_PROC_BROWSER_TEST_F(DeclarativeContentApiTest,
                        WebContentsWithoutTabAddedNotificationAtOnLoaded) {
   // Add a web contents to the tab strip in a way that doesn't trigger
   // NOTIFICATION_TAB_ADDED.
-  content::WebContents* contents = content::WebContents::Create(
+  std::unique_ptr<content::WebContents> contents = content::WebContents::Create(
       content::WebContents::CreateParams(profile()));
-  browser()->tab_strip_model()->AppendWebContents(contents, false);
+  browser()->tab_strip_model()->AppendWebContents(std::move(contents), false);
 
   // The actual extension contents don't matter here -- we're just looking to
   // trigger OnExtensionLoaded.
@@ -868,8 +878,8 @@ IN_PROC_BROWSER_TEST_F(DeclarativeContentApiTest,
       browser()->tab_strip_model()->GetWebContentsAt(0);
 
   AddTabAtIndex(1, GURL("http://test2/"), ui::PAGE_TRANSITION_LINK);
-  std::unique_ptr<content::WebContents> tab2(
-      browser()->tab_strip_model()->GetWebContentsAt(1));
+  content::WebContents* tab2 =
+      browser()->tab_strip_model()->GetWebContentsAt(1);
 
   // Add a rule matching the second tab.
   const std::string kAddTestRules =
@@ -886,8 +896,7 @@ IN_PROC_BROWSER_TEST_F(DeclarativeContentApiTest,
       "}], 'add_rules');\n";
   EXPECT_EQ("add_rules",
             ExecuteScriptInBackgroundPage(extension->id(), kAddTestRules));
-  EXPECT_TRUE(page_action->GetIsVisible(
-      ExtensionTabUtil::GetTabId(tab2.get())));
+  EXPECT_TRUE(page_action->GetIsVisible(ExtensionTabUtil::GetTabId(tab2)));
 
   // Remove the rule.
   const std::string kRemoveTestRule1 = "removeRule('2', 'remove_rule1');\n";
@@ -896,7 +905,8 @@ IN_PROC_BROWSER_TEST_F(DeclarativeContentApiTest,
 
   // Remove the second tab, then trigger a rule evaluation for the remaining
   // tab.
-  tab2.reset();
+  browser()->tab_strip_model()->DetachWebContentsAt(
+      browser()->tab_strip_model()->GetIndexOfWebContents(tab2));
   NavigateInRenderer(tab1, GURL("http://test1/"));
   EXPECT_TRUE(page_action->GetIsVisible(ExtensionTabUtil::GetTabId(tab1)));
 }

@@ -11,6 +11,7 @@ Polymer({
 
   behaviors: [
     CrScrollableBehavior,
+    settings.FindShortcutBehavior,
   ],
 
   properties: {
@@ -47,6 +48,23 @@ Polymer({
   /** @override */
   attached: function() {
     this.$.dialog.showModal();
+    this.becomeActiveFindShortcutListener();
+  },
+
+  /** @override */
+  detached: function() {
+    this.removeSelfAsFindShortcutListener();
+  },
+
+  // Override settings.FindShortcutBehavior methods.
+  handleFindShortcut: function(modalContextOpen) {
+    // Assumes this is the only open modal.
+    const searchInput = this.$.search.getSearchInput();
+    if (searchInput != this.$.search.shadowRoot.activeElement) {
+      searchInput.scrollIntoViewIfNeeded();
+      searchInput.focus();
+    }
+    return true;
   },
 
   /**
@@ -71,6 +89,9 @@ Polymer({
 
       if (!isAvailableLanguage)
         return false;
+
+      if (this.languageHelper.isLanguageCodeForArcIme(language.code))
+        return false;  // internal use only
 
       if (filterValue === null)
         return true;
@@ -106,7 +127,7 @@ Polymer({
   /**
    * Handler for checking or unchecking a language item.
    * @param {!{model: !{item: !chrome.languageSettingsPrivate.Language},
-   *           target: !PaperCheckboxElement}} e
+   *           target: !Element}} e
    * @private
    */
   onLanguageCheckboxChange_: function(e) {
@@ -137,5 +158,15 @@ Polymer({
     this.languagesToAdd_.forEach(languageCode => {
       this.languageHelper.enableLanguage(languageCode);
     });
+  },
+
+  /**
+   * @param {!KeyboardEvent} e
+   * @private
+   */
+  onKeydown_: function(e) {
+    // Close dialog if 'esc' is pressed and the search box is already empty.
+    if (e.key == 'Escape' && !this.$.search.getValue().trim())
+      this.$.dialog.close();
   },
 });

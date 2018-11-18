@@ -18,16 +18,14 @@
 namespace viz {
 
 GLOutputSurfaceBufferQueue::GLOutputSurfaceBufferQueue(
-    scoped_refptr<InProcessContextProvider> context_provider,
+    scoped_refptr<VizProcessContextProvider> context_provider,
     gpu::SurfaceHandle surface_handle,
     SyntheticBeginFrameSource* synthetic_begin_frame_source,
     gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
     uint32_t target,
     uint32_t internalformat,
     gfx::BufferFormat buffer_format)
-    : GLOutputSurface(context_provider, synthetic_begin_frame_source),
-      gl_helper_(context_provider->ContextGL(),
-                 context_provider->ContextSupport()) {
+    : GLOutputSurface(context_provider, synthetic_begin_frame_source) {
   capabilities_.uses_default_gl_framebuffer = false;
   capabilities_.flipped_output_surface = true;
   // Set |max_frames_pending| to 2 for buffer_queue, which aligns scheduling
@@ -41,7 +39,7 @@ GLOutputSurfaceBufferQueue::GLOutputSurfaceBufferQueue(
 
   buffer_queue_.reset(new BufferQueue(
       context_provider->ContextGL(), target, internalformat, buffer_format,
-      &gl_helper_, gpu_memory_buffer_manager, surface_handle));
+      gpu_memory_buffer_manager, surface_handle));
   buffer_queue_->Initialize();
 }
 
@@ -105,8 +103,7 @@ gfx::BufferFormat GLOutputSurfaceBufferQueue::GetOverlayBufferFormat() const {
 }
 
 void GLOutputSurfaceBufferQueue::DidReceiveSwapBuffersAck(
-    gfx::SwapResult result,
-    uint64_t swap_id) {
+    gfx::SwapResult result) {
   bool force_swap = false;
   if (result == gfx::SwapResult::SWAP_NAK_RECREATE_BUFFERS) {
     // Even through the swap failed, this is a fixable error so we can pretend
@@ -117,7 +114,7 @@ void GLOutputSurfaceBufferQueue::DidReceiveSwapBuffersAck(
   }
 
   buffer_queue_->PageFlipComplete();
-  client()->DidReceiveSwapBuffersAck(swap_id);
+  client()->DidReceiveSwapBuffersAck();
 
   if (force_swap)
     client()->SetNeedsRedrawRect(gfx::Rect(swap_size_));

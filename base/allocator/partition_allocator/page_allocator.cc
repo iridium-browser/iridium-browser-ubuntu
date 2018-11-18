@@ -6,26 +6,24 @@
 
 #include <limits.h>
 
+#include <atomic>
+
 #include "base/allocator/partition_allocator/address_space_randomization.h"
 #include "base/allocator/partition_allocator/page_allocator_internal.h"
 #include "base/allocator/partition_allocator/spin_lock.h"
-#include "base/base_export.h"
-#include "base/compiler_specific.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/numerics/checked_math.h"
 #include "build/build_config.h"
 
-#include <atomic>
-
 #if defined(OS_WIN)
 #include <windows.h>
 #endif
 
-#if defined(OS_POSIX)
-#include "base/allocator/partition_allocator/page_allocator_internals_posix.h"
-#elif defined(OS_WIN)
+#if defined(OS_WIN)
 #include "base/allocator/partition_allocator/page_allocator_internals_win.h"
+#elif defined(OS_POSIX) || defined(OS_FUCHSIA)
+#include "base/allocator/partition_allocator/page_allocator_internals_posix.h"
 #else
 #error Platform not supported.
 #endif
@@ -119,8 +117,8 @@ void* AllocPages(void* address,
   if (length >= kMinimumGuardedMemorySize) {
     CHECK_EQ(PageInaccessible, accessibility);
     CHECK(!commit);
-    if (AdjustAddressSpaceLimit(base::checked_cast<int64_t>(length))) {
-      DLOG(WARNING) << "Could not address space by " << length;
+    if (!AdjustAddressSpaceLimit(base::checked_cast<int64_t>(length))) {
+      DLOG(WARNING) << "Could not adjust address space by " << length;
       // Fall through. Try the allocation, since we may have a reserve.
     }
   }

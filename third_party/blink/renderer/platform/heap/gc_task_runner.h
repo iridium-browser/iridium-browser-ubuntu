@@ -33,27 +33,27 @@
 
 #include <memory>
 #include "base/location.h"
-#include "third_party/blink/public/platform/web_thread.h"
 #include "third_party/blink/renderer/platform/cross_thread_functional.h"
 #include "third_party/blink/renderer/platform/heap/thread_state.h"
+#include "third_party/blink/renderer/platform/scheduler/public/thread.h"
 
 namespace blink {
 
-class GCTaskObserver final : public WebThread::TaskObserver {
+class GCTaskObserver final : public Thread::TaskObserver {
   USING_FAST_MALLOC(GCTaskObserver);
 
  public:
   GCTaskObserver() : nesting_(0) {}
 
-  ~GCTaskObserver() {
+  ~GCTaskObserver() override {
     // m_nesting can be 1 if this was unregistered in a task and
     // didProcessTask was not called.
     DCHECK(!nesting_ || nesting_ == 1);
   }
 
-  virtual void WillProcessTask() { nesting_++; }
+  void WillProcessTask() override { nesting_++; }
 
-  virtual void DidProcessTask() {
+  void DidProcessTask() override {
     // In the production code WebKit::initialize is called from inside the
     // message loop so we can get didProcessTask() without corresponding
     // willProcessTask once. This is benign.
@@ -73,7 +73,7 @@ class GCTaskRunner final {
   USING_FAST_MALLOC(GCTaskRunner);
 
  public:
-  explicit GCTaskRunner(WebThread* thread)
+  explicit GCTaskRunner(Thread* thread)
       : gc_task_observer_(std::make_unique<GCTaskObserver>()), thread_(thread) {
     thread_->AddTaskObserver(gc_task_observer_.get());
   }
@@ -82,7 +82,7 @@ class GCTaskRunner final {
 
  private:
   std::unique_ptr<GCTaskObserver> gc_task_observer_;
-  WebThread* thread_;
+  Thread* thread_;
 };
 
 }  // namespace blink

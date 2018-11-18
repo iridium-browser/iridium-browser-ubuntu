@@ -47,7 +47,6 @@ class MODULES_EXPORT MediaSession final
   void OnMetadataChanged();
 
   void Trace(blink::Visitor*) override;
-  void TraceWrappers(const ScriptWrappableVisitor*) const override;
 
  private:
   friend class V8MediaSession;

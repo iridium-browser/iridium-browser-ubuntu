@@ -24,16 +24,6 @@ import sys
 # github.com/luci/recipes-py/blob/master/recipe_modules/generator_script/api.py
 _CATAPULT_TESTS = [
     {
-        'name': 'BattOr Smoke Tests',
-        'path': 'common/battor/battor/battor_wrapper_devicetest.py',
-        'disabled': ['android'],
-    },
-    {
-        'name': 'BattOr Unit Tests',
-        'path': 'common/battor/bin/run_py_tests',
-        'disabled': ['android'],
-    },
-    {
         'name': 'Build Python Tests',
         'path': 'catapult_build/bin/run_py_tests',
         'disabled': ['android'],
@@ -70,6 +60,12 @@ _CATAPULT_TESTS = [
         'additional_args': ['--no-install-hooks'],
         'uses_app_engine_sdk': True,
         'disabled': ['android'],
+    },
+    {
+        'name': 'Dashboard WCT Tests',
+        'path': 'dashboard/bin/run_wct_tests',
+        'disabled': ['android', 'win', 'mac'],
+        'uses_wct': True,
     },
     {
         'name': 'Dependency Manager Tests',
@@ -179,6 +175,14 @@ _CATAPULT_TESTS = [
         'disabled': ['android'],
     },
     {
+        'name': 'Typ unittest',
+        'path': 'third_party/typ/run',
+        'additional_args': ['tests'],
+        'disabled': [
+            'android',
+            'win'],  # TODO(crbug.com/851498): enable typ unittests on Win
+    },
+    {
         'name': 'Vinn Tests',
         'path': 'third_party/vinn/bin/run_tests',
         'disabled': ['android'],
@@ -207,6 +211,7 @@ def main(args=None):
   parser.add_argument('--api-path-checkout', help='Path to catapult checkout')
   parser.add_argument('--app-engine-sdk-pythonpath',
                       help='PYTHONPATH to include app engine SDK path')
+  parser.add_argument('--wct-path', help='Path to infra/testing/wct binary')
   parser.add_argument('--platform',
                       help='Platform name (linux, mac, or win)')
   parser.add_argument('--output-json', help='Output for buildbot status page')
@@ -253,7 +258,15 @@ def main(args=None):
         'name': test['name'],
         'env': {}
     }
-    step['cmd'] = ['python', os.path.join(args.api_path_checkout, test['path'])]
+
+    # vpython doesn't integrate well with app engine SDK yet
+    if test.get('uses_app_engine_sdk'):
+      executable = 'python'
+    else:
+      executable = 'vpython.bat' if sys.platform == 'win32' else 'vpython'
+
+    step['cmd'] = [
+        executable, os.path.join(args.api_path_checkout, test['path'])]
     if step['name'] == 'Systrace Tests':
       step['cmd'] += ['--device=' + args.platform]
     if test.get('additional_args'):
@@ -264,6 +277,8 @@ def main(args=None):
       step['env']['CHROME_DEVEL_SANDBOX'] = '/opt/chromium/chrome_sandbox'
     if test.get('outputs_presentation_json'):
       step['outputs_presentation_json'] = True
+    if test.get('uses_wct'):
+      step['env']['WCT'] = args.wct_path
     steps.append(step)
   with open(args.output_json, 'w') as outfile:
     json.dump(steps, outfile)

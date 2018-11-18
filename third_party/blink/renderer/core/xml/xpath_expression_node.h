@@ -37,7 +37,7 @@
 
 namespace blink {
 
-namespace XPath {
+namespace xpath {
 
 struct CORE_EXPORT EvaluationContext {
   STACK_ALLOCATED();
@@ -63,7 +63,7 @@ class CORE_EXPORT Expression : public ParseNode {
  public:
   Expression();
   ~Expression() override;
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
   virtual Value Evaluate(EvaluationContext&) const = 0;
 
@@ -108,7 +108,7 @@ class CORE_EXPORT Expression : public ParseNode {
   DISALLOW_COPY_AND_ASSIGN(Expression);
 };
 
-}  // namespace XPath
+}  // namespace xpath
 
 }  // namespace blink
 

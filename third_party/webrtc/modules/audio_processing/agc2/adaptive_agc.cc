@@ -14,8 +14,8 @@
 #include <numeric>
 
 #include "common_audio/include/audio_util.h"
+#include "modules/audio_processing/agc2/vad_with_level.h"
 #include "modules/audio_processing/logging/apm_data_dumper.h"
-#include "modules/audio_processing/vad/voice_activity_detector.h"
 
 namespace webrtc {
 
@@ -29,36 +29,43 @@ AdaptiveAgc::AdaptiveAgc(ApmDataDumper* apm_data_dumper)
 
 AdaptiveAgc::~AdaptiveAgc() = default;
 
-void AdaptiveAgc::Process(AudioFrameView<float> float_frame) {
-  // TODO(webrtc:7494): Remove this loop. Remove the vectors from
-  // VadWithData after we move to a VAD that outputs an estimate every
-  // kFrameDurationMs ms.
-  //
-  // Some VADs are 'bursty'. They return several estimates for some
-  // frames, and no estimates for other frames. We want to feed all to
-  // the level estimator, but only care about the last level it
-  // produces.
-  rtc::ArrayView<const VadWithLevel::LevelAndProbability> vad_results =
-      vad_.AnalyzeFrame(float_frame);
-  for (const auto& vad_result : vad_results) {
-    apm_data_dumper_->DumpRaw("agc2_vad_probability",
-                              vad_result.speech_probability);
-    apm_data_dumper_->DumpRaw("agc2_vad_rms_dbfs", vad_result.speech_rms_dbfs);
+void AdaptiveAgc::Process(AudioFrameView<float> float_frame,
+                          float last_audio_level) {
+  auto signal_with_levels = SignalWithLevels(float_frame);
+  signal_with_levels.vad_result = vad_.AnalyzeFrame(float_frame);
+  apm_data_dumper_->DumpRaw("agc2_vad_probability",
+                            signal_with_levels.vad_result.speech_probability);
+  apm_data_dumper_->DumpRaw("agc2_vad_rms_dbfs",
+                            signal_with_levels.vad_result.speech_rms_dbfs);
 
-    apm_data_dumper_->DumpRaw("agc2_vad_peak_dbfs",
-                              vad_result.speech_peak_dbfs);
-    speech_level_estimator_.UpdateEstimation(vad_result);
-  }
+  apm_data_dumper_->DumpRaw("agc2_vad_peak_dbfs",
+                            signal_with_levels.vad_result.speech_peak_dbfs);
+  speech_level_estimator_.UpdateEstimation(signal_with_levels.vad_result);
 
-  const float speech_level_dbfs = speech_level_estimator_.LatestLevelEstimate();
+  signal_with_levels.input_level_dbfs =
+      speech_level_estimator_.LatestLevelEstimate();
 
-  const float noise_level_dbfs = noise_level_estimator_.Analyze(float_frame);
+  signal_with_levels.input_noise_level_dbfs =
+      noise_level_estimator_.Analyze(float_frame);
 
-  apm_data_dumper_->DumpRaw("agc2_noise_estimate_dbfs", noise_level_dbfs);
+  apm_data_dumper_->DumpRaw("agc2_noise_estimate_dbfs",
+                            signal_with_levels.input_noise_level_dbfs);
+
+  signal_with_levels.limiter_audio_level_dbfs =
+      last_audio_level > 0 ? FloatS16ToDbfs(last_audio_level) : -90.f;
+  apm_data_dumper_->DumpRaw("agc2_last_limiter_audio_level",
+                            signal_with_levels.limiter_audio_level_dbfs);
+
+  signal_with_levels.estimate_is_confident =
+      speech_level_estimator_.LevelEstimationIsConfident();
 
   // The gain applier applies the gain.
-  gain_applier_.Process(speech_level_dbfs, noise_level_dbfs, vad_results,
-                        float_frame);
+  gain_applier_.Process(signal_with_levels);
+  ;
+}
+
+void AdaptiveAgc::Reset() {
+  speech_level_estimator_.Reset();
 }
 
 }  // namespace webrtc

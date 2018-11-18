@@ -25,7 +25,6 @@
 #include "ios/chrome/browser/browsing_data/browsing_data_features.h"
 #include "ios/chrome/browser/chrome_switches.h"
 #include "ios/chrome/browser/ui/ui_feature_flags.h"
-#include "ios/chrome/browser/ui/user_feedback_features.h"
 #include "ios/web/public/web_view_creation_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -81,11 +80,6 @@ WhatsNewPromoStatus GetWhatsNewPromoStatus() {
   return static_cast<WhatsNewPromoStatus>(status);
 }
 
-bool IsLRUSnapshotCacheEnabled() {
-  // TODO(crbug.com/751553): Remove this function and its associated code.
-  return NO;
-}
-
 bool IsMemoryDebuggingEnabled() {
 // Always return true for Chromium builds, but check the user default for
 // official builds because memory debugging should never be enabled on stable.
@@ -113,14 +107,6 @@ bool IsNewClearBrowsingDataUIEnabled() {
   return base::FeatureList::IsEnabled(kNewClearBrowsingDataUI);
 }
 
-bool IsNewFeedbackKitEnabled() {
-  return base::FeatureList::IsEnabled(kFeedbackKitV2);
-}
-
-bool IsNewFeedbackKitEnabledWithSSOService() {
-  return base::FeatureList::IsEnabled(kFeedbackKitV2WithSSOService);
-}
-
 bool IsThirdPartyKeyboardWorkaroundEnabled() {
   // Check if the experimental flag is forced on or off.
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
@@ -135,12 +121,8 @@ bool IsThirdPartyKeyboardWorkaroundEnabled() {
   return base::FeatureList::IsEnabled(kEnableThirdPartyKeyboardWorkaround);
 }
 
-bool IsRecentTabsUIRebootEnabled() {
-  return base::FeatureList::IsEnabled(kUIRefreshPhase1);
-}
-
-bool IsCollectionsUIRebootEnabled() {
-  return base::FeatureList::IsEnabled(kCollectionsUIReboot);
+bool IsBookmarksUIRebootEnabled() {
+  return true;
 }
 
 }  // namespace experimental_flags

@@ -33,7 +33,9 @@ class SurfaceChooserHelperTest : public testing::Test {
 
   void TearDown() override {}
 
-  void ReplaceHelper(bool is_overlay_required, bool promote_aggressively) {
+  void ReplaceHelper(bool is_overlay_required,
+                     bool promote_aggressively,
+                     bool always_use_texture_owner = false) {
     // Advance the clock so that time 0 isn't recent.
     tick_clock_.Advance(TimeDelta::FromSeconds(10000));
 
@@ -45,7 +47,7 @@ class SurfaceChooserHelperTest : public testing::Test {
     aggregator_ = aggregator.get();
     helper_ = std::make_unique<SurfaceChooserHelper>(
         std::move(chooser), is_overlay_required, promote_aggressively,
-        std::move(aggregator), &tick_clock_);
+        always_use_texture_owner, std::move(aggregator), &tick_clock_);
   }
 
   // Convenience function.
@@ -75,6 +77,13 @@ TEST_F(SurfaceChooserHelperTest, SetIsFullscreen) {
   UpdateChooserState();
   ASSERT_FALSE(chooser_->current_state_.is_fullscreen);
   // We don't really care if it sets expecting_relayout, clears it, or not.
+}
+
+TEST_F(SurfaceChooserHelperTest, SetVideoRotation) {
+  // VideoRotation should be forwarded to the chooser.
+  helper_->SetVideoRotation(VIDEO_ROTATION_90);
+  UpdateChooserState();
+  ASSERT_EQ(chooser_->current_state_.video_rotation, VIDEO_ROTATION_90);
 }
 
 TEST_F(SurfaceChooserHelperTest, SetIsOverlayRequired) {
@@ -141,6 +150,15 @@ TEST_F(SurfaceChooserHelperTest, SetPromoteAggressively) {
   ReplaceHelper(false, true);
   UpdateChooserState();
   ASSERT_TRUE(chooser_->current_state_.promote_aggressively);
+}
+
+TEST_F(SurfaceChooserHelperTest, SetAlwaysUseTextureOwner) {
+  UpdateChooserState();
+  ASSERT_FALSE(chooser_->current_state_.always_use_texture_owner);
+
+  ReplaceHelper(false, true, true);
+  UpdateChooserState();
+  ASSERT_TRUE(chooser_->current_state_.always_use_texture_owner);
 }
 
 TEST_F(SurfaceChooserHelperTest, PromotionHintsForwardsHint) {
@@ -242,7 +260,7 @@ TEST_F(SurfaceChooserHelperTest, FrameInformationIsCorrectForL3) {
 
   ASSERT_EQ(SurfaceChooserHelper::FrameInformation::OVERLAY_L3,
             helper_->ComputeFrameInformation(true));
-  ASSERT_EQ(SurfaceChooserHelper::FrameInformation::SURFACETEXTURE_L3,
+  ASSERT_EQ(SurfaceChooserHelper::FrameInformation::NON_OVERLAY_L3,
             helper_->ComputeFrameInformation(false));
 }
 
@@ -251,8 +269,8 @@ TEST_F(SurfaceChooserHelperTest, FrameInformationIsCorrectForInsecure) {
   helper_->SetSecureSurfaceMode(
       SurfaceChooserHelper::SecureSurfaceMode::kInsecure);
 
-  // Not using an overlay should be SURFACETEXTURE_INSECURE
-  ASSERT_EQ(SurfaceChooserHelper::FrameInformation::SURFACETEXTURE_INSECURE,
+  // Not using an overlay should be NON_OVERLAY_INSECURE
+  ASSERT_EQ(SurfaceChooserHelper::FrameInformation::NON_OVERLAY_INSECURE,
             helper_->ComputeFrameInformation(false));
 
   // Fullscreen state should affect the result, so that we can tell the

@@ -28,10 +28,12 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include "third_party/blink/renderer/core/page/chrome_client_impl.h"
+#include "cc/trees/layer_tree_host.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/platform/web_input_event.h"
-#include "third_party/blink/public/web/web_frame_client.h"
 #include "third_party/blink/public/web/web_local_frame.h"
+#include "third_party/blink/public/web/web_local_frame_client.h"
 #include "third_party/blink/public/web/web_view.h"
 #include "third_party/blink/public/web/web_view_client.h"
 #include "third_party/blink/renderer/core/exported/web_view_impl.h"
@@ -40,12 +42,13 @@
 #include "third_party/blink/renderer/core/html/forms/color_chooser_client.h"
 #include "third_party/blink/renderer/core/html/forms/date_time_chooser.h"
 #include "third_party/blink/renderer/core/html/forms/date_time_chooser_client.h"
+#include "third_party/blink/renderer/core/html/forms/file_chooser.h"
 #include "third_party/blink/renderer/core/html/forms/html_select_element.h"
 #include "third_party/blink/renderer/core/loader/frame_load_request.h"
-#include "third_party/blink/renderer/core/page/chrome_client_impl.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/page/scoped_page_pauser.h"
 #include "third_party/blink/renderer/platform/language.h"
+#include "third_party/blink/renderer/platform/testing/stub_graphics_layer_client.h"
 
 namespace blink {
 
@@ -114,7 +117,7 @@ class FakeColorChooserClient
       : owner_element_(owner_element) {}
   ~FakeColorChooserClient() override = default;
 
-  virtual void Trace(blink::Visitor* visitor) {
+  void Trace(blink::Visitor* visitor) override {
     visitor->Trace(owner_element_);
     ColorChooserClient::Trace(visitor);
   }
@@ -144,7 +147,7 @@ class FakeDateTimeChooserClient
       : owner_element_(owner_element) {}
   ~FakeDateTimeChooserClient() override = default;
 
-  virtual void Trace(blink::Visitor* visitor) {
+  void Trace(blink::Visitor* visitor) override {
     visitor->Trace(owner_element_);
     DateTimeChooserClient::Trace(visitor);
   }
@@ -235,6 +238,66 @@ TEST_F(PagePopupSuppressionTest, SuppressDateTimeChooser) {
 
   settings->SetImmersiveModeEnabled(false);
   EXPECT_TRUE(CanOpenDateTimeChooser());
+}
+
+// A WebLocalFrameClient which makes FileChooser::OpenFileChooser() success.
+class FrameClientForFileChooser : public FrameTestHelpers::TestWebFrameClient {
+  bool RunFileChooser(const WebFileChooserParams& params,
+                      WebFileChooserCompletion* chooser_completion) override {
+    return true;
+  }
+};
+
+// A FileChooserClient which makes FileChooser::OpenFileChooser() success.
+class MockFileChooserClient
+    : public GarbageCollectedFinalized<MockFileChooserClient>,
+      public FileChooserClient {
+  USING_GARBAGE_COLLECTED_MIXIN(MockFileChooserClient);
+
+ public:
+  explicit MockFileChooserClient(LocalFrame* frame) : frame_(frame) {}
+  void Trace(Visitor* visitor) override {
+    visitor->Trace(frame_);
+    FileChooserClient::Trace(visitor);
+  }
+
+ private:
+  // FilesChosen() and WillOpenPopup() are never called in the test.
+  void FilesChosen(const FileChooserFileInfoList&) override {}
+  void WillOpenPopup() override {}
+
+  LocalFrame* FrameOrNull() const override { return frame_; }
+
+  Member<LocalFrame> frame_;
+};
+
+class FileChooserQueueTest : public testing::Test {
+ protected:
+  void SetUp() override {
+    web_view_ = helper_.Initialize(&frame_client_);
+    chrome_client_impl_ =
+        ToChromeClientImpl(&web_view_->GetPage()->GetChromeClient());
+  }
+
+  FrameTestHelpers::WebViewHelper helper_;
+  FrameClientForFileChooser frame_client_;
+  WebViewImpl* web_view_;
+  Persistent<ChromeClientImpl> chrome_client_impl_;
+};
+
+TEST_F(FileChooserQueueTest, DerefQueuedChooser) {
+  LocalFrame* frame = helper_.LocalMainFrame()->GetFrame();
+  auto* client = new MockFileChooserClient(frame);
+  WebFileChooserParams params;
+  scoped_refptr<FileChooser> chooser1 = FileChooser::Create(client, params);
+  scoped_refptr<FileChooser> chooser2 = FileChooser::Create(client, params);
+
+  chrome_client_impl_->OpenFileChooser(frame, chooser1);
+  chrome_client_impl_->OpenFileChooser(frame, chooser2);
+  EXPECT_EQ(2u, chrome_client_impl_->file_chooser_queue_.size());
+  chooser2.reset();
+  chrome_client_impl_->DidCompleteFileChooser(*chooser1);
+  EXPECT_EQ(1u, chrome_client_impl_->file_chooser_queue_.size());
 }
 
 }  // namespace blink

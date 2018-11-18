@@ -13,13 +13,14 @@
 #include "base/location.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
-#include "base/single_thread_task_runner.h"
+#include "base/sequenced_task_runner.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/test/scoped_task_environment.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/sync/driver/async_directory_type_controller_mock.h"
+#include "components/sync/driver/configure_context.h"
 #include "components/sync/driver/data_type_controller_mock.h"
 #include "components/sync/driver/fake_sync_client.h"
 #include "components/sync/driver/generic_change_processor_factory.h"
@@ -65,7 +66,7 @@ class SharedChangeProcessorMock : public SharedChangeProcessor {
       GenericChangeProcessorFactory*,
       UserShare*,
       std::unique_ptr<DataTypeErrorHandler>,
-      const base::WeakPtr<SyncMergeResult>&) {
+      const base::WeakPtr<SyncMergeResult>&) override {
     return std::move(connect_return_);
   }
   MOCK_METHOD0(Disconnect, bool());
@@ -84,7 +85,7 @@ class SharedChangeProcessorMock : public SharedChangeProcessor {
   }
 
  protected:
-  virtual ~SharedChangeProcessorMock() { DCHECK(!connect_return_); }
+  ~SharedChangeProcessorMock() override { DCHECK(!connect_return_); }
   MOCK_METHOD2(OnUnrecoverableError,
                void(const base::Location&, const std::string&));
 
@@ -99,7 +100,7 @@ class AsyncDirectoryTypeControllerFake : public AsyncDirectoryTypeController {
       SyncClient* sync_client,
       AsyncDirectoryTypeControllerMock* mock,
       SharedChangeProcessor* change_processor,
-      scoped_refptr<base::SingleThreadTaskRunner> backend_task_runner)
+      scoped_refptr<base::SequencedTaskRunner> backend_task_runner)
       : AsyncDirectoryTypeController(kType,
                                      base::Closure(),
                                      sync_client,
@@ -166,7 +167,7 @@ class AsyncDirectoryTypeControllerFake : public AsyncDirectoryTypeController {
   std::vector<PendingTask> pending_tasks_;
   AsyncDirectoryTypeControllerMock* mock_;
   scoped_refptr<SharedChangeProcessor> change_processor_;
-  scoped_refptr<base::SingleThreadTaskRunner> backend_task_runner_;
+  scoped_refptr<base::SequencedTaskRunner> backend_task_runner_;
 
   DISALLOW_COPY_AND_ASSIGN(AsyncDirectoryTypeControllerFake);
 };
@@ -197,7 +198,8 @@ class SyncAsyncDirectoryTypeControllerTest : public testing::Test,
                        base::WaitableEvent::InitialState::NOT_SIGNALED);
     backend_thread_.task_runner()->PostTask(
         FROM_HERE,
-        base::Bind(&SyncAsyncDirectoryTypeControllerTest::SignalDone, &done));
+        base::BindOnce(&SyncAsyncDirectoryTypeControllerTest::SignalDone,
+                       &done));
     done.TimedWait(TestTimeouts::action_timeout());
     if (!done.IsSignaled()) {
       ADD_FAILURE() << "Timed out waiting for DB thread to finish.";
@@ -213,20 +215,20 @@ class SyncAsyncDirectoryTypeControllerTest : public testing::Test,
 
  protected:
   void SetStartExpectations() {
-    EXPECT_CALL(*dtc_mock_.get(), StartModels()).WillOnce(Return(true));
+    EXPECT_CALL(*dtc_mock_, StartModels()).WillOnce(Return(true));
     EXPECT_CALL(model_load_callback_, Run(_, _));
   }
 
   void SetAssociateExpectations() {
     change_processor_->SetConnectReturn(syncable_service_.AsWeakPtr());
-    EXPECT_CALL(*change_processor_.get(), CryptoReadyIfNecessary())
+    EXPECT_CALL(*change_processor_, CryptoReadyIfNecessary())
         .WillOnce(Return(true));
-    EXPECT_CALL(*change_processor_.get(), SyncModelHasUserCreatedNodes(_))
+    EXPECT_CALL(*change_processor_, SyncModelHasUserCreatedNodes(_))
         .WillOnce(DoAll(SetArgPointee<0>(true), Return(true)));
-    EXPECT_CALL(*change_processor_.get(), GetAllSyncDataReturnError(_, _))
+    EXPECT_CALL(*change_processor_, GetAllSyncDataReturnError(_, _))
         .WillOnce(Return(SyncError()));
-    EXPECT_CALL(*change_processor_.get(), GetSyncCount()).WillOnce(Return(0));
-    EXPECT_CALL(*change_processor_.get(), RecordAssociationTime(_));
+    EXPECT_CALL(*change_processor_, GetSyncCount()).WillOnce(Return(0));
+    EXPECT_CALL(*change_processor_, RecordAssociationTime(_));
   }
 
   void SetActivateExpectations(DataTypeController::ConfigureResult result) {
@@ -234,19 +236,21 @@ class SyncAsyncDirectoryTypeControllerTest : public testing::Test,
   }
 
   void SetStopExpectations() {
-    EXPECT_CALL(*dtc_mock_.get(), StopModels());
-    EXPECT_CALL(*change_processor_.get(), Disconnect()).WillOnce(Return(true));
+    EXPECT_CALL(*dtc_mock_, StopModels());
+    EXPECT_CALL(*change_processor_, Disconnect()).WillOnce(Return(true));
   }
 
   void SetStartFailExpectations(DataTypeController::ConfigureResult result) {
-    EXPECT_CALL(*dtc_mock_.get(), StopModels()).Times(AtLeast(1));
-    EXPECT_CALL(*dtc_mock_.get(), RecordStartFailure(result));
+    EXPECT_CALL(*dtc_mock_, StopModels()).Times(AtLeast(1));
+    EXPECT_CALL(*dtc_mock_, RecordStartFailure(result));
     EXPECT_CALL(start_callback_, Run(result, _, _));
   }
 
   void Start() {
-    non_ui_dtc_->LoadModels(base::Bind(
-        &ModelLoadCallbackMock::Run, base::Unretained(&model_load_callback_)));
+    non_ui_dtc_->LoadModels(
+        ConfigureContext(),
+        base::Bind(&ModelLoadCallbackMock::Run,
+                   base::Unretained(&model_load_callback_)));
     non_ui_dtc_->StartAssociating(base::Bind(
         &StartCallbackMock::Run, base::Unretained(&start_callback_)));
   }
@@ -279,13 +283,13 @@ TEST_F(SyncAsyncDirectoryTypeControllerTest, StartOk) {
 TEST_F(SyncAsyncDirectoryTypeControllerTest, StartFirstRun) {
   SetStartExpectations();
   change_processor_->SetConnectReturn(syncable_service_.AsWeakPtr());
-  EXPECT_CALL(*change_processor_.get(), CryptoReadyIfNecessary())
+  EXPECT_CALL(*change_processor_, CryptoReadyIfNecessary())
       .WillOnce(Return(true));
-  EXPECT_CALL(*change_processor_.get(), SyncModelHasUserCreatedNodes(_))
+  EXPECT_CALL(*change_processor_, SyncModelHasUserCreatedNodes(_))
       .WillOnce(DoAll(SetArgPointee<0>(false), Return(true)));
-  EXPECT_CALL(*change_processor_.get(), GetAllSyncDataReturnError(_, _))
+  EXPECT_CALL(*change_processor_, GetAllSyncDataReturnError(_, _))
       .WillOnce(Return(SyncError()));
-  EXPECT_CALL(*change_processor_.get(), RecordAssociationTime(_));
+  EXPECT_CALL(*change_processor_, RecordAssociationTime(_));
   SetActivateExpectations(DataTypeController::OK_FIRST_RUN);
   EXPECT_EQ(DataTypeController::NOT_RUNNING, non_ui_dtc_->state());
   Start();
@@ -296,14 +300,15 @@ TEST_F(SyncAsyncDirectoryTypeControllerTest, StartFirstRun) {
 // Start the DTC and have StartModels() return false.  Then, stop the
 // DTC without finishing model startup.  It should stop cleanly.
 TEST_F(SyncAsyncDirectoryTypeControllerTest, AbortDuringStartModels) {
-  EXPECT_CALL(*dtc_mock_.get(), StartModels()).WillOnce(Return(false));
-  EXPECT_CALL(*dtc_mock_.get(), StopModels());
+  EXPECT_CALL(*dtc_mock_, StartModels()).WillOnce(Return(false));
+  EXPECT_CALL(*dtc_mock_, StopModels());
   EXPECT_EQ(DataTypeController::NOT_RUNNING, non_ui_dtc_->state());
-  non_ui_dtc_->LoadModels(base::Bind(&ModelLoadCallbackMock::Run,
+  non_ui_dtc_->LoadModels(ConfigureContext(),
+                          base::Bind(&ModelLoadCallbackMock::Run,
                                      base::Unretained(&model_load_callback_)));
   WaitForDTC();
   EXPECT_EQ(DataTypeController::MODEL_STARTING, non_ui_dtc_->state());
-  non_ui_dtc_->Stop();
+  non_ui_dtc_->Stop(STOP_SYNC);
   EXPECT_EQ(DataTypeController::NOT_RUNNING, non_ui_dtc_->state());
 }
 
@@ -313,13 +318,13 @@ TEST_F(SyncAsyncDirectoryTypeControllerTest, AbortDuringStartModels) {
 TEST_F(SyncAsyncDirectoryTypeControllerTest, StartAssociationFailed) {
   SetStartExpectations();
   change_processor_->SetConnectReturn(syncable_service_.AsWeakPtr());
-  EXPECT_CALL(*change_processor_.get(), CryptoReadyIfNecessary())
+  EXPECT_CALL(*change_processor_, CryptoReadyIfNecessary())
       .WillOnce(Return(true));
-  EXPECT_CALL(*change_processor_.get(), SyncModelHasUserCreatedNodes(_))
+  EXPECT_CALL(*change_processor_, SyncModelHasUserCreatedNodes(_))
       .WillOnce(DoAll(SetArgPointee<0>(true), Return(true)));
-  EXPECT_CALL(*change_processor_.get(), GetAllSyncDataReturnError(_, _))
+  EXPECT_CALL(*change_processor_, GetAllSyncDataReturnError(_, _))
       .WillOnce(Return(SyncError()));
-  EXPECT_CALL(*change_processor_.get(), RecordAssociationTime(_));
+  EXPECT_CALL(*change_processor_, RecordAssociationTime(_));
   SetStartFailExpectations(DataTypeController::ASSOCIATION_FAILED);
   // Set up association to fail with an association failed error.
   EXPECT_EQ(DataTypeController::NOT_RUNNING, non_ui_dtc_->state());
@@ -327,8 +332,8 @@ TEST_F(SyncAsyncDirectoryTypeControllerTest, StartAssociationFailed) {
       FROM_HERE, SyncError::DATATYPE_ERROR, "Sync Error", non_ui_dtc_->type()));
   Start();
   WaitForDTC();
-  EXPECT_EQ(DataTypeController::DISABLED, non_ui_dtc_->state());
-  non_ui_dtc_->Stop();
+  EXPECT_EQ(DataTypeController::FAILED, non_ui_dtc_->state());
+  non_ui_dtc_->Stop(STOP_SYNC);
   EXPECT_EQ(DataTypeController::NOT_RUNNING, non_ui_dtc_->state());
 }
 
@@ -338,9 +343,9 @@ TEST_F(SyncAsyncDirectoryTypeControllerTest,
   SetStartFailExpectations(DataTypeController::UNRECOVERABLE_ERROR);
   // Set up association to fail with an unrecoverable error.
   change_processor_->SetConnectReturn(syncable_service_.AsWeakPtr());
-  EXPECT_CALL(*change_processor_.get(), CryptoReadyIfNecessary())
+  EXPECT_CALL(*change_processor_, CryptoReadyIfNecessary())
       .WillRepeatedly(Return(true));
-  EXPECT_CALL(*change_processor_.get(), SyncModelHasUserCreatedNodes(_))
+  EXPECT_CALL(*change_processor_, SyncModelHasUserCreatedNodes(_))
       .WillRepeatedly(DoAll(SetArgPointee<0>(false), Return(false)));
   EXPECT_EQ(DataTypeController::NOT_RUNNING, non_ui_dtc_->state());
   Start();
@@ -353,7 +358,7 @@ TEST_F(SyncAsyncDirectoryTypeControllerTest, StartAssociationCryptoNotReady) {
   SetStartFailExpectations(DataTypeController::NEEDS_CRYPTO);
   // Set up association to fail with a NEEDS_CRYPTO error.
   change_processor_->SetConnectReturn(syncable_service_.AsWeakPtr());
-  EXPECT_CALL(*change_processor_.get(), CryptoReadyIfNecessary())
+  EXPECT_CALL(*change_processor_, CryptoReadyIfNecessary())
       .WillRepeatedly(Return(false));
   EXPECT_EQ(DataTypeController::NOT_RUNNING, non_ui_dtc_->state());
   Start();
@@ -373,22 +378,22 @@ TEST_F(SyncAsyncDirectoryTypeControllerTest, AbortDuringAssociation) {
 
   SetStartExpectations();
   change_processor_->SetConnectReturn(syncable_service_.AsWeakPtr());
-  EXPECT_CALL(*change_processor_.get(), CryptoReadyIfNecessary())
+  EXPECT_CALL(*change_processor_, CryptoReadyIfNecessary())
       .WillOnce(Return(true));
-  EXPECT_CALL(*change_processor_.get(), SyncModelHasUserCreatedNodes(_))
+  EXPECT_CALL(*change_processor_, SyncModelHasUserCreatedNodes(_))
       .WillOnce(DoAll(SignalEvent(&wait_for_db_thread_pause),
                       WaitOnEvent(&pause_db_thread), SetArgPointee<0>(true),
                       Return(true)));
-  EXPECT_CALL(*change_processor_.get(), GetAllSyncDataReturnError(_, _))
+  EXPECT_CALL(*change_processor_, GetAllSyncDataReturnError(_, _))
       .WillOnce(Return(SyncError(FROM_HERE, SyncError::DATATYPE_ERROR,
                                  "Disconnected.", kType)));
-  EXPECT_CALL(*dtc_mock_.get(), StopModels());
-  EXPECT_CALL(*change_processor_.get(), Disconnect())
+  EXPECT_CALL(*dtc_mock_, StopModels());
+  EXPECT_CALL(*change_processor_, Disconnect())
       .WillOnce(DoAll(SignalEvent(&pause_db_thread), Return(true)));
   EXPECT_EQ(DataTypeController::NOT_RUNNING, non_ui_dtc_->state());
   Start();
   wait_for_db_thread_pause.Wait();
-  non_ui_dtc_->Stop();
+  non_ui_dtc_->Stop(STOP_SYNC);
   WaitForDTC();
   EXPECT_EQ(DataTypeController::NOT_RUNNING, non_ui_dtc_->state());
 }
@@ -404,7 +409,7 @@ TEST_F(SyncAsyncDirectoryTypeControllerTest, StartAfterSyncShutdown) {
   SetStopExpectations();
   EXPECT_EQ(DataTypeController::NOT_RUNNING, non_ui_dtc_->state());
   Start();
-  non_ui_dtc_->Stop();
+  non_ui_dtc_->Stop(STOP_SYNC);
   EXPECT_EQ(DataTypeController::NOT_RUNNING, non_ui_dtc_->state());
   Mock::VerifyAndClearExpectations(change_processor_.get());
   Mock::VerifyAndClearExpectations(dtc_mock_.get());
@@ -422,7 +427,7 @@ TEST_F(SyncAsyncDirectoryTypeControllerTest, Stop) {
   Start();
   WaitForDTC();
   EXPECT_EQ(DataTypeController::RUNNING, non_ui_dtc_->state());
-  non_ui_dtc_->Stop();
+  non_ui_dtc_->Stop(STOP_SYNC);
   EXPECT_EQ(DataTypeController::NOT_RUNNING, non_ui_dtc_->state());
 }
 
@@ -441,7 +446,7 @@ TEST_F(SyncAsyncDirectoryTypeControllerTest, StopStart) {
   EXPECT_EQ(DataTypeController::RUNNING, non_ui_dtc_->state());
 
   non_ui_dtc_->BlockBackendTasks();
-  non_ui_dtc_->Stop();
+  non_ui_dtc_->Stop(STOP_SYNC);
   SetStartExpectations();
   SetAssociateExpectations();
   SetActivateExpectations(DataTypeController::OK);

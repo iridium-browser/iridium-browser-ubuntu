@@ -21,15 +21,20 @@ class XRView final : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  enum Eye { kEyeLeft = 0, kEyeRight = 1 };
+  enum XREye { kEyeLeft = 0, kEyeRight = 1 };
 
-  XRView(XRSession*, Eye);
+  XRView(XRSession*, XREye);
 
   const String& eye() const { return eye_string_; }
-  Eye EyeValue() const { return eye_; }
+  XREye EyeValue() const { return eye_; }
 
   XRSession* session() const;
   DOMFloat32Array* projectionMatrix() const { return projection_matrix_; }
+
+  void UpdateProjectionMatrixFromRawValues(
+      const WTF::Vector<float>& projection_matrix,
+      float near_depth,
+      float far_depth);
 
   void UpdateProjectionMatrixFromFoV(float up_rad,
                                      float down_rad,
@@ -52,10 +57,10 @@ class XRView final : public ScriptWrappable {
   const FloatPoint3D& offset() const { return offset_; }
   void UpdateOffset(float x, float y, float z);
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  private:
-  const Eye eye_;
+  const XREye eye_;
   String eye_string_;
   Member<XRSession> session_;
   Member<DOMFloat32Array> projection_matrix_;

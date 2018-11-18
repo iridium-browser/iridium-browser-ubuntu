@@ -4,6 +4,7 @@
 
 #include <stddef.h>
 
+#include "build/build_config.h"
 #include "cc/layers/content_layer_client.h"
 #include "cc/layers/picture_layer.h"
 #include "cc/paint/display_item_list.h"
@@ -60,13 +61,13 @@ class LayerTreeHostTilesPixelTest : public LayerTreePixelTest {
       case PARTIAL_GPU_LOW_BIT_DEPTH:
         settings->gpu_rasterization_forced = true;
         settings->use_partial_raster = true;
-        settings->preferred_tile_format = viz::RGBA_4444;
+        settings->use_rgba_4444 = true;
         settings->unpremultiply_and_dither_low_bit_depth_tiles = true;
         break;
       case FULL_GPU_LOW_BIT_DEPTH:
         settings->gpu_rasterization_forced = true;
         settings->use_partial_raster = false;
-        settings->preferred_tile_format = viz::RGBA_4444;
+        settings->use_rgba_4444 = true;
         settings->unpremultiply_and_dither_low_bit_depth_tiles = true;
         break;
     }
@@ -224,8 +225,16 @@ TEST_F(LayerTreeHostTilesTestPartialInvalidation,
       base::FilePath(FILE_PATH_LITERAL("blue_yellow_flipped.png")));
 }
 
+// Flaky on Linux TSAN. https://crbug.com/707711
+#if defined(OS_LINUX) && defined(THREAD_SANITIZER)
+#define MAYBE_PartialRaster_MultiThread_OneCopy \
+  DISABLED_PartialRaster_MultiThread_OneCopy
+#else
+#define MAYBE_PartialRaster_MultiThread_OneCopy \
+  PartialRaster_MultiThread_OneCopy
+#endif
 TEST_F(LayerTreeHostTilesTestPartialInvalidation,
-       PartialRaster_MultiThread_OneCopy) {
+       MAYBE_PartialRaster_MultiThread_OneCopy) {
   RunRasterPixelTest(
       true, PARTIAL_ONE_COPY, picture_layer_,
       base::FilePath(FILE_PATH_LITERAL("blue_yellow_partial_flipped.png")));

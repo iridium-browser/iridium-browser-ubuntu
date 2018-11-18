@@ -33,6 +33,7 @@
 #include <memory>
 #include "third_party/blink/renderer/core/css/style_engine.h"
 #include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/core/dom/document_init.h"
 #include "third_party/blink/renderer/core/dom/document_parser.h"
 #include "third_party/blink/renderer/core/html/custom/v0_custom_element_sync_microtask_queue.h"
 #include "third_party/blink/renderer/core/html/html_document.h"
@@ -172,7 +173,7 @@ void HTMLImportLoader::DidFinishLoading() {
 }
 
 void HTMLImportLoader::MoveToFirst(HTMLImportChild* import) {
-  size_t position = imports_.Find(import);
+  wtf_size_t position = imports_.Find(import);
   DCHECK_NE(kNotFound, position);
   imports_.EraseAt(position);
   imports_.insert(0, import);

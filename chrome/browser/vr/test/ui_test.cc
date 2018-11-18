@@ -6,13 +6,12 @@
 
 #include "chrome/browser/vr/elements/rect.h"
 #include "chrome/browser/vr/model/model.h"
+#include "chrome/browser/vr/render_info.h"
 #include "chrome/browser/vr/test/animation_utils.h"
 #include "chrome/browser/vr/test/constants.h"
-#include "chrome/browser/vr/test/fake_ui_element_renderer.h"
 #include "chrome/browser/vr/ui.h"
 #include "chrome/browser/vr/ui_scene.h"
 #include "chrome/browser/vr/ui_scene_creator.h"
-#include "third_party/blink/public/platform/web_gesture_event.h"
 #include "ui/gfx/geometry/vector3d_f.h"
 
 namespace vr {
@@ -81,11 +80,12 @@ void UiTest::CreateSceneInternal(
     const UiInitialState& state,
     std::unique_ptr<MockContentInputDelegate> content_input_delegate) {
   content_input_delegate_ = content_input_delegate.get();
-  ui_ = std::make_unique<Ui>(std::move(browser_.get()),
-                             std::move(content_input_delegate), nullptr,
-                             nullptr, nullptr, state);
-  scene_ = ui_->scene();
-  model_ = ui_->model_for_test();
+  ui_instance_ = std::make_unique<Ui>(std::move(browser_.get()),
+                                      std::move(content_input_delegate),
+                                      nullptr, nullptr, nullptr, state);
+  ui_ = ui_instance_.get();
+  scene_ = ui_instance_->scene();
+  model_ = ui_instance_->model_for_test();
   model_->controller.transform.Translate3d(kStartControllerPosition);
 
   OnBeginFrame();
@@ -97,17 +97,9 @@ void UiTest::CreateScene(const UiInitialState& state) {
   CreateSceneInternal(state, std::move(content_input_delegate));
 }
 
-void UiTest::CreateScene(InCct in_cct, InWebVr in_web_vr) {
+void UiTest::CreateScene(InWebVr in_web_vr) {
   UiInitialState state;
-  state.in_cct = in_cct;
   state.in_web_vr = in_web_vr;
-  CreateScene(state);
-}
-
-void UiTest::CreateSceneForAutoPresentation() {
-  UiInitialState state;
-  state.in_web_vr = true;
-  state.web_vr_autopresentation_expected = true;
   CreateScene(state);
 }
 
@@ -223,7 +215,10 @@ bool UiTest::RunForSeconds(float seconds) {
 bool UiTest::OnBeginFrame() const {
   bool changed = false;
   changed |= scene_->OnBeginFrame(current_time_, kStartHeadPose);
-  changed |= scene_->UpdateTextures();
+  if (scene_->HasDirtyTextures()) {
+    scene_->UpdateTextures();
+    changed = true;
+  }
   return changed;
 }
 
@@ -234,22 +229,39 @@ bool UiTest::OnDelayedFrame(base::TimeDelta delta) {
 
 void UiTest::GetBackgroundColor(SkColor* background_color) const {
   OnBeginFrame();
-  Rect* front =
-      static_cast<Rect*>(scene_->GetUiElementByName(kBackgroundFront));
-  ASSERT_NE(nullptr, front);
-  SkColor color = front->edge_color();
+  Rect* background =
+      static_cast<Rect*>(scene_->GetUiElementByName(kSolidBackground));
+  ASSERT_NE(nullptr, background);
+  EXPECT_EQ(background->center_color(), background->edge_color());
+  *background_color = background->edge_color();
+}
 
-  // While returning background color, ensure that all background panel elements
-  // share the same color.
-  for (auto name : {kBackgroundFront, kBackgroundLeft, kBackgroundBack,
-                    kBackgroundRight, kBackgroundTop, kBackgroundBottom}) {
-    const Rect* panel = static_cast<Rect*>(scene_->GetUiElementByName(name));
-    ASSERT_NE(nullptr, panel);
-    EXPECT_EQ(panel->center_color(), color);
-    EXPECT_EQ(panel->edge_color(), color);
-  }
+void UiTest::ClickElement(UiElement* element) {
+  // Synthesize a controller vector targeting the element.
+  gfx::Point3F target;
+  element->ComputeTargetWorldSpaceTransform().TransformPoint(&target);
+  gfx::Point3F origin;
+  gfx::Vector3dF direction(target - origin);
+  direction.GetNormalized(&direction);
 
-  *background_color = color;
+  RenderInfo render_info;
+  ReticleModel reticle_model;
+  InputEventList input_event_list;
+  ControllerModel controller_model;
+  controller_model.laser_direction = direction;
+  controller_model.laser_origin = origin;
+
+  controller_model.touchpad_button_state = ControllerModel::ButtonState::kDown;
+  ui_instance_->input_manager()->HandleInput(current_time_, render_info,
+                                             controller_model, &reticle_model,
+                                             &input_event_list);
+  OnBeginFrame();
+
+  controller_model.touchpad_button_state = ControllerModel::ButtonState::kUp;
+  ui_instance_->input_manager()->HandleInput(current_time_, render_info,
+                                             controller_model, &reticle_model,
+                                             &input_event_list);
+  OnBeginFrame();
 }
 
 }  // namespace vr

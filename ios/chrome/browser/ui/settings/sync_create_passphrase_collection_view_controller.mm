@@ -86,7 +86,6 @@ using namespace sync_encryption_passphrase;
 - (CollectionViewItem*)confirmPassphraseItem {
   if (!confirmPassphrase_) {
     confirmPassphrase_ = [[UITextField alloc] init];
-    [confirmPassphrase_ setFont:[MDCTypography body1Font]];
     [confirmPassphrase_ setSecureTextEntry:YES];
     [confirmPassphrase_ setBackgroundColor:[UIColor clearColor]];
     [confirmPassphrase_ setAutoresizingMask:UIViewAutoresizingFlexibleWidth];

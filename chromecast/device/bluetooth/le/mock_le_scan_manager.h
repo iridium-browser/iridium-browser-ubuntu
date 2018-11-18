@@ -16,15 +16,39 @@ namespace bluetooth {
 
 class MockLeScanManager : public LeScanManager {
  public:
+  class MockScanHandle : public ScanHandle {
+   public:
+    MockScanHandle() = default;
+    ~MockScanHandle() override = default;
+  };
+
   MockLeScanManager();
   ~MockLeScanManager();
 
-  MOCK_METHOD1(AddObserver, void(Observer* o));
-  MOCK_METHOD1(RemoveObserver, void(Observer* o));
-  void SetScanEnable(bool enable, SetScanEnableCallback cb) override {}
+  void AddObserver(Observer* o) override {
+    DCHECK(o && !observer_);
+    observer_ = o;
+  }
+  void RemoveObserver(Observer* o) override {
+    DCHECK(o && o == observer_);
+    observer_ = nullptr;
+  }
+
+  MOCK_METHOD0(RequestScan, std::unique_ptr<ScanHandle>());
+  void RequestScan(RequestScanCallback cb) override {
+    std::move(cb).Run(RequestScan());
+  }
+
+  MOCK_METHOD1(
+      GetScanResults,
+      std::vector<LeScanResult>(base::Optional<ScanFilter> scan_filter));
   void GetScanResults(GetScanResultsCallback cb,
-                      base::Optional<ScanFilter> scan_filter) override {}
+                      base::Optional<ScanFilter> scan_filter) override {
+    std::move(cb).Run(GetScanResults(std::move(scan_filter)));
+  }
   MOCK_METHOD0(ClearScanResults, void());
+
+  Observer* observer_ = nullptr;
 };
 
 }  // namespace bluetooth

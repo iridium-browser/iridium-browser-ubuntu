@@ -8,9 +8,11 @@ import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.content.res.ColorStateList;
 import android.os.Bundle;
 import android.support.test.filters.SmallTest;
 import android.view.View;
+import android.view.ViewGroup;
 
 import org.junit.Assert;
 import org.junit.Before;
@@ -37,11 +39,11 @@ import org.chromium.ui.base.ActivityWindowAndroid;
 import org.chromium.ui.base.AndroidPermissionDelegate;
 import org.chromium.ui.base.PermissionCallback;
 import org.chromium.ui.base.WindowAndroid;
-import org.chromium.ui.base.WindowAndroid.IntentCallback;
 
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
 
 /**
  * Tests for {@link LocationBarVoiceRecognitionHandler}.
@@ -78,8 +80,12 @@ public class LocationBarVoiceRecognitionHandlerTest {
         private int mStartSource = -1;
         @VoiceInteractionSource
         private int mFinishSource = -1;
-        private Boolean mResult = null;
-        private Float mVoiceConfidenceValue = null;
+        @VoiceInteractionSource
+        private int mDismissedSource = -1;
+        @VoiceInteractionSource
+        private int mFailureSource = -1;
+        private Boolean mResult;
+        private Float mVoiceConfidenceValue;
 
         public TestLocationBarVoiceRecognitionHandler(Delegate delegate) {
             super(delegate);
@@ -93,6 +99,16 @@ public class LocationBarVoiceRecognitionHandlerTest {
         @Override
         protected void recordVoiceSearchFinishEventSource(@VoiceInteractionSource int source) {
             mFinishSource = source;
+        }
+
+        @Override
+        protected void recordVoiceSearchFailureEventSource(@VoiceInteractionSource int source) {
+            mFailureSource = source;
+        }
+
+        @Override
+        protected void recordVoiceSearchDismissedEventSource(@VoiceInteractionSource int source) {
+            mDismissedSource = source;
         }
 
         @Override
@@ -118,6 +134,16 @@ public class LocationBarVoiceRecognitionHandlerTest {
         @VoiceInteractionSource
         public int getVoiceSearchFinishEventSource() {
             return mFinishSource;
+        }
+
+        @VoiceInteractionSource
+        public int getVoiceSearchDismissedEventSource() {
+            return mDismissedSource;
+        }
+
+        @VoiceInteractionSource
+        public int getVoiceSearchFailureEventSource() {
+            return mFailureSource;
         }
 
         public Boolean getVoiceSearchResult() {
@@ -170,6 +196,11 @@ public class LocationBarVoiceRecognitionHandlerTest {
         }
 
         @Override
+        public UrlBarData getUrlBarData() {
+            return UrlBarData.EMPTY;
+        }
+
+        @Override
         public String getTitle() {
             return null;
         }
@@ -190,12 +221,7 @@ public class LocationBarVoiceRecognitionHandlerTest {
         }
 
         @Override
-        public boolean isShowingUntrustedOfflinePage() {
-            return false;
-        }
-
-        @Override
-        public boolean shouldShowGoogleG(String urlBarText) {
+        public boolean isPreview() {
             return false;
         }
 
@@ -215,18 +241,13 @@ public class LocationBarVoiceRecognitionHandlerTest {
         }
 
         @Override
+        public ColorStateList getSecurityIconColorStateList() {
+            return null;
+        }
+
+        @Override
         public boolean shouldDisplaySearchTerms() {
             return false;
-        }
-
-        @Override
-        public String getDisplayText() {
-            return null;
-        }
-
-        @Override
-        public String getEditingText() {
-            return null;
         }
     }
 
@@ -235,6 +256,19 @@ public class LocationBarVoiceRecognitionHandlerTest {
      */
     private class TestDelegate implements LocationBarVoiceRecognitionHandler.Delegate {
         private boolean mUpdatedMicButtonState;
+        private AutocompleteCoordinator mCoordinator;
+
+        TestDelegate() {
+            ViewGroup parent =
+                    (ViewGroup) mActivityTestRule.getActivity().findViewById(android.R.id.content);
+            Assert.assertNotNull(parent);
+            mCoordinator = new AutocompleteCoordinator(parent, null, null, null) {
+                @Override
+                public VoiceResult onVoiceResults(Bundle data) {
+                    return mAutocomplete.onVoiceResults(data);
+                }
+            };
+        }
 
         @Override
         public void loadUrlFromVoice(String url) {}
@@ -253,8 +287,8 @@ public class LocationBarVoiceRecognitionHandlerTest {
         }
 
         @Override
-        public AutocompleteController getAutocompleteController() {
-            return mAutocomplete;
+        public AutocompleteCoordinator getAutocompleteCoordinator() {
+            return mCoordinator;
         }
 
         @Override
@@ -375,16 +409,18 @@ public class LocationBarVoiceRecognitionHandlerTest {
         }
 
         @Override
-        public void onRequestPermissionsResult(
-                int requestCode, String[] permissions, int[] grantResults) {}
+        public boolean handlePermissionResult(
+                int requestCode, String[] permissions, int[] grantResults) {
+            return false;
+        }
     }
 
     @Before
-    public void setUp() throws InterruptedException {
+    public void setUp() throws InterruptedException, ExecutionException {
         mActivityTestRule.startMainActivityOnBlankPage();
 
         mDataProvider = new TestDataProvider();
-        mDelegate = new TestDelegate();
+        mDelegate = ThreadUtils.runOnUiThreadBlocking(() -> new TestDelegate());
         mHandler = new TestLocationBarVoiceRecognitionHandler(mDelegate);
         mPermissionDelegate = new TestAndroidPermissionDelegate();
         mAutocomplete = new LocalTestAutocompleteController(null /* view */,
@@ -476,6 +512,8 @@ public class LocationBarVoiceRecognitionHandlerTest {
         Assert.assertEquals(
                 VoiceInteractionSource.OMNIBOX, mHandler.getVoiceSearchStartEventSource());
         Assert.assertTrue(mDelegate.updatedMicButtonState());
+        Assert.assertEquals(
+                VoiceInteractionSource.OMNIBOX, mHandler.getVoiceSearchFailureEventSource());
     }
 
     @Test
@@ -497,10 +535,23 @@ public class LocationBarVoiceRecognitionHandlerTest {
     @Test
     @SmallTest
     public void testCallback_noVoiceSearchResultWithBadResultCode() {
+        mWindowAndroid.setResultCode(Activity.RESULT_FIRST_USER);
+        startVoiceRecognition(VoiceInteractionSource.NTP);
+        Assert.assertEquals(VoiceInteractionSource.NTP, mHandler.getVoiceSearchStartEventSource());
+        Assert.assertEquals(null, mHandler.getVoiceSearchResult());
+        Assert.assertEquals(
+                VoiceInteractionSource.NTP, mHandler.getVoiceSearchFailureEventSource());
+    }
+
+    @Test
+    @SmallTest
+    public void testCallback_noVoiceSearchResultCanceled() {
         mWindowAndroid.setResultCode(Activity.RESULT_CANCELED);
         startVoiceRecognition(VoiceInteractionSource.NTP);
         Assert.assertEquals(VoiceInteractionSource.NTP, mHandler.getVoiceSearchStartEventSource());
         Assert.assertEquals(null, mHandler.getVoiceSearchResult());
+        Assert.assertEquals(
+                VoiceInteractionSource.NTP, mHandler.getVoiceSearchDismissedEventSource());
     }
 
     @Test

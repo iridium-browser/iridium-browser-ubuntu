@@ -14,14 +14,12 @@
 #include "SkSurface.h"
 #include "Test.h"
 
-#if SK_SUPPORT_GPU
 #include "GrContext.h"
 #include "GrContextFactory.h"
 #include "GrContextPriv.h"
 #include "GrProxyProvider.h"
 #include "ProxyUtils.h"
 #include "SkGr.h"
-#endif
 
 
 static const int DEV_W = 100, DEV_H = 100;
@@ -170,7 +168,7 @@ static bool check_read_pixel(SkPMColor a, SkPMColor b, bool didPremulConversion)
 // overwritten in the area outside the readPixels.
 static bool check_read(skiatest::Reporter* reporter, const SkBitmap& bitmap, int x, int y,
                        bool checkSurfacePixels, bool checkBitmapPixels,
-                       SkAlphaType surfaceAlphaType) {
+                       SkImageInfo surfaceInfo) {
     SkAlphaType bmpAT = bitmap.alphaType();
     SkColorType bmpCT = bitmap.colorType();
     SkASSERT(!bitmap.isNull());
@@ -193,7 +191,7 @@ static bool check_read(skiatest::Reporter* reporter, const SkBitmap& bitmap, int
 
                 if (clippedSrcRect.contains(devx, devy)) {
                     if (checkSurfacePixels) {
-                        uint8_t surfaceAlpha = (surfaceAlphaType == kOpaque_SkAlphaType)
+                        uint8_t surfaceAlpha = (surfaceInfo.alphaType() == kOpaque_SkAlphaType)
                                                        ? 0xFF
                                                        : SkGetPackedA32(get_src_color(devx, devy));
                         if (surfaceAlpha != *alpha) {
@@ -225,7 +223,10 @@ static bool check_read(skiatest::Reporter* reporter, const SkBitmap& bitmap, int
             if (clippedSrcRect.contains(devx, devy)) {
                 if (checkSurfacePixels) {
                     SkPMColor surfacePMColor = get_src_color(devx, devy);
-                    if (kOpaque_SkAlphaType == surfaceAlphaType || kOpaque_SkAlphaType == bmpAT) {
+                    if (SkColorTypeIsAlphaOnly(surfaceInfo.colorType())) {
+                        surfacePMColor &= 0xFF000000;
+                    }
+                    if (kOpaque_SkAlphaType == surfaceInfo.alphaType() || kOpaque_SkAlphaType == bmpAT) {
                         surfacePMColor |= 0xFF000000;
                     }
                     bool didPremul;
@@ -393,10 +394,6 @@ ReadSuccessExpectation read_should_succeed(const SkIRect& srcRect, const SkImage
     if (SkColorTypeIsAlphaOnly(srcInfo.colorType())) {
         return ReadSuccessExpectation::kMaybe;
     }
-    if (!SkColorTypeIsAlwaysOpaque(srcInfo.colorType()) &&
-        SkColorTypeIsAlwaysOpaque(dstInfo.colorType())) {
-        return ReadSuccessExpectation::kNo;
-    }
     return ReadSuccessExpectation::kYes;
 }
 
@@ -436,7 +433,7 @@ static void test_readpixels(skiatest::Reporter* reporter, const sk_sp<SkSurface>
 
                 if (success || startsWithPixels) {
                     check_read(reporter, bmp, srcRect.fLeft, srcRect.fTop, success,
-                               startsWithPixels, surfaceInfo.alphaType());
+                               startsWithPixels, surfaceInfo);
                 } else {
                     // if we had no pixels beforehand and the readPixels
                     // failed then our bitmap should still not have pixels
@@ -453,7 +450,6 @@ DEF_TEST(ReadPixels, reporter) {
     // SW readback fails a premul check when reading back to an unaligned rowbytes.
     test_readpixels(reporter, surface, info, kLastAligned_BitmapInit);
 }
-#if SK_SUPPORT_GPU
 DEF_GPUTEST_FOR_RENDERING_CONTEXTS(ReadPixels_Gpu, reporter, ctxInfo) {
     if (ctxInfo.type() == sk_gpu_test::GrContextFactory::kANGLE_D3D9_ES2_ContextType ||
         ctxInfo.type() == sk_gpu_test::GrContextFactory::kANGLE_GL_ES2_ContextType ||
@@ -479,9 +475,7 @@ DEF_GPUTEST_FOR_RENDERING_CONTEXTS(ReadPixels_Gpu, reporter, ctxInfo) {
         }
     }
 }
-#endif
 
-#if SK_SUPPORT_GPU
 static void test_readpixels_texture(skiatest::Reporter* reporter,
                                     sk_sp<GrSurfaceContext> sContext,
                                     const SkImageInfo& surfaceInfo) {
@@ -524,7 +518,7 @@ static void test_readpixels_texture(skiatest::Reporter* reporter,
                             bmp.info().colorType(), bmp.info().alphaType());
                     if (success) {
                         check_read(reporter, bmp, srcRect.fLeft, srcRect.fTop, success, true,
-                                   surfaceInfo.alphaType());
+                                   surfaceInfo);
                     }
                 }
             }
@@ -556,7 +550,6 @@ DEF_GPUTEST_FOR_RENDERING_CONTEXTS(ReadPixels_Texture, reporter, ctxInfo) {
         }
     }
 }
-#endif
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -607,7 +600,7 @@ static const void* five_reference_pixels(SkColorType colorType) {
         case kRGBA_F16_SkColorType:
             return f16;
         default:
-            return nullptr; // remove me when kIndex_8 is removed from the enum
+            return nullptr;
     }
 
     SkASSERT(false);
@@ -616,7 +609,7 @@ static const void* five_reference_pixels(SkColorType colorType) {
 
 static void test_conversion(skiatest::Reporter* r, const SkImageInfo& dstInfo,
                             const SkImageInfo& srcInfo) {
-    if (!SkImageInfoIsValidRenderingCS(srcInfo)) {
+    if (!SkImageInfoIsValid(srcInfo)) {
         return;
     }
 
@@ -633,16 +626,25 @@ static void test_conversion(skiatest::Reporter* r, const SkImageInfo& dstInfo,
 
     if (success) {
         if (kGray_8_SkColorType == srcInfo.colorType() &&
-            kGray_8_SkColorType != dstInfo.colorType())
-        {
-            // This conversion is legal, but we won't get the "reference" pixels since we cannot
-            // represent colors in kGray8.
+            kGray_8_SkColorType != dstInfo.colorType()) {
+            // TODO: test (r,g,b) == (gray,gray,gray)?
+            return;
+        }
+
+        if (kGray_8_SkColorType == dstInfo.colorType() &&
+            kGray_8_SkColorType != srcInfo.colorType()) {
+            // TODO: test gray = luminance?
+            return;
+        }
+
+        if (kAlpha_8_SkColorType == srcInfo.colorType() &&
+            kAlpha_8_SkColorType != dstInfo.colorType()) {
+            // TODO: test output = black with this alpha?
             return;
         }
 
         REPORTER_ASSERT(r, 0 == memcmp(dstPixels, five_reference_pixels(dstInfo.colorType()),
                                        kNumPixels * SkColorTypeBytesPerPixel(dstInfo.colorType())));
-
     }
 }
 
@@ -676,14 +678,6 @@ DEF_TEST(ReadPixels_ValidConversion, reporter) {
                 for (SkColorType srcCT : kColorTypes) {
                     for (SkAlphaType srcAT: kAlphaTypes) {
                         for (sk_sp<SkColorSpace> srcCS : kColorSpaces) {
-                            if (kRGBA_F16_SkColorType == dstCT && dstCS) {
-                                dstCS = dstCS->makeLinearGamma();
-                            }
-
-                            if (kRGBA_F16_SkColorType == srcCT && srcCS) {
-                                srcCS = srcCS->makeLinearGamma();
-                            }
-
                             test_conversion(reporter,
                                             SkImageInfo::Make(kNumPixels, 1, dstCT, dstAT, dstCS),
                                             SkImageInfo::Make(kNumPixels, 1, srcCT, srcAT, srcCS));

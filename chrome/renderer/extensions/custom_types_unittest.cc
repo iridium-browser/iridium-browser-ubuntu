@@ -11,6 +11,7 @@
 #include "extensions/common/switches.h"
 #include "extensions/renderer/bindings/api_binding_test_util.h"
 #include "extensions/renderer/bindings/api_binding_util.h"
+#include "extensions/renderer/bindings/api_invocation_errors.h"
 #include "extensions/renderer/native_extension_bindings_system.h"
 #include "extensions/renderer/native_extension_bindings_system_test_base.h"
 #include "extensions/renderer/script_context.h"
@@ -21,7 +22,7 @@ class CustomTypesTest : public NativeExtensionBindingsSystemUnittest {
  public:
   CustomTypesTest()
       : extension_id_(crx_file::id_util::GenerateId("id")),
-        whitelisted_extension_id_(extension_id_) {}
+        allowlisted_extension_id_(extension_id_) {}
 
   ~CustomTypesTest() override = default;
 
@@ -36,10 +37,10 @@ class CustomTypesTest : public NativeExtensionBindingsSystemUnittest {
   void RunContextInvalidationTest(const char* permission,
                                   const char* api_script,
                                   const char* use_api_script) {
-    scoped_refptr<Extension> extension = ExtensionBuilder("foo")
-                                             .AddPermission(permission)
-                                             .SetID(extension_id_)
-                                             .Build();
+    scoped_refptr<const Extension> extension = ExtensionBuilder("foo")
+                                                   .AddPermission(permission)
+                                                   .SetID(extension_id_)
+                                                   .Build();
     RegisterExtension(extension);
 
     v8::HandleScope handle_scope(isolate());
@@ -69,7 +70,7 @@ class CustomTypesTest : public NativeExtensionBindingsSystemUnittest {
 
  private:
   std::string extension_id_;
-  SimpleFeature::ScopedThreadUnsafeWhitelistForTest whitelisted_extension_id_;
+  SimpleFeature::ScopedThreadUnsafeAllowlistForTest allowlisted_extension_id_;
 
   DISALLOW_COPY_AND_ASSIGN(CustomTypesTest);
 };
@@ -105,6 +106,72 @@ TEST_F(CustomTypesTest, EasyUnlockProximityRequiredUseAfterInvalidation) {
       R"((function(setting) {
            setting.onChange.addListener(function() {});
          });)");
+}
+
+TEST_F(CustomTypesTest, ContentSettingsInvalidInvocationError) {
+  scoped_refptr<const Extension> extension =
+      ExtensionBuilder("foo").AddPermission("contentSettings").Build();
+  RegisterExtension(extension);
+
+  v8::HandleScope handle_scope(isolate());
+  v8::Local<v8::Context> context = MainContext();
+
+  ScriptContext* script_context = CreateScriptContext(
+      context, extension.get(), Feature::BLESSED_EXTENSION_CONTEXT);
+  script_context->set_url(extension->url());
+
+  bindings_system()->UpdateBindingsForContext(script_context);
+
+  v8::Local<v8::Value> settings =
+      V8ValueFromScriptSource(context, "chrome.contentSettings");
+  ASSERT_TRUE(settings->IsObject());
+
+  // Invoke ContentSetting.set() without a required argument to trigger an
+  // error.
+  constexpr char kRunSetContentSetting[] =
+      "(function(settings) { settings.javascript.set(); })";
+  v8::Local<v8::Function> run_set_content_setting =
+      FunctionFromString(context, kRunSetContentSetting);
+  v8::Local<v8::Value> args[] = {settings};
+  RunFunctionAndExpectError(
+      run_set_content_setting, context, base::size(args), args,
+      "Uncaught TypeError: " + api_errors::InvocationError(
+                                   "contentSettings.ContentSetting.set",
+                                   "object details, optional function callback",
+                                   "No matching signature."));
+}
+
+TEST_F(CustomTypesTest, ChromeSettingsInvalidInvocationError) {
+  scoped_refptr<const Extension> extension =
+      ExtensionBuilder("foo").AddPermission("privacy").Build();
+  RegisterExtension(extension);
+
+  v8::HandleScope handle_scope(isolate());
+  v8::Local<v8::Context> context = MainContext();
+
+  ScriptContext* script_context = CreateScriptContext(
+      context, extension.get(), Feature::BLESSED_EXTENSION_CONTEXT);
+  script_context->set_url(extension->url());
+
+  bindings_system()->UpdateBindingsForContext(script_context);
+
+  v8::Local<v8::Value> settings =
+      V8ValueFromScriptSource(context, "chrome.privacy");
+  ASSERT_TRUE(settings->IsObject());
+
+  // Invoke ChromeSetting.set() without a required argument to trigger an
+  // error.
+  constexpr char kRunSetChromeSetting[] =
+      "(function(settings) { settings.websites.doNotTrackEnabled.set(); })";
+  v8::Local<v8::Function> run_set_chrome_setting =
+      FunctionFromString(context, kRunSetChromeSetting);
+  v8::Local<v8::Value> args[] = {settings};
+  RunFunctionAndExpectError(
+      run_set_chrome_setting, context, base::size(args), args,
+      "Uncaught TypeError: " + api_errors::InvocationError(
+                                   "types.ChromeSetting.set",
+                                   "object details, optional function callback",
+                                   "No matching signature."));
 }
 
 }  // namespace extensions

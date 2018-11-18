@@ -26,13 +26,13 @@
 #include "third_party/blink/renderer/modules/encryptedmedia/media_keys.h"
 
 #include <memory>
+
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/public/platform/web_content_decryption_module.h"
 #include "third_party/blink/public/platform/web_encrypted_media_key_information.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/html/media/html_media_element.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer.h"
@@ -43,6 +43,7 @@
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/bindings/v8_throw_exception.h"
 #include "third_party/blink/renderer/platform/instance_counters.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/timer.h"
 
 #define MEDIA_KEYS_LOG_LEVEL 3
@@ -114,8 +115,13 @@ class MediaKeys::PendingAction final
 class SetCertificateResultPromise
     : public ContentDecryptionModuleResultPromise {
  public:
-  SetCertificateResultPromise(ScriptState* script_state, MediaKeys* media_keys)
-      : ContentDecryptionModuleResultPromise(script_state),
+  SetCertificateResultPromise(ScriptState* script_state,
+                              MediaKeys* media_keys,
+                              const char* interface_name,
+                              const char* property_name)
+      : ContentDecryptionModuleResultPromise(script_state,
+                                             interface_name,
+                                             property_name),
         media_keys_(media_keys) {}
 
   ~SetCertificateResultPromise() override = default;
@@ -164,8 +170,12 @@ class GetStatusForPolicyResultPromise
     : public ContentDecryptionModuleResultPromise {
  public:
   GetStatusForPolicyResultPromise(ScriptState* script_state,
-                                  MediaKeys* media_keys)
-      : ContentDecryptionModuleResultPromise(script_state),
+                                  MediaKeys* media_keys,
+                                  const char* interface_name,
+                                  const char* property_name)
+      : ContentDecryptionModuleResultPromise(script_state,
+                                             interface_name,
+                                             property_name),
         media_keys_(media_keys) {}
 
   ~GetStatusForPolicyResultPromise() override = default;
@@ -224,6 +234,21 @@ MediaKeySession* MediaKeys::createSession(ScriptState* script_state,
   DVLOG(MEDIA_KEYS_LOG_LEVEL)
       << __func__ << "(" << this << ") " << session_type_string;
 
+  // [RuntimeEnabled] does not work with enum values. So we have to check it
+  // here. See https://crbug.com/871867 for details.
+  if (!RuntimeEnabledFeatures::
+          EncryptedMediaPersistentUsageRecordSessionEnabled() &&
+      session_type_string == "persistent-usage-record") {
+    DVLOG(MEDIA_KEYS_LOG_LEVEL)
+        << __func__ << ": 'persistent-usage-record' support not enabled.";
+    // The message here is carefully chosen to be exactly the same as what the
+    // generated bindings would generate for invalid enum values.
+    exception_state.ThrowTypeError(
+        "The provided value 'persistent-usage-record' is not a valid enum "
+        "value of type MediaKeySessionType.");
+    return nullptr;
+  }
+
   // From http://w3c.github.io/encrypted-media/#createSession
 
   // When this method is invoked, the user agent must run the following steps:
@@ -238,7 +263,7 @@ MediaKeySession* MediaKeys::createSession(ScriptState* script_state,
   WebEncryptedMediaSessionType session_type =
       EncryptedMediaUtils::ConvertToSessionType(session_type_string);
   if (!SessionTypeSupported(session_type)) {
-    exception_state.ThrowDOMException(kNotSupportedError,
+    exception_state.ThrowDOMException(DOMExceptionCode::kNotSupportedError,
                                       "Unsupported session type.");
     return nullptr;
   }
@@ -278,8 +303,8 @@ ScriptPromise MediaKeys::setServerCertificate(
       server_certificate.Data(), server_certificate.ByteLength());
 
   // 4. Let promise be a new promise.
-  SetCertificateResultPromise* result =
-      new SetCertificateResultPromise(script_state, this);
+  SetCertificateResultPromise* result = new SetCertificateResultPromise(
+      script_state, this, "MediaKeys", "setServerCertificate");
   ScriptPromise promise = result->Promise();
 
   // 5. Run the following steps asynchronously. See SetServerCertificateTask().
@@ -319,8 +344,8 @@ ScriptPromise MediaKeys::getStatusForPolicy(
   String min_hdcp_version = media_keys_policy.minHdcpVersion();
 
   // Let promise be a new promise.
-  GetStatusForPolicyResultPromise* result =
-      new GetStatusForPolicyResultPromise(script_state, this);
+  GetStatusForPolicyResultPromise* result = new GetStatusForPolicyResultPromise(
+      script_state, this, "MediaKeys", "getStatusForPolicy");
   ScriptPromise promise = result->Promise();
 
   // Run the following steps asynchronously. See GetStatusForPolicyTask().

@@ -39,7 +39,6 @@ class PaymentRequestDialogView;
 class CvcUnmaskViewController
     : public PaymentRequestSheetController,
       public autofill::RiskDataLoader,
-      public autofill::payments::PaymentsClientUnmaskDelegate,
       public autofill::payments::FullCardRequest::UIDelegate,
       public views::ComboboxListener,
       public views::TextfieldController {
@@ -54,13 +53,9 @@ class CvcUnmaskViewController
       content::WebContents* web_contents);
   ~CvcUnmaskViewController() override;
 
-  // autofill::payments::PaymentsClientUnmaskDelegate:
-  void OnDidGetRealPan(autofill::AutofillClient::PaymentsRpcResult result,
-                       const std::string& real_pan) override;
-
   // autofill::RiskDataLoader:
   void LoadRiskData(
-      const base::Callback<void(const std::string&)>& callback) override;
+      base::OnceCallback<void(const std::string&)> callback) override;
 
   // autofill::payments::FullCardRequest::UIDelegate:
   void ShowUnmaskPrompt(

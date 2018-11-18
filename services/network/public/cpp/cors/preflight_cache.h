@@ -23,6 +23,9 @@ namespace cors {
 
 // A class to implement CORS-preflight cache that is defined in the fetch spec,
 // https://fetch.spec.whatwg.org/#concept-cache.
+// TODO(toyoshim): Consider to replace the oldest entry with the new one when
+// we have too much cached entries. Also, we want to clear all cached entries
+// when users' network configuration is changed.
 class COMPONENT_EXPORT(NETWORK_CPP) PreflightCache final {
  public:
   PreflightCache();
@@ -41,7 +44,8 @@ class COMPONENT_EXPORT(NETWORK_CPP) PreflightCache final {
       const GURL& url,
       mojom::FetchCredentialsMode credentials_mode,
       const std::string& method,
-      const net::HttpRequestHeaders& headers);
+      const net::HttpRequestHeaders& headers,
+      bool is_revalidating);
 
   // Counts cached origins for testing.
   size_t CountOriginsForTesting() const;

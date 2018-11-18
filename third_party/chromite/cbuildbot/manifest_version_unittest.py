@@ -16,7 +16,6 @@ from chromite.cbuildbot import manifest_version
 from chromite.cbuildbot import repository
 from chromite.lib import builder_status_lib
 from chromite.lib import constants
-from chromite.lib import cros_build_lib_unittest
 from chromite.lib import cros_test_lib
 from chromite.lib import git
 from chromite.lib import osutils
@@ -154,6 +153,86 @@ class VersionInfoTest(cros_test_lib.MockTempDirTestCase):
     new_info = manifest_version.VersionInfo(version_file=version_file)
     self.assertEqual(new_info.VersionString(), '2.0.0')
     self.assertEqual(new_info.chrome_branch, '30')
+
+
+class BuildSpecFunctionsTest(cros_test_lib.MockTempDirTestCase):
+  """Tests for methods related to publishing buildspecs."""
+
+  def setUp(self):
+    self.version_info = manifest_version.VersionInfo('1.2.3', '11')
+
+    self.manifest_versions_int = os.path.join(
+        self.tempdir, 'manifest_versions_int')
+    self.manifest_versions_ext = os.path.join(
+        self.tempdir, 'manifest_versions_ext')
+
+  def testOfficialBuildSpecPath(self):
+    """Test OfficialBuildSpecPath."""
+    result = manifest_version.OfficialBuildSpecPath(self.version_info)
+    self.assertEqual(result, 'buildspecs/11/1.2.3.xml')
+
+  def testCandidateBuildSpecPathEmptyCategory(self):
+    """Test CandidateBuildSpecPath, with no existing candidates."""
+    result = manifest_version.CandidateBuildSpecPath(
+        self.version_info, 'new_cat', self.manifest_versions_int)
+    self.assertEqual(result, 'new_cat/buildspecs/11/1.2.3-rc1.xml')
+
+  def testCandidateBuildSpecPathExistingCandidates(self):
+    """Test CandidateBuildSpecPath, with existing candidates."""
+    # Create some preexisting build specs.
+    osutils.Touch(
+        os.path.join(self.manifest_versions_int,
+                     'cat/buildspecs/11/1.2.3-rc1.xml'),
+        makedirs=True)
+    osutils.Touch(
+        os.path.join(self.manifest_versions_int,
+                     'cat/buildspecs/11/1.2.3-rc2.xml'),
+        makedirs=True)
+
+    result = manifest_version.CandidateBuildSpecPath(
+        self.version_info, 'cat', self.manifest_versions_int)
+    self.assertEqual(result, 'cat/buildspecs/11/1.2.3-rc3.xml')
+
+  def testPopulateAndPublishBuildSpec(self):
+    """Test PopulateAndPublishBuildSpec."""
+    commitMock = self.PatchObject(manifest_version, '_CommitAndPush')
+
+    filter_out = os.path.join(self.tempdir, 'filter_out')
+    osutils.WriteFile(filter_out, 'filtered mani')
+    self.PatchObject(manifest_version, 'FilterManifest',
+                     return_value=filter_out)
+
+    manifest_version.PopulateAndPublishBuildSpec(
+        'spec',
+        'int mani',
+        self.manifest_versions_int,
+        self.manifest_versions_ext,
+        dryrun=True)
+
+    self.assertEqual(commitMock.call_args_list, [
+        mock.call(self.manifest_versions_int, 'spec', 'int mani', True),
+        mock.call(self.manifest_versions_ext, 'spec', 'filtered mani', True),
+    ])
+
+  def testPopulateAndPublishBuildSpecIntOnly(self):
+    """Test PopulateAndPublishBuildSpec without external manifest versions."""
+    commitMock = self.PatchObject(manifest_version, '_CommitAndPush')
+
+    filter_out = os.path.join(self.tempdir, 'filter_out')
+    osutils.WriteFile(filter_out, 'filtered mani')
+    self.PatchObject(manifest_version, 'FilterManifest',
+                     return_value=filter_out)
+
+    manifest_version.PopulateAndPublishBuildSpec(
+        'spec',
+        'int mani',
+        self.manifest_versions_int,
+        None,
+        dryrun=False)
+
+    self.assertEqual(commitMock.call_args_list, [
+        mock.call(self.manifest_versions_int, 'spec', 'int mani', False),
+    ])
 
 
 class BuildSpecsManagerTest(cros_test_lib.MockTempDirTestCase):
@@ -308,7 +387,7 @@ class BuildSpecsManagerTest(cros_test_lib.MockTempDirTestCase):
   def testLatestSpecFromDir(self):
     """Tests whether we can get sorted specs correctly from a directory."""
     self.manager = self.BuildManager()
-    self.PatchObject(repository, 'CloneGitRepo', side_effect=Exception())
+    self.PatchObject(git, 'Clone', side_effect=Exception())
     info = manifest_version.VersionInfo(
         '99.1.2', CHROME_BRANCH, incr_type='branch')
 
@@ -364,7 +443,7 @@ class BuildSpecsManagerTest(cros_test_lib.MockTempDirTestCase):
     self.PatchObject(repository.RepoRepository, 'Sync')
     self.PatchObject(repository.RepoRepository, 'ExportManifest',
                      return_value='<manifest />')
-    rc = self.StartPatcher(cros_build_lib_unittest.RunCommandMock())
+    rc = self.StartPatcher(cros_test_lib.RunCommandMock())
     rc.SetDefaultCmdResult()
 
     self.manager.GetNextBuildSpec(retries=0)

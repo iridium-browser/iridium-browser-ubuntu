@@ -30,7 +30,7 @@
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/browser/web_applications/web_app.h"
+#include "chrome/browser/web_applications/extensions/web_app_extension_shortcut.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/test/base/in_process_browser_test.h"
@@ -77,7 +77,7 @@ const base::FilePath::CharType* kTitle1File = FILE_PATH_LITERAL("title1.html");
 
 }  // namespace
 
-class TaskManagerBrowserTest : public ExtensionBrowserTest {
+class TaskManagerBrowserTest : public extensions::ExtensionBrowserTest {
  public:
   TaskManagerBrowserTest() {}
   ~TaskManagerBrowserTest() override {}
@@ -117,7 +117,7 @@ class TaskManagerBrowserTest : public ExtensionBrowserTest {
 
  protected:
   void SetUpCommandLine(base::CommandLine* command_line) override {
-    ExtensionBrowserTest::SetUpCommandLine(command_line);
+    extensions::ExtensionBrowserTest::SetUpCommandLine(command_line);
 
     // Do not launch device discovery process.
     command_line->AppendSwitch(switches::kDisableDeviceDiscoveryNotifications);
@@ -125,11 +125,11 @@ class TaskManagerBrowserTest : public ExtensionBrowserTest {
 
   void TearDownOnMainThread() override {
     model_.reset();
-    ExtensionBrowserTest::TearDownOnMainThread();
+    extensions::ExtensionBrowserTest::TearDownOnMainThread();
   }
 
   void SetUpOnMainThread() override {
-    ExtensionBrowserTest::SetUpOnMainThread();
+    extensions::ExtensionBrowserTest::SetUpOnMainThread();
     host_resolver()->AddRule("*", "127.0.0.1");
 
     // Add content/test/data so we can use cross_site_iframe_factory.html
@@ -406,8 +406,9 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, NoticeAppTabChanges) {
   ShowTaskManager();
 
   ASSERT_TRUE(LoadExtension(test_data_dir_.AppendASCII("packaged_app")));
-  ExtensionService* service = extensions::ExtensionSystem::Get(
-                                  browser()->profile())->extension_service();
+  extensions::ExtensionService* service =
+      extensions::ExtensionSystem::Get(browser()->profile())
+          ->extension_service();
   const extensions::Extension* extension =
       service->GetExtensionById(last_loaded_extension_id(), false);
 
@@ -448,8 +449,9 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, NoticeAppTabChanges) {
 IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, NoticeAppTab) {
   ASSERT_TRUE(LoadExtension(
       test_data_dir_.AppendASCII("packaged_app")));
-  ExtensionService* service = extensions::ExtensionSystem::Get(
-      browser()->profile())->extension_service();
+  extensions::ExtensionService* service =
+      extensions::ExtensionSystem::Get(browser()->profile())
+          ->extension_service();
   const extensions::Extension* extension =
       service->GetExtensionById(last_loaded_extension_id(), false);
 
@@ -675,7 +677,13 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, JSHeapMemory) {
   ASSERT_NO_FATAL_FAILURE(WaitForTaskManagerRows(1, MatchTab("title1.html")));
 }
 
-IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, SentDataObserved) {
+#if defined(MEMORY_SANITIZER)
+// This tests times out when MSan is enabled. See https://crbug.com/890313.
+#define MAYBE_SentDataObserved DISABLED_SentDataObserved
+#else
+#define MAYBE_SentDataObserved SentDataObserved
+#endif
+IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, MAYBE_SentDataObserved) {
   ShowTaskManager();
   GURL test_gurl = embedded_test_server()->GetURL("/title1.html");
 
@@ -700,9 +708,20 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, SentDataObserved) {
       ->ExecuteJavaScriptForTests(base::UTF8ToUTF16(test_js));
   ASSERT_NO_FATAL_FAILURE(WaitForTaskManagerStatToExceed(
       MatchTab("network use"), ColumnSpecifier::TOTAL_NETWORK_USE, 16000000));
+  // There shouldn't be too much usage on the browser process. Note that it
+  // should be the first row since tasks are sorted by process ID then by task
+  // ID.
+  EXPECT_GE(20000,
+            model()->GetColumnValue(ColumnSpecifier::TOTAL_NETWORK_USE, 0));
 }
 
-IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, TotalSentDataObserved) {
+#if defined(MEMORY_SANITIZER)
+// This tests times out when MSan is enabled. See https://crbug.com/890313.
+#define MAYBE_TotalSentDataObserved DISABLED_TotalSentDataObserved
+#else
+#define MAYBE_TotalSentDataObserved TotalSentDataObserved
+#endif
+IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, MAYBE_TotalSentDataObserved) {
   ShowTaskManager();
   GURL test_gurl = embedded_test_server()->GetURL("/title1.html");
 
@@ -743,6 +762,11 @@ IN_PROC_BROWSER_TEST_F(TaskManagerBrowserTest, TotalSentDataObserved) {
   ASSERT_NO_FATAL_FAILURE(WaitForTaskManagerStatToExceed(
       MatchTab("network use"), ColumnSpecifier::TOTAL_NETWORK_USE,
       16000000 * 2));
+  // There shouldn't be too much usage on the browser process. Note that it
+  // should be the first row since tasks are sorted by process ID then by task
+  // ID.
+  EXPECT_GE(20000,
+            model()->GetColumnValue(ColumnSpecifier::TOTAL_NETWORK_USE, 0));
 }
 
 // Checks that task manager counts idle wakeups.
@@ -796,7 +820,6 @@ IN_PROC_BROWSER_TEST_F(TaskManagerUtilityProcessBrowserTest,
   ASSERT_NO_FATAL_FAILURE(WaitForTaskManagerStatToExceed(
       MatchUtility(proxy_resolver_name), ColumnSpecifier::V8_MEMORY_USED,
       minimal_heap_size));
-  ASSERT_NO_FATAL_FAILURE(WaitForTaskManagerRows(1, MatchAnyUtility()));
   ASSERT_NO_FATAL_FAILURE(
       WaitForTaskManagerRows(1, MatchUtility(proxy_resolver_name)));
 }
@@ -971,8 +994,7 @@ IN_PROC_BROWSER_TEST_P(TaskManagerOOPIFBrowserTest, SubframeHistoryNavigation) {
       MatchSubframe("http://e.com/"), ColumnSpecifier::MEMORY_FOOTPRINT, 1000));
 }
 
-// Flaky, see https://crbug.com/797860.
-IN_PROC_BROWSER_TEST_P(TaskManagerOOPIFBrowserTest, DISABLED_KillSubframe) {
+IN_PROC_BROWSER_TEST_P(TaskManagerOOPIFBrowserTest, KillSubframe) {
   ShowTaskManager();
 
   content::TestNavigationObserver navigation_observer(

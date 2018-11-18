@@ -50,9 +50,8 @@ HTMLFrameSetElement* LayoutFrameSet::FrameSet() const {
   return ToHTMLFrameSetElement(GetNode());
 }
 
-void LayoutFrameSet::Paint(const PaintInfo& paint_info,
-                           const LayoutPoint& paint_offset) const {
-  FrameSetPainter(*this).Paint(paint_info, paint_offset);
+void LayoutFrameSet::Paint(const PaintInfo& paint_info) const {
+  FrameSetPainter(*this).Paint(paint_info);
 }
 
 void LayoutFrameSet::ComputePreferredLogicalWidths() {
@@ -97,7 +96,7 @@ void LayoutFrameSet::LayOutAxis(GridAxis& axis,
   int count_fixed = 0;
   int count_percent = 0;
 
-  float effective_zoom = Style()->EffectiveZoom();
+  float effective_zoom = StyleRef().EffectiveZoom();
 
   // First we need to investigate how many columns of each type we have and
   // how much space these columns are going to require.
@@ -137,7 +136,9 @@ void LayoutFrameSet::LayOutAxis(GridAxis& axis,
 
     for (int i = 0; i < grid_len; ++i) {
       if (grid[i].IsAbsolute()) {
-        grid_layout[i] = (grid_layout[i] * remaining_fixed) / total_fixed;
+        long long temp_product =
+            static_cast<long long>(grid_layout[i]) * remaining_fixed;
+        grid_layout[i] = temp_product / total_fixed;
         remaining_len -= grid_layout[i];
       }
     }
@@ -155,7 +156,9 @@ void LayoutFrameSet::LayOutAxis(GridAxis& axis,
 
     for (int i = 0; i < grid_len; ++i) {
       if (grid[i].IsPercentage()) {
-        grid_layout[i] = (grid_layout[i] * remaining_percent) / total_percent;
+        long long temp_product =
+            static_cast<long long>(grid_layout[i]) * remaining_percent;
+        grid_layout[i] = temp_product / total_percent;
         remaining_len -= grid_layout[i];
       }
     }
@@ -203,7 +206,9 @@ void LayoutFrameSet::LayOutAxis(GridAxis& axis,
 
       for (int i = 0; i < grid_len; ++i) {
         if (grid[i].IsPercentage()) {
-          change_percent = (remaining_percent * grid_layout[i]) / total_percent;
+          long long temp_product =
+              static_cast<long long>(grid_layout[i]) * remaining_percent;
+          change_percent = temp_product / total_percent;
           grid_layout[i] += change_percent;
           remaining_len -= change_percent;
         }
@@ -217,7 +222,9 @@ void LayoutFrameSet::LayOutAxis(GridAxis& axis,
 
       for (int i = 0; i < grid_len; ++i) {
         if (grid[i].IsAbsolute()) {
-          change_fixed = (remaining_fixed * grid_layout[i]) / total_fixed;
+          long long temp_product =
+              static_cast<long long>(grid_layout[i]) * remaining_fixed;
+          change_fixed = temp_product / total_fixed;
           grid_layout[i] += change_fixed;
           remaining_len -= change_fixed;
         }
@@ -463,15 +470,15 @@ void LayoutFrameSet::ContinueResizing(GridAxis& axis, int position) {
       LayoutInvalidationReason::kSizeChanged);
 }
 
-bool LayoutFrameSet::UserResize(MouseEvent* evt) {
+bool LayoutFrameSet::UserResize(const MouseEvent& evt) {
   if (!is_resizing_) {
     if (NeedsLayout())
       return false;
-    if (evt->type() == EventTypeNames::mousedown &&
-        evt->button() ==
+    if (evt.type() == EventTypeNames::mousedown &&
+        evt.button() ==
             static_cast<short>(WebPointerProperties::Button::kLeft)) {
       FloatPoint local_pos =
-          AbsoluteToLocal(FloatPoint(evt->AbsoluteLocation()), kUseTransforms);
+          AbsoluteToLocal(FloatPoint(evt.AbsoluteLocation()), kUseTransforms);
       StartResizing(cols_, local_pos.X());
       StartResizing(rows_, local_pos.Y());
       if (cols_.split_being_resized_ != kNoSplit ||
@@ -481,16 +488,16 @@ bool LayoutFrameSet::UserResize(MouseEvent* evt) {
       }
     }
   } else {
-    if (evt->type() == EventTypeNames::mousemove ||
-        (evt->type() == EventTypeNames::mouseup &&
-         evt->button() ==
+    if (evt.type() == EventTypeNames::mousemove ||
+        (evt.type() == EventTypeNames::mouseup &&
+         evt.button() ==
              static_cast<short>(WebPointerProperties::Button::kLeft))) {
       FloatPoint local_pos =
-          AbsoluteToLocal(FloatPoint(evt->AbsoluteLocation()), kUseTransforms);
+          AbsoluteToLocal(FloatPoint(evt.AbsoluteLocation()), kUseTransforms);
       ContinueResizing(cols_, local_pos.X());
       ContinueResizing(rows_, local_pos.Y());
-      if (evt->type() == EventTypeNames::mouseup &&
-          evt->button() ==
+      if (evt.type() == EventTypeNames::mouseup &&
+          evt.button() ==
               static_cast<short>(WebPointerProperties::Button::kLeft)) {
         SetIsResizing(false);
         return true;

@@ -109,7 +109,8 @@ class InputMethodManagerImpl : public InputMethodManager,
     bool ReplaceEnabledInputMethods(
         const std::vector<std::string>& new_active_input_method_ids) override;
     bool SetAllowedInputMethods(
-        const std::vector<std::string>& new_allowed_input_method_ids) override;
+        const std::vector<std::string>& new_allowed_input_method_ids,
+        bool enable_allowed_input_methods) override;
     const std::vector<std::string>& GetAllowedInputMethods() override;
     void EnableInputView() override;
     void DisableInputView() override;
@@ -152,11 +153,15 @@ class InputMethodManagerImpl : public InputMethodManager,
     ~StateImpl() override;
 
    private:
-    // Retruns true if the passed input method is allowed. By default, all input
+    // Returns true if the passed input method is allowed. By default, all input
     // methods are allowed. After SetAllowedKeyboardLayoutInputMethods was
     // called, the passed keyboard layout input methods are allowed and all
     // non-keyboard input methods remain to be allowed.
     bool IsInputMethodAllowed(const std::string& input_method_id) const;
+
+    // Returns the first hardware input method that is allowed or the first
+    // allowed input method, if no hardware input method is allowed.
+    std::string GetAllowedFallBackKeyboardLayout() const;
   };
 
   // Constructs an InputMethodManager instance. The client is responsible for
@@ -194,6 +199,12 @@ class InputMethodManagerImpl : public InputMethodManager,
   void SetImeMenuFeatureEnabled(ImeMenuFeature feature, bool enabled) override;
   bool GetImeMenuFeatureEnabled(ImeMenuFeature feature) const override;
   void NotifyObserversImeExtraInputStateChange() override;
+  ui::InputMethodKeyboardController* GetInputMethodKeyboardController()
+      override;
+  void NotifyInputMethodExtensionAdded(
+      const std::string& extension_id) override;
+  void NotifyInputMethodExtensionRemoved(
+      const std::string& extension_id) override;
 
   // chromeos::UserAddingScreen:
   void OnUserAddingStarted() override;
@@ -268,9 +279,10 @@ class InputMethodManagerImpl : public InputMethodManager,
   UISessionState ui_session_;
 
   // A list of objects that monitor the manager.
-  base::ObserverList<InputMethodManager::Observer> observers_;
-  base::ObserverList<CandidateWindowObserver> candidate_window_observers_;
-  base::ObserverList<ImeMenuObserver> ime_menu_observers_;
+  base::ObserverList<InputMethodManager::Observer>::Unchecked observers_;
+  base::ObserverList<CandidateWindowObserver>::Unchecked
+      candidate_window_observers_;
+  base::ObserverList<ImeMenuObserver>::Unchecked ime_menu_observers_;
 
   scoped_refptr<StateImpl> state_;
 

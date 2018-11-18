@@ -16,6 +16,10 @@ extern const base::Feature kDataReductionProxyLowMemoryDevicePromo;
 extern const base::Feature kMissingViaHeaderShortDuration;
 extern const base::Feature kDataReductionProxyRobustConnection;
 extern const base::Feature kDogfood;
+extern const base::Feature kDataSaverSiteBreakdownUsingPageLoadMetrics;
+extern const base::Feature kDataReductionProxyBrotliHoldback;
+extern const base::Feature kDataReductionProxyEnabledWithNetworkService;
+extern const base::Feature kDataSaverUseOnDeviceSafeBrowsing;
 
 }  // namespace features
 }  // namespace data_reduction_proxy

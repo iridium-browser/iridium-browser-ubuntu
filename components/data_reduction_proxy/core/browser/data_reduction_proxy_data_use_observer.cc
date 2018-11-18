@@ -12,10 +12,10 @@
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_io_data.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_metrics.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_util.h"
+#include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
 #include "components/data_reduction_proxy/core/common/lofi_decider.h"
 #include "components/data_use_measurement/core/data_use.h"
 #include "components/data_use_measurement/core/data_use_ascriber.h"
-#include "components/previews/core/previews_user_data.h"
 #include "net/http/http_response_headers.h"
 #include "net/url_request/url_request.h"
 #include "url/gurl.h"
@@ -43,15 +43,9 @@ class DataUseUserDataBytes : public base::SupportsUserData::Data {
   int64_t original_bytes_;
 };
 
-// Hostname used for the other bucket which consists of chrome-services traffic.
-// This should be in sync with the same in DataReductionSiteBreakdownView.java
-const char kOtherHostName[] = "Other";
-
 // static
 const void* const DataUseUserDataBytes::kUserDataKey =
     &DataUseUserDataBytes::kUserDataKey;
-
-const void* const kDataUsePreviewsUserDataKey = &kDataUsePreviewsUserDataKey;
 
 }  // namespace
 
@@ -63,7 +57,8 @@ DataReductionProxyDataUseObserver::DataReductionProxyDataUseObserver(
     : data_reduction_proxy_io_data_(data_reduction_proxy_io_data),
       data_use_ascriber_(data_use_ascriber) {
   DCHECK(data_reduction_proxy_io_data_);
-  data_use_ascriber_->AddObserver(this);
+  if (!data_reduction_proxy::params::IsDataSaverSiteBreakdownUsingPLMEnabled())
+    data_use_ascriber_->AddObserver(this);
 }
 
 DataReductionProxyDataUseObserver::~DataReductionProxyDataUseObserver() {
@@ -98,13 +93,6 @@ void DataReductionProxyDataUseObserver::OnPageResourceLoad(
     return;
   }
 
-  previews::PreviewsUserData* previews_user_data =
-      previews::PreviewsUserData::GetData(request);
-  if (previews_user_data) {
-    data_use->SetUserData(kDataUsePreviewsUserDataKey,
-                          previews_user_data->DeepCopy());
-  }
-
   if (request.GetTotalReceivedBytes() <= 0)
     return;
 
@@ -131,56 +119,19 @@ void DataReductionProxyDataUseObserver::OnPageResourceLoad(
                                 network_bytes, original_bytes));
     }
   } else {
+    // Report the datause that cannot be scoped to a page load to the other
+    // host. These include chrome services, service-worker, Downloads, etc.
     data_reduction_proxy_io_data_->UpdateDataUseForHost(
         network_bytes, original_bytes,
         data_use->traffic_type() ==
                 data_use_measurement::DataUse::TrafficType::USER_TRAFFIC
             ? data_use->url().HostNoBrackets()
-            : kOtherHostName);
+            : util::GetSiteBreakdownOtherHostName());
   }
 }
 
 void DataReductionProxyDataUseObserver::OnPageDidFinishLoad(
     data_use_measurement::DataUse* data_use) {
-  // This is good place to update data savings based on the overall page
-  // load. If we waited until the |OnPageLoadConcluded| callback, we would miss
-  // cases where the page loaded but the user doesn't navigate away before
-  // Android kills chrome.
-  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  previews::PreviewsUserData* previews_user_data =
-      reinterpret_cast<previews::PreviewsUserData*>(
-          data_use->GetUserData(kDataUsePreviewsUserDataKey));
-  if (previews_user_data) {
-    // Report estimated data savings for NOSCRIPT if applicable.
-    if (previews_user_data->committed_previews_type() ==
-        previews::PreviewsType::NOSCRIPT) {
-      int inflation_percent =
-          previews::params::NoScriptPreviewsInflationPercent();
-      int inflation_bytes = previews::params::NoScriptPreviewsInflationBytes();
-      if (previews_user_data->data_savings_inflation_percent() != 0) {
-        // Use specific inflation percent rather than default.
-        inflation_percent =
-            previews_user_data->data_savings_inflation_percent();
-        inflation_bytes = 0;
-      }
-      int total_inflated_bytes =
-          (data_use->total_bytes_received() * inflation_percent) / 100 +
-          inflation_bytes;
-      // Report for overall usage.
-      DCHECK(data_use->url().SchemeIs(url::kHttpsScheme));
-      data_reduction_proxy_io_data_->UpdateContentLengths(
-          0, total_inflated_bytes, data_reduction_proxy_io_data_->IsEnabled(),
-          HTTPS, std::string());
-      // Report for host usage.
-      data_reduction_proxy_io_data_->UpdateDataUseForHost(
-          0, total_inflated_bytes, data_use->url().HostNoBrackets());
-    }
-  }
-}
-
-const void*
-DataReductionProxyDataUseObserver::GetDataUsePreviewsUserDataKeyForTesting() {
-  return kDataUsePreviewsUserDataKey;
 }
 
 }  // namespace data_reduction_proxy

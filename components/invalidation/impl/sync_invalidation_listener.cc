@@ -76,7 +76,7 @@ void SyncInvalidationListener::Start(
   invalidation_state_tracker_ = invalidation_state_tracker;
   invalidation_state_tracker_task_runner_ =
       invalidation_state_tracker_task_runner;
-  DCHECK(invalidation_state_tracker_task_runner_.get());
+  DCHECK(invalidation_state_tracker_task_runner_);
 
   DCHECK(!delegate_);
   DCHECK(delegate);
@@ -175,8 +175,7 @@ void SyncInvalidationListener::InvalidateAll(
   client->Acknowledge(ack_handle);
 
   ObjectIdInvalidationMap invalidations;
-  for (ObjectIdSet::iterator it = registered_ids_.begin();
-       it != registered_ids_.end(); ++it) {
+  for (auto it = registered_ids_.begin(); it != registered_ids_.end(); ++it) {
     Invalidation unknown_version = Invalidation::InitUnknownVersion(*it);
     unknown_version.SetAckHandler(AsWeakPtr(),
                                   base::ThreadTaskRunnerHandle::Get());
@@ -202,10 +201,8 @@ void SyncInvalidationListener::DispatchInvalidations(
 void SyncInvalidationListener::SaveInvalidations(
     const ObjectIdInvalidationMap& to_save) {
   ObjectIdSet objects_to_save = to_save.GetObjectIds();
-  for (ObjectIdSet::const_iterator it = objects_to_save.begin();
-       it != objects_to_save.end(); ++it) {
-    UnackedInvalidationsMap::iterator lookup =
-        unacked_invalidations_map_.find(*it);
+  for (auto it = objects_to_save.begin(); it != objects_to_save.end(); ++it) {
+    auto lookup = unacked_invalidations_map_.find(*it);
     if (lookup == unacked_invalidations_map_.end()) {
       lookup = unacked_invalidations_map_.insert(
           std::make_pair(*it, UnackedInvalidationSet(*it))).first;
@@ -215,9 +212,8 @@ void SyncInvalidationListener::SaveInvalidations(
 
   invalidation_state_tracker_task_runner_->PostTask(
       FROM_HERE,
-      base::Bind(&InvalidationStateTracker::SetSavedInvalidations,
-                 invalidation_state_tracker_,
-                 unacked_invalidations_map_));
+      base::BindOnce(&InvalidationStateTracker::SetSavedInvalidations,
+                     invalidation_state_tracker_, unacked_invalidations_map_));
 }
 
 void SyncInvalidationListener::EmitSavedInvalidations(
@@ -299,8 +295,7 @@ void SyncInvalidationListener::InformError(
 void SyncInvalidationListener::Acknowledge(
   const invalidation::ObjectId& id,
   const syncer::AckHandle& handle) {
-  UnackedInvalidationsMap::iterator lookup =
-      unacked_invalidations_map_.find(id);
+  auto lookup = unacked_invalidations_map_.find(id);
   if (lookup == unacked_invalidations_map_.end()) {
     DLOG(WARNING) << "Received acknowledgement for untracked object ID";
     return;
@@ -308,16 +303,14 @@ void SyncInvalidationListener::Acknowledge(
   lookup->second.Acknowledge(handle);
   invalidation_state_tracker_task_runner_->PostTask(
       FROM_HERE,
-      base::Bind(&InvalidationStateTracker::SetSavedInvalidations,
-                 invalidation_state_tracker_,
-                 unacked_invalidations_map_));
+      base::BindOnce(&InvalidationStateTracker::SetSavedInvalidations,
+                     invalidation_state_tracker_, unacked_invalidations_map_));
 }
 
 void SyncInvalidationListener::Drop(
     const invalidation::ObjectId& id,
     const syncer::AckHandle& handle) {
-  UnackedInvalidationsMap::iterator lookup =
-      unacked_invalidations_map_.find(id);
+  auto lookup = unacked_invalidations_map_.find(id);
   if (lookup == unacked_invalidations_map_.end()) {
     DLOG(WARNING) << "Received drop for untracked object ID";
     return;
@@ -325,38 +318,32 @@ void SyncInvalidationListener::Drop(
   lookup->second.Drop(handle);
   invalidation_state_tracker_task_runner_->PostTask(
       FROM_HERE,
-      base::Bind(&InvalidationStateTracker::SetSavedInvalidations,
-                 invalidation_state_tracker_,
-                 unacked_invalidations_map_));
+      base::BindOnce(&InvalidationStateTracker::SetSavedInvalidations,
+                     invalidation_state_tracker_, unacked_invalidations_map_));
 }
 
 void SyncInvalidationListener::WriteState(const std::string& state) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DVLOG(1) << "WriteState";
   invalidation_state_tracker_task_runner_->PostTask(
-      FROM_HERE,
-      base::Bind(&InvalidationStateTracker::SetBootstrapData,
-                 invalidation_state_tracker_,
-                 state));
+      FROM_HERE, base::BindOnce(&InvalidationStateTracker::SetBootstrapData,
+                                invalidation_state_tracker_, state));
 }
 
 void SyncInvalidationListener::DoRegistrationUpdate() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   const ObjectIdSet& unregistered_ids =
       registration_manager_->UpdateRegisteredIds(registered_ids_);
-  for (ObjectIdSet::iterator it = unregistered_ids.begin();
-       it != unregistered_ids.end(); ++it) {
+  for (auto it = unregistered_ids.begin(); it != unregistered_ids.end(); ++it) {
     unacked_invalidations_map_.erase(*it);
   }
   invalidation_state_tracker_task_runner_->PostTask(
       FROM_HERE,
-      base::Bind(&InvalidationStateTracker::SetSavedInvalidations,
-                 invalidation_state_tracker_,
-                 unacked_invalidations_map_));
+      base::BindOnce(&InvalidationStateTracker::SetSavedInvalidations,
+                     invalidation_state_tracker_, unacked_invalidations_map_));
 
   ObjectIdInvalidationMap object_id_invalidation_map;
-  for (UnackedInvalidationsMap::iterator map_it =
-       unacked_invalidations_map_.begin();
+  for (auto map_it = unacked_invalidations_map_.begin();
        map_it != unacked_invalidations_map_.end(); ++map_it) {
     if (registered_ids_.find(map_it->first) == registered_ids_.end()) {
       continue;
@@ -390,10 +377,8 @@ SyncInvalidationListener::CollectDebugData() const {
                           std::string(InvalidatorStateToString(ticl_state_)));
   std::unique_ptr<base::DictionaryValue> unacked_map(
       new base::DictionaryValue());
-  for (UnackedInvalidationsMap::const_iterator it =
-           unacked_invalidations_map_.begin();
-       it != unacked_invalidations_map_.end();
-       ++it) {
+  for (auto it = unacked_invalidations_map_.begin();
+       it != unacked_invalidations_map_.end(); ++it) {
     unacked_map->Set((it->first).name(), (it->second).ToValue());
   }
   return_value->Set("SyncInvalidationListener.UnackedInvalidationsMap",

@@ -62,6 +62,7 @@ LayoutUnit MultiColumnFragmentainerGroup::LogicalHeightInFlowThreadAt(
 }
 
 void MultiColumnFragmentainerGroup::ResetColumnHeight() {
+  actual_column_count_allowance_ = 0;
   max_logical_height_ = CalculateMaxColumnHeight();
 
   LayoutMultiColumnFlowThread* flow_thread =
@@ -136,6 +137,24 @@ bool MultiColumnFragmentainerGroup::RecalculateColumnHeight(
   // We may not have found our final height yet, but at least we've found a
   // height.
   is_logical_height_known_ = true;
+
+  unsigned column_count = UnclampedActualColumnCount();
+  if (column_count > LayoutMultiColumnFlowThread::ColumnCountClampMax() ||
+      (column_count > LayoutMultiColumnFlowThread::ColumnCountClampMin() &&
+       column_count > column_set_.UsedColumnCount())) {
+    // That's a lot of columns! We have either exceeded the maximum value, or we
+    // have overflowing columns, and the proposed count is within clamping
+    // range. Calculate allowance to make sure we have a legitimate reason for
+    // it, or else clamp it. We have quadratic performance complexity for
+    // painting columns.
+    if (!actual_column_count_allowance_) {
+      const auto* flow_thread = column_set_.MultiColumnFlowThread();
+      unsigned allowance = flow_thread->CalculateActualColumnCountAllowance();
+      DCHECK_GE(allowance, LayoutMultiColumnFlowThread::ColumnCountClampMin());
+      DCHECK_LE(allowance, LayoutMultiColumnFlowThread::ColumnCountClampMax());
+      actual_column_count_allowance_ = allowance;
+    }
+  }
 
   if (logical_height_ == old_column_height)
     return false;  // No change. We're done.
@@ -224,7 +243,7 @@ LayoutPoint MultiColumnFragmentainerGroup::VisualPointToFlowThreadPoint(
   local_point.MoveBy(-column_rect.Location());
   if (!column_set_.IsHorizontalWritingMode()) {
     if (snap == kSnapToColumn) {
-      LayoutUnit column_start = column_set_.Style()->IsLeftToRightDirection()
+      LayoutUnit column_start = column_set_.StyleRef().IsLeftToRightDirection()
                                     ? LayoutUnit()
                                     : column_rect.Height();
       if (local_point.X() < 0)
@@ -236,7 +255,7 @@ LayoutPoint MultiColumnFragmentainerGroup::VisualPointToFlowThreadPoint(
                        local_point.Y());
   }
   if (snap == kSnapToColumn) {
-    LayoutUnit column_start = column_set_.Style()->IsLeftToRightDirection()
+    LayoutUnit column_start = column_set_.StyleRef().IsLeftToRightDirection()
                                   ? LayoutUnit()
                                   : column_rect.Width();
     if (local_point.Y() < 0)
@@ -309,36 +328,9 @@ LayoutRect MultiColumnFragmentainerGroup::CalculateOverflow() const {
 }
 
 unsigned MultiColumnFragmentainerGroup::ActualColumnCount() const {
-  // We must always return a value of 1 or greater. Column count = 0 is a
-  // meaningless situation, and will confuse and cause problems in other parts
-  // of the code.
-  if (!IsLogicalHeightKnown())
-    return 1;
-  // Our flow thread portion determines our column count. We have as many
-  // columns as needed to fit all the content.
-  LayoutUnit flow_thread_portion_height = LogicalHeightInFlowThread();
-  if (!flow_thread_portion_height)
-    return 1;
-
-  LayoutUnit column_height = ColumnLogicalHeight();
-  unsigned count = (flow_thread_portion_height / column_height).Floor();
-  // flowThreadPortionHeight may be saturated, so detect the remainder manually.
-  if (count * column_height < flow_thread_portion_height)
-    count++;
-
-  static const unsigned kColumnCountClampMin = 10;
-  static const unsigned kColumnCountClampMax = 500;
-  if (count > kColumnCountClampMin) {
-    // To avoid performance problems, limit the maximum number of columns. Try
-    // to identify legitimate reasons for creating many columns, and allow many
-    // columns in such cases. We currently use a function of column height to
-    // determine this (limit the column count to the column height in pixels,
-    // but never clamp to less than 10 columns).
-    unsigned max_count = column_height.ToInt();
-    count = std::min(count, std::max(std::min(max_count, kColumnCountClampMax),
-                                     kColumnCountClampMin));
-  }
-
+  unsigned count = UnclampedActualColumnCount();
+  if (actual_column_count_allowance_)
+    count = std::min(count, actual_column_count_allowance_);
   DCHECK_GE(count, 1u);
   return count;
 }
@@ -433,7 +425,7 @@ LayoutRect MultiColumnFragmentainerGroup::ColumnRectAt(
   LayoutUnit column_gap = column_set_.ColumnGap();
 
   if (column_set_.MultiColumnFlowThread()->ProgressionIsInline()) {
-    if (column_set_.Style()->IsLeftToRightDirection())
+    if (column_set_.StyleRef().IsLeftToRightDirection())
       column_logical_left += column_index * (column_logical_width + column_gap);
     else
       column_logical_left += column_set_.ContentLogicalWidth() -
@@ -468,12 +460,9 @@ LayoutRect MultiColumnFragmentainerGroup::FlowThreadPortionRectAt(
 static const int kMulticolMaxClipPixels = 1000000;
 
 LayoutRect MultiColumnFragmentainerGroup::FlowThreadPortionOverflowRectAt(
-    unsigned column_index,
-    ClipRectAxesSelector axes_selector) const {
+    unsigned column_index) const {
   // This function determines the portion of the flow thread that paints for the
-  // column. Along the inline axis, columns are unclipped at outside edges
-  // (i.e., the first and last column in the set), and they clip to half the
-  // column gap along interior edges.
+  // column.
   //
   // In the block direction, we will not clip overflow out of the top of the
   // first column, or out of the bottom of the last column. This applies only to
@@ -484,11 +473,6 @@ LayoutRect MultiColumnFragmentainerGroup::FlowThreadPortionOverflowRectAt(
   // contents from a previous column in the overflow area of a following column.
   bool is_first_column_in_row = !column_index;
   bool is_last_column_in_row = column_index == ActualColumnCount() - 1;
-  bool is_ltr = column_set_.Style()->IsLeftToRightDirection();
-  bool is_leftmost_column =
-      is_ltr ? is_first_column_in_row : is_last_column_in_row;
-  bool is_rightmost_column =
-      is_ltr ? is_last_column_in_row : is_first_column_in_row;
 
   LayoutRect portion_rect = FlowThreadPortionRectAt(column_index);
   bool is_first_column_in_multicol_container =
@@ -506,33 +490,16 @@ LayoutRect MultiColumnFragmentainerGroup::FlowThreadPortionOverflowRectAt(
   LayoutRect overflow_rect(
       IntRect(-kMulticolMaxClipPixels, -kMulticolMaxClipPixels,
               2 * kMulticolMaxClipPixels, 2 * kMulticolMaxClipPixels));
-  LayoutUnit column_gap = column_set_.ColumnGap();
   if (column_set_.IsHorizontalWritingMode()) {
     if (!is_first_column_in_multicol_container)
       overflow_rect.ShiftYEdgeTo(portion_rect.Y());
     if (!is_last_column_in_multicol_container)
       overflow_rect.ShiftMaxYEdgeTo(portion_rect.MaxY());
-    if (axes_selector == kBothAxes) {
-      if (!is_leftmost_column)
-        overflow_rect.ShiftXEdgeTo(portion_rect.X() - column_gap / 2);
-      if (!is_rightmost_column) {
-        overflow_rect.ShiftMaxXEdgeTo(portion_rect.MaxX() + column_gap -
-                                      column_gap / 2);
-      }
-    }
   } else {
     if (!is_first_column_in_multicol_container)
       overflow_rect.ShiftXEdgeTo(portion_rect.X());
     if (!is_last_column_in_multicol_container)
       overflow_rect.ShiftMaxXEdgeTo(portion_rect.MaxX());
-    if (axes_selector == kBothAxes) {
-      if (!is_leftmost_column)
-        overflow_rect.ShiftYEdgeTo(portion_rect.Y() - column_gap / 2);
-      if (!is_rightmost_column) {
-        overflow_rect.ShiftMaxYEdgeTo(portion_rect.MaxY() + column_gap -
-                                      column_gap / 2);
-      }
-    }
   }
   return overflow_rect;
 }
@@ -580,7 +547,7 @@ unsigned MultiColumnFragmentainerGroup::ColumnIndexAtVisualPoint(
       is_horizontal_writing_mode == is_column_progression_inline
           ? visual_point.X()
           : visual_point.Y();
-  if (!column_set_.Style()->IsLeftToRightDirection() &&
+  if (!column_set_.StyleRef().IsLeftToRightDirection() &&
       is_column_progression_inline)
     offset_in_column_progression_direction =
         column_set_.LogicalWidth() - offset_in_column_progression_direction;
@@ -626,7 +593,7 @@ void MultiColumnFragmentainerGroup::ColumnIntervalForVisualRect(
   bool is_column_progression_inline =
       column_set_.MultiColumnFlowThread()->ProgressionIsInline();
   bool is_flipped_column_progression =
-      !column_set_.Style()->IsLeftToRightDirection() &&
+      !column_set_.StyleRef().IsLeftToRightDirection() &&
       is_column_progression_inline;
   if (column_set_.IsHorizontalWritingMode() == is_column_progression_inline) {
     if (is_flipped_column_progression) {
@@ -646,6 +613,28 @@ void MultiColumnFragmentainerGroup::ColumnIntervalForVisualRect(
     }
   }
   DCHECK_LE(first_column, last_column);
+}
+
+unsigned MultiColumnFragmentainerGroup::UnclampedActualColumnCount() const {
+  // We must always return a value of 1 or greater. Column count = 0 is a
+  // meaningless situation, and will confuse and cause problems in other parts
+  // of the code.
+  if (!IsLogicalHeightKnown())
+    return 1;
+  // Our flow thread portion determines our column count. We have as many
+  // columns as needed to fit all the content.
+  LayoutUnit flow_thread_portion_height = LogicalHeightInFlowThread();
+  if (!flow_thread_portion_height)
+    return 1;
+
+  LayoutUnit column_height = ColumnLogicalHeight();
+  unsigned count = (flow_thread_portion_height / column_height).Floor();
+  // flowThreadPortionHeight may be saturated, so detect the remainder manually.
+  if (count * column_height < flow_thread_portion_height)
+    count++;
+
+  DCHECK_GE(count, 1u);
+  return count;
 }
 
 MultiColumnFragmentainerGroupList::MultiColumnFragmentainerGroupList(

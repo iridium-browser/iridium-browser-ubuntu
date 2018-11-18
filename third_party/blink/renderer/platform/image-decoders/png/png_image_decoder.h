@@ -38,6 +38,7 @@ class PLATFORM_EXPORT PNGImageDecoder final : public ImageDecoder {
 
  public:
   PNGImageDecoder(AlphaOption,
+                  HighBitDepthDecodingOption,
                   const ColorBehavior&,
                   size_t max_decoded_bytes,
                   size_t offset = 0);
@@ -47,6 +48,7 @@ class PLATFORM_EXPORT PNGImageDecoder final : public ImageDecoder {
   String FilenameExtension() const override { return "png"; }
   bool SetSize(unsigned, unsigned) override;
   int RepetitionCount() const override;
+  bool ImageIsHighBitDepth() override;
   bool FrameIsReceivedAtIndex(size_t) const override;
   TimeDelta FrameDurationAtIndex(size_t) const override;
   bool SetFailed() override;
@@ -58,6 +60,7 @@ class PLATFORM_EXPORT PNGImageDecoder final : public ImageDecoder {
 
   void SetColorSpace();
   void SetRepetitionCount(int);
+  void SetBitDepth();
 
  private:
   using ParseQuery = PNGImageReader::ParseQuery;
@@ -77,6 +80,9 @@ class PLATFORM_EXPORT PNGImageDecoder final : public ImageDecoder {
   int repetition_count_;
   bool has_alpha_channel_;
   bool current_buffer_saw_alpha_;
+  bool decode_to_half_float_;
+  size_t bit_depth_;
+  std::unique_ptr<ImageFrame::PixelData[]> color_transform_scanline_;
 };
 
 }  // namespace blink

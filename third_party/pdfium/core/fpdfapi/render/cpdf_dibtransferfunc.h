@@ -9,18 +9,15 @@
 
 #include <vector>
 
-#include "core/fxcrt/unowned_ptr.h"
 #include "core/fxge/dib/cfx_filtereddib.h"
 #include "core/fxge/fx_dib.h"
 
 class CPDF_TransferFunc;
 
-class CPDF_DIBTransferFunc : public CFX_FilteredDIB {
+class CPDF_DIBTransferFunc final : public CFX_FilteredDIB {
  public:
   template <typename T, typename... Args>
   friend RetainPtr<T> pdfium::MakeRetain(Args&&... args);
-
-  ~CPDF_DIBTransferFunc() override;
 
   // CFX_FilteredDIB
   FXDIB_Format GetDestFormat() override;
@@ -35,6 +32,7 @@ class CPDF_DIBTransferFunc : public CFX_FilteredDIB {
  private:
   explicit CPDF_DIBTransferFunc(
       const RetainPtr<CPDF_TransferFunc>& pTransferFunc);
+  ~CPDF_DIBTransferFunc() override;
 
   RetainPtr<CPDF_TransferFunc> m_pTransferFunc;
   const uint8_t* m_RampR;

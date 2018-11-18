@@ -2,6 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+// If you change or add any fields in this file, update proto_visitors.h and
+// potentially proto_enum_conversions.{h, cc}.
+
 syntax = "proto2";
 
 option optimize_for = LITE_RUNTIME;
@@ -30,4 +33,14 @@ message ModelTypeState {
   // ModelTypeProcessor should not attempt to commit any items until this
   // flag is set.
   optional bool initial_sync_done = 4;
+
+  // A GUID that identifies the committing sync client. It's persisted within
+  // the sync metadata and should be used to check the integrity of the
+  // metadata. Mismatches with the guid of the running client indicates invalid
+  // persisted sync metadata, because cache_guid is reset when sync is disabled,
+  // and disabling sync is supposed to clear sync metadata.
+  optional string cache_guid = 5;
+
+  // Syncing account ID, representing the user.
+  optional string authenticated_account_id = 6;
 }

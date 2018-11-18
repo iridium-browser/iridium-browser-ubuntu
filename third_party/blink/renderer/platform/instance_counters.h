@@ -34,6 +34,7 @@
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/wtf/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/atomics.h"
+#include "third_party/blink/renderer/platform/wtf/wtf.h"
 
 namespace blink {
 
@@ -53,7 +54,9 @@ namespace blink {
   V(WorkerGlobalScope)            \
   V(UACSSResource)                \
   V(RTCPeerConnection)            \
-  V(ResourceFetcher)
+  V(ResourceFetcher)              \
+  V(AdSubframe)                   \
+  V(DetachedScriptState)
 
 class InstanceCounters {
   STATIC_ONLY(InstanceCounters);

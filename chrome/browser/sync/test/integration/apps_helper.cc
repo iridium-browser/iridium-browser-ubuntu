@@ -191,7 +191,7 @@ std::string AppsMatchChecker::GetDebugMessage() const {
 }
 
 bool AppsMatchChecker::IsExitConditionSatisfied() {
-  std::vector<Profile*>::iterator it = profiles_.begin();
+  auto it = profiles_.begin();
   Profile* profile0 = *it;
   ++it;
   for (; it != profiles_.end(); ++it) {
@@ -210,7 +210,7 @@ void AppsMatchChecker::OnExtensionLoaded(
 
 void AppsMatchChecker::OnExtensionUnloaded(
     content::BrowserContext* context,
-    const extensions::Extension* extenion,
+    const extensions::Extension* extension,
     extensions::UnloadedExtensionReason reason) {
   CheckExitCondition();
 }

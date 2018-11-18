@@ -16,6 +16,14 @@ panic () {
   exit 1
 }
 
+run () {
+  if [ "$VERBOSE" -ge 1 ]; then
+    "$@"
+  else
+    "$@" 2>&1 >/dev/null
+  fi
+}
+
 # Run a command through adb shell, strip the extra \r from the output
 # and return the correct status code to detect failures. This assumes
 # that the adb shell command prints a final \n to stdout.
@@ -54,6 +62,7 @@ adb_shell () {
 }
 
 # Command-line parsing.
+VERBOSE=0
 DO_HELP=
 DO_TEST=
 for OPT; do
@@ -63,6 +72,9 @@ for OPT; do
       ;;
     --help|-?)
       DO_HELP=true
+      ;;
+    --verbose)
+      VERBOSE=$(( $VERBOSE + 1 ))
       ;;
     -*)
       panic "Invalid option $OPT, see --help."
@@ -97,6 +109,7 @@ Possible options:
 
    --help|-?           Print this message.
    --output-dir=<dir>  Manually set the Chromium output directory.
+   --verbose           Increment verbosity.
 
 EOF
   exit 0
@@ -130,8 +143,11 @@ libcrazy_linker_tests_libbar_with_two_dlopens.so \
 libcrazy_linker_tests_libfoo.so \
 libcrazy_linker_tests_libfoo_with_relro.so \
 libcrazy_linker_tests_libfoo_with_static_constructor.so \
+libcrazy_linker_tests_libfoo_with_gnu_hash_table.so \
 libcrazy_linker_tests_libfoo2.so \
 libcrazy_linker_tests_libzoo.so \
+libcrazy_linker_tests_libzoo_dlopen_in_initializer.so \
+libcrazy_linker_tests_libzoo_dlopen_in_initializer_inner.so \
 libcrazy_linker_tests_libzoo_with_dlopen_handle.so \
 "
 
@@ -141,10 +157,12 @@ TEST_FILES="\
 crazy_linker_bench_load_library \
 crazy_linker_test_constructors_destructors \
 crazy_linker_test_dl_wrappers \
+crazy_linker_test_dl_wrappers_recursive \
 crazy_linker_test_dl_wrappers_with_system_handle \
 crazy_linker_test_dl_wrappers_valid_handles \
 crazy_linker_test_load_library \
 crazy_linker_test_load_library_depends \
+crazy_linker_test_load_library_with_gnu_hash_table \
 crazy_linker_test_relocated_shared_relro \
 crazy_linker_test_search_path_list \
 crazy_linker_test_shared_relro \
@@ -165,14 +183,14 @@ if [ -n "$MISSING_FILES" ]; then
   panic "Please rebuild all crazy linker tests before using this script"
 fi
 
-(cd $CHROMIUM_OUTPUT_DIR && adb push $ALL_FILES $RUN_DIR/) ||
+(cd $CHROMIUM_OUTPUT_DIR && run adb push $ALL_FILES $RUN_DIR/) ||
     panic "Could not copy files to Android device"
 
 # Run a single test on the device.
 run_test () {
   local TEST_NAME=$1
   shift
-  adb_shell LD_LIBRARY_PATH=$RUN_DIR $RUN_DIR/$TEST_NAME "$@"
+  run adb_shell LD_LIBRARY_PATH=$RUN_DIR $RUN_DIR/$TEST_NAME "$@"
 }
 
 if [ -n "$DO_TEST" ]; then

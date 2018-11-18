@@ -9,27 +9,40 @@
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/sys_string_conversions.h"
-#include "components/google/core/browser/google_util.h"
+#include "components/google/core/common/google_util.h"
 #include "components/omnibox/browser/omnibox_edit_model.h"
+#include "components/omnibox/browser/omnibox_view.h"
 #include "components/search_engines/util.h"
 #include "components/strings/grit/components_strings.h"
+#include "components/variations/net/variations_http_headers.h"
 #include "ios/chrome/browser/autocomplete/autocomplete_scheme_classifier_impl.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #include "ios/chrome/browser/search_engines/template_url_service_factory.h"
+#include "ios/chrome/browser/ui/commands/browser_commands.h"
+#import "ios/chrome/browser/ui/commands/command_dispatcher.h"
+#import "ios/chrome/browser/ui/commands/load_query_commands.h"
+#import "ios/chrome/browser/ui/fullscreen/fullscreen_controller.h"
+#import "ios/chrome/browser/ui/fullscreen/fullscreen_controller_factory.h"
+#import "ios/chrome/browser/ui/fullscreen/fullscreen_ui_updater.h"
 #import "ios/chrome/browser/ui/location_bar/location_bar_constants.h"
 #import "ios/chrome/browser/ui/location_bar/location_bar_mediator.h"
 #import "ios/chrome/browser/ui/location_bar/location_bar_url_loader.h"
 #include "ios/chrome/browser/ui/location_bar/location_bar_view_controller.h"
+#import "ios/chrome/browser/ui/ntp/ntp_util.h"
 #include "ios/chrome/browser/ui/omnibox/location_bar_delegate.h"
 #import "ios/chrome/browser/ui/omnibox/omnibox_coordinator.h"
 #import "ios/chrome/browser/ui/omnibox/omnibox_text_field_ios.h"
 #import "ios/chrome/browser/ui/omnibox/popup/omnibox_popup_coordinator.h"
 #include "ios/chrome/browser/ui/omnibox/web_omnibox_edit_controller_impl.h"
-#import "ios/chrome/browser/ui/toolbar/clean/toolbar_coordinator_delegate.h"
+#import "ios/chrome/browser/ui/toolbar/toolbar_coordinator_delegate.h"
 #import "ios/chrome/browser/ui/url_loader.h"
+#import "ios/chrome/browser/ui/util/pasteboard_util.h"
 #import "ios/chrome/browser/web_state_list/web_state_list.h"
-#import "ios/third_party/material_components_ios/src/components/Typography/src/MaterialTypography.h"
+#include "ios/public/provider/chrome/browser/chrome_browser_provider.h"
+#include "ios/public/provider/chrome/browser/voice/voice_search_provider.h"
+#import "ios/web/public/navigation_manager.h"
 #import "ios/web/public/referrer.h"
+#import "ios/web/public/web_state/web_state.h"
 #include "url/gurl.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -44,11 +57,17 @@ const char* const kOmniboxQueryLocationAuthorizationStatusHistogram =
 const int kLocationAuthorizationStatusCount = 4;
 }  // namespace
 
-@interface LocationBarCoordinator ()<LocationBarDelegate,
+@interface LocationBarCoordinator ()<LoadQueryCommands,
+                                     LocationBarDelegate,
                                      LocationBarViewControllerDelegate,
                                      LocationBarConsumer> {
+  // API endpoint for omnibox.
   std::unique_ptr<WebOmniboxEditControllerImpl> _editController;
+  // Observer that updates |viewController| for fullscreen events.
+  std::unique_ptr<FullscreenControllerObserver> _fullscreenObserver;
 }
+// Whether the coordinator is started.
+@property(nonatomic, assign, getter=isStarted) BOOL started;
 // Coordinator for the omnibox popup.
 @property(nonatomic, strong) OmniboxPopupCoordinator* omniboxPopupCoordinator;
 // Coordinator for the omnibox.
@@ -59,7 +78,9 @@ const int kLocationAuthorizationStatusCount = 4;
 @end
 
 @implementation LocationBarCoordinator
+@synthesize commandDispatcher = _commandDispatcher;
 @synthesize viewController = _viewController;
+@synthesize started = _started;
 @synthesize mediator = _mediator;
 @synthesize browserState = _browserState;
 @synthesize dispatcher = _dispatcher;
@@ -77,43 +98,72 @@ const int kLocationAuthorizationStatusCount = 4;
 }
 
 - (void)start {
+  DCHECK(self.commandDispatcher);
+
+  if (self.started)
+    return;
+
+  [self.commandDispatcher startDispatchingToTarget:self
+                                       forProtocol:@protocol(OmniboxFocuser)];
+  [self.commandDispatcher
+      startDispatchingToTarget:self
+                   forProtocol:@protocol(LoadQueryCommands)];
+
   BOOL isIncognito = self.browserState->IsOffTheRecord();
 
-  UIColor* textColor =
-      isIncognito
-          ? [UIColor whiteColor]
-          : [UIColor colorWithWhite:0 alpha:[MDCTypography body1FontOpacity]];
-  UIColor* tintColor = isIncognito ? textColor : nil;
-  self.viewController = [[LocationBarViewController alloc]
-      initWithFrame:CGRectZero
-               font:[MDCTypography subheadFont]
-          textColor:textColor
-          tintColor:tintColor];
+  self.viewController = [[LocationBarViewController alloc] init];
   self.viewController.incognito = isIncognito;
   self.viewController.delegate = self;
+  self.viewController.dispatcher =
+      static_cast<id<ActivityServiceCommands, BrowserCommands,
+                     ApplicationCommands, LoadQueryCommands>>(self.dispatcher);
+  self.viewController.voiceSearchEnabled = ios::GetChromeBrowserProvider()
+                                               ->GetVoiceSearchProvider()
+                                               ->IsVoiceSearchEnabled();
 
   _editController = std::make_unique<WebOmniboxEditControllerImpl>(self);
   _editController->SetURLLoader(self);
 
   self.omniboxCoordinator = [[OmniboxCoordinator alloc] init];
-  self.omniboxCoordinator.textField = self.viewController.textField;
   self.omniboxCoordinator.editController = _editController.get();
   self.omniboxCoordinator.browserState = self.browserState;
   self.omniboxCoordinator.dispatcher = self.dispatcher;
   [self.omniboxCoordinator start];
 
+  [self.omniboxCoordinator.managedViewController
+      willMoveToParentViewController:self.viewController];
+  [self.viewController
+      addChildViewController:self.omniboxCoordinator.managedViewController];
+  [self.viewController
+      setEditView:self.omniboxCoordinator.managedViewController.view];
+  [self.omniboxCoordinator.managedViewController
+      didMoveToParentViewController:self.viewController];
+  self.viewController.offsetProvider = [self.omniboxCoordinator offsetProvider];
+
   self.omniboxPopupCoordinator =
       [self.omniboxCoordinator createPopupCoordinator:self.popupPositioner];
   self.omniboxPopupCoordinator.dispatcher = self.dispatcher;
+  self.omniboxPopupCoordinator.webStateList = self.webStateList;
   [self.omniboxPopupCoordinator start];
 
   self.mediator =
       [[LocationBarMediator alloc] initWithToolbarModel:[self toolbarModel]];
   self.mediator.webStateList = self.webStateList;
   self.mediator.consumer = self;
+
+  _fullscreenObserver =
+      std::make_unique<FullscreenUIUpdater>(self.viewController);
+  FullscreenControllerFactory::GetInstance()
+      ->GetForBrowserState(self.browserState)
+      ->AddObserver(_fullscreenObserver.get());
+
+  self.started = YES;
 }
 
 - (void)stop {
+  if (!self.started)
+    return;
+  [self.commandDispatcher stopDispatchingToTarget:self];
   // The popup has to be destroyed before the location bar.
   [self.omniboxPopupCoordinator stop];
   [self.omniboxCoordinator stop];
@@ -122,6 +172,11 @@ const int kLocationAuthorizationStatusCount = 4;
   self.viewController = nil;
   [self.mediator disconnect];
   self.mediator = nil;
+
+  FullscreenControllerFactory::GetInstance()
+      ->GetForBrowserState(self.browserState)
+      ->RemoveObserver(_fullscreenObserver.get());
+  self.started = NO;
 }
 
 - (BOOL)omniboxPopupHasAutocompleteResults {
@@ -136,22 +191,27 @@ const int kLocationAuthorizationStatusCount = 4;
   return [self.omniboxCoordinator isOmniboxFirstResponder];
 }
 
-#pragma mark - VoiceSearchControllerDelegate
-
-- (void)receiveVoiceSearchResult:(NSString*)result {
-  DCHECK(result);
-  [self loadURLForQuery:result];
+- (id<LocationBarAnimatee>)locationBarAnimatee {
+  return self.viewController;
 }
 
-#pragma mark - QRScannerResultLoading
+- (id<EditViewAnimatee>)editViewAnimatee {
+  return self.omniboxCoordinator.animatee;
+}
 
-- (void)receiveQRScannerResult:(NSString*)result loadImmediately:(BOOL)load {
-  DCHECK(result);
-  if (load) {
-    [self loadURLForQuery:result];
+#pragma mark - LoadQueryCommands
+
+- (void)loadQuery:(NSString*)query immediately:(BOOL)immediately {
+  DCHECK(query);
+  // Since the query is not user typed, sanitize it to make sure it's safe.
+  base::string16 sanitizedQuery =
+      OmniboxView::SanitizeTextForPaste(base::SysNSStringToUTF16(query));
+  if (immediately) {
+    [self loadURLForQuery:sanitizedQuery];
   } else {
-    [self focusOmnibox];
-    [self.omniboxCoordinator insertTextToOmnibox:result];
+    [self.omniboxCoordinator focusOmnibox];
+    [self.omniboxCoordinator
+        insertTextToOmnibox:base::SysUTF16ToNSString(sanitizedQuery)];
   }
 }
 
@@ -172,10 +232,10 @@ const int kLocationAuthorizationStatusCount = 4;
     // |loadURL|?  It doesn't seem to be causing major problems.  If we call
     // cancel before load, then any prerendered pages get destroyed before the
     // call to load.
-    [self.URLLoader loadURL:url
-                   referrer:web::Referrer()
-                 transition:transition
-          rendererInitiated:NO];
+    web::NavigationManager::WebLoadParams params(url);
+    params.transition_type = transition;
+    params.extra_headers = [self variationHeadersForURL:url];
+    [self.URLLoader loadURLWithParams:params];
 
     if (google_util::IsGoogleSearchUrl(url)) {
       UMA_HISTOGRAM_ENUMERATION(
@@ -194,13 +254,25 @@ const int kLocationAuthorizationStatusCount = 4;
   [self focusOmnibox];
 }
 
-- (void)focusOmnibox {
-  [self.viewController switchToEditing:YES];
+- (void)focusOmniboxFromFakebox {
   [self.omniboxCoordinator focusOmnibox];
+}
+
+- (void)focusOmnibox {
+  // When the NTP and fakebox are visible, make the fakebox animates into place
+  // before focusing the omnibox.
+  if (IsVisibleUrlNewTabPage([self webState]) &&
+      !self.browserState->IsOffTheRecord()) {
+    [self.viewController.dispatcher focusFakebox];
+  } else {
+    [self.omniboxCoordinator focusOmnibox];
+    [self.omniboxPopupCoordinator openPopup];
+  }
 }
 
 - (void)cancelOmniboxEdit {
   [self.omniboxCoordinator endEditing];
+  [self.omniboxPopupCoordinator closePopup];
 }
 
 #pragma mark - LocationBarDelegate
@@ -211,7 +283,6 @@ const int kLocationAuthorizationStatusCount = 4;
 
 - (void)locationBarHasResignedFirstResponder {
   [self.delegate locationBarDidResignFirstResponder];
-  [self.viewController switchToEditing:NO];
 }
 
 - (void)locationBarBeganEdit {
@@ -232,44 +303,74 @@ const int kLocationAuthorizationStatusCount = 4;
   [self focusOmnibox];
 }
 
+- (void)locationBarCopyTapped {
+  StoreURLInPasteboard(self.webState->GetVisibleURL());
+}
+
 #pragma mark - LocationBarConsumer
 
 - (void)updateLocationText:(NSString*)text {
   [self.omniboxCoordinator updateOmniboxState];
   [self.viewController updateLocationText:text];
+  [self.viewController updateForNTP:NO];
 }
 
 - (void)defocusOmnibox {
   [self cancelOmniboxEdit];
 }
 
-- (void)updateLocationIcon:(UIImage*)icon {
-  [self.viewController updateLocationIcon:icon];
+- (void)updateLocationIcon:(UIImage*)icon
+        securityStatusText:(NSString*)statusText {
+  [self.viewController updateLocationIcon:icon securityStatusText:statusText];
+}
+
+- (void)updateAfterNavigatingToNTP {
+  [self.viewController updateForNTP:YES];
+}
+
+- (void)updateLocationShareable:(BOOL)shareable {
+  [self.viewController setShareButtonEnabled:shareable];
 }
 
 #pragma mark - private
 
+// Returns a dictionary with variation headers for qualified URLs. Can be empty.
+- (NSDictionary*)variationHeadersForURL:(const GURL&)URL {
+  net::HttpRequestHeaders variation_headers;
+  variations::AppendVariationHeadersUnknownSignedIn(
+      URL,
+      self.browserState->IsOffTheRecord() ? variations::InIncognito::kYes
+                                          : variations::InIncognito::kNo,
+      &variation_headers);
+  NSMutableDictionary* result = [NSMutableDictionary dictionary];
+  net::HttpRequestHeaders::Iterator header_iterator(variation_headers);
+  while (header_iterator.GetNext()) {
+    NSString* name = base::SysUTF8ToNSString(header_iterator.name());
+    NSString* value = base::SysUTF8ToNSString(header_iterator.value());
+    result[name] = value;
+  }
+  return [result copy];
+}
+
 // Navigate to |query| from omnibox.
-- (void)loadURLForQuery:(NSString*)query {
+- (void)loadURLForQuery:(const base::string16&)query {
   GURL searchURL;
   metrics::OmniboxInputType type = AutocompleteInput::Parse(
-      base::SysNSStringToUTF16(query), std::string(),
-      AutocompleteSchemeClassifierImpl(), nullptr, nullptr, &searchURL);
+      query, std::string(), AutocompleteSchemeClassifierImpl(), nullptr,
+      nullptr, &searchURL);
   if (type != metrics::OmniboxInputType::URL || !searchURL.is_valid()) {
     searchURL = GetDefaultSearchURLForSearchTerms(
         ios::TemplateURLServiceFactory::GetForBrowserState(self.browserState),
-        base::SysNSStringToUTF16(query));
+        query);
   }
   if (searchURL.is_valid()) {
     // It is necessary to include PAGE_TRANSITION_FROM_ADDRESS_BAR in the
     // transition type is so that query-in-the-omnibox is triggered for the
     // URL.
-    ui::PageTransition transition = ui::PageTransitionFromInt(
+    web::NavigationManager::WebLoadParams params(searchURL);
+    params.transition_type = ui::PageTransitionFromInt(
         ui::PAGE_TRANSITION_LINK | ui::PAGE_TRANSITION_FROM_ADDRESS_BAR);
-    [self.URLLoader loadURL:GURL(searchURL)
-                   referrer:web::Referrer()
-                 transition:transition
-          rendererInitiated:NO];
+    [self.URLLoader loadURLWithParams:params];
   }
 }
 

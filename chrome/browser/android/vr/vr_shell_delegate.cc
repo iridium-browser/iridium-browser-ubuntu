@@ -8,19 +8,24 @@
 
 #include "base/android/jni_android.h"
 #include "base/callback_helpers.h"
+#include "chrome/browser/android/vr/arcore_device/arcore_device_provider.h"
 #include "chrome/browser/android/vr/metrics_util_android.h"
 #include "chrome/browser/android/vr/vr_shell.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/component_updater/vr_assets_component_installer.h"
 #include "chrome/browser/vr/assets_loader.h"
 #include "chrome/browser/vr/metrics/metrics_helper.h"
-#include "chrome/browser/vr/service/vr_device_manager.h"
 #include "chrome/browser/vr/service/vr_service_impl.h"
 #include "content/public/browser/webvr_service_provider.h"
 #include "device/vr/android/gvr/gvr_delegate_provider_factory.h"
 #include "device/vr/android/gvr/gvr_device.h"
+#include "device/vr/buildflags/buildflags.h"
 #include "jni/VrShellDelegate_jni.h"
 #include "third_party/gvr-android-sdk/src/libraries/headers/vr/gvr/capi/include/gvr.h"
+
+#if BUILDFLAG(ENABLE_ARCORE)
+#include "device/vr/android/arcore/arcore_device_provider_factory.h"
+#endif
 
 using base::android::JavaParamRef;
 using base::android::JavaRef;
@@ -47,6 +52,24 @@ VrShellDelegateProviderFactory::CreateGvrDelegateProvider() {
   return VrShellDelegate::CreateVrShellDelegate();
 }
 
+#if BUILDFLAG(ENABLE_ARCORE)
+class ArCoreDeviceProviderFactoryImpl
+    : public device::ArCoreDeviceProviderFactory {
+ public:
+  ArCoreDeviceProviderFactoryImpl() = default;
+  ~ArCoreDeviceProviderFactoryImpl() override = default;
+  std::unique_ptr<device::VRDeviceProvider> CreateDeviceProvider() override;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(ArCoreDeviceProviderFactoryImpl);
+};
+
+std::unique_ptr<device::VRDeviceProvider>
+ArCoreDeviceProviderFactoryImpl::CreateDeviceProvider() {
+  return std::make_unique<device::ArCoreDeviceProvider>();
+}
+#endif
+
 }  // namespace
 
 VrShellDelegate::VrShellDelegate(JNIEnv* env, jobject obj)
@@ -58,7 +81,7 @@ VrShellDelegate::VrShellDelegate(JNIEnv* env, jobject obj)
 
 VrShellDelegate::~VrShellDelegate() {
   DVLOG(1) << __FUNCTION__ << "=" << this;
-  device::VRDevice* device = GetDevice();
+  device::GvrDevice* device = GetDevice();
   if (device)
     device->OnExitPresent();
   if (!on_present_result_callback_.is_null())
@@ -83,7 +106,7 @@ VrShellDelegate* VrShellDelegate::GetNativeVrShellDelegate(
 void VrShellDelegate::SetDelegate(VrShell* vr_shell,
                                   gvr::ViewerType viewer_type) {
   vr_shell_ = vr_shell;
-  device::VRDevice* device = GetDevice();
+  device::GvrDevice* device = GetDevice();
   // When VrShell is created, we disable magic window mode as the user is inside
   // the headset. As currently implemented, orientation-based magic window
   // doesn't make sense when the window is fixed and the user is moving.
@@ -113,7 +136,7 @@ void VrShellDelegate::RemoveDelegate() {
     pending_successful_present_request_ = false;
     base::ResetAndReturn(&on_present_result_callback_).Run(false);
   }
-  device::VRDevice* device = GetDevice();
+  device::GvrDevice* device = GetDevice();
   if (device) {
     device->SetMagicWindowEnabled(true);
     device->OnExitPresent();
@@ -150,27 +173,24 @@ void VrShellDelegate::RecordVrStartAction(
 }
 
 void VrShellDelegate::OnPresentResult(
-    device::mojom::VRSubmitFrameClientPtr submit_client,
-    device::mojom::VRPresentationProviderRequest request,
     device::mojom::VRDisplayInfoPtr display_info,
-    device::mojom::VRRequestPresentOptionsPtr present_options,
-    device::mojom::VRDisplayHost::RequestPresentCallback callback,
+    device::mojom::XRRuntimeSessionOptionsPtr options,
+    base::OnceCallback<void(device::mojom::XRSessionPtr)> callback,
     bool success) {
   DVLOG(1) << __FUNCTION__ << ": success=" << success;
   if (!success) {
-    std::move(callback).Run(false, nullptr);
+    std::move(callback).Run(nullptr);
     possible_presentation_start_action_ = base::nullopt;
     return;
   }
 
   if (!vr_shell_) {
-    // We have to wait until the GL thread is ready since we have to pass it
-    // the VRSubmitFrameClient.
+    // We have to wait until the GL thread is ready since we have to get the
+    // XRPresentationClient.
     pending_successful_present_request_ = true;
     on_present_result_callback_ = base::BindOnce(
         &VrShellDelegate::OnPresentResult, base::Unretained(this),
-        std::move(submit_client), std::move(request), std::move(display_info),
-        std::move(present_options), std::move(callback));
+        std::move(display_info), std::move(options), std::move(callback));
     return;
   }
 
@@ -185,21 +205,20 @@ void VrShellDelegate::OnPresentResult(
 
   DVLOG(1) << __FUNCTION__ << ": connecting presenting service";
   request_present_response_callback_ = std::move(callback);
-  vr_shell_->ConnectPresentingService(
-      std::move(submit_client), std::move(request), std::move(display_info),
-      std::move(present_options));
+  vr_shell_->ConnectPresentingService(std::move(display_info),
+                                      std::move(options));
 }
 
 void VrShellDelegate::SendRequestPresentReply(
-    bool success,
-    device::mojom::VRDisplayFrameTransportOptionsPtr transport_options) {
+    device::mojom::XRSessionPtr session) {
   DVLOG(1) << __FUNCTION__;
   if (!request_present_response_callback_) {
     DLOG(ERROR) << __FUNCTION__ << ": ERROR: no callback";
     return;
   }
+
   base::ResetAndReturn(&request_present_response_callback_)
-      .Run(success, std::move(transport_options));
+      .Run(std::move(session));
 }
 
 void VrShellDelegate::DisplayActivate(JNIEnv* env,
@@ -228,7 +247,7 @@ void VrShellDelegate::DisplayActivate(JNIEnv* env,
 void VrShellDelegate::OnPause(JNIEnv* env, const JavaParamRef<jobject>& obj) {
   if (vr_shell_)
     return;
-  device::VRDevice* device = GetDevice();
+  device::GvrDevice* device = GetDevice();
   if (device)
     device->PauseTracking();
 }
@@ -236,7 +255,7 @@ void VrShellDelegate::OnPause(JNIEnv* env, const JavaParamRef<jobject>& obj) {
 void VrShellDelegate::OnResume(JNIEnv* env, const JavaParamRef<jobject>& obj) {
   if (vr_shell_)
     return;
-  device::VRDevice* device = GetDevice();
+  device::GvrDevice* device = GetDevice();
   if (device)
     device->ResumeTracking();
 }
@@ -246,17 +265,16 @@ void VrShellDelegate::Destroy(JNIEnv* env, const JavaParamRef<jobject>& obj) {
 }
 
 bool VrShellDelegate::ShouldDisableGvrDevice() {
-  JNIEnv* env = AttachCurrentThread();
   int vr_support_level =
-      Java_VrShellDelegate_getVrSupportLevel(env, j_vr_shell_delegate_);
-  return static_cast<VrSupportLevel>(vr_support_level) ==
-         VrSupportLevel::kVrNotAvailable;
+      Java_VrShellDelegate_getVrSupportLevel(AttachCurrentThread());
+  return static_cast<VrSupportLevel>(vr_support_level) <=
+         VrSupportLevel::kVrNeedsUpdate;
 }
 
-void VrShellDelegate::SetDeviceId(unsigned int device_id) {
+void VrShellDelegate::SetDeviceId(device::mojom::XRDeviceId device_id) {
   device_id_ = device_id;
   if (vr_shell_) {
-    device::VRDevice* device = GetDevice();
+    device::GvrDevice* device = GetDevice();
     // See comment in VrShellDelegate::SetDelegate. This handles the case where
     // VrShell is created before the device code is initialized (like when
     // entering VR browsing on a non-webVR page).
@@ -265,23 +283,21 @@ void VrShellDelegate::SetDeviceId(unsigned int device_id) {
   }
 }
 
-void VrShellDelegate::RequestWebVRPresent(
-    device::mojom::VRSubmitFrameClientPtr submit_client,
-    device::mojom::VRPresentationProviderRequest request,
+void VrShellDelegate::StartWebXRPresentation(
     device::mojom::VRDisplayInfoPtr display_info,
-    device::mojom::VRRequestPresentOptionsPtr present_options,
-    device::mojom::VRDisplayHost::RequestPresentCallback callback) {
+    device::mojom::XRRuntimeSessionOptionsPtr options,
+    base::OnceCallback<void(device::mojom::XRSessionPtr)> callback) {
   if (!on_present_result_callback_.is_null() ||
       !request_present_response_callback_.is_null()) {
     // Can only handle one request at a time. This is also extremely unlikely to
     // happen in practice.
-    std::move(callback).Run(false, nullptr);
+    std::move(callback).Run(nullptr);
     return;
   }
+
   on_present_result_callback_ = base::BindOnce(
       &VrShellDelegate::OnPresentResult, base::Unretained(this),
-      std::move(submit_client), std::move(request), std::move(display_info),
-      std::move(present_options), std::move(callback));
+      std::move(display_info), std::move(options), std::move(callback));
 
   // If/When VRShell is ready for use it will call SetPresentResult.
   JNIEnv* env = AttachCurrentThread();
@@ -291,7 +307,7 @@ void VrShellDelegate::RequestWebVRPresent(
 void VrShellDelegate::ExitWebVRPresent() {
   JNIEnv* env = AttachCurrentThread();
   Java_VrShellDelegate_exitWebVRPresent(env, j_vr_shell_delegate_);
-  device::VRDevice* device = GetDevice();
+  device::GvrDevice* device = GetDevice();
   if (device)
     device->OnExitPresent();
 }
@@ -317,8 +333,8 @@ void VrShellDelegate::OnListeningForActivateChanged(bool listening) {
                                                     listening);
 }
 
-device::VRDevice* VrShellDelegate::GetDevice() {
-  return VRDeviceManager::GetInstance()->GetDevice(device_id_);
+device::GvrDevice* VrShellDelegate::GetDevice() {
+  return device::GvrDelegateProviderFactory::GetDevice();
 }
 
 // ----------------------------------------------------------------------------
@@ -333,7 +349,14 @@ static void JNI_VrShellDelegate_OnLibraryAvailable(
     JNIEnv* env,
     const JavaParamRef<jclass>& clazz) {
   device::GvrDelegateProviderFactory::Install(
-      new VrShellDelegateProviderFactory);
+      std::make_unique<VrShellDelegateProviderFactory>());
+
+#if BUILDFLAG(ENABLE_ARCORE)
+  // TODO(https://crbug.com/837965): Move this to an ARCore-specific location
+  // with similar timing (occurs before XRRuntimeManager is initialized).
+  device::ArCoreDeviceProviderFactory::Install(
+      std::make_unique<ArCoreDeviceProviderFactoryImpl>());
+#endif
 }
 
 static void JNI_VrShellDelegate_RegisterVrAssetsComponent(

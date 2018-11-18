@@ -25,6 +25,7 @@
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/browser/webui/content_web_ui_controller_factory.h"
 #include "content/browser/webui/web_ui_controller_factory_registry.h"
+#include "content/public/common/bindings_policy.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/common/content_features.h"
@@ -42,6 +43,13 @@
 #include "url/url_util.h"
 
 namespace content {
+namespace {
+
+GURL GetWebUIURL(std::string host) {
+  return GURL(std::string(kChromeUIScheme) + "://" + host);
+}
+
+}  // namespace
 
 const char kPrivilegedScheme[] = "privileged";
 
@@ -107,7 +115,8 @@ class SiteInstanceTest : public testing::Test {
     url::AddStandardScheme(kPrivilegedScheme, url::SCHEME_WITH_HOST);
     url::AddStandardScheme(kChromeUIScheme, url::SCHEME_WITH_HOST);
 
-    RenderProcessHostImpl::set_render_process_host_factory(&rph_factory_);
+    RenderProcessHostImpl::set_render_process_host_factory_for_testing(
+        &rph_factory_);
   }
 
   void TearDown() override {
@@ -115,7 +124,7 @@ class SiteInstanceTest : public testing::Test {
     EXPECT_TRUE(RenderProcessHost::AllHostsIterator().IsAtEnd());
 
     SetBrowserClientForTesting(old_browser_client_);
-    RenderProcessHostImpl::set_render_process_host_factory(nullptr);
+    RenderProcessHostImpl::set_render_process_host_factory_for_testing(nullptr);
 
     // http://crbug.com/143565 found SiteInstanceTest leaking an
     // AppCacheDatabase. This happens because some part of the test indirectly
@@ -165,7 +174,7 @@ TEST_F(SiteInstanceTest, SiteInstanceDestructor) {
 
   NavigationEntryImpl* e1 = new NavigationEntryImpl(
       instance, url, Referrer(), base::string16(), ui::PAGE_TRANSITION_LINK,
-      false);
+      false, nullptr /* blob_url_loader_factory */);
 
   // Redundantly setting e1's SiteInstance shouldn't affect the ref count.
   e1->set_site_instance(instance);
@@ -175,7 +184,7 @@ TEST_F(SiteInstanceTest, SiteInstanceDestructor) {
   // Add a second reference
   NavigationEntryImpl* e2 = new NavigationEntryImpl(
       instance, url, Referrer(), base::string16(), ui::PAGE_TRANSITION_LINK,
-      false);
+      false, nullptr /* blob_url_loader_factory */);
 
   instance = nullptr;
   EXPECT_EQ(0, browser_client()->GetAndClearSiteInstanceDeleteCount());
@@ -194,10 +203,10 @@ TEST_F(SiteInstanceTest, SiteInstanceDestructor) {
   // Ensure that instances are deleted when their RenderViewHosts are gone.
   std::unique_ptr<TestBrowserContext> browser_context(new TestBrowserContext());
   {
-    std::unique_ptr<WebContentsImpl> web_contents(static_cast<WebContentsImpl*>(
+    std::unique_ptr<WebContents> web_contents(
         WebContents::Create(WebContents::CreateParams(
             browser_context.get(),
-            SiteInstance::Create(browser_context.get())))));
+            SiteInstance::Create(browser_context.get()))));
     EXPECT_EQ(0, browser_client()->GetAndClearSiteInstanceDeleteCount());
     EXPECT_EQ(0, browser_client()->GetAndClearBrowsingInstanceDeleteCount());
   }
@@ -209,40 +218,6 @@ TEST_F(SiteInstanceTest, SiteInstanceDestructor) {
   EXPECT_EQ(1, browser_client()->GetAndClearSiteInstanceDeleteCount());
   EXPECT_EQ(1, browser_client()->GetAndClearBrowsingInstanceDeleteCount());
   // contents is now deleted, along with instance and browsing_instance
-}
-
-// Test that NavigationEntries with SiteInstances can be cloned, but that their
-// SiteInstances can be changed afterwards.  Also tests that the ref counts are
-// updated properly after the change.
-TEST_F(SiteInstanceTest, CloneNavigationEntry) {
-  const GURL url("test:foo");
-
-  std::unique_ptr<NavigationEntryImpl> e1 =
-      base::WrapUnique(new NavigationEntryImpl(
-          SiteInstanceImpl::Create(nullptr), url, Referrer(),
-          base::string16(), ui::PAGE_TRANSITION_LINK, false));
-
-  // Clone the entry.
-  std::unique_ptr<NavigationEntryImpl> e2 = e1->Clone();
-
-  // Should be able to change the SiteInstance of the cloned entry.
-  e2->set_site_instance(SiteInstanceImpl::Create(nullptr));
-
-  EXPECT_EQ(0, browser_client()->GetAndClearSiteInstanceDeleteCount());
-  EXPECT_EQ(0, browser_client()->GetAndClearBrowsingInstanceDeleteCount());
-
-  // The first SiteInstance and BrowsingInstance should go away after resetting
-  // e1, since e2 should no longer be referencing it.
-  e1.reset();
-  EXPECT_EQ(1, browser_client()->GetAndClearSiteInstanceDeleteCount());
-  EXPECT_EQ(1, browser_client()->GetAndClearBrowsingInstanceDeleteCount());
-
-  // The second SiteInstance should go away after resetting e2.
-  e2.reset();
-  EXPECT_EQ(1, browser_client()->GetAndClearSiteInstanceDeleteCount());
-  EXPECT_EQ(1, browser_client()->GetAndClearBrowsingInstanceDeleteCount());
-
-  DrainMessageLoop();
 }
 
 // Test to ensure GetProcess returns and creates processes correctly.
@@ -283,51 +258,51 @@ TEST_F(SiteInstanceTest, SetSite) {
 TEST_F(SiteInstanceTest, GetSiteForURL) {
   // Pages are irrelevant.
   GURL test_url = GURL("http://www.google.com/index.html");
-  GURL site_url = SiteInstanceImpl::GetSiteForURL(nullptr, test_url);
+  GURL site_url = SiteInstance::GetSiteForURL(nullptr, test_url);
   EXPECT_EQ(GURL("http://google.com"), site_url);
   EXPECT_EQ("http", site_url.scheme());
   EXPECT_EQ("google.com", site_url.host());
 
   // Ports are irrelevant.
   test_url = GURL("https://www.google.com:8080");
-  site_url = SiteInstanceImpl::GetSiteForURL(nullptr, test_url);
+  site_url = SiteInstance::GetSiteForURL(nullptr, test_url);
   EXPECT_EQ(GURL("https://google.com"), site_url);
 
   // Punycode is canonicalized.
   test_url = GURL("http://☃snowperson☃.net:333/");
-  site_url = SiteInstanceImpl::GetSiteForURL(nullptr, test_url);
+  site_url = SiteInstance::GetSiteForURL(nullptr, test_url);
   EXPECT_EQ(GURL("http://xn--snowperson-di0gka.net"), site_url);
 
   // Username and password are stripped out.
   test_url = GURL("ftp://username:password@ftp.chromium.org/files/README");
-  site_url = SiteInstanceImpl::GetSiteForURL(nullptr, test_url);
+  site_url = SiteInstance::GetSiteForURL(nullptr, test_url);
   EXPECT_EQ(GURL("ftp://chromium.org"), site_url);
 
   // Literal IP addresses of any flavor are okay.
   test_url = GURL("http://127.0.0.1/a.html");
-  site_url = SiteInstanceImpl::GetSiteForURL(nullptr, test_url);
+  site_url = SiteInstance::GetSiteForURL(nullptr, test_url);
   EXPECT_EQ(GURL("http://127.0.0.1"), site_url);
   EXPECT_EQ("127.0.0.1", site_url.host());
 
   test_url = GURL("http://2130706433/a.html");
-  site_url = SiteInstanceImpl::GetSiteForURL(nullptr, test_url);
+  site_url = SiteInstance::GetSiteForURL(nullptr, test_url);
   EXPECT_EQ(GURL("http://127.0.0.1"), site_url);
   EXPECT_EQ("127.0.0.1", site_url.host());
 
   test_url = GURL("http://[::1]:2/page.html");
-  site_url = SiteInstanceImpl::GetSiteForURL(nullptr, test_url);
+  site_url = SiteInstance::GetSiteForURL(nullptr, test_url);
   EXPECT_EQ(GURL("http://[::1]"), site_url);
   EXPECT_EQ("[::1]", site_url.host());
 
   // Hostnames without TLDs are okay.
   test_url = GURL("http://foo/a.html");
-  site_url = SiteInstanceImpl::GetSiteForURL(nullptr, test_url);
+  site_url = SiteInstance::GetSiteForURL(nullptr, test_url);
   EXPECT_EQ(GURL("http://foo"), site_url);
   EXPECT_EQ("foo", site_url.host());
 
   // File URLs should include the scheme.
   test_url = GURL("file:///C:/Downloads/");
-  site_url = SiteInstanceImpl::GetSiteForURL(nullptr, test_url);
+  site_url = SiteInstance::GetSiteForURL(nullptr, test_url);
   EXPECT_EQ(GURL("file:"), site_url);
   EXPECT_EQ("file", site_url.scheme());
   EXPECT_FALSE(site_url.has_host());
@@ -336,21 +311,34 @@ TEST_F(SiteInstanceTest, GetSiteForURL) {
   // maps *all* file://... URLs into "file://" origin) such file URLs still need
   // to map into "file:" site URL.  See also https://crbug.com/776160.
   test_url = GURL("file://server/path");
-  site_url = SiteInstanceImpl::GetSiteForURL(nullptr, test_url);
+  site_url = SiteInstance::GetSiteForURL(nullptr, test_url);
   EXPECT_EQ(GURL("file:"), site_url);
   EXPECT_EQ("file", site_url.scheme());
   EXPECT_FALSE(site_url.has_host());
 
-  // Data URLs should include the scheme.
+  // Data URLs should include the whole URL, except for the hash, when Site
+  // Isolation is enabled.  Otherwise they just include the scheme.
   test_url = GURL("data:text/html,foo");
-  site_url = SiteInstanceImpl::GetSiteForURL(nullptr, test_url);
-  EXPECT_EQ(GURL("data:"), site_url);
+  site_url = SiteInstance::GetSiteForURL(nullptr, test_url);
+  if (AreAllSitesIsolatedForTesting())
+    EXPECT_EQ(test_url, site_url);
+  else
+    EXPECT_EQ(GURL("data:"), site_url);
   EXPECT_EQ("data", site_url.scheme());
   EXPECT_FALSE(site_url.has_host());
+  test_url = GURL("data:text/html,foo#bar");
+  site_url = SiteInstance::GetSiteForURL(nullptr, test_url);
+  EXPECT_FALSE(site_url.has_ref());
+  if (AreAllSitesIsolatedForTesting()) {
+    EXPECT_NE(test_url, site_url);
+    EXPECT_TRUE(site_url.EqualsIgnoringRef(test_url));
+  } else {
+    EXPECT_EQ(GURL("data:"), site_url);
+  }
 
   // Javascript URLs should include the scheme.
   test_url = GURL("javascript:foo();");
-  site_url = SiteInstanceImpl::GetSiteForURL(nullptr, test_url);
+  site_url = SiteInstance::GetSiteForURL(nullptr, test_url);
   EXPECT_EQ(GURL("javascript:"), site_url);
   EXPECT_EQ("javascript", site_url.scheme());
   EXPECT_FALSE(site_url.has_host());
@@ -359,26 +347,45 @@ TEST_F(SiteInstanceTest, GetSiteForURL) {
   test_url = GURL(
       "blob:gopher://www.ftp.chromium.org/"
       "4d4ff040-6d61-4446-86d3-13ca07ec9ab9");
-  site_url = SiteInstanceImpl::GetSiteForURL(nullptr, test_url);
+  site_url = SiteInstance::GetSiteForURL(nullptr, test_url);
   EXPECT_EQ(GURL("gopher://chromium.org"), site_url);
 
   // Blob URLs with file origin also extract the site from the origin.
   test_url = GURL("blob:file:///1029e5a4-2983-4b90-a585-ed217563acfeb");
-  site_url = SiteInstanceImpl::GetSiteForURL(nullptr, test_url);
+  site_url = SiteInstance::GetSiteForURL(nullptr, test_url);
   EXPECT_EQ(GURL("file:"), site_url);
   EXPECT_EQ("file", site_url.scheme());
   EXPECT_FALSE(site_url.has_host());
+
+  // Blob URLs created from a unique origin use the full URL as the site URL
+  // when Site Isolation is enabled, except for the hash.  Otherwise they just
+  // include the scheme.
+  test_url = GURL("blob:null/1029e5a4-2983-4b90-a585-ed217563acfeb");
+  site_url = SiteInstance::GetSiteForURL(nullptr, test_url);
+  if (AreAllSitesIsolatedForTesting())
+    EXPECT_EQ(test_url, site_url);
+  else
+    EXPECT_EQ(GURL("blob:"), site_url);
+  test_url = GURL("blob:null/1029e5a4-2983-4b90-a585-ed217563acfeb#foo");
+  site_url = SiteInstance::GetSiteForURL(nullptr, test_url);
+  EXPECT_FALSE(site_url.has_ref());
+  if (AreAllSitesIsolatedForTesting()) {
+    EXPECT_NE(test_url, site_url);
+    EXPECT_TRUE(site_url.EqualsIgnoringRef(test_url));
+  } else {
+    EXPECT_EQ(GURL("blob:"), site_url);
+  }
 
   // Private domains are preserved, appspot being such a site.
   test_url = GURL(
       "blob:http://www.example.appspot.com:44/"
       "4d4ff040-6d61-4446-86d3-13ca07ec9ab9");
-  site_url = SiteInstanceImpl::GetSiteForURL(nullptr, test_url);
+  site_url = SiteInstance::GetSiteForURL(nullptr, test_url);
   EXPECT_EQ(GURL("http://example.appspot.com"), site_url);
 
   // The site of filesystem URLs is determined by the inner URL.
   test_url = GURL("filesystem:http://www.google.com/foo/bar.html?foo#bar");
-  site_url = SiteInstanceImpl::GetSiteForURL(nullptr, test_url);
+  site_url = SiteInstance::GetSiteForURL(nullptr, test_url);
   EXPECT_EQ(GURL("http://google.com"), site_url);
 
   // Guest URLs are special and need to have the path in the site as well,
@@ -386,10 +393,68 @@ TEST_F(SiteInstanceTest, GetSiteForURL) {
   std::string guest_url(kGuestScheme);
   guest_url.append("://abc123/path");
   test_url = GURL(guest_url);
-  site_url = SiteInstanceImpl::GetSiteForURL(nullptr, test_url);
+  site_url = SiteInstance::GetSiteForURL(nullptr, test_url);
   EXPECT_EQ(test_url, site_url);
 
   DrainMessageLoop();
+}
+
+// Test that process lock URLs are computed without using effective URLs.
+TEST_F(SiteInstanceTest, ProcessLockDoesNotUseEffectiveURL) {
+  GURL test_url("https://some.app.foo.com/");
+  GURL nonapp_site_url("https://foo.com/");
+  GURL app_url("https://app.com/");
+  EffectiveURLContentBrowserClient modified_client(test_url, app_url);
+  ContentBrowserClient* regular_client =
+      SetBrowserClientForTesting(&modified_client);
+  std::unique_ptr<TestBrowserContext> browser_context(new TestBrowserContext());
+
+  // Sanity check that GetSiteForURL's |use_effective_urls| option works
+  // properly.  When it's true, the site URL should include both the effective
+  // URL's site (app.com) and the original URL's site (foo.com).
+  GURL expected_app_site_url(app_url.spec() + "#" + nonapp_site_url.spec());
+  {
+    GURL site_url = SiteInstanceImpl::GetSiteForURL(
+        nullptr, test_url, false /* use_effective_urls */);
+    EXPECT_EQ(nonapp_site_url, site_url);
+
+    site_url = SiteInstanceImpl::GetSiteForURL(nullptr, test_url,
+                                               true /* use_effective_urls */);
+    EXPECT_EQ(expected_app_site_url, site_url);
+  }
+
+  // New SiteInstance in a new BrowsingInstance with a predetermined URL.
+  {
+    scoped_refptr<SiteInstanceImpl> site_instance =
+        SiteInstanceImpl::CreateForURL(browser_context.get(), test_url);
+    EXPECT_EQ(expected_app_site_url, site_instance->GetSiteURL());
+    EXPECT_EQ(nonapp_site_url, site_instance->lock_url());
+  }
+
+  // New related SiteInstance from an existing SiteInstance with a
+  // predetermined URL.
+  {
+    scoped_refptr<SiteInstanceImpl> bar_site_instance =
+        SiteInstanceImpl::CreateForURL(browser_context.get(),
+                                       GURL("https://bar.com/"));
+    scoped_refptr<SiteInstance> site_instance =
+        bar_site_instance->GetRelatedSiteInstance(test_url);
+    EXPECT_EQ(expected_app_site_url, site_instance->GetSiteURL());
+    EXPECT_EQ(nonapp_site_url,
+              static_cast<SiteInstanceImpl*>(site_instance.get())->lock_url());
+  }
+
+  // New SiteInstance with a lazily assigned site URL.
+  {
+    scoped_refptr<SiteInstanceImpl> site_instance =
+        SiteInstanceImpl::Create(browser_context.get());
+    EXPECT_FALSE(site_instance->HasSite());
+    site_instance->SetSite(test_url);
+    EXPECT_EQ(expected_app_site_url, site_instance->GetSiteURL());
+    EXPECT_EQ(nonapp_site_url, site_instance->lock_url());
+  }
+
+  SetBrowserClientForTesting(regular_client);
 }
 
 // Test of distinguishing URLs from different sites.  Most of this logic is
@@ -611,78 +676,6 @@ TEST_F(SiteInstanceTest, OneSiteInstancePerSiteInBrowserContext) {
   DrainMessageLoop();
 }
 
-static scoped_refptr<SiteInstanceImpl> CreateSiteInstance(
-    BrowserContext* browser_context,
-    const GURL& url) {
-  return SiteInstanceImpl::CreateForURL(browser_context, url);
-}
-
-// Test to ensure that pages that require certain privileges are grouped
-// in processes with similar pages.
-TEST_F(SiteInstanceTest, ProcessSharingByType) {
-  // This test shouldn't run with --site-per-process mode, which prohibits
-  // the renderer process reuse this test explicitly exercises.
-  if (AreAllSitesIsolatedForTesting())
-    return;
-
-  ChildProcessSecurityPolicyImpl* policy =
-      ChildProcessSecurityPolicyImpl::GetInstance();
-
-  // Make a bunch of mock renderers so that we hit the limit.
-  std::unique_ptr<TestBrowserContext> browser_context(new TestBrowserContext());
-  std::vector<std::unique_ptr<MockRenderProcessHost>> hosts;
-  for (size_t i = 0; i < kMaxRendererProcessCount; ++i) {
-    hosts.push_back(
-        std::make_unique<MockRenderProcessHost>(browser_context.get()));
-    hosts[i]->SetIsUsed();
-  }
-
-  // On Android by default the number of renderer hosts is unlimited and process
-  // sharing doesn't happen. We set the override so that the test can run
-  // everywhere.
-  RenderProcessHost::SetMaxRendererProcessCount(kMaxRendererProcessCount);
-
-  // Create some extension instances and make sure they share a process.
-  scoped_refptr<SiteInstanceImpl> extension1_instance(
-      CreateSiteInstance(browser_context.get(),
-          GURL(kPrivilegedScheme + std::string("://foo/bar"))));
-  set_privileged_process_id(extension1_instance->GetProcess()->GetID());
-
-  scoped_refptr<SiteInstanceImpl> extension2_instance(
-      CreateSiteInstance(browser_context.get(),
-          GURL(kPrivilegedScheme + std::string("://baz/bar"))));
-
-  std::unique_ptr<RenderProcessHost> extension_host(
-      extension1_instance->GetProcess());
-  EXPECT_EQ(extension1_instance->GetProcess(),
-            extension2_instance->GetProcess());
-
-  // Create some WebUI instances and make sure they share a process.
-  scoped_refptr<SiteInstanceImpl> webui1_instance(CreateSiteInstance(
-      browser_context.get(), GURL(kChromeUIScheme + std::string("://gpu"))));
-  policy->GrantWebUIBindings(webui1_instance->GetProcess()->GetID());
-
-  scoped_refptr<SiteInstanceImpl> webui2_instance(CreateSiteInstance(
-      browser_context.get(),
-      GURL(kChromeUIScheme + std::string("://media-internals"))));
-
-  std::unique_ptr<RenderProcessHost> dom_host(webui1_instance->GetProcess());
-  EXPECT_EQ(webui1_instance->GetProcess(), webui2_instance->GetProcess());
-
-  // Make sure none of differing privilege processes are mixed.
-  EXPECT_NE(extension1_instance->GetProcess(), webui1_instance->GetProcess());
-
-  for (size_t i = 0; i < kMaxRendererProcessCount; ++i) {
-    EXPECT_NE(extension1_instance->GetProcess(), hosts[i].get());
-    EXPECT_NE(webui1_instance->GetProcess(), hosts[i].get());
-  }
-
-  DrainMessageLoop();
-
-  // Disable the process limit override.
-  RenderProcessHost::SetMaxRendererProcessCount(0u);
-}
-
 // Test to ensure that HasWrongProcessForURL behaves properly for different
 // types of URLs.
 TEST_F(SiteInstanceTest, HasWrongProcessForURL) {
@@ -722,7 +715,7 @@ TEST_F(SiteInstanceTest, HasWrongProcessForURL) {
 
   // Simulate granting WebUI bindings for the process.
   ChildProcessSecurityPolicyImpl::GetInstance()->GrantWebUIBindings(
-      webui_host->GetID());
+      webui_host->GetID(), BINDINGS_POLICY_WEB_UI);
 
   EXPECT_TRUE(webui_instance->HasProcess());
   EXPECT_FALSE(webui_instance->HasWrongProcessForURL(webui_url));
@@ -829,8 +822,10 @@ TEST_F(SiteInstanceTest, NoProcessPerSiteForEmptySite) {
   EXPECT_TRUE(instance->GetSiteURL().is_empty());
   host.reset(instance->GetProcess());
 
-  EXPECT_FALSE(RenderProcessHostImpl::GetProcessHostForSite(
+  EXPECT_FALSE(RenderProcessHostImpl::GetSoleProcessHostForURL(
       browser_context.get(), GURL()));
+  EXPECT_FALSE(RenderProcessHostImpl::GetSoleProcessHostForSite(
+      browser_context.get(), GURL(), GURL()));
 
   DrainMessageLoop();
 }
@@ -875,55 +870,6 @@ TEST_F(SiteInstanceTest, IsSameWebsiteForNestedURLs) {
   EXPECT_FALSE(
       SiteInstance::IsSameWebSite(nullptr, https_bar_url, blob_bar_url));
   EXPECT_FALSE(SiteInstance::IsSameWebSite(nullptr, https_bar_url, fs_bar_url));
-}
-
-TEST_F(SiteInstanceTest, DefaultSubframeSiteInstance) {
-  if (AreAllSitesIsolatedForTesting())
-    return;  // --top-document-isolation is not possible.
-
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitAndEnableFeature(features::kTopDocumentIsolation);
-
-  std::unique_ptr<TestBrowserContext> browser_context(new TestBrowserContext());
-  scoped_refptr<SiteInstanceImpl> main_instance =
-      SiteInstanceImpl::Create(browser_context.get());
-  scoped_refptr<SiteInstanceImpl> subframe_instance =
-      main_instance->GetDefaultSubframeSiteInstance();
-  int subframe_instance_id = subframe_instance->GetId();
-
-  EXPECT_NE(main_instance, subframe_instance);
-  EXPECT_EQ(subframe_instance, main_instance->GetDefaultSubframeSiteInstance());
-  EXPECT_FALSE(main_instance->IsDefaultSubframeSiteInstance());
-  EXPECT_TRUE(subframe_instance->IsDefaultSubframeSiteInstance());
-
-  EXPECT_EQ(0, browser_client()->GetAndClearSiteInstanceDeleteCount());
-  EXPECT_EQ(0, browser_client()->GetAndClearBrowsingInstanceDeleteCount());
-
-  // Free the subframe instance.
-  subframe_instance = nullptr;
-  EXPECT_EQ(1, browser_client()->GetAndClearSiteInstanceDeleteCount());
-  EXPECT_EQ(0, browser_client()->GetAndClearBrowsingInstanceDeleteCount());
-
-  // Calling GetDefaultSubframeSiteInstance again should return a new
-  // SiteInstance with a different ID from the original.
-  subframe_instance = main_instance->GetDefaultSubframeSiteInstance();
-  EXPECT_NE(subframe_instance->GetId(), subframe_instance_id);
-  EXPECT_FALSE(main_instance->IsDefaultSubframeSiteInstance());
-  EXPECT_TRUE(subframe_instance->IsDefaultSubframeSiteInstance());
-  EXPECT_EQ(subframe_instance->GetDefaultSubframeSiteInstance(),
-            subframe_instance);
-  EXPECT_EQ(0, browser_client()->GetAndClearSiteInstanceDeleteCount());
-  EXPECT_EQ(0, browser_client()->GetAndClearBrowsingInstanceDeleteCount());
-
-  // Free the main instance.
-  main_instance = nullptr;
-  EXPECT_EQ(1, browser_client()->GetAndClearSiteInstanceDeleteCount());
-  EXPECT_EQ(0, browser_client()->GetAndClearBrowsingInstanceDeleteCount());
-
-  // Free the subframe instance, which should free the browsing instance.
-  subframe_instance = nullptr;
-  EXPECT_EQ(1, browser_client()->GetAndClearSiteInstanceDeleteCount());
-  EXPECT_EQ(1, browser_client()->GetAndClearBrowsingInstanceDeleteCount());
 }
 
 TEST_F(SiteInstanceTest, IsolatedOrigins) {
@@ -1022,7 +968,7 @@ TEST_F(SiteInstanceTest, IsValidIsolatedOrigin) {
 
   // Scheme must be HTTP or HTTPS.
   EXPECT_FALSE(IsolatedOriginUtil::IsValidIsolatedOrigin(
-      url::Origin::Create(GURL(kChromeUIScheme + std::string("://gpu")))));
+      url::Origin::Create(GetWebUIURL(kChromeUIGpuHost))));
   EXPECT_TRUE(IsolatedOriginUtil::IsValidIsolatedOrigin(
       url::Origin::Create(GURL("http://a.com"))));
   EXPECT_TRUE(IsolatedOriginUtil::IsValidIsolatedOrigin(
@@ -1195,11 +1141,15 @@ TEST_F(SiteInstanceTest, OriginalURL) {
       SetBrowserClientForTesting(&modified_client);
   std::unique_ptr<TestBrowserContext> browser_context(new TestBrowserContext());
 
+  // The site URL of of effective URL should include both the effective URL's
+  // site and the original URL's site.
+  GURL expected_site_url(app_url.spec() + "#" + original_url.spec());
+
   // New SiteInstance in a new BrowsingInstance with a predetermined URL.
   {
     scoped_refptr<SiteInstanceImpl> site_instance =
         SiteInstanceImpl::CreateForURL(browser_context.get(), original_url);
-    EXPECT_EQ(app_url, site_instance->GetSiteURL());
+    EXPECT_EQ(expected_site_url, site_instance->GetSiteURL());
     EXPECT_EQ(original_url, site_instance->original_url());
   }
 
@@ -1211,7 +1161,7 @@ TEST_F(SiteInstanceTest, OriginalURL) {
                                        GURL("https://bar.com/"));
     scoped_refptr<SiteInstance> site_instance =
         bar_site_instance->GetRelatedSiteInstance(original_url);
-    EXPECT_EQ(app_url, site_instance->GetSiteURL());
+    EXPECT_EQ(expected_site_url, site_instance->GetSiteURL());
     EXPECT_EQ(
         original_url,
         static_cast<SiteInstanceImpl*>(site_instance.get())->original_url());
@@ -1224,11 +1174,24 @@ TEST_F(SiteInstanceTest, OriginalURL) {
     EXPECT_FALSE(site_instance->HasSite());
     EXPECT_TRUE(site_instance->original_url().is_empty());
     site_instance->SetSite(original_url);
-    EXPECT_EQ(app_url, site_instance->GetSiteURL());
+    EXPECT_EQ(expected_site_url, site_instance->GetSiteURL());
     EXPECT_EQ(original_url, site_instance->original_url());
   }
 
   SetBrowserClientForTesting(regular_client);
+}
+
+TEST_F(SiteInstanceTest, IsOriginLockASite) {
+  EXPECT_FALSE(SiteInstanceImpl::IsOriginLockASite(GURL("http://")));
+  EXPECT_FALSE(SiteInstanceImpl::IsOriginLockASite(GURL("")));
+  EXPECT_FALSE(SiteInstanceImpl::IsOriginLockASite(GURL("google.com")));
+  EXPECT_FALSE(SiteInstanceImpl::IsOriginLockASite(GURL("http:")));
+  EXPECT_FALSE(SiteInstanceImpl::IsOriginLockASite(GURL("chrome:")));
+
+  EXPECT_TRUE(SiteInstanceImpl::IsOriginLockASite(GURL("http://foo.com")));
+  EXPECT_TRUE(SiteInstanceImpl::IsOriginLockASite(GURL("http://bar.foo.com")));
+  EXPECT_TRUE(SiteInstanceImpl::IsOriginLockASite(
+      GURL("http://user:pass@google.com:99/foo;bar?q=a#ref")));
 }
 
 }  // namespace content

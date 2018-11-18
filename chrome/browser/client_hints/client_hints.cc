@@ -9,24 +9,26 @@
 #include "chrome/browser/client_hints/client_hints.h"
 
 #include "base/memory/ptr_util.h"
+#include "base/metrics/field_trial_params.h"
 #include "base/rand_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "build/build_config.h"
+#include "chrome/browser/browser_process.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
-#include "chrome/browser/net/nqe/ui_network_quality_estimator_service.h"
-#include "chrome/browser/net/nqe/ui_network_quality_estimator_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/client_hints/client_hints.h"
-#include "components/content_settings/core/browser/cookie_settings.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings_utils.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/common/content_features.h"
 #include "content/public/common/origin_util.h"
 #include "net/base/url_util.h"
 #include "net/http/http_request_headers.h"
 #include "net/nqe/effective_connection_type.h"
+#include "net/nqe/network_quality_estimator_params.h"
 #include "net/url_request/url_request.h"
+#include "services/network/public/cpp/network_quality_tracker.h"
 #include "third_party/blink/public/common/client_hints/client_hints.h"
 #include "third_party/blink/public/common/device_memory/approximated_device_memory.h"
 #include "third_party/blink/public/platform/web_client_hints_type.h"
@@ -107,6 +109,51 @@ double GetDeviceScaleFactor() {
   return device_scale_factor;
 }
 
+// Returns a string corresponding to |value|. The returned string satisfies
+// ABNF: 1*DIGIT [ "." 1*DIGIT ]
+std::string DoubleToSpecCompliantString(double value) {
+  DCHECK_LE(0.0, value);
+  std::string result = base::NumberToString(value);
+  DCHECK(!result.empty());
+  if (value >= 1.0)
+    return result;
+
+  DCHECK_LE(0.0, value);
+  DCHECK_GT(1.0, value);
+
+  // Check if there is at least one character before period.
+  if (result.at(0) != '.')
+    return result;
+
+  // '.' is the first character in |result|. Prefix one digit before the
+  // period to make it spec compliant.
+  return "0" + result;
+}
+
+// Return the effective connection type value overridden for web APIs.
+// If no override value has been set, a null value is returned.
+base::Optional<net::EffectiveConnectionType>
+GetWebHoldbackEffectiveConnectionType() {
+  if (!base::FeatureList::IsEnabled(
+          features::kNetworkQualityEstimatorWebHoldback)) {
+    return base::nullopt;
+  }
+  std::string effective_connection_type_param =
+      base::GetFieldTrialParamValueByFeature(
+          features::kNetworkQualityEstimatorWebHoldback,
+          "web_effective_connection_type_override");
+
+  base::Optional<net::EffectiveConnectionType> effective_connection_type =
+      net::GetEffectiveConnectionTypeForName(effective_connection_type_param);
+  DCHECK(effective_connection_type_param.empty() || effective_connection_type);
+
+  if (!effective_connection_type)
+    return base::nullopt;
+  DCHECK_NE(net::EFFECTIVE_CONNECTION_TYPE_UNKNOWN,
+            effective_connection_type.value());
+  return effective_connection_type;
+}
+
 }  // namespace
 
 namespace client_hints {
@@ -136,29 +183,26 @@ unsigned long RoundRtt(const std::string& host,
   return std::round(rtt_msec / kGranularityMsec) * kGranularityMsec;
 }
 
-double RoundMbps(const std::string& host,
-                 const base::Optional<double>& downlink_mbps) {
+double RoundKbpsToMbps(const std::string& host,
+                       const base::Optional<int32_t>& downlink_kbps) {
   // Limit the size of the buckets and the maximum reported value to reduce
   // fingerprinting.
   static const size_t kGranularityKbps = 50;
   static const double kMaxDownlinkKbps = 10.0 * 1000;
 
-  double downlink_kbps = 0;
-  if (!downlink_mbps.has_value()) {
-    // Throughput is unavailable. So, return the fastest value.
-    downlink_kbps = kMaxDownlinkKbps;
-  } else {
-    downlink_kbps = downlink_mbps.value() * 1000;
-  }
-  downlink_kbps *= GetRandomMultiplier(host);
+  // If downlink is unavailable, return the fastest value.
+  double randomized_downlink_kbps = downlink_kbps.value_or(kMaxDownlinkKbps);
+  randomized_downlink_kbps *= GetRandomMultiplier(host);
 
-  downlink_kbps = std::min(downlink_kbps, kMaxDownlinkKbps);
+  randomized_downlink_kbps =
+      std::min(randomized_downlink_kbps, kMaxDownlinkKbps);
 
-  DCHECK_LE(0, downlink_kbps);
-  DCHECK_GE(kMaxDownlinkKbps, downlink_kbps);
+  DCHECK_LE(0, randomized_downlink_kbps);
+  DCHECK_GE(kMaxDownlinkKbps, randomized_downlink_kbps);
   // Round down to the nearest kGranularityKbps kbps value.
   double downlink_kbps_rounded =
-      std::round(downlink_kbps / kGranularityKbps) * kGranularityKbps;
+      std::round(randomized_downlink_kbps / kGranularityKbps) *
+      kGranularityKbps;
 
   // Convert from Kbps to Mbps.
   return downlink_kbps_rounded / 1000;
@@ -174,7 +218,7 @@ GetAdditionalNavigationRequestClientHintsHeaders(
   DCHECK_EQ(blink::kWebEffectiveConnectionTypeMappingCount,
             net::EFFECTIVE_CONNECTION_TYPE_4G + 1u);
   DCHECK_EQ(blink::kWebEffectiveConnectionTypeMappingCount,
-            net::EFFECTIVE_CONNECTION_TYPE_LAST);
+            static_cast<size_t>(net::EFFECTIVE_CONNECTION_TYPE_LAST));
 
   // Get the client hint headers.
   if (!url.is_valid())
@@ -224,7 +268,7 @@ GetAdditionalNavigationRequestClientHintsHeaders(
     additional_headers->SetHeader(
         blink::kClientHintsHeaderMapping[static_cast<int>(
             blink::mojom::WebClientHintsType::kDeviceMemory)],
-        base::NumberToString(device_memory));
+        DoubleToSpecCompliantString(device_memory));
   }
 
   if (web_client_hints.IsEnabled(blink::mojom::WebClientHintsType::kDpr)) {
@@ -234,7 +278,7 @@ GetAdditionalNavigationRequestClientHintsHeaders(
     additional_headers->SetHeader(
         blink::kClientHintsHeaderMapping[static_cast<int>(
             blink::mojom::WebClientHintsType::kDpr)],
-        base::NumberToString(device_scale_factor * zoom_factor));
+        DoubleToSpecCompliantString(device_scale_factor * zoom_factor));
   }
 
   if (web_client_hints.IsEnabled(
@@ -260,34 +304,62 @@ GetAdditionalNavigationRequestClientHintsHeaders(
     }
   }
 
-  UINetworkQualityEstimatorService* estimator =
-      UINetworkQualityEstimatorServiceFactory::GetForProfile(
-          Profile::FromBrowserContext(context));
+  network::NetworkQualityTracker* network_quality_tracker =
+      g_browser_process->network_quality_tracker();
 
   if (web_client_hints.IsEnabled(blink::mojom::WebClientHintsType::kRtt)) {
+    base::Optional<net::EffectiveConnectionType> web_holdback_ect =
+        GetWebHoldbackEffectiveConnectionType();
+
+    base::TimeDelta http_rtt;
+    if (web_holdback_ect.has_value()) {
+      http_rtt = net::NetworkQualityEstimatorParams::GetDefaultTypicalHttpRtt(
+          web_holdback_ect.value());
+    } else {
+      http_rtt = network_quality_tracker->GetHttpRTT();
+    }
     additional_headers->SetHeader(
         blink::kClientHintsHeaderMapping[static_cast<int>(
             blink::mojom::WebClientHintsType::kRtt)],
-        base::NumberToString(
-            internal::RoundRtt(url.host(), estimator->GetHttpRTT())));
+        base::NumberToString(internal::RoundRtt(url.host(), http_rtt)));
   }
 
   if (web_client_hints.IsEnabled(blink::mojom::WebClientHintsType::kDownlink)) {
+    base::Optional<net::EffectiveConnectionType> web_holdback_ect =
+        GetWebHoldbackEffectiveConnectionType();
+
+    int32_t downlink_throughput_kbps;
+
+    if (web_holdback_ect.has_value()) {
+      downlink_throughput_kbps =
+          net::NetworkQualityEstimatorParams::GetDefaultTypicalDownlinkKbps(
+              web_holdback_ect.value());
+    } else {
+      downlink_throughput_kbps =
+          network_quality_tracker->GetDownstreamThroughputKbps();
+    }
+
     additional_headers->SetHeader(
         blink::kClientHintsHeaderMapping[static_cast<int>(
             blink::mojom::WebClientHintsType::kDownlink)],
-        base::NumberToString(internal::RoundMbps(
-            url.host(), estimator->GetDownstreamThroughputKbps())));
+        DoubleToSpecCompliantString(
+            internal::RoundKbpsToMbps(url.host(), downlink_throughput_kbps)));
   }
 
   if (web_client_hints.IsEnabled(blink::mojom::WebClientHintsType::kEct)) {
     DCHECK_EQ(blink::kWebEffectiveConnectionTypeMappingCount,
               net::EFFECTIVE_CONNECTION_TYPE_4G + 1u);
     DCHECK_EQ(blink::kWebEffectiveConnectionTypeMappingCount,
-              net::EFFECTIVE_CONNECTION_TYPE_LAST);
+              static_cast<size_t>(net::EFFECTIVE_CONNECTION_TYPE_LAST));
+
+    base::Optional<net::EffectiveConnectionType> web_holdback_ect =
+        GetWebHoldbackEffectiveConnectionType();
 
     int effective_connection_type =
-        static_cast<int>(estimator->GetEffectiveConnectionType());
+        web_holdback_ect.has_value()
+            ? web_holdback_ect.value()
+            : static_cast<int>(
+                  network_quality_tracker->GetEffectiveConnectionType());
 
     additional_headers->SetHeader(
         blink::kClientHintsHeaderMapping[static_cast<int>(
@@ -309,25 +381,6 @@ GetAdditionalNavigationRequestClientHintsHeaders(
   // the client hints headers if the request is redirected with a change in
   // scheme or a change in the origin.
   return additional_headers;
-}
-
-void RequestBeginning(
-    net::URLRequest* request,
-    scoped_refptr<content_settings::CookieSettings> cookie_settings) {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
-
-  if (!cookie_settings)
-    return;
-
-  if (cookie_settings->IsCookieAccessAllowed(request->url(),
-                                             request->site_for_cookies())) {
-    return;
-  }
-
-  // If |primary_url| is disallowed from storing cookies, then client hints are
-  // not attached to the requests sent to |primary_url|.
-  for (size_t i = 0; i < blink::kClientHintsHeaderMappingCount; ++i)
-    request->RemoveRequestHeaderByName(blink::kClientHintsHeaderMapping[i]);
 }
 
 }  // namespace client_hints

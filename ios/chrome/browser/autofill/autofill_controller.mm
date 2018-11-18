@@ -13,11 +13,11 @@
 #include "base/strings/utf_string_conversions.h"
 #include "components/autofill/core/browser/autofill_manager.h"
 #include "components/autofill/core/browser/popup_item_ids.h"
-#include "components/autofill/core/common/autofill_pref_names.h"
 #import "components/autofill/ios/browser/autofill_agent.h"
 #import "components/autofill/ios/browser/autofill_client_ios_bridge.h"
 #include "components/autofill/ios/browser/autofill_driver_ios.h"
 #include "components/autofill/ios/browser/autofill_driver_ios_bridge.h"
+#include "components/autofill/ios/browser/autofill_switches.h"
 #import "components/autofill/ios/browser/form_suggestion.h"
 #import "components/autofill/ios/browser/form_suggestion_provider.h"
 #include "components/infobars/core/infobar_manager.h"
@@ -28,6 +28,9 @@
 #include "ios/chrome/browser/infobars/infobar_manager_impl.h"
 #include "ios/chrome/browser/pref_names.h"
 #import "ios/chrome/browser/ui/autofill/chrome_autofill_client_ios.h"
+#include "ios/web/public/web_state/web_frame.h"
+#include "ios/web/public/web_state/web_frame_util.h"
+#import "ios/web/public/web_state/web_frames_manager.h"
 #import "ios/web/public/web_state/web_state.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -40,7 +43,7 @@ using autofill::AutofillPopupDelegate;
                                  AutofillDriverIOSBridge> {
   AutofillAgent* _autofillAgent;
   std::unique_ptr<autofill::ChromeAutofillClientIOS> _autofillClient;
-  autofill::AutofillManager* _autofillManager;  // weak
+  web::WebState* _webState;
 }
 
 @end
@@ -61,21 +64,20 @@ using autofill::AutofillPopupDelegate;
   self = [super init];
   if (self) {
     _browserState = browserState;
+    _webState = webState;
     infobars::InfoBarManager* infobarManager =
         InfoBarManagerImpl::FromWebState(webState);
     DCHECK(infobarManager);
     _autofillClient.reset(new autofill::ChromeAutofillClientIOS(
         browserState, webState, infobarManager, self,
         passwordGenerationManager));
-    autofill::AutofillDriverIOS::CreateForWebStateAndDelegate(
+    autofill::AutofillDriverIOS::PrepareForWebStateWebFrameAndDelegate(
         webState, _autofillClient.get(), self,
         GetApplicationContext()->GetApplicationLocale(),
         downloadEnabled
             ? autofill::AutofillManager::ENABLE_AUTOFILL_DOWNLOAD_MANAGER
             : autofill::AutofillManager::DISABLE_AUTOFILL_DOWNLOAD_MANAGER);
     _autofillAgent = autofillAgent;
-    _autofillManager =
-        autofill::AutofillDriverIOS::FromWebState(webState)->autofill_manager();
   }
   return self;
 }
@@ -104,13 +106,27 @@ using autofill::AutofillPopupDelegate;
 }
 
 - (void)detachFromWebState {
-  _autofillManager = nullptr;
   [_autofillAgent detachFromWebState];
   _autofillAgent = nil;
+  _webState = nullptr;
 }
 
 - (void)setBaseViewController:(UIViewController*)baseViewController {
   _autofillClient->SetBaseViewController(baseViewController);
+}
+
+// Return the AutofillManager associated to |frame|.
+// If autofill in iframes is disabled, ignore the frame parameter and return the
+// AutofillManager associated with |_webState|.
+- (autofill::AutofillManager*)autofillManagerForFrame:(web::WebFrame*)frame {
+  if (!_webState) {
+    return nil;
+  }
+  if (autofill::switches::IsAutofillIFrameMessagingEnabled() && !frame) {
+    return nil;
+  }
+  return autofill::AutofillDriverIOS::FromWebStateAndWebFrame(_webState, frame)
+      ->autofill_manager();
 }
 
 #pragma mark - AutofillClientIOSBridge
@@ -118,8 +134,6 @@ using autofill::AutofillPopupDelegate;
 - (void)
 showAutofillPopup:(const std::vector<autofill::Suggestion>&)popup_suggestions
     popupDelegate:(const base::WeakPtr<AutofillPopupDelegate>&)delegate {
-  DCHECK(
-      _browserState->GetPrefs()->GetBoolean(autofill::prefs::kAutofillEnabled));
   // Convert the suggestions into an NSArray for the keyboard.
   NSMutableArray* suggestions = [[NSMutableArray alloc] init];
   for (size_t i = 0; i < popup_suggestions.size(); ++i) {
@@ -128,9 +142,10 @@ showAutofillPopup:(const std::vector<autofill::Suggestion>&)popup_suggestions
     // such as separators ... see blink::WebAutofillClient::MenuItemIDSeparator
     // for example. We can't include that enum because it's from WebKit, but
     // fortunately almost all the entries we are interested in (profile or
-    // autofill entries) are zero or positive. The only negative entry we are
+    // autofill entries) are zero or positive. Negative entries we are
     // interested in is autofill::POPUP_ITEM_ID_CLEAR_FORM, used to show the
-    // "clear form" button.
+    // "clear form" button and autofill::POPUP_ITEM_ID_GOOGLE_PAY_BRANDING, used
+    // to show the "Google Pay" branding.
     NSString* value = nil;
     NSString* displayDescription = nil;
     if (popup_suggestions[i].frontend_id >= 0) {
@@ -142,6 +157,10 @@ showAutofillPopup:(const std::vector<autofill::Suggestion>&)popup_suggestions
     } else if (popup_suggestions[i].frontend_id ==
                autofill::POPUP_ITEM_ID_CLEAR_FORM) {
       // Show the "clear form" button.
+      value = base::SysUTF16ToNSString(popup_suggestions[i].value);
+    } else if (popup_suggestions[i].frontend_id ==
+               autofill::POPUP_ITEM_ID_GOOGLE_PAY_BRANDING) {
+      // Show "GPay branding" icon
       value = base::SysUTF16ToNSString(popup_suggestions[i].value);
     }
 
@@ -170,17 +189,18 @@ showAutofillPopup:(const std::vector<autofill::Suggestion>&)popup_suggestions
 #pragma mark - AutofillDriverIOSBridge
 
 - (void)onFormDataFilled:(uint16_t)query_id
+                 inFrame:(web::WebFrame*)frame
                   result:(const autofill::FormData&)result {
-  DCHECK(
-      _browserState->GetPrefs()->GetBoolean(autofill::prefs::kAutofillEnabled));
-  [_autofillAgent onFormDataFilled:result];
-  if (_autofillManager)
-    _autofillManager->OnDidFillAutofillFormData(result, base::TimeTicks::Now());
+  [_autofillAgent onFormDataFilled:result inFrame:frame];
+  autofill::AutofillManager* manager = [self autofillManagerForFrame:frame];
+  if (manager)
+    manager->OnDidFillAutofillFormData(result, base::TimeTicks::Now());
 }
 
 - (void)sendAutofillTypePredictionsToRenderer:
-    (const std::vector<autofill::FormDataPredictions>&)forms {
-  [_autofillAgent renderAutofillTypePredictions:forms];
+            (const std::vector<autofill::FormDataPredictions>&)forms
+                                      toFrame:(web::WebFrame*)frame {
+  [_autofillAgent renderAutofillTypePredictions:forms inFrame:frame];
 }
 
 @end

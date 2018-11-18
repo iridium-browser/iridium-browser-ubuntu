@@ -7,6 +7,7 @@
 #include "core/fpdfapi/parser/cpdf_name.h"
 
 #include "core/fpdfapi/parser/fpdf_parser_decode.h"
+#include "core/fpdfapi/parser/fpdf_parser_utility.h"
 #include "core/fxcrt/fx_stream.h"
 #include "third_party/base/ptr_util.h"
 
@@ -50,7 +51,8 @@ WideString CPDF_Name::GetUnicodeText() const {
   return PDF_DecodeText(m_Name);
 }
 
-bool CPDF_Name::WriteTo(IFX_ArchiveStream* archive) const {
+bool CPDF_Name::WriteTo(IFX_ArchiveStream* archive,
+                        const CPDF_Encryptor* encryptor) const {
   return archive->WriteString("/") &&
          archive->WriteString(PDF_NameEncode(GetString()).AsStringView());
 }

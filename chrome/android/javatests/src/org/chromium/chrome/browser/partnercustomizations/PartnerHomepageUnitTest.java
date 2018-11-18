@@ -21,6 +21,7 @@ import org.junit.runner.RunWith;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.metrics.RecordHistogram;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.ChromeFeatureList;
@@ -76,20 +77,23 @@ public class PartnerHomepageUnitTest {
         Assert.assertNull(PartnerBrowserCustomizations.getHomePageUrl());
 
         FeatureUtilities.resetHomePageButtonForceEnabledForTests();
-        ChromePreferenceManager.getInstance().setHomePageButtonForceEnabled(true);
+        ChromePreferenceManager.getInstance().writeBoolean(
+                ChromePreferenceManager.HOME_PAGE_BUTTON_FORCE_ENABLED_KEY, true);
         Assert.assertTrue(HomepageManager.isHomepageEnabled());
         Assert.assertEquals(UrlConstants.NTP_NON_NATIVE_URL, HomepageManager.getHomepageUri());
 
         mHomepageManager.setPrefHomepageEnabled(false);
         Assert.assertFalse(HomepageManager.isHomepageEnabled());
-
         FeatureUtilities.resetHomePageButtonForceEnabledForTests();
-        ChromePreferenceManager.getInstance().setHomePageButtonForceEnabled(false);
+
+        ChromePreferenceManager.getInstance().writeBoolean(
+                ChromePreferenceManager.HOME_PAGE_BUTTON_FORCE_ENABLED_KEY, false);
         mHomepageManager.setPrefHomepageEnabled(true);
         Assert.assertFalse(HomepageManager.isHomepageEnabled());
 
         // Test that a cached value (homepage enabled = false) is being read.
-        ChromePreferenceManager.getInstance().setHomePageButtonForceEnabled(true);
+        ChromePreferenceManager.getInstance().writeBoolean(
+                ChromePreferenceManager.HOME_PAGE_BUTTON_FORCE_ENABLED_KEY, true);
         mHomepageManager.setPrefHomepageEnabled(true);
         Assert.assertFalse(HomepageManager.isHomepageEnabled());
 
@@ -98,10 +102,12 @@ public class PartnerHomepageUnitTest {
 
     /**
      * Everything is enabled for using partner homepage, except that there is no flag file.
+     * Flaky: crbug.com/836700
      */
     @Test
     @SmallTest
     @Feature({"Homepage"})
+    @DisabledTest(message = "crbug.com/836700")
     public void testProviderNotFromSystemPackage() throws InterruptedException {
         mHomepageManager.setPrefHomepageEnabled(true);
         mHomepageManager.setPrefHomepageUseDefaultUri(true);
@@ -134,10 +140,12 @@ public class PartnerHomepageUnitTest {
 
     /**
      * Everything is enabled for using partner homepage, except that there is no actual provider.
+     * Flaky : http://crbug.com/836110
      */
     @Test
     @SmallTest
     @Feature({"Homepage"})
+    @DisabledTest(message = "crbug.com/836110")
     public void testNoProvider() throws InterruptedException {
         mHomepageManager.setPrefHomepageEnabled(true);
         mHomepageManager.setPrefHomepageUseDefaultUri(true);
@@ -242,6 +250,7 @@ public class PartnerHomepageUnitTest {
      */
     @Test
     @SmallTest
+    @DisabledTest(message = "crbug.com/837311")
     @Feature({"Homepage"})
     public void testHomepageProviderTimeout() throws InterruptedException {
         mHomepageManager.setPrefHomepageEnabled(true);
@@ -288,6 +297,7 @@ public class PartnerHomepageUnitTest {
     @Test
     @SmallTest
     @Feature({"Homepage"})
+    @DisabledTest(message = "crbug.com/837130")
     public void testHomepageProviderDelayed() throws InterruptedException {
         mHomepageManager.setPrefHomepageEnabled(true);
         mHomepageManager.setPrefHomepageUseDefaultUri(true);

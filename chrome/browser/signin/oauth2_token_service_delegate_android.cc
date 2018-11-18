@@ -112,7 +112,8 @@ void AndroidAccessTokenFetcher::OnAccessTokenResponse(
     return;
   }
   if (error.state() == GoogleServiceAuthError::NONE) {
-    FireOnGetTokenSuccess(access_token, expiration_time);
+    FireOnGetTokenSuccess(OAuth2AccessTokenConsumer::TokenResponse(
+        access_token, expiration_time, std::string()));
   } else {
     FireOnGetTokenFailure(error);
   }
@@ -136,13 +137,6 @@ std::string AndroidAccessTokenFetcher::CombineScopes(
 }  // namespace
 
 bool OAuth2TokenServiceDelegateAndroid::is_testing_profile_ = false;
-
-OAuth2TokenServiceDelegateAndroid::ErrorInfo::ErrorInfo()
-    : error(GoogleServiceAuthError::NONE) {}
-
-OAuth2TokenServiceDelegateAndroid::ErrorInfo::ErrorInfo(
-    const GoogleServiceAuthError& error)
-    : error(error) {}
 
 OAuth2TokenServiceDelegateAndroid::OAuth2TokenServiceDelegateAndroid(
     AccountTrackerService* account_tracker_service)
@@ -216,7 +210,7 @@ GoogleServiceAuthError OAuth2TokenServiceDelegateAndroid::GetAuthError(
     const std::string& account_id) const {
   auto it = errors_.find(account_id);
   return (it == errors_.end()) ? GoogleServiceAuthError::AuthErrorNone()
-                               : it->second.error;
+                               : it->second;
 }
 
 void OAuth2TokenServiceDelegateAndroid::UpdateAuthError(
@@ -229,10 +223,17 @@ void OAuth2TokenServiceDelegateAndroid::UpdateAuthError(
   if (error.IsTransientError())
     return;
 
-  if (error.state() == GoogleServiceAuthError::NONE)
-    errors_.erase(account_id);
-  else
-    errors_[account_id] = ErrorInfo(error);
+  auto it = errors_.find(account_id);
+  if (error.state() == GoogleServiceAuthError::NONE) {
+    if (it == errors_.end())
+      return;
+    errors_.erase(it);
+  } else {
+    if (it != errors_.end() && it->second == error)
+      return;
+    errors_[account_id] = error;
+  }
+  FireAuthErrorChanged(account_id, error);
 }
 
 std::vector<std::string> OAuth2TokenServiceDelegateAndroid::GetAccounts() {
@@ -260,7 +261,7 @@ OAuth2TokenServiceDelegateAndroid::GetSystemAccountNames() {
 OAuth2AccessTokenFetcher*
 OAuth2TokenServiceDelegateAndroid::CreateAccessTokenFetcher(
     const std::string& account_id,
-    net::URLRequestContextGetter* getter,
+    scoped_refptr<network::SharedURLLoaderFactory> url_factory,
     OAuth2AccessTokenConsumer* consumer) {
   DVLOG(1) << "OAuth2TokenServiceDelegateAndroid::CreateAccessTokenFetcher"
            << " account= " << account_id;
@@ -421,16 +422,6 @@ bool OAuth2TokenServiceDelegateAndroid::ValidateAccounts(
   return currently_signed_in;
 }
 
-void OAuth2TokenServiceDelegateAndroid::FireRefreshTokenAvailableFromJava(
-    JNIEnv* env,
-    const JavaParamRef<jobject>& obj,
-    const JavaParamRef<jstring>& account_name) {
-  std::string account_id =
-      MapAccountNameToAccountId(ConvertJavaStringToUTF8(env, account_name));
-  // Notify native observers.
-  FireRefreshTokenAvailable(account_id);
-}
-
 void OAuth2TokenServiceDelegateAndroid::FireRefreshTokenAvailable(
     const std::string& account_id) {
   DCHECK(!account_id.empty());
@@ -444,16 +435,6 @@ void OAuth2TokenServiceDelegateAndroid::FireRefreshTokenAvailable(
   Java_OAuth2TokenService_notifyRefreshTokenAvailable(env, java_ref_,
                                                       j_account_name);
   OAuth2TokenServiceDelegate::FireRefreshTokenAvailable(account_id);
-}
-
-void OAuth2TokenServiceDelegateAndroid::FireRefreshTokenRevokedFromJava(
-    JNIEnv* env,
-    const JavaParamRef<jobject>& obj,
-    const JavaParamRef<jstring>& account_name) {
-  std::string account_id =
-      MapAccountNameToAccountId(ConvertJavaStringToUTF8(env, account_name));
-  // Notify native observers.
-  FireRefreshTokenRevoked(account_id);
 }
 
 void OAuth2TokenServiceDelegateAndroid::FireRefreshTokenRevoked(
@@ -480,15 +461,12 @@ void OAuth2TokenServiceDelegateAndroid::FireRefreshTokenRevoked(
   OAuth2TokenServiceDelegate::FireRefreshTokenRevoked(account_id);
 }
 
-void OAuth2TokenServiceDelegateAndroid::FireRefreshTokensLoadedFromJava(
-    JNIEnv* env,
-    const JavaParamRef<jobject>& obj) {
-  // Notify native observers.
-  FireRefreshTokensLoaded();
-}
-
 void OAuth2TokenServiceDelegateAndroid::FireRefreshTokensLoaded() {
   DVLOG(1) << "OAuth2TokenServiceDelegateAndroid::FireRefreshTokensLoaded";
+
+  DCHECK_EQ(LOAD_CREDENTIALS_IN_PROGRESS, load_credentials_state());
+  set_load_credentials_state(LOAD_CREDENTIALS_FINISHED_WITH_SUCCESS);
+
   JNIEnv* env = AttachCurrentThread();
   Java_OAuth2TokenService_notifyRefreshTokensLoaded(env, java_ref_);
   OAuth2TokenServiceDelegate::FireRefreshTokensLoaded();
@@ -512,6 +490,8 @@ void OAuth2TokenServiceDelegateAndroid::RevokeAllCredentials() {
 
 void OAuth2TokenServiceDelegateAndroid::LoadCredentials(
     const std::string& primary_account_id) {
+  DCHECK_EQ(LOAD_CREDENTIALS_NOT_STARTED, load_credentials_state());
+  set_load_credentials_state(LOAD_CREDENTIALS_IN_PROGRESS);
   if (primary_account_id.empty()) {
     FireRefreshTokensLoaded();
     return;

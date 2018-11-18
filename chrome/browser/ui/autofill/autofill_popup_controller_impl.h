@@ -49,7 +49,8 @@ class AutofillPopupControllerImpl : public AutofillPopupController {
       base::i18n::TextDirection text_direction);
 
   // Shows the popup, or updates the existing popup with the given values.
-  virtual void Show(const std::vector<autofill::Suggestion>& suggestions);
+  virtual void Show(const std::vector<autofill::Suggestion>& suggestions,
+                    bool autoselect_first_suggestion);
 
   // Updates the data list values currently shown with the popup.
   virtual void UpdateDataListValues(const std::vector<base::string16>& values,
@@ -82,8 +83,9 @@ class AutofillPopupControllerImpl : public AutofillPopupController {
   void SetSelectionAtPoint(const gfx::Point& point) override;
   bool AcceptSelectedLine() override;
   void SelectionCleared() override;
+  bool HasSelection() const override;
   gfx::Rect popup_bounds() const override;
-  gfx::NativeView container_view() override;
+  gfx::NativeView container_view() const override;
   const gfx::RectF& element_bounds() const override;
   void SetElementBounds(const gfx::RectF& bounds);
   bool IsRTL() const override;
@@ -133,9 +135,7 @@ class AutofillPopupControllerImpl : public AutofillPopupController {
 
   base::WeakPtr<AutofillPopupControllerImpl> GetWeakPtr();
 
-  // Contains common popup functionality such as popup layout. Protected for
-  // testing.
-  PopupControllerCommon controller_common_;
+  AutofillPopupLayoutModel& LayoutModelForTesting() { return layout_model_; }
 
  private:
 #if !defined(OS_ANDROID)
@@ -156,7 +156,8 @@ class AutofillPopupControllerImpl : public AutofillPopupController {
   friend class AutofillPopupControllerUnitTest;
   void SetViewForTesting(AutofillPopupView* view) { view_ = view; }
 
-  AutofillPopupView* view_;  // Weak reference.
+  PopupControllerCommon controller_common_;
+  AutofillPopupView* view_ = nullptr;  // Weak reference.
   AutofillPopupLayoutModel layout_model_;
   base::WeakPtr<AutofillPopupDelegate> delegate_;
 
@@ -179,7 +180,7 @@ class AutofillPopupControllerImpl : public AutofillPopupController {
   // is drawn by Cocoa on macOS.
   gfx::Typesetter typesetter_ = gfx::Typesetter::HARFBUZZ;
 
-  base::WeakPtrFactory<AutofillPopupControllerImpl> weak_ptr_factory_;
+  base::WeakPtrFactory<AutofillPopupControllerImpl> weak_ptr_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(AutofillPopupControllerImpl);
 };

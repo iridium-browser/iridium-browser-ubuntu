@@ -35,6 +35,7 @@
 #include <memory>
 
 #include "base/macros.h"
+#include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/events/add_event_listener_options_resolved.h"
 #include "third_party/blink/renderer/core/dom/events/event_dispatch_result.h"
@@ -54,6 +55,7 @@ class DOMWindow;
 class Event;
 class EventListenerOptionsOrBoolean;
 class ExceptionState;
+class ExecutionContext;
 class LocalDOMWindow;
 class MessagePort;
 class Node;
@@ -61,15 +63,15 @@ class ScriptState;
 class ServiceWorker;
 
 struct FiringEventIterator {
-  DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
+  DISALLOW_NEW();
   FiringEventIterator(const AtomicString& event_type,
-                      size_t& iterator,
-                      size_t& end)
+                      wtf_size_t& iterator,
+                      wtf_size_t& end)
       : event_type(event_type), iterator(iterator), end(end) {}
 
   const AtomicString& event_type;
-  size_t& iterator;
-  size_t& end;
+  wtf_size_t& iterator;
+  wtf_size_t& end;
 };
 using FiringEventIteratorVector = Vector<FiringEventIterator, 1>;
 
@@ -80,14 +82,11 @@ class CORE_EXPORT EventTargetData final
   ~EventTargetData();
 
   void Trace(blink::Visitor*);
-  void TraceWrappers(const ScriptWrappableVisitor*) const;
 
   EventListenerMap event_listener_map;
   std::unique_ptr<FiringEventIteratorVector> firing_event_iterators;
   DISALLOW_COPY_AND_ASSIGN(EventTargetData);
 };
-
-DEFINE_TRAIT_FOR_TRACE_WRAPPERS(EventTargetData);
 
 // All DOM event targets extend EventTarget. The spec is defined here:
 // https://dom.spec.whatwg.org/#interface-eventtarget
@@ -120,7 +119,7 @@ class CORE_EXPORT EventTarget : public ScriptWrappable {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
-  virtual ~EventTarget();
+  ~EventTarget() override;
 
   virtual const AtomicString& InterfaceName() const = 0;
   virtual ExecutionContext* GetExecutionContext() const = 0;
@@ -155,13 +154,14 @@ class CORE_EXPORT EventTarget : public ScriptWrappable {
                            EventListenerOptions&);
   virtual void RemoveAllEventListeners();
 
-  DispatchEventResult DispatchEvent(Event*);
+  DispatchEventResult DispatchEvent(Event&);
+
+  void EnqueueEvent(Event&, TaskType);
 
   // dispatchEventForBindings is intended to only be called from
   // javascript originated calls. This method will validate and may adjust
   // the Event object before dispatching.
   bool dispatchEventForBindings(Event*, ExceptionState&);
-  virtual void UncaughtExceptionInEventHandler();
 
   // Used for legacy "onEvent" attribute APIs.
   bool SetAttributeEventListener(const AtomicString& event_type,
@@ -174,11 +174,17 @@ class CORE_EXPORT EventTarget : public ScriptWrappable {
   EventListenerVector* GetEventListeners(const AtomicString& event_type);
   Vector<AtomicString> EventTypes();
 
-  DispatchEventResult FireEventListeners(Event*);
+  DispatchEventResult FireEventListeners(Event&);
 
   static DispatchEventResult GetDispatchEventResult(const Event&);
 
-  virtual bool KeepEventInNode(Event*) { return false; }
+  virtual bool KeepEventInNode(const Event&) const { return false; }
+
+  virtual bool IsWindowOrWorkerGlobalScope() const { return false; }
+
+  // Returns true if the target is window, window.document, or
+  // window.document.body.
+  bool IsTopLevelNode();
 
  protected:
   EventTarget();
@@ -199,7 +205,7 @@ class CORE_EXPORT EventTarget : public ScriptWrappable {
   virtual void RemovedEventListener(const AtomicString& event_type,
                                     const RegisteredEventListener&);
 
-  virtual DispatchEventResult DispatchEventInternal(Event*);
+  virtual DispatchEventResult DispatchEventInternal(Event&);
 
   // Subclasses should likely not override these themselves; instead, they
   // should subclass EventTargetWithInlineData.
@@ -215,10 +221,12 @@ class CORE_EXPORT EventTarget : public ScriptWrappable {
   RegisteredEventListener* GetAttributeRegisteredEventListener(
       const AtomicString& event_type);
 
-  bool FireEventListeners(Event*, EventTargetData*, EventListenerVector&);
+  bool FireEventListeners(Event&, EventTargetData*, EventListenerVector&);
   void CountLegacyEvents(const AtomicString& legacy_type_name,
                          EventListenerVector*,
                          EventListenerVector*);
+
+  void DispatchEnqueuedEvent(Event*, ExecutionContext*);
 
   friend class EventListenerIterator;
 };
@@ -227,14 +235,9 @@ class CORE_EXPORT EventTargetWithInlineData : public EventTarget {
  public:
   ~EventTargetWithInlineData() override = default;
 
-  virtual void Trace(blink::Visitor* visitor) {
+  void Trace(blink::Visitor* visitor) override {
     visitor->Trace(event_target_data_);
     EventTarget::Trace(visitor);
-  }
-
-  virtual void TraceWrappers(const ScriptWrappableVisitor* visitor) const {
-    visitor->TraceWrappers(event_target_data_);
-    EventTarget::TraceWrappers(visitor);
   }
 
  protected:
@@ -245,7 +248,7 @@ class CORE_EXPORT EventTargetWithInlineData : public EventTarget {
   // EventTargetData is a GCed object, so it should not be used as a part of
   // object. However, we intentionally use it as a part of object for
   // performance, assuming that no one extracts a pointer of
-  // EventTargetWithInlineData::m_eventTargetData and store it to a Member etc.
+  // EventTargetWithInlineData::event_target_data_ and store it to a Member etc.
   GC_PLUGIN_IGNORE("513199") EventTargetData event_target_data_;
 };
 

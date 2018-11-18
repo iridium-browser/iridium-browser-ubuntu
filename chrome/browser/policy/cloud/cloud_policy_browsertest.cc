@@ -4,6 +4,7 @@
 
 #include <memory>
 
+#include "base/bind.h"
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
@@ -18,16 +19,18 @@
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/invalidation/profile_invalidation_provider_factory.h"
+#include "chrome/browser/invalidation/deprecated_profile_invalidation_provider_factory.h"
 #include "chrome/browser/policy/chrome_browser_policy_connector.h"
 #include "chrome/browser/policy/cloud/cloud_policy_test_utils.h"
 #include "chrome/browser/policy/profile_policy_connector.h"
 #include "chrome/browser/policy/profile_policy_connector_factory.h"
 #include "chrome/browser/policy/test/local_policy_test_server.h"
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "components/invalidation/impl/fake_invalidation_service.h"
+#include "components/invalidation/impl/profile_identity_provider.h"
 #include "components/invalidation/impl/profile_invalidation_provider.h"
 #include "components/invalidation/public/invalidation.h"
 #include "components/invalidation/public/invalidation_service.h"
@@ -35,6 +38,8 @@
 #include "components/policy/core/browser/browser_policy_connector.h"
 #include "components/policy/core/common/cloud/cloud_policy_client.h"
 #include "components/policy/core/common/cloud/cloud_policy_constants.h"
+#include "components/policy/core/common/cloud/cloud_policy_refresh_scheduler.h"
+#include "components/policy/core/common/cloud/dm_auth.h"
 #include "components/policy/core/common/cloud/mock_cloud_policy_client.h"
 #include "components/policy/core/common/external_data_fetcher.h"
 #include "components/policy/core/common/policy_map.h"
@@ -61,9 +66,10 @@
 #include "chromeos/chromeos_paths.h"
 #include "chromeos/cryptohome/cryptohome_parameters.h"
 #include "chromeos/dbus/cryptohome_client.h"
-#include "components/signin/core/account_id/account_id.h"
+#include "components/account_id/account_id.h"
 #include "components/user_manager/user_names.h"
 #else
+#include "chrome/browser/net/system_network_context_manager.h"
 #include "chrome/browser/policy/cloud/user_cloud_policy_manager_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "components/policy/core/common/cloud/user_cloud_policy_manager.h"
@@ -88,9 +94,11 @@ namespace {
 
 std::unique_ptr<KeyedService> BuildFakeProfileInvalidationProvider(
     content::BrowserContext* context) {
+  Profile* profile = static_cast<Profile*>(context);
   return std::make_unique<invalidation::ProfileInvalidationProvider>(
-      std::unique_ptr<invalidation::InvalidationService>(
-          new invalidation::FakeInvalidationService));
+      std::make_unique<invalidation::FakeInvalidationService>(),
+      std::make_unique<invalidation::ProfileIdentityProvider>(
+          IdentityManagerFactory::GetForProfile(profile)));
 }
 
 #if !defined(OS_CHROMEOS)
@@ -194,8 +202,9 @@ class CloudPolicyTest : public InProcessBrowserTest,
     base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
     command_line->AppendSwitchASCII(switches::kDeviceManagementUrl, url);
 
-    invalidation::ProfileInvalidationProviderFactory::GetInstance()->
-        RegisterTestingFactory(BuildFakeProfileInvalidationProvider);
+    invalidation::DeprecatedProfileInvalidationProviderFactory::GetInstance()
+        ->RegisterTestingFactory(
+            base::BindRepeating(&BuildFakeProfileInvalidationProvider));
   }
 
   void SetUpOnMainThread() override {
@@ -223,14 +232,27 @@ class CloudPolicyTest : public InProcessBrowserTest,
         UserCloudPolicyManagerFactory::GetForBrowserContext(
             browser()->profile());
     ASSERT_TRUE(policy_manager);
-    policy_manager->Connect(g_browser_process->local_state(),
-                            g_browser_process->system_request_context(),
-                            UserCloudPolicyManager::CreateCloudPolicyClient(
-                                connector->device_management_service(),
-                                g_browser_process->system_request_context()));
+    policy_manager->Connect(
+        g_browser_process->local_state(),
+        UserCloudPolicyManager::CreateCloudPolicyClient(
+            connector->device_management_service(),
+            g_browser_process->shared_url_loader_factory()));
 #endif  // defined(OS_CHROMEOS)
 
     ASSERT_TRUE(policy_manager->core()->client());
+
+    // The registration below will trigger a policy refresh (see
+    // CloudPolicyRefreshScheduler::OnRegistrationStateChanged). When the tests
+    // below call RefreshPolicies(), the first policy request will be cancelled
+    // (see CloudPolicyClient::FetchPolicy which will reset
+    // |policy_fetch_request_job_|). When the URLLoader implementation sees the
+    // SimpleURLLoader going away, it'll cancel it's request as well. This race
+    // sometimes causes errors in the Python policy server (|test_server_|).
+    // Work around this by removing the refresh scheduler as an observer
+    // temporarily.
+    policy_manager->core()->client()->RemoveObserver(
+        policy_manager->core()->refresh_scheduler());
+
     base::RunLoop run_loop;
     MockCloudPolicyClientObserver observer;
     EXPECT_CALL(observer, OnRegistrationStateChanged(_)).WillOnce(
@@ -249,21 +271,26 @@ class CloudPolicyTest : public InProcessBrowserTest,
     policy_manager->core()->client()->Register(
         registration_type, em::DeviceRegisterRequest::FLAVOR_USER_REGISTRATION,
         em::DeviceRegisterRequest::LIFETIME_INDEFINITE,
-        em::LicenseType::UNDEFINED, "bogus", std::string(), std::string(),
-        std::string());
+        em::LicenseType::UNDEFINED, DMAuth::FromOAuthToken("bogus"),
+        std::string(), std::string(), std::string());
     run_loop.Run();
     Mock::VerifyAndClearExpectations(&observer);
     policy_manager->core()->client()->RemoveObserver(&observer);
     EXPECT_TRUE(policy_manager->core()->client()->is_registered());
 
+    // Readd the refresh scheduler as an observer now that the first policy
+    // fetch finished.
+    policy_manager->core()->client()->AddObserver(
+        policy_manager->core()->refresh_scheduler());
+
 #if defined(OS_CHROMEOS)
     // Get the path to the user policy key file.
     base::FilePath user_policy_key_dir;
-    ASSERT_TRUE(
-        PathService::Get(chromeos::DIR_USER_POLICY_KEYS, &user_policy_key_dir));
+    ASSERT_TRUE(base::PathService::Get(chromeos::DIR_USER_POLICY_KEYS,
+                                       &user_policy_key_dir));
     std::string sanitized_username =
         chromeos::CryptohomeClient::GetStubSanitizedUsername(
-            cryptohome::Identification(
+            cryptohome::CreateAccountIdentifierFromAccountId(
                 AccountId::FromUserEmail(GetTestUser())));
     user_policy_key_file_ = user_policy_key_dir.AppendASCII(sanitized_username)
                                                .AppendASCII("policy.pub");
@@ -280,8 +307,10 @@ class CloudPolicyTest : public InProcessBrowserTest,
   invalidation::FakeInvalidationService* GetInvalidationService() {
     return static_cast<invalidation::FakeInvalidationService*>(
         static_cast<invalidation::ProfileInvalidationProvider*>(
-            invalidation::ProfileInvalidationProviderFactory::GetInstance()->
-                GetForProfile(browser()->profile()))->GetInvalidationService());
+            invalidation::DeprecatedProfileInvalidationProviderFactory::
+                GetInstance()
+                    ->GetForProfile(browser()->profile()))
+            ->GetInvalidationService());
   }
 
   void SetServerPolicy(const std::string& policy) {

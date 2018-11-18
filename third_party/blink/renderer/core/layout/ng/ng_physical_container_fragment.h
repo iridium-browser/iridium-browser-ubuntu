@@ -7,41 +7,38 @@
 
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/layout/ng/geometry/ng_physical_offset_rect.h"
-#include "third_party/blink/renderer/core/layout/ng/inline/ng_baseline.h"
+#include "third_party/blink/renderer/core/layout/ng/ng_link.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_physical_fragment.h"
+#include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
 
+enum class NGOutlineType;
+
 class CORE_EXPORT NGPhysicalContainerFragment : public NGPhysicalFragment {
  public:
-  const Vector<scoped_refptr<NGPhysicalFragment>>& Children() const {
-    return children_;
-  }
+  const Vector<NGLink>& Children() const { return children_; }
 
-  // Visual rect of children in the local coordinate.
-  const NGPhysicalOffsetRect& ContentsVisualRect() const {
-    return contents_visual_rect_;
-  }
+  void AddOutlineRectsForNormalChildren(Vector<LayoutRect>* outline_rects,
+                                        const LayoutPoint& additional_offset,
+                                        NGOutlineType outline_type) const;
+  void AddOutlineRectsForDescendant(const NGLink& descendant,
+                                    Vector<LayoutRect>* rects,
+                                    const LayoutPoint& additional_offset,
+                                    NGOutlineType outline_type) const;
 
  protected:
   // This modifies the passed-in children vector.
-  NGPhysicalContainerFragment(
-      LayoutObject*,
-      const ComputedStyle&,
-      NGPhysicalSize,
-      NGFragmentType,
-      unsigned sub_type,
-      Vector<scoped_refptr<NGPhysicalFragment>>& children,
-      const NGPhysicalOffsetRect& contents_visual_rect,
-      scoped_refptr<NGBreakToken> = nullptr);
+  NGPhysicalContainerFragment(LayoutObject*,
+                              const ComputedStyle&,
+                              NGStyleVariant,
+                              NGPhysicalSize,
+                              NGFragmentType,
+                              unsigned sub_type,
+                              Vector<NGLink>& children,
+                              scoped_refptr<NGBreakToken> = nullptr);
 
-  PositionWithAffinity PositionForPointInInlineLevelBox(
-      const NGPhysicalOffset&) const;
-  PositionWithAffinity PositionForPointInInlineFormattingContext(
-      const NGPhysicalOffset&) const;
-
-  Vector<scoped_refptr<NGPhysicalFragment>> children_;
-  NGPhysicalOffsetRect contents_visual_rect_;
+  Vector<NGLink> children_;
 };
 
 DEFINE_TYPE_CASTS(NGPhysicalContainerFragment,

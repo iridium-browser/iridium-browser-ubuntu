@@ -15,6 +15,7 @@
 #include "gpu/command_buffer/service/image_manager.h"
 #include "gpu/command_buffer/service/memory_tracking.h"
 #include "gpu/command_buffer/service/service_discardable_manager.h"
+#include "gpu/command_buffer/service/shared_image_manager.h"
 #include "gpu/command_buffer/service/transfer_buffer_manager.h"
 #include "gpu/gles2_conform_support/egl/config.h"
 #include "gpu/gles2_conform_support/egl/display.h"
@@ -85,7 +86,7 @@ bool Context::SwapBuffers(Surface* current_surface) {
   DCHECK(HasService() && is_current_in_some_thread_);
   if (WasServiceContextLost())
     return false;
-  client_gl_context_->SwapBuffers();
+  client_gl_context_->SwapBuffers(1);
   return true;
 }
 
@@ -236,8 +237,6 @@ bool Context::CanWaitUnverifiedSyncToken(const gpu::SyncToken& sync_token) {
   return false;
 }
 
-void Context::SetSnapshotRequested() {}
-
 void Context::ApplyCurrentContext(gl::GLSurface* current_surface) {
   DCHECK(HasService());
   // The current_surface will be the same as
@@ -256,14 +255,17 @@ void Context::ApplyContextReleased() {
 
 bool Context::CreateService(gl::GLSurface* gl_surface) {
   gpu::SharedMemoryLimits limits;
+  gpu::GpuPreferences gpu_preferences;
+  gpu::GpuFeatureInfo gpu_feature_info;
   scoped_refptr<gpu::gles2::FeatureInfo> feature_info(
-      new gpu::gles2::FeatureInfo(gpu_driver_bug_workarounds_));
+      new gpu::gles2::FeatureInfo(gpu_driver_bug_workarounds_,
+                                  gpu_feature_info));
   scoped_refptr<gpu::gles2::ContextGroup> group(new gpu::gles2::ContextGroup(
-      gpu::GpuPreferences(), true, &mailbox_manager_,
-      nullptr /* memory_tracker */, &translator_cache_, &completeness_cache_,
-      feature_info, true, &image_manager_, nullptr /* image_factory */,
-      nullptr /* progress_reporter */, gpu::GpuFeatureInfo(),
-      &discardable_manager_));
+      gpu_preferences, true, &mailbox_manager_, nullptr /* memory_tracker */,
+      &translator_cache_, &completeness_cache_, feature_info, true,
+      &image_manager_, nullptr /* image_factory */,
+      nullptr /* progress_reporter */, gpu_feature_info, &discardable_manager_,
+      &shared_image_manager_));
 
   transfer_buffer_manager_ =
       std::make_unique<gpu::TransferBufferManager>(nullptr);

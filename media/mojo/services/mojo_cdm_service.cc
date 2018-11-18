@@ -53,8 +53,9 @@ MojoCdmService::~MojoCdmService() {
   context_->UnregisterCdm(cdm_id_);
 }
 
-void MojoCdmService::SetClient(mojom::ContentDecryptionModuleClientPtr client) {
-  client_ = std::move(client);
+void MojoCdmService::SetClient(
+    mojom::ContentDecryptionModuleClientAssociatedPtrInfo client) {
+  client_.Bind(std::move(client));
 }
 
 void MojoCdmService::Initialize(const std::string& key_system,
@@ -166,12 +167,20 @@ void MojoCdmService::OnCdmCreated(
 
   // If |cdm| has a decryptor, create the MojoDecryptorService
   // and pass the connection back to the client.
-  mojom::DecryptorPtr decryptor_service;
+  mojom::DecryptorPtr decryptor_ptr;
   CdmContext* const cdm_context = cdm_->GetCdmContext();
   if (cdm_context && cdm_context->GetDecryptor()) {
-    decryptor_.reset(new MojoDecryptorService(
-        cdm_context->GetDecryptor(), MakeRequest(&decryptor_service),
-        base::Bind(&MojoCdmService::OnDecryptorConnectionError, weak_this_)));
+    // Both |cdm_| and |decryptor_| are owned by |this|, so we don't need to
+    // pass in a CdmContextRef.
+    decryptor_.reset(
+        new MojoDecryptorService(cdm_context->GetDecryptor(), nullptr));
+    decryptor_binding_ = std::make_unique<mojo::Binding<mojom::Decryptor>>(
+        decryptor_.get(), MakeRequest(&decryptor_ptr));
+    // base::Unretained is safe because |decryptor_binding_| is owned by |this|.
+    // If |this| is destructed, |decryptor_binding_| will be destructed as well
+    // and the error handler should never be called.
+    decryptor_binding_->set_connection_error_handler(base::BindOnce(
+        &MojoCdmService::OnDecryptorConnectionError, base::Unretained(this)));
   }
 
   // If the |context_| is not null, we should support connecting the |cdm| with
@@ -184,7 +193,7 @@ void MojoCdmService::OnCdmCreated(
 
   cdm_promise_result->success = true;
   std::move(callback).Run(std::move(cdm_promise_result), cdm_id,
-                          std::move(decryptor_service));
+                          std::move(decryptor_ptr));
 }
 
 void MojoCdmService::OnSessionMessage(const std::string& session_id,

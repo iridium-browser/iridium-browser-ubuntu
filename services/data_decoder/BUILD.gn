@@ -18,6 +18,8 @@ source_set("lib") {
     "xml_parser.h",
   ]
 
+  configs += [ "//build/config/compiler:wexit_time_destructors" ]
+
   deps = [
     "//base",
     "//mojo/public/cpp/bindings",
@@ -48,6 +50,7 @@ source_set("tests") {
   deps = [
     ":lib",
     "//base",
+    "//base/test:test_support",
     "//gin",
     "//gin:gin_test",
     "//services/data_decoder/public/cpp",
@@ -55,8 +58,11 @@ source_set("tests") {
     "//skia",
     "//testing/gtest",
     "//third_party/blink/public:blink",
-    "//tools/v8_context_snapshot",
     "//ui/gfx",
+  ]
+
+  data_deps = [
+    "//tools/v8_context_snapshot",
   ]
 
   configs += [

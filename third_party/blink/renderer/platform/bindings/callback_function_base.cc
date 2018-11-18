@@ -7,7 +7,7 @@
 namespace blink {
 
 CallbackFunctionBase::CallbackFunctionBase(
-    v8::Local<v8::Function> callback_function) {
+    v8::Local<v8::Object> callback_function) {
   DCHECK(!callback_function.IsEmpty());
 
   callback_relevant_script_state_ =
@@ -18,9 +18,10 @@ CallbackFunctionBase::CallbackFunctionBase(
   incumbent_script_state_ = ScriptState::From(isolate->GetIncumbentContext());
 }
 
-void CallbackFunctionBase::TraceWrappers(
-    const ScriptWrappableVisitor* visitor) const {
-  visitor->TraceWrappers(callback_function_);
+void CallbackFunctionBase::Trace(Visitor* visitor) {
+  visitor->Trace(callback_function_);
+  visitor->Trace(callback_relevant_script_state_);
+  visitor->Trace(incumbent_script_state_);
 }
 
 V8PersistentCallbackFunctionBase::V8PersistentCallbackFunctionBase(

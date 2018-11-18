@@ -12,6 +12,7 @@
 
 #include "base/files/file_path.h"
 #include "base/memory/weak_ptr.h"
+#include "base/scoped_observer.h"
 #include "chrome/browser/chromeos/printing/cups_printers_manager.h"
 #include "chrome/browser/chromeos/printing/printer_configurer.h"
 #include "chrome/browser/chromeos/printing/printer_event_tracker.h"
@@ -125,6 +126,9 @@ class CupsPrintersHandler : public ::settings::SettingsPageUIHandler,
       const std::string& manufacturer,
       const std::string& model);
 
+  // Emits the updated discovered printer list after new printers are received.
+  void UpdateDiscoveredPrinters();
+
   // Attempt to add a discovered printer.
   void HandleAddDiscoveredPrinter(const base::ListValue* args);
 
@@ -134,7 +138,8 @@ class CupsPrintersHandler : public ::settings::SettingsPageUIHandler,
 
   // Code common between the discovered and manual add printer code paths.
   void OnAddedPrinterCommon(const Printer& printer,
-                            PrinterSetupResult result_code);
+                            PrinterSetupResult result_code,
+                            bool is_automatic);
 
   // CupsPrintersManager::Observer override:
   void OnPrintersChanged(CupsPrintersManager::PrinterClass printer_class,
@@ -151,6 +156,10 @@ class CupsPrintersHandler : public ::settings::SettingsPageUIHandler,
   // with |path| as the result.
   void VerifyPpdContents(const base::FilePath& path,
                          const std::string& contents);
+
+  // Fires the on-manually-add-discovered-printer event with the appropriate
+  // parameters.  See https://crbug.com/835476
+  void FireManuallyAddDiscoveredPrinter(const Printer& printer);
 
   Profile* profile_;
 
@@ -174,7 +183,10 @@ class CupsPrintersHandler : public ::settings::SettingsPageUIHandler,
 
   scoped_refptr<ui::SelectFileDialog> select_file_dialog_;
   std::string webui_callback_id_;
-  std::unique_ptr<CupsPrintersManager> printers_manager_;
+  CupsPrintersManager* printers_manager_;
+
+  ScopedObserver<CupsPrintersManager, CupsPrintersManager::Observer>
+      printers_manager_observer_;
 
   base::WeakPtrFactory<CupsPrintersHandler> weak_factory_;
 

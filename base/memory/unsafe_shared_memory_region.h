@@ -5,8 +5,10 @@
 #ifndef BASE_MEMORY_UNSAFE_SHARED_MEMORY_REGION_H_
 #define BASE_MEMORY_UNSAFE_SHARED_MEMORY_REGION_H_
 
+#include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/platform_shared_memory_region.h"
+#include "base/memory/shared_memory_handle.h"
 #include "base/memory/shared_memory_mapping.h"
 
 namespace base {
@@ -30,7 +32,20 @@ class BASE_EXPORT UnsafeSharedMemoryRegion {
   using MappingType = WritableSharedMemoryMapping;
   // Creates a new UnsafeSharedMemoryRegion instance of a given size that can be
   // used for mapping writable shared memory into the virtual address space.
+  //
+  // This call will fail if the process does not have sufficient permissions to
+  // create a shared memory region itself. See
+  // mojo::CreateUnsafeSharedMemoryRegion in
+  // mojo/public/cpp/base/shared_memory_utils.h for creating a shared memory
+  // region from a an unprivileged process where a broker must be used.
   static UnsafeSharedMemoryRegion Create(size_t size);
+
+  // Creates a new UnsafeSharedMemoryRegion from a SharedMemoryHandle. This
+  // consumes the handle, which should not be used again.
+  // TODO(crbug.com/795291): this should only be used while transitioning from
+  // the old shared memory API, and should be removed when done.
+  static UnsafeSharedMemoryRegion CreateFromHandle(
+      const base::SharedMemoryHandle& handle);
 
   // Returns an UnsafeSharedMemoryRegion built from a platform-specific handle
   // that was taken from another UnsafeSharedMemoryRegion instance. Returns an
@@ -87,8 +102,25 @@ class BASE_EXPORT UnsafeSharedMemoryRegion {
     return handle_.GetSize();
   }
 
+  // Returns 128-bit GUID of the region.
+  const UnguessableToken& GetGUID() const {
+    DCHECK(IsValid());
+    return handle_.GetGUID();
+  }
+
  private:
+  FRIEND_TEST_ALL_PREFIXES(DiscardableSharedMemoryTest,
+                           LockShouldFailIfPlatformLockPagesFails);
+  friend class DiscardableSharedMemory;
+
   explicit UnsafeSharedMemoryRegion(subtle::PlatformSharedMemoryRegion handle);
+
+  // Returns a platform shared memory handle. |this| remains the owner of the
+  // handle.
+  subtle::PlatformSharedMemoryRegion::PlatformHandle GetPlatformHandle() const {
+    DCHECK(IsValid());
+    return handle_.GetPlatformHandle();
+  }
 
   subtle::PlatformSharedMemoryRegion handle_;
 

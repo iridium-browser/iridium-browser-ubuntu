@@ -56,8 +56,8 @@ void PnaclTranslationResourceHost::RequestNexeFd(
          GetMainThreadMessageLoop()->BelongsToCurrentThread());
   io_task_runner_->PostTask(
       FROM_HERE,
-      base::Bind(&PnaclTranslationResourceHost::SendRequestNexeFd, this,
-                 render_view_id, instance, cache_info, callback));
+      base::BindOnce(&PnaclTranslationResourceHost::SendRequestNexeFd, this,
+                     render_view_id, instance, cache_info, callback));
   return;
 }
 
@@ -71,10 +71,8 @@ void PnaclTranslationResourceHost::SendRequestNexeFd(
           render_view_id, instance, cache_info))) {
     PpapiGlobals::Get()->GetMainThreadMessageLoop()->PostTask(
         FROM_HERE,
-        base::Bind(callback,
-                   static_cast<int32_t>(PP_ERROR_FAILED),
-                   false,
-                   PP_kInvalidFileHandle));
+        base::BindOnce(callback, static_cast<int32_t>(PP_ERROR_FAILED), false,
+                       PP_kInvalidFileHandle));
     return;
   }
   pending_cache_requests_.insert(std::make_pair(instance, callback));
@@ -87,8 +85,9 @@ void PnaclTranslationResourceHost::ReportTranslationFinished(
          GetMainThreadMessageLoop()->BelongsToCurrentThread());
   io_task_runner_->PostTask(
       FROM_HERE,
-      base::Bind(&PnaclTranslationResourceHost::SendReportTranslationFinished,
-                 this, instance, success));
+      base::BindOnce(
+          &PnaclTranslationResourceHost::SendReportTranslationFinished, this,
+          instance, success));
   return;
 }
 
@@ -111,7 +110,7 @@ void PnaclTranslationResourceHost::OnNexeTempFileReply(
     IPC::PlatformFileForTransit file) {
   DCHECK(io_task_runner_->BelongsToCurrentThread());
   base::File base_file = IPC::PlatformFileForTransitToFile(file);
-  CacheRequestInfoMap::iterator it = pending_cache_requests_.find(instance);
+  auto it = pending_cache_requests_.find(instance);
   if (!base_file.IsValid()) {
     DLOG(ERROR) << "Got invalid platformfilefortransit";
   }
@@ -123,8 +122,7 @@ void PnaclTranslationResourceHost::OnNexeTempFileReply(
       status = PP_OK;
     }
     PpapiGlobals::Get()->GetMainThreadMessageLoop()->PostTask(
-        FROM_HERE,
-        base::Bind(it->second, status, is_hit, file_handle));
+        FROM_HERE, base::BindOnce(it->second, status, is_hit, file_handle));
     pending_cache_requests_.erase(it);
   } else {
     DLOG(ERROR) << "Could not find pending request for reply";
@@ -133,15 +131,12 @@ void PnaclTranslationResourceHost::OnNexeTempFileReply(
 
 void PnaclTranslationResourceHost::CleanupCacheRequests() {
   DCHECK(io_task_runner_->BelongsToCurrentThread());
-  for (CacheRequestInfoMap::iterator it = pending_cache_requests_.begin();
-       it != pending_cache_requests_.end();
-       ++it) {
+  for (auto it = pending_cache_requests_.begin();
+       it != pending_cache_requests_.end(); ++it) {
     PpapiGlobals::Get()->GetMainThreadMessageLoop()->PostTask(
         FROM_HERE,
-        base::Bind(it->second,
-                   static_cast<int32_t>(PP_ERROR_ABORTED),
-                   false,
-                   PP_kInvalidFileHandle));
+        base::BindOnce(it->second, static_cast<int32_t>(PP_ERROR_ABORTED),
+                       false, PP_kInvalidFileHandle));
   }
   pending_cache_requests_.clear();
 }

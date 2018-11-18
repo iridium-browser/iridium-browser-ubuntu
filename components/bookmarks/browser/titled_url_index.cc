@@ -15,7 +15,6 @@
 #include "components/bookmarks/browser/bookmark_utils.h"
 #include "components/bookmarks/browser/titled_url_match.h"
 #include "components/bookmarks/browser/titled_url_node.h"
-#include "components/bookmarks/browser/titled_url_node_sorter.h"
 #include "components/query_parser/snippet.h"
 #include "third_party/icu/source/common/unicode/normalizer2.h"
 #include "third_party/icu/source/common/unicode/utypes.h"
@@ -53,6 +52,11 @@ TitledUrlIndex::TitledUrlIndex(std::unique_ptr<TitledUrlNodeSorter> sorter)
 }
 
 TitledUrlIndex::~TitledUrlIndex() {
+}
+
+void TitledUrlIndex::SetNodeSorter(
+    std::unique_ptr<TitledUrlNodeSorter> sorter) {
+  sorter_ = std::move(sorter);
 }
 
 void TitledUrlIndex::Add(const TitledUrlNode* node) {
@@ -207,8 +211,7 @@ bool TitledUrlIndex::GetResultsMatchingTerm(
     while (i != index_.end() &&
            i->first.size() >= term.size() &&
            term.compare(0, term.size(), i->first, 0, term.size()) == 0) {
-      for (TitledUrlNodeSet::const_iterator n = i->second.begin();
-           n != i->second.end(); ++n) {
+      for (auto n = i->second.begin(); n != i->second.end(); ++n) {
         prefix_matches->insert(prefix_matches->end(), *n);
       }
       ++i;
@@ -239,7 +242,7 @@ void TitledUrlIndex::RegisterNode(const base::string16& term,
 
 void TitledUrlIndex::UnregisterNode(const base::string16& term,
                                    const TitledUrlNode* node) {
-  Index::iterator i = index_.find(term);
+  auto i = index_.find(term);
   if (i == index_.end()) {
     // We can get here if the node has the same term more than once. For
     // example, a node with the title 'foo foo' would end up here.

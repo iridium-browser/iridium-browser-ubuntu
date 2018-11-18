@@ -7,10 +7,10 @@
 #include <memory>
 #include "services/network/public/mojom/fetch_api.mojom-blink.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/public/platform/modules/serviceworker/web_service_worker_request.h"
+#include "third_party/blink/public/platform/modules/service_worker/web_service_worker_request.h"
 #include "third_party/blink/public/platform/web_url_request.h"
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_testing.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
@@ -58,8 +58,7 @@ TEST(ServiceWorkerRequestTest, FromAndToWebRequest) {
   } headers[] = {{"X-Foo", "bar"}, {"X-Quux", "foop"}, {nullptr, nullptr}};
   const String referrer = "http://www.referrer.com/";
   const WebReferrerPolicy kReferrerPolicy = kWebReferrerPolicyAlways;
-  const WebURLRequest::RequestContext kContext =
-      WebURLRequest::kRequestContextAudio;
+  const mojom::RequestContextType kContext = mojom::RequestContextType::AUDIO;
   const network::mojom::FetchRequestMode kMode =
       network::mojom::FetchRequestMode::kNavigate;
   const network::mojom::FetchCredentialsMode kCredentialsMode =

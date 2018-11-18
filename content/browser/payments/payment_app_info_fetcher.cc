@@ -4,16 +4,21 @@
 
 #include "content/browser/payments/payment_app_info_fetcher.h"
 
+#include <utility>
+
 #include "base/base64.h"
 #include "base/bind_helpers.h"
+#include "base/task/post_task.h"
 #include "content/browser/frame_host/render_frame_host_impl.h"
 #include "content/browser/service_worker/service_worker_context_wrapper.h"
 #include "content/browser/web_contents/web_contents_impl.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/global_routing_id.h"
 #include "content/public/browser/manifest_icon_downloader.h"
-#include "content/public/browser/manifest_icon_selector.h"
 #include "content/public/common/console_message_level.h"
-#include "ui/gfx/image/image.h"
+#include "third_party/blink/public/common/manifest/manifest_icon_selector.h"
+#include "ui/gfx/codec/png_codec.h"
 #include "url/origin.h"
 
 namespace content {
@@ -28,18 +33,18 @@ void PaymentAppInfoFetcher::Start(
     PaymentAppInfoFetchCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
-  std::unique_ptr<std::vector<std::pair<int, int>>> provider_hosts =
+  std::unique_ptr<std::vector<GlobalFrameRoutingId>> provider_hosts =
       service_worker_context->GetProviderHostIds(context_url.GetOrigin());
 
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::UI},
       base::BindOnce(&PaymentAppInfoFetcher::StartOnUI, context_url,
                      std::move(provider_hosts), std::move(callback)));
 }
 
 void PaymentAppInfoFetcher::StartOnUI(
     const GURL& context_url,
-    const std::unique_ptr<std::vector<std::pair<int, int>>>& provider_hosts,
+    const std::unique_ptr<std::vector<GlobalFrameRoutingId>>& provider_hosts,
     PaymentAppInfoFetchCallback callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
@@ -70,7 +75,7 @@ PaymentAppInfoFetcher::SelfDeleteFetcher::~SelfDeleteFetcher() {
 
 void PaymentAppInfoFetcher::SelfDeleteFetcher::Start(
     const GURL& context_url,
-    const std::unique_ptr<std::vector<std::pair<int, int>>>& provider_hosts) {
+    const std::unique_ptr<std::vector<GlobalFrameRoutingId>>& provider_hosts) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   if (provider_hosts->size() == 0U) {
@@ -81,7 +86,7 @@ void PaymentAppInfoFetcher::SelfDeleteFetcher::Start(
   for (const auto& frame : *provider_hosts) {
     // Find out the render frame host registering the payment app.
     RenderFrameHostImpl* render_frame_host =
-        RenderFrameHostImpl::FromID(frame.first, frame.second);
+        RenderFrameHostImpl::FromID(frame.child_id, frame.frame_routing_id);
     if (!render_frame_host ||
         context_url.spec().compare(
             render_frame_host->GetLastCommittedURL().spec()) != 0) {
@@ -119,15 +124,16 @@ void PaymentAppInfoFetcher::SelfDeleteFetcher::Start(
 void PaymentAppInfoFetcher::SelfDeleteFetcher::RunCallbackAndDestroy() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  BrowserThread::PostTask(BrowserThread::IO, FROM_HERE,
-                          base::BindOnce(std::move(callback_),
-                                         std::move(fetched_payment_app_info_)));
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::IO},
+      base::BindOnce(std::move(callback_),
+                     std::move(fetched_payment_app_info_)));
   delete this;
 }
 
 void PaymentAppInfoFetcher::SelfDeleteFetcher::FetchPaymentAppManifestCallback(
     const GURL& url,
-    const Manifest& manifest) {
+    const blink::Manifest& manifest) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   manifest_url_ = url;
@@ -209,9 +215,9 @@ void PaymentAppInfoFetcher::SelfDeleteFetcher::FetchPaymentAppManifestCallback(
     return;
   }
 
-  icon_url_ = ManifestIconSelector::FindBestMatchingIcon(
+  icon_url_ = blink::ManifestIconSelector::FindBestMatchingIcon(
       manifest.icons, kPaymentAppIdealIconSize, kPaymentAppMinimumIconSize,
-      Manifest::Icon::ANY);
+      blink::Manifest::ImageResource::Purpose::ANY);
   if (!icon_url_.is_valid()) {
     WarnIfPossible(
         "No suitable payment handler icon found in the \"icons\" field defined "
@@ -233,7 +239,7 @@ void PaymentAppInfoFetcher::SelfDeleteFetcher::FetchPaymentAppManifestCallback(
     return;
   }
 
-  bool can_download = content::ManifestIconDownloader::Download(
+  bool can_download = ManifestIconDownloader::Download(
       web_contents_helper_->web_contents(), icon_url_, kPaymentAppIdealIconSize,
       kPaymentAppMinimumIconSize,
       base::Bind(&PaymentAppInfoFetcher::SelfDeleteFetcher::OnIconFetched,
@@ -259,10 +265,12 @@ void PaymentAppInfoFetcher::SelfDeleteFetcher::OnIconFetched(
     return;
   }
 
-  gfx::Image decoded_image = gfx::Image::CreateFrom1xBitmap(icon);
-  scoped_refptr<base::RefCountedMemory> raw_data = decoded_image.As1xPNGBytes();
+  std::vector<unsigned char> bitmap_data;
+  bool success = gfx::PNGCodec::EncodeBGRASkBitmap(icon, false, &bitmap_data);
+  DCHECK(success);
   base::Base64Encode(
-      base::StringPiece(raw_data->front_as<char>(), raw_data->size()),
+      base::StringPiece(reinterpret_cast<const char*>(&bitmap_data[0]),
+                        bitmap_data.size()),
       &(fetched_payment_app_info_->icon));
   RunCallbackAndDestroy();
 }

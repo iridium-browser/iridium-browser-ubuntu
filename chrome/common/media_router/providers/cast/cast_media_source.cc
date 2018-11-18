@@ -4,30 +4,33 @@
 
 #include "chrome/common/media_router/providers/cast/cast_media_source.h"
 
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/utf_string_conversions.h"
-#include "build/build_config.h"
 #include "chrome/common/media_router/media_source_helper.h"
 #include "net/base/url_util.h"
 #include "url/gurl.h"
 #include "url/url_util.h"
 
+using cast_channel::BroadcastRequest;
+
 namespace media_router {
 
 namespace {
-
-constexpr char kMirroringAppId[] = "0F5096E8";
-constexpr char kAudioMirroringAppId[] = "85CDB22F";
 
 // Parameter keys used by new Cast URLs.
 constexpr char kCapabilitiesKey[] = "capabilities";
 constexpr char kBroadcastNamespaceKey[] = "broadcastNamespace";
 constexpr char kBroadcastMessageKey[] = "broadcastMessage";
+constexpr char kClientIdKey[] = "clientId";
+constexpr char kLaunchTimeoutKey[] = "launchTimeout";
 
 // Parameter keys used by legacy Cast URLs.
 constexpr char kLegacyAppIdKey[] = "__castAppId__";
 constexpr char kLegacyBroadcastNamespaceKey[] = "__castBroadcastNamespace__";
 constexpr char kLegacyBroadcastMessageKey[] = "__castBroadcastMessage__";
+constexpr char kLegacyClientIdKey[] = "__castClientId__";
+constexpr char kLegacyLaunchTimeoutKey[] = "__castLaunchTimeout__";
 
 // TODO(imcheng): Move to common utils?
 std::string DecodeURLComponent(const std::string& encoded) {
@@ -59,21 +62,38 @@ cast_channel::CastDeviceCapability CastDeviceCapabilityFromString(
 std::unique_ptr<CastMediaSource> CastMediaSourceForTabMirroring(
     const MediaSource::Id& source_id) {
   return std::make_unique<CastMediaSource>(
-      source_id, std::vector<CastAppInfo>({CastAppInfo(kMirroringAppId),
-                                           CastAppInfo(kAudioMirroringAppId)}));
+      source_id,
+      std::vector<CastAppInfo>({CastAppInfo(kCastStreamingAppId),
+                                CastAppInfo(kCastStreamingAudioAppId)}));
 }
 
 std::unique_ptr<CastMediaSource> CastMediaSourceForDesktopMirroring(
     const MediaSource::Id& source_id) {
-// Desktop audio mirroring is only supported on some platforms.
-#if defined(OS_WIN) || defined(OS_CHROMEOS)
+  // TODO(https://crbug.com/849335): Add back audio-only devices for desktop
+  // mirroring when proper support is implemented.
   return std::make_unique<CastMediaSource>(
-      source_id, std::vector<CastAppInfo>({CastAppInfo(kMirroringAppId),
-                                           CastAppInfo(kAudioMirroringAppId)}));
-#else
-  return std::make_unique<CastMediaSource>(
-      source_id, std::vector<CastAppInfo>({CastAppInfo(kMirroringAppId)}));
-#endif
+      source_id, std::vector<CastAppInfo>({CastAppInfo(kCastStreamingAppId)}));
+}
+
+std::unique_ptr<CastMediaSource> CreateFromURLParams(
+    const MediaSource::Id& source_id,
+    const std::vector<CastAppInfo>& app_infos,
+    const std::string& client_id,
+    const std::string& broadcast_namespace,
+    const std::string& broadcast_message,
+    base::TimeDelta launch_timeout) {
+  if (app_infos.empty())
+    return nullptr;
+
+  auto cast_source = std::make_unique<CastMediaSource>(source_id, app_infos);
+  cast_source->set_client_id(client_id);
+  if (!broadcast_namespace.empty() && !broadcast_message.empty()) {
+    cast_source->set_broadcast_request(
+        BroadcastRequest(broadcast_namespace, broadcast_message));
+  }
+  if (launch_timeout > base::TimeDelta())
+    cast_source->set_launch_timeout(launch_timeout);
+  return cast_source;
 }
 
 std::unique_ptr<CastMediaSource> ParseCastUrl(const MediaSource::Id& source_id,
@@ -84,6 +104,8 @@ std::unique_ptr<CastMediaSource> ParseCastUrl(const MediaSource::Id& source_id,
     return nullptr;
 
   std::string broadcast_namespace, broadcast_message, capabilities;
+  std::string client_id;
+  int launch_timeout_millis = 0;
   for (net::QueryIterator query_it(url); !query_it.IsAtEnd();
        query_it.Advance()) {
     std::string key = query_it.GetKey();
@@ -97,6 +119,12 @@ std::unique_ptr<CastMediaSource> ParseCastUrl(const MediaSource::Id& source_id,
       broadcast_message = DecodeURLComponent(value);
     } else if (key == kCapabilitiesKey) {
       capabilities = value;
+    } else if (key == kClientIdKey) {
+      client_id = value;
+    } else if (key == kLaunchTimeoutKey) {
+      if (!base::StringToInt(value, &launch_timeout_millis) ||
+          launch_timeout_millis < 0)
+        launch_timeout_millis = 0;
     }
   }
 
@@ -110,13 +138,9 @@ std::unique_ptr<CastMediaSource> ParseCastUrl(const MediaSource::Id& source_id,
     }
   }
 
-  auto parsed = std::make_unique<CastMediaSource>(source_id, app_info);
-  if (!broadcast_namespace.empty() && !broadcast_message.empty()) {
-    parsed->set_broadcast_request(
-        BroadcastRequest(broadcast_namespace, broadcast_message));
-  }
-
-  return parsed;
+  return CreateFromURLParams(
+      source_id, {app_info}, client_id, broadcast_namespace, broadcast_message,
+      base::TimeDelta::FromMilliseconds(launch_timeout_millis));
 }
 
 std::unique_ptr<CastMediaSource> ParseLegacyCastUrl(
@@ -127,6 +151,8 @@ std::unique_ptr<CastMediaSource> ParseLegacyCastUrl(
   // Legacy URLs can specify multiple apps.
   std::vector<std::string> app_id_params;
   std::string broadcast_namespace, broadcast_message;
+  std::string client_id;
+  int launch_timeout_millis = 0;
   for (const auto& key_value : parameters) {
     const auto& key = key_value.first;
     const auto& value = key_value.second;
@@ -137,6 +163,12 @@ std::unique_ptr<CastMediaSource> ParseLegacyCastUrl(
     } else if (key == kLegacyBroadcastMessageKey) {
       // The broadcast message is URL-encoded.
       broadcast_message = DecodeURLComponent(value);
+    } else if (key == kLegacyClientIdKey) {
+      client_id = value;
+    } else if (key == kLegacyLaunchTimeoutKey) {
+      if (!base::StringToInt(value, &launch_timeout_millis) ||
+          launch_timeout_millis < 0)
+        launch_timeout_millis = 0;
     }
   }
 
@@ -173,9 +205,9 @@ std::unique_ptr<CastMediaSource> ParseLegacyCastUrl(
   if (app_infos.empty())
     return nullptr;
 
-  auto parsed =
-      std::make_unique<CastMediaSource>(source_id, std::move(app_infos));
-  return parsed;
+  return CreateFromURLParams(
+      source_id, app_infos, client_id, broadcast_namespace, broadcast_message,
+      base::TimeDelta::FromMilliseconds(launch_timeout_millis));
 }
 
 }  // namespace
@@ -184,11 +216,6 @@ CastAppInfo::CastAppInfo(const std::string& app_id) : app_id(app_id) {}
 CastAppInfo::~CastAppInfo() = default;
 
 CastAppInfo::CastAppInfo(const CastAppInfo& other) = default;
-
-BroadcastRequest::BroadcastRequest(const std::string& broadcast_namespace,
-                                   const std::string& message)
-    : broadcast_namespace(broadcast_namespace), message(message) {}
-BroadcastRequest::~BroadcastRequest() = default;
 
 // static
 std::unique_ptr<CastMediaSource> CastMediaSource::From(
@@ -218,9 +245,6 @@ std::unique_ptr<CastMediaSource> CastMediaSource::From(
 }
 
 CastMediaSource::CastMediaSource(const MediaSource::Id& source_id,
-                                 const CastAppInfo& app_info)
-    : source_id_(source_id), app_infos_({app_info}) {}
-CastMediaSource::CastMediaSource(const MediaSource::Id& source_id,
                                  const std::vector<CastAppInfo>& app_infos)
     : source_id_(source_id), app_infos_(app_infos) {}
 CastMediaSource::CastMediaSource(const CastMediaSource& other) = default;
@@ -240,4 +264,13 @@ bool CastMediaSource::ContainsAnyAppFrom(
       app_ids.begin(), app_ids.end(),
       [this](const std::string& app_id) { return ContainsApp(app_id); });
 }
+
+std::vector<std::string> CastMediaSource::GetAppIds() const {
+  std::vector<std::string> app_ids;
+  for (const auto& info : app_infos_)
+    app_ids.push_back(info.app_id);
+
+  return app_ids;
+}
+
 }  // namespace media_router

@@ -29,6 +29,7 @@
 namespace blink {
 
 class EmbeddedContentView;
+class FrameView;
 class WebPluginContainerImpl;
 
 // LayoutObject for frames via LayoutFrame and LayoutIFrame, and plugins via
@@ -62,7 +63,6 @@ class CORE_EXPORT LayoutEmbeddedContent : public LayoutReplaced {
   void UpdateGeometry(EmbeddedContentView&);
 
   bool IsLayoutEmbeddedContent() const final { return true; }
-  virtual void PaintContents(const PaintInfo&, const LayoutPoint&) const;
 
   bool IsThrottledFrameView() const;
 
@@ -71,7 +71,9 @@ class CORE_EXPORT LayoutEmbeddedContent : public LayoutReplaced {
 
   void StyleDidChange(StyleDifference, const ComputedStyle* old_style) final;
   void UpdateLayout() override;
-  void Paint(const PaintInfo&, const LayoutPoint&) const override;
+  void PaintReplaced(const PaintInfo&,
+                     const LayoutPoint& paint_offset) const override;
+  void InvalidatePaint(const PaintInvalidatorContext&) const final;
   CursorDirective GetCursor(const LayoutPoint&, Cursor&) const final;
 
   bool CanBeSelectionLeafInternal() const final { return true; }

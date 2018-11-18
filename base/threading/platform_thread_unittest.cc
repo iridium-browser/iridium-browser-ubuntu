@@ -7,6 +7,7 @@
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/threading/platform_thread.h"
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -15,6 +16,7 @@
 #include "base/threading/platform_thread_internal_posix.h"
 #elif defined(OS_WIN)
 #include <windows.h>
+#include "base/threading/platform_thread_win.h"
 #endif
 
 namespace base {
@@ -218,81 +220,82 @@ TEST(PlatformThreadTest, FunctionTimesTen) {
 
 namespace {
 
-const ThreadPriority kThreadPriorityTestValues[] = {
-// The order should be higher to lower to cover as much cases as possible on
-// Linux trybots running without CAP_SYS_NICE permission.
-#if !defined(OS_ANDROID)
-    // PlatformThread::GetCurrentThreadPriority() on Android does not support
-    // REALTIME_AUDIO case. See http://crbug.com/505474.
-    ThreadPriority::REALTIME_AUDIO,
-#endif
-    ThreadPriority::DISPLAY,
-    // This redundant BACKGROUND priority is to test backgrounding from other
-    // priorities, and unbackgrounding.
-    ThreadPriority::BACKGROUND,
-    ThreadPriority::NORMAL,
-    ThreadPriority::BACKGROUND};
-
 class ThreadPriorityTestThread : public FunctionTestThread {
  public:
-  explicit ThreadPriorityTestThread(ThreadPriority priority)
-      : priority_(priority) {}
+  explicit ThreadPriorityTestThread(ThreadPriority from, ThreadPriority to)
+      : from_(from), to_(to) {}
   ~ThreadPriorityTestThread() override = default;
 
  private:
   void RunTest() override {
-    // Confirm that the current thread's priority is as expected.
-    EXPECT_EQ(ThreadPriority::NORMAL,
-              PlatformThread::GetCurrentThreadPriority());
+    EXPECT_EQ(PlatformThread::GetCurrentThreadPriority(),
+              ThreadPriority::NORMAL);
+    PlatformThread::SetCurrentThreadPriority(from_);
+    EXPECT_EQ(PlatformThread::GetCurrentThreadPriority(), from_);
+    PlatformThread::SetCurrentThreadPriority(to_);
 
-    // Alter and verify the current thread's priority.
-    PlatformThread::SetCurrentThreadPriority(priority_);
-    EXPECT_EQ(priority_, PlatformThread::GetCurrentThreadPriority());
+    if (static_cast<int>(to_) <= static_cast<int>(from_) ||
+        PlatformThread::CanIncreaseThreadPriority(to_)) {
+      EXPECT_EQ(PlatformThread::GetCurrentThreadPriority(), to_);
+    } else {
+      EXPECT_NE(PlatformThread::GetCurrentThreadPriority(), to_);
+    }
   }
 
-  const ThreadPriority priority_;
+  const ThreadPriority from_;
+  const ThreadPriority to_;
 
   DISALLOW_COPY_AND_ASSIGN(ThreadPriorityTestThread);
 };
 
-}  // namespace
+void TestSetCurrentThreadPriority() {
+  constexpr ThreadPriority kAllThreadPriorities[] = {
+      ThreadPriority::REALTIME_AUDIO, ThreadPriority::DISPLAY,
+      ThreadPriority::NORMAL, ThreadPriority::BACKGROUND};
 
-// Test changing a created thread's priority (which has different semantics on
-// some platforms).
-TEST(PlatformThreadTest, ThreadPriorityCurrentThread) {
-  const bool increase_priority_allowed =
-      PlatformThread::CanIncreaseCurrentThreadPriority();
+  for (auto from : kAllThreadPriorities) {
+    if (static_cast<int>(from) <= static_cast<int>(ThreadPriority::NORMAL) ||
+        PlatformThread::CanIncreaseThreadPriority(from)) {
+      for (auto to : kAllThreadPriorities) {
+        ThreadPriorityTestThread thread(from, to);
+        PlatformThreadHandle handle;
 
-// Bump the priority in order to verify that new threads are started with normal
-// priority. Skip this on Mac since this platform doesn't allow changing the
-// priority of the main thread. Also skip this on platforms that don't allow
-// increasing the priority of a thread.
-#if !defined(OS_MACOSX)
-  if (increase_priority_allowed)
-    PlatformThread::SetCurrentThreadPriority(ThreadPriority::DISPLAY);
-#endif
+        ASSERT_FALSE(thread.IsRunning());
+        ASSERT_TRUE(PlatformThread::Create(0, &thread, &handle));
+        thread.WaitForTerminationReady();
+        ASSERT_TRUE(thread.IsRunning());
 
-  // Toggle each supported priority on the thread and confirm it affects it.
-  for (size_t i = 0; i < arraysize(kThreadPriorityTestValues); ++i) {
-    if (!increase_priority_allowed &&
-        kThreadPriorityTestValues[i] >
-            PlatformThread::GetCurrentThreadPriority()) {
-      continue;
+        thread.MarkForTermination();
+        PlatformThread::Join(handle);
+        ASSERT_FALSE(thread.IsRunning());
+      }
     }
-
-    ThreadPriorityTestThread thread(kThreadPriorityTestValues[i]);
-    PlatformThreadHandle handle;
-
-    ASSERT_FALSE(thread.IsRunning());
-    ASSERT_TRUE(PlatformThread::Create(0, &thread, &handle));
-    thread.WaitForTerminationReady();
-    ASSERT_TRUE(thread.IsRunning());
-
-    thread.MarkForTermination();
-    PlatformThread::Join(handle);
-    ASSERT_FALSE(thread.IsRunning());
   }
 }
+
+}  // namespace
+
+// Test changing a created thread's priority.
+#if defined(OS_FUCHSIA)
+// TODO(crbug.com/851759): Thread priorities are not implemented in Fuchsia.
+#define MAYBE_SetCurrentThreadPriority DISABLED_SetCurrentThreadPriority
+#else
+#define MAYBE_SetCurrentThreadPriority SetCurrentThreadPriority
+#endif
+TEST(PlatformThreadTest, MAYBE_SetCurrentThreadPriority) {
+  TestSetCurrentThreadPriority();
+}
+
+#if defined(OS_WIN)
+// Test changing a created thread's priority, with the
+// kWindowsThreadModeBackground feature enabled.
+TEST(PlatformThreadTest, SetCurrentThreadPriorityWithThreadModeBackground) {
+  test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndEnableFeature(
+      features::kWindowsThreadModeBackground);
+  TestSetCurrentThreadPriority();
+}
+#endif  // defined(OS_WIN)
 
 // This tests internal PlatformThread APIs used under some POSIX platforms,
 // with the exception of Mac OS X, iOS and Fuchsia.

@@ -15,7 +15,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/infobars/infobar_service.h"
-#include "chrome/browser/language/language_model_factory.h"
+#include "chrome/browser/language/language_model_manager_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/user_event_service_factory.h"
 #include "chrome/browser/translate/translate_accept_languages_factory.h"
@@ -30,6 +30,7 @@
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/theme_resources.h"
+#include "components/language/core/browser/language_model_manager.h"
 #include "components/prefs/pref_service.h"
 #include "components/sync/driver/sync_driver_switches.h"
 #include "components/sync/protocol/user_event_specifics.pb.h"
@@ -49,7 +50,12 @@
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/web_contents.h"
 #include "third_party/metrics_proto/translate_event.pb.h"
+#include "ui/base/ui_base_features.h"
 #include "url/gurl.h"
+
+#if defined(OS_ANDROID)
+#include "chrome/browser/android/android_theme_resources.h"
+#endif
 
 namespace {
 using base::FeatureList;
@@ -108,8 +114,6 @@ void LogTranslateEvent(const content::WebContents* const web_contents,
 
 }  // namespace
 
-DEFINE_WEB_CONTENTS_USER_DATA_KEY(ChromeTranslateClient);
-
 ChromeTranslateClient::ChromeTranslateClient(content::WebContents* web_contents)
     : content::WebContentsObserver(web_contents),
       translate_driver_(&web_contents->GetController()),
@@ -117,8 +121,9 @@ ChromeTranslateClient::ChromeTranslateClient(content::WebContents* web_contents)
           this,
           translate::TranslateRankerFactory::GetForBrowserContext(
               web_contents->GetBrowserContext()),
-          LanguageModelFactory::GetForBrowserContext(
-              web_contents->GetBrowserContext()))) {
+          LanguageModelManagerFactory::GetForBrowserContext(
+              web_contents->GetBrowserContext())
+              ->GetPrimaryModel())) {
   translate_driver_.AddObserver(this);
   translate_driver_.set_translate_manager(translate_manager_.get());
 }
@@ -191,10 +196,8 @@ void ChromeTranslateClient::GetTranslateLanguages(
 
   Profile* profile =
       Profile::FromBrowserContext(web_contents->GetBrowserContext());
-  Profile* original_profile = profile->GetOriginalProfile();
-  PrefService* prefs = original_profile->GetPrefs();
   std::unique_ptr<translate::TranslatePrefs> translate_prefs =
-      CreateTranslatePrefs(prefs);
+      CreateTranslatePrefs(profile->GetPrefs());
   if (!web_contents->GetBrowserContext()->IsOffTheRecord()) {
     std::string auto_translate_language =
         translate::TranslateManager::GetAutoTargetLanguage(
@@ -206,8 +209,9 @@ void ChromeTranslateClient::GetTranslateLanguages(
   }
 
   *target = translate::TranslateManager::GetTargetLanguage(
-      translate_prefs.get(),
-      LanguageModelFactory::GetInstance()->GetForBrowserContext(profile));
+      translate_prefs.get(), LanguageModelManagerFactory::GetInstance()
+                                 ->GetForBrowserContext(profile)
+                                 ->GetPrimaryModel());
 }
 
 void ChromeTranslateClient::RecordTranslateEvent(
@@ -219,7 +223,7 @@ translate::TranslateManager* ChromeTranslateClient::GetTranslateManager() {
   return translate_manager_.get();
 }
 
-void ChromeTranslateClient::ShowTranslateUI(
+bool ChromeTranslateClient::ShowTranslateUI(
     translate::TranslateStep step,
     const std::string& source_language,
     const std::string& target_language,
@@ -231,7 +235,9 @@ void ChromeTranslateClient::ShowTranslateUI(
   if (error_type != translate::TranslateErrors::NONE)
     step = translate::TRANSLATE_STEP_TRANSLATE_ERROR;
 
-#if !defined(USE_AURA)
+// Translate uses a bubble UI on desktop and an infobar on Android (here)
+// and iOS (in ios/chrome/browser/translate/chrome_ios_translate_client.mm).
+#if defined(OS_ANDROID)
   if (!TranslateService::IsTranslateBubbleEnabled()) {
     // Infobar UI.
     translate::TranslateInfoBarDelegate::Create(
@@ -240,7 +246,7 @@ void ChromeTranslateClient::ShowTranslateUI(
         InfoBarService::FromWebContents(web_contents()),
         web_contents()->GetBrowserContext()->IsOffTheRecord(), step,
         source_language, target_language, error_type, triggered_from_menu);
-    return;
+    return true;
   }
 #endif
 
@@ -248,7 +254,7 @@ void ChromeTranslateClient::ShowTranslateUI(
   if (step == translate::TRANSLATE_STEP_BEFORE_TRANSLATE &&
       translate_manager_->ShouldSuppressBubbleUI(triggered_from_menu,
                                                  source_language)) {
-    return;
+    return false;
   }
 
   ShowTranslateBubbleResult result = ShowBubble(step, error_type);
@@ -257,6 +263,8 @@ void ChromeTranslateClient::ShowTranslateUI(
     translate_manager_->RecordTranslateEvent(
         BubbleResultToTranslateEvent(result));
   }
+
+  return true;
 }
 
 translate::TranslateDriver* ChromeTranslateClient::GetTranslateDriver() {
@@ -267,15 +275,12 @@ PrefService* ChromeTranslateClient::GetPrefs() {
   DCHECK(web_contents());
   Profile* profile =
       Profile::FromBrowserContext(web_contents()->GetBrowserContext());
-  return profile->GetOriginalProfile()->GetPrefs();
+  return profile->GetPrefs();
 }
 
 std::unique_ptr<translate::TranslatePrefs>
 ChromeTranslateClient::GetTranslatePrefs() {
-  DCHECK(web_contents());
-  Profile* profile =
-      Profile::FromBrowserContext(web_contents()->GetBrowserContext());
-  return CreateTranslatePrefs(profile->GetPrefs());
+  return CreateTranslatePrefs(GetPrefs());
 }
 
 translate::TranslateAcceptLanguages*
@@ -284,14 +289,11 @@ ChromeTranslateClient::GetTranslateAcceptLanguages() {
   return GetTranslateAcceptLanguages(web_contents()->GetBrowserContext());
 }
 
+#if defined(OS_ANDROID)
 int ChromeTranslateClient::GetInfobarIconID() const {
-#if defined(USE_AURA)
-  NOTREACHED();
-  return 0;
-#else
-  return IDR_INFOBAR_TRANSLATE;
-#endif
+  return IDR_ANDROID_INFOBAR_TRANSLATE;
 }
+#endif
 
 void ChromeTranslateClient::RecordLanguageDetectionEvent(
     const translate::LanguageDetectionDetails& details) const {

@@ -7,7 +7,6 @@
 #include <utility>
 
 #include "base/containers/flat_set.h"
-#include "base/memory/memory_coordinator_client_registry.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/clock.h"
 #include "base/time/default_clock.h"
@@ -23,12 +22,10 @@ SSLClientSessionCache::SSLClientSessionCache(const Config& config)
       lookups_since_flush_(0) {
   memory_pressure_listener_.reset(new base::MemoryPressureListener(base::Bind(
       &SSLClientSessionCache::OnMemoryPressure, base::Unretained(this))));
-  base::MemoryCoordinatorClientRegistry::GetInstance()->Register(this);
 }
 
 SSLClientSessionCache::~SSLClientSessionCache() {
   Flush();
-  base::MemoryCoordinatorClientRegistry::GetInstance()->Unregister(this);
 }
 
 size_t SSLClientSessionCache::size() const {
@@ -74,11 +71,10 @@ void SSLClientSessionCache::Insert(const std::string& cache_key,
                                    SSL_SESSION* session) {
   base::AutoLock lock(lock_);
 
-  SSL_SESSION_up_ref(session);
   auto iter = cache_.Get(cache_key);
   if (iter == cache_.end())
     iter = cache_.Put(cache_key, Entry());
-  iter->second.Push(bssl::UniquePtr<SSL_SESSION>(session));
+  iter->second.Push(bssl::UpRef(session));
 }
 
 void SSLClientSessionCache::Flush() {
@@ -120,7 +116,8 @@ void SSLClientSessionCache::DumpMemoryStats(
     for (const auto& session : pair.second.sessions) {
       if (!session)
         continue;
-      undeduped_cert_count += sk_CRYPTO_BUFFER_num(session->certs);
+      undeduped_cert_count += sk_CRYPTO_BUFFER_num(
+          SSL_SESSION_get0_peer_certificates(session.get()));
     }
   }
   // Use a flat_set here to avoid malloc upon insertion.
@@ -130,7 +127,8 @@ void SSLClientSessionCache::DumpMemoryStats(
     for (const auto& session : pair.second.sessions) {
       if (!session)
         continue;
-      for (const CRYPTO_BUFFER* cert : session->certs) {
+      for (const CRYPTO_BUFFER* cert :
+           SSL_SESSION_get0_peer_certificates(session.get())) {
         undeduped_cert_size += CRYPTO_BUFFER_len(cert);
         auto result = crypto_buffer_set.insert(cert);
         if (!result.second)
@@ -172,13 +170,12 @@ void SSLClientSessionCache::Entry::Push(bssl::UniquePtr<SSL_SESSION> session) {
 bssl::UniquePtr<SSL_SESSION> SSLClientSessionCache::Entry::Pop() {
   if (sessions[0] == nullptr)
     return nullptr;
-  SSL_SESSION* session = sessions[0].get();
-  SSL_SESSION_up_ref(session);
-  if (SSL_SESSION_should_be_single_use(session)) {
+  bssl::UniquePtr<SSL_SESSION> session = bssl::UpRef(sessions[0]);
+  if (SSL_SESSION_should_be_single_use(session.get())) {
     sessions[0] = std::move(sessions[1]);
     sessions[1] = nullptr;
   }
-  return bssl::UniquePtr<SSL_SESSION>(session);
+  return session;
 }
 
 bool SSLClientSessionCache::Entry::ExpireSessions(time_t now) {
@@ -221,10 +218,6 @@ void SSLClientSessionCache::OnMemoryPressure(
       Flush();
       break;
   }
-}
-
-void SSLClientSessionCache::OnPurgeMemory() {
-  Flush();
 }
 
 }  // namespace net

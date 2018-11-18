@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 # Copyright 2017 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -10,9 +11,10 @@ from chromite.cbuildbot import relevant_changes
 from chromite.cbuildbot.stages import generic_stages
 from chromite.lib import builder_status_lib
 from chromite.lib import clactions
+from chromite.lib import clactions_metrics
 from chromite.lib import config_lib
 from chromite.lib import constants
-from chromite.lib import cros_build_lib
+from chromite.lib import cros_collections
 from chromite.lib import cros_logging as logging
 from chromite.lib import hwtest_results
 from chromite.lib import metrics
@@ -27,6 +29,9 @@ class CommitQueueHandleChangesStage(generic_stages.BuilderStage):
   analyzing the BuilderStatus of the master CQ and the slave CQs which are
   collected by the CommitQueueCompletionStage.
   """
+
+  category = constants.CI_INFRA_STAGE
+
   def __init__(self, builder_run, sync_stage, completion_stage, **kwargs):
     """Initialize CommitQueueHandleChangesStage."""
     super(CommitQueueHandleChangesStage, self).__init__(builder_run, **kwargs)
@@ -55,8 +60,8 @@ class CommitQueueHandleChangesStage(generic_stages.BuilderStage):
       action_history = clactions.CLActionHistory(submitted_changes_all_actions)
       logging.info('Recording submission metrics about %s CLs to monarch.',
                    len(submitted_change_strategies))
-      clactions.RecordSubmissionMetrics(action_history,
-                                        submitted_change_strategies)
+      clactions_metrics.RecordSubmissionMetrics(action_history,
+                                                submitted_change_strategies)
 
       # Record CQ wall-clock metric.
       submitted_any = len(submitted_change_strategies) > 0
@@ -170,14 +175,11 @@ class CommitQueueHandleChangesStage(generic_stages.BuilderStage):
               build_id, db, self._run.config, changes,
               builds_not_passed_sync_stage,
               slave_buildbucket_ids, include_master=True))
-      subsys_by_config = (
-          relevant_changes.RelevantChanges.GetSubsysResultForSlaves(
-              build_id, db))
 
       changes_by_slaves = changes_by_config.copy()
       # Exclude master build
       changes_by_slaves.pop(self._run.config.name, None)
-      slaves_by_change = cros_build_lib.InvertDictionary(changes_by_slaves)
+      slaves_by_change = cros_collections.InvertDictionary(changes_by_slaves)
       passed_in_history_slaves_by_change = (
           relevant_changes.RelevantChanges.GetPreviouslyPassedSlavesForChanges(
               build_id, db, changes, slaves_by_change))
@@ -187,7 +189,7 @@ class CommitQueueHandleChangesStage(generic_stages.BuilderStage):
       # Even if there was a failure, we can submit the changes that indicate
       # that they don't care about this failure.
       changes = self.sync_stage.pool.SubmitPartialPool(
-          changes, messages, changes_by_config, subsys_by_config,
+          changes, messages, changes_by_config,
           passed_in_history_slaves_by_change, failing, inflight, no_stat)
 
     tot_sanity = self._CheckToTSanity()

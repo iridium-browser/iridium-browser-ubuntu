@@ -12,15 +12,20 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
+#include "base/mac/foundation_util.h"
 #include "base/mac/mac_logging.h"
 #include "base/mac/mac_util.h"
+#include "base/mac/scoped_cftyperef.h"
+#include "base/mac/scoped_mach_port.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/strings/strcat.h"
 #include "base/strings/stringprintf.h"
+#include "base/strings/sys_string_conversions.h"
 #include "base/sys_info.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
-#include "media/audio/mac/audio_manager_mac.h"
+#include "media/audio/mac/core_audio_util_mac.h"
 #include "media/audio/mac/scoped_audio_unit.h"
 #include "media/base/audio_bus.h"
 #include "media/base/audio_timestamp_helper.h"
@@ -34,6 +39,13 @@ OSStatus AudioDeviceDuck(AudioDeviceID inDevice,
                          Float32 inDuckedLevel,
                          const AudioTimeStamp* __nullable inStartTime,
                          Float32 inRampDuration) __attribute__((weak_import));
+}
+
+void UndoDucking(AudioDeviceID output_device_id) {
+  if (AudioDeviceDuck != nullptr) {
+    // Ramp the volume back up over half a second.
+    AudioDeviceDuck(output_device_id, 1.0, nullptr, 0.5);
+  }
 }
 
 }  // namespace
@@ -113,13 +125,12 @@ static OSStatus GetInputDeviceStreamFormat(
 
 // Returns the number of physical processors on the device.
 static int NumberOfPhysicalProcessors() {
-  mach_port_t mach_host = mach_host_self();
+  base::mac::ScopedMachSendRight mach_host(mach_host_self());
   host_basic_info hbi = {};
   mach_msg_type_number_t info_count = HOST_BASIC_INFO_COUNT;
   kern_return_t kr =
-      host_info(mach_host, HOST_BASIC_INFO, reinterpret_cast<host_info_t>(&hbi),
-                &info_count);
-  mach_port_deallocate(mach_task_self(), mach_host);
+      host_info(mach_host.get(), HOST_BASIC_INFO,
+                reinterpret_cast<host_info_t>(&hbi), &info_count);
 
   int n_physical_cores = 0;
   if (kr != KERN_SUCCESS) {
@@ -135,25 +146,54 @@ static int NumberOfPhysicalProcessors() {
 // Adds extra system information to Media.AudioXXXMac UMA statistics.
 // Only called when it has been detected that audio callbacks does not start
 // as expected.
-static void AddSystemInfoToUMA(bool is_on_battery, int num_resumes) {
-  // Logs true or false depending on if the machine is on battery power or not.
-  UMA_HISTOGRAM_BOOLEAN("Media.Audio.IsOnBatteryPowerMac", is_on_battery);
+static void AddSystemInfoToUMA() {
   // Number of logical processors/cores on the current machine.
-  UMA_HISTOGRAM_COUNTS("Media.Audio.LogicalProcessorsMac",
-                       base::SysInfo::NumberOfProcessors());
+  UMA_HISTOGRAM_COUNTS_1M("Media.Audio.LogicalProcessorsMac",
+                          base::SysInfo::NumberOfProcessors());
   // Number of physical processors/cores on the current machine.
-  UMA_HISTOGRAM_COUNTS("Media.Audio.PhysicalProcessorsMac",
-                       NumberOfPhysicalProcessors());
-  // Counts number of times the system has resumed from power suspension.
-  UMA_HISTOGRAM_COUNTS_1000("Media.Audio.ResumeEventsMac", num_resumes);
-  // System uptime in hours.
-  UMA_HISTOGRAM_COUNTS_1000("Media.Audio.UptimeMac",
-                            base::SysInfo::Uptime().InHours());
-  DVLOG(1) << "uptime: " << base::SysInfo::Uptime().InHours();
+  UMA_HISTOGRAM_COUNTS_1M("Media.Audio.PhysicalProcessorsMac",
+                          NumberOfPhysicalProcessors());
   DVLOG(1) << "logical processors: " << base::SysInfo::NumberOfProcessors();
   DVLOG(1) << "physical processors: " << NumberOfPhysicalProcessors();
-  DVLOG(1) << "battery power: " << is_on_battery;
-  DVLOG(1) << "resume events: " << num_resumes;
+}
+
+// Finds the first subdevice, in an aggregate device, with output streams.
+static AudioDeviceID FindFirstOutputSubdevice(
+    AudioDeviceID aggregate_device_id) {
+  const AudioObjectPropertyAddress property_address = {
+      kAudioAggregateDevicePropertyFullSubDeviceList,
+      kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMaster};
+  base::ScopedCFTypeRef<CFArrayRef> subdevices;
+  UInt32 size = sizeof(subdevices);
+  OSStatus result = AudioObjectGetPropertyData(
+      aggregate_device_id, &property_address, 0 /* inQualifierDataSize */,
+      nullptr /* inQualifierData */, &size, subdevices.InitializeInto());
+
+  if (result != noErr) {
+    OSSTATUS_LOG(WARNING, result)
+        << "Failed to read property "
+        << kAudioAggregateDevicePropertyFullSubDeviceList << " for device "
+        << aggregate_device_id;
+    return kAudioObjectUnknown;
+  }
+
+  AudioDeviceID output_subdevice_id = kAudioObjectUnknown;
+  DCHECK_EQ(CFGetTypeID(subdevices), CFArrayGetTypeID());
+  const CFIndex count = CFArrayGetCount(subdevices);
+  for (CFIndex i = 0; i != count; ++i) {
+    CFStringRef value =
+        base::mac::CFCast<CFStringRef>(CFArrayGetValueAtIndex(subdevices, i));
+    if (value) {
+      std::string uid = base::SysCFStringRefToUTF8(value);
+      output_subdevice_id = AudioManagerMac::GetAudioDeviceIdByUId(false, uid);
+      if (output_subdevice_id != kAudioObjectUnknown &&
+          core_audio_mac::GetNumStreams(output_subdevice_id, false) > 0) {
+        break;
+      }
+    }
+  }
+
+  return output_subdevice_id;
 }
 
 // See "Technical Note TN2091 - Device input using the HAL Output Audio Unit"
@@ -165,7 +205,7 @@ AUAudioInputStream::AUAudioInputStream(
     const AudioParameters& input_params,
     AudioDeviceID audio_device_id,
     const AudioManager::LogCallback& log_callback,
-    VoiceProcessingMode voice_processing_mode)
+    AudioManagerBase::VoiceProcessingMode voice_processing_mode)
     : manager_(manager),
       input_params_(input_params),
       number_of_frames_provided_(0),
@@ -179,12 +219,12 @@ AUAudioInputStream::AUAudioInputStream(
             kNumberOfBlocksBufferInFifo),
       got_input_callback_(false),
       input_callback_is_active_(false),
-      start_was_deferred_(false),
       buffer_size_was_changed_(false),
       audio_unit_render_has_worked_(false),
       noise_reduction_suppressed_(false),
       use_voice_processing_(voice_processing_mode ==
-                            VoiceProcessingMode::ENABLED),
+                            AudioManagerBase::VoiceProcessingMode::kEnabled),
+      output_device_id_for_aec_(kAudioObjectUnknown),
       last_sample_time_(0.0),
       last_number_of_frames_(0),
       total_lost_frames_(0),
@@ -195,7 +235,12 @@ AUAudioInputStream::AUAudioInputStream(
   CHECK(!log_callback_.Equals(AudioManager::LogCallback()));
   if (use_voice_processing_) {
     DCHECK(input_params.channels() == 1 || input_params.channels() == 2);
+    const bool got_default_device =
+        AudioManagerMac::GetDefaultOutputDevice(&output_device_id_for_aec_);
+    DCHECK(got_default_device);
   }
+
+  const SampleFormat kSampleFormat = kSampleFormatS16;
 
   // Set up the desired (output) format specified by the client.
   format_.mSampleRate = input_params.sample_rate();
@@ -203,12 +248,11 @@ AUAudioInputStream::AUAudioInputStream(
   format_.mFormatFlags =
       kLinearPCMFormatFlagIsPacked | kLinearPCMFormatFlagIsSignedInteger;
   DCHECK(FormatIsInterleaved(format_.mFormatFlags));
-  format_.mBitsPerChannel = input_params.bits_per_sample();
+  format_.mBitsPerChannel = SampleFormatToBitsPerChannel(kSampleFormat);
   format_.mChannelsPerFrame = input_params.channels();
   format_.mFramesPerPacket = 1;  // uncompressed audio
-  format_.mBytesPerPacket =
-      (format_.mBitsPerChannel * input_params.channels()) / 8;
-  format_.mBytesPerFrame = format_.mBytesPerPacket;
+  format_.mBytesPerPacket = format_.mBytesPerFrame =
+      input_params.GetBytesPerFrame(kSampleFormat);
   format_.mReserved = 0;
 
   DVLOG(1) << "ctor";
@@ -258,6 +302,9 @@ bool AUAudioInputStream::Open() {
   const int sample_rate =
       AudioManagerMac::HardwareSampleRateForDevice(input_device_id_);
   DCHECK_EQ(sample_rate, format_.mSampleRate);
+
+  log_callback_.Run(base::StrCat(
+      {"AU in: Open using ", use_voice_processing_ ? "VPAU" : "AUHAL"}));
 
   const bool success =
       use_voice_processing_ ? OpenVoiceProcessingAU() : OpenAUHAL();
@@ -484,11 +531,22 @@ bool AUAudioInputStream::OpenVoiceProcessingAU() {
     return false;
   }
 
-  // Next, set the audio device to be the Audio Unit's current device.
+  // Next, set the audio device to be the Audio Unit's input device.
   result =
       AudioUnitSetProperty(audio_unit_, kAudioOutputUnitProperty_CurrentDevice,
                            kAudioUnitScope_Global, AUElement::INPUT,
                            &input_device_id_, sizeof(input_device_id_));
+
+  if (result != noErr) {
+    HandleError(result);
+    return false;
+  }
+
+  // Followed by the audio device to be the Audio Unit's output device.
+  result = AudioUnitSetProperty(
+      audio_unit_, kAudioOutputUnitProperty_CurrentDevice,
+      kAudioUnitScope_Global, AUElement::OUTPUT, &output_device_id_for_aec_,
+      sizeof(output_device_id_for_aec_));
 
   if (result != noErr) {
     HandleError(result);
@@ -604,21 +662,7 @@ bool AUAudioInputStream::OpenVoiceProcessingAU() {
     return false;
   }
 
-  if (AudioDeviceDuck != nullptr) {
-    // Undo the ducking.
-    // Obtain the AudioDeviceID of the default output AudioDevice.
-    const AudioObjectPropertyAddress pa = {
-        kAudioHardwarePropertyDefaultOutputDevice,
-        kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyElementMaster};
-    AudioDeviceID output_device = 0;
-    UInt32 size = sizeof(output_device);
-    OSStatus result = AudioObjectGetPropertyData(kAudioObjectSystemObject, &pa,
-                                                 0, 0, &size, &output_device);
-    if (result == noErr) {
-      // Ramp the volume back up over half a second.
-      AudioDeviceDuck(output_device, 1.0, nullptr, 0.5);
-    }
-  }
+  UndoDucking(output_device_id_for_aec_);
 
   return true;
 }
@@ -635,7 +679,6 @@ void AUAudioInputStream::Start(AudioInputCallback* callback) {
   // Check if we should defer Start() for http://crbug.com/160920.
   if (manager_->ShouldDeferStreamStart()) {
     LOG(WARNING) << "Start of input audio is deferred";
-    start_was_deferred_ = true;
     // Use a cancellable closure so that if Stop() is called before Start()
     // actually runs, we can cancel the pending start.
     deferred_start_cb_.Reset(base::Bind(&AUAudioInputStream::Start,
@@ -731,21 +774,6 @@ void AUAudioInputStream::Close() {
 
   // Uninitialize and dispose the audio unit.
   CloseAudioUnit();
-
-  // Add more UMA stats but only if AGC was activated, i.e. for e.g. WebRTC
-  // audio input streams.
-  if (GetAutomaticGainControl()) {
-    // Log whether call to Start() was deferred or not. To be compared with
-    // Media.Audio.InputStartWasDeferredMac which logs the same value but only
-    // when input audio fails to start.
-    UMA_HISTOGRAM_BOOLEAN("Media.Audio.InputStartWasDeferredAudioWorkedMac",
-                          start_was_deferred_);
-    // Log if a change of I/O buffer size was required. To be compared with
-    // Media.Audio.InputBufferSizeWasChangedMac which logs the same value but
-    // only when input audio fails to start.
-    UMA_HISTOGRAM_BOOLEAN("Media.Audio.InputBufferSizeWasChangedAudioWorkedMac",
-                          buffer_size_was_changed_);
-  }
 
   // Inform the audio manager that we have been closed. This will cause our
   // destruction.
@@ -890,6 +918,87 @@ bool AUAudioInputStream::IsMuted() {
       input_device_id_, &property_address, 0, nullptr, &size, &muted);
   DLOG_IF(WARNING, result != noErr) << "Failed to get mute state";
   return result == noErr && muted != 0;
+}
+
+void AUAudioInputStream::SetOutputDeviceForAec(
+    const std::string& output_device_id) {
+  if (!use_voice_processing_)
+    return;
+
+  AudioDeviceID audio_device_id =
+      AudioManagerMac::GetAudioDeviceIdByUId(false, output_device_id);
+  if (audio_device_id == output_device_id_for_aec_)
+    return;
+
+  if (audio_device_id == kAudioObjectUnknown) {
+    log_callback_.Run(
+        base::StringPrintf("AU in: Unable to resolve output device id '%s'",
+                           output_device_id.c_str()));
+    return;
+  }
+
+  // If the selected device is an aggregate device, try to use the first output
+  // device of the aggregate device instead.
+  if (core_audio_mac::GetDeviceTransportType(audio_device_id) ==
+      kAudioDeviceTransportTypeAggregate) {
+    const AudioDeviceID output_subdevice_id =
+        FindFirstOutputSubdevice(audio_device_id);
+
+    if (output_subdevice_id == kAudioObjectUnknown) {
+      log_callback_.Run(base::StringPrintf(
+          "AU in: Unable to find an output subdevice in aggregate device '%s'",
+          output_device_id.c_str()));
+      return;
+    }
+    audio_device_id = output_subdevice_id;
+  }
+
+  if (audio_device_id != output_device_id_for_aec_) {
+    output_device_id_for_aec_ = audio_device_id;
+    log_callback_.Run(base::StringPrintf(
+        "AU in: Output device for AEC changed to '%s' (%d)",
+        output_device_id.c_str(), output_device_id_for_aec_));
+    // Only restart the stream if it has previously been started.
+    if (audio_unit_)
+      ReinitializeVoiceProcessingAudioUnit();
+  }
+}
+
+void AUAudioInputStream::ReinitializeVoiceProcessingAudioUnit() {
+  DCHECK(use_voice_processing_);
+  DCHECK(audio_unit_);
+
+  const bool was_running = IsRunning();
+  OSStatus result = noErr;
+
+  if (was_running) {
+    result = AudioOutputUnitStop(audio_unit_);
+    DCHECK_EQ(result, noErr);
+  }
+
+  CloseAudioUnit();
+
+  // Reset things to a state similar to before the audio unit was opened.
+  // Most of these will be no-ops if the audio unit was opened but not started.
+  SetInputCallbackIsActive(false);
+  ReportAndResetStats();
+  io_buffer_frame_size_ = 0;
+  got_input_callback_ = false;
+
+  OpenVoiceProcessingAU();
+
+  if (was_running) {
+    result = AudioOutputUnitStart(audio_unit_);
+    if (result != noErr) {
+      OSSTATUS_DLOG(ERROR, result) << "Failed to start acquiring data";
+      Stop();
+      return;
+    }
+  }
+
+  log_callback_.Run(base::StringPrintf(
+      "AU in: Successfully reinitialized AEC for output device id=%d.",
+      output_device_id_for_aec_));
 }
 
 // static
@@ -1253,16 +1362,8 @@ void AUAudioInputStream::CloseAudioUnit() {
 
 void AUAudioInputStream::AddHistogramsForFailedStartup() {
   DCHECK(thread_checker_.CalledOnValidThread());
-  UMA_HISTOGRAM_BOOLEAN("Media.Audio.InputStartWasDeferredMac",
-                        start_was_deferred_);
   UMA_HISTOGRAM_BOOLEAN("Media.Audio.InputBufferSizeWasChangedMac",
                         buffer_size_was_changed_);
-  UMA_HISTOGRAM_COUNTS_1000("Media.Audio.NumberOfOutputStreamsMac",
-                            manager_->output_streams());
-  UMA_HISTOGRAM_COUNTS_1000("Media.Audio.NumberOfLowLatencyInputStreamsMac",
-                            manager_->low_latency_input_streams());
-  UMA_HISTOGRAM_COUNTS_1000("Media.Audio.NumberOfBasicInputStreamsMac",
-                            manager_->basic_input_streams());
   // |input_params_.frames_per_buffer()| is set at construction and corresponds
   // to the requested (by the client) number of audio frames per I/O buffer
   // connected to the selected input device. Ideally, this size will be the same
@@ -1279,14 +1380,8 @@ void AUAudioInputStream::AddHistogramsForFailedStartup() {
   base::UmaHistogramSparse("Media.Audio.ActualInputBufferFrameSizeMac",
                            io_buffer_frame_size_);
   DVLOG(1) << "io_buffer_frame_size_: " << io_buffer_frame_size_;
-  // TODO(henrika): this value will currently always report true. It should
-  // be fixed when we understand the problem better.
-  UMA_HISTOGRAM_BOOLEAN("Media.Audio.AutomaticGainControlMac",
-                        GetAutomaticGainControl());
-  // Add information about things like number of logical processors, number
-  // of system resume events etc.
-  AddSystemInfoToUMA(manager_->IsOnBatteryPower(),
-                     manager_->GetNumberOfResumeNotifications());
+  // Add information about things like number of logical processors etc.
+  AddSystemInfoToUMA();
 }
 
 void AUAudioInputStream::UpdateCaptureTimestamp(
@@ -1323,7 +1418,7 @@ void AUAudioInputStream::ReportAndResetStats() {
                              number_of_frames_provided_);
   // Even if there aren't any glitches, we want to record it to get a feel for
   // how often we get no glitches vs the alternative.
-  UMA_HISTOGRAM_COUNTS("Media.Audio.Capture.Glitches", glitches_detected_);
+  UMA_HISTOGRAM_COUNTS_1M("Media.Audio.Capture.Glitches", glitches_detected_);
 
   auto lost_frames_ms = (total_lost_frames_ * 1000) / format_.mSampleRate;
   std::string log_message = base::StringPrintf(

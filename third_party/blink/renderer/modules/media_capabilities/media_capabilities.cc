@@ -43,7 +43,7 @@ double ComputeFrameRate(const String& fps_str) {
   if (std::isfinite(result))
     return result > 0 ? result : std::numeric_limits<double>::quiet_NaN();
 
-  size_t slash_position = fps_str.find('/');
+  wtf_size_t slash_position = fps_str.find('/');
   if (slash_position == kNotFound)
     return std::numeric_limits<double>::quiet_NaN();
 
@@ -288,7 +288,7 @@ ScriptPromise MediaCapabilities::encodingInfo(
               ->GetTaskRunner(TaskType::kInternalMediaRealTime));
   if (!handler) {
     resolver->Reject(DOMException::Create(
-        kInvalidStateError,
+        DOMExceptionCode::kInvalidStateError,
         "Platform error: could not create MediaRecorderHandler."));
     return promise;
   }

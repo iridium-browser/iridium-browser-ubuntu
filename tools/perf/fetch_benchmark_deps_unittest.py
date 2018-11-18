@@ -2,7 +2,9 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import json
 import os
+import tempfile
 import unittest
 
 import mock  # pylint: disable=import-error
@@ -12,6 +14,7 @@ from telemetry.wpr import archive_info
 
 from core import path_util
 import fetch_benchmark_deps
+
 
 def NormPaths(paths):
   return sorted([os.path.normcase(p) for p in paths.splitlines()])
@@ -26,7 +29,9 @@ class FetchBenchmarkDepsUnittest(unittest.TestCase):
   """
 
   def testFetchWPRs(self):
-    args = ['smoothness.top_25_smooth']
+    test_name = 'system_health.common_desktop'
+    deps_fd, deps_path = tempfile.mkstemp()
+    args = [test_name, '--output-deps=%s' % deps_path]
     with mock.patch.object(archive_info.WprArchiveInfo,
         'DownloadArchivesIfNeeded', autospec=True) as mock_download:
       with mock.patch('py_utils.cloud_storage'
@@ -38,9 +43,24 @@ class FetchBenchmarkDepsUnittest(unittest.TestCase):
             # pylint: disable=protected-access
             os.path.normpath(mock_download.call_args[0][0]._file_path),
             os.path.join(path_util.GetPerfStorySetsDir(), 'data',
-            'top_25_smooth.json'))
+            'system_health_desktop.json'))
         # This benchmark doesn't use any static local files.
         self.assertFalse(mock_get.called)
+
+    # Gets json content and remove the temp json file.
+    with open(deps_path) as deps_file:
+      deps = json.loads(deps_file.read())
+    os.close(deps_fd)
+    os.remove(deps_path)
+
+    # Checks fetch_benchmark_deps.py output.
+    output_count = 0
+    for dep in deps[test_name]:
+      fullpath = os.path.join(path_util.GetChromiumSrcDir(), dep)
+      sha1path = fullpath + '.sha1'
+      self.assertTrue(os.path.isfile(sha1path))
+      output_count += 1
+    self.assertTrue(output_count > 0)
 
   def testFetchServingDirs(self):
     args = ['media.desktop']

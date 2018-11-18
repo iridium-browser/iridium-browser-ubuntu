@@ -8,6 +8,7 @@
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
+#include "third_party/blink/renderer/core/html/media/html_video_element.h"
 #include "third_party/blink/renderer/modules/picture_in_picture/picture_in_picture_controller_impl.h"
 
 namespace blink {
@@ -32,24 +33,27 @@ ScriptPromise DocumentPictureInPicture::exitPictureInPicture(
   PictureInPictureControllerImpl& controller =
       PictureInPictureControllerImpl::From(document);
   Element* picture_in_picture_element =
-      controller.PictureInPictureElement(ToTreeScope(document));
+      controller.PictureInPictureElement(document);
 
   if (!picture_in_picture_element) {
     return ScriptPromise::RejectWithDOMException(
-        script_state,
-        DOMException::Create(kInvalidStateError, kNoPictureInPictureElement));
+        script_state, DOMException::Create(DOMExceptionCode::kInvalidStateError,
+                                           kNoPictureInPictureElement));
   }
 
-  // TODO(crbug.com/806249): Call element.exitPictureInPicture().
+  ScriptPromiseResolver* resolver = ScriptPromiseResolver::Create(script_state);
+  ScriptPromise promise = resolver->Promise();
 
-  controller.OnClosePictureInPictureWindow();
-
-  controller.UnsetPictureInPictureElement();
-
-  picture_in_picture_element->DispatchEvent(
-      Event::CreateBubble(EventTypeNames::leavepictureinpicture));
-
-  return ScriptPromise::CastUndefined(script_state);
+  DCHECK(IsHTMLVideoElement(picture_in_picture_element));
+  document.GetTaskRunner(TaskType::kMediaElementEvent)
+      ->PostTask(
+          FROM_HERE,
+          WTF::Bind(
+              &PictureInPictureControllerImpl::ExitPictureInPicture,
+              WrapPersistent(&controller),
+              WrapPersistent(ToHTMLVideoElement(picture_in_picture_element)),
+              WrapPersistent(resolver)));
+  return promise;
 }
 
 // static

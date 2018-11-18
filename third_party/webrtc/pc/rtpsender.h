@@ -21,15 +21,16 @@
 
 #include "api/mediastreaminterface.h"
 #include "api/rtpsenderinterface.h"
-#include "rtc_base/basictypes.h"
-#include "rtc_base/criticalsection.h"
 #include "media/base/audiosource.h"
 #include "media/base/mediachannel.h"
 #include "pc/dtmfsender.h"
+#include "rtc_base/criticalsection.h"
 
 namespace webrtc {
 
 class StatsCollector;
+
+bool UnimplementedRtpParameterHasValue(const RtpParameters& parameters);
 
 // Internal interface used by PeerConnection.
 class RtpSenderInternal : public RtpSenderInterface {
@@ -51,6 +52,8 @@ class RtpSenderInternal : public RtpSenderInterface {
   virtual void SetSsrc(uint32_t ssrc) = 0;
 
   virtual void set_stream_ids(const std::vector<std::string>& stream_ids) = 0;
+  virtual void set_init_send_encodings(
+      const std::vector<RtpEncodingParameters>& init_send_encodings) = 0;
 
   virtual void Stop() = 0;
 
@@ -91,15 +94,10 @@ class AudioRtpSender : public DtmfProviderInterface,
   // StatsCollector provided so that Add/RemoveLocalAudioTrack can be called
   // at the appropriate times.
 
-  // Construct an AudioRtpSender with a null track, a single, randomly generated
-  // stream id, and a randomly generated ID.
-  AudioRtpSender(rtc::Thread* worker_thread, StatsCollector* stats);
-
-  // Construct an AudioRtpSender with the given track and stream ids. The
-  // sender ID will be set to the track's ID.
+  // Construct an RtpSender for audio with the given sender ID.
+  // The sender is initialized with no track to send and no associated streams.
   AudioRtpSender(rtc::Thread* worker_thread,
-                 rtc::scoped_refptr<AudioTrackInterface> track,
-                 const std::vector<std::string>& stream_ids,
+                 const std::string& id,
                  StatsCollector* stats);
 
   virtual ~AudioRtpSender();
@@ -128,10 +126,16 @@ class AudioRtpSender : public DtmfProviderInterface,
 
   std::vector<std::string> stream_ids() const override { return stream_ids_; }
 
-  RtpParameters GetParameters() const override;
+  RtpParameters GetParameters() override;
   RTCError SetParameters(const RtpParameters& parameters) override;
 
   rtc::scoped_refptr<DtmfSenderInterface> GetDtmfSender() const override;
+
+  void SetFrameEncryptor(
+      rtc::scoped_refptr<FrameEncryptorInterface> frame_encryptor) override;
+
+  rtc::scoped_refptr<FrameEncryptorInterface> GetFrameEncryptor()
+      const override;
 
   // RtpSenderInternal implementation.
   void SetSsrc(uint32_t ssrc) override;
@@ -140,14 +144,21 @@ class AudioRtpSender : public DtmfProviderInterface,
     stream_ids_ = stream_ids;
   }
 
+  void set_init_send_encodings(
+      const std::vector<RtpEncodingParameters>& init_send_encodings) override {
+    init_parameters_.encodings = init_send_encodings;
+  }
+  std::vector<RtpEncodingParameters> init_send_encodings() const override {
+    return init_parameters_.encodings;
+  }
+
   void Stop() override;
 
   int AttachmentId() const override { return attachment_id_; }
 
   void SetVoiceMediaChannel(
-      cricket::VoiceMediaChannel* voice_media_channel) override {
-    media_channel_ = voice_media_channel;
-  }
+      cricket::VoiceMediaChannel* voice_media_channel) override;
+
   void SetVideoMediaChannel(
       cricket::VideoMediaChannel* video_media_channel) override {
     RTC_NOTREACHED();
@@ -168,10 +179,12 @@ class AudioRtpSender : public DtmfProviderInterface,
   rtc::Thread* const worker_thread_;
   const std::string id_;
   std::vector<std::string> stream_ids_;
+  RtpParameters init_parameters_;
   cricket::VoiceMediaChannel* media_channel_ = nullptr;
-  StatsCollector* stats_;
+  StatsCollector* stats_ = nullptr;
   rtc::scoped_refptr<AudioTrackInterface> track_;
   rtc::scoped_refptr<DtmfSenderInterface> dtmf_sender_proxy_;
+  absl::optional<std::string> last_transaction_id_;
   uint32_t ssrc_ = 0;
   bool cached_track_enabled_ = false;
   bool stopped_ = false;
@@ -180,20 +193,15 @@ class AudioRtpSender : public DtmfProviderInterface,
   // cricket::AudioSource.
   std::unique_ptr<LocalAudioSinkAdapter> sink_adapter_;
   int attachment_id_ = 0;
+  rtc::scoped_refptr<FrameEncryptorInterface> frame_encryptor_;
 };
 
 class VideoRtpSender : public ObserverInterface,
                        public rtc::RefCountedObject<RtpSenderInternal> {
  public:
-  // Construct a VideoRtpSender with a null track, a single, randomly generated
-  // stream id, and a randomly generated ID.
-  explicit VideoRtpSender(rtc::Thread* worker_thread);
-
-  // Construct a VideoRtpSender with the given track and stream ids. The
-  // sender ID will be set to the track's ID.
-  VideoRtpSender(rtc::Thread* worker_thread,
-                 rtc::scoped_refptr<VideoTrackInterface> track,
-                 const std::vector<std::string>& stream_ids);
+  // Construct an RtpSender for video with the given sender ID.
+  // The sender is initialized with no track to send and no associated streams.
+  VideoRtpSender(rtc::Thread* worker_thread, const std::string& id);
 
   virtual ~VideoRtpSender();
 
@@ -216,10 +224,24 @@ class VideoRtpSender : public ObserverInterface,
 
   std::vector<std::string> stream_ids() const override { return stream_ids_; }
 
-  RtpParameters GetParameters() const override;
+  void set_init_send_encodings(
+      const std::vector<RtpEncodingParameters>& init_send_encodings) override {
+    init_parameters_.encodings = init_send_encodings;
+  }
+  std::vector<RtpEncodingParameters> init_send_encodings() const override {
+    return init_parameters_.encodings;
+  }
+
+  RtpParameters GetParameters() override;
   RTCError SetParameters(const RtpParameters& parameters) override;
 
   rtc::scoped_refptr<DtmfSenderInterface> GetDtmfSender() const override;
+
+  void SetFrameEncryptor(
+      rtc::scoped_refptr<FrameEncryptorInterface> frame_encryptor) override;
+
+  rtc::scoped_refptr<FrameEncryptorInterface> GetFrameEncryptor()
+      const override;
 
   // RtpSenderInternal implementation.
   void SetSsrc(uint32_t ssrc) override;
@@ -235,10 +257,9 @@ class VideoRtpSender : public ObserverInterface,
       cricket::VoiceMediaChannel* voice_media_channel) override {
     RTC_NOTREACHED();
   }
+
   void SetVideoMediaChannel(
-      cricket::VideoMediaChannel* video_media_channel) override {
-    media_channel_ = video_media_channel;
-  }
+      cricket::VideoMediaChannel* video_media_channel) override;
 
  private:
   bool can_send_track() const { return track_ && ssrc_; }
@@ -251,14 +272,16 @@ class VideoRtpSender : public ObserverInterface,
   rtc::Thread* worker_thread_;
   const std::string id_;
   std::vector<std::string> stream_ids_;
+  RtpParameters init_parameters_;
   cricket::VideoMediaChannel* media_channel_ = nullptr;
   rtc::scoped_refptr<VideoTrackInterface> track_;
+  absl::optional<std::string> last_transaction_id_;
   uint32_t ssrc_ = 0;
-  bool cached_track_enabled_ = false;
   VideoTrackInterface::ContentHint cached_track_content_hint_ =
       VideoTrackInterface::ContentHint::kNone;
   bool stopped_ = false;
   int attachment_id_ = 0;
+  rtc::scoped_refptr<FrameEncryptorInterface> frame_encryptor_;
 };
 
 }  // namespace webrtc

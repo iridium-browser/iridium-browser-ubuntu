@@ -63,12 +63,10 @@ class FileWriteWatcher::FileWriteWatcherImpl {
   struct PathWatchInfo {
     std::vector<base::Closure> on_write_callbacks;
     base::FilePathWatcher watcher;
-    base::Timer timer;
+    base::OneShotTimer timer;
 
     explicit PathWatchInfo(const base::Closure& on_write_callback)
-        : on_write_callbacks(1, on_write_callback),
-          timer(false /* retain_closure_on_reset */, false /* is_repeating */) {
-    }
+        : on_write_callbacks(1, on_write_callback) {}
   };
 
   base::TimeDelta delay_;
@@ -94,8 +92,8 @@ void FileWriteWatcher::FileWriteWatcherImpl::Destroy() {
 
   // Just forwarding the call to FILE thread.
   blocking_task_runner_->PostTask(
-      FROM_HERE, base::Bind(&FileWriteWatcherImpl::DestroyOnBlockingThread,
-                            base::Unretained(this)));
+      FROM_HERE, base::BindOnce(&FileWriteWatcherImpl::DestroyOnBlockingThread,
+                                base::Unretained(this)));
 }
 
 void FileWriteWatcher::FileWriteWatcherImpl::StartWatch(
@@ -107,14 +105,13 @@ void FileWriteWatcher::FileWriteWatcherImpl::StartWatch(
   // Forwarding the call to FILE thread and relaying the |callback|.
   blocking_task_runner_->PostTask(
       FROM_HERE,
-      base::Bind(&FileWriteWatcherImpl::StartWatchOnBlockingThread,
-                 base::Unretained(this), path,
-                 google_apis::CreateRelayCallback(on_start_callback),
-                 google_apis::CreateRelayCallback(on_write_callback)));
+      base::BindOnce(&FileWriteWatcherImpl::StartWatchOnBlockingThread,
+                     base::Unretained(this), path,
+                     google_apis::CreateRelayCallback(on_start_callback),
+                     google_apis::CreateRelayCallback(on_write_callback)));
 }
 
-FileWriteWatcher::FileWriteWatcherImpl::~FileWriteWatcherImpl() {
-}
+FileWriteWatcher::FileWriteWatcherImpl::~FileWriteWatcherImpl() = default;
 
 void FileWriteWatcher::FileWriteWatcherImpl::DestroyOnBlockingThread() {
   delete this;
@@ -157,11 +154,9 @@ void FileWriteWatcher::FileWriteWatcherImpl::OnWriteEvent(
   // Delay running on_write_event_callback by |delay_| time, and if OnWriteEvent
   // is called again in the period, the timer is reset. In other words, we
   // invoke callback when |delay_| has passed after the last OnWriteEvent().
-  it->second->timer.Start(FROM_HERE,
-                          delay_,
-                          base::Bind(&FileWriteWatcherImpl::InvokeCallback,
-                                     weak_ptr_factory_.GetWeakPtr(),
-                                     path));
+  it->second->timer.Start(FROM_HERE, delay_,
+                          base::BindOnce(&FileWriteWatcherImpl::InvokeCallback,
+                                         weak_ptr_factory_.GetWeakPtr(), path));
 }
 
 void FileWriteWatcher::FileWriteWatcherImpl::InvokeCallback(

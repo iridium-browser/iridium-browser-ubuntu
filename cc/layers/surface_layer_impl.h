@@ -7,6 +7,7 @@
 
 #include <memory>
 
+#include "base/bind.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "cc/cc_export.h"
@@ -14,32 +15,34 @@
 #include "components/viz/common/quads/surface_draw_quad.h"
 #include "components/viz/common/surfaces/surface_id.h"
 #include "components/viz/common/surfaces/surface_info.h"
+#include "components/viz/common/surfaces/surface_range.h"
 
 namespace cc {
 
+// This must match SurfaceLayer::UpdateSubmissionStateCB.
+using UpdateSubmissionStateCB = base::RepeatingCallback<void(bool is_visible)>;
+
 class CC_EXPORT SurfaceLayerImpl : public LayerImpl {
  public:
+  static std::unique_ptr<SurfaceLayerImpl> Create(
+      LayerTreeImpl* tree_impl,
+      int id,
+      UpdateSubmissionStateCB update_submission_state_callback) {
+    return base::WrapUnique(new SurfaceLayerImpl(
+        tree_impl, id, std::move(update_submission_state_callback)));
+  }
+
   static std::unique_ptr<SurfaceLayerImpl> Create(LayerTreeImpl* tree_impl,
                                                   int id) {
-    return base::WrapUnique(new SurfaceLayerImpl(tree_impl, id));
+    return base::WrapUnique(
+        new SurfaceLayerImpl(tree_impl, id, base::BindRepeating([](bool) {})));
   }
+
   ~SurfaceLayerImpl() override;
 
-  void SetPrimarySurfaceId(const viz::SurfaceId& surface_id,
-                           base::Optional<uint32_t> deadline_in_frames);
-  const viz::SurfaceId& primary_surface_id() const {
-    return primary_surface_id_;
-  }
-
-  // A fallback Surface is a Surface that is already known to exist in the
-  // display compositor. If surface synchronization is enabled, the display
-  // compositor will use the fallback if the primary surface is unavailable
-  // at the time of surface aggregation. If surface synchronization is not
-  // enabled, then the primary and fallback surfaces will always match.
-  void SetFallbackSurfaceId(const viz::SurfaceId& surface_id);
-  const viz::SurfaceId& fallback_surface_id() const {
-    return fallback_surface_id_;
-  }
+  void SetRange(const viz::SurfaceRange& surface_range,
+                base::Optional<uint32_t> deadline_in_frames);
+  const viz::SurfaceRange& range() const { return surface_range_; }
 
   base::Optional<uint32_t> deadline_in_frames() const {
     return deadline_in_frames_;
@@ -50,36 +53,44 @@ class CC_EXPORT SurfaceLayerImpl : public LayerImpl {
     return stretch_content_to_fill_bounds_;
   }
 
-  void SetHitTestable(bool hit_testable);
-  bool hit_testable() const { return hit_testable_; }
+  void SetSurfaceHitTestable(bool surface_hit_testable);
+  bool ShouldGenerateSurfaceHitTestData() const {
+    return surface_hit_testable_ && !has_pointer_events_none_;
+  }
+
+  void SetHasPointerEventsNone(bool has_pointer_events_none);
+  bool has_pointer_events_none() const { return has_pointer_events_none_; }
 
   // LayerImpl overrides.
   std::unique_ptr<LayerImpl> CreateLayerImpl(LayerTreeImpl* tree_impl) override;
   void PushPropertiesTo(LayerImpl* layer) override;
+  bool WillDraw(DrawMode draw_mode,
+                viz::ClientResourceProvider* resource_provider) override;
   void AppendQuads(viz::RenderPass* render_pass,
                    AppendQuadsData* append_quads_data) override;
   bool is_surface_layer() const override;
 
  protected:
-  SurfaceLayerImpl(LayerTreeImpl* tree_impl, int id);
+  SurfaceLayerImpl(LayerTreeImpl* tree_impl, int id, UpdateSubmissionStateCB);
 
  private:
   viz::SurfaceDrawQuad* CreateSurfaceDrawQuad(
       viz::RenderPass* render_pass,
-      const viz::SurfaceId& surface_id,
-      const base::Optional<viz::SurfaceId>& fallback_surface_id);
+      const viz::SurfaceRange& surface_range);
 
   void GetDebugBorderProperties(SkColor* color, float* width) const override;
   void AppendRainbowDebugBorder(viz::RenderPass* render_pass);
   void AsValueInto(base::trace_event::TracedValue* dict) const override;
   const char* LayerTypeAsString() const override;
 
-  viz::SurfaceId primary_surface_id_;
-  viz::SurfaceId fallback_surface_id_;
+  UpdateSubmissionStateCB update_submission_state_callback_;
+  viz::SurfaceRange surface_range_;
   base::Optional<uint32_t> deadline_in_frames_;
 
   bool stretch_content_to_fill_bounds_ = false;
-  bool hit_testable_ = false;
+  bool surface_hit_testable_ = false;
+  bool has_pointer_events_none_ = false;
+  bool will_draw_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(SurfaceLayerImpl);
 };

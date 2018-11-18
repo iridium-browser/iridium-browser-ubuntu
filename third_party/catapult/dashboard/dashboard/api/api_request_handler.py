@@ -1,14 +1,18 @@
 # Copyright 2017 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+
 import json
 import logging
 import re
 
+import webapp2
+
 from dashboard.api import api_auth
-from dashboard.common import request_handler
+from dashboard.common import utils
 
 _ALLOWED_ORIGINS = [
+    'chromeperf.appspot.com',
     'chromiumdash.appspot.com',
     'chromiumdash-staging.googleplex.com',
 ]
@@ -18,11 +22,24 @@ class BadRequestError(Exception):
   pass
 
 
-class ApiRequestHandler(request_handler.RequestHandler):
+class ForbiddenError(Exception):
+  def __init__(self):
+    super(ForbiddenError, self).__init__('Access denied')
+
+
+class NotFoundError(Exception):
+  def __init__(self):
+    super(NotFoundError, self).__init__('Not found')
+
+
+class ApiRequestHandler(webapp2.RequestHandler):
   """API handler for api requests.
 
   Convenience methods handling authentication errors and surfacing them.
   """
+
+  def _AllowAnonymous(self):
+    return False
 
   def post(self, *args):
     """Returns alert data in response to API requests.
@@ -32,26 +49,40 @@ class ApiRequestHandler(request_handler.RequestHandler):
     """
     self._SetCorsHeadersIfAppropriate()
     try:
-      results = self._TryAuthorizePost(*args)
+      api_auth.Authorize()
+    except api_auth.NotLoggedInError as e:
+      if not self._AllowAnonymous():
+        self.WriteErrorMessage(e.message, 401)
+        return
+    except api_auth.OAuthError as e:
+      self.WriteErrorMessage(e.message, 403)
+      return
+    # Allow oauth.Error to manifest as HTTP 500.
+
+    try:
+      if utils.IsInternalUser():
+        results = self.PrivilegedPost(*args)
+      else:
+        results = self.UnprivilegedPost(*args)
       self.response.out.write(json.dumps(results))
+    except NotFoundError as e:
+      self.WriteErrorMessage(e.message, 404)
+    except ForbiddenError as e:
+      self.WriteErrorMessage(e.message, 403)
     except BadRequestError as e:
       self.WriteErrorMessage(e.message, 400)
-    except api_auth.NotLoggedInError:
-      self.WriteErrorMessage('User not authenticated', 403)
-    except api_auth.OAuthError:
-      self.WriteErrorMessage('User authentication error', 403)
 
   def options(self, *_):  # pylint: disable=invalid-name
     self._SetCorsHeadersIfAppropriate()
 
-  @api_auth.Authorize
-  def _TryAuthorizePost(self, *args):
-    return self.AuthorizedPost(*args)
+  def PrivilegedPost(self, *_):
+    raise NotImplementedError()
 
-  def AuthorizedPost(self, *_):
-    raise BadRequestError('Override this')
+  def UnprivilegedPost(self, *_):
+    raise ForbiddenError()
 
   def _SetCorsHeadersIfAppropriate(self):
+    self.response.headers['Content-Type'] = 'application/json; charset=utf-8'
     set_cors_headers = False
     origin = self.request.headers.get('Origin', '')
     for allowed in _ALLOWED_ORIGINS:
@@ -71,6 +102,6 @@ class ApiRequestHandler(request_handler.RequestHandler):
     self.response.headers.add_header('Access-Control-Max-Age', '3600')
 
   def WriteErrorMessage(self, message, status):
-    logging.error(message)
+    logging.error('Error: %r', message)
     self.response.set_status(status)
     self.response.out.write(json.dumps({'error': message}))

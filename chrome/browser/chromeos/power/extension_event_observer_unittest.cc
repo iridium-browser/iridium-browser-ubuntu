@@ -11,11 +11,9 @@
 
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
-#include "chrome/browser/chromeos/settings/cros_settings.h"
-#include "chrome/browser/chromeos/settings/device_settings_service.h"
+#include "chrome/browser/chromeos/settings/scoped_cros_settings_test_helper.h"
 #include "chrome/common/extensions/api/gcm.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
@@ -88,9 +86,9 @@ class ExtensionEventObserverTest : public ::testing::Test {
   }
 
  protected:
-  scoped_refptr<extensions::Extension> CreateApp(const std::string& name,
-                                                 bool uses_gcm) {
-    scoped_refptr<extensions::Extension> app =
+  scoped_refptr<const extensions::Extension> CreateApp(const std::string& name,
+                                                       bool uses_gcm) {
+    scoped_refptr<const extensions::Extension> app =
         extensions::ExtensionBuilder()
             .SetManifest(
                 extensions::DictionaryBuilder()
@@ -117,8 +115,9 @@ class ExtensionEventObserverTest : public ::testing::Test {
     return app;
   }
 
-  extensions::ExtensionHost* CreateHostForApp(Profile* profile,
-                                              extensions::Extension* app) {
+  extensions::ExtensionHost* CreateHostForApp(
+      Profile* profile,
+      const extensions::Extension* app) {
     extensions::ProcessManager::Get(profile)->CreateBackgroundHost(
         app, extensions::BackgroundInfo::GetBackgroundURL(app));
     base::RunLoop().RunUntilIdle();
@@ -145,15 +144,14 @@ class ExtensionEventObserverTest : public ::testing::Test {
   // and RenderProcessHosts.
   content::RenderViewHostTestEnabler render_view_host_test_enabler_;
 
-  // Chrome OS needs extra services to run in the following order.
-  ScopedTestDeviceSettingsService test_device_settings_service_;
-  ScopedTestCrosSettings test_cros_settings_;
+  // Chrome OS needs the CrosSettings test helper.
+  ScopedCrosSettingsTestHelper cros_settings_test_helper_;
 
   // Owned by |scoped_user_manager_enabler_|.
   FakeChromeUserManager* fake_user_manager_;
   user_manager::ScopedUserManager scoped_user_manager_enabler_;
 
-  std::vector<scoped_refptr<extensions::Extension>> created_apps_;
+  std::vector<scoped_refptr<const extensions::Extension>> created_apps_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionEventObserverTest);
 };
@@ -189,7 +187,7 @@ TEST_F(ExtensionEventObserverTest, CanceledSuspend) {
 // Tests that the ExtensionEventObserver delays suspends and dark suspends while
 // there is a push message pending for an app that uses GCM.
 TEST_F(ExtensionEventObserverTest, PushMessagesDelaySuspend) {
-  scoped_refptr<extensions::Extension> gcm_app =
+  scoped_refptr<const extensions::Extension> gcm_app =
       CreateApp("DelaysSuspendForPushMessages", true /* uses_gcm */);
   extensions::ExtensionHost* host = CreateHostForApp(profile_, gcm_app.get());
   ASSERT_TRUE(host);
@@ -233,7 +231,7 @@ TEST_F(ExtensionEventObserverTest, PushMessagesDelaySuspend) {
 
 // Tests that messages sent for apps that don't use GCM are ignored.
 TEST_F(ExtensionEventObserverTest, IgnoresNonGCMApps) {
-  scoped_refptr<extensions::Extension> app = CreateApp("Non-GCM", false);
+  scoped_refptr<const extensions::Extension> app = CreateApp("Non-GCM", false);
   extensions::ExtensionHost* host = CreateHostForApp(profile_, app.get());
   ASSERT_TRUE(host);
 
@@ -248,7 +246,8 @@ TEST_F(ExtensionEventObserverTest, IgnoresNonGCMApps) {
 // Tests that network requests started by an app while it is processing a push
 // message delay any suspend attempt.
 TEST_F(ExtensionEventObserverTest, NetworkRequestsMayDelaySuspend) {
-  scoped_refptr<extensions::Extension> app = CreateApp("NetworkRequests", true);
+  scoped_refptr<const extensions::Extension> app =
+      CreateApp("NetworkRequests", true);
   extensions::ExtensionHost* host = CreateHostForApp(profile_, app.get());
   ASSERT_TRUE(host);
   EXPECT_TRUE(test_api_->WillDelaySuspendForExtensionHost(host));
@@ -285,7 +284,7 @@ TEST_F(ExtensionEventObserverTest, NetworkRequestsMayDelaySuspend) {
 // Tests that any outstanding push messages or network requests for an
 // ExtensionHost that is destroyed do not end up blocking system suspend.
 TEST_F(ExtensionEventObserverTest, DeletedExtensionHostDoesNotBlockSuspend) {
-  scoped_refptr<extensions::Extension> app =
+  scoped_refptr<const extensions::Extension> app =
       CreateApp("DeletedExtensionHost", true);
 
   // The easiest way to delete an extension host is to delete the Profile it is
@@ -316,7 +315,7 @@ TEST_F(ExtensionEventObserverTest, DeletedExtensionHostDoesNotBlockSuspend) {
 // Tests that the ExtensionEventObserver does not delay suspend attempts when it
 // is disabled.
 TEST_F(ExtensionEventObserverTest, DoesNotDelaySuspendWhenDisabled) {
-  scoped_refptr<extensions::Extension> app =
+  scoped_refptr<const extensions::Extension> app =
       CreateApp("NoDelayWhenDisabled", true);
   extensions::ExtensionHost* host = CreateHostForApp(profile_, app.get());
   ASSERT_TRUE(host);

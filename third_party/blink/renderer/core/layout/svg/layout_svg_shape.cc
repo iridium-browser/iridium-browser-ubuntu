@@ -62,12 +62,21 @@ LayoutSVGShape::LayoutSVGShape(SVGGeometryElement* node)
 
 LayoutSVGShape::~LayoutSVGShape() = default;
 
+void LayoutSVGShape::StyleDidChange(StyleDifference diff,
+                                    const ComputedStyle* old_style) {
+  LayoutSVGModelObject::StyleDidChange(diff, old_style);
+  SVGResources::UpdatePaints(*GetElement(), old_style, StyleRef());
+}
+
+void LayoutSVGShape::WillBeDestroyed() {
+  SVGResources::ClearPaints(*GetElement(), Style());
+  LayoutSVGModelObject::WillBeDestroyed();
+}
+
 void LayoutSVGShape::CreatePath() {
   if (!path_)
     path_ = std::make_unique<Path>();
   *path_ = ToSVGGeometryElement(GetElement())->AsPath();
-  if (rare_data_.get())
-    rare_data_->cached_non_scaling_stroke_path_.Clear();
 }
 
 float LayoutSVGShape::DashScaleFactor() const {
@@ -78,8 +87,15 @@ float LayoutSVGShape::DashScaleFactor() const {
 
 void LayoutSVGShape::UpdateShapeFromElement() {
   CreatePath();
-
   fill_bounding_box_ = CalculateObjectBoundingBox();
+
+  if (HasNonScalingStroke()) {
+    // NonScalingStrokeTransform may depend on LocalTransform which in turn may
+    // depend on ObjectBoundingBox, thus we need to call them in this order.
+    UpdateLocalTransform();
+    UpdateNonScalingStrokeData();
+  }
+
   stroke_bounding_box_ = CalculateStrokeBoundingBox();
 }
 
@@ -123,7 +139,7 @@ FloatRect LayoutSVGShape::ApproximateStrokeBoundingBox(
 }
 
 FloatRect LayoutSVGShape::HitTestStrokeBoundingBox() const {
-  if (Style()->SvgStyle().HasStroke())
+  if (StyleRef().SvgStyle().HasStroke())
     return stroke_bounding_box_;
 
   // Implementation of
@@ -139,17 +155,21 @@ FloatRect LayoutSVGShape::HitTestStrokeBoundingBox() const {
 }
 
 bool LayoutSVGShape::ShapeDependentStrokeContains(const FloatPoint& point) {
-  DCHECK(path_);
+  // In case the subclass didn't create path during UpdateShapeFromElement()
+  // for optimization but still calls this method.
+  if (!HasPath())
+    CreatePath();
+
   StrokeData stroke_data;
   SVGLayoutSupport::ApplyStrokeStyleToStrokeData(stroke_data, StyleRef(), *this,
                                                  DashScaleFactor());
 
   if (HasNonScalingStroke()) {
-    AffineTransform non_scaling_transform = NonScalingStrokeTransform();
-    Path* use_path = NonScalingStrokePath(path_.get(), non_scaling_transform);
-
-    return use_path->StrokeContains(non_scaling_transform.MapPoint(point),
-                                    stroke_data);
+    // The reason is similar to the above code about HasPath().
+    if (!rare_data_)
+      UpdateNonScalingStrokeData();
+    return NonScalingStrokePath().StrokeContains(
+        NonScalingStrokeTransform().MapPoint(point), stroke_data);
   }
 
   return path_->StrokeContains(point, stroke_data);
@@ -243,7 +263,10 @@ void LayoutSVGShape::UpdateLayout() {
   // UpdateShapeFromElement() also updates the object & stroke bounds - which
   // feeds into the visual rect - so we need to call it for both the
   // shape-update and the bounds-update flag.
-  if (needs_shape_update_ || needs_boundaries_update_) {
+  // We also need to update stroke bounds if HasNonScalingStroke() because the
+  // shape may be affected by ancestor transforms.
+  if (needs_shape_update_ || needs_boundaries_update_ ||
+      HasNonScalingStroke()) {
     FloatRect old_object_bounding_box = ObjectBoundingBox();
     UpdateShapeFromElement();
     if (old_object_bounding_box != ObjectBoundingBox()) {
@@ -254,7 +277,8 @@ void LayoutSVGShape::UpdateLayout() {
     needs_shape_update_ = false;
 
     local_visual_rect_ = StrokeBoundingBox();
-    SVGLayoutSupport::AdjustVisualRectWithResources(*this, local_visual_rect_);
+    SVGLayoutSupport::AdjustVisualRectWithResources(*this, ObjectBoundingBox(),
+                                                    local_visual_rect_);
     needs_boundaries_update_ = false;
 
     update_parent_boundaries = true;
@@ -292,21 +316,9 @@ void LayoutSVGShape::UpdateLayout() {
   ClearNeedsLayout();
 }
 
-Path* LayoutSVGShape::NonScalingStrokePath(
-    const Path* path,
-    const AffineTransform& stroke_transform) const {
-  LayoutSVGShapeRareData& rare_data = EnsureRareData();
-  if (!rare_data.cached_non_scaling_stroke_path_.IsEmpty() &&
-      stroke_transform == rare_data.cached_non_scaling_stroke_transform_)
-    return &rare_data.cached_non_scaling_stroke_path_;
+void LayoutSVGShape::UpdateNonScalingStrokeData() {
+  DCHECK(HasNonScalingStroke());
 
-  rare_data.cached_non_scaling_stroke_path_ = *path;
-  rare_data.cached_non_scaling_stroke_path_.Transform(stroke_transform);
-  rare_data.cached_non_scaling_stroke_transform_ = stroke_transform;
-  return &rare_data.cached_non_scaling_stroke_path_;
-}
-
-AffineTransform LayoutSVGShape::NonScalingStrokeTransform() const {
   // Compute the CTM to the SVG root. This should probably be the CTM all the
   // way to the "canvas" of the page ("host" coordinate system), but with our
   // current approach of applying/painting non-scaling-stroke, that can break in
@@ -320,42 +332,46 @@ AffineTransform LayoutSVGShape::NonScalingStrokeTransform() const {
   // here.
   t.SetE(0);
   t.SetF(0);
-  return t;
+
+  auto& rare_data = EnsureRareData();
+  if (rare_data.non_scaling_stroke_transform_ != t) {
+    SetShouldDoFullPaintInvalidation(PaintInvalidationReason::kStyle);
+    rare_data.non_scaling_stroke_transform_ = t;
+  }
+
+  rare_data.non_scaling_stroke_path_ = *path_;
+  rare_data.non_scaling_stroke_path_.Transform(t);
 }
 
-void LayoutSVGShape::Paint(const PaintInfo& paint_info,
-                           const LayoutPoint&) const {
+void LayoutSVGShape::Paint(const PaintInfo& paint_info) const {
   SVGShapePainter(*this).Paint(paint_info);
 }
 
-// This method is called from inside paintOutline() since we call paintOutline()
-// while transformed to our coord system, return local coords
-void LayoutSVGShape::AddOutlineRects(Vector<LayoutRect>& rects,
-                                     const LayoutPoint&,
-                                     IncludeBlockVisualOverflowOrNot) const {
-  rects.push_back(LayoutRect(VisualRectInLocalSVGCoordinates()));
-}
-
-bool LayoutSVGShape::NodeAtFloatPoint(HitTestResult& result,
-                                      const FloatPoint& point_in_parent,
-                                      HitTestAction hit_test_action) {
+bool LayoutSVGShape::NodeAtPoint(HitTestResult& result,
+                                 const HitTestLocation& location_in_parent,
+                                 const LayoutPoint& accumulated_offset,
+                                 HitTestAction hit_test_action) {
+  DCHECK_EQ(accumulated_offset, LayoutPoint());
   // We only draw in the foreground phase, so we only hit-test then.
   if (hit_test_action != kHitTestForeground)
     return false;
 
-  FloatPoint local_point;
-  if (!SVGLayoutSupport::TransformToUserSpaceAndCheckClipping(
-          *this, LocalToSVGParentTransform(), point_in_parent, local_point))
+  base::Optional<HitTestLocation> local_storage;
+  const HitTestLocation* local_location =
+      SVGLayoutSupport::TransformToUserSpaceAndCheckClipping(
+          *this, LocalToSVGParentTransform(), location_in_parent,
+          local_storage);
+  if (!local_location)
     return false;
 
   PointerEventsHitRules hit_rules(
       PointerEventsHitRules::SVG_GEOMETRY_HITTESTING,
-      result.GetHitTestRequest(), Style()->PointerEvents());
-  if (NodeAtFloatPointInternal(result.GetHitTestRequest(), local_point,
-                               hit_rules)) {
-    const LayoutPoint& local_layout_point = LayoutPoint(local_point);
+      result.GetHitTestRequest(), StyleRef().PointerEvents());
+  if (NodeAtPointInternal(result.GetHitTestRequest(), *local_location,
+                          hit_rules)) {
+    const LayoutPoint local_layout_point(local_location->TransformedPoint());
     UpdateHitTestResult(result, local_layout_point);
-    if (result.AddNodeToListBasedTestResult(GetElement(), local_layout_point) ==
+    if (result.AddNodeToListBasedTestResult(GetElement(), *local_location) ==
         kStopHitTesting)
       return true;
   }
@@ -363,26 +379,30 @@ bool LayoutSVGShape::NodeAtFloatPoint(HitTestResult& result,
   return false;
 }
 
-bool LayoutSVGShape::NodeAtFloatPointInternal(const HitTestRequest& request,
-                                              const FloatPoint& local_point,
-                                              PointerEventsHitRules hit_rules) {
+bool LayoutSVGShape::NodeAtPointInternal(const HitTestRequest& request,
+                                         const HitTestLocation& local_location,
+                                         PointerEventsHitRules hit_rules) {
   const ComputedStyle& style = StyleRef();
   if (hit_rules.require_visible && style.Visibility() != EVisibility::kVisible)
     return false;
   if (hit_rules.can_hit_bounding_box &&
-      ObjectBoundingBox().Contains(local_point))
+      local_location.Intersects(ObjectBoundingBox()))
     return true;
+
+  // TODO(chrishtr): support rect-based intersections in the cases below.
   const SVGComputedStyle& svg_style = style.SvgStyle();
   if (hit_rules.can_hit_stroke &&
       (svg_style.HasStroke() || !hit_rules.require_stroke) &&
-      StrokeContains(local_point, hit_rules.require_stroke))
+      StrokeContains(local_location.TransformedPoint(),
+                     hit_rules.require_stroke))
     return true;
   WindRule fill_rule = svg_style.FillRule();
   if (request.SvgClipContent())
     fill_rule = svg_style.ClipRule();
   if (hit_rules.can_hit_fill &&
       (svg_style.HasFill() || !hit_rules.require_fill) &&
-      FillContains(local_point, hit_rules.require_fill, fill_rule))
+      FillContains(local_location.TransformedPoint(), hit_rules.require_fill,
+                   fill_rule))
     return true;
   return false;
 }
@@ -395,17 +415,16 @@ FloatRect LayoutSVGShape::CalculateStrokeBoundingBox() const {
   DCHECK(path_);
   FloatRect stroke_bounding_box = fill_bounding_box_;
 
-  if (Style()->SvgStyle().HasStroke()) {
+  if (StyleRef().SvgStyle().HasStroke()) {
     StrokeData stroke_data;
     SVGLayoutSupport::ApplyStrokeStyleToStrokeData(stroke_data, StyleRef(),
                                                    *this, DashScaleFactor());
     if (HasNonScalingStroke()) {
-      AffineTransform non_scaling_transform = NonScalingStrokeTransform();
+      const auto& non_scaling_transform = NonScalingStrokeTransform();
       if (non_scaling_transform.IsInvertible()) {
-        Path* use_path =
-            NonScalingStrokePath(path_.get(), non_scaling_transform);
+        const auto& non_scaling_stroke = NonScalingStrokePath();
         FloatRect stroke_bounding_rect =
-            use_path->StrokeBoundingRect(stroke_data);
+            non_scaling_stroke.StrokeBoundingRect(stroke_data);
         stroke_bounding_rect =
             non_scaling_transform.Inverse().MapRect(stroke_bounding_rect);
         stroke_bounding_box.Unite(stroke_bounding_rect);
@@ -420,7 +439,7 @@ FloatRect LayoutSVGShape::CalculateStrokeBoundingBox() const {
 
 float LayoutSVGShape::StrokeWidth() const {
   SVGLengthContext length_context(GetElement());
-  return length_context.ValueForLength(Style()->SvgStyle().StrokeWidth());
+  return length_context.ValueForLength(StyleRef().SvgStyle().StrokeWidth());
 }
 
 LayoutSVGShapeRareData& LayoutSVGShape::EnsureRareData() const {

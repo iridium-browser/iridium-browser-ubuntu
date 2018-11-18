@@ -4,7 +4,8 @@
 
 #include "third_party/blink/renderer/core/css/cssom/css_numeric_value.h"
 
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
+#include <numeric>
+
 #include "third_party/blink/renderer/core/css/css_calculation_value.h"
 #include "third_party/blink/renderer/core/css/css_primitive_value.h"
 #include "third_party/blink/renderer/core/css/cssom/css_math_invert.h"
@@ -16,8 +17,7 @@
 #include "third_party/blink/renderer/core/css/cssom/css_unit_value.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_token_stream.h"
 #include "third_party/blink/renderer/core/css/parser/css_tokenizer.h"
-
-#include <numeric>
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 
 namespace blink {
 
@@ -43,7 +43,7 @@ CSSUnitValue* MaybeSimplifyAsUnitValue(const CSSNumericValueVector& values,
     return nullptr;
 
   double final_value = first_unit_value->value();
-  for (size_t i = 1; i < values.size(); i++) {
+  for (wtf_size_t i = 1; i < values.size(); i++) {
     CSSUnitValue* unit_value = ToCSSUnitValueOrNull(values[i]);
     if (!unit_value ||
         unit_value->GetInternalUnit() != first_unit_value->GetInternalUnit())
@@ -62,7 +62,7 @@ CSSUnitValue* MaybeMultiplyAsUnitValue(const CSSNumericValueVector& values) {
   auto unit_other_than_number = CSSPrimitiveValue::UnitType::kNumber;
 
   double final_value = 1.0;
-  for (size_t i = 0; i < values.size(); i++) {
+  for (wtf_size_t i = 0; i < values.size(); i++) {
     CSSUnitValue* unit_value = ToCSSUnitValueOrNull(values[i]);
     if (!unit_value)
       return nullptr;
@@ -128,16 +128,16 @@ CSSNumericValue* CalcToNumericValue(const CSSCalcExpressionNode& root) {
   CSSNumericValueVector values;
 
   // For cases like calc(1 + 2 + 3), the calc expression tree looks like:
-  //       +
-  //      / \
-  //     +   3
-  //    / \
-  //   1   2
+  //       +     //
+  //      / \    //
+  //     +   3   //
+  //    / \      //
+  //   1   2     //
   //
   // But we want to produce a CSSMathValue tree that looks like:
-  //       +
-  //      /|\
-  //     1 2 3
+  //       +     //
+  //      /|\    //
+  //     1 2 3   //
   //
   // So when the left child has the same operator as its parent, we can combine
   // the two nodes. We keep moving down the left side of the tree as long as the
@@ -148,7 +148,7 @@ CSSNumericValue* CalcToNumericValue(const CSSCalcExpressionNode& root) {
     DCHECK(cur_node->LeftExpressionNode());
     DCHECK(cur_node->RightExpressionNode());
 
-    const auto& value = CalcToNumericValue(*cur_node->RightExpressionNode());
+    auto* const value = CalcToNumericValue(*cur_node->RightExpressionNode());
 
     // If the current node is a '-' or '/', it's really just a '+' or '*' with
     // the right child negated or inverted, respectively.
@@ -205,9 +205,12 @@ CSSNumericValue* CSSNumericValue::parse(const String& css_text,
                                         ExceptionState& exception_state) {
   CSSTokenizer tokenizer(css_text);
   CSSParserTokenStream stream(tokenizer);
+  stream.ConsumeWhitespace();
   auto range = stream.ConsumeUntilPeekedTypeIs<>();
+  stream.ConsumeWhitespace();
   if (!stream.AtEnd()) {
-    exception_state.ThrowDOMException(kSyntaxError, "Invalid math expression");
+    exception_state.ThrowDOMException(DOMExceptionCode::kSyntaxError,
+                                      "Invalid math expression");
     return nullptr;
   }
 
@@ -215,7 +218,7 @@ CSSNumericValue* CSSNumericValue::parse(const String& css_text,
     case kNumberToken:
     case kPercentageToken:
     case kDimensionToken: {
-      const auto token = range.Consume();
+      const auto token = range.ConsumeIncludingWhitespace();
       if (!range.AtEnd())
         break;
       return CSSUnitValue::Create(token.NumericValue(), token.GetUnitType());
@@ -235,7 +238,8 @@ CSSNumericValue* CSSNumericValue::parse(const String& css_text,
       break;
   }
 
-  exception_state.ThrowDOMException(kSyntaxError, "Invalid math expression");
+  exception_state.ThrowDOMException(DOMExceptionCode::kSyntaxError,
+                                    "Invalid math expression");
   return nullptr;
 }
 
@@ -258,7 +262,7 @@ CSSUnitValue* CSSNumericValue::to(const String& unit_string,
                                   ExceptionState& exception_state) {
   CSSPrimitiveValue::UnitType target_unit = UnitFromName(unit_string);
   if (!IsValidUnit(target_unit)) {
-    exception_state.ThrowDOMException(kSyntaxError,
+    exception_state.ThrowDOMException(DOMExceptionCode::kSyntaxError,
                                       "Invalid unit for conversion");
     return nullptr;
   }
@@ -287,13 +291,13 @@ CSSMathSum* CSSNumericValue::toSum(const Vector<String>& unit_strings,
                                    ExceptionState& exception_state) {
   for (const auto& unit_string : unit_strings) {
     if (!IsValidUnit(UnitFromName(unit_string))) {
-      exception_state.ThrowDOMException(kSyntaxError,
+      exception_state.ThrowDOMException(DOMExceptionCode::kSyntaxError,
                                         "Invalid unit for conversion");
       return nullptr;
     }
   }
 
-  const WTF::Optional<CSSNumericSumValue> sum = SumValue();
+  const base::Optional<CSSNumericSumValue> sum = SumValue();
   if (!sum) {
     exception_state.ThrowTypeError("Invalid value for conversion");
     return nullptr;
@@ -427,7 +431,7 @@ CSSNumericValue* CSSNumericValue::div(
     ExceptionState& exception_state) {
   auto values = CSSNumberishesToNumericValues(numberishes);
   for (auto& v : values) {
-    auto invert_value = v->Invert();
+    auto* invert_value = v->Invert();
     if (!invert_value) {
       exception_state.ThrowRangeError("Can't divide-by-zero");
       return nullptr;

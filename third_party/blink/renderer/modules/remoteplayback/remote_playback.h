@@ -6,7 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_REMOTEPLAYBACK_REMOTE_PLAYBACK_H_
 
 #include "mojo/public/cpp/bindings/binding.h"
-#include "third_party/blink/public/platform/modules/presentation/presentation.mojom-blink.h"
+#include "third_party/blink/public/mojom/presentation/presentation.mojom-blink.h"
 #include "third_party/blink/public/platform/modules/remoteplayback/web_remote_playback_availability.h"
 #include "third_party/blink/public/platform/modules/remoteplayback/web_remote_playback_client.h"
 #include "third_party/blink/public/platform/modules/remoteplayback/web_remote_playback_state.h"
@@ -100,16 +100,15 @@ class MODULES_EXPORT RemotePlayback final
   const Vector<KURL>& Urls() const override;
 
   // Handles the response from PresentationService::StartPresentation.
-  void HandlePresentationResponse(mojom::blink::PresentationInfoPtr,
+  void HandlePresentationResponse(mojom::blink::PresentationConnectionResultPtr,
                                   mojom::blink::PresentationErrorPtr);
-  void OnConnectionSuccess(const mojom::blink::PresentationInfo&);
+  void OnConnectionSuccess(mojom::blink::PresentationConnectionResultPtr);
   void OnConnectionError(const mojom::blink::PresentationError&);
 
   // mojom::blink::PresentationConnection implementation.
-  void OnMessage(mojom::blink::PresentationConnectionMessagePtr,
-                 OnMessageCallback) override;
+  void OnMessage(mojom::blink::PresentationConnectionMessagePtr) override;
   void DidChangeState(mojom::blink::PresentationConnectionState) override;
-  void RequestClose() override;
+  void DidClose(mojom::blink::PresentationConnectionCloseReason) override;
 
   // WebRemotePlaybackClient implementation.
   void StateChanged(WebRemotePlaybackState) override;
@@ -117,6 +116,7 @@ class MODULES_EXPORT RemotePlayback final
   void PromptCancelled() override;
   bool RemotePlaybackAvailable() const override;
   void SourceChanged(const WebURL&, bool is_source_supported) override;
+  WebString GetPresentationId() override;
 
   // ScriptWrappable implementation.
   bool HasPendingActivity() const final;
@@ -128,8 +128,7 @@ class MODULES_EXPORT RemotePlayback final
   DEFINE_ATTRIBUTE_EVENT_LISTENER(connect);
   DEFINE_ATTRIBUTE_EVENT_LISTENER(disconnect);
 
-  virtual void Trace(blink::Visitor*);
-  virtual void TraceWrappers(const ScriptWrappableVisitor*) const;
+  void Trace(blink::Visitor*) override;
 
  private:
   friend class V8RemotePlayback;
@@ -150,6 +149,9 @@ class MODULES_EXPORT RemotePlayback final
   // Stops listening for remote playback device availability (unconditionally).
   // May be called more than once in a row.
   void StopListeningForAvailability();
+
+  // Clears bindings after remote playback stops.
+  void CleanupConnections();
 
   WebRemotePlaybackState state_;
   WebRemotePlaybackAvailability availability_;

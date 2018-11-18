@@ -80,17 +80,12 @@ LayoutState::LayoutState(LayoutBox& layout_object,
 
   // Now adjust the pagination offset, so that we can easily figure out how far
   // away we are from the start of the pagination context.
-  pagination_offset_ = next_->pagination_offset_;
-  bool fixed = layout_object.IsOutOfFlowPositioned() &&
-               layout_object.Style()->GetPosition() == EPosition::kFixed;
-  if (fixed)
-    return;
   pagination_offset_ =
       next_->pagination_offset_ + layout_object.LocationOffset();
   if (!layout_object.IsOutOfFlowPositioned())
     return;
   if (LayoutObject* container = layout_object.Container()) {
-    if (container->Style()->HasInFlowPosition() &&
+    if (container->StyleRef().HasInFlowPosition() &&
         container->IsLayoutInline()) {
       pagination_offset_ +=
           ToLayoutInline(container)->OffsetForInFlowPositionedInline(

@@ -7,7 +7,6 @@
 #ifndef XFA_FXFA_CXFA_FFDOCVIEW_H_
 #define XFA_FXFA_CXFA_FFDOCVIEW_H_
 
-#include <map>
 #include <memory>
 #include <vector>
 
@@ -47,7 +46,7 @@ class CXFA_FFDocView {
   explicit CXFA_FFDocView(CXFA_FFDoc* pDoc);
   ~CXFA_FFDocView();
 
-  CXFA_FFDoc* GetDoc() { return m_pDoc.Get(); }
+  CXFA_FFDoc* GetDoc() const { return m_pDoc.Get(); }
   int32_t StartLayout();
   int32_t DoLayout();
   void StopLayout();
@@ -97,6 +96,8 @@ class CXFA_FFDocView {
   bool m_bInLayoutStatus = false;
   std::vector<WideString> m_arrNullTestMsg;
 
+  void ResetLayoutProcessor() { m_pXFADocLayout.Release(); }
+
  private:
   bool RunEventLayoutReady();
   void RunBindItems();
@@ -115,7 +116,7 @@ class CXFA_FFDocView {
 
   UnownedPtr<CXFA_FFDoc> const m_pDoc;
   std::unique_ptr<CXFA_FFWidgetHandler> m_pWidgetHandler;
-  CXFA_LayoutProcessor* m_pXFADocLayout = nullptr;  // Not owned.
+  UnownedPtr<CXFA_LayoutProcessor> m_pXFADocLayout;
   UnownedPtr<CXFA_Node> m_pFocusNode;
   UnownedPtr<CXFA_FFWidget> m_pFocusWidget;
   std::vector<CXFA_Node*> m_ValidateNodes;

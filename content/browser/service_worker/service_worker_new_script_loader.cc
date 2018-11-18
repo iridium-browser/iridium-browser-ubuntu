@@ -16,6 +16,7 @@
 #include "content/browser/service_worker/service_worker_write_to_cache_job.h"
 #include "content/browser/url_loader_factory_getter.h"
 #include "content/common/service_worker/service_worker_utils.h"
+#include "net/base/load_flags.h"
 #include "net/cert/cert_status_flags.h"
 #include "services/network/public/cpp/resource_response.h"
 #include "third_party/blink/public/common/mime_util/mime_util.h"
@@ -31,20 +32,24 @@ ServiceWorkerNewScriptLoader::ServiceWorkerNewScriptLoader(
     int32_t routing_id,
     int32_t request_id,
     uint32_t options,
-    const network::ResourceRequest& resource_request,
+    const network::ResourceRequest& original_request,
     network::mojom::URLLoaderClientPtr client,
     scoped_refptr<ServiceWorkerVersion> version,
-    scoped_refptr<URLLoaderFactoryGetter> loader_factory_getter,
+    scoped_refptr<network::SharedURLLoaderFactory> loader_factory,
     const net::MutableNetworkTrafficAnnotationTag& traffic_annotation)
-    : request_url_(resource_request.url),
-      resource_type_(static_cast<ResourceType>(resource_request.resource_type)),
+    : request_url_(original_request.url),
+      resource_type_(static_cast<ResourceType>(original_request.resource_type)),
       version_(version),
       network_client_binding_(this),
       network_watcher_(FROM_HERE,
                        mojo::SimpleWatcher::ArmingPolicy::MANUAL,
                        base::SequencedTaskRunnerHandle::Get()),
+      loader_factory_(std::move(loader_factory)),
       client_(std::move(client)),
+      original_options_(options),
       weak_factory_(this) {
+  network::ResourceRequest resource_request(original_request);
+
   // ServiceWorkerNewScriptLoader is used for fetching the service worker main
   // script (RESOURCE_TYPE_SERVICE_WORKER) during worker startup or
   // importScripts() (RESOURCE_TYPE_SCRIPT).
@@ -64,10 +69,13 @@ ServiceWorkerNewScriptLoader::ServiceWorkerNewScriptLoader(
   // |incumbent_cache_resource_id| is valid if the incumbent service worker
   // exists and it's required to do the byte-for-byte check.
   int64_t incumbent_cache_resource_id = kInvalidServiceWorkerResourceId;
-  if (resource_type_ == RESOURCE_TYPE_SERVICE_WORKER) {
-    scoped_refptr<ServiceWorkerRegistration> registration =
-        version_->context()->GetLiveRegistration(version_->registration_id());
-    DCHECK(registration);
+  scoped_refptr<ServiceWorkerRegistration> registration =
+      version_->context()->GetLiveRegistration(version_->registration_id());
+  // ServiceWorkerVersion keeps the registration alive while the service
+  // worker is starting up, and it must be starting up here.
+  DCHECK(registration);
+  const bool is_main_script = resource_type_ == RESOURCE_TYPE_SERVICE_WORKER;
+  if (is_main_script) {
     ServiceWorkerVersion* stored_version = registration->waiting_version()
                                                ? registration->waiting_version()
                                                : registration->active_version();
@@ -78,6 +86,23 @@ ServiceWorkerNewScriptLoader::ServiceWorkerNewScriptLoader(
       incumbent_cache_resource_id =
           stored_version->script_cache_map()->LookupResourceId(request_url_);
     }
+    // Request SSLInfo. It will be persisted in service worker storage and
+    // may be used by ServiceWorkerNavigationLoader for navigations handled
+    // by this service worker.
+    options |= network::mojom::kURLLoadOptionSendSSLInfoWithResponse;
+
+    resource_request.headers.SetHeader("Service-Worker", "script");
+  }
+
+  // Bypass the browser cache if needed, e.g., updateViaCache demands it or 24
+  // hours passed since the last update check that hit network.
+  base::TimeDelta time_since_last_check =
+      base::Time::Now() - registration->last_update_check();
+  if (ServiceWorkerUtils::ShouldBypassCacheDueToUpdateViaCache(
+          is_main_script, registration->update_via_cache()) ||
+      time_since_last_check > kServiceWorkerScriptMaxCacheAge ||
+      version_->force_bypass_cache_for_scripts()) {
+    resource_request.load_flags |= net::LOAD_BYPASS_CACHE;
   }
 
   // Create response readers only when we have to do the byte-for-byte check.
@@ -90,26 +115,31 @@ ServiceWorkerNewScriptLoader::ServiceWorkerNewScriptLoader(
   }
   cache_writer_ = std::make_unique<ServiceWorkerCacheWriter>(
       std::move(compare_reader), std::move(copy_reader),
-      storage->CreateResponseWriter(cache_resource_id));
+      storage->CreateResponseWriter(cache_resource_id),
+      false /* pause_when_not_identical */);
 
   version_->script_cache_map()->NotifyStartedCaching(request_url_,
                                                      cache_resource_id);
-  AdvanceState(State::kStarted);
 
-  // Disable MIME sniffing sniffing. The spec requires the header list to have
-  // a JavaScript MIME type. Therefore, no sniffing is needed.
+  // Disable MIME sniffing. The spec requires the header list to have a
+  // JavaScript MIME type. Therefore, no sniffing is needed.
   options &= ~network::mojom::kURLLoadOptionSniffMimeType;
 
   network::mojom::URLLoaderClientPtr network_client;
   network_client_binding_.Bind(mojo::MakeRequest(&network_client));
-  loader_factory_getter->GetNetworkFactory()->CreateLoaderAndStart(
+  loader_factory_->CreateLoaderAndStart(
       mojo::MakeRequest(&network_loader_), routing_id, request_id, options,
       resource_request, std::move(network_client), traffic_annotation);
+  DCHECK_EQ(NetworkLoaderState::kNotStarted, network_loader_state_);
+  network_loader_state_ = NetworkLoaderState::kLoadingHeader;
 }
 
 ServiceWorkerNewScriptLoader::~ServiceWorkerNewScriptLoader() = default;
 
-void ServiceWorkerNewScriptLoader::FollowRedirect() {
+void ServiceWorkerNewScriptLoader::FollowRedirect(
+    const base::Optional<std::vector<std::string>>&
+        to_be_removed_request_headers,
+    const base::Optional<net::HttpRequestHeaders>& modified_request_headers) {
   // Resource requests for service worker scripts should not follow redirects.
   // See comments in OnReceiveRedirect().
   NOTREACHED();
@@ -135,8 +165,8 @@ void ServiceWorkerNewScriptLoader::ResumeReadingBodyFromNet() {
 // URLLoaderClient for network loader ------------------------------------------
 
 void ServiceWorkerNewScriptLoader::OnReceiveResponse(
-    const network::ResourceResponseHead& response_head,
-    network::mojom::DownloadedTempFilePtr downloaded_file) {
+    const network::ResourceResponseHead& response_head) {
+  DCHECK_EQ(NetworkLoaderState::kLoadingHeader, network_loader_state_);
   if (!version_->context() || version_->is_redundant()) {
     CommitCompleted(network::URLLoaderCompletionStatus(net::ERR_FAILED),
                     kServiceWorkerFetchScriptError);
@@ -158,6 +188,9 @@ void ServiceWorkerNewScriptLoader::OnReceiveResponse(
 
   // The following sequence is equivalent to
   // ServiceWorkerWriteToCacheJob::OnResponseStarted.
+  // TODO(falken): Make these steps be in the same order as the spec. Right now
+  // there are slight differences, like we only bump last update check time on
+  // OK status.
 
   if (response_head.headers->response_code() / 100 != 2) {
     // Non-2XX HTTP status code is handled as an error.
@@ -209,13 +242,28 @@ void ServiceWorkerNewScriptLoader::OnReceiveResponse(
       return;
     }
 
+    if (response_head.network_accessed)
+      version_->embedded_worker()->OnNetworkAccessedForScriptLoad();
+
     version_->SetMainScriptHttpResponseInfo(*response_info);
   }
 
-  WriteHeaders(
-      base::MakeRefCounted<HttpResponseInfoIOBuffer>(response_info.release()));
+  network_loader_state_ = NetworkLoaderState::kWaitingForBody;
 
-  client_->OnReceiveResponse(response_head, std::move(downloaded_file));
+  WriteHeaders(
+      base::MakeRefCounted<HttpResponseInfoIOBuffer>(std::move(response_info)));
+
+  // Don't pass SSLInfo to the client when the original request doesn't ask
+  // to send it.
+  if (response_head.ssl_info.has_value() &&
+      !(original_options_ &
+        network::mojom::kURLLoadOptionSendSSLInfoWithResponse)) {
+    network::ResourceResponseHead new_response_head = response_head;
+    new_response_head.ssl_info.reset();
+    client_->OnReceiveResponse(new_response_head);
+    return;
+  }
+  client_->OnReceiveResponse(response_head);
 }
 
 void ServiceWorkerNewScriptLoader::OnReceiveRedirect(
@@ -227,11 +275,6 @@ void ServiceWorkerNewScriptLoader::OnReceiveRedirect(
   // https://w3c.github.io/ServiceWorker/#update-algorithm
   CommitCompleted(network::URLLoaderCompletionStatus(net::ERR_UNSAFE_REDIRECT),
                   kServiceWorkerRedirectError);
-}
-
-void ServiceWorkerNewScriptLoader::OnDataDownloaded(int64_t data_len,
-                                                    int64_t encoded_data_len) {
-  client_->OnDataDownloaded(data_len, encoded_data_len);
 }
 
 void ServiceWorkerNewScriptLoader::OnUploadProgress(
@@ -254,6 +297,7 @@ void ServiceWorkerNewScriptLoader::OnTransferSizeUpdated(
 
 void ServiceWorkerNewScriptLoader::OnStartLoadingResponseBody(
     mojo::ScopedDataPipeConsumerHandle consumer) {
+  DCHECK_EQ(NetworkLoaderState::kWaitingForBody, network_loader_state_);
   // Create a pair of the consumer and producer for responding to the client.
   mojo::ScopedDataPipeConsumerHandle client_consumer;
   if (mojo::CreateDataPipe(nullptr, &client_producer_, &client_consumer) !=
@@ -267,61 +311,76 @@ void ServiceWorkerNewScriptLoader::OnStartLoadingResponseBody(
   client_->OnStartLoadingResponseBody(std::move(client_consumer));
 
   network_consumer_ = std::move(consumer);
+  network_loader_state_ = NetworkLoaderState::kLoadingBody;
   MaybeStartNetworkConsumerHandleWatcher();
 }
 
 void ServiceWorkerNewScriptLoader::OnComplete(
     const network::URLLoaderCompletionStatus& status) {
+  NetworkLoaderState previous_state = network_loader_state_;
+  network_loader_state_ = NetworkLoaderState::kCompleted;
   if (status.error_code != net::OK) {
     CommitCompleted(status, kServiceWorkerFetchScriptError);
     return;
   }
 
-  network_load_completed_ = true;
-  switch (state_) {
-    case State::kNotStarted:
-    case State::kCompleted:
-      break;
-    case State::kStarted:
-    case State::kWroteHeaders:
-      // CommitCompleted() will be called after the data is written in the
-      // storage.
-      return;
-    case State::kWroteData:
-      CommitCompleted(network::URLLoaderCompletionStatus(net::OK),
-                      std::string() /* status_message */);
-      return;
+  DCHECK(previous_state == NetworkLoaderState::kWaitingForBody ||
+         previous_state == NetworkLoaderState::kLoadingBody);
+
+  // Response body is empty.
+  if (previous_state == NetworkLoaderState::kWaitingForBody) {
+    DCHECK_EQ(WriterState::kNotStarted, body_writer_state_);
+    body_writer_state_ = WriterState::kCompleted;
+    switch (header_writer_state_) {
+      case WriterState::kNotStarted:
+        NOTREACHED()
+            << "Response header should be received before OnComplete()";
+        break;
+      case WriterState::kWriting:
+        // Wait until it's written. OnWriteHeadersComplete() will call
+        // CommitCompleted().
+        return;
+      case WriterState::kCompleted:
+        DCHECK(!network_consumer_.is_valid());
+        CommitCompleted(network::URLLoaderCompletionStatus(net::OK),
+                        std::string() /* status_message */);
+        return;
+    }
+    NOTREACHED();
   }
-  NOTREACHED() << static_cast<int>(state_);
+
+  // Response body exists.
+  if (previous_state == NetworkLoaderState::kLoadingBody) {
+    switch (body_writer_state_) {
+      case WriterState::kNotStarted:
+        // Wait until it's written. OnNetworkDataAvailable() will call
+        // CommitCompleted() after all data from |network_consumer_| is
+        // consumed.
+        DCHECK_EQ(WriterState::kWriting, header_writer_state_);
+        return;
+      case WriterState::kWriting:
+        // Wait until it's written. OnNetworkDataAvailable() will call
+        // CommitCompleted() after all data from |network_consumer_| is
+        // consumed.
+        DCHECK_EQ(WriterState::kCompleted, header_writer_state_);
+        return;
+      case WriterState::kCompleted:
+        DCHECK_EQ(WriterState::kCompleted, header_writer_state_);
+        CommitCompleted(network::URLLoaderCompletionStatus(net::OK),
+                        std::string() /* status_message */);
+        return;
+    }
+    NOTREACHED();
+  }
+
+  NOTREACHED();
 }
 
 // End of URLLoaderClient ------------------------------------------------------
-
-void ServiceWorkerNewScriptLoader::AdvanceState(State new_state) {
-  switch (state_) {
-    case State::kNotStarted:
-      DCHECK_EQ(State::kStarted, new_state);
-      break;
-    case State::kStarted:
-      DCHECK(new_state == State::kWroteHeaders ||
-             new_state == State::kCompleted);
-      break;
-    case State::kWroteHeaders:
-      DCHECK(new_state == State::kWroteData || new_state == State::kCompleted);
-      break;
-    case State::kWroteData:
-      DCHECK_EQ(State::kCompleted, new_state);
-      break;
-    case State::kCompleted:
-      // This is the end state.
-      NOTREACHED();
-      break;
-  }
-  state_ = new_state;
-}
-
 void ServiceWorkerNewScriptLoader::WriteHeaders(
     scoped_refptr<HttpResponseInfoIOBuffer> info_buffer) {
+  DCHECK_EQ(WriterState::kNotStarted, header_writer_state_);
+  header_writer_state_ = WriterState::kWriting;
   net::Error error = cache_writer_->MaybeWriteHeaders(
       info_buffer.get(),
       base::BindOnce(&ServiceWorkerNewScriptLoader::OnWriteHeadersComplete,
@@ -336,28 +395,43 @@ void ServiceWorkerNewScriptLoader::WriteHeaders(
 }
 
 void ServiceWorkerNewScriptLoader::OnWriteHeadersComplete(net::Error error) {
+  DCHECK_EQ(WriterState::kWriting, header_writer_state_);
   DCHECK_NE(net::ERR_IO_PENDING, error);
   if (error != net::OK) {
+    ServiceWorkerMetrics::CountWriteResponseResult(
+        ServiceWorkerMetrics::WRITE_HEADERS_ERROR);
     CommitCompleted(network::URLLoaderCompletionStatus(error),
                     kServiceWorkerFetchScriptError);
     return;
   }
-  AdvanceState(State::kWroteHeaders);
+  header_writer_state_ = WriterState::kCompleted;
+
+  // If all other states are kCompleted the response body is empty, we can
+  // finish now.
+  if (network_loader_state_ == NetworkLoaderState::kCompleted &&
+      body_writer_state_ == WriterState::kCompleted) {
+    CommitCompleted(network::URLLoaderCompletionStatus(net::OK),
+                    std::string() /* status_message */);
+    return;
+  }
+
   MaybeStartNetworkConsumerHandleWatcher();
 }
 
 void ServiceWorkerNewScriptLoader::MaybeStartNetworkConsumerHandleWatcher() {
-  if (!network_consumer_.is_valid()) {
-    // Wait until the network consumer handle is ready to read.
-    // OnStartLoadingResponseBody() will continue the sequence.
+  if (network_loader_state_ == NetworkLoaderState::kWaitingForBody) {
+    // OnStartLoadingResponseBody() or OnComplete() will continue the sequence.
     return;
   }
-  if (state_ != State::kWroteHeaders) {
-    // Wait until the headers are written in the script storage because the
-    // cache writer cannot write the headers and data in parallel.
+  if (header_writer_state_ != WriterState::kCompleted) {
+    DCHECK_EQ(WriterState::kWriting, header_writer_state_);
     // OnWriteHeadersComplete() will continue the sequence.
     return;
   }
+
+  DCHECK_EQ(WriterState::kNotStarted, body_writer_state_);
+  body_writer_state_ = WriterState::kWriting;
+
   network_watcher_.Watch(
       network_consumer_.get(),
       MOJO_HANDLE_SIGNAL_READABLE | MOJO_HANDLE_SIGNAL_PEER_CLOSED,
@@ -367,6 +441,8 @@ void ServiceWorkerNewScriptLoader::MaybeStartNetworkConsumerHandleWatcher() {
 }
 
 void ServiceWorkerNewScriptLoader::OnNetworkDataAvailable(MojoResult) {
+  DCHECK_EQ(WriterState::kCompleted, header_writer_state_);
+  DCHECK_EQ(WriterState::kWriting, body_writer_state_);
   DCHECK(network_consumer_.is_valid());
   scoped_refptr<network::MojoToNetPendingBuffer> pending_buffer;
   uint32_t bytes_available = 0;
@@ -380,10 +456,11 @@ void ServiceWorkerNewScriptLoader::OnNetworkDataAvailable(MojoResult) {
       // Closed by peer. This indicates all the data from the network service
       // are read or there is an error. In the error case, the reason is
       // notified via OnComplete().
-      AdvanceState(State::kWroteData);
-      if (network_load_completed_)
+      body_writer_state_ = WriterState::kCompleted;
+      if (network_loader_state_ == NetworkLoaderState::kCompleted) {
         CommitCompleted(network::URLLoaderCompletionStatus(net::OK),
                         std::string() /* status_message */);
+      }
       return;
     case MOJO_RESULT_SHOULD_WAIT:
       network_watcher_.ArmOrNotify();
@@ -407,6 +484,8 @@ void ServiceWorkerNewScriptLoader::WriteData(
     case MOJO_RESULT_OK:
       break;
     case MOJO_RESULT_FAILED_PRECONDITION:
+      ServiceWorkerMetrics::CountWriteResponseResult(
+          ServiceWorkerMetrics::WRITE_DATA_ERROR);
       CommitCompleted(network::URLLoaderCompletionStatus(net::ERR_FAILED),
                       kServiceWorkerFetchScriptError);
       return;
@@ -445,11 +524,15 @@ void ServiceWorkerNewScriptLoader::OnWriteDataComplete(
     net::Error error) {
   DCHECK_NE(net::ERR_IO_PENDING, error);
   if (error != net::OK) {
+    ServiceWorkerMetrics::CountWriteResponseResult(
+        ServiceWorkerMetrics::WRITE_DATA_ERROR);
     CommitCompleted(network::URLLoaderCompletionStatus(error),
                     kServiceWorkerFetchScriptError);
     return;
   }
   DCHECK(pending_buffer);
+  ServiceWorkerMetrics::CountWriteResponseResult(
+      ServiceWorkerMetrics::WRITE_OK);
   pending_buffer->CompleteRead(bytes_written);
   // Get the consumer handle from a previous read operation if we have one.
   network_consumer_ = pending_buffer->ReleaseHandle();
@@ -459,15 +542,18 @@ void ServiceWorkerNewScriptLoader::OnWriteDataComplete(
 void ServiceWorkerNewScriptLoader::CommitCompleted(
     const network::URLLoaderCompletionStatus& status,
     const std::string& status_message) {
-  AdvanceState(State::kCompleted);
   net::Error error_code = static_cast<net::Error>(status.error_code);
   int bytes_written = -1;
   if (error_code == net::OK) {
+    DCHECK_EQ(NetworkLoaderState::kCompleted, network_loader_state_);
+    DCHECK_EQ(WriterState::kCompleted, header_writer_state_);
+    DCHECK_EQ(WriterState::kCompleted, body_writer_state_);
     // If all the calls to WriteHeaders/WriteData succeeded, but the incumbent
     // entry wasn't actually replaced because the new entry was equivalent, the
     // new version didn't actually install because it already exists.
     if (!cache_writer_->did_replace()) {
-      version_->SetStartWorkerStatusCode(SERVICE_WORKER_ERROR_EXISTS);
+      version_->SetStartWorkerStatusCode(
+          blink::ServiceWorkerStatusCode::kErrorExists);
       error_code = ServiceWorkerWriteToCacheJob::kIdenticalScriptError;
     }
     bytes_written = cache_writer_->bytes_written();
@@ -482,8 +568,6 @@ void ServiceWorkerNewScriptLoader::CommitCompleted(
   version_->script_cache_map()->NotifyFinishedCaching(
       request_url_, bytes_written, error_code, status_message);
 
-  // TODO(nhiroki): Record ServiceWorkerMetrics::CountWriteResponseResult().
-  // (https://crbug.com/762357)
   client_->OnComplete(status);
   client_producer_.reset();
 
@@ -492,6 +576,9 @@ void ServiceWorkerNewScriptLoader::CommitCompleted(
   network_consumer_.reset();
   network_watcher_.Cancel();
   cache_writer_.reset();
+  network_loader_state_ = NetworkLoaderState::kCompleted;
+  header_writer_state_ = WriterState::kCompleted;
+  body_writer_state_ = WriterState::kCompleted;
 }
 
 }  // namespace content

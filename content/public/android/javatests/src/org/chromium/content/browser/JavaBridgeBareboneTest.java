@@ -15,9 +15,9 @@ import org.junit.runner.RunWith;
 import org.chromium.base.test.BaseJUnit4ClassRunner;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.UrlUtils;
-import org.chromium.content.browser.test.util.TestCallbackHelperContainer;
-import org.chromium.content.browser.test.util.TestCallbackHelperContainer.OnEvaluateJavaScriptResultHelper;
-import org.chromium.content.browser.test.util.TestCallbackHelperContainer.OnPageFinishedHelper;
+import org.chromium.content_public.browser.test.util.TestCallbackHelperContainer;
+import org.chromium.content_public.browser.test.util.TestCallbackHelperContainer.OnEvaluateJavaScriptResultHelper;
+import org.chromium.content_public.browser.test.util.TestCallbackHelperContainer.OnPageFinishedHelper;
 
 /**
  * Common functionality for testing the Java Bridge.
@@ -36,7 +36,7 @@ public class JavaBridgeBareboneTest {
                 UrlUtils.encodeHtmlDataUri("<html><head></head><body>test</body></html>"));
         mActivityTestRule.waitForActiveShellToBeDoneLoading();
         mTestCallbackHelperContainer =
-                new TestCallbackHelperContainer(mActivityTestRule.getContentViewCore());
+                new TestCallbackHelperContainer(mActivityTestRule.getWebContents());
     }
 
     private void injectDummyObject(final String name) throws Throwable {

@@ -4,17 +4,24 @@
 
 #include "webrunner/browser/webrunner_content_browser_client.h"
 
+#include <utility>
+
 #include "webrunner/browser/webrunner_browser_main_parts.h"
 
 namespace webrunner {
 
-WebRunnerContentBrowserClient::WebRunnerContentBrowserClient() = default;
+WebRunnerContentBrowserClient::WebRunnerContentBrowserClient(
+    zx::channel context_channel)
+    : context_channel_(std::move(context_channel)) {}
+
 WebRunnerContentBrowserClient::~WebRunnerContentBrowserClient() = default;
 
 content::BrowserMainParts*
 WebRunnerContentBrowserClient::CreateBrowserMainParts(
     const content::MainFunctionParams& parameters) {
-  return new WebRunnerBrowserMainParts();
+  DCHECK(context_channel_);
+  main_parts_ = new WebRunnerBrowserMainParts(std::move(context_channel_));
+  return main_parts_;
 }
 
 }  // namespace webrunner

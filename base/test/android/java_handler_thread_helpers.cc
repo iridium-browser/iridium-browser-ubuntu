@@ -5,7 +5,7 @@
 #include "base/test/android/java_handler_thread_helpers.h"
 
 #include "base/android/java_handler_thread.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop/message_loop_current.h"
 #include "base/synchronization/waitable_event.h"
 #include "jni/JavaHandlerThreadHelpers_jni.h"
 
@@ -15,8 +15,8 @@ namespace android {
 // static
 std::unique_ptr<JavaHandlerThread> JavaHandlerThreadHelpers::CreateJavaFirst() {
   return std::make_unique<JavaHandlerThread>(
-      Java_JavaHandlerThreadHelpers_testAndGetJavaHandlerThread(
-          base::android::AttachCurrentThread()));
+      nullptr, Java_JavaHandlerThreadHelpers_testAndGetJavaHandlerThread(
+                   base::android::AttachCurrentThread()));
 }
 
 // static
@@ -24,7 +24,7 @@ void JavaHandlerThreadHelpers::ThrowExceptionAndAbort(WaitableEvent* event) {
   JNIEnv* env = AttachCurrentThread();
   Java_JavaHandlerThreadHelpers_throwException(env);
   DCHECK(HasException(env));
-  base::MessageLoopForUI::current()->Abort();
+  base::MessageLoopCurrentForUI::Get()->Abort();
   event->Signal();
 }
 

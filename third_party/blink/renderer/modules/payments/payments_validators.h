@@ -5,26 +5,24 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_PAYMENTS_PAYMENTS_VALIDATORS_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_PAYMENTS_PAYMENTS_VALIDATORS_H_
 
-#include "third_party/blink/public/platform/modules/payments/payment_request.mojom-blink.h"
+#include "third_party/blink/public/mojom/payments/payment_request.mojom-blink.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/platform/wtf/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
 
+class AddressErrors;
+class PayerErrors;
+class PaymentValidationErrors;
+
 class MODULES_EXPORT PaymentsValidators final {
   STATIC_ONLY(PaymentsValidators);
 
  public:
   // The most common identifiers are three-letter alphabetic codes as defined by
-  // [ISO4217] (for example, "USD" for US Dollars). |system| is a URL that
-  // indicates the currency system that the currency identifier belongs to. By
-  // default, the value is urn:iso:std:iso:4217 indicating that currency is
-  // defined by [[ISO4217]], however any string of at most 2048 characters is
-  // considered valid in other currencySystem. Returns false if currency |code|
-  // is too long (greater than 2048).
+  // [ISO4217] (for example, "USD" for US Dollars).
   static bool IsValidCurrencyCodeFormat(const String& code,
-                                        const String& system,
                                         String* optional_error_message);
 
   // Returns true if |amount| is a valid currency code as defined in ISO 20022
@@ -57,6 +55,19 @@ class MODULES_EXPORT PaymentsValidators final {
   // Returns false if |error| is too long (greater than 2048).
   static bool IsValidErrorMsgFormat(const String& code,
                                     String* optional_error_message);
+
+  // Returns false if |errors| has too long string (greater than 2048).
+  static bool IsValidAddressErrorsFormat(const AddressErrors& errors,
+                                         String* optional_error_message);
+
+  // Returns false if |errors| has too long string (greater than 2048).
+  static bool IsValidPayerErrorsFormat(const PayerErrors& errors,
+                                       String* optional_error_message);
+
+  // Returns false if |errors| has too long string (greater than 2048).
+  static bool IsValidPaymentValidationErrorsFormat(
+      const PaymentValidationErrors& errors,
+      String* optional_error_message);
 };
 
 }  // namespace blink

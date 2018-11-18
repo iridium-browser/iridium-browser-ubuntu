@@ -19,6 +19,8 @@ struct BlockMemberInfo;
 
 namespace rx
 {
+class BlitGL;
+class ClearMultiviewGL;
 class FunctionsGL;
 class RendererGL;
 class StateManagerGL;
@@ -27,7 +29,7 @@ struct WorkaroundsGL;
 class ContextGL : public ContextImpl
 {
   public:
-    ContextGL(const gl::ContextState &state, RendererGL *renderer);
+    ContextGL(const gl::ContextState &state, const std::shared_ptr<RendererGL> &renderer);
     ~ContextGL() override;
 
     gl::Error initialize() override;
@@ -53,7 +55,7 @@ class ContextGL : public ContextImpl
     VertexArrayImpl *createVertexArray(const gl::VertexArrayState &data) override;
 
     // Query and Fence creation
-    QueryImpl *createQuery(GLenum type) override;
+    QueryImpl *createQuery(gl::QueryType type) override;
     FenceNVImpl *createFenceNV() override;
     SyncImpl *createSync() override;
 
@@ -75,39 +77,39 @@ class ContextGL : public ContextImpl
     gl::Error finish(const gl::Context *context) override;
 
     // Drawing methods.
-    gl::Error drawArrays(const gl::Context *context,
-                         GLenum mode,
-                         GLint first,
-                         GLsizei count) override;
+    angle::Result drawArrays(const gl::Context *context,
+                             gl::PrimitiveMode mode,
+                             GLint first,
+                             GLsizei count) override;
     gl::Error drawArraysInstanced(const gl::Context *context,
-                                  GLenum mode,
+                                  gl::PrimitiveMode mode,
                                   GLint first,
                                   GLsizei count,
                                   GLsizei instanceCount) override;
 
     gl::Error drawElements(const gl::Context *context,
-                           GLenum mode,
+                           gl::PrimitiveMode mode,
                            GLsizei count,
                            GLenum type,
                            const void *indices) override;
     gl::Error drawElementsInstanced(const gl::Context *context,
-                                    GLenum mode,
+                                    gl::PrimitiveMode mode,
                                     GLsizei count,
                                     GLenum type,
                                     const void *indices,
                                     GLsizei instances) override;
     gl::Error drawRangeElements(const gl::Context *context,
-                                GLenum mode,
+                                gl::PrimitiveMode mode,
                                 GLuint start,
                                 GLuint end,
                                 GLsizei count,
                                 GLenum type,
                                 const void *indices) override;
     gl::Error drawArraysIndirect(const gl::Context *context,
-                                 GLenum mode,
+                                 gl::PrimitiveMode mode,
                                  const void *indirect) override;
     gl::Error drawElementsIndirect(const gl::Context *context,
-                                   GLenum mode,
+                                   gl::PrimitiveMode mode,
                                    GLenum type,
                                    const void *indirect) override;
 
@@ -172,17 +174,19 @@ class ContextGL : public ContextImpl
     void popDebugGroup() override;
 
     // State sync with dirty bits.
-    void syncState(const gl::Context *context, const gl::State::DirtyBits &dirtyBits) override;
+    angle::Result syncState(const gl::Context *context,
+                            const gl::State::DirtyBits &dirtyBits,
+                            const gl::State::DirtyBits &bitMask) override;
 
     // Disjoint timer queries
     GLint getGPUDisjoint() override;
     GLint64 getTimestamp() override;
 
     // Context switching
-    void onMakeCurrent(const gl::Context *context) override;
+    gl::Error onMakeCurrent(const gl::Context *context) override;
 
     // Caps queries
-    const gl::Caps &getNativeCaps() const override;
+    gl::Caps getNativeCaps() const override;
     const gl::TextureCapsMap &getNativeTextureCaps() const override;
     const gl::Extensions &getNativeExtensions() const override;
     const gl::Limitations &getNativeLimitations() const override;
@@ -193,6 +197,8 @@ class ContextGL : public ContextImpl
     const FunctionsGL *getFunctions() const;
     StateManagerGL *getStateManager();
     const WorkaroundsGL &getWorkaroundsGL() const;
+    BlitGL *getBlitter() const;
+    ClearMultiviewGL *getMultiviewClearer() const;
 
     gl::Error dispatchCompute(const gl::Context *context,
                               GLuint numGroupsX,
@@ -203,8 +209,14 @@ class ContextGL : public ContextImpl
     gl::Error memoryBarrier(const gl::Context *context, GLbitfield barriers) override;
     gl::Error memoryBarrierByRegion(const gl::Context *context, GLbitfield barriers) override;
 
+    void handleError(GLenum errorCode,
+                     const char *message,
+                     const char *file,
+                     const char *function,
+                     unsigned int line);
+
   private:
-    RendererGL *mRenderer;
+    std::shared_ptr<RendererGL> mRenderer;
 };
 
 }  // namespace rx

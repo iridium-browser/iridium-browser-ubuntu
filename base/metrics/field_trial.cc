@@ -13,6 +13,7 @@
 #include "base/debug/activity_tracker.h"
 #include "base/logging.h"
 #include "base/metrics/field_trial_param_associator.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/process/memory.h"
 #include "base/process/process_handle.h"
 #include "base/process/process_info.h"
@@ -509,7 +510,7 @@ FieldTrialList::FieldTrialList(
 FieldTrialList::~FieldTrialList() {
   AutoLock auto_lock(lock_);
   while (!registered_.empty()) {
-    RegistrationMap::iterator it = registered_.begin();
+    auto it = registered_.begin();
     it->second->Release();
     registered_.erase(it->first);
   }
@@ -727,8 +728,8 @@ void FieldTrialList::GetActiveFieldTrialGroups(
     return;
   AutoLock auto_lock(global_->lock_);
 
-  for (RegistrationMap::iterator it = global_->registered_.begin();
-       it != global_->registered_.end(); ++it) {
+  for (auto it = global_->registered_.begin(); it != global_->registered_.end();
+       ++it) {
     FieldTrial::ActiveGroup active_group;
     if (it->second->GetActiveGroup(&active_group))
       active_groups->push_back(active_group);
@@ -833,6 +834,8 @@ void FieldTrialList::CreateTrialsFromCommandLine(
     std::string switch_value =
         cmd_line.GetSwitchValueASCII(field_trial_handle_switch);
     bool result = CreateTrialsFromSwitchValue(switch_value);
+    UMA_HISTOGRAM_BOOLEAN("ChildProcess.FieldTrials.CreateFromShmemSuccess",
+                          result);
     DCHECK(result);
   }
 #elif defined(OS_POSIX) && !defined(OS_NACL)
@@ -843,6 +846,8 @@ void FieldTrialList::CreateTrialsFromCommandLine(
     std::string switch_value =
         cmd_line.GetSwitchValueASCII(field_trial_handle_switch);
     bool result = CreateTrialsFromDescriptor(fd_key, switch_value);
+    UMA_HISTOGRAM_BOOLEAN("ChildProcess.FieldTrials.CreateFromShmemSuccess",
+                          result);
     DCHECK(result);
   }
 #endif
@@ -851,6 +856,8 @@ void FieldTrialList::CreateTrialsFromCommandLine(
     bool result = FieldTrialList::CreateTrialsFromString(
         cmd_line.GetSwitchValueASCII(switches::kForceFieldTrials),
         std::set<std::string>());
+    UMA_HISTOGRAM_BOOLEAN("ChildProcess.FieldTrials.CreateFromSwitchSuccess",
+                          result);
     DCHECK(result);
   }
 }
@@ -1490,7 +1497,7 @@ const FieldTrial::EntropyProvider*
 }
 
 FieldTrial* FieldTrialList::PreLockedFind(const std::string& name) {
-  RegistrationMap::iterator it = registered_.find(name);
+  auto it = registered_.find(name);
   if (registered_.end() == it)
     return nullptr;
   return it->second;

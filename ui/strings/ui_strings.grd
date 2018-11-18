@@ -416,6 +416,12 @@ need to be translated for each locale.-->
 
       <!--Accessible name strings-->
       <if expr="is_macosx">
+        <message name="IDS_ACCNAME_CONTENT_DELETION_ROLE_DESCRIPTION" desc="Accessibility role description for content deletion, meaning content that is has been or is suggested to be removed from a document, such as in a revision review" meaning="UI element">
+          Deletion
+        </message>
+        <message name="IDS_ACCNAME_CONTENT_INSERTION_ROLE_DESCRIPTION" desc="Accessibility role description for content insertion, meaning content that is has been or is suggested to be inserted into a document, such as in a revision review" meaning="UI element">
+          Insertion
+        </message>
         <message name="IDS_ACCNAME_TAB_ROLE_DESCRIPTION" desc="A generic description of a tab button's role." meaning="UI element">
           Tab
         </message>
@@ -423,6 +429,9 @@ need to be translated for each locale.-->
           Disclosure triangle
         </message>
       </if>
+      <message name="IDS_APP_ACCNAME_BACK" desc="The accessible name for the back button on the window frame.">
+        Back button
+      </message>
       <message name="IDS_APP_ACCNAME_CLOSE" desc="The accessible name for the Close button.">
         Close
       </message>
@@ -437,6 +446,9 @@ need to be translated for each locale.-->
       </message>
       <message name="IDS_APP_ACCNAME_MENU" desc="The accessible name for the Menu button.">
         Menu
+      </message>
+      <message name="IDS_APP_ACCNAME_COLOR_CHOOSER_HEX_INPUT" desc="The accessible name for the color chooser hexadecimal input field">
+        Hex color value
       </message>
 
       <!-- Scroll Bar Context Menu Labels -->
@@ -592,22 +604,31 @@ need to be translated for each locale.-->
       <message name="IDS_APP_MEDIA_STOP_KEY" desc="Media stop key">
         Media Stop
       </message>
+      <message name="IDS_APP_ALT_KEY" desc="Alt key">
+        Alt
+      </message>
+      <message name="IDS_APP_COMMAND_KEY" desc="Command key">
+        Command
+      </message>
+      <message name="IDS_APP_CTRL_KEY" desc="Ctrl key">
+        Ctrl
+      </message>
+      <message name="IDS_APP_SEARCH_KEY" desc="Search key">
+        Search
+      </message>
+      <message name="IDS_APP_SHIFT_KEY" desc="Shift key">
+        Shift
+      </message>
+      <if expr="is_win">
+        <message name="IDS_APP_WINDOWS_KEY" desc="This refers to the 'Windows' key on certain
+            keyboards (often between Ctrl and Alt). This may not need to be translated.">
+          Win
+        </message>
+      </if>
 
-      <!-- Shortcut Modifiers -->
-      <message name="IDS_APP_CONTROL_MODIFIER" desc="Control key shortcut modifier">
-        Ctrl+<ph name="KEY_COMBO_NAME">$1<ex>C</ex></ph>
-      </message>
-      <message name="IDS_APP_ALT_MODIFIER" desc="Alt key shortcut modifier">
-        Alt+<ph name="KEY_COMBO_NAME">$1<ex>C</ex></ph>
-      </message>
-      <message name="IDS_APP_SHIFT_MODIFIER" desc="Shift key shortcut modifier">
-        Shift+<ph name="KEY_COMBO_NAME">$1<ex>C</ex></ph>
-      </message>
-      <message name="IDS_APP_COMMAND_MODIFIER" desc="Command key shortcut modifier">
-        Command+<ph name="KEY_COMBO_NAME">$1<ex>C</ex></ph>
-      </message>
-      <message name="IDS_APP_SEARCH_MODIFIER" desc="Search key shortcut modifier">
-        Search+<ph name="KEY_COMBO_NAME">$1<ex>C</ex></ph>
+      <!-- Accelerator format -->
+      <message name="IDS_APP_ACCELERATOR_WITH_MODIFIER" desc="Accelerator with a modifier key">
+        <ph name="KEY_MODIFIER_NAME">$1<ex>Ctrl</ex></ph>+<ph name="KEY_COMBO_NAME">$2<ex>C</ex></ph>
       </message>
 
       <!-- Byte size units -->
@@ -654,6 +675,9 @@ need to be translated for each locale.-->
       </message>
       <message name="IDS_MESSAGE_CENTER_NOTIFICATION_ACCESSIBLE_NAME" desc="The accessible name for a single notification.">
         Notification
+      </message>
+      <message name="IDS_MESSAGE_CENTER_NOTIFICATION_ACCESSIBLE_NAME_PLURAL" desc="The accessible name for a multiple notifications.">
+        Notifications
       </message>
       <message name="IDS_MESSAGE_CENTER_NOTIFIER_DISABLE" desc="The menu entry for disabling a notifier from a notification.">
         Disable notifications from <ph name="notifier_name">$1<ex>Notification Galore!</ex></ph>
@@ -779,8 +803,14 @@ need to be translated for each locale.-->
       <message name="IDS_APP_LIST_CLEAR_SEARCHBOX" desc="Tooltip for the button that clears all text from the search box in the app list.">
         Clear searchbox text
       </message>
+      <message name="IDS_APP_LIST_START_ASSISTANT" desc="Tooltip for the button that starts Google Assistant from the search box in the app list.">
+        Start Google Assistant
+      </message>
       <message name="IDS_APP_LIST_PAGE_SWITCHER" desc="Tooltip for page switcher for each page in fullscreen view which shows all apps.">
         Page <ph name="selected_page">$1<ex>1</ex></ph> of <ph name="total_page_num">$2<ex>3</ex></ph>
+      </message>
+      <message name="IDS_APP_LIST_CONTINUE_READING_ACCESSIBILE_NAME" desc="The spoken feedback text for the suggestion chip of continue reading.">
+        Continue reading from your mobile device <ph name="title">$1<ex>Title</ex></ph>
       </message>
       <message name="IDS_APP_ACCESSIBILITY_STAR_RATING_ARC" desc="Accessibility text for the star rating of a Play Store app.">
         Star rating <ph name="RATING_SCORE">$1<ex>5.0</ex></ph>

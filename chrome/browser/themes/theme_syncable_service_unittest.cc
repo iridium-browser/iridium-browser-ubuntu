@@ -39,8 +39,7 @@
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/login/users/scoped_test_user_manager.h"
-#include "chrome/browser/chromeos/settings/cros_settings.h"
-#include "chrome/browser/chromeos/settings/device_settings_service.h"
+#include "chrome/browser/chromeos/settings/scoped_cros_settings_test_helper.h"
 #endif
 
 using std::string;
@@ -180,8 +179,9 @@ class ThemeSyncableServiceTest : public testing::Test {
     extensions::TestExtensionSystem* test_ext_system =
         static_cast<extensions::TestExtensionSystem*>(
                 extensions::ExtensionSystem::Get(profile_.get()));
-    ExtensionService* service = test_ext_system->CreateExtensionService(
-        &command_line, base::FilePath(kExtensionFilePath), false);
+    extensions::ExtensionService* service =
+        test_ext_system->CreateExtensionService(
+            &command_line, base::FilePath(kExtensionFilePath), false);
     EXPECT_TRUE(service->extensions_enabled());
     service->Init();
     base::RunLoop().RunUntilIdle();
@@ -228,8 +228,7 @@ class ThemeSyncableServiceTest : public testing::Test {
   content::TestBrowserThreadBundle test_browser_thread_bundle_;
 
 #if defined OS_CHROMEOS
-  chromeos::ScopedTestDeviceSettingsService test_device_settings_service_;
-  chromeos::ScopedTestCrosSettings test_cros_settings_;
+  chromeos::ScopedCrosSettingsTestHelper cros_settings_test_helper_;
   chromeos::ScopedTestUserManager test_user_manager_;
 #endif
 

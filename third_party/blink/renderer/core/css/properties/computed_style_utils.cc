@@ -30,6 +30,7 @@
 #include "third_party/blink/renderer/core/layout/layout_box.h"
 #include "third_party/blink/renderer/core/layout/layout_grid.h"
 #include "third_party/blink/renderer/core/style/computed_style_constants.h"
+#include "third_party/blink/renderer/core/style/style_svg_resource.h"
 #include "third_party/blink/renderer/core/style_property_shorthand.h"
 
 namespace blink {
@@ -513,18 +514,23 @@ CSSValue* ComputedStyleUtils::ValueForPositionOffset(
     const CSSProperty& property,
     const LayoutObject* layout_object) {
   std::pair<const Length*, const Length*> positions;
+  bool is_horizontal_property;
   switch (property.PropertyID()) {
     case CSSPropertyLeft:
       positions = std::make_pair(&style.Left(), &style.Right());
+      is_horizontal_property = true;
       break;
     case CSSPropertyRight:
       positions = std::make_pair(&style.Right(), &style.Left());
+      is_horizontal_property = true;
       break;
     case CSSPropertyTop:
       positions = std::make_pair(&style.Top(), &style.Bottom());
+      is_horizontal_property = false;
       break;
     case CSSPropertyBottom:
       positions = std::make_pair(&style.Bottom(), &style.Top());
+      is_horizontal_property = false;
       break;
     default:
       NOTREACHED();
@@ -538,8 +544,8 @@ CSSValue* ComputedStyleUtils::ValueForPositionOffset(
   if (offset.IsPercentOrCalc() && layout_object && layout_object->IsBox() &&
       layout_object->IsPositioned()) {
     LayoutUnit containing_block_size =
-        (property.IDEquals(CSSPropertyLeft) ||
-         property.IDEquals(CSSPropertyRight))
+        is_horizontal_property ==
+                layout_object->ContainingBlock()->IsHorizontalWritingMode()
             ? ToLayoutBox(layout_object)
                   ->ContainingBlockLogicalWidthForContent()
             : ToLayoutBox(layout_object)
@@ -566,8 +572,8 @@ CSSValue* ComputedStyleUtils::ValueForPositionOffset(
       if (opposite.IsPercentOrCalc()) {
         if (layout_object->IsBox()) {
           LayoutUnit containing_block_size =
-              (property.IDEquals(CSSPropertyLeft) ||
-               property.IDEquals(CSSPropertyRight))
+              is_horizontal_property == layout_object->ContainingBlock()
+                                            ->IsHorizontalWritingMode()
                   ? ToLayoutBox(layout_object)
                         ->ContainingBlockLogicalWidthForContent()
                   : ToLayoutBox(layout_object)
@@ -1217,14 +1223,14 @@ CSSValue* ComputedStyleUtils::ValueForGridTrackList(
   OrderedNamedLinesCollector collector(style, is_row_axis,
                                        auto_repeat_total_tracks);
   CSSValueList* list = CSSValueList::CreateSpaceSeparated();
-  size_t insertion_index;
+  wtf_size_t insertion_index;
   if (is_layout_grid) {
     const auto* grid = ToLayoutGrid(layout_object);
     Vector<LayoutUnit> computed_track_sizes =
         grid->TrackSizesForComputedStyle(direction);
-    size_t num_tracks = computed_track_sizes.size();
+    wtf_size_t num_tracks = computed_track_sizes.size();
 
-    for (size_t i = 0; i < num_tracks; ++i) {
+    for (wtf_size_t i = 0; i < num_tracks; ++i) {
       AddValuesForNamedGridLinesAtIndex(collector, i, *list);
       list->Append(*ZoomAdjustedPixelValue(computed_track_sizes[i], style));
     }
@@ -1232,7 +1238,7 @@ CSSValue* ComputedStyleUtils::ValueForGridTrackList(
 
     insertion_index = num_tracks;
   } else {
-    for (size_t i = 0; i < track_sizes.size(); ++i) {
+    for (wtf_size_t i = 0; i < track_sizes.size(); ++i) {
       AddValuesForNamedGridLinesAtIndex(collector, i, *list);
       list->Append(*SpecifiedValueForGridTrackSize(track_sizes[i], style));
     }
@@ -1361,7 +1367,7 @@ CSSValue* ComputedStyleUtils::ValueForWillChange(
     list->Append(*CSSIdentifierValue::Create(CSSValueContents));
   if (will_change_scroll_position)
     list->Append(*CSSIdentifierValue::Create(CSSValueScrollPosition));
-  for (size_t i = 0; i < will_change_properties.size(); ++i)
+  for (wtf_size_t i = 0; i < will_change_properties.size(); ++i)
     list->Append(*CSSCustomIdentValue::Create(will_change_properties[i]));
   if (!list->length())
     list->Append(*CSSIdentifierValue::Create(CSSValueAuto));
@@ -1372,7 +1378,7 @@ CSSValue* ComputedStyleUtils::ValueForAnimationDelay(
     const CSSTimingData* timing_data) {
   CSSValueList* list = CSSValueList::CreateCommaSeparated();
   if (timing_data) {
-    for (size_t i = 0; i < timing_data->DelayList().size(); ++i) {
+    for (wtf_size_t i = 0; i < timing_data->DelayList().size(); ++i) {
       list->Append(*CSSPrimitiveValue::Create(
           timing_data->DelayList()[i], CSSPrimitiveValue::UnitType::kSeconds));
     }
@@ -1404,7 +1410,7 @@ CSSValue* ComputedStyleUtils::ValueForAnimationDuration(
     const CSSTimingData* timing_data) {
   CSSValueList* list = CSSValueList::CreateCommaSeparated();
   if (timing_data) {
-    for (size_t i = 0; i < timing_data->DurationList().size(); ++i) {
+    for (wtf_size_t i = 0; i < timing_data->DurationList().size(); ++i) {
       list->Append(
           *CSSPrimitiveValue::Create(timing_data->DurationList()[i],
                                      CSSPrimitiveValue::UnitType::kSeconds));
@@ -1516,7 +1522,7 @@ CSSValue* ComputedStyleUtils::ValueForAnimationTimingFunction(
     const CSSTimingData* timing_data) {
   CSSValueList* list = CSSValueList::CreateCommaSeparated();
   if (timing_data) {
-    for (size_t i = 0; i < timing_data->TimingFunctionList().size(); ++i) {
+    for (wtf_size_t i = 0; i < timing_data->TimingFunctionList().size(); ++i) {
       list->Append(*CreateTimingFunctionValue(
           timing_data->TimingFunctionList()[i].get()));
     }
@@ -1662,7 +1668,7 @@ CSSValue* ComputedStyleUtils::ValueForTransitionProperty(
     const CSSTransitionData* transition_data) {
   CSSValueList* list = CSSValueList::CreateCommaSeparated();
   if (transition_data) {
-    for (size_t i = 0; i < transition_data->PropertyList().size(); ++i) {
+    for (wtf_size_t i = 0; i < transition_data->PropertyList().size(); ++i) {
       list->Append(
           *CreateTransitionPropertyValue(transition_data->PropertyList()[i]));
     }
@@ -1876,7 +1882,7 @@ CSSValue* ComputedStyleUtils::AdjustSVGPaintForCurrentColor(
     const Color& current_color) {
   if (paint.type >= SVG_PAINTTYPE_URI_NONE) {
     CSSValueList* values = CSSValueList::CreateSpaceSeparated();
-    values->Append(*CSSURIValue::Create(AtomicString(paint.GetUrl())));
+    values->Append(*CSSURIValue::Create(paint.GetUrl()));
     if (paint.type == SVG_PAINTTYPE_URI_NONE)
       values->Append(*CSSIdentifierValue::Create(CSSValueNone));
     else if (paint.type == SVG_PAINTTYPE_URI_CURRENTCOLOR)
@@ -1891,6 +1897,13 @@ CSSValue* ComputedStyleUtils::AdjustSVGPaintForCurrentColor(
     return CSSColorValue::Create(current_color.Rgb());
 
   return CSSColorValue::Create(paint.GetColor().Rgb());
+}
+
+CSSValue* ComputedStyleUtils::ValueForSVGResource(
+    const StyleSVGResource* resource) {
+  if (resource)
+    return CSSURIValue::Create(resource->Url());
+  return CSSIdentifierValue::Create(CSSValueNone);
 }
 
 CSSValue* ComputedStyleUtils::ValueForShadowData(const ShadowData& shadow,
@@ -1915,8 +1928,8 @@ CSSValue* ComputedStyleUtils::ValueForShadowList(const ShadowList* shadow_list,
     return CSSIdentifierValue::Create(CSSValueNone);
 
   CSSValueList* list = CSSValueList::CreateCommaSeparated();
-  size_t shadow_count = shadow_list->Shadows().size();
-  for (size_t i = 0; i < shadow_count; ++i) {
+  wtf_size_t shadow_count = shadow_list->Shadows().size();
+  for (wtf_size_t i = 0; i < shadow_count; ++i) {
     list->Append(
         *ValueForShadowData(shadow_list->Shadows()[i], style, use_spread));
   }
@@ -2030,8 +2043,8 @@ CSSValue* ComputedStyleUtils::ValueForScrollSnapAlign(
     const ScrollSnapAlign& align,
     const ComputedStyle& style) {
   return CSSValuePair::Create(
-      CSSIdentifierValue::Create(align.alignment_inline),
       CSSIdentifierValue::Create(align.alignment_block),
+      CSSIdentifierValue::Create(align.alignment_inline),
       CSSValuePair::kDropIdenticalValues);
 }
 
@@ -2139,7 +2152,7 @@ CSSValueList* ComputedStyleUtils::ValuesForShorthandProperty(
     Node* styled_node,
     bool allow_visited_style) {
   CSSValueList* list = CSSValueList::CreateSpaceSeparated();
-  for (size_t i = 0; i < shorthand.length(); ++i) {
+  for (unsigned i = 0; i < shorthand.length(); ++i) {
     const CSSValue* value =
         shorthand.properties()[i]->CSSValueFromComputedStyle(
             style, layout_object, styled_node, allow_visited_style);
@@ -2156,7 +2169,7 @@ CSSValueList* ComputedStyleUtils::ValuesForGridShorthand(
     Node* styled_node,
     bool allow_visited_style) {
   CSSValueList* list = CSSValueList::CreateSlashSeparated();
-  for (size_t i = 0; i < shorthand.length(); ++i) {
+  for (unsigned i = 0; i < shorthand.length(); ++i) {
     const CSSValue* value =
         shorthand.properties()[i]->CSSValueFromComputedStyle(
             style, layout_object, styled_node, allow_visited_style);
@@ -2248,7 +2261,7 @@ CSSValue* ComputedStyleUtils::ValuesForFontVariantProperty(
   };
   StylePropertyShorthand shorthand = fontVariantShorthand();
   VariantShorthandCases shorthand_case = kAllNormal;
-  for (size_t i = 0; i < shorthand.length(); ++i) {
+  for (unsigned i = 0; i < shorthand.length(); ++i) {
     const CSSValue* value =
         shorthand.properties()[i]->CSSValueFromComputedStyle(
             style, layout_object, styled_node, allow_visited_style);
@@ -2271,7 +2284,7 @@ CSSValue* ComputedStyleUtils::ValuesForFontVariantProperty(
       return CSSIdentifierValue::Create(CSSValueNone);
     case kConcatenateNonNormal: {
       CSSValueList* list = CSSValueList::CreateSpaceSeparated();
-      for (size_t i = 0; i < shorthand.length(); ++i) {
+      for (unsigned i = 0; i < shorthand.length(); ++i) {
         const CSSValue* value =
             shorthand.properties()[i]->CSSValueFromComputedStyle(
                 style, layout_object, styled_node, allow_visited_style);

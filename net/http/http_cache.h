@@ -26,8 +26,9 @@
 #include "base/threading/thread_checker.h"
 #include "base/time/clock.h"
 #include "base/time/time.h"
+#include "build/build_config.h"
 #include "net/base/cache_type.h"
-#include "net/base/completion_callback.h"
+#include "net/base/completion_once_callback.h"
 #include "net/base/load_states.h"
 #include "net/base/net_export.h"
 #include "net/base/request_priority.h"
@@ -40,6 +41,10 @@ namespace base {
 namespace trace_event {
 class ProcessMemoryDump;
 }
+
+namespace android {
+class ApplicationStatusListener;
+}  // namespace android
 }  // namespace base
 
 namespace disk_cache {
@@ -80,7 +85,12 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory {
     // |callback| because the object can be deleted from within the callback.
     virtual int CreateBackend(NetLog* net_log,
                               std::unique_ptr<disk_cache::Backend>* backend,
-                              const CompletionCallback& callback) = 0;
+                              CompletionOnceCallback callback) = 0;
+
+#if defined(OS_ANDROID)
+    virtual void SetAppStatusListener(
+        base::android::ApplicationStatusListener* app_status_listener){};
+#endif
   };
 
   // A default backend factory for the common use cases.
@@ -100,13 +110,21 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory {
     // BackendFactory implementation.
     int CreateBackend(NetLog* net_log,
                       std::unique_ptr<disk_cache::Backend>* backend,
-                      const CompletionCallback& callback) override;
+                      CompletionOnceCallback callback) override;
+
+#if defined(OS_ANDROID)
+    void SetAppStatusListener(
+        base::android::ApplicationStatusListener* app_status_listener) override;
+#endif
 
    private:
     CacheType type_;
     BackendType backend_type_;
     const base::FilePath path_;
     int max_bytes_;
+#if defined(OS_ANDROID)
+    base::android::ApplicationStatusListener* app_status_listener_ = nullptr;
+#endif
   };
 
   // Whether a transaction can join parallel writing or not is a function of the
@@ -174,7 +192,7 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory {
   // |callback| will be notified when the operation completes. The pointer that
   // receives the |backend| must remain valid until the operation completes.
   int GetBackend(disk_cache::Backend** backend,
-                 const CompletionCallback& callback);
+                 CompletionOnceCallback callback);
 
   // Returns the current backend (can be NULL).
   disk_cache::Backend* GetCurrentBackend() const;
@@ -361,7 +379,7 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory {
   // Creates the |backend| object and notifies the |callback| when the operation
   // completes. Returns an error code.
   int CreateBackend(disk_cache::Backend** backend,
-                    const CompletionCallback& callback);
+                    CompletionOnceCallback callback);
 
   // Makes sure that the backend creation is complete before allowing the
   // provided transaction to use the object. Returns an error code.  |trans|
@@ -555,12 +573,10 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory {
   // Processes BackendCallback notifications.
   void OnIOComplete(int result, PendingOp* entry);
 
-  // Helper to conditionally delete |pending_op| if the HttpCache object it
-  // is meant for has been deleted.
-  //
-  // TODO(ajwong): The PendingOp lifetime management is very tricky.  It might
-  // be possible to simplify it using either base::Owned() or base::Passed()
-  // with the callback.
+  // Helper to conditionally delete |pending_op| if HttpCache has been deleted.
+  // This is necessary because |pending_op| owns a disk_cache::Backend that has
+  // been passed in to CreateCacheBackend(), therefore must live until callback
+  // is called.
   static void OnPendingOpComplete(const base::WeakPtr<HttpCache>& cache,
                                   PendingOp* pending_op,
                                   int result);

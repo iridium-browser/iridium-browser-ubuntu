@@ -5,6 +5,7 @@
 #ifndef CHROME_BROWSER_UI_BROWSER_WINDOW_H_
 #define CHROME_BROWSER_UI_BROWSER_WINDOW_H_
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -36,10 +37,13 @@ class ExclusiveAccessContext;
 class FindBar;
 class GURL;
 class LocationBar;
+class PageActionIconContainer;
 class StatusBubble;
 class ToolbarActionsBar;
 
 namespace autofill {
+class LocalCardMigrationBubbleController;
+class LocalCardMigrationBubble;
 class SaveCardBubbleController;
 class SaveCardBubbleView;
 }
@@ -56,7 +60,6 @@ class Extension;
 }
 
 namespace gfx {
-class Rect;
 class Size;
 }
 
@@ -112,6 +115,55 @@ class BrowserWindow : public ui::BaseWindow {
   //////////////////////////////////////////////////////////////////////////////
   // Browser specific methods:
 
+  // Sets the shown |ratio| of the browser's top controls (a.k.a. top-chrome) as
+  // a result of gesture scrolling in |web_contents|.
+  virtual void SetTopControlsShownRatio(content::WebContents* web_contents,
+                                        float ratio) = 0;
+
+  // Whether or not the renderer's viewport size should be shrunk by the height
+  // of the browser's top controls.
+  // As top-chrome is slided up or down, we don't actually resize the web
+  // contents (for perf reasons) but we have to do a bunch of adjustments on the
+  // renderer side to make it appear to the user like we're resizing things
+  // smoothly:
+  //
+  // 1) Expose content beyond the web contents rect by expanding the clip.
+  // 2) Push bottom-fixed elements around until we get a resize. As top-chrome
+  //    hides, we push the fixed elements down by an equivalent amount so that
+  //    they appear to stay fixed to the viewport bottom.
+  //
+  // Only when the user releases their finger to finish the scroll do we
+  // actually resize the web contents and clear these adjustments. So web
+  // contents has two possible sizes, viewport filling and shrunk by the top
+  // controls.
+  //
+  // The GetTopControlsHeight is a static number that never changes (as long as
+  // the top-chrome slide with gesture scrolls feature is enabled). To get the
+  // actual "showing" height as the user sees, you multiply this by the shown
+  // ratio. However, it's not enough to know this value, the renderer also needs
+  // to know which direction it should be doing the above-mentioned adjustments.
+  // That's what the DoBrowserControlsShrinkRendererSize bit is for. It tells
+  // the renderer whether it's currently in the "viewport filling" or the
+  // "shrunk by top controls" state.
+  // The returned value should never change while sliding top-chrome is in
+  // progress (either due to an in-progress gesture scroll, or due to a
+  // renderer-initiated animation of the top controls shown ratio).
+  virtual bool DoBrowserControlsShrinkRendererSize(
+      const content::WebContents* contents) const = 0;
+
+  // Returns the height of the browser's top controls. This height doesn't
+  // change with the current shown ratio above. Renderers will call this to
+  // calculate the top-chrome shown ratio from the gesture scroll offset.
+  //
+  // Note: This should always return 0 if hiding top-chrome with page gesture
+  // scrolls is disabled. This is needed so the renderer scrolls the page
+  // immediately rather than changing the shown ratio, thinking that top-chrome
+  // and the page's top edge are moving.
+  virtual int GetTopControlsHeight() const = 0;
+
+  // Propagates to the browser that gesture scrolling has changed state.
+  virtual void SetTopControlsGestureScrollInProgress(bool in_progress) = 0;
+
   // Return the status bubble associated with the frame
   virtual StatusBubble* GetStatusBubble() = 0;
 
@@ -163,6 +215,9 @@ class BrowserWindow : public ui::BaseWindow {
   // Returns the size of WebContents in the browser. This may be called before
   // the TabStripModel has an active tab.
   virtual gfx::Size GetContentsSize() const = 0;
+
+  // Returns the container of page action icons.
+  virtual PageActionIconContainer* GetPageActionIconContainer() = 0;
 
   // Returns the location bar.
   virtual LocationBar* GetLocationBar() const = 0;
@@ -231,10 +286,13 @@ class BrowserWindow : public ui::BaseWindow {
 
 #if defined(OS_CHROMEOS)
   // Shows the intent picker bubble. |app_info| contains the app candidates to
-  // display and |callback| gives access so we can redirect the user (if needed)
-  // and store UMA metrics.
+  // display, |disable_stay_in_chrome| allows to disable 'Stay in Chrome' (used
+  // for non-http(s) queries), and |callback| helps to continue the flow back to
+  // either AppsNavigationThrottle or ArcExternalProtocolDialog capturing the
+  // user's decision and storing UMA metrics.
   virtual void ShowIntentPickerBubble(
       std::vector<chromeos::IntentPickerAppInfo> app_info,
+      bool disable_stay_in_chrome,
       IntentPickerResponse callback) = 0;
   virtual void SetIntentPickerViewVisibility(bool visible) = 0;
 #endif  // defined(OS_CHROMEOS)
@@ -247,6 +305,12 @@ class BrowserWindow : public ui::BaseWindow {
   virtual autofill::SaveCardBubbleView* ShowSaveCreditCardBubble(
       content::WebContents* contents,
       autofill::SaveCardBubbleController* controller,
+      bool is_user_gesture) = 0;
+
+  // Shows the local card migration bubble.
+  virtual autofill::LocalCardMigrationBubble* ShowLocalCardMigrationBubble(
+      content::WebContents* contents,
+      autofill::LocalCardMigrationBubbleController* controller,
       bool is_user_gesture) = 0;
 
   // Shows the translate bubble.
@@ -308,10 +372,6 @@ class BrowserWindow : public ui::BaseWindow {
   // Clipboard commands applied to the whole browser window.
   virtual void CutCopyPaste(int command_id) = 0;
 
-  // Return the correct disposition for a popup window based on |bounds|.
-  virtual WindowOpenDisposition GetDispositionForPopupBounds(
-      const gfx::Rect& bounds) = 0;
-
   // Construct a FindBar implementation for the |browser|.
   virtual FindBar* CreateFindBar() = 0;
 
@@ -322,7 +382,7 @@ class BrowserWindow : public ui::BaseWindow {
       GetWebContentsModalDialogHost() = 0;
 
   // Construct a BrowserWindow implementation for the specified |browser|.
-  static BrowserWindow* CreateBrowserWindow(Browser* browser,
+  static BrowserWindow* CreateBrowserWindow(std::unique_ptr<Browser> browser,
                                             bool user_gesture);
 
   // Shows the avatar bubble on the window frame off of the avatar button with
@@ -343,6 +403,11 @@ class BrowserWindow : public ui::BaseWindow {
       const signin::ManageAccountsParams& manage_accounts_params,
       signin_metrics::AccessPoint access_point,
       bool is_source_keyboard) = 0;
+
+#if defined(OS_CHROMEOS) || defined(OS_MACOSX) || defined(OS_WIN) || \
+    defined(OS_LINUX)
+  virtual void ShowHatsBubbleFromAppMenuButton() = 0;
+#endif
 
   // Returns the height inset for RenderView when detached bookmark bar is
   // shown.  Invoked when a new RenderHostView is created for a non-NTP
@@ -371,13 +436,6 @@ class BrowserWindow : public ui::BaseWindow {
   friend class BrowserCloseManager;
   friend class BrowserView;
   virtual void DestroyBrowser() = 0;
-
-#if defined(OS_MACOSX)
-  // Creates a Cocoa browser window, in browser builds where both Views and
-  // Cocoa browsers windows are present.
-  static BrowserWindow* CreateBrowserWindowCocoa(Browser* browser,
-                                                 bool user_gesture);
-#endif
 };
 
 #endif  // CHROME_BROWSER_UI_BROWSER_WINDOW_H_

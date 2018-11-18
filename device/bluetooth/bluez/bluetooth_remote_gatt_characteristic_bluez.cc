@@ -32,8 +32,7 @@ namespace {
 // Stream operator for logging vector<uint8_t>.
 std::ostream& operator<<(std::ostream& out, const std::vector<uint8_t> bytes) {
   out << "[";
-  for (std::vector<uint8_t>::const_iterator iter = bytes.begin();
-       iter != bytes.end(); ++iter) {
+  for (auto iter = bytes.begin(); iter != bytes.end(); ++iter) {
     out << base::StringPrintf("%02X", *iter);
   }
   return out << "]";
@@ -60,8 +59,7 @@ BluetoothRemoteGattCharacteristicBlueZ::BluetoothRemoteGattCharacteristicBlueZ(
       bluez::BluezDBusManager::Get()
           ->GetBluetoothGattDescriptorClient()
           ->GetDescriptors();
-  for (std::vector<dbus::ObjectPath>::const_iterator iter = gatt_descs.begin();
-       iter != gatt_descs.end(); ++iter)
+  for (auto iter = gatt_descs.begin(); iter != gatt_descs.end(); ++iter)
     GattDescriptorAdded(*iter);
 }
 
@@ -91,8 +89,7 @@ BluetoothRemoteGattCharacteristicBlueZ::GetProperties() const {
 
   Properties props = PROPERTY_NONE;
   const std::vector<std::string>& flags = properties->flags.value();
-  for (std::vector<std::string>::const_iterator iter = flags.begin();
-       iter != flags.end(); ++iter) {
+  for (auto iter = flags.begin(); iter != flags.end(); ++iter) {
     if (*iter == bluetooth_gatt_characteristic::kFlagBroadcast)
       props |= PROPERTY_BROADCAST;
     if (*iter == bluetooth_gatt_characteristic::kFlagRead)
@@ -155,21 +152,6 @@ bool BluetoothRemoteGattCharacteristicBlueZ::IsNotifying() const {
   return has_notify_session_ && properties->notifying.value();
 }
 
-std::vector<device::BluetoothRemoteGattDescriptor*>
-BluetoothRemoteGattCharacteristicBlueZ::GetDescriptors() const {
-  std::vector<device::BluetoothRemoteGattDescriptor*> descriptors;
-  for (const auto& descriptor : descriptors_)
-    descriptors.push_back(descriptor.second.get());
-  return descriptors;
-}
-
-device::BluetoothRemoteGattDescriptor*
-BluetoothRemoteGattCharacteristicBlueZ::GetDescriptor(
-    const std::string& identifier) const {
-  auto iter = descriptors_.find(dbus::ObjectPath(identifier));
-  return iter != descriptors_.end() ? iter->second.get() : nullptr;
-}
-
 void BluetoothRemoteGattCharacteristicBlueZ::ReadRemoteCharacteristic(
     const ValueCallback& callback,
     const ErrorCallback& error_callback) {
@@ -204,14 +186,39 @@ void BluetoothRemoteGattCharacteristicBlueZ::WriteRemoteCharacteristic(
                      weak_ptr_factory_.GetWeakPtr(), error_callback));
 }
 
+#if defined(OS_CHROMEOS)
+void BluetoothRemoteGattCharacteristicBlueZ::PrepareWriteRemoteCharacteristic(
+    const std::vector<uint8_t>& value,
+    const base::Closure& callback,
+    const ErrorCallback& error_callback) {
+  VLOG(1) << "Sending GATT characteristic prepare write request to "
+          << "characteristic: " << GetIdentifier()
+          << ", UUID: " << GetUUID().canonical_value()
+          << ", with value: " << value << ".";
+
+  bluez::BluezDBusManager::Get()
+      ->GetBluetoothGattCharacteristicClient()
+      ->PrepareWriteValue(
+          object_path(), value, callback,
+          base::Bind(&BluetoothRemoteGattCharacteristicBlueZ::OnWriteError,
+                     weak_ptr_factory_.GetWeakPtr(), error_callback));
+}
+#endif
+
 void BluetoothRemoteGattCharacteristicBlueZ::SubscribeToNotifications(
     device::BluetoothRemoteGattDescriptor* ccc_descriptor,
+#if defined(OS_CHROMEOS)
+    NotificationType notification_type,
+#endif
     const base::Closure& callback,
     const ErrorCallback& error_callback) {
   bluez::BluezDBusManager::Get()
       ->GetBluetoothGattCharacteristicClient()
       ->StartNotify(
           object_path(),
+#if defined(OS_CHROMEOS)
+          notification_type,
+#endif
           base::Bind(
               &BluetoothRemoteGattCharacteristicBlueZ::OnStartNotifySuccess,
               weak_ptr_factory_.GetWeakPtr(), callback),
@@ -237,7 +244,7 @@ void BluetoothRemoteGattCharacteristicBlueZ::UnsubscribeFromNotifications(
 
 void BluetoothRemoteGattCharacteristicBlueZ::GattDescriptorAdded(
     const dbus::ObjectPath& object_path) {
-  if (descriptors_.find(object_path) != descriptors_.end()) {
+  if (descriptors_.find(object_path.value()) != descriptors_.end()) {
     VLOG(1) << "Remote GATT characteristic descriptor already exists: "
             << object_path.value();
     return;
@@ -259,7 +266,7 @@ void BluetoothRemoteGattCharacteristicBlueZ::GattDescriptorAdded(
   // NOTE: Can't use std::make_unique due to private constructor.
   BluetoothRemoteGattDescriptorBlueZ* descriptor =
       new BluetoothRemoteGattDescriptorBlueZ(this, object_path);
-  descriptors_.emplace(object_path, base::WrapUnique(descriptor));
+  AddDescriptor(base::WrapUnique(descriptor));
   DCHECK(descriptor->GetIdentifier() == object_path.value());
   DCHECK(descriptor->GetUUID().IsValid());
   DCHECK(service_);
@@ -270,7 +277,7 @@ void BluetoothRemoteGattCharacteristicBlueZ::GattDescriptorAdded(
 
 void BluetoothRemoteGattCharacteristicBlueZ::GattDescriptorRemoved(
     const dbus::ObjectPath& object_path) {
-  DescriptorMap::iterator iter = descriptors_.find(object_path);
+  auto iter = descriptors_.find(object_path.value());
   if (iter == descriptors_.end()) {
     VLOG(2) << "Unknown descriptor removed: " << object_path.value();
     return;
@@ -280,19 +287,21 @@ void BluetoothRemoteGattCharacteristicBlueZ::GattDescriptorRemoved(
           << GetIdentifier() << ", UUID: " << GetUUID().canonical_value();
 
   auto descriptor = std::move(iter->second);
-  DCHECK(descriptor->object_path() == object_path);
+  auto* descriptor_bluez =
+      static_cast<BluetoothRemoteGattDescriptorBlueZ*>(descriptor.get());
+  DCHECK(descriptor_bluez->object_path() == object_path);
   descriptors_.erase(iter);
 
   DCHECK(service_);
   static_cast<BluetoothRemoteGattServiceBlueZ*>(service_)
-      ->NotifyDescriptorAddedOrRemoved(this, descriptor.get(),
+      ->NotifyDescriptorAddedOrRemoved(this, descriptor_bluez,
                                        false /* added */);
 }
 
 void BluetoothRemoteGattCharacteristicBlueZ::GattDescriptorPropertyChanged(
     const dbus::ObjectPath& object_path,
     const std::string& property_name) {
-  DescriptorMap::iterator iter = descriptors_.find(object_path);
+  auto iter = descriptors_.find(object_path.value());
   if (iter == descriptors_.end()) {
     VLOG(2) << "Unknown descriptor removed: " << object_path.value();
     return;
@@ -310,8 +319,10 @@ void BluetoothRemoteGattCharacteristicBlueZ::GattDescriptorPropertyChanged(
 
   DCHECK(service_);
   static_cast<BluetoothRemoteGattServiceBlueZ*>(service_)
-      ->NotifyDescriptorValueChanged(this, iter->second.get(),
-                                     properties->value.value());
+      ->NotifyDescriptorValueChanged(
+          this,
+          static_cast<BluetoothRemoteGattDescriptorBlueZ*>(iter->second.get()),
+          properties->value.value());
 }
 
 void BluetoothRemoteGattCharacteristicBlueZ::OnStartNotifySuccess(

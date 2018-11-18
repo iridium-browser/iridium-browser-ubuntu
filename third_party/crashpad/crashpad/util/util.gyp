@@ -60,6 +60,7 @@
         'linux/direct_ptrace_connection.h',
         'linux/exception_handler_client.cc',
         'linux/exception_handler_client.h',
+        'linux/exception_handler_protocol.cc',
         'linux/exception_handler_protocol.h',
         'linux/exception_information.h',
         'linux/memory_map.cc',
@@ -153,6 +154,8 @@
         'misc/pdb_structures.h',
         'misc/random_string.cc',
         'misc/random_string.h',
+        'misc/range_set.cc',
+        'misc/range_set.h',
         'misc/reinterpret_bytes.cc',
         'misc/reinterpret_bytes.h',
         'misc/scoped_forbid_return.cc',
@@ -175,7 +178,6 @@
         'net/http_multipart_builder.h',
         'net/http_transport.cc',
         'net/http_transport.h',
-        'net/http_transport_libcurl.cc',
         'net/http_transport_mac.mm',
         'net/http_transport_none.cc',
         'net/http_transport_win.cc',
@@ -383,15 +385,12 @@
           ],
         }],
         ['OS=="linux"', {
-          'link_settings': {
-            'libraries': [
-              '-lcurl',
-            ],
-          },
+          'sources': [
+            'net/http_transport_socket.cc',
+          ],
         }, {  # else: OS!="linux"
           'sources!': [
             'misc/capture_context_linux.S',
-            'net/http_transport_libcurl.cc',
           ],
         }],
         ['OS!="android"', {

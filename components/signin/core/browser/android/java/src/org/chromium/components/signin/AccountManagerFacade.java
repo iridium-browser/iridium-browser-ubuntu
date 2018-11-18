@@ -5,6 +5,7 @@
 package org.chromium.components.signin;
 
 import android.accounts.Account;
+import android.accounts.AccountManager;
 import android.accounts.AuthenticatorDescription;
 import android.annotation.TargetApi;
 import android.app.Activity;
@@ -12,7 +13,6 @@ import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
-import android.os.AsyncTask;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.SystemClock;
@@ -26,8 +26,10 @@ import org.chromium.base.ContextUtils;
 import org.chromium.base.Log;
 import org.chromium.base.ObserverList;
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.TraceEvent;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.metrics.CachedMetrics;
+import org.chromium.base.task.AsyncTask;
 import org.chromium.components.signin.util.PatternMatcher;
 import org.chromium.net.NetworkChangeNotifier;
 
@@ -91,7 +93,9 @@ public class AccountManagerFacade {
             new CachedMetrics.TimesHistogramSample(
                     "Signin.AndroidPopulateAccountCacheWaitingTime", TimeUnit.MILLISECONDS);
 
-    private int mUpdateTasksCounter = 0;
+    private final ArrayList<Runnable> mCallbacksWaitingForCachePopulation = new ArrayList<>();
+
+    private int mUpdateTasksCounter;
     private final ArrayList<Runnable> mCallbacksWaitingForPendingUpdates = new ArrayList<>();
 
     /**
@@ -138,13 +142,15 @@ public class AccountManagerFacade {
      */
     @MainThread
     public static void initializeAccountManagerFacade(AccountManagerDelegate delegate) {
-        ThreadUtils.assertOnUiThread();
-        if (sInstance != null) {
-            throw new IllegalStateException("AccountManagerFacade is already initialized!");
+        try (TraceEvent e = TraceEvent.scoped("initializeAccountManagerFacade()")) {
+            ThreadUtils.assertOnUiThread();
+            if (sInstance != null) {
+                throw new IllegalStateException("AccountManagerFacade is already initialized!");
+            }
+            sInstance = new AccountManagerFacade(delegate);
+            if (sTestingInstance != null) return;
+            sAtomicInstance.set(sInstance);
         }
-        sInstance = new AccountManagerFacade(delegate);
-        if (sTestingInstance != null) return;
-        sAtomicInstance.set(sInstance);
     }
 
     /**
@@ -219,6 +225,34 @@ public class AccountManagerFacade {
     }
 
     /**
+     * Runs a callback after the account list cache is populated. In the callback
+     * {@link #getGoogleAccounts()} and similar methods are guaranteed to return instantly (without
+     * blocking and waiting for the cache to be populated). If the cache has already been populated,
+     * the callback will be posted on UI thread.
+     * @param runnable The callback to call after cache is populated. Invoked on the main thread.
+     */
+    @MainThread
+    @VisibleForTesting
+    public void runAfterCacheIsPopulated(Runnable runnable) {
+        ThreadUtils.assertOnUiThread();
+        if (isCachePopulated()) {
+            ThreadUtils.postOnUiThread(runnable);
+            return;
+        }
+        mCallbacksWaitingForCachePopulation.add(runnable);
+    }
+
+    /**
+     * Returns whether the account cache has already been populated. {@link #getGoogleAccounts()}
+     * and similar methods will return instantly if the cache has been populated, otherwise these
+     * methods may block waiting for the cache to be populated.
+     */
+    @AnyThread
+    public boolean isCachePopulated() {
+        return mFilteredAccounts.get() != null;
+    }
+
+    /**
      * Retrieves a list of the Google account names on the device.
      *
      * @throws AccountManagerDelegateException if Google Play Services are out of date,
@@ -251,13 +285,7 @@ public class AccountManagerFacade {
      */
     @MainThread
     public void tryGetGoogleAccountNames(final Callback<List<String>> callback) {
-        tryGetGoogleAccounts(accounts -> {
-            List<String> accountNames = new ArrayList<>();
-            for (Account account : accounts) {
-                accountNames.add(account.name);
-            }
-            callback.onResult(accountNames);
-        });
+        runAfterCacheIsPopulated(() -> callback.onResult(tryGetGoogleAccountNames()));
     }
 
     /**
@@ -266,7 +294,8 @@ public class AccountManagerFacade {
     @MainThread
     public void getGoogleAccountNames(
             final Callback<AccountManagerResult<List<String>>> callback) {
-        getGoogleAccounts(accounts -> {
+        runAfterCacheIsPopulated(() -> {
+            final AccountManagerResult<Account[]> accounts = mFilteredAccounts.get();
             final AccountManagerResult<List<String>> result;
             if (accounts.hasValue()) {
                 List<String> accountNames = new ArrayList<>(accounts.getValue().length);
@@ -312,22 +341,7 @@ public class AccountManagerFacade {
      */
     @MainThread
     public void getGoogleAccounts(final Callback<AccountManagerResult<Account[]>> callback) {
-        ThreadUtils.assertOnUiThread();
-        new AsyncTask<Void, Void, AccountManagerResult<Account[]>>() {
-            @Override
-            protected AccountManagerResult<Account[]> doInBackground(Void... params) {
-                try {
-                    return new AccountManagerResult<>(getGoogleAccounts());
-                } catch (AccountManagerDelegateException ex) {
-                    return new AccountManagerResult<>(ex);
-                }
-            }
-
-            @Override
-            protected void onPostExecute(AccountManagerResult<Account[]> accounts) {
-                callback.onResult(accounts);
-            }
-        }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+        runAfterCacheIsPopulated(() -> callback.onResult(mFilteredAccounts.get()));
     }
 
     /**
@@ -348,18 +362,7 @@ public class AccountManagerFacade {
      */
     @MainThread
     public void tryGetGoogleAccounts(final Callback<Account[]> callback) {
-        ThreadUtils.assertOnUiThread();
-        new AsyncTask<Void, Void, Account[]>() {
-            @Override
-            protected Account[] doInBackground(Void... params) {
-                return tryGetGoogleAccounts();
-            }
-
-            @Override
-            protected void onPostExecute(Account[] accounts) {
-                callback.onResult(accounts);
-            }
-        }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+        runAfterCacheIsPopulated(() -> callback.onResult(tryGetGoogleAccounts()));
     }
 
     /**
@@ -376,7 +379,7 @@ public class AccountManagerFacade {
      */
     @MainThread
     public void hasGoogleAccounts(final Callback<Boolean> callback) {
-        tryGetGoogleAccounts(accounts -> callback.onResult(accounts.length > 0));
+        runAfterCacheIsPopulated(() -> callback.onResult(hasGoogleAccounts()));
     }
 
     private String canonicalizeName(String name) {
@@ -413,17 +416,7 @@ public class AccountManagerFacade {
      */
     @MainThread
     public void getAccountFromName(String accountName, final Callback<Account> callback) {
-        final String canonicalName = canonicalizeName(accountName);
-        tryGetGoogleAccounts(accounts -> {
-            Account accountForName = null;
-            for (Account account : accounts) {
-                if (canonicalizeName(account.name).equals(canonicalName)) {
-                    accountForName = account;
-                    break;
-                }
-            }
-            callback.onResult(accountForName);
-        });
+        runAfterCacheIsPopulated(() -> callback.onResult(getAccountFromName(accountName)));
     }
 
     /**
@@ -442,7 +435,7 @@ public class AccountManagerFacade {
     @VisibleForTesting
     @MainThread
     public void hasAccountForName(String accountName, final Callback<Boolean> callback) {
-        getAccountFromName(accountName, account -> callback.onResult(account != null));
+        runAfterCacheIsPopulated(() -> callback.onResult(hasAccountForName(accountName)));
     }
 
     /**
@@ -518,12 +511,15 @@ public class AccountManagerFacade {
         });
     }
 
+    // Incorrectly infers that this is called on a worker thread because of AsyncTask doInBackground
+    // overriding.
+    @SuppressWarnings("WrongThread")
     @MainThread
     public void checkChildAccountStatus(Account account, Callback<Integer> callback) {
         ThreadUtils.assertOnUiThread();
-        new AsyncTask<Void, Void, Integer>() {
+        new AsyncTask<Integer>() {
             @Override
-            public @ChildAccountStatus.Status Integer doInBackground(Void... params) {
+            public @ChildAccountStatus.Status Integer doInBackground() {
                 if (hasFeature(account, FEATURE_IS_CHILD_ACCOUNT_KEY)) {
                     return ChildAccountStatus.REGULAR_CHILD;
                 }
@@ -539,6 +535,17 @@ public class AccountManagerFacade {
             }
         }
                 .executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+    }
+
+    /**
+     * Creates an intent that will ask the user to add a new account to the device. See
+     * {@link AccountManager#addAccount} for details.
+     * @param callback The callback to get the created intent. Will be invoked on the main thread.
+     *         If there is an issue while creating the intent, callback will receive null.
+     */
+    @AnyThread
+    public void createAddAccountIntent(Callback<Intent> callback) {
+        mDelegate.createAddAccountIntent(callback);
     }
 
     /**
@@ -691,14 +698,14 @@ public class AccountManagerFacade {
         mCallbacksWaitingForPendingUpdates.clear();
     }
 
-    private class InitializeTask extends AsyncTask<Void, Void, Void> {
+    private class InitializeTask extends AsyncTask<Void> {
         @Override
         protected void onPreExecute() {
             ++mUpdateTasksCounter;
         }
 
         @Override
-        protected Void doInBackground(Void... params) {
+        protected Void doInBackground() {
             mAccountRestrictionPatterns = getAccountRestrictionPatterns();
             mAllAccounts = getAllAccounts();
             mFilteredAccounts.set(getFilteredAccounts());
@@ -710,20 +717,24 @@ public class AccountManagerFacade {
 
         @Override
         protected void onPostExecute(Void v) {
+            for (Runnable callback : mCallbacksWaitingForCachePopulation) {
+                callback.run();
+            }
+            mCallbacksWaitingForCachePopulation.clear();
+
             fireOnAccountsChangedNotification();
             decrementUpdateCounter();
         }
     }
 
-    private class UpdateAccountRestrictionPatternsTask
-            extends AsyncTask<Void, Void, PatternMatcher[]> {
+    private class UpdateAccountRestrictionPatternsTask extends AsyncTask<PatternMatcher[]> {
         @Override
         protected void onPreExecute() {
             ++mUpdateTasksCounter;
         }
 
         @Override
-        protected PatternMatcher[] doInBackground(Void... params) {
+        protected PatternMatcher[] doInBackground() {
             return getAccountRestrictionPatterns();
         }
 
@@ -734,15 +745,14 @@ public class AccountManagerFacade {
         }
     }
 
-    private class UpdateAccountsTask
-            extends AsyncTask<Void, Void, AccountManagerResult<Account[]>> {
+    private class UpdateAccountsTask extends AsyncTask<AccountManagerResult<Account[]>> {
         @Override
         protected void onPreExecute() {
             ++mUpdateTasksCounter;
         }
 
         @Override
-        protected AccountManagerResult<Account[]> doInBackground(Void... params) {
+        protected AccountManagerResult<Account[]> doInBackground() {
             return getAllAccounts();
         }
 
@@ -791,9 +801,9 @@ public class AccountManagerFacade {
             ThreadUtils.assertOnUiThread();
             // Clear any transient error.
             mIsTransientError.set(false);
-            new AsyncTask<Void, Void, T>() {
+            new AsyncTask<T>() {
                 @Override
-                public T doInBackground(Void... params) {
+                public T doInBackground() {
                     try {
                         return mAuthTask.run();
                     } catch (AuthException ex) {
@@ -817,7 +827,8 @@ public class AccountManagerFacade {
                         NetworkChangeNotifier.addConnectionTypeObserver(ConnectionRetry.this);
                     }
                 }
-            }.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
+            }
+                    .executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
         }
 
         @Override

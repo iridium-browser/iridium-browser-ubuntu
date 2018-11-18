@@ -21,7 +21,7 @@ class CPDFSDK_FormFillEnvironment;
 class CPDFSDK_PageView;
 class CPDFSDK_Widget;
 
-class CFFL_InteractiveFormFiller : public IPWL_Filler_Notify {
+class CFFL_InteractiveFormFiller final : public IPWL_Filler_Notify {
  public:
   explicit CFFL_InteractiveFormFiller(
       CPDFSDK_FormFillEnvironment* pFormFillEnv);
@@ -34,7 +34,7 @@ class CFFL_InteractiveFormFiller : public IPWL_Filler_Notify {
   void OnDraw(CPDFSDK_PageView* pPageView,
               CPDFSDK_Annot* pAnnot,
               CFX_RenderDevice* pDevice,
-              CFX_Matrix* pUser2Device);
+              const CFX_Matrix& mtUser2Device);
 
   void OnDelete(CPDFSDK_Annot* pAnnot);
 
@@ -82,8 +82,14 @@ class CFFL_InteractiveFormFiller : public IPWL_Filler_Notify {
 
   CFFL_FormFiller* GetFormFiller(CPDFSDK_Annot* pAnnot, bool bRegister);
 
+  WideString GetText(CPDFSDK_Annot* pAnnot);
   WideString GetSelectedText(CPDFSDK_Annot* pAnnot);
   void ReplaceSelection(CPDFSDK_Annot* pAnnot, const WideString& text);
+
+  bool CanUndo(CPDFSDK_Annot* pAnnot);
+  bool CanRedo(CPDFSDK_Annot* pAnnot);
+  bool Undo(CPDFSDK_Annot* pAnnot);
+  bool Redo(CPDFSDK_Annot* pAnnot);
 
   static bool IsVisible(CPDFSDK_Widget* pWidget);
   static bool IsReadOnly(CPDFSDK_Widget* pWidget);
@@ -152,7 +158,7 @@ class CFFL_InteractiveFormFiller : public IPWL_Filler_Notify {
   bool m_bNotifying;
 };
 
-class CFFL_PrivateData : public CPWL_Wnd::PrivateData {
+class CFFL_PrivateData final : public CPWL_Wnd::PrivateData {
  public:
   CPDFSDK_Widget* pWidget;
   CPDFSDK_PageView* pPageView;

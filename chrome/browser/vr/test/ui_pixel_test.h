@@ -30,7 +30,7 @@ class UiPixelTest : public testing::Test {
               const ToolbarState& toolbar_state);
   void DrawUi(const gfx::Vector3dF& laser_direction,
               const gfx::Point3F& laser_origin,
-              UiInputManager::ButtonState button_state,
+              ControllerModel::ButtonState button_state,
               float controller_opacity,
               const gfx::Transform& controller_transform,
               const gfx::Transform& view_matrix,
@@ -45,7 +45,7 @@ class UiPixelTest : public testing::Test {
   GLuint content_texture_ = 0;
   GLuint content_overlay_texture_ = 0;
   gfx::Size frame_buffer_size_;
-  std::unique_ptr<Ui> ui_;
+  std::unique_ptr<UiInterface> ui_;
 };
 
 }  // namespace vr

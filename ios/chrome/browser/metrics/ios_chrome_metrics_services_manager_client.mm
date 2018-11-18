@@ -19,6 +19,7 @@
 #include "ios/chrome/browser/tabs/tab_model_list.h"
 #include "ios/chrome/browser/variations/ios_chrome_variations_service_client.h"
 #include "ios/chrome/browser/variations/ios_ui_string_overrider_factory.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
@@ -75,7 +76,9 @@ IOSChromeMetricsServicesManagerClient::CreateVariationsService() {
   return variations::VariationsService::Create(
       std::make_unique<IOSChromeVariationsServiceClient>(), local_state_,
       GetMetricsStateManager(), "dummy-disable-background-switch",
-      ::CreateUIStringOverrider());
+      ::CreateUIStringOverrider(),
+      base::BindOnce(&ApplicationContext::GetNetworkConnectionTracker,
+                     base::Unretained(GetApplicationContext())));
 }
 
 std::unique_ptr<metrics::MetricsServiceClient>
@@ -89,9 +92,9 @@ IOSChromeMetricsServicesManagerClient::CreateEntropyProvider() {
   return GetMetricsStateManager()->CreateDefaultEntropyProvider();
 }
 
-net::URLRequestContextGetter*
-IOSChromeMetricsServicesManagerClient::GetURLRequestContext() {
-  return GetApplicationContext()->GetSystemURLRequestContext();
+scoped_refptr<network::SharedURLLoaderFactory>
+IOSChromeMetricsServicesManagerClient::GetURLLoaderFactory() {
+  return GetApplicationContext()->GetSharedURLLoaderFactory();
 }
 
 bool IOSChromeMetricsServicesManagerClient::IsMetricsReportingEnabled() {
@@ -116,4 +119,8 @@ IOSChromeMetricsServicesManagerClient::GetMetricsStateManager() {
 
 bool IOSChromeMetricsServicesManagerClient::IsIncognitoSessionActive() {
   return TabModelList::IsOffTheRecordSessionActive();
+}
+
+bool IOSChromeMetricsServicesManagerClient::IsMetricsReportingForceEnabled() {
+  return IOSChromeMetricsServiceClient::IsMetricsReportingForceEnabled();
 }

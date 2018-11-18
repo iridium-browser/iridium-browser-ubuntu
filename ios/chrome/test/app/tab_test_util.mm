@@ -7,8 +7,9 @@
 #import <Foundation/Foundation.h>
 
 #import "base/mac/foundation_util.h"
+#import "base/test/ios/wait_util.h"
 #import "ios/chrome/app/main_controller_private.h"
-#import "ios/chrome/browser/autofill/form_input_accessory_view_controller.h"
+#include "ios/chrome/browser/chrome_url_constants.h"
 #include "ios/chrome/browser/experimental_flags.h"
 #import "ios/chrome/browser/metrics/tab_usage_recorder.h"
 #import "ios/chrome/browser/tabs/tab.h"
@@ -16,16 +17,18 @@
 #import "ios/chrome/browser/ui/browser_view_controller.h"
 #import "ios/chrome/browser/ui/commands/browser_commands.h"
 #import "ios/chrome/browser/ui/commands/open_new_tab_command.h"
+#import "ios/chrome/browser/ui/main/tab_switcher.h"
 #include "ios/chrome/browser/ui/ui_util.h"
 #import "ios/chrome/browser/web_state_list/web_state_list.h"
+#import "ios/chrome/browser/web_state_list/web_usage_enabler/web_state_list_web_usage_enabler.h"
+#import "ios/chrome/browser/web_state_list/web_usage_enabler/web_state_list_web_usage_enabler_factory.h"
 #import "ios/chrome/test/app/chrome_test_util.h"
-#import "ios/testing/wait_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
 
-using testing::WaitUntilConditionOrTimeout;
+using base::test::ios::WaitUntilConditionOrTimeout;
 
 namespace chrome_test_util {
 
@@ -52,14 +55,40 @@ BOOL IsIncognitoMode() {
 void OpenNewTab() {
   @autoreleasepool {  // Make sure that all internals are deallocated.
     OpenNewTabCommand* command = [OpenNewTabCommand command];
-    [chrome_test_util::DispatcherForActiveViewController() openNewTab:command];
+    id<ApplicationCommands, BrowserCommands> BVCDispatcher =
+        chrome_test_util::DispatcherForActiveBrowserViewController();
+    if (BVCDispatcher) {
+      [BVCDispatcher openURLInNewTab:command];
+      return;
+      }
+      // The TabGrid is currently presented.
+      [GetMainController().tabSwitcher
+          dismissWithNewTabAnimationToModel:[[GetMainController()
+                                                browserViewInformation]
+                                                mainTabModel]
+                                    withURL:GURL(kChromeUINewTabURL)
+                                    atIndex:NSNotFound
+                                 transition:ui::PAGE_TRANSITION_TYPED];
   }
 }
 
 void OpenNewIncognitoTab() {
   @autoreleasepool {  // Make sure that all internals are deallocated.
     OpenNewTabCommand* command = [OpenNewTabCommand incognitoTabCommand];
-    [chrome_test_util::DispatcherForActiveViewController() openNewTab:command];
+    id<ApplicationCommands, BrowserCommands> BVCDispatcher =
+        chrome_test_util::DispatcherForActiveBrowserViewController();
+    if (BVCDispatcher) {
+      [BVCDispatcher openURLInNewTab:command];
+      return;
+      }
+      // The TabGrid is currently presented.
+      [GetMainController().tabSwitcher
+          dismissWithNewTabAnimationToModel:[[GetMainController()
+                                                browserViewInformation]
+                                                otrTabModel]
+                                    withURL:GURL(kChromeUINewTabURL)
+                                    atIndex:NSNotFound
+                                 transition:ui::PAGE_TRANSITION_TYPED];
   }
 }
 
@@ -156,8 +185,11 @@ void EvictOtherTabModelTabs() {
           ? [GetMainController().browserViewInformation mainTabModel]
           : [GetMainController().browserViewInformation otrTabModel];
   // Disabling and enabling web usage will evict all web views.
-  otherTabModel.webUsageEnabled = NO;
-  otherTabModel.webUsageEnabled = YES;
+  WebStateListWebUsageEnabler* enabler =
+      WebStateListWebUsageEnablerFactory::GetInstance()->GetForBrowserState(
+          otherTabModel.browserState);
+  enabler->SetWebUsageEnabled(false);
+  enabler->SetWebUsageEnabled(true);
 }
 
 BOOL CloseAllIncognitoTabs() {
@@ -166,12 +198,13 @@ BOOL CloseAllIncognitoTabs() {
   TabModel* tabModel = [[main_controller browserViewInformation] otrTabModel];
   DCHECK(tabModel);
   [tabModel closeAllTabs];
-  if (!IsIPadIdiom()) {
+  if (!IsIPadIdiom() && !IsUIRefreshPhase1Enabled()) {
     // If the OTR BVC is active, wait until it isn't (since all of the
     // tabs are now closed)
-    return WaitUntilConditionOrTimeout(testing::kWaitForUIElementTimeout, ^{
-      return !IsIncognitoMode();
-    });
+    return WaitUntilConditionOrTimeout(
+        base::test::ios::kWaitForUIElementTimeout, ^{
+          return !IsIncognitoMode();
+        });
   }
   return YES;
 }

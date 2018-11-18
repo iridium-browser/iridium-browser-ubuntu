@@ -15,12 +15,12 @@
 #include "content/browser/service_worker/service_worker_disk_cache.h"
 #include "content/browser/service_worker/service_worker_version.h"
 #include "content/common/content_export.h"
-#include "content/common/service_worker/service_worker_status_code.h"
 #include "content/common/service_worker/service_worker_types.h"
 #include "content/public/common/resource_type.h"
 #include "net/base/net_errors.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_job.h"
+#include "third_party/blink/public/common/service_worker/service_worker_status_code.h"
 
 namespace content {
 
@@ -62,11 +62,6 @@ class CONTENT_EXPORT ServiceWorkerWriteToCacheJob
 
  private:
   friend class ServiceWorkerContextRequestHandlerTest;
-  // TODO(https://crbug.com/675540): Remove the following
-  // FRIEND_TEST_ALL_PREFIXES directive when the update_via_cache flag is
-  // shipped to stable.
-  FRIEND_TEST_ALL_PREFIXES(ServiceWorkerContextRequestHandlerTest,
-                           UpdateBefore24HoursWithoutUpdateViaCache);
   FRIEND_TEST_ALL_PREFIXES(ServiceWorkerContextRequestHandlerTest,
                            ServiceWorkerDataRequestAnnotation);
 
@@ -136,6 +131,10 @@ class CONTENT_EXPORT ServiceWorkerWriteToCacheJob
   // Returns true when the incumbent service worker exists and it's required to
   // do the byte-for-byte check.
   bool ShouldByteForByteCheck() const;
+
+  // Returns true if this writer is writing the main script for the service
+  // worker.
+  bool IsMainScript() const;
 
   const ResourceType resource_type_;  // Differentiate main script and imports
   scoped_refptr<net::IOBuffer> io_buffer_;

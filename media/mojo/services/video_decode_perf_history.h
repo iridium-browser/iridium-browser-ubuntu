@@ -15,11 +15,12 @@
 #include "base/supports_user_data.h"
 #include "media/base/video_codecs.h"
 #include "media/capabilities/video_decode_stats_db.h"
+#include "media/capabilities/video_decode_stats_db_provider.h"
 #include "media/mojo/interfaces/video_decode_perf_history.mojom.h"
 #include "media/mojo/services/media_mojo_export.h"
 #include "mojo/public/cpp/bindings/binding_set.h"
+#include "services/metrics/public/cpp/ukm_source_id.h"
 #include "ui/gfx/geometry/size.h"
-#include "url/origin.h"
 
 namespace media {
 
@@ -45,10 +46,10 @@ namespace media {
 // sequence.
 class MEDIA_MOJO_EXPORT VideoDecodePerfHistory
     : public mojom::VideoDecodePerfHistory,
+      public VideoDecodeStatsDBProvider,
       public base::SupportsUserData::Data {
  public:
-  explicit VideoDecodePerfHistory(
-      std::unique_ptr<VideoDecodeStatsDBFactory> db_factory);
+  explicit VideoDecodePerfHistory(std::unique_ptr<VideoDecodeStatsDB> db);
   ~VideoDecodePerfHistory() override;
 
   // Bind the mojo request to this instance. Single instance will be used to
@@ -59,19 +60,26 @@ class MEDIA_MOJO_EXPORT VideoDecodePerfHistory
   void GetPerfInfo(mojom::PredictionFeaturesPtr features,
                    GetPerfInfoCallback got_info_cb) override;
 
-  // Save a record of the given performance stats for the described stream.
-  // Saving is generally fire-and-forget, but |save_done_cb| may be optionally
+  // Provides a callback for saving a stats record for the described stream.
+  // This callback will silently fail if called after |this| is destroyed.
+  // Saving is generally fire-and-forget, but |save_done_cb| may be provided
   // for tests to know the save is complete.
-  void SavePerfRecord(const url::Origin& untrusted_top_frame_origin,
-                      bool is_top_frame,
-                      mojom::PredictionFeatures features,
-                      mojom::PredictionTargets targets,
-                      uint64_t player_id,
-                      base::OnceClosure save_done_cb = base::OnceClosure());
+  using SaveCallback =
+      base::RepeatingCallback<void(ukm::SourceId source_id,
+                                   bool is_top_frame,
+                                   mojom::PredictionFeatures features,
+                                   mojom::PredictionTargets targets,
+                                   uint64_t player_id,
+                                   base::OnceClosure save_done_cb)>;
+  SaveCallback GetSaveCallback();
 
   // Clear all history from the underlying database. Run |clear_done_cb| when
   // complete.
   void ClearHistory(base::OnceClosure clear_done_cb);
+
+  // From VideoDecodeStatsDBProvider. |cb| receives a pointer to the
+  // *initialized* VideoDecodeStatsDB, or null in case of error.
+  void GetVideoDecodeStatsDB(GetCB cb) override;
 
  private:
   friend class VideoDecodePerfHistoryTest;
@@ -94,12 +102,20 @@ class MEDIA_MOJO_EXPORT VideoDecodePerfHistory
   // this value.
   static constexpr double kMinPowerEfficientDecodedFramePercent = .50;
 
-  // Create and initialize the database. Will return early if initialization is
+  // Initialize the database. Will return early if initialization is
   // already PENDING.
   void InitDatabase();
 
   // Callback from |db_->Initialize()|.
   void OnDatabaseInit(bool success);
+
+  // Initiate saving of the provided record. See GetSaveCallback().
+  void SavePerfRecord(ukm::SourceId source_id,
+                      bool is_top_frame,
+                      mojom::PredictionFeatures features,
+                      mojom::PredictionTargets targets,
+                      uint64_t player_id,
+                      base::OnceClosure save_done_cb);
 
   // Internal callback for database queries made from GetPerfInfo() (mojo API).
   // Assesses performance from database stats and passes results to
@@ -115,7 +131,7 @@ class MEDIA_MOJO_EXPORT VideoDecodePerfHistory
   // of the GetPerfInfo() API. Comparison is recorded via UKM. Then saves the
   // |new_*| performance stats to the database.
   void OnGotStatsForSave(
-      const url::Origin& top_frame_origin,
+      ukm::SourceId source_id,
       bool is_top_frame,
       uint64_t player_id,
       const VideoDecodeStatsDB::VideoDescKey& video_key,
@@ -130,7 +146,7 @@ class MEDIA_MOJO_EXPORT VideoDecodePerfHistory
 
   // Report UKM metrics to grade the claims of the API by evaluating how well
   // |past_stats| predicts |new_stats|.
-  void ReportUkmMetrics(const url::Origin& top_frame_origin,
+  void ReportUkmMetrics(ukm::SourceId source_id,
                         bool is_top_frame,
                         uint64_t player_id,
                         const VideoDecodeStatsDB::VideoDescKey& video_key,
@@ -145,16 +161,15 @@ class MEDIA_MOJO_EXPORT VideoDecodePerfHistory
   // |clear_done_cb|.
   void OnClearedHistory(base::OnceClosure clear_done_cb);
 
-  // Factory for creating |db_|.
-  std::unique_ptr<VideoDecodeStatsDBFactory> db_factory_;
+  // Underlying database for managing/coalescing decode stats. Const to enforce
+  // assignment during construction and never cleared. We hand out references to
+  // the db via GetVideoDecodeStatsDB(), so clearing or reassigning breaks those
+  // dependencies.
+  const std::unique_ptr<VideoDecodeStatsDB> db_;
 
   // Tracks whether we've received OnDatabaseIniti() callback. All database
   // operations should be deferred until initialization is complete.
   InitStatus db_init_status_;
-
-  // Database helper for managing/coalescing decode stats.
-  // TODO(chcunningham): tear down |db_| if idle for extended period.
-  std::unique_ptr<VideoDecodeStatsDB> db_;
 
   // Vector of bound public API calls, to be run once DB initialization
   // completes.

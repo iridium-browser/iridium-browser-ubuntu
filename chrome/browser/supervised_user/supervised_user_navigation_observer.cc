@@ -25,8 +25,6 @@
 
 using content::NavigationEntry;
 
-DEFINE_WEB_CONTENTS_USER_DATA_KEY(SupervisedUserNavigationObserver);
-
 SupervisedUserNavigationObserver::~SupervisedUserNavigationObserver() {
   supervised_user_service_->RemoveObserver(this);
 }
@@ -134,7 +132,6 @@ void SupervisedUserNavigationObserver::OnRequestBlockedInternal(
       sessions::ContentSerializedNavigationBuilder::FromNavigationEntry(
           blocked_navigations_.size(), *entry));
   blocked_navigations_.push_back(std::move(serialized_entry));
-  supervised_user_service_->DidBlockNavigation(web_contents());
 
   // Show the interstitial.
   const bool initial_page_load = true;

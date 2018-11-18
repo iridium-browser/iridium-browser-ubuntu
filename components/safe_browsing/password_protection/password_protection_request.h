@@ -8,6 +8,7 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/task/cancelable_task_tracker.h"
+#include "components/safe_browsing/password_protection/metrics_util.h"
 #include "components/safe_browsing/password_protection/password_protection_service.h"
 #include "content/public/browser/browser_thread.h"
 
@@ -22,12 +23,6 @@ class SimpleURLLoader;
 namespace safe_browsing {
 
 class PasswordProtectionNavigationThrottle;
-
-// UMA metrics
-extern const char kPasswordOnFocusVerdictHistogram[];
-extern const char kAnyPasswordEntryVerdictHistogram[];
-extern const char kSyncPasswordEntryVerdictHistogram[];
-extern const char kProtectedPasswordEntryVerdictHistogram[];
 
 // A request for checking if an unfamiliar login form or a password reuse event
 // is safe. PasswordProtectionRequest objects are owned by
@@ -55,7 +50,7 @@ class PasswordProtectionRequest
                             const GURL& main_frame_url,
                             const GURL& password_form_action,
                             const GURL& password_form_frame_url,
-                            bool matches_sync_password,
+                            ReusedPasswordType reused_password_type,
                             const std::vector<std::string>& matching_origins,
                             LoginReputationClientRequest::TriggerType type,
                             bool password_field_exists,
@@ -89,7 +84,9 @@ class PasswordProtectionRequest
     return trigger_type_;
   }
 
-  bool matches_sync_password() { return matches_sync_password_; }
+  ReusedPasswordType reused_password_type() const {
+    return reused_password_type_;
+  }
 
   bool is_modal_warning_showing() const { return is_modal_warning_showing_; }
 
@@ -144,7 +141,7 @@ class PasswordProtectionRequest
   void StartTimeout();
 
   // |this| will be destroyed after calling this function.
-  void Finish(PasswordProtectionService::RequestOutcome outcome,
+  void Finish(RequestOutcome outcome,
               std::unique_ptr<LoginReputationClientResponse> response);
 
   // WebContents of the password protection event.
@@ -159,12 +156,12 @@ class PasswordProtectionRequest
   // Frame url of the detected password form.
   const GURL password_form_frame_url_;
 
-  // True if the password is the sync/Google password.
-  const bool matches_sync_password_;
+  // Type of the reused password.
+  const ReusedPasswordType reused_password_type_;
 
   // Domains from the Password Manager that match this password.
-  // Should be non-empty if |matches_sync_password_| == false. Otherwise,
-  // may or may not be empty.
+  // Should be non-empty if |reused_password_type_| == SAVED_PASSWORD.
+  // Otherwise, may or may not be empty.
   const std::vector<std::string> matching_domains_;
 
   // If this request is for unfamiliar login page or for a password reuse event.
@@ -199,6 +196,9 @@ class PasswordProtectionRequest
 
   // Whether there is a modal warning triggered by this request.
   bool is_modal_warning_showing_;
+
+  // If a request is sent, this is the token returned by the WebUI.
+  int web_ui_token_;
 
   base::WeakPtrFactory<PasswordProtectionRequest> weakptr_factory_;
   DISALLOW_COPY_AND_ASSIGN(PasswordProtectionRequest);

@@ -13,7 +13,8 @@
 #include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/sequenced_task_runner.h"
+#include "base/task/post_task.h"
 #include "base/test/scoped_task_environment.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/threading/thread.h"
@@ -32,27 +33,25 @@ namespace mojo {
 namespace test {
 namespace {
 
-typedef base::Callback<void(double)> CalcCallback;
-
 class MathCalculatorImpl : public math::Calculator {
  public:
   explicit MathCalculatorImpl(InterfaceRequest<math::Calculator> request)
       : total_(0.0), binding_(this, std::move(request)) {}
   ~MathCalculatorImpl() override {}
 
-  void Clear(const CalcCallback& callback) override {
+  void Clear(ClearCallback callback) override {
     total_ = 0.0;
-    callback.Run(total_);
+    std::move(callback).Run(total_);
   }
 
-  void Add(double value, const CalcCallback& callback) override {
+  void Add(double value, AddCallback callback) override {
     total_ += value;
-    callback.Run(total_);
+    std::move(callback).Run(total_);
   }
 
-  void Multiply(double value, const CalcCallback& callback) override {
+  void Multiply(double value, MultiplyCallback callback) override {
     total_ *= value;
-    callback.Run(total_);
+    std::move(callback).Run(total_);
   }
 
   Binding<math::Calculator>* binding() { return &binding_; }
@@ -156,13 +155,13 @@ class ReentrantServiceImpl : public sample::Service {
   void Frobinate(sample::FooPtr foo,
                  sample::Service::BazOptions baz,
                  sample::PortPtr port,
-                 const sample::Service::FrobinateCallback& callback) override {
+                 sample::Service::FrobinateCallback callback) override {
     max_call_depth_ = std::max(++call_depth_, max_call_depth_);
     if (call_depth_ == 1) {
       EXPECT_TRUE(binding_.WaitForIncomingMethodCall());
     }
     call_depth_--;
-    callback.Run(5);
+    std::move(callback).Run(5);
   }
 
   void GetPort(mojo::InterfaceRequest<sample::Port> port) override {}
@@ -184,8 +183,8 @@ class IntegerAccessorImpl : public sample::IntegerAccessor {
 
  private:
   // sample::IntegerAccessor implementation.
-  void GetInteger(const GetIntegerCallback& callback) override {
-    callback.Run(integer_, sample::Enum::VALUE);
+  void GetInteger(GetIntegerCallback callback) override {
+    std::move(callback).Run(integer_, sample::Enum::VALUE);
   }
   void SetInteger(int64_t data, sample::Enum type) override {
     integer_ = data;
@@ -499,16 +498,18 @@ class StrongMathCalculatorImpl : public math::Calculator {
   ~StrongMathCalculatorImpl() override { *destroyed_ = true; }
 
   // math::Calculator implementation.
-  void Clear(const CalcCallback& callback) override { callback.Run(total_); }
-
-  void Add(double value, const CalcCallback& callback) override {
-    total_ += value;
-    callback.Run(total_);
+  void Clear(ClearCallback callback) override {
+    std::move(callback).Run(total_);
   }
 
-  void Multiply(double value, const CalcCallback& callback) override {
+  void Add(double value, AddCallback callback) override {
+    total_ += value;
+    std::move(callback).Run(total_);
+  }
+
+  void Multiply(double value, MultiplyCallback callback) override {
     total_ *= value;
-    callback.Run(total_);
+    std::move(callback).Run(total_);
   }
 
  private:
@@ -569,16 +570,18 @@ class WeakMathCalculatorImpl : public math::Calculator {
   }
   ~WeakMathCalculatorImpl() override { *destroyed_ = true; }
 
-  void Clear(const CalcCallback& callback) override { callback.Run(total_); }
-
-  void Add(double value, const CalcCallback& callback) override {
-    total_ += value;
-    callback.Run(total_);
+  void Clear(ClearCallback callback) override {
+    std::move(callback).Run(total_);
   }
 
-  void Multiply(double value, const CalcCallback& callback) override {
+  void Add(double value, AddCallback callback) override {
+    total_ += value;
+    std::move(callback).Run(total_);
+  }
+
+  void Multiply(double value, MultiplyCallback callback) override {
     total_ *= value;
-    callback.Run(total_);
+    std::move(callback).Run(total_);
   }
 
  private:
@@ -710,7 +713,7 @@ class PingTestImpl : public sample::PingTest {
 
  private:
   // sample::PingTest:
-  void Ping(const PingCallback& callback) override { callback.Run(); }
+  void Ping(PingCallback callback) override { std::move(callback).Run(); }
 
   Binding<sample::PingTest> binding_;
 };
@@ -753,6 +756,27 @@ TEST_P(InterfacePtrTest, FlushForTesting) {
   EXPECT_EQ(10.0, calculator_ui.GetOutput());
 }
 
+TEST_P(InterfacePtrTest, FlushAsyncForTesting) {
+  math::CalculatorPtr calc;
+  MathCalculatorImpl calc_impl(MakeRequest(&calc));
+  calc.set_connection_error_handler(base::BindOnce(&Fail));
+
+  MathCalculatorUI calculator_ui(std::move(calc));
+
+  calculator_ui.Add(2.0, base::DoNothing());
+  base::RunLoop run_loop;
+  calculator_ui.GetInterfacePtr().FlushAsyncForTesting(run_loop.QuitClosure());
+  run_loop.Run();
+  EXPECT_EQ(2.0, calculator_ui.GetOutput());
+
+  calculator_ui.Multiply(5.0, base::DoNothing());
+  base::RunLoop run_loop2;
+  calculator_ui.GetInterfacePtr().FlushAsyncForTesting(run_loop2.QuitClosure());
+  run_loop2.Run();
+
+  EXPECT_EQ(10.0, calculator_ui.GetOutput());
+}
+
 void SetBool(bool* value) {
   *value = true;
 }
@@ -765,6 +789,21 @@ TEST_P(InterfacePtrTest, FlushForTestingWithClosedPeer) {
   calc.FlushForTesting();
   EXPECT_TRUE(called);
   calc.FlushForTesting();
+}
+
+TEST_P(InterfacePtrTest, FlushAsyncForTestingWithClosedPeer) {
+  math::CalculatorPtr calc;
+  MakeRequest(&calc);
+  bool called = false;
+  calc.set_connection_error_handler(base::BindOnce(&SetBool, &called));
+  base::RunLoop run_loop;
+  calc.FlushAsyncForTesting(run_loop.QuitClosure());
+  run_loop.Run();
+  EXPECT_TRUE(called);
+
+  base::RunLoop run_loop2;
+  calc.FlushAsyncForTesting(run_loop2.QuitClosure());
+  run_loop2.Run();
 }
 
 TEST_P(InterfacePtrTest, ConnectionErrorWithReason) {

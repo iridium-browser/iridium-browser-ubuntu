@@ -7,6 +7,10 @@
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
+#include "third_party/blink/renderer/core/intersection_observer/intersection_observation.h"
+#include "third_party/blink/renderer/core/timing/dom_window_performance.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 
 namespace blink {
@@ -31,7 +35,7 @@ void IntersectionObserverController::PostTaskToDeliverObservations() {
   // need to be unthrottled, but we should throttle all the other tasks
   // (e.g. ones coming from the web page).
   GetExecutionContext()
-      ->GetTaskRunner(TaskType::kUnthrottled)
+      ->GetTaskRunner(TaskType::kInternalIntersectionObserver)
       ->PostTask(
           FROM_HERE,
           WTF::Bind(
@@ -74,43 +78,32 @@ void IntersectionObserverController::DeliverIntersectionObservations() {
 }
 
 void IntersectionObserverController::ComputeTrackedIntersectionObservations() {
-  if (!GetExecutionContext())
-    return;
-  TRACE_EVENT0(
-      "blink",
-      "IntersectionObserverController::computeTrackedIntersectionObservations");
-  for (auto& observer : tracked_intersection_observers_)
-    observer->ComputeIntersectionObservations();
-}
-
-void IntersectionObserverController::AddTrackedObserver(
-    IntersectionObserver& observer) {
-  tracked_intersection_observers_.insert(&observer);
-}
-
-void IntersectionObserverController::RemoveTrackedObserversForRoot(
-    const Node& root) {
-  HeapVector<Member<IntersectionObserver>> to_remove;
-  for (auto& observer : tracked_intersection_observers_) {
-    if (observer->root() == &root)
-      to_remove.push_back(observer);
+  if (Document* document = To<Document>(GetExecutionContext())) {
+    TRACE_EVENT0("blink",
+                 "IntersectionObserverController::"
+                 "computeTrackedIntersectionObservations");
+    unsigned flags;
+    if (LocalFrameView* target_view = document->View())
+      flags = target_view->GetIntersectionObservationFlags();
+    for (auto& element : tracked_observation_targets_)
+      element->ComputeIntersectionObservations(flags);
   }
-  tracked_intersection_observers_.RemoveAll(to_remove);
+}
+
+void IntersectionObserverController::AddTrackedTarget(Element& target) {
+  tracked_observation_targets_.insert(&target);
+}
+
+void IntersectionObserverController::RemoveTrackedTarget(Element& target) {
+  target.ComputeIntersectionObservations(false);
+  tracked_observation_targets_.erase(&target);
 }
 
 void IntersectionObserverController::Trace(blink::Visitor* visitor) {
-  visitor->Trace(tracked_intersection_observers_);
+  visitor->Trace(tracked_observation_targets_);
   visitor->Trace(pending_intersection_observers_);
   visitor->Trace(intersection_observers_being_invoked_);
   PausableObject::Trace(visitor);
-}
-
-void IntersectionObserverController::TraceWrappers(
-    const ScriptWrappableVisitor* visitor) const {
-  for (const auto& observer : pending_intersection_observers_)
-    visitor->TraceWrappers(observer);
-  for (const auto& observer : intersection_observers_being_invoked_)
-    visitor->TraceWrappers(observer);
 }
 
 }  // namespace blink

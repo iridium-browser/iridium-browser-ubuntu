@@ -10,6 +10,7 @@
 #include "GrGpuCommandBuffer.h"
 #include "GrOpFlushState.h"
 #include "SkMakeUnique.h"
+#include "ccpr/GrCCConicShader.h"
 #include "ccpr/GrCCCubicShader.h"
 #include "ccpr/GrCCQuadraticShader.h"
 #include "glsl/GrGLSLVertexGeoBuilder.h"
@@ -42,6 +43,36 @@ class GrCCCoverageProcessor::TriangleShader : public GrCCCoverageProcessor::Shad
 
     GrGLSLVarying fCoverages;
 };
+
+void GrCCCoverageProcessor::Shader::CalcWind(const GrCCCoverageProcessor& proc,
+                                             GrGLSLVertexGeoBuilder* s, const char* pts,
+                                             const char* outputWind) {
+    if (3 == proc.numInputPoints()) {
+        s->codeAppendf("float2 a = %s[0] - %s[1], "
+                              "b = %s[0] - %s[2];", pts, pts, pts, pts);
+    } else {
+        // All inputs are convex, so it's sufficient to just average the middle two input points.
+        SkASSERT(4 == proc.numInputPoints());
+        s->codeAppendf("float2 p12 = (%s[1] + %s[2]) * .5;", pts, pts);
+        s->codeAppendf("float2 a = %s[0] - p12, "
+                              "b = %s[0] - %s[3];", pts, pts, pts);
+    }
+
+    s->codeAppend ("float area_x2 = determinant(float2x2(a, b));");
+    if (proc.isTriangles()) {
+        // We cull extremely thin triangles by zeroing wind. When a triangle gets too thin it's
+        // possible for FP round-off error to actually give us the wrong winding direction, causing
+        // rendering artifacts. The criteria we choose is "height <~ 1/1024". So we drop a triangle
+        // if the max effect it can have on any single pixel is <~ 1/1024, or 1/4 of a bit in 8888.
+        s->codeAppend ("float2 bbox_size = max(abs(a), abs(b));");
+        s->codeAppend ("float basewidth = max(bbox_size.x + bbox_size.y, 1);");
+        s->codeAppendf("%s = (abs(area_x2 * 1024) > basewidth) ? sign(area_x2) : 0;", outputWind);
+    } else {
+        // We already converted nearly-flat curves to lines on the CPU, so no need to worry about
+        // thin curve hulls at this point.
+        s->codeAppendf("%s = sign(area_x2);", outputWind);
+    }
+}
 
 void GrCCCoverageProcessor::Shader::EmitEdgeDistanceEquation(GrGLSLVertexGeoBuilder* s,
                                                              const char* leftPt,
@@ -113,14 +144,20 @@ void GrCCCoverageProcessor::Shader::CalcCornerAttenuation(GrGLSLVertexGeoBuilder
                                                           const char* outputAttenuation) {
     // obtuseness = cos(corner_angle)  if corner_angle > 90 degrees
     //                              0  if corner_angle <= 90 degrees
+    //
+    // NOTE: leftDir and rightDir are normalized and point in the same direction the path was
+    // defined with, i.e., leftDir points into the corner and rightDir points away from the corner.
     s->codeAppendf("half obtuseness = max(dot(%s, %s), 0);", leftDir, rightDir);
 
-    // axis_alignedness = 1  when the leftDir/rightDir bisector is aligned with the x- or y-axis
-    //                    0  when the bisector falls on a 45 degree angle
-    //                    (i.e. 1 - tan(angle_to_nearest_axis))
-    s->codeAppendf("half2 abs_bisect = abs(%s - %s);", leftDir, rightDir);
-    s->codeAppend ("half axis_alignedness = 1 - min(abs_bisect.y, abs_bisect.x) / "
-                                               "max(abs_bisect.x, abs_bisect.y);");
+    // axis_alignedness = 1 - tan(angle_to_nearest_axis_from_corner_bisector)
+    //                    (i.e.,  1  when the corner bisector is aligned with the x- or y-axis
+    //                            0  when the corner bisector falls on a 45 degree angle
+    //                         0..1  when the corner bisector falls somewhere in between
+    s->codeAppendf("half2 abs_bisect_maybe_transpose = abs((0 == obtuseness) ? %s - %s : %s + %s);",
+                   leftDir, rightDir, leftDir, rightDir);
+    s->codeAppend ("half axis_alignedness = "
+                           "1 - min(abs_bisect_maybe_transpose.y, abs_bisect_maybe_transpose.x) / "
+                               "max(abs_bisect_maybe_transpose.x, abs_bisect_maybe_transpose.y);");
 
     // ninety_degreesness = sin^2(corner_angle)
     // sin^2 just because... it's always positive and the results looked better than plain sine... ?
@@ -174,6 +211,9 @@ GrGLSLPrimitiveProcessor* GrCCCoverageProcessor::createGLSLInstance(const GrShad
         case PrimitiveType::kCubics:
             shader = skstd::make_unique<GrCCCubicShader>();
             break;
+        case PrimitiveType::kConics:
+            shader = skstd::make_unique<GrCCConicShader>();
+            break;
     }
     return Impl::kGeometryShader == fImpl ? this->createGSImpl(std::move(shader))
                                           : this->createVSImpl(std::move(shader));
@@ -190,16 +230,18 @@ void GrCCCoverageProcessor::Shader::emitFragmentCode(const GrCCCoverageProcessor
 }
 
 void GrCCCoverageProcessor::draw(GrOpFlushState* flushState, const GrPipeline& pipeline,
-                                 const GrMesh meshes[],
-                                 const GrPipeline::DynamicState dynamicStates[], int meshCount,
+                                 const SkIRect scissorRects[], const GrMesh meshes[], int meshCount,
                                  const SkRect& drawBounds) const {
+    GrPipeline::DynamicStateArrays dynamicStateArrays;
+    dynamicStateArrays.fScissorRects = scissorRects;
     GrGpuRTCommandBuffer* cmdBuff = flushState->rtCommandBuffer();
-    cmdBuff->draw(pipeline, *this, meshes, dynamicStates, meshCount, drawBounds);
+    cmdBuff->draw(*this, pipeline, nullptr, &dynamicStateArrays, meshes, meshCount, drawBounds);
 
     // Geometry shader backend draws primitives in two subpasses.
     if (Impl::kGeometryShader == fImpl) {
         SkASSERT(GSSubpass::kHulls == fGSSubpass);
         GrCCCoverageProcessor cornerProc(*this, GSSubpass::kCorners);
-        cmdBuff->draw(pipeline, cornerProc, meshes, dynamicStates, meshCount, drawBounds);
+        cmdBuff->draw(cornerProc, pipeline, nullptr, &dynamicStateArrays, meshes, meshCount,
+                      drawBounds);
     }
 }

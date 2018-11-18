@@ -26,7 +26,7 @@
 #include "third_party/blink/renderer/modules/accessibility/ax_menu_list_option.h"
 
 #include "SkMatrix44.h"
-#include "third_party/blink/renderer/core/dom/accessible_node.h"
+#include "third_party/blink/renderer/core/aom/accessible_node.h"
 #include "third_party/blink/renderer/core/html/forms/html_select_element.h"
 #include "third_party/blink/renderer/modules/accessibility/ax_menu_list.h"
 #include "third_party/blink/renderer/modules/accessibility/ax_menu_list_popup.h"
@@ -55,16 +55,16 @@ LocalFrameView* AXMenuListOption::DocumentFrameView() const {
   return element_->GetDocument().View();
 }
 
-AccessibilityRole AXMenuListOption::RoleValue() const {
+ax::mojom::Role AXMenuListOption::RoleValue() const {
   const AtomicString& aria_role =
       GetAOMPropertyOrARIAAttribute(AOMStringProperty::kRole);
   if (aria_role.IsEmpty())
-    return kMenuListOptionRole;
+    return ax::mojom::Role::kMenuListOption;
 
-  AccessibilityRole role = AriaRoleToWebCoreRole(aria_role);
-  if (role)
+  ax::mojom::Role role = AriaRoleToWebCoreRole(aria_role);
+  if (role != ax::mojom::Role::kUnknown)
     return role;
-  return kMenuListOptionRole;
+  return ax::mojom::Role::kMenuListOption;
 }
 
 Element* AXMenuListOption::ActionElement() const {
@@ -111,6 +111,21 @@ bool AXMenuListOption::IsVisible() const {
 bool AXMenuListOption::IsOffScreen() const {
   // Invisible list options are considered to be offscreen.
   return !IsVisible();
+}
+
+int AXMenuListOption::PosInSet() const {
+  // Value should be 1-based. 0 means not supported.
+  return SetSize() ? element_->index() + 1 : 0;
+}
+
+int AXMenuListOption::SetSize() const {
+  // Return 0 if not supported.
+  if (!element_)
+    return 0;
+  HTMLSelectElement* select = element_->OwnerSelectElement();
+  if (!select)
+    return 0;
+  return select->length();
 }
 
 AccessibilitySelectedState AXMenuListOption::IsSelected() const {
@@ -163,7 +178,7 @@ void AXMenuListOption::GetRelativeBounds(AXObject** out_container,
 String AXMenuListOption::TextAlternative(bool recursive,
                                          bool in_aria_labelled_by_traversal,
                                          AXObjectSet& visited,
-                                         AXNameFrom& name_from,
+                                         ax::mojom::NameFrom& name_from,
                                          AXRelatedObjectVector* related_objects,
                                          NameSources* name_sources) const {
   // If nameSources is non-null, relatedObjects is used in filling it in, so it
@@ -181,7 +196,7 @@ String AXMenuListOption::TextAlternative(bool recursive,
   if (found_text_alternative && !name_sources)
     return text_alternative;
 
-  name_from = kAXNameFromContents;
+  name_from = ax::mojom::NameFrom::kContents;
   text_alternative = element_->DisplayLabel();
   if (name_sources) {
     name_sources->push_back(NameSource(found_text_alternative));

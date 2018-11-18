@@ -2,32 +2,25 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/core/paint/compositing/compositing_inputs_updater.h"
+#include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
+#include "third_party/blink/renderer/core/paint/paint_layer_scrollable_area.h"
 #include "third_party/blink/renderer/core/testing/core_unit_test_helper.h"
-#include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
 
 namespace blink {
 
-typedef bool TestParamRootLayerScrolling;
-class CompositingInputsUpdaterTest
-    : public testing::WithParamInterface<TestParamRootLayerScrolling>,
-      private ScopedRootLayerScrollingForTest,
-      public RenderingTest {
+class CompositingInputsUpdaterTest : public RenderingTest {
  public:
   CompositingInputsUpdaterTest()
-      : ScopedRootLayerScrollingForTest(GetParam()),
-        RenderingTest(SingleChildLocalFrameClient::Create()) {}
+      : RenderingTest(SingleChildLocalFrameClient::Create()) {}
 };
-
-INSTANTIATE_TEST_CASE_P(All, CompositingInputsUpdaterTest, testing::Bool());
 
 // Tests that transitioning a sticky away from an ancestor overflow layer that
 // does not have a scrollable area does not crash.
 //
 // See http://crbug.com/467721#c14
-TEST_P(CompositingInputsUpdaterTest,
+TEST_F(CompositingInputsUpdaterTest,
        ChangingAncestorOverflowLayerAwayFromNonScrollableDoesNotCrash) {
   // The setup for this test is quite complex. We need UpdateRecursive to
   // transition directly from a non-scrollable ancestor overflow layer to a
@@ -95,7 +88,7 @@ TEST_P(CompositingInputsUpdaterTest,
   EXPECT_EQ(sticky->Layer()->AncestorOverflowLayer(), inner_scroller->Layer());
 }
 
-TEST_P(CompositingInputsUpdaterTest, UnclippedAndClippedRectsUnderScroll) {
+TEST_F(CompositingInputsUpdaterTest, UnclippedAndClippedRectsUnderScroll) {
   SetBodyInnerHTML(R"HTML(
     <div id=clip style="overflow: hidden; position: relative">
       <div id=target style="transform: translateZ(0); width: 200px; height: 200px; background: lightgray"></div>
@@ -106,28 +99,48 @@ TEST_P(CompositingInputsUpdaterTest, UnclippedAndClippedRectsUnderScroll) {
   LayoutBoxModelObject* target =
       ToLayoutBoxModelObject(GetLayoutObjectByElementId("target"));
 
-  GetDocument().View()->LayoutViewportScrollableArea()->ScrollBy(
-      ScrollOffset(0, 25), kUserScroll);
+  GetDocument().View()->LayoutViewport()->ScrollBy(ScrollOffset(0, 25),
+                                                   kUserScroll);
   GetDocument()
       .View()
       ->GetLayoutView()
       ->Layer()
       ->SetNeedsCompositingInputsUpdate();
   GetDocument().View()->UpdateAllLifecyclePhases();
-  if (RuntimeEnabledFeatures::RootLayerScrollingEnabled()) {
-    EXPECT_EQ(IntRect(8, -17, 200, 200),
-              target->Layer()->ClippedAbsoluteBoundingBox());
-    EXPECT_EQ(IntRect(8, -17, 200, 200),
-              target->Layer()->UnclippedAbsoluteBoundingBox());
-  } else {
-    EXPECT_EQ(IntRect(8, 8, 200, 200),
-              target->Layer()->ClippedAbsoluteBoundingBox());
-    EXPECT_EQ(IntRect(8, 8, 200, 200),
-              target->Layer()->UnclippedAbsoluteBoundingBox());
-  }
+  EXPECT_EQ(IntRect(8, 8, 200, 200),
+            target->Layer()->ClippedAbsoluteBoundingBox());
+  EXPECT_EQ(IntRect(8, 8, 200, 200),
+            target->Layer()->UnclippedAbsoluteBoundingBox());
 }
 
-TEST_P(CompositingInputsUpdaterTest, ClipPathAncestor) {
+TEST_F(CompositingInputsUpdaterTest,
+       UnclippedAndClippedRectsUnderScrollFixedPos) {
+  SetBodyInnerHTML(R"HTML(
+    <div id=clip style="position: fixed; overflow: hidden;">
+      <div id=target style=" transform: translateZ(0); width: 200px; height: 200px; background: lightgray"></div>
+     </div>
+     <div style="position: relative; width: 20px; height: 3000px"></div>
+  )HTML");
+
+  LayoutBoxModelObject* target =
+      ToLayoutBoxModelObject(GetLayoutObjectByElementId("target"));
+
+  GetDocument().View()->LayoutViewport()->ScrollBy(ScrollOffset(0, 25),
+                                                   kUserScroll);
+  GetDocument()
+      .View()
+      ->GetLayoutView()
+      ->Layer()
+      ->SetNeedsCompositingInputsUpdate();
+
+  GetDocument().View()->UpdateAllLifecyclePhases();
+  EXPECT_EQ(IntRect(8, 8, 200, 200),
+            target->Layer()->ClippedAbsoluteBoundingBox());
+  EXPECT_EQ(IntRect(8, 8, 200, 200),
+            target->Layer()->UnclippedAbsoluteBoundingBox());
+}
+
+TEST_F(CompositingInputsUpdaterTest, ClipPathAncestor) {
   SetBodyInnerHTML(R"HTML(
     <div id="parent" style="clip-path: circle(100%)">
       <div id="child" style="width: 20px; height: 20px; will-change: transform">
@@ -148,7 +161,7 @@ TEST_P(CompositingInputsUpdaterTest, ClipPathAncestor) {
   EXPECT_EQ(parent, grandchild->ClipPathAncestor());
 }
 
-TEST_P(CompositingInputsUpdaterTest, MaskAncestor) {
+TEST_F(CompositingInputsUpdaterTest, MaskAncestor) {
   SetBodyInnerHTML(R"HTML(
     <div id="parent" style="-webkit-mask-image: linear-gradient(black, white);">
       <div id="child" style="width: 20px; height: 20px; will-change: transform">

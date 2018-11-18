@@ -54,7 +54,7 @@ NetworkTestRunner.networkWaterfallColumn = function() {
 };
 
 NetworkTestRunner.networkRequests = function() {
-  return Array.from(BrowserSDK.networkLog.requests());
+  return Array.from(SDK.networkLog.requests());
 };
 
 NetworkTestRunner.dumpNetworkRequests = function() {
@@ -68,6 +68,33 @@ NetworkTestRunner.dumpNetworkRequests = function() {
 
   for (i = 0; i < requests.length; i++)
     TestRunner.addResult(requests[i].url());
+};
+
+NetworkTestRunner.dumpNetworkRequestsWithSignedExchangeInfo = function() {
+  for (const request of SDK.networkLog.requests()) {
+    TestRunner.addResult(`* ${request.url()}`);
+    TestRunner.addResult(`  failed: ${!!request.failed}`);
+    TestRunner.addResult(`  statusCode: ${request.statusCode}`);
+    TestRunner.addResult(`  resourceType: ${request.resourceType().name()}`);
+    if (request.signedExchangeInfo()) {
+      TestRunner.addResult('  SignedExchangeInfo');
+      if (request.signedExchangeInfo().header) {
+        const header = request.signedExchangeInfo().header;
+        TestRunner.addResult(`    Request URL: ${header.requestUrl}`);
+        for (const signature of header.signatures)
+          TestRunner.addResult(`    Certificate URL: ${signature.certUrl}`);
+      }
+      if (request.signedExchangeInfo().securityDetails) {
+        const securityDetails = request.signedExchangeInfo().securityDetails;
+        TestRunner.addResult(`    Certificate Subject: ${securityDetails.subjectName}`);
+        TestRunner.addResult(`    Certificate Issuer: ${securityDetails.issuer}`);
+      }
+      if (request.signedExchangeInfo().errors) {
+        for (const errorMessage of request.signedExchangeInfo().errors)
+          TestRunner.addResult(`    Error: ${JSON.stringify(errorMessage)}`);
+      }
+    }
+  }
 };
 
 NetworkTestRunner.findRequestsByURLPattern = function(urlPattern) {
@@ -143,7 +170,9 @@ NetworkTestRunner.HARPropertyFormatters = {
   version: 'formatAsTypeName',
   wait: 'formatAsTypeName',
   _transferSize: 'formatAsTypeName',
-  _error: 'skip'
+  _error: 'skip',
+  _initiator: 'formatAsTypeName',
+  _priority: 'formatAsTypeName'
 };
 
 NetworkTestRunner.HARPropertyFormattersWithSize = JSON.parse(JSON.stringify(NetworkTestRunner.HARPropertyFormatters));

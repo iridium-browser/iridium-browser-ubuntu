@@ -17,27 +17,11 @@
 #include "p2p/base/port.h"
 #include "rtc_base/bind.h"
 #include "rtc_base/checks.h"
-#include "rtc_base/ptr_util.h"
 #include "rtc_base/thread.h"
 
 using webrtc::SdpType;
 
 namespace {
-
-enum {
-  MSG_ICECONNECTIONSTATE,
-  MSG_ICEGATHERINGSTATE,
-  MSG_ICECANDIDATESGATHERED,
-};
-
-struct CandidatesData : public rtc::MessageData {
-  CandidatesData(const std::string& transport_name,
-                 const cricket::Candidates& candidates)
-      : transport_name(transport_name), candidates(candidates) {}
-
-  std::string transport_name;
-  cricket::Candidates candidates;
-};
 
 webrtc::RTCError VerifyCandidate(const cricket::Candidate& cand) {
   // No address zero.
@@ -90,11 +74,16 @@ JsepTransportController::JsepTransportController(
     rtc::Thread* signaling_thread,
     rtc::Thread* network_thread,
     cricket::PortAllocator* port_allocator,
+    AsyncResolverFactory* async_resolver_factory,
     Config config)
     : signaling_thread_(signaling_thread),
       network_thread_(network_thread),
       port_allocator_(port_allocator),
-      config_(config) {}
+      async_resolver_factory_(async_resolver_factory),
+      config_(config) {
+  // The |transport_observer| is assumed to be non-null.
+  RTC_DCHECK(config_.transport_observer);
+}
 
 JsepTransportController::~JsepTransportController() {
   // Channel destructors may try to send packets, so this needs to happen on
@@ -143,6 +132,15 @@ RtpTransportInternal* JsepTransportController::GetRtpTransport(
   return jsep_transport->rtp_transport();
 }
 
+MediaTransportInterface* JsepTransportController::GetMediaTransport(
+    const std::string& mid) const {
+  auto jsep_transport = GetJsepTransportForMid(mid);
+  if (!jsep_transport) {
+    return nullptr;
+  }
+  return jsep_transport->media_transport();
+}
+
 cricket::DtlsTransportInternal* JsepTransportController::GetDtlsTransport(
     const std::string& mid) const {
   auto jsep_transport = GetJsepTransportForMid(mid);
@@ -181,7 +179,7 @@ void JsepTransportController::SetNeedsIceRestartFlag() {
 
 bool JsepTransportController::NeedsIceRestart(
     const std::string& transport_name) const {
-  const cricket::JsepTransport2* transport =
+  const cricket::JsepTransport* transport =
       GetJsepTransportByName(transport_name);
   if (!transport) {
     return false;
@@ -189,16 +187,16 @@ bool JsepTransportController::NeedsIceRestart(
   return transport->needs_ice_restart();
 }
 
-rtc::Optional<rtc::SSLRole> JsepTransportController::GetDtlsRole(
+absl::optional<rtc::SSLRole> JsepTransportController::GetDtlsRole(
     const std::string& mid) const {
   if (!network_thread_->IsCurrent()) {
-    return network_thread_->Invoke<rtc::Optional<rtc::SSLRole>>(
+    return network_thread_->Invoke<absl::optional<rtc::SSLRole>>(
         RTC_FROM_HERE, [&] { return GetDtlsRole(mid); });
   }
 
-  const cricket::JsepTransport2* t = GetJsepTransportForMid(mid);
+  const cricket::JsepTransport* t = GetJsepTransportForMid(mid);
   if (!t) {
-    return rtc::Optional<rtc::SSLRole>();
+    return absl::optional<rtc::SSLRole>();
   }
   return t->GetDtlsRole();
 }
@@ -237,7 +235,7 @@ JsepTransportController::GetLocalCertificate(
         RTC_FROM_HERE, [&] { return GetLocalCertificate(transport_name); });
   }
 
-  const cricket::JsepTransport2* t = GetJsepTransportByName(transport_name);
+  const cricket::JsepTransport* t = GetJsepTransportByName(transport_name);
   if (!t) {
     return nullptr;
   }
@@ -329,7 +327,7 @@ RTCError JsepTransportController::RemoveRemoteCandidates(
   for (const auto& kv : candidates_by_transport_name) {
     const std::string& transport_name = kv.first;
     const cricket::Candidates& candidates = kv.second;
-    cricket::JsepTransport2* jsep_transport =
+    cricket::JsepTransport* jsep_transport =
         GetJsepTransportByName(transport_name);
     if (!jsep_transport) {
       RTC_LOG(LS_WARNING)
@@ -355,24 +353,28 @@ bool JsepTransportController::GetStats(const std::string& transport_name,
         RTC_FROM_HERE, [=] { return GetStats(transport_name, stats); });
   }
 
-  cricket::JsepTransport2* transport = GetJsepTransportByName(transport_name);
+  cricket::JsepTransport* transport = GetJsepTransportByName(transport_name);
   if (!transport) {
     return false;
   }
   return transport->GetStats(stats);
 }
 
-void JsepTransportController::SetMetricsObserver(
-    webrtc::MetricsObserverInterface* metrics_observer) {
+void JsepTransportController::SetActiveResetSrtpParams(
+    bool active_reset_srtp_params) {
   if (!network_thread_->IsCurrent()) {
-    network_thread_->Invoke<void>(
-        RTC_FROM_HERE, [=] { SetMetricsObserver(metrics_observer); });
+    network_thread_->Invoke<void>(RTC_FROM_HERE, [=] {
+      SetActiveResetSrtpParams(active_reset_srtp_params);
+    });
     return;
   }
 
-  metrics_observer_ = metrics_observer;
-  for (auto& dtls : GetDtlsTransports()) {
-    dtls->ice_transport()->SetMetricsObserver(metrics_observer);
+  RTC_LOG(INFO)
+      << "Updating the active_reset_srtp_params for JsepTransportController: "
+      << active_reset_srtp_params;
+  config_.active_reset_srtp_params = active_reset_srtp_params;
+  for (auto& kv : jsep_transports_by_name_) {
+    kv.second->SetActiveResetSrtpParams(active_reset_srtp_params);
   }
 }
 
@@ -390,15 +392,15 @@ JsepTransportController::CreateDtlsTransport(const std::string& transport_name,
     dtls = config_.external_transport_factory->CreateDtlsTransport(
         std::move(ice), config_.crypto_options);
   } else {
-    auto ice = rtc::MakeUnique<cricket::P2PTransportChannel>(
-        transport_name, component, port_allocator_);
-    dtls = rtc::MakeUnique<cricket::DtlsTransport>(std::move(ice),
-                                                   config_.crypto_options);
+    auto ice = absl::make_unique<cricket::P2PTransportChannel>(
+        transport_name, component, port_allocator_, async_resolver_factory_,
+        config_.event_log);
+    dtls = absl::make_unique<cricket::DtlsTransport>(std::move(ice),
+                                                     config_.crypto_options);
   }
 
   RTC_DCHECK(dtls);
   dtls->SetSslMaxProtocolVersion(config_.ssl_max_version);
-  dtls->ice_transport()->SetMetricsObserver(metrics_observer_);
   dtls->ice_transport()->SetIceRole(ice_role_);
   dtls->ice_transport()->SetIceTiebreaker(ice_tiebreaker_);
   dtls->ice_transport()->SetIceConfig(ice_config_);
@@ -434,7 +436,7 @@ JsepTransportController::CreateUnencryptedRtpTransport(
     rtc::PacketTransportInternal* rtcp_packet_transport) {
   RTC_DCHECK(network_thread_->IsCurrent());
   auto unencrypted_rtp_transport =
-      rtc::MakeUnique<RtpTransport>(rtcp_packet_transport == nullptr);
+      absl::make_unique<RtpTransport>(rtcp_packet_transport == nullptr);
   unencrypted_rtp_transport->SetRtpPacketTransport(rtp_packet_transport);
   if (rtcp_packet_transport) {
     unencrypted_rtp_transport->SetRtcpPacketTransport(rtcp_packet_transport);
@@ -449,7 +451,7 @@ JsepTransportController::CreateSdesTransport(
     cricket::DtlsTransportInternal* rtcp_dtls_transport) {
   RTC_DCHECK(network_thread_->IsCurrent());
   auto srtp_transport =
-      rtc::MakeUnique<webrtc::SrtpTransport>(rtcp_dtls_transport == nullptr);
+      absl::make_unique<webrtc::SrtpTransport>(rtcp_dtls_transport == nullptr);
   RTC_DCHECK(rtp_dtls_transport);
   srtp_transport->SetRtpPacketTransport(rtp_dtls_transport);
   if (rtcp_dtls_transport) {
@@ -467,17 +469,16 @@ JsepTransportController::CreateDtlsSrtpTransport(
     cricket::DtlsTransportInternal* rtp_dtls_transport,
     cricket::DtlsTransportInternal* rtcp_dtls_transport) {
   RTC_DCHECK(network_thread_->IsCurrent());
-  auto srtp_transport =
-      rtc::MakeUnique<webrtc::SrtpTransport>(rtcp_dtls_transport == nullptr);
+  auto dtls_srtp_transport = absl::make_unique<webrtc::DtlsSrtpTransport>(
+      rtcp_dtls_transport == nullptr);
   if (config_.enable_external_auth) {
-    srtp_transport->EnableExternalAuth();
+    dtls_srtp_transport->EnableExternalAuth();
   }
-
-  auto dtls_srtp_transport =
-      rtc::MakeUnique<webrtc::DtlsSrtpTransport>(std::move(srtp_transport));
 
   dtls_srtp_transport->SetDtlsTransports(rtp_dtls_transport,
                                          rtcp_dtls_transport);
+  dtls_srtp_transport->SetActiveResetSrtpParams(
+      config_.active_reset_srtp_params);
   return dtls_srtp_transport;
 }
 
@@ -497,37 +498,6 @@ JsepTransportController::GetDtlsTransports() {
     }
   }
   return dtls_transports;
-}
-
-void JsepTransportController::OnMessage(rtc::Message* pmsg) {
-  RTC_DCHECK(signaling_thread_->IsCurrent());
-
-  switch (pmsg->message_id) {
-    case MSG_ICECONNECTIONSTATE: {
-      rtc::TypedMessageData<cricket::IceConnectionState>* data =
-          static_cast<rtc::TypedMessageData<cricket::IceConnectionState>*>(
-              pmsg->pdata);
-      SignalIceConnectionState(data->data());
-      delete data;
-      break;
-    }
-    case MSG_ICEGATHERINGSTATE: {
-      rtc::TypedMessageData<cricket::IceGatheringState>* data =
-          static_cast<rtc::TypedMessageData<cricket::IceGatheringState>*>(
-              pmsg->pdata);
-      SignalIceGatheringState(data->data());
-      delete data;
-      break;
-    }
-    case MSG_ICECANDIDATESGATHERED: {
-      CandidatesData* data = static_cast<CandidatesData*>(pmsg->pdata);
-      SignalIceCandidatesGathered(data->transport_name, data->candidates);
-      delete data;
-      break;
-    }
-    default:
-      RTC_NOTREACHED();
-  }
 }
 
 RTCError JsepTransportController::ApplyDescription_n(
@@ -561,7 +531,7 @@ RTCError JsepTransportController::ApplyDescription_n(
         (IsBundled(content_info.name) && content_info.name != *bundled_mid())) {
       continue;
     }
-    error = MaybeCreateJsepTransport(content_info);
+    error = MaybeCreateJsepTransport(local, content_info);
     if (!error.ok()) {
       return error;
     }
@@ -579,7 +549,10 @@ RTCError JsepTransportController::ApplyDescription_n(
     }
 
     if (IsBundled(content_info.name) && content_info.name != *bundled_mid()) {
-      HandleBundledContent(content_info);
+      if (!HandleBundledContent(content_info)) {
+        return RTCError(RTCErrorType::INVALID_PARAMETER,
+                        "Failed to process the bundled m= section.");
+      }
       continue;
     }
 
@@ -598,7 +571,7 @@ RTCError JsepTransportController::ApplyDescription_n(
     int rtp_abs_sendtime_extn_id =
         GetRtpAbsSendTimeHeaderExtensionId(content_info);
 
-    cricket::JsepTransport2* transport =
+    cricket::JsepTransport* transport =
         GetJsepTransportForMid(content_info.name);
     RTC_DCHECK(transport);
 
@@ -741,10 +714,8 @@ void JsepTransportController::HandleRejectedContent(
     const cricket::SessionDescription* description) {
   // If the content is rejected, let the
   // BaseChannel/SctpTransport change the RtpTransport/DtlsTransport first,
-  // then destroy the cricket::JsepTransport2.
+  // then destroy the cricket::JsepTransport.
   RemoveTransportForMid(content_info.name);
-  // If the answerer rejects the first content, which other contents are bundled
-  // on, all the other contents in the bundle group will be rejected.
   if (content_info.name == bundled_mid()) {
     for (auto content_name : bundle_group_->content_names()) {
       RemoveTransportForMid(content_name);
@@ -761,33 +732,40 @@ void JsepTransportController::HandleRejectedContent(
   MaybeDestroyJsepTransport(content_info.name);
 }
 
-void JsepTransportController::HandleBundledContent(
+bool JsepTransportController::HandleBundledContent(
     const cricket::ContentInfo& content_info) {
   auto jsep_transport = GetJsepTransportByName(*bundled_mid());
   RTC_DCHECK(jsep_transport);
   // If the content is bundled, let the
   // BaseChannel/SctpTransport change the RtpTransport/DtlsTransport first,
-  // then destroy the cricket::JsepTransport2.
-  SetTransportForMid(content_info.name, jsep_transport);
-  MaybeDestroyJsepTransport(content_info.name);
+  // then destroy the cricket::JsepTransport.
+  if (SetTransportForMid(content_info.name, jsep_transport)) {
+    MaybeDestroyJsepTransport(content_info.name);
+    return true;
+  }
+  return false;
 }
 
-void JsepTransportController::SetTransportForMid(
+bool JsepTransportController::SetTransportForMid(
     const std::string& mid,
-    cricket::JsepTransport2* jsep_transport) {
+    cricket::JsepTransport* jsep_transport) {
   RTC_DCHECK(jsep_transport);
   if (mid_to_transport_[mid] == jsep_transport) {
-    return;
+    return true;
   }
 
   mid_to_transport_[mid] = jsep_transport;
-  SignalRtpTransportChanged(mid, jsep_transport->rtp_transport());
-  SignalDtlsTransportChanged(mid, jsep_transport->rtp_dtls_transport());
+  return config_.transport_observer->OnTransportChanged(
+      mid, jsep_transport->rtp_transport(),
+      jsep_transport->rtp_dtls_transport());
 }
 
 void JsepTransportController::RemoveTransportForMid(const std::string& mid) {
-  SignalRtpTransportChanged(mid, nullptr);
-  SignalDtlsTransportChanged(mid, nullptr);
+  bool ret =
+      config_.transport_observer->OnTransportChanged(mid, nullptr, nullptr);
+  // Calling OnTransportChanged with nullptr should always succeed, since it is
+  // only expected to fail when adding media to a transport (not removing).
+  RTC_DCHECK(ret);
   mid_to_transport_.erase(mid);
 }
 
@@ -894,35 +872,35 @@ int JsepTransportController::GetRtpAbsSendTimeHeaderExtensionId(
   return send_time_extension ? send_time_extension->id : -1;
 }
 
-const cricket::JsepTransport2* JsepTransportController::GetJsepTransportForMid(
+const cricket::JsepTransport* JsepTransportController::GetJsepTransportForMid(
     const std::string& mid) const {
   auto it = mid_to_transport_.find(mid);
   return it == mid_to_transport_.end() ? nullptr : it->second;
 }
 
-cricket::JsepTransport2* JsepTransportController::GetJsepTransportForMid(
+cricket::JsepTransport* JsepTransportController::GetJsepTransportForMid(
     const std::string& mid) {
   auto it = mid_to_transport_.find(mid);
   return it == mid_to_transport_.end() ? nullptr : it->second;
 }
 
-const cricket::JsepTransport2* JsepTransportController::GetJsepTransportByName(
+const cricket::JsepTransport* JsepTransportController::GetJsepTransportByName(
     const std::string& transport_name) const {
   auto it = jsep_transports_by_name_.find(transport_name);
   return (it == jsep_transports_by_name_.end()) ? nullptr : it->second.get();
 }
 
-cricket::JsepTransport2* JsepTransportController::GetJsepTransportByName(
+cricket::JsepTransport* JsepTransportController::GetJsepTransportByName(
     const std::string& transport_name) {
   auto it = jsep_transports_by_name_.find(transport_name);
   return (it == jsep_transports_by_name_.end()) ? nullptr : it->second.get();
 }
 
 RTCError JsepTransportController::MaybeCreateJsepTransport(
+    bool local,
     const cricket::ContentInfo& content_info) {
   RTC_DCHECK(network_thread_->IsCurrent());
-  cricket::JsepTransport2* transport =
-      GetJsepTransportByName(content_info.name);
+  cricket::JsepTransport* transport = GetJsepTransportByName(content_info.name);
   if (transport) {
     return RTCError::OK();
   }
@@ -937,7 +915,13 @@ RTCError JsepTransportController::MaybeCreateJsepTransport(
 
   std::unique_ptr<cricket::DtlsTransportInternal> rtp_dtls_transport =
       CreateDtlsTransport(content_info.name, /*rtcp =*/false);
+
   std::unique_ptr<cricket::DtlsTransportInternal> rtcp_dtls_transport;
+  std::unique_ptr<RtpTransport> unencrypted_rtp_transport;
+  std::unique_ptr<SrtpTransport> sdes_transport;
+  std::unique_ptr<DtlsSrtpTransport> dtls_srtp_transport;
+  std::unique_ptr<MediaTransportInterface> media_transport;
+
   if (config_.rtcp_mux_policy !=
           PeerConnectionInterface::kRtcpMuxPolicyRequire &&
       content_info.type == cricket::MediaProtocolType::kRtp) {
@@ -945,9 +929,20 @@ RTCError JsepTransportController::MaybeCreateJsepTransport(
         CreateDtlsTransport(content_info.name, /*rtcp =*/true);
   }
 
-  std::unique_ptr<RtpTransport> unencrypted_rtp_transport;
-  std::unique_ptr<SrtpTransport> sdes_transport;
-  std::unique_ptr<DtlsSrtpTransport> dtls_srtp_transport;
+  if (config_.media_transport_factory != nullptr) {
+    auto media_transport_result =
+        config_.media_transport_factory->CreateMediaTransport(
+            rtp_dtls_transport->ice_transport(), network_thread_,
+            /*is_caller=*/local);
+
+    // TODO(sukhanov): Proper error handling.
+    RTC_CHECK(media_transport_result.ok());
+
+    media_transport = std::move(media_transport_result.value());
+  }
+
+  // TODO(sukhanov): Do not create RTP/RTCP transports if media transport is
+  // used.
   if (config_.disable_encryption) {
     unencrypted_rtp_transport = CreateUnencryptedRtpTransport(
         content_info.name, rtp_dtls_transport.get(), rtcp_dtls_transport.get());
@@ -959,11 +954,12 @@ RTCError JsepTransportController::MaybeCreateJsepTransport(
         content_info.name, rtp_dtls_transport.get(), rtcp_dtls_transport.get());
   }
 
-  std::unique_ptr<cricket::JsepTransport2> jsep_transport =
-      rtc::MakeUnique<cricket::JsepTransport2>(
+  std::unique_ptr<cricket::JsepTransport> jsep_transport =
+      absl::make_unique<cricket::JsepTransport>(
           content_info.name, certificate_, std::move(unencrypted_rtp_transport),
           std::move(sdes_transport), std::move(dtls_srtp_transport),
-          std::move(rtp_dtls_transport), std::move(rtcp_dtls_transport));
+          std::move(rtp_dtls_transport), std::move(rtcp_dtls_transport),
+          std::move(media_transport));
   jsep_transport->SignalRtcpMuxActive.connect(
       this, &JsepTransportController::UpdateAggregateStates_n);
   SetTransportForMid(content_info.name, jsep_transport.get());
@@ -1006,7 +1002,7 @@ void JsepTransportController::SetIceRole_n(cricket::IceRole ice_role) {
 }
 
 cricket::IceRole JsepTransportController::DetermineIceRole(
-    cricket::JsepTransport2* jsep_transport,
+    cricket::JsepTransport* jsep_transport,
     const cricket::TransportInfo& transport_info,
     SdpType type,
     bool local) {
@@ -1106,11 +1102,11 @@ void JsepTransportController::OnTransportCandidateGathered_n(
     RTC_NOTREACHED();
     return;
   }
-  std::vector<cricket::Candidate> candidates;
-  candidates.push_back(candidate);
-  CandidatesData* data =
-      new CandidatesData(transport->transport_name(), candidates);
-  signaling_thread_->Post(RTC_FROM_HERE, this, MSG_ICECANDIDATESGATHERED, data);
+  std::string transport_name = transport->transport_name();
+  invoker_.AsyncInvoke<void>(
+      RTC_FROM_HERE, signaling_thread_, [this, transport_name, candidate] {
+        SignalIceCandidatesGathered(transport_name, {candidate});
+      });
 }
 
 void JsepTransportController::OnTransportCandidatesRemoved_n(
@@ -1118,14 +1114,7 @@ void JsepTransportController::OnTransportCandidatesRemoved_n(
     const cricket::Candidates& candidates) {
   invoker_.AsyncInvoke<void>(
       RTC_FROM_HERE, signaling_thread_,
-      rtc::Bind(&JsepTransportController::OnTransportCandidatesRemoved, this,
-                candidates));
-}
-
-void JsepTransportController::OnTransportCandidatesRemoved(
-    const cricket::Candidates& candidates) {
-  RTC_DCHECK(signaling_thread_->IsCurrent());
-  SignalIceCandidatesRemoved(candidates);
+      [this, candidates] { SignalIceCandidatesRemoved(candidates); });
 }
 
 void JsepTransportController::OnTransportRoleConflict_n(
@@ -1192,10 +1181,10 @@ void JsepTransportController::UpdateAggregateStates_n() {
   }
   if (ice_connection_state_ != new_connection_state) {
     ice_connection_state_ = new_connection_state;
-    signaling_thread_->Post(
-        RTC_FROM_HERE, this, MSG_ICECONNECTIONSTATE,
-        new rtc::TypedMessageData<cricket::IceConnectionState>(
-            new_connection_state));
+    invoker_.AsyncInvoke<void>(RTC_FROM_HERE, signaling_thread_,
+                               [this, new_connection_state] {
+                                 SignalIceConnectionState(new_connection_state);
+                               });
   }
 
   if (all_done_gathering) {
@@ -1205,10 +1194,10 @@ void JsepTransportController::UpdateAggregateStates_n() {
   }
   if (ice_gathering_state_ != new_gathering_state) {
     ice_gathering_state_ = new_gathering_state;
-    signaling_thread_->Post(
-        RTC_FROM_HERE, this, MSG_ICEGATHERINGSTATE,
-        new rtc::TypedMessageData<cricket::IceGatheringState>(
-            new_gathering_state));
+    invoker_.AsyncInvoke<void>(RTC_FROM_HERE, signaling_thread_,
+                               [this, new_gathering_state] {
+                                 SignalIceGatheringState(new_gathering_state);
+                               });
   }
 }
 

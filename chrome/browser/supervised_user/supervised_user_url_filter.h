@@ -15,11 +15,10 @@
 #include "base/observer_list.h"
 #include "base/sequence_checker.h"
 #include "base/values.h"
-#include "chrome/browser/safe_search_api/safe_search_url_checker.h"
 #include "chrome/browser/supervised_user/supervised_user_site_list.h"
 #include "chrome/browser/supervised_user/supervised_users.h"
+#include "components/safe_search_api/url_checker.h"
 #include "components/supervised_user_error_page/supervised_user_error_page.h"
-#include "third_party/re2/src/re2/re2.h"
 
 class GURL;
 class SupervisedUserBlacklist;
@@ -28,9 +27,9 @@ namespace base {
 class TaskRunner;
 }
 
-namespace net {
-class URLRequestContextGetter;
-}
+namespace network {
+class SharedURLLoaderFactory;
+}  // namespace network
 
 // This class manages the filtering behavior for URLs, i.e. it tells callers
 // if a URL should be allowed, blocked or warned about. It uses information
@@ -78,14 +77,6 @@ class SupervisedUserURLFilter {
 
   static bool ReasonIsAutomatic(
       supervised_user_error_page::FilteringBehaviorReason reason);
-
-  // Normalizes a URL for matching purposes.
-  static GURL Normalize(const GURL& url);
-
-  // For known "cache" URLs (e.g. from the AMP project CDN), this returns the
-  // embedded URL. For all other URLs, returns an empty GURL.
-  // TODO(treib): Merge this with Normalize()? See also crbug.com/663678.
-  GURL GetEmbeddedURL(const GURL& url) const;
 
   // Returns true if the URL has a standard scheme. Only URLs with standard
   // schemes are filtered.
@@ -160,7 +151,8 @@ class SupervisedUserURLFilter {
   void SetManualURLs(std::map<GURL, bool> url_map);
 
   // Initializes the experimental asynchronous checker.
-  void InitAsyncURLChecker(net::URLRequestContextGetter* context);
+  void InitAsyncURLChecker(
+      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory);
 
   // Clears any asynchronous checker.
   void ClearAsyncURLChecker();
@@ -188,14 +180,15 @@ class SupervisedUserURLFilter {
       const GURL& url,
       bool manual_only,
       supervised_user_error_page::FilteringBehaviorReason* reason) const;
+  FilteringBehavior GetManualFilteringBehaviorForURL(const GURL& url) const;
 
   void CheckCallback(FilteringBehaviorCallback callback,
                      const GURL& url,
-                     SafeSearchURLChecker::Classification classification,
+                     safe_search_api::Classification classification,
                      bool uncertain) const;
 
   // This is mutable to allow notification in const member functions.
-  mutable base::ObserverList<Observer> observers_;
+  mutable base::ObserverList<Observer>::Unchecked observers_;
 
   FilteringBehavior default_behavior_;
   std::unique_ptr<Contents> contents_;
@@ -211,11 +204,7 @@ class SupervisedUserURLFilter {
   // Not owned.
   const SupervisedUserBlacklist* blacklist_;
 
-  std::unique_ptr<SafeSearchURLChecker> async_url_checker_;
-
-  re2::RE2 amp_cache_path_regex_;
-  re2::RE2 google_amp_viewer_path_regex_;
-  re2::RE2 google_web_cache_query_regex_;
+  std::unique_ptr<safe_search_api::URLChecker> async_url_checker_;
 
   scoped_refptr<base::TaskRunner> blocking_task_runner_;
 

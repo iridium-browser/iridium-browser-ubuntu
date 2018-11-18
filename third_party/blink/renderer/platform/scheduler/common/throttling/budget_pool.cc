@@ -12,6 +12,8 @@
 namespace blink {
 namespace scheduler {
 
+using base::sequence_manager::TaskQueue;
+
 BudgetPool::BudgetPool(const char* name,
                        BudgetPoolController* budget_pool_controller)
     : name_(name),
@@ -30,7 +32,7 @@ void BudgetPool::AddQueue(base::TimeTicks now, TaskQueue* queue) {
 
   if (!is_enabled_)
     return;
-  budget_pool_controller_->UpdateQueueThrottlingState(now, queue);
+  budget_pool_controller_->UpdateQueueSchedulingLifecycleState(now, queue);
 }
 
 void BudgetPool::UnregisterQueue(TaskQueue* queue) {
@@ -43,7 +45,7 @@ void BudgetPool::RemoveQueue(base::TimeTicks now, TaskQueue* queue) {
   if (!is_enabled_)
     return;
 
-  budget_pool_controller_->UpdateQueueThrottlingState(now, queue);
+  budget_pool_controller_->UpdateQueueSchedulingLifecycleState(now, queue);
 }
 
 void BudgetPool::DissociateQueue(TaskQueue* queue) {
@@ -51,7 +53,7 @@ void BudgetPool::DissociateQueue(TaskQueue* queue) {
   associated_task_queues_.erase(queue);
 }
 
-void BudgetPool::EnableThrottling(LazyNow* lazy_now) {
+void BudgetPool::EnableThrottling(base::sequence_manager::LazyNow* lazy_now) {
   if (is_enabled_)
     return;
   is_enabled_ = true;
@@ -61,7 +63,7 @@ void BudgetPool::EnableThrottling(LazyNow* lazy_now) {
   BlockThrottledQueues(lazy_now->Now());
 }
 
-void BudgetPool::DisableThrottling(LazyNow* lazy_now) {
+void BudgetPool::DisableThrottling(base::sequence_manager::LazyNow* lazy_now) {
   if (!is_enabled_)
     return;
   is_enabled_ = false;
@@ -69,7 +71,8 @@ void BudgetPool::DisableThrottling(LazyNow* lazy_now) {
   TRACE_EVENT0("renderer.scheduler", "BudgetPool_DisableThrottling");
 
   for (TaskQueue* queue : associated_task_queues_) {
-    budget_pool_controller_->UpdateQueueThrottlingState(lazy_now->Now(), queue);
+    budget_pool_controller_->UpdateQueueSchedulingLifecycleState(
+        lazy_now->Now(), queue);
   }
 
   // TODO(altimin): We need to disable TimeBudgetQueues here or they will
@@ -88,7 +91,7 @@ void BudgetPool::Close() {
 
 void BudgetPool::BlockThrottledQueues(base::TimeTicks now) {
   for (TaskQueue* queue : associated_task_queues_)
-    budget_pool_controller_->UpdateQueueThrottlingState(now, queue);
+    budget_pool_controller_->UpdateQueueSchedulingLifecycleState(now, queue);
 }
 
 }  // namespace scheduler

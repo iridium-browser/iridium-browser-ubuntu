@@ -47,7 +47,8 @@ GalleryUtil.createEntrySet = function(originalEntries) {
     return entries.filter(function(entry) {
       // Currently the gallery doesn't support mime types, so checking by
       // file extensions is enough.
-      return FileType.isImage(entry) || FileType.isRaw(entry);
+      return FileType.isImage(entry) || FileType.isRaw(entry) ||
+          FileType.isVideo(entry);
     }).sort(function(a, b) {
       return util.compareName(a, b);
     });
@@ -57,7 +58,7 @@ GalleryUtil.createEntrySet = function(originalEntries) {
 /**
  * Returns true if entry is on MTP volume.
  * @param {!Entry} entry An entry.
- * @param {!VolumeManagerWrapper} volumeManager Volume manager.
+ * @param {!VolumeManager} volumeManager Volume manager.
  * @return True if entry is on MTP volume.
  */
 GalleryUtil.isOnMTPVolume = function(entry, volumeManager) {

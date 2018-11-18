@@ -7,7 +7,7 @@
 #include <memory>
 #include <vector>
 
-#include "src/api.h"
+#include "src/api-inl.h"
 #include "src/base/bits.h"
 #include "src/base/platform/platform.h"
 #include "src/bootstrapper.h"
@@ -19,6 +19,7 @@
 #include "src/ostreams.h"
 #include "src/snapshot/natives.h"
 #include "src/splay-tree-inl.h"
+#include "src/zone/zone-chunk-list.h"
 
 namespace v8 {
 namespace internal {
@@ -40,7 +41,7 @@ typedef ELF DebugObject;
 typedef ELFSection DebugSection;
 #endif
 
-class Writer BASE_EMBEDDED {
+class Writer {
  public:
   explicit Writer(DebugObject* debug_object)
       : debug_object_(debug_object),
@@ -176,7 +177,7 @@ class ELFStringTable;
 template<typename THeader>
 class DebugSectionBase : public ZoneObject {
  public:
-  virtual ~DebugSectionBase() { }
+  virtual ~DebugSectionBase() = default;
 
   virtual void WriteBody(Writer::Slot<THeader> header, Writer* writer) {
     uintptr_t start = writer->position();
@@ -237,7 +238,7 @@ class MachOSection : public DebugSectionBase<MachOSectionHeader> {
     }
   }
 
-  virtual ~MachOSection() { }
+  ~MachOSection() override = default;
 
   virtual void PopulateHeader(Writer::Slot<Header> header) {
     header->addr = 0;
@@ -313,11 +314,11 @@ class ELFSection : public DebugSectionBase<ELFSectionHeader> {
   ELFSection(const char* name, Type type, uintptr_t align)
       : name_(name), type_(type), align_(align) { }
 
-  virtual ~ELFSection() { }
+  ~ELFSection() override = default;
 
   void PopulateHeader(Writer::Slot<Header> header, ELFStringTable* strtab);
 
-  virtual void WriteBody(Writer::Slot<Header> header, Writer* w) {
+  void WriteBody(Writer::Slot<Header> header, Writer* w) override {
     uintptr_t start = w->position();
     if (WriteBodyInternal(w)) {
       uintptr_t end = w->position();
@@ -326,9 +327,7 @@ class ELFSection : public DebugSectionBase<ELFSectionHeader> {
     }
   }
 
-  virtual bool WriteBodyInternal(Writer* w) {
-    return false;
-  }
+  bool WriteBodyInternal(Writer* w) override { return false; }
 
   uint16_t index() const { return index_; }
   void set_index(uint16_t index) { index_ = index; }
@@ -395,7 +394,7 @@ class FullHeaderELFSection : public ELFSection {
         flags_(flags) { }
 
  protected:
-  virtual void PopulateHeader(Writer::Slot<Header> header) {
+  void PopulateHeader(Writer::Slot<Header> header) override {
     ELFSection::PopulateHeader(header);
     header->address = addr_;
     header->offset = offset_;
@@ -437,7 +436,7 @@ class ELFStringTable : public ELFSection {
 
   void DetachWriter() { writer_ = nullptr; }
 
-  virtual void WriteBody(Writer::Slot<Header> header, Writer* w) {
+  void WriteBody(Writer::Slot<Header> header, Writer* w) override {
     DCHECK_NULL(writer_);
     header->offset = offset_;
     header->size = size_;
@@ -471,13 +470,13 @@ void ELFSection::PopulateHeader(Writer::Slot<ELFSection::Header> header,
 
 
 #if defined(__MACH_O)
-class MachO BASE_EMBEDDED {
+class MachO {
  public:
-  explicit MachO(Zone* zone) : zone_(zone), sections_(6, zone) { }
+  explicit MachO(Zone* zone) : sections_(zone) {}
 
-  uint32_t AddSection(MachOSection* section) {
-    sections_.Add(section, zone_);
-    return sections_.length() - 1;
+  size_t AddSection(MachOSection* section) {
+    sections_.push_back(section);
+    return sections_.size() - 1;
   }
 
   void Write(Writer* w, uintptr_t code_start, uintptr_t code_size) {
@@ -570,7 +569,7 @@ class MachO BASE_EMBEDDED {
     cmd->maxprot = 7;
     cmd->initprot = 7;
     cmd->flags = 0;
-    cmd->nsects = sections_.length();
+    cmd->nsects = static_cast<uint32_t>(sections_.size());
     memset(cmd->segname, 0, 16);
     cmd->cmdsize = sizeof(MachOSegmentCommand) + sizeof(MachOSection::Header) *
         cmd->nsects;
@@ -583,29 +582,31 @@ class MachO BASE_EMBEDDED {
                      Writer::Slot<MachOHeader> header,
                      uintptr_t load_command_start) {
     Writer::Slot<MachOSection::Header> headers =
-        w->CreateSlotsHere<MachOSection::Header>(sections_.length());
+        w->CreateSlotsHere<MachOSection::Header>(
+            static_cast<uint32_t>(sections_.size()));
     cmd->fileoff = w->position();
     header->sizeofcmds =
         static_cast<uint32_t>(w->position() - load_command_start);
-    for (int section = 0; section < sections_.length(); ++section) {
-      sections_[section]->PopulateHeader(headers.at(section));
-      sections_[section]->WriteBody(headers.at(section), w);
+    uint32_t index = 0;
+    for (MachOSection* section : sections_) {
+      section->PopulateHeader(headers.at(index));
+      section->WriteBody(headers.at(index), w);
+      index++;
     }
     cmd->filesize = w->position() - (uintptr_t)cmd->fileoff;
   }
 
-  Zone* zone_;
-  ZoneList<MachOSection*> sections_;
+  ZoneChunkList<MachOSection*> sections_;
 };
 #endif  // defined(__MACH_O)
 
 
 #if defined(__ELF)
-class ELF BASE_EMBEDDED {
+class ELF {
  public:
-  explicit ELF(Zone* zone) : zone_(zone), sections_(6, zone) {
-    sections_.Add(new(zone) ELFSection("", ELFSection::TYPE_NULL, 0), zone);
-    sections_.Add(new(zone) ELFStringTable(".shstrtab"), zone);
+  explicit ELF(Zone* zone) : sections_(zone) {
+    sections_.push_back(new (zone) ELFSection("", ELFSection::TYPE_NULL, 0));
+    sections_.push_back(new (zone) ELFStringTable(".shstrtab"));
   }
 
   void Write(Writer* w) {
@@ -614,14 +615,12 @@ class ELF BASE_EMBEDDED {
     WriteSections(w);
   }
 
-  ELFSection* SectionAt(uint32_t index) {
-    return sections_[index];
-  }
+  ELFSection* SectionAt(uint32_t index) { return *sections_.Find(index); }
 
-  uint32_t AddSection(ELFSection* section) {
-    sections_.Add(section, zone_);
-    section->set_index(sections_.length() - 1);
-    return sections_.length() - 1;
+  size_t AddSection(ELFSection* section) {
+    sections_.push_back(section);
+    section->set_index(sections_.size() - 1);
+    return sections_.size() - 1;
   }
 
  private:
@@ -704,7 +703,7 @@ class ELF BASE_EMBEDDED {
     header->pht_entry_size = 0;
     header->pht_entry_num = 0;
     header->sht_entry_size = sizeof(ELFSection::Header);
-    header->sht_entry_num = sections_.length();
+    header->sht_entry_num = sections_.size();
     header->sht_strtab_index = 1;
   }
 
@@ -713,15 +712,16 @@ class ELF BASE_EMBEDDED {
     DCHECK(w->position() == sizeof(ELFHeader));
 
     Writer::Slot<ELFSection::Header> headers =
-        w->CreateSlotsHere<ELFSection::Header>(sections_.length());
+        w->CreateSlotsHere<ELFSection::Header>(
+            static_cast<uint32_t>(sections_.size()));
 
     // String table for section table is the first section.
     ELFStringTable* strtab = static_cast<ELFStringTable*>(SectionAt(1));
     strtab->AttachWriter(w);
-    for (int i = 0, length = sections_.length();
-         i < length;
-         i++) {
-      sections_[i]->PopulateHeader(headers.at(i), strtab);
+    uint32_t index = 0;
+    for (ELFSection* section : sections_) {
+      section->PopulateHeader(headers.at(index), strtab);
+      index++;
     }
     strtab->DetachWriter();
   }
@@ -734,19 +734,17 @@ class ELF BASE_EMBEDDED {
     Writer::Slot<ELFSection::Header> headers =
         w->SlotAt<ELFSection::Header>(sizeof(ELFHeader));
 
-    for (int i = 0, length = sections_.length();
-         i < length;
-         i++) {
-      sections_[i]->WriteBody(headers.at(i), w);
+    uint32_t index = 0;
+    for (ELFSection* section : sections_) {
+      section->WriteBody(headers.at(index), w);
+      index++;
     }
   }
 
-  Zone* zone_;
-  ZoneList<ELFSection*> sections_;
+  ZoneChunkList<ELFSection*> sections_;
 };
 
-
-class ELFSymbol BASE_EMBEDDED {
+class ELFSymbol {
  public:
   enum Type {
     TYPE_NOTYPE = 0,
@@ -834,7 +832,7 @@ class ELFSymbol BASE_EMBEDDED {
   };
 #endif
 
-  void Write(Writer::Slot<SerializedLayout> s, ELFStringTable* t) {
+  void Write(Writer::Slot<SerializedLayout> s, ELFStringTable* t) const {
     // Convert symbol names from strings to indexes in the string table.
     s->name = static_cast<uint32_t>(t->Add(name));
     s->value = value;
@@ -858,17 +856,17 @@ class ELFSymbolTable : public ELFSection {
  public:
   ELFSymbolTable(const char* name, Zone* zone)
       : ELFSection(name, TYPE_SYMTAB, sizeof(uintptr_t)),
-        locals_(1, zone),
-        globals_(1, zone) {
-  }
+        locals_(zone),
+        globals_(zone) {}
 
-  virtual void WriteBody(Writer::Slot<Header> header, Writer* w) {
+  void WriteBody(Writer::Slot<Header> header, Writer* w) override {
     w->Align(header->alignment);
-    int total_symbols = locals_.length() + globals_.length() + 1;
+    size_t total_symbols = locals_.size() + globals_.size() + 1;
     header->offset = w->position();
 
     Writer::Slot<ELFSymbol::SerializedLayout> symbols =
-        w->CreateSlotsHere<ELFSymbol::SerializedLayout>(total_symbols);
+        w->CreateSlotsHere<ELFSymbol::SerializedLayout>(
+            static_cast<uint32_t>(total_symbols));
 
     header->size = w->position() - header->offset;
 
@@ -883,40 +881,41 @@ class ELFSymbolTable : public ELFSection {
                                                   ELFSymbol::TYPE_NOTYPE,
                                                   0));
     WriteSymbolsList(&locals_, symbols.at(1), strtab);
-    WriteSymbolsList(&globals_, symbols.at(locals_.length() + 1), strtab);
+    WriteSymbolsList(&globals_,
+                     symbols.at(static_cast<uint32_t>(locals_.size() + 1)),
+                     strtab);
     strtab->DetachWriter();
   }
 
-  void Add(const ELFSymbol& symbol, Zone* zone) {
+  void Add(const ELFSymbol& symbol) {
     if (symbol.binding() == ELFSymbol::BIND_LOCAL) {
-      locals_.Add(symbol, zone);
+      locals_.push_back(symbol);
     } else {
-      globals_.Add(symbol, zone);
+      globals_.push_back(symbol);
     }
   }
 
  protected:
-  virtual void PopulateHeader(Writer::Slot<Header> header) {
+  void PopulateHeader(Writer::Slot<Header> header) override {
     ELFSection::PopulateHeader(header);
     // We are assuming that string table will follow symbol table.
     header->link = index() + 1;
-    header->info = locals_.length() + 1;
+    header->info = static_cast<uint32_t>(locals_.size() + 1);
     header->entry_size = sizeof(ELFSymbol::SerializedLayout);
   }
 
  private:
-  void WriteSymbolsList(const ZoneList<ELFSymbol>* src,
+  void WriteSymbolsList(const ZoneChunkList<ELFSymbol>* src,
                         Writer::Slot<ELFSymbol::SerializedLayout> dst,
                         ELFStringTable* strtab) {
-    for (int i = 0, len = src->length();
-         i < len;
-         i++) {
-      src->at(i).Write(dst.at(i), strtab);
+    int i = 0;
+    for (const ELFSymbol& symbol : *src) {
+      symbol.Write(dst.at(i++), strtab);
     }
   }
 
-  ZoneList<ELFSymbol> locals_;
-  ZoneList<ELFSymbol> globals_;
+  ZoneChunkList<ELFSymbol> locals_;
+  ZoneChunkList<ELFSymbol> globals_;
 };
 #endif  // defined(__ELF)
 
@@ -944,8 +943,7 @@ class LineInfo : public Malloced {
   std::vector<PCInfo> pc_info_;
 };
 
-
-class CodeDescription BASE_EMBEDDED {
+class CodeDescription {
  public:
 #if V8_TARGET_ARCH_X64
   enum StackState {
@@ -979,11 +977,11 @@ class CodeDescription BASE_EMBEDDED {
   }
 
   uintptr_t CodeStart() const {
-    return reinterpret_cast<uintptr_t>(code_->InstructionStart());
+    return static_cast<uintptr_t>(code_->InstructionStart());
   }
 
   uintptr_t CodeEnd() const {
-    return reinterpret_cast<uintptr_t>(code_->InstructionEnd());
+    return static_cast<uintptr_t>(code_->InstructionEnd());
   }
 
   uintptr_t CodeSize() const {
@@ -1039,10 +1037,8 @@ class CodeDescription BASE_EMBEDDED {
 };
 
 #if defined(__ELF)
-static void CreateSymbolsTable(CodeDescription* desc,
-                               Zone* zone,
-                               ELF* elf,
-                               int text_section_index) {
+static void CreateSymbolsTable(CodeDescription* desc, Zone* zone, ELF* elf,
+                               size_t text_section_index) {
   ELFSymbolTable* symtab = new(zone) ELFSymbolTable(".symtab", zone);
   ELFStringTable* strtab = new(zone) ELFStringTable(".strtab");
 
@@ -1050,21 +1046,12 @@ static void CreateSymbolsTable(CodeDescription* desc,
   elf->AddSection(symtab);
   elf->AddSection(strtab);
 
-  symtab->Add(ELFSymbol("V8 Code",
-                        0,
-                        0,
-                        ELFSymbol::BIND_LOCAL,
-                        ELFSymbol::TYPE_FILE,
-                        ELFSection::INDEX_ABSOLUTE),
-              zone);
+  symtab->Add(ELFSymbol("V8 Code", 0, 0, ELFSymbol::BIND_LOCAL,
+                        ELFSymbol::TYPE_FILE, ELFSection::INDEX_ABSOLUTE));
 
-  symtab->Add(ELFSymbol(desc->name(),
-                        0,
-                        desc->CodeSize(),
-                        ELFSymbol::BIND_GLOBAL,
-                        ELFSymbol::TYPE_FUNC,
-                        text_section_index),
-              zone);
+  symtab->Add(ELFSymbol(desc->name(), 0, desc->CodeSize(),
+                        ELFSymbol::BIND_GLOBAL, ELFSymbol::TYPE_FUNC,
+                        text_section_index));
 }
 #endif  // defined(__ELF)
 
@@ -1124,7 +1111,7 @@ class DebugInfoSection : public DebugSection {
     DW_ATE_SIGNED = 0x5
   };
 
-  bool WriteBodyInternal(Writer* w) {
+  bool WriteBodyInternal(Writer* w) override {
     uintptr_t cu_start = w->position();
     Writer::Slot<uint32_t> size = w->CreateSlotHere<uint32_t>();
     uintptr_t start = w->position();
@@ -1171,17 +1158,19 @@ class DebugInfoSection : public DebugSection {
       fb_block_size.set(static_cast<uint32_t>(w->position() - fb_block_start));
 
       int params = scope->ParameterCount();
-      int slots = scope->StackLocalCount();
       int context_slots = scope->ContextLocalCount();
       // The real slot ID is internal_slots + context_slot_id.
       int internal_slots = Context::MIN_CONTEXT_SLOTS;
-      int locals = scope->StackLocalCount();
       int current_abbreviation = 4;
+
+      EmbeddedVector<char, 256> buffer;
+      StringBuilder builder(buffer.start(), buffer.length());
 
       for (int param = 0; param < params; ++param) {
         w->WriteULEB128(current_abbreviation++);
-        w->WriteString(
-            scope->ParameterName(param)->ToCString(DISALLOW_NULLS).get());
+        builder.Reset();
+        builder.AddFormatted("param%d", param);
+        w->WriteString(builder.Finalize());
         w->Write<uint32_t>(ty_offset);
         Writer::Slot<uint32_t> block_size = w->CreateSlotHere<uint32_t>();
         uintptr_t block_start = w->position();
@@ -1192,24 +1181,14 @@ class DebugInfoSection : public DebugSection {
         block_size.set(static_cast<uint32_t>(w->position() - block_start));
       }
 
-      EmbeddedVector<char, 256> buffer;
-      StringBuilder builder(buffer.start(), buffer.length());
-
-      for (int slot = 0; slot < slots; ++slot) {
-        w->WriteULEB128(current_abbreviation++);
-        builder.Reset();
-        builder.AddFormatted("slot%d", slot);
-        w->WriteString(builder.Finalize());
-      }
-
       // See contexts.h for more information.
       DCHECK_EQ(Context::MIN_CONTEXT_SLOTS, 4);
-      DCHECK_EQ(Context::CLOSURE_INDEX, 0);
+      DCHECK_EQ(Context::SCOPE_INFO_INDEX, 0);
       DCHECK_EQ(Context::PREVIOUS_INDEX, 1);
       DCHECK_EQ(Context::EXTENSION_INDEX, 2);
       DCHECK_EQ(Context::NATIVE_CONTEXT_INDEX, 3);
       w->WriteULEB128(current_abbreviation++);
-      w->WriteString(".closure");
+      w->WriteString(".scope_info");
       w->WriteULEB128(current_abbreviation++);
       w->WriteString(".previous");
       w->WriteULEB128(current_abbreviation++);
@@ -1224,20 +1203,6 @@ class DebugInfoSection : public DebugSection {
         builder.Reset();
         builder.AddFormatted("context_slot%d", context_slot + internal_slots);
         w->WriteString(builder.Finalize());
-      }
-
-      for (int local = 0; local < locals; ++local) {
-        w->WriteULEB128(current_abbreviation++);
-        w->WriteString(
-            scope->StackLocalName(local)->ToCString(DISALLOW_NULLS).get());
-        w->Write<uint32_t>(ty_offset);
-        Writer::Slot<uint32_t> block_size = w->CreateSlotHere<uint32_t>();
-        uintptr_t block_start = w->position();
-        w->Write<uint8_t>(DW_OP_fbreg);
-        w->WriteSLEB128(
-          JavaScriptFrameConstants::kLocal0Offset -
-              kPointerSize * local);
-        block_size.set(static_cast<uint32_t>(w->position() - block_start));
       }
 
       {
@@ -1349,7 +1314,7 @@ class DebugAbbrevSection : public DebugSection {
     w->WriteULEB128(0);
   }
 
-  bool WriteBodyInternal(Writer* w) {
+  bool WriteBodyInternal(Writer* w) override {
     int current_abbreviation = 1;
     bool extra_info = desc_->has_scope_info();
     DCHECK(desc_->IsLineInfoAvailable());
@@ -1370,13 +1335,11 @@ class DebugAbbrevSection : public DebugSection {
     if (extra_info) {
       ScopeInfo* scope = desc_->scope_info();
       int params = scope->ParameterCount();
-      int slots = scope->StackLocalCount();
       int context_slots = scope->ContextLocalCount();
       // The real slot ID is internal_slots + context_slot_id.
       int internal_slots = Context::MIN_CONTEXT_SLOTS;
-      int locals = scope->StackLocalCount();
-      // Total children is params + slots + context_slots + internal_slots +
-      // locals + 2 (__function and __context).
+      // Total children is params + context_slots + internal_slots + 2
+      // (__function and __context).
 
       // The extra duplication below seems to be necessary to keep
       // gdb from getting upset on OSX.
@@ -1408,10 +1371,6 @@ class DebugAbbrevSection : public DebugSection {
         WriteVariableAbbreviation(w, current_abbreviation++, true, true);
       }
 
-      for (int slot = 0; slot < slots; ++slot) {
-        WriteVariableAbbreviation(w, current_abbreviation++, false, false);
-      }
-
       for (int internal_slot = 0;
            internal_slot < internal_slots;
            ++internal_slot) {
@@ -1422,10 +1381,6 @@ class DebugAbbrevSection : public DebugSection {
            context_slot < context_slots;
            ++context_slot) {
         WriteVariableAbbreviation(w, current_abbreviation++, false, false);
-      }
-
-      for (int local = 0; local < locals; ++local) {
-        WriteVariableAbbreviation(w, current_abbreviation++, true, false);
       }
 
       // The function.
@@ -1476,7 +1431,7 @@ class DebugLineSection : public DebugSection {
     DW_LNE_DEFINE_FILE = 3
   };
 
-  bool WriteBodyInternal(Writer* w) {
+  bool WriteBodyInternal(Writer* w) override {
     // Write prologue.
     Writer::Slot<uint32_t> total_length = w->CreateSlotHere<uint32_t>();
     uintptr_t start = w->position();
@@ -1612,7 +1567,7 @@ class DebugLineSection : public DebugSection {
 class UnwindInfoSection : public DebugSection {
  public:
   explicit UnwindInfoSection(CodeDescription* desc);
-  virtual bool WriteBodyInternal(Writer* w);
+  bool WriteBodyInternal(Writer* w) override;
 
   int WriteCIE(Writer* w);
   void WriteFDE(Writer* w, int);
@@ -1881,11 +1836,11 @@ extern "C" {
   // GDB will inspect contents of this descriptor.
   // Static initialization is necessary to prevent GDB from seeing
   // uninitialized descriptor.
-  JITDescriptor __jit_debug_descriptor = { 1, 0, 0, 0 };
+  JITDescriptor __jit_debug_descriptor = {1, 0, nullptr, nullptr};
 
 #ifdef OBJECT_PRINT
   void __gdb_print_v8_object(Object* object) {
-    OFStream os(stdout);
+    StdoutStream os;
     object->Print(os);
     os << std::flush;
   }
@@ -1900,7 +1855,8 @@ static JITCodeEntry* CreateCodeEntry(Address symfile_addr,
 
   entry->symfile_addr_ = reinterpret_cast<Address>(entry + 1);
   entry->symfile_size_ = symfile_size;
-  MemCopy(entry->symfile_addr_, symfile_addr, symfile_size);
+  MemCopy(reinterpret_cast<void*>(entry->symfile_addr_),
+          reinterpret_cast<void*>(symfile_addr), symfile_size);
 
   entry->prev_ = entry->next_ = nullptr;
 
@@ -1959,15 +1915,9 @@ static JITCodeEntry* CreateELFObject(CodeDescription* desc, Isolate* isolate) {
   ELF elf(&zone);
   Writer w(&elf);
 
-  int text_section_index = elf.AddSection(
-      new(&zone) FullHeaderELFSection(
-          ".text",
-          ELFSection::TYPE_NOBITS,
-          kCodeAlignment,
-          desc->CodeStart(),
-          0,
-          desc->CodeSize(),
-          ELFSection::FLAG_ALLOC | ELFSection::FLAG_EXEC));
+  size_t text_section_index = elf.AddSection(new (&zone) FullHeaderELFSection(
+      ".text", ELFSection::TYPE_NOBITS, kCodeAlignment, desc->CodeStart(), 0,
+      desc->CodeSize(), ELFSection::FLAG_ALLOC | ELFSection::FLAG_EXEC));
 
   CreateSymbolsTable(desc, &zone, &elf, text_section_index);
 
@@ -1976,7 +1926,7 @@ static JITCodeEntry* CreateELFObject(CodeDescription* desc, Isolate* isolate) {
   elf.Write(&w);
 #endif
 
-  return CreateCodeEntry(w.buffer(), w.position());
+  return CreateCodeEntry(reinterpret_cast<Address>(w.buffer()), w.position());
 }
 
 
@@ -2010,8 +1960,7 @@ static CodeMap* GetCodeMap() {
 
 static uint32_t HashCodeAddress(Address addr) {
   static const uintptr_t kGoldenRatio = 2654435761u;
-  uintptr_t offset = OffsetFrom(addr);
-  return static_cast<uint32_t>((offset >> kCodeAlignmentBits) * kGoldenRatio);
+  return static_cast<uint32_t>((addr >> kCodeAlignmentBits) * kGoldenRatio);
 }
 
 static base::HashMap* GetLineMap() {
@@ -2025,15 +1974,16 @@ static base::HashMap* GetLineMap() {
 
 static void PutLineInfo(Address addr, LineInfo* info) {
   base::HashMap* line_map = GetLineMap();
-  base::HashMap::Entry* e =
-      line_map->LookupOrInsert(addr, HashCodeAddress(addr));
+  base::HashMap::Entry* e = line_map->LookupOrInsert(
+      reinterpret_cast<void*>(addr), HashCodeAddress(addr));
   if (e->value != nullptr) delete static_cast<LineInfo*>(e->value);
   e->value = info;
 }
 
 
 static LineInfo* GetLineInfo(Address addr) {
-  void* value = GetLineMap()->Remove(addr, HashCodeAddress(addr));
+  void* value = GetLineMap()->Remove(reinterpret_cast<void*>(addr),
+                                     HashCodeAddress(addr));
   return static_cast<LineInfo*>(value);
 }
 
@@ -2121,7 +2071,7 @@ static void AddJITCodeEntry(CodeMap* map, const AddressRange& range,
 
     SNPrintF(Vector<char>(file_name, kMaxFileNameSize), "/tmp/elfdump%s%d.o",
              (name_hint != nullptr) ? name_hint : "", file_num++);
-    WriteBytes(file_name, entry->symfile_addr_,
+    WriteBytes(file_name, reinterpret_cast<byte*>(entry->symfile_addr_),
                static_cast<int>(entry->symfile_size_));
   }
 #endif

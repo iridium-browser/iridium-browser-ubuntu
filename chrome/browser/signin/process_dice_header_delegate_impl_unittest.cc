@@ -16,7 +16,6 @@
 #include "components/signin/core/browser/fake_profile_oauth2_token_service.h"
 #include "components/signin/core/browser/fake_signin_manager.h"
 #include "components/signin/core/browser/profile_management_switches.h"
-#include "components/signin/core/browser/scoped_account_consistency.h"
 #include "components/signin/core/browser/test_signin_client.h"
 #include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "content/public/browser/web_contents.h"
@@ -29,14 +28,15 @@ const signin::AccountConsistencyMethod kDiceFixAuthErrors =
     signin::AccountConsistencyMethod::kDiceFixAuthErrors;
 const signin::AccountConsistencyMethod kDice =
     signin::AccountConsistencyMethod::kDice;
-const signin::AccountConsistencyMethod kDicePrepareMigration =
-    signin::AccountConsistencyMethod::kDicePrepareMigration;
+const signin::AccountConsistencyMethod kDiceMigration =
+    signin::AccountConsistencyMethod::kDiceMigration;
 
 class ProcessDiceHeaderDelegateImplTest
     : public ChromeRenderViewHostTestHarness {
  public:
   ProcessDiceHeaderDelegateImplTest()
       : signin_client_(&pref_service_),
+        token_service_(&pref_service_),
         signin_manager_(&signin_client_,
                         &token_service_,
                         &account_tracker_service_,
@@ -46,10 +46,10 @@ class ProcessDiceHeaderDelegateImplTest
         account_id_("12345"),
         email_("foo@bar.com"),
         auth_error_(GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS) {
-    signin::RegisterAccountConsistencyProfilePrefs(pref_service_.registry());
     AccountTrackerService::RegisterPrefs(pref_service_.registry());
+    ProfileOAuth2TokenService::RegisterProfilePrefs(pref_service_.registry());
     SigninManager::RegisterProfilePrefs(pref_service_.registry());
-    account_tracker_service_.Initialize(&signin_client_);
+    account_tracker_service_.Initialize(&pref_service_, base::FilePath());
   }
 
   ~ProcessDiceHeaderDelegateImplTest() override {
@@ -61,9 +61,11 @@ class ProcessDiceHeaderDelegateImplTest
 
   // Creates a ProcessDiceHeaderDelegateImpl instance.
   std::unique_ptr<ProcessDiceHeaderDelegateImpl> CreateDelegate(
-      bool is_sync_signin_tab) {
+      bool is_sync_signin_tab,
+      signin::AccountConsistencyMethod account_consistency) {
     return std::make_unique<ProcessDiceHeaderDelegateImpl>(
-        web_contents(), &pref_service_, &signin_manager_, is_sync_signin_tab,
+        web_contents(), account_consistency, &signin_manager_,
+        is_sync_signin_tab,
         base::BindOnce(&ProcessDiceHeaderDelegateImplTest::StartSyncCallback,
                        base::Unretained(this)),
         base::BindOnce(
@@ -105,12 +107,11 @@ class ProcessDiceHeaderDelegateImplTest
 // Check that sync is enabled if the tab is closed during signin.
 TEST_F(ProcessDiceHeaderDelegateImplTest, CloseTabWhileStartingSync) {
   // Setup the test.
-  signin::ScopedAccountConsistencyDice account_consistency;
   GURL kSigninURL = GURL("https://accounts.google.com");
   NavigateAndCommit(kSigninURL);
   ASSERT_EQ(kSigninURL, web_contents()->GetVisibleURL());
   std::unique_ptr<ProcessDiceHeaderDelegateImpl> delegate =
-      CreateDelegate(true);
+      CreateDelegate(true, signin::AccountConsistencyMethod::kDice);
 
   // Close the tab.
   DeleteContents();
@@ -125,12 +126,11 @@ TEST_F(ProcessDiceHeaderDelegateImplTest, CloseTabWhileStartingSync) {
 // received.
 TEST_F(ProcessDiceHeaderDelegateImplTest, CloseTabWhileFailingSignin) {
   // Setup the test.
-  signin::ScopedAccountConsistencyDice account_consistency;
   GURL kSigninURL = GURL("https://accounts.google.com");
   NavigateAndCommit(kSigninURL);
   ASSERT_EQ(kSigninURL, web_contents()->GetVisibleURL());
   std::unique_ptr<ProcessDiceHeaderDelegateImpl> delegate =
-      CreateDelegate(true);
+      CreateDelegate(true, signin::AccountConsistencyMethod::kDice);
 
   // Close the tab.
   DeleteContents();
@@ -157,14 +157,14 @@ TestConfiguration kEnableSyncTestCases[] = {
     // AccountConsistency | signed_in | signin_tab | callback_called | show_ntp
     {kDiceFixAuthErrors,    false,      false,       false,            false},
     {kDiceFixAuthErrors,    false,      true,        false,            false},
-    {kDicePrepareMigration, false,      false,       false,            false},
-    {kDicePrepareMigration, false,      true,        true,             true},
+    {kDiceMigration,        false,      false,       false,            false},
+    {kDiceMigration,        false,      true,        true,             true},
     {kDice,                 false,      false,       false,            false},
     {kDice,                 false,      true,        true,             true},
     {kDiceFixAuthErrors,    true,       false,       false,            false},
     {kDiceFixAuthErrors,    true,       false,       false,            false},
-    {kDicePrepareMigration, true,       false,       false,            false},
-    {kDicePrepareMigration, true,       false,       false,            false},
+    {kDiceMigration,        true,       false,       false,            false},
+    {kDiceMigration,        true,       false,       false,            false},
     {kDice,                 true,       false,       false,            false},
     {kDice,                 true,       true,        false,            false},
     // clang-format on
@@ -178,15 +178,13 @@ class ProcessDiceHeaderDelegateImplTestEnableSync
 // Test the EnableSync() method in all configurations.
 TEST_P(ProcessDiceHeaderDelegateImplTestEnableSync, EnableSync) {
   // Setup the test.
-  signin::ScopedAccountConsistency account_consistency(
-      GetParam().account_consistency);
   GURL kSigninURL = GURL("https://accounts.google.com");
   NavigateAndCommit(kSigninURL);
   ASSERT_EQ(kSigninURL, web_contents()->GetVisibleURL());
   if (GetParam().signed_in)
     signin_manager_.SignIn("gaia_id", "user", "pass");
   std::unique_ptr<ProcessDiceHeaderDelegateImpl> delegate =
-      CreateDelegate(GetParam().signin_tab);
+      CreateDelegate(GetParam().signin_tab, GetParam().account_consistency);
 
   // Check expectations.
   delegate->EnableSync(account_id_);
@@ -206,14 +204,14 @@ TestConfiguration kHandleTokenExchangeFailureTestCases[] = {
     // AccountConsistency | signed_in | signin_tab | callback_called | show_ntp
     {kDiceFixAuthErrors,    false,      false,       false,            false},
     {kDiceFixAuthErrors,    false,      true,        false,            false},
-    {kDicePrepareMigration, false,      false,       false,            false},
-    {kDicePrepareMigration, false,      true,        true,             true},
+    {kDiceMigration,        false,      false,       false,            false},
+    {kDiceMigration,        false,      true,        true,             true},
     {kDice,                 false,      false,       true,             false},
     {kDice,                 false,      true,        true,             true},
     {kDiceFixAuthErrors,    true,       false,       false,            false},
     {kDiceFixAuthErrors,    true,       false,       false,            false},
-    {kDicePrepareMigration, true,       false,       false,            false},
-    {kDicePrepareMigration, true,       false,       false,            false},
+    {kDiceMigration,        true,       false,       false,            false},
+    {kDiceMigration,        true,       false,       false,            false},
     {kDice,                 true,       false,       true,             false},
     {kDice,                 true,       true,        true,             false},
     // clang-format on
@@ -228,15 +226,13 @@ class ProcessDiceHeaderDelegateImplTestHandleTokenExchangeFailure
 TEST_P(ProcessDiceHeaderDelegateImplTestHandleTokenExchangeFailure,
        HandleTokenExchangeFailure) {
   // Setup the test.
-  signin::ScopedAccountConsistency account_consistency(
-      GetParam().account_consistency);
   GURL kSigninURL = GURL("https://accounts.google.com");
   NavigateAndCommit(kSigninURL);
   ASSERT_EQ(kSigninURL, web_contents()->GetVisibleURL());
   if (GetParam().signed_in)
     signin_manager_.SignIn("gaia_id", "user", "pass");
   std::unique_ptr<ProcessDiceHeaderDelegateImpl> delegate =
-      CreateDelegate(GetParam().signin_tab);
+      CreateDelegate(GetParam().signin_tab, GetParam().account_consistency);
 
   // Check expectations.
   delegate->HandleTokenExchangeFailure(email_, auth_error_);

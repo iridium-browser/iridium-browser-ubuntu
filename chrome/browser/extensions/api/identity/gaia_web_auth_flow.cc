@@ -11,7 +11,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/trace_event/trace_event.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/signin/chrome_signin_client_factory.h"
+#include "chrome/browser/signin/chrome_device_id_helper.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
@@ -58,11 +58,8 @@ GaiaWebAuthFlow::GaiaWebAuthFlow(Delegate* delegate,
   std::reverse(client_id_parts.begin(), client_id_parts.end());
   redirect_scheme_ = base::JoinString(client_id_parts, ".");
   std::string signin_scoped_device_id;
-  // profile_ can be nullptr in unittests.
-  SigninClient* signin_client =
-      profile_ ? ChromeSigninClientFactory::GetForProfile(profile_) : nullptr;
-  if (signin_client)
-    signin_scoped_device_id = signin_client->GetSigninScopedDeviceId();
+  if (profile_)
+    signin_scoped_device_id = GetSigninScopedDeviceIdForProfile(profile_);
 
   redirect_path_prefix_ = base::StringPrintf(kOAuth2RedirectPathFormat,
                                              token_key->extension_id.c_str());
@@ -94,9 +91,9 @@ GaiaWebAuthFlow::~GaiaWebAuthFlow() {
 void GaiaWebAuthFlow::Start() {
   ProfileOAuth2TokenService* token_service =
       ProfileOAuth2TokenServiceFactory::GetForProfile(profile_);
-  ubertoken_fetcher_.reset(new UbertokenFetcher(token_service, this,
-                                                GaiaConstants::kChromeSource,
-                                                profile_->GetRequestContext()));
+  ubertoken_fetcher_.reset(
+      new UbertokenFetcher(token_service, this, GaiaConstants::kChromeSource,
+                           profile_->GetURLLoaderFactory()));
   ubertoken_fetcher_->set_is_bound_to_channel_id(false);
   ubertoken_fetcher_->StartFetchingToken(account_id_);
 }
@@ -192,9 +189,7 @@ void GaiaWebAuthFlow::OnAuthFlowURLChange(const GURL& url) {
     std::string error;
     std::string expiration;
 
-    for (base::StringPairs::iterator it = pairs.begin();
-         it != pairs.end();
-         ++it) {
+    for (auto it = pairs.begin(); it != pairs.end(); ++it) {
       if (it->first == kOAuth2RedirectAccessTokenKey)
         access_token = it->second;
       else if (it->first == kOAuth2RedirectErrorKey)

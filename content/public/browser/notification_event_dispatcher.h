@@ -11,13 +11,13 @@
 #include "base/optional.h"
 #include "base/strings/string16.h"
 #include "content/common/content_export.h"
-#include "content/public/common/persistent_notification_status.h"
 
 class GURL;
 
 namespace content {
 
 class BrowserContext;
+enum class PersistentNotificationStatus;
 
 // This is the dispatcher to be used for firing events related to notifications.
 // This class is a singleton, the instance of which can be retrieved using the
@@ -26,6 +26,7 @@ class CONTENT_EXPORT NotificationEventDispatcher {
  public:
   static NotificationEventDispatcher* GetInstance();
 
+  using NotificationClickEventCallback = base::OnceCallback<void(bool)>;
   using NotificationDispatchCompleteCallback =
       base::OnceCallback<void(PersistentNotificationStatus)>;
 
@@ -59,9 +60,11 @@ class CONTENT_EXPORT NotificationEventDispatcher {
   virtual void DispatchNonPersistentShowEvent(
       const std::string& notification_id) = 0;
   virtual void DispatchNonPersistentClickEvent(
-      const std::string& notification_id) = 0;
+      const std::string& notification_id,
+      NotificationClickEventCallback callback) = 0;
   virtual void DispatchNonPersistentCloseEvent(
-      const std::string& notification_id) = 0;
+      const std::string& notification_id,
+      base::OnceClosure completed_closure) = 0;
 
  protected:
   virtual ~NotificationEventDispatcher() {}

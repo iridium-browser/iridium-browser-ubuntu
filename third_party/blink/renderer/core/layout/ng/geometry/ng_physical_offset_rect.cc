@@ -4,7 +4,8 @@
 
 #include "third_party/blink/renderer/core/layout/ng/geometry/ng_physical_offset_rect.h"
 
-#include "third_party/blink/renderer/platform/geometry/float_rect.h"
+#include "third_party/blink/renderer/core/layout/ng/geometry/ng_box_strut.h"
+#include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/platform/geometry/layout_rect.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
@@ -27,6 +28,21 @@ void NGPhysicalOffsetRect::Unite(const NGPhysicalOffsetRect& other) {
     return;
   }
 
+  UniteEvenIfEmpty(other);
+}
+
+void NGPhysicalOffsetRect::UniteIfNonZero(const NGPhysicalOffsetRect& other) {
+  if (other.size.IsZero())
+    return;
+  if (size.IsZero()) {
+    *this = other;
+    return;
+  }
+
+  UniteEvenIfEmpty(other);
+}
+
+void NGPhysicalOffsetRect::UniteEvenIfEmpty(const NGPhysicalOffsetRect& other) {
   LayoutUnit left = std::min(offset.left, other.offset.left);
   LayoutUnit top = std::min(offset.top, other.offset.top);
   LayoutUnit right = std::max(Right(), other.Right());
@@ -35,12 +51,38 @@ void NGPhysicalOffsetRect::Unite(const NGPhysicalOffsetRect& other) {
   size = {right - left, bottom - top};
 }
 
+void NGPhysicalOffsetRect::Expand(const NGPhysicalBoxStrut& strut) {
+  if (strut.top) {
+    offset.top -= strut.top;
+    size.height += strut.top;
+  }
+  if (strut.bottom) {
+    size.height += strut.bottom;
+  }
+  if (strut.left) {
+    offset.left -= strut.left;
+    size.width += strut.left;
+  }
+  if (strut.right) {
+    size.width += strut.right;
+  }
+}
+
 NGPhysicalOffsetRect::NGPhysicalOffsetRect(const LayoutRect& source)
     : NGPhysicalOffsetRect({source.X(), source.Y()},
                            {source.Width(), source.Height()}) {}
 
 LayoutRect NGPhysicalOffsetRect::ToLayoutRect() const {
   return {offset.left, offset.top, size.width, size.height};
+}
+
+LayoutRect NGPhysicalOffsetRect::ToLayoutFlippedRect(
+    const ComputedStyle& style,
+    const NGPhysicalSize& container_size) const {
+  if (!style.IsFlippedBlocksWritingMode())
+    return {offset.left, offset.top, size.width, size.height};
+  return {container_size.width - offset.left - size.width, offset.top,
+          size.width, size.height};
 }
 
 FloatRect NGPhysicalOffsetRect::ToFloatRect() const {

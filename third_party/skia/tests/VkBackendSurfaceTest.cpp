@@ -9,9 +9,8 @@
 
 #include "SkTypes.h"
 
-#if SK_SUPPORT_GPU && defined(SK_VULKAN)
+#if defined(SK_VULKAN)
 
-#include "GrTest.h"
 #include "Test.h"
 
 #include "GrBackendSurface.h"
@@ -30,7 +29,7 @@ DEF_GPUTEST_FOR_VULKAN_CONTEXT(VkImageLayoutTest, reporter, ctxInfo) {
     GrVkGpu* gpu = static_cast<GrVkGpu*>(context->contextPriv().getGpu());
 
     GrBackendTexture backendTex = gpu->createTestingOnlyBackendTexture(nullptr, 1, 1,
-                                                                       kRGBA_8888_GrPixelConfig,
+                                                                       GrColorType::kRGBA_8888,
                                                                        false,
                                                                        GrMipMapped::kNo);
     REPORTER_ASSERT(reporter, backendTex.isValid());
@@ -64,8 +63,8 @@ DEF_GPUTEST_FOR_VULKAN_CONTEXT(VkImageLayoutTest, reporter, ctxInfo) {
 
     sk_sp<GrTextureProxy> texProxy = as_IB(wrappedImage)->asTextureProxyRef();
     REPORTER_ASSERT(reporter, texProxy.get());
-    REPORTER_ASSERT(reporter, texProxy->priv().isInstantiated());
-    GrTexture* texture = texProxy->priv().peekTexture();
+    REPORTER_ASSERT(reporter, texProxy->isInstantiated());
+    GrTexture* texture = texProxy->peekTexture();
     REPORTER_ASSERT(reporter, texture);
 
     // Verify that modifying the layout via the GrVkTexture is reflected in the GrBackendTexture
@@ -83,17 +82,6 @@ DEF_GPUTEST_FOR_VULKAN_CONTEXT(VkImageLayoutTest, reporter, ctxInfo) {
     // Verify that modifying the layout via the GrBackendTexutre is reflected in the GrVkTexture
     backendTexImage.setVkImageLayout(VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
     REPORTER_ASSERT(reporter, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL == vkTexture->currentLayout());
-
-    // Verify that modifying the layout via the old textureHandle sitll works in is reflected in the
-    // GrVkTexture and GrBackendTexture.
-    GrVkImageInfo* backendInfo = (GrVkImageInfo*)wrappedImage->getTextureHandle(false);
-    REPORTER_ASSERT(reporter, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL == backendInfo->fImageLayout);
-
-    backendInfo->updateImageLayout(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-    REPORTER_ASSERT(reporter,
-                    VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL == vkTexture->currentLayout());
-    REPORTER_ASSERT(reporter, backendTexImage.getVkImageInfo(&info));
-    REPORTER_ASSERT(reporter, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL == info.fImageLayout);
 
     vkTexture->updateImageLayout(initLayout);
 
@@ -123,7 +111,7 @@ DEF_GPUTEST_FOR_VULKAN_CONTEXT(VkImageLayoutTest, reporter, ctxInfo) {
     REPORTER_ASSERT(reporter, invalidTexture.isValid());
     REPORTER_ASSERT(reporter, GrBackendTexture::TestingOnly_Equals(invalidTexture, backendTex));
 
-    invalidTexture = invalidTexture;
+    invalidTexture = static_cast<decltype(invalidTexture)&>(invalidTexture);
     REPORTER_ASSERT(reporter, invalidTexture.isValid());
     REPORTER_ASSERT(reporter, GrBackendTexture::TestingOnly_Equals(invalidTexture, invalidTexture));
 

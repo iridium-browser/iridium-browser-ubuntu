@@ -6,17 +6,14 @@ package org.chromium.chrome.browser.omnibox;
 
 import android.annotation.SuppressLint;
 import android.content.Context;
-import android.content.DialogInterface;
 import android.content.res.Resources;
 import android.content.res.TypedArray;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
-import android.graphics.Color;
-import android.graphics.PorterDuff;
 import android.graphics.drawable.Drawable;
+import android.support.annotation.ColorRes;
 import android.support.annotation.IntDef;
 import android.support.v4.view.ViewCompat;
-import android.support.v7.app.AlertDialog;
 import android.text.Spannable;
 import android.text.SpannableString;
 import android.text.TextPaint;
@@ -31,12 +28,10 @@ import android.widget.TextView;
 import android.widget.TextView.BufferType;
 
 import org.chromium.base.ApiCompatibilityUtils;
-import org.chromium.base.metrics.RecordUserAction;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.omnibox.OmniboxResultsAdapter.OmniboxResultItem;
 import org.chromium.chrome.browser.omnibox.OmniboxResultsAdapter.OmniboxSuggestionDelegate;
 import org.chromium.chrome.browser.omnibox.OmniboxSuggestion.MatchClassification;
-import org.chromium.chrome.browser.util.ViewUtils;
 import org.chromium.chrome.browser.widget.TintedDrawable;
 import org.chromium.ui.base.DeviceFormFactor;
 
@@ -50,31 +45,19 @@ import java.util.List;
  * any unnecessary measures and layouts.
  */
 class SuggestionView extends ViewGroup {
+    @IntDef({SuggestionIcon.UNDEFINED, SuggestionIcon.BOOKMARK, SuggestionIcon.HISTORY,
+            SuggestionIcon.GLOBE, SuggestionIcon.MAGNIFIER, SuggestionIcon.VOICE})
     @Retention(RetentionPolicy.SOURCE)
-    @IntDef({
-            SUGGESTION_ICON_UNDEFINED,
-            SUGGESTION_ICON_BOOKMARK,
-            SUGGESTION_ICON_HISTORY,
-            SUGGESTION_ICON_GLOBE,
-            SUGGESTION_ICON_MAGNIFIER,
-            SUGGESTION_ICON_VOICE
-    })
-    private @interface SuggestionIcon {}
-
-    private static final int SUGGESTION_ICON_UNDEFINED = -1;
-    private static final int SUGGESTION_ICON_BOOKMARK = 0;
-    private static final int SUGGESTION_ICON_HISTORY = 1;
-    private static final int SUGGESTION_ICON_GLOBE = 2;
-    private static final int SUGGESTION_ICON_MAGNIFIER = 3;
-    private static final int SUGGESTION_ICON_VOICE = 4;
-
-    private static final long RELAYOUT_DELAY_MS = 20;
+    private @interface SuggestionIcon {
+        int UNDEFINED = -1;
+        int BOOKMARK = 0;
+        int HISTORY = 1;
+        int GLOBE = 2;
+        int MAGNIFIER = 3;
+        int VOICE = 4;
+    }
 
     private static final float ANSWER_IMAGE_SCALING_FACTOR = 1.15f;
-
-    private final LocationBar mLocationBar;
-    private UrlBar mUrlBar;
-    private ImageView mNavigationButton;
 
     private final int mSuggestionHeight;
     private final int mSuggestionAnswerHeight;
@@ -82,8 +65,7 @@ class SuggestionView extends ViewGroup {
 
     private final int mDarkTitleColorStandardFont;
     private final int mLightTitleColorStandardFont;
-    private final int mDarkUrlStandardModernColor;
-    private final int mLightUrlStandardModernColor;
+    private final int mDarkUrlStandardColor;
     private final int mLightUrlStandardColor;
 
     private OmniboxResultItem mSuggestionItem;
@@ -92,7 +74,6 @@ class SuggestionView extends ViewGroup {
     private Boolean mUseDarkColors;
     private int mPosition;
     private int mRefineViewOffsetPx;
-    private int mSuggestionViewStartOffset;
 
     private final SuggestionContentsContainer mContentsView;
 
@@ -100,23 +81,18 @@ class SuggestionView extends ViewGroup {
     private final View mRefineView;
     private TintedDrawable mRefineIcon;
     private final int mRefineViewModernEndPadding;
-    private final int mSuggestionListModernOffset;
-
-    private final int[] mViewPositionHolder = new int[2];
 
     // Pre-computed offsets in px.
-    private final int mPhoneUrlBarLeftOffsetPx;
-    private final int mPhoneUrlBarLeftOffsetRtlPx;
+    private final int mSuggestionStartOffsetPx;
+    private final int mSuggestionIconWidthPx;
 
     /**
      * Constructs a new omnibox suggestion view.
      *
      * @param context The context used to construct the suggestion view.
-     * @param locationBar The location bar showing these suggestions.
      */
-    public SuggestionView(Context context, LocationBar locationBar) {
+    public SuggestionView(Context context) {
         super(context);
-        mLocationBar = locationBar;
 
         mSuggestionHeight =
                 context.getResources().getDimensionPixelOffset(R.dimen.omnibox_suggestion_height);
@@ -129,12 +105,10 @@ class SuggestionView extends ViewGroup {
                 ApiCompatibilityUtils.getColor(resources, R.color.url_emphasis_default_text);
         mLightTitleColorStandardFont =
                 ApiCompatibilityUtils.getColor(resources, R.color.url_emphasis_light_default_text);
-        mDarkUrlStandardModernColor =
+        mDarkUrlStandardColor =
                 ApiCompatibilityUtils.getColor(resources, R.color.suggestion_url_dark_modern);
-        mLightUrlStandardModernColor =
-                ApiCompatibilityUtils.getColor(resources, R.color.suggestion_url_light_modern);
         mLightUrlStandardColor =
-                ApiCompatibilityUtils.getColor(resources, R.color.suggestion_url_light);
+                ApiCompatibilityUtils.getColor(resources, R.color.suggestion_url_light_modern);
 
         TypedArray a = getContext().obtainStyledAttributes(
                 new int [] {R.attr.selectableItemBackground});
@@ -199,15 +173,10 @@ class SuggestionView extends ViewGroup {
         mRefineViewModernEndPadding = getResources().getDimensionPixelSize(
                 R.dimen.omnibox_suggestion_refine_view_modern_end_padding);
 
-        mSuggestionListModernOffset =
-                getResources().getDimensionPixelSize(R.dimen.omnibox_suggestion_list_modern_offset);
-
-        mUrlBar = (UrlBar) locationBar.getContainerView().findViewById(R.id.url_bar);
-
-        mPhoneUrlBarLeftOffsetPx = getResources().getDimensionPixelOffset(
-                R.dimen.omnibox_suggestion_phone_url_bar_left_offset);
-        mPhoneUrlBarLeftOffsetRtlPx = getResources().getDimensionPixelOffset(
-                R.dimen.omnibox_suggestion_phone_url_bar_left_offset_rtl);
+        mSuggestionStartOffsetPx =
+                getResources().getDimensionPixelOffset(R.dimen.omnibox_suggestion_start_offset);
+        mSuggestionIconWidthPx =
+                getResources().getDimensionPixelSize(R.dimen.location_bar_icon_width);
     }
 
     @Override
@@ -280,6 +249,9 @@ class SuggestionView extends ViewGroup {
         // Whenever the suggestion dropdown is touched, we dispatch onGestureDown which is
         // used to let autocomplete controller know that it should stop updating suggestions.
         if (ev.getActionMasked() == MotionEvent.ACTION_DOWN) mSuggestionDelegate.onGestureDown();
+        if (ev.getActionMasked() == MotionEvent.ACTION_UP) {
+            mSuggestionDelegate.onGestureUp(ev.getEventTime());
+        }
         return super.dispatchTouchEvent(ev);
     }
 
@@ -290,17 +262,20 @@ class SuggestionView extends ViewGroup {
      * @param suggestionDelegate The suggestion delegate.
      * @param position Position of the suggestion in the dropdown list.
      * @param useDarkColors Whether dark colors should be used for fonts and icons.
-     * @param useModernDesign Whether modern design should be used.
      */
     public void init(OmniboxResultItem suggestionItem, OmniboxSuggestionDelegate suggestionDelegate,
-            int position, boolean useDarkColors, boolean useModernDesign) {
-        ViewCompat.setLayoutDirection(this, ViewCompat.getLayoutDirection(mUrlBar));
-
+            int position, boolean useDarkColors) {
         // Update the position unconditionally.
         mPosition = position;
         jumpDrawablesToCurrentState();
         boolean colorsChanged = mUseDarkColors == null || mUseDarkColors != useDarkColors;
-        if (suggestionItem.equals(mSuggestionItem) && !colorsChanged) return;
+        if (suggestionItem.equals(mSuggestionItem) && !colorsChanged) {
+            // Answer images can be lazily loaded, so update that icon regardless.
+            if (suggestionItem.getAnswerImage() != null) {
+                updateAnswerImage(suggestionItem.getAnswerImage());
+            }
+            return;
+        }
         mUseDarkColors = useDarkColors;
         if (colorsChanged) {
             mContentsView.mTextLine1.setTextColor(getStandardFontColor());
@@ -313,23 +288,19 @@ class SuggestionView extends ViewGroup {
         // Reset old computations.
         mContentsView.resetTextWidths();
         mContentsView.mAnswerImage.setVisibility(GONE);
-        mContentsView.mAnswerImage.getLayoutParams().height = 0;
-        mContentsView.mAnswerImage.getLayoutParams().width = 0;
         mContentsView.mAnswerImage.setImageDrawable(null);
-        mContentsView.mAnswerImageMaxSize = 0;
         mContentsView.mTextLine1.setTextSize(TypedValue.COMPLEX_UNIT_PX, getResources()
                 .getDimension(R.dimen.omnibox_suggestion_first_line_text_size));
         mContentsView.mTextLine2.setTextSize(TypedValue.COMPLEX_UNIT_PX, getResources()
                 .getDimension(R.dimen.omnibox_suggestion_second_line_text_size));
 
-        mRefineViewOffsetPx = useModernDesign ? mRefineViewModernEndPadding : 0;
-        mSuggestionViewStartOffset = useModernDesign ? mSuggestionListModernOffset : 0;
+        mRefineViewOffsetPx = mRefineViewModernEndPadding;
 
         // Suggestions with attached answers are rendered with rich results regardless of which
         // suggestion type they are.
         if (mSuggestion.hasAnswer()) {
-            setAnswer(mSuggestion.getAnswer());
-            mContentsView.setSuggestionIcon(SUGGESTION_ICON_MAGNIFIER, colorsChanged);
+            setAnswer(mSuggestion.getAnswer(), suggestionItem.getAnswerImage());
+            mContentsView.setSuggestionIcon(SuggestionIcon.MAGNIFIER, colorsChanged);
             mContentsView.mTextLine2.setVisibility(VISIBLE);
             setRefinable(true);
             return;
@@ -339,43 +310,42 @@ class SuggestionView extends ViewGroup {
             mContentsView.mTextLine2.setSingleLine();
         }
 
-        boolean sameAsTyped =
-                suggestionItem.getMatchedQuery().equalsIgnoreCase(mSuggestion.getDisplayText());
+        boolean sameAsTyped = suggestionItem.getMatchedQuery().trim().equalsIgnoreCase(
+                mSuggestion.getDisplayText());
         int suggestionType = mSuggestion.getType();
         if (mSuggestion.isUrlSuggestion()) {
             if (mSuggestion.isStarred()) {
-                mContentsView.setSuggestionIcon(SUGGESTION_ICON_BOOKMARK, colorsChanged);
+                mContentsView.setSuggestionIcon(SuggestionIcon.BOOKMARK, colorsChanged);
             } else if (suggestionType == OmniboxSuggestionType.HISTORY_URL) {
-                mContentsView.setSuggestionIcon(SUGGESTION_ICON_HISTORY, colorsChanged);
+                mContentsView.setSuggestionIcon(SuggestionIcon.HISTORY, colorsChanged);
             } else {
-                mContentsView.setSuggestionIcon(SUGGESTION_ICON_GLOBE, colorsChanged);
+                mContentsView.setSuggestionIcon(SuggestionIcon.GLOBE, colorsChanged);
             }
             boolean urlShown = !TextUtils.isEmpty(mSuggestion.getUrl());
             boolean urlHighlighted = false;
             if (urlShown) {
-                urlHighlighted = setUrlText(suggestionItem, useModernDesign);
+                urlHighlighted = setUrlText(suggestionItem);
             } else {
                 mContentsView.mTextLine2.setVisibility(INVISIBLE);
             }
             setSuggestedQuery(suggestionItem, true, urlShown, urlHighlighted);
-            setRefinable(!sameAsTyped
-                    && suggestionType != OmniboxSuggestionType.PHYSICAL_WEB_OVERFLOW);
+            setRefinable(!sameAsTyped);
         } else {
-            @SuggestionIcon int suggestionIcon = SUGGESTION_ICON_MAGNIFIER;
+            @SuggestionIcon
+            int suggestionIcon = SuggestionIcon.MAGNIFIER;
             if (suggestionType == OmniboxSuggestionType.VOICE_SUGGEST) {
-                suggestionIcon = SUGGESTION_ICON_VOICE;
+                suggestionIcon = SuggestionIcon.VOICE;
             } else if ((suggestionType == OmniboxSuggestionType.SEARCH_SUGGEST_PERSONALIZED)
                     || (suggestionType == OmniboxSuggestionType.SEARCH_HISTORY)) {
                 // Show history icon for suggestions based on user queries.
-                suggestionIcon = SUGGESTION_ICON_HISTORY;
+                suggestionIcon = SuggestionIcon.HISTORY;
             }
             mContentsView.setSuggestionIcon(suggestionIcon, colorsChanged);
             setRefinable(!sameAsTyped);
             setSuggestedQuery(suggestionItem, false, false, false);
             if ((suggestionType == OmniboxSuggestionType.SEARCH_SUGGEST_ENTITY)
                     || (suggestionType == OmniboxSuggestionType.SEARCH_SUGGEST_PROFILE)) {
-                showDescriptionLine(SpannableString.valueOf(mSuggestion.getDescription()), false,
-                        useModernDesign);
+                showDescriptionLine(SpannableString.valueOf(mSuggestion.getDescription()), false);
             } else {
                 mContentsView.mTextLine2.setVisibility(INVISIBLE);
             }
@@ -405,10 +375,9 @@ class SuggestionView extends ViewGroup {
                                                           : mLightTitleColorStandardFont;
     }
 
-    private int getStandardUrlColor(boolean useModernDesign) {
-        if (!useModernDesign) return mLightUrlStandardColor;
-        return (mUseDarkColors == null || mUseDarkColors) ? mDarkUrlStandardModernColor
-                                                          : mLightUrlStandardModernColor;
+    private int getStandardUrlColor() {
+        return (mUseDarkColors == null || mUseDarkColors) ? mDarkUrlStandardColor
+                                                          : mLightUrlStandardColor;
     }
 
     @Override
@@ -422,10 +391,10 @@ class SuggestionView extends ViewGroup {
     private void setRefineIcon(boolean invalidateIcon) {
         if (!invalidateIcon && mRefineIcon != null) return;
 
+        @ColorRes
+        int tintId = mUseDarkColors ? R.color.dark_mode_tint : R.color.light_mode_tint;
         mRefineIcon = TintedDrawable.constructTintedDrawable(
-                getResources(), R.drawable.btn_suggestion_refine);
-        mRefineIcon.setTint(ApiCompatibilityUtils.getColorStateList(getResources(),
-                mUseDarkColors ? R.color.dark_mode_tint : R.color.light_mode_tint));
+                getContext(), R.drawable.btn_suggestion_refine, tintId);
         mRefineIcon.setBounds(
                 0, 0,
                 mRefineIcon.getIntrinsicWidth(),
@@ -438,15 +407,14 @@ class SuggestionView extends ViewGroup {
      * Sets (and highlights) the URL text of the second line of the omnibox suggestion.
      *
      * @param result The suggestion containing the URL.
-     * @param useModernDesign Whether modern design should be used.
      * @return Whether the URL was highlighted based on the user query.
      */
-    private boolean setUrlText(OmniboxResultItem result, boolean useModernDesign) {
+    private boolean setUrlText(OmniboxResultItem result) {
         OmniboxSuggestion suggestion = result.getSuggestion();
         Spannable str = SpannableString.valueOf(suggestion.getDisplayText());
         boolean hasMatch = applyHighlightToMatchRegions(
                 str, suggestion.getDisplayTextClassifications());
-        showDescriptionLine(str, true, useModernDesign);
+        showDescriptionLine(str, true);
         return hasMatch;
     }
 
@@ -481,9 +449,8 @@ class SuggestionView extends ViewGroup {
      *
      * @param str The description text.
      * @param isUrl Whether this text is a URL (as opposed to a normal string).
-     * @param useModernDesign Whether modern design should be used.
      */
-    private void showDescriptionLine(Spannable str, boolean isUrl, boolean useModernDesign) {
+    private void showDescriptionLine(Spannable str, boolean isUrl) {
         TextView textLine = mContentsView.mTextLine2;
         if (textLine.getVisibility() != VISIBLE) {
             textLine.setVisibility(VISIBLE);
@@ -492,7 +459,7 @@ class SuggestionView extends ViewGroup {
 
         // Force left-to-right rendering for URLs. See UrlBar constructor for details.
         if (isUrl) {
-            textLine.setTextColor(getStandardUrlColor(useModernDesign));
+            textLine.setTextColor(getStandardUrlColor());
             ApiCompatibilityUtils.setTextDirection(textLine, TEXT_DIRECTION_LTR);
         } else {
             textLine.setTextColor(getStandardFontColor());
@@ -582,8 +549,9 @@ class SuggestionView extends ViewGroup {
      * Sets both lines of the Omnibox suggestion based on an Answers in Suggest result.
      *
      * @param answer The answer to be displayed.
+     * @param answerImage The image associated with the answer.
      */
-    private void setAnswer(SuggestionAnswer answer) {
+    private void setAnswer(SuggestionAnswer answer, Bitmap answerImage) {
         float density = getResources().getDisplayMetrics().density;
 
         SuggestionAnswer.ImageLine firstLine = answer.getFirstLine();
@@ -610,22 +578,14 @@ class SuggestionView extends ViewGroup {
 
         if (secondLine.hasImage()) {
             mContentsView.mAnswerImage.setVisibility(VISIBLE);
-
-            float textSize = mContentsView.mTextLine2.getTextSize();
-            int imageSize = (int) (textSize * ANSWER_IMAGE_SCALING_FACTOR);
-            mContentsView.mAnswerImage.getLayoutParams().height = imageSize;
-            mContentsView.mAnswerImage.getLayoutParams().width = imageSize;
-            mContentsView.mAnswerImageMaxSize = imageSize;
-
-            String url = "https:" + secondLine.getImage().replace("\\/", "/");
-            AnswersImage.requestAnswersImage(mLocationBar.getToolbarDataProvider().getProfile(),
-                    url, new AnswersImage.AnswersImageObserver() {
-                        @Override
-                        public void onAnswersImageChanged(Bitmap bitmap) {
-                            mContentsView.mAnswerImage.setImageBitmap(bitmap);
-                        }
-                    });
+            updateAnswerImage(answerImage);
         }
+    }
+
+    private void updateAnswerImage(Bitmap bitmap) {
+        if (bitmap == null) return;
+        if (mContentsView.mAnswerImage.getDrawable() != null) return;
+        mContentsView.mAnswerImage.setImageBitmap(bitmap);
     }
 
     /**
@@ -652,29 +612,19 @@ class SuggestionView extends ViewGroup {
      * Container view for the contents of the suggestion (the search query, URL, and suggestion type
      * icon).
      */
-    private class SuggestionContentsContainer extends ViewGroup implements OnLayoutChangeListener {
-        private int mSuggestionIconLeft = Integer.MIN_VALUE;
-        private int mTextLeft = Integer.MIN_VALUE;
-        private int mTextRight = Integer.MIN_VALUE;
+    private class SuggestionContentsContainer extends ViewGroup {
+        private int mTextStart = Integer.MIN_VALUE;
         private Drawable mSuggestionIcon;
         @SuggestionIcon
-        private int mSuggestionIconType = SUGGESTION_ICON_UNDEFINED;
+        private int mSuggestionIconType = SuggestionIcon.UNDEFINED;
 
         private final TextView mTextLine1;
         private final TextView mTextLine2;
         private final ImageView mAnswerImage;
 
-        private int mAnswerImageMaxSize;  // getMaxWidth() is API 16+, so store it locally.
         private float mRequiredWidth;
         private float mMatchContentsWidth;
         private boolean mForceIsFocused;
-
-        private final Runnable mRelayoutRunnable = new Runnable() {
-            @Override
-            public void run() {
-                requestLayout();
-            }
-        };
 
         // TODO(crbug.com/635567): Fix this properly.
         @SuppressLint("InlinedApi")
@@ -699,41 +649,7 @@ class SuggestionView extends ViewGroup {
             setOnLongClickListener(new OnLongClickListener() {
                 @Override
                 public boolean onLongClick(View v) {
-                    RecordUserAction.record("MobileOmniboxDeleteGesture");
-                    if (!mSuggestion.isDeletable()) return true;
-
-                    AlertDialog.Builder b =
-                            new AlertDialog.Builder(getContext(), R.style.AlertDialogTheme);
-                    b.setTitle(mSuggestion.getDisplayText());
-                    b.setMessage(R.string.omnibox_confirm_delete);
-                    DialogInterface.OnClickListener okListener =
-                            new DialogInterface.OnClickListener() {
-                                @Override
-                                public void onClick(DialogInterface dialog, int which) {
-                                    RecordUserAction.record("MobileOmniboxDeleteRequested");
-                                    mSuggestionDelegate.onDeleteSuggestion(mPosition);
-                                }
-                            };
-                    b.setPositiveButton(android.R.string.ok, okListener);
-                    DialogInterface.OnClickListener cancelListener =
-                            new DialogInterface.OnClickListener() {
-                                @Override
-                                public void onClick(DialogInterface dialog, int which) {
-                                    dialog.cancel();
-                                }
-                            };
-                    b.setNegativeButton(android.R.string.cancel, cancelListener);
-
-                    AlertDialog dialog = b.create();
-                    dialog.setOnDismissListener(new DialogInterface.OnDismissListener() {
-                        @Override
-                        public void onDismiss(DialogInterface dialog) {
-                            mSuggestionDelegate.onHideModal();
-                        }
-                    });
-
-                    mSuggestionDelegate.onShowModal();
-                    dialog.show();
+                    mSuggestionDelegate.onLongPress(mSuggestion, mPosition);
                     return true;
                 }
             });
@@ -757,8 +673,6 @@ class SuggestionView extends ViewGroup {
             mAnswerImage = new ImageView(context);
             mAnswerImage.setVisibility(GONE);
             mAnswerImage.setScaleType(ImageView.ScaleType.FIT_CENTER);
-            mAnswerImage.setLayoutParams(new LayoutParams(0, 0));
-            mAnswerImageMaxSize = 0;
             addView(mAnswerImage);
         }
 
@@ -772,205 +686,124 @@ class SuggestionView extends ViewGroup {
             super.onDraw(canvas);
 
             if (DeviceFormFactor.isNonMultiDisplayContextOnTablet(getContext())) {
-                // Use the same image transform matrix as the navigation icon to ensure the same
-                // scaling, which requires centering vertically based on the height of the
-                // navigation icon view and not the image itself.
                 canvas.save();
-                mSuggestionIconLeft = getSuggestionIconLeftPosition();
-                canvas.translate(
-                        mSuggestionIconLeft,
-                        (getMeasuredHeight() - mNavigationButton.getMeasuredHeight()) / 2f);
-                canvas.concat(mNavigationButton.getImageMatrix());
+                float suggestionIconLeft =
+                        (mSuggestionIconWidthPx - mSuggestionIcon.getIntrinsicWidth()) / 2f;
+                if (ApiCompatibilityUtils.isLayoutRtl(this)) {
+                    suggestionIconLeft += getMeasuredWidth() - mSuggestionIconWidthPx;
+                }
+                float suggestionIconTop =
+                        (getMeasuredHeight() - mSuggestionIcon.getIntrinsicHeight()) / 2f;
+                canvas.translate(suggestionIconLeft, suggestionIconTop);
                 mSuggestionIcon.draw(canvas);
                 canvas.restore();
             }
         }
 
         @Override
-        protected boolean drawChild(Canvas canvas, View child, long drawingTime) {
-            if (child != mTextLine1 && child != mTextLine2 && child != mAnswerImage) {
-                return super.drawChild(canvas, child, drawingTime);
-            }
-
-            int height = getMeasuredHeight();
-            int line1Height = mTextLine1.getMeasuredHeight();
-            int line2Height = mTextLine2.getVisibility() == VISIBLE
-                    ? mTextLine2.getMeasuredHeight() : 0;
-
-            int verticalOffset = 0;
-            if (line1Height + line2Height > height) {
-                // The text lines total height is larger than this view, snap them to the top and
-                // bottom of the view.
-                if (child != mTextLine1) {
-                    verticalOffset = height - line2Height;
-                }
-            } else {
-                // The text lines fit comfortably, so vertically center them.
-                verticalOffset = (height - line1Height - line2Height) / 2;
-                if (child == mTextLine2) {
-                    verticalOffset += line1Height;
-                    if (mSuggestion.hasAnswer()
-                            && mSuggestion.getAnswer().getSecondLine().hasImage()) {
-                        verticalOffset += getResources().getDimensionPixelOffset(
-                                R.dimen.omnibox_suggestion_answer_line2_vertical_spacing);
-                    }
-                }
-                // When one line is larger than the other, it contains extra vertical padding. This
-                // produces more apparent whitespace above or below the text lines.  Add a small
-                // offset to compensate.
-                if (line1Height != line2Height) {
-                    verticalOffset += (line2Height - line1Height) / 10;
-                }
-
-                // The image is positioned vertically aligned with the second text line but
-                // requires a small additional offset to align with the ascent of the text instead
-                // of the top of the text which includes some whitespace.
-                if (child == mAnswerImage) {
-                    verticalOffset += getResources().getDimensionPixelOffset(
-                            R.dimen.omnibox_suggestion_answer_image_vertical_spacing);
-                }
-
-                if (child != mTextLine1 && verticalOffset + line2Height > height) {
-                    verticalOffset = height - line2Height;
-                }
-            }
-
-            canvas.save();
-            canvas.translate(0, verticalOffset);
-            boolean retVal = super.drawChild(canvas, child, drawingTime);
-            canvas.restore();
-            return retVal;
-        }
-
-        @Override
         protected void onLayout(boolean changed, int l, int t, int r, int b) {
-            View locationBarView = mLocationBar.getContainerView();
-            if (mUrlBar == null) {
-                mUrlBar = (UrlBar) locationBarView.findViewById(R.id.url_bar);
-                mUrlBar.addOnLayoutChangeListener(this);
-            }
-            if (mNavigationButton == null) {
-                mNavigationButton =
-                        (ImageView) locationBarView.findViewById(R.id.navigation_button);
-                mNavigationButton.addOnLayoutChangeListener(this);
-            }
-
             // Align the text to be pixel perfectly aligned with the text in the url bar.
             boolean isRTL = ApiCompatibilityUtils.isLayoutRtl(this);
             if (DeviceFormFactor.isNonMultiDisplayContextOnTablet(getContext())) {
-                int textWidth = isRTL ? mTextRight : (r - l - mTextLeft);
+                int textWidth = isRTL ? mTextStart : (r - l - mTextStart);
                 final float maxRequiredWidth = mSuggestionDelegate.getMaxRequiredWidth();
                 final float maxMatchContentsWidth = mSuggestionDelegate.getMaxMatchContentsWidth();
                 float paddingStart = (textWidth > maxRequiredWidth)
                         ? (mRequiredWidth - mMatchContentsWidth)
                         : Math.max(textWidth - maxMatchContentsWidth, 0);
-                ApiCompatibilityUtils.setPaddingRelative(
-                        mTextLine1, (int) paddingStart, mTextLine1.getPaddingTop(),
-                        0, // TODO(skanuj) : Change to ApiCompatibilityUtils.getPaddingEnd(...).
-                        mTextLine1.getPaddingBottom());
+                // TODO(skanuj) : Change to ViewCompat.getPaddingEnd(...).
+                ViewCompat.setPaddingRelative(mTextLine1, (int) paddingStart,
+                        mTextLine1.getPaddingTop(), 0, mTextLine1.getPaddingBottom());
             }
 
-            int imageWidth = mAnswerImageMaxSize;
+            int imageWidth = mAnswerImage.getMeasuredWidth();
             int imageSpacing = 0;
             if (mAnswerImage.getVisibility() == VISIBLE && imageWidth > 0) {
                 imageSpacing = getResources().getDimensionPixelOffset(
                         R.dimen.omnibox_suggestion_answer_image_horizontal_spacing);
             }
 
+            final int height = getMeasuredHeight();
+            final int line1Height = mTextLine1.getMeasuredHeight();
+            final int line2Height =
+                    mTextLine2.getVisibility() == VISIBLE ? mTextLine2.getMeasuredHeight() : 0;
+
+            // Center the text lines vertically.
+            int line1VerticalOffset = Math.max(0, (height - line1Height - line2Height) / 2);
+            // When one line is larger than the other, it contains extra vertical padding. This
+            // produces more apparent whitespace above or below the text lines.  Add a small
+            // offset to compensate.
+            if (line1Height != line2Height) {
+                line1VerticalOffset += (line2Height - line1Height) / 10;
+            }
+
+            int line2VerticalOffset = line1VerticalOffset + line1Height;
+            int answerVerticalOffset = line2VerticalOffset;
+            if (mSuggestion.hasAnswer() && mSuggestion.getAnswer().getSecondLine().hasImage()) {
+                // The image is positioned vertically aligned with the second text line but
+                // requires a small additional offset to align with the ascent of the text
+                // instead of the top of the text which includes some whitespace.
+                answerVerticalOffset += getResources().getDimensionPixelOffset(
+                        R.dimen.omnibox_suggestion_answer_image_vertical_spacing);
+
+                line2VerticalOffset += getResources().getDimensionPixelOffset(
+                        R.dimen.omnibox_suggestion_answer_line2_vertical_spacing);
+            }
+
+            // The text lines total height is larger than this view, snap them to the top and
+            // bottom of the view.
+            if (line2VerticalOffset + line2Height > height) {
+                // The text lines total height is larger than this view, snap them to the top and
+                // bottom of the view.
+                line1VerticalOffset = 0;
+                line2VerticalOffset = height - line2Height;
+                answerVerticalOffset = line2VerticalOffset;
+            }
+
+            final int line1Top = t + line1VerticalOffset;
+            final int line1Bottom = line1Top + line1Height;
+            final int line2Top = t + line2VerticalOffset;
+            final int line2Bottom = line2Top + line2Height;
+            final int answerImageTop = t + answerVerticalOffset;
+            final int answerImageBottom = answerImageTop + mAnswerImage.getMeasuredHeight();
+
             if (isRTL) {
-                mTextLine1.layout(0, t, mTextRight, b);
-                mAnswerImage.layout(mTextRight - imageWidth, t, mTextRight, b);
-                mTextLine2.layout(0, t, mTextRight - (imageWidth + imageSpacing), b);
-            } else {
-                mTextLine1.layout(mTextLeft + mSuggestionViewStartOffset, t, r - l, b);
-                mAnswerImage.layout(
-                        mTextLeft + mSuggestionViewStartOffset, t, mTextLeft + imageWidth, b);
+                int rightStartPos = r - l - mTextStart;
+                mTextLine1.layout(0, line1Top, rightStartPos, line1Bottom);
+                mAnswerImage.layout(rightStartPos - imageWidth, answerImageTop, rightStartPos,
+                        answerImageBottom);
                 mTextLine2.layout(
-                        mTextLeft + imageWidth + imageSpacing + mSuggestionViewStartOffset, t,
-                        r - l, b);
-            }
-
-            int suggestionIconPosition = getSuggestionIconLeftPosition();
-            if (mSuggestionIconLeft != suggestionIconPosition
-                    && mSuggestionIconLeft != Integer.MIN_VALUE) {
-                mContentsView.postInvalidateOnAnimation();
-            }
-            mSuggestionIconLeft = suggestionIconPosition;
-        }
-
-        private int getUrlBarLeftOffset() {
-            if (mLocationBar.mustQueryUrlBarLocationForSuggestions()) {
-                View contentView = getRootView().findViewById(android.R.id.content);
-                ViewUtils.getRelativeLayoutPosition(contentView, mUrlBar, mViewPositionHolder);
-                return mViewPositionHolder[0];
+                        0, line2Top, rightStartPos - (imageWidth + imageSpacing), line2Bottom);
             } else {
-                return ApiCompatibilityUtils.isLayoutRtl(this) ? mPhoneUrlBarLeftOffsetRtlPx
-                        : mPhoneUrlBarLeftOffsetPx;
+                mTextLine1.layout(mTextStart, line1Top, r - l, line1Bottom);
+                mAnswerImage.layout(
+                        mTextStart, answerImageTop, mTextStart + imageWidth, answerImageBottom);
+                mTextLine2.layout(
+                        mTextStart + imageWidth + imageSpacing, line2Top, r - l, line2Bottom);
             }
-        }
-
-        /**
-         * @return The left offset for the suggestion text.
-         */
-        private int getSuggestionTextLeftPosition() {
-            if (mLocationBar == null) return 0;
-
-            int leftOffset = getUrlBarLeftOffset();
-            View contentView = getRootView().findViewById(android.R.id.content);
-            ViewUtils.getRelativeLayoutPosition(contentView, this, mViewPositionHolder);
-            return leftOffset + mUrlBar.getPaddingLeft() - mViewPositionHolder[0];
-        }
-
-        /**
-         * @return The right offset for the suggestion text.
-         */
-        private int getSuggestionTextRightPosition() {
-            if (mLocationBar == null) return 0;
-
-            int leftOffset = getUrlBarLeftOffset();
-            View contentView = getRootView().findViewById(android.R.id.content);
-            ViewUtils.getRelativeLayoutPosition(contentView, this, mViewPositionHolder);
-            return leftOffset + mUrlBar.getWidth() - mUrlBar.getPaddingRight()
-                    - mViewPositionHolder[0];
-        }
-
-        /**
-         * @return The left offset for the suggestion type icon that aligns it with the url bar.
-         */
-        private int getSuggestionIconLeftPosition() {
-            if (mNavigationButton == null) return 0;
-
-            // Ensure the suggestion icon matches the location of the navigation icon in the omnibox
-            // perfectly.
-            mNavigationButton.getLocationOnScreen(mViewPositionHolder);
-            int navButtonXPosition = mViewPositionHolder[0] + mNavigationButton.getPaddingLeft();
-
-            getLocationOnScreen(mViewPositionHolder);
-
-            return navButtonXPosition - mViewPositionHolder[0];
         }
 
         @Override
         protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-            int width = MeasureSpec.getSize(widthMeasureSpec);
-            int height = MeasureSpec.getSize(heightMeasureSpec);
+            mTextStart = mSuggestionStartOffsetPx;
 
-            boolean isRTL = ApiCompatibilityUtils.isLayoutRtl(this);
-            mTextLeft = getSuggestionTextLeftPosition();
-            mTextRight = getSuggestionTextRightPosition();
+            // TODO(tedchoc): Instead of comparing width/height, compare the last text (including
+            //                style spans) measured and if that remains the same along with the
+            //                height/width of this view, then we should be able to skip measure
+            //                properly.
+            int maxWidth = MeasureSpec.getSize(widthMeasureSpec) - mTextStart;
+            mTextLine1.measure(MeasureSpec.makeMeasureSpec(maxWidth, MeasureSpec.AT_MOST),
+                    MeasureSpec.makeMeasureSpec(mSuggestionHeight, MeasureSpec.AT_MOST));
+            mTextLine2.measure(MeasureSpec.makeMeasureSpec(maxWidth, MeasureSpec.AT_MOST),
+                    MeasureSpec.makeMeasureSpec(mSuggestionHeight, MeasureSpec.AT_MOST));
 
-            int maxWidth = width - (isRTL ? mTextRight : mTextLeft);
-            if (mTextLine1.getMeasuredWidth() != width
-                    || mTextLine1.getMeasuredHeight() != height) {
-                mTextLine1.measure(MeasureSpec.makeMeasureSpec(maxWidth, MeasureSpec.AT_MOST),
-                        MeasureSpec.makeMeasureSpec(mSuggestionHeight, MeasureSpec.AT_MOST));
+            if (mAnswerImage.getVisibility() == VISIBLE) {
+                float textSize = mContentsView.mTextLine2.getTextSize();
+                int imageSize = (int) (textSize * ANSWER_IMAGE_SCALING_FACTOR);
+                mAnswerImage.measure(MeasureSpec.makeMeasureSpec(imageSize, MeasureSpec.EXACTLY),
+                        MeasureSpec.makeMeasureSpec(imageSize, MeasureSpec.EXACTLY));
             }
 
-            if (mTextLine2.getMeasuredWidth() != width
-                    || mTextLine2.getMeasuredHeight() != height) {
-                mTextLine2.measure(MeasureSpec.makeMeasureSpec(maxWidth, MeasureSpec.AT_MOST),
-                        MeasureSpec.makeMeasureSpec(mSuggestionHeight, MeasureSpec.AT_MOST));
-            }
             if (MeasureSpec.getMode(heightMeasureSpec) == MeasureSpec.AT_MOST) {
                 int desiredHeight = mTextLine1.getMeasuredHeight() + mTextLine2.getMeasuredHeight();
                 int additionalPadding = (int) getResources().getDimension(
@@ -986,22 +819,6 @@ class SuggestionView extends ViewGroup {
             } else {
                 assert MeasureSpec.getMode(heightMeasureSpec) == MeasureSpec.EXACTLY;
                 super.onMeasure(widthMeasureSpec, heightMeasureSpec);
-            }
-        }
-
-        @Override
-        public void invalidate() {
-            if (getSuggestionTextLeftPosition() != mTextLeft
-                    || getSuggestionTextRightPosition() != mTextRight) {
-                // When the text position is changed, it typically is caused by the suggestions
-                // appearing while the URL bar on the phone is gaining focus (if you trigger an
-                // intent that will result in suggestions being shown before focusing the omnibox).
-                // Triggering a relayout will cause any animations to stutter, so we continually
-                // push the relayout to end of the UI queue until the animation is complete.
-                removeCallbacks(mRelayoutRunnable);
-                postDelayed(mRelayoutRunnable, RELAYOUT_DELAY_MS);
-            } else {
-                super.invalidate();
             }
         }
 
@@ -1026,84 +843,33 @@ class SuggestionView extends ViewGroup {
         @SuppressLint("SwitchIntDef")
         private void setSuggestionIcon(@SuggestionIcon int type, boolean invalidateCurrentIcon) {
             if (mSuggestionIconType == type && !invalidateCurrentIcon) return;
-            assert type != SUGGESTION_ICON_UNDEFINED;
+            assert type != SuggestionIcon.UNDEFINED;
 
             int drawableId = R.drawable.ic_omnibox_page;
             switch (type) {
-                case SUGGESTION_ICON_BOOKMARK:
+                case SuggestionIcon.BOOKMARK:
                     drawableId = R.drawable.btn_star;
                     break;
-                case SUGGESTION_ICON_MAGNIFIER:
+                case SuggestionIcon.MAGNIFIER:
                     drawableId = R.drawable.ic_suggestion_magnifier;
                     break;
-                case SUGGESTION_ICON_HISTORY:
+                case SuggestionIcon.HISTORY:
                     drawableId = R.drawable.ic_suggestion_history;
                     break;
-                case SUGGESTION_ICON_VOICE:
+                case SuggestionIcon.VOICE:
                     drawableId = R.drawable.btn_mic;
                     break;
                 default:
                     break;
             }
-            mSuggestionIcon = ApiCompatibilityUtils.getDrawable(getResources(), drawableId);
-            mSuggestionIcon.setColorFilter(mUseDarkColors
-                    ? ApiCompatibilityUtils.getColor(getResources(), R.color.light_normal_color)
-                    : Color.WHITE, PorterDuff.Mode.SRC_IN);
+            mSuggestionIcon = TintedDrawable.constructTintedDrawable(getContext(), drawableId,
+                    mUseDarkColors ? R.color.dark_mode_tint : R.color.white_mode_tint);
             mSuggestionIcon.setBounds(
                     0, 0,
                     mSuggestionIcon.getIntrinsicWidth(),
                     mSuggestionIcon.getIntrinsicHeight());
             mSuggestionIconType = type;
             invalidate();
-        }
-
-        @Override
-        public void onLayoutChange(
-                View v, int left, int top, int right, int bottom, int oldLeft,
-                int oldTop, int oldRight, int oldBottom) {
-            boolean needsInvalidate = false;
-            if (v == mNavigationButton) {
-                if (mSuggestionIconLeft != getSuggestionIconLeftPosition()
-                        && mSuggestionIconLeft != Integer.MIN_VALUE) {
-                    needsInvalidate = true;
-                }
-            } else {
-                if (mTextLeft != getSuggestionTextLeftPosition()
-                        && mTextLeft != Integer.MIN_VALUE) {
-                    needsInvalidate = true;
-                }
-                if (mTextRight != getSuggestionTextRightPosition()
-                        && mTextRight != Integer.MIN_VALUE) {
-                    needsInvalidate = true;
-                }
-            }
-            if (needsInvalidate) {
-                removeCallbacks(mRelayoutRunnable);
-                postDelayed(mRelayoutRunnable, RELAYOUT_DELAY_MS);
-            }
-        }
-
-        @Override
-        protected void onAttachedToWindow() {
-            super.onAttachedToWindow();
-            if (mNavigationButton != null) mNavigationButton.addOnLayoutChangeListener(this);
-            if (mUrlBar != null) mUrlBar.addOnLayoutChangeListener(this);
-            if (mLocationBar != null) {
-                mLocationBar.getContainerView().addOnLayoutChangeListener(this);
-            }
-            getRootView().addOnLayoutChangeListener(this);
-        }
-
-        @Override
-        protected void onDetachedFromWindow() {
-            if (mNavigationButton != null) mNavigationButton.removeOnLayoutChangeListener(this);
-            if (mUrlBar != null) mUrlBar.removeOnLayoutChangeListener(this);
-            if (mLocationBar != null) {
-                mLocationBar.getContainerView().removeOnLayoutChangeListener(this);
-            }
-            getRootView().removeOnLayoutChangeListener(this);
-
-            super.onDetachedFromWindow();
         }
     }
 }

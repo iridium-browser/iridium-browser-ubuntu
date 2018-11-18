@@ -192,8 +192,7 @@ bool IsolatedContext::Instance::ResolvePathForName(const std::string& name,
 
     return file_info_.name == name;
   }
-  std::set<MountPointInfo>::const_iterator found = files_.find(
-      MountPointInfo(name, base::FilePath()));
+  auto found = files_.find(MountPointInfo(name, base::FilePath()));
   if (found == files_.end())
     return false;
   *path = found->path;
@@ -310,8 +309,7 @@ bool IsolatedContext::CrackVirtualPath(
   virtual_path.GetComponents(&components);
   if (components.size() < 1)
     return false;
-  std::vector<base::FilePath::StringType>::iterator component_iter =
-      components.begin();
+  auto component_iter = components.begin();
   std::string fsid = base::FilePath(*component_iter++).MaybeAsASCII();
   if (fsid.empty())
     return false;
@@ -367,9 +365,8 @@ void IsolatedContext::RevokeFileSystemByPath(const base::FilePath& path_in) {
   auto ids_iter = path_to_id_map_.find(path);
   if (ids_iter == path_to_id_map_.end())
     return;
-  std::set<std::string>& ids = ids_iter->second;
-  for (auto iter = ids.begin(); iter != ids.end(); ++iter)
-    instance_map_.erase(*iter);
+  for (auto& id : ids_iter->second)
+    instance_map_.erase(id);
   path_to_id_map_.erase(ids_iter);
 }
 

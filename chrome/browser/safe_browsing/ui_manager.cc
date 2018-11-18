@@ -12,9 +12,9 @@
 #include "base/threading/thread_restrictions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/history/history_service_factory.h"
+#include "chrome/browser/interstitials/enterprise_util.h"
 #include "chrome/browser/metrics/chrome_metrics_service_accessor.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/safe_browsing/ping_manager.h"
 #include "chrome/browser/safe_browsing/safe_browsing_blocking_page.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/tab_contents/tab_util.h"
@@ -23,6 +23,7 @@
 #include "components/prefs/pref_service.h"
 #include "components/safe_browsing/browser/threat_details.h"
 #include "components/safe_browsing/common/safe_browsing_prefs.h"
+#include "components/safe_browsing/ping_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
@@ -107,7 +108,8 @@ void SafeBrowsingUIManager::ShowBlockingPageForResource(
 bool SafeBrowsingUIManager::ShouldSendHitReport(
     const HitReport& hit_report,
     const WebContents* web_contents) {
-  return hit_report.extended_reporting_level != SBER_LEVEL_OFF &&
+  return web_contents &&
+         hit_report.extended_reporting_level != SBER_LEVEL_OFF &&
          !web_contents->GetBrowserContext()->IsOffTheRecord();
 }
 
@@ -186,6 +188,20 @@ void SafeBrowsingUIManager::SendSerializedThreatDetails(
   }
 }
 
+void SafeBrowsingUIManager::OnBlockingPageDone(
+    const std::vector<UnsafeResource>& resources,
+    bool proceed,
+    content::WebContents* web_contents,
+    const GURL& main_frame_url) {
+  BaseUIManager::OnBlockingPageDone(resources, proceed, web_contents,
+                                    main_frame_url);
+  if (proceed && resources.size() > 0) {
+    MaybeTriggerSecurityInterstitialProceededEvent(
+        web_contents, main_frame_url,
+        GetThreatTypeStringForInterstitial(resources[0].threat_type),
+        /*net_error_code=*/0);
+  }
+}
 // Static.
 GURL SafeBrowsingUIManager::GetMainFrameWhitelistUrlForResourceForTesting(
     const security_interstitials::UnsafeResource& resource) {

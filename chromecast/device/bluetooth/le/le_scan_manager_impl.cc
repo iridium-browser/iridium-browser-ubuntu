@@ -41,6 +41,22 @@ const int kMaxMessagesInQueue = 5;
 
 }  // namespace
 
+// static
+constexpr int LeScanManagerImpl::kMaxScanResultEntries;
+
+class LeScanManagerImpl::ScanHandleImpl : public LeScanManager::ScanHandle {
+ public:
+  explicit ScanHandleImpl(LeScanManagerImpl* manager, int32_t id)
+      : on_destroyed_(BindToCurrentSequence(
+            base::BindOnce(&LeScanManagerImpl::NotifyScanHandleDestroyed,
+                           manager->weak_factory_.GetWeakPtr(),
+                           id))) {}
+  ~ScanHandleImpl() override { std::move(on_destroyed_).Run(); }
+
+ private:
+  base::OnceClosure on_destroyed_;
+};
+
 LeScanManagerImpl::LeScanManagerImpl(
     bluetooth_v2_shlib::LeScannerImpl* le_scanner)
     : le_scanner_(le_scanner),
@@ -64,24 +80,25 @@ void LeScanManagerImpl::RemoveObserver(Observer* observer) {
   observers_->RemoveObserver(observer);
 }
 
-void LeScanManagerImpl::SetScanEnable(bool enable, SetScanEnableCallback cb) {
-  MAKE_SURE_IO_THREAD(SetScanEnable, enable,
-                      BindToCurrentSequence(std::move(cb)));
-  bool success;
-  if (enable) {
-    success = le_scanner_->StartScan();
-  } else {
-    success = le_scanner_->StopScan();
+void LeScanManagerImpl::RequestScan(RequestScanCallback cb) {
+  MAKE_SURE_IO_THREAD(RequestScan, BindToCurrentSequence(std::move(cb)));
+  LOG(INFO) << __func__;
+
+  if (scan_handle_ids_.empty()) {
+    if (!le_scanner_->StartScan()) {
+      LOG(ERROR) << "Failed to enable scanning";
+      std::move(cb).Run(nullptr);
+      return;
+    }
+    LOG(INFO) << "Enabling scan";
+    observers_->Notify(FROM_HERE, &Observer::OnScanEnableChanged, true);
   }
 
-  if (!success) {
-    LOG(ERROR) << "Failed to " << (enable ? "enable" : "disable")
-               << " ble scanning";
-    EXEC_CB_AND_RET(cb, false);
-  }
+  int32_t id = next_scan_handle_id_++;
+  auto handle = std::make_unique<ScanHandleImpl>(this, id);
+  scan_handle_ids_.insert(id);
 
-  observers_->Notify(FROM_HERE, &Observer::OnScanEnableChanged, enable);
-  EXEC_CB_AND_RET(cb, true);
+  std::move(cb).Run(std::move(handle));
 }
 
 void LeScanManagerImpl::GetScanResults(GetScanResultsCallback cb,
@@ -89,6 +106,53 @@ void LeScanManagerImpl::GetScanResults(GetScanResultsCallback cb,
   MAKE_SURE_IO_THREAD(GetScanResults, BindToCurrentSequence(std::move(cb)),
                       std::move(scan_filter));
   std::move(cb).Run(GetScanResultsInternal(std::move(scan_filter)));
+}
+
+void LeScanManagerImpl::ClearScanResults() {
+  MAKE_SURE_IO_THREAD(ClearScanResults);
+  addr_to_scan_results_.clear();
+}
+
+void LeScanManagerImpl::OnScanResult(
+    const bluetooth_v2_shlib::LeScanner::ScanResult& scan_result_shlib) {
+  LeScanResult scan_result;
+  if (!scan_result.SetAdvData(scan_result_shlib.adv_data)) {
+    // Error logged.
+    return;
+  }
+  scan_result.addr = scan_result_shlib.addr;
+  scan_result.rssi = scan_result_shlib.rssi;
+
+  auto& previous_scan_results = addr_to_scan_results_[scan_result.addr];
+  if (previous_scan_results.size() > 0) {
+    // Remove results with the same data as the current result to avoid
+    // duplicate messages in the queue
+    previous_scan_results.remove_if(
+        [&scan_result](const auto& previous_result) {
+          return previous_result.adv_data == scan_result.adv_data;
+        });
+
+    // Remove scan_result.addr to avoid duplicate addresses in
+    // recent_scan_result_addr_list_.
+    base::Erase(scan_result_addr_list_, scan_result.addr);
+  }
+
+  previous_scan_results.push_front(scan_result);
+  if (previous_scan_results.size() > kMaxMessagesInQueue) {
+    previous_scan_results.pop_back();
+  }
+
+  // Update recent_scan_result_addr_list_.
+  scan_result_addr_list_.push_front(scan_result.addr);
+  while (scan_result_addr_list_.size() > kMaxScanResultEntries) {
+    // Remove least recently used address in recent_scan_result_addr_list_.
+    auto least_recently_used_addr = scan_result_addr_list_.back();
+    scan_result_addr_list_.pop_back();
+    addr_to_scan_results_.erase(least_recently_used_addr);
+  }
+
+  // Update observers.
+  observers_->Notify(FROM_HERE, &Observer::OnNewScanResult, scan_result);
 }
 
 // Returns a list of all scan results. The results are sorted by RSSI.
@@ -112,35 +176,19 @@ std::vector<LeScanResult> LeScanManagerImpl::GetScanResultsInternal(
   return results;
 }
 
-void LeScanManagerImpl::ClearScanResults() {
-  MAKE_SURE_IO_THREAD(ClearScanResults);
-  addr_to_scan_results_.clear();
-}
+void LeScanManagerImpl::NotifyScanHandleDestroyed(int32_t id) {
+  DCHECK(io_task_runner_->BelongsToCurrentThread());
 
-void LeScanManagerImpl::OnScanResult(
-    const bluetooth_v2_shlib::LeScanner::ScanResult& scan_result_shlib) {
-  LeScanResult scan_result;
-  if (!scan_result.SetAdvData(scan_result_shlib.adv_data)) {
-    // Error logged.
-    return;
+  size_t num_removed = scan_handle_ids_.erase(id);
+  DCHECK_EQ(num_removed, 1u);
+  if (scan_handle_ids_.empty()) {
+    if (!le_scanner_->StopScan()) {
+      LOG(ERROR) << "Failed to disable scanning";
+    } else {
+      LOG(INFO) << "Disabling scan";
+      observers_->Notify(FROM_HERE, &Observer::OnScanEnableChanged, false);
+    }
   }
-  scan_result.addr = scan_result_shlib.addr;
-  scan_result.rssi = scan_result_shlib.rssi;
-
-  // Remove results with the same data as the current result to avoid duplicate
-  // messages in the queue
-  auto& previous_scan_results = addr_to_scan_results_[scan_result.addr];
-  previous_scan_results.remove_if([&scan_result](const auto& previous_result) {
-    return previous_result.adv_data == scan_result.adv_data;
-  });
-
-  previous_scan_results.push_front(scan_result);
-  if (previous_scan_results.size() > kMaxMessagesInQueue) {
-    previous_scan_results.pop_back();
-  }
-
-  // Update observers.
-  observers_->Notify(FROM_HERE, &Observer::OnNewScanResult, scan_result);
 }
 
 }  // namespace bluetooth

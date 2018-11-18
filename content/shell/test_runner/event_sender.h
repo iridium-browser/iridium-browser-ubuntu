@@ -15,6 +15,7 @@
 #include "base/containers/circular_deque.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "base/time/time.h"
 #include "build/build_config.h"
 #include "third_party/blink/public/platform/web_drag_data.h"
 #include "third_party/blink/public/platform/web_drag_operation.h"
@@ -154,9 +155,6 @@ class EventSender {
   void GestureScrollBegin(gin::Arguments* args);
   void GestureScrollEnd(gin::Arguments* args);
   void GestureScrollUpdate(gin::Arguments* args);
-  void GesturePinchBegin(gin::Arguments* args);
-  void GesturePinchEnd(gin::Arguments* args);
-  void GesturePinchUpdate(gin::Arguments* args);
   void GestureTap(gin::Arguments* args);
   void GestureTapDown(gin::Arguments* args);
   void GestureShowPress(gin::Arguments* args);
@@ -176,7 +174,7 @@ class EventSender {
   // expect it.
   void ConsumeUserActivation();
 
-  double GetCurrentEventTimeSec();
+  base::TimeTicks GetCurrentEventTime() const;
 
   void DoLeapForward(int milliseconds);
 
@@ -210,7 +208,7 @@ class EventSender {
   std::unique_ptr<blink::WebInputEvent> TransformScreenToWidgetCoordinates(
       const blink::WebInputEvent& event);
 
-  double last_event_timestamp() { return last_event_timestamp_; }
+  base::TimeTicks last_event_timestamp() const { return last_event_timestamp_; }
 
   bool force_layout_on_events() const { return force_layout_on_events_; }
   void set_force_layout_on_events(bool force) {
@@ -313,7 +311,7 @@ class EventSender {
   blink::WebDragOperationsMask current_drag_effects_allowed_;
 
   // Time and place of the last mouse up event.
-  double last_click_time_sec_;
+  base::TimeTicks last_click_time_;
   blink::WebPoint last_click_pos_;
 
   // The last button number passed to mouseDown and mouseUp.
@@ -322,10 +320,10 @@ class EventSender {
 
   blink::WebDragOperation current_drag_effect_;
 
-  uint32_t time_offset_ms_;
+  base::TimeDelta time_offset_;
   int click_count_;
-  // Timestamp (in seconds) of the last event that was dispatched
-  double last_event_timestamp_;
+  // Timestamp of the last event that was dispatched
+  base::TimeTicks last_event_timestamp_;
 
   base::WeakPtrFactory<EventSender> weak_factory_;
 

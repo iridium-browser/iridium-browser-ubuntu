@@ -98,8 +98,10 @@ void DownloadShelfUIControllerDelegate::OnNewDownloadReady(
 
   if (browser && browser->window() &&
       DownloadItemModel(item).ShouldShowInShelf()) {
+    DownloadUIModel::DownloadUIModelPtr model = DownloadItemModel::Wrap(item);
+
     // GetDownloadShelf creates the download shelf if it was not yet created.
-    browser->window()->GetDownloadShelf()->AddDownload(item);
+    browser->window()->GetDownloadShelf()->AddDownload(std::move(model));
   }
 }
 
@@ -143,8 +145,7 @@ void DownloadUIController::OnDownloadCreated(content::DownloadManager* manager,
   content::WebContents* web_contents =
       content::DownloadItemUtils::GetWebContents(item);
   if (web_contents && (item->IsSavePackageDownload() ||
-                       (!web_contents->GetURL().is_empty() &&
-                        web_contents->GetURL() != item->GetOriginalUrl() &&
+                       (web_contents->GetURL() != item->GetOriginalUrl() &&
                         web_contents->GetURL() != item->GetURL()))) {
     auto* security_state_tab_helper =
         SecurityStateTabHelper::FromWebContents(web_contents);

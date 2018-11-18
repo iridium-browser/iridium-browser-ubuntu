@@ -270,18 +270,18 @@ template("generate_mini_installer") {
     ]
 
     # In general, mini_installer tries to avoid depending on the C++ standard
-    # library for size reasons. This is achieved by setting a custom entry point
-    # (which avoids pulling in the standard library via a link dependency) as
-    # well as by not depending on exe_and_shlib_deps (which depends on
-    # libc++ in use_custom_libcxx=true builds).
+    # library for size reasons. This is achieved by:
+    #   1. setting a custom entry point which avoids pulling in the standard
+    #      library via a link dependency.
+    #   2. setting no_default_deps=true to avoid including the implicit
+    #      dependency on //buildtools/third_party/libc++ in builds that set
+    #      use_custom_libcxx=true.
     #
     # But in asan builds we need to link against the asan runtime library, which
     # in turn depends on the standard library and relies on it to run
-    # initializers. So in asan builds we depend on exe_and_shlib_deps for the
-    # asan runtime and use the standard entry point.
-    if (is_asan) {
-      deps += [ "//build/config:exe_and_shlib_deps" ]
-    } else {
+    # initializers.
+    if (!is_asan) {
+      no_default_deps = true
       ldflags += [ "/ENTRY:MainEntryPoint" ]
     }
   }
@@ -293,13 +293,13 @@ generate_mini_installer("mini_installer") {
   chrome_dll_target = "//chrome:main_dll"
 }
 
-# next_version_mini_installer.exe can't be generated in an x86 Debug component
-# build because it requires too much memory.
+# previous_version_mini_installer.exe can't be generated in an x86 Debug
+# component build because it requires too much memory.
 # TODO(thakis): Enable this in cross builds, https://crbug.com/799827
 if (!(is_component_build && is_debug && target_cpu == "x86") &&
     host_os == "win") {
-  action("next_version_mini_installer") {
-    script = "generate_next_version_mini_installer.py"
+  action("previous_version_mini_installer") {
+    script = "generate_previous_version_mini_installer.py"
     testonly = true
     inputs = [
       "$root_out_dir/alternate_version_generator.exe",

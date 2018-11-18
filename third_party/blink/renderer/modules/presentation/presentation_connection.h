@@ -7,7 +7,7 @@
 
 #include <memory>
 #include "mojo/public/cpp/bindings/binding.h"
-#include "third_party/blink/public/platform/modules/presentation/presentation.mojom-blink.h"
+#include "third_party/blink/public/mojom/presentation/presentation.mojom-blink.h"
 #include "third_party/blink/renderer/core/dom/context_lifecycle_observer.h"
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
 #include "third_party/blink/renderer/core/fileapi/blob.h"
@@ -28,6 +28,7 @@ class DOMArrayBufferView;
 class PresentationController;
 class PresentationReceiver;
 class PresentationRequest;
+class WebString;
 
 class PresentationConnection : public EventTargetWithInlineData,
                                public ContextLifecycleObserver,
@@ -42,7 +43,7 @@ class PresentationConnection : public EventTargetWithInlineData,
   const AtomicString& InterfaceName() const override;
   ExecutionContext* GetExecutionContext() const override;
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
   const String& id() const { return id_; }
   const String& url() const { return url_; }
@@ -52,7 +53,12 @@ class PresentationConnection : public EventTargetWithInlineData,
   void send(DOMArrayBuffer*, ExceptionState&);
   void send(NotShared<DOMArrayBufferView>, ExceptionState&);
   void send(Blob*, ExceptionState&);
+
+  // Closes the connection to the ongoing presentation.
   void close();
+
+  // Terminates the ongoing presentation that this PresentationConnection is
+  // connected to.
   void terminate();
 
   String binaryType() const;
@@ -72,10 +78,9 @@ class PresentationConnection : public EventTargetWithInlineData,
                 const String& message);
 
   // mojom::blink::PresentationConnection implementation.
-  void OnMessage(mojom::blink::PresentationConnectionMessagePtr,
-                 OnMessageCallback) override;
+  void OnMessage(mojom::blink::PresentationConnectionMessagePtr) override;
   void DidChangeState(mojom::blink::PresentationConnectionState) override;
-  void RequestClose() override;
+  void DidClose(mojom::blink::PresentationConnectionCloseReason) override;
 
   mojom::blink::PresentationConnectionState GetState() const;
 
@@ -117,9 +122,9 @@ class PresentationConnection : public EventTargetWithInlineData,
   class Message;
 
   // Implemented by controller/receiver subclasses to perform additional
-  // operations.
-  virtual void DoClose() = 0;
-  virtual void DoTerminate() = 0;
+  // operations when close() / terminate() is called.
+  virtual void CloseInternal() = 0;
+  virtual void TerminateInternal() = 0;
 
   bool CanSendMessage(ExceptionState&);
   void HandleMessageQueue();
@@ -131,11 +136,11 @@ class PresentationConnection : public EventTargetWithInlineData,
   void SendMessageToTargetConnection(
       mojom::blink::PresentationConnectionMessagePtr);
   void DidReceiveTextMessage(const WebString&);
-  void DidReceiveBinaryMessage(const uint8_t*, size_t length);
+  void DidReceiveBinaryMessage(const uint8_t*, uint32_t length);
 
-  // Notifies the presentation about its state change to 'closed', with
-  // "closed" being the reason and empty string as the message.
-  void DidClose();
+  // Closes the PresentationConnection with the given reason and notifies the
+  // target connection.
+  void DoClose(mojom::blink::PresentationConnectionCloseReason);
 
   // Internal helper function to dispatch state change events asynchronously.
   void DispatchStateChangeEvent(Event*);
@@ -170,15 +175,16 @@ class ControllerPresentationConnection final : public PresentationConnection {
                                    const KURL&);
   ~ControllerPresentationConnection() override;
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
   // Initializes Mojo message pipes and registers with the PresentationService.
-  void Init();
+  void Init(mojom::blink::PresentationConnectionPtr connection_ptr,
+            mojom::blink::PresentationConnectionRequest connection_request);
 
  private:
   // PresentationConnection implementation.
-  void DoClose() override;
-  void DoTerminate() override;
+  void CloseInternal() override;
+  void TerminateInternal() override;
 
   Member<PresentationController> controller_;
 };
@@ -201,7 +207,7 @@ class ReceiverPresentationConnection final : public PresentationConnection {
                                  const KURL&);
   ~ReceiverPresentationConnection() override;
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
   void Init(
       mojom::blink::PresentationConnectionPtr controller_connection_ptr,
@@ -209,14 +215,17 @@ class ReceiverPresentationConnection final : public PresentationConnection {
 
   // PresentationConnection override
   void DidChangeState(mojom::blink::PresentationConnectionState) override;
-
-  // Changes |state_| to TERMINATED and notifies |target_connection_|.
-  void OnReceiverTerminated();
+  void DidClose(mojom::blink::PresentationConnectionCloseReason) override;
 
  private:
   // PresentationConnection implementation.
-  void DoClose() override;
-  void DoTerminate() override;
+  void CloseInternal() override;
+
+  // Changes the presentation state to TERMINATED and notifies the sender
+  // connection. This method does not dispatch a state change event to the page.
+  // This method is only suitable for use when the presentation receiver frame
+  // containing the connection object is going away.
+  void TerminateInternal() override;
 
   Member<PresentationReceiver> receiver_;
 };

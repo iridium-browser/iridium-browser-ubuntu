@@ -18,6 +18,7 @@ component("common") {
     "fileapi/file_system_info.cc",
     "fileapi/file_system_info.h",
     "fileapi/file_system_mount_option.h",
+    "fileapi/file_system_type_converters.h",
     "fileapi/file_system_types.h",
     "fileapi/file_system_util.cc",
     "fileapi/file_system_util.h",
@@ -62,7 +63,7 @@ source_set("unittests") {
   deps = [
     ":common",
     "//base/test:test_support",
-    "//mojo/edk",
+    "//mojo/core/embedder",
     "//testing/gtest",
     "//url",
   ]

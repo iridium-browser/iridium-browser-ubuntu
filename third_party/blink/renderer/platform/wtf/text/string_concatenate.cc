@@ -8,6 +8,9 @@
 
 #include "third_party/blink/renderer/platform/wtf/text/string_impl.h"
 
+WTF::StringTypeAdapter<char*>::StringTypeAdapter(char* buffer, size_t length)
+    : buffer_(buffer), length_(SafeCast<unsigned>(length)) {}
+
 void WTF::StringTypeAdapter<char*>::WriteTo(LChar* destination) const {
   for (unsigned i = 0; i < length_; ++i)
     destination[i] = static_cast<LChar>(buffer_[i]);
@@ -21,7 +24,8 @@ void WTF::StringTypeAdapter<char*>::WriteTo(UChar* destination) const {
 }
 
 WTF::StringTypeAdapter<LChar*>::StringTypeAdapter(LChar* buffer)
-    : buffer_(buffer), length_(strlen(reinterpret_cast<char*>(buffer))) {}
+    : buffer_(buffer),
+      length_(SafeCast<wtf_size_t>(strlen(reinterpret_cast<char*>(buffer)))) {}
 
 void WTF::StringTypeAdapter<LChar*>::WriteTo(LChar* destination) const {
   memcpy(destination, buffer_, length_ * sizeof(LChar));
@@ -39,7 +43,7 @@ void WTF::StringTypeAdapter<const UChar*>::WriteTo(UChar* destination) const {
 }
 
 WTF::StringTypeAdapter<const char*>::StringTypeAdapter(const char* buffer)
-    : buffer_(buffer), length_(strlen(buffer)) {}
+    : buffer_(buffer), length_(SafeCast<wtf_size_t>(strlen(buffer))) {}
 
 void WTF::StringTypeAdapter<const char*>::WriteTo(LChar* destination) const {
   memcpy(destination, buffer_, static_cast<size_t>(length_) * sizeof(LChar));
@@ -53,7 +57,10 @@ void WTF::StringTypeAdapter<const char*>::WriteTo(UChar* destination) const {
 }
 
 WTF::StringTypeAdapter<const LChar*>::StringTypeAdapter(const LChar* buffer)
-    : buffer_(buffer), length_(strlen(reinterpret_cast<const char*>(buffer))) {}
+    : buffer_(buffer),
+      length_(
+          SafeCast<wtf_size_t>(strlen(reinterpret_cast<const char*>(buffer)))) {
+}
 
 void WTF::StringTypeAdapter<const LChar*>::WriteTo(LChar* destination) const {
   memcpy(destination, buffer_, static_cast<size_t>(length_) * sizeof(LChar));

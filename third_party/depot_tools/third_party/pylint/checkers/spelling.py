@@ -15,24 +15,26 @@
 """Checker for spelling errors in comments and docstrings.
 """
 
+import os
 import sys
 import tokenize
 import string
 import re
 
-if sys.version_info[0] >= 3:
-    maketrans = str.maketrans
-else:
-    maketrans = string.maketrans
+try:
+    import enchant
+except ImportError:
+    enchant = None
+import six
 
 from pylint.interfaces import ITokenChecker, IAstroidChecker
 from pylint.checkers import BaseTokenChecker
 from pylint.checkers.utils import check_messages
 
-try:
-    import enchant
-except ImportError:
-    enchant = None
+if sys.version_info[0] >= 3:
+    maketrans = str.maketrans
+else:
+    maketrans = string.maketrans
 
 if enchant is not None:
     br = enchant.Broker()
@@ -48,6 +50,7 @@ else:
 
 table = maketrans("", "")
 
+
 class SpellingChecker(BaseTokenChecker):
     """Check spelling in comments and docstrings"""
     __implements__ = (ITokenChecker, IAstroidChecker)
@@ -61,6 +64,9 @@ class SpellingChecker(BaseTokenChecker):
                   '%s\nDid you mean: \'%s\'?',
                   'wrong-spelling-in-docstring',
                   'Used when a word in docstring is not spelled correctly.'),
+        'C0403': ('Invalid characters %r in a docstring',
+                  'invalid-characters-in-docstring',
+                  'Used when a word in docstring cannot be checked by enchant.'),
         }
     options = (('spelling-dict',
                 {'default' : '', 'type' : 'choice', 'metavar' : '<dict name>',
@@ -101,6 +107,11 @@ class SpellingChecker(BaseTokenChecker):
         # "param" appears in docstring in param description and
         # "pylint" appears in comments in pylint pragmas.
         self.ignore_list.extend(["param", "pylint"])
+
+        # Expand tilde to allow e.g. spelling-private-dict-file = ~/.pylintdict
+        if self.config.spelling_private_dict_file:
+            self.config.spelling_private_dict_file = os.path.expanduser(
+                self.config.spelling_private_dict_file)
 
         if self.config.spelling_private_dict_file:
             self.spelling_dict = enchant.DictWithPWL(
@@ -168,7 +179,13 @@ class SpellingChecker(BaseTokenChecker):
                 word = word[2:]
 
             # If it is a known word, then continue.
-            if self.spelling_dict.check(word):
+            try:
+                if self.spelling_dict.check(word):
+                    continue
+            except enchant.errors.Error:
+                # this can only happen in docstrings, not comments
+                self.add_message('invalid-characters-in-docstring',
+                                 line=line_num, args=(word,))
                 continue
 
             # Store word to private dict or raise a message.
@@ -211,16 +228,18 @@ class SpellingChecker(BaseTokenChecker):
         self._check_docstring(node)
 
     @check_messages('wrong-spelling-in-docstring')
-    def visit_class(self, node):
+    def visit_classdef(self, node):
         if not self.initialized:
             return
         self._check_docstring(node)
 
     @check_messages('wrong-spelling-in-docstring')
-    def visit_function(self, node):
+    def visit_functiondef(self, node):
         if not self.initialized:
             return
         self._check_docstring(node)
+
+    visit_asyncfunctiondef = visit_functiondef
 
     def _check_docstring(self, node):
         """check the node has any spelling errors"""
@@ -229,6 +248,10 @@ class SpellingChecker(BaseTokenChecker):
             return
 
         start_line = node.lineno + 1
+        if six.PY2:
+            encoding = node.root().file_encoding
+            docstring = docstring.decode(encoding or sys.getdefaultencoding(),
+                                         'replace')
 
         # Go through lines of docstring
         for idx, line in enumerate(docstring.splitlines()):

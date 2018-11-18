@@ -7,7 +7,6 @@
 #include "base/at_exit.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/scoped_feature_list.h"
@@ -71,8 +70,7 @@ bool FakePluginServiceFilter::IsPluginAvailable(
     const GURL& url,
     const url::Origin& main_frame_origin,
     content::WebPluginInfo* plugin) {
-  std::map<base::FilePath, bool>::iterator it =
-      plugin_state_.find(plugin->path);
+  auto it = plugin_state_.find(plugin->path);
   if (it == plugin_state_.end()) {
     ADD_FAILURE() << "No plugin state for '" << plugin->path.value() << "'";
     return false;

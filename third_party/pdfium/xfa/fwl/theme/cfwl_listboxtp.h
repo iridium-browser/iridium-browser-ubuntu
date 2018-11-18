@@ -9,7 +9,7 @@
 
 #include "xfa/fwl/theme/cfwl_widgettp.h"
 
-class CFWL_ListBoxTP : public CFWL_WidgetTP {
+class CFWL_ListBoxTP final : public CFWL_WidgetTP {
  public:
   CFWL_ListBoxTP();
   ~CFWL_ListBoxTP() override;
@@ -17,12 +17,12 @@ class CFWL_ListBoxTP : public CFWL_WidgetTP {
   // CFWL_WidgetTP
   void DrawBackground(CFWL_ThemeBackground* pParams) override;
 
- protected:
+ private:
   void DrawListBoxItem(CXFA_Graphics* pGraphics,
                        uint32_t dwStates,
                        const CFX_RectF* prtItem,
-                       void* pData = nullptr,
-                       CFX_Matrix* pMatrix = nullptr);
+                       void* pData,
+                       CFX_Matrix* pMatrix);
 };
 
 #endif  // XFA_FWL_THEME_CFWL_LISTBOXTP_H_

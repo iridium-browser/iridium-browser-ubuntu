@@ -634,6 +634,9 @@ cr.define('print_preview', function() {
         dpiVertical: 'vertical_dpi' in printTicketStore.dpi.getValue() ?
             printTicketStore.dpi.getValue().vertical_dpi :
             0,
+        dpiDefault: 'is_default' in printTicketStore.dpi.getValue() ?
+            printTicketStore.dpi.getValue().is_default :
+            false,
         deviceName: destination.id,
         fitToPageEnabled: printTicketStore.fitToPage.getValue(),
         pageWidth: documentInfo.pageSize.width,
@@ -1222,7 +1225,7 @@ cr.define('print_preview', function() {
         this.nativeLayer_.uiLoadedForTest();
       } else {
         combobox.value = 'landscape';
-        this.layoutSettings_.onSelectChange_();
+        this.layoutSettings_.onSelectChange();
       }
     },
 
@@ -1286,7 +1289,7 @@ cr.define('print_preview', function() {
         this.nativeLayer_.uiLoadedForTest();
       } else if (margins >= 0 && margins < combobox.length) {
         combobox.selectedIndex = margins;
-        this.marginSettings_.onSelectChange_();
+        this.marginSettings_.onSelectChange();
       } else {
         this.nativeLayer_.uiFailedLoadingForTest();
       }

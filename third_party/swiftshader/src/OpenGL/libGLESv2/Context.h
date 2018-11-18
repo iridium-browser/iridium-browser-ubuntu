@@ -214,6 +214,7 @@ public:
 		case GL_UNSIGNED_INT:   return mSize * sizeof(GLuint);
 		case GL_FIXED:          return mSize * sizeof(GLfixed);
 		case GL_FLOAT:          return mSize * sizeof(GLfloat);
+		case GL_HALF_FLOAT_OES:
 		case GL_HALF_FLOAT:     return mSize * sizeof(GLhalf);
 		case GL_INT_2_10_10_10_REV:          return sizeof(GLint);
 		case GL_UNSIGNED_INT_2_10_10_10_REV: return sizeof(GLuint);
@@ -429,7 +430,7 @@ struct State
 class [[clang::lto_visibility_public]] Context : public egl::Context
 {
 public:
-	Context(egl::Display *display, const Context *shareContext, EGLint clientVersion, const egl::Config *config);
+	Context(egl::Display *display, const Context *shareContext, const egl::Config *config);
 
 	void makeCurrent(gl::Surface *surface) override;
 	EGLint getClientVersion() const override;
@@ -698,6 +699,7 @@ public:
 	Device *getDevice();
 
 	const GLubyte *getExtensions(GLuint index, GLuint *numExt = nullptr) const;
+	sw::MutexLock *getResourceLock() { return mResourceManager->getLock(); }
 
 private:
 	~Context() override;
@@ -724,7 +726,6 @@ private:
 
 	Query *createQuery(GLuint handle, GLenum type);
 
-	const EGLint clientVersion;
 	const egl::Config *const config;
 
 	State mState;
@@ -769,6 +770,31 @@ private:
 	Device *device;
 	ResourceManager *mResourceManager;
 };
+
+// ptr to a context, which also holds the context's resource manager's lock.
+class ContextPtr {
+public:
+	explicit ContextPtr(Context *context) : ptr(context)
+	{
+		if (ptr) { ptr->getResourceLock()->lock(); }
+	}
+
+	~ContextPtr() {
+		if (ptr) { ptr->getResourceLock()->unlock(); }
+	}
+
+	ContextPtr(ContextPtr const &) = delete;
+	ContextPtr & operator=(ContextPtr const &) = delete;
+	ContextPtr(ContextPtr && other) : ptr(other.ptr) { other.ptr = nullptr; }
+	ContextPtr & operator=(ContextPtr && other) { ptr = other.ptr; other.ptr = nullptr; return *this; }
+
+	Context *operator ->() { return ptr; }
+	operator bool() const { return ptr != nullptr; }
+
+private:
+	Context *ptr;
+};
+
 }
 
 #endif   // INCLUDE_CONTEXT_H_

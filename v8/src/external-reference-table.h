@@ -8,7 +8,6 @@
 #include <vector>
 
 #include "src/accessors.h"
-#include "src/address-map.h"
 #include "src/builtins/builtins.h"
 #include "src/external-reference.h"
 
@@ -31,7 +30,8 @@ class ExternalReferenceTable {
       BUILTIN_LIST_C(COUNT_C_BUILTIN);
 #undef COUNT_C_BUILTIN
   static constexpr int kRuntimeReferenceCount =
-      Runtime::kNumFunctions / 2;  // Don't count dupe kInline... functions.
+      Runtime::kNumFunctions -
+      Runtime::kNumInlineFunctions;  // Don't count dupe kInline... functions.
   static constexpr int kIsolateAddressReferenceCount = kIsolateAddressCount;
   static constexpr int kAccessorReferenceCount =
       Accessors::kAccessorInfoCount + Accessors::kAccessorSetterCount;
@@ -43,21 +43,38 @@ class ExternalReferenceTable {
       kIsolateAddressReferenceCount + kAccessorReferenceCount +
       kStubCacheReferenceCount;
 
-  uint32_t size() const { return static_cast<uint32_t>(kSize); }
+  static constexpr uint32_t size() { return static_cast<uint32_t>(kSize); }
   Address address(uint32_t i) { return refs_[i].address; }
   const char* name(uint32_t i) { return refs_[i].name; }
 
-  bool is_initialized() const { return is_initialized_; }
+  bool is_initialized() const { return is_initialized_ != 0; }
 
   static const char* ResolveSymbol(void* address);
 
-  static uint32_t OffsetOfEntry(uint32_t i) {
-    // Used in CodeAssembler::LookupExternalReference.
-    STATIC_ASSERT(offsetof(ExternalReferenceEntry, address) == 0);
-    return i * sizeof(ExternalReferenceEntry);
+  static constexpr uint32_t EntrySize() {
+    return sizeof(ExternalReferenceEntry);
   }
 
-  ExternalReferenceTable() {}
+  static constexpr uint32_t OffsetOfEntry(uint32_t i) {
+    // Used in CodeAssembler::LookupExternalReference.
+    STATIC_ASSERT(offsetof(ExternalReferenceEntry, address) == 0);
+    return i * EntrySize();
+  }
+
+  const char* NameFromOffset(uint32_t offset) {
+    DCHECK_EQ(offset % EntrySize(), 0);
+    DCHECK_LT(offset, SizeInBytes());
+    int index = offset / EntrySize();
+    return name(index);
+  }
+
+  static constexpr uint32_t SizeInBytes() {
+    STATIC_ASSERT(OffsetOfEntry(size()) + 2 * kUInt32Size ==
+                  sizeof(ExternalReferenceTable));
+    return OffsetOfEntry(size()) + 2 * kUInt32Size;
+  }
+
+  ExternalReferenceTable() = default;
   void Init(Isolate* isolate);
 
  private:
@@ -65,7 +82,7 @@ class ExternalReferenceTable {
     Address address;
     const char* name;
 
-    ExternalReferenceEntry() : address(nullptr), name(nullptr) {}
+    ExternalReferenceEntry() : address(kNullAddress), name(nullptr) {}
     ExternalReferenceEntry(Address address, const char* name)
         : address(address), name(name) {}
   };
@@ -73,14 +90,15 @@ class ExternalReferenceTable {
   void Add(Address address, const char* name, int* index);
 
   void AddReferences(Isolate* isolate, int* index);
-  void AddBuiltins(Isolate* isolate, int* index);
-  void AddRuntimeFunctions(Isolate* isolate, int* index);
+  void AddBuiltins(int* index);
+  void AddRuntimeFunctions(int* index);
   void AddIsolateAddresses(Isolate* isolate, int* index);
-  void AddAccessors(Isolate* isolate, int* index);
+  void AddAccessors(int* index);
   void AddStubCache(Isolate* isolate, int* index);
 
   ExternalReferenceEntry refs_[kSize];
-  bool is_initialized_ = false;
+  uint32_t is_initialized_ = 0;  // Not bool to guarantee deterministic size.
+  uint32_t unused_padding_ = 0;  // For alignment.
 
   DISALLOW_COPY_AND_ASSIGN(ExternalReferenceTable);
 };

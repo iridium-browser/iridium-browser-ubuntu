@@ -42,8 +42,8 @@ class SandboxFileSystemBackendDelegateTest : public testing::Test {
         nullptr, base::ThreadTaskRunnerHandle::Get().get());
     delegate_.reset(new storage::SandboxFileSystemBackendDelegate(
         quota_manager_proxy_.get(), base::ThreadTaskRunnerHandle::Get().get(),
-        data_dir_.GetPath(), NULL /* special_storage_policy */,
-        CreateAllowFileAccessOptions()));
+        data_dir_.GetPath(), nullptr /* special_storage_policy */,
+        CreateAllowFileAccessOptions(), nullptr /* env_override */));
   }
 
   bool IsAccessValid(const FileSystemURL& url) const {

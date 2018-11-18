@@ -49,17 +49,11 @@ struct IsGarbageCollectedMixin {
 
 struct TraceDescriptor {
   STACK_ALLOCATED();
+
+ public:
   void* base_object_payload;
   TraceCallback callback;
   bool can_trace_eagerly;
-};
-
-struct TraceWrapperDescriptor {
-  STACK_ALLOCATED();
-  void* base_object_payload;
-  TraceWrappersCallback trace_wrappers_callback;
-  MissedWriteBarrierCallback missed_write_barrier_callback;
-  NameCallback name_callback;
 };
 
 // The GarbageCollectedMixin interface and helper macro
@@ -114,9 +108,6 @@ class PLATFORM_EXPORT GarbageCollectedMixin {
   virtual TraceDescriptor GetTraceDescriptor() const {
     return {BlinkGC::kNotFullyConstructedObject, nullptr, false};
   }
-  virtual TraceWrapperDescriptor GetTraceWrapperDescriptor() const {
-    return {BlinkGC::kNotFullyConstructedObject, nullptr, nullptr, nullptr};
-  }
 };
 
 #define DEFINE_GARBAGE_COLLECTED_MIXIN_METHODS(TYPE)                         \
@@ -132,13 +123,6 @@ class PLATFORM_EXPORT GarbageCollectedMixin {
   TraceDescriptor GetTraceDescriptor() const override {                      \
     return {const_cast<TYPE*>(static_cast<const TYPE*>(this)),               \
             TraceTrait<TYPE>::Trace, TraceEagerlyTrait<TYPE>::value};        \
-  }                                                                          \
-                                                                             \
-  TraceWrapperDescriptor GetTraceWrapperDescriptor() const override {        \
-    return {const_cast<TYPE*>(static_cast<const TYPE*>(this)),               \
-            TraceTrait<TYPE>::TraceWrappers,                                 \
-            ScriptWrappableVisitor::MissedWriteBarrier<TYPE>,                \
-            ScriptWrappableVisitor::NameCallback<TYPE>};                     \
   }                                                                          \
                                                                              \
  private:
@@ -249,7 +233,6 @@ class GarbageCollectedMixinConstructorMarker
  public:                                                                 \
   HeapObjectHeader* GetHeapObjectHeader() const override = 0;            \
   TraceDescriptor GetTraceDescriptor() const override = 0;               \
-  TraceWrapperDescriptor GetTraceWrapperDescriptor() const override = 0; \
                                                                          \
  private:                                                                \
   using merge_garbage_collected_mixins_requires_semicolon = void

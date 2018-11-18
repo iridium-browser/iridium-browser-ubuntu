@@ -15,15 +15,10 @@
 #include "base/strings/string16.h"
 #include "build/build_config.h"
 #include "chrome/browser/ui/bookmarks/bookmark_editor.h"
+#include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/resource_request_info.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/native_widget_types.h"
-
-#if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/apps/intent_helper/apps_navigation_types.h"
-#include "chrome/browser/chromeos/arc/intent_helper/arc_navigation_throttle.h"
-#include "url/gurl.h"
-#endif  // OS_CHROMEOS
 
 class Browser;
 class LoginHandler;
@@ -47,7 +42,6 @@ class Extension;
 
 namespace net {
 class AuthChallengeInfo;
-class AuthCredentials;
 }
 
 namespace payments {
@@ -70,11 +64,6 @@ namespace ui {
 class WebDialogDelegate;
 struct SelectedFileInfo;
 }
-
-namespace views {
-class View;
-class Widget;
-}  // namespace views
 
 namespace chrome {
 
@@ -134,12 +123,20 @@ void ShowBookmarkAppDialog(content::WebContents* web_contents,
                            const WebApplicationInfo& web_app_info,
                            AppInstallationAcceptanceCallback callback);
 
+// Sets whether |ShowBookmarkAppDialog| should accept immediately without any
+// user interaction.
+void SetAutoAcceptBookmarkAppDialogForTesting(bool auto_accept);
+
 // Shows the PWA installation confirmation bubble.
 //
 // |web_app_info| is the WebApplicationInfo to be installed.
 void ShowPWAInstallDialog(content::WebContents* web_contents,
                           const WebApplicationInfo& web_app_info,
                           AppInstallationAcceptanceCallback callback);
+
+// Sets whether |ShowPWAInstallDialog| should accept immediately without any
+// user interaction.
+void SetAutoAcceptPWAInstallDialogForTesting(bool auto_accept);
 
 // Shows a color chooser that reports to the given WebContents.
 content::ColorChooser* ShowColorChooser(content::WebContents* web_contents,
@@ -162,8 +159,7 @@ void ShowUpdateChromeDialogViews(gfx::NativeWindow parent);
 scoped_refptr<LoginHandler> CreateLoginHandlerViews(
     net::AuthChallengeInfo* auth_info,
     content::ResourceRequestInfo::WebContentsGetter web_contents_getter,
-    const base::Callback<void(const base::Optional<net::AuthCredentials>&)>&
-        auth_required_callback);
+    LoginAuthRequiredCallback auth_required_callback);
 
 // Shows the toolkit-views based BookmarkEditor.
 void ShowBookmarkEditorViews(gfx::NativeWindow parent_window,
@@ -210,7 +206,7 @@ enum class DialogIdentifier {
   SAFE_BROWSING_DOWNLOAD_FEEDBACK = 13,
   FIRST_RUN = 14,
   NETWORK_SHARE_PROFILE_WARNING = 15,
-  CONFLICTING_MODULE = 16,
+  // CONFLICTING_MODULE = 16,  Deprecated
   CRITICAL_NOTIFICATION = 17,
   IME_WARNING = 18,
   TOOLBAR_ACTIONS_BAR = 19,
@@ -279,6 +275,12 @@ enum class DialogIdentifier {
   RELAUNCH_RECOMMENDED = 82,
   CROSTINI_INSTALLER = 83,
   RELAUNCH_REQUIRED = 84,
+  UNITY_SYNC_CONSENT_BUMP = 85,
+  CROSTINI_UNINSTALLER = 86,
+  DOWNLOAD_OPEN_CONFIRMATION = 87,
+  ARC_DATA_REMOVAL_CONFIRMATION = 88,
+  CROSTINI_UPGRADE = 89,
+  HATS_BUBBLE = 90,
   MAX_VALUE
 };
 
@@ -311,36 +313,6 @@ void ShowChromeCleanerRebootPrompt(
 #endif  // OS_WIN
 
 }  // namespace chrome
-
-#if defined(OS_CHROMEOS)
-
-// This callback informs the launch name and type of the app selected by the
-// user, along with the reason why the Bubble was closed and whether the
-// decision should be persisted. When the reason is ERROR or DIALOG_DEACTIVATED,
-// the values of the launch name, app type, and persistence boolean are all
-// ignored.
-using IntentPickerResponse =
-    base::OnceCallback<void(const std::string&,
-                            chromeos::AppType,
-                            chromeos::IntentPickerCloseReason,
-                            bool should_persist)>;
-
-// TODO(djacobo): Decide whether or not refactor as base::RepeatableCallback.
-// Return a pointer to the IntentPickerBubbleView::ShowBubble method, which in
-// turn receives a View to be used as an anchor, the WebContents associated
-// with the current tab, a list of app candidates to be displayed to the user
-// and a callback to report back the user's response respectively. The newly
-// created widget is returned.
-using BubbleShowPtr =
-    views::Widget* (*)(views::View*,
-                       content::WebContents*,
-                       std::vector<chromeos::IntentPickerAppInfo>,
-                       bool disable_display_in_chrome,
-                       IntentPickerResponse);
-
-BubbleShowPtr ShowIntentPickerBubble();
-
-#endif  // OS_CHROMEOS
 
 void ShowFolderUploadConfirmationDialog(
     const base::FilePath& path,

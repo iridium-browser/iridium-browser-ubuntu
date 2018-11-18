@@ -89,7 +89,7 @@ class TastVMTestStageTest(generic_stages_unittest.AbstractStageTestCase,
     self._Prepare()
 
   def ConstructStage(self):
-    # pylint: disable=W0212
+    # pylint: disable=protected-access
     self._run.GetArchive().SetupArchivePath()
     self._stage = tast_test_stages.TastVMTestStage(self._run,
                                                    self._current_board)
@@ -154,7 +154,7 @@ class TastVMTestStageTest(generic_stages_unittest.AbstractStageTestCase,
 
   def _VerifyArtifacts(self):
     """Verifies that results were archived and queued to be uploaded."""
-    # pylint: disable=W0212
+    # pylint: disable=protected-access
     archive_dir = constants.TAST_VM_TEST_RESULTS % \
         {'attempt': self._stage._attempt}
     self.assertEqual(os.listdir(self._stage.archive_path), [archive_dir])
@@ -173,13 +173,14 @@ class TastVMTestStageTest(generic_stages_unittest.AbstractStageTestCase,
       for test in json.load(f):
         if test[tast_test_stages.RESULTS_ERRORS_KEY]:
           num_failed_tests += 1
-          flaky = tast_test_stages.RESULTS_FLAKY_ATTR in \
-              test.get(tast_test_stages.RESULTS_ATTR_KEY, [])
+          informational = (tast_test_stages.RESULTS_INFORMATIONAL_ATTR in
+                           test.get(tast_test_stages.RESULTS_ATTR_KEY, []))
 
           name = test[tast_test_stages.RESULTS_NAME_KEY]
           test_url = os.path.join(archive_dir, self._exp_test_suite,
                                   tast_test_stages.RESULTS_TESTS_DIR, name)
-          desc = tast_test_stages.FLAKY_PREFIX + name if flaky else name
+          desc = (tast_test_stages.INFORMATIONAL_PREFIX + name if informational
+                  else name)
           self._mock_print_download_link.assert_any_call(
               test_url, text_to_display=desc)
     self.assertEqual(self._mock_print_download_link.call_count,
@@ -244,13 +245,14 @@ class TastVMTestStageTest(generic_stages_unittest.AbstractStageTestCase,
     self.assertEquals(self._mock_run_command.call_count, 1)
     self._VerifyArtifacts()
 
-  def testFlakyTest(self):
-    """Tests that errors in flaky tests don't fail the stage."""
-    self._SetSuite('flaky_test_suite', ['(flaky)'])
+  def testInformationalTest(self):
+    """Tests that errors in informational tests don't fail the stage."""
+    attr = tast_test_stages.RESULTS_INFORMATIONAL_ATTR
+    self._SetSuite('info_test_suite', ['(' + attr + ')'])
     self._test_results_data = [
         {
-            'name': 'example.Flaky',
-            'attr': ['flaky'],
+            'name': 'example.Informational',
+            'attr': [attr],
             'errors': [{'reason': 'Failed!'}],
         },
     ]
@@ -312,7 +314,7 @@ class CopyResultsDirTest(cros_test_lib.TempDirTestCase):
 
   def _DoCopy(self):
     """Copies from src to dest directory."""
-    # pylint: disable=W0212
+    # pylint: disable=protected-access
     tast_test_stages._CopyResultsDir(self.src, self.dest)
 
   def testCopyAll(self):

@@ -13,7 +13,6 @@
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/native_pixmap.h"
 #include "ui/gfx/vsync_provider.h"
-#include "ui/ozone/common/gl_ozone_osmesa.h"
 #include "ui/ozone/public/surface_ozone_canvas.h"
 
 namespace ui {
@@ -47,12 +46,8 @@ class DummySurface : public SurfaceOzoneCanvas {
 
 class CastPixmap : public gfx::NativePixmap {
  public:
-  explicit CastPixmap(GLOzoneEglCast* parent) : parent_(parent) {}
+  CastPixmap() {}
 
-  void* GetEGLClientBuffer() const override {
-    // TODO(halliwell): try to implement this through CastEglPlatform.
-    return nullptr;
-  }
   bool AreDmaBufFdsValid() const override { return false; }
   size_t GetDmaBufFdCount() const override { return 0; }
   int GetDmaBufFd(size_t plane) const override { return -1; }
@@ -70,9 +65,9 @@ class CastPixmap : public gfx::NativePixmap {
                             gfx::OverlayTransform plane_transform,
                             const gfx::Rect& display_bounds,
                             const gfx::RectF& crop_rect,
-                            bool enable_blend) override {
-    parent_->OnOverlayScheduled(display_bounds);
-    return true;
+                            bool enable_blend,
+                            std::unique_ptr<gfx::GpuFence> gpu_fence) override {
+    return false;
   }
   gfx::NativePixmapHandle ExportHandle() override {
     return gfx::NativePixmapHandle();
@@ -80,8 +75,6 @@ class CastPixmap : public gfx::NativePixmap {
 
  private:
   ~CastPixmap() override {}
-
-  GLOzoneEglCast* parent_;
 
   DISALLOW_COPY_AND_ASSIGN(CastPixmap);
 };
@@ -91,8 +84,7 @@ class CastPixmap : public gfx::NativePixmap {
 SurfaceFactoryCast::SurfaceFactoryCast() : SurfaceFactoryCast(nullptr) {}
 
 SurfaceFactoryCast::SurfaceFactoryCast(
-    std::unique_ptr<chromecast::CastEglPlatform> egl_platform)
-    : osmesa_implementation_(std::make_unique<GLOzoneOSMesa>()) {
+    std::unique_ptr<chromecast::CastEglPlatform> egl_platform) {
   if (egl_platform) {
     egl_implementation_ =
         std::make_unique<GLOzoneEglCast>(std::move(egl_platform));
@@ -106,7 +98,6 @@ SurfaceFactoryCast::GetAllowedGLImplementations() {
   std::vector<gl::GLImplementation> impls;
   if (egl_implementation_)
     impls.push_back(gl::kGLImplementationEGLGLES2);
-  impls.push_back(gl::kGLImplementationOSMesaGL);
   return impls;
 }
 
@@ -114,8 +105,6 @@ GLOzone* SurfaceFactoryCast::GetGLOzone(gl::GLImplementation implementation) {
   switch (implementation) {
     case gl::kGLImplementationEGLGLES2:
       return egl_implementation_.get();
-    case gl::kGLImplementationOSMesaGL:
-      return osmesa_implementation_.get();
     default:
       return nullptr;
   }
@@ -134,7 +123,7 @@ scoped_refptr<gfx::NativePixmap> SurfaceFactoryCast::CreateNativePixmap(
     gfx::Size size,
     gfx::BufferFormat format,
     gfx::BufferUsage usage) {
-  return base::MakeRefCounted<CastPixmap>(egl_implementation_.get());
+  return base::MakeRefCounted<CastPixmap>();
 }
 
 }  // namespace ui

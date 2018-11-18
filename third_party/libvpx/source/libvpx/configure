@@ -116,7 +116,6 @@ all_platforms="${all_platforms} armv7s-darwin-gcc"
 all_platforms="${all_platforms} armv8-linux-gcc"
 all_platforms="${all_platforms} mips32-linux-gcc"
 all_platforms="${all_platforms} mips64-linux-gcc"
-all_platforms="${all_platforms} ppc64-linux-gcc"
 all_platforms="${all_platforms} ppc64le-linux-gcc"
 all_platforms="${all_platforms} sparc-solaris-gcc"
 all_platforms="${all_platforms} x86-android-gcc"
@@ -279,6 +278,8 @@ HAVE_LIST="
 EXPERIMENT_LIST="
     fp_mb_stats
     emulate_hardware
+    non_greedy_mv
+    ml_var_partition
 "
 CONFIG_LIST="
     dependency_tracking
@@ -328,6 +329,7 @@ CONFIG_LIST="
     multi_res_encoding
     temporal_denoising
     vp9_temporal_denoising
+    consistent_recode
     coefficient_range_checking
     vp9_highbitdepth
     better_hw_compatibility
@@ -389,6 +391,7 @@ CMDLINE_SELECT="
     multi_res_encoding
     temporal_denoising
     vp9_temporal_denoising
+    consistent_recode
     coefficient_range_checking
     better_hw_compatibility
     vp9_highbitdepth
@@ -521,7 +524,7 @@ process_detect() {
         # here rather than at option parse time because the target auto-detect
         # magic happens after the command line has been parsed.
         case "${tgt_os}" in
-        linux|os2|darwin*|iphonesimulator*)
+        linux|os2|solaris|darwin*|iphonesimulator*)
             # Supported platforms
             ;;
         *)
@@ -573,16 +576,30 @@ process_detect() {
         check_ld() {
             true
         }
+        check_lib() {
+            true
+        }
     fi
     check_header stdio.h || die "Unable to invoke compiler: ${CC} ${CFLAGS}"
     check_ld <<EOF || die "Toolchain is unable to link executables"
 int main(void) {return 0;}
 EOF
     # check system headers
-    check_header pthread.h
+
+    # Use both check_header and check_lib here, since check_lib
+    # could be a stub that always returns true.
+    check_header pthread.h && check_lib -lpthread <<EOF || disable_feature pthread_h
+#include <pthread.h>
+#include <stddef.h>
+int main(void) { return pthread_create(NULL, NULL, NULL, NULL); }
+EOF
     check_header unistd.h # for sysconf(3) and friends.
 
     check_header vpx/vpx_integer.h -I${source_path} && enable_feature vpx_ports
+
+    if enabled neon && ! enabled external_build; then
+      check_header arm_neon.h || die "Unable to find arm_neon.h"
+    fi
 }
 
 process_toolchain() {
@@ -619,6 +636,12 @@ process_toolchain() {
         # Avoid this warning for third_party C++ sources. Some reorganization
         # would be needed to apply this only to test/*.cc.
         check_cflags -Wshorten-64-to-32 && add_cflags_only -Wshorten-64-to-32
+
+        # Quiet gcc 6 vs 7 abi warnings:
+        # https://gcc.gnu.org/bugzilla/show_bug.cgi?id=77728
+        if enabled arm; then
+          check_add_cxxflags -Wno-psabi
+        fi
     fi
 
     if enabled icc; then
@@ -689,7 +712,7 @@ process_toolchain() {
             soft_enable libyuv
         ;;
         *-android-*)
-            soft_enable webm_io
+            check_add_cxxflags -std=c++11 && soft_enable webm_io
             soft_enable libyuv
             # GTestLog must be modified to use Android logging utilities.
         ;;
@@ -698,7 +721,7 @@ process_toolchain() {
             # x86 targets.
         ;;
         *-iphonesimulator-*)
-            soft_enable webm_io
+            check_add_cxxflags -std=c++11 && soft_enable webm_io
             soft_enable libyuv
         ;;
         *-win*)
@@ -708,9 +731,7 @@ process_toolchain() {
             check_cxx "$@" <<EOF && soft_enable unit_tests
 int z;
 EOF
-            check_cxx "$@" <<EOF && soft_enable webm_io
-int z;
-EOF
+            check_add_cxxflags -std=c++11 && soft_enable webm_io
             check_cxx "$@" <<EOF && soft_enable libyuv
 int z;
 EOF
@@ -719,9 +740,7 @@ EOF
             enabled pthread_h && check_cxx "$@" <<EOF && soft_enable unit_tests
 int z;
 EOF
-            check_cxx "$@" <<EOF && soft_enable webm_io
-int z;
-EOF
+            check_add_cxxflags -std=c++11 && soft_enable webm_io
             check_cxx "$@" <<EOF && soft_enable libyuv
 int z;
 EOF

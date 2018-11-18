@@ -4,8 +4,13 @@
 
 package org.chromium.content_public.browser;
 
+import android.support.annotation.IntDef;
 import android.support.annotation.Nullable;
 
+import org.chromium.blink.mojom.ViewportFit;
+
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
 import java.lang.ref.WeakReference;
 
 /**
@@ -57,6 +62,8 @@ public abstract class WebContentsObserver {
      * @param isSameDocument Whether the main frame navigation did not cause changes to the
      *                   document (for example scrolling to a named anchor or PopState).
      * @param isFragmentNavigation Whether the navigation was to a different fragment.
+     * @param isRendererInitiated Whether initiated by renderer. Eg clicking on a link.
+     * @param isDownload See NavigationHandle::IsDownload.
      * @param pageTransition The page transition type associated with this navigation.
      * @param errorCode The net error code if an error occurred prior to commit, otherwise net::OK.
      * @param errorDescription The description for the net error code.
@@ -64,8 +71,8 @@ public abstract class WebContentsObserver {
      */
     public void didFinishNavigation(String url, boolean isInMainFrame, boolean isErrorPage,
             boolean hasCommitted, boolean isSameDocument, boolean isFragmentNavigation,
-            @Nullable Integer pageTransition, int errorCode, String errorDescription,
-            int httpStatusCode) {}
+            boolean isRendererInitiated, boolean isDownload, @Nullable Integer pageTransition,
+            int errorCode, String errorDescription, int httpStatusCode) {}
 
     /**
      * Called when the a page starts loading.
@@ -160,6 +167,25 @@ public abstract class WebContentsObserver {
      * @param isFullscreen whether fullscreen is being entered or left.
      */
     public void hasEffectivelyFullscreenVideoChange(boolean isFullscreen) {}
+
+    /**
+     * The Viewport Fit Type passed to viewportFitChanged. This is mirrored
+     * in an enum in display_cutout.mojom.
+     */
+    @Retention(RetentionPolicy.SOURCE)
+    @IntDef({ViewportFit.AUTO, ViewportFit.CONTAIN, ViewportFit.COVER})
+    public @interface ViewportFitType {}
+
+    /**
+     * Called when the viewport fit of the Web Contents changes.
+     * @param value the new viewport fit value.
+     */
+    public void viewportFitChanged(@ViewportFitType int value) {}
+
+    /**
+     * This method is invoked when the WebContents reloads the LoFi images on the page.
+     */
+    public void didReloadLoFiImages() {}
 
     /**
      * Stop observing the web contents and clean up associated references.

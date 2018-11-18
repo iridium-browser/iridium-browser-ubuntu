@@ -19,14 +19,14 @@
 #include "perfetto/base/logging.h"
 #include "perfetto/base/task_runner.h"
 #include "perfetto/ipc/host.h"
-#include "perfetto/tracing/core/service.h"
+#include "perfetto/tracing/core/tracing_service.h"
 #include "src/tracing/ipc/posix_shared_memory.h"
 #include "src/tracing/ipc/service/consumer_ipc_service.h"
 #include "src/tracing/ipc/service/producer_ipc_service.h"
 
 namespace perfetto {
 
-// TODO: implement per-uid connection limit (b/69093705).
+// TODO(fmayer): implement per-uid connection limit (b/69093705).
 
 // Implements the publicly exposed factory method declared in
 // include/tracing/posix_ipc/posix_service_host.h.
@@ -68,7 +68,7 @@ bool ServiceIPCHostImpl::DoStart() {
   // Create and initialize the platform-independent tracing business logic.
   std::unique_ptr<SharedMemory::Factory> shm_factory(
       new PosixSharedMemory::Factory());
-  svc_ = Service::CreateInstance(std::move(shm_factory), task_runner_);
+  svc_ = TracingService::CreateInstance(std::move(shm_factory), task_runner_);
 
   if (!producer_ipc_port_) {
     Shutdown();
@@ -80,8 +80,8 @@ bool ServiceIPCHostImpl::DoStart() {
     return false;
   }
 
-  // TODO: add a test that destroyes the ServiceIPCHostImpl soon after Start()
-  // and checks that no spurious callbacks are issued.
+  // TODO(fmayer): add a test that destroyes the ServiceIPCHostImpl soon after
+  // Start() and checks that no spurious callbacks are issued.
   bool producer_service_exposed = producer_ipc_port_->ExposeService(
       std::unique_ptr<ipc::Service>(new ProducerIPCService(svc_.get())));
   PERFETTO_CHECK(producer_service_exposed);
@@ -93,7 +93,7 @@ bool ServiceIPCHostImpl::DoStart() {
   return true;
 }
 
-Service* ServiceIPCHostImpl::service_for_testing() const {
+TracingService* ServiceIPCHostImpl::service_for_testing() const {
   return svc_.get();
 }
 

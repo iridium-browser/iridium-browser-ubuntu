@@ -9,6 +9,7 @@
 #include "ui/views/controls/menu/menu_item_view.h"
 #include "ui/views/controls/menu/menu_model_adapter.h"
 #include "ui/views/controls/menu/menu_runner.h"
+#include "ui/views/controls/menu/submenu_view.h"
 
 ToolkitDelegateViews::ToolkitDelegateViews() : menu_view_(nullptr) {}
 
@@ -35,42 +36,10 @@ void ToolkitDelegateViews::Init(ui::SimpleMenuModel* menu_model) {
 }
 
 void ToolkitDelegateViews::Cancel() {
-  DCHECK(menu_runner_.get());
+  DCHECK(menu_runner_);
   menu_runner_->Cancel();
 }
 
-void ToolkitDelegateViews::UpdateMenuItem(int command_id,
-                                          bool enabled,
-                                          bool hidden,
-                                          const base::string16& title) {
-  views::MenuItemView* item = menu_view_->GetMenuItemByID(command_id);
-  if (!item)
-    return;
-
-  item->SetEnabled(enabled);
-  item->SetTitle(title);
-  item->SetVisible(!hidden);
-
-  views::MenuItemView* parent = item->GetParentMenuItem();
-  if (!parent)
-    return;
-
-  parent->ChildrenChanged();
+void ToolkitDelegateViews::RebuildMenu() {
+  menu_adapter_->BuildMenu(menu_view_);
 }
-
-#if defined(OS_CHROMEOS)
-void ToolkitDelegateViews::UpdateMenuIcon(int command_id,
-                                          const gfx::Image& image) {
-  views::MenuItemView* item = menu_view_->GetMenuItemByID(command_id);
-  if (!item)
-    return;
-
-  item->SetIcon(*image.ToImageSkia());
-
-  views::MenuItemView* parent = item->GetParentMenuItem();
-  if (!parent)
-    return;
-
-  parent->ChildrenChanged();
-}
-#endif

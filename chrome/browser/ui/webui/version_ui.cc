@@ -117,13 +117,9 @@ WebUIDataSource* CreateVersionUIDataSource() {
   html_source->AddString(version_ui::kFlashVersion, std::string());
 #endif  // OS_ANDROID
 
-#if defined(ARCH_CPU_64_BITS)
-  html_source->AddLocalizedString(version_ui::kVersionBitSize,
-                                  IDS_VERSION_UI_64BIT);
-#else
-  html_source->AddLocalizedString(version_ui::kVersionBitSize,
-                                  IDS_VERSION_UI_32BIT);
-#endif
+  html_source->AddLocalizedString(
+      version_ui::kVersionBitSize,
+      sizeof(void*) == 8 ? IDS_VERSION_UI_64BIT : IDS_VERSION_UI_32BIT);
 
 #if defined(OS_WIN)
   html_source->AddString(
@@ -133,7 +129,7 @@ WebUIDataSource* CreateVersionUIDataSource() {
   std::string command_line;
   typedef std::vector<std::string> ArgvList;
   const ArgvList& argv = base::CommandLine::ForCurrentProcess()->argv();
-  for (ArgvList::const_iterator iter = argv.begin(); iter != argv.end(); iter++)
+  for (auto iter = argv.begin(); iter != argv.end(); iter++)
     command_line += " " + *iter;
   // TODO(viettrungluu): |command_line| could really have any encoding, whereas
   // below we assumes it's UTF-8.
@@ -141,8 +137,6 @@ WebUIDataSource* CreateVersionUIDataSource() {
 #endif
 
 #if defined(OS_WIN)
-  html_source->AddString("linker", CHROMIUM_LINKER_NAME);
-
   base::string16 update_cohort_name =
       install_static::InstallDetails::Get().update_cohort_name();
   if (!update_cohort_name.empty()) {
@@ -177,8 +171,7 @@ VersionUI::VersionUI(content::WebUI* web_ui)
 
 #if !defined(OS_ANDROID)
   // Set up the chrome://theme/ source.
-  ThemeSource* theme = new ThemeSource(profile);
-  content::URLDataSource::Add(profile, theme);
+  content::URLDataSource::Add(profile, std::make_unique<ThemeSource>(profile));
 #endif
 
   WebUIDataSource::Add(profile, CreateVersionUIDataSource());

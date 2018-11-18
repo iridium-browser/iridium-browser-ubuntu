@@ -10,9 +10,9 @@
 #include "ash/accessibility/accessibility_controller.h"
 #include "ash/accessibility/test_accessibility_controller_client.h"
 #include "ash/app_list/test/app_list_test_helper.h"
-#include "ash/frame/custom_frame_view_ash.h"
+#include "ash/frame/non_client_frame_view_ash.h"
+#include "ash/public/cpp/app_list/app_list_features.h"
 #include "ash/public/cpp/app_types.h"
-#include "ash/public/cpp/config.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/public/cpp/window_properties.h"
 #include "ash/root_window_controller.h"
@@ -27,6 +27,7 @@
 #include "ash/shell_test_api.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/wallpaper/wallpaper_controller_test_api.h"
+#include "ash/window_factory.h"
 #include "ash/wm/fullscreen_window_finder.h"
 #include "ash/wm/overview/window_selector_controller.h"
 #include "ash/wm/splitview/split_view_controller.h"
@@ -40,7 +41,6 @@
 #include "ash/wm/workspace_controller_test_api.h"
 #include "base/run_loop.h"
 #include "chromeos/audio/chromeos_sounds.h"
-#include "ui/app_list/app_list_features.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/focus_client.h"
 #include "ui/aura/client/window_parenting_client.h"
@@ -59,9 +59,9 @@
 #include "ui/events/test/event_generator.h"
 #include "ui/gfx/geometry/insets.h"
 #include "ui/keyboard/keyboard_controller.h"
-#include "ui/keyboard/keyboard_test_util.h"
 #include "ui/keyboard/keyboard_ui.h"
 #include "ui/keyboard/keyboard_util.h"
+#include "ui/keyboard/test/keyboard_test_util.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
 #include "ui/wm/core/window_util.h"
@@ -118,31 +118,48 @@ display::Display GetDisplayNearestWindow(aura::Window* window) {
   return display::Screen::GetScreen()->GetDisplayNearestWindow(window);
 }
 
-void EnableStickyKeyboard() {
-  keyboard::KeyboardController::ResetInstance(new keyboard::KeyboardController(
-      std::make_unique<keyboard::TestKeyboardUI>(
-          Shell::Get()->window_tree_host_manager()->input_method()),
-      nullptr));
-  keyboard::KeyboardController::GetInstance()->set_keyboard_locked(true);
-}
-
-}  // namespace
-
-// NOTE: many of these tests use CustomFrameViewAshSizeLock. This is needed as
-// the tests assume a minimum size of 0x0. In mash the minimum size, for
-// top-level windows, is not 0x0, so without this the tests fails.
-// TODO(sky): update the tests so that this isn't necessary.
-class CustomFrameViewAshSizeLock {
+class ScopedStickyKeyboardEnabler {
  public:
-  CustomFrameViewAshSizeLock() {
-    CustomFrameViewAsh::use_empty_minimum_size_for_test_ = true;
+  ScopedStickyKeyboardEnabler()
+      : accessibility_controller_(Shell::Get()->accessibility_controller()),
+        enabled_(accessibility_controller_->IsVirtualKeyboardEnabled()) {
+    accessibility_controller_->SetVirtualKeyboardEnabled(true);
+    keyboard::KeyboardController::Get()->EnableKeyboard(
+        std::make_unique<keyboard::TestKeyboardUI>(
+            Shell::Get()->window_tree_host_manager()->input_method()),
+        nullptr);
+    keyboard::KeyboardController::Get()->set_keyboard_locked(true);
   }
-  ~CustomFrameViewAshSizeLock() {
-    CustomFrameViewAsh::use_empty_minimum_size_for_test_ = false;
+
+  ~ScopedStickyKeyboardEnabler() {
+    keyboard::KeyboardController::Get()->set_keyboard_locked(false);
+    accessibility_controller_->SetVirtualKeyboardEnabled(enabled_);
   }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(CustomFrameViewAshSizeLock);
+  AccessibilityController* accessibility_controller_;
+  const bool enabled_;
+
+  DISALLOW_COPY_AND_ASSIGN(ScopedStickyKeyboardEnabler);
+};
+
+}  // namespace
+
+// NOTE: many of these tests use NonClientFrameViewAshSizeLock. This is needed
+// as the tests assume a minimum size of 0x0. In mash the minimum size, for
+// top-level windows, is not 0x0, so without this the tests fails.
+// TODO(sky): update the tests so that this isn't necessary.
+class NonClientFrameViewAshSizeLock {
+ public:
+  NonClientFrameViewAshSizeLock() {
+    NonClientFrameViewAsh::use_empty_minimum_size_for_test_ = true;
+  }
+  ~NonClientFrameViewAshSizeLock() {
+    NonClientFrameViewAsh::use_empty_minimum_size_for_test_ = false;
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(NonClientFrameViewAshSizeLock);
 };
 
 using WorkspaceLayoutManagerTest = AshTestBase;
@@ -152,7 +169,7 @@ using WorkspaceLayoutManagerTest = AshTestBase;
 // there is one).
 TEST_F(WorkspaceLayoutManagerTest, RestoreFromMinimizeKeepsRestore) {
   // See comment at top of file for why this is needed.
-  CustomFrameViewAshSizeLock min_size_lock;
+  NonClientFrameViewAshSizeLock min_size_lock;
   std::unique_ptr<aura::Window> window(CreateTestWindow(gfx::Rect(1, 2, 3, 4)));
   gfx::Rect bounds(10, 15, 25, 35);
   window->SetBounds(bounds);
@@ -217,7 +234,7 @@ TEST_F(WorkspaceLayoutManagerTest, NoMinimumVisibilityForPopupWindows) {
 
 TEST_F(WorkspaceLayoutManagerTest, KeepRestoredWindowInDisplay) {
   // See comment at top of file for why this is needed.
-  CustomFrameViewAshSizeLock min_size_lock;
+  NonClientFrameViewAshSizeLock min_size_lock;
   std::unique_ptr<aura::Window> window(
       CreateTestWindow(gfx::Rect(1, 2, 30, 40)));
   wm::WindowState* window_state = wm::GetWindowState(window.get());
@@ -258,7 +275,7 @@ TEST_F(WorkspaceLayoutManagerTest, KeepRestoredWindowInDisplay) {
 
 TEST_F(WorkspaceLayoutManagerTest, MaximizeInDisplayToBeRestored) {
   // See comment at top of file for why this is needed.
-  CustomFrameViewAshSizeLock min_size_lock;
+  NonClientFrameViewAshSizeLock min_size_lock;
   UpdateDisplay("300x400,400x500");
 
   aura::Window::Windows root_windows = Shell::Get()->GetAllRootWindows();
@@ -273,8 +290,9 @@ TEST_F(WorkspaceLayoutManagerTest, MaximizeInDisplayToBeRestored) {
   // is inside 2nd display.
   window_state->Maximize();
   EXPECT_EQ(root_windows[1], window->GetRootWindow());
-  EXPECT_EQ(gfx::Rect(300, 0, 400, 500 - kShelfSize).ToString(),
-            window->GetBoundsInScreen().ToString());
+  EXPECT_EQ(
+      gfx::Rect(300, 0, 400, 500 - ShelfConstants::shelf_size()).ToString(),
+      window->GetBoundsInScreen().ToString());
 
   window_state->Restore();
   EXPECT_EQ(root_windows[1], window->GetRootWindow());
@@ -285,8 +303,9 @@ TEST_F(WorkspaceLayoutManagerTest, MaximizeInDisplayToBeRestored) {
   window_state->SetRestoreBoundsInScreen(gfx::Rect(295, 0, 30, 40));
   window_state->Maximize();
   EXPECT_EQ(root_windows[1], window->GetRootWindow());
-  EXPECT_EQ(gfx::Rect(300, 0, 400, 500 - kShelfSize).ToString(),
-            window->GetBoundsInScreen().ToString());
+  EXPECT_EQ(
+      gfx::Rect(300, 0, 400, 500 - ShelfConstants::shelf_size()).ToString(),
+      window->GetBoundsInScreen().ToString());
 
   window_state->Restore();
   EXPECT_EQ(root_windows[1], window->GetRootWindow());
@@ -297,13 +316,15 @@ TEST_F(WorkspaceLayoutManagerTest, MaximizeInDisplayToBeRestored) {
   views::Widget::InitParams params;
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
   params.delegate = new MaximizeDelegateView(gfx::Rect(400, 0, 30, 40));
+  params.context = CurrentContext();
   w1->Init(params);
   EXPECT_EQ(root_windows[0], w1->GetNativeWindow()->GetRootWindow());
   w1->Show();
   EXPECT_TRUE(w1->IsMaximized());
   EXPECT_EQ(root_windows[1], w1->GetNativeWindow()->GetRootWindow());
-  EXPECT_EQ(gfx::Rect(300, 0, 400, 500 - kShelfSize).ToString(),
-            w1->GetWindowBoundsInScreen().ToString());
+  EXPECT_EQ(
+      gfx::Rect(300, 0, 400, 500 - ShelfConstants::shelf_size()).ToString(),
+      w1->GetWindowBoundsInScreen().ToString());
   w1->Restore();
   EXPECT_EQ(root_windows[1], w1->GetNativeWindow()->GetRootWindow());
   EXPECT_EQ("400,0 30x40", w1->GetWindowBoundsInScreen().ToString());
@@ -311,7 +332,7 @@ TEST_F(WorkspaceLayoutManagerTest, MaximizeInDisplayToBeRestored) {
 
 TEST_F(WorkspaceLayoutManagerTest, FullscreenInDisplayToBeRestored) {
   // See comment at top of file for why this is needed.
-  CustomFrameViewAshSizeLock min_size_lock;
+  NonClientFrameViewAshSizeLock min_size_lock;
   UpdateDisplay("300x400,400x500");
 
   aura::Window::Windows root_windows = Shell::Get()->GetAllRootWindows();
@@ -384,8 +405,8 @@ class DontClobberRestoreBoundsWindowObserver : public aura::WindowObserver {
 // doesn't effect the restore bounds.
 TEST_F(WorkspaceLayoutManagerTest, DontClobberRestoreBounds) {
   DontClobberRestoreBoundsWindowObserver window_observer;
-  std::unique_ptr<aura::Window> window(std::make_unique<aura::Window>(
-      nullptr, aura::client::WINDOW_TYPE_NORMAL));
+  std::unique_ptr<aura::Window> window =
+      window_factory::NewWindow(nullptr, aura::client::WINDOW_TYPE_NORMAL);
   window->Init(ui::LAYER_TEXTURED);
   window->SetBounds(gfx::Rect(10, 20, 30, 40));
   // NOTE: for this test to exercise the failure the observer needs to be added
@@ -424,8 +445,8 @@ TEST_F(WorkspaceLayoutManagerTest, ChildBoundsResetOnMaximize) {
 // Verifies a window created with maximized state has the maximized
 // bounds.
 TEST_F(WorkspaceLayoutManagerTest, MaximizeWithEmptySize) {
-  std::unique_ptr<aura::Window> window(std::make_unique<aura::Window>(
-      nullptr, aura::client::WINDOW_TYPE_NORMAL));
+  std::unique_ptr<aura::Window> window =
+      window_factory::NewWindow(nullptr, aura::client::WINDOW_TYPE_NORMAL);
   window->Init(ui::LAYER_TEXTURED);
   wm::GetWindowState(window.get())->Maximize();
   aura::Window* default_container =
@@ -438,12 +459,6 @@ TEST_F(WorkspaceLayoutManagerTest, MaximizeWithEmptySize) {
 }
 
 TEST_F(WorkspaceLayoutManagerTest, WindowShouldBeOnScreenWhenAdded) {
-  // TODO: fix. This test verifies that when a window is added the bounds are
-  // adjusted. CreateTestWindow() for mus adds, then sets the bounds (this comes
-  // from NativeWidgetAura), which means this test now fails for aura-mus.
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;
-
   // Normal window bounds shouldn't be changed.
   gfx::Rect window_bounds(100, 100, 200, 200);
   std::unique_ptr<aura::Window> window(CreateTestWindow(window_bounds));
@@ -513,14 +528,10 @@ TEST_F(WorkspaceLayoutManagerTest, SizeToWorkArea) {
   gfx::Size work_area(GetPrimaryDisplay().work_area().size());
   const gfx::Rect window_bounds(100, 101, work_area.width() + 1,
                                 work_area.height() + 2);
-  std::unique_ptr<aura::Window> window(CreateTestWindow(window_bounds));
-  // TODO: fix. This test verifies that when a window is added the bounds are
-  // adjusted. CreateTestWindow() for mus adds, then sets the bounds (this comes
-  // from NativeWidgetAura), which means this test now fails for aura-mus.
-  if (Shell::GetAshConfig() == Config::CLASSIC) {
-    EXPECT_EQ(gfx::Rect(gfx::Point(100, 101), work_area).ToString(),
-              window->bounds().ToString());
-  }
+  std::unique_ptr<aura::Window> window(
+      CreateTestWindowInShellWithBounds(window_bounds));
+  EXPECT_EQ(gfx::Rect(gfx::Point(100, 101), work_area).ToString(),
+            window->bounds().ToString());
 
   // Directly setting the bounds triggers a slightly different code path. Verify
   // that too.
@@ -577,7 +588,7 @@ TEST_F(WorkspaceLayoutManagerTest,
   std::unique_ptr<aura::Window> window(
       CreateTestWindow(gfx::Rect(10, 20, 100, 200)));
   wm::WindowState* window_state = wm::GetWindowState(window.get());
-  gfx::Insets insets(0, 0, 50, 0);
+  gfx::Insets insets(0, 0, 56, 0);
   Shell::Get()->SetDisplayWorkAreaInsets(window.get(), insets);
   const wm::WMEvent snap_left(wm::WM_EVENT_SNAP_LEFT);
   window_state->OnWMEvent(&snap_left);
@@ -635,6 +646,7 @@ TEST_F(WorkspaceLayoutManagerTest, AdjustSnappedBoundsWidth) {
   const gfx::Rect new_work_area =
       display::Screen::GetScreen()->GetPrimaryDisplay().work_area();
   EXPECT_NE(work_area, new_work_area);
+
   const gfx::Rect new_expected_left_snapped_bounds =
       gfx::Rect(new_work_area.x(), new_work_area.y(), new_work_area.width() / 2,
                 new_work_area.height());
@@ -655,8 +667,8 @@ TEST_F(WorkspaceLayoutManagerTest, AdjustSnappedBoundsWidth) {
 TEST_F(WorkspaceLayoutManagerTest,
        DoNotAdjustTransientWindowBoundsToEnsureMinimumVisibility) {
   UpdateDisplay("300x400");
-  std::unique_ptr<aura::Window> window(std::make_unique<aura::Window>(
-      nullptr, aura::client::WINDOW_TYPE_NORMAL));
+  std::unique_ptr<aura::Window> window =
+      window_factory::NewWindow(nullptr, aura::client::WINDOW_TYPE_NORMAL);
   window->Init(ui::LAYER_TEXTURED);
   window->SetBounds(gfx::Rect(10, 0, 100, 200));
   ParentWindowInPrimaryRootWindow(window.get());
@@ -1049,7 +1061,7 @@ class WorkspaceLayoutManagerBackdropTest : public AshTestBase {
   }
 
   aura::Window* CreateTestWindowInParent(aura::Window* root_window) {
-    aura::Window* window = new aura::Window(nullptr);
+    aura::Window* window = window_factory::NewWindow().release();
     window->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_NORMAL);
     window->SetType(aura::client::WINDOW_TYPE_NORMAL);
     window->Init(ui::LAYER_TEXTURED);
@@ -1430,15 +1442,15 @@ TEST_F(WorkspaceLayoutManagerBackdropTest, SpokenFeedbackFullscreenBackground) {
   window->SetProperty(kBackdropWindowMode, BackdropWindowMode::kEnabled);
   EXPECT_TRUE(test_helper.GetBackdropWindow());
 
-  ui::test::EventGenerator& generator = GetEventGenerator();
+  ui::test::EventGenerator* generator = GetEventGenerator();
 
-  generator.MoveMouseTo(300, 300);
-  generator.ClickLeftButton();
+  generator->MoveMouseTo(300, 300);
+  generator->ClickLeftButton();
   controller->FlushMojoForTest();
   EXPECT_EQ(kNoSoundKey, client.GetPlayedEarconAndReset());
 
-  generator.MoveMouseRelativeTo(window.get(), 10, 10);
-  generator.ClickLeftButton();
+  generator->MoveMouseRelativeTo(window.get(), 10, 10);
+  generator->ClickLeftButton();
   controller->FlushMojoForTest();
   EXPECT_EQ(kNoSoundKey, client.GetPlayedEarconAndReset());
 
@@ -1446,13 +1458,13 @@ TEST_F(WorkspaceLayoutManagerBackdropTest, SpokenFeedbackFullscreenBackground) {
   controller->SetSpokenFeedbackEnabled(true, A11Y_NOTIFICATION_NONE);
   EXPECT_TRUE(controller->IsSpokenFeedbackEnabled());
 
-  generator.MoveMouseTo(300, 300);
-  generator.ClickLeftButton();
+  generator->MoveMouseTo(300, 300);
+  generator->ClickLeftButton();
   controller->FlushMojoForTest();
   EXPECT_EQ(chromeos::SOUND_VOLUME_ADJUST, client.GetPlayedEarconAndReset());
 
-  generator.MoveMouseRelativeTo(window.get(), 10, 10);
-  generator.ClickLeftButton();
+  generator->MoveMouseRelativeTo(window.get(), 10, 10);
+  generator->ClickLeftButton();
   controller->FlushMojoForTest();
   EXPECT_EQ(kNoSoundKey, client.GetPlayedEarconAndReset());
 
@@ -1460,94 +1472,20 @@ TEST_F(WorkspaceLayoutManagerBackdropTest, SpokenFeedbackFullscreenBackground) {
   controller->SetSpokenFeedbackEnabled(false, A11Y_NOTIFICATION_NONE);
   EXPECT_FALSE(controller->IsSpokenFeedbackEnabled());
 
-  generator.MoveMouseTo(300, 300);
-  generator.ClickLeftButton();
+  generator->MoveMouseTo(300, 300);
+  generator->ClickLeftButton();
   controller->FlushMojoForTest();
   EXPECT_EQ(kNoSoundKey, client.GetPlayedEarconAndReset());
 
-  generator.MoveMouseTo(70, 70);
-  generator.ClickLeftButton();
+  generator->MoveMouseTo(70, 70);
+  generator->ClickLeftButton();
   controller->FlushMojoForTest();
   EXPECT_EQ(kNoSoundKey, client.GetPlayedEarconAndReset());
 }
 
-TEST_F(WorkspaceLayoutManagerBackdropTest,
-       DualDisplayShowAppListWithBackdropState) {
-  // Create two displays.
-  UpdateDisplay("0+0-200x200,+200+0-100x100");
-  aura::Window::Windows root_windows = Shell::GetAllRootWindows();
-  EXPECT_EQ(root_windows.size(), 2u);
-
-  // Create a window in each display and show them in maximized state.
-  aura::Window* window_1 = CreateTestWindowInParent(root_windows[0]);
-  window_1->SetBounds(gfx::Rect(0, 0, 100, 100));
-  window_1->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_MAXIMIZED);
-  window_1->Show();
-  aura::Window* window_2 = CreateTestWindowInParent(root_windows[1]);
-  window_2->SetBounds(gfx::Rect(201, 0, 100, 100));
-  window_2->SetProperty(aura::client::kShowStateKey, ui::SHOW_STATE_MAXIMIZED);
-  window_2->Show();
-
-  RootWindowController* primary_controller =
-      Shell::GetPrimaryRootWindowController();
-  WorkspaceController* primary_wc = primary_controller->workspace_controller();
-  Shell::RootWindowControllerList controllers =
-      Shell::GetAllRootWindowControllers();
-  WorkspaceController* secondary_wc = nullptr;
-  RootWindowController* secondary_controller = nullptr;
-  EXPECT_EQ(controllers.size(), 2u);
-  for (size_t i = 0; i < controllers.size(); ++i) {
-    if (controllers[i] != primary_controller) {
-      secondary_controller = controllers[i];
-      secondary_wc = secondary_controller->workspace_controller();
-    }
-  }
-
-  // Turn on top window backdrop for two displays.
-  WorkspaceControllerTestApi primary_test_helper(primary_wc);
-  WorkspaceControllerTestApi secondary_test_helper(secondary_wc);
-  ShowTopWindowBackdropForContainer(default_container(), true);
-  EXPECT_TRUE(primary_test_helper.GetBackdropWindow());
-  ShowTopWindowBackdropForContainer(
-      secondary_controller->GetContainer(kShellWindowId_DefaultContainer),
-      true);
-  EXPECT_TRUE(secondary_test_helper.GetBackdropWindow());
-
-  // Showing the app list on the primary display should not hide the backdrop on
-  // the secondary display.
-  EXPECT_TRUE(primary_test_helper.GetBackdropWindow());
-  EXPECT_TRUE(secondary_test_helper.GetBackdropWindow());
-  GetAppListTestHelper()->ShowAndRunLoop(GetPrimaryDisplay().id());
-  EXPECT_FALSE(primary_test_helper.GetBackdropWindow());
-  EXPECT_TRUE(secondary_test_helper.GetBackdropWindow());
-}
-
-// Fullscreen app list changes to visible should hide the backdrop, otherwise,
-// should show the backdrop.
-TEST_F(WorkspaceLayoutManagerBackdropTest,
-       BackdropUpdatesOnFullscreenAppListVisibilityNotification) {
-  WorkspaceController* wc = ShellTestApi(Shell::Get()).workspace_controller();
-  WorkspaceControllerTestApi test_helper(wc);
-
-  std::unique_ptr<aura::Window> window(
-      CreateTestWindow(gfx::Rect(0, 0, 100, 100)));
-  EXPECT_FALSE(test_helper.GetBackdropWindow());
-
-  // Turn the top window backdrop on.
-  ShowTopWindowBackdropForContainer(default_container(), true);
-  EXPECT_TRUE(test_helper.GetBackdropWindow());
-
-  ui::ScopedAnimationDurationScaleMode test_duration_mode(
-      ui::ScopedAnimationDurationScaleMode::NON_ZERO_DURATION);
-  EXPECT_TRUE(test_helper.GetBackdropWindow());
-  // Showing the fullscreen app list should hide the backdrop.
-  GetAppListTestHelper()->Show(GetPrimaryDisplay().id());
-  EXPECT_FALSE(test_helper.GetBackdropWindow());
-  // Dismissing the app list should cause the backdrop to be shown again.
-  GetAppListTestHelper()->Dismiss();
-}
-
-TEST_F(WorkspaceLayoutManagerBackdropTest, OpenAppListInOverviewMode) {
+// TODO(crbug.com/803286): The npot texture check failed on asan tests bot.
+// TODO(crbug.com/838756): Very flaky on mash_ash_unittests.
+TEST_F(WorkspaceLayoutManagerBackdropTest, DISABLED_OpenAppListInOverviewMode) {
   WorkspaceController* wc = ShellTestApi(Shell::Get()).workspace_controller();
   WorkspaceControllerTestApi test_helper(wc);
 
@@ -1561,6 +1499,7 @@ TEST_F(WorkspaceLayoutManagerBackdropTest, OpenAppListInOverviewMode) {
 
   // Toggle overview button to enter overview mode.
   Shell::Get()->window_selector_controller()->ToggleOverview();
+  RunAllPendingInMessageLoop();
   EXPECT_FALSE(test_helper.GetBackdropWindow());
 
   ui::ScopedAnimationDurationScaleMode test_duration_mode(
@@ -1606,14 +1545,14 @@ TEST_F(WorkspaceLayoutManagerBackdropTest, SpokenFeedbackForArc) {
   EXPECT_TRUE(test_helper.GetBackdropWindow());
 
   // Make sure that clicking the backdrop window will play sound.
-  ui::test::EventGenerator& generator = GetEventGenerator();
-  generator.MoveMouseTo(300, 300);
-  generator.ClickLeftButton();
+  ui::test::EventGenerator* generator = GetEventGenerator();
+  generator->MoveMouseTo(300, 300);
+  generator->ClickLeftButton();
   controller->FlushMojoForTest();
   EXPECT_EQ(chromeos::SOUND_VOLUME_ADJUST, client.GetPlayedEarconAndReset());
 
-  generator.MoveMouseTo(70, 70);
-  generator.ClickLeftButton();
+  generator->MoveMouseTo(70, 70);
+  generator->ClickLeftButton();
   controller->FlushMojoForTest();
   EXPECT_EQ(kNoSoundKey, client.GetPlayedEarconAndReset());
 }
@@ -1668,10 +1607,10 @@ class WorkspaceLayoutManagerKeyboardTest : public AshTestBase {
 // Tests that when a child window gains focus the top level window containing it
 // is resized to fit the remaining workspace area.
 TEST_F(WorkspaceLayoutManagerKeyboardTest, ChildWindowFocused) {
-  EnableStickyKeyboard();
+  ScopedStickyKeyboardEnabler sticky_enabler;
 
   // See comment at top of file for why this is needed.
-  CustomFrameViewAshSizeLock min_size_lock;
+  NonClientFrameViewAshSizeLock min_size_lock;
 
   InitKeyboardBounds();
 
@@ -1700,10 +1639,10 @@ TEST_F(WorkspaceLayoutManagerKeyboardTest, ChildWindowFocused) {
 }
 
 TEST_F(WorkspaceLayoutManagerKeyboardTest, AdjustWindowForA11yKeyboard) {
-  EnableStickyKeyboard();
+  ScopedStickyKeyboardEnabler sticky_enabler;
 
   // See comment at top of file for why this is needed.
-  CustomFrameViewAshSizeLock min_size_lock;
+  NonClientFrameViewAshSizeLock min_size_lock;
   InitKeyboardBounds();
   gfx::Rect work_area(GetPrimaryDisplay().work_area());
 
@@ -1752,7 +1691,7 @@ TEST_F(WorkspaceLayoutManagerKeyboardTest, AdjustWindowForA11yKeyboard) {
 }
 
 TEST_F(WorkspaceLayoutManagerKeyboardTest, IgnoreKeyboardBoundsChange) {
-  EnableStickyKeyboard();
+  ScopedStickyKeyboardEnabler sticky_enabler;
   InitKeyboardBounds();
 
   std::unique_ptr<aura::Window> window(CreateTestWindow(keyboard_bounds()));
@@ -1773,9 +1712,8 @@ TEST_F(WorkspaceLayoutManagerKeyboardTest,
        IgnoreWorkAreaChangeinNonStickyMode) {
   keyboard::SetAccessibilityKeyboardEnabled(true);
   InitKeyboardBounds();
-  Shell::Get()->CreateKeyboard();
-  keyboard::KeyboardController* kb_controller =
-      keyboard::KeyboardController::GetInstance();
+  Shell::Get()->EnableKeyboard();
+  auto* kb_controller = keyboard::KeyboardController::Get();
 
   gfx::Rect work_area(
       display::Screen::GetScreen()->GetPrimaryDisplay().work_area());
@@ -1790,29 +1728,28 @@ TEST_F(WorkspaceLayoutManagerKeyboardTest,
 
   // Open keyboard in non-sticky mode.
   kb_controller->ShowKeyboard(false);
-  kb_controller->ui()->GetContentsWindow()->SetBounds(
+  kb_controller->GetKeyboardWindow()->SetBounds(
       keyboard::KeyboardBoundsFromRootBounds(
           Shell::GetPrimaryRootWindow()->bounds(), 100));
 
   // Window should not be shifted up.
   EXPECT_EQ(orig_window_bounds, window->bounds());
 
-  kb_controller->HideKeyboard(
-      keyboard::KeyboardController::HIDE_REASON_AUTOMATIC);
+  kb_controller->HideKeyboardExplicitlyBySystem();
   EXPECT_EQ(orig_window_bounds, window->bounds());
 
   // Open keyboard in sticky mode.
   kb_controller->ShowKeyboard(true);
+  kb_controller->NotifyKeyboardWindowLoaded();
 
   int shift =
-      work_area.height() - kb_controller->GetContainerWindow()->bounds().y();
+      work_area.height() - kb_controller->GetKeyboardWindow()->bounds().y();
   gfx::Rect changed_window_bounds(orig_window_bounds);
   changed_window_bounds.Offset(0, -shift);
   // Window should be shifted up.
   EXPECT_EQ(changed_window_bounds, window->bounds());
 
-  kb_controller->HideKeyboard(
-      keyboard::KeyboardController::HIDE_REASON_AUTOMATIC);
+  kb_controller->HideKeyboardExplicitlyBySystem();
   EXPECT_EQ(orig_window_bounds, window->bounds());
 }
 

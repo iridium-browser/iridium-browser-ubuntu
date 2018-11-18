@@ -16,16 +16,38 @@
 #include "ui/gl/gl_surface_egl.h"
 #include "ui/ozone/common/egl_util.h"
 #include "ui/ozone/common/gl_ozone_egl.h"
-#include "ui/ozone/common/gl_ozone_osmesa.h"
 #include "ui/ozone/platform/drm/common/drm_util.h"
 #include "ui/ozone/platform/drm/gpu/drm_thread_proxy.h"
 #include "ui/ozone/platform/drm/gpu/drm_window_proxy.h"
-#include "ui/ozone/platform/drm/gpu/gbm_buffer.h"
-#include "ui/ozone/platform/drm/gpu/gbm_surface.h"
+#include "ui/ozone/platform/drm/gpu/gbm_overlay_surface.h"
+#include "ui/ozone/platform/drm/gpu/gbm_pixmap.h"
 #include "ui/ozone/platform/drm/gpu/gbm_surfaceless.h"
 #include "ui/ozone/platform/drm/gpu/proxy_helpers.h"
 #include "ui/ozone/platform/drm/gpu/screen_manager.h"
 #include "ui/ozone/public/surface_ozone_canvas.h"
+
+#if BUILDFLAG(ENABLE_VULKAN)
+#include "gpu/vulkan/vulkan_function_pointers.h"
+#include "ui/ozone/platform/drm/gpu/vulkan_implementation_gbm.h"
+#if defined(OS_CHROMEOS)
+#define VK_STRUCTURE_TYPE_DMA_BUF_IMAGE_CREATE_INFO_INTEL 1024
+typedef struct VkDmaBufImageCreateInfo_ {
+  VkStructureType sType;
+  const void* pNext;
+  int fd;
+  VkFormat format;
+  VkExtent3D extent;
+  uint32_t strideInBytes;
+} VkDmaBufImageCreateInfo;
+
+typedef VkResult(VKAPI_PTR* PFN_vkCreateDmaBufImageINTEL)(
+    VkDevice device,
+    const VkDmaBufImageCreateInfo* pCreateInfo,
+    const VkAllocationCallbacks* pAllocator,
+    VkDeviceMemory* pMem,
+    VkImage* pImage);
+#endif
+#endif
 
 namespace ui {
 
@@ -41,9 +63,7 @@ class GLOzoneEGLGbm : public GLOzoneEGL {
 
   scoped_refptr<gl::GLSurface> CreateViewGLSurface(
       gfx::AcceleratedWidget window) override {
-    return gl::InitializeGLSurface(new GbmSurface(
-        surface_factory_, drm_thread_proxy_->CreateDrmWindowProxy(window),
-        window));
+    return nullptr;
   }
 
   scoped_refptr<gl::GLSurface> CreateSurfacelessViewGLSurface(
@@ -79,7 +99,6 @@ class GLOzoneEGLGbm : public GLOzoneEGL {
 GbmSurfaceFactory::GbmSurfaceFactory(DrmThreadProxy* drm_thread_proxy)
     : egl_implementation_(
           std::make_unique<GLOzoneEGLGbm>(this, drm_thread_proxy)),
-      osmesa_implementation_(std::make_unique<GLOzoneOSMesa>()),
       drm_thread_proxy_(drm_thread_proxy) {}
 
 GbmSurfaceFactory::~GbmSurfaceFactory() {
@@ -109,20 +128,97 @@ std::vector<gl::GLImplementation>
 GbmSurfaceFactory::GetAllowedGLImplementations() {
   DCHECK(thread_checker_.CalledOnValidThread());
   return std::vector<gl::GLImplementation>{gl::kGLImplementationEGLGLES2,
-                                           gl::kGLImplementationOSMesaGL,
                                            gl::kGLImplementationSwiftShaderGL};
 }
 
 GLOzone* GbmSurfaceFactory::GetGLOzone(gl::GLImplementation implementation) {
-  DCHECK(thread_checker_.CalledOnValidThread());
   switch (implementation) {
     case gl::kGLImplementationEGLGLES2:
+    case gl::kGLImplementationSwiftShaderGL:
       return egl_implementation_.get();
-    case gl::kGLImplementationOSMesaGL:
-      return osmesa_implementation_.get();
     default:
       return nullptr;
   }
+}
+
+#if BUILDFLAG(ENABLE_VULKAN)
+std::unique_ptr<gpu::VulkanImplementation>
+GbmSurfaceFactory::CreateVulkanImplementation() {
+  return std::make_unique<ui::VulkanImplementationGbm>();
+}
+
+scoped_refptr<gfx::NativePixmap> GbmSurfaceFactory::CreateNativePixmapForVulkan(
+    gfx::AcceleratedWidget widget,
+    gfx::Size size,
+    gfx::BufferFormat format,
+    gfx::BufferUsage usage,
+    VkDevice vk_device,
+    VkDeviceMemory* vk_device_memory,
+    VkImage* vk_image) {
+#if defined(OS_CHROMEOS)
+  std::unique_ptr<GbmBuffer> buffer;
+  scoped_refptr<DrmFramebuffer> framebuffer;
+
+  drm_thread_proxy_->CreateBuffer(widget, size, format, usage,
+                                  GbmPixmap::kFlagNoModifiers, &buffer,
+                                  &framebuffer);
+  if (!buffer)
+    return nullptr;
+
+  PFN_vkCreateDmaBufImageINTEL create_dma_buf_image_intel =
+      reinterpret_cast<PFN_vkCreateDmaBufImageINTEL>(
+          vkGetDeviceProcAddr(vk_device, "vkCreateDmaBufImageINTEL"));
+  if (!create_dma_buf_image_intel) {
+    LOG(ERROR) << "Scanout buffers can only be imported into vulkan when "
+                  "vkCreateDmaBufImageINTEL is available.";
+    return nullptr;
+  }
+
+  DCHECK(buffer->AreFdsValid());
+  DCHECK_EQ(buffer->GetFdCount(), 1U);
+
+  base::ScopedFD vk_image_fd(dup(buffer->GetPlaneFd(0)));
+  DCHECK(vk_image_fd.is_valid());
+
+  // TODO(spang): Fix this for formats other than gfx::BufferFormat::BGRA_8888
+  DCHECK_EQ(format, display::DisplaySnapshot::PrimaryFormat());
+  VkFormat vk_format = VK_FORMAT_B8G8R8A8_SRGB;
+
+  VkDmaBufImageCreateInfo dma_buf_image_create_info = {
+      /* .sType = */ static_cast<VkStructureType>(
+          VK_STRUCTURE_TYPE_DMA_BUF_IMAGE_CREATE_INFO_INTEL),
+      /* .pNext = */ nullptr,
+      /* .fd = */ vk_image_fd.release(),
+      /* .format = */ vk_format,
+      /* .extent = */
+      {
+          /* .width = */ size.width(),
+          /* .height = */ size.height(),
+          /* .depth = */ 1,
+      },
+      /* .strideInBytes = */ buffer->GetPlaneStride(0),
+  };
+
+  VkResult result =
+      create_dma_buf_image_intel(vk_device, &dma_buf_image_create_info, nullptr,
+                                 vk_device_memory, vk_image);
+  if (result != VK_SUCCESS) {
+    LOG(ERROR) << "Failed to create a Vulkan image from a dmabuf.";
+    return nullptr;
+  }
+
+  return base::MakeRefCounted<GbmPixmap>(this, std::move(buffer),
+                                         std::move(framebuffer));
+#else
+  return nullptr;
+#endif
+}
+#endif
+
+std::unique_ptr<OverlaySurface> GbmSurfaceFactory::CreateOverlaySurface(
+    gfx::AcceleratedWidget window) {
+  return std::make_unique<GbmOverlaySurface>(
+      drm_thread_proxy_->CreateDrmWindowProxy(window));
 }
 
 std::unique_ptr<SurfaceOzoneCanvas> GbmSurfaceFactory::CreateCanvasForWidget(
@@ -144,18 +240,14 @@ scoped_refptr<gfx::NativePixmap> GbmSurfaceFactory::CreateNativePixmap(
     gfx::Size size,
     gfx::BufferFormat format,
     gfx::BufferUsage usage) {
-#if !defined(OS_CHROMEOS)
-  // Support for memory mapping accelerated buffers requires some
-  // CrOS-specific patches (using dma-buf mmap API).
-  DCHECK(gfx::BufferUsage::SCANOUT == usage);
-#endif
-
-  scoped_refptr<GbmBuffer> buffer =
-      drm_thread_proxy_->CreateBuffer(widget, size, format, usage);
-  if (!buffer.get())
+  std::unique_ptr<GbmBuffer> buffer;
+  scoped_refptr<DrmFramebuffer> framebuffer;
+  drm_thread_proxy_->CreateBuffer(widget, size, format, usage, 0 /* flags */,
+                                  &buffer, &framebuffer);
+  if (!buffer)
     return nullptr;
-
-  return base::MakeRefCounted<GbmPixmap>(this, buffer);
+  return base::MakeRefCounted<GbmPixmap>(this, std::move(buffer),
+                                         std::move(framebuffer));
 }
 
 scoped_refptr<gfx::NativePixmap>
@@ -179,12 +271,15 @@ GbmSurfaceFactory::CreateNativePixmapFromHandleInternal(
     planes.push_back(plane);
   }
 
-  scoped_refptr<GbmBuffer> buffer = drm_thread_proxy_->CreateBufferFromFds(
-      widget, size, format, std::move(scoped_fds), planes);
+  std::unique_ptr<GbmBuffer> buffer;
+  scoped_refptr<DrmFramebuffer> framebuffer;
+  drm_thread_proxy_->CreateBufferFromFds(widget, size, format,
+                                         std::move(scoped_fds), planes, &buffer,
+                                         &framebuffer);
   if (!buffer)
     return nullptr;
-
-  return base::MakeRefCounted<GbmPixmap>(this, buffer);
+  return base::MakeRefCounted<GbmPixmap>(this, std::move(buffer),
+                                         std::move(framebuffer));
 }
 
 scoped_refptr<gfx::NativePixmap>

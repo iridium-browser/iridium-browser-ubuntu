@@ -80,7 +80,7 @@ def attribute_context(interface, attribute, interfaces):
         includes.add('core/frame/use_counter.h')
     # [CrossOrigin]
     if has_extended_attribute_value(attribute, 'CrossOrigin', 'Setter'):
-        includes.add('bindings/core/v8/v8_cross_origin_setter_info.h')
+        includes.add('platform/bindings/v8_cross_origin_setter_info.h')
     # [Constructor]
     # TODO(yukishiino): Constructors are much like methods although constructors
     # are not methods.  Constructors must be data-type properties, and we can
@@ -105,11 +105,6 @@ def attribute_context(interface, attribute, interfaces):
     if is_save_same_object:
         includes.add('platform/bindings/v8_private_property.h')
 
-    if (base_idl_type == 'EventHandler' and
-            interface.name in ['Window', 'WorkerGlobalScope'] and
-            attribute.name == 'onerror'):
-        includes.add('bindings/core/v8/v8_error_handler.h')
-
     cached_attribute_validation_method = extended_attributes.get('CachedAttribute')
     keep_alive_for_gc = is_keep_alive_for_gc(interface, attribute)
     if cached_attribute_validation_method or keep_alive_for_gc:
@@ -119,6 +114,18 @@ def attribute_context(interface, attribute, interfaces):
     is_cached_accessor = 'CachedAccessor' in extended_attributes
     if is_cached_accessor:
         includes.add('platform/bindings/v8_private_property.h')
+
+    # [LogActivity]
+    if 'LogActivity' in extended_attributes:
+        includes.add('platform/bindings/v8_per_context_data.h')
+
+    # [DeprecateAs], [MeasureAs]
+    deprecate_as = v8_utilities.deprecate_as(attribute)
+    measure_as = v8_utilities.measure_as(attribute, interface)
+
+    is_lazy_data_attribute = \
+        (constructor_type and not (measure_as or deprecate_as)) or \
+        (str(idl_type) == 'Window' and attribute.name in ('frames', 'self', 'window'))
 
     context = {
         'activity_logging_world_list_for_getter': v8_utilities.activity_logging_world_list(attribute, 'Getter'),  # [ActivityLogging]
@@ -130,7 +137,7 @@ def attribute_context(interface, attribute, interfaces):
         'cpp_name': cpp_name(attribute),
         'cpp_type': idl_type.cpp_type,
         'cpp_type_initializer': idl_type.cpp_type_initializer,
-        'deprecate_as': v8_utilities.deprecate_as(attribute),  # [DeprecateAs]
+        'deprecate_as': deprecate_as,
         'enum_type': idl_type.enum_type,
         'enum_values': idl_type.enum_values,
         'exposed_test': v8_utilities.exposed(attribute, interface),  # [Exposed]
@@ -157,6 +164,8 @@ def attribute_context(interface, attribute, interfaces):
             'RaisesException' in extended_attributes and
             extended_attributes['RaisesException'] in (None, 'Getter'),
         'is_keep_alive_for_gc': keep_alive_for_gc,
+        'is_lazy_data_attribute': is_lazy_data_attribute,
+        'is_lenient_setter': 'LenientSetter' in extended_attributes,
         'is_lenient_this': 'LenientThis' in extended_attributes,
         'is_nullable': idl_type.is_nullable,
         'is_explicit_nullable': idl_type.is_explicit_nullable,
@@ -171,13 +180,13 @@ def attribute_context(interface, attribute, interfaces):
         'is_save_same_object': is_save_same_object,
         'is_static': attribute.is_static,
         'is_url': 'URL' in extended_attributes,
-        'is_unforgeable': is_unforgeable(interface, attribute),
+        'is_unforgeable': is_unforgeable(attribute),
         'on_instance': v8_utilities.on_instance(interface, attribute),
         'on_interface': v8_utilities.on_interface(interface, attribute),
         'on_prototype': v8_utilities.on_prototype(interface, attribute),
         'origin_trial_feature_name': v8_utilities.origin_trial_feature_name(attribute),  # [OriginTrialEnabled]
         'use_output_parameter_for_result': idl_type.use_output_parameter_for_result,
-        'measure_as': v8_utilities.measure_as(attribute, interface),  # [MeasureAs]
+        'measure_as': measure_as,
         'name': attribute.name,
         'property_attributes': property_attributes(interface, attribute),
         'reflect_empty': extended_attributes.get('ReflectEmpty'),
@@ -256,20 +265,8 @@ def is_data_attribute(attribute):
             attribute['is_data_type_property'])
 
 
-def is_lazy_data_attribute(attribute):
-    return ((attribute['constructor_type'] and not
-             (attribute['measure_as'] or attribute['deprecate_as'])) or
-            (attribute['idl_type'] == 'Window' and attribute['name'] == 'frames') or
-            (attribute['idl_type'] == 'Window' and attribute['name'] == 'self') or
-            (attribute['idl_type'] == 'Window' and attribute['name'] == 'window'))
-
-
 def filter_data_attributes(attributes):
-    return [attribute for attribute in attributes if is_data_attribute(attribute) and not is_lazy_data_attribute(attribute)]
-
-
-def filter_lazy_data_attributes(attributes):
-    return [attribute for attribute in attributes if is_data_attribute(attribute) and is_lazy_data_attribute(attribute)]
+    return [attribute for attribute in attributes if is_data_attribute(attribute)]
 
 
 def filter_runtime_enabled(attributes):
@@ -461,6 +458,8 @@ def setter_context(interface, attribute, interfaces, context):
         'has_type_checking_interface': has_type_checking_interface,
         'is_setter_call_with_execution_context': has_extended_attribute_value(
             attribute, 'SetterCallWith', 'ExecutionContext'),
+        'is_setter_call_with_script_state': has_extended_attribute_value(
+            attribute, 'SetterCallWith', 'ScriptState'),
         'is_setter_raises_exception': is_setter_raises_exception,
         'v8_value_to_local_cpp_value': idl_type.v8_value_to_local_cpp_value(
             extended_attributes, 'v8Value', 'cppValue'),
@@ -490,17 +489,16 @@ def setter_expression(interface, attribute, context):
         getter_name = scoped_name(interface, attribute, cpp_name(attribute))
         context['event_handler_getter_expression'] = '%s(%s)' % (
             getter_name, ', '.join(arguments))
-        if (interface.name in ['Window', 'WorkerGlobalScope'] and
-                attribute.name == 'onerror'):
-            includes.add('bindings/core/v8/v8_error_handler.h')
-            arguments.append(
-                'V8EventListenerHelper::EnsureErrorHandler(' +
-                'ScriptState::ForRelevantRealm(info), v8Value)')
-        else:
-            arguments.append(
-                'V8EventListenerHelper::GetEventListener(' +
-                'ScriptState::ForRelevantRealm(info), v8Value, true, ' +
-                'kListenerFindOrCreate)')
+        handler_type = 'kEventHandler'
+        if attribute.name == 'onerror':
+            handler_type = 'kOnErrorEventHandler'
+        elif attribute.name == 'onbeforeunload':
+            handler_type = 'kOnBeforeUnloadEventHandler'
+        arguments.append(
+            'V8EventListenerHelper::GetEventHandler(' +
+            'ScriptState::ForRelevantRealm(info), v8Value, ' +
+            'JSEventHandler::HandlerType::' + handler_type +
+            ', kListenerFindOrCreate)')
     elif idl_type.base_type == 'SerializedScriptValue':
         arguments.append('std::move(cppValue)')
     else:
@@ -549,8 +547,8 @@ def scoped_content_attribute_name(interface, attribute):
 # Property descriptor's {writable: boolean}
 def is_writable(attribute):
     return (not attribute.is_read_only or
-            'PutForwards' in attribute.extended_attributes or
-            'Replaceable' in attribute.extended_attributes)
+            any(keyword in attribute.extended_attributes for keyword in [
+                'PutForwards', 'Replaceable', 'LenientSetter']))
 
 
 def is_data_type_property(interface, attribute):
@@ -560,7 +558,7 @@ def is_data_type_property(interface, attribute):
             'CrossOrigin' in attribute.extended_attributes)
 
 
-# [PutForwards], [Replaceable]
+# [PutForwards], [Replaceable], [LenientSetter]
 def has_setter(interface, attribute):
     if (is_data_type_property(interface, attribute) and
         (is_constructor_attribute(attribute) or
@@ -577,7 +575,7 @@ def property_attributes(interface, attribute):
     if ('NotEnumerable' in extended_attributes or
             is_constructor_attribute(attribute)):
         property_attributes_list.append('v8::DontEnum')
-    if is_unforgeable(interface, attribute):
+    if is_unforgeable(attribute):
         property_attributes_list.append('v8::DontDelete')
     if not is_writable(attribute):
         property_attributes_list.append('v8::ReadOnly')

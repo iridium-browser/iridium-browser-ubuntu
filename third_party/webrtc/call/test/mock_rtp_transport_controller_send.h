@@ -11,9 +11,12 @@
 #ifndef CALL_TEST_MOCK_RTP_TRANSPORT_CONTROLLER_SEND_H_
 #define CALL_TEST_MOCK_RTP_TRANSPORT_CONTROLLER_SEND_H_
 
+#include <map>
+#include <memory>
 #include <string>
+#include <vector>
 
-#include "call/bitrate_constraints.h"
+#include "api/bitrate_constraints.h"
 #include "call/rtp_transport_controller_send_interface.h"
 #include "modules/congestion_controller/include/network_changed_observer.h"
 #include "modules/pacing/packet_router.h"
@@ -27,6 +30,19 @@ namespace webrtc {
 class MockRtpTransportControllerSend
     : public RtpTransportControllerSendInterface {
  public:
+  MOCK_METHOD9(
+      CreateRtpVideoSender,
+      RtpVideoSenderInterface*(const std::vector<uint32_t>&,
+                               std::map<uint32_t, RtpState>,
+                               const std::map<uint32_t, RtpPayloadState>&,
+                               const RtpConfig&,
+                               const RtcpConfig&,
+                               Transport*,
+                               const RtpSenderObservers&,
+                               RtcEventLog*,
+                               std::unique_ptr<FecController>));
+  MOCK_METHOD1(DestroyRtpVideoSender, void(RtpVideoSenderInterface*));
+  MOCK_METHOD0(GetWorkerQueue, rtc::TaskQueue*());
   MOCK_METHOD0(packet_router, PacketRouter*());
   MOCK_METHOD0(transport_feedback_observer, TransportFeedbackObserver*());
   MOCK_METHOD0(packet_sender, RtpPacketSender*());
@@ -49,8 +65,9 @@ class MockRtpTransportControllerSend
   MOCK_METHOD1(EnablePeriodicAlrProbing, void(bool));
   MOCK_METHOD1(OnSentPacket, void(const rtc::SentPacket&));
   MOCK_METHOD1(SetSdpBitrateParameters, void(const BitrateConstraints&));
-  MOCK_METHOD1(SetClientBitratePreferences,
-               void(const BitrateConstraintsMask&));
+  MOCK_METHOD1(SetClientBitratePreferences, void(const BitrateSettings&));
+  MOCK_METHOD1(SetAllocatedBitrateWithoutFeedback, void(uint32_t));
+  MOCK_METHOD1(OnTransportOverheadChanged, void(size_t));
 };
 }  // namespace webrtc
 #endif  // CALL_TEST_MOCK_RTP_TRANSPORT_CONTROLLER_SEND_H_

@@ -31,6 +31,7 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Service that is responsible for uploading crash minidumps to the Google crash server.
@@ -60,14 +61,19 @@ public class MinidumpUploadService extends IntentService {
     private static final int FAILURE = 0;
     private static final int SUCCESS = 1;
 
-    @StringDef({BROWSER, RENDERER, GPU, OTHER})
-    public @interface ProcessType {}
-    static final String BROWSER = "Browser";
-    static final String RENDERER = "Renderer";
-    static final String GPU = "GPU";
-    static final String OTHER = "Other";
+    private static AtomicBoolean sBrowserCrashMetricsInitialized = new AtomicBoolean();
+    private static AtomicBoolean sDidBrowserCrashRecently = new AtomicBoolean();
 
-    static final String[] TYPES = {BROWSER, RENDERER, GPU, OTHER};
+    @StringDef({ProcessType.BROWSER, ProcessType.RENDERER, ProcessType.GPU, ProcessType.OTHER})
+    public @interface ProcessType {
+        String BROWSER = "Browser";
+        String RENDERER = "Renderer";
+        String GPU = "GPU";
+        String OTHER = "Other";
+    }
+
+    static final String[] TYPES = {
+            ProcessType.BROWSER, ProcessType.RENDERER, ProcessType.GPU, ProcessType.OTHER};
 
     public MinidumpUploadService() {
         super(TAG);
@@ -110,19 +116,47 @@ public class MinidumpUploadService extends IntentService {
      * Stores the successes and failures from uploading crash to UMA,
      */
     public static void storeBreakpadUploadStatsInUma(ChromePreferenceManager pref) {
+        sBrowserCrashMetricsInitialized.set(true);
         for (String type : TYPES) {
             for (int success = pref.getCrashSuccessUploadCount(type); success > 0; success--) {
                 RecordHistogram.recordEnumeratedHistogram(
                         HISTOGRAM_NAME_PREFIX + type, SUCCESS, HISTOGRAM_MAX);
+                if (ProcessType.BROWSER.equals(type)) sDidBrowserCrashRecently.set(true);
             }
             for (int fail = pref.getCrashFailureUploadCount(type); fail > 0; fail--) {
                 RecordHistogram.recordEnumeratedHistogram(
                         HISTOGRAM_NAME_PREFIX + type, FAILURE, HISTOGRAM_MAX);
+                if (ProcessType.BROWSER.equals(type)) sDidBrowserCrashRecently.set(true);
             }
 
             pref.setCrashSuccessUploadCount(type, 0);
             pref.setCrashFailureUploadCount(type, 0);
         }
+    }
+
+    /**
+     * Returns true if the initial breakpad upload stats have been recorded.
+     */
+    @CalledByNative
+    private static boolean browserCrashMetricsInitialized() {
+        return sBrowserCrashMetricsInitialized.get();
+    }
+
+    /**
+     * Returns if browser crash dumps were found for recent browser crashes.
+     *
+     * We detect if the browser crash dump was uploaded in last session (for a previous session) or
+     * if a crash dump was seen in current session. Detection of a crash from earlier session is
+     * valid right from the point where minidump service was initialized
+     * (sBrowserCrashMetricsInitialized() returns true). But, the detection of a crash in previous
+     * session is only valid after background minidump upload job is finished, depending on the job
+     * scheduler. So, calling this function at startup can return false even if browser crashed in
+     * previous session.
+     */
+    @CalledByNative
+    private static boolean didBrowserCrashRecently() {
+        assert browserCrashMetricsInitialized();
+        return sDidBrowserCrashRecently.get();
     }
 
     @Override
@@ -217,23 +251,11 @@ public class MinidumpUploadService extends IntentService {
                     // Crash type is on the line after the next line.
                     fileReader.readLine();
                     String crashType = fileReader.readLine();
-                    if (crashType == null) {
-                        return OTHER;
-                    }
-
-                    if (crashType.equals("browser")) {
-                        return BROWSER;
-                    }
-
-                    if (crashType.equals("renderer")) {
-                        return RENDERER;
-                    }
-
-                    if (crashType.equals("gpu-process")) {
-                        return GPU;
-                    }
-
-                    return OTHER;
+                    if (crashType == null) return ProcessType.OTHER;
+                    if (crashType.equals("browser")) return ProcessType.BROWSER;
+                    if (crashType.equals("renderer")) return ProcessType.RENDERER;
+                    if (crashType.equals("gpu-process")) return ProcessType.GPU;
+                    return ProcessType.OTHER;
                 }
             }
         } catch (IOException e) {
@@ -241,7 +263,7 @@ public class MinidumpUploadService extends IntentService {
         } finally {
             StreamUtil.closeQuietly(fileReader);
         }
-        return OTHER;
+        return ProcessType.OTHER;
     }
 
     /**
@@ -254,8 +276,12 @@ public class MinidumpUploadService extends IntentService {
      * @param originalFilename The name of the successfully uploaded minidump, *prior* to uploading.
      */
     public static void incrementCrashSuccessUploadCount(String originalFilename) {
-        ChromePreferenceManager.getInstance().incrementCrashSuccessUploadCount(
-                getCrashType(getNewNameAfterSuccessfulUpload(originalFilename)));
+        final @ProcessType String process_type =
+                getCrashType(getNewNameAfterSuccessfulUpload(originalFilename));
+        if (ProcessType.BROWSER.equals(process_type)) {
+            sDidBrowserCrashRecently.set(true);
+        }
+        ChromePreferenceManager.getInstance().incrementCrashSuccessUploadCount(process_type);
     }
 
     /**
@@ -267,8 +293,11 @@ public class MinidumpUploadService extends IntentService {
      * @param originalFilename The name of the successfully uploaded minidump, *prior* to uploading.
      */
     public static void incrementCrashFailureUploadCount(String originalFilename) {
-        ChromePreferenceManager.getInstance().incrementCrashFailureUploadCount(
-                getCrashType(originalFilename));
+        final @ProcessType String process_type = getCrashType(originalFilename);
+        if (ProcessType.BROWSER.equals(process_type)) {
+            sDidBrowserCrashRecently.set(true);
+        }
+        ChromePreferenceManager.getInstance().incrementCrashFailureUploadCount(process_type);
     }
 
     /**

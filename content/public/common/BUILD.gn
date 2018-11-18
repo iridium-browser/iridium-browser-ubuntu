@@ -7,7 +7,6 @@ import("//build/config/chromecast_build.gni")
 import("//build/config/features.gni")
 import("//build/config/jumbo.gni")
 import("//build/config/ui.gni")
-import("//content/public/common/zygote_features.gni")
 import("//media/media_options.gni")
 import("//mojo/public/tools/bindings/mojom.gni")
 import("//ppapi/buildflags/buildflags.gni")
@@ -31,6 +30,10 @@ group("common") {
 source_set("result_codes") {
   sources = [
     "result_codes.h",
+  ]
+
+  deps = [
+    "//services/service_manager/embedder:embedder_result_codes",
   ]
 }
 
@@ -70,12 +73,10 @@ config("static_switches_defines") {
 source_set("static_switches") {
   public = [
     "content_switches.h",
-    "mojo_channel_switches.h",
   ]
   sources = [
     "//content/common/content_export.h",
     "content_switches.cc",
-    "mojo_channel_switches.cc",
   ]
 
   public_configs = [ ":static_switches_defines" ]
@@ -102,6 +103,10 @@ source_set("static_features") {
   ]
 
   public_configs = [ ":static_switches_defines" ]
+
+  if (is_chromeos) {
+    public_deps += [ "//media/capture/video/chromeos/public" ]
+  }
 }
 
 jumbo_source_set("common_sources") {
@@ -142,10 +147,6 @@ jumbo_source_set("common_sources") {
     "drop_data.h",
     "favicon_url.cc",
     "favicon_url.h",
-    "file_chooser_file_info.cc",
-    "file_chooser_file_info.h",
-    "file_chooser_params.cc",
-    "file_chooser_params.h",
     "font_cache_dispatcher_win.h",
     "frame_navigate_params.cc",
     "frame_navigate_params.h",
@@ -156,10 +157,6 @@ jumbo_source_set("common_sources") {
     "isolated_world_ids.h",
     "javascript_dialog_type.h",
     "main_function_params.h",
-    "manifest.cc",
-    "manifest.h",
-    "manifest_share_target_util.cc",
-    "manifest_share_target_util.h",
     "manifest_util.cc",
     "manifest_util.h",
     "media_metadata.cc",
@@ -170,14 +167,8 @@ jumbo_source_set("common_sources") {
     "menu_item.h",
     "mhtml_generation_params.cc",
     "mhtml_generation_params.h",
-    "mojo_channel_switches.cc",
-    "mojo_channel_switches.h",
-    "network_connection_tracker.cc",
-    "network_connection_tracker.h",
-    "notification_resources.cc",
-    "notification_resources.h",
-    "origin_trial_policy.cc",
-    "origin_trial_policy.h",
+    "mime_handler_view_mode.cc",
+    "mime_handler_view_mode.h",
     "origin_util.h",
     "page_importance_signals.h",
     "page_state.cc",
@@ -187,21 +178,13 @@ jumbo_source_set("common_sources") {
     "pepper_plugin_info.cc",
     "pepper_plugin_info.h",
     "persistent_notification_status.h",
-    "platform_notification_data.cc",
-    "platform_notification_data.h",
-    "presentation_connection_message.cc",
-    "presentation_connection_message.h",
-    "presentation_info.cc",
-    "presentation_info.h",
     "previews_state.h",
     "process_type.h",
-    "push_event_payload.h",
     "push_subscription_options.h",
     "referrer.cc",
     "referrer.h",
     "renderer_preferences.cc",
     "renderer_preferences.h",
-    "request_context_type.h",
     "resource_request_body_android.cc",
     "resource_request_body_android.h",
     "resource_type.cc",
@@ -215,21 +198,15 @@ jumbo_source_set("common_sources") {
     "screen_info.cc",
     "screen_info.h",
     "screen_orientation_values.h",
-    "send_zygote_child_ping_linux.h",
     "service_manager_connection.h",
     "simple_connection_filter.cc",
     "simple_connection_filter.h",
     "socket_permission_request.h",
-    "speech_recognition_error.h",
-    "speech_recognition_grammar.h",
-    "speech_recognition_result.cc",
-    "speech_recognition_result.h",
     "stop_find_action.h",
     "storage_quota_params.h",
     "three_d_api_types.h",
     "url_constants.cc",
     "url_constants.h",
-    "url_fetcher.h",
     "url_loader_throttle.cc",
     "url_loader_throttle.h",
     "url_utils.cc",
@@ -237,14 +214,15 @@ jumbo_source_set("common_sources") {
     "use_zoom_for_dsf_policy.cc",
     "use_zoom_for_dsf_policy.h",
     "user_agent.h",
-    "weak_wrapper_shared_url_loader_factory.cc",
-    "weak_wrapper_shared_url_loader_factory.h",
+    "was_activated_option.h",
     "web_preferences.cc",
     "web_preferences.h",
     "webplugininfo.cc",
     "webplugininfo.h",
     "webplugininfo_param_traits.h",
-    "zygote_fork_delegate_linux.h",
+    "webrtc_ip_handling_policy.cc",
+    "webrtc_ip_handling_policy.h",
+    "widget_type.h",
   ]
 
   configs += [
@@ -257,11 +235,9 @@ jumbo_source_set("common_sources") {
   public_deps = [
     ":interfaces",
     ":service_names",
-    ":zygote_buildflags",
     "//content/common",
     "//ipc",
     "//media/capture:capture_base",
-    "//mojo/edk",
     "//mojo/public/cpp/bindings",
     "//net",
     "//services/network:network_service",
@@ -282,11 +258,13 @@ jumbo_source_set("common_sources") {
     # needed because of allow_circular_includes_from.
     "//content/common:mojo_bindings",
     "//media",
-    "//mojo/common",
+    "//media/mojo/interfaces",
     "//ppapi/buildflags",
     "//ppapi/c",
     "//services/network/public/cpp",
+    "//services/service_manager/embedder:embedder_result_codes",
     "//services/service_manager/public/cpp",
+    "//services/service_manager/zygote:zygote_buildflags",
     "//skia",
     "//storage/common",
     "//third_party/blink/public/common",
@@ -308,6 +286,14 @@ jumbo_source_set("common_sources") {
     deps += [ "//content/public/android:jni" ]
   }
 
+  if (is_linux) {
+    deps += [ "//services/service_manager/zygote" ]
+  }
+
+  if (is_chromeos) {
+    public_deps += [ "//media/capture/video/chromeos/public" ]
+  }
+
   # //content/common needs to include public headers.
   allow_circular_includes_from = [
     ":interfaces",
@@ -320,17 +306,6 @@ jumbo_source_set("common_sources") {
       "pepper_plugin_info.cc",
       "pepper_plugin_info.h",
     ]
-  }
-
-  if (enable_webrtc) {
-    sources += [
-      "webrtc_ip_handling_policy.cc",
-      "webrtc_ip_handling_policy.h",
-    ]
-  }
-
-  if (use_zygote_handle) {
-    sources += [ "zygote_handle.h" ]
   }
 }
 
@@ -351,12 +326,10 @@ source_set("feature_h264_with_openh264_ffmpeg") {
   ]
 }
 
-buildflag_header("zygote_buildflags") {
-  header = "zygote_buildflags.h"
-  flags = [ "USE_ZYGOTE_HANDLE=$use_zygote_handle" ]
-}
-
 mojom("interfaces") {
+  # We don't want Blink variants of these bindings to be generated.
+  disable_variants = true
+
   # Must depend on //content/public/common/ instead, for component build.
   visibility = [
     ":common_sources",
@@ -375,7 +348,10 @@ mojom("interfaces") {
   sources = [
     "appcache_info.mojom",
     "fullscreen_video_element.mojom",
+    "load_timing_info.mojom",
     "push_messaging_status.mojom",
+    "renderer_preference_watcher.mojom",
+    "renderer_preferences.mojom",
     "resource_load_info.mojom",
     "resource_usage_reporter.mojom",
     "transferrable_url_loader.mojom",
@@ -387,10 +363,18 @@ mojom("interfaces") {
     sources += [ "font_cache_win.mojom" ]
   }
 
+  if (is_mac) {
+    sources += [
+      "ns_view_bridge_factory.mojom",
+      "web_contents_ns_view_bridge.mojom",
+    ]
+  }
+
   public_deps = [
     ":resource_type_bindings",
-    "//mojo/common:common_custom_types",
     "//services/network/public/mojom",
+    "//third_party/blink/public:mojo_bindings",
+    "//ui/accessibility:ax_enums_mojo",
     "//url/mojom:url_mojom_gurl",
     "//url/mojom:url_mojom_origin",
   ]

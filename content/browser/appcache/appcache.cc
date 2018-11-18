@@ -61,14 +61,14 @@ bool AppCache::AddOrModifyEntry(const GURL& url, const AppCacheEntry& entry) {
 }
 
 void AppCache::RemoveEntry(const GURL& url) {
-  EntryMap::iterator found = entries_.find(url);
+  auto found = entries_.find(url);
   DCHECK(found != entries_.end());
   cache_size_ -= found->second.response_size();
   entries_.erase(found);
 }
 
 AppCacheEntry* AppCache::GetEntry(const GURL& url) {
-  EntryMap::iterator it = entries_.find(url);
+  auto it = entries_.find(url);
   return (it != entries_.end()) ? &(it->second) : nullptr;
 }
 
@@ -85,8 +85,9 @@ const AppCacheEntry* AppCache::GetEntryAndUrlWithResponseId(
   return nullptr;
 }
 
-GURL AppCache::GetNamespaceEntryUrl(const AppCacheNamespaceVector& namespaces,
-                                    const GURL& namespace_url) const {
+GURL AppCache::GetNamespaceEntryUrl(
+    const std::vector<AppCacheNamespace>& namespaces,
+    const GURL& namespace_url) const {
   size_t count = namespaces.size();
   for (size_t i = 0; i < count; ++i) {
     if (namespaces[i].namespace_url == namespace_url)
@@ -262,8 +263,8 @@ bool AppCache::FindResponseForRequest(const GURL& url,
   return *found_network_namespace;
 }
 
-
-void AppCache::ToResourceInfoVector(AppCacheResourceInfoVector* infos) const {
+void AppCache::ToResourceInfoVector(
+    std::vector<AppCacheResourceInfo>* infos) const {
   DCHECK(infos && infos->empty());
   for (const auto& pair : entries_) {
     infos->push_back(AppCacheResourceInfo());
@@ -282,7 +283,7 @@ void AppCache::ToResourceInfoVector(AppCacheResourceInfoVector* infos) const {
 
 // static
 const AppCacheNamespace* AppCache::FindNamespace(
-    const AppCacheNamespaceVector& namespaces,
+    const std::vector<AppCacheNamespace>& namespaces,
     const GURL& url) {
   size_t count = namespaces.size();
   for (size_t i = 0; i < count; ++i) {

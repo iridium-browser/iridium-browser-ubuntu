@@ -6,6 +6,7 @@
 
 #include <stddef.h>
 
+#include <set>
 #include <utility>
 
 #include "base/callback.h"
@@ -20,6 +21,7 @@
 #include "components/prefs/json_pref_store.h"
 #include "components/prefs/pref_filter.h"
 #include "components/sync/model/sync_change.h"
+#include "components/sync/model/sync_change_processor.h"
 #include "components/sync/model/sync_error_factory.h"
 #include "components/sync/protocol/sync.pb.h"
 #include "content/public/browser/browser_thread.h"
@@ -70,8 +72,8 @@ void SupervisedUserSettingsService::Init(
     bool load_synchronously) {
   base::FilePath path =
       profile_path.Append(chrome::kSupervisedUserSettingsFilename);
-  PersistentPrefStore* store = new JsonPrefStore(path, sequenced_task_runner,
-                                                 std::unique_ptr<PrefFilter>());
+  PersistentPrefStore* store = new JsonPrefStore(
+      path, std::unique_ptr<PrefFilter>(), sequenced_task_runner);
   Init(store);
   if (load_synchronously) {
     store_->ReadPrefs();

@@ -25,7 +25,6 @@
 #include "net/log/net_log_event_type.h"
 #include "net/socket/client_socket_handle.h"
 #include "net/socket/ssl_client_socket.h"
-#include "net/ssl/token_binding.h"
 #include "url/url_canon.h"
 
 namespace net {
@@ -93,7 +92,8 @@ bool ShouldTryReadingOnUploadError(int error_code) {
 //
 // Example:
 //
-// scoped_refptr<SeekableIOBuffer> buf = new SeekableIOBuffer(1024);
+// scoped_refptr<SeekableIOBuffer> buf =
+//     base::MakeRefCounted<SeekableIOBuffer>(1024);
 // // capacity() == 1024. size() == BytesRemaining() == BytesConsumed() == 0.
 // // data() points to the beginning of the buffer.
 //
@@ -167,7 +167,7 @@ class HttpStreamParser::SeekableIOBuffer : public IOBuffer {
 
   // Returns the capacity of the buffer. The capacity is the size used when
   // the object is created.
-  int capacity() const { return capacity_; };
+  int capacity() const { return capacity_; }
 
  private:
   ~SeekableIOBuffer() override {
@@ -211,8 +211,8 @@ HttpStreamParser::HttpStreamParser(ClientSocketHandle* connection,
       weak_ptr_factory_(this) {
   CHECK(connection_) << "ClientSocketHandle passed to HttpStreamParser must "
                         "not be NULL. See crbug.com/790776";
-  io_callback_ = base::Bind(&HttpStreamParser::OnIOComplete,
-                            weak_ptr_factory_.GetWeakPtr());
+  io_callback_ = base::BindRepeating(&HttpStreamParser::OnIOComplete,
+                                     weak_ptr_factory_.GetWeakPtr());
 }
 
 HttpStreamParser::~HttpStreamParser() = default;
@@ -248,12 +248,13 @@ int HttpStreamParser::SendRequest(
   request_headers_length_ = request.size();
 
   if (request_->upload_data_stream != NULL) {
-    request_body_send_buf_ = new SeekableIOBuffer(kRequestBodyBufferSize);
+    request_body_send_buf_ =
+        base::MakeRefCounted<SeekableIOBuffer>(kRequestBodyBufferSize);
     if (request_->upload_data_stream->is_chunked()) {
       // Read buffer is adjusted to guarantee that |request_body_send_buf_| is
       // large enough to hold the encoded chunk.
-      request_body_read_buf_ =
-          new SeekableIOBuffer(kRequestBodyBufferSize - kChunkHeaderFooterSize);
+      request_body_read_buf_ = base::MakeRefCounted<SeekableIOBuffer>(
+          kRequestBodyBufferSize - kChunkHeaderFooterSize);
     } else {
       // No need to encode request body, just send the raw data.
       request_body_read_buf_ = request_body_send_buf_;
@@ -268,12 +269,12 @@ int HttpStreamParser::SendRequest(
   if (ShouldMergeRequestHeadersAndBody(request, request_->upload_data_stream)) {
     int merged_size = static_cast<int>(
         request_headers_length_ + request_->upload_data_stream->size());
-    scoped_refptr<IOBuffer> merged_request_headers_and_body(
-        new IOBuffer(merged_size));
+    scoped_refptr<IOBuffer> merged_request_headers_and_body =
+        base::MakeRefCounted<IOBuffer>(merged_size);
     // We'll repurpose |request_headers_| to store the merged headers and
     // body.
-    request_headers_ = new DrainableIOBuffer(
-        merged_request_headers_and_body.get(), merged_size);
+    request_headers_ = base::MakeRefCounted<DrainableIOBuffer>(
+        merged_request_headers_and_body, merged_size);
 
     memcpy(request_headers_->data(), request.data(), request_headers_length_);
     request_headers_->DidConsume(request_headers_length_);
@@ -303,9 +304,10 @@ int HttpStreamParser::SendRequest(
   if (!did_merge) {
     // If we didn't merge the body with the headers, then |request_headers_|
     // contains just the HTTP headers.
-    scoped_refptr<StringIOBuffer> headers_io_buf(new StringIOBuffer(request));
-    request_headers_ =
-        new DrainableIOBuffer(headers_io_buf.get(), headers_io_buf->size());
+    scoped_refptr<StringIOBuffer> headers_io_buf =
+        base::MakeRefCounted<StringIOBuffer>(request);
+    request_headers_ = base::MakeRefCounted<DrainableIOBuffer>(
+        std::move(headers_io_buf), request.size());
   }
 
   result = DoLoop(OK);
@@ -1124,31 +1126,15 @@ bool HttpStreamParser::CanReuseConnection() const {
 
 void HttpStreamParser::GetSSLInfo(SSLInfo* ssl_info) {
   if (request_->url.SchemeIsCryptographic() && connection_->socket()) {
-    SSLClientSocket* ssl_socket =
-        static_cast<SSLClientSocket*>(connection_->socket());
-    ssl_socket->GetSSLInfo(ssl_info);
+    connection_->socket()->GetSSLInfo(ssl_info);
   }
 }
 
 void HttpStreamParser::GetSSLCertRequestInfo(
     SSLCertRequestInfo* cert_request_info) {
   if (request_->url.SchemeIsCryptographic() && connection_->socket()) {
-    SSLClientSocket* ssl_socket =
-        static_cast<SSLClientSocket*>(connection_->socket());
-    ssl_socket->GetSSLCertRequestInfo(cert_request_info);
+    connection_->socket()->GetSSLCertRequestInfo(cert_request_info);
   }
-}
-
-Error HttpStreamParser::GetTokenBindingSignature(crypto::ECPrivateKey* key,
-                                                 TokenBindingType tb_type,
-                                                 std::vector<uint8_t>* out) {
-  if (!request_->url.SchemeIsCryptographic() || !connection_->socket()) {
-    NOTREACHED();
-    return ERR_FAILED;
-  }
-  SSLClientSocket* ssl_socket =
-      static_cast<SSLClientSocket*>(connection_->socket());
-  return ssl_socket->GetTokenBindingSignature(key, tb_type, out);
 }
 
 int HttpStreamParser::EncodeChunk(const base::StringPiece& payload,

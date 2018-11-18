@@ -4,7 +4,10 @@
 
 #import "ios/chrome/browser/ui/settings/cells/sync_switch_item.h"
 
+#include "ios/chrome/browser/ui/collection_view/cells/collection_view_cell_constants.h"
 #import "ios/chrome/browser/ui/colors/MDCPalette+CrAdditions.h"
+#import "ios/chrome/browser/ui/uikit_ui_util.h"
+#import "ios/chrome/common/ui_util/constraints_ui_util.h"
 #include "ios/chrome/grit/ios_strings.h"
 #import "ios/third_party/material_components_ios/src/components/Palettes/src/MaterialPalettes.h"
 #import "ios/third_party/material_components_ios/src/components/Typography/src/MaterialTypography.h"
@@ -34,6 +37,7 @@ const CGFloat kHorizontalSwitchPadding = 10;
 @synthesize on = _on;
 @synthesize enabled = _enabled;
 @synthesize dataType = _dataType;
+@synthesize commandID = _commandID;
 
 - (instancetype)initWithType:(NSInteger)type {
   self = [super initWithType:type];
@@ -78,25 +82,24 @@ const CGFloat kHorizontalSwitchPadding = 10;
 
     _textLabel = [[UILabel alloc] init];
     _textLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.contentView addSubview:_textLabel];
-
-    _textLabel.font = [[MDCTypography fontLoader] mediumFontOfSize:14];
-    _textLabel.textColor = [[MDCPalette greyPalette] tint900];
+    _textLabel.font = [UIFont systemFontOfSize:kUIKitMainFontSize];
+    _textLabel.textColor = UIColorFromRGB(kUIKitMainTextColor);
     _textLabel.numberOfLines = 0;
+    [self.contentView addSubview:_textLabel];
 
     _detailTextLabel = [[UILabel alloc] init];
     _detailTextLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.contentView addSubview:_detailTextLabel];
-
-    _detailTextLabel.font = [[MDCTypography fontLoader] mediumFontOfSize:14];
-    _detailTextLabel.textColor = [[MDCPalette greyPalette] tint500];
+    _detailTextLabel.font =
+        [UIFont systemFontOfSize:kUIKitMultilineDetailFontSize];
+    _detailTextLabel.textColor = UIColorFromRGB(kUIKitMultilineDetailTextColor);
     _detailTextLabel.numberOfLines = 0;
+    [self.contentView addSubview:_detailTextLabel];
 
     _switchView = [[UISwitch alloc] initWithFrame:CGRectZero];
     _switchView.translatesAutoresizingMaskIntoConstraints = NO;
-    _switchView.onTintColor = [[MDCPalette cr_bluePalette] tint500];
     _switchView.accessibilityHint = l10n_util::GetNSString(
         IDS_IOS_TOGGLE_SETTING_SWITCH_ACCESSIBILITY_HINT);
+    _switchView.onTintColor = UIColorFromRGB(kUIKitSwitchTintColor);
     [self.contentView addSubview:_switchView];
 
     [self setConstraints];
@@ -121,16 +124,13 @@ const CGFloat kHorizontalSwitchPadding = 10;
                                  constant:-kHorizontalSwitchPadding],
     [_detailTextLabel.trailingAnchor
         constraintEqualToAnchor:_textLabel.trailingAnchor],
-    [_textLabel.topAnchor constraintEqualToAnchor:contentView.topAnchor
-                                         constant:kVerticalPadding],
     [_textLabel.bottomAnchor
         constraintEqualToAnchor:_detailTextLabel.topAnchor],
-    [_detailTextLabel.bottomAnchor
-        constraintEqualToAnchor:contentView.bottomAnchor
-                       constant:-kVerticalPadding],
     [_switchView.centerYAnchor
         constraintEqualToAnchor:contentView.centerYAnchor],
   ]];
+  AddOptionalVerticalPadding(contentView, _textLabel, _detailTextLabel,
+                             kVerticalPadding);
 }
 
 + (UIColor*)defaultTextColorForState:(UIControlState)state {

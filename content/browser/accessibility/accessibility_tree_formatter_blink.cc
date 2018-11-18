@@ -35,7 +35,7 @@ const char* STATE_OFFSCREEN = "offscreen";
 
 uint32_t AccessibilityTreeFormatterBlink::ChildCount(
     const BrowserAccessibility& node) const {
-  if (node.HasIntAttribute(ax::mojom::IntAttribute::kChildTreeId))
+  if (node.HasStringAttribute(ax::mojom::StringAttribute::kChildTreeId))
     return node.PlatformChildCount();
   else
     return node.InternalChildCount();
@@ -44,7 +44,7 @@ uint32_t AccessibilityTreeFormatterBlink::ChildCount(
 BrowserAccessibility* AccessibilityTreeFormatterBlink::GetChild(
     const BrowserAccessibility& node,
     uint32_t i) const {
-  if (node.HasIntAttribute(ax::mojom::IntAttribute::kChildTreeId))
+  if (node.HasStringAttribute(ax::mojom::StringAttribute::kChildTreeId))
     return node.PlatformGetChild(i);
   else
     return node.InternalGetChild(i);
@@ -71,6 +71,8 @@ std::string AccessibilityTreeFormatterBlink::IntAttrToString(
       return ui::ToString(static_cast<ax::mojom::DefaultActionVerb>(value));
     case ax::mojom::IntAttribute::kDescriptionFrom:
       return ui::ToString(static_cast<ax::mojom::DescriptionFrom>(value));
+    case ax::mojom::IntAttribute::kHasPopup:
+      return ui::ToString(static_cast<ax::mojom::HasPopup>(value));
     case ax::mojom::IntAttribute::kInvalidState:
       return ui::ToString(static_cast<ax::mojom::InvalidState>(value));
     case ax::mojom::IntAttribute::kNameFrom:
@@ -81,6 +83,8 @@ std::string AccessibilityTreeFormatterBlink::IntAttrToString(
       return ui::ToString(static_cast<ax::mojom::SortDirection>(value));
     case ax::mojom::IntAttribute::kTextDirection:
       return ui::ToString(static_cast<ax::mojom::TextDirection>(value));
+    case ax::mojom::IntAttribute::kTextPosition:
+      return ui::ToString(static_cast<ax::mojom::TextPosition>(value));
     // No pretty printing necessary for these:
     case ax::mojom::IntAttribute::kActivedescendantId:
     case ax::mojom::IntAttribute::kAriaCellColumnIndex:
@@ -88,7 +92,6 @@ std::string AccessibilityTreeFormatterBlink::IntAttrToString(
     case ax::mojom::IntAttribute::kAriaColumnCount:
     case ax::mojom::IntAttribute::kAriaRowCount:
     case ax::mojom::IntAttribute::kBackgroundColor:
-    case ax::mojom::IntAttribute::kChildTreeId:
     case ax::mojom::IntAttribute::kColor:
     case ax::mojom::IntAttribute::kColorValue:
     case ax::mojom::IntAttribute::kDetailsId:

@@ -61,9 +61,8 @@ int HttpBasicStream::ReadResponseBody(IOBuffer* buf,
 }
 
 void HttpBasicStream::Close(bool not_reusable) {
-  // parser() is null if |this| is created by an orphaned
-  // HttpStreamFactoryImpl::Job in which case InitializeStream() will not have
-  // been called.
+  // parser() is null if |this| is created by an orphaned HttpStreamFactory::Job
+  // in which case InitializeStream() will not have been called.
   if (parser())
     parser()->Close(not_reusable);
 }
@@ -130,12 +129,6 @@ bool HttpBasicStream::GetRemoteEndpoint(IPEndPoint* endpoint) {
     return false;
 
   return state_.connection()->socket()->GetPeerAddress(endpoint) == OK;
-}
-
-Error HttpBasicStream::GetTokenBindingSignature(crypto::ECPrivateKey* key,
-                                                TokenBindingType tb_type,
-                                                std::vector<uint8_t>* out) {
-  return parser()->GetTokenBindingSignature(key, tb_type, out);
 }
 
 void HttpBasicStream::Drain(HttpNetworkSession* session) {

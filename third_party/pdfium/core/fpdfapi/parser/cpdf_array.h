@@ -18,7 +18,7 @@
 #include "core/fxcrt/fx_coordinates.h"
 #include "third_party/base/ptr_util.h"
 
-class CPDF_Array : public CPDF_Object {
+class CPDF_Array final : public CPDF_Object {
  public:
   using const_iterator =
       std::vector<std::unique_ptr<CPDF_Object>>::const_iterator;
@@ -33,22 +33,28 @@ class CPDF_Array : public CPDF_Object {
   bool IsArray() const override;
   CPDF_Array* AsArray() override;
   const CPDF_Array* AsArray() const override;
-  bool WriteTo(IFX_ArchiveStream* archive) const override;
+  bool WriteTo(IFX_ArchiveStream* archive,
+               const CPDF_Encryptor* encryptor) const override;
 
   bool IsEmpty() const { return m_Objects.empty(); }
   size_t GetCount() const { return m_Objects.size(); }
-  CPDF_Object* GetObjectAt(size_t index) const;
-  CPDF_Object* GetDirectObjectAt(size_t index) const;
+  CPDF_Object* GetObjectAt(size_t index);
+  const CPDF_Object* GetObjectAt(size_t index) const;
+  CPDF_Object* GetDirectObjectAt(size_t index);
+  const CPDF_Object* GetDirectObjectAt(size_t index) const;
   ByteString GetStringAt(size_t index) const;
   WideString GetUnicodeTextAt(size_t index) const;
   int GetIntegerAt(size_t index) const;
   float GetNumberAt(size_t index) const;
-  CPDF_Dictionary* GetDictAt(size_t index) const;
-  CPDF_Stream* GetStreamAt(size_t index) const;
-  CPDF_Array* GetArrayAt(size_t index) const;
+  CPDF_Dictionary* GetDictAt(size_t index);
+  const CPDF_Dictionary* GetDictAt(size_t index) const;
+  CPDF_Stream* GetStreamAt(size_t index);
+  const CPDF_Stream* GetStreamAt(size_t index) const;
+  CPDF_Array* GetArrayAt(size_t index);
+  const CPDF_Array* GetArrayAt(size_t index) const;
   float GetFloatAt(size_t index) const { return GetNumberAt(index); }
-  CFX_Matrix GetMatrix();
-  CFX_FloatRect GetRect();
+  CFX_Matrix GetMatrix() const;
+  CFX_FloatRect GetRect() const;
 
   // Takes ownership of |pObj|, returns unowned pointer to it.
   CPDF_Object* Add(std::unique_ptr<CPDF_Object> pObj);
@@ -106,7 +112,7 @@ class CPDF_Array : public CPDF_Object {
   const_iterator begin() const { return m_Objects.begin(); }
   const_iterator end() const { return m_Objects.end(); }
 
- protected:
+ private:
   std::unique_ptr<CPDF_Object> CloneNonCyclic(
       bool bDirect,
       std::set<const CPDF_Object*>* pVisited) const override;

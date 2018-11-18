@@ -18,6 +18,8 @@
 #include "core/fpdfapi/parser/cpdf_dictionary.h"
 #include "core/fpdfapi/parser/cpdf_object.h"
 #include "core/fpdfapi/parser/cpdf_string.h"
+#include "core/fxcrt/fx_extension.h"
+#include "third_party/base/ptr_util.h"
 
 namespace {
 
@@ -119,7 +121,13 @@ bool CPDF_SecurityHandler::CheckSecurity(const ByteString& password) {
 }
 
 uint32_t CPDF_SecurityHandler::GetPermissions() const {
-  return m_bOwnerUnlocked ? 0xFFFFFFFF : m_Permissions;
+  uint32_t dwPermission = m_bOwnerUnlocked ? 0xFFFFFFFF : m_Permissions;
+  if (m_pEncryptDict && m_pEncryptDict->GetStringFor("Filter") == "Standard") {
+    // See PDF Reference 1.7, page 123, table 3.20.
+    dwPermission &= 0xFFFFFFFC;
+    dwPermission |= 0xFFFFF0C0;
+  }
+  return dwPermission;
 }
 
 static bool LoadCryptInfo(const CPDF_Dictionary* pEncryptDict,
@@ -130,17 +138,17 @@ static bool LoadCryptInfo(const CPDF_Dictionary* pEncryptDict,
   cipher = FXCIPHER_RC4;
   keylen = 0;
   if (Version >= 4) {
-    CPDF_Dictionary* pCryptFilters = pEncryptDict->GetDictFor("CF");
-    if (!pCryptFilters) {
+    const CPDF_Dictionary* pCryptFilters = pEncryptDict->GetDictFor("CF");
+    if (!pCryptFilters)
       return false;
-    }
+
     if (name == "Identity") {
       cipher = FXCIPHER_NONE;
     } else {
-      CPDF_Dictionary* pDefFilter = pCryptFilters->GetDictFor(name);
-      if (!pDefFilter) {
+      const CPDF_Dictionary* pDefFilter = pCryptFilters->GetDictFor(name);
+      if (!pDefFilter)
         return false;
-      }
+
       int nKeyBits = 0;
       if (Version == 4) {
         nKeyBits = pDefFilter->GetIntegerFor("Length", 0);
@@ -150,6 +158,9 @@ static bool LoadCryptInfo(const CPDF_Dictionary* pEncryptDict,
       } else {
         nKeyBits = pEncryptDict->GetIntegerFor("Length", 256);
       }
+      if (nKeyBits < 0)
+        return false;
+
       if (nKeyBits < 40) {
         nKeyBits *= 8;
       }
@@ -268,7 +279,7 @@ void Revision6_Hash(const ByteString& password,
         content.insert(std::end(content), vector, vector + 48);
       }
     }
-    CRYPT_AESSetKey(&aes, 16, key, 16, true);
+    CRYPT_AESSetKey(&aes, key, 16, true);
     CRYPT_AESSetIV(&aes, iv);
     CRYPT_AESEncrypt(&aes, E, content.data(), iBufLen);
     int iHash = 0;
@@ -355,12 +366,12 @@ bool CPDF_SecurityHandler::AES256_CheckPassword(const ByteString& password,
 
   CRYPT_aes_context aes;
   memset(&aes, 0, sizeof(aes));
-  CRYPT_AESSetKey(&aes, 16, digest, 32, false);
+  CRYPT_AESSetKey(&aes, digest, 32, false);
   uint8_t iv[16];
   memset(iv, 0, 16);
   CRYPT_AESSetIV(&aes, iv);
   CRYPT_AESDecrypt(&aes, key, ekey.raw_str(), 32);
-  CRYPT_AESSetKey(&aes, 16, key, 32, false);
+  CRYPT_AESSetKey(&aes, key, 32, false);
   CRYPT_AESSetIV(&aes, iv);
   ByteString perms = m_pEncryptDict->GetStringFor("Perms");
   if (perms.IsEmpty())
@@ -525,7 +536,7 @@ void CPDF_SecurityHandler::OnCreateInternal(CPDF_Dictionary* pEncryptDict,
     owner_password_copy = user_password;
 
   if (m_Revision >= 5) {
-    int t = (int)time(nullptr);
+    int t = static_cast<int>(FXSYS_time(nullptr));
     CRYPT_sha2_context sha;
     CRYPT_SHA256Start(&sha);
     CRYPT_SHA256Update(&sha, (uint8_t*)&t, sizeof t);
@@ -666,7 +677,7 @@ void CPDF_SecurityHandler::AES256_SetPassword(CPDF_Dictionary* pEncryptDict,
   }
   CRYPT_aes_context aes;
   memset(&aes, 0, sizeof(aes));
-  CRYPT_AESSetKey(&aes, 16, digest1, 32, true);
+  CRYPT_AESSetKey(&aes, digest1, 32, true);
   uint8_t iv[16];
   memset(iv, 0, 16);
   CRYPT_AESSetIV(&aes, iv);
@@ -695,7 +706,7 @@ void CPDF_SecurityHandler::AES256_SetPerms(CPDF_Dictionary* pEncryptDict,
 
   CRYPT_aes_context aes;
   memset(&aes, 0, sizeof(aes));
-  CRYPT_AESSetKey(&aes, 16, key, 32, true);
+  CRYPT_AESSetKey(&aes, key, 32, true);
 
   uint8_t iv[16];
   memset(iv, 0, 16);

@@ -23,9 +23,7 @@
 #include "content/public/browser/web_contents_delegate.h"
 #include "device/vr/buildflags/buildflags.h"
 #include "jni/ChromeMediaRouterDialogController_jni.h"
-
-DEFINE_WEB_CONTENTS_USER_DATA_KEY(
-    media_router::MediaRouterDialogControllerAndroid);
+#include "third_party/blink/public/mojom/presentation/presentation.mojom.h"
 
 using base::android::ConvertJavaStringToUTF8;
 using base::android::JavaParamRef;
@@ -73,18 +71,15 @@ void MediaRouterDialogControllerAndroid::OnSinkSelected(
   DCHECK(is_source_from_request);
 #endif  // NDEBUG
 
-  std::vector<MediaRouteResponseCallback> route_response_callbacks;
-  route_response_callbacks.push_back(
-      base::BindOnce(&StartPresentationContext::HandleRouteResponse,
-                     std::move(start_presentation_context)));
-
   content::BrowserContext* browser_context = initiator()->GetBrowserContext();
-  MediaRouter* router = MediaRouterFactory::GetApiForBrowserContext(
-      browser_context);
-  router->CreateRoute(source_id, ConvertJavaStringToUTF8(env, jsink_id),
-                      presentation_request.frame_origin, initiator(),
-                      std::move(route_response_callbacks), base::TimeDelta(),
-                      browser_context->IsOffTheRecord());
+  MediaRouter* router =
+      MediaRouterFactory::GetApiForBrowserContext(browser_context);
+  router->CreateRoute(
+      source_id, ConvertJavaStringToUTF8(env, jsink_id),
+      presentation_request.frame_origin, initiator(),
+      base::BindOnce(&StartPresentationContext::HandleRouteResponse,
+                     std::move(start_presentation_context)),
+      base::TimeDelta(), browser_context->IsOffTheRecord());
 }
 
 void MediaRouterDialogControllerAndroid::OnRouteClosed(
@@ -114,8 +109,9 @@ void MediaRouterDialogControllerAndroid::OnMediaSourceNotSupported(
   if (!request)
     return;
 
-  request->InvokeErrorCallback(content::PresentationError(
-      content::PRESENTATION_ERROR_NO_AVAILABLE_SCREENS, "No screens found."));
+  request->InvokeErrorCallback(blink::mojom::PresentationError(
+      blink::mojom::PresentationErrorType::NO_AVAILABLE_SCREENS,
+      "No screens found."));
 }
 
 void MediaRouterDialogControllerAndroid::CancelPresentationRequest() {
@@ -123,8 +119,8 @@ void MediaRouterDialogControllerAndroid::CancelPresentationRequest() {
   if (!request)
     return;
 
-  request->InvokeErrorCallback(content::PresentationError(
-      content::PRESENTATION_ERROR_PRESENTATION_REQUEST_CANCELLED,
+  request->InvokeErrorCallback(blink::mojom::PresentationError(
+      blink::mojom::PresentationErrorType::PRESENTATION_REQUEST_CANCELLED,
       "Dialog closed."));
 }
 
@@ -136,8 +132,7 @@ MediaRouterDialogControllerAndroid::MediaRouterDialogControllerAndroid(
       env, reinterpret_cast<jlong>(this)));
 }
 
-MediaRouterDialogControllerAndroid::~MediaRouterDialogControllerAndroid() {
-}
+MediaRouterDialogControllerAndroid::~MediaRouterDialogControllerAndroid() {}
 
 void MediaRouterDialogControllerAndroid::CreateMediaRouterDialog() {
   // TODO(crbug.com/736568): Re-enable dialog in VR.

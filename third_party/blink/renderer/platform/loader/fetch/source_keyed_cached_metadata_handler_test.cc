@@ -16,7 +16,7 @@ namespace {
 
 class MockSha256WebCryptoDigestor : public WebCryptoDigestor {
  public:
-  virtual bool Consume(const unsigned char* data, unsigned data_size) {
+  bool Consume(const unsigned char* data, unsigned data_size) override {
     String key(data, data_size);
 
     auto it = kMapOfHashes.find(key);
@@ -29,7 +29,8 @@ class MockSha256WebCryptoDigestor : public WebCryptoDigestor {
     return hash_exists_;
   }
 
-  virtual bool Finish(unsigned char*& result_data, unsigned& result_data_size) {
+  bool Finish(unsigned char*& result_data,
+              unsigned& result_data_size) override {
     if (hash_exists_) {
       result_data = hash_.data();
       result_data_size = hash_.size();
@@ -87,7 +88,8 @@ class SourceKeyedCachedMetadataHandlerMockPlatform final
 
   WebCrypto* Crypto() override { return &mock_web_crypto_; }
 
-  void CacheMetadata(const WebURL& url,
+  void CacheMetadata(blink::mojom::CodeCacheType cache_type,
+                     const WebURL& url,
                      base::Time response_time,
                      const char* data,
                      size_t data_size) override {
@@ -123,8 +125,9 @@ class MockCachedMetadataSender final : public CachedMetadataSender {
  public:
   MockCachedMetadataSender(KURL response_url) : response_url_(response_url) {}
 
-  void Send(const char* data, size_t size) {
-    Platform::Current()->CacheMetadata(response_url_, response_time_, data,
+  void Send(const char* data, size_t size) override {
+    Platform::Current()->CacheMetadata(blink::mojom::CodeCacheType::kJavascript,
+                                       response_url_, response_time_, data,
                                        size);
   }
 

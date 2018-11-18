@@ -51,7 +51,7 @@
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/proxy/resource_reply_thread_registrar.h"
 #include "services/service_manager/public/cpp/connector.h"
-#include "services/ui/public/interfaces/constants.mojom.h"
+#include "services/ws/public/mojom/constants.mojom.h"
 #include "third_party/blink/public/web/blink.h"
 #include "ui/base/ui_base_features.h"
 #include "ui/base/ui_base_switches.h"
@@ -61,6 +61,10 @@
 #include "base/win/win_util.h"
 #include "content/child/font_warmup_win.h"
 #include "sandbox/win/src/sandbox.h"
+#endif
+
+#if defined(OS_MACOSX)
+#include "sandbox/mac/seatbelt_exec.h"
 #endif
 
 #if defined(OS_WIN)
@@ -90,8 +94,11 @@ namespace content {
 typedef int32_t (*InitializeBrokerFunc)
     (PP_ConnectInstance_Func* connect_instance_func);
 
-PpapiThread::PpapiThread(const base::CommandLine& command_line, bool is_broker)
-    : is_broker_(is_broker),
+PpapiThread::PpapiThread(base::RepeatingClosure quit_closure,
+                         const base::CommandLine& command_line,
+                         bool is_broker)
+    : ChildThreadImpl(std::move(quit_closure)),
+      is_broker_(is_broker),
       plugin_globals_(GetIOTaskRunner()),
       connect_instance_func_(nullptr),
       local_pp_module_(base::RandInt(0, std::numeric_limits<PP_Module>::max())),
@@ -101,7 +108,7 @@ PpapiThread::PpapiThread(const base::CommandLine& command_line, bool is_broker)
       command_line.GetSwitchValueASCII(switches::kPpapiFlashArgs));
 
   blink_platform_impl_.reset(new PpapiBlinkPlatformImpl);
-  blink::Platform::Initialize(blink_platform_impl_.get());
+  blink::Platform::CreateMainThreadAndInitialize(blink_platform_impl_.get());
 
   if (!is_broker_) {
     scoped_refptr<ppapi::proxy::PluginMessageFilter> plugin_filter(
@@ -115,10 +122,10 @@ PpapiThread::PpapiThread(const base::CommandLine& command_line, bool is_broker)
   // allocator.
   if (!command_line.HasSwitch(switches::kSingleProcess)) {
     discardable_memory::mojom::DiscardableSharedMemoryManagerPtr manager_ptr;
-    if (features::IsMusEnabled()) {
+    if (features::IsMultiProcessMash()) {
 #if defined(USE_AURA)
       GetServiceManagerConnection()->GetConnector()->BindInterface(
-          ui::mojom::kServiceName, &manager_ptr);
+          ws::mojom::kServiceName, &manager_ptr);
 #else
       NOTREACHED();
 #endif
@@ -148,7 +155,7 @@ void PpapiThread::Shutdown() {
 
 bool PpapiThread::Send(IPC::Message* msg) {
   // Allow access from multiple threads.
-  if (message_loop()->task_runner()->BelongsToCurrentThread())
+  if (main_thread_runner()->BelongsToCurrentThread())
     return ChildThreadImpl::Send(msg);
 
   return sync_message_filter()->Send(msg);
@@ -198,6 +205,22 @@ base::SharedMemoryHandle PpapiThread::ShareSharedMemoryHandleWithRemote(
     base::ProcessId remote_pid) {
   DCHECK(remote_pid != base::kNullProcessId);
   return base::SharedMemory::DuplicateHandle(handle);
+}
+
+base::UnsafeSharedMemoryRegion
+PpapiThread::ShareUnsafeSharedMemoryRegionWithRemote(
+    const base::UnsafeSharedMemoryRegion& region,
+    base::ProcessId remote_pid) {
+  DCHECK(remote_pid != base::kNullProcessId);
+  return region.Duplicate();
+}
+
+base::ReadOnlySharedMemoryRegion
+PpapiThread::ShareReadOnlySharedMemoryRegionWithRemote(
+    const base::ReadOnlySharedMemoryRegion& region,
+    base::ProcessId remote_pid) {
+  DCHECK(remote_pid != base::kNullProcessId);
+  return region.Duplicate();
 }
 
 std::set<PP_Instance>* PpapiThread::GetGloballySeenInstanceIDSet() {
@@ -276,16 +299,17 @@ void PpapiThread::OnLoadPlugin(const base::FilePath& path,
   // client) then fetch the entry points from the embedder, rather than a DLL.
   std::vector<PepperPluginInfo> plugins;
   GetContentClient()->AddPepperPlugins(&plugins);
-  for (size_t i = 0; i < plugins.size(); ++i) {
-    if (plugins[i].is_internal && plugins[i].path == path) {
+  for (const auto& plugin : plugins) {
+    if (plugin.is_internal && plugin.path == path) {
       // An internal plugin is being loaded, so fetch the entry points.
-      plugin_entry_points_ = plugins[i].internal_entry_points;
+      plugin_entry_points_ = plugin.internal_entry_points;
+      break;
     }
   }
 
   // If the plugin isn't internal then load it from |path|.
   base::ScopedNativeLibrary library;
-  if (plugin_entry_points_.initialize_module == nullptr) {
+  if (!plugin_entry_points_.initialize_module) {
     // Load the plugin from the specified library.
     base::NativeLibraryLoadError error;
     base::TimeDelta load_time;
@@ -410,7 +434,7 @@ void PpapiThread::OnLoadPlugin(const base::FilePath& path,
 #if defined(OS_MACOSX)
     // TODO(kerrnel): Delete this once the V2 sandbox is default.
     const base::CommandLine* cmdline = base::CommandLine::ForCurrentProcess();
-    if (!cmdline->HasSwitch(switches::kEnableV2Sandbox)) {
+    if (!cmdline->HasSwitch(sandbox::switches::kSeatbeltClientName)) {
       // We need to do this after getting |PPP_GetInterface()| (or presumably
       // doing something nontrivial with the library), else the sandbox
       // intercedes.

@@ -39,12 +39,21 @@ Polymer({
     },
 
     /**
-     * Switches styles to "Welcome screen".
+     * Removes buttons padding.
      */
-    welcomeScreen: {
+    noButtonsPadding: {
+      type: Boolean,
+      value: false,
+    },
+
+    /**
+     * True when dialog is displayed in full-screen mode.
+     */
+    fullScreenDialog: {
       type: Boolean,
       value: false,
       reflectToAttribute: true,
+      observer: 'onfullScreenDialogChanged_',
     },
 
     android: {
@@ -61,6 +70,14 @@ Polymer({
        TODO (alemate): fix this once event flow is updated.
     */
     this.show();
+  },
+
+  onBeforeShow: function() {
+    var isOobe = window.hasOwnProperty('Oobe') &&
+        window.hasOwnProperty('DISPLAY_TYPE') && Oobe.getInstance() &&
+        Oobe.getInstance().displayType == DISPLAY_TYPE.OOBE;
+    if (isOobe || document.documentElement.hasAttribute('full-screen-dialog'))
+      this.fullScreenDialog = true;
   },
 
   /**
@@ -81,5 +98,10 @@ Polymer({
       focusedElements[0].focus();
 
     this.fire('show-dialog');
+  },
+
+  onfullScreenDialogChanged_: function() {
+    if (this.fullScreenDialog)
+      document.documentElement.setAttribute('full-screen-dialog', true);
   },
 });

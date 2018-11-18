@@ -151,7 +151,7 @@ class VIZ_COMMON_EXPORT BeginFrameSource {
   // The higher 32 bits are used for a process restart id that changes if a
   // process allocating BeginFrameSources has been restarted. The lower 32 bits
   // are allocated from an atomic sequence.
-  uint64_t source_id_;
+  const uint64_t source_id_;
 
   DISALLOW_COPY_AND_ASSIGN(BeginFrameSource);
 };
@@ -175,8 +175,6 @@ class VIZ_COMMON_EXPORT SyntheticBeginFrameSource : public BeginFrameSource {
 
   virtual void OnUpdateVSyncParameters(base::TimeTicks timebase,
                                        base::TimeDelta interval) = 0;
-  // This overrides any past or future interval from updating vsync parameters.
-  virtual void SetAuthoritativeVSyncInterval(base::TimeDelta interval) = 0;
 };
 
 // A frame source which calls BeginFrame (at the next possible time) as soon as
@@ -198,7 +196,6 @@ class VIZ_COMMON_EXPORT BackToBackBeginFrameSource
   // SyntheticBeginFrameSource implementation.
   void OnUpdateVSyncParameters(base::TimeTicks timebase,
                                base::TimeDelta interval) override {}
-  void SetAuthoritativeVSyncInterval(base::TimeDelta interval) override {}
 
   // DelayBasedTimeSourceClient implementation.
   void OnTimerTick() override;
@@ -232,7 +229,6 @@ class VIZ_COMMON_EXPORT DelayBasedBeginFrameSource
   // SyntheticBeginFrameSource implementation.
   void OnUpdateVSyncParameters(base::TimeTicks timebase,
                                base::TimeDelta interval) override;
-  void SetAuthoritativeVSyncInterval(base::TimeDelta interval) override;
 
   // DelayBasedTimeSourceClient implementation.
   void OnTimerTick() override;
@@ -243,7 +239,6 @@ class VIZ_COMMON_EXPORT DelayBasedBeginFrameSource
   std::unique_ptr<DelayBasedTimeSource> time_source_;
   std::unordered_set<BeginFrameObserver*> observers_;
   base::TimeTicks last_timebase_;
-  base::TimeDelta authoritative_interval_;
   BeginFrameArgs last_begin_frame_args_;
   uint64_t next_sequence_number_;
 
@@ -262,8 +257,11 @@ class VIZ_COMMON_EXPORT ExternalBeginFrameSourceClient {
 // an observable BeginFrameSource.
 class VIZ_COMMON_EXPORT ExternalBeginFrameSource : public BeginFrameSource {
  public:
-  // Client lifetime must be preserved by owner past the lifetime of this class.
-  explicit ExternalBeginFrameSource(ExternalBeginFrameSourceClient* client);
+  // Client lifetime must be preserved by owner for the lifetime of the class.
+  // In order to allow derived classes to implement the client interface, no
+  // calls to |client| are made during construction / destruction.
+  explicit ExternalBeginFrameSource(ExternalBeginFrameSourceClient* client,
+                                    uint32_t restart_id = kNotRestartableId);
   ~ExternalBeginFrameSource() override;
 
   // BeginFrameSource implementation.

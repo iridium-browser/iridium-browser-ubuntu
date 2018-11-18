@@ -24,7 +24,7 @@ std::unique_ptr<service_manager::Service> ResourceCoordinatorService::Create() {
 }
 
 ResourceCoordinatorService::ResourceCoordinatorService()
-    : weak_factory_(this) {}
+    : introspector_(&coordination_unit_graph_), weak_factory_(this) {}
 
 ResourceCoordinatorService::~ResourceCoordinatorService() = default;
 
@@ -43,18 +43,17 @@ void ResourceCoordinatorService::OnStart() {
   registry_.AddInterface(
       base::Bind(&PageSignalGeneratorImpl::BindToInterface,
                  base::Unretained(page_signal_generator_impl.get())));
-  coordination_unit_manager_.RegisterObserver(
+  coordination_unit_graph_.RegisterObserver(
       std::move(page_signal_generator_impl));
 
-  coordination_unit_manager_.RegisterObserver(
+  coordination_unit_graph_.RegisterObserver(
       std::make_unique<MetricsCollector>());
 
-  coordination_unit_manager_.RegisterObserver(
-      std::make_unique<IPCVolumeReporter>(
-          std::make_unique<base::OneShotTimer>()));
+  coordination_unit_graph_.RegisterObserver(std::make_unique<IPCVolumeReporter>(
+      std::make_unique<base::OneShotTimer>()));
 
-  coordination_unit_manager_.OnStart(&registry_, ref_factory_.get());
-  coordination_unit_manager_.set_ukm_recorder(ukm_recorder_.get());
+  coordination_unit_graph_.OnStart(&registry_, ref_factory_.get());
+  coordination_unit_graph_.set_ukm_recorder(ukm_recorder_.get());
 
   // TODO(chiniforooshan): The abstract class Coordinator in the
   // public/cpp/memory_instrumentation directory should not be needed anymore.
@@ -70,6 +69,8 @@ void ResourceCoordinatorService::OnStart() {
   registry_.AddInterface(base::BindRepeating(
       &memory_instrumentation::CoordinatorImpl::BindHeapProfilerHelperRequest,
       base::Unretained(memory_instrumentation_coordinator_.get())));
+  registry_.AddInterface(base::BindRepeating(
+      &ResourceCoordinatorService::BindWebUIGraphDump, base::Unretained(this)));
 }
 
 void ResourceCoordinatorService::OnBindInterface(
@@ -78,6 +79,33 @@ void ResourceCoordinatorService::OnBindInterface(
     mojo::ScopedMessagePipeHandle interface_pipe) {
   registry_.BindInterface(interface_name, std::move(interface_pipe),
                           source_info);
+}
+
+void ResourceCoordinatorService::BindWebUIGraphDump(
+    mojom::WebUIGraphDumpRequest request,
+    const service_manager::BindSourceInfo& source_info) {
+  std::unique_ptr<WebUIGraphDumpImpl> graph_dump =
+      std::make_unique<WebUIGraphDumpImpl>(&coordination_unit_graph_);
+
+  auto error_callback =
+      base::BindOnce(&ResourceCoordinatorService::OnGraphDumpConnectionError,
+                     base::Unretained(this), graph_dump.get());
+  graph_dump->Bind(std::move(request), std::move(error_callback));
+
+  graph_dumps_.push_back(std::move(graph_dump));
+}
+
+void ResourceCoordinatorService::OnGraphDumpConnectionError(
+    WebUIGraphDumpImpl* graph_dump) {
+  const auto it = std::find_if(
+      graph_dumps_.begin(), graph_dumps_.end(),
+      [graph_dump](const std::unique_ptr<WebUIGraphDumpImpl>& graph_dump_ptr) {
+        return graph_dump_ptr.get() == graph_dump;
+      });
+
+  DCHECK(it != graph_dumps_.end());
+
+  graph_dumps_.erase(it);
 }
 
 }  // namespace resource_coordinator

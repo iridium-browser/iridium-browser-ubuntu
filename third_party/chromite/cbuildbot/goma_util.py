@@ -24,9 +24,9 @@ from chromite.lib import path_util
 
 
 _GOMA_COMPILER_PROXY_LOG_URL_TEMPLATE = (
-    'http://chromium-build-stats.appspot.com/compiler_proxy_log/%s/%s')
+    'https://chromium-build-stats.appspot.com/compiler_proxy_log/%s/%s')
 _GOMA_NINJA_LOG_URL_TEMPLATE = (
-    'http://chromium-build-stats.appspot.com/ninja_log/%s/%s')
+    'https://chromium-build-stats.appspot.com/ninja_log/%s/%s')
 
 
 class Goma(object):
@@ -89,10 +89,10 @@ class Goma(object):
         deps cache is enabled.
 
     Raises:
-       ValueError if 1) |goma_dir| does not point to a directory, 2)
-       on bots, but |goma_client_json| is not given, 3) |goma_client_json|
-       is given, but it does not point to a file, or 4) if |goma_tmp_dir| is
-       given but it does not point to a directory.
+      ValueError if 1) |goma_dir| does not point to a directory, 2)
+      on bots, but |goma_client_json| is not given, 3) |goma_client_json|
+      is given, but it does not point to a file, or 4) if |goma_tmp_dir| is
+      given but it does not point to a directory.
     """
     # Sanity checks of given paths.
     if not os.path.isdir(goma_dir):

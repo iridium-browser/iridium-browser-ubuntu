@@ -1,11 +1,11 @@
 {
     "protocol": {
-        "path": "browser_protocol.json",
-        "package": "core/inspector/protocol",
+        "path": "browser_protocol.pdl",
+        "package": "third_party/blink/renderer/core/inspector/protocol",
         "output": "inspector/protocol",
         "namespace": ["blink", "protocol"],
         "export_macro": "CORE_EXPORT",
-        "export_header": "core/core_export.h",
+        "export_header": "third_party/blink/renderer/core/core_export.h",
         "options": [
             {
                 "domain": "Accessibility"
@@ -69,18 +69,12 @@
             },
             {
                 "domain": "Memory",
-                "include": ["getDOMCounters", "prepareForLeakDetection", "startSampling", "stopSampling", "getSamplingProfile", "getAllTimeSamplingProfile"],
-                "async": ["prepareForLeakDetection"]
-            },
-            {
-                "domain": "Tracing",
-                "include": ["start", "end"],
-                "async": ["start", "end"]
+                "include": ["getDOMCounters", "startSampling", "stopSampling", "getSamplingProfile", "getAllTimeSamplingProfile"]
             },
             {
                 "domain": "Page",
                 "exclude": ["getNavigationHistory", "navigateToHistoryEntry", "captureScreenshot", "screencastFrameAck", "handleJavaScriptDialog", "setColorPickerEnabled",
-                            "getAppManifest", "requestAppBanner", "setControlNavigations", "processNavigation", "printToPDF", "bringToFront", "setDownloadBehavior", "navigate", "crash"],
+                            "getAppManifest", "requestAppBanner", "setControlNavigations", "processNavigation", "printToPDF", "bringToFront", "setDownloadBehavior", "navigate", "crash", "close", "setWebLifecycleState"],
                 "async": ["getResourceContent", "searchInResource"],
                 "exclude_events": ["screencastFrame", "screencastVisibilityChanged", "colorPicked", "interstitialShown", "interstitialHidden", "javascriptDialogOpening", "javascriptDialogClosed", "navigationRequested"]
             },
@@ -90,19 +84,24 @@
             {
                 "domain": "Emulation",
                 "include": ["forceViewport", "resetViewport", "resetPageScaleFactor", "setPageScaleFactor", "setScriptExecutionDisabled", "setTouchEmulationEnabled",
-                            "setEmulatedMedia", "setCPUThrottlingRate", "setVirtualTimePolicy", "setNavigatorOverrides", "setDefaultBackgroundColorOverride", "setDeviceMetricsOverride", "clearDeviceMetricsOverride"],
+                            "setEmulatedMedia", "setCPUThrottlingRate", "setVirtualTimePolicy", "setNavigatorOverrides", "setDefaultBackgroundColorOverride", "setDeviceMetricsOverride", "clearDeviceMetricsOverride",
+                            "setUserAgentOverride", "setScrollbarsHidden", "setDocumentCookieDisabled", "setFocusEmulationEnabled"],
                 "include_events": ["virtualTimeBudgetExpired", "virtualTimeAdvanced", "virtualTimePaused"]
             },
             {
                 "domain": "Network",
                 "exclude": ["clearBrowserCache", "clearBrowserCookies", "getCookies", "getAllCookies", "deleteCookies", "setCookie", "setCookies", "canEmulateNetworkConditions",
-                            "setRequestInterception", "continueInterceptedRequest", "getResponseBodyForInterception"],
+                            "setRequestInterception", "continueInterceptedRequest", "getResponseBodyForInterception",
+                            "takeResponseBodyForInterceptionAsStream"],
                 "async": ["getResponseBody", "getRequestPostData"]
             },
             {
                 "domain": "Target",
                 "include": ["setAutoAttach", "sendMessageToTarget"],
                 "include_events": ["attachedToTarget", "detachedFromTarget", "receivedMessageFromTarget"]
+            },
+            {
+                "domain": "Testing"
             }
         ]
     },
@@ -125,10 +124,10 @@
     },
 
     "lib": {
-        "package": "core/inspector/protocol",
+        "package": "third_party/blink/renderer/core/inspector/protocol",
         "output": "inspector/protocol",
-        "string_header": "core/inspector/v8_inspector_string.h",
+        "string_header": "third_party/blink/renderer/core/inspector/v8_inspector_string.h",
         "export_macro": "CORE_EXPORT",
-        "export_header": "core/core_export.h"
+        "export_header": "third_party/blink/renderer/core/core_export.h"
     }
 }

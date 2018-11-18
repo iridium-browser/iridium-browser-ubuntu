@@ -85,10 +85,15 @@ void OverrideFeatures(const std::string& features,
 ScopedFeatureList::ScopedFeatureList() = default;
 
 ScopedFeatureList::~ScopedFeatureList() {
-  if (field_trial_override_)
+  // If one of the Init() functions was never called, don't reset anything.
+  if (!init_called_)
+    return;
+
+  if (field_trial_override_) {
     base::FieldTrialParamAssociator::GetInstance()->ClearParamsForTesting(
         field_trial_override_->trial_name(),
         field_trial_override_->group_name());
+  }
 
   FeatureList::ClearInstanceForTesting();
   if (original_feature_list_)
@@ -106,6 +111,7 @@ void ScopedFeatureList::InitWithFeatureList(
   DCHECK(!original_feature_list_);
   original_feature_list_ = FeatureList::ClearInstanceForTesting();
   FeatureList::SetInstance(std::move(feature_list));
+  init_called_ = true;
 }
 
 void ScopedFeatureList::InitFromCommandLine(
@@ -176,8 +182,7 @@ void ScopedFeatureList::InitWithFeaturesAndFieldTrials(
 
   // Add the field trial overrides. This assumes that |enabled_features| are at
   // the begining of |merged_features.enabled_feature_list|, in the same order.
-  std::vector<FieldTrial*>::const_iterator trial_it =
-      trials_for_enabled_features.begin();
+  auto trial_it = trials_for_enabled_features.begin();
   auto feature_it = merged_features.enabled_feature_list.begin();
   std::vector<std::unique_ptr<std::string>> features_with_trial;
   features_with_trial.reserve(trials_for_enabled_features.size());

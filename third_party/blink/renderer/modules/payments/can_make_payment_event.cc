@@ -8,9 +8,8 @@
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/workers/worker_global_scope.h"
 #include "third_party/blink/renderer/core/workers/worker_location.h"
-#include "third_party/blink/renderer/modules/serviceworkers/respond_with_observer.h"
-#include "third_party/blink/renderer/modules/serviceworkers/service_worker_global_scope_client.h"
-#include "third_party/blink/renderer/modules/serviceworkers/service_worker_window_client_callback.h"
+#include "third_party/blink/renderer/modules/service_worker/respond_with_observer.h"
+#include "third_party/blink/renderer/modules/service_worker/service_worker_global_scope_client.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 
@@ -37,8 +36,8 @@ const AtomicString& CanMakePaymentEvent::InterfaceName() const {
   return EventNames::CanMakePaymentEvent;
 }
 
-const String& CanMakePaymentEvent::topLevelOrigin() const {
-  return top_level_origin_;
+const String& CanMakePaymentEvent::topOrigin() const {
+  return top_origin_;
 }
 
 const String& CanMakePaymentEvent::paymentRequestOrigin() const {
@@ -57,6 +56,13 @@ const HeapVector<PaymentDetailsModifier>& CanMakePaymentEvent::modifiers()
 void CanMakePaymentEvent::respondWith(ScriptState* script_state,
                                       ScriptPromise script_promise,
                                       ExceptionState& exception_state) {
+  if (!isTrusted()) {
+    exception_state.ThrowDOMException(
+        DOMExceptionCode::kInvalidStateError,
+        "Cannot respond with data when the event is not trusted");
+    return;
+  }
+
   stopImmediatePropagation();
   if (observer_) {
     observer_->RespondWith(script_state, script_promise, exception_state);
@@ -76,10 +82,14 @@ CanMakePaymentEvent::CanMakePaymentEvent(
     RespondWithObserver* respond_with_observer,
     WaitUntilObserver* wait_until_observer)
     : ExtendableEvent(type, initializer, wait_until_observer),
-      top_level_origin_(initializer.topLevelOrigin()),
+      top_origin_(initializer.topOrigin()),
       payment_request_origin_(initializer.paymentRequestOrigin()),
-      method_data_(std::move(initializer.methodData())),
-      modifiers_(initializer.modifiers()),
+      method_data_(initializer.hasMethodData()
+                       ? initializer.methodData()
+                       : HeapVector<PaymentMethodData>()),
+      modifiers_(initializer.hasModifiers()
+                     ? initializer.modifiers()
+                     : HeapVector<PaymentDetailsModifier>()),
       observer_(respond_with_observer) {}
 
 }  // namespace blink

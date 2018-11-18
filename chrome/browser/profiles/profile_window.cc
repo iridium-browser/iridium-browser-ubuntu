@@ -77,13 +77,13 @@ namespace {
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
 void BlockExtensions(Profile* profile) {
-  ExtensionService* extension_service =
+  extensions::ExtensionService* extension_service =
       extensions::ExtensionSystem::Get(profile)->extension_service();
   extension_service->BlockAllExtensions();
 }
 
 void UnblockExtensions(Profile* profile) {
-  ExtensionService* extension_service =
+  extensions::ExtensionService* extension_service =
       extensions::ExtensionSystem::Get(profile)->extension_service();
   extension_service->UnblockAllExtensions();
 }
@@ -159,9 +159,6 @@ void OnUserManagerSystemProfileCreated(
   } else if (user_manager_action ==
              profiles::USER_MANAGER_SELECT_PROFILE_CHROME_SETTINGS) {
     page += profiles::kUserManagerSelectProfileChromeSettings;
-  } else if (user_manager_action ==
-             profiles::USER_MANAGER_SELECT_PROFILE_APP_LAUNCHER) {
-    page += profiles::kUserManagerSelectProfileAppLauncher;
   }
   callback.Run(system_profile, page);
 }
@@ -189,7 +186,6 @@ const char kUserManagerOpenCreateUserPage[] = "#create-user";
 const char kUserManagerSelectProfileTaskManager[] = "#task-manager";
 const char kUserManagerSelectProfileAboutChrome[] = "#about-chrome";
 const char kUserManagerSelectProfileChromeSettings[] = "#chrome-settings";
-const char kUserManagerSelectProfileAppLauncher[] = "#app-launcher";
 
 base::FilePath GetPathOfProfileWithEmail(ProfileManager* profile_manager,
                                          const std::string& email) {
@@ -299,7 +295,7 @@ void LoadProfileAsync(const base::FilePath& path,
                       ProfileManager::CreateCallback callback) {
   g_browser_process->profile_manager()->CreateProfileAsync(
       path, base::Bind(&ProfileLoadedCallback, callback), base::string16(),
-      std::string(), std::string());
+      std::string());
 }
 
 void SwitchToProfile(const base::FilePath& path,
@@ -311,11 +307,9 @@ void SwitchToProfile(const base::FilePath& path,
                                    path);
   g_browser_process->profile_manager()->CreateProfileAsync(
       path,
-      base::Bind(&profiles::OpenBrowserWindowForProfile,
-                 callback,
-                 always_create,
-                 false),
-      base::string16(), std::string(), std::string());
+      base::Bind(&profiles::OpenBrowserWindowForProfile, callback,
+                 always_create, false),
+      base::string16(), std::string());
 }
 
 void SwitchToGuestProfile(ProfileManager::CreateCallback callback) {
@@ -324,11 +318,10 @@ void SwitchToGuestProfile(ProfileManager::CreateCallback callback) {
                                    g_browser_process->profile_manager(),
                                    path);
   g_browser_process->profile_manager()->CreateProfileAsync(
-      path, base::Bind(&profiles::OpenBrowserWindowForProfile,
-                       callback,
-                       false,
-                       false),
-      base::string16(), std::string(), std::string());
+      path,
+      base::Bind(&profiles::OpenBrowserWindowForProfile, callback, false,
+                 false),
+      base::string16(), std::string());
 }
 #endif
 
@@ -348,11 +341,7 @@ void CreateAndSwitchToNewProfile(ProfileManager::CreateCallback callback,
   ProfileManager::CreateMultiProfileAsync(
       storage.ChooseNameForNewProfile(placeholder_avatar_index),
       profiles::GetDefaultAvatarIconUrl(placeholder_avatar_index),
-      base::Bind(&profiles::OpenBrowserWindowForProfile,
-                 callback,
-                 true,
-                 true),
-      std::string());
+      base::Bind(&profiles::OpenBrowserWindowForProfile, callback, true, true));
   ProfileMetrics::LogProfileAddNewUser(metric);
 }
 
@@ -422,7 +411,7 @@ bool IsLockAvailable(Profile* profile) {
   }
   // TODO(mlerman): Prohibit only users who authenticate using SAML. Until then,
   // prohibited users who use hosted domains (aside from google.com).
-  if (hosted_domain != Profile::kNoHostedDomainFound &&
+  if (hosted_domain != AccountTrackerService::kNoHostedDomainFound &&
       hosted_domain != "google.com") {
     return false;
   }
@@ -458,7 +447,6 @@ void CreateSystemProfileForUserManager(
                  user_manager_action,
                  callback),
       base::string16(),
-      std::string(),
       std::string());
 }
 

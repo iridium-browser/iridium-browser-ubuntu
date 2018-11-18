@@ -21,7 +21,6 @@ CR_REV_URL = 'https://cr-rev.appspot.com/_ah/api/crrev/v1/redirect/%s'
 
 class Site(object):
   CHROMIUM_SNAPSHOT = _SITE + '/chromium-browser-snapshots'
-  CHROMIUM_LINUX = _SITE + '/chromium-linux-archive/chromium.linux'
 
 
 def GetLatestRevision():
@@ -47,25 +46,20 @@ def DownloadChrome(revision, dest_dir, site=Site.CHROMIUM_SNAPSHOT):
   """
   def GetZipName(revision):
     if util.IsWindows():
-      return revision + '/chrome-win32.zip'
+      return revision + (
+          '/chrome-win.zip' if int(revision) > 591478 else '/chrome-win32.zip')
     elif util.IsMac():
       return revision + '/chrome-mac.zip'
     elif util.IsLinux():
-      if util.Is64Bit():
-        return revision + '/chrome-linux.zip'
-      else:
-        return 'full-build-linux_' + revision + '.zip'
+      return revision + '/chrome-linux.zip'
 
-  def GetDirName():
+  def GetDirName(revision):
     if util.IsWindows():
-      return 'chrome-win32'
+      return 'chrome-win' if int(revision) > 591478 else 'chrome-win32'
     elif util.IsMac():
       return 'chrome-mac'
     elif util.IsLinux():
-      if util.Is64Bit():
-        return 'chrome-linux'
-      else:
-        return 'full-build-linux'
+      return 'chrome-linux'
 
   def GetChromePathFromPackage():
     if util.IsWindows():
@@ -81,7 +75,8 @@ def DownloadChrome(revision, dest_dir, site=Site.CHROMIUM_SNAPSHOT):
     print 'Downloading', url, '...'
     urllib.urlretrieve(url, zip_path)
   util.Unzip(zip_path, dest_dir)
-  return os.path.join(dest_dir, GetDirName(), GetChromePathFromPackage())
+  return os.path.join(dest_dir, GetDirName(revision),
+                      GetChromePathFromPackage())
 
 
 def _GetDownloadPlatform():
@@ -91,27 +86,18 @@ def _GetDownloadPlatform():
   elif util.IsMac():
     return 'Mac'
   elif util.IsLinux():
-    if util.Is64Bit():
-      return 'Linux_x64'
-    else:
-      return 'Linux Builder (dbg)(32)'
+    return 'Linux_x64'
 
 
 def GetLatestSnapshotPosition():
   """Returns the latest commit position of snapshot build."""
   latest_revision = GetLatestRevision()
-  if util.IsLinux() and not util.Is64Bit():
-    return GetCommitPositionFromGitHash(latest_revision)
-  else:
-    return latest_revision
+  return latest_revision
 
 
 def GetDownloadSite():
   """Returns the site to download snapshot build according to the platform."""
-  if util.IsLinux() and not util.Is64Bit():
-    return Site.CHROMIUM_LINUX
-  else:
-    return Site.CHROMIUM_SNAPSHOT
+  return Site.CHROMIUM_SNAPSHOT
 
 
 def GetCommitPositionFromGitHash(snapshot_hashcode):

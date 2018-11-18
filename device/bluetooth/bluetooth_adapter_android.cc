@@ -44,7 +44,7 @@ namespace device {
 
 // static
 base::WeakPtr<BluetoothAdapter> BluetoothAdapter::CreateAdapter(
-    const InitCallback& init_callback) {
+    InitCallback init_callback) {
   return BluetoothAdapterAndroid::Create(
       BluetoothAdapterWrapper_CreateWithDefaultAdapter());
 }
@@ -150,7 +150,7 @@ void BluetoothAdapterAndroid::OnAdapterStateChanged(
     JNIEnv* env,
     const JavaParamRef<jobject>& caller,
     const bool powered) {
-  DidChangePoweredState();
+  RunPendingPowerCallbacks();
   NotifyAdapterPoweredChanged(powered);
 }
 
@@ -234,11 +234,13 @@ void BluetoothAdapterAndroid::CreateOrUpdateDeviceOnScan(
   int8_t clamped_tx_power = BluetoothDevice::ClampPower(tx_power);
 
   device_android->UpdateAdvertisementData(
-      BluetoothDevice::ClampPower(rssi), std::move(advertised_bluetooth_uuids),
-      service_data_map, manufacturer_data_map,
+      BluetoothDevice::ClampPower(rssi), base::nullopt /* flags */,
+      std::move(advertised_bluetooth_uuids),
       // Android uses INT32_MIN to indicate no Advertised Tx Power.
       // https://developer.android.com/reference/android/bluetooth/le/ScanRecord.html#getTxPowerLevel()
-      tx_power == INT32_MIN ? nullptr : &clamped_tx_power);
+      tx_power == INT32_MIN ? base::nullopt
+                            : base::make_optional(clamped_tx_power),
+      service_data_map, manufacturer_data_map);
 
   if (is_new_device) {
     devices_[device_address] = std::move(device_android_owner);
@@ -281,7 +283,7 @@ bool BluetoothAdapterAndroid::SetPoweredImpl(bool powered) {
 void BluetoothAdapterAndroid::AddDiscoverySession(
     BluetoothDiscoveryFilter* discovery_filter,
     const base::Closure& callback,
-    const DiscoverySessionErrorCallback& error_callback) {
+    DiscoverySessionErrorCallback error_callback) {
   // TODO(scheib): Support filters crbug.com/490401
   bool session_added = false;
   if (IsPowered()) {
@@ -309,14 +311,14 @@ void BluetoothAdapterAndroid::AddDiscoverySession(
     callback.Run();
   } else {
     // TODO(scheib): Eventually wire the SCAN_FAILED result through to here.
-    error_callback.Run(UMABluetoothDiscoverySessionOutcome::UNKNOWN);
+    std::move(error_callback).Run(UMABluetoothDiscoverySessionOutcome::UNKNOWN);
   }
 }
 
 void BluetoothAdapterAndroid::RemoveDiscoverySession(
     BluetoothDiscoveryFilter* discovery_filter,
     const base::Closure& callback,
-    const DiscoverySessionErrorCallback& error_callback) {
+    DiscoverySessionErrorCallback error_callback) {
   bool session_removed = false;
   if (num_discovery_sessions_ == 0) {
     VLOG(1) << "RemoveDiscoverySession: No scan in progress.";
@@ -341,17 +343,18 @@ void BluetoothAdapterAndroid::RemoveDiscoverySession(
     callback.Run();
   } else {
     // TODO(scheib): Eventually wire the SCAN_FAILED result through to here.
-    error_callback.Run(UMABluetoothDiscoverySessionOutcome::UNKNOWN);
+    std::move(error_callback).Run(UMABluetoothDiscoverySessionOutcome::UNKNOWN);
   }
 }
 
 void BluetoothAdapterAndroid::SetDiscoveryFilter(
     std::unique_ptr<BluetoothDiscoveryFilter> discovery_filter,
     const base::Closure& callback,
-    const DiscoverySessionErrorCallback& error_callback) {
+    DiscoverySessionErrorCallback error_callback) {
   // TODO(scheib): Support filters crbug.com/490401
   NOTIMPLEMENTED();
-  error_callback.Run(UMABluetoothDiscoverySessionOutcome::NOT_IMPLEMENTED);
+  std::move(error_callback)
+      .Run(UMABluetoothDiscoverySessionOutcome::NOT_IMPLEMENTED);
 }
 
 void BluetoothAdapterAndroid::RemovePairingDelegateInternal(

@@ -5,14 +5,12 @@
 #ifndef COMPONENTS_LEVELDB_PROTO_LEVELDB_DATABASE_H_
 #define COMPONENTS_LEVELDB_PROTO_LEVELDB_DATABASE_H_
 
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
 
-#include "base/gtest_prod_util.h"
-#include "base/macros.h"
 #include "base/strings/string_split.h"
-#include "base/threading/thread_collision_warner.h"
 #include "third_party/leveldatabase/env_chromium.h"
 
 namespace base {
@@ -40,19 +38,49 @@ class LevelDB {
   explicit LevelDB(const char* client_name);
   virtual ~LevelDB();
 
+  using KeyFilter = base::RepeatingCallback<bool(const std::string& key)>;
+
   // Initializes a leveldb with the given options. If |database_dir| is
   // empty, this opens an in-memory db.
   virtual bool Init(const base::FilePath& database_dir,
                     const leveldb_env::Options& options);
+  virtual leveldb::Status Init(const base::FilePath& database_dir,
+                               const leveldb_env::Options& options,
+                               bool destroy_on_corruption);
 
   virtual bool Save(const base::StringPairs& pairs_to_save,
                     const std::vector<std::string>& keys_to_remove);
+  virtual bool UpdateWithRemoveFilter(const base::StringPairs& entries_to_save,
+                                      const KeyFilter& delete_key_filter);
+
   virtual bool Load(std::vector<std::string>* entries);
+  virtual bool LoadWithFilter(const KeyFilter& filter,
+                              std::vector<std::string>* entries);
+  virtual bool LoadWithFilter(const KeyFilter& filter,
+                              std::vector<std::string>* entries,
+                              const leveldb::ReadOptions& options,
+                              const std::string& target_prefix);
+
+  virtual bool LoadKeysAndEntries(
+      std::map<std::string, std::string>* keys_entries);
+  virtual bool LoadKeysAndEntriesWithFilter(
+      const KeyFilter& filter,
+      std::map<std::string, std::string>* keys_entries);
+  virtual bool LoadKeysAndEntriesWithFilter(
+      const KeyFilter& filter,
+      std::map<std::string, std::string>* keys_entries,
+      const leveldb::ReadOptions& options,
+      const std::string& target_prefix);
+
   virtual bool LoadKeys(std::vector<std::string>* keys);
   virtual bool Get(const std::string& key, bool* found, std::string* entry);
   // Close (if currently open) and then destroy (i.e. delete) the database
   // directory.
   virtual bool Destroy();
+
+  // Returns true if we successfully read the approximate memory usage property
+  // from the LevelDB.
+  bool GetApproximateMemoryUse(uint64_t* approx_mem);
 
  private:
   FRIEND_TEST_ALL_PREFIXES(ProtoDatabaseImplLevelDBTest, TestDBInitFail);
@@ -67,6 +95,7 @@ class LevelDB {
   leveldb_env::Options open_options_;
   base::HistogramBase* open_histogram_;
   base::HistogramBase* destroy_histogram_;
+  base::HistogramBase* approx_memtable_mem_histogram_;
 
   DISALLOW_COPY_AND_ASSIGN(LevelDB);
 };

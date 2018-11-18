@@ -59,6 +59,22 @@ config("breakpad_unittest_config") {
   ldflags = [ "-Wl,--build-id=0x000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f" ]
 }
 
+config("default_logging_severity_config") {
+  defines = [ "BPLOG_MINIMUM_SEVERITY=SEVERITY_ERROR" ]
+}
+
+config("fuzzing_logging_severity_config") {
+  defines = [ "BPLOG_MINIMUM_SEVERITY=SEVERITY_CRITICAL" ]
+}
+
+default_breakpad_configs = [ ":tools_config" ]
+
+if (use_fuzzing_engine) {
+  default_breakpad_configs += [ ":fuzzing_logging_severity_config" ]
+} else {
+  default_breakpad_configs += [ ":default_logging_severity_config" ]
+}
+
 # {micro,mini}dump_stackwalk and minidump_dump are tool-type executables
 # that do not build on Windows.
 if (!is_win) {
@@ -77,6 +93,8 @@ if (!is_win) {
         "breakpad/src/processor/call_stack.cc",
         "breakpad/src/processor/cfi_frame_info.cc",
         "breakpad/src/processor/cfi_frame_info.h",
+        "breakpad/src/processor/convert_old_arm64_context.cc",
+        "breakpad/src/processor/convert_old_arm64_context.h",
         "breakpad/src/processor/disassembler_x86.cc",
         "breakpad/src/processor/disassembler_x86.h",
         "breakpad/src/processor/dump_context.cc",
@@ -142,11 +160,9 @@ if (!is_win) {
         "breakpad/src/third_party/libdisasm/x86_operand_list.h",
       ]
 
-      defines = [ "BPLOG_MINIMUM_SEVERITY=SEVERITY_ERROR" ]
-
       configs -= [ "//build/config/compiler:chromium_code" ]
       configs += [ "//build/config/compiler:no_chromium_code" ]
-      configs += [ ":tools_config" ]
+      configs += default_breakpad_configs
     }
 
     fuzzer_test("minidump_fuzzer") {
@@ -162,11 +178,12 @@ if (!is_win) {
         "//base",
       ]
 
-      defines = [ "BPLOG_MINIMUM_SEVERITY=SEVERITY_ERROR" ]
+      additional_configs = [ ":fuzzing_logging_severity_config" ]
       include_dirs = [ "breakpad/src" ]
 
       libfuzzer_options = [
-        "close_fd_mask=3",
+        # Suppress stdout from stackwalk_common, as it uses printf() directly.
+        "close_fd_mask=1",
         "max_len=128000",
       ]
 
@@ -191,14 +208,11 @@ if (!is_win) {
 
       deps = [
         ":stackwalk_common",
-        "//build/config:exe_and_shlib_deps",
       ]
-
-      defines = [ "BPLOG_MINIMUM_SEVERITY=SEVERITY_ERROR" ]
 
       configs -= [ "//build/config/compiler:chromium_code" ]
       configs += [ "//build/config/compiler:no_chromium_code" ]
-      configs += [ ":tools_config" ]
+      configs += default_breakpad_configs
     }
 
     executable("minidump_stackwalk") {
@@ -211,14 +225,11 @@ if (!is_win) {
 
       deps = [
         ":stackwalk_common",
-        "//build/config:exe_and_shlib_deps",
       ]
-
-      defines = [ "BPLOG_MINIMUM_SEVERITY=SEVERITY_ERROR" ]
 
       configs -= [ "//build/config/compiler:chromium_code" ]
       configs += [ "//build/config/compiler:no_chromium_code" ]
-      configs += [ ":tools_config" ]
+      configs += default_breakpad_configs
 
       # Always want these files included regardless of platform.
       set_sources_assignment_filter([])
@@ -238,6 +249,8 @@ if (!is_win) {
         "breakpad/src/processor/basic_code_module.h",
         "breakpad/src/processor/basic_code_modules.cc",
         "breakpad/src/processor/basic_code_modules.h",
+        "breakpad/src/processor/convert_old_arm64_context.cc",
+        "breakpad/src/processor/convert_old_arm64_context.h",
         "breakpad/src/processor/dump_context.cc",
         "breakpad/src/processor/dump_object.cc",
         "breakpad/src/processor/logging.cc",
@@ -254,10 +267,6 @@ if (!is_win) {
       # There are some warnings in this code.
       configs -= [ "//build/config/compiler:chromium_code" ]
       configs += [ "//build/config/compiler:no_chromium_code" ]
-
-      deps = [
-        "//build/config:exe_and_shlib_deps",
-      ]
     }
   } else {
     # Aliases for convenience.
@@ -287,6 +296,8 @@ if (is_mac) {
         "breakpad/src/common/dwarf_cfi_to_module.cc",
         "breakpad/src/common/dwarf_cu_to_module.cc",
         "breakpad/src/common/dwarf_line_to_module.cc",
+        "breakpad/src/common/dwarf_range_list_handler.cc",
+        "breakpad/src/common/dwarf_range_list_handler.h",
         "breakpad/src/common/language.cc",
         "breakpad/src/common/mac/arch_utilities.cc",
         "breakpad/src/common/mac/arch_utilities.h",
@@ -331,10 +342,6 @@ if (is_mac) {
         configs -= [ "//build/config/compiler:default_optimization" ]
         cflags += [ "-O0" ]
       }
-
-      deps = [
-        "//build/config:exe_and_shlib_deps",
-      ]
     }
 
     executable("symupload") {
@@ -349,10 +356,6 @@ if (is_mac) {
 
       configs -= [ "//build/config/compiler:chromium_code" ]
       configs += [ "//build/config/compiler:no_chromium_code" ]
-
-      deps = [
-        "//build/config:exe_and_shlib_deps",
-      ]
     }
   } else {
     binary_symlink("dump_syms") {
@@ -423,7 +426,6 @@ if (is_mac) {
 
     deps = [
       ":utilities",
-      "//build/config:exe_and_shlib_deps",
     ]
   }
 
@@ -484,10 +486,6 @@ if (is_linux || is_android) {
       configs += [ ":tools_config" ]
 
       libs = [ "dl" ]
-
-      deps = [
-        "//build/config:exe_and_shlib_deps",
-      ]
     }
 
     # dump_syms is a host tool, so only compile it for the host system.
@@ -504,6 +502,8 @@ if (is_linux || is_android) {
         "breakpad/src/common/dwarf_cu_to_module.h",
         "breakpad/src/common/dwarf_line_to_module.cc",
         "breakpad/src/common/dwarf_line_to_module.h",
+        "breakpad/src/common/dwarf_range_list_handler.cc",
+        "breakpad/src/common/dwarf_range_list_handler.h",
         "breakpad/src/common/language.cc",
         "breakpad/src/common/language.h",
         "breakpad/src/common/linux/crc32.cc",
@@ -549,10 +549,6 @@ if (is_linux || is_android) {
       defines = [ "HAVE_A_OUT_H" ]
 
       include_dirs = [ "breakpad/src" ]
-
-      deps = [
-        "//build/config:exe_and_shlib_deps",
-      ]
     }
   } else {
     # Aliases for convenience.
@@ -635,11 +631,6 @@ if (is_linux || is_android) {
       cflags = [ "-marm" ]
     }
 
-    # Clang's -mstackrealign doesn't work well with
-    # linux_syscall_support.h hand written asm syscalls.
-    # See https://crbug.com/556393
-    configs -= [ "//build/config/compiler:clang_stackrealign" ]
-
     if (is_android) {
       sources += [ "breakpad/src/common/android/breakpad_getcontext.S" ]
     }
@@ -660,6 +651,8 @@ if (is_linux || is_android) {
       "breakpad/src/common/scoped_ptr.h",
       "breakpad/src/processor/basic_code_modules.cc",
       "breakpad/src/processor/basic_code_modules.h",
+      "breakpad/src/processor/convert_old_arm64_context.cc",
+      "breakpad/src/processor/convert_old_arm64_context.h",
       "breakpad/src/processor/dump_context.cc",
       "breakpad/src/processor/dump_object.cc",
       "breakpad/src/processor/logging.cc",
@@ -715,7 +708,6 @@ if (is_linux || is_android) {
     deps = [
       ":client",
       ":processor_support",
-      "//build/config:exe_and_shlib_deps",
       "//testing/gmock",
       "//testing/gtest",
       "//testing/gtest:gtest_main",
@@ -750,11 +742,6 @@ if (is_linux || is_android) {
       extra_dist_files = [ "$root_out_dir/linux_dumper_unittest_helper" ]
     }
 
-    # Clang's -mstackrealign doesn't work well with
-    # linux_syscall_support.h hand written asm syscalls.
-    # See https://crbug.com/556393
-    configs -= [ "//build/config/compiler:clang_stackrealign" ]
-
     # Add the breakpad unittest config at the end to override all configs.
     configs += [ ":breakpad_unittest_config" ]
   }
@@ -767,7 +754,6 @@ if (is_linux || is_android) {
     ]
     deps = [
       ":processor_support",
-      "//build/config:exe_and_shlib_deps",
     ]
 
     configs += [ ":client_config" ]
@@ -793,7 +779,6 @@ if (is_linux || is_android) {
 
     deps = [
       ":client",
-      "//build/config:exe_and_shlib_deps",
     ]
 
     if (is_android) {
@@ -813,7 +798,6 @@ if (is_linux || is_android) {
 
     deps = [
       ":client",
-      "//build/config:exe_and_shlib_deps",
     ]
   }
 
@@ -825,7 +809,6 @@ if (is_linux || is_android) {
 
     deps = [
       ":client",
-      "//build/config:exe_and_shlib_deps",
     ]
 
     include_dirs = [ "breakpad/src" ]
@@ -853,10 +836,6 @@ if (is_win) {
       "breakpad/src/common/windows/string_utils-inl.h",
       "breakpad/src/common/windows/string_utils.cc",
       "breakpad/src/tools/windows/dump_syms/dump_syms.cc",
-    ]
-
-    deps = [
-      "//build/config:exe_and_shlib_deps",
     ]
 
     lib_dirs = []

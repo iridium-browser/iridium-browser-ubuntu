@@ -23,6 +23,7 @@ enum AcceleratorAction {
   DEBUG_PRINT_LAYER_HIERARCHY,
   DEBUG_PRINT_VIEW_HIERARCHY,
   DEBUG_PRINT_WINDOW_HIERARCHY,
+  DEBUG_SHOW_QUICK_LAUNCH,
   DEBUG_SHOW_TOAST,
   DEBUG_TOGGLE_DEVICE_SCALE_FACTOR,
   DEBUG_TOGGLE_SHOW_DEBUG_BORDERS,
@@ -94,7 +95,9 @@ enum AcceleratorAction {
   TOGGLE_APP_LIST,
   TOGGLE_CAPS_LOCK,
   TOGGLE_DICTATION,
+  TOGGLE_DOCKED_MAGNIFIER,
   TOGGLE_FULLSCREEN,
+  TOGGLE_FULLSCREEN_MAGNIFIER,
   TOGGLE_HIGH_CONTRAST,
   TOGGLE_MAXIMIZED,
   TOGGLE_MESSAGE_CENTER_BUBBLE,
@@ -123,7 +126,8 @@ struct AcceleratorData {
 };
 
 // A mask of all the modifiers used for debug accelerators.
-ASH_PUBLIC_EXPORT extern const int kDebugModifier;
+ASH_PUBLIC_EXPORT constexpr int kDebugModifier =
+    ui::EF_CONTROL_DOWN | ui::EF_ALT_DOWN | ui::EF_SHIFT_DOWN;
 
 // Accelerators handled by AcceleratorController.
 ASH_PUBLIC_EXPORT extern const AcceleratorData kAcceleratorData[];

@@ -7,11 +7,16 @@
 #include "core/fpdfapi/page/cpdf_color.h"
 
 #include "core/fpdfapi/page/cpdf_docpagedata.h"
+#include "core/fpdfapi/page/cpdf_patterncs.h"
 #include "core/fpdfapi/parser/cpdf_array.h"
 #include "core/fpdfapi/parser/cpdf_document.h"
 #include "core/fxcrt/fx_system.h"
 
-CPDF_Color::CPDF_Color() {}
+CPDF_Color::CPDF_Color() = default;
+
+CPDF_Color::CPDF_Color(const CPDF_Color& that) {
+  *this = that;
+}
 
 CPDF_Color::~CPDF_Color() {
   ReleaseBuffer();
@@ -79,17 +84,16 @@ void CPDF_Color::SetColorSpace(CPDF_ColorSpace* pCS) {
     m_pBuffer = pCS->CreateBufAndSetDefaultColor();
 }
 
-void CPDF_Color::SetValue(const float* comps) {
-  if (!m_pBuffer)
-    return;
-  if (!IsPatternInternal())
-    memcpy(m_pBuffer, comps, m_pCS->CountComponents() * sizeof(float));
+void CPDF_Color::SetValueForNonPattern(const std::vector<float>& values) {
+  ASSERT(m_pBuffer);
+  ASSERT(!IsPatternInternal());
+  ASSERT(m_pCS->CountComponents() <= values.size());
+  memcpy(m_pBuffer, values.data(), m_pCS->CountComponents() * sizeof(float));
 }
 
-void CPDF_Color::SetValue(CPDF_Pattern* pPattern,
-                          const float* comps,
-                          uint32_t ncomps) {
-  if (ncomps > kMaxPatternColorComps)
+void CPDF_Color::SetValueForPattern(CPDF_Pattern* pPattern,
+                                    const std::vector<float>& values) {
+  if (values.size() > kMaxPatternColorComps)
     return;
 
   if (!IsPattern()) {
@@ -104,10 +108,10 @@ void CPDF_Color::SetValue(CPDF_Pattern* pPattern,
     pDocPageData = pvalue->m_pPattern->document()->GetPageData();
     pDocPageData->ReleasePattern(pvalue->m_pPattern->pattern_obj());
   }
-  pvalue->m_nComps = ncomps;
+  pvalue->m_nComps = values.size();
   pvalue->m_pPattern = pPattern;
-  if (ncomps)
-    memcpy(pvalue->m_Comps, comps, ncomps * sizeof(float));
+  if (!values.empty())
+    memcpy(pvalue->m_Comps, values.data(), values.size() * sizeof(float));
 
   pvalue->m_pCountedPattern = nullptr;
   if (pPattern) {
@@ -119,42 +123,63 @@ void CPDF_Color::SetValue(CPDF_Pattern* pPattern,
   }
 }
 
-void CPDF_Color::Copy(const CPDF_Color* pSrc) {
+CPDF_Color& CPDF_Color::operator=(const CPDF_Color& that) {
+  if (this == &that)
+    return *this;
+
   ReleaseBuffer();
   ReleaseColorSpace();
-  m_pCS = pSrc->m_pCS;
+  m_pCS = that.m_pCS;
   if (!m_pCS)
-    return;
+    return *this;
 
   CPDF_Document* pDoc = m_pCS->GetDocument();
-  CPDF_Array* pArray = m_pCS->GetArray();
+  const CPDF_Array* pArray = m_pCS->GetArray();
   if (pDoc && pArray) {
     m_pCS = pDoc->GetPageData()->GetCopiedColorSpace(pArray);
     if (!m_pCS)
-      return;
+      return *this;
   }
   m_pBuffer = m_pCS->CreateBuf();
-  memcpy(m_pBuffer, pSrc->m_pBuffer, m_pCS->GetBufSize());
+  memcpy(m_pBuffer, that.m_pBuffer, m_pCS->GetBufSize());
   if (!IsPatternInternal())
-    return;
+    return *this;
 
   PatternValue* pValue = reinterpret_cast<PatternValue*>(m_pBuffer);
   CPDF_Pattern* pPattern = pValue->m_pPattern;
   if (!pPattern)
-    return;
+    return *this;
 
   pValue->m_pPattern = pPattern->document()->GetPageData()->GetPattern(
       pPattern->pattern_obj(), false, pPattern->parent_matrix());
+
+  return *this;
+}
+
+uint32_t CPDF_Color::CountComponents() const {
+  return m_pCS->CountComponents();
+}
+
+bool CPDF_Color::IsColorSpaceRGB() const {
+  return m_pCS == CPDF_ColorSpace::GetStockCS(PDFCS_DEVICERGB);
 }
 
 bool CPDF_Color::GetRGB(int* R, int* G, int* B) const {
-  if (!m_pCS || !m_pBuffer)
+  if (!m_pBuffer)
     return false;
 
   float r = 0.0f;
   float g = 0.0f;
   float b = 0.0f;
-  if (!m_pCS->GetRGB(m_pBuffer, &r, &g, &b))
+  bool result;
+  if (IsPatternInternal()) {
+    const CPDF_PatternCS* pPatternCS = m_pCS->AsPatternCS();
+    const auto* pValue = reinterpret_cast<const PatternValue*>(m_pBuffer);
+    result = pPatternCS->GetPatternRGB(*pValue, &r, &g, &b);
+  } else {
+    result = m_pCS->GetRGB(m_pBuffer, &r, &g, &b);
+  }
+  if (!result)
     return false;
 
   *R = static_cast<int32_t>(r * 255 + 0.5f);
@@ -164,7 +189,9 @@ bool CPDF_Color::GetRGB(int* R, int* G, int* B) const {
 }
 
 CPDF_Pattern* CPDF_Color::GetPattern() const {
-  if (!m_pBuffer || !IsPatternInternal())
+  ASSERT(IsPattern());
+
+  if (!m_pBuffer)
     return nullptr;
 
   PatternValue* pvalue = reinterpret_cast<PatternValue*>(m_pBuffer);

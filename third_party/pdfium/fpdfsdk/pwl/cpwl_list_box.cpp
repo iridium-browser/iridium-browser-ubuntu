@@ -72,10 +72,6 @@ CPWL_ListBox::CPWL_ListBox()
 
 CPWL_ListBox::~CPWL_ListBox() {}
 
-ByteString CPWL_ListBox::GetClassName() const {
-  return "CPWL_ListBox";
-}
-
 void CPWL_ListBox::OnCreated() {
   m_pList->SetFontMap(GetFontMap());
   m_pListNotify = pdfium::MakeUnique<CPWL_List_Notify>(this);
@@ -246,10 +242,6 @@ void CPWL_ListBox::ScrollWindowVertically(float pos) {
   m_pList->SetScrollPos(CFX_PointF(0, pos));
 }
 
-void CPWL_ListBox::KillFocus() {
-  CPWL_Wnd::KillFocus();
-}
-
 bool CPWL_ListBox::RePosChildWnd() {
   if (!CPWL_Wnd::RePosChildWnd())
     return false;
@@ -294,7 +286,7 @@ void CPWL_ListBox::AddString(const WideString& str) {
   m_pList->AddString(str);
 }
 
-WideString CPWL_ListBox::GetText() const {
+WideString CPWL_ListBox::GetText() {
   return m_pList->GetText();
 }
 

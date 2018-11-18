@@ -13,20 +13,22 @@ found in the LICENSE file.
     <style include="base-style">
       ul {
         list-style-type: none;
+        margin: 0;
         padding: 0;
       }
 
-      li {
-        margin: 0.5em 0;
+      dt {
+        margin-top: 12px;
       }
 
-      th {
-        text-align: right;
-        vertical-align: top;
-      }
-
-      td {
+      dd {
+        color: var(--paper-grey-500);
+        margin: 0;
         word-break: break-all;
+      }
+
+      .section {
+        margin: 24px 0;
       }
     </style>
 
@@ -38,29 +40,20 @@ found in the LICENSE file.
           </a>
       </template>
       <li>
-        <a href="/results2/[[job.job_id]]" target="_blank">
+        <a href="[[job.results_url]]" target="_blank">
           Analyze benchmark results
         </a>
     </ul>
 
-    <template is="dom-if" if="[[hasDifferences(job)]]">
-      <h2>Differences found after commits</h2>
-      <template is="dom-repeat" items="[[getDifferences(job)]]">
-        <change-info change=[[item]]></change-info>
-      </template>
-    </template>
-    <template is="dom-if" if="[[!hasDifferences(job)]]">
-      <h2>No differences found</h2>
-    </template>
-
-    <h2>Job arguments</h2>
-    <table>
-      <template is="dom-repeat" items="[[getArguments(job)]]">
-        <tr>
-          <th>[[item.key]]
-          <td>[[item.value]]
-      </template>
-    </table>
+    <div class="section">
+      <h2>Arguments</h2>
+      <dl>
+        <template is="dom-repeat" items="[[getArguments(job)]]">
+          <dt>[[item.key]]
+          <dd>[[item.value]]
+        </template>
+      </dl>
+    </div>
   </template>
 
   <script>
@@ -74,23 +67,12 @@ found in the LICENSE file.
         },
       },
 
-      hasDifferences(job) {
-        return this.getDifferences(job).length;
-      },
-
-      getDifferences(job) {
-        const differences = [];
-        for (let i = 0; i < job.comparisons.length; ++i) {
-          if (job.comparisons[i] === 'different') {
-            differences.push(job.changes[i + 1]);
-          }
-        }
-        return differences;
-      },
-
       getArguments(job) {
         const tuples = [];
         for (const key in job.arguments) {
+          if (['bug_id', 'name', 'user'].includes(key)) {
+            continue;
+          }
           tuples.push({key, value: job.arguments[key]});
         }
         tuples.sort(function(a, b) {

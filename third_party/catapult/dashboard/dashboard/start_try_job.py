@@ -20,7 +20,6 @@ from google.appengine.ext import ndb
 from dashboard import buildbucket_job
 from dashboard import can_bisect
 from dashboard import list_tests
-from dashboard import quick_logger
 from dashboard.common import namespaced_stored_object
 from dashboard.common import request_handler
 from dashboard.common import stored_object
@@ -115,7 +114,7 @@ class StartBisectHandler(request_handler.RequestHandler):
     This end-point should always output valid JSON with different contents
     depending on the value of "step".
     """
-    user = users.get_current_user()
+    user = utils.GetEmail()
     if not utils.IsValidSheriffUser():
       message = 'User "%s" not authorized.' % user
       self.response.out.write(json.dumps({'error': message}))
@@ -164,7 +163,7 @@ class StartBisectHandler(request_handler.RequestHandler):
         bot=bisect_bot,
         config=config_python_string,
         bug_id=bug_id,
-        email=user.email(),
+        email=user,
         master_name=master_name,
         internal_only=internal_only,
         job_type='bisect')
@@ -212,7 +211,7 @@ def _PrefillInfo(test_path):
   info['all_bots'] = _GetAvailableBisectBots(suite.master_name)
   info['bisect_bot'] = GuessBisectBot(suite.master_name, suite.bot_name)
 
-  user = users.get_current_user()
+  user = utils.GetEmail()
   if not user:
     return {'error': 'User not logged in.'}
 
@@ -225,7 +224,7 @@ def _PrefillInfo(test_path):
   else:
     info['is_admin'] = False
 
-  info['email'] = user.email()
+  info['email'] = user
 
   info['all_metrics'] = []
   metric_keys = list_tests.GetTestDescendants(graph_key, has_rows=True)
@@ -673,21 +672,6 @@ def PerformBisect(bisect_job, alerts=None):
   return result
 
 
-def LogBisectResult(job, comment):
-  """Adds an entry to the bisect result log for a particular bug."""
-  if not job.bug_id or job.bug_id < 0:
-    return
-  formatter = quick_logger.Formatter()
-  logger = quick_logger.QuickLogger('bisect_result', job.bug_id, formatter)
-  if job.log_record_id:
-    logger.Log(comment, record_id=job.log_record_id)
-    logger.Save()
-  else:
-    job.log_record_id = logger.Log(comment)
-    logger.Save()
-    job.put()
-
-
 def _MakeBuildbucketBisectJob(bisect_job):
   """Creates a bisect job object that the buildbucket service can use.
 
@@ -741,9 +725,6 @@ def _PerformBuildbucketBisect(bisect_job):
     hostname = app_identity.get_default_version_hostname()
     job_id = bisect_job.buildbucket_job_id
     issue_url = 'https://%s/buildbucket_job_status/%s' % (hostname, job_id)
-    bug_comment = ('Bisect started; track progress at '
-                   '<a href="%s">%s</a>' % (issue_url, issue_url))
-    LogBisectResult(bisect_job, bug_comment)
     return {
         'issue_id': job_id,
         'issue_url': issue_url,

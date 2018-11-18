@@ -12,6 +12,8 @@
 #include "content/common/content_export.h"
 #include "content/common/navigation_params.h"
 #include "content/public/common/url_loader_throttle.h"
+#include "content/renderer/loader/frame_request_blocker.h"
+#include "content/renderer/loader/navigation_response_override_parameters.h"
 #include "content/renderer/loader/web_url_loader_impl.h"
 #include "third_party/blink/public/mojom/page/page_visibility_state.mojom.h"
 #include "third_party/blink/public/platform/web_string.h"
@@ -49,10 +51,6 @@ class CONTENT_EXPORT RequestExtraData : public blink::WebURLRequest::ExtraData {
   void set_transition_type(ui::PageTransition transition_type) {
     transition_type_ = transition_type;
   }
-  void set_should_replace_current_entry(
-      bool should_replace_current_entry) {
-    should_replace_current_entry_ = should_replace_current_entry;
-  }
   int service_worker_provider_id() const {
     return service_worker_provider_id_;
   }
@@ -75,27 +73,21 @@ class CONTENT_EXPORT RequestExtraData : public blink::WebURLRequest::ExtraData {
   void set_custom_user_agent(const blink::WebString& custom_user_agent) {
     custom_user_agent_ = custom_user_agent;
   }
-  const blink::WebString& requested_with() const {
-    return requested_with_;
-  }
-  void set_requested_with(const blink::WebString& requested_with) {
-    requested_with_ = requested_with;
+
+  // PlzNavigate: |navigation_response_override| is used to override certain
+  // parameters of navigation requests.
+  std::unique_ptr<NavigationResponseOverrideParameters>
+  TakeNavigationResponseOverrideOwnership() {
+    return std::move(navigation_response_override_);
   }
 
-  // PlzNavigate: |stream_override| is used to override certain parameters of
-  // navigation requests.
-  std::unique_ptr<StreamOverrideParameters> TakeStreamOverrideOwnership() {
-    return std::move(stream_override_);
+  void set_navigation_response_override(
+      std::unique_ptr<NavigationResponseOverrideParameters> response_override) {
+    navigation_response_override_ = std::move(response_override);
   }
 
-  void set_stream_override(
-      std::unique_ptr<StreamOverrideParameters> stream_override) {
-    stream_override_ = std::move(stream_override);
-  }
-
-  // NavigationMojoResponse: |continue_navigation| is used to continue a
-  // navigation on the renderer process that has already been started on the
-  // browser process.
+  // |continue_navigation| is used to continue a navigation on the renderer
+  // process that has already been started on the browser process.
   base::OnceClosure TakeContinueNavigationFunctionOwnerShip() {
     return std::move(continue_navigation_function_);
   }
@@ -155,6 +147,15 @@ class CONTENT_EXPORT RequestExtraData : public blink::WebURLRequest::ExtraData {
     url_loader_throttles_ = std::move(throttles);
   }
 
+  void set_frame_request_blocker(
+      scoped_refptr<FrameRequestBlocker> frame_request_blocker) {
+    frame_request_blocker_ = frame_request_blocker;
+  }
+
+  scoped_refptr<FrameRequestBlocker> frame_request_blocker() {
+    return frame_request_blocker_;
+  }
+
   void CopyToResourceRequest(network::ResourceRequest* request) const;
 
  private:
@@ -163,14 +164,13 @@ class CONTENT_EXPORT RequestExtraData : public blink::WebURLRequest::ExtraData {
   bool is_main_frame_;
   bool allow_download_;
   ui::PageTransition transition_type_;
-  bool should_replace_current_entry_;
   int service_worker_provider_id_;
   bool originated_from_service_worker_;
   blink::WebString custom_user_agent_;
-  blink::WebString requested_with_;
-  std::unique_ptr<StreamOverrideParameters> stream_override_;
-  // TODO(arthursonzogni): Once NavigationMojoResponse is launched, move most of
-  // the |stream_override_| content as parameters of this function.
+  std::unique_ptr<NavigationResponseOverrideParameters>
+      navigation_response_override_;
+  // TODO(arthursonzogni): Move most of the |navigation_response_override_|
+  // content as parameters of this function.
   base::OnceClosure continue_navigation_function_;
   bool initiated_in_secure_context_;
   bool is_for_no_state_prefetch_;
@@ -179,6 +179,7 @@ class CONTENT_EXPORT RequestExtraData : public blink::WebURLRequest::ExtraData {
   bool navigation_initiated_by_renderer_;
   bool attach_same_site_cookies_;
   std::vector<std::unique_ptr<URLLoaderThrottle>> url_loader_throttles_;
+  scoped_refptr<FrameRequestBlocker> frame_request_blocker_;
 
   DISALLOW_COPY_AND_ASSIGN(RequestExtraData);
 };

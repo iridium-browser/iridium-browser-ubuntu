@@ -2,9 +2,12 @@
 # https://developers.google.com/appengine/docs/python/config/cron
 
 cron:
+- description: Send ts_mon metrics
+  url: /internal/cron/ts_mon/send
+  schedule: every 1 minutes
 
-- description: Mark alerts as recovered, and associate alerts with groups.
-  url: /auto_triage
+- description: Mark alerts as recovered.
+  url: /mark_recovered_alerts
   schedule: every 6 hours
 
 - description: Send e-mails with daily anomaly summaries.
@@ -23,8 +26,20 @@ cron:
   url: /update_bug_with_results
   schedule: every 15 minutes
 
+- description: Update dashboard stats.
+  url: /update_dashboard_stats
+  schedule: every 24 hours
+
 - description: Delete expired layered_cache.CachedPickledString entities.
   url: /delete_expired_entities
+  schedule: every 24 hours
+
+- description: Update externally-visible test suite descriptors served by /api/describe.
+  url: /update_test_suite_descriptors
+  schedule: every 24 hours
+
+- description: Update internal-only test suite descriptors served by /api/describe.
+  url: /update_test_suite_descriptors?internal_only=true
   schedule: every 24 hours
 
 - description: Update the internal-only test suite data used on the /report page.

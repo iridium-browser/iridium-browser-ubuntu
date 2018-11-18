@@ -6,18 +6,20 @@
 
 #include <vector>
 
+#include "base/bind.h"
+#include "base/sha1.h"
 #include "chrome/browser/chromeos/arc/extensions/fake_arc_support.h"
 #include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
 #include "chrome/browser/consent_auditor/consent_auditor_factory.h"
 #include "chrome/browser/consent_auditor/consent_auditor_test_utils.h"
-#include "chrome/browser/signin/fake_signin_manager_builder.h"
+#include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/consent_auditor/fake_consent_auditor.h"
-#include "components/signin/core/browser/fake_signin_manager.h"
 #include "components/user_manager/scoped_user_manager.h"
 #include "content/public/test/test_browser_thread_bundle.h"
+#include "services/identity/public/cpp/identity_manager.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -63,6 +65,8 @@ class MockErrorDelegateNonStrict : public ArcSupportHost::ErrorDelegate {
 
 using MockErrorDelegate = StrictMock<MockErrorDelegateNonStrict>;
 
+}  // namespace
+
 class ArcSupportHostTest : public BrowserWithTestWindowTest {
  public:
   ArcSupportHostTest() = default;
@@ -72,7 +76,9 @@ class ArcSupportHostTest : public BrowserWithTestWindowTest {
     BrowserWithTestWindowTest::SetUp();
     user_manager_enabler_ = std::make_unique<user_manager::ScopedUserManager>(
         std::make_unique<chromeos::FakeChromeUserManager>());
-    signin_manager()->SignIn("testing_account_id");
+    IdentityManagerFactory::GetForProfile(profile())
+        ->SetPrimaryAccountSynchronously("gaia_id", "testing@account.com",
+                                         /*refresh_token=*/std::string());
 
     support_host_ = std::make_unique<ArcSupportHost>(profile());
     fake_arc_support_ = std::make_unique<FakeArcSupport>(support_host_.get());
@@ -123,15 +129,10 @@ class ArcSupportHostTest : public BrowserWithTestWindowTest {
         ConsentAuditorFactory::GetForProfile(profile()));
   }
 
-  FakeSigninManagerBase* signin_manager() {
-    return static_cast<FakeSigninManagerBase*>(
-        SigninManagerFactory::GetForProfile(profile()));
-  }
-
   // BrowserWithTestWindowTest:
   TestingProfile::TestingFactories GetTestingFactories() override {
-    return {{SigninManagerFactory::GetInstance(), BuildFakeSigninManagerBase},
-            {ConsentAuditorFactory::GetInstance(), BuildFakeConsentAuditor}};
+    return {{ConsentAuditorFactory::GetInstance(),
+             base::BindRepeating(&BuildFakeConsentAuditor)}};
   }
 
  private:
@@ -145,6 +146,8 @@ class ArcSupportHostTest : public BrowserWithTestWindowTest {
 
   DISALLOW_COPY_AND_ASSIGN(ArcSupportHostTest);
 };
+
+namespace {
 
 TEST_F(ArcSupportHostTest, AuthSucceeded) {
   MockAuthDelegate* auth_delegate = CreateMockAuthDelegate();
@@ -183,6 +186,11 @@ TEST_F(ArcSupportHostTest, AuthRetryOnError) {
 }
 
 TEST_F(ArcSupportHostTest, TermsOfServiceAccept) {
+  consent_auditor::FakeConsentAuditor* ca = consent_auditor();
+  EXPECT_CALL(*ca, RecordArcPlayConsent(_, _));
+  EXPECT_CALL(*ca, RecordArcBackupAndRestoreConsent(_, _));
+  EXPECT_CALL(*ca, RecordArcGoogleLocationServiceConsent(_, _));
+
   MockTermsOfServiceDelegate tos_delegate;
   support_host()->SetTermsOfServiceDelegate(&tos_delegate);
 

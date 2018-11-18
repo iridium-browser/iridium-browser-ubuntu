@@ -9,18 +9,26 @@
 #include <utility>
 
 #include "core/fxcrt/fx_extension.h"
+#include "core/fxcrt/fx_safe_types.h"
 
 namespace {
 
 void MatchFloatRange(float f1, float f2, int* i1, int* i2) {
-  int length = static_cast<int>(ceil(f2 - f1));
-  int i1_1 = static_cast<int>(floor(f1));
-  int i1_2 = static_cast<int>(ceil(f1));
-  float error1 = f1 - i1_1 + fabsf(f2 - i1_1 - length);
-  float error2 = i1_2 - f1 + fabsf(f2 - i1_2 - length);
-
-  *i1 = error1 > error2 ? i1_2 : i1_1;
-  *i2 = *i1 + length;
+  float length = ceilf(f2 - f1);
+  float f1_floor = floorf(f1);
+  float f1_ceil = ceilf(f1);
+  float error1 = f1 - f1_floor + fabsf(f2 - f1_floor - length);
+  float error2 = f1_ceil - f1 + fabsf(f2 - f1_ceil - length);
+  float start = error1 > error2 ? f1_ceil : f1_floor;
+  FX_SAFE_INT32 safe1 = start;
+  FX_SAFE_INT32 safe2 = start + length;
+  if (safe1.IsValid() && safe2.IsValid()) {
+    *i1 = safe1.ValueOrDie();
+    *i2 = safe2.ValueOrDie();
+  } else {
+    *i1 = 0;
+    *i2 = 0;
+  }
 }
 
 #if _FX_PLATFORM_ == _FX_PLATFORM_WINDOWS_
@@ -42,6 +50,15 @@ static_assert(sizeof(FX_RECT::right) == sizeof(RECT::right),
 static_assert(sizeof(FX_RECT::bottom) == sizeof(RECT::bottom),
               "FX_RECT vs. RECT mismatch");
 #endif
+
+inline CFX_Matrix ConcatInternal(const CFX_Matrix& left,
+                                 const CFX_Matrix& right) {
+  return CFX_Matrix(
+      left.a * right.a + left.b * right.c, left.a * right.b + left.b * right.d,
+      left.c * right.a + left.d * right.c, left.c * right.b + left.d * right.d,
+      left.e * right.a + left.f * right.c + right.e,
+      left.e * right.b + left.f * right.d + right.f);
+}
 
 }  // namespace
 
@@ -188,6 +205,57 @@ void CFX_FloatRect::UpdateRect(const CFX_PointF& point) {
   top = std::max(top, point.y);
 }
 
+void CFX_FloatRect::Inflate(float x, float y) {
+  Inflate(x, y, x, y);
+}
+
+void CFX_FloatRect::Inflate(float other_left,
+                            float other_bottom,
+                            float other_right,
+                            float other_top) {
+  Normalize();
+  left -= other_left;
+  bottom -= other_bottom;
+  right += other_right;
+  top += other_top;
+}
+
+void CFX_FloatRect::Inflate(const CFX_FloatRect& rt) {
+  Inflate(rt.left, rt.bottom, rt.right, rt.top);
+}
+
+void CFX_FloatRect::Deflate(float x, float y) {
+  Deflate(x, y, x, y);
+}
+
+void CFX_FloatRect::Deflate(float other_left,
+                            float other_bottom,
+                            float other_right,
+                            float other_top) {
+  Inflate(-other_left, -other_bottom, -other_right, -other_top);
+}
+
+void CFX_FloatRect::Deflate(const CFX_FloatRect& rt) {
+  Deflate(rt.left, rt.bottom, rt.right, rt.top);
+}
+
+CFX_FloatRect CFX_FloatRect::GetDeflated(float x, float y) const {
+  if (IsEmpty())
+    return CFX_FloatRect();
+
+  CFX_FloatRect that = *this;
+  that.Deflate(x, y);
+  that.Normalize();
+  return that;
+}
+
+void CFX_FloatRect::Translate(float e, float f) {
+  left += e;
+  right += e;
+  top += f;
+  bottom += f;
+}
+
 void CFX_FloatRect::Scale(float fScale) {
   left *= fScale;
   bottom *= fScale;
@@ -248,12 +316,20 @@ CFX_Matrix CFX_Matrix::GetInverse() const {
   return inverse;
 }
 
-void CFX_Matrix::Concat(const CFX_Matrix& m, bool bPrepended) {
-  ConcatInternal(m, bPrepended);
+void CFX_Matrix::Concat(const CFX_Matrix& m) {
+  *this = ConcatInternal(*this, m);
 }
 
-void CFX_Matrix::ConcatInverse(const CFX_Matrix& src, bool bPrepended) {
-  Concat(src.GetInverse(), bPrepended);
+void CFX_Matrix::ConcatPrepend(const CFX_Matrix& m) {
+  *this = ConcatInternal(m, *this);
+}
+
+void CFX_Matrix::ConcatInverse(const CFX_Matrix& src) {
+  Concat(src.GetInverse());
+}
+
+void CFX_Matrix::ConcatInversePrepend(const CFX_Matrix& src) {
+  ConcatPrepend(src.GetInverse());
 }
 
 bool CFX_Matrix::Is90Rotated() const {
@@ -264,47 +340,33 @@ bool CFX_Matrix::IsScaled() const {
   return fabs(b * 1000) < fabs(a) && fabs(c * 1000) < fabs(d);
 }
 
-void CFX_Matrix::Translate(float x, float y, bool bPrepended) {
-  if (bPrepended) {
-    e += x * a + y * c;
-    f += y * d + x * b;
-    return;
-  }
+void CFX_Matrix::Translate(float x, float y) {
   e += x;
   f += y;
 }
 
-void CFX_Matrix::Scale(float sx, float sy, bool bPrepended) {
-  a *= sx;
-  d *= sy;
-  if (bPrepended) {
-    b *= sx;
-    c *= sy;
-    return;
-  }
+void CFX_Matrix::TranslatePrepend(float x, float y) {
+  e += x * a + y * c;
+  f += y * d + x * b;
+}
 
+void CFX_Matrix::Scale(float sx, float sy) {
+  a *= sx;
   b *= sy;
   c *= sx;
+  d *= sy;
   e *= sx;
   f *= sy;
 }
 
-void CFX_Matrix::Rotate(float fRadian, bool bPrepended) {
+void CFX_Matrix::Rotate(float fRadian) {
   float cosValue = cos(fRadian);
   float sinValue = sin(fRadian);
-  ConcatInternal(CFX_Matrix(cosValue, sinValue, -sinValue, cosValue, 0, 0),
-                 bPrepended);
+  Concat(CFX_Matrix(cosValue, sinValue, -sinValue, cosValue, 0, 0));
 }
 
-void CFX_Matrix::RotateAt(float fRadian, float x, float y, bool bPrepended) {
-  Translate(-x, -y, bPrepended);
-  Rotate(fRadian, bPrepended);
-  Translate(x, y, bPrepended);
-}
-
-void CFX_Matrix::Shear(float fAlphaRadian, float fBetaRadian, bool bPrepended) {
-  ConcatInternal(CFX_Matrix(1, tan(fAlphaRadian), tan(fBetaRadian), 1, 0, 0),
-                 bPrepended);
+void CFX_Matrix::Shear(float fAlphaRadian, float fBetaRadian) {
+  Concat(CFX_Matrix(1, tan(fAlphaRadian), tan(fBetaRadian), 1, 0, 0));
 }
 
 void CFX_Matrix::MatchRect(const CFX_FloatRect& dest,
@@ -395,23 +457,4 @@ CFX_FloatRect CFX_Matrix::TransformRect(const CFX_FloatRect& rect) const {
   std::tie(left, right, top, bottom) =
       TransformRect(rect.left, rect.right, rect.top, rect.bottom);
   return CFX_FloatRect(left, bottom, right, top);
-}
-
-void CFX_Matrix::ConcatInternal(const CFX_Matrix& other, bool prepend) {
-  CFX_Matrix left;
-  CFX_Matrix right;
-  if (prepend) {
-    left = other;
-    right = *this;
-  } else {
-    left = *this;
-    right = other;
-  }
-
-  a = left.a * right.a + left.b * right.c;
-  b = left.a * right.b + left.b * right.d;
-  c = left.c * right.a + left.d * right.c;
-  d = left.c * right.b + left.d * right.d;
-  e = left.e * right.a + left.f * right.c + right.e;
-  f = left.e * right.b + left.f * right.d + right.f;
 }

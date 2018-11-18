@@ -8,7 +8,6 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
@@ -35,6 +34,8 @@ import org.robolectric.shadows.ShadowLog;
 
 import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.base.test.util.Feature;
+import org.chromium.chrome.browser.media.router.CastSessionUtil;
+import org.chromium.chrome.browser.media.router.ClientRecord;
 import org.chromium.chrome.browser.media.router.cast.CastMessageHandler.RequestRecord;
 import org.chromium.chrome.browser.media.router.cast.JSONTestUtils.JSONObjectLike;
 import org.chromium.chrome.browser.media.router.cast.JSONTestUtils.JSONStringLike;
@@ -70,7 +71,7 @@ public class CastMessageHandlerTest {
     private CastMediaRouteProvider mRouteProvider;
     private CastSession mSession;
     private CastMessageHandler mMessageHandler;
-    private int mNumStopApplicationCalled = 0;
+    private int mNumStopApplicationCalled;
 
     private interface CheckedRunnable { void run() throws Exception; }
 
@@ -96,7 +97,6 @@ public class CastMessageHandlerTest {
                 .when(mRouteProvider)
                 .getClients();
         doNothing().when(mRouteProvider).onMessage(anyString(), anyString());
-        doNothing().when(mRouteProvider).onMessageSentResult(anyBoolean(), anyInt());
     }
 
     void setUpForAppMessageTest() throws JSONException {

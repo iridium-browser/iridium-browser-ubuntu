@@ -4,10 +4,13 @@
 
 #include "components/sync/driver/frontend_data_type_controller.h"
 
+#include <utility>
+
 #include "base/logging.h"
-#include "base/threading/thread_task_runner_handle.h"
+#include "base/threading/sequenced_task_runner_handle.h"
 #include "components/sync/base/data_type_histogram.h"
 #include "components/sync/base/model_type.h"
+#include "components/sync/driver/configure_context.h"
 #include "components/sync/driver/model_associator.h"
 #include "components/sync/driver/sync_client.h"
 #include "components/sync/driver/sync_service.h"
@@ -29,14 +32,18 @@ FrontendDataTypeController::FrontendDataTypeController(
 }
 
 void FrontendDataTypeController::LoadModels(
+    const ConfigureContext& configure_context,
     const ModelLoadCallback& model_load_callback) {
   DCHECK(CalledOnValidThread());
+  DCHECK_EQ(configure_context.storage_option,
+            ConfigureContext::STORAGE_ON_DISK);
+
   model_load_callback_ = model_load_callback;
 
   if (state_ != NOT_RUNNING) {
-    model_load_callback.Run(type(),
-                            SyncError(FROM_HERE, SyncError::DATATYPE_ERROR,
-                                      "Model already running", type()));
+    model_load_callback_.Run(type(),
+                             SyncError(FROM_HERE, SyncError::DATATYPE_ERROR,
+                                       "Model already running", type()));
     return;
   }
 
@@ -61,20 +68,20 @@ void FrontendDataTypeController::OnModelLoaded() {
 }
 
 void FrontendDataTypeController::StartAssociating(
-    const StartCallback& start_callback) {
+    StartCallback start_callback) {
   DCHECK(CalledOnValidThread());
-  DCHECK(!start_callback.is_null());
+  DCHECK(start_callback);
   DCHECK_EQ(state_, MODEL_LOADED);
 
-  start_callback_ = start_callback;
+  start_callback_ = std::move(start_callback);
   state_ = ASSOCIATING;
 
-  base::ThreadTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::Bind(&FrontendDataTypeController::Associate,
-                            base::AsWeakPtr(this)));
+  base::SequencedTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::BindOnce(&FrontendDataTypeController::Associate,
+                                base::AsWeakPtr(this)));
 }
 
-void FrontendDataTypeController::Stop() {
+void FrontendDataTypeController::Stop(ShutdownReason shutdown_reason) {
   DCHECK(CalledOnValidThread());
 
   if (state_ == NOT_RUNNING)
@@ -196,20 +203,21 @@ void FrontendDataTypeController::StartDone(
   if (!IsSuccessfulResult(start_result)) {
     CleanUp();
     if (start_result == ASSOCIATION_FAILED) {
-      state_ = DISABLED;
+      state_ = FAILED;
     } else {
       state_ = NOT_RUNNING;
     }
     RecordStartFailure(start_result);
   }
 
-  start_callback_.Run(start_result, local_merge_result, syncer_merge_result);
+  std::move(start_callback_)
+      .Run(start_result, local_merge_result, syncer_merge_result);
 }
 
 std::unique_ptr<DataTypeErrorHandler>
 FrontendDataTypeController::CreateErrorHandler() {
   return std::make_unique<DataTypeErrorHandlerImpl>(
-      base::ThreadTaskRunnerHandle::Get(), dump_stack_,
+      base::SequencedTaskRunnerHandle::Get(), dump_stack_,
       base::Bind(&FrontendDataTypeController::OnUnrecoverableError,
                  base::AsWeakPtr(this)));
 }
@@ -217,7 +225,7 @@ FrontendDataTypeController::CreateErrorHandler() {
 void FrontendDataTypeController::OnUnrecoverableError(const SyncError& error) {
   DCHECK(CalledOnValidThread());
   DCHECK_EQ(type(), error.model_type());
-  if (!model_load_callback_.is_null()) {
+  if (model_load_callback_) {
     model_load_callback_.Run(type(), error);
   }
 }
@@ -233,7 +241,7 @@ void FrontendDataTypeController::RecordAssociationTime(base::TimeDelta time) {
 void FrontendDataTypeController::RecordStartFailure(ConfigureResult result) {
   DCHECK(CalledOnValidThread());
   // TODO(wychen): enum uma should be strongly typed. crbug.com/661401
-  UMA_HISTOGRAM_ENUMERATION("Sync.DataTypeStartFailures",
+  UMA_HISTOGRAM_ENUMERATION("Sync.DataTypeStartFailures2",
                             ModelTypeToHistogramInt(type()),
                             static_cast<int>(MODEL_TYPE_COUNT));
 #define PER_DATA_TYPE_MACRO(type_str)                                    \
@@ -248,8 +256,8 @@ AssociatorInterface* FrontendDataTypeController::model_associator() const {
 }
 
 void FrontendDataTypeController::set_model_associator(
-    AssociatorInterface* model_associator) {
-  model_associator_.reset(model_associator);
+    std::unique_ptr<AssociatorInterface> model_associator) {
+  model_associator_ = std::move(model_associator);
 }
 
 ChangeProcessor* FrontendDataTypeController::GetChangeProcessor() const {
@@ -257,8 +265,8 @@ ChangeProcessor* FrontendDataTypeController::GetChangeProcessor() const {
 }
 
 void FrontendDataTypeController::set_change_processor(
-    ChangeProcessor* change_processor) {
-  change_processor_.reset(change_processor);
+    std::unique_ptr<ChangeProcessor> change_processor) {
+  change_processor_ = std::move(change_processor);
 }
 
 }  // namespace syncer

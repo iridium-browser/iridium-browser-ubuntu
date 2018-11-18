@@ -15,8 +15,8 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
+#include "base/sequenced_task_runner.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread_local.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -542,20 +542,6 @@ std::unique_ptr<SyncChannel> SyncChannel::Create(
   std::unique_ptr<SyncChannel> channel =
       Create(listener, ipc_task_runner, listener_task_runner, shutdown_event);
   channel->Init(channel_handle, mode, create_pipe_now);
-  return channel;
-}
-
-// static
-std::unique_ptr<SyncChannel> SyncChannel::Create(
-    std::unique_ptr<ChannelFactory> factory,
-    Listener* listener,
-    const scoped_refptr<base::SingleThreadTaskRunner>& ipc_task_runner,
-    const scoped_refptr<base::SingleThreadTaskRunner>& listener_task_runner,
-    bool create_pipe_now,
-    base::WaitableEvent* shutdown_event) {
-  std::unique_ptr<SyncChannel> channel =
-      Create(listener, ipc_task_runner, listener_task_runner, shutdown_event);
-  channel->Init(std::move(factory), create_pipe_now);
   return channel;
 }
 

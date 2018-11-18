@@ -148,7 +148,7 @@ IN_PROC_BROWSER_TEST_F(UpdateScreenTest, TestNoUpdate) {
   fake_update_engine_client_->set_default_status(status);
 
   EXPECT_CALL(*mock_base_screen_delegate_,
-              OnExit(_, ScreenExitCode::UPDATE_NOUPDATE, _))
+              OnExit(ScreenExitCode::UPDATE_NOUPDATE))
       .Times(1);
   update_screen_->UpdateStatusChanged(status);
 }
@@ -192,14 +192,14 @@ IN_PROC_BROWSER_TEST_F(UpdateScreenTest, TestUpdateAvailable) {
 IN_PROC_BROWSER_TEST_F(UpdateScreenTest, TestErrorIssuingUpdateCheck) {
   // First, cancel the update that is already in progress.
   EXPECT_CALL(*mock_base_screen_delegate_,
-              OnExit(_, ScreenExitCode::UPDATE_NOUPDATE, _))
+              OnExit(ScreenExitCode::UPDATE_NOUPDATE))
       .Times(1);
   update_screen_->CancelUpdate();
 
   fake_update_engine_client_->set_update_check_result(
       chromeos::UpdateEngineClient::UPDATE_RESULT_FAILED);
   EXPECT_CALL(*mock_base_screen_delegate_,
-              OnExit(_, ScreenExitCode::UPDATE_ERROR_CHECKING_FOR_UPDATE, _))
+              OnExit(ScreenExitCode::UPDATE_ERROR_CHECKING_FOR_UPDATE))
       .Times(1);
   update_screen_->StartNetworkCheck();
 }
@@ -212,7 +212,7 @@ IN_PROC_BROWSER_TEST_F(UpdateScreenTest, TestErrorCheckingForUpdate) {
   fake_update_engine_client_->set_default_status(status);
 
   EXPECT_CALL(*mock_base_screen_delegate_,
-              OnExit(_, ScreenExitCode::UPDATE_ERROR_CHECKING_FOR_UPDATE, _))
+              OnExit(ScreenExitCode::UPDATE_ERROR_CHECKING_FOR_UPDATE))
       .Times(1);
   update_screen_->UpdateStatusChanged(status);
 }
@@ -233,14 +233,14 @@ IN_PROC_BROWSER_TEST_F(UpdateScreenTest, TestErrorUpdating) {
   fake_update_engine_client_->set_default_status(status);
 
   EXPECT_CALL(*mock_base_screen_delegate_,
-              OnExit(_, ScreenExitCode::UPDATE_ERROR_UPDATING, _))
+              OnExit(ScreenExitCode::UPDATE_ERROR_UPDATING))
       .Times(1);
   update_screen_->UpdateStatusChanged(status);
 }
 
 IN_PROC_BROWSER_TEST_F(UpdateScreenTest, TestTemproraryOfflineNetwork) {
   EXPECT_CALL(*mock_base_screen_delegate_,
-              OnExit(_, ScreenExitCode::UPDATE_NOUPDATE, _))
+              OnExit(ScreenExitCode::UPDATE_NOUPDATE))
       .Times(1);
   update_screen_->CancelUpdate();
 
@@ -265,13 +265,7 @@ IN_PROC_BROWSER_TEST_F(UpdateScreenTest, TestTemproraryOfflineNetwork) {
   update_screen_->StartNetworkCheck();
 
   // Force timer expiration.
-  {
-    base::Closure timed_callback =
-        update_screen_->GetErrorMessageTimerForTesting().user_task();
-    ASSERT_FALSE(timed_callback.is_null());
-    update_screen_->GetErrorMessageTimerForTesting().Reset();
-    timed_callback.Run();
-  }
+  update_screen_->GetErrorMessageTimerForTesting().FireNow();
 
   NetworkPortalDetector::CaptivePortalState online_state;
   online_state.status = NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_ONLINE;
@@ -286,7 +280,7 @@ IN_PROC_BROWSER_TEST_F(UpdateScreenTest, TestTemproraryOfflineNetwork) {
       chromeos::UpdateEngineClient::UPDATE_RESULT_FAILED);
 
   EXPECT_CALL(*mock_base_screen_delegate_,
-              OnExit(_, ScreenExitCode::UPDATE_ERROR_CHECKING_FOR_UPDATE, _))
+              OnExit(ScreenExitCode::UPDATE_ERROR_CHECKING_FOR_UPDATE))
       .Times(1);
 
   NotifyPortalDetectionCompleted();
@@ -294,7 +288,7 @@ IN_PROC_BROWSER_TEST_F(UpdateScreenTest, TestTemproraryOfflineNetwork) {
 
 IN_PROC_BROWSER_TEST_F(UpdateScreenTest, TestTwoOfflineNetworks) {
   EXPECT_CALL(*mock_base_screen_delegate_,
-              OnExit(_, ScreenExitCode::UPDATE_NOUPDATE, _))
+              OnExit(ScreenExitCode::UPDATE_NOUPDATE))
       .Times(1);
   update_screen_->CancelUpdate();
 
@@ -319,13 +313,7 @@ IN_PROC_BROWSER_TEST_F(UpdateScreenTest, TestTwoOfflineNetworks) {
   update_screen_->StartNetworkCheck();
 
   // Force timer expiration.
-  {
-    base::Closure timed_callback =
-        update_screen_->GetErrorMessageTimerForTesting().user_task();
-    ASSERT_FALSE(timed_callback.is_null());
-    update_screen_->GetErrorMessageTimerForTesting().Reset();
-    timed_callback.Run();
-  }
+  update_screen_->GetErrorMessageTimerForTesting().FireNow();
 
   // Change active network to the wifi behind proxy.
   NetworkPortalDetector::CaptivePortalState proxy_state;
@@ -349,7 +337,7 @@ IN_PROC_BROWSER_TEST_F(UpdateScreenTest, TestVoidNetwork) {
 
   // Cancels pending update request.
   EXPECT_CALL(*mock_base_screen_delegate_,
-              OnExit(_, ScreenExitCode::UPDATE_NOUPDATE, _))
+              OnExit(ScreenExitCode::UPDATE_NOUPDATE))
       .Times(1);
   update_screen_->CancelUpdate();
 
@@ -376,7 +364,7 @@ IN_PROC_BROWSER_TEST_F(UpdateScreenTest, TestVoidNetwork) {
 
 IN_PROC_BROWSER_TEST_F(UpdateScreenTest, TestAPReselection) {
   EXPECT_CALL(*mock_base_screen_delegate_,
-              OnExit(_, ScreenExitCode::UPDATE_NOUPDATE, _))
+              OnExit(ScreenExitCode::UPDATE_NOUPDATE))
       .Times(1);
   update_screen_->CancelUpdate();
 
@@ -401,13 +389,7 @@ IN_PROC_BROWSER_TEST_F(UpdateScreenTest, TestAPReselection) {
   update_screen_->StartNetworkCheck();
 
   // Force timer expiration.
-  {
-    base::Closure timed_callback =
-        update_screen_->GetErrorMessageTimerForTesting().user_task();
-    ASSERT_FALSE(timed_callback.is_null());
-    update_screen_->GetErrorMessageTimerForTesting().Reset();
-    timed_callback.Run();
-  }
+  update_screen_->GetErrorMessageTimerForTesting().FireNow();
 
   // User re-selects the same network manually. In this case, hide
   // offline message and skip network check. Since ethernet is still
@@ -417,7 +399,7 @@ IN_PROC_BROWSER_TEST_F(UpdateScreenTest, TestAPReselection) {
   fake_update_engine_client_->set_update_check_result(
       chromeos::UpdateEngineClient::UPDATE_RESULT_FAILED);
   EXPECT_CALL(*mock_base_screen_delegate_,
-              OnExit(_, ScreenExitCode::UPDATE_ERROR_CHECKING_FOR_UPDATE, _))
+              OnExit(ScreenExitCode::UPDATE_ERROR_CHECKING_FOR_UPDATE))
       .Times(1);
 
   update_screen_->OnConnectRequested();

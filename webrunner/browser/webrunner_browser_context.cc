@@ -4,14 +4,23 @@
 
 #include "webrunner/browser/webrunner_browser_context.h"
 
+#include <memory>
+#include <utility>
+
+#include "base/base_paths_fuchsia.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
+#include "base/files/file_util.h"
+#include "base/path_service.h"
+#include "base/task/post_task.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/resource_context.h"
 #include "net/url_request/url_request_context.h"
 #include "services/network/public/cpp/network_switches.h"
 #include "webrunner/browser/webrunner_net_log.h"
 #include "webrunner/browser/webrunner_url_request_context_getter.h"
+#include "webrunner/service/common.h"
 
 namespace webrunner {
 
@@ -22,10 +31,6 @@ class WebRunnerBrowserContext::ResourceContext
   ~ResourceContext() override = default;
 
   // ResourceContext implementation.
-  net::HostResolver* GetHostResolver() override {
-    DCHECK(getter_);
-    return getter_->GetURLRequestContext()->host_resolver();
-  }
   net::URLRequestContext* GetRequestContext() override {
     DCHECK(getter_);
     return getter_->GetURLRequestContext();
@@ -56,17 +61,28 @@ std::unique_ptr<WebRunnerNetLog> CreateNetLog() {
   return result;
 }
 
-WebRunnerBrowserContext::WebRunnerBrowserContext()
+WebRunnerBrowserContext::WebRunnerBrowserContext(bool force_incognito)
     : net_log_(CreateNetLog()), resource_context_(new ResourceContext()) {
-  // TODO(sergeyu): Pass a valid path.
-  BrowserContext::Initialize(this, base::FilePath());
+  if (!force_incognito) {
+    base::PathService::Get(base::DIR_APP_DATA, &data_dir_path_);
+    if (!base::PathExists(data_dir_path_)) {
+      // Run in incognito mode if /data doesn't exist.
+      data_dir_path_.clear();
+    }
+  }
+
+  BrowserContext::Initialize(this, data_dir_path_);
 }
 
 WebRunnerBrowserContext::~WebRunnerBrowserContext() {
+  NotifyWillBeDestroyed(this);
+
   if (resource_context_) {
     content::BrowserThread::DeleteSoon(content::BrowserThread::IO, FROM_HERE,
                                        std::move(resource_context_));
   }
+
+  ShutdownStoragePartitions();
 }
 
 std::unique_ptr<content::ZoomLevelDelegate>
@@ -76,12 +92,16 @@ WebRunnerBrowserContext::CreateZoomLevelDelegate(
 }
 
 base::FilePath WebRunnerBrowserContext::GetPath() const {
+  return data_dir_path_;
+}
+
+base::FilePath WebRunnerBrowserContext::GetCachePath() const {
   NOTIMPLEMENTED();
   return base::FilePath();
 }
 
 bool WebRunnerBrowserContext::IsOffTheRecord() const {
-  return false;
+  return data_dir_path_.empty();
 }
 
 content::ResourceContext* WebRunnerBrowserContext::GetResourceContext() {
@@ -113,7 +133,8 @@ WebRunnerBrowserContext::GetSSLHostStateDelegate() {
   return nullptr;
 }
 
-content::PermissionManager* WebRunnerBrowserContext::GetPermissionManager() {
+content::PermissionControllerDelegate*
+WebRunnerBrowserContext::GetPermissionControllerDelegate() {
   return nullptr;
 }
 
@@ -137,10 +158,10 @@ net::URLRequestContextGetter* WebRunnerBrowserContext::CreateRequestContext(
     content::URLRequestInterceptorScopedVector request_interceptors) {
   DCHECK(!url_request_getter_);
   url_request_getter_ = new WebRunnerURLRequestContextGetter(
-      content::BrowserThread::GetTaskRunnerForThread(
-          content::BrowserThread::IO),
+      base::CreateSingleThreadTaskRunnerWithTraits(
+          {content::BrowserThread::IO}),
       net_log_.get(), std::move(*protocol_handlers),
-      std::move(request_interceptors));
+      std::move(request_interceptors), data_dir_path_);
   resource_context_->set_url_request_context_getter(url_request_getter_);
   return url_request_getter_.get();
 }

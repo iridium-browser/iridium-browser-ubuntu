@@ -43,6 +43,7 @@
 #include "third_party/blink/renderer/modules/indexeddb/idb_request.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_value.h"
 #include "third_party/blink/renderer/platform/shared_buffer.h"
+#include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 
 using blink::WebIDBCursor;
 using blink::WebIDBDatabase;
@@ -82,7 +83,8 @@ void WebIDBCallbacksImpl::OnError(const WebIDBDatabaseError& error) {
     return;
 
   probe::AsyncTask async_task(request_->GetExecutionContext(), this, "error");
-  request_->HandleResponse(DOMException::Create(error.Code(), error.Message()));
+  request_->HandleResponse(DOMException::Create(
+      static_cast<DOMExceptionCode>(error.Code()), error.Message()));
 }
 
 void WebIDBCallbacksImpl::OnSuccess(
@@ -153,7 +155,7 @@ void WebIDBCallbacksImpl::OnSuccess(WebVector<WebIDBValue> values) {
 
   probe::AsyncTask async_task(request_->GetExecutionContext(), this, "success");
   Vector<std::unique_ptr<IDBValue>> idb_values;
-  idb_values.ReserveInitialCapacity(values.size());
+  idb_values.ReserveInitialCapacity(SafeCast<wtf_size_t>(values.size()));
   for (WebIDBValue& value : values) {
     std::unique_ptr<IDBValue> idb_value = value.ReleaseIdbValue();
     idb_value->SetIsolate(request_->GetIsolate());

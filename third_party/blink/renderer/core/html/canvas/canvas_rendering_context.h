@@ -27,7 +27,6 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_HTML_CANVAS_CANVAS_RENDERING_CONTEXT_H_
 
 #include "base/macros.h"
-#include "third_party/blink/public/platform/web_thread.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/html/canvas/canvas_context_creation_attributes_core.h"
 #include "third_party/blink/renderer/core/html/canvas/html_canvas_element.h"
@@ -35,6 +34,7 @@
 #include "third_party/blink/renderer/core/offscreencanvas/offscreen_canvas.h"
 #include "third_party/blink/renderer/platform/graphics/canvas_color_params.h"
 #include "third_party/blink/renderer/platform/graphics/color_behavior.h"
+#include "third_party/blink/renderer/platform/scheduler/public/thread.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_hash.h"
 #include "third_party/skia/include/core/SkColorSpace.h"
@@ -45,29 +45,25 @@ namespace blink {
 class CanvasImageSource;
 class HTMLCanvasElement;
 class ImageBitmap;
-class WebLayer;
 
 constexpr const char* kSRGBCanvasColorSpaceName = "srgb";
 constexpr const char* kRec2020CanvasColorSpaceName = "rec2020";
 constexpr const char* kP3CanvasColorSpaceName = "p3";
 
-constexpr const char* kRGBA8CanvasPixelFormatName = "8-8-8-8";
+constexpr const char* kRGBA8CanvasPixelFormatName = "uint8";
 constexpr const char* kRGB10A2CanvasPixelFormatName = "10-10-10-2";
 constexpr const char* kRGBA12CanvasPixelFormatName = "12-12-12-12";
 constexpr const char* kF16CanvasPixelFormatName = "float16";
 
 class CORE_EXPORT CanvasRenderingContext : public ScriptWrappable,
-                                           public WebThread::TaskObserver {
+                                           public Thread::TaskObserver {
   USING_PRE_FINALIZER(CanvasRenderingContext, Dispose);
 
  public:
-  virtual ~CanvasRenderingContext() = default;
+  ~CanvasRenderingContext() override = default;
 
-  // A Canvas can either be "2D" or "webgl" but never both. If you request a 2D
-  // canvas and the existing context is already 2D, just return that. If the
-  // existing context is WebGL, then destroy it before creating a new 2D
-  // context. Vice versa when requesting a WebGL canvas. Requesting a context
-  // with any other type string will destroy any existing context.
+  // A Canvas can either be "2D" or "webgl" but never both. Requesting a context
+  // with a type different from an existing will destroy the latter.
   enum ContextType {
     // Do not change assigned numbers of existing items: add new features to the
     // end of the list.
@@ -77,6 +73,7 @@ class CORE_EXPORT CanvasRenderingContext : public ScriptWrappable,
     kContextWebgl2 = 4,
     kContextImageBitmap = 5,
     kContextXRPresent = 6,
+    kContextWebgl2Compute = 7,
     kContextTypeCount,
   };
 
@@ -94,6 +91,12 @@ class CORE_EXPORT CanvasRenderingContext : public ScriptWrappable,
   virtual ContextType GetContextType() const = 0;
   virtual bool IsComposited() const = 0;
   virtual bool IsAccelerated() const = 0;
+  virtual bool IsOriginTopLeft() const {
+    // Canvas contexts have the origin of coordinates on the top left corner.
+    // Accelerated resources (e.g. GPU textures) have their origin of
+    // coordinates in the uppper left corner.
+    return !IsAccelerated();
+  }
   virtual bool ShouldAntialias() const { return false; }
   virtual void SetIsHidden(bool) = 0;
   virtual bool isContextLost() const { return true; }
@@ -111,7 +114,7 @@ class CORE_EXPORT CanvasRenderingContext : public ScriptWrappable,
     return false;
   }
 
-  virtual WebLayer* PlatformLayer() const { return nullptr; }
+  virtual cc::Layer* CcLayer() const { return nullptr; }
 
   enum LostContextMode {
     kNotLostContext,
@@ -134,13 +137,13 @@ class CORE_EXPORT CanvasRenderingContext : public ScriptWrappable,
 
   void NeedsFinalizeFrame();
 
-  // WebThread::TaskObserver implementation
+  // Thread::TaskObserver implementation
   void DidProcessTask() override;
   void WillProcessTask() final {}
 
   // Canvas2D-specific interface
   virtual bool Is2d() const { return false; }
-  virtual void RestoreCanvasMatrixClipStack(PaintCanvas*) const {}
+  virtual void RestoreCanvasMatrixClipStack(cc::PaintCanvas*) const {}
   virtual void Reset() {}
   virtual void ClearRect(double x, double y, double width, double height) {}
   virtual void DidSetSurfaceSize() {}
@@ -177,6 +180,7 @@ class CORE_EXPORT CanvasRenderingContext : public ScriptWrappable,
   }
 
   // OffscreenCanvas-specific methods
+  virtual void PushFrame() {}
   virtual ImageBitmap* TransferToImageBitmap(ScriptState*) { return nullptr; }
 
   bool WouldTaintOrigin(CanvasImageSource*, const SecurityOrigin*);
@@ -188,7 +192,7 @@ class CORE_EXPORT CanvasRenderingContext : public ScriptWrappable,
     return creation_attributes_;
   }
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
   virtual void Stop() = 0;
 
  protected:

@@ -11,12 +11,13 @@
 
 #include "base/callback_forward.h"
 #include "base/compiler_specific.h"
-#include "base/files/scoped_temp_dir.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "components/signin/core/browser/signin_client.h"
-#include "net/cookies/cookie_change_dispatcher.h"
-#include "net/url_request/url_request_test_util.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
+#include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
+#include "services/network/public/mojom/cookie_manager.mojom.h"
+#include "services/network/test/test_url_loader_factory.h"
 
 class PrefService;
 
@@ -37,15 +38,6 @@ class TestSigninClient : public SigninClient {
   // once there is a unit test that requires it.
   PrefService* GetPrefs() override;
 
-  // Returns a pointer to a loaded database.
-  scoped_refptr<TokenWebData> GetDatabase() override;
-
-  // Returns true.
-  bool CanRevokeCredentials() override;
-
-  // Returns empty string.
-  std::string GetSigninScopedDeviceId() override;
-
   // Does nothing.
   void OnSignedOut() override;
 
@@ -54,32 +46,32 @@ class TestSigninClient : public SigninClient {
                     const std::string& username,
                     const std::string& password) override;
 
+  // Allow or disallow continuation of sign-out depending on value of
+  // |is_signout_allowed_|;
+  void PreSignOut(
+      base::OnceCallback<void(SignoutDecision)> on_signout_decision_reached,
+      signin_metrics::ProfileSignout signout_source_metric) override;
+
   std::string get_signed_in_password() { return signed_in_password_; }
 
   // Returns the empty string.
   std::string GetProductVersion() override;
 
-  // Returns a TestURLRequestContextGetter or an manually provided
-  // URLRequestContextGetter.
-  net::URLRequestContextGetter* GetURLRequestContext() override;
+  // Wraps the test_url_loader_factory().
+  scoped_refptr<network::SharedURLLoaderFactory> GetURLLoaderFactory() override;
 
-  // For testing purposes, can override the TestURLRequestContextGetter created
-  // in the default constructor.
-  void SetURLRequestContext(net::URLRequestContextGetter* request_context);
+  // Returns FakeCookieManager.
+  network::mojom::CookieManager* GetCookieManager() override;
 
-  // Returns true.
-  bool ShouldMergeSigninCredentialsIntoCookieJar() override;
-
-  // Registers |callback| and returns the subscription.
-  // Note that |callback| will never be called.
-  std::unique_ptr<SigninClient::CookieChangeSubscription>
-  AddCookieChangeCallback(const GURL& url,
-                          const std::string& name,
-                          net::CookieChangeCallback callback) override;
+  network::TestURLLoaderFactory* test_url_loader_factory() {
+    return &test_url_loader_factory_;
+  }
 
   void set_are_signin_cookies_allowed(bool value) {
     are_signin_cookies_allowed_ = value;
   }
+
+  void set_is_signout_allowed(bool value) { is_signout_allowed_ = value; }
 
   // When |value| is true, network calls posted through DelayNetworkCall() are
   // delayed indefinitely.
@@ -99,19 +91,19 @@ class TestSigninClient : public SigninClient {
   std::unique_ptr<GaiaAuthFetcher> CreateGaiaAuthFetcher(
       GaiaAuthConsumer* consumer,
       const std::string& source,
-      net::URLRequestContextGetter* getter) override;
+      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory)
+      override;
   void PreGaiaLogout(base::OnceClosure callback) override;
 
-  // Loads the token database.
-  void LoadTokenDatabase();
-
  private:
-  base::ScopedTempDir temp_dir_;
-  scoped_refptr<net::URLRequestContextGetter> request_context_;
-  scoped_refptr<TokenWebData> database_;
+  network::TestURLLoaderFactory test_url_loader_factory_;
+  scoped_refptr<network::SharedURLLoaderFactory> shared_factory_;
+
   PrefService* pref_service_;
+  std::unique_ptr<network::mojom::CookieManager> cookie_manager_;
   bool are_signin_cookies_allowed_;
   bool network_calls_delayed_;
+  bool is_signout_allowed_;
   std::vector<base::OnceClosure> delayed_network_calls_;
 
   // Pointer to be filled by PostSignedIn.

@@ -21,7 +21,6 @@ from chromite.cbuildbot import manifest_version
 from chromite.cbuildbot.builders import simple_builders
 from chromite.lib import cidb
 from chromite.lib import cros_build_lib
-from chromite.lib import cros_build_lib_unittest
 from chromite.lib import cros_test_lib
 from chromite.lib import osutils
 from chromite.lib import parallel
@@ -75,7 +74,7 @@ class TestHaltedException(Exception):
   """Exception used by mocks to halt execution without indicating failure."""
 
 
-class RunBuildStagesTest(cros_build_lib_unittest.RunCommandTempDirTestCase,
+class RunBuildStagesTest(cros_test_lib.RunCommandTempDirTestCase,
                          SimpleBuilderTestCase):
   """Test that cbuildbot runs the appropriate stages for a given config."""
 
@@ -390,10 +389,6 @@ class FullInterfaceTest(cros_test_lib.MockTempDirTestCase):
     self.root = self.tempdir
     self.buildroot = self.MakeTestRootDir('build_root')
     self.sourceroot = self.MakeTestRootDir('source_root')
-    self.trybot_root = self.MakeTestRootDir('trybot')
-    self.trybot_internal_root = self.MakeTestRootDir('trybot-internal')
-    self.external_marker = os.path.join(self.trybot_root, '.trybot')
-    self.internal_marker = os.path.join(self.trybot_internal_root, '.trybot')
 
     osutils.SafeMakedirs(os.path.join(self.sourceroot, '.repo', 'manifests'))
     osutils.SafeMakedirs(os.path.join(self.sourceroot, '.repo', 'repo'))

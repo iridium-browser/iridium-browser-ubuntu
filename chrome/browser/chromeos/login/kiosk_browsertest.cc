@@ -6,9 +6,7 @@
 #include <vector>
 
 #include "apps/test/app_window_waiter.h"
-#include "ash/shell.h"
-#include "ash/wallpaper/wallpaper_controller.h"
-#include "ash/wallpaper/wallpaper_controller_observer.h"
+#include "ash/public/interfaces/wallpaper.mojom.h"
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/location.h"
@@ -46,6 +44,7 @@
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profiles_state.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
+#include "chrome/browser/ui/ash/wallpaper_controller_client.h"
 #include "chrome/browser/ui/webui/chromeos/login/kiosk_app_menu_handler.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
@@ -79,6 +78,7 @@
 #include "media/audio/sounds/audio_stream_handler.h"
 #include "media/audio/sounds/sounds_manager.h"
 #include "media/audio/test_audio_thread.h"
+#include "mojo/public/cpp/bindings/associated_binding.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "services/audio/public/cpp/fake_system_info.h"
 #include "ui/aura/window.h"
@@ -369,7 +369,7 @@ class KioskFakeDiskMountManager : public file_manager::FakeDiskMountManager {
 
   void MountUsbStick() {
     DCHECK(!usb_mount_path_.empty());
-    MountPath(usb_mount_path_, "", "", chromeos::MOUNT_TYPE_DEVICE,
+    MountPath(usb_mount_path_, "", "", {}, chromeos::MOUNT_TYPE_DEVICE,
               chromeos::MOUNT_ACCESS_MODE_READ_ONLY);
   }
 
@@ -525,7 +525,7 @@ class KioskTest : public OobeBaseTest {
     // Needed to avoid showing Gaia screen instead of owner signin for
     // consumer network down test cases.
     StartupUtils::MarkDeviceRegistered(base::Closure());
-    settings_helper_.ReplaceProvider(kAccountsPrefDeviceLocalAccounts);
+    settings_helper_.ReplaceDeviceSettingsProviderWithStub();
     owner_settings_service_ = settings_helper_.CreateOwnerSettingsService(
         ProfileManager::GetPrimaryUserProfile());
 
@@ -534,7 +534,7 @@ class KioskTest : public OobeBaseTest {
   }
 
   void TearDownOnMainThread() override {
-    settings_helper_.RestoreProvider();
+    settings_helper_.RestoreRealDeviceSettingsProvider();
     AppLaunchController::SetNetworkTimeoutCallbackForTesting(NULL);
     AppLaunchSigninScreen::SetUserManagerForTesting(NULL);
 
@@ -691,7 +691,7 @@ class KioskTest : public OobeBaseTest {
 
     // Wait until the app terminates if it is still running.
     if (!app_window_registry->GetAppWindowsForApp(test_app_id_).empty())
-      content::RunMessageLoop();
+      RunUntilBrowserProcessQuits();
 
     // Check that the app had been informed that it is running in a kiosk
     // session.
@@ -832,7 +832,8 @@ IN_PROC_BROWSER_TEST_F(KioskTest, InstallAndLaunchApp) {
   EXPECT_EQ(extensions::Manifest::EXTERNAL_PREF, GetInstalledAppLocation());
 }
 
-IN_PROC_BROWSER_TEST_F(KioskTest, ZoomSupport) {
+// Flaky crash failures; see https://crbug.com/856393.
+IN_PROC_BROWSER_TEST_F(KioskTest, DISABLED_ZoomSupport) {
   ExtensionTestMessageListener app_window_loaded_listener("appWindowLoaded",
                                                           false);
   StartAppLaunchFromLoginScreen(SimulateNetworkOnlineClosure());
@@ -924,7 +925,7 @@ IN_PROC_BROWSER_TEST_F(KioskTest,
                        DISABLED_LaunchAppWithNetworkConfigAccelerator) {
   ScopedCanConfigureNetwork can_configure_network(true, false);
 
-  // Block app loading until the network screen is shown.
+  // Block app loading until the welcome screen is shown.
   AppLaunchController::SetBlockAppLaunchForTesting(true);
 
   // Start app launch and wait for network connectivity timeout.
@@ -1051,7 +1052,7 @@ IN_PROC_BROWSER_TEST_F(KioskTest, AutolaunchWarningCancel) {
 
   // Start login screen after configuring auto launch app since the warning
   // is triggered when switching to login screen.
-  wizard_controller->AdvanceToScreen(OobeScreen::SCREEN_OOBE_NETWORK);
+  wizard_controller->AdvanceToScreen(OobeScreen::SCREEN_OOBE_WELCOME);
   ReloadAutolaunchKioskApps();
   EXPECT_FALSE(KioskAppManager::Get()->GetAutoLaunchApp().empty());
   EXPECT_FALSE(KioskAppManager::Get()->IsAutoLaunchEnabled());
@@ -1084,7 +1085,7 @@ IN_PROC_BROWSER_TEST_F(KioskTest, AutolaunchWarningConfirm) {
 
   // Start login screen after configuring auto launch app since the warning
   // is triggered when switching to login screen.
-  wizard_controller->AdvanceToScreen(OobeScreen::SCREEN_OOBE_NETWORK);
+  wizard_controller->AdvanceToScreen(OobeScreen::SCREEN_OOBE_WELCOME);
   ReloadAutolaunchKioskApps();
   EXPECT_FALSE(KioskAppManager::Get()->GetAutoLaunchApp().empty());
   EXPECT_FALSE(KioskAppManager::Get()->IsAutoLaunchEnabled());
@@ -1277,7 +1278,7 @@ IN_PROC_BROWSER_TEST_F(KioskTest, MAYBE_NoConsumerAutoLaunchWhenUntrusted) {
   chromeos::WizardController* wizard_controller =
       chromeos::WizardController::default_controller();
   ASSERT_TRUE(wizard_controller);
-  wizard_controller->AdvanceToScreen(OobeScreen::SCREEN_OOBE_NETWORK);
+  wizard_controller->AdvanceToScreen(OobeScreen::SCREEN_OOBE_WELCOME);
   ReloadAutolaunchKioskApps();
   wizard_controller->SkipToLoginForTesting(LoginScreenContext());
   content::WindowedNotificationObserver(
@@ -1413,7 +1414,7 @@ class KioskUpdateTest : public KioskTest {
 
   void SetupFakeDiskMountManagerMountPath(const std::string& mount_path) {
     base::FilePath test_data_dir;
-    PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir);
+    base::PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir);
     test_data_dir = test_data_dir.AppendASCII(mount_path);
     fake_disk_mount_manager_->set_usb_mount_path(test_data_dir.value());
   }
@@ -1928,6 +1929,7 @@ IN_PROC_BROWSER_TEST_F(KioskUpdateTest, PRE_IncompliantPlatformDelayInstall) {
 
   // Fake auto launch.
   ReloadAutolaunchKioskApps();
+  KioskAppManager::Get()->SetEnableAutoLaunch(true);
   KioskAppManager::Get()->SetAppWasAutoLaunchedWithZeroDelay(
       kTestOfflineEnabledKioskApp);
 
@@ -1949,6 +1951,7 @@ IN_PROC_BROWSER_TEST_F(KioskUpdateTest, IncompliantPlatformDelayInstall) {
 
   // Fake auto launch.
   ReloadAutolaunchKioskApps();
+  KioskAppManager::Get()->SetEnableAutoLaunch(true);
   KioskAppManager::Get()->SetAppWasAutoLaunchedWithZeroDelay(
       kTestOfflineEnabledKioskApp);
 
@@ -1972,6 +1975,7 @@ IN_PROC_BROWSER_TEST_F(KioskUpdateTest, IncompliantPlatformFirstInstall) {
 
   // Fake auto launch.
   ReloadAutolaunchKioskApps();
+  KioskAppManager::Get()->SetEnableAutoLaunch(true);
   KioskAppManager::Get()->SetAppWasAutoLaunchedWithZeroDelay(
       kTestOfflineEnabledKioskApp);
 
@@ -2269,7 +2273,7 @@ IN_PROC_BROWSER_TEST_F(KioskEnterpriseTest, PrivateStore) {
 
   // |private_server| serves crx from test data dir.
   base::FilePath test_data_dir;
-  PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir);
+  base::PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir);
   private_server.ServeFilesFromDirectory(test_data_dir);
   ASSERT_TRUE(private_server.InitializeAndListen());
 
@@ -2354,8 +2358,13 @@ class KioskVirtualKeyboardTestSoundsManagerTestImpl
 class KioskVirtualKeyboardTest : public KioskTest,
                                  public audio::FakeSystemInfo {
  public:
-  KioskVirtualKeyboardTest() {}
-  ~KioskVirtualKeyboardTest() override = default;
+  KioskVirtualKeyboardTest() {
+    audio::FakeSystemInfo::OverrideGlobalBinderForAudioService(this);
+  }
+
+  ~KioskVirtualKeyboardTest() override {
+    audio::FakeSystemInfo::ClearGlobalBinderForAudioService();
+  }
 
  protected:
   // KioskVirtualKeyboardTest overrides:
@@ -2395,7 +2404,6 @@ IN_PROC_BROWSER_TEST_F(KioskVirtualKeyboardTest, RestrictFeatures) {
   mock_audio_manager_ = std::make_unique<media::MockAudioManager>(
       std::make_unique<media::TestAudioThread>());
   mock_audio_manager_->SetHasInputDevices(true);
-  audio::FakeSystemInfo::OverrideGlobalBinderForAudioService(this);
 
   set_test_app_id(kTestVirtualKeyboardKioskApp);
   set_test_app_version("0.1");
@@ -2412,19 +2420,20 @@ IN_PROC_BROWSER_TEST_F(KioskVirtualKeyboardTest, RestrictFeatures) {
 // Specialized test fixture for testing kiosk mode on the
 // hidden WebUI initialization flow for slow hardware.
 class KioskHiddenWebUITest : public KioskTest,
-                             public ash::WallpaperControllerObserver {
+                             public ash::mojom::WallpaperObserver {
  public:
-  KioskHiddenWebUITest() : wallpaper_loaded_(false) {}
+  KioskHiddenWebUITest() : wallpaper_loaded_(false), observer_binding_(this) {}
 
   void SetUpOnMainThread() override {
     LoginDisplayHostWebUI::DisableRestrictiveProxyCheckForTest();
 
     KioskTest::SetUpOnMainThread();
-    ash::Shell::Get()->wallpaper_controller()->AddObserver(this);
+    ash::mojom::WallpaperObserverAssociatedPtrInfo ptr_info;
+    observer_binding_.Bind(mojo::MakeRequest(&ptr_info));
+    WallpaperControllerClient::Get()->AddObserver(std::move(ptr_info));
   }
 
   void TearDownOnMainThread() override {
-    ash::Shell::Get()->wallpaper_controller()->RemoveObserver(this);
     KioskTest::TearDownOnMainThread();
   }
 
@@ -2437,17 +2446,25 @@ class KioskHiddenWebUITest : public KioskTest,
 
   bool wallpaper_loaded() const { return wallpaper_loaded_; }
 
-  // ash::WallpaperControllerObserver overrides:
-  void OnWallpaperDataChanged() override {
+  // ash::mojom::WallpaperObserver:
+  void OnWallpaperChanged(uint32_t image_id) override {
     wallpaper_loaded_ = true;
     if (runner_.get())
       runner_->Quit();
   }
 
+  void OnWallpaperColorsChanged(
+      const std::vector<SkColor>& prominent_colors) override {}
+
+  void OnWallpaperBlurChanged(bool blurred) override {}
+
   bool wallpaper_loaded_;
   scoped_refptr<content::MessageLoopRunner> runner_;
 
  private:
+  // The binding this instance uses to implement ash::mojom::WallpaperObserver.
+  mojo::AssociatedBinding<ash::mojom::WallpaperObserver> observer_binding_;
+
   DISALLOW_COPY_AND_ASSIGN(KioskHiddenWebUITest);
 };
 
@@ -2465,7 +2482,7 @@ IN_PROC_BROWSER_TEST_F(KioskHiddenWebUITest, AutolaunchWarning) {
 
   // Start login screen after configuring auto launch app since the warning
   // is triggered when switching to login screen.
-  wizard_controller->AdvanceToScreen(OobeScreen::SCREEN_OOBE_NETWORK);
+  wizard_controller->AdvanceToScreen(OobeScreen::SCREEN_OOBE_WELCOME);
   ReloadAutolaunchKioskApps();
   wizard_controller->SkipToLoginForTesting(LoginScreenContext());
 

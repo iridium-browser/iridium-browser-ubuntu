@@ -5,9 +5,17 @@
 #ifndef CHROMEOS_COMPONENTS_PROXIMITY_AUTH_REMOTE_DEVICE_LIFE_CYCLE_H_
 #define CHROMEOS_COMPONENTS_PROXIMITY_AUTH_REMOTE_DEVICE_LIFE_CYCLE_H_
 
+#include <ostream>
+
 #include "base/macros.h"
 #include "components/cryptauth/connection.h"
-#include "components/cryptauth/remote_device.h"
+#include "components/cryptauth/remote_device_ref.h"
+
+namespace chromeos {
+namespace secure_channel {
+class ClientChannel;
+}  // namespace secure_channel
+}  // namespace chromeos
 
 namespace proximity_auth {
 
@@ -55,11 +63,15 @@ class RemoteDeviceLifeCycle {
   // Starts the life cycle.
   virtual void Start() = 0;
 
-  // Returns the RemoteDevice instance that this life cycle manages.
-  virtual cryptauth::RemoteDevice GetRemoteDevice() const = 0;
+  // Returns the RemoteDeviceRef instance that this life cycle manages.
+  virtual cryptauth::RemoteDeviceRef GetRemoteDevice() const = 0;
 
   // Returns the current Connection, or null if the device is not yet connected.
   virtual cryptauth::Connection* GetConnection() const = 0;
+
+  // Returns the active channel to the remote device, or null if the device is
+  // not yet connected.
+  virtual chromeos::secure_channel::ClientChannel* GetChannel() const = 0;
 
   // Returns the current state of in the life cycle.
   virtual State GetState() const = 0;
@@ -75,6 +87,9 @@ class RemoteDeviceLifeCycle {
   // Removes an observer.
   virtual void RemoveObserver(Observer* observer) = 0;
 };
+
+std::ostream& operator<<(std::ostream& stream,
+                         const RemoteDeviceLifeCycle::State& state);
 
 }  // namespace proximity_auth
 

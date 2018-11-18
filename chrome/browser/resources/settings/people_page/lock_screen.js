@@ -52,7 +52,7 @@ Polymer({
     },
 
     /**
-     * Authentication token provided by password-prompt-dialog.
+     * Authentication token provided by lock-screen-password-prompt-dialog.
      * @private
      */
     authToken_: String,
@@ -135,6 +135,29 @@ Polymer({
     },
 
     /**
+     * True if Easy Unlock is in legacy host mode.
+     *
+     * TODO(crbug.com/894585): Remove this legacy special case after M71.
+     */
+    easyUnlockInLegacyHostMode_: {
+      type: Boolean,
+      value: function() {
+        return loadTimeData.getBoolean('easyUnlockInLegacyHostMode');
+      },
+    },
+
+    /**
+     * True if Multidevice Setup is enabled.
+     * @private {boolean}
+     */
+    multideviceSettingsEnabled_: {
+      type: Boolean,
+      value: function() {
+        return loadTimeData.getBoolean('enableMultideviceSettings');
+      },
+    },
+
+    /**
      * Returns the proximity threshold mapping to be displayed in the
      * threshold selector dropdown menu.
      */
@@ -160,6 +183,32 @@ Polymer({
             name: loadTimeData.getString('easyUnlockProximityThresholdVeryFar')
           }
         ];
+      },
+      readOnly: true,
+    },
+
+    /**
+     * Whether notifications on the lock screen are enable by the feature flag.
+     * @private
+     */
+    lockScreenNotificationsEnabled_: {
+      type: Boolean,
+      value: function() {
+        return loadTimeData.getBoolean('lockScreenNotificationsEnabled');
+      },
+      readOnly: true,
+    },
+
+    /**
+     * Whether the "hide sensitive notification" option on the lock screen can
+     * be enable by the feature flag.
+     * @private
+     */
+    lockScreenHideSensitiveNotificationSupported_: {
+      type: Boolean,
+      value: function() {
+        return loadTimeData.getBoolean(
+            'lockScreenHideSensitiveNotificationsSupported');
       },
       readOnly: true,
     },
@@ -195,6 +244,7 @@ Polymer({
         settings.EasyUnlockBrowserProxyImpl.getInstance();
     this.fingerprintBrowserProxy_ =
         settings.FingerprintBrowserProxyImpl.getInstance();
+    this.updateNumFingerprints_();
 
     if (this.easyUnlockAllowed_) {
       this.addWebUIListener(
@@ -214,12 +264,7 @@ Polymer({
   currentRouteChanged: function(newRoute, oldRoute) {
     if (newRoute == settings.routes.LOCK_SCREEN) {
       this.updateUnlockType();
-      if (this.fingerprintUnlockEnabled_ && this.fingerprintBrowserProxy_) {
-        this.fingerprintBrowserProxy_.getNumFingerprints().then(
-            numFingerprints => {
-              this.numFingerprints_ = numFingerprints;
-            });
-      }
+      this.updateNumFingerprints_();
     }
 
     if (this.shouldAskForPassword_(newRoute)) {
@@ -395,13 +440,35 @@ Polymer({
     return enabled ? enabledStr : disabledStr;
   },
 
+  /** @private */
+  updateNumFingerprints_: function() {
+    if (this.fingerprintUnlockEnabled_ && this.fingerprintBrowserProxy_) {
+      this.fingerprintBrowserProxy_.getNumFingerprints().then(
+          numFingerprints => {
+            this.numFingerprints_ = numFingerprints;
+          });
+    }
+  },
+
   /**
-   * @param {boolean} easyUnlockEnabled
-   * @param {boolean} proximityDetectionAllowed
+   * Looks up the translation id, which depends on PIN login support.
+   * @param {boolean} hasPinLogin
    * @private
    */
-  getShowEasyUnlockToggle_: function(
-      easyUnlockEnabled, proximityDetectionAllowed) {
-    return easyUnlockEnabled && proximityDetectionAllowed;
+  selectLockScreenOptionsString(hasPinLogin) {
+    if (hasPinLogin)
+      return this.i18n('lockScreenOptionsLoginLock');
+    return this.i18n('lockScreenOptionsLock');
+  },
+
+  /**
+   * @return {boolean} Whether Easy Unlock is available.
+   * @private
+   */
+  easyUnlockAvailable_: function(
+      multiDeviceEnabled, easyUnlockAllowed, easyUnlockInLegacyHostMode) {
+    return (
+        (!multiDeviceEnabled || easyUnlockInLegacyHostMode) &&
+        easyUnlockAllowed);
   },
 });

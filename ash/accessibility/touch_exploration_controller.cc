@@ -64,11 +64,9 @@ TouchExplorationController::~TouchExplorationController() {
 }
 
 void TouchExplorationController::SetTouchAccessibilityAnchorPoint(
-    const gfx::Point& anchor_point) {
-  gfx::Point native_point = anchor_point;
-  root_window_->GetHost()->ConvertDIPToScreenInPixels(&native_point);
-
-  anchor_point_ = gfx::PointF(native_point.x(), native_point.y());
+    const gfx::Point& anchor_point_dip) {
+  gfx::Point native_point = anchor_point_dip;
+  anchor_point_dip_ = gfx::PointF(native_point.x(), native_point.y());
   anchor_point_state_ = ANCHOR_POINT_EXPLICITLY_SET;
 }
 
@@ -103,9 +101,13 @@ ui::EventRewriteStatus TouchExplorationController::RewriteEvent(
   if (event.type() == ui::ET_TOUCH_PRESSED)
     seen_press_ = true;
 
+  // Touch events come through in screen pixels.
+  gfx::Point location = touch_event.location();
+  gfx::Point root_location = touch_event.root_location();
+  root_window_->GetHost()->ConvertPixelsToDIP(&location);
+  root_window_->GetHost()->ConvertPixelsToDIP(&root_location);
+
   if (!exclude_bounds_.IsEmpty()) {
-    gfx::Point location = touch_event.location();
-    root_window_->GetHost()->ConvertScreenInPixelsToDIP(&location);
     bool in_exclude_area = exclude_bounds_.Contains(location);
     if (in_exclude_area) {
       if (state_ == NO_FINGERS_DOWN)
@@ -133,15 +135,7 @@ ui::EventRewriteStatus TouchExplorationController::RewriteEvent(
     // this event under this new state.
   }
 
-  if (passthrough_timer_.IsRunning() &&
-      event.time_stamp() - most_recent_press_timestamp_ >
-          gesture_detector_config_.longpress_timeout) {
-    passthrough_timer_.Stop();
-    OnPassthroughTimerFired();
-  }
-
   const ui::EventType type = touch_event.type();
-  const gfx::PointF& location = touch_event.location_f();
   const int touch_id = touch_event.pointer_details().id;
 
   // Always update touch ids and touch locations, so we can use those
@@ -164,8 +158,8 @@ ui::EventRewriteStatus TouchExplorationController::RewriteEvent(
         std::unique_ptr<ui::TouchEvent> new_event(new ui::TouchEvent(
             ui::ET_TOUCH_CANCELLED, gfx::Point(), touch_event.time_stamp(),
             touch_event.pointer_details()));
-        new_event->set_location_f(touch_event.location_f());
-        new_event->set_root_location_f(touch_event.root_location_f());
+        new_event->set_location(location);
+        new_event->set_root_location(root_location);
         new_event->set_flags(touch_event.flags());
         *rewritten_event = std::move(new_event);
         return ui::EVENT_REWRITE_REWRITTEN;
@@ -185,7 +179,7 @@ ui::EventRewriteStatus TouchExplorationController::RewriteEvent(
     if (it == current_touch_ids_.end())
       return ui::EVENT_REWRITE_CONTINUE;
 
-    touch_locations_[*it] = location;
+    touch_locations_[*it] = gfx::PointF(location);
   } else {
     NOTREACHED() << "Unexpected event type received: " << event.GetName();
     return ui::EVENT_REWRITE_CONTINUE;
@@ -195,13 +189,9 @@ ui::EventRewriteStatus TouchExplorationController::RewriteEvent(
   // In order to avoid accidentally double tapping when moving off the edge
   // of the screen, the state will be rewritten to NoFingersDown.
   if ((type == ui::ET_TOUCH_RELEASED || type == ui::ET_TOUCH_CANCELLED) &&
-      FindEdgesWithinInset(touch_event.location(), kLeavingScreenEdge) !=
-          NO_EDGE) {
+      FindEdgesWithinInset(location, kLeavingScreenEdge) != NO_EDGE) {
     if (VLOG_on_)
       VLOG(1) << "Leaving screen";
-
-    // Indicates to the user that they are leaving the screen.
-    delegate_->PlayExitScreenEarcon();
 
     if (current_touch_ids_.size() == 0) {
       SET_STATE(NO_FINGERS_DOWN);
@@ -213,16 +203,20 @@ ui::EventRewriteStatus TouchExplorationController::RewriteEvent(
     }
   }
 
+  // We now need a TouchEvent that has its coordinates mapped into root window
+  // DIP.
+  ui::TouchEvent touch_event_dip = touch_event;
+  touch_event_dip.set_location(location);
+
   // If the user is in a gesture state, or if there is a possiblity that the
   // user will enter it in the future, we send the event to the gesture
   // provider so it can keep track of the state of the fingers. When the user
   // leaves one of these states, SET_STATE will set the gesture provider to
   // NULL.
   if (gesture_provider_.get()) {
-    ui::TouchEvent mutable_touch_event = touch_event;
-    if (gesture_provider_->OnTouchEvent(&mutable_touch_event)) {
+    if (gesture_provider_->OnTouchEvent(&touch_event_dip)) {
       gesture_provider_->OnTouchEventAck(
-          mutable_touch_event.unique_event_id(), false /* event_consumed */,
+          touch_event_dip.unique_event_id(), false /* event_consumed */,
           false /* is_source_touch_event_set_non_blocking */);
     }
     ProcessGestureEvents();
@@ -232,44 +226,42 @@ ui::EventRewriteStatus TouchExplorationController::RewriteEvent(
   // The rest of the processing depends on what state we're in.
   switch (state_) {
     case NO_FINGERS_DOWN:
-      status = InNoFingersDown(touch_event, rewritten_event);
+      status = InNoFingersDown(touch_event_dip, rewritten_event);
       break;
     case SINGLE_TAP_PRESSED:
-      status = InSingleTapPressed(touch_event, rewritten_event);
+      status = InSingleTapPressed(touch_event_dip, rewritten_event);
       break;
     case SINGLE_TAP_RELEASED:
     case TOUCH_EXPLORE_RELEASED:
-      status = InSingleTapOrTouchExploreReleased(touch_event, rewritten_event);
+      status =
+          InSingleTapOrTouchExploreReleased(touch_event_dip, rewritten_event);
       break;
     case DOUBLE_TAP_PENDING:
-      status = InDoubleTapPending(touch_event, rewritten_event);
+      status = InDoubleTapPending(touch_event_dip, rewritten_event);
       break;
     case TOUCH_RELEASE_PENDING:
-      status = InTouchReleasePending(touch_event, rewritten_event);
+      status = InTouchReleasePending(touch_event_dip, rewritten_event);
       break;
     case TOUCH_EXPLORATION:
-      status = InTouchExploration(touch_event, rewritten_event);
+      status = InTouchExploration(touch_event_dip, rewritten_event);
       break;
     case GESTURE_IN_PROGRESS:
-      status = InGestureInProgress(touch_event, rewritten_event);
+      status = InGestureInProgress(touch_event_dip, rewritten_event);
       break;
     case TOUCH_EXPLORE_SECOND_PRESS:
-      status = InTouchExploreSecondPress(touch_event, rewritten_event);
+      status = InTouchExploreSecondPress(touch_event_dip, rewritten_event);
       break;
     case SLIDE_GESTURE:
-      status = InSlideGesture(touch_event, rewritten_event);
+      status = InSlideGesture(touch_event_dip, rewritten_event);
       break;
     case ONE_FINGER_PASSTHROUGH:
-      status = InOneFingerPassthrough(touch_event, rewritten_event);
-      break;
-    case CORNER_PASSTHROUGH:
-      status = InCornerPassthrough(touch_event, rewritten_event);
+      status = InOneFingerPassthrough(touch_event_dip, rewritten_event);
       break;
     case WAIT_FOR_NO_FINGERS:
-      status = InWaitForNoFingers(touch_event, rewritten_event);
+      status = InWaitForNoFingers(touch_event_dip, rewritten_event);
       break;
     case TWO_FINGER_TAP:
-      status = InTwoFingerTap(touch_event, rewritten_event);
+      status = InTwoFingerTap(touch_event_dip, rewritten_event);
       break;
   }
   if (status == ui::EVENT_REWRITE_REWRITTEN) {
@@ -295,21 +287,6 @@ ui::EventRewriteStatus TouchExplorationController::InNoFingersDown(
     return ui::EVENT_REWRITE_CONTINUE;
   }
 
-  // If the user enters the screen from the edge then send an earcon.
-  int edge = FindEdgesWithinInset(event.location(), kLeavingScreenEdge);
-  if (edge != NO_EDGE)
-    delegate_->PlayEnterScreenEarcon();
-
-  int location = FindEdgesWithinInset(event.location(), kSlopDistanceFromEdge);
-  // If the press was at a corner, the user might go into corner passthrough
-  // instead.
-  bool in_a_bottom_corner =
-      (BOTTOM_LEFT_CORNER == location) || (BOTTOM_RIGHT_CORNER == location);
-  if (in_a_bottom_corner) {
-    passthrough_timer_.Start(
-        FROM_HERE, gesture_detector_config_.longpress_timeout, this,
-        &TouchExplorationController::OnPassthroughTimerFired);
-  }
   initial_press_ = std::make_unique<ui::TouchEvent>(event);
   most_recent_press_timestamp_ = initial_press_->time_stamp();
   initial_presses_[event.pointer_details().id] = event.location();
@@ -323,33 +300,11 @@ ui::EventRewriteStatus TouchExplorationController::InSingleTapPressed(
     const ui::TouchEvent& event,
     std::unique_ptr<ui::Event>* rewritten_event) {
   const ui::EventType type = event.type();
-
-  int location = FindEdgesWithinInset(event.location(), kMaxDistanceFromEdge);
-  bool in_a_bottom_corner =
-      (location == BOTTOM_LEFT_CORNER) || (location == BOTTOM_RIGHT_CORNER);
-  // If the event is from the initial press and the location is no longer in the
-  // corner, then we are not waiting for a corner passthrough anymore.
-  if (event.pointer_details().id == initial_press_->pointer_details().id &&
-      !in_a_bottom_corner) {
-    if (passthrough_timer_.IsRunning()) {
-      passthrough_timer_.Stop();
-      // Since the long press timer has been running, it is possible that the
-      // tap timer has timed out before the long press timer has. If the tap
-      // timer timeout has elapsed, then fire the tap timer.
-      if (event.time_stamp() - most_recent_press_timestamp_ >
-          gesture_detector_config_.double_tap_timeout) {
-        OnTapTimerFired();
-      }
-    }
-  }
-
   if (type == ui::ET_TOUCH_PRESSED) {
     initial_presses_[event.pointer_details().id] = event.location();
     SET_STATE(TWO_FINGER_TAP);
     return ui::EVENT_REWRITE_DISCARD;
   } else if (type == ui::ET_TOUCH_RELEASED || type == ui::ET_TOUCH_CANCELLED) {
-    if (passthrough_timer_.IsRunning())
-      passthrough_timer_.Stop();
     if (current_touch_ids_.size() == 0 &&
         event.pointer_details().id == initial_press_->pointer_details().id) {
       MaybeSendSimulatedTapInLiftActivationBounds(event);
@@ -513,10 +468,13 @@ ui::EventRewriteStatus TouchExplorationController::InTouchExploration(
   }
 
   // Rewrite as a mouse-move event.
-  *rewritten_event = CreateMouseMoveEvent(event.location_f(), event.flags());
+  // |event| locations are in DIP; see |RewriteEvent|. We need to dispatch
+  // |screen coords.
+  gfx::PointF location_f(ConvertDIPToPixels(event.location_f()));
+  *rewritten_event = CreateMouseMoveEvent(location_f, event.flags());
   last_touch_exploration_ = std::make_unique<ui::TouchEvent>(event);
   if (anchor_point_state_ != ANCHOR_POINT_EXPLICITLY_SET)
-    anchor_point_ = last_touch_exploration_->location_f();
+    anchor_point_dip_ = last_touch_exploration_->location_f();
 
   return ui::EVENT_REWRITE_REWRITTEN;
 }
@@ -534,40 +492,6 @@ ui::EventRewriteStatus TouchExplorationController::InGestureInProgress(
   return ui::EVENT_REWRITE_DISCARD;
 }
 
-ui::EventRewriteStatus TouchExplorationController::InCornerPassthrough(
-    const ui::TouchEvent& event,
-    std::unique_ptr<ui::Event>* rewritten_event) {
-  ui::EventType type = event.type();
-
-  // If the first finger has left the corner, then exit passthrough.
-  if (event.pointer_details().id == initial_press_->pointer_details().id) {
-    int edges = FindEdgesWithinInset(event.location(), kSlopDistanceFromEdge);
-    bool in_a_bottom_corner =
-        (edges == BOTTOM_LEFT_CORNER) || (edges == BOTTOM_RIGHT_CORNER);
-    if (type == ui::ET_TOUCH_MOVED && in_a_bottom_corner)
-      return ui::EVENT_REWRITE_DISCARD;
-
-    if (current_touch_ids_.size() == 0) {
-      SET_STATE(NO_FINGERS_DOWN);
-      return ui::EVENT_REWRITE_DISCARD;
-    }
-    SET_STATE(WAIT_FOR_NO_FINGERS);
-    return ui::EVENT_REWRITE_DISCARD;
-  }
-
-  std::unique_ptr<ui::TouchEvent> new_event(new ui::TouchEvent(
-      type, gfx::Point(), event.time_stamp(), event.pointer_details()));
-  new_event->set_location_f(event.location_f());
-  new_event->set_root_location_f(event.location_f());
-  new_event->set_flags(event.flags());
-  *rewritten_event = std::move(new_event);
-
-  if (current_touch_ids_.size() == 0)
-    SET_STATE(NO_FINGERS_DOWN);
-
-  return ui::EVENT_REWRITE_REWRITTEN;
-}
-
 ui::EventRewriteStatus TouchExplorationController::InOneFingerPassthrough(
     const ui::TouchEvent& event,
     std::unique_ptr<ui::Event>* rewritten_event) {
@@ -577,10 +501,14 @@ ui::EventRewriteStatus TouchExplorationController::InOneFingerPassthrough(
     }
     return ui::EVENT_REWRITE_DISCARD;
   }
+  // |event| locations are in DIP; see |RewriteEvent|. We need to dispatch
+  // screen coordinates.
+  gfx::PointF location_f(
+      ConvertDIPToPixels(event.location_f() - passthrough_offset_));
   std::unique_ptr<ui::TouchEvent> new_event(new ui::TouchEvent(
       event.type(), gfx::Point(), event.time_stamp(), event.pointer_details()));
-  new_event->set_location_f(event.location_f() - passthrough_offset_);
-  new_event->set_root_location_f(event.location_f() - passthrough_offset_);
+  new_event->set_location_f(location_f);
+  new_event->set_root_location_f(location_f);
   new_event->set_flags(event.flags());
   *rewritten_event = std::move(new_event);
   if (current_touch_ids_.size() == 0) {
@@ -602,8 +530,11 @@ ui::EventRewriteStatus TouchExplorationController::InTouchExploreSecondPress(
         ui::ET_TOUCH_CANCELLED, gfx::Point(), event.time_stamp(),
         initial_press_->pointer_details()));
     // TODO(dmazzoni): fix for multiple displays. http://crbug.com/616793
-    new_event->set_location_f(anchor_point_);
-    new_event->set_root_location_f(anchor_point_);
+    // |event| locations are in DIP; see |RewriteEvent|. We need to dispatch
+    // screen coordinates.
+    gfx::PointF location_f(ConvertDIPToPixels(anchor_point_dip_));
+    new_event->set_location_f(location_f);
+    new_event->set_root_location_f(location_f);
     new_event->set_flags(event.flags());
     *rewritten_event = std::move(new_event);
     SET_STATE(WAIT_FOR_NO_FINGERS);
@@ -684,25 +615,23 @@ void TouchExplorationController::SendSimulatedTap() {
   touch_press.reset(new ui::TouchEvent(ui::ET_TOUCH_PRESSED, gfx::Point(),
                                        Now(),
                                        initial_press_->pointer_details()));
-  touch_press->set_location_f(anchor_point_);
-  touch_press->set_root_location_f(anchor_point_);
+  touch_press->set_location_f(anchor_point_dip_);
+  touch_press->set_root_location_f(anchor_point_dip_);
   DispatchEvent(touch_press.get());
 
   std::unique_ptr<ui::TouchEvent> touch_release;
   touch_release.reset(new ui::TouchEvent(ui::ET_TOUCH_RELEASED, gfx::Point(),
                                          Now(),
                                          initial_press_->pointer_details()));
-  touch_release->set_location_f(anchor_point_);
-  touch_release->set_root_location_f(anchor_point_);
+  touch_release->set_location_f(anchor_point_dip_);
+  touch_release->set_root_location_f(anchor_point_dip_);
   DispatchEvent(touch_release.get());
 }
 
 void TouchExplorationController::MaybeSendSimulatedTapInLiftActivationBounds(
     const ui::TouchEvent& event) {
   gfx::Point location = event.location();
-  gfx::Point anchor_location(anchor_point_.x(), anchor_point_.y());
-  root_window_->GetHost()->ConvertScreenInPixelsToDIP(&location);
-  root_window_->GetHost()->ConvertScreenInPixelsToDIP(&anchor_location);
+  gfx::Point anchor_location(anchor_point_dip_.x(), anchor_point_dip_.y());
   if (lift_activation_bounds_.Contains(anchor_location.x(),
                                        anchor_location.y()) &&
       lift_activation_bounds_.Contains(location)) {
@@ -807,24 +736,22 @@ void TouchExplorationController::OnTapTimerFired() {
       SET_STATE(NO_FINGERS_DOWN);
       last_touch_exploration_ =
           std::make_unique<ui::TouchEvent>(*initial_press_);
-      anchor_point_ = last_touch_exploration_->location_f();
+      anchor_point_dip_ = last_touch_exploration_->location_f();
       anchor_point_state_ = ANCHOR_POINT_FROM_TOUCH_EXPLORATION;
       return;
     case DOUBLE_TAP_PENDING: {
       SET_STATE(ONE_FINGER_PASSTHROUGH);
       passthrough_offset_ =
-          last_unused_finger_event_->location_f() - anchor_point_;
+          last_unused_finger_event_->location_f() - anchor_point_dip_;
       std::unique_ptr<ui::TouchEvent> passthrough_press(
           new ui::TouchEvent(ui::ET_TOUCH_PRESSED, gfx::Point(), Now(),
                              last_unused_finger_event_->pointer_details()));
-      passthrough_press->set_location_f(anchor_point_);
-      passthrough_press->set_root_location_f(anchor_point_);
+      passthrough_press->set_location_f(anchor_point_dip_);
+      passthrough_press->set_root_location_f(anchor_point_dip_);
       DispatchEvent(passthrough_press.get());
       return;
     }
     case SINGLE_TAP_PRESSED:
-      if (passthrough_timer_.IsRunning())
-        return;
       FALLTHROUGH;
     case GESTURE_IN_PROGRESS:
       // If only one finger is down, go into touch exploration.
@@ -848,36 +775,18 @@ void TouchExplorationController::OnTapTimerFired() {
       initial_press_->location_f(), initial_press_->flags());
   DispatchEvent(mouse_move.get());
   last_touch_exploration_ = std::make_unique<ui::TouchEvent>(*initial_press_);
-  anchor_point_ = last_touch_exploration_->location_f();
+  anchor_point_dip_ = last_touch_exploration_->location_f();
   anchor_point_state_ = ANCHOR_POINT_FROM_TOUCH_EXPLORATION;
-}
-
-void TouchExplorationController::OnPassthroughTimerFired() {
-  // The passthrough timer will only fire if if the user has held a finger in
-  // one of the passthrough corners for the duration of the passthrough timeout.
-
-  // Check that initial press isn't null. Also a check that if the initial
-  // corner press was released, then it should not be in corner passthrough.
-  if (!initial_press_ ||
-      touch_locations_.find(initial_press_->pointer_details().id) !=
-          touch_locations_.end()) {
-  }
-
-  gfx::Point location =
-      ToRoundedPoint(touch_locations_[initial_press_->pointer_details().id]);
-  int corner = FindEdgesWithinInset(location, kSlopDistanceFromEdge);
-  if (corner != BOTTOM_LEFT_CORNER && corner != BOTTOM_RIGHT_CORNER)
-    return;
-
-  if (sound_timer_.IsRunning())
-    sound_timer_.Stop();
-  delegate_->PlayPassthroughEarcon();
-  SET_STATE(CORNER_PASSTHROUGH);
-  return;
 }
 
 void TouchExplorationController::DispatchEvent(ui::Event* event) {
   SetTouchAccessibilityFlag(event);
+  if (event->IsLocatedEvent()) {
+    ui::LocatedEvent* located_event = event->AsLocatedEvent();
+    gfx::PointF screen_point(ConvertDIPToPixels(located_event->location_f()));
+    located_event->set_location_f(screen_point);
+    located_event->set_root_location_f(screen_point);
+  }
   ignore_result(
       root_window_->GetHost()->dispatcher()->OnEventFromSource(event));
 }
@@ -893,6 +802,9 @@ void TouchExplorationController::OnGestureEvent(ui::GestureConsumer* consumer,
 void TouchExplorationController::ProcessGestureEvents() {
   std::vector<std::unique_ptr<ui::GestureEvent>> gestures =
       gesture_provider_->GetAndResetPendingGestures();
+  bool resolved_gesture = false;
+  max_gesture_touch_points_ =
+      std::max(max_gesture_touch_points_, current_touch_ids_.size());
   for (const auto& gesture : gestures) {
     if (gesture->type() == ui::ET_GESTURE_SWIPE &&
         state_ == GESTURE_IN_PROGRESS) {
@@ -905,7 +817,25 @@ void TouchExplorationController::ProcessGestureEvents() {
     }
     if (state_ == SLIDE_GESTURE && gesture->IsScrollGestureEvent()) {
       SideSlideControl(gesture.get());
+      resolved_gesture = true;
     }
+  }
+
+  if (resolved_gesture)
+    return;
+
+  if (current_touch_ids_.size() == 0) {
+    switch (max_gesture_touch_points_) {
+      case 3:
+        delegate_->HandleAccessibilityGesture(ax::mojom::Gesture::kTap3);
+        break;
+      case 4:
+        delegate_->HandleAccessibilityGesture(ax::mojom::Gesture::kTap4);
+        break;
+      default:
+        break;
+    }
+    max_gesture_touch_points_ = 0;
   }
 }
 
@@ -942,7 +872,7 @@ void TouchExplorationController::SideSlideControl(ui::GestureEvent* gesture) {
   }
 
   location = gesture->location();
-  gfx::Rect bounds = GetRootWindowBoundsInScreenUnits();
+  gfx::RectF bounds(root_window_->bounds());
   float volume_adjust_height = bounds.height() - 2 * kMaxDistanceFromEdge;
   float ratio = (location.y() - kMaxDistanceFromEdge) / volume_adjust_height;
   float volume = 100 - 100 * ratio;
@@ -1039,30 +969,23 @@ void TouchExplorationController::OnSwipeEvent(ui::GestureEvent* swipe_gesture) {
     delegate_->HandleAccessibilityGesture(gesture);
 }
 
-gfx::Rect TouchExplorationController::GetRootWindowBoundsInScreenUnits() {
-  gfx::Point root_window_size(root_window_->bounds().width(),
-                              root_window_->bounds().height());
-  root_window_->GetHost()->ConvertDIPToPixels(&root_window_size);
-  return gfx::Rect(0, 0, root_window_size.x(), root_window_size.y());
-}
-
-int TouchExplorationController::FindEdgesWithinInset(gfx::Point point,
+int TouchExplorationController::FindEdgesWithinInset(gfx::Point point_dip,
                                                      float inset) {
-  gfx::RectF inner_bounds(GetRootWindowBoundsInScreenUnits());
-  inner_bounds.Inset(inset, inset);
+  gfx::RectF inner_bounds_dip(root_window_->bounds());
+  inner_bounds_dip.Inset(inset, inset);
 
   // Bitwise manipulation in order to determine where on the screen the point
   // lies. If more than one bit is turned on, then it is a corner where the two
   // bit/edges intersect. Otherwise, if no bits are turned on, the point must be
   // in the center of the screen.
   int result = NO_EDGE;
-  if (point.x() < inner_bounds.x())
+  if (point_dip.x() < inner_bounds_dip.x())
     result |= LEFT_EDGE;
-  if (point.x() > inner_bounds.right())
+  if (point_dip.x() > inner_bounds_dip.right())
     result |= RIGHT_EDGE;
-  if (point.y() < inner_bounds.y())
+  if (point_dip.y() < inner_bounds_dip.y())
     result |= TOP_EDGE;
-  if (point.y() > inner_bounds.bottom())
+  if (point_dip.y() > inner_bounds_dip.bottom())
     result |= BOTTOM_EDGE;
   return result;
 }
@@ -1096,17 +1019,6 @@ TouchExplorationController::CreateMouseMoveEvent(const gfx::PointF& location,
   // backing native event.
   flags |= ui::EF_IS_SYNTHESIZED;
 
-  // TODO(dmazzoni) http://crbug.com/391008 - get rid of this hack.
-  // This is a short-term workaround for the limitation that we're using
-  // the ChromeVox content script to process touch exploration events, but
-  // ChromeVox needs a way to distinguish between a real mouse move and a
-  // mouse move generated from touch exploration, so we have touch exploration
-  // pretend that the command key was down (which becomes the "meta" key in
-  // JavaScript). We can remove this hack when the ChromeVox content script
-  // goes away and native accessibility code sends a touch exploration
-  // event to the new ChromeVox background page via the automation api.
-  flags |= ui::EF_COMMAND_DOWN;
-
   std::unique_ptr<ui::MouseEvent> event(new ui::MouseEvent(
       ui::ET_MOUSE_MOVED, gfx::Point(), gfx::Point(), Now(), flags, 0));
   event->set_location_f(location);
@@ -1139,10 +1051,10 @@ void TouchExplorationController::SetState(State new_state,
     case TOUCH_EXPLORATION:
     case TOUCH_EXPLORE_SECOND_PRESS:
     case ONE_FINGER_PASSTHROUGH:
-    case CORNER_PASSTHROUGH:
     case WAIT_FOR_NO_FINGERS:
       if (gesture_provider_.get())
         gesture_provider_.reset(NULL);
+      max_gesture_touch_points_ = 0;
       break;
     case NO_FINGERS_DOWN:
       gesture_provider_ = std::make_unique<ui::GestureProviderAura>(this, this);
@@ -1216,8 +1128,6 @@ const char* TouchExplorationController::EnumStateToString(State state) {
       return "GESTURE_IN_PROGRESS";
     case TOUCH_EXPLORE_SECOND_PRESS:
       return "TOUCH_EXPLORE_SECOND_PRESS";
-    case CORNER_PASSTHROUGH:
-      return "CORNER_PASSTHROUGH";
     case SLIDE_GESTURE:
       return "SLIDE_GESTURE";
     case ONE_FINGER_PASSTHROUGH:
@@ -1232,6 +1142,13 @@ const char* TouchExplorationController::EnumStateToString(State state) {
 
 float TouchExplorationController::GetSplitTapTouchSlop() {
   return gesture_detector_config_.touch_slop * 3;
+}
+
+gfx::PointF TouchExplorationController::ConvertDIPToPixels(
+    const gfx::PointF& location_f) {
+  gfx::Point location(gfx::ToFlooredPoint(location_f));
+  root_window_->GetHost()->ConvertDIPToPixels(&location);
+  return gfx::PointF(location);
 }
 
 }  // namespace ash

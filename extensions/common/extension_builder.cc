@@ -18,14 +18,22 @@ struct ExtensionBuilder::ManifestData {
   std::string name;
   std::vector<std::string> permissions;
   base::Optional<ActionType> action;
-  std::unique_ptr<base::DictionaryValue> extra;
+  base::Optional<BackgroundPage> background_page;
+  base::Optional<std::string> version;
+
+  // A ContentScriptEntry includes a string name, and a vector of string
+  // match patterns.
+  using ContentScriptEntry = std::pair<std::string, std::vector<std::string>>;
+  std::vector<ContentScriptEntry> content_scripts;
+
+  base::Optional<base::Value> extra;
 
   std::unique_ptr<base::DictionaryValue> GetValue() const {
     DictionaryBuilder manifest;
-    manifest.Set("name", name)
-        .Set("manifest_version", 2)
-        .Set("version", "0.1")
-        .Set("description", "some description");
+    manifest.Set(manifest_keys::kName, name)
+        .Set(manifest_keys::kManifestVersion, 2)
+        .Set(manifest_keys::kVersion, version.value_or("0.1"))
+        .Set(manifest_keys::kDescription, "some description");
 
     switch (type) {
       case Type::EXTENSION:
@@ -44,7 +52,7 @@ struct ExtensionBuilder::ManifestData {
       ListBuilder permissions_builder;
       for (const std::string& permission : permissions)
         permissions_builder.Append(permission);
-      manifest.Set("permissions", permissions_builder.Build());
+      manifest.Set(manifest_keys::kPermissions, permissions_builder.Build());
     }
 
     if (action) {
@@ -60,11 +68,52 @@ struct ExtensionBuilder::ManifestData {
       manifest.Set(action_key, std::make_unique<base::DictionaryValue>());
     }
 
+    if (background_page) {
+      DictionaryBuilder background;
+      background.Set("page", "background_page.html");
+      bool persistent = false;
+      switch (*background_page) {
+        case BackgroundPage::PERSISTENT:
+          persistent = true;
+          break;
+        case BackgroundPage::EVENT:
+          persistent = false;
+          break;
+      }
+      background.Set("persistent", persistent);
+      manifest.Set("background", background.Build());
+    }
+
+    if (!content_scripts.empty()) {
+      ListBuilder scripts_value;
+      for (const auto& script : content_scripts) {
+        ListBuilder matches;
+        for (const auto& match : script.second)
+          matches.Append(match);
+        scripts_value.Append(
+            DictionaryBuilder()
+                .Set(manifest_keys::kJs,
+                     ListBuilder().Append(script.first).Build())
+                .Set(manifest_keys::kMatches, matches.Build())
+                .Build());
+      }
+      manifest.Set(manifest_keys::kContentScripts, scripts_value.Build());
+    }
+
     std::unique_ptr<base::DictionaryValue> result = manifest.Build();
-    if (extra)
-      result->MergeDictionary(extra.get());
+    if (extra) {
+      const base::DictionaryValue* extra_dict = nullptr;
+      extra->GetAsDictionary(&extra_dict);
+      result->MergeDictionary(extra_dict);
+    }
 
     return result;
+  }
+
+  base::Value* get_extra() {
+    if (!extra)
+      extra.emplace(base::Value::Type::DICTIONARY);
+    return &extra.value();
   }
 };
 
@@ -84,14 +133,14 @@ ExtensionBuilder::ExtensionBuilder(ExtensionBuilder&& other) = default;
 ExtensionBuilder& ExtensionBuilder::operator=(ExtensionBuilder&& other) =
     default;
 
-scoped_refptr<Extension> ExtensionBuilder::Build() {
+scoped_refptr<const Extension> ExtensionBuilder::Build() {
   CHECK(manifest_data_ || manifest_value_);
 
   if (id_.empty() && manifest_data_)
     id_ = crx_file::id_util::GenerateId(manifest_data_->name);
 
   std::string error;
-  scoped_refptr<Extension> extension = Extension::Create(
+  scoped_refptr<const Extension> extension = Extension::Create(
       path_, location_,
       manifest_data_ ? *manifest_data_->GetValue() : *manifest_value_, flags_,
       id_, &error);
@@ -123,6 +172,27 @@ ExtensionBuilder& ExtensionBuilder::SetAction(ActionType action) {
   return *this;
 }
 
+ExtensionBuilder& ExtensionBuilder::SetBackgroundPage(
+    BackgroundPage background_page) {
+  CHECK(manifest_data_);
+  manifest_data_->background_page = background_page;
+  return *this;
+}
+
+ExtensionBuilder& ExtensionBuilder::AddContentScript(
+    const std::string& script_name,
+    const std::vector<std::string>& match_patterns) {
+  CHECK(manifest_data_);
+  manifest_data_->content_scripts.emplace_back(script_name, match_patterns);
+  return *this;
+}
+
+ExtensionBuilder& ExtensionBuilder::SetVersion(const std::string& version) {
+  CHECK(manifest_data_);
+  manifest_data_->version = version;
+  return *this;
+}
+
 ExtensionBuilder& ExtensionBuilder::SetPath(const base::FilePath& path) {
   path_ = path;
   return *this;
@@ -143,9 +213,9 @@ ExtensionBuilder& ExtensionBuilder::SetManifest(
 ExtensionBuilder& ExtensionBuilder::MergeManifest(
     std::unique_ptr<base::DictionaryValue> manifest) {
   if (manifest_data_) {
-    if (!manifest_data_->extra)
-      manifest_data_->extra = std::make_unique<base::DictionaryValue>();
-    manifest_data_->extra->MergeDictionary(manifest.get());
+    base::DictionaryValue* extra_dict = nullptr;
+    manifest_data_->get_extra()->GetAsDictionary(&extra_dict);
+    extra_dict->MergeDictionary(manifest.get());
   } else {
     manifest_value_->MergeDictionary(manifest.get());
   }
@@ -160,6 +230,19 @@ ExtensionBuilder& ExtensionBuilder::AddFlags(int init_from_value_flags) {
 ExtensionBuilder& ExtensionBuilder::SetID(const std::string& id) {
   id_ = id;
   return *this;
+}
+
+void ExtensionBuilder::SetManifestKeyImpl(base::StringPiece key,
+                                          base::Value value) {
+  CHECK(manifest_data_);
+  manifest_data_->get_extra()->SetKey(key, std::move(value));
+}
+
+void ExtensionBuilder::SetManifestPathImpl(
+    std::initializer_list<base::StringPiece> path,
+    base::Value value) {
+  CHECK(manifest_data_);
+  manifest_data_->get_extra()->SetPath(path, std::move(value));
 }
 
 }  // namespace extensions

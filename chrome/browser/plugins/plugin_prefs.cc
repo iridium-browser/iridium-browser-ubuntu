@@ -72,8 +72,11 @@ scoped_refptr<PluginPrefs> PluginPrefs::GetForProfile(Profile* profile) {
 scoped_refptr<PluginPrefs> PluginPrefs::GetForTestingProfile(
     Profile* profile) {
   return static_cast<PluginPrefs*>(
-      PluginPrefsFactory::GetInstance()->SetTestingFactoryAndUse(
-          profile, &PluginPrefsFactory::CreateForTestingProfile).get());
+      PluginPrefsFactory::GetInstance()
+          ->SetTestingFactoryAndUse(
+              profile,
+              base::BindRepeating(&PluginPrefsFactory::CreateForTestingProfile))
+          .get());
 }
 
 PluginPrefs::PolicyStatus PluginPrefs::PolicyStatusForPlugin(
@@ -121,7 +124,7 @@ void PluginPrefs::SetPrefs(PrefService* prefs) {
   base::FilePath last_internal_dir =
       prefs_->GetFilePath(prefs::kPluginsLastInternalDirectory);
   base::FilePath cur_internal_dir;
-  if (PathService::Get(chrome::DIR_INTERNAL_PLUGINS, &cur_internal_dir) &&
+  if (base::PathService::Get(chrome::DIR_INTERNAL_PLUGINS, &cur_internal_dir) &&
       cur_internal_dir != last_internal_dir) {
     update_internal_dir = true;
     prefs_->SetFilePath(
@@ -256,7 +259,7 @@ void PluginPrefs::OnUpdatePreferences(
   plugins_list->Clear();
 
   base::FilePath internal_dir;
-  if (PathService::Get(chrome::DIR_INTERNAL_PLUGINS, &internal_dir))
+  if (base::PathService::Get(chrome::DIR_INTERNAL_PLUGINS, &internal_dir))
     prefs_->SetFilePath(prefs::kPluginsLastInternalDirectory, internal_dir);
 
   base::AutoLock auto_lock(lock_);
@@ -277,8 +280,7 @@ void PluginPrefs::OnUpdatePreferences(
   }
 
   // Add the plugin groups.
-  for (std::set<base::string16>::const_iterator it = group_names.begin();
-      it != group_names.end(); ++it) {
+  for (auto it = group_names.begin(); it != group_names.end(); ++it) {
     std::unique_ptr<base::DictionaryValue> summary(new base::DictionaryValue());
     summary->SetString("name", *it);
     plugins_list->Append(std::move(summary));

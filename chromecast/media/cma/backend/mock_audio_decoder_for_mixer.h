@@ -27,11 +27,11 @@ class MockAudioDecoderForMixer : public AudioDecoderForMixer {
 
   // AudioDecoderForMixer implementation:
   void Initialize() override;
-  bool Start(int64_t start_pts) override;
+  bool Start(int64_t pts, bool start_playback_asap) override;
   void Stop() override;
   bool Pause() override;
   bool Resume() override;
-  bool SetPlaybackRate(float rate) override;
+  float SetPlaybackRate(float rate) override;
   int64_t GetCurrentPts() const override;
 
  private:

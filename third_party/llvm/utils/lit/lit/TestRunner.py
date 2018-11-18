@@ -2,6 +2,7 @@ from __future__ import absolute_import
 import difflib
 import errno
 import functools
+import io
 import itertools
 import getopt
 import os, signal, subprocess, sys
@@ -12,6 +13,7 @@ import shutil
 import tempfile
 import threading
 
+import io
 try:
     from StringIO import StringIO
 except ImportError:
@@ -37,6 +39,17 @@ kUseCloseFDs = not kIsWindows
 # Use temporary files to replace /dev/null on Windows.
 kAvoidDevNull = kIsWindows
 kDevNull = "/dev/null"
+
+# A regex that matches %dbg(ARG), which lit inserts at the beginning of each
+# run command pipeline such that ARG specifies the pipeline's source line
+# number.  lit later expands each %dbg(ARG) to a command that behaves as a null
+# command in the target shell so that the line number is seen in lit's verbose
+# mode.
+#
+# This regex captures ARG.  ARG must not contain a right parenthesis, which
+# terminates %dbg.  ARG must not contain quotes, in which ARG might be enclosed
+# during expansion.
+kPdbgRegex = '%dbg\(([^)\'"]*)\)'
 
 class ShellEnvironment(object):
 
@@ -386,12 +399,58 @@ def executeBuiltinDiff(cmd, cmd_shenv):
             return path, sorted(child_trees)
 
     def compareTwoFiles(filepaths):
+        compare_bytes = False
+        encoding = None
         filelines = []
         for file in filepaths:
-            with open(file, 'r') as f:
+            try:
+                with open(file, 'r') as f:
+                    filelines.append(f.readlines())
+            except UnicodeDecodeError:
+                try:
+                    with io.open(file, 'r', encoding="utf-8") as f:
+                        filelines.append(f.readlines())
+                    encoding = "utf-8"
+                except:
+                    compare_bytes = True
+
+        if compare_bytes:
+            return compareTwoBinaryFiles(filepaths)
+        else:
+            return compareTwoTextFiles(filepaths, encoding)
+
+    def compareTwoBinaryFiles(filepaths):
+        filelines = []
+        for file in filepaths:
+            with open(file, 'rb') as f:
                 filelines.append(f.readlines())
 
-        exitCode = 0 
+        exitCode = 0
+        if hasattr(difflib, 'diff_bytes'):
+            # python 3.5 or newer
+            diffs = difflib.diff_bytes(difflib.unified_diff, filelines[0], filelines[1], filepaths[0].encode(), filepaths[1].encode())
+            diffs = [diff.decode() for diff in diffs]
+        else:
+            # python 2.7
+            func = difflib.unified_diff if unified_diff else difflib.context_diff
+            diffs = func(filelines[0], filelines[1], filepaths[0], filepaths[1])
+
+        for diff in diffs:
+            stdout.write(diff)
+            exitCode = 1
+        return exitCode
+
+    def compareTwoTextFiles(filepaths, encoding):
+        filelines = []
+        for file in filepaths:
+            if encoding is None:
+                with open(file, 'r') as f:
+                    filelines.append(f.readlines())
+            else:
+                with io.open(file, 'r', encoding=encoding) as f:
+                    filelines.append(f.readlines())
+
+        exitCode = 0
         def compose2(f, g):
             return lambda x: f(g(x))
 
@@ -741,6 +800,13 @@ def _executeShCmd(cmd, shenv, results, timeoutHelper):
         results.append(cmdResult)
         return cmdResult.exitCode
 
+    if cmd.commands[0].args[0] == ':':
+        if len(cmd.commands) != 1:
+            raise InternalShellError(cmd.commands[0], "Unsupported: ':' "
+                                     "cannot be part of a pipeline")
+        results.append(ShellCommandResult(cmd.commands[0], '', '', 0, False))
+        return 0;
+
     procs = []
     default_stdin = subprocess.PIPE
     stderrTempFiles = []
@@ -797,8 +863,14 @@ def _executeShCmd(cmd, shenv, results, timeoutHelper):
 
         # Replace uses of /dev/null with temporary files.
         if kAvoidDevNull:
+            # In Python 2.x, basestring is the base class for all string (including unicode)
+            # In Python 3.x, basestring no longer exist and str is always unicode
+            try:
+                str_type = basestring
+            except NameError:
+                str_type = str
             for i,arg in enumerate(args):
-                if isinstance(arg, basestring) and kDevNull in arg:
+                if isinstance(arg, str_type) and kDevNull in arg:
                     f = tempfile.NamedTemporaryFile(delete=False)
                     f.close()
                     named_temp_files.append(f.name)
@@ -807,7 +879,7 @@ def _executeShCmd(cmd, shenv, results, timeoutHelper):
         # Expand all glob expressions
         args = expand_glob_expressions(args, cmd_shenv.cwd)
         if is_builtin_cmd:
-            args.insert(0, "python")
+            args.insert(0, sys.executable)
             args[1] = os.path.join(builtin_commands_dir ,args[1] + ".py")
 
         # On Windows, do our own command line quoting for better compatibility
@@ -867,11 +939,6 @@ def _executeShCmd(cmd, shenv, results, timeoutHelper):
     for i,f in stderrTempFiles:
         f.seek(0, 0)
         procData[i] = (procData[i][0], f.read())
-
-    def to_string(bytes):
-        if isinstance(bytes, str):
-            return bytes
-        return bytes.encode('utf-8')
 
     exitCode = None
     for i,(out,err) in enumerate(procData):
@@ -933,7 +1000,8 @@ def _executeShCmd(cmd, shenv, results, timeoutHelper):
 
 def executeScriptInternal(test, litConfig, tmpBase, commands, cwd):
     cmds = []
-    for ln in commands:
+    for i, ln in enumerate(commands):
+        ln = commands[i] = re.sub(kPdbgRegex, ": '\\1'; ", ln)
         try:
             cmds.append(ShUtil.ShParser(ln, litConfig.isWindows,
                                         test.config.pipefail).parse())
@@ -1017,9 +1085,16 @@ def executeScript(test, litConfig, tmpBase, commands, cwd):
       mode += 'b'  # Avoid CRLFs when writing bash scripts.
     f = open(script, mode)
     if isWin32CMDEXE:
-        f.write('@echo off\n')
-        f.write('\nif %ERRORLEVEL% NEQ 0 EXIT\n'.join(commands))
+        for i, ln in enumerate(commands):
+            commands[i] = re.sub(kPdbgRegex, "echo '\\1' > nul && ", ln)
+        if litConfig.echo_all_commands:
+            f.write('@echo on\n')
+        else:
+            f.write('@echo off\n')
+        f.write('\n@if %ERRORLEVEL% NEQ 0 EXIT\n'.join(commands))
     else:
+        for i, ln in enumerate(commands):
+            commands[i] = re.sub(kPdbgRegex, ": '\\1'; ", ln)
         if test.config.pipefail:
             f.write('set -o pipefail;')
         if litConfig.echo_all_commands:
@@ -1252,7 +1327,9 @@ class IntegratedTestKeywordParser(object):
         self.parser = parser
 
         if kind == ParserKind.COMMAND:
-            self.parser = self._handleCommand
+            self.parser = lambda line_number, line, output: \
+                                 self._handleCommand(line_number, line, output,
+                                                     self.keyword)
         elif kind == ParserKind.LIST:
             self.parser = self._handleList
         elif kind == ParserKind.BOOLEAN_EXPR:
@@ -1283,7 +1360,7 @@ class IntegratedTestKeywordParser(object):
         return (not line.strip() or output)
 
     @staticmethod
-    def _handleCommand(line_number, line, output):
+    def _handleCommand(line_number, line, output, keyword):
         """A helper for parsing COMMAND type keywords"""
         # Trim trailing whitespace.
         line = line.rstrip()
@@ -1302,6 +1379,14 @@ class IntegratedTestKeywordParser(object):
         else:
             if output is None:
                 output = []
+            pdbg = "%dbg({keyword} at line {line_number})".format(
+                keyword=keyword,
+                line_number=line_number)
+            assert re.match(kPdbgRegex + "$", pdbg), \
+                   "kPdbgRegex expected to match actual %dbg usage"
+            line = "{pdbg} {real_command}".format(
+                pdbg=pdbg,
+                real_command=line)
             output.append(line)
         return output
 

@@ -12,7 +12,7 @@
 #include "components/offline_pages/core/prefetch/prefetch_dispatcher.h"
 #include "components/offline_pages/core/prefetch/prefetch_network_request_factory.h"
 #include "components/offline_pages/core/prefetch/store/prefetch_store.h"
-#include "sql/connection.h"
+#include "sql/database.h"
 #include "sql/statement.h"
 #include "sql/transaction.h"
 
@@ -24,7 +24,7 @@ GetOperationTask::OperationResultList MakeError() {
   return nullptr;
 }
 
-bool UpdatePrefetchItemsForOperationSync(sql::Connection* db,
+bool UpdatePrefetchItemsForOperationSync(sql::Database* db,
                                          const std::string& operation_name) {
   static const char kSql[] =
       "UPDATE prefetch_items SET"
@@ -41,7 +41,7 @@ bool UpdatePrefetchItemsForOperationSync(sql::Connection* db,
 }
 
 std::unique_ptr<std::vector<std::string>> AvailableOperationsSync(
-    sql::Connection* db) {
+    sql::Database* db) {
   static const char kSql[] =
       "SELECT DISTINCT operation_name FROM prefetch_items WHERE state = ?";
 
@@ -56,10 +56,7 @@ std::unique_ptr<std::vector<std::string>> AvailableOperationsSync(
 }
 
 GetOperationTask::OperationResultList SelectOperationsToFetch(
-    sql::Connection* db) {
-  if (!db)
-    return MakeError();
-
+    sql::Database* db) {
   sql::Transaction transaction(db);
   if (!transaction.Begin())
     return MakeError();
@@ -84,10 +81,10 @@ GetOperationTask::OperationResultList SelectOperationsToFetch(
 GetOperationTask::GetOperationTask(
     PrefetchStore* store,
     PrefetchNetworkRequestFactory* request_factory,
-    const PrefetchRequestFinishedCallback& callback)
+    PrefetchRequestFinishedCallback callback)
     : prefetch_store_(store),
       request_factory_(request_factory),
-      callback_(callback),
+      callback_(std::move(callback)),
       weak_factory_(this) {}
 
 GetOperationTask::~GetOperationTask() {}
@@ -96,14 +93,16 @@ void GetOperationTask::Run() {
   prefetch_store_->Execute(
       base::BindOnce(&SelectOperationsToFetch),
       base::BindOnce(&GetOperationTask::StartGetOperationRequests,
-                     weak_factory_.GetWeakPtr()));
+                     weak_factory_.GetWeakPtr()),
+      MakeError());
 }
 
 void GetOperationTask::StartGetOperationRequests(
     OperationResultList operation_names) {
   if (operation_names) {
     for (std::string& operation : *operation_names) {
-      request_factory_->MakeGetOperationRequest(operation, callback_);
+      request_factory_->MakeGetOperationRequest(operation,
+                                                std::move(callback_));
     }
   }
 

@@ -2,11 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// https://immersive-web.github.io/webxr/spec/latest/#xrdevice-interface
+// https://immersive-web.github.io/webxr/#xrdevice-interface
 [
     SecureContext,
+    Exposed=Window,
     OriginTrialEnabled=WebXR
-] interface XRDevice : EventTarget {
-  [CallWith=ScriptState, MeasureAs=XRSupportsSession] Promise supportsSession([PermissiveDictionaryConversion] optional XRSessionCreationOptions options);
-  [CallWith=ScriptState, MeasureAs=XRRequestSession] Promise requestSession([PermissiveDictionaryConversion] optional XRSessionCreationOptions options);
+] interface XRDevice {
+  [CallWith=ScriptState, MeasureAs=XRSupportsSession] Promise<void> supportsSession([PermissiveDictionaryConversion] optional XRSessionCreationOptions options);
+  [CallWith=ScriptState, MeasureAs=XRRequestSession] Promise<XRSession> requestSession([PermissiveDictionaryConversion] optional XRSessionCreationOptions options);
 };

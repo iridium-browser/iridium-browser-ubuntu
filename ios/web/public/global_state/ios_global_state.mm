@@ -8,7 +8,8 @@
 #include "base/command_line.h"
 #include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
-#include "base/task_scheduler/initialization_util.h"
+#include "base/message_loop/message_loop_current.h"
+#include "base/task/task_scheduler/initialization_util.h"
 #include "net/base/network_change_notifier.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -58,10 +59,10 @@ void BuildMessageLoop() {
   dispatch_once(&once_token, ^{
     // Create a MessageLoop if one does not already exist for the current
     // thread.
-    if (!base::MessageLoop::current()) {
+    if (!base::MessageLoopCurrent::Get()) {
       g_message_loop = new base::MessageLoopForUI();
     }
-    base::MessageLoopForUI::current()->Attach();
+    base::MessageLoopCurrentForUI::Get()->Attach();
   });
 }
 

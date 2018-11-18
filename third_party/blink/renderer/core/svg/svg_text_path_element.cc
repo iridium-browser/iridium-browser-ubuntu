@@ -53,7 +53,8 @@ inline SVGTextPathElement::SVGTextPathElement(Document& document)
       start_offset_(
           SVGAnimatedLength::Create(this,
                                     SVGNames::startOffsetAttr,
-                                    SVGLength::Create(SVGLengthMode::kWidth))),
+                                    SVGLengthMode::kWidth,
+                                    SVGLength::Initial::kUnitlessZero)),
       method_(SVGAnimatedEnumeration<SVGTextPathMethodType>::Create(
           this,
           SVGNames::methodAttr,
@@ -137,15 +138,15 @@ void SVGTextPathElement::BuildPendingResource() {
 }
 
 Node::InsertionNotificationRequest SVGTextPathElement::InsertedInto(
-    ContainerNode* root_parent) {
+    ContainerNode& root_parent) {
   SVGTextContentElement::InsertedInto(root_parent);
   BuildPendingResource();
   return kInsertionDone;
 }
 
-void SVGTextPathElement::RemovedFrom(ContainerNode* root_parent) {
+void SVGTextPathElement::RemovedFrom(ContainerNode& root_parent) {
   SVGTextContentElement::RemovedFrom(root_parent);
-  if (root_parent->isConnected())
+  if (root_parent.isConnected())
     ClearResourceReferences();
 }
 

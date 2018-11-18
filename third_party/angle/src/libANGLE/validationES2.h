@@ -9,7 +9,8 @@
 #ifndef LIBANGLE_VALIDATION_ES2_H_
 #define LIBANGLE_VALIDATION_ES2_H_
 
-#include "libANGLE/PackedGLEnums.h"
+#include "common/PackedEnums.h"
+#include "libANGLE/validationES.h"
 
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
@@ -131,17 +132,17 @@ bool ValidateTexImage2D(Context *context,
                         GLenum format,
                         GLenum type,
                         const void *pixels);
-bool ValidateTexImage2DRobust(Context *context,
-                              TextureTarget target,
-                              GLint level,
-                              GLint internalformat,
-                              GLsizei width,
-                              GLsizei height,
-                              GLint border,
-                              GLenum format,
-                              GLenum type,
-                              GLsizei bufSize,
-                              const void *pixels);
+bool ValidateTexImage2DRobustANGLE(Context *context,
+                                   TextureTarget target,
+                                   GLint level,
+                                   GLint internalformat,
+                                   GLsizei width,
+                                   GLsizei height,
+                                   GLint border,
+                                   GLenum format,
+                                   GLenum type,
+                                   GLsizei bufSize,
+                                   const void *pixels);
 bool ValidateTexSubImage2D(Context *context,
                            TextureTarget target,
                            GLint level,
@@ -577,12 +578,15 @@ bool ValidateVertexAttrib4f(Context *context,
 bool ValidateVertexAttrib4fv(Context *context, GLuint index, const GLfloat *values);
 bool ValidateViewport(Context *context, GLint x, GLint y, GLsizei width, GLsizei height);
 bool ValidateDrawElements(Context *context,
-                          GLenum mode,
+                          PrimitiveMode mode,
                           GLsizei count,
                           GLenum type,
                           const void *indices);
 
-bool ValidateDrawArrays(Context *context, GLenum mode, GLint first, GLsizei count);
+inline bool ValidateDrawArrays(Context *context, PrimitiveMode mode, GLint first, GLsizei count)
+{
+    return ValidateDrawArraysCommon(context, mode, first, count, 1);
+}
 
 bool ValidateGetFramebufferAttachmentParameteriv(Context *context,
                                                  GLenum target,
@@ -717,7 +721,35 @@ bool ValidateTexStorage3DEXT(Context *context,
                              GLsizei width,
                              GLsizei height,
                              GLsizei depth);
+bool ValidateMaxShaderCompilerThreadsKHR(Context *context, GLuint count);
+}  // namespace gl
 
+#include "libANGLE/ErrorStrings.h"
+
+namespace gl
+{
+ANGLE_INLINE bool ValidateUniform2f(Context *context, GLint location, GLfloat x, GLfloat y)
+{
+    return ValidateUniform(context, GL_FLOAT_VEC2, location, 1);
+}
+
+ANGLE_INLINE bool ValidateBindBuffer(Context *context, BufferBinding target, GLuint buffer)
+{
+    if (!context->isValidBufferBinding(target))
+    {
+        context->validationError(GL_INVALID_ENUM, kErrorInvalidBufferTypes);
+        return false;
+    }
+
+    if (!context->getGLState().isBindGeneratesResourceEnabled() &&
+        !context->isBufferGenerated(buffer))
+    {
+        context->validationError(GL_INVALID_OPERATION, kErrorObjectNotGenerated);
+        return false;
+    }
+
+    return true;
+}
 }  // namespace gl
 
 #endif  // LIBANGLE_VALIDATION_ES2_H_

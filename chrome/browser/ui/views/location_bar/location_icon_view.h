@@ -7,8 +7,6 @@
 
 #include "base/macros.h"
 #include "chrome/browser/ui/views/location_bar/icon_label_bubble_view.h"
-#include "ui/gfx/animation/animation_delegate.h"
-#include "ui/gfx/animation/slide_animation.h"
 
 class LocationBarView;
 
@@ -29,9 +27,12 @@ class LocationIconView : public IconLabelBubbleView {
   bool GetTooltipText(const gfx::Point& p,
                       base::string16* tooltip) const override;
   SkColor GetTextColor() const override;
+  bool ShouldShowSeparator() const override;
+  bool ShouldShowExtraEndSpace() const override;
   bool ShowBubble(const ui::Event& event) override;
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
   bool IsBubbleShowing() const override;
+  SkColor GetInkDropBaseColor() const override;
 
   // Whether we should show the tooltip for this icon or not.
   void set_show_tooltip(bool show_tooltip) { show_tooltip_ = show_tooltip; }
@@ -51,22 +52,18 @@ class LocationIconView : public IconLabelBubbleView {
  protected:
   // IconLabelBubbleView:
   bool IsTriggerableEvent(const ui::Event& event) override;
-
- private:
-  // IconLabelBubbleView:
   double WidthMultiplier() const override;
 
-  // gfx::AnimationDelegate:
-  void AnimationProgressed(const gfx::Animation*) override;
-
+ private:
   // Returns what the minimum size would be if the preferred size were |size|.
   gfx::Size GetMinimumSizeForPreferredSize(gfx::Size size) const;
+
+  int GetSlideDurationTime() const override;
 
   // True if hovering this view should display a tooltip.
   bool show_tooltip_;
 
   LocationBarView* location_bar_;
-  gfx::SlideAnimation animation_;
 
   DISALLOW_COPY_AND_ASSIGN(LocationIconView);
 };

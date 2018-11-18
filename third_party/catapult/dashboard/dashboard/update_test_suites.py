@@ -8,27 +8,42 @@ import collections
 import logging
 
 from google.appengine.api import datastore_errors
+from google.appengine.ext import ndb
 
-from dashboard import list_tests
 from dashboard.common import datastore_hooks
+from dashboard.common import descriptor
 from dashboard.common import request_handler
 from dashboard.common import stored_object
+from dashboard.common import namespaced_stored_object
+from dashboard.common import utils
 from dashboard.models import graph_data
 
 # TestMetadata suite cache key.
 _LIST_SUITES_CACHE_KEY = 'list_tests_get_test_suites'
 
+TEST_SUITES_2_CACHE_KEY = 'test_suites_2'
+
+
+@ndb.synctasklet
+def FetchCachedTestSuites2():
+  result = yield FetchCachedTestSuites2Async()
+  raise ndb.Return(result)
+
+
+@ndb.tasklet
+def FetchCachedTestSuites2Async():
+  results = yield namespaced_stored_object.GetAsync(TEST_SUITES_2_CACHE_KEY)
+  raise ndb.Return(results)
+
 
 def FetchCachedTestSuites():
   """Fetches cached test suite data."""
-  cache_key = _NamespaceKey(_LIST_SUITES_CACHE_KEY)
-  cached = stored_object.Get(cache_key)
+  cached = namespaced_stored_object.Get(_LIST_SUITES_CACHE_KEY)
   if cached is None:
     # If the cache test suite list is not set, update it before fetching.
     # This is for convenience when testing sending of data to a local instance.
-    namespace = datastore_hooks.GetNamespace()
-    UpdateTestSuites(namespace)
-    cached = stored_object.Get(cache_key)
+    UpdateTestSuites(datastore_hooks.GetNamespace())
+    cached = namespaced_stored_object.Get(_LIST_SUITES_CACHE_KEY)
   return cached
 
 
@@ -56,14 +71,44 @@ def UpdateTestSuites(permissions_namespace):
   """Updates test suite data for either internal or external users."""
   logging.info('Updating test suite data for: %s', permissions_namespace)
   suite_dict = _CreateTestSuiteDict()
-  key = _NamespaceKey(_LIST_SUITES_CACHE_KEY, namespace=permissions_namespace)
+  key = namespaced_stored_object.NamespaceKey(
+      _LIST_SUITES_CACHE_KEY, permissions_namespace)
   stored_object.Set(key, suite_dict)
 
+  stored_object.Set(namespaced_stored_object.NamespaceKey(
+      TEST_SUITES_2_CACHE_KEY, permissions_namespace), _ListTestSuites())
 
-def _NamespaceKey(key, namespace=None):
-  if not namespace:
-    namespace = datastore_hooks.GetNamespace()
-  return '%s__%s' % (namespace, key)
+
+@ndb.tasklet
+def _ListTestSuitesAsync(test_suites, partial_tests, parent_test=None):
+  # Some test suites are composed of multiple test path components. See
+  # Descriptor. When a TestMetadata key doesn't contain enough test path
+  # components to compose a full test suite, add its key to partial_tests so
+  # that the caller can run another query with parent_test.
+  query = graph_data.TestMetadata.query()
+  query = query.filter(graph_data.TestMetadata.parent_test == parent_test)
+  query = query.filter(graph_data.TestMetadata.deprecated == False)
+  keys = yield query.fetch_async(keys_only=True)
+  for key in keys:
+    test_path = utils.TestPath(key)
+    desc = yield descriptor.Descriptor.FromTestPathAsync(test_path)
+    if desc.test_suite:
+      test_suites.add(desc.test_suite)
+    elif partial_tests is not None:
+      partial_tests.add(key)
+    else:
+      logging.error('Unable to parse "%s"', test_path)
+
+
+@ndb.synctasklet
+def _ListTestSuites():
+  test_suites = set()
+  partial_tests = set()
+  yield _ListTestSuitesAsync(test_suites, partial_tests)
+  yield [_ListTestSuitesAsync(test_suites, None, key) for key in partial_tests]
+  test_suites = list(test_suites)
+  test_suites.sort()
+  raise ndb.Return(test_suites)
 
 
 def _CreateTestSuiteDict():
@@ -81,15 +126,14 @@ def _CreateTestSuiteDict():
       {
           'my_test_suite': {
               'mas': {'ChromiumPerf': {'mac': False, 'linux': False}},
-              'mon': ['average_commit_time/www.yahoo.com'],
               'dep': True,
               'des': 'A description.'
           },
           ...
       }
 
-    Where 'mas', 'mon', 'dep', and 'des' are abbreviations for 'masters',
-    'monitored', 'deprecated', and 'description', respectively.
+    Where 'mas', 'dep', and 'des' are abbreviations for 'masters',
+    'deprecated', and 'description', respectively.
   """
   suites = _FetchSuites()
   result = collections.defaultdict(lambda: {'suites': []})
@@ -113,10 +157,6 @@ def _CreateTestSuiteDict():
 
     if all(s.deprecated for s in current_suites):
       v['dep'] = True
-
-    monitored = _FetchMonitoredForSuite(k)
-    if monitored:
-      v['mon'] = monitored
 
     for s in current_suites:
       master_name = s.master_name
@@ -149,21 +189,6 @@ def _FetchSuites():
   except datastore_errors.Timeout:
     logging.error('Timeout after fetching %d test suites.', len(suites))
   return suites
-
-
-def _FetchMonitoredForSuite(suite):
-  """Fetches the set of all monitored tests for a suite across all masters/bots.
-  """
-  suite_pattern = '*/*/%s' % suite
-  suites = list_tests.GetTestsMatchingPattern(
-      suite_pattern, list_entities=True, use_cache=False)
-
-  monitored = []
-  for s in suites:
-    monitored.extend(s.monitored)
-  monitored = sorted(list(set(_GetTestSubPath(p) for p in monitored)))
-
-  return monitored
 
 
 def _GetTestSubPath(key):

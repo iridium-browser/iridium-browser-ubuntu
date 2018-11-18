@@ -30,6 +30,7 @@ class COMPONENT_EXPORT(NETWORK_CPP_BASE) ResourceRequestBody
   static scoped_refptr<ResourceRequestBody> CreateFromBytes(const char* bytes,
                                                             size_t length);
 
+  void AppendBytes(std::vector<char> bytes);
   void AppendBytes(const char* bytes, int bytes_len);
   void AppendFileRange(const base::FilePath& file_path,
                        uint64_t offset,
@@ -43,7 +44,19 @@ class COMPONENT_EXPORT(NETWORK_CPP_BASE) ResourceRequestBody
                           uint64_t length,
                           const base::Time& expected_modification_time);
 
+  // Appends a blob. If the 2-parameter version is used, the resulting body can
+  // be read by Blink, which is needed when the body is sent to Blink, e.g., for
+  // service worker interception. The length must be size of the entire blob,
+  // not a subrange of it. If the length is unknown, use the 1-parameter
+  // version, but this means the body/blob won't be readable by Blink (that's OK
+  // if this ResourceRequestBody will only be sent to the browser process and
+  // won't be sent to Blink).
+  //
+  // TODO(crbug.com/846167): Remove these functions when NetworkService is
+  // enabled, as blobs are passed via AppendDataPipe in that case.
   void AppendBlob(const std::string& uuid);
+  void AppendBlob(const std::string& uuid, uint64_t length);
+
   void AppendDataPipe(mojom::DataPipeGetterPtr data_pipe_getter);
 
   // |chunked_data_pipe_getter| will provide the upload body for a chunked

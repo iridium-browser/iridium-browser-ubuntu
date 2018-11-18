@@ -24,15 +24,18 @@
 
 #include "third_party/blink/renderer/core/html/html_iframe_element.h"
 
+#include "third_party/blink/renderer/bindings/core/v8/string_or_trusted_html.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_html_iframe_element.h"
 #include "third_party/blink/renderer/core/css_property_names.h"
+#include "third_party/blink/renderer/core/dom/element.h"
+#include "third_party/blink/renderer/core/feature_policy/iframe_policy.h"
 #include "third_party/blink/renderer/core/frame/csp/content_security_policy.h"
 #include "third_party/blink/renderer/core/frame/use_counter.h"
 #include "third_party/blink/renderer/core/html/html_document.h"
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/core/layout/layout_iframe.h"
-#include "third_party/blink/renderer/core/page/page.h"
-#include "third_party/blink/renderer/core/policy/iframe_policy.h"
+#include "third_party/blink/renderer/core/loader/document_loader.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 
 namespace blink {
@@ -55,6 +58,13 @@ void HTMLIFrameElement::Trace(blink::Visitor* visitor) {
 }
 
 HTMLIFrameElement::~HTMLIFrameElement() = default;
+
+const HashSet<AtomicString>& HTMLIFrameElement::GetCheckedAttributeNames()
+    const {
+  DEFINE_STATIC_LOCAL(HashSet<AtomicString>, attribute_set,
+                      ({"src", "srcdoc"}));
+  return attribute_set;
+}
 
 void HTMLIFrameElement::SetCollapsed(bool collapse) {
   if (collapsed_by_client_ == collapse)
@@ -170,8 +180,7 @@ void HTMLIFrameElement::ParseAttribute(
       FrameOwnerPropertiesChanged();
       UpdateContainerPolicy();
     }
-  } else if (RuntimeEnabledFeatures::EmbedderCSPEnforcementEnabled() &&
-             name == cspAttr) {
+  } else if (name == cspAttr) {
     if (!ContentSecurityPolicy::IsValidCSPAttr(
             value.GetString(), GetDocument().RequiredCSP().GetString())) {
       required_csp_ = g_null_atom;
@@ -188,8 +197,7 @@ void HTMLIFrameElement::ParseAttribute(
     if (allow_ != value) {
       allow_ = value;
       Vector<String> messages;
-      bool old_syntax = false;
-      UpdateContainerPolicy(&messages, &old_syntax);
+      UpdateContainerPolicy(&messages);
       if (!messages.IsEmpty()) {
         for (const String& message : messages) {
           GetDocument().AddConsoleMessage(ConsoleMessage::Create(
@@ -197,14 +205,8 @@ void HTMLIFrameElement::ParseAttribute(
         }
       }
       if (!value.IsEmpty()) {
-        if (old_syntax) {
-          UseCounter::Count(
-              GetDocument(),
-              WebFeature::kFeaturePolicyAllowAttributeDeprecatedSyntax);
-        } else {
-          UseCounter::Count(GetDocument(),
-                            WebFeature::kFeaturePolicyAllowAttribute);
-        }
+        UseCounter::Count(GetDocument(),
+                          WebFeature::kFeaturePolicyAllowAttribute);
       }
     }
   } else {
@@ -214,8 +216,8 @@ void HTMLIFrameElement::ParseAttribute(
     // proper solution.
     // To avoid polluting the console, this is being recorded only once per
     // page.
-    if (name == "gesture" && value == "media" && GetDocument().GetPage() &&
-        !GetDocument().GetPage()->GetUseCounter().HasRecordedMeasurement(
+    if (name == "gesture" && value == "media" && GetDocument().Loader() &&
+        !GetDocument().Loader()->GetUseCounter().HasRecordedMeasurement(
             WebFeature::kHTMLIFrameElementGestureMedia)) {
       UseCounter::Count(GetDocument(),
                         WebFeature::kHTMLIFrameElementGestureMedia);
@@ -233,55 +235,31 @@ void HTMLIFrameElement::ParseAttribute(
 }
 
 ParsedFeaturePolicy HTMLIFrameElement::ConstructContainerPolicy(
-    Vector<String>* messages,
-    bool* old_syntax) const {
+    Vector<String>* messages) const {
   scoped_refptr<const SecurityOrigin> src_origin = GetOriginForFeaturePolicy();
   scoped_refptr<const SecurityOrigin> self_origin =
       GetDocument().GetSecurityOrigin();
-  ParsedFeaturePolicy container_policy = ParseFeaturePolicyAttribute(
-      allow_, self_origin, src_origin, messages, old_syntax);
+  ParsedFeaturePolicy container_policy =
+      ParseFeaturePolicyAttribute(allow_, self_origin, src_origin, messages);
 
   // If allowfullscreen attribute is present and no fullscreen policy is set,
   // enable the feature for all origins.
   if (AllowFullscreen()) {
-    bool has_fullscreen_policy = false;
-    for (const auto& declaration : container_policy) {
-      if (declaration.feature == mojom::FeaturePolicyFeature::kFullscreen) {
-        has_fullscreen_policy = true;
-        if (messages) {
-          messages->push_back(
-              "allow attribute is overriding 'allowfullscreen'.");
-        }
-        break;
-      }
-    }
-    if (!has_fullscreen_policy) {
-      ParsedFeaturePolicyDeclaration whitelist;
-      whitelist.feature = mojom::FeaturePolicyFeature::kFullscreen;
-      whitelist.matches_all_origins = true;
-      container_policy.push_back(whitelist);
+    bool policy_changed = AllowFeatureEverywhereIfNotPresent(
+        mojom::FeaturePolicyFeature::kFullscreen, container_policy);
+    if (!policy_changed && messages) {
+      messages->push_back(
+          "Allow attribute will take precedence over 'allowfullscreen'.");
     }
   }
   // If the allowpaymentrequest attribute is present and no 'payment' policy is
   // set, enable the feature for all origins.
   if (AllowPaymentRequest()) {
-    bool has_payment_policy = false;
-    for (const auto& declaration : container_policy) {
-      if (declaration.feature == mojom::FeaturePolicyFeature::kPayment) {
-        has_payment_policy = true;
-        if (messages) {
-          messages->push_back(
-              "allow attribute is overriding 'allowpaymentrequest'.");
-        }
-        break;
-      }
-    }
-    if (!has_payment_policy) {
-      ParsedFeaturePolicyDeclaration whitelist;
-      whitelist.feature = mojom::FeaturePolicyFeature::kPayment;
-      whitelist.matches_all_origins = true;
-      whitelist.origins = std::vector<url::Origin>(0UL);
-      container_policy.push_back(whitelist);
+    bool policy_changed = AllowFeatureEverywhereIfNotPresent(
+        mojom::FeaturePolicyFeature::kPayment, container_policy);
+    if (!policy_changed && messages) {
+      messages->push_back(
+          "Allow attribute will take precedence over 'allowpaymentrequest'.");
     }
   }
 
@@ -302,11 +280,11 @@ LayoutObject* HTMLIFrameElement::CreateLayoutObject(const ComputedStyle&) {
 }
 
 Node::InsertionNotificationRequest HTMLIFrameElement::InsertedInto(
-    ContainerNode* insertion_point) {
+    ContainerNode& insertion_point) {
   InsertionNotificationRequest result =
       HTMLFrameElementBase::InsertedInto(insertion_point);
 
-  if (insertion_point->IsInDocumentTree() && GetDocument().IsHTMLDocument()) {
+  if (insertion_point.IsInDocumentTree() && GetDocument().IsHTMLDocument()) {
     ToHTMLDocument(GetDocument()).AddNamedItem(name_);
 
     if (!ContentSecurityPolicy::IsValidCSPAttr(
@@ -326,9 +304,9 @@ Node::InsertionNotificationRequest HTMLIFrameElement::InsertedInto(
   return result;
 }
 
-void HTMLIFrameElement::RemovedFrom(ContainerNode* insertion_point) {
+void HTMLIFrameElement::RemovedFrom(ContainerNode& insertion_point) {
   HTMLFrameElementBase::RemovedFrom(insertion_point);
-  if (insertion_point->IsInDocumentTree() && GetDocument().IsHTMLDocument())
+  if (insertion_point.IsInDocumentTree() && GetDocument().IsHTMLDocument())
     ToHTMLDocument(GetDocument()).RemoveNamedItem(name_);
 }
 

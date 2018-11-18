@@ -10,7 +10,7 @@
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/sequence_checker.h"
-#include "base/test/histogram_tester.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "chrome/browser/safe_browsing/certificate_reporting_service.h"
 #include "content/public/test/test_browser_thread.h"
 #include "content/public/test/test_browser_thread_bundle.h"
@@ -194,7 +194,6 @@ class CertificateReportingServiceTestHelper
   void SendResponse(network::mojom::URLLoaderClientPtr client, bool fail);
 
   // network::SharedURLLoaderFactory
-  std::unique_ptr<network::SharedURLLoaderFactoryInfo> Clone() override;
   void CreateLoaderAndStart(network::mojom::URLLoaderRequest request,
                             int32_t routing_id,
                             int32_t request_id,
@@ -203,6 +202,8 @@ class CertificateReportingServiceTestHelper
                             network::mojom::URLLoaderClientPtr client,
                             const net::MutableNetworkTrafficAnnotationTag&
                                 traffic_annotation) override;
+  void Clone(network::mojom::URLLoaderFactoryRequest request) override;
+  std::unique_ptr<network::SharedURLLoaderFactoryInfo> Clone() override;
 
   ReportSendingResult expected_report_result_;
 

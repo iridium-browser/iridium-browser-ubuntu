@@ -9,7 +9,6 @@
 #include <algorithm>
 
 #include "fpdfsdk/cpdfsdk_formfillenvironment.h"
-#include "fxjs/JS_Define.h"
 #include "fxjs/cjs_annot.h"
 #include "fxjs/cjs_app.h"
 #include "fxjs/cjs_border.h"
@@ -39,40 +38,17 @@
 #include "fxjs/cjs_timerobj.h"
 #include "fxjs/cjs_util.h"
 #include "fxjs/cjs_zoomtype.h"
+#include "fxjs/js_define.h"
 #include "public/fpdf_formfill.h"
+#include "third_party/base/ptr_util.h"
 #include "third_party/base/stl_util.h"
 
 #ifdef PDF_ENABLE_XFA
 #include "fxjs/cfxjse_value.h"
 #endif  // PDF_ENABLE_XFA
 
-// static
-void IJS_Runtime::Initialize(unsigned int slot, void* isolate) {
-  FXJS_Initialize(slot, reinterpret_cast<v8::Isolate*>(isolate));
-}
-
-// static
-void IJS_Runtime::Destroy() {
-  FXJS_Release();
-}
-
-// static
-std::unique_ptr<IJS_Runtime> IJS_Runtime::Create(
-    CPDFSDK_FormFillEnvironment* pFormFillEnv) {
-  return pdfium::MakeUnique<CJS_Runtime>(pFormFillEnv);
-}
-
-// static
-CJS_Runtime* CJS_Runtime::RuntimeFromIsolateCurrentContext(
-    v8::Isolate* pIsolate) {
-  return static_cast<CJS_Runtime*>(
-      CFXJS_Engine::EngineFromIsolateCurrentContext(pIsolate));
-}
-
 CJS_Runtime::CJS_Runtime(CPDFSDK_FormFillEnvironment* pFormFillEnv)
-    : m_pFormFillEnv(pFormFillEnv),
-      m_bBlocking(false),
-      m_isolateManaged(false) {
+    : m_pFormFillEnv(pFormFillEnv) {
   v8::Isolate* pIsolate = nullptr;
 
   IPDF_JSPLATFORM* pPlatform = m_pFormFillEnv->GetFormFillInfo()->m_pJsPlatform;
@@ -80,7 +56,7 @@ CJS_Runtime::CJS_Runtime(CPDFSDK_FormFillEnvironment* pFormFillEnv)
     unsigned int embedderDataSlot = 0;
     v8::Isolate* pExternalIsolate = nullptr;
     if (pPlatform->version == 2) {
-      pExternalIsolate = reinterpret_cast<v8::Isolate*>(pPlatform->m_isolate);
+      pExternalIsolate = static_cast<v8::Isolate*>(pPlatform->m_isolate);
       embedderDataSlot = pPlatform->m_v8EmbedderSlot;
     }
     FXJS_Initialize(embedderDataSlot, pExternalIsolate);
@@ -96,19 +72,16 @@ CJS_Runtime::CJS_Runtime(CPDFSDK_FormFillEnvironment* pFormFillEnv)
   if (m_isolateManaged || FXJS_GlobalIsolateRefCount() == 0)
     DefineJSObjects();
 
-  IJS_EventContext* pContext = NewEventContext();
+  ScopedEventContext pContext(this);
   InitializeEngine();
-  ReleaseEventContext(pContext);
   SetFormFillEnvToDocument();
 }
 
 CJS_Runtime::~CJS_Runtime() {
-  NotifyObservedPtrs();
+  NotifyObservers();
   ReleaseEngine();
-  if (m_isolateManaged) {
-    GetIsolate()->Dispose();
-    SetIsolate(nullptr);
-  }
+  if (m_isolateManaged)
+    DisposeIsolate();
 }
 
 void CJS_Runtime::DefineJSObjects() {
@@ -159,17 +132,18 @@ void CJS_Runtime::DefineJSObjects() {
   CJS_Annot::DefineJSObjects(this);
 }
 
+CJS_Runtime* CJS_Runtime::AsCJSRuntime() {
+  return this;
+}
+
 IJS_EventContext* CJS_Runtime::NewEventContext() {
   m_EventContextArray.push_back(pdfium::MakeUnique<CJS_EventContext>(this));
   return m_EventContextArray.back().get();
 }
 
 void CJS_Runtime::ReleaseEventContext(IJS_EventContext* pContext) {
-  auto it = std::find(m_EventContextArray.begin(), m_EventContextArray.end(),
-                      pdfium::FakeUniquePtr<CJS_EventContext>(
-                          static_cast<CJS_EventContext*>(pContext)));
-  if (it != m_EventContextArray.end())
-    m_EventContextArray.erase(it);
+  ASSERT(pContext == m_EventContextArray.back().get());
+  m_EventContextArray.pop_back();
 }
 
 CJS_EventContext* CJS_Runtime::GetCurrentEventContext() const {
@@ -187,11 +161,7 @@ void CJS_Runtime::SetFormFillEnvToDocument() {
   if (pThis.IsEmpty())
     return;
 
-  if (CFXJS_Engine::GetObjDefnID(pThis) != CJS_Document::GetObjDefnID())
-    return;
-
-  CJS_Document* pJSDocument =
-      static_cast<CJS_Document*>(GetObjectPrivate(pThis));
+  auto pJSDocument = JSGetObject<CJS_Document>(pThis);
   if (!pJSDocument)
     return;
 
@@ -202,14 +172,9 @@ CPDFSDK_FormFillEnvironment* CJS_Runtime::GetFormFillEnv() const {
   return m_pFormFillEnv.Get();
 }
 
-int CJS_Runtime::ExecuteScript(const WideString& script, WideString* info) {
-  FXJSErr error = {};
-  int nRet = Execute(script, &error);
-  if (nRet < 0) {
-    *info = WideString::Format(L"[ Line: %05d { %ls } ] : %s", error.linnum - 1,
-                               error.srcline, error.message);
-  }
-  return nRet;
+Optional<IJS_Runtime::JS_Error> CJS_Runtime::ExecuteScript(
+    const WideString& script) {
+  return Execute(script);
 }
 
 bool CJS_Runtime::AddEventToSet(const FieldEvent& event) {
@@ -233,9 +198,12 @@ bool CJS_Runtime::GetValueByNameFromGlobalObject(const ByteStringView& utf8Name,
   v8::HandleScope handle_scope(GetIsolate());
   v8::Local<v8::Context> context = GetV8Context();
   v8::Context::Scope context_scope(context);
-  v8::Local<v8::Value> propvalue = context->Global()->Get(
+  v8::Local<v8::String> str =
       v8::String::NewFromUtf8(GetIsolate(), utf8Name.unterminated_c_str(),
-                              v8::String::kNormalString, utf8Name.GetLength()));
+                              v8::NewStringType::kNormal, utf8Name.GetLength())
+          .ToLocalChecked();
+  v8::Local<v8::Value> propvalue =
+      context->Global()->Get(context, str).ToLocalChecked();
   if (propvalue.IsEmpty()) {
     pValue->SetUndefined();
     return false;
@@ -256,11 +224,11 @@ bool CJS_Runtime::SetValueByNameInGlobalObject(const ByteStringView& utf8Name,
   v8::Context::Scope context_scope(context);
   v8::Local<v8::Value> propvalue =
       v8::Local<v8::Value>::New(pIsolate, pValue->DirectGetValue());
-  context->Global()->Set(
+  v8::Local<v8::String> str =
       v8::String::NewFromUtf8(pIsolate, utf8Name.unterminated_c_str(),
-                              v8::String::kNormalString, utf8Name.GetLength()),
-      propvalue);
-  return true;
+                              v8::NewStringType::kNormal, utf8Name.GetLength())
+          .ToLocalChecked();
+  return context->Global()->Set(context, str, propvalue).FromJust();
 }
 #endif
 
@@ -268,7 +236,7 @@ v8::Local<v8::Value> CJS_Runtime::MaybeCoerceToNumber(
     v8::Local<v8::Value> value) {
   bool bAllowNaN = false;
   if (value->IsString()) {
-    ByteString bstr = ByteString::FromUnicode(ToWideString(value));
+    ByteString bstr = ToWideString(value).ToDefANSI();
     if (bstr.GetLength() == 0)
       return value;
     if (bstr == "NaN")

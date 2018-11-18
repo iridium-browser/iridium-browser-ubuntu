@@ -8,8 +8,10 @@
 
 #include "base/guid.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/task/post_task.h"
 #include "content/browser/background_fetch/background_fetch_request_info.h"
 #include "content/browser/background_fetch/background_fetch_test_base.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -31,10 +33,9 @@ class FakeController : public BackgroundFetchScheduler::Controller {
                  const std::string& name,
                  std::vector<std::string>* controller_sequence_list,
                  int total_jobs)
-      : BackgroundFetchScheduler::Controller(
-            registration_id,
-            base::BindOnce(&FakeController::OnJobFinished)),
-        scheduler_(scheduler),
+      : BackgroundFetchScheduler::Controller(scheduler,
+                                             registration_id,
+                                             base::DoNothing()),
         controller_sequence_list_(controller_sequence_list),
         name_(name),
         total_jobs_(total_jobs) {}
@@ -43,28 +44,25 @@ class FakeController : public BackgroundFetchScheduler::Controller {
 
   // BackgroundFetchScheduler::Controller implementation:
   bool HasMoreRequests() override { return jobs_started_ < total_jobs_; }
-  void StartRequest(
-      scoped_refptr<BackgroundFetchRequestInfo> request) override {
+  void StartRequest(scoped_refptr<BackgroundFetchRequestInfo> request,
+                    RequestFinishedCallback callback) override {
     DCHECK_LT(jobs_started_, total_jobs_);
     ++jobs_started_;
     controller_sequence_list_->push_back(name_ +
                                          base::IntToString(jobs_started_));
-    BrowserThread::PostTask(
-        BrowserThread::IO, FROM_HERE,
-        base::BindOnce(&FakeController::OnDownloadCompleted,
-                       base::Unretained(this), std::move(request)));
+
+    base::PostTaskWithTraits(
+        FROM_HERE, {BrowserThread::IO},
+        base::BindOnce(std::move(callback), std::move(request)));
+  }
+
+  std::vector<scoped_refptr<BackgroundFetchRequestInfo>>
+  TakeOutstandingRequests() override {
+    return {};
   }
 
  private:
-  void OnDownloadCompleted(scoped_refptr<BackgroundFetchRequestInfo> request) {
-    scheduler_->MarkRequestAsComplete(registration_id(), std::move(request));
-  }
-
-  static void OnJobFinished(const BackgroundFetchRegistrationId&,
-                            bool aborted) {}
-
   int jobs_started_ = 0;
-  BackgroundFetchScheduler* scheduler_;
   std::vector<std::string>* controller_sequence_list_;
   std::string name_;
   int total_jobs_;
@@ -85,8 +83,8 @@ class BackgroundFetchSchedulerTest
       return;
     }
 
-    BrowserThread::PostTask(
-        BrowserThread::IO, FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, {BrowserThread::IO},
         base::BindOnce(
             &BackgroundFetchSchedulerTest::PostQuitAfterRepeatingBarriers,
             base::Unretained(this), std::move(quit_closure),
@@ -103,14 +101,15 @@ class BackgroundFetchSchedulerTest
         0 /* request_count */, fetch_request);
     request->InitializeDownloadGuid();
 
-    std::move(callback).Run(std::move(request));
+    std::move(callback).Run(blink::mojom::BackgroundFetchError::NONE,
+                            std::move(request));
   }
 
   void MarkRequestAsComplete(
       const BackgroundFetchRegistrationId& registration_id,
-      BackgroundFetchRequestInfo* request,
-      BackgroundFetchScheduler::MarkedCompleteCallback callback) override {
-    std::move(callback).Run();
+      scoped_refptr<BackgroundFetchRequestInfo> request_info,
+      BackgroundFetchScheduler::MarkRequestCompleteCallback closure) override {
+    std::move(closure).Run(blink::mojom::BackgroundFetchError::NONE);
   }
 
  protected:
@@ -156,46 +155,13 @@ TEST_F(BackgroundFetchSchedulerTest, TwoControllers) {
 
     // Only one task is run at a time so after 3 barrier iterations, 3 tasks
     // should have been have run.
-    EXPECT_THAT(controller_sequence_list_, ElementsAre("A1", "B1", "A2"));
+    EXPECT_THAT(controller_sequence_list_, ElementsAre("A1", "A2", "A3"));
   }
 
   base::RunLoop().RunUntilIdle();
 
   EXPECT_THAT(controller_sequence_list_,
-              ElementsAre("A1", "B1", "A2", "B2", "A3", "B3", "A4", "B4"));
-}
-
-TEST_F(BackgroundFetchSchedulerTest, TwoControllers_TwoConcurrent) {
-  BackgroundFetchRegistrationId registration_id1(
-      kExampleServiceWorkerRegistrationId, origin(), kExampleDeveloperId1,
-      base::GenerateGUID());
-  BackgroundFetchRegistrationId registration_id2(
-      kExampleServiceWorkerRegistrationId, origin(), kExampleDeveloperId2,
-      base::GenerateGUID());
-  FakeController controller1(registration_id1, &scheduler_, "A",
-                             &controller_sequence_list_, 4);
-  FakeController controller2(registration_id2, &scheduler_, "B",
-                             &controller_sequence_list_, 4);
-
-  scheduler_.set_max_concurrent_downloads(2);
-  scheduler_.AddJobController(&controller1);
-  scheduler_.AddJobController(&controller2);
-
-  {
-    base::RunLoop run_loop;
-    PostQuitAfterRepeatingBarriers(run_loop.QuitClosure(), 3);
-    run_loop.Run();
-
-    // Two tasks are run at a time so after 3 barrier iterations, 6 tasks should
-    // have run.
-    EXPECT_THAT(controller_sequence_list_,
-                ElementsAre("A1", "B1", "A2", "B2", "A3", "B3"));
-  }
-
-  base::RunLoop().RunUntilIdle();
-
-  EXPECT_THAT(controller_sequence_list_,
-              ElementsAre("A1", "B1", "A2", "B2", "A3", "B3", "A4", "B4"));
+              ElementsAre("A1", "A2", "A3", "A4", "B1", "B2", "B3", "B4"));
 }
 
 }  // namespace content

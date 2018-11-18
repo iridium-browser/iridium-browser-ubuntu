@@ -33,6 +33,7 @@
 #include "third_party/blink/renderer/bindings/modules/v8/v8_directory_entry.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_dom_file_system.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_file_entry.h"
+#include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
 #include "third_party/blink/renderer/modules/filesystem/directory_entry.h"
@@ -69,7 +70,7 @@ WebDOMFileSystem WebDOMFileSystem::Create(WebLocalFrame* frame,
   DCHECK(ToWebLocalFrameImpl(frame)->GetFrame());
   DOMFileSystem* dom_file_system = DOMFileSystem::Create(
       ToWebLocalFrameImpl(frame)->GetFrame()->GetDocument(), name,
-      static_cast<FileSystemType>(type), root_url);
+      static_cast<mojom::blink::FileSystemType>(type), root_url);
   if (serializable_type == kSerializableTypeSerializable)
     dom_file_system->MakeClonable();
   return WebDOMFileSystem(dom_file_system);
@@ -88,20 +89,20 @@ WebString WebDOMFileSystem::GetName() const {
   return private_->name();
 }
 
-WebFileSystem::Type WebDOMFileSystem::GetType() const {
+WebFileSystemType WebDOMFileSystem::GetType() const {
   DCHECK(private_.Get());
   switch (private_->GetType()) {
-    case kFileSystemTypeTemporary:
-      return WebFileSystem::kTypeTemporary;
-    case kFileSystemTypePersistent:
-      return WebFileSystem::kTypePersistent;
-    case kFileSystemTypeIsolated:
-      return WebFileSystem::kTypeIsolated;
-    case kFileSystemTypeExternal:
-      return WebFileSystem::kTypeExternal;
+    case blink::mojom::FileSystemType::kTemporary:
+      return WebFileSystemType::kWebFileSystemTypeTemporary;
+    case blink::mojom::FileSystemType::kPersistent:
+      return WebFileSystemType::kWebFileSystemTypePersistent;
+    case blink::mojom::FileSystemType::kIsolated:
+      return WebFileSystemType::kWebFileSystemTypeIsolated;
+    case blink::mojom::FileSystemType::kExternal:
+      return WebFileSystemType::kWebFileSystemTypeExternal;
     default:
       NOTREACHED();
-      return WebFileSystem::kTypeTemporary;
+      return WebFileSystemType::kWebFileSystemTypeTemporary;
   }
 }
 

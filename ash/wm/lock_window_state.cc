@@ -7,10 +7,10 @@
 #include <memory>
 #include <utility>
 
+#include "ash/public/cpp/window_animation_types.h"
 #include "ash/screen_util.h"
 #include "ash/shelf/shelf.h"
 #include "ash/wm/lock_layout_manager.h"
-#include "ash/wm/window_animation_types.h"
 #include "ash/wm/window_state.h"
 #include "ash/wm/window_state_delegate.h"
 #include "ash/wm/window_state_util.h"
@@ -18,7 +18,6 @@
 #include "ui/aura/window.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/keyboard/keyboard_controller.h"
-#include "ui/keyboard/keyboard_util.h"
 #include "ui/wm/core/coordinate_conversion.h"
 
 namespace ash {
@@ -179,10 +178,9 @@ gfx::Rect LockWindowState::GetWindowBounds(aura::Window* window) {
   if (exclude_shelf_)
     return screen_util::GetDisplayWorkAreaBoundsInParentForLockScreen(window);
 
-  keyboard::KeyboardController* keyboard_controller =
-      keyboard::KeyboardController::GetInstance();
+  auto* keyboard_controller = keyboard::KeyboardController::Get();
   const int keyboard_height =
-      keyboard_controller
+      keyboard_controller->IsEnabled()
           ? keyboard_controller->GetKeyboardLockScreenOffsetBounds().height()
           : 0;
   gfx::Rect bounds = screen_util::GetDisplayBoundsWithShelf(window);

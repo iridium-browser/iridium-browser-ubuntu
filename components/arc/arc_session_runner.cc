@@ -137,6 +137,15 @@ void ArcSessionRunner::RemoveObserver(Observer* observer) {
   observer_list_.RemoveObserver(observer);
 }
 
+void ArcSessionRunner::RequestStartMiniInstance() {
+  RequestStart(ArcInstanceMode::MINI_INSTANCE);
+}
+
+void ArcSessionRunner::RequestUpgrade(ArcSession::UpgradeParams params) {
+  upgrade_params_ = std::move(params);
+  RequestStart(ArcInstanceMode::FULL_INSTANCE);
+}
+
 void ArcSessionRunner::RequestStart(ArcInstanceMode request_mode) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
 
@@ -232,8 +241,9 @@ void ArcSessionRunner::StartArcSession() {
     if (!restart_after_crash_count_)
       RecordInstanceCrashUma(ArcContainerLifetimeEvent::CONTAINER_STARTING);
   }
-  if (target_mode_ == ArcInstanceMode::FULL_INSTANCE)
-    arc_session_->RequestUpgrade();
+  if (target_mode_ == ArcInstanceMode::FULL_INSTANCE) {
+    arc_session_->RequestUpgrade(std::move(upgrade_params_));
+  }
 }
 
 void ArcSessionRunner::RestartArcSession() {
@@ -280,8 +290,8 @@ void ArcSessionRunner::OnSessionStopped(ArcStopReason stop_reason,
     // PostTask, because observer callback may call RequestStart()/Stop().
     VLOG(0) << "ARC restarting";
     restart_timer_.Start(FROM_HERE, restart_delay_,
-                         base::Bind(&ArcSessionRunner::RestartArcSession,
-                                    weak_ptr_factory_.GetWeakPtr()));
+                         base::BindOnce(&ArcSessionRunner::RestartArcSession,
+                                        weak_ptr_factory_.GetWeakPtr()));
   }
 
   // The observers should be agnostic to the existence of the limited-purpose

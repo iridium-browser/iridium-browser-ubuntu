@@ -48,7 +48,7 @@ class LayoutSVGForeignObject final : public LayoutSVGBlock {
 
   bool IsChildAllowed(LayoutObject*, const ComputedStyle&) const override;
 
-  void Paint(const PaintInfo&, const LayoutPoint&) const override;
+  void Paint(const PaintInfo&) const override;
 
   void UpdateLayout() override;
 
@@ -60,22 +60,20 @@ class LayoutSVGForeignObject final : public LayoutSVGBlock {
     return ObjectBoundingBox();
   }
 
-  bool ShouldUseTransformFromContainer(
-      const LayoutObject* container) const override {
-    return true;
-  }
-  void GetTransformFromContainer(const LayoutObject* container,
-                                 const LayoutSize& offset_in_container,
-                                 TransformationMatrix&) const override;
-
   bool NodeAtPoint(HitTestResult&,
                    const HitTestLocation&,
                    const LayoutPoint&,
                    HitTestAction) override;
 
-  bool NodeAtFloatPoint(HitTestResult&,
-                        const FloatPoint& point_in_parent,
-                        HitTestAction) override;
+  // A method to call when recursively hit testing from an SVG parent.
+  // Since LayoutSVGRoot has a PaintLayer always, this will cause a
+  // trampoline through PaintLayer::HitTest and back to a call to NodeAtPoint
+  // on this object. This is why there are two methods.
+  bool NodeAtPointFromSVG(HitTestResult&,
+                          const HitTestLocation&,
+                          const LayoutPoint&,
+                          HitTestAction);
+
   bool IsOfType(LayoutObjectType type) const override {
     return type == kLayoutObjectSVGForeignObject ||
            LayoutSVGBlock::IsOfType(type);
@@ -85,8 +83,13 @@ class LayoutSVGForeignObject final : public LayoutSVGBlock {
 
   PaintLayerType LayerTypeRequired() const override;
 
+  bool CreatesNewFormattingContext() const final {
+    // This is the root of a foreign object. Don't let anything inside it escape
+    // to our ancestors.
+    return true;
+  }
+
  private:
-  bool AllowsOverflowClip() const override;
   LayoutUnit ElementX() const;
   LayoutUnit ElementY() const;
   LayoutUnit ElementWidth() const;
@@ -99,6 +102,8 @@ class LayoutSVGForeignObject final : public LayoutSVGBlock {
 
   bool needs_transform_update_;
 };
+
+DEFINE_LAYOUT_OBJECT_TYPE_CASTS(LayoutSVGForeignObject, IsSVGForeignObject());
 
 }  // namespace blink
 

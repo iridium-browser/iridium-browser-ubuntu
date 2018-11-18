@@ -49,8 +49,8 @@ void ProjectionFromFieldOfView(DOMFloat32Array* out_array,
 // Create a matrix from a rotation and translation.
 void MatrixfromRotationTranslation(
     DOMFloat32Array* out_array,
-    const WTF::Optional<WTF::Vector<float>>& rotation,
-    const WTF::Optional<WTF::Vector<float>>& translation) {
+    const base::Optional<WTF::Vector<float>>& rotation,
+    const base::Optional<WTF::Vector<float>>& translation) {
   // Quaternion math
   float x = !rotation ? 0.0f : rotation.value()[0];
   float y = !rotation ? 0.0f : rotation.value()[1];
@@ -187,8 +187,6 @@ bool VRFrameData::Update(const device::mojom::blink::VRPosePtr& pose,
     fov_right = right_eye->FieldOfView();
   } else {
     DCHECK(!left_eye && !right_eye);
-    // TODO(offenwanger): Look into making the projection matrixes null instead
-    // of hard coding values. May break some apps.
     fov_left = fov_right = new VRFieldOfView(45, 45, 45, 45);
   }
 

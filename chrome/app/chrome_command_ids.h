@@ -8,10 +8,6 @@
 // This file lists all the command IDs understood by e.g. the browser.
 // It is used by Windows RC files, Mac NIB files, and other platforms too.
 
-// Mac NIB files (e.g. chrome/app/nibs/MainMenu.xib) include ID numbers rather
-// than the corresponding #define labels.  If you change a given command's
-// number, any NIB files that refer to it will also need to be updated.
-
 // clang-format off
 
 // Values below IDC_MinimumLabelValue are reserved for dynamic menu items.
@@ -94,6 +90,7 @@
 #define IDC_ROUTE_MEDIA                 35011
 #define IDC_WINDOW_MUTE_SITE            35012
 #define IDC_WINDOW_PIN_TAB              35013
+#define IDC_MIGRATE_LOCAL_CREDIT_CARD_FOR_PAGE 35014
 
 // Clipboard commands
 #define IDC_CUT                         36000
@@ -126,7 +123,7 @@
 
 // Show various bits of UI
 #define IDC_OPEN_FILE                   40000
-#define IDC_CREATE_HOSTED_APP           40002
+#define IDC_CREATE_SHORTCUT             40002
 #define IDC_DEVELOPER_MENU              40003
 #define IDC_DEV_TOOLS                   40004
 #define IDC_DEV_TOOLS_CONSOLE           40005
@@ -151,7 +148,6 @@
 #define IDC_MANAGE_EXTENSIONS           40022
 #define IDC_DEV_TOOLS_INSPECT           40023
 #define IDC_UPGRADE_DIALOG              40024
-#define IDC_VIEW_INCOMPATIBILITIES      40025
 #define IDC_SHOW_KEYBOARD_OVERLAY       40027
 #define IDC_PROFILING_ENABLED           40028
 #define IDC_BOOKMARKS_MENU              40029
@@ -183,6 +179,7 @@
 #define IDC_CUSTOMIZE_TOUCH_BAR         40251
 #define IDC_SHOW_BETA_FORUM             40252
 #define IDC_TOGGLE_JAVASCRIPT_APPLE_EVENTS 40253
+#define IDC_INSTALL_PWA                 40254
 
 // Spell-check
 // Insert any additional suggestions before _LAST; these have to be consecutive.
@@ -254,7 +251,7 @@
 #define IDC_CONTENT_CONTEXT_SAVEAVAS 50120
 #define IDC_CONTENT_CONTEXT_COPYAVLOCATION 50121
 #define IDC_CONTENT_CONTEXT_OPENAVNEWTAB 50122
-#define IDC_CONTENT_CONTENT_PICTUREINPICTURE 50123
+#define IDC_CONTENT_CONTEXT_PICTUREINPICTURE 50123
 // Media items.
 #define IDC_CONTENT_CONTEXT_PLAYPAUSE 50130
 #define IDC_CONTENT_CONTEXT_MUTE 50131
@@ -283,7 +280,7 @@
 #define IDC_CONTENT_CONTEXT_INSPECTBACKGROUNDPAGE 50161
 #define IDC_CONTENT_CONTEXT_RELOAD_PACKAGED_APP 50162
 #define IDC_CONTENT_CONTEXT_RESTART_PACKAGED_APP 50163
-#define IDC_CONTENT_CONTEXT_FORCESAVEPASSWORD 50165
+// A gap here. Feel free to insert a new ID.
 #define IDC_CONTENT_CONTEXT_GENERATEPASSWORD 50166
 #define IDC_CONTENT_CONTEXT_EXIT_FULLSCREEN 50167
 #define IDC_CONTENT_CONTEXT_SHOWALLSAVEDPASSWORDS 50168
@@ -342,6 +339,7 @@
 #define IDC_MEDIA_ROUTER_MANAGE_DEVICES 51206
 #define IDC_MEDIA_ROUTER_SHOWN_BY_POLICY 51207
 #define IDC_MEDIA_ROUTER_SHOW_IN_TOOLBAR 51208
+#define IDC_MEDIA_ROUTER_TOGGLE_MEDIA_REMOTING 51209
 
 // Context menu items for media stream status tray
 #define IDC_MEDIA_STREAM_DEVICE_STATUS_TRAY 51300
@@ -357,6 +355,14 @@
 // Open link in profile entries
 #define IDC_OPEN_LINK_IN_PROFILE_FIRST 52300
 #define IDC_OPEN_LINK_IN_PROFILE_LAST  52399
+
+// Start smart text selection actions
+#define IDC_CONTENT_CONTEXT_START_SMART_SELECTION_ACTION1 52400
+#define IDC_CONTENT_CONTEXT_START_SMART_SELECTION_ACTION2 52401
+#define IDC_CONTENT_CONTEXT_START_SMART_SELECTION_ACTION3 52402
+#define IDC_CONTENT_CONTEXT_START_SMART_SELECTION_ACTION4 52403
+#define IDC_CONTENT_CONTEXT_START_SMART_SELECTION_ACTION5 52404
+#define IDC_CONTENT_CONTEXT_START_SMART_SELECTION_ACTION_LAST IDC_CONTENT_CONTEXT_START_SMART_SELECTION_ACTION5
 
 // NOTE: The last valid command value is 57343 (0xDFFF)
 // See http://msdn.microsoft.com/en-us/library/t2zechd4(VS.71).aspx

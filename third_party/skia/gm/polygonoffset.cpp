@@ -7,7 +7,7 @@
 
 #include "gm.h"
 #include "sk_tool_utils.h"
-#include "SkOffsetPolygon.h"
+#include "SkPolyUtils.h"
 #include "SkPathPriv.h"
 
 static void create_ngon(int n, SkPoint* pts, SkScalar w, SkScalar h, SkPath::Direction dir) {
@@ -85,9 +85,9 @@ const SkPoint gPoints6[] = {
 const SkPoint gPoints7[] = {
     { -10.0f, -50.0f },
     { 10.0f, -50.0f },
-    { 10.0f, -25.0f },
+    { 10.0f, -20.0f },
     { 10.0f,   0.0f },
-    { 10.0f,  25.0f },
+    { 10.0f,  35.0f },
     { 10.0f,  50.0f },
     { -10.0f,  50.0f }
 };
@@ -406,9 +406,12 @@ static_assert(SK_ARRAY_COUNT(gSimpleSizes) == SK_ARRAY_COUNT(gSimplePoints), "ar
 namespace skiagm {
 
 // This GM is intended to exercise the offsetting of polygons
+// When fVariableOffset is true it will skew the offset by x,
+// to test perspective and other variable offset functions
 class PolygonOffsetGM : public GM {
 public:
-    PolygonOffsetGM(bool convexOnly) : fConvexOnly(convexOnly) {
+    PolygonOffsetGM(bool convexOnly)
+        : fConvexOnly(convexOnly) {
         this->setBGColor(0xFFFFFFFF);
     }
 
@@ -495,6 +498,7 @@ protected:
     void drawPolygon(SkCanvas* canvas, int index, SkPoint* offset) {
 
         SkPoint center;
+        SkRect bounds;
         {
             std::unique_ptr<SkPoint[]> data(nullptr);
             int numPts;
@@ -503,7 +507,6 @@ protected:
             } else {
                 GetSimplePolygon(index, SkPath::kCW_Direction, &data, &numPts);
             }
-            SkRect bounds;
             bounds.set(data.get(), numPts);
             if (!fConvexOnly) {
                 bounds.outset(kMaxOutset, kMaxOutset);
@@ -552,11 +555,14 @@ protected:
         SkTDArray<SkPoint> offsetPoly;
         size_t count = fConvexOnly ? SK_ARRAY_COUNT(insets) : SK_ARRAY_COUNT(offsets);
         for (size_t i = 0; i < count; ++i) {
+            SkScalar offset = fConvexOnly ? insets[i] : offsets[i];
+            std::function<SkScalar(const SkPoint&)> offsetFunc;
+
             bool result;
             if (fConvexOnly) {
-                result = SkInsetConvexPolygon(data.get(), numPts, insets[i], &offsetPoly);
+                result = SkInsetConvexPolygon(data.get(), numPts, offset, &offsetPoly);
             } else {
-                result = SkOffsetSimplePolygon(data.get(), numPts, offsets[i], &offsetPoly);
+                result = SkOffsetSimplePolygon(data.get(), numPts, offset, &offsetPoly);
             }
             if (result) {
                 SkPath path;

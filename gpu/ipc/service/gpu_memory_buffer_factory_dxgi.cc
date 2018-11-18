@@ -6,9 +6,9 @@
 #include <wrl.h>
 #include <vector>
 #include "base/trace_event/trace_event.h"
-#include "gpu/GLES2/gl2extchromium.h"
 #include "ui/gfx/buffer_format_util.h"
 #include "ui/gl/gl_angle_util_win.h"
+#include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_image_dxgi.h"
 
 namespace gpu {
@@ -82,8 +82,7 @@ gfx::GpuMemoryBufferHandle GpuMemoryBufferFactoryDXGI::CreateGpuMemoryBuffer(
   if (!BufferSizeForBufferFormatChecked(size, format, &buffer_size))
     return handle;
 
-  handle.handle = base::SharedMemoryHandle(texture_handle, buffer_size,
-                                           base::UnguessableToken::Create());
+  handle.dxgi_handle = IPC::PlatformFileForTransit(texture_handle);
   handle.type = gfx::DXGI_SHARED_HANDLE;
   handle.id = id;
 
@@ -100,7 +99,7 @@ ImageFactory* GpuMemoryBufferFactoryDXGI::AsImageFactory() {
 
 scoped_refptr<gl::GLImage>
 GpuMemoryBufferFactoryDXGI::CreateImageForGpuMemoryBuffer(
-    const gfx::GpuMemoryBufferHandle& handle,
+    gfx::GpuMemoryBufferHandle handle,
     const gfx::Size& size,
     gfx::BufferFormat format,
     unsigned internalformat,
@@ -110,21 +109,11 @@ GpuMemoryBufferFactoryDXGI::CreateImageForGpuMemoryBuffer(
     return nullptr;
   // Transfer ownership of handle to GLImageDXGIHandle.
   base::win::ScopedHandle handle_owner;
-  handle_owner.Set(handle.handle.GetHandle());
+  handle_owner.Set(handle.dxgi_handle.GetHandle());
   auto image = base::MakeRefCounted<gl::GLImageDXGIHandle>(size, 0, format);
   if (!image->Initialize(std::move(handle_owner)))
     return nullptr;
   return image;
-}
-
-scoped_refptr<gl::GLImage> GpuMemoryBufferFactoryDXGI::CreateAnonymousImage(
-    const gfx::Size& size,
-    gfx::BufferFormat format,
-    gfx::BufferUsage usage,
-    unsigned internalformat,
-    bool* is_cleared) {
-  NOTIMPLEMENTED();
-  return nullptr;
 }
 
 unsigned GpuMemoryBufferFactoryDXGI::RequiredTextureType() {

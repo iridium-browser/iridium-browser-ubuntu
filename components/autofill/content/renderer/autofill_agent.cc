@@ -45,6 +45,7 @@
 #include "content/public/renderer/render_view.h"
 #include "net/cert/cert_status_flags.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
+#include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
 #include "third_party/blink/public/platform/web_keyboard_event.h"
 #include "third_party/blink/public/platform/web_url_request.h"
 #include "third_party/blink/public/web/web_console_message.h"
@@ -60,6 +61,7 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 
+using blink::WebAutofillState;
 using blink::WebAutofillClient;
 using blink::WebConsoleMessage;
 using blink::WebDocument;
@@ -88,24 +90,7 @@ size_t kWaitTimeForSelectOptionsChangesMs = 50;
 // Whether the "single click" autofill feature is enabled, through command-line
 // or field trial.
 bool IsSingleClickEnabled() {
-// On Android, default to showing the dropdown on field focus.
-// On desktop, require an extra click after field focus by default, unless the
-// experiment is active.
-#if defined(OS_ANDROID)
-  return !base::CommandLine::ForCurrentProcess()->HasSwitch(
-      switches::kDisableSingleClickAutofill);
-#endif
-  const std::string group_name =
-      base::FieldTrialList::FindFullName("AutofillSingleClick");
-
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableSingleClickAutofill))
-    return true;
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableSingleClickAutofill))
-    return false;
-
-  return base::StartsWith(group_name, "Enabled", base::CompareCase::SENSITIVE);
+  return base::FeatureList::IsEnabled(features::kSingleClickAutofill);
 }
 
 // Gets all the data list values (with corresponding label) for the given
@@ -142,19 +127,19 @@ AutofillAgent::ShowSuggestionsOptions::ShowSuggestionsOptions()
     : autofill_on_empty_values(false),
       requires_caret_at_end(false),
       show_full_suggestion_list(false),
-      show_password_suggestions_only(false) {
-}
+      show_password_suggestions_only(false),
+      autoselect_first_suggestion(false) {}
 
 AutofillAgent::AutofillAgent(content::RenderFrame* render_frame,
                              PasswordAutofillAgent* password_autofill_agent,
                              PasswordGenerationAgent* password_generation_agent,
-                             service_manager::BinderRegistry* registry)
+                             blink::AssociatedInterfaceRegistry* registry)
     : content::RenderFrameObserver(render_frame),
       form_cache_(render_frame->GetWebFrame()),
       password_autofill_agent_(password_autofill_agent),
       password_generation_agent_(password_generation_agent),
       autofill_query_id_(0),
-      was_query_node_autofilled_(false),
+      query_node_autofill_state_(WebAutofillState::kNotFilled),
       ignore_text_changes_(false),
       is_popup_possibly_visible_(false),
       is_generation_popup_possibly_visible_(false),
@@ -174,7 +159,7 @@ AutofillAgent::~AutofillAgent() {
   RemoveFormObserver(this);
 }
 
-void AutofillAgent::BindRequest(mojom::AutofillAgentRequest request) {
+void AutofillAgent::BindRequest(mojom::AutofillAgentAssociatedRequest request) {
   binding_.Bind(std::move(request));
 }
 
@@ -184,8 +169,8 @@ bool AutofillAgent::FormDataCompare::operator()(const FormData& lhs,
          std::tie(rhs.name, rhs.origin, rhs.action, rhs.is_form_tag);
 }
 
-void AutofillAgent::DidCommitProvisionalLoad(bool is_new_navigation,
-                                             bool is_same_document_navigation) {
+void AutofillAgent::DidCommitProvisionalLoad(bool is_same_document_navigation,
+                                             ui::PageTransition transition) {
   blink::WebFrame* frame = render_frame()->GetWebFrame();
   // TODO(dvadym): check if we need to check if it is main frame navigation
   // http://crbug.com/443155
@@ -209,12 +194,17 @@ void AutofillAgent::DidFinishDocumentLoad() {
 }
 
 void AutofillAgent::DidChangeScrollOffset() {
+  if (element_.IsNull())
+    return;
+
   if (!focus_requires_scroll_) {
     // Post a task here since scroll offset may change during layout.
     // (https://crbug.com/804886)
     weak_ptr_factory_.InvalidateWeakPtrs();
-    base::SequencedTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE, base::BindOnce(&AutofillAgent::DidChangeScrollOffsetImpl,
+    render_frame()
+        ->GetTaskRunner(blink::TaskType::kInternalUserInteraction)
+        ->PostTask(FROM_HERE,
+                   base::BindOnce(&AutofillAgent::DidChangeScrollOffsetImpl,
                                   weak_ptr_factory_.GetWeakPtr(), element_));
   } else if (!IsKeyboardAccessoryEnabled()) {
     HidePopup();
@@ -223,7 +213,7 @@ void AutofillAgent::DidChangeScrollOffset() {
 
 void AutofillAgent::DidChangeScrollOffsetImpl(
     const WebFormControlElement& element) {
-  if (element != element_ || focus_requires_scroll_ ||
+  if (element != element_ || element_.IsNull() || focus_requires_scroll_ ||
       !is_popup_possibly_visible_ || !element_.Focused())
     return;
 
@@ -322,6 +312,7 @@ void AutofillAgent::Shutdown() {
 
 void AutofillAgent::TextFieldDidEndEditing(const WebInputElement& element) {
   GetAutofillDriver()->DidEndTextFieldEditing();
+  password_autofill_agent_->DidEndTextFieldEditing();
 }
 
 void AutofillAgent::SetUserGestureRequired(bool required) {
@@ -367,6 +358,8 @@ void AutofillAgent::TextFieldDidReceiveKeyDown(const WebInputElement& element,
     ShowSuggestionsOptions options;
     options.autofill_on_empty_values = true;
     options.requires_caret_at_end = true;
+    options.autoselect_first_suggestion =
+        ShouldAutoselectFirstSuggestionOnArrowDown();
     ShowSuggestions(element, options);
   }
 }
@@ -423,6 +416,28 @@ void AutofillAgent::DoAcceptDataListSuggestion(
   DoFillFieldWithValue(new_value, input_element);
 }
 
+void AutofillAgent::TriggerRefillIfNeeded(const FormData& form) {
+  if (!base::FeatureList::IsEnabled(features::kAutofillDynamicForms))
+    return;
+
+  ReplaceElementIfNowInvalid(form);
+
+  FormFieldData field;
+  FormData updated_form;
+  if (form_util::FindFormAndFieldForFormControlElement(element_, &updated_form,
+                                                       &field) &&
+      (!element_.IsAutofilled() || !form.DynamicallySameFormAs(updated_form))) {
+    base::TimeTicks forms_seen_timestamp = base::TimeTicks::Now();
+    WebLocalFrame* frame = render_frame()->GetWebFrame();
+    std::vector<FormData> forms;
+    forms.push_back(updated_form);
+    // Always communicate to browser process for topmost frame.
+    if (!forms.empty() || !frame->Parent()) {
+      GetAutofillDriver()->FormsSeen(forms, forms_seen_timestamp);
+    }
+  }
+}
+
 // mojom::AutofillAgent:
 void AutofillAgent::FillForm(int32_t id, const FormData& form) {
   if (element_.IsNull())
@@ -436,12 +451,14 @@ void AutofillAgent::FillForm(int32_t id, const FormData& form) {
   if (base::FeatureList::IsEnabled(features::kAutofillDynamicForms))
     ReplaceElementIfNowInvalid(form);
 
-  was_query_node_autofilled_ = element_.IsAutofilled();
+  query_node_autofill_state_ = element_.GetAutofillState();
   form_util::FillForm(form, element_);
   if (!element_.Form().IsNull())
     UpdateLastInteractedForm(element_.Form());
 
   GetAutofillDriver()->DidFillAutofillFormData(form, base::TimeTicks::Now());
+
+  TriggerRefillIfNeeded(form);
 }
 
 void AutofillAgent::PreviewForm(int32_t id, const FormData& form) {
@@ -451,7 +468,7 @@ void AutofillAgent::PreviewForm(int32_t id, const FormData& form) {
   if (id != autofill_query_id_)
     return;
 
-  was_query_node_autofilled_ = element_.IsAutofilled();
+  query_node_autofill_state_ = element_.GetAutofillState();
   form_util::PreviewForm(form, element_);
 
   GetAutofillDriver()->DidPreviewAutofillFormData();
@@ -466,11 +483,11 @@ void AutofillAgent::FieldTypePredictionsAvailable(
   }
 }
 
-void AutofillAgent::ClearForm() {
+void AutofillAgent::ClearSection() {
   if (element_.IsNull())
     return;
 
-  form_cache_.ClearFormWithElement(element_);
+  form_cache_.ClearSectionWithElement(element_);
 }
 
 void AutofillAgent::ClearPreviewedForm() {
@@ -484,7 +501,7 @@ void AutofillAgent::ClearPreviewedForm() {
     return;
 
   form_util::ClearPreviewedFormWithElement(element_,
-                                           was_query_node_autofilled_);
+                                           query_node_autofill_state_);
 }
 
 void AutofillAgent::FillFieldWithValue(const base::string16& value) {
@@ -494,7 +511,7 @@ void AutofillAgent::FillFieldWithValue(const base::string16& value) {
   WebInputElement* input_element = ToWebInputElement(&element_);
   if (input_element) {
     DoFillFieldWithValue(value, input_element);
-    input_element->SetAutofilled(true);
+    input_element->SetAutofillState(WebAutofillState::kAutofilled);
   }
 }
 
@@ -533,7 +550,6 @@ void AutofillAgent::PreviewPasswordSuggestion(const base::string16& username,
 }
 
 void AutofillAgent::ShowInitialPasswordAccountSuggestions(
-    int32_t key,
     const PasswordFormFillData& form_data) {
   std::vector<blink::WebInputElement> elements;
   std::unique_ptr<RendererSavePasswordProgressLogger> logger;
@@ -544,7 +560,7 @@ void AutofillAgent::ShowInitialPasswordAccountSuggestions(
                            STRING_ON_SHOW_INITIAL_PASSWORD_ACCOUNT_SUGGESTIONS);
   }
   password_autofill_agent_->GetFillableElementFromFormData(
-      key, form_data, logger.get(), &elements);
+      form_data, logger.get(), &elements);
 
   // If wait_for_username is true, we don't want to initially show form options
   // until the user types in a valid username.
@@ -556,14 +572,6 @@ void AutofillAgent::ShowInitialPasswordAccountSuggestions(
   options.show_full_suggestion_list = true;
   for (auto element : elements)
     ShowSuggestions(element, options);
-}
-
-void AutofillAgent::ShowNotSecureWarning(
-    const blink::WebInputElement& element) {
-  if (is_generation_popup_possibly_visible_)
-    return;
-  password_autofill_agent_->ShowNotSecureWarning(element);
-  is_popup_possibly_visible_ = true;
 }
 
 bool AutofillAgent::CollectFormlessElements(FormData* output) {
@@ -647,7 +655,7 @@ void AutofillAgent::ShowSuggestions(const WebFormControlElement& element,
     return;
   }
 
-  QueryAutofillSuggestions(element);
+  QueryAutofillSuggestions(element, options.autoselect_first_suggestion);
 }
 
 void AutofillAgent::SetQueryPasswordSuggestion(bool query) {
@@ -662,8 +670,70 @@ void AutofillAgent::SetFocusRequiresScroll(bool require) {
   focus_requires_scroll_ = require;
 }
 
+void AutofillAgent::GetElementFormAndFieldData(
+    const std::vector<std::string>& selectors,
+    GetElementFormAndFieldDataCallback callback) {
+  FormData form;
+  FormFieldData field;
+  blink::WebElement target_element = FindUniqueWebElement(selectors);
+  if (target_element.IsNull() || !target_element.IsFormControlElement()) {
+    return std::move(callback).Run(form, field);
+  }
+
+  blink::WebFormControlElement target_form_control_element =
+      target_element.To<blink::WebFormControlElement>();
+  bool success = form_util::FindFormAndFieldForFormControlElement(
+      target_form_control_element, &form, &field);
+  if (success) {
+    // Remember this element so as to autofill the form without focusing the
+    // field for Autofill Assistant.
+    element_ = target_form_control_element;
+  }
+  // Do not expect failure.
+  DCHECK(success);
+
+  return std::move(callback).Run(form, field);
+}
+
+blink::WebElement AutofillAgent::FindUniqueWebElement(
+    const std::vector<std::string>& selectors) {
+  DCHECK(selectors.size() > 0);
+
+  blink::WebVector<blink::WebElement> elements =
+      render_frame()->GetWebFrame()->GetDocument().QuerySelectorAll(
+          blink::WebString::FromUTF8(selectors[0]));
+  if (elements.size() != 1) {
+    return blink::WebElement();
+  }
+
+  // Get the unique element in |elements| and match the next selector inside it
+  // if there are remaining selectors haven't been matched.
+  blink::WebElement query_element = elements[0];
+  for (size_t i = 1; i < selectors.size(); i++) {
+    elements = query_element.QuerySelectorAll(
+        blink::WebString::FromUTF8(selectors[i]));
+
+    // Query shadow DOM if necessary.
+    if (elements.size() == 0 && !query_element.ShadowRoot().IsNull()) {
+      // TODO(806868): Query shadow dom when Autofill is available for forms in
+      // shadow DOM (crbug.com/746593).
+      return blink::WebElement();
+    }
+
+    // Return an empty element if there are multiple matching elements.
+    if (elements.size() != 1) {
+      return blink::WebElement();
+    }
+
+    query_element = elements[0];
+  }
+
+  return query_element;
+}
+
 void AutofillAgent::QueryAutofillSuggestions(
-    const WebFormControlElement& element) {
+    const WebFormControlElement& element,
+    bool autoselect_first_suggestion) {
   if (!element.GetDocument().GetFrame())
     return;
 
@@ -706,7 +776,8 @@ void AutofillAgent::QueryAutofillSuggestions(
   GetAutofillDriver()->SetDataList(data_list_values, data_list_labels);
   GetAutofillDriver()->QueryFormFieldAutofill(
       autofill_query_id_, form, field,
-      render_frame()->GetRenderView()->ElementBoundsInWindow(element_));
+      render_frame()->GetRenderView()->ElementBoundsInWindow(element_),
+      autoselect_first_suggestion);
 }
 
 void AutofillAgent::DoFillFieldWithValue(const base::string16& value,
@@ -719,9 +790,9 @@ void AutofillAgent::DoFillFieldWithValue(const base::string16& value,
 
 void AutofillAgent::DoPreviewFieldWithValue(const base::string16& value,
                                             WebInputElement* node) {
-  was_query_node_autofilled_ = element_.IsAutofilled();
+  query_node_autofill_state_ = element_.GetAutofillState();
   node->SetSuggestedValue(blink::WebString::FromUTF16(value));
-  node->SetAutofilled(true);
+  node->SetAutofillState(WebAutofillState::kPreviewed);
   form_util::PreviewSuggestion(node->SuggestedValue().Utf16(),
                                node->Value().Utf16(), node);
 }
@@ -842,13 +913,11 @@ void AutofillAgent::FormControlElementClicked(
 
   ShowSuggestionsOptions options;
   options.autofill_on_empty_values = true;
-  options.show_full_suggestion_list = element.IsAutofilled();
+  // Show full suggestions when clicking on an already-focused form field.
+  options.show_full_suggestion_list = element.IsAutofilled() || was_focused;
 
   if (!IsSingleClickEnabled()) {
-    // Show full suggestions when clicking on an already-focused form field. On
-    // the initial click (not focused yet), only show password suggestions.
-    options.show_full_suggestion_list =
-        options.show_full_suggestion_list || was_focused;
+    // On  the initial click (not focused yet), only show password suggestions.
     options.show_password_suggestions_only = !was_focused;
   }
   ShowSuggestions(element, options);
@@ -1026,10 +1095,61 @@ void AutofillAgent::OnFormNoLongerSubmittable() {
   submitted_forms_.clear();
 }
 
+bool AutofillAgent::FindTheUniqueNewVersionOfOldElement(
+    WebVector<WebFormControlElement>& elements,
+    bool& element_found,
+    const WebString& original_element_section,
+    const WebFormControlElement& original_element) {
+  for (const WebFormControlElement& current_element : elements) {
+    if (current_element.IsFocusable() &&
+        original_element.NameForAutofill() ==
+            current_element.NameForAutofill()) {
+      if (!element_found) {
+        element_ = current_element;
+        element_found = true;
+      } else if (current_element.AutofillSection() ==
+                     element_.AutofillSection() ||
+                 (current_element.AutofillSection() !=
+                      original_element_section &&
+                  element_.AutofillSection() != original_element_section)) {
+        // If there are two elements that share the same name with the element_,
+        // and the section can't tell them apart, we can't decide between the
+        // two.
+        element_ = original_element;
+        return false;
+      } else if (current_element.AutofillSection() ==
+                 original_element_section) {
+        // If the current element has the right section, update the element_.
+        element_ = current_element;
+      }
+    }
+  }
+  return true;
+}
+
 void AutofillAgent::ReplaceElementIfNowInvalid(const FormData& original_form) {
   // If the document is invalid, bail out.
   if (element_.GetDocument().IsNull())
     return;
+
+  WebVector<WebFormElement> forms;
+  WebVector<WebFormControlElement> elements;
+
+  if (original_form.name.empty()) {
+    // If the form has no name, check all the forms.
+    bool element_found = false;
+    element_.GetDocument().Forms(forms);
+    for (const WebFormElement& form : forms) {
+      form.GetFormControlElements(elements);
+      // If finding a unique element is impossible, return.
+      if (!FindTheUniqueNewVersionOfOldElement(
+              elements, element_found, element_.AutofillSection(), element_))
+        return;
+    }
+    // If the element is not found, we should still check for unowned elements.
+    if (element_found)
+      return;
+  }
 
   if (!element_.Form().IsNull()) {
     // If |element_|'s parent form has no elements, |element_| is now invalid
@@ -1040,25 +1160,33 @@ void AutofillAgent::ReplaceElementIfNowInvalid(const FormData& original_form) {
       return;
   }
 
-  // Try to find the new version of the form.
   WebFormElement form_element;
-  WebVector<WebFormElement> forms;
-  element_.GetDocument().Forms(forms);
-  for (const WebFormElement& form : forms) {
-    if (original_form.name == form.GetName().Utf16() ||
-        original_form.name == form.GetAttribute("id").Utf16()) {
-      form_element = form;
-      break;
+  if (!original_form.name.empty()) {
+    // Try to find the new version of the form.
+    element_.GetDocument().Forms(forms);
+    for (const WebFormElement& form : forms) {
+      if (original_form.name == form.GetName().Utf16() ||
+          original_form.name == form.GetAttribute("id").Utf16()) {
+        form_element = form;
+        break;
+      }
     }
   }
 
-  // Could not find the new version of the form, bail out.
-  if (form_element.IsNull())
+  if (form_element.IsNull()) {
+    // Could not find the new version of the form, get all the unowned elements.
+    std::vector<WebElement> fieldsets;
+    elements = form_util::GetUnownedAutofillableFormFieldElements(
+        element_.GetDocument().All(), &fieldsets);
+    bool element_found = false;
+    FindTheUniqueNewVersionOfOldElement(elements, element_found,
+                                        element_.AutofillSection(), element_);
     return;
-
-  // Try to find the new version of the last interacted element.
-  WebVector<WebFormControlElement> elements;
+  }
+  // This is the case for owned fields that belong to the right named form.
+  // Get all the elements of the new version of the form.
   form_element.GetFormControlElements(elements);
+  // Try to find the new version of the last interacted element.
   for (const WebFormControlElement& element : elements) {
     if (element_.NameForAutofill() == element.NameForAutofill()) {
       element_ = element;
@@ -1067,16 +1195,16 @@ void AutofillAgent::ReplaceElementIfNowInvalid(const FormData& original_form) {
   }
 }
 
-const mojom::AutofillDriverPtr& AutofillAgent::GetAutofillDriver() {
+const mojom::AutofillDriverAssociatedPtr& AutofillAgent::GetAutofillDriver() {
   if (!autofill_driver_) {
-    render_frame()->GetRemoteInterfaces()->GetInterface(
+    render_frame()->GetRemoteAssociatedInterfaces()->GetInterface(
         mojo::MakeRequest(&autofill_driver_));
   }
 
   return autofill_driver_;
 }
 
-const mojom::PasswordManagerDriverPtr&
+const mojom::PasswordManagerDriverAssociatedPtr&
 AutofillAgent::GetPasswordManagerDriver() {
   DCHECK(password_autofill_agent_);
   return password_autofill_agent_->GetPasswordManagerDriver();

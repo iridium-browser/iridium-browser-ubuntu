@@ -10,6 +10,7 @@
 
 #include "base/logging.h"
 #include "base/template_util.h"
+#include "base/thread_annotations.h"
 
 namespace base {
 
@@ -277,7 +278,9 @@ class OptionalBase {
       storage_.Init(std::forward<U>(value));
   }
 
-  void FreeIfNeeded() {
+  // TODO(lukasza): Figure out how to remove the NO_THREAD_SAFETY_ANALYSIS
+  // annotation below.  See https://crbug.com/881875#c1 for details.
+  void FreeIfNeeded() NO_THREAD_SAFETY_ANALYSIS {
     if (!storage_.is_populated_)
       return;
     storage_.value_.~T();
@@ -575,32 +578,32 @@ class OPTIONAL_DECLSPEC_EMPTY_BASES Optional
   }
 
   constexpr const T* operator->() const {
-    CHECK(storage_.is_populated_);
+    DCHECK(storage_.is_populated_);
     return &storage_.value_;
   }
 
   constexpr T* operator->() {
-    CHECK(storage_.is_populated_);
+    DCHECK(storage_.is_populated_);
     return &storage_.value_;
   }
 
   constexpr const T& operator*() const & {
-    CHECK(storage_.is_populated_);
+    DCHECK(storage_.is_populated_);
     return storage_.value_;
   }
 
   constexpr T& operator*() & {
-    CHECK(storage_.is_populated_);
+    DCHECK(storage_.is_populated_);
     return storage_.value_;
   }
 
   constexpr const T&& operator*() const && {
-    CHECK(storage_.is_populated_);
+    DCHECK(storage_.is_populated_);
     return std::move(storage_.value_);
   }
 
   constexpr T&& operator*() && {
-    CHECK(storage_.is_populated_);
+    DCHECK(storage_.is_populated_);
     return std::move(storage_.value_);
   }
 
@@ -636,7 +639,7 @@ class OPTIONAL_DECLSPEC_EMPTY_BASES Optional
     static_assert(std::is_convertible<U, T>::value,
                   "U must be convertible to T");
     return storage_.is_populated_
-               ? value()
+               ? storage_.value_
                : static_cast<T>(std::forward<U>(default_value));
   }
 
@@ -648,7 +651,7 @@ class OPTIONAL_DECLSPEC_EMPTY_BASES Optional
     static_assert(std::is_convertible<U, T>::value,
                   "U must be convertible to T");
     return storage_.is_populated_
-               ? std::move(value())
+               ? std::move(storage_.value_)
                : static_cast<T>(std::forward<U>(default_value));
   }
 

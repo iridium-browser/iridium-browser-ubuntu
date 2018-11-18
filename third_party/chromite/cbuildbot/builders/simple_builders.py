@@ -59,8 +59,6 @@ class SimpleBuilder(generic_builders.Builder):
     if self._run.options.force_version:
       sync_stage = self._GetStageInstance(
           sync_stages.ManifestVersionedSyncStage)
-    elif self._run.config.use_lkgm:
-      sync_stage = self._GetStageInstance(sync_stages.LKGMSyncStage)
     elif self._run.config.use_chrome_lkgm:
       sync_stage = self._GetStageInstance(chrome_stages.ChromeLKGMSyncStage)
     else:
@@ -106,10 +104,8 @@ class SimpleBuilder(generic_builders.Builder):
     # For non-uni builds, we don't pass a model (just board)
     models = [config_lib.ModelTestConfig(None, board)]
 
-    unibuild = False
     if builder_run.config.models:
       models = builder_run.config.models
-      unibuild = True
 
     parallel_stages = []
     for suite_config in builder_run.config.hw_tests:
@@ -123,7 +119,11 @@ class SimpleBuilder(generic_builders.Builder):
 
       # Please see docstring for blocking in the HWTestConfig for more
       # information on this behavior.
-      if suite_config.blocking and not unibuild:
+      # Expected behavior:
+      #     1) Blocking suites are kicked off first, e.g. provision suite.
+      #     2) If it's unibuild, the blocking suites of all models are kicked
+      #        off in parallel first.
+      if suite_config.blocking:
         self._RunParallelStages(parallel_stages)
         parallel_stages = []
 
@@ -153,6 +153,13 @@ class SimpleBuilder(generic_builders.Builder):
         stage_class = test_stages.ASyncHWTestStage
       else:
         stage_class = test_stages.HWTestStage
+
+      if (builder_run.config.enable_skylab_hw_tests and
+          suite_config.enable_skylab):
+        if suite_config.async:
+          stage_class = test_stages.ASyncSkylabHWTestStage
+        else:
+          stage_class = test_stages.SkylabHWTestStage
 
       result = self._GetStageInstance(stage_class,
                                       board,
@@ -324,9 +331,8 @@ class SimpleBuilder(generic_builders.Builder):
 
   def _RunMasterPaladinOrPFQBuild(self):
     """Runs through the stages of the paladin or chrome PFQ master build."""
-    # If this master build uses Buildbucket scheduler, run
-    # scheduler_stages.ScheduleSlavesStage to schedule slaves.
-    if config_lib.UseBuildbucketScheduler(self._run.config):
+    # If there are slave builders, schedule them.
+    if self._run.config.slave_configs:
       self._RunStage(scheduler_stages.ScheduleSlavesStage, self.sync_stage)
     self._RunStage(build_stages.UprevStage)
     self._RunStage(build_stages.InitSDKStage)
@@ -342,10 +348,8 @@ class SimpleBuilder(generic_builders.Builder):
 
   def RunEarlySyncAndSetupStages(self):
     """Runs through the early sync and board setup stages."""
-    # If this build is master and uses Buildbucket scheduler, run
-    # scheduler_stages.ScheduleSlavesStage to schedule slaves.
-    if (config_lib.UseBuildbucketScheduler(self._run.config) and
-        config_lib.IsMasterBuild(self._run.config)):
+    # If there are slave builders, schedule them.
+    if self._run.config.slave_configs:
       self._RunStage(scheduler_stages.ScheduleSlavesStage, self.sync_stage)
     self._RunStage(build_stages.UprevStage)
     self._RunStage(build_stages.InitSDKStage)
@@ -488,6 +492,14 @@ class DistributedBuilder(SimpleBuilder):
       self.completion_stage_class = (
           completion_stages.CanaryCompletionStage)
     elif self._run.config.build_type == constants.TOOLCHAIN_TYPE:
+      sync_stage = self._GetStageInstance(sync_stages.MasterSlaveLKGMSyncStage)
+      self.completion_stage_class = (
+          completion_stages.MasterSlaveSyncCompletionStage)
+    elif self._run.config.build_type == constants.FULL_TYPE:
+      sync_stage = self._GetStageInstance(sync_stages.MasterSlaveLKGMSyncStage)
+      self.completion_stage_class = (
+          completion_stages.MasterSlaveSyncCompletionStage)
+    elif self._run.config.build_type == constants.INCREMENTAL_TYPE:
       sync_stage = self._GetStageInstance(sync_stages.MasterSlaveLKGMSyncStage)
       self.completion_stage_class = (
           completion_stages.MasterSlaveSyncCompletionStage)

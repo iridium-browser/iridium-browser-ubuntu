@@ -10,25 +10,24 @@
 #include "chrome/browser/ui/views/page_info/page_info_bubble_view.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/omnibox/browser/omnibox_edit_model.h"
+#include "components/omnibox/browser/omnibox_field_trial.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/toolbar/toolbar_model.h"
 #include "content/public/browser/web_contents.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/base/material_design/material_design_controller.h"
 #include "ui/views/controls/label.h"
 
 using content::WebContents;
 
 LocationIconView::LocationIconView(const gfx::FontList& font_list,
                                    LocationBarView* location_bar)
-    : IconLabelBubbleView(font_list),
-      location_bar_(location_bar),
-      animation_(this) {
+    : IconLabelBubbleView(font_list), location_bar_(location_bar) {
   label()->SetElideBehavior(gfx::ELIDE_MIDDLE);
   set_id(VIEW_ID_LOCATION_ICON);
   Update();
-
-  animation_.SetSlideDuration(kOpenTimeMS);
+  SetUpForInOutAnimation();
 }
 
 LocationIconView::~LocationIconView() {
@@ -47,7 +46,7 @@ bool LocationIconView::OnMousePressed(const ui::MouseEvent& event) {
     text = OmniboxView::SanitizeTextForPaste(text);
     OmniboxEditModel* model = location_bar_->GetOmniboxView()->model();
     if (model->CanPasteAndGo(text))
-      model->PasteAndGo(text);
+      model->PasteAndGo(text, event.time_stamp());
   }
 
   IconLabelBubbleView::OnMousePressed(event);
@@ -71,6 +70,25 @@ SkColor LocationIconView::GetTextColor() const {
       location_bar_->GetToolbarModel()->GetSecurityLevel(false));
 }
 
+bool LocationIconView::ShouldShowSeparator() const {
+  if (ShouldShowLabel())
+    return true;
+
+  if (OmniboxFieldTrial::IsJogTextfieldOnPopupEnabled())
+    return false;
+
+  return ui::MaterialDesignController::IsRefreshUi() &&
+         !location_bar_->GetOmniboxView()->IsEditingOrEmpty();
+}
+
+bool LocationIconView::ShouldShowExtraEndSpace() const {
+  if (OmniboxFieldTrial::IsJogTextfieldOnPopupEnabled())
+    return false;
+
+  return ui::MaterialDesignController::IsRefreshUi() &&
+         location_bar_->GetOmniboxView()->IsEditingOrEmpty();
+}
+
 bool LocationIconView::ShowBubble(const ui::Event& event) {
   auto* contents = location_bar_->GetWebContents();
   if (!contents)
@@ -78,9 +96,14 @@ bool LocationIconView::ShowBubble(const ui::Event& event) {
   return location_bar_->ShowPageInfoDialog(contents);
 }
 
+SkColor LocationIconView::GetInkDropBaseColor() const {
+  return location_bar_->GetIconInkDropColor();
+}
+
 void LocationIconView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   if (location_bar_->GetOmniboxView()->IsEditingOrEmpty()) {
-    node_data->role = ax::mojom::Role::kNone;
+    node_data->role = ax::mojom::Role::kImage;
+    node_data->SetName(l10n_util::GetStringUTF8(IDS_ACC_SEARCH_ICON));
     return;
   }
 
@@ -104,20 +127,28 @@ bool LocationIconView::IsBubbleShowing() const {
 
 gfx::Size LocationIconView::GetMinimumSizeForLabelText(
     const base::string16& text) const {
-  views::Label label(text, {font_list()});
-  return GetMinimumSizeForPreferredSize(
-      GetSizeForLabelWidth(label.GetPreferredSize().width()));
+  int width = 0;
+  if (text == label()->text()) {
+    // Optimize this common case by not creating a new label.
+    // GetPreferredSize is not dependent on the label's current
+    // width, so this returns the same value as the branch below.
+    width = label()->GetPreferredSize().width();
+  } else {
+    views::Label label(text, {font_list()});
+    width = label.GetPreferredSize().width();
+  }
+  return GetMinimumSizeForPreferredSize(GetSizeForLabelWidth(width));
 }
 
 void LocationIconView::SetTextVisibility(bool should_show,
                                          bool should_animate) {
-  if (!should_animate) {
-    animation_.Reset(should_show);
-  } else if (should_show) {
-    animation_.Show();
-  } else {
-    animation_.Hide();
-  }
+  if (!should_animate)
+    ResetSlideAnimation(should_show);
+  else if (should_show)
+    AnimateIn(base::nullopt);
+  else
+    AnimateOut();
+
   // The label text color may have changed.
   OnNativeThemeChanged(GetNativeTheme());
 }
@@ -158,12 +189,7 @@ bool LocationIconView::IsTriggerableEvent(const ui::Event& event) {
 }
 
 double LocationIconView::WidthMultiplier() const {
-  return animation_.GetCurrentValue();
-}
-
-void LocationIconView::AnimationProgressed(const gfx::Animation*) {
-  location_bar_->Layout();
-  location_bar_->SchedulePaint();
+  return GetAnimationValue();
 }
 
 gfx::Size LocationIconView::GetMinimumSizeForPreferredSize(
@@ -172,4 +198,9 @@ gfx::Size LocationIconView::GetMinimumSizeForPreferredSize(
   size.SetToMin(
       GetSizeForLabelWidth(font_list().GetExpectedTextWidth(kMinCharacters)));
   return size;
+}
+
+int LocationIconView::GetSlideDurationTime() const {
+  constexpr int kSlideDurationTimeMs = 150;
+  return kSlideDurationTimeMs;
 }

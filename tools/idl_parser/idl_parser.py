@@ -307,14 +307,22 @@ class IDLParser(object):
     p[0] = self.BuildError(p, 'Partial')
 
   def p_PartialDefinition(self, p):
-    """PartialDefinition : PartialDictionary
-                         | PartialInterface
+    """PartialDefinition : INTERFACE PartialInterfaceOrPartialMixin
+                         | PartialDictionary
                          | Namespace"""
+    if len(p) > 2:
+      p[0] = p[2]
+    else:
+      p[0] = p[1]
+
+  def p_PartialInterfaceOrPartialMixin(self, p):
+    """PartialInterfaceOrPartialMixin : PartialInterfaceRest
+                                      | MixinRest"""
     p[0] = p[1]
 
-  def p_PartialInterface(self, p):
-    """PartialInterface : INTERFACE identifier '{' InterfaceMembers '}' ';'"""
-    p[0] = self.BuildNamed('Interface', p, 2, p[4])
+  def p_PartialInterfaceRest(self, p):
+    """PartialInterfaceRest : identifier '{' InterfaceMembers '}' ';'"""
+    p[0] = self.BuildNamed('Interface', p, 1, p[3])
 
   def p_InterfaceMembers(self, p):
     """InterfaceMembers : ExtendedAttributeList InterfaceMember InterfaceMembers
@@ -344,7 +352,8 @@ class IDLParser(object):
 
   def p_MixinRest(self, p):
     """MixinRest : MIXIN identifier '{' MixinMembers '}' ';'"""
-    p[0] = self.BuildNamed('InterfaceMixin', p, 2, p[4])
+    p[0] = self.BuildNamed('Interface', p, 2, p[4])
+    p[0].AddChildren(self.BuildTrue('MIXIN'))
 
   def p_MixinMembers(self, p):
     """MixinMembers : ExtendedAttributeList MixinMember MixinMembers
@@ -455,9 +464,9 @@ class IDLParser(object):
     p[0] = self.BuildError(p, 'Enum')
 
   def p_EnumValueList(self, p):
-    """EnumValueList : ExtendedAttributeList string EnumValueListComma"""
-    enum = self.BuildNamed('EnumItem', p, 2, p[1])
-    p[0] = ListFromConcat(enum, p[3])
+    """EnumValueList : string EnumValueListComma"""
+    enum = self.BuildNamed('EnumItem', p, 1)
+    p[0] = ListFromConcat(enum, p[2])
 
   def p_EnumValueListComma(self, p):
     """EnumValueListComma : ',' EnumValueListString
@@ -466,11 +475,11 @@ class IDLParser(object):
       p[0] = p[2]
 
   def p_EnumValueListString(self, p):
-    """EnumValueListString : ExtendedAttributeList string EnumValueListComma
+    """EnumValueListString : string EnumValueListComma
                            |"""
     if len(p) > 1:
-      enum = self.BuildNamed('EnumItem', p, 2, p[1])
-      p[0] = ListFromConcat(enum, p[3])
+      enum = self.BuildNamed('EnumItem', p, 1)
+      p[0] = ListFromConcat(enum, p[2])
 
   def p_CallbackRest(self, p):
     """CallbackRest : identifier '=' ReturnType '(' ArgumentList ')' ';'"""

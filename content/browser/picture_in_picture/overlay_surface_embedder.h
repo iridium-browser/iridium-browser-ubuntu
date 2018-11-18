@@ -23,7 +23,8 @@ class OverlaySurfaceEmbedder {
   explicit OverlaySurfaceEmbedder(OverlayWindow* window);
   ~OverlaySurfaceEmbedder();
 
-  void SetPrimarySurfaceId(const viz::SurfaceId& surface_id);
+  void SetSurfaceId(const viz::SurfaceId&);
+  void UpdateLayerBounds();
 
  private:
   // The window which embeds the client. Weak pointer since the
@@ -32,6 +33,11 @@ class OverlaySurfaceEmbedder {
 
   // Contains the client's content.
   std::unique_ptr<ui::Layer> surface_layer_;
+
+  // Owned by the OverlayWindow implementation.
+  // These are set in the constructor.
+  ui::Layer* window_background_layer_ = nullptr;
+  ui::Layer* video_layer_ = nullptr;
 
   DISALLOW_COPY_AND_ASSIGN(OverlaySurfaceEmbedder);
 };

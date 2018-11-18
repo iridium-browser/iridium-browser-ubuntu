@@ -5,16 +5,19 @@
 #include "chrome/browser/safe_browsing/certificate_reporting_service_test_utils.h"
 
 #include "base/strings/string_piece.h"
+#include "base/task/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/ssl/certificate_error_report.h"
 #include "components/encrypted_messages/encrypted_message.pb.h"
 #include "components/encrypted_messages/message_encrypter.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/test/test_utils.h"
 #include "net/base/upload_bytes_element_reader.h"
 #include "net/base/upload_data_stream.h"
 #include "net/http/http_response_headers.h"
 #include "net/url_request/url_request_filter.h"
+#include "services/network/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/boringssl/src/include/openssl/curve25519.h"
 
@@ -23,18 +26,9 @@ namespace {
 static const char kHkdfLabel[] = "certificate report";
 const uint32_t kServerPublicKeyTestVersion = 16;
 
-std::string GetUploadData(const network::ResourceRequest& request) {
-  auto body = request.request_body;
-  CHECK(body.get());
-  CHECK_EQ(1u, body->elements()->size());
-  const auto& element = body->elements()->at(0);
-  CHECK_EQ(network::DataElement::TYPE_BYTES, element.type());
-  return std::string(element.bytes(), element.length());
-}
-
 std::string GetReportContents(const network::ResourceRequest& request,
                               const uint8_t* server_private_key) {
-  std::string serialized_report(GetUploadData(request));
+  std::string serialized_report(network::GetUploadData(request));
   encrypted_messages::EncryptedMessage encrypted_message;
   EXPECT_TRUE(encrypted_message.ParseFromString(serialized_report));
   EXPECT_EQ(kServerPublicKeyTestVersion,
@@ -173,8 +167,8 @@ DelayableCertReportURLRequestJob::DelayableCertReportURLRequestJob(
 
 DelayableCertReportURLRequestJob::~DelayableCertReportURLRequestJob() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
-  content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
-                                   destruction_callback_);
+  base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI},
+                           destruction_callback_);
 }
 
 base::WeakPtr<DelayableCertReportURLRequestJob>
@@ -365,14 +359,8 @@ void CertificateReportingServiceTestHelper::SendResponse(
   head.headers = new net::HttpResponseHeaders(
       "HTTP/1.1 200 OK\nContent-type: text/html\n\n");
   head.mime_type = "text/html";
-  client->OnReceiveResponse(head, nullptr);
+  client->OnReceiveResponse(head);
   client->OnComplete(network::URLLoaderCompletionStatus());
-}
-
-std::unique_ptr<network::SharedURLLoaderFactoryInfo>
-CertificateReportingServiceTestHelper::Clone() {
-  NOTREACHED();
-  return nullptr;
 }
 
 void CertificateReportingServiceTestHelper::CreateLoaderAndStart(
@@ -406,6 +394,17 @@ void CertificateReportingServiceTestHelper::CreateLoaderAndStart(
   SendResponse(std::move(client), false);
   request_destroyed_observer_.OnRequest(serialized_report,
                                         expected_report_result_);
+}
+
+void CertificateReportingServiceTestHelper::Clone(
+    network::mojom::URLLoaderFactoryRequest request) {
+  NOTREACHED();
+}
+
+std::unique_ptr<network::SharedURLLoaderFactoryInfo>
+CertificateReportingServiceTestHelper::Clone() {
+  NOTREACHED();
+  return nullptr;
 }
 
 EventHistogramTester::EventHistogramTester() {}

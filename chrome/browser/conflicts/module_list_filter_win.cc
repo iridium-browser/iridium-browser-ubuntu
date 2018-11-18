@@ -11,23 +11,14 @@
 #include "base/i18n/case_conversion.h"
 #include "base/logging.h"
 #include "base/sha1.h"
-#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/conflicts/module_info_win.h"
 
 namespace {
 
-std::string GenerateCodeId(const ModuleInfoKey& module_key) {
-  return base::StringPrintf("%08X%x", module_key.module_time_date_stamp,
-                            module_key.module_size);
-}
-
 bool MatchesModuleGroup(const chrome::conflicts::ModuleGroup& module_group,
-                        const std::string& module_basename_hash,
-                        const std::string& module_code_id_hash) {
-  // While the ModuleList proto supports fine-grained filtering using the
-  // publisher name and the module directory, this capability is not used yet.
-
+                        base::StringPiece module_basename_hash,
+                        base::StringPiece module_code_id_hash) {
   // Now look at each module in the group in detail.
   for (const auto& module : module_group.modules()) {
     // A valid entry contains one of the basename and the code id.
@@ -68,10 +59,23 @@ bool ModuleListFilter::Initialize(const base::FilePath& module_list_path) {
   return initialized_;
 }
 
-bool ModuleListFilter::IsWhitelisted(const ModuleInfoKey& module_key,
-                                     const ModuleInfoData& module_data) const {
+bool ModuleListFilter::IsWhitelisted(
+    base::StringPiece module_basename_hash,
+    base::StringPiece module_code_id_hash) const {
   DCHECK(initialized_);
 
+  for (const auto& module_group : module_list_.whitelist().module_groups()) {
+    if (MatchesModuleGroup(module_group, module_basename_hash,
+                           module_code_id_hash)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+bool ModuleListFilter::IsWhitelisted(const ModuleInfoKey& module_key,
+                                     const ModuleInfoData& module_data) const {
   // Precompute the hash of the basename and of the code id.
   const std::string module_basename_hash =
       base::SHA1HashString(base::UTF16ToUTF8(
@@ -79,13 +83,7 @@ bool ModuleListFilter::IsWhitelisted(const ModuleInfoKey& module_key,
   const std::string module_code_id_hash =
       base::SHA1HashString(GenerateCodeId(module_key));
 
-  for (const auto& module_group : module_list_.whitelist().module_groups()) {
-    if (MatchesModuleGroup(module_group, module_basename_hash,
-                           module_code_id_hash))
-      return true;
-  }
-
-  return false;
+  return IsWhitelisted(module_basename_hash, module_code_id_hash);
 }
 
 std::unique_ptr<chrome::conflicts::BlacklistAction>

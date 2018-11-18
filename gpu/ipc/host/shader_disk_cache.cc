@@ -4,11 +4,15 @@
 
 #include "gpu/ipc/host/shader_disk_cache.h"
 
+#include "base/command_line.h"
 #include "base/macros.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/sys_info.h"
 #include "base/threading/thread_checker.h"
 #include "build/build_config.h"
 #include "gpu/command_buffer/common/constants.h"
+#include "gpu/config/gpu_preferences.h"
+#include "gpu/config/gpu_switches.h"
 #include "net/base/cache_type.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
@@ -19,6 +23,22 @@ namespace {
 
 static const base::FilePath::CharType kGpuCachePath[] =
     FILE_PATH_LITERAL("GPUCache");
+
+#if !defined(OS_ANDROID)
+size_t GetCustomCacheSizeBytesIfExists(base::StringPiece switch_string) {
+  const base::CommandLine& process_command_line =
+      *base::CommandLine::ForCurrentProcess();
+  size_t cache_size;
+  if (process_command_line.HasSwitch(switch_string)) {
+    if (base::StringToSizeT(
+            process_command_line.GetSwitchValueASCII(switch_string),
+            &cache_size)) {
+      return cache_size * 1024;  // Bytes
+    }
+  }
+  return 0;
+}
+#endif
 
 }  // namespace
 
@@ -102,7 +122,7 @@ class ShaderClearHelper : public base::ThreadChecker {
                     const base::FilePath& path,
                     const base::Time& delete_begin,
                     const base::Time& delete_end,
-                    const base::Closure& callback);
+                    base::OnceClosure callback);
   ~ShaderClearHelper();
 
   void Clear();
@@ -118,7 +138,7 @@ class ShaderClearHelper : public base::ThreadChecker {
   base::FilePath path_;
   base::Time delete_begin_;
   base::Time delete_end_;
-  base::Closure callback_;
+  base::OnceClosure callback_;
   base::WeakPtrFactory<ShaderClearHelper> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(ShaderClearHelper);
@@ -173,8 +193,8 @@ void ShaderDiskCacheEntry::Cache() {
                              weak_ptr_factory_.GetWeakPtr(),
                              base::Passed(std::move(entry)));
 
-  int rv =
-      cache_->backend()->OpenEntry(key_, closure_owned_entry_ptr, callback);
+  int rv = cache_->backend()->OpenEntry(key_, net::HIGHEST,
+                                        closure_owned_entry_ptr, callback);
 
   if (rv != net::ERR_IO_PENDING) {
     entry_ = *closure_owned_entry_ptr;
@@ -223,8 +243,8 @@ int ShaderDiskCacheEntry::OpenCallback(int rv) {
                              weak_ptr_factory_.GetWeakPtr(),
                              base::Passed(std::move(entry)));
 
-  int create_rv =
-      cache_->backend()->CreateEntry(key_, closure_owned_entry_ptr, callback);
+  int create_rv = cache_->backend()->CreateEntry(
+      key_, net::HIGHEST, closure_owned_entry_ptr, callback);
 
   if (create_rv != net::ERR_IO_PENDING)
     entry_ = *closure_owned_entry_ptr;
@@ -240,7 +260,7 @@ int ShaderDiskCacheEntry::WriteCallback(int rv) {
   }
 
   op_type_ = WRITE_DATA;
-  scoped_refptr<net::StringIOBuffer> io_buf = new net::StringIOBuffer(shader_);
+  auto io_buf = base::MakeRefCounted<net::StringIOBuffer>(shader_);
   return entry_->WriteData(1, 0, io_buf.get(), shader_.length(),
                            base::Bind(&ShaderDiskCacheEntry::OnOpComplete,
                                       weak_ptr_factory_.GetWeakPtr()),
@@ -261,8 +281,8 @@ ShaderDiskReadHelper::ShaderDiskReadHelper(ShaderDiskCache* cache,
     : cache_(cache),
       shader_loaded_callback_(callback),
       op_type_(OPEN_NEXT),
-      buf_(NULL),
-      entry_(NULL),
+      buf_(nullptr),
+      entry_(nullptr),
       weak_ptr_factory_(this) {}
 
 ShaderDiskReadHelper::~ShaderDiskReadHelper() {
@@ -334,7 +354,7 @@ int ShaderDiskReadHelper::OpenNextEntryComplete(int rv) {
     return rv;
 
   op_type_ = READ_COMPLETE;
-  buf_ = new net::IOBufferWithSize(entry_->GetDataSize(1));
+  buf_ = base::MakeRefCounted<net::IOBufferWithSize>(entry_->GetDataSize(1));
   return entry_->ReadData(1, 0, buf_.get(), buf_->size(),
                           base::Bind(&ShaderDiskReadHelper::OnOpComplete,
                                      weak_ptr_factory_.GetWeakPtr()));
@@ -347,9 +367,9 @@ int ShaderDiskReadHelper::ReadComplete(int rv) {
                                 std::string(buf_->data(), buf_->size()));
   }
 
-  buf_ = NULL;
+  buf_ = nullptr;
   entry_->Close();
-  entry_ = NULL;
+  entry_ = nullptr;
 
   op_type_ = OPEN_NEXT;
   return net::OK;
@@ -370,14 +390,14 @@ ShaderClearHelper::ShaderClearHelper(ShaderCacheFactory* factory,
                                      const base::FilePath& path,
                                      const base::Time& delete_begin,
                                      const base::Time& delete_end,
-                                     const base::Closure& callback)
+                                     base::OnceClosure callback)
     : factory_(factory),
       cache_(std::move(cache)),
       op_type_(VERIFY_CACHE_SETUP),
       path_(path),
       delete_begin_(delete_begin),
       delete_end_(delete_end),
-      callback_(callback),
+      callback_(std::move(callback)),
       weak_ptr_factory_(this) {}
 
 ShaderClearHelper::~ShaderClearHelper() {
@@ -406,7 +426,7 @@ void ShaderClearHelper::DoClearShaderCache(int rv) {
         op_type_ = TERMINATE;
         break;
       case TERMINATE:
-        callback_.Run();
+        std::move(callback_).Run();
         // Calling CacheCleared() destroys |this|.
         factory_->CacheCleared(path_);
         rv = net::ERR_IO_PENDING;  // Break the loop.
@@ -437,7 +457,7 @@ scoped_refptr<ShaderDiskCache> ShaderCacheFactory::Get(int32_t client_id) {
   DCHECK(CalledOnValidThread());
   ClientIdToPathMap::iterator iter = client_id_to_path_map_.find(client_id);
   if (iter == client_id_to_path_map_.end())
-    return NULL;
+    return nullptr;
   return ShaderCacheFactory::GetByPath(iter->second);
 }
 
@@ -448,7 +468,7 @@ scoped_refptr<ShaderDiskCache> ShaderCacheFactory::GetByPath(
   if (iter != shader_cache_map_.end())
     return iter->second;
 
-  ShaderDiskCache* cache = new ShaderDiskCache(this, path);
+  auto cache = base::WrapRefCounted(new ShaderDiskCache(this, path));
   cache->Init();
   return cache;
 }
@@ -467,12 +487,13 @@ void ShaderCacheFactory::RemoveFromCache(const base::FilePath& key) {
 void ShaderCacheFactory::ClearByPath(const base::FilePath& path,
                                      const base::Time& delete_begin,
                                      const base::Time& delete_end,
-                                     const base::Closure& callback) {
+                                     base::OnceClosure callback) {
   DCHECK(CalledOnValidThread());
   DCHECK(!callback.is_null());
 
-  auto helper = std::make_unique<ShaderClearHelper>(
-      this, GetByPath(path), path, delete_begin, delete_end, callback);
+  auto helper = std::make_unique<ShaderClearHelper>(this, GetByPath(path), path,
+                                                    delete_begin, delete_end,
+                                                    std::move(callback));
 
   // We could receive requests to clear the same path with different
   // begin/end times. So, we keep a list of requests. If we haven't seen this
@@ -497,12 +518,13 @@ void ShaderCacheFactory::ClearByPath(const base::FilePath& path,
 void ShaderCacheFactory::ClearByClientId(int32_t client_id,
                                          const base::Time& delete_begin,
                                          const base::Time& delete_end,
-                                         const base::Closure& callback) {
+                                         base::OnceClosure callback) {
   DCHECK(CalledOnValidThread());
   ClientIdToPathMap::iterator iter = client_id_to_path_map_.find(client_id);
   if (iter == client_id_to_path_map_.end())
     return;
-  return ClearByPath(iter->second, delete_begin, delete_end, callback);
+  return ClearByPath(iter->second, delete_begin, delete_end,
+                     std::move(callback));
 }
 
 void ShaderCacheFactory::CacheCleared(const base::FilePath& path) {
@@ -636,6 +658,10 @@ int ShaderDiskCache::SetCacheCompleteCallback(
 // static
 size_t ShaderDiskCache::CacheSizeBytes() {
 #if !defined(OS_ANDROID)
+  size_t custom_cache_size =
+      GetCustomCacheSizeBytesIfExists(switches::kShaderDiskCacheSizeKB);
+  if (custom_cache_size)
+    return custom_cache_size;
   return kDefaultMaxProgramCacheMemoryBytes;
 #else   // !defined(OS_ANDROID)
   if (!base::SysInfo::IsLowEndDevice())

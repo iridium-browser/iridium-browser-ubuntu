@@ -5,6 +5,7 @@
 #include "base/android/path_utils.h"
 
 #include "base/android/jni_android.h"
+#include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
 #include "base/android/scoped_java_ref.h"
 #include "base/files/file_path.h"
@@ -47,6 +48,18 @@ bool GetDownloadsDirectory(FilePath* result) {
   return true;
 }
 
+std::vector<FilePath> GetAllPrivateDownloadsDirectories() {
+  std::vector<std::string> dirs;
+  JNIEnv* env = AttachCurrentThread();
+  auto jarray = Java_PathUtils_getAllPrivateDownloadsDirectories(env);
+  base::android::AppendJavaStringArrayToStringVector(env, jarray.obj(), &dirs);
+
+  std::vector<base::FilePath> file_paths;
+  for (const auto& dir : dirs)
+    file_paths.emplace_back(dir);
+  return file_paths;
+}
+
 bool GetNativeLibraryDirectory(FilePath* result) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jstring> path =
@@ -62,6 +75,15 @@ bool GetExternalStorageDirectory(FilePath* result) {
       Java_PathUtils_getExternalStorageDirectory(env);
   FilePath storage_path(ConvertJavaStringToUTF8(path));
   *result = storage_path;
+  return true;
+}
+
+bool GetPathToBaseApk(FilePath* result) {
+  JNIEnv* env = AttachCurrentThread();
+  ScopedJavaLocalRef<jstring> path =
+      Java_PathUtils_getPathToBaseApk(env);
+  FilePath apk_path(ConvertJavaStringToUTF8(path));
+  *result = apk_path;
   return true;
 }
 

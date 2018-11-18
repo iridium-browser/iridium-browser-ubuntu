@@ -8,7 +8,7 @@
 GN generates Xcode projects that build one configuration only. However, typical
 iOS development involves using the Xcode IDE to toggle the platform and
 configuration. This script replaces the 'gn' configuration with 'Debug',
-'Release' and 'Profile', and changes the ninja invokation to honor these
+'Release' and 'Profile', and changes the ninja invocation to honor these
 configurations.
 """
 
@@ -25,9 +25,6 @@ import shutil
 import subprocess
 import sys
 import tempfile
-
-
-XCTEST_PRODUCT_TYPE = 'com.apple.product-type.bundle.unit-test'
 
 
 class XcodeProject(object):
@@ -74,7 +71,7 @@ def WriteXcodeProject(output_path, json_string):
     CopyFileIfChanged(temp_file.name, output_path)
 
 
-def UpdateProductsProject(file_input, file_output, configurations):
+def UpdateProductsProject(file_input, file_output, configurations, root_dir):
   """Update Xcode project to support multiple configurations.
 
   Args:
@@ -91,36 +88,11 @@ def UpdateProductsProject(file_input, file_output, configurations):
   for value in project.objects.values():
     isa = value['isa']
 
-    # TODO(crbug.com/619072): gn does not write the min deployment target in the
-    # generated Xcode project, so add it while doing the conversion, only if it
-    # is not present. Remove this code and comment once the bug is fixed and gn
-    # has rolled past it.
-    if isa == 'XCBuildConfiguration':
-      build_settings = value['buildSettings']
-      if 'IPHONEOS_DEPLOYMENT_TARGET' not in build_settings:
-        build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '9.0'
-
     # Teach build shell script to look for the configuration and platform.
     if isa == 'PBXShellScriptBuildPhase':
       value['shellScript'] = value['shellScript'].replace(
           'ninja -C .',
           'ninja -C "../${CONFIGURATION}${EFFECTIVE_PLATFORM_NAME}"')
-
-    # Configure BUNDLE_LOADER and TEST_HOST for xctest targets (if not yet
-    # configured by gn). Old convention was to name the test dynamic module
-    # "foo" and the host "foo_host" while the new convention is to name the
-    # test "foo_module" and the host "foo". Decide which convention to use
-    # by inspecting the target name.
-    if isa == 'PBXNativeTarget' and value['productType'] == XCTEST_PRODUCT_TYPE:
-      configuration_list = project.objects[value['buildConfigurationList']]
-      for config_name in configuration_list['buildConfigurations']:
-        config = project.objects[config_name]
-        if not config['buildSettings'].get('BUNDLE_LOADER'):
-          assert value['name'].endswith('_module')
-          host_name = value['name'][:-len('_module')]
-          config['buildSettings']['BUNDLE_LOADER'] = '$(TEST_HOST)'
-          config['buildSettings']['TEST_HOST'] = \
-              '${BUILT_PRODUCTS_DIR}/%s.app/%s' % (host_name, host_name)
 
     # Add new configuration, using the first one as default.
     if isa == 'XCConfigurationList':
@@ -141,11 +113,79 @@ def UpdateProductsProject(file_input, file_output, configurations):
   for object_id in objects_to_remove:
     del project.objects[object_id]
 
+  AddMarkdownToProject(project, root_dir, json_data['rootObject'])
+
   objects = collections.OrderedDict(sorted(project.objects.iteritems()))
   WriteXcodeProject(file_output, json.dumps(json_data))
 
 
-def ConvertGnXcodeProject(input_dir, output_dir, configurations):
+def AddMarkdownToProject(project, root_dir, root_object):
+  list_files_cmd = ['git', '-C', root_dir, 'ls-files', '*.md']
+  paths = subprocess.check_output(list_files_cmd).splitlines()
+  ios_internal_dir = os.path.join(root_dir, 'ios_internal')
+  if os.path.exists(ios_internal_dir):
+    list_files_cmd = ['git', '-C', ios_internal_dir, 'ls-files', '*.md']
+    ios_paths = subprocess.check_output(list_files_cmd).splitlines()
+    paths.extend(["ios_internal/" + path for path in ios_paths])
+  for path in paths:
+    new_markdown_entry = {
+      "fileEncoding": "4",
+      "isa": "PBXFileReference",
+      "lastKnownFileType": "net.daringfireball.markdown",
+      "name": os.path.basename(path),
+      "path": path,
+      "sourceTree": "<group>"
+    }
+    new_markdown_entry_id = project.AddObject('sources', new_markdown_entry)
+    folder = GetFolderForPath(project, root_object, os.path.dirname(path))
+    folder['children'].append(new_markdown_entry_id)
+
+
+def GetFolderForPath(project, rootObject, path):
+  objects = project.objects
+  # 'Sources' is always the first child of
+  # project->rootObject->mainGroup->children.
+  root = objects[objects[objects[rootObject]['mainGroup']]['children'][0]]
+  if not path:
+    return root
+  for folder in path.split('/'):
+    children = root['children']
+    new_root = None
+    for child in children:
+      if objects[child]['isa'] == 'PBXGroup' and \
+         objects[child]['name'] == folder:
+        new_root = objects[child]
+        break
+    if not new_root:
+      # If the folder isn't found we could just cram it into the leaf existing
+      # folder, but that leads to folders with tons of README.md inside.
+      new_group =  {
+        "children": [
+        ],
+        "isa": "PBXGroup",
+        "name": folder,
+        "sourceTree": "<group>"
+      }
+      new_group_id = project.AddObject('sources', new_group)
+      children.append(new_group_id)
+      new_root = objects[new_group_id]
+    root = new_root
+  return root
+
+
+def DisableNewBuildSystem(output_dir):
+  """Disables the new build system due to crbug.com/852522 """
+  xcwspacesharedsettings = os.path.join(output_dir, 'all.xcworkspace',
+      'xcshareddata', 'WorkspaceSettings.xcsettings')
+  if os.path.isfile(xcwspacesharedsettings):
+    json_data = json.loads(LoadXcodeProjectAsJSON(xcwspacesharedsettings))
+  else:
+    json_data = {}
+  json_data['BuildSystemType'] = 'Original'
+  WriteXcodeProject(xcwspacesharedsettings, json.dumps(json_data))
+
+
+def ConvertGnXcodeProject(root_dir, input_dir, output_dir, configurations):
   '''Tweak the Xcode project generated by gn to support multiple configurations.
 
   The Xcode projects generated by "gn gen --ide" only supports a single
@@ -165,12 +205,16 @@ def ConvertGnXcodeProject(input_dir, output_dir, configurations):
   products = os.path.join('products.xcodeproj', 'project.pbxproj')
   product_input = os.path.join(input_dir, products)
   product_output = os.path.join(output_dir, products)
-  UpdateProductsProject(product_input, product_output, configurations)
+  UpdateProductsProject(product_input, product_output, configurations, root_dir)
 
   # Copy all workspace.
   xcwspace = os.path.join('all.xcworkspace', 'contents.xcworkspacedata')
   CopyFileIfChanged(os.path.join(input_dir, xcwspace),
                     os.path.join(output_dir, xcwspace))
+
+  # TODO(crbug.com/852522): Disable new BuildSystemType.
+  DisableNewBuildSystem(output_dir)
+
   # TODO(crbug.com/679110): gn has been modified to remove 'sources.xcodeproj'
   # and keep 'all.xcworkspace' and 'products.xcodeproj'. The following code is
   # here to support both old and new projects setup and will be removed once gn
@@ -192,6 +236,9 @@ def Main(args):
   parser.add_argument(
       '--add-config', dest='configurations', default=[], action='append',
       help='configuration to add to the Xcode project')
+  parser.add_argument(
+      '--root', type=os.path.abspath, required=True,
+      help='root directory of the project')
   args = parser.parse_args(args)
 
   if not os.path.isdir(args.input):
@@ -208,9 +255,7 @@ def Main(args):
     sys.stderr.write('At least one configuration required, see --add-config.\n')
     return 1
 
-  ConvertGnXcodeProject(args.input, args.output, args.configurations)
+  ConvertGnXcodeProject(args.root, args.input, args.output, args.configurations)
 
 if __name__ == '__main__':
   sys.exit(Main(sys.argv[1:]))
-
-

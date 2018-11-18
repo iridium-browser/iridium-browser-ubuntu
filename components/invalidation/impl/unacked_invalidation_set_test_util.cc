@@ -89,8 +89,7 @@ namespace {
 ObjectIdInvalidationMap UnackedInvalidationsMapToObjectIdInvalidationMap(
     const UnackedInvalidationsMap& state_map) {
   ObjectIdInvalidationMap object_id_invalidation_map;
-  for (UnackedInvalidationsMap::const_iterator it = state_map.begin();
-       it != state_map.end(); ++it) {
+  for (auto it = state_map.begin(); it != state_map.end(); ++it) {
     it->second.ExportInvalidations(
         base::WeakPtr<AckHandler>(),
         scoped_refptr<base::SingleThreadTaskRunner>(),
@@ -151,22 +150,21 @@ void PrintTo(const UnackedInvalidationSet& invalidations,
   std::string output;
   JSONStringValueSerializer serializer(&output);
   serializer.set_pretty_print(true);
-  serializer.Serialize(*value.get());
+  serializer.Serialize(*value);
 
   (*os) << output;
 }
 
 void PrintTo(const UnackedInvalidationsMap& map, ::std::ostream* os) {
   std::unique_ptr<base::ListValue> list(new base::ListValue);
-  for (UnackedInvalidationsMap::const_iterator it = map.begin();
-       it != map.end(); ++it) {
+  for (auto it = map.begin(); it != map.end(); ++it) {
     list->Append(it->second.ToValue());
   }
 
   std::string output;
   JSONStringValueSerializer serializer(&output);
   serializer.set_pretty_print(true);
-  serializer.Serialize(*list.get());
+  serializer.Serialize(*list);
 
   (*os) << output;
 }

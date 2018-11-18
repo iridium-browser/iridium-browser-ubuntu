@@ -17,7 +17,6 @@
 @class AutofillController;
 @class CastController;
 @class ExternalAppLauncher;
-@class FormInputAccessoryViewController;
 class GURL;
 @class OpenInController;
 @class OverscrollActionsController;
@@ -27,7 +26,6 @@ class GURL;
 @class FormSuggestionController;
 @protocol TabDialogDelegate;
 @class Tab;
-@protocol TabHeadersDelegate;
 @class TabModel;
 
 namespace ios {
@@ -90,7 +88,6 @@ extern NSString* const kProxyPassthroughHeaderValue;
 
 @property(nonatomic, readonly) BOOL canGoBack;
 @property(nonatomic, readonly) BOOL canGoForward;
-@property(nonatomic, weak) id<TabHeadersDelegate> tabHeadersDelegate;
 
 @property(nonatomic, readonly)
     OverscrollActionsController* overscrollActionsController;
@@ -164,6 +161,15 @@ extern NSString* const kProxyPassthroughHeaderValue;
 
 // Evaluates U2F result.
 - (void)evaluateU2FResultFromURL:(const GURL&)url;
+
+// Generates a GURL compliant with the x-callback-url specs for FIDO Universal
+// 2nd Factory (U2F) requests. Returns empty GURL if origin is not secure.
+// See http://x-callback-url.com/specifications/ for specifications.
+- (GURL)XCallbackFromRequestURL:(const GURL&)requestURL
+                      originURL:(const GURL&)originURL;
+
+// Sends a notification to indicate that |url| is going to start loading.
+- (void)notifyTabOfUrlMayStartLoading:(const GURL&)url;
 
 @end
 

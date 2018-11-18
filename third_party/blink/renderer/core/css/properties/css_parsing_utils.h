@@ -37,8 +37,6 @@ using ConsumeAnimationItemValue = CSSValue* (*)(CSSPropertyID,
                                                 const CSSParserContext&,
                                                 bool use_legacy_parsing);
 using IsPositionKeyword = bool (*)(CSSValueID);
-using ConsumePlaceAlignmentValue = CSSValue* (*)(CSSParserTokenRange&,
-                                                 IsPositionKeyword);
 
 constexpr size_t kMaxNumAnimationLonghands = 8;
 
@@ -47,6 +45,7 @@ bool IsSelfPositionOrLeftOrRightKeyword(CSSValueID);
 bool IsContentPositionKeyword(CSSValueID);
 bool IsContentPositionOrLeftOrRightKeyword(CSSValueID);
 
+CSSValue* ConsumeScrollOffset(CSSParserTokenRange&);
 CSSValue* ConsumeSelfPositionOverflowPosition(CSSParserTokenRange&,
                                               IsPositionKeyword);
 CSSValue* ConsumeSimplifiedDefaultPosition(CSSParserTokenRange&,
@@ -89,7 +88,7 @@ CSSValue* ParseBackgroundBox(CSSParserTokenRange&,
 CSSValue* ParseBackgroundOrMaskSize(CSSParserTokenRange&,
                                     const CSSParserContext&,
                                     const CSSParserLocalContext&,
-                                    WTF::Optional<WebFeature> negativeSize);
+                                    base::Optional<WebFeature> negative_size);
 bool ParseBackgroundOrMask(bool,
                            CSSParserTokenRange&,
                            const CSSParserContext&,
@@ -206,11 +205,6 @@ CSSValue* ConsumeOffsetPath(CSSParserTokenRange&, const CSSParserContext&);
 CSSValue* ConsumePathOrNone(CSSParserTokenRange&);
 CSSValue* ConsumeOffsetRotate(CSSParserTokenRange&, const CSSParserContext&);
 
-bool ConsumePlaceAlignment(CSSParserTokenRange&,
-                           ConsumePlaceAlignmentValue,
-                           CSSValue*& align_value,
-                           CSSValue*& justify_value);
-
 CSSValue* ConsumeBasicShape(CSSParserTokenRange&, const CSSParserContext&);
 bool ConsumeRadii(CSSValue* horizontal_radii[4],
                   CSSValue* vertical_radii[4],
@@ -220,6 +214,9 @@ bool ConsumeRadii(CSSValue* horizontal_radii[4],
 
 CSSValue* ConsumeTextDecorationLine(CSSParserTokenRange&);
 
+CSSValue* ConsumeTransformValue(CSSParserTokenRange&,
+                                const CSSParserContext&,
+                                bool use_legacy_parsing);
 CSSValue* ConsumeTransformList(CSSParserTokenRange&,
                                const CSSParserContext&,
                                const CSSParserLocalContext&);

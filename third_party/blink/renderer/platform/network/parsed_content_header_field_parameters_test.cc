@@ -35,21 +35,32 @@ void CheckValidity(bool expected,
 TEST(ParsedContentHeaderFieldParametersTest, Validity) {
   CheckValidity(true, "");
   CheckValidity(true, "  ");
+  CheckValidity(true, "\t");
   CheckValidity(true, "  ;p1=v1");
+  CheckValidity(true, "\t;p1=v1");
   CheckValidity(true, ";  p1=v1");
+  CheckValidity(true, ";\tp1=v1");
   CheckValidity(true, ";p1=v1  ");
+  CheckValidity(true, ";p1=v1\t");
   CheckValidity(true, ";p1 = v1");
+  CheckValidity(true, ";p1\t=\tv1");
+  CheckValidity(true, ";  p1  =  v1  ");
+  CheckValidity(true, ";\tp1\t=\tv1\t");
   CheckValidity(true, ";z=\"ttx&r=z;;\\u\\\"kd==\"");
   CheckValidity(true, "; z=\"\xff\"");
 
   CheckValidity(false, "\r");
   CheckValidity(false, "\n");
   CheckValidity(false, " p1=v1");
+  CheckValidity(false, "\tp1=v1");
   CheckValidity(false, ";p1=v1;");
   CheckValidity(false, ";");
   CheckValidity(false, ";  ");
+  CheckValidity(false, ";\t");
   CheckValidity(false, "; p1");
+  CheckValidity(false, ";\tp1");
   CheckValidity(false, "; p1;");
+  CheckValidity(false, ";\tp1;");
   CheckValidity(false, ";\"xx");
   CheckValidity(false, ";\"xx=y");
   CheckValidity(false, "; \"z\"=u");
@@ -68,7 +79,7 @@ TEST(ParsedContentHeaderFieldParametersTest, ParameterName) {
 
   CheckValidity(true, input);
 
-  WTF::Optional<ParsedContentHeaderFieldParameters> t =
+  base::Optional<ParsedContentHeaderFieldParameters> t =
       ParsedContentHeaderFieldParameters::Parse(HeaderFieldTokenizer(input),
                                                 Mode::kNormal);
   ASSERT_TRUE(t);
@@ -93,7 +104,7 @@ TEST(ParsedContentHeaderFieldParametersTest, RelaxedParameterName) {
 
   CheckValidity(true, input, Mode::kRelaxed);
 
-  WTF::Optional<ParsedContentHeaderFieldParameters> t =
+  base::Optional<ParsedContentHeaderFieldParameters> t =
       ParsedContentHeaderFieldParameters::Parse(HeaderFieldTokenizer(input),
                                                 Mode::kRelaxed);
   ASSERT_TRUE(t);
@@ -106,14 +117,14 @@ TEST(ParsedContentHeaderFieldParametersTest, RelaxedParameterName) {
 TEST(ParsedContentHeaderFieldParametersTest, BeginEnd) {
   String input = "; a=b; a=c; b=d";
 
-  WTF::Optional<ParsedContentHeaderFieldParameters> t =
+  base::Optional<ParsedContentHeaderFieldParameters> t =
       ParsedContentHeaderFieldParameters::Parse(HeaderFieldTokenizer(input),
                                                 Mode::kNormal);
   ASSERT_TRUE(t);
   EXPECT_TRUE(t->HasDuplicatedNames());
   EXPECT_EQ(3u, t->ParameterCount());
 
-  auto i = t->begin();
+  auto* i = t->begin();
   ASSERT_NE(i, t->end());
   EXPECT_EQ(i->name, "a");
   EXPECT_EQ(i->value, "b");
@@ -135,7 +146,7 @@ TEST(ParsedContentHeaderFieldParametersTest, BeginEnd) {
 TEST(ParsedContentHeaderFieldParametersTest, RBeginEnd) {
   String input = "; a=B; A=c; b=d";
 
-  WTF::Optional<ParsedContentHeaderFieldParameters> t =
+  base::Optional<ParsedContentHeaderFieldParameters> t =
       ParsedContentHeaderFieldParameters::Parse(HeaderFieldTokenizer(input),
                                                 Mode::kNormal);
   ASSERT_TRUE(t);

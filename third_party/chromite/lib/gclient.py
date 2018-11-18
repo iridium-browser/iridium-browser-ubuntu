@@ -17,9 +17,6 @@ from chromite.lib import git
 from chromite.lib import osutils
 
 
-site_config = config_lib.GetConfig()
-
-
 CHROME_COMMITTER_URL = 'https://chromium.googlesource.com/chromium/src'
 STATUS_URL = 'https://chromium-status.appspot.com/current?format=json'
 
@@ -131,7 +128,8 @@ def _GetGclientURLs(internal, rev):
   elif internal:
     # Internal buildspec: check out the buildspec repo and set deps_file to
     # the path to the desired release spec.
-    url = site_config.params.INTERNAL_GOB_URL + '/chrome/tools/buildspec.git'
+    site_params = config_lib.GetSiteParams()
+    url = site_params.INTERNAL_GOB_URL + '/chrome/tools/buildspec.git'
 
     # Chromium switched to DEPS at version 45.0.2432.3.
     deps_file = '.DEPS.git' if BuildspecUsesDepsGit(rev) else 'DEPS'
@@ -178,6 +176,8 @@ def _GetGclientSpec(internal, rev, template, use_cache, managed):
   """
   solutions = _GetGclientSolutions(internal, rev, template, managed)
   result = 'solutions = %s\n' % pprint.pformat(solutions)
+
+  result += "target_os = ['chromeos']\n"
 
   # Horrible hack, I will go to hell for this.  The bots need to have a git
   # cache set up; but how can we tell whether this code is running on a bot

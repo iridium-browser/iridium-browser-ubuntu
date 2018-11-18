@@ -7,6 +7,8 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/logging.h"
+#include "base/task/post_task.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "url/gurl.h"
 
@@ -47,8 +49,6 @@ FakeSafeBrowsingDatabaseManager::~FakeSafeBrowsingDatabaseManager() {}
 bool FakeSafeBrowsingDatabaseManager::CheckUrlForSubresourceFilter(
     const GURL& url,
     Client* client) {
-  DCHECK(CanCheckSubresourceFilter());
-
   if (synchronous_failure_ && !url_to_threat_type_.count(url))
     return true;
 
@@ -58,11 +58,12 @@ bool FakeSafeBrowsingDatabaseManager::CheckUrlForSubresourceFilter(
   checks_.insert(client);
   if (simulate_timeout_)
     return false;
-  content::BrowserThread::PostTask(
-      content::BrowserThread::IO, FROM_HERE,
-      base::Bind(&FakeSafeBrowsingDatabaseManager::
-                     OnCheckUrlForSubresourceFilterComplete,
-                 weak_factory_.GetWeakPtr(), base::Unretained(client), url));
+  base::PostTaskWithTraits(
+      FROM_HERE, {content::BrowserThread::IO},
+      base::BindOnce(&FakeSafeBrowsingDatabaseManager::
+                         OnCheckUrlForSubresourceFilterComplete,
+                     weak_factory_.GetWeakPtr(), base::Unretained(client),
+                     url));
   return false;
 }
 
@@ -105,10 +106,6 @@ void FakeSafeBrowsingDatabaseManager::CancelCheck(Client* client) {
 }
 bool FakeSafeBrowsingDatabaseManager::CanCheckResourceType(
     content::ResourceType /* resource_type */) const {
-  return true;
-}
-
-bool FakeSafeBrowsingDatabaseManager::CanCheckSubresourceFilter() const {
   return true;
 }
 

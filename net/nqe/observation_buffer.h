@@ -45,6 +45,11 @@ class NET_EXPORT_PRIVATE ObservationBuffer {
                     double weight_multiplier_per_second,
                     double weight_multiplier_per_signal_level);
 
+  //  This constructor does not copy the |observations_| from |other| to |this|.
+  //  As such, this constructor should only be called before adding any
+  //  observations to |other|.
+  ObservationBuffer(const ObservationBuffer& other);
+
   ~ObservationBuffer();
 
   // Adds |observation| to the buffer. The oldest observation in the buffer
@@ -69,11 +74,10 @@ class NET_EXPORT_PRIVATE ObservationBuffer {
   // signal strength. |result| must not be null. If |observations_count| is not
   // null, then it is set to the number of observations that were available
   // in the observation buffer for computing the percentile.
-  base::Optional<int32_t> GetPercentile(
-      base::TimeTicks begin_timestamp,
-      const base::Optional<int32_t>& current_signal_strength,
-      int percentile,
-      size_t* observations_count) const;
+  base::Optional<int32_t> GetPercentile(base::TimeTicks begin_timestamp,
+                                        int32_t current_signal_strength,
+                                        int percentile,
+                                        size_t* observations_count) const;
 
   void SetTickClockForTesting(const base::TickClock* tick_clock) {
     tick_clock_ = tick_clock;
@@ -109,7 +113,7 @@ class NET_EXPORT_PRIVATE ObservationBuffer {
   // at least one observation in the buffer.
   void ComputeWeightedObservations(
       const base::TimeTicks& begin_timestamp,
-      const base::Optional<int32_t>& current_signal_strength,
+      int32_t current_signal_strength,
       std::vector<WeightedObservation>* weighted_observations,
       double* total_weight) const;
 
@@ -136,7 +140,7 @@ class NET_EXPORT_PRIVATE ObservationBuffer {
 
   const base::TickClock* tick_clock_;
 
-  DISALLOW_COPY_AND_ASSIGN(ObservationBuffer);
+  DISALLOW_ASSIGN(ObservationBuffer);
 };
 
 }  // namespace internal

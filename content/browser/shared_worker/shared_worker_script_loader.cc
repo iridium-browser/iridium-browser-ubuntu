@@ -4,42 +4,57 @@
 
 #include "content/browser/shared_worker/shared_worker_script_loader.h"
 
+#include "content/browser/appcache/appcache_request_handler.h"
 #include "content/browser/loader/navigation_loader_interceptor.h"
+#include "content/browser/loader/resource_dispatcher_host_impl.h"
 #include "content/browser/service_worker/service_worker_provider_host.h"
-#include "content/browser/url_loader_factory_getter.h"
-#include "content/common/service_worker/service_worker_utils.h"
 #include "content/public/browser/resource_context.h"
 #include "net/url_request/redirect_util.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
+#include "third_party/blink/public/common/service_worker/service_worker_utils.h"
 
 namespace content {
 
 SharedWorkerScriptLoader::SharedWorkerScriptLoader(
+    int process_id,
     int32_t routing_id,
     int32_t request_id,
     uint32_t options,
     const network::ResourceRequest& resource_request,
     network::mojom::URLLoaderClientPtr client,
     base::WeakPtr<ServiceWorkerProviderHost> service_worker_provider_host,
+    base::WeakPtr<AppCacheHost> appcache_host,
     ResourceContext* resource_context,
-    scoped_refptr<URLLoaderFactoryGetter> loader_factory_getter,
+    scoped_refptr<network::SharedURLLoaderFactory> default_loader_factory,
     const net::MutableNetworkTrafficAnnotationTag& traffic_annotation)
-    : routing_id_(routing_id),
+    : process_id_(process_id),
+      routing_id_(routing_id),
       request_id_(request_id),
       options_(options),
       resource_request_(resource_request),
       client_(std::move(client)),
       service_worker_provider_host_(service_worker_provider_host),
       resource_context_(resource_context),
-      loader_factory_getter_(std::move(loader_factory_getter)),
+      default_loader_factory_(std::move(default_loader_factory)),
       traffic_annotation_(traffic_annotation),
       url_loader_client_binding_(this),
       weak_factory_(this) {
-  DCHECK(ServiceWorkerUtils::IsServicificationEnabled());
+  DCHECK(blink::ServiceWorkerUtils::IsServicificationEnabled());
 
   if (service_worker_provider_host_) {
-    service_worker_interceptor_ =
+    std::unique_ptr<NavigationLoaderInterceptor> service_worker_interceptor =
         ServiceWorkerRequestHandler::InitializeForSharedWorker(
             resource_request_, service_worker_provider_host_);
+    if (service_worker_interceptor)
+      interceptors_.push_back(std::move(service_worker_interceptor));
+  }
+
+  if (appcache_host) {
+    std::unique_ptr<NavigationLoaderInterceptor> appcache_interceptor =
+        AppCacheRequestHandler::InitializeForMainResourceNetworkService(
+            resource_request_, appcache_host, default_loader_factory_);
+    if (appcache_interceptor)
+      interceptors_.push_back(std::move(appcache_interceptor));
   }
 
   Start();
@@ -47,22 +62,36 @@ SharedWorkerScriptLoader::SharedWorkerScriptLoader(
 
 SharedWorkerScriptLoader::~SharedWorkerScriptLoader() = default;
 
+base::WeakPtr<SharedWorkerScriptLoader> SharedWorkerScriptLoader::GetWeakPtr() {
+  return weak_factory_.GetWeakPtr();
+}
+
 void SharedWorkerScriptLoader::Start() {
-  if (service_worker_interceptor_) {
-    service_worker_interceptor_->MaybeCreateLoader(
+  if (interceptor_index_ < interceptors_.size()) {
+    auto* interceptor = interceptors_[interceptor_index_++].get();
+    interceptor->MaybeCreateLoader(
         resource_request_, resource_context_,
         base::BindOnce(&SharedWorkerScriptLoader::MaybeStartLoader,
-                       weak_factory_.GetWeakPtr(),
-                       service_worker_interceptor_.get()));
+                       weak_factory_.GetWeakPtr(), interceptor),
+        base::BindOnce(&SharedWorkerScriptLoader::LoadFromNetwork,
+                       weak_factory_.GetWeakPtr()));
     return;
   }
 
-  LoadFromNetwork();
+  LoadFromNetwork(false);
 }
 
 void SharedWorkerScriptLoader::MaybeStartLoader(
     NavigationLoaderInterceptor* interceptor,
     SingleRequestURLLoaderFactory::RequestHandler single_request_handler) {
+  DCHECK(interceptor);
+
+  // Create SubresourceLoaderParams for intercepting subresource requests and
+  // populating the "controller" field in ServiceWorkerContainer. This can be
+  // null if the interceptor is not interested in this request.
+  subresource_loader_params_ =
+      interceptor->MaybeCreateSubresourceLoaderParams();
+
   if (single_request_handler) {
     // The interceptor elected to handle the request. Use it.
     network::mojom::URLLoaderClientPtr client;
@@ -76,15 +105,24 @@ void SharedWorkerScriptLoader::MaybeStartLoader(
     return;
   }
 
-  // TODO(falken): Support blob urls.
+  // We shouldn't try the remaining interceptors if this interceptor provides
+  // SubresourceLoaderParams. For details, see comments on
+  // NavigationLoaderInterceptor::MaybeCreateSubresourceLoaderParams().
+  if (subresource_loader_params_)
+    interceptor_index_ = interceptors_.size();
 
-  LoadFromNetwork();
+  // Continue until all the interceptors are tried.
+  Start();
 }
 
-void SharedWorkerScriptLoader::LoadFromNetwork() {
+void SharedWorkerScriptLoader::LoadFromNetwork(
+    bool reset_subresource_loader_params) {
+  default_loader_used_ = true;
   network::mojom::URLLoaderClientPtr client;
+  if (url_loader_client_binding_)
+    url_loader_client_binding_.Unbind();
   url_loader_client_binding_.Bind(mojo::MakeRequest(&client));
-  url_loader_factory_ = loader_factory_getter_->GetNetworkFactory();
+  url_loader_factory_ = default_loader_factory_;
   url_loader_factory_->CreateLoaderAndStart(
       mojo::MakeRequest(&url_loader_), routing_id_, request_id_, options_,
       resource_request_, std::move(client), traffic_annotation_);
@@ -95,7 +133,13 @@ void SharedWorkerScriptLoader::LoadFromNetwork() {
 // When this class gets a FollowRedirect IPC from the renderer, it restarts with
 // the new URL.
 
-void SharedWorkerScriptLoader::FollowRedirect() {
+void SharedWorkerScriptLoader::FollowRedirect(
+    const base::Optional<std::vector<std::string>>&
+        to_be_removed_request_headers,
+    const base::Optional<net::HttpRequestHeaders>& modified_request_headers) {
+  DCHECK(!modified_request_headers.has_value()) << "Redirect with modified "
+                                                   "headers was not supported "
+                                                   "yet. crbug.com/845683";
   DCHECK(redirect_info_);
 
   // |should_clear_upload| is unused because there is no body anyway.
@@ -103,7 +147,8 @@ void SharedWorkerScriptLoader::FollowRedirect() {
   bool should_clear_upload = false;
   net::RedirectUtil::UpdateHttpRequest(
       resource_request_.url, resource_request_.method, *redirect_info_,
-      &resource_request_.headers, &should_clear_upload);
+      modified_request_headers, &resource_request_.headers,
+      &should_clear_upload);
 
   resource_request_.url = redirect_info_->new_url;
   resource_request_.method = redirect_info_->new_method;
@@ -112,8 +157,15 @@ void SharedWorkerScriptLoader::FollowRedirect() {
   resource_request_.referrer_policy = redirect_info_->new_referrer_policy;
 
   // Restart the request.
+  interceptor_index_ = 0;
   url_loader_client_binding_.Unbind();
   redirect_info_.reset();
+
+  // Cancel the request on ResourceDispatcherHost so that we can fall back
+  // to network again.
+  DCHECK(ResourceDispatcherHostImpl::Get());
+  ResourceDispatcherHostImpl::Get()->CancelRequest(process_id_, request_id_);
+
   Start();
 }
 
@@ -147,9 +199,8 @@ void SharedWorkerScriptLoader::ResumeReadingBodyFromNet() {
 // calls FollowRedirect(), it can do so.
 
 void SharedWorkerScriptLoader::OnReceiveResponse(
-    const network::ResourceResponseHead& response_head,
-    network::mojom::DownloadedTempFilePtr downloaded_file) {
-  client_->OnReceiveResponse(response_head, std::move(downloaded_file));
+    const network::ResourceResponseHead& response_head) {
+  client_->OnReceiveResponse(response_head);
 }
 
 void SharedWorkerScriptLoader::OnReceiveRedirect(
@@ -163,11 +214,6 @@ void SharedWorkerScriptLoader::OnReceiveRedirect(
 
   redirect_info_ = redirect_info;
   client_->OnReceiveRedirect(redirect_info, response_head);
-}
-
-void SharedWorkerScriptLoader::OnDataDownloaded(int64_t data_len,
-                                                int64_t encoded_data_len) {
-  client_->OnDataDownloaded(data_len, encoded_data_len);
 }
 
 void SharedWorkerScriptLoader::OnUploadProgress(
@@ -198,6 +244,28 @@ void SharedWorkerScriptLoader::OnComplete(
   if (status.error_code == net::OK)
     service_worker_provider_host_->CompleteSharedWorkerPreparation();
   client_->OnComplete(status);
+}
+
+bool SharedWorkerScriptLoader::MaybeCreateLoaderForResponse(
+    const network::ResourceResponseHead& response,
+    network::mojom::URLLoaderPtr* response_url_loader,
+    network::mojom::URLLoaderClientRequest* response_client_request,
+    ThrottlingURLLoader* url_loader) {
+  DCHECK(default_loader_used_);
+  for (auto& interceptor : interceptors_) {
+    bool skip_other_interceptors = false;
+    if (interceptor->MaybeCreateLoaderForResponse(
+            response, response_url_loader, response_client_request, url_loader,
+            &skip_other_interceptors)) {
+      // Both ServiceWorkerRequestHandler and AppCacheRequestHandler don't set
+      // skip_other_interceptors.
+      DCHECK(!skip_other_interceptors);
+      subresource_loader_params_ =
+          interceptor->MaybeCreateSubresourceLoaderParams();
+      return true;
+    }
+  }
+  return false;
 }
 
 }  // namespace content

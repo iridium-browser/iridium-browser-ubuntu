@@ -410,6 +410,8 @@ CodeMirror.prototype = {
    */
   addOverlay: function(spec, options) {},
   addWidget: function(pos, node, scroll, vert, horiz) {},
+  /** @param {boolean=} isClosed bv */
+  changeGeneration: function(isClosed) {},
   charCoords: function(pos, mode) {},
   clearGutter: function(gutterID) {},
   clearHistory: function() {},
@@ -478,7 +480,8 @@ CodeMirror.prototype = {
   indentLine: function(n, dir, aggressive) {},
   indentSelection: function(how) {},
   indexFromPos: function(coords) {},
-  isClean: function() {},
+  /** @param {number=} generation */
+  isClean: function(generation) {},
   iterLinkedDocs: function(f) {},
   lastLine: function() {},
   lineCount: function() {},
@@ -526,7 +529,7 @@ CodeMirror.prototype = {
   setHistory: function(histData) {},
   setLine: function(line, text) {},
   setOption: function(option, value) {},
-  setSelection: function(anchor, head) {},
+  setSelection: function(anchor, head, options) {},
   /**
    * @param {number=} primaryIndex
    * @param {?Object=} config
@@ -541,7 +544,7 @@ CodeMirror.prototype = {
 };
 /** @type {!{cursorDiv: Element, lineSpace: Element}} */
 CodeMirror.prototype.display;
-/** @type {!{mode: string}} */
+/** @type {!{mode: string, lineWrapping: boolean}} */
 CodeMirror.prototype.options;
 /** @type {!Object} */
 CodeMirror.Pass;
@@ -554,6 +557,36 @@ CodeMirror.overlayMode = function(mode1, mode2, squashSpans) {};
 CodeMirror.defineMode = function(modeName, modeConstructor) {};
 CodeMirror.startState = function(mode) {};
 CodeMirror.copyState = function(mode, state) {};
+CodeMirror.inputStyles = {};
+CodeMirror.inputStyles.textarea = class {
+  constructor() {
+    /** @type {!HTMLTextAreaElement} */
+    this.textarea;
+    this.prevInput = '';
+    this.composing = false;
+    this.contextMenuPending = false;
+    /** @type {!CodeMirror} */
+    this.cm;
+  }
+  /**
+   * @param {!Object} display
+   */
+  init(display) {
+  }
+
+  /**
+   * @param {boolean=} typing
+   */
+  reset(typing) {
+  }
+
+  /**
+   * @return {boolean}
+   */
+  poll() {
+    return false;
+  }
+};
 
 /** @typedef {{canceled: boolean, from: !CodeMirror.Pos, to: !CodeMirror.Pos, text: string, origin: string, cancel: function()}} */
 CodeMirror.BeforeChangeObject;
@@ -641,6 +674,13 @@ Element.prototype.animate = function(keyframes, timing) {};
 /**
  * @param {...!Node} nodes
  * @return {undefined}
+ * @see https://dom.spec.whatwg.org/#dom-parentnode-append
+ */
+Element.prototype.append = function(nodes) {};
+
+/**
+ * @param {...!Node} nodes
+ * @return {undefined}
  * @see https://dom.spec.whatwg.org/#dom-parentnode-prepend
  */
 Element.prototype.prepend = function(nodes) {};
@@ -674,13 +714,6 @@ const acorn = {
   /**
    * @param {string} text
    * @param {Object.<string, boolean>} options
-   * @return {!ESTree.Node}
-   */
-  parse_dammit: function(text, options) {},
-
-  /**
-   * @param {string} text
-   * @param {Object.<string, boolean>} options
    * @return {!Acorn.Tokenizer}
    */
   tokenizer: function(text, options) {},
@@ -696,6 +729,15 @@ const acorn = {
     eof: new Acorn.TokenType()
   }
 };
+
+acorn.loose = {};
+
+/**
+ * @param {string} text
+ * @param {Object.<string, boolean>} options
+ * @return {!ESTree.Node}
+ */
+acorn.loose.parse = function(text, options) {};
 
 const Acorn = {};
 /**
@@ -833,3 +875,178 @@ const ls = function(strings, vararg) {};
  * @param {function(!Array<*>)} callback
  */
 const ResizeObserver = function(callback) {};
+
+
+// Lighthouse Report Renderer
+
+/**
+ * @constructor
+ * @param {!Document} document
+ */
+const DOM = function(document) {};
+
+/**
+ * @constructor
+ * @param {!DOM} dom
+ */
+const ReportRenderer = function(dom) {};
+
+ReportRenderer.prototype = {
+  /**
+   * @param {!ReportRenderer.ReportJSON} report
+   * @param {!Element} container Parent element to render the report into.
+   */
+  renderReport: function(report, container) {},
+
+  /**
+   * @param {!Document|!Element} context
+   */
+  setTemplateContext: function(context) {},
+
+};
+
+/**
+ * @typedef {{
+ *     rawValue: (number|boolean|undefined),
+ *     id: string,
+ *     title: string,
+ *     description: string,
+ *     explanation: (string|undefined),
+ *     errorMessage: (string|undefined),
+ *     displayValue: (string|Array<string|number>|undefined),
+ *     scoreDisplayMode: string,
+ *     error: boolean,
+ *     score: (number|null),
+ *     details: (!DetailsRenderer.DetailsJSON|undefined),
+ * }}
+ */
+ReportRenderer.AuditResultJSON;
+
+/**
+ * @typedef {{
+ *     id: string,
+ *     score: (number|null),
+ *     weight: number,
+ *     group: (string|undefined),
+ *     result: ReportRenderer.AuditResultJSON
+ * }}
+ */
+ReportRenderer.AuditJSON;
+
+/**
+ * @typedef {{
+ *     title: string,
+ *     id: string,
+ *     score: (number|null),
+ *     description: (string|undefined),
+ *     manualDescription: string,
+ *     auditRefs: !Array<!ReportRenderer.AuditJSON>
+ * }}
+ */
+ReportRenderer.CategoryJSON;
+
+/**
+ * @typedef {{
+ *     title: string,
+ *     description: (string|undefined),
+ * }}
+ */
+ReportRenderer.GroupJSON;
+
+/**
+ * @typedef {{
+ *     lighthouseVersion: string,
+ *     userAgent: string,
+ *     fetchTime: string,
+ *     timing: {total: number},
+ *     requestedUrl: string,
+ *     finalUrl: string,
+ *     runWarnings: (!Array<string>|undefined),
+ *     artifacts: {traces: {defaultPass: {traceEvents: !Array}}},
+ *     audits: !Object<string, !ReportRenderer.AuditResultJSON>,
+ *     categories: !Object<string, !ReportRenderer.CategoryJSON>,
+ *     categoryGroups: !Object<string, !ReportRenderer.GroupJSON>,
+ * }}
+ */
+ReportRenderer.ReportJSON;
+
+/**
+ * @typedef {{
+ *     traces: {defaultPass: {traceEvents: !Array}},
+ * }}
+ */
+ReportRenderer.RunnerResultArtifacts;
+
+/**
+ * @typedef {{
+ *     lhr: !ReportRenderer.ReportJSON,
+ *     artifacts: ReportRenderer.RunnerResultArtifacts,
+ *     report: string
+ * }}
+ */
+ReportRenderer.RunnerResult;
+
+
+/**
+ * @constructor
+ * @param {!DOM} dom
+ * @param {!DetailsRenderer} detailsRenderer
+ */
+const CategoryRenderer = function(dom, detailsRenderer) {};
+
+
+/**
+ * @constructor
+ * @param {!DOM} dom
+ */
+const DetailsRenderer = function(dom) {};
+
+DetailsRenderer.prototype = {
+  /**
+   * @param {!DetailsRenderer.NodeDetailsJSON} item
+   * @return {!Element}
+   */
+  renderNode: function(item) {},
+};
+
+/**
+ * @typedef {{
+ *     type: string,
+ *     value: (string|number|undefined),
+ *     summary: (DetailsRenderer.OpportunitySummary|undefined),
+ *     granularity: (number|undefined),
+ *     displayUnit: (string|undefined)
+ * }}
+ */
+DetailsRenderer.DetailsJSON;
+
+/**
+ * @typedef {{
+ *     type: string,
+ *     path: (string|undefined),
+ *     selector: (string|undefined),
+ *     snippet:(string|undefined)
+ * }}
+ */
+DetailsRenderer.NodeDetailsJSON;
+
+/** @typedef {{
+ *     wastedMs: (number|undefined),
+ *     wastedBytes: (number|undefined),
+ * }}
+ */
+DetailsRenderer.OpportunitySummary;
+
+
+// Clipboard API
+
+/** @constructor */
+const Clipboard = function() {};
+/**
+ * @param {string} data
+ * @return {!Promise}
+ */
+Clipboard.prototype.writeText = function(data) {};
+
+/** @type {Clipboard} */
+Navigator.prototype.clipboard;

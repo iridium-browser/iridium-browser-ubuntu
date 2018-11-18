@@ -39,7 +39,7 @@ class TaskRunnerBoundObserverList {
   virtual ~TaskRunnerBoundObserverList() {}
 
   // Returns a new observer list with given observer.
-  // It is valid to give NULL as |runner_to_notify|, and in that case
+  // It is valid to give nullptr as |runner_to_notify|, and in that case
   // notifications are dispatched on the current runner.
   // Note that this is a const method and does NOT change 'this' observer
   // list but returns a new list.
@@ -74,9 +74,9 @@ class FileAccessObserver;
 class FileChangeObserver;
 class FileUpdateObserver;
 
-typedef TaskRunnerBoundObserverList<FileAccessObserver> AccessObserverList;
-typedef TaskRunnerBoundObserverList<FileChangeObserver> ChangeObserverList;
-typedef TaskRunnerBoundObserverList<FileUpdateObserver> UpdateObserverList;
+using AccessObserverList = TaskRunnerBoundObserverList<FileAccessObserver>;
+using ChangeObserverList = TaskRunnerBoundObserverList<FileChangeObserver>;
+using UpdateObserverList = TaskRunnerBoundObserverList<FileUpdateObserver>;
 
 }  // namespace storage
 

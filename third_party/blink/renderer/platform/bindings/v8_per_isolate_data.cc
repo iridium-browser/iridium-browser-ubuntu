@@ -28,14 +28,22 @@
 #include <memory>
 #include <utility>
 
+#include "base/single_thread_task_runner.h"
+#include "base/time/default_tick_clock.h"
+#include "gin/public/v8_idle_task_runner.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/web/blink.h"
+#include "third_party/blink/renderer/platform/bindings/active_script_wrappable_base.h"
 #include "third_party/blink/renderer/platform/bindings/dom_data_store.h"
 #include "third_party/blink/renderer/platform/bindings/script_forbidden_scope.h"
+#include "third_party/blink/renderer/platform/bindings/script_state.h"
+#include "third_party/blink/renderer/platform/bindings/script_wrappable_marking_visitor.h"
 #include "third_party/blink/renderer/platform/bindings/v8_binding.h"
 #include "third_party/blink/renderer/platform/bindings/v8_object_constructor.h"
 #include "third_party/blink/renderer/platform/bindings/v8_private_property.h"
 #include "third_party/blink/renderer/platform/bindings/v8_value_cache.h"
+#include "third_party/blink/renderer/platform/heap/unified_heap_controller.h"
+#include "third_party/blink/renderer/platform/scheduler/public/thread.h"
 #include "third_party/blink/renderer/platform/wtf/leak_annotations.h"
 #include "v8/include/v8.h"
 
@@ -60,10 +68,13 @@ V8PerIsolateData::V8PerIsolateData(
     scoped_refptr<base::SingleThreadTaskRunner> task_runner,
     V8ContextSnapshotMode v8_context_snapshot_mode)
     : v8_context_snapshot_mode_(v8_context_snapshot_mode),
-      isolate_holder_(task_runner,
-                      gin::IsolateHolder::kSingleThread,
-                      IsMainThread() ? gin::IsolateHolder::kDisallowAtomicsWait
-                                     : gin::IsolateHolder::kAllowAtomicsWait),
+      isolate_holder_(
+          task_runner,
+          gin::IsolateHolder::kSingleThread,
+          IsMainThread() ? gin::IsolateHolder::kDisallowAtomicsWait
+                         : gin::IsolateHolder::kAllowAtomicsWait,
+          IsMainThread() ? gin::IsolateHolder::IsolateType::kBlinkMainThread
+                         : gin::IsolateHolder::IsolateType::kBlinkWorkerThread),
       interface_template_map_for_v8_context_snapshot_(GetIsolate()),
       string_cache_(std::make_unique<StringCache>(GetIsolate())),
       private_property_(V8PrivateProperty::Create()),
@@ -71,7 +82,12 @@ V8PerIsolateData::V8PerIsolateData(
       use_counter_disabled_(false),
       is_handling_recursion_level_error_(false),
       is_reporting_exception_(false),
-      runtime_call_stats_(base::DefaultTickClock::GetInstance()) {
+      script_wrappable_visitor_(
+          new ScriptWrappableMarkingVisitor(ThreadState::Current())),
+      unified_heap_controller_(
+          new UnifiedHeapController(ThreadState::Current())),
+      runtime_call_stats_(base::DefaultTickClock::GetInstance()),
+      handled_near_v8_heap_limit_(false) {
   // FIXME: Remove once all v8::Isolate::GetCurrent() calls are gone.
   GetIsolate()->Enter();
   GetIsolate()->AddBeforeCallEnteredCallback(&BeforeCallEnteredCallback);
@@ -87,6 +103,7 @@ V8PerIsolateData::V8PerIsolateData()
       isolate_holder_(Platform::Current()->MainThread()->GetTaskRunner(),
                       gin::IsolateHolder::kSingleThread,
                       gin::IsolateHolder::kAllowAtomicsWait,
+                      gin::IsolateHolder::IsolateType::kBlinkMainThread,
                       gin::IsolateHolder::IsolateCreationMode::kCreateSnapshot),
       interface_template_map_for_v8_context_snapshot_(GetIsolate()),
       string_cache_(std::make_unique<StringCache>(GetIsolate())),
@@ -95,7 +112,8 @@ V8PerIsolateData::V8PerIsolateData()
       use_counter_disabled_(false),
       is_handling_recursion_level_error_(false),
       is_reporting_exception_(false),
-      runtime_call_stats_(base::DefaultTickClock::GetInstance()) {
+      runtime_call_stats_(base::DefaultTickClock::GetInstance()),
+      handled_near_v8_heap_limit_(false) {
   CHECK(IsMainThread());
 
   // SnapshotCreator enters the isolate, so we don't call Isolate::Enter() here.
@@ -142,6 +160,19 @@ void V8PerIsolateData::WillBeDestroyed(v8::Isolate* isolate) {
   data->ClearEndOfScopeTasks();
 
   data->active_script_wrappables_.Clear();
+
+  // Detach V8's garbage collector.
+  if (RuntimeEnabledFeatures::HeapUnifiedGarbageCollectionEnabled()) {
+    // Need to finalize an already running garbage collection as otherwise
+    // callbacks are missing and state gets out of sync.
+    ThreadState::Current()->FinishIncrementalMarkingIfRunning(
+        BlinkGC::kHeapPointersOnStack, BlinkGC::kAtomicMarking,
+        BlinkGC::kEagerSweeping, BlinkGC::GCReason::kThreadTerminationGC);
+  }
+  isolate->SetEmbedderHeapTracer(nullptr);
+  if (data->script_wrappable_visitor_->WrapperTracingInProgress())
+    data->script_wrappable_visitor_->AbortTracing();
+  data->script_wrappable_visitor_.reset();
 }
 
 // destroy() clear things that should be cleared after ThreadState::detach()
@@ -352,18 +383,6 @@ void V8PerIsolateData::AddActiveScriptWrappable(
     active_script_wrappables_ = new ActiveScriptWrappableSet();
 
   active_script_wrappables_->insert(wrappable);
-}
-
-void V8PerIsolateData::TemporaryScriptWrappableVisitorScope::
-    SwapWithV8PerIsolateDataVisitor(
-        std::unique_ptr<ScriptWrappableMarkingVisitor>& visitor) {
-  ScriptWrappableMarkingVisitor* current = CurrentVisitor();
-  if (current)
-    ScriptWrappableMarkingVisitor::PerformCleanup(isolate_);
-
-  V8PerIsolateData::From(isolate_)->script_wrappable_visitor_.swap(
-      saved_visitor_);
-  isolate_->SetEmbedderHeapTracer(CurrentVisitor());
 }
 
 }  // namespace blink

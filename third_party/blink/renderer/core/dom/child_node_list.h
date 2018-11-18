@@ -43,9 +43,7 @@ class ChildNodeList final : public NodeList {
   unsigned length() const override {
     return collection_index_cache_.NodeCount(*this);
   }
-  Node* item(unsigned index) const override {
-    return collection_index_cache_.NodeAt(*this, index);
-  }
+  Node* item(unsigned index) const override;
 
   // Non-DOM API.
   void ChildrenChanged(const ContainerNode::ChildrenChange&);
@@ -65,7 +63,7 @@ class ChildNodeList final : public NodeList {
                                  Node& current_node,
                                  unsigned& current_offset) const;
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  private:
   explicit ChildNodeList(ContainerNode& root_node);

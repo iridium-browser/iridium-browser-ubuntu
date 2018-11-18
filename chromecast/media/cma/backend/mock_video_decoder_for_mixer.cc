@@ -27,7 +27,9 @@ MockVideoDecoderForMixer<CRN, CRD, CF>::MockVideoDecoderForMixer() {
 }
 
 template <int64_t CRN, int64_t CRD, int64_t CF>
-void MockVideoDecoderForMixer<CRN, CRD, CF>::Initialize() {}
+bool MockVideoDecoderForMixer<CRN, CRD, CF>::Initialize() {
+  return true;
+}
 
 template <int64_t CRN, int64_t CRD, int64_t CF>
 bool MockVideoDecoderForMixer<CRN, CRD, CF>::Start(int64_t start_pts,
@@ -63,8 +65,11 @@ bool MockVideoDecoderForMixer<CRN, CRD, CF>::Resume() {
 }
 
 template <int64_t CRN, int64_t CRD, int64_t CF>
-int64_t MockVideoDecoderForMixer<CRN, CRD, CF>::GetCurrentPts() const {
-  return last_displayed_frame_pts_;
+bool MockVideoDecoderForMixer<CRN, CRD, CF>::GetCurrentPts(int64_t* timestamp,
+                                                           int64_t* pts) const {
+  *timestamp = 0;
+  *pts = last_displayed_frame_pts_;
+  return true;
 }
 
 template <int64_t CRN, int64_t CRD, int64_t CF>
@@ -74,7 +79,8 @@ bool MockVideoDecoderForMixer<CRN, CRD, CF>::SetPlaybackRate(float rate) {
 }
 
 template <int64_t CRN, int64_t CRD, int64_t CF>
-bool MockVideoDecoderForMixer<CRN, CRD, CF>::SetCurrentPts(int64_t pts) {
+bool MockVideoDecoderForMixer<CRN, CRD, CF>::SetPts(int64_t timestamp,
+                                                    int64_t pts) {
   current_video_pts_ = pts;
   return true;
 }
@@ -175,6 +181,10 @@ std::unique_ptr<VideoDecoderForMixer> VideoDecoderForMixer::Create(
   return MockVideoDecoderForMixer<1, 1, 60>::Create();
 }
 
+void VideoDecoderForMixer::InitializeGraphicsForTesting() {
+  // No initialization required.
+}
+
 template <int64_t CRN, int64_t CRD, int64_t CF>
 std::unique_ptr<VideoDecoderForTest>
 MockVideoDecoderForMixer<CRN, CRD, CF>::Create() {
@@ -221,6 +231,7 @@ int64_t MockVideoDecoderForMixer<CRN, CRD, CF>::GetAvSyncDriftTolerated() {
 
 template class MockVideoDecoderForMixer<1, 1, 30>;
 template class MockVideoDecoderForMixer<1, 1, 24>;
+template class MockVideoDecoderForMixer<1, 1, 60>;
 template class MockVideoDecoderForMixer<2, 1, 60>;
 template class MockVideoDecoderForMixer<1, 2, 60>;
 template class MockVideoDecoderForMixer<14, 10, 60>;

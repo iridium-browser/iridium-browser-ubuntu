@@ -19,14 +19,15 @@
 #include "base/files/scoped_file.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/memory/ptr_util.h"
 #include "base/nix/xdg_util.h"
 #include "base/sequenced_task_runner.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_tokenizer.h"
 #include "base/strings/string_util.h"
-#include "base/task_scheduler/post_task.h"
-#include "base/task_scheduler/task_traits.h"
+#include "base/task/post_task.h"
+#include "base/task/task_traits.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/timer/timer.h"
 #include "net/base/proxy_server.h"
@@ -234,9 +235,7 @@ class SettingGetterImplGSettings
     if (client_) {
       // gsettings client was not cleaned up.
       if (task_runner_->RunsTasksInCurrentSequence()) {
-        // We are on the UI thread so we can clean it safely. This is
-        // the case at least for ui_tests running under Valgrind in
-        // bug 16076.
+        // We are on the UI thread so we can clean it safely.
         VLOG(1) << "~SettingGetterImplGSettings: releasing gsettings client";
         ShutDown();
       } else {
@@ -647,7 +646,7 @@ class SettingGetterImplKDE : public ProxyConfigServiceLinux::SettingGetter {
   }
 
   bool GetString(StringSetting key, std::string* result) override {
-    string_map_type::iterator it = string_table_.find(key);
+    auto it = string_table_.find(key);
     if (it == string_table_.end())
       return false;
     *result = it->second;
@@ -663,7 +662,7 @@ class SettingGetterImplKDE : public ProxyConfigServiceLinux::SettingGetter {
   }
   bool GetStringList(StringListSetting key,
                      std::vector<std::string>* result) override {
-    strings_map_type::iterator it = strings_table_.find(key);
+    auto it = strings_table_.find(key);
     if (it == strings_table_.end())
       return false;
     *result = it->second;
@@ -775,7 +774,7 @@ class SettingGetterImplKDE : public ProxyConfigServiceLinux::SettingGetter {
   }
 
   void ResolveIndirect(StringSetting key) {
-    string_map_type::iterator it = string_table_.find(key);
+    auto it = string_table_.find(key);
     if (it != string_table_.end()) {
       std::string value;
       if (env_var_getter_->GetVar(it->second.c_str(), &value))
@@ -786,7 +785,7 @@ class SettingGetterImplKDE : public ProxyConfigServiceLinux::SettingGetter {
   }
 
   void ResolveIndirectList(StringListSetting key) {
-    strings_map_type::iterator it = strings_table_.find(key);
+    auto it = strings_table_.find(key);
     if (it != strings_table_.end()) {
       std::string value;
       if (!it->second.empty() &&
@@ -1027,7 +1026,7 @@ ProxyConfigServiceLinux::Delegate::GetConfigFromSettings() {
   if (!setting_getter_->GetString(SettingGetter::PROXY_MODE, &mode)) {
     // We expect this to always be set, so if we don't see it then we probably
     // have a gsettings problem, and so we don't have a valid proxy config.
-    return base::Optional<ProxyConfigWithAnnotation>();
+    return base::nullopt;
   }
   if (mode == "none") {
     // Specifically specifies no proxy.
@@ -1046,7 +1045,7 @@ ProxyConfigServiceLinux::Delegate::GetConfigFromSettings() {
           pac_url_str = "file://" + pac_url_str;
         GURL pac_url(pac_url_str);
         if (!pac_url.is_valid())
-          return base::Optional<ProxyConfigWithAnnotation>();
+          return base::nullopt;
         config.set_pac_url(pac_url);
         return ProxyConfigWithAnnotation(
             config, NetworkTrafficAnnotationTag(traffic_annotation_));
@@ -1059,7 +1058,7 @@ ProxyConfigServiceLinux::Delegate::GetConfigFromSettings() {
 
   if (mode != "manual") {
     // Mode is unrecognized.
-    return base::Optional<ProxyConfigWithAnnotation>();
+    return base::nullopt;
   }
   bool use_http_proxy;
   if (setting_getter_->GetBool(SettingGetter::PROXY_USE_HTTP_PROXY,
@@ -1123,7 +1122,7 @@ ProxyConfigServiceLinux::Delegate::GetConfigFromSettings() {
 
   if (config.proxy_rules().empty()) {
     // Manual mode but we couldn't parse any rules.
-    return base::Optional<ProxyConfigWithAnnotation>();
+    return base::nullopt;
   }
 
   // Check for authentication, just so we can warn.
@@ -1161,18 +1160,23 @@ ProxyConfigServiceLinux::Delegate::GetConfigFromSettings() {
 
   return ProxyConfigWithAnnotation(
       config, NetworkTrafficAnnotationTag(traffic_annotation_));
-  ;
 }
-
-ProxyConfigServiceLinux::Delegate::Delegate()
-    : env_var_getter_(base::Environment::Create()) {}
 
 ProxyConfigServiceLinux::Delegate::Delegate(
     std::unique_ptr<base::Environment> env_var_getter,
-    const NetworkTrafficAnnotationTag& traffic_annotation)
-    : env_var_getter_(std::move(env_var_getter)),
-      traffic_annotation_(
-          MutableNetworkTrafficAnnotationTag(traffic_annotation)) {
+    base::Optional<std::unique_ptr<SettingGetter>> setting_getter,
+    base::Optional<NetworkTrafficAnnotationTag> traffic_annotation)
+    : env_var_getter_(std::move(env_var_getter)) {
+  if (traffic_annotation) {
+    traffic_annotation_ =
+        MutableNetworkTrafficAnnotationTag(traffic_annotation.value());
+  }
+
+  if (setting_getter) {
+    setting_getter_ = std::move(setting_getter.value());
+    return;
+  }
+
   // Figure out which SettingGetterImpl to use, if any.
   switch (base::nix::GetDesktopEnvironment(env_var_getter_.get())) {
     case base::nix::DESKTOP_ENVIRONMENT_CINNAMON:
@@ -1200,15 +1204,6 @@ ProxyConfigServiceLinux::Delegate::Delegate(
       break;
   }
 }
-
-ProxyConfigServiceLinux::Delegate::Delegate(
-    std::unique_ptr<base::Environment> env_var_getter,
-    SettingGetter* setting_getter,
-    const NetworkTrafficAnnotationTag& traffic_annotation)
-    : env_var_getter_(std::move(env_var_getter)),
-      setting_getter_(setting_getter),
-      traffic_annotation_(
-          MutableNetworkTrafficAnnotationTag(traffic_annotation)) {}
 
 void ProxyConfigServiceLinux::Delegate::SetUpAndFetchInitialConfig(
     const scoped_refptr<base::SingleThreadTaskRunner>& glib_task_runner,
@@ -1240,7 +1235,7 @@ void ProxyConfigServiceLinux::Delegate::SetUpAndFetchInitialConfig(
   // does so even if the proxy mode is set to auto, which would
   // mislead us.
 
-  cached_config_ = base::Optional<ProxyConfigWithAnnotation>();
+  cached_config_ = base::nullopt;
   if (setting_getter_ && setting_getter_->Init(glib_task_runner)) {
     cached_config_ = GetConfigFromSettings();
   }
@@ -1339,7 +1334,8 @@ void ProxyConfigServiceLinux::Delegate::OnCheckProxyConfigSettings() {
 
   // See if it is different from what we had before.
   if (new_config.has_value() != reference_config_.has_value() ||
-      !new_config->value().Equals(reference_config_->value())) {
+      (new_config.has_value() &&
+       !new_config->value().Equals(reference_config_->value()))) {
     // Post a task to the main TaskRunner with the new configuration, so it can
     // update |cached_config_|.
     main_task_runner_->PostTask(
@@ -1389,7 +1385,9 @@ void ProxyConfigServiceLinux::Delegate::OnDestroy() {
 }
 
 ProxyConfigServiceLinux::ProxyConfigServiceLinux()
-    : delegate_(new Delegate()) {}
+    : delegate_(new Delegate(base::Environment::Create(),
+                             base::nullopt,
+                             base::nullopt)) {}
 
 ProxyConfigServiceLinux::~ProxyConfigServiceLinux() {
   delegate_->PostDestroyTask();
@@ -1398,14 +1396,16 @@ ProxyConfigServiceLinux::~ProxyConfigServiceLinux() {
 ProxyConfigServiceLinux::ProxyConfigServiceLinux(
     std::unique_ptr<base::Environment> env_var_getter,
     const NetworkTrafficAnnotationTag& traffic_annotation)
-    : delegate_(new Delegate(std::move(env_var_getter), traffic_annotation)) {}
+    : delegate_(new Delegate(std::move(env_var_getter),
+                             base::nullopt,
+                             traffic_annotation)) {}
 
 ProxyConfigServiceLinux::ProxyConfigServiceLinux(
     std::unique_ptr<base::Environment> env_var_getter,
     SettingGetter* setting_getter,
     const NetworkTrafficAnnotationTag& traffic_annotation)
     : delegate_(new Delegate(std::move(env_var_getter),
-                             setting_getter,
+                             base::WrapUnique(setting_getter),
                              traffic_annotation)) {}
 
 void ProxyConfigServiceLinux::AddObserver(Observer* observer) {

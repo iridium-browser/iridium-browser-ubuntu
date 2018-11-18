@@ -4,14 +4,18 @@
 
 package org.chromium.chrome.browser.contextual_suggestions;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -20,10 +24,14 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
+import org.mockito.invocation.InvocationOnMock;
+import org.mockito.stubbing.Answer;
 import org.robolectric.annotation.Config;
 import org.robolectric.shadows.ShadowLooper;
 
+import org.chromium.base.Callback;
 import org.chromium.base.test.BaseRobolectricTestRunner;
+import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.contextual_suggestions.FetchHelper.Delegate;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabObserver;
@@ -33,18 +41,22 @@ import org.chromium.chrome.browser.tabmodel.TabModel.TabSelectionType;
 import org.chromium.chrome.browser.tabmodel.TabModelObserver;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
 import org.chromium.chrome.browser.util.test.ShadowUrlUtilities;
+import org.chromium.content_public.browser.RenderFrameHost;
 import org.chromium.content_public.browser.WebContents;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 
 /** Unit tests for FetchHelper. */
 @RunWith(BaseRobolectricTestRunner.class)
 @Config(manifest = Config.NONE, shadows = {ShadowUrlUtilities.class})
 public final class FetchHelperTest {
-    private static final String STARTING_URL = "http://starting.url";
-    private static final String DIFFERENT_URL = "http://different.url";
+    private static final String STARTING_URL = "https://starting.url";
+    private static final String DIFFERENT_URL = "https://different.url";
 
     @Mock
     private TabModelSelector mTabModelSelector;
@@ -54,6 +66,8 @@ public final class FetchHelperTest {
     private Tab mTab;
     @Mock
     private WebContents mWebContents;
+    @Mock
+    private RenderFrameHost mFrameHost;
     @Mock
     private Tab mTab2;
     @Mock
@@ -95,6 +109,11 @@ public final class FetchHelperTest {
         tabModels.add(mTabModel);
         doReturn(tabModels).when(mTabModelSelector).getModels();
         doReturn(mTab).when(mTabModelSelector).getCurrentTab();
+
+        // Ensure Chrome feature list does not switch to native.
+        Map<String, Boolean> testFeatures = new HashMap<>();
+        testFeatures.put(ChromeFeatureList.CONTEXTUAL_SUGGESTIONS_BUTTON, true);
+        ChromeFeatureList.setTestFeatures(testFeatures);
     }
 
     @Test
@@ -120,12 +139,33 @@ public final class FetchHelperTest {
     }
 
     @Test
-    public void tabObserver_updateUrl() {
+    public void tabObserver_pageLoadStarted() {
         FetchHelper helper = createFetchHelper();
-        getTabObserver().onUpdateUrl(mTab, STARTING_URL);
+        getTabObserver().onPageLoadStarted(mTab, STARTING_URL);
         verify(mDelegate, times(1)).clearState();
         // Normally we would change the suffix here, but ShadowUrlUtilities don't support that now.
-        getTabObserver().onUpdateUrl(mTab, DIFFERENT_URL);
+        getTabObserver().onPageLoadStarted(mTab, DIFFERENT_URL);
+        verify(mDelegate, times(2)).clearState();
+    }
+
+    @Test
+    public void tabObserver_onUrlUpdated() {
+        FetchHelper helper = createFetchHelper();
+        doReturn(DIFFERENT_URL).when(mTab).getUrl();
+        getTabObserver().onUrlUpdated(mTab);
+        verify(mDelegate, times(1)).clearState();
+        // Normally we would change the suffix here, but ShadowUrlUtilities don't support that now.
+        doReturn(STARTING_URL).when(mTab).getUrl();
+        getTabObserver().onUrlUpdated(mTab);
+        verify(mDelegate, times(2)).clearState();
+
+        // Should be ignored, because URL is the same.
+        getTabObserver().onUrlUpdated(mTab);
+        verify(mDelegate, times(2)).clearState();
+
+        // Should be ignored, because tab is different.
+        doReturn(STARTING_URL).when(mTab2).getUrl();
+        getTabObserver().onUrlUpdated(mTab2);
         verify(mDelegate, times(2)).clearState();
     }
 
@@ -135,14 +175,14 @@ public final class FetchHelperTest {
     }
 
     @Test
-    public void tabObserver_didFirstVisuallyNonEmptyPaint_updateUrl_toSame() {
-        delayFetchExecutionTest_updateUrl_toSame(
+    public void tabObserver_didFirstVisuallyNonEmptyPaint_pageLoadStarted_toSame() {
+        delayFetchExecutionTest_pageLoadStarted_toSame(
                 (tabObserver) -> tabObserver.didFirstVisuallyNonEmptyPaint(mTab));
     }
 
     @Test
-    public void tabObserver_didFirstVisuallyNonEmptyPaint_updateUrl_toDifferent() {
-        delayFetchExecutionTest_updateUrl_toDifferent(
+    public void tabObserver_didFirstVisuallyNonEmptyPaint_pageLoadStarted_toDifferent() {
+        delayFetchExecutionTest_pageLoadStarted_toDifferent(
                 (tabObserver) -> tabObserver.didFirstVisuallyNonEmptyPaint(mTab));
     }
 
@@ -152,14 +192,14 @@ public final class FetchHelperTest {
     }
 
     @Test
-    public void tabObserver_onPageLoadFinished_updateUrl_toSame() {
-        delayFetchExecutionTest_updateUrl_toSame(
+    public void tabObserver_onPageLoadFinished_pageLoadStarted_toSame() {
+        delayFetchExecutionTest_pageLoadStarted_toSame(
                 (tabObserver) -> tabObserver.onPageLoadFinished(mTab));
     }
 
     @Test
-    public void tabObserver_onPageLoadFinished_updateUrl_toDifferent() {
-        delayFetchExecutionTest_updateUrl_toDifferent(
+    public void tabObserver_onPageLoadFinished_pageLoadStarted_toDifferent() {
+        delayFetchExecutionTest_pageLoadStarted_toDifferent(
                 (tabObserver) -> tabObserver.onPageLoadFinished(mTab));
     }
 
@@ -169,14 +209,14 @@ public final class FetchHelperTest {
     }
 
     @Test
-    public void tabObserver_onLoadStopped_updateUrl_toSame() {
-        delayFetchExecutionTest_updateUrl_toSame(
+    public void tabObserver_onLoadStopped_pageLoadStarted_toSame() {
+        delayFetchExecutionTest_pageLoadStarted_toSame(
                 (tabObserver) -> tabObserver.onLoadStopped(mTab, false));
     }
 
     @Test
-    public void tabObserver_onLoadStopped_updateUrl_toDifferent() {
-        delayFetchExecutionTest_updateUrl_toDifferent(
+    public void tabObserver_onLoadStopped_pageLoadStarted_toDifferent() {
+        delayFetchExecutionTest_pageLoadStarted_toDifferent(
                 (tabObserver) -> tabObserver.onLoadStopped(mTab, false));
     }
 
@@ -190,15 +230,27 @@ public final class FetchHelperTest {
     }
 
     @Test
+    public void tabModelObserver_addTab_closeTab_isLoading() {
+        doReturn(true).when(mTab).isLoading();
+        addAndcloseNonSelectedTab(() -> closeTab(mTab));
+    }
+
+    @Test
     public void tabModelObserver_addTab_removeTab_isLoading() {
         doReturn(true).when(mTab).isLoading();
-        addAndRemoveNonSelectedTab();
+        addAndcloseNonSelectedTab(() -> removeTab(mTab));
+    }
+
+    @Test
+    public void tabModelObserver_addTab_closeTab_doneLoading() {
+        doReturn(false).when(mTab).isLoading();
+        addAndcloseNonSelectedTab(() -> closeTab(mTab));
     }
 
     @Test
     public void tabModelObserver_addTab_removeTab_doneLoading() {
         doReturn(false).when(mTab).isLoading();
-        addAndRemoveNonSelectedTab();
+        addAndcloseNonSelectedTab(() -> removeTab(mTab));
     }
 
     @Test
@@ -221,7 +273,7 @@ public final class FetchHelperTest {
     }
 
     @Test
-    public void secondTab_add_select_remove_whenDoneLoading() {
+    public void secondTab_add_select_close_whenDoneLoading() {
         FetchHelper helper = createFetchHelper();
         addTab(mTab2);
         verify(mTab2, times(1)).addObserver(eq(getTabObserver()));
@@ -234,7 +286,7 @@ public final class FetchHelperTest {
         verify(mDelegate, times(1)).clearState();
         verify(mDelegate, times(1)).reportFetchDelayed(eq(mWebContents2));
 
-        removeTab(mTab2);
+        closeTab(mTab2);
         assertFalse(helper.isObservingTab(mTab2));
         verify(mDelegate, times(2)).clearState();
         verify(mDelegate, times(1)).reportFetchDelayed(eq(mWebContents2));
@@ -242,7 +294,7 @@ public final class FetchHelperTest {
     }
 
     @Test
-    public void secondTab_select_remove_whenLoading() {
+    public void secondTab_select_close_whenLoading() {
         doReturn(true).when(mTab2).isLoading();
 
         FetchHelper helper = createFetchHelper();
@@ -252,7 +304,7 @@ public final class FetchHelperTest {
         verify(mDelegate, times(1)).clearState();
         verify(mDelegate, times(0)).reportFetchDelayed(eq(mWebContents2));
 
-        removeTab(mTab2);
+        closeTab(mTab2);
         assertFalse(helper.isObservingTab(mTab2));
         verify(mDelegate, times(2)).clearState();
         verify(mDelegate, times(0)).reportFetchDelayed(eq(mWebContents2));
@@ -260,28 +312,28 @@ public final class FetchHelperTest {
     }
 
     @Test
-    public void secondTab_add_select_fetch_remove_whenDoneLoading() {
+    public void secondTab_add_select_fetch_close_whenDoneLoading() {
         FetchHelper helper = createFetchHelper();
         addTab(mTab2);
         selectTab(mTab2);
         runUntilFetchPossible();
         verify(mDelegate, times(1)).requestSuggestions(eq(DIFFERENT_URL));
 
-        removeTab(mTab2);
+        closeTab(mTab2);
         verify(mDelegate, times(2)).clearState();
         verify(mDelegate, times(1)).reportFetchDelayed(eq(mWebContents2));
         verify(mDelegate, times(1)).requestSuggestions(any(String.class));
     }
 
     @Test
-    public void secondTab_add_select_fetch_remove_whenLoading() {
+    public void secondTab_add_select_fetch_close_whenLoading() {
         doReturn(true).when(mTab2).isLoading();
         FetchHelper helper = createFetchHelper();
         addTab(mTab2);
         selectTab(mTab2);
         runUntilFetchPossible();
 
-        removeTab(mTab2);
+        closeTab(mTab2);
         verify(mDelegate, times(2)).clearState();
         verify(mDelegate, times(0)).reportFetchDelayed(eq(mWebContents2));
         verify(mDelegate, times(0)).requestSuggestions(eq(DIFFERENT_URL));
@@ -303,7 +355,7 @@ public final class FetchHelperTest {
         verify(mDelegate, times(0)).reportFetchDelayed(eq(mWebContents));
         verify(mDelegate, times(0)).requestSuggestions(eq(STARTING_URL));
 
-        removeTab(mTab2);
+        closeTab(mTab2);
         verify(mDelegate, times(2)).clearState();
     }
 
@@ -333,12 +385,74 @@ public final class FetchHelperTest {
         verify(mDelegate, times(1)).requestSuggestions(eq(STARTING_URL));
     }
 
+    @Test
+    public void canonicalUrl_isResolved() {
+        doReturn(false).when(mTab).isLoading();
+        doReturn(mFrameHost).when(mWebContents).getMainFrame();
+        doAnswer(new Answer<Void>() {
+            @Override
+            public Void answer(InvocationOnMock invocation) {
+                if (invocation.getArguments()[0] instanceof Callback) {
+                    @SuppressWarnings("unchecked")
+                    Callback<String> callback = (Callback<String>) invocation.getArguments()[0];
+                    callback.onResult(DIFFERENT_URL);
+                }
+                return null;
+            }
+        })
+                .when(mFrameHost)
+                .getCanonicalUrlForSharing(any());
+        FetchHelper helper = createFetchHelper();
+
+        getTabObserver().onPageLoadFinished(mTab);
+        verify(mFrameHost, times(0)).getCanonicalUrlForSharing(any());
+        runUntilFetchPossible();
+        verify(mFrameHost, times(1)).getCanonicalUrlForSharing(any());
+        verify(mDelegate, times(1)).requestSuggestions(DIFFERENT_URL);
+    }
+
+    @Test
+    public void canonicalUrl_readinessStateIsNull() {
+        doReturn(true).when(mTab).isLoading();
+
+        FetchHelper helper = createFetchHelper();
+
+        doReturn(mFrameHost).when(mWebContents).getMainFrame();
+        doAnswer(new Answer<Void>() {
+            @Override
+            public Void answer(InvocationOnMock invocation) {
+                if (invocation.getArguments()[0] instanceof Callback) {
+                    closeTab(mTab);
+                    @SuppressWarnings("unchecked")
+                    Callback<String> callback = (Callback<String>) invocation.getArguments()[0];
+                    callback.onResult(DIFFERENT_URL);
+                }
+                return null;
+            }
+        })
+                .when(mFrameHost)
+                .getCanonicalUrlForSharing(any());
+        getTabObserver().onPageLoadFinished(mTab);
+        runUntilFetchPossible();
+        verify(mDelegate, times(0)).requestSuggestions(DIFFERENT_URL);
+    }
+
+    @Test
+    public void getMinimumFetchDelayMillis_Default() {
+        assertEquals(FetchHelper.getMinimumFetchDelayMillis(),
+                TimeUnit.SECONDS.toMillis(FetchHelper.MINIMUM_FETCH_DELAY_SECONDS));
+    }
+
     private void addTab(Tab tab) {
         getTabModelObserver().didAddTab(tab, TabLaunchType.FROM_LINK);
     }
 
     private void selectTab(Tab tab) {
         getTabModelObserver().didSelectTab(tab, TabSelectionType.FROM_USER, 0);
+    }
+
+    private void closeTab(Tab tab) {
+        getTabModelObserver().willCloseTab(tab, true);
     }
 
     private void removeTab(Tab tab) {
@@ -350,7 +464,10 @@ public final class FetchHelperTest {
     }
 
     private FetchHelper createFetchHelper() {
-        FetchHelper helper = new FetchHelper(mDelegate, mTabModelSelector);
+        FetchHelper helper = spy(new FetchHelper(mDelegate, mTabModelSelector));
+        when(helper.requireCurrentPageFromSRP()).thenReturn(false);
+        when(helper.requireNavChainFromSRP()).thenReturn(false);
+
         if (mTabModelSelector.getCurrentTab() != null && !mTab.isIncognito()) {
             verify(mTab, times(1)).addObserver(mTabObserverCaptor.capture());
         }
@@ -359,7 +476,7 @@ public final class FetchHelperTest {
     }
 
     private void delayFetchExecutionTest(Consumer<TabObserver> consumer) {
-        FetchHelper helper = new FetchHelper(mDelegate, mTabModelSelector);
+        FetchHelper helper = createFetchHelper();
         verify(mTab, times(1)).addObserver(mTabObserverCaptor.capture());
         consumer.accept(getTabObserver());
         verify(mDelegate, times(0)).requestSuggestions(eq(STARTING_URL));
@@ -369,24 +486,25 @@ public final class FetchHelperTest {
         verify(mDelegate, times(1)).requestSuggestions(eq(STARTING_URL));
     }
 
-    private void delayFetchExecutionTest_updateUrl_toSame(Consumer<TabObserver> consumer) {
-        FetchHelper helper = new FetchHelper(mDelegate, mTabModelSelector);
+    private void delayFetchExecutionTest_pageLoadStarted_toSame(Consumer<TabObserver> consumer) {
+        FetchHelper helper = createFetchHelper();
         verify(mTab, times(1)).addObserver(mTabObserverCaptor.capture());
         consumer.accept(getTabObserver());
 
-        mTabObserverCaptor.getValue().onUpdateUrl(mTab, STARTING_URL);
+        mTabObserverCaptor.getValue().onPageLoadStarted(mTab, STARTING_URL);
         verify(mDelegate, times(1)).clearState();
 
         runUntilFetchPossible();
         verify(mDelegate, times(1)).requestSuggestions(eq(STARTING_URL));
     }
 
-    private void delayFetchExecutionTest_updateUrl_toDifferent(Consumer<TabObserver> consumer) {
-        FetchHelper helper = new FetchHelper(mDelegate, mTabModelSelector);
+    private void delayFetchExecutionTest_pageLoadStarted_toDifferent(
+            Consumer<TabObserver> consumer) {
+        FetchHelper helper = createFetchHelper();
         verify(mTab, times(1)).addObserver(mTabObserverCaptor.capture());
         consumer.accept(getTabObserver());
 
-        mTabObserverCaptor.getValue().onUpdateUrl(mTab, DIFFERENT_URL);
+        mTabObserverCaptor.getValue().onPageLoadStarted(mTab, DIFFERENT_URL);
         verify(mDelegate, times(1)).clearState();
 
         // Request suggestions should not be called.
@@ -394,10 +512,10 @@ public final class FetchHelperTest {
         verify(mDelegate, times(0)).requestSuggestions(eq(STARTING_URL));
     }
 
-    private void addAndRemoveNonSelectedTab() {
+    private void addAndcloseNonSelectedTab(Runnable closeTabRunnable) {
         // Starting with null tab so we can add one.
         doReturn(null).when(mTabModelSelector).getCurrentTab();
-        FetchHelper helper = new FetchHelper(mDelegate, mTabModelSelector);
+        FetchHelper helper = createFetchHelper();
         verify(mTabModel, times(1)).addObserver(mTabModelObserverCaptor.capture());
 
         addTab(mTab);
@@ -405,7 +523,7 @@ public final class FetchHelperTest {
         verify(mDelegate, times(0)).requestSuggestions(eq(STARTING_URL));
         verify(mDelegate, times(0)).reportFetchDelayed(eq(mWebContents));
 
-        removeTab(mTab);
+        closeTabRunnable.run();
         assertFalse(helper.isObservingTab(mTab));
         verify(mDelegate, times(0)).requestSuggestions(eq(STARTING_URL));
         verify(mDelegate, times(0)).reportFetchDelayed(eq(mWebContents));

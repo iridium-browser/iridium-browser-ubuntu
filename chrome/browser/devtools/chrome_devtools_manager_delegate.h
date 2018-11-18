@@ -21,6 +21,10 @@
 class ChromeDevToolsSession;
 using RemoteLocations = std::set<net::HostPortPair>;
 
+namespace extensions {
+class Extension;
+}
+
 class ChromeDevToolsManagerDelegate : public content::DevToolsManagerDelegate {
  public:
   static const char kTypeApp[];
@@ -32,16 +36,39 @@ class ChromeDevToolsManagerDelegate : public content::DevToolsManagerDelegate {
   static ChromeDevToolsManagerDelegate* GetInstance();
   void UpdateDeviceDiscovery();
 
+  // |web_contents| may be null, in which case this function just checks
+  // the settings for |profile|.
+  static bool AllowInspection(Profile* profile,
+                              content::WebContents* web_contents);
+
+  // |extension| may be null, in which case this function just checks
+  // the settings for |profile|.
+  static bool AllowInspection(Profile* profile,
+                              const extensions::Extension* extension);
+
+  // Resets |device_manager_|.
+  void ResetAndroidDeviceManagerForTesting();
+
  private:
   friend class DevToolsManagerDelegateTest;
 
   // content::DevToolsManagerDelegate implementation.
   void Inspect(content::DevToolsAgentHost* agent_host) override;
-  bool HandleCommand(content::DevToolsAgentHost* agent_host,
+  void HandleCommand(content::DevToolsAgentHost* agent_host,
                      content::DevToolsAgentHostClient* client,
-                     base::DictionaryValue* command_dict) override;
+                     std::unique_ptr<base::DictionaryValue> command_dict,
+                     const std::string& message,
+                     NotHandledCallback callback) override;
   std::string GetTargetType(content::WebContents* web_contents) override;
   std::string GetTargetTitle(content::WebContents* web_contents) override;
+
+  std::vector<content::BrowserContext*> GetBrowserContexts() override;
+  content::BrowserContext* GetDefaultBrowserContext() override;
+  content::BrowserContext* CreateBrowserContext() override;
+  void DisposeBrowserContext(content::BrowserContext*,
+                             DisposeCallback callback) override;
+
+  bool AllowInspectingRenderFrameHost(content::RenderFrameHost* rfh) override;
   void ClientAttached(content::DevToolsAgentHost* agent_host,
                       content::DevToolsAgentHostClient* client) override;
   void ClientDetached(content::DevToolsAgentHost* agent_host,

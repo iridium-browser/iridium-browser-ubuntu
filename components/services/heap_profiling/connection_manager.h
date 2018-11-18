@@ -21,7 +21,6 @@
 #include "components/services/heap_profiling/allocation_tracker.h"
 #include "components/services/heap_profiling/backtrace_storage.h"
 #include "components/services/heap_profiling/public/mojom/heap_profiling_service.mojom.h"
-#include "mojo/edk/embedder/scoped_platform_handle.h"
 #include "services/resource_coordinator/public/mojom/memory_instrumentation/memory_instrumentation.mojom.h"
 
 namespace base {
@@ -33,8 +32,8 @@ class SequencedTaskRunner;
 namespace heap_profiling {
 
 using VmRegions =
-    std::unordered_map<base::ProcessId,
-                       std::vector<memory_instrumentation::mojom::VmRegionPtr>>;
+    base::flat_map<base::ProcessId,
+                   std::vector<memory_instrumentation::mojom::VmRegionPtr>>;
 
 // Manages all connections and logging for each process. Pipes are supplied by
 // the pipe server and this class will connect them to a parser and logger.

@@ -15,8 +15,9 @@ rtc_static_library("bbr") {
   ]
   deps = [
     ":bbr_controller",
+    "../../../api/transport:network_control",
     "../../../rtc_base:rtc_base_approved",
-    "../network_control",
+    "//third_party/abseil-cpp/absl/memory",
   ]
 }
 
@@ -27,16 +28,38 @@ rtc_source_set("bbr_controller") {
     "bbr_network_controller.h",
   ]
   deps = [
-    ":data_transfer_tracker",
+    ":bandwidth_sampler",
+    ":loss_rate_filter",
     ":rtt_stats",
     ":windowed_filter",
-    "../../../api:optional",
+    "../../../api/transport:network_control",
     "../../../rtc_base:checks",
     "../../../rtc_base:rtc_base_approved",
+    "../../../rtc_base/experiments:field_trial_parser",
     "../../../rtc_base/system:fallthrough",
-    "../network_control",
+    "../../../system_wrappers:field_trial",
+    "//third_party/abseil-cpp/absl/types:optional",
   ]
 }
+
+rtc_source_set("bandwidth_sampler") {
+  visibility = [ ":*" ]
+  sources = [
+    "bandwidth_sampler.cc",
+    "bandwidth_sampler.h",
+  ]
+  deps = [
+    ":packet_number_indexed_queue",
+    "../../../api/units:data_rate",
+    "../../../api/units:data_size",
+    "../../../api/units:time_delta",
+    "../../../api/units:timestamp",
+    "../../../rtc_base:checks",
+    "../../../rtc_base:rtc_base_approved",
+    "//third_party/abseil-cpp/absl/types:optional",
+  ]
+}
+
 rtc_source_set("data_transfer_tracker") {
   visibility = [ ":*" ]
   sources = [
@@ -44,9 +67,32 @@ rtc_source_set("data_transfer_tracker") {
     "data_transfer_tracker.h",
   ]
   deps = [
+    "../../../api/units:data_size",
+    "../../../api/units:time_delta",
+    "../../../api/units:timestamp",
     "../../../rtc_base:checks",
     "../../../rtc_base:rtc_base_approved",
-    "../network_control",
+  ]
+}
+
+rtc_source_set("packet_number_indexed_queue") {
+  visibility = [ ":*" ]
+  sources = [
+    "packet_number_indexed_queue.h",
+  ]
+  deps = [
+    "../../../rtc_base:checks",
+  ]
+}
+
+rtc_source_set("loss_rate_filter") {
+  visibility = [ ":*" ]
+  sources = [
+    "loss_rate_filter.cc",
+    "loss_rate_filter.h",
+  ]
+  deps = [
+    "//third_party/abseil-cpp/absl/types:optional",
   ]
 }
 rtc_source_set("rtt_stats") {
@@ -56,8 +102,9 @@ rtc_source_set("rtt_stats") {
     "rtt_stats.h",
   ]
   deps = [
+    "../../../api/units:time_delta",
+    "../../../api/units:timestamp",
     "../../../rtc_base:rtc_base_approved",
-    "../network_control",
   ]
 }
 rtc_source_set("windowed_filter") {
@@ -67,23 +114,43 @@ rtc_source_set("windowed_filter") {
   ]
 }
 if (rtc_include_tests) {
-  rtc_source_set("bbr_unittests") {
+  rtc_source_set("test_bbr_printer") {
     testonly = true
     sources = [
-      "bbr_network_controller_unittest.cc",
-      "data_transfer_tracker_unittest.cc",
-      "rtt_stats_unittest.cc",
-      "windowed_filter_unittest.cc",
+      "test/bbr_printer.cc",
+      "test/bbr_printer.h",
     ]
     deps = [
       ":bbr",
       ":bbr_controller",
+      "..:test_controller_printer",
+    ]
+  }
+  rtc_source_set("bbr_unittests") {
+    testonly = true
+    sources = [
+      "bandwidth_sampler_unittest.cc",
+      "bbr_network_controller_unittest.cc",
+      "data_transfer_tracker_unittest.cc",
+      "loss_rate_filter_unittest.cc",
+      "packet_number_indexed_queue_unittest.cc",
+      "rtt_stats_unittest.cc",
+      "windowed_filter_unittest.cc",
+    ]
+    deps = [
+      ":bandwidth_sampler",
+      ":bbr",
+      ":bbr_controller",
       ":data_transfer_tracker",
+      ":loss_rate_filter",
+      ":packet_number_indexed_queue",
       ":rtt_stats",
       ":windowed_filter",
+      "../../../api/transport:network_control_test",
+      "../../../api/units:data_rate",
+      "../../../api/units:time_delta",
+      "../../../api/units:timestamp",
       "../../../test:test_support",
-      "../network_control",
-      "../network_control:network_control_test",
     ]
     if (!build_with_chromium && is_clang) {
       # Suppress warnings from the Chromium Clang plugin (bugs.webrtc.org/163).

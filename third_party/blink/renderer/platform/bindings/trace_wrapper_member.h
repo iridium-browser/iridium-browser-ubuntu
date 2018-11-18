@@ -6,7 +6,6 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_BINDINGS_TRACE_WRAPPER_MEMBER_H_
 
 #include "third_party/blink/renderer/platform/bindings/script_wrappable_marking_visitor.h"
-#include "third_party/blink/renderer/platform/bindings/trace_wrapper_base.h"
 #include "third_party/blink/renderer/platform/heap/heap_allocator.h"
 
 namespace blink {
@@ -16,14 +15,10 @@ class Member;
 
 // TraceWrapperMember is used for Member fields that should participate in
 // wrapper tracing, i.e., strongly hold a ScriptWrappable alive. All
-// TraceWrapperMember fields must be traced in the class' |TraceWrappers|
-// method.
+// TraceWrapperMember fields must be traced in the class' |Trace| method.
 template <class T>
 class TraceWrapperMember : public Member<T> {
-  DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
-  // TODO(mlippautz): Enable the following check.
-  // static_assert(std::is_base_of<TraceWrapperBase, T>::value,
-  //               "T must inherit from TraceWrapperBase");
+  DISALLOW_NEW();
 
  public:
   TraceWrapperMember() : Member<T>(nullptr) {}
@@ -77,7 +72,8 @@ void swap(HeapVector<TraceWrapperMember<T>>& a,
   HeapVector<Member<T>>& a_ = reinterpret_cast<HeapVector<Member<T>>&>(a);
   HeapVector<Member<T>>& b_ = reinterpret_cast<HeapVector<Member<T>>&>(b);
   a_.swap(b_);
-  if (ThreadState::Current()->WrapperTracingInProgress()) {
+  if (ThreadState::IsAnyWrapperTracing() &&
+      ThreadState::Current()->IsWrapperTracing()) {
     // If incremental marking is enabled we need to emit the write barrier since
     // the swap was performed on HeapVector<Member<T>>.
     for (auto item : a) {
@@ -106,7 +102,8 @@ void swap(HeapVector<TraceWrapperMember<T>>& a, HeapVector<Member<T>>& b) {
   // TraceWrapperMember and Member match in vector backings.
   HeapVector<Member<T>>& a_ = reinterpret_cast<HeapVector<Member<T>>&>(a);
   a_.swap(b);
-  if (ThreadState::Current()->WrapperTracingInProgress()) {
+  if (ThreadState::IsAnyWrapperTracing() &&
+      ThreadState::Current()->IsWrapperTracing()) {
     // If incremental marking is enabled we need to emit the write barrier since
     // the swap was performed on HeapVector<Member<T>>.
     for (auto item : a) {

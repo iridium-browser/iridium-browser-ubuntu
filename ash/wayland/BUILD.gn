@@ -11,7 +11,9 @@ source_set("wayland") {
   ]
 
   deps = [
+    "//ash/keyboard/arc",
     "//ash/public/cpp",
+    "//ash/system/message_center/arc",
     "//base",
     "//components/exo",
     "//components/exo/wayland",

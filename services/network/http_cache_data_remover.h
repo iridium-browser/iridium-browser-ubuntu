@@ -12,7 +12,6 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
-#include "net/base/completion_callback.h"
 #include "services/network/conditional_cache_deletion_helper.h"
 #include "services/network/public/mojom/network_service.mojom.h"
 #include "url/gurl.h"
@@ -41,7 +40,7 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) HttpCacheDataRemover {
   // interface and might be slow.
   static std::unique_ptr<HttpCacheDataRemover> CreateAndStart(
       net::URLRequestContext* url_request_context,
-      mojom::ClearCacheUrlFilterPtr url_filter,
+      mojom::ClearDataFilterPtr url_filter,
       base::Time delete_begin,
       base::Time delete_end,
       HttpCacheDataRemoverCallback done_callback);
@@ -49,12 +48,12 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) HttpCacheDataRemover {
   ~HttpCacheDataRemover();
 
  private:
-  HttpCacheDataRemover(mojom::ClearCacheUrlFilterPtr url_filter,
+  HttpCacheDataRemover(mojom::ClearDataFilterPtr url_filter,
                        base::Time delete_begin,
                        base::Time delete_end,
                        HttpCacheDataRemoverCallback done_callback);
 
-  void CacheRetrieved(std::unique_ptr<disk_cache::Backend*> backend, int rv);
+  void CacheRetrieved(int rv);
   void ClearHttpCacheDone(int rv);
 
   base::RepeatingCallback<bool(const GURL&)> url_matcher_;
@@ -62,6 +61,8 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) HttpCacheDataRemover {
   const base::Time delete_end_;
 
   HttpCacheDataRemoverCallback done_callback_;
+
+  disk_cache::Backend* backend_;
 
   std::unique_ptr<ConditionalCacheDeletionHelper> deletion_helper_;
 

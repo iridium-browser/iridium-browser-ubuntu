@@ -36,7 +36,7 @@
 
 namespace blink {
 
-class BaseAudioContext;
+class AudioContext;
 class MediaStreamAudioSourceOptions;
 
 class MediaStreamAudioSourceHandler final : public AudioHandler {
@@ -83,15 +83,13 @@ class MediaStreamAudioSourceNode final : public AudioNode,
   USING_GARBAGE_COLLECTED_MIXIN(MediaStreamAudioSourceNode);
 
  public:
-  static MediaStreamAudioSourceNode* Create(BaseAudioContext&,
+  static MediaStreamAudioSourceNode* Create(AudioContext&,
                                             MediaStream&,
                                             ExceptionState&);
-  static MediaStreamAudioSourceNode* Create(
-      BaseAudioContext*,
-      const MediaStreamAudioSourceOptions&,
-      ExceptionState&);
+  static MediaStreamAudioSourceNode*
+  Create(AudioContext*, const MediaStreamAudioSourceOptions&, ExceptionState&);
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
   MediaStream* getMediaStream() const;
 
@@ -99,7 +97,7 @@ class MediaStreamAudioSourceNode final : public AudioNode,
   void SetFormat(size_t number_of_channels, float sample_rate) override;
 
  private:
-  MediaStreamAudioSourceNode(BaseAudioContext&,
+  MediaStreamAudioSourceNode(AudioContext&,
                              MediaStream&,
                              MediaStreamTrack*,
                              std::unique_ptr<AudioSourceProvider>);

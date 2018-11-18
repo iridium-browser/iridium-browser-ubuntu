@@ -15,6 +15,7 @@
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/message_loop/message_loop.h"
+#include "base/message_loop/message_loop_current.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
@@ -102,7 +103,7 @@ class VideoRendererImplTest : public testing::Test {
                        scoped_refptr<DecoderBuffer>(new DecoderBuffer(0))));
   }
 
-  virtual ~VideoRendererImplTest() = default;
+  ~VideoRendererImplTest() override = default;
 
   void Initialize() {
     InitializeWithLowDelay(false);
@@ -208,9 +209,7 @@ class VideoRendererImplTest : public testing::Test {
     decode_results_.push_back(std::make_pair(status, frame));
   }
 
-  bool IsReadPending() {
-    return !decode_cb_.is_null();
-  }
+  bool IsReadPending() { return !!decode_cb_; }
 
   void WaitForError(PipelineStatus expected) {
     SCOPED_TRACE(base::StringPrintf("WaitForError(%d)", expected));
@@ -231,21 +230,21 @@ class VideoRendererImplTest : public testing::Test {
 
   void WaitForPendingDecode() {
     SCOPED_TRACE("WaitForPendingDecode()");
-    if (!decode_cb_.is_null())
+    if (decode_cb_)
       return;
 
-    DCHECK(wait_for_pending_decode_cb_.is_null());
+    DCHECK(!wait_for_pending_decode_cb_);
 
     WaitableMessageLoopEvent event;
     wait_for_pending_decode_cb_ = event.GetClosure();
     event.RunAndWait();
 
-    DCHECK(!decode_cb_.is_null());
-    DCHECK(wait_for_pending_decode_cb_.is_null());
+    DCHECK(decode_cb_);
+    DCHECK(!wait_for_pending_decode_cb_);
   }
 
   void SatisfyPendingDecode() {
-    CHECK(!decode_cb_.is_null());
+    CHECK(decode_cb_);
     CHECK(!decode_results_.empty());
 
     // Post tasks for OutputCB and DecodeCB.
@@ -254,13 +253,13 @@ class VideoRendererImplTest : public testing::Test {
       message_loop_.task_runner()->PostTask(FROM_HERE,
                                             base::Bind(output_cb_, frame));
     message_loop_.task_runner()->PostTask(
-        FROM_HERE, base::Bind(base::ResetAndReturn(&decode_cb_),
-                              decode_results_.front().first));
+        FROM_HERE,
+        base::Bind(std::move(decode_cb_), decode_results_.front().first));
     decode_results_.pop_front();
   }
 
   void SatisfyPendingDecodeWithEndOfStream() {
-    DCHECK(!decode_cb_.is_null());
+    DCHECK(decode_cb_);
 
     // Return EOS buffer to trigger EOS frame.
     EXPECT_CALL(demuxer_stream_, Read(_))
@@ -269,24 +268,22 @@ class VideoRendererImplTest : public testing::Test {
 
     // Satify pending |decode_cb_| to trigger a new DemuxerStream::Read().
     message_loop_.task_runner()->PostTask(
-        FROM_HERE,
-        base::Bind(base::ResetAndReturn(&decode_cb_), DecodeStatus::OK));
+        FROM_HERE, base::BindOnce(std::move(decode_cb_), DecodeStatus::OK));
 
     WaitForPendingDecode();
 
     message_loop_.task_runner()->PostTask(
-        FROM_HERE,
-        base::Bind(base::ResetAndReturn(&decode_cb_), DecodeStatus::OK));
+        FROM_HERE, base::BindOnce(std::move(decode_cb_), DecodeStatus::OK));
   }
 
   void AdvanceWallclockTimeInMs(int time_ms) {
-    DCHECK_EQ(&message_loop_, base::MessageLoop::current());
+    DCHECK_EQ(&message_loop_, base::MessageLoopCurrent::Get());
     base::AutoLock l(lock_);
     tick_clock_.Advance(base::TimeDelta::FromMilliseconds(time_ms));
   }
 
   void AdvanceTimeInMs(int time_ms) {
-    DCHECK_EQ(&message_loop_, base::MessageLoop::current());
+    DCHECK_EQ(&message_loop_, base::MessageLoopCurrent::Get());
     base::AutoLock l(lock_);
     time_ += base::TimeDelta::FromMilliseconds(time_ms);
     time_source_.StopTicking();
@@ -470,13 +467,13 @@ class VideoRendererImplTest : public testing::Test {
  private:
   void DecodeRequested(scoped_refptr<DecoderBuffer> buffer,
                        const VideoDecoder::DecodeCB& decode_cb) {
-    DCHECK_EQ(&message_loop_, base::MessageLoop::current());
-    CHECK(decode_cb_.is_null());
+    DCHECK_EQ(&message_loop_, base::MessageLoopCurrent::Get());
+    CHECK(!decode_cb_);
     decode_cb_ = decode_cb;
 
     // Wake up WaitForPendingDecode() if needed.
-    if (!wait_for_pending_decode_cb_.is_null())
-      base::ResetAndReturn(&wait_for_pending_decode_cb_).Run();
+    if (wait_for_pending_decode_cb_)
+      std::move(wait_for_pending_decode_cb_).Run();
 
     if (decode_results_.empty())
       return;
@@ -488,9 +485,9 @@ class VideoRendererImplTest : public testing::Test {
   }
 
   void FlushRequested(const base::Closure& callback) {
-    DCHECK_EQ(&message_loop_, base::MessageLoop::current());
+    DCHECK_EQ(&message_loop_, base::MessageLoopCurrent::Get());
     decode_results_.clear();
-    if (!decode_cb_.is_null()) {
+    if (decode_cb_) {
       QueueFrames("abort");
       SatisfyPendingDecode();
     }
@@ -877,6 +874,9 @@ TEST_F(VideoRendererImplTest, RenderingStartedThenStopped) {
   // calls must all have occurred before playback starts.
   EXPECT_EQ(0u, last_pipeline_statistics.video_frames_dropped);
   EXPECT_EQ(1u, last_pipeline_statistics.video_frames_decoded);
+
+  // Note: This is not the total, but just the increase in the last call since
+  // the previous call, the total should be 4 * 115200.
   EXPECT_EQ(115200, last_pipeline_statistics.video_memory_usage);
 
   // Consider the case that rendering is faster than we setup the test event.
@@ -897,10 +897,21 @@ TEST_F(VideoRendererImplTest, RenderingStartedThenStopped) {
   AdvanceTimeInMs(91);
   EXPECT_CALL(mock_cb_, FrameReceived(HasTimestampMatcher(90)));
   WaitForPendingDecode();
+
+  EXPECT_CALL(mock_cb_, OnStatisticsUpdate(_))
+      .WillOnce(SaveArg<0>(&last_pipeline_statistics));
   SatisfyPendingDecodeWithEndOfStream();
 
   AdvanceTimeInMs(30);
   WaitForEnded();
+
+  EXPECT_EQ(0u, last_pipeline_statistics.video_frames_dropped);
+  EXPECT_EQ(0u, last_pipeline_statistics.video_frames_decoded);
+
+  // Memory usage is relative, so the prior lines increased memory usage to
+  // 4 * 115200, so this last one should show we only have 1 frame left.
+  EXPECT_EQ(-3 * 115200, last_pipeline_statistics.video_memory_usage);
+
   Destroy();
 }
 

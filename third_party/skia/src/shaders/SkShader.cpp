@@ -15,7 +15,6 @@
 #include "SkPaint.h"
 #include "SkPicture.h"
 #include "SkPictureShader.h"
-#include "SkPM4fPriv.h"
 #include "SkRasterPipeline.h"
 #include "SkReadBuffer.h"
 #include "SkScalar.h"
@@ -116,8 +115,6 @@ SkShaderBase::Context* SkShaderBase::makeContext(const ContextRec& rec, SkArenaA
 SkShaderBase::Context* SkShaderBase::makeBurstPipelineContext(const ContextRec& rec,
                                                               SkArenaAlloc* alloc) const {
 
-    SkASSERT(rec.fPreferredDstType == ContextRec::kPM4f_DstType);
-
     // Always use vanilla stages for perspective.
     if (rec.fMatrix->hasPerspective() || fLocalMatrix.hasPerspective()) {
         return nullptr;
@@ -145,14 +142,14 @@ SkShaderBase::Context::Context(const SkShaderBase& shader, const ContextRec& rec
 
 SkShaderBase::Context::~Context() {}
 
-void SkShaderBase::Context::shadeSpan4f(int x, int y, SkPM4f dst[], int count) {
+void SkShaderBase::Context::shadeSpan4f(int x, int y, SkPMColor4f dst[], int count) {
     const int N = 128;
     SkPMColor tmp[N];
     while (count > 0) {
         int n = SkTMin(count, N);
         this->shadeSpan(x, y, tmp, n);
         for (int i = 0; i < n; ++i) {
-            dst[i] = SkPM4f::FromPMColor(tmp[i]);
+            dst[i] = SkPMColor4f::FromPMColor(tmp[i]);
         }
         dst += n;
         x += n;
@@ -208,13 +205,6 @@ sk_sp<SkShader> SkShader::MakePictureShader(sk_sp<SkPicture> src, TileMode tmx, 
     return SkPictureShader::Make(std::move(src), tmx, tmy, localMatrix, tile);
 }
 
-void SkShaderBase::toString(SkString* str) const {
-    if (!fLocalMatrix.isIdentity()) {
-        str->append(" ");
-        fLocalMatrix.toString(str);
-    }
-}
-
 bool SkShaderBase::appendStages(const StageRec& rec) const {
     return this->onAppendStages(rec);
 }
@@ -228,7 +218,7 @@ bool SkShaderBase::onAppendStages(const StageRec& rec) const {
         opaquePaint.writable()->setAlpha(SK_AlphaOPAQUE);
     }
 
-    ContextRec cr(*opaquePaint, rec.fCTM, rec.fLocalM, ContextRec::kPM4f_DstType, rec.fDstCS);
+    ContextRec cr(*opaquePaint, rec.fCTM, rec.fLocalM, rec.fDstCS);
 
     struct CallbackCtx : SkJumper_CallbackCtx {
         sk_sp<SkShader> shader;
@@ -242,7 +232,7 @@ bool SkShaderBase::onAppendStages(const StageRec& rec) const {
         auto c = (CallbackCtx*)self;
         int x = (int)c->rgba[0],
         y = (int)c->rgba[1];
-        c->ctx->shadeSpan4f(x,y, (SkPM4f*)c->rgba, active_pixels);
+        c->ctx->shadeSpan4f(x,y, (SkPMColor4f*)c->rgba, active_pixels);
     };
 
     if (cb->ctx) {
@@ -257,14 +247,4 @@ bool SkShaderBase::onAppendStages(const StageRec& rec) const {
 
 sk_sp<SkFlattenable> SkEmptyShader::CreateProc(SkReadBuffer&) {
     return SkShader::MakeEmptyShader();
-}
-
-#include "SkEmptyShader.h"
-
-void SkEmptyShader::toString(SkString* str) const {
-    str->append("SkEmptyShader: (");
-
-    this->INHERITED::toString(str);
-
-    str->append(")");
 }

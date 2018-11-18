@@ -8,7 +8,6 @@
 #include "base/files/scoped_temp_dir.h"
 #include "base/guid.h"
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/stl_util.h"
 #include "base/strings/string16.h"
@@ -25,7 +24,6 @@
 #include "components/autofill/core/browser/webdata/autofill_entry.h"
 #include "components/autofill/core/browser/webdata/autofill_table.h"
 #include "components/autofill/core/common/autofill_constants.h"
-#include "components/password_manager/core/browser/webdata/logins_table.h"
 #include "components/search_engines/keyword_table.h"
 #include "components/signin/core/browser/webdata/token_service_table.h"
 #include "components/webdata/common/web_database.h"
@@ -65,13 +63,11 @@ class WebDatabaseMigrationTest : public testing::Test {
   void DoMigration() {
     AutofillTable autofill_table;
     KeywordTable keyword_table;
-    LoginsTable logins_table;
     TokenServiceTable token_service_table;
 
     WebDatabase db;
     db.AddTable(&autofill_table);
     db.AddTable(&keyword_table);
-    db.AddTable(&logins_table);
     db.AddTable(&token_service_table);
 
     // This causes the migration to occur.
@@ -96,7 +92,7 @@ class WebDatabaseMigrationTest : public testing::Test {
   // Returns true if the file exists and is read successfully, false otherwise.
   bool GetWebDatabaseData(const base::FilePath& file, std::string* contents) {
     base::FilePath source_path;
-    PathService::Get(base::DIR_SOURCE_ROOT, &source_path);
+    base::PathService::Get(base::DIR_SOURCE_ROOT, &source_path);
     source_path = source_path.AppendASCII("components");
     source_path = source_path.AppendASCII("test");
     source_path = source_path.AppendASCII("data");
@@ -106,7 +102,7 @@ class WebDatabaseMigrationTest : public testing::Test {
            base::ReadFileToString(source_path, contents);
   }
 
-  static int VersionFromConnection(sql::Connection* connection) {
+  static int VersionFromConnection(sql::Database* connection) {
     // Get version.
     sql::Statement s(connection->GetUniqueStatement(
         "SELECT value FROM meta WHERE key='version'"));
@@ -130,14 +126,14 @@ class WebDatabaseMigrationTest : public testing::Test {
   DISALLOW_COPY_AND_ASSIGN(WebDatabaseMigrationTest);
 };
 
-const int WebDatabaseMigrationTest::kCurrentTestedVersionNumber = 77;
+const int WebDatabaseMigrationTest::kCurrentTestedVersionNumber = 80;
 
 void WebDatabaseMigrationTest::LoadDatabase(
     const base::FilePath::StringType& file) {
   std::string contents;
   ASSERT_TRUE(GetWebDatabaseData(base::FilePath(file), &contents));
 
-  sql::Connection connection;
+  sql::Database connection;
   ASSERT_TRUE(connection.Open(GetDatabasePath()));
   ASSERT_TRUE(connection.Execute(contents.data()));
 }
@@ -146,7 +142,7 @@ void WebDatabaseMigrationTest::LoadDatabase(
 // schema as migrating from an empty database.
 TEST_F(WebDatabaseMigrationTest, VersionXxSqlFilesAreGolden) {
   DoMigration();
-  sql::Connection connection;
+  sql::Database connection;
   ASSERT_TRUE(connection.Open(GetDatabasePath()));
   const std::string& expected_schema = RemoveQuotes(connection.GetSchema());
   for (int i = WebDatabase::kDeprecatedVersionNumber + 1;
@@ -177,7 +173,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateEmptyToCurrent) {
   // Verify post-conditions.  These are expectations for current version of the
   // database.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
 
     // Check version.
@@ -191,8 +187,6 @@ TEST_F(WebDatabaseMigrationTest, MigrateEmptyToCurrent) {
     EXPECT_TRUE(connection.DoesTableExist("autofill_profiles"));
     EXPECT_TRUE(connection.DoesTableExist("credit_cards"));
     EXPECT_TRUE(connection.DoesTableExist("keywords"));
-    // The logins table is obsolete. (We used to store saved passwords here.)
-    EXPECT_FALSE(connection.DoesTableExist("logins"));
     EXPECT_TRUE(connection.DoesTableExist("meta"));
     EXPECT_TRUE(connection.DoesTableExist("token_service"));
     // The web_apps and web_apps_icons tables are obsolete as of version 58.
@@ -212,7 +206,7 @@ TEST_F(WebDatabaseMigrationTest, RazeDeprecatedVersionAndReinit) {
   // Verify pre-conditions.  These are expectations for version 50 of the
   // database.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
     ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
 
@@ -233,7 +227,7 @@ TEST_F(WebDatabaseMigrationTest, RazeDeprecatedVersionAndReinit) {
   // Verify post-conditions.  These are expectations for current version of the
   // database.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
     ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
 
@@ -259,7 +253,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion52ToCurrent) {
   // Verify pre-conditions.  These are expectations for version 52 of the
   // database.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
     ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
 
@@ -274,7 +268,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion52ToCurrent) {
   // Verify post-conditions.  These are expectations for current version of the
   // database.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
     ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
 
@@ -298,7 +292,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion53ToCurrent) {
   // Verify pre-conditions.  These are expectations for version 53 of the
   // database.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
 
     EXPECT_TRUE(
@@ -320,7 +314,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion53ToCurrent) {
   // Verify post-conditions.  These are expectations for current version of the
   // database.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
     ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
 
@@ -454,7 +448,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion54ToCurrent) {
   // Verify pre-conditions.  These are expectations for version 54 of the
   // database.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
 
     EXPECT_TRUE(connection.DoesTableExist("autofill_dates"));
@@ -536,7 +530,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion54ToCurrent) {
   // Verify post-conditions.  These are expectations for current version of the
   // database.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
     ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
 
@@ -608,7 +602,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion55ToCurrent) {
   // Verify pre-conditions. These are expectations for version 55 of the
   // database.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
     ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
 
@@ -621,7 +615,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion55ToCurrent) {
   // Verify post-conditions. These are expectations for current version of the
   // database.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
     ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
 
@@ -670,7 +664,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion56ToCurrent) {
   // Verify pre-conditions. These are expectations for version 56 of the
   // database.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
     ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
 
@@ -693,7 +687,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion56ToCurrent) {
   // Verify post-conditions. These are expectations for current version of the
   // database.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
     ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
 
@@ -731,7 +725,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion57ToCurrent) {
   // Verify pre-conditions. These are expectations for version 57 of the
   // database.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
     ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
 
@@ -746,7 +740,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion57ToCurrent) {
   // Verify post-conditions. These are expectations for current version of the
   // database.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
     ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
 
@@ -771,7 +765,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion58ToCurrent) {
       "?q={searchTerms}'";
   // Verify pre-conditions.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
     ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
 
@@ -791,7 +785,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion58ToCurrent) {
 
   // Verify post-conditions.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
     ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
 
@@ -824,7 +818,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion59ToCurrent) {
 
   // Verify pre-conditions.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
     ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
 
@@ -840,7 +834,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion59ToCurrent) {
 
   // Verify post-conditions.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
     ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
 
@@ -860,7 +854,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion60ToCurrent) {
 
   // Verify pre-conditions.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
     ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
 
@@ -877,7 +871,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion60ToCurrent) {
 
   // Verify post-conditions.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
     ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
 
@@ -897,7 +891,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion61ToCurrent) {
 
   // Verify pre-conditions.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
     ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
 
@@ -914,7 +908,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion61ToCurrent) {
 
   // Verify post-conditions.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
     ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
 
@@ -934,7 +928,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion64ToCurrent) {
 
   // Verify pre-conditions.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
     ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
 
@@ -955,7 +949,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion64ToCurrent) {
 
   // Verify post-conditions.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
     ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
 
@@ -979,7 +973,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion65ToCurrent) {
 
   // Verify pre-conditions.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
     ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
 
@@ -997,7 +991,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion65ToCurrent) {
 
   // Verify post-conditions.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
     ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
 
@@ -1022,7 +1016,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion66ToCurrent) {
 
   // Verify pre-conditions.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
     ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
 
@@ -1041,7 +1035,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion66ToCurrent) {
 
   // Verify post-conditions.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
     ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
 
@@ -1062,7 +1056,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion67ToCurrent) {
 
   // Verify pre-conditions.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
     ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
 
@@ -1076,7 +1070,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion67ToCurrent) {
 
   // Verify post-conditions.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
     ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
 
@@ -1094,7 +1088,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion68ToCurrent) {
 
   // Verify pre-conditions.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
     ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
 
@@ -1108,7 +1102,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion68ToCurrent) {
 
   // Verify post-conditions.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
     ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
 
@@ -1125,7 +1119,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion69ToCurrent) {
 
   // Verify pre-conditions.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
     ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
 
@@ -1140,7 +1134,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion69ToCurrent) {
 
   // Verify post-conditions.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
     ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
 
@@ -1160,7 +1154,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion70ToCurrent) {
 
   // Verify pre-conditions.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
     ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
 
@@ -1177,7 +1171,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion70ToCurrent) {
 
   // Verify post-conditions.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
     ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
 
@@ -1237,7 +1231,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion71ToCurrent) {
 
   // Verify pre-conditions.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
     ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
 
@@ -1256,7 +1250,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion71ToCurrent) {
 
   // Verify post-conditions.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
     ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
 
@@ -1281,7 +1275,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion72ToCurrent) {
 
   // Verify pre-conditions.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
     ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
 
@@ -1296,7 +1290,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion72ToCurrent) {
 
   // Verify post-conditions.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
     ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
 
@@ -1320,7 +1314,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion73ToCurrent) {
 
   // Verify pre-conditions.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
     ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
 
@@ -1338,7 +1332,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion73ToCurrent) {
 
   // Verify post-conditions.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
     ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
 
@@ -1365,7 +1359,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion73WithTypeColumnToCurrent) {
 
   // Verify pre-conditions.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
     ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
 
@@ -1384,7 +1378,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion73WithTypeColumnToCurrent) {
 
   // Verify post-conditions.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
     ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
 
@@ -1411,7 +1405,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion74ToCurrent) {
 
   // Verify pre-conditions.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
     ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
 
@@ -1426,7 +1420,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion74ToCurrent) {
 
   // Verify post-conditions.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
     ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
 
@@ -1473,7 +1467,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion75ToCurrent) {
 
   // Verify pre-conditions.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
     ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
 
@@ -1491,7 +1485,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion75ToCurrent) {
 
   // Verify post-conditions.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
     ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
 
@@ -1512,7 +1506,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion76ToCurrent) {
 
   // Verify pre-conditions.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
     ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
 
@@ -1532,7 +1526,7 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion76ToCurrent) {
 
   // Verify post-conditions.
   {
-    sql::Connection connection;
+    sql::Database connection;
     ASSERT_TRUE(connection.Open(GetDatabasePath()));
     ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
 
@@ -1546,5 +1540,150 @@ TEST_F(WebDatabaseMigrationTest, MigrateVersion76ToCurrent) {
     EXPECT_EQ(11644473723000000, s.ColumnInt64(1));
     EXPECT_EQ(11644474056000000, s.ColumnInt64(2));
     EXPECT_EQ(11644474389000000, s.ColumnInt64(3));
+  }
+}
+
+// Tests adding model_type columns into autofill_sync_metadata and
+// autofill_model_type_state.
+TEST_F(WebDatabaseMigrationTest, MigrateVersion77ToCurrent) {
+  ASSERT_NO_FATAL_FAILURE(LoadDatabase(FILE_PATH_LITERAL("version_77.sql")));
+
+  // Verify pre-conditions.
+  {
+    sql::Database connection;
+    ASSERT_TRUE(connection.Open(GetDatabasePath()));
+    ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
+
+    sql::MetaTable meta_table;
+    ASSERT_TRUE(meta_table.Init(&connection, 77, 77));
+
+    sql::Statement s1(connection.GetUniqueStatement(
+        "SELECT storage_key, value FROM autofill_sync_metadata"));
+    ASSERT_TRUE(s1.Step());
+    EXPECT_EQ("storage_key1", s1.ColumnString(0));
+    EXPECT_EQ("blob1", s1.ColumnString(1));
+    ASSERT_TRUE(s1.Step());
+    EXPECT_EQ("storage_key2", s1.ColumnString(0));
+    EXPECT_EQ("blob2", s1.ColumnString(1));
+
+    sql::Statement s2(connection.GetUniqueStatement(
+        "SELECT id, value FROM autofill_model_type_state"));
+    ASSERT_TRUE(s2.Step());
+    EXPECT_EQ(1, s2.ColumnInt(0));
+    EXPECT_EQ("state", s2.ColumnString(1));
+  }
+
+  DoMigration();
+
+  // Verify post-conditions.
+  {
+    sql::Database connection;
+    ASSERT_TRUE(connection.Open(GetDatabasePath()));
+    ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
+
+    // Check version.
+    EXPECT_EQ(kCurrentTestedVersionNumber, VersionFromConnection(&connection));
+
+    // Check that the AUTOFILL metadata is still there.
+    sql::Statement s1(connection.GetUniqueStatement(
+        "SELECT model_type, storage_key, value FROM autofill_sync_metadata"));
+    ASSERT_TRUE(s1.Step());
+    EXPECT_EQ(syncer::ModelTypeToHistogramInt(syncer::AUTOFILL),
+              s1.ColumnInt(0));
+    EXPECT_EQ("storage_key1", s1.ColumnString(1));
+    EXPECT_EQ("blob1", s1.ColumnString(2));
+    ASSERT_TRUE(s1.Step());
+    EXPECT_EQ(syncer::ModelTypeToHistogramInt(syncer::AUTOFILL),
+              s1.ColumnInt(0));
+    EXPECT_EQ("storage_key2", s1.ColumnString(1));
+    EXPECT_EQ("blob2", s1.ColumnString(2));
+
+    // Check that the AUTOFILL model_type_state is still there.
+    sql::Statement s2(connection.GetUniqueStatement(
+        "SELECT model_type, value FROM autofill_model_type_state"));
+    ASSERT_TRUE(s2.Step());
+    EXPECT_EQ(syncer::ModelTypeToHistogramInt(syncer::AUTOFILL),
+              s2.ColumnInt(0));
+    EXPECT_EQ("state", s2.ColumnString(1));
+  }
+}
+
+TEST_F(WebDatabaseMigrationTest, MigrateVersion78ToCurrent) {
+  ASSERT_NO_FATAL_FAILURE(LoadDatabase(FILE_PATH_LITERAL("version_78.sql")));
+
+  {
+    sql::Database connection;
+    ASSERT_TRUE(connection.Open(GetDatabasePath()));
+
+    ASSERT_TRUE(connection.DoesTableExist("ie7_logins"));
+    ASSERT_TRUE(connection.DoesTableExist("logins"));
+  }
+
+  DoMigration();
+
+  {
+    sql::Database connection;
+    ASSERT_TRUE(connection.Open(GetDatabasePath()));
+
+    ASSERT_FALSE(connection.DoesTableExist("ie7_logins"));
+    ASSERT_FALSE(connection.DoesTableExist("logins"));
+  }
+}
+
+// Tests adding "is_client_validity_states_updated" column for the
+// "autofill_profiles" table.
+TEST_F(WebDatabaseMigrationTest, MigrateVersion79ToCurrent) {
+  ASSERT_NO_FATAL_FAILURE(LoadDatabase(FILE_PATH_LITERAL("version_79.sql")));
+
+  // Verify pre-conditions.
+  {
+    sql::Database connection;
+    ASSERT_TRUE(connection.Open(GetDatabasePath()));
+    ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
+    sql::MetaTable meta_table;
+    ASSERT_TRUE(meta_table.Init(&connection, 79, 79));
+    EXPECT_FALSE(connection.DoesColumnExist(
+        "autofill_profiles", "is_client_validity_states_updated"));
+  }
+  DoMigration();
+  // Verify post-conditions.
+  {
+    sql::Database connection;
+    ASSERT_TRUE(connection.Open(GetDatabasePath()));
+    ASSERT_TRUE(sql::MetaTable::DoesTableExist(&connection));
+    // Check version.
+    EXPECT_EQ(kCurrentTestedVersionNumber, VersionFromConnection(&connection));
+    EXPECT_TRUE(connection.DoesColumnExist(
+        "autofill_profiles", "is_client_validity_states_updated"));
+    // Data should have been preserved. Validity
+    // is_client_validity_states_updated should have been set to false.
+    sql::Statement s_profiles(connection.GetUniqueStatement(
+        "SELECT guid, company_name, street_address, dependent_locality,"
+        " city, state, zipcode, sorting_code, country_code, date_modified,"
+        " origin, language_code, validity_bitfield, "
+        " is_client_validity_states_updated "
+        " FROM autofill_profiles"));
+    ASSERT_TRUE(s_profiles.Step());
+    EXPECT_EQ("00000000-0000-0000-0000-000000000001",
+              s_profiles.ColumnString(0));
+    EXPECT_EQ(ASCIIToUTF16("Google Inc"), s_profiles.ColumnString16(1));
+    EXPECT_EQ(ASCIIToUTF16("340 Main St"), s_profiles.ColumnString16(2));
+    EXPECT_EQ(base::string16(), s_profiles.ColumnString16(3));
+    EXPECT_EQ(ASCIIToUTF16("Los Angeles"), s_profiles.ColumnString16(4));
+    EXPECT_EQ(ASCIIToUTF16("CA"), s_profiles.ColumnString16(5));
+    EXPECT_EQ(ASCIIToUTF16("90291"), s_profiles.ColumnString16(6));
+    EXPECT_EQ(base::string16(), s_profiles.ColumnString16(7));
+    EXPECT_EQ(ASCIIToUTF16("US"), s_profiles.ColumnString16(8));
+    EXPECT_EQ(1395948829, s_profiles.ColumnInt(9));
+    EXPECT_EQ(ASCIIToUTF16(autofill::kSettingsOrigin),
+              s_profiles.ColumnString16(10));
+    EXPECT_EQ("en", s_profiles.ColumnString(11));
+    EXPECT_EQ(1365, s_profiles.ColumnInt(12));
+    // The new is_client_validity_states_updated should have the default value
+    // of FALSE.
+    EXPECT_FALSE(s_profiles.ColumnBool(13));
+
+    // No more entries expected.
+    ASSERT_FALSE(s_profiles.Step());
   }
 }

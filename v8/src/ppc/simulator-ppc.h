@@ -156,9 +156,7 @@ class Simulator : public SimulatorBase {
   void set_pc(intptr_t value);
   intptr_t get_pc() const;
 
-  Address get_sp() const {
-    return reinterpret_cast<Address>(static_cast<intptr_t>(get_register(sp)));
-  }
+  Address get_sp() const { return static_cast<Address>(get_register(sp)); }
 
   // Accessor to the internal simulator stack area.
   uintptr_t StackLimit(uintptr_t c_limit) const;
@@ -167,14 +165,14 @@ class Simulator : public SimulatorBase {
   void Execute();
 
   template <typename Return, typename... Args>
-  Return Call(byte* entry, Args... args) {
+  Return Call(Address entry, Args... args) {
     return VariadicCall<Return>(this, &Simulator::CallImpl, entry, args...);
   }
 
   // Alternative: call a 2-argument double function.
-  void CallFP(byte* entry, double d0, double d1);
-  int32_t CallFPReturnsInt(byte* entry, double d0, double d1);
-  double CallFPReturnsDouble(byte* entry, double d0, double d1);
+  void CallFP(Address entry, double d0, double d1);
+  int32_t CallFPReturnsInt(Address entry, double d0, double d1);
+  double CallFPReturnsDouble(Address entry, double d0, double d1);
 
   // Push an address onto the JS stack.
   uintptr_t PushAddress(uintptr_t address);
@@ -210,7 +208,8 @@ class Simulator : public SimulatorBase {
     end_sim_pc = -2
   };
 
-  intptr_t CallImpl(byte* entry, int argument_count, const intptr_t* arguments);
+  intptr_t CallImpl(Address entry, int argument_count,
+                    const intptr_t* arguments);
 
   enum BCType { BC_OFFSET, BC_LINK_REG, BC_CTR_REG };
 
@@ -266,6 +265,8 @@ class Simulator : public SimulatorBase {
 
   intptr_t* ReadDW(intptr_t addr);
   void WriteDW(intptr_t addr, int64_t value);
+  inline int WriteExDW(intptr_t addr, uint64_t value, Instruction* instr);
+  inline uint64_t ReadExDWU(intptr_t addr, Instruction* instr);
 
   void Trace(Instruction* instr);
   void SetCR0(intptr_t result, bool setSO = false);
@@ -304,7 +305,7 @@ class Simulator : public SimulatorBase {
   void SetFpResult(const double& result);
   void TrashCallerSaveRegisters();
 
-  void CallInternal(byte* entry);
+  void CallInternal(Address entry);
 
   // Architecture state.
   // Saturating instructions require a Q flag to indicate saturation.

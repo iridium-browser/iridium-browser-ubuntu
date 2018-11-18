@@ -9,12 +9,15 @@
 #include "base/ios/ios_util.h"
 #include "ios/chrome/browser/ui/animation_util.h"
 #import "ios/chrome/browser/ui/omnibox/image_retriever.h"
-#include "ios/chrome/browser/ui/omnibox/omnibox_util.h"
+#import "ios/chrome/browser/ui/omnibox/omnibox_util.h"
 #import "ios/chrome/browser/ui/omnibox/popup/omnibox_popup_row.h"
+#import "ios/chrome/browser/ui/omnibox/popup/self_sizing_table_view.h"
 #import "ios/chrome/browser/ui/omnibox/truncating_attributed_label.h"
 #include "ios/chrome/browser/ui/rtl_geometry.h"
+#import "ios/chrome/browser/ui/toolbar/buttons/toolbar_configuration.h"
 #include "ios/chrome/browser/ui/ui_util.h"
 #import "ios/chrome/browser/ui/uikit_ui_util.h"
+#include "ios/chrome/common/ui_util/constraints_ui_util.h"
 #include "ios/chrome/grit/ios_theme_resources.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -24,6 +27,7 @@
 namespace {
 const int kRowCount = 6;
 const CGFloat kRowHeight = 48.0;
+const CGFloat kShortcutsRowHeight = 100;
 const CGFloat kAnswerRowHeight = 64.0;
 const CGFloat kTopAndBottomPadding = 8.0;
 UIColor* BackgroundColorTablet() {
@@ -62,6 +66,17 @@ UIColor* BackgroundColorIncognito() {
 // tapping and holding on them or by using arrow keys on a hardware keyboard.
 @property(nonatomic, strong) NSIndexPath* highlightedIndexPath;
 
+@property(nonatomic, strong) UITableView* tableView;
+
+// Flag that enables forwarding scroll events to the delegate. Disabled while
+// updating the cells to avoid defocusing the omnibox when the omnibox popup
+// changes size and table view issues a scroll event.
+@property(nonatomic, assign) BOOL forwardsScrollEvents;
+
+// The cell with shortcuts to display when no results are available (only if
+// this is enabled with |shortcutsEnabled|). Lazily instantiated.
+@property(nonatomic, strong) UITableViewCell* shortcutsCell;
+
 @end
 
 @implementation OmniboxPopupViewController
@@ -70,12 +85,13 @@ UIColor* BackgroundColorIncognito() {
 @synthesize imageRetriever = _imageRetriever;
 @synthesize highlightedIndexPath = _highlightedIndexPath;
 @synthesize tableView = _tableView;
-
+@synthesize forwardsScrollEvents = _forwardsScrollEvents;
 #pragma mark -
 #pragma mark Initialization
 
 - (instancetype)init {
   if (self = [super initWithNibName:nil bundle:nil]) {
+    _forwardsScrollEvents = YES;
     if (IsIPadIdiom()) {
       // The iPad keyboard can cover some of the rows of the scroll view. The
       // scroll view's content inset may need to be updated when the keyboard is
@@ -96,8 +112,9 @@ UIColor* BackgroundColorIncognito() {
 }
 
 - (void)loadView {
-  self.tableView = [[UITableView alloc] initWithFrame:CGRectZero
-                                                style:UITableViewStylePlain];
+  self.tableView =
+      [[SelfSizingTableView alloc] initWithFrame:CGRectZero
+                                           style:UITableViewStylePlain];
   self.tableView.delegate = self;
   self.tableView.dataSource = self;
   self.view = self.tableView;
@@ -123,6 +140,7 @@ UIColor* BackgroundColorIncognito() {
     self.view.backgroundColor =
         IsIPadIdiom() ? BackgroundColorTablet() : BackgroundColorPhone();
   }
+
   [self.view setAutoresizingMask:(UIViewAutoresizingFlexibleWidth |
                                   UIViewAutoresizingFlexibleHeight)];
 
@@ -164,7 +182,32 @@ UIColor* BackgroundColorIncognito() {
 }
 
 - (void)traitCollectionDidChange:(UITraitCollection*)previousTraitCollection {
+  [super traitCollectionDidChange:previousTraitCollection];
   [self layoutRows];
+
+  if (!IsUIRefreshPhase1Enabled()) {
+    return;
+  }
+
+  ToolbarConfiguration* configuration = [[ToolbarConfiguration alloc]
+      initWithStyle:self.incognito ? INCOGNITO : NORMAL];
+
+  if (IsRegularXRegularSizeClass(self)) {
+    self.view.backgroundColor = configuration.backgroundColor;
+  } else {
+    self.view.backgroundColor = [UIColor clearColor];
+  }
+}
+
+- (void)viewWillTransitionToSize:(CGSize)size
+       withTransitionCoordinator:
+           (id<UIViewControllerTransitionCoordinator>)coordinator {
+  [super viewWillTransitionToSize:size withTransitionCoordinator:coordinator];
+  [coordinator animateAlongsideTransition:^(
+                   id<UIViewControllerTransitionCoordinatorContext> context) {
+    [self layoutRows];
+  }
+                               completion:nil];
 }
 
 #pragma mark - Properties accessors
@@ -174,10 +217,41 @@ UIColor* BackgroundColorIncognito() {
   _incognito = incognito;
 }
 
+- (void)setShortcutsEnabled:(BOOL)shortcutsEnabled {
+  if (shortcutsEnabled == _shortcutsEnabled) {
+    return;
+  }
+
+  DCHECK(!shortcutsEnabled || self.shortcutsViewController);
+
+  _shortcutsEnabled = shortcutsEnabled;
+  [self.tableView reloadData];
+}
+
+- (UITableViewCell*)shortcutsCell {
+  if (_shortcutsCell) {
+    return _shortcutsCell;
+  }
+
+  DCHECK(self.shortcutsEnabled);
+  DCHECK(self.shortcutsViewController);
+
+  UITableViewCell* cell = [[UITableViewCell alloc] init];
+  [self.shortcutsViewController willMoveToParentViewController:self];
+  [self addChildViewController:self.shortcutsViewController];
+  [cell.contentView addSubview:self.shortcutsViewController.view];
+  self.shortcutsViewController.view.translatesAutoresizingMaskIntoConstraints =
+      NO;
+  AddSameConstraints(self.shortcutsViewController.view, cell.contentView);
+  [self.shortcutsViewController didMoveToParentViewController:self];
+  return cell;
+}
+
 #pragma mark - AutocompleteResultConsumer
 
 - (void)updateMatches:(NSArray<id<AutocompleteSuggestion>>*)result
         withAnimation:(BOOL)animation {
+  self.forwardsScrollEvents = NO;
   // Reset highlight state.
   if (self.highlightedIndexPath) {
     [self unhighlightRowAtIndexPath:self.highlightedIndexPath];
@@ -191,6 +265,7 @@ UIColor* BackgroundColorIncognito() {
   if (animation && size > 0) {
     [self fadeInRows];
   }
+  self.forwardsScrollEvents = YES;
 }
 
 #pragma mark -
@@ -198,8 +273,13 @@ UIColor* BackgroundColorIncognito() {
 
 - (void)updateRow:(OmniboxPopupRow*)row
         withMatch:(id<AutocompleteSuggestion>)match {
-  const CGFloat kTextCellLeadingPadding =
-      IsIPadIdiom() ? (!IsCompactTablet() ? 192 : 100) : 16;
+  CGFloat kTextCellLeadingPadding =
+      [self showsLeadingIcons] ? ([self useRegularWidthOffset] ? 192 : 100)
+                               : 16;
+  if (IsUIRefreshPhase1Enabled()) {
+    kTextCellLeadingPadding = [self showsLeadingIcons] ? 221 : 24;
+  }
+
   const CGFloat kTextCellTopPadding = 6;
   const CGFloat kDetailCellTopPadding = 26;
   const CGFloat kTextLabelHeight = 24;
@@ -305,12 +385,19 @@ UIColor* BackgroundColorIncognito() {
 
   // The leading image (e.g. magnifying glass, star, clock) is only shown on
   // iPad.
-  if (IsIPadIdiom()) {
-    [row updateLeadingImage:match.imageID];
+  if ([self showsLeadingIcons]) {
+    UIImage* image = nil;
+    if (IsUIRefreshPhase1Enabled()) {
+      image = match.suggestionTypeIcon;
+    } else {
+      image = NativeImage(match.imageID);
+    }
+    DCHECK(image);
+    [row updateLeadingImage:image];
   }
 
-  // Show append button for search history/search suggestions/Physical Web as
-  // the right control element (aka an accessory element of a table view cell).
+  // Show append button for search history/search suggestions as the right
+  // control element (aka an accessory element of a table view cell).
   row.appendButton.hidden = !match.isAppendable;
   [row.appendButton cancelTrackingWithEvent:nil];
 
@@ -334,7 +421,8 @@ UIColor* BackgroundColorIncognito() {
   if (LTRTextInRTLLayout) {
     // This is really a left padding, not a leading padding.
     const CGFloat kLTRTextInRTLLayoutLeftPadding =
-        IsIPadIdiom() ? (!IsCompactTablet() ? 176 : 94) : 94;
+        [self showsLeadingIcons] ? ([self useRegularWidthOffset] ? 176 : 94)
+                                 : 94;
     CGRect frame = textLabel.frame;
     frame.size.width -= kLTRTextInRTLLayoutLeftPadding - frame.origin.x;
     frame.origin.x = kLTRTextInRTLLayoutLeftPadding;
@@ -458,7 +546,8 @@ UIColor* BackgroundColorIncognito() {
       return;
   }
 
-  [self.delegate autocompleteResultConsumerDidScroll:self];
+  if (self.forwardsScrollEvents)
+    [self.delegate autocompleteResultConsumerDidScroll:self];
   for (OmniboxPopupRow* row in _rows) {
     row.highlighted = NO;
   }
@@ -555,6 +644,11 @@ UIColor* BackgroundColorIncognito() {
 
 - (CGFloat)tableView:(UITableView*)tableView
     heightForRowAtIndexPath:(NSIndexPath*)indexPath {
+  if (self.shortcutsEnabled && indexPath.row == 0 &&
+      _currentResult.count == 0) {
+    return kShortcutsRowHeight;
+  }
+
   DCHECK_EQ(0U, (NSUInteger)indexPath.section);
   DCHECK_LT((NSUInteger)indexPath.row, _currentResult.count);
   return ((OmniboxPopupRow*)(_rows[indexPath.row])).rowHeight;
@@ -567,6 +661,9 @@ UIColor* BackgroundColorIncognito() {
 - (NSInteger)tableView:(UITableView*)tableView
     numberOfRowsInSection:(NSInteger)section {
   DCHECK_EQ(0, section);
+  if (self.shortcutsEnabled && _currentResult.count == 0) {
+    return 1;
+  }
   return _currentResult.count;
 }
 
@@ -574,6 +671,12 @@ UIColor* BackgroundColorIncognito() {
 - (UITableViewCell*)tableView:(UITableView*)tableView
         cellForRowAtIndexPath:(NSIndexPath*)indexPath {
   DCHECK_EQ(0U, (NSUInteger)indexPath.section);
+
+  if (self.shortcutsEnabled && indexPath.row == 0 &&
+      _currentResult.count == 0) {
+    return self.shortcutsCell;
+  }
+
   DCHECK_LT((NSUInteger)indexPath.row, _currentResult.count);
   return _rows[indexPath.row];
 }
@@ -581,6 +684,12 @@ UIColor* BackgroundColorIncognito() {
 - (BOOL)tableView:(UITableView*)tableView
     canEditRowAtIndexPath:(NSIndexPath*)indexPath {
   DCHECK_EQ(0U, (NSUInteger)indexPath.section);
+
+  if (self.shortcutsEnabled && indexPath.row == 0 &&
+      _currentResult.count == 0) {
+    return NO;
+  }
+
   // iOS doesn't check -numberOfRowsInSection before checking
   // -canEditRowAtIndexPath in a reload call. If |indexPath.row| is too large,
   // simple return |NO|.
@@ -602,6 +711,20 @@ UIColor* BackgroundColorIncognito() {
     [self.delegate autocompleteResultConsumer:self
                       didSelectRowForDeletion:indexPath.row];
   }
+}
+
+#pragma mark - private
+
+- (BOOL)showsLeadingIcons {
+  if (IsUIRefreshPhase1Enabled()) {
+    return IsRegularXRegularSizeClass();
+  } else {
+    return IsIPadIdiom();
+  }
+}
+
+- (BOOL)useRegularWidthOffset {
+  return [self showsLeadingIcons] && !IsCompactWidth();
 }
 
 @end

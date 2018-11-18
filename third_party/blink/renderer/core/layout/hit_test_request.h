@@ -28,6 +28,8 @@
 
 namespace blink {
 
+class LayoutObject;
+
 class HitTestRequest {
   DISALLOW_NEW();
 
@@ -50,12 +52,15 @@ class HitTestRequest {
     // testing after a hit has been found.
     kPenetratingList = 1 << 12,
     kAvoidCache = 1 << 13,
+    kIgnoreZeroOpacityObjects = 1 << 14,
+    kHitTestVisualOverflow = 1 << 15,
   };
 
   typedef unsigned HitTestRequestType;
 
-  HitTestRequest(HitTestRequestType request_type)
-      : request_type_(request_type) {
+  HitTestRequest(HitTestRequestType request_type,
+                 const LayoutObject* stop_node = nullptr)
+      : request_type_(request_type), stop_node_(stop_node) {
     // Penetrating lists should also be list-based.
     DCHECK(!(request_type & kPenetratingList) || (request_type & kListBased));
   }
@@ -84,6 +89,7 @@ class HitTestRequest {
   bool TouchMove() const { return Move() && TouchEvent(); }
 
   HitTestRequestType GetType() const { return request_type_; }
+  const LayoutObject* GetStopNode() const { return stop_node_; }
 
   // The Cacheability bits don't affect hit testing computation.
   // TODO(dtapuska): These bits really shouldn't be fields on the HitTestRequest
@@ -93,11 +99,14 @@ class HitTestRequest {
       kReadOnly | kActive | kMove | kRelease | kTouchEvent;
   bool EqualForCacheability(const HitTestRequest& value) const {
     return (request_type_ | kCacheabilityBits) ==
-           (value.request_type_ | kCacheabilityBits);
+               (value.request_type_ | kCacheabilityBits) &&
+           stop_node_ == value.stop_node_;
   }
 
  private:
   HitTestRequestType request_type_;
+  // If non-null, do not hit test the children of this object.
+  const LayoutObject* stop_node_;
 };
 
 }  // namespace blink

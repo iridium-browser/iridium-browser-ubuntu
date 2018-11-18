@@ -55,7 +55,7 @@ void CredentialManagerPasswordFormManager::ProcessMatches(
   // Mark the form as "preferred", as we've been told by the API that this is
   // indeed the credential set that the user used to sign into the site.
   saved_form_->preferred = true;
-  ProvisionallySave(*saved_form_, IGNORE_OTHER_POSSIBLE_USERNAMES);
+  ProvisionallySave(*saved_form_);
 
   // Notify the delegate. This might result in deleting |this|, while
   // ProcessMatches is being called from FormFetcherImpl, owned by |this|. If
@@ -63,8 +63,8 @@ void CredentialManagerPasswordFormManager::ProcessMatches(
   // used after free. Therefore the call is posted to a separate task.
   base::SequencedTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
-      base::Bind(&CredentialManagerPasswordFormManager::NotifyDelegate,
-                 weak_factory_.GetWeakPtr()));
+      base::BindOnce(&CredentialManagerPasswordFormManager::NotifyDelegate,
+                     weak_factory_.GetWeakPtr()));
 }
 
 metrics_util::CredentialSourceType

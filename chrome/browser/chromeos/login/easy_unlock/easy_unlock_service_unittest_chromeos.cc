@@ -11,8 +11,10 @@
 #include <string>
 #include <utility>
 
+#include "base/bind.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/no_destructor.h"
 #include "base/run_loop.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/login/easy_unlock/easy_unlock_app_manager.h"
@@ -22,6 +24,7 @@
 #include "chrome/browser/chromeos/login/users/mock_user_manager.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/prefs/browser_prefs.h"
+#include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_browser_process.h"
@@ -29,13 +32,17 @@
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/fake_power_manager_client.h"
 #include "chromeos/dbus/power_manager/suspend.pb.h"
-#include "components/signin/core/account_id/account_id.h"
-#include "components/signin/core/browser/signin_manager_base.h"
+#include "chromeos/services/device_sync/public/cpp/fake_device_sync_client.h"
+#include "chromeos/services/multidevice_setup/public/cpp/fake_multidevice_setup_client.h"
+#include "components/account_id/account_id.h"
+#include "components/signin/core/browser/account_info.h"
 #include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "components/user_manager/scoped_user_manager.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "device/bluetooth/bluetooth_adapter_factory.h"
 #include "device/bluetooth/test/mock_bluetooth_adapter.h"
+#include "services/identity/public/cpp/identity_manager.h"
+#include "services/identity/public/cpp/identity_test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
 using device::MockBluetoothAdapter;
@@ -44,13 +51,12 @@ using testing::AnyNumber;
 using testing::Return;
 
 namespace chromeos {
+
 namespace {
 
-// IDs for fake users used in tests.
+// Emails for fake users used in tests.
 const char kTestUserPrimary[] = "primary_user@nowhere.com";
-const char kPrimaryGaiaId[] = "1111111111";
 const char kTestUserSecondary[] = "secondary_user@nowhere.com";
-const char kSecondaryGaiaId[] = "2222222222";
 
 class MockEasyUnlockNotificationController
     : public EasyUnlockNotificationController {
@@ -63,7 +69,6 @@ class MockEasyUnlockNotificationController
   MOCK_METHOD0(ShowChromebookAddedNotification, void());
   MOCK_METHOD0(ShowPairingChangeNotification, void());
   MOCK_METHOD1(ShowPairingChangeAppliedNotification, void(const std::string&));
-  MOCK_METHOD0(ShowPromotionNotification, void());
 
  private:
   DISALLOW_COPY_AND_ASSIGN(MockEasyUnlockNotificationController);
@@ -182,10 +187,22 @@ class TestAppManagerFactory {
   DISALLOW_COPY_AND_ASSIGN(TestAppManagerFactory);
 };
 
-// Global TestAppManager factory. It should be created and desctructed in
-// EasyUnlockServiceTest::SetUp and EasyUnlockServiceTest::TearDown
+// Global TestAppManager factory. It should be created and destroyed in
+// EasyUnlockServiceTest::SetUp and EasyUnlockServiceTest::TearDown,
 // respectively.
-TestAppManagerFactory* app_manager_factory = NULL;
+TestAppManagerFactory* app_manager_factory = nullptr;
+
+device_sync::FakeDeviceSyncClient* GetDefaultDeviceSyncClient() {
+  static base::NoDestructor<device_sync::FakeDeviceSyncClient> fake_client;
+  return fake_client.get();
+}
+
+multidevice_setup::FakeMultiDeviceSetupClient*
+GetDefaultMultiDeviceSetupClient() {
+  static base::NoDestructor<multidevice_setup::FakeMultiDeviceSetupClient>
+      fake_client;
+  return fake_client.get();
+}
 
 // EasyUnlockService factory function injected into testing profiles.
 // It creates an EasyUnlockService with test AppManager.
@@ -204,13 +221,17 @@ std::unique_ptr<KeyedService> CreateEasyUnlockServiceForTest(
   std::unique_ptr<EasyUnlockServiceRegular> service(
       new EasyUnlockServiceRegular(
           Profile::FromBrowserContext(context),
-          std::make_unique<MockEasyUnlockNotificationController>()));
+          nullptr /* secure_channel_client */,
+          std::make_unique<MockEasyUnlockNotificationController>(),
+          GetDefaultDeviceSyncClient(), GetDefaultMultiDeviceSetupClient()));
   service->Initialize(std::move(app_manager));
   return std::move(service);
 }
 
+}  // namespace
+
 class EasyUnlockServiceTest : public testing::Test {
- public:
+ protected:
   EasyUnlockServiceTest()
       : mock_user_manager_(new testing::NiceMock<MockUserManager>()),
         scoped_user_manager_(base::WrapUnique(mock_user_manager_)),
@@ -242,14 +263,14 @@ class EasyUnlockServiceTest : public testing::Test {
     TestingBrowserProcess::GetGlobal()->SetLocalState(&local_pref_service_);
     RegisterLocalState(local_pref_service_.registry());
 
-    SetUpProfile(&profile_, AccountId::FromUserEmailGaiaId(kTestUserPrimary,
-                                                           kPrimaryGaiaId));
+    profile_ = SetUpProfile(kTestUserPrimary, &profile_gaia_id_);
   }
 
   void TearDown() override {
     TestingBrowserProcess::GetGlobal()->SetLocalState(nullptr);
+
     delete app_manager_factory;
-    app_manager_factory = NULL;
+    app_manager_factory = nullptr;
   }
 
   void SetEasyUnlockAllowedPolicy(bool allowed) {
@@ -287,40 +308,41 @@ class EasyUnlockServiceTest : public testing::Test {
     app_manager->SetReady();
   }
 
-  void SetUpSecondaryProfile() {
-    SetUpProfile(
-        &secondary_profile_,
-        AccountId::FromUserEmailGaiaId(kTestUserSecondary, kSecondaryGaiaId));
-  }
-
- private:
-  // Sets up a test profile with a user id.
-  void SetUpProfile(std::unique_ptr<TestingProfile>* profile,
-                    const AccountId& account_id) {
-    ASSERT_TRUE(profile);
-    ASSERT_FALSE(profile->get());
-
+  // Sets up a test profile using the provided |email|. Will generate a unique
+  // gaia id and output to |gaia_id|. Returns the created TestingProfile.
+  std::unique_ptr<TestingProfile> SetUpProfile(const std::string& email,
+                                               std::string* gaia_id) {
     TestingProfile::Builder builder;
-    builder.AddTestingFactory(EasyUnlockServiceFactory::GetInstance(),
-                              &CreateEasyUnlockServiceForTest);
-    *profile = builder.Build();
+    builder.AddTestingFactory(
+        EasyUnlockServiceFactory::GetInstance(),
+        base::BindRepeating(&CreateEasyUnlockServiceForTest));
+    std::unique_ptr<TestingProfile> profile = builder.Build();
 
-    mock_user_manager_->AddUser(account_id);
-    profile->get()->set_profile_name(account_id.GetUserEmail());
+    AccountInfo account_info = identity::SetPrimaryAccount(
+        SigninManagerFactory::GetForProfile(profile.get()),
+        IdentityManagerFactory::GetForProfile(profile.get()), email);
 
-    SigninManagerBase* signin_manager =
-        SigninManagerFactory::GetForProfile(profile->get());
-    signin_manager->SetAuthenticatedAccountInfo(account_id.GetGaiaId(),
-                                                account_id.GetUserEmail());
+    *gaia_id = account_info.gaia;
+
+    mock_user_manager_->AddUser(
+        AccountId::FromUserEmailGaiaId(email, *gaia_id));
+    profile.get()->set_profile_name(email);
+
+    return profile;
   }
 
- private:
+  void SetUpSecondaryProfile() {
+    secondary_profile_ =
+        SetUpProfile(kTestUserSecondary, &secondary_profile_gaia_id_);
+  }
+
   // Must outlive TestingProfiles.
   content::TestBrowserThreadBundle thread_bundle_;
 
- protected:
   std::unique_ptr<TestingProfile> profile_;
+  std::string profile_gaia_id_;
   std::unique_ptr<TestingProfile> secondary_profile_;
+  std::string secondary_profile_gaia_id_;
   MockUserManager* mock_user_manager_;
 
  private:
@@ -351,7 +373,8 @@ TEST_F(EasyUnlockServiceTest, NoBluetoothNoService) {
       EasyUnlockAppInState(profile_.get(), TestAppManager::STATE_NOT_LOADED));
 }
 
-TEST_F(EasyUnlockServiceTest, DisabledOnSuspend) {
+// TODO(https://crbug.com/893878): Fix disabled test.
+TEST_F(EasyUnlockServiceTest, DISABLED_DisabledOnSuspend) {
   // This should start easy unlock service initialization.
   SetAppManagerReady(profile_.get());
 
@@ -372,7 +395,8 @@ TEST_F(EasyUnlockServiceTest, DisabledOnSuspend) {
       EasyUnlockAppInState(profile_.get(), TestAppManager::STATE_LOADED));
 }
 
-TEST_F(EasyUnlockServiceTest, NotAllowedForSecondaryProfile) {
+// TODO(https://crbug.com/893878): Fix disabled test.
+TEST_F(EasyUnlockServiceTest, DISABLED_NotAllowedForSecondaryProfile) {
   SetAppManagerReady(profile_.get());
 
   EasyUnlockService* primary_service = EasyUnlockService::Get(profile_.get());
@@ -405,14 +429,13 @@ TEST_F(EasyUnlockServiceTest, NotAllowedForEphemeralAccounts) {
 }
 
 TEST_F(EasyUnlockServiceTest, GetAccountId) {
-  EXPECT_EQ(AccountId::FromUserEmailGaiaId(kTestUserPrimary, kPrimaryGaiaId),
+  EXPECT_EQ(AccountId::FromUserEmailGaiaId(kTestUserPrimary, profile_gaia_id_),
             EasyUnlockService::Get(profile_.get())->GetAccountId());
 
   SetUpSecondaryProfile();
-  EXPECT_EQ(
-      AccountId::FromUserEmailGaiaId(kTestUserSecondary, kSecondaryGaiaId),
-      EasyUnlockService::Get(secondary_profile_.get())->GetAccountId());
+  EXPECT_EQ(AccountId::FromUserEmailGaiaId(kTestUserSecondary,
+                                           secondary_profile_gaia_id_),
+            EasyUnlockService::Get(secondary_profile_.get())->GetAccountId());
 }
 
-}  // namespace
 }  // namespace chromeos

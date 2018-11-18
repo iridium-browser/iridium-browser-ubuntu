@@ -108,15 +108,20 @@ Main.Main = class {
     Runtime.experiments.register('applyCustomStylesheet', 'Allow custom UI themes');
     Runtime.experiments.register('blackboxJSFramesOnTimeline', 'Blackbox JavaScript frames on Timeline', true);
     Runtime.experiments.register('colorContrastRatio', 'Color contrast ratio line in color picker', true);
+    Runtime.experiments.register('consoleBelowPrompt', 'Console eager evaluation');
+    Runtime.experiments.register('consoleKeyboardNavigation', 'Console keyboard navigation', true);
     Runtime.experiments.register('emptySourceMapAutoStepping', 'Empty sourcemap auto-stepping');
     Runtime.experiments.register('inputEventsOnTimelineOverview', 'Input events on Timeline overview', true);
     Runtime.experiments.register('nativeHeapProfiler', 'Native memory sampling heap profiler', true);
     Runtime.experiments.register('networkSearch', 'Network search');
     Runtime.experiments.register('oopifInlineDOM', 'OOPIF: inline DOM ', true);
+    Runtime.experiments.register('pinnedExpressions', 'Pinned expressions in Console', true);
     Runtime.experiments.register('protocolMonitor', 'Protocol Monitor');
     Runtime.experiments.register('sourceDiff', 'Source diff');
+    Runtime.experiments.register('sourcesPrettyPrint', 'Automatically pretty print in the Sources Panel');
     Runtime.experiments.register(
         'stepIntoAsync', 'Introduce separate step action, stepInto becomes powerful enough to go inside async call');
+    Runtime.experiments.register('splitInDrawer', 'Split in drawer', true);
     Runtime.experiments.register('terminalInDrawer', 'Terminal in drawer', true);
 
     // Timeline
@@ -125,9 +130,9 @@ Main.Main = class {
     Runtime.experiments.register('timelineInvalidationTracking', 'Timeline: invalidation tracking', true);
     Runtime.experiments.register('timelinePaintTimingMarkers', 'Timeline: paint timing markers', true);
     Runtime.experiments.register('timelineShowAllEvents', 'Timeline: show all events', true);
-    Runtime.experiments.register('timelineShowAllProcesses', 'Timeline: show all processes', true);
     Runtime.experiments.register('timelineTracingJSProfile', 'Timeline: tracing based JS profiler', true);
     Runtime.experiments.register('timelineV8RuntimeCallStats', 'Timeline: V8 Runtime Call Stats on Timeline', true);
+    Runtime.experiments.register('timelineWebGL', 'Timeline: WebGL-based flamechart');
 
     Runtime.experiments.cleanUpStaleExperiments();
 
@@ -138,9 +143,16 @@ Main.Main = class {
         Runtime.experiments.enableForTest('oopifInlineDOM');
       if (testPath.indexOf('network/') !== -1)
         Runtime.experiments.enableForTest('networkSearch');
+      if (testPath.indexOf('console/viewport-testing/') !== -1)
+        Runtime.experiments.enableForTest('consoleKeyboardNavigation');
+      if (testPath.indexOf('console/') !== -1)
+        Runtime.experiments.enableForTest('pinnedExpressions');
     }
 
-    Runtime.experiments.setDefaultExperiments(['colorContrastRatio', 'stepIntoAsync', 'oopifInlineDOM']);
+    Runtime.experiments.setDefaultExperiments([
+      'colorContrastRatio', 'stepIntoAsync', 'oopifInlineDOM', 'consoleBelowPrompt', 'timelineTracingJSProfile',
+      'pinnedExpressions'
+    ]);
   }
 
   /**
@@ -378,18 +390,8 @@ Main.Main = class {
   }
 
   _postDocumentKeyDown(event) {
-    if (event.handled)
-      return;
-
-    if (!UI.Dialog.hasInstance() && UI.inspectorView.currentPanelDeprecated()) {
-      UI.inspectorView.currentPanelDeprecated().handleShortcut(event);
-      if (event.handled) {
-        event.consume(true);
-        return;
-      }
-    }
-
-    UI.shortcutRegistry.handleShortcut(event);
+    if (!event.handled)
+      UI.shortcutRegistry.handleShortcut(event);
   }
 
   /**
@@ -520,7 +522,8 @@ Main.Main.MainMenuItem = class {
           'Placement of DevTools relative to the page. (%s to restore last position)', toggleDockSideShorcuts[0].name);
       dockItemElement.appendChild(titleElement);
       const dockItemToolbar = new UI.Toolbar('', dockItemElement);
-      dockItemToolbar.makeBlueOnHover();
+      if (Host.isMac() && !UI.themeSupport.hasTheme())
+        dockItemToolbar.makeBlueOnHover();
       const undock = new UI.ToolbarToggle(Common.UIString('Undock into separate window'), 'largeicon-undock');
       const bottom = new UI.ToolbarToggle(Common.UIString('Dock to bottom'), 'largeicon-dock-to-bottom');
       const right = new UI.ToolbarToggle(Common.UIString('Dock to right'), 'largeicon-dock-to-right');

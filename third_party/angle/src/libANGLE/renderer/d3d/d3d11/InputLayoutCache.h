@@ -48,7 +48,7 @@ struct PackedAttributeLayout
 
     uint32_t numAttributes;
     uint32_t flags;
-    gl::AttribArray<uint32_t> attributeData;
+    gl::AttribArray<uint64_t> attributeData;
 };
 }  // namespace rx
 
@@ -71,6 +71,7 @@ class Program;
 
 namespace rx
 {
+class Context11;
 struct TranslatedAttribute;
 struct TranslatedIndexData;
 struct SourceIndexData;
@@ -88,20 +89,21 @@ class InputLayoutCache : angle::NonCopyable
     // Useful for testing
     void setCacheSize(size_t newCacheSize);
 
-    gl::Error getInputLayout(Renderer11 *renderer,
-                             const gl::State &state,
-                             const std::vector<const TranslatedAttribute *> &currentAttributes,
-                             const AttribIndexArray &sortedSemanticIndices,
-                             const gl::DrawCallParams &drawCallParams,
-                             const d3d11::InputLayout **inputLayoutOut);
+    angle::Result getInputLayout(Context11 *context,
+                                 const gl::State &state,
+                                 const std::vector<const TranslatedAttribute *> &currentAttributes,
+                                 const AttribIndexArray &sortedSemanticIndices,
+                                 const gl::DrawCallParams &drawCallParams,
+                                 const d3d11::InputLayout **inputLayoutOut);
 
   private:
-    gl::Error createInputLayout(Renderer11 *renderer,
-                                const AttribIndexArray &sortedSemanticIndices,
-                                const std::vector<const TranslatedAttribute *> &currentAttributes,
-                                gl::Program *program,
-                                const gl::DrawCallParams &drawCallParams,
-                                d3d11::InputLayout *inputLayoutOut);
+    angle::Result createInputLayout(
+        Context11 *context11,
+        const AttribIndexArray &sortedSemanticIndices,
+        const std::vector<const TranslatedAttribute *> &currentAttributes,
+        gl::Program *program,
+        const gl::DrawCallParams &drawCallParams,
+        d3d11::InputLayout *inputLayoutOut);
 
     // Starting cache size.
     static constexpr size_t kDefaultCacheSize = 1024;

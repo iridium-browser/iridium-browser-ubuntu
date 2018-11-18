@@ -6,7 +6,6 @@
 
 #include <memory>
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/dom/node.h"
@@ -15,6 +14,7 @@
 #include "third_party/blink/renderer/core/html/html_element.h"
 #include "third_party/blink/renderer/core/html/html_slot_element.h"
 #include "third_party/blink/renderer/core/testing/dummy_page_holder.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/geometry/int_size.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
@@ -65,7 +65,7 @@ void SlotScopedTraversalTest::AttachOpenShadowRoot(
   ShadowRoot& shadow_root =
       shadow_host.AttachShadowRootInternal(ShadowRootType::kOpen);
   shadow_root.SetInnerHTMLFromString(String::FromUTF8(shadow_inner_html));
-  GetDocument().body()->UpdateDistribution();
+  GetDocument().body()->UpdateDistributionForFlatTreeTraversal();
 }
 
 TEST_F(SlotScopedTraversalTest, emptySlot) {
@@ -83,12 +83,12 @@ TEST_F(SlotScopedTraversalTest, emptySlot) {
 
 void SlotScopedTraversalTest::TestExpectedSequence(
     const Vector<Element*>& list) {
-  for (size_t i = 0; i < list.size(); ++i) {
+  for (wtf_size_t i = 0; i < list.size(); ++i) {
     const Element* expected = i == list.size() - 1 ? nullptr : list[i + 1];
     EXPECT_EQ(expected, SlotScopedTraversal::Next(*list[i]));
   }
 
-  for (size_t i = list.size(); i > 0; --i) {
+  for (wtf_size_t i = list.size(); i > 0; --i) {
     const Element* expected = i == 1 ? nullptr : list[i - 2];
     EXPECT_EQ(expected, SlotScopedTraversal::Previous(*list[i - 1]));
   }

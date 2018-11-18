@@ -15,7 +15,9 @@
 #include "third_party/blink/renderer/core/layout/text_run_constructor.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/page/page.h"
+#include "third_party/blink/renderer/core/paint/image_element_timing.h"
 #include "third_party/blink/renderer/core/paint/paint_info.h"
+#include "third_party/blink/renderer/core/paint/scoped_paint_state.h"
 #include "third_party/blink/renderer/platform/geometry/layout_point.h"
 #include "third_party/blink/renderer/platform/graphics/paint/display_item_cache_skipper.h"
 #include "third_party/blink/renderer/platform/graphics/paint/drawing_recorder.h"
@@ -24,16 +26,14 @@
 
 namespace blink {
 
-void ImagePainter::Paint(const PaintInfo& paint_info,
-                         const LayoutPoint& paint_offset) {
-  layout_image_.LayoutReplaced::Paint(paint_info, paint_offset);
+void ImagePainter::Paint(const PaintInfo& paint_info) {
+  layout_image_.LayoutReplaced::Paint(paint_info);
 
   if (paint_info.phase == PaintPhase::kOutline)
-    PaintAreaElementFocusRing(paint_info, paint_offset);
+    PaintAreaElementFocusRing(paint_info);
 }
 
-void ImagePainter::PaintAreaElementFocusRing(const PaintInfo& paint_info,
-                                             const LayoutPoint& paint_offset) {
+void ImagePainter::PaintAreaElementFocusRing(const PaintInfo& paint_info) {
   Document& document = layout_image_.GetDocument();
 
   if (paint_info.IsPrinting() ||
@@ -62,10 +62,9 @@ void ImagePainter::PaintAreaElementFocusRing(const PaintInfo& paint_info,
   if (path.IsEmpty())
     return;
 
-  LayoutPoint adjusted_paint_offset = paint_offset;
-  adjusted_paint_offset.MoveBy(layout_image_.Location());
-  path.Translate(
-      FloatSize(adjusted_paint_offset.X(), adjusted_paint_offset.Y()));
+  ScopedPaintState paint_state(layout_image_, paint_info);
+  auto paint_offset = paint_state.PaintOffset();
+  path.Translate(FloatSize(paint_offset.X(), paint_offset.Y()));
 
   if (DrawingRecorder::UseCachedDrawingIfPossible(
           paint_info.context, layout_image_, DisplayItem::kImageAreaFocusRing))
@@ -78,8 +77,8 @@ void ImagePainter::PaintAreaElementFocusRing(const PaintInfo& paint_info,
   // https://crbug.com/251206
 
   paint_info.context.Save();
-  LayoutRect focus_rect = layout_image_.ContentBoxRect();
-  focus_rect.MoveBy(adjusted_paint_offset);
+  LayoutRect focus_rect = layout_image_.PhysicalContentBoxRect();
+  focus_rect.MoveBy(paint_offset);
   paint_info.context.Clip(PixelSnappedIntRect(focus_rect));
   paint_info.context.DrawFocusRing(
       path, area_element_style.GetOutlineStrokeWidthForFocusRing(),
@@ -111,14 +110,14 @@ void ImagePainter::PaintReplaced(const PaintInfo& paint_info,
 
   // Disable cache in under-invalidation checking mode for animated image
   // because it may change before it's actually invalidated.
-  Optional<DisplayItemCacheSkipper> cache_skipper;
+  base::Optional<DisplayItemCacheSkipper> cache_skipper;
   if (RuntimeEnabledFeatures::PaintUnderInvalidationCheckingEnabled() &&
       layout_image_.ImageResource() &&
       layout_image_.ImageResource()->MaybeAnimated())
     cache_skipper.emplace(context);
 
-  LayoutRect content_rect(paint_offset + layout_image_.ContentBoxOffset(),
-                          content_size);
+  LayoutRect content_rect(
+      paint_offset + layout_image_.PhysicalContentBoxOffset(), content_size);
 
   if (!has_image) {
     // Draw an outline rect where the image should be.
@@ -135,12 +134,15 @@ void ImagePainter::PaintReplaced(const PaintInfo& paint_info,
   paint_rect.MoveBy(paint_offset);
 
   DrawingRecorder recorder(context, layout_image_, paint_info.phase);
-  PaintIntoRect(context, paint_rect, content_rect);
+  DCHECK(paint_info.PaintContainer());
+  PaintIntoRect(context, paint_rect, content_rect,
+                paint_info.PaintContainer()->Layer());
 }
 
 void ImagePainter::PaintIntoRect(GraphicsContext& context,
                                  const LayoutRect& dest_rect,
-                                 const LayoutRect& content_rect) {
+                                 const LayoutRect& content_rect,
+                                 const PaintLayer* painting_layer) {
   if (!layout_image_.ImageResource()->HasImage() ||
       layout_image_.ImageResource()->ErrorOccurred())
     return;  // FIXME: should we just ASSERT these conditions? (audit all
@@ -155,7 +157,7 @@ void ImagePainter::PaintIntoRect(GraphicsContext& context,
   if (!image || image->IsNull())
     return;
 
-  FloatRect src_rect = image->Rect();
+  FloatRect src_rect = FloatRect(image->Rect());
   // If the content rect requires clipping, adjust |srcRect| and
   // |pixelSnappedDestRect| over using a clip.
   if (!content_rect.Contains(dest_rect)) {
@@ -163,8 +165,8 @@ void ImagePainter::PaintIntoRect(GraphicsContext& context,
     pixel_snapped_content_rect.Intersect(pixel_snapped_dest_rect);
     if (pixel_snapped_content_rect.IsEmpty())
       return;
-    src_rect =
-        MapRect(pixel_snapped_content_rect, pixel_snapped_dest_rect, src_rect);
+    src_rect = MapRect(FloatRect(pixel_snapped_content_rect),
+                       FloatRect(pixel_snapped_dest_rect), src_rect);
     pixel_snapped_dest_rect = pixel_snapped_content_rect;
   }
 
@@ -183,9 +185,16 @@ void ImagePainter::PaintIntoRect(GraphicsContext& context,
                 image->paint_image_id())
           : Image::kUnspecifiedDecode;
   context.DrawImage(
-      image.get(), decode_mode, pixel_snapped_dest_rect, &src_rect,
+      image.get(), decode_mode, FloatRect(pixel_snapped_dest_rect), &src_rect,
       SkBlendMode::kSrcOver,
       LayoutObject::ShouldRespectImageOrientation(&layout_image_));
+  if (RuntimeEnabledFeatures::ElementTimingEnabled() &&
+      IsHTMLImageElement(node) && !context.ContextDisabled()) {
+    LocalDOMWindow* window = layout_image_.GetDocument().domWindow();
+    DCHECK(window);
+    ImageElementTiming::From(*window).NotifyImagePainted(
+        ToHTMLImageElement(node), &layout_image_, painting_layer);
+  }
 }
 
 }  // namespace blink

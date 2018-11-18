@@ -101,7 +101,7 @@ bool PublicSessionPermissionHelper::HandlePermissionRequestImpl(
     content::WebContents* web_contents,
     const RequestResolvedCallback& callback,
     const PromptFactory& prompt_factory) {
-  DCHECK(profiles::IsPublicSession());
+  DCHECK(profiles::ArePublicSessionRestrictionsEnabled());
   if (!PermissionCheckNeeded(&extension)) {
     if (!callback.is_null())
       callback.Run(requested_permissions);
@@ -150,8 +150,7 @@ bool PublicSessionPermissionHelper::HandlePermissionRequestImpl(
     messages.push_back(PermissionMessage(
         l10n_util::GetStringUTF16(IDS_EXTENSION_PROMPT_WARNING_CURRENT_HOST),
         extensions::PermissionIDSet()));
-    permissions_prompt->AddPermissions(
-        messages, ExtensionInstallPrompt::REGULAR_PERMISSIONS);
+    permissions_prompt->AddPermissions(messages);
   }
 
   // This Unretained is safe because the lifetime of this object is until
@@ -173,7 +172,7 @@ bool PublicSessionPermissionHelper::HandlePermissionRequestImpl(
 bool PublicSessionPermissionHelper::PermissionAllowedImpl(
     const Extension* extension,
     APIPermission::ID permission) {
-  DCHECK(profiles::IsPublicSession());
+  DCHECK(profiles::ArePublicSessionRestrictionsEnabled());
   return !PermissionCheckNeeded(extension) ||
          allowed_permission_set_.ContainsID(permission);
 }

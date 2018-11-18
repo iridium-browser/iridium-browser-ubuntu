@@ -16,65 +16,76 @@
 #include <memory>
 #include <vector>
 
-#include "api/optional.h"
+#include "absl/types/optional.h"
+#include "api/transport/network_control.h"
 #include "logging/rtc_event_log/rtc_event_log.h"
 #include "modules/bitrate_controller/send_side_bandwidth_estimation.h"
 #include "modules/congestion_controller/goog_cc/acknowledged_bitrate_estimator.h"
 #include "modules/congestion_controller/goog_cc/alr_detector.h"
+#include "modules/congestion_controller/goog_cc/congestion_window_pushback_controller.h"
 #include "modules/congestion_controller/goog_cc/delay_based_bwe.h"
 #include "modules/congestion_controller/goog_cc/probe_controller.h"
-#include "modules/congestion_controller/network_control/include/network_control.h"
 #include "rtc_base/constructormagic.h"
 
 namespace webrtc {
-namespace webrtc_cc {
+
 
 class GoogCcNetworkController : public NetworkControllerInterface {
  public:
   GoogCcNetworkController(RtcEventLog* event_log,
-                          NetworkControllerObserver* observer,
-                          NetworkControllerConfig config);
+                          NetworkControllerConfig config,
+                          bool feedback_only);
   ~GoogCcNetworkController() override;
 
   // NetworkControllerInterface
-  void OnNetworkAvailability(NetworkAvailability msg) override;
-  void OnNetworkRouteChange(NetworkRouteChange msg) override;
-  void OnProcessInterval(ProcessInterval msg) override;
-  void OnRemoteBitrateReport(RemoteBitrateReport msg) override;
-  void OnRoundTripTimeUpdate(RoundTripTimeUpdate msg) override;
-  void OnSentPacket(SentPacket msg) override;
-  void OnStreamsConfig(StreamsConfig msg) override;
-  void OnTargetRateConstraints(TargetRateConstraints msg) override;
-  void OnTransportLossReport(TransportLossReport msg) override;
-  void OnTransportPacketsFeedback(TransportPacketsFeedback msg) override;
+  NetworkControlUpdate OnNetworkAvailability(NetworkAvailability msg) override;
+  NetworkControlUpdate OnNetworkRouteChange(NetworkRouteChange msg) override;
+  NetworkControlUpdate OnProcessInterval(ProcessInterval msg) override;
+  NetworkControlUpdate OnRemoteBitrateReport(RemoteBitrateReport msg) override;
+  NetworkControlUpdate OnRoundTripTimeUpdate(RoundTripTimeUpdate msg) override;
+  NetworkControlUpdate OnSentPacket(SentPacket msg) override;
+  NetworkControlUpdate OnStreamsConfig(StreamsConfig msg) override;
+  NetworkControlUpdate OnTargetRateConstraints(
+      TargetRateConstraints msg) override;
+  NetworkControlUpdate OnTransportLossReport(TransportLossReport msg) override;
+  NetworkControlUpdate OnTransportPacketsFeedback(
+      TransportPacketsFeedback msg) override;
+
+  NetworkControlUpdate GetNetworkState(Timestamp at_time) const;
 
  private:
-  void UpdateBitrateConstraints(TargetRateConstraints constraints,
-                                DataRate starting_rate);
-  void MaybeUpdateCongestionWindow();
-  void MaybeTriggerOnNetworkChanged(Timestamp at_time);
-  bool GetNetworkParameters(int32_t* estimated_bitrate_bps,
-                            uint8_t* fraction_loss,
-                            int64_t* rtt_ms,
-                            Timestamp at_time);
-  void OnNetworkEstimate(NetworkEstimate msg);
-  void UpdatePacingRates(Timestamp at_time);
+  friend class GoogCcStatePrinter;
+  std::vector<ProbeClusterConfig> UpdateBitrateConstraints(
+      TargetRateConstraints constraints,
+      absl::optional<DataRate> starting_rate);
+  void MaybeTriggerOnNetworkChanged(NetworkControlUpdate* update,
+                                    Timestamp at_time);
+  PacerConfig GetPacingRates(Timestamp at_time) const;
 
   RtcEventLog* const event_log_;
-  NetworkControllerObserver* const observer_;
+  const bool packet_feedback_only_;
 
   const std::unique_ptr<ProbeController> probe_controller_;
+  const std::unique_ptr<CongestionWindowPushbackController>
+      congestion_window_pushback_controller_;
 
   std::unique_ptr<SendSideBandwidthEstimation> bandwidth_estimation_;
   std::unique_ptr<AlrDetector> alr_detector_;
   std::unique_ptr<DelayBasedBwe> delay_based_bwe_;
   std::unique_ptr<AcknowledgedBitrateEstimator> acknowledged_bitrate_estimator_;
 
-  std::deque<int64_t> feedback_rtts_;
-  rtc::Optional<int64_t> min_feedback_rtt_ms_;
+  absl::optional<NetworkControllerConfig> initial_config_;
 
-  rtc::Optional<NetworkEstimate> last_estimate_;
-  rtc::Optional<TargetTransferRate> last_target_rate_;
+  bool first_packet_sent_ = false;
+
+  Timestamp next_loss_update_ = Timestamp::MinusInfinity();
+  int lost_packets_since_last_loss_update_ = 0;
+  int expected_packets_since_last_loss_update_ = 0;
+
+  std::deque<int64_t> feedback_max_rtts_;
+
+  DataRate last_bandwidth_;
+  absl::optional<TargetTransferRate> last_target_rate_;
 
   int32_t last_estimated_bitrate_bps_ = 0;
   uint8_t last_estimated_fraction_loss_ = 0;
@@ -89,10 +100,11 @@ class GoogCcNetworkController : public NetworkControllerInterface {
   int64_t accepted_queue_ms_;
   bool previously_in_alr = false;
 
+  absl::optional<DataSize> current_data_window_;
+
   RTC_DISALLOW_IMPLICIT_CONSTRUCTORS(GoogCcNetworkController);
 };
 
-}  // namespace webrtc_cc
 }  // namespace webrtc
 
 #endif  // MODULES_CONGESTION_CONTROLLER_GOOG_CC_GOOG_CC_NETWORK_CONTROL_H_

@@ -4,8 +4,7 @@
 
 #include "extensions/common/extension_features.h"
 
-namespace extensions {
-namespace features {
+namespace extensions_features {
 
 // Enables the use of C++-based extension bindings (instead of JS generation).
 const base::Feature kNativeCrxBindings{"NativeCrxBindings",
@@ -15,5 +14,9 @@ const base::Feature kNativeCrxBindings{"NativeCrxBindings",
 const base::Feature kNewExtensionUpdaterService{
     "NewExtensionUpdaterService", base::FEATURE_DISABLED_BY_DEFAULT};
 
-}  // namespace features
-}  // namespace extensions
+// Forces extensions with <all_hosts> to use activeTab-style runtime host
+// permissions.
+const base::Feature kRuntimeHostPermissions{"RuntimeHostPermissions",
+                                            base::FEATURE_DISABLED_BY_DEFAULT};
+
+}  // namespace extensions_features

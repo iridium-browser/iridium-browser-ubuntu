@@ -30,12 +30,21 @@ class ThemeProperties {
     COLOR_FRAME_INACTIVE,
     // Instead of using the INCOGNITO variants directly, most code should
     // use the original color ID in an incognito-aware context (such as
-    // GetDefaultColor).
+    // GetDefaultColor).  This comment applies to other properties tagged
+    // INCOGNITO below as well.
     COLOR_FRAME_INCOGNITO,
     COLOR_FRAME_INCOGNITO_INACTIVE,
+    COLOR_BACKGROUND_TAB,
+    COLOR_BACKGROUND_TAB_INACTIVE,
+    COLOR_BACKGROUND_TAB_INCOGNITO,
+    COLOR_BACKGROUND_TAB_INCOGNITO_INACTIVE,
     COLOR_TOOLBAR,
     COLOR_TAB_TEXT,
+    COLOR_TAB_TEXT_INACTIVE,
     COLOR_BACKGROUND_TAB_TEXT,
+    COLOR_BACKGROUND_TAB_TEXT_INACTIVE,
+    COLOR_BACKGROUND_TAB_TEXT_INCOGNITO,
+    COLOR_BACKGROUND_TAB_TEXT_INCOGNITO_INACTIVE,
     COLOR_BOOKMARK_TEXT,
     COLOR_NTP_BACKGROUND,
     COLOR_NTP_TEXT,
@@ -52,7 +61,7 @@ class ThemeProperties {
 
     NTP_BACKGROUND_ALIGNMENT,
     NTP_BACKGROUND_TILING,
-    NTP_LOGO_ALTERNATE
+    NTP_LOGO_ALTERNATE,
   };
 
   // A bitfield mask for alignments.
@@ -85,7 +94,7 @@ class ThemeProperties {
 
     // The color of the line separating the bottom of the toolbar from the
     // contents.
-    COLOR_TOOLBAR_BOTTOM_SEPARATOR,
+    COLOR_TOOLBAR_CONTENT_AREA_SEPARATOR,
 
     // The color of a normal toolbar button's icon.
     COLOR_TOOLBAR_BUTTON_ICON,
@@ -102,9 +111,6 @@ class ThemeProperties {
     // Colors of vertical separators, such as on the bookmark bar or on the DL
     // shelf.
     COLOR_TOOLBAR_VERTICAL_SEPARATOR,
-
-    // The color of a background tab, as well as the new tab button.
-    COLOR_BACKGROUND_TAB,
 
     // The color of the "instructions text" in an empty bookmarks bar.
     COLOR_BOOKMARK_BAR_INSTRUCTIONS_TEXT,
@@ -129,7 +135,15 @@ class ThemeProperties {
     // The colors used by the various alert indicator icons in the tab.
     COLOR_TAB_ALERT_AUDIO,
     COLOR_TAB_ALERT_RECORDING,
+    COLOR_TAB_PIP_PLAYING,
     COLOR_TAB_ALERT_CAPTURING,
+
+    // Calculated representative colors for the background of window control
+    // buttons.
+    COLOR_WINDOW_CONTROL_BUTTON_BACKGROUND_ACTIVE,
+    COLOR_WINDOW_CONTROL_BUTTON_BACKGROUND_INACTIVE,
+    COLOR_WINDOW_CONTROL_BUTTON_BACKGROUND_INCOGNITO_ACTIVE,
+    COLOR_WINDOW_CONTROL_BUTTON_BACKGROUND_INCOGNITO_INACTIVE,
 
     // These colors don't have constant default values. They are derived from
     // the runtime value of other colors.
@@ -143,7 +157,6 @@ class ThemeProperties {
 #if defined(OS_MACOSX)
     COLOR_FRAME_VIBRANCY_OVERLAY,
     COLOR_TOOLBAR_INACTIVE,
-    COLOR_BACKGROUND_TAB_INACTIVE,
     COLOR_TOOLBAR_BEZEL,
     COLOR_TOOLBAR_STROKE,
     COLOR_TOOLBAR_STROKE_INACTIVE,
@@ -164,7 +177,26 @@ class ThemeProperties {
     // The color of the 1px border around the window on Windows 10.
     COLOR_ACCENT_BORDER,
 #endif  // OS_WIN
+
+    SHOULD_FILL_BACKGROUND_TAB_COLOR,
   };
+
+  // Represents the lookup values for a theme property.
+  struct PropertyLookupPair {
+    int property_id;    // ID of the property to lookup (should never be an
+                        // incognito variant)
+    bool is_incognito;  // Whether the lookup should use the incognito value
+                        // of this property or not
+  };
+
+  // Themes are hardcoded to draw frame images as if they start this many DIPs
+  // above the top of the tabstrip, no matter how much space actually exists.
+  // This aids with backwards compatibility (for some themes; Chrome's behavior
+  // has been inconsistent over time), provides a consistent alignment point for
+  // theme authors, and ensures the frame image won't need to be mirrored above
+  // the tabs in Refresh (since frame heights above the tabs are never greater
+  // than this).
+  static constexpr int kFrameHeightAboveTabs = 16;
 
   // Used by the browser theme pack to parse alignments from something like
   // "top left" into a bitmask of Alignment.
@@ -189,6 +221,16 @@ class ThemeProperties {
   // Returns the default color for the given color |id| COLOR_* enum value.
   // Returns gfx::kPlaceholderColor if |id| is invalid.
   static SkColor GetDefaultColor(int id, bool incognito);
+
+  // Returns the default color for the color represented by |lookup_pair|
+  // Returns gfx::kPlaceholderColor if |id| is invalid.
+  static SkColor GetDefaultColor(PropertyLookupPair lookup_pair);
+
+  // Get the PropertyLookupPair  necessary to look up a property for |input_id|
+  // in an incognito-aware context.  Returns a pair with the id to lookup
+  // (always a non-incognito variant), and a boolean representing whether
+  // |input_id| was an incognito variant of the id to lookup
+  static PropertyLookupPair GetLookupID(int input_id);
 
  private:
   DISALLOW_IMPLICIT_CONSTRUCTORS(ThemeProperties);

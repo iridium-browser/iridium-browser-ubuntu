@@ -24,6 +24,8 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_HTML_HTML_IMAGE_ELEMENT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_HTML_HTML_IMAGE_ELEMENT_H_
 
+#include <memory>
+
 #include "third_party/blink/renderer/bindings/core/v8/active_script_wrappable.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/create_element_flags.h"
@@ -31,6 +33,8 @@
 #include "third_party/blink/renderer/core/html/forms/form_associated.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
 #include "third_party/blink/renderer/core/html/html_image_loader.h"
+#include "third_party/blink/renderer/core/html/lazy_load_image_observer.h"
+#include "third_party/blink/renderer/platform/geometry/int_size.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_types.h"
 #include "third_party/blink/renderer/platform/heap/heap_allocator.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_parameters.h"
@@ -40,7 +44,9 @@ namespace blink {
 
 class HTMLFormElement;
 class ImageCandidate;
+class ExceptionState;
 class ShadowRoot;
+class USVStringOrTrustedURL;
 
 class CORE_EXPORT HTMLImageElement final
     : public HTMLElement,
@@ -53,6 +59,9 @@ class CORE_EXPORT HTMLImageElement final
  public:
   class ViewportChangeListener;
 
+  // Returns attributes that should be checked against Trusted Types
+  const HashSet<AtomicString>& GetCheckedAttributeNames() const override;
+
   static HTMLImageElement* Create(Document&);
   static HTMLImageElement* Create(Document&, const CreateElementFlags);
   static HTMLImageElement* CreateForJSConstructor(Document&);
@@ -62,7 +71,7 @@ class CORE_EXPORT HTMLImageElement final
                                                   unsigned height);
 
   ~HTMLImageElement() override;
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
   unsigned width();
   unsigned height();
@@ -85,6 +94,9 @@ class CORE_EXPORT HTMLImageElement final
   ImageResource* CachedImageResourceForImageDocument() const {
     return GetImageLoader().ImageResourceForImageDocument();
   }
+  void LoadDeferredImage() {
+    GetImageLoader().LoadDeferredImage(referrer_policy_);
+  }
   void SetImageForTest(ImageResourceContent* content) {
     GetImageLoader().SetImageForTest(content);
   }
@@ -95,8 +107,14 @@ class CORE_EXPORT HTMLImageElement final
 
   KURL Src() const;
   void SetSrc(const String&);
+  void SetSrc(const USVStringOrTrustedURL&, ExceptionState&);
 
   void setWidth(unsigned);
+
+  IntSize GetOverriddenIntrinsicSize() const;
+  bool IsDefaultIntrinsicSize() const {
+    return is_default_overridden_intrinsic_size_;
+  }
 
   int x() const;
   int y() const;
@@ -128,13 +146,24 @@ class CORE_EXPORT HTMLImageElement final
 
   void SetIsFallbackImage() { is_fallback_image_ = true; }
 
-  FetchParameters::ResourceWidth GetResourceWidth();
+  FetchParameters::ResourceWidth GetResourceWidth() const;
   float SourceSize(Element&);
 
   void ForceReload() const;
 
   FormAssociated* ToFormAssociatedOrNull() override { return this; };
   void AssociateWith(HTMLFormElement*) override;
+
+  bool ElementCreatedByParser() const { return element_created_by_parser_; }
+
+  LazyLoadImageObserver::VisibleLoadTimeMetrics&
+  EnsureVisibleLoadTimeMetrics() {
+    if (!visible_load_time_metrics_) {
+      visible_load_time_metrics_ =
+          std::make_unique<LazyLoadImageObserver::VisibleLoadTimeMetrics>();
+    }
+    return *visible_load_time_metrics_;
+  }
 
  protected:
   // Controls how an image element appears in the layout. See:
@@ -182,8 +211,8 @@ class CORE_EXPORT HTMLImageElement final
 
   bool draggable() const override;
 
-  InsertionNotificationRequest InsertedInto(ContainerNode*) override;
-  void RemovedFrom(ContainerNode*) override;
+  InsertionNotificationRequest InsertedInto(ContainerNode&) override;
+  void RemovedFrom(ContainerNode&) override;
   NamedItemType GetNamedItemType() const override {
     return NamedItemType::kNameOrIdWithName;
   }
@@ -208,8 +237,16 @@ class CORE_EXPORT HTMLImageElement final
   unsigned form_was_set_by_parser_ : 1;
   unsigned element_created_by_parser_ : 1;
   unsigned is_fallback_image_ : 1;
+  bool should_invert_color_;
+  bool sizes_set_width_;
+  bool is_default_overridden_intrinsic_size_;
 
   ReferrerPolicy referrer_policy_;
+
+  IntSize overridden_intrinsic_size_;
+
+  std::unique_ptr<LazyLoadImageObserver::VisibleLoadTimeMetrics>
+      visible_load_time_metrics_;
 };
 
 }  // namespace blink

@@ -8,16 +8,17 @@
 #include <limits>
 #include <utility>
 
+#include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "build/build_config.h"
+#include "cc/paint/paint_canvas.h"
 #include "content/shell/test_runner/layout_and_paint_async_then.h"
 #include "content/shell/test_runner/layout_dump.h"
 #include "content/shell/test_runner/mock_content_settings_client.h"
 #include "content/shell/test_runner/mock_screen_orientation_client.h"
-#include "content/shell/test_runner/mock_web_speech_recognizer.h"
 #include "content/shell/test_runner/pixel_dump.h"
 #include "content/shell/test_runner/spell_check_client.h"
 #include "content/shell/test_runner/test_common.h"
@@ -31,9 +32,9 @@
 #include "gin/handle.h"
 #include "gin/object_template_builder.h"
 #include "gin/wrappable.h"
+#include "third_party/blink/public/mojom/frame/find_in_page.mojom.h"
 #include "third_party/blink/public/mojom/page/page_visibility_state.mojom.h"
-#include "third_party/blink/public/platform/modules/serviceworker/web_service_worker_registration.h"
-#include "third_party/blink/public/platform/web_canvas.h"
+#include "third_party/blink/public/platform/modules/service_worker/web_service_worker_registration.h"
 #include "third_party/blink/public/platform/web_data.h"
 #include "third_party/blink/public/platform/web_point.h"
 #include "third_party/blink/public/platform/web_url_response.h"
@@ -41,7 +42,6 @@
 #include "third_party/blink/public/web/web_array_buffer.h"
 #include "third_party/blink/public/web/web_array_buffer_converter.h"
 #include "third_party/blink/public/web/web_document.h"
-#include "third_party/blink/public/web/web_find_options.h"
 #include "third_party/blink/public/web/web_frame.h"
 #include "third_party/blink/public/web/web_frame_widget.h"
 #include "third_party/blink/public/web/web_input_element.h"
@@ -59,8 +59,6 @@
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/skia_util.h"
 #include "ui/gfx/switches.h"
-
-using namespace blink;
 
 namespace test_runner {
 
@@ -104,10 +102,9 @@ void TestRunnerForSpecificView::Reset() {
 bool TestRunnerForSpecificView::RequestPointerLock() {
   switch (pointer_lock_planned_result_) {
     case PointerLockWillSucceed:
-      PostDelayedTask(
-          0,
-          base::Bind(&TestRunnerForSpecificView::DidAcquirePointerLockInternal,
-                     weak_factory_.GetWeakPtr()));
+      PostTask(base::BindOnce(
+          &TestRunnerForSpecificView::DidAcquirePointerLockInternal,
+          weak_factory_.GetWeakPtr()));
       return true;
     case PointerLockWillRespondAsync:
       DCHECK(!pointer_locked_);
@@ -122,30 +119,25 @@ bool TestRunnerForSpecificView::RequestPointerLock() {
 }
 
 void TestRunnerForSpecificView::RequestPointerUnlock() {
-  PostDelayedTask(
-      0, base::Bind(&TestRunnerForSpecificView::DidLosePointerLockInternal,
-                    weak_factory_.GetWeakPtr()));
+  PostTask(
+      base::BindOnce(&TestRunnerForSpecificView::DidLosePointerLockInternal,
+                     weak_factory_.GetWeakPtr()));
 }
 
 bool TestRunnerForSpecificView::isPointerLocked() {
   return pointer_locked_;
 }
 
-void TestRunnerForSpecificView::PostTask(const base::Closure& callback) {
-  delegate()->PostTask(callback);
-}
-
-void TestRunnerForSpecificView::PostDelayedTask(long long delay,
-                                                const base::Closure& callback) {
-  delegate()->PostDelayedTask(callback, delay);
+void TestRunnerForSpecificView::PostTask(base::OnceClosure callback) {
+  delegate()->PostTask(std::move(callback));
 }
 
 void TestRunnerForSpecificView::PostV8Callback(
     const v8::Local<v8::Function>& callback) {
-  PostTask(base::Bind(&TestRunnerForSpecificView::InvokeV8Callback,
-                      weak_factory_.GetWeakPtr(),
-                      v8::UniquePersistent<v8::Function>(
-                          blink::MainThreadIsolate(), callback)));
+  PostTask(base::BindOnce(&TestRunnerForSpecificView::InvokeV8Callback,
+                          weak_factory_.GetWeakPtr(),
+                          v8::UniquePersistent<v8::Function>(
+                              blink::MainThreadIsolate(), callback)));
 }
 
 void TestRunnerForSpecificView::PostV8CallbackWithArgs(
@@ -158,9 +150,9 @@ void TestRunnerForSpecificView::PostV8CallbackWithArgs(
         v8::UniquePersistent<v8::Value>(blink::MainThreadIsolate(), argv[i]));
   }
 
-  PostTask(base::Bind(&TestRunnerForSpecificView::InvokeV8CallbackWithArgs,
-                      weak_factory_.GetWeakPtr(), std::move(callback),
-                      std::move(args)));
+  PostTask(base::BindOnce(&TestRunnerForSpecificView::InvokeV8CallbackWithArgs,
+                          weak_factory_.GetWeakPtr(), std::move(callback),
+                          std::move(args)));
 }
 
 void TestRunnerForSpecificView::InvokeV8Callback(
@@ -191,14 +183,31 @@ void TestRunnerForSpecificView::InvokeV8CallbackWithArgs(
       local_args.size(), local_args.data());
 }
 
-base::Closure TestRunnerForSpecificView::CreateClosureThatPostsV8Callback(
+base::OnceClosure TestRunnerForSpecificView::CreateClosureThatPostsV8Callback(
     const v8::Local<v8::Function>& callback) {
-  return base::Bind(&TestRunnerForSpecificView::PostTask,
-                    weak_factory_.GetWeakPtr(),
-                    base::Bind(&TestRunnerForSpecificView::InvokeV8Callback,
-                               weak_factory_.GetWeakPtr(),
-                               v8::UniquePersistent<v8::Function>(
-                                   blink::MainThreadIsolate(), callback)));
+  return base::BindOnce(
+      &TestRunnerForSpecificView::PostTask, weak_factory_.GetWeakPtr(),
+      base::BindOnce(&TestRunnerForSpecificView::InvokeV8Callback,
+                     weak_factory_.GetWeakPtr(),
+                     v8::UniquePersistent<v8::Function>(
+                         blink::MainThreadIsolate(), callback)));
+}
+
+void TestRunnerForSpecificView::UpdateAllLifecyclePhasesAndComposite() {
+  // Note, this is executed synchronously. Wrap in setTimeout() to run
+  // asynchronously.
+  blink::WebWidget* widget =
+      web_view()->MainFrame()->ToWebLocalFrame()->FrameWidget();
+  widget->UpdateAllLifecyclePhasesAndCompositeForTesting(/* raster = */ true);
+}
+
+void TestRunnerForSpecificView::UpdateAllLifecyclePhasesAndCompositeThen(
+    v8::Local<v8::Function> callback) {
+  // Note, this is executed synchronously. Wrap in setTimeout() to run
+  // asynchronously.
+  TestRunnerForSpecificView::UpdateAllLifecyclePhasesAndComposite();
+  InvokeV8Callback(
+      v8::UniquePersistent<v8::Function>(blink::MainThreadIsolate(), callback));
 }
 
 void TestRunnerForSpecificView::LayoutAndPaintAsync() {
@@ -208,7 +217,7 @@ void TestRunnerForSpecificView::LayoutAndPaintAsync() {
   // this structure more generic.
   test_runner::LayoutAndPaintAsyncThen(
       web_view()->MainFrame()->ToWebLocalFrame()->FrameWidget(),
-      base::Closure());
+      base::DoNothing());
 }
 
 void TestRunnerForSpecificView::LayoutAndPaintAsyncThen(
@@ -282,13 +291,6 @@ void TestRunnerForSpecificView::CopyImageAtAndCapturePixelsAsyncThen(
     v8::Local<v8::Function> callback) {
   v8::UniquePersistent<v8::Function> persistent_callback(
       blink::MainThreadIsolate(), callback);
-
-  // TODO(lukasza): Support image capture in OOPIFs for
-  // https://crbug.com/477150.
-  CHECK(web_view()->MainFrame()->IsWebLocalFrame())
-      << "Layout tests harness doesn't support calling "
-      << "testRunner.copyImageAtAndCapturePixelsAsyncThen from an OOPIF.";
-
   CopyImageAtAndCapturePixels(
       web_view()->MainFrame()->ToWebLocalFrame(), x, y,
       base::BindOnce(&TestRunnerForSpecificView::CapturePixelsCallback,
@@ -316,17 +318,17 @@ void TestRunnerForSpecificView::GetManifestThen(
 void TestRunnerForSpecificView::GetManifestCallback(
     v8::UniquePersistent<v8::Function> callback,
     const GURL& manifest_url,
-    const content::Manifest& manifest) {
+    const blink::Manifest& manifest) {
   PostV8CallbackWithArgs(std::move(callback), 0, nullptr);
 }
 
 void TestRunnerForSpecificView::GetBluetoothManualChooserEvents(
     v8::Local<v8::Function> callback) {
-  return delegate()->GetBluetoothManualChooserEvents(base::Bind(
+  return delegate()->GetBluetoothManualChooserEvents(base::BindOnce(
       &TestRunnerForSpecificView::GetBluetoothManualChooserEventsCallback,
       weak_factory_.GetWeakPtr(),
-      base::Passed(v8::UniquePersistent<v8::Function>(
-          blink::MainThreadIsolate(), callback))));
+      v8::UniquePersistent<v8::Function>(blink::MainThreadIsolate(),
+                                         callback)));
 }
 
 void TestRunnerForSpecificView::GetBluetoothManualChooserEventsCallback(
@@ -399,11 +401,11 @@ void TestRunnerForSpecificView::DispatchBeforeInstallPromptEvent(
     v8::Local<v8::Function> callback) {
   delegate()->DispatchBeforeInstallPromptEvent(
       event_platforms,
-      base::Bind(
+      base::BindOnce(
           &TestRunnerForSpecificView::DispatchBeforeInstallPromptCallback,
           weak_factory_.GetWeakPtr(),
-          base::Passed(v8::UniquePersistent<v8::Function>(
-              blink::MainThreadIsolate(), callback))));
+          v8::UniquePersistent<v8::Function>(blink::MainThreadIsolate(),
+                                             callback)));
 }
 
 void TestRunnerForSpecificView::DispatchBeforeInstallPromptCallback(
@@ -446,19 +448,19 @@ void TestRunnerForSpecificView::ExecCommand(gin::Arguments* args) {
   }
 
   // Note: webkit's version does not return the boolean, so neither do we.
-  web_view()->FocusedFrame()->ExecuteCommand(WebString::FromUTF8(command),
-                                             WebString::FromUTF8(value));
+  web_view()->FocusedFrame()->ExecuteCommand(
+      blink::WebString::FromUTF8(command), blink::WebString::FromUTF8(value));
 }
 
 bool TestRunnerForSpecificView::IsCommandEnabled(const std::string& command) {
   return web_view()->FocusedFrame()->IsCommandEnabled(
-      WebString::FromUTF8(command));
+      blink::WebString::FromUTF8(command));
 }
 
 bool TestRunnerForSpecificView::HasCustomPageSizeStyle(int page_index) {
   // TODO(dcheng): This class has many implicit assumptions that the frames it
   // operates on are always local.
-  WebFrame* frame = web_view()->MainFrame();
+  blink::WebFrame* frame = web_view()->MainFrame();
   if (!frame || frame->IsWebRemoteFrame())
     return false;
   return frame->ToWebLocalFrame()->HasCustomPageSizeStyle(page_index);
@@ -485,13 +487,13 @@ void TestRunnerForSpecificView::SetPageVisibility(
 void TestRunnerForSpecificView::SetTextDirection(
     const std::string& direction_name) {
   // Map a direction name to a WebTextDirection value.
-  WebTextDirection direction;
+  blink::WebTextDirection direction;
   if (direction_name == "auto")
-    direction = kWebTextDirectionDefault;
+    direction = blink::kWebTextDirectionDefault;
   else if (direction_name == "rtl")
-    direction = kWebTextDirectionRightToLeft;
+    direction = blink::kWebTextDirectionRightToLeft;
   else if (direction_name == "ltr")
-    direction = kWebTextDirectionLeftToRight;
+    direction = blink::kWebTextDirectionLeftToRight;
   else
     return;
 
@@ -571,31 +573,29 @@ void TestRunnerForSpecificView::SetDomainRelaxationForbiddenForURLScheme(
     bool forbidden,
     const std::string& scheme) {
   web_view()->SetDomainRelaxationForbidden(forbidden,
-                                           WebString::FromUTF8(scheme));
+                                           blink::WebString::FromUTF8(scheme));
 }
 
 v8::Local<v8::Value>
 TestRunnerForSpecificView::EvaluateScriptInIsolatedWorldAndReturnValue(
     int world_id,
     const std::string& script) {
-  WebVector<v8::Local<v8::Value>> values;
-  WebScriptSource source(WebString::FromUTF8(script));
+  blink::WebScriptSource source(blink::WebString::FromUTF8(script));
   // This relies on the iframe focusing itself when it loads. This is a bit
   // sketchy, but it seems to be what other tests do.
-  web_view()->FocusedFrame()->ExecuteScriptInIsolatedWorld(world_id, &source, 1,
-                                                           &values);
-  // Since only one script was added, only one result is expected
-  if (values.size() == 1 && !values[0].IsEmpty())
-    return values[0];
+  v8::Local<v8::Value> value =
+      web_view()->FocusedFrame()->ExecuteScriptInIsolatedWorldAndReturnValue(
+          world_id, source);
+  if (!value.IsEmpty())
+    return value;
   return v8::Local<v8::Value>();
 }
 
 void TestRunnerForSpecificView::EvaluateScriptInIsolatedWorld(
     int world_id,
     const std::string& script) {
-  WebScriptSource source(WebString::FromUTF8(script));
-  web_view()->FocusedFrame()->ExecuteScriptInIsolatedWorld(world_id, &source,
-                                                           1);
+  blink::WebScriptSource source(blink::WebString::FromUTF8(script));
+  web_view()->FocusedFrame()->ExecuteScriptInIsolatedWorld(world_id, source);
 }
 
 void TestRunnerForSpecificView::SetIsolatedWorldSecurityOrigin(
@@ -604,10 +604,10 @@ void TestRunnerForSpecificView::SetIsolatedWorldSecurityOrigin(
   if (!(origin->IsString() || !origin->IsNull()))
     return;
 
-  WebSecurityOrigin web_origin;
+  blink::WebSecurityOrigin web_origin;
   if (origin->IsString()) {
-    web_origin = WebSecurityOrigin::CreateFromString(
-        V8StringToWebString(origin.As<v8::String>()));
+    web_origin = blink::WebSecurityOrigin::CreateFromString(V8StringToWebString(
+        blink::MainThreadIsolate(), origin.As<v8::String>()));
   }
   web_view()->FocusedFrame()->SetIsolatedWorldSecurityOrigin(world_id,
                                                              web_origin);
@@ -617,41 +617,37 @@ void TestRunnerForSpecificView::SetIsolatedWorldContentSecurityPolicy(
     int world_id,
     const std::string& policy) {
   web_view()->FocusedFrame()->SetIsolatedWorldContentSecurityPolicy(
-      world_id, WebString::FromUTF8(policy));
+      world_id, blink::WebString::FromUTF8(policy));
 }
 
 void TestRunner::InsertStyleSheet(const std::string& source_code) {
-  WebLocalFrame::FrameForCurrentContext()->GetDocument().InsertStyleSheet(
-      WebString::FromUTF8(source_code));
+  blink::WebLocalFrame::FrameForCurrentContext()
+      ->GetDocument()
+      .InsertStyleSheet(blink::WebString::FromUTF8(source_code));
 }
 
 bool TestRunnerForSpecificView::FindString(
     const std::string& search_text,
     const std::vector<std::string>& options_array) {
-  WebFindOptions find_options;
+  bool match_case = true;
+  bool forward = true;
+  bool find_next = true;
   bool wrap_around = false;
-  find_options.match_case = true;
-  find_options.find_next = true;
-
   for (const std::string& option : options_array) {
     if (option == "CaseInsensitive")
-      find_options.match_case = false;
+      match_case = false;
     else if (option == "Backwards")
-      find_options.forward = false;
+      forward = false;
     else if (option == "StartInSelection")
-      find_options.find_next = false;
-    else if (option == "AtWordStarts")
-      find_options.word_start = true;
-    else if (option == "TreatMedialCapitalAsWordStart")
-      find_options.medial_capital_as_word_start = true;
+      find_next = false;
     else if (option == "WrapAround")
       wrap_around = true;
   }
 
-  WebLocalFrame* frame = GetLocalMainFrame();
-  const bool find_result = frame->Find(0, WebString::FromUTF8(search_text),
-                                       find_options, wrap_around, nullptr);
-  frame->StopFinding(WebLocalFrame::kStopFindActionKeepSelection);
+  blink::WebLocalFrame* frame = GetLocalMainFrame();
+  const bool find_result = frame->FindForTesting(
+      0, blink::WebString::FromUTF8(search_text), match_case, forward,
+      find_next, false /* force */, wrap_around);
   return find_result;
 }
 
@@ -661,8 +657,8 @@ std::string TestRunnerForSpecificView::SelectionAsMarkup() {
 
 void TestRunnerForSpecificView::SetViewSourceForFrame(const std::string& name,
                                                       bool enabled) {
-  WebFrame* target_frame =
-      GetLocalMainFrame()->FindFrameByName(WebString::FromUTF8(name));
+  blink::WebFrame* target_frame =
+      GetLocalMainFrame()->FindFrameByName(blink::WebString::FromUTF8(name));
   if (target_frame) {
     CHECK(target_frame->IsWebLocalFrame())
         << "This function requires that the target frame is a local frame.";

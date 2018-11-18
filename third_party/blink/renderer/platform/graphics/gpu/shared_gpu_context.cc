@@ -11,6 +11,7 @@
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_graphics_context_3d_provider.h"
 #include "third_party/blink/renderer/platform/cross_thread_functional.h"
+#include "third_party/blink/renderer/platform/scheduler/public/thread.h"
 #include "third_party/blink/renderer/platform/waitable_event.h"
 #include "third_party/blink/renderer/platform/web_task_runner.h"
 
@@ -67,7 +68,7 @@ static void CreateContextProviderOnMainThread(
   Platform::GraphicsInfo graphics_info;
   auto context_provider =
       Platform::Current()->CreateOffscreenGraphicsContext3DProvider(
-          context_attributes, WebURL(), nullptr, &graphics_info);
+          context_attributes, WebURL(), &graphics_info);
   if (context_provider) {
     *wrapper = std::make_unique<WebGraphicsContext3DProviderWrapper>(
         std::move(context_provider));

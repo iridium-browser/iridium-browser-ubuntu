@@ -5,18 +5,20 @@
 #include "third_party/blink/renderer/bindings/core/v8/script_custom_element_definition.h"
 
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_custom_element_constructor.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_custom_element_registry.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_element.h"
-#include "third_party/blink/renderer/bindings/core/v8/v8_error_handler.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_function.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_script_runner.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_throw_dom_exception.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
+#include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/events/error_event.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/html/custom/custom_element.h"
 #include "third_party/blink/renderer/core/html/html_element.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/bindings/v8_binding_macros.h"
+#include "third_party/blink/renderer/platform/bindings/v8_per_context_data.h"
 #include "third_party/blink/renderer/platform/bindings/v8_private_property.h"
 #include "third_party/blink/renderer/platform/wtf/allocator.h"
 #include "v8/include/v8.h"
@@ -28,7 +30,7 @@ class CSSStyleSheet;
 ScriptCustomElementDefinition* ScriptCustomElementDefinition::ForConstructor(
     ScriptState* script_state,
     CustomElementRegistry* registry,
-    const v8::Local<v8::Value>& constructor) {
+    v8::Local<v8::Value> constructor) {
   V8PerContextData* per_context_data = script_state->PerContextData();
   // TODO(yukishiino): Remove this check when crbug.com/583429 is fixed.
   if (UNLIKELY(!per_context_data))
@@ -71,26 +73,25 @@ ScriptCustomElementDefinition* ScriptCustomElementDefinition::Create(
     CustomElementRegistry* registry,
     const CustomElementDescriptor& descriptor,
     CustomElementDefinition::Id id,
-    const v8::Local<v8::Object>& constructor,
-    const v8::Local<v8::Function>& connected_callback,
-    const v8::Local<v8::Function>& disconnected_callback,
-    const v8::Local<v8::Function>& adopted_callback,
-    const v8::Local<v8::Function>& attribute_changed_callback,
-    HashSet<AtomicString>&& observed_attributes,
-    CSSStyleSheet* default_style_sheet) {
+    V8CustomElementConstructor* constructor,
+    V8Function* connected_callback,
+    V8Function* disconnected_callback,
+    V8Function* adopted_callback,
+    V8Function* attribute_changed_callback,
+    HashSet<AtomicString>&& observed_attributes) {
   ScriptCustomElementDefinition* definition = new ScriptCustomElementDefinition(
       script_state, descriptor, constructor, connected_callback,
       disconnected_callback, adopted_callback, attribute_changed_callback,
-      std::move(observed_attributes), default_style_sheet);
+      std::move(observed_attributes));
 
   // Tag the JavaScript constructor object with its ID.
   v8::Local<v8::Value> id_value =
       v8::Integer::NewFromUnsigned(script_state->GetIsolate(), id);
   auto private_id =
       script_state->PerContextData()->GetPrivateCustomElementDefinitionId();
-  CHECK(
-      constructor->SetPrivate(script_state->GetContext(), private_id, id_value)
-          .ToChecked());
+  CHECK(constructor->CallbackObject()
+            ->SetPrivate(script_state->GetContext(), private_id, id_value)
+            .ToChecked());
 
   return definition;
 }
@@ -98,37 +99,28 @@ ScriptCustomElementDefinition* ScriptCustomElementDefinition::Create(
 ScriptCustomElementDefinition::ScriptCustomElementDefinition(
     ScriptState* script_state,
     const CustomElementDescriptor& descriptor,
-    const v8::Local<v8::Object>& constructor,
-    const v8::Local<v8::Function>& connected_callback,
-    const v8::Local<v8::Function>& disconnected_callback,
-    const v8::Local<v8::Function>& adopted_callback,
-    const v8::Local<v8::Function>& attribute_changed_callback,
-    HashSet<AtomicString>&& observed_attributes,
-    CSSStyleSheet* default_style_sheet)
-    : CustomElementDefinition(descriptor,
-                              default_style_sheet,
-                              std::move(observed_attributes)),
+    V8CustomElementConstructor* constructor,
+    V8Function* connected_callback,
+    V8Function* disconnected_callback,
+    V8Function* adopted_callback,
+    V8Function* attribute_changed_callback,
+    HashSet<AtomicString>&& observed_attributes)
+    : CustomElementDefinition(descriptor, std::move(observed_attributes)),
       script_state_(script_state),
-      constructor_(script_state->GetIsolate(), constructor) {
-  v8::Isolate* isolate = script_state->GetIsolate();
-  if (!connected_callback.IsEmpty())
-    connected_callback_.Set(isolate, connected_callback);
-  if (!disconnected_callback.IsEmpty())
-    disconnected_callback_.Set(isolate, disconnected_callback);
-  if (!adopted_callback.IsEmpty())
-    adopted_callback_.Set(isolate, adopted_callback);
-  if (!attribute_changed_callback.IsEmpty())
-    attribute_changed_callback_.Set(isolate, attribute_changed_callback);
-}
+      constructor_(constructor),
+      connected_callback_(connected_callback),
+      disconnected_callback_(disconnected_callback),
+      adopted_callback_(adopted_callback),
+      attribute_changed_callback_(attribute_changed_callback) {}
 
-void ScriptCustomElementDefinition::TraceWrappers(
-    const ScriptWrappableVisitor* visitor) const {
-  visitor->TraceWrappers(constructor_.Cast<v8::Value>());
-  visitor->TraceWrappers(connected_callback_.Cast<v8::Value>());
-  visitor->TraceWrappers(disconnected_callback_.Cast<v8::Value>());
-  visitor->TraceWrappers(adopted_callback_.Cast<v8::Value>());
-  visitor->TraceWrappers(attribute_changed_callback_.Cast<v8::Value>());
-  CustomElementDefinition::TraceWrappers(visitor);
+void ScriptCustomElementDefinition::Trace(Visitor* visitor) {
+  visitor->Trace(script_state_);
+  visitor->Trace(constructor_);
+  visitor->Trace(connected_callback_);
+  visitor->Trace(disconnected_callback_);
+  visitor->Trace(adopted_callback_);
+  visitor->Trace(attribute_changed_callback_);
+  CustomElementDefinition::Trace(visitor);
 }
 
 HTMLElement* ScriptCustomElementDefinition::HandleCreateElementSyncException(
@@ -150,7 +142,7 @@ HTMLElement* ScriptCustomElementDefinition::CreateAutonomousCustomElementSync(
     const QualifiedName& tag_name) {
   if (!script_state_->ContextIsValid())
     return CustomElement::CreateFailedElement(document, tag_name);
-  ScriptState::Scope scope(script_state_.get());
+  ScriptState::Scope scope(script_state_);
   v8::Isolate* isolate = script_state_->GetIsolate();
 
   ExceptionState exception_state(isolate, ExceptionState::kConstructionContext,
@@ -198,6 +190,7 @@ HTMLElement* ScriptCustomElementDefinition::CreateAutonomousCustomElementSync(
   if (element->prefix() != tag_name.Prefix())
     element->SetTagNameForCreateElementNS(tag_name);
   DCHECK_EQ(element->GetCustomElementState(), CustomElementState::kCustom);
+  AddDefaultStylesTo(*element);
   return ToHTMLElement(element);
 }
 
@@ -205,7 +198,7 @@ HTMLElement* ScriptCustomElementDefinition::CreateAutonomousCustomElementSync(
 bool ScriptCustomElementDefinition::RunConstructor(Element* element) {
   if (!script_state_->ContextIsValid())
     return false;
-  ScriptState::Scope scope(script_state_.get());
+  ScriptState::Scope scope(script_state_);
   v8::Isolate* isolate = script_state_->GetIsolate();
 
   // Step 5 says to rethrow the exception; but there is no one to
@@ -225,9 +218,11 @@ bool ScriptCustomElementDefinition::RunConstructor(Element* element) {
     const String& message =
         "custom element constructors must call super() first and must "
         "not return a different object";
-    v8::Local<v8::Value> exception = V8ThrowDOMException::CreateDOMException(
-        script_state_->GetIsolate(), kInvalidStateError, message);
-    V8ScriptRunner::ReportException(isolate, exception);
+    v8::Local<v8::Value> exception = V8ThrowDOMException::CreateOrEmpty(
+        script_state_->GetIsolate(), DOMExceptionCode::kInvalidStateError,
+        message);
+    if (!exception.IsEmpty())
+      V8ScriptRunner::ReportException(isolate, exception);
     return false;
   }
 
@@ -235,91 +230,66 @@ bool ScriptCustomElementDefinition::RunConstructor(Element* element) {
 }
 
 Element* ScriptCustomElementDefinition::CallConstructor() {
-  v8::Isolate* isolate = script_state_->GetIsolate();
-  DCHECK(ScriptState::Current(isolate) == script_state_);
-  ExecutionContext* execution_context =
-      ExecutionContext::From(script_state_.get());
-  v8::Local<v8::Value> result;
-  if (!V8ScriptRunner::CallAsConstructor(isolate, Constructor(),
-                                         execution_context, 0, nullptr)
-           .ToLocal(&result)) {
+  ScriptValue result;
+  if (!constructor_->Construct().To(&result)) {
     return nullptr;
   }
-  return V8Element::ToImplWithTypeCheck(isolate, result);
+
+  return V8Element::ToImplWithTypeCheck(constructor_->GetIsolate(),
+                                        result.V8Value());
 }
 
 v8::Local<v8::Object> ScriptCustomElementDefinition::Constructor() const {
-  DCHECK(!constructor_.IsEmpty());
-  return constructor_.NewLocal(script_state_->GetIsolate());
+  return constructor_->CallbackObject();
 }
 
 // CustomElementDefinition
 ScriptValue ScriptCustomElementDefinition::GetConstructorForScript() {
-  return ScriptValue(script_state_.get(), Constructor());
+  return ScriptValue(script_state_, Constructor());
 }
 
 bool ScriptCustomElementDefinition::HasConnectedCallback() const {
-  return !connected_callback_.IsEmpty();
+  return connected_callback_;
 }
 
 bool ScriptCustomElementDefinition::HasDisconnectedCallback() const {
-  return !disconnected_callback_.IsEmpty();
+  return disconnected_callback_;
 }
 
 bool ScriptCustomElementDefinition::HasAdoptedCallback() const {
-  return !adopted_callback_.IsEmpty();
-}
-
-void ScriptCustomElementDefinition::RunCallback(
-    v8::Local<v8::Function> callback,
-    Element* element,
-    int argc,
-    v8::Local<v8::Value> argv[]) {
-  DCHECK(ScriptState::Current(script_state_->GetIsolate()) == script_state_);
-  v8::Isolate* isolate = script_state_->GetIsolate();
-
-  // Invoke custom element reactions
-  // https://html.spec.whatwg.org/multipage/scripting.html#invoke-custom-element-reactions
-  // If this throws any exception, then report the exception.
-  v8::TryCatch try_catch(isolate);
-  try_catch.SetVerbose(true);
-
-  ExecutionContext* execution_context =
-      ExecutionContext::From(script_state_.get());
-  v8::Local<v8::Value> element_handle =
-      ToV8(element, script_state_->GetContext()->Global(), isolate);
-  V8ScriptRunner::CallFunction(callback, execution_context, element_handle,
-                               argc, argv, isolate);
+  return adopted_callback_;
 }
 
 void ScriptCustomElementDefinition::RunConnectedCallback(Element* element) {
-  if (!script_state_->ContextIsValid())
+  if (!connected_callback_)
     return;
-  ScriptState::Scope scope(script_state_.get());
-  v8::Isolate* isolate = script_state_->GetIsolate();
-  RunCallback(connected_callback_.NewLocal(isolate), element);
+
+  connected_callback_->InvokeAndReportException(element, Vector<ScriptValue>());
 }
 
 void ScriptCustomElementDefinition::RunDisconnectedCallback(Element* element) {
-  if (!script_state_->ContextIsValid())
+  if (!disconnected_callback_)
     return;
-  ScriptState::Scope scope(script_state_.get());
-  v8::Isolate* isolate = script_state_->GetIsolate();
-  RunCallback(disconnected_callback_.NewLocal(isolate), element);
+
+  disconnected_callback_->InvokeAndReportException(element,
+                                                   Vector<ScriptValue>());
 }
 
 void ScriptCustomElementDefinition::RunAdoptedCallback(Element* element,
                                                        Document* old_owner,
                                                        Document* new_owner) {
-  if (!script_state_->ContextIsValid())
+  if (!adopted_callback_)
     return;
-  ScriptState::Scope scope(script_state_.get());
-  v8::Isolate* isolate = script_state_->GetIsolate();
-  v8::Local<v8::Value> argv[] = {
-      ToV8(old_owner, script_state_->GetContext()->Global(), isolate),
-      ToV8(new_owner, script_state_->GetContext()->Global(), isolate)};
-  RunCallback(adopted_callback_.NewLocal(isolate), element,
-              WTF_ARRAY_LENGTH(argv), argv);
+
+  ScriptState* script_state = adopted_callback_->CallbackRelevantScriptState();
+  if (!script_state->ContextIsValid())
+    return;
+  ScriptState::Scope scope(script_state);
+  Vector<ScriptValue> args({
+      ScriptValue(script_state, ToV8(old_owner, script_state)),
+      ScriptValue(script_state, ToV8(new_owner, script_state)),
+  });
+  adopted_callback_->InvokeAndReportException(element, args);
 }
 
 void ScriptCustomElementDefinition::RunAttributeChangedCallback(
@@ -327,17 +297,22 @@ void ScriptCustomElementDefinition::RunAttributeChangedCallback(
     const QualifiedName& name,
     const AtomicString& old_value,
     const AtomicString& new_value) {
-  if (!script_state_->ContextIsValid())
+  if (!attribute_changed_callback_)
     return;
-  ScriptState::Scope scope(script_state_.get());
-  v8::Isolate* isolate = script_state_->GetIsolate();
-  v8::Local<v8::Value> argv[] = {
-      V8String(isolate, name.LocalName()), V8StringOrNull(isolate, old_value),
-      V8StringOrNull(isolate, new_value),
-      V8StringOrNull(isolate, name.NamespaceURI()),
-  };
-  RunCallback(attribute_changed_callback_.NewLocal(isolate), element,
-              WTF_ARRAY_LENGTH(argv), argv);
+
+  v8::Isolate* isolate = attribute_changed_callback_->GetIsolate();
+  ScriptState* script_state =
+      attribute_changed_callback_->CallbackRelevantScriptState();
+  if (!script_state->ContextIsValid())
+    return;
+  ScriptState::Scope scope(script_state);
+  Vector<ScriptValue> args({
+      ScriptValue(script_state, V8String(isolate, name.LocalName())),
+      ScriptValue(script_state, V8StringOrNull(isolate, old_value)),
+      ScriptValue(script_state, V8StringOrNull(isolate, new_value)),
+      ScriptValue(script_state, V8StringOrNull(isolate, name.NamespaceURI())),
+  });
+  attribute_changed_callback_->InvokeAndReportException(element, args);
 }
 
 }  // namespace blink

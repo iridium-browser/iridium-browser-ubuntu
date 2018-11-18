@@ -12,6 +12,8 @@
 
 namespace views {
 
+class WindowEventFilter;
+
 class VIEWS_EXPORT DesktopWindowTreeHostPlatform
     : public aura::WindowTreeHostPlatform,
       public DesktopWindowTreeHost {
@@ -34,8 +36,8 @@ class VIEWS_EXPORT DesktopWindowTreeHostPlatform
   void Close() override;
   void CloseNow() override;
   aura::WindowTreeHost* AsWindowTreeHost() override;
-  void ShowWindowWithState(ui::WindowShowState show_state) override;
-  void ShowMaximizedWithBounds(const gfx::Rect& restored_bounds) override;
+  void Show(ui::WindowShowState show_state,
+            const gfx::Rect& restore_bounds) override;
   bool IsVisible() const override;
   void SetSize(const gfx::Size& size) override;
   void StackAbove(aura::Window* window) override;
@@ -77,6 +79,7 @@ class VIEWS_EXPORT DesktopWindowTreeHostPlatform
   void SetFullscreen(bool fullscreen) override;
   bool IsFullscreen() const override;
   void SetOpacity(float opacity) override;
+  void SetAspectRatio(const gfx::SizeF& aspect_ratio) override {}
   void SetWindowIcons(const gfx::ImageSkia& window_icon,
                       const gfx::ImageSkia& app_icon) override;
   void InitModalType(ui::ModalType modal_type) override;
@@ -89,12 +92,23 @@ class VIEWS_EXPORT DesktopWindowTreeHostPlatform
   bool ShouldCreateVisibilityController() const override;
 
   // WindowTreeHostPlatform:
+  void DispatchEvent(ui::Event* event) override;
   void OnClosed() override;
+  void OnWindowStateChanged(ui::PlatformWindowState new_state) override;
   void OnCloseRequest() override;
   void OnActivationChanged(bool active) override;
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(DesktopWindowTreeHostPlatformTest, HitTest);
+
+  void Relayout();
+
+  void RemoveNonClientEventFilter();
+
   Widget* GetWidget();
+
+  gfx::Rect ToDIPRect(const gfx::Rect& rect_in_pixels) const;
+  gfx::Rect ToPixelRect(const gfx::Rect& rect_in_dip) const;
 
   internal::NativeWidgetDelegate* const native_widget_delegate_;
   DesktopNativeWidgetAura* const desktop_native_widget_aura_;
@@ -105,6 +119,9 @@ class VIEWS_EXPORT DesktopWindowTreeHostPlatform
   bool got_on_closed_ = false;
 
   bool is_active_ = false;
+
+  // A handler for events intended for non client area.
+  std::unique_ptr<WindowEventFilter> non_client_window_event_filter_;
 
   base::WeakPtrFactory<DesktopWindowTreeHostPlatform> weak_factory_{this};
 

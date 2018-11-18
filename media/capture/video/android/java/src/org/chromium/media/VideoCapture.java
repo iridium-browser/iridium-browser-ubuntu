@@ -62,23 +62,34 @@ public abstract class VideoCapture {
     @CalledByNative
     public abstract boolean allocate(int width, int height, int frameRate);
 
+    // Success is indicated by returning true and a callback to
+    // nativeOnStarted(), which may occur synchronously or asynchronously.
+    // Failure can be indicated by one of the following:
+    // * Returning false. In this case no callback to nativeOnStarted() is made.
+    // * Returning true, and asynchronously invoking nativeOnError. In this case
+    //   also no callback to nativeOnStarted() is made.
     @CalledByNative
-    public abstract boolean startCapture();
+    public abstract boolean startCaptureMaybeAsync();
 
+    // Blocks until it is guaranteed that no more frames are sent.
     @CalledByNative
-    public abstract boolean stopCapture();
+    public abstract boolean stopCaptureAndBlockUntilStopped();
 
+    // Replies by calling nativeOnGetPhotoCapabilitiesReply(). Will pass |null|
+    // for parameter |result| to indicate failure.
     @CalledByNative
-    public abstract PhotoCapabilities getPhotoCapabilities();
+    public abstract void getPhotoCapabilitiesAsync(long callbackId);
 
     /**
      * @param zoom Zoom level, should be ignored if 0.
      * @param focusMode Focus mode following AndroidMeteringMode enum.
+     * @param focusDistance Desired distance to plane of sharpest focus.
      * @param exposureMode Exposure mode following AndroidMeteringMode enum.
      * @param pointsOfInterest2D 2D normalized points of interest, marshalled with
      * x coordinate first followed by the y coordinate.
      * @param hasExposureCompensation Indicates if |exposureCompensation| is set.
      * @param exposureCompensation Adjustment to auto exposure. 0 means not adjusted.
+     * @param exposureTime Duration each pixel is exposed to light (in nanoseconds).
      * @param whiteBalanceMode White Balance mode following AndroidMeteringMode enum.
      * @param iso Sensitivity to light. 0, which would be invalid, means ignore.
      * @param hasRedEyeReduction Indicates if |redEyeReduction| is set.
@@ -89,14 +100,15 @@ public abstract class VideoCapture {
      * @param torch Torch setting, true meaning on.
      */
     @CalledByNative
-    public abstract void setPhotoOptions(double zoom, int focusMode, int exposureMode, double width,
-            double height, float[] pointsOfInterest2D, boolean hasExposureCompensation,
-            double exposureCompensation, int whiteBalanceMode, double iso,
-            boolean hasRedEyeReduction, boolean redEyeReduction, int fillLightMode,
-            boolean hasTorch, boolean torch, double colorTemperature);
+    public abstract void setPhotoOptions(double zoom, int focusMode, double focusDistance,
+            int exposureMode, double width, double height, float[] pointsOfInterest2D,
+            boolean hasExposureCompensation, double exposureCompensation, double exposureTime,
+            int whiteBalanceMode, double iso, boolean hasRedEyeReduction, boolean redEyeReduction,
+            int fillLightMode, boolean hasTorch, boolean torch, double colorTemperature);
 
+    // Replies by calling nativeOnPhotoTaken().
     @CalledByNative
-    public abstract boolean takePhoto(final long callbackId);
+    public abstract void takePhotoAsync(long callbackId);
 
     @CalledByNative
     public abstract void deallocate();
@@ -164,6 +176,12 @@ public abstract class VideoCapture {
         return orientation;
     }
 
+    // {@link nativeOnPhotoTaken()} needs to be called back if there's any
+    // problem after {@link takePhotoAsync()} has returned true.
+    protected void notifyTakePhotoError(long callbackId) {
+        nativeOnPhotoTaken(mNativeVideoCaptureDeviceAndroid, callbackId, null);
+    }
+
     /**
      * Finds the framerate range matching |targetFramerate|. Tries to find a range with as low of a
      * minimum value as possible to allow the camera adjust based on the lighting conditions.
@@ -228,12 +246,24 @@ public abstract class VideoCapture {
             long timestamp);
 
     // Method for VideoCapture implementations to signal an asynchronous error.
-    public native void nativeOnError(long nativeVideoCaptureDeviceAndroid, String message);
+    public native void nativeOnError(
+            long nativeVideoCaptureDeviceAndroid, int androidVideoCaptureError, String message);
 
-    // Method for VideoCapture implementations to send Photos back to.
+    // Method for VideoCapture implementations to signal that a frame was dropped.
+    public native void nativeOnFrameDropped(
+            long nativeVideoCaptureDeviceAndroid, int androidVideoCaptureFrameDropReason);
+
+    public native void nativeOnGetPhotoCapabilitiesReply(
+            long nativeVideoCaptureDeviceAndroid, long callbackId, PhotoCapabilities result);
+
+    // Callback for calls to takePhoto(). This can indicate both success and
+    // failure. Failure is indicated by |data| being null.
     public native void nativeOnPhotoTaken(
             long nativeVideoCaptureDeviceAndroid, long callbackId, byte[] data);
 
     // Method for VideoCapture implementations to report device started event.
     public native void nativeOnStarted(long nativeVideoCaptureDeviceAndroid);
+
+    public native void nativeDCheckCurrentlyOnIncomingTaskRunner(
+            long nativeVideoCaptureDeviceAndroid);
 }

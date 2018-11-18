@@ -20,6 +20,37 @@
 
 namespace settings {
 
+namespace {
+
+#if defined(OS_CHROMEOS)
+// Triggers a TPM firmware update using the least destructive mode from
+// |available_modes|.
+void TriggerTPMFirmwareUpdate(
+    const std::set<chromeos::tpm_firmware_update::Mode>& available_modes) {
+  using chromeos::tpm_firmware_update::Mode;
+
+  // Decide which update mode to use.
+  for (Mode mode :
+       {Mode::kPreserveDeviceState, Mode::kPowerwash, Mode::kCleanup}) {
+    if (available_modes.count(mode) == 0) {
+      continue;
+    }
+
+    // Save a TPM firmware update request in local state, which
+    // will trigger the reset screen to appear on reboot.
+    PrefService* prefs = g_browser_process->local_state();
+    prefs->SetBoolean(prefs::kFactoryResetRequested, true);
+    prefs->SetInteger(prefs::kFactoryResetTPMFirmwareUpdateMode,
+                      static_cast<int>(mode));
+    prefs->CommitPendingWrite();
+    chrome::AttemptRelaunch();
+    return;
+  }
+}
+#endif  // defined(OS_CHROMEOS)
+
+}  // namespace
+
 BrowserLifetimeHandler::BrowserLifetimeHandler() {}
 
 BrowserLifetimeHandler::~BrowserLifetimeHandler() {}
@@ -66,26 +97,19 @@ void BrowserLifetimeHandler::HandleFactoryReset(
   bool tpm_firmware_update_requested = args_list[0].GetBool();
 
   if (tpm_firmware_update_requested) {
-    chromeos::tpm_firmware_update::ShouldOfferUpdateViaPowerwash(
-        base::BindOnce([](bool offer_update) {
-          if (!offer_update)
-            return;
-
-          PrefService* prefs = g_browser_process->local_state();
-          prefs->SetBoolean(prefs::kFactoryResetRequested, true);
-          prefs->SetBoolean(prefs::kFactoryResetTPMFirmwareUpdateRequested,
-                            true);
-          prefs->CommitPendingWrite();
-          chrome::AttemptRelaunch();
-        }), base::TimeDelta());
+    chromeos::tpm_firmware_update::GetAvailableUpdateModes(
+        base::BindOnce(&TriggerTPMFirmwareUpdate), base::TimeDelta());
     return;
   }
 
+  // TODO(crbug.com/891905): Centralize powerwash restriction checks.
   policy::BrowserPolicyConnectorChromeOS* connector =
       g_browser_process->platform_part()->browser_policy_connector_chromeos();
-  bool allow_powerwash = !connector->IsEnterpriseManaged() &&
+  bool allow_powerwash =
+      !connector->IsEnterpriseManaged() &&
       !user_manager::UserManager::Get()->IsLoggedInAsGuest() &&
-      !user_manager::UserManager::Get()->IsLoggedInAsSupervisedUser();
+      !user_manager::UserManager::Get()->IsLoggedInAsSupervisedUser() &&
+      !user_manager::UserManager::Get()->IsLoggedInAsChildUser();
 
   if (!allow_powerwash)
     return;

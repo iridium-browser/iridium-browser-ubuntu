@@ -11,35 +11,61 @@
 namespace ash {
 namespace features {
 
-// Enables the keyboard shortcut to move active window between displays.
-// TODO(warx): Remove this after the feature is fully launched.
-// https://crbug.com/773749.
-ASH_PUBLIC_EXPORT extern const base::Feature kDisplayMoveWindowAccels;
-
 // Enables the docked (a.k.a. picture-in-picture) magnifier.
 // TODO(afakhry): Remove this after the feature is fully launched.
 // https://crbug.com/709824.
 ASH_PUBLIC_EXPORT extern const base::Feature kDockedMagnifier;
+
+// Enables dragging an app window when it is in tablet mode.
+// TODO(minch): Remove this after the feature is launched.
+// https://crbug.com/847587.
+ASH_PUBLIC_EXPORT extern const base::Feature kDragAppsInTabletMode;
+
+// Enables dragging one or more tabs out of a browser window in tablet mode.
+// TODO(xdai): Remove this after the feature is launched.
+// https://crbug.com/823769.
+ASH_PUBLIC_EXPORT extern const base::Feature kDragTabsInTabletMode;
 
 // Enables the keyboard shortcut viewer.
 // TODO(wutao): Remove this after the feature is fully launched.
 // https://crbug.com/755448.
 ASH_PUBLIC_EXPORT extern const base::Feature kKeyboardShortcutViewer;
 
-// Enables the new overview animations.
-// TODO(wutao): Remove this after the feature is fully launched.
-// https://crbug.com/801465.
-ASH_PUBLIC_EXPORT extern const base::Feature kNewOverviewAnimations;
+// Enables the keyboard shortcut viewer mojo app.
+// TODO(msw): Remove this after the feature is fully launched.
+// https://crbug.com/841020.
+ASH_PUBLIC_EXPORT extern const base::Feature kKeyboardShortcutViewerApp;
 
-// Enables the new overview animations.
+// Enables notifications on the lock screen.
+ASH_PUBLIC_EXPORT extern const base::Feature kLockScreenNotifications;
+
+// Enables inline reply on notifications on the lock screen.
+// This option is effective when |kLockScreenNotification| is enabled.
+ASH_PUBLIC_EXPORT extern const base::Feature kLockScreenInlineReply;
+
+// Supports the feature to hide sensitive content in notifications on the lock
+// screen. This option is effective when |kLockScreenNotification| is enabled.
+ASH_PUBLIC_EXPORT extern const base::Feature
+    kLockScreenHideSensitiveNotificationsSupport;
+
+// Enables new message list view. https://crbug.com/769219
+ASH_PUBLIC_EXPORT extern const base::Feature kNewMessageListView;
+
+// Enables the new wallpaper picker.
+// TODO(wzang): Remove this after the feature is fully launched.
+// https://crbug.com/777293.
+ASH_PUBLIC_EXPORT extern const base::Feature kNewWallpaperPicker;
+
+// Enables the Night Light feature.
+ASH_PUBLIC_EXPORT extern const base::Feature kNightLight;
+
+// Enables notification scroll bar in UnifiedSystemTray.
+ASH_PUBLIC_EXPORT extern const base::Feature kNotificationScrollBar;
+
+// Enables swipe to close in overview mode.
 // TODO(sammiequon): Remove this after the feature is fully launched.
-// https://crbug.com/821608.
-ASH_PUBLIC_EXPORT extern const base::Feature kNewOverviewUi;
-
-// Enables persistent window bounds in multi-displays scenario.
-// TODO(warx): Remove this after the feature is fully launched.
-// https://crbug.com/805046.
-ASH_PUBLIC_EXPORT extern const base::Feature kPersistentWindowBounds;
+// https://crbug.com/828646.
+ASH_PUBLIC_EXPORT extern const base::Feature kOverviewSwipeToClose;
 
 // Enables new system menu.
 ASH_PUBLIC_EXPORT extern const base::Feature kSystemTrayUnified;
@@ -47,29 +73,40 @@ ASH_PUBLIC_EXPORT extern const base::Feature kSystemTrayUnified;
 // Enables trilinear filtering.
 ASH_PUBLIC_EXPORT extern const base::Feature kTrilinearFiltering;
 
-// Enables notifications on the lock screen.
-ASH_PUBLIC_EXPORT extern const base::Feature kLockScreenNotifications;
+// Enables running an external binary which provides lock screen authentication.
+ASH_PUBLIC_EXPORT extern const base::Feature kUnlockWithExternalBinary;
 
-// Enables mode-specific power button behavior.
-// TODO(derat): Remove this after we make a decision about whether to enable it
-// by default: https://crbug.com/819276
-ASH_PUBLIC_EXPORT extern const base::Feature kModeSpecificPowerButton;
+// Enables views login.
+ASH_PUBLIC_EXPORT extern const base::Feature kViewsLogin;
 
-ASH_PUBLIC_EXPORT bool IsDisplayMoveWindowAccelsEnabled();
+// Enables using the BluetoothSystem Mojo interface for Bluetooth operations.
+ASH_PUBLIC_EXPORT extern const base::Feature kUseBluetoothSystemInAsh;
 
 ASH_PUBLIC_EXPORT bool IsDockedMagnifierEnabled();
 
 ASH_PUBLIC_EXPORT bool IsKeyboardShortcutViewerEnabled();
 
-ASH_PUBLIC_EXPORT bool IsPersistentWindowBoundsEnabled();
+ASH_PUBLIC_EXPORT bool IsKeyboardShortcutViewerAppEnabled();
+
+ASH_PUBLIC_EXPORT bool IsLockScreenNotificationsEnabled();
+
+ASH_PUBLIC_EXPORT bool IsLockScreenInlineReplyEnabled();
+
+ASH_PUBLIC_EXPORT bool IsLockScreenHideSensitiveNotificationsSupported();
+
+ASH_PUBLIC_EXPORT bool IsNewMessageListViewEnabled();
+
+ASH_PUBLIC_EXPORT bool IsNewWallpaperPickerEnabled();
+
+ASH_PUBLIC_EXPORT bool IsNightLightEnabled();
+
+ASH_PUBLIC_EXPORT bool IsNotificationScrollBarEnabled();
 
 ASH_PUBLIC_EXPORT bool IsSystemTrayUnifiedEnabled();
 
 ASH_PUBLIC_EXPORT bool IsTrilinearFilteringEnabled();
 
-ASH_PUBLIC_EXPORT bool IsLockScreenNotificationsEnabled();
-
-ASH_PUBLIC_EXPORT bool IsModeSpecificPowerButtonEnabled();
+ASH_PUBLIC_EXPORT bool IsViewsLoginEnabled();
 
 }  // namespace features
 }  // namespace ash

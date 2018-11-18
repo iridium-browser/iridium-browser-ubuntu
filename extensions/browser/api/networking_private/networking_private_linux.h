@@ -11,7 +11,6 @@
 #include <vector>
 
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
 #include "base/threading/thread.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "extensions/browser/api/networking_private/networking_private_delegate.h"
@@ -273,7 +272,7 @@ class NetworkingPrivateLinux : public NetworkingPrivateDelegate {
   // Holds the current mapping of known networks. Only access on |dbus_thread_|.
   std::unique_ptr<NetworkMap> network_map_;
   // Observers to Network Events.
-  base::ObserverList<NetworkingPrivateDelegateObserver>
+  base::ObserverList<NetworkingPrivateDelegateObserver>::Unchecked
       network_events_observers_;
 
   DISALLOW_COPY_AND_ASSIGN(NetworkingPrivateLinux);

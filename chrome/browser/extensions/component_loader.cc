@@ -19,7 +19,6 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/pdf/pdf_extension_util.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/webui/md_bookmarks/md_bookmarks_ui.h"
 #include "chrome/common/buildflags.h"
 #include "chrome/common/channel_info.h"
 #include "chrome/common/chrome_paths.h"
@@ -55,7 +54,6 @@
 #include "ui/chromeos/devicetype_utils.h"
 #include "ui/file_manager/grit/file_manager_resources.h"
 #include "ui/keyboard/grit/keyboard_resources.h"
-#include "ui/keyboard/keyboard_util.h"
 #endif
 
 #if defined(GOOGLE_CHROME_BUILD)
@@ -120,7 +118,7 @@ ComponentLoader::ComponentExtensionInfo::ComponentExtensionInfo(
     const base::FilePath& directory)
     : manifest(std::move(manifest_param)), root_directory(directory) {
   if (!root_directory.IsAbsolute()) {
-    CHECK(PathService::Get(chrome::DIR_RESOURCES, &root_directory));
+    CHECK(base::PathService::Get(chrome::DIR_RESOURCES, &root_directory));
     root_directory = root_directory.Append(directory);
   }
   extension_id = GenerateId(manifest.get(), root_directory);
@@ -272,8 +270,7 @@ void ComponentLoader::Remove(const base::FilePath& root_directory) {
 }
 
 void ComponentLoader::Remove(const std::string& id) {
-  for (RegisteredComponentExtensions::iterator it =
-           component_extensions_.begin();
+  for (auto it = component_extensions_.begin();
        it != component_extensions_.end(); ++it) {
     if (it->extension_id == id) {
       UnloadComponent(&(*it));
@@ -324,9 +321,7 @@ void ComponentLoader::AddGalleryExtension() {
 void ComponentLoader::AddZipArchiverExtension() {
 #if defined(OS_CHROMEOS)
   base::FilePath resources_path;
-  if ((chromeos::switches::IsZipArchiverPackerEnabled() ||
-       chromeos::switches::IsZipArchiverUnpackerEnabled()) &&
-      PathService::Get(chrome::DIR_RESOURCES, &resources_path)) {
+  if (base::PathService::Get(chrome::DIR_RESOURCES, &resources_path)) {
     AddWithNameAndDescriptionFromDir(
         resources_path.Append(extension_misc::kZipArchiverExtensionPath),
         extension_misc::kZipArchiverExtensionId,
@@ -372,7 +367,7 @@ void ComponentLoader::AddChromeOsSpeechSynthesisExtension() {
       extension_misc::kSpeechSynthesisExtensionId,
       base::Bind(&ComponentLoader::EnableFileSystemInGuestMode,
                  weak_factory_.GetWeakPtr(),
-                 extension_misc::kChromeVoxExtensionId));
+                 extension_misc::kSpeechSynthesisExtensionId));
 }
 #endif
 
@@ -463,23 +458,11 @@ void ComponentLoader::AddDefaultComponentExtensions(
 
   // Skip all other extensions that require user session presence.
   if (!skip_session_components) {
-    const base::CommandLine* command_line =
-        base::CommandLine::ForCurrentProcess();
-    if (!command_line->HasSwitch(chromeos::switches::kGuestSession) &&
-        !MdBookmarksUI::IsEnabled()) {
-      Add(IDR_BOOKMARKS_MANIFEST,
-          base::FilePath(FILE_PATH_LITERAL("bookmark_manager")));
-    }
-
     Add(IDR_CROSH_BUILTIN_MANIFEST, base::FilePath(FILE_PATH_LITERAL(
         "/usr/share/chromeos-assets/crosh_builtin")));
   }
 #else  // defined(OS_CHROMEOS)
   DCHECK(!skip_session_components);
-  if (!MdBookmarksUI::IsEnabled()) {
-    Add(IDR_BOOKMARKS_MANIFEST,
-        base::FilePath(FILE_PATH_LITERAL("bookmark_manager")));
-  }
 #if BUILDFLAG(ENABLE_PRINTING)
 #if 0 /* IRIDIUM */
   // Cloud Print component app. Not required on Chrome OS.
@@ -535,9 +518,9 @@ void ComponentLoader::AddDefaultComponentExtensionsWithBackgroundPages(
   // Component extensions with background pages are not enabled during tests
   // because they generate a lot of background behavior that can interfere.
   if (!enable_background_extensions_during_testing &&
-      (command_line->HasSwitch(switches::kTestType) ||
-          command_line->HasSwitch(
-              switches::kDisableComponentExtensionsWithBackgroundPages))) {
+      (command_line->HasSwitch(::switches::kTestType) ||
+       command_line->HasSwitch(
+           ::switches::kDisableComponentExtensionsWithBackgroundPages))) {
     return;
   }
 
@@ -622,9 +605,9 @@ void ComponentLoader::
   // Component extensions with background pages are not enabled during tests
   // because they generate a lot of background behavior that can interfere.
   if (!enable_background_extensions_during_testing &&
-      (command_line->HasSwitch(switches::kTestType) ||
+      (command_line->HasSwitch(::switches::kTestType) ||
        command_line->HasSwitch(
-           switches::kDisableComponentExtensionsWithBackgroundPages))) {
+           ::switches::kDisableComponentExtensionsWithBackgroundPages))) {
     return;
   }
 

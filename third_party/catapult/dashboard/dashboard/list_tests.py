@@ -13,7 +13,7 @@ import json
 
 from google.appengine.ext import ndb
 
-from dashboard import layered_cache
+from dashboard.common import layered_cache
 from dashboard.common import request_handler
 from dashboard.common import utils
 from dashboard.models import graph_data
@@ -473,17 +473,16 @@ def _GetCoreTestPathsForTest(path, return_selected):
 
   paths = []
   parent_test = utils.TestKey(path).get()
-  # Monitoring information is stored on the suite's entity
-  monitored = utils.TestKey('/'.join(path.split('/')[:3])).get().monitored
+
   # The parent test is always considered core as long as it has rows.
   if return_selected and parent_test.has_rows:
     paths.append(path)
   for subtest in GetTestsMatchingPattern(
       '%s/*' % path, only_with_rows=True, list_entities=True):
     # All subtests that are monitored are core.
-    if return_selected and subtest.key in monitored:
+    if return_selected and subtest.sheriff:
       paths.append(utils.TestPath(subtest.key))
-    elif not return_selected and subtest.key not in monitored:
+    elif not return_selected and not subtest.sheriff:
       paths.append(utils.TestPath(subtest.key))
 
 

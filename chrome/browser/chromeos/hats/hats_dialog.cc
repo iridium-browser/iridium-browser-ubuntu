@@ -6,13 +6,14 @@
 
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/browser_resources.h"
 #include "chrome/grit/generated_resources.h"
-#include "chromeos/system/version_loader.h"
+#include "chromeos/dbus/util/version_loader.h"
+#include "components/language/core/browser/pref_names.h"
 #include "components/language/core/common/locale_util.h"
 #include "components/prefs/pref_service.h"
 #include "components/version_info/version_info.h"
@@ -119,7 +120,7 @@ std::string GetFormattedSiteContext(std::string user_locale,
 void HatsDialog::CreateAndShow(bool is_google_account) {
   Profile* profile = ProfileManager::GetActiveUserProfile();
   std::string user_locale =
-      profile->GetPrefs()->GetString(prefs::kApplicationLocale);
+      profile->GetPrefs()->GetString(language::prefs::kApplicationLocale);
   language::ConvertToActualUILocale(&user_locale);
   if (!user_locale.length())
     user_locale = kDefaultProfileLocale;
@@ -127,7 +128,7 @@ void HatsDialog::CreateAndShow(bool is_google_account) {
   std::unique_ptr<HatsDialog> hats_dialog(new HatsDialog);
 
   base::PostTaskWithTraitsAndReplyWithResult(
-      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
       base::Bind(&GetFormattedSiteContext, user_locale, kDeviceInfoStopKeyword),
       base::Bind(&HatsDialog::Show, base::Passed(&hats_dialog),
                  is_google_account ? kGooglerSiteID : kSiteID));

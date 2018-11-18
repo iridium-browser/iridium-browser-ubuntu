@@ -6,13 +6,17 @@
 
 import atexit
 import httplib
+import json
 import os
 import platform
+import random
 import signal
+import socket
 import stat
 import subprocess
 import sys
 import tempfile
+import time
 import urlparse
 import zipfile
 
@@ -74,7 +78,11 @@ def GetAbsolutePathOfUserPath(user_path):
 
 
 def _DeleteDir(path):
-  """Deletes a directory recursively, which must exist."""
+  """Deletes a directory recursively, which must exist.
+
+  Note that this function can fail and raise OSError if another process is
+  making changes to the directory at the same time.
+  """
   # Don't use shutil.rmtree because it can't delete read-only files on Win.
   for root, dirs, files in os.walk(path, topdown=False):
     for name in files:
@@ -225,3 +233,66 @@ def AddLink(label, url):
     url: A string of the URL.
   """
   print '@@@STEP_LINK@%s@%s@@@' % (label, url)
+
+
+def FindProbableFreePorts():
+  """Get an generator returning random free ports on the system.
+
+  Note that this function has an inherent race condition: some other process
+  may bind to the port after we return it, so it may no longer be free by then.
+  The workaround is to do this inside a retry loop. Do not use this function
+  if there is any alternative.
+  """
+  # This is the range of dynamic ports. See RFC6335 page 10.
+  dynamic_ports = range(49152, 65535)
+  random.shuffle(dynamic_ports)
+
+  for port in dynamic_ports:
+    try:
+      socket.create_connection(('127.0.0.1', port), 0.2).close()
+    except socket.error:
+      # If we can't connect to the port, then clearly nothing is listening on
+      # it.
+      yield port
+  raise RuntimeError('Cannot find open port')
+
+
+def WriteResultToJSONFile(tests, result, json_path):
+  """Write a unittest result object to a file as a JSON.
+
+  This takes a result object from a run of Python unittest tests and writes
+  it to a file in the correct format for the --isolated-script-test-output
+  argument passed to test isolates.
+
+  Args:
+    tests: unittest.TestSuite that was run to get the result object; iterated
+      to get all test cases that were run.
+    result: unittest.TextTestResult object returned from running unittest tests.
+    json_path: desired path to JSON file of result.
+  """
+  output = {
+      'interrupted': False,
+      'num_failures_by_type': {},
+      'path_delimiter': '.',
+      'seconds_since_epoch': time.time(),
+      'tests': {},
+      'version': 3,
+  }
+
+  for test in tests:
+    output['tests'][test.id()] = {
+        'expected': 'PASS',
+        'actual': 'PASS'
+    }
+
+  for failure in result.failures + result.errors:
+    output['tests'][failure[0].id()]['actual'] = 'FAIL'
+    output['tests'][failure[0].id()]['is_unexpected'] = True
+
+  num_fails = len(result.failures) + len(result.errors)
+  output['num_failures_by_type']['FAIL'] = num_fails
+  output['num_failures_by_type']['PASS'] = len(output['tests']) - num_fails
+
+  with open(json_path, 'w') as script_out_file:
+    json.dump(output, script_out_file)
+    script_out_file.write('\n')

@@ -11,6 +11,7 @@
 #include "base/memory/singleton.h"
 #include "build/build_config.h"
 #include "components/viz/common/surfaces/surface_id.h"
+#include "content/public/browser/file_select_listener.h"
 #include "content/public/browser/keyboard_event_processing_result.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/security_style_explanations.h"
@@ -32,10 +33,6 @@ WebContents* WebContentsDelegate::OpenURLFromTab(WebContents* source,
 bool WebContentsDelegate::ShouldTransferNavigation(
     bool is_main_frame_navigation) {
   return true;
-}
-
-bool WebContentsDelegate::IsPopupOrPanel(const WebContents* source) const {
-  return false;
 }
 
 bool WebContentsDelegate::CanOverscrollContent() const { return false; }
@@ -162,14 +159,28 @@ content::ColorChooser* WebContentsDelegate::OpenColorChooser(
   return nullptr;
 }
 
+void WebContentsDelegate::RunFileChooser(
+    RenderFrameHost* render_frame_host,
+    std::unique_ptr<FileSelectListener> listener,
+    const blink::mojom::FileChooserParams& params) {
+  listener->FileSelectionCanceled();
+}
+
+void WebContentsDelegate::EnumerateDirectory(
+    WebContents* web_contents,
+    std::unique_ptr<FileSelectListener> listener,
+    const base::FilePath& path) {
+  listener->FileSelectionCanceled();
+}
+
 void WebContentsDelegate::RequestMediaAccessPermission(
     WebContents* web_contents,
     const MediaStreamRequest& request,
-    const MediaResponseCallback& callback) {
+    MediaResponseCallback callback) {
   LOG(ERROR) << "WebContentsDelegate::RequestMediaAccessPermission: "
              << "Not supported.";
-  callback.Run(MediaStreamDevices(), MEDIA_DEVICE_NOT_SUPPORTED,
-               std::unique_ptr<MediaStreamUI>());
+  std::move(callback).Run(MediaStreamDevices(), MEDIA_DEVICE_NOT_SUPPORTED,
+                          std::unique_ptr<MediaStreamUI>());
 }
 
 bool WebContentsDelegate::CheckMediaAccessPermission(
@@ -188,11 +199,6 @@ std::string WebContentsDelegate::GetDefaultMediaDeviceID(
 }
 
 #if defined(OS_ANDROID)
-base::android::ScopedJavaLocalRef<jobject>
-WebContentsDelegate::GetContentVideoViewEmbedder() {
-  return base::android::ScopedJavaLocalRef<jobject>();
-}
-
 bool WebContentsDelegate::ShouldBlockMediaRequest(const GURL& url) {
   return false;
 }
@@ -265,14 +271,27 @@ int WebContentsDelegate::GetBottomControlsHeight() const {
   return 0;
 }
 
-bool WebContentsDelegate::DoBrowserControlsShrinkBlinkSize() const {
+bool WebContentsDelegate::DoBrowserControlsShrinkRendererSize(
+    const WebContents* web_contents) const {
   return false;
 }
 
-void WebContentsDelegate::UpdatePictureInPictureSurfaceId(
-    const viz::SurfaceId& surface_id,
-    const gfx::Size& natural_size) {}
+void WebContentsDelegate::SetTopControlsGestureScrollInProgress(
+    bool in_progress) {}
+
+gfx::Size WebContentsDelegate::EnterPictureInPicture(const viz::SurfaceId&,
+                                                     const gfx::Size&) {
+  return gfx::Size();
+}
 
 void WebContentsDelegate::ExitPictureInPicture() {}
+
+std::unique_ptr<content::WebContents> WebContentsDelegate::SwapWebContents(
+    content::WebContents* old_contents,
+    std::unique_ptr<content::WebContents> new_contents,
+    bool did_start_load,
+    bool did_finish_load) {
+  return new_contents;
+}
 
 }  // namespace content

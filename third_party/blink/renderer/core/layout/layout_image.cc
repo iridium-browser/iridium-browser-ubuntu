@@ -28,20 +28,83 @@
 
 #include "third_party/blink/renderer/core/layout/layout_image.h"
 
+#include "third_party/blink/public/common/feature_policy/feature_policy.h"
 #include "third_party/blink/renderer/core/dom/pseudo_element.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/frame/use_counter.h"
 #include "third_party/blink/renderer/core/html/html_area_element.h"
 #include "third_party/blink/renderer/core/html/html_image_element.h"
+#include "third_party/blink/renderer/core/html/media/media_element_parser_helpers.h"
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/layout/hit_test_result.h"
+#include "third_party/blink/renderer/core/layout/intrinsic_sizing_info.h"
 #include "third_party/blink/renderer/core/layout/layout_view.h"
 #include "third_party/blink/renderer/core/loader/resource/image_resource_content.h"
+#include "third_party/blink/renderer/core/paint/image_element_timing.h"
 #include "third_party/blink/renderer/core/paint/image_painter.h"
+#include "third_party/blink/renderer/core/paint/paint_layer.h"
 #include "third_party/blink/renderer/core/svg/graphics/svg_image.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 
 namespace blink {
+
+namespace {
+constexpr float kmax_downscaling_ratio = 2.0f;
+
+bool CheckForOptimizedImagePolicy(const LocalFrame& frame,
+                                  LayoutImage* layout_image,
+                                  ImageResourceContent* new_image) {
+  // Invert the image if the document does not have the 'legacy-image-formats'
+  // feature enabled, and the image is not one of the allowed formats.
+  if (RuntimeEnabledFeatures::ExperimentalProductivityFeaturesEnabled() &&
+      !frame.DeprecatedIsFeatureEnabled(
+          mojom::FeaturePolicyFeature::kLegacyImageFormats)) {
+    if (!new_image->IsAcceptableContentType()) {
+      return true;
+    }
+  }
+  // Invert the image if the document does not have the image-compression'
+  // feature enabled and the image is not sufficiently-well-compressed.
+  if (RuntimeEnabledFeatures::ExperimentalProductivityFeaturesEnabled() &&
+      !frame.DeprecatedIsFeatureEnabled(
+          mojom::FeaturePolicyFeature::kImageCompression)) {
+    if (!new_image->IsAcceptableCompressionRatio())
+      return true;
+  }
+  return false;
+}
+
+bool CheckForMaxDownscalingImagePolicy(const LocalFrame& frame,
+                                       ImageResourceContent* new_image,
+                                       LayoutImage* layout_image) {
+  DCHECK(new_image);
+  if (!RuntimeEnabledFeatures::ExperimentalProductivityFeaturesEnabled() ||
+      frame.DeprecatedIsFeatureEnabled(
+          mojom::FeaturePolicyFeature::kMaxDownscalingImage))
+    return false;
+  if (auto* image = new_image->GetImage()) {
+    // Invert the image if the image's size is more than 2 times bigger than the
+    // size it is being laid-out by.
+    LayoutUnit layout_width = layout_image->ContentWidth();
+    LayoutUnit layout_height = layout_image->ContentHeight();
+    int image_width = image->width();
+    int image_height = image->height();
+
+    if (layout_width > 0 && layout_height > 0 && image_width > 0 &&
+        image_height > 0) {
+      double device_pixel_ratio = frame.DevicePixelRatio();
+      if (LayoutUnit(image_width / (kmax_downscaling_ratio *
+                                    device_pixel_ratio)) > layout_width ||
+          LayoutUnit(image_height / (kmax_downscaling_ratio *
+                                     device_pixel_ratio)) > layout_height)
+        return true;
+    }
+  }
+  return false;
+}
+
+}  // namespace
 
 using namespace HTMLNames;
 
@@ -49,7 +112,9 @@ LayoutImage::LayoutImage(Element* element)
     : LayoutReplaced(element, LayoutSize()),
       did_increment_visually_non_empty_pixel_count_(false),
       is_generated_content_(false),
-      image_device_pixel_ratio_(1.0f) {}
+      image_device_pixel_ratio_(1.0f),
+      is_legacy_format_or_compressed_image_(false),
+      is_downscaled_image_(false) {}
 
 LayoutImage* LayoutImage::CreateAnonymous(PseudoElement& pseudo) {
   LayoutImage* image = new LayoutImage(nullptr);
@@ -62,6 +127,11 @@ LayoutImage::~LayoutImage() = default;
 void LayoutImage::WillBeDestroyed() {
   DCHECK(image_resource_);
   image_resource_->Shutdown();
+  if (RuntimeEnabledFeatures::ElementTimingEnabled()) {
+    if (LocalDOMWindow* window = GetDocument().domWindow())
+      ImageElementTiming::From(*window).NotifyWillBeDestroyed(this);
+  }
+
   LayoutReplaced::WillBeDestroyed();
 }
 
@@ -72,7 +142,7 @@ void LayoutImage::StyleDidChange(StyleDifference diff,
   bool old_orientation =
       old_style ? old_style->RespectImageOrientation()
                 : ComputedStyleInitialValues::InitialRespectImageOrientation();
-  if (Style() && Style()->RespectImageOrientation() != old_orientation)
+  if (Style() && StyleRef().RespectImageOrientation() != old_orientation)
     IntrinsicSizeChanged();
 }
 
@@ -83,8 +153,7 @@ void LayoutImage::SetImageResource(LayoutImageResource* image_resource) {
 }
 
 void LayoutImage::ImageChanged(WrappedImagePtr new_image,
-                               CanDeferInvalidation defer,
-                               const IntRect* rect) {
+                               CanDeferInvalidation defer) {
   DCHECK(View());
   DCHECK(View()->GetFrameView());
   if (DocumentBeingDestroyed())
@@ -92,7 +161,7 @@ void LayoutImage::ImageChanged(WrappedImagePtr new_image,
 
   if (HasBoxDecorationBackground() || HasMask() || HasShapeOutside() ||
       HasReflection())
-    LayoutReplaced::ImageChanged(new_image, defer, rect);
+    LayoutReplaced::ImageChanged(new_image, defer);
 
   if (!image_resource_)
     return;
@@ -125,10 +194,13 @@ void LayoutImage::ImageChanged(WrappedImagePtr new_image,
   if (!did_increment_visually_non_empty_pixel_count_) {
     // At a zoom level of 1 the image is guaranteed to have an integer size.
     View()->GetFrameView()->IncrementVisuallyNonEmptyPixelCount(
-        FlooredIntSize(image_resource_->ImageSize(1.0f)));
+        FlooredIntSize(ImageSizeOverriddenByIntrinsicSize(1.0f)));
     did_increment_visually_non_empty_pixel_count_ = true;
   }
 
+  // The replaced content transform depends on the intrinsic size (see:
+  // FragmentPaintPropertyTreeBuilder::UpdateReplacedContentTransform).
+  SetNeedsPaintPropertyUpdate();
   InvalidatePaintAndMarkForLayoutIfNeeded(defer);
 }
 
@@ -141,8 +213,9 @@ void LayoutImage::UpdateIntrinsicSizeIfNeeded(const LayoutSize& new_size) {
 void LayoutImage::InvalidatePaintAndMarkForLayoutIfNeeded(
     CanDeferInvalidation defer) {
   LayoutSize old_intrinsic_size = IntrinsicSize();
-  LayoutSize new_intrinsic_size =
-      RoundedLayoutSize(image_resource_->ImageSize(Style()->EffectiveZoom()));
+
+  LayoutSize new_intrinsic_size = RoundedLayoutSize(
+      ImageSizeOverriddenByIntrinsicSize(StyleRef().EffectiveZoom()));
   UpdateIntrinsicSizeIfNeeded(new_intrinsic_size);
 
   // In the case of generated image content using :before/:after/content, we
@@ -158,17 +231,17 @@ void LayoutImage::InvalidatePaintAndMarkForLayoutIfNeeded(
 
   // If the actual area occupied by the image has changed and it is not
   // constrained by style then a layout is required.
-  bool image_size_is_constrained = Style()->LogicalWidth().IsSpecified() &&
-                                   Style()->LogicalHeight().IsSpecified();
+  bool image_size_is_constrained = StyleRef().LogicalWidth().IsSpecified() &&
+                                   StyleRef().LogicalHeight().IsSpecified();
 
   // FIXME: We only need to recompute the containing block's preferred size if
   // the containing block's size depends on the image's size (i.e., the
   // container uses shrink-to-fit sizing). There's no easy way to detect that
   // shrink-to-fit is needed, always force a layout.
   bool containing_block_needs_to_recompute_preferred_size =
-      Style()->LogicalWidth().IsPercentOrCalc() ||
-      Style()->LogicalMaxWidth().IsPercentOrCalc() ||
-      Style()->LogicalMinWidth().IsPercentOrCalc();
+      StyleRef().LogicalWidth().IsPercentOrCalc() ||
+      StyleRef().LogicalMaxWidth().IsPercentOrCalc() ||
+      StyleRef().LogicalMinWidth().IsPercentOrCalc();
 
   if (image_source_has_changed_size &&
       (!image_size_is_constrained ||
@@ -179,10 +252,11 @@ void LayoutImage::InvalidatePaintAndMarkForLayoutIfNeeded(
   }
 
   SetShouldDoFullPaintInvalidationWithoutGeometryChange(
-      defer == CanDeferInvalidation::kYes && ImageResource() &&
-              ImageResource()->MaybeAnimated()
-          ? PaintInvalidationReason::kDelayedFull
-          : PaintInvalidationReason::kImage);
+      PaintInvalidationReason::kImage);
+
+  if (defer == CanDeferInvalidation::kYes && ImageResource() &&
+      ImageResource()->MaybeAnimated())
+    SetShouldDelayFullPaintInvalidation();
 
   // Tell any potential compositing layers that the image needs updating.
   ContentChanged(kImageChanged);
@@ -197,6 +271,20 @@ void LayoutImage::ImageNotifyFinished(ImageResourceContent* new_image) {
 
   InvalidateBackgroundObscurationStatus();
 
+  // Check for optimized image policies.
+  if (View() && View()->GetFrameView()) {
+    bool old_flag = ShouldInvertColor();
+    const LocalFrame& frame = View()->GetFrameView()->GetFrame();
+    is_legacy_format_or_compressed_image_ =
+        CheckForOptimizedImagePolicy(frame, this, new_image);
+    if (auto* image_element = ToHTMLImageElementOrNull(GetNode())) {
+      is_downscaled_image_ =
+          CheckForMaxDownscalingImagePolicy(frame, new_image, this);
+    }
+    if (old_flag != ShouldInvertColor())
+      UpdateShouldInvertColor();
+  }
+
   if (new_image == image_resource_->CachedImage()) {
     // tell any potential compositing layers
     // that the image is done and they can reference it directly.
@@ -209,9 +297,8 @@ void LayoutImage::PaintReplaced(const PaintInfo& paint_info,
   ImagePainter(*this).PaintReplaced(paint_info, paint_offset);
 }
 
-void LayoutImage::Paint(const PaintInfo& paint_info,
-                        const LayoutPoint& paint_offset) const {
-  ImagePainter(*this).Paint(paint_info, paint_offset);
+void LayoutImage::Paint(const PaintInfo& paint_info) const {
+  ImagePainter(*this).Paint(paint_info);
 }
 
 void LayoutImage::AreaElementFocusChanged(HTMLAreaElement* area_element) {
@@ -231,25 +318,25 @@ bool LayoutImage::ForegroundIsKnownToBeOpaqueInRect(
   ImageResourceContent* image_content = image_resource_->CachedImage();
   if (!image_content || !image_content->IsLoaded())
     return false;
-  if (!ContentBoxRect().Contains(local_rect))
+  if (!PhysicalContentBoxRect().Contains(local_rect))
     return false;
-  EFillBox background_clip = Style()->BackgroundClip();
+  EFillBox background_clip = StyleRef().BackgroundClip();
   // Background paints under borders.
-  if (background_clip == EFillBox::kBorder && Style()->HasBorder() &&
-      !Style()->BorderObscuresBackground())
+  if (background_clip == EFillBox::kBorder && StyleRef().HasBorder() &&
+      !StyleRef().BorderObscuresBackground())
     return false;
   // Background shows in padding area.
   if ((background_clip == EFillBox::kBorder ||
        background_clip == EFillBox::kPadding) &&
-      Style()->HasPadding())
+      StyleRef().HasPadding())
     return false;
   // Object-position may leave parts of the content box empty, regardless of the
   // value of object-fit.
-  if (Style()->ObjectPosition() !=
+  if (StyleRef().ObjectPosition() !=
       ComputedStyleInitialValues::InitialObjectPosition())
     return false;
   // Object-fit may leave parts of the content box empty.
-  EObjectFit object_fit = Style()->GetObjectFit();
+  EObjectFit object_fit = StyleRef().GetObjectFit();
   if (object_fit != EObjectFit::kFill && object_fit != EObjectFit::kCover)
     return false;
   // Check for image with alpha.
@@ -283,8 +370,7 @@ bool LayoutImage::NodeAtPoint(HitTestResult& result,
                               const HitTestLocation& location_in_container,
                               const LayoutPoint& accumulated_offset,
                               HitTestAction hit_test_action) {
-  HitTestResult temp_result(result.GetHitTestRequest(),
-                            result.GetHitTestLocation());
+  HitTestResult temp_result(result);
   bool inside = LayoutReplaced::NodeAtPoint(
       temp_result, location_in_container, accumulated_offset, hit_test_action);
 
@@ -295,22 +381,78 @@ bool LayoutImage::NodeAtPoint(HitTestResult& result,
   return inside;
 }
 
+IntSize LayoutImage::GetOverriddenIntrinsicSize() const {
+  if (auto* image_element = ToHTMLImageElementOrNull(GetNode())) {
+    if (RuntimeEnabledFeatures::ExperimentalProductivityFeaturesEnabled())
+      return image_element->GetOverriddenIntrinsicSize();
+  }
+  return IntSize();
+}
+
+FloatSize LayoutImage::ImageSizeOverriddenByIntrinsicSize(
+    float multiplier) const {
+  FloatSize overridden_intrinsic_size = FloatSize(GetOverriddenIntrinsicSize());
+  if (overridden_intrinsic_size.IsEmpty())
+    return image_resource_->ImageSize(multiplier);
+
+  if (multiplier != 1) {
+    overridden_intrinsic_size.Scale(multiplier);
+    if (overridden_intrinsic_size.Width() < 1.0f)
+      overridden_intrinsic_size.SetWidth(1.0f);
+    if (overridden_intrinsic_size.Height() < 1.0f)
+      overridden_intrinsic_size.SetHeight(1.0f);
+  }
+
+  return overridden_intrinsic_size;
+}
+
+bool LayoutImage::OverrideIntrinsicSizingInfo(
+    IntrinsicSizingInfo& intrinsic_sizing_info) const {
+  IntSize overridden_intrinsic_size = GetOverriddenIntrinsicSize();
+  if (overridden_intrinsic_size.IsEmpty())
+    return false;
+
+  intrinsic_sizing_info.size = FloatSize(overridden_intrinsic_size);
+  intrinsic_sizing_info.aspect_ratio = intrinsic_sizing_info.size;
+  if (!IsHorizontalWritingMode())
+    intrinsic_sizing_info.Transpose();
+
+  return true;
+}
+
 void LayoutImage::ComputeIntrinsicSizingInfo(
     IntrinsicSizingInfo& intrinsic_sizing_info) const {
-  LayoutReplaced::ComputeIntrinsicSizingInfo(intrinsic_sizing_info);
+  if (!OverrideIntrinsicSizingInfo(intrinsic_sizing_info)) {
+    if (SVGImage* svg_image = EmbeddedSVGImage()) {
+      svg_image->GetIntrinsicSizingInfo(intrinsic_sizing_info);
 
-  // Our intrinsicSize is empty if we're laying out generated images with
-  // relative width/height. Figure out the right intrinsic size to use.
-  if (intrinsic_sizing_info.size.IsEmpty() &&
-      image_resource_->ImageHasRelativeSize()) {
-    LayoutObject* containing_block =
-        IsOutOfFlowPositioned() ? Container() : ContainingBlock();
-    if (containing_block->IsBox()) {
-      LayoutBox* box = ToLayoutBox(containing_block);
-      intrinsic_sizing_info.size.SetWidth(
-          box->AvailableLogicalWidth().ToFloat());
-      intrinsic_sizing_info.size.SetHeight(
-          box->AvailableLogicalHeight(kIncludeMarginBorderPadding).ToFloat());
+      // Handle zoom & vertical writing modes here, as the embedded SVG document
+      // doesn't know about them.
+      intrinsic_sizing_info.size.Scale(StyleRef().EffectiveZoom());
+      if (StyleRef().GetObjectFit() != EObjectFit::kScaleDown)
+        intrinsic_sizing_info.size.Scale(ImageDevicePixelRatio());
+
+      if (!IsHorizontalWritingMode())
+        intrinsic_sizing_info.Transpose();
+      return;
+    }
+
+    LayoutReplaced::ComputeIntrinsicSizingInfo(intrinsic_sizing_info);
+
+    // Our intrinsicSize is empty if we're laying out generated images with
+    // relative width/height. Figure out the right intrinsic size to use.
+    if (intrinsic_sizing_info.size.IsEmpty() &&
+        image_resource_->ImageHasRelativeSize() &&
+        !IsLayoutNGListMarkerImage()) {
+      LayoutObject* containing_block =
+          IsOutOfFlowPositioned() ? Container() : ContainingBlock();
+      if (containing_block->IsBox()) {
+        LayoutBox* box = ToLayoutBox(containing_block);
+        intrinsic_sizing_info.size.SetWidth(
+            box->AvailableLogicalWidth().ToFloat());
+        intrinsic_sizing_info.size.SetHeight(
+            box->AvailableLogicalHeight(kIncludeMarginBorderPadding).ToFloat());
+      }
     }
   }
   // Don't compute an intrinsic ratio to preserve historical WebKit behavior if
@@ -326,19 +468,11 @@ void LayoutImage::ComputeIntrinsicSizingInfo(
 bool LayoutImage::NeedsPreferredWidthsRecalculation() const {
   if (LayoutReplaced::NeedsPreferredWidthsRecalculation())
     return true;
-  return EmbeddedReplacedContent();
+  SVGImage* svg_image = EmbeddedSVGImage();
+  return svg_image && svg_image->HasIntrinsicSizingInfo();
 }
 
-bool LayoutImage::GetNestedIntrinsicSizingInfo(
-    IntrinsicSizingInfo& intrinsic_sizing_info) const {
-  if (LayoutReplaced* content_layout_object = EmbeddedReplacedContent()) {
-    content_layout_object->ComputeIntrinsicSizingInfo(intrinsic_sizing_info);
-    return true;
-  }
-  return false;
-}
-
-LayoutReplaced* LayoutImage::EmbeddedReplacedContent() const {
+SVGImage* LayoutImage::EmbeddedSVGImage() const {
   if (!image_resource_)
     return nullptr;
   ImageResourceContent* cached_image = image_resource_->CachedImage();
@@ -346,10 +480,47 @@ LayoutReplaced* LayoutImage::EmbeddedReplacedContent() const {
   // https://crbug.com/761026
   if (!cached_image || cached_image->IsCacheValidator())
     return nullptr;
-  Image* image = cached_image->GetImage();
-  if (!image->IsSVGImage())
-    return nullptr;
-  return ToSVGImage(image)->EmbeddedReplacedContent();
+  return ToSVGImageOrNull(cached_image->GetImage());
+}
+
+bool LayoutImage::ShouldInvertColor() const {
+  return is_downscaled_image_ || is_legacy_format_or_compressed_image_;
+}
+
+void LayoutImage::UpdateShouldInvertColor() {
+  SetNeedsPaintPropertyUpdate();
+  // If composited image, update compositing layer.
+  if (Layer())
+    Layer()->SetNeedsCompositingInputsUpdate();
+}
+
+void LayoutImage::UpdateShouldInvertColorForTest(bool value) {
+  is_downscaled_image_ = value;
+  is_legacy_format_or_compressed_image_ = value;
+  UpdateShouldInvertColor();
+}
+
+void LayoutImage::UpdateAfterLayout() {
+  LayoutBox::UpdateAfterLayout();
+  Node* node = GetNode();
+  if (auto* image_element = ToHTMLImageElementOrNull(node)) {
+    if (View() && View()->GetFrameView()) {
+      const LocalFrame& frame = View()->GetFrameView()->GetFrame();
+
+      if (image_resource_ && image_resource_->CachedImage()) {
+        // Check for optimized image policies.
+        bool old_flag = ShouldInvertColor();
+        is_downscaled_image_ = CheckForMaxDownscalingImagePolicy(
+            frame, image_resource_->CachedImage(), this);
+        if (old_flag != ShouldInvertColor())
+          UpdateShouldInvertColor();
+      }
+    }
+
+    // Report violation of unsized-media policy.
+    if (image_element->IsDefaultIntrinsicSize())
+      MediaElementParserHelpers::ReportUnsizedMediaViolation(this);
+  }
 }
 
 }  // namespace blink

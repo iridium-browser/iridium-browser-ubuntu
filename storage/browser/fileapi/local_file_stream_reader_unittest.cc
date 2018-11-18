@@ -38,14 +38,14 @@ const int kTestDataSize = arraysize(kTestData) - 1;
 void ReadFromReader(LocalFileStreamReader* reader,
                     std::string* data, size_t size,
                     int* result) {
-  ASSERT_TRUE(reader != NULL);
-  ASSERT_TRUE(result != NULL);
+  ASSERT_TRUE(reader != nullptr);
+  ASSERT_TRUE(result != nullptr);
   *result = net::OK;
   net::TestCompletionCallback callback;
   size_t total_bytes_read = 0;
   while (total_bytes_read < size) {
     scoped_refptr<net::IOBufferWithSize> buf(
-        new net::IOBufferWithSize(size - total_bytes_read));
+        base::MakeRefCounted<net::IOBufferWithSize>(size - total_bytes_read));
     int rv = reader->Read(buf.get(), buf->size(), callback.callback());
     if (rv == net::ERR_IO_PENDING)
       rv = callback.WaitForResult();
@@ -68,8 +68,7 @@ void QuitLoop() {
 
 class LocalFileStreamReaderTest : public testing::Test {
  public:
-  LocalFileStreamReaderTest()
-      : file_thread_("FileUtilProxyTestFileThread") {}
+  LocalFileStreamReaderTest() : file_thread_("TestFileThread") {}
 
   void SetUp() override {
     ASSERT_TRUE(file_thread_.Start());
@@ -187,7 +186,7 @@ TEST_F(LocalFileStreamReaderTest, GetLengthAfterModified) {
     result = callback.WaitForResult();
   ASSERT_EQ(net::ERR_UPLOAD_FILE_CHANGED, result);
 
-  // With NULL expected modification time this should work.
+  // With nullptr expected modification time this should work.
   reader.reset(CreateFileReader(test_path(), 0, base::Time()));
   result = reader->GetLength(callback.callback());
   if (result == net::ERR_IO_PENDING)
@@ -247,7 +246,7 @@ TEST_F(LocalFileStreamReaderTest, ReadAfterModified) {
   EXPECT_EQ(net::OK, result);
   EXPECT_EQ(kTestData, data);
 
-  // And with NULL expected modification time this should work.
+  // And with nullptr expected modification time this should work.
   data.clear();
   reader.reset(CreateFileReader(test_path(), 0, base::Time()));
   ReadFromReader(reader.get(), &data, kTestDataSize, &result);
@@ -270,8 +269,8 @@ TEST_F(LocalFileStreamReaderTest, DeleteWithUnfinishedRead) {
       CreateFileReader(test_path(), 0, base::Time()));
 
   net::TestCompletionCallback callback;
-  scoped_refptr<net::IOBufferWithSize> buf(
-      new net::IOBufferWithSize(kTestDataSize));
+  scoped_refptr<net::IOBufferWithSize> buf =
+      base::MakeRefCounted<net::IOBufferWithSize>(kTestDataSize);
   int rv = reader->Read(buf.get(), buf->size(), base::Bind(&NeverCalled));
   ASSERT_TRUE(rv == net::ERR_IO_PENDING || rv >= 0);
 

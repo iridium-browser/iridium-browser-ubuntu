@@ -66,10 +66,10 @@ static void eat_space_sep_strings(SkTArray<SkString>* out, const char in[]) {
 }
 
 bool GrGLExtensions::init(GrGLStandard standard,
-                          GrGLFunction<GrGLGetStringProc> getString,
-                          GrGLFunction<GrGLGetStringiProc> getStringi,
-                          GrGLFunction<GrGLGetIntegervProc> getIntegerv,
-                          GrGLFunction<GrEGLQueryStringProc> queryString,
+                          GrGLFunction<GrGLGetStringFn> getString,
+                          GrGLFunction<GrGLGetStringiFn> getStringi,
+                          GrGLFunction<GrGLGetIntegervFn> getIntegerv,
+                          GrGLFunction<GrEGLQueryStringFn> queryString,
                           GrEGLDisplay eglDisplay) {
     fInitialized = false;
     fStrings.reset();
@@ -151,6 +151,7 @@ void GrGLExtensions::add(const char ext[]) {
     }
 }
 
+#ifdef SK_ENABLE_DUMP_GPU
 void GrGLExtensions::dumpJSON(SkJSONWriter* writer) const {
     writer->beginArray();
     for (int i = 0; i < fStrings.count(); ++i) {
@@ -158,3 +159,6 @@ void GrGLExtensions::dumpJSON(SkJSONWriter* writer) const {
     }
     writer->endArray();
 }
+#else
+void GrGLExtensions::dumpJSON(SkJSONWriter* writer) const { }
+#endif

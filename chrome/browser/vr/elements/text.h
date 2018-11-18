@@ -10,6 +10,7 @@
 #include "chrome/browser/vr/elements/textured_element.h"
 #include "chrome/browser/vr/elements/ui_texture.h"
 #include "chrome/browser/vr/model/color_scheme.h"
+#include "chrome/browser/vr/vr_ui_export.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkRect.h"
 #include "ui/gfx/font.h"
@@ -34,7 +35,7 @@ enum TextLayoutMode {
 // This class describes a formatting attribute, applicable to a Text element.
 // Attributes are applied in order, and may override previous attributes.
 // Formatting may be applied only to non-wrapping text.
-class TextFormattingAttribute {
+class VR_UI_EXPORT TextFormattingAttribute {
  public:
   enum Type {
     COLOR,
@@ -69,7 +70,30 @@ class TextFormattingAttribute {
 
 typedef std::vector<TextFormattingAttribute> TextFormatting;
 
-class Text : public TexturedElement {
+enum TextAlignment {
+  kTextAlignmentNone,
+  kTextAlignmentLeft,
+  kTextAlignmentCenter,
+  kTextAlignmentRight,
+};
+
+enum WrappingBehavior {
+  kWrappingBehaviorWrap,
+  kWrappingBehaviorNoWrap,
+};
+
+struct TextRenderParameters {
+  SkColor color = SK_ColorBLACK;
+  TextAlignment text_alignment = kTextAlignmentNone;
+  WrappingBehavior wrapping_behavior = kWrappingBehaviorNoWrap;
+  bool cursor_enabled = false;
+  int cursor_position = 0;
+  bool shadows_enabled = false;
+  SkColor shadow_color = SK_ColorBLACK;
+  float shadow_size = 10.0f;
+};
+
+class VR_UI_EXPORT Text : public TexturedElement {
  public:
   explicit Text(float font_height_dmms);
   ~Text() override;
@@ -87,7 +111,7 @@ class Text : public TexturedElement {
   // Formatting must be applied only to non-wrapping text elements.
   void SetFormatting(const TextFormatting& formatting);
 
-  void SetAlignment(UiTexture::TextAlignment alignment);
+  void SetAlignment(TextAlignment alignment);
   void SetLayoutMode(TextLayoutMode mode);
 
   // This text element does not typically feature a cursor, but since the cursor

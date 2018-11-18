@@ -411,7 +411,7 @@ class RenderTextTest : public testing::Test,
       const internal::TextRunHarfBuzz& run = *run_list->runs()[logical_index];
       if (run.range.length() == 1) {
         result.append(base::StringPrintf("[%d]", run.range.start()));
-      } else if (run.is_rtl) {
+      } else if (run.font_params.is_rtl) {
         result.append(base::StringPrintf("[%d<-%d]", run.range.end() - 1,
                                          run.range.start()));
       } else {
@@ -463,7 +463,9 @@ class RenderTextTest : public testing::Test,
 
   Rect GetSubstringBoundsUnion(const Range& range) {
     const std::vector<Rect> bounds = render_text_->GetSubstringBounds(range);
-    return std::accumulate(bounds.begin(), bounds.end(), Rect(), UnionRects);
+    return std::accumulate(
+        bounds.begin(), bounds.end(), Rect(),
+        [](const Rect& a, const Rect& b) { return UnionRects(a, b); });
   }
 
   Rect GetSelectionBoundsUnion() {
@@ -549,9 +551,15 @@ class RenderTextHarfBuzzTest : public RenderTextTest {
 
   bool ShapeRunWithFont(const base::string16& text,
                         const Font& font,
-                        const FontRenderParams& params,
+                        const FontRenderParams& render_params,
                         internal::TextRunHarfBuzz* run) {
-    return GetRenderTextHarfBuzz()->ShapeRunWithFont(text, font, params, run);
+    internal::TextRunHarfBuzz::FontParams font_params = run->font_params;
+    font_params.ComputeRenderParamsFontSizeAndBaselineOffset();
+    font_params.SetFontAndRenderParams(font, render_params);
+    run->shape.missing_glyph_count = static_cast<size_t>(-1);
+    std::vector<internal::TextRunHarfBuzz*> runs = {run};
+    GetRenderTextHarfBuzz()->ShapeRunsWithFont(text, font_params, &runs);
+    return runs.empty();
   }
 
   int GetCursorYForTesting(int line_num = 0) {
@@ -1095,6 +1103,79 @@ TEST_P(RenderTextHarfBuzzTest, MultilineElide) {
   EXPECT_LT(actual_text.size(), input_text.size());
   EXPECT_EQ(actual_text, input_text.substr(0, actual_text.size() - 1) +
                              base::string16(kEllipsisUTF16));
+}
+
+TEST_P(RenderTextHarfBuzzTest, MultilineElideWrap) {
+  RenderText* render_text = GetRenderText();
+  base::string16 input_text;
+  for (int i = 0; i < 20; ++i)
+    input_text.append(UTF8ToUTF16("hello world "));
+  render_text->SetText(input_text);
+
+  render_text->ApplyWeight(Font::Weight::BOLD, Range(1, 20));
+  render_text->ApplyStyle(ITALIC, true, Range(1, 20));
+  render_text->SetMultiline(true);
+  render_text->SetMaxLines(3);
+  render_text->SetElideBehavior(ELIDE_TAIL);
+
+  render_text->SetDisplayRect(Rect(30, 0));
+
+  const base::char16 kEllipsisUTF16[] = {0x2026, 0};
+  base::string16 actual_text;
+
+  // ELIDE_LONG_WORDS doesn't make sense in multiline, and triggers assertion
+  // failure.
+  const WordWrapBehavior wrap_behaviors[] = {
+      IGNORE_LONG_WORDS, TRUNCATE_LONG_WORDS, WRAP_LONG_WORDS};
+  for (auto wrap_behavior : wrap_behaviors) {
+    render_text->SetWordWrapBehavior(wrap_behavior);
+    render_text->GetStringSize();
+    actual_text = render_text->GetDisplayText();
+    EXPECT_LE(actual_text.size(), input_text.size());
+    EXPECT_EQ(actual_text, input_text.substr(0, actual_text.size() - 1) +
+                               base::string16(kEllipsisUTF16));
+    EXPECT_LE(render_text->GetNumLines(), 3U);
+  }
+}
+
+TEST_P(RenderTextHarfBuzzTest, MultilineElideWrapStress) {
+  RenderText* render_text = GetRenderText();
+  base::string16 input_text;
+  for (int i = 0; i < 20; ++i)
+    input_text.append(UTF8ToUTF16("hello world "));
+  render_text->SetText(input_text);
+
+  // TODO(crbug.com/866720): with the line about ApplyWeight() uncommented, when
+  // |i| (the width of display rect) is 23, there would be actually 4 lines
+  // rendered, more than the max lines setting. It could be that ellipsis is
+  // wrapped to the 4th line due to different word segmentation from the
+  // original text.
+
+  // render_text->ApplyWeight(Font::Weight::BOLD, Range(1, 20));
+  render_text->SetMultiline(true);
+  render_text->SetMaxLines(3);
+  render_text->SetElideBehavior(ELIDE_TAIL);
+
+  base::string16 actual_text;
+
+  // ELIDE_LONG_WORDS doesn't make sense in multiline, and triggers assertion
+  // failure.
+  const WordWrapBehavior wrap_behaviors[] = {
+      IGNORE_LONG_WORDS, TRUNCATE_LONG_WORDS, WRAP_LONG_WORDS};
+  for (auto wrap_behavior : wrap_behaviors) {
+    for (int i = 1; i < 60; ++i) {
+      SCOPED_TRACE(base::StringPrintf(
+          "MultilineElideWrapStress wrap_behavior = %d, width = %d",
+          wrap_behavior, i));
+
+      render_text->SetDisplayRect(Rect(i, 0));
+      render_text->SetWordWrapBehavior(wrap_behavior);
+      render_text->GetStringSize();
+      actual_text = render_text->GetDisplayText();
+      EXPECT_LE(actual_text.size(), input_text.size());
+      EXPECT_LE(render_text->GetNumLines(), 3U);
+    }
+  }
 }
 
 TEST_P(RenderTextTest, ElidedEmail) {
@@ -2301,8 +2382,43 @@ TEST_P(RenderTextHarfBuzzTest, MoveLeftRightByWordInTextWithMultiSpaces) {
 #endif  // !defined(OS_WIN)
 
 // TODO(asvitkine): RenderTextMac cursor movements. http://crbug.com/131618
-TEST_P(RenderTextHarfBuzzTest, MoveLeftRightByWordInChineseText) {
+TEST_P(RenderTextHarfBuzzTest, MoveLeftRightByWordInThaiText) {
   RenderText* render_text = GetRenderText();
+  // เรียกดูรวดเร็ว is broken to เรียก|ดู|รวดเร็ว.
+  render_text->SetText(UTF8ToUTF16("เรียกดูรวดเร็ว"));
+  render_text->MoveCursor(LINE_BREAK, CURSOR_LEFT, SELECTION_NONE);
+  EXPECT_EQ(0U, render_text->cursor_position());
+  render_text->MoveCursor(WORD_BREAK, CURSOR_RIGHT, SELECTION_NONE);
+  EXPECT_EQ(5U, render_text->cursor_position());
+  render_text->MoveCursor(WORD_BREAK, CURSOR_RIGHT, SELECTION_NONE);
+  EXPECT_EQ(7U, render_text->cursor_position());
+  render_text->MoveCursor(WORD_BREAK, CURSOR_RIGHT, SELECTION_NONE);
+  EXPECT_EQ(14U, render_text->cursor_position());
+  render_text->MoveCursor(WORD_BREAK, CURSOR_RIGHT, SELECTION_NONE);
+  EXPECT_EQ(14U, render_text->cursor_position());
+
+  render_text->MoveCursor(WORD_BREAK, CURSOR_LEFT, SELECTION_NONE);
+  EXPECT_EQ(7U, render_text->cursor_position());
+  render_text->MoveCursor(WORD_BREAK, CURSOR_LEFT, SELECTION_NONE);
+  EXPECT_EQ(5U, render_text->cursor_position());
+  render_text->MoveCursor(WORD_BREAK, CURSOR_LEFT, SELECTION_NONE);
+  EXPECT_EQ(0U, render_text->cursor_position());
+  render_text->MoveCursor(WORD_BREAK, CURSOR_LEFT, SELECTION_NONE);
+  EXPECT_EQ(0U, render_text->cursor_position());
+}
+
+// TODO(crbug.com/865527): Chinese and Japanese tokenization doesn't work on
+// mobile.
+#if defined(OS_ANDROID)
+#define MAYBE_MoveLeftRightByWordInChineseText \
+  DISABLED_MoveLeftRightByWordInChineseText
+#else
+#define MAYBE_MoveLeftRightByWordInChineseText MoveLeftRightByWordInChineseText
+#endif
+// TODO(asvitkine): RenderTextMac cursor movements. http://crbug.com/131618
+TEST_P(RenderTextHarfBuzzTest, MAYBE_MoveLeftRightByWordInChineseText) {
+  RenderText* render_text = GetRenderText();
+  // zh-Hans-CN: 我们去公园玩, broken to 我们|去|公园|玩.
   render_text->SetText(UTF8ToUTF16("\u6211\u4EEC\u53BB\u516C\u56ED\u73A9"));
   render_text->MoveCursor(LINE_BREAK, CURSOR_LEFT, SELECTION_NONE);
   EXPECT_EQ(0U, render_text->cursor_position());
@@ -2316,6 +2432,17 @@ TEST_P(RenderTextHarfBuzzTest, MoveLeftRightByWordInChineseText) {
   EXPECT_EQ(6U, render_text->cursor_position());
   render_text->MoveCursor(WORD_BREAK, CURSOR_RIGHT, SELECTION_NONE);
   EXPECT_EQ(6U, render_text->cursor_position());
+
+  render_text->MoveCursor(WORD_BREAK, CURSOR_LEFT, SELECTION_NONE);
+  EXPECT_EQ(5U, render_text->cursor_position());
+  render_text->MoveCursor(WORD_BREAK, CURSOR_LEFT, SELECTION_NONE);
+  EXPECT_EQ(3U, render_text->cursor_position());
+  render_text->MoveCursor(WORD_BREAK, CURSOR_LEFT, SELECTION_NONE);
+  EXPECT_EQ(2U, render_text->cursor_position());
+  render_text->MoveCursor(WORD_BREAK, CURSOR_LEFT, SELECTION_NONE);
+  EXPECT_EQ(0U, render_text->cursor_position());
+  render_text->MoveCursor(WORD_BREAK, CURSOR_LEFT, SELECTION_NONE);
+  EXPECT_EQ(0U, render_text->cursor_position());
 }
 
 // Test the correct behavior of undirected selections: selections where the
@@ -2472,7 +2599,17 @@ TEST_P(RenderTextTest, StringSizeEmptyString) {
   EXPECT_EQ(font_list.GetBaseline(), render_text->GetBaseline());
 }
 
-TEST_P(RenderTextTest, StringSizeRespectsFontListMetrics) {
+// TODO(865540): Find two system fonts on Android with different baseline and
+// different height.
+// See also: FontListTest::Fonts_GetHeight_GetBaseline.
+#if defined(OS_ANDROID)
+#define MAYBE_StringSizeRespectsFontListMetrics \
+  DISABLED_StringSizeRespectsFontListMetrics
+#else
+#define MAYBE_StringSizeRespectsFontListMetrics \
+  StringSizeRespectsFontListMetrics
+#endif
+TEST_P(RenderTextTest, MAYBE_StringSizeRespectsFontListMetrics) {
   // Check that the test font and the CJK font have different font metrics.
   Font test_font(kTestFontName, 16);
   ASSERT_EQ(base::ToLowerASCII(kTestFontName),
@@ -3447,9 +3584,9 @@ TEST_P(RenderTextHarfBuzzTest, Multiline_HorizontalAlignment) {
       EXPECT_EQ(8u, std::max(lines[0].length(), lines[1].length()));
       const internal::TextRunList* run_list = GetHarfBuzzRunList();
       ASSERT_EQ(3U, run_list->runs().size());
-      EXPECT_EQ(lines[0].length(), run_list->runs()[0]->glyph_count);
-      EXPECT_EQ(1u, run_list->runs()[1]->glyph_count);  // \n.
-      EXPECT_EQ(lines[1].length(), run_list->runs()[2]->glyph_count);
+      EXPECT_EQ(lines[0].length(), run_list->runs()[0]->shape.glyph_count);
+      EXPECT_EQ(1u, run_list->runs()[1]->shape.glyph_count);  // \n.
+      EXPECT_EQ(lines[1].length(), run_list->runs()[2]->shape.glyph_count);
 
       int difference = (lines[0].length() - lines[1].length()) * kGlyphSize;
       EXPECT_EQ(test_api()->GetAlignmentOffset(0).x() + difference,
@@ -3697,10 +3834,12 @@ TEST_P(RenderTextHarfBuzzTest, HarfBuzz_HorizontalPositions) {
 
     // Verifies the DrawText happens in the visual order and left-to-right.
     // If the text is RTL, the logically first run should be drawn at last.
-    EXPECT_EQ(run_list->runs()[run_list->logical_to_visual(0)]->glyph_count,
-              text_log[0].glyph_count);
-    EXPECT_EQ(run_list->runs()[run_list->logical_to_visual(1)]->glyph_count,
-              text_log[1].glyph_count);
+    EXPECT_EQ(
+        run_list->runs()[run_list->logical_to_visual(0)]->shape.glyph_count,
+        text_log[0].glyph_count);
+    EXPECT_EQ(
+        run_list->runs()[run_list->logical_to_visual(1)]->shape.glyph_count,
+        text_log[1].glyph_count);
     EXPECT_LT(text_log[0].origin.x(), text_log[1].origin.x());
   }
 }
@@ -3741,13 +3880,13 @@ TEST_P(RenderTextHarfBuzzTest, HarfBuzz_Clusters) {
 
   internal::TextRunHarfBuzz run((Font()));
   run.range = Range(0, 4);
-  run.glyph_count = 4;
-  run.glyph_to_char.resize(4);
+  run.shape.glyph_count = 4;
+  run.shape.glyph_to_char.resize(4);
 
   for (size_t i = 0; i < arraysize(cases); ++i) {
     std::copy(cases[i].glyph_to_char, cases[i].glyph_to_char + 4,
-              run.glyph_to_char.begin());
-    run.is_rtl = cases[i].is_rtl;
+              run.shape.glyph_to_char.begin());
+    run.font_params.is_rtl = cases[i].is_rtl;
 
     for (size_t j = 0; j < 4; ++j) {
       SCOPED_TRACE(base::StringPrintf("Case %" PRIuS ", char %" PRIuS, i, j));
@@ -3765,9 +3904,9 @@ TEST_P(RenderTextHarfBuzzTest, HarfBuzz_Clusters) {
 TEST_P(RenderTextHarfBuzzTest, HarfBuzz_NoCrashOnTextRunGetClusterAt) {
   internal::TextRunHarfBuzz run((Font()));
   run.range = Range(0, 4);
-  run.glyph_count = 4;
+  run.shape.glyph_count = 4;
   // Construct a |glyph_to_char| map where no glyph maps to the first character.
-  run.glyph_to_char = {1u, 1u, 2u, 3u};
+  run.shape.glyph_to_char = {1u, 1u, 2u, 3u};
 
   Range chars, glyphs;
   // GetClusterAt should not crash asking for the cluster at position 0.
@@ -3835,20 +3974,20 @@ TEST_P(RenderTextHarfBuzzTest, HarfBuzz_SubglyphGraphemePartition) {
 
   internal::TextRunHarfBuzz run((Font()));
   run.range = Range(0, 4);
-  run.glyph_count = 2;
-  run.glyph_to_char.resize(2);
-  run.positions.reset(new SkPoint[4]);
-  run.width = 20;
+  run.shape.glyph_count = 2;
+  run.shape.glyph_to_char.resize(2);
+  run.shape.positions.resize(4);
+  run.shape.width = 20;
 
   RenderTextHarfBuzz* render_text = GetRenderTextHarfBuzz();
   render_text->SetText(UTF8ToUTF16("abcd"));
 
   for (size_t i = 0; i < arraysize(cases); ++i) {
     std::copy(cases[i].glyph_to_char, cases[i].glyph_to_char + 2,
-              run.glyph_to_char.begin());
-    run.is_rtl = cases[i].is_rtl;
+              run.shape.glyph_to_char.begin());
+    run.font_params.is_rtl = cases[i].is_rtl;
     for (int j = 0; j < 2; ++j)
-      run.positions[j].set(j * 10, 0);
+      run.shape.positions[j].set(j * 10, 0);
 
     for (size_t j = 0; j < 4; ++j) {
       SCOPED_TRACE(base::StringPrintf("Case %" PRIuS ", char %" PRIuS, i, j));
@@ -3994,6 +4133,13 @@ TEST_P(RenderTextHarfBuzzTest, HarfBuzz_BreakRunsByEmoji) {
   EXPECT_EQ(ToString16Vec({"x", "😁", "y", "✨"}), GetRunListStrings());
   // U+1F601 is represented as a surrogate pair in UTF-16.
   EXPECT_EQ("[0][1->2][3][4]", GetRunListStructureString());
+
+  // Ensure non-latin 「foo」 brackets around Emoji correctly break runs.
+  render_text->SetText(UTF8ToUTF16("「🦋」「"));
+  test_api()->EnsureLayout();
+  EXPECT_EQ(ToString16Vec({"「", "🦋", "」「"}), GetRunListStrings());
+  // Note 🦋 is a surrogate pair [1->2].
+  EXPECT_EQ("[0][1->2][3->4]", GetRunListStructureString());
 }
 
 TEST_P(RenderTextHarfBuzzTest, HarfBuzz_BreakRunsByEmojiVariationSelectors) {
@@ -4022,6 +4168,11 @@ TEST_P(RenderTextHarfBuzzTest, HarfBuzz_BreakRunsByEmojiVariationSelectors) {
   // Bail out early except on 10.12 and above.
   if (base::mac::IsAtMostOS10_11())
     return;
+#endif
+
+#if defined(OS_ANDROID)
+  // TODO(865709): make this work on Android.
+  return;
 #endif
 
   // Jump over the telephone: two codepoints, but a single glyph.
@@ -4134,11 +4285,11 @@ TEST_P(RenderTextHarfBuzzTest, EmojiFlagGlyphCount) {
   ASSERT_EQ(1U, run_list->runs().size());
 #if defined(OS_MACOSX)
   // On Mac, the flags should be found, so two glyphs result.
-  EXPECT_EQ(2u, run_list->runs()[0]->glyph_count);
+  EXPECT_EQ(2u, run_list->runs()[0]->shape.glyph_count);
 #else
   // Elsewhere, the flags are not found, so each surrogate pair gets a
   // placeholder glyph. Eventually, all platforms should have 2 glyphs.
-  EXPECT_EQ(4u, run_list->runs()[0]->glyph_count);
+  EXPECT_EQ(4u, run_list->runs()[0]->shape.glyph_count);
 #endif
 }
 
@@ -4175,7 +4326,7 @@ TEST_P(RenderTextHarfBuzzTest, HarfBuzz_EmptyRun) {
   render_text->SetText(UTF8ToUTF16("abcdefgh"));
 
   run.range = Range(3, 8);
-  run.glyph_count = 0;
+  run.shape.glyph_count = 0;
   EXPECT_EQ(Range(0, 0), run.CharRangeToGlyphRange(Range(4, 5)));
   EXPECT_EQ(Range(0, 0), run.GetGraphemeBounds(render_text, 4).Round());
   Range chars;
@@ -4218,21 +4369,17 @@ TEST_P(RenderTextTest, StringFitsOwnWidth) {
 }
 
 // TODO(derat): Figure out why this fails on Windows: http://crbug.com/427184
-#if !defined(OS_WIN)
+// TODO(865715): Figure out why this fails on Android.
+#if !defined(OS_WIN) && !defined(OS_ANDROID)
 // Ensure that RenderText examines all of the fonts in its FontList before
 // falling back to other fonts.
 TEST_P(RenderTextHarfBuzzTest, HarfBuzz_FontListFallback) {
-#if defined(OS_LINUX)
-  const char kTestFont[] = "Arimo";
-#else
-  const char kTestFont[] = "Arial";
-#endif
   // Double-check that the requested fonts are present.
-  std::string format = std::string(kTestFont) + ", %s, 12px";
+  std::string format = std::string(kTestFontName) + ", %s, 12px";
   FontList font_list(base::StringPrintf(format.c_str(), kSymbolFontName));
   const std::vector<Font>& fonts = font_list.GetFonts();
   ASSERT_EQ(2u, fonts.size());
-  ASSERT_EQ(base::ToLowerASCII(kTestFont),
+  ASSERT_EQ(base::ToLowerASCII(kTestFontName),
             base::ToLowerASCII(fonts[0].GetActualFontNameForTesting()));
   ASSERT_EQ(base::ToLowerASCII(kSymbolFontName),
             base::ToLowerASCII(fonts[1].GetActualFontNameForTesting()));
@@ -4247,7 +4394,7 @@ TEST_P(RenderTextHarfBuzzTest, HarfBuzz_FontListFallback) {
   ASSERT_EQ(static_cast<size_t>(1), spans.size());
   EXPECT_STRCASEEQ(kSymbolFontName, spans[0].first.GetFontName().c_str());
 }
-#endif  // !defined(OS_WIN)
+#endif  // !defined(OS_WIN) && !defined(OS_ANDROID)
 
 // Ensure that the fallback fonts of the Uniscribe font are tried for shaping.
 #if defined(OS_WIN)
@@ -4272,8 +4419,8 @@ TEST_P(RenderTextHarfBuzzTest, HarfBuzz_UniscribeFallback) {
 // Ensure that the fallback fonts offered by GetFallbackFonts() are tried. Note
 // this test assumes the font "Arial" doesn't provide a unicode glyph for a
 // particular character, and that there is a system fallback font which does.
-// TODO(msw): Fallback doesn't find a glyph on Linux.
-#if !defined(OS_LINUX)
+// TODO(msw): Fallback doesn't find a glyph on Linux and Android.
+#if !defined(OS_LINUX) && !defined(OS_ANDROID)
 TEST_P(RenderTextHarfBuzzTest, HarfBuzz_UnicodeFallback) {
   RenderTextHarfBuzz* render_text = GetRenderTextHarfBuzz();
   render_text->SetFontList(FontList("Arial, 12px"));
@@ -4347,12 +4494,12 @@ TEST_P(RenderTextTest, TextDoesntClip) {
     {
       SCOPED_TRACE("TextDoesntClip Left Side");
 #if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_LINUX) || \
-    defined(ARCH_CPU_MIPS_FAMILY)
-      // TODO(dschuyler): On Windows, Chrome OS, Linux, and Mac smoothing draws
-      // to the left of text.  This appears to be a preexisting issue that
-      // wasn't revealed by the prior unit tests.  RenderText currently only
-      // uses origins and advances and ignores bounding boxes so cannot account
-      // for under- and over-hang.
+    defined(OS_ANDROID) || defined(ARCH_CPU_MIPS_FAMILY)
+      // TODO(dschuyler): On Windows, Chrome OS, Linux, Android, and Mac
+      // smoothing draws to the left of text.  This appears to be a preexisting
+      // issue that wasn't revealed by the prior unit tests.  RenderText
+      // currently only uses origins and advances and ignores bounding boxes so
+      // cannot account for under- and over-hang.
       rect_buffer.EnsureSolidRect(SK_ColorWHITE, 0, kTestSize, kTestSize - 1,
                                   string_size.height());
 #else
@@ -4363,12 +4510,12 @@ TEST_P(RenderTextTest, TextDoesntClip) {
     {
       SCOPED_TRACE("TextDoesntClip Right Side");
 #if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_LINUX) || \
-    defined(ARCH_CPU_MIPS_FAMILY)
-      // TODO(dschuyler): On Windows, Chrome OS, Linux, and Mac smoothing draws
-      // to the right of text.  This appears to be a preexisting issue that
-      // wasn't revealed by the prior unit tests.  RenderText currently only
-      // uses origins and advances and ignores bounding boxes so cannot account
-      // for under- and over-hang.
+    defined(OS_ANDROID) || defined(ARCH_CPU_MIPS_FAMILY)
+      // TODO(dschuyler): On Windows, Chrome OS, Linux, Android, and Mac
+      // smoothing draws to the right of text.  This appears to be a preexisting
+      // issue that wasn't revealed by the prior unit tests.  RenderText
+      // currently only uses origins and advances and ignores bounding boxes so
+      // cannot account for under- and over-hang.
       rect_buffer.EnsureSolidRect(SK_ColorWHITE,
                                   kTestSize + string_size.width() + 1,
                                   kTestSize, kTestSize - 1,
@@ -4527,11 +4674,13 @@ TEST_P(RenderTextTest, SubpixelRenderingSuppressed) {
   render_text->SetText(UTF8ToUTF16("x"));
 
   DrawVisualText();
-#if defined(OS_LINUX)
+#if defined(OS_LINUX) || defined(OS_ANDROID)
   // On Linux, whether subpixel AA is supported is determined by the platform
   // FontConfig. Force it into a particular style after computing runs. Other
   // platforms use a known default FontRenderParams from a static local.
-  GetHarfBuzzRunList()->runs()[0]->render_params.subpixel_rendering =
+  GetHarfBuzzRunList()
+      ->runs()[0]
+      ->font_params.render_params.subpixel_rendering =
       FontRenderParams::SUBPIXEL_RENDERING_RGB;
   DrawVisualText();
 #endif
@@ -4539,16 +4688,18 @@ TEST_P(RenderTextTest, SubpixelRenderingSuppressed) {
 
   render_text->set_subpixel_rendering_suppressed(true);
   DrawVisualText();
-#if defined(OS_LINUX)
-    // For Linux, runs shouldn't be re-calculated, and the suppression of the
-    // SUBPIXEL_RENDERING_RGB set above should now take effect. But, after
-    // checking, apply the override anyway to be explicit that it is suppressed.
-    EXPECT_FALSE(GetRendererPaint().isLCDRenderText());
-    GetHarfBuzzRunList()->runs()[0]->render_params.subpixel_rendering =
-        FontRenderParams::SUBPIXEL_RENDERING_RGB;
-    DrawVisualText();
+#if defined(OS_LINUX) || defined(OS_ANDROID)
+  // For Linux, runs shouldn't be re-calculated, and the suppression of the
+  // SUBPIXEL_RENDERING_RGB set above should now take effect. But, after
+  // checking, apply the override anyway to be explicit that it is suppressed.
+  EXPECT_FALSE(GetRendererPaint().isLCDRenderText());
+  GetHarfBuzzRunList()
+      ->runs()[0]
+      ->font_params.render_params.subpixel_rendering =
+      FontRenderParams::SUBPIXEL_RENDERING_RGB;
+  DrawVisualText();
 #endif
-    EXPECT_FALSE(GetRendererPaint().isLCDRenderText());
+  EXPECT_FALSE(GetRendererPaint().isLCDRenderText());
 }
 
 // Verify GetWordLookupDataAtPoint returns the correct baseline point and
@@ -4975,6 +5126,36 @@ TEST_P(RenderTextTest, InvalidFont) {
   DrawVisualText();
 }
 
+TEST_P(RenderTextTest, ExpandToBeVerticallySymmetric) {
+  Rect test_display_rect(0, 0, 400, 100);
+
+  // Basic case.
+  EXPECT_EQ(Rect(20, 20, 400, 60),
+            test::RenderTextTestApi::ExpandToBeVerticallySymmetric(
+                Rect(20, 20, 400, 40), test_display_rect));
+
+  // Expand upwards.
+  EXPECT_EQ(Rect(20, 20, 400, 60),
+            test::RenderTextTestApi::ExpandToBeVerticallySymmetric(
+                Rect(20, 40, 400, 40), test_display_rect));
+
+  // Original rect is entirely above the center point.
+  EXPECT_EQ(Rect(10, 30, 200, 40),
+            test::RenderTextTestApi::ExpandToBeVerticallySymmetric(
+                Rect(10, 30, 200, 10), test_display_rect));
+
+  // Original rect is below the display rect entirely.
+  EXPECT_EQ(Rect(10, -10, 200, 120),
+            test::RenderTextTestApi::ExpandToBeVerticallySymmetric(
+                Rect(10, 100, 200, 10), test_display_rect));
+
+  // Sanity check that we can handle a display rect with a non-zero origin.
+  test_display_rect.Offset(10, 10);
+  EXPECT_EQ(Rect(20, 20, 400, 80),
+            test::RenderTextTestApi::ExpandToBeVerticallySymmetric(
+                Rect(20, 20, 400, 40), test_display_rect));
+}
+
 TEST_P(RenderTextHarfBuzzTest, LinesInvalidationOnElideBehaviorChange) {
   RenderTextHarfBuzz* render_text = GetRenderTextHarfBuzz();
   render_text->SetText(UTF8ToUTF16("This is an example"));
@@ -5202,14 +5383,14 @@ TEST_P(RenderTextHarfBuzzTest, GlyphSpacing) {
   // The default glyph spacing is zero.
   EXPECT_EQ(0, render_text->glyph_spacing());
   ShapeRunWithFont(render_text->text(), Font(), FontRenderParams(), run);
-  const float width_without_glyph_spacing = run->width;
+  const float width_without_glyph_spacing = run->shape.width;
 
   const float kGlyphSpacing = 5;
   render_text->set_glyph_spacing(kGlyphSpacing);
   ShapeRunWithFont(render_text->text(), Font(), FontRenderParams(), run);
   // The new width is the sum of |width_without_glyph_spacing| and the spacing.
   const float total_spacing = seuss.length() * kGlyphSpacing;
-  EXPECT_EQ(width_without_glyph_spacing + total_spacing, run->width);
+  EXPECT_EQ(width_without_glyph_spacing + total_spacing, run->shape.width);
 }
 
 // Ensure font size overrides propagate through to text runs.
@@ -5225,9 +5406,12 @@ TEST_P(RenderTextHarfBuzzTest, FontSizeOverride) {
   const internal::TextRunList* run_list = GetHarfBuzzRunList();
   ASSERT_EQ(3U, run_list->size());
 
-  EXPECT_EQ(default_font_size, run_list->runs()[0].get()->font_size);
-  EXPECT_EQ(test_font_size_override, run_list->runs()[1].get()->font_size);
-  EXPECT_EQ(default_font_size, run_list->runs()[2].get()->font_size);
+  EXPECT_EQ(default_font_size,
+            run_list->runs()[0].get()->font_params.font_size);
+  EXPECT_EQ(test_font_size_override,
+            run_list->runs()[1].get()->font_params.font_size);
+  EXPECT_EQ(default_font_size,
+            run_list->runs()[2].get()->font_params.font_size);
 }
 
 // Prefix for test instantiations intentionally left blank since each test

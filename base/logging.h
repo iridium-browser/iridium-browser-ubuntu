@@ -19,6 +19,7 @@
 #include "base/compiler_specific.h"
 #include "base/debug/debugger.h"
 #include "base/macros.h"
+#include "base/scoped_clear_last_error.h"
 #include "base/strings/string_piece_forward.h"
 #include "base/template_util.h"
 #include "build/build_config.h"
@@ -148,7 +149,7 @@ namespace logging {
 // TODO(avi): do we want to do a unification of character types here?
 #if defined(OS_WIN)
 typedef wchar_t PathChar;
-#else
+#elif defined(OS_POSIX) || defined(OS_FUCHSIA)
 typedef char PathChar;
 #endif
 
@@ -166,7 +167,7 @@ enum LoggingDestination {
   // stderr.
 #if defined(OS_WIN)
   LOG_DEFAULT = LOG_TO_FILE,
-#elif defined(OS_POSIX)
+#elif defined(OS_POSIX) || defined(OS_FUCHSIA)
   LOG_DEFAULT = LOG_TO_SYSTEM_DEBUG_LOG,
 #endif
 };
@@ -267,6 +268,12 @@ int GetVlogLevel(const char (&file)[N]) {
 // only.
 BASE_EXPORT void SetLogItems(bool enable_process_id, bool enable_thread_id,
                              bool enable_timestamp, bool enable_tickcount);
+
+// Sets an optional prefix to add to each log message. |prefix| is not copied
+// and should be a raw string constant. |prefix| must only contain ASCII letters
+// to avoid confusion with PIDs and timestamps. Pass null to remove the prefix.
+// Logging defaults to no prefix.
+BASE_EXPORT void SetLogPrefix(const char* prefix);
 
 // Sets whether or not you'd like to see fatal debug messages popped up in
 // a dialog box or not.
@@ -436,7 +443,7 @@ const LogSeverity LOG_0 = LOG_ERROR;
 #define VPLOG_STREAM(verbose_level) \
   ::logging::Win32ErrorLogMessage(__FILE__, __LINE__, -verbose_level, \
     ::logging::GetLastSystemErrorCode()).stream()
-#elif defined(OS_POSIX)
+#elif defined(OS_POSIX) || defined(OS_FUCHSIA)
 #define VPLOG_STREAM(verbose_level) \
   ::logging::ErrnoLogMessage(__FILE__, __LINE__, -verbose_level, \
     ::logging::GetLastSystemErrorCode()).stream()
@@ -459,7 +466,7 @@ const LogSeverity LOG_0 = LOG_ERROR;
 #define PLOG_STREAM(severity) \
   COMPACT_GOOGLE_LOG_EX_ ## severity(Win32ErrorLogMessage, \
       ::logging::GetLastSystemErrorCode()).stream()
-#elif defined(OS_POSIX)
+#elif defined(OS_POSIX) || defined(OS_FUCHSIA)
 #define PLOG_STREAM(severity) \
   COMPACT_GOOGLE_LOG_EX_ ## severity(ErrnoLogMessage, \
       ::logging::GetLastSystemErrorCode()).stream()
@@ -903,9 +910,8 @@ const LogSeverity LOG_DCHECK = LOG_FATAL;
 #define DCHECK_OP(name, op, val1, val2)                                \
   switch (0) case 0: default:                                          \
   if (::logging::CheckOpResult true_if_passed =                        \
-      DCHECK_IS_ON() ?                                                 \
       ::logging::Check##name##Impl((val1), (val2),                     \
-                                   #val1 " " #op " " #val2) : nullptr) \
+                                   #val1 " " #op " " #val2))           \
    ;                                                                   \
   else                                                                 \
     ::logging::LogMessage(__FILE__, __LINE__, ::logging::LOG_DCHECK,   \
@@ -1014,25 +1020,10 @@ class BASE_EXPORT LogMessage {
   const char* file_;
   const int line_;
 
-#if defined(OS_WIN)
-  // Stores the current value of GetLastError in the constructor and restores
-  // it in the destructor by calling SetLastError.
   // This is useful since the LogMessage class uses a lot of Win32 calls
   // that will lose the value of GLE and the code that called the log function
   // will have lost the thread error value when the log call returns.
-  class SaveLastError {
-   public:
-    SaveLastError();
-    ~SaveLastError();
-
-    unsigned long get_error() const { return last_error_; }
-
-   protected:
-    unsigned long last_error_;
-  };
-
-  SaveLastError last_error_;
-#endif
+  base::internal::ScopedClearLastError last_error_;
 
   DISALLOW_COPY_AND_ASSIGN(LogMessage);
 };
@@ -1050,7 +1041,7 @@ class LogMessageVoidify {
 
 #if defined(OS_WIN)
 typedef unsigned long SystemErrorCode;
-#elif defined(OS_POSIX)
+#elif defined(OS_POSIX) || defined(OS_FUCHSIA)
 typedef int SystemErrorCode;
 #endif
 
@@ -1079,7 +1070,7 @@ class BASE_EXPORT Win32ErrorLogMessage {
 
   DISALLOW_COPY_AND_ASSIGN(Win32ErrorLogMessage);
 };
-#elif defined(OS_POSIX)
+#elif defined(OS_POSIX) || defined(OS_FUCHSIA)
 // Appends a formatted system message of the errno type
 class BASE_EXPORT ErrnoLogMessage {
  public:

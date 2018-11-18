@@ -15,9 +15,9 @@
 namespace web {
 
 struct FaviconURL;
-struct FormActivityParams;
 class NavigationContext;
 struct LoadCommittedDetails;
+class WebFrame;
 class WebState;
 
 enum class PageLoadCompletionStatus : bool { SUCCESS = 0, FAILURE = 1 };
@@ -138,25 +138,23 @@ class WebStateObserver {
   // false.
   virtual void DidSuppressDialog(WebState* web_state) {}
 
-  // Called on form submission in the main frame or in a same-origin iframe.
-  // |user_initiated| is true if the user interacted with the page.
-  // |is_main_frame| is true if the submitted form is in the main frame.
-  // TODO(crbug.com/823285): move this handler to components/autofill.
-  virtual void DocumentSubmitted(WebState* web_state,
-                                 const std::string& form_name,
-                                 bool user_initiated,
-                                 bool is_main_frame) {}
-
-  // Called when the user is typing on a form field in the main frame or in a
-  // same-origin iframe. |params.input_missing| is indicating if there is any
-  // error when parsing the form field information.
-  // TODO(crbug.com/823285): move this handler to components/autofill.
-  virtual void FormActivityRegistered(WebState* web_state,
-                                      const FormActivityParams& params) {}
-
   // Invoked when new favicon URL candidates are received.
   virtual void FaviconUrlUpdated(WebState* web_state,
                                  const std::vector<FaviconURL>& candidates) {}
+
+  // Called when a frame was created or navigated to a new document.
+  // Receivers can keep references to |web_frame| until
+  // |WebFrameWillBecomeUnavailable| is called but must not assume that the
+  // web Frame described by |web_frame| still exist.
+  virtual void WebFrameDidBecomeAvailable(WebState* web_state,
+                                          WebFrame* web_frame) {}
+
+  // Called when a frame was deleted or navigated away from the document and
+  // will be removed from the WebFramesManager.
+  // Receivers of this callback should clear all references to
+  // |web_frame|.
+  virtual void WebFrameWillBecomeUnavailable(WebState* web_state,
+                                             WebFrame* web_frame) {}
 
   // Called when the web process is terminated (usually by crashing, though
   // possibly by other means).

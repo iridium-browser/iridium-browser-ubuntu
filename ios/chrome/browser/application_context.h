@@ -8,6 +8,7 @@
 #include <string>
 
 #include "base/macros.h"
+#include "base/memory/scoped_refptr.h"
 
 namespace component_updater {
 class ComponentUpdateService;
@@ -30,12 +31,21 @@ class MetricsServicesManager;
 }
 
 namespace net {
+class NetLog;
 class URLRequestContextGetter;
 }
 
 namespace net_log {
-class ChromeNetLog;
+class NetExportFileWriter;
 }
+
+namespace network {
+class NetworkConnectionTracker;
+class SharedURLLoaderFactory;
+namespace mojom {
+class NetworkContext;
+}
+}  // namespace network
 
 namespace network_time {
 class NetworkTimeTracker;
@@ -84,6 +94,14 @@ class ApplicationContext {
   // Gets the URL request context associated with this application.
   virtual net::URLRequestContextGetter* GetSystemURLRequestContext() = 0;
 
+  // Gets the shared URL loader factory associated with this application.
+  virtual scoped_refptr<network::SharedURLLoaderFactory>
+  GetSharedURLLoaderFactory() = 0;
+
+  // Gets the NetworkContext object associated with the same context as
+  // GetSystemURLRequestContext().
+  virtual network::mojom::NetworkContext* GetSystemNetworkContext() = 0;
+
   // Gets the locale used by the application.
   virtual const std::string& GetApplicationLocale() = 0;
 
@@ -107,8 +125,10 @@ class ApplicationContext {
   // Gets the RapporServiceImpl. May return null.
   virtual rappor::RapporServiceImpl* GetRapporServiceImpl() = 0;
 
-  // Gets the ChromeNetLog.
-  virtual net_log::ChromeNetLog* GetNetLog() = 0;
+  // Gets the NetLog.
+  virtual net::NetLog* GetNetLog() = 0;
+
+  virtual net_log::NetExportFileWriter* GetNetExportFileWriter() = 0;
 
   // Gets the NetworkTimeTracker.
   virtual network_time::NetworkTimeTracker* GetNetworkTimeTracker() = 0;
@@ -122,6 +142,9 @@ class ApplicationContext {
   // Gets the ComponentUpdateService.
   virtual component_updater::ComponentUpdateService*
   GetComponentUpdateService() = 0;
+
+  // Returns the NetworkConnectionTracker instance for this ApplicationContext.
+  virtual network::NetworkConnectionTracker* GetNetworkConnectionTracker() = 0;
 
  protected:
   // Sets the global ApplicationContext instance.

@@ -18,7 +18,6 @@ import org.junit.runner.RunWith;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
-import org.chromium.base.test.util.FlakyTest;
 import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.util.browser.sync.SyncTestUtil;
@@ -26,9 +25,9 @@ import org.chromium.components.sync.ModelType;
 import org.chromium.components.sync.protocol.EntitySpecifics;
 import org.chromium.components.sync.protocol.SyncEnums;
 import org.chromium.components.sync.protocol.TypedUrlSpecifics;
-import org.chromium.content.browser.test.util.Criteria;
-import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content_public.browser.LoadUrlParams;
+import org.chromium.content_public.browser.test.util.Criteria;
+import org.chromium.content_public.browser.test.util.CriteriaHelper;
 import org.chromium.ui.base.PageTransition;
 
 import java.util.ArrayList;
@@ -74,13 +73,10 @@ public class TypedUrlsTest {
         assertServerTypedUrlCountWithName(0, URL);
     }
 
-    /*
     // Test syncing a typed URL from client to server.
+    @Test
     @LargeTest
     @Feature({"Sync"})
-    */
-    @Test
-    @FlakyTest(message = "https://crbug.com/592437")
     public void testUploadTypedUrl() {
         loadUrlByTyping(URL);
         waitForClientTypedUrlCount(1);

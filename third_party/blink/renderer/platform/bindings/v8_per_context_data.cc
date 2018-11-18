@@ -37,8 +37,10 @@
 #include "base/memory/ptr_util.h"
 #include "third_party/blink/renderer/platform/bindings/origin_trial_features.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
+#include "third_party/blink/renderer/platform/bindings/v0_custom_element_binding.h"
 #include "third_party/blink/renderer/platform/bindings/v8_binding.h"
 #include "third_party/blink/renderer/platform/bindings/v8_object_constructor.h"
+#include "third_party/blink/renderer/platform/bindings/wrapper_type_info.h"
 #include "third_party/blink/renderer/platform/instance_counters.h"
 
 namespace blink {
@@ -49,7 +51,8 @@ V8PerContextData::V8PerContextData(v8::Local<v8::Context> context)
       constructor_map_(isolate_),
       context_holder_(std::make_unique<gin::ContextHolder>(isolate_)),
       context_(isolate_, context),
-      activity_logger_(nullptr) {
+      activity_logger_(nullptr),
+      data_map_(new DataMap()) {
   context_holder_->SetContext(context);
   context_.Get().AnnotateStrongRetainer("blink::V8PerContextData::context_");
 
@@ -140,15 +143,15 @@ void V8PerContextData::AddCustomElementBinding(
 }
 
 void V8PerContextData::AddData(const char* key, Data* data) {
-  data_map_.Set(key, data);
+  data_map_->Set(key, data);
 }
 
 void V8PerContextData::ClearData(const char* key) {
-  data_map_.erase(key);
+  data_map_->erase(key);
 }
 
 V8PerContextData::Data* V8PerContextData::GetData(const char* key) {
-  return data_map_.at(key);
+  return data_map_->at(key);
 }
 
 }  // namespace blink

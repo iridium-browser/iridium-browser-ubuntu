@@ -19,12 +19,14 @@
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/synchronization/lock.h"
+#include "base/task/post_task.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time/tick_clock.h"
 #include "base/timer/timer.h"
 #include "build/build_config.h"
 #include "content/browser/media/capture/desktop_capture_device_uma_types.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/desktop_capture.h"
 #include "content/public/browser/desktop_media_id.h"
@@ -181,6 +183,10 @@ class DesktopCaptureDevice::Core : public webrtc::DesktopCapturer::Callback {
   // result.
   bool first_capture_returned_;
 
+  // True if the first capture permanent error has been logged. Used to log the
+  // first capture permanent error.
+  bool first_permanent_error_logged;
+
   // The type of the capturer.
   DesktopMediaID::Type capturer_type_;
 
@@ -208,6 +214,7 @@ DesktopCaptureDevice::Core::Core(
       max_cpu_consumption_percentage_(GetMaximumCpuConsumptionPercentage()),
       capture_in_progress_(false),
       first_capture_returned_(false),
+      first_permanent_error_logged(false),
       capturer_type_(type),
       weak_factory_(this) {}
 
@@ -249,8 +256,8 @@ void DesktopCaptureDevice::Core::AllocateAndStart(
   // TODO(https://crbug.com/823869): Fix DesktopCaptureDeviceTest and remove
   // this conditional.
   if (BrowserThread::IsThreadInitialized(BrowserThread::UI)) {
-    BrowserThread::PostTaskAndReplyWithResult(
-        BrowserThread::UI, FROM_HERE, base::BindOnce(&GetServiceConnector),
+    base::PostTaskWithTraitsAndReplyWithResult(
+        FROM_HERE, {BrowserThread::UI}, base::BindOnce(&GetServiceConnector),
         base::BindOnce(&DesktopCaptureDevice::Core::RequestWakeLock,
                        weak_factory_.GetWeakPtr()));
   }
@@ -299,8 +306,19 @@ void DesktopCaptureDevice::Core::OnCaptureResult(
   }
 
   if (!success) {
-    if (result == webrtc::DesktopCapturer::Result::ERROR_PERMANENT)
-      client_->OnError(FROM_HERE, "The desktop capturer has failed.");
+    if (result == webrtc::DesktopCapturer::Result::ERROR_PERMANENT) {
+      if (!first_permanent_error_logged) {
+        first_permanent_error_logged = true;
+        if (capturer_type_ == DesktopMediaID::TYPE_SCREEN) {
+          IncrementDesktopCaptureCounter(SCREEN_CAPTURER_PERMANENT_ERROR);
+        } else {
+          IncrementDesktopCaptureCounter(WINDOW_CAPTURER_PERMANENT_ERROR);
+        }
+      }
+      client_->OnError(media::VideoCaptureError::
+                           kDesktopCaptureDeviceWebrtcDesktopCapturerHasFailed,
+                       FROM_HERE, "The desktop capturer has failed.");
+    }
     return;
   }
   DCHECK(frame);

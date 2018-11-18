@@ -9,18 +9,15 @@
  * PATENTS file, you can obtain it at www.aomedia.org/license/patent.
  */
 
-#ifndef AV1_COMMON_IDCT_H_
-#define AV1_COMMON_IDCT_H_
+#ifndef AOM_AV1_COMMON_IDCT_H_
+#define AOM_AV1_COMMON_IDCT_H_
 
-#include <assert.h>
+#include "config/aom_config.h"
 
-#include "./aom_config.h"
 #include "av1/common/blockd.h"
 #include "av1/common/common.h"
 #include "av1/common/enums.h"
-#include "aom_dsp/inv_txfm.h"
 #include "aom_dsp/txfm_common.h"
-#include "aom_ports/mem.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -32,57 +29,39 @@ typedef struct {
   transform_1d cols, rows;  // vertical and horizontal
 } transform_2d;
 
-#if CONFIG_LGT
-int get_lgt4(const TxfmParam *txfm_param, int is_col,
-             const tran_high_t **lgtmtx);
-int get_lgt8(const TxfmParam *txfm_param, int is_col,
-             const tran_high_t **lgtmtx);
-#endif  // CONFIG_LGT
-
-#if CONFIG_HIGHBITDEPTH
-typedef void (*highbd_transform_1d)(const tran_low_t *, tran_low_t *, int bd);
-
-typedef struct {
-  highbd_transform_1d cols, rows;  // vertical and horizontal
-} highbd_transform_2d;
-#endif  // CONFIG_HIGHBITDEPTH
-
 #define MAX_TX_SCALE 1
 int av1_get_tx_scale(const TX_SIZE tx_size);
 
-void av1_iwht4x4_add(const tran_low_t *input, uint8_t *dest, int stride,
-                     const TxfmParam *txfm_param);
-void av1_idct4x4_add(const tran_low_t *input, uint8_t *dest, int stride,
-                     const TxfmParam *txfm_param);
-
-void av1_inv_txfm_add(const tran_low_t *input, uint8_t *dest, int stride,
-                      TxfmParam *txfm_param);
 void av1_inverse_transform_block(const MACROBLOCKD *xd,
-                                 const tran_low_t *dqcoeff,
-#if CONFIG_LGT
-                                 PREDICTION_MODE mode,
-#endif
-#if CONFIG_MRC_TX && SIGNAL_ANY_MRC_MASK
-                                 uint8_t *mrc_mask,
-#endif  // CONFIG_MRC_TX && SIGNAL_ANY_MRC_MASK
+                                 const tran_low_t *dqcoeff, int plane,
                                  TX_TYPE tx_type, TX_SIZE tx_size, uint8_t *dst,
-                                 int stride, int eob);
-void av1_inverse_transform_block_facade(MACROBLOCKD *xd, int plane, int block,
-                                        int blk_row, int blk_col, int eob);
-
+                                 int stride, int eob, int reduced_tx_set);
 void av1_highbd_iwht4x4_add(const tran_low_t *input, uint8_t *dest, int stride,
                             int eob, int bd);
-void av1_highbd_inv_txfm_add_4x4(const tran_low_t *input, uint8_t *dest,
-                                 int stride, const TxfmParam *param);
-void av1_highbd_inv_txfm_add_4x8(const tran_low_t *input, uint8_t *dest,
-                                 int stride, const TxfmParam *param);
-void av1_highbd_inv_txfm_add_8x4(const tran_low_t *input, uint8_t *dest,
-                                 int stride, const TxfmParam *param);
-void av1_highbd_inv_txfm_add(const tran_low_t *input, uint8_t *dest, int stride,
-                             TxfmParam *txfm_param);
+
+static INLINE const int32_t *cast_to_int32(const tran_low_t *input) {
+  assert(sizeof(int32_t) == sizeof(tran_low_t));
+  return (const int32_t *)input;
+}
+
+typedef void(highbd_inv_txfm_add)(const tran_low_t *input, uint8_t *dest,
+                                  int stride, const TxfmParam *param);
+
+highbd_inv_txfm_add av1_highbd_inv_txfm_add_4x8;
+highbd_inv_txfm_add av1_highbd_inv_txfm_add_8x4;
+highbd_inv_txfm_add av1_highbd_inv_txfm_add_16x32;
+highbd_inv_txfm_add av1_highbd_inv_txfm_add_32x16;
+highbd_inv_txfm_add av1_highbd_inv_txfm_add_32x64;
+highbd_inv_txfm_add av1_highbd_inv_txfm_add_64x32;
+highbd_inv_txfm_add av1_highbd_inv_txfm_add_16x64;
+highbd_inv_txfm_add av1_highbd_inv_txfm_add_64x16;
+highbd_inv_txfm_add av1_highbd_inv_txfm_add_16x4;
+highbd_inv_txfm_add av1_highbd_inv_txfm_add_4x16;
+highbd_inv_txfm_add av1_highbd_inv_txfm_add_8x32;
+highbd_inv_txfm_add av1_highbd_inv_txfm_add_32x8;
 
 #ifdef __cplusplus
 }  // extern "C"
 #endif
 
-#endif  // AV1_COMMON_IDCT_H_
+#endif  // AOM_AV1_COMMON_IDCT_H_

@@ -16,7 +16,7 @@ import org.chromium.chrome.R;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabObserver;
-import org.chromium.chrome.browser.vr_shell.VrShellDelegate;
+import org.chromium.chrome.browser.vr.VrModuleProvider;
 import org.chromium.ui.widget.UiWidgetFactory;
 
 /**
@@ -46,7 +46,7 @@ public class RepostFormWarningDialog extends DialogFragment {
         mTabObserver = new EmptyTabObserver() {
             @Override
             public void onDestroyed(Tab tab) {
-                dismiss();
+                dismissAllowingStateLoss();
             }
         };
         mTab.addObserver(mTabObserver);
@@ -74,7 +74,7 @@ public class RepostFormWarningDialog extends DialogFragment {
             mTab.getWebContents().getNavigationController().continuePendingReload();
         };
         Dialog dialog;
-        if (VrShellDelegate.isInVr()) {
+        if (VrModuleProvider.getDelegate().isInVr()) {
             android.app.AlertDialog alertDialog =
                     UiWidgetFactory.getInstance().createAlertDialog(getActivity());
             alertDialog.setMessage(alertDialog.getContext().getString(R.string.http_post_warning));
@@ -109,13 +109,25 @@ public class RepostFormWarningDialog extends DialogFragment {
 
     @Override
     public void dismiss() {
+        handleDimissCleanup();
         if (getFragmentManager() == null) return;
         super.dismiss();
     }
 
     @Override
+    public void dismissAllowingStateLoss() {
+        handleDimissCleanup();
+        if (getFragmentManager() == null) return;
+        super.dismissAllowingStateLoss();
+    }
+
+    @Override
     public void onDismiss(DialogInterface dialog) {
         super.onDismiss(dialog);
+        handleDimissCleanup();
+    }
+
+    private void handleDimissCleanup() {
         setCurrentDialogForTesting(null);
 
         if (mTab != null && mTabObserver != null) {

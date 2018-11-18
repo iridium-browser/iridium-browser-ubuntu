@@ -13,7 +13,6 @@
 #include "CheckFinalizerVisitor.h"
 #include "CheckGCRootsVisitor.h"
 #include "CheckTraceVisitor.h"
-#include "CheckTraceWrappersVisitor.h"
 #include "CollectVisitor.h"
 #include "JsonWriter.h"
 #include "RecordInfo.h"
@@ -118,11 +117,6 @@ void BlinkGCPluginConsumer::HandleTranslationUnit(ASTContext& context) {
 
   for (const auto& method : visitor.trace_decls())
     CheckTracingMethod(method);
-
-  if (options_.warn_trace_wrappers_missing_base_dispatch) {
-    for (const auto& method : visitor.trace_wrapper_decls())
-      CheckWrapperTracingMethod(method);
-  }
 
   if (json_) {
     json_->CloseList();
@@ -531,16 +525,6 @@ void BlinkGCPluginConsumer::CheckTracingMethod(CXXMethodDecl* method) {
   CheckTraceOrDispatchMethod(parent, method);
 }
 
-void BlinkGCPluginConsumer::CheckWrapperTracingMethod(CXXMethodDecl* method) {
-  RecordInfo* parent = cache_.Lookup(method->getParent());
-  if (IsIgnored(parent))
-    return;
-
-  Config::TraceWrappersMethodType trace_wrappers_type =
-      Config::GetTraceWrappersMethodType(method);
-  CheckTraceWrappersMethod(parent, method, trace_wrappers_type);
-}
-
 void BlinkGCPluginConsumer::CheckTraceOrDispatchMethod(
     RecordInfo* parent,
     CXXMethodDecl* method) {
@@ -580,25 +564,13 @@ void BlinkGCPluginConsumer::CheckTraceMethod(
   }
 }
 
-void BlinkGCPluginConsumer::CheckTraceWrappersMethod(
-    RecordInfo* parent,
-    clang::CXXMethodDecl* trace_wrappers,
-    Config::TraceWrappersMethodType trace_wrappers_type) {
-  CheckTraceWrappersVisitor visitor(trace_wrappers, parent, &cache_);
-  visitor.TraverseCXXMethodDecl(trace_wrappers);
-
-  for (auto& base : parent->GetBases())
-    if (!base.second.IsProperlyWrapperTraced())
-      reporter_.BaseRequiresWrapperTracing(parent, trace_wrappers, base.first);
-}
-
 void BlinkGCPluginConsumer::DumpClass(RecordInfo* info) {
   if (!json_)
     return;
 
   json_->OpenObject();
   json_->Write("name", info->record()->getQualifiedNameAsString());
-  json_->Write("loc", GetLocString(info->record()->getLocStart()));
+  json_->Write("loc", GetLocString(info->record()->getBeginLoc()));
   json_->CloseObject();
 
   class DumpEdgeVisitor : public RecursiveEdgeVisitor {
@@ -665,16 +637,12 @@ void BlinkGCPluginConsumer::DumpClass(RecordInfo* info) {
   DumpEdgeVisitor visitor(json_);
 
   for (auto& base : info->GetBases())
-    visitor.DumpEdge(info,
-                     base.second.info(),
-                     "<super>",
-                     Edge::kStrong,
-                     GetLocString(base.second.spec().getLocStart()));
+    visitor.DumpEdge(info, base.second.info(), "<super>", Edge::kStrong,
+                     GetLocString(base.second.spec().getBeginLoc()));
 
   for (auto& field : info->GetFields())
-    visitor.DumpField(info,
-                      &field.second,
-                      GetLocString(field.second.field()->getLocStart()));
+    visitor.DumpField(info, &field.second,
+                      GetLocString(field.second.field()->getBeginLoc()));
 }
 
 std::string BlinkGCPluginConsumer::GetLocString(SourceLocation loc) {
@@ -709,9 +677,9 @@ bool BlinkGCPluginConsumer::IsIgnoredClass(RecordInfo* info) {
 
 bool BlinkGCPluginConsumer::InIgnoredDirectory(RecordInfo* info) {
   std::string filename;
-  if (!GetFilename(info->record()->getLocStart(), &filename))
+  if (!GetFilename(info->record()->getBeginLoc(), &filename))
     return false;  // TODO: should we ignore non-existing file locations?
-#if defined(LLVM_ON_WIN32)
+#if defined(_WIN32)
   std::replace(filename.begin(), filename.end(), '\\', '/');
 #endif
   for (const auto& dir : options_.ignored_directories)

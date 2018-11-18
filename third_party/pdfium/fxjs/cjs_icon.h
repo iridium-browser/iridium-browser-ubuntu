@@ -7,14 +7,14 @@
 #ifndef FXJS_CJS_ICON_H_
 #define FXJS_CJS_ICON_H_
 
-#include "fxjs/JS_Define.h"
+#include "fxjs/js_define.h"
 
-class CJS_Icon : public CJS_Object {
+class CJS_Icon final : public CJS_Object {
  public:
   static int GetObjDefnID();
   static void DefineJSObjects(CFXJS_Engine* pEngine);
 
-  explicit CJS_Icon(v8::Local<v8::Object> pObject);
+  CJS_Icon(v8::Local<v8::Object> pObject, CJS_Runtime* pRuntime);
   ~CJS_Icon() override;
 
   WideString GetIconName() const { return m_swIconName; }
@@ -27,8 +27,8 @@ class CJS_Icon : public CJS_Object {
   static const char kName[];
   static const JSPropertySpec PropertySpecs[];
 
-  CJS_Return get_name(CJS_Runtime* pRuntime);
-  CJS_Return set_name(CJS_Runtime* pRuntime, v8::Local<v8::Value> vp);
+  CJS_Result get_name(CJS_Runtime* pRuntime);
+  CJS_Result set_name(CJS_Runtime* pRuntime, v8::Local<v8::Value> vp);
 
   WideString m_swIconName;
 };

@@ -6,8 +6,8 @@
 
 #include "ash/shell.h"
 #include "ash/strings/grit/ash_strings.h"
+#include "ash/system/message_center/notification_tray.h"
 #include "ash/system/tray/system_tray.h"
-#include "ash/system/web_notification/web_notification_tray.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/wm/tablet_mode/tablet_mode_controller.h"
 #include "base/command_line.h"
@@ -15,6 +15,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/test/scoped_feature_list.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/chromeos/devicetype_utils.h"
@@ -39,11 +40,11 @@ class ScreenLayoutObserverTest : public AshTestBase {
  protected:
   void SetUp() override {
     AshTestBase::SetUp();
-    WebNotificationTray::DisableAnimationsForTest(true);
+    NotificationTray::DisableAnimationsForTest(true);
   }
 
   void TearDown() override {
-    WebNotificationTray::DisableAnimationsForTest(false);
+    NotificationTray::DisableAnimationsForTest(false);
     AshTestBase::TearDown();
   }
 
@@ -191,28 +192,6 @@ TEST_P(ScreenLayoutObserverTestMultiMirroring, DisplayNotifications) {
             GetDisplayNotificationAdditionalText());
   EXPECT_TRUE(GetDisplayNotificationText().empty());
 
-  // UI-scale
-  CloseNotification();
-  UpdateDisplay("400x400@1.5");
-  EXPECT_EQ(l10n_util::GetStringFUTF16(
-                IDS_ASH_STATUS_TRAY_DISPLAY_RESOLUTION_CHANGED,
-                GetFirstDisplayName(), base::UTF8ToUTF16("600x600")),
-            GetDisplayNotificationAdditionalText());
-  EXPECT_EQ(l10n_util::GetStringUTF16(
-                IDS_ASH_STATUS_TRAY_DISPLAY_RESOLUTION_CHANGED_TITLE),
-            GetDisplayNotificationText());
-
-  // UI-scale to 1.0
-  CloseNotification();
-  UpdateDisplay("400x400");
-  EXPECT_EQ(l10n_util::GetStringFUTF16(
-                IDS_ASH_STATUS_TRAY_DISPLAY_RESOLUTION_CHANGED,
-                GetFirstDisplayName(), base::UTF8ToUTF16("400x400")),
-            GetDisplayNotificationAdditionalText());
-  EXPECT_EQ(l10n_util::GetStringUTF16(
-                IDS_ASH_STATUS_TRAY_DISPLAY_RESOLUTION_CHANGED_TITLE),
-            GetDisplayNotificationText());
-
   // No-update
   CloseNotification();
   UpdateDisplay("400x400");
@@ -278,16 +257,6 @@ TEST_P(ScreenLayoutObserverTestMultiMirroring, DisplayNotifications) {
   }
   EXPECT_TRUE(GetDisplayNotificationAdditionalText().empty());
 
-  // Resize the first display.
-  UpdateDisplay("400x400@1.5,200x200");
-  EXPECT_EQ(l10n_util::GetStringFUTF16(
-                IDS_ASH_STATUS_TRAY_DISPLAY_RESOLUTION_CHANGED,
-                GetFirstDisplayName(), base::UTF8ToUTF16("600x600")),
-            GetDisplayNotificationAdditionalText());
-  EXPECT_EQ(l10n_util::GetStringUTF16(
-                IDS_ASH_STATUS_TRAY_DISPLAY_RESOLUTION_CHANGED_TITLE),
-            GetDisplayNotificationText());
-
   // Rotate the second.
   UpdateDisplay("400x400@1.5,200x200/r");
   EXPECT_EQ(l10n_util::GetStringFUTF16(
@@ -319,7 +288,8 @@ TEST_F(ScreenLayoutObserverTest, ZoomingInUnifiedModeNotification) {
   // Using keyboard shortcuts to change the zoom should result in a
   // notification.
   CloseNotification();
-  EXPECT_TRUE(display_manager()->ZoomInternalDisplay(false /* up */));
+  int64_t display_id = display::Screen::GetScreen()->GetPrimaryDisplay().id();
+  EXPECT_TRUE(display_manager()->ZoomDisplay(display_id, false /* up */));
   EXPECT_EQ(l10n_util::GetStringFUTF16(
                 IDS_ASH_STATUS_TRAY_DISPLAY_RESOLUTION_CHANGED,
                 GetUnifiedDisplayName(), base::UTF8ToUTF16("400x200")),
@@ -329,7 +299,7 @@ TEST_F(ScreenLayoutObserverTest, ZoomingInUnifiedModeNotification) {
             GetDisplayNotificationText());
 
   CloseNotification();
-  EXPECT_TRUE(display_manager()->ZoomInternalDisplay(true /* up */));
+  EXPECT_TRUE(display_manager()->ZoomDisplay(display_id, true /* up */));
   EXPECT_EQ(l10n_util::GetStringFUTF16(
                 IDS_ASH_STATUS_TRAY_DISPLAY_RESOLUTION_CHANGED,
                 GetUnifiedDisplayName(), base::UTF8ToUTF16("800x400")),
@@ -344,7 +314,7 @@ TEST_F(ScreenLayoutObserverTest, ZoomingInUnifiedModeNotification) {
   CloseNotification();
   Shell::Get()->screen_layout_observer()->SetDisplayChangedFromSettingsUI(
       display::kUnifiedDisplayId);
-  EXPECT_TRUE(display_manager()->ZoomInternalDisplay(false /* up */));
+  EXPECT_TRUE(display_manager()->ZoomDisplay(display_id, false /* up */));
   EXPECT_TRUE(GetDisplayNotificationAdditionalText().empty());
   EXPECT_TRUE(GetDisplayNotificationText().empty());
 }

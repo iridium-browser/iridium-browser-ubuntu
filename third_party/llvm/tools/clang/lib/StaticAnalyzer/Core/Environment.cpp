@@ -67,7 +67,7 @@ static const Stmt *ignoreTransparentExprs(const Stmt *S) {
 EnvironmentEntry::EnvironmentEntry(const Stmt *S, const LocationContext *L)
     : std::pair<const Stmt *,
                 const StackFrameContext *>(ignoreTransparentExprs(S),
-                                           L ? L->getCurrentStackFrame()
+                                           L ? L->getStackFrame()
                                              : nullptr) {}
 
 SVal Environment::lookupExpr(const EnvironmentEntry &E) const {
@@ -202,7 +202,9 @@ EnvironmentManager::removeDeadBindings(Environment Env,
 }
 
 void Environment::print(raw_ostream &Out, const char *NL,
-                        const char *Sep, const LocationContext *WithLC) const {
+                        const char *Sep,
+                        const ASTContext &Context,
+                        const LocationContext *WithLC) const {
   if (ExprBindings.isEmpty())
     return;
 
@@ -222,10 +224,9 @@ void Environment::print(raw_ostream &Out, const char *NL,
 
   assert(WithLC);
 
-  LangOptions LO; // FIXME.
-  PrintingPolicy PP(LO);
+  PrintingPolicy PP = Context.getPrintingPolicy();
 
-  Out << NL << NL << "Expressions by stack frame:" << NL;
+  Out << NL << "Expressions by stack frame:" << NL;
   WithLC->dumpStack(Out, "", NL, Sep, [&](const LocationContext *LC) {
     for (auto I : ExprBindings) {
       if (I.first.getLocationContext() != LC)
@@ -234,8 +235,8 @@ void Environment::print(raw_ostream &Out, const char *NL,
       const Stmt *S = I.first.getStmt();
       assert(S != nullptr && "Expected non-null Stmt");
 
-      Out << "(" << (const void *)LC << ',' << (const void *)S << ") ";
-      S->printPretty(Out, nullptr, PP);
+      Out << "(LC" << LC->getID() << ", S" << S->getID(Context) << ") ";
+      S->printPretty(Out, /*Helper=*/nullptr, PP);
       Out << " : " << I.second << NL;
     }
   });

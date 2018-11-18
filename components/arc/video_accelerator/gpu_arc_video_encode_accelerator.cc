@@ -55,15 +55,14 @@ void GpuArcVideoEncodeAccelerator::RequireBitstreamBuffers(
 
 void GpuArcVideoEncodeAccelerator::BitstreamBufferReady(
     int32_t bitstream_buffer_id,
-    size_t payload_size,
-    bool key_frame,
-    base::TimeDelta timestamp) {
+    const media::BitstreamBufferMetadata& metadata) {
   DVLOGF(2) << "id=" << bitstream_buffer_id;
   DCHECK(client_);
   auto iter = use_bitstream_cbs_.find(bitstream_buffer_id);
   DCHECK(iter != use_bitstream_cbs_.end());
   std::move(iter->second)
-      .Run(payload_size, key_frame, timestamp.InMicroseconds());
+      .Run(metadata.payload_size_bytes, metadata.key_frame,
+           metadata.timestamp.InMicroseconds());
   use_bitstream_cbs_.erase(iter);
 }
 
@@ -81,7 +80,7 @@ void GpuArcVideoEncodeAccelerator::GetSupportedProfiles(
           gpu_preferences_));
 }
 
-void GpuArcVideoEncodeAccelerator::Initialize(
+void GpuArcVideoEncodeAccelerator::InitializeDeprecated(
     VideoPixelFormat input_format,
     const gfx::Size& visible_size,
     VideoEncodeAccelerator::StorageType input_storage,
@@ -94,9 +93,30 @@ void GpuArcVideoEncodeAccelerator::Initialize(
 
   input_pixel_format_ = input_format;
   visible_size_ = visible_size;
+  const media::VideoEncodeAccelerator::Config config(
+      input_pixel_format_, visible_size_, output_profile, initial_bitrate);
   accelerator_ = media::GpuVideoEncodeAcceleratorFactory::CreateVEA(
-      input_pixel_format_, visible_size_, output_profile, initial_bitrate, this,
-      gpu_preferences_);
+      config, this, gpu_preferences_);
+  if (accelerator_ == nullptr) {
+    DLOG(ERROR) << "Failed to create a VideoEncodeAccelerator.";
+    std::move(callback).Run(false);
+    return;
+  }
+  client_ = std::move(client);
+  std::move(callback).Run(true);
+}
+
+void GpuArcVideoEncodeAccelerator::Initialize(
+    const media::VideoEncodeAccelerator::Config& config,
+    VideoEncodeAccelerator::StorageType input_storage,
+    VideoEncodeClientPtr client,
+    InitializeCallback callback) {
+  DVLOGF(2) << config.AsHumanReadableString();
+
+  input_pixel_format_ = config.input_format;
+  visible_size_ = config.input_visible_size;
+  accelerator_ = media::GpuVideoEncodeAcceleratorFactory::CreateVEA(
+      config, this, gpu_preferences_);
   if (accelerator_ == nullptr) {
     DLOG(ERROR) << "Failed to create a VideoEncodeAccelerator.";
     std::move(callback).Run(false);

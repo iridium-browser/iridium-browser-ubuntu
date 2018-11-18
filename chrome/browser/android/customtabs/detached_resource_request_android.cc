@@ -5,6 +5,7 @@
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
 #include "base/android/scoped_java_ref.h"
+#include "base/bind.h"
 #include "chrome/browser/android/customtabs/detached_resource_request.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_android.h"
@@ -15,13 +16,29 @@
 
 namespace customtabs {
 
+namespace {
+
+void NotifyClientOfDetachedRequestCompletion(
+    const base::android::ScopedJavaGlobalRef<jobject>& session,
+    const GURL& url,
+    int net_error) {
+  JNIEnv* env = base::android::AttachCurrentThread();
+  Java_CustomTabsConnection_notifyClientOfDetachedRequestCompletion(
+      env, session, base::android::ConvertUTF8ToJavaString(env, url.spec()),
+      net_error);
+}
+
+}  // namespace
+
 static void JNI_CustomTabsConnection_CreateAndStartDetachedResourceRequest(
     JNIEnv* env,
     const base::android::JavaParamRef<jclass>& jcaller,
     const base::android::JavaParamRef<jobject>& profile,
+    const base::android::JavaParamRef<jobject>& session,
     const base::android::JavaParamRef<jstring>& url,
     const base::android::JavaParamRef<jstring>& origin,
-    jint referrer_policy) {
+    jint referrer_policy,
+    jint motivation) {
   DCHECK(profile && url && origin);
 
   Profile* native_profile = ProfileAndroid::FromProfileAndroid(profile);
@@ -36,8 +53,19 @@ static void JNI_CustomTabsConnection_CreateAndStartDetachedResourceRequest(
   net::URLRequest::ReferrerPolicy url_request_referrer_policy =
       content::Referrer::ReferrerPolicyForUrlRequest(
           static_cast<blink::WebReferrerPolicy>(referrer_policy));
+  DetachedResourceRequest::Motivation request_motivation =
+      static_cast<DetachedResourceRequest::Motivation>(motivation);
+
+  DetachedResourceRequest::OnResultCallback cb =
+      session.is_null()
+          ? base::DoNothing()
+          : base::BindOnce(&NotifyClientOfDetachedRequestCompletion,
+                           base::android::ScopedJavaGlobalRef<jobject>(session),
+                           native_url);
+
   DetachedResourceRequest::CreateAndStart(
-      native_profile, native_url, native_origin, url_request_referrer_policy);
+      native_profile, native_url, native_origin, url_request_referrer_policy,
+      request_motivation, std::move(cb));
 }
 
 }  // namespace customtabs

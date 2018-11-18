@@ -20,7 +20,6 @@
 
 #include "third_party/blink/renderer/core/html/html_summary_element.h"
 
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
 #include "third_party/blink/renderer/core/dom/flat_tree_traversal.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/events/keyboard_event.h"
@@ -30,6 +29,8 @@
 #include "third_party/blink/renderer/core/html/shadow/shadow_element_names.h"
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/layout/layout_block_flow.h"
+#include "third_party/blink/renderer/core/layout/layout_object_factory.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 
 namespace blink {
 
@@ -55,7 +56,7 @@ LayoutObject* HTMLSummaryElement::CreateLayoutObject(
       display == EDisplay::kLayoutCustom ||
       display == EDisplay::kInlineLayoutCustom)
     return LayoutObject::CreateObject(this, style);
-  return new LayoutBlockFlow(this);
+  return LayoutObjectFactory::CreateBlockFlow(*this, style);
 }
 
 void HTMLSummaryElement::DidAddUserAgentShadowRoot(ShadowRoot& root) {
@@ -100,40 +101,40 @@ bool HTMLSummaryElement::SupportsFocus() const {
   return IsMainSummary() || HTMLElement::SupportsFocus();
 }
 
-void HTMLSummaryElement::DefaultEventHandler(Event* event) {
+void HTMLSummaryElement::DefaultEventHandler(Event& event) {
   if (IsMainSummary()) {
-    if (event->type() == EventTypeNames::DOMActivate &&
-        !IsClickableControl(event->target()->ToNode())) {
+    if (event.type() == EventTypeNames::DOMActivate &&
+        !IsClickableControl(event.target()->ToNode())) {
       if (HTMLDetailsElement* details = DetailsElement())
         details->ToggleOpen();
-      event->SetDefaultHandled();
+      event.SetDefaultHandled();
       return;
     }
 
-    if (event->IsKeyboardEvent()) {
-      if (event->type() == EventTypeNames::keydown &&
-          ToKeyboardEvent(event)->key() == " ") {
+    if (event.IsKeyboardEvent()) {
+      if (event.type() == EventTypeNames::keydown &&
+          ToKeyboardEvent(event).key() == " ") {
         SetActive(true);
         // No setDefaultHandled() - IE dispatches a keypress in this case.
         return;
       }
-      if (event->type() == EventTypeNames::keypress) {
-        switch (ToKeyboardEvent(event)->charCode()) {
+      if (event.type() == EventTypeNames::keypress) {
+        switch (ToKeyboardEvent(event).charCode()) {
           case '\r':
-            DispatchSimulatedClick(event);
-            event->SetDefaultHandled();
+            DispatchSimulatedClick(&event);
+            event.SetDefaultHandled();
             return;
           case ' ':
             // Prevent scrolling down the page.
-            event->SetDefaultHandled();
+            event.SetDefaultHandled();
             return;
         }
       }
-      if (event->type() == EventTypeNames::keyup &&
-          ToKeyboardEvent(event)->key() == " ") {
+      if (event.type() == EventTypeNames::keyup &&
+          ToKeyboardEvent(event).key() == " ") {
         if (IsActive())
-          DispatchSimulatedClick(event);
-        event->SetDefaultHandled();
+          DispatchSimulatedClick(&event);
+        event.SetDefaultHandled();
         return;
       }
     }

@@ -164,6 +164,7 @@ cc_defaults {
         "libskia",
     ],
     cflags: [
+        "-Wno-implicit-fallthrough",
         "-Wno-unused-parameter",
         "-Wno-unused-variable",
     ],
@@ -212,14 +213,16 @@ cc_test {
 
 # We'll run GN to get the main source lists and include directories for Skia.
 gn_args = {
-  'is_official_build':  'true',
-  'skia_enable_tools':  'true',
-  'skia_use_libheif':   'true',
-  'skia_use_vulkan':    'true',
-  'target_cpu':         '"none"',
-  'target_os':          '"android"',
-  'skia_vulkan_header': '"Skia_Vulkan_Android.h"',
+  'is_official_build':   'true',
+  'skia_enable_tools':   'true',
+  'skia_use_libheif':    'true',
+  'skia_use_vulkan':     'true',
+  'target_cpu':          '"none"',
+  'target_os':           '"android"',
 }
+
+extra_userconfig_defines = [
+]
 
 js = gn_to_bp_utils.GenerateJSONFromGN(gn_args)
 
@@ -232,6 +235,7 @@ cflags_cc       = strip_slashes(js['targets']['//:skia']['cflags_cc'])
 local_includes  = strip_slashes(js['targets']['//:skia']['include_dirs'])
 export_includes = strip_slashes(js['targets']['//:public']['include_dirs'])
 defines      = [str(d) for d in js['targets']['//:skia']['defines']]
+defines      += extra_userconfig_defines
 
 dm_srcs         = strip_slashes(js['targets']['//:dm']['sources'])
 dm_includes     = strip_slashes(js['targets']['//:dm']['include_dirs'])
@@ -245,18 +249,25 @@ gn_to_bp_utils.GrabDependentValues(js, '//:dm', 'sources', dm_srcs, 'skia')
 gn_to_bp_utils.GrabDependentValues(js, '//:nanobench', 'sources',
                                    nanobench_srcs, 'skia')
 
-# No need to list headers.
-srcs            = {s for s in srcs           if not s.endswith('.h')}
-dm_srcs         = {s for s in dm_srcs        if not s.endswith('.h')}
-nanobench_srcs  = {s for s in nanobench_srcs if not s.endswith('.h')}
+# skcms is a little special, kind of a second-party library.
+local_includes.add("third_party/skcms")
+dm_includes   .add("third_party/skcms")
+
+# need to manually include the vulkanmemoryallocator headers. If HWUI ever needs
+# direct access to the allocator we need to add it to export_includes as well.
+srcs.add("third_party/vulkanmemoryallocator/GrVulkanMemoryAllocator.cpp")
+local_includes.add("third_party/vulkanmemoryallocator/")
+
+# Android's build will choke if we list headers.
+def strip_headers(sources):
+  return {s for s in sources if not s.endswith('.h')}
+
+srcs            = strip_headers(srcs)
+dm_srcs         = strip_headers(dm_srcs)
+nanobench_srcs  = strip_headers(nanobench_srcs)
 
 cflags = gn_to_bp_utils.CleanupCFlags(cflags)
 cflags_cc = gn_to_bp_utils.CleanupCCFlags(cflags_cc)
-
-# We need to add the include path to the vulkan defines and header file set in
-# then skia_vulkan_header gn arg that is used for framework builds.
-local_includes.add("platform_tools/android/vulkan")
-export_includes.add("platform_tools/android/vulkan")
 
 here = os.path.dirname(__file__)
 defs = gn_to_bp_utils.GetArchSources(os.path.join(here, 'opts.gni'))
@@ -278,17 +289,17 @@ with open('Android.bp', 'w') as f:
     'cflags':          bpfmt(8, cflags, False),
     'cflags_cc':       bpfmt(8, cflags_cc),
 
-    'arm_srcs':      bpfmt(16, defs['armv7']),
-    'arm_neon_srcs': bpfmt(20, defs['neon']),
-    'arm64_srcs':    bpfmt(16, defs['arm64'] +
-                               defs['crc32']),
-    'none_srcs':     bpfmt(16, defs['none']),
-    'x86_srcs':      bpfmt(16, defs['sse2'] +
-                               defs['ssse3'] +
-                               defs['sse41'] +
-                               defs['sse42'] +
-                               defs['avx'  ] +
-                               defs['hsw'  ]),
+    'arm_srcs':      bpfmt(16, strip_headers(defs['armv7'])),
+    'arm_neon_srcs': bpfmt(20, strip_headers(defs['neon'])),
+    'arm64_srcs':    bpfmt(16, strip_headers(defs['arm64'] +
+                                             defs['crc32'])),
+    'none_srcs':     bpfmt(16, strip_headers(defs['none'])),
+    'x86_srcs':      bpfmt(16, strip_headers(defs['sse2'] +
+                                             defs['ssse3'] +
+                                             defs['sse41'] +
+                                             defs['sse42'] +
+                                             defs['avx'  ] +
+                                             defs['hsw'  ])),
 
     'dm_includes'       : bpfmt(8, dm_includes),
     'dm_srcs'           : bpfmt(8, dm_srcs),

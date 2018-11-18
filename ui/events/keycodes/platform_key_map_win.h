@@ -37,23 +37,19 @@ class EVENTS_EXPORT PlatformKeyMap {
   // If the supplied event has both Control and Alt modifiers set, then they
   // are replaced by AltGraph. This should only ever be applied to the flags
   // for printable-character events.
-  // TODO(crbug.com/25503): Has no effect if FixAltGraph is not enabled.
   static int ReplaceControlAndAltWithAltGraph(int flags);
-
-  // TODO(crbug.com/25503): Returns true if we disambiguate AltGraph.
-  static bool IsFixAltGraphEnabled();
 
  private:
   friend class PlatformKeyMapTest;
 
   PlatformKeyMap();
 
-  // TODO(chongz): Expose this function when we need to access separate layout.
-  // Returns the DomKey 'meaning' of |KeyboardCode| in the context of specified
-  // |EventFlags| and stored keyboard layout.
+  // TODO(input-dev): Expose this function when we need to access separate
+  // layout. Returns the DomKey 'meaning' of |KeyboardCode| in the context of
+  // specified |EventFlags| and stored keyboard layout.
   DomKey DomKeyFromKeyboardCodeImpl(KeyboardCode, int* flags) const;
 
-  // TODO(chongz): Expose this function in response to WM_INPUTLANGCHANGE.
+  // TODO(input-dev): Expose this function in response to WM_INPUTLANGCHANGE.
   void UpdateLayout(HKL layout);
 
   HKL keyboard_layout_ = 0;

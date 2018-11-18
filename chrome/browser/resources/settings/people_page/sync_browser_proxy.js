@@ -20,6 +20,7 @@ settings.StoredAccount;
 
 /**
  * @typedef {{childUser: (boolean|undefined),
+ *            disabled: (boolean|undefined),
  *            domain: (string|undefined),
  *            hasError: (boolean|undefined),
  *            hasUnrecoverableError: (boolean|undefined),
@@ -96,6 +97,9 @@ settings.StatusAction = {
  *   typedUrlsEnforced: boolean,
  *   typedUrlsRegistered: boolean,
  *   typedUrlsSynced: boolean,
+ *   userEventsEnforced: boolean,
+ *   userEventsRegistered: boolean,
+ *   userEventsSynced: boolean,
  * }}
  */
 settings.SyncPrefs;
@@ -132,6 +136,11 @@ cr.define('settings', function() {
      * @param {boolean} deleteProfile
      */
     signOut(deleteProfile) {}
+
+    /**
+     * Invalidates the Sync token without signing the user out.
+     */
+    pauseSync() {}
 
     /**
      * Opens the multi-profile user manager.
@@ -192,13 +201,6 @@ cr.define('settings', function() {
     setSyncDatatypes(syncPrefs) {}
 
     /**
-     * Sets the syncAllDataTypes pref.
-     * @param {boolean} syncEverything
-     * @return {!Promise<!settings.PageStatus>}
-     */
-    setSyncEverything(syncEverything) {}
-
-    /**
      * Sets the sync encryption options.
      * @param {!settings.SyncPrefs} syncPrefs
      * @return {!Promise<!settings.PageStatus>}
@@ -218,6 +220,13 @@ cr.define('settings', function() {
      * Opens the Google Activity Controls url in a new tab.
      */
     openActivityControlsUrl() {}
+
+    /**
+     * Function to invoke when the unified consent toggle state changes, to
+     * notify the C++ layer.
+     * @param {boolean} toggleChecked
+     */
+    unifiedConsentToggleChanged(toggleChecked) {}
   }
 
   /**
@@ -232,7 +241,12 @@ cr.define('settings', function() {
 
     /** @override */
     signOut(deleteProfile) {
-      chrome.send('SyncSetupStopSyncing', [deleteProfile]);
+      chrome.send('SyncSetupSignout', [deleteProfile]);
+    }
+
+    /** @override */
+    pauseSync() {
+      chrome.send('SyncSetupPauseSync');
     }
 
     /** @override */
@@ -289,11 +303,6 @@ cr.define('settings', function() {
     }
 
     /** @override */
-    setSyncEverything(syncEverything) {
-      return cr.sendWithPromise('SyncSetupSetSyncEverything', syncEverything);
-    }
-
-    /** @override */
     setSyncEncryption(syncPrefs) {
       return cr.sendWithPromise(
           'SyncSetupSetEncryption', JSON.stringify(syncPrefs));
@@ -309,6 +318,11 @@ cr.define('settings', function() {
     openActivityControlsUrl() {
       chrome.metricsPrivate.recordUserAction(
           'Signin_AccountSettings_GoogleActivityControlsClicked');
+    }
+
+    /** @override */
+    unifiedConsentToggleChanged(toggleChecked) {
+      chrome.send('UnifiedConsentToggleChanged', [toggleChecked]);
     }
   }
 

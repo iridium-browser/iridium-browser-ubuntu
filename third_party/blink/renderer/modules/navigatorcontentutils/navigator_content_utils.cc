@@ -26,10 +26,12 @@
 
 #include "third_party/blink/renderer/modules/navigatorcontentutils/navigator_content_utils.h"
 
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
+#include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/use_counter.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
+#include "third_party/blink/renderer/platform/weborigin/security_origin.h"
+#include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
 namespace blink {
 
@@ -42,7 +44,7 @@ static void InitCustomSchemeHandlerWhitelist() {
       "mms",     "news", "nntp", "openpgp4fpr", "sip",  "sms",    "smsto",
       "ssh",     "tel",  "urn",  "webcal",      "wtai", "xmpp",
   };
-  for (size_t i = 0; i < WTF_ARRAY_LENGTH(kSchemes); ++i)
+  for (size_t i = 0; i < arraysize(kSchemes); ++i)
     g_scheme_whitelist->insert(kSchemes[i]);
 }
 
@@ -55,7 +57,7 @@ static bool VerifyCustomHandlerURL(const Document& document,
   int index = url.Find(kToken);
   if (-1 == index) {
     exception_state.ThrowDOMException(
-        kSyntaxError,
+        DOMExceptionCode::kSyntaxError,
         "The url provided ('" + url + "') does not contain '%s'.");
     return false;
   }
@@ -63,12 +65,12 @@ static bool VerifyCustomHandlerURL(const Document& document,
   // It is also a SyntaxError if the custom handler URL, as created by removing
   // the "%s" token and prepending the base url, does not resolve.
   String new_url = url;
-  new_url.Remove(index, WTF_ARRAY_LENGTH(kToken) - 1);
+  new_url.Remove(index, arraysize(kToken) - 1);
   KURL kurl = document.CompleteURL(new_url);
 
   if (kurl.IsEmpty() || !kurl.IsValid()) {
     exception_state.ThrowDOMException(
-        kSyntaxError,
+        DOMExceptionCode::kSyntaxError,
         "The custom handler URL created by removing '%s' and prepending '" +
             document.BaseURL().GetString() + "' is invalid.");
     return false;

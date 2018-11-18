@@ -15,6 +15,7 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/metrics/field_trial.h"
+#include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_split.h"
@@ -23,7 +24,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/trace_event/memory_usage_estimator.h"
 #include "build/build_config.h"
-#include "components/google/core/browser/google_util.h"
+#include "components/google/core/common/google_util.h"
 #include "components/search_engines/search_engines_switches.h"
 #include "components/search_engines/search_terms_data.h"
 #include "components/search_engines/template_url_prepopulate_data.h"
@@ -191,7 +192,7 @@ TemplateURLRef::SearchTermsArgs::SearchTermsArgs(
       accepted_suggestion(NO_SUGGESTIONS_AVAILABLE),
       cursor_position(base::string16::npos),
       page_classification(metrics::OmniboxEventProto::INVALID_SPEC),
-      append_extra_query_params(false),
+      append_extra_query_params_from_command_line(false),
       from_app_list(false),
       contextual_search_params(ContextualSearchParams()) {}
 
@@ -211,7 +212,7 @@ size_t TemplateURLRef::SearchTermsArgs::EstimateMemoryUsage() const {
   res += base::trace_event::EstimateMemoryUsage(session_token);
   res += base::trace_event::EstimateMemoryUsage(prefetch_query);
   res += base::trace_event::EstimateMemoryUsage(prefetch_query_type);
-  res += base::trace_event::EstimateMemoryUsage(suggest_query_params);
+  res += base::trace_event::EstimateMemoryUsage(additional_query_params);
   res += base::trace_event::EstimateMemoryUsage(image_thumbnail_content);
   res += base::trace_event::EstimateMemoryUsage(image_url);
   res += base::trace_event::EstimateMemoryUsage(contextual_search_params);
@@ -222,15 +223,21 @@ size_t TemplateURLRef::SearchTermsArgs::EstimateMemoryUsage() const {
 TemplateURLRef::SearchTermsArgs::ContextualSearchParams::
     ContextualSearchParams()
     : version(-1),
-      contextual_cards_version(0) {}
+      contextual_cards_version(0),
+      previous_event_id(0),
+      previous_event_results(0) {}
 
 TemplateURLRef::SearchTermsArgs::ContextualSearchParams::ContextualSearchParams(
     int version,
     int contextual_cards_version,
-    const std::string& home_country)
+    const std::string& home_country,
+    int64_t previous_event_id,
+    int previous_event_results)
     : version(version),
       contextual_cards_version(contextual_cards_version),
-      home_country(home_country) {}
+      home_country(home_country),
+      previous_event_id(previous_event_id),
+      previous_event_results(previous_event_results) {}
 
 TemplateURLRef::SearchTermsArgs::ContextualSearchParams::ContextualSearchParams(
     const ContextualSearchParams& other) = default;
@@ -248,27 +255,13 @@ TemplateURLRef::SearchTermsArgs::ContextualSearchParams::EstimateMemoryUsage()
 // TemplateURLRef -------------------------------------------------------------
 
 TemplateURLRef::TemplateURLRef(const TemplateURL* owner, Type type)
-    : owner_(owner),
-      type_(type),
-      index_in_owner_(0),
-      parsed_(false),
-      valid_(false),
-      supports_replacements_(false),
-      search_term_key_location_(url::Parsed::QUERY),
-      prepopulated_(false) {
+    : owner_(owner), type_(type) {
   DCHECK(owner_);
   DCHECK_NE(INDEXED, type_);
 }
 
 TemplateURLRef::TemplateURLRef(const TemplateURL* owner, size_t index_in_owner)
-    : owner_(owner),
-      type_(INDEXED),
-      index_in_owner_(index_in_owner),
-      parsed_(false),
-      valid_(false),
-      supports_replacements_(false),
-      search_term_key_location_(url::Parsed::QUERY),
-      prepopulated_(false) {
+    : owner_(owner), type_(INDEXED), index_in_owner_(index_in_owner) {
   DCHECK(owner_);
   DCHECK_LT(index_in_owner_, owner_->alternate_urls().size());
 }
@@ -318,11 +311,13 @@ size_t TemplateURLRef::EstimateMemoryUsage() const {
   res += base::trace_event::EstimateMemoryUsage(replacements_);
   res += base::trace_event::EstimateMemoryUsage(host_);
   res += base::trace_event::EstimateMemoryUsage(port_);
-  res += base::trace_event::EstimateMemoryUsage(path_);
+  res += base::trace_event::EstimateMemoryUsage(path_prefix_);
+  res += base::trace_event::EstimateMemoryUsage(path_suffix_);
   res += base::trace_event::EstimateMemoryUsage(search_term_key_);
   res += base::trace_event::EstimateMemoryUsage(search_term_value_prefix_);
   res += base::trace_event::EstimateMemoryUsage(search_term_value_suffix_);
   res += base::trace_event::EstimateMemoryUsage(post_params_);
+  res += sizeof(path_wildcard_present_);
 
   return res;
 }
@@ -385,15 +380,15 @@ std::string TemplateURLRef::ReplaceSearchTerms(
     return url;
 
   std::vector<std::string> query_params;
-  if (search_terms_args.append_extra_query_params) {
+  if (search_terms_args.append_extra_query_params_from_command_line) {
     std::string extra_params(
         base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
             switches::kExtraSearchQueryParams));
     if (!extra_params.empty())
       query_params.push_back(extra_params);
   }
-  if (!search_terms_args.suggest_query_params.empty())
-    query_params.push_back(search_terms_args.suggest_query_params);
+  if (!search_terms_args.additional_query_params.empty())
+    query_params.push_back(search_terms_args.additional_query_params);
   if (!gurl.query().empty())
     query_params.push_back(gurl.query());
 
@@ -445,10 +440,10 @@ const std::string& TemplateURLRef::GetHost(
   return host_;
 }
 
-const std::string& TemplateURLRef::GetPath(
+std::string TemplateURLRef::GetPath(
     const SearchTermsData& search_terms_data) const {
   ParseIfNecessary(search_terms_data);
-  return path_;
+  return path_prefix_ + path_suffix_;
 }
 
 const std::string& TemplateURLRef::GetSearchTermKey(
@@ -534,10 +529,8 @@ bool TemplateURLRef::ExtractSearchTermsFromURL(
     return false;
 
   // Host, port, and path must match.
-  if ((url.host() != host_) ||
-      (url.port() != port_) ||
-      ((url.path() != path_) &&
-          (search_term_key_location_ != url::Parsed::PATH))) {
+  if ((url.host() != host_) || (url.port() != port_) ||
+      (!PathIsEqual(url) && (search_term_key_location_ != url::Parsed::PATH))) {
     return false;
   }
 
@@ -606,10 +599,11 @@ bool TemplateURLRef::ExtractSearchTermsFromURL(
 }
 
 void TemplateURLRef::InvalidateCachedValues() const {
-  supports_replacements_ = valid_ = parsed_ = false;
+  supports_replacements_ = valid_ = parsed_ = path_wildcard_present_ = false;
   host_.clear();
   port_.clear();
-  path_.clear();
+  path_prefix_.clear();
+  path_suffix_.clear();
   search_term_key_.clear();
   search_term_key_location_ = url::Parsed::QUERY;
   search_term_value_prefix_.clear();
@@ -688,6 +682,8 @@ bool TemplateURLRef::ParseParameter(size_t start,
                                         start));
   } else if (parameter == "google:pageClassification") {
     replacements->push_back(Replacement(GOOGLE_PAGE_CLASSIFICATION, start));
+  } else if (parameter == "google:pathWildcard") {
+    // Do nothing, we just want the path wildcard removed from the URL.
   } else if (parameter == "google:prefetchQuery") {
     replacements->push_back(Replacement(GOOGLE_PREFETCH_QUERY, start));
   } else if (parameter == "google:RLZ") {
@@ -837,6 +833,28 @@ void TemplateURLRef::ParseIfNecessary(
   }
 }
 
+void TemplateURLRef::ParsePath(const std::string& path) const {
+  // Wildcard string used when matching URLs.
+  const std::string wildcard_escaped = "%7Bgoogle:pathWildcard%7D";
+
+  // We only search for the escaped wildcard because we're only replacing it in
+  // the path, and GURL's constructor escapes { and }.
+  size_t wildcard_start = path.find(wildcard_escaped);
+  path_wildcard_present_ = wildcard_start != std::string::npos;
+  path_prefix_ = path.substr(0, wildcard_start);
+  path_suffix_ = path_wildcard_present_
+                     ? path.substr(wildcard_start + wildcard_escaped.length())
+                     : std::string();
+}
+
+bool TemplateURLRef::PathIsEqual(const GURL& url) const {
+  base::StringPiece path = url.path_piece();
+  if (!path_wildcard_present_)
+    return path == path_prefix_;
+  return ((path.length() >= path_prefix_.length() + path_suffix_.length()) &&
+          path.starts_with(path_prefix_) && path.ends_with(path_suffix_));
+}
+
 void TemplateURLRef::ParseHostAndSearchTermKey(
     const SearchTermsData& search_terms_data) const {
   std::string url_string(GetURL());
@@ -869,13 +887,13 @@ void TemplateURLRef::ParseHostAndSearchTermKey(
     search_term_key_ = query_result.key();
     search_term_value_prefix_ = query_result.value_prefix();
     search_term_value_suffix_ = query_result.value_suffix();
-    path_ = url.path();
+    ParsePath(url.path());
   } else if (in_ref) {
     search_term_key_location_ = url::Parsed::REF;
     search_term_key_ = ref_result.key();
     search_term_value_prefix_ = ref_result.value_prefix();
     search_term_value_suffix_ = ref_result.value_suffix();
-    path_ = url.path();
+    ParsePath(url.path());
   } else {
     DCHECK(in_path);
     search_term_key_location_ = url::Parsed::PATH;
@@ -934,8 +952,7 @@ std::string TemplateURLRef::HandleReplacements(
 
   // replacements_ is ordered in ascending order, as such we need to iterate
   // from the back.
-  for (Replacements::reverse_iterator i = replacements_.rbegin();
-       i != replacements_.rend(); ++i) {
+  for (auto i = replacements_.rbegin(); i != replacements_.rend(); ++i) {
     switch (i->type) {
       case ENCODING:
         HandleReplacement(std::string(), input_encoding, *i, &url);
@@ -1022,6 +1039,14 @@ std::string TemplateURLRef::HandleReplacements(
         }
         if (!params.home_country.empty())
           args.push_back("ctxs_hc=" + params.home_country);
+        if (params.previous_event_id != 0) {
+          args.push_back("ctxsl_pid=" +
+                         base::Int64ToString(params.previous_event_id));
+        }
+        if (params.previous_event_results != 0) {
+          args.push_back("ctxsl_per=" +
+                         base::IntToString(params.previous_event_results));
+        }
 
         HandleReplacement(std::string(), base::JoinString(args, "&"), *i, &url);
         break;
@@ -1293,7 +1318,6 @@ bool TemplateURL::MatchesData(const TemplateURL* t_url,
          (t_url->suggestions_url_post_params() ==
           data->suggestions_url_post_params) &&
          (t_url->image_url_post_params() == data->image_url_post_params) &&
-         (t_url->favicon_url() == data->favicon_url) &&
          (t_url->safe_for_autoreplace() == data->safe_for_autoreplace) &&
          (t_url->input_encodings() == data->input_encodings) &&
          (t_url->alternate_urls() == data->alternate_urls);
@@ -1431,7 +1455,7 @@ void TemplateURL::EncodeSearchTerms(
     base::string16* encoded_original_query) const {
 
   std::vector<std::string> encodings(input_encodings());
-  if (std::find(encodings.begin(), encodings.end(), "UTF-8") == encodings.end())
+  if (!base::ContainsValue(encodings, "UTF-8"))
     encodings.push_back("UTF-8");
   for (auto i = encodings.begin(); i != encodings.end(); ++i) {
     if (TryEncoding(search_terms_args.search_terms,

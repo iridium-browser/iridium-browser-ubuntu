@@ -238,6 +238,9 @@ Polymer({
 
   /** @private */
   pairingChanged_: function() {
+    if (this.pairingDevice === undefined)
+      return;
+
     // Auto-close the dialog when pairing completes.
     if (this.pairingDevice.paired && !this.pairingDevice.connecting &&
         this.pairingDevice.connected) {
@@ -258,7 +261,7 @@ Polymer({
       message = 'bluetoothStartConnecting';
     else
       message = this.getEventDesc_(this.pairingEvent_.pairing);
-    return this.i18n(message, this.pairingDevice.name);
+    return this.i18n(message, this.pairingDevice.name || '');
   },
 
   /**
@@ -326,10 +329,10 @@ Polymer({
         (this.pairingEvent_.pairing == PairingEventType.REQUEST_PINCODE) ?
         '#pincode' :
         '#passkey';
-    var paperInput = /** @type {!PaperInputElement} */ (this.$$(inputId));
-    assert(paperInput);
-    /** @type {string} */ var value = paperInput.value;
-    return !!value && paperInput.validate();
+    var crInput = /** @type {!CrInputElement} */ (this.$$(inputId));
+    assert(crInput);
+    /** @type {string} */ var value = crInput.value;
+    return !!value && crInput.validate();
   },
 
   /**

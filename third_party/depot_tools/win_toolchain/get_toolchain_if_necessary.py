@@ -238,6 +238,22 @@ def CanAccessToolchainBucket():
   return code == 0
 
 
+def ToolchainBaseURL():
+  base_url = os.environ.get('DEPOT_TOOLS_WIN_TOOLCHAIN_BASE_URL', '')
+  if base_url.startswith('file://'):
+    base_url = base_url[len('file://'):]
+  return base_url
+
+
+def UsesToolchainFromFile():
+  return os.path.isdir(ToolchainBaseURL())
+
+
+def UsesToolchainFromHttp():
+  url = ToolchainBaseURL()
+  return url.startswith('http://') or url.startswith('https://')
+
+
 def RequestGsAuthentication():
   """Requests that the user authenticate to be able to access gs:// as a
   Googler. This allows much faster downloads, and pulling (old) toolchains
@@ -276,6 +292,27 @@ def DelayBeforeRemoving(target_dir):
     print
 
 
+def DownloadUsingHttp(filename):
+  """Downloads the given file from a url defined in
+     DEPOT_TOOLS_WIN_TOOLCHAIN_BASE_URL environment variable."""
+  import urlparse
+  import urllib2
+  from contextlib import closing
+  temp_dir = tempfile.mkdtemp()
+  assert os.path.basename(filename) == filename
+  target_path = os.path.join(temp_dir, filename)
+  base_url = ToolchainBaseURL()
+  src_url = urlparse.urljoin(base_url, filename)
+  try:
+    with closing(urllib2.urlopen(src_url)) as fsrc, \
+         open(target_path, 'wb') as fdst:
+      shutil.copyfileobj(fsrc, fdst)
+  except urllib2.URLError as e:
+    RmDir(temp_dir)
+    sys.exit('Failed to retrieve file: %s' % e)
+  return temp_dir, target_path
+
+
 def DownloadUsingGsutil(filename):
   """Downloads the given file from Google Storage chrome-wintoolchain bucket."""
   temp_dir = tempfile.mkdtemp()
@@ -302,10 +339,13 @@ def DoTreeMirror(target_dir, tree_sha1):
   """In order to save temporary space on bots that do not have enough space to
   download ISOs, unpack them, and copy to the target location, the whole tree
   is uploaded as a zip to internal storage, and then mirrored here."""
-  use_local_zip = bool(int(os.environ.get('USE_LOCAL_ZIP', 0)))
-  if use_local_zip:
+  if UsesToolchainFromFile():
     temp_dir = None
-    local_zip = tree_sha1 + '.zip'
+    local_zip = os.path.join(ToolchainBaseURL(), tree_sha1 + '.zip')
+    if not os.path.isfile(local_zip):
+      sys.exit('%s is not a valid file.' % local_zip)
+  elif UsesToolchainFromHttp():
+    temp_dir, local_zip = DownloadUsingHttp(tree_sha1 + '.zip')
   else:
     temp_dir, local_zip = DownloadUsingGsutil(tree_sha1 + '.zip')
   sys.stdout.write('Extracting %s...\n' % local_zip)
@@ -452,17 +492,27 @@ def main():
   # based on timestamps to make that case fast.
   current_hashes = CalculateToolchainHashes(target_dir, True)
   if desired_hash not in current_hashes:
+    should_use_file = False
+    should_use_http = False
     should_use_gs = False
-    if (HaveSrcInternalAccess() or
+    if UsesToolchainFromFile():
+      should_use_file = True
+    elif UsesToolchainFromHttp():
+      should_use_http = True
+    elif (HaveSrcInternalAccess() or
         LooksLikeGoogler() or
         CanAccessToolchainBucket()):
       should_use_gs = True
       if not CanAccessToolchainBucket():
         RequestGsAuthentication()
-    if not should_use_gs:
-      print('\n\n\nPlease follow the instructions at '
-            'https://www.chromium.org/developers/how-tos/'
-            'build-instructions-windows\n\n')
+    if not should_use_file and not should_use_gs and not should_use_http:
+      if sys.platform not in ('win32', 'cygwin'):
+        doc = 'https://chromium.googlesource.com/chromium/src/+/master/docs/' \
+              'win_cross.md'
+      else:
+        doc = 'https://chromium.googlesource.com/chromium/src/+/master/docs/' \
+              'windows_build_instructions.md'
+      print('\n\n\nPlease follow the instructions at %s\n\n' % doc)
       return 1
     print('Windows toolchain out of date or doesn\'t exist, updating (Pro)...')
     print('  current_hashes: %s' % ', '.join(current_hashes))

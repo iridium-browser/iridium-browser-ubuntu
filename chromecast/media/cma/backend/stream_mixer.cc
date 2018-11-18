@@ -14,22 +14,23 @@
 
 #include "base/bind_helpers.h"
 #include "base/compiler_specific.h"
-#include "base/lazy_instance.h"
+#include "base/no_destructor.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "chromecast/base/chromecast_switches.h"
+#include "chromecast/base/serializers.h"
 #include "chromecast/media/base/audio_device_ids.h"
+#include "chromecast/media/cma/backend/audio_output_redirector.h"
 #include "chromecast/media/cma/backend/cast_audio_json.h"
 #include "chromecast/media/cma/backend/filter_group.h"
-#include "chromecast/media/cma/backend/mixer_output_stream.h"
 #include "chromecast/media/cma/backend/post_processing_pipeline_impl.h"
 #include "chromecast/media/cma/backend/post_processing_pipeline_parser.h"
-#include "chromecast/public/media/audio_post_processor_shlib.h"
+#include "chromecast/public/media/mixer_output_stream.h"
 #include "media/audio/audio_device_description.h"
 
-#define POST_THROUGH_SHIM_THREAD(method, ...)                                  \
-  shim_task_runner_->PostTask(                                                 \
+#define POST_THROUGH_INPUT_THREAD(method, ...)                                 \
+  input_task_runner_->PostTask(                                                \
       FROM_HERE, base::BindOnce(&PostTaskShim, mixer_task_runner_,             \
                                 base::BindOnce(method, base::Unretained(this), \
                                                ##__VA_ARGS__)));
@@ -41,6 +42,57 @@
 
 namespace chromecast {
 namespace media {
+
+class StreamMixer::ExternalLoopbackAudioObserver
+    : public CastMediaShlib::LoopbackAudioObserver {
+ public:
+  ExternalLoopbackAudioObserver(StreamMixer* mixer) : mixer_(mixer) {}
+
+  void OnLoopbackAudio(int64_t timestamp,
+                       SampleFormat format,
+                       int sample_rate,
+                       int num_channels,
+                       uint8_t* data,
+                       int length) override {
+    auto loopback_data = std::make_unique<uint8_t[]>(length);
+    std::copy(data, data + length, loopback_data.get());
+    mixer_->PostLoopbackData(timestamp, format, sample_rate, num_channels,
+                             std::move(loopback_data), length);
+  }
+  void OnLoopbackInterrupted() override { mixer_->PostLoopbackInterrupted(); }
+
+  void OnRemoved() override {
+    // We expect that external pipeline will not invoke any other callbacks
+    // after this one.
+    delete this;
+    // No need to pipe this, StreamMixer will let the other observer know when
+    // it's being removed.
+  }
+
+ private:
+  StreamMixer* const mixer_;
+};
+
+class StreamMixer::ExternalMediaVolumeChangeRequestObserver
+    : public StreamMixer::BaseExternalMediaVolumeChangeRequestObserver {
+ public:
+  ExternalMediaVolumeChangeRequestObserver(StreamMixer* mixer) : mixer_(mixer) {
+    DCHECK(mixer_);
+  }
+
+  // ExternalAudioPipelineShlib::ExternalMediaVolumeChangeRequestObserver
+  // implementation:
+  void OnVolumeChangeRequest(float new_volume) override {
+    mixer_->SetVolume(AudioContentType::kMedia, new_volume);
+  }
+
+  void OnMuteChangeRequest(bool new_muted) override {
+    mixer_->SetMuted(AudioContentType::kMedia, new_muted);
+  }
+
+ private:
+  StreamMixer* const mixer_;
+};
 
 namespace {
 
@@ -64,31 +116,6 @@ const int kDefaultFilterFrameAlignment = 64;
 void PostTaskShim(scoped_refptr<base::SingleThreadTaskRunner> task_runner,
                   base::OnceClosure task) {
   task_runner->PostTask(FROM_HERE, std::move(task));
-}
-
-bool IsOutputDeviceId(const std::string& device) {
-  return device == ::media::AudioDeviceDescription::kDefaultDeviceId ||
-         device == ::media::AudioDeviceDescription::kCommunicationsDeviceId ||
-         device == kLocalAudioDeviceId || device == kAlarmAudioDeviceId ||
-         device == kPlatformAudioDeviceId /* e.g. bluetooth and aux */ ||
-         device == kTtsAudioDeviceId;
-}
-
-std::unique_ptr<FilterGroup> CreateFilterGroup(
-    FilterGroup::GroupType type,
-    int input_channels,
-    bool mix_to_mono,
-    const std::string& name,
-    const base::ListValue* filter_list,
-    const std::unordered_set<std::string>& device_ids,
-    const std::vector<FilterGroup*>& mixed_inputs,
-    std::unique_ptr<PostProcessingPipelineFactory>& ppp_factory) {
-  DCHECK(ppp_factory);
-  auto pipeline =
-      ppp_factory->CreatePipeline(name, filter_list, input_channels);
-  return std::make_unique<FilterGroup>(input_channels, type, mix_to_mono, name,
-                                       std::move(pipeline), device_ids,
-                                       mixed_inputs);
 }
 
 int GetFixedSampleRate() {
@@ -124,9 +151,6 @@ void UseHighPriority() {
 #endif
 }
 
-base::LazyInstance<StreamMixer>::DestructorAtExit g_mixer_instance =
-    LAZY_INSTANCE_INITIALIZER;
-
 }  // namespace
 
 float StreamMixer::VolumeInfo::GetEffectiveVolume() {
@@ -135,7 +159,8 @@ float StreamMixer::VolumeInfo::GetEffectiveVolume() {
 
 // static
 StreamMixer* StreamMixer::Get() {
-  return g_mixer_instance.Pointer();
+  static base::NoDestructor<StreamMixer> mixer_instance;
+  return mixer_instance.get();
 }
 
 StreamMixer::StreamMixer()
@@ -163,12 +188,22 @@ StreamMixer::StreamMixer(
       no_input_close_timeout_(GetNoInputCloseTimeout()),
       filter_frame_alignment_(kDefaultFilterFrameAlignment),
       state_(kStateStopped),
+      external_audio_pipeline_supported_(
+          ExternalAudioPipelineShlib::IsSupported()),
       weak_factory_(this) {
   VLOG(1) << __func__;
+
+  volume_info_[AudioContentType::kOther].volume = 1.0f;
+  volume_info_[AudioContentType::kOther].limit = 1.0f;
+  volume_info_[AudioContentType::kOther].muted = false;
 
   if (mixer_thread_) {
     base::Thread::Options options;
     options.priority = base::ThreadPriority::REALTIME_AUDIO;
+#if defined(OS_FUCHSIA)
+    // MixerOutputStreamFuchsia uses FIDL, which works only on IO threads.
+    options.message_loop_type = base::MessageLoop::TYPE_IO;
+#endif
     mixer_thread_->StartWithOptions(options);
     mixer_task_runner_ = mixer_thread_->task_runner();
     mixer_task_runner_->PostTask(FROM_HERE, base::BindOnce(&UseHighPriority));
@@ -179,21 +214,109 @@ StreamMixer::StreamMixer(
     shim_thread_->StartWithOptions(shim_options);
     shim_task_runner_ = shim_thread_->task_runner();
     shim_task_runner_->PostTask(FROM_HERE, base::BindOnce(&UseHighPriority));
+
+    input_thread_ = std::make_unique<base::Thread>("CMA mixer PI input");
+    input_thread_->StartWithOptions(shim_options);
+    input_task_runner_ = input_thread_->task_runner();
+    input_task_runner_->PostTask(FROM_HERE, base::BindOnce(&UseHighPriority));
   } else {
     shim_task_runner_ = mixer_task_runner_;
+    input_task_runner_ = mixer_task_runner_;
   }
 
   if (fixed_sample_rate_ != MixerOutputStream::kInvalidSampleRate) {
     LOG(INFO) << "Setting fixed sample rate to " << fixed_sample_rate_;
   }
 
-  // Read post-processing configuration file.
-  PostProcessingPipelineParser pipeline_parser;
-  CreatePostProcessors(&pipeline_parser);
+  CreatePostProcessors([](bool, const std::string&) {},
+                       "" /* override_config */);
 
   // TODO(jyw): command line flag for filter frame alignment.
   DCHECK_EQ(filter_frame_alignment_ & (filter_frame_alignment_ - 1), 0)
       << "Alignment must be a power of 2.";
+
+  if (external_audio_pipeline_supported_) {
+    external_volume_observer_ =
+        std::make_unique<ExternalMediaVolumeChangeRequestObserver>(this);
+    ExternalAudioPipelineShlib::AddExternalMediaVolumeChangeRequestObserver(
+        external_volume_observer_.get());
+    external_loopback_audio_observer_ =
+        std::make_unique<ExternalLoopbackAudioObserver>(this);
+    ExternalAudioPipelineShlib::AddExternalLoopbackAudioObserver(
+        external_loopback_audio_observer_.get());
+  }
+}
+
+void StreamMixer::ResetPostProcessors(CastMediaShlib::ResultCallback callback) {
+  POST_THROUGH_INPUT_THREAD(&StreamMixer::ResetPostProcessorsOnThread,
+                            std::move(callback), "");
+}
+
+void StreamMixer::ResetPostProcessorsOnThread(
+    CastMediaShlib::ResultCallback callback,
+    const std::string& override_config) {
+  DCHECK(mixer_task_runner_->BelongsToCurrentThread());
+
+  // Detach inputs.
+  for (const auto& input : inputs_) {
+    input.second->SetFilterGroup(nullptr);
+  }
+
+  CreatePostProcessors(std::move(callback), override_config);
+
+  // Re-attach inputs.
+  for (const auto& input : inputs_) {
+    FilterGroup* input_group =
+        mixer_pipeline_->GetInputGroup(input.first->device_id());
+    DCHECK(input_group) << "No input group for input.first->device_id()";
+    input.second->SetFilterGroup(input_group);
+  }
+  UpdatePlayoutChannel();
+}
+
+// May be called on mixer_task_runner_ or from ctor
+void StreamMixer::CreatePostProcessors(CastMediaShlib::ResultCallback callback,
+                                       const std::string& override_config) {
+  // (Re)-create post processors.
+  mixer_pipeline_.reset();
+
+  if (!override_config.empty()) {
+    PostProcessingPipelineParser parser(
+        base::DictionaryValue::From(DeserializeFromJson(override_config)));
+    mixer_pipeline_ = MixerPipeline::CreateMixerPipeline(
+        &parser, post_processing_pipeline_factory_.get());
+  } else {
+    PostProcessingPipelineParser parser(CastAudioJson::GetFilePath());
+    mixer_pipeline_ = MixerPipeline::CreateMixerPipeline(
+        &parser, post_processing_pipeline_factory_.get());
+  }
+
+  // Attempt to fall back to built-in cast_audio.json, unless we were reset with
+  // an override config.
+  if ((!mixer_pipeline_ || !PostProcessorsHaveCorrectNumOutputs()) &&
+      override_config.empty()) {
+    LOG(WARNING) << "Invalid cast_audio.json config loaded. Retrying with "
+                    "read-only config";
+    callback(false,
+             "Unable to build pipeline.");  // TODO(bshaya): Send more specific
+                                            // error message.
+    callback = nullptr;
+    PostProcessingPipelineParser parser(CastAudioJson::GetReadOnlyFilePath());
+    mixer_pipeline_.reset();
+    mixer_pipeline_ = MixerPipeline::CreateMixerPipeline(
+        &parser, post_processing_pipeline_factory_.get());
+  }
+
+  CHECK(mixer_pipeline_) << "Unable to load post processor config!";
+  CHECK(PostProcessorsHaveCorrectNumOutputs());
+
+  if (state_ == kStateRunning) {
+    mixer_pipeline_->Initialize(output_samples_per_second_);
+  }
+
+  if (callback) {
+    callback(true, "");
+  }
 }
 
 void StreamMixer::ResetPostProcessorsForTest(
@@ -201,96 +324,14 @@ void StreamMixer::ResetPostProcessorsForTest(
     const std::string& pipeline_json) {
   DCHECK(mixer_task_runner_->BelongsToCurrentThread());
   LOG(INFO) << __FUNCTION__ << " disregard previous PostProcessor messages.";
-  filter_groups_.clear();
-  default_filter_ = nullptr;
+  mixer_pipeline_.reset();
   post_processing_pipeline_factory_ = std::move(pipeline_factory);
-  PostProcessingPipelineParser parser(pipeline_json);
-  CreatePostProcessors(&parser);
+  ResetPostProcessorsOnThread([](bool, const std::string&) {}, pipeline_json);
 }
 
 void StreamMixer::SetNumOutputChannelsForTest(int num_output_channels) {
   DCHECK(mixer_task_runner_->BelongsToCurrentThread());
   num_output_channels_ = num_output_channels;
-}
-
-void StreamMixer::CreatePostProcessors(
-    PostProcessingPipelineParser* pipeline_parser) {
-  std::unordered_set<std::string> used_streams;
-  for (auto& stream_pipeline : pipeline_parser->GetStreamPipelines()) {
-    const auto& device_ids = stream_pipeline.stream_types;
-    for (const std::string& stream_type : device_ids) {
-      CHECK(IsOutputDeviceId(stream_type))
-          << stream_type << " is not a stream type. Stream types are listed "
-          << "in chromecast/media/base/audio_device_ids.cc and "
-          << "media/audio/audio_device_description.cc";
-      CHECK(used_streams.insert(stream_type).second)
-          << "Multiple instances of stream type '" << stream_type << "' in "
-          << kCastAudioJsonFilePath << ".";
-    }
-    filter_groups_.push_back(CreateFilterGroup(
-        FilterGroup::GroupType::kStream, kNumInputChannels,
-        false /* mono_mixer */, *device_ids.begin() /* name */,
-        stream_pipeline.pipeline, device_ids,
-        std::vector<FilterGroup*>() /* mixed_inputs */,
-        post_processing_pipeline_factory_));
-    if (device_ids.find(::media::AudioDeviceDescription::kDefaultDeviceId) !=
-        device_ids.end()) {
-      default_filter_ = filter_groups_.back().get();
-    }
-  }
-
-  bool enabled_mono_mixer = (num_output_channels_ == 1);
-  if (!filter_groups_.empty()) {
-    std::vector<FilterGroup*> filter_group_ptrs(filter_groups_.size());
-    int mix_group_input_channels = filter_groups_[0]->GetOutputChannelCount();
-    for (size_t i = 0; i < filter_groups_.size(); ++i) {
-      DCHECK_EQ(mix_group_input_channels,
-                filter_groups_[i]->GetOutputChannelCount())
-          << "All output stream mixers must have the same number of channels";
-      filter_group_ptrs[i] = filter_groups_[i].get();
-    }
-
-    // Enable Mono mixer in |mix_filter_| if necessary.
-    filter_groups_.push_back(CreateFilterGroup(
-        FilterGroup::GroupType::kFinalMix, mix_group_input_channels,
-        enabled_mono_mixer, "mix", pipeline_parser->GetMixPipeline(),
-        std::unordered_set<std::string>() /* device_ids */, filter_group_ptrs,
-        post_processing_pipeline_factory_));
-  } else {
-    // Mix group directly mixes all inputs.
-    std::string kDefaultDeviceId =
-        ::media::AudioDeviceDescription::kDefaultDeviceId;
-    filter_groups_.push_back(CreateFilterGroup(
-        FilterGroup::GroupType::kFinalMix, kNumInputChannels,
-        enabled_mono_mixer, "mix", pipeline_parser->GetMixPipeline(),
-        std::unordered_set<std::string>({kDefaultDeviceId}),
-        std::vector<FilterGroup*>() /* mixed_inputs */,
-        post_processing_pipeline_factory_));
-    default_filter_ = filter_groups_.back().get();
-  }
-
-  mix_filter_ = filter_groups_.back().get();
-
-  filter_groups_.push_back(CreateFilterGroup(
-      FilterGroup::GroupType::kLinearize, mix_filter_->GetOutputChannelCount(),
-      false /* mono_mixer */, "linearize",
-      pipeline_parser->GetLinearizePipeline(),
-      std::unordered_set<std::string>() /* device_ids */,
-      std::vector<FilterGroup*>({mix_filter_}),
-      post_processing_pipeline_factory_));
-  linearize_filter_ = filter_groups_.back().get();
-
-  LOG(INFO) << "PostProcessor configuration:";
-  if (default_filter_ == mix_filter_) {
-    LOG(INFO) << "Stream layer: none";
-  } else {
-    LOG(INFO) << "Stream layer: " << default_filter_->GetOutputChannelCount()
-              << " channels";
-  }
-  LOG(INFO) << "Mix filter: " << mix_filter_->GetOutputChannelCount()
-            << " channels";
-  LOG(INFO) << "Linearize filter: "
-            << linearize_filter_->GetOutputChannelCount() << " channels";
 }
 
 StreamMixer::~StreamMixer() {
@@ -304,6 +345,14 @@ StreamMixer::~StreamMixer() {
                                 base::Unretained(this)));
   if (mixer_thread_) {
     mixer_thread_->Stop();
+  }
+
+  if (external_volume_observer_) {
+    ExternalAudioPipelineShlib::RemoveExternalLoopbackAudioObserver(
+        external_loopback_audio_observer_.get());
+    external_loopback_audio_observer_.release();
+    ExternalAudioPipelineShlib::RemoveExternalMediaVolumeChangeRequestObserver(
+        external_volume_observer_.get());
   }
 }
 
@@ -322,8 +371,13 @@ void StreamMixer::Start() {
   DCHECK(inputs_.empty());
 
   if (!output_) {
-    output_ = MixerOutputStream::Create();
+    if (external_audio_pipeline_supported_) {
+      output_ = ExternalAudioPipelineShlib::CreateMixerOutputStream();
+    } else {
+      output_ = MixerOutputStream::Create();
+    }
   }
+  DCHECK(output_);
 
   int requested_sample_rate;
   if (fixed_sample_rate_ != MixerOutputStream::kInvalidSampleRate) {
@@ -349,11 +403,11 @@ void StreamMixer::Start() {
       output_->OptimalWriteFramesCount() & ~(filter_frame_alignment_ - 1);
   CHECK_GT(frames_per_write_, 0);
 
-  ValidatePostProcessors();
-
   // Initialize filters.
-  for (auto&& filter_group : filter_groups_) {
-    filter_group->Initialize(output_samples_per_second_);
+  mixer_pipeline_->Initialize(output_samples_per_second_);
+
+  for (auto& redirector : audio_output_redirectors_) {
+    redirector.second->Start(output_samples_per_second_);
   }
 
   state_ = kStateRunning;
@@ -373,10 +427,14 @@ void StreamMixer::Stop() {
 
   weak_factory_.InvalidateWeakPtrs();
 
-  POST_TASK_TO_SHIM_THREAD(&StreamMixer::LoopbackInterrupted);
+  PostLoopbackInterrupted();
 
   if (output_) {
     output_->Stop();
+  }
+
+  for (auto& redirector : audio_output_redirectors_) {
+    redirector.second->Stop();
   }
 
   state_ = kStateStopped;
@@ -419,7 +477,7 @@ void StreamMixer::SignalError(MixerInput::Source::MixerError error) {
 }
 
 void StreamMixer::AddInput(MixerInput::Source* input_source) {
-  POST_THROUGH_SHIM_THREAD(&StreamMixer::AddInputOnThread, input_source);
+  POST_THROUGH_INPUT_THREAD(&StreamMixer::AddInputOnThread, input_source);
 }
 
 void StreamMixer::AddInputOnThread(MixerInput::Source* input_source) {
@@ -442,25 +500,14 @@ void StreamMixer::AddInputOnThread(MixerInput::Source* input_source) {
     Start();
   }
 
-  FilterGroup* input_filter_group = default_filter_;
-  for (auto&& filter_group : filter_groups_) {
-    if (filter_group->CanProcessInput(input_source->device_id())) {
-      input_filter_group = filter_group.get();
-      break;
-    }
-  }
-  if (input_filter_group) {
-    LOG(INFO) << "Added input of type " << input_source->device_id() << " to "
-              << input_filter_group->name();
-  } else {
-    NOTREACHED() << "Could not find a filter group for "
-                 << input_source->device_id() << "\n"
-                 << "(consider adding a 'default' processor)";
-  }
+  FilterGroup* input_group =
+      mixer_pipeline_->GetInputGroup(input_source->device_id());
+  DCHECK(input_group) << "Could not find a processor for "
+                      << input_source->device_id();
 
   auto input = std::make_unique<MixerInput>(
       input_source, output_samples_per_second_, frames_per_write_,
-      GetTotalRenderingDelay(input_filter_group), input_filter_group);
+      GetTotalRenderingDelay(input_group), input_group);
   if (state_ != kStateRunning) {
     // Mixer error occurred, signal error.
     MixerInput* input_ptr = input.get();
@@ -470,20 +517,26 @@ void StreamMixer::AddInputOnThread(MixerInput::Source* input_source) {
   }
 
   auto type = input->content_type();
-  if (input->primary()) {
-    input->SetContentTypeVolume(volume_info_[type].GetEffectiveVolume(),
-                                kUseDefaultFade);
-  } else {
-    input->SetContentTypeVolume(volume_info_[type].volume, kUseDefaultFade);
+  if (type != AudioContentType::kOther) {
+    if (input->primary()) {
+      input->SetContentTypeVolume(volume_info_[type].GetEffectiveVolume(),
+                                  kUseDefaultFade);
+    } else {
+      input->SetContentTypeVolume(volume_info_[type].volume, kUseDefaultFade);
+    }
+    input->SetMuted(volume_info_[type].muted);
   }
-  input->SetMuted(volume_info_[type].muted);
+
+  for (auto& redirector : audio_output_redirectors_) {
+    redirector.second->AddInput(input.get());
+  }
 
   inputs_[input_source] = std::move(input);
   UpdatePlayoutChannel();
 }
 
 void StreamMixer::RemoveInput(MixerInput::Source* input_source) {
-  POST_THROUGH_SHIM_THREAD(&StreamMixer::RemoveInputOnThread, input_source);
+  POST_THROUGH_INPUT_THREAD(&StreamMixer::RemoveInputOnThread, input_source);
 }
 
 void StreamMixer::RemoveInputOnThread(MixerInput::Source* input_source) {
@@ -492,7 +545,14 @@ void StreamMixer::RemoveInputOnThread(MixerInput::Source* input_source) {
 
   LOG(INFO) << "Remove input " << input_source;
 
-  inputs_.erase(input_source);
+  auto it = inputs_.find(input_source);
+  if (it != inputs_.end()) {
+    for (auto& redirector : audio_output_redirectors_) {
+      redirector.second->RemoveInput(it->second.get());
+    }
+    inputs_.erase(it);
+  }
+
   ignored_inputs_.erase(input_source);
   UpdatePlayoutChannel();
 
@@ -509,8 +569,6 @@ void StreamMixer::SetCloseTimeout() {
 
 void StreamMixer::UpdatePlayoutChannel() {
   DCHECK(mixer_task_runner_->BelongsToCurrentThread());
-  DCHECK(mix_filter_);
-  DCHECK(linearize_filter_);
 
   int playout_channel;
   if (inputs_.empty()) {
@@ -527,11 +585,9 @@ void StreamMixer::UpdatePlayoutChannel() {
          playout_channel >= 0 && playout_channel < kNumInputChannels);
   LOG(INFO) << "Update playout channel: " << playout_channel;
 
-  mix_filter_->SetMixToMono(num_output_channels_ == 1 &&
-                            playout_channel == kChannelAll);
-  for (auto& filter_group : filter_groups_) {
-    filter_group->UpdatePlayoutChannel(playout_channel);
-  }
+  mixer_pipeline_->SetMixToMono(num_output_channels_ == 1 &&
+                                playout_channel == kChannelAll);
+  mixer_pipeline_->SetPlayoutChannel(playout_channel);
 }
 
 MediaPipelineBackend::AudioDecoder::RenderingDelay
@@ -540,20 +596,12 @@ StreamMixer::GetTotalRenderingDelay(FilterGroup* filter_group) {
   if (!output_) {
     return MediaPipelineBackend::AudioDecoder::RenderingDelay();
   }
-  MediaPipelineBackend::AudioDecoder::RenderingDelay delay =
-      output_->GetRenderingDelay();
   if (!filter_group) {
-    return delay;
+    return output_->GetRenderingDelay();
   }
 
-  if (filter_group != mix_filter_) {
-    delay.delay_microseconds += filter_group->GetRenderingDelayMicroseconds();
-  }
-  delay.delay_microseconds += mix_filter_->GetRenderingDelayMicroseconds();
-  delay.delay_microseconds +=
-      linearize_filter_->GetRenderingDelayMicroseconds();
-
-  return delay;
+  // Includes |output_->GetRenderingDelay()|.
+  return filter_group->GetRenderingDelayToOutput();
 }
 
 void StreamMixer::PlaybackLoop() {
@@ -572,19 +620,29 @@ void StreamMixer::PlaybackLoop() {
 }
 
 void StreamMixer::WriteOneBuffer() {
+  for (auto& redirector : audio_output_redirectors_) {
+    redirector.second->PrepareNextBuffer(frames_per_write_);
+  }
+
   // Recursively mix and filter each group.
   MediaPipelineBackend::AudioDecoder::RenderingDelay rendering_delay =
       output_->GetRenderingDelay();
-  linearize_filter_->MixAndFilter(frames_per_write_, rendering_delay);
+  mixer_pipeline_->MixAndFilter(frames_per_write_, rendering_delay);
 
   int64_t expected_playback_time;
   if (rendering_delay.timestamp_microseconds == kNoTimestamp) {
     expected_playback_time = kNoTimestamp;
   } else {
-    expected_playback_time = rendering_delay.timestamp_microseconds +
-                             rendering_delay.delay_microseconds +
-                             linearize_filter_->GetRenderingDelayMicroseconds();
+    expected_playback_time =
+        rendering_delay.timestamp_microseconds +
+        rendering_delay.delay_microseconds +
+        mixer_pipeline_->GetPostLoopbackRenderingDelayMicroseconds();
   }
+
+  for (auto& redirector : audio_output_redirectors_) {
+    redirector.second->FinishBuffer();
+  }
+
   WriteMixedPcm(frames_per_write_, expected_playback_time);
 }
 
@@ -592,10 +650,10 @@ void StreamMixer::WriteMixedPcm(int frames, int64_t expected_playback_time) {
   DCHECK(mixer_task_runner_->BelongsToCurrentThread());
 
   // Downmix reference signal to mono to reduce CPU load.
-  int mix_channel_count = mix_filter_->GetOutputChannelCount();
+  int mix_channel_count = mixer_pipeline_->GetLoopbackChannelCount();
   int loopback_channel_count = mix_channel_count;
 
-  float* mixed_data = mix_filter_->GetOutputBuffer();
+  float* mixed_data = mixer_pipeline_->GetLoopbackOutput();
   if (num_output_channels_ == 1 && mix_channel_count != 1) {
     for (int i = 0; i < frames; ++i) {
       float sum = 0;
@@ -609,21 +667,23 @@ void StreamMixer::WriteMixedPcm(int frames, int64_t expected_playback_time) {
 
   // Hard limit to [1.0, -1.0]
   for (int i = 0; i < frames * loopback_channel_count; ++i) {
+    // TODO(bshaya): Warn about clipping here.
     mixed_data[i] = std::min(1.0f, std::max(-1.0f, mixed_data[i]));
   }
 
-  auto loopback_data =
-      std::make_unique<float[]>(frames * loopback_channel_count);
-  std::copy(mixed_data, mixed_data + frames * loopback_channel_count,
-            loopback_data.get());
-  POST_TASK_TO_SHIM_THREAD(&StreamMixer::SendLoopbackData,
-                           expected_playback_time, output_samples_per_second_,
-                           frames, loopback_channel_count,
-                           std::move(loopback_data));
+  if (!external_audio_pipeline_supported_) {
+    size_t length = frames * loopback_channel_count * sizeof(float);
+    auto loopback_data = std::make_unique<uint8_t[]>(length);
+    uint8_t* data = reinterpret_cast<uint8_t*>(mixed_data);
+    std::copy(data, data + length, loopback_data.get());
+    PostLoopbackData(expected_playback_time, kSampleFormatF32,
+                     output_samples_per_second_, loopback_channel_count,
+                     std::move(loopback_data), length);
+  }
 
   // Drop extra channels from linearize filter if necessary.
-  float* linearized_data = linearize_filter_->GetOutputBuffer();
-  int linearize_channel_count = linearize_filter_->GetOutputChannelCount();
+  float* linearized_data = mixer_pipeline_->GetOutput();
+  int linearize_channel_count = mixer_pipeline_->GetOutputChannelCount();
   if (num_output_channels_ == 1 && linearize_channel_count != 1) {
     for (int i = 0; i < frames; ++i) {
       linearized_data[i] = linearized_data[i * linearize_channel_count];
@@ -640,12 +700,13 @@ void StreamMixer::WriteMixedPcm(int frames, int64_t expected_playback_time) {
                  &playback_interrupted);
 
   if (playback_interrupted) {
-    POST_TASK_TO_SHIM_THREAD(&StreamMixer::LoopbackInterrupted);
+    PostLoopbackInterrupted();
   }
 }
 
 void StreamMixer::AddLoopbackAudioObserver(
     CastMediaShlib::LoopbackAudioObserver* observer) {
+  VLOG(1) << __func__;
   POST_TASK_TO_SHIM_THREAD(&StreamMixer::AddLoopbackAudioObserverOnShimThread,
                            observer);
 }
@@ -659,6 +720,7 @@ void StreamMixer::AddLoopbackAudioObserverOnShimThread(
 
 void StreamMixer::RemoveLoopbackAudioObserver(
     CastMediaShlib::LoopbackAudioObserver* observer) {
+  VLOG(1) << __func__;
   POST_TASK_TO_SHIM_THREAD(
       &StreamMixer::RemoveLoopbackAudioObserverOnShimThread, observer);
 }
@@ -670,18 +732,67 @@ void StreamMixer::RemoveLoopbackAudioObserverOnShimThread(
   observer->OnRemoved();
 }
 
-void StreamMixer::SendLoopbackData(int64_t expected_playback_time,
+void StreamMixer::AddAudioOutputRedirector(
+    std::unique_ptr<AudioOutputRedirector> redirector) {
+  VLOG(1) << __func__;
+  POST_THROUGH_INPUT_THREAD(&StreamMixer::AddAudioOutputRedirectorOnThread,
+                            std::move(redirector));
+}
+
+void StreamMixer::AddAudioOutputRedirectorOnThread(
+    std::unique_ptr<AudioOutputRedirector> redirector) {
+  DCHECK(mixer_task_runner_->BelongsToCurrentThread());
+  DCHECK(redirector);
+  AudioOutputRedirector* key = redirector.get();
+  audio_output_redirectors_[key] = std::move(redirector);
+
+  for (const auto& input : inputs_) {
+    key->AddInput(input.second.get());
+  }
+  if (state_ == kStateRunning) {
+    key->Start(output_samples_per_second_);
+  }
+}
+
+void StreamMixer::RemoveAudioOutputRedirector(
+    AudioOutputRedirector* redirector) {
+  VLOG(1) << __func__;
+  POST_THROUGH_INPUT_THREAD(&StreamMixer::RemoveAudioOutputRedirectorOnThread,
+                            redirector);
+}
+
+void StreamMixer::RemoveAudioOutputRedirectorOnThread(
+    AudioOutputRedirector* redirector) {
+  DCHECK(mixer_task_runner_->BelongsToCurrentThread());
+  audio_output_redirectors_.erase(redirector);
+}
+
+void StreamMixer::PostLoopbackData(int64_t expected_playback_time,
+                                   SampleFormat format,
                                    int sample_rate,
-                                   int frames,
                                    int channels,
-                                   std::unique_ptr<float[]> data) {
+                                   std::unique_ptr<uint8_t[]> data,
+                                   int length) {
+  POST_TASK_TO_SHIM_THREAD(&StreamMixer::SendLoopbackData,
+                           expected_playback_time, format, sample_rate,
+                           channels, std::move(data), length);
+}
+
+void StreamMixer::SendLoopbackData(int64_t expected_playback_time,
+                                   SampleFormat format,
+                                   int sample_rate,
+                                   int channels,
+                                   std::unique_ptr<uint8_t[]> data,
+                                   int length) {
   DCHECK(shim_task_runner_->BelongsToCurrentThread());
   for (CastMediaShlib::LoopbackAudioObserver* observer : loopback_observers_) {
-    observer->OnLoopbackAudio(
-        expected_playback_time, kSampleFormatF32, sample_rate, channels,
-        reinterpret_cast<uint8_t*>(data.get()),
-        static_cast<size_t>(frames) * channels * sizeof(float));
+    observer->OnLoopbackAudio(expected_playback_time, format, sample_rate,
+                              channels, data.get(), length);
   }
+}
+
+void StreamMixer::PostLoopbackInterrupted() {
+  POST_TASK_TO_SHIM_THREAD(&StreamMixer::LoopbackInterrupted);
 }
 
 void StreamMixer::LoopbackInterrupted() {
@@ -692,11 +803,13 @@ void StreamMixer::LoopbackInterrupted() {
 }
 
 void StreamMixer::SetVolume(AudioContentType type, float level) {
-  POST_THROUGH_SHIM_THREAD(&StreamMixer::SetVolumeOnThread, type, level);
+  POST_THROUGH_INPUT_THREAD(&StreamMixer::SetVolumeOnThread, type, level);
 }
 
 void StreamMixer::SetVolumeOnThread(AudioContentType type, float level) {
   DCHECK(mixer_task_runner_->BelongsToCurrentThread());
+  DCHECK(type != AudioContentType::kOther);
+
   volume_info_[type].volume = level;
   float effective_volume = volume_info_[type].GetEffectiveVolume();
   for (const auto& input : inputs_) {
@@ -709,28 +822,38 @@ void StreamMixer::SetVolumeOnThread(AudioContentType type, float level) {
       }
     }
   }
+  if (external_audio_pipeline_supported_ && type == AudioContentType::kMedia) {
+    ExternalAudioPipelineShlib::SetExternalMediaVolume(effective_volume);
+  }
 }
 
 void StreamMixer::SetMuted(AudioContentType type, bool muted) {
-  POST_THROUGH_SHIM_THREAD(&StreamMixer::SetMutedOnThread, type, muted);
+  POST_THROUGH_INPUT_THREAD(&StreamMixer::SetMutedOnThread, type, muted);
 }
 
 void StreamMixer::SetMutedOnThread(AudioContentType type, bool muted) {
   DCHECK(mixer_task_runner_->BelongsToCurrentThread());
+  DCHECK(type != AudioContentType::kOther);
+
   volume_info_[type].muted = muted;
   for (const auto& input : inputs_) {
     if (input.second->content_type() == type) {
       input.second->SetMuted(muted);
     }
   }
+  if (external_audio_pipeline_supported_ && type == AudioContentType::kMedia) {
+    ExternalAudioPipelineShlib::SetExternalMediaMuted(muted);
+  }
 }
 
 void StreamMixer::SetOutputLimit(AudioContentType type, float limit) {
-  POST_THROUGH_SHIM_THREAD(&StreamMixer::SetOutputLimitOnThread, type, limit);
+  POST_THROUGH_INPUT_THREAD(&StreamMixer::SetOutputLimitOnThread, type, limit);
 }
 
 void StreamMixer::SetOutputLimitOnThread(AudioContentType type, float limit) {
   DCHECK(mixer_task_runner_->BelongsToCurrentThread());
+  DCHECK(type != AudioContentType::kOther);
+
   LOG(INFO) << "Set volume limit for " << static_cast<int>(type) << " to "
             << limit;
   volume_info_[type].limit = limit;
@@ -749,12 +872,15 @@ void StreamMixer::SetOutputLimitOnThread(AudioContentType type, float limit) {
       input.second->SetContentTypeVolume(effective_volume, fade_ms);
     }
   }
+  if (external_audio_pipeline_supported_ && type == AudioContentType::kMedia) {
+    ExternalAudioPipelineShlib::SetExternalMediaVolume(effective_volume);
+  }
 }
 
 void StreamMixer::SetVolumeMultiplier(MixerInput::Source* source,
                                       float multiplier) {
-  POST_THROUGH_SHIM_THREAD(&StreamMixer::SetVolumeMultiplierOnThread, source,
-                           multiplier);
+  POST_THROUGH_INPUT_THREAD(&StreamMixer::SetVolumeMultiplierOnThread, source,
+                            multiplier);
 }
 
 void StreamMixer::SetVolumeMultiplierOnThread(MixerInput::Source* source,
@@ -768,35 +894,40 @@ void StreamMixer::SetVolumeMultiplierOnThread(MixerInput::Source* source,
 
 void StreamMixer::SetPostProcessorConfig(const std::string& name,
                                          const std::string& config) {
-  POST_THROUGH_SHIM_THREAD(&StreamMixer::SetPostProcessorConfigOnThread, name,
-                           config);
+  POST_THROUGH_INPUT_THREAD(&StreamMixer::SetPostProcessorConfigOnThread, name,
+                            config);
 }
 
 void StreamMixer::SetPostProcessorConfigOnThread(const std::string& name,
                                                  const std::string& config) {
   DCHECK(mixer_task_runner_->BelongsToCurrentThread());
-  for (auto&& filter_group : filter_groups_) {
-    filter_group->SetPostProcessorConfig(name, config);
-  }
+  mixer_pipeline_->SetPostProcessorConfig(name, config);
 }
 
 void StreamMixer::ValidatePostProcessorsForTest() {
-  ValidatePostProcessors();
+  CHECK(PostProcessorsHaveCorrectNumOutputs());
 }
 
-void StreamMixer::ValidatePostProcessors() {
-  // Ensure filter configuration is viable.
-  // This can't be done in CreatePostProcessors() because it breaks tests.
-  CHECK(num_output_channels_ == 1 ||
-        num_output_channels_ == linearize_filter_->GetOutputChannelCount())
-      << "PostProcessor configuration channel count does not match command line"
-      << " flag: " << linearize_filter_->GetOutputChannelCount() << " vs "
-      << num_output_channels_;
-  int loopback_channel_count =
-      num_output_channels_ == 1 ? 1 : mix_filter_->GetOutputChannelCount();
-  CHECK_LE(loopback_channel_count, 2)
-      << "PostProcessor configuration has " << loopback_channel_count
-      << " channels after 'mix' group, but only 1 or 2 are allowed.";
+bool StreamMixer::PostProcessorsHaveCorrectNumOutputs() {
+  bool correct_num_outputs =
+      num_output_channels_ == 1 ||
+      num_output_channels_ == mixer_pipeline_->GetOutputChannelCount();
+  if (!correct_num_outputs) {
+    LOG(WARNING) << "PostProcessor configuration channel count does not match "
+                 << "command line  flag: "
+                 << mixer_pipeline_->GetOutputChannelCount() << " vs "
+                 << num_output_channels_;
+    return false;
+  }
+  int loopback_channel_count = num_output_channels_ == 1
+                                   ? 1
+                                   : mixer_pipeline_->GetLoopbackChannelCount();
+  if (loopback_channel_count > 2) {
+    LOG(WARNING) << "PostProcessor configuration has " << loopback_channel_count
+                 << " channels after 'mix' group, but only 1 or 2 are allowed.";
+    return false;
+  }
+  return true;
 }
 
 }  // namespace media

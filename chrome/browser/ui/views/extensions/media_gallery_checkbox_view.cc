@@ -5,7 +5,7 @@
 #include "chrome/browser/ui/views/extensions/media_gallery_checkbox_view.h"
 
 #include "chrome/browser/media_galleries/media_galleries_preferences.h"
-#include "chrome/browser/ui/views/harmony/chrome_layout_provider.h"
+#include "chrome/browser/ui/views/chrome_layout_provider.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/geometry/rect.h"
@@ -39,8 +39,8 @@ MediaGalleryCheckboxView::MediaGalleryCheckboxView(
   if (menu_controller)
     set_context_menu_controller(menu_controller);
 
-  checkbox_ = new views::Checkbox(pref_info.GetGalleryDisplayName());
-  checkbox_->set_listener(button_listener);
+  checkbox_ =
+      new views::Checkbox(pref_info.GetGalleryDisplayName(), button_listener);
   if (menu_controller)
     checkbox_->set_context_menu_controller(menu_controller);
   checkbox_->SetElideBehavior(gfx::ELIDE_MIDDLE);

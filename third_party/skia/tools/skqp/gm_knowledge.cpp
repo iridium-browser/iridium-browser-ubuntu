@@ -119,9 +119,7 @@ static float set_error_code(gmkb::Error* error_out, gmkb::Error error) {
 
 static bool WritePixmapToFile(const SkPixmap& pixmap, const char* path) {
     SkFILEWStream wStream(path);
-    SkPngEncoder::Options options;
-    options.fUnpremulBehavior = SkTransferFunctionBehavior::kIgnore;
-    return wStream.isValid() && SkPngEncoder::Encode(&wStream, pixmap, options);
+    return wStream.isValid() && SkPngEncoder::Encode(&wStream, pixmap, SkPngEncoder::Options());
 }
 
 constexpr SkColorType kColorType = kRGBA_8888_SkColorType;
@@ -297,7 +295,7 @@ static constexpr char kDocHead[] =
     "function f(backend, gm, e1, e2) {\n"
     "  var b = ce(\"div\");\n"
     "  var x = ce(\"h2\");\n"
-    "  var t = backend + \"/\" + gm;\n"
+    "  var t = backend + \"_\" + gm;\n"
     "  ac(x, ct(t));\n"
     "  ac(b, x);\n"
     "  ac(b, ct(\"backend: \" + backend));\n"

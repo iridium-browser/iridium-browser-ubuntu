@@ -11,6 +11,8 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "base/callback.h"
 #include "base/containers/circular_deque.h"
@@ -18,6 +20,7 @@
 #include "base/location.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "base/optional.h"
 #include "chrome/browser/media_galleries/chromeos/mtp_device_task_helper.h"
 #include "chrome/browser/media_galleries/fileapi/mtp_device_async_delegate.h"
 #include "content/public/browser/browser_thread.h"
@@ -143,49 +146,46 @@ class MTPDeviceDelegateImplLinux : public MTPDeviceAsyncDelegate {
 
   // The internal methods correspond to the similarly named methods above.
   // The |root_node_| cache should be filled at this point.
-  virtual void GetFileInfoInternal(
-      const base::FilePath& file_path,
-      const GetFileInfoSuccessCallback& success_callback,
-      const ErrorCallback& error_callback);
-  virtual void CreateDirectoryInternal(
+  void GetFileInfoInternal(const base::FilePath& file_path,
+                           const GetFileInfoSuccessCallback& success_callback,
+                           const ErrorCallback& error_callback);
+  void CreateDirectoryInternal(
       const std::vector<base::FilePath>& components,
       const bool exclusive,
       const CreateDirectorySuccessCallback& success_callback,
       const ErrorCallback& error_callback);
-  virtual void ReadDirectoryInternal(
+  void ReadDirectoryInternal(
       const base::FilePath& root,
       const ReadDirectorySuccessCallback& success_callback,
       const ErrorCallback& error_callback);
-  virtual void CreateSnapshotFileInternal(
+  void CreateSnapshotFileInternal(
       const base::FilePath& device_file_path,
       const base::FilePath& local_path,
       const CreateSnapshotFileSuccessCallback& success_callback,
       const ErrorCallback& error_callback);
-  virtual void ReadBytesInternal(
-      const base::FilePath& device_file_path,
-      net::IOBuffer* buf,
-      int64_t offset,
-      int buf_len,
-      const ReadBytesSuccessCallback& success_callback,
-      const ErrorCallback& error_callback);
-  virtual void MoveFileLocalInternal(
+  void ReadBytesInternal(const base::FilePath& device_file_path,
+                         net::IOBuffer* buf,
+                         int64_t offset,
+                         int buf_len,
+                         const ReadBytesSuccessCallback& success_callback,
+                         const ErrorCallback& error_callback);
+  void MoveFileLocalInternal(
       const base::FilePath& source_file_path,
       const base::FilePath& device_file_path,
       const CreateTemporaryFileCallback& create_temporary_file_callback,
       const MoveFileLocalSuccessCallback& success_callback,
       const ErrorCallback& error_callback,
       const base::File::Info& source_file_info);
-  virtual void OnDidOpenFDToCopyFileFromLocal(
+  void OnDidOpenFDToCopyFileFromLocal(
       const base::FilePath& device_file_path,
       const CopyFileFromLocalSuccessCallback& success_callback,
       const ErrorCallback& error_callback,
       const std::pair<int, base::File::Error>& open_fd_result);
-  virtual void DeleteFileInternal(
-      const base::FilePath& file_path,
-      const DeleteFileSuccessCallback& success_callback,
-      const ErrorCallback& error_callback,
-      const base::File::Info& file_info);
-  virtual void DeleteDirectoryInternal(
+  void DeleteFileInternal(const base::FilePath& file_path,
+                          const DeleteFileSuccessCallback& success_callback,
+                          const ErrorCallback& error_callback,
+                          const base::File::Info& file_info);
+  void DeleteDirectoryInternal(
       const base::FilePath& file_path,
       const DeleteDirectorySuccessCallback& success_callback,
       const ErrorCallback& error_callback,
@@ -193,7 +193,7 @@ class MTPDeviceDelegateImplLinux : public MTPDeviceAsyncDelegate {
 
   // Creates a single directory to |directory_path|. The caller must ensure that
   // parent directory |directory_path.DirName()| already exists.
-  virtual void CreateSingleDirectory(
+  void CreateSingleDirectory(
       const base::FilePath& directory_path,
       const bool exclusive,
       const CreateDirectorySuccessCallback& success_callback,
@@ -201,7 +201,7 @@ class MTPDeviceDelegateImplLinux : public MTPDeviceAsyncDelegate {
 
   // Called when ReadDirectoryInternal() completes for filling cache as part of
   // creating directories.
-  virtual void OnDidReadDirectoryToCreateDirectory(
+  void OnDidReadDirectoryToCreateDirectory(
       const std::vector<base::FilePath>& components,
       const bool exclusive,
       const CreateDirectorySuccessCallback& success_callback,
@@ -209,17 +209,16 @@ class MTPDeviceDelegateImplLinux : public MTPDeviceAsyncDelegate {
       storage::AsyncFileUtil::EntryList entries,
       const bool has_more);
 
-  // Called when ReadDirectory succeeds.
-  virtual void OnDidReadDirectoryToDeleteDirectory(
+  // Called when CheckDirectoryEmpty() succeeds.
+  void OnDidCheckDirectoryEmptyToDeleteDirectory(
       const base::FilePath& directory_path,
-      const uint32_t directory_id,
+      uint32_t directory_id,
       const DeleteDirectorySuccessCallback& success_callback,
       const ErrorCallback& error_callback,
-      const MTPDeviceTaskHelper::MTPEntries& entries,
-      const bool has_more);
+      bool is_empty);
 
   // Calls DeleteObjectOnUIThread on UI thread.
-  virtual void RunDeleteObjectOnUIThread(
+  void RunDeleteObjectOnUIThread(
       const base::FilePath& object_path,
       const uint32_t object_id,
       const DeleteObjectSuccessCallback& success_callback,
@@ -460,27 +459,26 @@ class MTPDeviceDelegateImplLinux : public MTPDeviceAsyncDelegate {
   // Fills the file cache using the results from NextUncachedPathComponent().
   void FillFileCache(const base::FilePath& uncached_path);
 
-  // Given a full path, if it exists in the cache, writes the file's id to |id|
-  // and return true.
-  bool CachedPathToId(const base::FilePath& path, uint32_t* id) const;
+  // Given a full path, if it exists in the cache, return the id.
+  base::Optional<uint32_t> CachedPathToId(const base::FilePath& path) const;
 
   // Evict the cache of |id|.
-  void EvictCachedPathToId(const uint32_t id);
+  void EvictCachedPathToId(uint32_t id);
 
   // MTP device initialization state.
-  InitializationState init_state_;
+  InitializationState init_state_ = UNINITIALIZED;
 
   // Used to make sure only one task is in progress at any time.
   // Otherwise the browser will try to send too many requests at once and
   // overload the device.
-  bool task_in_progress_;
+  bool task_in_progress_ = false;
 
   // Registered file system device path. This path does not
   // correspond to a real device path (e.g. "/usb:2,2:81282").
   const base::FilePath device_path_;
 
   // MTP device storage name (e.g. "usb:2,2:81282").
-  std::string storage_name_;
+  const std::string storage_name_;
 
   // Mode for opening storage.
   const bool read_only_;
@@ -509,7 +507,7 @@ class MTPDeviceDelegateImplLinux : public MTPDeviceAsyncDelegate {
 
   // The root node of a tree-structure that caches the directory structure of
   // the MTP device.
-  std::unique_ptr<MTPFileNode> root_node_;
+  const std::unique_ptr<MTPFileNode> root_node_;
 
   // A list of child nodes encountered while a ReadDirectory operation, which
   // can return results over multiple callbacks, is in progress.

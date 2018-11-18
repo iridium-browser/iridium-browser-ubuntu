@@ -52,7 +52,8 @@ AppSyncUIState::AppSyncUIState(Profile* profile)
 }
 
 AppSyncUIState::~AppSyncUIState() {
-  StopObserving();
+  // StopObserving() must have been called before (from Shutdown()).
+  DCHECK(!sync_service_);
 }
 
 void AppSyncUIState::AddObserver(AppSyncUIStateObserver* observer) {
@@ -61,6 +62,10 @@ void AppSyncUIState::AddObserver(AppSyncUIStateObserver* observer) {
 
 void AppSyncUIState::RemoveObserver(AppSyncUIStateObserver* observer) {
   observers_.RemoveObserver(observer);
+}
+
+void AppSyncUIState::Shutdown() {
+  StopObserving();
 }
 
 void AppSyncUIState::StartObserving() {
@@ -116,7 +121,7 @@ void AppSyncUIState::CheckAppSync() {
   if (!sync_service_ || !sync_service_->IsFirstSetupComplete())
     return;
 
-  const bool synced = sync_service_->IsSyncActive();
+  const bool synced = sync_service_->IsSyncFeatureActive();
   const bool has_pending_extension = extensions::ExtensionSystem::Get(profile_)
                                          ->extension_service()
                                          ->pending_extension_manager()

@@ -23,28 +23,26 @@ class DragWindowController;
 // drag windows across displays.
 class ASH_EXPORT DragWindowResizer : public WindowResizer {
  public:
+  // Creates DragWindowResizer that adds the ability of dragging windows across
+  // displays to |next_window_resizer|.
+  DragWindowResizer(std::unique_ptr<WindowResizer> next_window_resizer,
+                    wm::WindowState* window_state);
   ~DragWindowResizer() override;
-
-  // Creates a new DragWindowResizer. The caller takes ownership of the
-  // returned object. The ownership of |next_window_resizer| is taken by the
-  // returned object. Returns NULL if not resizable.
-  static DragWindowResizer* Create(WindowResizer* next_window_resizer,
-                                   wm::WindowState* window_state);
 
   // WindowResizer:
   void Drag(const gfx::Point& location, int event_flags) override;
   void CompleteDrag() override;
   void RevertDrag() override;
+  void FlingOrSwipe(ui::GestureEvent* event) override;
+
+  WindowResizer* next_window_resizer_for_testing() {
+    return next_window_resizer_.get();
+  }
 
  private:
   FRIEND_TEST_ALL_PREFIXES(DragWindowResizerTest, DragWindowController);
   FRIEND_TEST_ALL_PREFIXES(DragWindowResizerTest,
                            DragWindowControllerAcrossThreeDisplays);
-  // Creates DragWindowResizer that adds the ability of dragging windows across
-  // displays to |next_window_resizer|. This object takes the ownership of
-  // |next_window_resizer|.
-  explicit DragWindowResizer(WindowResizer* next_window_resizer,
-                             wm::WindowState* window_state);
 
   // Updates the bounds of the drag window for window dragging.
   void UpdateDragWindow(const gfx::Rect& bounds_in_parent,
@@ -52,6 +50,10 @@ class ASH_EXPORT DragWindowResizer : public WindowResizer {
 
   // Returns true if we should allow the mouse pointer to warp.
   bool ShouldAllowMouseWarp();
+
+  // Do the real work of ending a drag. If the drag ends in a different display,
+  // move the dragged window to that display.
+  void EndDragImpl();
 
   std::unique_ptr<WindowResizer> next_window_resizer_;
 

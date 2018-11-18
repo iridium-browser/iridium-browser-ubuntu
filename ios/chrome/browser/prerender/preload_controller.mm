@@ -11,11 +11,14 @@
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/sys_string_conversions.h"
+#import "components/prefs/ios/pref_observer_bridge.h"
 #include "components/prefs/pref_service.h"
 #import "components/signin/ios/browser/account_consistency_service.h"
+#import "ios/chrome/browser/app_launcher/app_launcher_tab_helper.h"
 #include "ios/chrome/browser/browser_state/chrome_browser_state.h"
 #import "ios/chrome/browser/geolocation/omnibox_geolocation_controller.h"
 #import "ios/chrome/browser/history/history_tab_helper.h"
+#import "ios/chrome/browser/itunes_urls/itunes_urls_handler_tab_helper.h"
 #include "ios/chrome/browser/pref_names.h"
 #include "ios/chrome/browser/prerender/preload_controller_delegate.h"
 #import "ios/chrome/browser/signin/account_consistency_service_factory.h"
@@ -26,10 +29,11 @@
 #include "ios/chrome/browser/ui/prerender_final_status.h"
 #import "ios/web/public/navigation_item.h"
 #import "ios/web/public/navigation_manager.h"
+#import "ios/web/public/web_state/navigation_context.h"
 #import "ios/web/public/web_state/ui/crw_native_content.h"
-#include "ios/web/public/web_state/ui/crw_web_delegate.h"
 #import "ios/web/public/web_state/web_state.h"
 #include "ios/web/public/web_state/web_state_observer_bridge.h"
+#import "ios/web/public/web_state/web_state_policy_decider_bridge.h"
 #include "ios/web/public/web_thread.h"
 #import "ios/web/web_state/ui/crw_web_controller.h"
 #import "net/base/mac/url_conversions.h"
@@ -38,6 +42,8 @@
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
+
+using web::WebStatePolicyDecider;
 
 namespace {
 // Delay before starting to prerender a URL.
@@ -87,9 +93,10 @@ bool IsPrerenderTabEvictionExperimentalGroup() {
 
 @end
 
-@interface PreloadController ()<CRWWebDelegate,
-                                CRWWebStateObserver,
-                                ManageAccountsDelegate>
+@interface PreloadController ()<CRWWebStateObserver,
+                                CRWWebStatePolicyDecider,
+                                ManageAccountsDelegate,
+                                PrefObserverDelegate>
 @end
 
 @implementation PreloadController {
@@ -142,6 +149,9 @@ bool IsPrerenderTabEvictionExperimentalGroup() {
   // Number of successful prerenders (i.e. the user viewed the prerendered page)
   // during the lifetime of this controller.
   int successfulPrerendersPerSessionCount_;
+
+  // Bridge to provide navigation policies for |webState_|.
+  std::unique_ptr<web::WebStatePolicyDeciderBridge> policyDeciderBridge_;
 }
 
 @synthesize prerenderedURL = prerenderedURL_;
@@ -186,8 +196,8 @@ bool IsPrerenderTabEvictionExperimentalGroup() {
 }
 
 - (void)dealloc {
-  UMA_HISTOGRAM_COUNTS(kPrerendersPerSessionCountHistogramName,
-                       successfulPrerendersPerSessionCount_);
+  UMA_HISTOGRAM_COUNTS_1M(kPrerendersPerSessionCountHistogramName,
+                          successfulPrerendersPerSessionCount_);
   [self cancelPrerender];
 }
 
@@ -251,12 +261,11 @@ bool IsPrerenderTabEvictionExperimentalGroup() {
 
   Tab* tab = LegacyTabHelper::GetTabForWebState(webState.get());
   [[tab webController] setNativeProvider:nil];
-  [[tab webController] setDelegate:tab];
 
   webState->SetShouldSuppressDialogs(false);
   webState->RemoveObserver(webStateObserver_.get());
   webState->SetDelegate(nullptr);
-
+  policyDeciderBridge_.reset();
   HistoryTabHelper::FromWebState(webState.get())
       ->SetDelayHistoryServiceNotification(false);
 
@@ -341,13 +350,9 @@ bool IsPrerenderTabEvictionExperimentalGroup() {
   return nil;
 }
 
-// Override the CRWNativeContentProvider methods to cancel any prerenders that
-// require native content.
-- (id<CRWNativeContent>)controllerForUnhandledContentAtURL:(const GURL&)URL
-                                                  webState:
-                                                      (web::WebState*)webState {
-  [self schedulePrerenderCancel];
-  return nil;
+- (CGFloat)nativeContentHeaderHeightForWebState:(web::WebState*)webState {
+  return [delegate_ nativeContentHeaderHeightForPreloadController:self
+                                                         webState:webState];
 }
 
 #pragma mark -
@@ -378,13 +383,17 @@ bool IsPrerenderTabEvictionExperimentalGroup() {
 
   web::WebState::CreateParams createParams(browserState_);
   webState_ = web::WebState::Create(createParams);
+  // Add the preload controller as a policyDecider before other tab helpers, so
+  // that it can block the navigation if needed before other policy deciders
+  // execute thier side effects (eg. AppLauncherTabHelper launching app).
+  policyDeciderBridge_ =
+      std::make_unique<web::WebStatePolicyDeciderBridge>(webState_.get(), self);
   AttachTabHelpers(webState_.get(), /*for_prerender=*/true);
 
   Tab* tab = LegacyTabHelper::GetTabForWebState(webState_.get());
   DCHECK(tab);
 
   [[tab webController] setNativeProvider:self];
-  [[tab webController] setDelegate:self];
 
   webState_->SetDelegate(webStateDelegate_.get());
   webState_->AddObserver(webStateObserver_.get());
@@ -427,7 +436,6 @@ bool IsPrerenderTabEvictionExperimentalGroup() {
 
   Tab* tab = LegacyTabHelper::GetTabForWebState(webState_.get());
   [[tab webController] setNativeProvider:nil];
-  [[tab webController] setDelegate:tab];
   webState_->RemoveObserver(webStateObserver_.get());
   webState_->SetDelegate(nullptr);
   webState_.reset();
@@ -465,6 +473,12 @@ bool IsPrerenderTabEvictionExperimentalGroup() {
 #pragma mark - CRWWebStateObserver
 
 - (void)webState:(web::WebState*)webState
+    didStartNavigation:(web::NavigationContext*)navigation {
+  Tab* tab = LegacyTabHelper::GetTabForWebState(webState_.get());
+  [tab notifyTabOfUrlMayStartLoading:navigation->GetUrl()];
+}
+
+- (void)webState:(web::WebState*)webState
     didLoadPageWithSuccess:(BOOL)loadSuccess {
   DCHECK_EQ(webState, webState_.get());
   // Cancel prerendering if response is "application/octet-stream". It can be a
@@ -478,47 +492,6 @@ bool IsPrerenderTabEvictionExperimentalGroup() {
 - (void)webStateDidSuppressDialog:(web::WebState*)webState {
   DCHECK_EQ(webState, webState_.get());
   [self schedulePrerenderCancel];
-}
-
-#pragma mark - CRWWebDelegate protocol
-
-- (BOOL)openExternalURL:(const GURL&)URL
-              sourceURL:(const GURL&)sourceURL
-            linkClicked:(BOOL)linkClicked {
-  DCHECK(webState_);
-  Tab* tab = LegacyTabHelper::GetTabForWebState(webState_.get());
-  return [tab openExternalURL:URL sourceURL:sourceURL linkClicked:linkClicked];
-}
-
-- (BOOL)webController:(CRWWebController*)webController
-        shouldOpenURL:(const GURL&)URL
-      mainDocumentURL:(const GURL&)mainDocumentURL {
-  DCHECK(webState_);
-  Tab* tab = LegacyTabHelper::GetTabForWebState(webState_.get());
-  SEL selector = @selector(webController:shouldOpenURL:mainDocumentURL:);
-  if ([tab respondsToSelector:selector]) {
-    return [tab webController:webController
-                shouldOpenURL:URL
-              mainDocumentURL:mainDocumentURL];
-  }
-  return NO;
-}
-
-- (BOOL)webController:(CRWWebController*)webController
-    shouldOpenExternalURL:(const GURL&)URL {
-  [self schedulePrerenderCancel];
-  return NO;
-}
-
-- (CGFloat)nativeContentHeaderHeightForWebController:
-    (CRWWebController*)webController {
-  DCHECK(webState_);
-  Tab* tab = LegacyTabHelper::GetTabForWebState(webState_.get());
-  SEL selector = @selector(nativeContentHeaderHeightForWebController:);
-  if ([tab respondsToSelector:selector]) {
-    return [tab nativeContentHeaderHeightForWebController:webController];
-  }
-  return 0;
 }
 
 #pragma mark - ManageAccountsDelegate
@@ -535,4 +508,18 @@ bool IsPrerenderTabEvictionExperimentalGroup() {
   [self schedulePrerenderCancel];
 }
 
+#pragma mark - CRWWebStatePolicyDecider
+
+- (BOOL)shouldAllowRequest:(NSURLRequest*)request
+               requestInfo:(const WebStatePolicyDecider::RequestInfo&)info {
+  GURL requestURL = net::GURLWithNSURL(request.URL);
+  // Don't allow preloading for requests that are handled by opening another
+  // application or by presenting a native UI.
+  if (AppLauncherTabHelper::IsAppUrl(requestURL) ||
+      ITunesUrlsHandlerTabHelper::CanHandleUrl(requestURL)) {
+    [self schedulePrerenderCancel];
+    return NO;
+  }
+  return YES;
+}
 @end

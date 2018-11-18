@@ -1,64 +1,58 @@
 {
     "archives": {
-        "Blogger": {
-            "DEFAULT": "tough_pinch_zoom_cases_000.wprgo"
+        "accu_weather_pinch_2018": {
+            "DEFAULT": "tough_pinch_zoom_cases_001.wprgo"
         },
-        "ESPN": {
-            "DEFAULT": "tough_pinch_zoom_cases_000.wprgo"
+        "amazon_pinch_2018": {
+            "DEFAULT": "tough_pinch_zoom_cases_001.wprgo"
         },
-        "Facebook": {
-            "DEFAULT": "tough_pinch_zoom_cases_000.wprgo"
+        "blogspot_pinch_2018": {
+            "DEFAULT": "tough_pinch_zoom_cases_001.wprgo"
         },
-        "LinkedIn": {
-            "DEFAULT": "tough_pinch_zoom_cases_000.wprgo"
+        "booking_pinch_2018": {
+            "DEFAULT": "tough_pinch_zoom_cases_001.wprgo"
         },
-        "Twitter": {
-            "DEFAULT": "tough_pinch_zoom_cases_000.wprgo"
+        "cnn_pinch_2018": {
+            "DEFAULT": "tough_pinch_zoom_cases_001.wprgo"
         },
-        "Weather.com": {
-            "DEFAULT": "tough_pinch_zoom_cases_000.wprgo"
+        "ebay_pinch_2018": {
+            "DEFAULT": "tough_pinch_zoom_cases_001.wprgo"
         },
-        "http://answers.yahoo.com": {
-            "DEFAULT": "tough_pinch_zoom_cases_000.wprgo"
+        "espn_pinch_2018": {
+            "DEFAULT": "tough_pinch_zoom_cases_001.wprgo"
         },
-        "http://booking.com": {
-            "DEFAULT": "tough_pinch_zoom_cases_000.wprgo"
+        "facebook_pinch_2018": {
+            "DEFAULT": "tough_pinch_zoom_cases_001.wprgo"
         },
-        "http://games.yahoo.com": {
-            "DEFAULT": "tough_pinch_zoom_cases_000.wprgo"
+        "gmail_pinch_2018": {
+            "DEFAULT": "tough_pinch_zoom_cases_001.wprgo"
         },
-        "http://news.yahoo.com": {
-            "DEFAULT": "tough_pinch_zoom_cases_000.wprgo"
+        "google_calendar_pinch_2018": {
+            "DEFAULT": "tough_pinch_zoom_cases_001.wprgo"
         },
-        "http://sports.yahoo.com/": {
-            "DEFAULT": "tough_pinch_zoom_cases_000.wprgo"
+        "google_image_pinch_2018": {
+            "DEFAULT": "tough_pinch_zoom_cases_001.wprgo"
         },
-        "http://www.amazon.com": {
-            "DEFAULT": "tough_pinch_zoom_cases_000.wprgo"
+        "google_search_pinch_2018": {
+            "DEFAULT": "tough_pinch_zoom_cases_001.wprgo"
         },
-        "http://www.cnn.com": {
-            "DEFAULT": "tough_pinch_zoom_cases_000.wprgo"
+        "linkedin_pinch_2018": {
+            "DEFAULT": "tough_pinch_zoom_cases_001.wprgo"
         },
-        "http://www.ebay.com": {
-            "DEFAULT": "tough_pinch_zoom_cases_000.wprgo"
+        "twitch_pinch_2018": {
+            "DEFAULT": "tough_pinch_zoom_cases_001.wprgo"
         },
-        "http://www.youtube.com": {
-            "DEFAULT": "tough_pinch_zoom_cases_000.wprgo"
+        "twitter_pinch_2018": {
+            "DEFAULT": "tough_pinch_zoom_cases_001.wprgo"
         },
-        "https://mail.google.com/mail/": {
-            "DEFAULT": "tough_pinch_zoom_cases_000.wprgo"
+        "yahoo_news_pinch_2018": {
+            "DEFAULT": "tough_pinch_zoom_cases_001.wprgo"
         },
-        "https://plus.google.com/+BarackObama/posts": {
-            "DEFAULT": "tough_pinch_zoom_cases_000.wprgo"
+        "yahoo_sports_pinch_2018": {
+            "DEFAULT": "tough_pinch_zoom_cases_001.wprgo"
         },
-        "https://www.google.com/#hl=en&q=barack+obama": {
-            "DEFAULT": "tough_pinch_zoom_cases_000.wprgo"
-        },
-        "https://www.google.com/calendar/": {
-            "DEFAULT": "tough_pinch_zoom_cases_000.wprgo"
-        },
-        "https://www.google.com/search?q=cats&tbm=isch": {
-            "DEFAULT": "tough_pinch_zoom_cases_000.wprgo"
+        "youtube_pinch_2018": {
+            "DEFAULT": "tough_pinch_zoom_cases_001.wprgo"
         }
     },
     "description": "Describes the Web Page Replay archives for a story set. Don't edit by hand! Use record_wpr for updating.",

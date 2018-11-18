@@ -2,19 +2,21 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/single_thread_task_runner.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_cache_options.h"
 #include "third_party/blink/renderer/core/inspector/console_message_storage.h"
 #include "third_party/blink/renderer/core/inspector/thread_debugger.h"
 #include "third_party/blink/renderer/core/origin_trials/origin_trial_context.h"
+#include "third_party/blink/renderer/core/script/script.h"
 #include "third_party/blink/renderer/core/testing/dummy_page_holder.h"
 #include "third_party/blink/renderer/core/workers/global_scope_creation_params.h"
-#include "third_party/blink/renderer/core/workers/threaded_worklet_global_scope.h"
 #include "third_party/blink/renderer/core/workers/threaded_worklet_messaging_proxy.h"
 #include "third_party/blink/renderer/core/workers/threaded_worklet_object_proxy.h"
 #include "third_party/blink/renderer/core/workers/worker_thread.h"
 #include "third_party/blink/renderer/core/workers/worker_thread_test_helper.h"
+#include "third_party/blink/renderer/core/workers/worklet_global_scope.h"
 #include "third_party/blink/renderer/core/workers/worklet_module_responses_map.h"
 #include "third_party/blink/renderer/core/workers/worklet_thread_holder.h"
 #include "third_party/blink/renderer/platform/cross_thread_functional.h"
@@ -56,7 +58,7 @@ class ThreadedWorkletThreadForTest : public WorkerThread {
  public:
   explicit ThreadedWorkletThreadForTest(
       WorkerReportingProxy& worker_reporting_proxy)
-      : WorkerThread(nullptr, worker_reporting_proxy) {}
+      : WorkerThread(worker_reporting_proxy) {}
   ~ThreadedWorkletThreadForTest() override = default;
 
   WorkerBackingThread& GetWorkerBackingThread() override {
@@ -70,8 +72,8 @@ class ThreadedWorkletThreadForTest : public WorkerThread {
 
   static void EnsureSharedBackingThread() {
     DCHECK(IsMainThread());
-    WorkletThreadHolder<ThreadedWorkletThreadForTest>::CreateForTest(
-        WebThreadCreationParams(WebThreadType::kTestThread)
+    WorkletThreadHolder<ThreadedWorkletThreadForTest>::EnsureInstance(
+        ThreadCreationParams(WebThreadType::kTestThread)
             .SetThreadNameForTest("ThreadedWorkletThreadForTest"));
   }
 
@@ -84,8 +86,8 @@ class ThreadedWorkletThreadForTest : public WorkerThread {
     WorkletGlobalScope* global_scope = ToWorkletGlobalScope(GlobalScope());
     // The SecurityOrigin for a worklet should be a unique opaque origin, while
     // the owner Document's SecurityOrigin shouldn't.
-    EXPECT_TRUE(global_scope->GetSecurityOrigin()->IsUnique());
-    EXPECT_FALSE(global_scope->DocumentSecurityOrigin()->IsUnique());
+    EXPECT_TRUE(global_scope->GetSecurityOrigin()->IsOpaque());
+    EXPECT_FALSE(global_scope->DocumentSecurityOrigin()->IsOpaque());
     PostCrossThreadTask(
         *GetParentExecutionContextTaskRunners()->Get(TaskType::kInternalTest),
         FROM_HERE, CrossThreadBind(&test::ExitRunLoop));
@@ -95,11 +97,10 @@ class ThreadedWorkletThreadForTest : public WorkerThread {
     EXPECT_TRUE(IsCurrentThread());
     ContentSecurityPolicy* csp = GlobalScope()->GetContentSecurityPolicy();
 
-    // The "script-src 'self'" directive is specified but the Worklet has a
-    // unique opaque origin, so this should not be allowed.
-    EXPECT_FALSE(csp->AllowScriptFromSource(GlobalScope()->Url(), String(),
-                                            IntegrityMetadataSet(),
-                                            kParserInserted));
+    // The "script-src 'self'" directive allows this.
+    EXPECT_TRUE(csp->AllowScriptFromSource(GlobalScope()->Url(), String(),
+                                           IntegrityMetadataSet(),
+                                           kParserInserted));
 
     // The "script-src https://allowed.example.com" should allow this.
     EXPECT_TRUE(csp->AllowScriptFromSource(KURL("https://allowed.example.com"),
@@ -115,7 +116,24 @@ class ThreadedWorkletThreadForTest : public WorkerThread {
         FROM_HERE, CrossThreadBind(&test::ExitRunLoop));
   }
 
-  // Emulates API use on ThreadedWorkletGlobalScope.
+  // Test that having an invalid CSP does not result in an exception.
+  // See bugs: 844383,844317
+  void TestInvalidContentSecurityPolicy() {
+    EXPECT_TRUE(IsCurrentThread());
+
+    // At this point check that the CSP that was set is indeed invalid.
+    ContentSecurityPolicy* csp = GlobalScope()->GetContentSecurityPolicy();
+    EXPECT_EQ(1ul, csp->Headers().size());
+    EXPECT_EQ("invalid-csp", csp->Headers().at(0).first);
+    EXPECT_EQ(kContentSecurityPolicyHeaderTypeEnforce,
+              csp->Headers().at(0).second);
+
+    PostCrossThreadTask(
+        *GetParentExecutionContextTaskRunners()->Get(TaskType::kInternalTest),
+        FROM_HERE, CrossThreadBind(&test::ExitRunLoop));
+  }
+
+  // Emulates API use on threaded WorkletGlobalScope.
   void CountFeature(WebFeature feature) {
     EXPECT_TRUE(IsCurrentThread());
     GlobalScope()->CountFeature(feature);
@@ -124,7 +142,7 @@ class ThreadedWorkletThreadForTest : public WorkerThread {
         FROM_HERE, CrossThreadBind(&test::ExitRunLoop));
   }
 
-  // Emulates deprecated API use on ThreadedWorkletGlobalScope.
+  // Emulates deprecated API use on threaded WorkletGlobalScope.
   void CountDeprecation(WebFeature feature) {
     EXPECT_TRUE(IsCurrentThread());
     GlobalScope()->CountDeprecation(feature);
@@ -152,8 +170,11 @@ class ThreadedWorkletThreadForTest : public WorkerThread {
  private:
   WorkerOrWorkletGlobalScope* CreateWorkerGlobalScope(
       std::unique_ptr<GlobalScopeCreationParams> creation_params) final {
-    return new ThreadedWorkletGlobalScope(std::move(creation_params),
-                                          GetIsolate(), this);
+    auto* global_scope = new WorkletGlobalScope(
+        std::move(creation_params), GetWorkerReportingProxy(), this);
+    EXPECT_FALSE(global_scope->IsMainThreadWorkletGlobalScope());
+    EXPECT_TRUE(global_scope->IsThreadedWorkletGlobalScope());
+    return global_scope;
   }
 
   bool IsOwningBackingThread() const final { return false; }
@@ -176,22 +197,21 @@ class ThreadedWorkletMessagingProxyForTest
   ~ThreadedWorkletMessagingProxyForTest() override = default;
 
   void Start() {
-    Document* document = ToDocument(GetExecutionContext());
+    Document* document = To<Document>(GetExecutionContext());
     std::unique_ptr<Vector<char>> cached_meta_data = nullptr;
     WorkerClients* worker_clients = nullptr;
     std::unique_ptr<WorkerSettings> worker_settings = nullptr;
     InitializeWorkerThread(
         std::make_unique<GlobalScopeCreationParams>(
-            document->Url(), document->UserAgent(),
-            document->GetContentSecurityPolicy()->Headers().get(),
+            document->Url(), ScriptType::kModule, document->UserAgent(),
+            document->GetContentSecurityPolicy()->Headers(),
             document->GetReferrerPolicy(), document->GetSecurityOrigin(),
-            document->IsSecureContext(), worker_clients,
-            document->AddressSpace(),
+            document->IsSecureContext(), document->GetHttpsState(),
+            worker_clients, document->AddressSpace(),
             OriginTrialContext::GetTokens(document).get(),
             base::UnguessableToken::Create(), std::move(worker_settings),
-            kV8CacheOptionsDefault,
-            new WorkletModuleResponsesMap(document->Fetcher())),
-        WTF::nullopt);
+            kV8CacheOptionsDefault, new WorkletModuleResponsesMap),
+        base::nullopt);
   }
 
  private:
@@ -266,13 +286,30 @@ TEST_F(ThreadedWorkletTest, ContentSecurityPolicy) {
   test::EnterRunLoop();
 }
 
+TEST_F(ThreadedWorkletTest, InvalidContentSecurityPolicy) {
+  ContentSecurityPolicy* csp = ContentSecurityPolicy::Create();
+  csp->DidReceiveHeader("invalid-csp", kContentSecurityPolicyHeaderTypeEnforce,
+                        kContentSecurityPolicyHeaderSourceHTTP);
+  GetDocument().InitContentSecurityPolicy(csp);
+
+  MessagingProxy()->Start();
+
+  PostCrossThreadTask(
+      *GetWorkerThread()->GetTaskRunner(TaskType::kInternalTest), FROM_HERE,
+      CrossThreadBind(
+          &ThreadedWorkletThreadForTest::TestInvalidContentSecurityPolicy,
+          CrossThreadUnretained(GetWorkerThread())));
+  test::EnterRunLoop();
+}
+
 TEST_F(ThreadedWorkletTest, UseCounter) {
+  Page::InsertOrdinaryPageForTesting(GetDocument().GetPage());
   MessagingProxy()->Start();
 
   // This feature is randomly selected.
   const WebFeature kFeature1 = WebFeature::kRequestFileSystem;
 
-  // API use on the ThreadedWorkletGlobalScope should be recorded in UseCounter
+  // API use on the threaded WorkletGlobalScope should be recorded in UseCounter
   // on the Document.
   EXPECT_FALSE(UseCounter::IsCounted(GetDocument(), kFeature1));
   PostCrossThreadTask(
@@ -283,7 +320,7 @@ TEST_F(ThreadedWorkletTest, UseCounter) {
   EXPECT_TRUE(UseCounter::IsCounted(GetDocument(), kFeature1));
 
   // API use should be reported to the Document only one time. See comments in
-  // ThreadedWorkletGlobalScopeForTest::CountFeature.
+  // ThreadedWorkletObjectProxyForTest::CountFeature.
   PostCrossThreadTask(
       *GetWorkerThread()->GetTaskRunner(TaskType::kInternalTest), FROM_HERE,
       CrossThreadBind(&ThreadedWorkletThreadForTest::CountFeature,
@@ -293,7 +330,7 @@ TEST_F(ThreadedWorkletTest, UseCounter) {
   // This feature is randomly selected from Deprecation::deprecationMessage().
   const WebFeature kFeature2 = WebFeature::kPrefixedStorageInfo;
 
-  // Deprecated API use on the ThreadedWorkletGlobalScope should be recorded in
+  // Deprecated API use on the threaded WorkletGlobalScope should be recorded in
   // UseCounter on the Document.
   EXPECT_FALSE(UseCounter::IsCounted(GetDocument(), kFeature2));
   PostCrossThreadTask(
@@ -304,7 +341,7 @@ TEST_F(ThreadedWorkletTest, UseCounter) {
   EXPECT_TRUE(UseCounter::IsCounted(GetDocument(), kFeature2));
 
   // API use should be reported to the Document only one time. See comments in
-  // ThreadedWorkletGlobalScopeForTest::CountDeprecation.
+  // ThreadedWorkletObjectProxyForTest::CountDeprecation.
   PostCrossThreadTask(
       *GetWorkerThread()->GetTaskRunner(TaskType::kInternalTest), FROM_HERE,
       CrossThreadBind(&ThreadedWorkletThreadForTest::CountDeprecation,

@@ -29,8 +29,8 @@ import org.chromium.chrome.browser.download.DownloadManagerDelegate.DownloadQuer
 import org.chromium.chrome.browser.download.OMADownloadHandler.OMAInfo;
 import org.chromium.chrome.browser.test.ChromeBrowserTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
-import org.chromium.content.browser.test.util.Criteria;
-import org.chromium.content.browser.test.util.CriteriaHelper;
+import org.chromium.content_public.browser.test.util.Criteria;
+import org.chromium.content_public.browser.test.util.CriteriaHelper;
 import org.chromium.net.test.EmbeddedTestServer;
 
 import java.io.ByteArrayInputStream;
@@ -59,10 +59,6 @@ public class OMADownloadHandlerTest {
     static class MockDownloadSnackbarController extends DownloadSnackbarController {
         public boolean mSucceeded;
         public boolean mFailed;
-
-        public MockDownloadSnackbarController() {
-            super(null);
-        }
 
         public void waitForSnackbarControllerToFinish(final boolean success) {
             CriteriaHelper.pollInstrumentationThread(
@@ -296,14 +292,13 @@ public class OMADownloadHandlerTest {
 
         DownloadManagerDelegate downloadManagerDelegate = new DownloadManagerDelegate(context);
         DownloadQueryResultVerifier verifier =
-                new DownloadQueryResultVerifier(DownloadManagerService.DOWNLOAD_STATUS_COMPLETE);
+                new DownloadQueryResultVerifier(DownloadManagerService.DownloadStatus.COMPLETE);
         downloadManagerDelegate.queryDownloadResult(downloadItem, false, verifier);
         waitForQueryCompletion(verifier);
 
         manager.remove(downloadId1);
         downloadItem.setSystemDownloadId(downloadId1);
-        verifier =
-                new DownloadQueryResultVerifier(DownloadManagerService.DOWNLOAD_STATUS_CANCELLED);
+        verifier = new DownloadQueryResultVerifier(DownloadManagerService.DownloadStatus.CANCELLED);
         downloadManagerDelegate.queryDownloadResult(downloadItem, false, verifier);
         waitForQueryCompletion(verifier);
     }

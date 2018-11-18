@@ -3,8 +3,8 @@
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/core/exported/web_view_impl.h"
+#include "third_party/blink/renderer/core/layout/layout_block_flow.h"
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_inline_node.h"
-#include "third_party/blink/renderer/core/layout/ng/layout_ng_block_flow.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_block_layout_algorithm.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_constraint_space_builder.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_layout_result.h"
@@ -20,8 +20,7 @@ namespace blink {
 
 class NGInlineLayoutTest : public SimTest {
  public:
-  scoped_refptr<NGConstraintSpace> ConstraintSpaceForElement(
-      LayoutBlockFlow* block_flow) {
+  NGConstraintSpace ConstraintSpaceForElement(LayoutBlockFlow* block_flow) {
     return NGConstraintSpaceBuilder(
                block_flow->Style()->GetWritingMode(),
                /* icb_size */ {NGSizeIndefinite, NGSizeIndefinite})
@@ -45,16 +44,17 @@ TEST_F(NGInlineLayoutTest, BlockWithSingleTextNode) {
 
   Element* target = GetDocument().getElementById("target");
   LayoutBlockFlow* block_flow = ToLayoutBlockFlow(target->GetLayoutObject());
-  scoped_refptr<NGConstraintSpace> constraint_space =
-      ConstraintSpaceForElement(block_flow);
+  NGConstraintSpace constraint_space = ConstraintSpaceForElement(block_flow);
   NGBlockNode node(block_flow);
 
   scoped_refptr<NGLayoutResult> result =
-      NGBlockLayoutAlgorithm(node, *constraint_space).Layout();
+      NGBlockLayoutAlgorithm(node, constraint_space).Layout();
   EXPECT_TRUE(result);
 
   String expected_text("Hello World!");
-  EXPECT_EQ(expected_text, ToNGInlineNode(node.FirstChild()).Text(0, 12));
+  NGInlineNode first_child = ToNGInlineNode(node.FirstChild());
+  EXPECT_EQ(expected_text,
+            StringView(first_child.ItemsData(false).text_content, 0, 12));
 }
 
 TEST_F(NGInlineLayoutTest, BlockWithTextAndAtomicInline) {
@@ -69,18 +69,19 @@ TEST_F(NGInlineLayoutTest, BlockWithTextAndAtomicInline) {
 
   Element* target = GetDocument().getElementById("target");
   LayoutBlockFlow* block_flow = ToLayoutBlockFlow(target->GetLayoutObject());
-  scoped_refptr<NGConstraintSpace> constraint_space =
-      ConstraintSpaceForElement(block_flow);
+  NGConstraintSpace constraint_space = ConstraintSpaceForElement(block_flow);
   NGBlockNode node(block_flow);
 
   scoped_refptr<NGLayoutResult> result =
-      NGBlockLayoutAlgorithm(node, *constraint_space).Layout();
+      NGBlockLayoutAlgorithm(node, constraint_space).Layout();
   EXPECT_TRUE(result);
 
   String expected_text("Hello ");
   expected_text.append(kObjectReplacementCharacter);
   expected_text.append(".");
-  EXPECT_EQ(expected_text, ToNGInlineNode(node.FirstChild()).Text(0, 8));
+  NGInlineNode first_child = ToNGInlineNode(node.FirstChild());
+  EXPECT_EQ(expected_text,
+            StringView(first_child.ItemsData(false).text_content, 0, 8));
 
   // Delete the line box tree to avoid leaks in the test.
   block_flow->DeleteLineBoxTree();

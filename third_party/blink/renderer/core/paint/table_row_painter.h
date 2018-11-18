@@ -10,11 +10,9 @@
 
 namespace blink {
 
-class CellSpan;
-class LayoutPoint;
-class LayoutTableCell;
-class LayoutTableRow;
 struct PaintInfo;
+class CellSpan;
+class LayoutTableRow;
 
 class TableRowPainter {
   STACK_ALLOCATED();
@@ -23,22 +21,20 @@ class TableRowPainter {
   TableRowPainter(const LayoutTableRow& layout_table_row)
       : layout_table_row_(layout_table_row) {}
 
-  void Paint(const PaintInfo&, const LayoutPoint&);
-  void PaintOutline(const PaintInfo&, const LayoutPoint&);
+  void Paint(const PaintInfo&);
+  void PaintOutline(const PaintInfo&);
   void PaintBoxDecorationBackground(const PaintInfo&,
-                                    const LayoutPoint&,
                                     const CellSpan& dirtied_columns);
   void PaintCollapsedBorders(const PaintInfo&,
-                             const LayoutPoint&,
                              const CellSpan& dirtied_columns);
 
  private:
-  void PaintBackgroundBehindCell(const LayoutTableCell&,
-                                 const PaintInfo&,
-                                 const LayoutPoint&);
-
   void HandleChangedPartialPaint(const PaintInfo&,
                                  const CellSpan& dirtied_columns);
+  // Paint a hit test display item and record hit test data. This should be
+  // called in the background paint phase even if there is no other painted
+  // content.
+  void RecordHitTestData(const PaintInfo&, const LayoutPoint& paint_offset);
 
   const LayoutTableRow& layout_table_row_;
 };

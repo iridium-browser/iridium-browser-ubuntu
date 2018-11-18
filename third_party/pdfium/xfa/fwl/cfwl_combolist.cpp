@@ -9,7 +9,6 @@
 #include <memory>
 #include <utility>
 
-#include "third_party/base/ptr_util.h"
 #include "xfa/fwl/cfwl_combobox.h"
 #include "xfa/fwl/cfwl_comboedit.h"
 #include "xfa/fwl/cfwl_listbox.h"
@@ -122,8 +121,8 @@ void CFWL_ComboList::OnDropListFocusChanged(CFWL_Message* pMsg, bool bSet) {
 
   CFWL_MessageKillFocus* pKill = static_cast<CFWL_MessageKillFocus*>(pMsg);
   CFWL_ComboBox* pOuter = static_cast<CFWL_ComboBox*>(m_pOuter);
-  if (pKill->m_pSetFocus == m_pOuter ||
-      pKill->m_pSetFocus == pOuter->GetComboEdit()) {
+  if (pKill->IsFocusedOnWidget(m_pOuter) ||
+      pKill->IsFocusedOnWidget(pOuter->GetComboEdit())) {
     pOuter->ShowDropList(false);
   }
 }
@@ -208,7 +207,7 @@ bool CFWL_ComboList::OnDropListKey(CFWL_MessageKey* pKey) {
     bPropagate = true;
   }
   if (bPropagate) {
-    pKey->m_pDstTarget = m_pOuter;
+    pKey->SetDstTarget(m_pOuter);
     pOuter->GetDelegate()->OnProcessMessage(pKey);
     return true;
   }

@@ -14,7 +14,7 @@
 namespace viz {
 
 VIZ_RESOURCE_FORMAT_EXPORT SkColorType
-ResourceFormatToClosestSkColorType(ResourceFormat format);
+ResourceFormatToClosestSkColorType(bool gpu_compositing, ResourceFormat format);
 VIZ_RESOURCE_FORMAT_EXPORT int BitsPerPixel(ResourceFormat format);
 
 // The following functions use unsigned int instead of GLenum, since including
@@ -35,8 +35,6 @@ VIZ_RESOURCE_FORMAT_EXPORT gfx::BufferFormat BufferFormat(
     ResourceFormat format);
 VIZ_RESOURCE_FORMAT_EXPORT bool IsResourceFormatCompressed(
     ResourceFormat format);
-VIZ_RESOURCE_FORMAT_EXPORT bool DoesResourceFormatSupportAlpha(
-    ResourceFormat format);
 VIZ_RESOURCE_FORMAT_EXPORT unsigned int TextureStorageFormat(
     ResourceFormat format);
 
@@ -48,6 +46,11 @@ VIZ_RESOURCE_FORMAT_EXPORT bool IsGpuMemoryBufferFormatSupported(
 // Returns whether the format can be used as a software bitmap for export to the
 // display compositor.
 VIZ_RESOURCE_FORMAT_EXPORT bool IsBitmapFormatSupported(ResourceFormat format);
+
+VIZ_RESOURCE_FORMAT_EXPORT ResourceFormat
+GetResourceFormat(gfx::BufferFormat format);
+
+VIZ_RESOURCE_FORMAT_EXPORT bool GLSupportsFormat(ResourceFormat format);
 
 }  // namespace viz
 

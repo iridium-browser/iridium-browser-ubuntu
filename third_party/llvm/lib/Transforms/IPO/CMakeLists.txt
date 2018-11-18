@@ -15,6 +15,7 @@ add_llvm_library(LLVMipo
   GlobalDCE.cpp
   GlobalOpt.cpp
   GlobalSplit.cpp
+  HotColdSplitting.cpp
   IPConstantPropagation.cpp
   IPO.cpp
   InferFunctionAttrs.cpp
@@ -24,7 +25,6 @@ add_llvm_library(LLVMipo
   LoopExtractor.cpp
   LowerTypeTests.cpp
   MergeFunctions.cpp
-  MetaRenamer.cpp
   PartialInlining.cpp
   PassManagerBuilder.cpp
   PruneEH.cpp

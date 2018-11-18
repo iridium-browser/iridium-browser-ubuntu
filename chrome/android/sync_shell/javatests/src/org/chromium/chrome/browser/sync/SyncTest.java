@@ -21,7 +21,6 @@ import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.FlakyTest;
-import org.chromium.chrome.browser.ChromeActivity;
 import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.signin.AccountTrackerService;
 import org.chromium.chrome.browser.signin.SigninHelper;
@@ -32,9 +31,8 @@ import org.chromium.chrome.test.util.browser.signin.SigninTestUtil;
 import org.chromium.chrome.test.util.browser.sync.SyncTestUtil;
 import org.chromium.components.signin.AccountIdProvider;
 import org.chromium.components.sync.AndroidSyncSettings;
-import org.chromium.content.browser.test.util.Criteria;
-import org.chromium.content.browser.test.util.CriteriaHelper;
-import org.chromium.content_public.browser.ContentViewCore;
+import org.chromium.content_public.browser.test.util.Criteria;
+import org.chromium.content_public.browser.test.util.CriteriaHelper;
 
 /**
  * Test suite for Sync.
@@ -128,15 +126,14 @@ public class SyncTest {
                 // real account rename events instead of the mocks.
                 MockChangeEventChecker eventChecker = new MockChangeEventChecker();
                 eventChecker.insertRenameEvent(oldAccount.name, newAccount.name);
-                SigninHelper.resetAccountRenameEventIndex(mSyncTestRule.getTargetContext());
-                SigninHelper.updateAccountRenameData(
-                        mSyncTestRule.getTargetContext(), eventChecker);
+                SigninHelper.resetAccountRenameEventIndex();
+                SigninHelper.updateAccountRenameData(eventChecker);
 
                 // Tell the fake content resolver that a rename had happen and copy over the sync
                 // settings. This would normally be done by the
                 // SystemSyncTestRule.getSyncContentResolver().
-                mSyncTestRule.getSyncContentResolver().renameAccounts(oldAccount, newAccount,
-                        AndroidSyncSettings.getContractAuthority(mSyncTestRule.getTargetContext()));
+                mSyncTestRule.getSyncContentResolver().renameAccounts(
+                        oldAccount, newAccount, AndroidSyncSettings.getContractAuthority());
 
                 // Inform the AccountTracker, these would normally be done by account validation
                 // or signin. We will only be calling the testing versions of it.
@@ -148,7 +145,7 @@ public class SyncTest {
 
                 // Starts the rename process. Normally, this is triggered by the broadcast
                 // listener as well.
-                SigninHelper.get(mSyncTestRule.getTargetContext()).validateAccountSettings(true);
+                SigninHelper.get().validateAccountSettings(true);
             }
         });
 
@@ -183,8 +180,7 @@ public class SyncTest {
     public void testStopAndStartSyncThroughAndroid() {
         Account account = mSyncTestRule.setUpTestAccountAndSignIn();
 
-        String authority =
-                AndroidSyncSettings.getContractAuthority(mSyncTestRule.getTargetContext());
+        String authority = AndroidSyncSettings.getContractAuthority();
 
         // Disabling Android sync should turn Chrome sync engine off.
         mSyncTestRule.getSyncContentResolver().setSyncAutomatically(account, authority, false);
@@ -227,9 +223,5 @@ public class SyncTest {
         mSyncTestRule.getSyncContentResolver().setMasterSyncAutomatically(false);
         mSyncTestRule.startSync();
         Assert.assertFalse(SyncTestUtil.isSyncRequested());
-    }
-
-    private static ContentViewCore getContentViewCore(ChromeActivity activity) {
-        return activity.getActivityTab().getContentViewCore();
     }
 }

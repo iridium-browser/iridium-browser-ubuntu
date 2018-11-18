@@ -5,6 +5,7 @@
 #include "third_party/blink/renderer/modules/media_controls/elements/media_control_cast_button_element.h"
 
 #include "third_party/blink/public/platform/platform.h"
+#include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/geometry/dom_rect.h"
 #include "third_party/blink/renderer/core/html/media/html_media_element.h"
@@ -91,8 +92,8 @@ const char* MediaControlCastButtonElement::GetNameForHistograms() const {
              : IsOverflowElement() ? "CastOverflowButton" : "CastButton";
 }
 
-void MediaControlCastButtonElement::DefaultEventHandler(Event* event) {
-  if (event->type() == EventTypeNames::click) {
+void MediaControlCastButtonElement::DefaultEventHandler(Event& event) {
+  if (event.type() == EventTypeNames::click) {
     if (is_overlay_button_) {
       Platform::Current()->RecordAction(
           UserMetricsAction("Media.Controls.CastOverlay"));
@@ -113,7 +114,7 @@ void MediaControlCastButtonElement::DefaultEventHandler(Event* event) {
   MediaControlInputElement::DefaultEventHandler(event);
 }
 
-bool MediaControlCastButtonElement::KeepEventInNode(Event* event) {
+bool MediaControlCastButtonElement::KeepEventInNode(const Event& event) const {
   return MediaControlElementsHelper::IsUserInteractionEvent(event);
 }
 

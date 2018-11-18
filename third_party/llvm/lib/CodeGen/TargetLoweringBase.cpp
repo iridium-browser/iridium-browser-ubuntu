@@ -33,6 +33,7 @@
 #include "llvm/CodeGen/TargetLowering.h"
 #include "llvm/CodeGen/TargetOpcodes.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
+#include "llvm/CodeGen/ValueTypes.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/IR/DataLayout.h"
@@ -43,7 +44,6 @@
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
-#include "llvm/IR/ValueTypes.h"
 #include "llvm/Support/BranchProbability.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
@@ -118,7 +118,7 @@ static cl::opt<int> MinPercentageForPredictableBranch(
 void TargetLoweringBase::InitLibcalls(const Triple &TT) {
 #define HANDLE_LIBCALL(code, name) \
   setLibcallName(RTLIB::code, name);
-#include "llvm/CodeGen/RuntimeLibcalls.def"
+#include "llvm/IR/RuntimeLibcalls.def"
 #undef HANDLE_LIBCALL
   // Initialize calling conventions to their default.
   for (int LC = 0; LC < RTLIB::UNKNOWN_LIBCALL; ++LC)
@@ -161,7 +161,8 @@ void TargetLoweringBase::InitLibcalls(const Triple &TT) {
     setLibcallName(RTLIB::FPROUND_F32_F16, "__gnu_f2h_ieee");
   }
 
-  if (TT.isGNUEnvironment() || TT.isOSFuchsia()) {
+  if (TT.isGNUEnvironment() || TT.isOSFuchsia() ||
+      (TT.isAndroid() && !TT.isAndroidVersionLT(9))) {
     setLibcallName(RTLIB::SINCOS_F32, "sincosf");
     setLibcallName(RTLIB::SINCOS_F64, "sincos");
     setLibcallName(RTLIB::SINCOS_F80, "sincosl");
@@ -535,6 +536,7 @@ TargetLoweringBase::TargetLoweringBase(const TargetMachine &tm) : TM(tm) {
   // Perform these initializations only once.
   MaxStoresPerMemset = MaxStoresPerMemcpy = MaxStoresPerMemmove =
       MaxLoadsPerMemcmp = 8;
+  MaxGluedStoresPerMemcpy = 0;
   MaxStoresPerMemsetOptSize = MaxStoresPerMemcpyOptSize =
       MaxStoresPerMemmoveOptSize = MaxLoadsPerMemcmpOptSize = 4;
   UseUnderscoreSetJmp = false;
@@ -620,12 +622,18 @@ void TargetLoweringBase::initActions() {
     setOperationAction(ISD::SUBCARRY, VT, Expand);
     setOperationAction(ISD::SETCCCARRY, VT, Expand);
 
+    // ADDC/ADDE/SUBC/SUBE default to expand.
+    setOperationAction(ISD::ADDC, VT, Expand);
+    setOperationAction(ISD::ADDE, VT, Expand);
+    setOperationAction(ISD::SUBC, VT, Expand);
+    setOperationAction(ISD::SUBE, VT, Expand);
+
     // These default to Expand so they will be expanded to CTLZ/CTTZ by default.
     setOperationAction(ISD::CTLZ_ZERO_UNDEF, VT, Expand);
     setOperationAction(ISD::CTTZ_ZERO_UNDEF, VT, Expand);
 
     setOperationAction(ISD::BITREVERSE, VT, Expand);
-    
+
     // These library functions default to expand.
     setOperationAction(ISD::FROUND, VT, Expand);
     setOperationAction(ISD::FPOWI, VT, Expand);
@@ -659,6 +667,7 @@ void TargetLoweringBase::initActions() {
 
   // These library functions default to expand.
   for (MVT VT : {MVT::f32, MVT::f64, MVT::f128}) {
+    setOperationAction(ISD::FCBRT,      VT, Expand);
     setOperationAction(ISD::FLOG ,      VT, Expand);
     setOperationAction(ISD::FLOG2,      VT, Expand);
     setOperationAction(ISD::FLOG10,     VT, Expand);
@@ -917,7 +926,7 @@ TargetLoweringBase::emitPatchPoint(MachineInstr &InitialMI,
   // STATEPOINT Deopt Spill - live-through, read only, indirect
   // STATEPOINT Deopt Alloca - live-through, read only, direct
   // (We're currently conservative and mark the deopt slots read/write in
-  // practice.) 
+  // practice.)
   // STATEPOINT GC Spill - live-through, read/write, indirect
   // STATEPOINT GC Alloca - live-through, read/write, direct
   // The live-in vs live-through is handled already (the live through ones are
@@ -961,7 +970,7 @@ TargetLoweringBase::emitPatchPoint(MachineInstr &InitialMI,
       MIB.add(MI->getOperand(i));
 
     // Inherit previous memory operands.
-    MIB->setMemRefs(MI->memoperands_begin(), MI->memoperands_end());
+    MIB.cloneMemRefs(*MI);
     assert(MIB->mayLoad() && "Folded a stackmap use to a non-load!");
 
     // Add a new memory operand for this FI.
@@ -991,6 +1000,21 @@ TargetLoweringBase::emitXRayCustomEvent(MachineInstr &MI,
                                         MachineBasicBlock *MBB) const {
   assert(MI.getOpcode() == TargetOpcode::PATCHABLE_EVENT_CALL &&
          "Called emitXRayCustomEvent on the wrong MI!");
+  auto &MF = *MI.getMF();
+  auto MIB = BuildMI(MF, MI.getDebugLoc(), MI.getDesc());
+  for (unsigned OpIdx = 0; OpIdx != MI.getNumOperands(); ++OpIdx)
+    MIB.add(MI.getOperand(OpIdx));
+
+  MBB->insert(MachineBasicBlock::iterator(MI), MIB);
+  MI.eraseFromParent();
+  return MBB;
+}
+
+MachineBasicBlock *
+TargetLoweringBase::emitXRayTypedEvent(MachineInstr &MI,
+                                       MachineBasicBlock *MBB) const {
+  assert(MI.getOpcode() == TargetOpcode::PATCHABLE_TYPED_EVENT_CALL &&
+         "Called emitXRayTypedEvent on the wrong MI!");
   auto &MF = *MI.getMF();
   auto MIB = BuildMI(MF, MI.getDebugLoc(), MI.getDesc());
   for (unsigned OpIdx = 0; OpIdx != MI.getNumOperands(); ++OpIdx)
@@ -1315,7 +1339,8 @@ unsigned TargetLoweringBase::getVectorTypeBreakdown(LLVMContext &Context, EVT VT
 /// type of the given function.  This does not require a DAG or a return value,
 /// and is suitable for use before any DAGs for the function are constructed.
 /// TODO: Move this out of TargetLowering.cpp.
-void llvm::GetReturnInfo(Type *ReturnType, AttributeList attr,
+void llvm::GetReturnInfo(CallingConv::ID CC, Type *ReturnType,
+                         AttributeList attr,
                          SmallVectorImpl<ISD::OutputArg> &Outs,
                          const TargetLowering &TLI, const DataLayout &DL) {
   SmallVector<EVT, 4> ValueVTs;
@@ -1343,9 +1368,9 @@ void llvm::GetReturnInfo(Type *ReturnType, AttributeList attr,
     }
 
     unsigned NumParts =
-        TLI.getNumRegistersForCallingConv(ReturnType->getContext(), VT);
+        TLI.getNumRegistersForCallingConv(ReturnType->getContext(), CC, VT);
     MVT PartVT =
-        TLI.getRegisterTypeForCallingConv(ReturnType->getContext(), VT);
+        TLI.getRegisterTypeForCallingConv(ReturnType->getContext(), CC, VT);
 
     // 'inreg' on function refers to return value
     ISD::ArgFlagsTy Flags = ISD::ArgFlagsTy();
@@ -1388,7 +1413,7 @@ bool TargetLoweringBase::allowsMemoryAccess(LLVMContext &Context,
       *Fast = true;
     return true;
   }
-  
+
   // This is a misaligned access.
   return allowsMisalignedMemoryAccesses(VT, AddrSpace, Alignment, Fast);
 }
@@ -1609,13 +1634,16 @@ Value *TargetLoweringBase::getIRStackGuard(IRBuilder<> &IRB) const {
 // Currently only support "standard" __stack_chk_guard.
 // TODO: add LOAD_STACK_GUARD support.
 void TargetLoweringBase::insertSSPDeclarations(Module &M) const {
-  M.getOrInsertGlobal("__stack_chk_guard", Type::getInt8PtrTy(M.getContext()));
+  if (!M.getNamedValue("__stack_chk_guard"))
+    new GlobalVariable(M, Type::getInt8PtrTy(M.getContext()), false,
+                       GlobalVariable::ExternalLinkage,
+                       nullptr, "__stack_chk_guard");
 }
 
 // Currently only support "standard" __stack_chk_guard.
 // TODO: add LOAD_STACK_GUARD support.
 Value *TargetLoweringBase::getSDagStackGuard(const Module &M) const {
-  return M.getGlobalVariable("__stack_chk_guard", true);
+  return M.getNamedValue("__stack_chk_guard");
 }
 
 Value *TargetLoweringBase::getSSPStackGuardCheck(const Module &M) const {
@@ -1705,7 +1733,7 @@ static int getOpEnabled(bool IsSqrt, EVT VT, StringRef Override) {
     return TargetLoweringBase::ReciprocalEstimate::Unspecified;
 
   SmallVector<StringRef, 4> OverrideVector;
-  SplitString(Override, OverrideVector, ",");
+  Override.split(OverrideVector, ',');
   unsigned NumArgs = OverrideVector.size();
 
   // Check if "all", "none", or "default" was specified.
@@ -1765,7 +1793,7 @@ static int getOpRefinementSteps(bool IsSqrt, EVT VT, StringRef Override) {
     return TargetLoweringBase::ReciprocalEstimate::Unspecified;
 
   SmallVector<StringRef, 4> OverrideVector;
-  SplitString(Override, OverrideVector, ",");
+  Override.split(OverrideVector, ',');
   unsigned NumArgs = OverrideVector.size();
 
   // Check if "all", "default", or "none" was specified.

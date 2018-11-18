@@ -45,6 +45,14 @@ public class LocationBarVoiceRecognitionHandler {
             .EnumeratedHistogramSample VOICE_INTERACTION_FINISH_SOURCE_METRIC =
             new CachedMetrics.EnumeratedHistogramSample("VoiceInteraction.FinishEventSource",
                     VoiceInteractionSource.HISTOGRAM_BOUNDARY);
+    private static final CachedMetrics
+            .EnumeratedHistogramSample VOICE_INTERACTION_DISMISSED_SOURCE_METRIC =
+            new CachedMetrics.EnumeratedHistogramSample("VoiceInteraction.DismissedEventSource",
+                    VoiceInteractionSource.HISTOGRAM_BOUNDARY);
+    private static final CachedMetrics
+            .EnumeratedHistogramSample VOICE_INTERACTION_FAILURE_SOURCE_METRIC =
+            new CachedMetrics.EnumeratedHistogramSample("VoiceInteraction.FailureEventSource",
+                    VoiceInteractionSource.HISTOGRAM_BOUNDARY);
     private static final CachedMetrics.BooleanHistogramSample VOICE_SEARCH_RESULT_METRIC =
             new CachedMetrics.BooleanHistogramSample("VoiceInteraction.VoiceSearchResult");
     // There's no percentage histogram sample in CachedMetrics, so we mimic what that does
@@ -99,11 +107,14 @@ public class LocationBarVoiceRecognitionHandler {
         ToolbarDataProvider getToolbarDataProvider();
 
         /**
-         * Grabs a reference to the autocomplete controller from the location bar.
-         * @return The {@link AutocompleteController} currently in use by the
+         * Grabs a reference to the autocomplete coordinator from the location bar.
+         * @return The {@link AutocompleteCoordinator} currently in use by the
          *         {@link LocationBarLayout}.
          */
-        AutocompleteController getAutocompleteController();
+        // TODO(tedchoc): Limit the visibility of what is passed in here.  This does not need the
+        //                full coordinator.  It simply needs a way to pass voice suggestions to the
+        //                AutocompleteController.
+        AutocompleteCoordinator getAutocompleteCoordinator();
 
         /**
          * @return The current {@link WindowAndroid}.
@@ -147,8 +158,8 @@ public class LocationBarVoiceRecognitionHandler {
         @Override
         public void didFinishNavigation(String url, boolean isInMainFrame, boolean isErrorPage,
                 boolean hasCommitted, boolean isSameDocument, boolean isFragmentNavigation,
-                @Nullable Integer pageTransition, int errorCode, String errorDescription,
-                int httpStatusCode) {
+                boolean isRendererInitiated, boolean isDownload, @Nullable Integer pageTransition,
+                int errorCode, String errorDescription, int httpStatusCode) {
             if (hasCommitted && isInMainFrame && !isErrorPage) setReceivedUserGesture(url);
             destroy();
         }
@@ -168,11 +179,22 @@ public class LocationBarVoiceRecognitionHandler {
         // WindowAndroid.IntentCallback implementation:
         @Override
         public void onIntentCompleted(WindowAndroid window, int resultCode, Intent data) {
-            if (resultCode != Activity.RESULT_OK || data.getExtras() == null) return;
+            if (resultCode != Activity.RESULT_OK || data.getExtras() == null) {
+                if (resultCode == Activity.RESULT_CANCELED) {
+                    recordVoiceSearchDismissedEventSource(mSource);
+                } else {
+                    recordVoiceSearchFailureEventSource(mSource);
+                }
+                return;
+            }
 
-            AutocompleteController autocompleteController = mDelegate.getAutocompleteController();
-            assert autocompleteController != null;
-            VoiceResult topResult = autocompleteController.onVoiceResults(data.getExtras());
+            AutocompleteCoordinator autocompleteCoordinator =
+                    mDelegate.getAutocompleteCoordinator();
+            assert autocompleteCoordinator != null;
+
+            recordVoiceSearchFinishEventSource(mSource);
+
+            VoiceResult topResult = autocompleteCoordinator.onVoiceResults(data.getExtras());
             if (topResult == null) {
                 recordVoiceSearchResult(false);
                 return;
@@ -184,9 +206,6 @@ public class LocationBarVoiceRecognitionHandler {
                 return;
             }
 
-            // Record metrics of where the voice search was started and the top result confidence
-            // value.
-            recordVoiceSearchFinishEventSource(mSource);
             recordVoiceSearchResult(true);
             recordVoiceSearchConfidenceValue(topResult.getConfidence());
 
@@ -264,6 +283,7 @@ public class LocationBarVoiceRecognitionHandler {
             // Requery whether or not the recognition intent can be handled.
             isRecognitionIntentPresent(activity, false);
             mDelegate.updateMicButtonState();
+            recordVoiceSearchFailureEventSource(source);
         }
     }
 
@@ -322,6 +342,26 @@ public class LocationBarVoiceRecognitionHandler {
     @VisibleForTesting
     protected void recordVoiceSearchFinishEventSource(@VoiceInteractionSource int source) {
         VOICE_INTERACTION_FINISH_SOURCE_METRIC.record(source);
+    }
+
+    /**
+     * Records the source of a dismissed voice search.
+     * @param source The source of the voice search, such as NTP or omnibox. Values taken from the
+     *        enum VoiceInteractionEventSource in enums.xml.
+     */
+    @VisibleForTesting
+    protected void recordVoiceSearchDismissedEventSource(@VoiceInteractionSource int source) {
+        VOICE_INTERACTION_DISMISSED_SOURCE_METRIC.record(source);
+    }
+
+    /**
+     * Records the source of a failed voice search.
+     * @param source The source of the voice search, such as NTP or omnibox. Values taken from the
+     *        enum VoiceInteractionEventSource in enums.xml.
+     */
+    @VisibleForTesting
+    protected void recordVoiceSearchFailureEventSource(@VoiceInteractionSource int source) {
+        VOICE_INTERACTION_FAILURE_SOURCE_METRIC.record(source);
     }
 
     /**

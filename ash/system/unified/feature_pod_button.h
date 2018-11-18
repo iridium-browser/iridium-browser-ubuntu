@@ -11,6 +11,7 @@
 #include "ui/views/view.h"
 
 namespace views {
+class ImageView;
 class Label;
 }
 
@@ -34,6 +35,7 @@ class FeaturePodIconButton : public views::ImageButton {
   std::unique_ptr<views::InkDropHighlight> CreateInkDropHighlight()
       const override;
   std::unique_ptr<views::InkDropMask> CreateInkDropMask() const override;
+  void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
 
   bool toggled() const { return toggled_; }
 
@@ -57,7 +59,14 @@ class FeaturePodLabelButton : public views::Button {
   // See FeaturePodButton::SetSubLabel.
   void SetSubLabel(const base::string16& sub_label);
 
+  // Show arrow to indicate that the feature has a detailed view.
+  // See FeaturePodButton::ShowDetailedViewArrow.
+  void ShowDetailedViewArrow();
+
   // views::Button:
+  void Layout() override;
+  void OnEnabledChanged() override;
+  gfx::Size CalculatePreferredSize() const override;
   std::unique_ptr<views::InkDrop> CreateInkDrop() override;
   std::unique_ptr<views::InkDropRipple> CreateInkDropRipple() const override;
   std::unique_ptr<views::InkDropHighlight> CreateInkDropHighlight()
@@ -65,9 +74,13 @@ class FeaturePodLabelButton : public views::Button {
   std::unique_ptr<views::InkDropMask> CreateInkDropMask() const override;
 
  private:
+  // Layout |child| in horizontal center with its vertical origin set to |y|.
+  void LayoutInCenter(views::View* child, int y);
+
   // Owned by views hierarchy.
   views::Label* const label_;
   views::Label* const sub_label_;
+  views::ImageView* const detailed_view_arrow_;
 
   DISALLOW_COPY_AND_ASSIGN(FeaturePodLabelButton);
 };
@@ -92,13 +105,31 @@ class ASH_EXPORT FeaturePodButton : public views::View,
   // Set the text of sub-label shown below the label.
   void SetSubLabel(const base::string16& sub_label);
 
+  // Set the tooltip text of the icon button.
+  void SetIconTooltip(const base::string16& text);
+
+  // Set the tooltip text of the label button.
+  void SetLabelTooltip(const base::string16& text);
+
+  // Convenience method to set both icon and label tooltip texts.
+  void SetIconAndLabelTooltips(const base::string16& text);
+
+  // Show arrow to indicate that the feature has a detailed view.
+  void ShowDetailedViewArrow();
+
+  // Remove the label button from keyboard focus chain. This is useful when
+  // the icon button and the label button has the same action.
+  void DisableLabelButtonFocus();
+
   // Change the toggled state. If toggled, the background color of the circle
   // will change.
   void SetToggled(bool toggled);
   bool IsToggled() const { return icon_button_->toggled(); }
 
-  // Change the expanded state. If not expanded, the labels are not shown.
-  void SetExpanded(bool expanded);
+  // Change the expanded state. 0.0 if collapsed, and 1.0 if expanded.
+  // Otherwise, it shows intermediate state. In the collapsed state, the labels
+  // are not shown.
+  void SetExpandedAmount(double expanded_amount);
 
   // Only called by the container. Same as SetVisible but doesn't change
   // |visible_preferred_| flag.
@@ -106,6 +137,9 @@ class ASH_EXPORT FeaturePodButton : public views::View,
 
   // views::View:
   void SetVisible(bool visible) override;
+  bool HasFocus() const override;
+  void RequestFocus() override;
+  void OnEnabledChanged() override;
 
   // views::ButtonListener:
   void ButtonPressed(views::Button* sender, const ui::Event& event) override;

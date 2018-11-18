@@ -482,9 +482,9 @@ defm VSELVS : vsel_inst<"vs", 0b01, 6>;
 multiclass vmaxmin_inst<string op, bit opc, SDNode SD> {
   let DecoderNamespace = "VFPV8", PostEncoderMethod = "" in {
     def H : AHbInp<0b11101, 0b00, opc,
-                   (outs SPR:$Sd), (ins SPR:$Sn, SPR:$Sm),
+                   (outs HPR:$Sd), (ins HPR:$Sn, HPR:$Sm),
                    NoItinerary, !strconcat(op, ".f16\t$Sd, $Sn, $Sm"),
-                   []>,
+                   [(set HPR:$Sd, (SD HPR:$Sn, HPR:$Sm))]>,
                    Requires<[HasFullFP16]>;
 
     def S : ASbInp<0b11101, 0b00, opc,
@@ -725,9 +725,11 @@ def VCVTBHD : ADuI<0b11101, 0b11, 0b0010, 0b01, 0,
 }
 
 def : FullFP16Pat<(f64 (fpextend HPR:$Sm)),
-                  (VCVTBHD (COPY_TO_REGCLASS HPR:$Sm, SPR))>;
+                  (VCVTBHD (COPY_TO_REGCLASS HPR:$Sm, SPR))>,
+                  Requires<[HasFPARMv8, HasDPVFP]>;
 def : FP16Pat<(f64 (f16_to_fp GPR:$a)),
-              (VCVTBHD (COPY_TO_REGCLASS GPR:$a, SPR))>;
+              (VCVTBHD (COPY_TO_REGCLASS GPR:$a, SPR))>,
+              Requires<[HasFPARMv8, HasDPVFP]>;
 
 def VCVTBDH : ADuI<0b11101, 0b11, 0b0011, 0b01, 0,
                    (outs SPR:$Sd), (ins DPR:$Dm),
@@ -746,9 +748,11 @@ def VCVTBDH : ADuI<0b11101, 0b11, 0b0011, 0b01, 0,
 }
 
 def : FullFP16Pat<(f16 (fpround DPR:$Dm)),
-                  (COPY_TO_REGCLASS (VCVTBDH DPR:$Dm), HPR)>;
+                  (COPY_TO_REGCLASS (VCVTBDH DPR:$Dm), HPR)>,
+                  Requires<[HasFPARMv8, HasDPVFP]>;
 def : FP16Pat<(fp_to_f16 (f64 DPR:$a)),
-              (i32 (COPY_TO_REGCLASS (VCVTBDH DPR:$a), GPR))>;
+              (i32 (COPY_TO_REGCLASS (VCVTBDH DPR:$a), GPR))>,
+                   Requires<[HasFPARMv8, HasDPVFP]>;
 
 def VCVTTHD : ADuI<0b11101, 0b11, 0b0010, 0b11, 0,
                    (outs DPR:$Dd), (ins SPR:$Sm),
@@ -977,7 +981,7 @@ multiclass vrint_inst_anpm<string opc, bits<2> rm,
 }
 
 defm VRINTA : vrint_inst_anpm<"a", 0b00, fround>;
-defm VRINTN : vrint_inst_anpm<"n", 0b01>;
+defm VRINTN : vrint_inst_anpm<"n", 0b01, int_arm_neon_vrintn>;
 defm VRINTP : vrint_inst_anpm<"p", 0b10, fceil>;
 defm VRINTM : vrint_inst_anpm<"m", 0b11, ffloor>;
 
@@ -999,6 +1003,7 @@ def VSQRTH : AHuI<0b11101, 0b11, 0b0001, 0b11, 0,
                   []>;
 
 let hasSideEffects = 0 in {
+let isMoveReg = 1 in {
 def VMOVD  : ADuI<0b11101, 0b11, 0b0000, 0b01, 0,
                   (outs DPR:$Dd), (ins DPR:$Dm),
                   IIC_fpUNA64, "vmov", ".f64\t$Dd, $Dm", []>;
@@ -1006,6 +1011,7 @@ def VMOVD  : ADuI<0b11101, 0b11, 0b0000, 0b01, 0,
 def VMOVS  : ASuI<0b11101, 0b11, 0b0000, 0b01, 0,
                   (outs SPR:$Sd), (ins SPR:$Sm),
                   IIC_fpUNA32, "vmov", ".f32\t$Sd, $Sm", []>;
+} // isMoveReg
 
 let PostEncoderMethod = "", DecoderNamespace = "VFPV8" in {
 def VMOVH  : ASuInp<0b11101, 0b11, 0b0000, 0b01, 0,
@@ -1024,6 +1030,7 @@ def VINSH  : ASuInp<0b11101, 0b11, 0b0000, 0b11, 0,
 // FP <-> GPR Copies.  Int <-> FP Conversions.
 //
 
+let isMoveReg = 1 in {
 def VMOVRS : AVConv2I<0b11100001, 0b1010,
                       (outs GPR:$Rt), (ins SPR:$Sn),
                       IIC_fpMOVSI, "vmov", "\t$Rt, $Sn",
@@ -1069,6 +1076,7 @@ def VMOVSR : AVConv4I<0b11100000, 0b1010,
   // pipelines.
   let D = VFPNeonDomain;
 }
+} // isMoveReg
 def : Pat<(arm_vmovsr GPR:$Rt), (VMOVSR GPR:$Rt)>, Requires<[HasVFP2, UseVMOVSR]>;
 
 let hasSideEffects = 0 in {

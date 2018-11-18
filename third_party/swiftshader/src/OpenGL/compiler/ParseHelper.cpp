@@ -224,6 +224,14 @@ void TParseContext::warning(const TSourceLoc& loc,
 						   srcLoc, reason, token, extraInfo);
 }
 
+void TParseContext::info(const TSourceLoc& loc,
+							const char* reason, const char* token,
+							const char* extraInfo) {
+	pp::SourceLocation srcLoc(loc.first_file, loc.first_line);
+	mDiagnostics.writeInfo(pp::Diagnostics::PP_INFO,
+						   srcLoc, reason, token, extraInfo);
+}
+
 void TParseContext::trace(const char* str)
 {
 	mDiagnostics.writeDebug(str);
@@ -3597,7 +3605,9 @@ TIntermTyped *TParseContext::addFunctionCallOrMethod(TFunction *fnCall, TIntermN
 					//
 					// Treat it like a built-in unary operator.
 					//
-					callNode = createUnaryMath(op, paramNode->getAsTyped(), loc, &fnCandidate->getReturnType());
+					TIntermNode *operand = paramNode->getAsAggregate()->getSequence()[0];
+					callNode = createUnaryMath(op, operand->getAsTyped(), loc, &fnCandidate->getReturnType());
+
 					if(callNode == nullptr)
 					{
 						std::stringstream extraInfoStream;
@@ -3619,21 +3629,45 @@ TIntermTyped *TParseContext::addFunctionCallOrMethod(TFunction *fnCall, TIntermN
 
 					callNode = aggregate;
 
-					if(fnCandidate->getParamCount() == 2)
+					if(op == EOpClamp)
 					{
+						// Special case for clamp -- try to fold it as min(max(t, minVal), maxVal)
 						TIntermSequence &parameters = paramNode->getAsAggregate()->getSequence();
-						TIntermTyped *left = parameters[0]->getAsTyped();
-						TIntermTyped *right = parameters[1]->getAsTyped();
+						TIntermConstantUnion *valConstant = parameters[0]->getAsTyped()->getAsConstantUnion();
+						TIntermConstantUnion *minConstant = parameters[1]->getAsTyped()->getAsConstantUnion();
+						TIntermConstantUnion *maxConstant = parameters[2]->getAsTyped()->getAsConstantUnion();
 
-						TIntermConstantUnion *leftTempConstant = left->getAsConstantUnion();
-						TIntermConstantUnion *rightTempConstant = right->getAsConstantUnion();
-						if (leftTempConstant && rightTempConstant)
+						if (valConstant && minConstant && maxConstant)
 						{
-							TIntermTyped *typedReturnNode = leftTempConstant->fold(op, rightTempConstant, infoSink());
-
-							if(typedReturnNode)
+							TIntermTyped *typedReturnNode = valConstant->fold(EOpMax, minConstant, infoSink());
+							if (typedReturnNode && typedReturnNode->getAsConstantUnion())
+							{
+								typedReturnNode = maxConstant->fold(EOpMin, typedReturnNode->getAsConstantUnion(), infoSink());
+							}
+							if (typedReturnNode)
 							{
 								callNode = typedReturnNode;
+							}
+						}
+					}
+					else
+					{
+						if(fnCandidate->getParamCount() == 2)
+						{
+							TIntermSequence &parameters = paramNode->getAsAggregate()->getSequence();
+							TIntermTyped *left = parameters[0]->getAsTyped();
+							TIntermTyped *right = parameters[1]->getAsTyped();
+
+							TIntermConstantUnion *leftTempConstant = left->getAsConstantUnion();
+							TIntermConstantUnion *rightTempConstant = right->getAsConstantUnion();
+							if (leftTempConstant && rightTempConstant)
+							{
+								TIntermTyped *typedReturnNode = leftTempConstant->fold(op, rightTempConstant, infoSink());
+
+								if(typedReturnNode)
+								{
+									callNode = typedReturnNode;
+								}
 							}
 						}
 					}

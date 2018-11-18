@@ -8,12 +8,12 @@ import android.accounts.AccountManager;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
-import android.os.AsyncTask;
 
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.library_loader.ProcessInitException;
+import org.chromium.base.task.AsyncTask;
 import org.chromium.chrome.browser.ChromeApplication;
 import org.chromium.chrome.browser.init.BrowserParts;
 import org.chromium.chrome.browser.init.ChromeBrowserInitializer;
@@ -34,10 +34,10 @@ public class AccountsChangedReceiver extends BroadcastReceiver {
         if (!AccountManager.LOGIN_ACCOUNTS_CHANGED_ACTION.equals(intent.getAction())) return;
 
         final Context appContext = context.getApplicationContext();
-        AsyncTask<Void, Void, Void> task = new AsyncTask<Void, Void, Void>() {
+        AsyncTask<Void> task = new AsyncTask<Void>() {
             @Override
-            protected Void doInBackground(Void... params) {
-                SigninHelper.updateAccountRenameData(appContext);
+            protected Void doInBackground() {
+                SigninHelper.updateAccountRenameData();
                 return null;
             }
 
@@ -46,7 +46,7 @@ public class AccountsChangedReceiver extends BroadcastReceiver {
                 continueHandleAccountChangeIfNeeded(appContext);
             }
         };
-        task.execute();
+        task.executeOnExecutor(AsyncTask.SERIAL_EXECUTOR);
     }
 
     private void continueHandleAccountChangeIfNeeded(final Context context) {
@@ -57,7 +57,7 @@ public class AccountsChangedReceiver extends BroadcastReceiver {
             startBrowserIfNeededAndValidateAccounts(context);
         } else {
             // Notify SigninHelper of changed accounts (via shared prefs).
-            SigninHelper.markAccountsChangedPref(context);
+            SigninHelper.markAccountsChangedPref();
         }
     }
 
@@ -68,7 +68,7 @@ public class AccountsChangedReceiver extends BroadcastReceiver {
                 ThreadUtils.runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
-                        SigninHelper.get(context).validateAccountSettings(true);
+                        SigninHelper.get().validateAccountSettings(true);
                     }
                 });
             }
@@ -77,7 +77,7 @@ public class AccountsChangedReceiver extends BroadcastReceiver {
             public void onStartupFailure() {
                 // Startup failed. So notify SigninHelper of changed accounts via
                 // shared prefs.
-                SigninHelper.markAccountsChangedPref(context);
+                SigninHelper.markAccountsChangedPref();
             }
         };
         try {

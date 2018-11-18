@@ -8,7 +8,7 @@
 #include <memory>
 
 #include "base/mac/foundation_util.h"
-#include "components/google/core/browser/google_util.h"
+#include "components/google/core/common/google_util.h"
 #include "components/prefs/pref_member.h"
 #include "components/prefs/pref_service.h"
 #include "components/translate/core/browser/translate_pref_names.h"
@@ -17,9 +17,9 @@
 #import "ios/chrome/browser/translate/chrome_ios_translate_client.h"
 #import "ios/chrome/browser/ui/collection_view/cells/MDCCollectionViewCell+Chrome.h"
 #import "ios/chrome/browser/ui/collection_view/cells/collection_view_footer_item.h"
-#import "ios/chrome/browser/ui/collection_view/cells/collection_view_switch_item.h"
-#import "ios/chrome/browser/ui/collection_view/cells/collection_view_text_item.h"
 #import "ios/chrome/browser/ui/collection_view/collection_view_model.h"
+#import "ios/chrome/browser/ui/settings/cells/settings_switch_item.h"
+#import "ios/chrome/browser/ui/settings/cells/settings_text_item.h"
 #import "ios/chrome/browser/ui/settings/settings_utils.h"
 #import "ios/chrome/browser/ui/settings/utils/pref_backed_boolean.h"
 #include "ios/chrome/browser/ui/uikit_ui_util.h"
@@ -49,7 +49,7 @@ typedef NS_ENUM(NSInteger, ItemType) {
 };
 
 const char kTranslateLearnMoreUrl[] =
-    "https://support.google.com/chrome/answer/3214105?p=mobile_translate";
+    "https://support.google.com/chrome/answer/3214105?p=mobile_translate&ios=1";
 NSString* const kTranslateSettingsCategory = @"ChromeTranslateSettings";
 
 }  // namespace
@@ -59,7 +59,7 @@ NSString* const kTranslateSettingsCategory = @"ChromeTranslateSettings";
   PrefService* _prefs;  // weak
   PrefBackedBoolean* _translationEnabled;
   // The item related to the switch for the translation setting.
-  CollectionViewSwitchItem* _translationItem;
+  SettingsSwitchItem* _translationItem;
 }
 
 @end
@@ -89,10 +89,6 @@ NSString* const kTranslateSettingsCategory = @"ChromeTranslateSettings";
   return self;
 }
 
-- (void)dealloc {
-  [_translationEnabled setObserver:nil];
-}
-
 #pragma mark - SettingsRootCollectionViewController
 
 - (void)loadModel {
@@ -102,17 +98,16 @@ NSString* const kTranslateSettingsCategory = @"ChromeTranslateSettings";
   // Translate Section
   [model addSectionWithIdentifier:SectionIdentifierTranslate];
   _translationItem =
-      [[CollectionViewSwitchItem alloc] initWithType:ItemTypeTranslate];
+      [[SettingsSwitchItem alloc] initWithType:ItemTypeTranslate];
   _translationItem.text = l10n_util::GetNSString(IDS_IOS_TRANSLATE_SETTING);
   _translationItem.on = [_translationEnabled value];
   [model addItem:_translationItem
       toSectionWithIdentifier:SectionIdentifierTranslate];
 
-  CollectionViewTextItem* resetTranslate =
-      [[CollectionViewTextItem alloc] initWithType:ItemTypeResetTranslate];
+  SettingsTextItem* resetTranslate =
+      [[SettingsTextItem alloc] initWithType:ItemTypeResetTranslate];
   resetTranslate.text = l10n_util::GetNSString(IDS_IOS_TRANSLATE_SETTING_RESET);
   resetTranslate.accessibilityTraits |= UIAccessibilityTraitButton;
-  resetTranslate.textFont = [MDCTypography body2Font];
   [model addItem:resetTranslate
       toSectionWithIdentifier:SectionIdentifierTranslate];
 
@@ -120,6 +115,7 @@ NSString* const kTranslateSettingsCategory = @"ChromeTranslateSettings";
   [model addSectionWithIdentifier:SectionIdentifierFooter];
   CollectionViewFooterItem* footer =
       [[CollectionViewFooterItem alloc] initWithType:ItemTypeFooter];
+  footer.cellStyle = CollectionViewCellStyle::kUIKit;
   footer.text = l10n_util::GetNSString(IDS_IOS_TRANSLATE_SETTING_DESCRIPTION);
   footer.linkURL = google_util::AppendGoogleLocaleParam(
       GURL(kTranslateLearnMoreUrl),
@@ -139,8 +135,8 @@ NSString* const kTranslateSettingsCategory = @"ChromeTranslateSettings";
 
   switch (itemType) {
     case ItemTypeTranslate: {
-      CollectionViewSwitchCell* switchCell =
-          base::mac::ObjCCastStrict<CollectionViewSwitchCell>(cell);
+      SettingsSwitchCell* switchCell =
+          base::mac::ObjCCastStrict<SettingsSwitchCell>(cell);
       [switchCell.switchView addTarget:self
                                 action:@selector(translateToggled:)
                       forControlEvents:UIControlEventValueChanged];
@@ -244,11 +240,11 @@ NSString* const kTranslateSettingsCategory = @"ChromeTranslateSettings";
       indexPathForItemType:ItemTypeTranslate
          sectionIdentifier:SectionIdentifierTranslate];
 
-  CollectionViewSwitchItem* switchItem =
-      base::mac::ObjCCastStrict<CollectionViewSwitchItem>(
+  SettingsSwitchItem* switchItem =
+      base::mac::ObjCCastStrict<SettingsSwitchItem>(
           [self.collectionViewModel itemAtIndexPath:switchPath]);
-  CollectionViewSwitchCell* switchCell =
-      base::mac::ObjCCastStrict<CollectionViewSwitchCell>(
+  SettingsSwitchCell* switchCell =
+      base::mac::ObjCCastStrict<SettingsSwitchCell>(
           [self.collectionView cellForItemAtIndexPath:switchPath]);
 
   DCHECK_EQ(switchCell.switchView, sender);

@@ -39,7 +39,7 @@ class PresubmitTest(unittest.TestCase):
 
     @mock.patch('subprocess.Popen')
     def testCheckChangeOnUploadWithBlinkAndChromiumFiles(self, _):
-        """This verifies that CheckChangeOnUpload will only call check-webkit-style
+        """This verifies that CheckChangeOnUpload will only call check_blink_style.py
         on non-test files.
         """
         diff_file_blink_h = ['some diff']
@@ -64,22 +64,41 @@ class PresubmitTest(unittest.TestCase):
     @mock.patch('subprocess.Popen')
     def testCheckChangeOnUploadWithEmptyAffectedFileList(self, _):
         """This verifies that CheckChangeOnUpload will skip calling
-        check-webkit-style if the affected file list is empty.
+        check_blink_style.py if the affected file list is empty.
         """
         diff_file_chromium1_h = ['some diff']
         diff_file_chromium2_h = ['another diff']
         diff_file_layout_test_html = ['more diff']
         mock_input_api = MockInputApi()
-        mock_input_api.files = [
-            MockAffectedFile('first_file_chromium.h', diff_file_chromium1_h),
-            MockAffectedFile('second_file_chromium.h', diff_file_chromium2_h),
-            MockAffectedFile('LayoutTests/some_tests.html', diff_file_layout_test_html)
-        ]
+        mock_input_api.files = []
         # Access to a protected member _CheckStyle
         # pylint: disable=W0212
         PRESUBMIT._CheckStyle(mock_input_api, MockOutputApi())
-        # pylint: disable=E1101
-        subprocess.Popen.assert_not_called()
+        self.assertEqual(0, subprocess.Popen.call_count)
+
+    def test_FilterPaths(self):
+        """This verifies that _FilterPaths removes expected paths."""
+        diff_file_chromium1_h = ['some diff']
+        diff_web_tests_html = ['more diff']
+        diff_presubmit = ['morer diff']
+        diff_test_expectations = ['morest diff']
+        mock_input_api = MockInputApi()
+        mock_input_api.files = [
+            MockAffectedFile('file_chromium1.h', diff_file_chromium1_h),
+            MockAffectedFile('web_tests/some_tests.html', diff_web_tests_html),
+            MockAffectedFile('web_tests/TestExpectations', diff_test_expectations),
+            MockAffectedFile('blink/PRESUBMIT', diff_presubmit),
+        ]
+        # Access to a protected member _FilterPaths
+        # pylint: disable=W0212
+        filtered = PRESUBMIT._FilterPaths(mock_input_api)
+        self.assertEqual(2, len(filtered))
+        self.assertEqual(
+            mock_input_api.os_path.join('..', '..', 'file_chromium1.h'),
+            filtered[0])
+        self.assertEqual(
+            mock_input_api.os_path.join('..', '..', 'web_tests/TestExpectations'),
+            filtered[1])
 
     def testCheckPublicHeaderWithBlinkMojo(self):
         """This verifies that _CheckForWrongMojomIncludes detects -blink mojo
@@ -124,6 +143,8 @@ class CxxDependencyTest(unittest.TestCase):
         'gfx::ColorSpace',
         'gfx::CubicBezier',
         'gfx::ICCProfile',
+        'gfx::Point',
+        'gfx::Rect',
         'gfx::ScrollOffset',
         'scoped_refptr<base::SingleThreadTaskRunner>',
     ]
@@ -131,8 +152,7 @@ class CxxDependencyTest(unittest.TestCase):
         'GURL',
         'base::Callback<void()>',
         'content::RenderFrame',
-        'gfx::Point',
-        'gfx::Rect',
+        'gfx::Canvas',
         'net::IPEndPoint',
         'ui::Clipboard',
     ]

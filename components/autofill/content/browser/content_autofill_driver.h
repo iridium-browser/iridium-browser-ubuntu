@@ -15,7 +15,7 @@
 #include "components/autofill/core/browser/autofill_driver.h"
 #include "components/autofill/core/browser/autofill_external_delegate.h"
 #include "components/autofill/core/browser/autofill_manager.h"
-#include "mojo/public/cpp/bindings/binding.h"
+#include "mojo/public/cpp/bindings/associated_binding.h"
 
 namespace content {
 class NavigationHandle;
@@ -46,11 +46,13 @@ class ContentAutofillDriver : public AutofillDriver,
   static ContentAutofillDriver* GetForRenderFrameHost(
       content::RenderFrameHost* render_frame_host);
 
-  void BindRequest(mojom::AutofillDriverRequest request);
+  void BindRequest(mojom::AutofillDriverAssociatedRequest request);
 
   // AutofillDriver:
   bool IsIncognito() const override;
+  bool IsInMainFrame() const override;
   net::URLRequestContextGetter* GetURLRequestContext() override;
+  scoped_refptr<network::SharedURLLoaderFactory> GetURLLoaderFactory() override;
   bool RendererIsAvailable() override;
   void SendFormDataToRenderer(int query_id,
                               RendererFormDataAction action,
@@ -61,7 +63,7 @@ class ContentAutofillDriver : public AutofillDriver,
       const std::vector<FormStructure*>& forms) override;
   void RendererShouldAcceptDataListSuggestion(
       const base::string16& value) override;
-  void RendererShouldClearFilledForm() override;
+  void RendererShouldClearFilledSection() override;
   void RendererShouldClearPreviewedForm() override;
   void RendererShouldFillFieldWithValue(const base::string16& value) override;
   void RendererShouldPreviewFieldWithValue(
@@ -91,7 +93,8 @@ class ContentAutofillDriver : public AutofillDriver,
   void QueryFormFieldAutofill(int32_t id,
                               const FormData& form,
                               const FormFieldData& field,
-                              const gfx::RectF& bounding_box) override;
+                              const gfx::RectF& bounding_box,
+                              bool autoselect_first_suggestion) override;
   void HidePopup() override;
   void FocusNoLongerOnForm() override;
   void FocusOnFormField(const FormData& form,
@@ -116,7 +119,7 @@ class ContentAutofillDriver : public AutofillDriver,
   AutofillManager* autofill_manager() { return autofill_manager_; }
   content::RenderFrameHost* render_frame_host() { return render_frame_host_; }
 
-  const mojom::AutofillAgentPtr& GetAutofillAgent();
+  const mojom::AutofillAgentAssociatedPtr& GetAutofillAgent();
 
   // Methods forwarded to key_press_handler_manager_.
   void RegisterKeyPressHandler(
@@ -158,9 +161,9 @@ class ContentAutofillDriver : public AutofillDriver,
 
   KeyPressHandlerManager key_press_handler_manager_;
 
-  mojo::Binding<mojom::AutofillDriver> binding_;
+  mojo::AssociatedBinding<mojom::AutofillDriver> binding_;
 
-  mojom::AutofillAgentPtr autofill_agent_;
+  mojom::AutofillAgentAssociatedPtr autofill_agent_;
 };
 
 }  // namespace autofill

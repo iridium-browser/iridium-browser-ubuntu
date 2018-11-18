@@ -13,6 +13,7 @@
 #include <windows.h>
 
 #include <memory>
+#include <vector>
 
 #include "device/gamepad/abstract_haptic_gamepad.h"
 #include "device/gamepad/dualshock4_controller_win.h"
@@ -37,9 +38,9 @@ class RawInputGamepadDeviceWin : public AbstractHapticGamepad {
   static bool IsGamepadUsageId(uint16_t usage);
 
   int GetSourceId() const { return source_id_; }
-  int GetVendorId() const { return vendor_id_; }
-  int GetVersionNumber() const { return version_number_; }
-  int GetProductId() const { return product_id_; }
+  uint16_t GetVendorId() const { return vendor_id_; }
+  uint16_t GetVersionNumber() const { return version_number_; }
+  uint16_t GetProductId() const { return product_id_; }
   std::wstring GetDeviceName() const { return name_; }
   std::wstring GetProductString() const { return product_string_; }
 
@@ -87,6 +88,12 @@ class RawInputGamepadDeviceWin : public AbstractHapticGamepad {
   // on the device.
   bool QueryDeviceCapabilities();
   void QueryButtonCapabilities(uint16_t button_count);
+  void QueryNormalButtonCapabilities(HIDP_BUTTON_CAPS button_caps[],
+                                     uint16_t button_count,
+                                     std::vector<bool>* button_indices_used);
+  void QuerySpecialButtonCapabilities(HIDP_BUTTON_CAPS button_caps[],
+                                      uint16_t button_count,
+                                      std::vector<bool>* button_indices_used);
   void QueryAxisCapabilities(uint16_t axis_count);
 
   // True if the device described by this object is a valid RawInput gamepad.
@@ -98,22 +105,26 @@ class RawInputGamepadDeviceWin : public AbstractHapticGamepad {
   // The index assigned to this gamepad by the data fetcher.
   int source_id_ = 0;
 
+  // The last time the pad state was updated.
+  int64_t last_update_timestamp_;
+
   // Functions loaded from hid.dll. Not owned.
   HidDllFunctionsWin* hid_functions_ = nullptr;
 
-  // The report ID incremented each time an input message is received for this
-  // device. It is included in the pad info in place of a timestamp.
-  uint32_t report_id_ = 0;
-
-  uint32_t vendor_id_ = 0;
-  uint32_t product_id_ = 0;
-  uint32_t version_number_ = 0;
+  uint16_t vendor_id_ = 0;
+  uint16_t product_id_ = 0;
+  uint16_t version_number_ = 0;
   uint16_t usage_ = 0;
   std::wstring name_;
   std::wstring product_string_;
 
   size_t buttons_length_ = 0;
   bool buttons_[Gamepad::kButtonsLengthCap];
+
+  // Mapping from "Special" usage index (defined by the kSpecialUsages table)
+  // to an index within the |buttons_| array, or -1 if the special usage is not
+  // mapped for this device.
+  std::vector<int> special_button_map_;
 
   size_t axes_length_ = 0;
   RawGamepadAxis axes_[Gamepad::kAxesLengthCap];

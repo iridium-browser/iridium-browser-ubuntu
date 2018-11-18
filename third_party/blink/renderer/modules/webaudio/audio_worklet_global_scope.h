@@ -7,7 +7,7 @@
 
 #include "third_party/blink/renderer/bindings/core/v8/script_value.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
-#include "third_party/blink/renderer/core/workers/threaded_worklet_global_scope.h"
+#include "third_party/blink/renderer/core/workers/worklet_global_scope.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_param_descriptor.h"
 #include "third_party/blink/renderer/platform/audio/audio_array.h"
@@ -46,14 +46,12 @@ class MODULES_EXPORT ProcessorCreationParams final {
 
 // This is constructed and destroyed on a worker thread, and all methods also
 // must be called on the worker thread.
-class MODULES_EXPORT AudioWorkletGlobalScope final
-    : public ThreadedWorkletGlobalScope {
+class MODULES_EXPORT AudioWorkletGlobalScope final : public WorkletGlobalScope {
   DEFINE_WRAPPERTYPEINFO();
 
  public:
   static AudioWorkletGlobalScope* Create(
       std::unique_ptr<GlobalScopeCreationParams>,
-      v8::Isolate*,
       WorkerThread*);
   ~AudioWorkletGlobalScope() override;
   bool IsAudioWorkletGlobalScope() const final { return true; }
@@ -102,12 +100,10 @@ class MODULES_EXPORT AudioWorkletGlobalScope final
   double currentTime() const;
   float sampleRate() const { return sample_rate_; }
 
-  void Trace(blink::Visitor*);
-  void TraceWrappers(const ScriptWrappableVisitor*) const;
+  void Trace(blink::Visitor*) override;
 
  private:
   AudioWorkletGlobalScope(std::unique_ptr<GlobalScopeCreationParams>,
-                          v8::Isolate*,
                           WorkerThread*);
 
   bool is_closing_ = false;

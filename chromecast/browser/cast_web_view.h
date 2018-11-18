@@ -12,9 +12,12 @@
 #include "base/observer_list.h"
 #include "base/strings/string16.h"
 #include "base/time/time.h"
+#include "base/values.h"
 #include "chromecast/browser/cast_content_window.h"
 #include "chromecast/graphics/cast_window_manager.h"
+#include "content/public/browser/bluetooth_chooser.h"
 #include "content/public/browser/web_contents.h"
+#include "url/gurl.h"
 
 namespace chromecast {
 
@@ -45,6 +48,15 @@ class CastWebView {
         const base::string16& message,
         int32_t line_no,
         const base::string16& source_id) = 0;
+
+    // Invoked by CastWebView when WebContentsDelegate::RunBluetoothChooser is
+    // called. Returns a BluetoothChooser, a class used to solicit bluetooth
+    // device selection from the user for WebBluetooth applications. If a
+    // delegate does not provide an implementation, WebBluetooth will not be
+    // supported for that CastWebView.
+    virtual std::unique_ptr<content::BluetoothChooser> RunBluetoothChooser(
+        content::RenderFrameHost* frame,
+        const content::BluetoothChooser::EventHandler& event_handler);
   };
 
   // Observer interface for tracking CastWebView lifetime.
@@ -64,6 +76,9 @@ class CastWebView {
     // The delegate for the CastWebView. Must be non-null.
     Delegate* delegate = nullptr;
 
+    // Parameters for creating the content window for this CastWebView.
+    shell::CastContentWindow::CreateParams window_params;
+
     // Identifies the activity that is hosted by this CastWebView.
     std::string activity_id = "";
 
@@ -73,16 +88,18 @@ class CastWebView {
     // Whether this CastWebView is granted media access.
     bool allow_media_access = false;
 
-    // True if this CastWebView is for a headless build.
-    bool is_headless = false;
-
-    // Enable touch input for this CastWebView intance.
-    bool enable_touch_input = false;
-
     // Enable development mode for this CastWebView. Whitelists certain
     // functionality for the WebContents, like remote debugging and debugging
     // interfaces.
     bool enabled_for_dev = false;
+
+    // Enable/Force 720p resolution for this CastWebView instance.
+    bool force_720p_resolution = false;
+
+    // Whether this CastWebView should be managed by web ui window manager.
+    bool managed = true;
+
+    CreateParams();
   };
 
   CastWebView();
@@ -106,16 +123,27 @@ class CastWebView {
   // |is_visible| is true. |z_order| determines how this window is layered in
   // relationt other windows (higher value == more foreground).
   virtual void InitializeWindow(CastWindowManager* window_manager,
-                                bool is_visible,
                                 CastWindowManager::WindowId z_order,
                                 VisibilityPriority initial_priority) = 0;
+
+  // Sets the activity context exposed to web view and content window. The exact
+  // format of context is defined by each activity.
+  virtual void SetContext(base::Value context) = 0;
+
+  // Allows the page to be shown on the screen. The page cannot be shown on the
+  // screen until this is called.
+  virtual void GrantScreenAccess() = 0;
+
+  // Prevents the page from being shown on the screen until GrantScreenAccess()
+  // is called.
+  virtual void RevokeScreenAccess() = 0;
 
   // Observer interface:
   void AddObserver(Observer* observer);
   void RemoveObserver(Observer* observer);
 
  private:
-  base::ObserverList<Observer> observer_list_;
+  base::ObserverList<Observer>::Unchecked observer_list_;
 
   DISALLOW_COPY_AND_ASSIGN(CastWebView);
 };

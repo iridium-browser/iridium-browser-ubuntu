@@ -5,6 +5,7 @@
 #include "third_party/blink/renderer/modules/mediasession/media_session.h"
 
 #include <memory>
+#include "base/optional.h"
 #include "services/service_manager/public/cpp/interface_provider.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_media_session_action_handler.h"
@@ -14,7 +15,6 @@
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/modules/mediasession/media_metadata.h"
 #include "third_party/blink/renderer/modules/mediasession/media_metadata_sanitizer.h"
-#include "third_party/blink/renderer/platform/wtf/optional.h"
 
 namespace blink {
 
@@ -53,7 +53,7 @@ const AtomicString& MojomActionToActionName(MediaSessionAction action) {
   return WTF::g_empty_atom;
 }
 
-WTF::Optional<MediaSessionAction> ActionNameToMojomAction(
+base::Optional<MediaSessionAction> ActionNameToMojomAction(
     const String& action_name) {
   if ("play" == action_name)
     return MediaSessionAction::PLAY;
@@ -69,7 +69,7 @@ WTF::Optional<MediaSessionAction> ActionNameToMojomAction(
     return MediaSessionAction::SEEK_FORWARD;
 
   NOTREACHED();
-  return WTF::nullopt;
+  return base::nullopt;
 }
 
 const AtomicString& MediaSessionPlaybackStateToString(
@@ -194,9 +194,7 @@ mojom::blink::MediaSessionService* MediaSession::GetService() {
   if (!GetExecutionContext())
     return nullptr;
 
-  DCHECK(GetExecutionContext()->IsDocument())
-      << "MediaSession::getService() is only available from a frame";
-  Document* document = ToDocument(GetExecutionContext());
+  Document* document = To<Document>(GetExecutionContext());
   LocalFrame* frame = document->GetFrame();
   if (!frame)
     return nullptr;
@@ -216,10 +214,10 @@ mojom::blink::MediaSessionService* MediaSession::GetService() {
 
 void MediaSession::DidReceiveAction(
     blink::mojom::blink::MediaSessionAction action) {
-  DCHECK(GetExecutionContext()->IsDocument());
-  Document* document = ToDocument(GetExecutionContext());
+  Document* document = To<Document>(GetExecutionContext());
   std::unique_ptr<UserGestureIndicator> gesture_indicator =
-      Frame::NotifyUserActivation(document ? document->GetFrame() : nullptr);
+      LocalFrame::NotifyUserActivation(document ? document->GetFrame()
+                                                : nullptr);
 
   auto iter = action_handlers_.find(MojomActionToActionName(action));
   if (iter == action_handlers_.end())
@@ -233,12 +231,6 @@ void MediaSession::Trace(blink::Visitor* visitor) {
   visitor->Trace(action_handlers_);
   ScriptWrappable::Trace(visitor);
   ContextClient::Trace(visitor);
-}
-
-void MediaSession::TraceWrappers(const ScriptWrappableVisitor* visitor) const {
-  for (auto handler : action_handlers_.Values())
-    visitor->TraceWrappers(handler);
-  ScriptWrappable::TraceWrappers(visitor);
 }
 
 }  // namespace blink

@@ -9,13 +9,16 @@
 
 #include <list>
 #include <map>
+#include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "content/browser/web_contents/web_contents_impl.h"
 #include "content/public/test/web_contents_tester.h"
 #include "content/test/test_render_frame_host.h"
 #include "content/test/test_render_view_host.h"
+#include "third_party/blink/public/mojom/loader/pause_subresource_loading_handle.mojom.h"
 #include "ui/base/page_transition_types.h"
 
 class GURL;
@@ -44,8 +47,9 @@ class TestWebContents : public WebContentsImpl, public WebContentsTester {
  public:
   ~TestWebContents() override;
 
-  static TestWebContents* Create(BrowserContext* browser_context,
-                                 scoped_refptr<SiteInstance> instance);
+  static std::unique_ptr<TestWebContents> Create(
+      BrowserContext* browser_context,
+      scoped_refptr<SiteInstance> instance);
   static TestWebContents* Create(const CreateParams& params);
 
   // WebContentsImpl overrides (returning the same values, but in Test* types)
@@ -58,11 +62,16 @@ class TestWebContents : public WebContentsImpl, public WebContentsTester {
                     bool bypass_cache,
                     ImageDownloadCallback callback) override;
   const GURL& GetLastCommittedURL() const override;
+  const base::string16& GetTitle() const override;
 
   // WebContentsTester implementation.
   void CommitPendingNavigation() override;
   TestRenderFrameHost* GetPendingMainFrame() override;
   void NavigateAndCommit(const GURL& url) override;
+  void NavigateAndFail(
+      const GURL& url,
+      int error_code,
+      scoped_refptr<net::HttpResponseHeaders> response_headers) override;
   void TestSetIsLoading(bool value) override;
   void TestDidNavigate(RenderFrameHost* render_frame_host,
                        int nav_entry_id,
@@ -94,10 +103,11 @@ class TestWebContents : public WebContentsImpl, public WebContentsTester {
       const std::vector<SkBitmap>& bitmaps,
       const std::vector<gfx::Size>& original_bitmap_sizes) override;
   void SetLastCommittedURL(const GURL& url) override;
+  void SetTitle(const base::string16& new_title) override;
   void SetMainFrameMimeType(const std::string& mime_type) override;
-  void SetWasRecentlyAudible(bool audible) override;
   void SetIsCurrentlyAudible(bool audible) override;
   void TestDidReceiveInputEvent(blink::WebInputEvent::Type type) override;
+  void TestDidFinishLoad(const GURL& url) override;
   void TestDidFailLoadWithError(
       const GURL& url,
       int error_code,
@@ -117,7 +127,7 @@ class TestWebContents : public WebContentsImpl, public WebContentsTester {
 
   // Returns a clone of this TestWebContents. The returned object is also a
   // TestWebContents. The caller owns the returned object.
-  WebContents* Clone() override;
+  std::unique_ptr<WebContents> Clone() override;
 
   // Allow mocking of the RenderViewHostDelegateView.
   RenderViewHostDelegateView* GetDelegateView() override;
@@ -126,7 +136,7 @@ class TestWebContents : public WebContentsImpl, public WebContentsTester {
   }
 
   // Allows us to simulate that a contents was created via CreateNewWindow.
-  void AddPendingContents(TestWebContents* contents);
+  void AddPendingContents(std::unique_ptr<WebContentsImpl> contents);
 
   // Establish expected arguments for |SetHistoryOffsetAndLength()|. When
   // |SetHistoryOffsetAndLength()| is called, the arguments are compared
@@ -139,7 +149,17 @@ class TestWebContents : public WebContentsImpl, public WebContentsTester {
   void SetHistoryOffsetAndLength(int history_offset,
                                  int history_length) override;
 
-  void TestDidFinishLoad(const GURL& url);
+  // Records that this was called and returns and empty vector.
+  std::vector<blink::mojom::PauseSubresourceLoadingHandlePtr>
+  PauseSubresourceLoading() override;
+
+  bool GetPauseSubresourceLoadingCalled() override;
+
+  void ResetPauseSubresourceLoadingCalled() override;
+
+  void SetPageImportanceSignals(PageImportanceSignals signals) override;
+
+  void SetLastActiveTime(base::TimeTicks last_active_time) override;
 
  protected:
   // The deprecated WebContentsTester still needs to subclass this.
@@ -156,8 +176,7 @@ class TestWebContents : public WebContentsImpl, public WebContentsTester {
       SessionStorageNamespace* session_storage_namespace) override;
   void CreateNewWidget(int32_t render_process_id,
                        int32_t route_id,
-                       mojom::WidgetPtr widget,
-                       blink::WebPopupType popup_type) override;
+                       mojom::WidgetPtr widget) override;
   void CreateNewFullscreenWidget(int32_t render_process_id,
                                  int32_t route_id,
                                  mojom::WidgetPtr widget) override;
@@ -187,6 +206,8 @@ class TestWebContents : public WebContentsImpl, public WebContentsTester {
   std::map<GURL, std::list<std::pair<int, ImageDownloadCallback>>>
       pending_image_downloads_;
   GURL last_committed_url_;
+  base::Optional<base::string16> title_;
+  bool pause_subresource_loading_called_;
 };
 
 }  // namespace content

@@ -38,6 +38,44 @@ static_assert(int(blink::kWebTextDecorationTypeGrammar) ==
                   int(SpellCheckResult::GRAMMAR),
               "mismatching enums");
 
+class SpellCheckProvider::DictionaryUpdateObserverImpl
+    : public DictionaryUpdateObserver {
+ public:
+  explicit DictionaryUpdateObserverImpl(SpellCheckProvider* owner);
+  ~DictionaryUpdateObserverImpl() override;
+
+  // DictionaryUpdateObserver:
+  void OnDictionaryUpdated(const WebVector<WebString>& words_added) override;
+
+ private:
+  SpellCheckProvider* owner_;
+};
+
+SpellCheckProvider::DictionaryUpdateObserverImpl::DictionaryUpdateObserverImpl(
+    SpellCheckProvider* owner)
+    : owner_(owner) {
+  owner_->spellcheck_->AddDictionaryUpdateObserver(this);
+}
+
+SpellCheckProvider::DictionaryUpdateObserverImpl::
+    ~DictionaryUpdateObserverImpl() {
+  owner_->spellcheck_->RemoveDictionaryUpdateObserver(this);
+}
+
+void SpellCheckProvider::DictionaryUpdateObserverImpl::OnDictionaryUpdated(
+    const WebVector<WebString>& words_added) {
+  // Clear only cache. Current pending requests should continue as they are.
+  owner_->last_request_.clear();
+  owner_->last_results_.Assign(
+      blink::WebVector<blink::WebTextCheckingResult>());
+
+  // owner_->render_frame() is nullptr in unit tests.
+  if (auto* render_frame = owner_->render_frame()) {
+    DCHECK(render_frame->GetWebFrame());
+    render_frame->GetWebFrame()->RemoveSpellingMarkersUnderWords(words_added);
+  }
+}
+
 SpellCheckProvider::SpellCheckProvider(
     content::RenderFrame* render_frame,
     SpellCheck* spellcheck,
@@ -51,9 +89,16 @@ SpellCheckProvider::SpellCheckProvider(
   DCHECK(embedder_provider);
   if (render_frame)  // NULL in unit tests.
     render_frame->GetWebFrame()->SetTextCheckClient(this);
+
+  dictionary_update_observer_ =
+      std::make_unique<DictionaryUpdateObserverImpl>(this);
 }
 
 SpellCheckProvider::~SpellCheckProvider() {
+}
+
+void SpellCheckProvider::ResetDictionaryUpdateObserverForTesting() {
+  dictionary_update_observer_.reset();
 }
 
 spellcheck::mojom::SpellCheckHost& SpellCheckProvider::GetSpellCheckHost() {
@@ -131,9 +176,9 @@ void SpellCheckProvider::CheckSpelling(
         suggestions.begin(), suggestions.end(), web_suggestions.begin(),
         [](const base::string16& s) { return WebString::FromUTF16(s); });
     *optional_suggestions = web_suggestions;
-    UMA_HISTOGRAM_COUNTS("SpellCheck.api.check.suggestions", word.size());
+    UMA_HISTOGRAM_COUNTS_1M("SpellCheck.api.check.suggestions", word.size());
   } else {
-    UMA_HISTOGRAM_COUNTS("SpellCheck.api.check", word.size());
+    UMA_HISTOGRAM_COUNTS_1M("SpellCheck.api.check", word.size());
     // If optional_suggestions is not requested, the API is called
     // for marking.  So we use this for counting markable words.
     GetSpellCheckHost().NotifyChecked(word, 0 < length);
@@ -144,7 +189,7 @@ void SpellCheckProvider::RequestCheckingOfText(
     const WebString& text,
     WebTextCheckingCompletion* completion) {
   RequestTextChecking(text.Utf16(), completion);
-  UMA_HISTOGRAM_COUNTS("SpellCheck.api.async", text.length());
+  UMA_HISTOGRAM_COUNTS_1M("SpellCheck.api.async", text.length());
 }
 
 void SpellCheckProvider::CancelAllPendingRequests() {

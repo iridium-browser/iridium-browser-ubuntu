@@ -26,7 +26,7 @@ class Comparator(object):
 
   def Equals(self, rhs):
     """Returns whether rhs compares the same thing."""
-    return type(self) == type(rhs) and self.__dict__ == rhs.__dict__
+    return isinstance(rhs, type(self)) and self.__dict__ == rhs.__dict__
 
   def __eq__(self, rhs):
     return self.Equals(rhs)
@@ -178,7 +178,7 @@ def _RecursiveCompare(lhs, rhs):
   if isinstance(lhs, Comparator):
     return lhs.Match(rhs)
   elif isinstance(lhs, (tuple, list)):
-    return (type(lhs) == type(rhs) and
+    return (isinstance(rhs, type(lhs)) and
             len(lhs) == len(rhs) and
             all(_RecursiveCompare(i, j) for i, j in zip(lhs, rhs)))
   elif isinstance(lhs, dict):
@@ -408,6 +408,7 @@ class PartialMock(object):
                            % (self.TARGET, self.ATTRS))
 
     if self.ATTRS is not None:
+      # pylint: disable=not-an-iterable
       for attr in self.ATTRS:
         self._results[attr] = MockedCallResults(attr)
 
@@ -451,7 +452,7 @@ class PartialMock(object):
     module = cros_build_lib.load_module(chunks[0])
 
     cls = getattr(module, chunks[1])
-    for attr in self.ATTRS:
+    for attr in self.ATTRS:  # pylint: disable=not-an-iterable
       self.backup[attr] = getattr(cls, attr)
       src_attr = '_target%s' % attr if attr.startswith('__') else attr
       if hasattr(self.backup[attr], 'reset_mock'):

@@ -5,12 +5,11 @@
 #include "chrome/browser/ui/webui/chromeos/user_image_source.h"
 
 #include "base/memory/ref_counted_memory.h"
-#include "base/message_loop/message_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "chrome/browser/chromeos/login/users/default_user_image/default_user_images.h"
 #include "chrome/common/url_constants.h"
-#include "components/signin/core/account_id/account_id.h"
+#include "components/account_id/account_id.h"
 #include "components/user_manager/known_user.h"
 #include "components/user_manager/user_manager.h"
 #include "net/base/escape.h"
@@ -81,7 +80,7 @@ scoped_refptr<base::RefCountedMemory> LoadUserImageFrameForScaleFactor(
       ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(resource_id);
   float scale = ui::GetScaleForScaleFactor(scale_factor);
   scoped_refptr<base::RefCountedBytes> data(new base::RefCountedBytes);
-  gfx::PNGCodec::EncodeBGRASkBitmap(image->GetRepresentation(scale).sk_bitmap(),
+  gfx::PNGCodec::EncodeBGRASkBitmap(image->GetRepresentation(scale).GetBitmap(),
                                     false /* discard transparency */,
                                     &data->data());
   return data;

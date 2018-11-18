@@ -43,6 +43,11 @@ namespace gcm {
 class GCMDriver;
 }
 
+namespace network {
+class NetworkQualityTracker;
+class TestNetworkConnectionTracker;
+}
+
 namespace policy {
 class PolicyService;
 }
@@ -72,7 +77,9 @@ class TestingBrowserProcess : public BrowserProcess {
   rappor::RapporServiceImpl* rappor_service() override;
   IOThread* io_thread() override;
   SystemNetworkContextManager* system_network_context_manager() override;
-  content::NetworkConnectionTracker* network_connection_tracker() override;
+  scoped_refptr<network::SharedURLLoaderFactory> shared_url_loader_factory()
+      override;
+  network::NetworkQualityTracker* network_quality_tracker() override;
   WatchDogThread* watchdog_thread() override;
   ProfileManager* profile_manager() override;
   PrefService* local_state() override;
@@ -107,7 +114,8 @@ class TestingBrowserProcess : public BrowserProcess {
       override;
   printing::BackgroundPrintingManager* background_printing_manager() override;
   const std::string& GetApplicationLocale() override;
-  void SetApplicationLocale(const std::string& app_locale) override;
+  void SetApplicationLocale(const std::string& actual_locale,
+                            const std::string& preferred_locale) override;
   DownloadStatusUpdater* download_status_updater() override;
   DownloadRequestLimiter* download_request_limiter() override;
 
@@ -121,9 +129,7 @@ class TestingBrowserProcess : public BrowserProcess {
   supervised_user_whitelist_installer() override;
   MediaFileSystemRegistry* media_file_system_registry() override;
 
-#if BUILDFLAG(ENABLE_WEBRTC)
   WebRtcLogUploader* webrtc_log_uploader() override;
-#endif
 
   network_time::NetworkTimeTracker* network_time_tracker() override;
 
@@ -131,7 +137,6 @@ class TestingBrowserProcess : public BrowserProcess {
   resource_coordinator::TabManager* GetTabManager() override;
   shell_integration::DefaultWebClientState CachedDefaultWebClientState()
       override;
-  physical_web::PhysicalWebDataSource* GetPhysicalWebDataSource() override;
   prefs::InProcessPrefServiceFactory* pref_service_factory() const override;
 
   // Set the local state for tests. Consumer is responsible for cleaning it up
@@ -147,8 +152,8 @@ class TestingBrowserProcess : public BrowserProcess {
       std::unique_ptr<optimization_guide::OptimizationGuideService>
           optimization_guide_service);
   void SetSystemRequestContext(net::URLRequestContextGetter* context_getter);
-  void SetNetworkConnectionTracker(
-      std::unique_ptr<content::NetworkConnectionTracker> tracker);
+  void SetSharedURLLoaderFactory(
+      scoped_refptr<network::SharedURLLoaderFactory> shared_url_loader_factory);
   void SetNotificationUIManager(
       std::unique_ptr<NotificationUIManager> notification_ui_manager);
   void SetNotificationPlatformBridge(
@@ -169,11 +174,11 @@ class TestingBrowserProcess : public BrowserProcess {
   std::unique_ptr<policy::ChromeBrowserPolicyConnector>
       browser_policy_connector_;
   bool created_browser_policy_connector_ = false;
-  std::unique_ptr<content::NetworkConnectionTracker>
-      network_connection_tracker_;
+  std::unique_ptr<network::NetworkQualityTracker> network_quality_tracker_;
   std::unique_ptr<ProfileManager> profile_manager_;
   std::unique_ptr<NotificationUIManager> notification_ui_manager_;
   std::unique_ptr<NotificationPlatformBridge> notification_platform_bridge_;
+  scoped_refptr<DownloadRequestLimiter> download_request_limiter_;
 
 #if BUILDFLAG(ENABLE_PRINTING)
   std::unique_ptr<printing::PrintJobManager> print_job_manager_;
@@ -196,7 +201,7 @@ class TestingBrowserProcess : public BrowserProcess {
 
   // |tab_manager_| is null by default and will be created when
   // GetTabManager() is invoked on supported platforms.
-#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_LINUX)
+#if !defined(OS_ANDROID)
   std::unique_ptr<resource_coordinator::TabManager> tab_manager_;
   std::unique_ptr<resource_coordinator::TabLifecycleUnitSource>
       tab_lifecycle_unit_source_;
@@ -206,9 +211,12 @@ class TestingBrowserProcess : public BrowserProcess {
   PrefService* local_state_;
   IOThread* io_thread_;
   net::URLRequestContextGetter* system_request_context_;
+  scoped_refptr<network::SharedURLLoaderFactory> shared_url_loader_factory_;
   rappor::RapporServiceImpl* rappor_service_;
 
   std::unique_ptr<BrowserProcessPlatformPart> platform_part_;
+  std::unique_ptr<network::TestNetworkConnectionTracker>
+      test_network_connection_tracker_;
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
   std::unique_ptr<MediaFileSystemRegistry> media_file_system_registry_;

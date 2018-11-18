@@ -27,12 +27,6 @@
 
 #include <stdio.h>
 
-// A region class based on the paper "Scanline Coherent Shape Algebra"
-// by Jonathan E. Steinhart from the book "Graphics Gems II".
-//
-// This implementation uses two vectors instead of linked list, and
-// also compresses regions when possible.
-
 namespace blink {
 
 Region::Region() = default;
@@ -104,6 +98,22 @@ bool Region::Intersects(const Region& region) const {
 
   return Shape::CompareShapes<Shape::CompareIntersectsOperation>(shape_,
                                                                  region.shape_);
+}
+
+double Region::Area() const {
+  double area = 0.0;
+  for (Shape::SpanIterator span = shape_.SpansBegin(), end = shape_.SpansEnd();
+       span != end && span + 1 != end; ++span) {
+    int height = (span + 1)->y - span->y;
+
+    for (Shape::SegmentIterator segment = shape_.SegmentsBegin(span),
+                                end = shape_.SegmentsEnd(span);
+         segment != end && segment + 1 != end; segment += 2) {
+      int width = *(segment + 1) - *segment;
+      area += height * width;
+    }
+  }
+  return area;
 }
 
 template <typename CompareOperation>
@@ -231,7 +241,7 @@ Region::Shape::Shape(const IntRect& rect) {
   AppendSpan(rect.MaxY());
 }
 
-Region::Shape::Shape(size_t segments_capacity, size_t spans_capacity) {
+Region::Shape::Shape(wtf_size_t segments_capacity, wtf_size_t spans_capacity) {
   segments_.ReserveCapacity(segments_capacity);
   spans_.ReserveCapacity(spans_capacity);
 }
@@ -311,7 +321,7 @@ Region::Shape::SegmentIterator Region::Shape::SegmentsEnd(
     return nullptr;
 
   DCHECK_LT(it + 1, spans_.data() + spans_.size());
-  size_t segment_index = (it + 1)->segment_index;
+  wtf_size_t segment_index = (it + 1)->segment_index;
 
   SECURITY_DCHECK(segment_index <= segments_.size());
   return segments_.data() + segment_index;
@@ -371,9 +381,9 @@ IntRect Region::Shape::Bounds() const {
 }
 
 void Region::Shape::Translate(const IntSize& offset) {
-  for (size_t i = 0; i < segments_.size(); ++i)
+  for (wtf_size_t i = 0; i < segments_.size(); ++i)
     segments_[i] += offset.Width();
-  for (size_t i = 0; i < spans_.size(); ++i)
+  for (wtf_size_t i = 0; i < spans_.size(); ++i)
     spans_[i].y += offset.Height();
 }
 
@@ -397,8 +407,8 @@ Region::Shape Region::Shape::ShapeOperation(const Shape& shape1,
                   Operation::kShouldAddRemainingSpansFromShape2),
                 "invalid span combination");
 
-  size_t segments_capacity = shape1.SegmentsSize() + shape2.SegmentsSize();
-  size_t spans_capacity = shape1.SpansSize() + shape2.SpansSize();
+  wtf_size_t segments_capacity = shape1.SegmentsSize() + shape2.SegmentsSize();
+  wtf_size_t spans_capacity = shape1.SpansSize() + shape2.SpansSize();
   Shape result(segments_capacity, spans_capacity);
   if (Operation::TrySimpleOperation(shape1, shape2, result))
     return result;

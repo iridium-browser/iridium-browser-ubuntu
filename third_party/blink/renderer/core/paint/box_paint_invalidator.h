@@ -25,7 +25,7 @@ class CORE_EXPORT BoxPaintInvalidator {
 
   static void BoxWillBeDestroyed(const LayoutBox&);
 
-  PaintInvalidationReason InvalidatePaint();
+  void InvalidatePaint();
 
  private:
   friend class BoxPaintInvalidatorTest;
@@ -39,15 +39,11 @@ class CORE_EXPORT BoxPaintInvalidator {
 
   enum BackgroundInvalidationType { kNone = 0, kIncremental, kFull };
   BackgroundInvalidationType ComputeBackgroundInvalidation();
-  void InvalidateScrollingContentsBackground(BackgroundInvalidationType);
+  void InvalidateBackground();
 
   PaintInvalidationReason ComputePaintInvalidationReason();
 
-  void IncrementallyInvalidatePaint(PaintInvalidationReason,
-                                    const LayoutRect& old_rect,
-                                    const LayoutRect& new_rect);
-
-  bool NeedsToSavePreviousContentBoxSizeOrLayoutOverflowRect();
+  bool NeedsToSavePreviousContentBoxRectOrLayoutOverflowRect();
   void SavePreviousBoxGeometriesIfNeeded();
 
   const LayoutBox& box_;

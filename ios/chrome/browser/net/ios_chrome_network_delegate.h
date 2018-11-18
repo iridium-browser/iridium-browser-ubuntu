@@ -48,21 +48,18 @@ class IOSChromeNetworkDelegate : public net::NetworkDelegateImpl {
  private:
   // NetworkDelegate implementation.
   int OnBeforeURLRequest(net::URLRequest* request,
-                         const net::CompletionCallback& callback,
+                         net::CompletionOnceCallback callback,
                          GURL* new_url) override;
   void OnCompleted(net::URLRequest* request,
                    bool started,
                    int net_error) override;
-  net::NetworkDelegate::AuthRequiredResponse OnAuthRequired(
-      net::URLRequest* request,
-      const net::AuthChallengeInfo& auth_info,
-      const AuthCallback& callback,
-      net::AuthCredentials* credentials) override;
   bool OnCanGetCookies(const net::URLRequest& request,
-                       const net::CookieList& cookie_list) override;
+                       const net::CookieList& cookie_list,
+                       bool allowed_from_caller) override;
   bool OnCanSetCookie(const net::URLRequest& request,
                       const net::CanonicalCookie& cookie,
-                      net::CookieOptions* options) override;
+                      net::CookieOptions* options,
+                      bool allowed_from_caller) override;
   bool OnCanAccessFile(const net::URLRequest& request,
                        const base::FilePath& original_path,
                        const base::FilePath& absolute_path) const override;

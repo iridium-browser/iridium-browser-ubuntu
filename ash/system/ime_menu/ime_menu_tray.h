@@ -10,14 +10,15 @@
 #include "ash/public/interfaces/ime_info.mojom.h"
 #include "ash/system/ime/ime_observer.h"
 #include "ash/system/tray/tray_background_view.h"
+#include "ash/system/tray/tray_bubble_view.h"
 #include "ash/system/tray/tray_bubble_wrapper.h"
 #include "ash/system/virtual_keyboard/virtual_keyboard_observer.h"
 #include "base/macros.h"
 #include "ui/base/ime/chromeos/public/interfaces/ime_keyset.mojom.h"
 #include "ui/keyboard/keyboard_controller_observer.h"
-#include "ui/views/bubble/tray_bubble_view.h"
 
 namespace views {
+class ImageView;
 class Label;
 }  // namespace views
 
@@ -52,28 +53,24 @@ class ASH_EXPORT ImeMenuTray : public TrayBackgroundView,
 
   // TrayBackgroundView:
   base::string16 GetAccessibleNameForTray() override;
-  void HideBubbleWithView(const views::TrayBubbleView* bubble_view) override;
+  void HideBubbleWithView(const TrayBubbleView* bubble_view) override;
   void ClickedOutsideBubble() override;
   bool PerformAction(const ui::Event& event) override;
   void CloseBubble() override;
   void ShowBubble(bool show_by_click) override;
-  views::TrayBubbleView* GetBubbleView() override;
+  TrayBubbleView* GetBubbleView() override;
 
   // IMEObserver:
   void OnIMERefresh() override;
   void OnIMEMenuActivationChanged(bool is_activated) override;
 
-  // views::TrayBubbleView::Delegate:
-  void BubbleViewDestroyed() override;
-  void OnMouseEnteredView() override;
-  void OnMouseExitedView() override;
+  // TrayBubbleView::Delegate:
   base::string16 GetAccessibleNameForBubble() override;
   bool ShouldEnableExtraKeyboardAccessibility() override;
-  void HideBubble(const views::TrayBubbleView* bubble_view) override;
+  void HideBubble(const TrayBubbleView* bubble_view) override;
 
   // keyboard::KeyboardControllerObserver:
-  void OnKeyboardClosed() override;
-  void OnKeyboardHidden() override;
+  void OnKeyboardHidden(bool is_temporary_hide) override;
 
   // VirtualKeyboardObserver:
   void OnKeyboardSuppressionChanged(bool suppressed) override;
@@ -87,12 +84,8 @@ class ASH_EXPORT ImeMenuTray : public TrayBackgroundView,
 
   // Updates the text of the label on the tray.
   void UpdateTrayLabel();
-
-  // Disables the virtual keyboard.
-  void DisableVirtualKeyboard();
-
-  // Show the virtual keyboard.
-  void ShowKeyboard();
+  void CreateLabel();
+  void CreateImageView();
 
   ImeController* ime_controller_;
 
@@ -100,9 +93,10 @@ class ASH_EXPORT ImeMenuTray : public TrayBackgroundView,
   std::unique_ptr<TrayBubbleWrapper> bubble_;
   ImeListView* ime_list_view_;
 
+  // Only one of |label_| and |image_view_| can be non null at the same time.
   views::Label* label_;
-  bool show_keyboard_;
-  bool force_show_keyboard_;
+  views::ImageView* image_view_;
+
   bool keyboard_suppressed_;
   bool show_bubble_after_keyboard_hidden_;
   bool is_emoji_enabled_;

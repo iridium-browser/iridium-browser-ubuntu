@@ -14,9 +14,9 @@
 #include "base/atomicops.h"
 #include "base/macros.h"
 #include "base/observer_list.h"
+#include "base/sequence_checker.h"
 #include "base/strings/string_util.h"
 #include "base/synchronization/lock.h"
-#include "base/threading/thread_checker.h"
 #include "components/sync/base/cancelation_observer.h"
 #include "components/sync/syncable/syncable_id.h"
 
@@ -170,7 +170,7 @@ class ServerConnectionManager {
   void RemoveListener(ServerConnectionEventListener* listener);
 
   inline HttpResponse::ServerConnectionCode server_status() const {
-    DCHECK(thread_checker_.CalledOnValidThread());
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
     return server_status_;
   }
 
@@ -181,7 +181,7 @@ class ServerConnectionManager {
   virtual std::unique_ptr<Connection> MakeConnection();
 
   void set_client_id(const std::string& client_id) {
-    DCHECK(thread_checker_.CalledOnValidThread());
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
     DCHECK(client_id_.empty());
     client_id_.assign(client_id);
   }
@@ -194,7 +194,7 @@ class ServerConnectionManager {
   bool HasInvalidAuthToken() { return auth_token_.empty(); }
 
   const std::string auth_token() const {
-    DCHECK(thread_checker_.CalledOnValidThread());
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
     return auth_token_;
   }
 
@@ -211,10 +211,7 @@ class ServerConnectionManager {
                                 const std::string& path,
                                 const std::string& auth_token);
 
-  // An internal helper to clear our auth_token_ and cache the old version
-  // in |previously_invalidated_token_| to shelter us from retrying with a
-  // known bad token.
-  void InvalidateAndClearAuthToken();
+  void ClearAuthToken();
 
   // Helper to check terminated flags and build a Connection object. If this
   // ServerConnectionManager has been terminated, this will return null.
@@ -241,14 +238,11 @@ class ServerConnectionManager {
   // The auth token to use in authenticated requests.
   std::string auth_token_;
 
-  // The previous auth token that is invalid now.
-  std::string previously_invalidated_token;
-
-  base::ObserverList<ServerConnectionEventListener> listeners_;
+  base::ObserverList<ServerConnectionEventListener>::Unchecked listeners_;
 
   HttpResponse::ServerConnectionCode server_status_;
 
-  base::ThreadChecker thread_checker_;
+  SEQUENCE_CHECKER(sequence_checker_);
 
   CancelationSignal* const cancelation_signal_;
 

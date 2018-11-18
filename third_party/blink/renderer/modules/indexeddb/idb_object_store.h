@@ -27,9 +27,9 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_INDEXEDDB_IDB_OBJECT_STORE_H_
 
 #include "base/memory/scoped_refptr.h"
+#include "third_party/blink/public/common/indexeddb/web_idb_types.h"
 #include "third_party/blink/public/platform/modules/indexeddb/web_idb_cursor.h"
 #include "third_party/blink/public/platform/modules/indexeddb/web_idb_database.h"
-#include "third_party/blink/public/platform/modules/indexeddb/web_idb_types.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/serialized_script_value.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_cursor.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_index.h"
@@ -55,8 +55,9 @@ class MODULES_EXPORT IDBObjectStore final : public ScriptWrappable {
                                 IDBTransaction* transaction) {
     return new IDBObjectStore(std::move(metadata), transaction);
   }
-  ~IDBObjectStore() = default;
-  void Trace(blink::Visitor*);
+  ~IDBObjectStore() override = default;
+
+  void Trace(blink::Visitor*) override;
 
   const IDBObjectStoreMetadata& Metadata() const { return *metadata_; }
   const IDBKeyPath& IdbKeyPath() const { return Metadata().key_path; }

@@ -2,12 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/run_loop.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/test/histogram_tester.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profile_window.h"
 #include "chrome/browser/profiles/profiles_state.h"
@@ -33,7 +34,8 @@ using ::testing::_;
 
 class MockLoginUIService : public LoginUIService {
  public:
-  MockLoginUIService() : LoginUIService(nullptr) {}
+  explicit MockLoginUIService(content::BrowserContext* context)
+      : LoginUIService(static_cast<Profile*>(context)) {}
   ~MockLoginUIService() override {}
   MOCK_METHOD3(DisplayLoginResult,
                void(Browser* browser,
@@ -44,7 +46,7 @@ class MockLoginUIService : public LoginUIService {
 
 std::unique_ptr<KeyedService> CreateLoginUIService(
     content::BrowserContext* context) {
-  return std::make_unique<MockLoginUIService>();
+  return std::make_unique<MockLoginUIService>(context);
 }
 
 class UserManagerUIBrowserTest : public InProcessBrowserTest,
@@ -162,7 +164,7 @@ IN_PROC_BROWSER_TEST_F(UserManagerUIAuthenticatedUserBrowserTest,
   entry_->SetSupervisedUserId("supervised_user_id");
   MockLoginUIService* service = static_cast<MockLoginUIService*>(
       LoginUIServiceFactory::GetInstance()->SetTestingFactoryAndUse(
-          profile_, CreateLoginUIService));
+          profile_, base::BindRepeating(&CreateLoginUIService)));
   EXPECT_CALL(*service, DisplayLoginResult(_, _, _));
 
   LaunchAuthenticatedUser("");
@@ -179,7 +181,7 @@ IN_PROC_BROWSER_TEST_F(UserManagerUIAuthenticatedUserBrowserTest,
   entry_->SetActiveTimeToNow();
   MockLoginUIService* service = static_cast<MockLoginUIService*>(
       LoginUIServiceFactory::GetInstance()->SetTestingFactoryAndUse(
-          profile_, CreateLoginUIService));
+          profile_, base::BindRepeating(&CreateLoginUIService)));
   EXPECT_CALL(*service, SetProfileBlockingErrorMessage());
 
   LaunchAuthenticatedUser("");

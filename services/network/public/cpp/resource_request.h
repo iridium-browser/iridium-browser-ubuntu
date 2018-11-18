@@ -11,6 +11,7 @@
 #include "base/component_export.h"
 #include "base/memory/ref_counted.h"
 #include "base/optional.h"
+#include "base/unguessable_token.h"
 #include "net/base/request_priority.h"
 #include "net/http/http_request_headers.h"
 #include "net/url_request/url_request.h"
@@ -69,8 +70,19 @@ struct COMPONENT_EXPORT(NETWORK_CPP_BASE) ResourceRequest {
   // Additional HTTP request headers.
   net::HttpRequestHeaders headers;
 
+  // 'X-Requested-With' header value. Some consumers want to set this header,
+  // but such internal headers must be ignored by CORS checks (which run inside
+  // Network Service), so the value is stored here (rather than in |headers|)
+  // and later populated in the headers after CORS check.
+  // TODO(toyoshim): Remove it once PPAPI is deprecated.
+  std::string requested_with;
+
   // net::URLRequest load flags (0 by default).
   int load_flags = 0;
+
+  // If false, calls set_allow_credentials(false) on the
+  // net::URLRequest.
+  bool allow_credentials = true;
 
   // If this request originated from a pepper plugin running in a child
   // process, this identifies which process it came from. Otherwise, it
@@ -123,15 +135,23 @@ struct COMPONENT_EXPORT(NETWORK_CPP_BASE) ResourceRequest {
   // about this.
   bool skip_service_worker = false;
 
-  // The request mode passed to the ServiceWorker.
-  mojom::FetchRequestMode fetch_request_mode =
-      mojom::FetchRequestMode::kSameOrigin;
+  // https://fetch.spec.whatwg.org/#concept-request-mode
+  // Used mainly by CORS handling (out-of-blink CORS), CORB, Service Worker.
+  // CORS handling needs a proper origin (including a unique opaque origin).
+  // Hence a request with kSameOrigin, kCORS, or kCORSWithForcedPreflight should
+  // have a non-null request_initiator.
+  mojom::FetchRequestMode fetch_request_mode = mojom::FetchRequestMode::kNoCORS;
 
-  // The credentials mode passed to the ServiceWorker.
+  // https://fetch.spec.whatwg.org/#concept-request-credentials-mode
+  // Used mainly by CORS handling (out-of-blink CORS), Service Worker.
+  // If this member is kOmit, then DO_NOT_SAVE_COOKIES, DO_NOT_SEND_COOKIES,
+  // and DO_NOT_SEND_AUTH_DATA must be set on load_flags.
   mojom::FetchCredentialsMode fetch_credentials_mode =
-      mojom::FetchCredentialsMode::kOmit;
+      mojom::FetchCredentialsMode::kInclude;
 
-  // The redirect mode used in Fetch API.
+  // https://fetch.spec.whatwg.org/#concept-request-redirect-mode
+  // Used mainly by CORS handling (out-of-blink CORS), Service Worker.
+  // This member must be kFollow as long as |fetch_request_mode| is kNoCORS.
   mojom::FetchRedirectMode fetch_redirect_mode =
       mojom::FetchRedirectMode::kFollow;
 
@@ -150,12 +170,6 @@ struct COMPONENT_EXPORT(NETWORK_CPP_BASE) ResourceRequest {
 
   // Optional resource request body (may be null).
   scoped_refptr<ResourceRequestBody> request_body;
-
-  // If true, then the response body will be downloaded to a file and the path
-  // to that file will be provided in ResponseInfo::download_file_path.
-  // Deprecated and not supported by the network service code.
-  // TODO(mek): Remove this flag once all usage of it is gone (XHR and PPAPI).
-  bool download_to_file = false;
 
   // True if the request can work after the fetch group is terminated.
   // https://fetch.spec.whatwg.org/#request-keepalive-flag
@@ -177,7 +191,7 @@ struct COMPONENT_EXPORT(NETWORK_CPP_BASE) ResourceRequest {
   bool do_not_prompt_for_login = false;
 
   // The routing id of the RenderFrame.
-  int render_frame_id = 0;
+  int render_frame_id = MSG_ROUTING_NONE;
 
   // True if |frame_id| is the main frame of a RenderView.
   bool is_main_frame = false;
@@ -186,17 +200,6 @@ struct COMPONENT_EXPORT(NETWORK_CPP_BASE) ResourceRequest {
   // TODO(jam): remove this from the struct since network service shouldn't know
   // about this.
   int transition_type = 0;
-
-  // For navigations, whether this navigation should replace the current session
-  // history entry on commit.
-  bool should_replace_current_entry = false;
-
-  // The following two members identify a previous request that has been
-  // created before this navigation has been transferred to a new process.
-  // This serves the purpose of recycling the old request.
-  // Unless this refers to a transferred navigation, these values are -1 and -1.
-  int transferred_request_child_id = -1;
-  int transferred_request_request_id = -1;
 
   // Whether or not we should allow the URL to download.
   bool allow_download = false;
@@ -214,13 +217,26 @@ struct COMPONENT_EXPORT(NETWORK_CPP_BASE) ResourceRequest {
   // about this.
   int previews_state = 0;
 
-  // PlzNavigate: the stream url associated with a navigation. Used to get
-  // access to the body of the response that has already been fetched by the
-  // browser.
-  GURL resource_body_stream_url;
-
-  // Wether or not the initiator of this request is a secure context.
+  // Whether or not the initiator of this request is a secure context.
   bool initiated_in_secure_context = false;
+
+  // Whether or not this request (including redirects) should be upgraded to
+  // HTTPS due to an Upgrade-Insecure-Requests requirement.
+  bool upgrade_if_insecure = false;
+
+  // True when the request is revalidating.
+  // Some users, notably blink, has its own cache. This flag is set to exempt
+  // some CORS logic for a revalidating request.
+  bool is_revalidating = false;
+
+  // The profile ID of network conditions to throttle the network request.
+  base::Optional<base::UnguessableToken> throttling_profile_id;
+
+  // Headers that will be added pre and post cache if the network context uses
+  // the custom proxy for this request. The custom proxy is used for requests
+  // that match the custom proxy config, and would otherwise be made direct.
+  net::HttpRequestHeaders custom_proxy_pre_cache_headers;
+  net::HttpRequestHeaders custom_proxy_post_cache_headers;
 };
 
 }  // namespace network

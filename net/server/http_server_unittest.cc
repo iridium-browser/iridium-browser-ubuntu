@@ -42,6 +42,7 @@
 #include "net/socket/tcp_client_socket.h"
 #include "net/socket/tcp_server_socket.h"
 #include "net/test/gtest_util.h"
+#include "net/test/test_with_scoped_task_environment.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
 #include "net/url_request/url_fetcher.h"
 #include "net/url_request/url_fetcher_delegate.h"
@@ -74,8 +75,8 @@ class TestHttpClient {
   }
 
   void Send(const std::string& data) {
-    write_buffer_ =
-        new DrainableIOBuffer(new StringIOBuffer(data), data.length());
+    write_buffer_ = base::MakeRefCounted<DrainableIOBuffer>(
+        base::MakeRefCounted<StringIOBuffer>(data), data.length());
     Write();
   }
 
@@ -84,7 +85,7 @@ class TestHttpClient {
     message->clear();
     while (total_bytes_received < expected_bytes) {
       TestCompletionCallback callback;
-      ReadInternal(callback.callback());
+      ReadInternal(&callback);
       int bytes_received = callback.WaitForResult();
       if (bytes_received <= 0)
         return false;
@@ -137,12 +138,13 @@ class TestHttpClient {
       Write();
   }
 
-  void ReadInternal(const CompletionCallback& callback) {
-    read_buffer_ = new IOBufferWithSize(kMaxExpectedResponseLength);
-    int result =
-        socket_->Read(read_buffer_.get(), kMaxExpectedResponseLength, callback);
+  void ReadInternal(TestCompletionCallback* callback) {
+    read_buffer_ =
+        base::MakeRefCounted<IOBufferWithSize>(kMaxExpectedResponseLength);
+    int result = socket_->Read(read_buffer_.get(), kMaxExpectedResponseLength,
+                               callback->callback());
     if (result != ERR_IO_PENDING)
-      callback.Run(result);
+      callback->callback().Run(result);
   }
 
   bool IsCompleteResponse(const std::string& response) {
@@ -167,7 +169,7 @@ class TestHttpClient {
 
 }  // namespace
 
-class HttpServerTest : public testing::Test,
+class HttpServerTest : public TestWithScopedTaskEnvironment,
                        public HttpServer::Delegate {
  public:
   HttpServerTest()
@@ -548,7 +550,7 @@ class MockStreamSocket : public StreamSocket {
         read_buf_len_(0) {}
 
   // StreamSocket
-  int Connect(const CompletionCallback& callback) override {
+  int Connect(CompletionOnceCallback callback) override {
     return ERR_NOT_IMPLEMENTED;
   }
   void Disconnect() override {
@@ -556,7 +558,7 @@ class MockStreamSocket : public StreamSocket {
     if (!read_callback_.is_null()) {
       read_buf_ = NULL;
       read_buf_len_ = 0;
-      base::ResetAndReturn(&read_callback_).Run(ERR_CONNECTION_CLOSED);
+      std::move(read_callback_).Run(ERR_CONNECTION_CLOSED);
     }
   }
   bool IsConnected() const override { return connected_; }
@@ -568,8 +570,6 @@ class MockStreamSocket : public StreamSocket {
     return ERR_NOT_IMPLEMENTED;
   }
   const NetLogWithSource& NetLog() const override { return net_log_; }
-  void SetSubresourceSpeculation() override {}
-  void SetOmniboxSpeculation() override {}
   bool WasEverUsed() const override { return true; }
   bool WasAlpnNegotiated() const override { return false; }
   NextProto GetNegotiatedProtocol() const override { return kProtoUnknown; }
@@ -588,14 +588,14 @@ class MockStreamSocket : public StreamSocket {
   // Socket
   int Read(IOBuffer* buf,
            int buf_len,
-           const CompletionCallback& callback) override {
+           CompletionOnceCallback callback) override {
     if (!connected_) {
       return ERR_SOCKET_NOT_CONNECTED;
     }
     if (pending_read_data_.empty()) {
       read_buf_ = buf;
       read_buf_len_ = buf_len;
-      read_callback_ = callback;
+      read_callback_ = std::move(callback);
       return ERR_IO_PENDING;
     }
     DCHECK_GT(buf_len, 0);
@@ -608,7 +608,7 @@ class MockStreamSocket : public StreamSocket {
 
   int Write(IOBuffer* buf,
             int buf_len,
-            const CompletionCallback& callback,
+            CompletionOnceCallback callback,
             const NetworkTrafficAnnotationTag& traffic_annotation) override {
     return ERR_NOT_IMPLEMENTED;
   }
@@ -627,7 +627,7 @@ class MockStreamSocket : public StreamSocket {
     pending_read_data_.assign(data + read_len, data_len - read_len);
     read_buf_ = NULL;
     read_buf_len_ = 0;
-    base::ResetAndReturn(&read_callback_).Run(read_len);
+    std::move(read_callback_).Run(read_len);
   }
 
  private:
@@ -636,7 +636,7 @@ class MockStreamSocket : public StreamSocket {
   bool connected_;
   scoped_refptr<IOBuffer> read_buf_;
   int read_buf_len_;
-  CompletionCallback read_callback_;
+  CompletionOnceCallback read_callback_;
   std::string pending_read_data_;
   NetLogWithSource net_log_;
 

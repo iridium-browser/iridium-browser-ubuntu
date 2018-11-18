@@ -4,11 +4,14 @@
 
 #include "ash/test/ash_interactive_ui_test_base.h"
 
+#include "ash/test/ui_controls_factory_ash.h"
 #include "base/lazy_instance.h"
 #include "base/path_service.h"
-#include "mojo/edk/embedder/embedder.h"
+#include "mojo/core/embedder/embedder.h"
 #include "ui/aura/env.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/base/test/ui_controls_aura.h"
+#include "ui/base/ui_base_features.h"
 #include "ui/base/ui_base_paths.h"
 #include "ui/gl/test/gl_surface_test_support.h"
 
@@ -18,7 +21,7 @@ namespace {
 
 class MojoInitializer {
  public:
-  MojoInitializer() { mojo::edk::Init(); }
+  MojoInitializer() { mojo::core::Init(); }
 };
 
 base::LazyInstance<MojoInitializer>::Leaky mojo_initializer;
@@ -43,12 +46,15 @@ void AshInteractiveUITestBase::SetUp() {
   ui::ResourceBundle::InitSharedInstanceWithLocale(
       "en-US", NULL, ui::ResourceBundle::LOAD_COMMON_RESOURCES);
   base::FilePath resources_pack_path;
-  PathService::Get(base::DIR_MODULE, &resources_pack_path);
+  base::PathService::Get(base::DIR_MODULE, &resources_pack_path);
   resources_pack_path =
       resources_pack_path.Append(FILE_PATH_LITERAL("resources.pak"));
   ui::ResourceBundle::GetSharedInstance().AddDataPackFromPath(
       resources_pack_path, ui::SCALE_FACTOR_NONE);
-  env_ = aura::Env::CreateInstance();
+  env_ = aura::Env::CreateInstance(features::IsSingleProcessMash()
+                                       ? aura::Env::Mode::MUS
+                                       : aura::Env::Mode::LOCAL);
+  ui_controls::InstallUIControlsAura(test::CreateAshUIControls());
 
   AshTestBase::SetUp();
 }

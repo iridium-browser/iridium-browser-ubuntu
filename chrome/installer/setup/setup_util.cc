@@ -44,16 +44,15 @@
 #include "chrome/installer/setup/installer_state.h"
 #include "chrome/installer/setup/setup_constants.h"
 #include "chrome/installer/setup/user_hive_visitor.h"
-#include "chrome/installer/util/app_registration_data.h"
 #include "chrome/installer/util/google_update_constants.h"
 #include "chrome/installer/util/google_update_settings.h"
 #include "chrome/installer/util/install_util.h"
 #include "chrome/installer/util/installation_state.h"
 #include "chrome/installer/util/master_preferences.h"
 #include "chrome/installer/util/master_preferences_constants.h"
-#include "chrome/installer/util/non_updating_app_registration_data.h"
-#include "chrome/installer/util/updating_app_registration_data.h"
 #include "chrome/installer/util/util_constants.h"
+#include "chrome/installer/util/work_item.h"
+#include "chrome/installer/util/work_item_list.h"
 #include "components/zucchini/zucchini.h"
 #include "components/zucchini/zucchini_integration.h"
 #include "courgette/courgette.h"
@@ -66,37 +65,6 @@ namespace {
 // Event log providers registry location.
 constexpr wchar_t kEventLogProvidersRegPath[] =
     L"SYSTEM\\CurrentControlSet\\Services\\EventLog\\Application\\";
-
-// Returns true if the "lastrun" value in |root|\|key_path| (a path to Chrome's
-// ClientState key for a user) indicates that Chrome has been used within the
-// last 28 days.
-bool IsActivelyUsedIn(HKEY root, const wchar_t* key_path) {
-  VLOG(1) << "IsActivelyUsedIn probing " << root << "\\" << key_path;
-  int days_ago_last_run = GoogleUpdateSettings::GetLastRunTime();
-  if (days_ago_last_run >= 0) {
-    VLOG(1) << "Found a user that last ran Chrome " << days_ago_last_run
-            << " days ago.";
-    return days_ago_last_run <= 28;
-  }
-  return false;
-}
-
-// A visitor for user hives, run by VisitUserHives. |client_state_path| is the
-// path to Chrome's ClientState key. |is_used| is set to true if Chrome has been
-// used within the last 28 days based on the contents of |user_hive|, in which
-// case |false| is returned to halt the hive visits. |user_sid| and |user_hive|
-// are provided by VisitUserHives.
-bool OnUserHive(const base::string16& client_state_path,
-                bool* is_used,
-                const wchar_t* user_sid,
-                base::win::RegKey* user_hive) {
-  // Continue the iteration if this hive isn't owned by an active Chrome user.
-  if (!IsActivelyUsedIn(user_hive->Handle(), client_state_path.c_str()))
-    return true;
-  // Stop the iteration.
-  *is_used = true;
-  return false;
-}
 
 // Remove the registration of the browser's DelegateExecute verb handler class.
 // This was once registered in support of "metro" mode on Windows 8.
@@ -155,18 +123,20 @@ void RemoveMultiChromeFrame(const InstallerState& installer_state) {
   // ClientState\UninstallString contains a path including "\Chrome Frame\".
   // Multi-install GCF would have had "\Chrome\", and anything else is garbage.
 
-  UpdatingAppRegistrationData gcf_data(
-      L"{8BA986DA-5100-405E-AA35-86F34A02ACBF}");
+  static constexpr wchar_t kGcfGuid[] =
+      L"{8BA986DA-5100-405E-AA35-86F34A02ACBF}";
+  base::string16 clients_key_path = install_static::GetClientsKeyPath(kGcfGuid);
   base::win::RegKey clients_key;
+  base::string16 client_state_key_path =
+      install_static::GetClientStateKeyPath(kGcfGuid);
   base::win::RegKey client_state_key;
 
   const bool has_clients_key =
-      clients_key.Open(installer_state.root_key(),
-                       gcf_data.GetVersionKey().c_str(),
+      clients_key.Open(installer_state.root_key(), clients_key_path.c_str(),
                        KEY_QUERY_VALUE | KEY_WOW64_32KEY) == ERROR_SUCCESS;
   const bool has_client_state_key =
       client_state_key.Open(installer_state.root_key(),
-                            gcf_data.GetStateKey().c_str(),
+                            client_state_key_path.c_str(),
                             KEY_QUERY_VALUE | KEY_WOW64_32KEY) == ERROR_SUCCESS;
   if (!has_clients_key && !has_client_state_key)
     return;  // Nothing to check or to clean.
@@ -192,12 +162,11 @@ void RemoveMultiChromeFrame(const InstallerState& installer_state) {
   int success_count = 0;
 
   if (InstallUtil::DeleteRegistryKey(installer_state.root_key(),
-                                     gcf_data.GetVersionKey(),
-                                     KEY_WOW64_32KEY)) {
+                                     clients_key_path, KEY_WOW64_32KEY)) {
     ++success_count;
   }
   if (InstallUtil::DeleteRegistryKey(installer_state.root_key(),
-                                     gcf_data.GetStateKey(), KEY_WOW64_32KEY)) {
+                                     client_state_key_path, KEY_WOW64_32KEY)) {
     ++success_count;
   }
   if (InstallUtil::DeleteRegistryKey(
@@ -227,10 +196,10 @@ void RemoveMultiChromeFrame(const InstallerState& installer_state) {
 void RemoveAppLauncherVersionKey(const InstallerState& installer_state) {
 // The app launcher was only registered for Google Chrome.
 #if defined(GOOGLE_CHROME_BUILD)
-  UpdatingAppRegistrationData reg_data(
-      L"{FDA71E6F-AC4C-4a00-8B70-9958A68906BF}");
+  static constexpr wchar_t kLauncherGuid[] =
+      L"{FDA71E6F-AC4C-4a00-8B70-9958A68906BF}";
 
-  base::string16 path(reg_data.GetVersionKey());
+  base::string16 path = install_static::GetClientsKeyPath(kLauncherGuid);
   if (base::win::RegKey(installer_state.root_key(), path.c_str(),
                         KEY_QUERY_VALUE | KEY_WOW64_32KEY)
           .Valid()) {
@@ -258,9 +227,7 @@ void RemoveAppHostExe(const InstallerState& installer_state) {
 void RemoveLegacyChromeAppCommands(const InstallerState& installer_state) {
 // These app commands were only registered for Google Chrome.
 #if defined(GOOGLE_CHROME_BUILD)
-  base::string16 path(GetRegistrationDataCommandKey(
-      installer_state.product().distribution()->GetAppRegistrationData(),
-      L"install-extension"));
+  base::string16 path(GetCommandKey(L"install-extension"));
 
   if (base::win::RegKey(installer_state.root_key(), path.c_str(),
                         KEY_QUERY_VALUE | KEY_WOW64_32KEY)
@@ -517,10 +484,8 @@ bool IsProcessorSupported() {
   return base::CPU().has_sse2();
 }
 
-base::string16 GetRegistrationDataCommandKey(
-    const AppRegistrationData& reg_data,
-    const wchar_t* name) {
-  base::string16 cmd_key(reg_data.GetVersionKey());
+base::string16 GetCommandKey(const wchar_t* name) {
+  base::string16 cmd_key = install_static::GetClientsKeyPath();
   cmd_key.append(1, base::FilePath::kSeparators[0])
       .append(google_update::kRegCommandsKey)
       .append(1, base::FilePath::kSeparators[0])
@@ -674,43 +639,10 @@ void DeleteRegistryKeyPartial(
   }
 }
 
-base::string16 GuidToSquid(const base::string16& guid) {
-  base::string16 squid;
-  squid.reserve(32);
-  auto input = guid.begin();
-  auto output = std::back_inserter(squid);
-
-  // Reverse-copy relevant characters, skipping separators.
-  std::reverse_copy(input + 0, input + 8, output);
-  std::reverse_copy(input + 9, input + 13, output);
-  std::reverse_copy(input + 14, input + 18, output);
-  std::reverse_copy(input + 19, input + 21, output);
-  std::reverse_copy(input + 21, input + 23, output);
-  std::reverse_copy(input + 24, input + 26, output);
-  std::reverse_copy(input + 26, input + 28, output);
-  std::reverse_copy(input + 28, input + 30, output);
-  std::reverse_copy(input + 30, input + 32, output);
-  std::reverse_copy(input + 32, input + 34, output);
-  std::reverse_copy(input + 34, input + 36, output);
-  return squid;
-}
-
 bool IsDowngradeAllowed(const MasterPreferences& prefs) {
   bool allow_downgrade = false;
   return prefs.GetBool(master_preferences::kAllowDowngrade, &allow_downgrade) &&
          allow_downgrade;
-}
-
-bool IsChromeActivelyUsed(const InstallerState& installer_state) {
-  BrowserDistribution* chrome_dist = BrowserDistribution::GetDistribution();
-  if (!installer_state.system_install()) {
-    return IsActivelyUsedIn(HKEY_CURRENT_USER,
-                            chrome_dist->GetStateKey().c_str());
-  }
-  bool is_used = false;
-  VisitUserHives(base::Bind(&OnUserHive, chrome_dist->GetStateKey(),
-                            base::Unretained(&is_used)));
-  return is_used;
 }
 
 int GetInstallAge(const InstallerState& installer_state) {
@@ -805,15 +737,6 @@ void DeRegisterEventLogProvider() {
                                  WorkItem::kWow64Default);
 }
 
-std::unique_ptr<AppRegistrationData> MakeBinariesRegistrationData() {
-  if (install_static::kUseGoogleUpdateIntegration) {
-    return std::make_unique<UpdatingAppRegistrationData>(
-        install_static::kBinariesAppGuid);
-  }
-  return std::make_unique<NonUpdatingAppRegistrationData>(
-      base::string16(L"Software\\").append(install_static::kBinariesPathName));
-}
-
 bool AreBinariesInstalled(const InstallerState& installer_state) {
   if (!install_static::InstallDetails::Get().supported_multi_install())
     return false;
@@ -874,12 +797,6 @@ base::Time GetConsoleSessionStartTime() {
   return base::Time::FromFileTime(filetime);
 }
 
-bool OsSupportsDarkTextTiles() {
-  auto windows_version = base::win::GetVersion();
-  return windows_version == base::win::VERSION_WIN8_1 ||
-         windows_version >= base::win::VERSION_WIN10_RS1;
-}
-
 base::Optional<std::string> DecodeDMTokenSwitchValue(
     const base::string16& encoded_token) {
   if (encoded_token.empty()) {
@@ -933,6 +850,33 @@ bool StoreDMToken(const std::string& token) {
   VLOG(1) << "Successfully stored specified DMToken in the registry.";
 
   return true;
+}
+
+base::FilePath GetNotificationHelperPath(const base::FilePath& target_path,
+                                         const base::Version& version) {
+  return target_path.AppendASCII(version.GetString())
+      .Append(kNotificationHelperExe);
+}
+
+base::FilePath GetElevationServicePath(const base::FilePath& target_path,
+                                       const base::Version& version) {
+  return target_path.AppendASCII(version.GetString())
+      .Append(kElevationServiceExe);
+}
+
+base::string16 GetElevationServiceGuid(base::StringPiece16 prefix) {
+  base::string16 result =
+      InstallUtil::String16FromGUID(install_static::GetElevatorClsid());
+  result.insert(0, prefix.data(), prefix.size());
+  return result;
+}
+
+base::string16 GetElevationServiceClsidRegistryPath() {
+  return GetElevationServiceGuid(L"Software\\Classes\\CLSID\\");
+}
+
+base::string16 GetElevationServiceAppidRegistryPath() {
+  return GetElevationServiceGuid(L"Software\\Classes\\AppID\\");
 }
 
 }  // namespace installer

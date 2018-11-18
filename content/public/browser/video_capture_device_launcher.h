@@ -29,11 +29,16 @@ class CONTENT_EXPORT VideoCaptureDeviceLauncher {
     virtual ~Callbacks() {}
     virtual void OnDeviceLaunched(
         std::unique_ptr<LaunchedVideoCaptureDevice> device) = 0;
-    virtual void OnDeviceLaunchFailed() = 0;
+    virtual void OnDeviceLaunchFailed(media::VideoCaptureError error) = 0;
     virtual void OnDeviceLaunchAborted() = 0;
   };
 
   virtual ~VideoCaptureDeviceLauncher() {}
+
+  // Creates an InProcessVideoCaptureDeviceLauncher.
+  static std::unique_ptr<VideoCaptureDeviceLauncher>
+  CreateInProcessVideoCaptureDeviceLauncher(
+      scoped_refptr<base::SingleThreadTaskRunner> device_task_runner);
 
   // The passed-in |done_cb| must guarantee that the context relevant
   // during the asynchronous processing stays alive.

@@ -34,20 +34,22 @@ class FakeVideoEncodeAccelerator : public VideoEncodeAccelerator {
   ~FakeVideoEncodeAccelerator() override;
 
   VideoEncodeAccelerator::SupportedProfiles GetSupportedProfiles() override;
-  bool Initialize(VideoPixelFormat input_format,
-                  const gfx::Size& input_visible_size,
-                  VideoCodecProfile output_profile,
-                  uint32_t initial_bitrate,
-                  Client* client) override;
+  bool Initialize(const Config& config, Client* client) override;
   void Encode(const scoped_refptr<VideoFrame>& frame,
               bool force_keyframe) override;
   void UseOutputBitstreamBuffer(const BitstreamBuffer& buffer) override;
   void RequestEncodingParametersChange(uint32_t bitrate,
                                        uint32_t framerate) override;
+  void RequestEncodingParametersChange(const VideoBitrateAllocation& bitrate,
+                                       uint32_t framerate) override;
   void Destroy() override;
 
   const std::vector<uint32_t>& stored_bitrates() const {
     return stored_bitrates_;
+  }
+  const std::vector<VideoBitrateAllocation>& stored_bitrate_allocations()
+      const {
+    return stored_bitrate_allocations_;
   }
   void SendDummyFrameForTesting(bool key_frame);
   void SetWillInitializationSucceed(bool will_initialization_succeed);
@@ -66,6 +68,7 @@ class FakeVideoEncodeAccelerator : public VideoEncodeAccelerator {
   // Our original (constructor) calling message loop used for all tasks.
   const scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
   std::vector<uint32_t> stored_bitrates_;
+  std::vector<VideoBitrateAllocation> stored_bitrate_allocations_;
   bool will_initialization_succeed_;
 
   VideoEncodeAccelerator::Client* client_;

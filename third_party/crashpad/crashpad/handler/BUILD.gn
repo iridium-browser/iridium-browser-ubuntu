@@ -80,6 +80,10 @@ static_library("handler") {
   if (crashpad_is_win) {
     cflags = [ "/wd4201" ]  # nonstandard extension used : nameless struct/union
   }
+
+  if (crashpad_is_fuchsia) {
+    deps += [ "../third_party/fuchsia:zx" ]
+  }
 }
 
 source_set("handler_test") {
@@ -112,6 +116,7 @@ source_set("handler_test") {
   if (crashpad_is_win) {
     data_deps = [
       ":crashpad_handler_test_extended_handler",
+      ":fake_handler_that_crashes_at_startup",
     ]
   }
 }
@@ -138,10 +143,15 @@ crashpad_executable("crashpad_handler") {
         "@loader_path/../../../../../../../..",
 
         # The handler is also in
-        # Content Shell.app/Contents/Frameworks/Content Shell Framework.framework/Helpers/
+        # Content Shell.app/Contents/Frameworks/Content Shell Framework.framework/Versions/C/Helpers/
         # so set the rpath for that too.
         "-rpath",
-        "@loader_path/../../../../..",
+        "@loader_path/../../../../../../..",
+
+        # The handler can also be executed in an unbundled framework at
+        # Chromium Framework.framework/Versions/V/Helpers/
+        "-rpath",
+        "@loader_path/../../../..",
       ]
     }
   }
@@ -156,6 +166,26 @@ crashpad_executable("crashpad_handler") {
       configs =
           [ "//third_party/mini_chromium/mini_chromium/build:win_windowed" ]
     }
+  }
+}
+
+# There is not any normal way to package native executables in an Android APK.
+# It is normal to package native code as a loadable module but Android's APK
+# installer will ignore files not named like a shared object, so give the
+# handler executable an acceptable name.
+if (crashpad_is_android) {
+  copy("crashpad_handler_named_as_so") {
+    deps = [
+      ":crashpad_handler",
+    ]
+
+    sources = [
+      "$root_out_dir/crashpad_handler",
+    ]
+
+    outputs = [
+      "$root_out_dir/libcrashpad_handler.so",
+    ]
   }
 }
 

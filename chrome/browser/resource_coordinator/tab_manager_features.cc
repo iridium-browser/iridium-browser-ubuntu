@@ -5,6 +5,7 @@
 #include "chrome/browser/resource_coordinator/tab_manager_features.h"
 
 #include "base/metrics/field_trial_params.h"
+#include "base/numerics/ranges.h"
 #include "chrome/common/chrome_features.h"
 
 namespace {
@@ -22,9 +23,19 @@ namespace features {
 const base::Feature kCustomizedTabLoadTimeout{
     "CustomizedTabLoadTimeout", base::FEATURE_DISABLED_BY_DEFAULT};
 
-// Enables proactive tab discarding.
-const base::Feature kProactiveTabDiscarding{"ProactiveTabDiscarding",
+// Enables TabLoader improvements for reducing the overhead of session restores
+// involving many many tabs.
+const base::Feature kInfiniteSessionRestore{"InfiniteSessionRestore",
                                             base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Enables proactive tab freezing and discarding.
+const base::Feature kProactiveTabFreezeAndDiscard{
+    resource_coordinator::kProactiveTabFreezeAndDiscardFeatureName,
+    base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Enables the site characteristics database.
+const base::Feature kSiteCharacteristicsDatabase{
+    "SiteCharacteristicsDatabase", base::FEATURE_DISABLED_BY_DEFAULT};
 
 // Enables delaying the navigation of background tabs in order to improve
 // foreground tab's user experience.
@@ -38,82 +49,177 @@ const base::Feature kStaggeredBackgroundTabOpeningExperiment{
     "StaggeredBackgroundTabOpeningExperiment",
     base::FEATURE_ENABLED_BY_DEFAULT};
 
+// Enables using the Tab Ranker to score tabs for discarding instead of relying
+// on last focused time.
+const base::Feature kTabRanker{"TabRanker", base::FEATURE_DISABLED_BY_DEFAULT};
+
 }  // namespace features
 
 namespace resource_coordinator {
 
-// Field-trial parameter names for proactive tab discarding.
-const char kProactiveTabDiscard_LowLoadedTabCountParam[] = "LowLoadedTabCount";
-const char kProactiveTabDiscard_ModerateLoadedTabsPerGbRamParam[] =
-    "ModerateLoadedTabsPerGbRam";
-const char kProactiveTabDiscard_HighLoadedTabCountParam[] =
-    "HighLoadedTabCount";
-const char kProactiveTabDiscard_LowOccludedTimeoutParam[] =
-    "LowOccludedTimeoutSeconds";
-const char kProactiveTabDiscard_ModerateOccludedTimeoutParam[] =
-    "ModerateOccludedTimeoutSeconds";
-const char kProactiveTabDiscard_HighOccludedTimeoutParam[] =
-    "HighOccludedTimeoutSeconds";
+namespace {
 
-// Default values for ProactiveTabDiscardParams.
-//
-// 50% of people cap out at 4 tabs, so for them proactive discarding won't even
-// be invoked. See Tabs.MaxTabsInADay.
-// TODO(chrisha): This should eventually be informed by the number of tabs
-// typically used over a given time horizon (metric being developed).
-const uint32_t kProactiveTabDiscard_LowLoadedTabCountDefault = 4;
-// Testing in the lab shows that 2GB devices suffer beyond 6 tabs, and 4GB
-// devices suffer beyond about 12 tabs. As a very simple first step, we'll aim
-// at allowing 3 tabs per GB of RAM on a system before proactive discarding
-// kicks in. This is a system resource dependent max, which is combined with the
-// DefaultMaxLoadedTabCount to determine the max on a system.
-const uint32_t kProactiveTabDiscard_ModerateLoadedTabsPerGbRamDefault = 3;
-// 99.9% of people cap out with fewer than this number, so only 0.1% of the
-// population should ever encounter proactive discarding based on this cap.
-const uint32_t kProactiveTabDiscard_HighLoadedTabCountDefault = 100;
-// Current discarding uses 10 minutes as a minimum cap. This uses exponentially
-// increasing timeouts beyond that.
-const base::TimeDelta kProactiveTabDiscard_LowOccludedTimeoutDefault =
-    base::TimeDelta::FromHours(6);
-const base::TimeDelta kProactiveTabDiscard_ModerateOccludedTimeoutDefault =
-    base::TimeDelta::FromHours(1);
-const base::TimeDelta kProactiveTabDiscard_HighOccludedTimeoutDefault =
-    base::TimeDelta::FromMinutes(10);
+// Determines the moderate threshold for tab discarding based on system memory,
+// and enforces the constraint that it must be in the interval
+// [low_loaded_tab_count, high_loaded_tab_count].
+int GetModerateThresholdTabCountBasedOnSystemMemory(
+    ProactiveTabFreezeAndDiscardParams* params,
+    int memory_in_gb) {
+  int moderate_loaded_tab_count_per_gb =
+      ProactiveTabFreezeAndDiscardParams::kModerateLoadedTabsPerGbRam.Get();
 
-void GetProactiveTabDiscardParams(ProactiveTabDiscardParams* params) {
-  params->low_loaded_tab_count = base::GetFieldTrialParamByFeatureAsInt(
-      features::kProactiveTabDiscarding,
-      kProactiveTabDiscard_LowLoadedTabCountParam,
-      kProactiveTabDiscard_LowLoadedTabCountDefault);
+  int moderate_level = moderate_loaded_tab_count_per_gb * memory_in_gb;
 
-  params->moderate_loaded_tab_count_per_gb =
-      base::GetFieldTrialParamByFeatureAsInt(
-          features::kProactiveTabDiscarding,
-          kProactiveTabDiscard_ModerateLoadedTabsPerGbRamParam,
-          kProactiveTabDiscard_ModerateLoadedTabsPerGbRamDefault);
+  moderate_level =
+      base::ClampToRange(moderate_level, params->low_loaded_tab_count,
+                         params->high_loaded_tab_count);
 
-  params->high_loaded_tab_count = base::GetFieldTrialParamByFeatureAsInt(
-      features::kProactiveTabDiscarding,
-      kProactiveTabDiscard_HighLoadedTabCountParam,
-      kProactiveTabDiscard_HighLoadedTabCountDefault);
+  return moderate_level;
+}
 
-  params->low_occluded_timeout =
-      base::TimeDelta::FromSeconds(base::GetFieldTrialParamByFeatureAsInt(
-          features::kProactiveTabDiscarding,
-          kProactiveTabDiscard_LowOccludedTimeoutParam,
-          kProactiveTabDiscard_LowOccludedTimeoutDefault.InSeconds()));
+}  // namespace
 
-  params->moderate_occluded_timeout =
-      base::TimeDelta::FromSeconds(base::GetFieldTrialParamByFeatureAsInt(
-          features::kProactiveTabDiscarding,
-          kProactiveTabDiscard_ModerateOccludedTimeoutParam,
-          kProactiveTabDiscard_ModerateOccludedTimeoutDefault.InSeconds()));
+const char kProactiveTabFreezeAndDiscardFeatureName[] =
+    "ProactiveTabFreezeAndDiscard";
+const char kProactiveTabFreezeAndDiscard_ShouldProactivelyDiscardParam[] =
+    "ShouldProactivelyDiscard";
+const char kProactiveTabFreezeAndDiscard_DisableHeuristicsParam[] =
+    "DisableHeuristicsProtections";
 
-  params->high_occluded_timeout =
-      base::TimeDelta::FromSeconds(base::GetFieldTrialParamByFeatureAsInt(
-          features::kProactiveTabDiscarding,
-          kProactiveTabDiscard_HighOccludedTimeoutParam,
-          kProactiveTabDiscard_HighOccludedTimeoutDefault.InSeconds()));
+// Instantiate the feature parameters for proactive tab discarding.
+constexpr base::FeatureParam<bool>
+    ProactiveTabFreezeAndDiscardParams::kShouldProactivelyDiscard;
+constexpr base::FeatureParam<bool>
+    ProactiveTabFreezeAndDiscardParams::kShouldPeriodicallyUnfreeze;
+constexpr base::FeatureParam<bool> ProactiveTabFreezeAndDiscardParams::
+    kShouldProtectTabsSharingBrowsingInstance;
+constexpr base::FeatureParam<int>
+    ProactiveTabFreezeAndDiscardParams::kLowLoadedTabCount;
+constexpr base::FeatureParam<int>
+    ProactiveTabFreezeAndDiscardParams::kModerateLoadedTabsPerGbRam;
+constexpr base::FeatureParam<int>
+    ProactiveTabFreezeAndDiscardParams::kHighLoadedTabCount;
+constexpr base::FeatureParam<int>
+    ProactiveTabFreezeAndDiscardParams::kLowOccludedTimeout;
+constexpr base::FeatureParam<int>
+    ProactiveTabFreezeAndDiscardParams::kModerateOccludedTimeout;
+constexpr base::FeatureParam<int>
+    ProactiveTabFreezeAndDiscardParams::kHighOccludedTimeout;
+constexpr base::FeatureParam<int>
+    ProactiveTabFreezeAndDiscardParams::kFreezeTimeout;
+constexpr base::FeatureParam<int>
+    ProactiveTabFreezeAndDiscardParams::kUnfreezeTimeout;
+constexpr base::FeatureParam<int>
+    ProactiveTabFreezeAndDiscardParams::kRefreezeTimeout;
+constexpr base::FeatureParam<bool>
+    ProactiveTabFreezeAndDiscardParams::kDisableHeuristicsProtections;
+
+// Instantiate the feature parameters for the site characteristics database.
+constexpr base::FeatureParam<int>
+    SiteCharacteristicsDatabaseParams::kFaviconUpdateObservationWindow;
+constexpr base::FeatureParam<int>
+    SiteCharacteristicsDatabaseParams::kTitleUpdateObservationWindow;
+constexpr base::FeatureParam<int>
+    SiteCharacteristicsDatabaseParams::kAudioUsageObservationWindow;
+constexpr base::FeatureParam<int>
+    SiteCharacteristicsDatabaseParams::kNotificationsUsageObservationWindow;
+constexpr base::FeatureParam<int>
+    SiteCharacteristicsDatabaseParams::kTitleOrFaviconChangeGracePeriod;
+constexpr base::FeatureParam<int>
+    SiteCharacteristicsDatabaseParams::kAudioUsageGracePeriod;
+
+// Instantiate the feature parameters for infinite session restore.
+constexpr base::FeatureParam<int>
+    InfiniteSessionRestoreParams::kMinSimultaneousTabLoads;
+constexpr base::FeatureParam<int>
+    InfiniteSessionRestoreParams::kMaxSimultaneousTabLoads;
+constexpr base::FeatureParam<int>
+    InfiniteSessionRestoreParams::kCoresPerSimultaneousTabLoad;
+constexpr base::FeatureParam<int>
+    InfiniteSessionRestoreParams::kMinTabsToRestore;
+constexpr base::FeatureParam<int>
+    InfiniteSessionRestoreParams::kMaxTabsToRestore;
+constexpr base::FeatureParam<int>
+    InfiniteSessionRestoreParams::kMbFreeMemoryPerTabToRestore;
+constexpr base::FeatureParam<int>
+    InfiniteSessionRestoreParams::kMaxTimeSinceLastUseToRestore;
+constexpr base::FeatureParam<int>
+    InfiniteSessionRestoreParams::kMinSiteEngagementToRestore;
+
+ProactiveTabFreezeAndDiscardParams::ProactiveTabFreezeAndDiscardParams() =
+    default;
+ProactiveTabFreezeAndDiscardParams::ProactiveTabFreezeAndDiscardParams(
+    const ProactiveTabFreezeAndDiscardParams& rhs) = default;
+
+SiteCharacteristicsDatabaseParams::SiteCharacteristicsDatabaseParams() =
+    default;
+SiteCharacteristicsDatabaseParams::SiteCharacteristicsDatabaseParams(
+    const SiteCharacteristicsDatabaseParams& rhs) = default;
+
+InfiniteSessionRestoreParams::InfiniteSessionRestoreParams() = default;
+InfiniteSessionRestoreParams::InfiniteSessionRestoreParams(
+    const InfiniteSessionRestoreParams& rhs) = default;
+
+ProactiveTabFreezeAndDiscardParams GetProactiveTabFreezeAndDiscardParams(
+    int memory_in_gb) {
+  ProactiveTabFreezeAndDiscardParams params = {};
+
+  params.should_proactively_discard =
+      ProactiveTabFreezeAndDiscardParams::kShouldProactivelyDiscard.Get();
+
+  params.should_periodically_unfreeze =
+      ProactiveTabFreezeAndDiscardParams::kShouldPeriodicallyUnfreeze.Get();
+
+  params.should_protect_tabs_sharing_browsing_instance =
+      ProactiveTabFreezeAndDiscardParams::
+          kShouldProtectTabsSharingBrowsingInstance.Get();
+
+  params.low_loaded_tab_count =
+      ProactiveTabFreezeAndDiscardParams::kLowLoadedTabCount.Get();
+
+  params.high_loaded_tab_count =
+      ProactiveTabFreezeAndDiscardParams::kHighLoadedTabCount.Get();
+
+  // |moderate_loaded_tab_count| determined after |high_loaded_tab_count| so it
+  // can be enforced that it is lower than |high_loaded_tab_count|.
+  params.moderate_loaded_tab_count =
+      GetModerateThresholdTabCountBasedOnSystemMemory(&params, memory_in_gb);
+
+  params.low_occluded_timeout = base::TimeDelta::FromSeconds(
+      ProactiveTabFreezeAndDiscardParams::kLowOccludedTimeout.Get());
+
+  params.moderate_occluded_timeout = base::TimeDelta::FromSeconds(
+      ProactiveTabFreezeAndDiscardParams::kModerateOccludedTimeout.Get());
+
+  params.high_occluded_timeout = base::TimeDelta::FromSeconds(
+      ProactiveTabFreezeAndDiscardParams::kHighOccludedTimeout.Get());
+
+  params.freeze_timeout = base::TimeDelta::FromSeconds(
+      ProactiveTabFreezeAndDiscardParams::kFreezeTimeout.Get());
+
+  params.unfreeze_timeout = base::TimeDelta::FromSeconds(
+      ProactiveTabFreezeAndDiscardParams::kUnfreezeTimeout.Get());
+
+  params.refreeze_timeout = base::TimeDelta::FromSeconds(
+      ProactiveTabFreezeAndDiscardParams::kRefreezeTimeout.Get());
+
+  params.disable_heuristics_protections =
+      ProactiveTabFreezeAndDiscardParams::kDisableHeuristicsProtections.Get();
+
+  return params;
+}
+
+const ProactiveTabFreezeAndDiscardParams&
+GetStaticProactiveTabFreezeAndDiscardParams() {
+  static base::NoDestructor<ProactiveTabFreezeAndDiscardParams> params(
+      GetProactiveTabFreezeAndDiscardParams());
+  return *params;
+}
+
+ProactiveTabFreezeAndDiscardParams*
+GetMutableStaticProactiveTabFreezeAndDiscardParamsForTesting() {
+  return const_cast<ProactiveTabFreezeAndDiscardParams*>(
+      &GetStaticProactiveTabFreezeAndDiscardParams());
 }
 
 base::TimeDelta GetTabLoadTimeout(const base::TimeDelta& default_timeout) {
@@ -125,6 +231,62 @@ base::TimeDelta GetTabLoadTimeout(const base::TimeDelta& default_timeout) {
     return default_timeout;
 
   return base::TimeDelta::FromMilliseconds(timeout_in_ms);
+}
+
+SiteCharacteristicsDatabaseParams GetSiteCharacteristicsDatabaseParams() {
+  SiteCharacteristicsDatabaseParams params = {};
+
+  params.favicon_update_observation_window = base::TimeDelta::FromSeconds(
+      SiteCharacteristicsDatabaseParams::kFaviconUpdateObservationWindow.Get());
+
+  params.title_update_observation_window = base::TimeDelta::FromSeconds(
+      SiteCharacteristicsDatabaseParams::kTitleUpdateObservationWindow.Get());
+
+  params.audio_usage_observation_window = base::TimeDelta::FromSeconds(
+      SiteCharacteristicsDatabaseParams::kAudioUsageObservationWindow.Get());
+
+  params.notifications_usage_observation_window = base::TimeDelta::FromSeconds(
+      SiteCharacteristicsDatabaseParams::kNotificationsUsageObservationWindow
+          .Get());
+
+  params.title_or_favicon_change_grace_period = base::TimeDelta::FromSeconds(
+      SiteCharacteristicsDatabaseParams::kTitleOrFaviconChangeGracePeriod
+          .Get());
+
+  params.audio_usage_grace_period = base::TimeDelta::FromSeconds(
+      SiteCharacteristicsDatabaseParams::kAudioUsageGracePeriod.Get());
+
+  return params;
+}
+
+const SiteCharacteristicsDatabaseParams&
+GetStaticSiteCharacteristicsDatabaseParams() {
+  static base::NoDestructor<SiteCharacteristicsDatabaseParams> params(
+      GetSiteCharacteristicsDatabaseParams());
+  return *params;
+}
+
+InfiniteSessionRestoreParams GetInfiniteSessionRestoreParams() {
+  InfiniteSessionRestoreParams params = {};
+
+  params.min_simultaneous_tab_loads =
+      InfiniteSessionRestoreParams::kMinSimultaneousTabLoads.Get();
+  params.max_simultaneous_tab_loads =
+      InfiniteSessionRestoreParams::kMaxSimultaneousTabLoads.Get();
+  params.cores_per_simultaneous_tab_load =
+      InfiniteSessionRestoreParams::kCoresPerSimultaneousTabLoad.Get();
+  params.min_tabs_to_restore =
+      InfiniteSessionRestoreParams::kMinTabsToRestore.Get();
+  params.max_tabs_to_restore =
+      InfiniteSessionRestoreParams::kMaxTabsToRestore.Get();
+  params.mb_free_memory_per_tab_to_restore =
+      InfiniteSessionRestoreParams::kMbFreeMemoryPerTabToRestore.Get();
+  params.max_time_since_last_use_to_restore = base::TimeDelta::FromSeconds(
+      InfiniteSessionRestoreParams::kMaxTimeSinceLastUseToRestore.Get());
+  params.min_site_engagement_to_restore =
+      InfiniteSessionRestoreParams::kMinSiteEngagementToRestore.Get();
+
+  return params;
 }
 
 }  // namespace resource_coordinator

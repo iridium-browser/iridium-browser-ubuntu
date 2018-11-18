@@ -7,7 +7,6 @@
 #include <memory>
 
 #include "build/build_config.h"
-#include "third_party/blink/public/platform/modules/screen_orientation/web_lock_orientation_callback.h"
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/public/platform/web_screen_info.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
@@ -20,6 +19,7 @@
 #include "third_party/blink/renderer/modules/device_orientation/device_orientation_event.h"
 #include "third_party/blink/renderer/modules/screen_orientation/screen_orientation.h"
 #include "third_party/blink/renderer/modules/screen_orientation/screen_screen_orientation.h"
+#include "third_party/blink/renderer/modules/screen_orientation/web_lock_orientation_callback.h"
 #include "third_party/blink/renderer/platform/histogram.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
@@ -145,7 +145,7 @@ void MediaControlsOrientationLockDelegate::MaybeLockOrientation() {
   if (!GetDocument().GetFrame())
     return;
 
-  auto controller =
+  auto* controller =
       ScreenOrientationController::From(*GetDocument().GetFrame());
   if (controller->MaybeHasActiveLock()) {
     RecordLockResult(LockResultMetrics::kAlreadyLocked);
@@ -210,7 +210,7 @@ void MediaControlsOrientationLockDelegate::MaybeListenToDeviceOrientation() {
   if (!RuntimeEnabledFeatures::VideoRotateToFullscreenEnabled())
     return;
 
-  if (is_auto_rotate_enabled_by_user_override_for_testing_ != WTF::nullopt) {
+  if (is_auto_rotate_enabled_by_user_override_for_testing_ != base::nullopt) {
     GotIsAutoRotateEnabledByUser(
         is_auto_rotate_enabled_by_user_override_for_testing_.value());
     return;
@@ -377,7 +377,7 @@ MediaControlsOrientationLockDelegate::ComputeDeviceOrientation(
 
   // device_orientation_angle snapped to nearest multiple of 90.
   int device_orientation_angle90 =
-      std::lround(device_orientation_angle / 90) * 90;
+      static_cast<int>(std::lround(device_orientation_angle / 90) * 90);
 
   // To be considered portrait or landscape, allow the device to be rotated 23
   // degrees (chosen to approximately match Android's behavior) to either side

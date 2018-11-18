@@ -8,7 +8,7 @@
 #include "base/callback.h"
 #include "base/strings/string16.h"
 #include "content/common/content_export.h"
-#include "content/public/common/speech_recognition_result.h"
+#include "third_party/blink/public/mojom/speech/speech_recognition_result.mojom.h"
 
 namespace content {
 
@@ -64,12 +64,6 @@ class SpeechRecognitionManager {
   // Retrieves the context associated to a session.
   virtual SpeechRecognitionSessionContext GetSessionContext(
       int session_id) const = 0;
-
-  // Looks up an existing session from the context tuple
-  // {render_process_id, render_frame_id, request_id}.
-  virtual int GetSession(int render_process_id,
-                         int render_frame_id,
-                         int request_id) const = 0;
 
  protected:
   virtual ~SpeechRecognitionManager() {}

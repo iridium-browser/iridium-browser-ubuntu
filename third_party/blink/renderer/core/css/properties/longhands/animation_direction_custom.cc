@@ -32,14 +32,20 @@ const CSSValue* AnimationDirection::CSSValueFromComputedStyleInternal(
   CSSValueList* list = CSSValueList::CreateCommaSeparated();
   const CSSAnimationData* animation_data = style.Animations();
   if (animation_data) {
-    for (size_t i = 0; i < animation_data->DirectionList().size(); ++i) {
+    for (wtf_size_t i = 0; i < animation_data->DirectionList().size(); ++i) {
       list->Append(*ComputedStyleUtils::ValueForAnimationDirection(
           animation_data->DirectionList()[i]));
     }
   } else {
-    list->Append(*CSSIdentifierValue::Create(CSSValueNormal));
+    list->Append(*InitialValue());
   }
   return list;
+}
+
+const CSSValue* AnimationDirection::InitialValue() const {
+  DEFINE_STATIC_LOCAL(Persistent<CSSValue>, value,
+                      (CSSIdentifierValue::Create(CSSValueNormal)));
+  return value;
 }
 
 }  // namespace CSSLonghand

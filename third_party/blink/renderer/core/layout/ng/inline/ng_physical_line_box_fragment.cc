@@ -5,39 +5,71 @@
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_physical_line_box_fragment.h"
 
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_inline_break_token.h"
+#include "third_party/blink/renderer/core/layout/ng/ng_relative_utils.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
 
 namespace blink {
 
 NGPhysicalLineBoxFragment::NGPhysicalLineBoxFragment(
     const ComputedStyle& style,
+    NGStyleVariant style_variant,
     NGPhysicalSize size,
-    Vector<scoped_refptr<NGPhysicalFragment>>& children,
-    const NGPhysicalOffsetRect& contents_visual_rect,
+    Vector<NGLink>& children,
     const NGLineHeightMetrics& metrics,
     TextDirection base_direction,
     scoped_refptr<NGBreakToken> break_token)
     : NGPhysicalContainerFragment(nullptr,
                                   style,
+                                  style_variant,
                                   size,
                                   kFragmentLineBox,
                                   0,
                                   children,
-                                  contents_visual_rect,
                                   std::move(break_token)),
       metrics_(metrics) {
   base_direction_ = static_cast<unsigned>(base_direction);
 }
 
-LayoutUnit NGPhysicalLineBoxFragment::BaselinePosition(FontBaseline) const {
+NGLineHeightMetrics NGPhysicalLineBoxFragment::BaselineMetrics(
+    FontBaseline) const {
   // TODO(kojii): Computing other baseline types than the used one is not
   // implemented yet.
   // TODO(kojii): We might need locale/script to look up OpenType BASE table.
-  return metrics_.ascent;
+  return metrics_;
 }
 
-NGPhysicalOffsetRect NGPhysicalLineBoxFragment::VisualRectWithContents() const {
-  return ContentsVisualRect();
+NGPhysicalOffsetRect NGPhysicalLineBoxFragment::InkOverflow() const {
+  return ContentsInkOverflow();
+}
+
+NGPhysicalOffsetRect NGPhysicalLineBoxFragment::ContentsInkOverflow() const {
+  // Cannot be cached, because children might change their self-painting flag.
+  NGPhysicalOffsetRect overflow({}, Size());
+  for (const auto& child : Children()) {
+    child->PropagateContentsInkOverflow(&overflow, child.Offset());
+  }
+  return overflow;
+}
+
+NGPhysicalOffsetRect NGPhysicalLineBoxFragment::ScrollableOverflow(
+    const ComputedStyle* container_style,
+    NGPhysicalSize container_physical_size) const {
+  WritingMode container_writing_mode = container_style->GetWritingMode();
+  TextDirection container_direction = container_style->Direction();
+  NGPhysicalOffsetRect overflow({}, Size());
+  for (const auto& child : Children()) {
+    NGPhysicalOffsetRect child_scroll_overflow = child->ScrollableOverflow();
+    child_scroll_overflow.offset += child.Offset();
+    // If child has the same style as parent, parent will compute relative
+    // offset.
+    if (&child->Style() != container_style) {
+      child_scroll_overflow.offset +=
+          ComputeRelativeOffset(child->Style(), container_writing_mode,
+                                container_direction, container_physical_size);
+    }
+    overflow.Unite(child_scroll_overflow);
+  }
+  return overflow;
 }
 
 const NGPhysicalFragment* NGPhysicalLineBoxFragment::FirstLogicalLeaf() const {
@@ -47,7 +79,7 @@ const NGPhysicalFragment* NGPhysicalLineBoxFragment::FirstLogicalLeaf() const {
   // should compute and store it during layout.
   const TextDirection direction = Style().Direction();
   const NGPhysicalFragment* runner = this;
-  while (runner->IsContainer() && !runner->IsBlockLayoutRoot()) {
+  while (runner->IsContainer() && !runner->IsBlockFormattingContextRoot()) {
     const NGPhysicalContainerFragment* runner_as_container =
         ToNGPhysicalContainerFragment(runner);
     if (runner_as_container->Children().IsEmpty())
@@ -67,7 +99,7 @@ const NGPhysicalFragment* NGPhysicalLineBoxFragment::LastLogicalLeaf() const {
   // should compute and store it during layout.
   const TextDirection direction = Style().Direction();
   const NGPhysicalFragment* runner = this;
-  while (runner->IsContainer() && !runner->IsBlockLayoutRoot()) {
+  while (runner->IsContainer() && !runner->IsBlockFormattingContextRoot()) {
     const NGPhysicalContainerFragment* runner_as_container =
         ToNGPhysicalContainerFragment(runner);
     if (runner_as_container->Children().IsEmpty())
@@ -85,11 +117,6 @@ bool NGPhysicalLineBoxFragment::HasSoftWrapToNextLine() const {
   DCHECK(BreakToken()->IsInlineType());
   const NGInlineBreakToken& break_token = ToNGInlineBreakToken(*BreakToken());
   return !break_token.IsFinished() && !break_token.IsForcedBreak();
-}
-
-PositionWithAffinity NGPhysicalLineBoxFragment::PositionForPoint(
-    const NGPhysicalOffset& point) const {
-  return PositionForPointInInlineLevelBox(point);
 }
 
 }  // namespace blink

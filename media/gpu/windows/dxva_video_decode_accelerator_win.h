@@ -30,12 +30,13 @@
 #include "base/memory/weak_ptr.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/thread.h"
-#include "gpu/command_buffer/service/gpu_preferences.h"
+#include "gpu/config/gpu_preferences.h"
 #include "media/base/video_color_space.h"
 #include "media/gpu/gpu_video_decode_accelerator_helpers.h"
 #include "media/gpu/media_gpu_export.h"
 #include "media/video/video_decode_accelerator.h"
 #include "ui/gfx/color_space.h"
+#include "ui/gfx/geometry/rect.h"
 
 interface IMFSample;
 interface IDirect3DSurface9;
@@ -47,7 +48,7 @@ class GLContext;
 namespace gpu {
 class GpuDriverBugWorkarounds;
 struct GpuPreferences;
-}
+}  // namespace gpu
 
 typedef HRESULT(WINAPI* CreateDXGIDeviceManager)(
     UINT* reset_token,
@@ -57,12 +58,15 @@ namespace media {
 class DXVAPictureBuffer;
 class EGLStreamCopyPictureBuffer;
 class EGLStreamPictureBuffer;
+class MediaLog;
 class PbufferPictureBuffer;
 
 class ConfigChangeDetector {
  public:
   virtual ~ConfigChangeDetector();
   virtual bool DetectConfig(const uint8_t* stream, unsigned int size) = 0;
+  virtual gfx::Rect current_visible_rect(
+      const gfx::Rect& container_visible_rect) const = 0;
   virtual VideoColorSpace current_color_space(
       const VideoColorSpace& container_color_space) const = 0;
   bool config_changed() const { return config_changed_; }
@@ -94,12 +98,15 @@ class MEDIA_GPU_EXPORT DXVAVideoDecodeAccelerator
       const MakeGLContextCurrentCallback& make_context_current_cb,
       const BindGLImageCallback& bind_image_cb,
       const gpu::GpuDriverBugWorkarounds& workarounds,
-      const gpu::GpuPreferences& gpu_preferences);
+      const gpu::GpuPreferences& gpu_preferences,
+      MediaLog* media_log);
   ~DXVAVideoDecodeAccelerator() override;
 
   // VideoDecodeAccelerator implementation.
   bool Initialize(const Config& config, Client* client) override;
-  void Decode(const BitstreamBuffer& bitstream_buffer) override;
+  void Decode(const BitstreamBuffer& bitstream) override;
+  void Decode(scoped_refptr<DecoderBuffer> buffer,
+              int32_t bitstream_id) override;
   void AssignPictureBuffers(const std::vector<PictureBuffer>& buffers) override;
   void ReusePictureBuffer(int32_t picture_buffer_id) override;
   void Flush() override;
@@ -190,12 +197,14 @@ class MEDIA_GPU_EXPORT DXVAVideoDecodeAccelerator
 
   // The bulk of the decoding happens here. This function handles errors,
   // format changes and processes decoded output.
-  void DoDecode(const gfx::ColorSpace& color_space);
+  void DoDecode(const gfx::Rect& visible_rect,
+                const gfx::ColorSpace& color_space);
 
   // Invoked when we have a valid decoded output sample. Retrieves the D3D
   // surface and maintains a copy of it which is passed eventually to the
   // client when we have a picture buffer to copy the surface contents to.
   bool ProcessOutputSample(Microsoft::WRL::ComPtr<IMFSample> sample,
+                           const gfx::Rect& visible_rect,
                            const gfx::ColorSpace& color_space);
 
   // Processes pending output samples by copying them to available picture
@@ -228,6 +237,7 @@ class MEDIA_GPU_EXPORT DXVAVideoDecodeAccelerator
   // Notifies the client about the availability of a picture.
   void NotifyPictureReady(int picture_buffer_id,
                           int input_buffer_id,
+                          const gfx::Rect& visible_rect,
                           const gfx::ColorSpace& color_space,
                           bool allow_overlay);
 
@@ -408,8 +418,6 @@ class MEDIA_GPU_EXPORT DXVAVideoDecodeAccelerator
   // Reset token for the DX11 device manager.
   uint32_t dx11_dev_manager_reset_token_;
 
-  uint32_t dx11_dev_manager_reset_token_format_conversion_;
-
   // The EGL config to use for decoded frames.
   EGLConfig egl_config_;
 
@@ -423,6 +431,7 @@ class MEDIA_GPU_EXPORT DXVAVideoDecodeAccelerator
   struct PendingSampleInfo {
     PendingSampleInfo(int32_t buffer_id,
                       Microsoft::WRL::ComPtr<IMFSample> sample,
+                      const gfx::Rect& visible_rect,
                       const gfx::ColorSpace& color_space);
     PendingSampleInfo(const PendingSampleInfo& other);
     ~PendingSampleInfo();
@@ -432,6 +441,8 @@ class MEDIA_GPU_EXPORT DXVAVideoDecodeAccelerator
     // The target picture buffer id where the frame would be copied to.
     // Defaults to -1.
     int picture_buffer_id;
+
+    gfx::Rect visible_rect;
 
     // The color space of this picture.
     gfx::ColorSpace color_space;
@@ -478,6 +489,9 @@ class MEDIA_GPU_EXPORT DXVAVideoDecodeAccelerator
   // Callback to set the correct gl context.
   MakeGLContextCurrentCallback make_context_current_cb_;
   BindGLImageCallback bind_image_cb_;
+
+  // This may be null, e.g. when not using MojoVideoDecoder.
+  MediaLog* const media_log_;
 
   // Which codec we are decoding with hardware acceleration.
   VideoCodec codec_;
@@ -561,6 +575,11 @@ class MEDIA_GPU_EXPORT DXVAVideoDecodeAccelerator
 
   // Set to true if we are processing a video configuration change.
   bool processing_config_changed_;
+
+  // Contain the visible rect and color space of frames that are currently being
+  // fed into the decoder. These may change at a config change.
+  gfx::Rect current_visible_rect_;
+  VideoColorSpace current_color_space_;
 
   // WeakPtrFactory for posting tasks back to |this|.
   base::WeakPtrFactory<DXVAVideoDecodeAccelerator> weak_this_factory_;

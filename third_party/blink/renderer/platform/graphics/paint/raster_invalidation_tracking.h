@@ -14,12 +14,19 @@
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/skia/include/core/SkColor.h"
 
+namespace base {
+namespace trace_event {
+class TracedValue;
+}
+}  // namespace base
+
 namespace blink {
 
 class DisplayItemClient;
 
 struct RasterInvalidationInfo {
-  DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
+  DISALLOW_NEW();
+
   // This is for comparison only. Don't dereference because the client may have
   // died.
   const DisplayItemClient* client = nullptr;
@@ -32,11 +39,22 @@ struct RasterInvalidationInfo {
 
 inline bool operator==(const RasterInvalidationInfo& a,
                        const RasterInvalidationInfo& b) {
-  return a.rect == b.rect;
+  return a.client == b.client && a.client_debug_name == b.client_debug_name &&
+         a.rect == b.rect && a.reason == b.reason;
+}
+inline bool operator!=(const RasterInvalidationInfo& a,
+                       const RasterInvalidationInfo& b) {
+  return !(a == b);
+}
+
+inline std::ostream& operator<<(std::ostream& os,
+                                const RasterInvalidationInfo& info) {
+  return os << info.client << ":" << info.client_debug_name
+            << " rect=" << info.rect << " reason=" << info.reason;
 }
 
 struct RasterUnderInvalidation {
-  DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
+  DISALLOW_NEW();
   int x;
   int y;
   SkColor old_pixel;
@@ -45,13 +63,18 @@ struct RasterUnderInvalidation {
 
 class PLATFORM_EXPORT RasterInvalidationTracking {
  public:
-  DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
+  DISALLOW_NEW();
 
   // When RuntimeEnabledFeatures::PaintUnderInvalidationCheckingEnabled() and
-  // simulateRasterUnderInvalidation(true) is called, all changed pixels will
+  // SimulateRasterUnderInvalidation(true) is called, all changed pixels will
   // be reported as raster under-invalidations. Used to visually test raster
   // under-invalidation checking feature.
   static void SimulateRasterUnderInvalidations(bool enable);
+
+  // Whether we should always track because RuntimeEnabledFeatures::
+  // PaintUnderInvalidationCheckingEnabled() is true, or we are tracing
+  // "disabled-by-default-blink.invalidation" category.
+  static bool ShouldAlwaysTrack();
 
   void AddInvalidation(const DisplayItemClient*,
                        const String& debug_name,
@@ -73,6 +96,7 @@ class PLATFORM_EXPORT RasterInvalidationTracking {
                                const IntRect& new_interest_rect);
 
   void AsJSON(JSONObject*);
+  void AddToTracedValue(base::trace_event::TracedValue&);
 
   // The record containing under-invalidated pixels in dark red.
   sk_sp<const PaintRecord> UnderInvalidationRecord() const {

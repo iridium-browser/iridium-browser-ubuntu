@@ -34,23 +34,21 @@
 #include <string>
 
 #include "build/build_config.h"
+#include "cc/layers/layer.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/platform/platform.h"
-#include "third_party/blink/public/platform/web_clipboard.h"
 #include "third_party/blink/public/platform/web_coalesced_input_event.h"
-#include "third_party/blink/public/platform/web_compositor_support.h"
-#include "third_party/blink/public/platform/web_layer.h"
 #include "third_party/blink/public/platform/web_mouse_wheel_event.h"
 #include "third_party/blink/public/platform/web_pointer_event.h"
-#include "third_party/blink/public/platform/web_thread.h"
 #include "third_party/blink/public/platform/web_url_loader_mock_factory.h"
 #include "third_party/blink/public/web/web_document.h"
 #include "third_party/blink/public/web/web_element.h"
-#include "third_party/blink/public/web/web_frame_client.h"
+#include "third_party/blink/public/web/web_local_frame_client.h"
 #include "third_party/blink/public/web/web_plugin_params.h"
 #include "third_party/blink/public/web/web_print_params.h"
 #include "third_party/blink/public/web/web_settings.h"
 #include "third_party/blink/public/web/web_view.h"
+#include "third_party/blink/renderer/core/clipboard/system_clipboard.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/events/keyboard_event.h"
 #include "third_party/blink/renderer/core/exported/fake_web_plugin.h"
@@ -68,7 +66,9 @@
 #include "third_party/blink/renderer/platform/graphics/paint/paint_controller.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_recorder.h"
 #include "third_party/blink/renderer/platform/keyboard_codes.h"
+#include "third_party/blink/renderer/platform/scheduler/public/thread.h"
 #include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
+#include "third_party/blink/renderer/platform/testing/scoped_fake_plugin_registry.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 #include "third_party/blink/renderer/platform/testing/url_test_helpers.h"
 
@@ -103,6 +103,7 @@ class WebPluginContainerTest : public testing::Test {
   }
 
  protected:
+  ScopedFakePluginRegistry fake_plugins_;
   std::string base_url_;
 };
 
@@ -137,7 +138,7 @@ class TestPlugin : public FakeWebPlugin {
   WebString SelectionAsMarkup() const override { return WebString("y"); }
   bool SupportsPaginatedPrint() override { return true; }
   int PrintBegin(const WebPrintParams& print_params) override { return 1; }
-  void PrintPage(int page_number, WebCanvas*) override;
+  void PrintPage(int page_number, cc::PaintCanvas*) override;
 
  private:
   ~TestPlugin() override = default;
@@ -160,7 +161,7 @@ class TestPluginWithEditableText : public FakeWebPlugin {
 
   bool HasSelection() const override { return true; }
   bool CanEditText() const override { return true; }
-  bool ExecuteEditCommand(const WebString& name) {
+  bool ExecuteEditCommand(const WebString& name) override {
     return ExecuteEditCommand(name, WebString());
   }
   bool ExecuteEditCommand(const WebString& name,
@@ -197,7 +198,7 @@ class TestPluginWebFrameClient : public FrameTestHelpers::TestWebFrameClient {
                                   const WebString& fallback_name,
                                   WebSandboxFlags sandbox_flags,
                                   const ParsedFeaturePolicy& container_policy,
-                                  const WebFrameOwnerProperties&) {
+                                  const WebFrameOwnerProperties&) override {
     return CreateLocalChild(*parent, scope,
                             std::make_unique<TestPluginWebFrameClient>());
   }
@@ -210,7 +211,7 @@ class TestPluginWebFrameClient : public FrameTestHelpers::TestWebFrameClient {
 
       return new TestPlugin(params, this);
     }
-    return WebFrameClient::CreatePlugin(params);
+    return WebLocalFrameClient::CreatePlugin(params);
   }
 
  public:
@@ -225,7 +226,7 @@ class TestPluginWebFrameClient : public FrameTestHelpers::TestWebFrameClient {
   bool has_editable_text_ = false;
 };
 
-void TestPlugin::PrintPage(int page_number, WebCanvas* canvas) {
+void TestPlugin::PrintPage(int page_number, cc::PaintCanvas* canvas) {
   DCHECK(test_client_);
   test_client_->OnPrintPage();
 }
@@ -245,14 +246,16 @@ WebPluginContainer* GetWebPluginContainer(WebViewImpl* web_view,
   return element.PluginContainer();
 }
 
-WebString ReadClipboard() {
-  return Platform::Current()->Clipboard()->ReadPlainText(
-      mojom::ClipboardBuffer::kStandard);
+String ReadClipboard() {
+  // Run all tasks in a message loop to allow asynchronous clipboard writing
+  // to happen before reading from it synchronously.
+  test::RunPendingTasks();
+  return SystemClipboard::GetInstance().ReadPlainText();
 }
 
 void ClearClipboardBuffer() {
-  Platform::Current()->Clipboard()->WritePlainText(WebString());
-  EXPECT_EQ(WebString(), ReadClipboard());
+  SystemClipboard::GetInstance().WritePlainText(String(""));
+  EXPECT_EQ(String(""), ReadClipboard());
 }
 
 void CreateAndHandleKeyboardEvent(WebElement* plugin_container_one_element,
@@ -264,7 +267,7 @@ void CreateAndHandleKeyboardEvent(WebElement* plugin_container_one_element,
   web_keyboard_event.windows_key_code = key_code;
   KeyboardEvent* key_event = KeyboardEvent::Create(web_keyboard_event, nullptr);
   ToWebPluginContainerImpl(plugin_container_one_element->PluginContainer())
-      ->HandleEvent(key_event);
+      ->HandleEvent(*key_event);
 }
 
 void ExecuteContextMenuCommand(WebViewImpl* web_view,
@@ -454,7 +457,7 @@ TEST_F(WebPluginContainerTest, Copy) {
       ->getElementById("translated-plugin")
       ->focus();
   EXPECT_TRUE(web_view->MainFrame()->ToWebLocalFrame()->ExecuteCommand("Copy"));
-  EXPECT_EQ(WebString("x"), ReadClipboard());
+  EXPECT_EQ(String("x"), ReadClipboard());
   ClearClipboardBuffer();
 }
 
@@ -469,7 +472,7 @@ TEST_F(WebPluginContainerTest, CopyFromContextMenu) {
 
   // Make sure the right-click + command works in common scenario.
   ExecuteContextMenuCommand(web_view, "Copy");
-  EXPECT_EQ(WebString("x"), ReadClipboard());
+  EXPECT_EQ(String("x"), ReadClipboard());
   ClearClipboardBuffer();
 
   auto event = FrameTestHelpers::CreateMouseEvent(WebMouseEvent::kMouseDown,
@@ -485,7 +488,7 @@ TEST_F(WebPluginContainerTest, CopyFromContextMenu) {
   // 3) Copy should still operate on the context node, even though the focus had
   //    shifted.
   EXPECT_TRUE(web_view->MainFrameImpl()->ExecuteCommand("Copy"));
-  EXPECT_EQ(WebString("x"), ReadClipboard());
+  EXPECT_EQ(String("x"), ReadClipboard());
   ClearClipboardBuffer();
 }
 
@@ -507,12 +510,12 @@ TEST_F(WebPluginContainerTest, CopyInsertKeyboardEventsTest) {
       kEditingModifier | WebInputEvent::kNumLockOn | WebInputEvent::kIsLeft);
   CreateAndHandleKeyboardEvent(&plugin_container_one_element, modifier_key,
                                VKEY_C);
-  EXPECT_EQ(WebString("x"), ReadClipboard());
+  EXPECT_EQ(String("x"), ReadClipboard());
   ClearClipboardBuffer();
 
   CreateAndHandleKeyboardEvent(&plugin_container_one_element, modifier_key,
                                VKEY_INSERT);
-  EXPECT_EQ(WebString("x"), ReadClipboard());
+  EXPECT_EQ(String("x"), ReadClipboard());
   ClearClipboardBuffer();
 }
 
@@ -706,7 +709,9 @@ TEST_F(WebPluginContainerTest, PasteAndMatchStyleFromContextMenu) {
 class EventTestPlugin : public FakeWebPlugin {
  public:
   explicit EventTestPlugin(const WebPluginParams& params)
-      : FakeWebPlugin(params), last_event_type_(WebInputEvent::kUndefined) {}
+      : FakeWebPlugin(params),
+        last_event_type_(WebInputEvent::kUndefined),
+        last_event_modifiers_(WebInputEvent::kNoModifiers) {}
 
   WebInputEventResult HandleInputEvent(
       const WebCoalescedInputEvent& coalesced_event,
@@ -714,6 +719,7 @@ class EventTestPlugin : public FakeWebPlugin {
     const WebInputEvent& event = coalesced_event.Event();
     coalesced_event_count_ = coalesced_event.CoalescedEventSize();
     last_event_type_ = event.GetType();
+    last_event_modifiers_ = event.GetModifiers();
     if (WebInputEvent::IsMouseEventType(event.GetType()) ||
         event.GetType() == WebInputEvent::kMouseWheel) {
       const WebMouseEvent& mouse_event =
@@ -738,6 +744,8 @@ class EventTestPlugin : public FakeWebPlugin {
 
   IntPoint GetLastEventLocation() { return last_event_location_; }
 
+  int GetLastEventModifiers() { return last_event_modifiers_; }
+
   void ClearLastEventType() { last_event_type_ = WebInputEvent::kUndefined; }
 
   size_t GetCoalescedEventCount() { return coalesced_event_count_; }
@@ -748,6 +756,7 @@ class EventTestPlugin : public FakeWebPlugin {
   size_t coalesced_event_count_;
   WebInputEvent::Type last_event_type_;
   IntPoint last_event_location_;
+  int last_event_modifiers_;
 };
 
 TEST_F(WebPluginContainerTest, GestureLongPressReachesPlugin) {
@@ -792,6 +801,39 @@ TEST_F(WebPluginContainerTest, GestureLongPressReachesPlugin) {
 
   EXPECT_EQ(WebInputEvent::kGestureLongPress,
             test_plugin->GetLastInputEventType());
+}
+
+TEST_F(WebPluginContainerTest, MouseEventButtons) {
+  RegisterMockedURL("plugin_container.html");
+  // Must outlive |web_view_helper|.
+  CustomPluginWebFrameClient<EventTestPlugin> plugin_web_frame_client;
+  FrameTestHelpers::WebViewHelper web_view_helper;
+  WebViewImpl* web_view = web_view_helper.InitializeAndLoad(
+      base_url_ + "plugin_container.html", &plugin_web_frame_client);
+  EnablePlugins(web_view, WebSize(300, 300));
+
+  WebElement plugin_container_one_element =
+      web_view->MainFrameImpl()->GetDocument().GetElementById(
+          WebString::FromUTF8("translated-plugin"));
+  WebPlugin* plugin = static_cast<WebPluginContainerImpl*>(
+                          plugin_container_one_element.PluginContainer())
+                          ->Plugin();
+  EventTestPlugin* test_plugin = static_cast<EventTestPlugin*>(plugin);
+
+  WebMouseEvent event = FrameTestHelpers::CreateMouseEvent(
+      WebMouseEvent::kMouseMove, WebMouseEvent::Button::kNoButton,
+      WebPoint(30, 30),
+      WebInputEvent::kMiddleButtonDown | WebInputEvent::kShiftKey);
+
+  WebRect rect = plugin_container_one_element.BoundsInViewport();
+  event.SetPositionInWidget(rect.x + rect.width / 2, rect.y + rect.height / 2);
+
+  web_view->HandleInputEvent(WebCoalescedInputEvent(event));
+  RunPendingTasks();
+
+  EXPECT_EQ(WebInputEvent::kMouseMove, test_plugin->GetLastInputEventType());
+  EXPECT_EQ(WebInputEvent::kMiddleButtonDown | WebInputEvent::kShiftKey,
+            test_plugin->GetLastEventModifiers());
 }
 
 TEST_F(WebPluginContainerTest, MouseWheelEventTranslated) {
@@ -1324,29 +1366,28 @@ namespace {
 class CompositedPlugin : public FakeWebPlugin {
  public:
   explicit CompositedPlugin(const WebPluginParams& params)
-      : FakeWebPlugin(params),
-        layer_(Platform::Current()->CompositorSupport()->CreateLayer()) {}
+      : FakeWebPlugin(params), layer_(cc::Layer::Create()) {}
 
-  WebLayer* GetWebLayer() const { return layer_.get(); }
+  cc::Layer* GetCcLayer() const { return layer_.get(); }
 
   // WebPlugin
 
   bool Initialize(WebPluginContainer* container) override {
     if (!FakeWebPlugin::Initialize(container))
       return false;
-    container->SetWebLayer(layer_.get());
+    container->SetCcLayer(layer_.get(), false);
     return true;
   }
 
   void Destroy() override {
-    Container()->SetWebLayer(nullptr);
+    Container()->SetCcLayer(nullptr, false);
     FakeWebPlugin::Destroy();
   }
 
  private:
   ~CompositedPlugin() override = default;
 
-  std::unique_ptr<WebLayer> layer_;
+  scoped_refptr<cc::Layer> layer_;
 };
 
 }  // namespace
@@ -1369,12 +1410,8 @@ TEST_F(WebPluginContainerTest, CompositedPluginSPv2) {
       static_cast<const CompositedPlugin*>(container->Plugin());
 
   std::unique_ptr<PaintController> paint_controller = PaintController::Create();
-  PropertyTreeState property_tree_state(TransformPaintPropertyNode::Root(),
-                                        ClipPaintPropertyNode::Root(),
-                                        EffectPaintPropertyNode::Root());
-  PaintChunkProperties properties(property_tree_state);
-
-  paint_controller->UpdateCurrentPaintChunkProperties(WTF::nullopt, properties);
+  paint_controller->UpdateCurrentPaintChunkProperties(
+      base::nullopt, PropertyTreeState::Root());
   GraphicsContext graphics_context(*paint_controller);
   container->Paint(graphics_context, kGlobalPaintNormalPhase,
                    CullRect(IntRect(10, 10, 400, 300)));
@@ -1387,8 +1424,7 @@ TEST_F(WebPluginContainerTest, CompositedPluginSPv2) {
   ASSERT_EQ(DisplayItem::kForeignLayerPlugin, display_items[0].GetType());
   const auto& foreign_layer_display_item =
       static_cast<const ForeignLayerDisplayItem&>(display_items[0]);
-  EXPECT_EQ(plugin->GetWebLayer()->CcLayer(),
-            foreign_layer_display_item.GetLayer());
+  EXPECT_EQ(plugin->GetCcLayer(), foreign_layer_display_item.GetLayer());
 }
 
 TEST_F(WebPluginContainerTest, NeedsWheelEvents) {
@@ -1406,8 +1442,10 @@ TEST_F(WebPluginContainerTest, NeedsWheelEvents) {
   plugin_container_one_element.PluginContainer()->SetWantsWheelEvents(true);
 
   RunPendingTasks();
-  EXPECT_TRUE(web_view->GetPage()->GetEventHandlerRegistry().HasEventHandlers(
-      EventHandlerRegistry::kWheelEventBlocking));
+  EXPECT_TRUE(web_view->MainFrameImpl()
+                  ->GetFrame()
+                  ->GetEventHandlerRegistry()
+                  .HasEventHandlers(EventHandlerRegistry::kWheelEventBlocking));
 }
 
 TEST_F(WebPluginContainerTest, IFramePluginDocumentDisplayNone) {

@@ -17,8 +17,8 @@
 #include "base/process/kill.h"
 #include "base/process/launch.h"
 #include "base/process/process.h"
-#include "base/task_scheduler/post_task.h"
-#include "base/task_scheduler/task_traits.h"
+#include "base/task/post_task.h"
+#include "base/task/task_traits.h"
 #include "base/time/time.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
@@ -43,7 +43,7 @@ namespace {
 bool LaunchSetupForEula(const base::FilePath::StringType& value,
                         int* ret_code) {
   base::FilePath exe_dir;
-  if (!PathService::Get(base::DIR_MODULE, &exe_dir))
+  if (!base::PathService::Get(base::DIR_MODULE, &exe_dir))
     return false;
   exe_dir = exe_dir.Append(installer::kInstallerDir);
   base::FilePath exe_path = exe_dir.Append(installer::kSetupExe);
@@ -74,7 +74,7 @@ bool IsEULANotAccepted(installer::MasterPreferences* install_prefs) {
     base::FilePath eula_sentinel;
     // Be conservative and show the EULA if the path to the sentinel can't be
     // determined.
-    if (!InstallUtil::GetEULASentinelFilePath(&eula_sentinel) ||
+    if (!InstallUtil::GetEulaSentinelFilePath(&eula_sentinel) ||
         !base::PathExists(eula_sentinel)) {
       return true;
     }
@@ -95,9 +95,9 @@ bool WriteEULAtoTempFile(base::FilePath* eula_path) {
 // accepted.
 bool CreateEULASentinel() {
   base::FilePath eula_sentinel;
-  return InstallUtil::GetEULASentinelFilePath(&eula_sentinel) &&
-      base::CreateDirectory(eula_sentinel.DirName()) &&
-      base::WriteFile(eula_sentinel, "", 0) != -1;
+  return InstallUtil::GetEulaSentinelFilePath(&eula_sentinel) &&
+         base::CreateDirectory(eula_sentinel.DirName()) &&
+         base::WriteFile(eula_sentinel, "", 0) != -1;
 }
 
 }  // namespace
@@ -112,7 +112,7 @@ void DoPostImportPlatformSpecificTasks(Profile* /* profile */) {
     content::BrowserThread::PostAfterStartupTask(
         FROM_HERE,
         base::CreateTaskRunnerWithTraits(
-            {base::MayBlock(), base::TaskPriority::BACKGROUND,
+            {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
              base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN}),
         base::BindOnce(&InstallUtil::TriggerActiveSetupCommand));
   }
@@ -157,7 +157,7 @@ bool ShowPostInstallEULAIfNeeded(installer::MasterPreferences* install_prefs) {
 base::FilePath MasterPrefsPath() {
   // The standard location of the master prefs is next to the chrome binary.
   base::FilePath master_prefs;
-  if (!PathService::Get(base::DIR_EXE, &master_prefs))
+  if (!base::PathService::Get(base::DIR_EXE, &master_prefs))
     return base::FilePath();
   return master_prefs.AppendASCII(installer::kDefaultMasterPrefs);
 }

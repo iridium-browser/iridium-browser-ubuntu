@@ -25,15 +25,15 @@
 
 #include "third_party/blink/renderer/core/page/page_visibility_notifier.h"
 
+#include "base/auto_reset.h"
 #include "third_party/blink/renderer/core/page/page_visibility_observer.h"
-#include "third_party/blink/renderer/platform/wtf/auto_reset.h"
 
 namespace blink {
 
 void PageVisibilityNotifier::NotifyPageVisibilityChanged() {
-  AutoReset<IterationState> scope(&iteration_state_, kAllowingNone);
-  for (PageVisibilityObserver* observer : observers_)
+  ForEachObserver([](PageVisibilityObserver* observer) {
     observer->PageVisibilityChanged();
+  });
 }
 
 }  // namespace blink

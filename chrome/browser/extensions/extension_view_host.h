@@ -83,7 +83,8 @@ class ExtensionViewHost
       const std::vector<blink::mojom::ColorSuggestionPtr>& suggestions)
       override;
   void RunFileChooser(content::RenderFrameHost* render_frame_host,
-                      const content::FileChooserParams& params) override;
+                      std::unique_ptr<content::FileSelectListener> listener,
+                      const blink::mojom::FileChooserParams& params) override;
   void ResizeDueToAutoResize(content::WebContents* source,
                              const gfx::Size& new_size) override;
 
@@ -117,13 +118,6 @@ class ExtensionViewHost
   static std::unique_ptr<ExtensionView> CreateExtensionView(
       ExtensionViewHost* host,
       Browser* browser);
-#if defined(OS_MACOSX)
-  // Temporary shim for Polychrome. See bottom of first comment in
-  // https://crbug.com/80495 for details.
-  static std::unique_ptr<ExtensionView> CreateExtensionViewCocoa(
-      ExtensionViewHost* host,
-      Browser* browser);
-#endif
   // Optional view that shows the rendered content in the UI.
   std::unique_ptr<ExtensionView> view_;
 

@@ -13,6 +13,7 @@
 #include "SkMathPriv.h"
 #include "SkPoint.h"
 #include "SkRandom.h"
+#include "SkTo.h"
 #include "Test.h"
 
 static void test_clz(skiatest::Reporter* reporter) {
@@ -197,27 +198,6 @@ static void test_blend31() {
     SkDebugf("---- failed %d death %d\n", failed, death);
 }
 
-static void test_blend(skiatest::Reporter* reporter) {
-    for (int src = 0; src <= 255; src++) {
-        for (int dst = 0; dst <= 255; dst++) {
-            for (int a = 0; a <= 255; a++) {
-                int r0 = SkAlphaBlend255(src, dst, a);
-                float f1 = float_blend(src, dst, a / 255.f);
-                int r1 = SkScalarRoundToInt(f1);
-
-                if (r0 != r1) {
-                    float diff = sk_float_abs(f1 - r1);
-                    diff = sk_float_abs(diff - 0.5f);
-                    if (diff > (1 / 255.f)) {
-                        ERRORF(reporter, "src:%d dst:%d a:%d "
-                               "result:%d float:%g\n", src, dst, a, r0, f1);
-                    }
-                }
-            }
-        }
-    }
-}
-
 static void check_length(skiatest::Reporter* reporter,
                          const SkPoint& p, SkScalar targetLen) {
     float x = SkScalarToFloat(p.fX);
@@ -229,13 +209,9 @@ static void check_length(skiatest::Reporter* reporter,
     REPORTER_ASSERT(reporter, len > 0.999f && len < 1.001f);
 }
 
-static float make_zero() {
-    return sk_float_sin(0);
-}
-
 static void unittest_isfinite(skiatest::Reporter* reporter) {
     float nan = sk_float_asin(2);
-    float inf = 1.0f / make_zero();
+    float inf = SK_ScalarInfinity;
     float big = 3.40282e+038f;
 
     REPORTER_ASSERT(reporter, !SkScalarIsNaN(inf));
@@ -416,6 +392,21 @@ static void test_copysign(skiatest::Reporter* reporter) {
     }
 }
 
+static void huge_vector_normalize(skiatest::Reporter* reporter) {
+    // these values should fail (overflow/underflow) trying to normalize
+    const SkVector fail[] = {
+        { 0, 0 },
+        { SK_ScalarInfinity, 0 }, { 0, SK_ScalarInfinity },
+        { 0, SK_ScalarNaN }, { SK_ScalarNaN, 0 },
+    };
+    for (SkVector v : fail) {
+        SkVector v2 = v;
+        if (v2.setLength(1.0f)) {
+            REPORTER_ASSERT(reporter, !v.setLength(1.0f));
+        }
+    }
+}
+
 DEF_TEST(Math, reporter) {
     int         i;
     SkRandom    rand;
@@ -450,8 +441,8 @@ DEF_TEST(Math, reporter) {
     }
 
     for (i = 0; i < 1000; i++) {
-        int value = rand.nextS16();
-        int max = rand.nextU16();
+        int value = rand.nextS() >> 16;
+        int max = rand.nextU() >> 16;
 
         int clamp = SkClampMax(value, max);
         int clamp2 = value < 0 ? 0 : (value > max ? max : value);
@@ -488,6 +479,7 @@ DEF_TEST(Math, reporter) {
         REPORTER_ASSERT(reporter, (SkFixedCeilToFixed(-SK_Fixed1 * 10) >> 1) == -SK_Fixed1 * 5);
     }
 
+    huge_vector_normalize(reporter);
     unittest_isfinite(reporter);
     unittest_half(reporter);
     test_rsqrt(reporter, sk_float_rsqrt);
@@ -513,8 +505,6 @@ DEF_TEST(Math, reporter) {
         }
         REPORTER_ASSERT(reporter, result == (int32_t)check);
     }
-
-    test_blend(reporter);
 
     if (false) test_floor(reporter);
 

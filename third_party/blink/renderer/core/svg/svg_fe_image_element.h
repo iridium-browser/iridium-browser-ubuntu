@@ -49,7 +49,7 @@ class SVGFEImageElement final : public SVGFilterPrimitiveStandardAttributes,
 
   // Promptly remove as a ImageResource client.
   EAGERLY_FINALIZE();
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  private:
   explicit SVGFEImageElement(Document&);
@@ -65,8 +65,8 @@ class SVGFEImageElement final : public SVGFilterPrimitiveStandardAttributes,
   void ClearImageResource();
 
   void BuildPendingResource() override;
-  InsertionNotificationRequest InsertedInto(ContainerNode*) override;
-  void RemovedFrom(ContainerNode*) override;
+  InsertionNotificationRequest InsertedInto(ContainerNode&) override;
+  void RemovedFrom(ContainerNode&) override;
 
   Member<SVGAnimatedPreserveAspectRatio> preserve_aspect_ratio_;
 

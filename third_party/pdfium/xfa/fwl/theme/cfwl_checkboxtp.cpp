@@ -29,11 +29,6 @@ CFX_PointF ScaleBezierPoint(const CFX_PointF& point) {
 
 }  // namespace
 
-#define CHECKBOX_COLOR_BOXLT1 (ArgbEncode(255, 172, 168, 153))
-#define CHECKBOX_COLOR_BOXLT2 (ArgbEncode(255, 113, 111, 100))
-#define CHECKBOX_COLOR_BOXRB1 (ArgbEncode(255, 241, 239, 226))
-#define CHECKBOX_COLOR_BOXRB2 (ArgbEncode(255, 255, 255, 255))
-
 CFWL_CheckBoxTP::CFWL_CheckBoxTP() : m_pThemeData(new CKBThemeData) {
   SetThemeData();
 }
@@ -275,8 +270,8 @@ void CFWL_CheckBoxTP::DrawBackground(CFWL_ThemeBackground* pParams) {
 
   if ((pParams->m_dwStates & CFWL_PartState_Checked) ||
       (pParams->m_dwStates & CFWL_PartState_Neutral)) {
-    DrawCheckSign(pParams->m_pWidget, pParams->m_pGraphics, pParams->m_rtPart,
-                  pParams->m_dwStates, &pParams->m_matrix);
+    DrawCheckSign(pParams->m_pWidget, pParams->m_pGraphics.Get(),
+                  pParams->m_rtPart, pParams->m_dwStates, &pParams->m_matrix);
   }
 }
 

@@ -7,10 +7,11 @@
 
 #include "third_party/blink/public/platform/web_memory_pressure_level.h"
 #include "third_party/blink/public/platform/web_memory_state.h"
-#include "third_party/blink/public/platform/web_thread.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
+#include "third_party/blink/renderer/platform/scheduler/public/thread.h"
 #include "third_party/blink/renderer/platform/wtf/noncopyable.h"
+#include "third_party/blink/renderer/platform/wtf/threading_primitives.h"
 
 namespace blink {
 
@@ -51,8 +52,8 @@ class PLATFORM_EXPORT MemoryCoordinator final
   // the heap size.
   static void Initialize();
 
-  static void RegisterThread(WebThread*);
-  static void UnregisterThread(WebThread*);
+  void RegisterThread(Thread*) LOCKS_EXCLUDED(threads_mutex_);
+  void UnregisterThread(Thread*) LOCKS_EXCLUDED(threads_mutex_);
 
   void RegisterClient(MemoryCoordinatorClient*);
   void UnregisterClient(MemoryCoordinatorClient*);
@@ -80,7 +81,8 @@ class PLATFORM_EXPORT MemoryCoordinator final
   static bool is_low_end_device_;
 
   HeapHashSet<WeakMember<MemoryCoordinatorClient>> clients_;
-  HashSet<WebThread*> web_threads_;
+  HashSet<Thread*> threads_;
+  Mutex threads_mutex_;
 };
 
 }  // namespace blink

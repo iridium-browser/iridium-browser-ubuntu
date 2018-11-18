@@ -79,6 +79,11 @@ class DISPLAY_EXPORT Display final {
   Display(const Display& other);
   ~Display();
 
+  // Returns a valid display with default parameters and ID set to
+  // |kDefaultDisplayId| which is used when there's no actual display connected
+  // to the device.
+  static Display GetDefaultDisplay();
+
   // Returns the forced device scale factor, which is given by
   // "--force-device-scale-factor".
   static float GetForcedDeviceScaleFactor();
@@ -89,11 +94,19 @@ class DISPLAY_EXPORT Display final {
 
   // Returns the forced display color profile, which is given by
   // "--force-color-profile".
-  static gfx::ColorSpace GetForcedColorProfile();
+  static gfx::ColorSpace GetForcedDisplayColorProfile();
 
   // Indicates if a display color profile is being explicitly enforced from the
   // command line via "--force-color-profile".
-  static bool HasForceColorProfile();
+  static bool HasForceDisplayColorProfile();
+
+  // Returns the forced raster color profile, which is given by
+  // "--force-raster-color-profile".
+  static gfx::ColorSpace GetForcedRasterColorProfile();
+
+  // Indicates if a raster color profile is being explicitly enforced from the
+  // command line via "--force-raster-color-profile".
+  static bool HasForceRasterColorProfile();
 
   // Indicates if the display color profile being forced should be ensured to
   // be in use by the operating system as well.
@@ -106,6 +119,21 @@ class DISPLAY_EXPORT Display final {
 
   // Resets the cache and sets a new force device scale factor.
   static void SetForceDeviceScaleFactor(double dsf);
+
+  // Converts the given angle to its corresponding Rotation. The angle is in
+  // degrees, and the only valid values are 0, 90, 180, and 270.
+  // TODO(crbug.com/840189): we should never need to convert degrees to a
+  // Rotation if we were to Rotations internally and only converted to numeric
+  // values when required.
+  static Rotation DegreesToRotation(int degrees);
+
+  // This is the analog to DegreesToRotation and converts a Rotation to a
+  // numeric representation.
+  static int RotationToDegrees(Rotation rotation);
+
+  // Returns true if |degrees| is compatible with DegreesToRotation. I.e., that
+  // it is 0, 90, 180, or 270.
+  static bool IsValidRotation(int degrees);
 
   // Sets/Gets unique identifier associated with the display.
   // -1 means invalid display and it doesn't not exit.

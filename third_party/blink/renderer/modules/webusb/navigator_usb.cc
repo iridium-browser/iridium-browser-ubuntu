@@ -4,6 +4,8 @@
 
 #include "third_party/blink/renderer/modules/webusb/navigator_usb.h"
 
+#include "third_party/blink/renderer/core/dom/document.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/navigator.h"
 #include "third_party/blink/renderer/modules/webusb/usb.h"
 
@@ -33,8 +35,10 @@ void NavigatorUSB::Trace(blink::Visitor* visitor) {
 }
 
 NavigatorUSB::NavigatorUSB(Navigator& navigator) {
-  if (navigator.GetFrame())
-    usb_ = USB::Create(*navigator.GetFrame());
+  if (navigator.GetFrame()) {
+    DCHECK(navigator.GetFrame()->GetDocument());
+    usb_ = USB::Create(*navigator.GetFrame()->GetDocument());
+  }
 }
 
 const char NavigatorUSB::kSupplementName[] = "NavigatorUSB";

@@ -8,7 +8,7 @@
 #include <memory>
 
 #include "base/macros.h"
-#include "base/test/histogram_tester.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "chrome/browser/page_load_metrics/observers/page_load_metrics_observer_tester.h"
 #include "chrome/browser/page_load_metrics/page_load_metrics_observer.h"
 #include "chrome/test/base/chrome_render_view_host_test_harness.h"
@@ -83,6 +83,8 @@ class PageLoadMetricsObserverTestHarness
       const mojom::PageLoadTiming& timing,
       const mojom::PageLoadMetadata& metadata,
       const mojom::PageLoadFeatures& new_features);
+  void SimulateResourceDataUseUpdate(
+      const std::vector<mojom::ResourceDataUpdatePtr>& resources);
 
   // Simulates a loaded resource. Main frame resources must specify a
   // GlobalRequestID, using the SimulateLoadedResource() method that takes a

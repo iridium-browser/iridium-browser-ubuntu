@@ -2,200 +2,111 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import httplib2
+import datetime
 import json
-import logging
-import oauth2client.client
-import oauth2client.file
-from oauth2client import service_account  # pylint: disable=no-name-in-module
-import oauth2client.tools
-import os
 import urllib
 
-from py_utils import retry_util
-
-
-class RequestError(OSError):
-  """Exception class for errors while making a request."""
-  def __init__(self, response, content):
-    self.response = response
-    self.content = content
-    try:
-      # Try to find error message within returned content.
-      message = json.loads(content)['error']
-    except StandardError:
-      # Otherwise use the entire content itself.
-      message = content
-    super(RequestError, self).__init__(
-        'Request returned HTTP Error %s: %s' % (response['status'], message))
-
-
-class ClientError(RequestError):
-  """Exception for 4xx HTTP client errors."""
-  pass
-
-class ServerError(RequestError):
-  """Exception for 5xx HTTP server errors."""
-  pass
-
-
-def BuildRequestError(response, content):
-  """Build the correct RequestError depending on the response status."""
-  if response['status'].startswith('4'):
-    return ClientError(response, content)
-  elif response['status'].startswith('5'):
-    return ServerError(response, content)
-  else:
-    # Fall back to the base class.
-    return RequestError(response, content)
+from services import chrome_perf_auth
+from services import request
 
 
 class PerfDashboardCommunicator(object):
-
   REQUEST_URL = 'https://chromeperf.appspot.com/api/'
-  OAUTH_CLIENT_ID = (
-      '62121018386-h08uiaftreu4dr3c4alh3l7mogskvb7i.apps.googleusercontent.com')
-  OAUTH_CLIENT_SECRET = 'vc1fZfV1cZC6mgDSHV-KSPOz'
-  SCOPES = ['https://www.googleapis.com/auth/userinfo.email']
 
   def __init__(self, flags):
-    self._credentials = None
-    if flags.service_account_json:
-      self._AuthorizeAccountServiceAccount(flags.service_account_json)
-    else:
-      self._AuthorizeAccountUserAccount(flags)
+    self._credentials = chrome_perf_auth.GetUserCredentials(flags)
 
-  @property
-  def has_credentials(self):
-    return self._credentials and not self._credentials.invalid
-
-  def _AuthorizeAccountServiceAccount(self, json_keyfile):
-    """Used to create service account credentials for the dashboard.
-
-    Args:
-      json_keyfile: Path to json file that contains credentials.
-    """
-    self._credentials = (
-        service_account.ServiceAccountCredentials.from_json_keyfile_name(
-            json_keyfile, self.SCOPES))
-
-  def _AuthorizeAccountUserAccount(self, flags):
-    """Used to create user account credentials for the performance dashboard.
-
-    Args:
-      flags: An argparse.Namespace as returned by argparser.parse_args; in
-        addition to oauth2client.tools.argparser flags should also have set a
-        user_credentials_json flag.
-    """
-    store = oauth2client.file.Storage(flags.user_credentials_json)
-    if os.path.exists(flags.user_credentials_json):
-      self._credentials = store.locked_get()
-    if not self.has_credentials:
-      flow = oauth2client.client.OAuth2WebServerFlow(
-          self.OAUTH_CLIENT_ID, self.OAUTH_CLIENT_SECRET, self.SCOPES,
-          access_type='offline', include_granted_scopes='true',
-          prompt='consent')
-      self._credentials = oauth2client.tools.run_flow(flow, store, flags)
-
-  @retry_util.RetryOnException(ServerError, retries=3)
-  def _MakeApiRequest(self, request, retries=None):
+  def _MakeApiRequest(self, endpoint, params=None):
     """Used to communicate with perf dashboard.
 
     Args:
-      request: String that contains POST request to dashboard.
+      endpoint: String with the API endpoint to which the request is made.
+      params: A dictionary with parameters for the request.
+      retries: Number of times to retry in case of server errors.
+
     Returns:
       Contents of the response from the dashboard.
     """
-    del retries  # Handled by the decorator.
-    assert self.has_credentials
-    http = httplib2.Http()
-    if self._credentials.access_token_expired:
-      self._credentials.refresh(http)
-    http = self._credentials.authorize(http)
-    logging.info('Making API request: %s', request)
-    resp, content = http.request(
-        self.REQUEST_URL + request,
-        method="POST",
-        headers={'Content-length': 0})
-    if resp['status'] != '200':
-      raise BuildRequestError(resp, content)
-    return json.loads(content)
+    return json.loads(request.Request(
+        self.REQUEST_URL + endpoint, params=params, method='POST',
+        credentials=self._credentials))
 
-  def ListTestPaths(self, benchmark, sheriff=False):
-    """Lists test paths for the given benchmark.
+  def ListTestPaths(self, test_suite, sheriff):
+    """Lists test paths for the given test_suite.
 
-    args:
-      benchmark: Benchmark to get paths for.
-      sheriff:
-          Filters test paths to only ones monitored by the given sheriff
-          rotation.
-    returns:
+    Args:
+      test_suite: String with test suite (benchmark) to get paths for.
+      sheriff: Include only test paths monitored by the given sheriff rotation,
+          use 'all' to return all test pathds regardless of rotation.
+
+    Returns:
       A list of test paths. Ex. ['TestPath1', 'TestPath2']
     """
-    r = 'list_timeseries/%s' % benchmark
-    if sheriff:
-      r += '?sheriff=%s' % urllib.quote(sheriff)
-    return self._MakeApiRequest(r)
+    return self._MakeApiRequest(
+        'list_timeseries/%s' % test_suite, {'sheriff': sheriff})
 
   def GetTimeseries(self, test_path, days=30):
     """Get timeseries for the given test path.
 
-    args:
+    Args:
       test_path: test path to get timeseries for.
       days: Number of days to get data points for.
-    returns:
+
+    Returns:
       A dict in the format:
-      {'revision_logs':{
-          r_commit_pos: {... data ...},
-          r_chromium_rev: {... data ...},
-          ...},
-       'timeseries': [
-           [revision, value, timestamp, r_commit_pos, r_webkit_rev],
-           ...
-           ],
-       'test_path': test_path}
+
+        {'revision_logs':{
+            r_commit_pos: {... data ...},
+            r_chromium_rev: {... data ...},
+            ...},
+         'timeseries': [
+             [revision, value, timestamp, r_commit_pos, r_webkit_rev],
+             ...
+             ],
+         'test_path': test_path}
+
+      or None if the test_path is not found.
     """
-    options = urllib.urlencode({'num_days': days})
-    r = 'timeseries/%s?%s' % (urllib.quote(test_path), options)
-    return self._MakeApiRequest(r)
+    try:
+      return self._MakeApiRequest(
+          'timeseries/%s' % urllib.quote(test_path), {'num_days': days})
+    except request.ClientError as exc:
+      if 'Invalid test_path' in exc.json['error']:
+        return None
+      else:
+        raise
 
-  def GetBugData(self, bug_id):
-    """Returns data on the given bug."""
-    return self._MakeApiRequest('bugs/%d' % bug_id)
+  def GetBugData(self, bug_ids):
+    """Yields data for a given bug id or sequence of bug ids."""
+    if not hasattr(bug_ids, '__iter__'):
+      bug_ids = [bug_ids]
+    for bug_id in bug_ids:
+      yield self._MakeApiRequest('bugs/%d' % bug_id)
 
-  def GetAlertData(self, benchmark, days=30):
-    """Returns alerts for the given benchmark."""
-    options = urllib.urlencode({'benchmark': benchmark})
-    return self._MakeApiRequest('alerts/history/%d?%s' % (days, options))
+  def IterAlertData(self, test_suite, sheriff, days=30):
+    """Returns alerts for the given test_suite.
 
-  def GetAllTimeseriesForBenchmark(self, benchmark, days=30, filters=None,
-                                   sheriff=None):
-    """ Generator function returning timeseries entries for a benchmark.
+    Args:
+      test_suite: String with test suite (benchmark) to get paths for.
+      sheriff: Include only test paths monitored by the given sheriff rotation,
+          use 'all' to return all test pathds regardless of rotation.
+      days: Only return alerts which are at most this number of days old.
 
-    args:
-      benchmark: benchmark you want data for.
-      days: number of days to return data for.
-      filter: A list of strings. The metric must contain all of the strings.
-      sheriff: Search for timeseries for the specific sheriff rotation only. If
-          not specified, 'Chrome Perf Sheriff' is used by default on the server.
-
-    yields:
-      Timeseries data point.
+    Yields:
+      Data for all requested alerts in chunks.
     """
-    header = ['bot', 'benchmark', 'metric', 'story']
-    test_paths = self.ListTestPaths(benchmark, sheriff=sheriff)
-    for tp in test_paths:
-      if not filters or all(f in tp for f in filters):
-        ts = self.GetTimeseries(tp, days=days)
-        if header:
-          # First entry in the timeseries is a header. We only need this once.
-          full_header = header + ts['timeseries'][0]
-          header = None
-          yield full_header
-        for point in ts['timeseries'][1:]:
-          # Splits the test path into [bot, benchmark, metric, story] and
-          # appends the data from a timeseries entry. Current data returned:
-          # 'revision', 'value', 'timestamp', 'r_commit_pos', 'r_webrtc_rev',
-          # 'r_chromium', 'r_webkit_rev', 'r_v8_rev'
-          test_data = tp.split('/', 4)[1:] + [data for data in point]
-          yield test_data
+    min_timestamp = datetime.datetime.now() - datetime.timedelta(days=days)
+    params = {
+        'test_suite': test_suite,
+        'min_timestamp': min_timestamp.isoformat(),
+        'limit': 1000,
+    }
+    if sheriff != 'all':
+      params['sheriff'] = sheriff
+    while True:
+      response = self._MakeApiRequest('alerts', params)
+      yield response
+      if 'next_cursor' in response:
+        params['cursor'] = response['next_cursor']
+      else:
+        return

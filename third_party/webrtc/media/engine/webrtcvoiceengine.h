@@ -42,6 +42,7 @@ class WebRtcVoiceMediaChannel;
 // It uses the WebRtc VoiceEngine library for audio handling.
 class WebRtcVoiceEngine final {
   friend class WebRtcVoiceMediaChannel;
+
  public:
   WebRtcVoiceEngine(
       webrtc::AudioDeviceModule* adm,
@@ -119,15 +120,13 @@ class WebRtcVoiceEngine final {
   bool initialized_ = false;
 
   webrtc::AgcConfig default_agc_config_;
-  // Cache received extended_filter_aec, delay_agnostic_aec, experimental_ns
-  // and intelligibility_enhancer values, and apply them
-  // in case they are missing in the audio options. We need to do this because
-  // SetExtraOptions() will revert to defaults for options which are not
-  // provided.
-  rtc::Optional<bool> extended_filter_aec_;
-  rtc::Optional<bool> delay_agnostic_aec_;
-  rtc::Optional<bool> experimental_ns_;
-  rtc::Optional<bool> intelligibility_enhancer_;
+  // Cache received extended_filter_aec, delay_agnostic_aec and experimental_ns
+  // values, and apply them in case they are missing in the audio options.
+  // We need to do this because SetExtraOptions() will revert to defaults for
+  // options which are not provided.
+  absl::optional<bool> extended_filter_aec_;
+  absl::optional<bool> delay_agnostic_aec_;
+  absl::optional<bool> experimental_ns_;
   // Jitter buffer settings for new streams.
   size_t audio_jitter_buffer_max_packets_ = 50;
   bool audio_jitter_buffer_fast_accelerate_ = false;
@@ -171,6 +170,21 @@ class WebRtcVoiceMediaChannel final : public VoiceMediaChannel,
   bool RemoveSendStream(uint32_t ssrc) override;
   bool AddRecvStream(const StreamParams& sp) override;
   bool RemoveRecvStream(uint32_t ssrc) override;
+
+  // E2EE Frame API
+  // Set a frame decryptor to a particular ssrc that will intercept all
+  // incoming audio payloads and attempt to decrypt them before forwarding the
+  // result.
+  void SetFrameDecryptor(uint32_t ssrc,
+                         rtc::scoped_refptr<webrtc::FrameDecryptorInterface>
+                             frame_decryptor) override;
+  // Set a frame encryptor to a particular ssrc that will intercept all
+  // outgoing audio payloads frames and attempt to encrypt them and forward the
+  // result to the packetizer.
+  void SetFrameEncryptor(uint32_t ssrc,
+                         rtc::scoped_refptr<webrtc::FrameEncryptorInterface>
+                             frame_encryptor) override;
+
   // SSRC=0 will apply the new volume to current and future unsignaled streams.
   bool SetOutputVolume(uint32_t ssrc, double volume) override;
 
@@ -201,12 +215,23 @@ class WebRtcVoiceMediaChannel final : public VoiceMediaChannel,
     rtc::CopyOnWriteBuffer packet(data, len, kMaxRtpPacketLen);
     rtc::PacketOptions rtc_options;
     rtc_options.packet_id = options.packet_id;
+    if (DscpEnabled()) {
+      rtc_options.dscp = PreferredDscp();
+    }
+    rtc_options.info_signaled_after_sent.included_in_feedback =
+        options.included_in_feedback;
+    rtc_options.info_signaled_after_sent.included_in_allocation =
+        options.included_in_allocation;
     return VoiceMediaChannel::SendPacket(&packet, rtc_options);
   }
 
   bool SendRtcp(const uint8_t* data, size_t len) override {
     rtc::CopyOnWriteBuffer packet(data, len, kMaxRtpPacketLen);
-    return VoiceMediaChannel::SendRtcp(&packet, rtc::PacketOptions());
+    rtc::PacketOptions rtc_options;
+    if (DscpEnabled()) {
+      rtc_options.dscp = PreferredDscp();
+    }
+    return VoiceMediaChannel::SendRtcp(&packet, rtc_options);
   }
 
  private:
@@ -221,8 +246,6 @@ class WebRtcVoiceMediaChannel final : public VoiceMediaChannel,
   int CreateVoEChannel();
   bool DeleteVoEChannel(int channel);
   bool SetMaxSendBitrate(int bps);
-  webrtc::RTCError ValidateRtpParameters(
-      const webrtc::RtpParameters& parameters);
   void SetupRecording();
   // Check if 'ssrc' is an unsignaled stream, and if so mark it as not being
   // unsignaled anymore (i.e. it is now removed, or signaled), and return true.
@@ -240,7 +263,7 @@ class WebRtcVoiceMediaChannel final : public VoiceMediaChannel,
 
   int max_send_bitrate_bps_ = 0;
   AudioOptions options_;
-  rtc::Optional<int> dtmf_payload_type_;
+  absl::optional<int> dtmf_payload_type_;
   int dtmf_payload_freq_ = -1;
   bool recv_transport_cc_enabled_ = false;
   bool recv_nack_enabled_ = false;
@@ -276,12 +299,16 @@ class WebRtcVoiceMediaChannel final : public VoiceMediaChannel,
   std::map<uint32_t, WebRtcAudioReceiveStream*> recv_streams_;
   std::vector<webrtc::RtpExtension> recv_rtp_extensions_;
 
-  rtc::Optional<webrtc::AudioSendStream::Config::SendCodecSpec>
+  absl::optional<webrtc::AudioSendStream::Config::SendCodecSpec>
       send_codec_spec_;
 
   // TODO(kwiberg): Per-SSRC codec pair IDs?
   const webrtc::AudioCodecPairId codec_pair_id_ =
       webrtc::AudioCodecPairId::Create();
+
+  // Unsignaled streams have an option to have a frame decryptor set on them.
+  rtc::scoped_refptr<webrtc::FrameDecryptorInterface>
+      unsignaled_frame_decryptor_;
 
   RTC_DISALLOW_IMPLICIT_CONSTRUCTORS(WebRtcVoiceMediaChannel);
 };

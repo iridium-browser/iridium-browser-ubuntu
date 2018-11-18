@@ -29,6 +29,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_HTML_CANVAS_IMAGE_DATA_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_HTML_CANVAS_IMAGE_DATA_H_
 
+#include "base/numerics/checked_math.h"
 #include "third_party/blink/renderer/bindings/core/v8/uint8_clamped_array_or_uint16_array_or_float32_array.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/html/canvas/canvas_rendering_context.h"
@@ -42,7 +43,6 @@
 #include "third_party/blink/renderer/platform/graphics/canvas_color_params.h"
 #include "third_party/blink/renderer/platform/graphics/static_bitmap_image.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/wtf/checked_numeric.h"
 #include "third_party/blink/renderer/platform/wtf/compiler.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/skia/include/core/SkColorSpace.h"
@@ -137,7 +137,7 @@ class CORE_EXPORT ImageData final : public ScriptWrappable,
   DOMArrayBufferBase* BufferBase() const;
   CanvasColorParams GetCanvasColorParams();
 
-  // DataU8ColorType param specifies if the converted pixels in 8-8-8-8 pixel
+  // DataU8ColorType param specifies if the converted pixels in uint8 pixel
   // format should respect the "native" 32bit ARGB format of Skia's blitters.
   // For example, if ImageDataInCanvasColorSettings() is called to fill an
   // ImageBuffer, kRGBAColorType should be used. If the converted pixels are
@@ -154,7 +154,7 @@ class CORE_EXPORT ImageData final : public ScriptWrappable,
   IntSize BitmapSourceSize() const override { return size_; }
   ScriptPromise CreateImageBitmap(ScriptState*,
                                   EventTarget&,
-                                  Optional<IntRect> crop_rect,
+                                  base::Optional<IntRect> crop_rect,
                                   const ImageBitmapOptions&) override;
 
   void Trace(blink::Visitor*) override;
@@ -201,12 +201,6 @@ class CORE_EXPORT ImageData final : public ScriptWrappable,
   static DOMFloat32Array* AllocateAndValidateFloat32Array(
       const unsigned&,
       ExceptionState* = nullptr);
-
-  static DOMFloat32Array* ConvertFloat16ArrayToFloat32Array(const uint16_t*,
-                                                            unsigned);
-
-  void SwapU16EndiannessForSkColorSpaceXform(const IntRect* = nullptr);
-  void SwizzleIfNeeded(DataU8ColorType, const IntRect*);
 };
 
 }  // namespace blink

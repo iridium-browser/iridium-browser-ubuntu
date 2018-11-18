@@ -45,7 +45,7 @@ class CONTENT_EXPORT WebUIImpl : public WebUI,
   // WebUI implementation:
   WebContents* GetWebContents() const override;
   WebUIController* GetController() const override;
-  void SetController(WebUIController* controller) override;
+  void SetController(std::unique_ptr<WebUIController> controller) override;
   float GetDeviceScaleFactor() const override;
   const base::string16& GetOverriddenTitle() const override;
   void OverrideTitle(const base::string16& title) override;
@@ -86,7 +86,6 @@ class CONTENT_EXPORT WebUIImpl : public WebUI,
 
   // IPC message handling.
   void OnWebUISend(RenderFrameHost* sender,
-                   const GURL& source_url,
                    const std::string& message,
                    const base::ListValue& args);
 

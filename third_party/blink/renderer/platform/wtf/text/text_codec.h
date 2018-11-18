@@ -32,6 +32,7 @@
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/blink/renderer/platform/wtf/text/unicode.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
+#include "third_party/blink/renderer/platform/wtf/wtf_size_t.h"
 
 namespace WTF {
 
@@ -52,11 +53,15 @@ enum UnencodableHandling {
   // Encodes the character as a CSS entity.  For example U+06DE
   // would be \06de.  See: https://www.w3.org/TR/css-syntax-3/#escaping
   kCSSEncodedEntitiesForUnencodables,
+
+  // Used when all characters can be encoded in the character set. Only
+  // applicable to UTF-N encodings.
+  kNoUnencodables,
 };
 
 typedef char UnencodableReplacementArray[32];
 
-enum FlushBehavior {
+enum class FlushBehavior {
   // More bytes are coming, don't flush the codec.
   kDoNotFlush = 0,
 
@@ -68,10 +73,6 @@ enum FlushBehavior {
   kDataEOF
 };
 
-static_assert(!kDoNotFlush, "DoNotFlush should be falsy");
-static_assert(kFetchEOF, "FetchEOF should be truthy");
-static_assert(kDataEOF, "DataEOF should be truthy");
-
 class WTF_EXPORT TextCodec {
   USING_FAST_MALLOC(TextCodec);
 
@@ -80,26 +81,30 @@ class WTF_EXPORT TextCodec {
   virtual ~TextCodec();
 
   String Decode(const char* str,
-                size_t length,
-                FlushBehavior flush = kDoNotFlush) {
+                wtf_size_t length,
+                FlushBehavior flush = FlushBehavior::kDoNotFlush) {
     bool ignored;
     return Decode(str, length, flush, false, ignored);
   }
 
   virtual String Decode(const char*,
-                        size_t length,
+                        wtf_size_t length,
                         FlushBehavior,
                         bool stop_on_error,
                         bool& saw_error) = 0;
-  virtual CString Encode(const UChar*, size_t length, UnencodableHandling) = 0;
-  virtual CString Encode(const LChar*, size_t length, UnencodableHandling) = 0;
+  virtual CString Encode(const UChar*,
+                         wtf_size_t length,
+                         UnencodableHandling) = 0;
+  virtual CString Encode(const LChar*,
+                         wtf_size_t length,
+                         UnencodableHandling) = 0;
 
   // Fills a null-terminated string representation of the given
   // unencodable character into the given replacement buffer.
   // The length of the string (not including the null) will be returned.
-  static int GetUnencodableReplacement(unsigned code_point,
-                                       UnencodableHandling,
-                                       UnencodableReplacementArray);
+  static uint32_t GetUnencodableReplacement(unsigned code_point,
+                                            UnencodableHandling,
+                                            UnencodableReplacementArray);
 
   DISALLOW_COPY_AND_ASSIGN(TextCodec);
 };

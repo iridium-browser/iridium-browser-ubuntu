@@ -27,6 +27,7 @@
 
 #include "third_party/blink/renderer/bindings/core/v8/serialization/serialized_script_value.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/serialized_script_value_factory.h"
+#include "third_party/blink/renderer/core/event_names.h"
 
 namespace blink {
 
@@ -75,12 +76,8 @@ const AtomicString& CustomEvent::InterfaceName() const {
 }
 
 void CustomEvent::Trace(blink::Visitor* visitor) {
+  visitor->Trace(detail_);
   Event::Trace(visitor);
-}
-
-void CustomEvent::TraceWrappers(const ScriptWrappableVisitor* visitor) const {
-  visitor->TraceWrappers(detail_);
-  Event::TraceWrappers(visitor);
 }
 
 }  // namespace blink

@@ -14,13 +14,17 @@
 #include "chrome/browser/extensions/extension_action.h"
 #include "chrome/browser/ui/toolbar/toolbar_actions_bar.h"
 #include "chrome/grit/theme_resources.h"
+#include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/base/ui_base_features.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/image/image_skia_operations.h"
+#include "ui/gfx/shadow_value.h"
+#include "ui/gfx/skia_paint_util.h"
 
 namespace {
 
@@ -29,10 +33,14 @@ gfx::ImageSkiaRep ScaleImageSkiaRep(const gfx::ImageSkiaRep& rep,
                                     float target_scale) {
   int width_px = target_width_dp * target_scale;
   return gfx::ImageSkiaRep(
-      skia::ImageOperations::Resize(rep.sk_bitmap(),
+      skia::ImageOperations::Resize(rep.GetBitmap(),
                                     skia::ImageOperations::RESIZE_BEST,
                                     width_px, width_px),
       target_scale);
+}
+
+float GetBlockedActionBadgeRadius() {
+  return 12.0f;
 }
 
 }  // namespace
@@ -45,10 +53,7 @@ IconWithBadgeImageSource::Badge::Badge(const std::string& text,
 IconWithBadgeImageSource::Badge::~Badge() {}
 
 IconWithBadgeImageSource::IconWithBadgeImageSource(const gfx::Size& size)
-    : gfx::CanvasImageSource(size, false),
-      grayscale_(false),
-      paint_page_action_decoration_(false),
-      paint_blocked_actions_decoration_(false) {}
+    : gfx::CanvasImageSource(size, false) {}
 
 IconWithBadgeImageSource::~IconWithBadgeImageSource() {}
 
@@ -61,8 +66,14 @@ void IconWithBadgeImageSource::SetBadge(std::unique_ptr<Badge> badge) {
 }
 
 void IconWithBadgeImageSource::Draw(gfx::Canvas* canvas) {
+  // TODO(https://crbug.com/842856): There should be a cleaner delineation
+  // between what is drawn here and what is handled by the button itself.
+
   if (icon_.IsEmpty())
     return;
+
+  if (paint_blocked_actions_decoration_)
+    PaintBlockedActionDecoration(canvas);
 
   gfx::ImageSkia skia = icon_.AsImageSkia();
   gfx::ImageSkiaRep rep = skia.GetRepresentation(canvas->image_scale());
@@ -84,9 +95,6 @@ void IconWithBadgeImageSource::Draw(gfx::Canvas* canvas) {
 
   if (paint_page_action_decoration_)
     PaintPageActionDecoration(canvas);
-
-  if (paint_blocked_actions_decoration_)
-    PaintBlockedActionDecoration(canvas);
 }
 
 // Paints badge with specified parameters to |canvas|.
@@ -193,14 +201,37 @@ void IconWithBadgeImageSource::PaintPageActionDecoration(gfx::Canvas* canvas) {
 
 void IconWithBadgeImageSource::PaintBlockedActionDecoration(
     gfx::Canvas* canvas) {
-  canvas->Save();
-  gfx::ImageSkia img =
-      *ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
-          IDR_BLOCKED_EXTENSION_SCRIPT);
-  // This decoration is positioned at the top right corner of the icon area.
-  const gfx::Point top_right = GetIconAreaRect().top_right();
-  canvas->DrawImageInt(img, top_right.x() - img.width(), top_right.y());
-  canvas->Restore();
+  // To match the CSS notion of blur (spread outside the bounding box) to the
+  // Skia notion of blur (spread outside and inside the bounding box), we have
+  // to double the CSS-based blur values.
+  constexpr int kBlurCorrection = 2;
+
+  constexpr int kKeyShadowOpacity = 0x4D;  // 30%
+  const gfx::ShadowValue key_shadow(
+      gfx::Vector2d(0, 1), kBlurCorrection * 2 /*blur*/,
+      SkColorSetA(gfx::kGoogleGrey800, kKeyShadowOpacity));
+
+  constexpr int kAmbientShadowOpacity = 0x26;  // 15%
+  const gfx::ShadowValue ambient_shadow(
+      gfx::Vector2d(0, 2), kBlurCorrection * 6 /*blur*/,
+      SkColorSetA(gfx::kGoogleGrey800, kAmbientShadowOpacity));
+
+  const float blocked_action_badge_radius = GetBlockedActionBadgeRadius();
+
+  // Sanity checking.
+  const gfx::Rect icon_rect = GetIconAreaRect();
+  DCHECK_LE(2 * blocked_action_badge_radius, icon_rect.width());
+  DCHECK_EQ(icon_rect.width(), icon_rect.height());
+
+  cc::PaintFlags paint_flags;
+  paint_flags.setStyle(cc::PaintFlags::kFill_Style);
+  paint_flags.setAntiAlias(true);
+  paint_flags.setColor(SK_ColorWHITE);
+  paint_flags.setLooper(
+      gfx::CreateShadowDrawLooper({key_shadow, ambient_shadow}));
+
+  canvas->DrawCircle(gfx::PointF(icon_rect.CenterPoint()),
+                     blocked_action_badge_radius, paint_flags);
 }
 
 gfx::Rect IconWithBadgeImageSource::GetIconAreaRect() const {

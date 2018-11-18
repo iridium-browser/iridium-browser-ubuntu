@@ -19,6 +19,10 @@ if (is_fuchsia) {
   import("//build/config/fuchsia/package.gni")
 }
 
+if (is_chromeos) {
+  import("//build/config/chromeos/rules.gni")
+}
+
 # Define a test as an executable (or apk on Android) with the "testonly" flag
 # set.
 # Variable:
@@ -249,48 +253,30 @@ template("test") {
   } else if (is_fuchsia) {
     _output_name = invoker.target_name
     _pkg_target = "${_output_name}_pkg"
-    _gen_runner_target = "${_output_name}_runner"
     _exec_target = "${_output_name}__exec"
 
-    group(target_name) {
+    fuchsia_package_runner(target_name) {
       testonly = true
-      deps = [
-        ":$_gen_runner_target",
-        ":$_pkg_target",
-      ]
-
-      # Disable packaging for Chromecast builds. (https://crbug.com/810069)
-      if (is_chromecast) {
-        deps -= [ ":${_pkg_target}" ]
-      }
-    }
-
-    # Makes the script which invokes the executable.
-    test_runner_script(_gen_runner_target) {
       forward_variables_from(invoker, [ "use_test_server" ])
+      runner_script = "//build/fuchsia/test_runner.py"
+      package = ":$_pkg_target"
+      package_name_override = _output_name
+
       deps = [
-        ":$_exec_target",
+        "//testing/buildbot/filters:fuchsia_filters",
       ]
-      test_name = _output_name
-      exe_path =
-          "$root_out_dir/exe.unstripped/" + get_label_info(_exec_target, "name")
-      package_name = _output_name
     }
 
     executable(_exec_target) {
-      testonly = true
       forward_variables_from(invoker, "*")
+      testonly = true
       output_name = _exec_target
-      deps += [ "//build/config:exe_and_shlib_deps" ]
     }
 
-    package(_pkg_target) {
+    fuchsia_package(_pkg_target) {
       testonly = true
-      package_name = _output_name
-      binary = get_label_info(_exec_target, "name")
-      deps = [
-        ":$_exec_target",
-      ]
+      binary = ":$_exec_target"
+      package_name_override = _output_name
     }
   } else if (is_ios) {
     import("//build/config/ios/ios_sdk.gni")
@@ -331,30 +317,50 @@ template("test") {
       }
       extra_substitutions += [ "GTEST_BUNDLE_ID_SUFFIX=$_bundle_id_suffix" ]
 
-      if (!defined(deps)) {
-        deps = []
-      }
-      deps += [
-        # All shared libraries must have the sanitizer deps to properly link in
-        # asan mode (this target will be empty in other cases).
-        "//build/config:exe_and_shlib_deps",
-      ]
       if (!defined(bundle_deps)) {
         bundle_deps = []
       }
       bundle_deps += [ ":$_resources_bundle_data" ]
     }
+  } else if (is_chromeos && is_chromeos_chrome) {
+    # Building for a cros board (ie: not linux-chromeos).
+
+    _gen_runner_target = "${target_name}__runner"
+    _runtime_deps_file =
+        "$root_out_dir/gen.runtime/" + get_label_info(target_name, "dir") +
+        "/" + get_label_info(target_name, "name") + ".runtime_deps"
+
+    generate_vm_runner_script(_gen_runner_target) {
+      testonly = true
+      generated_script = "$root_build_dir/bin/run_" + invoker.target_name
+      test_exe = invoker.target_name
+      runtime_deps_file = _runtime_deps_file
+    }
+
+    executable(target_name) {
+      forward_variables_from(invoker, "*")
+      if (!defined(deps)) {
+        deps = []
+      }
+      if (!defined(data)) {
+        data = []
+      }
+
+      testonly = true
+      output_name = target_name
+      write_runtime_deps = _runtime_deps_file
+      data += [ _runtime_deps_file ]
+      deps += [ ":$_gen_runner_target" ]
+    }
   } else {
     executable(target_name) {
-      deps = []
       forward_variables_from(invoker, "*")
+      if (!defined(deps)) {
+        deps = []
+      }
 
       testonly = true
       deps += [
-        # All shared libraries must have the sanitizer deps to properly link in
-        # asan mode (this target will be empty in other cases).
-        "//build/config:exe_and_shlib_deps",
-
         # Give tests the default manifest on Windows (a no-op elsewhere).
         "//build/win:default_exe_manifest",
       ]

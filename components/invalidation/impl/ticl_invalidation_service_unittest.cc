@@ -19,9 +19,11 @@
 #include "components/invalidation/impl/invalidation_service_test_template.h"
 #include "components/invalidation/impl/invalidation_state_tracker.h"
 #include "components/invalidation/impl/invalidator.h"
-#include "google_apis/gaia/fake_identity_provider.h"
-#include "google_apis/gaia/fake_oauth2_token_service.h"
+#include "components/invalidation/impl/profile_identity_provider.h"
 #include "net/url_request/url_request_context_getter.h"
+#include "services/identity/public/cpp/identity_test_environment.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
+#include "services/network/test/test_network_connection_tracker.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace invalidation {
@@ -65,12 +67,15 @@ class TiclInvalidationServiceTestDelegate {
   }
 
   void CreateUninitializedInvalidationService() {
-    gcm_driver_.reset(new gcm::FakeGCMDriver());
-    invalidation_service_.reset(new TiclInvalidationService(
-        "TestUserAgent",
-        std::make_unique<FakeIdentityProvider>(&token_service_),
+    gcm_driver_ = std::make_unique<gcm::FakeGCMDriver>();
+    identity_provider_ = std::make_unique<ProfileIdentityProvider>(
+        identity_test_env_.identity_manager());
+    DCHECK(identity_provider_);
+    invalidation_service_ = std::make_unique<TiclInvalidationService>(
+        "TestUserAgent", identity_provider_.get(),
         std::unique_ptr<TiclSettingsProvider>(new FakeTiclSettingsProvider),
-        gcm_driver_.get(), nullptr));
+        gcm_driver_.get(), nullptr, nullptr,
+        network::TestNetworkConnectionTracker::GetInstance());
   }
 
   void InitializeInvalidationService() {
@@ -97,10 +102,13 @@ class TiclInvalidationServiceTestDelegate {
     fake_invalidator_->EmitOnIncomingInvalidation(invalidation_map);
   }
 
-  FakeOAuth2TokenService token_service_;
+  identity::IdentityTestEnvironment identity_test_env_;
   std::unique_ptr<gcm::GCMDriver> gcm_driver_;
+  std::unique_ptr<invalidation::IdentityProvider> identity_provider_;
   syncer::FakeInvalidator* fake_invalidator_;  // Owned by the service.
 
+  // The service has to be below the provider since the service keeps
+  // a non-owned pointer to the provider.
   std::unique_ptr<TiclInvalidationService> invalidation_service_;
 };
 

@@ -16,6 +16,7 @@
 #include "base/metrics/user_metrics_action.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/task/cancelable_task_tracker.h"
+#include "base/task/post_task.h"
 #include "components/favicon/ios/web_favicon_driver.h"
 #include "components/navigation_metrics/navigation_metrics.h"
 #include "components/sessions/core/serialized_navigation_entry.h"
@@ -48,7 +49,6 @@
 #import "ios/chrome/browser/tabs/tab_model_selected_tab_observer.h"
 #import "ios/chrome/browser/tabs/tab_model_synced_window_delegate.h"
 #import "ios/chrome/browser/tabs/tab_model_web_state_list_delegate.h"
-#import "ios/chrome/browser/tabs/tab_model_web_usage_enabled_observer.h"
 #import "ios/chrome/browser/tabs/tab_parenting_observer.h"
 #import "ios/chrome/browser/web/page_placeholder_tab_helper.h"
 #import "ios/chrome/browser/web_state_list/web_state_list.h"
@@ -56,6 +56,8 @@
 #import "ios/chrome/browser/web_state_list/web_state_list_observer.h"
 #import "ios/chrome/browser/web_state_list/web_state_list_serialization.h"
 #import "ios/chrome/browser/web_state_list/web_state_opener.h"
+#import "ios/chrome/browser/web_state_list/web_usage_enabler/web_state_list_web_usage_enabler.h"
+#import "ios/chrome/browser/web_state_list/web_usage_enabler/web_state_list_web_usage_enabler_factory.h"
 #include "ios/web/public/browser_state.h"
 #include "ios/web/public/certificate_policy_cache.h"
 #import "ios/web/public/load_committed_details.h"
@@ -65,6 +67,7 @@
 #import "ios/web/public/web_state/navigation_context.h"
 #include "ios/web/public/web_state/session_certificate_policy_cache.h"
 #import "ios/web/public/web_state/web_state_observer_bridge.h"
+#include "ios/web/public/web_task_traits.h"
 #include "ios/web/public/web_thread.h"
 #include "url/gurl.h"
 
@@ -255,6 +258,8 @@ void RecordMainFrameNavigationMetric(web::WebState* web_state) {
 
 // Session window for the contents of the tab model.
 @property(nonatomic, readonly) SessionIOS* sessionForSaving;
+// Whether the underlying WebStateList's web usage is enabled.
+@property(nonatomic, readonly, getter=isWebUsageEnabled) BOOL webUsageEnabled;
 
 // Helper method to restore a saved session and control if the state should
 // be persisted or not. Used to implement the public -restoreSessionWindow:
@@ -267,7 +272,6 @@ void RecordMainFrameNavigationMetric(web::WebState* web_state) {
 @implementation TabModel
 
 @synthesize browserState = _browserState;
-@synthesize webUsageEnabled = _webUsageEnabled;
 
 #pragma mark - Overriden
 
@@ -396,9 +400,6 @@ void RecordMainFrameNavigationMetric(web::WebState* web_state) {
     _webStateListMetricsObserver = webStateListMetricsObserver.get();
     _webStateListObservers.push_back(std::move(webStateListMetricsObserver));
 
-    _webStateListObservers.push_back(
-        std::make_unique<TabModelWebUsageEnabledObserver>(self));
-
     auto tabModelNotificationObserver =
         std::make_unique<TabModelNotificationObserver>(self);
     _tabModelNotificationObserver = tabModelNotificationObserver.get();
@@ -468,16 +469,6 @@ void RecordMainFrameNavigationMetric(web::WebState* web_state) {
 
   DCHECK_GE(index, 0);
   return static_cast<NSUInteger>(index);
-}
-
-- (Tab*)openerOfTab:(Tab*)tab {
-  int index = _webStateList->GetIndexOfWebState(tab.webState);
-  if (index == WebStateList::kInvalidIndex)
-    return nil;
-
-  WebStateOpener opener = _webStateList->GetOpenerOfWebStateAt(index);
-  return opener.opener ? LegacyTabHelper::GetTabForWebState(opener.opener)
-                       : nil;
 }
 
 - (Tab*)insertTabWithURL:(const GURL&)URL
@@ -626,16 +617,6 @@ void RecordMainFrameNavigationMetric(web::WebState* web_state) {
   [_observers tabModel:self didChangeTabSnapshot:tab withImage:image];
 }
 
-- (void)setWebUsageEnabled:(BOOL)webUsageEnabled {
-  if (_webUsageEnabled == webUsageEnabled)
-    return;
-  _webUsageEnabled = webUsageEnabled;
-  for (int index = 0; index < _webStateList->count(); ++index) {
-    web::WebState* webState = _webStateList->GetWebStateAt(index);
-    webState->SetWebUsageEnabled(_webUsageEnabled ? true : false);
-  }
-}
-
 - (void)setPrimary:(BOOL)primary {
   if (_tabUsageRecorder) {
     _tabUsageRecorder->RecordPrimaryTabModelChange(primary,
@@ -750,6 +731,13 @@ void RecordMainFrameNavigationMetric(web::WebState* web_state) {
       initWithWindows:@[ SerializeWebStateList(_webStateList.get()) ]];
 }
 
+- (BOOL)isWebUsageEnabled {
+  DCHECK(_browserState);
+  return WebStateListWebUsageEnablerFactory::GetInstance()
+      ->GetForBrowserState(_browserState)
+      ->IsWebUsageEnabled();
+}
+
 - (BOOL)restoreSessionWindow:(SessionWindowIOS*)window
                 persistState:(BOOL)persistState {
   DCHECK(_browserState);
@@ -837,7 +825,7 @@ void RecordMainFrameNavigationMetric(web::WebState* web_state) {
 
 // Called when UIApplicationWillResignActiveNotification is received.
 - (void)willResignActive:(NSNotification*)notify {
-  if (_webUsageEnabled && self.currentTab) {
+  if (self.webUsageEnabled && self.currentTab) {
     [SnapshotCacheFactory::GetForBrowserState(_browserState)
         willBeSavedGreyWhenBackgrounding:self.currentTab.tabId];
   }
@@ -852,7 +840,7 @@ void RecordMainFrameNavigationMetric(web::WebState* web_state) {
   // active sessions.
   CleanCertificatePolicyCache(
       &_clearPoliciesTaskTracker,
-      web::WebThread::GetTaskRunnerForThread(web::WebThread::IO),
+      base::CreateSingleThreadTaskRunnerWithTraits({web::WebThread::IO}),
       web::BrowserState::GetCertificatePolicyCache(_browserState),
       _webStateList.get());
 
@@ -861,7 +849,7 @@ void RecordMainFrameNavigationMetric(web::WebState* web_state) {
   [self saveSessionImmediately:YES];
 
   // Write out a grey version of the current website to disk.
-  if (_webUsageEnabled && self.currentTab) {
+  if (self.webUsageEnabled && self.currentTab) {
     [SnapshotCacheFactory::GetForBrowserState(_browserState)
         saveGreyInBackgroundForSessionID:self.currentTab.tabId];
   }

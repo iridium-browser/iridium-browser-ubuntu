@@ -20,6 +20,7 @@
 #include "net/test/cert_test_util.h"
 #include "net/test/channel_id_test_util.h"
 #include "net/test/test_data_directory.h"
+#include "net/test/test_with_scoped_task_environment.h"
 #include "sql/statement.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -28,7 +29,7 @@ namespace net {
 const base::FilePath::CharType kTestChannelIDFilename[] =
     FILE_PATH_LITERAL("ChannelID");
 
-class SQLiteChannelIDStoreTest : public testing::Test {
+class SQLiteChannelIDStoreTest : public TestWithScopedTaskEnvironment {
  public:
   void Load(std::vector<std::unique_ptr<DefaultChannelIDStore::ChannelID>>*
                 channel_ids) {
@@ -229,7 +230,7 @@ TEST_F(SQLiteChannelIDStoreTest, TestUpgradeV1) {
 
   // Create a version 1 database.
   {
-    sql::Connection db;
+    sql::Database db;
     ASSERT_TRUE(db.Open(v1_db_path));
     ASSERT_TRUE(db.Execute(
         "CREATE TABLE meta(key LONGVARCHAR NOT NULL UNIQUE PRIMARY KEY,"
@@ -276,7 +277,7 @@ TEST_F(SQLiteChannelIDStoreTest, TestUpgradeV1) {
 
     // Verify the database version is updated.
     {
-      sql::Connection db;
+      sql::Database db;
       ASSERT_TRUE(db.Open(v1_db_path));
       sql::Statement smt(db.GetUniqueStatement(
           "SELECT value FROM meta WHERE key = \"version\""));
@@ -299,7 +300,7 @@ TEST_F(SQLiteChannelIDStoreTest, TestUpgradeV2) {
 
   // Create a version 2 database.
   {
-    sql::Connection db;
+    sql::Database db;
     ASSERT_TRUE(db.Open(v2_db_path));
     ASSERT_TRUE(db.Execute(
         "CREATE TABLE meta(key LONGVARCHAR NOT NULL UNIQUE PRIMARY KEY,"
@@ -351,7 +352,7 @@ TEST_F(SQLiteChannelIDStoreTest, TestUpgradeV2) {
 
     // Verify the database version is updated.
     {
-      sql::Connection db;
+      sql::Database db;
       ASSERT_TRUE(db.Open(v2_db_path));
       sql::Statement smt(db.GetUniqueStatement(
           "SELECT value FROM meta WHERE key = \"version\""));
@@ -374,7 +375,7 @@ TEST_F(SQLiteChannelIDStoreTest, TestUpgradeV3) {
 
   // Create a version 3 database.
   {
-    sql::Connection db;
+    sql::Database db;
     ASSERT_TRUE(db.Open(v3_db_path));
     ASSERT_TRUE(db.Execute(
         "CREATE TABLE meta(key LONGVARCHAR NOT NULL UNIQUE PRIMARY KEY,"
@@ -428,7 +429,7 @@ TEST_F(SQLiteChannelIDStoreTest, TestUpgradeV3) {
 
     // Verify the database version is updated.
     {
-      sql::Connection db;
+      sql::Database db;
       ASSERT_TRUE(db.Open(v3_db_path));
       sql::Statement smt(db.GetUniqueStatement(
           "SELECT value FROM meta WHERE key = \"version\""));
@@ -451,7 +452,7 @@ TEST_F(SQLiteChannelIDStoreTest, TestUpgradeV4) {
 
   // Create a version 4 database.
   {
-    sql::Connection db;
+    sql::Database db;
     ASSERT_TRUE(db.Open(v4_db_path));
     ASSERT_TRUE(db.Execute(
         "CREATE TABLE meta(key LONGVARCHAR NOT NULL UNIQUE PRIMARY KEY,"
@@ -521,7 +522,7 @@ TEST_F(SQLiteChannelIDStoreTest, TestUpgradeV4) {
 
     // Verify the database version is updated.
     {
-      sql::Connection db;
+      sql::Database db;
       ASSERT_TRUE(db.Open(v4_db_path));
       sql::Statement smt(db.GetUniqueStatement(
           "SELECT value FROM meta WHERE key = \"version\""));
@@ -544,7 +545,7 @@ TEST_F(SQLiteChannelIDStoreTest, TestUpgradeV5) {
 
   // Create a version 5 database.
   {
-    sql::Connection db;
+    sql::Database db;
     ASSERT_TRUE(db.Open(v5_db_path));
     ASSERT_TRUE(db.Execute(
         "CREATE TABLE meta(key LONGVARCHAR NOT NULL UNIQUE PRIMARY KEY,"
@@ -596,7 +597,7 @@ TEST_F(SQLiteChannelIDStoreTest, TestUpgradeV5) {
 
     // Verify the database version is updated.
     {
-      sql::Connection db;
+      sql::Database db;
       ASSERT_TRUE(db.Open(v5_db_path));
       sql::Statement smt(db.GetUniqueStatement(
           "SELECT value FROM meta WHERE key = \"version\""));

@@ -4,20 +4,17 @@
 
 #include "third_party/blink/renderer/core/layout/ng/ng_unpositioned_float.h"
 
-#include "third_party/blink/renderer/core/style/computed_style.h"
+#include "third_party/blink/renderer/core/layout/ng/ng_block_break_token.h"
+#include "third_party/blink/renderer/core/layout/ng/ng_layout_result.h"
 
 namespace blink {
 
-bool NGUnpositionedFloat::IsLeft() const {
-  return node.Style().Floating() == EFloat::kLeft;
-}
+// Define the constructor and destructor here, so that we can forward-declare
+// more in the header file.
+NGUnpositionedFloat::NGUnpositionedFloat(NGBlockNode node,
+                                         const NGBlockBreakToken* token)
+    : node(node), token(token) {}
 
-bool NGUnpositionedFloat::IsRight() const {
-  return node.Style().Floating() == EFloat::kRight;
-}
-
-EClear NGUnpositionedFloat::ClearType() const {
-  return node.Style().Clear();
-}
+NGUnpositionedFloat::~NGUnpositionedFloat() = default;
 
 }  // namespace blink

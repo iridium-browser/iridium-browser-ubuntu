@@ -9,7 +9,7 @@
 
 #include "base/macros.h"
 #include "base/run_loop.h"
-#include "base/test/histogram_tester.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "components/favicon/core/favicon_client.h"
 #include "components/favicon/core/favicon_handler.h"
 #include "components/favicon/core/test/mock_favicon_service.h"
@@ -52,7 +52,7 @@ class ContentFaviconDriverTest : public content::RenderViewHostTestHarness {
     RenderViewHostTestHarness::SetUp();
 
     ContentFaviconDriver::CreateForWebContents(web_contents(),
-                                               &favicon_service_, nullptr);
+                                               &favicon_service_);
   }
 
   content::WebContentsTester* web_contents_tester() {

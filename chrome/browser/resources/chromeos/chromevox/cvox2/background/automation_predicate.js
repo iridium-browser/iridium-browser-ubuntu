@@ -192,9 +192,13 @@ AutomationPredicate.leaf = function(node) {
        !hasActionableDescendant(node)) ||
       (!!node.descriptionFor && node.descriptionFor.length > 0 &&
        !hasActionableDescendant(node)) ||
+      (node.activeDescendantFor && node.activeDescendantFor.length > 0) ||
+      (node.role == Role.MENU_ITEM && !hasActionableDescendant(node)) ||
       node.state[State.INVISIBLE] || node.children.every(function(n) {
         return n.state[State.INVISIBLE];
-      });
+      }) ||
+      // Explicitly only check the clickable attribute here (for Android).
+      node.clickable || !!AutomationPredicate.math(node);
 };
 
 /**
@@ -319,6 +323,10 @@ AutomationPredicate.linebreak = function(first, second) {
  * @return {boolean}
  */
 AutomationPredicate.container = function(node) {
+  // Math is never a container.
+  if (AutomationPredicate.math(node))
+    return false;
+
   return AutomationPredicate.match({
     anyRole: [
       Role.GENERIC_CONTAINER, Role.DOCUMENT, Role.GROUP, Role.LIST,
@@ -348,7 +356,7 @@ AutomationPredicate.container = function(node) {
 AutomationPredicate.structuralContainer = AutomationPredicate.roles([
   Role.ALERT_DIALOG, Role.CLIENT, Role.DIALOG, Role.ROOT_WEB_AREA,
   Role.WEB_VIEW, Role.WINDOW, Role.EMBEDDED_OBJECT, Role.IFRAME,
-  Role.IFRAME_PRESENTATIONAL, Role.UNKNOWN
+  Role.IFRAME_PRESENTATIONAL, Role.IGNORED, Role.UNKNOWN
 ]);
 
 /**
@@ -360,8 +368,6 @@ AutomationPredicate.structuralContainer = AutomationPredicate.roles([
 AutomationPredicate.root = function(node) {
   switch (node.role) {
     case Role.WINDOW:
-    case Role.MENU:
-    case Role.MENU_BAR:
       return true;
     case Role.DIALOG:
       // The below logic handles nested dialogs properly in the desktop tree
@@ -396,9 +402,10 @@ AutomationPredicate.root = function(node) {
  * @param {AutomationNode} node
  * @return {boolean}
  */
-AutomationPredicate.editableRoot = function(node) {
+AutomationPredicate.rootOrEditableRoot = function(node) {
   return AutomationPredicate.root(node) ||
-      node.state.richlyEditable && node.state.focused;
+      (node.state.richlyEditable && node.state.focused &&
+       node.children.length > 0);
 };
 
 /**
@@ -432,6 +439,10 @@ AutomationPredicate.shouldIgnoreNode = function(node) {
   if (node.name || node.value || node.description || node.url)
     return false;
 
+  // Don't ignore math nodes.
+  if (AutomationPredicate.math(node))
+    return false;
+
   // Ignore some roles.
   return AutomationPredicate.leaf(node) && (AutomationPredicate.roles([
            Role.CLIENT, Role.COLUMN, Role.GENERIC_CONTAINER, Role.GROUP,
@@ -445,10 +456,9 @@ AutomationPredicate.shouldIgnoreNode = function(node) {
  * @param {!AutomationNode} node
  * @return {boolean}
  */
-AutomationPredicate.checkable = AutomationPredicate.roles([
-  Role.CHECK_BOX, Role.RADIO_BUTTON, Role.MENU_ITEM_CHECK_BOX,
-  Role.MENU_ITEM_RADIO, Role.TREE_ITEM
-]);
+AutomationPredicate.checkable = function(node) {
+  return !!node.checked;
+};
 
 /**
  * Returns if the node is clickable.
@@ -578,6 +588,37 @@ AutomationPredicate.contextualBraille = function(node) {
  */
 AutomationPredicate.multiline = function(node) {
   return node.state[State.MULTILINE] || node.state[State.RICHLY_EDITABLE];
+};
+
+/**
+ * Matches against a node that should be auto-scrolled during navigation.
+ * @param {!AutomationNode} node
+ * @return {boolean}
+ */
+AutomationPredicate.autoScrollable = function(node) {
+  return !!node.scrollable &&
+      (node.role == Role.GRID || node.role == Role.LIST ||
+       node.role == Role.POP_UP_BUTTON || node.role == Role.SCROLL_VIEW);
+};
+
+/**
+ * @param {!AutomationNode} node
+ * @return {boolean}
+ */
+AutomationPredicate.math = function(node) {
+  return node.role == Role.MATH || !!node.htmlAttributes['data-mathml'];
+};
+
+/**
+ * Matches against editable nodes, that should not be treated in the usual
+ * fashion.
+ * Instead, only output the contents around the selection in braille.
+ * @param {!AutomationNode} node
+ * @return {boolean}
+ */
+AutomationPredicate.shouldOnlyOutputSelectionChangeInBraille = function(node) {
+  return node.state[State.RICHLY_EDITABLE] && node.state[State.FOCUSED] &&
+      node.role == Role.LOG;
 };
 
 });  // goog.scope

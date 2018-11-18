@@ -15,14 +15,19 @@
 #ifndef CRASHPAD_SNAPSHOT_FUCHSIA_PROCESS_READER_H_
 #define CRASHPAD_SNAPSHOT_FUCHSIA_PROCESS_READER_H_
 
+#include <lib/zx/process.h>
+#include <zircon/syscalls/debug.h>
+
 #include <memory>
 #include <vector>
 
 #include "base/macros.h"
 #include "build/build_config.h"
 #include "snapshot/elf/elf_image_reader.h"
+#include "snapshot/fuchsia/memory_map_fuchsia.h"
 #include "snapshot/module_snapshot.h"
 #include "util/misc/initialization_state_dcheck.h"
+#include "util/numeric/checked_range.h"
 #include "util/process/process_memory_fuchsia.h"
 #include "util/process/process_memory_range.h"
 
@@ -37,8 +42,7 @@ class ProcessReaderFuchsia {
     Module();
     ~Module();
 
-    //! \brief The `ZX_PROP_NAME` of the module. Will be prepended with "app:"
-    //!     for the main executable.
+    //! \brief The `ZX_PROP_NAME` of the module.
     std::string name;
 
     //! \brief An image reader for the module.
@@ -68,6 +72,15 @@ class ProcessReaderFuchsia {
 
     //! \brief The `ZX_PROP_NAME` property of the thread. This may be empty.
     std::string name;
+
+    //! \brief The raw architecture-specific `zx_thread_state_general_regs_t` as
+    //!     returned by `zx_thread_read_state()`.
+    zx_thread_state_general_regs_t general_registers = {};
+
+    //! \brief The regions representing the stack. The first entry in the vector
+    //!     represents the callstack, and further entries optionally identify
+    //!     other stack data when the thread uses a split stack representation.
+    std::vector<CheckedRange<zx_vaddr_t, size_t>> stack_regions;
   };
 
   ProcessReaderFuchsia();
@@ -82,7 +95,7 @@ class ProcessReaderFuchsia {
   //! \return `true` on success, indicating that this object will respond
   //!     validly to further method calls. `false` on failure. On failure, no
   //!     further method calls should be made.
-  bool Initialize(zx_handle_t process);
+  bool Initialize(const zx::process& process);
 
   //! \return The modules loaded in the process. The first element (at index
   //!     `0`) corresponds to the main executable.
@@ -108,7 +121,8 @@ class ProcessReaderFuchsia {
   std::vector<std::unique_ptr<ElfImageReader>> module_readers_;
   std::vector<std::unique_ptr<ProcessMemoryRange>> process_memory_ranges_;
   std::unique_ptr<ProcessMemoryFuchsia> process_memory_;
-  zx_handle_t process_;
+  MemoryMapFuchsia memory_map_;
+  zx::unowned_process process_;
   bool initialized_modules_ = false;
   bool initialized_threads_ = false;
   InitializationStateDcheck initialized_;

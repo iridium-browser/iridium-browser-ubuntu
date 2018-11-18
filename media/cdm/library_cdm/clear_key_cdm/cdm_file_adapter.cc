@@ -8,7 +8,7 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
-#include "media/cdm/library_cdm/clear_key_cdm/cdm_host_proxy.h"
+#include "media/cdm/library_cdm/cdm_host_proxy.h"
 
 namespace media {
 
@@ -35,9 +35,9 @@ CdmFileAdapter::CdmFileAdapter(CdmHostProxy* cdm_host_proxy) {
 }
 
 CdmFileAdapter::~CdmFileAdapter() {
-  DCHECK(open_cb_.is_null());
-  DCHECK(read_cb_.is_null());
-  DCHECK(write_cb_.is_null());
+  DCHECK(!open_cb_);
+  DCHECK(!read_cb_);
+  DCHECK(!write_cb_);
   file_io_->Close();
 }
 

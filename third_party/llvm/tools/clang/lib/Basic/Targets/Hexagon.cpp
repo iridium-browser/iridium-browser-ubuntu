@@ -75,7 +75,6 @@ void HexagonTargetInfo::getTargetDefines(const LangOptions &Opts,
 bool HexagonTargetInfo::initFeatureMap(
     llvm::StringMap<bool> &Features, DiagnosticsEngine &Diags, StringRef CPU,
     const std::vector<std::string> &FeaturesVec) const {
-  Features["hvx-double"] = false;
   Features["long-calls"] = false;
 
   return TargetInfo::initFeatureMap(Features, Diags, CPU, FeaturesVec);
@@ -132,6 +131,10 @@ const Builtin::Info HexagonTargetInfo::BuiltinInfo[] = {
 };
 
 bool HexagonTargetInfo::hasFeature(StringRef Feature) const {
+  std::string VS = "hvxv" + HVXVersion;
+  if (Feature == VS)
+    return true;
+
   return llvm::StringSwitch<bool>(Feature)
       .Case("hexagon", true)
       .Case("hvx", HasHVX)

@@ -22,13 +22,13 @@ class MockQuotaManager;
 
 class MockQuotaManagerProxy : public QuotaManagerProxy {
  public:
-  // It is ok to give NULL to |quota_manager|.
+  // It is ok to give nullptr to |quota_manager|.
   MockQuotaManagerProxy(MockQuotaManager* quota_manager,
                         base::SingleThreadTaskRunner* task_runner);
 
   void RegisterClient(QuotaClient* client) override;
 
-  void SimulateQuotaManagerDestroyed();
+  virtual void SimulateQuotaManagerDestroyed();
 
   // We don't mock them.
   void NotifyOriginInUse(const url::Origin& origin) override {}

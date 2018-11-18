@@ -21,6 +21,14 @@ script:
   - mkdir build && cd build
   - cmake -DREACTOR_BACKEND=$REACTOR_BACKEND ..
   - make
+  - ./unittests
+
+notifications:
+  email:
+    recipients:
+      - swiftshader-team@google.com
+    on_success: never
+    on_failure: always
 
 deploy:
   provider: gcs

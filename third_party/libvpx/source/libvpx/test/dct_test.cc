@@ -26,10 +26,10 @@
 #include "vpx/vpx_integer.h"
 #include "vpx_ports/mem.h"
 
-using ::testing::make_tuple;
-using ::testing::tuple;
 using libvpx_test::ACMRandom;
 using libvpx_test::Buffer;
+using ::testing::make_tuple;
+using ::testing::tuple;
 
 namespace {
 typedef void (*FdctFunc)(const int16_t *in, tran_low_t *out, int stride);
@@ -683,6 +683,19 @@ INSTANTIATE_TEST_CASE_P(
                                          VPX_BITS_12)));
 #endif  // HAVE_SSE4_1 && CONFIG_VP9_HIGHBITDEPTH
 
+#if HAVE_VSX && !CONFIG_EMULATE_HARDWARE && !CONFIG_VP9_HIGHBITDEPTH
+static const FuncInfo ht_vsx_func_info[3] = {
+  { &vp9_fht4x4_c, &iht_wrapper<vp9_iht4x4_16_add_vsx>, 4, 1 },
+  { &vp9_fht8x8_c, &iht_wrapper<vp9_iht8x8_64_add_vsx>, 8, 1 },
+  { &vp9_fht16x16_c, &iht_wrapper<vp9_iht16x16_256_add_vsx>, 16, 1 }
+};
+
+INSTANTIATE_TEST_CASE_P(VSX, TransHT,
+                        ::testing::Combine(::testing::Range(0, 3),
+                                           ::testing::Values(ht_vsx_func_info),
+                                           ::testing::Range(0, 4),
+                                           ::testing::Values(VPX_BITS_8)));
+#endif  // HAVE_VSX
 #endif  // !CONFIG_EMULATE_HARDWARE
 
 /* -------------------------------------------------------------------------- */
@@ -725,4 +738,14 @@ INSTANTIATE_TEST_CASE_P(SSE2, TransWHT,
                         ::testing::Values(make_tuple(0, &wht_sse2_func_info, 0,
                                                      VPX_BITS_8)));
 #endif  // HAVE_SSE2 && !CONFIG_EMULATE_HARDWARE
+
+#if HAVE_VSX && !CONFIG_EMULATE_HARDWARE && !CONFIG_VP9_HIGHBITDEPTH
+static const FuncInfo wht_vsx_func_info = {
+  &fdct_wrapper<vp9_fwht4x4_c>, &idct_wrapper<vpx_iwht4x4_16_add_vsx>, 4, 1
+};
+
+INSTANTIATE_TEST_CASE_P(VSX, TransWHT,
+                        ::testing::Values(make_tuple(0, &wht_vsx_func_info, 0,
+                                                     VPX_BITS_8)));
+#endif  // HAVE_VSX && !CONFIG_EMULATE_HARDWARE
 }  // namespace

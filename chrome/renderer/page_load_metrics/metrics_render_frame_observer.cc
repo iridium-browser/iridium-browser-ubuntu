@@ -38,12 +38,15 @@ class MojoPageTimingSender : public PageTimingSender {
         &page_load_metrics_);
   }
   ~MojoPageTimingSender() override {}
-  void SendTiming(const mojom::PageLoadTimingPtr& timing,
-                  const mojom::PageLoadMetadataPtr& metadata,
-                  mojom::PageLoadFeaturesPtr new_features) override {
+  void SendTiming(
+      const mojom::PageLoadTimingPtr& timing,
+      const mojom::PageLoadMetadataPtr& metadata,
+      mojom::PageLoadFeaturesPtr new_features,
+      std::vector<mojom::ResourceDataUpdatePtr> resources) override {
     DCHECK(page_load_metrics_);
     page_load_metrics_->UpdateTiming(timing->Clone(), metadata->Clone(),
-                                     std::move(new_features));
+                                     std::move(new_features),
+                                     std::move(resources));
   }
 
  private:
@@ -56,7 +59,8 @@ class MojoPageTimingSender : public PageTimingSender {
 
 MetricsRenderFrameObserver::MetricsRenderFrameObserver(
     content::RenderFrame* render_frame)
-    : content::RenderFrameObserver(render_frame) {}
+    : content::RenderFrameObserver(render_frame),
+      scoped_ad_resource_observer_(this) {}
 
 MetricsRenderFrameObserver::~MetricsRenderFrameObserver() {}
 
@@ -85,13 +89,88 @@ void MetricsRenderFrameObserver::DidObserveNewCssPropertyUsage(
   }
 }
 
+void MetricsRenderFrameObserver::DidStartResponse(
+    int request_id,
+    const network::ResourceResponseHead& response_head,
+    content::ResourceType resource_type) {
+  if (provisional_frame_resource_data_use_ &&
+      content::IsResourceTypeFrame(resource_type)) {
+    // TODO(rajendrant): This frame request might start before the provisional
+    // load starts, and data use of the frame request might be missed in that
+    // case. There should be a guarantee that DidStartProvisionalLoad be called
+    // before DidStartResponse for the frame request.
+    provisional_frame_resource_data_use_->DidStartResponse(request_id,
+                                                           response_head);
+  } else if (page_timing_metrics_sender_) {
+    page_timing_metrics_sender_->DidStartResponse(request_id, response_head);
+    UpdateResourceMetadata(request_id);
+  }
+}
+
+void MetricsRenderFrameObserver::DidCompleteResponse(
+    int request_id,
+    const network::URLLoaderCompletionStatus& status) {
+  if (provisional_frame_resource_data_use_ &&
+      provisional_frame_resource_data_use_->resource_id() == request_id) {
+    provisional_frame_resource_data_use_->DidCompleteResponse(status);
+  } else if (page_timing_metrics_sender_) {
+    page_timing_metrics_sender_->DidCompleteResponse(request_id, status);
+    // The provisional frame can be flagged as an ad anytime during the load.
+    if (request_id == provisional_frame_resource_id)
+      UpdateResourceMetadata(request_id);
+  }
+}
+
+void MetricsRenderFrameObserver::DidCancelResponse(int request_id) {
+  if (provisional_frame_resource_data_use_ &&
+      provisional_frame_resource_data_use_->resource_id() == request_id) {
+    provisional_frame_resource_data_use_.reset();
+  } else if (page_timing_metrics_sender_) {
+    page_timing_metrics_sender_->DidCancelResponse(request_id);
+    // The provisional frame can be flagged as an ad anytime during the load.
+    if (request_id == provisional_frame_resource_id)
+      UpdateResourceMetadata(request_id);
+  }
+}
+
+void MetricsRenderFrameObserver::DidReceiveTransferSizeUpdate(
+    int request_id,
+    int received_data_length) {
+  if (provisional_frame_resource_data_use_ &&
+      provisional_frame_resource_data_use_->resource_id() == request_id) {
+    provisional_frame_resource_data_use_->DidReceiveTransferSizeUpdate(
+        received_data_length);
+  } else if (page_timing_metrics_sender_) {
+    page_timing_metrics_sender_->DidReceiveTransferSizeUpdate(
+        request_id, received_data_length);
+    // The provisional frame can be flagged as an ad anytime during the load.
+    if (request_id == provisional_frame_resource_id)
+      UpdateResourceMetadata(request_id);
+  }
+}
+
 void MetricsRenderFrameObserver::FrameDetached() {
   page_timing_metrics_sender_.reset();
 }
 
+void MetricsRenderFrameObserver::DidStartProvisionalLoad(
+    blink::WebDocumentLoader* document_loader,
+    bool is_content_initiated) {
+  // Create a new data use tracker for the new provisional load.
+  provisional_frame_resource_data_use_ =
+      std::make_unique<PageResourceDataUse>();
+  provisional_frame_resource_id = 0;
+}
+
+void MetricsRenderFrameObserver::DidFailProvisionalLoad(
+    const blink::WebURLError& error) {
+  // Clear the data use tracker for the provisional navigation that started.
+  provisional_frame_resource_data_use_.reset();
+}
+
 void MetricsRenderFrameObserver::DidCommitProvisionalLoad(
-    bool is_new_navigation,
-    bool is_same_document_navigation) {
+    bool is_same_document_navigation,
+    ui::PageTransition transition) {
   // Same-document navigations (e.g. a navigation from a fragment link) aren't
   // full page loads, since they don't go to network to load the main HTML
   // resource. DidStartProvisionalLoad doesn't get invoked for same document
@@ -106,8 +185,56 @@ void MetricsRenderFrameObserver::DidCommitProvisionalLoad(
   if (HasNoRenderFrame())
     return;
 
+  // Update metadata once the load has been committed. There is no guarantee
+  // that the provisional resource will have been reported as an ad by this
+  // point. Therefore, need to update metadata for the resource after the load.
+  // Consumers may receive the correct ad information late.
+  UpdateResourceMetadata(provisional_frame_resource_data_use_->resource_id());
+
+  provisional_frame_resource_id =
+      provisional_frame_resource_data_use_->resource_id();
+
   page_timing_metrics_sender_ = std::make_unique<PageTimingMetricsSender>(
-      CreatePageTimingSender(), CreateTimer(), GetTiming());
+      CreatePageTimingSender(), CreateTimer(), GetTiming(),
+      std::move(provisional_frame_resource_data_use_));
+}
+
+void MetricsRenderFrameObserver::SetAdResourceTracker(
+    subresource_filter::AdResourceTracker* ad_resource_tracker) {
+  // Remove all sources and set a new source for the observer.
+  scoped_ad_resource_observer_.RemoveAll();
+  scoped_ad_resource_observer_.Add(ad_resource_tracker);
+}
+
+void MetricsRenderFrameObserver::OnAdResourceTrackerGoingAway() {
+  scoped_ad_resource_observer_.RemoveAll();
+}
+
+void MetricsRenderFrameObserver::OnAdResourceObserved(int request_id) {
+  ad_request_ids_.insert(request_id);
+}
+
+void MetricsRenderFrameObserver::UpdateResourceMetadata(int request_id) {
+  if (!page_timing_metrics_sender_)
+    return;
+  // If the request is an ad, pop it off the list of known ad requests.
+  auto ad_resource_it = ad_request_ids_.find(request_id);
+  bool reported_as_ad_resource =
+      ad_request_ids_.find(request_id) != ad_request_ids_.end();
+  if (reported_as_ad_resource)
+    ad_request_ids_.erase(ad_resource_it);
+  bool is_main_frame_resource = render_frame()->IsMainFrame();
+  if (provisional_frame_resource_data_use_ &&
+      provisional_frame_resource_data_use_->resource_id() == request_id) {
+    if (reported_as_ad_resource)
+      provisional_frame_resource_data_use_->SetReportedAsAdResource(
+          reported_as_ad_resource);
+    provisional_frame_resource_data_use_->SetIsMainFrameResource(
+        is_main_frame_resource);
+  } else {
+    page_timing_metrics_sender_->UpdateResourceMetadata(
+        request_id, reported_as_ad_resource, is_main_frame_resource);
+  }
 }
 
 void MetricsRenderFrameObserver::SendMetrics() {
@@ -125,6 +252,10 @@ mojom::PageLoadTimingPtr MetricsRenderFrameObserver::GetTiming() const {
   mojom::PageLoadTimingPtr timing(CreatePageLoadTiming());
   double start = perf.NavigationStart();
   timing->navigation_start = base::Time::FromDoubleT(start);
+  if (perf.InputForNavigationStart() > 0.0) {
+    timing->input_to_navigation_start =
+        ClampDelta(start, perf.InputForNavigationStart());
+  }
   if (perf.PageInteractive() > 0.0) {
     // PageInteractive and PageInteractiveDetection should be available at the
     // same time. This is a renderer side DCHECK to ensure this.
@@ -145,6 +276,14 @@ mojom::PageLoadTimingPtr MetricsRenderFrameObserver::GetTiming() const {
   if (perf.FirstInputTimestamp() > 0.0) {
     timing->interactive_timing->first_input_timestamp =
         ClampDelta(perf.FirstInputTimestamp(), start);
+  }
+  if (perf.LongestInputDelay() > 0.0) {
+    timing->interactive_timing->longest_input_delay =
+        base::TimeDelta::FromSecondsD(perf.LongestInputDelay());
+  }
+  if (perf.LongestInputTimestamp() > 0.0) {
+    timing->interactive_timing->longest_input_timestamp =
+        ClampDelta(perf.LongestInputTimestamp(), start);
   }
   if (perf.ResponseStart() > 0.0)
     timing->response_start = ClampDelta(perf.ResponseStart(), start);
@@ -199,19 +338,10 @@ mojom::PageLoadTimingPtr MetricsRenderFrameObserver::GetTiming() const {
             perf.ParseBlockedOnScriptExecutionFromDocumentWriteDuration());
   }
 
-  if (perf.AuthorStyleSheetParseDurationBeforeFCP() > 0.0) {
-    timing->style_sheet_timing->author_style_sheet_parse_duration_before_fcp =
-        base::TimeDelta::FromSecondsD(
-            perf.AuthorStyleSheetParseDurationBeforeFCP());
-  }
-  if (perf.UpdateStyleDurationBeforeFCP() > 0.0) {
-    timing->style_sheet_timing->update_style_duration_before_fcp =
-        base::TimeDelta::FromSecondsD(perf.UpdateStyleDurationBeforeFCP());
-  }
   return timing;
 }
 
-std::unique_ptr<base::Timer> MetricsRenderFrameObserver::CreateTimer() {
+std::unique_ptr<base::OneShotTimer> MetricsRenderFrameObserver::CreateTimer() {
   return std::make_unique<base::OneShotTimer>();
 }
 

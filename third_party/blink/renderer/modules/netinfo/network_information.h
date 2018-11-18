@@ -5,13 +5,13 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_NETINFO_NETWORK_INFORMATION_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_NETINFO_NETWORK_INFORMATION_H_
 
+#include "base/optional.h"
 #include "third_party/blink/public/platform/web_connection_type.h"
 #include "third_party/blink/public/platform/web_effective_connection_type.h"
 #include "third_party/blink/renderer/bindings/core/v8/active_script_wrappable.h"
 #include "third_party/blink/renderer/core/dom/context_lifecycle_observer.h"
 #include "third_party/blink/renderer/core/dom/events/event_target.h"
 #include "third_party/blink/renderer/platform/network/network_state_notifier.h"
-#include "third_party/blink/renderer/platform/wtf/optional.h"
 #include "third_party/blink/renderer/platform/wtf/time.h"
 
 namespace blink {
@@ -32,18 +32,18 @@ class NetworkInformation final
 
   String type() const;
   double downlinkMax() const;
-  String effectiveType() const;
-  unsigned long rtt() const;
-  double downlink() const;
+  String effectiveType();
+  unsigned long rtt();
+  double downlink();
   bool saveData() const;
 
   // NetworkStateObserver overrides.
   void ConnectionChange(WebConnectionType,
                         double downlink_max_mbps,
                         WebEffectiveConnectionType effective_type,
-                        const Optional<TimeDelta>& http_rtt,
-                        const Optional<TimeDelta>& transport_rtt,
-                        const Optional<double>& downlink_mbps,
+                        const base::Optional<TimeDelta>& http_rtt,
+                        const base::Optional<TimeDelta>& transport_rtt,
+                        const base::Optional<double>& downlink_mbps,
                         bool save_data) override;
 
   // EventTarget overrides.
@@ -79,6 +79,8 @@ class NetworkInformation final
 
   const String Host() const;
 
+  void MaybeShowWebHoldbackConsoleMsg();
+
   // Touched only on context thread.
   WebConnectionType type_;
 
@@ -100,6 +102,11 @@ class NetworkInformation final
 
   // Whether the data saving mode is enabled.
   bool save_data_;
+
+  // True if the console message indicating that network quality is overridden
+  // using a holdback experiment has been shown. Set to true if the console
+  // message has been shown, or if the holdback experiment is not enabled.
+  bool web_holdback_console_message_shown_;
 
   // Whether ContextLifecycleObserver::contextDestroyed has been called.
   bool context_stopped_;

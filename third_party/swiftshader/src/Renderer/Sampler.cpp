@@ -228,7 +228,7 @@ namespace sw
 				{
 					unsigned int YStride = pitchP;
 					unsigned int YSize = YStride * height;
-					unsigned int CStride = align(YStride / 2, 16);
+					unsigned int CStride = align<16>(YStride / 2);
 					unsigned int CSize = CStride * height / 2;
 
 					mipmap.buffer[1] = (byte*)mipmap.buffer[0] + YSize;
@@ -401,6 +401,16 @@ namespace sw
 		return textureType == TEXTURE_3D || textureType == TEXTURE_2D_ARRAY;
 	}
 
+	void Sampler::setSyncRequired(bool isSyncRequired)
+	{
+		syncRequired = isSyncRequired;
+	}
+
+	bool Sampler::requiresSync() const
+	{
+		return syncRequired;
+	}
+
 	const Texture &Sampler::getTextureData()
 	{
 		return texture;
@@ -478,7 +488,8 @@ namespace sw
 	{
 		if(textureType == TEXTURE_2D_ARRAY ||
 		   textureType == TEXTURE_2D ||
-		   textureType == TEXTURE_CUBE)
+		   textureType == TEXTURE_CUBE ||
+		   textureType == TEXTURE_RECTANGLE)
 		{
 			return ADDRESSING_LAYER;
 		}

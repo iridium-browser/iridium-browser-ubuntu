@@ -65,25 +65,9 @@ CodeGenFunction::CodeGenFunction(CodeGenModule &cgm, bool suppressNewContext)
     : CodeGenTypeCache(cgm), CGM(cgm), Target(cgm.getTarget()),
       Builder(cgm, cgm.getModule().getContext(), llvm::ConstantFolder(),
               CGBuilderInserterTy(this)),
-      CurFn(nullptr), ReturnValue(Address::invalid()),
-      CapturedStmtInfo(nullptr), SanOpts(CGM.getLangOpts().Sanitize),
-      IsSanitizerScope(false), CurFuncIsThunk(false), AutoreleaseResult(false),
-      SawAsmBlock(false), IsOutlinedSEHHelper(false), BlockInfo(nullptr),
-      BlockPointer(nullptr), LambdaThisCaptureField(nullptr),
-      NormalCleanupDest(Address::invalid()), NextCleanupDestIndex(1),
-      FirstBlockInfo(nullptr), EHResumeBlock(nullptr), ExceptionSlot(nullptr),
-      EHSelectorSlot(nullptr), DebugInfo(CGM.getModuleDebugInfo()),
-      DisableDebugInfo(false), DidCallStackSave(false), IndirectBranch(nullptr),
-      PGO(cgm), SwitchInsn(nullptr), SwitchWeights(nullptr),
-      CaseRangeBlock(nullptr), UnreachableBlock(nullptr), NumReturnExprs(0),
-      NumSimpleReturnExprs(0), CXXABIThisDecl(nullptr),
-      CXXABIThisValue(nullptr), CXXThisValue(nullptr),
-      CXXStructorImplicitParamDecl(nullptr),
-      CXXStructorImplicitParamValue(nullptr), OutermostConditional(nullptr),
-      CurLexicalScope(nullptr), TerminateLandingPad(nullptr),
-      TerminateHandler(nullptr), TrapBB(nullptr),
-      ShouldEmitLifetimeMarkers(
-          shouldEmitLifetimeMarkers(CGM.getCodeGenOpts(), CGM.getLangOpts())) {
+      SanOpts(CGM.getLangOpts().Sanitize), DebugInfo(CGM.getModuleDebugInfo()),
+      PGO(cgm), ShouldEmitLifetimeMarkers(shouldEmitLifetimeMarkers(
+                    CGM.getCodeGenOpts(), CGM.getLangOpts())) {
   if (!suppressNewContext)
     CGM.getCXXABI().getMangleContext().startNewFunction();
 
@@ -445,6 +429,11 @@ void CodeGenFunction::FinishFunction(SourceLocation EndLoc) {
         cast<llvm::AllocaInst>(NormalCleanupDest.getPointer()), DT);
     NormalCleanupDest = Address::invalid();
   }
+
+  // Add the required-vector-width attribute.
+  if (LargestVectorWidth != 0)
+    CurFn->addFnAttr("min-legal-vector-width",
+                     llvm::utostr(LargestVectorWidth));
 }
 
 /// ShouldInstrumentFunction - Return true if the current function should be
@@ -466,9 +455,19 @@ bool CodeGenFunction::ShouldXRayInstrumentFunction() const {
 }
 
 /// AlwaysEmitXRayCustomEvents - Return true if we should emit IR for calls to
-/// the __xray_customevent(...) builin calls, when doing XRay instrumentation.
+/// the __xray_customevent(...) builtin calls, when doing XRay instrumentation.
 bool CodeGenFunction::AlwaysEmitXRayCustomEvents() const {
-  return CGM.getCodeGenOpts().XRayAlwaysEmitCustomEvents;
+  return CGM.getCodeGenOpts().XRayInstrumentFunctions &&
+         (CGM.getCodeGenOpts().XRayAlwaysEmitCustomEvents ||
+          CGM.getCodeGenOpts().XRayInstrumentationBundle.Mask ==
+              XRayInstrKind::Custom);
+}
+
+bool CodeGenFunction::AlwaysEmitXRayTypedEvents() const {
+  return CGM.getCodeGenOpts().XRayInstrumentFunctions &&
+         (CGM.getCodeGenOpts().XRayAlwaysEmitTypedEvents ||
+          CGM.getCodeGenOpts().XRayInstrumentationBundle.Mask ==
+              XRayInstrKind::Typed);
 }
 
 llvm::Constant *
@@ -773,9 +772,11 @@ static bool endsWithReturn(const Decl* F) {
   return false;
 }
 
-static void markAsIgnoreThreadCheckingAtRuntime(llvm::Function *Fn) {
-  Fn->addFnAttr("sanitize_thread_no_checking_at_run_time");
-  Fn->removeFnAttr(llvm::Attribute::SanitizeThread);
+void CodeGenFunction::markAsIgnoreThreadCheckingAtRuntime(llvm::Function *Fn) {
+  if (SanOpts.has(SanitizerKind::Thread)) {
+    Fn->addFnAttr("sanitize_thread_no_checking_at_run_time");
+    Fn->removeFnAttr(llvm::Attribute::SanitizeThread);
+  }
 }
 
 static bool matchesStlAllocatorFn(const Decl *D, const ASTContext &Ctx) {
@@ -846,21 +847,33 @@ void CodeGenFunction::StartFunction(GlobalDecl GD,
 
   if (D) {
     // Apply the no_sanitize* attributes to SanOpts.
-    for (auto Attr : D->specific_attrs<NoSanitizeAttr>())
-      SanOpts.Mask &= ~Attr->getMask();
+    for (auto Attr : D->specific_attrs<NoSanitizeAttr>()) {
+      SanitizerMask mask = Attr->getMask();
+      SanOpts.Mask &= ~mask;
+      if (mask & SanitizerKind::Address)
+        SanOpts.set(SanitizerKind::KernelAddress, false);
+      if (mask & SanitizerKind::KernelAddress)
+        SanOpts.set(SanitizerKind::Address, false);
+      if (mask & SanitizerKind::HWAddress)
+        SanOpts.set(SanitizerKind::KernelHWAddress, false);
+      if (mask & SanitizerKind::KernelHWAddress)
+        SanOpts.set(SanitizerKind::HWAddress, false);
+    }
   }
 
   // Apply sanitizer attributes to the function.
   if (SanOpts.hasOneOf(SanitizerKind::Address | SanitizerKind::KernelAddress))
     Fn->addFnAttr(llvm::Attribute::SanitizeAddress);
-  if (SanOpts.hasOneOf(SanitizerKind::HWAddress))
+  if (SanOpts.hasOneOf(SanitizerKind::HWAddress | SanitizerKind::KernelHWAddress))
     Fn->addFnAttr(llvm::Attribute::SanitizeHWAddress);
   if (SanOpts.has(SanitizerKind::Thread))
     Fn->addFnAttr(llvm::Attribute::SanitizeThread);
-  if (SanOpts.has(SanitizerKind::Memory))
+  if (SanOpts.hasOneOf(SanitizerKind::Memory | SanitizerKind::KernelMemory))
     Fn->addFnAttr(llvm::Attribute::SanitizeMemory);
   if (SanOpts.has(SanitizerKind::SafeStack))
     Fn->addFnAttr(llvm::Attribute::SafeStack);
+  if (SanOpts.has(SanitizerKind::ShadowCallStack))
+    Fn->addFnAttr(llvm::Attribute::ShadowCallStack);
 
   // Apply fuzzing attribute to the function.
   if (SanOpts.hasOneOf(SanitizerKind::Fuzzer | SanitizerKind::FuzzerNoLink))
@@ -876,10 +889,6 @@ void CodeGenFunction::StartFunction(GlobalDecl GD,
           (OMD->getSelector().isUnarySelector() && II->isStr(".cxx_destruct"))) {
         markAsIgnoreThreadCheckingAtRuntime(Fn);
       }
-    } else if (const auto *FD = dyn_cast_or_null<FunctionDecl>(D)) {
-      IdentifierInfo *II = FD->getIdentifier();
-      if (II && II->isStr("__destroy_helper_block_"))
-        markAsIgnoreThreadCheckingAtRuntime(Fn);
     }
   }
 
@@ -892,19 +901,21 @@ void CodeGenFunction::StartFunction(GlobalDecl GD,
   }
 
   // Apply xray attributes to the function (as a string, for now)
-  bool InstrumentXray = ShouldXRayInstrumentFunction();
-  if (D && InstrumentXray) {
+  if (D) {
     if (const auto *XRayAttr = D->getAttr<XRayInstrumentAttr>()) {
-      if (XRayAttr->alwaysXRayInstrument())
-        Fn->addFnAttr("function-instrument", "xray-always");
-      if (XRayAttr->neverXRayInstrument())
-        Fn->addFnAttr("function-instrument", "xray-never");
-      if (const auto *LogArgs = D->getAttr<XRayLogArgsAttr>()) {
-        Fn->addFnAttr("xray-log-args",
-                      llvm::utostr(LogArgs->getArgumentCount()));
+      if (CGM.getCodeGenOpts().XRayInstrumentationBundle.has(
+              XRayInstrKind::Function)) {
+        if (XRayAttr->alwaysXRayInstrument() && ShouldXRayInstrumentFunction())
+          Fn->addFnAttr("function-instrument", "xray-always");
+        if (XRayAttr->neverXRayInstrument())
+          Fn->addFnAttr("function-instrument", "xray-never");
+        if (const auto *LogArgs = D->getAttr<XRayLogArgsAttr>())
+          if (ShouldXRayInstrumentFunction())
+            Fn->addFnAttr("xray-log-args",
+                          llvm::utostr(LogArgs->getArgumentCount()));
       }
     } else {
-      if (!CGM.imbueXRayAttrs(Fn, Loc))
+      if (ShouldXRayInstrumentFunction() && !CGM.imbueXRayAttrs(Fn, Loc))
         Fn->addFnAttr(
             "xray-instruction-threshold",
             llvm::itostr(CGM.getCodeGenOpts().XRayInstructionThreshold));
@@ -968,6 +979,13 @@ void CodeGenFunction::StartFunction(GlobalDecl GD,
       if (FD->isMain())
         Fn->addFnAttr(llvm::Attribute::NoRecurse);
 
+  // If a custom alignment is used, force realigning to this alignment on
+  // any main function which certainly will need it.
+  if (const FunctionDecl *FD = dyn_cast_or_null<FunctionDecl>(D))
+    if ((FD->isMain() || FD->isMSVCRTEntryPoint()) &&
+        CGM.getCodeGenOpts().StackAlignment)
+      Fn->addFnAttr("stackrealign");
+
   llvm::BasicBlock *EntryBB = createBasicBlock("entry", CurFn);
 
   // Create a marker to make it easy to insert allocas into the entryblock
@@ -1001,7 +1019,8 @@ void CodeGenFunction::StartFunction(GlobalDecl GD,
       ArgTypes.push_back(VD->getType());
     QualType FnType = getContext().getFunctionType(
         RetTy, ArgTypes, FunctionProtoType::ExtProtoInfo(CC));
-    DI->EmitFunctionStart(GD, Loc, StartLoc, FnType, CurFn, Builder);
+    DI->EmitFunctionStart(GD, Loc, StartLoc, FnType, CurFn, CurFuncIsThunk,
+                          Builder);
   }
 
   if (ShouldInstrumentFunction()) {
@@ -1161,6 +1180,12 @@ void CodeGenFunction::StartFunction(GlobalDecl GD,
   // Emit a location at the end of the prologue.
   if (CGDebugInfo *DI = getDebugInfo())
     DI->EmitLocation(Builder, StartLoc);
+
+  // TODO: Do we need to handle this in two places like we do with
+  // target-features/target-cpu?
+  if (CurFuncDecl)
+    if (const auto *VecWidth = CurFuncDecl->getAttr<MinVectorWidthAttr>())
+      LargestVectorWidth = VecWidth->getVectorWidth();
 }
 
 void CodeGenFunction::EmitFunctionBody(FunctionArgList &Args,
@@ -2069,9 +2094,8 @@ void CodeGenFunction::EmitVariablyModifiedType(QualType type) {
             SanitizerScope SanScope(this);
             llvm::Value *Zero = llvm::Constant::getNullValue(Size->getType());
             llvm::Constant *StaticArgs[] = {
-              EmitCheckSourceLocation(size->getLocStart()),
-              EmitCheckTypeDescriptor(size->getType())
-            };
+                EmitCheckSourceLocation(size->getBeginLoc()),
+                EmitCheckTypeDescriptor(size->getType())};
             EmitCheck(std::make_pair(Builder.CreateICmpSGT(Size, Zero),
                                      SanitizerKind::VLABound),
                       SanitizerHandler::VLABoundNotPositive, StaticArgs, Size);
@@ -2259,7 +2283,7 @@ static bool hasRequiredFeatures(const SmallVectorImpl<StringRef> &ReqFeatures,
   return std::all_of(
       ReqFeatures.begin(), ReqFeatures.end(), [&](StringRef Feature) {
         SmallVector<StringRef, 1> OrFeatures;
-        Feature.split(OrFeatures, "|");
+        Feature.split(OrFeatures, '|');
         return std::any_of(OrFeatures.begin(), OrFeatures.end(),
                            [&](StringRef Feature) {
                              if (!CallerFeatureMap.lookup(Feature)) {
@@ -2297,24 +2321,35 @@ void CodeGenFunction::checkTargetFeatures(const CallExpr *E,
     // Return if the builtin doesn't have any required features.
     if (!FeatureList || StringRef(FeatureList) == "")
       return;
-    StringRef(FeatureList).split(ReqFeatures, ",");
+    StringRef(FeatureList).split(ReqFeatures, ',');
     if (!hasRequiredFeatures(ReqFeatures, CGM, FD, MissingFeature))
-      CGM.getDiags().Report(E->getLocStart(), diag::err_builtin_needs_feature)
+      CGM.getDiags().Report(E->getBeginLoc(), diag::err_builtin_needs_feature)
           << TargetDecl->getDeclName()
           << CGM.getContext().BuiltinInfo.getRequiredFeatures(BuiltinID);
 
-  } else if (TargetDecl->hasAttr<TargetAttr>()) {
+  } else if (TargetDecl->hasAttr<TargetAttr>() ||
+             TargetDecl->hasAttr<CPUSpecificAttr>()) {
     // Get the required features for the callee.
+
+    const TargetAttr *TD = TargetDecl->getAttr<TargetAttr>();
+    TargetAttr::ParsedTargetAttr ParsedAttr = CGM.filterFunctionTargetAttrs(TD);
+
     SmallVector<StringRef, 1> ReqFeatures;
     llvm::StringMap<bool> CalleeFeatureMap;
     CGM.getFunctionFeatureMap(CalleeFeatureMap, TargetDecl);
+
+    for (const auto &F : ParsedAttr.Features) {
+      if (F[0] == '+' && CalleeFeatureMap.lookup(F.substr(1)))
+        ReqFeatures.push_back(StringRef(F).substr(1));
+    }
+
     for (const auto &F : CalleeFeatureMap) {
       // Only positive features are "required".
       if (F.getValue())
         ReqFeatures.push_back(F.getKey());
     }
     if (!hasRequiredFeatures(ReqFeatures, CGM, FD, MissingFeature))
-      CGM.getDiags().Report(E->getLocStart(), diag::err_function_needs_feature)
+      CGM.getDiags().Report(E->getBeginLoc(), diag::err_function_needs_feature)
           << FD->getDeclName() << TargetDecl->getDeclName() << MissingFeature;
   }
 }
@@ -2330,21 +2365,17 @@ void CodeGenFunction::EmitSanitizerStatReport(llvm::SanitizerStatKind SSK) {
 
 llvm::Value *
 CodeGenFunction::FormResolverCondition(const MultiVersionResolverOption &RO) {
-  llvm::Value *TrueCondition = nullptr;
-  if (!RO.ParsedAttribute.Architecture.empty())
-    TrueCondition = EmitX86CpuIs(RO.ParsedAttribute.Architecture);
+  llvm::Value *Condition = nullptr;
 
-  if (!RO.ParsedAttribute.Features.empty()) {
-    SmallVector<StringRef, 8> FeatureList;
-    llvm::for_each(RO.ParsedAttribute.Features,
-                   [&FeatureList](const std::string &Feature) {
-                     FeatureList.push_back(StringRef{Feature}.substr(1));
-                   });
-    llvm::Value *FeatureCmp = EmitX86CpuSupports(FeatureList);
-    TrueCondition = TrueCondition ? Builder.CreateAnd(TrueCondition, FeatureCmp)
-                                  : FeatureCmp;
+  if (!RO.Conditions.Architecture.empty())
+    Condition = EmitX86CpuIs(RO.Conditions.Architecture);
+
+  if (!RO.Conditions.Features.empty()) {
+    llvm::Value *FeatureCond = EmitX86CpuSupports(RO.Conditions.Features);
+    Condition =
+        Condition ? Builder.CreateAnd(Condition, FeatureCond) : FeatureCond;
   }
-  return TrueCondition;
+  return Condition;
 }
 
 void CodeGenFunction::EmitMultiVersionResolver(
@@ -2354,32 +2385,37 @@ void CodeGenFunction::EmitMultiVersionResolver(
           getContext().getTargetInfo().getTriple().getArch() ==
               llvm::Triple::x86_64) &&
          "Only implemented for x86 targets");
-
   // Main function's basic block.
-  llvm::BasicBlock *CurBlock = createBasicBlock("entry", Resolver);
+  llvm::BasicBlock *CurBlock = createBasicBlock("resolver_entry", Resolver);
   Builder.SetInsertPoint(CurBlock);
   EmitX86CpuInit();
 
-  llvm::Function *DefaultFunc = nullptr;
   for (const MultiVersionResolverOption &RO : Options) {
     Builder.SetInsertPoint(CurBlock);
-    llvm::Value *TrueCondition = FormResolverCondition(RO);
+    llvm::Value *Condition = FormResolverCondition(RO);
 
-    if (!TrueCondition) {
-      DefaultFunc = RO.Function;
-    } else {
-      llvm::BasicBlock *RetBlock = createBasicBlock("ro_ret", Resolver);
-      llvm::IRBuilder<> RetBuilder(RetBlock);
-      RetBuilder.CreateRet(RO.Function);
-      CurBlock = createBasicBlock("ro_else", Resolver);
-      Builder.CreateCondBr(TrueCondition, RetBlock, CurBlock);
+    // The 'default' or 'generic' case.
+    if (!Condition) {
+      assert(&RO == Options.end() - 1 &&
+             "Default or Generic case must be last");
+      Builder.CreateRet(RO.Function);
+      return;
     }
+
+    llvm::BasicBlock *RetBlock = createBasicBlock("resolver_return", Resolver);
+    llvm::IRBuilder<> RetBuilder(RetBlock);
+    RetBuilder.CreateRet(RO.Function);
+    CurBlock = createBasicBlock("resolver_else", Resolver);
+    Builder.CreateCondBr(Condition, RetBlock, CurBlock);
   }
 
-  assert(DefaultFunc && "No default version?");
-  // Emit return from the 'else-ist' block.
+  // If no generic/default, emit an unreachable.
   Builder.SetInsertPoint(CurBlock);
-  Builder.CreateRet(DefaultFunc);
+  llvm::CallInst *TrapCall = EmitTrapCall(llvm::Intrinsic::trap);
+  TrapCall->setDoesNotReturn();
+  TrapCall->setDoesNotThrow();
+  Builder.CreateUnreachable();
+  Builder.ClearInsertionPoint();
 }
 
 llvm::DebugLoc CodeGenFunction::SourceLocToDebugLoc(SourceLocation Location) {

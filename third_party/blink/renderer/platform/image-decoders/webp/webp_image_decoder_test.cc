@@ -127,7 +127,7 @@ TEST(AnimatedWebPTests, verifyAnimationParametersTransparentImage) {
        true},
   };
 
-  for (size_t i = 0; i < WTF_ARRAY_LENGTH(kFrameParameters); ++i) {
+  for (size_t i = 0; i < arraysize(kFrameParameters); ++i) {
     const ImageFrame* const frame = decoder->DecodeFrameBufferAtIndex(i);
     EXPECT_EQ(ImageFrame::kFrameComplete, frame->GetStatus());
     EXPECT_EQ(kCanvasWidth, frame->Bitmap().width());
@@ -143,7 +143,7 @@ TEST(AnimatedWebPTests, verifyAnimationParametersTransparentImage) {
     EXPECT_EQ(kFrameParameters[i].has_alpha, frame->HasAlpha());
   }
 
-  EXPECT_EQ(WTF_ARRAY_LENGTH(kFrameParameters), decoder->FrameCount());
+  EXPECT_EQ(arraysize(kFrameParameters), decoder->FrameCount());
   EXPECT_EQ(kAnimationLoopInfinite, decoder->RepetitionCount());
 }
 
@@ -174,7 +174,7 @@ TEST(AnimatedWebPTests,
        true},
   };
 
-  for (size_t i = 0; i < WTF_ARRAY_LENGTH(kFrameParameters); ++i) {
+  for (size_t i = 0; i < arraysize(kFrameParameters); ++i) {
     const ImageFrame* const frame = decoder->DecodeFrameBufferAtIndex(i);
     EXPECT_EQ(ImageFrame::kFrameComplete, frame->GetStatus());
     EXPECT_EQ(kCanvasWidth, frame->Bitmap().width());
@@ -190,7 +190,7 @@ TEST(AnimatedWebPTests,
     EXPECT_EQ(kFrameParameters[i].has_alpha, frame->HasAlpha());
   }
 
-  EXPECT_EQ(WTF_ARRAY_LENGTH(kFrameParameters), decoder->FrameCount());
+  EXPECT_EQ(arraysize(kFrameParameters), decoder->FrameCount());
   EXPECT_EQ(kAnimationLoopInfinite, decoder->RepetitionCount());
 }
 
@@ -216,7 +216,7 @@ TEST(AnimatedWebPTests, verifyAnimationParametersBlendOverwrite) {
        ImageFrame::kBlendAtopBgcolor, TimeDelta::FromMilliseconds(1000), true},
   };
 
-  for (size_t i = 0; i < WTF_ARRAY_LENGTH(kFrameParameters); ++i) {
+  for (size_t i = 0; i < arraysize(kFrameParameters); ++i) {
     const ImageFrame* const frame = decoder->DecodeFrameBufferAtIndex(i);
     EXPECT_EQ(ImageFrame::kFrameComplete, frame->GetStatus());
     EXPECT_EQ(kCanvasWidth, frame->Bitmap().width());
@@ -232,7 +232,7 @@ TEST(AnimatedWebPTests, verifyAnimationParametersBlendOverwrite) {
     EXPECT_EQ(kFrameParameters[i].has_alpha, frame->HasAlpha());
   }
 
-  EXPECT_EQ(WTF_ARRAY_LENGTH(kFrameParameters), decoder->FrameCount());
+  EXPECT_EQ(arraysize(kFrameParameters), decoder->FrameCount());
   EXPECT_EQ(kAnimationLoopInfinite, decoder->RepetitionCount());
 }
 
@@ -279,7 +279,8 @@ TEST(AnimatedWebPTests, truncatedInBetweenFrame) {
   std::unique_ptr<ImageDecoder> decoder = CreateWEBPDecoder();
 
   const Vector<char> full_data =
-      ReadFile("/images/resources/invalid-animated-webp4.webp")->Copy();
+      ReadFile("/images/resources/invalid-animated-webp4.webp")
+          ->CopyAs<Vector<char>>();
   scoped_refptr<SharedBuffer> data =
       SharedBuffer::Create(full_data.data(), full_data.size() - 1);
   decoder->SetData(data.get(), false);
@@ -301,7 +302,7 @@ TEST(AnimatedWebPTests, reproCrash) {
   scoped_refptr<SharedBuffer> full_data_buffer =
       ReadFile("/images/resources/invalid_vp8_vp8x.webp");
   ASSERT_TRUE(full_data_buffer.get());
-  const Vector<char> full_data = full_data_buffer->Copy();
+  const Vector<char> full_data = full_data_buffer->CopyAs<Vector<char>>();
 
   // Parse partial data up to which error in bitstream is not detected.
   const size_t kPartialSize = 32768;
@@ -336,7 +337,7 @@ TEST(AnimatedWebPTests, frameIsCompleteAndDuration) {
   scoped_refptr<SharedBuffer> data_buffer =
       ReadFile("/images/resources/webp-animated.webp");
   ASSERT_TRUE(data_buffer.get());
-  const Vector<char> data = data_buffer->Copy();
+  const Vector<char> data = data_buffer->CopyAs<Vector<char>>();
 
   ASSERT_GE(data.size(), 10u);
   scoped_refptr<SharedBuffer> temp_data =
@@ -390,10 +391,8 @@ TEST(AnimatedWebPTests, randomDecodeAfterClearFrameBufferCache) {
       &CreateWEBPDecoder, "/images/resources/webp-animated-icc-xmp.webp");
 }
 
-// This test is disabled since it timed out on the Windows bot. See
-// crrev.com/962853004
 TEST(AnimatedWebPTests,
-     DISABLED_resumePartialDecodeAfterClearFrameBufferCache) {
+     resumePartialDecodeAfterClearFrameBufferCache) {
   TestResumePartialDecodeAfterClearFrameBufferCache(
       &CreateWEBPDecoder, "/images/resources/webp-animated-large.webp");
 }

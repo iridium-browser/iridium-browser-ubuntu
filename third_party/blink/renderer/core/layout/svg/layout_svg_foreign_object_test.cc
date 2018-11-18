@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 #include "third_party/blink/renderer/core/layout/layout_geometry_map.h"
+#include "third_party/blink/renderer/core/paint/paint_layer.h"
 #include "third_party/blink/renderer/core/testing/core_unit_test_helper.h"
 
 namespace blink {
@@ -11,15 +12,6 @@ class LayoutSVGForeignObjectTest : public RenderingTest {
  public:
   LayoutSVGForeignObjectTest()
       : RenderingTest(SingleChildLocalFrameClient::Create()) {}
-
-  const Node* HitTest(int x, int y) {
-    HitTestResult result(
-        HitTestRequest(HitTestRequest::kReadOnly | HitTestRequest::kActive |
-                       HitTestRequest::kAllowChildFrameContent),
-        IntPoint(x, y));
-    GetLayoutView().HitTest(result);
-    return result.InnerNode();
-  }
 };
 
 TEST_F(LayoutSVGForeignObjectTest, DivInForeignObject) {
@@ -76,6 +68,17 @@ TEST_F(LayoutSVGForeignObjectTest, DivInForeignObject) {
   EXPECT_EQ(div.GetNode(), HitTest(349, 249));
   EXPECT_EQ(foreign, HitTest(350, 250));
   EXPECT_EQ(svg, HitTest(450, 350));
+
+  // Rect based hit testing
+  auto results = RectBasedHitTest(LayoutRect(0, 0, 300, 300));
+  int count = 0;
+  EXPECT_EQ(3u, results.size());
+  for (auto result : results) {
+    Node* node = result.Get();
+    if (node == svg || node == div.GetNode() || node == foreign)
+      count++;
+  }
+  EXPECT_EQ(3, count);
 }
 
 TEST_F(LayoutSVGForeignObjectTest, IframeInForeignObject) {
@@ -83,7 +86,7 @@ TEST_F(LayoutSVGForeignObjectTest, IframeInForeignObject) {
     <style>body { margin: 0 }</style>
     <svg id='svg' style='width: 500px; height: 450px'>
       <foreignObject id='foreign' x='100' y='100' width='300' height='250'>
-        <iframe style='border: none; margin: 30px;
+        <iframe id=iframe style='border: none; margin: 30px;
              width: 240px; height: 190px'></iframe>
       </foreignObject>
     </svg>
@@ -100,6 +103,7 @@ TEST_F(LayoutSVGForeignObjectTest, IframeInForeignObject) {
   const auto& svg = *GetDocument().getElementById("svg");
   const auto& foreign = *GetDocument().getElementById("foreign");
   const auto& foreign_object = *GetLayoutObjectByElementId("foreign");
+  const auto& iframe = *GetDocument().getElementById("iframe");
   const auto& div = *ChildDocument().getElementById("div")->GetLayoutObject();
 
   EXPECT_EQ(FloatRect(100, 100, 300, 250), foreign_object.ObjectBoundingBox());
@@ -144,6 +148,18 @@ TEST_F(LayoutSVGForeignObjectTest, IframeInForeignObject) {
   EXPECT_EQ(ChildDocument().documentElement(), HitTest(369, 319));
   EXPECT_EQ(foreign, HitTest(370, 320));
   EXPECT_EQ(svg, HitTest(450, 400));
+
+  // Rect based hit testing
+  auto results = RectBasedHitTest(LayoutRect(0, 0, 300, 300));
+  int count = 0;
+  EXPECT_EQ(7u, results.size());
+  for (auto result : results) {
+    Node* node = result.Get();
+    if (node == svg || node == div.GetNode() || node == foreign ||
+        node == iframe)
+      count++;
+  }
+  EXPECT_EQ(4, count);
 }
 
 TEST_F(LayoutSVGForeignObjectTest, HitTestZoomedForeignObject) {
@@ -192,6 +208,17 @@ TEST_F(LayoutSVGForeignObjectTest, HitTestZoomedForeignObject) {
   EXPECT_EQ(svg, HitTest(20, 20));
   EXPECT_EQ(foreign, HitTest(280, 280));
   EXPECT_EQ(div, HitTest(290, 290));
+
+  // Rect based hit testing
+  auto results = RectBasedHitTest(LayoutRect(0, 0, 300, 300));
+  int count = 0;
+  EXPECT_EQ(3u, results.size());
+  for (auto result : results) {
+    Node* node = result.Get();
+    if (node == svg || node == &div || node == foreign)
+      count++;
+  }
+  EXPECT_EQ(3, count);
 }
 
 TEST_F(LayoutSVGForeignObjectTest, HitTestViewBoxForeignObject) {
@@ -227,6 +254,148 @@ TEST_F(LayoutSVGForeignObjectTest, HitTestViewBoxForeignObject) {
   EXPECT_EQ(svg, HitTest(20, 20));
   EXPECT_EQ(foreign, HitTest(120, 110));
   EXPECT_EQ(div, HitTest(160, 160));
+}
+
+TEST_F(LayoutSVGForeignObjectTest, HitTestUnderClipPath) {
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      * {
+        margin: 0
+      }
+      #target {
+         width: 500px;
+         height: 500px;
+         background-color: blue;
+      }
+      #target:hover {
+        background-color: green;
+      }
+    </style>
+    <svg id="svg" style="width: 500px; height: 500px">
+      <clipPath id="c">
+        <circle cx="250" cy="250" r="200"/>
+      </clipPath>
+      <g clip-path="url(#c)">
+        <foreignObject id="foreignObject" width="100%" height="100%">
+        </foreignObject>
+      </g>
+    </svg>
+  )HTML");
+
+  const auto& svg = *GetDocument().getElementById("svg");
+  const auto& foreignObject = *GetDocument().getElementById("foreignObject");
+
+  // The fist and the third return |svg| because the circle clip-path
+  // clips out the foreignObject.
+  EXPECT_EQ(svg, GetDocument().ElementFromPoint(20, 20));
+  EXPECT_EQ(foreignObject, GetDocument().ElementFromPoint(250, 250));
+  EXPECT_EQ(svg, GetDocument().ElementFromPoint(400, 400));
+}
+
+TEST_F(LayoutSVGForeignObjectTest,
+       HitTestUnderClippedPositionedForeignObjectDescendant) {
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      * {
+        margin: 0
+      }
+    </style>
+    <svg id="svg" style="width: 600px; height: 600px">
+      <foreignObject id="foreignObject" x="200" y="200" width="100"
+          height="100">
+        <div id="target" style="overflow: hidden; position: relative;
+            width: 100px; height: 50px; left: 5px"></div>
+      </foreignObject>
+    </svg>
+  )HTML");
+
+  const auto& svg = *GetDocument().getElementById("svg");
+  const auto& target = *GetDocument().getElementById("target");
+  const auto& foreignObject = *GetDocument().getElementById("foreignObject");
+
+  EXPECT_EQ(svg, GetDocument().ElementFromPoint(1, 1));
+  EXPECT_EQ(foreignObject, GetDocument().ElementFromPoint(201, 201));
+  EXPECT_EQ(target, GetDocument().ElementFromPoint(206, 206));
+  EXPECT_EQ(foreignObject, GetDocument().ElementFromPoint(205, 255));
+
+  HitTestRequest request(HitTestRequest::kReadOnly | HitTestRequest::kActive);
+  HitTestLocation location((LayoutPoint(206, 206)));
+  HitTestResult result(request, location);
+  GetDocument().GetLayoutView()->HitTest(location, result);
+  EXPECT_EQ(target, result.InnerNode());
+  EXPECT_EQ(LayoutPoint(206, 206), result.PointInInnerNodeFrame());
+}
+
+TEST_F(LayoutSVGForeignObjectTest,
+       HitTestUnderTransformedForeignObjectDescendant) {
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      * {
+        margin: 0
+      }
+    </style>
+    <svg id="svg" style="width: 600px; height: 600px">
+      <foreignObject id="foreignObject" x="200" y="200" width="100"
+          height="100" transform="translate(30)">
+        <div id="target" style="overflow: hidden; position: relative;
+            width: 100px; height: 50px; left: 5px"></div>
+      </foreignObject>
+    </svg>
+  )HTML");
+
+  const auto& svg = *GetDocument().getElementById("svg");
+  const auto& target = *GetDocument().getElementById("target");
+  const auto& foreign_object = *GetDocument().getElementById("foreignObject");
+
+  EXPECT_EQ(svg, GetDocument().ElementFromPoint(1, 1));
+  EXPECT_EQ(foreign_object, GetDocument().ElementFromPoint(231, 201));
+  EXPECT_EQ(target, GetDocument().ElementFromPoint(236, 206));
+  EXPECT_EQ(foreign_object, GetDocument().ElementFromPoint(235, 255));
+
+  HitTestRequest request(HitTestRequest::kReadOnly | HitTestRequest::kActive);
+  HitTestLocation location((LayoutPoint(236, 206)));
+  HitTestResult result(request, location);
+  GetDocument().GetLayoutView()->HitTest(location, result);
+  EXPECT_EQ(target, result.InnerNode());
+  EXPECT_EQ(LayoutPoint(236, 206), result.PointInInnerNodeFrame());
+}
+
+TEST_F(LayoutSVGForeignObjectTest, HitTestUnderScrollingAncestor) {
+  SetBodyInnerHTML(R"HTML(
+    <style>
+      * {
+        margin: 0
+      }
+    </style>
+    <div id=scroller style="width: 500px; height: 500px; overflow: auto">
+      <svg width="3000" height="3000">
+        <foreignObject width="3000" height="3000">
+          <div id="target" style="width: 3000px; height: 3000px; background: red">
+          </div>
+        </foreignObject>
+      </svg>
+    </div>
+  )HTML");
+
+  auto& scroller = *GetDocument().getElementById("scroller");
+  const auto& target = *GetDocument().getElementById("target");
+
+  EXPECT_EQ(target, GetDocument().ElementFromPoint(450, 450));
+
+  HitTestRequest request(HitTestRequest::kReadOnly | HitTestRequest::kActive);
+  HitTestLocation location((LayoutPoint(450, 450)));
+  HitTestResult result(request, location);
+  GetDocument().GetLayoutView()->HitTest(location, result);
+  EXPECT_EQ(target, result.InnerNode());
+  EXPECT_EQ(LayoutPoint(450, 450), result.PointInInnerNodeFrame());
+
+  scroller.setScrollTop(3000);
+
+  EXPECT_EQ(target, GetDocument().ElementFromPoint(450, 450));
+
+  GetDocument().GetLayoutView()->HitTest(location, result);
+  EXPECT_EQ(target, result.InnerNode());
+  EXPECT_EQ(LayoutPoint(450, 450), result.PointInInnerNodeFrame());
 }
 
 }  // namespace blink

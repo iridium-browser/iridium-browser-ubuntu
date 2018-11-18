@@ -16,33 +16,57 @@
 
 namespace cc {
 
-SurfaceLayerImpl::SurfaceLayerImpl(LayerTreeImpl* tree_impl, int id)
-    : LayerImpl(tree_impl, id) {}
+SurfaceLayerImpl::SurfaceLayerImpl(
+    LayerTreeImpl* tree_impl,
+    int id,
+    UpdateSubmissionStateCB update_submission_state_callback)
+    : LayerImpl(tree_impl, id),
+      update_submission_state_callback_(
+          std::move(update_submission_state_callback)) {}
 
-SurfaceLayerImpl::~SurfaceLayerImpl() = default;
+SurfaceLayerImpl::~SurfaceLayerImpl() {
+  if (update_submission_state_callback_)
+    update_submission_state_callback_.Run(false);
+}
 
 std::unique_ptr<LayerImpl> SurfaceLayerImpl::CreateLayerImpl(
     LayerTreeImpl* tree_impl) {
-  return SurfaceLayerImpl::Create(tree_impl, id());
+  return SurfaceLayerImpl::Create(tree_impl, id(),
+                                  std::move(update_submission_state_callback_));
 }
 
-void SurfaceLayerImpl::SetPrimarySurfaceId(
-    const viz::SurfaceId& surface_id,
-    base::Optional<uint32_t> deadline_in_frames) {
-  if (primary_surface_id_ == surface_id &&
+void SurfaceLayerImpl::SetRange(const viz::SurfaceRange& surface_range,
+                                base::Optional<uint32_t> deadline_in_frames) {
+  if (surface_range_ == surface_range &&
       deadline_in_frames_ == deadline_in_frames) {
     return;
   }
-  primary_surface_id_ = surface_id;
+
+  if (surface_range_.end() != surface_range.end()) {
+    TRACE_EVENT_WITH_FLOW2(
+        TRACE_DISABLED_BY_DEFAULT("viz.surface_id_flow"),
+        "LocalSurfaceId.Embed.Flow",
+        TRACE_ID_GLOBAL(
+            surface_range.end().local_surface_id().embed_trace_id()),
+        TRACE_EVENT_FLAG_FLOW_IN | TRACE_EVENT_FLAG_FLOW_OUT, "step",
+        "ImplSetPrimarySurfaceId", "surface_id",
+        surface_range.end().ToString());
+  }
+
+  if (surface_range.start() &&
+      surface_range_.start() != surface_range.start()) {
+    TRACE_EVENT_WITH_FLOW2(
+        TRACE_DISABLED_BY_DEFAULT("viz.surface_id_flow"),
+        "LocalSurfaceId.Submission.Flow",
+        TRACE_ID_GLOBAL(
+            surface_range.start()->local_surface_id().submission_trace_id()),
+        TRACE_EVENT_FLAG_FLOW_IN | TRACE_EVENT_FLAG_FLOW_OUT, "step",
+        "ImplSetFallbackSurfaceId", "surface_id",
+        surface_range.start()->ToString());
+  }
+
+  surface_range_ = surface_range;
   deadline_in_frames_ = deadline_in_frames;
-  NoteLayerPropertyChanged();
-}
-
-void SurfaceLayerImpl::SetFallbackSurfaceId(const viz::SurfaceId& surface_id) {
-  if (fallback_surface_id_ == surface_id)
-    return;
-
-  fallback_surface_id_ = surface_id;
   NoteLayerPropertyChanged();
 }
 
@@ -54,40 +78,60 @@ void SurfaceLayerImpl::SetStretchContentToFillBounds(bool stretch_content) {
   NoteLayerPropertyChanged();
 }
 
-void SurfaceLayerImpl::SetHitTestable(bool hit_testable) {
-  if (hit_testable_ == hit_testable)
+void SurfaceLayerImpl::SetSurfaceHitTestable(bool surface_hit_testable) {
+  if (surface_hit_testable_ == surface_hit_testable)
     return;
 
-  hit_testable_ = hit_testable;
+  surface_hit_testable_ = surface_hit_testable;
+  NoteLayerPropertyChanged();
+}
+
+void SurfaceLayerImpl::SetHasPointerEventsNone(bool has_pointer_events_none) {
+  if (has_pointer_events_none_ == has_pointer_events_none)
+    return;
+
+  has_pointer_events_none_ = has_pointer_events_none;
   NoteLayerPropertyChanged();
 }
 
 void SurfaceLayerImpl::PushPropertiesTo(LayerImpl* layer) {
   LayerImpl::PushPropertiesTo(layer);
   SurfaceLayerImpl* layer_impl = static_cast<SurfaceLayerImpl*>(layer);
-  layer_impl->SetPrimarySurfaceId(primary_surface_id_, deadline_in_frames_);
+  layer_impl->SetRange(surface_range_, std::move(deadline_in_frames_));
   // Unless the client explicitly specifies otherwise, don't block on
-  // |primary_surface_id_| more than once.
+  // |surface_range_| more than once.
   deadline_in_frames_ = 0u;
-  layer_impl->SetFallbackSurfaceId(fallback_surface_id_);
   layer_impl->SetStretchContentToFillBounds(stretch_content_to_fill_bounds_);
-  layer_impl->SetHitTestable(hit_testable_);
+  layer_impl->SetSurfaceHitTestable(surface_hit_testable_);
+  layer_impl->SetHasPointerEventsNone(has_pointer_events_none_);
+}
+
+bool SurfaceLayerImpl::WillDraw(
+    DrawMode draw_mode,
+    viz::ClientResourceProvider* resource_provider) {
+  bool will_draw = LayerImpl::WillDraw(draw_mode, resource_provider);
+  // If we have a change in WillDraw (meaning that visibility has changed), we
+  // want to inform the VideoFrameSubmitter to start or stop submitting
+  // compositor frames.
+  if (will_draw_ != will_draw) {
+    will_draw_ = will_draw;
+    if (update_submission_state_callback_)
+      update_submission_state_callback_.Run(will_draw);
+  }
+
+  return surface_range_.IsValid() && will_draw;
 }
 
 void SurfaceLayerImpl::AppendQuads(viz::RenderPass* render_pass,
                                    AppendQuadsData* append_quads_data) {
   AppendRainbowDebugBorder(render_pass);
-  if (!primary_surface_id_.is_valid())
+  if (!surface_range_.IsValid())
     return;
 
-  auto* primary = CreateSurfaceDrawQuad(
-      render_pass, primary_surface_id_,
-      fallback_surface_id_.is_valid()
-          ? base::Optional<viz::SurfaceId>(fallback_surface_id_)
-          : base::nullopt);
-  if (primary && fallback_surface_id_ != primary_surface_id_) {
+  auto* primary = CreateSurfaceDrawQuad(render_pass, surface_range_);
+  if (primary && surface_range_.end() != surface_range_.start()) {
     // Add the primary surface ID as a dependency.
-    append_quads_data->activation_dependencies.push_back(primary_surface_id_);
+    append_quads_data->activation_dependencies.push_back(surface_range_.end());
     if (deadline_in_frames_) {
       if (!append_quads_data->deadline_in_frames)
         append_quads_data->deadline_in_frames = 0u;
@@ -98,7 +142,7 @@ void SurfaceLayerImpl::AppendQuads(viz::RenderPass* render_pass,
     }
   }
   // Unless the client explicitly specifies otherwise, don't block on
-  // |primary_surface_id_| more than once.
+  // |surface_range_| more than once.
   deadline_in_frames_ = 0u;
 }
 
@@ -108,9 +152,8 @@ bool SurfaceLayerImpl::is_surface_layer() const {
 
 viz::SurfaceDrawQuad* SurfaceLayerImpl::CreateSurfaceDrawQuad(
     viz::RenderPass* render_pass,
-    const viz::SurfaceId& primary_surface_id,
-    const base::Optional<viz::SurfaceId>& fallback_surface_id) {
-  DCHECK(primary_surface_id.is_valid());
+    const viz::SurfaceRange& surface_range) {
+  DCHECK(surface_range.end().is_valid());
 
   float device_scale_factor = layer_tree_impl()->device_scale_factor();
 
@@ -127,21 +170,17 @@ viz::SurfaceDrawQuad* SurfaceLayerImpl::CreateSurfaceDrawQuad(
   if (visible_quad_rect.IsEmpty())
     return nullptr;
 
-  // If a |common_shared_quad_state| is provided then use that. Otherwise,
-  // allocate a new SharedQuadState. Assign the new SharedQuadState to
-  // *|common_shared_quad_state| so that it may be reused by another emitted
-  // viz::SurfaceDrawQuad.
   viz::SharedQuadState* shared_quad_state =
-    render_pass->CreateAndAppendSharedQuadState();
+      render_pass->CreateAndAppendSharedQuadState();
 
   PopulateScaledSharedQuadState(shared_quad_state, device_scale_factor,
                                 device_scale_factor, contents_opaque());
 
   auto* surface_draw_quad =
       render_pass->CreateAndAppendDrawQuad<viz::SurfaceDrawQuad>();
-  surface_draw_quad->SetNew(
-      shared_quad_state, quad_rect, visible_quad_rect, primary_surface_id,
-      fallback_surface_id, background_color(), stretch_content_to_fill_bounds_);
+  surface_draw_quad->SetNew(shared_quad_state, quad_rect, visible_quad_rect,
+                            surface_range, background_color(),
+                            stretch_content_to_fill_bounds_);
 
   return surface_draw_quad;
 }
@@ -242,8 +281,7 @@ void SurfaceLayerImpl::AppendRainbowDebugBorder(viz::RenderPass* render_pass) {
 
 void SurfaceLayerImpl::AsValueInto(base::trace_event::TracedValue* dict) const {
   LayerImpl::AsValueInto(dict);
-  dict->SetString("primar_surface_id", primary_surface_id_.ToString());
-  dict->SetString("fallback_surface_id", fallback_surface_id_.ToString());
+  dict->SetString("surface_range", surface_range_.ToString());
 }
 
 const char* SurfaceLayerImpl::LayerTypeAsString() const {

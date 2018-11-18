@@ -7,6 +7,7 @@
 #include <string>
 
 #include "ash/scoped_root_window_for_new_windows.h"
+#include "ash/shelf/shelf_constants.h"
 #include "ash/shell.h"
 #include "ash/shell/toplevel_window.h"
 #include "ash/test/ash_test_base.h"
@@ -16,7 +17,6 @@
 #include "base/strings/string_number_conversions.h"
 #include "ui/display/screen.h"
 #include "ui/views/widget/widget.h"
-#include "ui/views/widget/widget_delegate.h"
 
 namespace ash {
 
@@ -51,6 +51,7 @@ TEST_F(WindowPositionerTest, OpenDefaultWindowOnSecondDisplay) {
 // its restore bounds.
 TEST_F(WindowPositionerTest, SecondMaximizedWindowHasProperRestoreSize) {
   UpdateDisplay("1400x900");
+  const int bottom_inset = 900 - ShelfConstants::shelf_size();
   shell::ToplevelWindow::CreateParams params;
   params.can_resize = true;
   params.can_maximize = true;
@@ -65,7 +66,7 @@ TEST_F(WindowPositionerTest, SecondMaximizedWindowHasProperRestoreSize) {
   // The window should be maximized.
   bounds = widget1->GetWindowBoundsInScreen();
   EXPECT_TRUE(widget1->IsMaximized());
-  EXPECT_EQ(gfx::Rect(0, 0, 1400, 852).ToString(), bounds.ToString());
+  EXPECT_EQ(gfx::Rect(0, 0, 1400, bottom_inset).ToString(), bounds.ToString());
 
   // Create another window
   views::Widget* widget2 = shell::ToplevelWindow::CreateToplevelWindow(params);
@@ -73,54 +74,12 @@ TEST_F(WindowPositionerTest, SecondMaximizedWindowHasProperRestoreSize) {
   // The second window should be maximized.
   bounds = widget2->GetWindowBoundsInScreen();
   EXPECT_TRUE(widget2->IsMaximized());
-  EXPECT_EQ(gfx::Rect(0, 0, 1400, 852).ToString(), bounds.ToString());
+  EXPECT_EQ(gfx::Rect(0, 0, 1400, bottom_inset).ToString(), bounds.ToString());
 
   widget2->Restore();
   // Second window's restored size should be set to default size.
   bounds = widget2->GetWindowBoundsInScreen();
   EXPECT_EQ("300x300", bounds.size().ToString());
-}
-
-namespace {
-
-// A WidgetDelegate that returns the out of display saved bounds.
-class OutOfDisplayDelegate : public views::WidgetDelegate {
- public:
-  explicit OutOfDisplayDelegate(views::Widget* widget) : widget_(widget) {}
-  ~OutOfDisplayDelegate() override = default;
-
-  // Overridden from WidgetDelegate:
-  void DeleteDelegate() override { delete this; }
-  views::Widget* GetWidget() override { return widget_; }
-  const views::Widget* GetWidget() const override { return widget_; }
-  bool GetSavedWindowPlacement(const views::Widget* widget,
-                               gfx::Rect* bounds,
-                               ui::WindowShowState* show_state) const override {
-    bounds->SetRect(450, 10, 100, 100);
-    *show_state = ui::SHOW_STATE_NORMAL;
-    return true;
-  }
-
- private:
-  views::Widget* widget_;
-
-  DISALLOW_COPY_AND_ASSIGN(OutOfDisplayDelegate);
-};
-
-}  // namespace
-
-TEST_F(WindowPositionerTest, EnsureMinimumVisibility) {
-  UpdateDisplay("400x400");
-  views::Widget* widget = new views::Widget();
-  views::Widget::InitParams params(views::Widget::InitParams::TYPE_WINDOW);
-  params.delegate = new OutOfDisplayDelegate(widget);
-  widget->Init(params);
-  widget->SetBounds(gfx::Rect(450, 10, 100, 100));
-  wm::GetWindowState(widget->GetNativeView())->set_minimum_visibility(true);
-  widget->Show();
-  // Make sure the bounds is adjusted to be inside the work area.
-  EXPECT_EQ("375,10 100x100", widget->GetWindowBoundsInScreen().ToString());
-  widget->CloseNow();
 }
 
 TEST_F(WindowPositionerTest, IgnoreFullscreenInAutoRearrange) {

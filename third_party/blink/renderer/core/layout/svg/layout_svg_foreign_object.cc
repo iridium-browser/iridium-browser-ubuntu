@@ -24,6 +24,7 @@
 #include "third_party/blink/renderer/core/layout/hit_test_result.h"
 #include "third_party/blink/renderer/core/layout/svg/svg_layout_support.h"
 #include "third_party/blink/renderer/core/layout/svg/svg_resources_cache.h"
+#include "third_party/blink/renderer/core/paint/paint_layer.h"
 #include "third_party/blink/renderer/core/paint/svg_foreign_object_painter.h"
 #include "third_party/blink/renderer/core/svg/svg_foreign_object_element.h"
 
@@ -41,8 +42,7 @@ bool LayoutSVGForeignObject::IsChildAllowed(LayoutObject* child,
   return !child->IsSVGChild();
 }
 
-void LayoutSVGForeignObject::Paint(const PaintInfo& paint_info,
-                                   const LayoutPoint&) const {
+void LayoutSVGForeignObject::Paint(const PaintInfo& paint_info) const {
   SVGForeignObjectPainter(*this).Paint(paint_info);
 }
 
@@ -124,42 +124,49 @@ void LayoutSVGForeignObject::UpdateLayout() {
     SVGResourcesCache::ClientLayoutChanged(*this);
 }
 
-bool LayoutSVGForeignObject::NodeAtFloatPoint(HitTestResult& result,
-                                              const FloatPoint& point_in_parent,
-                                              HitTestAction hit_test_action) {
-  if (RuntimeEnabledFeatures::SlimmingPaintV175Enabled()) {
-    NOTREACHED();
-    return false;
-  }
+bool LayoutSVGForeignObject::NodeAtPointFromSVG(
+    HitTestResult& result,
+    const HitTestLocation& location_in_parent,
+    const LayoutPoint& accumulated_offset,
+    HitTestAction) {
+  DCHECK_EQ(accumulated_offset, LayoutPoint());
   AffineTransform local_transform = LocalSVGTransform();
   if (!local_transform.IsInvertible())
     return false;
 
-  FloatPoint local_point = local_transform.Inverse().MapPoint(point_in_parent);
+  AffineTransform inverse = local_transform.Inverse();
+  base::Optional<HitTestLocation> local_location;
+  if (location_in_parent.IsRectBasedTest()) {
+    local_location.emplace(
+        inverse.MapPoint(location_in_parent.TransformedPoint()),
+        inverse.MapQuad(location_in_parent.TransformedRect()));
+  } else {
+    local_location.emplace(
+        (inverse.MapPoint(location_in_parent.TransformedPoint())));
+  }
 
-  // Early exit if local point is not contained in clipped viewport area
-  if (SVGLayoutSupport::IsOverflowHidden(*this) &&
-      !FrameRect().Contains(LayoutPoint(local_point)))
-    return false;
+  // |local_point| already includes the offset of the <foreignObject> element,
+  // but PaintLayer::HitTestLayer assumes it has not been.
+  HitTestLocation local_without_offset(
+      *local_location, -ToLayoutSize(Layer()->LayoutBoxLocation()));
+  HitTestResult layer_result(result.GetHitTestRequest(), local_without_offset);
+  bool retval = Layer()->HitTest(local_without_offset, layer_result,
+                                 LayoutRect(LayoutRect::InfiniteIntRect()));
 
-  // FOs establish a stacking context, so we need to hit-test all layers.
-  HitTestLocation hit_test_location(local_point);
-  return LayoutBlock::NodeAtPoint(result, hit_test_location, LayoutPoint(),
-                                  kHitTestForeground) ||
-         LayoutBlock::NodeAtPoint(result, hit_test_location, LayoutPoint(),
-                                  kHitTestFloat) ||
-         LayoutBlock::NodeAtPoint(result, hit_test_location, LayoutPoint(),
-                                  kHitTestChildBlockBackgrounds);
-}
-
-void LayoutSVGForeignObject::GetTransformFromContainer(
-    const LayoutObject* container,
-    const LayoutSize& offset_in_container,
-    TransformationMatrix& matrix) const {
-  AffineTransform to_svg_root_transform;
-  SVGLayoutSupport::ComputeTransformToSVGRoot(*this, to_svg_root_transform);
-  matrix = to_svg_root_transform;
-  GetTransformFromContainerInternal(container, offset_in_container, matrix);
+  // Preserve the "point in inner node frame" from the original request,
+  // since |layer_result| is a hit test rooted at the <foreignObject> element,
+  // not the frame, due to the constructor above using
+  // |point_in_foreign_object| as its "point in inner node frame".
+  // TODO(chrishtr): refactor the PaintLayer and HitTestResults code around
+  // this, to better support hit tests that don't start at frame boundaries.
+  LayoutPoint original_point_in_inner_node_frame =
+      result.PointInInnerNodeFrame();
+  if (result.GetHitTestRequest().ListBased())
+    result.Append(layer_result);
+  else
+    result = layer_result;
+  result.SetPointInInnerNodeFrame(original_point_in_inner_node_frame);
+  return retval;
 }
 
 bool LayoutSVGForeignObject::NodeAtPoint(
@@ -167,22 +174,14 @@ bool LayoutSVGForeignObject::NodeAtPoint(
     const HitTestLocation& location_in_parent,
     const LayoutPoint& accumulated_offset,
     HitTestAction hit_test_action) {
-  if (RuntimeEnabledFeatures::SlimmingPaintV175Enabled()) {
-    return LayoutBlock::NodeAtPoint(result, location_in_parent,
-                                    accumulated_offset, hit_test_action);
-  }
-  NOTREACHED();
-  return false;
+  // Skip LayoutSVGBlock's override.
+  return LayoutBlockFlow::NodeAtPoint(result, location_in_parent,
+                                      accumulated_offset, hit_test_action);
 }
 
 PaintLayerType LayoutSVGForeignObject::LayerTypeRequired() const {
-  if (RuntimeEnabledFeatures::SlimmingPaintV175Enabled())
-    return LayoutBlockFlow::LayerTypeRequired();
-  return kNoPaintLayer;
-}
-
-bool LayoutSVGForeignObject::AllowsOverflowClip() const {
-  return RuntimeEnabledFeatures::SlimmingPaintV175Enabled();
+  // Skip LayoutSVGBlock's override.
+  return LayoutBlockFlow::LayerTypeRequired();
 }
 
 void LayoutSVGForeignObject::StyleDidChange(StyleDifference diff,
@@ -193,6 +192,9 @@ void LayoutSVGForeignObject::StyleDidChange(StyleDifference diff,
                     SVGLayoutSupport::IsOverflowHidden(StyleRef()))) {
     // See NeedsOverflowClip() in PaintPropertyTreeBuilder for the reason.
     SetNeedsPaintPropertyUpdate();
+
+    if (Layer())
+      Layer()->SetNeedsCompositingInputsUpdate();
   }
 }
 

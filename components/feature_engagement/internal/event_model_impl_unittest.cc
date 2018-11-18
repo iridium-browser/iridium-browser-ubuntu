@@ -14,7 +14,7 @@
 #include "components/feature_engagement/internal/editable_configuration.h"
 #include "components/feature_engagement/internal/in_memory_event_store.h"
 #include "components/feature_engagement/internal/never_event_storage_validator.h"
-#include "components/feature_engagement/internal/proto/event.pb.h"
+#include "components/feature_engagement/internal/proto/feature_event.pb.h"
 #include "components/feature_engagement/internal/test/event_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -171,7 +171,7 @@ class EventModelImplTest : public ::testing::Test {
 
 class LoadFailingEventModelImplTest : public EventModelImplTest {
  public:
-  LoadFailingEventModelImplTest() : EventModelImplTest() {}
+  LoadFailingEventModelImplTest() {}
 
   std::unique_ptr<TestInMemoryEventStore> CreateStore() override {
     return std::make_unique<TestInMemoryEventStore>(

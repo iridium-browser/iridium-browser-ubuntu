@@ -6,9 +6,9 @@
 
 #import <EarlGrey/EarlGrey.h>
 
+#import "ios/chrome/browser/ui/recent_tabs/recent_tabs_constants.h"
 #import "ios/chrome/browser/ui/tab_grid/grid/grid_constants.h"
 #import "ios/chrome/browser/ui/tab_grid/tab_grid_constants.h"
-#import "ios/chrome/browser/ui/tools_menu/public/tools_menu_constants.h"
 #import "ios/chrome/browser/ui/uikit_ui_util.h"
 #include "ios/chrome/grit/ios_strings.h"
 #import "ios/chrome/test/app/chrome_test_util.h"
@@ -48,6 +48,12 @@ id<GREYMatcher> TabGridCloseAllButton() {
 
 id<GREYMatcher> TabGridUndoCloseAllButton() {
   return grey_allOf(grey_accessibilityID(kTabGridUndoCloseAllButtonIdentifier),
+                    grey_sufficientlyVisible(), nil);
+}
+
+id<GREYMatcher> TabGridSelectShowHistoryCell() {
+  return grey_allOf(grey_accessibilityID(
+                        kRecentTabsShowFullHistoryCellAccessibilityIdentifier),
                     grey_sufficientlyVisible(), nil);
 }
 

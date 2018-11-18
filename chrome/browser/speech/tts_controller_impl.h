@@ -15,6 +15,7 @@
 #include "base/macros.h"
 #include "base/memory/singleton.h"
 #include "chrome/browser/speech/tts_controller.h"
+#include "components/prefs/testing_pref_service.h"
 #include "url/gurl.h"
 
 namespace content {
@@ -55,7 +56,10 @@ class TtsControllerImpl : public TtsController {
   ~TtsControllerImpl() override;
 
  private:
+  FRIEND_TEST_ALL_PREFIXES(TtsControllerTest, TestTtsControllerShutdown);
   FRIEND_TEST_ALL_PREFIXES(TtsControllerTest, TestGetMatchingVoice);
+  FRIEND_TEST_ALL_PREFIXES(TtsControllerTest,
+                           TestTtsControllerUtteranceDefaults);
 
   // Get the platform TTS implementation (or injected mock).
   TtsPlatformImpl* GetPlatformImpl();
@@ -79,6 +83,13 @@ class TtsControllerImpl : public TtsController {
   int GetMatchingVoice(const Utterance* utterance,
                        std::vector<VoiceData>& voices);
 
+  // Updates the utterance to have default values for rate, pitch, and
+  // volume if they have not yet been set. On Chrome OS, defaults are
+  // pulled from user prefs, and may not be the same as other platforms.
+  void UpdateUtteranceDefaults(Utterance* utterance);
+
+  virtual const PrefService* GetPrefService(const Utterance* utterance);
+
   friend struct base::DefaultSingletonTraits<TtsControllerImpl>;
 
   // The current utterance being spoken.
@@ -91,7 +102,7 @@ class TtsControllerImpl : public TtsController {
   base::queue<Utterance*> utterance_queue_;
 
   // A set of delegates that want to be notified when the voices change.
-  std::set<VoicesChangedDelegate*> voices_changed_delegates_;
+  base::ObserverList<VoicesChangedDelegate> voices_changed_delegates_;
 
   // A pointer to the platform implementation of text-to-speech, for
   // dependency injection.

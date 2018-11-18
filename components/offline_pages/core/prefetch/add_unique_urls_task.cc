@@ -19,7 +19,7 @@
 #include "components/offline_pages/core/prefetch/prefetch_types.h"
 #include "components/offline_pages/core/prefetch/store/prefetch_store.h"
 #include "components/offline_pages/core/prefetch/store/prefetch_store_utils.h"
-#include "sql/connection.h"
+#include "sql/database.h"
 #include "sql/statement.h"
 #include "sql/transaction.h"
 #include "url/gurl.h"
@@ -31,7 +31,7 @@ using Result = AddUniqueUrlsTask::Result;
 namespace {
 
 std::map<std::string, std::pair<int64_t, PrefetchItemState>>
-FindExistingPrefetchItemsInNamespaceSync(sql::Connection* db,
+FindExistingPrefetchItemsInNamespaceSync(sql::Database* db,
                                          const std::string& name_space) {
   static const char kSql[] =
       "SELECT offline_id, state, requested_url FROM prefetch_items"
@@ -50,7 +50,7 @@ FindExistingPrefetchItemsInNamespaceSync(sql::Connection* db,
   return result;
 }
 
-bool CreatePrefetchItemSync(sql::Connection* db,
+bool CreatePrefetchItemSync(sql::Database* db,
                             const std::string& name_space,
                             const PrefetchURL& prefetch_url,
                             int64_t now_db_time) {
@@ -81,10 +81,7 @@ bool CreatePrefetchItemSync(sql::Connection* db,
 Result AddUrlsAndCleanupZombiesSync(
     const std::string& name_space,
     const std::vector<PrefetchURL>& candidate_prefetch_urls,
-    sql::Connection* db) {
-  if (!db)
-    return Result::STORE_ERROR;
-
+    sql::Database* db) {
   sql::Transaction transaction(db);
   if (!transaction.Begin())
     return Result::STORE_ERROR;
@@ -133,7 +130,7 @@ Result AddUrlsAndCleanupZombiesSync(
                            added_row_count);
   return added_row_count > 0 ? Result::URLS_ADDED : Result::NOTHING_ADDED;
 }
-}
+}  // namespace
 
 AddUniqueUrlsTask::AddUniqueUrlsTask(
     PrefetchDispatcher* prefetch_dispatcher,
@@ -155,7 +152,8 @@ void AddUniqueUrlsTask::Run() {
   prefetch_store_->Execute(base::BindOnce(&AddUrlsAndCleanupZombiesSync,
                                           name_space_, prefetch_urls_),
                            base::BindOnce(&AddUniqueUrlsTask::OnUrlsAdded,
-                                          weak_ptr_factory_.GetWeakPtr()));
+                                          weak_ptr_factory_.GetWeakPtr()),
+                           Result::STORE_ERROR);
 }
 
 void AddUniqueUrlsTask::OnUrlsAdded(Result result) {

@@ -40,8 +40,12 @@ class HTMLFrameSetElement final : public HTMLElement {
   bool HasFrameBorder() const { return frameborder_; }
   bool NoResize() const { return noresize_; }
 
-  size_t TotalRows() const { return std::max<size_t>(1, row_lengths_.size()); }
-  size_t TotalCols() const { return std::max<size_t>(1, col_lengths_.size()); }
+  wtf_size_t TotalRows() const {
+    return std::max<wtf_size_t>(1, row_lengths_.size());
+  }
+  wtf_size_t TotalCols() const {
+    return std::max<wtf_size_t>(1, col_lengths_.size());
+  }
   int Border() const { return HasFrameBorder() ? border_ : 0; }
 
   bool HasBorderColor() const { return border_color_set_; }
@@ -50,8 +54,6 @@ class HTMLFrameSetElement final : public HTMLElement {
   const Vector<HTMLDimension>& ColLengths() const { return col_lengths_; }
 
   bool HasNonInBodyInsertionMode() const override { return true; }
-
-  LocalDOMWindow* AnonymousNamedGetter(const AtomicString&);
 
   DEFINE_WINDOW_ATTRIBUTE_EVENT_LISTENER(blur);
   DEFINE_WINDOW_ATTRIBUTE_EVENT_LISTENER(error);
@@ -75,9 +77,9 @@ class HTMLFrameSetElement final : public HTMLElement {
   bool LayoutObjectIsNeeded(const ComputedStyle&) const override;
   LayoutObject* CreateLayoutObject(const ComputedStyle&) override;
 
-  void DefaultEventHandler(Event*) override;
+  void DefaultEventHandler(Event&) override;
 
-  InsertionNotificationRequest InsertedInto(ContainerNode*) override;
+  InsertionNotificationRequest InsertedInto(ContainerNode&) override;
   void WillRecalcStyle(StyleRecalcChange) override;
 
   Vector<HTMLDimension> row_lengths_;

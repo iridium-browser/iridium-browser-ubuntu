@@ -6,19 +6,21 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_PAINT_PROPERTY_TREE_BUILDER_H_
 
 #include "base/memory/scoped_refptr.h"
+#include "base/optional.h"
 #include "third_party/blink/renderer/platform/geometry/layout_point.h"
 #include "third_party/blink/renderer/platform/graphics/paint/clip_paint_property_node.h"
 #include "third_party/blink/renderer/platform/graphics/paint/effect_paint_property_node.h"
 #include "third_party/blink/renderer/platform/graphics/paint/scroll_paint_property_node.h"
 #include "third_party/blink/renderer/platform/graphics/paint/transform_paint_property_node.h"
-#include "third_party/blink/renderer/platform/wtf/optional.h"
 
 namespace blink {
 
 class FragmentData;
 class LayoutObject;
+class LayoutTableSection;
 class LocalFrameView;
 class PaintLayer;
+class VisualViewport;
 
 // The context for PaintPropertyTreeBuilder.
 // It's responsible for bookkeeping tree state in other order, for example, the
@@ -48,11 +50,6 @@ struct PaintPropertyTreeBuilderFragmentContext {
     // be updated whenever |transform| is; flattening only needs to happen
     // to immediate children.
     bool should_flatten_inherited_transform = false;
-
-    // True if making filter a containing block for all descendants would
-    // change this context to a different one. This is used only for
-    // use-counting.
-    bool containing_block_changed_under_filter = false;
 
     // Rendering context for 3D sorting. See
     // TransformPaintPropertyNode::renderingContextId.
@@ -100,39 +97,33 @@ struct PaintPropertyTreeBuilderFragmentContext {
 
   // If the object is a flow thread, this records the clip rect for this
   // fragment.
-  Optional<LayoutRect> fragment_clip;
+  base::Optional<LayoutRect> fragment_clip;
 
   // If the object is fragmented, this records the logical top of this fragment
   // in the flow thread.
   LayoutUnit logical_top_in_flow_thread;
 
-  // A repeating object paints at multiple places in the flow thread, once in
-  // each fragment. The repeated paintings need to add an adjustment to the
-  // calculated paint offset to paint at the desired place.
+  // A repeating object paints at multiple places, once in each fragment.
+  // The repeated paintings need to add an adjustment to the calculated paint
+  // offset to paint at the desired place.
   LayoutSize repeating_paint_offset_adjustment;
+
+  LayoutPoint old_paint_offset;
 };
 
 struct PaintPropertyTreeBuilderContext {
-  DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
+  DISALLOW_NEW();
 
  public:
-  PaintPropertyTreeBuilderContext() = default;
+  PaintPropertyTreeBuilderContext();
 
   Vector<PaintPropertyTreeBuilderFragmentContext, 1> fragments;
   const LayoutObject* container_for_absolute_position = nullptr;
   const LayoutObject* container_for_fixed_position = nullptr;
 
-  // True if a change has forced all properties in a subtree to be updated. This
-  // can be set due to paint offset changes or when the structure of the
-  // property tree changes (i.e., a node is added or removed).
-  bool force_subtree_update = false;
-
-  // Whether a clip paint property node appeared, disappeared, or changed
-  // its clip since this variable was last set to false. This is used
-  // to find out whether a clip changed since the last transform update.
-  // Code ouside of this class resets clip_changed to false when transforms
-  // change.
-  bool clip_changed = false;
+  // The physical bounding box of all appearances of the repeating table section
+  // in the flow thread or the paged LayoutView.
+  LayoutRect repeating_table_section_bounding_box;
 
 #if DCHECK_IS_ON()
   // When DCHECK_IS_ON() we create PaintPropertyTreeBuilderContext even if not
@@ -142,39 +133,68 @@ struct PaintPropertyTreeBuilderContext {
 
   PaintLayer* painting_layer = nullptr;
 
-  // In a fragmented context, some objects (e.g. repeating table headers and
-  // footers, fixed-position objects in paged media, and their descendants in
-  // paint order) repeatly paint in all fragments after the fragment where the
-  // object first appears.
-  bool is_repeating_in_fragments = false;
+  // In a fragmented context, repeating table headers and footers and their
+  // descendants in paint order repeatedly paint in all fragments after the
+  // fragment where the object first appears.
+  const LayoutTableSection* repeating_table_section = nullptr;
+
+  // Specifies the reason the subtree update was forced. For simplicity, this
+  // only categorizes it into two categories:
+  // - Isolation piercing, meaning that the update is required for subtrees
+  //   under an isolation boundary.
+  // - Isolation blocked, meaning that the recursion can be blocked by
+  //   isolation.
+  enum SubtreeUpdateReason : unsigned {
+    kSubtreeUpdateIsolationPiercing = 1 << 0,
+    kSubtreeUpdateIsolationBlocked = 1 << 1
+  };
+
+  // True if a change has forced all properties in a subtree to be updated. This
+  // can be set due to paint offset changes or when the structure of the
+  // property tree changes (i.e., a node is added or removed).
+  unsigned force_subtree_update_reasons : 2;
+
+  // Note that the next four bitfields are conceptually bool, but are declared
+  // as unsigned in order to be packed in the same word as the above bitfield.
+
+  // Whether a clip paint property node appeared, disappeared, or changed
+  // its clip since this variable was last set to false. This is used
+  // to find out whether a clip changed since the last transform update.
+  // Code outside of this class resets clip_changed to false when transforms
+  // change.
+  unsigned clip_changed : 1;
+
+  // When printing, fixed-position objects and their descendants need to repeat
+  // in each page.
+  unsigned is_repeating_fixed_position : 1;
 
   // True if the current subtree is underneath a LayoutSVGHiddenContainer
   // ancestor.
-  bool has_svg_hidden_container_ancestor = false;
+  unsigned has_svg_hidden_container_ancestor : 1;
 
-  // The physical bounding box of all appearances of the repeating object
-  // in the flow thread.
-  LayoutRect repeating_bounding_box_in_flow_thread;
+  // Whether composited raster invalidation is supported for this object.
+  // If not, subtree invalidations occur on every property tree change.
+  unsigned supports_composited_raster_invalidation : 1;
 };
 
-// |FrameViewPaintPropertyTreeBuilder| and |ObjectPaintPropertyTreeBuilder|
-// create paint property tree nodes for special things in the layout tree.
-// Special things include but not limit to: overflow clip, transform, fixed-pos,
-// animation, mask, filter, ... etc.
-// It expects to be invoked for each layout tree node in DOM order during
-// InPrePaint phase.
-
-class FrameViewPaintPropertyTreeBuilder {
+class VisualViewportPaintPropertyTreeBuilder {
  public:
-  // Update the paint properties for a frame view and ensure the context is up
-  // to date.
-  static void Update(LocalFrameView&, PaintPropertyTreeBuilderContext&);
+  // Update the paint properties for the visual viewport and ensure the context
+  // is up to date.
+  static void Update(VisualViewport&, PaintPropertyTreeBuilderContext&);
 };
 
-class ObjectPaintPropertyTreeBuilder {
+// Creates paint property tree nodes for non-local effects in the layout tree.
+// Non-local effects include but are not limited to: overflow clip, transform,
+// fixed-pos, animation, mask, filters, etc. It expects to be invoked for each
+// layout tree node in DOM order during the PrePaint lifecycle phase.
+class PaintPropertyTreeBuilder {
  public:
-  ObjectPaintPropertyTreeBuilder(const LayoutObject& object,
-                                 PaintPropertyTreeBuilderContext& context)
+  static void SetupContextForFrame(LocalFrameView&,
+                                   PaintPropertyTreeBuilderContext&);
+
+  PaintPropertyTreeBuilder(const LayoutObject& object,
+                           PaintPropertyTreeBuilderContext& context)
       : object_(object), context_(context) {}
 
   // Update the paint properties that affect this object (e.g., properties like
@@ -197,15 +217,22 @@ class ObjectPaintPropertyTreeBuilder {
   ALWAYS_INLINE void InitSingleFragmentFromParent(bool needs_paint_properties);
   ALWAYS_INLINE bool ObjectTypeMightNeedPaintProperties() const;
   ALWAYS_INLINE void UpdateCompositedLayerPaginationOffset();
-  ALWAYS_INLINE bool NeedsFragmentation() const;
   ALWAYS_INLINE PaintPropertyTreeBuilderFragmentContext
-  ContextForFragment(const Optional<LayoutRect>& fragment_clip,
+  ContextForFragment(const base::Optional<LayoutRect>& fragment_clip,
                      LayoutUnit logical_top_in_flow_thread) const;
-  ALWAYS_INLINE void CreateFragmentContexts(bool needs_paint_properties);
+  ALWAYS_INLINE void CreateFragmentContextsInFlowThread(
+      bool needs_paint_properties);
+  ALWAYS_INLINE bool IsRepeatingInPagedMedia() const;
+  ALWAYS_INLINE bool ObjectIsRepeatingTableSectionInPagedMedia() const;
+  ALWAYS_INLINE void CreateFragmentContextsForRepeatingFixedPosition();
+  ALWAYS_INLINE void
+  CreateFragmentContextsForRepeatingTableSectionInPagedMedia();
+  ALWAYS_INLINE void CreateFragmentDataForRepeatingInPagedMedia(
+      bool needs_paint_properties);
   // Returns whether ObjectPaintProperties were allocated or deleted.
   ALWAYS_INLINE bool UpdateFragments();
   ALWAYS_INLINE void UpdatePaintingLayer();
-  ALWAYS_INLINE void UpdateRepeatingPaintOffsetAdjustment();
+  ALWAYS_INLINE void UpdateRepeatingTableSectionPaintOffsetAdjustment();
   ALWAYS_INLINE void UpdateRepeatingTableHeaderPaintOffsetAdjustment();
   ALWAYS_INLINE void UpdateRepeatingTableFooterPaintOffsetAdjustment();
 

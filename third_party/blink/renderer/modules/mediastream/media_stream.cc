@@ -26,12 +26,11 @@
 #include "third_party/blink/renderer/modules/mediastream/media_stream.h"
 
 #include "third_party/blink/public/platform/task_type.h"
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/deprecation.h"
 #include "third_party/blink/renderer/modules/mediastream/media_stream_registry.h"
 #include "third_party/blink/renderer/modules/mediastream/media_stream_track_event.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_center.h"
 #include "third_party/blink/renderer/platform/mediastream/media_stream_source.h"
@@ -49,9 +48,6 @@ static bool ContainsSource(MediaStreamTrackVector& track_vector,
 
 static void ProcessTrack(MediaStreamTrack* track,
                          MediaStreamTrackVector& track_vector) {
-  if (track->Ended())
-    return;
-
   MediaStreamSource* source = track->Component()->Source();
   if (!ContainsSource(track_vector, source))
     track_vector.push_back(track);
@@ -253,7 +249,8 @@ void MediaStream::addTrack(MediaStreamTrack* track,
                            ExceptionState& exception_state) {
   if (!track) {
     exception_state.ThrowDOMException(
-        kTypeMismatchError, "The MediaStreamTrack provided is invalid.");
+        DOMExceptionCode::kTypeMismatchError,
+        "The MediaStreamTrack provided is invalid.");
     return;
   }
 
@@ -284,7 +281,8 @@ void MediaStream::removeTrack(MediaStreamTrack* track,
                               ExceptionState& exception_state) {
   if (!track) {
     exception_state.ThrowDOMException(
-        kTypeMismatchError, "The MediaStreamTrack provided is invalid.");
+        DOMExceptionCode::kTypeMismatchError,
+        "The MediaStreamTrack provided is invalid.");
     return;
   }
 
@@ -398,34 +396,18 @@ const AtomicString& MediaStream::InterfaceName() const {
   return EventTargetNames::MediaStream;
 }
 
-void MediaStream::AddTrackByComponent(MediaStreamComponent* component) {
+void MediaStream::AddTrackByComponentAndFireEvents(
+    MediaStreamComponent* component) {
   DCHECK(component);
   if (!GetExecutionContext())
     return;
-
   MediaStreamTrack* track =
       MediaStreamTrack::Create(GetExecutionContext(), component);
-  switch (component->Source()->GetType()) {
-    case MediaStreamSource::kTypeAudio:
-      audio_tracks_.push_back(track);
-      break;
-    case MediaStreamSource::kTypeVideo:
-      video_tracks_.push_back(track);
-      break;
-  }
-  track->RegisterMediaStream(this);
-  descriptor_->AddComponent(component);
-
-  ScheduleDispatchEvent(
-      MediaStreamTrackEvent::Create(EventTypeNames::addtrack, track));
-
-  if (!active() && !track->Ended()) {
-    descriptor_->SetActive(true);
-    ScheduleDispatchEvent(Event::Create(EventTypeNames::active));
-  }
+  AddTrackAndFireEvents(track);
 }
 
-void MediaStream::RemoveTrackByComponent(MediaStreamComponent* component) {
+void MediaStream::RemoveTrackByComponentAndFireEvents(
+    MediaStreamComponent* component) {
   DCHECK(component);
   if (!GetExecutionContext())
     return;
@@ -464,6 +446,33 @@ void MediaStream::RemoveTrackByComponent(MediaStreamComponent* component) {
   }
 }
 
+void MediaStream::AddTrackAndFireEvents(MediaStreamTrack* track) {
+  DCHECK(track);
+  switch (track->Component()->Source()->GetType()) {
+    case MediaStreamSource::kTypeAudio:
+      audio_tracks_.push_back(track);
+      break;
+    case MediaStreamSource::kTypeVideo:
+      video_tracks_.push_back(track);
+      break;
+  }
+  track->RegisterMediaStream(this);
+  descriptor_->AddComponent(track->Component());
+
+  ScheduleDispatchEvent(
+      MediaStreamTrackEvent::Create(EventTypeNames::addtrack, track));
+
+  if (!active() && !track->Ended()) {
+    descriptor_->SetActive(true);
+    ScheduleDispatchEvent(Event::Create(EventTypeNames::active));
+  }
+}
+
+void MediaStream::RemoveTrackAndFireEvents(MediaStreamTrack* track) {
+  DCHECK(track);
+  RemoveTrackByComponentAndFireEvents(track->Component());
+}
+
 void MediaStream::ScheduleDispatchEvent(Event* event) {
   scheduled_events_.push_back(event);
 
@@ -480,7 +489,7 @@ void MediaStream::ScheduledEventTimerFired(TimerBase*) {
 
   HeapVector<Member<Event>>::iterator it = events.begin();
   for (; it != events.end(); ++it)
-    DispatchEvent((*it).Release());
+    DispatchEvent(*it->Release());
 
   events.clear();
 }

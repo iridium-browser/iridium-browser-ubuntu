@@ -45,32 +45,6 @@
 
 #define MAX_VP9_HEADER_SIZE 80
 
-static int is_compound_reference_allowed(const VP9_COMMON *cm) {
-  int i;
-  for (i = 1; i < REFS_PER_FRAME; ++i)
-    if (cm->ref_frame_sign_bias[i + 1] != cm->ref_frame_sign_bias[1]) return 1;
-
-  return 0;
-}
-
-static void setup_compound_reference_mode(VP9_COMMON *cm) {
-  if (cm->ref_frame_sign_bias[LAST_FRAME] ==
-      cm->ref_frame_sign_bias[GOLDEN_FRAME]) {
-    cm->comp_fixed_ref = ALTREF_FRAME;
-    cm->comp_var_ref[0] = LAST_FRAME;
-    cm->comp_var_ref[1] = GOLDEN_FRAME;
-  } else if (cm->ref_frame_sign_bias[LAST_FRAME] ==
-             cm->ref_frame_sign_bias[ALTREF_FRAME]) {
-    cm->comp_fixed_ref = GOLDEN_FRAME;
-    cm->comp_var_ref[0] = LAST_FRAME;
-    cm->comp_var_ref[1] = ALTREF_FRAME;
-  } else {
-    cm->comp_fixed_ref = LAST_FRAME;
-    cm->comp_var_ref[0] = GOLDEN_FRAME;
-    cm->comp_var_ref[1] = ALTREF_FRAME;
-  }
-}
-
 static int read_is_valid(const uint8_t *start, size_t len, const uint8_t *end) {
   return len != 0 && len <= (size_t)(end - start);
 }
@@ -118,7 +92,7 @@ static void read_inter_mode_probs(FRAME_CONTEXT *fc, vpx_reader *r) {
 
 static REFERENCE_MODE read_frame_reference_mode(const VP9_COMMON *cm,
                                                 vpx_reader *r) {
-  if (is_compound_reference_allowed(cm)) {
+  if (vp9_compound_reference_allowed(cm)) {
     return vpx_read_bit(r)
                ? (vpx_read_bit(r) ? REFERENCE_MODE_SELECT : COMPOUND_REFERENCE)
                : SINGLE_REFERENCE;
@@ -1148,9 +1122,15 @@ static void resize_context_buffers(VP9_COMMON *cm, int width, int height) {
     // Allocations in vp9_alloc_context_buffers() depend on individual
     // dimensions as well as the overall size.
     if (new_mi_cols > cm->mi_cols || new_mi_rows > cm->mi_rows) {
-      if (vp9_alloc_context_buffers(cm, width, height))
+      if (vp9_alloc_context_buffers(cm, width, height)) {
+        // The cm->mi_* values have been cleared and any existing context
+        // buffers have been freed. Clear cm->width and cm->height to be
+        // consistent and to force a realloc next time.
+        cm->width = 0;
+        cm->height = 0;
         vpx_internal_error(&cm->error, VPX_CODEC_MEM_ERROR,
                            "Failed to allocate context buffers");
+      }
     } else {
       vp9_set_mb_mi(cm, width, height);
     }
@@ -1526,9 +1506,9 @@ static int tile_worker_hook(void *arg1, void *arg2) {
 
 // sorts in descending order
 static int compare_tile_buffers(const void *a, const void *b) {
-  const TileBuffer *const buf1 = (const TileBuffer *)a;
-  const TileBuffer *const buf2 = (const TileBuffer *)b;
-  return (int)(buf2->size - buf1->size);
+  const TileBuffer *const buf_a = (const TileBuffer *)a;
+  const TileBuffer *const buf_b = (const TileBuffer *)b;
+  return (buf_a->size < buf_b->size) - (buf_a->size > buf_b->size);
 }
 
 static const uint8_t *decode_tiles_mt(VP9Decoder *pbi, const uint8_t *data,
@@ -1724,6 +1704,22 @@ static void read_bitdepth_colorspace_sampling(VP9_COMMON *cm,
   }
 }
 
+static INLINE void flush_all_fb_on_key(VP9_COMMON *cm) {
+  if (cm->frame_type == KEY_FRAME && cm->current_video_frame > 0) {
+    RefCntBuffer *const frame_bufs = cm->buffer_pool->frame_bufs;
+    BufferPool *const pool = cm->buffer_pool;
+    int i;
+    for (i = 0; i < FRAME_BUFFERS; ++i) {
+      if (i == cm->new_fb_idx) continue;
+      frame_bufs[i].ref_count = 0;
+      if (!frame_bufs[i].released) {
+        pool->release_fb_cb(pool->cb_priv, &frame_bufs[i].raw_frame_buffer);
+        frame_bufs[i].released = 1;
+      }
+    }
+  }
+}
+
 static size_t read_uncompressed_header(VP9Decoder *pbi,
                                        struct vpx_read_bit_buffer *rb) {
   VP9_COMMON *const cm = &pbi->common;
@@ -1788,6 +1784,7 @@ static size_t read_uncompressed_header(VP9Decoder *pbi,
     setup_frame_size(cm, rb);
     if (pbi->need_resync) {
       memset(&cm->ref_frame_map, -1, sizeof(cm->ref_frame_map));
+      flush_all_fb_on_key(cm);
       pbi->need_resync = 0;
     }
   } else {
@@ -1953,7 +1950,7 @@ static int read_compressed_header(VP9Decoder *pbi, const uint8_t *data,
 
     cm->reference_mode = read_frame_reference_mode(cm, &r);
     if (cm->reference_mode != SINGLE_REFERENCE)
-      setup_compound_reference_mode(cm);
+      vp9_setup_compound_reference_mode(cm);
     read_frame_reference_mode_probs(cm, &r);
 
     for (j = 0; j < BLOCK_SIZE_GROUPS; j++)

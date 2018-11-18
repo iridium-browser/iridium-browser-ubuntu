@@ -7,20 +7,20 @@
 
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "components/offline_pages/core/task.h"
+#include "components/offline_pages/task/task.h"
 
 namespace offline_pages {
 
 class ArchiveManager;
 class ClientPolicyController;
-class OfflinePageMetadataStoreSQL;
+class OfflinePageMetadataStore;
 
 // This task is responsible for executing maintenance sub-tasks during Chrome
 // startup, including: temporary page consistency check, legacy directory
 // cleaning and report storage usage UMA.
 class StartupMaintenanceTask : public Task {
  public:
-  StartupMaintenanceTask(OfflinePageMetadataStoreSQL* store,
+  StartupMaintenanceTask(OfflinePageMetadataStore* store,
                          ArchiveManager* archive_manager,
                          ClientPolicyController* policy_controller);
   ~StartupMaintenanceTask() override;
@@ -32,7 +32,7 @@ class StartupMaintenanceTask : public Task {
   void OnStartupMaintenanceDone(bool result);
 
   // The store containing the offline pages. Not owned.
-  OfflinePageMetadataStoreSQL* store_;
+  OfflinePageMetadataStore* store_;
   // The archive manager storing archive directories. Not owned.
   ArchiveManager* archive_manager_;
   // The policy controller which is used to acquire names of namespaces. Not

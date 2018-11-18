@@ -23,19 +23,17 @@ class TableCellPainter {
   TableCellPainter(const LayoutTableCell& layout_table_cell)
       : layout_table_cell_(layout_table_cell) {}
 
-  void Paint(const PaintInfo&, const LayoutPoint&);
-
   void PaintContainerBackgroundBehindCell(
       const PaintInfo&,
-      const LayoutPoint&,
       const LayoutObject& background_object);
   void PaintBoxDecorationBackground(const PaintInfo&,
                                     const LayoutPoint& paint_offset);
   void PaintMask(const PaintInfo&, const LayoutPoint& paint_offset);
 
- private:
   LayoutRect PaintRectNotIncludingVisualOverflow(
       const LayoutPoint& paint_offset);
+
+ private:
   void PaintBackground(const PaintInfo&,
                        const LayoutRect&,
                        const LayoutObject& background_object);

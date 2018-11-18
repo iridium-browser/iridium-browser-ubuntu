@@ -17,7 +17,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "base/test/scoped_task_environment.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -38,7 +38,7 @@ TEST(TaskAnnotatorTest, QueueAndRunTask) {
   PendingTask pending_task(FROM_HERE, BindOnce(&TestTask, &result));
 
   TaskAnnotator annotator;
-  annotator.DidQueueTask("TaskAnnotatorTest::Queue", pending_task);
+  annotator.WillQueueTask("TaskAnnotatorTest::Queue", &pending_task);
   EXPECT_EQ(0, result);
   annotator.RunTask("TaskAnnotatorTest::Queue", &pending_task);
   EXPECT_EQ(123, result);

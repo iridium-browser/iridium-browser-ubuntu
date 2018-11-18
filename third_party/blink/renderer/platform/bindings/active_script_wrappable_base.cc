@@ -6,15 +6,15 @@
 
 #include "third_party/blink/renderer/platform/bindings/dom_data_store.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
-#include "third_party/blink/renderer/platform/bindings/script_wrappable_visitor.h"
 #include "third_party/blink/renderer/platform/bindings/v8_binding.h"
 #include "third_party/blink/renderer/platform/bindings/v8_per_isolate_data.h"
+#include "third_party/blink/renderer/platform/heap/visitor.h"
 
 namespace blink {
 
 void ActiveScriptWrappableBase::TraceActiveScriptWrappables(
     v8::Isolate* isolate,
-    ScriptWrappableVisitor* visitor) {
+    Visitor* visitor) {
   V8PerIsolateData* isolate_data = V8PerIsolateData::From(isolate);
   const auto* active_script_wrappables = isolate_data->ActiveScriptWrappables();
   if (!active_script_wrappables)
@@ -40,13 +40,7 @@ void ActiveScriptWrappableBase::TraceActiveScriptWrappables(
     if (active_wrappable->IsContextDestroyed())
       continue;
     ScriptWrappable* script_wrappable = active_wrappable->ToScriptWrappable();
-    // Notify the visitor about this script_wrappable by dispatching to the
-    // corresponding visitor->Visit(script_wrappable) method.
-    // Ideally, we would call visitor->TraceWrappers(script_wrappable) here,
-    // but that method requires TraceWrapperMember<T>. Since we are getting
-    // the script wrappable from ActiveScriptWrappables, we do not have
-    // TraceWrapperMember<T> and have to use TraceWrappersFromGeneratedCode.
-    visitor->TraceWrappersFromGeneratedCode(script_wrappable);
+    visitor->TraceWithWrappers(script_wrappable);
   }
 }
 

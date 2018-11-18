@@ -10,7 +10,6 @@
 
 #include "base/location.h"
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/test/test_timeouts.h"
@@ -141,7 +140,8 @@ static void SendMulticastPacket(const base::Closure& quit_run_loop,
                                 UDPSocket* src,
                                 int result) {
   if (result == 0) {
-    scoped_refptr<net::IOBuffer> data = new net::WrappedIOBuffer(kTestMessage);
+    scoped_refptr<net::IOBuffer> data =
+        base::MakeRefCounted<net::WrappedIOBuffer>(kTestMessage);
     src->Write(data, kTestMessageLength, base::BindRepeating(&OnSendCompleted));
     base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE,

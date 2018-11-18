@@ -20,8 +20,8 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/win/scoped_handle.h"
+#include "base/win/wincrypt_shim.h"
 #include "chrome/common/safe_browsing/pe_image_reader_win.h"
-#include "crypto/wincrypt_shim.h"
 
 // This must be after wincrypt and wintrust.
 #include <mscat.h>
@@ -109,6 +109,10 @@ base::string16 GetSubjectNameInFile(const base::FilePath& filename) {
                           subject_name_size))) {
     return base::string16();
   }
+
+  // The subject name is normalized because it can contain trailing null
+  // characters.
+  internal::NormalizeCertificateSubject(&subject_name);
 
   return subject_name;
 }
@@ -217,10 +221,6 @@ void GetCatalogCertificateInfo(const base::FilePath& filename,
   certificate_info->type = CertificateType::CERTIFICATE_IN_CATALOG;
   certificate_info->path = catalog_path;
   certificate_info->subject = subject;
-
-  // The subject name is normalized because it can contain trailing null
-  // characters.
-  internal::NormalizeCertificateSubject(certificate_info);
 }
 
 }  // namespace
@@ -250,6 +250,11 @@ void GetCertificateInfo(const base::FilePath& filename,
   certificate_info->type = CertificateType::CERTIFICATE_IN_FILE;
   certificate_info->path = filename;
   certificate_info->subject = subject;
+}
+
+bool IsMicrosoftModule(base::StringPiece16 subject) {
+  static constexpr wchar_t kMicrosoft[] = L"Microsoft ";
+  return subject.starts_with(kMicrosoft);
 }
 
 StringMapping GetEnvironmentVariablesMapping(
@@ -329,10 +334,10 @@ bool GetModuleImageSizeAndTimeDateStamp(const base::FilePath& path,
 
 namespace internal {
 
-void NormalizeCertificateSubject(CertificateInfo* certificate_info) {
-  size_t first_null = certificate_info->subject.find(L'\0');
+void NormalizeCertificateSubject(base::string16* subject) {
+  size_t first_null = subject->find(L'\0');
   if (first_null != base::string16::npos)
-    certificate_info->subject.resize(first_null);
+    subject->resize(first_null);
 }
 
 }  // namespace internal

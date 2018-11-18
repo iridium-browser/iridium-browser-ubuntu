@@ -34,6 +34,7 @@
  * Originally part of the Polymer Project. Original license below.
  *
  * @externs
+ * @suppress {strictMissingProperties}
  * @license
  * Copyright (c) 2015 The Polymer Project Authors. All rights reserved.
  * This code may only be used under the BSD style license found at
@@ -174,6 +175,21 @@ PolymerElement.prototype.hostAttributes;
  * @type {!Object<string, string>}
  */
 PolymerElement.prototype.listeners;
+
+/**
+ * Force this element to distribute its children to its local dom.
+ * A user should call `distributeContent` if distribution has been
+ * invalidated due to changes to selectors on child elements that
+ * effect distribution that were not made via `Polymer.dom`.
+ * For example, if an element contains an insertion point with
+ * `<content select=".foo">` and a `foo` class is added to a child,
+ * then `distributeContent` must be called to update
+ * local dom distribution.
+ * @param {boolean} updateInsertionPoints Shady DOM does not detect
+ *   <content> insertion that is nested in a sub-tree being appended.
+ *   Set to true to distribute to newly added nested <content>'s.
+ */
+PolymerElement.prototype.distributeContent = function(updateInsertionPoints) {};
 
 /**
  * Return the element whose local dom within which this element is contained.
@@ -581,6 +597,13 @@ Polymer.Base.get = function(path, root) {};
 Polymer.Base.fire = function(type, detail, options) {};
 
 /**
+ * For Polymer internal use only, except for
+ * github.com/Polymer/polymer/issues/4138
+ * @type {!function (!Node, ?string, *, ?Object)}
+ */
+Polymer.Base._computeFinalAnnotationValue;
+
+/**
  * @param {...*} var_args
  * For Polymer-internal use only.
  */
@@ -627,6 +650,12 @@ Polymer.Gestures.findOriginalTarget = function(ev) {};
  * @type {!Object}
  */
 Polymer.Gestures.gestures = {};
+
+/**
+ * @param {Node} node
+ * @param {string} value
+ */
+Polymer.Gestures.setTouchAction = function(node, value) {};
 
 /**
  * @type {!Object}
@@ -1166,7 +1195,7 @@ Polymer.Collection.applySplices = function(userArray, splices) {};
 
 /**
  * Settings pulled from
- * https://github.com/Polymer/polymer/blob/master/src/lib/settings.html
+ * https://github.com/Polymer/polymer/blob/master/lib/utils/settings.html
  * @const
  */
 Polymer.Settings = {};
@@ -1195,6 +1224,9 @@ Polymer.Settings.useNativeImports;
 /** @type {boolean} */
 Polymer.Settings.useNativeCustomElements;
 
+/** @type {boolean} */
+Polymer.Settings.useNativeCSSProperties;
+
 
 /**
  * @see https://github.com/Polymer/polymer/blob/master/src/lib/template/templatizer.html
@@ -1211,8 +1243,10 @@ Polymer.Templatizer = {
 
   /**
    * @param {?Element} template
+   * @param {boolean=} mutableData In Polymer 1.x, passing this argument is a
+   * no-op.
    */
-  templatize: function(template) {},
+  templatize: function(template, mutableData) {},
 
   /**
    * Returns the template "model" associated with a given element, which
@@ -1253,6 +1287,24 @@ var TemplatizerNode = function() {};
 
 /** @type {?PolymerElement} */
 TemplatizerNode.prototype._templateInstance;
+
+
+/**
+ * @see https://github.com/Polymer/polymer/blob/1.x/src/lib/template/dom-if.html
+ * @extends {PolymerElement}
+ * @constructor
+ */
+var DomIf = function() {};
+
+
+/**
+ * Forces the element to render its content. Normally rendering is
+ * asynchronous to a provoking change. This is done for efficiency so
+ * that multiple changes trigger only a single render. The render method
+ * should be called if, for example, template rendering is required to
+ * validate application state.
+ */
+DomIf.prototype.render = function() {};
 
 
 
@@ -1315,6 +1367,23 @@ DomRepeatElement.prototype.indexForElement = function(el) {};
  */
 DomRepeatElement.prototype.renderedItemCount;
 
+
+/**
+ * Event object for an event handler on a child of a dom-repeat template.
+ * @see https://www.polymer-project.org/1.0/docs/devguide/templates#handling-events
+ * @extends {CustomEvent}
+ * @constructor
+ * @template T
+ */
+var DomRepeatEvent = function() {};
+
+/**
+ * @type {{
+ *   index: number,
+ *   item: T
+ * }}
+ */
+DomRepeatEvent.prototype.model;
 
 
 /**
@@ -1643,6 +1712,25 @@ Polymer.DomModule = function() {};
  */
 Polymer.DomModule.import = function(id, opt_selector) {};
 
+/** @const */
+Polymer.Path = {
+  /**
+   * @param {string=} base
+   * @param {string=} newBase
+   * @param {string=} path
+   * @return {string}
+   */
+  translate: function(base, newBase, path) {},
+
+  /**
+   * @param {string=} base
+   * @param {string=} wildcard
+   * @param {string=} path
+   * @return {boolean}
+   */
+  matches: function(base, wildcard, path) {}
+};
+
 /**
  * For compatibility with both Polymer 1.0 and 2.0, code may check for certain
  * objects and properties which don't exist in Polymer 1.0.
@@ -1654,3 +1742,24 @@ Polymer.DomModule.import = function(id, opt_selector) {};
 
 /** @type {undefined} */
 var ShadyDOM;
+
+Polymer.flush;
+Polymer.enqueueDebouncer;
+Polymer.Async.animationFrame;
+Polymer.Async.idlePeriod;
+Polymer.Async.microTask;
+Polymer.Debouncer.debounce;
+
+Polymer.Templatizer.mutableData;
+Polymer.Templatizer.parentModel;
+Polymer.Templatizer.forwardHostProp;
+Polymer.Templatizer.notifyInstanceProp;
+Polymer.Templatizer._setPendingPropertyOrPath;
+Polymer.Templatizer._setPendingProperty;
+Polymer.Templatizer._instanceProps;
+
+/**
+ * @param {number} index
+ * @return {boolean}
+ */
+ArraySelectorElement.prototype.isIndexSelected = function(index) {};

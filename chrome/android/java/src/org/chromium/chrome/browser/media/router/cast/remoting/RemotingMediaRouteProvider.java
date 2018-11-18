@@ -8,13 +8,14 @@ import android.support.v7.media.MediaRouter;
 import org.chromium.base.Log;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.browser.media.router.ChromeMediaRouter;
-import org.chromium.chrome.browser.media.router.MediaController;
+import org.chromium.chrome.browser.media.router.FlingingController;
 import org.chromium.chrome.browser.media.router.MediaRoute;
 import org.chromium.chrome.browser.media.router.MediaRouteManager;
 import org.chromium.chrome.browser.media.router.MediaRouteProvider;
 import org.chromium.chrome.browser.media.router.MediaSink;
 import org.chromium.chrome.browser.media.router.MediaSource;
 import org.chromium.chrome.browser.media.router.cast.BaseMediaRouteProvider;
+import org.chromium.chrome.browser.media.router.cast.CastSession;
 import org.chromium.chrome.browser.media.router.cast.ChromeCastSessionManager;
 import org.chromium.chrome.browser.media.router.cast.CreateRouteRequest;
 
@@ -23,8 +24,12 @@ import javax.annotation.Nullable;
 /**
  * A {@link MediaRouteProvider} implementation for media remote playback.
  */
+// Migrated to CafRemotingMediaRouteProvider. See https://crbug.com/711860.
 public class RemotingMediaRouteProvider extends BaseMediaRouteProvider {
     private static final String TAG = "MediaRemoting";
+
+    private int mPendingNativeRequestId;
+    private MediaRoute mPendingMediaRoute;
 
     /**
      * @return Initialized {@link RemotingMediaRouteProvider} object.
@@ -60,7 +65,7 @@ public class RemotingMediaRouteProvider extends BaseMediaRouteProvider {
 
         if (mSession == null) {
             mRoutes.remove(routeId);
-            mManager.onRouteClosed(routeId);
+            mManager.onRouteTerminated(routeId);
             return;
         }
 
@@ -73,9 +78,8 @@ public class RemotingMediaRouteProvider extends BaseMediaRouteProvider {
     }
 
     @Override
-    public void sendStringMessage(String routeId, String message, int nativeCallbackId) {
+    public void sendStringMessage(String routeId, String message) {
         Log.e(TAG, "Remote playback does not support sending messages");
-        mManager.onMessageSentResult(false, nativeCallbackId);
     }
 
     @VisibleForTesting
@@ -87,7 +91,7 @@ public class RemotingMediaRouteProvider extends BaseMediaRouteProvider {
     public void onSessionEnded() {
         if (mSession == null) return;
 
-        for (String routeId : mRoutes.keySet()) mManager.onRouteClosed(routeId);
+        for (String routeId : mRoutes.keySet()) mManager.onRouteTerminated(routeId);
         mRoutes.clear();
 
         mSession = null;
@@ -103,25 +107,55 @@ public class RemotingMediaRouteProvider extends BaseMediaRouteProvider {
         MediaSink sink = request.getSink();
         MediaSource source = request.getSource();
 
-        MediaRoute route =
+        // Calling mManager.onRouteCreated() too early causes some issues. If we call it here
+        // directly, getMediaController() might be called before onSessionStarted(), which causes
+        // the FlingingRenderer's creation to fail. Instead, save the route and request ID, and only
+        // signal the route as having been created when onSessionStarted() is called.
+        mPendingMediaRoute =
                 new MediaRoute(sink.getId(), source.getSourceId(), request.getPresentationId());
-        mRoutes.put(route.id, route);
-        mManager.onRouteCreated(route.id, route.sinkId, request.getNativeRequestId(), this, true);
+        mPendingNativeRequestId = request.getNativeRequestId();
+    }
+
+    private void clearPendingRoute() {
+        mPendingMediaRoute = null;
+        mPendingNativeRequestId = 0;
     }
 
     @Override
+    public void onSessionStarted(CastSession session) {
+        super.onSessionStarted(session);
+
+        // Continued from onSessionStarting()
+        mRoutes.put(mPendingMediaRoute.id, mPendingMediaRoute);
+        mManager.onRouteCreated(mPendingMediaRoute.id, mPendingMediaRoute.sinkId,
+                mPendingNativeRequestId, this, true);
+
+        clearPendingRoute();
+    }
+
+    @Override
+    public void onSessionStartFailed() {
+        super.onSessionStartFailed();
+
+        mManager.onRouteRequestError(
+                "Failure to start RemotingCastSession", mPendingNativeRequestId);
+
+        clearPendingRoute();
+    };
+
+    @Override
     @Nullable
-    public MediaController getMediaController(String routeId) {
-        // We cannot return a MediaController if we don't have a session.
+    public FlingingController getFlingingController(String routeId) {
+        // We cannot return a FlingingController if we don't have a session.
         if (mSession == null) return null;
 
         // Don't return controllers for stale routes.
-        if (mRoutes.get(routeId) == null) return null;
+        if (!mRoutes.containsKey(routeId)) return null;
 
         // RemotePlayback does not support joining routes, which means we only
         // have a single route active at a time. If we have a a valid CastSession
         // and the route ID is current, this means that the given |mSession|
-        // corresponds to the route ID, and it is ok to return the MediaController.
-        return mSession.getMediaController();
+        // corresponds to the route ID, and it is ok to return the FlingingController.
+        return mSession.getFlingingController();
     }
 }

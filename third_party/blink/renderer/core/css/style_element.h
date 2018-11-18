@@ -35,7 +35,7 @@ class CORE_EXPORT StyleElement : public GarbageCollectedMixin {
  public:
   StyleElement(Document*, bool created_by_parser);
   virtual ~StyleElement();
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  protected:
   enum ProcessingResult { kProcessingSuccessful, kProcessingFatalError };
@@ -49,7 +49,7 @@ class CORE_EXPORT StyleElement : public GarbageCollectedMixin {
   bool SheetLoaded(Document&);
   void StartLoadingDynamicSheet(Document&);
 
-  void RemovedFrom(Element&, ContainerNode* insertion_point);
+  void RemovedFrom(Element&, ContainerNode& insertion_point);
   ProcessingResult ProcessStyleSheet(Document&, Element&);
   ProcessingResult ChildrenChanged(Element&);
   ProcessingResult FinishParsingChildren(Element&);

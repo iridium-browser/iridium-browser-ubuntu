@@ -40,6 +40,16 @@ namespace blink {
 
 // What you should know about Supplementable and Supplement
 // ========================================================
+// Supplementable allows a garbage-collected object to be extended with
+// additional data.
+//
+// Most commonly, this is used to attach data to a central object, such as
+// LocalFrame, so that it can be easily accessed. This is similar to adding a
+// member to that class (e.g. it is kept alive while the supplementable is),
+// except that it occupies less memory if not used, and can be done in cases
+// that would otherwise be a layering violation. For example, it is common for
+// features implemented in modules/ to supplement classes in core/.
+//
 // Supplementable and Supplement instances are meant to be thread local. They
 // should only be accessed from within the thread that created them. The
 // 2 classes are not designed for safe access from another thread. Violating
@@ -105,19 +115,8 @@ namespace blink {
 template <typename T>
 class Supplementable;
 
-// Supplement<T>-specific version of TraceWrapperBase class. In order to support
-// wrapper-tracing from Supplementable<T> to Supplement<T> (especially when
-// crossing core/modules boundary), Supplement<T> needs to be wrapper-traceable.
-// This class provides a common API for all subclasses of Supplement<T> to
-// support wrapper-tracing.
-class PLATFORM_EXPORT TraceWrapperBaseForSupplement {
- public:
-  virtual void TraceWrappers(const ScriptWrappableVisitor* visitor) const {}
-};
-
 template <typename T>
-class Supplement : public GarbageCollectedMixin,
-                   public TraceWrapperBaseForSupplement {
+class Supplement : public GarbageCollectedMixin {
  public:
   // TODO(haraken): Remove the default constructor.
   // All Supplement objects should be instantiated with |supplementable_|.
@@ -148,7 +147,7 @@ class Supplement : public GarbageCollectedMixin,
                : nullptr;
   }
 
-  virtual void Trace(blink::Visitor* visitor) {
+  void Trace(blink::Visitor* visitor) override {
     visitor->Trace(supplementable_);
   }
 
@@ -204,11 +203,7 @@ class Supplementable : public GarbageCollectedMixin {
 #endif
   }
 
-  virtual void Trace(blink::Visitor* visitor) { visitor->Trace(supplements_); }
-  virtual void TraceWrappers(const ScriptWrappableVisitor* visitor) const {
-    for (const auto& supplement : supplements_.Values())
-      visitor->TraceWrappers(supplement);
-  }
+  void Trace(blink::Visitor* visitor) override { visitor->Trace(supplements_); }
 
  protected:
   using SupplementMap = HeapHashMap<const char*,

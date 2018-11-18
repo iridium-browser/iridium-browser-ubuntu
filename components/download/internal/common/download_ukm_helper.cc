@@ -27,11 +27,15 @@ int DownloadUkmHelper::CalcNearestKB(int num_bytes) {
 void DownloadUkmHelper::RecordDownloadStarted(int download_id,
                                               ukm::SourceId source_id,
                                               DownloadContent file_type,
-                                              DownloadSource download_source) {
+                                              DownloadSource download_source,
+                                              DownloadConnectionSecurity state,
+                                              bool is_same_host_download) {
   ukm::builders::Download_Started(source_id)
       .SetDownloadId(download_id)
       .SetFileType(static_cast<int>(file_type))
       .SetDownloadSource(static_cast<int>(download_source))
+      .SetDownloadConnectionSecurity(static_cast<int>(state))
+      .SetIsSameHostDownload(is_same_host_download)
       .Record(ukm::UkmRecorder::Get());
 }
 
@@ -82,13 +86,6 @@ void DownloadUkmHelper::RecordDownloadCompleted(
       .SetTimeSinceStart(time_since_start.InMilliseconds())
       .SetBytesWasted(DownloadUkmHelper::CalcNearestKB(bytes_wasted))
       .Record(ukm::UkmRecorder::Get());
-}
-
-void DownloadUkmHelper::UpdateSourceURL(ukm::UkmRecorder* ukm_recorder,
-                                        ukm::SourceId source_id,
-                                        const GURL& url) {
-  if (ukm_recorder)
-    ukm_recorder->UpdateSourceURL(source_id, url);
 }
 
 }  // namespace download

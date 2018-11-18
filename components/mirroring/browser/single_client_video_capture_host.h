@@ -39,14 +39,12 @@ class SingleClientVideoCaptureHost final
       std::unique_ptr<content::VideoCaptureDeviceLauncher>()>;
   SingleClientVideoCaptureHost(const std::string& device_id,
                                content::MediaStreamType type,
-                               const VideoCaptureParams& params,
                                DeviceLauncherCreateCallback callback);
   ~SingleClientVideoCaptureHost() override;
 
   // media::mojom::VideoCaptureHost implementations
   // |device_id| and |session_id| are ignored since there will be only one
-  // device and one client. |params| is also ignored since it is already set
-  // through the constructor.
+  // device and one client.
   void Start(int32_t device_id,
              int32_t session_id,
              const VideoCaptureParams& params,
@@ -70,10 +68,8 @@ class SingleClientVideoCaptureHost final
 
   // media::VideoFrameReceiver implementations
   using Buffer = VideoCaptureDevice::Client::Buffer;
-  void OnNewBufferHandle(
-      int buffer_id,
-      std::unique_ptr<VideoCaptureDevice::Client::Buffer::HandleProvider>
-          handle_provider) override;
+  void OnNewBuffer(int buffer_id,
+                   media::mojom::VideoBufferHandlePtr buffer_handle) override;
   void OnFrameReadyInBuffer(
       int buffer_id,
       int frame_feedback_id,
@@ -82,14 +78,15 @@ class SingleClientVideoCaptureHost final
           buffer_read_permission,
       media::mojom::VideoFrameInfoPtr frame_info) override;
   void OnBufferRetired(int buffer_id) override;
-  void OnError() override;
+  void OnError(media::VideoCaptureError error) override;
+  void OnFrameDropped(media::VideoCaptureFrameDropReason reason) override;
   void OnLog(const std::string& message) override;
   void OnStarted() override;
   void OnStartedUsingGpuDecode() override;
 
   void OnDeviceLaunched(
       std::unique_ptr<content::LaunchedVideoCaptureDevice> device);
-  void OnDeviceLaunchFailed();
+  void OnDeviceLaunchFailed(media::VideoCaptureError error);
   void OnDeviceLaunchAborted();
 
  private:
@@ -99,7 +96,6 @@ class SingleClientVideoCaptureHost final
 
   const std::string device_id_;
   const content::MediaStreamType type_;
-  const VideoCaptureParams params_;
   const DeviceLauncherCreateCallback device_launcher_callback_;
 
   media::mojom::VideoCaptureObserverPtr observer_;

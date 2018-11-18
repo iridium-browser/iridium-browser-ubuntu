@@ -24,10 +24,18 @@ Polymer({
     /** @type {!print_preview_new.State} */
     state: Number,
 
-    /** @private {boolean} */
+    /** @private */
     printButtonEnabled_: {
       type: Boolean,
       value: false,
+    },
+
+    /** @private */
+    printButtonLabel_: {
+      type: String,
+      value: function() {
+        return loadTimeData.getString('printButton');
+      },
     },
 
     /** @private {?string} */
@@ -47,9 +55,14 @@ Polymer({
     errorMessage: String,
   },
 
-  observers:
-      ['update_(settings.copies.value, settings.duplex.value, ' +
-       'settings.pages.value, state)'],
+  observers: [
+    'update_(settings.copies.value, settings.duplex.value, ' +
+        'settings.pages.value, state, destination.id)',
+    'updatePrintButtonLabel_(destination.id)'
+  ],
+
+  /** @private {!print_preview_new.State} */
+  lastState_: print_preview_new.State.NOT_READY,
 
   /** @private */
   onPrintClick_: function() {
@@ -73,12 +86,9 @@ Polymer({
              print_preview.Destination.GooglePromotedId.DOCS);
   },
 
-  /**
-   * @return {string}
-   * @private
-   */
-  getPrintButton_: function() {
-    return loadTimeData.getString(
+  /** @private */
+  updatePrintButtonLabel_: function() {
+    this.printButtonLabel_ = loadTimeData.getString(
         this.isPdfOrDrive_() ? 'saveButton' : 'printButton');
   },
 
@@ -131,6 +141,11 @@ Polymer({
         const labelInfo = this.computeLabelInfo_();
         this.summary_ = this.getSummary_(labelInfo);
         this.summaryLabel_ = this.getSummaryLabel_(labelInfo);
+        if (this.lastState_ != this.state &&
+            (document.activeElement == null ||
+             document.activeElement == document.body)) {
+          this.$$('paper-button.action-button').focus();
+        }
         break;
       case (print_preview_new.State.FATAL_ERROR):
         this.printButtonEnabled_ = false;
@@ -143,6 +158,7 @@ Polymer({
         this.printButtonEnabled_ = false;
         break;
     }
+    this.lastState_ = this.state;
   },
 
   /**
@@ -151,19 +167,10 @@ Polymer({
    * @private
    */
   getSummary_: function(labelInfo) {
-    let html = null;
-    if (labelInfo.numPages != labelInfo.numSheets) {
-      html = loadTimeData.getStringF(
-          'printPreviewSummaryFormatLong',
-          '<b>' + labelInfo.numSheets.toLocaleString() + '</b>',
-          '<b>' + labelInfo.summaryLabel + '</b>',
-          labelInfo.numPages.toLocaleString(), labelInfo.pagesLabel);
-    } else {
-      html = loadTimeData.getStringF(
-          'printPreviewSummaryFormatShort',
-          '<b>' + labelInfo.numSheets.toLocaleString() + '</b>',
-          '<b>' + labelInfo.summaryLabel + '</b>');
-    }
+    let html = loadTimeData.getStringF(
+        'printPreviewSummaryFormatShort',
+        '<b>' + labelInfo.numSheets.toLocaleString() + '</b>',
+        '<b>' + labelInfo.summaryLabel + '</b>');
 
     // Removing extra spaces from within the string.
     html = html.replace(/\s{2,}/g, ' ');
@@ -176,12 +183,6 @@ Polymer({
    * @private
    */
   getSummaryLabel_: function(labelInfo) {
-    if (labelInfo.numPages != labelInfo.numSheets) {
-      return loadTimeData.getStringF(
-          'printPreviewSummaryFormatLong', labelInfo.numSheets.toLocaleString(),
-          labelInfo.summaryLabel, labelInfo.numPages.toLocaleString(),
-          labelInfo.pagesLabel);
-    }
     return loadTimeData.getStringF(
         'printPreviewSummaryFormatShort', labelInfo.numSheets.toLocaleString(),
         labelInfo.summaryLabel);

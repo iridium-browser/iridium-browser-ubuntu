@@ -9,14 +9,9 @@
 
 #include "base/macros.h"
 #include "base/threading/thread_checker.h"
-#include "net/base/network_change_notifier.h"
 #include "net/base/proxy_delegate.h"
 #include "net/proxy_resolution/proxy_retry_info.h"
 #include "url/gurl.h"
-
-namespace base {
-class TickClock;
-}
 
 namespace net {
 class NetLog;
@@ -32,9 +27,7 @@ class DataReductionProxyConfigurator;
 class DataReductionProxyEventCreator;
 class DataReductionProxyIOData;
 
-class DataReductionProxyDelegate
-    : public net::ProxyDelegate,
-      public net::NetworkChangeNotifier::IPAddressObserver {
+class DataReductionProxyDelegate : public net::ProxyDelegate {
  public:
   // ProxyDelegate instance is owned by io_thread. |auth_handler| and |config|
   // outlives this class instance.
@@ -56,8 +49,6 @@ class DataReductionProxyDelegate
                       net::ProxyInfo* result) override;
   void OnFallback(const net::ProxyServer& bad_proxy, int net_error) override;
 
-  void SetTickClockForTesting(const base::TickClock* tick_clock);
-
  protected:
   // Protected so that it can be overridden during testing.
   // Returns true if |proxy_server| supports QUIC.
@@ -77,9 +68,6 @@ class DataReductionProxyDelegate
   // Records the availability status of data reduction proxy.
   void RecordQuicProxyStatus(QuicProxyStatus status) const;
 
-  // NetworkChangeNotifier::IPAddressObserver:
-  void OnIPAddressChanged() override;
-
   // Checks if the first proxy server in |result| supports QUIC and if so
   // adds an alternative proxy configuration to |result|.
   void GetAlternativeProxy(const GURL& url,
@@ -90,18 +78,6 @@ class DataReductionProxyDelegate
   const DataReductionProxyConfigurator* configurator_;
   DataReductionProxyEventCreator* event_creator_;
   DataReductionProxyBypassStats* bypass_stats_;
-
-  // Tick clock used for obtaining the current time.
-  const base::TickClock* tick_clock_;
-
-  // True if the metrics related to the first request whose resolved proxy was a
-  // data saver proxy has been recorded. |first_data_saver_request_recorded_| is
-  // reset to false on IP address change events.
-  bool first_data_saver_request_recorded_;
-
-  // Set to the time when last IP address change event was received, or the time
-  // of initialization of |this|, whichever is later.
-  base::TimeTicks last_network_change_time_;
 
   DataReductionProxyIOData* io_data_;
 

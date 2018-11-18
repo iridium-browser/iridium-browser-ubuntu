@@ -7,7 +7,9 @@
 #include "third_party/blink/renderer/bindings/core/v8/script_controller.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/use_counter.h"
-#include "third_party/blink/renderer/core/inspector/InspectorBaseAgent.h"
+#include "third_party/blink/renderer/core/inspector/inspected_frames.h"
+#include "third_party/blink/renderer/core/inspector/inspector_base_agent.h"
+#include "third_party/blink/renderer/core/inspector/inspector_session_state.h"
 #include "third_party/blink/renderer/core/inspector/protocol/Protocol.h"
 #include "third_party/blink/renderer/core/inspector/v8_inspector_string.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
@@ -18,32 +20,47 @@ namespace {
 const char kV8StateKey[] = "v8";
 }
 
-InspectorSession::InspectorSession(Client* client,
-                                   CoreProbeSink* instrumenting_agents,
-                                   int session_id,
-                                   v8_inspector::V8Inspector* inspector,
-                                   int context_group_id,
-                                   const String& reattach_state)
+// static
+bool InspectorSession::ShouldInterruptForMethod(const String& method) {
+  // Keep in sync with DevToolsSession::ShouldSendOnIO.
+  // TODO(dgozman): find a way to share this.
+  return method == "Debugger.pause" || method == "Debugger.setBreakpoint" ||
+         method == "Debugger.setBreakpointByUrl" ||
+         method == "Debugger.removeBreakpoint" ||
+         method == "Debugger.setBreakpointsActive" ||
+         method == "Performance.getMetrics" || method == "Page.crash" ||
+         method == "Runtime.terminateExecution" ||
+         method == "Emulation.setScriptExecutionDisabled";
+}
+
+InspectorSession::InspectorSession(
+    Client* client,
+    CoreProbeSink* instrumenting_agents,
+    InspectedFrames* inspected_frames,
+    int session_id,
+    v8_inspector::V8Inspector* inspector,
+    int context_group_id,
+    mojom::blink::DevToolsSessionStatePtr reattach_session_state)
     : client_(client),
       v8_session_(nullptr),
       session_id_(session_id),
       disposed_(false),
       instrumenting_agents_(instrumenting_agents),
-      inspector_backend_dispatcher_(new protocol::UberDispatcher(this)) {
-  String v8_state;
-  if (!reattach_state.IsNull()) {
-    std::unique_ptr<protocol::Value> state =
-        protocol::StringUtil::parseJSON(reattach_state);
-    if (state)
-      state_ = protocol::DictionaryValue::cast(std::move(state));
-    if (!state_)
-      state_ = protocol::DictionaryValue::create();
-    state_->getString(kV8StateKey, &v8_state);
-  } else {
-    state_ = protocol::DictionaryValue::create();
-  }
-  v8_session_ = inspector->connect(context_group_id, this,
-                                   ToV8InspectorStringView(v8_state));
+      inspected_frames_(inspected_frames),
+      inspector_backend_dispatcher_(new protocol::UberDispatcher(this)),
+      session_state_(std::move(reattach_session_state)),
+      v8_session_state_(kV8StateKey),
+      v8_session_state_json_(&v8_session_state_, /*default_value=*/String()) {
+  v8_session_state_.InitFrom(&session_state_);
+
+  // inspector->connect may result in calls to |this| against the
+  // V8Inspector::Channel interface for receiving responses / notifications,
+  // while v8_session_ is still nullptr.
+  v8_session_ =
+      inspector->connect(context_group_id, /*channel*/ this,
+                         ToV8InspectorStringView(v8_session_state_json_.Get()));
+
+  instrumenting_agents_->addInspectorSession(this);
 }
 
 InspectorSession::~InspectorSession() {
@@ -53,26 +70,28 @@ InspectorSession::~InspectorSession() {
 void InspectorSession::Append(InspectorAgent* agent) {
   agents_.push_back(agent);
   agent->Init(instrumenting_agents_.Get(), inspector_backend_dispatcher_.get(),
-              state_.get());
+              &session_state_);
 }
 
 void InspectorSession::Restore() {
   DCHECK(!disposed_);
-  for (size_t i = 0; i < agents_.size(); i++)
+  for (wtf_size_t i = 0; i < agents_.size(); i++)
     agents_[i]->Restore();
 }
 
 void InspectorSession::Dispose() {
   DCHECK(!disposed_);
   disposed_ = true;
+  instrumenting_agents_->removeInspectorSession(this);
   inspector_backend_dispatcher_.reset();
-  for (size_t i = agents_.size(); i > 0; i--)
+  for (wtf_size_t i = agents_.size(); i > 0; i--)
     agents_[i - 1]->Dispose();
   agents_.clear();
   v8_session_.reset();
 }
 
-void InspectorSession::DispatchProtocolMessage(const String& method,
+void InspectorSession::DispatchProtocolMessage(int call_id,
+                                               const String& method,
                                                const String& message) {
   DCHECK(!disposed_);
   if (v8_inspector::V8InspectorSession::canDispatchMethod(
@@ -80,34 +99,59 @@ void InspectorSession::DispatchProtocolMessage(const String& method,
     v8_session_->dispatchProtocolMessage(ToV8InspectorStringView(message));
   } else {
     inspector_backend_dispatcher_->dispatch(
-        protocol::StringUtil::parseJSON(message));
+        call_id, method, protocol::StringUtil::parseJSON(message), message);
   }
 }
 
 void InspectorSession::DispatchProtocolMessage(const String& message) {
   DCHECK(!disposed_);
+  int call_id;
   String method;
-  std::unique_ptr<protocol::DictionaryValue> parsedMessage;
-  if (!inspector_backend_dispatcher_->getCommandName(message, &method,
-                                                     &parsedMessage))
+  std::unique_ptr<protocol::Value> parsed_message =
+      protocol::StringUtil::parseJSON(message);
+  if (!inspector_backend_dispatcher_->parseCommand(parsed_message.get(),
+                                                   &call_id, &method)) {
     return;
+  }
   if (v8_inspector::V8InspectorSession::canDispatchMethod(
           ToV8InspectorStringView(method))) {
     v8_session_->dispatchProtocolMessage(ToV8InspectorStringView(message));
   } else {
-    inspector_backend_dispatcher_->dispatch(std::move(parsedMessage));
+    inspector_backend_dispatcher_->dispatch(call_id, method,
+                                            std::move(parsed_message), message);
   }
 }
 
+void InspectorSession::DidStartProvisionalLoad(LocalFrame* frame) {
+  if (inspected_frames_->Root() == frame) {
+    v8_session_->setSkipAllPauses(true);
+    v8_session_->resume();
+  }
+}
+
+void InspectorSession::DidFailProvisionalLoad(LocalFrame* frame) {
+  if (inspected_frames_->Root() == frame)
+    v8_session_->setSkipAllPauses(false);
+}
+
 void InspectorSession::DidCommitLoadForLocalFrame(LocalFrame* frame) {
-  for (size_t i = 0; i < agents_.size(); i++)
+  for (wtf_size_t i = 0; i < agents_.size(); i++)
     agents_[i]->DidCommitLoadForLocalFrame(frame);
+  if (inspected_frames_->Root() == frame)
+    v8_session_->setSkipAllPauses(false);
 }
 
 void InspectorSession::sendProtocolResponse(
     int call_id,
     std::unique_ptr<protocol::Serializable> message) {
   SendProtocolResponse(call_id, message->serialize());
+}
+
+void InspectorSession::fallThrough(int call_id,
+                                   const String& method,
+                                   const String& message) {
+  // There's no other layer to handle the command.
+  NOTREACHED();
 }
 
 void InspectorSession::sendResponse(
@@ -124,13 +168,10 @@ void InspectorSession::SendProtocolResponse(int call_id,
   if (disposed_)
     return;
   flushProtocolNotifications();
-  state_->setString(kV8StateKey, ToCoreString(v8_session_->stateJSON()));
-  String state_to_send = state_->serialize();
-  if (state_to_send == last_sent_state_)
-    state_to_send = String();
-  else
-    last_sent_state_ = state_to_send;
-  client_->SendProtocolResponse(session_id_, call_id, message, state_to_send);
+  if (v8_session_)
+    v8_session_state_json_.Set(ToCoreString(v8_session_->stateJSON()));
+  client_->SendProtocolResponse(session_id_, call_id, message,
+                                session_state_.TakeUpdates());
 }
 
 class InspectorSession::Notification {
@@ -190,17 +231,23 @@ void InspectorSession::sendNotification(
 void InspectorSession::flushProtocolNotifications() {
   if (disposed_)
     return;
-  for (size_t i = 0; i < agents_.size(); i++)
+  for (wtf_size_t i = 0; i < agents_.size(); i++)
     agents_[i]->FlushPendingProtocolNotifications();
-  for (size_t i = 0; i < notification_queue_.size(); ++i) {
+  if (!notification_queue_.size())
+    return;
+  if (v8_session_)
+    v8_session_state_json_.Set(ToCoreString(v8_session_->stateJSON()));
+  for (wtf_size_t i = 0; i < notification_queue_.size(); ++i) {
     client_->SendProtocolNotification(session_id_,
-                                      notification_queue_[i]->Serialize());
+                                      notification_queue_[i]->Serialize(),
+                                      session_state_.TakeUpdates());
   }
   notification_queue_.clear();
 }
 
 void InspectorSession::Trace(blink::Visitor* visitor) {
   visitor->Trace(instrumenting_agents_);
+  visitor->Trace(inspected_frames_);
   visitor->Trace(agents_);
 }
 

@@ -8,6 +8,7 @@
 #include <stddef.h>
 
 #include "base/macros.h"
+#include "base/time/time.h"
 #include "ui/base/page_transition_types.h"
 #include "ui/base/window_open_disposition.h"
 #include "url/gurl.h"
@@ -33,9 +34,15 @@ class LocationBar {
   virtual GURL GetDestinationURL() const = 0;
   virtual WindowOpenDisposition GetWindowOpenDisposition() const = 0;
   virtual ui::PageTransition GetPageTransition() const = 0;
+  virtual base::TimeTicks GetMatchSelectionTimestamp() const = 0;
 
   // Accepts the current string of text entered in the location bar.
   virtual void AcceptInput() = 0;
+
+  // Accepts the current string of text entered in the location bar. If
+  // |match_selection_timestamp| is not null, uses this value to track
+  // latency of page loads starting at user input.
+  virtual void AcceptInput(base::TimeTicks match_selection_timestamp) = 0;
 
   // Focuses the location bar.  Optionally also selects its contents.
   virtual void FocusLocation(bool select_all) = 0;
@@ -52,14 +59,11 @@ class LocationBar {
   // Updates the visibility and toggled state of the save credit card icon.
   virtual void UpdateSaveCreditCardIcon() = 0;
 
-  // Updates the visibility of the find bar image icon.
-  virtual void UpdateFindBarIconVisibility() = 0;
+  // Updates the visibility and toggled state of the local card migration icon.
+  virtual void UpdateLocalCardMigrationIcon() = 0;
 
   // Updates the visibility of the bookmark star.
   virtual void UpdateBookmarkStarVisibility() = 0;
-
-  // Updates the visibility of the zoom icon.
-  virtual void UpdateZoomViewVisibility() = 0;
 
   // Updates the visibility of the location bar. Animates the transition if
   // |animate| is true.
@@ -71,10 +75,6 @@ class LocationBar {
 
   // Reverts the location bar.  The bar's permanent text will be shown.
   virtual void Revert() = 0;
-
-  // Asks the location bar to show a page info dialog for |web_contents|.
-  // Returns true if a dialog was shown, false otherwise.
-  virtual bool ShowPageInfoDialog(content::WebContents* contents) = 0;
 
   virtual const OmniboxView* GetOmniboxView() const = 0;
   virtual OmniboxView* GetOmniboxView() = 0;

@@ -14,51 +14,46 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/optional.h"
 #include "content/browser/frame_host/render_frame_host_impl.h"
+#include "content/browser/keyboard_lock/keyboard_lock_metrics.h"
 #include "content/browser/renderer_host/render_widget_host_impl.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_widget_host.h"
+#include "content/public/common/console_message_level.h"
 #include "content/public/common/content_features.h"
+#include "ui/events/keycodes/dom/dom_code.h"
 #include "ui/events/keycodes/dom/keycode_converter.h"
 
+using blink::mojom::GetKeyboardLayoutMapResult;
 using blink::mojom::KeyboardLockRequestResult;
 
 namespace content {
 
 namespace {
 
-// These values must stay in sync with tools/metrics/histograms.xml.
-// Enum values should never be renumbered or reused as they are stored and can
-// be used for multi-release queries.  Insert any new values before |kCount| and
-// increment the count.
-enum class KeyboardLockMethods {
-  kRequestAllKeys = 0,
-  kRequestSomeKeys = 1,
-  kCancelLock = 2,
-  kCount = 3
-};
-
 void LogKeyboardLockMethodCalled(KeyboardLockMethods method) {
-  UMA_HISTOGRAM_ENUMERATION("Blink.KeyboardLock.MethodCalled", method,
+  UMA_HISTOGRAM_ENUMERATION(kKeyboardLockMethodCalledHistogramName, method,
                             KeyboardLockMethods::kCount);
 }
 
 }  // namespace
 
 KeyboardLockServiceImpl::KeyboardLockServiceImpl(
-    RenderFrameHost* render_frame_host)
-    : render_frame_host_(static_cast<RenderFrameHostImpl*>(render_frame_host)) {
+    RenderFrameHost* render_frame_host,
+    blink::mojom::KeyboardLockServiceRequest request)
+    : FrameServiceBase(render_frame_host, std::move(request)),
+      render_frame_host_(static_cast<RenderFrameHostImpl*>(render_frame_host)) {
   DCHECK(render_frame_host_);
 }
-
-KeyboardLockServiceImpl::~KeyboardLockServiceImpl() = default;
 
 // static
 void KeyboardLockServiceImpl::CreateMojoService(
     RenderFrameHost* render_frame_host,
     blink::mojom::KeyboardLockServiceRequest request) {
-  mojo::MakeStrongBinding(
-      std::make_unique<KeyboardLockServiceImpl>(render_frame_host),
-      std::move(request));
+  DCHECK(render_frame_host);
+
+  // The object is bound to the lifetime of |render_frame_host| and the mojo
+  // connection. See FrameServiceBase for details.
+  new KeyboardLockServiceImpl(render_frame_host, std::move(request));
 }
 
 void KeyboardLockServiceImpl::RequestKeyboardLock(
@@ -86,30 +81,39 @@ void KeyboardLockServiceImpl::RequestKeyboardLock(
 
   // Per base::flat_set usage notes, the proper way to init a flat_set is
   // inserting into a vector and using that to init the flat_set.
-  std::vector<int> native_key_codes;
-  const int invalid_key_code = ui::KeycodeConverter::InvalidNativeKeycode();
+  std::vector<ui::DomCode> dom_codes;
+  bool invalid_key_code_found = false;
   for (const std::string& code : key_codes) {
-    int native_key_code = ui::KeycodeConverter::CodeStringToNativeKeycode(code);
-    if (native_key_code != invalid_key_code)
-      native_key_codes.push_back(native_key_code);
+    ui::DomCode dom_code = ui::KeycodeConverter::CodeStringToDomCode(code);
+    if (dom_code != ui::DomCode::NONE) {
+      dom_codes.push_back(dom_code);
+    } else {
+      invalid_key_code_found = true;
+      render_frame_host_->AddMessageToConsole(
+          ConsoleMessageLevel::CONSOLE_MESSAGE_LEVEL_WARNING,
+          "Invalid DOMString passed into keyboard.lock(): '" + code + "'");
+    }
   }
 
-  // If we are provided with a vector containing only invalid keycodes, then
-  // exit without enabling keyboard lock.  An empty vector is treated as
-  // 'capture all keys' which is not what the caller intended.
-  if (!key_codes.empty() && native_key_codes.empty()) {
+  // If we are provided with a vector containing one or more invalid key codes,
+  // then exit without enabling keyboard lock.  Also cancel any previous
+  // keyboard lock request since the most recent request failed.
+  if (invalid_key_code_found) {
+    render_frame_host_->GetRenderWidgetHost()->CancelKeyboardLock();
     std::move(callback).Run(KeyboardLockRequestResult::kNoValidKeyCodesError);
     return;
   }
 
-  base::Optional<base::flat_set<int>> key_code_set;
-  if (!native_key_codes.empty())
-    key_code_set = std::move(native_key_codes);
+  base::Optional<base::flat_set<ui::DomCode>> dom_code_set;
+  if (!dom_codes.empty())
+    dom_code_set = std::move(dom_codes);
 
-  render_frame_host_->GetRenderWidgetHost()->RequestKeyboardLock(
-      std::move(key_code_set));
-
-  std::move(callback).Run(KeyboardLockRequestResult::kSuccess);
+  if (render_frame_host_->GetRenderWidgetHost()->RequestKeyboardLock(
+          std::move(dom_code_set))) {
+    std::move(callback).Run(KeyboardLockRequestResult::kSuccess);
+  } else {
+    std::move(callback).Run(KeyboardLockRequestResult::kRequestFailedError);
+  }
 }
 
 void KeyboardLockServiceImpl::CancelKeyboardLock() {
@@ -118,5 +122,17 @@ void KeyboardLockServiceImpl::CancelKeyboardLock() {
   if (base::FeatureList::IsEnabled(features::kKeyboardLockAPI))
     render_frame_host_->GetRenderWidgetHost()->CancelKeyboardLock();
 }
+
+void KeyboardLockServiceImpl::GetKeyboardLayoutMap(
+    GetKeyboardLayoutMapCallback callback) {
+  auto response = GetKeyboardLayoutMapResult::New();
+  response->status = blink::mojom::GetKeyboardLayoutMapStatus::kSuccess;
+  response->layout_map =
+      render_frame_host_->GetRenderWidgetHost()->GetKeyboardLayoutMap();
+
+  std::move(callback).Run(std::move(response));
+}
+
+KeyboardLockServiceImpl::~KeyboardLockServiceImpl() = default;
 
 }  // namespace content

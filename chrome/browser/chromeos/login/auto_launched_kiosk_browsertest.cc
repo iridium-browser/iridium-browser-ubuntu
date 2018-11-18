@@ -145,12 +145,13 @@ class PersistentSessionManagerClient : public FakeSessionManagerClient {
       command_line->AppendSwitchASCII(flag.name, flag.value);
   }
 
-  void StartSession(const cryptohome::Identification& cryptohome_id) override {
+  void StartSession(
+      const cryptohome::AccountIdentifier& cryptohome_id) override {
     FakeSessionManagerClient::StartSession(cryptohome_id);
 
     std::string user_id_hash =
         CryptohomeClient::GetStubSanitizedUsername(cryptohome_id);
-    login_args_ = {{"login-user", cryptohome_id.id()},
+    login_args_ = {{"login-user", cryptohome_id.account_id()},
                    {"login-profile", user_id_hash}};
   }
 
@@ -162,7 +163,7 @@ class PersistentSessionManagerClient : public FakeSessionManagerClient {
 
   bool SupportsRestartToApplyUserFlags() const override { return true; }
 
-  void SetFlagsForUser(const cryptohome::Identification& identification,
+  void SetFlagsForUser(const cryptohome::AccountIdentifier& identification,
                        const std::vector<std::string>& flags) override {
     extra_args_.clear();
     FakeSessionManagerClient::SetFlagsForUser(identification, flags);
@@ -282,13 +283,12 @@ class TerminationObserver : public content::NotificationObserver {
 
 }  // namespace
 
-class AutoLaunchedKioskTest : public ExtensionApiTest {
+class AutoLaunchedKioskTest : public extensions::ExtensionApiTest {
  public:
   AutoLaunchedKioskTest()
       : install_attributes_(
-            chromeos::ScopedStubInstallAttributes::CreateCloudManaged(
-                "domain.com",
-                "device_id")),
+            chromeos::StubInstallAttributes::CreateCloudManaged("domain.com",
+                                                                "device_id")),
         fake_session_manager_(new PersistentSessionManagerClient()),
         fake_cws_(new FakeCWS) {
     set_chromeos_user_ = false;
@@ -305,7 +305,7 @@ class AutoLaunchedKioskTest : public ExtensionApiTest {
     ASSERT_TRUE(embedded_test_server()->InitializeAndListen());
     AppLaunchController::SkipSplashWaitForTesting();
 
-    ExtensionApiTest::SetUp();
+    extensions::ExtensionApiTest::SetUp();
   }
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
@@ -314,14 +314,14 @@ class AutoLaunchedKioskTest : public ExtensionApiTest {
     std::vector<std::string> secondary_apps = GetTestSecondaryAppIds();
     for (const auto& secondary_app : secondary_apps)
       fake_cws_->SetUpdateCrx(secondary_app, secondary_app + ".crx", "1.0.0");
-    ExtensionApiTest::SetUpCommandLine(command_line);
+    extensions::ExtensionApiTest::SetUpCommandLine(command_line);
   }
 
   bool SetUpUserDataDirectory() override {
     InitDevicePolicy();
 
     base::FilePath user_data_path;
-    if (!PathService::Get(chrome::DIR_USER_DATA, &user_data_path)) {
+    if (!base::PathService::Get(chrome::DIR_USER_DATA, &user_data_path)) {
       ADD_FAILURE() << "Unable to get used data dir";
       return false;
     }
@@ -352,7 +352,7 @@ class AutoLaunchedKioskTest : public ExtensionApiTest {
     DBusThreadManager::GetSetterForTesting()->SetSessionManagerClient(
         std::move(fake_session_manager_));
 
-    ExtensionApiTest::SetUpInProcessBrowserTestFixture();
+    extensions::ExtensionApiTest::SetUpInProcessBrowserTestFixture();
   }
 
   void PreRunTestOnMainThread() override {
@@ -365,13 +365,13 @@ class AutoLaunchedKioskTest : public ExtensionApiTest {
 
     embedded_test_server()->StartAcceptingConnections();
 
-    ExtensionApiTest::SetUpOnMainThread();
+    extensions::ExtensionApiTest::SetUpOnMainThread();
   }
 
   void TearDownOnMainThread() override {
     termination_observer_.reset();
 
-    ExtensionApiTest::TearDownOnMainThread();
+    extensions::ExtensionApiTest::TearDownOnMainThread();
   }
 
   void InitDevicePolicy() {
@@ -419,6 +419,7 @@ class AutoLaunchedKioskTest : public ExtensionApiTest {
             .Set("PublicAccounts",
                  extensions::ListBuilder().Append(GetTestAppUserId()).Build())
             .Build();
+    local_state->SetKey(prefs::kOobeComplete, base::Value(true));
 
     JSONFileValueSerializer serializer(
         user_data_path.Append(chrome::kLocalStateFilename));
@@ -454,7 +455,7 @@ class AutoLaunchedKioskTest : public ExtensionApiTest {
 
     // Wait until the app terminates if it is still running.
     if (!app_window_registry->GetAppWindowsForApp(app_id).empty())
-      base::RunLoop().Run();
+      RunUntilBrowserProcessQuits();
     return true;
   }
 

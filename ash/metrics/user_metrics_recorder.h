@@ -16,6 +16,11 @@
 
 namespace ash {
 
+namespace mojom {
+enum class DictationToggleSource;
+}  // namespace mojom
+
+class DemoSessionMetricsRecorder;
 class DesktopTaskSwitchMetricRecorder;
 class PointerMetricsRecorder;
 
@@ -40,8 +45,14 @@ class ASH_EXPORT UserMetricsRecorder {
   static void RecordUserClickOnShelfButton(
       LoginMetricsRecorder::ShelfButtonClickTarget target);
 
+  // Record the method used to activate dictation.
+  static void RecordUserToggleDictation(mojom::DictationToggleSource source);
+
   // Records an Ash owned user action.
   void RecordUserMetricsAction(UserMetricsAction action);
+
+  // Starts recording demo session metrics. Used in Demo Mode.
+  void StartDemoSessionMetricsRecording();
 
   TaskSwitchMetricsRecorder& task_switch_metrics_recorder() {
     return task_switch_metrics_recorder_;
@@ -93,6 +104,9 @@ class ASH_EXPORT UserMetricsRecorder {
 
   // Metric recorder to track login authentication activity.
   std::unique_ptr<LoginMetricsRecorder> login_metrics_recorder_;
+
+  // Metric recorder to track app use in demo sessions.
+  std::unique_ptr<DemoSessionMetricsRecorder> demo_session_metrics_recorder_;
 
   DISALLOW_COPY_AND_ASSIGN(UserMetricsRecorder);
 };

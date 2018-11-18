@@ -10,24 +10,25 @@
 #include "base/command_line.h"
 #include "base/metrics/histogram_macros.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/signin/chrome_signin_client_factory.h"
+#include "chrome/browser/signin/chrome_device_id_helper.h"
 #include "chrome/browser/signin/gaia_cookie_manager_service_factory.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chromeos/chromeos_switches.h"
-#include "components/signin/core/account_id/account_id.h"
+#include "components/account_id/account_id.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_client.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/user_manager/user_manager.h"
 #include "google_apis/gaia/gaia_auth_util.h"
 #include "google_apis/gaia/gaia_urls.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 
 namespace chromeos {
 
 OAuth2LoginManager::OAuth2LoginManager(Profile* user_profile)
     : user_profile_(user_profile),
-      restore_strategy_(RESTORE_FROM_COOKIE_JAR),
+      restore_strategy_(RESTORE_FROM_SAVED_OAUTH2_REFRESH_TOKEN),
       state_(SESSION_RESTORE_NOT_STARTED) {
   GetTokenService()->AddObserver(this);
 
@@ -51,12 +52,12 @@ void OAuth2LoginManager::RemoveObserver(
 }
 
 void OAuth2LoginManager::RestoreSession(
-    net::URLRequestContextGetter* auth_request_context,
+    scoped_refptr<network::SharedURLLoaderFactory> auth_url_loader_factory,
     SessionRestoreStrategy restore_strategy,
     const std::string& oauth2_refresh_token,
     const std::string& oauth2_access_token) {
   DCHECK(user_profile_);
-  auth_request_context_ = auth_request_context;
+  auth_url_loader_factory_ = auth_url_loader_factory;
   restore_strategy_ = restore_strategy;
   refresh_token_ = oauth2_refresh_token;
   oauthlogin_access_token_ = oauth2_access_token;
@@ -65,11 +66,10 @@ void OAuth2LoginManager::RestoreSession(
 }
 
 void OAuth2LoginManager::ContinueSessionRestore() {
+  DCHECK_NE(DEPRECATED_RESTORE_FROM_COOKIE_JAR, restore_strategy_)
+      << "Exchanging cookies for OAuth 2.0 tokens is no longer supported";
+
   SetSessionRestoreState(OAuth2LoginManager::SESSION_RESTORE_PREPARING);
-  if (restore_strategy_ == RESTORE_FROM_COOKIE_JAR) {
-    FetchOAuth2Tokens();
-    return;
-  }
 
   // Save passed OAuth2 refresh token.
   if (restore_strategy_ == RESTORE_FROM_PASSED_OAUTH2_REFRESH_TOKEN) {
@@ -79,7 +79,7 @@ void OAuth2LoginManager::ContinueSessionRestore() {
     return;
   }
 
-  DCHECK(restore_strategy_ == RESTORE_FROM_SAVED_OAUTH2_REFRESH_TOKEN);
+  DCHECK_EQ(RESTORE_FROM_SAVED_OAUTH2_REFRESH_TOKEN, restore_strategy_);
   RestoreSessionFromSavedTokens();
 }
 
@@ -144,6 +144,10 @@ void OAuth2LoginManager::OnRefreshTokenAvailable(
   }
   // Only restore session cookies for the primary account in the profile.
   if (GetPrimaryAccountId() == user_email) {
+    // The refresh token has changed, so stop any ongoing actions that were
+    // based on the old refresh token.
+    Stop();
+
     // Token is loaded. Undo the flagging before token loading.
     user_manager::UserManager::Get()->SaveUserOAuthStatus(
         AccountId::FromUserEmail(user_email),
@@ -185,27 +189,6 @@ void OAuth2LoginManager::UpdateCredentials(const std::string& account_id) {
 void OAuth2LoginManager::FireRefreshTokensLoaded() {
   // TODO(570218): Figure out the right way to plumb this.
   GetTokenService()->LoadCredentials(std::string());
-}
-
-void OAuth2LoginManager::FetchOAuth2Tokens() {
-  DCHECK(auth_request_context_.get());
-  if (restore_strategy_ != RESTORE_FROM_COOKIE_JAR) {
-    NOTREACHED();
-    SetSessionRestoreState(SESSION_RESTORE_FAILED);
-    return;
-  }
-
-  // If we have authenticated cookie jar, get OAuth1 token first, then fetch
-  // SID/LSID cookies through OAuthLogin call.
-  SigninClient* signin_client =
-      ChromeSigninClientFactory::GetForProfile(user_profile_);
-  std::string signin_scoped_device_id =
-      signin_client->GetSigninScopedDeviceId();
-
-  oauth2_token_fetcher_.reset(
-      new OAuth2TokenFetcher(this, auth_request_context_.get()));
-  oauth2_token_fetcher_->StartExchangeFromCookies(std::string(),
-                                                  signin_scoped_device_id);
 }
 
 void OAuth2LoginManager::OnOAuth2TokensAvailable(

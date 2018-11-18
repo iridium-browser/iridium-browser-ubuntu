@@ -22,7 +22,7 @@ class ServiceWorkerVersion;
 // non-S13nServiceWorker). It wraps either a
 // ServiceWorkerURLRequestJob or a callback for URLLoader and forwards to the
 // underlying implementation.
-class ServiceWorkerURLJobWrapper {
+class CONTENT_EXPORT ServiceWorkerURLJobWrapper {
  public:
   // A helper used by the ServiceWorkerNavigationLoader or
   // ServiceWorkerURLRequestJob.
@@ -51,6 +51,11 @@ class ServiceWorkerURLJobWrapper {
     // Called to signal that loading failed, and that the resource being loaded
     // was a main resource.
     virtual void MainResourceLoadFailed() {}
+
+    virtual void ReportDestination(
+        ServiceWorkerMetrics::MainResourceRequestDestination destination) {}
+
+    virtual void WillDispatchFetchEventForMainResource() {}
   };
 
   // Non-S13nServiceWorker.
@@ -72,13 +77,18 @@ class ServiceWorkerURLJobWrapper {
   // instead should fallback to the network.
   bool ShouldFallbackToNetwork();
 
+  // Returns true if this job should be forwarded to a service worker.
+  bool ShouldForwardToServiceWorker();
+
   // Tells the job to abort with a start error. Currently this is only called
   // because the controller was lost. This function could be made more generic
   // if needed later.
   void FailDueToLostController();
 
-  // Returns true if the underlying job has been canceled or destroyed.
-  bool WasCanceled() const;
+  // Returns true if the underlying job has not been destroyed. This only useful
+  // in the non-S13nServiceWorker case, since this wrapper owns the job in the
+  // S13nServiceWorker case.
+  bool IsAlive() const;
 
  private:
   enum class JobType { kURLRequest, kURLLoader };

@@ -13,21 +13,6 @@ namespace switches {
 // have an effect. 0 disables MSAA.
 const char kAcceleratedCanvas2dMSAASampleCount[] = "canvas-msaa-sample-count";
 
-// Enables a new tuning of the WebRTC Acoustic Echo Canceler (AEC). The new
-// tuning aims at resolving two issues with the AEC:
-// https://bugs.chromium.org/p/webrtc/issues/detail?id=5777
-// https://bugs.chromium.org/p/webrtc/issues/detail?id=5778
-// TODO(hlundin): Remove this switch when experimentation is over;
-// crbug.com/603821.
-const char kAecRefinedAdaptiveFilter[] = "aec-refined-adaptive-filter";
-
-// Override the default minimum starting volume of the Automatic Gain Control
-// algorithm in WebRTC used with audio tracks from getUserMedia.
-// The valid range is 12-255. Values outside that range will be clamped
-// to the lowest or highest valid value inside WebRTC.
-// TODO(tommi): Remove this switch when crbug.com/555577 is fixed.
-const char kAgcStartupMinVolume[] = "agc-startup-min-volume";
-
 // By default, file:// URIs cannot read other file:// URIs. This is an
 // override for developers who need the old behavior for testing.
 const char kAllowFileAccessFromFiles[]      = "allow-file-access-from-files";
@@ -60,6 +45,11 @@ const char kBrowserStartupDialog[]          = "browser-startup-dialog";
 // Path to the exe to run for the renderer and plugin subprocesses.
 const char kBrowserSubprocessPath[]         = "browser-subprocess-path";
 
+// Tells whether the code is running browser tests (this changes the startup URL
+// used by the content shell and also disables features that can make tests
+// flaky [like monitoring of memory pressure]).
+const char kBrowserTest[] = "browser-test";
+
 // Sets the tile size used by composited layers.
 const char kDefaultTileWidth[]              = "default-tile-width";
 const char kDefaultTileHeight[]             = "default-tile-height";
@@ -78,11 +68,6 @@ const char kDisable3DAPIs[]                 = "disable-3d-apis";
 
 // Disable gpu-accelerated 2d canvas.
 const char kDisableAccelerated2dCanvas[]    = "disable-accelerated-2d-canvas";
-
-// Disable hardware acceleration of mjpeg decode for captured frame, where
-// available.
-const char kDisableAcceleratedMjpegDecode[] =
-    "disable-accelerated-mjpeg-decode";
 
 // Disables hardware acceleration of video decode, where available.
 const char kDisableAcceleratedVideoDecode[] =
@@ -169,9 +154,6 @@ const char kDisableGpuProcessCrashLimit[] = "disable-gpu-process-crash-limit";
 // during fast scrolling especially on slower devices.
 const char kDisableLowResTiling[] = "disable-low-res-tiling";
 
-// Disable the GPU process sandbox.
-const char kDisableGpuSandbox[]             = "disable-gpu-sandbox";
-
 // Disable the thread that crashes the GPU process if it stops responding to
 // messages.
 const char kDisableGpuWatchdog[] = "disable-gpu-watchdog";
@@ -205,9 +187,6 @@ const char kDisableLogging[]                = "disable-logging";
 
 // Disables using CODECAPI_AVLowLatencyMode when creating DXVA decoders.
 const char kDisableLowLatencyDxva[]         = "disable-low-latency-dxva";
-
-// Disables usage of the namespace sandbox.
-const char kDisableNamespaceSandbox[]       = "disable-namespace-sandbox";
 
 // Disables clearing the rendering output of a renderer when it didn't commit
 // new output for a while after a top-frame navigation.
@@ -339,15 +318,15 @@ const char kEnableLCDText[]                 = "enable-lcd-text";
 const char kEnablePreferCompositingToLCDText[] =
     "enable-prefer-compositing-to-lcd-text";
 
-// Enable work-in-progress persistent storage for the Background Fetch API.
-const char kEnableBackgroundFetchPersistence[] =
-    "enable-background-fetch-persistence";
-
 // Enable one or more Blink runtime-enabled features.
 // Use names from runtime_enabled_features.json5, separated by commas.
 // Applied before kDisableBlinkFeatures, and after other flags that change these
 // features.
 const char kEnableBlinkFeatures[]           = "enable-blink-features";
+
+// A shorthand for adding both "--enable-blink-features=BlinkGenPropertyTrees"
+// and "--enable-layer-lists".
+const char kEnableBlinkGenPropertyTrees[] = "enable-blink-gen-property-trees";
 
 // Enables Web Platform features that are in development.
 const char kEnableExperimentalWebPlatformFeatures[] =
@@ -404,16 +383,13 @@ const char kEnableRGBA4444Textures[] = "enable-rgba-4444-textures";
 // Set options to cache V8 data. (off, preparse data, or code)
 const char kV8CacheOptions[] = "v8-cache-options";
 
-// Cause the OS X sandbox write to syslog every time an access to a resource
-// is denied by the sandbox.
-const char kEnableSandboxLogging[]          = "enable-sandbox-logging";
+// If true the ServiceProcessLauncher is used to launch services. This allows
+// for service binaries to be loaded rather than using the utility process. This
+// is only useful for tests.
+const char kEnableServiceBinaryLauncher[] = "enable-service-binary-launcher";
 
 // Enables the Skia benchmarking extension
 const char kEnableSkiaBenchmarking[]        = "enable-skia-benchmarking";
-
-// Enables slimming paint phase 1.75:
-// https://www.chromium.org/blink/slimming-paint
-const char kEnableSlimmingPaintV175[] = "enable-slimming-paint-v175";
 
 // Enables slimming paint phase 2: https://www.chromium.org/blink/slimming-paint
 const char kEnableSlimmingPaintV2[]         = "enable-slimming-paint-v2";
@@ -465,6 +441,9 @@ const char kEnableVulkan[] = "enable-vulkan";
 // https://w3c.github.io/webauthn
 const char kEnableWebAuthTestingAPI[] = "enable-web-authentication-testing-api";
 
+// Enable WebGL2 Compute context.
+const char kEnableWebGL2ComputeContext[] = "enable-webgl2-compute-context";
+
 // Enables WebGL extensions not yet approved by the community.
 const char kEnableWebGLDraftExtensions[] = "enable-webgl-draft-extensions";
 
@@ -487,10 +466,25 @@ const char kExplicitlyAllowedPorts[]        = "explicitly-allowed-ports";
 // shared memory segment as a string.
 const char kFieldTrialHandle[] = "field-trial-handle";
 
+// Define an alias root directory which is replaced with the replacement string
+// in file URLs. The format is "/alias=/replacement", which would turn
+// file:///alias/some/path.html into file:///replacement/some/path.html.
+const char kFileUrlPathAlias[] = "file-url-path-alias";
+
 // Always use the Skia GPU backend for drawing layer tiles. Only valid with GPU
 // accelerated compositing + impl-side painting. Overrides the
 // kEnableGpuRasterization flag.
-const char kForceGpuRasterization[]        = "force-gpu-rasterization";
+const char kForceGpuRasterization[] = "force-gpu-rasterization";
+
+// Disables OOP rasterization.  Takes precedence over the enable flag.
+const char kDisableOopRasterization[] = "disable-oop-rasterization";
+
+// Turns on out of process raster for the renderer whenever gpu raster
+// would have been used.  Enables the chromium_raster_transport extension.
+const char kEnableOopRasterization[] = "enable-oop-rasterization";
+
+// Turns on skia deferred display list for out of process raster.
+const char kEnableOopRasterizationDDL[] = "enable-oop-rasterization-ddl";
 
 // The number of multisample antialiasing samples for GPU rasterization.
 // Requires MSAA support on GPU to have an effect. 0 disables MSAA.
@@ -578,15 +572,6 @@ const char kLogFile[] = "log-file";
 const char kMainFrameResizesAreOrientationChanges[] =
     "main-frame-resizes-are-orientation-changes";
 
-// Specifies the maximum cache size per an origin for the ApplicationCache.
-// The default value is 5MB.
-const char kMaxAppCacheOriginCacheSizeMb[] =
-    "max-appcache-origin-cache-size-mb";
-
-// Specifies the maximum disk cache size for the ApplicationCache. The default
-// value is 250MB.
-const char kMaxAppCacheDiskCacheSizeMb[] = "max-appcache-disk-cache-size-mb";
-
 // Sets the maximium decoded image size limitation.
 const char kMaxDecodedImageSizeMb[] = "max-decoded-image-size-mb";
 
@@ -607,14 +592,21 @@ const char kMHTMLSkipNostoreAll[]           = "skip-nostore-all";
 // Use a Mojo-based LocalStorage implementation.
 const char kMojoLocalStorage[]              = "mojo-local-storage";
 
-// Disables the sandbox for all process types that are normally sandboxed.
-const char kNoSandbox[]                     = "no-sandbox";
+// Sets the timeout seconds of the network-quiet timers in IdlenessDetector.
+// Used by embedders who want to change the timeout time in order to run web
+// contents on various embedded devices and changeable network bandwidths in
+// different regions. For example, it's useful when using FirstMeaningfulPaint
+// signal to dismiss a splash screen.
+const char kNetworkQuietTimeout[] = "network-quiet-timeout";
 
 // Disables the use of a zygote process for forking child processes. Instead,
 // child processes will be forked and exec'd directly. Note that --no-sandbox
 // should also be used together with this flag because the sandbox needs the
 // zygote to work.
 const char kNoZygote[] = "no-zygote";
+
+// Disables V8 mitigations for executing untrusted code.
+const char kNoV8UntrustedCodeMitigations[] = "no-v8-untrusted-code-mitigations";
 
 // Number of worker threads used to rasterize content.
 const char kNumRasterThreads[]              = "num-raster-threads";
@@ -736,8 +728,8 @@ const char kRendererProcess[]               = "renderer";
 const char kRendererProcessLimit[]          = "renderer-process-limit";
 
 // Causes the renderer process to display a dialog on launch. Passing this flag
-// also adds kNoSandbox on Windows non-official builds, since that's needed to
-// show a dialog.
+// also adds service_manager::kNoSandbox on Windows non-official builds, since
+// that's needed to show a dialog.
 const char kRendererStartupDialog[]         = "renderer-startup-dialog";
 
 // Reduce the default `referer` header's granularity.
@@ -856,13 +848,6 @@ const char kValidateInputEventStream[] = "validate-input-event-stream";
 // kWaitForDebugger flag passed on or not.
 const char kWaitForDebuggerChildren[]       = "wait-for-debugger-children";
 
-// The prefix used when starting the zygote process. (i.e. 'gdb --args')
-const char kZygoteCmdPrefix[]               = "zygote-cmd-prefix";
-
-// Causes the process to run as a renderer zygote.
-const char kZygoteProcess[]                 = "zygote";
-
-#if BUILDFLAG(ENABLE_WEBRTC)
 // Disables encryption of RTP Media for WebRTC. When Chrome embeds Content, it
 // ignores this switch on its stable and beta channels.
 const char kDisableWebRtcEncryption[]      = "disable-webrtc-encryption";
@@ -909,7 +894,6 @@ const char kWebRtcMaxCpuConsumptionPercentage[] =
 // interval. Please see SetupStunProbeTrial in
 // chrome_browser_field_trials_desktop.cc for more detail.
 const char kWebRtcStunProbeTrialParameter[] = "webrtc-stun-probe-trial";
-#endif
 
 // Enable capture and local storage of WebRTC event logs without visiting
 // chrome://webrtc-internals. This is useful for automated testing. It accepts
@@ -955,6 +939,10 @@ const char kRendererWaitForJavaDebugger[] = "renderer-wait-for-java-debugger";
 // Enables overscrolling for the OSK on Android.
 const char kEnableOSKOverscroll[]               = "enable-osk-overscroll";
 #endif
+
+// Enable the experimental Accessibility Object Model APIs in development.
+const char kEnableAccessibilityObjectModel[] =
+    "enable-accessibility-object-model";
 
 // Enable the aggressive flushing of DOM Storage to minimize data loss.
 const char kEnableAggressiveDOMStorageFlushing[] =
@@ -1050,19 +1038,6 @@ const char kIpcDumpDirectory[] = "ipc-dump-directory";
 // Specifies the testcase used by the IPC fuzzer.
 const char kIpcFuzzerTestcase[] = "ipc-fuzzer-testcase";
 #endif
-
-#if defined(OS_MACOSX)
-// Enable the V2 sandbox during the helper executable initialization.
-const char kEnableV2Sandbox[] = "v2-sandbox";
-
-// The command line paramter indicating that the v2 sandbox is enabled. This
-// must be different than the "v2-sandbox" flag to avoid endless re-executing.
-// The flag tells the sandbox initialization code inside Chrome that the sandbox
-// should already be enabled.
-// TODO(kerrnel): Remove this once the V2 sandbox migration is complete, as
-// processes will be assumed to run under the V2 sandbox.
-const char kV2SandboxedEnabled[] = "v2-sandbox-enabled";
-#endif  // defined(OS_MACOSX)
 
 // Don't dump stuff here, follow the same order as the header.
 

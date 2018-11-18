@@ -37,10 +37,12 @@ namespace content {
 
 class CONTENT_EXPORT GpuDataManagerImplPrivate {
  public:
-  static GpuDataManagerImplPrivate* Create(GpuDataManagerImpl* owner);
+  explicit GpuDataManagerImplPrivate(GpuDataManagerImpl* owner);
+  virtual ~GpuDataManagerImplPrivate();
 
   void BlacklistWebGLForTesting();
   gpu::GPUInfo GetGPUInfo() const;
+  gpu::GPUInfo GetGPUInfoForHardwareGpu() const;
   bool GpuAccessAllowed(std::string* reason) const;
   bool GpuProcessStartAllowed() const;
   void RequestCompleteGpuInfoIfNeeded();
@@ -56,20 +58,25 @@ class CONTENT_EXPORT GpuDataManagerImplPrivate {
   void UnblockDomainFrom3DAPIs(const GURL& url);
   void DisableHardwareAcceleration();
   bool HardwareAccelerationEnabled() const;
-  void BlockSwiftShader();
   bool SwiftShaderAllowed() const;
 
-  void UpdateGpuInfo(const gpu::GPUInfo& gpu_info);
-  void UpdateGpuFeatureInfo(const gpu::GpuFeatureInfo& gpu_feature_info);
+  void UpdateGpuInfo(
+      const gpu::GPUInfo& gpu_info,
+      const base::Optional<gpu::GPUInfo>& optional_gpu_info_for_hardware_gpu);
+#if defined(OS_WIN)
+  void UpdateDxDiagNode(const gpu::DxDiagNode& dx_diagnostics);
+  void UpdateDx12VulkanInfo(
+      const gpu::Dx12VulkanVersionInfo& dx12_vulkan_version_info);
+#endif
+  void UpdateGpuFeatureInfo(const gpu::GpuFeatureInfo& gpu_feature_info,
+                            const base::Optional<gpu::GpuFeatureInfo>&
+                                gpu_feature_info_for_hardware_gpu);
   gpu::GpuFeatureInfo GetGpuFeatureInfo() const;
+  gpu::GpuFeatureInfo GetGpuFeatureInfoForHardwareGpu() const;
 
   void AppendGpuCommandLine(base::CommandLine* command_line) const;
 
   void UpdateGpuPreferences(gpu::GpuPreferences* gpu_preferences) const;
-
-  void GetBlacklistReasons(base::ListValue* reasons) const;
-
-  std::vector<std::string> GetDriverBugWorkarounds() const;
 
   void AddLogMessage(int level,
                      const std::string& header,
@@ -81,11 +88,7 @@ class CONTENT_EXPORT GpuDataManagerImplPrivate {
 
   void HandleGpuSwitch();
 
-  void GetDisabledExtensions(std::string* disabled_extensions) const;
-  void GetDisabledWebGLExtensions(std::string* disabled_webgl_extensions) const;
-
-  void BlockDomainFrom3DAPIs(
-      const GURL& url, GpuDataManagerImpl::DomainGuilt guilt);
+  void BlockDomainFrom3DAPIs(const GURL& url, gpu::DomainGuilt guilt);
   bool Are3DAPIsBlocked(const GURL& top_origin_url,
                         int render_process_id,
                         int render_frame_id,
@@ -100,12 +103,15 @@ class CONTENT_EXPORT GpuDataManagerImplPrivate {
 
   bool UpdateActiveGpu(uint32_t vendor_id, uint32_t device_id);
 
-  void OnGpuProcessInitFailure();
+  gpu::GpuMode GetGpuMode() const;
+  void FallBackToNextGpuMode();
 
   // Notify all observers whenever there is a GPU info update.
   void NotifyGpuInfoUpdate();
 
-  virtual ~GpuDataManagerImplPrivate();
+  bool IsGpuProcessUsingHardwareGpu() const;
+
+  void SetApplicationVisible(bool is_visible);
 
  private:
   friend class GpuDataManagerImplPrivateTest;
@@ -123,14 +129,19 @@ class CONTENT_EXPORT GpuDataManagerImplPrivate {
   FRIEND_TEST_ALL_PREFIXES(GpuDataManagerImplPrivateTest,
                            UnblockThisDomainFrom3DAPIs);
 
-  struct DomainBlockEntry {
-    GpuDataManagerImpl::DomainGuilt last_guilt;
+  // Indicates the reason that access to a given client API (like
+  // WebGL or Pepper 3D) was blocked or not. This state is distinct
+  // from blacklisting of an entire feature.
+  enum class DomainBlockStatus {
+    kBlocked,
+    kAllDomainsBlocked,
+    kNotBlocked,
   };
 
-  typedef std::map<std::string, DomainBlockEntry> DomainBlockMap;
+  using DomainGuiltMap = std::map<std::string, gpu::DomainGuilt>;
 
-  typedef base::ObserverListThreadSafe<GpuDataManagerObserver>
-      GpuDataManagerObserverList;
+  using GpuDataManagerObserverList =
+      base::ObserverListThreadSafe<GpuDataManagerObserver>;
 
   struct LogMessage {
     int level;
@@ -145,8 +156,6 @@ class CONTENT_EXPORT GpuDataManagerImplPrivate {
           message(_message) { }
   };
 
-  explicit GpuDataManagerImplPrivate(GpuDataManagerImpl* owner);
-
   // Called when GPU access (hardware acceleration and swiftshader) becomes
   // blocked.
   void OnGpuBlocked();
@@ -157,24 +166,28 @@ class CONTENT_EXPORT GpuDataManagerImplPrivate {
   // Implementation functions for blocking of 3D graphics APIs, used
   // for unit testing.
   void BlockDomainFrom3DAPIsAtTime(const GURL& url,
-                                   GpuDataManagerImpl::DomainGuilt guilt,
+                                   gpu::DomainGuilt guilt,
                                    base::Time at_time);
-  GpuDataManagerImpl::DomainBlockStatus Are3DAPIsBlockedAtTime(
-      const GURL& url, base::Time at_time) const;
+  DomainBlockStatus Are3DAPIsBlockedAtTime(const GURL& url,
+                                           base::Time at_time) const;
   int64_t GetBlockAllDomainsDurationInMs() const;
 
   // This is platform specific. At the moment:
-  //   1) on MacOSX, if GL strings are missing, this returns true;
-  //   2) on Windows, if DxDiagnostics are missing, this returns true;
-  //   3) all other platforms, this returns false.
+  //   1) on Windows, if DxDiagnostics are missing, this returns true;
+  //   2) all other platforms, this returns false.
   bool NeedsCompleteGpuInfoCollection() const;
 
-  bool complete_gpu_info_already_requested_;
+  GpuDataManagerImpl* const owner_;
 
-  // Eventually |blacklisted_features_| should be folded in to this.
+  bool complete_gpu_info_already_requested_ = false;
+
   gpu::GpuFeatureInfo gpu_feature_info_;
-
   gpu::GPUInfo gpu_info_;
+
+  // What we would have gotten if we haven't fallen back to SwiftShader or
+  // pure software (in the viz case).
+  gpu::GpuFeatureInfo gpu_feature_info_for_hardware_gpu_;
+  gpu::GPUInfo gpu_info_for_hardware_gpu_;
 
   const scoped_refptr<GpuDataManagerObserverList> observer_list_;
 
@@ -183,23 +196,23 @@ class CONTENT_EXPORT GpuDataManagerImplPrivate {
 
   // Current card force-disabled due to GPU crashes, or disabled through
   // the --disable-gpu commandline switch.
-  bool card_disabled_;
+  bool card_disabled_ = false;
 
   // SwiftShader force-blocked due to GPU crashes using SwiftShader.
-  bool swiftshader_blocked_;
+  bool swiftshader_blocked_ = false;
 
   // We disable histogram stuff in testing, especially in unit tests because
   // they cause random failures.
-  bool update_histograms_;
+  bool update_histograms_ = true;
 
-  DomainBlockMap blocked_domains_;
+  DomainGuiltMap blocked_domains_;
   mutable std::list<base::Time> timestamps_of_gpu_resets_;
-  bool domain_blocking_enabled_;
+  bool domain_blocking_enabled_ = true;
 
-  GpuDataManagerImpl* owner_;
+  bool application_is_visible_ = true;
 
   // True if --single-process or --in-process-gpu is passed in.
-  bool in_process_gpu_;
+  bool in_process_gpu_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(GpuDataManagerImplPrivate);
 };

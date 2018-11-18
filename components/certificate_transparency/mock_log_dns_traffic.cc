@@ -9,11 +9,13 @@
 #include <vector>
 
 #include "base/big_endian.h"
+#include "base/containers/span.h"
 #include "base/numerics/safe_conversions.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/sys_byteorder.h"
 #include "base/test/test_timeouts.h"
 #include "net/dns/dns_client.h"
+#include "net/dns/dns_config.h"
 #include "net/dns/dns_protocol.h"
 #include "net/dns/dns_query.h"
 #include "net/dns/dns_util.h"
@@ -32,10 +34,6 @@ const net::MockRead kNoMoreData(net::SYNCHRONOUS, net::ERR_UNEXPECTED, 2);
 // Necessary to expose SetDnsConfig for testing.
 class DnsChangeNotifier : public net::NetworkChangeNotifier {
  public:
-  static void SetInitialDnsConfig(const net::DnsConfig& config) {
-    net::NetworkChangeNotifier::SetInitialDnsConfig(config);
-  }
-
   static void SetDnsConfig(const net::DnsConfig& config) {
     net::NetworkChangeNotifier::SetDnsConfig(config);
   }
@@ -158,7 +156,7 @@ class MockLogDnsTraffic::MockSocketData {
                                       expected_read_payload_.size(),
                                       1),
                         kNoMoreData},
-        socket_data_(expected_reads_, 2, &expected_write_, 1) {}
+        socket_data_(expected_reads_, base::make_span(&expected_write_, 1)) {}
 
   // A socket that expects one write and a read error.
   MockSocketData(const std::vector<char>& write, net::Error error)
@@ -168,7 +166,7 @@ class MockLogDnsTraffic::MockSocketData {
                         expected_write_payload_.size(),
                         0),
         expected_reads_{net::MockRead(net::ASYNC, error, 1), kNoMoreData},
-        socket_data_(expected_reads_, 2, &expected_write_, 1) {}
+        socket_data_(expected_reads_, base::make_span(&expected_write_, 1)) {}
 
   // A socket that expects one write and no response.
   explicit MockSocketData(const std::vector<char>& write)
@@ -179,7 +177,7 @@ class MockLogDnsTraffic::MockSocketData {
                         0),
         expected_reads_{net::MockRead(net::SYNCHRONOUS, net::ERR_IO_PENDING, 1),
                         kNoMoreData},
-        socket_data_(expected_reads_, 2, &expected_write_, 1) {}
+        socket_data_(expected_reads_, base::make_span(&expected_write_, 1)) {}
 
   ~MockSocketData() {}
 
@@ -311,7 +309,7 @@ void MockLogDnsTraffic::InitializeDnsConfig() {
   // IDs.
   dns_config.randomize_ports = false;
 
-  DnsChangeNotifier::SetInitialDnsConfig(dns_config);
+  DnsChangeNotifier::SetDnsConfig(dns_config);
 }
 
 void MockLogDnsTraffic::SetDnsConfig(const net::DnsConfig& config) {

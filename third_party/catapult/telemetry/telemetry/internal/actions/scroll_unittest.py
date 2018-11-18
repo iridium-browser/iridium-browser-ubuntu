@@ -112,9 +112,10 @@ class ScrollActionTest(tab_test_case.TabTestCase):
 
   def testScrollDistanceSlowWheel(self):
     self._RunScrollDistanceTest(
-        1000, 300, page_action.GESTURE_SOURCE_MOUSE, 100)
+        1000, 300, page_action.GESTURE_SOURCE_MOUSE, 125)
 
   @decorators.Disabled('chromeos', 'linux')  # crbug.com/805523
+  @decorators.Disabled('win-reference')  # crbug.com/805523
   def testWheelScrollDistanceWhileZoomed(self):
     # TODO(bokan): This API was added recently so only run the test once it's
     # available. Remove this check once it rolls into stable builds.

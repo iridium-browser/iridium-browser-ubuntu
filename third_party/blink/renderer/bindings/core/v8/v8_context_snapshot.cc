@@ -17,6 +17,7 @@
 #include "third_party/blink/renderer/platform/bindings/dom_wrapper_world.h"
 #include "third_party/blink/renderer/platform/bindings/origin_trial_features.h"
 #include "third_party/blink/renderer/platform/bindings/v8_object_constructor.h"
+#include "third_party/blink/renderer/platform/bindings/v8_per_context_data.h"
 #include "third_party/blink/renderer/platform/bindings/v8_per_isolate_data.h"
 #include "third_party/blink/renderer/platform/bindings/v8_private_property.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
@@ -83,8 +84,7 @@ SnapshotInterface g_snapshot_interfaces[] = {
     {&V8Document::wrapperTypeInfo,
      V8Document::InstallRuntimeEnabledFeaturesOnTemplate},
 };
-constexpr size_t kSnapshotInterfaceSize =
-    WTF_ARRAY_LENGTH(g_snapshot_interfaces);
+constexpr size_t kSnapshotInterfaceSize = base::size(g_snapshot_interfaces);
 
 enum class InternalFieldType : uint8_t {
   kNone,
@@ -114,7 +114,12 @@ const WrapperTypeInfo* FieldTypeToWrapperTypeInfo(InternalFieldType type) {
 
 struct DataForDeserializer {
   STACK_ALLOCATED();
+ public:
+  DataForDeserializer(Document* document) : document(document) {}
+
   Member<Document> document;
+  // Figures if we failed the deserialization.
+  bool did_fail = false;
 };
 
 }  // namespace
@@ -130,13 +135,22 @@ v8::Local<v8::Context> V8ContextSnapshot::CreateContextFromSnapshot(
   }
 
   const int index = GetSnapshotIndexForWorld(world);
-  DataForDeserializer data{document};
+  DataForDeserializer data(document);
   v8::DeserializeInternalFieldsCallback callback =
       v8::DeserializeInternalFieldsCallback(&DeserializeInternalField, &data);
   v8::Local<v8::Context> context =
       v8::Context::FromSnapshot(isolate, index, callback,
                                 extension_configuration, global_proxy)
           .ToLocalChecked();
+
+  // In case we fail to deserialize v8::Context from snapshot,
+  // disable the snapshot feature and returns an empty handle.
+  // TODO(peria): Drop this fallback routine. crbug.com/881417
+  if (data.did_fail) {
+    V8PerIsolateData::From(isolate)->BailoutAndDisableV8ContextSnapshot();
+    return v8::Local<v8::Context>();
+  }
+
   VLOG(1) << "A context is created from snapshot for "
           << (world.IsMainWorld() ? "" : "non-") << "main world";
 
@@ -249,11 +263,18 @@ void V8ContextSnapshot::EnsureInterfaceTemplates(v8::Isolate* isolate) {
   }
 
   v8::HandleScope handle_scope(isolate);
+  // Update the install functions for V8Window and V8Document to work for their
+  // partial interfaces.
   SnapshotInterface& snapshot_window = g_snapshot_interfaces[0];
   DCHECK(V8Window::wrapperTypeInfo.Equals(snapshot_window.wrapper_type_info));
-  // Update the install function for V8Window to work for partial interfaces.
   snapshot_window.install_function =
       V8Window::install_runtime_enabled_features_on_template_function_;
+
+  SnapshotInterface& snapshot_document = g_snapshot_interfaces[4];
+  DCHECK(
+      V8Document::wrapperTypeInfo.Equals(snapshot_document.wrapper_type_info));
+  snapshot_document.install_function =
+      V8Document::install_runtime_enabled_features_on_template_function_;
 
   EnsureInterfaceTemplatesForWorld(isolate, DOMWrapperWorld::MainWorld());
   // Any world types other than |kMain| are acceptable for this.
@@ -342,27 +363,45 @@ void V8ContextSnapshot::DeserializeInternalField(v8::Local<v8::Object> object,
       *reinterpret_cast<const InternalFieldType*>(payload.data);
 
   const WrapperTypeInfo* wrapper_type_info = FieldTypeToWrapperTypeInfo(type);
+  DataForDeserializer* embed_data = static_cast<DataForDeserializer*>(ptr);
   switch (type) {
     case InternalFieldType::kNodeType:
     case InternalFieldType::kDocumentType:
     case InternalFieldType::kHTMLDocumentType: {
-      CHECK_EQ(index, kV8DOMWrapperTypeIndex);
+      // TODO(peria): Make this branch back to CHECK_EQ. crbug.com/881417
+      if (index != kV8DOMWrapperTypeIndex) {
+        LOG(ERROR) << "Invalid index for wrpper type info: " << index;
+        embed_data->did_fail = true;
+        return;
+      }
       object->SetAlignedPointerInInternalField(
           index, const_cast<WrapperTypeInfo*>(wrapper_type_info));
       return;
     }
     case InternalFieldType::kHTMLDocumentObject: {
+      // There seems to be few crash reports with invalid |index|.
+      // In such cases, we fallback to create v8::Context without snapshots.
+      // TODO(peria): Make this branch back to CHECK_EQ. crbug.com/881417
+      if (index != kV8DOMWrapperObjectIndex) {
+        LOG(ERROR) << "Invalid index for HTMLDocument object: " << index;
+        embed_data->did_fail = true;
+        return;
+      }
+
       // The below code handles window.document on the main world.
-      CHECK_EQ(index, kV8DOMWrapperObjectIndex);
       v8::Isolate* isolate = v8::Isolate::GetCurrent();
-      DataForDeserializer* data = static_cast<DataForDeserializer*>(ptr);
-      ScriptWrappable* document = data->document;
+      ScriptWrappable* document = embed_data->document;
       DCHECK(document);
 
       // Make reference from wrapper to document
       object->SetAlignedPointerInInternalField(index, document);
       // Make reference from document to wrapper
-      CHECK(document->SetWrapper(isolate, wrapper_type_info, object));
+      // TODO(peria): Make this branch back to CHECK. crbug.com/881417
+      if (!document->SetWrapper(isolate, wrapper_type_info, object)) {
+        LOG(ERROR) << "Failed to set HTMLDocument wrapper on Blink object.";
+        embed_data->did_fail = true;
+        return;
+      }
       WrapperTypeInfo::WrapperCreated();
       return;
     }
@@ -457,8 +496,8 @@ void V8ContextSnapshot::TakeSnapshotForWorld(v8::SnapshotCreator* creator,
     int indices[] = {kV8DOMWrapperObjectIndex, kV8DOMWrapperTypeIndex};
     void* values[] = {nullptr, const_cast<WrapperTypeInfo*>(
                                    &V8HTMLDocument::wrapperTypeInfo)};
-    document_wrapper->SetAlignedPointerInInternalFields(
-        WTF_ARRAY_LENGTH(indices), indices, values);
+    document_wrapper->SetAlignedPointerInInternalFields(base::size(indices),
+                                                        indices, values);
 
     // Set the cached accessor for window.document.
     CHECK(V8PrivateProperty::GetWindowDocumentCachedAccessor(isolate).Set(

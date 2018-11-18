@@ -17,9 +17,9 @@ class GURL;
 template <class T>
 class scoped_refptr;
 
-namespace net {
-class URLRequestContextGetter;
-}  // namespace net
+namespace network {
+class SharedURLLoaderFactory;
+}
 
 namespace payments {
 
@@ -49,16 +49,20 @@ namespace payments {
 class TestDownloader : public PaymentManifestDownloader {
  public:
   explicit TestDownloader(
-      const scoped_refptr<net::URLRequestContextGetter>& context);
+      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory);
   ~TestDownloader() override;
 
   // PaymentManifestDownloader implementation.
   void DownloadPaymentMethodManifest(
       const GURL& url,
       PaymentManifestDownloadCallback callback) override;
+  void DownloadWebAppManifest(
+      const GURL& url,
+      PaymentManifestDownloadCallback callback) override;
 
   // Modifies the downloader to replace all instances of |prefix| with
-  // |test_server_url| when downloading the payment method manifest.
+  // |test_server_url| when downloading payment method manifests and web app
+  // manifests.
   //
   // For example, if AddTestServerURL("https://", "https://127.0.0.1:7070") is
   // called, then all calls to DownloadPaymentMethodManifest(some_url, callback)
@@ -92,6 +96,8 @@ class TestDownloader : public PaymentManifestDownloader {
   void AddTestServerURL(const std::string& prefix, const GURL& test_server_url);
 
  private:
+  GURL FindTestServerURL(const GURL& url) const;
+
   // The mapping from the URL prefix to the URL of the test server to be used.
   // Example 1:
   //

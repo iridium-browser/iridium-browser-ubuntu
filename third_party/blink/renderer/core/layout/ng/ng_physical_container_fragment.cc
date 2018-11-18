@@ -4,223 +4,134 @@
 
 #include "third_party/blink/renderer/core/layout/ng/ng_physical_container_fragment.h"
 
-#include "third_party/blink/renderer/core/editing/position_with_affinity.h"
-#include "third_party/blink/renderer/core/layout/layout_object.h"
-#include "third_party/blink/renderer/core/layout/ng/geometry/ng_logical_offset.h"
-#include "third_party/blink/renderer/core/layout/ng/geometry/ng_logical_size.h"
+#include "third_party/blink/renderer/core/layout/layout_block_flow.h"
+#include "third_party/blink/renderer/core/layout/layout_inline.h"
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_physical_line_box_fragment.h"
-#include "third_party/blink/renderer/core/layout/ng/ng_fragment.h"
+#include "third_party/blink/renderer/core/layout/ng/ng_outline_utils.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_physical_box_fragment.h"
-#include "third_party/blink/renderer/core/style/computed_style.h"
+#include "third_party/blink/renderer/platform/geometry/layout_rect.h"
 
 namespace blink {
-
-namespace {
-
-NGLogicalOffset ChildLogicalOffsetInParent(
-    const NGPhysicalContainerFragment& parent,
-    const NGPhysicalFragment& child) {
-  return child.Offset().ConvertToLogical(parent.Style().GetWritingMode(),
-                                         parent.Style().Direction(),
-                                         parent.Size(), child.Size());
-}
-
-NGLogicalSize ChildLogicalSizeInParent(
-    const NGPhysicalContainerFragment& parent,
-    const NGPhysicalFragment& child) {
-  return NGFragment(parent.Style().GetWritingMode(), child).Size();
-}
-
-Optional<PositionWithAffinity> PositionForPointInChild(
-    const NGPhysicalFragment& child,
-    const NGPhysicalOffset& point) {
-  const NGPhysicalOffset& child_point = point - child.Offset();
-  // We must fallback to legacy for old layout roots. We also fallback (to
-  // LayoutNGMixin::PositionForPoint()) for NG block layout, so that we can
-  // utilize LayoutBlock::PositionForPoint() that resolves the position in block
-  // layout.
-  // TODO(xiaochengh): Don't fallback to legacy for NG block layout.
-  const PositionWithAffinity result =
-      (child.IsBlockFlow() || child.IsOldLayoutRoot())
-          ? child.GetLayoutObject()->PositionForPoint(
-                child_point.ToLayoutPoint())
-          : child.PositionForPoint(child_point);
-  if (result.IsNotNull())
-    return result;
-  return WTF::nullopt;
-}
-
-}  // namespace
 
 NGPhysicalContainerFragment::NGPhysicalContainerFragment(
     LayoutObject* layout_object,
     const ComputedStyle& style,
+    NGStyleVariant style_variant,
     NGPhysicalSize size,
     NGFragmentType type,
     unsigned sub_type,
-    Vector<scoped_refptr<NGPhysicalFragment>>& children,
-    const NGPhysicalOffsetRect& contents_visual_rect,
+    Vector<NGLink>& children,
     scoped_refptr<NGBreakToken> break_token)
     : NGPhysicalFragment(layout_object,
                          style,
-                         NGStyleVariant::kStandard,
+                         style_variant,
                          size,
                          type,
                          sub_type,
                          std::move(break_token)),
-      children_(std::move(children)),
-      contents_visual_rect_(contents_visual_rect) {
+      children_(std::move(children)) {
   DCHECK(children.IsEmpty());  // Ensure move semantics is used.
 }
 
-PositionWithAffinity
-NGPhysicalContainerFragment::PositionForPointInInlineLevelBox(
-    const NGPhysicalOffset& point) const {
-  DCHECK(IsInline() || IsLineBox()) << ToString();
-  DCHECK(!IsBlockFlow()) << ToString();
-
-  const NGLogicalOffset logical_point = point.ConvertToLogical(
-      Style().GetWritingMode(), Style().Direction(), Size(), NGPhysicalSize());
-  const LayoutUnit inline_point = logical_point.inline_offset;
-
-  // Stores the closest child before |point| in the inline direction. Used if we
-  // can't find any child |point| falls in to resolve the position.
-  const NGPhysicalFragment* closest_child_before = nullptr;
-  LayoutUnit closest_child_before_inline_offset = LayoutUnit::Min();
-
-  // Stores the closest child after |point| in the inline direction. Used if we
-  // can't find any child |point| falls in to resolve the position.
-  const NGPhysicalFragment* closest_child_after = nullptr;
-  LayoutUnit closest_child_after_inline_offset = LayoutUnit::Max();
-
-  for (const auto& child : children_) {
-    const LayoutUnit child_inline_min =
-        ChildLogicalOffsetInParent(*this, *child).inline_offset;
-    const LayoutUnit child_inline_max =
-        child_inline_min + ChildLogicalSizeInParent(*this, *child).inline_size;
-
-    // Try to resolve if |point| falls in any child in inline direction.
-    if (inline_point >= child_inline_min && inline_point <= child_inline_max) {
-      if (auto child_position = PositionForPointInChild(*child, point))
-        return child_position.value();
+void NGPhysicalContainerFragment::AddOutlineRectsForNormalChildren(
+    Vector<LayoutRect>* outline_rects,
+    const LayoutPoint& additional_offset,
+    NGOutlineType outline_type) const {
+  for (const auto& child : Children()) {
+    // Outlines of out-of-flow positioned descendants are handled in
+    // NGPhysicalBoxFragment::AddSelfOutlineRects().
+    if (child->IsOutOfFlowPositioned())
       continue;
+
+    // Outline of an element continuation or anonymous block continuation is
+    // added when we iterate the continuation chain.
+    // See NGPhysicalBoxFragment::AddSelfOutlineRects().
+    if (LayoutObject* child_layout_object = child->GetLayoutObject()) {
+      if (child_layout_object->IsElementContinuation() ||
+          (child_layout_object->IsLayoutBlockFlow() &&
+           ToLayoutBlockFlow(child_layout_object)
+               ->IsAnonymousBlockContinuation()))
+        continue;
     }
 
-    if (inline_point < child_inline_min) {
-      if (child_inline_min < closest_child_after_inline_offset) {
-        closest_child_after = child.get();
-        closest_child_after_inline_offset = child_inline_min;
-      }
-    }
-
-    if (inline_point > child_inline_max) {
-      if (child_inline_max > closest_child_before_inline_offset) {
-        closest_child_before = child.get();
-        closest_child_before_inline_offset = child_inline_max;
-      }
-    }
+    AddOutlineRectsForDescendant(child, outline_rects, additional_offset,
+                                 outline_type);
   }
-
-  if (closest_child_after) {
-    if (auto child_position =
-            PositionForPointInChild(*closest_child_after, point))
-      return child_position.value();
-  }
-
-  if (closest_child_before) {
-    if (auto child_position =
-            PositionForPointInChild(*closest_child_before, point))
-      return child_position.value();
-  }
-
-  return PositionWithAffinity();
 }
 
-PositionWithAffinity
-NGPhysicalContainerFragment::PositionForPointInInlineFormattingContext(
-    const NGPhysicalOffset& point) const {
-  DCHECK(IsBlockFlow()) << ToString();
-  DCHECK(IsBox()) << ToString();
-  DCHECK(ToNGPhysicalBoxFragment(this)->ChildrenInline()) << ToString();
+void NGPhysicalContainerFragment::AddOutlineRectsForDescendant(
+    const NGLink& descendant,
+    Vector<LayoutRect>* outline_rects,
+    const LayoutPoint& additional_offset,
+    NGOutlineType outline_type) const {
+  if (descendant->IsText() || descendant->IsListMarker())
+    return;
 
-  const NGLogicalOffset logical_point = point.ConvertToLogical(
-      Style().GetWritingMode(), Style().Direction(), Size(), NGPhysicalSize());
-  const LayoutUnit block_point = logical_point.block_offset;
+  if (const NGPhysicalBoxFragment* descendant_box =
+          ToNGPhysicalBoxFragmentOrNull(descendant.get())) {
+    LayoutObject* descendant_layout_object = descendant_box->GetLayoutObject();
+    DCHECK(descendant_layout_object);
 
-  // Stores the closest line box child above |point| in the block direction.
-  // Used if we can't find any child |point| falls in to resolve the position.
-  const NGPhysicalLineBoxFragment* closest_line_before = nullptr;
-  LayoutUnit closest_line_before_block_offset = LayoutUnit::Min();
-
-  // Stores the closest line box child below |point| in the block direction.
-  // Used if we can't find any child |point| falls in to resolve the position.
-  const NGPhysicalLineBoxFragment* closest_line_after = nullptr;
-  LayoutUnit closest_line_after_block_offset = LayoutUnit::Max();
-
-  for (const auto& child : children_) {
-    // Try to resolve if |point| falls in a non-line-box child completely.
-    if (!child->IsLineBox()) {
-      if (point.left >= child->Offset().left &&
-          point.left <= child->Offset().left + child->Size().width &&
-          point.top >= child->Offset().top &&
-          point.top <= child->Offset().top + child->Size().height) {
-        if (auto child_position = PositionForPointInChild(*child, point))
-          return child_position.value();
-      }
-      continue;
+    if (descendant_box->HasLayer()) {
+      Vector<LayoutRect> layer_outline_rects;
+      descendant_box->AddSelfOutlineRects(&layer_outline_rects, LayoutPoint(),
+                                          outline_type);
+      descendant_layout_object->LocalToAncestorRects(
+          layer_outline_rects, ToLayoutBoxModelObject(GetLayoutObject()),
+          LayoutPoint(), additional_offset);
+      outline_rects->AppendVector(layer_outline_rects);
+      return;
     }
 
-    if (!child->IsLineBox() ||
-        ToNGPhysicalLineBoxFragment(*child).Children().IsEmpty())
-      continue;
-
-    const LayoutUnit line_min =
-        ChildLogicalOffsetInParent(*this, *child).block_offset;
-    const LayoutUnit line_max =
-        line_min + ChildLogicalSizeInParent(*this, *child).block_size;
-
-    // Try to resolve if |point| falls in a line box in block direction.
-    // Hitting on line bottom doesn't count, to match legacy behavior.
-    // TODO(xiaochengh): Consider floats.
-    if (block_point >= line_min && block_point < line_max) {
-      if (auto child_position = PositionForPointInChild(*child, point))
-        return child_position.value();
-      continue;
+    if (descendant_layout_object->IsBox()) {
+      descendant_box->AddSelfOutlineRects(
+          outline_rects,
+          additional_offset + descendant.Offset().ToLayoutPoint(),
+          outline_type);
+      return;
     }
 
-    if (block_point < line_min) {
-      if (line_min < closest_line_after_block_offset) {
-        closest_line_after = ToNGPhysicalLineBoxFragment(child.get());
-        closest_line_after_block_offset = line_min;
-      }
+    DCHECK(descendant_layout_object->IsLayoutInline());
+    LayoutInline* descendant_layout_inline =
+        ToLayoutInline(descendant_layout_object);
+    // As an optimization, an ancestor has added rects for its line boxes
+    // covering descendants' line boxes, so descendants don't need to add line
+    // boxes again. For example, if the parent is a LayoutBlock, it adds rects
+    // for its line box which cover the line boxes of this LayoutInline. So
+    // the LayoutInline needs to add rects for children and continuations
+    // only.
+    if (!NGOutlineUtils::IsInlineOutlineNonpaintingFragment(*descendant)) {
+      descendant_layout_inline->AddOutlineRectsForChildrenAndContinuations(
+          *outline_rects, additional_offset, outline_type);
     }
+    return;
+  }
 
-    if (block_point >= line_max) {
-      if (line_max > closest_line_before_block_offset) {
-        closest_line_before = ToNGPhysicalLineBoxFragment(child.get());
-        closest_line_before_block_offset = line_max;
+  if (const NGPhysicalLineBoxFragment* descendant_line_box =
+          ToNGPhysicalLineBoxFragmentOrNull(descendant.get())) {
+    descendant_line_box->AddOutlineRectsForNormalChildren(
+        outline_rects, additional_offset + descendant.Offset().ToLayoutPoint(),
+        outline_type);
+
+    if (!descendant_line_box->Size().IsEmpty()) {
+      outline_rects->emplace_back(additional_offset,
+                                  descendant_line_box->Size().ToLayoutSize());
+    } else if (descendant_line_box->Children().IsEmpty()) {
+      // Special-case for when the first continuation does not generate
+      // fragments. NGInlineLayoutAlgorithm suppresses box fragments when the
+      // line is "empty". When there is a continuation from the LayoutInline,
+      // the suppression makes such continuation not reachable. Check the
+      // continuation from LayoutInline in such case.
+      DCHECK(GetLayoutObject());
+      if (LayoutInline* first_layout_inline =
+              ToLayoutInlineOrNull(GetLayoutObject()->SlowFirstChild())) {
+        if (!first_layout_inline->IsElementContinuation()) {
+          first_layout_inline->AddOutlineRectsForChildrenAndContinuations(
+              *outline_rects, additional_offset, outline_type);
+        }
       }
     }
   }
-
-  if (closest_line_after) {
-    if (auto child_position =
-            PositionForPointInChild(*closest_line_after, point))
-      return child_position.value();
-  }
-
-  if (closest_line_before) {
-    if (auto child_position =
-            PositionForPointInChild(*closest_line_before, point))
-      return child_position.value();
-  }
-
-  // TODO(xiaochengh): Looking at only the closest lines may not be enough,
-  // when we have multiple lines full of pseudo elements. Fix it.
-
-  // TODO(xiaochengh): Consider floats.
-
-  return PositionWithAffinity();
 }
 
 }  // namespace blink

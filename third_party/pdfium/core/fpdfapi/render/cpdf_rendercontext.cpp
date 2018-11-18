@@ -21,7 +21,7 @@
 #include "core/fxge/fx_dib.h"
 
 CPDF_RenderContext::CPDF_RenderContext(CPDF_Page* pPage)
-    : m_pDocument(pPage->m_pDocument.Get()),
+    : m_pDocument(pPage->GetDocument()),
       m_pPageResources(pPage->m_pPageResources.Get()),
       m_pPageCache(pPage->GetRenderCache()) {}
 
@@ -65,23 +65,24 @@ void CPDF_RenderContext::Render(CFX_RenderDevice* pDevice,
                                 const CFX_Matrix* pLastMatrix) {
   for (auto& layer : m_Layers) {
     CFX_RenderDevice::StateRestorer restorer(pDevice);
-    CPDF_RenderStatus status;
+    CPDF_RenderStatus status(this, pDevice);
+    if (pOptions)
+      status.SetOptions(*pOptions);
+    status.SetStopObject(pStopObj);
+    status.SetTransparency(layer.m_pObjectHolder->GetTransparency());
     if (pLastMatrix) {
       CFX_Matrix FinalMatrix = layer.m_Matrix;
       FinalMatrix.Concat(*pLastMatrix);
-      status.Initialize(this, pDevice, pLastMatrix, pStopObj, nullptr, nullptr,
-                        pOptions, layer.m_pObjectHolder->m_iTransparency, false,
-                        nullptr);
-      status.RenderObjectList(layer.m_pObjectHolder.Get(), &FinalMatrix);
+      status.SetDeviceMatrix(*pLastMatrix);
+      status.Initialize(nullptr, nullptr);
+      status.RenderObjectList(layer.m_pObjectHolder.Get(), FinalMatrix);
     } else {
-      status.Initialize(this, pDevice, nullptr, pStopObj, nullptr, nullptr,
-                        pOptions, layer.m_pObjectHolder->m_iTransparency, false,
-                        nullptr);
-      status.RenderObjectList(layer.m_pObjectHolder.Get(), &layer.m_Matrix);
+      status.Initialize(nullptr, nullptr);
+      status.RenderObjectList(layer.m_pObjectHolder.Get(), layer.m_Matrix);
     }
-    if (status.GetRenderOptions()->HasFlag(RENDER_LIMITEDIMAGECACHE)) {
+    if (status.GetRenderOptions().HasFlag(RENDER_LIMITEDIMAGECACHE)) {
       m_pPageCache->CacheOptimization(
-          status.GetRenderOptions()->GetCacheSizeLimit());
+          status.GetRenderOptions().GetCacheSizeLimit());
     }
     if (status.IsStopped())
       break;

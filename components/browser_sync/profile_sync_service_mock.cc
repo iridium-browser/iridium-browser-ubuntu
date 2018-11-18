@@ -9,9 +9,7 @@
 namespace browser_sync {
 
 ProfileSyncServiceMock::ProfileSyncServiceMock(InitParams init_params)
-    : ProfileSyncService(std::move(init_params)) {
-  ON_CALL(*this, IsSyncRequested()).WillByDefault(testing::Return(true));
-}
+    : ProfileSyncService(std::move(init_params)) {}
 
 ProfileSyncServiceMock::ProfileSyncServiceMock(InitParams* init_params)
     : ProfileSyncServiceMock(std::move(*init_params)) {}
@@ -24,6 +22,10 @@ ProfileSyncServiceMock::GetOpenTabsUIDelegate() {
       GetOpenTabsUIDelegateMock();
   return mock_delegate ? mock_delegate
                        : ProfileSyncService::GetOpenTabsUIDelegate();
+}
+
+bool ProfileSyncServiceMock::IsAuthenticatedAccountPrimary() const {
+  return true;
 }
 
 std::unique_ptr<syncer::SyncSetupInProgressHandle>

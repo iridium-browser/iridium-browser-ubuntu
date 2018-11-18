@@ -34,6 +34,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/script_source_location_type.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_streamer.h"
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/platform/bindings/parkable_string.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_position.h"
@@ -45,12 +46,19 @@ class ScriptResource;
 class SingleCachedMetadataHandler;
 
 class CORE_EXPORT ScriptSourceCode final {
-  DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
+  DISALLOW_NEW();
 
  public:
   // For inline scripts.
   ScriptSourceCode(
       const String& source,
+      ScriptSourceLocationType = ScriptSourceLocationType::kUnknown,
+      SingleCachedMetadataHandler* = nullptr,
+      const KURL& = KURL(),
+      const TextPosition& = TextPosition::MinimumPosition());
+
+  ScriptSourceCode(
+      const ParkableString& source,
       ScriptSourceLocationType = ScriptSourceLocationType::kUnknown,
       SingleCachedMetadataHandler* cache_handler = nullptr,
       const KURL& = KURL(),
@@ -60,19 +68,16 @@ class CORE_EXPORT ScriptSourceCode final {
   //
   // We lose the encoding information from ScriptResource.
   // Not sure if that matters.
-  ScriptSourceCode(ScriptStreamer*, ScriptResource*);
+  ScriptSourceCode(ScriptStreamer*,
+                   ScriptResource*,
+                   ScriptStreamer::NotStreamingReason);
 
   ~ScriptSourceCode();
   void Trace(blink::Visitor*);
 
-  // The null value represents a missing script, created by the nullary
-  // constructor, and differs from the empty script.
-  bool IsNull() const { return source_.IsNull(); }
-
-  const String& Source() const { return source_; }
+  const ParkableString& Source() const { return source_; }
   SingleCachedMetadataHandler* CacheHandler() const { return cache_handler_; }
   const KURL& Url() const { return url_; }
-  int StartLine() const { return start_position_.line_.OneBasedInt(); }
   const TextPosition& StartPosition() const { return start_position_; }
   ScriptSourceLocationType SourceLocationType() const {
     return source_location_type_;
@@ -80,11 +85,15 @@ class CORE_EXPORT ScriptSourceCode final {
   const String& SourceMapUrl() const { return source_map_url_; }
 
   ScriptStreamer* Streamer() const { return streamer_; }
+  ScriptStreamer::NotStreamingReason NotStreamingReason() const {
+    return not_streaming_reason_;
+  }
 
  private:
-  const String source_;
+  const ParkableString source_;
   Member<SingleCachedMetadataHandler> cache_handler_;
   Member<ScriptStreamer> streamer_;
+  ScriptStreamer::NotStreamingReason not_streaming_reason_;
 
   // The URL of the source code, which is primarily intended for DevTools
   // javascript debugger.

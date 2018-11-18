@@ -11,7 +11,7 @@
 #include "base/containers/hash_tables.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop/message_loop_current.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread_restrictions.h"
@@ -138,10 +138,13 @@ class MAYBE_DomSerializerTests : public ContentBrowserTest,
       // Do not use WebFrame.LoadHTMLString because it assumes that input
       // html contents use UTF-8 encoding.
       WebData data(contents.data(), contents.length());
-      GetMainFrame()->LoadData(data, "text/html", encoding_info, base_url);
+      GetMainFrame()->CommitDataNavigation(
+          blink::WebURLRequest(base_url), data, "text/html", encoding_info,
+          WebURL(), blink::WebFrameLoadType::kStandard, blink::WebHistoryItem(),
+          false /* is_client_redirect */, nullptr /* navigation_params */,
+          nullptr /* navigation_data */);
     }
-    base::MessageLoop::ScopedNestableTaskAllower allow(
-        base::MessageLoop::current());
+    base::MessageLoopCurrent::ScopedNestableTaskAllower allow;
     waiter.Wait();
   }
 
@@ -674,7 +677,7 @@ IN_PROC_BROWSER_TEST_F(MAYBE_DomSerializerTests,
   std::string original_contents;
   {
     // Read original contents for later comparison.
-    base::ThreadRestrictions::ScopedAllowIO allow_io_for_test_verifications;
+    base::ScopedAllowBlockingForTesting allow_blocking;
     ASSERT_TRUE(base::ReadFileToString(xml_file_path, &original_contents));
   }
 
@@ -700,7 +703,7 @@ IN_PROC_BROWSER_TEST_F(MAYBE_DomSerializerTests,
   std::string original_contents;
   {
     // Read original contents for later comparison .
-    base::ThreadRestrictions::ScopedAllowIO allow_io_for_test_verifications;
+    base::ScopedAllowBlockingForTesting allow_blocking;
     ASSERT_TRUE(base::ReadFileToString(page_file_path, &original_contents));
   }
 

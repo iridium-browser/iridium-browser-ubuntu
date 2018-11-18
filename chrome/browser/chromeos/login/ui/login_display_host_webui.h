@@ -14,6 +14,7 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
+#include "chrome/browser/chromeos/login/oobe_configuration.h"
 #include "chrome/browser/chromeos/login/signin_screen_controller.h"
 #include "chrome/browser/chromeos/login/ui/login_display.h"
 #include "chrome/browser/chromeos/login/ui/login_display_host_common.h"
@@ -45,6 +46,7 @@ class LoginDisplayHostWebUI : public LoginDisplayHostCommon,
                               public content::WebContentsObserver,
                               public chromeos::SessionManagerClient::Observer,
                               public chromeos::CrasAudioHandler::AudioObserver,
+                              public chromeos::OobeConfiguration::Observer,
                               public display::DisplayObserver,
                               public ui::InputDeviceEventObserver,
                               public views::WidgetRemovalsObserver,
@@ -54,9 +56,11 @@ class LoginDisplayHostWebUI : public LoginDisplayHostCommon,
   ~LoginDisplayHostWebUI() override;
 
   // LoginDisplayHost:
-  LoginDisplay* CreateLoginDisplay(LoginDisplay::Delegate* delegate) override;
+  LoginDisplay* GetLoginDisplay() override;
+  ExistingUserController* GetExistingUserController() override;
   gfx::NativeWindow GetNativeWindow() const override;
   OobeUI* GetOobeUI() const override;
+  content::WebContents* GetOobeWebContents() const override;
   WebUILoginView* GetWebUILoginView() const override;
   void OnFinalize() override;
   void SetStatusAreaVisible(bool visible) override;
@@ -71,12 +75,19 @@ class LoginDisplayHostWebUI : public LoginDisplayHostCommon,
   bool IsVoiceInteractionOobe() override;
   void StartVoiceInteractionOobe() override;
   void OnBrowserCreated() override;
-  void UpdateGaiaDialogVisibility(bool visible) override;
-  void UpdateGaiaDialogSize(int width, int height) override;
+  void ShowGaiaDialog(
+      bool can_close,
+      const base::Optional<AccountId>& prefilled_account) override;
+  void HideOobeDialog() override;
+  void UpdateOobeDialogSize(int width, int height) override;
+  void UpdateOobeDialogState(ash::mojom::OobeDialogState state) override;
   const user_manager::UserList GetUsers() override;
+  void ShowFeedback() override;
+  void ShowResetScreen() override;
+  void HandleDisplayCaptivePortal() override;
+  void UpdateAddUserButtonStatus() override;
 
-  // Creates WizardController instance.
-  WizardController* CreateWizardController();
+  void OnCancelPasswordChangedFlow() override;
 
   // Trace id for ShowLoginWebUI event (since there exists at most one login
   // WebUI at a time).
@@ -101,6 +112,9 @@ class LoginDisplayHostWebUI : public LoginDisplayHostCommon,
   // chromeos::SessionManagerClient::Observer:
   void EmitLoginPromptVisibleCalled() override;
 
+  // chromeos::OobeConfiguration::Observer:
+  void OnOobeConfigurationChanged() override;
+
   // chromeos::CrasAudioHandler::AudioObserver:
   void OnActiveOutputNodeChanged() override;
 
@@ -119,8 +133,6 @@ class LoginDisplayHostWebUI : public LoginDisplayHostCommon,
   void OnUserSwitchAnimationFinished() override;
 
  private:
-  class LoginWidgetDelegate;
-
   // Way to restore if renderer have crashed.
   enum RestorePath {
     RESTORE_UNKNOWN,
@@ -172,6 +184,12 @@ class LoginDisplayHostWebUI : public LoginDisplayHostCommon,
   // Called when login-prompt-visible signal is caught.
   void OnLoginPromptVisible();
 
+  // Creates or recreates |existing_user_controller_|.
+  void CreateExistingUserController();
+
+  // Plays startup sound if needed and audio device is ready.
+  void PlayStartupSoundIfPossible();
+
   // Sign in screen controller.
   std::unique_ptr<ExistingUserController> existing_user_controller_;
 
@@ -186,14 +204,11 @@ class LoginDisplayHostWebUI : public LoginDisplayHostCommon,
   // Container of the screen we are displaying.
   views::Widget* login_window_ = nullptr;
 
-  // The delegate of |login_window_|; owned by |login_window_|.
-  LoginWidgetDelegate* login_window_delegate_ = nullptr;
-
   // Container of the view we are displaying.
   WebUILoginView* login_view_ = nullptr;
 
   // Login display we are using.
-  LoginDisplayWebUI* login_display_ = nullptr;
+  std::unique_ptr<LoginDisplayWebUI> login_display_;
 
   // True if the login display is the current screen.
   bool is_showing_login_ = false;
@@ -215,6 +230,12 @@ class LoginDisplayHostWebUI : public LoginDisplayHostCommon,
   // True if WebUI is initialized in hidden state and we're waiting for
   // wallpaper load animation to finish.
   bool waiting_for_wallpaper_load_;
+
+  // True if WebUI is initialized in hidden state, the OOBE is not completed
+  // and we're waiting for OOBE configuration check to finish.
+  bool waiting_for_configuration_ = false;
+
+  static bool disable_restrictive_proxy_check_for_test_;
 
   // How many times renderer has crashed.
   int crash_count_ = 0;
@@ -245,6 +266,9 @@ class LoginDisplayHostWebUI : public LoginDisplayHostCommon,
   bool oobe_startup_sound_played_ = false;
 
   bool is_voice_interaction_oobe_ = false;
+
+  // True if we need to play startup sound when audio device becomes available.
+  bool need_to_play_startup_sound_ = false;
 
   base::WeakPtrFactory<LoginDisplayHostWebUI> weak_factory_;
 

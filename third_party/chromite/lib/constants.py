@@ -44,16 +44,14 @@ CHROMITE_BIN_DIR = os.path.join(CHROMITE_DIR, 'bin')
 PATH_TO_CBUILDBOT = os.path.join(CHROMITE_BIN_SUBDIR, 'cbuildbot')
 DEFAULT_CHROOT_DIR = 'chroot'
 
-SITE_CONFIG_DIR = os.path.join(CHROMITE_DIR, 'config')
-SITE_CONFIG_FILE = os.path.join(SITE_CONFIG_DIR, 'config_dump.json')
-
-CHROMEOS_CONFIG_FILE = os.path.join(CHROMITE_DIR, 'cbuildbot',
-                                    'config_dump.json')
-WATERFALL_CONFIG_FILE = os.path.join(CHROMITE_DIR, 'cbuildbot',
-                                     'waterfall_layout_dump.txt')
+CHROMEOS_CONFIG_FILE = os.path.join(CHROMITE_DIR, 'config', 'config_dump.json')
+WATERFALL_CONFIG_FILE = os.path.join(
+    CHROMITE_DIR, 'config', 'waterfall_layout_dump.txt')
+LUCI_SCHEDULER_CONFIG_FILE = os.path.join(
+    CHROMITE_DIR, 'config', 'luci-scheduler.cfg')
 
 GE_BUILD_CONFIG_FILE = os.path.join(
-    CHROMITE_DIR, 'cbuildbot', 'ge_build_config.json')
+    CHROMITE_DIR, 'config', 'ge_build_config.json')
 
 # The following define the location for storing toolchain packages and
 # SDK overlay tarballs created during SDK builder runs. The paths are relative
@@ -130,6 +128,9 @@ CL_STATUS_LAUNCHING = 'launching'
 CL_STATUS_WAITING = 'waiting'
 CL_STATUS_READY_TO_SUBMIT = 'ready-to-submit'
 CL_STATUS_FULLY_VERIFIED = 'fully-verified'
+
+# Partition labels
+CROS_PART_STATEFUL = 'STATE'
 
 # Signer status strings
 SIGNER_STATUS_PASSED = 'passed'
@@ -209,6 +210,9 @@ SUSPECT_REASONS = {
     SUSPECT_REASON_UNKNOWN: 6,
 }
 
+# Ts-mon related constants
+TSMON_METRIC_FIELDS = '/tmp/ts_mon_fields.txt'
+
 # Monarch metric names
 MON_CQ_WALL_CLOCK_SECS = 'chromeos/cbuildbot/cq_wall_clock_seconds'
 MON_CQ_SELF_DESTRUCTION_COUNT = ('chromeos/cbuildbot/build/'
@@ -226,6 +230,9 @@ MON_BUILD_SANITY_ID = 'chromeos/cbuildbot/build/sanity_build_id'
 MON_BUILD_DURATION = 'chromeos/cbuildbot/build/durations'
 MON_STAGE_COMP_COUNT = 'chromeos/cbuildbot/stage/completed_count'
 MON_STAGE_DURATION = 'chromeos/cbuildbot/stage/durations'
+MON_STAGE_INSTANCE_DURATION = 'chromeos/cbuildbot/stage/instance_durations'
+MON_STAGE_FAILURE_COUNT = 'chromeos/cbuildbot/stage/failure_count'
+MON_FAILED_STAGE = 'chromeos/chromite/cbuildbot_launch/failed_stage'
 MON_CL_HANDLE_TIME = 'chromeos/cbuildbot/submitted_change/handling_times'
 MON_CL_WALL_CLOCK_TIME = 'chromeos/cbuildbot/submitted_change/wall_clock_times'
 MON_CL_PRECQ_TIME = 'chromeos/cbuildbot/submitted_change/precq_times'
@@ -258,6 +265,15 @@ MON_EXPORT_TO_GCLOUD = 'chromeos/cbuildbot/export_to_gcloud'
 MON_CL_REJECT_COUNT = 'chromeos/cbuildbot/change/rejected_count'
 MON_GS_ERROR = 'chromeos/gs/error_count'
 
+# Stage Categorization for failed stages metric.
+UNCATEGORIZED_STAGE = 'Uncategorized'
+CI_INFRA_STAGE = 'CI-Infra'
+TEST_INFRA_STAGE = 'Test-Infra'
+PRODUCT_OS_STAGE = 'Product-OS'
+PRODUCT_ANDROID_STAGE = 'Product-Android'
+PRODUCT_CHROME_STAGE = 'Product-Chrome'
+PRODUCT_TOOLCHAIN_STAGE = 'Product-Toolchain'
+
 
 # Re-execution API constants.
 # Used by --resume and --bootstrap to decipher which options they
@@ -268,7 +284,7 @@ MON_GS_ERROR = 'chromeos/gs/error_count'
 # Major is used for tracking heavy API breakage- for example, no longer
 # supporting the --resume option.
 REEXEC_API_MAJOR = 0
-REEXEC_API_MINOR = 7
+REEXEC_API_MINOR = 9
 REEXEC_API_VERSION = '%i.%i' % (REEXEC_API_MAJOR, REEXEC_API_MINOR)
 
 # Support --master-build-id
@@ -281,6 +297,10 @@ REEXEC_API_GOMA = 5
 REEXEC_API_TSMON_TASK_NUM = 6
 # Support --sanity-check-build
 REEXEC_API_SANITY_CHECK_BUILD = 7
+# Support --previous-build-state
+REEXEC_API_PREVIOUS_BUILD_STATE = 8
+# Support --workspace
+REEXEC_API_WORKSPACE = 9
 
 # We rely on the (waterfall, builder name, build number) to uniquely identify
 # a build. However, future migrations or state wipes of the buildbot master may
@@ -329,16 +349,18 @@ ANDROID_INTERNAL_PATTERN = r'\.zip.internal$'
 ANDROID_BUCKET_URL = 'gs://android-build-chromeos/builds'
 ANDROID_MST_BUILD_BRANCH = 'git_master-arc-dev'
 ANDROID_NYC_BUILD_BRANCH = 'git_nyc-mr1-arc'
-ANDROID_PI_BUILD_BRANCH = 'git_pi-arc-dev'
+ANDROID_PI_BUILD_BRANCH = 'git_pi-arc'
 ANDROID_GTS_BUILD_TARGETS = {
     # "gts_arm64" is the build maintained by GMS team.
     'XTS': ('linux-gts_arm64', r'\.zip$'),
 }
 ANDROID_MST_BUILD_TARGETS = {
     'ARM': ('linux-cheets_arm-user', r'\.zip$'),
+    'ARM64': ('linux-cheets_arm64-user', r'\.zip$'),
     'X86': ('linux-cheets_x86-user', r'\.zip$'),
     'X86_64': ('linux-cheets_x86_64-user', r'\.zip$'),
     'ARM_USERDEBUG': ('linux-cheets_arm-userdebug', r'\.zip$'),
+    'ARM64_USERDEBUG': ('linux-cheets_arm64-userdebug', r'\.zip$'),
     'X86_USERDEBUG': ('linux-cheets_x86-userdebug', r'\.zip$'),
     'X86_64_USERDEBUG': ('linux-cheets_x86_64-userdebug', r'\.zip$'),
 }
@@ -361,19 +383,31 @@ ANDROID_NYC_BUILD_TARGETS = {
 ANDROID_PI_BUILD_TARGETS = {
     'ARM': ('linux-cheets_arm-user', r'\.zip$'),
     'X86': ('linux-cheets_x86-user', r'\.zip$'),
+    'X86_NDK_TRANSLATION': ('linux-cheets_x86_ndk_translation-user', r'\.zip$'),
     'X86_64': ('linux-cheets_x86_64-user', r'\.zip$'),
     'ARM_USERDEBUG': ('linux-cheets_arm-userdebug', r'\.zip$'),
     'X86_USERDEBUG': ('linux-cheets_x86-userdebug', r'\.zip$'),
+    'X86_NDK_TRANSLATION_USERDEBUG': (
+        'linux-cheets_x86_ndk_translation-userdebug', r'\.zip$'
+    ),
     'X86_64_USERDEBUG': ('linux-cheets_x86_64-userdebug', r'\.zip$'),
+    'SDK_GOOGLE_X86_USERDEBUG': ('linux-sdk_cheets_x86-userdebug',
+                                 r'\.zip$'),
+    'SDK_GOOGLE_X86_64_USERDEBUG': ('linux-sdk_cheets_x86_64-userdebug',
+                                    r'\.zip$'),
 }
 
 ARC_BUCKET_URL = 'gs://chromeos-arc-images/builds'
 ARC_BUCKET_ACLS = {
     'ARM': 'googlestorage_acl_arm.txt',
+    'ARM64': 'googlestorage_acl_arm.txt',
     'X86': 'googlestorage_acl_x86.txt',
+    'X86_NDK_TRANSLATION': 'googlestorage_acl_ndk.txt',
     'X86_64': 'googlestorage_acl_x86.txt',
     'ARM_USERDEBUG': 'googlestorage_acl_arm.txt',
+    'ARM64_USERDEBUG': 'googlestorage_acl_arm.txt',
     'X86_USERDEBUG': 'googlestorage_acl_x86.txt',
+    'X86_NDK_TRANSLATION_USERDEBUG': 'googlestorage_acl_ndk.txt',
     'X86_64_USERDEBUG': 'googlestorage_acl_x86.txt',
     'AOSP_ARM_USERDEBUG': 'googlestorage_acl_arm.txt',
     'AOSP_X86_USERDEBUG': 'googlestorage_acl_x86.txt',
@@ -397,7 +431,10 @@ ANDROID_SYMBOLS_FILE = 'android-symbols.zip'
 # the Android bucket to the ARC++ bucket (b/33072485).
 ARC_BUILDS_NEED_ARTIFACTS_RENAMED = {
     'ARM_USERDEBUG',
+    'ARM64_USERDEBUG',
+    'X86_NDK_TRANSLATION',
     'X86_USERDEBUG',
+    'X86_NDK_TRANSLATION_USERDEBUG',
     'X86_64_USERDEBUG',
     'AOSP_ARM_USERDEBUG',
     'AOSP_X86_USERDEBUG',
@@ -405,6 +442,11 @@ ARC_BUILDS_NEED_ARTIFACTS_RENAMED = {
     'SDK_GOOGLE_X86_USERDEBUG',
     'SDK_GOOGLE_X86_64_USERDEBUG',
 }
+# All builds will have the same name without target prefix.
+# Emerge checksum failures will be workarounded by ebuild rename symbol (->).
+ARC_ARTIFACTS_RENAME_NOT_NEEDED = [
+    'sepolicy.zip',
+]
 
 GOB_COOKIE_PATH = os.path.expanduser('~/.git-credential-cache/cookie')
 GITCOOKIES_PATH = os.path.expanduser('~/.gitcookies')
@@ -518,14 +560,11 @@ VALID_ANDROID_REVISIONS = [ANDROID_REV_LATEST]
 BAREMETAL_BUILD_SLAVE_TYPE = 'baremetal'
 GCE_BEEFY_BUILD_SLAVE_TYPE = 'gce_beefy'
 GCE_BUILD_SLAVE_TYPE = 'gce'
-# A wimpy GCE instance well suited to run cbuildbot's master build-types.
-GCE_WIMPY_BUILD_SLAVE_TYPE = 'gce_wimpy'
 
 VALID_BUILD_SLAVE_TYPES = (
     BAREMETAL_BUILD_SLAVE_TYPE,
     GCE_BEEFY_BUILD_SLAVE_TYPE,
     GCE_BUILD_SLAVE_TYPE,
-    GCE_WIMPY_BUILD_SLAVE_TYPE,
 )
 
 # Build types supported.
@@ -555,7 +594,7 @@ ANDROID_PFQ_TYPE = 'android'
 
 # Builds from source and non-incremental.  This builds fully wipe their
 # chroot before the start of every build and no not use a BINHOST.
-BUILD_FROM_SOURCE_TYPE = 'full'
+FULL_TYPE = 'full'
 
 # Full but with versioned logic.
 CANARY_TYPE = 'canary'
@@ -585,7 +624,7 @@ PRE_CQ_TYPE = 'pre_cq'
 VALID_BUILD_TYPES = (
     PALADIN_TYPE,
     INCREMENTAL_TYPE,
-    BUILD_FROM_SOURCE_TYPE,
+    FULL_TYPE,
     CANARY_TYPE,
     CHROOT_BUILDER_TYPE,
     CHROOT_BUILDER_BOARD,
@@ -604,10 +643,15 @@ VALID_BUILD_TYPES = (
 PRE_CQ_DEFAULT_CONFIGS = [
     # Betty is the designated board to run vmtest on N.
     'betty-pre-cq',                   # vm board                  vmtest
+    'betty-arcnext-pre-cq',           # vm board                  arcnext
     'cyan-no-vmtest-pre-cq',          # braswell     kernel 3.18
     'daisy_spring-no-vmtest-pre-cq',  # arm32        kernel 3.8
     'eve-no-vmtest-pre-cq',           # kabylake     kernel 4.4   cheets_user_64
+    'fizz-no-vmtest-pre-cq',          # kabylake     kernel 4.4
+    'grunt-no-vmtest-pre-cq',         # stoneyridge  kernel 4.14
+    'guado_moblab-no-vmtest-pre-cq',  # broadwell    kernel 3.14  moblab
     'kevin-arcnext-no-vmtest-pre-cq', # arm64        kernel 4.4   arcnext
+    'lakitu-no-vmtest-pre-cq',        # container    kernel 4.14
     'nyan_blaze-no-vmtest-pre-cq',    # arm32        kernel 3.10
     'reef-no-vmtest-pre-cq',          # apollolake   kernel 4.4   vulkan
     'samus-no-vmtest-pre-cq',         # broadwell    kernel 3.14
@@ -666,11 +710,16 @@ HWTEST_MAX_RETRIES = 5
 #   INSTALLER: Blocking suite run against all canaries; tests basic installer
 #              functionality.
 HWTEST_ARC_COMMIT_SUITE = 'bvt-arc'
-HWTEST_ARC_CANARY_SUITE = 'arc-bvt-perbuild'
 HWTEST_BVT_SUITE = 'bvt-inline'
 HWTEST_COMMIT_SUITE = 'bvt-cq'
 HWTEST_CANARY_SUITE = 'bvt-perbuild'
 HWTEST_INSTALLER_SUITE = 'bvt-installer'
+# Runs all non-informational Tast tests (exercising any of OS, Chrome, and ARC).
+HWTEST_TAST_CQ_SUITE = 'bvt-tast-cq'
+# Runs non-informational Tast tests exercising either Chrome or ARC.
+HWTEST_TAST_CHROME_PFQ_SUITE = 'bvt-tast-chrome-pfq'
+# Runs non-informational Tast tests exercising ARC.
+HWTEST_TAST_ANDROID_PFQ_SUITE = 'bvt-tast-android-pfq'
 HWTEST_AFDO_SUITE = 'AFDO_record'
 HWTEST_JETSTREAM_COMMIT_SUITE = 'jetstream_cq'
 HWTEST_MOBLAB_SUITE = 'moblab'
@@ -678,11 +727,8 @@ HWTEST_MOBLAB_QUICK_SUITE = 'moblab_quick'
 HWTEST_SANITY_SUITE = 'sanity'
 HWTEST_TOOLCHAIN_SUITE = 'toolchain-tests'
 HWTEST_PROVISION_SUITE = 'provision'
-HWTEST_CTS_FOLLOWER_SUITE = 'arc-cts-follower'
 HWTEST_CTS_QUAL_SUITE = 'arc-cts-qual'
 HWTEST_GTS_QUAL_SUITE = 'arc-gts-qual'
-HWTEST_CTS_PRIORITY = 11
-HWTEST_GTS_PRIORITY = HWTEST_CTS_PRIORITY
 # Non-blocking informational hardware tests for Chrome, run throughout the
 # day on tip-of-trunk Chrome rather than on the daily Chrome branch.
 HWTEST_CHROME_INFORMATIONAL = 'chrome-informational'
@@ -692,6 +738,10 @@ HWTEST_CHROME_INFORMATIONAL = 'chrome-informational'
 # indicate that autotest is at capacity.
 HWTEST_TIMEOUT_EXTENSION = 10 * 60
 
+HWTEST_WEEKLY_PRIORITY = 'Weekly'
+HWTEST_CTS_PRIORITY = 'CTS'
+HWTEST_GTS_PRIORITY = HWTEST_CTS_PRIORITY
+HWTEST_DAILY_PRIORITY = 'Daily'
 HWTEST_DEFAULT_PRIORITY = 'DEFAULT'
 HWTEST_CQ_PRIORITY = 'CQ'
 HWTEST_BUILD_PRIORITY = 'Build'
@@ -699,8 +749,9 @@ HWTEST_PFQ_PRIORITY = 'PFQ'
 HWTEST_POST_BUILD_PRIORITY = 'PostBuild'
 
 # Ordered by priority (first item being lowest).
-HWTEST_VALID_PRIORITIES = ['Weekly',
-                           'Daily',
+HWTEST_VALID_PRIORITIES = [HWTEST_WEEKLY_PRIORITY,
+                           HWTEST_CTS_PRIORITY,
+                           HWTEST_DAILY_PRIORITY,
                            HWTEST_POST_BUILD_PRIORITY,
                            HWTEST_DEFAULT_PRIORITY,
                            HWTEST_BUILD_PRIORITY,
@@ -709,8 +760,30 @@ HWTEST_VALID_PRIORITIES = ['Weekly',
 
 # Creates a mapping of priorities to make easy comparsions.
 # Use the same priorities mapping as autotest/client/common_lib/priorities.py
-HWTEST_PRIORITIES_MAP = {key: 10 + 10 * index
-                         for index, key in enumerate(HWTEST_VALID_PRIORITIES)}
+HWTEST_PRIORITIES_MAP = {
+    HWTEST_WEEKLY_PRIORITY: 10,
+    HWTEST_CTS_PRIORITY: 11,
+    HWTEST_DAILY_PRIORITY: 20,
+    HWTEST_POST_BUILD_PRIORITY: 30,
+    HWTEST_DEFAULT_PRIORITY: 40,
+    HWTEST_BUILD_PRIORITY: 50,
+    HWTEST_PFQ_PRIORITY: 60,
+    HWTEST_CQ_PRIORITY: 70}
+
+# Creates a mapping of priorities for skylab hwtest tasks. In swarming,
+# lower number means high priorities. Priority lower than 48 will be special
+# tasks. The upper bound of priority is 255.
+# Use the same priorities mapping as autotest/venv/skylab_suite/swarming_lib.py
+SKYLAB_HWTEST_PRIORITIES_MAP = {
+    HWTEST_WEEKLY_PRIORITY: 230,
+    HWTEST_CTS_PRIORITY: 215,
+    HWTEST_DAILY_PRIORITY: 200,
+    HWTEST_POST_BUILD_PRIORITY: 170,
+    HWTEST_DEFAULT_PRIORITY: 140,
+    HWTEST_BUILD_PRIORITY: 110,
+    HWTEST_PFQ_PRIORITY: 80,
+    HWTEST_CQ_PRIORITY: 50,
+}
 
 
 # HWTest result statuses
@@ -724,8 +797,6 @@ HWTEST_STATUES_NOT_PASSED = frozenset([HWTEST_STATUS_FAIL,
 
 # Define HWTEST subsystem logic constants.
 SUBSYSTEMS = 'subsystems'
-SUBSYSTEM_PASS = 'subsystem_pass'
-SUBSYSTEM_FAIL = 'subsystem_fail'
 SUBSYSTEM_UNUSED = 'subsystem_unused'
 
 # Build messages
@@ -948,7 +1019,6 @@ STRATEGY_CQ_PARTIAL_NOT_TESTED = 'strategy:cq-submit-partial-pool-not-tested'
 STRATEGY_CQ_PARTIAL_CQ_HISTORY = 'strategy:cq-submit-partial-pool-cq-history'
 STRATEGY_CQ_PARTIAL_IGNORED_STAGES = (
     'strategy:cq-submit-partial-pool-ignored-stages')
-STRATEGY_CQ_PARTIAL_SUBSYSTEM = 'strategy:cq-submit-partial-pool-pass-subsystem'
 STRATEGY_CQ_PARTIAL_BUILDS_PASSED = (
     'strategy:cq-submit-partial-pool-builds-passed')
 
@@ -958,8 +1028,7 @@ STRATEGY_CQ_PARTIAL_REASONS = {
     STRATEGY_CQ_PARTIAL_NOT_TESTED: 1,
     STRATEGY_CQ_PARTIAL_CQ_HISTORY: 2,
     STRATEGY_CQ_PARTIAL_IGNORED_STAGES: 3,
-    STRATEGY_CQ_PARTIAL_SUBSYSTEM: 4,
-    STRATEGY_CQ_PARTIAL_BUILDS_PASSED: 5
+    STRATEGY_CQ_PARTIAL_BUILDS_PASSED: 4
 }
 
 # CQ types.
@@ -1002,6 +1071,8 @@ CHROOT_ENVIRONMENT_WHITELIST = (
 # Paths for Chrome LKGM which are relative to the Chromium base url.
 CHROME_LKGM_FILE = 'CHROMEOS_LKGM'
 PATH_TO_CHROME_LKGM = 'chromeos/%s' % CHROME_LKGM_FILE
+# Path for the Chrome LKGM's closest OWNERS file.
+PATH_TO_CHROME_CHROMEOS_OWNERS = 'chromeos/OWNERS'
 
 # Cache constants.
 COMMON_CACHE = 'common'
@@ -1078,6 +1149,8 @@ METADATA_TAGS = 'tags'
 DELTA_SYSROOT_TAR = 'delta_sysroot.tar.xz'
 DELTA_SYSROOT_BATCH = 'batch'
 
+FIRMWARE_ARCHIVE_NAME = 'firmware_from_source.tar.bz2'
+
 # Global configuration constants.
 CHROMITE_CONFIG_DIR = os.path.expanduser('~/.chromite')
 CHROME_SDK_BASHRC = os.path.join(CHROMITE_CONFIG_DIR, 'chrome_sdk.bashrc')
@@ -1149,11 +1222,17 @@ CHROMEOS_SERVICE_ACCOUNT = os.path.join('/', 'creds', 'service_accounts',
                                         'service-account-chromeos.json')
 
 # Buildbucket buckets
-TRYSERVER_BUILDBUCKET_BUCKET = 'master.chromiumos.tryserver'
 CHROMEOS_RELEASE_BUILDBUCKET_BUCKET = 'master.chromeos_release'
 CHROMEOS_BUILDBUCKET_BUCKET = 'master.chromeos'
 CHROMIUMOS_BUILDBUCKET_BUCKET = 'master.chromiumos'
 INTERNAL_SWARMING_BUILDBUCKET_BUCKET = 'luci.chromeos.general'
+
+ACTIVE_BUCKETS = [
+    CHROMEOS_RELEASE_BUILDBUCKET_BUCKET,
+    CHROMEOS_BUILDBUCKET_BUCKET,
+    CHROMIUMOS_BUILDBUCKET_BUCKET,
+    INTERNAL_SWARMING_BUILDBUCKET_BUCKET,
+]
 
 # Build retry limit on buildbucket
 BUILDBUCKET_BUILD_RETRY_LIMIT = 2
@@ -1178,3 +1257,13 @@ SELF_DESTRUCTED_WITH_SUCCESS_BUILD = 'self_destructed_with_success_build'
 # The path to update_payload in the update_engine.
 UPDATE_ENGINE_SCRIPTS_PATH = os.path.join(SOURCE_ROOT, 'src', 'aosp', 'system',
                                           'update_engine', 'scripts')
+
+# Chroot snapshot names
+CHROOT_SNAPSHOT_CLEAN = 'clean-chroot'
+
+# Partition labels.
+PART_STATE = 'STATE'
+PART_ROOT_A = 'ROOT-A'
+PART_ROOT_B = 'ROOT-B'
+PART_KERN_A = 'KERN-A'
+PART_KERN_B = 'KERN-B'

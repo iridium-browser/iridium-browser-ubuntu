@@ -39,11 +39,8 @@
   return nativeContent == _nativeContent.end() ? nil : nativeContent->second;
 }
 
-- (id<CRWNativeContent>)controllerForUnhandledContentAtURL:(const GURL&)URL
-                                                  webState:
-                                                      (web::WebState*)webState {
-  auto nativeContent = _nativeContent.find(URL);
-  return nativeContent == _nativeContent.end() ? nil : nativeContent->second;
+- (CGFloat)nativeContentHeaderHeightForWebState:(web::WebState*)webState {
+  return 0;
 }
 
 @end

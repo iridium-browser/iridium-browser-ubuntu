@@ -4,6 +4,8 @@
 
 #include "chrome/browser/supervised_user/child_accounts/child_account_service.h"
 
+#include <utility>
+
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/feature_list.h"
@@ -32,9 +34,13 @@
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_manager.h"
 #include "components/signin/core/browser/signin_pref_names.h"
+#include "content/public/browser/browser_context.h"
+#include "content/public/browser/storage_partition.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
+#else
+#include "chrome/browser/signin/signin_util.h"
 #endif
 
 const char kGaiaCookieManagerSource[] = "child_account_service";
@@ -128,11 +134,11 @@ void ChildAccountService::Shutdown() {
 }
 
 void ChildAccountService::AddChildStatusReceivedCallback(
-    const base::Closure& callback) {
+    base::OnceClosure callback) {
   if (IsChildAccountStatusKnown())
-    callback.Run();
+    std::move(callback).Run();
   else
-    status_received_callback_list_.push_back(callback);
+    status_received_callback_list_.push_back(std::move(callback));
 }
 
 ChildAccountService::AuthState ChildAccountService::GetGoogleAuthState() {
@@ -191,7 +197,7 @@ bool ChildAccountService::SetActive(bool active) {
     // This is also used by user policies (UserPolicySigninService), but since
     // child accounts can not also be Dasher accounts, there shouldn't be any
     // problems.
-    SigninManagerFactory::GetForProfile(profile_)->ProhibitSignout(true);
+    signin_util::SetUserSignoutAllowedForProfile(profile_, false);
 #endif
 
     // TODO(treib): Maybe store the last update time in a pref, so we don't
@@ -223,7 +229,7 @@ bool ChildAccountService::SetActive(bool active) {
 #endif
 
 #if !defined(OS_CHROMEOS)
-    SigninManagerFactory::GetForProfile(profile_)->ProhibitSignout(false);
+    signin_util::SetUserSignoutAllowedForProfile(profile_, true);
 #endif
 
     CancelFetchingFamilyInfo();
@@ -253,8 +259,8 @@ void ChildAccountService::SetIsChildAccount(bool is_child_account) {
   }
   profile_->GetPrefs()->SetBoolean(prefs::kChildAccountStatusKnown, true);
 
-  for (const auto& callback : status_received_callback_list_)
-    callback.Run();
+  for (auto& callback : status_received_callback_list_)
+    std::move(callback).Run();
   status_received_callback_list_.clear();
 }
 
@@ -328,7 +334,8 @@ void ChildAccountService::StartFetchingFamilyInfo() {
       SigninManagerFactory::GetForProfile(profile_)
           ->GetAuthenticatedAccountId(),
       ProfileOAuth2TokenServiceFactory::GetForProfile(profile_),
-      profile_->GetRequestContext()));
+      content::BrowserContext::GetDefaultStoragePartition(profile_)
+          ->GetURLLoaderFactoryForBrowserProcess()));
   family_fetcher_->StartGetFamilyMembers();
 }
 

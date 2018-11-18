@@ -42,7 +42,8 @@ HeapProfilerTestRunner.createHeapSnapshotMockFactories = function() {
           node_fields: ['type', 'name', 'id', 'self_size', 'retained_size', 'dominator', 'edge_count'],
           node_types: [['hidden', 'object'], '', '', '', '', '', ''],
           edge_fields: ['type', 'name_or_index', 'to_node'],
-          edge_types: [['element', 'property', 'shortcut'], '', '']
+          edge_types: [['element', 'property', 'shortcut'], '', ''],
+          location_fields: ['object_index', 'script_id', 'line', 'column']
         },
 
         node_count: 6,
@@ -55,6 +56,9 @@ HeapProfilerTestRunner.createHeapSnapshotMockFactories = function() {
       ],
 
       edges: [1, 6, 7, 1, 7, 14, 0, 1, 14, 1, 8, 21, 1, 9, 21, 1, 10, 28, 1, 11, 35],
+
+      locations: [0, 1, 2, 3, 18, 2, 3, 4],
+
       strings: ['', 'A', 'B', 'C', 'D', 'E', 'a', 'b', 'ac', 'bc', 'bd', 'ce']
     };
   };
@@ -76,7 +80,8 @@ HeapProfilerTestRunner.createHeapSnapshotMockFactories = function() {
           node_fields: ['type', 'name', 'id', 'edge_count'],
           node_types: [['hidden', 'object', 'synthetic'], '', '', ''],
           edge_fields: ['type', 'name_or_index', 'to_node'],
-          edge_types: [['element', 'hidden', 'internal'], '', '']
+          edge_types: [['element', 'hidden', 'internal'], '', ''],
+          location_fields: ['object_index', 'script_id', 'line', 'column']
         },
 
         node_count: 13,
@@ -92,6 +97,8 @@ HeapProfilerTestRunner.createHeapSnapshotMockFactories = function() {
         0,  1, 4, 0,  2, 8, 0,  3, 12, 0,  4, 16, 0,  1, 20, 0,  2, 24, 0, 1,
         24, 0, 2, 28, 1, 3, 32, 0, 1,  36, 0, 1,  40, 2, 12, 44, 2, 1,  48
       ],
+
+      locations: [0, 2, 1, 1, 6, 2, 2, 2],
 
       strings: ['', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'M', 'N', 'Window', 'native']
     });
@@ -233,6 +240,7 @@ HeapProfilerTestRunner.createHeapSnapshotMockFactories = function() {
 
         'nodes': [],
         'edges': [],
+        'locations': [],
         'strings': []
       };
 
@@ -543,6 +551,10 @@ HeapProfilerTestRunner.expandRow = function(row, callback) {
   })();
 };
 
+HeapProfilerTestRunner.expandRowPromise = function(row) {
+  return new Promise(resolve => HeapProfilerTestRunner.expandRow(row, resolve));
+};
+
 HeapProfilerTestRunner.findAndExpandGCRoots = function(callback) {
   HeapProfilerTestRunner.findAndExpandRow('(GC roots)', callback);
 };
@@ -551,11 +563,12 @@ HeapProfilerTestRunner.findAndExpandWindow = function(callback) {
   HeapProfilerTestRunner.findAndExpandRow('Window', callback);
 };
 
-HeapProfilerTestRunner.findAndExpandRow = function(name, callback) {
-  callback = TestRunner.safeWrap(callback);
+HeapProfilerTestRunner.findAndExpandRow = async function(name, callback) {
   const row = HeapProfilerTestRunner.findRow(name);
-  TestRunner.assertEquals(true, !!row, '"' + name + '" row');
-  HeapProfilerTestRunner.expandRow(row, callback);
+  TestRunner.assertEquals(true, !!row, `"${name}" row`);
+  await HeapProfilerTestRunner.expandRowPromise(row);
+  TestRunner.safeWrap(callback)(row);
+  return row;
 };
 
 HeapProfilerTestRunner.findButtonsNode = function(row, startNode) {
@@ -563,16 +576,11 @@ HeapProfilerTestRunner.findButtonsNode = function(row, startNode) {
     if (!node.selectable && node.showNext)
       return node;
   }
-
   return null;
 };
 
 HeapProfilerTestRunner.findRow = function(name, parent) {
-  function matcher(x) {
-    return x._name === name;
-  }
-
-  return HeapProfilerTestRunner.findMatchingRow(matcher, parent);
+  return HeapProfilerTestRunner.findMatchingRow(node => node._name === name, parent);
 };
 
 HeapProfilerTestRunner.findMatchingRow = function(matcher, parent) {
@@ -587,10 +595,12 @@ HeapProfilerTestRunner.findMatchingRow = function(matcher, parent) {
 };
 
 HeapProfilerTestRunner.switchToView = function(title, callback) {
-  callback = TestRunner.safeWrap(callback);
-  const view = UI.panels.heap_profiler.visibleView;
-  view._changePerspectiveAndWait(title).then(callback);
-  HeapProfilerTestRunner._currentGrid().scrollContainer.style.height = '10000px';
+  return new Promise(resolve => {
+    callback = TestRunner.safeWrap(callback);
+    const view = UI.panels.heap_profiler.visibleView;
+    view._changePerspectiveAndWait(title).then(callback).then(resolve);
+    HeapProfilerTestRunner._currentGrid().scrollContainer.style.height = '10000px';
+  });
 };
 
 HeapProfilerTestRunner.takeAndOpenSnapshot = async function(generator, callback) {
@@ -613,6 +623,36 @@ HeapProfilerTestRunner.takeAndOpenSnapshot = async function(generator, callback)
   if (!UI.context.flavor(SDK.HeapProfilerModel))
     await new Promise(resolve => UI.context.addFlavorChangeListener(SDK.HeapProfilerModel, resolve));
   profileType._takeHeapSnapshot();
+};
+
+/**
+ * @return {!Promise<!Profiler.HeapProfileHeader>}
+ */
+HeapProfilerTestRunner.takeSnapshotPromise = function() {
+  return new Promise(resolve => {
+    const heapProfileType = Profiler.ProfileTypeRegistry.instance.heapSnapshotProfileType;
+    heapProfileType.addEventListener(Profiler.HeapSnapshotProfileType.SnapshotReceived, finishHeapSnapshot);
+    heapProfileType._takeHeapSnapshot();
+
+    function finishHeapSnapshot() {
+      const profiles = heapProfileType.getProfiles();
+      if (!profiles.length)
+        throw 'FAILED: no profiles found.';
+      if (profiles.length > 1)
+        throw `FAILED: wrong number of recorded profiles was found. profiles.length = ${profiles.length}`;
+      const profile = profiles[0];
+      UI.panels.heap_profiler.showProfile(profile);
+
+      const dataGrid = HeapProfilerTestRunner.currentProfileView()._dataGrid;
+      dataGrid.addEventListener(Profiler.HeapSnapshotSortableDataGrid.Events.SortingComplete, sortingComplete, null);
+
+      function sortingComplete() {
+        dataGrid.removeEventListener(
+            Profiler.HeapSnapshotSortableDataGrid.Events.SortingComplete, sortingComplete, null);
+        resolve(profile);
+      }
+    }
+  });
 };
 
 HeapProfilerTestRunner.viewColumns = function() {

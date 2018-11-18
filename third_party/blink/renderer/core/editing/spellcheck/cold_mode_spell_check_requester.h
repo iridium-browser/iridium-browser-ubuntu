@@ -16,8 +16,10 @@ class LocalFrame;
 class IdleDeadline;
 class SpellCheckRequester;
 
-// This class is only supposed to be used by IdleSpellCheckCallback in cold mode
-// invocation. Not to be confused with SpellCheckRequester.
+// This class is only supposed to be used by IdleSpellCheckController in cold
+// mode invocation. Not to be confused with SpellCheckRequester. The class
+// iteratively checks the editing host currently focused when the document is
+// idle.
 class ColdModeSpellCheckRequester
     : public GarbageCollected<ColdModeSpellCheckRequester> {
  public:
@@ -28,7 +30,9 @@ class ColdModeSpellCheckRequester
   }
 
   void Invoke(IdleDeadline*);
-  bool FullDocumentChecked() const;
+
+  void ClearProgress();
+  bool FullyChecked() const;
 
   void Trace(blink::Visitor*);
 
@@ -38,25 +42,25 @@ class ColdModeSpellCheckRequester
   LocalFrame& GetFrame() const { return *frame_; }
   SpellCheckRequester& GetSpellCheckRequester() const;
 
-  // Perform checking task incrementally based on the stored state.
-  void Step();
+  const Element* CurrentFocusedEditable() const;
 
-  void SearchForNextRootEditable();
-  void InitializeForCurrentRootEditable();
-  bool HaveMoreChunksToCheck();
   void RequestCheckingForNextChunk();
-  void FinishCheckingCurrentRootEditable();
+  void SetHasFullyChecked();
 
-  void ResetCheckingProgress();
-  void ChunkAndRequestFullCheckingFor(const Element&);
-
+  // The LocalFrame this cold mode checker belongs to.
   const Member<LocalFrame> frame_;
-  Member<Node> next_node_;
-  Member<Element> current_root_editable_;
-  int current_full_length_;
-  int current_chunk_index_;
-  Position current_chunk_start_;
-  uint64_t last_checked_dom_tree_version_;
+
+  // The root editable element checked in the last invocation. |nullptr| if not
+  // invoked yet or didn't find any root editable element to check.
+  Member<const Element> root_editable_;
+
+  // If |root_editable_| is non-null and hasn't been fully checked, the id of
+  // the last checked chunk and the remaining range to check;
+  // Otherwise, |kInvalidChunkIndex| and null.
+  int last_chunk_index_;
+  Member<Range> remaining_check_range_;
+
+  // A test-only flag for forcing lifecycle advancing.
   mutable bool needs_more_invocation_for_testing_;
 
   DISALLOW_COPY_AND_ASSIGN(ColdModeSpellCheckRequester);

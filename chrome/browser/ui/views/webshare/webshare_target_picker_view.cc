@@ -8,7 +8,7 @@
 
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/ui/browser_dialogs.h"
-#include "chrome/browser/ui/views/harmony/chrome_layout_provider.h"
+#include "chrome/browser/ui/views/chrome_layout_provider.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/constrained_window/constrained_window_views.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -22,9 +22,8 @@
 
 namespace {
 
-int kDialogWidth = 500;
-int kDialogHeight = 400;
-
+int kWebShareTargetPickerDialogWidth = 500;
+int kWebShareTargetPickerDialogHeight = 400;
 }
 
 // Supplies data to the table view.
@@ -122,7 +121,8 @@ WebShareTargetPickerView::~WebShareTargetPickerView() {
 }
 
 gfx::Size WebShareTargetPickerView::CalculatePreferredSize() const {
-  return gfx::Size(kDialogWidth, kDialogHeight);
+  return gfx::Size(kWebShareTargetPickerDialogWidth,
+                   kWebShareTargetPickerDialogHeight);
 }
 
 ui::ModalType WebShareTargetPickerView::GetModalType() const {

@@ -66,6 +66,8 @@ class SRGBTextureTest : public ANGLETest
     GLint mTextureLocation = -1;
 };
 
+// GenerateMipmaps should generate INVALID_OPERATION in ES 2.0 / WebGL 1.0 with EXT_sRGB.
+// https://bugs.chromium.org/p/chromium/issues/detail?id=769989
 TEST_P(SRGBTextureTest, SRGBValidation)
 {
     // TODO(fjhenigman): Figure out why this fails on Ozone Intel.
@@ -87,7 +89,14 @@ TEST_P(SRGBTextureTest, SRGBValidation)
         EXPECT_GL_NO_ERROR();
 
         glGenerateMipmap(GL_TEXTURE_2D);
-        EXPECT_GL_ERROR(GL_INVALID_OPERATION);
+        if (getClientMajorVersion() < 3)
+        {
+            EXPECT_GL_ERROR(GL_INVALID_OPERATION);
+        }
+        else
+        {
+            EXPECT_GL_NO_ERROR();
+        }
     }
     else
     {
@@ -118,7 +127,7 @@ TEST_P(SRGBTextureTest, SRGBAValidation)
         EXPECT_GL_NO_ERROR();
 
         glGenerateMipmap(GL_TEXTURE_2D);
-        if (getClientMajorVersion() == 2)
+        if (getClientMajorVersion() < 3)
         {
             EXPECT_GL_ERROR(GL_INVALID_OPERATION);
         }
@@ -133,6 +142,30 @@ TEST_P(SRGBTextureTest, SRGBAValidation)
     }
 
     glDeleteTextures(1, &tex);
+}
+
+// Test that sized SRGBA formats allow generating mipmaps
+TEST_P(SRGBTextureTest, SRGBASizedValidation)
+{
+    // TODO(fjhenigman): Figure out why this fails on Ozone Intel.
+    ANGLE_SKIP_TEST_IF(IsOzone() && IsIntel() && IsOpenGLES());
+
+    // ES3 required for sized SRGB textures
+    ANGLE_SKIP_TEST_IF(getClientMajorVersion() < 3);
+
+    GLTexture tex;
+    glBindTexture(GL_TEXTURE_2D, tex);
+
+    GLubyte pixel[4] = {0};
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_SRGB8_ALPHA8, 1, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
+
+    EXPECT_GL_NO_ERROR();
+
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
+    EXPECT_GL_NO_ERROR();
+
+    glGenerateMipmap(GL_TEXTURE_2D);
+    EXPECT_GL_NO_ERROR();
 }
 
 TEST_P(SRGBTextureTest, SRGBARenderbuffer)

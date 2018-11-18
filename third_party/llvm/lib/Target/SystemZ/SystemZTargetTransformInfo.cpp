@@ -329,7 +329,7 @@ bool SystemZTTIImpl::hasDivRemOp(Type *DataType, bool IsSigned) {
 }
 
 int SystemZTTIImpl::getArithmeticInstrCost(
-    unsigned Opcode, Type *Ty,  
+    unsigned Opcode, Type *Ty,
     TTI::OperandValueKind Op1Info, TTI::OperandValueKind Op2Info,
     TTI::OperandValueProperties Opd1PropInfo,
     TTI::OperandValueProperties Opd2PropInfo,
@@ -439,9 +439,11 @@ int SystemZTTIImpl::getArithmeticInstrCost(
     if (Opcode == Instruction::Or)
       return 1;
 
-    if (Opcode == Instruction::Xor && ScalarBits == 1)
-      // 2 * ipm sequences ; xor ; shift ; compare
-      return 7;
+    if (Opcode == Instruction::Xor && ScalarBits == 1) {
+      if (ST->hasLoadStoreOnCond2())
+        return 5; // 2 * (li 0; loc 1); xor
+      return 7; // 2 * ipm sequences ; xor ; shift ; compare
+    }
 
     if (UDivPow2)
       return 1;
@@ -469,7 +471,7 @@ int SystemZTTIImpl::getShuffleCost(TTI::ShuffleKind Kind, Type *Tp, int Index,
   assert (Tp->isVectorTy());
   assert (ST->hasVector() && "getShuffleCost() called.");
   unsigned NumVectors = getNumberOfParts(Tp);
-  
+
   // TODO: Since fp32 is expanded, the shuffle cost should always be 0.
 
   // FP128 values are always in scalar registers, so there is no work
@@ -647,7 +649,7 @@ int SystemZTTIImpl::getCastInstrCost(unsigned Opcode, Type *Dst, Type *Src,
         return Cost;
       }
     }
-  
+
     if (Opcode == Instruction::SIToFP || Opcode == Instruction::UIToFP ||
         Opcode == Instruction::FPToSI || Opcode == Instruction::FPToUI) {
       // TODO: Fix base implementation which could simplify things a bit here
@@ -704,9 +706,12 @@ int SystemZTTIImpl::getCastInstrCost(unsigned Opcode, Type *Dst, Type *Src,
 
     if (Opcode == Instruction::SIToFP || Opcode == Instruction::UIToFP)
       return (SrcScalarBits >= 32 ? 1 : 2 /*i8/i16 extend*/);
-    
+
     if ((Opcode == Instruction::ZExt || Opcode == Instruction::SExt) &&
         Src->isIntegerTy(1)) {
+      if (ST->hasLoadStoreOnCond2())
+        return 2; // li 0; loc 1
+
       // This should be extension of a compare i1 result, which is done with
       // ipm and a varying sequence of instructions.
       unsigned Cost = 0;
@@ -718,7 +723,6 @@ int SystemZTTIImpl::getCastInstrCost(unsigned Opcode, Type *Dst, Type *Src,
       if (CmpOpTy != nullptr && CmpOpTy->isFloatingPointTy())
         // If operands of an fp-type was compared, this costs +1.
         Cost++;
-
       return Cost;
     }
   }
@@ -737,7 +741,7 @@ int SystemZTTIImpl::getCmpSelInstrCost(unsigned Opcode, Type *ValTy, Type *CondT
       unsigned PredicateExtraCost = 0;
       if (I != nullptr) {
         // Some predicates cost one or two extra instructions.
-        switch (dyn_cast<CmpInst>(I)->getPredicate()) {
+        switch (cast<CmpInst>(I)->getPredicate()) {
         case CmpInst::Predicate::ICMP_NE:
         case CmpInst::Predicate::ICMP_UGE:
         case CmpInst::Predicate::ICMP_ULE:

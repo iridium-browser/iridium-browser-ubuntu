@@ -20,8 +20,6 @@
 
 #include "third_party/blink/renderer/core/svg/svg_text_content_element.h"
 
-#include "third_party/blink/renderer/bindings/core/v8/exception_messages.h"
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
 #include "third_party/blink/renderer/core/css_property_names.h"
 #include "third_party/blink/renderer/core/css_value_keywords.h"
 #include "third_party/blink/renderer/core/editing/frame_selection.h"
@@ -33,6 +31,8 @@
 #include "third_party/blink/renderer/core/svg/svg_rect_tear_off.h"
 #include "third_party/blink/renderer/core/svg_names.h"
 #include "third_party/blink/renderer/core/xml_names.h"
+#include "third_party/blink/renderer/platform/bindings/exception_messages.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 
 namespace blink {
 
@@ -59,7 +59,7 @@ class SVGAnimatedTextLength final : public SVGAnimatedLength {
 
   SVGLengthTearOff* baseVal() override {
     SVGTextContentElement* text_content_element =
-        ToSVGTextContentElement(contextElement());
+        ToSVGTextContentElement(ContextElement());
     if (!text_content_element->TextLengthIsSpecifiedByUser())
       BaseValue()->NewValueSpecifiedUnits(
           CSSPrimitiveValue::UnitType::kNumber,
@@ -72,7 +72,8 @@ class SVGAnimatedTextLength final : public SVGAnimatedLength {
   SVGAnimatedTextLength(SVGTextContentElement* context_element)
       : SVGAnimatedLength(context_element,
                           SVGNames::textLengthAttr,
-                          SVGLength::Create(SVGLengthMode::kWidth)) {}
+                          SVGLengthMode::kWidth,
+                          SVGLength::Initial::kUnitlessZero) {}
 };
 
 SVGTextContentElement::SVGTextContentElement(const QualifiedName& tag_name,
@@ -113,8 +114,9 @@ float SVGTextContentElement::getSubStringLength(
   unsigned number_of_chars = getNumberOfChars();
   if (charnum >= number_of_chars) {
     exception_state.ThrowDOMException(
-        kIndexSizeError, ExceptionMessages::IndexExceedsMaximumBound(
-                             "charnum", charnum, getNumberOfChars()));
+        DOMExceptionCode::kIndexSizeError,
+        ExceptionMessages::IndexExceedsMaximumBound("charnum", charnum,
+                                                    getNumberOfChars()));
     return 0.0f;
   }
 
@@ -131,8 +133,9 @@ SVGPointTearOff* SVGTextContentElement::getStartPositionOfChar(
 
   if (charnum >= getNumberOfChars()) {
     exception_state.ThrowDOMException(
-        kIndexSizeError, ExceptionMessages::IndexExceedsMaximumBound(
-                             "charnum", charnum, getNumberOfChars()));
+        DOMExceptionCode::kIndexSizeError,
+        ExceptionMessages::IndexExceedsMaximumBound("charnum", charnum,
+                                                    getNumberOfChars()));
     return nullptr;
   }
 
@@ -148,8 +151,9 @@ SVGPointTearOff* SVGTextContentElement::getEndPositionOfChar(
 
   if (charnum >= getNumberOfChars()) {
     exception_state.ThrowDOMException(
-        kIndexSizeError, ExceptionMessages::IndexExceedsMaximumBound(
-                             "charnum", charnum, getNumberOfChars()));
+        DOMExceptionCode::kIndexSizeError,
+        ExceptionMessages::IndexExceedsMaximumBound("charnum", charnum,
+                                                    getNumberOfChars()));
     return nullptr;
   }
 
@@ -165,8 +169,9 @@ SVGRectTearOff* SVGTextContentElement::getExtentOfChar(
 
   if (charnum >= getNumberOfChars()) {
     exception_state.ThrowDOMException(
-        kIndexSizeError, ExceptionMessages::IndexExceedsMaximumBound(
-                             "charnum", charnum, getNumberOfChars()));
+        DOMExceptionCode::kIndexSizeError,
+        ExceptionMessages::IndexExceedsMaximumBound("charnum", charnum,
+                                                    getNumberOfChars()));
     return nullptr;
   }
 
@@ -181,8 +186,9 @@ float SVGTextContentElement::getRotationOfChar(
 
   if (charnum >= getNumberOfChars()) {
     exception_state.ThrowDOMException(
-        kIndexSizeError, ExceptionMessages::IndexExceedsMaximumBound(
-                             "charnum", charnum, getNumberOfChars()));
+        DOMExceptionCode::kIndexSizeError,
+        ExceptionMessages::IndexExceedsMaximumBound("charnum", charnum,
+                                                    getNumberOfChars()));
     return 0.0f;
   }
 
@@ -203,8 +209,9 @@ void SVGTextContentElement::selectSubString(unsigned charnum,
   unsigned number_of_chars = getNumberOfChars();
   if (charnum >= number_of_chars) {
     exception_state.ThrowDOMException(
-        kIndexSizeError, ExceptionMessages::IndexExceedsMaximumBound(
-                             "charnum", charnum, getNumberOfChars()));
+        DOMExceptionCode::kIndexSizeError,
+        ExceptionMessages::IndexExceedsMaximumBound("charnum", charnum,
+                                                    getNumberOfChars()));
     return;
   }
 

@@ -8,8 +8,8 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef VP9_ENCODER_VP9_RATECTRL_H_
-#define VP9_ENCODER_VP9_RATECTRL_H_
+#ifndef VPX_VP9_ENCODER_VP9_RATECTRL_H_
+#define VPX_VP9_ENCODER_VP9_RATECTRL_H_
 
 #include "vpx/vpx_codec.h"
 #include "vpx/vpx_integer.h"
@@ -179,6 +179,8 @@ typedef struct {
   int last_frame_is_src_altref;
   int high_source_sad;
   int count_last_scene_change;
+  int hybrid_intra_scene_change;
+  int re_encode_maxq_scene_change;
   int avg_frame_low_motion;
   int af_ratio_onepass_vbr;
   int force_qpmin;
@@ -302,8 +304,12 @@ void vp9_scene_detection_onepass(struct VP9_COMP *cpi);
 
 int vp9_encodedframe_overshoot(struct VP9_COMP *cpi, int frame_size, int *q);
 
+void vp9_configure_buffer_updates(struct VP9_COMP *cpi, int gf_group_index);
+
+void vp9_estimate_qp_gop(struct VP9_COMP *cpi);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif
 
-#endif  // VP9_ENCODER_VP9_RATECTRL_H_
+#endif  // VPX_VP9_ENCODER_VP9_RATECTRL_H_

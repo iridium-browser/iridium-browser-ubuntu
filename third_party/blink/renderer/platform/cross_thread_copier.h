@@ -36,16 +36,20 @@
 #include "base/memory/weak_ptr.h"
 #include "mojo/public/cpp/bindings/interface_ptr_info.h"
 #include "mojo/public/cpp/bindings/interface_request.h"
-#include "third_party/blink/public/common/message_port/message_port_channel.h"
+#include "third_party/blink/public/common/messaging/message_port_channel.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"  // FunctionThreadAffinity
 #include "third_party/blink/renderer/platform/wtf/type_traits.h"
+#include "third_party/blink/renderer/platform/wtf/wtf_size_t.h"
 
 namespace base {
 template <typename, typename>
 class RefCountedThreadSafe;
+class TimeDelta;
+class TimeTicks;
+class Time;
 }
 
 class SkRefCnt;
@@ -63,11 +67,6 @@ namespace blink {
 class IntRect;
 class IntSize;
 class KURL;
-class ResourceError;
-class ResourceRequest;
-class ResourceResponse;
-struct CrossThreadResourceResponseData;
-struct CrossThreadResourceRequestData;
 template <typename T>
 class CrossThreadPersistent;
 template <typename T>
@@ -124,6 +123,24 @@ struct CrossThreadCopier<sk_sp<T>>
                 "sk_sp<T> can be passed across threads only if T is SkRefCnt.");
 };
 
+template <>
+struct CrossThreadCopier<base::TimeDelta>
+    : public CrossThreadCopierPassThrough<base::TimeDelta> {
+  STATIC_ONLY(CrossThreadCopier);
+};
+
+template <>
+struct CrossThreadCopier<base::TimeTicks>
+    : public CrossThreadCopierPassThrough<base::TimeTicks> {
+  STATIC_ONLY(CrossThreadCopier);
+};
+
+template <>
+struct CrossThreadCopier<base::Time>
+    : public CrossThreadCopierPassThrough<base::Time> {
+  STATIC_ONLY(CrossThreadCopier);
+};
+
 // nullptr_t can be passed through without any changes.
 template <>
 struct CrossThreadCopier<std::nullptr_t>
@@ -155,7 +172,7 @@ struct CrossThreadCopier<std::unique_ptr<T, Deleter>> {
   }
 };
 
-template <typename T, size_t inlineCapacity, typename Allocator>
+template <typename T, wtf_size_t inlineCapacity, typename Allocator>
 struct CrossThreadCopier<
     Vector<std::unique_ptr<T>, inlineCapacity, Allocator>> {
   STATIC_ONLY(CrossThreadCopier);
@@ -165,7 +182,7 @@ struct CrossThreadCopier<
   }
 };
 
-template <size_t inlineCapacity, typename Allocator>
+template <wtf_size_t inlineCapacity, typename Allocator>
 struct CrossThreadCopier<Vector<uint64_t, inlineCapacity, Allocator>> {
   STATIC_ONLY(CrossThreadCopier);
   using Type = Vector<uint64_t, inlineCapacity, Allocator>;
@@ -227,29 +244,6 @@ struct CrossThreadCopier<String> {
   PLATFORM_EXPORT static Type Copy(const String&);
 };
 
-template <>
-struct CrossThreadCopier<ResourceError> {
-  STATIC_ONLY(CrossThreadCopier);
-  typedef ResourceError Type;
-  PLATFORM_EXPORT static Type Copy(const ResourceError&);
-};
-
-template <>
-struct CrossThreadCopier<ResourceRequest> {
-  STATIC_ONLY(CrossThreadCopier);
-  typedef WTF::PassedWrapper<std::unique_ptr<CrossThreadResourceRequestData>>
-      Type;
-  PLATFORM_EXPORT static Type Copy(const ResourceRequest&);
-};
-
-template <>
-struct CrossThreadCopier<ResourceResponse> {
-  STATIC_ONLY(CrossThreadCopier);
-  typedef WTF::PassedWrapper<std::unique_ptr<CrossThreadResourceResponseData>>
-      Type;
-  PLATFORM_EXPORT static Type Copy(const ResourceResponse&);
-};
-
 // mojo::InterfacePtrInfo is a cross-thread safe mojo::InterfacePtr.
 template <typename Interface>
 struct CrossThreadCopier<mojo::InterfacePtrInfo<Interface>> {
@@ -278,7 +272,7 @@ struct CrossThreadCopier<MessagePortChannel> {
   }
 };
 
-template <size_t inlineCapacity, typename Allocator>
+template <wtf_size_t inlineCapacity, typename Allocator>
 struct CrossThreadCopier<
     Vector<MessagePortChannel, inlineCapacity, Allocator>> {
   STATIC_ONLY(CrossThreadCopier);

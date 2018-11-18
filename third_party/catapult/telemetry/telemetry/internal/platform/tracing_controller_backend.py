@@ -3,7 +3,6 @@
 # found in the LICENSE file.
 
 import ast
-from py_utils import atexit_with_log
 import contextlib
 import gc
 import logging
@@ -13,15 +12,16 @@ import tempfile
 import traceback
 import uuid
 
-from battor import battor_error
 from py_trace_event import trace_event
-from py_utils import discover
 from telemetry.core import exceptions
 from telemetry.core import util
 from telemetry.internal.platform import tracing_agent
 from telemetry.internal.platform.tracing_agent import chrome_tracing_agent
 from telemetry.timeline import tracing_config
 from tracing.trace_data import trace_data as trace_data_module
+
+from py_utils import atexit_with_log
+from py_utils import discover
 
 
 def _IterAllTracingAgentClasses():
@@ -65,6 +65,9 @@ class TracingControllerBackend(object):
     self._telemetry_info = None
     self._nonfatal_exceptions = []
 
+  # TODO(charliea): Remove all logic supporting the notion of nonfatal
+  # exceptions. BattOr was the only use case for this logic, and we no longer
+  # support BattOr tracing in Telemetry.
   @contextlib.contextmanager
   def _CollectNonfatalException(self, context_description):
     """Collects any nonfatal exceptions that occur in the context, adding them
@@ -74,15 +77,8 @@ class TracingControllerBackend(object):
       context_description: A string description of the context to be used in
           logging.
     """
-    try:
-      yield
-    except Exception as e: # pylint: disable=broad-except
-      if isinstance(e, battor_error.BattOrError):
-        logging.exception(
-            'NONFATAL exception encountered during %s:', context_description)
-        self._nonfatal_exceptions.append(e)
-      else:
-        raise
+    del context_description
+    yield
 
   def StartTracing(self, config, timeout):
     if self.is_tracing_running:
@@ -240,6 +236,12 @@ class TracingControllerBackend(object):
   @property
   def is_tracing_running(self):
     return self._current_state is not None
+
+  @property
+  def is_chrome_tracing_running(self):
+    return self.is_tracing_running and any(
+        isinstance(agent, chrome_tracing_agent.ChromeTracingAgent)
+        for agent in self._active_agents_instances)
 
   def _GetActiveChromeTracingAgent(self):
     if not self.is_tracing_running:

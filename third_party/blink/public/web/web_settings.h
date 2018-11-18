@@ -134,7 +134,6 @@ class WebSettings {
   // contents at an insecure URL. Otherwise, disallows it. The
   // LocalFrameClient set to the frame may override the value set by this
   // method.
-  virtual void SetAccessibilityEnabled(bool) = 0;
   virtual void SetAccessibilityPasswordValuesEnabled(bool) = 0;
   virtual void SetAllowFileAccessFromFileURLs(bool) = 0;
   virtual void SetAllowCustomScrollbarInMainFrame(bool) = 0;
@@ -151,7 +150,6 @@ class WebSettings {
   virtual void SetAntialiasedClips2dCanvasEnabled(bool) = 0;
   virtual void SetAutoplayPolicy(AutoplayPolicy) = 0;
   virtual void SetAutoZoomFocusedNodeToLegibleScale(bool) = 0;
-  virtual void SetBrowserSideNavigationEnabled(bool) = 0;
   virtual void SetClobberUserAgentInitialScaleQuirk(bool) = 0;
   virtual void SetCookieEnabled(bool) = 0;
   virtual void SetNavigateOnDragDrop(bool) = 0;
@@ -172,14 +170,13 @@ class WebSettings {
   virtual void SetEnableScrollAnimator(bool) = 0;
   virtual void SetEnableTouchAdjustment(bool) = 0;
   virtual void SetSmoothScrollForFindEnabled(bool) = 0;
-  virtual bool MultiTargetTapNotificationEnabled() = 0;
-  virtual void SetMultiTargetTapNotificationEnabled(bool) = 0;
   virtual void SetWebGL1Enabled(bool) = 0;
   virtual void SetWebGL2Enabled(bool) = 0;
   virtual void SetFantasyFontFamily(const WebString&,
                                     UScriptCode = USCRIPT_COMMON) = 0;
   virtual void SetFixedFontFamily(const WebString&,
                                   UScriptCode = USCRIPT_COMMON) = 0;
+  virtual void SetNetworkQuietTimeout(double timeout) = 0;
   virtual void SetForceMainWorldInitialization(bool) = 0;
   virtual void SetForcePreloadNoneForMediaElements(bool) = 0;
   virtual void SetForceZeroLayoutHeight(bool) = 0;
@@ -203,6 +200,8 @@ class WebSettings {
   virtual void SetMainFrameResizesAreOrientationChanges(bool) = 0;
   virtual void SetMaxTouchPoints(int) = 0;
   virtual void SetPictureInPictureEnabled(bool) = 0;
+  virtual void SetDataSaverHoldbackWebApi(bool) = 0;
+  virtual void SetDataSaverHoldbackMediaApi(bool) = 0;
   virtual void SetMediaPlaybackGestureWhitelistScope(const WebString&) = 0;
   virtual void SetPresentationRequiresUserGesture(bool) = 0;
   virtual void SetEmbeddedMediaExperienceEnabled(bool) = 0;
@@ -298,6 +297,18 @@ class WebSettings {
   virtual void SetDoNotUpdateSelectionOnMutatingSelectionRange(bool) = 0;
   virtual void SetMediaDownloadInProductHelpEnabled(bool) = 0;
   virtual void SetLowPriorityIframesThreshold(WebEffectiveConnectionType) = 0;
+  virtual void SetLazyFrameLoadingDistanceThresholdPxUnknown(int) = 0;
+  virtual void SetLazyFrameLoadingDistanceThresholdPxOffline(int) = 0;
+  virtual void SetLazyFrameLoadingDistanceThresholdPxSlow2G(int) = 0;
+  virtual void SetLazyFrameLoadingDistanceThresholdPx2G(int) = 0;
+  virtual void SetLazyFrameLoadingDistanceThresholdPx3G(int) = 0;
+  virtual void SetLazyFrameLoadingDistanceThresholdPx4G(int) = 0;
+  virtual void SetLazyImageLoadingDistanceThresholdPxUnknown(int) = 0;
+  virtual void SetLazyImageLoadingDistanceThresholdPxOffline(int) = 0;
+  virtual void SetLazyImageLoadingDistanceThresholdPxSlow2G(int) = 0;
+  virtual void SetLazyImageLoadingDistanceThresholdPx2G(int) = 0;
+  virtual void SetLazyImageLoadingDistanceThresholdPx3G(int) = 0;
+  virtual void SetLazyImageLoadingDistanceThresholdPx4G(int) = 0;
 
  protected:
   ~WebSettings() = default;

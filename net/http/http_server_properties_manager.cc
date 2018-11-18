@@ -11,9 +11,11 @@
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/values.h"
+#include "net/base/host_port_pair.h"
 #include "net/base/ip_address.h"
 #include "net/base/port_util.h"
-#include "net/quic/platform/api/quic_hostname_utils.h"
+#include "net/base/privacy_mode.h"
+#include "net/third_party/quic/platform/api/quic_hostname_utils.h"
 #include "url/gurl.h"
 
 namespace net {
@@ -86,14 +88,22 @@ struct ServerPref {
   ServerNetworkStats server_network_stats;
 };
 
-QuicServerId QuicServerIdFromString(const std::string& str) {
+quic::QuicServerId QuicServerIdFromString(const std::string& str) {
   GURL url(str);
   if (!url.is_valid()) {
-    return QuicServerId();
+    return quic::QuicServerId();
   }
-  return QuicServerId(HostPortPair::FromURL(url), url.path_piece() == "/private"
-                                                      ? PRIVACY_MODE_ENABLED
-                                                      : PRIVACY_MODE_DISABLED);
+  HostPortPair host_port_pair = HostPortPair::FromURL(url);
+  return quic::QuicServerId(host_port_pair.host(), host_port_pair.port(),
+                            url.path_piece() == "/private"
+                                ? PRIVACY_MODE_ENABLED
+                                : PRIVACY_MODE_DISABLED);
+}
+
+std::string QuicServerIdToString(const quic::QuicServerId& server_id) {
+  HostPortPair host_port_pair(server_id.host(), server_id.port());
+  return "https://" + host_port_pair.ToString() +
+         (server_id.privacy_mode_enabled() ? "/private" : "");
 }
 
 }  // namespace
@@ -216,7 +226,7 @@ bool HttpServerPropertiesManager::SetQuicAlternativeService(
     const url::SchemeHostPort& origin,
     const AlternativeService& alternative_service,
     base::Time expiration,
-    const QuicTransportVersionVector& advertised_versions) {
+    const quic::QuicTransportVersionVector& advertised_versions) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   const bool changed = http_server_properties_impl_->SetQuicAlternativeService(
       origin, alternative_service, expiration, advertised_versions);
@@ -244,6 +254,17 @@ void HttpServerPropertiesManager::MarkAlternativeServiceBroken(
   http_server_properties_impl_->MarkAlternativeServiceBroken(
       alternative_service);
   ScheduleUpdatePrefs(MARK_ALTERNATIVE_SERVICE_BROKEN);
+}
+
+void HttpServerPropertiesManager::
+    MarkAlternativeServiceBrokenUntilDefaultNetworkChanges(
+        const AlternativeService& alternative_service) {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  http_server_properties_impl_
+      ->MarkAlternativeServiceBrokenUntilDefaultNetworkChanges(
+          alternative_service);
+  ScheduleUpdatePrefs(
+      MARK_ALTERNATIVE_SERVICE_BROKEN_UNTIL_DEFAULT_NETWORK_CHANGES);
 }
 
 void HttpServerPropertiesManager::MarkAlternativeServiceRecentlyBroken(
@@ -280,6 +301,14 @@ void HttpServerPropertiesManager::ConfirmAlternativeService(
   // IsAlternativeServiceBroken. If that value changes, then call persist.
   if (old_value != new_value)
     ScheduleUpdatePrefs(CONFIRM_ALTERNATIVE_SERVICE);
+}
+
+bool HttpServerPropertiesManager::OnDefaultNetworkChanged() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  bool changed = http_server_properties_impl_->OnDefaultNetworkChanged();
+  if (changed)
+    ScheduleUpdatePrefs(ON_DEFAULT_NETWORK_CHANGED);
+  return changed;
 }
 
 const AlternativeServiceMap&
@@ -351,7 +380,7 @@ HttpServerPropertiesManager::server_network_stats_map() const {
 }
 
 bool HttpServerPropertiesManager::SetQuicServerInfo(
-    const QuicServerId& server_id,
+    const quic::QuicServerId& server_id,
     const std::string& server_info) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   bool changed =
@@ -362,7 +391,7 @@ bool HttpServerPropertiesManager::SetQuicServerInfo(
 }
 
 const std::string* HttpServerPropertiesManager::GetQuicServerInfo(
-    const QuicServerId& server_id) {
+    const quic::QuicServerId& server_id) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   return http_server_properties_impl_->GetQuicServerInfo(server_id);
 }
@@ -524,8 +553,7 @@ void HttpServerPropertiesManager::UpdateCacheFromPrefs() {
     // Iterate servers list in reverse MRU order so that entries are inserted
     // into |spdy_servers_map|, |alternative_service_map|, and
     // |server_network_stats_map| from oldest to newest.
-    for (base::ListValue::const_iterator it = servers_list->end();
-         it != servers_list->begin();) {
+    for (auto it = servers_list->end(); it != servers_list->begin();) {
       --it;
       if (!it->GetAsDictionary(&servers_dict)) {
         DVLOG(1) << "Malformed http_server_properties for servers dictionary.";
@@ -559,7 +587,7 @@ void HttpServerPropertiesManager::UpdateCacheFromPrefs() {
         std::make_unique<RecentlyBrokenAlternativeServices>();
 
     // Iterate list in reverse-MRU order
-    for (base::ListValue::const_iterator it = broken_alt_svc_list->end();
+    for (auto it = broken_alt_svc_list->end();
          it != broken_alt_svc_list->begin();) {
       --it;
       const base::DictionaryValue* entry_dict;
@@ -815,7 +843,7 @@ bool HttpServerPropertiesManager::ParseAlternativeServiceInfoDictOfServer(
                << "server: " << server_str;
       return false;
     }
-    QuicTransportVersionVector advertised_versions;
+    quic::QuicTransportVersionVector advertised_versions;
     for (const auto& value : *versions_list) {
       int version;
       if (!value.GetAsInteger(&version)) {
@@ -823,7 +851,7 @@ bool HttpServerPropertiesManager::ParseAlternativeServiceInfoDictOfServer(
                  << server_str;
         return false;
       }
-      advertised_versions.push_back(QuicTransportVersion(version));
+      advertised_versions.push_back(quic::QuicTransportVersion(version));
     }
     alternative_service_info->set_advertised_versions(advertised_versions);
   }
@@ -939,7 +967,8 @@ bool HttpServerPropertiesManager::AddToQuicServerInfoMap(
     // Get quic_server_id.
     const std::string& quic_server_id_str = it.key();
 
-    QuicServerId quic_server_id = QuicServerIdFromString(quic_server_id_str);
+    quic::QuicServerId quic_server_id =
+        QuicServerIdFromString(quic_server_id_str);
     if (quic_server_id.host().empty()) {
       DVLOG(1) << "Malformed http_server_properties for quic server: "
                << quic_server_id_str;
@@ -997,8 +1026,8 @@ void HttpServerPropertiesManager::UpdatePrefsFromCache(
   // Add SPDY servers to |server_pref_map|.
   const SpdyServersMap& spdy_servers_map =
       http_server_properties_impl_->spdy_servers_map();
-  for (SpdyServersMap::const_reverse_iterator it = spdy_servers_map.rbegin();
-       it != spdy_servers_map.rend(); ++it) {
+  for (auto it = spdy_servers_map.rbegin(); it != spdy_servers_map.rend();
+       ++it) {
     // Only add servers that support SPDY.
     if (!it->second)
       continue;
@@ -1016,8 +1045,7 @@ void HttpServerPropertiesManager::UpdatePrefsFromCache(
   typedef std::map<std::string, bool> CanonicalHostPersistedMap;
   CanonicalHostPersistedMap persisted_map;
   const base::Time now = base::Time::Now();
-  for (AlternativeServiceMap::const_reverse_iterator it =
-           alternative_service_map.rbegin();
+  for (auto it = alternative_service_map.rbegin();
        it != alternative_service_map.rend(); ++it) {
     const url::SchemeHostPort& server = it->first;
     AlternativeServiceInfoVector notbroken_alternative_service_info_vector;
@@ -1054,8 +1082,7 @@ void HttpServerPropertiesManager::UpdatePrefsFromCache(
   // Add server network stats to |server_pref_map|.
   const ServerNetworkStatsMap& server_network_stats_map =
       http_server_properties_impl_->server_network_stats_map();
-  for (ServerNetworkStatsMap::const_reverse_iterator it =
-           server_network_stats_map.rbegin();
+  for (auto it = server_network_stats_map.rbegin();
        it != server_network_stats_map.rend(); ++it) {
     const url::SchemeHostPort& server = it->first;
     auto map_it = server_pref_map.Get(server);
@@ -1193,14 +1220,13 @@ void HttpServerPropertiesManager::SaveQuicServerInfoMapToServerPrefs(
   if (quic_server_info_map.empty())
     return;
   auto quic_servers_dict = std::make_unique<base::DictionaryValue>();
-  for (QuicServerInfoMap::const_reverse_iterator it =
-           quic_server_info_map.rbegin();
+  for (auto it = quic_server_info_map.rbegin();
        it != quic_server_info_map.rend(); ++it) {
-    const QuicServerId& server_id = it->first;
+    const quic::QuicServerId& server_id = it->first;
     auto quic_server_pref_dict = std::make_unique<base::DictionaryValue>();
     quic_server_pref_dict->SetKey(kServerInfoKey, base::Value(it->second));
     quic_servers_dict->SetWithoutPathExpansion(
-        server_id.ToString(), std::move(quic_server_pref_dict));
+        QuicServerIdToString(server_id), std::move(quic_server_pref_dict));
   }
   http_server_properties_dict->SetWithoutPathExpansion(
       kQuicServers, std::move(quic_servers_dict));

@@ -10,13 +10,13 @@
 
 #include "ash/public/cpp/shelf_types.h"
 #include "base/macros.h"
+#include "base/timer/timer.h"
 #include "chrome/browser/image_decoder.h"
-#include "chrome/browser/ui/app_list/arc/arc_app_icon.h"
+#include "chrome/browser/ui/app_list/arc/arc_app_icon_loader.h"
+#include "chrome/browser/ui/ash/launcher/app_window_base.h"
 #include "chrome/browser/ui/ash/launcher/arc_app_shelf_id.h"
-#include "ui/base/base_window.h"
 
 class ArcAppWindowLauncherController;
-class ArcAppWindowLauncherItemController;
 
 namespace gfx {
 class ImageSkia;
@@ -29,9 +29,9 @@ class Widget;
 class Profile;
 
 // A ui::BaseWindow for a chromeos launcher to control ARC applications.
-class ArcAppWindow : public ui::BaseWindow,
+class ArcAppWindow : public AppWindowBase,
                      public ImageDecoder::ImageRequest,
-                     public ArcAppIcon::Observer {
+                     public AppIconLoaderDelegate {
  public:
   // TODO(khmel): use a bool set to false by default, or use an existing enum,
   // like ash::mojom::WindowStateType.
@@ -49,8 +49,6 @@ class ArcAppWindow : public ui::BaseWindow,
 
   ~ArcAppWindow() override;
 
-  void SetController(ArcAppWindowLauncherItemController* controller);
-
   void SetFullscreenMode(FullScreenMode mode);
 
   // Sets optional window title and icon. Note that |unsafe_icon_data_png| has
@@ -64,40 +62,13 @@ class ArcAppWindow : public ui::BaseWindow,
 
   const arc::ArcAppShelfId& app_shelf_id() const { return app_shelf_id_; }
 
-  const ash::ShelfID& shelf_id() const { return shelf_id_; }
-
-  void set_shelf_id(const ash::ShelfID& shelf_id) { shelf_id_ = shelf_id; }
-
-  views::Widget* widget() const { return widget_; }
-
-  ArcAppWindowLauncherItemController* controller() { return controller_; }
-
   // ui::BaseWindow:
   bool IsActive() const override;
-  bool IsMaximized() const override;
-  bool IsMinimized() const override;
-  bool IsFullscreen() const override;
-  gfx::NativeWindow GetNativeWindow() const override;
-  gfx::Rect GetRestoredBounds() const override;
-  ui::WindowShowState GetRestoredState() const override;
-  gfx::Rect GetBounds() const override;
-  void Show() override;
-  void ShowInactive() override;
-  void Hide() override;
-  bool IsVisible() const override;
   void Close() override;
-  void Activate() override;
-  void Deactivate() override;
-  void Maximize() override;
-  void Minimize() override;
-  void Restore() override;
-  void SetBounds(const gfx::Rect& bounds) override;
-  void FlashFrame(bool flash) override;
-  bool IsAlwaysOnTop() const override;
-  void SetAlwaysOnTop(bool always_on_top) override;
 
-  // ArcAppIcon::Observer:
-  void OnIconUpdated(ArcAppIcon* icon) override;
+  // AppIconLoaderDelegate:
+  void OnAppImageUpdated(const std::string& app_id,
+                         const gfx::ImageSkia& image) override;
 
  private:
   // Ensures that default app icon is set.
@@ -113,20 +84,20 @@ class ArcAppWindow : public ui::BaseWindow,
   const int task_id_;
   // Keeps ARC shelf grouping id.
   const arc::ArcAppShelfId app_shelf_id_;
-  // Keeps shelf id.
-  ash::ShelfID shelf_id_;
   // Keeps current full-screen mode.
   FullScreenMode fullscreen_mode_ = FullScreenMode::NOT_DEFINED;
-  // Unowned pointers
-  views::Widget* const widget_;
   ArcAppWindowLauncherController* const owner_;
-  ArcAppWindowLauncherItemController* controller_ = nullptr;
+
+  // Set to true in case image fetch is requested. This indicates that default
+  // app icon is returned in |OnAppImageUpdated|.
+  bool image_fetching_ = false;
+  base::OneShotTimer apply_default_image_timer_;
 
   Profile* const profile_;
 
   // Loads the ARC app icon to the window icon keys. Nullptr once a custom icon
   // has been successfully set.
-  std::unique_ptr<ArcAppIcon> app_icon_;
+  std::unique_ptr<ArcAppIconLoader> app_icon_loader_;
 
   DISALLOW_COPY_AND_ASSIGN(ArcAppWindow);
 };

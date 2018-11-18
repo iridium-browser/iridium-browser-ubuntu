@@ -38,7 +38,7 @@ class DOMContentLoadedListener final
     DCHECK(RuntimeEnabledFeatures::XSLTEnabled());
     DCHECK_EQ(event->type(), "DOMContentLoaded");
 
-    Document& document = *ToDocument(execution_context);
+    Document& document = *To<Document>(execution_context);
     DCHECK(!document.Parsing());
 
     // Processing instruction (XML documents only).
@@ -58,7 +58,7 @@ class DOMContentLoadedListener final
 
   EventListener* ToEventListener() override { return this; }
 
-  virtual void Trace(blink::Visitor* visitor) {
+  void Trace(blink::Visitor* visitor) override {
     visitor->Trace(processing_instruction_);
     EventListener::Trace(visitor);
     ProcessingInstruction::DetachableEventListener::Trace(visitor);

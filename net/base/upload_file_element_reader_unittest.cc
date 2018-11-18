@@ -17,6 +17,7 @@
 #include "net/base/net_errors.h"
 #include "net/base/test_completion_callback.h"
 #include "net/test/gtest_util.h"
+#include "net/test/test_with_scoped_task_environment.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -32,12 +33,13 @@ namespace net {
 // When the parameter is false, the UploadFileElementReader is passed only a
 // FilePath and needs to open the file itself. When it's true, it's passed an
 // already open base::File.
-class UploadFileElementReaderTest : public testing::TestWithParam<bool> {
+class UploadFileElementReaderTest : public testing::TestWithParam<bool>,
+                                    public WithScopedTaskEnvironment {
  protected:
   void SetUp() override {
     // Some tests (*.ReadPartially) rely on bytes_.size() being even.
-    const char kData[] = "123456789abcdefghi";
-    bytes_.assign(kData, kData + arraysize(kData) - 1);
+    bytes_.assign({'1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c',
+                   'd', 'e', 'f', 'g', 'h', 'i'});
 
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
 
@@ -107,7 +109,8 @@ TEST_P(UploadFileElementReaderTest, ReadPartially) {
   const size_t kHalfSize = bytes_.size() / 2;
   ASSERT_EQ(bytes_.size(), kHalfSize * 2);
   std::vector<char> buf(kHalfSize);
-  scoped_refptr<IOBuffer> wrapped_buffer = new WrappedIOBuffer(&buf[0]);
+  scoped_refptr<IOBuffer> wrapped_buffer =
+      base::MakeRefCounted<WrappedIOBuffer>(&buf[0]);
   TestCompletionCallback read_callback1;
   ASSERT_EQ(ERR_IO_PENDING,
             reader_->Read(
@@ -127,7 +130,8 @@ TEST_P(UploadFileElementReaderTest, ReadPartially) {
 
 TEST_P(UploadFileElementReaderTest, ReadAll) {
   std::vector<char> buf(bytes_.size());
-  scoped_refptr<IOBuffer> wrapped_buffer = new WrappedIOBuffer(&buf[0]);
+  scoped_refptr<IOBuffer> wrapped_buffer =
+      base::MakeRefCounted<WrappedIOBuffer>(&buf[0]);
   TestCompletionCallback read_callback;
   ASSERT_EQ(ERR_IO_PENDING,
             reader_->Read(
@@ -144,7 +148,8 @@ TEST_P(UploadFileElementReaderTest, ReadAll) {
 TEST_P(UploadFileElementReaderTest, ReadTooMuch) {
   const size_t kTooLargeSize = bytes_.size() * 2;
   std::vector<char> buf(kTooLargeSize);
-  scoped_refptr<IOBuffer> wrapped_buffer = new WrappedIOBuffer(&buf[0]);
+  scoped_refptr<IOBuffer> wrapped_buffer =
+      base::MakeRefCounted<WrappedIOBuffer>(&buf[0]);
   TestCompletionCallback read_callback;
   ASSERT_EQ(ERR_IO_PENDING,
             reader_->Read(
@@ -157,7 +162,8 @@ TEST_P(UploadFileElementReaderTest, ReadTooMuch) {
 
 TEST_P(UploadFileElementReaderTest, MultipleInit) {
   std::vector<char> buf(bytes_.size());
-  scoped_refptr<IOBuffer> wrapped_buffer = new WrappedIOBuffer(&buf[0]);
+  scoped_refptr<IOBuffer> wrapped_buffer =
+      base::MakeRefCounted<WrappedIOBuffer>(&buf[0]);
 
   // Read all.
   TestCompletionCallback read_callback1;
@@ -187,7 +193,8 @@ TEST_P(UploadFileElementReaderTest, MultipleInit) {
 
 TEST_P(UploadFileElementReaderTest, InitDuringAsyncOperation) {
   std::vector<char> buf(bytes_.size());
-  scoped_refptr<IOBuffer> wrapped_buffer = new WrappedIOBuffer(&buf[0]);
+  scoped_refptr<IOBuffer> wrapped_buffer =
+      base::MakeRefCounted<WrappedIOBuffer>(&buf[0]);
 
   // Start reading all.
   TestCompletionCallback read_callback1;
@@ -210,7 +217,8 @@ TEST_P(UploadFileElementReaderTest, InitDuringAsyncOperation) {
 
   // Read half.
   std::vector<char> buf2(bytes_.size() / 2);
-  scoped_refptr<IOBuffer> wrapped_buffer2 = new WrappedIOBuffer(&buf2[0]);
+  scoped_refptr<IOBuffer> wrapped_buffer2 =
+      base::MakeRefCounted<WrappedIOBuffer>(&buf2[0]);
   TestCompletionCallback read_callback2;
   EXPECT_EQ(ERR_IO_PENDING,
             reader_->Read(
@@ -227,7 +235,8 @@ TEST_P(UploadFileElementReaderTest, InitDuringAsyncOperation) {
 
 TEST_P(UploadFileElementReaderTest, RepeatedInitDuringInit) {
   std::vector<char> buf(bytes_.size());
-  scoped_refptr<IOBuffer> wrapped_buffer = new WrappedIOBuffer(&buf[0]);
+  scoped_refptr<IOBuffer> wrapped_buffer =
+      base::MakeRefCounted<WrappedIOBuffer>(&buf[0]);
 
   TestCompletionCallback init_callback1;
   EXPECT_THAT(reader_->Init(init_callback1.callback()),
@@ -269,7 +278,8 @@ TEST_P(UploadFileElementReaderTest, Range) {
   EXPECT_EQ(kLength, reader_->GetContentLength());
   EXPECT_EQ(kLength, reader_->BytesRemaining());
   std::vector<char> buf(kLength);
-  scoped_refptr<IOBuffer> wrapped_buffer = new WrappedIOBuffer(&buf[0]);
+  scoped_refptr<IOBuffer> wrapped_buffer =
+      base::MakeRefCounted<WrappedIOBuffer>(&buf[0]);
   TestCompletionCallback read_callback;
   ASSERT_EQ(
       ERR_IO_PENDING,

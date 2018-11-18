@@ -9,13 +9,6 @@
  */
 
 /**
- * @see https://developer.mozilla.org/en-US/docs/Web/API/Element/setPointerCapture
- * @param {number} pointerId
- * TODO(dpapad): Remove this once it is added to Closure Compiler itself.
- */
-Element.prototype.setPointerCapture = function(pointerId) {};
-
-/**
  * @see https://drafts.fxtf.org/geometry-1/#domrectreadonly
  * TODO(scottchen): Remove this once it is added to Closure Compiler itself.
  */
@@ -78,3 +71,14 @@ class ResizeObserver {
   /** @param {Element} target */
   unobserve(target) {}
 }
+
+/**
+ * @see
+ * https://www.polymer-project.org/2.0/docs/api/namespaces/Polymer.RenderStatus
+ * Queue a function call to be run before the next render.
+ * @param {!Element} element The element on which the function call is made.
+ * @param {!function()} fn The function called on next render.
+ * @param {...*} args The function arguments.
+ * TODO(rbpotter): Remove this once it is added to Closure Compiler itself.
+ */
+Polymer.RenderStatus.beforeNextRender = function(element, fn, args) {}

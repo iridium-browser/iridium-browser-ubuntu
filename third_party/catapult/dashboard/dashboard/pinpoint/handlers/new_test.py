@@ -5,259 +5,237 @@
 import json
 
 import mock
-import webapp2
-import webtest
 
 from dashboard.api import api_auth
+from dashboard.common import datastore_hooks
 from dashboard.common import namespaced_stored_object
+from dashboard.common import stored_object
 from dashboard.common import testing_common
 from dashboard.common import utils
-from dashboard.services import gitiles_service
+from dashboard.pinpoint import test
 from dashboard.pinpoint.handlers import new
 from dashboard.pinpoint.models import job as job_module
+from dashboard.pinpoint.models import quest as quest_module
+from dashboard.pinpoint.models.change import change_test
 
 
 _BASE_REQUEST = {
     'target': 'telemetry_perf_tests',
     'configuration': 'chromium-rel-mac11-pro',
     'benchmark': 'speedometer',
-    'auto_explore': '1',
     'bug_id': '12345',
     'start_git_hash': '1',
     'end_git_hash': '3',
 }
 
 
-class _NewTest(testing_common.TestCase):
+# TODO: Make this agnostic to the parameters the Quests take.
+_CONFIGURATION_ARGUMENTS = {
+    'browser': 'release',
+    'builder': 'Mac Builder',
+    'dimensions': '{"key": "value"}',
+    'repository': 'chromium',
+    'swarming_server': 'https://chromium-swarm.appspot.com',
+}
+
+
+class _NewTest(test.TestCase):
 
   def setUp(self):
     super(_NewTest, self).setUp()
 
-    app = webapp2.WSGIApplication([
-        webapp2.Route(r'/api/new', new.New),
-    ])
-    self.testapp = webtest.TestApp(app)
+    self.SetCurrentUserOAuth(testing_common.INTERNAL_USER)
+    self.SetCurrentClientIdOAuth(api_auth.OAUTH_CLIENT_ID_WHITELIST[0])
 
-    self.SetCurrentUser('internal@chromium.org', is_admin=True)
-
-    namespaced_stored_object.Set('bot_configurations', {
-        'chromium-rel-mac11-pro': {
-            'browser': 'release',
-            'builder': 'Mac Builder',
-            'dimensions': {'key': 'value'},
-            'repository': 'src',
-        },
-    })
-    namespaced_stored_object.Set('repositories', {
-        'src': {'repository_url': 'http://src'},
+    key = namespaced_stored_object.NamespaceKey(
+        'bot_configurations', datastore_hooks.INTERNAL)
+    stored_object.Set(key, {
+        'chromium-rel-mac11-pro': _CONFIGURATION_ARGUMENTS
     })
 
 
 class NewAuthTest(_NewTest):
 
-  @mock.patch.object(api_auth, '_AuthorizeOauthUser',
-                     mock.MagicMock(side_effect=api_auth.OAuthError()))
-  @mock.patch.object(gitiles_service, 'CommitInfo', mock.MagicMock(
-      return_value={'commit': 'abc'}))
-  def testPost_FailsOauth(self):
-    response = self.testapp.post('/api/new', _BASE_REQUEST, status=400)
+  @mock.patch.object(api_auth, 'Authorize',
+                     mock.MagicMock(side_effect=api_auth.NotLoggedInError()))
+  def testPost_NotLoggedIn(self):
+    self.SetCurrentUserOAuth(None)
+
+    response = self.Post('/api/new', _BASE_REQUEST, status=401)
     result = json.loads(response.body)
-    self.assertEqual({'error': 'User authentication error'}, result)
+    self.assertEqual(result, {'error': 'User not authenticated'})
+
+  @mock.patch.object(api_auth, 'Authorize',
+                     mock.MagicMock(side_effect=api_auth.OAuthError()))
+  def testFailsOauth(self):
+    self.SetCurrentUserOAuth(testing_common.EXTERNAL_USER)
+
+    response = self.Post('/api/new', _BASE_REQUEST, status=403)
+    result = json.loads(response.body)
+    self.assertEqual(result, {'error': 'User authentication error'})
 
 
 @mock.patch('dashboard.services.issue_tracker_service.IssueTrackerService',
             mock.MagicMock())
 @mock.patch.object(utils, 'ServiceAccountHttp', mock.MagicMock())
-@mock.patch.object(api_auth, '_AuthorizeOauthUser', mock.MagicMock())
+@mock.patch.object(api_auth, 'Authorize', mock.MagicMock())
 class NewTest(_NewTest):
 
-  @mock.patch.object(gitiles_service, 'CommitInfo', mock.MagicMock(
-      return_value={'commit': 'abc'}))
   def testPost(self):
-    response = self.testapp.post('/api/new', _BASE_REQUEST, status=200)
+    response = self.Post('/api/new', _BASE_REQUEST, status=200)
     result = json.loads(response.body)
     self.assertIn('jobId', result)
     self.assertEqual(
         result['jobUrl'],
         'https://testbed.example.com/job/%s' % result['jobId'])
 
-  @mock.patch.object(gitiles_service, 'CommitInfo', mock.MagicMock(
-      return_value={'commit': 'abc'}))
-  def testPost_NoConfiguration(self):
-    # TODO: Make this test agnostic to the parameters the Quests take.
+  def testNoConfiguration(self):
     request = dict(_BASE_REQUEST)
-    request.update({
-        'builder': 'Mac Builder',
-        'dimensions': '{"key": "value"}',
-        'browser': 'android-webview',
-        'repository': 'src',
-    })
+    request.update(_CONFIGURATION_ARGUMENTS)
     del request['configuration']
-    response = self.testapp.post('/api/new', request, status=200)
+    response = self.Post('/api/new', request, status=200)
     result = json.loads(response.body)
     self.assertIn('jobId', result)
     self.assertEqual(
         result['jobUrl'],
         'https://testbed.example.com/job/%s' % result['jobId'])
 
-  @mock.patch.object(gitiles_service, 'CommitInfo', mock.MagicMock(
-      return_value={'commit': 'abc'}))
-  def testPost_AutoExploreTrue(self):
-    params = {}
-    params.update(_BASE_REQUEST)
-    params['auto_explore'] = True
-    response = self.testapp.post('/api/new', params, status=200)
-    result = json.loads(response.body)
-    self.assertIn('jobId', result)
-    job = job_module.JobFromId(result['jobId'])
-    self.assertTrue(job.auto_explore)
-
-  @mock.patch.object(gitiles_service, 'CommitInfo', mock.MagicMock(
-      return_value={'commit': 'abc'}))
-  def testPost_ComparisonModeFunctional(self):
+  def testComparisonModeFunctional(self):
     request = dict(_BASE_REQUEST)
     request['comparison_mode'] = 'functional'
-    response = self.testapp.post('/api/new', request, status=200)
-    result = json.loads(response.body)
-    self.assertIn('jobId', result)
-    job = job_module.JobFromId(result['jobId'])
-    self.assertEqual(job.comparison_mode, job_module.ComparisonMode.FUNCTIONAL)
+    response = self.Post('/api/new', request, status=200)
+    job = job_module.JobFromId(json.loads(response.body)['jobId'])
+    self.assertEqual(job.comparison_mode, 'functional')
 
-  @mock.patch.object(gitiles_service, 'CommitInfo', mock.MagicMock(
-      return_value={'commit': 'abc'}))
-  def testPost_ComparisonModePerformance(self):
+  def testComparisonModePerformance(self):
     request = dict(_BASE_REQUEST)
     request['comparison_mode'] = 'performance'
-    response = self.testapp.post('/api/new', request, status=200)
-    result = json.loads(response.body)
-    self.assertIn('jobId', result)
-    job = job_module.JobFromId(result['jobId'])
-    self.assertEqual(job.comparison_mode, job_module.ComparisonMode.PERFORMANCE)
+    response = self.Post('/api/new', request, status=200)
+    job = job_module.JobFromId(json.loads(response.body)['jobId'])
+    self.assertEqual(job.comparison_mode, 'performance')
 
-  @mock.patch.object(gitiles_service, 'CommitInfo', mock.MagicMock(
-      return_value={'commit': 'abc'}))
-  def testPost_ComparisonModeUnknown(self):
+  def testComparisonModeUnknown(self):
     request = dict(_BASE_REQUEST)
     request['comparison_mode'] = 'invalid comparison mode'
-    response = self.testapp.post('/api/new', request, status=400)
+    response = self.Post('/api/new', request, status=400)
     self.assertIn('error', json.loads(response.body))
 
-  @mock.patch.object(gitiles_service, 'CommitInfo', mock.MagicMock(
-      return_value={'commit': 'abc'}))
-  def testPost_WithChanges(self):
-    base_request = {}
-    base_request.update(_BASE_REQUEST)
-    del base_request['start_git_hash']
-    del base_request['end_git_hash']
-    base_request['changes'] = json.dumps([
-        {'commits': [{'repository': 'src', 'git_hash': '1'}]},
-        {'commits': [{'repository': 'src', 'git_hash': '3'}]}])
+  def testComparisonMagnitude(self):
+    request = dict(_BASE_REQUEST)
+    request['comparison_magnitude'] = '123.456'
+    response = self.Post('/api/new', request, status=200)
+    job = job_module.JobFromId(json.loads(response.body)['jobId'])
+    self.assertEqual(job.state._comparison_magnitude, 123.456)
 
-    response = self.testapp.post('/api/new', base_request, status=200)
+  def testQuests(self):
+    request = dict(_BASE_REQUEST)
+    request['quests'] = ['FindIsolate', 'RunTelemetryTest']
+    response = self.Post('/api/new', request, status=200)
+    job = job_module.JobFromId(json.loads(response.body)['jobId'])
+    self.assertEqual(len(job.state._quests), 2)
+    self.assertIsInstance(job.state._quests[0], quest_module.FindIsolate)
+    self.assertIsInstance(job.state._quests[1], quest_module.RunTelemetryTest)
+
+  def testQuestsString(self):
+    request = dict(_BASE_REQUEST)
+    request['quests'] = 'FindIsolate,RunTelemetryTest'
+    response = self.Post('/api/new', request, status=200)
+    job = job_module.JobFromId(json.loads(response.body)['jobId'])
+    self.assertEqual(len(job.state._quests), 2)
+    self.assertIsInstance(job.state._quests[0], quest_module.FindIsolate)
+    self.assertIsInstance(job.state._quests[1], quest_module.RunTelemetryTest)
+
+  def testUnknownQuest(self):
+    request = dict(_BASE_REQUEST)
+    request['quests'] = 'FindIsolate,UnknownQuest'
+    response = self.Post('/api/new', request, status=400)
+    self.assertIn('error', json.loads(response.body))
+
+  def testWithChanges(self):
+    request = dict(_BASE_REQUEST)
+    del request['start_git_hash']
+    del request['end_git_hash']
+    request['changes'] = json.dumps([
+        {'commits': [{'repository': 'chromium', 'git_hash': '1'}]},
+        {'commits': [{'repository': 'chromium', 'git_hash': '3'}]}])
+
+    response = self.Post('/api/new', request, status=200)
     result = json.loads(response.body)
     self.assertIn('jobId', result)
     self.assertEqual(
         result['jobUrl'],
         'https://testbed.example.com/job/%s' % result['jobId'])
 
-  @mock.patch.object(gitiles_service, 'CommitInfo', mock.MagicMock(
-      return_value={'commit': 'abc'}))
-  @mock.patch('dashboard.pinpoint.models.change.patch.FromDict')
-  def testPost_WithPatch(self, mock_patch):
-    mock_patch.return_value = None
-    params = {
-        'patch': 'https://lalala/c/foo/bar/+/123'
-    }
-    params.update(_BASE_REQUEST)
-    response = self.testapp.post('/api/new', params, status=200)
-    result = json.loads(response.body)
-    self.assertIn('jobId', result)
-    self.assertEqual(
-        result['jobUrl'],
-        'https://testbed.example.com/job/%s' % result['jobId'])
-    mock_patch.assert_called_with(params['patch'])
+  def testWithPatch(self):
+    request = dict(_BASE_REQUEST)
+    request['patch'] = 'https://lalala/c/foo/bar/+/123'
 
-  def testPost_MissingTarget(self):
+    response = self.Post('/api/new', request, status=200)
+    job = job_module.JobFromId(json.loads(response.body)['jobId'])
+    self.assertEqual('https://lalala', job.gerrit_server)
+    self.assertEqual('repo~branch~id', job.gerrit_change_id)
+
+  def testMissingTarget(self):
     request = dict(_BASE_REQUEST)
     del request['target']
-    response = self.testapp.post('/api/new', request, status=400)
+    response = self.Post('/api/new', request, status=400)
     self.assertIn('error', json.loads(response.body))
 
-  @mock.patch.object(gitiles_service, 'CommitInfo', mock.MagicMock(
-      return_value={'commit': 'abc'}))
-  def testPost_InvalidTestConfig(self):
+  def testInvalidTestConfig(self):
     request = dict(_BASE_REQUEST)
     del request['configuration']
-    response = self.testapp.post('/api/new', request, status=400)
+    response = self.Post('/api/new', request, status=400)
     self.assertIn('error', json.loads(response.body))
 
-  @mock.patch.object(
-      gitiles_service, 'CommitInfo',
-      mock.MagicMock(side_effect=gitiles_service.NotFoundError('message')))
-  def testPost_InvalidChange(self):
-    response = self.testapp.post('/api/new', _BASE_REQUEST, status=400)
-    self.assertEqual({'error': 'message'}, json.loads(response.body))
-
-  def testPost_InvalidBug(self):
+  def testInvalidBug(self):
     request = dict(_BASE_REQUEST)
     request['bug_id'] = 'not_an_int'
-    response = self.testapp.post('/api/new', request, status=400)
+    response = self.Post('/api/new', request, status=400)
     self.assertEqual({'error': new._ERROR_BUG_ID},
                      json.loads(response.body))
 
-  @mock.patch.object(gitiles_service, 'CommitInfo', mock.MagicMock(
-      return_value={'commit': 'abc'}))
-  def testPost_EmptyBug(self):
+  def testEmptyBug(self):
     request = dict(_BASE_REQUEST)
     request['bug_id'] = ''
-    response = self.testapp.post('/api/new', request, status=200)
-    result = json.loads(response.body)
-    self.assertIn('jobId', result)
-    self.assertEqual(
-        result['jobUrl'],
-        'https://testbed.example.com/job/%s' % result['jobId'])
-    job = job_module.JobFromId(result['jobId'])
+    response = self.Post('/api/new', request, status=200)
+    job = job_module.JobFromId(json.loads(response.body)['jobId'])
     self.assertIsNone(job.bug_id)
 
-  @mock.patch.object(gitiles_service, 'CommitInfo', mock.MagicMock(
-      return_value={'commit': 'abc'}))
-  def testPost_ValidTags(self):
+  def testPin(self):
+    request = dict(_BASE_REQUEST)
+    request['pin'] = 'https://codereview.com/c/foo/bar/+/123'
+
+    response = self.Post('/api/new', request, status=200)
+    job = job_module.JobFromId(json.loads(response.body)['jobId'])
+    self.assertEqual(job.state._pin, change_test.Change(patch=True))
+
+  def testValidTags(self):
     request = dict(_BASE_REQUEST)
     request['tags'] = json.dumps({'key': 'value'})
-    response = self.testapp.post('/api/new', request, status=200)
+    response = self.Post('/api/new', request, status=200)
     result = json.loads(response.body)
     self.assertIn('jobId', result)
 
-  @mock.patch.object(gitiles_service, 'CommitInfo', mock.MagicMock(
-      return_value={'commit': 'abc'}))
-  def testPost_InvalidTags(self):
+  def testInvalidTags(self):
     request = dict(_BASE_REQUEST)
     request['tags'] = json.dumps(['abc'])
-    response = self.testapp.post('/api/new', request, status=400)
+    response = self.Post('/api/new', request, status=400)
     self.assertIn('error', json.loads(response.body))
 
-  @mock.patch.object(gitiles_service, 'CommitInfo', mock.MagicMock(
-      return_value={'commit': 'abc'}))
-  def testPost_InvalidTagType(self):
+  def testInvalidTagType(self):
     request = dict(_BASE_REQUEST)
     request['tags'] = json.dumps({'abc': 123})
-    response = self.testapp.post('/api/new', request, status=400)
+    response = self.Post('/api/new', request, status=400)
     self.assertIn('error', json.loads(response.body))
 
-  @mock.patch.object(gitiles_service, 'CommitInfo', mock.MagicMock(
-      return_value={'commit': 'abc'}))
-  def testPost_UserFromParams(self):
+  def testUserFromParams(self):
     request = dict(_BASE_REQUEST)
     request['user'] = 'foo@example.org'
-    response = self.testapp.post('/api/new', request, status=200)
-    result = json.loads(response.body)
-    job = job_module.JobFromId(result['jobId'])
+    response = self.Post('/api/new', request, status=200)
+    job = job_module.JobFromId(json.loads(response.body)['jobId'])
     self.assertEqual(job.user, 'foo@example.org')
 
-  @mock.patch.object(gitiles_service, 'CommitInfo', mock.MagicMock(
-      return_value={'commit': 'abc'}))
-  def testPost_UserFromAuth(self):
-    response = self.testapp.post('/api/new', _BASE_REQUEST, status=200)
-    result = json.loads(response.body)
-    job = job_module.JobFromId(result['jobId'])
-    self.assertEqual(job.user, 'example@example.com')
+  def testUserFromAuth(self):
+    response = self.Post('/api/new', _BASE_REQUEST, status=200)
+    job = job_module.JobFromId(json.loads(response.body)['jobId'])
+    self.assertEqual(job.user, testing_common.INTERNAL_USER.email())

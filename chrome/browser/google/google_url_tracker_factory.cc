@@ -6,6 +6,8 @@
 
 #include <utility>
 
+#include "base/bind.h"
+#include "base/feature_list.h"
 #include "chrome/browser/google/chrome_google_url_tracker_client.h"
 #include "chrome/browser/profiles/incognito_helpers.h"
 #include "chrome/browser/profiles/profile.h"
@@ -13,6 +15,7 @@
 #include "components/google/core/browser/google_url_tracker.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/prefs/pref_service.h"
+#include "content/public/browser/network_service_instance.h"
 
 // static
 GoogleURLTracker* GoogleURLTrackerFactory::GetForProfile(Profile* profile) {
@@ -23,6 +26,33 @@ GoogleURLTracker* GoogleURLTrackerFactory::GetForProfile(Profile* profile) {
 // static
 GoogleURLTrackerFactory* GoogleURLTrackerFactory::GetInstance() {
   return base::Singleton<GoogleURLTrackerFactory>::get();
+}
+
+namespace {
+
+std::unique_ptr<KeyedService> BuildGoogleURLTracker(
+    content::BrowserContext* context) {
+  // Delete this now-unused pref.
+  // At some point in the future, this code can be removed entirely.
+  static_cast<Profile*>(context)->GetOriginalProfile()->GetPrefs()->ClearPref(
+      prefs::kLastPromptedGoogleURL);
+
+  auto client = std::make_unique<ChromeGoogleURLTrackerClient>(
+      Profile::FromBrowserContext(context));
+  return std::make_unique<GoogleURLTracker>(
+      std::move(client),
+      base::FeatureList::IsEnabled(GoogleURLTracker::kNoSearchDomainCheck)
+          ? GoogleURLTracker::ALWAYS_DOT_COM_MODE
+          : GoogleURLTracker::NORMAL_MODE,
+      content::GetNetworkConnectionTracker());
+}
+
+}  // namespace
+
+// static
+BrowserContextKeyedServiceFactory::TestingFactory
+GoogleURLTrackerFactory::GetDefaultFactory() {
+  return base::BindRepeating(&BuildGoogleURLTracker);
 }
 
 GoogleURLTrackerFactory::GoogleURLTrackerFactory()
@@ -36,14 +66,7 @@ GoogleURLTrackerFactory::~GoogleURLTrackerFactory() {
 
 KeyedService* GoogleURLTrackerFactory::BuildServiceInstanceFor(
     content::BrowserContext* context) const {
-  // Delete this now-unused pref.
-  // At some point in the future, this code can be removed entirely.
-  static_cast<Profile*>(context)->GetOriginalProfile()->GetPrefs()->ClearPref(
-      prefs::kLastPromptedGoogleURL);
-
-  std::unique_ptr<GoogleURLTrackerClient> client(
-      new ChromeGoogleURLTrackerClient(Profile::FromBrowserContext(context)));
-  return new GoogleURLTracker(std::move(client), GoogleURLTracker::NORMAL_MODE);
+  return BuildGoogleURLTracker(context).release();
 }
 
 void GoogleURLTrackerFactory::RegisterProfilePrefs(

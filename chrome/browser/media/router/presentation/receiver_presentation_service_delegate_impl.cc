@@ -11,9 +11,6 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/web_preferences.h"
 
-DEFINE_WEB_CONTENTS_USER_DATA_KEY(
-    media_router::ReceiverPresentationServiceDelegateImpl);
-
 using content::RenderFrameHost;
 
 namespace media_router {
@@ -77,8 +74,8 @@ void ReceiverPresentationServiceDelegateImpl::
         const content::ReceiverConnectionAvailableCallback&
             receiver_available_callback) {
   local_presentation_manager_->OnLocalPresentationReceiverCreated(
-      content::PresentationInfo(web_contents_->GetLastCommittedURL(),
-                                presentation_id_),
+      blink::mojom::PresentationInfo(web_contents_->GetLastCommittedURL(),
+                                     presentation_id_),
       receiver_available_callback);
 }
 

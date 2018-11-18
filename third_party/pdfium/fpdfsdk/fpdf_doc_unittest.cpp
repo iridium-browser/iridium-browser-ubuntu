@@ -9,6 +9,7 @@
 
 #include "core/fpdfapi/cpdf_modulemgr.h"
 #include "core/fpdfapi/parser/cpdf_array.h"
+#include "core/fpdfapi/parser/cpdf_dictionary.h"
 #include "core/fpdfapi/parser/cpdf_document.h"
 #include "core/fpdfapi/parser/cpdf_name.h"
 #include "core/fpdfapi/parser/cpdf_null.h"
@@ -17,38 +18,19 @@
 #include "core/fpdfapi/parser/cpdf_reference.h"
 #include "core/fpdfapi/parser/cpdf_string.h"
 #include "core/fpdfdoc/cpdf_dest.h"
+#include "fpdfsdk/cpdfsdk_helpers.h"
+#include "public/cpp/fpdf_scopers.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/test_support.h"
 #include "third_party/base/ptr_util.h"
 
-#ifdef PDF_ENABLE_XFA
-#include "fpdfsdk/fpdfxfa/cpdfxfa_context.h"
-#endif  // PDF_ENABLE_XFA
-
-class CPDF_TestDocument : public CPDF_Document {
+class CPDF_TestDocument final : public CPDF_Document {
  public:
-  CPDF_TestDocument() : CPDF_Document(nullptr) {}
+  CPDF_TestDocument() : CPDF_Document() {}
 
   void SetRoot(CPDF_Dictionary* root) { m_pRootDict = root; }
   CPDF_IndirectObjectHolder* GetHolder() { return this; }
 };
-
-#ifdef PDF_ENABLE_XFA
-class CPDF_TestXFAContext : public CPDFXFA_Context {
- public:
-  CPDF_TestXFAContext()
-      : CPDFXFA_Context(pdfium::MakeUnique<CPDF_TestDocument>()) {}
-
-  void SetRoot(CPDF_Dictionary* root) {
-    reinterpret_cast<CPDF_TestDocument*>(GetPDFDoc())->SetRoot(root);
-  }
-
-  CPDF_IndirectObjectHolder* GetHolder() { return GetPDFDoc(); }
-};
-using CPDF_TestPdfDocument = CPDF_TestXFAContext;
-#else   // PDF_ENABLE_XFA
-using CPDF_TestPdfDocument = CPDF_TestDocument;
-#endif  // PDF_ENABLE_XFA
 
 class PDFDocTest : public testing::Test {
  public:
@@ -59,17 +41,15 @@ class PDFDocTest : public testing::Test {
 
   void SetUp() override {
     CPDF_ModuleMgr::Get()->Init();
-
-    m_pDoc = pdfium::MakeUnique<CPDF_TestPdfDocument>();
-    m_pIndirectObjs = m_pDoc->GetHolder();
-
-    // Setup the root directory.
-    m_pRootObj = pdfium::MakeUnique<CPDF_Dictionary>();
-    m_pDoc->SetRoot(m_pRootObj.get());
+    auto pTestDoc = pdfium::MakeUnique<CPDF_TestDocument>();
+    m_pIndirectObjs = pTestDoc->GetHolder();
+    m_pRootObj = m_pIndirectObjs->NewIndirect<CPDF_Dictionary>();
+    pTestDoc->SetRoot(m_pRootObj.Get());
+    m_pDoc.reset(FPDFDocumentFromCPDFDocument(pTestDoc.release()));
   }
 
   void TearDown() override {
-    m_pRootObj.reset();
+    m_pRootObj = nullptr;
     m_pIndirectObjs = nullptr;
     m_pDoc.reset();
     CPDF_ModuleMgr::Destroy();
@@ -86,9 +66,9 @@ class PDFDocTest : public testing::Test {
   }
 
  protected:
-  std::unique_ptr<CPDF_TestPdfDocument> m_pDoc;
+  ScopedFPDFDocument m_pDoc;
   UnownedPtr<CPDF_IndirectObjectHolder> m_pIndirectObjs;
-  std::unique_ptr<CPDF_Dictionary> m_pRootObj;
+  UnownedPtr<CPDF_Dictionary> m_pRootObj;
 };
 
 TEST_F(PDFDocTest, FindBookmark) {
@@ -148,11 +128,13 @@ TEST_F(PDFDocTest, FindBookmark) {
 
     // Title with a match.
     title = GetFPDFWideString(L"Chapter 2");
-    EXPECT_EQ(bookmarks[2].obj, FPDFBookmark_Find(m_pDoc.get(), title.get()));
+    EXPECT_EQ(FPDFBookmarkFromCPDFDictionary(bookmarks[2].obj),
+              FPDFBookmark_Find(m_pDoc.get(), title.get()));
 
     // Title match is case insensitive.
     title = GetFPDFWideString(L"cHaPter 2");
-    EXPECT_EQ(bookmarks[2].obj, FPDFBookmark_Find(m_pDoc.get(), title.get()));
+    EXPECT_EQ(FPDFBookmarkFromCPDFDictionary(bookmarks[2].obj),
+              FPDFBookmark_Find(m_pDoc.get(), title.get()));
   }
   {
     // Circular bookmarks in depth.
@@ -187,7 +169,8 @@ TEST_F(PDFDocTest, FindBookmark) {
 
     // Title with a match.
     title = GetFPDFWideString(L"Chapter 2");
-    EXPECT_EQ(bookmarks[2].obj, FPDFBookmark_Find(m_pDoc.get(), title.get()));
+    EXPECT_EQ(FPDFBookmarkFromCPDFDictionary(bookmarks[2].obj),
+              FPDFBookmark_Find(m_pDoc.get(), title.get()));
   }
   {
     // Circular bookmarks in breadth.
@@ -228,7 +211,8 @@ TEST_F(PDFDocTest, FindBookmark) {
 
     // Title with a match.
     title = GetFPDFWideString(L"Chapter 3");
-    EXPECT_EQ(bookmarks[3].obj, FPDFBookmark_Find(m_pDoc.get(), title.get()));
+    EXPECT_EQ(FPDFBookmarkFromCPDFDictionary(bookmarks[3].obj),
+              FPDFBookmark_Find(m_pDoc.get(), title.get()));
   }
 }
 
@@ -247,8 +231,9 @@ TEST_F(PDFDocTest, GetLocationInPage) {
   FS_FLOAT y;
   FS_FLOAT zoom;
 
-  EXPECT_TRUE(FPDFDest_GetLocationInPage(array.get(), &hasX, &hasY, &hasZoom,
-                                         &x, &y, &zoom));
+  EXPECT_TRUE(FPDFDest_GetLocationInPage(FPDFDestFromCPDFArray(array.get()),
+                                         &hasX, &hasY, &hasZoom, &x, &y,
+                                         &zoom));
   EXPECT_TRUE(hasX);
   EXPECT_TRUE(hasY);
   EXPECT_TRUE(hasZoom);
@@ -259,13 +244,15 @@ TEST_F(PDFDocTest, GetLocationInPage) {
   array->SetNewAt<CPDF_Null>(2);
   array->SetNewAt<CPDF_Null>(3);
   array->SetNewAt<CPDF_Null>(4);
-  EXPECT_TRUE(FPDFDest_GetLocationInPage(array.get(), &hasX, &hasY, &hasZoom,
-                                         &x, &y, &zoom));
+  EXPECT_TRUE(FPDFDest_GetLocationInPage(FPDFDestFromCPDFArray(array.get()),
+                                         &hasX, &hasY, &hasZoom, &x, &y,
+                                         &zoom));
   EXPECT_FALSE(hasX);
   EXPECT_FALSE(hasY);
   EXPECT_FALSE(hasZoom);
 
   array = pdfium::MakeUnique<CPDF_Array>();
-  EXPECT_FALSE(FPDFDest_GetLocationInPage(array.get(), &hasX, &hasY, &hasZoom,
-                                          &x, &y, &zoom));
+  EXPECT_FALSE(FPDFDest_GetLocationInPage(FPDFDestFromCPDFArray(array.get()),
+                                          &hasX, &hasY, &hasZoom, &x, &y,
+                                          &zoom));
 }

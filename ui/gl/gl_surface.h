@@ -25,6 +25,7 @@
 #include "ui/gl/gl_surface_format.h"
 
 namespace gfx {
+class GpuFence;
 class VSyncProvider;
 }
 
@@ -36,6 +37,7 @@ struct DCRendererLayerParams;
 namespace gl {
 
 class GLContext;
+class EGLTimestampClient;
 
 // Encapsulates a surface that can be rendered to with GL, hiding platform
 // specific management.
@@ -57,6 +59,12 @@ class GL_EXPORT GLSurface : public base::RefCounted<GLSurface> {
 
   // Destroys the surface.
   virtual void Destroy() = 0;
+
+  // Some implementations (macOS), in Destroy, will need to delete GL objects
+  // that exist in the current GL context. This method is called before the
+  // context's decoder (and potentially context itself) are destroyed, giving an
+  // opportunity for this cleanup.
+  virtual void PrepareToDestroy(bool have_context);
 
   // Color spaces that can be dynamically specified to the surface when resized.
   enum class ColorSpace {
@@ -123,7 +131,15 @@ class GL_EXPORT GLSurface : public base::RefCounted<GLSurface> {
   // FBO. Otherwise returns 0.
   virtual unsigned int GetBackingFramebufferObject();
 
-  using SwapCompletionCallback = base::Callback<void(gfx::SwapResult)>;
+  // The SwapCompletionCallback is used to receive notification about the
+  // completion of the swap operation from |SwapBuffersAsync|,
+  // |PostSubBufferAsync|, |CommitOverlayPlanesAsync|, etc. If a null gpu fence
+  // is returned, then the swap is guaranteed to have already completed. If a
+  // non-null gpu fence is returned, then the swap operation may still be in
+  // progress when this callback is invoked, and the signaling of the gpu fence
+  // will mark the completion of the swap operation.
+  using SwapCompletionCallback =
+      base::Callback<void(gfx::SwapResult, std::unique_ptr<gfx::GpuFence>)>;
   // Swaps front and back buffers. This has no effect for off-screen
   // contexts. On some platforms, we want to send SwapBufferAck only after the
   // surface is displayed on screen. The callback can be used to delay sending
@@ -205,6 +221,10 @@ class GL_EXPORT GLSurface : public base::RefCounted<GLSurface> {
   // of screen refresh. If unavailable, returns NULL.
   virtual gfx::VSyncProvider* GetVSyncProvider();
 
+  // Set vsync to enabled or disabled. If supported, vsync is enabled by
+  // default. Does nothing if vsync cannot be changed.
+  virtual void SetVSyncEnabled(bool enabled);
+
   // Schedule an overlay plane to be shown at swap time, or on the next
   // CommitOverlayPlanes call.
   // |z_order| specifies the stacking order of the plane relative to the
@@ -223,7 +243,8 @@ class GL_EXPORT GLSurface : public base::RefCounted<GLSurface> {
                                     GLImage* image,
                                     const gfx::Rect& bounds_rect,
                                     const gfx::RectF& crop_rect,
-                                    bool enable_blend);
+                                    bool enable_blend,
+                                    std::unique_ptr<gfx::GpuFence> gpu_fence);
 
   // Schedule a CALayer to be shown at swap time.
   // All arguments correspond to their CALayer properties.
@@ -255,6 +276,8 @@ class GL_EXPORT GLSurface : public base::RefCounted<GLSurface> {
 
   virtual bool UseOverlaysForVideo() const;
 
+  virtual bool SupportsProtectedVideo() const;
+
   // Set the rectangle that will be drawn into on the surface.
   virtual bool SetDrawRectangle(const gfx::Rect& rect);
 
@@ -262,17 +285,22 @@ class GL_EXPORT GLSurface : public base::RefCounted<GLSurface> {
   // offset.
   virtual gfx::Vector2d GetDrawOffset() const;
 
-  // This waits until rendering work is complete enough that an OS snapshot
-  // will capture the last swapped contents. A GL context must be current when
-  // calling this.
-  virtual void WaitForSnapshotRendering();
-
   // Tells the surface to rely on implicit sync when swapping buffers.
   virtual void SetRelyOnImplicitSync();
 
   // Support for eglGetFrameTimestamps.
   virtual bool SupportsSwapTimestamps() const;
   virtual void SetEnableSwapTimestamps();
+
+  virtual bool SupportsPlaneGpuFences() const;
+
+  // Returns the number of buffers the surface uses in the swap chain. For
+  // example, most surfaces are double-buffered, so this would return 2. For
+  // triple-buffered surfaces this would return 3, etc.
+  virtual int GetBufferCount() const;
+
+  // Return the interface used for querying EGL timestamps.
+  virtual EGLTimestampClient* GetEGLTimestampClient();
 
   static GLSurface* GetCurrent();
 
@@ -346,12 +374,14 @@ class GL_EXPORT GLSurfaceAdapter : public GLSurface {
   unsigned long GetCompatibilityKey() override;
   GLSurfaceFormat GetFormat() override;
   gfx::VSyncProvider* GetVSyncProvider() override;
+  void SetVSyncEnabled(bool enabled) override;
   bool ScheduleOverlayPlane(int z_order,
                             gfx::OverlayTransform transform,
                             GLImage* image,
                             const gfx::Rect& bounds_rect,
                             const gfx::RectF& crop_rect,
-                            bool enable_blend) override;
+                            bool enable_blend,
+                            std::unique_ptr<gfx::GpuFence> gpu_fence) override;
   bool ScheduleDCLayer(const ui::DCRendererLayerParams& params) override;
   bool SetEnableDCLayers(bool enable) override;
   bool IsSurfaceless() const override;
@@ -359,12 +389,14 @@ class GL_EXPORT GLSurfaceAdapter : public GLSurface {
   bool BuffersFlipped() const override;
   bool SupportsDCLayers() const override;
   bool UseOverlaysForVideo() const override;
+  bool SupportsProtectedVideo() const override;
   bool SetDrawRectangle(const gfx::Rect& rect) override;
   gfx::Vector2d GetDrawOffset() const override;
-  void WaitForSnapshotRendering() override;
   void SetRelyOnImplicitSync() override;
   bool SupportsSwapTimestamps() const override;
   void SetEnableSwapTimestamps() override;
+  bool SupportsPlaneGpuFences() const override;
+  int GetBufferCount() const override;
 
   GLSurface* surface() const { return surface_.get(); }
 

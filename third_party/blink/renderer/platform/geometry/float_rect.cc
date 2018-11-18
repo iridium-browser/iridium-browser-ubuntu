@@ -29,6 +29,7 @@
 #include "third_party/blink/renderer/platform/geometry/int_rect.h"
 #include "third_party/blink/renderer/platform/geometry/layout_rect.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
+#include "third_party/blink/renderer/platform/wtf/text/text_stream.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/skia/include/core/SkRect.h"
 #include "ui/gfx/geometry/rect_f.h"
@@ -115,6 +116,17 @@ bool FloatRect::Intersects(const FloatRect& other) const {
          other.X() < MaxX() && Y() < other.MaxY() && other.Y() < MaxY();
 }
 
+bool FloatRect::Intersects(const IntRect& other) const {
+  // Checking emptiness handles negative widths as well as zero.
+  return !IsEmpty() && !other.IsEmpty() && X() < other.MaxX() &&
+         other.X() < MaxX() && Y() < other.MaxY() && other.Y() < MaxY();
+}
+
+bool FloatRect::Contains(const IntRect& other) const {
+  return X() <= other.X() && MaxX() >= other.MaxX() && Y() <= other.Y() &&
+         MaxY() >= other.MaxY();
+}
+
 bool FloatRect::Contains(const FloatRect& other) const {
   return X() <= other.X() && MaxX() >= other.MaxX() && Y() <= other.Y() &&
          MaxY() >= other.MaxY();
@@ -126,6 +138,23 @@ bool FloatRect::Contains(const FloatPoint& point,
     return Contains(point.X(), point.Y());
   return X() < point.X() && MaxX() > point.X() && Y() < point.Y() &&
          MaxY() > point.Y();
+}
+
+void FloatRect::Intersect(const IntRect& other) {
+  float left = std::max(X(), static_cast<float>(other.X()));
+  float top = std::max(Y(), static_cast<float>(other.Y()));
+  float right = std::min(MaxX(), static_cast<float>(other.MaxX()));
+  float bottom = std::min(MaxY(), static_cast<float>(other.MaxY()));
+
+  // Return a clean empty rectangle for non-intersecting cases.
+  if (left >= right || top >= bottom) {
+    left = 0;
+    top = 0;
+    right = 0;
+    bottom = 0;
+  }
+
+  SetLocationAndSizeFromEdges(left, top, right, bottom);
 }
 
 void FloatRect::Intersect(const FloatRect& other) {
@@ -143,6 +172,26 @@ void FloatRect::Intersect(const FloatRect& other) {
   }
 
   SetLocationAndSizeFromEdges(left, top, right, bottom);
+}
+
+bool FloatRect::InclusiveIntersect(const FloatRect& other) {
+  float left = std::max(X(), other.X());
+  float top = std::max(Y(), other.Y());
+  float right = std::min(MaxX(), other.MaxX());
+  float bottom = std::min(MaxY(), other.MaxY());
+
+  // Return a clean empty rectangle for non-intersecting cases.
+  if (left > right || top > bottom) {
+    left = 0;
+    top = 0;
+    right = 0;
+    bottom = 0;
+    SetLocationAndSizeFromEdges(left, top, right, bottom);
+    return false;
+  }
+
+  SetLocationAndSizeFromEdges(left, top, right, bottom);
+  return true;
 }
 
 void FloatRect::Unite(const FloatRect& other) {
@@ -212,9 +261,8 @@ FloatRect::operator gfx::RectF() const {
 FloatRect UnionRect(const Vector<FloatRect>& rects) {
   FloatRect result;
 
-  size_t count = rects.size();
-  for (size_t i = 0; i < count; ++i)
-    result.Unite(rects[i]);
+  for (const auto& rect : rects)
+    result.Unite(rect);
 
   return result;
 }
@@ -252,6 +300,14 @@ std::ostream& operator<<(std::ostream& ostream, const FloatRect& rect) {
 String FloatRect::ToString() const {
   return String::Format("%s %s", Location().ToString().Ascii().data(),
                         Size().ToString().Ascii().data());
+}
+
+WTF::TextStream& operator<<(WTF::TextStream& ts, const FloatRect& r) {
+  ts << "at (" << WTF::TextStream::FormatNumberRespectingIntegers(r.X());
+  ts << "," << WTF::TextStream::FormatNumberRespectingIntegers(r.Y());
+  ts << ") size " << WTF::TextStream::FormatNumberRespectingIntegers(r.Width());
+  ts << "x" << WTF::TextStream::FormatNumberRespectingIntegers(r.Height());
+  return ts;
 }
 
 }  // namespace blink

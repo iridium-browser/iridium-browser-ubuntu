@@ -8,10 +8,10 @@
 
 #include <vector>
 
-#include "fxjs/JS_Define.h"
 #include "fxjs/cjs_event_context.h"
 #include "fxjs/cjs_eventhandler.h"
 #include "fxjs/cjs_object.h"
+#include "fxjs/js_define.h"
 
 const JSMethodSpec CJS_Console::MethodSpecs[] = {{"clear", clear_static},
                                                  {"hide", hide_static},
@@ -22,33 +22,39 @@ int CJS_Console::ObjDefnID = -1;
 const char CJS_Console::kName[] = "console";
 
 // static
+int CJS_Console::GetObjDefnID() {
+  return ObjDefnID;
+}
+
+// static
 void CJS_Console::DefineJSObjects(CFXJS_Engine* pEngine) {
   ObjDefnID = pEngine->DefineObj(CJS_Console::kName, FXJSOBJTYPE_STATIC,
                                  JSConstructor<CJS_Console>, JSDestructor);
-  DefineMethods(pEngine, ObjDefnID, MethodSpecs, FX_ArraySize(MethodSpecs));
+  DefineMethods(pEngine, ObjDefnID, MethodSpecs);
 }
 
-CJS_Console::CJS_Console(v8::Local<v8::Object> pObject) : CJS_Object(pObject) {}
+CJS_Console::CJS_Console(v8::Local<v8::Object> pObject, CJS_Runtime* pRuntime)
+    : CJS_Object(pObject, pRuntime) {}
 
 CJS_Console::~CJS_Console() = default;
 
-CJS_Return CJS_Console::clear(CJS_Runtime* pRuntime,
+CJS_Result CJS_Console::clear(CJS_Runtime* pRuntime,
                               const std::vector<v8::Local<v8::Value>>& params) {
-  return CJS_Return(true);
+  return CJS_Result::Success();
 }
 
-CJS_Return CJS_Console::hide(CJS_Runtime* pRuntime,
+CJS_Result CJS_Console::hide(CJS_Runtime* pRuntime,
                              const std::vector<v8::Local<v8::Value>>& params) {
-  return CJS_Return(true);
+  return CJS_Result::Success();
 }
 
-CJS_Return CJS_Console::println(
+CJS_Result CJS_Console::println(
     CJS_Runtime* pRuntime,
     const std::vector<v8::Local<v8::Value>>& params) {
-  return CJS_Return(params.size() > 0);
+  return CJS_Result::Success();
 }
 
-CJS_Return CJS_Console::show(CJS_Runtime* pRuntime,
+CJS_Result CJS_Console::show(CJS_Runtime* pRuntime,
                              const std::vector<v8::Local<v8::Value>>& params) {
-  return CJS_Return(true);
+  return CJS_Result::Success();
 }

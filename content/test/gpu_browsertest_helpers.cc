@@ -4,16 +4,18 @@
 
 #include "content/test/gpu_browsertest_helpers.h"
 
+#include <utility>
+
 #include "base/callback.h"
 #include "base/run_loop.h"
 #include "content/browser/browser_main_loop.h"
-#include "content/common/gpu_stream_constants.h"
+#include "content/public/common/gpu_stream_constants.h"
 #include "gpu/command_buffer/client/shared_memory_limits.h"
 #include "gpu/command_buffer/common/context_creation_attribs.h"
 #include "gpu/ipc/client/gpu_channel_host.h"
 #include "gpu/ipc/common/surface_handle.h"
-#include "services/ui/public/cpp/gpu/command_buffer_metrics.h"
-#include "services/ui/public/cpp/gpu/context_provider_command_buffer.h"
+#include "services/ws/public/cpp/gpu/command_buffer_metrics.h"
+#include "services/ws/public/cpp/gpu/context_provider_command_buffer.h"
 #include "url/gurl.h"
 
 namespace content {
@@ -44,7 +46,7 @@ GpuBrowsertestEstablishGpuChannelSyncRunLoop() {
   return gpu_channel_host;
 }
 
-scoped_refptr<ui::ContextProviderCommandBuffer> GpuBrowsertestCreateContext(
+scoped_refptr<ws::ContextProviderCommandBuffer> GpuBrowsertestCreateContext(
     scoped_refptr<gpu::GpuChannelHost> gpu_channel_host) {
   gpu::GpuChannelEstablishFactory* factory =
       content::BrowserMainLoop::GetInstance()->gpu_channel_establish_factory();
@@ -60,12 +62,12 @@ scoped_refptr<ui::ContextProviderCommandBuffer> GpuBrowsertestCreateContext(
   constexpr bool automatic_flushes = false;
   constexpr bool support_locking = false;
   constexpr bool support_grcontext = true;
-  return base::MakeRefCounted<ui::ContextProviderCommandBuffer>(
+  return base::MakeRefCounted<ws::ContextProviderCommandBuffer>(
       std::move(gpu_channel_host), factory->GetGpuMemoryBufferManager(),
       content::kGpuStreamIdDefault, content::kGpuStreamPriorityDefault,
       gpu::kNullSurfaceHandle, GURL(), automatic_flushes, support_locking,
-      support_grcontext, gpu::SharedMemoryLimits(), attributes, nullptr,
-      ui::command_buffer_metrics::OFFSCREEN_CONTEXT_FOR_TESTING);
+      support_grcontext, gpu::SharedMemoryLimits(), attributes,
+      ws::command_buffer_metrics::ContextType::FOR_TESTING);
 }
 
 }  // namespace content

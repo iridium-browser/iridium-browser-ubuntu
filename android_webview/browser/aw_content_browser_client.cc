@@ -4,7 +4,9 @@
 
 #include "android_webview/browser/aw_content_browser_client.h"
 
+#include <string>
 #include <utility>
+#include <vector>
 
 #include "android_webview/browser/aw_browser_context.h"
 #include "android_webview/browser/aw_browser_main_parts.h"
@@ -15,6 +17,7 @@
 #include "android_webview/browser/aw_devtools_manager_delegate.h"
 #include "android_webview/browser/aw_login_delegate.h"
 #include "android_webview/browser/aw_printing_message_filter.h"
+#include "android_webview/browser/aw_proxying_url_loader_factory.h"
 #include "android_webview/browser/aw_quota_permission_context.h"
 #include "android_webview/browser/aw_settings.h"
 #include "android_webview/browser/aw_url_checker_delegate_impl.h"
@@ -24,13 +27,14 @@
 #include "android_webview/browser/tracing/aw_tracing_delegate.h"
 #include "android_webview/common/aw_descriptors.h"
 #include "android_webview/common/aw_switches.h"
-#include "android_webview/common/crash_reporter/aw_microdump_crash_reporter.h"
+#include "android_webview/common/crash_reporter/aw_crash_reporter_client.h"
 #include "android_webview/common/render_view_messages.h"
 #include "android_webview/common/url_constants.h"
 #include "android_webview/grit/aw_resources.h"
 #include "base/android/locale_utils.h"
 #include "base/base_paths_android.h"
 #include "base/base_switches.h"
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/feature_list.h"
 #include "base/files/scoped_file.h"
@@ -38,17 +42,20 @@
 #include "base/memory/ptr_util.h"
 #include "base/path_service.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/post_task.h"
 #include "components/autofill/content/browser/content_autofill_driver_factory.h"
 #include "components/cdm/browser/cdm_message_filter_android.h"
-#include "components/crash/content/browser/crash_dump_observer_android.h"
+#include "components/crash/content/browser/child_exit_observer_android.h"
 #include "components/navigation_interception/intercept_navigation_delegate.h"
 #include "components/policy/content/policy_blacklist_navigation_throttle.h"
+#include "components/policy/core/browser/browser_policy_connector_base.h"
 #include "components/safe_browsing/browser/browser_url_loader_throttle.h"
 #include "components/safe_browsing/browser/mojo_safe_browsing_impl.h"
 #include "components/safe_browsing/features.h"
 #include "components/services/heap_profiling/public/mojom/constants.mojom.h"
 #include "components/spellcheck/spellcheck_buildflags.h"
 #include "content/public/browser/browser_message_filter.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/client_certificate_delegate.h"
@@ -201,8 +208,6 @@ AwBrowserContext* AwContentBrowserClient::GetAwBrowserContext() {
 }
 
 AwContentBrowserClient::AwContentBrowserClient() : net_log_(new net::NetLog()) {
-  frame_interfaces_.AddInterface(base::BindRepeating(
-      &autofill::ContentAutofillDriverFactory::BindAutofillDriver));
   // Although WebView does not support password manager feature, renderer code
   // could still request this interface, so we register a dummy binder which
   // just drops the incoming request, to avoid the 'Failed to locate a binder
@@ -214,12 +219,15 @@ AwContentBrowserClient::AwContentBrowserClient() : net_log_(new net::NetLog()) {
 
 AwContentBrowserClient::~AwContentBrowserClient() {}
 
-AwBrowserContext* AwContentBrowserClient::InitBrowserContext() {
+AwBrowserContext* AwContentBrowserClient::InitBrowserContext(
+    std::unique_ptr<PrefService> pref_service,
+    std::unique_ptr<policy::BrowserPolicyConnectorBase> policy_connector) {
   base::FilePath user_data_dir;
-  if (!PathService::Get(base::DIR_ANDROID_APP_DATA, &user_data_dir)) {
+  if (!base::PathService::Get(base::DIR_ANDROID_APP_DATA, &user_data_dir)) {
     NOTREACHED() << "Failed to get app data directory for Android WebView";
   }
-  browser_context_.reset(new AwBrowserContext(user_data_dir));
+  browser_context_ = std::make_unique<AwBrowserContext>(
+      user_data_dir, std::move(pref_service), std::move(policy_connector));
   return browser_context_.get();
 }
 
@@ -240,13 +248,17 @@ void AwContentBrowserClient::RenderProcessWillLaunch(
   // Grant content: scheme access to the whole renderer process, since we impose
   // per-view access checks, and access is granted by default (see
   // AwSettings.mAllowContentUrlAccess).
-  content::ChildProcessSecurityPolicy::GetInstance()->GrantScheme(
+  content::ChildProcessSecurityPolicy::GetInstance()->GrantRequestScheme(
       host->GetID(), url::kContentScheme);
 
   host->AddFilter(new AwContentsMessageFilter(host->GetID()));
   // WebView always allows persisting data.
   host->AddFilter(new cdm::CdmMessageFilterAndroid(true, false));
   host->AddFilter(new AwPrintingMessageFilter(host->GetID()));
+}
+
+bool AwContentBrowserClient::ShouldUseMobileFlingCurve() const {
+  return true;
 }
 
 bool AwContentBrowserClient::IsHandledURL(const GURL& url) {
@@ -287,9 +299,12 @@ void AwContentBrowserClient::AppendExtraCommandLineSwitches(
     base::CommandLine* command_line,
     int child_process_id) {
   if (!command_line->HasSwitch(switches::kSingleProcess)) {
-    // The only kind of a child process WebView can have is renderer.
-    DCHECK_EQ(switches::kRendererProcess,
-              command_line->GetSwitchValueASCII(switches::kProcessType));
+    // The only kind of a child process WebView can have is renderer or utility.
+    std::string process_type =
+        command_line->GetSwitchValueASCII(switches::kProcessType);
+    DCHECK(process_type == switches::kRendererProcess ||
+           process_type == switches::kUtilityProcess)
+        << process_type;
     // Pass crash reporter enabled state to renderer processes.
     if (crash_reporter::IsCrashReporterEnabled()) {
       command_line->AppendSwitch(::switches::kEnableCrashReporter);
@@ -340,17 +355,15 @@ bool AwContentBrowserClient::AllowSetCookie(const GURL& url,
                                             const net::CanonicalCookie& cookie,
                                             content::ResourceContext* context,
                                             int render_process_id,
-                                            int render_frame_id,
-                                            const net::CookieOptions& options) {
+                                            int render_frame_id) {
   return AwCookieAccessPolicy::GetInstance()->AllowSetCookie(
-      url, first_party, cookie, context, render_process_id, render_frame_id,
-      options);
+      url, first_party, cookie, context, render_process_id, render_frame_id);
 }
 
 void AwContentBrowserClient::AllowWorkerFileSystem(
     const GURL& url,
     content::ResourceContext* context,
-    const std::vector<std::pair<int, int> >& render_frames,
+    const std::vector<content::GlobalFrameRoutingId>& render_frames,
     base::Callback<void(bool)> callback) {
   callback.Run(true);
 }
@@ -359,7 +372,7 @@ bool AwContentBrowserClient::AllowWorkerIndexedDB(
     const GURL& url,
     const base::string16& name,
     content::ResourceContext* context,
-    const std::vector<std::pair<int, int> >& render_frames) {
+    const std::vector<content::GlobalFrameRoutingId>& render_frames) {
   return true;
 }
 
@@ -504,8 +517,8 @@ void AwContentBrowserClient::GetAdditionalMappedFilesForChildProcess(
   fd = ui::GetLocalePackFd(&region);
   mappings->ShareWithRegion(kAndroidWebViewLocalePakDescriptor, fd, region);
 
-  breakpad::CrashDumpObserver::GetInstance()->BrowserChildProcessStarted(
-      child_process_id, mappings);
+  ::crash_reporter::ChildExitObserver::GetInstance()
+      ->BrowserChildProcessStarted(child_process_id, mappings);
 }
 
 void AwContentBrowserClient::OverrideWebkitPrefs(
@@ -566,6 +579,20 @@ void AwContentBrowserClient::BindInterfaceRequestFromFrame(
                                      render_frame_host);
 }
 
+bool AwContentBrowserClient::BindAssociatedInterfaceRequestFromFrame(
+    content::RenderFrameHost* render_frame_host,
+    const std::string& interface_name,
+    mojo::ScopedInterfaceEndpointHandle* handle) {
+  if (interface_name == autofill::mojom::AutofillDriver::Name_) {
+    autofill::ContentAutofillDriverFactory::BindAutofillDriver(
+        autofill::mojom::AutofillDriverAssociatedRequest(std::move(*handle)),
+        render_frame_host);
+    return true;
+  }
+
+  return false;
+}
+
 void AwContentBrowserClient::ExposeInterfacesToRenderer(
     service_manager::BinderRegistry* registry,
     blink::AssociatedInterfaceRegistry* associated_registry,
@@ -581,12 +608,12 @@ void AwContentBrowserClient::ExposeInterfacesToRenderer(
             base::BindRepeating(
                 &AwContentBrowserClient::GetSafeBrowsingUrlCheckerDelegate,
                 base::Unretained(this))),
-        BrowserThread::GetTaskRunnerForThread(BrowserThread::IO));
+        base::CreateSingleThreadTaskRunnerWithTraits({BrowserThread::IO}));
   }
 #if BUILDFLAG(ENABLE_SPELLCHECK)
   registry->AddInterface(
       base::BindRepeating(&SpellCheckHostImpl::Create),
-      BrowserThread::GetTaskRunnerForThread(BrowserThread::UI));
+      base::CreateSingleThreadTaskRunnerWithTraits({BrowserThread::UI}));
 #endif
 }
 
@@ -690,14 +717,15 @@ scoped_refptr<content::LoginDelegate>
 AwContentBrowserClient::CreateLoginDelegate(
     net::AuthChallengeInfo* auth_info,
     content::ResourceRequestInfo::WebContentsGetter web_contents_getter,
+    const content::GlobalRequestID& request_id,
     bool is_main_frame,
     const GURL& url,
+    scoped_refptr<net::HttpResponseHeaders> response_headers,
     bool first_auth_attempt,
-    const base::Callback<void(const base::Optional<net::AuthCredentials>&)>&
-        auth_required_callback) {
-  return base::MakeRefCounted<AwLoginDelegate>(auth_info, web_contents_getter,
-                                               first_auth_attempt,
-                                               auth_required_callback);
+    LoginAuthRequiredCallback auth_required_callback) {
+  return AwLoginDelegate::Create(auth_info, web_contents_getter,
+                                 first_auth_attempt,
+                                 std::move(auth_required_callback));
 }
 
 bool AwContentBrowserClient::HandleExternalProtocol(
@@ -717,7 +745,38 @@ bool AwContentBrowserClient::HandleExternalProtocol(
 void AwContentBrowserClient::RegisterOutOfProcessServices(
     OutOfProcessServiceMap* services) {
   (*services)[heap_profiling::mojom::kServiceName] =
-      base::ASCIIToUTF16("Heap Profiling Service");
+      base::BindRepeating(&base::ASCIIToUTF16, "Heap Profiling Service");
+}
+
+bool AwContentBrowserClient::ShouldEnableStrictSiteIsolation() {
+  // TODO(lukasza): When/if we eventually add OOPIF support for AW we should
+  // consider running AW tests with and without site-per-process (and this might
+  // require returning true below).  Adding OOPIF support for AW is tracked by
+  // https://crbug.com/869494.
+  return false;
+}
+
+bool AwContentBrowserClient::WillCreateURLLoaderFactory(
+    content::BrowserContext* browser_context,
+    content::RenderFrameHost* frame,
+    bool is_navigation,
+    const url::Origin& request_initiator,
+    network::mojom::URLLoaderFactoryRequest* factory_request,
+    bool* bypass_redirect_checks) {
+  DCHECK(base::FeatureList::IsEnabled(network::features::kNetworkService));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
+  auto proxied_request = std::move(*factory_request);
+  network::mojom::URLLoaderFactoryPtrInfo target_factory_info;
+  *factory_request = mojo::MakeRequest(&target_factory_info);
+
+  // Android WebView has one non off-the-record browser context.
+  base::PostTaskWithTraits(
+      FROM_HERE, {content::BrowserThread::IO},
+      base::BindOnce(&AwProxyingURLLoaderFactory::CreateProxy,
+                     std::move(proxied_request), std::move(target_factory_info),
+                     nullptr /* AwInterceptedRequestHandler */));
+  return true;
 }
 
 // static

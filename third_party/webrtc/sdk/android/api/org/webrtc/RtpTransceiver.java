@@ -13,7 +13,6 @@ package org.webrtc;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import org.webrtc.RtpParameters.Encoding;
 
 /**
  * Java wrapper for a C++ RtpTransceiverInterface.
@@ -31,7 +30,6 @@ import org.webrtc.RtpParameters.Encoding;
  * <p>WebRTC specification for RTCRtpTransceiver, the JavaScript analog:
  * https://w3c.github.io/webrtc-pc/#dom-rtcrtptransceiver
  */
-@JNINamespace("webrtc::jni")
 public class RtpTransceiver {
   /** Java version of webrtc::RtpTransceiverDirection - the ordering must be kept in sync. */
   public enum RtpTransceiverDirection {
@@ -97,7 +95,7 @@ public class RtpTransceiver {
     }
   }
 
-  private final long nativeRtpTransceiver;
+  private long nativeRtpTransceiver;
   private RtpSender cachedSender;
   private RtpReceiver cachedReceiver;
 
@@ -113,6 +111,7 @@ public class RtpTransceiver {
    * type as well.
    */
   public MediaStreamTrack.MediaType getMediaType() {
+    checkRtpTransceiverExists();
     return nativeGetMediaType(nativeRtpTransceiver);
   }
 
@@ -123,6 +122,7 @@ public class RtpTransceiver {
    * https://w3c.github.io/webrtc-pc/#dom-rtcrtptransceiver-mid
    */
   public String getMid() {
+    checkRtpTransceiverExists();
     return nativeGetMid(nativeRtpTransceiver);
   }
 
@@ -154,6 +154,7 @@ public class RtpTransceiver {
    * https://w3c.github.io/webrtc-pc/#dom-rtcrtptransceiver-stopped
    */
   public boolean isStopped() {
+    checkRtpTransceiverExists();
     return nativeStopped(nativeRtpTransceiver);
   }
 
@@ -163,6 +164,7 @@ public class RtpTransceiver {
    * https://w3c.github.io/webrtc-pc/#dom-rtcrtptransceiver-direction
    */
   public RtpTransceiverDirection getDirection() {
+    checkRtpTransceiverExists();
     return nativeDirection(nativeRtpTransceiver);
   }
 
@@ -173,6 +175,7 @@ public class RtpTransceiver {
    * https://w3c.github.io/webrtc-pc/#dom-rtcrtptransceiver-currentdirection
    */
   public RtpTransceiverDirection getCurrentDirection() {
+    checkRtpTransceiverExists();
     return nativeCurrentDirection(nativeRtpTransceiver);
   }
 
@@ -184,6 +187,7 @@ public class RtpTransceiver {
    * https://w3c.github.io/webrtc-pc/#dom-rtcrtptransceiver-direction
    */
   public void setDirection(RtpTransceiverDirection rtpTransceiverDirection) {
+    checkRtpTransceiverExists();
     nativeSetDirection(nativeRtpTransceiver, rtpTransceiverDirection);
   }
 
@@ -193,13 +197,23 @@ public class RtpTransceiver {
    * https://w3c.github.io/webrtc-pc/#dom-rtcrtptransceiver-stop
    */
   public void stop() {
+    checkRtpTransceiverExists();
     nativeStop(nativeRtpTransceiver);
   }
 
+  @CalledByNative
   public void dispose() {
+    checkRtpTransceiverExists();
     cachedSender.dispose();
     cachedReceiver.dispose();
     JniCommon.nativeReleaseRef(nativeRtpTransceiver);
+    nativeRtpTransceiver = 0;
+  }
+
+  private void checkRtpTransceiverExists() {
+    if (nativeRtpTransceiver == 0) {
+      throw new IllegalStateException("RtpTransceiver has been disposed.");
+    }
   }
 
   private static native MediaStreamTrack.MediaType nativeGetMediaType(long rtpTransceiver);

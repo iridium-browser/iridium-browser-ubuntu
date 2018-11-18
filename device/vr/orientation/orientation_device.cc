@@ -17,18 +17,17 @@
 
 namespace device {
 
-using mojom::SensorType;
 using gfx::Quaternion;
 using gfx::Vector3dF;
 
 namespace {
 static constexpr int kDefaultPumpFrequencyHz = 60;
 
-mojom::VRDisplayInfoPtr CreateVRDisplayInfo(unsigned int id) {
+mojom::VRDisplayInfoPtr CreateVRDisplayInfo(mojom::XRDeviceId id) {
   static const char DEVICE_NAME[] = "VR Orientation Device";
 
   mojom::VRDisplayInfoPtr display_info = mojom::VRDisplayInfo::New();
-  display_info->index = id;
+  display_info->id = id;
   display_info->displayName = DEVICE_NAME;
   display_info->capabilities = mojom::VRDisplayCapabilities::New();
   display_info->capabilities->hasPosition = false;
@@ -53,12 +52,11 @@ display::Display::Rotation GetRotation() {
 VROrientationDevice::VROrientationDevice(
     mojom::SensorProviderPtr* sensor_provider,
     base::OnceClosure ready_callback)
-    : ready_callback_(std::move(ready_callback)), binding_(this) {
-  // Use RELATIVE_ORIENTATION_QUATERNION rather than
-  // ABSOLUTE_ORIENTATION_QUATERNION because compass readings can be innacurate
-  // when used indoors.
+    : VRDeviceBase(mojom::XRDeviceId::ORIENTATION_DEVICE_ID),
+      ready_callback_(std::move(ready_callback)),
+      binding_(this) {
   (*sensor_provider)
-      ->GetSensor(SensorType::RELATIVE_ORIENTATION_QUATERNION,
+      ->GetSensor(kOrientationSensorType,
                   base::BindOnce(&VROrientationDevice::SensorReady,
                                  base::Unretained(this)));
 
@@ -140,8 +138,17 @@ void VROrientationDevice::HandleSensorError() {
   binding_.Close();
 }
 
-void VROrientationDevice::OnMagicWindowPoseRequest(
-    mojom::VRMagicWindowProvider::GetPoseCallback callback) {
+void VROrientationDevice::RequestSession(
+    mojom::XRRuntimeSessionOptionsPtr options,
+    mojom::XRRuntime::RequestSessionCallback callback) {
+  DCHECK(!options->immersive);
+  // TODO(http://crbug.com/695937): Perform a check to see if sensors are
+  // available when RequestSession is called for non-immersive sessions.
+  ReturnNonImmersiveSession(std::move(callback));
+}
+
+void VROrientationDevice::OnMagicWindowFrameDataRequest(
+    mojom::XRFrameDataProvider::GetFrameDataCallback callback) {
   mojom::VRPosePtr pose = mojom::VRPose::New();
   pose->orientation.emplace(4);
 
@@ -162,7 +169,10 @@ void VROrientationDevice::OnMagicWindowPoseRequest(
   pose->orientation.value()[2] = latest_pose_.z();
   pose->orientation.value()[3] = latest_pose_.w();
 
-  std::move(callback).Run(std::move(pose));
+  mojom::XRFrameDataPtr frame_data = mojom::XRFrameData::New();
+  frame_data->pose = std::move(pose);
+
+  std::move(callback).Run(std::move(frame_data));
 }
 
 Quaternion VROrientationDevice::SensorSpaceToWorldSpace(Quaternion q) {
@@ -207,9 +217,5 @@ Quaternion VROrientationDevice::WorldSpaceToUserOrientedSpace(Quaternion q) {
 
   return q;
 }
-
-bool VROrientationDevice::IsFallbackDevice() {
-  return true;
-};
 
 }  // namespace device

@@ -31,12 +31,13 @@
 #ifndef THIRD_PARTY_BLINK_PUBLIC_PLATFORM_WEB_INPUT_EVENT_H_
 #define THIRD_PARTY_BLINK_PUBLIC_PLATFORM_WEB_INPUT_EVENT_H_
 
+#include <string.h>
+
+#include "base/time/time.h"
 #include "third_party/blink/public/platform/web_common.h"
 #include "third_party/blink/public/platform/web_pointer_properties.h"
 #include "third_party/blink/public/platform/web_rect.h"
 #include "third_party/blink/public/platform/web_touch_point.h"
-
-#include <string.h>
 
 namespace blink {
 
@@ -161,12 +162,14 @@ class WebInputEvent {
     // because it may still turn into a GestureDoubleTap.
     kGestureTapUnconfirmed,
 
-    // Double-tap is two single-taps spread apart in time, like a double-click.
-    // This event is only sent on desktop pages viewed on an Android phone, and
-    // is always preceded by GestureTapUnconfirmed.  It's an instruction to
-    // Blink to perform a PageScaleAnimation zoom onto the double-tapped
-    // content.  (It's treated differently from GestureTap with tapCount=2,
-    // which can also happen.)
+    // On Android, double-tap is two single-taps spread apart in time, like a
+    // double-click. This event is only sent on desktop pages, and is always
+    // preceded by GestureTapUnconfirmed. It's an instruction to Blink to
+    // perform a PageScaleAnimation zoom onto the double-tapped content. (It's
+    // treated differently from GestureTap with tapCount=2, which can also
+    // happen.)
+    // On desktop, this event may be used for a double-tap with two fingers on
+    // a touchpad, as the desired effect is similar to Android's double-tap.
     kGestureDoubleTap,
 
     kGestureTypeLast = kGestureDoubleTap,
@@ -187,6 +190,7 @@ class WebInputEvent {
     kPointerTypeFirst = kPointerDown,
     kPointerUp,
     kPointerMove,
+    kPointerRawMove,  // To be only used within blink.
     kPointerCancel,
     kPointerCausedUaAction,
     kPointerTypeLast = kPointerCausedUaAction,
@@ -279,12 +283,7 @@ class WebInputEvent {
     // This value represents a state which would have normally blocking
     // but was forced to be non-blocking during fling; not cancelable.
     kListenersForcedNonBlockingDueToFling,
-    // This value represents a state which would have normally blocking but
-    // was forced to be non-blocking due to the main thread being
-    // unresponsive.
-    kListenersForcedNonBlockingDueToMainThreadResponsiveness,
-    kLastDispatchType =
-        kListenersForcedNonBlockingDueToMainThreadResponsiveness,
+    kLastDispatchType = kListenersForcedNonBlockingDueToFling,
   };
 
   // The rail mode for a wheel event specifies the axis on which scrolling is
@@ -299,7 +298,17 @@ class WebInputEvent {
   static const int kInputModifiers =
       kShiftKey | kControlKey | kAltKey | kMetaKey;
 
-  static double GetStaticTimeStampForTests() { return 123.0; }
+  static constexpr base::TimeTicks GetStaticTimeStampForTests() {
+    // Note: intentionally use a relatively large delta from base::TimeTicks ==
+    // 0. Otherwise, code that tracks the time ticks of the last event that
+    // happened and computes a delta might get confused when the testing
+    // timestamp is near 0, as the computed delta may very well be under the
+    // delta threshhold.
+    //
+    // TODO(dcheng): This really shouldn't use FromInternalValue(), but
+    // constexpr support for time operations is a bit busted...
+    return base::TimeTicks::FromInternalValue(123'000'000);
+  }
 
   // Returns true if the WebInputEvent |type| is a mouse event.
   static bool IsMouseEventType(WebInputEvent::Type type) {
@@ -340,9 +349,25 @@ class WebInputEvent {
     return type_ == other.type_;
   }
 
+  bool IsGestureScroll() const {
+    switch (type_) {
+      case Type::kGestureScrollBegin:
+      case Type::kGestureScrollUpdate:
+      case Type::kGestureScrollEnd:
+        return true;
+      default:
+        return false;
+    }
+  }
+
   // Returns true if the WebInputEvent |type| is a pinch gesture event.
   static bool IsPinchGestureEventType(WebInputEvent::Type type) {
     return kGesturePinchTypeFirst <= type && type <= kGesturePinchTypeLast;
+  }
+
+  // Returns true if the WebInputEvent |type| is a fling gesture event.
+  static bool IsFlingGestureEventType(WebInputEvent::Type type) {
+    return kGestureFlingStart <= type && type <= kGestureFlingCancel;
   }
 
   static const char* GetName(WebInputEvent::Type type) {
@@ -387,6 +412,7 @@ class WebInputEvent {
       CASE_TYPE(PointerDown);
       CASE_TYPE(PointerUp);
       CASE_TYPE(PointerMove);
+      CASE_TYPE(PointerRawMove);
       CASE_TYPE(PointerCancel);
       CASE_TYPE(PointerCausedUaAction);
     }
@@ -409,8 +435,8 @@ class WebInputEvent {
   int GetModifiers() const { return modifiers_; }
   void SetModifiers(int modifiers_param) { modifiers_ = modifiers_param; }
 
-  double TimeStampSeconds() const { return time_stamp_seconds_; }
-  void SetTimeStampSeconds(double seconds) { time_stamp_seconds_ = seconds; }
+  base::TimeTicks TimeStamp() const { return time_stamp_; }
+  void SetTimeStamp(base::TimeTicks time_stamp) { time_stamp_ = time_stamp; }
 
   unsigned size() const { return size_; }
 
@@ -421,17 +447,17 @@ class WebInputEvent {
   // The root frame translation (applied post scale).
   WebFloatPoint frame_translate_;
 
-  WebInputEvent(unsigned size_param,
-                Type type_param,
-                int modifiers_param,
-                double time_stamp_seconds_param) {
+  WebInputEvent(unsigned size,
+                Type type,
+                int modifiers,
+                base::TimeTicks time_stamp) {
     // TODO(dtapuska): Remove this memset when we remove the chrome IPC of this
     // struct.
-    memset(this, 0, size_param);
-    time_stamp_seconds_ = time_stamp_seconds_param;
-    size_ = size_param;
-    type_ = type_param;
-    modifiers_ = modifiers_param;
+    memset(this, 0, size);
+    time_stamp_ = time_stamp;
+    size_ = size;
+    type_ = type;
+    modifiers_ = modifiers;
 #if DCHECK_IS_ON()
     // If dcheck is on force failures if frame scale is not initialized
     // correctly by causing DIV0.
@@ -445,7 +471,7 @@ class WebInputEvent {
     // TODO(dtapuska): Remove this memset when we remove the chrome IPC of this
     // struct.
     memset(this, 0, size_param);
-    time_stamp_seconds_ = 0.0;
+    time_stamp_ = base::TimeTicks();
     size_ = size_param;
     type_ = kUndefined;
 #if DCHECK_IS_ON()
@@ -457,9 +483,10 @@ class WebInputEvent {
 #endif
   }
 
-  double time_stamp_seconds_;  // Seconds since platform start with microsecond
-                               // resolution.
-  unsigned size_;              // The size of this structure, for serialization.
+  // Event time since platform start with microsecond resolution.
+  base::TimeTicks time_stamp_;
+  // The size of this structure, for serialization.
+  unsigned size_;
   Type type_;
   int modifiers_;
 };

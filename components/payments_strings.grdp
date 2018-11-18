@@ -384,6 +384,9 @@
   <message name="IDS_PAYMENTS_CARD_AND_ADDRESS_SETTINGS_SIGNED_OUT" desc="Label of the section containing the origin description and the link to go to the settings page for card and address options. This label is used when the user is not signed in." formatter_data="android_java">
     Cards and addresses are from Chrome. You can manage them in <ph name="BEGIN_LINK">BEGIN_LINK</ph>Settings<ph name="END_LINK">END_LINK</ph>.
   </message>
+  <message name="IDS_SETTINGS_CAN_MAKE_PAYMENT_TOGGLE_LABEL" desc="Label of the toggle which disables canMakePayment" formatter_data="android_java">
+    Allow sites to check if you have payment methods saved
+  </message>
 
   <!-- iOS Credit Card form -->
   <if expr="is_ios">
@@ -582,6 +585,9 @@
     <message name="IDS_EXTERNAL_PAYMENT_APP_LEAVE_INCOGNITO_WARNING" desc="Alert dialog text warning the user that incognito mode does not continue into external payment apps." formatter_data="android_java">
       Leaving incognito mode to pay via an external application. Continue?
     </message>
+    <message name="IDS_EXTERNAL_PAYMENT_APP_LEAVE_PRIVATE_WARNING" desc="Alert dialog text warning the user that private mode does not continue into external payment apps." formatter_data="android_java">
+      Leaving private mode to pay via an external application. Continue?
+    </message>
   </if>
 
   <!-- Payment Request section preview strings. They are slightly different on desktop and android because the pluralization and formatting code behaves differently. -->
@@ -630,5 +636,8 @@
   </message>
   <message name="IDS_PAYMENTS_ACCESSIBLE_LABEL_WITH_ERROR" desc="The format to append an error message to a screen reader string describing a profile or payment method">
     <ph name="LABEL">$1<ex>Homer Simpson 123 Fake Street</ex></ph> <ph name="ERROR">$2<ex>Phone number required</ex></ph>
+  </message>
+  <message name="IDS_PAYMENTS_ORDER_SUMMARY_ACCESSIBLE_LABEL" desc="The string used to format what the screenreader reads out for the order summary section of the Payment Sheet.">
+    Order Summary, <ph name="TOTAL_LABEL">$1<ex>Total, USD $10.00</ex></ph>, More Details
   </message>
 </grit-part>

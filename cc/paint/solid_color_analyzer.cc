@@ -152,7 +152,6 @@ base::Optional<SkColor> SolidColorAnalyzer::DetermineIfSolidColor(
   SkColor color = SK_ColorTRANSPARENT;
 
   struct Frame {
-    Frame() = default;
     Frame(PaintOpBuffer::CompositeIterator iter,
           const SkMatrix& original_ctm,
           int save_count)
@@ -263,17 +262,20 @@ base::Optional<SkColor> SolidColorAnalyzer::DetermineIfSolidColor(
         break;
       }
 
-      // The rest of the ops should only affect our state canvas.
+      // Don't affect the canvas, so ignore.
       case PaintOpType::Annotate:
-      case PaintOpType::Concat:
       case PaintOpType::CustomData:
+      case PaintOpType::Noop:
+        break;
+
+      // The rest of the ops should only affect our state canvas.
+      case PaintOpType::Concat:
       case PaintOpType::Scale:
       case PaintOpType::SetMatrix:
       case PaintOpType::Restore:
       case PaintOpType::Rotate:
       case PaintOpType::Save:
       case PaintOpType::Translate:
-      case PaintOpType::Noop:
         op->Raster(&canvas, params);
         break;
     }

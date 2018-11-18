@@ -12,57 +12,61 @@ template <class StringClass>
 struct StringTraits {
   static const StringClass& FromStringResource(StringResourceBase*);
   template <typename V8StringTrait>
-  static StringClass FromV8String(v8::Local<v8::String>, int);
+  static StringClass FromV8String(v8::Isolate*, v8::Local<v8::String>, int);
 };
 
 template <>
 struct StringTraits<String> {
-  static const String& FromStringResource(StringResourceBase* resource) {
-    return resource->WebcoreString();
+  static const String FromStringResource(StringResourceBase* resource) {
+    return resource->GetWTFString();
   }
   template <typename V8StringTrait>
-  static String FromV8String(v8::Local<v8::String>, int);
+  static String FromV8String(v8::Isolate*, v8::Local<v8::String>, int);
 };
 
 template <>
 struct StringTraits<AtomicString> {
-  static const AtomicString& FromStringResource(StringResourceBase* resource) {
+  static const AtomicString FromStringResource(StringResourceBase* resource) {
     return resource->GetAtomicString();
   }
   template <typename V8StringTrait>
-  static AtomicString FromV8String(v8::Local<v8::String>, int);
+  static AtomicString FromV8String(v8::Isolate*, v8::Local<v8::String>, int);
 };
 
 struct V8StringTwoBytesTrait {
   typedef UChar CharType;
-  ALWAYS_INLINE static void Write(v8::Local<v8::String> v8_string,
+  ALWAYS_INLINE static void Write(v8::Isolate* isolate,
+                                  v8::Local<v8::String> v8_string,
                                   CharType* buffer,
                                   int length) {
-    v8_string->Write(reinterpret_cast<uint16_t*>(buffer), 0, length);
+    v8_string->Write(isolate, reinterpret_cast<uint16_t*>(buffer), 0, length);
   }
 };
 
 struct V8StringOneByteTrait {
   typedef LChar CharType;
-  ALWAYS_INLINE static void Write(v8::Local<v8::String> v8_string,
+  ALWAYS_INLINE static void Write(v8::Isolate* isolate,
+                                  v8::Local<v8::String> v8_string,
                                   CharType* buffer,
                                   int length) {
-    v8_string->WriteOneByte(buffer, 0, length);
+    v8_string->WriteOneByte(isolate, buffer, 0, length);
   }
 };
 
 template <typename V8StringTrait>
-String StringTraits<String>::FromV8String(v8::Local<v8::String> v8_string,
+String StringTraits<String>::FromV8String(v8::Isolate* isolate,
+                                          v8::Local<v8::String> v8_string,
                                           int length) {
   DCHECK(v8_string->Length() == length);
   typename V8StringTrait::CharType* buffer;
   String result = String::CreateUninitialized(length, buffer);
-  V8StringTrait::Write(v8_string, buffer, length);
+  V8StringTrait::Write(isolate, v8_string, buffer, length);
   return result;
 }
 
 template <typename V8StringTrait>
 AtomicString StringTraits<AtomicString>::FromV8String(
+    v8::Isolate* isolate,
     v8::Local<v8::String> v8_string,
     int length) {
   DCHECK(v8_string->Length() == length);
@@ -70,18 +74,18 @@ AtomicString StringTraits<AtomicString>::FromV8String(
       32 / sizeof(typename V8StringTrait::CharType);
   if (length <= kInlineBufferSize) {
     typename V8StringTrait::CharType inline_buffer[kInlineBufferSize];
-    V8StringTrait::Write(v8_string, inline_buffer, length);
-    return AtomicString(inline_buffer, length);
+    V8StringTrait::Write(isolate, v8_string, inline_buffer, length);
+    return AtomicString(inline_buffer, static_cast<unsigned>(length));
   }
   typename V8StringTrait::CharType* buffer;
   String string = String::CreateUninitialized(length, buffer);
-  V8StringTrait::Write(v8_string, buffer, length);
+  V8StringTrait::Write(isolate, v8_string, buffer, length);
   return AtomicString(string);
 }
 
 template <typename StringType>
-StringType V8StringToWebCoreString(v8::Local<v8::String> v8_string,
-                                   ExternalMode external) {
+StringType ToBlinkString(v8::Local<v8::String> v8_string,
+                         ExternalMode external) {
   {
     // This portion of this function is very hot in certain Dromeao benchmarks.
     v8::String::Encoding encoding;
@@ -101,11 +105,13 @@ StringType V8StringToWebCoreString(v8::Local<v8::String> v8_string,
   if (UNLIKELY(!length))
     return StringType("");
 
+  v8::Isolate* isolate = v8::Isolate::GetCurrent();
   bool one_byte = v8_string->ContainsOnlyOneByte();
-  StringType result(one_byte ? StringTraits<StringType>::template FromV8String<
-                                   V8StringOneByteTrait>(v8_string, length)
-                             : StringTraits<StringType>::template FromV8String<
-                                   V8StringTwoBytesTrait>(v8_string, length));
+  StringType result(
+      one_byte ? StringTraits<StringType>::template FromV8String<
+                     V8StringOneByteTrait>(isolate, v8_string, length)
+               : StringTraits<StringType>::template FromV8String<
+                     V8StringTwoBytesTrait>(isolate, v8_string, length));
 
   if (external != kExternalize || !v8_string->CanMakeExternal())
     return result;
@@ -125,14 +131,12 @@ StringType V8StringToWebCoreString(v8::Local<v8::String> v8_string,
 // Explicitly instantiate the above template with the expected
 // parameterizations, to ensure the compiler generates the code; otherwise link
 // errors can result in GCC 4.4.
-template String V8StringToWebCoreString<String>(v8::Local<v8::String>,
-                                                ExternalMode);
-template AtomicString V8StringToWebCoreString<AtomicString>(
-    v8::Local<v8::String>,
-    ExternalMode);
+template String ToBlinkString<String>(v8::Local<v8::String>, ExternalMode);
+template AtomicString ToBlinkString<AtomicString>(v8::Local<v8::String>,
+                                                  ExternalMode);
 
 // Fast but non thread-safe version.
-String Int32ToWebCoreStringFast(int value) {
+static String ToBlinkStringFast(int value) {
   // Caching of small strings below is not thread safe: newly constructed
   // AtomicString are not safely published.
   DCHECK(IsMainThread());
@@ -155,11 +159,11 @@ String Int32ToWebCoreStringFast(int value) {
   return web_core_string;
 }
 
-String Int32ToWebCoreString(int value) {
+String ToBlinkString(int value) {
   // If we are on the main thread (this should always true for non-workers),
   // call the faster one.
   if (IsMainThread())
-    return Int32ToWebCoreStringFast(value);
+    return ToBlinkStringFast(value);
   return String::Number(value);
 }
 

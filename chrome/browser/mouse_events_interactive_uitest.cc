@@ -111,8 +111,8 @@ IN_PROC_BROWSER_TEST_F(MouseEventsTest, MAYBE_ClickAndDoubleClick) {
 // OS_MACOSX: Missing automation provider support: http://crbug.com/45892.
 // OS_LINUX: http://crbug.com/133361.
 #define MAYBE_TestOnMouseOut DISABLED_TestOnMouseOut
-#elif defined(OS_WIN) && !defined(NDEBUG)
-// Flaky on Win debug; see https://crbug.com/419468.
+#elif defined(OS_WIN)
+// Flaky on Windows; see https://crbug.com/419468.
 #define MAYBE_TestOnMouseOut DISABLED_TestOnMouseOut
 #else
 #define MAYBE_TestOnMouseOut TestOnMouseOut
@@ -165,12 +165,13 @@ IN_PROC_BROWSER_TEST_F(MouseEventsTest, MAYBE_ContextMenu) {
   EXPECT_EQ(success_title, done_title_watcher.WaitAndGetTitle());
 }
 
-#if defined(OS_WIN) || defined(OS_MACOSX)
+#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_LINUX)
 // Test that a mouseleave is not triggered when showing a modal dialog.
 // Sample regression: crbug.com/394672
 // TODO: Make test pass on OS_WIN and OS_MACOSX
 // OS_WIN: http://crbug.com/450138
 // OS_MACOSX: Missing automation provider support: http://crbug.com/45892.
+// OS_LINUX: Flaky http://crbug.com/838120
 #define MAYBE_ModalDialog DISABLED_ModalDialog
 #else
 #define MAYBE_ModalDialog ModalDialog

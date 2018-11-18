@@ -8,12 +8,16 @@
 #include <stdint.h>
 #include <vector>
 
+#include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "third_party/re2/src/re2/re2.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/utils/SkParse.h"
+#include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/color_utils.h"
 
 namespace extensions {
@@ -156,6 +160,53 @@ bool ParseHslColorString(const std::string& color_string, SkColor* result) {
 
   *result = color_utils::HSLToSkColor(hsl, sk_alpha);
   return true;
+}
+
+bool IsIconSufficientlyVisible(const SkBitmap& bitmap) {
+  // TODO(crbug.com/805600): Currently, we only consider if there are enough
+  // visible pixels that it won't be difficult for the user to see. Future
+  // revisions will consider the background color of the display context.
+
+  // If the alpha value of any pixel is greater than kAlphaThreshold, the
+  // pixmap is not transparent. These values will likely be adjusted, based
+  // on stats and research into visibility thresholds.
+  constexpr unsigned int kAlphaThreshold = 10;
+  // The minimum "percent" of pixels that must be visible for the icon to be
+  // considered OK.
+  constexpr double kMinPercentVisiblePixels = 0.05;
+  const unsigned int total_pixels = bitmap.height() * bitmap.width();
+  unsigned int visible_pixels = 0;
+  for (int y = 0; y < bitmap.height(); ++y) {
+    for (int x = 0; x < bitmap.width(); ++x) {
+      if (SkColorGetA(bitmap.getColor(x, y)) >= kAlphaThreshold) {
+        ++visible_pixels;
+      }
+    }
+  }
+  // TODO(crbug.com/805600): Add UMA stats when we move to a more
+  // sophisticated analysis of the image and the background display
+  // color.
+  return static_cast<double>(visible_pixels) / total_pixels >=
+         kMinPercentVisiblePixels;
+}
+
+bool IsIconAtPathSufficientlyVisible(const base::FilePath& path) {
+  SkBitmap icon;
+  if (!LoadPngFromFile(path, &icon)) {
+    return false;
+  } else {
+    return image_util::IsIconSufficientlyVisible(icon);
+  }
+}
+
+bool LoadPngFromFile(const base::FilePath& path, SkBitmap* dst) {
+  std::string png_bytes;
+  if (!base::ReadFileToString(path, &png_bytes)) {
+    return false;
+  }
+  return gfx::PNGCodec::Decode(
+      reinterpret_cast<const unsigned char*>(png_bytes.data()),
+      png_bytes.length(), dst);
 }
 
 }  // namespace image_util

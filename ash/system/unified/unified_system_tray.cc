@@ -4,37 +4,60 @@
 
 #include "ash/system/unified/unified_system_tray.h"
 
+#include "ash/accessibility/accessibility_controller.h"
+#include "ash/shell.h"
+#include "ash/strings/grit/ash_strings.h"
+#include "ash/system/date/date_view.h"
+#include "ash/system/date/tray_system_info.h"
+#include "ash/system/message_center/ash_popup_alignment_delegate.h"
+#include "ash/system/message_center/message_center_ui_controller.h"
+#include "ash/system/message_center/message_center_ui_delegate.h"
+#include "ash/system/model/clock_model.h"
+#include "ash/system/model/system_tray_model.h"
+#include "ash/system/network/network_tray_view.h"
+#include "ash/system/network/tray_network_state_observer.h"
+#include "ash/system/power/tray_power.h"
 #include "ash/system/status_area_widget.h"
 #include "ash/system/tray/system_tray.h"
+#include "ash/system/tray/tray_constants.h"
+#include "ash/system/tray/tray_container.h"
+#include "ash/system/unified/ime_mode_view.h"
+#include "ash/system/unified/managed_device_view.h"
+#include "ash/system/unified/notification_counter_view.h"
+#include "ash/system/unified/unified_slider_bubble_controller.h"
 #include "ash/system/unified/unified_system_tray_bubble.h"
 #include "ash/system/unified/unified_system_tray_model.h"
-#include "ash/system/web_notification/ash_popup_alignment_delegate.h"
+#include "base/time/time.h"
+#include "base/timer/timer.h"
+#include "chromeos/network/network_handler.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
 #include "ui/message_center/message_center.h"
-#include "ui/message_center/ui_controller.h"
-#include "ui/message_center/ui_delegate.h"
 #include "ui/message_center/views/message_popup_collection.h"
 
 namespace ash {
 
-class UnifiedSystemTray::UiDelegate : public message_center::UiDelegate {
+class UnifiedSystemTray::UiDelegate : public MessageCenterUiDelegate {
  public:
-  explicit UiDelegate(UnifiedSystemTray* owner);
+  UiDelegate(UnifiedSystemTray* owner);
   ~UiDelegate() override;
 
-  // message_center::UiDelegate:
+  // MessageCenterUiDelegate:
   void OnMessageCenterContentsChanged() override;
   bool ShowPopups() override;
-  void HidePopups() override;
+  void HidePopups(bool animate) override;
   bool ShowMessageCenter(bool show_by_click) override;
   void HideMessageCenter() override;
-  bool ShowNotifierSettings() override;
 
-  message_center::UiController* ui_controller() { return ui_controller_.get(); }
+  MessageCenterUiController* ui_controller() { return ui_controller_.get(); }
+
+  void SetTrayBubbleHeight(int height) {
+    popup_alignment_delegate_->SetTrayBubbleHeight(height);
+  }
 
  private:
-  std::unique_ptr<message_center::UiController> ui_controller_;
+  std::unique_ptr<MessageCenterUiController> ui_controller_;
   std::unique_ptr<AshPopupAlignmentDelegate> popup_alignment_delegate_;
   std::unique_ptr<message_center::MessagePopupCollection>
       message_popup_collection_;
@@ -44,14 +67,17 @@ class UnifiedSystemTray::UiDelegate : public message_center::UiDelegate {
   DISALLOW_COPY_AND_ASSIGN(UiDelegate);
 };
 
+const base::TimeDelta UnifiedSystemTray::kNotificationCountUpdateDelay =
+    base::TimeDelta::FromMilliseconds(100);
+
 UnifiedSystemTray::UiDelegate::UiDelegate(UnifiedSystemTray* owner)
     : owner_(owner) {
-  ui_controller_ = std::make_unique<message_center::UiController>(this);
+  ui_controller_ = std::make_unique<MessageCenterUiController>(this);
+  ui_controller_->set_hide_on_last_notification(false);
   popup_alignment_delegate_ =
       std::make_unique<AshPopupAlignmentDelegate>(owner->shelf());
   message_popup_collection_ =
       std::make_unique<message_center::MessagePopupCollection>(
-          message_center::MessageCenter::Get(), ui_controller_.get(),
           popup_alignment_delegate_.get());
   display::Screen* screen = display::Screen::GetScreen();
   popup_alignment_delegate_->StartObserving(
@@ -62,25 +88,26 @@ UnifiedSystemTray::UiDelegate::UiDelegate(UnifiedSystemTray* owner)
 UnifiedSystemTray::UiDelegate::~UiDelegate() = default;
 
 void UnifiedSystemTray::UiDelegate::OnMessageCenterContentsChanged() {
-  // TODO(tetsui): Implement.
+  owner_->UpdateNotificationInternal();
 }
 
 bool UnifiedSystemTray::UiDelegate::ShowPopups() {
   if (owner_->IsBubbleShown())
     return false;
-  message_popup_collection_->DoUpdate();
+  message_popup_collection_->Update();
   return true;
 }
 
-void UnifiedSystemTray::UiDelegate::HidePopups() {
-  message_popup_collection_->MarkAllPopupsShown();
+void UnifiedSystemTray::UiDelegate::HidePopups(bool animate) {
+  message_popup_collection_->MarkAllPopupsShown(animate);
+  popup_alignment_delegate_->SetTrayBubbleHeight(0);
 }
 
 bool UnifiedSystemTray::UiDelegate::ShowMessageCenter(bool show_by_click) {
   if (owner_->IsBubbleShown())
     return false;
 
-  owner_->ShowBubbleInternal();
+  owner_->ShowBubbleInternal(show_by_click);
   return true;
 }
 
@@ -88,32 +115,163 @@ void UnifiedSystemTray::UiDelegate::HideMessageCenter() {
   owner_->HideBubbleInternal();
 }
 
-bool UnifiedSystemTray::UiDelegate::ShowNotifierSettings() {
-  return false;
+class UnifiedSystemTray::NetworkStateDelegate
+    : public TrayNetworkStateObserver::Delegate {
+ public:
+  explicit NetworkStateDelegate(tray::NetworkTrayView* tray_view);
+  ~NetworkStateDelegate() override;
+
+  // TrayNetworkStateObserver::Delegate
+  void NetworkStateChanged(bool notify_a11y) override;
+
+ private:
+  tray::NetworkTrayView* const tray_view_;
+  const std::unique_ptr<TrayNetworkStateObserver> network_state_observer_;
+
+  DISALLOW_COPY_AND_ASSIGN(NetworkStateDelegate);
+};
+
+UnifiedSystemTray::NetworkStateDelegate::NetworkStateDelegate(
+    tray::NetworkTrayView* tray_view)
+    : tray_view_(tray_view),
+      network_state_observer_(
+          std::make_unique<TrayNetworkStateObserver>(this)) {}
+
+UnifiedSystemTray::NetworkStateDelegate::~NetworkStateDelegate() = default;
+
+void UnifiedSystemTray::NetworkStateDelegate::NetworkStateChanged(
+    bool notify_a11y) {
+  tray_view_->UpdateNetworkStateHandlerIcon();
+  tray_view_->UpdateConnectionStatus(tray::GetConnectedNetwork(), notify_a11y);
 }
 
 UnifiedSystemTray::UnifiedSystemTray(Shelf* shelf)
     : TrayBackgroundView(shelf),
       ui_delegate_(std::make_unique<UiDelegate>(this)),
-      model_(std::make_unique<UnifiedSystemTrayModel>()) {
-  // On the first step, features in the status area button are still provided by
-  // TrayViews in SystemTray.
-  // TODO(tetsui): Remove SystemTray from StatusAreaWidget and provide these
-  // features from UnifiedSystemTray.
-  SetVisible(false);
+      model_(std::make_unique<UnifiedSystemTrayModel>()),
+      slider_bubble_controller_(
+          std::make_unique<UnifiedSliderBubbleController>(this)),
+      ime_mode_view_(new ImeModeView()),
+      managed_device_view_(new ManagedDeviceView()),
+      notification_counter_item_(new NotificationCounterView()),
+      quiet_mode_view_(new QuietModeView()),
+      time_view_(new tray::TimeTrayItemView(nullptr, shelf)) {
+  tray_container()->SetMargin(kUnifiedTrayContentPadding, 0);
+  tray_container()->AddChildView(ime_mode_view_);
+  tray_container()->AddChildView(managed_device_view_);
+  tray_container()->AddChildView(notification_counter_item_);
+  tray_container()->AddChildView(quiet_mode_view_);
+
+  // It is possible in unit tests that it's missing.
+  if (chromeos::NetworkHandler::IsInitialized()) {
+    tray::NetworkTrayView* network_item = new tray::NetworkTrayView(nullptr);
+    network_state_delegate_ =
+        std::make_unique<NetworkStateDelegate>(network_item);
+    tray_container()->AddChildView(network_item);
+  }
+
+  tray_container()->AddChildView(new tray::PowerTrayView(nullptr));
+  tray_container()->AddChildView(time_view_);
+
+  SetInkDropMode(InkDropMode::ON);
+  set_separator_visibility(false);
 }
 
-UnifiedSystemTray::~UnifiedSystemTray() = default;
+UnifiedSystemTray::~UnifiedSystemTray() {
+  // Close bubble immediately when the bubble is closed on dtor.
+  if (bubble_)
+    bubble_->CloseNow();
+  bubble_.reset();
+}
 
 bool UnifiedSystemTray::IsBubbleShown() const {
   return !!bubble_;
 }
 
-bool UnifiedSystemTray::PerformAction(const ui::Event& event) {
+bool UnifiedSystemTray::IsSliderBubbleShown() const {
+  return slider_bubble_controller_->IsBubbleShown();
+}
+
+bool UnifiedSystemTray::IsBubbleActive() const {
+  return bubble_ && bubble_->IsBubbleActive();
+}
+
+void UnifiedSystemTray::ActivateBubble() {
   if (bubble_)
+    bubble_->ActivateBubble();
+}
+
+void UnifiedSystemTray::EnsureBubbleExpanded() {
+  if (bubble_)
+    bubble_->EnsureExpanded();
+}
+
+void UnifiedSystemTray::ShowVolumeSliderBubble() {
+  slider_bubble_controller_->ShowBubble(
+      UnifiedSliderBubbleController::SLIDER_TYPE_VOLUME);
+}
+
+void UnifiedSystemTray::ShowAudioDetailedViewBubble() {
+  ShowBubble(false /* show_by_click */);
+  bubble_->ShowAudioDetailedView();
+}
+
+void UnifiedSystemTray::SetTrayBubbleHeight(int height) {
+  ui_delegate_->SetTrayBubbleHeight(height);
+}
+
+gfx::Rect UnifiedSystemTray::GetBubbleBoundsInScreen() const {
+  return bubble_ ? bubble_->GetBoundsInScreen() : gfx::Rect();
+}
+
+void UnifiedSystemTray::UpdateAfterLoginStatusChange() {
+  SetVisible(true);
+  PreferredSizeChanged();
+}
+
+bool UnifiedSystemTray::ShouldEnableExtraKeyboardAccessibility() {
+  return Shell::Get()->accessibility_controller()->IsSpokenFeedbackEnabled();
+}
+
+void UnifiedSystemTray::AddInkDropLayer(ui::Layer* ink_drop_layer) {
+  TrayBackgroundView::AddInkDropLayer(ink_drop_layer);
+  ink_drop_layer_ = ink_drop_layer;
+}
+
+void UnifiedSystemTray::RemoveInkDropLayer(ui::Layer* ink_drop_layer) {
+  DCHECK_EQ(ink_drop_layer, ink_drop_layer_);
+  TrayBackgroundView::RemoveInkDropLayer(ink_drop_layer);
+  ink_drop_layer_ = nullptr;
+}
+
+void UnifiedSystemTray::OnBoundsChanged(const gfx::Rect& previous_bounds) {
+  TrayBackgroundView::OnBoundsChanged(previous_bounds);
+  // Workarounding an ui::Layer bug that layer mask is not properly updated.
+  // https://crbug.com/860367
+  // TODO(tetsui): Remove after the bug is fixed on ui::Layer side.
+  if (ink_drop_layer_) {
+    ResetInkDropMask();
+    InstallInkDropMask(ink_drop_layer_);
+  }
+}
+
+void UnifiedSystemTray::SetTrayEnabled(bool enabled) {
+  // We should close bubble at this point. If it remains opened and interactive,
+  // it can be dangerous (http://crbug.com/497080).
+  if (!enabled && bubble_)
     CloseBubble();
-  else
-    ShowBubble(true /* show_by_click */);
+
+  SetEnabled(enabled);
+}
+
+bool UnifiedSystemTray::PerformAction(const ui::Event& event) {
+  if (bubble_) {
+    CloseBubble();
+  } else {
+    ShowBubble(event.IsMouseEvent() || event.IsGestureEvent());
+    if (event.IsKeyEvent() || (event.flags() & ui::EF_TOUCH_ACCESSIBILITY))
+      ActivateBubble();
+  }
   return true;
 }
 
@@ -128,26 +286,65 @@ void UnifiedSystemTray::CloseBubble() {
   ui_delegate_->ui_controller()->HideMessageCenterBubble();
 }
 
-base::string16 UnifiedSystemTray::GetAccessibleNameForTray() {
-  // TODO(tetsui): Implement.
-  return base::string16();
+base::string16 UnifiedSystemTray::GetAccessibleNameForBubble() {
+  return GetAccessibleNameForTray();
 }
 
-void UnifiedSystemTray::HideBubbleWithView(
-    const views::TrayBubbleView* bubble_view) {}
+base::string16 UnifiedSystemTray::GetAccessibleNameForTray() {
+  base::string16 time = base::TimeFormatTimeOfDayWithHourClockType(
+      base::Time::Now(),
+      Shell::Get()->system_tray_model()->clock()->hour_clock_type(),
+      base::kKeepAmPm);
+  base::string16 battery = PowerStatus::Get()->GetAccessibleNameString(false);
+  return l10n_util::GetStringFUTF16(IDS_ASH_STATUS_TRAY_ACCESSIBLE_DESCRIPTION,
+                                    time, battery);
+}
 
-void UnifiedSystemTray::ClickedOutsideBubble() {}
+void UnifiedSystemTray::HideBubble(const TrayBubbleView* bubble_view) {
+  CloseBubble();
+}
 
-void UnifiedSystemTray::ShowBubbleInternal() {
-  bubble_ = std::make_unique<UnifiedSystemTrayBubble>(this);
-  // TODO(tetsui): Call its own SetIsActive. See the comment in the ctor.
-  shelf()->GetStatusAreaWidget()->system_tray()->SetIsActive(true);
+void UnifiedSystemTray::HideBubbleWithView(const TrayBubbleView* bubble_view) {}
+
+void UnifiedSystemTray::ClickedOutsideBubble() {
+  CloseBubble();
+}
+
+void UnifiedSystemTray::UpdateAfterShelfAlignmentChange() {
+  TrayBackgroundView::UpdateAfterShelfAlignmentChange();
+  time_view_->UpdateAlignmentForShelf(shelf());
+}
+
+void UnifiedSystemTray::ShowBubbleInternal(bool show_by_click) {
+  // Never show System Tray bubble in kiosk app mode.
+  if (Shell::Get()->session_controller()->IsRunningInAppMode())
+    return;
+
+  // Hide volume/brightness slider popup.
+  slider_bubble_controller_->CloseBubble();
+
+  bubble_ = std::make_unique<UnifiedSystemTrayBubble>(this, show_by_click);
+  SetIsActive(true);
 }
 
 void UnifiedSystemTray::HideBubbleInternal() {
   bubble_.reset();
-  // TODO(tetsui): Call its own SetIsActive. See the comment in the ctor.
-  shelf()->GetStatusAreaWidget()->system_tray()->SetIsActive(false);
+  SetIsActive(false);
+}
+
+void UnifiedSystemTray::UpdateNotificationInternal() {
+  // Limit update frequency in order to avoid flashing when 2 updates are
+  // incoming in a very short period of time. It happens when ARC++ apps
+  // creating bundled notifications.
+  if (!timer_.IsRunning()) {
+    timer_.Start(FROM_HERE, kNotificationCountUpdateDelay, this,
+                 &UnifiedSystemTray::UpdateNotificationAfterDelay);
+  }
+}
+
+void UnifiedSystemTray::UpdateNotificationAfterDelay() {
+  notification_counter_item_->Update();
+  quiet_mode_view_->Update();
 }
 
 }  // namespace ash

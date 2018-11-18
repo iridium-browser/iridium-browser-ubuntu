@@ -16,6 +16,8 @@
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 #endif
 
+#include <iosfwd>
+
 namespace blink {
 
 class ClipPaintPropertyNode;
@@ -53,6 +55,11 @@ PLATFORM_EXPORT const TransformPaintPropertyNode& LowestCommonAncestorInternal(
     const TransformPaintPropertyNode&);
 
 template <typename NodeType>
+const NodeType* SafeUnalias(const NodeType* node) {
+  return node ? node->Unalias() : nullptr;
+}
+
+template <typename NodeType>
 class PaintPropertyNode : public RefCounted<NodeType> {
  public:
   // Parent property node, or nullptr if this is the root node.
@@ -67,33 +74,24 @@ class PaintPropertyNode : public RefCounted<NodeType> {
     return true;
   }
 
-  // TODO(wangxianzhu): Changed() and ClearChangedToRoot() are inefficient
-  // due to the tree walks. Optimize this if this affects overall performance.
-
-  // Returns true if any node (excluding the lowest common ancestor of
-  // |relative_to_node| and |this|) is marked changed along the shortest path
-  // from |this| to |relative_to_node|.
-  bool Changed(const NodeType& relative_to_node) const {
-    if (this == &relative_to_node)
-      return false;
-
-    bool changed = false;
-    for (const auto* n = this; n; n = n->Parent()) {
-      if (n == &relative_to_node)
-        return changed;
-      if (n->changed_)
-        changed = true;
-    }
-
-    // We reach here if |relative_to_node| is not an ancestor of |this|.
-    const auto& lca = LowestCommonAncestor(static_cast<const NodeType&>(*this),
-                                           relative_to_node);
-    return Changed(lca) || relative_to_node.Changed(lca);
-  }
-
   void ClearChangedToRoot() const {
     for (auto* n = this; n; n = n->Parent())
       n->changed_ = false;
+  }
+
+  // Returns true if this node is an alias for its parent. A parent alias is a
+  // node which on its own does not contribute to the rendering output, and only
+  // exists to enforce a particular structure of the paint property tree. Its
+  // value is ignored during display item list generation, instead the parent
+  // value is used. See Unalias().
+  bool IsParentAlias() const { return is_parent_alias_; }
+  // Returns the first node up the parent chain that is not an alias; return the
+  // root node if every node is an alias.
+  const NodeType* Unalias() const {
+    const auto* node = static_cast<const NodeType*>(this);
+    while (node->Parent() && node->IsParentAlias())
+      node = node->Parent();
+    return node;
   }
 
   String ToString() const {
@@ -113,25 +111,39 @@ class PaintPropertyNode : public RefCounted<NodeType> {
 #endif
 
  protected:
-  PaintPropertyNode(scoped_refptr<const NodeType> parent)
-      : parent_(std::move(parent)), changed_(false) {}
+  PaintPropertyNode(const NodeType* parent, bool is_parent_alias = false)
+      : parent_(parent),
+        is_parent_alias_(is_parent_alias),
+        changed_(!!parent) {}
 
-  bool Update(scoped_refptr<const NodeType> parent) {
+  bool SetParent(const NodeType* parent) {
     DCHECK(!IsRoot());
     DCHECK(parent != this);
     if (parent == parent_)
       return false;
 
-    SetChanged();
-    parent_ = std::move(parent);
+    parent_ = parent;
+    static_cast<NodeType*>(this)->SetChanged();
     return true;
   }
 
-  void SetChanged() { changed_ = true; }
+  void SetChanged() {
+    DCHECK(!IsRoot());
+    changed_ = true;
+  }
+  bool NodeChanged() const { return changed_; }
 
  private:
+  friend class PaintPropertyNodeTest;
+  // Object paint properties can set the parent directly for an alias update.
+  friend class ObjectPaintProperties;
+
   scoped_refptr<const NodeType> parent_;
-  mutable bool changed_;
+  // Indicates whether this node is an alias for its parent. Parent aliases are
+  // nodes that do not affect rendering and are ignored for the purposes of
+  // display item list generation.
+  bool is_parent_alias_ = false;
+  mutable bool changed_ = true;
 
 #if DCHECK_IS_ON()
   String debug_name_;

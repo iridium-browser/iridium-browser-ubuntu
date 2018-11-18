@@ -50,7 +50,9 @@
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/use_counter.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
-#include "third_party/blink/renderer/core/svg/svg_uri_reference.h"
+#include "third_party/blink/renderer/core/style/reference_clip_path_operation.h"
+#include "third_party/blink/renderer/core/style/shape_clip_path_operation.h"
+#include "third_party/blink/renderer/core/style/style_svg_resource.h"
 
 namespace blink {
 
@@ -109,13 +111,16 @@ Color StyleBuilderConverter::ConvertColor(StyleResolverState& state,
       value, state.Style()->GetColor(), for_visited_link);
 }
 
-AtomicString StyleBuilderConverter::ConvertFragmentIdentifier(
+scoped_refptr<StyleSVGResource> StyleBuilderConverter::ConvertElementReference(
     StyleResolverState& state,
     const CSSValue& value) {
-  if (value.IsURIValue())
-    return SVGURIReference::FragmentIdentifierFromIRIString(
-        ToCSSURIValue(value).Value(), state.GetElement()->GetTreeScope());
-  return g_null_atom;
+  if (!value.IsURIValue())
+    return nullptr;
+  const CSSURIValue& url_value = ToCSSURIValue(value);
+  SVGResource* resource =
+      state.GetElementStyleResources().GetSVGResourceFromValue(
+          state.GetTreeScope(), url_value);
+  return StyleSVGResource::Create(resource, url_value.ValueForSerialization());
 }
 
 LengthBox StyleBuilderConverter::ConvertClip(StyleResolverState& state,
@@ -139,7 +144,8 @@ scoped_refptr<ClipPathOperation> StyleBuilderConverter::ConvertClipPath(
         state.GetElementStyleResources().GetSVGResourceFromValue(
             state.GetTreeScope(), url_value);
     // TODO(fs): Doesn't work with external SVG references (crbug.com/109212.)
-    return ReferenceClipPathOperation::Create(url_value.Value(), resource);
+    return ReferenceClipPathOperation::Create(url_value.ValueForSerialization(),
+                                              resource);
   }
   DCHECK(value.IsIdentifierValue() &&
          ToCSSIdentifierValue(value).GetValueID() == CSSValueNone);
@@ -153,8 +159,9 @@ FilterOperations StyleBuilderConverter::ConvertFilterOperations(
 }
 
 FilterOperations StyleBuilderConverter::ConvertOffscreenFilterOperations(
-    const CSSValue& value) {
-  return FilterOperationResolver::CreateOffscreenFilterOperations(value);
+    const CSSValue& value,
+    const Font& font) {
+  return FilterOperationResolver::CreateOffscreenFilterOperations(value, font);
 }
 
 static FontDescription::GenericFamilyType ConvertGenericFamily(
@@ -544,7 +551,7 @@ StyleBuilderConverter::ConvertFontVariantLigatures(StyleResolverState&,
   if (value.IsValueList()) {
     FontDescription::VariantLigatures ligatures;
     const CSSValueList& value_list = ToCSSValueList(value);
-    for (size_t i = 0; i < value_list.length(); ++i) {
+    for (wtf_size_t i = 0; i < value_list.length(); ++i) {
       const CSSValue& item = value_list.Item(i);
       switch (ToCSSIdentifierValue(item).GetValueID()) {
         case CSSValueNoCommonLigatures:
@@ -792,7 +799,7 @@ GridPosition StyleBuilderConverter::ConvertGridPosition(StyleResolverState&,
   int grid_line_number = 1;
   AtomicString grid_line_name;
 
-  auto it = values.begin();
+  auto* it = values.begin();
   const CSSValue* current_value = it->Get();
   if (current_value->IsIdentifierValue() &&
       ToCSSIdentifierValue(current_value)->GetValueID() == CSSValueSpan) {
@@ -1230,7 +1237,7 @@ scoped_refptr<QuotesData> StyleBuilderConverter::ConvertQuotes(
   if (value.IsValueList()) {
     const CSSValueList& list = ToCSSValueList(value);
     scoped_refptr<QuotesData> quotes = QuotesData::Create();
-    for (size_t i = 0; i < list.length(); i += 2) {
+    for (wtf_size_t i = 0; i < list.length(); i += 2) {
       String start_quote = ToCSSStringValue(list.Item(i)).Value();
       String end_quote = ToCSSStringValue(list.Item(i + 1)).Value();
       quotes->AddPair(std::make_pair(start_quote, end_quote));
@@ -1364,8 +1371,8 @@ scoped_refptr<SVGDashArray> StyleBuilderConverter::ConvertStrokeDasharray(
   const CSSValueList& dashes = ToCSSValueList(value);
 
   scoped_refptr<SVGDashArray> array = SVGDashArray::Create();
-  size_t length = dashes.length();
-  for (size_t i = 0; i < length; ++i) {
+  wtf_size_t length = dashes.length();
+  for (wtf_size_t i = 0; i < length; ++i) {
     array->push_back(ConvertLength(state, ToCSSPrimitiveValue(dashes.Item(i))));
   }
 
@@ -1403,27 +1410,26 @@ SVGPaint StyleBuilderConverter::ConvertSVGPaint(StyleResolverState& state,
   if (value.IsValueList()) {
     const CSSValueList& list = ToCSSValueList(value);
     DCHECK_EQ(list.length(), 2u);
-    paint.url = ToCSSURIValue(list.Item(0)).Value();
+    paint.resource = ConvertElementReference(state, list.Item(0));
     local_value = &list.Item(1);
   }
 
   if (local_value->IsURIValue()) {
     paint.type = SVG_PAINTTYPE_URI;
-    paint.url = ToCSSURIValue(local_value)->Value();
+    paint.resource = ConvertElementReference(state, *local_value);
   } else if (local_value->IsIdentifierValue() &&
              ToCSSIdentifierValue(local_value)->GetValueID() == CSSValueNone) {
-    paint.type =
-        paint.url.IsEmpty() ? SVG_PAINTTYPE_NONE : SVG_PAINTTYPE_URI_NONE;
+    paint.type = !paint.resource ? SVG_PAINTTYPE_NONE : SVG_PAINTTYPE_URI_NONE;
   } else if (local_value->IsIdentifierValue() &&
              ToCSSIdentifierValue(local_value)->GetValueID() ==
                  CSSValueCurrentcolor) {
     paint.color = state.Style()->GetColor();
-    paint.type = paint.url.IsEmpty() ? SVG_PAINTTYPE_CURRENTCOLOR
-                                     : SVG_PAINTTYPE_URI_CURRENTCOLOR;
+    paint.type = !paint.resource ? SVG_PAINTTYPE_CURRENTCOLOR
+                                 : SVG_PAINTTYPE_URI_CURRENTCOLOR;
   } else {
     paint.color = ConvertColor(state, *local_value);
-    paint.type = paint.url.IsEmpty() ? SVG_PAINTTYPE_RGBCOLOR
-                                     : SVG_PAINTTYPE_URI_RGBCOLOR;
+    paint.type =
+        !paint.resource ? SVG_PAINTTYPE_RGBCOLOR : SVG_PAINTTYPE_URI_RGBCOLOR;
   }
   return paint;
 }
@@ -1471,6 +1477,26 @@ TextSizeAdjust StyleBuilderConverter::ConvertTextSizeAdjust(
   const CSSPrimitiveValue& primitive_value = ToCSSPrimitiveValue(value);
   DCHECK(primitive_value.IsPercentage());
   return TextSizeAdjust(primitive_value.GetFloatValue() / 100.0f);
+}
+
+TextUnderlinePosition StyleBuilderConverter::ConvertTextUnderlinePosition(
+    StyleResolverState& state,
+    const CSSValue& value) {
+  TextUnderlinePosition flags = kTextUnderlinePositionAuto;
+
+  auto process = [&flags](const CSSValue& identifier) {
+    flags |=
+        ToCSSIdentifierValue(identifier).ConvertTo<TextUnderlinePosition>();
+  };
+
+  if (value.IsValueList()) {
+    for (auto& entry : ToCSSValueList(value)) {
+      process(*entry);
+    }
+  } else {
+    process(value);
+  }
+  return flags;
 }
 
 TransformOperations StyleBuilderConverter::ConvertTransformOperations(
@@ -1523,14 +1549,14 @@ ScrollSnapAlign StyleBuilderConverter::ConvertSnapAlign(StyleResolverState&,
       ComputedStyleInitialValues::InitialScrollSnapAlign();
   if (value.IsValuePair()) {
     const CSSValuePair& pair = ToCSSValuePair(value);
-    snapAlign.alignment_inline =
-        ToCSSIdentifierValue(pair.First()).ConvertTo<SnapAlignment>();
     snapAlign.alignment_block =
+        ToCSSIdentifierValue(pair.First()).ConvertTo<SnapAlignment>();
+    snapAlign.alignment_inline =
         ToCSSIdentifierValue(pair.Second()).ConvertTo<SnapAlignment>();
   } else {
-    snapAlign.alignment_inline =
+    snapAlign.alignment_block =
         ToCSSIdentifierValue(value).ConvertTo<SnapAlignment>();
-    snapAlign.alignment_block = snapAlign.alignment_inline;
+    snapAlign.alignment_inline = snapAlign.alignment_block;
   }
   return snapAlign;
 }
@@ -1654,8 +1680,9 @@ static const CSSValue& ComputeRegisteredPropertyValue(
   }
 
   if (value.IsValueList()) {
-    CSSValueList* new_list = CSSValueList::CreateSpaceSeparated();
-    for (const CSSValue* inner_value : ToCSSValueList(value)) {
+    const CSSValueList& old_list = ToCSSValueList(value);
+    CSSValueList* new_list = CSSValueList::CreateWithSeparatorFrom(old_list);
+    for (const CSSValue* inner_value : old_list) {
       new_list->Append(ComputeRegisteredPropertyValue(
           css_to_length_conversion_data, *inner_value));
     }

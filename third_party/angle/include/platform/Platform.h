@@ -12,6 +12,8 @@
 #include <stdint.h>
 #include <array>
 
+#define EGL_PLATFORM_ANGLE_PLATFORM_METHODS_ANGLEX 0x3482
+
 #if defined(_WIN32)
 #   if !defined(LIBANGLE_IMPLEMENTATION)
 #       define ANGLE_PLATFORM_EXPORT __declspec(dllimport)
@@ -266,7 +268,7 @@ inline void DefaultCacheProgram(PlatformMethods *platform,
 
 struct ANGLE_PLATFORM_EXPORT PlatformMethods
 {
-    PlatformMethods();
+    PlatformMethods() {}
 
     // User data pointer for any implementation specific members. Put it at the start of the
     // platform structure so it doesn't become overwritten if one version of the platform

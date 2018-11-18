@@ -9,12 +9,14 @@
 
 #include "android_webview/browser/aw_render_process_gone_delegate.h"
 #include "android_webview/common/aw_descriptors.h"
-#include "android_webview/common/crash_reporter/aw_microdump_crash_reporter.h"
+#include "android_webview/common/crash_reporter/aw_crash_reporter_client.h"
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/stl_util.h"
 #include "base/sync_socket.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
+#include "components/crash/content/browser/crash_dump_manager_android.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_data.h"
 #include "content/public/browser/child_process_launcher_utils.h"
@@ -129,21 +131,15 @@ void AwBrowserTerminator::OnChildStart(
 }
 
 void AwBrowserTerminator::OnChildExitAsync(
-    int process_host_id,
-    base::ProcessHandle pid,
-    content::ProcessType process_type,
-    base::TerminationStatus termination_status,
-    base::android::ApplicationState app_state,
+    const ::crash_reporter::ChildExitObserver::TerminationInfo& info,
     base::FilePath crash_dump_dir,
     std::unique_ptr<base::SyncSocket> pipe) {
   if (crash_reporter::IsCrashReporterEnabled()) {
     breakpad::CrashDumpManager::GetInstance()->ProcessMinidumpFileFromChild(
-        crash_dump_dir, process_host_id, process_type, termination_status,
-        app_state);
+        crash_dump_dir, info);
   }
 
-  if (!pipe.get() ||
-      termination_status == base::TERMINATION_STATUS_NORMAL_TERMINATION)
+  if (!pipe.get() || info.normal_termination)
     return;
 
   bool crashed = false;
@@ -153,22 +149,19 @@ void AwBrowserTerminator::OnChildExitAsync(
   if (pipe->Peek() >= sizeof(int)) {
     int exit_code;
     pipe->Receive(&exit_code, sizeof(exit_code));
-    LOG(ERROR) << "Renderer process (" << pid << ") crash detected (code "
+    LOG(ERROR) << "Renderer process (" << info.pid << ") crash detected (code "
                << exit_code << ").";
     crashed = true;
   }
 
-  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                          base::BindOnce(&OnRenderProcessGoneDetail,
-                                         process_host_id, pid, crashed));
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::UI},
+      base::BindOnce(&OnRenderProcessGoneDetail, info.process_host_id, info.pid,
+                     crashed));
 }
 
 void AwBrowserTerminator::OnChildExit(
-    int process_host_id,
-    base::ProcessHandle pid,
-    content::ProcessType process_type,
-    base::TerminationStatus termination_status,
-    base::android::ApplicationState app_state) {
+    const ::crash_reporter::ChildExitObserver::TerminationInfo& info) {
   std::unique_ptr<base::SyncSocket> pipe;
 
   {
@@ -176,7 +169,7 @@ void AwBrowserTerminator::OnChildExit(
     // We might get a NOTIFICATION_RENDERER_PROCESS_TERMINATED and a
     // NOTIFICATION_RENDERER_PROCESS_CLOSED. In that case we only want
     // to process the first notification.
-    const auto& iter = process_host_id_to_pipe_.find(process_host_id);
+    const auto& iter = process_host_id_to_pipe_.find(info.process_host_id);
     if (iter != process_host_id_to_pipe_.end()) {
       pipe = std::move(iter->second);
       DCHECK(pipe->handle() != base::SyncSocket::kInvalidHandle);
@@ -184,15 +177,14 @@ void AwBrowserTerminator::OnChildExit(
     }
   }
   if (pipe.get()) {
-    OnRenderProcessGone(process_host_id);
+    OnRenderProcessGone(info.process_host_id);
   }
 
   base::PostTaskWithTraits(
       FROM_HERE,
       {base::MayBlock(), base::TaskPriority::USER_VISIBLE,
        base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN},
-      base::BindOnce(&AwBrowserTerminator::OnChildExitAsync, process_host_id,
-                     pid, process_type, termination_status, app_state,
+      base::BindOnce(&AwBrowserTerminator::OnChildExitAsync, info,
                      crash_dump_dir_, std::move(pipe)));
 }
 

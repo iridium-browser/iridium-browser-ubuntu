@@ -19,12 +19,11 @@ class CFXJSE_RuntimeData {
 
   static CFXJSE_RuntimeData* Get(v8::Isolate* pIsolate);
 
-  v8::Isolate* m_pIsolate;
   v8::Global<v8::FunctionTemplate> m_hRootContextGlobalTemplate;
   v8::Global<v8::Context> m_hRootContext;
 
  protected:
-  explicit CFXJSE_RuntimeData(v8::Isolate* pIsolate);
+  CFXJSE_RuntimeData();
 
   static std::unique_ptr<CFXJSE_RuntimeData> Create(v8::Isolate* pIsolate);
 

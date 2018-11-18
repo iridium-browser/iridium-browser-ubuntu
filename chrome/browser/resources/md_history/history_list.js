@@ -34,7 +34,10 @@ Polymer({
     },
 
     // An array of history entries in reverse chronological order.
-    historyData_: Array,
+    historyData_: {
+      type: Array,
+      observer: 'onHistoryDataChanged_',
+    },
 
     lastFocused_: Object,
 
@@ -421,11 +424,11 @@ Polymer({
    * next one is large enough for a spacer to be required.
    * @param {HistoryEntry} item
    * @param {number} index The index of |item| in |historyData_|.
-   * @param {number} length The length of |historyData_|.
    * @return {boolean} Whether or not time gap separator is required.
    * @private
    */
-  needsTimeGap_: function(item, index, length) {
+  needsTimeGap_: function(item, index) {
+    const length = this.historyData_.length;
     if (index >= length - 1 || length == 0)
       return false;
 
@@ -443,11 +446,11 @@ Polymer({
    * True if the given item is the beginning of a new card.
    * @param {HistoryEntry} item
    * @param {number} i Index of |item| within |historyData_|.
-   * @param {number} length
    * @return {boolean}
    * @private
    */
-  isCardStart_: function(item, i, length) {
+  isCardStart_: function(item, i) {
+    const length = this.historyData_.length;
     if (length == 0 || i > length - 1)
       return false;
     return i == 0 ||
@@ -459,11 +462,11 @@ Polymer({
    * True if the given item is the end of a card.
    * @param {HistoryEntry} item
    * @param {number} i Index of |item| within |historyData_|.
-   * @param {number} length
    * @return {boolean}
    * @private
    */
-  isCardEnd_: function(item, i, length) {
+  isCardEnd_: function(item, i) {
+    const length = this.historyData_.length;
     if (length == 0 || i > length - 1)
       return false;
     return i == length - 1 ||
@@ -472,12 +475,11 @@ Polymer({
   },
 
   /**
-   * @param {number} historyDataLength
    * @return {boolean}
    * @private
    */
-  hasResults_: function(historyDataLength) {
-    return historyDataLength > 0;
+  hasResults_: function() {
+    return this.historyData_.length > 0;
   },
 
   /**
@@ -521,5 +523,15 @@ Polymer({
         currentDate = results[i].dateRelativeDay;
       }
     }
+  },
+
+  /**
+   * Adding in order to address an issue with a flaky test. After the list is
+   * updated, the test would not see the updated elements when using Polymer 2.
+   * This has yet to be reproduced in manual testing.
+   * @private
+   */
+  onHistoryDataChanged_: function() {
+    this.$['infinite-list'].fire('iron-resize');
   },
 });

@@ -35,9 +35,13 @@ class MediaLog;
 //         |                                 |
 //         V                                 V
 //   [ Playing ] <---------.            [ Stopped ]
-//     |     | Seek()      |
-//     |     V             |
-//     |   [ Seeking ] ----'
+//     |  |  | Seek()      |
+//     |  |  V             |
+//     |  | [ Seeking ] ---'
+//     |  |                ^
+//     |  | *TrackChange() |
+//     |  V                |
+//     | [ Switching ] ----'
 //     |                   ^
 //     | Suspend()         |
 //     V                   |
@@ -99,12 +103,14 @@ class MEDIA_EXPORT PipelineImpl : public Pipeline {
 
   // |enabled_track_ids| contains track ids of enabled audio tracks.
   void OnEnabledAudioTracksChanged(
-      const std::vector<MediaTrack::Id>& enabled_track_ids) override;
+      const std::vector<MediaTrack::Id>& enabled_track_ids,
+      base::OnceClosure change_completed_cb) override;
 
   // |selected_track_id| is either empty, which means no video track is
   // selected, or contains the selected video track id.
   void OnSelectedVideoTrackChanged(
-      base::Optional<MediaTrack::Id> selected_track_id) override;
+      base::Optional<MediaTrack::Id> selected_track_id,
+      base::OnceClosure change_completed_cb) override;
 
  private:
   friend class MediaLog;
@@ -132,8 +138,6 @@ class MEDIA_EXPORT PipelineImpl : public Pipeline {
   void OnMetadata(PipelineMetadata metadata);
   void OnBufferingStateChange(BufferingState state);
   void OnDurationChange(base::TimeDelta duration);
-  void OnAddTextTrack(const TextTrackConfig& config,
-                      const AddTextTrackDoneCB& done_cb);
   void OnWaitingForDecryptionKey();
   void OnAudioConfigChange(const AudioDecoderConfig& config);
   void OnVideoConfigChange(const VideoDecoderConfig& config);

@@ -60,7 +60,6 @@
 #include "ppapi/c/private/ppb_file_ref_private.h"
 #include "ppapi/c/private/ppb_flash.h"
 #include "ppapi/c/private/ppb_flash_clipboard.h"
-#include "ppapi/c/private/ppb_flash_device_id.h"
 #include "ppapi/c/private/ppb_flash_drm.h"
 #include "ppapi/c/private/ppb_flash_menu.h"
 #include "ppapi/c/private/ppb_host_resolver_private.h"
@@ -72,8 +71,6 @@
 #include "ppapi/c/private/ppb_testing_private.h"
 #include "ppapi/c/private/ppb_udp_socket_private.h"
 #include "ppapi/c/private/ppb_uma_private.h"
-#include "ppapi/c/private/ppb_video_destination_private.h"
-#include "ppapi/c/private/ppb_video_source_private.h"
 #include "ppapi/c/private/ppb_x509_certificate_private.h"
 #include "ppapi/c/private/ppp_instance_private.h"
 
@@ -178,8 +175,6 @@ static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_Flash_13_0;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_Flash_Clipboard_4_0;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_Flash_Clipboard_5_0;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_Flash_Clipboard_5_1;
-static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_Flash_DeviceID_1_0;
-static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_Flash_DRM_1_0;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_Flash_DRM_1_1;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_Flash_Menu_0_2;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_HostResolver_Private_0_1;
@@ -198,8 +193,6 @@ static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_UDPSocket_Private_0_2;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_UDPSocket_Private_0_3;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_UDPSocket_Private_0_4;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_UMA_Private_0_3;
-static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_VideoDestination_Private_0_1;
-static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_VideoSource_Private_0_1;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_X509Certificate_Private_0_1;
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPP_Instance_Private_0_1;
 /* END Declarations for all Wrapper Infos. */
@@ -3715,44 +3708,6 @@ static PP_Bool Pnacl_M34_PPB_Flash_Clipboard_GetSequenceNumber(PP_Instance insta
 
 /* End wrapper methods for PPB_Flash_Clipboard_5_1 */
 
-/* Begin wrapper methods for PPB_Flash_DeviceID_1_0 */
-
-static PP_Resource Pnacl_M21_PPB_Flash_DeviceID_Create(PP_Instance instance) {
-  const struct PPB_Flash_DeviceID_1_0 *iface = Pnacl_WrapperInfo_PPB_Flash_DeviceID_1_0.real_iface;
-  return iface->Create(instance);
-}
-
-static int32_t Pnacl_M21_PPB_Flash_DeviceID_GetDeviceID(PP_Resource device_id, struct PP_Var* id, struct PP_CompletionCallback* callback) {
-  const struct PPB_Flash_DeviceID_1_0 *iface = Pnacl_WrapperInfo_PPB_Flash_DeviceID_1_0.real_iface;
-  return iface->GetDeviceID(device_id, id, *callback);
-}
-
-/* End wrapper methods for PPB_Flash_DeviceID_1_0 */
-
-/* Begin wrapper methods for PPB_Flash_DRM_1_0 */
-
-static PP_Resource Pnacl_M29_PPB_Flash_DRM_Create(PP_Instance instance) {
-  const struct PPB_Flash_DRM_1_0 *iface = Pnacl_WrapperInfo_PPB_Flash_DRM_1_0.real_iface;
-  return iface->Create(instance);
-}
-
-static int32_t Pnacl_M29_PPB_Flash_DRM_GetDeviceID(PP_Resource drm, struct PP_Var* id, struct PP_CompletionCallback* callback) {
-  const struct PPB_Flash_DRM_1_0 *iface = Pnacl_WrapperInfo_PPB_Flash_DRM_1_0.real_iface;
-  return iface->GetDeviceID(drm, id, *callback);
-}
-
-static PP_Bool Pnacl_M29_PPB_Flash_DRM_GetHmonitor(PP_Resource drm, int64_t* hmonitor) {
-  const struct PPB_Flash_DRM_1_0 *iface = Pnacl_WrapperInfo_PPB_Flash_DRM_1_0.real_iface;
-  return iface->GetHmonitor(drm, hmonitor);
-}
-
-static int32_t Pnacl_M29_PPB_Flash_DRM_GetVoucherFile(PP_Resource drm, PP_Resource* file_ref, struct PP_CompletionCallback* callback) {
-  const struct PPB_Flash_DRM_1_0 *iface = Pnacl_WrapperInfo_PPB_Flash_DRM_1_0.real_iface;
-  return iface->GetVoucherFile(drm, file_ref, *callback);
-}
-
-/* End wrapper methods for PPB_Flash_DRM_1_0 */
-
 /* Begin wrapper methods for PPB_Flash_DRM_1_1 */
 
 static PP_Resource Pnacl_M33_PPB_Flash_DRM_Create(PP_Instance instance) {
@@ -3785,8 +3740,6 @@ static int32_t Pnacl_M33_PPB_Flash_DRM_MonitorIsExternal(PP_Resource drm, PP_Boo
 /* Not generating wrapper methods for PPB_Flash_FontFile_0_1 */
 
 /* Not generating wrapper methods for PPB_Flash_FontFile_0_2 */
-
-/* Not generating wrapper methods for PPB_FlashFullscreen_0_1 */
 
 /* Not generating wrapper methods for PPB_FlashFullscreen_1_0 */
 
@@ -4476,64 +4429,6 @@ static int32_t Pnacl_M35_PPB_UMA_Private_IsCrashReportingEnabled(PP_Instance ins
 }
 
 /* End wrapper methods for PPB_UMA_Private_0_3 */
-
-/* Begin wrapper methods for PPB_VideoDestination_Private_0_1 */
-
-static PP_Resource Pnacl_M28_PPB_VideoDestination_Private_Create(PP_Instance instance) {
-  const struct PPB_VideoDestination_Private_0_1 *iface = Pnacl_WrapperInfo_PPB_VideoDestination_Private_0_1.real_iface;
-  return iface->Create(instance);
-}
-
-static PP_Bool Pnacl_M28_PPB_VideoDestination_Private_IsVideoDestination(PP_Resource resource) {
-  const struct PPB_VideoDestination_Private_0_1 *iface = Pnacl_WrapperInfo_PPB_VideoDestination_Private_0_1.real_iface;
-  return iface->IsVideoDestination(resource);
-}
-
-static int32_t Pnacl_M28_PPB_VideoDestination_Private_Open(PP_Resource destination, struct PP_Var* stream_url, struct PP_CompletionCallback* callback) {
-  const struct PPB_VideoDestination_Private_0_1 *iface = Pnacl_WrapperInfo_PPB_VideoDestination_Private_0_1.real_iface;
-  return iface->Open(destination, *stream_url, *callback);
-}
-
-static int32_t Pnacl_M28_PPB_VideoDestination_Private_PutFrame(PP_Resource destination, const struct PP_VideoFrame_Private* frame) {
-  const struct PPB_VideoDestination_Private_0_1 *iface = Pnacl_WrapperInfo_PPB_VideoDestination_Private_0_1.real_iface;
-  return iface->PutFrame(destination, frame);
-}
-
-static void Pnacl_M28_PPB_VideoDestination_Private_Close(PP_Resource destination) {
-  const struct PPB_VideoDestination_Private_0_1 *iface = Pnacl_WrapperInfo_PPB_VideoDestination_Private_0_1.real_iface;
-  iface->Close(destination);
-}
-
-/* End wrapper methods for PPB_VideoDestination_Private_0_1 */
-
-/* Begin wrapper methods for PPB_VideoSource_Private_0_1 */
-
-static PP_Resource Pnacl_M28_PPB_VideoSource_Private_Create(PP_Instance instance) {
-  const struct PPB_VideoSource_Private_0_1 *iface = Pnacl_WrapperInfo_PPB_VideoSource_Private_0_1.real_iface;
-  return iface->Create(instance);
-}
-
-static PP_Bool Pnacl_M28_PPB_VideoSource_Private_IsVideoSource(PP_Resource resource) {
-  const struct PPB_VideoSource_Private_0_1 *iface = Pnacl_WrapperInfo_PPB_VideoSource_Private_0_1.real_iface;
-  return iface->IsVideoSource(resource);
-}
-
-static int32_t Pnacl_M28_PPB_VideoSource_Private_Open(PP_Resource source, struct PP_Var* stream_url, struct PP_CompletionCallback* callback) {
-  const struct PPB_VideoSource_Private_0_1 *iface = Pnacl_WrapperInfo_PPB_VideoSource_Private_0_1.real_iface;
-  return iface->Open(source, *stream_url, *callback);
-}
-
-static int32_t Pnacl_M28_PPB_VideoSource_Private_GetFrame(PP_Resource source, struct PP_VideoFrame_Private* frame, struct PP_CompletionCallback* callback) {
-  const struct PPB_VideoSource_Private_0_1 *iface = Pnacl_WrapperInfo_PPB_VideoSource_Private_0_1.real_iface;
-  return iface->GetFrame(source, frame, *callback);
-}
-
-static void Pnacl_M28_PPB_VideoSource_Private_Close(PP_Resource source) {
-  const struct PPB_VideoSource_Private_0_1 *iface = Pnacl_WrapperInfo_PPB_VideoSource_Private_0_1.real_iface;
-  iface->Close(source);
-}
-
-/* End wrapper methods for PPB_VideoSource_Private_0_1 */
 
 /* Begin wrapper methods for PPB_X509Certificate_Private_0_1 */
 
@@ -5560,18 +5455,6 @@ static const struct PPB_Flash_Clipboard_5_1 Pnacl_Wrappers_PPB_Flash_Clipboard_5
     .GetSequenceNumber = (PP_Bool (*)(PP_Instance instance_id, PP_Flash_Clipboard_Type clipboard_type, uint64_t* sequence_number))&Pnacl_M34_PPB_Flash_Clipboard_GetSequenceNumber
 };
 
-static const struct PPB_Flash_DeviceID_1_0 Pnacl_Wrappers_PPB_Flash_DeviceID_1_0 = {
-    .Create = (PP_Resource (*)(PP_Instance instance))&Pnacl_M21_PPB_Flash_DeviceID_Create,
-    .GetDeviceID = (int32_t (*)(PP_Resource device_id, struct PP_Var* id, struct PP_CompletionCallback callback))&Pnacl_M21_PPB_Flash_DeviceID_GetDeviceID
-};
-
-static const struct PPB_Flash_DRM_1_0 Pnacl_Wrappers_PPB_Flash_DRM_1_0 = {
-    .Create = (PP_Resource (*)(PP_Instance instance))&Pnacl_M29_PPB_Flash_DRM_Create,
-    .GetDeviceID = (int32_t (*)(PP_Resource drm, struct PP_Var* id, struct PP_CompletionCallback callback))&Pnacl_M29_PPB_Flash_DRM_GetDeviceID,
-    .GetHmonitor = (PP_Bool (*)(PP_Resource drm, int64_t* hmonitor))&Pnacl_M29_PPB_Flash_DRM_GetHmonitor,
-    .GetVoucherFile = (int32_t (*)(PP_Resource drm, PP_Resource* file_ref, struct PP_CompletionCallback callback))&Pnacl_M29_PPB_Flash_DRM_GetVoucherFile
-};
-
 static const struct PPB_Flash_DRM_1_1 Pnacl_Wrappers_PPB_Flash_DRM_1_1 = {
     .Create = (PP_Resource (*)(PP_Instance instance))&Pnacl_M33_PPB_Flash_DRM_Create,
     .GetDeviceID = (int32_t (*)(PP_Resource drm, struct PP_Var* id, struct PP_CompletionCallback callback))&Pnacl_M33_PPB_Flash_DRM_GetDeviceID,
@@ -5583,8 +5466,6 @@ static const struct PPB_Flash_DRM_1_1 Pnacl_Wrappers_PPB_Flash_DRM_1_1 = {
 /* Not generating wrapper interface for PPB_Flash_FontFile_0_1 */
 
 /* Not generating wrapper interface for PPB_Flash_FontFile_0_2 */
-
-/* Not generating wrapper interface for PPB_FlashFullscreen_0_1 */
 
 /* Not generating wrapper interface for PPB_FlashFullscreen_1_0 */
 
@@ -5764,22 +5645,6 @@ static const struct PPB_UMA_Private_0_3 Pnacl_Wrappers_PPB_UMA_Private_0_3 = {
     .HistogramCustomCounts = (void (*)(PP_Instance instance, struct PP_Var name, int32_t sample, int32_t min, int32_t max, uint32_t bucket_count))&Pnacl_M35_PPB_UMA_Private_HistogramCustomCounts,
     .HistogramEnumeration = (void (*)(PP_Instance instance, struct PP_Var name, int32_t sample, int32_t boundary_value))&Pnacl_M35_PPB_UMA_Private_HistogramEnumeration,
     .IsCrashReportingEnabled = (int32_t (*)(PP_Instance instance, struct PP_CompletionCallback callback))&Pnacl_M35_PPB_UMA_Private_IsCrashReportingEnabled
-};
-
-static const struct PPB_VideoDestination_Private_0_1 Pnacl_Wrappers_PPB_VideoDestination_Private_0_1 = {
-    .Create = (PP_Resource (*)(PP_Instance instance))&Pnacl_M28_PPB_VideoDestination_Private_Create,
-    .IsVideoDestination = (PP_Bool (*)(PP_Resource resource))&Pnacl_M28_PPB_VideoDestination_Private_IsVideoDestination,
-    .Open = (int32_t (*)(PP_Resource destination, struct PP_Var stream_url, struct PP_CompletionCallback callback))&Pnacl_M28_PPB_VideoDestination_Private_Open,
-    .PutFrame = (int32_t (*)(PP_Resource destination, const struct PP_VideoFrame_Private* frame))&Pnacl_M28_PPB_VideoDestination_Private_PutFrame,
-    .Close = (void (*)(PP_Resource destination))&Pnacl_M28_PPB_VideoDestination_Private_Close
-};
-
-static const struct PPB_VideoSource_Private_0_1 Pnacl_Wrappers_PPB_VideoSource_Private_0_1 = {
-    .Create = (PP_Resource (*)(PP_Instance instance))&Pnacl_M28_PPB_VideoSource_Private_Create,
-    .IsVideoSource = (PP_Bool (*)(PP_Resource resource))&Pnacl_M28_PPB_VideoSource_Private_IsVideoSource,
-    .Open = (int32_t (*)(PP_Resource source, struct PP_Var stream_url, struct PP_CompletionCallback callback))&Pnacl_M28_PPB_VideoSource_Private_Open,
-    .GetFrame = (int32_t (*)(PP_Resource source, struct PP_VideoFrame_Private* frame, struct PP_CompletionCallback callback))&Pnacl_M28_PPB_VideoSource_Private_GetFrame,
-    .Close = (void (*)(PP_Resource source))&Pnacl_M28_PPB_VideoSource_Private_Close
 };
 
 static const struct PPB_X509Certificate_Private_0_1 Pnacl_Wrappers_PPB_X509Certificate_Private_0_1 = {
@@ -6325,18 +6190,6 @@ static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_Flash_Clipboard_5_1 = {
   .real_iface = NULL
 };
 
-static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_Flash_DeviceID_1_0 = {
-  .iface_macro = PPB_FLASH_DEVICEID_INTERFACE_1_0,
-  .wrapped_iface = (const void *) &Pnacl_Wrappers_PPB_Flash_DeviceID_1_0,
-  .real_iface = NULL
-};
-
-static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_Flash_DRM_1_0 = {
-  .iface_macro = PPB_FLASH_DRM_INTERFACE_1_0,
-  .wrapped_iface = (const void *) &Pnacl_Wrappers_PPB_Flash_DRM_1_0,
-  .real_iface = NULL
-};
-
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_Flash_DRM_1_1 = {
   .iface_macro = PPB_FLASH_DRM_INTERFACE_1_1,
   .wrapped_iface = (const void *) &Pnacl_Wrappers_PPB_Flash_DRM_1_1,
@@ -6445,18 +6298,6 @@ static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_UMA_Private_0_3 = {
   .real_iface = NULL
 };
 
-static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_VideoDestination_Private_0_1 = {
-  .iface_macro = PPB_VIDEODESTINATION_PRIVATE_INTERFACE_0_1,
-  .wrapped_iface = (const void *) &Pnacl_Wrappers_PPB_VideoDestination_Private_0_1,
-  .real_iface = NULL
-};
-
-static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_VideoSource_Private_0_1 = {
-  .iface_macro = PPB_VIDEOSOURCE_PRIVATE_INTERFACE_0_1,
-  .wrapped_iface = (const void *) &Pnacl_Wrappers_PPB_VideoSource_Private_0_1,
-  .real_iface = NULL
-};
-
 static struct __PnaclWrapperInfo Pnacl_WrapperInfo_PPB_X509Certificate_Private_0_1 = {
   .iface_macro = PPB_X509CERTIFICATE_PRIVATE_INTERFACE_0_1,
   .wrapped_iface = (const void *) &Pnacl_Wrappers_PPB_X509Certificate_Private_0_1,
@@ -6556,8 +6397,6 @@ static struct __PnaclWrapperInfo *s_ppb_wrappers[] = {
   &Pnacl_WrapperInfo_PPB_Flash_Clipboard_4_0,
   &Pnacl_WrapperInfo_PPB_Flash_Clipboard_5_0,
   &Pnacl_WrapperInfo_PPB_Flash_Clipboard_5_1,
-  &Pnacl_WrapperInfo_PPB_Flash_DeviceID_1_0,
-  &Pnacl_WrapperInfo_PPB_Flash_DRM_1_0,
   &Pnacl_WrapperInfo_PPB_Flash_DRM_1_1,
   &Pnacl_WrapperInfo_PPB_Flash_Menu_0_2,
   &Pnacl_WrapperInfo_PPB_HostResolver_Private_0_1,
@@ -6576,8 +6415,6 @@ static struct __PnaclWrapperInfo *s_ppb_wrappers[] = {
   &Pnacl_WrapperInfo_PPB_UDPSocket_Private_0_3,
   &Pnacl_WrapperInfo_PPB_UDPSocket_Private_0_4,
   &Pnacl_WrapperInfo_PPB_UMA_Private_0_3,
-  &Pnacl_WrapperInfo_PPB_VideoDestination_Private_0_1,
-  &Pnacl_WrapperInfo_PPB_VideoSource_Private_0_1,
   &Pnacl_WrapperInfo_PPB_X509Certificate_Private_0_1,
   NULL
 };

@@ -92,6 +92,8 @@ source_set("audio") {
     "audio_input_device.h",
     "audio_input_ipc.cc",
     "audio_input_ipc.h",
+    "audio_input_stream_data_interceptor.cc",
+    "audio_input_stream_data_interceptor.h",
     "audio_input_sync_writer.cc",
     "audio_input_sync_writer.h",
     "audio_io.h",
@@ -105,6 +107,8 @@ source_set("audio") {
     "audio_output_delegate.h",
     "audio_output_device.cc",
     "audio_output_device.h",
+    "audio_output_device_thread_callback.cc",
+    "audio_output_device_thread_callback.h",
     "audio_output_dispatcher.cc",
     "audio_output_dispatcher.h",
     "audio_output_dispatcher_impl.cc",
@@ -119,9 +123,16 @@ source_set("audio") {
     "audio_output_stream_sink.h",
     "audio_power_monitor.cc",
     "audio_power_monitor.h",
+    "audio_processing.cc",
+    "audio_processing.h",
+    "audio_sink_parameters.cc",
+    "audio_sink_parameters.h",
     "audio_source_diverter.h",
+    "audio_source_parameters.cc",
+    "audio_source_parameters.h",
     "audio_sync_reader.cc",
     "audio_sync_reader.h",
+    "audio_system.cc",
     "audio_system.h",
     "audio_system_helper.cc",
     "audio_system_helper.h",
@@ -308,14 +319,7 @@ source_set("audio") {
       "fuchsia/audio_output_stream_fuchsia.cc",
       "fuchsia/audio_output_stream_fuchsia.h",
     ]
-    libs += [ "media_client" ]
-  }
-
-  if (enable_webrtc) {
-    sources += [
-      "audio_input_stream_data_interceptor.cc",
-      "audio_input_stream_data_interceptor.h",
-    ]
+    deps += [ "//third_party/fuchsia-sdk/sdk:media" ]
   }
 
   configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
@@ -353,8 +357,6 @@ static_library("test_support") {
     "mock_audio_manager.h",
     "mock_audio_source_callback.cc",
     "mock_audio_source_callback.h",
-    "test_audio_input_controller_factory.cc",
-    "test_audio_input_controller_factory.h",
     "test_audio_thread.cc",
     "test_audio_thread.h",
   ]
@@ -385,6 +387,7 @@ source_set("unit_tests") {
     "audio_debug_recording_session_impl_unittest.cc",
     "audio_input_controller_unittest.cc",
     "audio_input_device_unittest.cc",
+    "audio_input_stream_data_interceptor_unittest.cc",
     "audio_input_sync_writer_unittest.cc",
     "audio_input_unittest.cc",
     "audio_manager_unittest.cc",
@@ -415,10 +418,6 @@ source_set("unit_tests") {
     "//build/config/compiler:no_size_t_to_int_warning",
     "//media:media_config",
   ]
-
-  if (enable_webrtc) {
-    sources += [ "audio_input_stream_data_interceptor_unittest.cc" ]
-  }
 
   if (is_android) {
     sources += [ "android/audio_android_unittest.cc" ]

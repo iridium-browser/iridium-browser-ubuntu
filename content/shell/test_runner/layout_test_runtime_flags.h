@@ -83,7 +83,7 @@ class TEST_RUNNER_EXPORT LayoutTestRuntimeFlags {
   DEFINE_BOOL_LAYOUT_TEST_RUNTIME_FLAG(wait_until_done)
 
   // If true, ends the test when a URL is loaded externally via
-  // WebFrameClient::loadURLExternally().
+  // WebLocalFrameClient::loadURLExternally().
   DEFINE_BOOL_LAYOUT_TEST_RUNTIME_FLAG(wait_until_external_url_load)
 
   // Causes navigation actions just printout the intended navigation instead
@@ -144,7 +144,7 @@ class TEST_RUNNER_EXPORT LayoutTestRuntimeFlags {
   DEFINE_BOOL_LAYOUT_TEST_RUNTIME_FLAG(dump_resource_response_mime_types)
 
   // If true, content_shell will dump the default navigation policy passed to
-  // WebFrameClient::decidePolicyForNavigation.
+  // WebLocalFrameClient::decidePolicyForNavigation.
   DEFINE_BOOL_LAYOUT_TEST_RUNTIME_FLAG(dump_navigation_policy)
 
   // If true, output a message when the page title is changed.
@@ -157,7 +157,7 @@ class TEST_RUNNER_EXPORT LayoutTestRuntimeFlags {
   // be part of test output.
   DEFINE_BOOL_LAYOUT_TEST_RUNTIME_FLAG(dump_console_messages)
 
-  // Desired return value of WebFrameClient::runModalBeforeUnloadDialog.
+  // Desired return value of WebLocalFrameClient::runModalBeforeUnloadDialog.
   DEFINE_BOOL_LAYOUT_TEST_RUNTIME_FLAG(
       stay_on_page_after_handling_before_unload)
 
@@ -189,6 +189,11 @@ class TEST_RUNNER_EXPORT LayoutTestRuntimeFlags {
 
   // Contains text passed by the test to testRunner.setCustomTextOutput.
   DEFINE_STRING_LAYOUT_TEST_RUNTIME_FLAG(custom_text_output)
+
+  // Controls which implementation to use for text dump, to help progressive
+  // rebaseline of layout test text dumps.
+  // TODO(xiaochengh): Remove this flag when rebaseline is complete.
+  DEFINE_BOOL_LAYOUT_TEST_RUNTIME_FLAG(should_use_inner_text_dump)
 
 #undef DEFINE_BOOL_LAYOUT_TEST_RUNTIME_FLAG
 #undef DEFINE_STRING_LAYOUT_TEST_RUNTIME_FLAG

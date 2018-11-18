@@ -15,8 +15,7 @@ namespace syncer {
 // classes that use ModelTypeStore objects.
 class ModelTypeStoreTestUtil {
  public:
-  // Creates an in memory store synchronously. Be aware that to do this all
-  // outstanding tasks will be run as the current message loop is pumped.
+  // Creates an in memory store synchronously.
   static std::unique_ptr<ModelTypeStore> CreateInMemoryStoreForTest(
       ModelType type = UNSPECIFIED);
 
@@ -28,6 +27,12 @@ class ModelTypeStoreTestUtil {
   static void MoveStoreToCallback(std::unique_ptr<ModelTypeStore> store,
                                   ModelType type,
                                   ModelTypeStore::InitCallback callback);
+
+  // Returns a callback that constructs a store that forwards all calls to
+  // |target|. |*target| must outlive the returned factory as well any store
+  // created by the factory.
+  static RepeatingModelTypeStoreFactory FactoryForForwardingStore(
+      ModelTypeStore* target);
 };
 
 }  // namespace syncer

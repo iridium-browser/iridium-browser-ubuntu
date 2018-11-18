@@ -35,11 +35,15 @@ by a child template that "extends" this file.
     {% endif %}
     <uses-permission-sdk-23 android:name="android.permission.BLUETOOTH"/>
     <uses-permission-sdk-23 android:name="android.permission.BLUETOOTH_ADMIN"/>
+    <uses-permission-sdk-23 android:name="android.permission.READ_CONTACTS"/>
     <uses-permission-sdk-23 android:name="android.permission.REORDER_TASKS"/>
     <uses-permission-sdk-23 android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
 
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.DOWNLOAD_WITHOUT_NOTIFICATION" />
+    {% if target_sdk_version|int > 27 or target_sdk_version == "P" %}
+        <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    {% endif %}
     <uses-permission android:name="android.permission.GET_ACCOUNTS"/>
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.MANAGE_ACCOUNTS"/>
@@ -67,6 +71,8 @@ by a child template that "extends" this file.
       android:orientation attribute.
     -->
     <uses-feature android:name="android.hardware.screen.landscape" android:required="false"/>
+    <!-- Indicates that head tracking should be done in 6DoF, if available -->
+    <uses-feature android:name="android.hardware.vr.headtracking" android:version="1" android:required="false"/>
     {% endif %}
 
     <permission android:name="{{ manifest_package }}.permission.CHILD_SERVICE" android:protectionLevel="signature" />
@@ -159,6 +165,23 @@ by a child template that "extends" this file.
         <meta-data android:name="android.content.APP_RESTRICTIONS"
             android:resource="@xml/app_restrictions"/>
 
+        {% if enable_arcore %}
+        <!-- ARCore APK integration -->
+        <!-- This tag indicates that this application optionally uses ARCore. -->
+        <meta-data android:name="com.google.ar.core" android:value="optional" />
+        <!-- This value referes to ARCore 1.1.
+             This value should be updated when ARCore features require
+             a newer version of the ARCore SDK. -->
+        <meta-data android:name="com.google.ar.core.min_apk_version"
+            android:value="180226000"/>
+        {% endif %}
+
+        <!-- Cast support -->
+        <meta-data
+            android:name=
+            "com.google.android.gms.cast.framework.OPTIONS_PROVIDER_CLASS_NAME"
+            android:value="org.chromium.chrome.browser.media.router.caf.CastOptionsProvider"/>
+
         <!-- Note: All activities directly or indirectly derived from ChromeActivity
              must specify android:hardwareAccelerated="false".
 
@@ -171,6 +194,17 @@ by a child template that "extends" this file.
             android:taskAffinity=""
             android:excludeFromRecents="true"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|mcc|mnc|screenLayout|smallestScreenSize|uiMode|density">
+            <!-- TODO(mthiesse, b/72214458): This is a duplication of the icon metadata below.
+                 Daydream will actually ignore the metadata here, and use the metadata on the
+                 activity-alias. However, play store apk validation fails to find the icons on the
+                 alias, so we need to include them here to pass validation. -->
+            {% if enable_vr == "true" %}
+            <meta-data android:name="com.google.android.vr.icon"
+                android:resource="@drawable/daydream_icon_foreground" />
+            <meta-data android:name="com.google.android.vr.icon_background"
+                android:resource="@drawable/daydream_icon_background" />
+            {% endif %}
+            {{ self.supports_vr() }}
         </activity>
         <activity-alias android:name="com.google.android.apps.chrome.IntentDispatcher"
             android:targetActivity="org.chromium.chrome.browser.document.ChromeLauncherActivity"
@@ -178,6 +212,9 @@ by a child template that "extends" this file.
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.NOTIFICATION_PREFERENCES" />
+                {% if enable_vr == "true" %}
+                <category android:name="com.google.intent.category.DAYDREAM" />
+                {% endif %}
             </intent-filter>
             <!-- Matches the common case of intents with no MIME type.
                  Make sure to keep in sync with the next filter.  -->
@@ -186,6 +223,9 @@ by a child template that "extends" this file.
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
+                {% if enable_vr == "true" %}
+                <category android:name="com.google.intent.category.DAYDREAM" />
+                {% endif %}
                 {% if channel in ['stable', 'default'] %}<data android:scheme="googlechrome" />{% endif %}
                 <data android:scheme="http" />
                 <data android:scheme="https" />
@@ -196,13 +236,11 @@ by a child template that "extends" this file.
             <!-- Same filter as above but with MIME types.  Intents that
                  do not specify a MIME type won't match. -->
             <intent-filter>
-                {% block common_view_intent_shared_filter_with_mime_body %}
                 {{ self.common_view_intent_shared_filter_body() }}
                 <data android:scheme="content" />
                 <data android:mimeType="text/html"/>
                 <data android:mimeType="text/plain"/>
                 <data android:mimeType="application/xhtml+xml"/>
-                {% endblock %}
             </intent-filter>
             <!-- MHTML support, used for snapshots -->
             <intent-filter>
@@ -224,6 +262,9 @@ by a child template that "extends" this file.
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
+                {% if enable_vr == "true" %}
+                <category android:name="com.google.intent.category.DAYDREAM" />
+                {% endif %}
                 <data android:scheme="file"/>
                 <data android:scheme="content"/>
                 <data android:host="*" />
@@ -234,10 +275,8 @@ by a child template that "extends" this file.
             <!-- Same filter as above but with mimeType="*/*". Used for
                  handling intent send by ShareIt. -->
             <intent-filter>
-                {% block mhtml_view_intent_shared_filter_with_mime_body %}
                 {{ self.mhtml_view_intent_shared_filter_body() }}
                 <data android:mimeType="*/*"/>
-                {% endblock %}
             </intent-filter>
             <intent-filter>
                 <action android:name="android.intent.action.MEDIA_SEARCH" />
@@ -261,7 +300,28 @@ by a child template that "extends" this file.
             </intent-filter>
             <meta-data android:name="android.app.searchable"
                 android:resource="@xml/searchable" />
+            {% if enable_vr == "true" %}
+            <meta-data android:name="com.google.android.vr.icon"
+                android:resource="@drawable/daydream_icon_foreground" />
+            <meta-data android:name="com.google.android.vr.icon_background"
+                android:resource="@drawable/daydream_icon_background" />
+            {% endif %}
         </activity-alias>
+
+        <activity android:name="org.chromium.chrome.browser.media.MediaLauncherActivity"
+            android:theme="@android:style/Theme.NoDisplay"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:enabled="false"><!-- This will be selectively enabled at runtime. -->
+            <intent-filter tools:ignore="AppLinkUrlError">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <!-- TODO(https://crbug.com/800875): Limit these to supported MIME types. -->
+                <data android:mimeType="audio/*" />
+                <data android:mimeType="image/*" />
+                <data android:mimeType="video/*" />
+            </intent-filter>
+        </activity>
 
         <activity android:name="org.chromium.chrome.browser.LauncherShortcutActivity"
             android:theme="@android:style/Theme.NoDisplay"
@@ -298,6 +358,7 @@ by a child template that "extends" this file.
             android:persistableMode="persistAcrossReboots"
             android:autoRemoveFromRecents="false"
             {{ self.chrome_activity_common() }}>
+            {{ self.extra_web_rendering_activity_definitions() }}
         </activity>
         <activity-alias android:name="com.google.android.apps.chrome.document.DocumentActivity"
             android:targetActivity="org.chromium.chrome.browser.document.DocumentActivity"
@@ -310,6 +371,7 @@ by a child template that "extends" this file.
             android:persistableMode="persistNever"
             android:autoRemoveFromRecents="false"
             {{ self.chrome_activity_common() }}>
+            {{ self.extra_web_rendering_activity_definitions() }}
         </activity>
         <activity-alias android:name="com.google.android.apps.chrome.document.IncognitoDocumentActivity"
             android:targetActivity="org.chromium.chrome.browser.document.IncognitoDocumentActivity"
@@ -323,7 +385,22 @@ by a child template that "extends" this file.
             {{ self.supports_video_persistence() }}
         >
             {{ self.supports_vr() }}
+            {{ self.extra_web_rendering_activity_definitions() }}
         </activity>
+        <activity android:name="org.chromium.chrome.browser.customtabs.PaymentHandlerActivity"
+            android:theme="@style/TranslucentMainTheme"
+            android:exported="false"
+            {{ self.chrome_activity_common() }}
+            {{ self.supports_video_persistence() }}
+        >
+            {{ self.supports_vr() }}
+            {{ self.extra_web_rendering_activity_definitions() }}
+        </activity>
+        <!-- SeparateTaskCustomTabActivity is a wrapper of CustomTabActivity. It provides the
+             general feeling of supporting multi tasks, even for versions that did not fully support
+             it.
+             TODO(arthursonzogni, tedchoc): Enabled this only on Android < 21 after M74.
+        -->
         <activity android:name="org.chromium.chrome.browser.customtabs.SeparateTaskCustomTabActivity"
             android:theme="@style/MainTheme"
             android:exported="false"
@@ -334,98 +411,30 @@ by a child template that "extends" this file.
             {{ self.supports_video_persistence() }}
         >
             {{ self.supports_vr() }}
+            {{ self.extra_web_rendering_activity_definitions() }}
         </activity>
-        {% for i in range(10) %}
-        <activity android:name="org.chromium.chrome.browser.customtabs.SeparateTaskCustomTabActivity{{ i }}"
-            android:theme="@style/MainTheme"
-            android:icon="@mipmap/app_single_page_icon"
-            android:exported="false"
-            android:launchMode="singleTask"
-            android:persistableMode="persistNever"
-            android:taskAffinity=""
-            {{ self.chrome_activity_common() }}
-            {{ self.supports_video_persistence() }}
-        >
-            {{ self.supports_vr() }}
-        </activity>
-        {% endfor %}
-        {% if enable_vr == "true" %}
-        <!-- Needs to be exported for Daydream deep-links. Also note that we explicitly don't set
-             VR mode here as it actually doesn't matter for VR launches given that we set it
-             within the timeout in onCreate, and it makes launches from 2D much smoother. -->
-        <activity android:name="org.chromium.chrome.browser.vr.VrMainActivity"
-            android:theme="@style/VrSupportThemeLauncher"
-            android:exported="true"
-            android:taskAffinity=""
-            android:relinquishTaskIdentity="true"
-            android:excludeFromRecents="true"
-            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|mcc|mnc|screenLayout|smallestScreenSize|uiMode|density">
-            <!-- TODO(mthiesse, b/72214458): This is a duplication of the icon metadata below.
-                 Daydream will actually ignore the metadata here, and use the metadata on the
-                 activity-alias. However, play store apk validation fails to find the icons on the
-                 alias, so we need to include them here to pass validation. -->
-            <meta-data android:name="com.google.android.vr.icon"
-                android:resource="@drawable/daydream_icon_foreground" />
-            <meta-data android:name="com.google.android.vr.icon_background"
-                android:resource="@drawable/daydream_icon_background" />
-            {{ self.supports_vr() }}
-        </activity>
-
-        <!-- The VrIntentDispatcher handles many of the same intents as the non-vr
-             IntentDispatcher, and should be kept in sync where applicable. Intents that should
-             not be handled in VR include all intents that don't launch ChromeTabbedActivity.
-             Custom Tabs are a complicated special case, which are kind of supported. -->
-        <activity-alias android:name="com.google.android.apps.chrome.VrIntentDispatcher"
-            android:targetActivity="org.chromium.chrome.browser.vr.VrMainActivity"
-            android:enabled="true"
-            android:exported="true">
-            <meta-data android:name="com.google.android.vr.icon"
-                android:resource="@drawable/daydream_icon_foreground" />
-            <meta-data android:name="com.google.android.vr.icon_background"
-                android:resource="@drawable/daydream_icon_background" />
-
-            <!-- The Intent filters must all have lower priority than the non-VR intent filters
-                 so that intents without the Daydream flag aren't erroneously routed to the
-                 VrIntentDispatcher. -->
-            <intent-filter android:priority="-1">
-                <!-- Show icon in Daydream app launcher. -->
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="com.google.intent.category.DAYDREAM" />
-            </intent-filter>
-
-            <!-- Intent filters below are copied from IntentDispatcher, but with the added
-                 Daydream flag. -->
-
-            <intent-filter android:priority="-1">
-                <category android:name="com.google.intent.category.DAYDREAM" />
-                {{ self.common_view_intent_shared_filter_body() }}
-            </intent-filter>
-            <intent-filter android:priority="-1">
-                <category android:name="com.google.intent.category.DAYDREAM" />
-                {{ self.common_view_intent_shared_filter_with_mime_body() }}
-            </intent-filter>
-            <intent-filter android:priority="-1">
-                <category android:name="com.google.intent.category.DAYDREAM" />
-                {{ self.mhtml_view_intent_shared_filter_body() }}
-            </intent-filter>
-            <intent-filter android:priority="-1">
-                <category android:name="com.google.intent.category.DAYDREAM" />
-                {{ self.mhtml_view_intent_shared_filter_with_mime_body() }}
-            </intent-filter>
-        </activity-alias>
-        <activity android:name="org.chromium.chrome.browser.vr.CustomTabVrActivity"
-            android:theme="@style/VrSupportTheme"
-            android:screenOrientation="landscape"
-            android:enableVrMode="@string/gvr_vr_mode_component"
-            android:taskAffinity=""
-            android:persistableMode="persistNever"
-            android:autoRemoveFromRecents="false"
-            {{ self.chrome_activity_common() }}
-            {{ self.supports_video_persistence() }}
-        >
-            {{ self.supports_vr() }}
-        </activity>
+        {% if min_sdk_version|int < 21 %}
+          {% for i in range(10) %}
+            <activity android:name="org.chromium.chrome.browser.customtabs.SeparateTaskCustomTabActivity{{ i }}"
+                android:theme="@style/MainTheme"
+                android:icon="@mipmap/app_single_page_icon"
+                android:exported="false"
+                android:launchMode="singleTask"
+                android:persistableMode="persistNever"
+                android:taskAffinity=""
+                {{ self.chrome_activity_common() }}
+                {{ self.supports_video_persistence() }}
+            >
+                {{ self.supports_vr() }}
+                {{ self.extra_web_rendering_activity_definitions() }}
+            </activity>
+          {% endfor %}
         {% endif %}
+
+        <activity android:name="org.chromium.chrome.browser.incognito.IncognitoDisclosureActivity"
+          android:theme="@style/FullscreenTransparentActivityTheme"
+          android:exported="false">
+        </activity>
 
         <!-- ChromeTabbedActivity related -->
         <activity android:name="org.chromium.chrome.browser.ChromeTabbedActivity"
@@ -456,6 +465,9 @@ by a child template that "extends" this file.
                 <category android:name="com.google.intent.category.CARDBOARD" />
             </intent-filter>
             {% endblock %}
+
+            {% block extra_web_rendering_activity_definitions %}
+            {% endblock %}
         </activity>
         <!-- TODO(crbug.com/780674): retarget .Main back to CTA for non-modern APK -->
         <activity-alias android:name="com.google.android.apps.chrome.Main"
@@ -478,6 +490,9 @@ by a child template that "extends" this file.
             <meta-data android:name="android.app.shortcuts"
                 android:resource="@xml/launchershortcuts" />
             {{ self.supports_vr() }}
+            {% if min_sdk_version|int >= 21 %}
+            {{ self.extra_web_rendering_activity_definitions() }}
+            {% endif %}
         </activity-alias>
         <activity android:name="org.chromium.chrome.browser.ChromeTabbedActivity2"
             android:theme="@style/TabbedModeTheme"
@@ -488,11 +503,13 @@ by a child template that "extends" this file.
             {{ self.supports_video_persistence() }}
         >
             {{ self.supports_vr() }}
+            {{ self.extra_web_rendering_activity_definitions() }}
         </activity>
         <activity android:name="org.chromium.chrome.browser.multiwindow.MultiInstanceChromeTabbedActivity"
             android:theme="@style/TabbedModeTheme"
             android:exported="false"
             {{ self.chrome_activity_common() }}>
+            {{ self.extra_web_rendering_activity_definitions() }}
         </activity>
         <activity android:name="org.chromium.chrome.browser.FullscreenActivity"
             android:theme="@style/MainTheme"
@@ -500,6 +517,7 @@ by a child template that "extends" this file.
             android:noHistory="true"
             {{ self.chrome_activity_common() }}
             {{ self.supports_video_persistence() }} >
+            {{ self.extra_web_rendering_activity_definitions() }}
         </activity>
 
         <activity android:name="org.chromium.chrome.browser.sync.ui.PassphraseActivity"
@@ -526,7 +544,7 @@ by a child template that "extends" this file.
             {{ self.first_run_activity_common() }}>
         </activity>
         {% if enable_vr == "true" %}
-        <activity android:name="org.chromium.chrome.browser.vr_shell.VrFirstRunActivity"
+        <activity android:name="org.chromium.chrome.browser.vr.VrFirstRunActivity"
             android:exported="false"
             android:launchMode="singleInstance"
             android:theme="@style/VrActivityTheme"
@@ -552,7 +570,7 @@ by a child template that "extends" this file.
             android:exported="false">
         </activity>
         <activity android:name="org.chromium.chrome.browser.preferences.website.ManageSpaceActivity"
-            android:theme="@style/PreferencesTheme"
+            android:theme="@style/ManageSpaceTheme"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|mcc|mnc|screenLayout|smallestScreenSize"
             android:label="@string/storage_management_activity_label"
             android:exported="false">
@@ -635,11 +653,13 @@ by a child template that "extends" this file.
             android:label="@string/webapp_activity_title"
             android:launchMode="singleTop"
             android:documentLaunchMode="intoExisting"
+            android:exported="false"
             android:persistableMode="persistNever"
             {{ self.supports_video_persistence() }}
             {{ self.chrome_activity_common() }}
         >
             {{ self.supports_vr() }}
+            {{ self.extra_web_rendering_activity_definitions() }}
         </activity>
         <activity-alias android:name="com.google.android.apps.chrome.webapps.WebappActivity"
             android:targetActivity="org.chromium.chrome.browser.webapps.WebappActivity"
@@ -652,12 +672,14 @@ by a child template that "extends" this file.
             android:icon="@mipmap/app_shortcut_icon"
             android:label="@string/webapp_activity_title"
             android:launchMode="singleTask"
+            android:exported="false"
             android:persistableMode="persistNever"
             android:taskAffinity="{{ manifest_package }}.webapps.WebappActivity{{ i }}"
             {{ self.supports_video_persistence() }}
             {{ self.chrome_activity_common() }}
         >
            {{ self.supports_vr() }}
+           {{ self.extra_web_rendering_activity_definitions() }}
         </activity>
         <activity-alias android:name="com.google.android.apps.chrome.webapps.WebappActivity{{ i }}"
             android:targetActivity="org.chromium.chrome.browser.webapps.WebappActivity{{ i }}"
@@ -671,11 +693,13 @@ by a child template that "extends" this file.
             android:label="@string/webapp_activity_title"
             android:launchMode="singleTop"
             android:documentLaunchMode="intoExisting"
+            android:exported="false"
             android:persistableMode="persistNever"
             {{ self.supports_video_persistence() }}
             {{ self.chrome_activity_common() }}
         >
             {{ self.supports_vr() }}
+            {{ self.extra_web_rendering_activity_definitions() }}
         </activity>
         {% for i in range(10) %}
         <activity android:name="org.chromium.chrome.browser.webapps.WebApkActivity{{ i }}"
@@ -683,12 +707,14 @@ by a child template that "extends" this file.
             android:icon="@mipmap/app_shortcut_icon"
             android:label="@string/webapp_activity_title"
             android:launchMode="singleTask"
+            android:exported="false"
             android:persistableMode="persistNever"
             android:taskAffinity="{{ manifest_package }}.webapps.WebApkActivity{{ i }}"
             {{ self.supports_video_persistence() }}
             {{ self.chrome_activity_common() }}
         >
             {{ self.supports_vr() }}
+            {{ self.extra_web_rendering_activity_definitions() }}
         </activity>
         {% endfor %}
 
@@ -739,7 +765,7 @@ by a child template that "extends" this file.
         </activity>
 
         <activity
-            android:name="org.chromium.chrome.browser.vr_shell.VrCancelAnimationActivity"
+            android:name="org.chromium.chrome.browser.vr.VrCancelAnimationActivity"
             android:exported="false"
             android:theme="@android:style/Theme.NoDisplay"
             android:noHistory="true"
@@ -750,10 +776,6 @@ by a child template that "extends" this file.
             >
             {{ self.supports_vr() }}
         </activity>
-
-        <!-- Service for handling Nearby Messages -->
-        <service android:name="org.chromium.chrome.browser.physicalweb.NearbyMessageIntentService"
-            android:exported="false" />
 
         <!-- Activities for Browser Actions -->
         <activity android:name="org.chromium.chrome.browser.browseractions.BrowserActionActivity"
@@ -771,6 +793,16 @@ by a child template that "extends" this file.
         <service android:name="org.chromium.chrome.browser.browseractions.BrowserActionsService"
             android:exported="false">
         </service>
+
+        <!-- Components for Trusted Web Activities -->
+        <receiver android:name="org.chromium.chrome.browser.browserservices.ClearDataBroadcastReceiver"
+            android:exported="true">
+            <intent-filter>
+                <data android:scheme="package" />
+                <action android:name="android.intent.action.PACKAGE_FULLY_REMOVED" />
+                <action android:name="android.intent.action.PACKAGE_DATA_CLEARED" />
+            </intent-filter>
+        </receiver>
 
         <!-- Service for decoding images in a sandboxed process. -->
         <service
@@ -795,12 +827,6 @@ by a child template that "extends" this file.
             android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
-        </provider>
-
-        <provider android:name="org.chromium.chrome.browser.superviseduser.SupervisedUserContentProvider"
-            android:authorities="{{ manifest_package }}.SupervisedUserProvider"
-            android:permission="android.permission.INTERNET"
-            android:exported="true">
         </provider>
 
         <!-- Sync adapter for browser invalidation. -->
@@ -1003,16 +1029,13 @@ by a child template that "extends" this file.
             android:exported="false"/>
         <service android:name="org.chromium.chrome.browser.incognito.IncognitoNotificationService"
             android:exported="false"/>
-        <service android:name="org.chromium.chrome.browser.webapps.WebApkDisclosureNotificationService"
-            android:exported="false"/>
-
 
         <!-- The following service entries exist in order to allow us to
              start more than one sandboxed process. -->
 
         <!-- NOTE: If you change the value of "android:process" for the below services,
              you also need to update kHelperProcessExecutableName in chrome_constants.cc. -->
-        {% set num_sandboxed_services = 20 %}
+        {% set num_sandboxed_services = 40 %}
         <meta-data android:name="org.chromium.content.browser.NUM_SANDBOXED_SERVICES"
             android:value="{{ num_sandboxed_services }}"/>
 
@@ -1105,39 +1128,6 @@ android:value="true" />
 
         <meta-data android:name="org.chromium.content.browser.SMART_CLIP_PROVIDER"
             android:value="org.chromium.content_public.browser.SmartClipProvider"/>
-
-        {% set enable_leakcanary = enable_leakcanary|default(0) %}
-        {% if enable_leakcanary == "true" %}
-        {# Entries for LeakCanary copied from (and then tweaked):
-               //third_party/leakcanary/src/leakcanary-android/src/main/AndroidManifest.xml #}
-          <service
-              android:name="com.squareup.leakcanary.internal.HeapAnalyzerService"
-              android:process=":leakcanary"
-              android:enabled="false" />
-          <activity
-              android:theme="@style/leak_canary_LeakCanary.Base"
-              android:name="com.squareup.leakcanary.internal.DisplayLeakActivity"
-              android:process=":leakcanary2"  {# Added to avoid StrictMode violations crashing the activity #}
-              android:label="@string/app_name"  {# Changed from "string/leak_canary_display_activity_label" to help distinguaish when multiple apps include leakcanary. #}
-              android:icon="@drawable/leak_canary_icon"
-              android:taskAffinity=".com.squareup.leakcanary">  {# Added leading "." for multi-app case. #}
-            <intent-filter>
-              <action android:name="android.intent.action.MAIN" />
-              <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-          </activity>
-          <service
-              android:name="com.squareup.leakcanary.DisplayLeakService"
-              android:process=":leakcanary2"  {# Added to minimize interaction with browser process. #}
-              android:enabled="false" />
-          <activity  {# This is just a toast-like overlay, so leaving in browser process #}
-              android:theme="@style/leak_canary_Theme.Transparent"
-              android:name="com.squareup.leakcanary.internal.RequestStoragePermissionActivity"
-              android:taskAffinity="com.squareup.leakcanary"
-              android:enabled="false"
-              android:icon="@drawable/leak_canary_icon"
-              android:label="@string/leak_canary_storage_permission_activity_label" />
-        {% endif %}
 
         {% block extra_application_definitions %}
 

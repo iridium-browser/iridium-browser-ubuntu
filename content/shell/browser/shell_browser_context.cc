@@ -12,10 +12,12 @@
 #include "base/files/file_util.h"
 #include "base/logging.h"
 #include "base/path_service.h"
+#include "base/task/post_task.h"
 #include "base/threading/thread.h"
 #include "build/build_config.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/network_session_configurator/common/network_switches.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/public/common/content_switches.h"
@@ -30,6 +32,8 @@
 #include "base/nix/xdg_util.h"
 #elif defined(OS_MACOSX)
 #include "base/base_paths_mac.h"
+#elif defined(OS_FUCHSIA)
+#include "base/base_paths_fuchsia.h"
 #endif
 
 namespace content {
@@ -38,12 +42,6 @@ ShellBrowserContext::ShellResourceContext::ShellResourceContext()
     : getter_(nullptr) {}
 
 ShellBrowserContext::ShellResourceContext::~ShellResourceContext() {
-}
-
-net::HostResolver*
-ShellBrowserContext::ShellResourceContext::GetHostResolver() {
-  CHECK(getter_);
-  return getter_->host_resolver();
 }
 
 net::URLRequestContext*
@@ -82,8 +80,8 @@ ShellBrowserContext::~ShellBrowserContext() {
   }
   ShutdownStoragePartitions();
   if (url_request_getter_) {
-    BrowserThread::PostTask(
-        BrowserThread::IO, FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, {BrowserThread::IO},
         base::BindOnce(&ShellURLRequestContextGetter::NotifyContextShuttingDown,
                        url_request_getter_));
   }
@@ -110,7 +108,7 @@ void ShellBrowserContext::InitWhileIOAllowed() {
   }
 
 #if defined(OS_WIN)
-  CHECK(PathService::Get(base::DIR_LOCAL_APP_DATA, &path_));
+  CHECK(base::PathService::Get(base::DIR_LOCAL_APP_DATA, &path_));
   path_ = path_.Append(std::wstring(L"content_shell"));
 #elif defined(OS_LINUX)
   std::unique_ptr<base::Environment> env(base::Environment::Create());
@@ -120,10 +118,13 @@ void ShellBrowserContext::InitWhileIOAllowed() {
                                  base::nix::kDotConfigDir));
   path_ = config_dir.Append("content_shell");
 #elif defined(OS_MACOSX)
-  CHECK(PathService::Get(base::DIR_APP_DATA, &path_));
+  CHECK(base::PathService::Get(base::DIR_APP_DATA, &path_));
   path_ = path_.Append("Chromium Content Shell");
 #elif defined(OS_ANDROID)
-  CHECK(PathService::Get(base::DIR_ANDROID_APP_DATA, &path_));
+  CHECK(base::PathService::Get(base::DIR_ANDROID_APP_DATA, &path_));
+  path_ = path_.Append(FILE_PATH_LITERAL("content_shell"));
+#elif defined(OS_FUCHSIA)
+  CHECK(base::PathService::Get(base::DIR_APP_DATA, &path_));
   path_ = path_.Append(FILE_PATH_LITERAL("content_shell"));
 #else
   NOTIMPLEMENTED();
@@ -142,6 +143,10 @@ std::unique_ptr<ZoomLevelDelegate> ShellBrowserContext::CreateZoomLevelDelegate(
 #endif  // !defined(OS_ANDROID)
 
 base::FilePath ShellBrowserContext::GetPath() const {
+  return path_;
+}
+
+base::FilePath ShellBrowserContext::GetCachePath() const {
   return path_;
 }
 
@@ -165,7 +170,7 @@ ShellBrowserContext::CreateURLRequestContextGetter(
     URLRequestInterceptorScopedVector request_interceptors) {
   return new ShellURLRequestContextGetter(
       ignore_certificate_errors_, off_the_record_, GetPath(),
-      BrowserThread::GetTaskRunnerForThread(BrowserThread::IO),
+      base::CreateSingleThreadTaskRunnerWithTraits({BrowserThread::IO}),
       protocol_handlers, std::move(request_interceptors), net_log_);
 }
 
@@ -227,7 +232,8 @@ SSLHostStateDelegate* ShellBrowserContext::GetSSLHostStateDelegate() {
   return nullptr;
 }
 
-PermissionManager* ShellBrowserContext::GetPermissionManager() {
+PermissionControllerDelegate*
+ShellBrowserContext::GetPermissionControllerDelegate() {
   if (!permission_manager_.get())
     permission_manager_.reset(new ShellPermissionManager());
   return permission_manager_.get();

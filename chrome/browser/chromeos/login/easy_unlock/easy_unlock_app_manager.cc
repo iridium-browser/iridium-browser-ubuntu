@@ -16,7 +16,7 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
-#include "chrome/common/extensions/api/easy_unlock_private.h"
+#include "chrome/common/apps/platform_apps/api/easy_unlock_private.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chromeos/components/proximity_auth/logging/logging.h"
 #include "chromeos/components/proximity_auth/switches.h"
@@ -73,7 +73,8 @@ void EasyUnlockAppManagerImpl::EnsureReady(
 }
 
 void EasyUnlockAppManagerImpl::LaunchSetup() {
-  ExtensionService* extension_service = extension_system_->extension_service();
+  extensions::ExtensionService* extension_service =
+      extension_system_->extension_service();
   if (!extension_service)
     return;
 
@@ -91,7 +92,8 @@ void EasyUnlockAppManagerImpl::LaunchSetup() {
 }
 
 void EasyUnlockAppManagerImpl::LoadApp() {
-  ExtensionService* extension_service = extension_system_->extension_service();
+  extensions::ExtensionService* extension_service =
+      extension_system_->extension_service();
   if (!extension_service)
     return;
 
@@ -113,7 +115,8 @@ void EasyUnlockAppManagerImpl::LoadApp() {
 }
 
 void EasyUnlockAppManagerImpl::DisableAppIfLoaded() {
-  ExtensionService* extension_service = extension_system_->extension_service();
+  extensions::ExtensionService* extension_service =
+      extension_system_->extension_service();
   if (!extension_service)
     return;
 
@@ -125,7 +128,8 @@ void EasyUnlockAppManagerImpl::DisableAppIfLoaded() {
 }
 
 void EasyUnlockAppManagerImpl::ReloadApp() {
-  ExtensionService* extension_service = extension_system_->extension_service();
+  extensions::ExtensionService* extension_service =
+      extension_system_->extension_service();
   if (!extension_service)
     return;
 
@@ -136,7 +140,8 @@ void EasyUnlockAppManagerImpl::ReloadApp() {
 }
 
 bool EasyUnlockAppManagerImpl::SendAuthAttemptEvent() {
-  ExtensionService* extension_service = extension_system_->extension_service();
+  extensions::ExtensionService* extension_service =
+      extension_system_->extension_service();
   if (!extension_service)
     return false;
 

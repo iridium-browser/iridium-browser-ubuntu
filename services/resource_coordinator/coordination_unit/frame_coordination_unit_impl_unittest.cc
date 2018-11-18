@@ -7,6 +7,7 @@
 #include "base/test/simple_test_tick_clock.h"
 #include "services/resource_coordinator/coordination_unit/coordination_unit_test_harness.h"
 #include "services/resource_coordinator/coordination_unit/mock_coordination_unit_graphs.h"
+#include "services/resource_coordinator/coordination_unit/page_coordination_unit_impl.h"
 #include "services/resource_coordinator/coordination_unit/process_coordination_unit_impl.h"
 #include "services/resource_coordinator/resource_coordinator_clock.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -114,13 +115,84 @@ TEST_F(FrameCoordinationUnitImplTest, RemoveChildFrame) {
 }
 
 TEST_F(FrameCoordinationUnitImplTest, LastAudibleTime) {
-  MockSinglePageInSingleProcessCoordinationUnitGraph cu_graph;
+  MockSinglePageInSingleProcessCoordinationUnitGraph cu_graph(
+      coordination_unit_graph());
   EXPECT_EQ(base::TimeTicks(), cu_graph.frame->last_audible_time());
   cu_graph.frame->SetAudibility(true);
   AdvanceClock(base::TimeDelta::FromSeconds(1));
   cu_graph.frame->SetAudibility(false);
   EXPECT_EQ(ResourceCoordinatorClock::NowTicks(),
             cu_graph.frame->last_audible_time());
+}
+
+int64_t GetLifecycleState(PageCoordinationUnitImpl* cu) {
+  int64_t value;
+  if (cu->GetProperty(mojom::PropertyType::kLifecycleState, &value))
+    return value;
+  // Initial state is running.
+  return static_cast<int64_t>(mojom::LifecycleState::kRunning);
+}
+
+#define EXPECT_FROZEN(cu)                                         \
+  EXPECT_EQ(static_cast<int64_t>(mojom::LifecycleState::kFrozen), \
+            GetLifecycleState(cu.get()))
+#define EXPECT_RUNNING(cu)                                         \
+  EXPECT_EQ(static_cast<int64_t>(mojom::LifecycleState::kRunning), \
+            GetLifecycleState(cu.get()))
+
+TEST_F(FrameCoordinationUnitImplTest, LifecycleStatesTransitions) {
+  MockMultiplePagesWithMultipleProcessesCoordinationUnitGraph cu_graph(
+      coordination_unit_graph());
+  // Verifying the model.
+  ASSERT_TRUE(cu_graph.frame->IsMainFrame());
+  ASSERT_TRUE(cu_graph.other_frame->IsMainFrame());
+  ASSERT_FALSE(cu_graph.child_frame->IsMainFrame());
+  ASSERT_EQ(cu_graph.child_frame->GetParentFrameCoordinationUnit(),
+            cu_graph.other_frame.get());
+  ASSERT_EQ(cu_graph.frame->GetPageCoordinationUnit(), cu_graph.page.get());
+  ASSERT_EQ(cu_graph.other_frame->GetPageCoordinationUnit(),
+            cu_graph.other_page.get());
+
+  // Freezing a child frame should not affect the page state.
+  cu_graph.child_frame->SetLifecycleState(mojom::LifecycleState::kFrozen);
+  EXPECT_RUNNING(cu_graph.page);
+  EXPECT_RUNNING(cu_graph.other_page);
+
+  // Freezing the only frame in a page should freeze that page.
+  cu_graph.frame->SetLifecycleState(mojom::LifecycleState::kFrozen);
+  EXPECT_FROZEN(cu_graph.page);
+  EXPECT_RUNNING(cu_graph.other_page);
+
+  // Unfreeze the child frame in the other page.
+  cu_graph.child_frame->SetLifecycleState(mojom::LifecycleState::kRunning);
+  EXPECT_FROZEN(cu_graph.page);
+  EXPECT_RUNNING(cu_graph.other_page);
+
+  // Freezing the main frame in the other page should not alter that pages
+  // state, as there is still a child frame that is running.
+  cu_graph.other_frame->SetLifecycleState(mojom::LifecycleState::kFrozen);
+  EXPECT_FROZEN(cu_graph.page);
+  EXPECT_RUNNING(cu_graph.other_page);
+
+  // Refreezing the child frame should freeze the page.
+  cu_graph.child_frame->SetLifecycleState(mojom::LifecycleState::kFrozen);
+  EXPECT_FROZEN(cu_graph.page);
+  EXPECT_FROZEN(cu_graph.other_page);
+
+  // Unfreezing a main frame should unfreeze the associated page.
+  cu_graph.frame->SetLifecycleState(mojom::LifecycleState::kRunning);
+  EXPECT_RUNNING(cu_graph.page);
+  EXPECT_FROZEN(cu_graph.other_page);
+
+  // Unfreezing the child frame should unfreeze the associated page.
+  cu_graph.child_frame->SetLifecycleState(mojom::LifecycleState::kRunning);
+  EXPECT_RUNNING(cu_graph.page);
+  EXPECT_RUNNING(cu_graph.other_page);
+
+  // Unfreezing the main frame shouldn't change anything.
+  cu_graph.other_frame->SetLifecycleState(mojom::LifecycleState::kRunning);
+  EXPECT_RUNNING(cu_graph.page);
+  EXPECT_RUNNING(cu_graph.other_page);
 }
 
 }  // namespace resource_coordinator

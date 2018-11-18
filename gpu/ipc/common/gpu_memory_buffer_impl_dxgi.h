@@ -41,16 +41,17 @@ class GPU_EXPORT GpuMemoryBufferImplDXGI : public GpuMemoryBufferImpl {
   void* memory(size_t plane) override;
   void Unmap() override;
   int stride(size_t plane) const override;
-  gfx::GpuMemoryBufferHandle GetHandle() const override;
+  gfx::GpuMemoryBufferType GetType() const override;
+  gfx::GpuMemoryBufferHandle CloneHandle() const override;
 
  private:
   GpuMemoryBufferImplDXGI(gfx::GpuMemoryBufferId id,
                           const gfx::Size& size,
                           gfx::BufferFormat format,
                           const DestructionCallback& callback,
-                          const base::SharedMemoryHandle& dxgi_handle);
+                          base::win::ScopedHandle dxgi_handle);
 
-  base::SharedMemory shared_memory_;
+  base::win::ScopedHandle dxgi_handle_;
 
   DISALLOW_COPY_AND_ASSIGN(GpuMemoryBufferImplDXGI);
 };

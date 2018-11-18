@@ -59,6 +59,7 @@ class ChromeAppListItem {
   const std::string& name() const { return metadata_->name; }
   bool is_folder() const { return metadata_->is_folder; }
   const gfx::ImageSkia& icon() const { return metadata_->icon; }
+  bool is_page_break() const { return metadata_->is_page_break; }
 
   void SetIsInstalling(bool is_installing);
   void SetPercentDownloaded(int32_t percent_downloaded);
@@ -74,6 +75,7 @@ class ChromeAppListItem {
                            const std::string& short_name);
   void SetFolderId(const std::string& folder_id);
   void SetPosition(const syncer::StringOrdinal& position);
+  void SetIsPageBreak(bool is_page_break);
 
   // The following methods won't make changes to Ash and it should be called
   // by this item itself or the model updater.
@@ -82,6 +84,9 @@ class ChromeAppListItem {
   void SetChromeName(const std::string& name);
   void SetChromePosition(const syncer::StringOrdinal& position);
 
+  // Call |Activate()| and dismiss launcher if necessary.
+  void PerformActivate(int event_flags);
+
   // Activates (opens) the item. Does nothing by default.
   virtual void Activate(int event_flags);
 
@@ -89,10 +94,12 @@ class ChromeAppListItem {
   // Pointers can be compared for quick type checking.
   virtual const char* GetItemType() const;
 
-  // Returns the context menu model for this item, or NULL if there is currently
-  // no menu for the item (e.g. during install).
-  // Note the returned menu model is owned by this item.
-  virtual ui::MenuModel* GetContextMenuModel();
+  // Returns the context menu model in |callback| for this item. NULL if there
+  // is currently no menu for the item (e.g. during install). Note |callback|
+  // takes the ownership of the returned menu model.
+  using GetMenuModelCallback =
+      base::OnceCallback<void(std::unique_ptr<ui::MenuModel>)>;
+  virtual void GetContextMenuModel(GetMenuModelCallback callback);
 
   // Returns true iff this item was badged because it's an extension app that
   // has its Android analog installed.
@@ -104,6 +111,10 @@ class ChromeAppListItem {
   bool CompareForTest(const ChromeAppListItem* other) const;
 
   std::string ToDebugString() const;
+
+  // Set the default position if it exists. Otherwise set the first available
+  // position in the app list if |model_updater| is not null.
+  void SetDefaultPositionIfApplicable(AppListModelUpdater* model_updater);
 
  protected:
   ChromeAppListItem(Profile* profile, const std::string& app_id);
@@ -123,12 +134,11 @@ class ChromeAppListItem {
   void UpdateFromSync(
       const app_list::AppListSyncableService::SyncItem* sync_item);
 
-  // Set the default position if it exists.
-  void SetDefaultPositionIfApplicable();
-
   // Get the context menu of a certain app. This could be different for
   // different kinds of items.
   virtual app_list::AppContextMenu* GetAppContextMenu();
+
+  void MaybeDismissAppList();
 
  private:
   ash::mojom::AppListItemMetadataPtr metadata_;

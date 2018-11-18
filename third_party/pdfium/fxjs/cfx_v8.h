@@ -7,7 +7,6 @@
 #ifndef FXJS_CFX_V8_H_
 #define FXJS_CFX_V8_H_
 
-#include <map>
 #include <vector>
 
 #include "core/fxcrt/fx_string.h"
@@ -20,7 +19,7 @@ class CFX_V8 {
   explicit CFX_V8(v8::Isolate* pIsolate);
   virtual ~CFX_V8();
 
-  v8::Isolate* GetIsolate() const { return m_isolate; }
+  v8::Isolate* GetIsolate() const { return m_pIsolate.Get(); }
 
   v8::Local<v8::Value> NewNull();
   v8::Local<v8::Value> NewUndefined();
@@ -59,17 +58,23 @@ class CFX_V8 {
                          v8::Local<v8::Value> pValue);
 
  protected:
-  void SetIsolate(v8::Isolate* pIsolate) { m_isolate = pIsolate; }
+  void SetIsolate(v8::Isolate* pIsolate) { m_pIsolate = pIsolate; }
+  void DisposeIsolate();
 
  private:
-  v8::Isolate* m_isolate;
+  UnownedPtr<v8::Isolate> m_pIsolate;
 };
 
-class CFX_V8ArrayBufferAllocator : public v8::ArrayBuffer::Allocator {
+class CFX_V8ArrayBufferAllocator final : public v8::ArrayBuffer::Allocator {
   static const size_t kMaxAllowedBytes = 0x10000000;
   void* Allocate(size_t length) override;
   void* AllocateUninitialized(size_t length) override;
   void Free(void* data, size_t length) override;
+};
+
+// Use with std::unique_ptr<v8::Isolate> to dispose of isolates correctly.
+struct CFX_V8IsolateDeleter {
+  inline void operator()(v8::Isolate* ptr) { ptr->Dispose(); }
 };
 
 #endif  // FXJS_CFX_V8_H_

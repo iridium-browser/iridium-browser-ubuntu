@@ -7,6 +7,7 @@
 #include <utility>
 
 #include "base/bind.h"
+#include "base/no_destructor.h"
 #include "base/strings/nullable_string16.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/renderer/fetchers/manifest_fetcher.h"
@@ -47,7 +48,7 @@ ManifestManager::~ManifestManager() {
 void ManifestManager::RequestManifest(RequestManifestCallback callback) {
   RequestManifestImpl(base::BindOnce(
       [](RequestManifestCallback callback, const GURL& manifest_url,
-         const Manifest& manifest,
+         const blink::Manifest& manifest,
          const blink::mojom::ManifestDebugInfo* debug_info) {
         std::move(callback).Run(manifest_url, manifest);
       },
@@ -58,7 +59,7 @@ void ManifestManager::RequestManifestDebugInfo(
     RequestManifestDebugInfoCallback callback) {
   RequestManifestImpl(base::BindOnce(
       [](RequestManifestDebugInfoCallback callback, const GURL& manifest_url,
-         const Manifest& manifest,
+         const blink::Manifest& manifest,
          const blink::mojom::ManifestDebugInfo* debug_info) {
         std::move(callback).Run(manifest_url,
                                 debug_info ? debug_info->Clone() : nullptr);
@@ -69,7 +70,7 @@ void ManifestManager::RequestManifestDebugInfo(
 void ManifestManager::RequestManifestImpl(
     InternalRequestManifestCallback callback) {
   if (!may_have_manifest_) {
-    std::move(callback).Run(GURL(), Manifest(), nullptr);
+    std::move(callback).Run(GURL(), blink::Manifest(), nullptr);
     return;
   }
 
@@ -95,9 +96,8 @@ void ManifestManager::DidChangeManifest() {
   manifest_debug_info_ = nullptr;
 }
 
-void ManifestManager::DidCommitProvisionalLoad(
-    bool is_new_navigation,
-    bool is_same_document_navigation) {
+void ManifestManager::DidCommitProvisionalLoad(bool is_same_document_navigation,
+                                               ui::PageTransition transition) {
   if (is_same_document_navigation)
     return;
 
@@ -131,8 +131,8 @@ void ManifestManager::FetchManifest() {
 }
 
 static const std::string& GetMessagePrefix() {
-  CR_DEFINE_STATIC_LOCAL(std::string, message_prefix, ("Manifest: "));
-  return message_prefix;
+  static base::NoDestructor<std::string> message_prefix("Manifest: ");
+  return *message_prefix;
 }
 
 void ManifestManager::OnManifestFetchComplete(
@@ -190,7 +190,7 @@ void ManifestManager::ResolveCallbacks(ResolveState state) {
   // |manifest_url| will be reset on navigation or if we receive a didchange
   // event.
   if (state == ResolveStateFailure)
-    manifest_ = Manifest();
+    manifest_ = blink::Manifest();
 
   manifest_dirty_ = state != ResolveStateSuccess;
 

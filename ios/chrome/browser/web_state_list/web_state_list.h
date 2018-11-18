@@ -181,10 +181,16 @@ class WebStateList {
   std::unique_ptr<WebStateListOrderController> order_controller_;
 
   // List of observers notified of changes to the model.
-  base::ObserverList<WebStateListObserver, true> observers_;
+  base::ObserverList<WebStateListObserver, true>::Unchecked observers_;
 
   // Index of the currently active WebState, kInvalidIndex if no such WebState.
   int active_index_ = kInvalidIndex;
+
+  // Lock to prevent observers from mutating or deleting the list while it is
+  // mutating.
+  // TODO(crbug.com/834263): Remove this lock and the code that uses it once
+  // the source of the crash is identified.
+  bool locked_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(WebStateList);
 };

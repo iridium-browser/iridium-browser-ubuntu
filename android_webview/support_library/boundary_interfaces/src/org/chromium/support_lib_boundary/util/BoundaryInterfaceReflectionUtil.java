@@ -16,25 +16,39 @@ import java.lang.reflect.Proxy;
  */
 public class BoundaryInterfaceReflectionUtil {
     /**
+     * Check if an object is an instance of {@code className}, resolving {@code className} in
+     * the object's own ClassLoader. This is useful when {@code obj} may have been created in a
+     * ClassLoader other than the current one (in which case {@code obj instanceof Foo} would fail
+     * but {@code instanceOfInOwnClassLoader(obj, "Foo")} may succeed).
+     */
+    public static boolean instanceOfInOwnClassLoader(Object obj, String className) {
+        try {
+            ClassLoader loader = obj.getClass().getClassLoader();
+            // We intentionally set initialize = false because instanceof shouldn't trigger
+            // static initialization.
+            Class<?> clazz = Class.forName(className, false, loader);
+            return clazz.isInstance(obj);
+        } catch (ClassNotFoundException e) {
+            // If className is not in the ClassLoader, then this cannot be an instance.
+            return false;
+        }
+    }
+
+    /**
      * Utility method for fetching a method from {@param delegateLoader}, with the same signature
      * (package + class + method name + parameters) as a given method defined in another
      * classloader.
      */
     public static Method dupeMethod(Method method, ClassLoader delegateLoader)
             throws ClassNotFoundException, NoSuchMethodException {
+        // We're converting one type to another. This is analogous to instantiating the type on the
+        // other side of the Boundary, so it makes sense to perform static initialization if it
+        // hasn't already happened (initialize = true).
         Class<?> declaringClass =
                 Class.forName(method.getDeclaringClass().getName(), true, delegateLoader);
-        Class[] otherSideParameterClasses = method.getParameterTypes();
-        Class[] parameterClasses = new Class[otherSideParameterClasses.length];
-        for (int n = 0; n < parameterClasses.length; n++) {
-            Class<?> clazz = otherSideParameterClasses[n];
-            // Primitive classes are shared between the classloaders - so we can use the same
-            // primitive class declarations on either side. Non-primitive classes must be looked up
-            // by name.
-            parameterClasses[n] = clazz.isPrimitive()
-                    ? clazz
-                    : Class.forName(clazz.getName(), true, delegateLoader);
-        }
+        // We do not need to convert parameter types across ClassLoaders because we never pass
+        // BoundaryInterfaces in methods, but pass InvocationHandlers instead.
+        Class[] parameterClasses = method.getParameterTypes();
         return declaringClass.getDeclaredMethod(method.getName(), parameterClasses);
     }
 

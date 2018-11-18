@@ -6,6 +6,7 @@
 #include <utility>
 #include <vector>
 
+#include "ash/public/cpp/app_list/app_list_config.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "chrome/browser/extensions/chrome_app_icon.h"
@@ -161,20 +162,18 @@ bool AreAllImageRepresentationsDifferent(const gfx::ImageSkia& image1,
   for (size_t i = 0; i < image1_reps.size(); ++i) {
     const float scale = image1_reps[i].scale();
     const gfx::ImageSkiaRep& image_rep2 = image2.GetRepresentation(scale);
-    if (gfx::test::AreBitmapsClose(image1_reps[i].sk_bitmap(),
-                                   image_rep2.sk_bitmap(), 0)) {
+    if (gfx::test::AreBitmapsClose(image1_reps[i].GetBitmap(),
+                                   image_rep2.GetBitmap(), 0)) {
       return false;
     }
   }
   return true;
 }
 
-// Waits until icon content of the item is changed for all representations.
-template <typename T>
-void WaitForIconUpdates(const T& item) {
-  item.icon().EnsureRepsForSupportedScales();
-  std::unique_ptr<gfx::ImageSkia> reference_image = item.icon().DeepCopy();
-  while (!AreAllImageRepresentationsDifferent(*reference_image, item.icon()))
+void WaitForIconUpdates(const gfx::ImageSkia& icon) {
+  icon.EnsureRepsForSupportedScales();
+  std::unique_ptr<gfx::ImageSkia> reference_image = icon.DeepCopy();
+  while (!AreAllImageRepresentationsDifferent(*reference_image, icon))
     base::RunLoop().RunUntilIdle();
 }
 
@@ -295,7 +294,7 @@ class ChromeAppIconWithModelTest : public ChromeAppIconTest {
   DISALLOW_COPY_AND_ASSIGN(ChromeAppIconWithModelTest);
 };
 
-// Validates that icons are the same for different consumers.
+// Validates icons sizes for various consumers.
 TEST_F(ChromeAppIconWithModelTest, IconsTheSame) {
   CreateBuilder();
 
@@ -303,33 +302,56 @@ TEST_F(ChromeAppIconWithModelTest, IconsTheSame) {
   // updated and take image snapshot.
   ChromeAppListItem* app_list_item = FindAppListItem(kTestAppId);
   ASSERT_TRUE(app_list_item);
-  WaitForIconUpdates<ChromeAppListItem>(*app_list_item);
+  WaitForIconUpdates(app_list_item->icon());
   std::unique_ptr<gfx::ImageSkia> app_list_item_image =
       app_list_item->icon().DeepCopy();
 
-  // Load reference icon.
-  TestAppIcon reference_icon(profile(), kTestAppId,
-                             extension_misc::EXTENSION_ICON_MEDIUM);
+  // Load reference icon sized for the app list.
+  TestAppIcon reference_icon_app_list(
+      profile(), kTestAppId,
+      app_list::AppListConfig::instance().grid_icon_dimension());
 
   // Wait until reference data is loaded.
-  reference_icon.image_skia().EnsureRepsForSupportedScales();
-  reference_icon.WaitForIconUpdates();
-  EXPECT_FALSE(IsBlankImage(reference_icon.image_skia()));
+  reference_icon_app_list.image_skia().EnsureRepsForSupportedScales();
+  reference_icon_app_list.WaitForIconUpdates();
+  EXPECT_FALSE(IsBlankImage(reference_icon_app_list.image_skia()));
 
   // Now compare with app list icon snapshot.
-  EXPECT_TRUE(AreEqual(reference_icon.image_skia(), *app_list_item_image));
+  EXPECT_TRUE(
+      AreEqual(reference_icon_app_list.image_skia(), *app_list_item_image));
+
+  // Load reference icon sized for the search result.
+  TestAppIcon reference_icon_search(
+      profile(), kTestAppId,
+      app_list::AppListConfig::instance().suggestion_chip_icon_dimension());
+
+  // Wait until reference data is loaded.
+  reference_icon_search.image_skia().EnsureRepsForSupportedScales();
+  reference_icon_search.WaitForIconUpdates();
+  EXPECT_FALSE(IsBlankImage(reference_icon_search.image_skia()));
 
   app_list::ExtensionAppResult search(profile(), kTestAppId,
-                                      app_list_controller(), true);
-  WaitForIconUpdates<app_list::ExtensionAppResult>(search);
-  EXPECT_TRUE(AreEqual(reference_icon.image_skia(), search.icon()));
+                                      app_list_controller(),
+                                      /* is_recommendation */ true);
+  WaitForIconUpdates(search.chip_icon());
+  EXPECT_TRUE(AreEqual(reference_icon_search.image_skia(), search.chip_icon()));
+
+  // Load reference icon sized for the shelf.
+  TestAppIcon reference_icon_shelf(profile(), kTestAppId,
+                                   extension_misc::EXTENSION_ICON_MEDIUM);
+
+  // Wait until reference data is loaded.
+  reference_icon_shelf.image_skia().EnsureRepsForSupportedScales();
+  reference_icon_shelf.WaitForIconUpdates();
+  EXPECT_FALSE(IsBlankImage(reference_icon_shelf.image_skia()));
 
   TestAppIconLoader loader_delegate;
   ChromeAppIconLoader loader(profile(), extension_misc::EXTENSION_ICON_MEDIUM,
                              &loader_delegate);
   loader.FetchImage(kTestAppId);
-  WaitForIconUpdates<TestAppIconLoader>(loader_delegate);
-  EXPECT_TRUE(AreEqual(reference_icon.image_skia(), loader_delegate.icon()));
+  WaitForIconUpdates(loader_delegate.icon());
+  EXPECT_TRUE(
+      AreEqual(reference_icon_shelf.image_skia(), loader_delegate.icon()));
 
   ResetBuilder();
 }

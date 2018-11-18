@@ -10,8 +10,8 @@
 #include <string>
 
 #include "base/macros.h"
-#include "base/memory/linked_ptr.h"
 #include "components/sync/base/nigori.h"
+#include "components/sync/base/passphrase_enums.h"
 #include "components/sync/protocol/encryption.pb.h"
 
 namespace sync_pb {
@@ -25,9 +25,15 @@ class Encryptor;
 extern const char kNigoriTag[];
 
 // The parameters used to initialize a Nigori instance.
+// TODO(davidovic): Stop relying on KeyParams and inline it, because it's now
+// just a pair of KeyDerivationParams and passphrase.
 struct KeyParams {
-  std::string hostname;
-  std::string username;
+  KeyParams(KeyDerivationParams derivation_params, const std::string& password);
+  KeyParams(const KeyParams& other);
+  KeyParams(KeyParams&& other);
+  ~KeyParams();
+
+  KeyDerivationParams derivation_params;
   std::string password;
 };
 
@@ -185,7 +191,7 @@ class Cryptographer {
   bool ImportNigoriKey(const std::string& serialized_nigori_key);
 
  private:
-  using NigoriMap = std::map<std::string, linked_ptr<const Nigori>>;
+  using NigoriMap = std::map<std::string, std::unique_ptr<const Nigori>>;
 
   // Helper method to instantiate Nigori instances for each set of key
   // parameters in |bag|.

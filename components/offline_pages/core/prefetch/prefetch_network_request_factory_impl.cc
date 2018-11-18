@@ -9,6 +9,7 @@
 #include "components/offline_pages/core/offline_page_feature.h"
 #include "components/offline_pages/core/prefetch/generate_page_bundle_request.h"
 #include "components/offline_pages/core/prefetch/get_operation_request.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 
 namespace {
 // Max size of all articles archives to be generated from a single request. This
@@ -31,21 +32,19 @@ namespace offline_pages {
 
 void RecordGetOperationStatusUma(PrefetchRequestStatus status) {
   UMA_HISTOGRAM_ENUMERATION(
-      "OfflinePages.Prefetching.ServiceGetOperationStatus", status,
-      PrefetchRequestStatus::COUNT);
+      "OfflinePages.Prefetching.ServiceGetOperationStatus", status);
 }
 
 void RecordGeneratePageBundleStatusUma(PrefetchRequestStatus status) {
   UMA_HISTOGRAM_ENUMERATION(
-      "OfflinePages.Prefetching.ServiceGetPageBundleStatus", status,
-      PrefetchRequestStatus::COUNT);
+      "OfflinePages.Prefetching.ServiceGetPageBundleStatus", status);
 }
 
 PrefetchNetworkRequestFactoryImpl::PrefetchNetworkRequestFactoryImpl(
-    net::URLRequestContextGetter* request_context,
+    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
     version_info::Channel channel,
     const std::string& user_agent)
-    : request_context_(request_context),
+    : url_loader_factory_(std::move(url_loader_factory)),
       channel_(channel),
       user_agent_(user_agent),
       weak_factory_(this) {}
@@ -61,7 +60,7 @@ bool PrefetchNetworkRequestFactoryImpl::HasOutstandingRequests() const {
 void PrefetchNetworkRequestFactoryImpl::MakeGeneratePageBundleRequest(
     const std::vector<std::string>& url_strings,
     const std::string& gcm_registration_id,
-    const PrefetchRequestFinishedCallback& callback) {
+    PrefetchRequestFinishedCallback callback) {
   if (!AddConcurrentRequest())
     return;
   int max_bundle_size = IsLimitlessPrefetchingEnabled()
@@ -71,10 +70,10 @@ void PrefetchNetworkRequestFactoryImpl::MakeGeneratePageBundleRequest(
   generate_page_bundle_requests_[request_id] =
       std::make_unique<GeneratePageBundleRequest>(
           user_agent_, gcm_registration_id, max_bundle_size, url_strings,
-          channel_, request_context_.get(),
-          base::Bind(
+          channel_, url_loader_factory_,
+          base::BindOnce(
               &PrefetchNetworkRequestFactoryImpl::GeneratePageBundleRequestDone,
-              weak_factory_.GetWeakPtr(), callback, request_id));
+              weak_factory_.GetWeakPtr(), std::move(callback), request_id));
 }
 
 std::unique_ptr<std::set<std::string>>
@@ -89,35 +88,35 @@ PrefetchNetworkRequestFactoryImpl::GetAllUrlsRequested() const {
 
 void PrefetchNetworkRequestFactoryImpl::MakeGetOperationRequest(
     const std::string& operation_name,
-    const PrefetchRequestFinishedCallback& callback) {
+    PrefetchRequestFinishedCallback callback) {
   if (!AddConcurrentRequest())
     return;
   get_operation_requests_[operation_name] =
       std::make_unique<GetOperationRequest>(
-          operation_name, channel_, request_context_.get(),
-          base::Bind(
+          operation_name, channel_, url_loader_factory_,
+          base::BindOnce(
               &PrefetchNetworkRequestFactoryImpl::GetOperationRequestDone,
-              weak_factory_.GetWeakPtr(), callback));
+              weak_factory_.GetWeakPtr(), std::move(callback)));
 }
 
 void PrefetchNetworkRequestFactoryImpl::GeneratePageBundleRequestDone(
-    const PrefetchRequestFinishedCallback& callback,
+    PrefetchRequestFinishedCallback callback,
     uint64_t request_id,
     PrefetchRequestStatus status,
     const std::string& operation_name,
     const std::vector<RenderPageInfo>& pages) {
-  callback.Run(status, operation_name, pages);
+  std::move(callback).Run(status, operation_name, pages);
   generate_page_bundle_requests_.erase(request_id);
   ReleaseConcurrentRequest();
   RecordGeneratePageBundleStatusUma(status);
 }
 
 void PrefetchNetworkRequestFactoryImpl::GetOperationRequestDone(
-    const PrefetchRequestFinishedCallback& callback,
+    PrefetchRequestFinishedCallback callback,
     PrefetchRequestStatus status,
     const std::string& operation_name,
     const std::vector<RenderPageInfo>& pages) {
-  callback.Run(status, operation_name, pages);
+  std::move(callback).Run(status, operation_name, pages);
   get_operation_requests_.erase(operation_name);
   ReleaseConcurrentRequest();
   RecordGetOperationStatusUma(status);

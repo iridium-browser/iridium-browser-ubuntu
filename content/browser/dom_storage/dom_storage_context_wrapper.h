@@ -14,10 +14,14 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/synchronization/lock.h"
+#include "base/thread_annotations.h"
+#include "components/services/leveldb/public/interfaces/leveldb.mojom.h"
 #include "content/browser/dom_storage/dom_storage_context_impl.h"
 #include "content/common/content_export.h"
-#include "content/common/storage_partition_service.mojom.h"
 #include "content/public/browser/dom_storage_context.h"
+#include "mojo/public/cpp/bindings/message.h"
+#include "third_party/blink/public/mojom/dom_storage/session_storage_namespace.mojom.h"
+#include "third_party/blink/public/mojom/dom_storage/storage_area.mojom.h"
 #include "url/origin.h"
 
 namespace base {
@@ -54,8 +58,7 @@ class CONTENT_EXPORT DOMStorageContextWrapper
       storage::SpecialStoragePolicy* special_storage_policy);
 
   // DOMStorageContext implementation.
-  void GetLocalStorageUsage(
-      const GetLocalStorageUsageCallback& callback) override;
+  void GetLocalStorageUsage(GetLocalStorageUsageCallback callback) override;
   void GetSessionStorageUsage(GetSessionStorageUsageCallback callback) override;
   void DeleteLocalStorage(const GURL& origin,
                           base::OnceClosure callback) override;
@@ -78,10 +81,11 @@ class CONTENT_EXPORT DOMStorageContextWrapper
 
   // See mojom::StoragePartitionService interface.
   void OpenLocalStorage(const url::Origin& origin,
-                        mojom::LevelDBWrapperRequest request);
+                        blink::mojom::StorageAreaRequest request);
   void OpenSessionStorage(int process_id,
                           const std::string& namespace_id,
-                          mojom::SessionStorageNamespaceRequest request);
+                          mojo::ReportBadMessageCallback bad_message_callback,
+                          blink::mojom::SessionStorageNamespaceRequest request);
 
   void SetLocalStorageDatabaseForTesting(
       leveldb::mojom::LevelDBDatabaseAssociatedPtr database);
@@ -139,7 +143,8 @@ class CONTENT_EXPORT DOMStorageContextWrapper
   // Profile wasn't destructed. This map allows the restored session to re-use
   // the SessionStorageNamespaceImpl objects that are still alive thanks to the
   // sessions component.
-  std::map<std::string, SessionStorageNamespaceImpl*> alive_namespaces_;
+  std::map<std::string, SessionStorageNamespaceImpl*> alive_namespaces_
+      GUARDED_BY(alive_namespaces_lock_);
   mutable base::Lock alive_namespaces_lock_;
 
   base::FilePath legacy_localstorage_path_;

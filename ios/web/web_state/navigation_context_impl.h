@@ -25,6 +25,7 @@ class NavigationContextImpl : public NavigationContext {
   static std::unique_ptr<NavigationContextImpl> CreateNavigationContext(
       WebState* web_state,
       const GURL& url,
+      bool has_user_gesture,
       ui::PageTransition page_transition,
       bool is_renderer_initiated);
 
@@ -37,6 +38,7 @@ class NavigationContextImpl : public NavigationContext {
   WebState* GetWebState() override;
   int64_t GetNavigationId() const override;
   const GURL& GetUrl() const override;
+  bool HasUserGesture() const override;
   ui::PageTransition GetPageTransition() const override;
   bool IsSameDocument() const override;
   bool HasCommitted() const override;
@@ -66,15 +68,34 @@ class NavigationContextImpl : public NavigationContext {
   void SetWKNavigationType(WKNavigationType wk_navigation_type);
   WKNavigationType GetWKNavigationType() const;
 
+  // true if this navigation context is a -[WKWebView loadHTMLString:baseURL:]
+  // navigation used to load Error page into web view. IsLoadingErrorPage() and
+  // IsLoadingHtmlString() are mutually exclusive.
+  bool IsLoadingErrorPage() const;
+  void SetLoadingErrorPage(bool is_loading_error_page);
+
+  // true if this navigation context is a -[WKWebView loadHTMLString:baseURL:]
+  // navigation. IsLoadingErrorPage() and IsLoadingHtmlString() are mutually
+  // exclusive.
+  bool IsLoadingHtmlString() const;
+  void SetLoadingHtmlString(bool is_loading_html);
+
+  // true if this navigation context is a placeholder navigation associated with
+  // a native view URL and the native content is already presented.
+  bool IsNativeContentPresented() const;
+  void SetIsNativeContentPresented(bool is_native_content_presented);
+
  private:
   NavigationContextImpl(WebState* web_state,
                         const GURL& url,
+                        bool has_user_gesture,
                         ui::PageTransition page_transition,
                         bool is_renderer_initiated);
 
   WebState* web_state_ = nullptr;
   int64_t navigation_id_ = 0;
   GURL url_;
+  bool has_user_gesture_ = false;
   const ui::PageTransition page_transition_;
   bool is_same_document_ = false;
   bool has_committed_ = false;
@@ -85,6 +106,9 @@ class NavigationContextImpl : public NavigationContext {
   bool is_renderer_initiated_ = false;
   int navigation_item_unique_id_ = -1;
   WKNavigationType wk_navigation_type_ = WKNavigationTypeOther;
+  bool is_loading_error_page_ = false;
+  bool is_loading_html_string_ = false;
+  bool is_native_content_presented_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(NavigationContextImpl);
 };

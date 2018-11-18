@@ -135,12 +135,6 @@ void OfflineAudioDestinationHandler::StopRendering() {
   NOTREACHED();
 }
 
-size_t OfflineAudioDestinationHandler::CallbackBufferSize() const {
-  // The callback buffer size has no meaning for an offline context.
-  NOTREACHED();
-  return 0;
-}
-
 void OfflineAudioDestinationHandler::InitializeOfflineRenderThread(
     AudioBuffer* render_target) {
   DCHECK(IsMainThread());
@@ -271,6 +265,12 @@ void OfflineAudioDestinationHandler::NotifyComplete() {
 
   render_thread_.reset();
 
+  // If the execution context has been destroyed, there's no where to
+  // send the notification, so just return.
+  if (IsExecutionContextDestroyed()) {
+    return;
+  }
+
   // The OfflineAudioContext might be gone.
   if (Context() && Context()->GetExecutionContext())
     Context()->FireCompletionEvent();
@@ -313,10 +313,6 @@ bool OfflineAudioDestinationHandler::RenderIfNotSuspended(
     SuspendOfflineRendering();
     return true;
   }
-
-  // Prepare the local audio input provider for this render quantum.
-  if (source_bus)
-    local_audio_input_provider_.Set(source_bus);
 
   DCHECK_GE(NumberOfInputs(), 1u);
   if (NumberOfInputs() < 1) {
@@ -377,7 +373,7 @@ void OfflineAudioDestinationHandler::PrepareTaskRunnerForRendering() {
     if (!render_thread_) {
       // The context started from the non-AudioWorklet mode.
       render_thread_ = Platform::Current()->CreateThread(
-          WebThreadCreationParams(WebThreadType::kOfflineAudioRenderThread));
+          ThreadCreationParams(WebThreadType::kOfflineAudioRenderThread));
       render_thread_task_runner_ = render_thread_->GetTaskRunner();
     }
   }

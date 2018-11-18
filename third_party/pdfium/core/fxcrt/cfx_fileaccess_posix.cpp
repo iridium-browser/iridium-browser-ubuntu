@@ -6,6 +6,10 @@
 
 #include "core/fxcrt/cfx_fileaccess_posix.h"
 
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
 #include <memory>
 
 #include "third_party/base/ptr_util.h"
@@ -17,10 +21,6 @@
 #ifndef O_LARGEFILE
 #define O_LARGEFILE 0
 #endif  // O_LARGEFILE
-
-#if _FX_PLATFORM_ == _FX_PLATFORM_LINUX_ || \
-    _FX_PLATFORM_ == _FX_PLATFORM_APPLE_ || \
-    _FX_PLATFORM_ == _FX_PLATFORM_ANDROID_
 
 namespace {
 
@@ -149,5 +149,3 @@ bool CFX_FileAccess_Posix::Truncate(FX_FILESIZE szFile) {
 
   return !ftruncate(m_nFD, szFile);
 }
-
-#endif

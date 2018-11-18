@@ -33,14 +33,12 @@
 #include <utility>
 
 #include "third_party/blink/public/platform/web_blob_info.h"
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
 #include "third_party/blink/renderer/bindings/core/v8/to_v8_for_core.h"
 #include "third_party/blink/renderer/bindings/modules/v8/idb_object_store_or_idb_index_or_idb_cursor.h"
 #include "third_party/blink/renderer/bindings/modules/v8/to_v8_for_modules.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_binding_for_modules.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/dom/events/event_queue.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/modules/indexed_db_names.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_cursor_with_value.h"
@@ -51,9 +49,11 @@
 #include "third_party/blink/renderer/modules/indexeddb/idb_value.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_value_wrapping.h"
 #include "third_party/blink/renderer/modules/indexeddb/web_idb_callbacks_impl.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/histogram.h"
 #include "third_party/blink/renderer/platform/shared_buffer.h"
+#include "third_party/blink/renderer/platform/wtf/functional.h"
 
 using blink::WebIDBCursor;
 
@@ -138,7 +138,9 @@ IDBRequest::IDBRequest(ScriptState* script_state,
       transaction_(transaction),
       isolate_(script_state->GetIsolate()),
       metrics_(std::move(metrics)),
-      source_(source) {}
+      source_(source),
+      event_queue_(EventQueue::Create(ExecutionContext::From(script_state),
+                                      TaskType::kInternalIndexedDB)) {}
 
 IDBRequest::~IDBRequest() {
   DCHECK((ready_state_ == DONE && metrics_.IsEmpty()) ||
@@ -150,7 +152,7 @@ void IDBRequest::Trace(blink::Visitor* visitor) {
   visitor->Trace(source_);
   visitor->Trace(result_);
   visitor->Trace(error_);
-  visitor->Trace(enqueued_events_);
+  visitor->Trace(event_queue_);
   visitor->Trace(pending_cursor_);
   EventTargetWithInlineData::Trace(visitor);
   PausableObject::Trace(visitor);
@@ -162,11 +164,12 @@ ScriptValue IDBRequest::result(ScriptState* script_state,
     // Must throw if returning an empty value. Message is arbitrary since it
     // will never be seen.
     exception_state.ThrowDOMException(
-        kInvalidStateError, IDBDatabase::kRequestNotFinishedErrorMessage);
+        DOMExceptionCode::kInvalidStateError,
+        IDBDatabase::kRequestNotFinishedErrorMessage);
     return ScriptValue();
   }
   if (!GetExecutionContext()) {
-    exception_state.ThrowDOMException(kInvalidStateError,
+    exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
                                       IDBDatabase::kDatabaseClosedErrorMessage);
     return ScriptValue();
   }
@@ -178,7 +181,8 @@ ScriptValue IDBRequest::result(ScriptState* script_state,
 DOMException* IDBRequest::error(ExceptionState& exception_state) const {
   if (ready_state_ != DONE) {
     exception_state.ThrowDOMException(
-        kInvalidStateError, IDBDatabase::kRequestNotFinishedErrorMessage);
+        DOMExceptionCode::kInvalidStateError,
+        IDBDatabase::kRequestNotFinishedErrorMessage);
     return nullptr;
   }
   return error_;
@@ -225,17 +229,12 @@ void IDBRequest::Abort() {
   if (ready_state_ == DONE)
     return;
 
-  EventQueue* event_queue = GetExecutionContext()->GetEventQueue();
-  for (size_t i = 0; i < enqueued_events_.size(); ++i) {
-    bool removed = event_queue->CancelEvent(enqueued_events_[i].Get());
-    DCHECK(removed);
-  }
-  enqueued_events_.clear();
+  event_queue_->CancelAllEvents();
 
   error_.Clear();
   result_.Clear();
   EnqueueResponse(DOMException::Create(
-      kAbortError,
+      DOMExceptionCode::kAbortError,
       "The transaction was aborted, so the request cannot be fulfilled."));
   request_aborted_ = true;
 }
@@ -298,7 +297,7 @@ bool IDBRequest::ShouldEnqueueEvent() const {
   // NotifyContextDestroyed() call yet, it will hang onto an ExecutionContext
   // whose event queue has been nulled out. The event queue null check covers
   // these specific circumstances.
-  if (!execution_context || !execution_context->GetEventQueue())
+  if (!execution_context)
     return false;
 
   DCHECK(ready_state_ == PENDING || ready_state_ == DONE);
@@ -431,8 +430,8 @@ void IDBRequest::EnqueueResponse(const Vector<String>& string_list) {
   }
 
   DOMStringList* dom_string_list = DOMStringList::Create();
-  for (size_t i = 0; i < string_list.size(); ++i)
-    dom_string_list->Append(string_list[i]);
+  for (const auto& item : string_list)
+    dom_string_list->Append(item);
   EnqueueResultInternal(IDBAny::Create(dom_string_list));
   metrics_.RecordAndReset();
 }
@@ -613,7 +612,6 @@ void IDBRequest::ContextDestroyed(ExecutionContext*) {
       transaction_->UnregisterRequest(this);
   }
 
-  enqueued_events_.clear();
   if (source_.IsIDBCursor())
     source_.GetAsIDBCursor()->ContextWillBeDestroyed();
   if (result_)
@@ -634,18 +632,16 @@ ExecutionContext* IDBRequest::GetExecutionContext() const {
   return PausableObject::GetExecutionContext();
 }
 
-DispatchEventResult IDBRequest::DispatchEventInternal(Event* event) {
+DispatchEventResult IDBRequest::DispatchEventInternal(Event& event) {
   IDB_TRACE("IDBRequest::dispatchEvent");
   if (!GetExecutionContext())
     return DispatchEventResult::kCanceledBeforeDispatch;
   DCHECK_EQ(ready_state_, PENDING);
   DCHECK(has_pending_activity_);
-  DCHECK(enqueued_events_.size());
-  DCHECK_EQ(event->target(), this);
+  DCHECK_EQ(event.target(), this);
 
-  if (event->type() != EventTypeNames::blocked)
+  if (event.type() != EventTypeNames::blocked)
     ready_state_ = DONE;
-  DequeueEvent(event);
 
   HeapVector<Member<EventTarget>> targets;
   targets.push_back(this);
@@ -661,7 +657,7 @@ DispatchEventResult IDBRequest::DispatchEventInternal(Event* event) {
   // Cursor properties should not be updated until the success event is being
   // dispatched.
   IDBCursor* cursor_to_notify = nullptr;
-  if (event->type() == EventTypeNames::success) {
+  if (event.type() == EventTypeNames::success) {
     cursor_to_notify = GetResultCursor();
     if (cursor_to_notify) {
       cursor_to_notify->SetValueReady(std::move(cursor_key_),
@@ -670,23 +666,23 @@ DispatchEventResult IDBRequest::DispatchEventInternal(Event* event) {
     }
   }
 
-  if (event->type() == EventTypeNames::upgradeneeded) {
+  if (event.type() == EventTypeNames::upgradeneeded) {
     DCHECK(!did_fire_upgrade_needed_event_);
     did_fire_upgrade_needed_event_ = true;
   }
 
   // FIXME: When we allow custom event dispatching, this will probably need to
   // change.
-  DCHECK(event->type() == EventTypeNames::success ||
-         event->type() == EventTypeNames::error ||
-         event->type() == EventTypeNames::blocked ||
-         event->type() == EventTypeNames::upgradeneeded)
-      << "event type was " << event->type();
+  DCHECK(event.type() == EventTypeNames::success ||
+         event.type() == EventTypeNames::error ||
+         event.type() == EventTypeNames::blocked ||
+         event.type() == EventTypeNames::upgradeneeded)
+      << "event type was " << event.type();
   const bool set_transaction_active =
       transaction_ &&
-      (event->type() == EventTypeNames::success ||
-       event->type() == EventTypeNames::upgradeneeded ||
-       (event->type() == EventTypeNames::error && !request_aborted_));
+      (event.type() == EventTypeNames::success ||
+       event.type() == EventTypeNames::upgradeneeded ||
+       (event.type() == EventTypeNames::error && !request_aborted_));
 
   if (set_transaction_active)
     transaction_->SetActive(true);
@@ -698,7 +694,7 @@ DispatchEventResult IDBRequest::DispatchEventInternal(Event* event) {
   if (transaction_ && ready_state_ == DONE)
     transaction_->UnregisterRequest(this);
 
-  did_throw_in_event_handler_ = false;
+  event.SetTarget(this);
   DispatchEventResult dispatch_result =
       IDBEventDispatcher::Dispatch(event, targets);
 
@@ -707,11 +703,14 @@ DispatchEventResult IDBRequest::DispatchEventInternal(Event* event) {
     // this request doesn't receive a second error) and before deactivating
     // (which might trigger commit).
     if (!request_aborted_) {
-      if (did_throw_in_event_handler_) {
-        transaction_->SetError(DOMException::Create(
-            kAbortError, "Uncaught exception in event handler."));
+      // Transactions should be aborted after event dispatch if an exception was
+      // not caught.
+      if (event.LegacyDidListenersThrow()) {
+        transaction_->SetError(
+            DOMException::Create(DOMExceptionCode::kAbortError,
+                                 "Uncaught exception in event handler."));
         transaction_->abort(IGNORE_EXCEPTION_FOR_TESTING);
-      } else if (event->type() == EventTypeNames::error &&
+      } else if (event.type() == EventTypeNames::error &&
                  dispatch_result == DispatchEventResult::kNotCanceled) {
         transaction_->SetError(error_);
         transaction_->abort(IGNORE_EXCEPTION_FOR_TESTING);
@@ -729,14 +728,10 @@ DispatchEventResult IDBRequest::DispatchEventInternal(Event* event) {
 
   // An upgradeneeded event will always be followed by a success or error event,
   // so must be kept alive.
-  if (ready_state_ == DONE && event->type() != EventTypeNames::upgradeneeded)
+  if (ready_state_ == DONE && event.type() != EventTypeNames::upgradeneeded)
     has_pending_activity_ = false;
 
   return dispatch_result;
-}
-
-void IDBRequest::UncaughtExceptionInEventHandler() {
-  did_throw_in_event_handler_ = true;
 }
 
 void IDBRequest::TransactionDidFinishAndDispatch() {
@@ -763,21 +758,9 @@ void IDBRequest::EnqueueEvent(Event* event) {
       << "When queueing event " << event->type() << ", ready_state_ was "
       << ready_state_;
 
-  EventQueue* event_queue = GetExecutionContext()->GetEventQueue();
   event->SetTarget(this);
 
-  // Keep track of enqueued events in case we need to abort prior to dispatch,
-  // in which case these must be cancelled. If the events not dispatched for
-  // other reasons they must be removed from this list via DequeueEvent().
-  if (event_queue->EnqueueEvent(FROM_HERE, event))
-    enqueued_events_.push_back(event);
-}
-
-void IDBRequest::DequeueEvent(Event* event) {
-  for (size_t i = 0; i < enqueued_events_.size(); ++i) {
-    if (enqueued_events_[i].Get() == event)
-      enqueued_events_.EraseAt(i);
-  }
+  event_queue_->EnqueueEvent(FROM_HERE, *event);
 }
 
 }  // namespace blink

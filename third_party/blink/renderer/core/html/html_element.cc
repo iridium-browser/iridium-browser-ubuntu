@@ -25,7 +25,7 @@
 
 #include "third_party/blink/renderer/core/html/html_element.h"
 
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
+#include "base/stl_util.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_event_listener.h"
 #include "third_party/blink/renderer/core/css/css_color_value.h"
 #include "third_party/blink/renderer/core/css/css_markup.h"
@@ -36,7 +36,6 @@
 #include "third_party/blink/renderer/core/dom/document_fragment.h"
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
 #include "third_party/blink/renderer/core/dom/events/event_listener.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
 #include "third_party/blink/renderer/core/dom/flat_tree_traversal.h"
 #include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/dom/node_traversal.h"
@@ -47,6 +46,7 @@
 #include "third_party/blink/renderer/core/editing/spellcheck/spell_checker.h"
 #include "third_party/blink/renderer/core/events/keyboard_event.h"
 #include "third_party/blink/renderer/core/frame/csp/content_security_policy.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/frame/use_counter.h"
 #include "third_party/blink/renderer/core/html/forms/html_form_element.h"
@@ -65,6 +65,7 @@
 #include "third_party/blink/renderer/core/page/spatial_navigation.h"
 #include "third_party/blink/renderer/core/svg/svg_svg_element.h"
 #include "third_party/blink/renderer/core/xml_names.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/language.h"
 #include "third_party/blink/renderer/platform/text/bidi_resolver.h"
 #include "third_party/blink/renderer/platform/text/bidi_text_run.h"
@@ -207,7 +208,7 @@ void HTMLElement::MapLanguageAttributeToLocale(
     else if (IsHTMLBodyElement(*this))
       UseCounter::Count(GetDocument(), WebFeature::kLangAttributeOnBody);
     String html_language = value.GetString();
-    size_t first_separator = html_language.find('-');
+    wtf_size_t first_separator = html_language.find('-');
     if (first_separator != kNotFound)
       html_language = html_language.Left(first_separator);
     String ui_language = DefaultLanguage();
@@ -257,7 +258,7 @@ void HTMLElement::CollectStyleForPresentationAttribute(
     if (value.IsEmpty() || DeprecatedEqualIgnoringCase(value, "true")) {
       AddPropertyToPresentationAttributeStyle(
           style, CSSPropertyWebkitUserModify, CSSValueReadWrite);
-      AddPropertyToPresentationAttributeStyle(style, CSSPropertyWordWrap,
+      AddPropertyToPresentationAttributeStyle(style, CSSPropertyOverflowWrap,
                                               CSSValueBreakWord);
       AddPropertyToPresentationAttributeStyle(style, CSSPropertyWebkitLineBreak,
                                               CSSValueAfterWhiteSpace);
@@ -269,7 +270,7 @@ void HTMLElement::CollectStyleForPresentationAttribute(
     } else if (DeprecatedEqualIgnoringCase(value, "plaintext-only")) {
       AddPropertyToPresentationAttributeStyle(
           style, CSSPropertyWebkitUserModify, CSSValueReadWritePlaintextOnly);
-      AddPropertyToPresentationAttributeStyle(style, CSSPropertyWordWrap,
+      AddPropertyToPresentationAttributeStyle(style, CSSPropertyOverflowWrap,
                                               CSSValueBreakWord);
       AddPropertyToPresentationAttributeStyle(style, CSSPropertyWebkitLineBreak,
                                               CSSValueAfterWhiteSpace);
@@ -335,6 +336,8 @@ AttributeTriggers* HTMLElement::TriggersForAttributeName(
        &HTMLElement::OnXMLLangAttrChanged},
 
       {onabortAttr, kNoWebFeature, EventTypeNames::abort, nullptr},
+      {onactivateinvisibleAttr, kNoWebFeature,
+       EventTypeNames::activateinvisible, nullptr},
       {onanimationendAttr, kNoWebFeature, EventTypeNames::animationend,
        nullptr},
       {onanimationiterationAttr, kNoWebFeature,
@@ -410,6 +413,8 @@ AttributeTriggers* HTMLElement::TriggersForAttributeName(
       {onpointermoveAttr, kNoWebFeature, EventTypeNames::pointermove, nullptr},
       {onpointeroutAttr, kNoWebFeature, EventTypeNames::pointerout, nullptr},
       {onpointeroverAttr, kNoWebFeature, EventTypeNames::pointerover, nullptr},
+      {onpointerrawmoveAttr, kNoWebFeature, EventTypeNames::pointerrawmove,
+       nullptr},
       {onpointerupAttr, kNoWebFeature, EventTypeNames::pointerup, nullptr},
       {onprogressAttr, kNoWebFeature, EventTypeNames::progress, nullptr},
       {onratechangeAttr, kNoWebFeature, EventTypeNames::ratechange, nullptr},
@@ -532,11 +537,11 @@ AttributeTriggers* HTMLElement::TriggersForAttributeName(
        nullptr},
   };
 
-  using AttributeToTriggerIndexMap = HashMap<QualifiedName, int>;
+  using AttributeToTriggerIndexMap = HashMap<QualifiedName, uint32_t>;
   DEFINE_STATIC_LOCAL(AttributeToTriggerIndexMap,
                       attribute_to_trigger_index_map, ());
   if (!attribute_to_trigger_index_map.size()) {
-    for (size_t i = 0; i < arraysize(attribute_triggers); ++i)
+    for (uint32_t i = 0; i < base::size(attribute_triggers); ++i)
       attribute_to_trigger_index_map.insert(attribute_triggers[i].attribute, i);
   }
 
@@ -593,8 +598,7 @@ void HTMLElement::ParseAttribute(const AttributeModificationParams& params) {
   if (triggers->event != g_null_atom) {
     SetAttributeEventListener(
         triggers->event,
-        CreateAttributeEventListener(this, params.name, params.new_value,
-                                     EventParameterName()));
+        CreateAttributeEventListener(this, params.name, params.new_value));
   }
 
   if (triggers->web_feature != kNoWebFeature) {
@@ -686,8 +690,9 @@ void HTMLElement::setOuterText(const String& text,
                                ExceptionState& exception_state) {
   ContainerNode* parent = parentNode();
   if (!parent) {
-    exception_state.ThrowDOMException(kNoModificationAllowedError,
-                                      "The element has no parent.");
+    exception_state.ThrowDOMException(
+        DOMExceptionCode::kNoModificationAllowedError,
+        "The element has no parent.");
     return;
   }
 
@@ -703,7 +708,7 @@ void HTMLElement::setOuterText(const String& text,
 
   // textToFragment might cause mutation events.
   if (!parentNode())
-    exception_state.ThrowDOMException(kHierarchyRequestError,
+    exception_state.ThrowDOMException(DOMExceptionCode::kHierarchyRequestError,
                                       "The element has no parent.");
 
   if (exception_state.HadException())
@@ -788,7 +793,7 @@ void HTMLElement::setContentEditable(const String& enabled,
   else if (DeprecatedEqualIgnoringCase(enabled, "inherit"))
     removeAttribute(contenteditableAttr);
   else
-    exception_state.ThrowDOMException(kSyntaxError,
+    exception_state.ThrowDOMException(DOMExceptionCode::kSyntaxError,
                                       "The value provided ('" + enabled +
                                           "') is not one of 'true', 'false', "
                                           "'plaintext-only', or 'inherit'.");
@@ -1045,7 +1050,7 @@ void HTMLElement::AdjustDirectionalityIfNeededAfterChildrenChanged(
   if (!SelfOrAncestorHasDirAutoAttribute())
     return;
 
-  UpdateDistribution();
+  UpdateDistributionForFlatTreeTraversal();
 
   for (Element* element_to_adjust = this; element_to_adjust;
        element_to_adjust =
@@ -1058,7 +1063,7 @@ void HTMLElement::AdjustDirectionalityIfNeededAfterChildrenChanged(
 }
 
 Node::InsertionNotificationRequest HTMLElement::InsertedInto(
-    ContainerNode* insertion_point) {
+    ContainerNode& insertion_point) {
   // Process the superclass first to ensure that `InActiveDocument()` is
   // updated.
   Element::InsertedInto(insertion_point);
@@ -1100,7 +1105,7 @@ static RGBA32 ParseColorStringWithCrazyLegacyRules(const String& color_string) {
   // max.
   Vector<char, kMaxColorLength + 2> digit_buffer;
 
-  size_t i = 0;
+  wtf_size_t i = 0;
   // Skip a leading #.
   if (color_string[0] == '#')
     i = 1;
@@ -1131,11 +1136,13 @@ static RGBA32 ParseColorStringWithCrazyLegacyRules(const String& color_string) {
   // Split the digits into three components, then search the last 8 digits of
   // each component.
   DCHECK_GE(digit_buffer.size(), 6u);
-  size_t component_length = digit_buffer.size() / 3;
-  size_t component_search_window_length = std::min<size_t>(component_length, 8);
-  size_t red_index = component_length - component_search_window_length;
-  size_t green_index = component_length * 2 - component_search_window_length;
-  size_t blue_index = component_length * 3 - component_search_window_length;
+  wtf_size_t component_length = digit_buffer.size() / 3;
+  wtf_size_t component_search_window_length =
+      std::min<wtf_size_t>(component_length, 8);
+  wtf_size_t red_index = component_length - component_search_window_length;
+  wtf_size_t green_index =
+      component_length * 2 - component_search_window_length;
+  wtf_size_t blue_index = component_length * 3 - component_search_window_length;
   // Skip digits until one of them is non-zero, or we've only got two digits
   // left in the component.
   while (digit_buffer[red_index] == '0' && digit_buffer[green_index] == '0' &&
@@ -1207,10 +1214,10 @@ bool HTMLElement::IsInteractiveContent() const {
   return false;
 }
 
-void HTMLElement::DefaultEventHandler(Event* event) {
-  if (event->type() == EventTypeNames::keypress && event->IsKeyboardEvent()) {
+void HTMLElement::DefaultEventHandler(Event& event) {
+  if (event.type() == EventTypeNames::keypress && event.IsKeyboardEvent()) {
     HandleKeypressEvent(ToKeyboardEvent(event));
-    if (event->DefaultHandled())
+    if (event.DefaultHandled())
       return;
   }
 
@@ -1236,7 +1243,7 @@ bool HTMLElement::MatchesReadWritePseudoClass() const {
   return parentElement() && HasEditableStyle(*parentElement());
 }
 
-void HTMLElement::HandleKeypressEvent(KeyboardEvent* event) {
+void HTMLElement::HandleKeypressEvent(KeyboardEvent& event) {
   if (!IsSpatialNavigationEnabled(GetDocument().GetFrame()) || !SupportsFocus())
     return;
   GetDocument().UpdateStyleAndLayoutTree();
@@ -1246,16 +1253,11 @@ void HTMLElement::HandleKeypressEvent(KeyboardEvent* event) {
   // action.
   if (IsTextControl() || HasEditableStyle(*this))
     return;
-  int char_code = event->charCode();
+  int char_code = event.charCode();
   if (char_code == '\r' || char_code == ' ') {
-    DispatchSimulatedClick(event);
-    event->SetDefaultHandled();
+    DispatchSimulatedClick(&event);
+    event.SetDefaultHandled();
   }
-}
-
-const AtomicString& HTMLElement::EventParameterName() {
-  DEFINE_STATIC_LOCAL(const AtomicString, event_string, ("event"));
-  return event_string;
 }
 
 int HTMLElement::offsetLeftForBinding() {
@@ -1320,7 +1322,7 @@ void HTMLElement::OnDirAttrChanged(const AttributeModificationParams& params) {
   // changes to dir attribute may affect the ancestor.
   if (!CanParticipateInFlatTree())
     return;
-  UpdateDistribution();
+  UpdateDistributionForFlatTreeTraversal();
   Element* parent = FlatTreeTraversal::ParentElement(*this);
   if (parent && parent->IsHTMLElement() &&
       ToHTMLElement(parent)->SelfOrAncestorHasDirAutoAttribute()) {
@@ -1334,7 +1336,7 @@ void HTMLElement::OnDirAttrChanged(const AttributeModificationParams& params) {
 
 void HTMLElement::OnInertAttrChanged(
     const AttributeModificationParams& params) {
-  UpdateDistribution();
+  UpdateDistributionForUnknownReasons();
   if (GetDocument().GetFrame()) {
     GetDocument().GetFrame()->SetIsInert(GetDocument().LocalOwner() &&
                                          GetDocument().LocalOwner()->IsInert());

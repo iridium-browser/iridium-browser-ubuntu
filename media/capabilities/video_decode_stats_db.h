@@ -6,8 +6,10 @@
 #define MEDIA_CAPABILITIES_VIDEO_DECODE_STATS_DB_H_
 
 #include <memory>
+#include <string>
 
-#include "base/callback.h"
+#include "base/callback_forward.h"
+#include "base/logging.h"
 #include "base/macros.h"
 #include "media/base/media_export.h"
 #include "media/base/video_codecs.h"
@@ -26,11 +28,19 @@ class MEDIA_EXPORT VideoDecodeStatsDB {
                                         const gfx::Size& size,
                                         int frame_rate);
 
+    // Returns a concise string representation of the key for storing in DB.
+    std::string Serialize() const;
+
+    // For debug logging. NOT interchangeable with Serialize().
+    std::string ToLogString() const;
+
+    // Note: operator == and != are defined outside this class.
     const VideoCodecProfile codec_profile;
     const gfx::Size size;
     const int frame_rate;
 
    private:
+    // All key's should be "bucketed" using MakeBucketedKey(...).
     VideoDescKey(VideoCodecProfile codec_profile,
                  const gfx::Size& size,
                  int frame_rate);
@@ -41,19 +51,29 @@ class MEDIA_EXPORT VideoDecodeStatsDB {
   struct MEDIA_EXPORT DecodeStatsEntry {
     DecodeStatsEntry(uint64_t frames_decoded,
                      uint64_t frames_dropped,
-                     uint64_t frames_decoded_power_efficient);
+                     uint64_t frames_power_efficient);
+    DecodeStatsEntry(const DecodeStatsEntry& entry);
+
+    // Add stats from |right| to |this| entry.
+    DecodeStatsEntry& operator+=(const DecodeStatsEntry& right);
+
+    // For debug logging.
+    std::string ToLogString() const;
+
+    // Note: operator == and != are defined outside this class.
     uint64_t frames_decoded;
     uint64_t frames_dropped;
-    uint64_t frames_decoded_power_efficient;
+    uint64_t frames_power_efficient;
   };
 
-  virtual ~VideoDecodeStatsDB() = default;
+  virtual ~VideoDecodeStatsDB();
 
   // Run asynchronous initialization of database. Initialization must complete
   // before calling other APIs. Initialization must be RE-RUN after calling
   // DestroyStats() and receiving its completion callback. |init_cb| must not be
   // a null callback.
-  virtual void Initialize(base::OnceCallback<void(bool)> init_cb) = 0;
+  using InitializeCB = base::OnceCallback<void(bool)>;
+  virtual void Initialize(InitializeCB init_cb) = 0;
 
   // Appends `stats` to existing entry associated with `key`. Will create a new
   // entry if none exists. The operation is asynchronous. The caller should be
@@ -73,18 +93,34 @@ class MEDIA_EXPORT VideoDecodeStatsDB {
   virtual void GetDecodeStats(const VideoDescKey& key,
                               GetDecodeStatsCB get_stats_cb) = 0;
 
-  // Clear all statistics by DESTROYING the underlying the database.
-  // DO NOT use the database until |callback| is run. When finished, users must
-  // RE-RUN Initialize() before performing further I/O.
-  virtual void DestroyStats(base::OnceClosure destroy_done_cb) = 0;
+  // Clear all statistics from the DB.
+  virtual void ClearStats(base::OnceClosure clear_done_cb) = 0;
+
+  // Tracking down root cause of crash probable UAF (https://crbug/865321).
+  // We will CHECK if a |dependent_db_| is found to be set during destruction.
+  // Dependent DB should always be destroyed and unhooked before |this|.
+  void set_dependent_db(VideoDecodeStatsDB* dependent) {
+    // One of these should be non-null.
+    CHECK(!dependent_db_ || !dependent);
+    // They shouldn't already match.
+    CHECK(dependent_db_ != dependent);
+
+    dependent_db_ = dependent;
+  }
+
+ private:
+  // See set_dependent_db().
+  VideoDecodeStatsDB* dependent_db_ = nullptr;
 };
 
-// Factory interface to create a DB instance.
-class MEDIA_EXPORT VideoDecodeStatsDBFactory {
- public:
-  virtual ~VideoDecodeStatsDBFactory() {}
-  virtual std::unique_ptr<VideoDecodeStatsDB> CreateDB() = 0;
-};
+MEDIA_EXPORT bool operator==(const VideoDecodeStatsDB::VideoDescKey& x,
+                             const VideoDecodeStatsDB::VideoDescKey& y);
+MEDIA_EXPORT bool operator!=(const VideoDecodeStatsDB::VideoDescKey& x,
+                             const VideoDecodeStatsDB::VideoDescKey& y);
+MEDIA_EXPORT bool operator==(const VideoDecodeStatsDB::DecodeStatsEntry& x,
+                             const VideoDecodeStatsDB::DecodeStatsEntry& y);
+MEDIA_EXPORT bool operator!=(const VideoDecodeStatsDB::DecodeStatsEntry& x,
+                             const VideoDecodeStatsDB::DecodeStatsEntry& y);
 
 }  // namespace media
 

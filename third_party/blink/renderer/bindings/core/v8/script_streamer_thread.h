@@ -8,8 +8,8 @@
 #include <memory>
 
 #include "base/macros.h"
-#include "third_party/blink/public/platform/web_thread.h"
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/platform/scheduler/public/thread.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/blink/renderer/platform/wtf/threading_primitives.h"
 #include "v8/include/v8.h"
@@ -44,11 +44,11 @@ class CORE_EXPORT ScriptStreamerThread {
 
   bool IsRunning() const { return !!thread_; }
 
-  WebThread& PlatformThread();
+  Thread& PlatformThread();
 
   // At the moment, we only use one thread, so we can only stream one script
   // at a time. FIXME: Use a thread pool and stream multiple scripts.
-  std::unique_ptr<WebThread> thread_;
+  std::unique_ptr<Thread> thread_;
   bool running_task_;
   mutable Mutex mutex_;  // Guards m_runningTask.
 

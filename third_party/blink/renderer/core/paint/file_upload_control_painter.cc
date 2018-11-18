@@ -4,47 +4,28 @@
 
 #include "third_party/blink/renderer/core/paint/file_upload_control_painter.h"
 
+#include "base/optional.h"
 #include "third_party/blink/renderer/core/layout/layout_button.h"
 #include "third_party/blink/renderer/core/layout/layout_file_upload_control.h"
 #include "third_party/blink/renderer/core/layout/text_run_constructor.h"
 #include "third_party/blink/renderer/core/paint/paint_info.h"
-#include "third_party/blink/renderer/platform/graphics/paint/clip_recorder.h"
+#include "third_party/blink/renderer/platform/fonts/text_run_paint_info.h"
 #include "third_party/blink/renderer/platform/graphics/paint/drawing_recorder.h"
-#include "third_party/blink/renderer/platform/wtf/optional.h"
 
 namespace blink {
 
-const int kButtonShadowHeight = 2;
-
 void FileUploadControlPainter::PaintObject(const PaintInfo& paint_info,
                                            const LayoutPoint& paint_offset) {
-  if (layout_file_upload_control_.Style()->Visibility() !=
+  if (layout_file_upload_control_.StyleRef().Visibility() !=
       EVisibility::kVisible)
     return;
-
-  // Push a clip.
-  Optional<ClipRecorder> clip_recorder;
-  if (paint_info.phase == PaintPhase::kForeground ||
-      paint_info.phase == PaintPhase::kDescendantBlockBackgroundsOnly) {
-    IntRect clip_rect = EnclosingIntRect(LayoutRect(
-        LayoutPoint(paint_offset.X() + layout_file_upload_control_.BorderLeft(),
-                    paint_offset.Y() + layout_file_upload_control_.BorderTop()),
-        layout_file_upload_control_.Size() +
-            LayoutSize(LayoutUnit(),
-                       -layout_file_upload_control_.BorderWidth() +
-                           kButtonShadowHeight)));
-    if (clip_rect.IsEmpty())
-      return;
-    clip_recorder.emplace(paint_info.context, layout_file_upload_control_,
-                          DisplayItem::kClipFileUploadControlRect, clip_rect);
-  }
 
   if (paint_info.phase == PaintPhase::kForeground &&
       !DrawingRecorder::UseCachedDrawingIfPossible(
           paint_info.context, layout_file_upload_control_, paint_info.phase)) {
     const String& displayed_filename =
         layout_file_upload_control_.FileTextValue();
-    const Font& font = layout_file_upload_control_.Style()->GetFont();
+    const Font& font = layout_file_upload_control_.StyleRef().GetFont();
     TextRun text_run = ConstructTextRun(
         font, displayed_filename, layout_file_upload_control_.StyleRef(),
         kRespectDirection | kRespectDirectionOverride);
@@ -65,7 +46,7 @@ void FileUploadControlPainter::PaintObject(const PaintInfo& paint_info,
         button_width + LayoutFileUploadControl::kAfterButtonSpacing);
     float text_width = font.Width(text_run);
     LayoutUnit text_x;
-    if (layout_file_upload_control_.Style()->IsLeftToRightDirection())
+    if (layout_file_upload_control_.StyleRef().IsLeftToRightDirection())
       text_x = content_left + button_and_spacing_width;
     else
       text_x =
@@ -89,7 +70,7 @@ void FileUploadControlPainter::PaintObject(const PaintInfo& paint_info,
     TextRunPaintInfo text_run_paint_info(text_run);
 
     const SimpleFontData* font_data =
-        layout_file_upload_control_.Style()->GetFont().PrimaryFont();
+        layout_file_upload_control_.StyleRef().GetFont().PrimaryFont();
     if (!font_data)
       return;
     // FIXME: Shouldn't these offsets be rounded? crbug.com/350474

@@ -7,6 +7,7 @@
 
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/compiler_specific.h"
@@ -28,7 +29,6 @@
 #include "extensions/common/extension.h"
 #include "extensions/common/manifest.h"
 
-class ExtensionService;
 class ExtensionServiceTest;
 class SkBitmap;
 struct WebApplicationInfo;
@@ -43,6 +43,7 @@ class Connector;
 
 namespace extensions {
 class CrxInstallError;
+class ExtensionService;
 class ExtensionUpdaterTest;
 class PreloadCheckGroup;
 
@@ -248,6 +249,7 @@ class CrxInstaller : public SandboxedUnpackerClient {
  private:
   friend class ::ExtensionServiceTest;
   friend class ExtensionUpdaterTest;
+  friend class BookmarkAppInstallerTest;
 
   CrxInstaller(base::WeakPtr<ExtensionService> service_weak,
                std::unique_ptr<ExtensionInstallPrompt> client,
@@ -262,7 +264,7 @@ class CrxInstaller : public SandboxedUnpackerClient {
 
   // Called after OnUnpackSuccess as a last check to see whether the install
   // should complete.
-  CrxInstallError AllowInstall(const Extension* extension);
+  base::Optional<CrxInstallError> AllowInstall(const Extension* extension);
 
   // SandboxedUnpackerClient
   void OnUnpackFailure(const CrxInstallError& error) override;
@@ -302,7 +304,7 @@ class CrxInstaller : public SandboxedUnpackerClient {
   void ReportSuccessFromFileThread();
   void ReportSuccessFromUIThread();
   void NotifyCrxInstallBegin();
-  void NotifyCrxInstallComplete(bool success);
+  void NotifyCrxInstallComplete(const base::Optional<CrxInstallError>& error);
 
   // Deletes temporary directory and crx file if needed.
   void CleanupTempFiles();
@@ -449,7 +451,7 @@ class CrxInstaller : public SandboxedUnpackerClient {
   extension_misc::CrxInstallCause install_cause_;
 
   // Creation flags to use for the extension.  These flags will be used
-  // when calling Extenion::Create() by the crx installer.
+  // when calling Extension::Create() by the crx installer.
   int creation_flags_;
 
   // Whether to allow off store installation.

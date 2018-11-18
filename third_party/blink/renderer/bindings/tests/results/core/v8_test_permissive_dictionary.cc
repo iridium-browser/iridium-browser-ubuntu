@@ -8,11 +8,12 @@
 // DO NOT MODIFY!
 
 // clang-format off
-#include "v8_test_permissive_dictionary.h"
+#include "third_party/blink/renderer/bindings/tests/results/core/v8_test_permissive_dictionary.h"
 
-#include "bindings/core/v8/exception_state.h"
-#include "bindings/core/v8/idl_types.h"
-#include "bindings/core/v8/native_value_traits_impl.h"
+#include "base/stl_util.h"
+#include "third_party/blink/renderer/bindings/core/v8/idl_types.h"
+#include "third_party/blink/renderer/bindings/core/v8/native_value_traits_impl.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 
 namespace blink {
 
@@ -21,7 +22,7 @@ static const v8::Eternal<v8::Name>* eternalV8TestPermissiveDictionaryKeys(v8::Is
     "booleanMember",
   };
   return V8PerIsolateData::From(isolate)->FindOrCreateEternalNameCache(
-      kKeys, kKeys, WTF_ARRAY_LENGTH(kKeys));
+      kKeys, kKeys, base::size(kKeys));
 }
 
 void V8TestPermissiveDictionary::ToImpl(v8::Isolate* isolate, v8::Local<v8::Value> v8Value, TestPermissiveDictionary& impl, ExceptionState& exceptionState) {
@@ -38,18 +39,18 @@ void V8TestPermissiveDictionary::ToImpl(v8::Isolate* isolate, v8::Local<v8::Valu
   const v8::Eternal<v8::Name>* keys = eternalV8TestPermissiveDictionaryKeys(isolate);
   v8::TryCatch block(isolate);
   v8::Local<v8::Context> context = isolate->GetCurrentContext();
-  v8::Local<v8::Value> booleanMemberValue;
-  if (!v8Object->Get(context, keys[0].Get(isolate)).ToLocal(&booleanMemberValue)) {
+  v8::Local<v8::Value> boolean_member_value;
+  if (!v8Object->Get(context, keys[0].Get(isolate)).ToLocal(&boolean_member_value)) {
     exceptionState.RethrowV8Exception(block.Exception());
     return;
   }
-  if (booleanMemberValue.IsEmpty() || booleanMemberValue->IsUndefined()) {
+  if (boolean_member_value.IsEmpty() || boolean_member_value->IsUndefined()) {
     // Do nothing.
   } else {
-    bool booleanMemberCppValue = NativeValueTraits<IDLBoolean>::NativeValue(isolate, booleanMemberValue, exceptionState);
+    bool boolean_member_cpp_value = NativeValueTraits<IDLBoolean>::NativeValue(isolate, boolean_member_value, exceptionState);
     if (exceptionState.HadException())
       return;
-    impl.setBooleanMember(booleanMemberCppValue);
+    impl.setBooleanMember(boolean_member_cpp_value);
   }
 }
 
@@ -63,14 +64,14 @@ v8::Local<v8::Value> TestPermissiveDictionary::ToV8Impl(v8::Local<v8::Object> cr
 bool toV8TestPermissiveDictionary(const TestPermissiveDictionary& impl, v8::Local<v8::Object> dictionary, v8::Local<v8::Object> creationContext, v8::Isolate* isolate) {
   const v8::Eternal<v8::Name>* keys = eternalV8TestPermissiveDictionaryKeys(isolate);
   v8::Local<v8::Context> context = isolate->GetCurrentContext();
-  v8::Local<v8::Value> booleanMemberValue;
-  bool booleanMemberHasValueOrDefault = false;
+  v8::Local<v8::Value> boolean_member_value;
+  bool boolean_member_has_value_or_default = false;
   if (impl.hasBooleanMember()) {
-    booleanMemberValue = v8::Boolean::New(isolate, impl.booleanMember());
-    booleanMemberHasValueOrDefault = true;
+    boolean_member_value = v8::Boolean::New(isolate, impl.booleanMember());
+    boolean_member_has_value_or_default = true;
   }
-  if (booleanMemberHasValueOrDefault &&
-      !V8CallBoolean(dictionary->CreateDataProperty(context, keys[0].Get(isolate), booleanMemberValue))) {
+  if (boolean_member_has_value_or_default &&
+      !V8CallBoolean(dictionary->CreateDataProperty(context, keys[0].Get(isolate), boolean_member_value))) {
     return false;
   }
 

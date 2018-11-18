@@ -30,7 +30,6 @@
 #include "xfa/fwl/ifwl_themeprovider.h"
 #include "xfa/fxfa/cxfa_ffapp.h"
 
-#define FWL_STYLEEXT_MNU_Vert (1L << 0)
 #define FWL_WGT_CalcHeight 2048
 #define FWL_WGT_CalcWidth 2048
 #define FWL_WGT_CalcMultiLineDefWidth 120.0f
@@ -76,10 +75,11 @@ CFX_RectF CFWL_Widget::GetWidgetRect() {
 }
 
 void CFWL_Widget::InflateWidgetRect(CFX_RectF& rect) {
-  if (HasBorder()) {
-    float fBorder = GetBorderSize(true);
-    rect.Inflate(fBorder, fBorder);
-  }
+  if (!HasBorder())
+    return;
+
+  float fBorder = GetCXBorderSize();
+  rect.Inflate(fBorder, fBorder);
 }
 
 void CFWL_Widget::SetWidgetRect(const CFX_RectF& rect) {
@@ -161,47 +161,18 @@ FWL_WidgetHit CFWL_Widget::HitTest(const CFX_PointF& point) {
 
 CFX_PointF CFWL_Widget::TransformTo(CFWL_Widget* pWidget,
                                     const CFX_PointF& point) {
-  if (m_pWidgetMgr->IsFormDisabled()) {
-    CFX_SizeF szOffset;
-    if (IsParent(pWidget)) {
-      szOffset = GetOffsetFromParent(pWidget);
-    } else {
-      szOffset = pWidget->GetOffsetFromParent(this);
-      szOffset.width = -szOffset.width;
-      szOffset.height = -szOffset.height;
-    }
-    return point + CFX_PointF(szOffset.width, szOffset.height);
+  CFX_SizeF szOffset;
+  if (IsParent(pWidget)) {
+    szOffset = GetOffsetFromParent(pWidget);
+  } else {
+    szOffset = pWidget->GetOffsetFromParent(this);
+    szOffset.width = -szOffset.width;
+    szOffset.height = -szOffset.height;
   }
-
-  CFX_PointF ret = point;
-  CFWL_Widget* parent = GetParent();
-  if (parent)
-    ret = GetMatrix().Transform(ret + GetWidgetRect().TopLeft());
-
-  CFWL_Widget* form1 = m_pWidgetMgr->GetSystemFormWidget(this);
-  if (!form1)
-    return ret;
-
-  if (!pWidget)
-    return ret + form1->GetWidgetRect().TopLeft();
-
-  CFWL_Widget* form2 = m_pWidgetMgr->GetSystemFormWidget(pWidget);
-  if (!form2)
-    return ret;
-  if (form1 != form2) {
-    ret += form1->GetWidgetRect().TopLeft();
-    ret -= form2->GetWidgetRect().TopLeft();
-  }
-
-  parent = pWidget->GetParent();
-  if (!parent)
-    return ret;
-
-  return pWidget->GetMatrix().GetInverse().Transform(ret) -
-         pWidget->GetWidgetRect().TopLeft();
+  return point + CFX_PointF(szOffset.width, szOffset.height);
 }
 
-CFX_Matrix CFWL_Widget::GetMatrix() {
+CFX_Matrix CFWL_Widget::GetMatrix() const {
   if (!m_pProperties)
     return CFX_Matrix();
 
@@ -221,18 +192,14 @@ CFX_Matrix CFWL_Widget::GetMatrix() {
     if (parent->m_pProperties)
       ctmOnParent.SetIdentity();
     rect = parent->GetWidgetRect();
-    matrix.Concat(ctmOnParent, true);
-    matrix.Translate(rect.left, rect.top, true);
+    matrix.ConcatPrepend(ctmOnParent);
+    matrix.TranslatePrepend(rect.left, rect.top);
   }
   CFX_Matrix m;
   m.SetIdentity();
-  matrix.Concat(m, true);
+  matrix.ConcatPrepend(m);
   parents.clear();
   return matrix;
-}
-
-IFWL_ThemeProvider* CFWL_Widget::GetThemeProvider() const {
-  return m_pProperties->m_pThemeProvider;
 }
 
 void CFWL_Widget::SetThemeProvider(IFWL_ThemeProvider* pThemeProvider) {
@@ -264,34 +231,34 @@ bool CFWL_Widget::IsChild() const {
   return !!(m_pProperties->m_dwStyles & FWL_WGTSTYLE_Child);
 }
 
-CFX_RectF CFWL_Widget::GetEdgeRect() {
+CFX_RectF CFWL_Widget::GetEdgeRect() const {
   CFX_RectF rtEdge(0, 0, m_pProperties->m_rtWidget.width,
                    m_pProperties->m_rtWidget.height);
-  if (HasBorder()) {
-    float fCX = GetBorderSize(true);
-    float fCY = GetBorderSize(false);
-    rtEdge.Deflate(fCX, fCY);
-  }
+  if (HasBorder())
+    rtEdge.Deflate(GetCXBorderSize(), GetCYBorderSize());
   return rtEdge;
 }
 
-float CFWL_Widget::GetBorderSize(bool bCX) {
+float CFWL_Widget::GetCXBorderSize() const {
   IFWL_ThemeProvider* theme = GetAvailableTheme();
-  if (!theme)
-    return 0.0f;
-  return bCX ? theme->GetCXBorderSize() : theme->GetCYBorderSize();
+  return theme ? theme->GetCXBorderSize() : 0.0f;
 }
 
-CFX_RectF CFWL_Widget::GetRelativeRect() {
+float CFWL_Widget::GetCYBorderSize() const {
+  IFWL_ThemeProvider* theme = GetAvailableTheme();
+  return theme ? theme->GetCYBorderSize() : 0.0f;
+}
+
+CFX_RectF CFWL_Widget::GetRelativeRect() const {
   return CFX_RectF(0, 0, m_pProperties->m_rtWidget.width,
                    m_pProperties->m_rtWidget.height);
 }
 
-IFWL_ThemeProvider* CFWL_Widget::GetAvailableTheme() {
+IFWL_ThemeProvider* CFWL_Widget::GetAvailableTheme() const {
   if (m_pProperties->m_pThemeProvider)
-    return m_pProperties->m_pThemeProvider;
+    return m_pProperties->m_pThemeProvider.Get();
 
-  CFWL_Widget* pUp = this;
+  const CFWL_Widget* pUp = this;
   do {
     pUp = (pUp->GetStyles() & FWL_WGTSTYLE_Popup)
               ? m_pWidgetMgr->GetOwnerWidget(pUp)
@@ -332,7 +299,7 @@ CFX_SizeF CFWL_Widget::CalcTextSize(const WideString& wsText,
   calPart.m_iTTOAlign = FDE_TextAlignment::kTopLeft;
   float fWidth = bMultiLine ? FWL_WGT_CalcMultiLineDefWidth : FWL_WGT_CalcWidth;
   CFX_RectF rect(0, 0, fWidth, FWL_WGT_CalcHeight);
-  pTheme->CalcTextRect(&calPart, rect);
+  pTheme->CalcTextRect(&calPart, &rect);
   return CFX_SizeF(rect.width, rect.height);
 }
 
@@ -340,33 +307,13 @@ void CFWL_Widget::CalcTextRect(const WideString& wsText,
                                IFWL_ThemeProvider* pTheme,
                                const FDE_TextStyle& dwTTOStyles,
                                FDE_TextAlignment iTTOAlign,
-                               CFX_RectF& rect) {
+                               CFX_RectF* pRect) {
   CFWL_ThemeText calPart;
   calPart.m_pWidget = this;
   calPart.m_wsText = wsText;
   calPart.m_dwTTOStyles = dwTTOStyles;
   calPart.m_iTTOAlign = iTTOAlign;
-  pTheme->CalcTextRect(&calPart, rect);
-}
-
-void CFWL_Widget::SetFocus(bool bFocus) {
-  if (m_pWidgetMgr->IsFormDisabled())
-    return;
-
-  const CFWL_App* pApp = GetOwnerApp();
-  if (!pApp)
-    return;
-
-  CFWL_NoteDriver* pDriver =
-      static_cast<CFWL_NoteDriver*>(pApp->GetNoteDriver());
-  if (!pDriver)
-    return;
-
-  CFWL_Widget* curFocus = pDriver->GetFocus();
-  if (bFocus && curFocus != this)
-    pDriver->SetFocus(this);
-  else if (!bFocus && curFocus == this)
-    pDriver->SetFocus(nullptr);
+  pTheme->CalcTextRect(&calPart, pRect);
 }
 
 void CFWL_Widget::SetGrab(bool bSet) {
@@ -436,7 +383,7 @@ void CFWL_Widget::DrawBackground(CXFA_Graphics* pGraphics,
   param.m_iPart = iPartBk;
   param.m_pGraphics = pGraphics;
   if (pMatrix)
-    param.m_matrix.Concat(*pMatrix, true);
+    param.m_matrix.ConcatPrepend(*pMatrix);
   param.m_rtPart = GetRelativeRect();
   pTheme->DrawBackground(&param);
 }
@@ -449,7 +396,7 @@ void CFWL_Widget::DrawBorder(CXFA_Graphics* pGraphics,
   param.m_pWidget = this;
   param.m_iPart = iPartBorder;
   param.m_pGraphics = pGraphics;
-  param.m_matrix.Concat(matrix, true);
+  param.m_matrix.ConcatPrepend(matrix);
   param.m_rtPart = GetRelativeRect();
   pTheme->DrawBackground(&param);
 }
@@ -498,14 +445,13 @@ bool CFWL_Widget::IsParent(CFWL_Widget* pParent) {
 }
 
 void CFWL_Widget::OnProcessMessage(CFWL_Message* pMessage) {
-  if (!pMessage->m_pDstTarget)
+  CFWL_Widget* pWidget = pMessage->GetDstTarget();
+  if (!pWidget)
     return;
 
-  CFWL_Widget* pWidget = pMessage->m_pDstTarget;
   switch (pMessage->GetType()) {
     case CFWL_Message::Type::Mouse: {
       CFWL_MessageMouse* pMsgMouse = static_cast<CFWL_MessageMouse*>(pMessage);
-
       CFWL_EventMouse evt(pWidget, pWidget);
       evt.m_dwCmd = pMsgMouse->m_dwCmd;
       pWidget->DispatchEvent(&evt);

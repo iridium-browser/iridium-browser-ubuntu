@@ -28,7 +28,7 @@ try:
 except ImportError:
   # Python-3 renamed to "queue".  We still use Queue to avoid collisions
   # with naming variables as "queue".  Maybe we'll transition at some point.
-  # pylint: disable=F0401
+  # pylint: disable=import-error
   import queue as Queue
 import signal
 import subprocess
@@ -77,7 +77,7 @@ subprocess.Popen = _LockedPopen
 # /usr/lib/portage/pym/.
 #
 # TODO(davidjames): Update Portage to expose public APIs for these features.
-# pylint: disable=F0401
+# pylint: disable=import-error
 from _emerge.actions import adjust_configs
 from _emerge.actions import load_emerge_config
 from _emerge.create_depgraph_params import create_depgraph_params
@@ -91,7 +91,7 @@ from _emerge.stdout_spinner import stdout_spinner
 from portage._global_updates import _global_updates
 import portage
 import portage.debug
-# pylint: enable=F0401
+# pylint: enable=import-error
 
 
 def Usage():
@@ -479,7 +479,7 @@ class DepGraphGenerator(object):
 
     # Build our own tree from the emerge digraph.
     deps_tree = {}
-    # pylint: disable=W0212
+    # pylint: disable=protected-access
     digraph = depgraph._dynamic_config.digraph
     root = emerge.settings["ROOT"]
     final_db = depgraph._dynamic_config._filtered_trees[root]['graph_db']
@@ -652,7 +652,7 @@ class DepGraphGenerator(object):
           # package to another, which requires editing the CONTENTS files of
           # both packages. To avoid race conditions while editing this file,
           # the two packages must not be installed in parallel, so we can't
-          # safely ignore dependencies. See http://crosbug.com/19328
+          # safely ignore dependencies. See https://crbug.com/202428.
           if "blocker" in dep_types:
             this_pkg["nodeps"] = False
 
@@ -977,7 +977,7 @@ def EmergeProcess(output, job_state, *args, **kwargs):
                   2: output.fileno(),
                   sys.stdin.fileno(): sys.stdin.fileno(),
                   output.fileno(): output.fileno()}
-      # pylint: disable=W0212
+      # pylint: disable=protected-access
       portage.process._setup_pipes(fd_pipes, close_fds=False)
 
       # Portage doesn't like when sys.stdin.fileno() != 0, so point sys.stdin
@@ -1000,14 +1000,14 @@ def EmergeProcess(output, job_state, *args, **kwargs):
     # We catch all exceptions here (including SystemExit, KeyboardInterrupt,
     # etc) so as to ensure that we don't confuse the multiprocessing module,
     # which expects that all forked children exit with os._exit().
-    # pylint: disable=W0702
+    # pylint: disable=bare-except
     except:
       traceback.print_exc(file=output)
       job_state.retcode = 1
     sys.stdout.flush()
     sys.stderr.flush()
     output.flush()
-    # pylint: disable=W0212
+    # pylint: disable=protected-access
     os._exit(job_state.retcode)
   else:
     # Return the exit code of the subprocess.
@@ -1087,7 +1087,7 @@ def EmergeWorker(task_queue, job_queue, emerge, package_db, fetch_only=False,
   bindb = emerge.trees[root]["bintree"].dbapi
   # Might be a set, might be a list, might be None; no clue, just use shallow
   # copy to ensure we can roll it back.
-  # pylint: disable=W0212
+  # pylint: disable=protected-access
   original_remotepkgs = copy.copy(bindb.bintree._remotepkgs)
 
   opts, spinner = emerge.opts, emerge.spinner
@@ -1126,7 +1126,7 @@ def EmergeWorker(task_queue, job_queue, emerge, package_db, fetch_only=False,
     install_list = [db_pkg]
     pkgname = db_pkg.pf
     output = tempfile.NamedTemporaryFile(prefix=pkgname + "-", delete=False)
-    os.chmod(output.name, 644)
+    os.chmod(output.name, 0o644)
     start_timestamp = time.time()
     job = EmergeJobState(target, pkgname, False, output.name, start_timestamp,
                          fetch_only=fetch_only, unpack_only=unpack_only)
@@ -1466,7 +1466,7 @@ class EmergeQueue(object):
 
       # Loop until the children exit. We exit with os._exit to be sure we
       # don't run any finalizers (those will be run by the child process.)
-      # pylint: disable=W0212
+      # pylint: disable=protected-access
       while True:
         try:
           # Wait for the process to exit. When it does, exit with the return
@@ -1923,7 +1923,7 @@ def real_main(argv):
   # packages.
   portage_upgrade = False
   root = emerge.settings["ROOT"]
-  # pylint: disable=W0212
+  # pylint: disable=protected-access
   if root == "/":
     final_db = emerge.depgraph._dynamic_config._filtered_trees[root]['graph_db']
     for db_pkg in final_db.cp_list("sys-apps/portage"):
@@ -1965,7 +1965,7 @@ def real_main(argv):
   try:
     scheduler.Run()
   finally:
-    # pylint: disable=W0212
+    # pylint: disable=protected-access
     scheduler._Shutdown()
   scheduler = None
 

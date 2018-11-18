@@ -5,6 +5,7 @@
 #include "components/drive/chromeos/search_metadata.h"
 
 #include <algorithm>
+#include <map>
 #include <queue>
 #include <utility>
 
@@ -85,9 +86,11 @@ class HiddenEntryClassifier {
   HiddenEntryClassifier(ResourceMetadata* metadata,
                         const std::string& mydrive_local_id)
       : metadata_(metadata) {
-    // Only things under My Drive and drive/other are not hidden.
+    // Only things under My Drive, drive/other and drive/team_drives are not
+    // hidden.
     is_hiding_child_[mydrive_local_id] = false;
     is_hiding_child_[util::kDriveOtherDirLocalId] = false;
+    is_hiding_child_[util::kDriveTeamDrivesDirLocalId] = false;
 
     // Everything else is hidden, including the directories mentioned above
     // themselves.
@@ -245,13 +248,13 @@ FileError SearchMetadataOnBlockingPool(ResourceMetadata* resource_metadata,
 
 // Runs the SearchMetadataCallback and updates the histogram.
 void RunSearchMetadataCallback(
-    const SearchMetadataCallback& callback,
+    SearchMetadataCallback callback,
     const base::TimeTicks& start_time,
     std::unique_ptr<MetadataSearchResultVector> results,
     FileError error) {
   if (error != FILE_ERROR_OK)
     results.reset();
-  callback.Run(error, std::move(results));
+  std::move(callback).Run(error, std::move(results));
 
   UMA_HISTOGRAM_TIMES("Drive.SearchMetadataTime",
                       base::TimeTicks::Now() - start_time);
@@ -282,8 +285,8 @@ void SearchMetadata(
     const SearchMetadataPredicate& predicate,
     size_t at_most_num_matches,
     MetadataSearchOrder order,
-    const SearchMetadataCallback& callback) {
-  DCHECK(!callback.is_null());
+    SearchMetadataCallback callback) {
+  DCHECK(callback);
 
   const base::TimeTicks start_time = base::TimeTicks::Now();
 
@@ -294,8 +297,8 @@ void SearchMetadata(
       blocking_task_runner.get(), FROM_HERE,
       base::BindOnce(&SearchMetadataOnBlockingPool, resource_metadata, query,
                      predicate, at_most_num_matches, order, results_ptr),
-      base::BindOnce(&RunSearchMetadataCallback, callback, start_time,
-                     std::move(results)));
+      base::BindOnce(&RunSearchMetadataCallback, std::move(callback),
+                     start_time, std::move(results)));
 }
 
 bool MatchesType(int options, const ResourceEntry& entry) {

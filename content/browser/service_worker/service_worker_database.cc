@@ -275,6 +275,7 @@ const char* ServiceWorkerDatabase::StatusToString(
 
 ServiceWorkerDatabase::RegistrationData::RegistrationData()
     : registration_id(blink::mojom::kInvalidServiceWorkerRegistrationId),
+      script_type(blink::mojom::ScriptType::kClassic),
       update_via_cache(blink::mojom::ServiceWorkerUpdateViaCache::kImports),
       version_id(blink::mojom::kInvalidServiceWorkerVersionId),
       is_active(false),
@@ -575,8 +576,7 @@ ServiceWorkerDatabase::Status ServiceWorkerDatabase::WriteRegistration(
   // Used for avoiding multiple writes for the same resource id or url.
   std::set<int64_t> pushed_resources;
   std::set<GURL> pushed_urls;
-  for (std::vector<ResourceRecord>::const_iterator itr = resources.begin();
-       itr != resources.end(); ++itr) {
+  for (auto itr = resources.begin(); itr != resources.end(); ++itr) {
     if (!itr->url.is_valid())
       return STATUS_ERROR_FAILED;
 
@@ -1226,12 +1226,8 @@ ServiceWorkerDatabase::Status ServiceWorkerDatabase::DestroyDatabase() {
     return STATUS_OK;
   }
 
-  // Directly delete the database instead of calling leveldb::DestroyDB()
-  // because the API does not delete the directory if there are unrelated files.
-  // (https://code.google.com/p/chromium/issues/detail?id=468926#c24)
-  Status status = base::DeleteFile(path_, true /* recursive */)
-                      ? STATUS_OK
-                      : STATUS_ERROR_FAILED;
+  Status status = LevelDBStatusToServiceWorkerDBStatus(
+      leveldb_chrome::DeleteDB(path_, leveldb_env::Options()));
   ServiceWorkerMetrics::RecordDestroyDatabaseResult(status);
   return status;
 }
@@ -1246,18 +1242,17 @@ ServiceWorkerDatabase::Status ServiceWorkerDatabase::LazyOpen(
   if (IsOpen())
     return STATUS_OK;
 
-  if (!create_if_missing) {
+  if (!create_if_missing &&
+      (IsDatabaseInMemory() ||
+       !leveldb_chrome::PossiblyValidDB(path_, leveldb::Env::Default()))) {
     // Avoid opening a database if it does not exist at the |path_|.
-    if (IsDatabaseInMemory() || !base::PathExists(path_) ||
-        base::IsDirectoryEmpty(path_)) {
-      return STATUS_ERROR_NOT_FOUND;
-    }
+    return STATUS_ERROR_NOT_FOUND;
   }
 
   leveldb_env::Options options;
   options.create_if_missing = create_if_missing;
   if (IsDatabaseInMemory()) {
-    env_.reset(leveldb_chrome::NewMemEnv(leveldb::Env::Default()));
+    env_ = leveldb_chrome::NewMemEnv("service-worker");
     options.env = env_.get();
   } else {
     options.env = g_service_worker_env.Pointer();
@@ -1415,6 +1410,15 @@ ServiceWorkerDatabase::Status ServiceWorkerDatabase::ParseRegistrationData(
   for (uint32_t feature : data.used_features())
     out->used_features.insert(feature);
 
+  if (data.has_script_type()) {
+    auto value = data.script_type();
+    if (!ServiceWorkerRegistrationData_ServiceWorkerScriptType_IsValid(value)) {
+      DLOG(ERROR) << "Worker script type '" << value << "' is not valid.";
+      return ServiceWorkerDatabase::STATUS_ERROR_CORRUPTED;
+    }
+    out->script_type = static_cast<blink::mojom::ScriptType>(value);
+  }
+
   if (data.has_update_via_cache()) {
     auto value = data.update_via_cache();
     if (!ServiceWorkerRegistrationData_ServiceWorkerUpdateViaCacheType_IsValid(
@@ -1466,15 +1470,13 @@ void ServiceWorkerDatabase::WriteRegistrationDataInBatch(
   for (uint32_t feature : registration.used_features)
     data.add_used_features(feature);
 
-  // TODO(https://crbug.com/675540): Remove the the command line check and
-  // always set to data when shipping the updateViaCache flag to stable.
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kEnableExperimentalWebPlatformFeatures)) {
-    data.set_update_via_cache(
-        static_cast<
-            ServiceWorkerRegistrationData_ServiceWorkerUpdateViaCacheType>(
-            registration.update_via_cache));
-  }
+  data.set_script_type(
+      static_cast<ServiceWorkerRegistrationData_ServiceWorkerScriptType>(
+          registration.script_type));
+  data.set_update_via_cache(
+      static_cast<
+          ServiceWorkerRegistrationData_ServiceWorkerUpdateViaCacheType>(
+          registration.update_via_cache));
 
   std::string value;
   bool success = data.SerializeToString(&value);
@@ -1679,8 +1681,7 @@ ServiceWorkerDatabase::Status ServiceWorkerDatabase::WriteResourceIdsInBatch(
 
   if (ids.empty())
     return STATUS_OK;
-  for (std::set<int64_t>::const_iterator itr = ids.begin(); itr != ids.end();
-       ++itr) {
+  for (auto itr = ids.begin(); itr != ids.end(); ++itr) {
     // Value should be empty.
     batch->Put(CreateResourceIdKey(id_key_prefix, *itr), "");
   }
@@ -1702,8 +1703,7 @@ ServiceWorkerDatabase::Status ServiceWorkerDatabase::DeleteResourceIdsInBatch(
   if (status != STATUS_OK)
     return status;
 
-  for (std::set<int64_t>::const_iterator itr = ids.begin(); itr != ids.end();
-       ++itr) {
+  for (auto itr = ids.begin(); itr != ids.end(); ++itr) {
     batch->Delete(CreateResourceIdKey(id_key_prefix, *itr));
   }
   return STATUS_OK;

@@ -5,9 +5,8 @@
 #include <memory>
 #include <utility>
 
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
-#include "mojo/edk/embedder/embedder.h"
+#include "mojo/core/embedder/embedder.h"
 #include "mojo/public/cpp/bindings/associated_binding_set.h"
 #include "mojo/public/cpp/bindings/binding_set.h"
 #include "mojo/public/cpp/bindings/strong_binding_set.h"
@@ -89,19 +88,19 @@ class PingImpl : public PingService {
   PingImpl() {}
   ~PingImpl() override {}
 
-  void set_ping_handler(const base::Closure& handler) {
+  void set_ping_handler(const base::RepeatingClosure& handler) {
     ping_handler_ = handler;
   }
 
  private:
   // PingService:
-  void Ping(const PingCallback& callback) override {
+  void Ping(PingCallback callback) override {
     if (!ping_handler_.is_null())
       ping_handler_.Run();
-    callback.Run();
+    std::move(callback).Run();
   }
 
-  base::Closure ping_handler_;
+  base::RepeatingClosure ping_handler_;
 };
 
 TEST_P(BindingSetTest, BindingSetContext) {
@@ -209,7 +208,7 @@ TEST_P(BindingSetTest, BindingSetReportBadMessage) {
   PingImpl impl;
 
   std::string last_received_error;
-  edk::SetDefaultProcessErrorCallback(
+  core::SetDefaultProcessErrorCallback(
       base::Bind([](std::string* out_error,
                     const std::string& error) { *out_error = error; },
                  &last_received_error));
@@ -239,14 +238,14 @@ TEST_P(BindingSetTest, BindingSetReportBadMessage) {
 
   EXPECT_TRUE(bindings.empty());
 
-  edk::SetDefaultProcessErrorCallback(mojo::edk::ProcessErrorCallback());
+  core::SetDefaultProcessErrorCallback(mojo::core::ProcessErrorCallback());
 }
 
 TEST_P(BindingSetTest, BindingSetGetBadMessageCallback) {
   PingImpl impl;
 
   std::string last_received_error;
-  edk::SetDefaultProcessErrorCallback(
+  core::SetDefaultProcessErrorCallback(
       base::Bind([](std::string* out_error,
                     const std::string& error) { *out_error = error; },
                  &last_received_error));
@@ -289,14 +288,14 @@ TEST_P(BindingSetTest, BindingSetGetBadMessageCallback) {
 
   EXPECT_TRUE(bindings.empty());
 
-  edk::SetDefaultProcessErrorCallback(mojo::edk::ProcessErrorCallback());
+  core::SetDefaultProcessErrorCallback(mojo::core::ProcessErrorCallback());
 }
 
 TEST_P(BindingSetTest, BindingSetGetBadMessageCallbackOutlivesBindingSet) {
   PingImpl impl;
 
   std::string last_received_error;
-  edk::SetDefaultProcessErrorCallback(
+  core::SetDefaultProcessErrorCallback(
       base::Bind([](std::string* out_error,
                     const std::string& error) { *out_error = error; },
                  &last_received_error));
@@ -317,7 +316,7 @@ TEST_P(BindingSetTest, BindingSetGetBadMessageCallbackOutlivesBindingSet) {
   std::move(bad_message_callback).Run("message 1");
   EXPECT_EQ("message 1", last_received_error);
 
-  edk::SetDefaultProcessErrorCallback(mojo::edk::ProcessErrorCallback());
+  core::SetDefaultProcessErrorCallback(mojo::core::ProcessErrorCallback());
 }
 
 class PingProviderImpl : public AssociatedPingProvider, public PingService {
@@ -348,10 +347,10 @@ class PingProviderImpl : public AssociatedPingProvider, public PingService {
   }
 
   // PingService:
-  void Ping(const PingCallback& callback) override {
+  void Ping(PingCallback callback) override {
     if (!ping_handler_.is_null())
       ping_handler_.Run();
-    callback.Run();
+    std::move(callback).Run();
   }
 
   AssociatedBindingSet<PingService, int> ping_bindings_;
@@ -587,7 +586,7 @@ class PingInstanceCounter : public PingService {
   PingInstanceCounter() { ++instance_count; }
   ~PingInstanceCounter() override { --instance_count; }
 
-  void Ping(const PingCallback& callback) override {}
+  void Ping(PingCallback callback) override {}
 
   static int instance_count;
 };

@@ -23,8 +23,8 @@
 #include "ui/message_center/public/cpp/notification.h"
 
 namespace {
-const char* kNotifierId = "app.downloaded-notification";
-}  // anonymous namespace
+const char kNotifierId[] = "app.downloaded-notification";
+}  // namespace
 
 using content::BrowserThread;
 
@@ -45,7 +45,6 @@ ExtensionInstalledNotification::ExtensionInstalledNotification(
           message_center::NOTIFICATION_TYPE_SIMPLE, extension_id_,
           base::UTF8ToUTF16(extension->name()),
           l10n_util::GetStringUTF16(IDS_EXTENSION_NOTIFICATION_INSTALLED),
-          gfx::Image(),
           l10n_util::GetStringUTF16(IDS_EXTENSION_NOTIFICATION_DISPLAY_SOURCE),
           GURL(extension_urls::kChromeWebstoreBaseURL) /* origin_url */,
           message_center::NotifierId(

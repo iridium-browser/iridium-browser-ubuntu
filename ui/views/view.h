@@ -363,6 +363,11 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // Return the bounds of the View in screen coordinate system.
   gfx::Rect GetBoundsInScreen() const;
 
+  // Return the bounds that an anchored widget should anchor to. These can be
+  // different from |GetBoundsInScreen()| when a view is larger than its visible
+  // size, for instance to provide a larger hittable area.
+  virtual gfx::Rect GetAnchorBoundsInScreen() const;
+
   // Returns the baseline of this view, or -1 if this view has no baseline. The
   // return value is relative to the preferred height.
   virtual int GetBaseline() const;
@@ -419,6 +424,7 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // Views as |children_|. The default implementation returns |children_|,
   // subclass if the paint order should differ from that of |children_|.
   // This order is taken into account by painting and targeting implementations.
+  // NOTE: see SetPaintToLayer() for details on painting and views with layers.
   virtual View::Views GetChildrenInZOrder();
 
   // Transformations -----------------------------------------------------------
@@ -439,6 +445,10 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // . SetPaintToLayer(ui::LayerType) has been invoked.
   // View creates the Layer only when it exists in a Widget with a non-NULL
   // Compositor.
+  // Enabling a view to have a layer impacts painting of sibling views.
+  // Specifically views with layers effectively paint in a z-order that is
+  // always above any sibling views that do not have layers. This happens
+  // regardless of the ordering returned by GetChildrenInZOrder().
   void SetPaintToLayer(ui::LayerType layer_type = ui::LAYER_TEXTURED);
 
   // Please refer to the comments above the DestroyLayerImpl() function for
@@ -878,6 +888,7 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   ui::EventTargeter* GetEventTargeter() override;
   void ConvertEventToTarget(ui::EventTarget* target,
                             ui::LocatedEvent* event) override;
+  gfx::PointF GetScreenLocationF(const ui::LocatedEvent& event) const override;
 
   // Overridden from ui::EventHandler:
   void OnKeyEvent(ui::KeyEvent* event) override;
@@ -1391,22 +1402,6 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
   // hierarchy).
   virtual void OnNativeThemeChanged(const ui::NativeTheme* theme) {}
 
-  // Debugging -----------------------------------------------------------------
-
-#if !defined(NDEBUG)
-  // Returns string containing a graph of the views hierarchy in graphViz DOT
-  // language (http://graphviz.org/). Can be called within debugger and save
-  // to a file to compile/view.
-  // Note: Assumes initial call made with first = true.
-  virtual std::string PrintViewGraph(bool first);
-
-  // Some classes may own an object which contains the children to displayed in
-  // the views hierarchy. The above function gives the class the flexibility to
-  // decide which object should be used to obtain the children, but this
-  // function makes the decision explicit.
-  std::string DoPrintViewGraph(bool first, View* view_with_children);
-#endif
-
  private:
   friend class internal::PreEventDispatchHandler;
   friend class internal::PostEventDispatchHandler;
@@ -1838,7 +1833,7 @@ class VIEWS_EXPORT View : public ui::LayerDelegate,
 
   // Observers -------------------------------------------------------------
 
-  base::ObserverList<ViewObserver> observers_;
+  base::ObserverList<ViewObserver>::Unchecked observers_;
 
   DISALLOW_COPY_AND_ASSIGN(View);
 };

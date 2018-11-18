@@ -145,11 +145,11 @@ class EmbeddedTestServer {
   // This is the equivalent of calling InitializeAndListen() followed by
   // StartAcceptingConnections().
   // Returns whether a listening socket has been successfully created.
-  bool Start() WARN_UNUSED_RESULT;
+  bool Start(int port = 0) WARN_UNUSED_RESULT;
 
   // Starts listening for incoming connections but will not yet accept them.
   // Returns whether a listening socket has been succesfully created.
-  bool InitializeAndListen() WARN_UNUSED_RESULT;
+  bool InitializeAndListen(int port = 0) WARN_UNUSED_RESULT;
 
   // Starts the Accept IO Thread and begins accepting connections.
   void StartAcceptingConnections();
@@ -192,6 +192,9 @@ class EmbeddedTestServer {
 
   void SetSSLConfig(ServerCertificate cert, const SSLServerConfig& ssl_config);
   void SetSSLConfig(ServerCertificate cert);
+
+  bool ResetSSLConfig(ServerCertificate cert,
+                      const SSLServerConfig& ssl_config);
 
   // Returns the file name of the certificate the server is using. The test
   // certificates can be found in net/data/ssl/certificates/.
@@ -241,6 +244,10 @@ class EmbeddedTestServer {
  private:
   // Shuts down the server.
   void ShutdownOnIOThread();
+
+  // Resets the SSLServerConfig on the IO thread.
+  void ResetSSLConfigOnIOThread(ServerCertificate cert,
+                                const SSLServerConfig& ssl_config);
 
   // Upgrade the TCP connection to one over SSL.
   std::unique_ptr<StreamSocket> DoSSLUpgrade(

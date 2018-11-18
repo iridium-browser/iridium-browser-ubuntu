@@ -41,6 +41,8 @@ class ASH_EXPORT ShelfButton : public views::Button {
     STATE_DRAGGING = 1 << 4,
     // App has at least 1 notification.
     STATE_NOTIFICATION = 1 << 5,
+    // Underlying ShelfItem owns the window that is currently active.
+    STATE_ACTIVE = 1 << 6,
   };
 
   ShelfButton(InkDropButtonListener* listener, ShelfView* shelf_view);
@@ -140,8 +142,8 @@ class ASH_EXPORT ShelfButton : public views::Button {
   // showing and used to detect if the menu was deleted while running.
   bool* destroyed_flag_;
 
-  // Whether the touchable context menu is enabled.
-  const bool is_touchable_app_context_menu_enabled_;
+  // Whether the notification indicator is enabled.
+  const bool is_notification_indicator_enabled_;
 
   // A timer to defer showing drag UI when the shelf button is pressed.
   base::OneShotTimer drag_timer_;

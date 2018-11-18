@@ -38,11 +38,11 @@ from telemetry.internal.util import webpagereplay_go_server
 from telemetry.internal.util import binary_manager
 
 
-class NoCyglogDataError(Exception):
-  """An error used to indicate that no cyglog data was collected."""
+class NoProfileDataError(Exception):
+  """An error used to indicate that no profile data was collected."""
 
   def __init__(self, value):
-    super(NoCyglogDataError, self).__init__()
+    super(NoProfileDataError, self).__init__()
     self.value = value
 
   def __str__(self):
@@ -174,39 +174,59 @@ class WprManager(object):
 
 
 class AndroidProfileTool(object):
-  """A utility for generating cygprofile data for chrome on andorid.
+  """A utility for generating orderfile profile data for chrome on android.
 
   Runs cygprofile_unittest found in output_directory, does profiling runs,
-  and pulls the data to the local machine in output_directory/cyglog_data.
+  and pulls the data to the local machine in output_directory/profile_data.
   """
 
-  _DEVICE_CYGLOG_DIR = '/data/local/tmp/chrome/cyglog'
+  _DEVICE_PROFILE_DIR = '/data/local/tmp/chrome/orderfile'
+
+  # Old profile data directories that used to be used. These are cleaned up in
+  # order to keep devices tidy.
+  _LEGACY_PROFILE_DIRS = ['/data/local/tmp/chrome/cyglog']
 
   TEST_URL = 'https://www.google.com/#hl=en&q=science'
   _WPR_ARCHIVE = os.path.join(
       os.path.dirname(__file__), 'memory_top_10_mobile_000.wprgo')
 
-  def __init__(self, output_directory, host_cyglog_dir, use_wpr, urls,
-               simulate_user):
+  def __init__(self, output_directory, host_profile_dir, use_wpr, urls,
+               simulate_user, device=None):
     """Constructor.
 
     Args:
       output_directory: (str) Chrome build directory.
-      host_cyglog_dir: (str) Where to store the profiles.
+      host_profile_dir: (str) Where to store the profiles on the host.
       use_wpr: (bool) Whether to use Web Page Replay.
       urls: (str) URLs to load. Have to be contained in the WPR archive if
                   use_wpr is True.
       simulate_user: (bool) Whether to simulate a user.
     """
-    devices = device_utils.DeviceUtils.HealthyDevices()
-    self._device = devices[0]
+    if device is None:
+      devices = device_utils.DeviceUtils.HealthyDevices()
+      assert len(devices) == 1, 'Expected exactly one connected device'
+      self._device = devices[0]
+    else:
+      self._device = device_utils.DeviceUtils(device)
     self._cygprofile_tests = os.path.join(
         output_directory, 'cygprofile_unittests')
-    self._host_cyglog_dir = host_cyglog_dir
+    self._host_profile_dir = host_profile_dir
     self._use_wpr = use_wpr
     self._urls = urls
     self._simulate_user = simulate_user
     self._SetUpDevice()
+    self._pregenerated_profiles = None
+
+  def SetPregeneratedProfiles(self, files):
+    """Set pregenerated profiles.
+
+    The pregenerated files will be returned as profile data instead of running
+    an actual profiling step.
+
+    Args:
+      files: ([str]) List of pregenerated files.
+    """
+    self._pregenerated_profiles = files
 
   def RunCygprofileTests(self):
     """Run the cygprofile unit tests suite on the device.
@@ -238,8 +258,12 @@ class AndroidProfileTool(object):
       A list of cygprofile data files.
 
     Raises:
-      NoCyglogDataError: No data was found on the device.
+      NoProfileDataError: No data was found on the device.
     """
+    if self._pregenerated_profiles:
+      logging.info('Using pregenerated profiles instead of running profile')
+      logging.info('Profile files: %s', '\n'.join(self._pregenerated_profiles))
+      return self._pregenerated_profiles
     self._Install(apk)
     try:
       changer = self._SetChromeFlags(package_info)
@@ -253,9 +277,47 @@ class AndroidProfileTool(object):
     finally:
       self._RestoreChromeFlags(changer)
 
-    data = self._PullCyglogData()
+    data = self._PullProfileData()
     self._DeleteDeviceData()
     return data
+
+  def CollectSystemHealthProfile(self, apk):
+    """Run the orderfile system health benchmarks and collect log files.
+
+    Args:
+      apk: The location of the chrome apk file to profile.
+
+    Returns:
+      A list of cygprofile data files.
+
+    Raises:
+      NoProfileDataError: No data was found on the device.
+    """
+    self._SetUpDeviceFolders()
+    self._RunCommand(['tools/perf/run_benchmark',
+                      '--device={}'.format(self._device.serial),
+                      '--browser=exact',
+                      '--browser-executable={}'.format(apk),
+                      'orderfile_generation.training'])
+    data = self._PullProfileData()
+    self._DeleteDeviceData()
+    return data
+
+  @classmethod
+  def _RunCommand(cls, command):
+    """Run a command from current build directory root.
+
+    Args:
+      command: A list of command strings.
+
+    Returns:
+      The process's return code.
+    """
+    root = constants.DIR_SOURCE_ROOT
+    print 'Executing {} in {}'.format(' '.join(command), root)
+    process = subprocess.Popen(command, cwd=root, env=os.environ)
+    process.wait()
+    return process.returncode
 
   def _RunProfileCollection(self, package_info, simulate_user):
     """Runs the profile collection tasks.
@@ -308,7 +370,7 @@ class AndroidProfileTool(object):
     """When profiling, files are output to the disk by every process.  This
     means running without sandboxing enabled.
     """
-    # We need to have adb root in order to pull cyglog data
+    # We need to have adb root in order to pull profile data
     try:
       print 'Enabling root...'
       self._device.EnableRoot()
@@ -334,18 +396,18 @@ class AndroidProfileTool(object):
       changer.Restore()
 
   def _SetUpDeviceFolders(self):
-    """Creates folders on the device to store cyglog data."""
+    """Creates folders on the device to store profile data."""
     print 'Setting up device folders...'
     self._DeleteDeviceData()
-    self._device.RunShellCommand(
-        ['mkdir', '-p', str(self._DEVICE_CYGLOG_DIR)],
-        check_return=True)
+    self._device.RunShellCommand(['mkdir', '-p', self._DEVICE_PROFILE_DIR],
+                                 check_return=True)
 
   def _DeleteDeviceData(self):
-    """Clears out cyglog storage locations on the device. """
-    self._device.RunShellCommand(
-        ['rm', '-rf', str(self._DEVICE_CYGLOG_DIR)],
-        check_return=True)
+    """Clears out profile storage locations on the device. """
+    for profile_dir in [self._DEVICE_PROFILE_DIR] + self._LEGACY_PROFILE_DIRS:
+      self._device.RunShellCommand(
+          ['rm', '-rf', str(profile_dir)],
+          check_return=True)
 
   def _StartChrome(self, package_info, url):
     print 'Launching chrome...'
@@ -360,43 +422,45 @@ class AndroidProfileTool(object):
     self._device.KillAll(package_info.package)
 
   def _DeleteHostData(self):
-    """Clears out cyglog storage locations on the host."""
-    shutil.rmtree(self._host_cyglog_dir, ignore_errors=True)
+    """Clears out profile storage locations on the host."""
+    shutil.rmtree(self._host_profile_dir, ignore_errors=True)
 
   def _SetUpHostFolders(self):
     self._DeleteHostData()
-    os.mkdir(self._host_cyglog_dir)
+    os.mkdir(self._host_profile_dir)
 
-  def _PullCyglogData(self):
-    """Pulls the cyglog data off of the device.
+  def _PullProfileData(self):
+    """Pulls the profile data off of the device.
 
     Returns:
-      A list of cyglog data files which were pulled.
+      A list of profile data files which were pulled.
 
     Raises:
-      NoCyglogDataError: No data was found on the device.
+      NoProfileDataError: No data was found on the device.
     """
-    print 'Pulling cyglog data...'
+    print 'Pulling profile data...'
     self._SetUpHostFolders()
-    self._device.PullFile(self._DEVICE_CYGLOG_DIR, self._host_cyglog_dir)
-    files = os.listdir(self._host_cyglog_dir)
-
-    if len(files) == 0:
-      raise NoCyglogDataError('No cyglog data was collected')
+    self._device.PullFile(self._DEVICE_PROFILE_DIR, self._host_profile_dir,
+                          timeout=300)
 
     # Temporary workaround/investigation: if (for unknown reason) 'adb pull' of
-    # the directory 'cyglog' into '.../Release/cyglog_data' produces
-    # '...cyglog_data/cyglog/files' instead of the usual '...cyglog_data/files',
-    # list the files deeper in the tree.
-    cyglog_dir = self._host_cyglog_dir
-    if (len(files) == 1) and (files[0] == 'cyglog'):
-      cyglog_dir = os.path.join(self._host_cyglog_dir, 'cyglog')
-      files = os.listdir(cyglog_dir)
+    # the directory 'orderfile' '.../Release/profile_data' produces
+    # '...profile_data/orderfile/files' instead of the usual
+    # '...profile_data/files', list the files deeper in the tree.
+    files = []
+    redundant_dir_root = os.path.basename(self._DEVICE_PROFILE_DIR)
+    for root_file in os.listdir(self._host_profile_dir):
+      if root_file == redundant_dir_root:
+        profile_dir = os.path.join(self._host_profile_dir, root_file)
+        files.extend(os.path.join(profile_dir, f)
+                     for f in os.listdir(profile_dir))
+      else:
+        files.append(os.path.join(self._host_profile_dir, root_file))
 
     if len(files) == 0:
-      raise NoCyglogDataError('No cyglog data was collected')
+      raise NoProfileDataError('No profile data was collected')
 
-    return [os.path.join(cyglog_dir, x) for x in files]
+    return files
 
 
 def AddProfileCollectionArguments(parser):
@@ -424,8 +488,8 @@ def CreateArgumentParser():
       help='Chromium output directory (e.g. out/Release)')
   parser.add_argument(
       '--trace-directory', type=os.path.realpath,
-      help='Directory in which cyglog traces will be stored. '
-           'Defaults to <output-directory>/cyglog_data')
+      help='Directory in which profile traces will be stored. '
+           'Defaults to <output-directory>/profile_data')
   AddProfileCollectionArguments(parser)
   return parser
 
@@ -446,8 +510,11 @@ def main():
   else:
     raise Exception('Unable to determine package info for %s' % args.apk_path)
 
+  trace_directory = args.trace_directory
+  if not trace_directory:
+    trace_directory = os.path.join(args.output_directory, 'profile_data')
   profiler = AndroidProfileTool(
-      args.output_directory, host_cyglog_dir=args.trace_directory,
+      args.output_directory, host_profile_dir=trace_directory,
       use_wpr=not args.no_wpr, urls=args.urls, simulate_user=args.simulate_user)
   profiler.CollectProfile(args.apk_path, package_info)
   return 0

@@ -51,6 +51,7 @@ namespace {
 /*
  * A union which permits us to convert between a double and two 32 bit
  * ints.
+ * TODO(jkummerow): This is undefined behavior. Use bit_cast instead.
  */
 
 #if V8_TARGET_LITTLE_ENDIAN
@@ -89,7 +90,7 @@ typedef union {
     ew_u.value = (d);              \
     (ix0) = ew_u.parts.msw;        \
     (ix1) = ew_u.parts.lsw;        \
-  } while (0)
+  } while (false)
 
 /* Get a 64-bit int from a double. */
 #define EXTRACT_WORD64(ix, d)    \
@@ -97,7 +98,7 @@ typedef union {
     ieee_double_shape_type ew_u; \
     ew_u.value = (d);            \
     (ix) = ew_u.xparts.w;        \
-  } while (0)
+  } while (false)
 
 /* Get the more significant 32 bit int from a double.  */
 
@@ -106,7 +107,7 @@ typedef union {
     ieee_double_shape_type gh_u; \
     gh_u.value = (d);            \
     (i) = gh_u.parts.msw;        \
-  } while (0)
+  } while (false)
 
 /* Get the less significant 32 bit int from a double.  */
 
@@ -115,7 +116,7 @@ typedef union {
     ieee_double_shape_type gl_u; \
     gl_u.value = (d);            \
     (i) = gl_u.parts.lsw;        \
-  } while (0)
+  } while (false)
 
 /* Set a double from two 32 bit ints.  */
 
@@ -125,7 +126,7 @@ typedef union {
     iw_u.parts.msw = (ix0);       \
     iw_u.parts.lsw = (ix1);       \
     (d) = iw_u.value;             \
-  } while (0)
+  } while (false)
 
 /* Set a double from a 64-bit int. */
 #define INSERT_WORD64(d, ix)     \
@@ -133,7 +134,7 @@ typedef union {
     ieee_double_shape_type iw_u; \
     iw_u.xparts.w = (ix);        \
     (d) = iw_u.value;            \
-  } while (0)
+  } while (false)
 
 /* Set the more significant 32 bits of a double from an int.  */
 
@@ -143,7 +144,7 @@ typedef union {
     sh_u.value = (d);            \
     sh_u.parts.msw = (v);        \
     (d) = sh_u.value;            \
-  } while (0)
+  } while (false)
 
 /* Set the less significant 32 bits of a double from an int.  */
 
@@ -153,7 +154,7 @@ typedef union {
     sl_u.value = (d);            \
     sl_u.parts.lsw = (v);        \
     (d) = sl_u.value;            \
-  } while (0)
+  } while (false)
 
 /* Support macro. */
 
@@ -1209,9 +1210,9 @@ double atan(double x) {
     if (ix > 0x7FF00000 || (ix == 0x7FF00000 && (low != 0)))
       return x + x; /* NaN */
     if (hx > 0)
-      return atanhi[3] + *(volatile double *)&atanlo[3];
+      return atanhi[3] + *const_cast<volatile double*>(&atanlo[3]);
     else
-      return -atanhi[3] - *(volatile double *)&atanlo[3];
+      return -atanhi[3] - *const_cast<volatile double*>(&atanlo[3]);
   }
   if (ix < 0x3FDC0000) {            /* |x| < 0.4375 */
     if (ix < 0x3E400000) {          /* |x| < 2^-27 */

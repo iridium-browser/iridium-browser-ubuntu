@@ -11,6 +11,8 @@ namespace blink {
 
 class HTMLVideoElement;
 class PictureInPictureWindow;
+class TreeScope;
+struct WebSize;
 
 // The PictureInPictureControllerImpl is keeping the state and implementing the
 // logic around the Picture-in-Picture feature. It is meant to be used as well
@@ -43,31 +45,28 @@ class PictureInPictureControllerImpl : public PictureInPictureController {
   // request Picture-in-Picture.
   Status IsDocumentAllowed() const;
 
-  // Implementation of PictureInPictureController.
-  Status IsElementAllowed(const HTMLVideoElement&) const override;
-
-  // Meant to be called by HTMLVideoElementPictureInPicture and DOM objects
-  // but not internally.
-  void SetPictureInPictureElement(HTMLVideoElement&);
-
-  // Meant to be called by DocumentPictureInPicture,
-  // HTMLVideoElementPictureInPicture, and DOM objects but not internally.
-  void UnsetPictureInPictureElement();
-
   // Returns element currently in Picture-in-Picture if any. Null otherwise.
   Element* PictureInPictureElement(TreeScope&) const;
 
-  // Meant to be called by HTMLVideoElementPictureInPicture, and DOM objects but
-  // not internally. It closes the current Picture-in-Picture window if any.
-  PictureInPictureWindow* CreatePictureInPictureWindow(int width, int height);
-
-  // Meant to be called by DocumentPictureInPicture,
-  // HTMLVideoElementPictureInPicture, and DOM objects but not internally.
-  void OnClosePictureInPictureWindow();
+  // Implementation of PictureInPictureController.
+  void EnterPictureInPicture(HTMLVideoElement*,
+                             ScriptPromiseResolver*) override;
+  void ExitPictureInPicture(HTMLVideoElement*, ScriptPromiseResolver*) override;
+  void SetPictureInPictureCustomControls(
+      HTMLVideoElement*,
+      const std::vector<PictureInPictureControlInfo>&) override;
+  Status IsElementAllowed(const HTMLVideoElement&) const override;
+  bool IsPictureInPictureElement(const Element*) const override;
 
   void Trace(blink::Visitor*) override;
 
  private:
+  void OnEnteredPictureInPicture(HTMLVideoElement*,
+                                 ScriptPromiseResolver*,
+                                 const WebSize& picture_in_picture_window_size);
+  void OnExitedPictureInPicture(ScriptPromiseResolver*) override;
+  void OnPictureInPictureControlClicked(const WebString& control_id) override;
+
   explicit PictureInPictureControllerImpl(Document&);
 
   // The Picture-in-Picture element for the associated document.

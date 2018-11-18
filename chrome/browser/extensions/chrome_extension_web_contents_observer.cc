@@ -22,6 +22,8 @@
 #include "content/public/common/content_switches.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
+#include "extensions/browser/extensions_browser_client.h"
+#include "extensions/browser/kiosk/kiosk_delegate.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension_messages.h"
 #include "extensions/common/extension_urls.h"
@@ -30,9 +32,6 @@
 #include "third_party/blink/public/platform/autoplay.mojom.h"
 
 using content::BrowserContext;
-
-DEFINE_WEB_CONTENTS_USER_DATA_KEY(
-    extensions::ChromeExtensionWebContentsObserver);
 
 namespace extensions {
 
@@ -71,10 +70,10 @@ void ChromeExtensionWebContentsObserver::RenderFrameCreated(
   // are allowed to use chrome://resources/ and chrome://theme/ URLs.
   if ((extension->is_extension() || extension->is_platform_app()) &&
       Manifest::IsComponentLocation(extension->location())) {
-    policy->GrantOrigin(
+    policy->GrantRequestOrigin(
         process_id, url::Origin::Create(GURL(content::kChromeUIResourcesURL)));
-    policy->GrantOrigin(process_id,
-                        url::Origin::Create(GURL(chrome::kChromeUIThemeURL)));
+    policy->GrantRequestOrigin(
+        process_id, url::Origin::Create(GURL(chrome::kChromeUIThemeURL)));
   }
 
   // Extensions, legacy packaged apps, and component platform apps are allowed
@@ -85,9 +84,9 @@ void ChromeExtensionWebContentsObserver::RenderFrameCreated(
       extension->is_legacy_packaged_app() ||
       (extension->is_platform_app() &&
        Manifest::IsComponentLocation(extension->location()))) {
-    policy->GrantOrigin(process_id,
-                        url::Origin::Create(GURL(chrome::kChromeUIFaviconURL)));
-    policy->GrantOrigin(
+    policy->GrantRequestOrigin(
+        process_id, url::Origin::Create(GURL(chrome::kChromeUIFaviconURL)));
+    policy->GrantRequestOrigin(
         process_id,
         url::Origin::Create(GURL(chrome::kChromeUIExtensionIconURL)));
   }
@@ -173,8 +172,16 @@ void ChromeExtensionWebContentsObserver::ReloadIfTerminated(
 
 void ChromeExtensionWebContentsObserver::ReadyToCommitNavigation(
     content::NavigationHandle* navigation_handle) {
+  ExtensionWebContentsObserver::ReadyToCommitNavigation(navigation_handle);
   const ExtensionRegistry* registry = ExtensionRegistry::Get(
       navigation_handle->GetWebContents()->GetBrowserContext());
+
+  const Extension* extension =
+      GetExtensionFromFrame(web_contents()->GetMainFrame(), false);
+  DCHECK(ExtensionsBrowserClient::Get()->GetKioskDelegate());
+  bool is_kiosk = extension && ExtensionsBrowserClient::Get()
+                                   ->GetKioskDelegate()
+                                   ->IsAutoLaunchedKioskApp(extension->id());
 
   // If the top most frame is an extension, packaged app, hosted app, etc. then
   // the main frame and all iframes should be able to autoplay without
@@ -182,7 +189,7 @@ void ChromeExtensionWebContentsObserver::ReadyToCommitNavigation(
   GURL url = navigation_handle->IsInMainFrame()
                  ? navigation_handle->GetURL()
                  : navigation_handle->GetWebContents()->GetLastCommittedURL();
-  if (registry->enabled_extensions().GetExtensionOrAppByURL(url)) {
+  if (is_kiosk || registry->enabled_extensions().GetExtensionOrAppByURL(url)) {
     blink::mojom::AutoplayConfigurationClientAssociatedPtr client;
     navigation_handle->GetRenderFrameHost()
         ->GetRemoteAssociatedInterfaces()

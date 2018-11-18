@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2017 The Android Open foo Project
+ * Copyright (C) 2018 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,13 +23,15 @@
 
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
+#include "perfetto/base/file_utils.h"
+#include "perfetto/base/temp_file.h"
+#include "perfetto/base/unix_socket.h"
 #include "perfetto/base/utils.h"
 #include "perfetto/ipc/service_descriptor.h"
 #include "perfetto/ipc/service_proxy.h"
 #include "src/base/test/test_task_runner.h"
 #include "src/ipc/buffered_frame_deserializer.h"
 #include "src/ipc/test/test_socket.h"
-#include "src/ipc/unix_socket.h"
 
 #include "src/ipc/test/client_unittest_messages.pb.h"
 
@@ -77,7 +79,7 @@ class MockEventListener : public ServiceProxy::EventListener {
 
 // A fake host implementation. Listens on |kSockName| and replies to IPC
 // metohds like a real one.
-class FakeHost : public UnixSocket::EventListener {
+class FakeHost : public base::UnixSocket::EventListener {
  public:
   struct FakeMethod {
     MethodID id;
@@ -102,7 +104,7 @@ class FakeHost : public UnixSocket::EventListener {
 
   explicit FakeHost(base::TaskRunner* task_runner) {
     DESTROY_TEST_SOCK(kSockName);
-    listening_sock = UnixSocket::Listen(kSockName, this, task_runner);
+    listening_sock = base::UnixSocket::Listen(kSockName, this, task_runner);
     EXPECT_TRUE(listening_sock->is_listening());
   }
   ~FakeHost() override { DESTROY_TEST_SOCK(kSockName); }
@@ -116,19 +118,22 @@ class FakeHost : public UnixSocket::EventListener {
     return svc;
   }
 
-  // UnixSocket::EventListener implementation.
+  // base::UnixSocket::EventListener implementation.
   void OnNewIncomingConnection(
-      UnixSocket*,
-      std::unique_ptr<UnixSocket> new_connection) override {
+      base::UnixSocket*,
+      std::unique_ptr<base::UnixSocket> new_connection) override {
     ASSERT_FALSE(client_sock);
     client_sock = std::move(new_connection);
   }
 
-  void OnDataAvailable(UnixSocket* sock) override {
+  void OnDataAvailable(base::UnixSocket* sock) override {
     if (sock != client_sock.get())
       return;
     auto buf = frame_deserializer.BeginReceive();
-    size_t rsize = client_sock->Receive(buf.data, buf.size);
+    base::ScopedFile fd;
+    size_t rsize = client_sock->Receive(buf.data, buf.size, &fd);
+    if (fd)
+      received_fd_ = std::move(fd);
     EXPECT_TRUE(frame_deserializer.EndReceive(rsize));
     while (std::unique_ptr<Frame> frame = frame_deserializer.PopNextFrame())
       OnFrameReceived(*frame);
@@ -138,7 +143,7 @@ class FakeHost : public UnixSocket::EventListener {
     if (req.msg_case() == Frame::kMsgBindService) {
       auto svc_it = services.find(req.msg_bind_service().service_name());
       ASSERT_NE(services.end(), svc_it);
-      const FakeService& svc = *svc_it->second.get();
+      const FakeService& svc = *svc_it->second;
       Frame reply;
       reply.set_request_id(req.request_id());
       reply.mutable_msg_bind_service_reply()->set_success(true);
@@ -148,7 +153,7 @@ class FakeHost : public UnixSocket::EventListener {
         method->set_name(method_it.first);
         method->set_id(method_it.second->id);
       }
-      return Reply(reply);
+      Reply(reply);
     } else if (req.msg_case() == Frame::kMsgInvokeMethod) {
       // Lookup the service and method.
       bool has_more = false;
@@ -156,12 +161,10 @@ class FakeHost : public UnixSocket::EventListener {
         Frame reply;
         reply.set_request_id(req.request_id());
         for (const auto& svc : services) {
-          if (static_cast<int32_t>(svc.second->id) !=
-              req.msg_invoke_method().service_id())
+          if (svc.second->id != req.msg_invoke_method().service_id())
             continue;
           for (const auto& method : svc.second->methods) {
-            if (static_cast<int32_t>(method.second->id) !=
-                req.msg_invoke_method().method_id())
+            if (method.second->id != req.msg_invoke_method().method_id())
               continue;
             method.second->OnInvoke(req.msg_invoke_method(),
                                     reply.mutable_msg_invoke_method_reply());
@@ -180,16 +183,18 @@ class FakeHost : public UnixSocket::EventListener {
   void Reply(const Frame& frame) {
     auto buf = BufferedFrameDeserializer::Serialize(frame);
     ASSERT_TRUE(client_sock->is_connected());
-    EXPECT_TRUE(client_sock->Send(buf.data(), buf.size(), next_reply_fd));
+    EXPECT_TRUE(client_sock->Send(buf.data(), buf.size(), next_reply_fd,
+                                  base::UnixSocket::BlockingMode::kBlocking));
     next_reply_fd = -1;
   }
 
   BufferedFrameDeserializer frame_deserializer;
-  std::unique_ptr<UnixSocket> listening_sock;
-  std::unique_ptr<UnixSocket> client_sock;
+  std::unique_ptr<base::UnixSocket> listening_sock;
+  std::unique_ptr<base::UnixSocket> client_sock;
   std::map<std::string, std::unique_ptr<FakeService>> services;
   ServiceID last_service_id = 0;
   int next_reply_fd = -1;
+  base::ScopedFile received_fd_;
 };  // FakeHost.
 
 class ClientImplTest : public ::testing::Test {
@@ -240,7 +245,7 @@ TEST_F(ClientImplTest, BindAndInvokeMethod) {
   RequestProto req;
   req.set_data("req_data");
   auto on_invoke_reply = task_runner_->CreateCheckpoint("on_invoke_reply");
-  DeferredBase deferred_reply(
+  Deferred<ProtoMessage> deferred_reply(
       [on_invoke_reply](AsyncResult<ProtoMessage> reply) {
         EXPECT_TRUE(reply.success());
         on_invoke_reply();
@@ -250,7 +255,7 @@ TEST_F(ClientImplTest, BindAndInvokeMethod) {
 
   // Invoke an invalid method.
   auto on_invalid_invoke = task_runner_->CreateCheckpoint("on_invalid_invoke");
-  DeferredBase deferred_reply2(
+  Deferred<ProtoMessage> deferred_reply2(
       [on_invalid_invoke](AsyncResult<ProtoMessage> reply) {
         EXPECT_FALSE(reply.success());
         on_invalid_invoke();
@@ -258,6 +263,35 @@ TEST_F(ClientImplTest, BindAndInvokeMethod) {
   RequestProto empty_req;
   proxy->BeginInvoke("InvalidMethod", empty_req, std::move(deferred_reply2));
   task_runner_->RunUntilCheckpoint("on_invalid_invoke");
+}
+
+// Tests that when invoking a method without binding a callback, the resulting
+// request has the |drop_reply| flag set.
+TEST_F(ClientImplTest, InvokeMethodDropReply) {
+  auto* host_svc = host_->AddFakeService("FakeSvc");
+  auto* host_method = host_svc->AddFakeMethod("FakeMethod1");
+
+  std::unique_ptr<FakeProxy> proxy(new FakeProxy("FakeSvc", &proxy_events_));
+
+  // Bind |proxy| to the fake host.
+  cli_->BindService(proxy->GetWeakPtr());
+  auto on_connect = task_runner_->CreateCheckpoint("on_connect");
+  EXPECT_CALL(proxy_events_, OnConnect()).WillOnce(Invoke(on_connect));
+  task_runner_->RunUntilCheckpoint("on_connect");
+
+  auto on_req_received = task_runner_->CreateCheckpoint("on_req_received");
+  EXPECT_CALL(*host_method, OnInvoke(_, _))
+      .WillOnce(Invoke([on_req_received](const Frame::InvokeMethod& req,
+                                         Frame::InvokeMethodReply*) {
+        RequestProto req_args;
+        EXPECT_TRUE(req.drop_reply());
+        on_req_received();
+      }));
+
+  // Invoke a method without binding any callback to the Deferred object.
+  Deferred<ProtoMessage> no_callback;
+  proxy->BeginInvoke("FakeMethod1", RequestProto(), std::move(no_callback));
+  task_runner_->RunUntilCheckpoint("on_req_received");
 }
 
 // Like BindAndInvokeMethod, but this time invoke a streaming method that
@@ -291,7 +325,7 @@ TEST_F(ClientImplTest, BindAndInvokeStreamingMethod) {
   req.set_data("req_data");
   auto on_last_reply = task_runner_->CreateCheckpoint("on_last_reply");
   int replies_seen = 0;
-  DeferredBase deferred_reply(
+  Deferred<ProtoMessage> deferred_reply(
       [on_last_reply, &replies_seen](AsyncResult<ProtoMessage> reply) {
         EXPECT_TRUE(reply.success());
         replies_seen++;
@@ -303,8 +337,6 @@ TEST_F(ClientImplTest, BindAndInvokeStreamingMethod) {
   ASSERT_EQ(kNumReplies, replies_seen);
 }
 
-// Like BindAndInvokeMethod, but this time invoke a streaming method that
-// provides > 1 reply per invocation.
 TEST_F(ClientImplTest, ReceiveFileDescriptor) {
   auto* host_svc = host_->AddFakeService("FakeSvc");
   auto* host_method = host_svc->AddFakeMethod("FakeMethod1");
@@ -316,16 +348,15 @@ TEST_F(ClientImplTest, ReceiveFileDescriptor) {
   EXPECT_CALL(proxy_events_, OnConnect()).WillOnce(Invoke(on_connect));
   task_runner_->RunUntilCheckpoint("on_connect");
 
-  FILE* tx_file = tmpfile();  // Automatically unlinked from the filesystem.
+  base::TempFile tx_file = base::TempFile::CreateUnlinked();
   static constexpr char kFileContent[] = "shared file";
-  fwrite(kFileContent, sizeof(kFileContent), 1, tx_file);
-  fflush(tx_file);
-  host_->next_reply_fd = fileno(tx_file);
+  ASSERT_EQ(base::WriteAll(tx_file.fd(), kFileContent, sizeof(kFileContent)),
+            sizeof(kFileContent));
+  host_->next_reply_fd = tx_file.fd();
 
-  // Invoke a valid method, reply kNumReplies times.
   EXPECT_CALL(*host_method, OnInvoke(_, _))
       .WillOnce(Invoke(
-          [](const Frame::InvokeMethod& req, Frame::InvokeMethodReply* reply) {
+          [](const Frame::InvokeMethod&, Frame::InvokeMethodReply* reply) {
             RequestProto req_args;
             reply->set_reply_proto(ReplyProto().SerializeAsString());
             reply->set_success(true);
@@ -333,15 +364,59 @@ TEST_F(ClientImplTest, ReceiveFileDescriptor) {
 
   RequestProto req;
   auto on_reply = task_runner_->CreateCheckpoint("on_reply");
-  DeferredBase deferred_reply([on_reply](AsyncResult<ProtoMessage> reply) {
-    EXPECT_TRUE(reply.success());
-    on_reply();
-  });
+  Deferred<ProtoMessage> deferred_reply(
+      [on_reply](AsyncResult<ProtoMessage> reply) {
+        EXPECT_TRUE(reply.success());
+        on_reply();
+      });
   proxy->BeginInvoke("FakeMethod1", req, std::move(deferred_reply));
   task_runner_->RunUntilCheckpoint("on_reply");
 
-  fclose(tx_file);
+  tx_file.ReleaseFD();
   base::ScopedFile rx_fd = cli_->TakeReceivedFD();
+  ASSERT_TRUE(rx_fd);
+  char buf[sizeof(kFileContent)] = {};
+  ASSERT_EQ(0, lseek(*rx_fd, 0, SEEK_SET));
+  ASSERT_EQ(static_cast<long>(sizeof(buf)),
+            PERFETTO_EINTR(read(*rx_fd, buf, sizeof(buf))));
+  ASSERT_STREQ(kFileContent, buf);
+}
+
+TEST_F(ClientImplTest, SendFileDescriptor) {
+  auto* host_svc = host_->AddFakeService("FakeSvc");
+  auto* host_method = host_svc->AddFakeMethod("FakeMethod1");
+
+  // Create and bind |proxy| to the fake host.
+  std::unique_ptr<FakeProxy> proxy(new FakeProxy("FakeSvc", &proxy_events_));
+  cli_->BindService(proxy->GetWeakPtr());
+  auto on_connect = task_runner_->CreateCheckpoint("on_connect");
+  EXPECT_CALL(proxy_events_, OnConnect()).WillOnce(Invoke(on_connect));
+  task_runner_->RunUntilCheckpoint("on_connect");
+
+  base::TempFile tx_file = base::TempFile::CreateUnlinked();
+  static constexpr char kFileContent[] = "shared file";
+  ASSERT_EQ(base::WriteAll(tx_file.fd(), kFileContent, sizeof(kFileContent)),
+            sizeof(kFileContent));
+  EXPECT_CALL(*host_method, OnInvoke(_, _))
+      .WillOnce(Invoke(
+          [](const Frame::InvokeMethod&, Frame::InvokeMethodReply* reply) {
+            RequestProto req_args;
+            reply->set_reply_proto(ReplyProto().SerializeAsString());
+            reply->set_success(true);
+          }));
+
+  RequestProto req;
+  auto on_reply = task_runner_->CreateCheckpoint("on_reply");
+  Deferred<ProtoMessage> deferred_reply(
+      [on_reply](AsyncResult<ProtoMessage> reply) {
+        EXPECT_TRUE(reply.success());
+        on_reply();
+      });
+  proxy->BeginInvoke("FakeMethod1", req, std::move(deferred_reply),
+                     tx_file.fd());
+  task_runner_->RunUntilCheckpoint("on_reply");
+
+  base::ScopedFile rx_fd = std::move(host_->received_fd_);
   ASSERT_TRUE(rx_fd);
   char buf[sizeof(kFileContent)] = {};
   ASSERT_EQ(0, lseek(*rx_fd, 0, SEEK_SET));
@@ -429,10 +504,11 @@ TEST_F(ClientImplTest, DropCallbacksIfServiceProxyIsDestroyed) {
       }));
 
   auto on_reject = task_runner_->CreateCheckpoint("on_reject");
-  DeferredBase deferred_reply([on_reject](AsyncResult<ProtoMessage> res) {
-    ASSERT_FALSE(res.success());
-    on_reject();
-  });
+  Deferred<ProtoMessage> deferred_reply(
+      [on_reject](AsyncResult<ProtoMessage> res) {
+        ASSERT_FALSE(res.success());
+        on_reject();
+      });
   proxy->BeginInvoke("FakeMethod1", req, std::move(deferred_reply));
   proxy.reset();
   task_runner_->RunUntilCheckpoint("on_reject");

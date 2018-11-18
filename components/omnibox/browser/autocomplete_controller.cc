@@ -29,11 +29,11 @@
 #include "components/omnibox/browser/bookmark_provider.h"
 #include "components/omnibox/browser/builtin_provider.h"
 #include "components/omnibox/browser/clipboard_url_provider.h"
+#include "components/omnibox/browser/document_provider.h"
 #include "components/omnibox/browser/history_quick_provider.h"
 #include "components/omnibox/browser/history_url_provider.h"
 #include "components/omnibox/browser/keyword_provider.h"
 #include "components/omnibox/browser/omnibox_field_trial.h"
-#include "components/omnibox/browser/physical_web_provider.h"
 #include "components/omnibox/browser/search_provider.h"
 #include "components/omnibox/browser/shortcuts_provider.h"
 #include "components/omnibox/browser/zero_suggest_provider.h"
@@ -41,6 +41,7 @@
 #include "components/search_engines/template_url.h"
 #include "components/search_engines/template_url_service.h"
 #include "components/strings/grit/components_strings.h"
+#include "ui/base/device_form_factor.h"
 #include "ui/base/l10n/l10n_util.h"
 
 #if !defined(OS_IOS)
@@ -147,14 +148,6 @@ void AutocompleteMatchToAssistedQuery(
       *subtype = 177;
       return;
     }
-    case AutocompleteMatchType::PHYSICAL_WEB: {
-      *subtype = 190;
-      return;
-    }
-    case AutocompleteMatchType::PHYSICAL_WEB_OVERFLOW: {
-      *subtype = 191;
-      return;
-    }
     default: {
       // This value indicates a native chrome suggestion with no named subtype
       // (yet).
@@ -191,8 +184,13 @@ bool IsTrivialAutocompletion(const AutocompleteMatch& match) {
 
 // Whether this autocomplete match type supports custom descriptions.
 bool AutocompleteMatchHasCustomDescription(const AutocompleteMatch& match) {
+  if (ui::GetDeviceFormFactor() == ui::DEVICE_FORM_FACTOR_DESKTOP &&
+      OmniboxFieldTrial::IsNewAnswerLayoutEnabled() &&
+      match.type == AutocompleteMatchType::CALCULATOR) {
+    return true;
+  }
   return match.type == AutocompleteMatchType::SEARCH_SUGGEST_ENTITY ||
-      match.type == AutocompleteMatchType::SEARCH_SUGGEST_PROFILE;
+         match.type == AutocompleteMatchType::SEARCH_SUGGEST_PROFILE;
 }
 
 }  // namespace
@@ -203,6 +201,7 @@ AutocompleteController::AutocompleteController(
     int provider_types)
     : delegate_(delegate),
       provider_client_(std::move(provider_client)),
+      document_provider_(nullptr),
       history_url_provider_(nullptr),
       keyword_provider_(nullptr),
       search_provider_(nullptr),
@@ -210,6 +209,7 @@ AutocompleteController::AutocompleteController(
       stop_timer_duration_(OmniboxFieldTrial::StopTimerFieldTrialDuration()),
       done_(true),
       in_start_(false),
+      first_query_(true),
       search_service_worker_signal_sent_(false),
       template_url_service_(provider_client_->GetTemplateURLService()) {
   provider_types &= ~OmniboxFieldTrial::GetDisabledProviderTypes();
@@ -240,6 +240,10 @@ AutocompleteController::AutocompleteController(
     if (zero_suggest_provider_)
       providers_.push_back(zero_suggest_provider_);
   }
+  if (provider_types & AutocompleteProvider::TYPE_DOCUMENT) {
+    document_provider_ = DocumentProvider::Create(provider_client_.get(), this);
+    providers_.push_back(document_provider_);
+  }
   if (provider_types & AutocompleteProvider::TYPE_CLIPBOARD_URL) {
 #if !defined(OS_IOS)
     // On iOS, a global ClipboardRecentContent should've been created by now
@@ -260,12 +264,6 @@ AutocompleteController::AutocompleteController(
           provider_client_.get(), history_url_provider_,
           ClipboardRecentContent::GetInstance()));
     }
-  }
-  if (provider_types & AutocompleteProvider::TYPE_PHYSICAL_WEB) {
-    PhysicalWebProvider* physical_web_provider = PhysicalWebProvider::Create(
-        provider_client_.get(), history_url_provider_);
-    if (physical_web_provider)
-      providers_.push_back(physical_web_provider);
   }
 
   base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
@@ -316,7 +314,7 @@ void AutocompleteController::Start(const AutocompleteInput& input) {
   // Start the new query.
   in_start_ = true;
   base::TimeTicks start_time = base::TimeTicks::Now();
-  for (Providers::iterator i(providers_.begin()); i != providers_.end(); ++i) {
+  for (auto i(providers_.begin()); i != providers_.end(); ++i) {
     // TODO(mpearson): Remove timing code once bug 178705 is resolved.
     base::TimeTicks provider_start_time = base::TimeTicks::Now();
     (*i)->Start(input_, minimal_changes);
@@ -354,6 +352,17 @@ void AutocompleteController::Start(const AutocompleteInput& input) {
   // need the edit model to update the display.
   UpdateResult(false, true);
 
+  // Omnibox has dependencies that may be lazily initialized. This metric will
+  // help tracking regression on the first use.
+  if (first_query_) {
+    base::TimeTicks end_time = base::TimeTicks::Now();
+    base::HistogramBase* counter =
+        base::Histogram::FactoryGet("Omnibox.WarmupTime", 1, 1000, 50,
+                                    base::Histogram::kUmaTargetedHistogramFlag);
+    counter->Add(static_cast<int>((end_time - start_time).InMilliseconds()));
+    first_query_ = false;
+  }
+
   // If the input looks like a query, send a signal predicting that the user is
   // going to issue a search (either to the default search engine or to a
   // keyword search engine, as indicated by the destination_url). This allows
@@ -386,7 +395,7 @@ void AutocompleteController::DeleteMatch(const AutocompleteMatch& match) {
   DCHECK(match.SupportsDeletion());
 
   // Delete duplicate matches attached to the main match first.
-  for (ACMatches::const_iterator it(match.duplicate_matches.begin());
+  for (auto it(match.duplicate_matches.begin());
        it != match.duplicate_matches.end(); ++it) {
     if (it->deletable)
       it->provider->DeleteMatch(*it);
@@ -420,8 +429,7 @@ void AutocompleteController::OnProviderUpdate(bool updated_matches) {
 void AutocompleteController::AddProvidersInfo(
     ProvidersInfo* provider_info) const {
   provider_info->clear();
-  for (Providers::const_iterator i(providers_.begin()); i != providers_.end();
-       ++i) {
+  for (auto i(providers_.begin()); i != providers_.end(); ++i) {
     // Add per-provider info, if any.
     (*i)->AddProviderInfo(provider_info);
 
@@ -441,7 +449,7 @@ void AutocompleteController::ResetSession() {
 void AutocompleteController::UpdateMatchDestinationURLWithQueryFormulationTime(
     base::TimeDelta query_formulation_time,
     AutocompleteMatch* match) const {
-  if (!match->search_terms_args.get() ||
+  if (!match->search_terms_args ||
       match->search_terms_args->assisted_query_stats.empty())
     return;
 
@@ -504,8 +512,19 @@ void AutocompleteController::UpdateResult(
        i != providers_.end(); ++i)
     result_.AppendMatches(input_, (*i)->matches());
 
+  if (OmniboxFieldTrial::GetPedalSuggestionMode() ==
+      OmniboxFieldTrial::PedalSuggestionMode::DEDICATED)
+    result_.AppendDedicatedPedalMatches(provider_client_.get(), input_);
+
   // Sort the matches and trim to a small number of "best" matches.
   result_.SortAndCull(input_, template_url_service_);
+
+  if (OmniboxFieldTrial::IsTabSwitchSuggestionsEnabled())
+    result_.ConvertOpenTabMatches(provider_client_.get(), &input_);
+
+  if (OmniboxFieldTrial::GetPedalSuggestionMode() ==
+      OmniboxFieldTrial::PedalSuggestionMode::IN_SUGGESTION)
+    result_.ConvertInSuggestionPedalMatches(provider_client_.get());
 
   // Need to validate before invoking CopyOldMatches as the old matches are not
   // valid against the current input.
@@ -564,8 +583,7 @@ void AutocompleteController::UpdateAssociatedKeywords(
       keyword_provider_->GetKeywordForText(input_.text());
 
   std::set<base::string16> keywords;
-  for (ACMatches::iterator match(result->begin()); match != result->end();
-       ++match) {
+  for (auto match(result->begin()); match != result->end(); ++match) {
     base::string16 keyword(
         match->GetSubstitutingExplicitlyInvokedKeyword(template_url_service_));
     if (!keyword.empty()) {
@@ -607,8 +625,7 @@ void AutocompleteController::UpdateAssociatedKeywords(
 void AutocompleteController::UpdateKeywordDescriptions(
     AutocompleteResult* result) {
   base::string16 last_keyword;
-  for (AutocompleteResult::iterator i(result->begin()); i != result->end();
-       ++i) {
+  for (auto i(result->begin()); i != result->end(); ++i) {
     if (AutocompleteMatch::IsSearchType(i->type)) {
       if (AutocompleteMatchHasCustomDescription(*i))
         continue;
@@ -648,8 +665,7 @@ void AutocompleteController::UpdateAssistedQueryStats(
   int count = 0;
   size_t last_type = base::string16::npos;
   size_t last_subtype = base::string16::npos;
-  for (ACMatches::iterator match(result->begin()); match != result->end();
-       ++match) {
+  for (auto match(result->begin()); match != result->end(); ++match) {
     size_t type = base::string16::npos;
     size_t subtype = base::string16::npos;
     AutocompleteMatchToAssistedQuery(
@@ -672,7 +688,7 @@ void AutocompleteController::UpdateAssistedQueryStats(
     AutocompleteMatch* match = result->match_at(index);
     const TemplateURL* template_url =
         match->GetTemplateURL(template_url_service_, false);
-    if (!template_url || !match->search_terms_args.get())
+    if (!template_url || !match->search_terms_args)
       continue;
     std::string selected_index;
     // Prevent trivial suggestions from getting credit for being selected.
@@ -719,11 +735,9 @@ void AutocompleteController::StartExpireTimer() {
 }
 
 void AutocompleteController::StartStopTimer() {
-  stop_timer_.Start(FROM_HERE,
-                    stop_timer_duration_,
-                    base::Bind(&AutocompleteController::StopHelper,
-                               base::Unretained(this),
-                               false, true));
+  stop_timer_.Start(FROM_HERE, stop_timer_duration_,
+                    base::BindOnce(&AutocompleteController::StopHelper,
+                                   base::Unretained(this), false, true));
 }
 
 void AutocompleteController::StopHelper(bool clear_result,

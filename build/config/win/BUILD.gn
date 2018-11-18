@@ -8,16 +8,11 @@ import("//build/config/clang/clang.gni")
 import("//build/config/compiler/compiler.gni")
 import("//build/config/sanitizers/sanitizers.gni")
 import("//build/config/win/visual_studio_version.gni")
+import("//build/timestamp.gni")
 import("//build/toolchain/goma.gni")
 import("//build/toolchain/toolchain.gni")
 
 assert(is_win)
-
-if (disable_goma) {
-  goma_disabled = "true"
-} else {
-  goma_disabled = "false"
-}
 
 declare_args() {
   # Set this to true to enable static analysis through Visual Studio's
@@ -42,6 +37,15 @@ declare_args() {
   #   "server" - Windows Server Applications
   #   "desktop" - Windows Desktop Applications
   target_winuwp_family = "app"
+
+  # Set this to use clang-style diagnostics format instead of MSVC-style, which
+  # is useful in e.g. Emacs compilation mode.
+  # E.g.:
+  #  Without this, clang emits a diagnostic message like this:
+  #    foo/bar.cc(12,34): error: something went wrong
+  #  and with this switch, clang emits it like this:
+  #    foo/bar.cc:12:34: error: something went wrong
+  use_clang_diagnostics_format = false
 }
 
 # This is included by reference in the //build/config/compiler config that
@@ -98,11 +102,20 @@ config("compiler") {
       ]
     }
 
+    if (use_clang_diagnostics_format) {
+      cflags += [
+        "-Xclang",
+        "-fdiagnostics-format",
+        "-Xclang",
+        "clang",
+      ]
+    }
+
     # Clang runtime libraries, such as the sanitizer runtimes, live here.
     lib_dirs = [ "$clang_base_path/lib/clang/$clang_version/lib/windows" ]
   }
 
-  if (use_lld && !use_thin_lto) {
+  if (use_lld && !use_thin_lto && (is_clang || !use_goma)) {
     # /Brepro lets the compiler not write the mtime field in the .obj output.
     # link.exe /incremental relies on this field to work correctly, but lld
     # never looks at this timestamp, so it's safe to pass this flag with
@@ -112,24 +125,48 @@ config("compiler") {
     cflags += [ "/Brepro" ]
   }
 
+  ldflags = []
+
+  if (use_lld) {
+    # lld defaults to writing the current time in the pe/coff header.
+    # For build reproducibility, pass an explicit timestamp. See
+    # build/compute_build_timestamp.py for how the timestamp is chosen.
+    # (link.exe also writes the current time, but it doesn't have a flag to
+    # override that behavior.)
+    ldflags += [ "/TIMESTAMP:" + build_timestamp ]
+  }
+
   if (!is_debug && !is_component_build) {
     # Enable standard linker optimizations like GC (/OPT:REF) and ICF in static
     # release builds. These are implied by /PROFILE below, but /PROFILE is
-    # incompatible with /debug:fastlink and LLD ignores it as of this writing.
+    # incompatible with /debug:fastlink.
     # Release builds always want these optimizations, so enable them explicitly.
-    ldflags = [
-      "/OPT:REF",
+    # TODO(crbug.com/884545): Remove the checks for use_libfuzzer when
+    # libFuzzer's issues with /OPT:REF are resolved upstream.
+    if (!use_libfuzzer) {
+      ldflags += [ "/OPT:REF" ]
+    }
+
+    ldflags += [
       "/OPT:ICF",
       "/INCREMENTAL:NO",
       "/FIXED:NO",
     ]
+
+    if (use_lld) {
+      # String tail merging leads to smaller binaries, but they don't compress
+      # as well, leading to increased mini_installer size (crbug.com/838449).
+      ldflags += [ "/OPT:NOLLDTAILMERGE" ]
+    }
 
     # TODO(siggi): Is this of any use anymore?
     # /PROFILE ensures that the PDB file contains FIXUP information (growing the
     # PDB file by about 5%) but does not otherwise alter the output binary. It
     # is enabled opportunistically for builds where it is not prohibited (not
     # supported when incrementally linking, or using /debug:fastlink).
-    if (!is_win_fastlink) {
+    # /PROFILE implies /OPT:REF. Don't use it with libFuzzer while /OPT:REF
+    # can't be used with libFuzzer. See crbug.com/884545 for more details.
+    if (!is_win_fastlink && !use_libfuzzer) {
       ldflags += [ "/PROFILE" ]
     }
   }
@@ -193,6 +230,7 @@ config("vs_code_analysis") {
 # :runtime_library vs. :compiler.
 config("runtime_library") {
   cflags = []
+  cflags_cc = []
 
   # Defines that set up the CRT.
   defines = [
@@ -201,12 +239,6 @@ config("runtime_library") {
     "_CRT_SECURE_NO_DEPRECATE",
     "_SCL_SECURE_NO_DEPRECATE",
   ]
-
-  if (is_clang) {
-    # Work around Fall Creators Update SDK bug - crbug.com/773476 has details.
-    # https://developercommunity.visualstudio.com/content/problem/131391/154-fails-to-define-deprecatedenumerator-2.html
-    defines += [ "DEPRECATEDENUMERATOR(x)=[[deprecated(x)]]" ]
-  }
 
   # Defines that set up the Windows SDK.
   defines += [
@@ -225,8 +257,9 @@ config("runtime_library") {
   }
 
   if (use_custom_libcxx) {
-    cflags_cc = [ "-I" + rebase_path("$libcxx_prefix/include", root_build_dir) ]
-    if (libcpp_is_static) {
+    cflags_cc +=
+        [ "-I" + rebase_path("$libcxx_prefix/include", root_build_dir) ]
+    if (!is_component_build) {
       defines += [ "_LIBCPP_DISABLE_VISIBILITY_ANNOTATIONS" ]
     }
 
@@ -319,7 +352,6 @@ config("sdk_link") {
                                         current_os,
                                         current_cpu,
                                         "none",
-                                        goma_disabled,
                                       ],
                                       "scope")
 
@@ -366,7 +398,10 @@ config("cfi_linker") {
   # turned on either.
   # CFG seems to lead to random corruption with incremental linking so turn off
   # CFG in component builds. https://crbug.com/812421
-  if (!is_debug && !is_component_build) {
+  # ASan and CFG leads to slow process startup. Chromium's test runner uses
+  # lots of child processes, so this means things are really slow. Disable CFG
+  # for now. https://crbug.com/846966
+  if (!is_debug && !is_component_build && !is_asan) {
     # Turn on CFG in msvc linker, regardless of compiler used. Turn off CFG for
     # longjmp (new in VS 2017) because it relies on compiler support which we do
     # not have enabled.
@@ -450,7 +485,9 @@ config("windowed") {
 # Incremental linking ----------------------------------------------------------
 
 incremental_linking_on_switch = [ "/INCREMENTAL" ]
-incremental_linking_off_switch = [ "/INCREMENTAL:NO" ]
+if ((!is_debug && !is_component_build) || !use_lld) {
+  incremental_linking_off_switch = [ "/INCREMENTAL:NO" ]
+}
 if (use_lld) {
   incremental_linking_on_switch += [ "/OPT:NOREF" ]
 }
@@ -473,14 +510,21 @@ config("incremental_linking") {
   ldflags = incremental_linking_on_switch
 }
 config("no_incremental_linking") {
-  ldflags = incremental_linking_off_switch
+  # Projects disable incremental linking to work around ilk file issues with
+  # link.exe. lld doesn't use ilk files and doesn't really have an incremental
+  # link mode; the only effect of the flag is that the .lib file timestamp isn't
+  # updated if the .lib doesn't change.
+  if (!use_lld) {
+    ldflags = incremental_linking_off_switch
+  }
 }
 
 # Some large modules can't handle incremental linking in some situations. This
 # config should be applied to large modules to turn off incremental linking
 # when it won't work.
 config("default_large_module_incremental_linking") {
-  if (symbol_level == 0 || (current_cpu == "x86" && is_component_build)) {
+  if (use_lld || symbol_level == 0 ||
+      (current_cpu == "x86" && is_component_build)) {
     # In these configurations, ilk file sizes stay low enough that we can
     # link incrementally.
     ldflags = default_incremental_linking_switch

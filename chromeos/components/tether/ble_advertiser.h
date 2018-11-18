@@ -7,7 +7,7 @@
 
 #include "base/macros.h"
 #include "base/observer_list.h"
-#include "components/cryptauth/remote_device.h"
+#include "components/cryptauth/remote_device_ref.h"
 
 namespace chromeos {
 
@@ -50,7 +50,7 @@ class BleAdvertiser {
   void NotifyAllAdvertisementsUnregistered();
 
  private:
-  base::ObserverList<Observer> observer_list_;
+  base::ObserverList<Observer>::Unchecked observer_list_;
 
   DISALLOW_COPY_AND_ASSIGN(BleAdvertiser);
 };

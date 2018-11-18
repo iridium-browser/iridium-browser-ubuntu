@@ -642,7 +642,7 @@ class CastBenchmark {
                       SearchVector b,
                       SearchVector c,
                       double accuracy,
-                      std::vector<linked_ptr<base::Thread> >* threads) {
+                      std::vector<std::unique_ptr<base::Thread>>* threads) {
     static int thread_num = 0;
     if (x > max) return;
     if (skip > max) {
@@ -669,10 +669,10 @@ class CastBenchmark {
   void Run() {
     // Spanning search.
 
-    std::vector<linked_ptr<base::Thread> > threads;
+    std::vector<std::unique_ptr<base::Thread>> threads;
     for (int i = 0; i < 16; i++) {
-      threads.push_back(make_linked_ptr(new base::Thread(
-          base::StringPrintf("cast_bench_thread_%d", i))));
+      threads.push_back(std::make_unique<base::Thread>(
+          base::StringPrintf("cast_bench_thread_%d", i)));
       threads[i]->Start();
     }
 
@@ -683,8 +683,9 @@ class CastBenchmark {
       a.latency.grade = 1.0;
       a.packet_drop.grade = 1.0;
       threads[0]->message_loop()->task_runner()->PostTask(
-          FROM_HERE, base::Bind(base::IgnoreResult(&CastBenchmark::RunOnePoint),
-                                base::Unretained(this), a, 1.0));
+          FROM_HERE,
+          base::BindOnce(base::IgnoreResult(&CastBenchmark::RunOnePoint),
+                         base::Unretained(this), a, 1.0));
     } else {
       SearchVector a, b, c;
       a.bitrate.base = b.bitrate.base = c.bitrate.base = 100.0;

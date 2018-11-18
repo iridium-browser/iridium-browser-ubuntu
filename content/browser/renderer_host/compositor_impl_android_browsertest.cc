@@ -2,14 +2,17 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#include "base/android/application_status_listener.h"
 #include "base/base_switches.h"
+#include "base/test/scoped_feature_list.h"
+#include "components/viz/common/features.h"
 #include "content/browser/browser_main_loop.h"
 #include "content/browser/gpu/gpu_process_host.h"
 #include "content/browser/renderer_host/compositor_impl_android.h"
 #include "content/browser/renderer_host/render_widget_host_view_android.h"
 #include "content/browser/web_contents/web_contents_impl.h"
-#include "content/common/gpu_stream_constants.h"
 #include "content/public/common/content_switches.h"
+#include "content/public/common/gpu_stream_constants.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/content_browser_test_utils.h"
@@ -26,13 +29,35 @@ namespace content {
 
 namespace {
 
-class CompositorImplLowEndBrowserTest : public ContentBrowserTest {
+enum class CompositorImplMode {
+  kNormal,
+  kViz,
+  kVizSkDDL,
+};
+
+class CompositorImplBrowserTest
+    : public testing::WithParamInterface<CompositorImplMode>,
+      public ContentBrowserTest {
  public:
-  CompositorImplLowEndBrowserTest() {}
-  void SetUpCommandLine(base::CommandLine* command_line) override {
-    command_line->AppendSwitch(switches::kEnableLowEndDeviceMode);
-    command_line->AppendSwitch(switches::kInProcessGPU);
-    content::ContentBrowserTest::SetUpCommandLine(command_line);
+  CompositorImplBrowserTest() {}
+
+  void SetUp() override {
+    switch (GetParam()) {
+      case CompositorImplMode::kNormal:
+        break;
+      case CompositorImplMode::kViz:
+        scoped_feature_list_.InitAndEnableFeature(
+            features::kVizDisplayCompositor);
+        break;
+      case CompositorImplMode::kVizSkDDL:
+        scoped_feature_list_.InitWithFeatures(
+            {features::kVizDisplayCompositor,
+             features::kUseSkiaDeferredDisplayList, features::kUseSkiaRenderer},
+            {});
+        break;
+    }
+
+    ContentBrowserTest::SetUp();
   }
 
  protected:
@@ -63,8 +88,32 @@ class CompositorImplLowEndBrowserTest : public ContentBrowserTest {
   }
 
  private:
-  DISALLOW_COPY_AND_ASSIGN(CompositorImplLowEndBrowserTest);
+  base::test::ScopedFeatureList scoped_feature_list_;
+
+  DISALLOW_COPY_AND_ASSIGN(CompositorImplBrowserTest);
 };
+
+INSTANTIATE_TEST_CASE_P(P,
+                        CompositorImplBrowserTest,
+                        ::testing::Values(CompositorImplMode::kNormal,
+                                          CompositorImplMode::kViz,
+                                          CompositorImplMode::kVizSkDDL));
+
+class CompositorImplLowEndBrowserTest : public CompositorImplBrowserTest {
+ public:
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    command_line->AppendSwitch(switches::kEnableLowEndDeviceMode);
+    command_line->AppendSwitch(switches::kInProcessGPU);
+    content::ContentBrowserTest::SetUpCommandLine(command_line);
+  }
+};
+
+// Viz on android is not yet compatible with in-process GPU. Only run in
+// kNormal mode.
+// TODO(ericrk): Make this work everywhere. https://crbug.com/851643
+INSTANTIATE_TEST_CASE_P(P,
+                        CompositorImplLowEndBrowserTest,
+                        ::testing::Values(CompositorImplMode::kNormal));
 
 // RunLoop implementation that calls glFlush() every second until it observes
 // OnContextLost().
@@ -130,8 +179,15 @@ class CompositorFrameRunLoop : public ui::WindowAndroidObserver {
   DISALLOW_COPY_AND_ASSIGN(CompositorFrameRunLoop);
 };
 
-IN_PROC_BROWSER_TEST_F(CompositorImplLowEndBrowserTest,
+IN_PROC_BROWSER_TEST_P(CompositorImplLowEndBrowserTest,
                        CompositorImplDropsResourcesOnBackground) {
+  // This test makes invalid assumptions when surface synchronization is
+  // enabled. The compositor lock is obsolete, and inspecting frames
+  // from the CompositorImpl does not guarantee renderer CompositorFrames
+  // are ready.
+  if (features::IsSurfaceSynchronizationEnabled())
+    return;
+
   auto* rwhva = render_widget_host_view_android();
   auto* compositor = compositor_impl();
   auto context = GpuBrowsertestCreateContext(
@@ -143,6 +199,8 @@ IN_PROC_BROWSER_TEST_F(CompositorImplLowEndBrowserTest,
 
   ContextLostRunLoop run_loop(context.get());
   compositor->SetVisibleForTesting(false);
+  base::android::ApplicationStatusListener::NotifyApplicationStateChange(
+      base::android::APPLICATION_STATE_HAS_STOPPED_ACTIVITIES);
   rwhva->OnRootWindowVisibilityChanged(false);
   rwhva->Hide();
 
@@ -153,6 +211,8 @@ IN_PROC_BROWSER_TEST_F(CompositorImplLowEndBrowserTest,
 
   // Become visible again:
   compositor->SetVisibleForTesting(true);
+  base::android::ApplicationStatusListener::NotifyApplicationStateChange(
+      base::android::APPLICATION_STATE_HAS_RUNNING_ACTIVITIES);
   rwhva->Show();
   rwhva->OnRootWindowVisibilityChanged(true);
 
@@ -164,6 +224,36 @@ IN_PROC_BROWSER_TEST_F(CompositorImplLowEndBrowserTest,
   CompositorFrameRunLoop(window()).RunUntilFrame();
   EXPECT_FALSE(compositor->IsLockedForTesting());
   EXPECT_TRUE(rwhva->HasValidFrame());
+}
+
+// RunLoop implementation that runs until it observes a swap with size.
+class CompositorSwapRunLoop {
+ public:
+  CompositorSwapRunLoop(CompositorImpl* compositor) : compositor_(compositor) {
+    compositor_->SetSwapCompletedWithSizeCallbackForTesting(base::BindRepeating(
+        &CompositorSwapRunLoop::DidSwap, base::Unretained(this)));
+  }
+  ~CompositorSwapRunLoop() {
+    compositor_->SetSwapCompletedWithSizeCallbackForTesting(base::DoNothing());
+  }
+
+  void RunUntilSwap() { run_loop_.Run(); }
+
+ private:
+  void DidSwap(const gfx::Size& pixel_size) {
+    EXPECT_FALSE(pixel_size.IsEmpty());
+    run_loop_.Quit();
+  }
+
+  CompositorImpl* compositor_;
+  base::RunLoop run_loop_;
+
+  DISALLOW_COPY_AND_ASSIGN(CompositorSwapRunLoop);
+};
+
+IN_PROC_BROWSER_TEST_P(CompositorImplBrowserTest,
+                       CompositorImplReceivesSwapCallbacks) {
+  CompositorSwapRunLoop(compositor_impl()).RunUntilSwap();
 }
 
 }  // namespace

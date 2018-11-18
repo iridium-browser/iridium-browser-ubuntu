@@ -8,16 +8,21 @@
 #include "base/memory/singleton.h"
 #include "build/build_config.h"
 #include "chrome/browser/chromeos/cryptauth/chrome_cryptauth_service_factory.h"
+#include "chrome/browser/chromeos/device_sync/device_sync_client_factory.h"
 #include "chrome/browser/chromeos/login/easy_unlock/easy_unlock_app_manager.h"
 #include "chrome/browser/chromeos/login/easy_unlock/easy_unlock_service.h"
 #include "chrome/browser/chromeos/login/easy_unlock/easy_unlock_service_regular.h"
 #include "chrome/browser/chromeos/login/easy_unlock/easy_unlock_service_signin_chromeos.h"
 #include "chrome/browser/chromeos/login/easy_unlock/easy_unlock_tpm_key_manager_factory.h"
+#include "chrome/browser/chromeos/multidevice_setup/multidevice_setup_client_factory.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
+#include "chrome/browser/chromeos/secure_channel/secure_channel_client_provider.h"
 #include "chrome/browser/profiles/incognito_helpers.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/grit/browser_resources.h"
+#include "chromeos/services/multidevice_setup/public/cpp/prefs.h"
+#include "chromeos/services/multidevice_setup/public/mojom/multidevice_setup.mojom.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "extensions/browser/extension_system.h"
@@ -45,6 +50,12 @@ base::FilePath GetEasyUnlockAppPath() {
   return base::FilePath();
 }
 
+bool IsFeatureAllowed(content::BrowserContext* context) {
+  return multidevice_setup::IsFeatureAllowed(
+      multidevice_setup::mojom::Feature::kSmartLock,
+      Profile::FromBrowserContext(context)->GetPrefs());
+}
+
 }  // namespace
 
 // static
@@ -68,6 +79,8 @@ EasyUnlockServiceFactory::EasyUnlockServiceFactory()
   DependsOn(
       extensions::ExtensionsBrowserClient::Get()->GetExtensionSystemFactory());
   DependsOn(EasyUnlockTpmKeyManagerFactory::GetInstance());
+  DependsOn(device_sync::DeviceSyncClientFactory::GetInstance());
+  DependsOn(multidevice_setup::MultiDeviceSetupClientFactory::GetInstance());
 }
 
 EasyUnlockServiceFactory::~EasyUnlockServiceFactory() {}
@@ -77,21 +90,33 @@ KeyedService* EasyUnlockServiceFactory::BuildServiceInstanceFor(
   EasyUnlockService* service = NULL;
   int manifest_id = 0;
 
+  if (!IsFeatureAllowed(context))
+    return nullptr;
+
   if (ProfileHelper::IsLockScreenAppProfile(
           Profile::FromBrowserContext(context))) {
     return nullptr;
   }
+
   if (ProfileHelper::IsSigninProfile(Profile::FromBrowserContext(context))) {
     if (!context->IsOffTheRecord())
       return NULL;
 
-    service = new EasyUnlockServiceSignin(Profile::FromBrowserContext(context));
+    service = new EasyUnlockServiceSignin(
+        Profile::FromBrowserContext(context),
+        secure_channel::SecureChannelClientProvider::GetInstance()
+            ->GetClient());
     manifest_id = IDR_EASY_UNLOCK_MANIFEST_SIGNIN;
   }
 
   if (!service) {
-    service =
-        new EasyUnlockServiceRegular(Profile::FromBrowserContext(context));
+    service = new EasyUnlockServiceRegular(
+        Profile::FromBrowserContext(context),
+        secure_channel::SecureChannelClientProvider::GetInstance()->GetClient(),
+        device_sync::DeviceSyncClientFactory::GetForProfile(
+            Profile::FromBrowserContext(context)),
+        multidevice_setup::MultiDeviceSetupClientFactory::GetForProfile(
+            Profile::FromBrowserContext(context)));
     manifest_id = IDR_EASY_UNLOCK_MANIFEST;
   }
 

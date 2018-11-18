@@ -11,8 +11,10 @@
 #include "base/json/json_reader.h"
 #include "base/json/json_writer.h"
 #include "base/memory/ptr_util.h"
+#include "base/test/scoped_feature_list.h"
 #include "base/test/simple_test_clock.h"
 #include "base/time/time.h"
+#include "build/build_config.h"
 #include "chrome/browser/content_settings/content_settings_mock_observer.h"
 #include "chrome/browser/content_settings/cookie_settings_factory.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
@@ -20,12 +22,16 @@
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/content_settings/core/browser/content_settings_details.h"
+#include "components/content_settings/core/browser/content_settings_ephemeral_provider.h"
+#include "components/content_settings/core/browser/content_settings_pref_provider.h"
+#include "components/content_settings/core/browser/content_settings_registry.h"
 #include "components/content_settings/core/browser/cookie_settings.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/browser/user_modifiable_provider.h"
 #include "components/content_settings/core/browser/website_settings_info.h"
 #include "components/content_settings/core/browser/website_settings_registry.h"
 #include "components/content_settings/core/common/pref_names.h"
+#include "components/content_settings/core/test/content_settings_test_utils.h"
 #include "components/prefs/pref_service.h"
 #include "components/prefs/scoped_user_pref_update.h"
 #include "components/sync_preferences/testing_pref_service_syncable.h"
@@ -52,7 +58,7 @@ bool MatchPrimaryPattern(const ContentSettingsPattern& expected_primary,
 class MockUserModifiableProvider
     : public content_settings::UserModifiableProvider {
  public:
-  ~MockUserModifiableProvider() = default;
+  ~MockUserModifiableProvider() override = default;
   MOCK_CONST_METHOD3(GetRuleIterator,
                      std::unique_ptr<content_settings::RuleIterator>(
                          ContentSettingsType,
@@ -1760,11 +1766,111 @@ TEST_F(HostContentSettingsMapTest, CanSetNarrowestSetting) {
       CONTENT_SETTINGS_TYPE_POPUPS));
 }
 
+TEST_F(HostContentSettingsMapTest, MigrateRequestingAndTopLevelOriginSettings) {
+  TestingProfile profile;
+  HostContentSettingsMap* map =
+      HostContentSettingsMapFactory::GetForProfile(&profile);
+
+  GURL requesting_origin("https://requester.com");
+  GURL embedding_origin("https://embedder.com");
+
+  ContentSettingsPattern requesting_pattern =
+      ContentSettingsPattern::FromURLNoWildcard(requesting_origin);
+  ContentSettingsPattern embedding_pattern =
+      ContentSettingsPattern::FromURLNoWildcard(embedding_origin);
+
+  // Set content settings for 2 types that use requesting and top level
+  // origin as well as one for a type that doesn't.
+  map->SetContentSettingCustomScope(requesting_pattern, embedding_pattern,
+                                    CONTENT_SETTINGS_TYPE_GEOLOCATION,
+                                    std::string(), CONTENT_SETTING_ALLOW);
+  map->SetContentSettingCustomScope(requesting_pattern, embedding_pattern,
+                                    CONTENT_SETTINGS_TYPE_MIDI_SYSEX,
+                                    std::string(), CONTENT_SETTING_ALLOW);
+
+  map->SetContentSettingCustomScope(requesting_pattern, embedding_pattern,
+                                    CONTENT_SETTINGS_TYPE_COOKIES,
+                                    std::string(), CONTENT_SETTING_ALLOW);
+
+  map->MigrateRequestingAndTopLevelOriginSettings();
+
+  ContentSettingsForOneType host_settings;
+  // Verify that all the settings are deleted except the cookies setting.
+  map->GetSettingsForOneType(CONTENT_SETTINGS_TYPE_GEOLOCATION, std::string(),
+                             &host_settings);
+  EXPECT_EQ(1u, host_settings.size());
+  EXPECT_EQ(ContentSettingsPattern::Wildcard(),
+            host_settings[0].primary_pattern);
+  EXPECT_EQ(ContentSettingsPattern::Wildcard(),
+            host_settings[0].secondary_pattern);
+
+  map->GetSettingsForOneType(CONTENT_SETTINGS_TYPE_MIDI_SYSEX, std::string(),
+                             &host_settings);
+  EXPECT_EQ(1u, host_settings.size());
+  EXPECT_EQ(ContentSettingsPattern::Wildcard(),
+            host_settings[0].primary_pattern);
+  EXPECT_EQ(ContentSettingsPattern::Wildcard(),
+            host_settings[0].secondary_pattern);
+
+  map->GetSettingsForOneType(CONTENT_SETTINGS_TYPE_COOKIES, std::string(),
+                             &host_settings);
+  EXPECT_EQ(2u, host_settings.size());
+  EXPECT_EQ(requesting_pattern, host_settings[0].primary_pattern);
+  EXPECT_EQ(embedding_pattern, host_settings[0].secondary_pattern);
+  EXPECT_EQ(ContentSettingsPattern::Wildcard(),
+            host_settings[1].primary_pattern);
+  EXPECT_EQ(ContentSettingsPattern::Wildcard(),
+            host_settings[1].secondary_pattern);
+}
+
+TEST_F(HostContentSettingsMapTest,
+       MigrateRequestingAndTopLevelOriginSettingsResetsEmbeddedSetting) {
+  TestingProfile profile;
+  HostContentSettingsMap* map =
+      HostContentSettingsMapFactory::GetForProfile(&profile);
+
+  GURL requesting_origin("https://requester.com");
+  GURL embedding_origin("https://embedder.com");
+
+  ContentSettingsPattern requesting_pattern =
+      ContentSettingsPattern::FromURLNoWildcard(requesting_origin);
+  ContentSettingsPattern embedding_pattern =
+      ContentSettingsPattern::FromURLNoWildcard(embedding_origin);
+
+  map->SetContentSettingCustomScope(requesting_pattern, embedding_pattern,
+                                    CONTENT_SETTINGS_TYPE_GEOLOCATION,
+                                    std::string(), CONTENT_SETTING_BLOCK);
+  map->SetContentSettingCustomScope(embedding_pattern, embedding_pattern,
+                                    CONTENT_SETTINGS_TYPE_GEOLOCATION,
+                                    std::string(), CONTENT_SETTING_ALLOW);
+
+  map->MigrateRequestingAndTopLevelOriginSettings();
+
+  ContentSettingsForOneType host_settings;
+  // Verify that all settings for the embedding origin are deleted. This is
+  // important so that a user is repropmted if a permission request from an
+  // embedded site they had previously blocked makes a new request.
+  map->GetSettingsForOneType(CONTENT_SETTINGS_TYPE_GEOLOCATION, std::string(),
+                             &host_settings);
+  EXPECT_EQ(1u, host_settings.size());
+  EXPECT_EQ(ContentSettingsPattern::Wildcard(),
+            host_settings[0].primary_pattern);
+  EXPECT_EQ(ContentSettingsPattern::Wildcard(),
+            host_settings[0].secondary_pattern);
+}
+
 #if BUILDFLAG(ENABLE_PLUGINS)
 // Test that existing Flash preferences should get copied into the
 // |CONTENT_SETTINGS_TYPE_PLUGINS_DATA| setting on the creation of a new
 // |HostContentSettingsMap|.
 TEST_F(HostContentSettingsMapTest, PluginDataMigration) {
+  // Avoid the test if Flash permissions are ephemeral.
+  if (content_settings::ContentSettingsRegistry::GetInstance()
+          ->Get(CONTENT_SETTINGS_TYPE_PLUGINS)
+          ->storage_behavior() ==
+      content_settings::ContentSettingsInfo::EPHEMERAL) {
+    return;
+  }
   TestingProfile profile;
   // Set a website-specific Flash preference and a pattern exception.
   std::unique_ptr<base::Value> value = base::JSONReader::Read(
@@ -1823,4 +1929,214 @@ TEST_F(HostContentSettingsMapTest, PluginDataMigrated) {
                                             CONTENT_SETTINGS_TYPE_PLUGINS_DATA,
                                             std::string(), nullptr));
 }
-#endif
+
+// Creates new instances of PrefProvider and EphemeralProvider and overrides
+// them in |host_content_settings_map|.
+void ReloadProviders(PrefService* pref_service,
+                     HostContentSettingsMap* host_content_settings_map) {
+  auto pref_provider = std::make_unique<content_settings::PrefProvider>(
+      pref_service, false, true);
+  content_settings::TestUtils::OverrideProvider(
+      host_content_settings_map, std::move(pref_provider),
+      HostContentSettingsMap::PREF_PROVIDER);
+
+  auto ephemeral_provider =
+      std::make_unique<content_settings::EphemeralProvider>(true);
+  content_settings::TestUtils::OverrideProvider(
+      host_content_settings_map, std::move(ephemeral_provider),
+      HostContentSettingsMap::EPHEMERAL_PROVIDER);
+}
+
+// Tests that Flash permissions are reset after restarting.
+// Flash, and consequently, Flash permissions are not available on Android.
+#if !defined(OS_ANDROID)
+TEST_F(HostContentSettingsMapTest, FlashPermissionsAreEphemeral) {
+  TestingProfile profile;
+  HostContentSettingsMap* map =
+      HostContentSettingsMapFactory::GetForProfile(&profile);
+  const GURL url("https://example.com");
+
+  map->SetDefaultContentSetting(CONTENT_SETTINGS_TYPE_PLUGINS,
+                                CONTENT_SETTING_ASK);
+
+  base::test::ScopedFeatureList feature_list;
+  content_settings::ContentSettingsRegistry::GetInstance()->ResetForTest();
+
+  ReloadProviders(profile.GetPrefs(), map);
+  map->SetContentSettingDefaultScope(url, url, CONTENT_SETTINGS_TYPE_PLUGINS,
+                                     std::string(), CONTENT_SETTING_ALLOW);
+  EXPECT_EQ(CONTENT_SETTING_ALLOW,
+            map->GetContentSetting(url, url, CONTENT_SETTINGS_TYPE_PLUGINS,
+                                   std::string()));
+
+  ReloadProviders(profile.GetPrefs(), map);
+  EXPECT_EQ(CONTENT_SETTING_ASK,
+            map->GetContentSetting(url, url, CONTENT_SETTINGS_TYPE_PLUGINS,
+                                   std::string()));
+}
+#endif  // !defined(OS_ANDROID)
+
+// Tests that restarting only removes ephemeral permissions. Flash, and
+// consequently, Flash permissions are not available on Android.
+#if !defined(OS_ANDROID)
+TEST_F(HostContentSettingsMapTest, MixedEphemeralAndPersistentPermissions) {
+  TestingProfile profile;
+  HostContentSettingsMap* map =
+      HostContentSettingsMapFactory::GetForProfile(&profile);
+
+  content_settings::ContentSettingsRegistry::GetInstance()->ResetForTest();
+  ReloadProviders(profile.GetPrefs(), map);
+
+  // The following two types are used as samples of ephemeral and persistent
+  // permission types. They can be replaced with any other type if required.
+  const ContentSettingsType ephemeral_type = CONTENT_SETTINGS_TYPE_PLUGINS;
+  const ContentSettingsType persistent_type = CONTENT_SETTINGS_TYPE_GEOLOCATION;
+
+  EXPECT_EQ(content_settings::ContentSettingsInfo::EPHEMERAL,
+            content_settings::ContentSettingsRegistry::GetInstance()
+                ->Get(ephemeral_type)
+                ->storage_behavior());
+  EXPECT_EQ(content_settings::ContentSettingsInfo::PERSISTENT,
+            content_settings::ContentSettingsRegistry::GetInstance()
+                ->Get(persistent_type)
+                ->storage_behavior());
+
+  const GURL url("https://example.com");
+
+  // Set default permission of both to ASK and expect it for a website.
+  map->SetDefaultContentSetting(ephemeral_type, CONTENT_SETTING_ASK);
+  map->SetDefaultContentSetting(persistent_type, CONTENT_SETTING_ASK);
+
+  EXPECT_EQ(CONTENT_SETTING_ASK,
+            map->GetContentSetting(url, url, ephemeral_type, std::string()));
+  EXPECT_EQ(CONTENT_SETTING_ASK,
+            map->GetContentSetting(url, url, persistent_type, std::string()));
+
+  // Set permission for both types and expect receiving it correctly.
+  map->SetContentSettingDefaultScope(url, url, ephemeral_type, std::string(),
+                                     CONTENT_SETTING_ALLOW);
+  map->SetContentSettingDefaultScope(url, url, persistent_type, std::string(),
+                                     CONTENT_SETTING_BLOCK);
+
+  EXPECT_EQ(CONTENT_SETTING_ALLOW,
+            map->GetContentSetting(url, url, ephemeral_type, std::string()));
+  EXPECT_EQ(CONTENT_SETTING_BLOCK,
+            map->GetContentSetting(url, url, persistent_type, std::string()));
+
+  // Restart and expect reset of ephemeral permission to ASK, while keeping
+  // the permission of persistent type.
+  ReloadProviders(profile.GetPrefs(), map);
+
+  EXPECT_EQ(CONTENT_SETTING_ASK,
+            map->GetContentSetting(url, url, ephemeral_type, std::string()));
+  EXPECT_EQ(CONTENT_SETTING_BLOCK,
+            map->GetContentSetting(url, url, persistent_type, std::string()));
+}
+#endif  // !defined(OS_ANDROID)
+
+// Test that directly writing a value to PrefProvider doesn't affect ephmeral
+// types. Flash, and consequently, Flash permissions are not available on
+// Android.
+#if !defined(OS_ANDROID)
+TEST_F(HostContentSettingsMapTest, EphemeralTypeDoesntReadFromPrefProvider) {
+  TestingProfile profile;
+  HostContentSettingsMap* map =
+      HostContentSettingsMapFactory::GetForProfile(&profile);
+
+  content_settings::ContentSettingsRegistry::GetInstance()->ResetForTest();
+  ReloadProviders(profile.GetPrefs(), map);
+
+  // CONTENT_SETTINGS_TYPE_PLUGINS is used as a sample of ephemeral permission
+  // type. It can be replaced with any other type if required.
+  const ContentSettingsType ephemeral_type = CONTENT_SETTINGS_TYPE_PLUGINS;
+
+  EXPECT_EQ(content_settings::ContentSettingsInfo::EPHEMERAL,
+            content_settings::ContentSettingsRegistry::GetInstance()
+                ->Get(ephemeral_type)
+                ->storage_behavior());
+
+  const GURL url("https://example.com");
+  const ContentSettingsPattern pattern = ContentSettingsPattern::FromURL(url);
+
+  map->SetDefaultContentSetting(ephemeral_type, CONTENT_SETTING_ASK);
+
+  content_settings::PrefProvider pref_provider(profile.GetPrefs(), true, true);
+  pref_provider.SetWebsiteSetting(
+      pattern, pattern, ephemeral_type, std::string(),
+      std::make_unique<base::Value>(CONTENT_SETTING_ALLOW).get());
+
+  EXPECT_EQ(CONTENT_SETTING_ASK,
+            map->GetContentSetting(url, url, ephemeral_type, std::string()));
+
+  ReloadProviders(profile.GetPrefs(), map);
+
+  EXPECT_EQ(CONTENT_SETTING_ASK,
+            map->GetContentSetting(url, url, ephemeral_type, std::string()));
+
+  pref_provider.ShutdownOnUIThread();
+}
+
+#endif  // !defined(OS_ANDROID)
+
+#endif  // BUILDFLAG(ENABLE_PLUGINS)
+
+TEST_F(HostContentSettingsMapTest, GetPatternsFromScopingType) {
+  const GURL primary_url("http://a.b.example1.com:8080");
+  const GURL secondary_url("http://a.b.example2.com:8080");
+
+  TestingProfile profile;
+  HostContentSettingsMap* host_content_settings_map =
+      HostContentSettingsMapFactory::GetForProfile(&profile);
+
+  // Testing case: WebsiteSettingsInfo::REQUESTING_DOMAIN_ONLY_SCOPE.
+  host_content_settings_map->SetContentSettingDefaultScope(
+      primary_url, secondary_url, CONTENT_SETTINGS_TYPE_COOKIES, std::string(),
+      CONTENT_SETTING_ALLOW);
+
+  ContentSettingsForOneType settings;
+
+  host_content_settings_map->GetSettingsForOneType(
+      CONTENT_SETTINGS_TYPE_COOKIES, std::string(), &settings);
+
+  EXPECT_EQ(settings[0].primary_pattern,
+            ContentSettingsPattern::FromURL(primary_url));
+  EXPECT_EQ(settings[0].secondary_pattern, ContentSettingsPattern::Wildcard());
+
+  // Testing case: WebsiteSettingsInfo::TOP_LEVEL_ORIGIN_ONLY_SCOPE.
+  host_content_settings_map->SetContentSettingDefaultScope(
+      primary_url, secondary_url, CONTENT_SETTINGS_TYPE_JAVASCRIPT,
+      std::string(), CONTENT_SETTING_ALLOW);
+
+  host_content_settings_map->GetSettingsForOneType(
+      CONTENT_SETTINGS_TYPE_JAVASCRIPT, std::string(), &settings);
+
+  EXPECT_EQ(settings[0].primary_pattern,
+            ContentSettingsPattern::FromURLNoWildcard(primary_url));
+  EXPECT_EQ(settings[0].secondary_pattern, ContentSettingsPattern::Wildcard());
+
+  // Testing case: WebsiteSettingsInfo::REQUESTING_ORIGIN_ONLY_SCOPE.
+  host_content_settings_map->SetContentSettingDefaultScope(
+      primary_url, secondary_url, CONTENT_SETTINGS_TYPE_NOTIFICATIONS,
+      std::string(), CONTENT_SETTING_ASK);
+
+  host_content_settings_map->GetSettingsForOneType(
+      CONTENT_SETTINGS_TYPE_NOTIFICATIONS, std::string(), &settings);
+
+  EXPECT_EQ(settings[0].primary_pattern,
+            ContentSettingsPattern::FromURLNoWildcard(primary_url));
+  EXPECT_EQ(settings[0].secondary_pattern, ContentSettingsPattern::Wildcard());
+
+  // Testing case:
+  // WebsiteSettingsInfo::REQUESTING_ORIGIN_AND_TOP_LEVEL_ORIGIN_SCOPE.
+  host_content_settings_map->SetContentSettingDefaultScope(
+      primary_url, secondary_url, CONTENT_SETTINGS_TYPE_GEOLOCATION,
+      std::string(), CONTENT_SETTING_ASK);
+
+  host_content_settings_map->GetSettingsForOneType(
+      CONTENT_SETTINGS_TYPE_GEOLOCATION, std::string(), &settings);
+
+  EXPECT_EQ(settings[0].primary_pattern,
+            ContentSettingsPattern::FromURLNoWildcard(primary_url));
+  EXPECT_EQ(settings[0].secondary_pattern,
+            ContentSettingsPattern::FromURLNoWildcard(secondary_url));
+}

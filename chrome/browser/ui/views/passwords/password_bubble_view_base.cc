@@ -7,23 +7,17 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/passwords/passwords_model_delegate.h"
+#include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "chrome/browser/ui/views/passwords/manage_passwords_icon_views.h"
 #include "chrome/browser/ui/views/passwords/password_auto_sign_in_view.h"
 #include "chrome/browser/ui/views/passwords/password_items_view.h"
 #include "chrome/browser/ui/views/passwords/password_pending_view.h"
 #include "chrome/browser/ui/views/passwords/password_save_confirmation_view.h"
-#include "ui/base/material_design/material_design_controller.h"
-
-#if !defined(OS_MACOSX) || BUILDFLAG(MAC_VIEWS_BROWSER)
-#include "chrome/browser/ui/views/frame/browser_view.h"
-#endif
 
 // static
 PasswordBubbleViewBase* PasswordBubbleViewBase::g_manage_passwords_bubble_ =
     nullptr;
-
-#if !defined(OS_MACOSX) || BUILDFLAG(MAC_VIEWS_BROWSER)
 
 // static
 void PasswordBubbleViewBase::ShowBubble(content::WebContents* web_contents,
@@ -36,15 +30,8 @@ void PasswordBubbleViewBase::ShowBubble(content::WebContents* web_contents,
 
   BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser);
   bool is_fullscreen = browser_view->IsFullscreen();
-  views::View* anchor_view = nullptr;
-  if (!is_fullscreen) {
-    if (ui::MaterialDesignController::IsSecondaryUiMaterial()) {
-      anchor_view = browser_view->GetLocationBarView();
-    } else {
-      anchor_view =
-          browser_view->GetLocationBarView()->manage_passwords_icon_view();
-    }
-  }
+  views::View* const anchor_view =
+      is_fullscreen ? nullptr : browser_view->GetLocationBarView();
 
   PasswordBubbleViewBase* bubble =
       CreateBubble(web_contents, anchor_view, gfx::Point(), reason);
@@ -55,14 +42,12 @@ void PasswordBubbleViewBase::ShowBubble(content::WebContents* web_contents,
     g_manage_passwords_bubble_->set_parent_window(
         web_contents->GetNativeView());
 
-  views::Widget* bubble_widget =
-      views::BubbleDialogDelegateView::CreateBubble(g_manage_passwords_bubble_);
-
   if (anchor_view) {
-    browser_view->GetLocationBarView()
-        ->manage_passwords_icon_view()
-        ->OnBubbleWidgetCreated(bubble_widget);
+    g_manage_passwords_bubble_->SetHighlightedButton(
+        browser_view->GetLocationBarView()->manage_passwords_icon_view());
   }
+
+  views::BubbleDialogDelegateView::CreateBubble(g_manage_passwords_bubble_);
 
   // Adjust for fullscreen after creation as it relies on the content size.
   if (is_fullscreen) {
@@ -72,8 +57,6 @@ void PasswordBubbleViewBase::ShowBubble(content::WebContents* web_contents,
 
   g_manage_passwords_bubble_->ShowForReason(reason);
 }
-
-#endif  // !defined(OS_MACOSX) || BUILDFLAG(MAC_VIEWS_BROWSER)
 
 // static
 PasswordBubbleViewBase* PasswordBubbleViewBase::CreateBubble(

@@ -3,7 +3,12 @@
 // found in the LICENSE file.
 
 #include "src/builtins/builtins-iterator-gen.h"
+#include "src/builtins/growable-fixed-array-gen.h"
 
+#include "src/builtins/builtins-string-gen.h"
+#include "src/builtins/builtins-utils-gen.h"
+#include "src/builtins/builtins.h"
+#include "src/code-stub-assembler.h"
 #include "src/heap/factory-inl.h"
 
 namespace v8 {
@@ -11,8 +16,8 @@ namespace internal {
 
 using compiler::Node;
 
-Node* IteratorBuiltinsAssembler::GetIteratorMethod(Node* context,
-                                                   Node* object) {
+TNode<Object> IteratorBuiltinsAssembler::GetIteratorMethod(Node* context,
+                                                           Node* object) {
   return GetProperty(context, object, factory()->iterator_symbol());
 }
 
@@ -37,8 +42,7 @@ IteratorRecord IteratorBuiltinsAssembler::GetIterator(Node* context,
 
   BIND(&if_not_callable);
   {
-    Node* ret = CallRuntime(Runtime::kThrowTypeError, context,
-                            SmiConstant(MessageTemplate::kNotIterable), object);
+    Node* ret = CallRuntime(Runtime::kThrowIteratorError, context, object);
     GotoIfException(ret, if_exception, exception);
     Unreachable();
   }
@@ -192,6 +196,108 @@ void IteratorBuiltinsAssembler::IteratorCloseOnException(
   BIND(&rethrow);
   CallRuntime(Runtime::kReThrow, context, exception->value());
   Unreachable();
+}
+
+TNode<JSArray> IteratorBuiltinsAssembler::IterableToList(
+    TNode<Context> context, TNode<Object> iterable, TNode<Object> iterator_fn) {
+  // 1. Let iteratorRecord be ? GetIterator(items, method).
+  IteratorRecord iterator_record = GetIterator(context, iterable, iterator_fn);
+
+  // 2. Let values be a new empty List.
+  GrowableFixedArray values(state());
+
+  Variable* vars[] = {values.var_array(), values.var_length(),
+                      values.var_capacity()};
+  Label loop_start(this, 3, vars), done(this);
+  Goto(&loop_start);
+  // 3. Let next be true.
+  // 4. Repeat, while next is not false
+  BIND(&loop_start);
+  {
+    //  a. Set next to ? IteratorStep(iteratorRecord).
+    TNode<Object> next = CAST(IteratorStep(context, iterator_record, &done));
+    //  b. If next is not false, then
+    //   i. Let nextValue be ? IteratorValue(next).
+    TNode<Object> next_value = CAST(IteratorValue(context, next));
+    //   ii. Append nextValue to the end of the List values.
+    values.Push(next_value);
+    Goto(&loop_start);
+  }
+
+  BIND(&done);
+  return values.ToJSArray(context);
+}
+
+TF_BUILTIN(IterableToList, IteratorBuiltinsAssembler) {
+  TNode<Context> context = CAST(Parameter(Descriptor::kContext));
+  TNode<Object> iterable = CAST(Parameter(Descriptor::kIterable));
+  TNode<Object> iterator_fn = CAST(Parameter(Descriptor::kIteratorFn));
+
+  Return(IterableToList(context, iterable, iterator_fn));
+}
+
+// This builtin always returns a new JSArray and is thus safe to use even in the
+// presence of code that may call back into user-JS. This builtin will take the
+// fast path if the iterable is a fast array and the Array prototype and the
+// Symbol.iterator is untouched. The fast path skips the iterator and copies the
+// backing store to the new array. Note that if the array has holes, the holes
+// will be copied to the new array, which is inconsistent with the behavior of
+// an actual iteration, where holes should be replaced with undefined (if the
+// prototype has no elements). To maintain the correct behavior for holey
+// arrays, use the builtins IterableToList or IterableToListWithSymbolLookup.
+TF_BUILTIN(IterableToListMayPreserveHoles, IteratorBuiltinsAssembler) {
+  TNode<Context> context = CAST(Parameter(Descriptor::kContext));
+  TNode<Object> iterable = CAST(Parameter(Descriptor::kIterable));
+  TNode<Object> iterator_fn = CAST(Parameter(Descriptor::kIteratorFn));
+
+  Label slow_path(this);
+
+  GotoIfNot(IsFastJSArrayWithNoCustomIteration(iterable, context), &slow_path);
+
+  // The fast path will copy holes to the new array.
+  TailCallBuiltin(Builtins::kCloneFastJSArray, context, iterable);
+
+  BIND(&slow_path);
+  TailCallBuiltin(Builtins::kIterableToList, context, iterable, iterator_fn);
+}
+
+// This builtin loads the property Symbol.iterator as the iterator, and has a
+// fast path for fast arrays and another one for strings. These fast paths will
+// only be taken if Symbol.iterator and the Iterator prototype are not modified
+// in a way that changes the original iteration behavior.
+// * In case of fast holey arrays, holes will be converted to undefined to
+// reflect iteration semantics. Note that replacement by undefined is only
+// correct when the NoElements protector is valid.
+TF_BUILTIN(IterableToListWithSymbolLookup, IteratorBuiltinsAssembler) {
+  TNode<Context> context = CAST(Parameter(Descriptor::kContext));
+  TNode<Object> iterable = CAST(Parameter(Descriptor::kIterable));
+
+  Label slow_path(this), check_string(this);
+
+  GotoIfForceSlowPath(&slow_path);
+
+  GotoIfNot(IsFastJSArrayWithNoCustomIteration(iterable, context),
+            &check_string);
+
+  // Fast path for fast JSArray.
+  TailCallBuiltin(Builtins::kCloneFastJSArrayFillingHoles, context, iterable);
+
+  BIND(&check_string);
+  {
+    StringBuiltinsAssembler string_assembler(state());
+    GotoIfNot(string_assembler.IsStringPrimitiveWithNoCustomIteration(iterable,
+                                                                      context),
+              &slow_path);
+
+    // Fast path for strings.
+    TailCallBuiltin(Builtins::kStringToList, context, iterable);
+  }
+
+  BIND(&slow_path);
+  {
+    TNode<Object> iterator_fn = GetIteratorMethod(context, iterable);
+    TailCallBuiltin(Builtins::kIterableToList, context, iterable, iterator_fn);
+  }
 }
 
 }  // namespace internal

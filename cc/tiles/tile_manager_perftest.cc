@@ -45,9 +45,9 @@ class TileManagerPerfTest : public TestLayerTreeHostBase {
                base::TimeDelta::FromMilliseconds(kTimeLimitMillis),
                kTimeCheckInterval) {}
 
-  void InitializeRenderer() override {
+  void InitializeFrameSink() override {
     host_impl()->SetVisible(true);
-    host_impl()->InitializeRenderer(layer_tree_frame_sink());
+    host_impl()->InitializeFrameSink(layer_tree_frame_sink());
     tile_manager()->SetTileTaskManagerForTesting(
         std::make_unique<FakeTileTaskManagerImpl>());
   }
@@ -219,7 +219,7 @@ class TileManagerPerfTest : public TestLayerTreeHostBase {
 
     gfx::Size layer_bounds(width, height);
     gfx::Size viewport(width / 5, height / 5);
-    host_impl()->SetViewportSize(viewport);
+    host_impl()->active_tree()->SetDeviceViewportSize(viewport);
     SetupDefaultTreesWithFixedTileSize(layer_bounds,
                                        settings.default_tile_size);
 

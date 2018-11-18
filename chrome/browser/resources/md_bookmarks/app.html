@@ -1,5 +1,6 @@
 <link rel="import" href="chrome://resources/html/polymer.html">
 
+<link rel="import" href="chrome://resources/cr_elements/shared_vars_css.html">
 <link rel="import" href="chrome://resources/html/cr/ui/splitter.html">
 <link rel="import" href="chrome://bookmarks/api_listener.html">
 <link rel="import" href="chrome://bookmarks/command_manager.html">
@@ -19,7 +20,7 @@
   <template>
     <style>
       :host {
-        color: var(--primary-text-color);
+        color: var(--cr-primary-text-color);
         display: flex;
         flex-direction: column;
         height: 100%;
@@ -46,18 +47,17 @@
 
       #splitter:hover,
       #splitter.splitter-active {
-        -webkit-border-start: 1px solid rgba(0, 0, 0, 0.1);
+        border-inline-start: 1px solid rgba(0, 0, 0, 0.1);
         opacity: 1;
         transition: opacity 100ms ease-out;
       }
 
       #sidebar {
-        -webkit-padding-start: 3px;
         display: block;
         max-width: 40%;
         min-width: var(--min-sidebar-width);
         overflow-y: auto;
-        padding-top: 8px;
+        padding: 8px 3px 0 3px;
         user-select: none;
         width: var(--min-sidebar-width);
       }
@@ -70,7 +70,7 @@
     <bookmarks-toolbar sidebar-width="[[sidebarWidth_]]" role="banner">
     </bookmarks-toolbar>
     <div id="main-container">
-       <div id="sidebar" role="navigation" aria-label="$i18n{sidebarAxLabel}">
+       <div id="sidebar" role="tree" aria-label="$i18n{sidebarAxLabel}">
          <bookmarks-folder-node item-id="0" depth="-1"></bookmarks-folder-node>
       </div>
       <div id="splitter"></div>
@@ -78,7 +78,7 @@
     </div>
     <bookmarks-router></bookmarks-router>
     <bookmarks-command-manager></bookmarks-command-manager>
-    <bookmarks-toast-manager duration="5000"></bookmarks-toast-manager>
+    <bookmarks-toast-manager duration="10000"></bookmarks-toast-manager>
   </template>
   <script src="chrome://bookmarks/app.js"></script>
 </dom-module>

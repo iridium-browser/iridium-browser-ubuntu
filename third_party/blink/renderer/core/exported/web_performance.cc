@@ -65,6 +65,10 @@ double WebPerformance::NavigationStart() const {
   return MillisecondsToSeconds(private_->timing()->navigationStart());
 }
 
+double WebPerformance::InputForNavigationStart() const {
+  return MillisecondsToSeconds(private_->timing()->inputStart());
+}
+
 double WebPerformance::UnloadEventEnd() const {
   return MillisecondsToSeconds(private_->timing()->unloadEventEnd());
 }
@@ -166,6 +170,11 @@ double WebPerformance::FirstMeaningfulPaint() const {
   return MillisecondsToSeconds(private_->timing()->FirstMeaningfulPaint());
 }
 
+double WebPerformance::FirstMeaningfulPaintCandidate() const {
+  return MillisecondsToSeconds(
+      private_->timing()->FirstMeaningfulPaintCandidate());
+}
+
 double WebPerformance::PageInteractive() const {
   return MillisecondsToSeconds(private_->timing()->PageInteractive());
 }
@@ -185,6 +194,14 @@ double WebPerformance::FirstInputDelay() const {
 
 double WebPerformance::FirstInputTimestamp() const {
   return MillisecondsToSeconds(private_->timing()->FirstInputTimestamp());
+}
+
+double WebPerformance::LongestInputDelay() const {
+  return MillisecondsToSeconds(private_->timing()->LongestInputDelay());
+}
+
+double WebPerformance::LongestInputTimestamp() const {
+  return MillisecondsToSeconds(private_->timing()->LongestInputTimestamp());
 }
 
 double WebPerformance::ParseStart() const {
@@ -216,16 +233,6 @@ double WebPerformance::ParseBlockedOnScriptExecutionFromDocumentWriteDuration()
   return MillisecondsToSeconds(
       private_->timing()
           ->ParseBlockedOnScriptExecutionFromDocumentWriteDuration());
-}
-
-double WebPerformance::AuthorStyleSheetParseDurationBeforeFCP() const {
-  return MillisecondsToSeconds(
-      private_->timing()->AuthorStyleSheetParseDurationBeforeFCP());
-}
-
-double WebPerformance::UpdateStyleDurationBeforeFCP() const {
-  return MillisecondsToSeconds(
-      private_->timing()->UpdateStyleDurationBeforeFCP());
 }
 
 WebPerformance::WebPerformance(WindowPerformance* performance)

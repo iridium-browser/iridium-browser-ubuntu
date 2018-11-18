@@ -9,14 +9,18 @@
 #include <string>
 #include <utility>
 
+#include "base/auto_reset.h"
 #include "base/containers/flat_map.h"
 #include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
 #include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
+#include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/defaults.h"
 #include "chrome/browser/extensions/tab_helper.h"
+#include "chrome/browser/lifetime/browser_shutdown.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper_delegate.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_delegate.h"
@@ -24,8 +28,13 @@
 #include "chrome/browser/ui/tabs/tab_utils.h"
 #include "chrome/browser/ui/web_contents_sizer.h"
 #include "chrome/common/url_constants.h"
+#include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/feature_engagement/buildflags.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
+#include "content/public/browser/render_process_host.h"
+#include "content/public/browser/render_widget_host.h"
+#include "content/public/browser/render_widget_host_observer.h"
+#include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
 
@@ -56,20 +65,64 @@ bool ShouldForgetOpenersForTransition(ui::PageTransition transition) {
                                       ui::PAGE_TRANSITION_AUTO_TOPLEVEL);
 }
 
+// This tracks (and reports via UMA and tracing) how long it takes before a
+// RenderWidgetHost is requested to become visible.
+class RenderWidgetHostVisibilityTracker
+    : public content::RenderWidgetHostObserver {
+ public:
+  explicit RenderWidgetHostVisibilityTracker(content::RenderWidgetHost* host)
+      : host_(host) {
+    if (!host_ || host_->GetView()->IsShowing())
+      return;
+    host_->AddObserver(this);
+    TRACE_EVENT_ASYNC_BEGIN0("ui,latency", "TabSwitchVisibilityRequest", this);
+  }
+
+  ~RenderWidgetHostVisibilityTracker() override {
+    if (host_)
+      host_->RemoveObserver(this);
+  }
+
+ private:
+  // content::RenderWidgetHostObserver:
+  void RenderWidgetHostVisibilityChanged(content::RenderWidgetHost* host,
+                                         bool became_visible) override {
+    DCHECK_EQ(host_, host);
+    DCHECK(became_visible);
+    UMA_HISTOGRAM_CUSTOM_MICROSECONDS_TIMES(
+        "Browser.Tabs.SelectionToVisibilityRequestTime", timer_.Elapsed(),
+        base::TimeDelta::FromMicroseconds(1), base::TimeDelta::FromSeconds(3),
+        50);
+    TRACE_EVENT_ASYNC_END0("ui,latency", "TabSwitchVisibilityRequest", this);
+  }
+
+  void RenderWidgetHostDestroyed(content::RenderWidgetHost* host) override {
+    DCHECK_EQ(host_, host);
+    host_->RemoveObserver(this);
+    host_ = nullptr;
+  }
+
+  content::RenderWidgetHost* host_ = nullptr;
+  base::ElapsedTimer timer_;
+
+  DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostVisibilityTracker);
+};
+
 }  // namespace
 
 ///////////////////////////////////////////////////////////////////////////////
 // WebContentsData
 
-// An object to hold a reference to a WebContents that is in a tabstrip, as
-// well as other various properties it has.
+// An object to own a WebContents that is in a tabstrip, as well as other
+// various properties it has.
 class TabStripModel::WebContentsData : public content::WebContentsObserver {
  public:
-  WebContentsData(TabStripModel* tab_strip_model, WebContents* a_contents);
+  explicit WebContentsData(std::unique_ptr<WebContents> a_contents);
 
   // Changes the WebContents that this WebContentsData tracks.
-  void SetWebContents(WebContents* contents);
-  WebContents* web_contents() { return contents_; }
+  std::unique_ptr<WebContents> ReplaceWebContents(
+      std::unique_ptr<WebContents> contents);
+  WebContents* web_contents() { return contents_.get(); }
 
   // Create a relationship between this WebContentsData and other
   // WebContentses. Used to identify which WebContents to select next after
@@ -92,13 +145,8 @@ class TabStripModel::WebContentsData : public content::WebContentsObserver {
   // is properly removed from the tab strip.
   void WebContentsDestroyed() override;
 
-  // The WebContents being tracked by this WebContentsData. The
-  // WebContentsObserver does keep a reference, but when the WebContents is
-  // deleted, the WebContentsObserver reference is NULLed and thus inaccessible.
-  WebContents* contents_;
-
-  // The TabStripModel containing this WebContents.
-  TabStripModel* tab_strip_model_;
+  // The WebContents owned by this WebContentsData.
+  std::unique_ptr<WebContents> contents_;
 
   // The group is used to model a set of tabs spawned from a single parent
   // tab. This value is preserved for a given tab as long as the tab remains
@@ -132,26 +180,86 @@ class TabStripModel::WebContentsData : public content::WebContentsObserver {
   DISALLOW_COPY_AND_ASSIGN(WebContentsData);
 };
 
-TabStripModel::WebContentsData::WebContentsData(TabStripModel* tab_strip_model,
-                                                WebContents* contents)
-    : content::WebContentsObserver(contents),
-      contents_(contents),
-      tab_strip_model_(tab_strip_model) {}
+TabStripModel::WebContentsData::WebContentsData(
+    std::unique_ptr<WebContents> contents)
+    : content::WebContentsObserver(contents.get()),
+      contents_(std::move(contents)) {}
 
-void TabStripModel::WebContentsData::SetWebContents(WebContents* contents) {
-  contents_ = contents;
-  Observe(contents);
+std::unique_ptr<WebContents> TabStripModel::WebContentsData::ReplaceWebContents(
+    std::unique_ptr<WebContents> contents) {
+  contents_.swap(contents);
+  Observe(contents_.get());
+  return contents;
 }
 
 void TabStripModel::WebContentsData::WebContentsDestroyed() {
-  DCHECK_EQ(contents_, web_contents());
-
-  // Note that we only detach the contents here, not close it - it's
-  // already been closed. We just want to undo our bookkeeping.
-  int index = tab_strip_model_->GetIndexOfWebContents(web_contents());
-  DCHECK_NE(TabStripModel::kNoTab, index);
-  tab_strip_model_->DetachWebContentsAt(index);
+  // TODO(erikchen): Remove this NOTREACHED statement as well as the
+  // WebContents observer - this is just a temporary sanity check to make sure
+  // that unit tests are not destroyed a WebContents out from under a
+  // TabStripModel.
+  NOTREACHED();
 }
+
+// Holds state for a WebContents that has been detached from the tab strip.
+struct TabStripModel::DetachedWebContents {
+  DetachedWebContents(int index_before_any_removals,
+                      int index_at_time_of_removal,
+                      std::unique_ptr<WebContents> contents)
+      : contents(std::move(contents)),
+        index_before_any_removals(index_before_any_removals),
+        index_at_time_of_removal(index_at_time_of_removal) {}
+  ~DetachedWebContents() = default;
+  DetachedWebContents(DetachedWebContents&&) = default;
+
+  std::unique_ptr<WebContents> contents;
+
+  // The index of the WebContents in the original selection model of the tab
+  // strip [prior to any tabs being removed, if multiple tabs are being
+  // simultaneously removed].
+  const int index_before_any_removals;
+
+  // The index of the WebContents at the time it is being removed. If multiple
+  // tabs are being simultaneously removed, the index reflects previously
+  // removed tabs in this batch.
+  const int index_at_time_of_removal;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(DetachedWebContents);
+};
+
+// Holds all state necessary to send notifications for detached tabs. Will
+// also handle WebContents deletion if |will_delete| is true.
+struct TabStripModel::DetachNotifications {
+  DetachNotifications(WebContents* initially_active_web_contents,
+                      const ui::ListSelectionModel& selection_model,
+                      bool will_delete)
+      : initially_active_web_contents(initially_active_web_contents),
+        selection_model(selection_model),
+        will_delete(will_delete) {}
+  ~DetachNotifications() = default;
+
+  // The WebContents that was active prior to any detaches happening.
+  //
+  // It's safe to use a raw pointer here because the active web contents, if
+  // detached, is owned by |detached_web_contents|.
+  //
+  // Once the notification for change of active web contents has been sent,
+  // this field is set to nullptr.
+  WebContents* initially_active_web_contents = nullptr;
+
+  // The WebContents that were recently detached. Observers need to be notified
+  // about these. These must be updated after construction.
+  std::vector<std::unique_ptr<DetachedWebContents>> detached_web_contents;
+
+  // The selection model prior to any tabs being detached.
+  const ui::ListSelectionModel selection_model;
+
+  // Whether to delete the WebContents after sending notifications.
+  const bool will_delete;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(DetachNotifications);
+};
 
 ///////////////////////////////////////////////////////////////////////////////
 // TabStripModel, public:
@@ -179,32 +287,32 @@ bool TabStripModel::ContainsIndex(int index) const {
   return index >= 0 && index < count();
 }
 
-void TabStripModel::AppendWebContents(WebContents* contents, bool foreground) {
-  InsertWebContentsAt(count(), contents,
+void TabStripModel::AppendWebContents(std::unique_ptr<WebContents> contents,
+                                      bool foreground) {
+  InsertWebContentsAt(count(), std::move(contents),
                       foreground ? (ADD_INHERIT_GROUP | ADD_ACTIVE) : ADD_NONE);
 }
 
 void TabStripModel::InsertWebContentsAt(int index,
-                                        WebContents* contents,
+                                        std::unique_ptr<WebContents> contents,
                                         int add_types) {
-  delegate()->WillAddWebContents(contents);
+  // TODO(erikchne): Change this to a CHECK. https://crbug.com/851400.
+  DCHECK(!reentrancy_guard_);
+  base::AutoReset<bool> resetter(&reentrancy_guard_, true);
+
+  delegate()->WillAddWebContents(contents.get());
 
   bool active = (add_types & ADD_ACTIVE) != 0;
   bool pin = (add_types & ADD_PINNED) != 0;
   index = ConstrainInsertionIndex(index, pin);
 
-  // In tab dragging situations, if the last tab in the window was detached
-  // then the user aborted the drag, we will have the |closing_all_| member
-  // set (see DetachWebContentsAt) which will mess with our mojo here. We need
-  // to clear this bit.
-  closing_all_ = false;
-
   // Have to get the active contents before we monkey with the contents
   // otherwise we run into problems when we try to change the active contents
   // since the old contents and the new contents will be the same...
   WebContents* active_contents = GetActiveWebContents();
+  WebContents* raw_contents = contents.get();
   std::unique_ptr<WebContentsData> data =
-      std::make_unique<WebContentsData>(this, contents);
+      std::make_unique<WebContentsData>(std::move(contents));
   data->set_pinned(pin);
   if ((add_types & ADD_INHERIT_GROUP) && active_contents) {
     if (active) {
@@ -228,79 +336,125 @@ void TabStripModel::InsertWebContentsAt(int index,
   // be blocked, or just let the modal dialog manager make the blocking call
   // directly and not use this at all.
   const web_modal::WebContentsModalDialogManager* manager =
-      web_modal::WebContentsModalDialogManager::FromWebContents(contents);
+      web_modal::WebContentsModalDialogManager::FromWebContents(raw_contents);
   if (manager)
     data->set_blocked(manager->IsDialogActive());
+
+  TabStripSelectionChange selection(GetActiveWebContents(), selection_model_);
 
   contents_data_.insert(contents_data_.begin() + index, std::move(data));
 
   selection_model_.IncrementFrom(index);
 
   for (auto& observer : observers_)
-    observer.TabInsertedAt(this, contents, index, active);
+    observer.TabInsertedAt(this, raw_contents, index, active);
 
   if (active) {
     ui::ListSelectionModel new_model = selection_model_;
     new_model.SetSelectedIndex(index);
-    SetSelection(std::move(new_model), Notify::kDefault);
+    selection = SetSelection(std::move(new_model),
+                             TabStripModelObserver::CHANGE_REASON_NONE,
+                             /*triggered_by_other_operation=*/true);
   }
+
+  TabStripModelChange change(
+      TabStripModelChange::kInserted,
+      TabStripModelChange::CreateInsertDelta(raw_contents, index));
+  for (auto& observer : observers_)
+    observer.OnTabStripModelChanged(this, change, selection);
 }
 
-WebContents* TabStripModel::ReplaceWebContentsAt(int index,
-                                                 WebContents* new_contents) {
-  delegate()->WillAddWebContents(new_contents);
+std::unique_ptr<content::WebContents> TabStripModel::ReplaceWebContentsAt(
+    int index,
+    std::unique_ptr<WebContents> new_contents) {
+  delegate()->WillAddWebContents(new_contents.get());
 
   DCHECK(ContainsIndex(index));
-  WebContents* old_contents = GetWebContentsAtImpl(index);
 
   FixOpenersAndGroupsReferencing(index);
 
-  contents_data_[index]->SetWebContents(new_contents);
+  TabStripSelectionChange selection(GetActiveWebContents(), selection_model_);
+  WebContents* raw_new_contents = new_contents.get();
+  std::unique_ptr<WebContents> old_contents =
+      contents_data_[index]->ReplaceWebContents(std::move(new_contents));
 
   for (auto& observer : observers_)
-    observer.TabReplacedAt(this, old_contents, new_contents, index);
+    observer.TabReplacedAt(this, old_contents.get(), raw_new_contents, index);
 
   // When the active WebContents is replaced send out a selection notification
   // too. We do this as nearly all observers need to treat a replacement of the
   // selected contents as the selection changing.
   if (active_index() == index) {
+    selection.new_contents = raw_new_contents;
+    selection.reason = TabStripModelObserver::CHANGE_REASON_REPLACED;
     for (auto& observer : observers_) {
-      observer.ActiveTabChanged(old_contents, new_contents, active_index(),
+      observer.ActiveTabChanged(selection.old_contents, selection.new_contents,
+                                index,
                                 TabStripModelObserver::CHANGE_REASON_REPLACED);
     }
   }
+
+  TabStripModelChange change(TabStripModelChange::kReplaced,
+                             TabStripModelChange::CreateReplaceDelta(
+                                 old_contents.get(), raw_new_contents, index));
+  for (auto& observer : observers_)
+    observer.OnTabStripModelChanged(this, change, selection);
+
   return old_contents;
 }
 
-WebContents* TabStripModel::DetachWebContentsAt(int index) {
-  CHECK(!in_notify_);
+std::unique_ptr<content::WebContents> TabStripModel::DetachWebContentsAt(
+    int index) {
+  // TODO(erikchne): Change this to a CHECK. https://crbug.com/851400.
+  DCHECK(!reentrancy_guard_);
+  base::AutoReset<bool> resetter(&reentrancy_guard_, true);
+
+  DCHECK_NE(active_index(), kNoTab) << "Activate the TabStripModel by "
+                                       "selecting at least one tab before "
+                                       "trying to detach web contents.";
+  WebContents* initially_active_web_contents =
+      GetWebContentsAtImpl(active_index());
+
+  DetachNotifications notifications(initially_active_web_contents,
+                                    selection_model_, /*will_delete=*/false);
+  std::unique_ptr<DetachedWebContents> dwc =
+      std::make_unique<DetachedWebContents>(
+          index, index,
+          DetachWebContentsImpl(index, /*create_historical_tab=*/false,
+                                /*will_delete=*/false));
+  notifications.detached_web_contents.push_back(std::move(dwc));
+  SendDetachWebContentsNotifications(&notifications);
+  return std::move(notifications.detached_web_contents[0]->contents);
+}
+
+std::unique_ptr<content::WebContents> TabStripModel::DetachWebContentsImpl(
+    int index,
+    bool create_historical_tab,
+    bool will_delete) {
   if (contents_data_.empty())
     return nullptr;
   DCHECK(ContainsIndex(index));
 
   FixOpenersAndGroupsReferencing(index);
 
-  WebContents* removed_contents = GetWebContentsAtImpl(index);
-  bool was_selected = IsTabSelected(index);
+  // Ask the delegate to save an entry for this tab in the historical tab
+  // database.
+  WebContents* raw_web_contents = GetWebContentsAtImpl(index);
+  if (create_historical_tab)
+    delegate_->CreateHistoricalTab(raw_web_contents);
+
   int next_selected_index = order_controller_->DetermineNewSelectedIndex(index);
+  std::unique_ptr<WebContentsData> old_data = std::move(contents_data_[index]);
   contents_data_.erase(contents_data_.begin() + index);
-  if (empty())
-    closing_all_ = true;
-  for (auto& observer : observers_)
-    observer.TabDetachedAt(removed_contents, index);
+
   if (empty()) {
     selection_model_.Clear();
-    // TabDetachedAt() might unregister observers, so send |TabStripEmpty()| in
-    // a second pass.
-    for (auto& observer : observers_)
-      observer.TabStripEmpty();
   } else {
     int old_active = active_index();
     selection_model_.DecrementFrom(index);
     ui::ListSelectionModel old_model;
     old_model = selection_model_;
     if (index == old_active) {
-      NotifyIfTabDeactivated(removed_contents);
       if (!selection_model_.empty()) {
         // The active tab was removed, but there is still something selected.
         // Move the active and anchor to the first selected index.
@@ -311,19 +465,95 @@ WebContents* TabStripModel::DetachWebContentsAt(int index) {
         // selection and send out notification.
         selection_model_.SetSelectedIndex(next_selected_index);
       }
-      NotifyIfActiveTabChanged(removed_contents, Notify::kDefault);
-    }
-
-    // Sending notification in case the detached tab was selected. Using
-    // NotifyIfActiveOrSelectionChanged() here would not guarantee that a
-    // notification is sent even though the tab selection has changed because
-    // |old_model| is stored after calling DecrementFrom().
-    if (was_selected) {
-      for (auto& observer : observers_)
-        observer.TabSelectionChanged(this, old_model);
     }
   }
-  return removed_contents;
+  return old_data->ReplaceWebContents(nullptr);
+}
+
+void TabStripModel::SendDetachWebContentsNotifications(
+    DetachNotifications* notifications) {
+  bool was_any_tab_selected = false;
+  std::vector<TabStripModelChange::Delta> deltas;
+
+  // Sort the DetachedWebContents in decreasing order of
+  // |index_before_any_removals|. This is because |index_before_any_removals| is
+  // used by observers to update their own copy of TabStripModel state, and each
+  // removal affects subsequent removals of higher index.
+  std::sort(notifications->detached_web_contents.begin(),
+            notifications->detached_web_contents.end(),
+            [](const std::unique_ptr<DetachedWebContents>& dwc1,
+               const std::unique_ptr<DetachedWebContents>& dwc2) {
+              return dwc1->index_before_any_removals >
+                     dwc2->index_before_any_removals;
+            });
+  for (auto& dwc : notifications->detached_web_contents) {
+    // TabClosingAt() must be sent before TabDetachedAt(), since some observers
+    // use the former to change the behavior of the latter.
+    // TODO(erikchen): Combine these notifications. https://crbug.com/842194.
+    if (notifications->will_delete) {
+      for (auto& observer : observers_) {
+        observer.TabClosingAt(this, dwc->contents.get(),
+                              dwc->index_before_any_removals);
+      }
+    }
+
+    // TabDetachedAt() allows observers that keep their own model of
+    // |contents_data_| to keep that model in sync.
+    for (auto& observer : observers_) {
+      observer.TabDetachedAt(
+          dwc->contents.get(), dwc->index_before_any_removals,
+          notifications->initially_active_web_contents == dwc->contents.get());
+    }
+
+    deltas.push_back(TabStripModelChange::CreateRemoveDelta(
+        dwc->contents.get(), dwc->index_before_any_removals,
+        notifications->will_delete));
+  }
+
+  TabStripSelectionChange selection;
+  selection.old_contents = notifications->initially_active_web_contents;
+  selection.new_contents = GetActiveWebContents();
+  selection.old_model = notifications->selection_model;
+  selection.new_model = selection_model_;
+  selection.reason = TabStripModelObserver::CHANGE_REASON_NONE;
+
+  TabStripModelChange change(TabStripModelChange::kRemoved, deltas);
+  for (auto& observer : observers_)
+    observer.OnTabStripModelChanged(this, change, selection);
+
+  for (auto& dwc : notifications->detached_web_contents) {
+    if (notifications->selection_model.IsSelected(
+            dwc->index_before_any_removals)) {
+      was_any_tab_selected = true;
+    }
+
+    if (notifications->initially_active_web_contents &&
+        dwc->contents.get() == notifications->initially_active_web_contents) {
+      for (auto& observer : observers_)
+        observer.TabDeactivated(notifications->initially_active_web_contents);
+
+      if (!empty()) {
+        NotifyIfActiveTabChanged(selection);
+      }
+      notifications->initially_active_web_contents = nullptr;
+    }
+
+    if (notifications->will_delete) {
+      // This destroys the WebContents, which will also send
+      // WebContentsDestroyed notifications.
+      dwc->contents.reset();
+    }
+  }
+
+  if (!empty() && was_any_tab_selected) {
+    for (auto& observer : observers_)
+      observer.TabSelectionChanged(this, notifications->selection_model);
+  }
+
+  if (empty()) {
+    for (auto& observer : observers_)
+      observer.TabStripEmpty();
+  }
 }
 
 void TabStripModel::ActivateTabAt(int index, bool user_gesture) {
@@ -331,14 +561,9 @@ void TabStripModel::ActivateTabAt(int index, bool user_gesture) {
   ui::ListSelectionModel new_model = selection_model_;
   new_model.SetSelectedIndex(index);
   SetSelection(std::move(new_model),
-               user_gesture ? Notify::kUserGesture : Notify::kDefault);
-}
-
-void TabStripModel::AddTabAtToSelection(int index) {
-  DCHECK(ContainsIndex(index));
-  ui::ListSelectionModel new_model = selection_model_;
-  new_model.AddIndexToSelection(index);
-  SetSelection(std::move(new_model), Notify::kDefault);
+               user_gesture ? TabStripModelObserver::CHANGE_REASON_USER_GESTURE
+                            : TabStripModelObserver::CHANGE_REASON_NONE,
+               /*triggered_by_other_operation=*/false);
 }
 
 void TabStripModel::MoveWebContentsAt(int index,
@@ -566,7 +791,8 @@ void TabStripModel::ExtendSelectionTo(int index) {
   DCHECK(ContainsIndex(index));
   ui::ListSelectionModel new_model = selection_model_;
   new_model.SetSelectionFromAnchorTo(index);
-  SetSelection(std::move(new_model), Notify::kDefault);
+  SetSelection(std::move(new_model), TabStripModelObserver::CHANGE_REASON_NONE,
+               /*triggered_by_other_operation=*/false);
 }
 
 void TabStripModel::ToggleSelectionAt(int index) {
@@ -588,13 +814,15 @@ void TabStripModel::ToggleSelectionAt(int index) {
     new_model.set_anchor(index);
     new_model.set_active(index);
   }
-  SetSelection(std::move(new_model), Notify::kDefault);
+  SetSelection(std::move(new_model), TabStripModelObserver::CHANGE_REASON_NONE,
+               /*triggered_by_other_operation=*/false);
 }
 
 void TabStripModel::AddSelectionFromAnchorTo(int index) {
   ui::ListSelectionModel new_model = selection_model_;
   new_model.AddSelectionFromAnchorTo(index);
-  SetSelection(std::move(new_model), Notify::kDefault);
+  SetSelection(std::move(new_model), TabStripModelObserver::CHANGE_REASON_NONE,
+               /*triggered_by_other_operation=*/false);
 }
 
 bool TabStripModel::IsTabSelected(int index) const {
@@ -604,14 +832,15 @@ bool TabStripModel::IsTabSelected(int index) const {
 
 void TabStripModel::SetSelectionFromModel(ui::ListSelectionModel source) {
   DCHECK_NE(ui::ListSelectionModel::kUnselectedIndex, source.active());
-  SetSelection(std::move(source), Notify::kDefault);
+  SetSelection(std::move(source), TabStripModelObserver::CHANGE_REASON_NONE,
+               /*triggered_by_other_operation=*/false);
 }
 
 const ui::ListSelectionModel& TabStripModel::selection_model() const {
   return selection_model_;
 }
 
-void TabStripModel::AddWebContents(WebContents* contents,
+void TabStripModel::AddWebContents(std::unique_ptr<WebContents> contents,
                                    int index,
                                    ui::PageTransition transition,
                                    int add_types) {
@@ -649,10 +878,11 @@ void TabStripModel::AddWebContents(WebContents* contents,
     // is re-selected, not the next-adjacent.
     inherit_group = true;
   }
-  InsertWebContentsAt(index, contents,
+  WebContents* raw_contents = contents.get();
+  InsertWebContentsAt(index, std::move(contents),
                       add_types | (inherit_group ? ADD_INHERIT_GROUP : 0));
   // Reset the index, just in case insert ended up moving it on us.
-  index = GetIndexOfWebContents(contents);
+  index = GetIndexOfWebContents(raw_contents);
 
   if (inherit_group && ui::PageTransitionTypeIncludingQualifiersIs(
                            transition, ui::PAGE_TRANSITION_TYPED))
@@ -670,7 +900,7 @@ void TabStripModel::AddWebContents(WebContents* contents,
   // new background tab.
   if (WebContents* old_contents = GetActiveWebContents()) {
     if ((add_types & ADD_ACTIVE) == 0) {
-      ResizeWebContents(contents,
+      ResizeWebContents(raw_contents,
                         gfx::Rect(old_contents->GetContainerBounds().size()));
     }
   }
@@ -876,8 +1106,7 @@ void TabStripModel::ExecuteContextMenuCommand(int context_index,
         base::RecordAction(UserMetricsAction("TabContextMenu_MuteTabs"));
       else
         base::RecordAction(UserMetricsAction("TabContextMenu_UnmuteTabs"));
-      for (std::vector<int>::const_iterator i = indices.begin();
-           i != indices.end(); ++i) {
+      for (auto i = indices.begin(); i != indices.end(); ++i) {
         chrome::SetTabAudioMuted(GetWebContentsAt(*i), mute,
                                  TabMutedReason::CONTEXT_MENU, std::string());
       }
@@ -894,7 +1123,7 @@ void TabStripModel::ExecuteContextMenuCommand(int context_index,
         base::RecordAction(
             UserMetricsAction("SoundContentSetting.UnmuteBy.TabStrip"));
       }
-      chrome::SetSitesMuted(*this, indices, mute);
+      SetSitesMuted(indices, mute);
       break;
     }
 
@@ -1040,20 +1269,6 @@ bool TabStripModel::ContainsWebContents(content::WebContents* contents) {
   return GetIndexOfWebContents(contents) != kNoTab;
 }
 
-void TabStripModel::OnWillDeleteWebContents(content::WebContents* contents,
-                                            uint32_t close_types) {
-  const int index = GetIndexOfWebContents(contents);
-  DCHECK_NE(kNoTab, index);
-
-  for (auto& observer : observers_)
-    observer.TabClosingAt(this, contents, index);
-
-  // Ask the delegate to save an entry for this tab in the historical tab
-  // database if applicable.
-  if ((close_types & CLOSE_CREATE_HISTORICAL_TAB) != 0)
-    delegate_->CreateHistoricalTab(contents);
-}
-
 bool TabStripModel::RunUnloadListenerBeforeClosing(
     content::WebContents* contents) {
   return delegate_->RunUnloadListenerBeforeClosing(contents);
@@ -1061,7 +1276,8 @@ bool TabStripModel::RunUnloadListenerBeforeClosing(
 
 bool TabStripModel::ShouldRunUnloadListenerBeforeClosing(
     content::WebContents* contents) {
-  return delegate_->ShouldRunUnloadListenerBeforeClosing(contents);
+  return contents->NeedToFireBeforeUnload() ||
+         delegate_->ShouldRunUnloadListenerBeforeClosing(contents);
 }
 
 int TabStripModel::ConstrainInsertionIndex(int index, bool pinned_tab) {
@@ -1139,6 +1355,10 @@ std::vector<content::WebContents*> TabStripModel::GetWebContentsesByIndices(
 bool TabStripModel::InternalCloseTabs(
     base::span<content::WebContents* const> items,
     uint32_t close_types) {
+  // TODO(erikchne): Change this to a CHECK. https://crbug.com/851400.
+  DCHECK(!reentrancy_guard_);
+  base::AutoReset<bool> resetter(&reentrancy_guard_, true);
+
   if (items.empty())
     return true;
 
@@ -1146,15 +1366,100 @@ bool TabStripModel::InternalCloseTabs(
   base::WeakPtr<TabStripModel> ref = weak_factory_.GetWeakPtr();
   if (closing_all) {
     for (auto& observer : observers_)
-      observer.WillCloseAllTabs();
+      observer.WillCloseAllTabs(this);
   }
-  const bool closed_all = CloseWebContentses(this, items, close_types);
+  const bool closed_all = CloseWebContentses(items, close_types);
   if (!ref)
     return closed_all;
-  if (closing_all && !closed_all) {
+  if (closing_all) {
+    // CloseAllTabsStopped is sent with reason kCloseAllCompleted if
+    // closed_all; otherwise kCloseAllCanceled is sent.
     for (auto& observer : observers_)
-      observer.CloseAllTabsCanceled();
+      observer.CloseAllTabsStopped(
+          this, closed_all ? TabStripModelObserver::kCloseAllCompleted
+                           : TabStripModelObserver::kCloseAllCanceled);
   }
+
+  return closed_all;
+}
+
+bool TabStripModel::CloseWebContentses(
+    base::span<content::WebContents* const> items,
+    uint32_t close_types) {
+  if (items.empty())
+    return true;
+
+  // We only try the fast shutdown path if the whole browser process is *not*
+  // shutting down. Fast shutdown during browser termination is handled in
+  // browser_shutdown::OnShutdownStarting.
+  if (browser_shutdown::GetShutdownType() == browser_shutdown::NOT_VALID) {
+    // Construct a map of processes to the number of associated tabs that are
+    // closing.
+    base::flat_map<content::RenderProcessHost*, size_t> processes;
+    for (content::WebContents* contents : items) {
+      if (ShouldRunUnloadListenerBeforeClosing(contents))
+        continue;
+      content::RenderProcessHost* process =
+          contents->GetMainFrame()->GetProcess();
+      ++processes[process];
+    }
+
+    // Try to fast shutdown the tabs that can close.
+    for (const auto& pair : processes)
+      pair.first->FastShutdownIfPossible(pair.second, false);
+  }
+
+  DetachNotifications notifications(GetWebContentsAtImpl(active_index()),
+                                    selection_model_, /*will_delete=*/true);
+
+  // We now return to our regularly scheduled shutdown procedure.
+  bool closed_all = true;
+
+  // The indices of WebContents prior to any modification of the internal state.
+  std::vector<int> original_indices;
+  original_indices.resize(items.size());
+  for (size_t i = 0; i < items.size(); ++i)
+    original_indices[i] = GetIndexOfWebContents(items[i]);
+
+  for (size_t i = 0; i < items.size(); ++i) {
+    WebContents* closing_contents = items[i];
+
+    // The index into contents_data_.
+    int current_index = GetIndexOfWebContents(closing_contents);
+    DCHECK_NE(current_index, kNoTab);
+
+    CoreTabHelper* core_tab_helper =
+        CoreTabHelper::FromWebContents(closing_contents);
+    core_tab_helper->OnCloseStarted();
+
+    // Update the explicitly closed state. If the unload handlers cancel the
+    // close the state is reset in Browser. We don't update the explicitly
+    // closed state if already marked as explicitly closed as unload handlers
+    // call back to this if the close is allowed.
+    if (!closing_contents->GetClosedByUserGesture()) {
+      closing_contents->SetClosedByUserGesture(
+          close_types & TabStripModel::CLOSE_USER_GESTURE);
+    }
+
+    if (RunUnloadListenerBeforeClosing(closing_contents)) {
+      closed_all = false;
+      continue;
+    }
+
+    std::unique_ptr<DetachedWebContents> dwc =
+        std::make_unique<DetachedWebContents>(
+            original_indices[i], current_index,
+            DetachWebContentsImpl(current_index,
+                                  close_types & CLOSE_CREATE_HISTORICAL_TAB,
+                                  /*will_delete=*/true));
+    notifications.detached_web_contents.push_back(std::move(dwc));
+  }
+
+  // When unload handler is triggered for all items, we should wait for the
+  // result.
+  if (!notifications.detached_web_contents.empty())
+    SendDetachWebContentsNotifications(&notifications);
+
   return closed_all;
 }
 
@@ -1164,52 +1469,67 @@ WebContents* TabStripModel::GetWebContentsAtImpl(int index) const {
   return contents_data_[index]->web_contents();
 }
 
-void TabStripModel::NotifyIfTabDeactivated(WebContents* contents) {
-  if (contents) {
-    for (auto& observer : observers_)
-      observer.TabDeactivated(contents);
-  }
-}
-
-void TabStripModel::NotifyIfActiveTabChanged(WebContents* old_contents,
-                                             Notify notify_types) {
-  WebContents* new_contents = GetWebContentsAtImpl(active_index());
-  if (old_contents == new_contents)
+void TabStripModel::NotifyIfActiveTabChanged(
+    const TabStripSelectionChange& selection) {
+  if (!selection.active_tab_changed())
     return;
 
-  int reason = notify_types == Notify::kUserGesture
-                   ? TabStripModelObserver::CHANGE_REASON_USER_GESTURE
-                   : TabStripModelObserver::CHANGE_REASON_NONE;
-  CHECK(!in_notify_);
-  in_notify_ = true;
-  for (auto& observer : observers_) {
-    observer.ActiveTabChanged(old_contents, new_contents, active_index(),
-                              reason);
+  content::RenderWidgetHost* track_host = nullptr;
+  if (selection.new_contents &&
+      selection.new_contents->GetRenderWidgetHostView()) {
+    track_host = selection.new_contents->GetRenderWidgetHostView()
+                     ->GetRenderWidgetHost();
   }
-  in_notify_ = false;
+  RenderWidgetHostVisibilityTracker tracker(track_host);
+
+  for (auto& observer : observers_) {
+    observer.ActiveTabChanged(selection.old_contents, selection.new_contents,
+                              active_index(), selection.reason);
+  }
 }
 
 void TabStripModel::NotifyIfActiveOrSelectionChanged(
-    WebContents* old_contents,
-    Notify notify_types,
-    const ui::ListSelectionModel& old_model) {
-  NotifyIfActiveTabChanged(old_contents, notify_types);
+    const TabStripSelectionChange& selection) {
+  NotifyIfActiveTabChanged(selection);
 
-  if (selection_model() != old_model) {
+  if (selection.selection_changed()) {
     for (auto& observer : observers_)
-      observer.TabSelectionChanged(this, old_model);
+      observer.TabSelectionChanged(this, selection.old_model);
   }
 }
 
-void TabStripModel::SetSelection(ui::ListSelectionModel new_model,
-                                 Notify notify_types) {
-  WebContents* old_contents = GetActiveWebContents();
-  ui::ListSelectionModel old_model;
-  old_model = selection_model_;
-  if (new_model.active() != selection_model_.active())
-    NotifyIfTabDeactivated(old_contents);
+TabStripSelectionChange TabStripModel::SetSelection(
+    ui::ListSelectionModel new_model,
+    TabStripModelObserver::ChangeReason reason,
+    bool triggered_by_other_operation) {
+  TabStripSelectionChange selection;
+  selection.old_model = selection_model_;
+  selection.old_contents = GetActiveWebContents();
+  selection.new_model = new_model;
+  selection.reason = reason;
+
+  if (selection.old_contents &&
+      selection.old_model.active() != selection.new_model.active()) {
+    for (auto& observer : observers_)
+      observer.TabDeactivated(selection.old_contents);
+  }
+
+  // This is done after notifying TabDeactivated() because caller can assume
+  // that TabStripModel::active_index() would return the index for
+  // |selection.old_contents|.
   selection_model_ = new_model;
-  NotifyIfActiveOrSelectionChanged(old_contents, notify_types, old_model);
+  selection.new_contents = GetActiveWebContents();
+
+  NotifyIfActiveOrSelectionChanged(selection);
+
+  if (!triggered_by_other_operation &&
+      (selection.active_tab_changed() || selection.selection_changed())) {
+    TabStripModelChange change;
+    for (auto& observer : observers_)
+      observer.OnTabStripModelChanged(this, change, selection);
+  }
+
+  return selection;
 }
 
 void TabStripModel::SelectRelativeTab(bool next) {
@@ -1229,6 +1549,8 @@ void TabStripModel::MoveWebContentsAtImpl(int index,
                                           bool select_after_move) {
   FixOpenersAndGroupsReferencing(index);
 
+  TabStripSelectionChange selection(GetActiveWebContents(), selection_model_);
+
   std::unique_ptr<WebContentsData> moved_data =
       std::move(contents_data_[index]);
   WebContents* web_contents = moved_data->web_contents();
@@ -1241,9 +1563,16 @@ void TabStripModel::MoveWebContentsAtImpl(int index,
     // TODO(sky): why doesn't this code notify observers?
     selection_model_.SetSelectedIndex(to_position);
   }
+  selection.new_model = selection_model_;
 
   for (auto& observer : observers_)
     observer.TabMoved(web_contents, index, to_position);
+
+  TabStripModelChange change(
+      TabStripModelChange::kMoved,
+      TabStripModelChange::CreateMoveDelta(web_contents, index, to_position));
+  for (auto& observer : observers_)
+    observer.OnTabStripModelChanged(this, change, selection);
 }
 
 void TabStripModel::MoveSelectedTabsToImpl(int index,
@@ -1279,6 +1608,35 @@ void TabStripModel::MoveSelectedTabsToImpl(int index,
     }
     tab_index++;
     target_index++;
+  }
+}
+
+// Sets the sound content setting for each site at the |indices|.
+void TabStripModel::SetSitesMuted(const std::vector<int>& indices,
+                                  bool mute) const {
+  for (int tab_index : indices) {
+    content::WebContents* web_contents = GetWebContentsAt(tab_index);
+    GURL url = web_contents->GetLastCommittedURL();
+    if (url.SchemeIs(content::kChromeUIScheme)) {
+      // chrome:// URLs don't have content settings but can be muted, so just
+      // mute the WebContents.
+      chrome::SetTabAudioMuted(web_contents, mute,
+                               TabMutedReason::CONTENT_SETTING_CHROME,
+                               std::string());
+    } else {
+      Profile* profile =
+          Profile::FromBrowserContext(web_contents->GetBrowserContext());
+      HostContentSettingsMap* settings =
+          HostContentSettingsMapFactory::GetForProfile(profile);
+      ContentSetting setting =
+          mute ? CONTENT_SETTING_BLOCK : CONTENT_SETTING_ALLOW;
+      if (setting == settings->GetDefaultContentSetting(
+                         CONTENT_SETTINGS_TYPE_SOUND, nullptr)) {
+        setting = CONTENT_SETTING_DEFAULT;
+      }
+      settings->SetContentSettingDefaultScope(
+          url, url, CONTENT_SETTINGS_TYPE_SOUND, std::string(), setting);
+    }
   }
 }
 

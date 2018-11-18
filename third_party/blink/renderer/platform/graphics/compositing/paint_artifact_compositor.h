@@ -7,21 +7,24 @@
 
 #include <memory>
 
+#include "base/callback.h"
+#include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/platform/graphics/compositing/property_tree_manager.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_layer_client.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_controller.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
-#include "third_party/blink/renderer/platform/wtf/noncopyable.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace cc {
+struct ElementId;
 class Layer;
 }
 
 namespace gfx {
 class Vector2dF;
+class ScrollOffset;
 }
 
 namespace blink {
@@ -30,9 +33,18 @@ class ContentLayerClientImpl;
 class JSONObject;
 class PaintArtifact;
 class SynthesizedClip;
-class WebLayer;
-class WebLayerScrollClient;
 struct PaintChunk;
+
+class LayerListBuilder {
+ public:
+  void Add(scoped_refptr<cc::Layer>);
+  cc::LayerList Finalize();
+
+ private:
+  // The list becomes invalid once |Finalize| is called.
+  bool list_valid_ = true;
+  cc::LayerList list_;
+};
 
 // Responsible for managing compositing in terms of a PaintArtifact.
 //
@@ -44,37 +56,34 @@ struct PaintChunk;
 class PLATFORM_EXPORT PaintArtifactCompositor final
     : private PropertyTreeManagerClient {
   USING_FAST_MALLOC(PaintArtifactCompositor);
-  WTF_MAKE_NONCOPYABLE(PaintArtifactCompositor);
 
  public:
   ~PaintArtifactCompositor();
 
   static std::unique_ptr<PaintArtifactCompositor> Create(
-      WebLayerScrollClient& client) {
-    return base::WrapUnique(new PaintArtifactCompositor(client));
+      base::RepeatingCallback<void(const gfx::ScrollOffset&,
+                                   const cc::ElementId&)> scroll_callback) {
+    return base::WrapUnique(
+        new PaintArtifactCompositor(std::move(scroll_callback)));
   }
 
   // Updates the layer tree to match the provided paint artifact.
   //
   // Populates |composited_element_ids| with the CompositorElementId of all
   // animations for which we saw a paint chunk and created a layer.
-  void Update(const PaintArtifact&,
-              CompositorElementIdSet& composited_element_ids);
+  void Update(scoped_refptr<const PaintArtifact>,
+              CompositorElementIdSet& composited_element_ids,
+              TransformPaintPropertyNode* viewport_scale_node);
 
   // The root layer of the tree managed by this object.
   cc::Layer* RootLayer() const { return root_layer_.get(); }
-
-  // Wraps rootLayer(), so that it can be attached as a child of another
-  // WebLayer.
-  WebLayer* GetWebLayer() const { return web_layer_.get(); }
 
   // Returns extra information recorded during unit tests.
   // While not part of the normal output of this class, this provides a simple
   // way of locating the layers of interest, since there are still a slew of
   // placeholder layers required.
   struct PLATFORM_EXPORT ExtraDataForTesting {
-    std::unique_ptr<WebLayer> ContentWebLayerAt(unsigned index);
-    std::unique_ptr<WebLayer> ScrollHitTestWebLayerAt(unsigned index);
+    cc::Layer* ScrollHitTestWebLayerAt(unsigned index);
 
     Vector<scoped_refptr<cc::Layer>> content_layers;
     Vector<scoped_refptr<cc::Layer>> synthesized_clip_layers;
@@ -120,14 +129,13 @@ class PLATFORM_EXPORT PaintArtifactCompositor final
     FloatRect bounds;
     Vector<size_t> paint_chunk_indices;
     FloatRect rect_known_to_be_opaque;
-    bool backface_hidden;
     PropertyTreeState property_tree_state;
     bool requires_own_layer;
   };
 
-  PaintArtifactCompositor(WebLayerScrollClient&);
-
-  void RemoveChildLayers();
+  PaintArtifactCompositor(
+      base::RepeatingCallback<void(const gfx::ScrollOffset&,
+                                   const cc::ElementId&)> scroll_callback);
 
   // Collects the PaintChunks into groups which will end up in the same
   // cc layer. This is the entry point of the layerization algorithm.
@@ -165,7 +173,7 @@ class PLATFORM_EXPORT PaintArtifactCompositor final
   // paint chunk to align the bounding box to (0, 0) and return the actual
   // origin of the paint chunk in the |layerOffset| outparam.
   scoped_refptr<cc::Layer> CompositedLayerForPendingLayer(
-      const PaintArtifact&,
+      scoped_refptr<const PaintArtifact>,
       const PendingLayer&,
       gfx::Vector2dF& layer_offset,
       Vector<std::unique_ptr<ContentLayerClientImpl>>&
@@ -200,12 +208,12 @@ class PLATFORM_EXPORT PaintArtifactCompositor final
       CompositorElementId& mask_effect_id) final;
 
   // Provides a callback for notifying blink of composited scrolling.
-  WebLayerScrollClient& scroll_client_;
+  base::RepeatingCallback<void(const gfx::ScrollOffset&, const cc::ElementId&)>
+      scroll_callback_;
 
   bool tracks_raster_invalidations_;
 
   scoped_refptr<cc::Layer> root_layer_;
-  std::unique_ptr<WebLayer> web_layer_;
   Vector<std::unique_ptr<ContentLayerClientImpl>> content_layer_clients_;
   struct SynthesizedClipEntry {
     const ClipPaintPropertyNode* key;
@@ -221,6 +229,8 @@ class PLATFORM_EXPORT PaintArtifactCompositor final
 
   friend class StubChromeClientForSPv2;
   friend class PaintArtifactCompositorTest;
+
+  DISALLOW_COPY_AND_ASSIGN(PaintArtifactCompositor);
 };
 
 }  // namespace blink

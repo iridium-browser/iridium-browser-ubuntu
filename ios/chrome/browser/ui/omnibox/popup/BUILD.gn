@@ -17,7 +17,6 @@ source_set("popup") {
     "omnibox_popup_view_ios.h",
     "omnibox_popup_view_ios.mm",
     "omnibox_popup_view_suggestions_delegate.h",
-    "table_view_owning.h",
   ]
   deps = [
     ":popup_internal",
@@ -30,11 +29,15 @@ source_set("popup") {
     "//ios/chrome/browser/ui:ui",
     "//ios/chrome/browser/ui:ui_util",
     "//ios/chrome/browser/ui/commands",
+    "//ios/chrome/browser/ui/ntp:util",
     "//ios/chrome/browser/ui/omnibox:omnibox_popup_shared",
     "//ios/chrome/browser/ui/omnibox:omnibox_util",
+    "//ios/chrome/browser/ui/omnibox/popup/shortcuts",
+    "//ios/chrome/browser/ui/toolbar/buttons",
+    "//ios/chrome/browser/ui/toolbar/public:feature_flags",
     "//ios/chrome/browser/ui/toolbar/public:public",
-    "//ios/chrome/browser/ui/toolbar/public:toolbar_base_feature",
     "//ios/chrome/browser/ui/util:util",
+    "//ios/chrome/browser/web_state_list:web_state_list",
     "//ios/web/public:public",
     "//net",
   ]
@@ -45,6 +48,8 @@ source_set("popup_internal") {
   sources = [
     "omnibox_popup_row.h",
     "omnibox_popup_row.mm",
+    "self_sizing_table_view.h",
+    "self_sizing_table_view.mm",
   ]
   deps = [
     "//base",
@@ -58,4 +63,20 @@ source_set("popup_internal") {
     "//net",
   ]
   configs += [ "//build/config/compiler:enable_arc" ]
+}
+
+source_set("unit_tests") {
+  configs += [ "//build/config/compiler:enable_arc" ]
+  testonly = true
+  sources = [
+    "omnibox_popup_view_controller_unittest.mm",
+  ]
+  deps = [
+    ":popup",
+    "//base",
+    "//ios/chrome/app/strings",
+    "//ios/chrome/browser",
+    "//testing/gtest",
+    "//ui/base",
+  ]
 }

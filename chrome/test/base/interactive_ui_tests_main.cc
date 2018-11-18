@@ -20,10 +20,6 @@
 #endif
 #endif
 
-#if defined(OS_CHROMEOS)
-#include "ash/test/ui_controls_factory_ash.h"
-#endif
-
 #if defined(OS_WIN)
 #include "base/win/scoped_com_initializer.h"
 #include "chrome/test/base/always_on_top_window_killer_win.h"
@@ -37,18 +33,18 @@ class InteractiveUITestSuite : public ChromeTestSuite {
  protected:
   // ChromeTestSuite overrides:
   void Initialize() override {
-    ChromeTestSuite::Initialize();
+    // Browser tests are expected not to tear-down various globals.
+    base::TestSuite::DisableCheckForLeakedGlobals();
 
-#if defined(OS_MACOSX)
-    gpu::ImageTransportSurface::SetAllowOSMesaForTesting(true);
-#endif
+    ChromeTestSuite::Initialize();
 
     // Only allow ui_controls to be used in interactive_ui_tests, since they
     // depend on focus and can't be sharded.
     ui_controls::EnableUIControls();
 
 #if defined(OS_CHROMEOS)
-    ui_controls::InstallUIControlsAura(ash::test::CreateAshUIControls());
+    // Do not InstallUIControlsAura in ChromeOS, it will be installed in
+    // InProcessBrowserTest::PreRunTestOnMainThread().
 #elif defined(USE_AURA)
 #if defined(OS_WIN)
     com_initializer_.reset(new base::win::ScopedCOMInitializer());

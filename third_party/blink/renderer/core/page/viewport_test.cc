@@ -37,7 +37,6 @@
 #include "third_party/blink/public/web/web_script_source.h"
 #include "third_party/blink/public/web/web_settings.h"
 #include "third_party/blink/public/web/web_view_client.h"
-#include "third_party/blink/renderer/core/dom/viewport_description.h"
 #include "third_party/blink/renderer/core/frame/frame_test_helpers.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
@@ -45,13 +44,14 @@
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
 #include "third_party/blink/renderer/core/page/page.h"
+#include "third_party/blink/renderer/core/page/viewport_description.h"
+#include "third_party/blink/renderer/core/scroll/scrollbar_theme.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_request.h"
 #include "third_party/blink/renderer/core/testing/sim/sim_test.h"
 #include "third_party/blink/renderer/platform/geometry/int_point.h"
 #include "third_party/blink/renderer/platform/geometry/int_rect.h"
 #include "third_party/blink/renderer/platform/geometry/int_size.h"
 #include "third_party/blink/renderer/platform/length.h"
-#include "third_party/blink/renderer/platform/scroll/scrollbar_theme.h"
 #include "third_party/blink/renderer/platform/testing/histogram_tester.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 #include "third_party/blink/renderer/platform/testing/url_test_helpers.h"
@@ -3031,10 +3031,10 @@ TEST_F(ViewportTest, viewportTriggersGpuRasterization) {
 class ConsoleMessageWebFrameClient
     : public FrameTestHelpers::TestWebFrameClient {
  public:
-  virtual void DidAddMessageToConsole(const WebConsoleMessage& msg,
-                                      const WebString& source_name,
-                                      unsigned source_line,
-                                      const WebString& stack_trace) {
+  void DidAddMessageToConsole(const WebConsoleMessage& msg,
+                              const WebString& source_name,
+                              unsigned source_line,
+                              const WebString& stack_trace) override {
     messages.push_back(msg);
   }
 

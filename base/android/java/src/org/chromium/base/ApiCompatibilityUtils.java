@@ -20,8 +20,11 @@ import android.content.res.Resources.NotFoundException;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.ColorFilter;
+import android.graphics.PorterDuff;
 import android.graphics.Rect;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.LayerDrawable;
+import android.graphics.drawable.TransitionDrawable;
 import android.graphics.drawable.VectorDrawable;
 import android.net.Uri;
 import android.os.Build;
@@ -32,14 +35,18 @@ import android.os.StatFs;
 import android.os.StrictMode;
 import android.os.UserManager;
 import android.provider.Settings;
+import android.support.annotation.NonNull;
+import android.support.annotation.Nullable;
+import android.support.v4.widget.ImageViewCompat;
 import android.text.Html;
 import android.text.Spanned;
 import android.view.View;
-import android.view.ViewGroup.MarginLayoutParams;
 import android.view.Window;
 import android.view.WindowManager;
 import android.view.inputmethod.InputMethodSubtype;
 import android.view.textclassifier.TextClassifier;
+import android.widget.ImageView;
+import android.widget.PopupWindow;
 import android.widget.TextView;
 
 import java.io.File;
@@ -67,6 +74,29 @@ public class ApiCompatibilityUtils {
      */
     public static int compareBoolean(boolean lhs, boolean rhs) {
         return lhs == rhs ? 0 : lhs ? 1 : -1;
+    }
+
+    /**
+     * Checks that the object reference is not null and throws NullPointerException if it is.
+     * See {@link Objects#requireNonNull} which is available since API level 19.
+     * @param obj The object to check
+     */
+    @NonNull
+    public static <T> T requireNonNull(T obj) {
+        if (obj == null) throw new NullPointerException();
+        return obj;
+    }
+
+    /**
+     * Checks that the object reference is not null and throws NullPointerException if it is.
+     * See {@link Objects#requireNonNull} which is available since API level 19.
+     * @param obj The object to check
+     * @param message The message to put into NullPointerException
+     */
+    @NonNull
+    public static <T> T requireNonNull(T obj, String message) {
+        if (obj == null) throw new NullPointerException(message);
+        return obj;
     }
 
     /**
@@ -167,82 +197,13 @@ public class ApiCompatibilityUtils {
     }
 
     /**
-     * @see android.view.ViewGroup.MarginLayoutParams#setMarginEnd(int)
+     * @see android.widget.TextView#getCompoundDrawablesRelative()
      */
-    public static void setMarginEnd(MarginLayoutParams layoutParams, int end) {
+    public static Drawable[] getCompoundDrawablesRelative(TextView textView) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
-            layoutParams.setMarginEnd(end);
+            return textView.getCompoundDrawablesRelative();
         } else {
-            layoutParams.rightMargin = end;
-        }
-    }
-
-    /**
-     * @see android.view.ViewGroup.MarginLayoutParams#getMarginEnd()
-     */
-    public static int getMarginEnd(MarginLayoutParams layoutParams) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
-            return layoutParams.getMarginEnd();
-        } else {
-            return layoutParams.rightMargin;
-        }
-    }
-
-    /**
-     * @see android.view.ViewGroup.MarginLayoutParams#setMarginStart(int)
-     */
-    public static void setMarginStart(MarginLayoutParams layoutParams, int start) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
-            layoutParams.setMarginStart(start);
-        } else {
-            layoutParams.leftMargin = start;
-        }
-    }
-
-    /**
-     * @see android.view.ViewGroup.MarginLayoutParams#getMarginStart()
-     */
-    public static int getMarginStart(MarginLayoutParams layoutParams) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
-            return layoutParams.getMarginStart();
-        } else {
-            return layoutParams.leftMargin;
-        }
-    }
-
-    /**
-     * @see android.view.View#setPaddingRelative(int, int, int, int)
-     */
-    public static void setPaddingRelative(View view, int start, int top, int end, int bottom) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
-            view.setPaddingRelative(start, top, end, bottom);
-        } else {
-            // Before JB MR1, all layouts are left-to-right, so start == left, etc.
-            view.setPadding(start, top, end, bottom);
-        }
-    }
-
-    /**
-     * @see android.view.View#getPaddingStart()
-     */
-    public static int getPaddingStart(View view) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
-            return view.getPaddingStart();
-        } else {
-            // Before JB MR1, all layouts are left-to-right, so start == left.
-            return view.getPaddingLeft();
-        }
-    }
-
-    /**
-     * @see android.view.View#getPaddingEnd()
-     */
-    public static int getPaddingEnd(View view) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
-            return view.getPaddingEnd();
-        } else {
-            // Before JB MR1, all layouts are left-to-right, so end == right.
-            return view.getPaddingRight();
+            return textView.getCompoundDrawables();
         }
     }
 
@@ -365,6 +326,35 @@ public class ApiCompatibilityUtils {
         return true;
     }
 
+    /**
+     * Set elevation if supported.
+     */
+    @TargetApi(Build.VERSION_CODES.LOLLIPOP)
+    public static boolean setElevation(PopupWindow window, float elevationValue) {
+        if (!isElevationSupported()) return false;
+
+        window.setElevation(elevationValue);
+        return true;
+    }
+
+    /**
+     *  Gets an intent to start the Android system notification settings activity for an app.
+     *
+     *  @param context Context of the app whose settings intent should be returned.
+     */
+    public static Intent getNotificationSettingsIntent(Context context) {
+        Intent intent = new Intent();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            intent.setAction(Settings.ACTION_APP_NOTIFICATION_SETTINGS);
+            intent.putExtra(Settings.EXTRA_APP_PACKAGE, context.getPackageName());
+        } else {
+            intent.setAction("android.settings.ACTION_APP_NOTIFICATION_SETTINGS");
+            intent.putExtra("app_package", context.getPackageName());
+            intent.putExtra("app_uid", context.getApplicationInfo().uid);
+        }
+        return intent;
+    }
+
     private static class FinishAndRemoveTaskWithRetry implements Runnable {
         private static final long RETRY_DELAY_MS = 500;
         private static final long MAX_TRY_COUNT = 3;
@@ -460,6 +450,25 @@ public class ApiCompatibilityUtils {
     }
 
     /**
+     * Sets the status bar icons to dark or light. Note that this is only valid for
+     * Android M+.
+     *
+     * @param rootView The root view used to request updates to the system UI theming.
+     * @param useDarkIcons Whether the status bar icons should be dark.
+     */
+    public static void setStatusBarIconColor(View rootView, boolean useDarkIcons) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return;
+
+        int systemUiVisibility = rootView.getSystemUiVisibility();
+        if (useDarkIcons) {
+            systemUiVisibility |= View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+        } else {
+            systemUiVisibility &= ~View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+        }
+        rootView.setSystemUiVisibility(systemUiVisibility);
+    }
+
+    /**
      * @see android.content.res.Resources#getDrawable(int id).
      * TODO(ltian): use {@link AppCompatResources} to parse drawable to prevent fail on
      * {@link VectorDrawable}. (http://crbug.com/792129)
@@ -476,6 +485,17 @@ public class ApiCompatibilityUtils {
         } finally {
             StrictMode.setThreadPolicy(oldPolicy);
         }
+    }
+
+    public static void setImageTintList(
+            @NonNull ImageView view, @Nullable ColorStateList tintList) {
+        if (Build.VERSION.SDK_INT == Build.VERSION_CODES.LOLLIPOP) {
+            // Work around broken workaround in ImageViewCompat, see https://crbug.com/891609#c3.
+            if (tintList != null && view.getImageTintMode() == null) {
+                view.setImageTintMode(PorterDuff.Mode.SRC_IN);
+            }
+        }
+        ImageViewCompat.setImageTintList(view, tintList);
     }
 
     /**
@@ -548,18 +568,6 @@ public class ApiCompatibilityUtils {
             return drawable.getColorFilter();
         } else {
             return null;
-        }
-    }
-
-    /**
-     * @see android.content.res.Resources#getColorStateList(int id).
-     */
-    @SuppressWarnings("deprecation")
-    public static ColorStateList getColorStateList(Resources res, int id) throws NotFoundException {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            return res.getColorStateList(id, null);
-        } else {
-            return res.getColorStateList(id);
         }
     }
 
@@ -723,5 +731,114 @@ public class ApiCompatibilityUtils {
         ActivityOptions options = ActivityOptions.makeBasic();
         options.setLaunchDisplayId(displayId);
         return options.toBundle();
+    }
+
+    /**
+     * @see View#setAccessibilityTraversalBefore(int)
+     */
+    public static void setAccessibilityTraversalBefore(View view, int viewFocusedAfter) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
+            view.setAccessibilityTraversalBefore(viewFocusedAfter);
+        }
+    }
+
+    /**
+     * Creates regular LayerDrawable on Android L+. On older versions creates a helper class that
+     * fixes issues around {@link LayerDrawable#mutate()}. See https://crbug.com/890317 for details.
+     * See also {@link #createTransitionDrawable}.
+     * @param layers A list of drawables to use as layers in this new drawable.
+     */
+    public static LayerDrawable createLayerDrawable(@NonNull Drawable[] layers) {
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.KITKAT) {
+            return new LayerDrawableCompat(layers);
+        }
+        return new LayerDrawable(layers);
+    }
+
+    /**
+     * Creates regular TransitionDrawable on Android L+. On older versions creates a helper class
+     * that fixes issues around {@link TransitionDrawable#mutate()}. See https://crbug.com/892061
+     * for details. See also {@link #createLayerDrawable}.
+     * @param layers A list of drawables to use as layers in this new drawable.
+     */
+    public static TransitionDrawable createTransitionDrawable(@NonNull Drawable[] layers) {
+        if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.KITKAT) {
+            return new TransitionDrawableCompat(layers);
+        }
+        return new TransitionDrawable(layers);
+    }
+
+    private static class LayerDrawableCompat extends LayerDrawable {
+        private boolean mMutated;
+
+        LayerDrawableCompat(@NonNull Drawable[] layers) {
+            super(layers);
+        }
+
+        @NonNull
+        @Override
+        public Drawable mutate() {
+            // LayerDrawable in Android K loses bounds of layers, so this method works around that.
+            if (mMutated) {
+                // This object has already been mutated and shouldn't have any shared state.
+                return this;
+            }
+
+            Rect[] oldBounds = getLayersBounds(this);
+            Drawable superResult = super.mutate();
+            // LayerDrawable.mutate() always returns this, bail out if this isn't the case.
+            if (superResult != this) return superResult;
+            restoreLayersBounds(this, oldBounds);
+            mMutated = true;
+            return this;
+        }
+    }
+
+    private static class TransitionDrawableCompat extends TransitionDrawable {
+        private boolean mMutated;
+
+        TransitionDrawableCompat(@NonNull Drawable[] layers) {
+            super(layers);
+        }
+
+        @NonNull
+        @Override
+        public Drawable mutate() {
+            // LayerDrawable in Android K loses bounds of layers, so this method works around that.
+            if (mMutated) {
+                // This object has already been mutated and shouldn't have any shared state.
+                return this;
+            }
+            Rect[] oldBounds = getLayersBounds(this);
+            Drawable superResult = super.mutate();
+            // TransitionDrawable.mutate() always returns this, bail out if this isn't the case.
+            if (superResult != this) return superResult;
+            restoreLayersBounds(this, oldBounds);
+            mMutated = true;
+            return this;
+        }
+    }
+
+    /**
+     * Helper for {@link LayerDrawableCompat#mutate} and {@link TransitionDrawableCompat#mutate}.
+     * Obtains the bounds of layers so they can be restored after a mutation.
+     */
+    private static Rect[] getLayersBounds(LayerDrawable layerDrawable) {
+        Rect[] result = new Rect[layerDrawable.getNumberOfLayers()];
+        for (int i = 0; i < layerDrawable.getNumberOfLayers(); i++) {
+            result[i] = layerDrawable.getDrawable(i).getBounds();
+        }
+        return result;
+    }
+
+    /**
+     * Helper for {@link LayerDrawableCompat#mutate} and {@link TransitionDrawableCompat#mutate}.
+     * Restores the bounds of layers after a mutation.
+     */
+    private static void restoreLayersBounds(LayerDrawable layerDrawable, Rect[] oldBounds) {
+        assert layerDrawable.getNumberOfLayers() == oldBounds.length;
+        for (int i = 0; i < layerDrawable.getNumberOfLayers(); i++) {
+            layerDrawable.getDrawable(i).setBounds(oldBounds[i]);
+        }
     }
 }

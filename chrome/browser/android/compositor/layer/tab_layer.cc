@@ -93,7 +93,6 @@ static void PositionPadding(scoped_refptr<cc::SolidColorLayer> padding_layer,
 
 void TabLayer::SetProperties(int id,
                              bool can_use_live_layer,
-                             bool modern_design_enabled,
                              int toolbar_resource_id,
                              int close_button_resource_id,
                              int shadow_resource_id,
@@ -103,7 +102,7 @@ void TabLayer::SetProperties(int id,
                              int border_inner_shadow_resource_id,
                              int default_background_color,
                              int back_logo_color,
-                             bool is_portrait,
+                             bool close_button_on_right,
                              float x,
                              float y,
                              float width,
@@ -154,7 +153,7 @@ void TabLayer::SetProperties(int id,
   // Grab required resources
   ui::NinePatchResource* border_resource =
       ui::NinePatchResource::From(resource_manager_->GetStaticResourceWithTint(
-          border_resource_id, toolbar_background_color));
+          border_resource_id, default_theme_color));
   ui::NinePatchResource* border_inner_shadow_resource =
       ui::NinePatchResource::From(resource_manager_->GetResource(
           ui::ANDROID_RESOURCE_TYPE_STATIC, border_inner_shadow_resource_id));
@@ -190,10 +189,6 @@ void TabLayer::SetProperties(int id,
   const gfx::RectF shadow_padding(shadow_resource->padding());
   const gfx::RectF contour_padding(contour_resource->padding());
 
-  // If we're in portrait and we're RTL, the close button is on the left.
-  // Similarly if we're in landscape and we're in LTR, the close button is on
-  // the left.
-  const bool close_button_on_left = is_portrait == l10n_util::IsLayoutRtl();
   const bool back_visible = cos(rotation_x * SK_MScalarPI / 180.0f) < 0 ||
                             cos(rotation_y * SK_MScalarPI / 180.0f) < 0;
 
@@ -229,19 +224,13 @@ void TabLayer::SetProperties(int id,
   //--------------------------------------------------------------------------
 
   // TODO(kkimlabs): Tab switcher doesn't show the progress bar.
-  toolbar_layer_->PushResource(toolbar_resource_id,
-                               toolbar_background_color,
-                               anonymize_toolbar,
-                               toolbar_textbox_background_color,
-                               toolbar_textbox_resource_id,
-                               toolbar_textbox_alpha,
-                               view_height,
-                               // TODO(mdjones): Feels odd to pass 0 here when
-                               // we have access to toolbar_y_offset.
-                               0,
-                               false,
-                               false,
-                               modern_design_enabled);
+  toolbar_layer_->PushResource(
+      toolbar_resource_id, toolbar_background_color, anonymize_toolbar,
+      toolbar_textbox_background_color, toolbar_textbox_resource_id,
+      toolbar_textbox_alpha, view_height,
+      // TODO(mdjones): Feels odd to pass 0 here when
+      // we have access to toolbar_y_offset.
+      0, false, false);
   toolbar_layer_->UpdateProgressBar(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
 
   float toolbar_impact_height = 0;
@@ -329,7 +318,7 @@ void TabLayer::SetProperties(int id,
 
   close_button_position.set_y(-border_padding.y());
   title_position.set_y(-border_padding.y());
-  if (!close_button_on_left)
+  if (close_button_on_right)
     close_button_position.set_x(width - close_button_size.width());
   else
     title_position.set_x(close_btn_effective_width);
@@ -500,7 +489,7 @@ void TabLayer::SetProperties(int id,
     transform.Translate(toolbar_position.x(), toolbar_position.y());
     toolbar_layer_->layer()->SetTransformOrigin(gfx::Point3F(0.f, 0.f, 0.f));
     toolbar_layer_->layer()->SetTransform(transform);
-    toolbar_layer_->layer()->SetOpacity(toolbar_alpha);
+    toolbar_layer_->SetOpacity(toolbar_alpha);
 
     toolbar_layer_->layer()->SetMasksToBounds(
         toolbar_layer_->layer()->bounds() != toolbar_size);

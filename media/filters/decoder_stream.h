@@ -56,13 +56,13 @@ class MEDIA_EXPORT DecoderStream {
       base::RepeatingCallback<std::vector<std::unique_ptr<Decoder>>()>;
 
   // Indicates completion of a DecoderStream initialization.
-  using InitCB = base::RepeatingCallback<void(bool success)>;
+  using InitCB = base::OnceCallback<void(bool success)>;
 
   // Indicates completion of a DecoderStream read.
-  using ReadCB =
-      base::RepeatingCallback<void(Status, const scoped_refptr<Output>&)>;
+  using ReadCB = base::OnceCallback<void(Status, const scoped_refptr<Output>&)>;
 
-  DecoderStream(const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
+  DecoderStream(std::unique_ptr<DecoderStreamTraits<StreamType>> traits,
+                const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
                 CreateDecodersCB create_decoders_cb,
                 MediaLog* media_log);
   virtual ~DecoderStream();
@@ -75,16 +75,16 @@ class MEDIA_EXPORT DecoderStream {
   // |cdm_context| can be used to handle encrypted stream. Can be null if the
   // stream is not encrypted.
   void Initialize(DemuxerStream* stream,
-                  const InitCB& init_cb,
+                  InitCB init_cb,
                   CdmContext* cdm_context,
-                  const StatisticsCB& statistics_cb,
-                  const base::Closure& waiting_for_decryption_key_cb);
+                  StatisticsCB statistics_cb,
+                  base::RepeatingClosure waiting_for_decryption_key_cb);
 
   // Reads a decoded Output and returns it via the |read_cb|. Note that
   // |read_cb| is always called asynchronously. This method should only be
   // called after initialization has succeeded and must not be called during
   // pending Reset().
-  void Read(const ReadCB& read_cb);
+  void Read(ReadCB read_cb);
 
   // Resets the decoder, flushes all decoded outputs and/or internal buffers,
   // fires any existing pending read callback and calls |closure| on completion.
@@ -93,7 +93,7 @@ class MEDIA_EXPORT DecoderStream {
   // during pending Reset().
   // N.B: If the decoder stream has run into an error, calling this method does
   // not 'reset' it to a normal state.
-  void Reset(const base::Closure& closure);
+  void Reset(base::OnceClosure closure);
 
   // Returns true if the decoder currently has the ability to decode and return
   // an Output.
@@ -131,7 +131,8 @@ class MEDIA_EXPORT DecoderStream {
   // Allows callers to register for notification of config changes; this is
   // called immediately after receiving the 'kConfigChanged' status from the
   // DemuxerStream, before any action is taken to handle the config change.
-  using ConfigChangeObserverCB = base::Callback<void(const DecoderConfig&)>;
+  using ConfigChangeObserverCB =
+      base::RepeatingCallback<void(const DecoderConfig&)>;
   void set_config_change_observer(
       ConfigChangeObserverCB config_change_observer) {
     config_change_observer_cb_ = config_change_observer;
@@ -187,7 +188,10 @@ class MEDIA_EXPORT DecoderStream {
   void FlushDecoder();
 
   // Callback for Decoder::Decode().
-  void OnDecodeDone(int buffer_size, bool end_of_stream, DecodeStatus status);
+  void OnDecodeDone(int buffer_size,
+                    bool end_of_stream,
+                    std::unique_ptr<ScopedDecodeTrace> trace_event,
+                    DecodeStatus status);
 
   // Output callback passed to Decoder::Initialize().
   void OnDecodeOutputReady(const scoped_refptr<Output>& output);
@@ -212,21 +216,21 @@ class MEDIA_EXPORT DecoderStream {
   void ClearOutputs();
   void MaybePrepareAnotherOutput();
   void OnPreparedOutputReady(const scoped_refptr<Output>& frame);
+  void CompletePrepare(const Output* output);
 
-  DecoderStreamTraits<StreamType> traits_;
+  std::unique_ptr<DecoderStreamTraits<StreamType>> traits_;
 
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
-  CreateDecodersCB create_decoders_cb_;
   MediaLog* media_log_;
 
   State state_;
 
   StatisticsCB statistics_cb_;
   InitCB init_cb_;
-  base::Closure waiting_for_decryption_key_cb_;
+  base::RepeatingClosure waiting_for_decryption_key_cb_;
 
   ReadCB read_cb_;
-  base::Closure reset_cb_;
+  base::OnceClosure reset_cb_;
 
   DemuxerStream* stream_;
 
@@ -237,20 +241,11 @@ class MEDIA_EXPORT DecoderStream {
   // Whether |decoder_| has produced a frame yet. Reset on fallback.
   bool decoder_produced_a_frame_;
 
-  // Whether we have already fallen back once on decode error, used to prevent
-  // issues like infinite fallback like:
-  // 1. select decoder 1
-  // 2. decode error on decoder 1
-  // 3. black list decoder 1 and select decoder 2
-  // 4. decode error again on decoder 2
-  // 5. black list decoder 2 and select decoder 1
-  // 6. go to (2)
-  bool has_fallen_back_once_on_decode_error_;
-
   std::unique_ptr<DecryptingDemuxerStream> decrypting_demuxer_stream_;
 
-  // Destruct before |decrypting_demuxer_stream_| or |decoder_|.
-  std::unique_ptr<DecoderSelector<StreamType>> decoder_selector_;
+  // Note: Holds pointers to |traits_|, |stream_|, |decrypting_demuxer_stream_|,
+  // and |cdm_context_|.
+  DecoderSelector<StreamType> decoder_selector_;
 
   ConfigChangeObserverCB config_change_observer_cb_;
   DecoderChangeObserverCB decoder_change_observer_cb_;
@@ -314,8 +309,8 @@ bool DecoderStream<DemuxerStream::AUDIO>::CanReadWithoutStalling() const;
 template <>
 int DecoderStream<DemuxerStream::AUDIO>::GetMaxDecodeRequests() const;
 
-using VideoFrameStream = DecoderStream<DemuxerStream::VIDEO>;
-using AudioBufferStream = DecoderStream<DemuxerStream::AUDIO>;
+using VideoDecoderStream = DecoderStream<DemuxerStream::VIDEO>;
+using AudioDecoderStream = DecoderStream<DemuxerStream::AUDIO>;
 
 }  // namespace media
 

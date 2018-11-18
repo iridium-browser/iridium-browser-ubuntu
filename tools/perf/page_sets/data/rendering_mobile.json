@@ -1,436 +1,634 @@
 {
     "archives": {
-        "espn": {
-            "DEFAULT": "key_mobile_sites_012.wprgo"
+        "accu_weather_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
         },
-        "espn_sync_scroll": {
-            "DEFAULT": "key_mobile_sites_012.wprgo"
+        "accu_weather_desktop_gpu_raster_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
         },
-        "twitter": {
-            "DEFAULT": "key_mobile_sites_011.wprgo"
+        "amazon_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
         },
-        "twitter_sync_scroll": {
-            "DEFAULT": "key_mobile_sites_011.wprgo"
+        "amazon_desktop_gpu_raster_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
         },
-        "wikipedia": {
-            "DEFAULT": "key_mobile_sites_009.wprgo"
+        "amazon_mobile_2018": {
+            "DEFAULT": "rendering_mobile_011.wprgo"
         },
-        "wikipedia_sync_scroll": {
-            "DEFAULT": "key_mobile_sites_009.wprgo"
+        "analog_clock_svg": {
+            "DEFAULT": "rendering_mobile_002.wprgo"
         },
-        "wikipedia_delayed_scroll_start": {
-            "DEFAULT": "key_mobile_sites_009.wprgo"
+        "androidpolice_mobile_2018": {
+            "DEFAULT": "rendering_mobile_011.wprgo"
         },
-        "wikipedia_delayed_scroll_start_sync_scroll": {
-            "DEFAULT": "key_mobile_sites_009.wprgo"
+        "animometer_webgl": {
+            "DEFAULT": "rendering_mobile_026.wprgo"
         },
-        "yahoo_answers": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "aquarium": {
+            "DEFAULT": "rendering_mobile_026.wprgo"
         },
-        "yahoo_answers_sync_scroll": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "aquarium_20k": {
+            "DEFAULT": "rendering_mobile_026.wprgo"
         },
-        "cuteoverload": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "baidu_mobile_2018": {
+            "DEFAULT": "rendering_mobile_011.wprgo"
         },
-        "cuteoverload_sync_scroll": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "basic_stream": {
+            "DEFAULT": "rendering_mobile_019.wprgo"
         },
-        "digg": {
-            "DEFAULT": "key_mobile_sites_014.wprgo"
+        "bing_mobile_2018": {
+            "DEFAULT": "rendering_mobile_011.wprgo"
         },
-        "digg_sync_scroll": {
-            "DEFAULT": "key_mobile_sites_014.wprgo"
+        "blob": {
+            "DEFAULT": "rendering_mobile_026.wprgo"
         },
-        "wordpress": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "blogspot_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
         },
-        "wordpress_sync_scroll": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "blogspot_desktop_gpu_raster_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
         },
-        "forecast.io": {
-            "DEFAULT": "key_mobile_sites_013.wprgo"
+        "blogspot_mobile_2018": {
+            "DEFAULT": "rendering_mobile_011.wprgo"
         },
-        "forecast.io_sync_scroll": {
-            "DEFAULT": "key_mobile_sites_013.wprgo"
+        "boingboing_mobile_2018": {
+            "DEFAULT": "rendering_mobile_011.wprgo"
         },
-        "usatoday": {
-            "DEFAULT": "key_mobile_sites_007.wprgo"
+        "booking.com_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
         },
-        "usatoday_sync_scroll": {
-            "DEFAULT": "key_mobile_sites_007.wprgo"
+        "booking.com_desktop_gpu_raster_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
         },
-        "blogspot": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "booking.com_mobile_2018": {
+            "DEFAULT": "rendering_mobile_011.wprgo"
         },
-        "blogspot_sync_scroll": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "camera_to_webgl": {
+            "DEFAULT": "rendering_mobile_026.wprgo"
         },
-        "gsp.ro": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "capitolvolkswagen_mobile_2018": {
+            "DEFAULT": "rendering_mobile_011.wprgo"
         },
-        "gsp.ro_sync_scroll": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "card_expansion": {
+            "DEFAULT": "rendering_mobile_020.wprgo"
         },
-        "capitolvolkswagen": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "card_expansion_animated": {
+            "DEFAULT": "rendering_mobile_020.wprgo"
         },
-        "capitolvolkswagen_sync_scroll": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "card_expansion_images_text": {
+            "DEFAULT": "rendering_mobile_021.wprgo"
         },
-        "youtube": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "card_flying": {
+            "DEFAULT": "rendering_mobile_020.wprgo"
         },
-        "youtube_sync_scroll": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "cats_unscaled": {
+            "DEFAULT": "rendering_mobile_008.wprgo"
         },
-        "mlb": {
-            "DEFAULT": "key_mobile_sites_002.wprgo"
+        "cats_viewport_width": {
+            "DEFAULT": "rendering_mobile_008.wprgo"
         },
-        "mlb_sync_scroll": {
-            "DEFAULT": "key_mobile_sites_002.wprgo"
+        "cc_poster_circle": {
+            "DEFAULT": "rendering_mobile_009.wprgo"
         },
-        "google_news": {
-            "DEFAULT": "key_mobile_sites_006.wprgo"
+        "cc_scroll_200_layer_grid": {
+            "DEFAULT": "rendering_mobile_009.wprgo"
         },
-        "google_news_sync_scroll": {
-            "DEFAULT": "key_mobile_sites_006.wprgo"
+        "cc_scroll_text_only": {
+            "DEFAULT": "rendering_mobile_009.wprgo"
         },
-        "yahoo_news": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "chip_tune": {
+            "DEFAULT": "rendering_mobile_004.wprgo"
         },
-        "yahoo_news_sync_scroll": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "cnn_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
         },
-        "nytimes": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "cnn_article_mobile_2018": {
+            "DEFAULT": "rendering_mobile_011.wprgo"
         },
-        "nytimes_sync_scroll": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "cnn_desktop_gpu_raster_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
         },
-        "wsj": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "cnn_mobile_2018": {
+            "DEFAULT": "rendering_mobile_011.wprgo"
         },
-        "wsj_sync_scroll": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "cnn_pathological_2018": {
+            "DEFAULT": "rendering_mobile_025.wprgo"
         },
-        "pinterest": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "coordinated_animation": {
+            "DEFAULT": "rendering_mobile_020.wprgo"
         },
-        "pinterest_sync_scroll": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "core_scroll_header_panel": {
+            "DEFAULT": "rendering_mobile_017.wprgo"
         },
-        "ebay": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "crafty_mind": {
+            "DEFAULT": "rendering_mobile_004.wprgo"
         },
-        "ebay_sync_scroll": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "deviantart_mobile_2018": {
+            "DEFAULT": "rendering_mobile_011.wprgo"
         },
-        "slashdot": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "digg_mobile_2018": {
+            "DEFAULT": "rendering_mobile_011.wprgo"
         },
-        "slashdot_sync_scroll": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "dynamic_cube_map": {
+            "DEFAULT": "rendering_mobile_026.wprgo"
         },
-        "yahoo_sports": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "earth": {
+            "DEFAULT": "rendering_mobile_026.wprgo"
         },
-        "yahoo_sports_sync_scroll": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "ebay_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
         },
-        "techcrunch": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "ebay_desktop_gpu_raster_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
         },
-        "techcrunch_sync_scroll": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "ebay_mobile_2018": {
+            "DEFAULT": "rendering_mobile_011.wprgo"
         },
-        "theverge": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "ebay_scroll_2018": {
+            "DEFAULT": "rendering_mobile_016.wprgo"
         },
-        "theverge_sync_scroll": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "effect_games": {
+            "DEFAULT": "rendering_mobile_004.wprgo"
         },
-        "worldjournal": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "espn_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
         },
-        "worldjournal_sync_scroll": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "espn_desktop_gpu_raster_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
         },
-        "amazon": {
-            "DEFAULT": "key_mobile_sites_015.wprgo"
+        "espn_mobile_2018": {
+            "DEFAULT": "rendering_mobile_011.wprgo"
         },
-        "amazon_sync_scroll": {
-            "DEFAULT": "key_mobile_sites_015.wprgo"
+        "espn_pathological_2018": {
+            "DEFAULT": "rendering_mobile_025.wprgo"
         },
-        "androidpolice": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "facebook_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
         },
-        "androidpolice_sync_scroll": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "facebook_desktop_gpu_raster_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
         },
-        "baidu": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "facebook_mobile_2018": {
+            "DEFAULT": "rendering_mobile_011.wprgo"
         },
-        "baidu_sync_scroll": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "famo_us_twitter_demo": {
+            "DEFAULT": "rendering_mobile_019.wprgo"
         },
-        "bing": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "filter_terrain_svg": {
+            "DEFAULT": "rendering_mobile_002.wprgo"
         },
-        "bing_sync_scroll": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "flickr_scroll_2018": {
+            "DEFAULT": "rendering_mobile_016.wprgo"
         },
-        "boingboing": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "forecast.io_mobile_2018": {
+            "DEFAULT": "rendering_mobile_011.wprgo"
         },
-        "boingboing_sync_scroll": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "geo_apis": {
+            "DEFAULT": "rendering_mobile_004.wprgo"
         },
-        "booking.com": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "gmail_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
         },
-        "booking.com_sync_scroll": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "gmail_desktop_gpu_raster_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
         },
-        "cnn": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "google_calendar_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
         },
-        "cnn_sync_scroll": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "google_calendar_desktop_gpu_raster_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
         },
-        "cnn_article": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "google_docs_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
         },
-        "cnn_article_sync_scroll": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "google_docs_desktop_gpu_raster_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
         },
-        "deviantart": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "google_image_search_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
         },
-        "deviantart_sync_scroll": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "google_image_search_desktop_gpu_raster_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
         },
-        "latimes": {
-            "DEFAULT": "key_mobile_sites_007.wprgo"
+        "google_image_search_mobile_2018": {
+            "DEFAULT": "rendering_mobile_015.wprgo"
         },
-        "latimes_sync_scroll": {
-            "DEFAULT": "key_mobile_sites_007.wprgo"
+        "google_news_ios": {
+            "DEFAULT": "rendering_mobile_019.wprgo"
         },
-        "reddit": {
-            "DEFAULT": "key_mobile_sites_010.wprgo"
+        "google_news_mobile_2018": {
+            "DEFAULT": "rendering_mobile_013.wprgo"
         },
-        "reddit_sync_scroll": {
-            "DEFAULT": "key_mobile_sites_010.wprgo"
+        "google_plus_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
         },
-        "sfgate": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "google_plus_desktop_gpu_raster_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
         },
-        "sfgate_sync_scroll": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "google_plus_mobile_2018": {
+            "DEFAULT": "rendering_mobile_011.wprgo"
         },
-        "theverge_article": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "google_web_search_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
         },
-        "theverge_article_sync_scroll": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "google_web_search_desktop_gpu_raster_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
         },
-        "wowwiki": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "google_web_search_mobile_2018": {
+            "DEFAULT": "rendering_mobile_011.wprgo"
         },
-        "wowwiki_sync_scroll": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "gsp.ro_mobile_2018": {
+            "DEFAULT": "rendering_mobile_014.wprgo"
         },
-        "facebook": {
-            "DEFAULT": "key_mobile_sites_003.wprgo"
+        "guardian_pathological_2018": {
+            "DEFAULT": "rendering_mobile_025.wprgo"
         },
-        "facebook_sync_scroll": {
-            "DEFAULT": "key_mobile_sites_003.wprgo"
+        "guimark_vector_chart": {
+            "DEFAULT": "rendering_mobile_003.wprgo"
         },
-        "gmail": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "gws_boogie_expansion": {
+            "DEFAULT": "rendering_mobile_023.wprgo"
         },
-        "gmail_sync_scroll": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "gws_google_expansion": {
+            "DEFAULT": "rendering_mobile_019.wprgo"
         },
-        "google_plus": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "hakim": {
+            "DEFAULT": "rendering_mobile_004.wprgo"
         },
-        "google_plus_sync_scroll": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "horizontal_vertical_expansion": {
+            "DEFAULT": "rendering_mobile_020.wprgo"
         },
-        "google_web_search": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "ie_chalkboard": {
+            "DEFAULT": "rendering_mobile_003.wprgo"
         },
-        "google_web_search_sync_scroll": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "ie_pirate_mark": {
+            "DEFAULT": "rendering_mobile_002.wprgo"
         },
-        "google_calendar": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "jarro_doverson": {
+            "DEFAULT": "rendering_mobile_004.wprgo"
         },
-        "google_calendar_sync_scroll": {
-            "DEFAULT": "key_mobile_sites_000.wprgo"
+        "js_full_screen_invalidation": {
+            "DEFAULT": "rendering_mobile_009.wprgo"
         },
-        "linkedin": {
-            "DEFAULT": "key_mobile_sites_002.wprgo"
+        "js_poster_circle": {
+            "DEFAULT": "rendering_mobile_009.wprgo"
         },
-        "linkedin_sync_scroll": {
-            "DEFAULT": "key_mobile_sites_002.wprgo"
+        "js_scroll_200_layer_grid": {
+            "DEFAULT": "rendering_mobile_009.wprgo"
         },
-        "google_docs_desktop": {
-            "DEFAULT": "top_25_009.wprgo"
+        "js_scroll_text_only": {
+            "DEFAULT": "rendering_mobile_009.wprgo"
         },
-        "google_docs_desktop_gpu_raster": {
-            "DEFAULT": "top_25_009.wprgo"
+        "kevs_3d": {
+            "DEFAULT": "rendering_mobile_004.wprgo"
         },
-        "facebook_desktop": {
-            "DEFAULT": "top_25_003.wprgo"
+        "latimes_pathological_2018": {
+            "DEFAULT": "rendering_mobile_025.wprgo"
         },
-        "facebook_desktop_gpu_raster": {
-            "DEFAULT": "top_25_003.wprgo"
+        "linkedin_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
         },
-        "wikipedia_desktop": {
-            "DEFAULT": "top_25_004.wprgo"
+        "linkedin_desktop_gpu_raster_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
         },
-        "wikipedia_desktop_gpu_raster": {
-            "DEFAULT": "top_25_004.wprgo"
+        "linkedin_mobile_2018": {
+            "DEFAULT": "rendering_mobile_011.wprgo"
         },
-        "yahoo_answers_desktop": {
-            "DEFAULT": "top_25_000.wprgo"
+        "linkedin_pathological_2018": {
+            "DEFAULT": "rendering_mobile_025.wprgo"
         },
-        "yahoo_answers_desktop_gpu_raster": {
-            "DEFAULT": "top_25_000.wprgo"
+        "list_recycle_transform": {
+            "DEFAULT": "rendering_mobile_018.wprgo"
         },
-        "booking.com_desktop": {
-            "DEFAULT": "top_25_000.wprgo"
+        "man_in_blue": {
+            "DEFAULT": "rendering_mobile_004.wprgo"
         },
-        "booking.com_desktop_gpu_raster": {
-            "DEFAULT": "top_25_000.wprgo"
+        "many_planets_deep": {
+            "DEFAULT": "rendering_mobile_026.wprgo"
         },
-        "wordpress_desktop": {
-            "DEFAULT": "top_25_000.wprgo"
+        "mask_transition_animation": {
+            "DEFAULT": "rendering_mobile_020.wprgo"
         },
-        "wordpress_desktop_gpu_raster": {
-            "DEFAULT": "top_25_000.wprgo"
+        "megi_dish": {
+            "DEFAULT": "rendering_mobile_004.wprgo"
         },
-        "espn_desktop": {
-            "DEFAULT": "top_25_000.wprgo"
+        "microsoft_asteroid_belt": {
+            "DEFAULT": "rendering_mobile_004.wprgo"
         },
-        "espn_desktop_gpu_raster": {
-            "DEFAULT": "top_25_000.wprgo"
+        "microsoft_fireflies": {
+            "DEFAULT": "rendering_mobile_004.wprgo"
         },
-        "yahoo_games_desktop": {
-            "DEFAULT": "top_25_000.wprgo"
+        "microsoft_fish_ie_tank": {
+            "DEFAULT": "rendering_mobile_004.wprgo"
         },
-        "yahoo_games_desktop_gpu_raster": {
-            "DEFAULT": "top_25_000.wprgo"
+        "microsoft_performance": {
+            "DEFAULT": "rendering_mobile_005.wprgo"
         },
-        "blogspot_desktop": {
-            "DEFAULT": "top_25_000.wprgo"
+        "microsoft_snow": {
+            "DEFAULT": "rendering_mobile_004.wprgo"
         },
-        "blogspot_desktop_gpu_raster": {
-            "DEFAULT": "top_25_000.wprgo"
+        "microsoft_speed_reading": {
+            "DEFAULT": "rendering_mobile_004.wprgo"
         },
-        "yahoo_news_desktop": {
-            "DEFAULT": "top_25_000.wprgo"
+        "microsoft_tweet_map": {
+            "DEFAULT": "rendering_mobile_004.wprgo"
         },
-        "yahoo_news_desktop_gpu_raster": {
-            "DEFAULT": "top_25_000.wprgo"
+        "microsoft_video_city": {
+            "DEFAULT": "rendering_mobile_004.wprgo"
         },
-        "pinterest_desktop": {
-            "DEFAULT": "top_25_000.wprgo"
+        "microsoft_worker_fountains": {
+            "DEFAULT": "rendering_mobile_004.wprgo"
         },
-        "pinterest_desktop_gpu_raster": {
-            "DEFAULT": "top_25_000.wprgo"
+        "mix_10k": {
+            "DEFAULT": "rendering_mobile_004.wprgo"
         },
-        "yahoo_sports_desktop": {
-            "DEFAULT": "top_25_000.wprgo"
+        "mlb_mobile_2018": {
+            "DEFAULT": "rendering_mobile_011.wprgo"
         },
-        "yahoo_sports_desktop_gpu_raster": {
-            "DEFAULT": "top_25_000.wprgo"
+        "mobile_news_sandbox": {
+            "DEFAULT": "rendering_mobile_019.wprgo"
         },
-        "techcrunch_desktop": {
-            "DEFAULT": "top_25_000.wprgo"
+        "motion_mark_canvas_fill_shapes": {
+            "DEFAULT": "rendering_mobile_003.wprgo"
         },
-        "techcrunch_desktop_gpu_raster": {
-            "DEFAULT": "top_25_000.wprgo"
+        "motion_mark_canvas_stroke_shapes": {
+            "DEFAULT": "rendering_mobile_003.wprgo"
         },
-        "amazon_desktop": {
-            "DEFAULT": "top_25_000.wprgo"
+        "motion_mark_focus": {
+            "DEFAULT": "rendering_mobile_002.wprgo"
         },
-        "amazon_desktop_gpu_raster": {
-            "DEFAULT": "top_25_000.wprgo"
+        "motionmark_anim_design_15": {
+            "DEFAULT": "rendering_mobile_f7f3ea1d6e.wprgo"
         },
-        "cnn_desktop": {
-            "DEFAULT": "top_25_000.wprgo"
+        "motionmark_anim_focus_25": {
+            "DEFAULT": "rendering_mobile_f7f3ea1d6e.wprgo"
         },
-        "cnn_desktop_gpu_raster": {
-            "DEFAULT": "top_25_000.wprgo"
+        "motionmark_anim_images_50": {
+            "DEFAULT": "rendering_mobile_f7f3ea1d6e.wprgo"
         },
-        "ebay_desktop": {
-            "DEFAULT": "top_25_000.wprgo"
+        "motionmark_anim_leaves_250": {
+            "DEFAULT": "rendering_mobile_f7f3ea1d6e.wprgo"
         },
-        "ebay_desktop_gpu_raster": {
-            "DEFAULT": "top_25_000.wprgo"
+        "motionmark_anim_multiply_175": {
+            "DEFAULT": "rendering_mobile_f7f3ea1d6e.wprgo"
         },
-        "linkedin_desktop": {
-            "DEFAULT": "top_25_000.wprgo"
+        "motionmark_anim_suits_125": {
+            "DEFAULT": "rendering_mobile_f7f3ea1d6e.wprgo"
         },
-        "linkedin_desktop_gpu_raster": {
-            "DEFAULT": "top_25_000.wprgo"
+        "motionmark_html_composited_transforms_125": {
+            "DEFAULT": "rendering_mobile_f7f3ea1d6e.wprgo"
         },
-        "weather.com_desktop": {
-            "DEFAULT": "top_25_000.wprgo"
+        "motionmark_html_css_bouncing_blend_circles_25": {
+            "DEFAULT": "rendering_mobile_f7f3ea1d6e.wprgo"
         },
-        "weather.com_desktop_gpu_raster": {
-            "DEFAULT": "top_25_000.wprgo"
+        "motionmark_html_css_bouncing_circles_250": {
+            "DEFAULT": "rendering_mobile_f7f3ea1d6e.wprgo"
         },
-        "youtube_desktop": {
-            "DEFAULT": "top_25_011.wprgo"
+        "motionmark_html_css_bouncing_clipped_rects_100": {
+            "DEFAULT": "rendering_mobile_f7f3ea1d6e.wprgo"
         },
-        "youtube_desktop_gpu_raster": {
-            "DEFAULT": "top_25_011.wprgo"
+        "motionmark_html_css_bouncing_filter_circles_15": {
+            "DEFAULT": "rendering_mobile_f7f3ea1d6e.wprgo"
         },
-        "google_drive_desktop": {
-            "DEFAULT": "top_25_000.wprgo"
+        "motionmark_html_css_bouncing_gradient_circles_250": {
+            "DEFAULT": "rendering_mobile_f7f3ea1d6e.wprgo"
         },
-        "google_drive_desktop_gpu_raster": {
-            "DEFAULT": "top_25_000.wprgo"
+        "motionmark_html_css_bouncing_svg_images_50": {
+            "DEFAULT": "rendering_mobile_f7f3ea1d6e.wprgo"
         },
-        "gmail_desktop": {
-            "DEFAULT": "top_25_006.wprgo"
+        "motionmark_html_css_bouncing_tagged_images_225": {
+            "DEFAULT": "rendering_mobile_f7f3ea1d6e.wprgo"
         },
-        "gmail_desktop_gpu_raster": {
-            "DEFAULT": "top_25_006.wprgo"
+        "motionmark_html_dom_particles_svg_masks_25": {
+            "DEFAULT": "rendering_mobile_f7f3ea1d6e.wprgo"
         },
-        "google_plus_desktop": {
-            "DEFAULT": "top_25_010.wprgo"
+        "motionmark_html_focus_20_15": {
+            "DEFAULT": "rendering_mobile_f7f3ea1d6e.wprgo"
         },
-        "google_plus_desktop_gpu_raster": {
-            "DEFAULT": "top_25_010.wprgo"
+        "motionmark_html_leaves_20_50": {
+            "DEFAULT": "rendering_mobile_f7f3ea1d6e.wprgo"
         },
-        "twitter_desktop": {
-            "DEFAULT": "top_25_000.wprgo"
+        "motionmark_svg_bouncing_circles_250": {
+            "DEFAULT": "rendering_mobile_f7f3ea1d6e.wprgo"
         },
-        "twitter_desktop_gpu_raster": {
-            "DEFAULT": "top_25_000.wprgo"
+        "motionmark_svg_bouncing_clipped_rects_100": {
+            "DEFAULT": "rendering_mobile_f7f3ea1d6e.wprgo"
         },
-        "google_web_search_desktop": {
-            "DEFAULT": "top_25_000.wprgo"
+        "motionmark_svg_bouncing_gradient_circles_200": {
+            "DEFAULT": "rendering_mobile_f7f3ea1d6e.wprgo"
         },
-        "google_web_search_desktop_gpu_raster": {
-            "DEFAULT": "top_25_000.wprgo"
+        "motionmark_svg_bouncing_png_images_200": {
+            "DEFAULT": "rendering_mobile_f7f3ea1d6e.wprgo"
         },
-        "google_calendar_desktop": {
-            "DEFAULT": "top_25_008.wprgo"
+        "motionmark_svg_bouncing_svg_images_50": {
+            "DEFAULT": "rendering_mobile_f7f3ea1d6e.wprgo"
         },
-        "google_calendar_desktop_gpu_raster": {
-            "DEFAULT": "top_25_008.wprgo"
+        "new_tilings": {
+            "DEFAULT": "rendering_mobile_010.wprgo"
         },
-        "google_image_search_desktop": {
-            "DEFAULT": "top_25_007.wprgo"
+        "nvidia_vertex_buffer_object": {
+            "DEFAULT": "rendering_mobile_026.wprgo"
         },
-        "google_image_search_desktop_gpu_raster": {
-            "DEFAULT": "top_25_007.wprgo"
+        "nyc_gov_scroll_2018": {
+            "DEFAULT": "rendering_mobile_016.wprgo"
+        },
+        "nytimes_mobile_2018": {
+            "DEFAULT": "rendering_mobile_011.wprgo"
+        },
+        "nytimes_scroll_2018": {
+            "DEFAULT": "rendering_mobile_016.wprgo"
+        },
+        "paper_button": {
+            "DEFAULT": "rendering_mobile_017.wprgo"
+        },
+        "paper_calculator": {
+            "DEFAULT": "rendering_mobile_017.wprgo"
+        },
+        "paper_checkbox": {
+            "DEFAULT": "rendering_mobile_017.wprgo"
+        },
+        "paper_fab": {
+            "DEFAULT": "rendering_mobile_017.wprgo"
+        },
+        "paper_icon_button": {
+            "DEFAULT": "rendering_mobile_017.wprgo"
+        },
+        "paper_shadow": {
+            "DEFAULT": "rendering_mobile_017.wprgo"
+        },
+        "paper_tabs": {
+            "DEFAULT": "rendering_mobile_017.wprgo"
+        },
+        "paper_toggle_button": {
+            "DEFAULT": "rendering_mobile_017.wprgo"
+        },
+        "parallax_effect": {
+            "DEFAULT": "rendering_mobile_020.wprgo"
+        },
+        "particles": {
+            "DEFAULT": "rendering_mobile_026.wprgo"
+        },
+        "pbs_pathological_2018": {
+            "DEFAULT": "rendering_mobile_025.wprgo"
+        },
+        "physical_simulation": {
+            "DEFAULT": "rendering_mobile_020.wprgo"
+        },
+        "pinterest_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
+        },
+        "pinterest_desktop_gpu_raster_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
+        },
+        "pinterest_mobile_2018": {
+            "DEFAULT": "rendering_mobile_011.wprgo"
+        },
+        "polymer_topeka": {
+            "DEFAULT": "rendering_mobile_024.wprgo"
+        },
+        "recode_pathological_2018": {
+            "DEFAULT": "rendering_mobile_025.wprgo"
+        },
+        "reddit_mobile_2018": {
+            "DEFAULT": "rendering_mobile_011.wprgo"
+        },
+        "runway": {
+            "DEFAULT": "rendering_mobile_004.wprgo"
+        },
+        "san_angeles": {
+            "DEFAULT": "rendering_mobile_026.wprgo"
+        },
+        "sfgate_mobile_2018": {
+            "DEFAULT": "rendering_mobile_011.wprgo"
+        },
+        "slashdot_mobile_2018": {
+            "DEFAULT": "rendering_mobile_011.wprgo"
+        },
+        "smash_cat": {
+            "DEFAULT": "rendering_mobile_004.wprgo"
+        },
+        "spielzeugz": {
+            "DEFAULT": "rendering_mobile_004.wprgo"
+        },
+        "sticky_using_webkit": {
+            "DEFAULT": "rendering_mobile_018.wprgo"
+        },
+        "svg_icon_raster": {
+            "DEFAULT": "rendering_mobile_022.wprgo"
+        },
+        "swipe_to_dismiss": {
+            "DEFAULT": "rendering_mobile_020.wprgo"
+        },
+        "techcrunch_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
+        },
+        "techcrunch_desktop_gpu_raster_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
+        },
+        "techcrunch_mobile_2018": {
+            "DEFAULT": "rendering_mobile_011.wprgo"
+        },
+        "theverge_article_mobile_2018": {
+            "DEFAULT": "rendering_mobile_012.wprgo"
+        },
+        "theverge_mobile_2018": {
+            "DEFAULT": "rendering_mobile_011.wprgo"
+        },
+        "twitch_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
+        },
+        "twitch_desktop_gpu_raster_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
+        },
+        "twitter_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
+        },
+        "twitter_desktop_gpu_raster_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
+        },
+        "twitter_mobile_2018": {
+            "DEFAULT": "rendering_mobile_011.wprgo"
+        },
+        "usatoday_mobile_2018": {
+            "DEFAULT": "rendering_mobile_011.wprgo"
+        },
+        "vertical_expansion": {
+            "DEFAULT": "rendering_mobile_020.wprgo"
+        },
+        "wikipedia_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
+        },
+        "wikipedia_delayed_scroll_start_2018": {
+            "DEFAULT": "rendering_mobile_011.wprgo"
+        },
+        "wikipedia_desktop_gpu_raster_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
+        },
+        "wikipedia_mobile_2018": {
+            "DEFAULT": "rendering_mobile_011.wprgo"
+        },
+        "wordpress_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
+        },
+        "wordpress_desktop_gpu_raster_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
+        },
+        "wordpress_mobile_2018": {
+            "DEFAULT": "rendering_mobile_011.wprgo"
+        },
+        "worldjournal_mobile_2018": {
+            "DEFAULT": "rendering_mobile_011.wprgo"
+        },
+        "wow_wiki_pathological_2018": {
+            "DEFAULT": "rendering_mobile_025.wprgo"
+        },
+        "wowwiki_mobile_2018": {
+            "DEFAULT": "rendering_mobile_011.wprgo"
+        },
+        "wsj_mobile_2018": {
+            "DEFAULT": "rendering_mobile_011.wprgo"
+        },
+        "yahoo_answers_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
+        },
+        "yahoo_answers_desktop_gpu_raster_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
+        },
+        "yahoo_answers_mobile_2018": {
+            "DEFAULT": "rendering_mobile_011.wprgo"
+        },
+        "yahoo_news_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
+        },
+        "yahoo_news_desktop_gpu_raster_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
+        },
+        "yahoo_news_mobile_2018": {
+            "DEFAULT": "rendering_mobile_011.wprgo"
+        },
+        "yahoo_sports_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
+        },
+        "yahoo_sports_desktop_gpu_raster_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
+        },
+        "yahoo_sports_pathological_2018": {
+            "DEFAULT": "rendering_mobile_025.wprgo"
+        },
+        "youtube_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
+        },
+        "youtube_desktop_gpu_raster_2018": {
+            "DEFAULT": "rendering_mobile_000.wprgo"
+        },
+        "youtube_mobile_2018": {
+            "DEFAULT": "rendering_mobile_011.wprgo"
+        },
+        "zdnet_pathological_2018": {
+            "DEFAULT": "rendering_mobile_025.wprgo"
+        },
+        "zoom_in_animation": {
+            "DEFAULT": "rendering_mobile_020.wprgo"
         }
     },
     "description": "Describes the Web Page Replay archives for a story set. Don't edit by hand! Use record_wpr for updating.",

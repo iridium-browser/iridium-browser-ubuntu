@@ -4,21 +4,27 @@
 
 #include "ash/login/ui/login_expanded_public_account_view.h"
 
+#include <memory>
+#include <utility>
+#include <vector>
+
 #include "ash/login/login_screen_controller.h"
 #include "ash/login/ui/arrow_button_view.h"
+#include "ash/login/ui/login_bubble.h"
+#include "ash/login/ui/login_button.h"
 #include "ash/login/ui/login_user_view.h"
+#include "ash/login/ui/public_account_warning_dialog.h"
 #include "ash/resources/vector_icons/vector_icons.h"
 #include "ash/shell.h"
 #include "ash/strings/grit/ash_strings.h"
 #include "base/strings/utf_string_conversions.h"
-#include "mojo/common/values_struct_traits.h"
+#include "components/vector_icons/vector_icons.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/paint_vector_icon.h"
 #include "ui/views/border.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/label.h"
-#include "ui/views/controls/styled_label.h"
 #include "ui/views/controls/styled_label_listener.h"
 #include "ui/views/layout/box_layout.h"
 #include "ui/views/layout/fill_layout.h"
@@ -51,7 +57,7 @@ constexpr SkColor kArrowButtonColor = SkColorSetARGB(0xFF, 0x42, 0x85, 0xF4);
 
 constexpr int kDropDownIconSizeDp = 16;
 constexpr int kArrowButtonSizeDp = 40;
-constexpr int kAdvancedViewButtonWidthDp = 132;
+constexpr int kAdvancedViewButtonWidthDp = 190;
 constexpr int kAdvancedViewButtonHeightDp = 16;
 constexpr int kSelectionBoxWidthDp = 178;
 constexpr int kSelectionBoxHeightDp = 28;
@@ -67,6 +73,10 @@ constexpr int kTopSpacingForUserViewDp = 62;
 constexpr int kNonEmptyWidth = 1;
 constexpr int kNonEmptyHeight = 1;
 
+constexpr char kMonitoringWarningClassName[] = "MonitoringWarning";
+constexpr int kSpacingBetweenMonitoringWarningIconAndLabelDp = 8;
+constexpr int kMonitoringWarningIconSizeDp = 20;
+
 views::Label* CreateLabel(const base::string16& text, SkColor color) {
   auto* label = new views::Label(text);
   label->SetSubpixelRenderingEnabled(false);
@@ -81,15 +91,16 @@ views::Label* CreateLabel(const base::string16& text, SkColor color) {
 }  // namespace
 
 // Button with text on the left side and an icon on the right side.
-class SelectionButtonView : public views::Button {
+class SelectionButtonView : public LoginButton {
  public:
   SelectionButtonView(const base::string16& text,
                       views::ButtonListener* listener)
-      : views::Button(listener) {
+      : LoginButton(listener) {
     SetPaintToLayer();
     layer()->SetFillsBoundsOpaquely(false);
     SetFocusBehavior(FocusBehavior::ALWAYS);
     SetLayoutManager(std::make_unique<views::FillLayout>());
+    SetInkDropMode(InkDropHostView::InkDropMode::OFF);
 
     auto add_horizontal_margin = [&](int width,
                                      views::View* parent) -> views::View* {
@@ -129,7 +140,7 @@ class SelectionButtonView : public views::Button {
   ~SelectionButtonView() override = default;
 
   // Return the preferred height of this view. This overrides the default
-  // behavior in FillLayout::GetPreferredHeightForWidth which caluculates the
+  // behavior in FillLayout::GetPreferredHeightForWidth which calculates the
   // height based on its child height.
   int GetHeightForWidth(int w) const override {
     return GetPreferredSize().height();
@@ -149,6 +160,11 @@ class SelectionButtonView : public views::Button {
   }
 
   void SetTextColor(SkColor color) { label_->SetEnabledColor(color); }
+  void SetText(const base::string16& text) {
+    SetAccessibleName(text);
+    label_->SetText(text);
+    Layout();
+  }
 
   void SetIcon(const gfx::VectorIcon& icon, SkColor color) {
     icon_->SetImage(gfx::CreateVectorIcon(icon, color));
@@ -165,12 +181,45 @@ class SelectionButtonView : public views::Button {
   DISALLOW_COPY_AND_ASSIGN(SelectionButtonView);
 };
 
+// Container for the device monitoring warning.  Contains the warning icon on
+// the left side, and text on the right side.
+class MonitoringWarningView : public NonAccessibleView {
+ public:
+  MonitoringWarningView() : NonAccessibleView(kMonitoringWarningClassName) {
+    SetLayoutManager(std::make_unique<views::BoxLayout>(
+        views::BoxLayout::kHorizontal, gfx::Insets(),
+        kSpacingBetweenMonitoringWarningIconAndLabelDp));
+
+    views::ImageView* image = new views::ImageView();
+    image->SetImage(gfx::CreateVectorIcon(
+        vector_icons::kWarningIcon, kMonitoringWarningIconSizeDp, SK_ColorRED));
+    image->SetPreferredSize(
+        gfx::Size(kMonitoringWarningIconSizeDp, kMonitoringWarningIconSizeDp));
+    AddChildView(image);
+
+    const base::string16 label_text = l10n_util::GetStringUTF16(
+        IDS_ASH_LOGIN_PUBLIC_ACCOUNT_MONITORING_WARNING);
+    views::Label* label = CreateLabel(label_text, SK_ColorWHITE);
+    label->SetMultiLine(true);
+    label->SetLineHeight(kTextLineHeightDp);
+    AddChildView(label);
+  }
+
+  ~MonitoringWarningView() override = default;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(MonitoringWarningView);
+};
+
 // Implements the right part of the expanded public session view.
 class RightPaneView : public NonAccessibleView,
                       public views::ButtonListener,
                       public views::StyledLabelListener {
  public:
-  RightPaneView() {
+  explicit RightPaneView(const base::RepeatingClosure& on_learn_more_tapped)
+      : language_menu_(std::make_unique<LoginBubble>()),
+        keyboard_menu_(std::make_unique<LoginBubble>()),
+        on_learn_more_tapped_(on_learn_more_tapped) {
     SetPreferredSize(
         gfx::Size(kExpandedViewWidthDp / 2, kExpandedViewHeightDp));
     SetBorder(views::CreateEmptyBorder(gfx::Insets(kRightPaneMarginDp)));
@@ -181,34 +230,29 @@ class RightPaneView : public NonAccessibleView,
         views::BoxLayout::kVertical, gfx::Insets(), kSpacingBetweenLabelsDp));
     AddChildView(labels_view_);
 
-    views::Label* top_label =
-        CreateLabel(l10n_util::GetStringUTF16(
-                        IDS_ASH_LOGIN_PUBLIC_ACCOUNT_MONITORING_WARNING),
-                    SK_ColorWHITE);
-    top_label->SetMultiLine(true);
-    top_label->SetLineHeight(kTextLineHeightDp);
+    auto* top_container = new MonitoringWarningView();
+    labels_view_->AddChildView(top_container);
 
     const base::string16 link = l10n_util::GetStringUTF16(IDS_ASH_LEARN_MORE);
     size_t offset;
     const base::string16 text = l10n_util::GetStringFUTF16(
         IDS_ASH_LOGIN_PUBLIC_ACCOUNT_SIGNOUT_REMINDER, link, &offset);
-    views::StyledLabel* bottom_label = new views::StyledLabel(text, this);
+    learn_more_label_ = new views::StyledLabel(text, this);
 
     views::StyledLabel::RangeStyleInfo style;
-    style.custom_font = bottom_label->GetDefaultFontList().Derive(
+    style.custom_font = learn_more_label_->GetDefaultFontList().Derive(
         0, gfx::Font::FontStyle::NORMAL, gfx::Font::Weight::NORMAL);
     style.override_color = SK_ColorWHITE;
-    bottom_label->AddStyleRange(gfx::Range(0, offset), style);
+    learn_more_label_->AddStyleRange(gfx::Range(0, offset), style);
 
     views::StyledLabel::RangeStyleInfo link_style =
         views::StyledLabel::RangeStyleInfo::CreateForLink();
     link_style.override_color = kPublicSessionBlueColor;
-    bottom_label->AddStyleRange(gfx::Range(offset, offset + link.length()),
-                                link_style);
-    bottom_label->set_auto_color_readability_enabled(false);
+    learn_more_label_->AddStyleRange(gfx::Range(offset, offset + link.length()),
+                                     link_style);
+    learn_more_label_->set_auto_color_readability_enabled(false);
 
-    labels_view_->AddChildView(top_label);
-    labels_view_->AddChildView(bottom_label);
+    labels_view_->AddChildView(learn_more_label_);
 
     // Create button to show/hide advanced view.
     advanced_view_button_ = new SelectionButtonView(
@@ -314,15 +358,35 @@ class RightPaneView : public NonAccessibleView,
   void ButtonPressed(views::Button* sender, const ui::Event& event) override {
     if (sender == advanced_view_button_) {
       show_advanced_view_ = !show_advanced_view_;
+      show_advanced_changed_by_user_ = true;
       Layout();
     } else if (sender == submit_button_) {
       Shell::Get()->login_screen_controller()->LaunchPublicSession(
-          current_user_->basic_user_info->account_id, selected_locale_,
-          selected_keyboard_);
+          current_user_->basic_user_info->account_id,
+          selected_language_item_.value, selected_keyboard_item_.value);
+    } else if (sender == language_selection_) {
+      if (!language_menu_->IsVisible() && !language_items_.empty()) {
+        LoginMenuView* view = new LoginMenuView(
+            language_items_, language_selection_ /*anchor_view*/,
+            base::BindRepeating(&RightPaneView::OnLanguageSelected,
+                                weak_factory_.GetWeakPtr()));
+        language_menu_->ShowSelectionMenu(
+            view, language_selection_ /*bubble_opener*/);
+      } else {
+        language_menu_->Close();
+      }
+    } else if (sender == keyboard_selection_) {
+      if (!keyboard_menu_->IsVisible() && !keyboard_items_.empty()) {
+        LoginMenuView* view = new LoginMenuView(
+            keyboard_items_, keyboard_selection_ /*anchor_view*/,
+            base::BindRepeating(&RightPaneView::OnKeyboardSelected,
+                                weak_factory_.GetWeakPtr()));
+        keyboard_menu_->ShowSelectionMenu(
+            view, keyboard_selection_ /*bubble_opener*/);
+      } else {
+        keyboard_menu_->Close();
+      }
     }
-
-    // TODO(crbug.com/809635): Show language and keyboard menu when clicks on
-    // language_selection_ and keyboard_selection_.
   }
 
   // "Learn more" is clicked to show additional information of what the device
@@ -330,31 +394,111 @@ class RightPaneView : public NonAccessibleView,
   void StyledLabelLinkClicked(views::StyledLabel* label,
                               const gfx::Range& range,
                               int event_flags) override {
-    NOTIMPLEMENTED();
+    on_learn_more_tapped_.Run();
   }
 
   void UpdateForUser(const mojom::LoginUserInfoPtr& user) {
     DCHECK_EQ(user->basic_user_info->type,
               user_manager::USER_TYPE_PUBLIC_ACCOUNT);
     current_user_ = user->Clone();
-    if (selected_locale_.empty())
-      selected_locale_ = user->public_account_info->default_locale;
+    if (!language_changed_by_user_)
+      selected_language_item_.value = user->public_account_info->default_locale;
 
-    show_advanced_view_ = user->public_account_info->show_advanced_view;
+    PopulateLanguageItems(user->public_account_info->available_locales);
+    PopulateKeyboardItems(user->public_account_info->keyboard_layouts);
+    language_selection_->SetText(
+        base::UTF8ToUTF16(selected_language_item_.title));
+    keyboard_selection_->SetText(
+        base::UTF8ToUTF16(selected_keyboard_item_.title));
+
+    if (!show_advanced_changed_by_user_)
+      show_advanced_view_ = user->public_account_info->show_advanced_view;
+
     Layout();
-
-    // TODO(crbug.com/809635): pre-populate keyboard list in LoginUserInfoPtr.
   }
 
-  SelectionButtonView* advanced_view_button() { return advanced_view_button_; }
-  ArrowButtonView* submit_button() { return submit_button_; }
-  views::View* advanced_view() { return advanced_view_; }
+  void OnLanguageSelected(LoginMenuView::Item item) {
+    language_changed_by_user_ = true;
+    selected_language_item_ = item;
+    language_selection_->SetText(base::UTF8ToUTF16(item.title));
+    current_user_->public_account_info->default_locale = item.value;
+
+    // User changed the preferred locale, request to get corresponding keyboard
+    // layouts.
+    Shell::Get()
+        ->login_screen_controller()
+        ->RequestPublicSessionKeyboardLayouts(
+            current_user_->basic_user_info->account_id, item.value);
+  }
+
+  void OnKeyboardSelected(LoginMenuView::Item item) {
+    selected_keyboard_item_ = item;
+    keyboard_selection_->SetText(base::UTF8ToUTF16(item.title));
+  }
+
+  void PopulateLanguageItems(const std::vector<mojom::LocaleItemPtr>& locales) {
+    language_items_.clear();
+    for (const auto& locale : locales) {
+      LoginMenuView::Item item;
+      if (locale->group_name) {
+        item.title = locale->group_name.value();
+        item.is_group = true;
+      } else {
+        item.title = locale->title;
+        item.value = locale->language_code;
+        item.is_group = false;
+        item.selected = selected_language_item_.value == locale->language_code;
+      }
+      language_items_.push_back(item);
+
+      if (selected_language_item_.value == locale->language_code)
+        selected_language_item_ = item;
+    }
+  }
+
+  void PopulateKeyboardItems(
+      const std::vector<mojom::InputMethodItemPtr>& keyboard_layouts) {
+    keyboard_items_.clear();
+    for (const auto& keyboard : keyboard_layouts) {
+      LoginMenuView::Item item;
+      item.title = keyboard->title;
+      item.value = keyboard->ime_id;
+      item.is_group = false;
+      item.selected = keyboard->selected;
+      keyboard_items_.push_back(item);
+
+      if (keyboard->selected)
+        selected_keyboard_item_ = item;
+    }
+  }
+
+  LoginBaseBubbleView* GetLanguageMenuView() {
+    if (language_menu_ && language_menu_->bubble_view())
+      return language_menu_->bubble_view();
+    return nullptr;
+  }
+
+  LoginBaseBubbleView* GetKeyboardMenuView() {
+    if (keyboard_menu_ && keyboard_menu_->bubble_view())
+      return keyboard_menu_->bubble_view();
+    return nullptr;
+  }
+
+  // Close language and keyboard menus and reset local states.
+  void Reset() {
+    if (language_menu_ && language_menu_->IsVisible())
+      language_menu_->CloseImmediately();
+    if (keyboard_menu_ && keyboard_menu_->IsVisible())
+      keyboard_menu_->CloseImmediately();
+    show_advanced_changed_by_user_ = false;
+    language_changed_by_user_ = false;
+  }
 
  private:
+  friend class LoginExpandedPublicAccountView::TestApi;
+
   bool show_advanced_view_ = false;
   mojom::LoginUserInfoPtr current_user_;
-  std::string selected_locale_;
-  std::string selected_keyboard_;
 
   views::View* labels_view_ = nullptr;
   SelectionButtonView* advanced_view_button_ = nullptr;
@@ -362,6 +506,27 @@ class RightPaneView : public NonAccessibleView,
   SelectionButtonView* language_selection_ = nullptr;
   SelectionButtonView* keyboard_selection_ = nullptr;
   ArrowButtonView* submit_button_ = nullptr;
+  views::StyledLabel* learn_more_label_ = nullptr;
+
+  std::unique_ptr<LoginBubble> language_menu_;
+  std::unique_ptr<LoginBubble> keyboard_menu_;
+  LoginMenuView::Item selected_language_item_;
+  LoginMenuView::Item selected_keyboard_item_;
+  std::vector<LoginMenuView::Item> language_items_;
+  std::vector<LoginMenuView::Item> keyboard_items_;
+
+  // Local states to check if the locale and whether to show advanced view
+  // has been changed by the user. This ensures user action won't be overridden
+  // by the default settings and it will be reset after this view is hidden.
+  // Keyboard selection is not tracked here because it's depending on which
+  // locale user selects, so the previously selected keyboard might not be
+  // applicable for the current locale.
+  bool show_advanced_changed_by_user_ = false;
+  bool language_changed_by_user_ = false;
+
+  base::RepeatingClosure on_learn_more_tapped_;
+
+  base::WeakPtrFactory<RightPaneView> weak_factory_{this};
 
   DISALLOW_COPY_AND_ASSIGN(RightPaneView);
 };
@@ -373,15 +538,53 @@ LoginExpandedPublicAccountView::TestApi::TestApi(
 LoginExpandedPublicAccountView::TestApi::~TestApi() = default;
 
 views::View* LoginExpandedPublicAccountView::TestApi::advanced_view_button() {
-  return view_->right_pane_->advanced_view_button();
+  return view_->right_pane_->advanced_view_button_;
 }
 
 ArrowButtonView* LoginExpandedPublicAccountView::TestApi::submit_button() {
-  return view_->right_pane_->submit_button();
+  return view_->right_pane_->submit_button_;
 }
 
 views::View* LoginExpandedPublicAccountView::TestApi::advanced_view() {
-  return view_->right_pane_->advanced_view();
+  return view_->right_pane_->advanced_view_;
+}
+
+PublicAccountWarningDialog*
+LoginExpandedPublicAccountView::TestApi::warning_dialog() {
+  return view_->warning_dialog_;
+}
+
+views::StyledLabel*
+LoginExpandedPublicAccountView::TestApi::learn_more_label() {
+  return view_->right_pane_->learn_more_label_;
+}
+
+views::View*
+LoginExpandedPublicAccountView::TestApi::language_selection_button() {
+  return view_->right_pane_->language_selection_;
+}
+
+views::View*
+LoginExpandedPublicAccountView::TestApi::keyboard_selection_button() {
+  return view_->right_pane_->keyboard_selection_;
+}
+
+LoginBubble* LoginExpandedPublicAccountView::TestApi::language_menu() {
+  return view_->right_pane_->language_menu_.get();
+}
+
+LoginBubble* LoginExpandedPublicAccountView::TestApi::keyboard_menu() {
+  return view_->right_pane_->keyboard_menu_.get();
+}
+
+LoginMenuView::Item
+LoginExpandedPublicAccountView::TestApi::selected_language_item() {
+  return view_->right_pane_->selected_language_item_;
+}
+
+LoginMenuView::Item
+LoginExpandedPublicAccountView::TestApi::selected_keyboard_item() {
+  return view_->right_pane_->selected_keyboard_item_;
 }
 
 LoginExpandedPublicAccountView::LoginExpandedPublicAccountView(
@@ -414,7 +617,9 @@ LoginExpandedPublicAccountView::LoginExpandedPublicAccountView(
   left_pane->SetBorder(
       views::CreateSolidSidedBorder(0, 0, 0, kBorderThicknessDp, kBorderColor));
 
-  right_pane_ = new RightPaneView();
+  right_pane_ = new RightPaneView(
+      base::BindRepeating(&LoginExpandedPublicAccountView::ShowWarningDialog,
+                          base::Unretained(this)));
   AddChildView(right_pane_);
 }
 
@@ -427,11 +632,31 @@ void LoginExpandedPublicAccountView::ProcessPressedEvent(
   if (!visible())
     return;
 
+  // Keep this view to be visible until warning dialog is dismissed.
+  if (warning_dialog_ && warning_dialog_->IsVisible())
+    return;
+
   if (GetBoundsInScreen().Contains(event->root_location()))
     return;
 
-  SetVisible(false);
-  on_dismissed_.Run();
+  // Ignore press event inside the language and keyboard menu.
+  LoginBaseBubbleView* language_menu_view = right_pane_->GetLanguageMenuView();
+  LoginBaseBubbleView* keyboard_menu_view = right_pane_->GetKeyboardMenuView();
+  if (language_menu_view) {
+    const gfx::Rect bounds =
+        language_menu_view->GetWidget()->GetWindowBoundsInScreen();
+    if (bounds.Contains(event->root_location()))
+      return;
+  }
+
+  if (keyboard_menu_view) {
+    const gfx::Rect bounds =
+        keyboard_menu_view->GetWidget()->GetWindowBoundsInScreen();
+    if (bounds.Contains(event->root_location()))
+      return;
+  }
+
+  Hide();
 }
 
 void LoginExpandedPublicAccountView::UpdateForUser(
@@ -443,6 +668,22 @@ void LoginExpandedPublicAccountView::UpdateForUser(
 const mojom::LoginUserInfoPtr& LoginExpandedPublicAccountView::current_user()
     const {
   return user_view_->current_user();
+}
+
+void LoginExpandedPublicAccountView::Hide() {
+  SetVisible(false);
+  right_pane_->Reset();
+  on_dismissed_.Run();
+}
+
+void LoginExpandedPublicAccountView::ShowWarningDialog() {
+  DCHECK(!warning_dialog_);
+  warning_dialog_ = new PublicAccountWarningDialog(weak_factory_.GetWeakPtr());
+  warning_dialog_->Show();
+}
+
+void LoginExpandedPublicAccountView::OnWarningDialogClosed() {
+  warning_dialog_ = nullptr;
 }
 
 void LoginExpandedPublicAccountView::OnPaint(gfx::Canvas* canvas) {
@@ -471,9 +712,12 @@ void LoginExpandedPublicAccountView::OnKeyEvent(ui::KeyEvent* event) {
   if (!visible() || event->type() != ui::ET_KEY_PRESSED)
     return;
 
+  // Give warning dialog a chance to handle key event.
+  if (warning_dialog_ && warning_dialog_->IsVisible())
+    return;
+
   if (event->key_code() == ui::KeyboardCode::VKEY_ESCAPE) {
-    SetVisible(false);
-    on_dismissed_.Run();
+    Hide();
   }
 }
 

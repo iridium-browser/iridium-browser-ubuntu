@@ -6,7 +6,6 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_PAINT_PAINT_CONTROLLER_TEST_H_
 
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/renderer/platform/graphics/paint/clip_recorder.h"
 #include "third_party/blink/renderer/platform/graphics/paint/drawing_recorder.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_controller.h"
 #include "third_party/blink/renderer/platform/testing/fake_display_item_client.h"
@@ -43,11 +42,10 @@ class PaintControllerTestBase : public testing::Test {
     context.DrawRect(RoundedIntRect(FloatRect(bounds)));
   }
 
-  void InitRootChunk() {
-    if (RuntimeEnabledFeatures::SlimmingPaintV175Enabled()) {
-      GetPaintController().UpdateCurrentPaintChunkProperties(
-          root_paint_chunk_id_, test::DefaultPaintChunkProperties());
-    }
+  void InitRootChunk() { InitRootChunk(GetPaintController()); }
+  void InitRootChunk(PaintController& paint_controller) {
+    paint_controller.UpdateCurrentPaintChunkProperties(
+        root_paint_chunk_id_, DefaultPaintChunkProperties());
   }
 
  protected:
@@ -68,6 +66,11 @@ class PaintControllerTestBase : public testing::Test {
 #endif
 
   void InvalidateAll() { paint_controller_->InvalidateAllForTesting(); }
+
+  void CommitAndFinishCycle() {
+    paint_controller_->CommitNewDisplayItems();
+    paint_controller_->FinishCycle();
+  }
 
   using SubsequenceMarkers = PaintController::SubsequenceMarkers;
   SubsequenceMarkers* GetSubsequenceMarkers(const DisplayItemClient& client) {
@@ -95,8 +98,8 @@ class TestDisplayItem final : public DisplayItem {
       : DisplayItem(client, type, sizeof(*this)) {}
 
   void Replay(GraphicsContext&) const final { NOTREACHED(); }
-  void AppendToWebDisplayItemList(const FloatSize&,
-                                  WebDisplayItemList*) const final {
+  void AppendToDisplayItemList(const FloatSize&,
+                               cc::DisplayItemList&) const final {
     NOTREACHED();
   }
 };
@@ -128,7 +131,7 @@ const DisplayItem::Type kForegroundType =
 const DisplayItem::Type kDocumentBackgroundType =
     DisplayItem::kDocumentBackground;
 const DisplayItem::Type kScrollHitTestType = DisplayItem::kScrollHitTest;
-const DisplayItem::Type kClipType = DisplayItem::kClipFirst;
+const DisplayItem::Type kClipType = DisplayItem::kClipPaintPhaseFirst;
 
 }  // namespace blink
 

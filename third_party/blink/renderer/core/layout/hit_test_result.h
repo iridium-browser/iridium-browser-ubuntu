@@ -53,17 +53,12 @@ class Scrollbar;
 enum ListBasedHitTestBehavior { kContinueHitTesting, kStopHitTesting };
 
 class CORE_EXPORT HitTestResult {
-  DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
+  DISALLOW_NEW();
 
  public:
   typedef HeapListHashSet<Member<Node>> NodeSet;
 
   HitTestResult();
-  HitTestResult(const HitTestRequest&, const LayoutPoint&);
-  // Pass positive padding values to perform a rect-based hit test.
-  HitTestResult(const HitTestRequest&,
-                const LayoutPoint& center_point,
-                const LayoutRectOutsets& padding);
   HitTestResult(const HitTestRequest&, const HitTestLocation&);
   HitTestResult(const HitTestResult&);
   ~HitTestResult();
@@ -71,7 +66,7 @@ class CORE_EXPORT HitTestResult {
   void Trace(blink::Visitor*);
 
   bool EqualForCacheability(const HitTestResult&) const;
-  void CacheValues(const HitTestResult&);
+  void CacheValues(const HitTestResult& other);
 
   // Populate this object based on another HitTestResult; similar to assignment
   // operator but don't assign any of the request parameters. ie. This method
@@ -99,21 +94,13 @@ class CORE_EXPORT HitTestResult {
     return is_over_embedded_content_view_;
   }
 
-  // Forwarded from HitTestLocation
-  bool IsRectBasedTest() const { return hit_test_location_.IsRectBasedTest(); }
-
-  // The hit-tested point in the coordinates of the main frame.
-  const LayoutPoint& PointInMainFrame() const {
-    return hit_test_location_.Point();
-  }
-  IntPoint RoundedPointInMainFrame() const {
-    return RoundedIntPoint(PointInMainFrame());
-  }
-
   // The hit-tested point in the coordinates of the innerNode frame, the frame
   // containing innerNode.
   const LayoutPoint& PointInInnerNodeFrame() const {
     return point_in_inner_node_frame_;
+  }
+  void SetPointInInnerNodeFrame(const LayoutPoint& point) {
+    point_in_inner_node_frame_ = point;
   }
   IntPoint RoundedPointInInnerNodeFrame() const {
     return RoundedIntPoint(PointInInnerNodeFrame());
@@ -132,9 +119,6 @@ class CORE_EXPORT HitTestResult {
 
   void SetToShadowHostIfInRestrictedShadowRoot();
 
-  const HitTestLocation& GetHitTestLocation() const {
-    return hit_test_location_;
-  }
   const HitTestRequest& GetHitTestRequest() const { return hit_test_request_; }
 
   void SetInnerNode(Node*);
@@ -145,7 +129,7 @@ class CORE_EXPORT HitTestResult {
     is_over_embedded_content_view_ = b;
   }
 
-  bool IsSelected() const;
+  bool IsSelected(const HitTestLocation& location) const;
   String Title(TextDirection&) const;
   const AtomicString& AltDisplayString() const;
   Image* GetImage() const;
@@ -188,14 +172,14 @@ class CORE_EXPORT HitTestResult {
 
   // Collapse the rect-based test result into a single target at the specified
   // location.
-  void ResolveRectBasedTest(Node* resolved_inner_node,
-                            const LayoutPoint& resolved_point_in_main_frame);
+  HitTestLocation ResolveRectBasedTest(
+      Node* resolved_inner_node,
+      const LayoutPoint& resolved_point_in_main_frame);
 
  private:
   NodeSet& MutableListBasedTestResult();  // See above.
   HTMLMediaElement* MediaElement() const;
 
-  HitTestLocation hit_test_location_;
   HitTestRequest hit_test_request_;
   bool cacheable_;
 

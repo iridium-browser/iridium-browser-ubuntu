@@ -255,7 +255,7 @@ int SparseControl::StartIO(SparseOperation op,
                            int64_t offset,
                            net::IOBuffer* buf,
                            int buf_len,
-                           const CompletionCallback& callback) {
+                           CompletionOnceCallback callback) {
   DCHECK(init_);
   // We don't support simultaneous IO for sparse data.
   if (operation_ != kNoOperation)
@@ -279,9 +279,10 @@ int SparseControl::StartIO(SparseOperation op,
   // Copy the operation parameters.
   operation_ = op;
   offset_ = offset;
-  user_buf_ = buf ? new net::DrainableIOBuffer(buf, buf_len) : NULL;
+  user_buf_ =
+      buf ? base::MakeRefCounted<net::DrainableIOBuffer>(buf, buf_len) : NULL;
   buf_len_ = buf_len;
-  user_callback_ = callback;
+  user_callback_ = std::move(callback);
 
   result_ = 0;
   pending_ = false;
@@ -315,8 +316,8 @@ int SparseControl::GetAvailableRange(int64_t offset, int len, int64_t* start) {
   DCHECK(start);
 
   range_found_ = false;
-  int result = StartIO(
-      kGetRangeOperation, offset, NULL, len, CompletionCallback());
+  int result =
+      StartIO(kGetRangeOperation, offset, NULL, len, CompletionOnceCallback());
   if (range_found_) {
     *start = offset_;
     return result;
@@ -333,7 +334,7 @@ void SparseControl::CancelIO() {
   abort_ = true;
 }
 
-int SparseControl::ReadyToUse(const CompletionCallback& callback) {
+int SparseControl::ReadyToUse(CompletionOnceCallback callback) {
   if (!abort_)
     return net::OK;
 
@@ -341,7 +342,7 @@ int SparseControl::ReadyToUse(const CompletionCallback& callback) {
   // one extra reference due to the pending IO operation itself, but we'll
   // release that one before invoking user_callback_.
   entry_->AddRef();  // Balanced in DoAbortCallbacks.
-  abort_callbacks_.push_back(callback);
+  abort_callbacks_.push_back(std::move(callback));
   return net::ERR_IO_PENDING;
 }
 
@@ -395,11 +396,11 @@ int SparseControl::CreateSparseEntry() {
   children_map_.Resize(kNumSparseBits, true);
 
   // Save the header. The bitmap is saved in the destructor.
-  scoped_refptr<net::IOBuffer> buf(
-      new net::WrappedIOBuffer(reinterpret_cast<char*>(&sparse_header_)));
+  scoped_refptr<net::IOBuffer> buf = base::MakeRefCounted<net::WrappedIOBuffer>(
+      reinterpret_cast<char*>(&sparse_header_));
 
   int rv = entry_->WriteData(kSparseIndex, 0, buf.get(), sizeof(sparse_header_),
-                             CompletionCallback(), false);
+                             CompletionOnceCallback(), false);
   if (rv != sizeof(sparse_header_)) {
     DLOG(ERROR) << "Unable to save sparse_header_";
     return net::ERR_CACHE_OPERATION_NOT_SUPPORTED;
@@ -425,12 +426,12 @@ int SparseControl::OpenSparseEntry(int data_len) {
   if (map_len > kMaxMapSize || map_len % 4)
     return net::ERR_CACHE_OPERATION_NOT_SUPPORTED;
 
-  scoped_refptr<net::IOBuffer> buf(
-      new net::WrappedIOBuffer(reinterpret_cast<char*>(&sparse_header_)));
+  scoped_refptr<net::IOBuffer> buf = base::MakeRefCounted<net::WrappedIOBuffer>(
+      reinterpret_cast<char*>(&sparse_header_));
 
   // Read header.
   int rv = entry_->ReadData(kSparseIndex, 0, buf.get(), sizeof(sparse_header_),
-                            CompletionCallback());
+                            CompletionOnceCallback());
   if (rv != static_cast<int>(sizeof(sparse_header_)))
     return net::ERR_CACHE_READ_FAILURE;
 
@@ -442,9 +443,9 @@ int SparseControl::OpenSparseEntry(int data_len) {
     return net::ERR_CACHE_OPERATION_NOT_SUPPORTED;
 
   // Read the actual bitmap.
-  buf = new net::IOBuffer(map_len);
+  buf = base::MakeRefCounted<net::IOBuffer>(map_len);
   rv = entry_->ReadData(kSparseIndex, sizeof(sparse_header_), buf.get(),
-                        map_len, CompletionCallback());
+                        map_len, CompletionOnceCallback());
   if (rv != map_len)
     return net::ERR_CACHE_READ_FAILURE;
 
@@ -480,12 +481,13 @@ bool SparseControl::OpenChild() {
       child_->GetDataSize(kSparseIndex) < static_cast<int>(sizeof(child_data_)))
     return KillChildAndContinue(key, false);
 
-  scoped_refptr<net::WrappedIOBuffer> buf(
-      new net::WrappedIOBuffer(reinterpret_cast<char*>(&child_data_)));
+  scoped_refptr<net::WrappedIOBuffer> buf =
+      base::MakeRefCounted<net::WrappedIOBuffer>(
+          reinterpret_cast<char*>(&child_data_));
 
   // Read signature.
   int rv = child_->ReadData(kSparseIndex, 0, buf.get(), sizeof(child_data_),
-                            CompletionCallback());
+                            CompletionOnceCallback());
   if (rv != sizeof(child_data_))
     return KillChildAndContinue(key, true);  // This is a fatal failure.
 
@@ -504,12 +506,13 @@ bool SparseControl::OpenChild() {
 }
 
 void SparseControl::CloseChild() {
-  scoped_refptr<net::WrappedIOBuffer> buf(
-      new net::WrappedIOBuffer(reinterpret_cast<char*>(&child_data_)));
+  scoped_refptr<net::WrappedIOBuffer> buf =
+      base::MakeRefCounted<net::WrappedIOBuffer>(
+          reinterpret_cast<char*>(&child_data_));
 
   // Save the allocation bitmap before closing the child entry.
   int rv = child_->WriteData(kSparseIndex, 0, buf.get(), sizeof(child_data_),
-                             CompletionCallback(), false);
+                             CompletionOnceCallback(), false);
   if (rv != sizeof(child_data_))
     DLOG(ERROR) << "Failed to save child data";
   child_ = NULL;
@@ -572,12 +575,12 @@ void SparseControl::SetChildBit(bool value) {
 }
 
 void SparseControl::WriteSparseData() {
-  scoped_refptr<net::IOBuffer> buf(new net::WrappedIOBuffer(
-      reinterpret_cast<const char*>(children_map_.GetMap())));
+  scoped_refptr<net::IOBuffer> buf = base::MakeRefCounted<net::WrappedIOBuffer>(
+      reinterpret_cast<const char*>(children_map_.GetMap()));
 
   int len = children_map_.ArraySize() * 4;
   int rv = entry_->WriteData(kSparseIndex, sizeof(sparse_header_), buf.get(),
-                             len, CompletionCallback(), false);
+                             len, CompletionOnceCallback(), false);
   if (rv != len) {
     DLOG(ERROR) << "Unable to save sparse map";
   }
@@ -670,11 +673,12 @@ void SparseControl::InitChildData() {
   memset(&child_data_, 0, sizeof(child_data_));
   child_data_.header = sparse_header_;
 
-  scoped_refptr<net::WrappedIOBuffer> buf(
-      new net::WrappedIOBuffer(reinterpret_cast<char*>(&child_data_)));
+  scoped_refptr<net::WrappedIOBuffer> buf =
+      base::MakeRefCounted<net::WrappedIOBuffer>(
+          reinterpret_cast<char*>(&child_data_));
 
   int rv = child_->WriteData(kSparseIndex, 0, buf.get(), sizeof(child_data_),
-                             CompletionCallback(), false);
+                             CompletionOnceCallback(), false);
   if (rv != sizeof(child_data_))
     DLOG(ERROR) << "Failed to save child data";
   SetChildBit(true);
@@ -712,10 +716,10 @@ bool SparseControl::DoChildIO() {
 
   // We have more work to do. Let's not trigger a callback to the caller.
   finished_ = false;
-  CompletionCallback callback;
+  CompletionOnceCallback callback;
   if (!user_callback_.is_null()) {
-    callback =
-        base::Bind(&SparseControl::OnChildIOCompleted, base::Unretained(this));
+    callback = base::BindOnce(&SparseControl::OnChildIOCompleted,
+                              base::Unretained(this));
   }
 
   int rv = 0;
@@ -728,7 +732,7 @@ bool SparseControl::DoChildIO() {
                                                 child_len_));
       }
       rv = child_->ReadDataImpl(kSparseData, child_offset_, user_buf_.get(),
-                                child_len_, callback);
+                                child_len_, std::move(callback));
       break;
     case kWriteOperation:
       if (entry_->net_log().IsCapturing()) {
@@ -738,7 +742,7 @@ bool SparseControl::DoChildIO() {
                                                 child_len_));
       }
       rv = child_->WriteDataImpl(kSparseData, child_offset_, user_buf_.get(),
-                                 child_len_, callback, false);
+                                 child_len_, std::move(callback), false);
       break;
     case kGetRangeOperation:
       rv = DoGetAvailableRange();
@@ -896,25 +900,24 @@ void SparseControl::OnChildIOCompleted(int result) {
 
 void SparseControl::DoUserCallback() {
   DCHECK(!user_callback_.is_null());
-  CompletionCallback cb = user_callback_;
-  user_callback_.Reset();
+  CompletionOnceCallback cb = std::move(user_callback_);
   user_buf_ = NULL;
   pending_ = false;
   operation_ = kNoOperation;
   int rv = result_;
   entry_->Release();  // Don't touch object after this line.
-  cb.Run(rv);
+  std::move(cb).Run(rv);
 }
 
 void SparseControl::DoAbortCallbacks() {
-  std::vector<CompletionCallback> abort_callbacks;
+  std::vector<CompletionOnceCallback> abort_callbacks;
   abort_callbacks.swap(abort_callbacks_);
 
-  for (CompletionCallback& callback : abort_callbacks) {
+  for (CompletionOnceCallback& callback : abort_callbacks) {
     // Releasing all references to entry_ may result in the destruction of this
     // object so we should not be touching it after the last Release().
     entry_->Release();
-    callback.Run(net::OK);
+    std::move(callback).Run(net::OK);
   }
 }
 

@@ -12,14 +12,19 @@
 
 namespace {
 
-// ARMv8 has vrndmq_f32 to floor 4 floats.  Here we emulate it:
+// ARMv8 has vrndm(q)_f32 to floor floats.  Here we emulate it:
 //   - roundtrip through integers via truncation
 //   - subtract 1 if that's too big (possible for negative values).
 // This restricts the domain of our inputs to a maximum somehwere around 2^31.  Seems plenty big.
-AI static float32x4_t armv7_vrndmq_f32(float32x4_t v) {
+AI static float32x4_t emulate_vrndmq_f32(float32x4_t v) {
     auto roundtrip = vcvtq_f32_s32(vcvtq_s32_f32(v));
     auto too_big = vcgtq_f32(roundtrip, v);
     return vsubq_f32(roundtrip, (float32x4_t)vandq_u32(too_big, (uint32x4_t)vdupq_n_f32(1)));
+}
+AI static float32x2_t emulate_vrndm_f32(float32x2_t v) {
+    auto roundtrip = vcvt_f32_s32(vcvt_s32_f32(v));
+    auto too_big = vcgt_f32(roundtrip, v);
+    return vsub_f32(roundtrip, (float32x2_t)vand_u32(too_big, (uint32x2_t)vdup_n_f32(1)));
 }
 
 template <>
@@ -33,6 +38,12 @@ public:
 
     AI static SkNx Load(const void* ptr) { return vld1_f32((const float*)ptr); }
     AI void store(void* ptr) const { vst1_f32((float*)ptr, fVec); }
+
+    AI static void Load2(const void* ptr, SkNx* x, SkNx* y) {
+        float32x2x2_t xy = vld2_f32((const float*) ptr);
+        *x = xy.val[0];
+        *y = xy.val[1];
+    }
 
     AI static void Store2(void* dst, const SkNx& a, const SkNx& b) {
         float32x2x2_t ab = {{
@@ -96,6 +107,13 @@ public:
     AI static SkNx Max(const SkNx& l, const SkNx& r) { return vmax_f32(l.fVec, r.fVec); }
 
     AI SkNx abs() const { return vabs_f32(fVec); }
+    AI SkNx floor() const {
+    #if defined(SK_CPU_ARM64)
+        return vrndm_f32(fVec);
+    #else
+        return emulate_vrndm_f32(fVec);
+    #endif
+    }
 
     AI SkNx rsqrt() const {
         float32x2_t est0 = vrsqrte_f32(fVec);
@@ -120,7 +138,7 @@ public:
     }
 
     AI bool allTrue() const {
-    #if defined(__aarch64__)
+    #if defined(SK_CPU_ARM64)
         return 0 != vminv_u32(vreinterpret_u32_f32(fVec));
     #else
         auto v = vreinterpret_u32_f32(fVec);
@@ -128,7 +146,7 @@ public:
     #endif
     }
     AI bool anyTrue() const {
-    #if defined(__aarch64__)
+    #if defined(SK_CPU_ARM64)
         return 0 != vmaxv_u32(vreinterpret_u32_f32(fVec));
     #else
         auto v = vreinterpret_u32_f32(fVec);
@@ -217,7 +235,7 @@ public:
     #if defined(SK_CPU_ARM64)
         return vrndmq_f32(fVec);
     #else
-        return armv7_vrndmq_f32(fVec);
+        return emulate_vrndmq_f32(fVec);
     #endif
     }
 
@@ -244,8 +262,26 @@ public:
         return pun.fs[k&3];
     }
 
+    AI float min() const {
+    #if defined(SK_CPU_ARM64)
+        return vminvq_f32(fVec);
+    #else
+        SkNx min = Min(*this, vrev64q_f32(fVec));
+        return SkTMin(min[0], min[2]);
+    #endif
+    }
+
+    AI float max() const {
+    #if defined(SK_CPU_ARM64)
+        return vmaxvq_f32(fVec);
+    #else
+        SkNx max = Max(*this, vrev64q_f32(fVec));
+        return SkTMax(max[0], max[2]);
+    #endif
+    }
+
     AI bool allTrue() const {
-    #if defined(__aarch64__)
+    #if defined(SK_CPU_ARM64)
         return 0 != vminvq_u32(vreinterpretq_u32_f32(fVec));
     #else
         auto v = vreinterpretq_u32_f32(fVec);
@@ -254,7 +290,7 @@ public:
     #endif
     }
     AI bool anyTrue() const {
-    #if defined(__aarch64__)
+    #if defined(SK_CPU_ARM64)
         return 0 != vmaxvq_u32(vreinterpretq_u32_f32(fVec));
     #else
         auto v = vreinterpretq_u32_f32(fVec);

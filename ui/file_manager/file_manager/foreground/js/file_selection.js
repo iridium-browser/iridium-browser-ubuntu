@@ -104,7 +104,7 @@ FileSelection.prototype.computeAdditional = function(metadataModel) {
  * @param {!FileOperationManager} fileOperationManager
  * @param {!ListContainer} listContainer
  * @param {!MetadataModel} metadataModel
- * @param {!VolumeManagerWrapper} volumeManager
+ * @param {!VolumeManager} volumeManager
  * @extends {cr.EventTarget}
  * @constructor
  * @struct
@@ -133,7 +133,7 @@ function FileSelectionHandler(
   this.metadataModel_ = metadataModel;
 
   /**
-   * @private {VolumeManagerWrapper}
+   * @private {VolumeManager}
    * @const
    */
   this.volumeManager_ = volumeManager;
@@ -252,9 +252,13 @@ FileSelectionHandler.prototype.updateFileSelectionAsync_ = function(selection) {
     return;
 
   // Calculate all additional and heavy properties.
-  selection.computeAdditional(this.metadataModel_);
+  selection.computeAdditional(this.metadataModel_).then(() => {
+    if (this.selection !== selection)
+      return;
 
-  cr.dispatchSimpleEvent(this, FileSelectionHandler.EventType.CHANGE_THROTTLED);
+    cr.dispatchSimpleEvent(
+        this, FileSelectionHandler.EventType.CHANGE_THROTTLED);
+  });
 };
 
 /**

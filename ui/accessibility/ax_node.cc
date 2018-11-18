@@ -18,8 +18,7 @@ AXNode::AXNode(AXNode* parent, int32_t id, int32_t index_in_parent)
   data_.id = id;
 }
 
-AXNode::~AXNode() {
-}
+AXNode::~AXNode() {}
 
 int AXNode::GetUnignoredChildCount() const {
   int count = 0;
@@ -83,7 +82,7 @@ void AXNode::SetData(const AXNodeData& src) {
   data_ = src;
 }
 
-void AXNode::SetLocation(int offset_container_id,
+void AXNode::SetLocation(int32_t offset_container_id,
                          const gfx::RectF& location,
                          gfx::Transform* transform) {
   data_.offset_container_id = offset_container_id;
@@ -168,6 +167,10 @@ const std::string& AXNode::GetInheritedStringAttribute(
 base::string16 AXNode::GetInheritedString16Attribute(
     ax::mojom::StringAttribute attribute) const {
   return base::UTF8ToUTF16(GetInheritedStringAttribute(attribute));
+}
+
+std::ostream& operator<<(std::ostream& stream, const AXNode& node) {
+  return stream << node.data().ToString();
 }
 
 }  // namespace ui

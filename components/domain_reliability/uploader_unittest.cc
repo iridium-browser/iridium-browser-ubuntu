@@ -52,8 +52,8 @@ class UploadMockURLRequestJob : public net::URLRequestJob {
  protected:
   void Start() override {
     int rv = upload_stream_->Init(
-        base::Bind(&UploadMockURLRequestJob::OnStreamInitialized,
-                   base::Unretained(this)),
+        base::BindOnce(&UploadMockURLRequestJob::OnStreamInitialized,
+                       base::Unretained(this)),
         net::NetLogWithSource());
     if (rv == net::ERR_IO_PENDING)
       return;
@@ -71,12 +71,11 @@ class UploadMockURLRequestJob : public net::URLRequestJob {
     EXPECT_EQ(net::OK, rv);
 
     size_t upload_size = upload_stream_->size();
-    upload_buffer_ = new net::IOBufferWithSize(upload_size);
+    upload_buffer_ = base::MakeRefCounted<net::IOBufferWithSize>(upload_size);
     rv = upload_stream_->Read(
-        upload_buffer_.get(),
-        upload_size,
-        base::Bind(&UploadMockURLRequestJob::OnStreamRead,
-                   base::Unretained(this)));
+        upload_buffer_.get(), upload_size,
+        base::BindOnce(&UploadMockURLRequestJob::OnStreamRead,
+                       base::Unretained(this)));
     if (rv == net::ERR_IO_PENDING)
       return;
     OnStreamRead(rv);

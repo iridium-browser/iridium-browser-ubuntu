@@ -22,6 +22,7 @@
 #include "rlz/lib/net_response_check.h"
 #include "rlz/lib/rlz_value_store.h"
 #include "rlz/lib/string_utils.h"
+#include "services/network/public/mojom/url_loader_factory.mojom.h"
 
 namespace {
 
@@ -216,8 +217,8 @@ bool GetProductEventsAsCgiHelper(rlz_lib::Product product, char* cgi,
 namespace rlz_lib {
 
 #if defined(RLZ_NETWORK_IMPLEMENTATION_CHROME_NET)
-bool SetURLRequestContext(net::URLRequestContextGetter* context) {
-  return FinancialPing::SetURLRequestContext(context);
+bool SetURLLoaderFactory(network::mojom::URLLoaderFactory* factory) {
+  return FinancialPing::SetURLLoaderFactory(factory);
 }
 #endif
 
@@ -352,6 +353,14 @@ bool SetAccessPointRlz(AccessPoint point, const char* new_rlz) {
   return store->WriteAccessPointRlz(point, normalized_rlz);
 }
 
+bool UpdateExistingAccessPointRlz(const std::string& brand) {
+  ScopedRlzValueStoreLock lock;
+  RlzValueStore* store = lock.GetStore();
+  if (!store || !store->HasAccess(RlzValueStore::kWriteAccess))
+    return false;
+  return store->UpdateExistingAccessPointRlz(brand);
+}
+
 // Financial Server pinging functions.
 
 bool FormFinancialPingRequest(Product product, const AccessPoint* access_points,
@@ -429,7 +438,6 @@ bool SendFinancialPing(Product product,
   std::string response;
 
 #if defined(OS_CHROMEOS)
-
   const net::BackoffEntry::Policy policy = {
       0,  // Number of initial errors to ignore.
       base::TimeDelta::FromSeconds(5).InMilliseconds(),  // Initial delay.
@@ -473,14 +481,11 @@ bool SendFinancialPing(Product product,
   }
 
   SYSLOG(INFO) << "Succeeded in sending RLZ ping";
-
 #else
-
   FinancialPing::PingResponse res =
       FinancialPing::PingServer(request.c_str(), &response);
   if (res != FinancialPing::PING_SUCCESSFUL)
     return false;
-
 #endif
 
   return ParsePingResponse(product, response.c_str());

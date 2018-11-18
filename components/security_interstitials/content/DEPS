@@ -6,4 +6,8 @@ include_rules = [
   "+components/security_interstitials/core",
   "+content/public/browser",
   "+content/public/common",
+  "+content/public/test",
+  "+net",
+  "+net/test",
+  "+third_party/zlib/google/compression_utils.h",
 ]

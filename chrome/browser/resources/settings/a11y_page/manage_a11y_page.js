@@ -10,6 +10,8 @@
 Polymer({
   is: 'settings-manage-a11y-page',
 
+  behaviors: [WebUIListenerBehavior],
+
   properties: {
     /**
      * Preferences state.
@@ -96,6 +98,64 @@ Polymer({
         return loadTimeData.getBoolean('isGuest');
       }
     },
+
+    /**
+     * |hasKeyboard_|starts undefined so observers don't trigger
+     * until it has been populated.
+     * @private
+     */
+    hasKeyboard_: Boolean,
+  },
+
+  /** @override */
+  attached: function() {
+    this.addWebUIListener(
+        'has-hardware-keyboard', this.set.bind(this, 'hasKeyboard_'));
+    chrome.send('initializeKeyboardWatcher');
+  },
+
+  /** @override */
+  ready: function() {
+    this.addWebUIListener(
+        'startup-sound-enabled-updated',
+        this.updateStartupSoundEnabled_.bind(this));
+    chrome.send('getStartupSoundEnabled');
+  },
+
+  /**
+   * Updates the Select-to-Speak description text based on:
+   *    1. Whether Select-to-Speak is enabled.
+   *    2. If it is enabled, whether a physical keyboard is present.
+   * @param {boolean} enabled
+   * @param {boolean} hasKeyboard
+   * @param {string} disabledString String to show when Select-to-Speak is
+   *    disabled.
+   * @param {string} keyboardString String to show when there is a physical
+   *    keyboard
+   * @param {string} noKeyboardString String to show when there is no keyboard
+   * @private
+   */
+  getSelectToSpeakDescription_: function(
+      enabled, hasKeyboard, disabledString, keyboardString, noKeyboardString) {
+    return !enabled ? disabledString :
+                      hasKeyboard ? keyboardString : noKeyboardString;
+  },
+
+  /**
+   * @param {!CustomEvent} e
+   * @private
+   */
+  toggleStartupSoundEnabled_: function(e) {
+    let checked = /** @type {boolean} */ (e.detail);
+    chrome.send('setStartupSoundEnabled', [checked]);
+  },
+
+  /**
+   * @param {boolean} enabled
+   * @private
+   */
+  updateStartupSoundEnabled_: function(enabled) {
+    this.$.startupSoundEnabled.checked = enabled;
   },
 
   /** @private */

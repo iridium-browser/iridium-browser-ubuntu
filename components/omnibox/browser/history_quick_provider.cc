@@ -97,8 +97,6 @@ void HistoryQuickProvider::DoAutocomplete() {
     // Mark this max_match_score as being used.
     max_match_score--;
   }
-  if (OmniboxFieldTrial::InTabSwitchSuggestionTrial())
-    ConvertOpenTabMatches(&autocomplete_input_);
 }
 
 int HistoryQuickProvider::FindMaxMatchScore(
@@ -238,8 +236,6 @@ AutocompleteMatch HistoryQuickProvider::QuickMatchToACMatch(
     match.allowed_to_be_default_match = match.inline_autocompletion.empty() ||
         !PreventInlineAutocomplete(autocomplete_input_);
   }
-  match.EnsureUWYTIsAllowedToBeDefault(autocomplete_input_,
-                                       client()->GetTemplateURLService());
 
   // The term match offsets should be adjusted based on the formatting
   // applied to the suggestion contents displayed in the dropdown.

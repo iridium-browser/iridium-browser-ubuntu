@@ -38,11 +38,11 @@ static INLINE void sync_read(VP9LfSync *const lf_sync, int r, int c) {
   const int nsync = lf_sync->sync_range;
 
   if (r && !(c & (nsync - 1))) {
-    pthread_mutex_t *const mutex = &lf_sync->mutex_[r - 1];
+    pthread_mutex_t *const mutex = &lf_sync->mutex[r - 1];
     mutex_lock(mutex);
 
     while (c > lf_sync->cur_sb_col[r - 1] - nsync) {
-      pthread_cond_wait(&lf_sync->cond_[r - 1], mutex);
+      pthread_cond_wait(&lf_sync->cond[r - 1], mutex);
     }
     pthread_mutex_unlock(mutex);
   }
@@ -69,12 +69,12 @@ static INLINE void sync_write(VP9LfSync *const lf_sync, int r, int c,
   }
 
   if (sig) {
-    mutex_lock(&lf_sync->mutex_[r]);
+    mutex_lock(&lf_sync->mutex[r]);
 
     lf_sync->cur_sb_col[r] = cur;
 
-    pthread_cond_signal(&lf_sync->cond_[r]);
-    pthread_mutex_unlock(&lf_sync->mutex_[r]);
+    pthread_cond_signal(&lf_sync->cond[r]);
+    pthread_mutex_unlock(&lf_sync->mutex[r]);
   }
 #else
   (void)lf_sync;
@@ -91,6 +91,7 @@ static INLINE void thread_loop_filter_rows(
     int y_only, VP9LfSync *const lf_sync) {
   const int num_planes = y_only ? 1 : MAX_MB_PLANE;
   const int sb_cols = mi_cols_aligned_to_sb(cm->mi_cols) >> MI_BLOCK_SIZE_LOG2;
+  const int num_active_workers = VPXMIN(lf_sync->num_workers, lf_sync->rows);
   int mi_row, mi_col;
   enum lf_path path;
   if (y_only)
@@ -103,7 +104,7 @@ static INLINE void thread_loop_filter_rows(
     path = LF_PATH_SLOW;
 
   for (mi_row = start; mi_row < stop;
-       mi_row += lf_sync->num_workers * MI_BLOCK_SIZE) {
+       mi_row += num_active_workers * MI_BLOCK_SIZE) {
     MODE_INFO **const mi = cm->mi_grid_visible + mi_row * cm->mi_stride;
     LOOP_FILTER_MASK *lfm = get_lfm(&cm->lf, mi_row, 0);
 
@@ -157,10 +158,7 @@ static void loop_filter_rows_mt(YV12_BUFFER_CONFIG *frame, VP9_COMMON *cm,
   const VPxWorkerInterface *const winterface = vpx_get_worker_interface();
   // Number of superblock rows and cols
   const int sb_rows = mi_cols_aligned_to_sb(cm->mi_rows) >> MI_BLOCK_SIZE_LOG2;
-  // Decoder may allocate more threads than number of tiles based on user's
-  // input.
-  const int tile_cols = 1 << cm->log2_tile_cols;
-  const int num_workers = VPXMIN(nworkers, tile_cols);
+  const int num_workers = VPXMIN(nworkers, sb_rows);
   int i;
 
   if (!lf_sync->sync_range || sb_rows != lf_sync->rows ||
@@ -253,19 +251,19 @@ void vp9_loop_filter_alloc(VP9LfSync *lf_sync, VP9_COMMON *cm, int rows,
   {
     int i;
 
-    CHECK_MEM_ERROR(cm, lf_sync->mutex_,
-                    vpx_malloc(sizeof(*lf_sync->mutex_) * rows));
-    if (lf_sync->mutex_) {
+    CHECK_MEM_ERROR(cm, lf_sync->mutex,
+                    vpx_malloc(sizeof(*lf_sync->mutex) * rows));
+    if (lf_sync->mutex) {
       for (i = 0; i < rows; ++i) {
-        pthread_mutex_init(&lf_sync->mutex_[i], NULL);
+        pthread_mutex_init(&lf_sync->mutex[i], NULL);
       }
     }
 
-    CHECK_MEM_ERROR(cm, lf_sync->cond_,
-                    vpx_malloc(sizeof(*lf_sync->cond_) * rows));
-    if (lf_sync->cond_) {
+    CHECK_MEM_ERROR(cm, lf_sync->cond,
+                    vpx_malloc(sizeof(*lf_sync->cond) * rows));
+    if (lf_sync->cond) {
       for (i = 0; i < rows; ++i) {
-        pthread_cond_init(&lf_sync->cond_[i], NULL);
+        pthread_cond_init(&lf_sync->cond[i], NULL);
       }
     }
   }
@@ -288,17 +286,17 @@ void vp9_loop_filter_dealloc(VP9LfSync *lf_sync) {
 #if CONFIG_MULTITHREAD
     int i;
 
-    if (lf_sync->mutex_ != NULL) {
+    if (lf_sync->mutex != NULL) {
       for (i = 0; i < lf_sync->rows; ++i) {
-        pthread_mutex_destroy(&lf_sync->mutex_[i]);
+        pthread_mutex_destroy(&lf_sync->mutex[i]);
       }
-      vpx_free(lf_sync->mutex_);
+      vpx_free(lf_sync->mutex);
     }
-    if (lf_sync->cond_ != NULL) {
+    if (lf_sync->cond != NULL) {
       for (i = 0; i < lf_sync->rows; ++i) {
-        pthread_cond_destroy(&lf_sync->cond_[i]);
+        pthread_cond_destroy(&lf_sync->cond[i]);
       }
-      vpx_free(lf_sync->cond_);
+      vpx_free(lf_sync->cond);
     }
 #endif  // CONFIG_MULTITHREAD
     vpx_free(lf_sync->lfdata);

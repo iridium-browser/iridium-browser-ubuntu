@@ -16,8 +16,9 @@
 #include "content/browser/compositor/browser_compositor_output_surface.h"
 #include "gpu/vulkan/buildflags.h"
 #include "ui/latency/latency_info.h"
+#include "ui/latency/latency_tracker.h"
 
-namespace ui {
+namespace ws {
 class ContextProviderCommandBuffer;
 }
 
@@ -28,7 +29,7 @@ class OffscreenBrowserCompositorOutputSurface
     : public BrowserCompositorOutputSurface {
  public:
   OffscreenBrowserCompositorOutputSurface(
-      scoped_refptr<ui::ContextProviderCommandBuffer> context,
+      scoped_refptr<ws::ContextProviderCommandBuffer> context,
       const UpdateVSyncParametersCallback& update_vsync_parameters_callback,
       std::unique_ptr<viz::CompositorOverlayCandidateValidator>
           overlay_candidate_validator);
@@ -51,28 +52,26 @@ class OffscreenBrowserCompositorOutputSurface
   bool IsDisplayedAsOverlayPlane() const override;
   unsigned GetOverlayTextureId() const override;
   gfx::BufferFormat GetOverlayBufferFormat() const override;
-  bool SurfaceIsSuspendForRecycle() const override;
   uint32_t GetFramebufferCopyTextureFormat() override;
 
   // BrowserCompositorOutputSurface implementation.
   void OnReflectorChanged() override;
-#if defined(OS_MACOSX)
-  void SetSurfaceSuspendedForRecycle(bool suspended) override {}
-#endif
 
 #if BUILDFLAG(ENABLE_VULKAN)
   gpu::VulkanSurface* GetVulkanSurface() override;
 #endif
 
+  unsigned UpdateGpuFence() override;
+
   void OnSwapBuffersComplete(const std::vector<ui::LatencyInfo>& latency_info,
-                             uint64_t swap_id);
+                             bool need_presentation_feedback);
 
   viz::OutputSurfaceClient* client_ = nullptr;
   gfx::Size reshape_size_;
   uint32_t fbo_ = 0;
   bool reflector_changed_ = false;
   std::unique_ptr<ReflectorTexture> reflector_texture_;
-  uint64_t swap_id_ = 0;
+  ui::LatencyTracker latency_tracker_;
   base::WeakPtrFactory<OffscreenBrowserCompositorOutputSurface>
       weak_ptr_factory_;
 

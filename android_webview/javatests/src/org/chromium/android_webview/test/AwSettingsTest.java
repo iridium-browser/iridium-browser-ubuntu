@@ -46,10 +46,10 @@ import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.base.test.util.TestFileUtil;
 import org.chromium.base.test.util.UrlUtils;
-import org.chromium.content.browser.test.util.DOMUtils;
-import org.chromium.content.browser.test.util.HistoryUtils;
-import org.chromium.content.common.ContentSwitches;
 import org.chromium.content_public.browser.WebContents;
+import org.chromium.content_public.browser.test.util.DOMUtils;
+import org.chromium.content_public.browser.test.util.HistoryUtils;
+import org.chromium.content_public.common.ContentSwitches;
 import org.chromium.content_public.common.ContentUrlConstants;
 import org.chromium.net.test.EmbeddedTestServer;
 import org.chromium.net.test.util.TestWebServer;
@@ -232,48 +232,6 @@ public class AwSettingsTest {
 
         private String getScript(String title) {
             return "document.title='" + title + "';";
-        }
-    }
-
-    class AwSettingsPluginsTestHelper extends AwSettingsTestHelper<Boolean> {
-        private static final String PLUGINS_ENABLED_STRING = "Embed";
-        private static final String PLUGINS_DISABLED_STRING = "NoEmbed";
-
-        AwSettingsPluginsTestHelper(AwTestContainerView containerView,
-                                    TestAwContentsClient contentViewClient) throws Throwable {
-            super(containerView, contentViewClient, true);
-        }
-
-        @Override
-        protected Boolean getAlteredValue() {
-            return ENABLED;
-        }
-
-        @Override
-        protected Boolean getInitialValue() {
-            return DISABLED;
-        }
-
-        @Override
-        protected Boolean getCurrentValue() {
-            return mAwSettings.getPluginsEnabled();
-        }
-
-        @Override
-        protected void setCurrentValue(Boolean value) {
-            mAwSettings.setPluginsEnabled(value);
-        }
-
-        @Override
-        protected void doEnsureSettingHasValue(Boolean value) throws Throwable {
-            loadDataSync(getData());
-            Assert.assertEquals(value == ENABLED ? PLUGINS_ENABLED_STRING : PLUGINS_DISABLED_STRING,
-                    getTitleOnUiThread());
-        }
-
-        private String getData() {
-            return "<html><body onload=\"document.title = document.body.innerText;\">"
-                    + "<noembed>No</noembed><span>Embed</span></body></html>";
         }
     }
 
@@ -1562,16 +1520,6 @@ public class AwSettingsTest {
     @Test
     @SmallTest
     @Feature({"AndroidWebView", "Preferences"})
-    public void testPluginsEnabledWithTwoViews() throws Throwable {
-        ViewPair views = createViews();
-        runPerViewSettingsTest(
-                new AwSettingsPluginsTestHelper(views.getContainer0(), views.getClient0()),
-                new AwSettingsPluginsTestHelper(views.getContainer1(), views.getClient1()));
-    }
-
-    @Test
-    @SmallTest
-    @Feature({"AndroidWebView", "Preferences"})
     public void testStandardFontFamilyWithTwoViews() throws Throwable {
         ViewPair views = createViews();
         runPerViewSettingsTest(
@@ -2145,7 +2093,7 @@ public class AwSettingsTest {
             int count = callback.getCallCount();
             mActivityTestRule.loadDataSync(awContents, contentClient.getOnPageFinishedHelper(),
                     pageHtml, "text/html", false);
-            DOMUtils.clickNode(testContainer.getContentViewCore(), "play");
+            DOMUtils.clickNode(testContainer.getWebContents(), "play");
             callback.waitForCallback(count, 1);
             Assert.assertEquals(0, webServer.getRequestCount(httpPath));
 
@@ -2407,6 +2355,7 @@ public class AwSettingsTest {
     @Test
     @SmallTest
     @Feature({"AndroidWebView", "Preferences"})
+    @DisabledTest(message = "crbug.com/860556")
     public void testCacheModeWithTwoViews() throws Throwable {
         ViewPair views = createViews();
         TestWebServer webServer = TestWebServer.start();
@@ -2632,28 +2581,23 @@ public class AwSettingsTest {
                 viewportTagSpecifiedWidth, mActivityTestRule.getTitleOnUiThread(awContents));
     }
 
-    // WebView layout width tests are flaky: http://crbug.com/746264
     @Test
     @SmallTest
     @Feature({"AndroidWebView", "Preferences"})
-    @DisabledTest(message = "crbug.com/746264")
     public void testUseWideViewportLayoutWidth() throws Throwable {
         TestAwContentsClient contentClient = new TestAwContentsClient();
         AwTestContainerView testContainerView =
-                mActivityTestRule.createAwTestContainerViewOnMainSync(contentClient);
+                mActivityTestRule.createAwTestContainerViewOnMainSync(contentClient, true);
         useWideViewportLayoutWidthTest(testContainerView, contentClient.getOnPageFinishedHelper());
     }
 
-    // WebView layout width tests are flaky: http://crbug.com/746264
-    @RetryOnFailure
     @Test
     @SmallTest
     @Feature({"AndroidWebView", "Preferences"})
-    @DisabledTest(message = "crbug.com/746264")
     public void testUseWideViewportLayoutWidthNoQuirks() throws Throwable {
         TestAwContentsClient contentClient = new TestAwContentsClient();
         AwTestContainerView testContainerView =
-                mActivityTestRule.createAwTestContainerViewOnMainSync(contentClient, false);
+                mActivityTestRule.createAwTestContainerViewOnMainSync(contentClient);
         useWideViewportLayoutWidthTest(testContainerView, contentClient.getOnPageFinishedHelper());
     }
 

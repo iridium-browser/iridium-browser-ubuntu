@@ -46,8 +46,7 @@ namespace {
 void OnGotCategories(const WebUIDataSource::GotDataCallback& callback,
                      const std::set<std::string>& categorySet) {
   base::ListValue category_list;
-  for (std::set<std::string>::const_iterator it = categorySet.begin();
-       it != categorySet.end(); it++) {
+  for (auto it = categorySet.begin(); it != categorySet.end(); it++) {
     category_list.AppendString(*it);
   }
 
@@ -237,14 +236,13 @@ void TracingUI::DoUploadInternal(const std::string& file_contents,
   TraceUploader::UploadProgressCallback progress_callback =
       base::Bind(&TracingUI::OnTraceUploadProgress,
       weak_factory_.GetWeakPtr());
-  TraceUploader::UploadDoneCallback done_callback =
-      base::Bind(&TracingUI::OnTraceUploadComplete,
-      weak_factory_.GetWeakPtr());
+  TraceUploader::UploadDoneCallback done_callback = base::BindOnce(
+      &TracingUI::OnTraceUploadComplete, weak_factory_.GetWeakPtr());
 
   trace_uploader_ = delegate_->GetTraceUploader(
       BrowserContext::GetDefaultStoragePartition(
-          web_ui()->GetWebContents()->GetBrowserContext())->
-              GetURLRequestContext());
+          web_ui()->GetWebContents()->GetBrowserContext())
+          ->GetURLLoaderFactoryForBrowserProcess());
   DCHECK(trace_uploader_);
   trace_uploader_->DoUpload(file_contents, upload_mode, nullptr,
                             std::move(progress_callback),

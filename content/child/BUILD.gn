@@ -55,6 +55,8 @@ target(link_target_type, "child") {
     "dwrite_font_proxy/dwrite_localized_strings_win.h",
     "dwrite_font_proxy/font_fallback_win.cc",
     "dwrite_font_proxy/font_fallback_win.h",
+    "field_trial.cc",
+    "field_trial.h",
     "font_warmup_win.cc",
     "font_warmup_win.h",
     "image_decoder.cc",
@@ -67,13 +69,10 @@ target(link_target_type, "child") {
     "runtime_features.h",
     "scoped_child_process_reference.cc",
     "scoped_child_process_reference.h",
-    "scoped_web_callbacks.h",
     "service_factory.cc",
     "service_factory.h",
     "thread_safe_sender.cc",
     "thread_safe_sender.h",
-    "webfallbackthemeengine_impl.cc",
-    "webfallbackthemeengine_impl.h",
     "webthemeengine_impl_android.cc",
     "webthemeengine_impl_android.h",
     "webthemeengine_impl_default.cc",
@@ -106,13 +105,12 @@ target(link_target_type, "child") {
     "//gpu/command_buffer/client",
     "//media",
     "//media/blink",
-    "//mojo/common",
-    "//mojo/edk",
+    "//mojo/core/embedder",
     "//net",
     "//services/device/public/cpp:device_features",
     "//services/device/public/cpp/power_monitor",
     "//services/device/public/mojom:constants",
-    "//services/resource_coordinator/public/cpp:resource_coordinator_cpp",
+    "//services/resource_coordinator/public/cpp/memory_instrumentation",
     "//services/service_manager/public/cpp",
     "//services/service_manager/public/mojom",
     "//services/service_manager/runner/common",
@@ -128,6 +126,7 @@ target(link_target_type, "child") {
     "//third_party/ced",
     "//third_party/zlib/google:compression_utils",
     "//ui/base",
+    "//ui/events/blink",
     "//ui/events/gestures/blink",
     "//ui/gfx",
     "//ui/gfx/geometry",
@@ -146,6 +145,14 @@ target(link_target_type, "child") {
 
   if (is_android) {
     deps += [ "//third_party/android_tools:cpu_features" ]
+  }
+
+  if (is_linux) {
+    deps += [
+      "//components/services/font/public/cpp",
+      "//components/services/font/public/interfaces",
+      "//services/service_manager/zygote",
+    ]
   }
 
   if (is_win) {

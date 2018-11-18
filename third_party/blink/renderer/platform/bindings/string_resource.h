@@ -6,6 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_BINDINGS_STRING_RESOURCE_H_
 
 #include "base/macros.h"
+#include "third_party/blink/renderer/platform/bindings/parkable_string.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/wtf/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
@@ -39,6 +40,17 @@ class StringResourceBase {
         string.CharactersSizeInBytes());
   }
 
+  explicit StringResourceBase(const ParkableString& string)
+      : parkable_string_(string) {
+#if DCHECK_IS_ON()
+    thread_id_ = WTF::CurrentThread();
+#endif
+    // TODO(lizeb): This is only true without compression.
+    DCHECK(!string.IsNull());
+    v8::Isolate::GetCurrent()->AdjustAmountOfExternalAllocatedMemory(
+        string.CharactersSizeInBytes());
+  }
+
   virtual ~StringResourceBase() {
 #if DCHECK_IS_ON()
     DCHECK(thread_id_ == WTF::CurrentThread());
@@ -51,12 +63,24 @@ class StringResourceBase {
         -reduced_external_memory);
   }
 
-  const String& WebcoreString() { return plain_string_; }
+  String GetWTFString() {
+    if (!parkable_string_.IsNull()) {
+      DCHECK(plain_string_.IsNull());
+      DCHECK(atomic_string_.IsNull());
+      return parkable_string_.ToString();
+    }
+    return plain_string_;
+  }
 
-  const AtomicString& GetAtomicString() {
+  AtomicString GetAtomicString() {
 #if DCHECK_IS_ON()
     DCHECK(thread_id_ == WTF::CurrentThread());
 #endif
+    if (!parkable_string_.IsNull()) {
+      DCHECK(plain_string_.IsNull());
+      DCHECK(atomic_string_.IsNull());
+      return AtomicString(parkable_string_.ToString());
+    }
     if (atomic_string_.IsNull()) {
       atomic_string_ = AtomicString(plain_string_);
       DCHECK(!atomic_string_.IsNull());
@@ -78,6 +102,9 @@ class StringResourceBase {
   // the original string alive because v8 may keep derived pointers
   // into that string.
   AtomicString atomic_string_;
+  // If this string is parkable, its value is held here, and the other
+  // members above are null.
+  ParkableString parkable_string_;
 
  private:
 #if DCHECK_IS_ON()
@@ -128,12 +155,59 @@ class StringResource8 final : public StringResourceBase,
   DISALLOW_COPY_AND_ASSIGN(StringResource8);
 };
 
+class ParkableStringResource16 final
+    : public StringResourceBase,
+      public v8::String::ExternalStringResource {
+ public:
+  explicit ParkableStringResource16(const ParkableString& string)
+      : StringResourceBase(string) {
+    DCHECK(!parkable_string_.Is8Bit());
+  }
+
+  bool IsCacheable() const override { return !parkable_string_.is_parkable(); }
+
+  void Lock() const override { parkable_string_.Lock(); }
+
+  void Unlock() const override { parkable_string_.Unlock(); }
+
+  size_t length() const override { return parkable_string_.length(); }
+
+  const uint16_t* data() const override {
+    return reinterpret_cast<const uint16_t*>(parkable_string_.Characters16());
+  }
+
+  DISALLOW_COPY_AND_ASSIGN(ParkableStringResource16);
+};
+
+class ParkableStringResource8 final
+    : public StringResourceBase,
+      public v8::String::ExternalOneByteStringResource {
+ public:
+  explicit ParkableStringResource8(const ParkableString& string)
+      : StringResourceBase(string) {
+    DCHECK(parkable_string_.Is8Bit());
+  }
+
+  bool IsCacheable() const override { return !parkable_string_.is_parkable(); }
+
+  void Lock() const override { parkable_string_.Lock(); }
+
+  void Unlock() const override { parkable_string_.Unlock(); }
+
+  size_t length() const override { return parkable_string_.length(); }
+
+  const char* data() const override {
+    return reinterpret_cast<const char*>(parkable_string_.Characters8());
+  }
+
+  DISALLOW_COPY_AND_ASSIGN(ParkableStringResource8);
+};
+
 enum ExternalMode { kExternalize, kDoNotExternalize };
 
 template <typename StringType>
-PLATFORM_EXPORT StringType V8StringToWebCoreString(v8::Local<v8::String>,
-                                                   ExternalMode);
-PLATFORM_EXPORT String Int32ToWebCoreString(int value);
+PLATFORM_EXPORT StringType ToBlinkString(v8::Local<v8::String>, ExternalMode);
+PLATFORM_EXPORT String ToBlinkString(int value);
 
 }  // namespace blink
 

@@ -154,7 +154,7 @@ enum NewlineType { kCr, kLf, kCrLf };
 String LineBreakString(NewlineType type) {
   static const char kBreakStrings[] = "\r\n";
   return String(type == kLf ? kBreakStrings + 1 : kBreakStrings,
-                type == kCrLf ? 2 : 1);
+                type == kCrLf ? 2u : 1u);
 }
 
 String MakeTestData(const char** lines, const NewlineType* breaks, int count) {
@@ -166,23 +166,23 @@ String MakeTestData(const char** lines, const NewlineType* breaks, int count) {
   return builder.ToString();
 }
 
-const size_t kBlockSizes[] = {64, 32, 16, 8,  4,  2,  1,  3,
-                              5,  7,  9,  11, 13, 17, 19, 23};
+const wtf_size_t kBlockSizes[] = {64, 32, 16, 8,  4,  2,  1,  3,
+                                  5,  7,  9,  11, 13, 17, 19, 23};
 
 TEST(BufferedLineReaderTest, BufferSizes) {
   const char* lines[] = {"aaaaaaaaaaaaaaaa", "bbbbbbbbbb", "ccccccccccccc", "",
                          "dddddd",           "",           "eeeeeeeeee"};
   const NewlineType kBreaks[] = {kLf, kLf, kLf, kLf, kLf, kLf, kLf};
-  const size_t num_test_lines = WTF_ARRAY_LENGTH(lines);
-  static_assert(num_test_lines == WTF_ARRAY_LENGTH(kBreaks),
+  const size_t num_test_lines = arraysize(lines);
+  static_assert(num_test_lines == arraysize(kBreaks),
                 "number of test lines and breaks should be the same");
   String data = MakeTestData(lines, kBreaks, num_test_lines);
 
-  for (size_t k = 0; k < WTF_ARRAY_LENGTH(kBlockSizes); ++k) {
+  for (size_t k = 0; k < arraysize(kBlockSizes); ++k) {
     size_t line_count = 0;
     BufferedLineReader reader;
-    size_t block_size = kBlockSizes[k];
-    for (size_t i = 0; i < data.length(); i += block_size) {
+    wtf_size_t block_size = kBlockSizes[k];
+    for (wtf_size_t i = 0; i < data.length(); i += block_size) {
       reader.Append(data.Substring(i, block_size));
 
       String line;
@@ -200,16 +200,16 @@ TEST(BufferedLineReaderTest, BufferSizesMixedEndings) {
       "aaaaaaaaaaaaaaaa", "bbbbbbbbbb", "ccccccccccccc",      "",
       "dddddd",           "eeeeeeeeee", "fffffffffffffffffff"};
   const NewlineType kBreaks[] = {kCr, kLf, kCrLf, kCr, kLf, kCrLf, kLf};
-  const size_t num_test_lines = WTF_ARRAY_LENGTH(lines);
-  static_assert(num_test_lines == WTF_ARRAY_LENGTH(kBreaks),
+  const size_t num_test_lines = arraysize(lines);
+  static_assert(num_test_lines == arraysize(kBreaks),
                 "number of test lines and breaks should be the same");
   String data = MakeTestData(lines, kBreaks, num_test_lines);
 
-  for (size_t k = 0; k < WTF_ARRAY_LENGTH(kBlockSizes); ++k) {
+  for (size_t k = 0; k < arraysize(kBlockSizes); ++k) {
     size_t line_count = 0;
     BufferedLineReader reader;
-    size_t block_size = kBlockSizes[k];
-    for (size_t i = 0; i < data.length(); i += block_size) {
+    wtf_size_t block_size = kBlockSizes[k];
+    for (wtf_size_t i = 0; i < data.length(); i += block_size) {
       reader.Append(data.Substring(i, block_size));
 
       String line;
@@ -248,7 +248,7 @@ TEST(BufferedLineReaderTest, BufferBoundaryInCRLF_2) {
 
 TEST(BufferedLineReaderTest, NormalizedNUL) {
   BufferedLineReader reader;
-  reader.Append(String("X\0Y\n", 4));
+  reader.Append(String("X\0Y\n", 4u));
   String line;
   ASSERT_TRUE(reader.GetLine(line));
   ASSERT_EQ(line[1], kReplacementCharacter);

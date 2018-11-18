@@ -15,6 +15,7 @@
 #include "components/ntp_snippets/contextual/contextual_suggestion.h"
 #include "components/ntp_snippets/contextual/contextual_suggestions_fetch.h"
 #include "components/ntp_snippets/contextual/contextual_suggestions_fetcher.h"
+#include "components/unified_consent/url_keyed_data_collection_consent_helper.h"
 
 namespace network {
 class SharedURLLoaderFactory;
@@ -22,13 +23,16 @@ class SharedURLLoaderFactory;
 
 using contextual_suggestions::Cluster;
 using contextual_suggestions::ContextualSuggestionsFetch;
+using contextual_suggestions::ContextualSuggestionsResult;
 
-namespace ntp_snippets {
+namespace contextual_suggestions {
 
 class ContextualSuggestionsFetcherImpl : public ContextualSuggestionsFetcher {
  public:
   ContextualSuggestionsFetcherImpl(
       const scoped_refptr<network::SharedURLLoaderFactory>& loader_factory,
+      std::unique_ptr<unified_consent::UrlKeyedDataCollectionConsentHelper>
+          consent_helper,
       const std::string& application_language_code);
   ~ContextualSuggestionsFetcherImpl() override;
 
@@ -41,10 +45,11 @@ class ContextualSuggestionsFetcherImpl : public ContextualSuggestionsFetcher {
  private:
   void FetchFinished(ContextualSuggestionsFetch* fetch,
                      FetchClustersCallback callback,
-                     std::string peek_text,
-                     std::vector<Cluster> clusters);
+                     ContextualSuggestionsResult result);
 
   const scoped_refptr<network::SharedURLLoaderFactory> loader_factory_;
+  std::unique_ptr<unified_consent::UrlKeyedDataCollectionConsentHelper>
+      consent_helper_;
   /// BCP47 formatted language code to use.
   const std::string bcp_language_code_;
 
@@ -56,6 +61,6 @@ class ContextualSuggestionsFetcherImpl : public ContextualSuggestionsFetcher {
   DISALLOW_COPY_AND_ASSIGN(ContextualSuggestionsFetcherImpl);
 };
 
-}  // namespace ntp_snippets
+}  // namespace contextual_suggestions
 
 #endif  // COMPONENTS_NTP_SNIPPETS_CONTEXTUAL_CONTEXTUAL_SUGGESTIONS_FETCHER_IMPL_H_

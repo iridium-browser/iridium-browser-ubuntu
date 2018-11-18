@@ -30,27 +30,31 @@
 
 #include "third_party/blink/renderer/bindings/core/v8/v8_gc_for_context_dispose.h"
 
+#include "base/process/process_metrics.h"
 #include "build/build_config.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/platform/bindings/v8_per_isolate_data.h"
 #include "third_party/blink/renderer/platform/histogram.h"
 #include "third_party/blink/renderer/platform/memory_coordinator.h"
-#include "third_party/blink/renderer/platform/scheduler/child/web_scheduler.h"
-#include "third_party/blink/renderer/platform/wtf/process_metrics.h"
+#include "third_party/blink/renderer/platform/scheduler/public/thread_scheduler.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "third_party/blink/renderer/platform/wtf/time.h"
 #include "v8/include/v8.h"
 
-size_t GetMemoryUsage() {
-  size_t usage = WTF::GetMallocUsage() + WTF::Partitions::TotalActiveBytes() +
-                 blink::ProcessHeap::TotalAllocatedObjectSize() +
-                 blink::ProcessHeap::TotalMarkedObjectSize();
+#if defined(OS_ANDROID)
+static size_t GetMemoryUsage() {
+  size_t usage =
+      base::ProcessMetrics::CreateCurrentProcessMetrics()->GetMallocUsage() +
+      WTF::Partitions::TotalActiveBytes() +
+      blink::ProcessHeap::TotalAllocatedObjectSize() +
+      blink::ProcessHeap::TotalMarkedObjectSize();
   v8::HeapStatistics v8_heap_statistics;
   blink::V8PerIsolateData::MainThreadIsolate()->GetHeapStatistics(
       &v8_heap_statistics);
   usage = v8_heap_statistics.total_heap_size();
   return usage;
 }
+#endif  // defined(OS_ANDROID)
 
 namespace blink {
 
@@ -58,7 +62,8 @@ V8GCForContextDispose::V8GCForContextDispose()
     : pseudo_idle_timer_(
           Platform::Current()->MainThread()->Scheduler()->V8TaskRunner(),
           this,
-          &V8GCForContextDispose::PseudoIdleTimerFired) {
+          &V8GCForContextDispose::PseudoIdleTimerFired),
+      force_page_navigation_gc_(false) {
   Reset();
 }
 
@@ -72,8 +77,9 @@ void V8GCForContextDispose::NotifyContextDisposed(
   // memory use and trigger a V8+Blink GC. However, on Android, if the frame
   // will not be reused, the process will likely to be killed soon so skip this.
   if (is_main_frame && frame_reuse_status == WindowProxy::kFrameWillBeReused &&
-      MemoryCoordinator::IsLowEndDevice() &&
-      MemoryCoordinator::IsCurrentlyLowMemory()) {
+      ((MemoryCoordinator::IsLowEndDevice() &&
+        MemoryCoordinator::IsCurrentlyLowMemory()) ||
+       force_page_navigation_gc_)) {
     size_t pre_gc_memory_usage = GetMemoryUsage();
     V8PerIsolateData::MainThreadIsolate()->MemoryPressureNotification(
         v8::MemoryPressureLevel::kCritical);
@@ -84,6 +90,8 @@ void V8GCForContextDispose::NotifyContextDisposed(
         CustomCountHistogram, reduction_histogram,
         ("BlinkGC.LowMemoryPageNavigationGC.Reduction", 1, 512, 50));
     reduction_histogram.Count(reduction / 1024 / 1024);
+
+    force_page_navigation_gc_ = false;
   }
 #endif
   V8PerIsolateData::MainThreadIsolate()->ContextDisposedNotification(
@@ -114,6 +122,10 @@ void V8GCForContextDispose::PseudoIdleTimerFired(TimerBase*) {
 void V8GCForContextDispose::Reset() {
   did_dispose_context_for_main_frame_ = false;
   last_context_disposal_time_ = -1;
+}
+
+void V8GCForContextDispose::SetForcePageNavigationGC() {
+  force_page_navigation_gc_ = true;
 }
 
 }  // namespace blink

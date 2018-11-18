@@ -6,6 +6,7 @@
 
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
+#include "third_party/blink/renderer/core/dom/events/event_listener.h"
 #include "third_party/blink/renderer/core/html/media/html_media_element.h"
 #include "third_party/blink/renderer/modules/media_controls/elements/media_control_elements_helper.h"
 #include "third_party/blink/renderer/modules/media_controls/media_controls_impl.h"
@@ -33,25 +34,35 @@ class MediaControlPanelElement::TransitionEventListener final
         element_(element) {
     DCHECK(callback_);
     DCHECK(element_);
+  }
 
-    element->addEventListener(EventTypeNames::transitionend, this, false);
+  void Attach() {
+    DCHECK(!attached_);
+    attached_ = true;
+
+    element_->addEventListener(EventTypeNames::transitionend, this, false);
   }
 
   void Detach() {
+    DCHECK(attached_);
+    attached_ = false;
+
     element_->removeEventListener(EventTypeNames::transitionend, this, false);
   }
+
+  bool IsAttached() const { return attached_; }
 
   bool operator==(const EventListener& other) const override {
     return this == &other;
   }
 
-  virtual void Trace(blink::Visitor* visitor) {
+  void Trace(blink::Visitor* visitor) override {
     EventListener::Trace(visitor);
     visitor->Trace(element_);
   }
 
  private:
-  void handleEvent(ExecutionContext* context, Event* event) {
+  void handleEvent(ExecutionContext* context, Event* event) override {
     if (event->type() == EventTypeNames::transitionend) {
       callback_.Run();
       return;
@@ -60,6 +71,8 @@ class MediaControlPanelElement::TransitionEventListener final
     NOTREACHED();
   }
 
+  bool attached_ = false;
+
   Callback callback_;
   Member<Element> element_;
 };
@@ -67,11 +80,7 @@ class MediaControlPanelElement::TransitionEventListener final
 MediaControlPanelElement::MediaControlPanelElement(
     MediaControlsImpl& media_controls)
     : MediaControlDivElement(media_controls, kMediaControlsPanel),
-      event_listener_(new MediaControlPanelElement::TransitionEventListener(
-          this,
-          WTF::BindRepeating(
-              &MediaControlPanelElement::HandleTransitionEndEvent,
-              WrapWeakPersistent(this)))) {
+      event_listener_(nullptr) {
   SetShadowPseudoId(AtomicString("-webkit-media-controls-panel"));
 }
 
@@ -95,6 +104,9 @@ void MediaControlPanelElement::MakeOpaque() {
   opaque_ = true;
 
   if (is_displayed_) {
+    // Make sure we are listening for the 'transitionend' event.
+    EnsureTransitionEventListener();
+
     SetIsWanted(true);
     removeAttribute("class");
     DidBecomeVisible();
@@ -105,13 +117,17 @@ void MediaControlPanelElement::MakeTransparent() {
   if (!opaque_)
     return;
 
+  // Make sure we are listening for the 'transitionend' event.
+  EnsureTransitionEventListener();
+
   setAttribute("class", kTransparentClassName);
 
   opaque_ = false;
 }
 
-void MediaControlPanelElement::RemovedFrom(ContainerNode*) {
-  event_listener_->Detach();
+void MediaControlPanelElement::RemovedFrom(ContainerNode& insertion_point) {
+  MediaControlDivElement::RemovedFrom(insertion_point);
+  DetachTransitionEventListener();
 }
 
 void MediaControlPanelElement::Trace(blink::Visitor* visitor) {
@@ -119,22 +135,55 @@ void MediaControlPanelElement::Trace(blink::Visitor* visitor) {
   visitor->Trace(event_listener_);
 }
 
+bool MediaControlPanelElement::KeepDisplayedForAccessibility() {
+  return keep_displayed_for_accessibility_;
+}
+
 void MediaControlPanelElement::SetKeepDisplayedForAccessibility(bool value) {
   keep_displayed_for_accessibility_ = value;
 }
 
-void MediaControlPanelElement::DefaultEventHandler(Event* event) {
+bool MediaControlPanelElement::EventListenerIsAttachedForTest() const {
+  return event_listener_->IsAttached();
+}
+
+void MediaControlPanelElement::EnsureTransitionEventListener() {
+  // Create the event listener if it doesn't exist.
+  if (!event_listener_) {
+    event_listener_ = new MediaControlPanelElement::TransitionEventListener(
+        this,
+        WTF::BindRepeating(&MediaControlPanelElement::HandleTransitionEndEvent,
+                           WrapWeakPersistent(this)));
+  }
+
+  // Attach the event listener if we are not attached.
+  if (!event_listener_->IsAttached())
+    event_listener_->Attach();
+}
+
+void MediaControlPanelElement::DetachTransitionEventListener() {
+  if (!event_listener_)
+    return;
+
+  // Detach the event listener if we are attached.
+  if (event_listener_->IsAttached())
+    event_listener_->Detach();
+}
+
+void MediaControlPanelElement::DefaultEventHandler(Event& event) {
   // Suppress the media element activation behavior (toggle play/pause) when
   // any part of the control panel is clicked.
-  if (event->type() == EventTypeNames::click) {
-    event->SetDefaultHandled();
+  if (event.type() == EventTypeNames::click && !MediaControlsImpl::IsModern()) {
+    event.SetDefaultHandled();
     return;
   }
   HTMLDivElement::DefaultEventHandler(event);
 }
 
-bool MediaControlPanelElement::KeepEventInNode(Event* event) {
-  return MediaControlElementsHelper::IsUserInteractionEvent(event);
+bool MediaControlPanelElement::KeepEventInNode(const Event& event) const {
+  return (!MediaControlsImpl::IsModern() ||
+          GetMediaControls().ShouldShowAudioControls()) &&
+         MediaControlElementsHelper::IsUserInteractionEvent(event);
 }
 
 void MediaControlPanelElement::DidBecomeVisible() {
@@ -146,6 +195,10 @@ void MediaControlPanelElement::HandleTransitionEndEvent() {
   // Hide the element in the DOM once we have finished the transition.
   if (!opaque_ && !keep_displayed_for_accessibility_)
     SetIsWanted(false);
+
+  // Now that we have received the 'transitionend' event we can dispose of
+  // the listener.
+  DetachTransitionEventListener();
 }
 
 }  // namespace blink

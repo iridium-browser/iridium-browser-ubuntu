@@ -12,7 +12,9 @@
 #include <vector>
 
 #include "base/files/scoped_temp_dir.h"
+#include "base/optional.h"
 #include "content/public/browser/background_fetch_delegate.h"
+#include "third_party/skia/include/core/SkBitmap.h"
 #include "url/gurl.h"
 
 namespace net {
@@ -63,16 +65,14 @@ class MockBackgroundFetchDelegate : public BackgroundFetchDelegate {
   ~MockBackgroundFetchDelegate() override;
 
   // BackgroundFetchDelegate implementation:
+  void GetPermissionForOrigin(
+      const url::Origin& origin,
+      const ResourceRequestInfo::WebContentsGetter& wc_getter,
+      GetPermissionForOriginCallback callback) override;
   void GetIconDisplaySize(
       BackgroundFetchDelegate::GetIconDisplaySizeCallback callback) override;
   void CreateDownloadJob(
-      const std::string& job_unique_id,
-      const std::string& title,
-      const url::Origin& origin,
-      const SkBitmap& icon,
-      int completed_parts,
-      int total_parts,
-      const std::vector<std::string>& current_guids) override;
+      std::unique_ptr<BackgroundFetchDescription> fetch_description) override;
   void DownloadUrl(const std::string& job_unique_id,
                    const std::string& guid,
                    const std::string& method,
@@ -80,6 +80,9 @@ class MockBackgroundFetchDelegate : public BackgroundFetchDelegate {
                    const net::NetworkTrafficAnnotationTag& traffic_annotation,
                    const net::HttpRequestHeaders& headers) override;
   void Abort(const std::string& job_unique_id) override;
+  void UpdateUI(const std::string& job_unique_id,
+                const base::Optional<std::string>& title,
+                const base::Optional<SkBitmap>& icon) override;
 
   void RegisterResponse(const GURL& url,
                         std::unique_ptr<TestResponse> response);

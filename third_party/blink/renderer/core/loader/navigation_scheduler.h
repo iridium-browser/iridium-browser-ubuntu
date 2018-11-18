@@ -36,7 +36,8 @@
 
 #include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
-#include "third_party/blink/public/platform/scheduler/web_main_thread_scheduler.h"
+#include "third_party/blink/public/platform/scheduler/web_thread_scheduler.h"
+#include "third_party/blink/public/web/web_frame_load_type.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
@@ -65,9 +66,7 @@ class CORE_EXPORT NavigationScheduler final
   bool IsNavigationScheduledWithin(double interval_in_seconds) const;
 
   void ScheduleRedirect(double delay, const KURL&, Document::HttpRefreshType);
-  void ScheduleFrameNavigation(Document*,
-                               const KURL&,
-                               bool replaces_current_item = true);
+  void ScheduleFrameNavigation(Document*, const KURL&, WebFrameLoadType);
   void SchedulePageBlock(Document*, int reason);
   void ScheduleFormSubmission(Document*, FormSubmission*);
   void ScheduleReload();
@@ -87,13 +86,11 @@ class CORE_EXPORT NavigationScheduler final
   void Schedule(ScheduledNavigation*);
 
   static bool MustReplaceCurrentItem(LocalFrame* target_frame);
+  base::TimeTicks InputTimestamp();
 
   Member<LocalFrame> frame_;
   TaskHandle navigate_task_handle_;
   Member<ScheduledNavigation> redirect_;
-
-  // Exists because we can't deref m_frame in destructor.
-  scheduler::WebMainThreadScheduler::NavigatingFrameType frame_type_;
 
   DISALLOW_COPY_AND_ASSIGN(NavigationScheduler);
 };

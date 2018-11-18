@@ -20,6 +20,7 @@ import android.view.WindowManager;
 import android.widget.PopupWindow;
 import android.widget.PopupWindow.OnDismissListener;
 
+import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.base.ObserverList;
 import org.chromium.base.VisibleForTesting;
 
@@ -299,7 +300,7 @@ public class AnchoredPopupWindow implements OnTouchListener, RectProvider.Observ
      * @param focusable True if the popup is focusable, false otherwise.
      */
     public void setFocusable(boolean focusable) {
-        mPopupWindow.setFocusable(true);
+        mPopupWindow.setFocusable(focusable);
     }
 
     /**
@@ -344,6 +345,13 @@ public class AnchoredPopupWindow implements OnTouchListener, RectProvider.Observ
         mPopupWindow.setBackgroundDrawable(background);
     }
 
+    /**
+     * Sets the elevation of the popup, if elevation is supported.
+     */
+    public void setElevation(float elevation) {
+        ApiCompatibilityUtils.setElevation(mPopupWindow, elevation);
+    }
+
     // RectProvider.Observer implementation.
     @Override
     public void onRectChanged() {
@@ -372,7 +380,7 @@ public class AnchoredPopupWindow implements OnTouchListener, RectProvider.Observ
         int paddingY = mCachedPaddingRect.top + mCachedPaddingRect.bottom;
 
         int maxContentWidth =
-                getMaxContentWidth(mMaxWidthPx, mRootView.getWidth(), mMarginPx, paddingY);
+                getMaxContentWidth(mMaxWidthPx, mRootView.getWidth(), mMarginPx, paddingX);
 
         // Determine whether or not the popup should be above or below the anchor.
         // Aggressively try to put it below the anchor.  Put it above only if it would fit better.

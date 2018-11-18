@@ -11,11 +11,14 @@
 #include <utility>
 #include <vector>
 
+#include "ash/public/cpp/default_scale_factor_retriever.h"
 #include "base/command_line.h"
 #include "base/location.h"
 #include "base/posix/eintr_wrapper.h"
-#include "base/task_scheduler/post_task.h"
-#include "base/task_scheduler/task_traits.h"
+#include "base/rand_util.h"
+#include "base/strings/string_number_conversions.h"
+#include "base/task/post_task.h"
+#include "base/task/task_traits.h"
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/cryptohome/cryptohome_parameters.h"
 #include "chromeos/dbus/dbus_method_call_status.h"
@@ -23,15 +26,14 @@
 #include "chromeos/dbus/login_manager/arc.pb.h"
 #include "components/arc/arc_bridge_host_impl.h"
 #include "components/arc/arc_features.h"
+#include "components/arc/arc_util.h"
 #include "components/user_manager/user_manager.h"
-#include "mojo/edk/embedder/embedder.h"
-#include "mojo/edk/embedder/named_platform_handle.h"
-#include "mojo/edk/embedder/named_platform_handle_utils.h"
-#include "mojo/edk/embedder/outgoing_broker_client_invitation.h"
-#include "mojo/edk/embedder/platform_channel_pair.h"
-#include "mojo/edk/embedder/platform_channel_utils_posix.h"
-#include "mojo/edk/embedder/scoped_platform_handle.h"
 #include "mojo/public/cpp/bindings/binding.h"
+#include "mojo/public/cpp/platform/named_platform_channel.h"
+#include "mojo/public/cpp/platform/platform_channel.h"
+#include "mojo/public/cpp/platform/platform_handle.h"
+#include "mojo/public/cpp/platform/socket_utils_posix.h"
+#include "mojo/public/cpp/system/invitation.h"
 
 namespace arc {
 
@@ -46,6 +48,12 @@ chromeos::SessionManagerClient* GetSessionManagerClient() {
     return nullptr;
   }
   return chromeos::DBusThreadManager::Get()->GetSessionManagerClient();
+}
+
+std::string GenerateRandomToken() {
+  char random_bytes[16];
+  base::RandBytes(random_bytes, 16);
+  return base::HexEncode(random_bytes, 16);
 }
 
 // Creates a pipe. Returns true on success, otherwise false.
@@ -99,22 +107,45 @@ ArcStopReason GetArcStopReason(bool low_disk_space, bool stop_requested) {
   return ArcStopReason::GENERIC_BOOT_FAILURE;
 }
 
+// Converts ArcSupervisionTransition into
+// login_manager::UpgradeArcContainerRequest_SupervisionTransition.
+login_manager::UpgradeArcContainerRequest_SupervisionTransition
+ToLoginManagerSupervisionTransition(ArcSupervisionTransition transition) {
+  switch (transition) {
+    case ArcSupervisionTransition::NO_TRANSITION:
+      return login_manager::
+          UpgradeArcContainerRequest_SupervisionTransition_NONE;
+    case ArcSupervisionTransition::CHILD_TO_REGULAR:
+      return login_manager::
+          UpgradeArcContainerRequest_SupervisionTransition_CHILD_TO_REGULAR;
+    case ArcSupervisionTransition::REGULAR_TO_CHILD:
+      return login_manager::
+          UpgradeArcContainerRequest_SupervisionTransition_REGULAR_TO_CHILD;
+    default:
+      NOTREACHED() << "Invalid transition " << transition;
+      return login_manager::
+          UpgradeArcContainerRequest_SupervisionTransition_NONE;
+  }
+}
+
 // Real Delegate implementation to connect Mojo.
 class ArcSessionDelegateImpl : public ArcSessionImpl::Delegate {
  public:
-  explicit ArcSessionDelegateImpl(ArcBridgeService* arc_bridge_service);
+  ArcSessionDelegateImpl(ArcBridgeService* arc_bridge_service,
+                         ash::DefaultScaleFactorRetriever* retriever);
   ~ArcSessionDelegateImpl() override = default;
 
   // ArcSessionImpl::Delegate override.
   base::ScopedFD ConnectMojo(base::ScopedFD socket_fd,
                              ConnectMojoCallback callback) override;
+  void GetLcdDensity(GetLcdDensityCallback callback) override;
 
  private:
-  // Synchronously accepts a connection on |socket_fd| and then processes the
-  // connected socket's file descriptor. This is designed to run on a
+  // Synchronously accepts a connection on |server_endpoint| and then processes
+  // the connected socket's file descriptor. This is designed to run on a
   // blocking thread.
   static mojo::ScopedMessagePipeHandle ConnectMojoInternal(
-      mojo::edk::ScopedPlatformHandle socket_fd,
+      base::ScopedFD socket_fd,
       base::ScopedFD cancel_fd);
 
   // Called when Mojo connection is established or canceled.
@@ -125,6 +156,9 @@ class ArcSessionDelegateImpl : public ArcSessionImpl::Delegate {
   // Owned by ArcServiceManager.
   ArcBridgeService* const arc_bridge_service_;
 
+  // Owned by ArcServiceLauncher.
+  ash::DefaultScaleFactorRetriever* const default_scale_factor_retriever_;
+
   // WeakPtrFactory to use callbacks.
   base::WeakPtrFactory<ArcSessionDelegateImpl> weak_factory_;
 
@@ -132,8 +166,11 @@ class ArcSessionDelegateImpl : public ArcSessionImpl::Delegate {
 };
 
 ArcSessionDelegateImpl::ArcSessionDelegateImpl(
-    ArcBridgeService* arc_bridge_service)
-    : arc_bridge_service_(arc_bridge_service), weak_factory_(this) {}
+    ArcBridgeService* arc_bridge_service,
+    ash::DefaultScaleFactorRetriever* retriever)
+    : arc_bridge_service_(arc_bridge_service),
+      default_scale_factor_retriever_(retriever),
+      weak_factory_(this) {}
 
 base::ScopedFD ArcSessionDelegateImpl::ConnectMojo(
     base::ScopedFD socket_fd,
@@ -150,50 +187,52 @@ base::ScopedFD ArcSessionDelegateImpl::ConnectMojo(
   // For production, |socket_fd| passed from session_manager is either a valid
   // socket or a valid file descriptor (/dev/null). For testing, |socket_fd|
   // might be invalid.
-  mojo::edk::PlatformHandle raw_handle(socket_fd.release());
-  raw_handle.needs_connection = true;
-
-  mojo::edk::ScopedPlatformHandle mojo_socket_fd(raw_handle);
   base::PostTaskWithTraitsAndReplyWithResult(
       FROM_HERE, {base::MayBlock()},
       base::BindOnce(&ArcSessionDelegateImpl::ConnectMojoInternal,
-                     std::move(mojo_socket_fd), std::move(cancel_fd)),
+                     std::move(socket_fd), std::move(cancel_fd)),
       base::BindOnce(&ArcSessionDelegateImpl::OnMojoConnected,
                      weak_factory_.GetWeakPtr(), std::move(callback)));
   return return_fd;
 }
 
+void ArcSessionDelegateImpl::GetLcdDensity(GetLcdDensityCallback callback) {
+  default_scale_factor_retriever_->GetDefaultScaleFactor(base::BindOnce(
+      [](GetLcdDensityCallback callback, float default_scale_factor) {
+        std::move(callback).Run(
+            GetLcdDensityForDeviceScaleFactor(default_scale_factor));
+      },
+      std::move(callback)));
+}
+
 // static
 mojo::ScopedMessagePipeHandle ArcSessionDelegateImpl::ConnectMojoInternal(
-    mojo::edk::ScopedPlatformHandle socket_fd,
+    base::ScopedFD socket_fd,
     base::ScopedFD cancel_fd) {
-  if (!WaitForSocketReadable(socket_fd.get().handle, cancel_fd.get())) {
+  if (!WaitForSocketReadable(socket_fd.get(), cancel_fd.get())) {
     VLOG(1) << "Mojo connection was cancelled.";
     return mojo::ScopedMessagePipeHandle();
   }
 
-  mojo::edk::ScopedPlatformHandle scoped_fd;
-  if (!mojo::edk::ServerAcceptConnection(socket_fd, &scoped_fd,
-                                         /* check_peer_user = */ false) ||
-      !scoped_fd.is_valid()) {
+  base::ScopedFD connection_fd;
+  if (!mojo::AcceptSocketConnection(socket_fd.get(), &connection_fd,
+                                    /* check_peer_user = */ false) ||
+      !connection_fd.is_valid()) {
     return mojo::ScopedMessagePipeHandle();
   }
 
-  // Hardcode pid 0 since it is unused in mojo.
-  const base::ProcessHandle kUnusedChildProcessHandle = 0;
-  mojo::edk::PlatformChannelPair channel_pair;
-  mojo::edk::OutgoingBrokerClientInvitation invitation;
-
-  std::string token = mojo::edk::GenerateRandomToken();
+  mojo::PlatformChannel channel;
+  mojo::OutgoingInvitation invitation;
+  // Generate an arbitrary 32-byte string. ARC uses this length as a protocol
+  // version identifier.
+  std::string token = GenerateRandomToken();
   mojo::ScopedMessagePipeHandle pipe = invitation.AttachMessagePipe(token);
+  mojo::OutgoingInvitation::Send(std::move(invitation),
+                                 base::kNullProcessHandle,
+                                 channel.TakeLocalEndpoint());
 
-  invitation.Send(
-      kUnusedChildProcessHandle,
-      mojo::edk::ConnectionParams(mojo::edk::TransportProtocol::kLegacy,
-                                  channel_pair.PassServerHandle()));
-
-  std::vector<mojo::edk::ScopedPlatformHandle> handles;
-  handles.emplace_back(channel_pair.PassClientHandle());
+  std::vector<base::ScopedFD> fds;
+  fds.emplace_back(channel.TakeRemoteEndpoint().TakePlatformHandle().TakeFD());
 
   // We need to send the length of the message as a single byte, so make sure it
   // fits.
@@ -201,8 +240,8 @@ mojo::ScopedMessagePipeHandle ArcSessionDelegateImpl::ConnectMojoInternal(
   uint8_t message_length = static_cast<uint8_t>(token.size());
   struct iovec iov[] = {{&message_length, sizeof(message_length)},
                         {const_cast<char*>(token.c_str()), token.size()}};
-  ssize_t result = mojo::edk::PlatformChannelSendmsgWithHandles(
-      scoped_fd, iov, sizeof(iov) / sizeof(iov[0]), handles);
+  ssize_t result = mojo::SendmsgWithHandles(connection_fd.get(), iov,
+                                            sizeof(iov) / sizeof(iov[0]), fds);
   if (result == -1) {
     PLOG(ERROR) << "sendmsg";
     return mojo::ScopedMessagePipeHandle();
@@ -234,8 +273,10 @@ const char ArcSessionImpl::kPackagesCacheModeSkipCopy[] = "skip-copy";
 
 // static
 std::unique_ptr<ArcSessionImpl::Delegate> ArcSessionImpl::CreateDelegate(
-    ArcBridgeService* arc_bridge_service) {
-  return std::make_unique<ArcSessionDelegateImpl>(arc_bridge_service);
+    ArcBridgeService* arc_bridge_service,
+    ash::DefaultScaleFactorRetriever* retriever) {
+  return std::make_unique<ArcSessionDelegateImpl>(arc_bridge_service,
+                                                  retriever);
 }
 
 ArcSessionImpl::ArcSessionImpl(std::unique_ptr<Delegate> delegate)
@@ -259,12 +300,25 @@ void ArcSessionImpl::StartMiniInstance() {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK_EQ(state_, State::NOT_STARTED);
 
-  state_ = State::STARTING_MINI_INSTANCE;
-  VLOG(2) << "Starting ARC mini instance";
+  state_ = State::WAITING_FOR_LCD_DENSITY;
 
+  VLOG(2) << "Querying the lcd density to start ARC mini instance";
+
+  delegate_->GetLcdDensity(base::BindOnce(&ArcSessionImpl::OnLcdDensity,
+                                          weak_factory_.GetWeakPtr()));
+}
+
+void ArcSessionImpl::OnLcdDensity(int32_t lcd_density) {
+  DCHECK_GT(lcd_density, 0);
+  DCHECK_EQ(state_, State::WAITING_FOR_LCD_DENSITY);
+  state_ = State::STARTING_MINI_INSTANCE;
   login_manager::StartArcMiniContainerRequest request;
   request.set_native_bridge_experiment(
       base::FeatureList::IsEnabled(arc::kNativeBridgeExperimentFeature));
+  request.set_lcd_density(lcd_density);
+
+  VLOG(1) << "Starting ARC mini instance with lcd_density="
+          << request.lcd_density();
 
   chromeos::SessionManagerClient* client = GetSessionManagerClient();
   client->StartArcMiniContainer(
@@ -272,15 +326,18 @@ void ArcSessionImpl::StartMiniInstance() {
                               weak_factory_.GetWeakPtr()));
 }
 
-void ArcSessionImpl::RequestUpgrade() {
+void ArcSessionImpl::RequestUpgrade(UpgradeParams params) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  DCHECK(!params.locale.empty());
 
   upgrade_requested_ = true;
+  upgrade_params_ = std::move(params);
 
   switch (state_) {
     case State::NOT_STARTED:
       NOTREACHED();
       break;
+    case State::WAITING_FOR_LCD_DENSITY:
     case State::STARTING_MINI_INSTANCE:
       VLOG(2) << "Requested to upgrade a starting ARC mini instance";
       // OnMiniInstanceStarted() will restart a full instance.
@@ -365,6 +422,20 @@ void ArcSessionImpl::DoUpgrade() {
             << packages_cache_mode_string << ".";
   }
 
+  request.set_is_child(upgrade_params_.is_child);
+  request.set_supervision_transition(ToLoginManagerSupervisionTransition(
+      upgrade_params_.supervision_transition));
+  request.set_locale(upgrade_params_.locale);
+  for (const std::string& language : upgrade_params_.preferred_languages)
+    request.add_preferred_languages(language);
+
+  request.set_is_demo_session(upgrade_params_.is_demo_session);
+  if (!upgrade_params_.demo_session_apps_path.empty()) {
+    DCHECK(upgrade_params_.is_demo_session);
+    request.set_demo_session_apps_path(
+        upgrade_params_.demo_session_apps_path.value());
+  }
+
   chromeos::SessionManagerClient* client = GetSessionManagerClient();
   client->UpgradeArcContainer(
       request,
@@ -436,6 +507,9 @@ void ArcSessionImpl::Stop() {
   arc_bridge_host_.reset();
   switch (state_) {
     case State::NOT_STARTED:
+    case State::WAITING_FOR_LCD_DENSITY:
+      // If |Stop()| is called while waiting for LCD density, it can directly
+      // move to stopped state.
       OnStopped(ArcStopReason::SHUTDOWN);
       return;
     case State::STARTING_MINI_INSTANCE:
@@ -471,7 +545,8 @@ void ArcSessionImpl::Stop() {
 
 void ArcSessionImpl::StopArcInstance() {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-  DCHECK(state_ == State::STARTING_MINI_INSTANCE ||
+  DCHECK(state_ == State::WAITING_FOR_LCD_DENSITY ||
+         state_ == State::STARTING_MINI_INSTANCE ||
          state_ == State::RUNNING_MINI_INSTANCE ||
          state_ == State::STARTING_FULL_INSTANCE ||
          state_ == State::CONNECTING_MOJO ||
@@ -582,6 +657,7 @@ std::ostream& operator<<(std::ostream& os, ArcSessionImpl::State state) {
 
   switch (state) {
     MAP_STATE(NOT_STARTED);
+    MAP_STATE(WAITING_FOR_LCD_DENSITY);
     MAP_STATE(STARTING_MINI_INSTANCE);
     MAP_STATE(RUNNING_MINI_INSTANCE);
     MAP_STATE(STARTING_FULL_INSTANCE);

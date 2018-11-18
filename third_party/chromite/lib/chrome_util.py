@@ -310,10 +310,9 @@ C = Conditions
 
 # Files shared between all deployment types.
 _COPY_PATHS_COMMON = (
-    Path('chrome_sandbox', mode=0o4755, dest=_CHROME_SANDBOX_DEST),
+    Path('chrome_sandbox', mode=0o755, dest=_CHROME_SANDBOX_DEST),
     Path('icudtl.dat'),
     Path('libosmesa.so', exe=True, optional=True),
-    Path('mojo_shell', exe=True, optional=True),
     # Do not strip the nacl_helper_bootstrap binary because the binutils
     # objcopy/strip mangles the ELF program headers.
     Path('nacl_helper_bootstrap',
@@ -347,12 +346,21 @@ _COPY_PATHS_CHROME = (
     Path('dbus/', optional=True),
     Path('keyboard_resources.pak'),
     Path('libassistant.so', exe=True, optional=True),
+    Path('libmojo_core.so', exe=True),
+
+    # The ARC++ mojo_core libraries are pre-stripped and don't play well with
+    # the binutils stripping tools, hence stripping is disabled here.
+    Path('libmojo_core_arc32.so', exe=True, strip=False),
+    Path('libmojo_core_arc64.so', exe=True, strip=False),
+
     # Widevine CDM is already pre-stripped.  In addition, it doesn't
     # play well with the binutils stripping tools, so skip stripping.
+    # Optional for arm64 builds (http://crbug.com/881022)
     Path('libwidevinecdm.so',
          exe=True,
          strip=False,
-         cond=C.GnSetTo(_IS_CHROME_BRANDED, True)),
+         cond=C.GnSetTo(_IS_CHROME_BRANDED, True),
+         optional=C.GnSetTo('target_cpu', 'arm64')),
     # In component build, copy so files (e.g. libbase.so) except for the
     # blacklist.
     Path('*.so',

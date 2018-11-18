@@ -17,12 +17,12 @@
 #include "base/debug/alias.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop/message_loop_current.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/rand_util.h"
+#include "base/task/post_task.h"
 #include "base/task_runner_util.h"
-#include "base/task_scheduler/post_task.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 #include "net/base/io_buffer.h"
@@ -56,10 +56,6 @@
 #include <pthread.h>
 #endif  // defined(OS_MACOSX) && !defined(OS_IOS)
 
-#if defined(OS_FUCHSIA)
-#include <netstack/netconfig.h>
-#endif  // defined(OS_FUCHSIA)
-
 namespace net {
 
 namespace {
@@ -72,10 +68,9 @@ const int kActivityMonitorMinimumSamplesForThroughputEstimate = 2;
 const base::TimeDelta kActivityMonitorMsThreshold =
     base::TimeDelta::FromMilliseconds(100);
 
-#if defined(OS_MACOSX) || defined(OS_FUCHSIA)
-
-// When enabling multicast using setsockopt(IP_MULTICAST_IF) MacOS and Fuchsia
-// require passing IPv4 address instead of interface index. This function
+#if defined(OS_MACOSX)
+// When enabling multicast using setsockopt(IP_MULTICAST_IF) MacOS
+// requires passing IPv4 address instead of interface index. This function
 // resolves IPv4 address by interface index. The |address| is returned in
 // network order.
 int GetIPv4AddressFromIndex(int socket, uint32_t index, uint32_t* address) {
@@ -86,7 +81,6 @@ int GetIPv4AddressFromIndex(int socket, uint32_t index, uint32_t* address) {
 
   sockaddr_in* result = nullptr;
 
-#if defined(OS_MACOSX)
   ifreq ifr;
   ifr.ifr_addr.sa_family = AF_INET;
   if (!if_indextoname(index, ifr.ifr_name))
@@ -95,24 +89,6 @@ int GetIPv4AddressFromIndex(int socket, uint32_t index, uint32_t* address) {
   if (rv == -1)
     return MapSystemError(errno);
   result = reinterpret_cast<sockaddr_in*>(&ifr.ifr_addr);
-#elif defined(OS_FUCHSIA)
-  uint32_t num_ifs = 0;
-  if (ioctl_netc_get_num_ifs(socket, &num_ifs) < 0) {
-    PLOG(ERROR) << "ioctl_netc_get_num_ifs";
-    return MapSystemError(errno);
-  }
-  for (uint32_t i = 0; i < num_ifs; ++i) {
-    netc_if_info_t interface;
-    if (ioctl_netc_get_if_info_at(socket, &i, &interface) < 0) {
-      PLOG(WARNING) << "ioctl_netc_get_if_info_at";
-      continue;
-    }
-    if (interface.index == index && interface.addr.ss_family == AF_INET) {
-      result = reinterpret_cast<sockaddr_in*>(&(interface.addr));
-      break;
-    }
-  }
-#endif
 
   if (!result)
     return ERR_ADDRESS_INVALID;
@@ -121,7 +97,7 @@ int GetIPv4AddressFromIndex(int socket, uint32_t index, uint32_t* address) {
   return OK;
 }
 
-#endif  // OS_MACOSX || OS_FUCHSIA
+#endif  // OS_MACOSX
 
 #if defined(OS_MACOSX) && !defined(OS_IOS)
 
@@ -389,14 +365,14 @@ int UDPSocketPosix::GetLocalAddress(IPEndPoint* address) const {
 
 int UDPSocketPosix::Read(IOBuffer* buf,
                          int buf_len,
-                         const CompletionCallback& callback) {
-  return RecvFrom(buf, buf_len, NULL, callback);
+                         CompletionOnceCallback callback) {
+  return RecvFrom(buf, buf_len, NULL, std::move(callback));
 }
 
 int UDPSocketPosix::RecvFrom(IOBuffer* buf,
                              int buf_len,
                              IPEndPoint* address,
-                             const CompletionCallback& callback) {
+                             CompletionOnceCallback callback) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK_NE(kInvalidSocket, socket_);
   CHECK(read_callback_.is_null());
@@ -408,7 +384,7 @@ int UDPSocketPosix::RecvFrom(IOBuffer* buf,
   if (nread != ERR_IO_PENDING)
     return nread;
 
-  if (!base::MessageLoopForIO::current()->WatchFileDescriptor(
+  if (!base::MessageLoopCurrentForIO::Get()->WatchFileDescriptor(
           socket_, true, base::MessagePumpForIO::WATCH_READ,
           &read_socket_watcher_, &read_watcher_)) {
     PLOG(ERROR) << "WatchFileDescriptor failed on read";
@@ -420,29 +396,29 @@ int UDPSocketPosix::RecvFrom(IOBuffer* buf,
   read_buf_ = buf;
   read_buf_len_ = buf_len;
   recv_from_address_ = address;
-  read_callback_ = callback;
+  read_callback_ = std::move(callback);
   return ERR_IO_PENDING;
 }
 
 int UDPSocketPosix::Write(
     IOBuffer* buf,
     int buf_len,
-    const CompletionCallback& callback,
+    CompletionOnceCallback callback,
     const NetworkTrafficAnnotationTag& traffic_annotation) {
-  return SendToOrWrite(buf, buf_len, NULL, callback);
+  return SendToOrWrite(buf, buf_len, NULL, std::move(callback));
 }
 
 int UDPSocketPosix::SendTo(IOBuffer* buf,
                            int buf_len,
                            const IPEndPoint& address,
-                           const CompletionCallback& callback) {
-  return SendToOrWrite(buf, buf_len, &address, callback);
+                           CompletionOnceCallback callback) {
+  return SendToOrWrite(buf, buf_len, &address, std::move(callback));
 }
 
 int UDPSocketPosix::SendToOrWrite(IOBuffer* buf,
                                   int buf_len,
                                   const IPEndPoint* address,
-                                  const CompletionCallback& callback) {
+                                  CompletionOnceCallback callback) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK_NE(kInvalidSocket, socket_);
   CHECK(write_callback_.is_null());
@@ -453,7 +429,7 @@ int UDPSocketPosix::SendToOrWrite(IOBuffer* buf,
   if (result != ERR_IO_PENDING)
     return result;
 
-  if (!base::MessageLoopForIO::current()->WatchFileDescriptor(
+  if (!base::MessageLoopCurrentForIO::Get()->WatchFileDescriptor(
           socket_, true, base::MessagePumpForIO::WATCH_WRITE,
           &write_socket_watcher_, &write_watcher_)) {
     DVLOG(1) << "WatchFileDescriptor failed on write, errno " << errno;
@@ -468,7 +444,7 @@ int UDPSocketPosix::SendToOrWrite(IOBuffer* buf,
   if (address) {
     send_to_address_.reset(new IPEndPoint(*address));
   }
-  write_callback_ = callback;
+  write_callback_ = std::move(callback);
   return ERR_IO_PENDING;
 }
 
@@ -711,7 +687,7 @@ void UDPSocketPosix::DoReadCallback(int rv) {
 
   // Since Run() may result in Read() being called,
   // clear |read_callback_| up front.
-  base::ResetAndReturn(&read_callback_).Run(rv);
+  std::move(read_callback_).Run(rv);
 }
 
 void UDPSocketPosix::DoWriteCallback(int rv) {
@@ -720,7 +696,7 @@ void UDPSocketPosix::DoWriteCallback(int rv) {
 
   // Since Run() may result in Write() being called,
   // clear |write_callback_| up front.
-  base::ResetAndReturn(&write_callback_).Run(rv);
+  std::move(write_callback_).Run(rv);
 }
 
 void UDPSocketPosix::DidCompleteRead() {
@@ -925,17 +901,17 @@ int UDPSocketPosix::SetMulticastOptions() {
   if (multicast_interface_ != 0) {
     switch (addr_family_) {
       case AF_INET: {
-#if defined(OS_MACOSX) || defined(OS_FUCHSIA)
-        ip_mreq mreq;
+#if defined(OS_MACOSX)
+        ip_mreq mreq = {};
         int error = GetIPv4AddressFromIndex(socket_, multicast_interface_,
                                             &mreq.imr_interface.s_addr);
         if (error != OK)
           return error;
-#else   //  defined(OS_MACOSX) || defined(OS_FUCHSIA)
-        ip_mreqn mreq;
+#else   //  defined(OS_MACOSX)
+        ip_mreqn mreq = {};
         mreq.imr_ifindex = multicast_interface_;
         mreq.imr_address.s_addr = htonl(INADDR_ANY);
-#endif  //  !defined(OS_MACOSX) && !defined(OS_FUCHSIA)
+#endif  //  !defined(OS_MACOSX)
         int rv = setsockopt(socket_, IPPROTO_IP, IP_MULTICAST_IF,
                             reinterpret_cast<const char*>(&mreq), sizeof(mreq));
         if (rv)
@@ -999,14 +975,14 @@ int UDPSocketPosix::JoinGroup(const IPAddress& group_address) const {
       if (addr_family_ != AF_INET)
         return ERR_ADDRESS_INVALID;
 
-#if defined(OS_MACOSX) || defined(OS_FUCHSIA)
-      ip_mreq mreq;
+#if defined(OS_MACOSX)
+      ip_mreq mreq = {};
       int error = GetIPv4AddressFromIndex(socket_, multicast_interface_,
                                           &mreq.imr_interface.s_addr);
       if (error != OK)
         return error;
 #else
-      ip_mreqn mreq;
+      ip_mreqn mreq = {};
       mreq.imr_ifindex = multicast_interface_;
       mreq.imr_address.s_addr = htonl(INADDR_ANY);
 #endif
@@ -1047,16 +1023,9 @@ int UDPSocketPosix::LeaveGroup(const IPAddress& group_address) const {
     case IPAddress::kIPv4AddressSize: {
       if (addr_family_ != AF_INET)
         return ERR_ADDRESS_INVALID;
-      ip_mreq mreq;
-#if defined(OS_FUCHSIA)
-      // Fuchsia currently doesn't support INADDR_ANY in ip_mreq.imr_interface.
-      int error = GetIPv4AddressFromIndex(socket_, multicast_interface_,
-                                          &mreq.imr_interface.s_addr);
-      if (error != OK)
-        return error;
-#else   // defined(OS_FUCHSIA)
-      mreq.imr_interface.s_addr = INADDR_ANY;
-#endif  // !defined(OS_FUCHSIA)
+      ip_mreqn mreq = {};
+      mreq.imr_ifindex = multicast_interface_;
+      mreq.imr_address.s_addr = INADDR_ANY;
       memcpy(&mreq.imr_multiaddr, group_address.bytes().data(),
              IPAddress::kIPv4AddressSize);
       int rv = setsockopt(socket_, IPPROTO_IP, IP_DROP_MEMBERSHIP,
@@ -1239,25 +1208,25 @@ int UDPSocketPosixSender::Sendmmsg(int sockfd,
 int UDPSocketPosix::WriteAsync(
     const char* buffer,
     size_t buf_len,
-    const CompletionCallback& callback,
+    CompletionOnceCallback callback,
     const NetworkTrafficAnnotationTag& traffic_annotation) {
   DCHECK(datagram_buffer_pool_ != nullptr);
   IncreaseWriteAsyncOutstanding(1);
   datagram_buffer_pool_->Enqueue(buffer, buf_len, &pending_writes_);
-  return InternalWriteAsync(callback, traffic_annotation);
+  return InternalWriteAsync(std::move(callback), traffic_annotation);
 }
 
 int UDPSocketPosix::WriteAsync(
     DatagramBuffers buffers,
-    const CompletionCallback& callback,
+    CompletionOnceCallback callback,
     const NetworkTrafficAnnotationTag& traffic_annotation) {
   IncreaseWriteAsyncOutstanding(buffers.size());
   pending_writes_.splice(pending_writes_.end(), std::move(buffers));
-  return InternalWriteAsync(callback, traffic_annotation);
+  return InternalWriteAsync(std::move(callback), traffic_annotation);
 }
 
 int UDPSocketPosix::InternalWriteAsync(
-    const CompletionCallback& callback,
+    CompletionOnceCallback callback,
     const NetworkTrafficAnnotationTag& traffic_annotation) {
   CHECK(write_callback_.is_null());
 
@@ -1285,7 +1254,7 @@ int UDPSocketPosix::InternalWriteAsync(
   int blocking_threshold =
       write_batching_active_ ? kWriteAsyncMaxBuffersThreshold : 1;
   if (write_async_outstanding_ >= blocking_threshold) {
-    write_callback_ = callback;
+    write_callback_ = std::move(callback);
     return ERR_IO_PENDING;
   }
 
@@ -1466,7 +1435,7 @@ void UDPSocketPosix::StopWatchingFileDescriptor() {
 }
 
 bool UDPSocketPosix::InternalWatchFileDescriptor() {
-  return base::MessageLoopForIO::current()->WatchFileDescriptor(
+  return base::MessageLoopCurrentForIO::Get()->WatchFileDescriptor(
       socket_, true, base::MessagePumpForIO::WATCH_WRITE,
       &write_socket_watcher_, write_async_watcher_.get());
 }

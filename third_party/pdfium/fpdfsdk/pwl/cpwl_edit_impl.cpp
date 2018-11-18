@@ -16,14 +16,12 @@
 #include "core/fpdfapi/page/cpdf_pageobjectholder.h"
 #include "core/fpdfapi/page/cpdf_pathobject.h"
 #include "core/fpdfapi/page/cpdf_textobject.h"
-#include "core/fpdfapi/parser/fpdf_parser_decode.h"
 #include "core/fpdfapi/render/cpdf_renderoptions.h"
 #include "core/fpdfapi/render/cpdf_textrenderer.h"
 #include "core/fpdfdoc/cpvt_word.h"
 #include "core/fpdfdoc/ipvt_fontmap.h"
 #include "core/fxcrt/autorestorer.h"
 #include "core/fxcrt/fx_codepage.h"
-#include "core/fxcrt/fx_fallthrough.h"
 #include "core/fxge/cfx_graphstatedata.h"
 #include "core/fxge/cfx_pathdata.h"
 #include "core/fxge/cfx_renderdevice.h"
@@ -31,6 +29,7 @@
 #include "fpdfsdk/pwl/cpwl_edit.h"
 #include "fpdfsdk/pwl/cpwl_edit_ctrl.h"
 #include "fpdfsdk/pwl/cpwl_scroll_bar.h"
+#include "third_party/base/compiler_specific.h"
 #include "third_party/base/ptr_util.h"
 #include "third_party/base/stl_util.h"
 
@@ -44,26 +43,17 @@ void DrawTextString(CFX_RenderDevice* pDevice,
                     float fFontSize,
                     const CFX_Matrix& mtUser2Device,
                     const ByteString& str,
-                    FX_ARGB crTextFill,
-                    int32_t nHorzScale) {
+                    FX_ARGB crTextFill) {
   if (!pFont)
     return;
 
   CFX_PointF pos = mtUser2Device.Transform(pt);
-  CFX_Matrix mt;
-  if (nHorzScale == 100) {
-    mt = mtUser2Device;
-  } else {
-    mt = CFX_Matrix(nHorzScale / 100.0f, 0, 0, 1, 0, 0);
-    mt.Concat(mtUser2Device);
-  }
-
   CPDF_RenderOptions ro;
   ro.SetFlags(RENDER_CLEARTYPE);
-
   ro.SetColorMode(CPDF_RenderOptions::kNormal);
   CPDF_TextRenderer::DrawTextString(pDevice, pos.x, pos.y, pFont, fFontSize,
-                                    &mt, str, crTextFill, nullptr, &ro);
+                                    mtUser2Device, str, crTextFill, nullptr,
+                                    &ro);
 }
 
 }  // namespace
@@ -438,11 +428,8 @@ void CPWL_EditImpl::DrawEdit(CFX_RenderDevice* pDevice,
   uint16_t SubWord = pEdit->GetPasswordChar();
   float fFontSize = pEdit->GetFontSize();
   CPVT_WordRange wrSelect = pEdit->GetSelectWordRange();
-  int32_t nHorzScale = pEdit->GetHorzScale();
-
   FX_COLORREF crCurFill = crTextFill;
   FX_COLORREF crOldFill = crCurFill;
-
   bool bSelect = false;
   const FX_COLORREF crWhite = ArgbEncode(255, 255, 255, 255);
   const FX_COLORREF crSelBK = ArgbEncode(255, 0, 51, 113);
@@ -505,10 +492,10 @@ void CPWL_EditImpl::DrawEdit(CFX_RenderDevice* pDevice,
         if (place.LineCmp(oldplace) != 0 || word.nFontIndex != nFontIndex ||
             crOldFill != crCurFill) {
           if (sTextBuf.tellp() > 0) {
-            DrawTextString(
-                pDevice, CFX_PointF(ptBT.x + ptOffset.x, ptBT.y + ptOffset.y),
-                pFontMap->GetPDFFont(nFontIndex), fFontSize, mtUser2Device,
-                ByteString(sTextBuf), crOldFill, nHorzScale);
+            DrawTextString(pDevice,
+                           CFX_PointF(ptBT.x + ptOffset.x, ptBT.y + ptOffset.y),
+                           pFontMap->GetPDFFont(nFontIndex), fFontSize,
+                           mtUser2Device, ByteString(sTextBuf), crOldFill);
 
             sTextBuf.str("");
           }
@@ -525,7 +512,7 @@ void CPWL_EditImpl::DrawEdit(CFX_RenderDevice* pDevice,
             CFX_PointF(word.ptWord.x + ptOffset.x, word.ptWord.y + ptOffset.y),
             pFontMap->GetPDFFont(word.nFontIndex), fFontSize, mtUser2Device,
             pEdit->GetPDFWordString(word.nFontIndex, word.Word, SubWord),
-            crCurFill, nHorzScale);
+            crCurFill);
       }
       oldplace = place;
     }
@@ -535,7 +522,7 @@ void CPWL_EditImpl::DrawEdit(CFX_RenderDevice* pDevice,
     DrawTextString(pDevice,
                    CFX_PointF(ptBT.x + ptOffset.x, ptBT.y + ptOffset.y),
                    pFontMap->GetPDFFont(nFontIndex), fFontSize, mtUser2Device,
-                   ByteString(sTextBuf), crOldFill, nHorzScale);
+                   ByteString(sTextBuf), crOldFill);
   }
 }
 
@@ -828,10 +815,6 @@ int32_t CPWL_EditImpl::GetCharArray() const {
 
 CFX_FloatRect CPWL_EditImpl::GetContentRect() const {
   return VTToEdit(m_pVT->GetContentRect());
-}
-
-int32_t CPWL_EditImpl::GetHorzScale() const {
-  return m_pVT->GetHorzScale();
 }
 
 float CPWL_EditImpl::GetCharSpace() const {
@@ -1808,17 +1791,17 @@ CPVT_WordPlace CPWL_EditImpl::DoInsertText(const CPVT_WordPlace& place,
     for (int32_t i = 0, sz = sText.GetLength(); i < sz; i++) {
       uint16_t word = sText[i];
       switch (word) {
-        case 0x0D:
+        case '\r':
           wp = m_pVT->InsertSection(wp);
-          if (i + 1 < sz && sText[i + 1] == 0x0A)
+          if (i + 1 < sz && sText[i + 1] == '\n')
             i++;
           break;
-        case 0x0A:
+        case '\n':
           wp = m_pVT->InsertSection(wp);
           break;
-        case 0x09:
-          word = 0x20;
-          FX_FALLTHROUGH;
+        case '\t':
+          word = ' ';
+          FALLTHROUGH;
         default:
           wp =
               m_pVT->InsertWord(wp, word, GetCharSetFromUnicode(word, charset));

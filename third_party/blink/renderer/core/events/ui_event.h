@@ -71,7 +71,7 @@ class CORE_EXPORT UIEvent : public Event {
 
   virtual unsigned which() const;
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  protected:
   UIEvent();
@@ -94,6 +94,8 @@ class CORE_EXPORT UIEvent : public Event {
   int detail_;
   Member<InputDeviceCapabilities> source_capabilities_;
 };
+
+DEFINE_EVENT_TYPE_CASTS(UIEvent);
 
 }  // namespace blink
 

@@ -115,8 +115,8 @@ AC_SUBST(DYNAMIC_EXTENSION_FLAGS)
 #   --enable-fts5
 #
 AC_ARG_ENABLE(fts5, [AS_HELP_STRING(
-  [--enable-fts5], [include fts5 support [default=no]])],
-  [], [enable_fts5=no])
+  [--enable-fts5], [include fts5 support [default=yes]])],
+  [], [enable_fts5=yes])
 if test x"$enable_fts5" = "xyes"; then
   AC_SEARCH_LIBS(log, m)
   FTS5_FLAGS=-DSQLITE_ENABLE_FTS5
@@ -128,8 +128,8 @@ AC_SUBST(FTS5_FLAGS)
 #   --enable-json1
 #
 AC_ARG_ENABLE(json1, [AS_HELP_STRING(
-  [--enable-json1], [include json1 support [default=no]])],
-  [], [enable_json1=no])
+  [--enable-json1], [include json1 support [default=yes]])],
+  [], [enable_json1=yes])
 if test x"$enable_json1" = "xyes"; then
   JSON1_FLAGS=-DSQLITE_ENABLE_JSON1
 fi
@@ -146,6 +146,18 @@ if test x"$enable_session" = "xyes"; then
   SESSION_FLAGS="-DSQLITE_ENABLE_SESSION -DSQLITE_ENABLE_PREUPDATE_HOOK"
 fi
 AC_SUBST(SESSION_FLAGS)
+#-----------------------------------------------------------------------
+
+#-----------------------------------------------------------------------
+#   --enable-debug
+#
+AC_ARG_ENABLE(debug, [AS_HELP_STRING(
+  [--enable-debug], [build with debugging features enabled [default=no]])],
+  [], [enable_session=no])
+if test x"$enable_debug" = "xyes"; then
+  DEBUG_FLAGS="-DSQLITE_DEBUG -DSQLITE_ENABLE_SELECTTRACE -DSQLITE_ENABLE_WHERETRACE"
+fi
+AC_SUBST(DEBUG_FLAGS)
 #-----------------------------------------------------------------------
 
 #-----------------------------------------------------------------------
@@ -168,6 +180,9 @@ AC_CHECK_HEADERS(zlib.h,[
   AC_SEARCH_LIBS(deflate,z,[ZLIB_FLAGS="-DSQLITE_HAVE_ZLIB"])
 ])
 AC_SUBST(ZLIB_FLAGS)
+
+AC_SEARCH_LIBS(system,,,[SHELL_CFLAGS="-DSQLITE_NOHAVE_SYSTEM"])
+AC_SUBST(SHELL_CFLAGS)
 
 #-----------------------------------------------------------------------
 # UPDATE: Maybe it's better if users just set CFLAGS before invoking

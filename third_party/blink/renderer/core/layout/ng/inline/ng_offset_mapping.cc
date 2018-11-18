@@ -8,8 +8,10 @@
 #include "third_party/blink/renderer/core/dom/text.h"
 #include "third_party/blink/renderer/core/editing/ephemeral_range.h"
 #include "third_party/blink/renderer/core/editing/position.h"
+#include "third_party/blink/renderer/core/layout/layout_text_fragment.h"
 #include "third_party/blink/renderer/core/layout/ng/inline/ng_inline_node.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_block_node.h"
+#include "third_party/blink/renderer/platform/text/character.h"
 
 namespace blink {
 
@@ -84,6 +86,28 @@ NGOffsetMappingUnit::NGOffsetMappingUnit(NGOffsetMappingUnitType type,
       text_content_end_(text_content_end) {}
 
 NGOffsetMappingUnit::~NGOffsetMappingUnit() = default;
+
+bool NGOffsetMappingUnit::Concatenate(const NGOffsetMappingUnit& other) {
+  if (owner_ != other.owner_)
+    return false;
+  if (type_ != other.type_ || type_ == NGOffsetMappingUnitType::kExpanded)
+    return false;
+  if (dom_end_ != other.dom_start_)
+    return false;
+  if (text_content_end_ != other.text_content_start_)
+    return false;
+  // Don't merge first letter and remaining text
+  if (const LayoutTextFragment* text_fragment =
+          ToLayoutTextFragmentOrNull(owner_->GetLayoutObject())) {
+    // TODO(layout-dev): Fix offset calculation for text-transform
+    if (text_fragment->IsRemainingTextLayoutObject() &&
+        other.dom_start_ == text_fragment->TextStartOffset())
+      return false;
+  }
+  dom_end_ = other.dom_end_;
+  text_content_end_ = other.text_content_end_;
+  return true;
+}
 
 unsigned NGOffsetMappingUnit::ConvertDOMOffsetToTextContent(
     unsigned offset) const {
@@ -180,7 +204,7 @@ NGOffsetMapping::NGOffsetMapping(NGOffsetMapping&& other)
 NGOffsetMapping::NGOffsetMapping(UnitVector&& units,
                                  RangeMap&& ranges,
                                  String text)
-    : units_(units), ranges_(ranges), text_(text) {}
+    : units_(std::move(units)), ranges_(std::move(ranges)), text_(text) {}
 
 NGOffsetMapping::~NGOffsetMapping() = default;
 
@@ -247,13 +271,39 @@ NGMappingUnitRange NGOffsetMapping::GetMappingUnitsForDOMRange(
   return {result_begin, result_end};
 }
 
-Optional<unsigned> NGOffsetMapping::GetTextContentOffset(
+NGMappingUnitRange NGOffsetMapping::GetMappingUnitsForTextContentOffsetRange(
+    unsigned start,
+    unsigned end) const {
+  DCHECK_LE(start, end);
+  if (units_.front().TextContentStart() >= end ||
+      units_.back().TextContentEnd() <= start)
+    return {};
+
+  // Find the first unit where unit.text_content_end > start
+  const NGOffsetMappingUnit* result_begin =
+      std::lower_bound(units_.begin(), units_.end(), start,
+                       [](const NGOffsetMappingUnit& unit, unsigned offset) {
+                         return unit.TextContentEnd() <= offset;
+                       });
+  if (result_begin == units_.end() || result_begin->TextContentStart() >= end)
+    return {};
+
+  // Find the next of the last unit where unit.text_content_start < end
+  const NGOffsetMappingUnit* result_end =
+      std::upper_bound(units_.begin(), units_.end(), end,
+                       [](unsigned offset, const NGOffsetMappingUnit& unit) {
+                         return offset <= unit.TextContentStart();
+                       });
+  return {result_begin, result_end};
+}
+
+base::Optional<unsigned> NGOffsetMapping::GetTextContentOffset(
     const Position& position) const {
   DCHECK(NGOffsetMapping::AcceptsPosition(position)) << position;
   if (IsNonAtomicInline(*position.AnchorNode())) {
     auto iter = ranges_.find(position.AnchorNode());
     if (iter == ranges_.end())
-      return WTF::nullopt;
+      return base::nullopt;
     DCHECK_NE(iter->value.first, iter->value.second) << position;
     if (position.IsBeforeAnchor())
       return units_[iter->value.first].TextContentStart();
@@ -262,7 +312,7 @@ Optional<unsigned> NGOffsetMapping::GetTextContentOffset(
 
   const NGOffsetMappingUnit* unit = GetMappingUnitForPosition(position);
   if (!unit)
-    return WTF::nullopt;
+    return base::nullopt;
   return unit->ConvertDOMOffsetToTextContent(ToNodeOffsetPair(position).second);
 }
 
@@ -339,13 +389,13 @@ bool NGOffsetMapping::IsAfterNonCollapsedContent(
          unit->GetType() != NGOffsetMappingUnitType::kCollapsed;
 }
 
-Optional<UChar> NGOffsetMapping::GetCharacterBefore(
+base::Optional<UChar> NGOffsetMapping::GetCharacterBefore(
     const Position& position) const {
   DCHECK(NGOffsetMapping::AcceptsPosition(position));
   DCHECK(!IsNonAtomicInline(*position.AnchorNode())) << position;
-  Optional<unsigned> text_content_offset = GetTextContentOffset(position);
+  base::Optional<unsigned> text_content_offset = GetTextContentOffset(position);
   if (!text_content_offset || !*text_content_offset)
-    return WTF::nullopt;
+    return base::nullopt;
   return text_[*text_content_offset - 1];
 }
 
@@ -383,6 +433,17 @@ Position NGOffsetMapping::GetLastPosition(unsigned offset) const {
   const Node& node = result->GetOwner();
   const unsigned dom_offset = result->ConvertTextContentToLastDOMOffset(offset);
   return CreatePositionForOffsetMapping(node, dom_offset);
+}
+
+bool NGOffsetMapping::HasBidiControlCharactersOnly(unsigned start,
+                                                   unsigned end) const {
+  DCHECK_LE(start, end);
+  DCHECK_LE(end, text_.length());
+  for (unsigned i = start; i < end; ++i) {
+    if (!Character::IsBidiControl(text_[i]))
+      return false;
+  }
+  return true;
 }
 
 }  // namespace blink

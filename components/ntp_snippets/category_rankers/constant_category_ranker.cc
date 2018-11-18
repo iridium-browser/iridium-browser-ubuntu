@@ -122,11 +122,8 @@ ConstantCategoryRanker::GetKnownCategoriesDefaultOrder() {
     // KnownCategories::CONTEXTUAL because it is not handled by
     // ContentSuggestionsService.
     case CategoryOrderChoice::GENERAL:
-      categories.push_back(KnownCategories::PHYSICAL_WEB_PAGES);
       categories.push_back(KnownCategories::READING_LIST);
       categories.push_back(KnownCategories::DOWNLOADS);
-      categories.push_back(KnownCategories::RECENT_TABS);
-      categories.push_back(KnownCategories::FOREIGN_TABS);
       categories.push_back(KnownCategories::BOOKMARKS);
       categories.push_back(KnownCategories::ARTICLES);
       break;
@@ -135,10 +132,6 @@ ConstantCategoryRanker::GetKnownCategoriesDefaultOrder() {
       categories.push_back(KnownCategories::READING_LIST);
       categories.push_back(KnownCategories::DOWNLOADS);
       categories.push_back(KnownCategories::BOOKMARKS);
-
-      categories.push_back(KnownCategories::PHYSICAL_WEB_PAGES);
-      categories.push_back(KnownCategories::RECENT_TABS);
-      categories.push_back(KnownCategories::FOREIGN_TABS);
       break;
   }
 

@@ -54,9 +54,11 @@ PaintedScrollbarLayer::PaintedScrollbarLayer(
       is_overlay_(scrollbar_->IsOverlay()),
       has_thumb_(scrollbar_->HasThumb()),
       thumb_opacity_(scrollbar_->ThumbOpacity()) {
-  if (!scrollbar_->IsOverlay())
+  if (!scrollbar_->IsOverlay()) {
     AddMainThreadScrollingReasons(
         MainThreadScrollingReason::kScrollbarScrolling);
+  }
+  SetIsScrollbar(true);
 }
 
 PaintedScrollbarLayer::~PaintedScrollbarLayer() = default;
@@ -107,10 +109,6 @@ void PaintedScrollbarLayer::PushPropertiesTo(LayerImpl* layer) {
   scrollbar_layer->set_thumb_opacity(thumb_opacity_);
 
   scrollbar_layer->set_is_overlay_scrollbar(is_overlay_);
-}
-
-ScrollbarLayerInterface* PaintedScrollbarLayer::ToScrollbarLayer() {
-  return this;
 }
 
 void PaintedScrollbarLayer::SetLayerTreeHost(LayerTreeHost* host) {

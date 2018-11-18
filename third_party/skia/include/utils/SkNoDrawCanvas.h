@@ -29,7 +29,7 @@ public:
     // TODO: investigate the users of this ctor.
     SkNoDrawCanvas(const SkIRect&);
 
-    explicit SkNoDrawCanvas(SkBaseDevice* device);
+    explicit SkNoDrawCanvas(sk_sp<SkBaseDevice> device);
 
     // Optimization to reset state to be the same as after construction.
     void resetCanvas(int width, int height) {
@@ -46,8 +46,6 @@ protected:
     void onDrawText(const void*, size_t, SkScalar, SkScalar, const SkPaint&) override {}
     void onDrawPosText(const void*, size_t, const SkPoint[], const SkPaint&) override {}
     void onDrawPosTextH(const void*, size_t, const SkScalar[], SkScalar, const SkPaint&) override {}
-    void onDrawTextOnPath(const void*, size_t, const SkPath&, const SkMatrix*,
-                          const SkPaint&) override {}
     void onDrawTextRSXform(const void*, size_t, const SkRSXform[], const SkRect*,
                            const SkPaint&) override {}
     void onDrawTextBlob(const SkTextBlob*, SkScalar, SkScalar, const SkPaint&) override {}
@@ -75,7 +73,8 @@ protected:
                             const SkPaint*) override {}
     void onDrawBitmapLattice(const SkBitmap&, const Lattice&, const SkRect&,
                              const SkPaint*) override {}
-    void onDrawVerticesObject(const SkVertices*, SkBlendMode, const SkPaint&) override {}
+    void onDrawVerticesObject(const SkVertices*, const SkVertices::Bone[], int, SkBlendMode,
+                              const SkPaint&) override {}
     void onDrawAtlas(const SkImage*, const SkRSXform[], const SkRect[], const SkColor[],
                      int, SkBlendMode, const SkRect*, const SkPaint*) override {}
     void onDrawShadowRec(const SkPath&, const SkDrawShadowRec&) override {}

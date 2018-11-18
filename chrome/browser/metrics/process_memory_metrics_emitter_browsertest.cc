@@ -5,9 +5,8 @@
 #include "chrome/browser/metrics/process_memory_metrics_emitter.h"
 
 #include "base/memory/ref_counted.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
-#include "base/test/histogram_tester.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "base/test/scoped_feature_list.h"
 #include "base/test/trace_event_analyzer.h"
 #include "base/trace_event/memory_dump_manager.h"
@@ -18,13 +17,13 @@
 #include "chrome/test/base/tracing.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "components/ukm/test_ukm_recorder.h"
-#include "components/ukm/ukm_source.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/test/test_utils.h"
 #include "extensions/buildflags/buildflags.h"
 #include "net/dns/mock_host_resolver.h"
 #include "services/metrics/public/cpp/ukm_builders.h"
+#include "services/metrics/public/cpp/ukm_source.h"
 #include "services/resource_coordinator/public/cpp/memory_instrumentation/memory_instrumentation.h"
 #include "url/gurl.h"
 #include "url/url_constants.h"
@@ -199,7 +198,8 @@ void CheckAllMemoryMetrics(const base::HistogramTester& histogram_tester,
 
 }  // namespace
 
-class ProcessMemoryMetricsEmitterTest : public ExtensionBrowserTest {
+class ProcessMemoryMetricsEmitterTest
+    : public extensions::ExtensionBrowserTest {
  public:
   ProcessMemoryMetricsEmitterTest() {
     scoped_feature_list_.InitAndEnableFeature(ukm::kUkmFeature);
@@ -208,7 +208,7 @@ class ProcessMemoryMetricsEmitterTest : public ExtensionBrowserTest {
   ~ProcessMemoryMetricsEmitterTest() override {}
 
   void SetUpOnMainThread() override {
-    ExtensionBrowserTest::SetUpOnMainThread();
+    extensions::ExtensionBrowserTest::SetUpOnMainThread();
     host_resolver()->AddRule("*", "127.0.0.1");
   }
 

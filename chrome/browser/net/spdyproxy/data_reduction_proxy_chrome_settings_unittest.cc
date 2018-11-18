@@ -8,7 +8,7 @@
 #include <string>
 
 #include "base/message_loop/message_loop.h"
-#include "base/test/histogram_tester.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_config_test_utils.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_test_utils.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
@@ -16,6 +16,7 @@
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/testing_pref_service.h"
 #include "components/proxy_config/proxy_config_pref_names.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using testing::_;
@@ -260,6 +261,23 @@ TEST_F(DataReductionProxyChromeSettingsTest,
        false},
       // PAC URL that doesn't embed a script.
       {"http://compress.googlezip.net/pac", false},
+      // Complicated PAC that returns a JavaScript function that can evaluate to
+      // proxy.googlezip.net:443 and compress.googlezip.net:80.
+      {"data:application/"
+       "x-ns-proxy-autoconfig;base64,"
+       "ZnVuY3Rpb24gRmluZFByb3h5Rm9yVVJMKHVybCwgaG9zdCkgewogIGlmICh1cmwuc3Vic3R"
+       "yaW5nKDAsNSkgPT0gJ2h0dHA6JyAmJiAKICAgICAgIWlzUGxhaW5Ib3N0TmFtZShob3N0KS"
+       "AmJiAKICAgICAgIXNoRXhwTWF0Y2goaG9zdCwgJyoubG9jYWwnKSAmJiAKICAgICAgIWlzS"
+       "W5OZXQoZG5zUmVzb2x2ZShob3N0KSwgJzEwLjAuMC4wJywgJzI1NS4wLjAuMCcpICYmIAog"
+       "ICAgICAhaXNJbk5ldChkbnNSZXNvbHZlKGhvc3QpLCAnMTcyLjE2LjAuMCcsICAnMjU1LjI"
+       "0MC4wLjAnKSAmJiAKICAgICAgIWlzSW5OZXQoZG5zUmVzb2x2ZShob3N0KSwgJzE5Mi4xNj"
+       "guMC4wJywgICcyNTUuMjU1LjAuMCcpICYmIAogICAgICAhaXNJbk5ldChkbnNSZXNvbHZlK"
+       "Ghvc3QpLCAnMTI3LjAuMC4wJywgJzI1NS4yNTUuMjU1LjAnKSAmJiAKICAgICAgIXNoRXhw"
+       "TWF0Y2goaG9zdCwgJygqLm1ldHJpYy5nc3RhdGljLmNvbSknKSkKICAgIHJldHVybiAnSFR"
+       "UUFMgcHJveHkuZ29vZ2xlemlwLm5ldDo0NDM7IFBST1hZIGNvbXByZXNzLmdvb2dsZXppcC"
+       "5uZXQ6ODA7IFBST1hZIDc0LjEyNS4yMDUuMjExOjgwOyBESVJFQ1QnOwogIHJldHVybiAnR"
+       "ElSRUNUJzsKfQ==",
+       true},
   };
 
   for (const auto& test : test_cases) {

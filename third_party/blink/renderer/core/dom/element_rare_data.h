@@ -24,13 +24,14 @@
 
 #include <memory>
 #include "third_party/blink/renderer/core/animation/element_animations.h"
+#include "third_party/blink/renderer/core/aom/accessible_node.h"
 #include "third_party/blink/renderer/core/css/cssom/inline_style_property_map.h"
 #include "third_party/blink/renderer/core/css/inline_css_style_declaration.h"
-#include "third_party/blink/renderer/core/dom/accessible_node.h"
 #include "third_party/blink/renderer/core/dom/attr.h"
 #include "third_party/blink/renderer/core/dom/dataset_dom_string_map.h"
 #include "third_party/blink/renderer/core/dom/dom_token_list.h"
 #include "third_party/blink/renderer/core/dom/named_node_map.h"
+#include "third_party/blink/renderer/core/dom/names_map.h"
 #include "third_party/blink/renderer/core/dom/node_rare_data.h"
 #include "third_party/blink/renderer/core/dom/pseudo_element.h"
 #include "third_party/blink/renderer/core/dom/pseudo_element_data.h"
@@ -104,6 +105,16 @@ class ElementRareData : public NodeRareData {
     part_names_->Set(part_names);
   }
   const SpaceSplitString* PartNames() const { return part_names_.get(); }
+
+  void SetPartNamesMap(const AtomicString part_names) {
+    if (!RuntimeEnabledFeatures::CSSPartPseudoElementEnabled())
+      return;
+    if (!part_names_map_) {
+      part_names_map_.reset(new NamesMap());
+    }
+    part_names_map_->Set(part_names);
+  }
+  const NamesMap* PartNamesMap() const { return part_names_map_.get(); }
 
   DatasetDOMStringMap* Dataset() const { return dataset_.Get(); }
   void SetDataset(DatasetDOMStringMap* dataset) {
@@ -180,7 +191,6 @@ class ElementRareData : public NodeRareData {
   void SetNonce(const AtomicString& nonce) { nonce_ = nonce; }
 
   void TraceAfterDispatch(blink::Visitor*);
-  void TraceWrappersAfterDispatch(const ScriptWrappableVisitor*) const;
 
  private:
   ScrollOffset saved_layer_scroll_offset_;
@@ -190,15 +200,16 @@ class ElementRareData : public NodeRareData {
   TraceWrapperMember<ShadowRoot> shadow_root_;
   TraceWrapperMember<DOMTokenList> class_list_;
   std::unique_ptr<SpaceSplitString> part_names_;
+  std::unique_ptr<NamesMap> part_names_map_;
   TraceWrapperMember<NamedNodeMap> attribute_map_;
-  Member<AttrNodeList> attr_node_list_;
+  TraceWrapperMember<AttrNodeList> attr_node_list_;
   Member<InlineCSSStyleDeclaration> cssom_wrapper_;
   Member<InlineStylePropertyMap> cssom_map_wrapper_;
 
   Member<ElementAnimations> element_animations_;
   TraceWrapperMember<ElementIntersectionObserverData>
       intersection_observer_data_;
-  Member<ResizeObserverDataMap> resize_observer_data_;
+  TraceWrapperMember<ResizeObserverDataMap> resize_observer_data_;
 
   scoped_refptr<ComputedStyle> computed_style_;
   // TODO(davaajav):remove this field when v0 custom elements are deprecated
@@ -212,7 +223,6 @@ class ElementRareData : public NodeRareData {
 
   explicit ElementRareData(NodeRenderingData*);
 };
-DEFINE_TRAIT_FOR_TRACE_WRAPPERS(ElementRareData);
 
 inline LayoutSize DefaultMinimumSizeForResizing() {
   return LayoutSize(LayoutUnit::Max(), LayoutUnit::Max());
@@ -231,8 +241,11 @@ inline void ElementRareData::ClearPseudoElements() {
 
 inline void ElementRareData::SetPseudoElement(PseudoId pseudo_id,
                                               PseudoElement* element) {
-  if (!pseudo_element_data_)
+  if (!pseudo_element_data_) {
+    if (!element)
+      return;
     pseudo_element_data_ = PseudoElementData::Create();
+  }
   pseudo_element_data_->SetPseudoElement(pseudo_id, element);
 }
 

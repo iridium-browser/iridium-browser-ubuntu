@@ -12,6 +12,7 @@
 #include <unordered_set>
 
 #include "base/memory/weak_ptr.h"
+#include "base/sequenced_task_runner.h"
 #include "components/safe_browsing/db/database_manager.h"
 #include "components/safe_browsing/db/hit_report.h"
 #include "components/safe_browsing/db/v4_database.h"
@@ -51,7 +52,6 @@ class V4LocalDatabaseManager : public SafeBrowsingDatabaseManager {
 
   void CancelCheck(Client* client) override;
   bool CanCheckResourceType(content::ResourceType resource_type) const override;
-  bool CanCheckSubresourceFilter() const override;
   bool CanCheckUrl(const GURL& url) const override;
   bool ChecksAreAlwaysAsync() const override;
   bool CheckBrowseUrl(const GURL& url,
@@ -277,11 +277,6 @@ class V4LocalDatabaseManager : public SafeBrowsingDatabaseManager {
   virtual void PerformFullHashCheck(std::unique_ptr<PendingCheck> check,
                                     const FullHashToStoreAndHashPrefixesMap&
                                         full_hash_to_store_and_hash_prefixes);
-
-  // Make callbacks about the completion of database update process. This is
-  // currently used by the extension blacklist checker to disable any installed
-  // extensions that have been blacklisted since.
-  void PostUpdateNotificationOnUIThread();
 
   // When the database is ready to use, process the checks that were queued
   // while the database was loading from disk.

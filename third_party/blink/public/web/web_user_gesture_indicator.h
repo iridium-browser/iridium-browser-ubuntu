@@ -31,6 +31,7 @@
 #ifndef THIRD_PARTY_BLINK_PUBLIC_WEB_WEB_USER_GESTURE_INDICATOR_H_
 #define THIRD_PARTY_BLINK_PUBLIC_WEB_WEB_USER_GESTURE_INDICATOR_H_
 
+#include "third_party/blink/public/common/frame/user_activation_update_source.h"
 #include "third_party/blink/public/platform/web_common.h"
 
 namespace blink {
@@ -42,21 +43,19 @@ class WebUserGestureIndicator {
  public:
   // Returns true if a user gesture is currently being processed. Must be called
   // on the main thread.
-  //
-  // TODO(mustaq): remove the default value when all callers have been fixed.
-  BLINK_EXPORT static bool IsProcessingUserGesture(WebLocalFrame* = nullptr);
+  BLINK_EXPORT static bool IsProcessingUserGesture(WebLocalFrame*);
 
   // Can be called from any thread. Note that this is slower than the non
   // thread-safe version due to thread id lookups. Prefer the non thread-safe
   // version for code that will only execute on the main thread.
-  //
-  // TODO(mustaq): remove the default value when all callers have been fixed.
-  BLINK_EXPORT static bool IsProcessingUserGestureThreadSafe(
-      WebLocalFrame* = nullptr);
+  BLINK_EXPORT static bool IsProcessingUserGestureThreadSafe(WebLocalFrame*);
 
   // Returns true if a consumable gesture exists and has been successfully
   // consumed.
-  BLINK_EXPORT static bool ConsumeUserGesture(WebLocalFrame*);
+  BLINK_EXPORT static bool ConsumeUserGesture(
+      WebLocalFrame*,
+      UserActivationUpdateSource update_source =
+          UserActivationUpdateSource::kRenderer);
 
   // Returns true if a user gesture was processed on the provided frame since
   // the time the frame was loaded.
@@ -68,8 +67,8 @@ class WebUserGestureIndicator {
   BLINK_EXPORT static WebUserGestureToken CurrentUserGestureToken();
 
   BLINK_EXPORT static void ExtendTimeout();
-  BLINK_EXPORT static void DisableTimeout();
 };
-}
+
+}  // namespace blink
 
 #endif  // THIRD_PARTY_BLINK_PUBLIC_WEB_WEB_USER_GESTURE_INDICATOR_H_

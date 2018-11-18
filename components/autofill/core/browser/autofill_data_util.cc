@@ -16,6 +16,7 @@
 #include "components/autofill/core/browser/autofill_profile.h"
 #include "components/autofill/core/browser/credit_card.h"
 #include "components/autofill/core/browser/field_types.h"
+#include "components/autofill/core/browser/webdata/autofill_table.h"
 #include "components/grit/components_scaled_resources.h"
 #include "components/strings/grit/components_strings.h"
 #include "third_party/icu/source/common/unicode/uscript.h"
@@ -44,6 +45,11 @@ const PaymentRequestData kPaymentRequestData[]{
      IDS_AUTOFILL_CC_UNION_PAY},
     {autofill::kVisaCard, "visa", IDR_AUTOFILL_CC_VISA, IDS_AUTOFILL_CC_VISA},
 };
+
+const PaymentRequestData kGooglePayBrandingRequestData = {
+    "googlePay", "googlePay", IDR_AUTOFILL_GOOGLE_PAY,
+    IDS_AUTOFILL_CC_GOOGLE_PAY};
+
 const PaymentRequestData kGenericPaymentRequestData = {
     autofill::kGenericCard, "generic", IDR_AUTOFILL_CC_GENERIC,
     IDS_AUTOFILL_CC_GENERIC};
@@ -106,7 +112,7 @@ bool ContainsString(const char* const set[],
 
 // Removes common name prefixes from |name_tokens|.
 void StripPrefixes(std::vector<base::StringPiece16>* name_tokens) {
-  std::vector<base::StringPiece16>::iterator iter = name_tokens->begin();
+  auto iter = name_tokens->begin();
   while (iter != name_tokens->end()) {
     if (!ContainsString(name_prefixes, arraysize(name_prefixes), *iter))
       break;
@@ -234,6 +240,21 @@ bool SplitCJKName(const std::vector<base::StringPiece16>& name_tokens,
 }
 
 }  // namespace
+
+std::string TruncateUTF8(const std::string& data) {
+  std::string trimmed_value;
+  base::TruncateUTF8ToByteSize(data, AutofillTable::kMaxDataLength,
+                               &trimmed_value);
+  return trimmed_value;
+}
+
+bool IsCreditCardExpirationType(ServerFieldType type) {
+  return type == CREDIT_CARD_EXP_MONTH ||
+         type == CREDIT_CARD_EXP_2_DIGIT_YEAR ||
+         type == CREDIT_CARD_EXP_4_DIGIT_YEAR ||
+         type == CREDIT_CARD_EXP_DATE_2_DIGIT_YEAR ||
+         type == CREDIT_CARD_EXP_DATE_4_DIGIT_YEAR;
+}
 
 bool IsCJKName(base::StringPiece16 name) {
   // The name is considered to be a CJK name if it is only CJK characters,
@@ -419,6 +440,9 @@ const PaymentRequestData& GetPaymentRequestData(
   for (const PaymentRequestData& data : kPaymentRequestData) {
     if (issuer_network == data.issuer_network)
       return data;
+  }
+  if (issuer_network == kGooglePayBrandingRequestData.issuer_network) {
+    return kGooglePayBrandingRequestData;
   }
   return kGenericPaymentRequestData;
 }

@@ -15,7 +15,7 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
+#include "base/no_destructor.h"
 #include "base/run_loop.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
@@ -111,7 +111,6 @@
 #include "ppapi/c/private/ppb_find_private.h"
 #include "ppapi/c/private/ppb_flash.h"
 #include "ppapi/c/private/ppb_flash_clipboard.h"
-#include "ppapi/c/private/ppb_flash_device_id.h"
 #include "ppapi/c/private/ppb_flash_drm.h"
 #include "ppapi/c/private/ppb_flash_file.h"
 #include "ppapi/c/private/ppb_flash_font_file.h"
@@ -129,8 +128,6 @@
 #include "ppapi/c/private/ppb_testing_private.h"
 #include "ppapi/c/private/ppb_udp_socket_private.h"
 #include "ppapi/c/private/ppb_uma_private.h"
-#include "ppapi/c/private/ppb_video_destination_private.h"
-#include "ppapi/c/private/ppb_video_source_private.h"
 #include "ppapi/c/private/ppb_x509_certificate_private.h"
 #include "ppapi/c/trusted/ppb_broker_trusted.h"
 #include "ppapi/c/trusted/ppb_browser_font_trusted.h"
@@ -177,8 +174,8 @@ HostGlobals* host_globals = nullptr;
 typedef std::set<PluginModule*> PluginModuleSet;
 
 PluginModuleSet* GetLivePluginSet() {
-  CR_DEFINE_STATIC_LOCAL(PluginModuleSet, live_plugin_libs, ());
-  return &live_plugin_libs;
+  static base::NoDestructor<PluginModuleSet> live_plugin_libs;
+  return live_plugin_libs.get();
 }
 
 class PowerSaverTestPluginDelegate : public PluginInstanceThrottler::Observer {
@@ -683,9 +680,7 @@ void PluginModule::PluginCrashed() {
   is_crashed_ = true;
 
   // Notify all instances that they crashed.
-  for (PluginInstanceSet::iterator i = instances_.begin();
-       i != instances_.end();
-       ++i)
+  for (auto i = instances_.begin(); i != instances_.end(); ++i)
     (*i)->InstanceCrashed();
 
   PepperPluginRegistry::GetInstance()->PluginModuleDead(this);

@@ -7,6 +7,8 @@
 
 #include "base/memory/scoped_refptr.h"
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/core/layout/ng/geometry/ng_box_strut.h"
+#include "third_party/blink/renderer/platform/fonts/font_baseline.h"
 #include "third_party/blink/renderer/platform/wtf/allocator.h"
 
 namespace blink {
@@ -31,7 +33,7 @@ struct NGLogicalOffset;
 // algorithm, they are set as "unpositioned", and are propagated to ancestors
 // through NGLayoutResult until they meet the corresponding list items.
 class CORE_EXPORT NGUnpositionedListMarker final {
-  DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
+  DISALLOW_NEW();
 
  public:
   NGUnpositionedListMarker() : marker_layout_object_(nullptr) {}
@@ -45,21 +47,29 @@ class CORE_EXPORT NGUnpositionedListMarker final {
   // that the child content does not have a baseline to align to, and that
   // caller should try next child, or "WithoutLineBoxes" version.
   bool AddToBox(const NGConstraintSpace&,
+                FontBaseline,
                 const NGPhysicalFragment& content,
                 NGLogicalOffset* content_offset,
-                NGFragmentBuilder*) const;
+                NGFragmentBuilder*,
+                const NGBoxStrut&) const;
 
   // Add a fragment for an outside list marker when the list item has no line
   // boxes.
   // Returns the block size of the list marker.
   LayoutUnit AddToBoxWithoutLineBoxes(const NGConstraintSpace&,
+                                      FontBaseline,
                                       NGFragmentBuilder*) const;
+  LayoutUnit InlineOffset(const LayoutUnit marker_inline_size) const;
 
  private:
   bool IsImage() const;
-  LayoutUnit InlineOffset(const LayoutUnit marker_inline_size) const;
 
-  scoped_refptr<NGLayoutResult> Layout(const NGConstraintSpace&) const;
+  scoped_refptr<NGLayoutResult> Layout(const NGConstraintSpace&,
+                                       FontBaseline) const;
+  LayoutUnit ComputeIntrudedFloatOffset(const NGConstraintSpace&,
+                                        const NGFragmentBuilder*,
+                                        const NGBoxStrut&,
+                                        LayoutUnit) const;
 
   LayoutNGListMarker* marker_layout_object_;
 };

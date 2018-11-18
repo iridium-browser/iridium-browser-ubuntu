@@ -6,16 +6,16 @@
 
 #import <UIKit/UIKit.h>
 
+#include "base/bind.h"
 #include "base/files/file_path.h"
 #include "base/format_macros.h"
 #include "base/location.h"
 #include "base/logging.h"
-#import "base/mac/bind_objc_block.h"
 #import "base/mac/foundation_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/sequenced_task_runner.h"
 #include "base/strings/sys_string_conversions.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "base/threading/thread_restrictions.h"
 #import "ios/chrome/browser/sessions/session_ios.h"
 #import "ios/chrome/browser/sessions/session_window_ios.h"
@@ -82,7 +82,7 @@ NSString* const kRootObjectKey = @"root";  // Key for the root object.
 - (instancetype)init {
   scoped_refptr<base::SequencedTaskRunner> taskRunner =
       base::CreateSequencedTaskRunnerWithTraits(
-          {base::MayBlock(), base::TaskPriority::BACKGROUND,
+          {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
            base::TaskShutdownBehavior::BLOCK_SHUTDOWN});
   return [self initWithTaskRunner:taskRunner];
 }
@@ -168,7 +168,7 @@ NSString* const kRootObjectKey = @"root";  // Key for the root object.
                               completion:(base::OnceClosure)callback {
   NSString* sessionPath = [[self class] sessionPathForDirectory:directory];
   _taskRunner->PostTaskAndReply(
-      FROM_HERE, base::BindBlockArc(^{
+      FROM_HERE, base::BindOnce(^{
         base::AssertBlockingAllowed();
         NSFileManager* fileManager = [NSFileManager defaultManager];
         if (![fileManager fileExistsAtPath:sessionPath])
@@ -202,7 +202,7 @@ NSString* const kRootObjectKey = @"root";  // Key for the root object.
 
   @try {
     NSData* sessionData = [NSKeyedArchiver archivedDataWithRootObject:session];
-    _taskRunner->PostTask(FROM_HERE, base::BindBlockArc(^{
+    _taskRunner->PostTask(FROM_HERE, base::BindOnce(^{
                             [self performSaveSessionData:sessionData
                                              sessionPath:sessionPath];
                           }));

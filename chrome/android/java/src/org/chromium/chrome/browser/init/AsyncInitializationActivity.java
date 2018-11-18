@@ -6,7 +6,6 @@ package org.chromium.chrome.browser.init;
 
 import android.annotation.SuppressLint;
 import android.annotation.TargetApi;
-import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.content.res.Configuration;
@@ -41,7 +40,6 @@ import org.chromium.chrome.browser.IntentHandler;
 import org.chromium.chrome.browser.LaunchIntentDispatcher;
 import org.chromium.chrome.browser.WarmupManager;
 import org.chromium.chrome.browser.firstrun.FirstRunFlowSequencer;
-import org.chromium.chrome.browser.metrics.UmaUtils;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tabmodel.DocumentModeAssassin;
 import org.chromium.chrome.browser.upgrade.UpgradeActivity;
@@ -86,6 +84,8 @@ public abstract class AsyncInitializationActivity extends AppCompatActivity impl
     private boolean mStartupDelayed;
     private boolean mFirstDrawComplete;
 
+    private Runnable mOnInflationCompleteCallback;
+
     public AsyncInitializationActivity() {
         mHandler = new Handler();
     }
@@ -119,6 +119,10 @@ public abstract class AsyncInitializationActivity extends AppCompatActivity impl
             int targetSmallestScreenWidthDp =
                     DisplayUtil.pxToDp(display, DisplayUtil.getSmallestWidth(display));
             Configuration config = new Configuration();
+            // Pre-Android O, fontScale gets initialized to 1 in the constructor. Set it to 0 so
+            // that applyOverrideConfiguration() does not interpret it as an overridden value.
+            // https://crbug.com/834191
+            config.fontScale = 0;
             config.smallestScreenWidthDp = targetSmallestScreenWidthDp;
             applyOverrideConfiguration(config);
         }
@@ -128,26 +132,27 @@ public abstract class AsyncInitializationActivity extends AppCompatActivity impl
     @Override
     public void preInflationStartup() {
         mIsTablet = DeviceFormFactor.isNonMultiDisplayContextOnTablet(this);
-        mHadWarmStart = LibraryLoader.isInitialized();
+        mHadWarmStart = LibraryLoader.getInstance().isInitialized();
     }
 
     @Override
-    public final void setContentViewAndLoadLibrary() {
-        // Start loading libraries before setContentView(). This "hides" library loading behind
-        // UI inflation and prevents stalling UI thread. See crbug.com/796957 for details.
-        // Note that for optimal performance AsyncInitTaskRunner.startBackgroundTasks() needs
-        // to start warmup renderer only after library is loaded.
+    public final void setContentViewAndLoadLibrary(Runnable onInflationCompleteCallback) {
+        // Start loading libraries before triggerLayoutInflation(). This "hides" library loading
+        // behind UI inflation and prevents stalling UI thread. See https://crbug.com/796957 for
+        // details. Note that for optimal performance AsyncInitTaskRunner.startBackgroundTasks()
+        // needs to start warmup renderer only after library is loaded.
 
         if (!mStartupDelayed) {
             // Kick off long running IO tasks that can be done in parallel.
             mNativeInitializationController.startBackgroundTasks(shouldAllocateChildConnection());
         }
 
-        setContentView();
+        mOnInflationCompleteCallback = onInflationCompleteCallback;
+        triggerLayoutInflation();
         if (mLaunchBehindWorkaround != null) mLaunchBehindWorkaround.onSetContentView();
     }
 
-    /** Controls the parameter of {@link NativeInitializationController#startBackgroundTasks()}.*/
+    /** Controls the parameter of {@link NativeInitializationController#startBackgroundTasks}.*/
     @VisibleForTesting
     public boolean shouldAllocateChildConnection() {
         return true;
@@ -228,7 +233,7 @@ public abstract class AsyncInitializationActivity extends AppCompatActivity impl
 
     /**
      * Extending classes should override {@link AsyncInitializationActivity#preInflationStartup()},
-     * {@link AsyncInitializationActivity#setContentView()} and
+     * {@link AsyncInitializationActivity#triggerLayoutInflation()} and
      * {@link AsyncInitializationActivity#postInflationStartup()} instead of this call which will
      * be called on that order.
      */
@@ -252,7 +257,7 @@ public abstract class AsyncInitializationActivity extends AppCompatActivity impl
     }
 
     private final void onCreateInternal(Bundle savedInstanceState) {
-        UmaUtils.recordActivityStartTime();
+        initializeStartupMetrics();
         setIntent(validateIntent(getIntent()));
 
         @LaunchIntentDispatcher.Action
@@ -305,6 +310,12 @@ public abstract class AsyncInitializationActivity extends AppCompatActivity impl
         mStartupDelayed = shouldDelayBrowserStartup();
         ChromeBrowserInitializer.getInstance(this).handlePreNativeStartup(this);
     }
+
+    /**
+     * This method is called very early on during Activity.onCreate. Subclassing activities should
+     * use this to initialize their tracking metrics including things like Activity start time.
+     */
+    protected void initializeStartupMetrics() {}
 
     private void abortLaunch() {
         super.onCreate(null);
@@ -477,7 +488,6 @@ public abstract class AsyncInitializationActivity extends AppCompatActivity impl
         mNativeInitializationController.onActivityResult(requestCode, resultCode, data);
     }
 
-    @CallSuper
     @Override
     public final void onCreateWithNative() {
         try {
@@ -553,11 +563,12 @@ public abstract class AsyncInitializationActivity extends AppCompatActivity impl
     @CallSuper
     @Override
     public boolean onActivityResultWithNative(int requestCode, int resultCode, Intent intent) {
-        if (mWindowAndroid != null) {
-            return mWindowAndroid.onActivityResult(requestCode, resultCode, intent);
-        } else {
-            return false;
+        if (mWindowAndroid != null
+                && mWindowAndroid.onActivityResult(requestCode, resultCode, intent)) {
+            return true;
         }
+        super.onActivityResult(requestCode, resultCode, intent);
+        return false;
     }
 
     @CallSuper
@@ -565,7 +576,7 @@ public abstract class AsyncInitializationActivity extends AppCompatActivity impl
     public void onRequestPermissionsResult(
             int requestCode, String[] permissions, int[] grantResults) {
         if (mWindowAndroid != null) {
-            if (mWindowAndroid.onRequestPermissionsResult(requestCode, permissions, grantResults)) {
+            if (mWindowAndroid.handlePermissionResult(requestCode, permissions, grantResults)) {
                 return;
             }
         }
@@ -661,22 +672,29 @@ public abstract class AsyncInitializationActivity extends AppCompatActivity impl
                     removeWindowBackground = false;
                 }
             }
-        } catch (SettingNotFoundException e) {
-            // Window background is removed if an exception occurs.
-        } catch (NoSuchFieldException e) {
-            // Window background is removed if an exception occurs.
-        } catch (IllegalAccessException e) {
-            // Window background is removed if an exception occurs.
-        } catch (IllegalArgumentException e) {
+        } catch (SettingNotFoundException | NoSuchFieldException | IllegalAccessException
+                | IllegalArgumentException ignore) {
             // Window background is removed if an exception occurs.
         }
         if (removeWindowBackground) getWindow().setBackgroundDrawable(null);
     }
 
     /**
-     * Extending classes should implement this and call {@link Activity#setContentView(int)} in it.
+     * Extending classes should implement this, inflate the layout, set the content view and then
+     * call {@link #onInitialLayoutInflationComplete}.
      */
-    protected abstract void setContentView();
+    protected abstract void triggerLayoutInflation();
+
+    /**
+     * Once inflation is complete, this runs the callback to inform ChromeBrowserInitializer of this
+     * and to start the post-inflation pre-native startup.
+     */
+    @CallSuper
+    protected void onInitialLayoutInflationComplete() {
+        if (mOnInflationCompleteCallback == null) return;
+        mOnInflationCompleteCallback.run();
+        mOnInflationCompleteCallback = null;
+    }
 
     /**
      * Lollipop (pre-MR1) makeTaskLaunchBehind() workaround.

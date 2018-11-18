@@ -10,17 +10,21 @@
 
 #include "base/macros.h"
 #include "base/observer_list.h"
+#include "base/scoped_observer.h"
 #include "chrome/browser/command_observer.h"
 #include "chrome/browser/ui/toolbar/app_menu_icon_controller.h"
 #include "chrome/browser/ui/toolbar/back_forward_menu_model.h"
+#include "chrome/browser/ui/views/frame/browser_root_view.h"
 #include "chrome/browser/ui/views/frame/toolbar_button_provider.h"
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
+#include "chrome/browser/ui/views/profiles/avatar_toolbar_button.h"
 #include "chrome/browser/ui/views/toolbar/browser_actions_container.h"
-#include "chrome/browser/upgrade_observer.h"
+#include "chrome/browser/upgrade_detector/upgrade_observer.h"
 #include "components/prefs/pref_member.h"
 #include "components/translate/core/browser/translate_step.h"
 #include "components/translate/core/common/translate_errors.h"
 #include "ui/base/accelerators/accelerator.h"
+#include "ui/base/material_design/material_design_controller_observer.h"
 #include "ui/views/accessible_pane_view.h"
 #include "ui/views/controls/button/menu_button.h"
 #include "ui/views/controls/button/menu_button_listener.h"
@@ -34,6 +38,7 @@
 #endif  // defined(OS_CHROMEOS)
 
 class AppMenuButton;
+class AvatarToolbarButton;
 class BrowserAppMenuButton;
 class Browser;
 class HomeButton;
@@ -42,6 +47,10 @@ class ToolbarButton;
 
 namespace bookmarks {
 class BookmarkBubbleObserver;
+}
+
+namespace media_router {
+class CastToolbarButton;
 }
 
 // The Browser Window's toolbar.
@@ -54,12 +63,14 @@ class ToolbarView : public views::AccessiblePaneView,
                     public views::ButtonListener,
                     public AppMenuIconController::Delegate,
                     public UpgradeObserver,
-                    public ToolbarButtonProvider {
+                    public ToolbarButtonProvider,
+                    public BrowserRootView::DropTarget,
+                    public ui::MaterialDesignControllerObserver {
  public:
   // The view class name.
   static const char kViewClassName[];
 
-  explicit ToolbarView(Browser* browser);
+  explicit ToolbarView(Browser* browser, BrowserView* browser_view);
   ~ToolbarView() override;
 
   // Create the contents of the Browser Toolbar.
@@ -85,6 +96,7 @@ class ToolbarView : public views::AccessiblePaneView,
 #if defined(OS_CHROMEOS)
   void ShowIntentPickerBubble(
       std::vector<IntentPickerBubbleView::AppInfo> app_info,
+      bool disable_stay_in_chrome,
       IntentPickerResponse callback);
 #endif  // defined(OS_CHROMEOS)
 
@@ -105,7 +117,8 @@ class ToolbarView : public views::AccessiblePaneView,
   ToolbarButton* back_button() const { return back_; }
   ReloadButton* reload_button() const { return reload_; }
   LocationBarView* location_bar() const { return location_bar_; }
-  ToolbarButton* avatar_button() const { return avatar_; }
+  media_router::CastToolbarButton* cast_button() const { return cast_; }
+  AvatarToolbarButton* avatar_button() const { return avatar_; }
   BrowserAppMenuButton* app_menu_button() const { return app_menu_button_; }
   HomeButton* home_button() const { return home_; }
   AppMenuIconController* app_menu_icon_controller() {
@@ -154,6 +167,7 @@ class ToolbarView : public views::AccessiblePaneView,
   gfx::Size CalculatePreferredSize() const override;
   gfx::Size GetMinimumSize() const override;
   void Layout() override;
+  void OnPaintBackground(gfx::Canvas* canvas) override;
   void OnThemeChanged() override;
   const char* GetClassName() const override;
   bool AcceleratorPressed(const ui::Accelerator& acc) override;
@@ -163,6 +177,9 @@ class ToolbarView : public views::AccessiblePaneView,
   // AccessiblePaneView:
   bool SetPaneFocusAndFocusDefault() override;
   void RemovePaneFocus() override;
+
+  // ui::MaterialDesignControllerObserver:
+  void OnMdModeChanged() override;
 
   bool is_display_mode_normal() const {
     return display_mode_ == DISPLAYMODE_NORMAL;
@@ -183,9 +200,16 @@ class ToolbarView : public views::AccessiblePaneView,
 
   // ToolbarButtonProvider:
   BrowserActionsContainer* GetBrowserActionsContainer() override;
+  PageActionIconContainerView* GetPageActionIconContainerView() override;
   AppMenuButton* GetAppMenuButton() override;
+  gfx::Rect GetFindBarBoundingBox(int contents_height) const override;
   void FocusToolbar() override;
   views::AccessiblePaneView* GetAsAccessiblePaneView() override;
+
+  // BrowserRootView::DropTarget
+  BrowserRootView::DropIndex GetDropIndex(
+      const ui::DropTargetEvent& event) override;
+  views::View* GetViewForDrop() override;
 
   // Used to avoid duplicating the near-identical logic of
   // ToolbarView::CalculatePreferredSize() and ToolbarView::GetMinimumSize().
@@ -217,10 +241,12 @@ class ToolbarView : public views::AccessiblePaneView,
   HomeButton* home_ = nullptr;
   LocationBarView* location_bar_ = nullptr;
   BrowserActionsContainer* browser_actions_ = nullptr;
-  ToolbarButton* avatar_ = nullptr;
+  media_router::CastToolbarButton* cast_ = nullptr;
+  AvatarToolbarButton* avatar_ = nullptr;
   BrowserAppMenuButton* app_menu_button_ = nullptr;
 
   Browser* const browser_;
+  BrowserView* const browser_view_;
 
   AppMenuIconController app_menu_icon_controller_;
 
@@ -229,6 +255,10 @@ class ToolbarView : public views::AccessiblePaneView,
 
   // The display mode used when laying out the toolbar.
   const DisplayMode display_mode_;
+
+  ScopedObserver<ui::MaterialDesignController,
+                 ui::MaterialDesignControllerObserver>
+      md_observer_{this};
 
   // Whether this toolbar has been initialized.
   bool initialized_ = false;

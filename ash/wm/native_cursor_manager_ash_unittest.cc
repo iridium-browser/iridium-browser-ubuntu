@@ -8,12 +8,14 @@
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/wm/cursor_manager_test_api.h"
+#include "base/test/scoped_feature_list.h"
 #include "ui/aura/test/aura_test_utils.h"
 #include "ui/aura/test/test_window_delegate.h"
 #include "ui/aura/test/test_windows.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/base/cursor/image_cursors.h"
+#include "ui/display/display_switches.h"
 #include "ui/display/manager/display_manager.h"
 #include "ui/display/screen.h"
 #include "ui/display/test/display_manager_test_api.h"
@@ -138,37 +140,6 @@ TEST_F(NativeCursorManagerAshTest, FractionalScale) {
   // Cursor should use the resource scale factor.
   UpdateDisplay("800x100*1.25");
   EXPECT_EQ(1.0f, test_api.GetCurrentCursor().device_scale_factor());
-}
-
-TEST_F(NativeCursorManagerAshTest, UIScaleShouldNotChangeCursor) {
-  int64_t display_id = display::Screen::GetScreen()->GetPrimaryDisplay().id();
-  display::Display::SetInternalDisplayId(display_id);
-
-  ::wm::CursorManager* cursor_manager = Shell::Get()->cursor_manager();
-  CursorManagerTestApi test_api(cursor_manager);
-
-  display::test::DisplayManagerTestApi(Shell::Get()->display_manager())
-      .SetDisplayUIScale(display_id, 0.5f);
-  EXPECT_EQ(
-      1.0f,
-      display::Screen::GetScreen()->GetPrimaryDisplay().device_scale_factor());
-  EXPECT_EQ(1.0f, test_api.GetCurrentCursor().device_scale_factor());
-
-  display::test::DisplayManagerTestApi(Shell::Get()->display_manager())
-      .SetDisplayUIScale(display_id, 1.0f);
-
-  // 2x display should keep using 2x cursor regardless of the UI scale.
-  UpdateDisplay("800x800*2");
-  EXPECT_EQ(
-      2.0f,
-      display::Screen::GetScreen()->GetPrimaryDisplay().device_scale_factor());
-  EXPECT_EQ(2.0f, test_api.GetCurrentCursor().device_scale_factor());
-  display::test::DisplayManagerTestApi(Shell::Get()->display_manager())
-      .SetDisplayUIScale(display_id, 2.0f);
-  EXPECT_EQ(
-      1.0f,
-      display::Screen::GetScreen()->GetPrimaryDisplay().device_scale_factor());
-  EXPECT_EQ(2.0f, test_api.GetCurrentCursor().device_scale_factor());
 }
 
 }  // namespace ash

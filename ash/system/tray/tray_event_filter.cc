@@ -6,9 +6,8 @@
 
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/shell.h"
-#include "ash/shell_port.h"
 #include "ash/system/tray/tray_background_view.h"
-#include "ash/system/tray/tray_bubble_wrapper.h"
+#include "ash/system/tray/tray_bubble_base.h"
 #include "ash/wm/container_finder.h"
 #include "ash/wm/tablet_mode/tablet_mode_controller.h"
 #include "ui/aura/window.h"
@@ -20,36 +19,36 @@ namespace ash {
 TrayEventFilter::TrayEventFilter() = default;
 
 TrayEventFilter::~TrayEventFilter() {
-  DCHECK(wrappers_.empty());
+  DCHECK(bubbles_.empty());
 }
 
-void TrayEventFilter::AddWrapper(TrayBubbleWrapper* wrapper) {
-  bool was_empty = wrappers_.empty();
-  wrappers_.insert(wrapper);
-  if (was_empty && !wrappers_.empty()) {
-    ShellPort::Get()->AddPointerWatcher(this,
-                                        views::PointerWatcherEventTypes::BASIC);
-  }
+void TrayEventFilter::AddBubble(TrayBubbleBase* bubble) {
+  bool was_empty = bubbles_.empty();
+  bubbles_.insert(bubble);
+  if (was_empty && !bubbles_.empty())
+    Shell::Get()->AddPreTargetHandler(this);
 }
 
-void TrayEventFilter::RemoveWrapper(TrayBubbleWrapper* wrapper) {
-  wrappers_.erase(wrapper);
-  if (wrappers_.empty())
-    ShellPort::Get()->RemovePointerWatcher(this);
+void TrayEventFilter::RemoveBubble(TrayBubbleBase* bubble) {
+  bubbles_.erase(bubble);
+  if (bubbles_.empty())
+    Shell::Get()->RemovePreTargetHandler(this);
 }
 
-void TrayEventFilter::OnPointerEventObserved(
-    const ui::PointerEvent& event,
-    const gfx::Point& location_in_screen,
-    gfx::NativeView target) {
-  if (event.type() == ui::ET_POINTER_DOWN)
-    ProcessPressedEvent(location_in_screen, target);
+void TrayEventFilter::OnMouseEvent(ui::MouseEvent* event) {
+  if (event->type() == ui::ET_MOUSE_PRESSED)
+    ProcessPressedEvent(*event);
 }
 
-void TrayEventFilter::ProcessPressedEvent(const gfx::Point& location_in_screen,
-                                          gfx::NativeView target) {
+void TrayEventFilter::OnTouchEvent(ui::TouchEvent* event) {
+  if (event->type() == ui::ET_TOUCH_PRESSED)
+    ProcessPressedEvent(*event);
+}
+
+void TrayEventFilter::ProcessPressedEvent(const ui::LocatedEvent& event) {
   // The hit target window for the virtual keyboard isn't the same as its
   // views::Widget.
+  aura::Window* target = static_cast<aura::Window*>(event.target());
   const views::Widget* target_widget =
       views::Widget::GetTopLevelWidgetForNativeView(target);
   const aura::Window* container =
@@ -73,17 +72,18 @@ void TrayEventFilter::ProcessPressedEvent(const gfx::Point& location_in_screen,
   }
 
   std::set<TrayBackgroundView*> trays;
-  // Check the boundary for all wrappers, and do not handle the event if it
-  // happens inside of any of those wrappers.
-  for (std::set<TrayBubbleWrapper*>::const_iterator iter = wrappers_.begin();
-       iter != wrappers_.end(); ++iter) {
-    const TrayBubbleWrapper* wrapper = *iter;
-    const views::Widget* bubble_widget = wrapper->bubble_widget();
+  // Check the boundary for all bubbles, and do not handle the event if it
+  // happens inside of any of those bubbles.
+  const gfx::Point screen_location =
+      event.target() ? event.target()->GetScreenLocation(event)
+                     : event.root_location();
+  for (const TrayBubbleBase* bubble : bubbles_) {
+    const views::Widget* bubble_widget = bubble->GetBubbleWidget();
     if (!bubble_widget)
       continue;
 
     gfx::Rect bounds = bubble_widget->GetWindowBoundsInScreen();
-    bounds.Inset(wrapper->bubble_view()->GetBorderInsets());
+    bounds.Inset(bubble->GetBubbleView()->GetBorderInsets());
     // System tray can be dragged to show the bubble if it is in tablet mode.
     // During the drag, the bubble's logical bounds can extend outside of the
     // work area, but its visual bounds are only within the work area. Restrict
@@ -97,24 +97,21 @@ void TrayEventFilter::ProcessPressedEvent(const gfx::Point& location_in_screen,
         bubble_container_id == kShellWindowId_SettingBubbleContainer) {
       bounds.Intersect(bubble_widget->GetWorkAreaBoundsInScreen());
     }
-    if (bounds.Contains(location_in_screen))
+    if (bounds.Contains(screen_location))
       continue;
-    if (wrapper->tray()) {
+    if (bubble->GetTray()) {
       // If the user clicks on the parent tray, don't process the event here,
       // let the tray logic handle the event and determine show/hide behavior.
-      bounds = wrapper->tray()->GetBoundsInScreen();
-      if (bounds.Contains(location_in_screen))
+      bounds = bubble->GetTray()->GetBoundsInScreen();
+      if (bounds.Contains(screen_location))
         continue;
     }
-    trays.insert((*iter)->tray());
+    trays.insert(bubble->GetTray());
   }
 
-  // Close all bubbles other than the one a user clicked on the tray
-  // or its bubble.
-  for (std::set<TrayBackgroundView*>::iterator iter = trays.begin();
-       iter != trays.end(); ++iter) {
-    (*iter)->ClickedOutsideBubble();
-  }
+  // Close all bubbles other than the one that the user clicked on.
+  for (TrayBackgroundView* tray_background_view : trays)
+    tray_background_view->ClickedOutsideBubble();
 }
 
 }  // namespace ash

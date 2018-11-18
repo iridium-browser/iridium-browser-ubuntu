@@ -53,12 +53,20 @@ class SocketWrapperTestImpl : public UDPSocket::SocketWrapper {
       net::IOBuffer* buf,
       int buf_len,
       const net::IPEndPoint& dest_addr,
-      const net::CompletionCallback& callback,
+      net::CompletionOnceCallback callback,
       const net::NetworkTrafficAnnotationTag& traffic_annotation) override {
     NOTREACHED();
     return net::ERR_NOT_IMPLEMENTED;
   }
   int SetBroadcast(bool broadcast) override {
+    NOTREACHED();
+    return net::ERR_NOT_IMPLEMENTED;
+  }
+  int SetSendBufferSize(int send_buffer_size) override {
+    NOTREACHED();
+    return net::ERR_NOT_IMPLEMENTED;
+  }
+  int SetReceiveBufferSize(int receive_buffer_size) override {
     NOTREACHED();
     return net::ERR_NOT_IMPLEMENTED;
   }
@@ -73,7 +81,7 @@ class SocketWrapperTestImpl : public UDPSocket::SocketWrapper {
   int Write(
       net::IOBuffer* buf,
       int buf_len,
-      const net::CompletionCallback& callback,
+      net::CompletionOnceCallback callback,
       const net::NetworkTrafficAnnotationTag& traffic_annotation) override {
     NOTREACHED();
     return net::ERR_NOT_IMPLEMENTED;
@@ -81,7 +89,7 @@ class SocketWrapperTestImpl : public UDPSocket::SocketWrapper {
   int RecvFrom(net::IOBuffer* buf,
                int buf_len,
                net::IPEndPoint* address,
-               const net::CompletionCallback& callback) override {
+               net::CompletionOnceCallback callback) override {
     NOTREACHED();
     return net::ERR_NOT_IMPLEMENTED;
   }
@@ -116,7 +124,7 @@ class HangingUDPSocket : public SocketWrapperTestImpl {
       net::IOBuffer* buf,
       int buf_len,
       const net::IPEndPoint& address,
-      const net::CompletionCallback& callback,
+      net::CompletionOnceCallback callback,
       const net::NetworkTrafficAnnotationTag& traffic_annotation) override {
     EXPECT_EQ(expected_data_,
               std::vector<unsigned char>(buf->data(), buf->data() + buf_len));
@@ -124,7 +132,7 @@ class HangingUDPSocket : public SocketWrapperTestImpl {
       return net::OK;
     pending_io_buffers_.push_back(buf);
     pending_io_buffer_lengths_.push_back(buf_len);
-    pending_send_requests_.push_back(callback);
+    pending_send_requests_.push_back(std::move(callback));
     return net::ERR_IO_PENDING;
   }
 
@@ -143,8 +151,8 @@ class HangingUDPSocket : public SocketWrapperTestImpl {
   // Completes all pending requests.
   void CompleteAllPendingRequests() {
     should_complete_requests_ = true;
-    for (auto request : pending_send_requests_) {
-      request.Run(net::OK);
+    for (auto& request : pending_send_requests_) {
+      std::move(request).Run(net::OK);
     }
     pending_send_requests_.clear();
   }
@@ -154,7 +162,7 @@ class HangingUDPSocket : public SocketWrapperTestImpl {
   bool should_complete_requests_ = false;
   std::vector<net::IOBuffer*> pending_io_buffers_;
   std::vector<int> pending_io_buffer_lengths_;
-  std::vector<net::CompletionCallback> pending_send_requests_;
+  std::vector<net::CompletionOnceCallback> pending_send_requests_;
 };
 
 // A Mock UDPSocket that returns 0 byte read.
@@ -169,7 +177,7 @@ class ZeroByteReadUDPSocket : public SocketWrapperTestImpl {
   int RecvFrom(net::IOBuffer* buf,
                int buf_len,
                net::IPEndPoint* address,
-               const net::CompletionCallback& callback) override {
+               net::CompletionOnceCallback callback) override {
     *address = GetLocalHostWithAnyPort();
     return 0;
   }
@@ -213,7 +221,7 @@ TEST_F(UDPSocketTest, Settings) {
 
   test::UDPSocketTestHelper helper(&socket_ptr);
   net::IPEndPoint local_addr;
-  mojom::UDPSocketOptionsPtr options = network::mojom::UDPSocketOptions::New();
+  mojom::UDPSocketOptionsPtr options = mojom::UDPSocketOptions::New();
   options->send_buffer_size = 1024;
   options->receive_buffer_size = 2048;
   ASSERT_EQ(net::OK,
@@ -279,9 +287,15 @@ TEST_F(UDPSocketTest, TestUnexpectedSequences) {
 
   // Now these Setters should not work before Bind().
   EXPECT_EQ(net::ERR_UNEXPECTED, helper.SetBroadcastSync(true));
+  EXPECT_EQ(net::ERR_UNEXPECTED, helper.SetSendBufferSizeSync(4096));
+  EXPECT_EQ(net::ERR_UNEXPECTED, helper.SetReceiveBufferSizeSync(4096));
 
   // Now Bind() the socket.
   ASSERT_EQ(net::OK, helper.BindSync(local_addr, nullptr, &local_addr));
+
+  // Setting the buffer size should now succeed.
+  EXPECT_EQ(net::OK, helper.SetSendBufferSizeSync(4096));
+  EXPECT_EQ(net::OK, helper.SetReceiveBufferSizeSync(4096));
 
   // Calling Connect() after Bind() should fail because they can't be both used.
   ASSERT_EQ(net::ERR_SOCKET_IS_CONNECTED,
@@ -667,7 +681,7 @@ TEST_F(UDPSocketTest, MAYBE_JoinMulticastGroup) {
 
   test::UDPSocketTestHelper helper(&socket_ptr);
 
-  mojom::UDPSocketOptionsPtr options = network::mojom::UDPSocketOptions::New();
+  mojom::UDPSocketOptionsPtr options = mojom::UDPSocketOptions::New();
 #if defined(OS_FUCHSIA)
   // Fuchsia currently doesn't support automatic interface selection for
   // multicast, so interface index needs to be set explicitly.
@@ -742,7 +756,7 @@ TEST_F(UDPSocketTest, ErrorHappensDuringSocketOptionsConfiguration) {
   test::UDPSocketTestHelper helper(&socket_ptr);
 
   // Invalid options.
-  mojom::UDPSocketOptionsPtr options = network::mojom::UDPSocketOptions::New();
+  mojom::UDPSocketOptionsPtr options = mojom::UDPSocketOptions::New();
   options->multicast_time_to_live = 256;
 
   net::IPEndPoint local_addr;
@@ -750,8 +764,7 @@ TEST_F(UDPSocketTest, ErrorHappensDuringSocketOptionsConfiguration) {
             helper.ConnectSync(server_addr, std::move(options), &local_addr));
 
   // It's legal to retry Connect() with valid options.
-  mojom::UDPSocketOptionsPtr valid_options =
-      network::mojom::UDPSocketOptions::New();
+  mojom::UDPSocketOptionsPtr valid_options = mojom::UDPSocketOptions::New();
   valid_options->multicast_time_to_live = 255;
   ASSERT_EQ(net::OK,
             helper.ConnectSync(server_addr, std::move(options), &local_addr));

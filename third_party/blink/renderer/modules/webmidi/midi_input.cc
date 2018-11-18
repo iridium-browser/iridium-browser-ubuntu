@@ -99,9 +99,9 @@ void MIDIInput::DidReceiveMIDIData(unsigned port_index,
   if (data[0] == 0xf0 && !midiAccess()->sysexEnabled())
     return;
   DOMUint8Array* array = DOMUint8Array::Create(data, length);
-  DispatchEvent(MIDIMessageEvent::Create(time_stamp, array));
+  DispatchEvent(*MIDIMessageEvent::Create(time_stamp, array));
 
-  UseCounter::Count(*ToDocument(GetExecutionContext()),
+  UseCounter::Count(*To<Document>(GetExecutionContext()),
                     WebFeature::kMIDIMessageEvent);
 }
 

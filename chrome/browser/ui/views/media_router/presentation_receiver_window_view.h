@@ -25,6 +25,10 @@ class PresentationReceiverWindowDelegate;
 class PresentationReceiverWindowFrame;
 class ToolbarModelImpl;
 
+#if defined(OS_CHROMEOS)
+class FullscreenWindowObserver;
+#endif
+
 // This class implements the View portion of PresentationReceiverWindow.  It
 // contains a WebView for displaying the receiver page and a LocationBarView for
 // displaying the URL.
@@ -46,7 +50,6 @@ class PresentationReceiverWindowView final
 
   LocationBarView* location_bar_view() { return location_bar_view_; }
 
- private:
   // PresentationReceiverWindow overrides.
   void Close() final;
   bool IsWindowActive() const final;
@@ -89,11 +92,15 @@ class PresentationReceiverWindowView final
   void UpdateExclusiveAccessExitBubbleContent(
       const GURL& url,
       ExclusiveAccessBubbleType bubble_type,
-      ExclusiveAccessBubbleHideCallback bubble_first_hide_callback) final;
+      ExclusiveAccessBubbleHideCallback bubble_first_hide_callback,
+      bool force_update) final;
   void OnExclusiveAccessUserInput() final;
   content::WebContents* GetActiveWebContents() final;
   void UnhideDownloadShelf() final;
   void HideDownloadShelf() final;
+  bool ShouldHideUIForFullscreen() const final;
+  ExclusiveAccessBubbleViews* GetExclusiveAccessBubble() final;
+  bool CanUserExitFullscreen() const final;
 
   // ExclusiveAccessBubbleViewsContext overrides.
   ExclusiveAccessManager* GetExclusiveAccessManager() final;
@@ -111,7 +118,9 @@ class PresentationReceiverWindowView final
   bool GetAcceleratorForCommandId(int command_id,
                                   ui::Accelerator* accelerator) const final;
 
-  void EnterFullscreen();
+ private:
+  // Updates the UI in response to a change to fullscreen state.
+  void OnFullscreenChanged();
 
   PresentationReceiverWindowFrame* const frame_;
   PresentationReceiverWindowDelegate* const delegate_;
@@ -124,7 +133,6 @@ class PresentationReceiverWindowView final
   std::unique_ptr<ExclusiveAccessBubbleViews> exclusive_access_bubble_;
 
 #if defined(OS_CHROMEOS)
-  class FullscreenWindowObserver;
   std::unique_ptr<FullscreenWindowObserver> window_observer_;
 #endif
 

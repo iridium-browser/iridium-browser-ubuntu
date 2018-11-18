@@ -12,14 +12,14 @@
 #include "base/android/path_utils.h"
 #include "base/big_endian.h"
 #include "base/files/file.h"
-#include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "third_party/android_opengl/etc1/etc1.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -386,7 +386,7 @@ void ThumbnailCache::CompressThumbnailIfNecessary(
       raw_data_size, ui_resource_provider_->SupportsETC1NonPowerOfTwo());
 
   base::PostTaskWithTraits(FROM_HERE,
-                           {base::TaskPriority::BACKGROUND,
+                           {base::TaskPriority::BEST_EFFORT,
                             base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
                            base::Bind(&ThumbnailCache::CompressionTask, bitmap,
                                       encoded_size, post_compression_task));
@@ -435,8 +435,8 @@ void ThumbnailCache::MakeSpaceForNewItemIfNecessary(TabId tab_id) {
          riter++) {
       if (cache_.Get(*riter)) {
         key_to_remove = *riter;
-        break;
         found_key_to_remove = true;
+        break;
       }
     }
   }
@@ -555,8 +555,8 @@ void ThumbnailCache::WriteTask(TabId tab_id,
   if (!success)
     base::DeleteFile(file_path, false);
 
-  content::BrowserThread::PostTask(
-      content::BrowserThread::UI, FROM_HERE, post_write_task);
+  base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI},
+                           post_write_task);
 }
 
 void ThumbnailCache::PostWriteTask() {
@@ -603,9 +603,8 @@ void ThumbnailCache::CompressionTask(
     }
   }
 
-  content::BrowserThread::PostTask(
-      content::BrowserThread::UI,
-      FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {content::BrowserThread::UI},
       base::Bind(post_compression_task, std::move(compressed_data),
                  content_size));
 }
@@ -769,13 +768,12 @@ void ThumbnailCache::ReadTask(
 
   if (decompress) {
     base::PostTaskWithTraits(
-        FROM_HERE, {base::TaskPriority::BACKGROUND},
+        FROM_HERE, {base::TaskPriority::BEST_EFFORT},
         base::Bind(post_read_task, std::move(compressed_data), scale,
                    content_size));
   } else {
-    content::BrowserThread::PostTask(
-        content::BrowserThread::UI,
-        FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, {content::BrowserThread::UI},
         base::Bind(post_read_task, std::move(compressed_data), scale,
                    content_size));
   }
@@ -880,9 +878,8 @@ void ThumbnailCache::DecompressionTask(
     }
   }
 
-  content::BrowserThread::PostTask(
-      content::BrowserThread::UI,
-      FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {content::BrowserThread::UI},
       base::Bind(post_decompression_callback, success, raw_data_small));
 }
 

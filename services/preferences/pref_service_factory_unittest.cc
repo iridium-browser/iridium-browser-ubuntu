@@ -60,8 +60,8 @@ class ServiceTestClient : public service_manager::test::ServiceTestClient,
       const std::string& name,
       service_manager::mojom::PIDReceiverPtr pid_receiver) override {
     if (name == prefs::mojom::kServiceName) {
-      pref_service_context_.reset(new service_manager::ServiceContext(
-          service_factory_.Run(), std::move(request)));
+      pref_service_context_ = std::make_unique<service_manager::ServiceContext>(
+          service_factory_.Run(), std::move(request));
     } else if (name == "prefs_unittest_helper") {
       test_helper_service_context_ =
           std::make_unique<service_manager::ServiceContext>(
@@ -95,8 +95,8 @@ class PrefServiceFactoryTest : public service_manager::test::ServiceTest {
 
  protected:
   void SetUp() override {
-    above_user_prefs_pref_store_ = new ValueMapPrefStore();
-    below_user_prefs_pref_store_ = new ValueMapPrefStore();
+    above_user_prefs_pref_store_ = base::MakeRefCounted<ValueMapPrefStore>();
+    below_user_prefs_pref_store_ = base::MakeRefCounted<ValueMapPrefStore>();
     auto user_prefs = base::MakeRefCounted<InMemoryPrefStore>();
     PrefServiceFactory factory;
     service_factory_ = std::make_unique<InProcessPrefServiceFactory>();
@@ -442,8 +442,7 @@ TEST_F(PrefServiceFactoryTest, MultipleClients_SubPrefUpdates_Basic) {
         EXPECT_EQ(base::ASCIIToUTF16("hello"), out);
       },
       [](ScopedDictionaryPrefUpdate* update) {
-        (*update)->SetKey("key.for.string16",
-                          base::Value(base::ASCIIToUTF16("prefs!")));
+        (*update)->SetKey("key.for.string16", base::Value("prefs!"));
         base::string16 out;
         ASSERT_TRUE(
             (*update)->GetStringWithoutPathExpansion("key.for.string16", &out));
@@ -613,16 +612,16 @@ class IncognitoPrefServiceFactoryTest
         base::MakeRefCounted<InMemoryPrefStore>();
     scoped_refptr<PersistentPrefStore> underlay =
         base::MakeRefCounted<InMemoryPrefStore>();
-    const auto overlay_pref_names = GetOverlayPrefNames();
-    delegate->InitIncognitoUserPrefs(overlay, underlay, overlay_pref_names);
+    const auto persistent_pref_names = GetPersistentPrefNames();
+    delegate->InitIncognitoUserPrefs(overlay, underlay, persistent_pref_names);
     auto overlay_pref_store = base::MakeRefCounted<OverlayUserPrefStore>(
         overlay.get(), underlay.get());
-    for (auto* overlay_pref_name : overlay_pref_names)
-      overlay_pref_store->RegisterOverlayPref(overlay_pref_name);
+    for (auto* persistent_pref_name : persistent_pref_names)
+      overlay_pref_store->RegisterPersistentPref(persistent_pref_name);
     factory->set_user_prefs(std::move(overlay_pref_store));
   }
 
-  std::vector<const char*> GetOverlayPrefNames() {
+  std::vector<const char*> GetPersistentPrefNames() {
     if (GetParam())
       return {kInitialKey, kOtherInitialKey, kKey};
     return {};

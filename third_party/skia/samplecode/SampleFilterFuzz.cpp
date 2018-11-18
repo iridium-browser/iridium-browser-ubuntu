@@ -4,7 +4,7 @@
  * Use of this source code is governed by a BSD-style license that can be
  * found in the LICENSE file.
  */
-#include "SampleCode.h"
+#include "Sample.h"
 #include "Sk1DPathEffect.h"
 #include "Sk2DPathEffect.h"
 #include "SkAlphaThresholdFilter.h"
@@ -39,8 +39,10 @@
 #include "SkTableColorFilter.h"
 #include "SkTileImageFilter.h"
 #include "SkTypeface.h"
-#include "SkView.h"
 #include "SkXfermodeImageFilter.h"
+#if SK_SUPPORT_GPU
+#include "text/GrSDFMaskFilter.h"
+#endif
 #include <stdio.h>
 #include <time.h>
 
@@ -455,7 +457,11 @@ static sk_sp<SkPathEffect> make_path_effect(bool canBeNull = true) {
 
 static sk_sp<SkMaskFilter> make_mask_filter() {
     sk_sp<SkMaskFilter> maskFilter;
+#if SK_SUPPORT_GPU
+    switch (R(4)) {
+#else
     switch (R(3)) {
+#endif
         case 0:
             maskFilter = SkMaskFilter::MakeBlur(make_blur_style(), make_scalar(),
                                                 make_blur_mask_filter_respectctm());
@@ -469,7 +475,13 @@ static sk_sp<SkMaskFilter> make_mask_filter() {
             light.fSpecular = R(256);
             maskFilter = SkEmbossMaskFilter::Make(make_scalar(), light);
         }
+#if SK_SUPPORT_GPU
         case 2:
+            maskFilter = GrSDFMaskFilter::Make();
+        case 3:
+#else
+        case 2:
+#endif
         default:
             break;
     }
@@ -773,17 +785,16 @@ static void do_fuzz(SkCanvas* canvas) {
 
 //////////////////////////////////////////////////////////////////////////////
 
-class ImageFilterFuzzView : public SampleView {
+class ImageFilterFuzzView : public Sample {
 public:
     ImageFilterFuzzView() {
         this->setBGColor(0xFFDDDDDD);
     }
 
 protected:
-    // overrides from SkEventSink
-    virtual bool onQuery(SkEvent* evt) {
-        if (SampleCode::TitleQ(*evt)) {
-            SampleCode::TitleR(evt, "ImageFilterFuzzer");
+    virtual bool onQuery(Sample::Event* evt) {
+        if (Sample::TitleQ(*evt)) {
+            Sample::TitleR(evt, "ImageFilterFuzzer");
             return true;
         }
         return this->INHERITED::onQuery(evt);
@@ -798,10 +809,9 @@ protected:
     }
 
 private:
-    typedef SkView INHERITED;
+    typedef Sample INHERITED;
 };
 
 //////////////////////////////////////////////////////////////////////////////
 
-static SkView* MyFactory() { return new ImageFilterFuzzView; }
-static SkViewRegister reg(MyFactory);
+DEF_SAMPLE( return new ImageFilterFuzzView(); )

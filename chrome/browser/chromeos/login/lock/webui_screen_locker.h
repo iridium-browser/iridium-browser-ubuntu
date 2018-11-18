@@ -85,22 +85,18 @@ class WebUIScreenLocker : public WebUILoginView,
   content::WebContents* GetWebContents() override;
 
   // LoginDisplay::Delegate:
-  void CancelPasswordChangedFlow() override;
   base::string16 GetConnectedNetworkName() override;
   bool IsSigninInProgress() const override;
   void Login(const UserContext& user_context,
              const SigninSpecifics& specifics) override;
-  void MigrateUserData(const std::string& old_password) override;
   void OnSigninScreenReady() override;
   void OnStartEnterpriseEnrollment() override;
   void OnStartEnableDebuggingScreen() override;
-  void OnStartDemoModeSetupScreen() override;
   void OnStartKioskEnableScreen() override;
   void OnStartKioskAutolaunchScreen() override;
   void ShowWrongHWIDScreen() override;
   void ShowUpdateRequiredScreen() override;
   void ResetAutoLoginTimer() override;
-  void ResyncUserData() override;
   void Signout() override;
 
   // WidgetObserver:
@@ -116,8 +112,6 @@ class WebUIScreenLocker : public WebUILoginView,
   void RenderProcessGone(base::TerminationStatus status) override;
 
   // display::DisplayObserver:
-  void OnDisplayAdded(const display::Display& new_display) override;
-  void OnDisplayRemoved(const display::Display& old_display) override;
   void OnDisplayMetricsChanged(const display::Display& display,
                                uint32_t changed_metrics) override;
 

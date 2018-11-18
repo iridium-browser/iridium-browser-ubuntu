@@ -34,23 +34,22 @@ struct SkScalerContextRec;
 struct SkTestFontData {
     const SkScalar* fPoints;
     const unsigned char* fVerbs;
-    const unsigned* fCharCodes;
+    const SkUnichar* fCharCodes;
     const size_t fCharCodesCount;
     const SkFixed* fWidths;
     const SkPaint::FontMetrics& fMetrics;
     const char* fName;
     SkFontStyle fStyle;
-    sk_sp<SkTestFont> fCachedFont;
 };
 
 class SkTestFont : public SkRefCnt {
 public:
     SkTestFont(const SkTestFontData& );
     virtual ~SkTestFont();
-    int codeToIndex(SkUnichar charCode) const;
+    SkGlyphID glyphForUnichar(SkUnichar charCode) const;
     void init(const SkScalar* pts, const unsigned char* verbs);
 private:
-    const unsigned* fCharCodes;
+    const SkUnichar* fCharCodes;
     const size_t fCharCodesCount;
     const SkFixed* fWidths;
     const SkPaint::FontMetrics& fMetrics;
@@ -71,10 +70,15 @@ protected:
     SkScalerContext* onCreateScalerContext(const SkScalerContextEffects&,
                                            const SkDescriptor* desc) const override;
     void onFilterRec(SkScalerContextRec* rec) const override;
+    void getGlyphToUnicodeMap(SkUnichar* glyphToUnicode) const override;
     std::unique_ptr<SkAdvancedTypefaceMetrics> onGetAdvancedMetrics() const override;
 
     SkStreamAsset* onOpenStream(int* ttcIndex) const override {
         return nullptr;
+    }
+
+    sk_sp<SkTypeface> onMakeClone(const SkFontArguments& args) const override {
+        return sk_ref_sp(this);
     }
 
     void onGetFontDescriptor(SkFontDescriptor* desc, bool* isLocal) const override;
@@ -95,6 +99,12 @@ protected:
 
     int onGetVariationDesignPosition(SkFontArguments::VariationPosition::Coordinate coordinates[],
                                      int coordinateCount) const override
+    {
+        return 0;
+    }
+
+    int onGetVariationDesignParameters(SkFontParameters::Variation::Axis parameters[],
+                                       int parameterCount) const override
     {
         return 0;
     }

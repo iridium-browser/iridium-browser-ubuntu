@@ -18,7 +18,7 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "base/values.h"
-#include "chrome/browser/apps/app_load_service.h"
+#include "chrome/browser/apps/platform_apps/app_load_service.h"
 #include "chrome/browser/background/background_contents_service_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -298,8 +298,7 @@ std::vector<BackgroundContents*>
 BackgroundContentsService::GetBackgroundContents() const
 {
   std::vector<BackgroundContents*> contents;
-  for (BackgroundContentsMap::const_iterator it = contents_map_.begin();
-       it != contents_map_.end(); ++it)
+  for (auto it = contents_map_.begin(); it != contents_map_.end(); ++it)
     contents.push_back(it->second.contents);
   return contents;
 }
@@ -373,7 +372,7 @@ void BackgroundContentsService::Observe(
           content::Details<BackgroundContents>(details).ptr();
       Profile* profile = content::Source<Profile>(source).ptr();
       const std::string& appid = GetParentApplicationId(bgcontents);
-      ExtensionService* extension_service =
+      extensions::ExtensionService* extension_service =
           extensions::ExtensionSystem::Get(profile)->extension_service();
       // extension_service can be nullptr when running tests.
       if (extension_service) {
@@ -440,7 +439,7 @@ void BackgroundContentsService::OnExtensionLoaded(
     // app, then blow away registered urls in the pref.
     ShutdownAssociatedBackgroundContents(extension->id());
 
-    ExtensionService* service =
+    extensions::ExtensionService* service =
         extensions::ExtensionSystem::Get(browser_context)->extension_service();
     if (service && service->is_ready()) {
       // Now load the manifest-specified background page. If service isn't
@@ -562,8 +561,8 @@ void BackgroundContentsService::LoadBackgroundContentsFromPrefs(
       prefs_->GetDictionary(prefs::kRegisteredBackgroundContents);
   if (!contents)
     return;
-  ExtensionService* extensions_service =
-          extensions::ExtensionSystem::Get(profile)->extension_service();
+  extensions::ExtensionService* extensions_service =
+      extensions::ExtensionSystem::Get(profile)->extension_service();
   DCHECK(extensions_service);
   for (base::DictionaryValue::Iterator it(*contents);
        !it.IsAtEnd(); it.Advance()) {
@@ -637,7 +636,7 @@ void BackgroundContentsService::LoadBackgroundContentsFromDictionary(
     Profile* profile,
     const std::string& extension_id,
     const base::DictionaryValue* contents) {
-  ExtensionService* extensions_service =
+  extensions::ExtensionService* extensions_service =
       extensions::ExtensionSystem::Get(profile)->extension_service();
   DCHECK(extensions_service);
 
@@ -806,8 +805,7 @@ BackgroundContents* BackgroundContentsService::GetAppBackgroundContents(
 
 const std::string& BackgroundContentsService::GetParentApplicationId(
     BackgroundContents* contents) const {
-  for (BackgroundContentsMap::const_iterator it = contents_map_.begin();
-       it != contents_map_.end(); ++it) {
+  for (auto it = contents_map_.begin(); it != contents_map_.end(); ++it) {
     if (contents == it->second.contents)
       return it->first;
   }
@@ -815,15 +813,14 @@ const std::string& BackgroundContentsService::GetParentApplicationId(
 }
 
 void BackgroundContentsService::AddWebContents(
-    WebContents* new_contents,
+    std::unique_ptr<WebContents> new_contents,
     WindowOpenDisposition disposition,
     const gfx::Rect& initial_rect,
-    bool user_gesture,
     bool* was_blocked) {
   Browser* browser = chrome::FindLastActiveWithProfile(
       Profile::FromBrowserContext(new_contents->GetBrowserContext()));
   if (browser) {
-    chrome::AddWebContents(browser, nullptr, new_contents, disposition,
-                           initial_rect, user_gesture);
+    chrome::AddWebContents(browser, nullptr, std::move(new_contents),
+                           disposition, initial_rect);
   }
 }

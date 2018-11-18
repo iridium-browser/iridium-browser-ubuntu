@@ -10,7 +10,7 @@
 #include "base/macros.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/timer/elapsed_timer.h"
 #include "chrome/browser/media/router/presentation/local_presentation_manager.h"
@@ -24,22 +24,21 @@
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/web_contents_observer.h"
-#include "content/public/common/presentation_connection_message.h"
-#include "content/public/common/presentation_info.h"
 #include "content/public/test/browser_test_utils.h"
 #include "extensions/browser/script_executor.h"
 #include "mojo/public/cpp/bindings/binding.h"
 #include "net/base/filename_util.h"
 #include "testing/gmock/include/gmock/gmock.h"
-#include "third_party/blink/public/platform/modules/presentation/presentation.mojom.h"
+#include "third_party/blink/public/mojom/presentation/presentation.mojom.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
 #include "ui/views/widget/widget.h"
 #include "url/gurl.h"
 
-namespace {
+using testing::_;
+using testing::Invoke;
 
-using RenderFrameHostId = std::pair<int, int>;
+namespace {
 
 constexpr char kPresentationId[] = "test_id";
 const base::FilePath::StringPieceType kResourcePath =
@@ -51,7 +50,7 @@ base::RepeatingCallback<void(const std::string&)> GetNoopTitleChangeCallback() {
 
 base::FilePath GetResourceFile(base::FilePath::StringPieceType relative_path) {
   base::FilePath base_dir;
-  if (!PathService::Get(chrome::DIR_TEST_DATA, &base_dir))
+  if (!base::PathService::Get(chrome::DIR_TEST_DATA, &base_dir))
     return base::FilePath();
   base::FilePath full_path =
       base_dir.Append(kResourcePath).Append(relative_path);
@@ -88,27 +87,21 @@ class CloseObserver final : public content::WebContentsObserver {
 class FakeControllerConnection final
     : public blink::mojom::PresentationConnection {
  public:
-  using OnMessageCallback = base::OnceCallback<void(bool)>;
-
   FakeControllerConnection() : binding_(this) {}
 
   void SendTextMessage(const std::string& message) {
     ASSERT_TRUE(receiver_connection_.is_bound());
     receiver_connection_->OnMessage(
-        content::PresentationConnectionMessage(message),
-        base::BindOnce([](bool success) { ASSERT_TRUE(success); }));
+        blink::mojom::PresentationConnectionMessage::NewMessage(message));
   }
 
   // blink::mojom::PresentationConnection implementation
-  void OnMessage(content::PresentationConnectionMessage message,
-                 OnMessageCallback callback) {
-    OnMessageMock(message);
-    std::move(callback).Run(true);
-  }
-  MOCK_METHOD1(OnMessageMock,
-               void(content::PresentationConnectionMessage message));
-  void DidChangeState(content::PresentationConnectionState state) override {}
-  void RequestClose() override {}
+  MOCK_METHOD1(OnMessage,
+               void(blink::mojom::PresentationConnectionMessagePtr message));
+  void DidChangeState(
+      blink::mojom::PresentationConnectionState state) override {}
+  void DidClose(
+      blink::mojom::PresentationConnectionCloseReason reason) override {}
 
   blink::mojom::PresentationConnectionRequest MakeConnectionRequest() {
     return mojo::MakeRequest(&receiver_connection_);
@@ -243,8 +236,9 @@ IN_PROC_BROWSER_TEST_F(PresentationReceiverWindowControllerBrowserTest,
   destroyer.AwaitTerminate(std::move(receiver_window));
 }
 
+// Flaky. See https://crbug.com/880045.
 IN_PROC_BROWSER_TEST_F(PresentationReceiverWindowControllerBrowserTest,
-                       NavigationClosesWindow) {
+                       DISABLED_NavigationClosesWindow) {
   // Start receiver window.
   auto file_path =
       GetResourceFile(FILE_PATH_LITERAL("presentation_receiver.html"));
@@ -271,8 +265,9 @@ IN_PROC_BROWSER_TEST_F(PresentationReceiverWindowControllerBrowserTest,
   destroyer.AwaitTerminate(std::move(receiver_window));
 }
 
+// Flaky. See https://crbug.com/840136.
 IN_PROC_BROWSER_TEST_F(PresentationReceiverWindowControllerBrowserTest,
-                       PresentationApiCommunication) {
+                       DISABLED_PresentationApiCommunication) {
   // Start receiver window.
   auto file_path =
       GetResourceFile(FILE_PATH_LITERAL("presentation_receiver.html"));
@@ -294,34 +289,29 @@ IN_PROC_BROWSER_TEST_F(PresentationReceiverWindowControllerBrowserTest,
   media_router::LocalPresentationManagerFactory::GetOrCreateForBrowserContext(
       browser()->profile())
       ->RegisterLocalPresentationController(
-          content::PresentationInfo(presentation_url, kPresentationId),
-          RenderFrameHostId(0, 0), std::move(controller_ptr),
+          blink::mojom::PresentationInfo(presentation_url, kPresentationId),
+          content::GlobalFrameRoutingId(0, 0), std::move(controller_ptr),
           controller_connection.MakeConnectionRequest(),
           media_router::MediaRoute("route",
                                    media_router::MediaSource(presentation_url),
                                    "sink", "desc", true, true));
 
   base::RunLoop connection_loop;
-  EXPECT_CALL(controller_connection, OnMessageMock(::testing::_))
-      .WillOnce(::testing::Invoke(
-          [&connection_loop](content::PresentationConnectionMessage msg) {
-            ASSERT_TRUE(msg.message);
-            EXPECT_EQ("ready", *msg.message);
-            connection_loop.Quit();
-          }));
+  EXPECT_CALL(controller_connection, OnMessage(_)).WillOnce([&](auto response) {
+    ASSERT_TRUE(response->is_message());
+    EXPECT_EQ("ready", response->get_message());
+    connection_loop.Quit();
+  });
   connection_loop.Run();
 
   // Test ping-pong message.
   const std::string message("turtles");
   base::RunLoop run_loop;
-  EXPECT_CALL(controller_connection, OnMessageMock(::testing::_))
-      .WillOnce(::testing::Invoke(
-          [&run_loop,
-           &message](content::PresentationConnectionMessage response) {
-            ASSERT_TRUE(response.message);
-            EXPECT_EQ("Pong: " + message, *response.message);
-            run_loop.Quit();
-          }));
+  EXPECT_CALL(controller_connection, OnMessage(_)).WillOnce([&](auto response) {
+    ASSERT_TRUE(response->is_message());
+    EXPECT_EQ("Pong: " + message, response->get_message());
+    run_loop.Quit();
+  });
   controller_connection.SendTextMessage(message);
   run_loop.Run();
 

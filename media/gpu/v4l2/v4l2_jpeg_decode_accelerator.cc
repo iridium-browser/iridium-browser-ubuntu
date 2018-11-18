@@ -133,7 +133,8 @@ V4L2JpegDecodeAccelerator::JobRecord::JobRecord(
     const BitstreamBuffer& bitstream_buffer,
     scoped_refptr<VideoFrame> video_frame)
     : bitstream_buffer_id(bitstream_buffer.id()),
-      shm(bitstream_buffer, true),
+      shm(bitstream_buffer.handle(), bitstream_buffer.size(), true),
+      offset(bitstream_buffer.offset()),
       out_frame(video_frame) {}
 
 V4L2JpegDecodeAccelerator::JobRecord::~JobRecord() {}
@@ -160,8 +161,8 @@ V4L2JpegDecodeAccelerator::~V4L2JpegDecodeAccelerator() {
 
   if (decoder_thread_.IsRunning()) {
     decoder_task_runner_->PostTask(
-        FROM_HERE, base::Bind(&V4L2JpegDecodeAccelerator::DestroyTask,
-                              base::Unretained(this)));
+        FROM_HERE, base::BindOnce(&V4L2JpegDecodeAccelerator::DestroyTask,
+                                  base::Unretained(this)));
     decoder_thread_.Stop();
   }
   weak_factory_.InvalidateWeakPtrs();
@@ -198,8 +199,8 @@ void V4L2JpegDecodeAccelerator::NotifyError(int32_t bitstream_buffer_id,
 void V4L2JpegDecodeAccelerator::PostNotifyError(int32_t bitstream_buffer_id,
                                                 Error error) {
   child_task_runner_->PostTask(
-      FROM_HERE, base::Bind(&V4L2JpegDecodeAccelerator::NotifyError, weak_ptr_,
-                            bitstream_buffer_id, error));
+      FROM_HERE, base::BindOnce(&V4L2JpegDecodeAccelerator::NotifyError,
+                                weak_ptr_, bitstream_buffer_id, error));
 }
 
 bool V4L2JpegDecodeAccelerator::Initialize(Client* client) {
@@ -241,8 +242,8 @@ bool V4L2JpegDecodeAccelerator::Initialize(Client* client) {
   decoder_task_runner_ = decoder_thread_.task_runner();
 
   decoder_task_runner_->PostTask(
-      FROM_HERE, base::Bind(&V4L2JpegDecodeAccelerator::StartDevicePoll,
-                            base::Unretained(this)));
+      FROM_HERE, base::BindOnce(&V4L2JpegDecodeAccelerator::StartDevicePoll,
+                                base::Unretained(this)));
 
   VLOGF(2) << "V4L2JpegDecodeAccelerator initialized.";
   return true;
@@ -272,8 +273,9 @@ void V4L2JpegDecodeAccelerator::Decode(
       new JobRecord(bitstream_buffer, video_frame));
 
   decoder_task_runner_->PostTask(
-      FROM_HERE, base::Bind(&V4L2JpegDecodeAccelerator::DecodeTask,
-                            base::Unretained(this), base::Passed(&job_record)));
+      FROM_HERE,
+      base::BindOnce(&V4L2JpegDecodeAccelerator::DecodeTask,
+                     base::Unretained(this), base::Passed(&job_record)));
 }
 
 // static
@@ -288,7 +290,7 @@ bool V4L2JpegDecodeAccelerator::IsSupported() {
 void V4L2JpegDecodeAccelerator::DecodeTask(
     std::unique_ptr<JobRecord> job_record) {
   DCHECK(decoder_task_runner_->BelongsToCurrentThread());
-  if (!job_record->shm.Map()) {
+  if (!job_record->shm.MapAt(job_record->offset, job_record->shm.size())) {
     VPLOGF(1) << "could not map bitstream_buffer";
     PostNotifyError(job_record->bitstream_buffer_id, UNREADABLE_INPUT);
     return;
@@ -569,8 +571,8 @@ void V4L2JpegDecodeAccelerator::DevicePollTask() {
   // All processing should happen on ServiceDeviceTask(), since we shouldn't
   // touch decoder state from this thread.
   decoder_task_runner_->PostTask(
-      FROM_HERE, base::Bind(&V4L2JpegDecodeAccelerator::ServiceDeviceTask,
-                            base::Unretained(this), event_pending));
+      FROM_HERE, base::BindOnce(&V4L2JpegDecodeAccelerator::ServiceDeviceTask,
+                                base::Unretained(this), event_pending));
 }
 
 bool V4L2JpegDecodeAccelerator::DequeueSourceChangeEvent() {
@@ -621,8 +623,8 @@ void V4L2JpegDecodeAccelerator::ServiceDeviceTask(bool event_pending) {
 
   if (!running_jobs_.empty()) {
     device_poll_task_runner_->PostTask(
-        FROM_HERE, base::Bind(&V4L2JpegDecodeAccelerator::DevicePollTask,
-                              base::Unretained(this)));
+        FROM_HERE, base::BindOnce(&V4L2JpegDecodeAccelerator::DevicePollTask,
+                                  base::Unretained(this)));
   }
 
   DVLOGF(3) << "buffer counts: INPUT["
@@ -680,6 +682,21 @@ bool V4L2JpegDecodeAccelerator::ConvertOutputImage(
   size_t dst_u_stride = dst_frame->stride(VideoFrame::kUPlane);
   size_t dst_v_stride = dst_frame->stride(VideoFrame::kVPlane);
 
+  // It is assumed that |dst_frame| is backed by enough memory that it is safe
+  // to store an I420 frame of |dst_width|x|dst_height| in it using the data
+  // pointers and strides from above.
+  int dst_width = dst_frame->coded_size().width();
+  int dst_height = dst_frame->coded_size().height();
+
+  // The video frame's coded dimensions should be even for the I420 format.
+  DCHECK_EQ(0, dst_width % 2);
+  DCHECK_EQ(0, dst_height % 2);
+
+  // The coded size of the hardware buffer should be at least as large as the
+  // video frame's coded size.
+  DCHECK_GE(output_buffer_coded_size_.width(), dst_width);
+  DCHECK_GE(output_buffer_coded_size_.height(), dst_height);
+
   if (output_buffer_num_planes_ == 1) {
     // Use ConvertToI420 to convert all splane buffers.
     // If the source format is I420, ConvertToI420 will simply copy the frame.
@@ -691,9 +708,8 @@ bool V4L2JpegDecodeAccelerator::ConvertOutputImage(
             static_cast<uint8_t*>(output_buffer.address[0]), src_size, dst_y,
             dst_y_stride, dst_u, dst_u_stride, dst_v, dst_v_stride, 0, 0,
             output_buffer_coded_size_.width(),
-            output_buffer_coded_size_.height(), dst_frame->coded_size().width(),
-            dst_frame->coded_size().height(), libyuv::kRotate0,
-            output_buffer_pixelformat_)) {
+            output_buffer_coded_size_.height(), dst_width, dst_height,
+            libyuv::kRotate0, output_buffer_pixelformat_)) {
       VLOGF(1) << "ConvertToI420 failed. Source format: "
                << output_buffer_pixelformat_;
       return false;
@@ -709,18 +725,16 @@ bool V4L2JpegDecodeAccelerator::ConvertOutputImage(
     if (output_buffer_pixelformat_ == V4L2_PIX_FMT_YUV420M) {
       if (libyuv::I420Copy(src_y, src_y_stride, src_u, src_u_stride, src_v,
                            src_v_stride, dst_y, dst_y_stride, dst_u,
-                           dst_u_stride, dst_v, dst_v_stride,
-                           output_buffer_coded_size_.width(),
-                           output_buffer_coded_size_.height())) {
+                           dst_u_stride, dst_v, dst_v_stride, dst_width,
+                           dst_height)) {
         VLOGF(1) << "I420Copy failed";
         return false;
       }
     } else {  // output_buffer_pixelformat_ == V4L2_PIX_FMT_YUV422M
       if (libyuv::I422ToI420(src_y, src_y_stride, src_u, src_u_stride, src_v,
                              src_v_stride, dst_y, dst_y_stride, dst_u,
-                             dst_u_stride, dst_v, dst_v_stride,
-                             output_buffer_coded_size_.width(),
-                             output_buffer_coded_size_.height())) {
+                             dst_u_stride, dst_v, dst_v_stride, dst_width,
+                             dst_height)) {
         VLOGF(1) << "I422ToI420 failed";
         return false;
       }
@@ -818,8 +832,9 @@ void V4L2JpegDecodeAccelerator::Dequeue() {
                 << job_record->bitstream_buffer_id;
 
       child_task_runner_->PostTask(
-          FROM_HERE, base::Bind(&V4L2JpegDecodeAccelerator::VideoFrameReady,
-                                weak_ptr_, job_record->bitstream_buffer_id));
+          FROM_HERE,
+          base::BindOnce(&V4L2JpegDecodeAccelerator::VideoFrameReady, weak_ptr_,
+                         job_record->bitstream_buffer_id));
     }
   }
 }

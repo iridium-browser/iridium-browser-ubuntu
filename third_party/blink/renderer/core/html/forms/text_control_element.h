@@ -31,6 +31,7 @@
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/editing/forward.h"
 #include "third_party/blink/renderer/core/html/forms/html_form_control_element_with_state.h"
+#include "third_party/blink/renderer/core/html/forms/text_control_inner_elements.h"
 
 namespace blink {
 
@@ -61,7 +62,7 @@ class CORE_EXPORT TextControlElement : public HTMLFormControlElementWithState {
 
   ~TextControlElement() override;
 
-  void ForwardEvent(Event*);
+  void ForwardEvent(Event&);
 
   void SetFocused(bool, WebFocusType) override;
 
@@ -126,12 +127,15 @@ class CORE_EXPORT TextControlElement : public HTMLFormControlElementWithState {
       TextControlSetValueSelection =
           TextControlSetValueSelection::kSetSelectionToEnd) = 0;
 
-  HTMLElement* InnerEditorElement() const { return inner_editor_; }
+  TextControlInnerEditorElement* InnerEditorElement() const {
+    return inner_editor_;
+  }
   HTMLElement* CreateInnerEditorElement();
   void DropInnerEditorElement() { inner_editor_ = nullptr; }
 
   void SelectionChanged(bool user_triggered);
   bool LastChangeWasUserEdit() const;
+
   virtual void SetInnerEditorValue(const String&);
   String InnerEditorValue() const;
   Node* CreatePlaceholderBreakElement() const;
@@ -147,6 +151,8 @@ class CORE_EXPORT TextControlElement : public HTMLFormControlElementWithState {
 
   void Trace(Visitor*) override;
 
+  ETextOverflow ValueForTextOverflow() const;
+
  protected:
   TextControlElement(const QualifiedName&, Document&);
   bool IsPlaceholderEmpty() const;
@@ -157,7 +163,7 @@ class CORE_EXPORT TextControlElement : public HTMLFormControlElementWithState {
 
   void RestoreCachedSelection();
 
-  void DefaultEventHandler(Event*) override;
+  void DefaultEventHandler(Event&) override;
   virtual void SubtreeHasChanged() = 0;
 
   void SetLastChangeWasNotUserEdit() { last_change_was_user_edit_ = false; }
@@ -206,11 +212,11 @@ class CORE_EXPORT TextControlElement : public HTMLFormControlElementWithState {
   // Held directly instead of looked up by ID for speed.
   // Not only is the lookup faster, but for simple text inputs it avoids
   // creating a number of TreeScope data structures to track elements by ID.
-  Member<HTMLElement> inner_editor_;
+  Member<TextControlInnerEditorElement> inner_editor_;
 
-  // In m_valueBeforeFirstUserEdit, we distinguish a null String and zero-length
-  // String. Null String means the field doesn't have any data yet, and
-  // zero-length String is a valid data.
+  // In value_before_first_user_edit_, we distinguish a null String and
+  // zero-length String. Null String means the field doesn't have any data yet,
+  // and zero-length String is a valid data.
   String value_before_first_user_edit_;
   bool last_change_was_user_edit_;
 

@@ -45,6 +45,10 @@ DrmOverlayManager::CreateOverlayCandidates(gfx::AcceleratedWidget w) {
   return std::make_unique<DrmOverlayCandidatesHost>(this, w);
 }
 
+bool DrmOverlayManager::SupportsOverlays() const {
+  return supports_overlays_;
+}
+
 void DrmOverlayManager::CheckOverlaySupport(
     OverlayCandidatesOzone::OverlaySurfaceCandidateList* candidates,
     gfx::AcceleratedWidget widget) {
@@ -132,7 +136,7 @@ void DrmOverlayManager::SendOverlayValidationRequest(
 }
 
 void DrmOverlayManager::GpuSentOverlayResult(
-    const gfx::AcceleratedWidget& widget,
+    gfx::AcceleratedWidget widget,
     const OverlaySurfaceCandidateList& candidates,
     const OverlayStatusList& returns) {
   TRACE_EVENT_ASYNC_END0(

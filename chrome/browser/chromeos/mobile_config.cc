@@ -14,8 +14,8 @@
 #include "base/json/json_reader.h"
 #include "base/logging.h"
 #include "base/stl_util.h"
-#include "base/task_scheduler/post_task.h"
-#include "base/threading/thread_restrictions.h"
+#include "base/task/post_task.h"
+#include "base/threading/scoped_blocking_call.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
@@ -62,7 +62,7 @@ const char kLocalCarrierConfigPath[] =
 chromeos::MobileConfig::Config ReadConfigInBackground(
     const base::FilePath& global_config_file,
     const base::FilePath& local_config_file) {
-  base::AssertBlockingAllowed();
+  base::ScopedBlockingCall scoped_blocking_call(base::BlockingType::MAY_BLOCK);
 
   chromeos::MobileConfig::Config config;
   if (!base::ReadFileToString(global_config_file, &config.global_config)) {
@@ -333,7 +333,7 @@ MobileConfig::~MobileConfig() {
 
 void MobileConfig::LoadConfig() {
   base::PostTaskWithTraitsAndReplyWithResult(
-      FROM_HERE, {base::TaskPriority::BACKGROUND, base::MayBlock()},
+      FROM_HERE, {base::TaskPriority::BEST_EFFORT, base::MayBlock()},
       base::BindOnce(&ReadConfigInBackground,
                      base::FilePath(kGlobalCarrierConfigPath),
                      base::FilePath(kLocalCarrierConfigPath)),

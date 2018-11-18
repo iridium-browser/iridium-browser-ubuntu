@@ -1,4 +1,4 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -8,6 +8,7 @@
 
 #include "base/command_line.h"
 #include "base/macros.h"
+#include "base/run_loop.h"
 #include "chrome/browser/chromeos/login/enrollment/enrollment_screen.h"
 #include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/chromeos/login/mock_network_state_helper.h"
@@ -44,21 +45,20 @@ class DummyButtonListener : public views::ButtonListener {
 class NetworkScreenTest : public WizardInProcessBrowserTest {
  public:
   NetworkScreenTest()
-      : WizardInProcessBrowserTest(OobeScreen::SCREEN_OOBE_NETWORK),
-        fake_session_manager_client_(nullptr) {}
+      : WizardInProcessBrowserTest(OobeScreen::SCREEN_OOBE_NETWORK) {}
+  ~NetworkScreenTest() override = default;
 
  protected:
   void SetUpInProcessBrowserTestFixture() override {
     WizardInProcessBrowserTest::SetUpInProcessBrowserTestFixture();
 
-    fake_session_manager_client_ = new FakeSessionManagerClient;
     DBusThreadManager::GetSetterForTesting()->SetSessionManagerClient(
-        std::unique_ptr<SessionManagerClient>(fake_session_manager_client_));
+        std::make_unique<FakeSessionManagerClient>());
   }
 
   void SetUpOnMainThread() override {
     WizardInProcessBrowserTest::SetUpOnMainThread();
-    mock_base_screen_delegate_.reset(new MockBaseScreenDelegate());
+    mock_base_screen_delegate_ = std::make_unique<MockBaseScreenDelegate>();
     ASSERT_TRUE(WizardController::default_controller() != nullptr);
     network_screen_ = NetworkScreen::Get(
         WizardController::default_controller()->screen_manager());
@@ -75,12 +75,12 @@ class NetworkScreenTest : public WizardInProcessBrowserTest {
 
   void EmulateContinueButtonExit(NetworkScreen* network_screen) {
     EXPECT_CALL(*mock_base_screen_delegate_,
-                OnExit(_, ScreenExitCode::NETWORK_CONNECTED, _))
+                OnExit(ScreenExitCode::NETWORK_CONNECTED))
         .Times(1);
     EXPECT_CALL(*mock_network_state_helper_, IsConnected())
         .WillOnce(Return(true));
-    network_screen->OnContinueButtonPressed();
-    content::RunAllPendingInMessageLoop();
+    network_screen->OnContinueButtonClicked();
+    base::RunLoop().RunUntilIdle();
   }
 
   void SetDefaultNetworkStateHelperExpectations() {
@@ -98,7 +98,6 @@ class NetworkScreenTest : public WizardInProcessBrowserTest {
   std::unique_ptr<MockBaseScreenDelegate> mock_base_screen_delegate_;
   login::MockNetworkStateHelper* mock_network_state_helper_;
   NetworkScreen* network_screen_;
-  FakeSessionManagerClient* fake_session_manager_client_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(NetworkScreenTest);

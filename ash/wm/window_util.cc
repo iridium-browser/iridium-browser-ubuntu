@@ -7,28 +7,27 @@
 #include <memory>
 #include <vector>
 
-#include "ash/ash_constants.h"
-#include "ash/public/cpp/config.h"
+#include "ash/public/cpp/ash_constants.h"
 #include "ash/public/cpp/shell_window_ids.h"
+#include "ash/public/cpp/window_properties.h"
 #include "ash/root_window_controller.h"
 #include "ash/session/session_controller.h"
 #include "ash/shelf/shelf.h"
 #include "ash/shell.h"
-#include "ash/wm/resize_handle_window_targeter.h"
 #include "ash/wm/widget_finder.h"
 #include "ash/wm/window_positioning_utils.h"
 #include "ash/wm/window_properties.h"
 #include "ash/wm/window_state.h"
 #include "ash/wm/wm_event.h"
+#include "ash/ws/window_service_owner.h"
+#include "services/ws/window_service.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/capture_client.h"
 #include "ui/aura/client/focus_client.h"
-#include "ui/aura/mus/window_manager_delegate.h"
-#include "ui/aura/mus/window_port_mus.h"
-#include "ui/aura/mus/window_tree_client.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_delegate.h"
 #include "ui/aura/window_event_dispatcher.h"
+#include "ui/aura/window_targeter.h"
 #include "ui/base/hit_test.h"
 #include "ui/compositor/dip_util.h"
 #include "ui/display/display.h"
@@ -39,6 +38,7 @@
 #include "ui/views/widget/widget.h"
 #include "ui/wm/core/coordinate_conversion.h"
 #include "ui/wm/core/easy_resize_window_targeter.h"
+#include "ui/wm/core/window_properties.h"
 #include "ui/wm/core/window_util.h"
 #include "ui/wm/public/activation_client.h"
 
@@ -59,6 +59,56 @@ bool MoveWindowToRoot(aura::Window* window, aura::Window* root) {
   container->AddChild(window);
   return true;
 }
+
+// Asks the remote client that owns |window| to close it. Returns true if there
+// was a remote client for |window|, false otherwise.
+bool AskRemoteClientToCloseWindow(aura::Window* window) {
+  ws::WindowService* window_service =
+      Shell::Get()->window_service_owner()->window_service();
+  return window_service && window_service->RequestClose(window);
+}
+
+// This window targeter reserves space for the portion of the resize handles
+// that extend within a top level window.
+class InteriorResizeHandleTargeter : public aura::WindowTargeter {
+ public:
+  InteriorResizeHandleTargeter() {
+    SetInsets(gfx::Insets(kResizeInsideBoundsSize));
+  }
+
+  ~InteriorResizeHandleTargeter() override = default;
+
+  bool GetHitTestRects(aura::Window* target,
+                       gfx::Rect* hit_test_rect_mouse,
+                       gfx::Rect* hit_test_rect_touch) const override {
+    if (target == window() && window()->parent() &&
+        window()->parent()->targeter()) {
+      // Defer to the parent's targeter on whether |window_| should be able to
+      // receive the event. This should be EasyResizeWindowTargeter, which is
+      // installed on the container window, and is necessary for
+      // kResizeOutsideBoundsSize to work.
+      return window()->parent()->targeter()->GetHitTestRects(
+          target, hit_test_rect_mouse, hit_test_rect_touch);
+    }
+
+    return WindowTargeter::GetHitTestRects(target, hit_test_rect_mouse,
+                                           hit_test_rect_touch);
+  }
+
+  bool ShouldUseExtendedBounds(const aura::Window* target) const override {
+    // Fullscreen/maximized windows can't be drag-resized.
+    if (GetWindowState(window())->IsMaximizedOrFullscreenOrPinned() ||
+        !wm::GetWindowState(target)->CanResize()) {
+      return false;
+    }
+
+    // The shrunken hit region only applies to children of |window()|.
+    return target->parent() == window();
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(InteriorResizeHandleTargeter);
+};
 
 }  // namespace
 
@@ -163,23 +213,10 @@ bool MoveWindowToEventRoot(aura::Window* window, const ui::Event& event) {
   return root && MoveWindowToRoot(window, root);
 }
 
-void SnapWindowToPixelBoundary(aura::Window* window) {
-  window->SetProperty(kSnapChildrenToPixelBoundary, true);
-  aura::Window* snapped_ancestor = window->parent();
-  while (snapped_ancestor) {
-    if (snapped_ancestor->GetProperty(kSnapChildrenToPixelBoundary)) {
-      ui::SnapLayerToPhysicalPixelBoundary(snapped_ancestor->layer(),
-                                           window->layer());
-      return;
-    }
-    snapped_ancestor = snapped_ancestor->parent();
-  }
-}
-
 void SetSnapsChildrenToPhysicalPixelBoundary(aura::Window* container) {
-  DCHECK(!container->GetProperty(kSnapChildrenToPixelBoundary))
+  DCHECK(!container->GetProperty(::wm::kSnapChildrenToPixelBoundary))
       << container->GetName();
-  container->SetProperty(kSnapChildrenToPixelBoundary, true);
+  container->SetProperty(::wm::kSnapChildrenToPixelBoundary, true);
 }
 
 int GetNonClientComponent(aura::Window* window, const gfx::Point& location) {
@@ -200,44 +237,24 @@ void SetChildrenUseExtendedHitRegionForWindow(aura::Window* window) {
   // events to be dispatched to windows outside the windows bounds that this
   // function calls into. http://crbug.com/679056.
   window->SetEventTargeter(std::make_unique<::wm::EasyResizeWindowTargeter>(
-      window, mouse_extend, touch_extend));
+      mouse_extend, touch_extend));
 }
 
 void CloseWidgetForWindow(aura::Window* window) {
-  if (Shell::GetAshConfig() == Config::MASH &&
-      window->GetProperty(kWidgetCreationTypeKey) ==
-          WidgetCreationType::FOR_CLIENT) {
-    // NOTE: in the FOR_CLIENT case there is not necessarily a widget associated
-    // with the window. Mash only creates widgets for top level windows if mash
-    // renders the non-client frame.
-    DCHECK(Shell::window_manager_client());
-    Shell::window_manager_client()->RequestClose(window);
+  if (AskRemoteClientToCloseWindow(window))
     return;
-  }
+
   views::Widget* widget = GetInternalWidgetForWindow(window);
   DCHECK(widget);
   widget->Close();
 }
 
-void AddLimitedPreTargetHandlerForWindow(ui::EventHandler* handler,
-                                         aura::Window* window) {
-  // In mus AddPreTargetHandler() only works for windows created by this client.
-  DCHECK(Shell::GetAshConfig() != Config::MASH ||
-         Shell::window_tree_client()->WasCreatedByThisClient(
-             aura::WindowMus::Get(window)));
-  window->AddPreTargetHandler(handler);
+void InstallResizeHandleWindowTargeterForWindow(aura::Window* window) {
+  window->SetEventTargeter(std::make_unique<InteriorResizeHandleTargeter>());
 }
 
-void RemoveLimitedPreTargetHandlerForWindow(ui::EventHandler* handler,
-                                            aura::Window* window) {
-  window->RemovePreTargetHandler(handler);
-}
-
-void InstallResizeHandleWindowTargeterForWindow(
-    aura::Window* window,
-    ImmersiveFullscreenController* immersive_fullscreen_controller) {
-  window->SetEventTargeter(std::make_unique<ResizeHandleWindowTargeter>(
-      window, immersive_fullscreen_controller));
+bool IsDraggingTabs(const aura::Window* window) {
+  return window->GetProperty(ash::kIsDraggingTabsKey);
 }
 
 }  // namespace wm

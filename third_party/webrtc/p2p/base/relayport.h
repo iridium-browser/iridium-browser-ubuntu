@@ -12,6 +12,7 @@
 #define P2P_BASE_RELAYPORT_H_
 
 #include <deque>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -35,15 +36,16 @@ class RelayPort : public Port {
   typedef std::pair<rtc::Socket::Option, int> OptionValue;
 
   // RelayPort doesn't yet do anything fancy in the ctor.
-  static RelayPort* Create(rtc::Thread* thread,
-                           rtc::PacketSocketFactory* factory,
-                           rtc::Network* network,
-                           uint16_t min_port,
-                           uint16_t max_port,
-                           const std::string& username,
-                           const std::string& password) {
-    return new RelayPort(thread, factory, network, min_port, max_port, username,
-                         password);
+  static std::unique_ptr<RelayPort> Create(rtc::Thread* thread,
+                                           rtc::PacketSocketFactory* factory,
+                                           rtc::Network* network,
+                                           uint16_t min_port,
+                                           uint16_t max_port,
+                                           const std::string& username,
+                                           const std::string& password) {
+    // Using `new` to access a non-public constructor.
+    return absl::WrapUnique(new RelayPort(thread, factory, network, min_port,
+                                          max_port, username, password));
   }
   ~RelayPort() override;
 
@@ -62,7 +64,7 @@ class RelayPort : public Port {
   bool SupportsProtocol(const std::string& protocol) const override;
   ProtocolType GetProtocol() const override;
 
-  const ProtocolAddress * ServerAddress(size_t index) const;
+  const ProtocolAddress* ServerAddress(size_t index) const;
   bool IsReady() { return ready_; }
 
   // Used for testing.
@@ -88,7 +90,8 @@ class RelayPort : public Port {
              bool payload) override;
 
   // Dispatches the given packet to the port or connection as appropriate.
-  void OnReadPacket(const char* data, size_t size,
+  void OnReadPacket(const char* data,
+                    size_t size,
                     const rtc::SocketAddress& remote_addr,
                     ProtocolType proto,
                     const rtc::PacketTime& packet_time);

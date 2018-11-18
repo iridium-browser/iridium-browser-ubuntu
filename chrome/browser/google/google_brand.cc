@@ -10,6 +10,7 @@
 #include "base/macros.h"
 #include "base/no_destructor.h"
 #include "base/optional.h"
+#include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
@@ -92,6 +93,15 @@ bool GetReactivationBrand(std::string* brand) {
 
 #endif
 
+bool GetRlzBrand(std::string* brand) {
+#if defined(OS_CHROMEOS)
+  brand->assign(google_brand::chromeos::GetRlzBrand());
+  return true;
+#else
+  return GetBrand(brand);
+#endif
+}
+
 bool IsOrganic(const std::string& brand) {
 #if defined(OS_MACOSX)
   if (brand.empty()) {
@@ -140,9 +150,7 @@ bool IsInternetCafeBrandCode(const std::string& brand) {
     "CHIQ", "CHSG", "HLJY", "NTMO", "OOBA", "OOBB", "OOBC", "OOBD", "OOBE",
     "OOBF", "OOBG", "OOBH", "OOBI", "OOBJ", "IDCM",
   };
-  const char* const* end = &kBrands[arraysize(kBrands)];
-  const char* const* found = std::find(&kBrands[0], end, brand);
-  return found != end;
+  return base::ContainsValue(kBrands, brand);
 }
 
 // BrandForTesting ------------------------------------------------------------

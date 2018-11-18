@@ -5,15 +5,20 @@
 #include "third_party/blink/renderer/core/workers/worklet_pending_tasks.h"
 
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
+#include "third_party/blink/renderer/core/workers/worklet.h"
 #include "third_party/blink/renderer/platform/wtf/wtf.h"
 
 namespace blink {
 
-WorkletPendingTasks::WorkletPendingTasks(int counter,
+WorkletPendingTasks::WorkletPendingTasks(Worklet* worklet,
                                          ScriptPromiseResolver* resolver)
-    : counter_(counter), resolver_(resolver) {
+    : resolver_(resolver), worklet_(worklet) {
   DCHECK(IsMainThread());
+}
+
+void WorkletPendingTasks::InitializeCounter(int counter) {
+  DCHECK(IsMainThread());
+  counter_ = counter;
 }
 
 void WorkletPendingTasks::Abort() {
@@ -25,7 +30,8 @@ void WorkletPendingTasks::Abort() {
   //     2: "Reject promise with an "AbortError" DOMException."
   if (counter_ != -1) {
     counter_ = -1;
-    resolver_->Reject(DOMException::Create(kAbortError));
+    worklet_->FinishPendingTasks(this);
+    resolver_->Reject(DOMException::Create(DOMExceptionCode::kAbortError));
   }
 }
 
@@ -38,9 +44,16 @@ void WorkletPendingTasks::DecrementCounter() {
   //     2: "If pendingTaskStruct's counter is 0, then resolve promise."
   if (counter_ != -1) {
     --counter_;
-    if (counter_ == 0)
+    if (counter_ == 0) {
+      worklet_->FinishPendingTasks(this);
       resolver_->Resolve();
+    }
   }
+}
+
+void WorkletPendingTasks::Trace(blink::Visitor* visitor) {
+  visitor->Trace(resolver_);
+  visitor->Trace(worklet_);
 }
 
 }  // namespace blink

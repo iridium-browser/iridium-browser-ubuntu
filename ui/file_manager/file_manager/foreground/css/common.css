@@ -193,6 +193,9 @@ html[dir='rtl'] .entry-name {
 }
 
 /* Pop-up dialogs. */
+.cr-dialog-container.shown {
+  background-color: rgba(0, 0, 0, 0.6);
+}
 
 .cr-dialog-container {
   display: flex;

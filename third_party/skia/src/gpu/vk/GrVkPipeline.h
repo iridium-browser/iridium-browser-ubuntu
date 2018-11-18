@@ -25,13 +25,13 @@ struct SkIRect;
 class GrVkPipeline : public GrVkResource {
 public:
     static GrVkPipeline* Create(GrVkGpu* gpu,
+                                const GrPrimitiveProcessor& primProc,
                                 const GrPipeline& pipeline,
                                 const GrStencilSettings&,
-                                const GrPrimitiveProcessor& primProc,
                                 VkPipelineShaderStageCreateInfo* shaderStageInfo,
                                 int shaderStageCount,
                                 GrPrimitiveType primitiveType,
-                                const GrVkRenderPass& renderPass,
+                                VkRenderPass compatibleRenderPass,
                                 VkPipelineLayout layout,
                                 VkPipelineCache cache);
 

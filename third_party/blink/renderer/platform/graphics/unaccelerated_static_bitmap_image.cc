@@ -60,10 +60,9 @@ UnacceleratedStaticBitmapImage::MakeAccelerated(
   if (!grcontext)
     return nullptr;  // Can happen if the context is lost.
 
-  // TODO(crbug.com/782383): This can return a SkColorSpace, which should be
-  // passed along.
+  sk_sp<SkImage> sk_image = paint_image_.GetSkImage();
   sk_sp<SkImage> gpu_skimage =
-      paint_image_.GetSkImage()->makeTextureImage(grcontext, nullptr);
+      sk_image->makeTextureImage(grcontext, sk_image->colorSpace());
   if (!gpu_skimage)
     return nullptr;
 
@@ -75,8 +74,8 @@ bool UnacceleratedStaticBitmapImage::CurrentFrameKnownToBeOpaque() {
   return paint_image_.GetSkImage()->isOpaque();
 }
 
-void UnacceleratedStaticBitmapImage::Draw(PaintCanvas* canvas,
-                                          const PaintFlags& flags,
+void UnacceleratedStaticBitmapImage::Draw(cc::PaintCanvas* canvas,
+                                          const cc::PaintFlags& flags,
                                           const FloatRect& dst_rect,
                                           const FloatRect& src_rect,
                                           RespectImageOrientationEnum,

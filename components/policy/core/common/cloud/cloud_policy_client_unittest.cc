@@ -23,8 +23,8 @@
 #include "components/policy/core/common/cloud/mock_device_management_service.h"
 #include "components/policy/core/common/cloud/mock_signing_service.h"
 #include "components/policy/proto/device_management_backend.pb.h"
-#include "net/url_request/url_request_context_getter.h"
-#include "net/url_request/url_request_test_util.h"
+#include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
+#include "services/network/test/test_url_loader_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -44,11 +44,15 @@ namespace {
 const char kClientID[] = "fake-client-id";
 const char kMachineID[] = "fake-machine-id";
 const char kMachineModel[] = "fake-machine-model";
+const char kBrandCode[] = "fake-brand-code";
 const char kOAuthToken[] = "fake-oauth-token";
 const char kDMToken[] = "fake-dm-token";
+const char kDMToken2[] = "fake-dm-token-2";
 const char kDeviceDMToken[] = "fake-device-dm-token";
 const char kMachineCertificate[] = "fake-machine-certificate";
 const char kEnrollmentCertificate[] = "fake-enrollment-certificate";
+const char kEnrollmentId[] = "fake-enrollment-id";
+const char kEnrollmentToken[] = "enrollment_token";
 const char kRequisition[] = "fake-requisition";
 const char kStateKey[] = "fake-state-key";
 const char kPayload[] = "input_payload";
@@ -57,11 +61,9 @@ const char kAssetId[] = "fake-asset-id";
 const char kLocation[] = "fake-location";
 const char kGcmID[] = "fake-gcm-id";
 const char kPackageName[] = "com.example.app";
-
-#if defined(OS_WIN) || defined(OS_MACOSX) || \
-    defined(OS_LINUX) && !defined(OS_CHROMEOS)
-const char kEnrollmentToken[] = "enrollment_token";
-#endif
+const char kPolicyToken[] = "fake-policy-token";
+const char kPolicyName[] = "fake-policy-name";
+const char kValueValidationMessage[] = "fake-value-validation-message";
 
 const int64_t kAgeOfCommand = 123123123;
 const int64_t kLastCommandId = 123456789;
@@ -97,7 +99,8 @@ class MockAvailableLicensesObserver {
   MockAvailableLicensesObserver() {}
 
   MOCK_METHOD2(OnAvailableLicensesFetched,
-               void(bool, const CloudPolicyClient::LicenseMap&));
+               void(DeviceManagementStatus,
+                    const CloudPolicyClient::LicenseMap&));
 };
 
 class MockDeviceDMTokenCallbackObserver {
@@ -120,10 +123,24 @@ class CloudPolicyClientTest : public testing::Test {
     register_request->set_type(em::DeviceRegisterRequest::USER);
     register_request->set_machine_id(kMachineID);
     register_request->set_machine_model(kMachineModel);
+    register_request->set_brand_code(kBrandCode);
     register_request->set_lifetime(
         em::DeviceRegisterRequest::LIFETIME_INDEFINITE);
     register_request->set_flavor(
         em::DeviceRegisterRequest::FLAVOR_USER_REGISTRATION);
+
+    em::DeviceRegisterRequest* reregister_request =
+        reregistration_request_.mutable_register_request();
+    reregister_request->set_type(em::DeviceRegisterRequest::USER);
+    reregister_request->set_machine_id(kMachineID);
+    reregister_request->set_machine_model(kMachineModel);
+    reregister_request->set_brand_code(kBrandCode);
+    reregister_request->set_lifetime(
+        em::DeviceRegisterRequest::LIFETIME_INDEFINITE);
+    reregister_request->set_flavor(
+        em::DeviceRegisterRequest::FLAVOR_ENROLLMENT_RECOVERY);
+    reregister_request->set_reregister(true);
+    reregister_request->set_reregistration_dm_token(kDMToken);
 
     em::CertificateBasedDeviceRegistrationData data;
     data.set_certificate_type(em::CertificateBasedDeviceRegistrationData::
@@ -134,6 +151,7 @@ class CloudPolicyClientTest : public testing::Test {
     request->set_type(em::DeviceRegisterRequest::DEVICE);
     request->set_machine_id(kMachineID);
     request->set_machine_model(kMachineModel);
+    request->set_brand_code(kBrandCode);
     request->set_lifetime(em::DeviceRegisterRequest::LIFETIME_INDEFINITE);
     request->set_flavor(
         em::DeviceRegisterRequest::FLAVOR_ENROLLMENT_ATTESTATION);
@@ -156,6 +174,9 @@ class CloudPolicyClientTest : public testing::Test {
     registration_response_.mutable_register_response()->
         set_device_management_token(kDMToken);
 
+    failed_reregistration_response_.mutable_register_response()
+        ->set_device_management_token(kDMToken2);
+
 #if defined(OS_WIN) || defined(OS_MACOSX) || \
     defined(OS_LINUX) && !defined(OS_CHROMEOS)
     em::RegisterBrowserRequest* enrollment_request =
@@ -177,6 +198,8 @@ class CloudPolicyClientTest : public testing::Test {
     upload_enrollment_certificate_request_.mutable_cert_upload_request()
         ->set_certificate_type(
             em::DeviceCertUploadRequest::ENTERPRISE_ENROLLMENT_CERTIFICATE);
+    upload_enrollment_id_request_.mutable_cert_upload_request()
+        ->set_enrollment_id(kEnrollmentId);
     upload_certificate_response_.mutable_cert_upload_response();
 
     upload_status_request_.mutable_device_status_report_request();
@@ -238,6 +261,22 @@ class CloudPolicyClientTest : public testing::Test {
     license_two->set_available_licenses(0);
 
     upload_app_install_report_response_.mutable_app_install_report_response();
+
+    em::PolicyValidationReportRequest* policy_validation_report_request =
+        upload_policy_validation_report_request_
+            .mutable_policy_validation_report_request();
+    policy_validation_report_request->set_policy_type(policy_type_);
+    policy_validation_report_request->set_policy_token(kPolicyToken);
+    policy_validation_report_request->set_validation_result_type(
+        em::PolicyValidationReportRequest::
+            VALIDATION_RESULT_TYPE_VALUE_WARNING);
+    em::PolicyValueValidationIssue* policy_value_validation_issue =
+        policy_validation_report_request->add_policy_value_validation_issues();
+    policy_value_validation_issue->set_policy_name(kPolicyName);
+    policy_value_validation_issue->set_severity(
+        em::PolicyValueValidationIssue::
+            VALUE_VALIDATION_ISSUE_SEVERITY_WARNING);
+    policy_value_validation_issue->set_debug_message(kValueValidationMessage);
   }
 
   void SetUp() override {
@@ -257,14 +296,15 @@ class CloudPolicyClientTest : public testing::Test {
   }
 
   void CreateClient() {
-    if (client_.get())
+    if (client_)
       client_->RemoveObserver(&observer_);
 
-    request_context_ =
-        new net::TestURLRequestContextGetter(loop_.task_runner());
+    shared_url_loader_factory_ =
+        base::MakeRefCounted<network::WeakWrapperSharedURLLoaderFactory>(
+            &url_loader_factory_);
     client_ = std::make_unique<CloudPolicyClient>(
-        kMachineID, kMachineModel, &service_, request_context_,
-        &fake_signing_service_,
+        kMachineID, kMachineModel, kBrandCode, &service_,
+        shared_url_loader_factory_, &fake_signing_service_,
         base::BindRepeating(
             &MockDeviceDMTokenCallbackObserver::OnDeviceDMTokenRequested,
             base::Unretained(&device_dmtoken_callback_observer_)));
@@ -275,139 +315,180 @@ class CloudPolicyClientTest : public testing::Test {
   void ExpectRegistration(const std::string& oauth_token) {
     EXPECT_CALL(service_,
                 CreateJob(DeviceManagementRequestJob::TYPE_REGISTRATION,
-                          request_context_))
+                          shared_url_loader_factory_))
         .WillOnce(service_.SucceedJob(registration_response_));
     EXPECT_CALL(service_,
                 StartJob(dm_protocol::kValueRequestRegister, std::string(),
-                         oauth_token, std::string(), _,
+                         oauth_token, std::string(), std::string(), _,
                          MatchProto(registration_request_)))
-        .WillOnce(SaveArg<4>(&client_id_));
+        .WillOnce(SaveArg<5>(&client_id_));
+  }
+
+  void ExpectReregistration(const std::string& oauth_token) {
+    EXPECT_CALL(service_,
+                CreateJob(DeviceManagementRequestJob::TYPE_REGISTRATION,
+                          shared_url_loader_factory_))
+        .WillOnce(service_.SucceedJob(registration_response_));
+    EXPECT_CALL(service_,
+                StartJob(dm_protocol::kValueRequestRegister, std::string(),
+                         oauth_token, std::string(), std::string(), client_id_,
+                         MatchProto(reregistration_request_)));
+  }
+
+  void ExpectFailedReregistration(const std::string& oauth_token) {
+    EXPECT_CALL(service_,
+                CreateJob(DeviceManagementRequestJob::TYPE_REGISTRATION,
+                          shared_url_loader_factory_))
+        .WillOnce(service_.SucceedJob(failed_reregistration_response_));
+    EXPECT_CALL(service_,
+                StartJob(dm_protocol::kValueRequestRegister, std::string(),
+                         oauth_token, std::string(), std::string(), client_id_,
+                         MatchProto(reregistration_request_)));
   }
 
   void ExpectCertBasedRegistration() {
     EXPECT_CALL(device_dmtoken_callback_observer_, OnDeviceDMTokenRequested(_))
         .WillOnce(Return(kDeviceDMToken));
-    EXPECT_CALL(service_, CreateJob(
-        DeviceManagementRequestJob::TYPE_CERT_BASED_REGISTRATION,
-        request_context_))
+    EXPECT_CALL(
+        service_,
+        CreateJob(DeviceManagementRequestJob::TYPE_CERT_BASED_REGISTRATION,
+                  shared_url_loader_factory_))
         .WillOnce(service_.SucceedJob(registration_response_));
     EXPECT_CALL(service_,
                 StartJob(dm_protocol::kValueRequestCertBasedRegister,
-                         std::string(), _, std::string(), _,
+                         std::string(), _, std::string(), std::string(), _,
                          MatchProto(cert_based_registration_request_)))
-        .WillOnce(SaveArg<4>(&client_id_));
+        .WillOnce(SaveArg<5>(&client_id_));
   }
 
   void ExpectEnrollmentTokenBasedRegistration() {
     EXPECT_CALL(service_,
                 CreateJob(DeviceManagementRequestJob::TYPE_TOKEN_ENROLLMENT,
-                          request_context_))
+                          shared_url_loader_factory_))
         .WillOnce(service_.SucceedJob(registration_response_));
     EXPECT_CALL(service_, StartJob(dm_protocol::kValueRequestTokenEnrollment,
                                    std::string(), std::string(), std::string(),
-                                   _, MatchProto(enrollment_token_request_)))
-        .WillOnce(SaveArg<4>(&client_id_));
+                                   kEnrollmentToken, _,
+                                   MatchProto(enrollment_token_request_)))
+        .WillOnce(SaveArg<5>(&client_id_));
   }
 
   void ExpectPolicyFetch(const std::string& dm_token) {
     EXPECT_CALL(service_,
                 CreateJob(DeviceManagementRequestJob::TYPE_POLICY_FETCH,
-                          request_context_))
+                          shared_url_loader_factory_))
         .WillOnce(service_.SucceedJob(policy_response_));
     EXPECT_CALL(service_,
                 StartJob(dm_protocol::kValueRequestPolicy, std::string(),
-                         std::string(), dm_token, client_id_,
+                         std::string(), dm_token, std::string(), client_id_,
                          MatchProto(policy_request_)));
   }
 
   void ExpectUnregistration(const std::string& dm_token) {
     EXPECT_CALL(service_,
                 CreateJob(DeviceManagementRequestJob::TYPE_UNREGISTRATION,
-                          request_context_))
+                          shared_url_loader_factory_))
         .WillOnce(service_.SucceedJob(unregistration_response_));
     EXPECT_CALL(service_,
                 StartJob(dm_protocol::kValueRequestUnregister, std::string(),
-                         std::string(), dm_token, client_id_,
+                         std::string(), dm_token, std::string(), client_id_,
                          MatchProto(unregistration_request_)));
   }
 
   void ExpectUploadCertificate(const em::DeviceManagementRequest& request) {
     EXPECT_CALL(service_,
                 CreateJob(DeviceManagementRequestJob::TYPE_UPLOAD_CERTIFICATE,
-                          request_context_))
+                          shared_url_loader_factory_))
         .WillOnce(service_.SucceedJob(upload_certificate_response_));
-    EXPECT_CALL(service_, StartJob(dm_protocol::kValueRequestUploadCertificate,
-                                   std::string(), std::string(), kDMToken,
-                                   client_id_, MatchProto(request)));
+    EXPECT_CALL(service_,
+                StartJob(dm_protocol::kValueRequestUploadCertificate,
+                         std::string(), std::string(), kDMToken, std::string(),
+                         client_id_, MatchProto(request)));
   }
 
   void ExpectUploadStatus() {
     EXPECT_CALL(service_,
                 CreateJob(DeviceManagementRequestJob::TYPE_UPLOAD_STATUS,
-                          request_context_))
+                          shared_url_loader_factory_))
         .WillOnce(service_.SucceedJob(upload_status_response_));
     EXPECT_CALL(service_,
-                StartJob(dm_protocol::kValueRequestUploadStatus,
-                         std::string(), std::string(), kDMToken,
-                         client_id_, MatchProto(upload_status_request_)));
+                StartJob(dm_protocol::kValueRequestUploadStatus, std::string(),
+                         std::string(), kDMToken, std::string(), client_id_,
+                         MatchProto(upload_status_request_)));
+  }
+
+  void ExpectUploadPolicyValidationReport() {
+    EXPECT_CALL(
+        service_,
+        CreateJob(
+            DeviceManagementRequestJob::TYPE_UPLOAD_POLICY_VALIDATION_REPORT,
+            shared_url_loader_factory_))
+        .WillOnce(
+            service_.SucceedJob(upload_policy_validation_report_response_));
+    EXPECT_CALL(service_,
+                StartJob(dm_protocol::kValueRequestUploadPolicyValidationReport,
+                         std::string(), std::string(), kDMToken, std::string(),
+                         client_id_,
+                         MatchProto(upload_policy_validation_report_request_)));
   }
 
   void ExpectChromeDesktopReport() {
     EXPECT_CALL(
         service_,
         CreateJob(DeviceManagementRequestJob::TYPE_CHROME_DESKTOP_REPORT,
-                  request_context_))
+                  shared_url_loader_factory_))
         .WillOnce(service_.SucceedJob(chrome_desktop_report_response_));
-    EXPECT_CALL(service_,
-                StartJob(dm_protocol::kValueRequestChromeDesktopReport,
-                         std::string(), std::string(), kDMToken, client_id_,
-                         MatchProto(chrome_desktop_report_request_)));
+    EXPECT_CALL(
+        service_,
+        StartJob(dm_protocol::kValueRequestChromeDesktopReport, std::string(),
+                 std::string(), kDMToken, std::string(), client_id_,
+                 MatchProto(chrome_desktop_report_request_)));
   }
 
   void ExpectFetchRemoteCommands() {
     EXPECT_CALL(service_,
                 CreateJob(DeviceManagementRequestJob::TYPE_REMOTE_COMMANDS,
-                          request_context_))
+                          shared_url_loader_factory_))
         .WillOnce(service_.SucceedJob(remote_command_response_));
     EXPECT_CALL(service_,
                 StartJob(dm_protocol::kValueRequestRemoteCommands,
-                         std::string(), std::string(), kDMToken,
+                         std::string(), std::string(), kDMToken, std::string(),
                          client_id_, MatchProto(remote_command_request_)));
   }
 
   void ExpectAttributeUpdatePermission(const std::string& oauth_token) {
-    EXPECT_CALL(service_,
-          CreateJob(
-              DeviceManagementRequestJob::TYPE_ATTRIBUTE_UPDATE_PERMISSION,
-              request_context_))
-          .WillOnce(service_.SucceedJob(attribute_update_permission_response_));
-    EXPECT_CALL(service_,
-                StartJob(
-                    dm_protocol::kValueRequestDeviceAttributeUpdatePermission,
-                    std::string(), oauth_token, std::string(),
-                    client_id_,
-                    MatchProto(attribute_update_permission_request_)));
+    EXPECT_CALL(
+        service_,
+        CreateJob(DeviceManagementRequestJob::TYPE_ATTRIBUTE_UPDATE_PERMISSION,
+                  shared_url_loader_factory_))
+        .WillOnce(service_.SucceedJob(attribute_update_permission_response_));
+    EXPECT_CALL(
+        service_,
+        StartJob(dm_protocol::kValueRequestDeviceAttributeUpdatePermission,
+                 std::string(), oauth_token, std::string(), std::string(),
+                 client_id_, MatchProto(attribute_update_permission_request_)));
   }
 
   void ExpectAttributeUpdate(const std::string& oauth_token) {
     EXPECT_CALL(service_,
                 CreateJob(DeviceManagementRequestJob::TYPE_ATTRIBUTE_UPDATE,
-                          request_context_))
+                          shared_url_loader_factory_))
         .WillOnce(service_.SucceedJob(attribute_update_response_));
-    EXPECT_CALL(service_,
-                StartJob(dm_protocol::kValueRequestDeviceAttributeUpdate,
-                         std::string(), oauth_token, std::string(),
-                         client_id_, MatchProto(attribute_update_request_)));
+    EXPECT_CALL(
+        service_,
+        StartJob(dm_protocol::kValueRequestDeviceAttributeUpdate, std::string(),
+                 oauth_token, std::string(), std::string(), client_id_,
+                 MatchProto(attribute_update_request_)));
   }
 
   void ExpectGcmIdUpdate() {
     EXPECT_CALL(service_,
                 CreateJob(DeviceManagementRequestJob::TYPE_GCM_ID_UPDATE,
-                          request_context_))
+                          shared_url_loader_factory_))
         .WillOnce(service_.SucceedJob(gcm_id_update_response_));
     EXPECT_CALL(service_,
                 StartJob(dm_protocol::kValueRequestGcmIdUpdate, std::string(),
-                         std::string(), kDMToken, client_id_,
+                         std::string(), kDMToken, std::string(), client_id_,
                          MatchProto(gcm_id_update_request_)));
   }
 
@@ -416,11 +497,11 @@ class CloudPolicyClientTest : public testing::Test {
     EXPECT_CALL(
         service_,
         CreateJob(DeviceManagementRequestJob::TYPE_REQUEST_LICENSE_TYPES,
-                  request_context_))
+                  shared_url_loader_factory_))
         .WillOnce(service_.SucceedJob(response));
     EXPECT_CALL(service_, StartJob(dm_protocol::kValueRequestCheckDeviceLicense,
                                    std::string(), oauth_token, std::string(),
-                                   std::string(),
+                                   std::string(), std::string(),
                                    MatchProto(check_device_license_request_)));
   }
 
@@ -430,18 +511,19 @@ class CloudPolicyClientTest : public testing::Test {
       EXPECT_CALL(
           service_,
           CreateJob(DeviceManagementRequestJob::TYPE_UPLOAD_APP_INSTALL_REPORT,
-                    request_context_))
+                    shared_url_loader_factory_))
           .WillOnce(service_.CreateAsyncJob(async_job));
     } else {
       EXPECT_CALL(
           service_,
           CreateJob(DeviceManagementRequestJob::TYPE_UPLOAD_APP_INSTALL_REPORT,
-                    request_context_))
+                    shared_url_loader_factory_))
           .WillOnce(service_.SucceedJob(upload_app_install_report_response_));
     }
-    EXPECT_CALL(service_, StartJob(dm_protocol::kValueRequestAppInstallReport,
-                                   std::string(), std::string(), kDMToken,
-                                   client_id_, MatchProto(request)));
+    EXPECT_CALL(service_,
+                StartJob(dm_protocol::kValueRequestAppInstallReport,
+                         std::string(), std::string(), kDMToken, std::string(),
+                         client_id_, MatchProto(request)));
   }
 
   void CheckPolicyResponse() {
@@ -459,12 +541,14 @@ class CloudPolicyClientTest : public testing::Test {
 
   // Request protobufs used as expectations for the client requests.
   em::DeviceManagementRequest registration_request_;
+  em::DeviceManagementRequest reregistration_request_;
   em::DeviceManagementRequest cert_based_registration_request_;
   em::DeviceManagementRequest enrollment_token_request_;
   em::DeviceManagementRequest policy_request_;
   em::DeviceManagementRequest unregistration_request_;
   em::DeviceManagementRequest upload_machine_certificate_request_;
   em::DeviceManagementRequest upload_enrollment_certificate_request_;
+  em::DeviceManagementRequest upload_enrollment_id_request_;
   em::DeviceManagementRequest upload_status_request_;
   em::DeviceManagementRequest chrome_desktop_report_request_;
   em::DeviceManagementRequest remote_command_request_;
@@ -472,9 +556,11 @@ class CloudPolicyClientTest : public testing::Test {
   em::DeviceManagementRequest attribute_update_request_;
   em::DeviceManagementRequest gcm_id_update_request_;
   em::DeviceManagementRequest check_device_license_request_;
+  em::DeviceManagementRequest upload_policy_validation_report_request_;
 
   // Protobufs used in successful responses.
   em::DeviceManagementResponse registration_response_;
+  em::DeviceManagementResponse failed_reregistration_response_;
   em::DeviceManagementResponse policy_response_;
   em::DeviceManagementResponse unregistration_response_;
   em::DeviceManagementResponse upload_certificate_response_;
@@ -487,6 +573,7 @@ class CloudPolicyClientTest : public testing::Test {
   em::DeviceManagementResponse check_device_license_response_;
   em::DeviceManagementResponse check_device_license_broken_response_;
   em::DeviceManagementResponse upload_app_install_report_response_;
+  em::DeviceManagementResponse upload_policy_validation_report_response_;
 
   base::MessageLoop loop_;
   std::string client_id_;
@@ -499,8 +586,8 @@ class CloudPolicyClientTest : public testing::Test {
       device_dmtoken_callback_observer_;
   FakeSigningService fake_signing_service_;
   std::unique_ptr<CloudPolicyClient> client_;
-  // Pointer to the client's request context.
-  scoped_refptr<net::URLRequestContextGetter> request_context_;
+  network::TestURLLoaderFactory url_loader_factory_;
+  scoped_refptr<network::SharedURLLoaderFactory> shared_url_loader_factory_;
 };
 
 TEST_F(CloudPolicyClientTest, Init) {
@@ -554,7 +641,8 @@ TEST_F(CloudPolicyClientTest, RegistrationAndPolicyFetch) {
   client_->Register(em::DeviceRegisterRequest::USER,
                     em::DeviceRegisterRequest::FLAVOR_USER_REGISTRATION,
                     em::DeviceRegisterRequest::LIFETIME_INDEFINITE,
-                    em::LicenseType::UNDEFINED, kOAuthToken, std::string(),
+                    em::LicenseType::UNDEFINED,
+                    DMAuth::FromOAuthToken(kOAuthToken), std::string(),
                     std::string(), std::string());
   EXPECT_TRUE(client_->is_registered());
   EXPECT_FALSE(client_->GetPolicyFor(policy_type_, std::string()));
@@ -616,7 +704,8 @@ TEST_F(CloudPolicyClientTest, RegistrationParametersPassedThrough) {
   client_->Register(em::DeviceRegisterRequest::USER,
                     em::DeviceRegisterRequest::FLAVOR_ENROLLMENT_MANUAL,
                     em::DeviceRegisterRequest::LIFETIME_INDEFINITE,
-                    em::LicenseType::UNDEFINED, kOAuthToken, kClientID,
+                    em::LicenseType::UNDEFINED,
+                    DMAuth::FromOAuthToken(kOAuthToken), kClientID,
                     kRequisition, kStateKey);
   EXPECT_EQ(kClientID, client_id_);
 }
@@ -629,7 +718,8 @@ TEST_F(CloudPolicyClientTest, RegistrationNoToken) {
   client_->Register(em::DeviceRegisterRequest::USER,
                     em::DeviceRegisterRequest::FLAVOR_USER_REGISTRATION,
                     em::DeviceRegisterRequest::LIFETIME_INDEFINITE,
-                    em::LicenseType::UNDEFINED, kOAuthToken, std::string(),
+                    em::LicenseType::UNDEFINED,
+                    DMAuth::FromOAuthToken(kOAuthToken), std::string(),
                     std::string(), std::string());
   EXPECT_FALSE(client_->is_registered());
   EXPECT_FALSE(client_->GetPolicyFor(policy_type_, std::string()));
@@ -637,16 +727,16 @@ TEST_F(CloudPolicyClientTest, RegistrationNoToken) {
 }
 
 TEST_F(CloudPolicyClientTest, RegistrationFailure) {
-  EXPECT_CALL(service_,
-              CreateJob(DeviceManagementRequestJob::TYPE_REGISTRATION,
-                        request_context_))
+  EXPECT_CALL(service_, CreateJob(DeviceManagementRequestJob::TYPE_REGISTRATION,
+                                  shared_url_loader_factory_))
       .WillOnce(service_.FailJob(DM_STATUS_REQUEST_FAILED));
-  EXPECT_CALL(service_, StartJob(_, _, _, _, _, _));
+  EXPECT_CALL(service_, StartJob(_, _, _, _, _, _, _));
   EXPECT_CALL(observer_, OnClientError(_));
   client_->Register(em::DeviceRegisterRequest::USER,
                     em::DeviceRegisterRequest::FLAVOR_USER_REGISTRATION,
                     em::DeviceRegisterRequest::LIFETIME_INDEFINITE,
-                    em::LicenseType::UNDEFINED, kOAuthToken, std::string(),
+                    em::LicenseType::UNDEFINED,
+                    DMAuth::FromOAuthToken(kOAuthToken), std::string(),
                     std::string(), std::string());
   EXPECT_FALSE(client_->is_registered());
   EXPECT_FALSE(client_->GetPolicyFor(policy_type_, std::string()));
@@ -658,18 +748,18 @@ TEST_F(CloudPolicyClientTest, RetryRegistration) {
   EXPECT_FALSE(
       registration_request_.mutable_register_request()->has_reregister());
   MockDeviceManagementJob* register_job = nullptr;
-  EXPECT_CALL(service_,
-              CreateJob(DeviceManagementRequestJob::TYPE_REGISTRATION,
-                        request_context_))
+  EXPECT_CALL(service_, CreateJob(DeviceManagementRequestJob::TYPE_REGISTRATION,
+                                  shared_url_loader_factory_))
       .WillOnce(service_.CreateAsyncJob(&register_job));
   EXPECT_CALL(service_,
               StartJob(dm_protocol::kValueRequestRegister, std::string(),
-                       kOAuthToken, std::string(), _,
+                       kOAuthToken, std::string(), std::string(), _,
                        MatchProto(registration_request_)));
   client_->Register(em::DeviceRegisterRequest::USER,
                     em::DeviceRegisterRequest::FLAVOR_USER_REGISTRATION,
                     em::DeviceRegisterRequest::LIFETIME_INDEFINITE,
-                    em::LicenseType::UNDEFINED, kOAuthToken, std::string(),
+                    em::LicenseType::UNDEFINED,
+                    DMAuth::FromOAuthToken(kOAuthToken), std::string(),
                     std::string(), std::string());
   EXPECT_FALSE(client_->is_registered());
   Mock::VerifyAndClearExpectations(&service_);
@@ -678,7 +768,7 @@ TEST_F(CloudPolicyClientTest, RetryRegistration) {
   registration_request_.mutable_register_request()->set_reregister(true);
   EXPECT_CALL(service_,
               StartJob(dm_protocol::kValueRequestRegister, std::string(),
-                       kOAuthToken, std::string(), _,
+                       kOAuthToken, std::string(), std::string(), _,
                        MatchProto(registration_request_)));
   register_job->RetryJob();
   Mock::VerifyAndClearExpectations(&service_);
@@ -686,7 +776,7 @@ TEST_F(CloudPolicyClientTest, RetryRegistration) {
   // Subsequent retries keep the flag set.
   EXPECT_CALL(service_,
               StartJob(dm_protocol::kValueRequestRegister, std::string(),
-                       kOAuthToken, std::string(), _,
+                       kOAuthToken, std::string(), std::string(), _,
                        MatchProto(registration_request_)));
   register_job->RetryJob();
   Mock::VerifyAndClearExpectations(&service_);
@@ -784,11 +874,10 @@ TEST_F(CloudPolicyClientTest, BadPolicyResponse) {
 TEST_F(CloudPolicyClientTest, PolicyRequestFailure) {
   Register();
 
-  EXPECT_CALL(service_,
-              CreateJob(DeviceManagementRequestJob::TYPE_POLICY_FETCH,
-                        request_context_))
+  EXPECT_CALL(service_, CreateJob(DeviceManagementRequestJob::TYPE_POLICY_FETCH,
+                                  shared_url_loader_factory_))
       .WillOnce(service_.FailJob(DM_STATUS_REQUEST_FAILED));
-  EXPECT_CALL(service_, StartJob(_, _, _, _, _, _));
+  EXPECT_CALL(service_, StartJob(_, _, _, _, _, _, _));
   EXPECT_CALL(observer_, OnClientError(_));
   client_->FetchPolicy();
   EXPECT_EQ(DM_STATUS_REQUEST_FAILED, client_->status());
@@ -811,9 +900,9 @@ TEST_F(CloudPolicyClientTest, UnregisterEmpty) {
   unregistration_response_.clear_unregister_response();
   EXPECT_CALL(service_,
               CreateJob(DeviceManagementRequestJob::TYPE_UNREGISTRATION,
-                        request_context_))
+                        shared_url_loader_factory_))
       .WillOnce(service_.SucceedJob(unregistration_response_));
-  EXPECT_CALL(service_, StartJob(_, _, _, _, _, _));
+  EXPECT_CALL(service_, StartJob(_, _, _, _, _, _, _));
   EXPECT_CALL(observer_, OnRegistrationStateChanged(_));
   client_->Unregister();
   EXPECT_FALSE(client_->is_registered());
@@ -825,9 +914,9 @@ TEST_F(CloudPolicyClientTest, UnregisterFailure) {
 
   EXPECT_CALL(service_,
               CreateJob(DeviceManagementRequestJob::TYPE_UNREGISTRATION,
-                        request_context_))
+                        shared_url_loader_factory_))
       .WillOnce(service_.FailJob(DM_STATUS_REQUEST_FAILED));
-  EXPECT_CALL(service_, StartJob(_, _, _, _, _, _));
+  EXPECT_CALL(service_, StartJob(_, _, _, _, _, _, _));
   EXPECT_CALL(observer_, OnClientError(_));
   client_->Unregister();
   EXPECT_TRUE(client_->is_registered());
@@ -866,15 +955,13 @@ TEST_F(CloudPolicyClientTest, PolicyFetchWithExtensionPolicy) {
   }
 
   // Make a policy fetch.
-  EXPECT_CALL(service_,
-              CreateJob(DeviceManagementRequestJob::TYPE_POLICY_FETCH,
-                        request_context_))
+  EXPECT_CALL(service_, CreateJob(DeviceManagementRequestJob::TYPE_POLICY_FETCH,
+                                  shared_url_loader_factory_))
       .WillOnce(service_.SucceedJob(policy_response_));
-  EXPECT_CALL(
-      service_,
-      StartJob(dm_protocol::kValueRequestPolicy, std::string(), std::string(),
-               kDMToken, client_id_, _))
-      .WillOnce(SaveArg<5>(&policy_request_));
+  EXPECT_CALL(service_,
+              StartJob(dm_protocol::kValueRequestPolicy, std::string(),
+                       std::string(), kDMToken, std::string(), client_id_, _))
+      .WillOnce(SaveArg<6>(&policy_request_));
   EXPECT_CALL(observer_, OnPolicyFetched(_));
   client_->AddPolicyTypeToFetch(dm_protocol::kChromeExtensionPolicyType,
                                 std::string());
@@ -963,15 +1050,27 @@ TEST_F(CloudPolicyClientTest, UploadCertificateFailure) {
   EXPECT_CALL(callback_observer_, OnCallbackComplete(false)).Times(1);
   EXPECT_CALL(service_,
               CreateJob(DeviceManagementRequestJob::TYPE_UPLOAD_CERTIFICATE,
-                        request_context_))
+                        shared_url_loader_factory_))
       .WillOnce(service_.FailJob(DM_STATUS_REQUEST_FAILED));
-  EXPECT_CALL(service_, StartJob(_, _, _, _, _, _));
+  EXPECT_CALL(service_, StartJob(_, _, _, _, _, _, _));
   EXPECT_CALL(observer_, OnClientError(_));
   CloudPolicyClient::StatusCallback callback = base::Bind(
       &MockStatusCallbackObserver::OnCallbackComplete,
       base::Unretained(&callback_observer_));
   client_->UploadEnterpriseMachineCertificate(kMachineCertificate, callback);
   EXPECT_EQ(DM_STATUS_REQUEST_FAILED, client_->status());
+}
+
+TEST_F(CloudPolicyClientTest, UploadEnterpriseEnrollmentId) {
+  Register();
+
+  ExpectUploadCertificate(upload_enrollment_id_request_);
+  EXPECT_CALL(callback_observer_, OnCallbackComplete(true)).Times(1);
+  CloudPolicyClient::StatusCallback callback =
+      base::BindRepeating(&MockStatusCallbackObserver::OnCallbackComplete,
+                          base::Unretained(&callback_observer_));
+  client_->UploadEnterpriseEnrollmentId(kEnrollmentId, callback);
+  EXPECT_EQ(DM_STATUS_SUCCESS, client_->status());
 }
 
 TEST_F(CloudPolicyClientTest, UploadStatus) {
@@ -993,9 +1092,9 @@ TEST_F(CloudPolicyClientTest, UploadStatusWhilePolicyFetchActive) {
   MockDeviceManagementJob* upload_status_job = nullptr;
   EXPECT_CALL(service_,
               CreateJob(DeviceManagementRequestJob::TYPE_UPLOAD_STATUS,
-                        request_context_))
+                        shared_url_loader_factory_))
       .WillOnce(service_.CreateAsyncJob(&upload_status_job));
-  EXPECT_CALL(service_, StartJob(_, _, _, _, _, _));
+  EXPECT_CALL(service_, StartJob(_, _, _, _, _, _, _));
   EXPECT_CALL(callback_observer_, OnCallbackComplete(true)).Times(1);
   CloudPolicyClient::StatusCallback callback = base::Bind(
       &MockStatusCallbackObserver::OnCallbackComplete,
@@ -1011,6 +1110,19 @@ TEST_F(CloudPolicyClientTest, UploadStatusWhilePolicyFetchActive) {
   CheckPolicyResponse();
 
   upload_status_job->SendResponse(DM_STATUS_SUCCESS, upload_status_response_);
+  EXPECT_EQ(DM_STATUS_SUCCESS, client_->status());
+}
+
+TEST_F(CloudPolicyClientTest, UploadPolicyValidationReport) {
+  Register();
+
+  ExpectUploadPolicyValidationReport();
+  std::vector<ValueValidationIssue> issues;
+  issues.push_back(
+      {kPolicyName, ValueValidationIssue::kWarning, kValueValidationMessage});
+  client_->UploadPolicyValidationReport(
+      CloudPolicyValidatorBase::VALIDATION_VALUE_WARNING, issues, policy_type_,
+      kPolicyToken);
   EXPECT_EQ(DM_STATUS_SUCCESS, client_->status());
 }
 
@@ -1036,9 +1148,9 @@ TEST_F(CloudPolicyClientTest, MultipleActiveRequests) {
   MockDeviceManagementJob* upload_status_job = nullptr;
   EXPECT_CALL(service_,
               CreateJob(DeviceManagementRequestJob::TYPE_UPLOAD_STATUS,
-                        request_context_))
+                        shared_url_loader_factory_))
       .WillOnce(service_.CreateAsyncJob(&upload_status_job));
-  EXPECT_CALL(service_, StartJob(_, _, _, _, _, _));
+  EXPECT_CALL(service_, StartJob(_, _, _, _, _, _, _));
   CloudPolicyClient::StatusCallback callback = base::Bind(
       &MockStatusCallbackObserver::OnCallbackComplete,
       base::Unretained(&callback_observer_));
@@ -1050,9 +1162,9 @@ TEST_F(CloudPolicyClientTest, MultipleActiveRequests) {
   MockDeviceManagementJob* upload_certificate_job = nullptr;
   EXPECT_CALL(service_,
               CreateJob(DeviceManagementRequestJob::TYPE_UPLOAD_CERTIFICATE,
-                        request_context_))
+                        shared_url_loader_factory_))
       .WillOnce(service_.CreateAsyncJob(&upload_certificate_job));
-  EXPECT_CALL(service_, StartJob(_, _, _, _, _, _));
+  EXPECT_CALL(service_, StartJob(_, _, _, _, _, _, _));
 
   // Expect two calls on our upload observer, one for the status upload and
   // one for the certificate upload.
@@ -1079,9 +1191,9 @@ TEST_F(CloudPolicyClientTest, UploadStatusFailure) {
   EXPECT_CALL(callback_observer_, OnCallbackComplete(false)).Times(1);
   EXPECT_CALL(service_,
               CreateJob(DeviceManagementRequestJob::TYPE_UPLOAD_STATUS,
-                        request_context_))
+                        shared_url_loader_factory_))
       .WillOnce(service_.FailJob(DM_STATUS_REQUEST_FAILED));
-  EXPECT_CALL(service_, StartJob(_, _, _, _, _, _));
+  EXPECT_CALL(service_, StartJob(_, _, _, _, _, _, _));
   EXPECT_CALL(observer_, OnClientError(_));
   CloudPolicyClient::StatusCallback callback = base::Bind(
       &MockStatusCallbackObserver::OnCallbackComplete,
@@ -1100,9 +1212,9 @@ TEST_F(CloudPolicyClientTest, RequestCancelOnUnregister) {
   MockDeviceManagementJob* upload_status_job = nullptr;
   EXPECT_CALL(service_,
               CreateJob(DeviceManagementRequestJob::TYPE_UPLOAD_STATUS,
-                        request_context_))
+                        shared_url_loader_factory_))
       .WillOnce(service_.CreateAsyncJob(&upload_status_job));
-  EXPECT_CALL(service_, StartJob(_, _, _, _, _, _));
+  EXPECT_CALL(service_, StartJob(_, _, _, _, _, _, _));
   CloudPolicyClient::StatusCallback callback = base::Bind(
       &MockStatusCallbackObserver::OnCallbackComplete,
       base::Unretained(&callback_observer_));
@@ -1129,15 +1241,15 @@ TEST_F(CloudPolicyClientTest, FetchRemoteCommands) {
           ElementsAre(MatchProto(
               remote_command_response_.remote_command_response().commands(0)))))
       .Times(1);
-  const CloudPolicyClient::RemoteCommandCallback callback =
-      base::Bind(&MockRemoteCommandsObserver::OnRemoteCommandsFetched,
-                 base::Unretained(&remote_commands_observer));
+  CloudPolicyClient::RemoteCommandCallback callback =
+      base::BindOnce(&MockRemoteCommandsObserver::OnRemoteCommandsFetched,
+                     base::Unretained(&remote_commands_observer));
 
   const std::vector<em::RemoteCommandResult> command_results(
       1, remote_command_request_.remote_command_request().command_results(0));
   client_->FetchRemoteCommands(
       std::make_unique<RemoteCommandJob::UniqueIDType>(kLastCommandId),
-      command_results, callback);
+      command_results, std::move(callback));
 
   EXPECT_EQ(DM_STATUS_SUCCESS, client_->status());
 }
@@ -1150,7 +1262,8 @@ TEST_F(CloudPolicyClientTest, RequestDeviceAttributeUpdatePermission) {
   CloudPolicyClient::StatusCallback callback = base::Bind(
       &MockStatusCallbackObserver::OnCallbackComplete,
       base::Unretained(&callback_observer_));
-  client_->GetDeviceAttributeUpdatePermission(kOAuthToken, callback);
+  client_->GetDeviceAttributeUpdatePermission(
+      DMAuth::FromOAuthToken(kOAuthToken), callback);
   EXPECT_EQ(DM_STATUS_SUCCESS, client_->status());
 }
 
@@ -1162,7 +1275,8 @@ TEST_F(CloudPolicyClientTest, RequestDeviceAttributeUpdate) {
   CloudPolicyClient::StatusCallback callback =
       base::Bind(&MockStatusCallbackObserver::OnCallbackComplete,
                  base::Unretained(&callback_observer_));
-  client_->UpdateDeviceAttributes(kOAuthToken, kAssetId, kLocation, callback);
+  client_->UpdateDeviceAttributes(DMAuth::FromOAuthToken(kOAuthToken), kAssetId,
+                                  kLocation, callback);
   EXPECT_EQ(DM_STATUS_SUCCESS, client_->status());
 }
 
@@ -1181,28 +1295,32 @@ TEST_F(CloudPolicyClientTest, RequestGcmIdUpdate) {
 TEST_F(CloudPolicyClientTest, RequestAvailableLicenses) {
   ExpectCheckDeviceLicense(kOAuthToken, check_device_license_response_);
 
-  EXPECT_CALL(license_callback_observer_, OnAvailableLicensesFetched(true, _))
+  EXPECT_CALL(license_callback_observer_,
+              OnAvailableLicensesFetched(DM_STATUS_SUCCESS, _))
       .Times(1);
 
   CloudPolicyClient::LicenseRequestCallback callback =
       base::Bind(&MockAvailableLicensesObserver::OnAvailableLicensesFetched,
                  base::Unretained(&license_callback_observer_));
 
-  client_->RequestAvailableLicenses(kOAuthToken, callback);
+  client_->RequestAvailableLicenses(DMAuth::FromOAuthToken(kOAuthToken),
+                                    callback);
   EXPECT_EQ(DM_STATUS_SUCCESS, client_->status());
 }
 
 TEST_F(CloudPolicyClientTest, RequestAvailableLicensesBrokenResponse) {
   ExpectCheckDeviceLicense(kOAuthToken, check_device_license_broken_response_);
 
-  EXPECT_CALL(license_callback_observer_, OnAvailableLicensesFetched(false, _))
+  EXPECT_CALL(license_callback_observer_,
+              OnAvailableLicensesFetched(DM_STATUS_RESPONSE_DECODING_ERROR, _))
       .Times(1);
 
   CloudPolicyClient::LicenseRequestCallback callback =
       base::Bind(&MockAvailableLicensesObserver::OnAvailableLicensesFetched,
                  base::Unretained(&license_callback_observer_));
 
-  client_->RequestAvailableLicenses(kOAuthToken, callback);
+  client_->RequestAvailableLicenses(DMAuth::FromOAuthToken(kOAuthToken),
+                                    callback);
   EXPECT_EQ(DM_STATUS_RESPONSE_DECODING_ERROR, client_->status());
 }
 
@@ -1276,6 +1394,74 @@ TEST_F(CloudPolicyClientTest, UploadAppInstallReportSupersedesPending) {
                           upload_app_install_report_response_);
   EXPECT_EQ(DM_STATUS_SUCCESS, client_->status());
   EXPECT_EQ(0, client_->GetActiveRequestCountForTest());
+}
+
+TEST_F(CloudPolicyClientTest, PolicyReregistration) {
+  Register();
+
+  // Handle 410 (unknown deviceID) on policy fetch.
+  EXPECT_TRUE(client_->is_registered());
+  EXPECT_FALSE(client_->requires_reregistration());
+  EXPECT_CALL(service_, CreateJob(DeviceManagementRequestJob::TYPE_POLICY_FETCH,
+                                  shared_url_loader_factory_))
+      .WillOnce(service_.FailJob(DM_STATUS_SERVICE_DEVICE_NOT_FOUND));
+  EXPECT_CALL(service_, StartJob(_, _, _, _, _, _, _));
+  EXPECT_CALL(observer_, OnRegistrationStateChanged(_));
+  EXPECT_CALL(observer_, OnClientError(_));
+  client_->FetchPolicy();
+  EXPECT_EQ(DM_STATUS_SERVICE_DEVICE_NOT_FOUND, client_->status());
+  EXPECT_FALSE(client_->GetPolicyFor(policy_type_, std::string()));
+  EXPECT_FALSE(client_->is_registered());
+  EXPECT_TRUE(client_->requires_reregistration());
+
+  // Re-register.
+  ExpectReregistration(kOAuthToken);
+  EXPECT_CALL(observer_, OnRegistrationStateChanged(_));
+  EXPECT_CALL(device_dmtoken_callback_observer_, OnDeviceDMTokenRequested(_))
+      .WillOnce(Return(kDeviceDMToken));
+  client_->Register(em::DeviceRegisterRequest::USER,
+                    em::DeviceRegisterRequest::FLAVOR_ENROLLMENT_RECOVERY,
+                    em::DeviceRegisterRequest::LIFETIME_INDEFINITE,
+                    em::LicenseType::UNDEFINED,
+                    DMAuth::FromOAuthToken(kOAuthToken), client_id_,
+                    std::string(), std::string());
+  EXPECT_TRUE(client_->is_registered());
+  EXPECT_FALSE(client_->requires_reregistration());
+  EXPECT_FALSE(client_->GetPolicyFor(policy_type_, std::string()));
+  EXPECT_EQ(DM_STATUS_SUCCESS, client_->status());
+}
+
+TEST_F(CloudPolicyClientTest, PolicyReregistrationFailsWithNonMatchingDMToken) {
+  Register();
+
+  // Handle 410 (unknown deviceID) on policy fetch.
+  EXPECT_TRUE(client_->is_registered());
+  EXPECT_FALSE(client_->requires_reregistration());
+  EXPECT_CALL(service_, CreateJob(DeviceManagementRequestJob::TYPE_POLICY_FETCH,
+                                  shared_url_loader_factory_))
+      .WillOnce(service_.FailJob(DM_STATUS_SERVICE_DEVICE_NOT_FOUND));
+  EXPECT_CALL(service_, StartJob(_, _, _, _, _, _, _));
+  EXPECT_CALL(observer_, OnRegistrationStateChanged(_));
+  EXPECT_CALL(observer_, OnClientError(_));
+  client_->FetchPolicy();
+  EXPECT_EQ(DM_STATUS_SERVICE_DEVICE_NOT_FOUND, client_->status());
+  EXPECT_FALSE(client_->GetPolicyFor(policy_type_, std::string()));
+  EXPECT_FALSE(client_->is_registered());
+  EXPECT_TRUE(client_->requires_reregistration());
+
+  // Re-register (server sends wrong DMToken).
+  ExpectFailedReregistration(kOAuthToken);
+  EXPECT_CALL(observer_, OnClientError(_));
+  client_->Register(em::DeviceRegisterRequest::USER,
+                    em::DeviceRegisterRequest::FLAVOR_ENROLLMENT_RECOVERY,
+                    em::DeviceRegisterRequest::LIFETIME_INDEFINITE,
+                    em::LicenseType::UNDEFINED,
+                    DMAuth::FromOAuthToken(kOAuthToken), client_id_,
+                    std::string(), std::string());
+  EXPECT_FALSE(client_->is_registered());
+  EXPECT_TRUE(client_->requires_reregistration());
+  EXPECT_FALSE(client_->GetPolicyFor(policy_type_, std::string()));
+  EXPECT_EQ(DM_STATUS_SERVICE_MANAGEMENT_TOKEN_INVALID, client_->status());
 }
 
 }  // namespace policy

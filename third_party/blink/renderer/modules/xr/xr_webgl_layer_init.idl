@@ -2,14 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// https://immersive-web.github.io/webxr/spec/latest/#xrwebgllayerinit-dictionary
-[
-    SecureContext
-] dictionary XRWebGLLayerInit {
+// https://immersive-web.github.io/webxr/#xrwebgllayer-interface
+dictionary XRWebGLLayerInit {
   boolean antialias = true;
   boolean depth = true;
   boolean stencil = false;
   boolean alpha = true;
   boolean multiview = false;
-  double framebufferScaleFactor;
+  double framebufferScaleFactor = 1.0;
 };

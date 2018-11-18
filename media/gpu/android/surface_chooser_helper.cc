@@ -33,6 +33,7 @@ SurfaceChooserHelper::SurfaceChooserHelper(
     std::unique_ptr<AndroidVideoSurfaceChooser> surface_chooser,
     bool is_overlay_required,
     bool promote_aggressively,
+    bool always_use_texture_owner,
     std::unique_ptr<PromotionHintAggregator> promotion_hint_aggregator,
     const base::TickClock* tick_clock)
     : surface_chooser_(std::move(surface_chooser)),
@@ -45,6 +46,7 @@ SurfaceChooserHelper::SurfaceChooserHelper(
                              : base::DefaultTickClock::GetInstance()) {
   surface_chooser_state_.is_required = is_overlay_required_;
   surface_chooser_state_.promote_aggressively = promote_aggressively;
+  surface_chooser_state_.always_use_texture_owner = always_use_texture_owner;
 }
 
 SurfaceChooserHelper::~SurfaceChooserHelper() {}
@@ -87,6 +89,10 @@ void SurfaceChooserHelper::SetIsFullscreen(bool is_fullscreen) {
   }
 
   surface_chooser_state_.is_fullscreen = is_fullscreen;
+}
+
+void SurfaceChooserHelper::SetVideoRotation(VideoRotation video_rotation) {
+  surface_chooser_state_.video_rotation = video_rotation;
 }
 
 void SurfaceChooserHelper::UpdateChooserState(
@@ -143,8 +149,8 @@ SurfaceChooserHelper::ComputeFrameInformation(bool is_using_overlay) {
   if (!is_using_overlay) {
     // Not an overlay.
     return surface_chooser_state_.is_secure
-               ? FrameInformation::SURFACETEXTURE_L3
-               : FrameInformation::SURFACETEXTURE_INSECURE;
+               ? FrameInformation::NON_OVERLAY_L3
+               : FrameInformation::NON_OVERLAY_INSECURE;
   }
 
   // Overlay.

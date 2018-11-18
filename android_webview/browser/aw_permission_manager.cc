@@ -12,6 +12,7 @@
 #include "base/callback.h"
 #include "base/containers/hash_tables.h"
 #include "base/logging.h"
+#include "content/public/browser/permission_controller.h"
 #include "content/public/browser/permission_type.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
@@ -220,10 +221,7 @@ class AwPermissionManager::PendingRequest {
 };
 
 AwPermissionManager::AwPermissionManager()
-  : content::PermissionManager(),
-    result_cache_(new LastRequestResultCache),
-    weak_ptr_factory_(this) {
-}
+    : result_cache_(new LastRequestResultCache), weak_ptr_factory_(this) {}
 
 AwPermissionManager::~AwPermissionManager() {
   CancelPermissionRequests();
@@ -250,7 +248,7 @@ int AwPermissionManager::RequestPermissions(
         callback) {
   if (permissions.empty()) {
     callback.Run(std::vector<PermissionStatus>());
-    return kNoPendingOperation;
+    return content::PermissionController::kNoPendingOperation;
   }
 
   const GURL& embedding_origin = LastCommittedOrigin(render_frame_host);
@@ -322,18 +320,23 @@ int AwPermissionManager::RequestPermissions(
       case PermissionType::NOTIFICATIONS:
       case PermissionType::DURABLE_STORAGE:
       case PermissionType::BACKGROUND_SYNC:
-      case PermissionType::SENSORS:
       case PermissionType::FLASH:
       case PermissionType::ACCESSIBILITY_EVENTS:
       case PermissionType::CLIPBOARD_READ:
       case PermissionType::CLIPBOARD_WRITE:
       case PermissionType::PAYMENT_HANDLER:
+      case PermissionType::BACKGROUND_FETCH:
         NOTIMPLEMENTED() << "RequestPermissions is not implemented for "
                          << static_cast<int>(permissions[i]);
         pending_request_raw->SetPermissionStatus(permissions[i],
                                                  PermissionStatus::DENIED);
         break;
       case PermissionType::MIDI:
+      case PermissionType::SENSORS:
+        // PermissionType::SENSORS requests are always granted so that access
+        // to device motion and device orientation data (and underlying
+        // sensors) works in the WebView. SensorProviderImpl::GetSensor()
+        // filters requests for other types of sensors.
         pending_request_raw->SetPermissionStatus(permissions[i],
                                                  PermissionStatus::GRANTED);
         break;
@@ -348,7 +351,7 @@ int AwPermissionManager::RequestPermissions(
   // If delegate resolve the permission synchronously, all requests could be
   // already resolved here.
   if (!pending_requests_.Lookup(request_id))
-    return kNoPendingOperation;
+    return content::PermissionController::kNoPendingOperation;
 
   // If requests are resolved without calling delegate functions, e.g.
   // PermissionType::MIDI is permitted within the previous for-loop, all
@@ -358,7 +361,7 @@ int AwPermissionManager::RequestPermissions(
     std::vector<PermissionStatus> results = pending_request_raw->results;
     pending_requests_.Remove(request_id);
     callback.Run(results);
-    return kNoPendingOperation;
+    return content::PermissionController::kNoPendingOperation;
   }
 
   return request_id;
@@ -446,10 +449,10 @@ PermissionStatus AwPermissionManager::GetPermissionStatusForFrame(
 
 int AwPermissionManager::SubscribePermissionStatusChange(
     PermissionType permission,
+    content::RenderFrameHost* render_frame_host,
     const GURL& requesting_origin,
-    const GURL& embedding_origin,
     const base::Callback<void(PermissionStatus)>& callback) {
-  return kNoPendingOperation;
+  return content::PermissionController::kNoPendingOperation;
 }
 
 void AwPermissionManager::UnsubscribePermissionStatusChange(
@@ -509,16 +512,17 @@ void AwPermissionManager::CancelPermissionRequest(int request_id) {
       case PermissionType::AUDIO_CAPTURE:
       case PermissionType::VIDEO_CAPTURE:
       case PermissionType::BACKGROUND_SYNC:
-      case PermissionType::SENSORS:
       case PermissionType::FLASH:
       case PermissionType::ACCESSIBILITY_EVENTS:
       case PermissionType::CLIPBOARD_READ:
       case PermissionType::CLIPBOARD_WRITE:
       case PermissionType::PAYMENT_HANDLER:
+      case PermissionType::BACKGROUND_FETCH:
         NOTIMPLEMENTED() << "CancelPermission not implemented for "
                          << static_cast<int>(permission);
         break;
       case PermissionType::MIDI:
+      case PermissionType::SENSORS:
         // There is nothing to cancel so this is simply ignored.
         break;
       case PermissionType::NUM:

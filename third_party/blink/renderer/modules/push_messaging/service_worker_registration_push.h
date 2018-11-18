@@ -5,7 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_PUSH_MESSAGING_SERVICE_WORKER_REGISTRATION_PUSH_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_PUSH_MESSAGING_SERVICE_WORKER_REGISTRATION_PUSH_H_
 
-#include "third_party/blink/renderer/modules/serviceworkers/service_worker_registration.h"
+#include "third_party/blink/renderer/modules/service_worker/service_worker_registration.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
 
@@ -30,7 +30,7 @@ class ServiceWorkerRegistrationPush final
   static PushManager* pushManager(ServiceWorkerRegistration& registration);
   PushManager* pushManager();
 
-  virtual void Trace(blink::Visitor* visitor);
+  void Trace(blink::Visitor* visitor) override;
 
  private:
   explicit ServiceWorkerRegistrationPush(

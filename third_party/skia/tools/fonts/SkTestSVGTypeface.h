@@ -77,10 +77,15 @@ protected:
     SkScalerContext* onCreateScalerContext(const SkScalerContextEffects&,
                                            const SkDescriptor* desc) const override;
     void onFilterRec(SkScalerContextRec* rec) const override;
+    void getGlyphToUnicodeMap(SkUnichar*) const override;
     std::unique_ptr<SkAdvancedTypefaceMetrics> onGetAdvancedMetrics() const override;
 
     SkStreamAsset* onOpenStream(int* ttcIndex) const override {
         return nullptr;
+    }
+
+    sk_sp<SkTypeface> onMakeClone(const SkFontArguments& args) const override {
+        return sk_ref_sp(this);
     }
 
     void onGetFontDescriptor(SkFontDescriptor* desc, bool* isLocal) const override;
@@ -101,6 +106,12 @@ protected:
 
     int onGetVariationDesignPosition(SkFontArguments::VariationPosition::Coordinate coordinates[],
                                      int coordinateCount) const override
+    {
+        return 0;
+    }
+
+    int onGetVariationDesignParameters(SkFontParameters::Variation::Axis parameters[],
+                                       int parameterCount) const override
     {
         return 0;
     }

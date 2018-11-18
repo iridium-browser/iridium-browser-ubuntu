@@ -11,7 +11,7 @@
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/views/harmony/chrome_layout_provider.h"
+#include "chrome/browser/ui/views/chrome_layout_provider.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/grit/generated_resources.h"
 #include "extensions/browser/extension_system.h"
@@ -42,7 +42,7 @@
 namespace {
 
 // Size of extension icon in top left of dialog.
-const int kIconSize = 64;
+const int kAppIconSize = 64;
 
 }  // namespace
 
@@ -65,7 +65,7 @@ AppInfoHeaderPanel::~AppInfoHeaderPanel() {
 
 void AppInfoHeaderPanel::CreateControls() {
   app_icon_view_ = new views::ImageView();
-  app_icon_view_->SetImageSize(gfx::Size(kIconSize, kIconSize));
+  app_icon_view_->SetImageSize(gfx::Size(kAppIconSize, kAppIconSize));
   AddChildView(app_icon_view_);
 
   app_icon_ = extensions::ChromeAppIconService::Get(profile_)->CreateIcon(

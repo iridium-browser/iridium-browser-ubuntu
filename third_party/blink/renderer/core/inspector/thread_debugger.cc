@@ -12,7 +12,6 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_dom_exception.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_dom_token_list.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_event.h"
-#include "third_party/blink/renderer/bindings/core/v8/v8_event_listener.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_event_listener_helper.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_event_listener_info.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_html_all_collection.h"
@@ -21,21 +20,21 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_node_list.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_script_runner.h"
 #include "third_party/blink/renderer/core/dom/user_gesture_indicator.h"
-#include "third_party/blink/renderer/core/inspector/InspectorDOMDebuggerAgent.h"
-#include "third_party/blink/renderer/core/inspector/InspectorTraceEvents.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
+#include "third_party/blink/renderer/core/inspector/inspector_dom_debugger_agent.h"
+#include "third_party/blink/renderer/core/inspector/inspector_trace_events.h"
 #include "third_party/blink/renderer/core/inspector/v8_inspector_string.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/platform/bindings/script_forbidden_scope.h"
-#include "third_party/blink/renderer/platform/scheduler/child/web_scheduler.h"
+#include "third_party/blink/renderer/platform/scheduler/public/thread_scheduler.h"
 #include "third_party/blink/renderer/platform/wtf/time.h"
 
 namespace blink {
 
 ThreadDebugger::ThreadDebugger(v8::Isolate* isolate)
     : isolate_(isolate),
-      v8_inspector_(v8_inspector::V8Inspector::create(isolate, this)),
-      v8_tracing_cpu_profiler_(v8::TracingCpuProfiler::Create(isolate)) {}
+      v8_inspector_(v8_inspector::V8Inspector::create(isolate, this)) {}
 
 ThreadDebugger::~ThreadDebugger() = default;
 
@@ -154,9 +153,9 @@ void ThreadDebugger::PromiseRejectionRevoked(v8::Local<v8::Context> context,
 
 void ThreadDebugger::beginUserGesture() {
   ExecutionContext* ec = CurrentExecutionContext(isolate_);
-  Document* document = ec && ec->IsDocument() ? ToDocument(ec) : nullptr;
-  user_gesture_indicator_ =
-      Frame::NotifyUserActivation(document ? document->GetFrame() : nullptr);
+  Document* document = DynamicTo<Document>(ec);
+  user_gesture_indicator_ = LocalFrame::NotifyUserActivation(
+      document ? document->GetFrame() : nullptr);
 }
 
 void ThreadDebugger::endUserGesture() {
@@ -220,16 +219,18 @@ static v8::Maybe<bool> CreateDataProperty(v8::Local<v8::Context> context,
   return object->CreateDataProperty(context, key, value);
 }
 
-static void CreateFunctionPropertyWithData(v8::Local<v8::Context> context,
-                                           v8::Local<v8::Object> object,
-                                           const char* name,
-                                           v8::FunctionCallback callback,
-                                           v8::Local<v8::Value> data,
-                                           const char* description) {
+static void CreateFunctionPropertyWithData(
+    v8::Local<v8::Context> context,
+    v8::Local<v8::Object> object,
+    const char* name,
+    v8::FunctionCallback callback,
+    v8::Local<v8::Value> data,
+    const char* description,
+    v8::SideEffectType side_effect_type) {
   v8::Local<v8::String> func_name = V8String(context->GetIsolate(), name);
   v8::Local<v8::Function> func;
   if (!v8::Function::New(context, callback, data, 0,
-                         v8::ConstructorBehavior::kThrow)
+                         v8::ConstructorBehavior::kThrow, side_effect_type)
            .ToLocal(&func))
     return;
   func->SetName(func_name);
@@ -237,7 +238,8 @@ static void CreateFunctionPropertyWithData(v8::Local<v8::Context> context,
       V8String(context->GetIsolate(), description);
   v8::Local<v8::Function> to_string_function;
   if (v8::Function::New(context, ReturnDataCallback, return_value, 0,
-                        v8::ConstructorBehavior::kThrow)
+                        v8::ConstructorBehavior::kThrow,
+                        v8::SideEffectType::kHasNoSideEffect)
           .ToLocal(&to_string_function))
     CreateDataProperty(context, func,
                        V8AtomicString(context->GetIsolate(), "toString"),
@@ -257,14 +259,16 @@ v8::Maybe<bool> ThreadDebugger::CreateDataPropertyInArray(
   return array->CreateDataProperty(context, index, value);
 }
 
-void ThreadDebugger::CreateFunctionProperty(v8::Local<v8::Context> context,
-                                            v8::Local<v8::Object> object,
-                                            const char* name,
-                                            v8::FunctionCallback callback,
-                                            const char* description) {
+void ThreadDebugger::CreateFunctionProperty(
+    v8::Local<v8::Context> context,
+    v8::Local<v8::Object> object,
+    const char* name,
+    v8::FunctionCallback callback,
+    const char* description,
+    v8::SideEffectType side_effect_type) {
   CreateFunctionPropertyWithData(context, object, name, callback,
                                  v8::External::New(context->GetIsolate(), this),
-                                 description);
+                                 description, side_effect_type);
 }
 
 void ThreadDebugger::installAdditionalCommandLineAPI(
@@ -273,7 +277,8 @@ void ThreadDebugger::installAdditionalCommandLineAPI(
   CreateFunctionProperty(
       context, object, "getEventListeners",
       ThreadDebugger::GetEventListenersCallback,
-      "function getEventListeners(node) { [Command Line API] }");
+      "function getEventListeners(node) { [Command Line API] }",
+      v8::SideEffectType::kHasNoSideEffect);
 
   v8::Local<v8::Value> function_value;
   bool success =
@@ -288,11 +293,13 @@ void ThreadDebugger::installAdditionalCommandLineAPI(
   CreateFunctionPropertyWithData(
       context, object, "monitorEvents", ThreadDebugger::MonitorEventsCallback,
       function_value,
-      "function monitorEvents(object, [types]) { [Command Line API] }");
+      "function monitorEvents(object, [types]) { [Command Line API] }",
+      v8::SideEffectType::kHasSideEffect);
   CreateFunctionPropertyWithData(
       context, object, "unmonitorEvents",
       ThreadDebugger::UnmonitorEventsCallback, function_value,
-      "function unmonitorEvents(object, [types]) { [Command Line API] }");
+      "function unmonitorEvents(object, [types]) { [Command Line API] }",
+      v8::SideEffectType::kHasSideEffect);
 }
 
 static Vector<String> NormalizeEventTypes(
@@ -302,7 +309,7 @@ static Vector<String> NormalizeEventTypes(
     types.push_back(ToCoreString(info[1].As<v8::String>()));
   if (info.Length() > 1 && info[1]->IsArray()) {
     v8::Local<v8::Array> types_array = v8::Local<v8::Array>::Cast(info[1]);
-    for (size_t i = 0; i < types_array->Length(); ++i) {
+    for (wtf_size_t i = 0; i < types_array->Length(); ++i) {
       v8::Local<v8::Value> type_value;
       if (!types_array->Get(info.GetIsolate()->GetCurrentContext(), i)
                .ToLocal(&type_value) ||
@@ -322,7 +329,7 @@ static Vector<String> NormalizeEventTypes(
                         "search",  "devicemotion", "deviceorientation"}));
 
   Vector<String> output_types;
-  for (size_t i = 0; i < types.size(); ++i) {
+  for (wtf_size_t i = 0; i < types.size(); ++i) {
     if (types[i] == "mouse")
       output_types.AppendVector(
           Vector<String>({"auxclick", "click", "dblclick", "mousedown",
@@ -368,11 +375,11 @@ void ThreadDebugger::SetMonitorEventsCallback(
   Vector<String> types = NormalizeEventTypes(info);
   EventListener* event_listener = V8EventListenerHelper::GetEventListener(
       ScriptState::Current(info.GetIsolate()),
-      v8::Local<v8::Function>::Cast(info.Data()), false,
+      v8::Local<v8::Function>::Cast(info.Data()),
       enabled ? kListenerFindOrCreate : kListenerFindOnly);
   if (!event_listener)
     return;
-  for (size_t i = 0; i < types.size(); ++i) {
+  for (wtf_size_t i = 0; i < types.size(); ++i) {
     if (enabled)
       event_target->addEventListener(AtomicString(types[i]), event_listener,
                                      false);
@@ -420,7 +427,7 @@ void ThreadDebugger::GetEventListenersCallback(
   v8::Local<v8::Object> result = v8::Object::New(isolate);
   AtomicString current_event_type;
   v8::Local<v8::Array> listeners;
-  size_t output_index = 0;
+  wtf_size_t output_index = 0;
   for (auto& info : listener_info) {
     if (current_event_type != info.event_type) {
       current_event_type = info.event_type;
@@ -493,7 +500,7 @@ void ThreadDebugger::startRepeatingTimer(
 }
 
 void ThreadDebugger::cancelTimer(void* data) {
-  for (size_t index = 0; index < timer_data_.size(); ++index) {
+  for (wtf_size_t index = 0; index < timer_data_.size(); ++index) {
     if (timer_data_[index] == data) {
       timers_[index]->Stop();
       timer_callbacks_.EraseAt(index);
@@ -505,7 +512,7 @@ void ThreadDebugger::cancelTimer(void* data) {
 }
 
 void ThreadDebugger::OnTimer(TimerBase* timer) {
-  for (size_t index = 0; index < timers_.size(); ++index) {
+  for (wtf_size_t index = 0; index < timers_.size(); ++index) {
     if (timers_[index].get() == timer) {
       timer_callbacks_[index](timer_data_[index]);
       return;

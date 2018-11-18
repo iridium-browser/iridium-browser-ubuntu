@@ -1,7 +1,7 @@
 {% filter format_blink_cpp_source_code %}
 
 {% include 'copyright_block.txt' %}
-#include "{{this_include_header_name}}"
+#include "{{this_include_header_path}}"
 
 {% for filename in cpp_includes if filename != '%s.h' % cpp_class_or_partial %}
 #include "{{filename}}"
@@ -92,7 +92,7 @@ static void (*{{method.name}}MethodForPartialInterface)(const v8::FunctionCallba
 {% if not attribute.has_custom_getter and not attribute.constructor_type %}
 {{attribute_getter(attribute, world_suffix)}}
 {% endif %}
-{% if attribute.has_setter and not attribute.has_custom_setter %}
+{% if attribute.has_setter and not (attribute.has_custom_setter or attribute.is_lenient_setter) %}
 {{attribute_setter(attribute, world_suffix)}}
 {% endif %}
 {% endfor %}
@@ -101,16 +101,12 @@ static void (*{{method.name}}MethodForPartialInterface)(const v8::FunctionCallba
 {# Methods #}
 {% from 'methods.cpp.tmpl' import generate_method, overload_resolution_method,
       origin_safe_method_getter, generate_constructor,
-      generate_post_message_impl, runtime_determined_length_method,
-      runtime_determined_maxarg_method
+      runtime_determined_length_method, runtime_determined_maxarg_method
       with context %}
 {% for method in methods %}
 {% for world_suffix in method.world_suffixes %}
-{% if not method.is_custom and not method.is_post_message and method.visible %}
+{% if not method.is_custom and method.visible %}
 {{generate_method(method, world_suffix)}}
-{% endif %}
-{% if method.is_post_message and not is_partial %}
-{{generate_post_message_impl(method)}}
 {% endif %}
 {% if method.overloads and method.overloads.visible %}
 {% if method.overloads.runtime_determined_lengths %}
@@ -121,7 +117,8 @@ static void (*{{method.name}}MethodForPartialInterface)(const v8::FunctionCallba
 {% endif %}
 {{overload_resolution_method(method.overloads, world_suffix)}}
 {% endif %}
-{% if method.is_cross_origin and method.visible %}
+{% if method.is_cross_origin and method.visible and
+      (not method.overload_index or method.overloads) %}
 {{origin_safe_method_getter(method, world_suffix)}}
 {% endif %}
 {% endfor %}
@@ -173,7 +170,8 @@ static const struct {
   },
   {% endfor %}
   {##### Cross-origin methods #####}
-  {% for method in methods if method.is_cross_origin %}
+  {% for method in methods if method.is_cross_origin and
+        (not method.overload_index or method.overloads) %}
   {"{{method.name}}", &{{cpp_class}}V8Internal::{{method.name}}OriginSafeMethodGetter, nullptr},
   {% endfor %}
 };
@@ -219,7 +217,8 @@ static const struct {
 {{method_callback(method, world_suffix)}}
 {% endif %}
 {% endif %}
-{% if method.is_cross_origin and method.visible %}
+{% if method.is_cross_origin and method.visible and
+     (not method.overload_index or method.overloads) %}
 {{origin_safe_method_getter_callback(method, world_suffix)}}
 {% endif %}
 {% endfor %}
@@ -371,27 +370,6 @@ static const V8DOMConfiguration::AttributeConfiguration {{v8_class}}Attributes[]
 {% endif %}
 {% endblock %}
 {##############################################################################}
-{% block install_lazy_data_attributes %}
-{% from 'attributes.cpp.tmpl' import attribute_configuration with context %}
-{% if lazy_data_attributes %}
-// Suppress warning: global constructors, because AttributeConfiguration is trivial
-// and does not depend on another global objects.
-#if defined(COMPONENT_BUILD) && defined(WIN32) && defined(__clang__)
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wglobal-constructors"
-#endif
-static const V8DOMConfiguration::AttributeConfiguration {{v8_class}}LazyDataAttributes[] = {
-    {% for data_attribute in lazy_data_attributes %}
-    {{attribute_configuration(data_attribute) | trim | indent(4)}},
-    {% endfor %}
-};
-#if defined(COMPONENT_BUILD) && defined(WIN32) && defined(__clang__)
-#pragma clang diagnostic pop
-#endif
-
-{% endif %}
-{% endblock %}
-{##############################################################################}
 {% block install_accessors %}
 {% from 'attributes.cpp.tmpl' import accessor_configuration with context %}
 {% if accessors %}
@@ -491,22 +469,17 @@ static void install{{v8_class}}Template(
   {% if data_attributes %}
   V8DOMConfiguration::InstallAttributes(
       isolate, world, instanceTemplate, prototypeTemplate,
-      {{'%sAttributes' % v8_class}}, {{'WTF_ARRAY_LENGTH(%sAttributes)' % v8_class}});
-  {% endif %}
-  {% if lazy_data_attributes %}
-  V8DOMConfiguration::InstallLazyDataAttributes(
-      isolate, world, instanceTemplate, prototypeTemplate,
-      {{'%sLazyDataAttributes' % v8_class}}, {{'WTF_ARRAY_LENGTH(%sLazyDataAttributes)' % v8_class}});
+      {{'%sAttributes' % v8_class}}, {{'base::size(%sAttributes)' % v8_class}});
   {% endif %}
   {% if accessors %}
   V8DOMConfiguration::InstallAccessors(
       isolate, world, instanceTemplate, prototypeTemplate, interfaceTemplate,
-      signature, {{'%sAccessors' % v8_class}}, {{'WTF_ARRAY_LENGTH(%sAccessors)' % v8_class}});
+      signature, {{'%sAccessors' % v8_class}}, {{'base::size(%sAccessors)' % v8_class}});
   {% endif %}
   {% if methods | has_method_configuration(is_partial) %}
   V8DOMConfiguration::InstallMethods(
       isolate, world, instanceTemplate, prototypeTemplate, interfaceTemplate,
-      signature, {{'%sMethods' % v8_class}}, {{'WTF_ARRAY_LENGTH(%sMethods)' % v8_class}});
+      signature, {{'%sMethods' % v8_class}}, {{'base::size(%sMethods)' % v8_class}});
   {% endif %}
 
   {% if has_access_check_callbacks and not is_partial %}
@@ -707,7 +680,7 @@ void {{v8_class_or_partial}}::InstallRuntimeEnabledFeaturesOnTemplate(
   };
   V8DOMConfiguration::InstallConstants(
       isolate, interface_template, prototype_template,
-      constant_configurations, WTF_ARRAY_LENGTH(constant_configurations));
+      constant_configurations, base::size(constant_configurations));
   {% endfilter %}
   {% endfor %}
 
@@ -720,7 +693,7 @@ void {{v8_class_or_partial}}::InstallRuntimeEnabledFeaturesOnTemplate(
   };
   V8DOMConfiguration::InstallAttributes(
       isolate, world, instance_template, prototype_template,
-      attribute_configurations, WTF_ARRAY_LENGTH(attribute_configurations));
+      attribute_configurations, base::size(attribute_configurations));
   {% endfilter %}
   {% endfor %}
 
@@ -734,7 +707,7 @@ void {{v8_class_or_partial}}::InstallRuntimeEnabledFeaturesOnTemplate(
   V8DOMConfiguration::InstallAccessors(
       isolate, world, instance_template, prototype_template, interface_template,
       signature, accessor_configurations,
-      WTF_ARRAY_LENGTH(accessor_configurations));
+      base::size(accessor_configurations));
   {% endfilter %}
   {% endfor %}
 
@@ -833,7 +806,7 @@ void {{v8_class_or_partial}}::InstallRuntimeEnabledFeaturesImpl(
       {% endfor %}
   };
   V8DOMConfiguration::InstallAttributes(isolate, world, instance, prototype,
-      attribute_configurations, WTF_ARRAY_LENGTH(attribute_configurations));
+      attribute_configurations, base::size(attribute_configurations));
   {% endfilter %}
   {% endfor %}
 
@@ -846,7 +819,7 @@ void {{v8_class_or_partial}}::InstallRuntimeEnabledFeaturesImpl(
   };
   V8DOMConfiguration::InstallAccessors(isolate, world, instance, prototype,
       interface, signature, accessor_configurations,
-      WTF_ARRAY_LENGTH(accessor_configurations));
+      base::size(accessor_configurations));
   {% endfilter %}
   {% endfor %}
 
@@ -985,7 +958,12 @@ void {{v8_class_or_partial}}::InstallConditionalFeatures(
     if (prototypeObject->HasOwnProperty(context, unscopablesSymbol).To(&has_unscopables) && has_unscopables) {
       unscopables = prototypeObject->Get(context, unscopablesSymbol).ToLocalChecked().As<v8::Object>();
     } else {
+      // Web IDL 3.6.3. Interface prototype object
+      // https://heycam.github.io/webidl/#create-an-interface-prototype-object
+      // step 8.1. Let unscopableObject be the result of performing
+      //   ! ObjectCreate(null).
       unscopables = v8::Object::New(isolate);
+      unscopables->SetPrototype(context, v8::Null(isolate)).ToChecked();
     }
     {% for name, runtime_enabled_feature_name in unscopables %}
     {% filter runtime_enabled(runtime_enabled_feature_name) %}
@@ -1008,20 +986,26 @@ void {{v8_class_or_partial}}::InstallConditionalFeatures(
   bool isSecureContext = (executionContext && executionContext->IsSecureContext());
   {% endif %}
 
-  {% set attributes_on_instance = conditional_attributes | selectattr('on_instance') | list  %}
-  {% if attributes_on_instance or conditional_interface_objects %}
+  {% set attributes_on_instance = conditional_attributes | selectattr('on_instance') | list %}
+  {% set methods_on_instance = conditional_methods | selectattr('on_instance') | list %}
+  {% if attributes_on_instance or conditional_interface_objects or methods_on_instance %}
   if (!instanceObject.IsEmpty()) {
     {{install_conditional_attributes(attributes_on_instance) | trim | indent(4)}}
     {{install_conditional_interface_objects(conditional_interface_objects) | trim | indent(4)}}
+    {{install_conditional_methods(methods_on_instance) | trim | indent(4)}}
   }
   {% endif %}
 
-  {% set attributes_on_prototype = conditional_attributes | selectattr('on_prototype') | list  %}
-  {% set attributes_on_interface = conditional_attributes | selectattr('on_interface') | list  %}
+  {% set attributes_on_prototype = conditional_attributes | selectattr('on_prototype') | list %}
+  {% set attributes_on_interface = conditional_attributes | selectattr('on_interface') | list %}
+  {% set methods_on_prototype = conditional_methods | selectattr('on_prototype') | list %}
+  {% set methods_on_interface = conditional_methods | selectattr('on_interface') | list %}
+  {% if attributes_on_prototype or attributes_on_interface or methods_on_prototype or methods_on_interface %}
   if (!prototypeObject.IsEmpty() || !interfaceObject.IsEmpty()) {
     {{install_conditional_attributes(attributes_on_prototype + attributes_on_interface) | trim | indent(4)}}
-    {{install_conditional_methods() | trim | indent(4)}}
+    {{install_conditional_methods(methods_on_prototype + methods_on_interface) | trim | indent(4)}}
   }
+  {% endif %}
   {% endif %}{# conditional_attributes or conditional_methods #}
 }
 {% endif %}

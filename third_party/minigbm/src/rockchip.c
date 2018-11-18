@@ -24,8 +24,8 @@ struct rockchip_private_map_data {
 };
 
 static const uint32_t render_target_formats[] = { DRM_FORMAT_ABGR8888, DRM_FORMAT_ARGB8888,
-						  DRM_FORMAT_RGB565, DRM_FORMAT_XBGR8888,
-						  DRM_FORMAT_XRGB8888 };
+						  DRM_FORMAT_BGR888,   DRM_FORMAT_RGB565,
+						  DRM_FORMAT_XBGR8888, DRM_FORMAT_XRGB8888 };
 
 static const uint32_t texture_source_formats[] = { DRM_FORMAT_R8, DRM_FORMAT_NV12,
 						   DRM_FORMAT_YVU420, DRM_FORMAT_YVU420_ANDROID };
@@ -127,7 +127,7 @@ static int rockchip_init(struct driver *drv)
 
 	/* Camera ISP supports only NV12 output. */
 	drv_modify_combination(drv, DRM_FORMAT_NV12, &metadata,
-			       BO_USE_CAMERA_READ | BO_USE_CAMERA_WRITE);
+			       BO_USE_CAMERA_READ | BO_USE_CAMERA_WRITE | BO_USE_HW_VIDEO_DECODER);
 	/*
 	 * R8 format is used for Android's HAL_PIXEL_FORMAT_BLOB and is used for JPEG snapshots
 	 * from camera.
@@ -186,7 +186,7 @@ static int rockchip_bo_create_with_modifiers(struct bo *bo, uint32_t width, uint
 	} else {
 		if (!has_modifier(modifiers, count, DRM_FORMAT_MOD_LINEAR)) {
 			errno = EINVAL;
-			fprintf(stderr, "no usable modifier found\n");
+			drv_log("no usable modifier found\n");
 			return -1;
 		}
 
@@ -212,8 +212,8 @@ static int rockchip_bo_create_with_modifiers(struct bo *bo, uint32_t width, uint
 	ret = drmIoctl(bo->drv->fd, DRM_IOCTL_ROCKCHIP_GEM_CREATE, &gem_create);
 
 	if (ret) {
-		fprintf(stderr, "drv: DRM_IOCTL_ROCKCHIP_GEM_CREATE failed (size=%llu)\n",
-			gem_create.size);
+		drv_log("DRM_IOCTL_ROCKCHIP_GEM_CREATE failed (size=%llu)\n",
+			(unsigned long long)gem_create.size);
 		return ret;
 	}
 
@@ -247,7 +247,7 @@ static void *rockchip_bo_map(struct bo *bo, struct vma *vma, size_t plane, uint3
 
 	ret = drmIoctl(bo->drv->fd, DRM_IOCTL_ROCKCHIP_GEM_MAP_OFFSET, &gem_map);
 	if (ret) {
-		fprintf(stderr, "drv: DRM_IOCTL_ROCKCHIP_GEM_MAP_OFFSET failed\n");
+		drv_log("DRM_IOCTL_ROCKCHIP_GEM_MAP_OFFSET failed\n");
 		return MAP_FAILED;
 	}
 

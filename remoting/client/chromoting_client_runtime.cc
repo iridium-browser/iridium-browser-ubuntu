@@ -9,11 +9,16 @@
 #include "base/logging.h"
 #include "base/memory/singleton.h"
 #include "base/message_loop/message_loop.h"
-#include "base/task_scheduler/task_scheduler.h"
+#include "base/message_loop/message_loop_current.h"
+#include "base/task/task_scheduler/task_scheduler.h"
+#include "build/build_config.h"
+#include "mojo/core/embedder/embedder.h"
 #include "remoting/base/chromium_url_request.h"
 #include "remoting/base/telemetry_log_writer.h"
 #include "remoting/base/url_request_context_getter.h"
 #include "remoting/client/oauth_token_getter_proxy.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
+#include "services/network/transitional_url_loader_factory_owner.h"
 
 namespace {
 
@@ -31,17 +36,14 @@ ChromotingClientRuntime* ChromotingClientRuntime::GetInstance() {
 ChromotingClientRuntime::ChromotingClientRuntime() {
   base::TaskScheduler::CreateAndStartWithDefaultParams("Remoting");
 
-  DCHECK(!base::MessageLoop::current());
+  DCHECK(!base::MessageLoopCurrent::Get());
 
   VLOG(1) << "Starting main message loop";
   ui_loop_.reset(new base::MessageLoopForUI());
-#if defined(OS_ANDROID)
-  // On Android, the UI thread is managed by Java, so we need to attach and
-  // start a special type of message loop to allow Chromium code to run tasks.
-  ui_loop_->Start();
-#elif defined(OS_IOS)
+#if defined(OS_IOS)
+  // TODO(ranj): Attach on BindToCurrentThread().
   ui_loop_->Attach();
-#endif  // OS_ANDROID, OS_IOS
+#endif
 
 #if defined(DEBUG)
   net::URLFetcher::SetIgnoreCertificateRequests(true);
@@ -57,10 +59,8 @@ ChromotingClientRuntime::ChromotingClientRuntime() {
   display_task_runner_ = AutoThread::Create("native_disp", ui_task_runner_);
   network_task_runner_ = AutoThread::CreateWithType(
       "native_net", ui_task_runner_, base::MessageLoop::TYPE_IO);
-  file_task_runner_ = AutoThread::CreateWithType("native_file", ui_task_runner_,
-                                                 base::MessageLoop::TYPE_IO);
-  url_requester_ =
-      new URLRequestContextGetter(network_task_runner_, file_task_runner_);
+
+  mojo::core::Init();
 }
 
 ChromotingClientRuntime::~ChromotingClientRuntime() {
@@ -83,16 +83,34 @@ void ChromotingClientRuntime::Init(
   DCHECK(delegate);
   DCHECK(!delegate_);
   delegate_ = delegate;
-  log_writer_ = std::make_unique<TelemetryLogWriter>(
-      kTelemetryBaseUrl,
-      std::make_unique<ChromiumUrlRequestFactory>(url_requester()),
-      CreateOAuthTokenGetter());
+  url_requester_ = new URLRequestContextGetter(network_task_runner_);
+  log_writer_ = std::make_unique<TelemetryLogWriter>(kTelemetryBaseUrl,
+                                                     CreateOAuthTokenGetter());
+  network_task_runner()->PostTask(
+      FROM_HERE,
+      base::BindOnce(&ChromotingClientRuntime::InitializeOnNetworkThread,
+                     base::Unretained(this)));
 }
 
 std::unique_ptr<OAuthTokenGetter>
 ChromotingClientRuntime::CreateOAuthTokenGetter() {
   return std::make_unique<OAuthTokenGetterProxy>(
       delegate_->oauth_token_getter(), ui_task_runner());
+}
+
+scoped_refptr<network::SharedURLLoaderFactory>
+ChromotingClientRuntime::url_loader_factory() {
+  DCHECK(network_task_runner()->BelongsToCurrentThread());
+  return url_loader_factory_owner_->GetURLLoaderFactory();
+}
+
+void ChromotingClientRuntime::InitializeOnNetworkThread() {
+  DCHECK(network_task_runner()->BelongsToCurrentThread());
+  url_loader_factory_owner_ =
+      std::make_unique<network::TransitionalURLLoaderFactoryOwner>(
+          url_requester_);
+  log_writer_->Init(
+      std::make_unique<ChromiumUrlRequestFactory>(url_loader_factory()));
 }
 
 }  // namespace remoting

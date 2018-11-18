@@ -69,7 +69,7 @@ class NET_EXPORT_PRIVATE BackendImpl : public Backend {
   ~BackendImpl() override;
 
   // Performs general initialization for this current instance of the cache.
-  int Init(const CompletionCallback& callback);
+  net::Error Init(CompletionOnceCallback callback);
 
   // Performs the actual initialization and final cleanup on destruction.
   int SyncInit();
@@ -98,7 +98,7 @@ class NET_EXPORT_PRIVATE BackendImpl : public Backend {
   scoped_refptr<EntryImpl> OpenNextEntryImpl(Rankings::Iterator* iter);
 
   // Sets the maximum size for the total amount of data stored by this instance.
-  bool SetMaxSize(int max_bytes);
+  bool SetMaxSize(int64_t max_bytes);
 
   // Sets the cache type for this backend.
   void SetType(net::CacheType type);
@@ -247,12 +247,11 @@ class NET_EXPORT_PRIVATE BackendImpl : public Backend {
   void ClearRefCountForTest();
 
   // Sends a dummy operation through the operation queue, for unit tests.
-  int FlushQueueForTest(const CompletionCallback& callback);
+  int FlushQueueForTest(CompletionOnceCallback callback);
 
   // Runs the provided task on the cache thread. The task will be automatically
   // deleted after it runs.
-  int RunTaskForTest(const base::Closure& task,
-                     const CompletionCallback& callback);
+  int RunTaskForTest(base::OnceClosure task, CompletionOnceCallback callback);
 
   // Trims an entry (all if |empty| is true) from the list of deleted
   // entries. This method should be called directly on the cache thread.
@@ -278,21 +277,25 @@ class NET_EXPORT_PRIVATE BackendImpl : public Backend {
   // Backend implementation.
   net::CacheType GetCacheType() const override;
   int32_t GetEntryCount() const override;
-  int OpenEntry(const std::string& key,
-                Entry** entry,
-                const CompletionCallback& callback) override;
-  int CreateEntry(const std::string& key,
-                  Entry** entry,
-                  const CompletionCallback& callback) override;
-  int DoomEntry(const std::string& key,
-                const CompletionCallback& callback) override;
-  int DoomAllEntries(const CompletionCallback& callback) override;
-  int DoomEntriesBetween(base::Time initial_time,
-                         base::Time end_time,
-                         const CompletionCallback& callback) override;
-  int DoomEntriesSince(base::Time initial_time,
-                       const CompletionCallback& callback) override;
-  int CalculateSizeOfAllEntries(const CompletionCallback& callback) override;
+  net::Error OpenEntry(const std::string& key,
+                       net::RequestPriority request_priority,
+                       Entry** entry,
+                       CompletionOnceCallback callback) override;
+  net::Error CreateEntry(const std::string& key,
+                         net::RequestPriority request_priority,
+                         Entry** entry,
+                         CompletionOnceCallback callback) override;
+  net::Error DoomEntry(const std::string& key,
+                       net::RequestPriority priority,
+                       CompletionOnceCallback callback) override;
+  net::Error DoomAllEntries(CompletionOnceCallback callback) override;
+  net::Error DoomEntriesBetween(base::Time initial_time,
+                                base::Time end_time,
+                                CompletionOnceCallback callback) override;
+  net::Error DoomEntriesSince(base::Time initial_time,
+                              CompletionOnceCallback callback) override;
+  int64_t CalculateSizeOfAllEntries(
+      Int64CompletionOnceCallback callback) override;
   // NOTE: The blockfile Backend::Iterator::OpenNextEntry method does not modify
   // the last_used field of the entry, and therefore it does not impact the
   // eviction ranking of the entry. However, an enumeration will go through all

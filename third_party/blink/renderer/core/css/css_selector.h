@@ -25,13 +25,14 @@
 
 #include <memory>
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/core/css/parser/css_parser_context.h"
 #include "third_party/blink/renderer/core/css/parser/css_parser_mode.h"
 #include "third_party/blink/renderer/core/dom/qualified_name.h"
 #include "third_party/blink/renderer/core/style/computed_style_constants.h"
 #include "third_party/blink/renderer/platform/wtf/ref_counted.h"
 
 namespace blink {
+
+class CSSParserContext;
 class CSSSelectorList;
 
 // This class represents a simple selector for a StyleRule.
@@ -102,6 +103,10 @@ class CORE_EXPORT CSSSelector {
 
   bool operator==(const CSSSelector&) const;
 
+  static constexpr unsigned kIdSpecificity = 0x010000;
+  static constexpr unsigned kClassLikeSpecificity = 0x000100;
+  static constexpr unsigned kTagSpecificity = 0x000001;
+
   // http://www.w3.org/TR/css3-selectors/#specificity
   // We use 256 as the base of the specificity number system.
   unsigned Specificity() const;
@@ -132,7 +137,6 @@ class CORE_EXPORT CSSSelector {
     kDirectAdjacent,    // + combinator
     kIndirectAdjacent,  // ~ combinator
     // Special cases for shadow DOM related selectors.
-    kShadowPiercingDescendant,  // >>> combinator
     kShadowDeep,                // /deep/ combinator
     kShadowDeepAsDescendant,    // /deep/ as an alias for descendant
     kShadowPseudo,              // ::shadow pseudo element
@@ -160,9 +164,12 @@ class CORE_EXPORT CSSSelector {
     kPseudoVisited,
     kPseudoAny,
     kPseudoMatches,
+    kPseudoIS,
     kPseudoAnyLink,
     kPseudoWebkitAnyLink,
     kPseudoAutofill,
+    kPseudoAutofillPreviewed,
+    kPseudoAutofillSelected,
     kPseudoHover,
     kPseudoDrag,
     kPseudoFocus,
@@ -235,6 +242,7 @@ class CORE_EXPORT CSSSelector {
     kPseudoHostContext,
     kPseudoShadow,
     kPseudoSpatialNavigationFocus,
+    kPseudoIsHtml,
     kPseudoListBox,
     kPseudoHostHasAppearance,
     kPseudoSlotted,
@@ -348,6 +356,9 @@ class CORE_EXPORT CSSSelector {
   bool IsLastInTagHistory() const { return is_last_in_tag_history_; }
   void SetLastInTagHistory(bool is_last) { is_last_in_tag_history_ = is_last; }
 
+  bool IgnoreSpecificity() const { return ignore_specificity_; }
+  void SetIgnoreSpecificity(bool ignore) { ignore_specificity_ = ignore; }
+
   // https://drafts.csswg.org/selectors/#compound
   bool IsCompound() const;
 
@@ -375,6 +386,7 @@ class CORE_EXPORT CSSSelector {
   bool HasDeepCombinatorOrShadowPseudo() const;
   bool NeedsUpdatedDistribution() const;
   bool HasPseudoMatches() const;
+  bool HasPseudoIS() const;
 
  private:
   unsigned relation_ : 4;     // enum RelationType
@@ -387,6 +399,7 @@ class CORE_EXPORT CSSSelector {
   unsigned tag_is_implicit_ : 1;
   unsigned relation_is_affected_by_pseudo_content_ : 1;
   unsigned is_last_in_original_list_ : 1;
+  unsigned ignore_specificity_ : 1;
 
   void SetPseudoType(PseudoType pseudo_type) {
     pseudo_type_ = pseudo_type;
@@ -452,7 +465,7 @@ inline CSSSelector::AttributeMatchType CSSSelector::AttributeMatch() const {
 }
 
 inline bool CSSSelector::IsASCIILower(const AtomicString& value) {
-  for (size_t i = 0; i < value.length(); ++i) {
+  for (wtf_size_t i = 0; i < value.length(); ++i) {
     if (IsASCIIUpper(value[i]))
       return false;
   }
@@ -488,7 +501,8 @@ inline CSSSelector::CSSSelector()
       is_for_page_(false),
       tag_is_implicit_(false),
       relation_is_affected_by_pseudo_content_(false),
-      is_last_in_original_list_(false) {}
+      is_last_in_original_list_(false),
+      ignore_specificity_(false) {}
 
 inline CSSSelector::CSSSelector(const QualifiedName& tag_q_name,
                                 bool tag_is_implicit)
@@ -501,7 +515,8 @@ inline CSSSelector::CSSSelector(const QualifiedName& tag_q_name,
       is_for_page_(false),
       tag_is_implicit_(tag_is_implicit),
       relation_is_affected_by_pseudo_content_(false),
-      is_last_in_original_list_(false) {
+      is_last_in_original_list_(false),
+      ignore_specificity_(false) {
   data_.tag_q_name_ = tag_q_name.Impl();
   data_.tag_q_name_->AddRef();
 }
@@ -517,7 +532,8 @@ inline CSSSelector::CSSSelector(const CSSSelector& o)
       tag_is_implicit_(o.tag_is_implicit_),
       relation_is_affected_by_pseudo_content_(
           o.relation_is_affected_by_pseudo_content_),
-      is_last_in_original_list_(o.is_last_in_original_list_) {
+      is_last_in_original_list_(o.is_last_in_original_list_),
+      ignore_specificity_(o.ignore_specificity_) {
   if (o.match_ == kTag) {
     data_.tag_q_name_ = o.data_.tag_q_name_;
     data_.tag_q_name_->AddRef();

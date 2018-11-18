@@ -85,6 +85,12 @@ class TestProcMetrics(cros_test_lib.TestCase):
                        'cros-version:winky-release/R61-9741.0.0']
           ),
           _mock_process(
+              name='gs_offloader',
+              cmdline=['/usr/bin/python',
+                       '/usr/local/autotest/site_utils/gs_offloader.py',
+                       '-s', '--parallelism=30']
+          ),
+          _mock_process(
               name='python',
               cmdline=[('/usr/local/google/home/chromeos-test/.cache/cros_venv'
                         '/venv-2.7.6-5addca6cf590166d7b70e22a95bea4a0'
@@ -119,8 +125,8 @@ class TestProcMetrics(cros_test_lib.TestCase):
                        '/opt/infra-tools/usr/bin/lucifer_watcher']
           ),
           _mock_process(
-              name='lucifer_run_job',
-              cmdline=['/opt/infra-tools/usr/bin/lucifer_run_job',
+              name='lucifer',
+              cmdline=['/opt/infra-tools/usr/bin/lucifer',
                        '-resultsdir',
                        ('/usr/local/autotest/results/167263377-chromeos-test/'
                         'chromeos2-row11-rack6-host5'),
@@ -128,17 +134,38 @@ class TestProcMetrics(cros_test_lib.TestCase):
                        '-watcherpath',
                        '/opt/infra-tools/usr/bin/lucifer_watcher']
           ),
+          _mock_process(
+              name='lxc-start',
+              cmdline=['[lcx monitor] /usr/local/autotest/containers'
+                       ' test_196499100_1525673902_240543]']
+          ),
+          _mock_process(
+              name='lxc-attach',
+              cmdline=['lxc-attach',
+                       '-P',
+                       '/usr/local/autotest/containers',
+                       '-n',
+                       'test_196499100_1525673902_240543',
+                       '--',
+                       'bash',
+                       '-c',
+                       ('/usr/local/autotest/server/autoserv'
+                        ' -s -P 196499100-chromeos-test/group0 ...')]
+          ),
       ]
       proc_metrics.collect_proc_info()
 
     setter = self.store.set
     calls = []
+    calls.extend(_expected_calls_for('apache'))
     calls.extend(_expected_calls_for('autoserv'))
-    calls.extend(_expected_calls_for('sysmon'))
+    calls.extend(_expected_calls_for('gs_offloader'))
     calls.extend(_expected_calls_for('job_aborter'))
     calls.extend(_expected_calls_for('job_reporter'))
-    calls.extend(_expected_calls_for('lucifer_run_job'))
-    calls.extend(_expected_calls_for('apache'))
+    calls.extend(_expected_calls_for('lucifer'))
+    calls.extend(_expected_calls_for('lxc-start'))
+    calls.extend(_expected_calls_for('lxc-attach'))
+    calls.extend(_expected_calls_for('sysmon'))
     calls.extend(_expected_calls_for('other'))
     setter.assert_has_calls(calls)
     self.assertEqual(len(setter.mock_calls), len(calls))

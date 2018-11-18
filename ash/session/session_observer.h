@@ -7,6 +7,7 @@
 
 #include "ash/ash_export.h"
 #include "base/macros.h"
+#include "base/observer_list_types.h"
 #include "components/session_manager/session_manager_types.h"
 
 class AccountId;
@@ -16,13 +17,16 @@ namespace ash {
 
 enum class LoginStatus;
 
-class ASH_EXPORT SessionObserver {
+class ASH_EXPORT SessionObserver : public base::CheckedObserver {
  public:
   // Called when the active user session has changed.
   virtual void OnActiveUserSessionChanged(const AccountId& account_id) {}
 
   // Called when a user session gets added to the existing session.
   virtual void OnUserSessionAdded(const AccountId& account_id) {}
+
+  // Called once the first time a user session starts.
+  virtual void OnFirstSessionStarted() {}
 
   // Called when a user session is updated, such as avatar change.
   virtual void OnUserSessionUpdated(const AccountId& account_id) {}
@@ -53,10 +57,13 @@ class ASH_EXPORT SessionObserver {
   virtual void OnActiveUserPrefServiceChanged(PrefService* pref_service) {}
 
  protected:
-  virtual ~SessionObserver() {}
+  ~SessionObserver() override {}
 };
 
 // A class to attach / detach an object as a session state observer.
+//
+// NOTE: Both ash::Shell and ash::SessionController must outlive your object.
+// You may find it clearer to manually add and remove your observer.
 class ASH_EXPORT ScopedSessionObserver {
  public:
   explicit ScopedSessionObserver(SessionObserver* observer);

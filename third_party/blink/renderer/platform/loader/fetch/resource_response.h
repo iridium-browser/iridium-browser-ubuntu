@@ -32,6 +32,7 @@
 
 #include "base/memory/scoped_refptr.h"
 #include "base/time/time.h"
+#include "services/network/public/cpp/cors/cors.h"
 #include "services/network/public/mojom/fetch_api.mojom-blink.h"
 #include "third_party/blink/public/platform/web_url_response.h"
 #include "third_party/blink/renderer/platform/blob/blob_data.h"
@@ -49,20 +50,13 @@
 
 namespace blink {
 
-struct CrossThreadResourceResponseData;
-
 // A ResourceResponse is a "response" object used in blink. Conceptually
 // it is https://fetch.spec.whatwg.org/#concept-response, but it contains
 // a lot of blink specific fields. WebURLResponse is the "public version"
 // of this class and public classes (i.e., classes in public/platform) use it.
 //
-// There are cases where we need to copy a response across threads, and
-// CrossThreadResourceResponseData is a struct for the purpose. When you add a
-// member variable to this class, do not forget to add the corresponding
-// one in CrossThreadResourceResponseData and write copying logic.
+// This class is thread-bound. Do not copy/pass an instance across threads.
 class PLATFORM_EXPORT ResourceResponse final {
-  DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
-
  public:
   enum HTTPVersion : uint8_t {
     kHTTPVersionUnknown,
@@ -149,17 +143,8 @@ class PLATFORM_EXPORT ResourceResponse final {
     virtual ~ExtraData() = default;
   };
 
-  explicit ResourceResponse(CrossThreadResourceResponseData*);
-
-  // Gets a copy of the data suitable for passing to another thread.
-  std::unique_ptr<CrossThreadResourceResponseData> CopyData() const;
-
   ResourceResponse();
-  explicit ResourceResponse(
-      const KURL&,
-      const AtomicString& mime_type = g_null_atom,
-      long long expected_length = 0,
-      const AtomicString& text_encoding_name = g_null_atom);
+  explicit ResourceResponse(const KURL&);
   ResourceResponse(const ResourceResponse&);
   ResourceResponse& operator=(const ResourceResponse&);
 
@@ -222,6 +207,8 @@ class PLATFORM_EXPORT ResourceResponse final {
   double Age() const;
   double Expires() const;
   double LastModified() const;
+  // Will always return values >= 0.
+  double CacheControlStaleWhileRevalidate() const;
 
   unsigned ConnectionID() const;
   void SetConnectionID(unsigned);
@@ -240,6 +227,9 @@ class PLATFORM_EXPORT ResourceResponse final {
 
   HTTPVersion HttpVersion() const { return http_version_; }
   void SetHTTPVersion(HTTPVersion version) { http_version_ = version; }
+
+  int RequestId() const { return request_id_; }
+  void SetRequestId(int request_id) { request_id_ = request_id; }
 
   bool HasMajorCertificateErrors() const {
     return has_major_certificate_errors_;
@@ -306,14 +296,19 @@ class PLATFORM_EXPORT ResourceResponse final {
     was_fallback_required_by_service_worker_ = value;
   }
 
-  network::mojom::FetchResponseType ResponseTypeViaServiceWorker() const {
-    return response_type_via_service_worker_;
-  }
-  void SetResponseTypeViaServiceWorker(
-      network::mojom::FetchResponseType value) {
-    response_type_via_service_worker_ = value;
+  network::mojom::FetchResponseType GetType() const { return response_type_; }
+  void SetType(network::mojom::FetchResponseType value) {
+    response_type_ = value;
   }
   bool IsOpaqueResponseFromServiceWorker() const;
+  // https://html.spec.whatwg.org/#cors-same-origin
+  bool IsCORSSameOrigin() const {
+    return network::cors::IsCORSSameOriginResponseType(response_type_);
+  }
+  // https://html.spec.whatwg.org/#cors-cross-origin
+  bool IsCORSCrossOrigin() const {
+    return network::cors::IsCORSCrossOriginResponseType(response_type_);
+  }
 
   // See ServiceWorkerResponseInfo::url_list_via_service_worker.
   const Vector<KURL>& UrlListViaServiceWorker() const {
@@ -390,9 +385,6 @@ class PLATFORM_EXPORT ResourceResponse final {
   long long DecodedBodyLength() const { return decoded_body_length_; }
   void SetDecodedBodyLength(long long value);
 
-  const String& DownloadedFilePath() const { return downloaded_file_path_; }
-  void SetDownloadedFilePath(const String&);
-
   // Extra data associated with this response.
   ExtraData* GetExtraData() const { return extra_data_.get(); }
   void SetExtraData(scoped_refptr<ExtraData> extra_data) {
@@ -412,6 +404,23 @@ class PLATFORM_EXPORT ResourceResponse final {
   }
   void AppendRedirectResponse(const ResourceResponse&);
 
+  bool AsyncRevalidationRequested() const {
+    return async_revalidation_requested_;
+  }
+
+  void SetAsyncRevalidationRequested(bool requested) {
+    async_revalidation_requested_ = requested;
+  }
+
+  bool IsSignedExchangeInnerResponse() const {
+    return is_signed_exchange_inner_response_;
+  }
+
+  void SetIsSignedExchangeInnerResponse(
+      bool is_signed_exchange_inner_response) {
+    is_signed_exchange_inner_response_ = is_signed_exchange_inner_response;
+  }
+
   // This method doesn't compare the all members.
   static bool Compare(const ResourceResponse&, const ResourceResponse&);
 
@@ -420,7 +429,7 @@ class PLATFORM_EXPORT ResourceResponse final {
 
   KURL url_;
   AtomicString mime_type_;
-  long long expected_content_length_;
+  long long expected_content_length_ = 0;
   AtomicString text_encoding_name_;
 
   unsigned connection_id_ = 0;
@@ -461,9 +470,6 @@ class PLATFORM_EXPORT ResourceResponse final {
   // Was the resource fetched over SPDY.  See http://dev.chromium.org/spdy
   bool was_fetched_via_spdy_ = false;
 
-  // Was the resource fetched over an explicit proxy (HTTP, SOCKS, etc).
-  bool was_fetched_via_proxy_ = false;
-
   // Was the resource fetched over a ServiceWorker.
   bool was_fetched_via_service_worker_ = false;
 
@@ -474,12 +480,23 @@ class PLATFORM_EXPORT ResourceResponse final {
   // the request for this resource.
   bool did_service_worker_navigation_preload_ = false;
 
-  // The type of the response which was returned by the ServiceWorker.
-  network::mojom::FetchResponseType response_type_via_service_worker_ =
+  // True if this resource is stale and needs async revalidation. Will only
+  // possibly be set if the load_flags indicated SUPPORT_ASYNC_REVALIDATION.
+  bool async_revalidation_requested_ = false;
+
+  // True if this resource is from an inner response of a signed exchange.
+  // https://wicg.github.io/webpackage/draft-yasskin-http-origin-signed-responses.html
+  bool is_signed_exchange_inner_response_ = false;
+
+  // https://fetch.spec.whatwg.org/#concept-response-type
+  network::mojom::FetchResponseType response_type_ =
       network::mojom::FetchResponseType::kDefault;
 
   // HTTP version used in the response, if known.
   HTTPVersion http_version_ = kHTTPVersionUnknown;
+
+  // Request id given to the resource by the WebUrlLoader.
+  int request_id_ = 0;
 
   // The security style of the resource.
   // This only contains a valid value when the DevTools Network domain is
@@ -545,13 +562,6 @@ class PLATFORM_EXPORT ResourceResponse final {
   // removed.
   long long decoded_body_length_ = 0;
 
-  // The downloaded file path if the load streamed to a file.
-  String downloaded_file_path_;
-
-  // The handle to the downloaded file to ensure the underlying file will not
-  // be deleted.
-  scoped_refptr<BlobDataHandle> downloaded_file_handle_;
-
   // ExtraData associated with the response.
   scoped_refptr<ExtraData> extra_data_;
 
@@ -566,59 +576,6 @@ inline bool operator==(const ResourceResponse& a, const ResourceResponse& b) {
 inline bool operator!=(const ResourceResponse& a, const ResourceResponse& b) {
   return !(a == b);
 }
-
-// This class is needed to copy a ResourceResponse across threads, because it
-// has some members which cannot be transferred across threads (AtomicString
-// for example).
-// There are some rules / restrictions:
-//  - This struct cannot contain an object that cannot be transferred across
-//    threads (e.g., AtomicString)
-//  - Non-simple members need explicit copying (e.g., String::IsolatedCopy,
-//    KURL::Copy) rather than the copy constructor or the assignment operator.
-struct CrossThreadResourceResponseData {
-  WTF_MAKE_NONCOPYABLE(CrossThreadResourceResponseData);
-  USING_FAST_MALLOC(CrossThreadResourceResponseData);
-
- public:
-  CrossThreadResourceResponseData() = default;
-  KURL url_;
-  String mime_type_;
-  long long expected_content_length_;
-  String text_encoding_name_;
-  int http_status_code_;
-  String http_status_text_;
-  std::unique_ptr<CrossThreadHTTPHeaderMapData> http_headers_;
-  scoped_refptr<ResourceLoadTiming> resource_load_timing_;
-  bool has_major_certificate_errors_;
-  ResourceResponse::CTPolicyCompliance ct_policy_compliance_;
-  bool is_legacy_symantec_cert_;
-  base::Time cert_validity_start_;
-  ResourceResponse::SecurityStyle security_style_;
-  ResourceResponse::SecurityDetails security_details_;
-  // This is |certificate| from SecurityDetails since that structure should
-  // use an AtomicString but this temporary structure is sent across threads.
-  Vector<String> certificate_;
-  ResourceResponse::HTTPVersion http_version_;
-  long long app_cache_id_;
-  KURL app_cache_manifest_url_;
-  Vector<char> multipart_boundary_;
-  bool was_fetched_via_spdy_;
-  bool was_fetched_via_proxy_;
-  bool was_fetched_via_service_worker_;
-  bool was_fallback_required_by_service_worker_;
-  network::mojom::FetchResponseType response_type_via_service_worker_;
-  Vector<KURL> url_list_via_service_worker_;
-  String cache_storage_cache_name_;
-  bool did_service_worker_navigation_preload_;
-  Time response_time_;
-  String remote_ip_address_;
-  unsigned short remote_port_;
-  long long encoded_data_length_;
-  long long encoded_body_length_;
-  long long decoded_body_length_;
-  String downloaded_file_path_;
-  scoped_refptr<BlobDataHandle> downloaded_file_handle_;
-};
 
 }  // namespace blink
 

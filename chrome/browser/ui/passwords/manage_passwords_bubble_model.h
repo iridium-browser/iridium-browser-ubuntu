@@ -63,26 +63,12 @@ class ManagePasswordsBubbleModel {
   // Called by the view code when the save/update button is clicked by the user.
   void OnSaveClicked();
 
-  // Called by the view code when the update link is clicked by the user.
-  // TODO(vasilii): remove when the cocoa bubble is gone.
-  void OnUpdateClicked(const autofill::PasswordForm& password_form);
-
-  // Called by the view code when the "Done" button is clicked by the user.
-  // TODO(vasilii): remove when the cocoa bubble is gone.
-  void OnDoneClicked();
-
-  // TODO(vasilii): remove when the cocoa bubble is gone.
-  void OnOKClicked();
-
   // Called by the view code when the manage button is clicked by the user.
   void OnManageClicked();
 
   // Called by the view code when the navigate to passwords.google.com link is
   // clicked by the user.
   void OnNavigateToPasswordManagerAccountDashboardLinkClicked();
-
-  // Called by the view code when the brand name link is clicked by the user.
-  void OnBrandLinkClicked();
 
   // Called by the view code when the auto-signin toast is about to close due to
   // timeout.
@@ -120,10 +106,6 @@ class ManagePasswordsBubbleModel {
     return save_confirmation_link_range_;
   }
 
-  const gfx::Range& title_brand_link_range() const {
-    return title_brand_link_range_;
-  }
-
   bool are_passwords_revealed_when_bubble_is_opened() const {
     return are_passwords_revealed_when_bubble_is_opened_;
   }
@@ -143,15 +125,14 @@ class ManagePasswordsBubbleModel {
   Profile* GetProfile() const;
   content::WebContents* GetWebContents() const;
 
-  // Returns true iff the multiple account selection prompt for account update
-  // should be presented.
-  // TODO(vasilii): remove when the cocoa bubble is gone.
-  bool ShouldShowMultipleAccountUpdateUI() const;
-
   // The password bubble can switch its state between "save" and "update"
   // depending on the user input. |state_| only captures the correct state on
   // creation. This method returns true iff the current state is "update".
   bool IsCurrentStateUpdate() const;
+
+  // Returns true iff the bubble is supposed to show the footer about syncing
+  // to Google account.
+  bool ShouldShowFooter() const;
 
   // Returns the value for the username field when the bubble is opened.
   const base::string16& GetCurrentUsername() const;
@@ -172,8 +153,7 @@ class ManagePasswordsBubbleModel {
 
  private:
   class InteractionKeeper;
-  // Updates |title_| and |title_brand_link_range_| for the
-  // PENDING_PASSWORD_STATE.
+  // Updates |title_| for the PENDING_PASSWORD_STATE.
   void UpdatePendingStateTitle();
   // Updates |title_| for the MANAGE_STATE.
   void UpdateManageStateTitle();
@@ -182,9 +162,6 @@ class ManagePasswordsBubbleModel {
   GURL origin_;
   password_manager::ui::State state_;
   base::string16 title_;
-  // Range of characters in the title that contains the Smart Lock Brand and
-  // should point to an article. For the default title the range is empty.
-  gfx::Range title_brand_link_range_;
   autofill::PasswordForm pending_password_;
   std::vector<autofill::PasswordForm> local_credentials_;
   base::string16 manage_link_;

@@ -10,9 +10,10 @@
 
 #include "video/video_stream_decoder_impl.h"
 
+#include "absl/memory/memory.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/numerics/mod_ops.h"
-#include "rtc_base/ptr_util.h"
+#include "rtc_base/timeutils.h"
 
 namespace webrtc {
 
@@ -34,8 +35,8 @@ VideoStreamDecoderImpl::VideoStreamDecoderImpl(
                     &jitter_estimator_,
                     &timing_,
                     nullptr),
-      next_start_time_index_(0) {
-  decode_start_time_.fill({-1, 0});
+      next_frame_timestamps_index_(0) {
+  frame_timestamps_.fill({-1, -1, -1});
   decode_thread_.Start();
 }
 
@@ -63,7 +64,7 @@ void VideoStreamDecoderImpl::OnFrame(
     };
 
     bookkeeping_queue_.PostTask(
-        rtc::MakeUnique<OnFrameTask>(std::move(frame), this));
+        absl::make_unique<OnFrameTask>(std::move(frame), this));
     return;
   }
 
@@ -186,29 +187,95 @@ VideoStreamDecoderImpl::DecodeResult VideoStreamDecoderImpl::DecodeNextFrame(
     }
 
     int64_t decode_start_time_ms = rtc::TimeMillis();
-    uint32_t frame_timestamp = frame->timestamp;
+    int64_t timestamp = frame->Timestamp();
+    int64_t render_time_us = frame->RenderTimeMs() * 1000;
     bookkeeping_queue_.PostTask(
-        [this, decode_start_time_ms, frame_timestamp]() {
+        [this, decode_start_time_ms, timestamp, render_time_us]() {
           RTC_DCHECK_RUN_ON(&bookkeeping_queue_);
           // Saving decode start time this way wont work if we decode spatial
           // layers sequentially.
-          decode_start_time_[next_start_time_index_] = {frame_timestamp,
-                                                        decode_start_time_ms};
-          next_start_time_index_ =
-              Add<kDecodeTimeMemory>(next_start_time_index_, 1);
+          FrameTimestamps* frame_timestamps =
+              &frame_timestamps_[next_frame_timestamps_index_];
+          frame_timestamps->timestamp = timestamp;
+          frame_timestamps->decode_start_time_ms = decode_start_time_ms;
+          frame_timestamps->render_time_us = render_time_us;
+
+          next_frame_timestamps_index_ =
+              Add<kFrameTimestampsMemory>(next_frame_timestamps_index_, 1);
         });
 
-    int32_t decode_result =
-        decoder->Decode(frame->EncodedImage(),
-                        false,    // missing_frame
-                        nullptr,  // rtp fragmentation header
-                        nullptr,  // codec specific info
-                        frame->RenderTimeMs());
+    int32_t decode_result = decoder->Decode(frame->EncodedImage(),
+                                            false,    // missing_frame
+                                            nullptr,  // codec specific info
+                                            frame->RenderTimeMs());
 
     return decode_result == WEBRTC_VIDEO_CODEC_OK ? kOk : kDecodeFailure;
   }
 
   return kNoFrame;
+}
+
+VideoStreamDecoderImpl::FrameTimestamps*
+VideoStreamDecoderImpl::GetFrameTimestamps(int64_t timestamp) {
+  RTC_DCHECK_RUN_ON(&bookkeeping_queue_);
+
+  int start_time_index = next_frame_timestamps_index_;
+  for (int i = 0; i < kFrameTimestampsMemory; ++i) {
+    start_time_index = Subtract<kFrameTimestampsMemory>(start_time_index, 1);
+
+    if (frame_timestamps_[start_time_index].timestamp == timestamp)
+      return &frame_timestamps_[start_time_index];
+  }
+
+  return nullptr;
+}
+
+// VideoDecoder::DecodedImageCallback
+int32_t VideoStreamDecoderImpl::Decoded(VideoFrame& decoded_image) {
+  Decoded(decoded_image, absl::nullopt, absl::nullopt);
+  return WEBRTC_VIDEO_CODEC_OK;
+}
+
+// VideoDecoder::DecodedImageCallback
+int32_t VideoStreamDecoderImpl::Decoded(VideoFrame& decoded_image,
+                                        int64_t decode_time_ms) {
+  Decoded(decoded_image, decode_time_ms, absl::nullopt);
+  return WEBRTC_VIDEO_CODEC_OK;
+}
+
+// VideoDecoder::DecodedImageCallback
+void VideoStreamDecoderImpl::Decoded(VideoFrame& decoded_image,
+                                     absl::optional<int32_t> decode_time_ms,
+                                     absl::optional<uint8_t> qp) {
+  int64_t decode_stop_time_ms = rtc::TimeMillis();
+
+  bookkeeping_queue_.PostTask([this, decode_stop_time_ms, decoded_image,
+                               decode_time_ms, qp]() {
+    RTC_DCHECK_RUN_ON(&bookkeeping_queue_);
+
+    FrameTimestamps* frame_timestamps =
+        GetFrameTimestamps(decoded_image.timestamp());
+    if (!frame_timestamps) {
+      RTC_LOG(LS_ERROR) << "No frame information found for frame with timestamp"
+                        << decoded_image.timestamp();
+      return;
+    }
+
+    absl::optional<int> casted_qp;
+    if (qp)
+      casted_qp.emplace(*qp);
+
+    absl::optional<int> casted_decode_time_ms(decode_time_ms.value_or(
+        decode_stop_time_ms - frame_timestamps->decode_start_time_ms));
+
+    timing_.StopDecodeTimer(0, *casted_decode_time_ms, decode_stop_time_ms,
+                            frame_timestamps->render_time_us / 1000);
+
+    callbacks_->OnDecodedFrame(
+        VideoFrame(decoded_image.video_frame_buffer(), decoded_image.rotation(),
+                   frame_timestamps->render_time_us),
+        casted_decode_time_ms, casted_qp);
+  });
 }
 
 }  // namespace webrtc

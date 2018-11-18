@@ -14,6 +14,7 @@
 #include "base/memory/ref_counted.h"
 #include "net/base/completion_callback.h"
 #include "net/base/completion_once_callback.h"
+#include "net/base/completion_repeating_callback.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/load_timing_info.h"
 #include "net/base/net_export.h"
@@ -61,13 +62,11 @@ class NET_EXPORT_PRIVATE HttpProxyClientSocket : public ProxyClientSocket {
   NextProto GetProxyNegotiatedProtocol() const override;
 
   // StreamSocket implementation.
-  int Connect(const CompletionCallback& callback) override;
+  int Connect(CompletionOnceCallback callback) override;
   void Disconnect() override;
   bool IsConnected() const override;
   bool IsConnectedAndIdle() const override;
   const NetLogWithSource& NetLog() const override;
-  void SetSubresourceSpeculation() override;
-  void SetOmniboxSpeculation() override;
   bool WasEverUsed() const override;
   bool WasAlpnNegotiated() const override;
   NextProto GetNegotiatedProtocol() const override;
@@ -81,10 +80,14 @@ class NET_EXPORT_PRIVATE HttpProxyClientSocket : public ProxyClientSocket {
   // Socket implementation.
   int Read(IOBuffer* buf,
            int buf_len,
-           const CompletionCallback& callback) override;
+           CompletionOnceCallback callback) override;
+  int ReadIfReady(IOBuffer* buf,
+                  int buf_len,
+                  CompletionOnceCallback callback) override;
+  int CancelReadIfReady() override;
   int Write(IOBuffer* buf,
             int buf_len,
-            const CompletionCallback& callback,
+            CompletionOnceCallback callback,
             const NetworkTrafficAnnotationTag& traffic_annotation) override;
   int SetReceiveBufferSize(int32_t size) override;
   int SetSendBufferSize(int32_t size) override;
@@ -113,8 +116,6 @@ class NET_EXPORT_PRIVATE HttpProxyClientSocket : public ProxyClientSocket {
   int PrepareForAuthRestart();
   int DidDrainBodyForAuthRestart();
 
-  void LogBlockedTunnelResponse() const;
-
   void DoCallback(int result);
   void OnIOComplete(int result);
 
@@ -128,7 +129,10 @@ class NET_EXPORT_PRIVATE HttpProxyClientSocket : public ProxyClientSocket {
   int DoDrainBody();
   int DoDrainBodyComplete(int result);
 
-  CompletionCallback io_callback_;
+  // Returns whether |next_state_| is STATE_DONE.
+  bool CheckDone();
+
+  CompletionRepeatingCallback io_callback_;
   State next_state_;
 
   // Stores the callback provided by the caller of async operations.

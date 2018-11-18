@@ -5,7 +5,7 @@
 Polymer({
   is: 'print-preview-destination-dialog',
 
-  behaviors: [I18nBehavior],
+  behaviors: [I18nBehavior, ListPropertyUpdateBehavior],
 
   properties: {
     /** @type {?print_preview.DestinationStore} */
@@ -36,6 +36,7 @@ Polymer({
     showCloudPrintPromo: {
       type: Boolean,
       notify: true,
+      observer: 'onShowCloudPrintPromoChanged_',
     },
 
     /** @private {!Array<!print_preview.Destination>} */
@@ -61,6 +62,7 @@ Polymer({
       computed: 'computeRecentDestinationList_(' +
           'destinationStore, recentDestinations, recentDestinations.*, ' +
           'userInfo, destinations_.*)',
+      observer: 'onRecentDestinationListChange_',
     },
 
     /** @private {?RegExp} */
@@ -70,8 +72,20 @@ Polymer({
     },
   },
 
+  listeners: {
+    'keydown': 'onKeydown_',
+  },
+
   /** @private {!EventTracker} */
   tracker_: new EventTracker(),
+
+  /** @private {!print_preview.DestinationSearchMetricsContext} */
+  metrics_: new print_preview.DestinationSearchMetricsContext(),
+
+  // <if expr="chromeos">
+  /** @private {?print_preview.Destination} */
+  destinationInConfiguring_: null,
+  // </if>
 
   /** @override */
   ready: function() {
@@ -81,6 +95,8 @@ Polymer({
           attrs: {
             'is': (node, v) => v == 'action-link',
             'class': (node, v) => v == 'sign-in',
+            'tabindex': (node, v) => v == '0',
+            'role': (node, v) => v == 'link',
           },
         });
   },
@@ -89,9 +105,20 @@ Polymer({
   attached: function() {
     this.tracker_.add(
         assert(this.$$('.sign-in')), 'click', this.onSignInClick_.bind(this));
-    this.tracker_.add(
-        assert(this.$$('#cloudprintPromo > .close-button')), 'click',
-        this.onCloudPrintPromoDismissed_.bind(this));
+  },
+
+  /**
+   * @param {!KeyboardEvent} e Event containing the key
+   * @private
+   */
+  onKeydown_: function(e) {
+    e.stopPropagation();
+    const searchInput = this.$.searchBox.getSearchInput();
+    if (e.key == 'Escape' &&
+        (e.composedPath()[0] !== searchInput || !searchInput.value.trim())) {
+      this.$.dialog.cancel();
+      e.preventDefault();
+    }
   },
 
   /** @private */
@@ -129,15 +156,24 @@ Polymer({
 
   /** @private */
   updateDestinations_: function() {
+    if (this.destinationStore === undefined)
+      return;
+
     this.notifyPath('userInfo.users');
     this.notifyPath('userInfo.activeUser');
     this.notifyPath('userInfo.loggedIn');
     if (this.userInfo.loggedIn)
       this.showCloudPrintPromo = false;
 
-    this.destinations_ = this.userInfo ?
-        this.destinationStore.destinations(this.userInfo.activeUser) :
-        [];
+    if (this.userInfo) {
+      this.updateList(
+          'destinations_',
+          destination => destination.origin + '/' + destination.id,
+          this.destinationStore.destinations(this.userInfo.activeUser));
+    } else {
+      this.destinations_ = [];
+    }
+
     this.loadingDestinations_ =
         this.destinationStore.isPrintDestinationSearchInProgress;
   },
@@ -147,6 +183,9 @@ Polymer({
    * @private
    */
   computeRecentDestinationList_: function() {
+    if (!observerDepsDefined(Array.from(arguments)))
+      return [];
+
     let recentDestinations = [];
     const filterAccount = this.userInfo.activeUser;
     this.recentDestinations.forEach((recentDestination) => {
@@ -162,9 +201,23 @@ Polymer({
   },
 
   /** @private */
+  onRecentDestinationListChange_: function() {
+    const numRecent = Math.max(2, this.recentDestinationList_.length);
+    this.$.recentList.style.maxHeight = `calc(${numRecent} *
+            var(--destination-item-height) + 10px + 20 / 13 * 1rem)`;
+  },
+
+  /** @private */
   onCloseOrCancel_: function() {
     if (this.searchQuery_)
       this.$.searchBox.setValue('');
+    if (this.$.dialog.getNative().returnValue == 'success') {
+      this.metrics_.record(print_preview.Metrics.DestinationSearchBucket
+                               .DESTINATION_CLOSED_CHANGED);
+    } else {
+      this.metrics_.record(print_preview.Metrics.DestinationSearchBucket
+                               .DESTINATION_CLOSED_UNCHANGED);
+    }
   },
 
   /** @private */
@@ -173,19 +226,84 @@ Polymer({
   },
 
   /**
-   * @param {!CustomEvent} e Event containing the selected destination.
+   * @param {!CustomEvent} e Event containing the selected destination list item
+   *     element.
    * @private
    */
   onDestinationSelected_: function(e) {
-    this.destinationStore.selectDestination(
-        /** @type {!print_preview.Destination} */ (e.detail));
+    const listItem =
+        /** @type {!PrintPreviewDestinationListItemElement} */ (e.detail);
+    const destination = listItem.destination;
+
+    // ChromeOS local destinations that don't have capabilities need to be
+    // configured before selecting, and provisional destinations need to be
+    // resolved. Other destinations can be selected.
+    if (destination.readyForSelection) {
+      this.selectDestination_(destination);
+      return;
+    }
+
+    // Provisional destinations
+    if (destination.isProvisional) {
+      this.$.provisionalResolver.resolveDestination(destination)
+          .then(this.selectDestination_.bind(this))
+          .catch(function() {
+            console.warn(
+                'Failed to resolve provisional destination: ' + destination.id);
+          })
+          .then(() => {
+            if (this.$.dialog.open && !!listItem && !listItem.hidden) {
+              listItem.focus();
+            }
+          });
+      return;
+    }
+
+    // <if expr="chromeos">
+    // Destination must be a CrOS local destination that needs to be set up.
+    // The user is only allowed to set up printer at one time.
+    if (this.destinationInConfiguring_)
+      return;
+
+    // Show the configuring status to the user and resolve the destination.
+    listItem.onConfigureRequestAccepted();
+    this.destinationInConfiguring_ = destination;
+    this.destinationStore.resolveCrosDestination(destination)
+        .then(
+            response => {
+              this.destinationInConfiguring_ = null;
+              listItem.onConfigureComplete(response.success);
+              if (response.success) {
+                destination.capabilities = response.capabilities;
+                if (response.policies)
+                  destination.policies = response.policies;
+                this.selectDestination_(destination);
+              }
+            },
+            () => {
+              this.destinationInConfiguring_ = null;
+              listItem.onConfigureComplete(false);
+            });
+    // </if>
+  },
+
+  /**
+   * @param {!print_preview.Destination} destination The destination to select.
+   * @private
+   */
+  selectDestination_: function(destination) {
+    this.destinationStore.selectDestination(destination);
     this.$.dialog.close();
   },
 
   show: function() {
-    this.loadingDestinations_ =
-        this.destinationStore.isPrintDestinationSearchInProgress;
     this.$.dialog.showModal();
+    this.loadingDestinations_ = this.destinationStore === undefined ||
+        this.destinationStore.isPrintDestinationSearchInProgress;
+    this.metrics_.record(
+        print_preview.Metrics.DestinationSearchBucket.DESTINATION_SHOWN);
+    this.$.recentList.forceIronResize();
+    this.$.printList.forceIronResize();
   },
 
   /** @return {boolean} Whether the dialog is open. */
@@ -200,6 +318,8 @@ Polymer({
 
   /** @private */
   onSignInClick_: function() {
+    this.metrics_.record(
+        print_preview.Metrics.DestinationSearchBucket.SIGNIN_TRIGGERED);
     print_preview.NativeLayer.getInstance().signIn(false).then(() => {
       this.destinationStore.onDestinationsReload();
     });
@@ -218,6 +338,10 @@ Polymer({
     const invitations = this.userInfo.activeUser ?
         this.invitationStore.invitations(this.userInfo.activeUser) :
         [];
+    if (this.invitation_ != invitations[0]) {
+      this.metrics_.record(
+          print_preview.Metrics.DestinationSearchBucket.INVITATION_AVAILABLE);
+    }
     this.invitation_ = invitations.length > 0 ? invitations[0] : null;
   },
 
@@ -260,12 +384,16 @@ Polymer({
 
   /** @private */
   onInvitationAcceptClick_: function() {
+    this.metrics_.record(
+        print_preview.Metrics.DestinationSearchBucket.INVITATION_ACCEPTED);
     this.invitationStore.processInvitation(assert(this.invitation_), true);
     this.updateInvitations_();
   },
 
   /** @private */
   onInvitationRejectClick_: function() {
+    this.metrics_.record(
+        print_preview.Metrics.DestinationSearchBucket.INVITATION_REJECTED);
     this.invitationStore.processInvitation(assert(this.invitation_), false);
     this.updateInvitations_();
   },
@@ -281,6 +409,8 @@ Polymer({
       this.notifyPath('userInfo.loggedIn');
       this.destinationStore.reloadUserCookieBasedDestinations();
       this.invitationStore.startLoadingInvitations();
+      this.metrics_.record(
+          print_preview.Metrics.DestinationSearchBucket.ACCOUNT_CHANGED);
     } else {
       print_preview.NativeLayer.getInstance().signIn(true).then(
           this.destinationStore.onDestinationsReload.bind(
@@ -292,6 +422,16 @@ Polymer({
           break;
         }
       }
+      this.metrics_.record(
+          print_preview.Metrics.DestinationSearchBucket.ADD_ACCOUNT_SELECTED);
+    }
+  },
+
+  /** @private */
+  onShowCloudPrintPromoChanged_: function() {
+    if (this.showCloudPrintPromo) {
+      this.metrics_.record(
+          print_preview.Metrics.DestinationSearchBucket.SIGNIN_PROMPT);
     }
   },
 });

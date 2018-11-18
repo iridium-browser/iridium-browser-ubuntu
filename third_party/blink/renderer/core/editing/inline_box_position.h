@@ -43,8 +43,9 @@ enum class UnicodeBidi : unsigned;
 struct InlineBoxPosition {
   STACK_ALLOCATED();
 
-  const InlineBox* const inline_box;
-  const int offset_in_box;
+ public:
+  const InlineBox* inline_box;
+  int offset_in_box;
 
   InlineBoxPosition() : inline_box(nullptr), offset_in_box(0) {}
 
@@ -64,13 +65,6 @@ struct InlineBoxPosition {
   }
 };
 
-// TODO(yoichio): ComputeInlineBoxPosition returns null if position is at the
-// end of line and We fixed LocalCaretRectOfPosition for such position with
-// NeedsLineEndAdjustment and NextLinePositionOf.
-// We should include the fix into ComputeInlineBoxPosition however
-// SelectionModifierCharacter and SelectionModifierWord
-// depend on the null-line-end behavior of CIBP.
-// Move the fix into the CIBP while fixing the modifier functions.
 CORE_EXPORT InlineBoxPosition
 ComputeInlineBoxPosition(const PositionWithAffinity&);
 CORE_EXPORT InlineBoxPosition
@@ -87,13 +81,9 @@ InlineBoxPosition ComputeInlineBoxPositionForInlineAdjustedPosition(
 InlineBoxPosition ComputeInlineBoxPositionForInlineAdjustedPosition(
     const PositionInFlatTreeWithAffinity&);
 
-InlineBoxPosition AdjustInlineBoxPositionForTextDirection(InlineBox*,
-                                                          int,
-                                                          UnicodeBidi);
-
 // The print for |InlineBoxPosition| is available only for testing
 // in "webkit_unit_tests", and implemented in
-// "core/editing/InlineBoxPositionTest.cpp".
+// "core/editing/inline_box_position_test.cc".
 std::ostream& operator<<(std::ostream&, const InlineBoxPosition&);
 
 }  // namespace blink

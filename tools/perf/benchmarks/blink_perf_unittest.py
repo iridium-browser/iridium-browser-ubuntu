@@ -5,7 +5,6 @@ import os
 import unittest
 
 from telemetry import story
-from telemetry.page import page as page_module
 from telemetry.testing import options_for_unittests
 from telemetry.testing import page_test_test_case
 from telemetry.timeline import async_slice
@@ -17,11 +16,11 @@ from benchmarks import blink_perf
 
 class BlinkPerfTest(page_test_test_case.PageTestTestCase):
   _BLINK_PERF_TEST_DATA_DIR = os.path.join(os.path.dirname(__file__),
-      '..', '..', '..', 'third_party', 'WebKit', 'PerformanceTests',
-      'TestData')
+      '..', '..', '..', 'third_party', 'blink', 'perf_tests',
+      'test_data')
 
   _BLINK_PERF_RESOURCES_DIR = os.path.join(os.path.dirname(__file__),
-      '..', '..', '..', 'third_party', 'WebKit', 'PerformanceTests',
+      '..', '..', '..', 'third_party', 'blink', 'perf_tests',
       'resources')
   def setUp(self):
     self._options = options_for_unittests.GetCopy()
@@ -33,8 +32,10 @@ class BlinkPerfTest(page_test_test_case.PageTestTestCase):
     story_set = story.StorySet(base_dir=self._BLINK_PERF_TEST_DATA_DIR,
         serving_dirs={self._BLINK_PERF_TEST_DATA_DIR,
                       self._BLINK_PERF_RESOURCES_DIR})
-    page = page_module.Page('file://' + test_file_name, story_set,
+    # pylint: disable=protected-access
+    page = blink_perf._BlinkPerfPage('file://' + test_file_name, story_set,
         base_dir=story_set.base_dir, name=test_file_name)
+    # pylint: enable=protected-access
     story_set.AddStory(page)
     return story_set
 

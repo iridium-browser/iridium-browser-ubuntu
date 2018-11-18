@@ -22,9 +22,9 @@ import org.chromium.base.process_launcher.ChildProcessLauncher;
 import org.chromium.base.process_launcher.FileDescriptorInfo;
 import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.Feature;
-import org.chromium.content.browser.test.ContentJUnit4ClassRunner;
-import org.chromium.content.browser.test.util.Criteria;
-import org.chromium.content.browser.test.util.CriteriaHelper;
+import org.chromium.content_public.browser.test.ContentJUnit4ClassRunner;
+import org.chromium.content_public.browser.test.util.Criteria;
+import org.chromium.content_public.browser.test.util.CriteriaHelper;
 import org.chromium.content_shell_apk.ChildProcessLauncherTestUtils;
 import org.chromium.content_shell_apk.IChildProcessTest;
 
@@ -107,9 +107,9 @@ public class ChildProcessLauncherTest {
                     public ChildConnectionAllocator call() {
                         Context context = InstrumentationRegistry.getTargetContext();
                         return ChildConnectionAllocator.create(context, LauncherThread.getHandler(),
-                                SERVICE_PACKAGE_NAME, SERVICE_NAME, SERVICE_COUNT_META_DATA_KEY,
-                                false /* bindToCaller */, false /* bindAsExternalService */,
-                                false /* useStrongBinding */);
+                                null, SERVICE_PACKAGE_NAME, SERVICE_NAME,
+                                SERVICE_COUNT_META_DATA_KEY, false /* bindToCaller */,
+                                false /* bindAsExternalService */, false /* useStrongBinding */);
                     }
                 });
     }
@@ -356,7 +356,7 @@ public class ChildProcessLauncherTest {
                         new Callable<ChildConnectionAllocator>() {
                             @Override
                             public ChildConnectionAllocator call() {
-                                return ChildConnectionAllocator.createForTest(
+                                return ChildConnectionAllocator.createForTest(null,
                                         "org.chromium.wrong_package", "WrongService",
                                         2 /* serviceCount */, false /* bindToCaller */,
                                         false /* bindAsExternalService */,

@@ -11,7 +11,6 @@
 #include "base/time/tick_clock.h"
 #include "components/offline_pages/core/prefetch/prefetch_background_task_handler.h"
 
-class PrefRegistrySimple;
 class PrefService;
 
 namespace base {
@@ -68,8 +67,6 @@ class PrefetchBackgroundTaskHandlerImpl : public PrefetchBackgroundTaskHandler {
 
   DISALLOW_COPY_AND_ASSIGN(PrefetchBackgroundTaskHandlerImpl);
 };
-
-void RegisterPrefetchBackgroundTaskPrefs(PrefRegistrySimple* registry);
 
 }  // namespace offline_pages
 

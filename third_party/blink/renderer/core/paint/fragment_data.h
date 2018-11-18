@@ -5,9 +5,9 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_FRAGMENT_DATA_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_FRAGMENT_DATA_H_
 
+#include "base/optional.h"
 #include "third_party/blink/renderer/core/paint/object_paint_properties.h"
 #include "third_party/blink/renderer/platform/graphics/paint/ref_counted_property_tree_state.h"
-#include "third_party/blink/renderer/platform/wtf/optional.h"
 
 namespace blink {
 
@@ -21,16 +21,12 @@ class CORE_EXPORT FragmentData {
  public:
   FragmentData* NextFragment() const { return next_fragment_.get(); }
   FragmentData& EnsureNextFragment();
-  void ClearNextFragment() { next_fragment_.reset(); }
+  void ClearNextFragment() { DestroyTail(); }
 
   // Visual offset of this fragment's top-left position from the
-  // "paint offset root":
-  // - In SPv1 mode, this is the containing composited PaintLayer, or
-  //   PaintLayer with a transform, whichever is nearer along the containing
-  //   block chain.
-  // - In SPv2 mode, this is the containing root PaintLayer of the
-  //   root LocalFrameView, or PaintLayer with a transform, whichever is nearer
-  //   along the containing block chain.
+  // "paint offset root" which is the containing root PaintLayer of the root
+  // LocalFrameView, or PaintLayer with a transform, whichever is nearer along
+  // the containing block chain.
   LayoutPoint PaintOffset() const { return paint_offset_; }
   void SetPaintOffset(const LayoutPoint& paint_offset) {
     paint_offset_ = paint_offset;
@@ -39,6 +35,8 @@ class CORE_EXPORT FragmentData {
   // The visual rect computed by the latest paint invalidation.
   // This rect does *not* account for composited scrolling. See LayoutObject::
   // AdjustVisualRectForCompositedScrolling().
+  // It's location may be different from PaintOffset when there is visual (ink)
+  // overflow to the top and/or the left.
   LayoutRect VisualRect() const { return visual_rect_; }
   void SetVisualRect(const LayoutRect& rect) { visual_rect_ = rect; }
 
@@ -54,17 +52,6 @@ class CORE_EXPORT FragmentData {
   }
   void SetLayer(std::unique_ptr<PaintLayer>);
 
-  // See PaintInvalidatorContext::old_location for details. This will be removed
-  // for SPv2.
-  LayoutPoint LocationInBacking() const {
-    return rare_data_ ? rare_data_->location_in_backing
-                      : visual_rect_.Location();
-  }
-  void SetLocationInBacking(const LayoutPoint& location) {
-    if (rare_data_ || location != visual_rect_.Location())
-      EnsureRareData().location_in_backing = location;
-  }
-
   // Visual rect of the selection on this object, in the same coordinate space
   // as DisplayItemClient::VisualRect().
   LayoutRect SelectionVisualRect() const {
@@ -75,12 +62,31 @@ class CORE_EXPORT FragmentData {
       EnsureRareData().selection_visual_rect = r;
   }
 
-  LayoutRect PartialInvalidationRect() const {
-    return rare_data_ ? rare_data_->partial_invalidation_rect : LayoutRect();
+  // Covers the sub-rectangles of the object that need to be re-rastered, in the
+  // object's local coordinate space.  During PrePaint, the rect mapped into
+  // visual rect space will be added into PartialInvalidationVisualRect(), and
+  // cleared.
+  LayoutRect PartialInvalidationLocalRect() const {
+    return rare_data_ ? rare_data_->partial_invalidation_local_rect
+                      : LayoutRect();
   }
-  void SetPartialInvalidationRect(const LayoutRect& r) {
+  // LayoutObject::InvalidatePaintRectangle() calls this method to accumulate
+  // the sub-rectangles needing re-rasterization.
+  void SetPartialInvalidationLocalRect(const LayoutRect& r) {
     if (rare_data_ || !r.IsEmpty())
-      EnsureRareData().partial_invalidation_rect = r;
+      EnsureRareData().partial_invalidation_local_rect = r;
+  }
+
+  // Covers the sub-rectangles of the object that need to be re-rastered, in
+  // visual rect space (see VisualRect()). It will be cleared after the raster
+  // invalidation is issued after paint.
+  LayoutRect PartialInvalidationVisualRect() const {
+    return rare_data_ ? rare_data_->partial_invalidation_visual_rect
+                      : LayoutRect();
+  }
+  void SetPartialInvalidationVisualRect(const LayoutRect& r) {
+    if (rare_data_ || !r.IsEmpty())
+      EnsureRareData().partial_invalidation_visual_rect = r;
   }
 
   LayoutUnit LogicalTopInFlowThread() const {
@@ -107,15 +113,15 @@ class CORE_EXPORT FragmentData {
   }
   void InvalidateClipPathCache();
 
-  Optional<IntRect> ClipPathBoundingBox() const {
+  base::Optional<IntRect> ClipPathBoundingBox() const {
     DCHECK(IsClipPathCacheValid());
-    return rare_data_ ? rare_data_->clip_path_bounding_box : WTF::nullopt;
+    return rare_data_ ? rare_data_->clip_path_bounding_box : base::nullopt;
   }
   const RefCountedPath* ClipPathPath() const {
     DCHECK(IsClipPathCacheValid());
     return rare_data_ ? rare_data_->clip_path_path.get() : nullptr;
   }
-  void SetClipPathCache(const Optional<IntRect>& bounding_box,
+  void SetClipPathCache(const base::Optional<IntRect>& bounding_box,
                         scoped_refptr<const RefCountedPath>);
 
   // Holds references to the paint property nodes created by this object.
@@ -135,6 +141,7 @@ class CORE_EXPORT FragmentData {
     if (rare_data_)
       rare_data_->paint_properties = nullptr;
   }
+  void EnsureIdForTesting() { EnsureRareData(); }
 
   // This is a complete set of property nodes that should be used as a
   // starting point to paint a LayoutObject. This data is cached because some
@@ -164,7 +171,7 @@ class CORE_EXPORT FragmentData {
       rare_data_->local_border_box_properties =
           std::make_unique<RefCountedPropertyTreeState>(state);
     } else {
-      *rare_data_->local_border_box_properties = std::move(state);
+      *rare_data_->local_border_box_properties = state;
     }
   }
 
@@ -181,7 +188,7 @@ class CORE_EXPORT FragmentData {
   // overflow clip, scroll translation) that apply to contents.
   PropertyTreeState ContentsProperties() const {
     return PropertyTreeState(PostScrollTranslation(), PostOverflowClip(),
-                             LocalBorderBoxProperties().Effect());
+                             PostIsolationEffect());
   }
 
   // This is the complete set of property nodes that can be used to
@@ -202,25 +209,38 @@ class CORE_EXPORT FragmentData {
   const ClipPaintPropertyNode* PostOverflowClip() const;
   const EffectPaintPropertyNode* PreEffect() const;
   const EffectPaintPropertyNode* PreFilter() const;
+  const EffectPaintPropertyNode* PostIsolationEffect() const;
+
+  // Map a rect from |this|'s local border box space to |fragment|'s local
+  // border box space. Both fragments must have local border box properties.
+  void MapRectToFragment(const FragmentData& fragment, IntRect&) const;
+  void MapRectToFragment(const FragmentData& fragment, LayoutRect&) const;
+
+  ~FragmentData() {
+    if (next_fragment_)
+      DestroyTail();
+  }
 
  private:
   friend class FragmentDataTest;
+
+  void DestroyTail();
 
   // Contains rare data that that is not needed on all fragments.
   struct RareData {
     USING_FAST_MALLOC(RareData);
 
    public:
-    RareData(const LayoutPoint& location_in_backing);
+    RareData();
     ~RareData();
 
     // The following data fields are not fragment specific. Placed here just to
     // avoid separate data structure for them.
     std::unique_ptr<PaintLayer> layer;
     UniqueObjectId unique_id;
-    LayoutPoint location_in_backing;
     LayoutRect selection_visual_rect;
-    LayoutRect partial_invalidation_rect;
+    LayoutRect partial_invalidation_local_rect;
+    LayoutRect partial_invalidation_visual_rect;
 
     // Fragment specific data.
     LayoutPoint pagination_offset;
@@ -228,7 +248,7 @@ class CORE_EXPORT FragmentData {
     std::unique_ptr<ObjectPaintProperties> paint_properties;
     std::unique_ptr<RefCountedPropertyTreeState> local_border_box_properties;
     bool is_clip_path_cache_valid = false;
-    Optional<IntRect> clip_path_bounding_box;
+    base::Optional<IntRect> clip_path_bounding_box;
     scoped_refptr<const RefCountedPath> clip_path_path;
 
     DISALLOW_COPY_AND_ASSIGN(RareData);

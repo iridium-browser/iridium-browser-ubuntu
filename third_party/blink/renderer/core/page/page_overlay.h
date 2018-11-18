@@ -39,7 +39,7 @@
 namespace blink {
 
 class GraphicsContext;
-class WebLocalFrameImpl;
+class LocalFrame;
 
 // Manages a layer that is overlaid on a WebLocalFrame's content.
 class CORE_EXPORT PageOverlay : public GraphicsLayerClient,
@@ -52,14 +52,14 @@ class CORE_EXPORT PageOverlay : public GraphicsLayerClient,
     // Paints page overlay contents.
     virtual void PaintPageOverlay(const PageOverlay&,
                                   GraphicsContext&,
-                                  const WebSize& web_view_size) const = 0;
+                                  const IntSize& web_view_size) const = 0;
   };
 
   static std::unique_ptr<PageOverlay> Create(
-      WebLocalFrameImpl*,
+      LocalFrame*,
       std::unique_ptr<PageOverlay::Delegate>);
 
-  ~PageOverlay();
+  ~PageOverlay() override;
 
   void Update();
 
@@ -70,7 +70,7 @@ class CORE_EXPORT PageOverlay : public GraphicsLayerClient,
   LayoutRect VisualRect() const override;
 
   // GraphicsLayerClient implementation
-  bool NeedsRepaint(const GraphicsLayer&) const { return true; }
+  bool NeedsRepaint(const GraphicsLayer&) const override { return true; }
   IntRect ComputeInterestRect(const GraphicsLayer*,
                               const IntRect&) const override;
   void PaintContents(const GraphicsLayer*,
@@ -80,9 +80,9 @@ class CORE_EXPORT PageOverlay : public GraphicsLayerClient,
   String DebugName(const GraphicsLayer*) const override;
 
  private:
-  PageOverlay(WebLocalFrameImpl*, std::unique_ptr<PageOverlay::Delegate>);
+  PageOverlay(LocalFrame*, std::unique_ptr<PageOverlay::Delegate>);
 
-  Persistent<WebLocalFrameImpl> frame_impl_;
+  Persistent<LocalFrame> frame_;
   std::unique_ptr<PageOverlay::Delegate> delegate_;
   std::unique_ptr<GraphicsLayer> layer_;
 };

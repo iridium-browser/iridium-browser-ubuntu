@@ -8,8 +8,10 @@
 #include <memory>
 #include <string>
 
+#include "ash/public/interfaces/login_screen.mojom.h"
 #include "base/callback_forward.h"
 #include "base/memory/weak_ptr.h"
+#include "base/optional.h"
 #include "chrome/browser/chromeos/customization/customization_document.h"
 #include "chrome/browser/chromeos/login/auth/auth_prewarmer.h"
 #include "chrome/browser/chromeos/login/oobe_screen.h"
@@ -18,9 +20,14 @@
 
 class AccountId;
 
+namespace content {
+class WebContents;
+}
+
 namespace chromeos {
 
 class AppLaunchController;
+class ExistingUserController;
 class LoginScreenContext;
 class OobeUI;
 class WebUILoginView;
@@ -35,30 +42,36 @@ class WizardController;
 //                                   /       |
 //                LoginDisplayHostCommon   MockLoginDisplayHost
 //                      /      |
-//   LoginDisplayHostViews   LoginDisplayHostWebUI
+//   LoginDisplayHostMojo    LoginDisplayHostWebUI
 //
 //
 // - LoginDisplayHost defines the generic interface.
 // - LoginDisplayHostCommon is UI-agnostic code shared between the views and
 //   webui hosts.
 // - MockLoginDisplayHost is for tests.
-// - LoginDisplayHostViews is for the login screen, which is written in views.
+// - LoginDisplayHostMojo is for the login screen which is a mojo controller
+//   (ie, ash/public/interfaces/login_screen.mojom,
+//    ash/login/login_screen_controller.h).
 // - LoginDisplayHostWebUI is for OOBE, which is written in HTML/JS/CSS.
 class LoginDisplayHost {
  public:
   // Returns the default LoginDisplayHost instance if it has been created.
   static LoginDisplayHost* default_host() { return default_host_; }
 
-  // Creates UI implementation specific login display instance (views/WebUI).
-  // The caller takes ownership of the returned value.
-  virtual LoginDisplay* CreateLoginDisplay(
-      LoginDisplay::Delegate* delegate) = 0;
+  // Returns an unowned pointer to the LoginDisplay instance.
+  virtual LoginDisplay* GetLoginDisplay() = 0;
+
+  // Returns an unowned pointer to the ExistingUserController instance.
+  virtual ExistingUserController* GetExistingUserController() = 0;
 
   // Returns corresponding native window.
   virtual gfx::NativeWindow GetNativeWindow() const = 0;
 
   // Returns instance of the OOBE WebUI.
   virtual OobeUI* GetOobeUI() const = 0;
+
+  // Return the WebContents instance of OOBE, if any.
+  virtual content::WebContents* GetOobeWebContents() const = 0;
 
   // Returns the current login view.
   virtual WebUILoginView* GetWebUILoginView() const = 0;
@@ -122,11 +135,20 @@ class LoginDisplayHost {
   // Returns whether current host is for voice interaction OOBE.
   virtual bool IsVoiceInteractionOobe() = 0;
 
-  // Update the visibility of the gaia dialog.
-  virtual void UpdateGaiaDialogVisibility(bool visible) = 0;
+  // Show the gaia dialog. |can_close| determines if the user is allowed to
+  // close the dialog. If available, |account| is preloaded in the gaia dialog.
+  virtual void ShowGaiaDialog(
+      bool can_close,
+      const base::Optional<AccountId>& prefilled_account) = 0;
 
-  // Update the size of the gaia dialog.
-  virtual void UpdateGaiaDialogSize(int width, int height) = 0;
+  // Hide any visible oobe dialog.
+  virtual void HideOobeDialog() = 0;
+
+  // Update the size of the oobe dialog.
+  virtual void UpdateOobeDialogSize(int width, int height) = 0;
+
+  // Update the state of the oobe dialog.
+  virtual void UpdateOobeDialogState(ash::mojom::OobeDialogState state) = 0;
 
   // Get users that are visible in the login screen UI.
   // This is mainly used by views login screen. WebUI login screen will
@@ -160,6 +182,32 @@ class LoginDisplayHost {
 
   // Returns true if user is allowed to log in by domain policy.
   virtual bool IsUserWhitelisted(const AccountId& account_id) = 0;
+
+  // ----- Password change flow methods -----
+  // Cancels current password changed flow.
+  virtual void CancelPasswordChangedFlow() = 0;
+
+  // Decrypt cryptohome using user provided |old_password| and migrate to new
+  // password.
+  virtual void MigrateUserData(const std::string& old_password) = 0;
+
+  // Ignore password change, remove existing cryptohome and force full sync of
+  // user data.
+  virtual void ResyncUserData() = 0;
+
+  // Shows a feedback report dialog.
+  virtual void ShowFeedback() = 0;
+
+  // Shows the powerwash dialog.
+  virtual void ShowResetScreen() = 0;
+
+  // Handles a request to show the captive portal web dialog. For webui, the
+  // dialog is displayed immediately. For views, the dialog is displayed as soon
+  // as the OOBE dialog is visible.
+  virtual void HandleDisplayCaptivePortal() = 0;
+
+  // Update status of add user button in the shelf.
+  virtual void UpdateAddUserButtonStatus() = 0;
 
  protected:
   LoginDisplayHost();

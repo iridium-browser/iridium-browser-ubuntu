@@ -24,6 +24,7 @@ AXSystemCaretWin::AXSystemCaretWin(gfx::AcceleratedWidget event_target)
   data_.role = ax::mojom::Role::kCaret;
   // |get_accState| should return 0 which means that the caret is visible.
   data_.state = 0;
+  data_.AddState(ax::mojom::State::kInvisible);
   // According to MSDN, "Edit" should be the name of the caret object.
   data_.SetName(L"Edit");
   data_.offset_container_id = -1;
@@ -54,24 +55,45 @@ Microsoft::WRL::ComPtr<IAccessible> AXSystemCaretWin::GetCaret() const {
 void AXSystemCaretWin::MoveCaretTo(const gfx::Rect& bounds) {
   if (bounds.IsEmpty())
     return;
-  data_.location = gfx::RectF(bounds);
-  if (event_target_) {
+
+  // If the caret has non-empty bounds, assume it has been made visible.
+  bool newly_visible = false;
+  if (data_.HasState(ax::mojom::State::kInvisible)) {
+    newly_visible = true;
+    data_.RemoveState(ax::mojom::State::kInvisible);
+  }
+
+  if (!event_target_)
+    return;
+
+  if (newly_visible) {
+    ::NotifyWinEvent(EVENT_OBJECT_SHOW, event_target_, OBJID_CARET,
+                     -caret_->GetUniqueId());
+  }
+
+  gfx::RectF new_location(bounds);
+  // Avoid redundant caret move events (if the location stays the same), but
+  // always fire when it's made visible again.
+  if (data_.location != new_location || newly_visible) {
+    data_.location = new_location;
     ::NotifyWinEvent(EVENT_OBJECT_LOCATIONCHANGE, event_target_, OBJID_CARET,
                      -caret_->GetUniqueId());
   }
 }
 
+void AXSystemCaretWin::Hide() {
+  if (!data_.HasState(ax::mojom::State::kInvisible)) {
+    data_.AddState(ax::mojom::State::kInvisible);
+    data_.location.set_width(0);
+    if (event_target_) {
+      ::NotifyWinEvent(EVENT_OBJECT_HIDE, event_target_, OBJID_CARET,
+                       -caret_->GetUniqueId());
+    }
+  }
+}
+
 const AXNodeData& AXSystemCaretWin::GetData() const {
   return data_;
-}
-
-const AXTreeData& AXSystemCaretWin::GetTreeData() const {
-  CR_DEFINE_STATIC_LOCAL(AXTreeData, empty_data, ());
-  return empty_data;
-}
-
-gfx::NativeWindow AXSystemCaretWin::GetTopLevelWidget() {
-  return nullptr;
 }
 
 gfx::NativeViewAccessible AXSystemCaretWin::GetParent() {
@@ -87,14 +109,6 @@ gfx::NativeViewAccessible AXSystemCaretWin::GetParent() {
   return nullptr;
 }
 
-int AXSystemCaretWin::GetChildCount() {
-  return 0;
-}
-
-gfx::NativeViewAccessible AXSystemCaretWin::ChildAtIndex(int index) {
-  return nullptr;
-}
-
 gfx::Rect AXSystemCaretWin::GetClippedScreenBoundsRect() const {
   // We could optionally add clipping here if ever needed.
   return ToEnclosingRect(data_.location);
@@ -104,49 +118,13 @@ gfx::Rect AXSystemCaretWin::GetUnclippedScreenBoundsRect() const {
   return ToEnclosingRect(data_.location);
 }
 
-gfx::NativeViewAccessible AXSystemCaretWin::HitTestSync(int x, int y) {
-  return nullptr;
-}
-
-gfx::NativeViewAccessible AXSystemCaretWin::GetFocus() {
-  return nullptr;
-}
-
 gfx::AcceleratedWidget
 AXSystemCaretWin::GetTargetForNativeAccessibilityEvent() {
   return event_target_;
 }
 
-bool AXSystemCaretWin::AccessibilityPerformAction(const AXActionData& data) {
-  return false;
-}
-
-int AXSystemCaretWin::GetIndexInParent() const {
-  return -1;
-}
-
-AXPlatformNode* AXSystemCaretWin::GetFromNodeID(int32_t id) {
-  return nullptr;
-}
-
 bool AXSystemCaretWin::ShouldIgnoreHoveredStateForTesting() {
   return false;
-}
-
-bool AXSystemCaretWin::IsOffscreen() const {
-  return false;
-}
-
-std::set<int32_t> AXSystemCaretWin::GetReverseRelations(
-    ax::mojom::IntAttribute attr,
-    int32_t dst_id) {
-  return std::set<int32_t>();
-}
-
-std::set<int32_t> AXSystemCaretWin::GetReverseRelations(
-    ax::mojom::IntListAttribute attr,
-    int32_t dst_id) {
-  return std::set<int32_t>();
 }
 
 const ui::AXUniqueId& AXSystemCaretWin::GetUniqueId() const {

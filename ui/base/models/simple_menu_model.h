@@ -5,6 +5,7 @@
 #ifndef UI_BASE_MODELS_SIMPLE_MENU_MODEL_H_
 #define UI_BASE_MODELS_SIMPLE_MENU_MODEL_H_
 
+#include <string>
 #include <vector>
 
 #include "base/compiler_specific.h"
@@ -55,7 +56,10 @@ class UI_BASE_EXPORT SimpleMenuModel : public MenuModel {
     virtual void ExecuteCommand(int command_id, int event_flags) = 0;
 
     // Notifies the delegate that the menu is about to show.
-    virtual void MenuWillShow(SimpleMenuModel* source);
+    // Slight hack: Prefix with "On" to make sure this doesn't conflict with
+    // MenuModel::MenuWillShow(), since many classes derive from both
+    // SimpleMenuModel and SimpleMenuModel::Delegate.
+    virtual void OnMenuWillShow(SimpleMenuModel* source);
 
     // Notifies the delegate that the menu has closed.
     virtual void MenuClosed(SimpleMenuModel* source);
@@ -93,13 +97,20 @@ class UI_BASE_EXPORT SimpleMenuModel : public MenuModel {
   //   or SPACING. NORMAL separators are silently ignored if the model is empty.
   void AddSeparator(MenuSeparatorType separator_type);
 
-  // These three methods take pointers to various sub-models. These models
-  // should be owned by the same owner of this SimpleMenuModel.
+  // These methods take pointers to various sub-models. These models should be
+  // owned by the same owner of this SimpleMenuModel.
   void AddButtonItem(int command_id, ButtonMenuItemModel* model);
   void AddSubMenu(int command_id,
                   const base::string16& label,
                   MenuModel* model);
   void AddSubMenuWithStringId(int command_id, int string_id, MenuModel* model);
+  void AddActionableSubMenu(int command_id,
+                            const base::string16& label,
+                            MenuModel* model);
+  void AddActionableSubmenuWithStringIdAndIcon(int command_id,
+                                               int string_id,
+                                               MenuModel* model,
+                                               const gfx::ImageSkia& icon);
 
   // Methods for inserting items into the model.
   void InsertItemAt(int index, int command_id, const base::string16& label);
@@ -128,6 +139,9 @@ class UI_BASE_EXPORT SimpleMenuModel : public MenuModel {
   // Sets the icon for the item at |index|.
   void SetIcon(int index, const gfx::Image& icon);
 
+  // Sets the label for the item at |index|.
+  void SetLabel(int index, const base::string16& label);
+
   // Sets the sublabel for the item at |index|.
   void SetSublabel(int index, const base::string16& sublabel);
 
@@ -136,6 +150,12 @@ class UI_BASE_EXPORT SimpleMenuModel : public MenuModel {
 
   // Sets the minor icon for the item at |index|.
   void SetMinorIcon(int index, const gfx::VectorIcon& minor_icon);
+
+  // Sets whether the item at |index| is enabled.
+  void SetEnabledAt(int index, bool enabled);
+
+  // Sets whether the item at |index| is visible.
+  void SetVisibleAt(int index, bool visible);
 
   // Clears all items. Note that it does not free MenuModel of submenu.
   void Clear();
@@ -203,6 +223,8 @@ class UI_BASE_EXPORT SimpleMenuModel : public MenuModel {
     MenuModel* submenu = nullptr;
     ButtonMenuItemModel* button_model = nullptr;
     MenuSeparatorType separator_type = NORMAL_SEPARATOR;
+    bool enabled = true;
+    bool visible = true;
   };
 
   typedef std::vector<Item> ItemVector;

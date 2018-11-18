@@ -36,10 +36,10 @@ import org.chromium.chrome.browser.ChromeTabbedActivity;
 import org.chromium.chrome.browser.modaldialog.ModalDialogView;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
-import org.chromium.content.browser.test.util.Criteria;
-import org.chromium.content.browser.test.util.CriteriaHelper;
-import org.chromium.content.browser.test.util.TestCallbackHelperContainer.OnEvaluateJavaScriptResultHelper;
 import org.chromium.content_public.browser.LoadUrlParams;
+import org.chromium.content_public.browser.test.util.Criteria;
+import org.chromium.content_public.browser.test.util.CriteriaHelper;
+import org.chromium.content_public.browser.test.util.TestCallbackHelperContainer.OnEvaluateJavaScriptResultHelper;
 import org.chromium.ui.base.PageTransition;
 import org.chromium.ui.test.util.UiRestriction;
 
@@ -105,8 +105,8 @@ public class JavascriptTabModalDialogTest {
         Assert.assertNotNull("No dialog showing.", jsDialog);
 
         ThreadUtils.runOnUiThreadBlocking(() -> {
-            jsDialog.onClick(ModalDialogView.BUTTON_POSITIVE);
-            jsDialog.onClick(ModalDialogView.BUTTON_POSITIVE);
+            jsDialog.onClick(ModalDialogView.ButtonType.POSITIVE);
+            jsDialog.onClick(ModalDialogView.ButtonType.POSITIVE);
         });
 
         Assert.assertTrue("JavaScript execution should continue after closing prompt.",
@@ -297,8 +297,7 @@ public class JavascriptTabModalDialogTest {
      */
     private OnEvaluateJavaScriptResultHelper executeJavaScriptAndWaitForDialog(
             final OnEvaluateJavaScriptResultHelper helper, String script) {
-        helper.evaluateJavaScriptForTests(
-                mActivity.getCurrentContentViewCore().getWebContents(), script);
+        helper.evaluateJavaScriptForTests(mActivity.getCurrentWebContents(), script);
         checkDialogShowing("Could not spawn or locate a modal dialog.", true);
         return helper;
     }

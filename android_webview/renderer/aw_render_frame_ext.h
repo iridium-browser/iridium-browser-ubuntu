@@ -7,7 +7,7 @@
 
 #include "base/macros.h"
 #include "content/public/renderer/render_frame_observer.h"
-#include "services/service_manager/public/cpp/binder_registry.h"
+#include "third_party/blink/public/common/associated_interfaces/associated_interface_registry.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/geometry/point_f.h"
 #include "ui/gfx/geometry/size.h"
@@ -33,11 +33,11 @@ class AwRenderFrameExt : public content::RenderFrameObserver {
   ~AwRenderFrameExt() override;
 
   // RenderFrameObserver:
-  void OnInterfaceRequestForFrame(
+  bool OnAssociatedInterfaceRequestForFrame(
       const std::string& interface_name,
-      mojo::ScopedMessagePipeHandle* interface_pipe) override;
-  void DidCommitProvisionalLoad(bool is_new_navigation,
-                                bool is_same_document_navigation) override;
+      mojo::ScopedInterfaceEndpointHandle* handle) override;
+  void DidCommitProvisionalLoad(bool is_same_document_navigation,
+                                ui::PageTransition transition) override;
 
   bool OnMessageReceived(const IPC::Message& message) override;
   void FocusedNodeChanged(const blink::WebNode& node) override;
@@ -62,7 +62,7 @@ class AwRenderFrameExt : public content::RenderFrameObserver {
 
   url::Origin last_origin_;
 
-  std::unique_ptr<service_manager::BinderRegistry> registry_;
+  blink::AssociatedInterfaceRegistry registry_;
 
   DISALLOW_COPY_AND_ASSIGN(AwRenderFrameExt);
 };

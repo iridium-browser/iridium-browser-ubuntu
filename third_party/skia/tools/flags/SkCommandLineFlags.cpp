@@ -253,7 +253,7 @@ void SkCommandLineFlags::Parse(int argc, const char* const * argv) {
                 SkTDArray<SkFlagInfo*> allFlags;
                 for (SkFlagInfo* flag = SkCommandLineFlags::gHead; flag;
                      flag = flag->next()) {
-                    allFlags.push(flag);
+                    allFlags.push_back(flag);
                 }
                 SkTQSort(&allFlags[0], &allFlags[allFlags.count() - 1],
                          CompareFlagsByName());
@@ -327,6 +327,10 @@ void SkCommandLineFlags::Parse(int argc, const char* const * argv) {
                         case SkFlagInfo::kInt_FlagType:
                             i++;
                             flag->setInt(atoi(argv[i]));
+                            break;
+                        case SkFlagInfo::kUint_FlagType:
+                            i++;
+                            flag->setUint(strtoul(argv[i], nullptr, 0));
                             break;
                         case SkFlagInfo::kDouble_FlagType:
                             i++;

@@ -4,6 +4,10 @@
 
 package org.chromium.chromecast.base;
 
+import android.annotation.SuppressLint;
+
+import java.util.Objects;
+
 /**
  * Represents a structure containing an instance of both A and B.
  *
@@ -45,6 +49,21 @@ public class Both<A, B> {
                 .toString();
     }
 
+    @Override
+    public boolean equals(Object other) {
+        if (other instanceof Both) {
+            Both<?, ?> that = (Both<?, ?>) other;
+            return this.first.equals(that.first) && this.second.equals(that.second);
+        }
+        return false;
+    }
+
+    @SuppressLint("NewApi")
+    @Override
+    public int hashCode() {
+        return Objects.hash(this.first, this.second);
+    }
+
     /**
      * Constructs a Both object containing both `a` and `b`.
      */
@@ -57,21 +76,22 @@ public class Both<A, B> {
     /**
      * Turns a function of two arguments into a function of a single Both argument.
      */
-    public static <A, B, R> Function<Both<A, B>, R> adapt(BiFunction<A, B, R> function) {
+    public static <A, B, R> Function<Both<A, B>, R> adapt(
+            BiFunction<? super A, ? super B, ? extends R> function) {
         return (Both<A, B> data) -> function.apply(data.first, data.second);
     }
 
     /**
      * Turns a consumer of two arguments into a consumer of a single Both argument.
      */
-    public static <A, B> Consumer<Both<A, B>> adapt(BiConsumer<A, B> consumer) {
+    public static <A, B> Consumer<Both<A, B>> adapt(BiConsumer<? super A, ? super B> consumer) {
         return (Both<A, B> data) -> consumer.accept(data.first, data.second);
     }
 
     /**
      * Turns a predicate of two arguments into a predicate of a single Both argument.
      */
-    public static <A, B> Predicate<Both<A, B>> adapt(BiPredicate<A, B> predicate) {
+    public static <A, B> Predicate<Both<A, B>> adapt(BiPredicate<? super A, ? super B> predicate) {
         return (Both<A, B> data) -> predicate.test(data.first, data.second);
     }
 }

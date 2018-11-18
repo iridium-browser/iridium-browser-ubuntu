@@ -32,17 +32,20 @@
 
 #include "base/location.h"
 #include "base/macros.h"
-#include "base/single_thread_task_runner.h"
+#include "base/unguessable_token.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/context_lifecycle_notifier.h"
 #include "third_party/blink/renderer/core/dom/context_lifecycle_observer.h"
-#include "third_party/blink/renderer/core/execution_context/security_context.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/loader/fetch/access_control_status.h"
+#include "third_party/blink/renderer/platform/loader/fetch/https_state.h"
 #include "third_party/blink/renderer/platform/supplementable.h"
-#include "third_party/blink/renderer/platform/weborigin/kurl.h"
 #include "third_party/blink/renderer/platform/weborigin/referrer_policy.h"
 #include "v8/include/v8.h"
+
+namespace base {
+class SingleThreadTaskRunner;
+}
 
 namespace service_manager {
 class InterfaceProvider;
@@ -51,17 +54,20 @@ class InterfaceProvider;
 namespace blink {
 
 class ConsoleMessage;
+class ContentSecurityPolicy;
 class CoreProbeSink;
 class DOMTimerCoordinator;
 class ErrorEvent;
-class EventQueue;
 class EventTarget;
-class FrameOrWorkerGlobalScopeScheduler;
+class FetchClientSettingsObjectSnapshot;
+class FrameOrWorkerScheduler;
 class InterfaceInvalidator;
+class KURL;
 class LocalDOMWindow;
 class PausableObject;
 class PublicURLManager;
 class ResourceFetcher;
+class SecurityContext;
 class SecurityOrigin;
 class ScriptState;
 
@@ -74,12 +80,34 @@ enum ReasonForCallingCanExecuteScripts {
 
 enum class SecureContextMode { kInsecureContext, kSecureContext };
 
+// An environment in which script can execute. This class exposes the common
+// properties of script execution environments on the web (i.e, common between
+// script executing in a document and script executing in a worker), such as:
+//
+// - a base URL for the resolution of relative URLs
+// - a security context that defines the privileges associated with the
+//   environment (note, however, that specific isolated script contexts may
+//   still enjoy elevated privileges)
+// - affordances for the activity (including script and active DOM objects) to
+//   be paused or terminated, e.g. because a frame has entered the background or
+//   been closed permanently
+// - a console logging facility for debugging
+//
+// Typically, the ExecutionContext is an instance of Document or of
+// WorkerOrWorkletGlobalScope.
+//
+// Note that this is distinct from the notion of a ScriptState or v8::Context,
+// which are associated with a single script context (with a single global
+// object). For example, there are separate JavaScript globals for "main world"
+// script written by a web author and an "isolated world" content script written
+// by an extension developer, but these share an ExecutionContext (the document)
+// in common.
 class CORE_EXPORT ExecutionContext : public ContextLifecycleNotifier,
                                      public Supplementable<ExecutionContext> {
   MERGE_GARBAGE_COLLECTED_MIXINS();
 
  public:
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
   static ExecutionContext* From(const ScriptState*);
 
@@ -118,6 +146,8 @@ class CORE_EXPORT ExecutionContext : public ContextLifecycleNotifier,
   virtual LocalDOMWindow* ExecutingWindow() const { return nullptr; }
   virtual String UserAgent() const = 0;
 
+  virtual HttpsState GetHttpsState() const = 0;
+
   // Gets the DOMTimerCoordinator which maintains the "active timer
   // list" of tasks created by setTimeout and setInterval. The
   // DOMTimerCoordinator is owned by the ExecutionContext and should
@@ -127,6 +157,11 @@ class CORE_EXPORT ExecutionContext : public ContextLifecycleNotifier,
   virtual ResourceFetcher* Fetcher() const = 0;
 
   virtual SecurityContext& GetSecurityContext() = 0;
+
+  // https://tc39.github.io/ecma262/#sec-agent-clusters
+  virtual const base::UnguessableToken& GetAgentClusterID() const = 0;
+
+  bool IsSameAgentCluster(const base::UnguessableToken&) const;
 
   virtual bool CanExecuteScripts(ReasonForCallingCanExecuteScripts) {
     return false;
@@ -168,7 +203,6 @@ class CORE_EXPORT ExecutionContext : public ContextLifecycleNotifier,
   int CircularSequentialID();
 
   virtual EventTarget* ErrorEventTarget() = 0;
-  virtual EventQueue* GetEventQueue() const = 0;
 
   // Methods related to window interaction. It should be used to manage window
   // focusing and window creation permission for an ExecutionContext.
@@ -186,7 +220,13 @@ class CORE_EXPORT ExecutionContext : public ContextLifecycleNotifier,
                              : SecureContextMode::kInsecureContext;
   }
 
+  // Returns a referrer to be used in the "Determine request's Referrer"
+  // algorithm defined in the Referrer Policy spec.
+  // https://w3c.github.io/webappsec-referrer-policy/#determine-requests-referrer
   virtual String OutgoingReferrer() const;
+
+  FetchClientSettingsObjectSnapshot* CreateFetchClientSettingsObjectSnapshot();
+
   // Parses a comma-separated list of referrer policy tokens, and sets
   // the context's referrer policy to the last one that is a valid
   // policy. Logs a message to the console if none of the policy
@@ -206,7 +246,7 @@ class CORE_EXPORT ExecutionContext : public ContextLifecycleNotifier,
     return nullptr;
   }
 
-  virtual FrameOrWorkerGlobalScopeScheduler* GetScheduler() = 0;
+  virtual FrameOrWorkerScheduler* GetScheduler() = 0;
   virtual scoped_refptr<base::SingleThreadTaskRunner> GetTaskRunner(
       TaskType) = 0;
 
@@ -214,7 +254,7 @@ class CORE_EXPORT ExecutionContext : public ContextLifecycleNotifier,
 
  protected:
   ExecutionContext();
-  virtual ~ExecutionContext();
+  ~ExecutionContext() override;
 
  private:
   bool DispatchErrorEventInternal(ErrorEvent*, AccessControlStatus);

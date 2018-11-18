@@ -7,7 +7,7 @@
 #include "base/macros.h"
 #include "base/strings/string_util.h"
 #include "net/base/net_errors.h"
-#include "net/url_request/url_request_context_getter.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 
 using testing::Action;
 
@@ -32,11 +32,10 @@ class MockRequestJobBase : public DeviceManagementRequestJob {
  protected:
   void Run() override {
     service_->StartJob(ExtractParameter(dm_protocol::kParamRequest),
-                       gaia_token_,
+                       auth_data_->gaia_token(),
                        ExtractParameter(dm_protocol::kParamOAuthToken),
-                       dm_token_,
-                       ExtractParameter(dm_protocol::kParamDeviceID),
-                       request_);
+                       auth_data_->dm_token(), auth_data_->enrollment_token(),
+                       ExtractParameter(dm_protocol::kParamDeviceID), request_);
   }
 
  private:

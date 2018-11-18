@@ -4,6 +4,10 @@
 
 include "components/url_pattern_index/flat/url_pattern_index.fbs";
 
+// NOTE: Increment kIndexedRulesetFormatVersion at
+// extensions/browser/api/declarative_net_request/utils.cc whenever
+// making a breaking change to this schema.
+
 namespace extensions.declarative_net_request.flat;
 
 /// Additional extension related metadata for a url_pattern_index UrlRule.
@@ -19,10 +23,10 @@ table UrlRuleMetadata {
 /// Declarative Net Request API.
 table ExtensionIndexedRuleset {
   /// The index of all blocking URL rules.
-  blacklist_index : url_pattern_index.flat.UrlPatternIndex;
+  blocking_index : url_pattern_index.flat.UrlPatternIndex;
 
-  /// The index of all whitelist URL rules.
-  whitelist_index : url_pattern_index.flat.UrlPatternIndex;
+  /// The index of all allowing URL rules.
+  allowing_index : url_pattern_index.flat.UrlPatternIndex;
 
   /// The index of all redirect URL rules.
   redirect_index : url_pattern_index.flat.UrlPatternIndex;

@@ -75,8 +75,6 @@ class LibEGL
 public:
 	LibEGL()
 	{
-		libEGL = nullptr;
-		libEGLexports = nullptr;
 	}
 
 	~LibEGL()
@@ -101,11 +99,7 @@ private:
 					const char *libEGL_lib[] = {"libEGL.dll", "libEGL_translator.dll"};
 				#endif
 			#elif defined(__ANDROID__)
-				#if defined(__LP64__)
-					const char *libEGL_lib[] = {"/vendor/lib64/egl/libEGL_swiftshader.so", "/system/lib64/egl/libEGL_swiftshader.so"};
-				#else
-					const char *libEGL_lib[] = {"/vendor/lib/egl/libEGL_swiftshader.so", "/system/lib/egl/libEGL_swiftshader.so"};
-				#endif
+				const char *libEGL_lib[] = {"libEGL_swiftshader.so", "libEGL_swiftshader.so"};
 			#elif defined(__linux__)
 				#if defined(__LP64__)
 					const char *libEGL_lib[] = {"lib64EGL_translator.so", "libEGL.so.1", "libEGL.so"};
@@ -119,12 +113,13 @@ private:
 					const char *libEGL_lib[] = {"libswiftshader_libEGL.dylib", "libEGL_translator.dylib", "libEGL.so", "libEGL.dylib"};
 				#endif
 			#elif defined(__Fuchsia__)
-				const char *libEGL_lib[] = {"libEGL.so"};
+				const char *libEGL_lib[] = {"libswiftshader_libEGL.so", "libEGL.so"};
 			#else
 				#error "libEGL::loadExports unimplemented for this platform"
 			#endif
 
-			libEGL = loadLibrary(libEGL_lib, "libEGL_swiftshader");
+			std::string directory = getModuleDirectory();
+			libEGL = loadLibrary(directory, libEGL_lib, "libEGL_swiftshader");
 
 			if(libEGL)
 			{
@@ -136,8 +131,8 @@ private:
 		return libEGLexports;
 	}
 
-	void *libEGL;
-	LibEGLexports *libEGLexports;
+	void *libEGL = nullptr;
+	LibEGLexports *libEGLexports = nullptr;
 };
 
 #endif   // libEGL_hpp

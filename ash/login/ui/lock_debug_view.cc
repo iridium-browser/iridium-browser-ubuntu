@@ -12,27 +12,67 @@
 #include "ash/detachable_base/detachable_base_pairing_status.h"
 #include "ash/ime/ime_controller.h"
 #include "ash/login/login_screen_controller.h"
-#include "ash/login/ui/layout_util.h"
 #include "ash/login/ui/lock_contents_view.h"
 #include "ash/login/ui/lock_screen.h"
 #include "ash/login/ui/login_data_dispatcher.h"
 #include "ash/login/ui/login_detachable_base_model.h"
 #include "ash/login/ui/non_accessible_view.h"
+#include "ash/login/ui/views_utils.h"
+#include "ash/public/interfaces/kiosk_app_info.mojom.h"
+#include "ash/shelf/login_shelf_view.h"
+#include "ash/shelf/shelf.h"
+#include "ash/shelf/shelf_widget.h"
 #include "ash/shell.h"
+#include "ash/wallpaper/wallpaper_controller.h"
 #include "base/optional.h"
 #include "base/strings/utf_string_conversions.h"
-#include "mojo/common/values_struct_traits.h"
 #include "ui/base/ime/chromeos/ime_keyboard.h"
 #include "ui/views/controls/button/md_text_button.h"
+#include "ui/views/controls/scroll_view.h"
+#include "ui/views/controls/scrollbar/overlay_scroll_bar.h"
 #include "ui/views/layout/box_layout.h"
 #include "ui/views/view.h"
 
 namespace ash {
 namespace {
 
+namespace ButtonId {
+enum {
+  kGlobalAddUser = 1,
+  kGlobalAddTenUsers,
+  kGlobalRemoveUser,
+  kGlobalToggleBlur,
+  kGlobalToggleNoteAction,
+  kGlobalToggleCapsLock,
+  kGlobalAddSystemInfo,
+  kGlobalToggleAuth,
+  kGlobalAddKioskApp,
+  kGlobalRemoveKioskApp,
+  kGlobalShowKioskError,
+  kGlobalToggleDebugDetachableBase,
+  kGlobalCycleDetachableBaseStatus,
+  kGlobalCycleDetachableBaseId,
+  kGlobalCycleAuthErrorMessage,
+  kGlobalToggleWarningBanner,
+  kPerUserTogglePin,
+  kPerUserToggleTap,
+  kPerUserCycleEasyUnlockState,
+  kPerUserCycleFingerprintState,
+  kPerUserForceOnlineSignIn,
+  kPerUserToggleAuthEnabled,
+  kPerUserUseDetachableBase,
+  kPerUserTogglePublicAccount,
+};
+}  // namespace ButtonId
+
 constexpr const char* kDebugUserNames[] = {
     "Angelina Johnson", "Marcus Cohen", "Chris Wallace",
     "Debbie Craig",     "Stella Wong",  "Stephanie Wade",
+};
+
+constexpr const char* kDebugPublicAccountNames[] = {
+    "Seattle Public Library", "San Jose Public Library",
+    "Sunnyvale Public Library", "Mountain View Public Library",
 };
 
 constexpr const char* kDebugDetachableBases[] = {"Base A", "Base B", "Base C"};
@@ -42,17 +82,29 @@ constexpr const char kDebugOsVersion[] =
 constexpr const char kDebugEnterpriseInfo[] = "Asset ID: 1111";
 constexpr const char kDebugBluetoothName[] = "Bluetooth adapter";
 
+constexpr const char kDebugKioskAppId[] = "asdf1234";
+constexpr const char kDebugKioskAppName[] = "Test App Name";
+
+constexpr const char kDebugDefaultLocaleCode[] = "en-GB";
+constexpr const char kDebugDefaultLocaleTitle[] = "English";
+constexpr const char kDebugEnterpriseDomain[] = "library.com";
+
 // Additional state for a user that the debug UI needs to reference.
 struct UserMetadata {
   explicit UserMetadata(const mojom::UserInfoPtr& user_info)
-      : account_id(user_info->account_id) {}
+      : account_id(user_info->account_id),
+        display_name(user_info->display_name),
+        type(user_info->type) {}
 
   AccountId account_id;
+  std::string display_name;
   bool enable_pin = false;
-  bool enable_click_to_unlock = false;
+  bool enable_tap_to_unlock = false;
+  bool enable_auth = true;
+  user_manager::UserType type = user_manager::USER_TYPE_REGULAR;
   mojom::EasyUnlockIconId easy_unlock_id = mojom::EasyUnlockIconId::NONE;
-
-  views::View* view = nullptr;
+  mojom::FingerprintUnlockState fingerprint_state =
+      mojom::FingerprintUnlockState::UNAVAILABLE;
 };
 
 std::string DetachableBasePairingStatusToString(
@@ -70,6 +122,48 @@ std::string DetachableBasePairingStatusToString(
   return "Unknown";
 }
 
+// Update the user data based on |type| and |user_index|.
+mojom::LoginUserInfoPtr PopulateUserData(const mojom::LoginUserInfoPtr& user,
+                                         user_manager::UserType type,
+                                         int user_index) {
+  mojom::LoginUserInfoPtr result = user->Clone();
+  result->basic_user_info->type = type;
+
+  bool is_public_account = type == user_manager::USER_TYPE_PUBLIC_ACCOUNT;
+  // Set debug user names and email. Useful for the stub user, which does not
+  // have a name  and email set.
+  result->basic_user_info->display_name =
+      is_public_account
+          ? kDebugPublicAccountNames[user_index %
+                                     base::size(kDebugPublicAccountNames)]
+          : kDebugUserNames[user_index % base::size(kDebugUserNames)];
+  result->basic_user_info->display_email =
+      result->basic_user_info->account_id.GetUserEmail();
+
+  if (is_public_account) {
+    result->public_account_info = mojom::PublicAccountInfo::New();
+    result->public_account_info->enterprise_domain = kDebugEnterpriseDomain;
+    result->public_account_info->default_locale = kDebugDefaultLocaleCode;
+
+    std::vector<mojom::LocaleItemPtr> locales;
+    mojom::LocaleItemPtr locale_item = mojom::LocaleItem::New();
+    locale_item->language_code = kDebugDefaultLocaleCode;
+    locale_item->title = kDebugDefaultLocaleTitle;
+    locales.push_back(std::move(locale_item));
+    result->public_account_info->available_locales = std::move(locales);
+
+    // Request keyboard layouts for the default locale.
+    Shell::Get()
+        ->login_screen_controller()
+        ->RequestPublicSessionKeyboardLayouts(
+            result->basic_user_info->account_id, kDebugDefaultLocaleCode);
+  } else {
+    result->public_account_info.reset();
+  }
+
+  return result;
+}
+
 }  // namespace
 
 // Applies a series of user-defined transformations to a |LoginDataDispatcher|
@@ -80,9 +174,11 @@ class LockDebugView::DebugDataDispatcherTransformer
  public:
   DebugDataDispatcherTransformer(
       mojom::TrayActionState initial_lock_screen_note_state,
-      LoginDataDispatcher* dispatcher)
+      LoginDataDispatcher* dispatcher,
+      const base::RepeatingClosure& on_users_received)
       : root_dispatcher_(dispatcher),
-        lock_screen_note_state_(initial_lock_screen_note_state) {
+        lock_screen_note_state_(initial_lock_screen_note_state),
+        on_users_received_(on_users_received) {
     root_dispatcher_->AddObserver(this);
   }
   ~DebugDataDispatcherTransformer() override {
@@ -92,10 +188,13 @@ class LockDebugView::DebugDataDispatcherTransformer
   LoginDataDispatcher* debug_dispatcher() { return &debug_dispatcher_; }
 
   // Changes the number of displayed users to |count|.
-  void SetUserCount(int count) {
+  void SetUserCount(int count) { NotifyUsers(BuildUserList(count)); }
+
+  // Create user list.
+  std::vector<mojom::LoginUserInfoPtr> BuildUserList(int count) {
     DCHECK(!root_users_.empty());
 
-    count = std::max(count, 1);
+    count = std::max(count, 0);
 
     // Trim any extra debug users.
     if (debug_users_.size() > size_t{count})
@@ -104,9 +203,7 @@ class LockDebugView::DebugDataDispatcherTransformer
     // Build |users|, add any new users to |debug_users|.
     std::vector<mojom::LoginUserInfoPtr> users;
     for (size_t i = 0; i < size_t{count}; ++i) {
-      const mojom::LoginUserInfoPtr& root_user =
-          root_users_[i % root_users_.size()];
-      users.push_back(root_user->Clone());
+      users.push_back(root_users_[i % root_users_.size()]->Clone());
       if (i >= root_users_.size()) {
         users[i]->basic_user_info->account_id = AccountId::FromUserEmailGaiaId(
             users[i]->basic_user_info->account_id.GetUserEmail() +
@@ -114,21 +211,33 @@ class LockDebugView::DebugDataDispatcherTransformer
             users[i]->basic_user_info->account_id.GetGaiaId() +
                 std::to_string(i));
       }
+
+      // Setup user data based on the user type in debug_users_.
+      user_manager::UserType type = (i < debug_users_.size())
+                                        ? debug_users_[i].type
+                                        : users[i]->basic_user_info->type;
+      users[i] = PopulateUserData(users[i], type, i);
+
       if (i >= debug_users_.size())
         debug_users_.push_back(UserMetadata(users[i]->basic_user_info));
     }
 
-    // Set debug user names. Useful for the stub user, which does not have a
-    // name set.
-    for (size_t i = 0; i < users.size(); ++i)
-      users[i]->basic_user_info->display_name =
-          kDebugUserNames[i % arraysize(kDebugUserNames)];
+    return users;
+  }
 
+  void NotifyUsers(std::vector<mojom::LoginUserInfoPtr> users) {
     // User notification resets PIN state.
     for (UserMetadata& user : debug_users_)
       user.enable_pin = false;
 
     debug_dispatcher_.NotifyUsers(users);
+  }
+
+  int GetUserCount() const { return debug_users_.size(); }
+
+  base::string16 GetDisplayNameForUserIndex(size_t user_index) {
+    DCHECK(user_index >= 0 && user_index < debug_users_.size());
+    return base::UTF8ToUTF16(debug_users_[user_index].display_name);
   }
 
   const AccountId& GetAccountIdForUserIndex(size_t user_index) {
@@ -144,6 +253,15 @@ class LockDebugView::DebugDataDispatcherTransformer
     debug_user->enable_pin = !debug_user->enable_pin;
     debug_dispatcher_.SetPinEnabledForUser(debug_user->account_id,
                                            debug_user->enable_pin);
+  }
+
+  // Activates or deactivates tap unlock for the user at |user_index|.
+  void ToggleTapStateForUserIndex(size_t user_index) {
+    DCHECK(user_index >= 0 && user_index < debug_users_.size());
+    UserMetadata* debug_user = &debug_users_[user_index];
+    debug_user->enable_tap_to_unlock = !debug_user->enable_tap_to_unlock;
+    debug_dispatcher_.SetTapToUnlockEnabledForUser(
+        debug_user->account_id, debug_user->enable_tap_to_unlock);
   }
 
   // Enables click to auth for the user at |user_index|.
@@ -174,7 +292,7 @@ class LockDebugView::DebugDataDispatcherTransformer
     debug_user->easy_unlock_id = get_next_id(debug_user->easy_unlock_id);
 
     // Enable/disable click to unlock.
-    debug_user->enable_click_to_unlock =
+    debug_user->enable_tap_to_unlock =
         debug_user->easy_unlock_id == mojom::EasyUnlockIconId::UNLOCKED;
 
     // Prepare icon that we will show.
@@ -196,8 +314,55 @@ class LockDebugView::DebugDataDispatcherTransformer
 
     // Show icon and enable/disable click to unlock.
     debug_dispatcher_.ShowEasyUnlockIcon(debug_user->account_id, icon);
-    debug_dispatcher_.SetClickToUnlockEnabledForUser(
-        debug_user->account_id, debug_user->enable_click_to_unlock);
+    debug_dispatcher_.SetTapToUnlockEnabledForUser(
+        debug_user->account_id, debug_user->enable_tap_to_unlock);
+  }
+
+  // Enables fingerprint auth for the user at |user_index|.
+  void CycleFingerprintUnlockForUserIndex(size_t user_index) {
+    DCHECK(user_index >= 0 && user_index < debug_users_.size());
+    UserMetadata* debug_user = &debug_users_[user_index];
+
+    debug_user->fingerprint_state = static_cast<mojom::FingerprintUnlockState>(
+        (static_cast<int>(debug_user->fingerprint_state) + 1) %
+        (static_cast<int>(mojom::FingerprintUnlockState::kMaxValue) + 1));
+    debug_dispatcher_.SetFingerprintUnlockState(debug_user->account_id,
+                                                debug_user->fingerprint_state);
+  }
+
+  // Force online sign-in for the user at |user_index|.
+  void ForceOnlineSignInForUserIndex(size_t user_index) {
+    DCHECK(user_index >= 0 && user_index < debug_users_.size());
+    debug_dispatcher_.SetForceOnlineSignInForUser(
+        debug_users_[user_index].account_id);
+  }
+
+  // Toggle the unlock allowed state for the user at |user_index|.
+  void ToggleAuthEnabledForUserIndex(size_t user_index) {
+    DCHECK(user_index >= 0 && user_index < debug_users_.size());
+    UserMetadata& user = debug_users_[user_index];
+    user.enable_auth = !user.enable_auth;
+    debug_dispatcher_.SetAuthEnabledForUser(
+        user.account_id, user.enable_auth,
+        base::Time::Now() + base::TimeDelta::FromHours(user_index) +
+            base::TimeDelta::FromHours(8));
+  }
+
+  // Convert user type to regular user or public account for the user at
+  // |user_index|.
+  void TogglePublicAccountForUserIndex(size_t user_index) {
+    DCHECK(user_index >= 0 && user_index < debug_users_.size());
+    UserMetadata& user = debug_users_[user_index];
+    // Swap the type between regular and public account.
+    user.type = user.type == user_manager::USER_TYPE_REGULAR
+                    ? user_manager::USER_TYPE_PUBLIC_ACCOUNT
+                    : user_manager::USER_TYPE_REGULAR;
+
+    std::vector<mojom::LoginUserInfoPtr> users =
+        BuildUserList(debug_users_.size());
+    // Update display name and email in debug users.
+    debug_users_[user_index] = UserMetadata(users[user_index]->basic_user_info);
+    NotifyUsers(std::move(users));
   }
 
   void ToggleLockScreenNoteButton() {
@@ -210,12 +375,34 @@ class LockDebugView::DebugDataDispatcherTransformer
     debug_dispatcher_.SetLockScreenNoteState(lock_screen_note_state_);
   }
 
-  void AddLockScreenDevChannelInfo(const std::string& os_version,
-                                   const std::string& enterprise_info,
-                                   const std::string& bluetooth_name) {
-    debug_dispatcher_.SetDevChannelInfo(os_version, enterprise_info,
-                                        bluetooth_name);
+  void AddKioskApp(ShelfWidget* shelf_widget) {
+    mojom::KioskAppInfoPtr app_info = mojom::KioskAppInfo::New();
+    app_info->identifier = mojom::KioskAppIdentifier::New();
+    app_info->identifier->set_app_id(kDebugKioskAppId);
+    app_info->name = base::UTF8ToUTF16(kDebugKioskAppName);
+    kiosk_apps_.push_back(std::move(app_info));
+    shelf_widget->login_shelf_view()->SetKioskApps(mojo::Clone(kiosk_apps_));
   }
+
+  void RemoveKioskApp(ShelfWidget* shelf_widget) {
+    if (kiosk_apps_.empty())
+      return;
+    kiosk_apps_.pop_back();
+    shelf_widget->login_shelf_view()->SetKioskApps(mojo::Clone(kiosk_apps_));
+  }
+
+  void AddSystemInfo(const std::string& os_version,
+                     const std::string& enterprise_info,
+                     const std::string& bluetooth_name) {
+    debug_dispatcher_.SetSystemInfo(true /*show_if_hidden*/, os_version,
+                                    enterprise_info, bluetooth_name);
+  }
+
+  void ShowWarningBanner(const base::string16& message) {
+    debug_dispatcher_.ShowWarningBanner(message);
+  }
+
+  void HideWarningBanner() { debug_dispatcher_.HideWarningBanner(); }
 
   // LoginDataDispatcher::Observer:
   void OnUsersChanged(
@@ -226,7 +413,9 @@ class LockDebugView::DebugDataDispatcherTransformer
       root_users_.push_back(user->Clone());
 
     // Rebuild debug users using new source data.
-    SetUserCount(debug_users_.size());
+    SetUserCount(root_users_.size());
+
+    on_users_received_.Run();
   }
   void OnPinEnabledForUserChanged(const AccountId& user,
                                   bool enabled) override {
@@ -239,13 +428,13 @@ class LockDebugView::DebugDataDispatcherTransformer
       }
     }
   }
-  void OnClickToUnlockEnabledForUserChanged(const AccountId& user,
-                                            bool enabled) override {
+  void OnTapToUnlockEnabledForUserChanged(const AccountId& user,
+                                          bool enabled) override {
     // Forward notification only if the user is currently being shown.
     for (size_t i = 0u; i < debug_users_.size(); ++i) {
       if (debug_users_[i].account_id == user) {
-        debug_users_[i].enable_click_to_unlock = enabled;
-        debug_dispatcher_.SetClickToUnlockEnabledForUser(user, enabled);
+        debug_users_[i].enable_tap_to_unlock = enabled;
+        debug_dispatcher_.SetTapToUnlockEnabledForUser(user, enabled);
         break;
       }
     }
@@ -264,6 +453,14 @@ class LockDebugView::DebugDataDispatcherTransformer
     debug_dispatcher_.SetDetachableBasePairingStatus(pairing_status);
   }
 
+  void OnPublicSessionKeyboardLayoutsChanged(
+      const AccountId& account_id,
+      const std::string& locale,
+      const std::vector<mojom::InputMethodItemPtr>& keyboard_layouts) override {
+    debug_dispatcher_.SetPublicSessionKeyboardLayouts(account_id, locale,
+                                                      keyboard_layouts);
+  }
+
  private:
   // The debug overlay UI takes ground-truth data from |root_dispatcher_|,
   // applies a series of transformations to it, and exposes it to the UI via
@@ -279,6 +476,12 @@ class LockDebugView::DebugDataDispatcherTransformer
 
   // The current lock screen note action state.
   mojom::TrayActionState lock_screen_note_state_;
+
+  // List of kiosk apps loaded.
+  std::vector<mojom::KioskAppInfoPtr> kiosk_apps_;
+
+  // Called when a new user list has been received.
+  base::RepeatingClosure on_users_received_;
 
   DISALLOW_COPY_AND_ASSIGN(DebugDataDispatcherTransformer);
 };
@@ -407,10 +610,15 @@ class LockDebugView::DebugLoginDetachableBaseModel
 };
 
 LockDebugView::LockDebugView(mojom::TrayActionState initial_note_action_state,
+                             LockScreen::ScreenType screen_type,
                              LoginDataDispatcher* data_dispatcher)
     : debug_data_dispatcher_(std::make_unique<DebugDataDispatcherTransformer>(
           initial_note_action_state,
-          data_dispatcher)) {
+          data_dispatcher,
+          base::BindRepeating(
+              &LockDebugView::UpdatePerUserActionContainerAndLayout,
+              base::Unretained(this)))),
+      next_auth_error_type_(AuthErrorType::kFirstUnlockFailed) {
   SetLayoutManager(
       std::make_unique<views::BoxLayout>(views::BoxLayout::kHorizontal));
 
@@ -418,35 +626,81 @@ LockDebugView::LockDebugView(mojom::TrayActionState initial_note_action_state,
       std::make_unique<DebugLoginDetachableBaseModel>(data_dispatcher);
   debug_detachable_base_model_ = debug_detachable_base_model.get();
 
-  lock_ = new LockContentsView(initial_note_action_state,
+  lock_ = new LockContentsView(initial_note_action_state, screen_type,
                                debug_data_dispatcher_->debug_dispatcher(),
                                std::move(debug_detachable_base_model));
   AddChildView(lock_);
 
-  debug_row_ = new NonAccessibleView();
-  debug_row_->SetLayoutManager(
-      std::make_unique<views::BoxLayout>(views::BoxLayout::kHorizontal));
-  AddChildView(debug_row_);
-
-  per_user_action_column_ = new NonAccessibleView();
-  per_user_action_column_->SetLayoutManager(
+  container_ = new NonAccessibleView();
+  container_->SetLayoutManager(
       std::make_unique<views::BoxLayout>(views::BoxLayout::kVertical));
-  debug_row_->AddChildView(per_user_action_column_);
+  AddChildView(container_);
 
   auto* margin = new NonAccessibleView();
   margin->SetPreferredSize(gfx::Size(10, 10));
-  debug_row_->AddChildView(margin);
+  container_->AddChildView(margin);
 
-  toggle_blur_ = AddButton("Blur");
-  toggle_note_action_ = AddButton("Toggle note action");
-  toggle_caps_lock_ = AddButton("Toggle caps lock");
-  add_dev_channel_info_ = AddButton("Add dev channel info");
-  add_user_ = AddButton("Add user");
-  remove_user_ = AddButton("Remove user");
-  toggle_auth_ = AddButton("Auth (allowed)");
+  global_action_view_container_ = new NonAccessibleView();
+  global_action_view_container_->SetLayoutManager(
+      std::make_unique<views::BoxLayout>(views::BoxLayout::kVertical));
 
-  RebuildDebugUserColumn();
-  BuildDetachableBaseColumn();
+  auto add_horizontal_container = [&]() {
+    auto* container = new NonAccessibleView();
+    container->SetLayoutManager(
+        std::make_unique<views::BoxLayout>(views::BoxLayout::kHorizontal));
+    global_action_view_container_->AddChildView(container);
+    return container;
+  };
+
+  auto* change_users_container = add_horizontal_container();
+  AddButton("Add user", ButtonId::kGlobalAddUser, change_users_container);
+  AddButton("Add 10 users", ButtonId::kGlobalAddTenUsers,
+            change_users_container);
+  AddButton("Remove user", ButtonId::kGlobalRemoveUser, change_users_container);
+
+  auto* toggle_container = add_horizontal_container();
+  AddButton("Blur", ButtonId::kGlobalToggleBlur, toggle_container);
+  AddButton("Toggle note action", ButtonId::kGlobalToggleNoteAction,
+            toggle_container);
+  AddButton("Toggle caps lock", ButtonId::kGlobalToggleCapsLock,
+            toggle_container);
+  AddButton("Add system info", ButtonId::kGlobalAddSystemInfo,
+            toggle_container);
+  global_action_toggle_auth_ = AddButton(
+      "Auth (allowed)", ButtonId::kGlobalToggleAuth, toggle_container);
+  AddButton("Cycle auth error", ButtonId::kGlobalCycleAuthErrorMessage,
+            toggle_container);
+  AddButton("Toggle warning banner", ButtonId::kGlobalToggleWarningBanner,
+            toggle_container);
+
+  auto* kiosk_container = add_horizontal_container();
+  AddButton("Add kiosk app", ButtonId::kGlobalAddKioskApp, kiosk_container);
+  AddButton("Remove kiosk app", ButtonId::kGlobalRemoveKioskApp,
+            kiosk_container);
+  AddButton("Show kiosk error", ButtonId::kGlobalShowKioskError,
+            kiosk_container);
+
+  global_action_detachable_base_group_ = add_horizontal_container();
+  UpdateDetachableBaseColumn();
+
+  per_user_action_view_container_ = new NonAccessibleView();
+  per_user_action_view_container_->SetLayoutManager(
+      std::make_unique<views::BoxLayout>(views::BoxLayout::kVertical));
+  UpdatePerUserActionContainer();
+
+  auto make_scroll = [](views::View* content, int height) -> views::View* {
+    views::ScrollView* scroll = views::ScrollView::CreateScrollViewWithBorder();
+    scroll->SetPreferredSize(gfx::Size(600, height));
+    scroll->SetContents(content);
+    scroll->SetBackgroundColor(SK_ColorTRANSPARENT);
+    scroll->SetVerticalScrollBar(new views::OverlayScrollBar(false));
+    scroll->SetHorizontalScrollBar(new views::OverlayScrollBar(true));
+    return scroll;
+  };
+  container_->AddChildView(make_scroll(global_action_view_container_, 110));
+  container_->AddChildView(make_scroll(per_user_action_view_container_, 100));
+
+  Layout();
 }
 
 LockDebugView::~LockDebugView() {
@@ -456,70 +710,120 @@ LockDebugView::~LockDebugView() {
 }
 
 void LockDebugView::Layout() {
+  global_action_view_container_->SizeToPreferredSize();
+  per_user_action_view_container_->SizeToPreferredSize();
+
   views::View::Layout();
+
   lock_->SetBoundsRect(GetLocalBounds());
-  debug_row_->SetPosition(gfx::Point());
-  debug_row_->SizeToPreferredSize();
+  container_->SetPosition(gfx::Point());
+  container_->SizeToPreferredSize();
+}
+
+void LockDebugView::CycleAuthErrorMessage() {
+  switch (next_auth_error_type_) {
+    case AuthErrorType::kFirstUnlockFailed:
+      next_auth_error_type_ = AuthErrorType::kFirstUnlockFailedCapsLockOn;
+      Shell::Get()->ime_controller()->UpdateCapsLockState(
+          false /*caps_enabled*/);
+      debug_detachable_base_model_->SetPairingState(
+          DetachableBasePairingStatus::kNone,
+          DebugLoginDetachableBaseModel::kNullBaseId);
+      lock_->ShowAuthErrorMessageForDebug(1 /*unlock_attempt*/);
+      return;
+    case AuthErrorType::kFirstUnlockFailedCapsLockOn:
+      next_auth_error_type_ = AuthErrorType::kSecondUnlockFailed;
+      Shell::Get()->ime_controller()->UpdateCapsLockState(
+          true /*caps_enabled*/);
+      lock_->ShowAuthErrorMessageForDebug(1 /*unlock_attempt*/);
+      return;
+    case AuthErrorType::kSecondUnlockFailed:
+      next_auth_error_type_ = AuthErrorType::kSecondUnlockFailedCapsLockOn;
+      Shell::Get()->ime_controller()->UpdateCapsLockState(
+          false /*caps_enabled*/);
+      lock_->ShowAuthErrorMessageForDebug(2 /*unlock_attempt*/);
+      return;
+    case AuthErrorType::kSecondUnlockFailedCapsLockOn:
+      next_auth_error_type_ = AuthErrorType::kDetachableBaseFailed;
+      Shell::Get()->ime_controller()->UpdateCapsLockState(
+          true /*caps_enabled*/);
+      lock_->ShowAuthErrorMessageForDebug(2 /*unlock_attempt*/);
+      return;
+    case AuthErrorType::kDetachableBaseFailed:
+      next_auth_error_type_ = AuthErrorType::kFirstUnlockFailed;
+      debug_detachable_base_model_->SetPairingState(
+          DetachableBasePairingStatus::kNotAuthenticated,
+          DebugLoginDetachableBaseModel::kNullBaseId);
+      return;
+    default:
+      NOTREACHED();
+  }
 }
 
 void LockDebugView::ButtonPressed(views::Button* sender,
                                   const ui::Event& event) {
+  // Add or remove a user.
+  bool is_add_user = sender->id() == ButtonId::kGlobalAddUser;
+  bool is_add_many_users = sender->id() == ButtonId::kGlobalAddTenUsers;
+  bool is_remove_user = sender->id() == ButtonId::kGlobalRemoveUser;
+  if (is_add_user || is_add_many_users || is_remove_user) {
+    int num_users = debug_data_dispatcher_->GetUserCount();
+    if (is_add_user)
+      ++num_users;
+    else if (is_add_many_users)
+      num_users += 10;
+    else if (is_remove_user)
+      --num_users;
+    if (num_users < 0)
+      num_users = 0;
+    debug_data_dispatcher_->SetUserCount(num_users);
+    UpdatePerUserActionContainer();
+    Layout();
+    return;
+  }
+
   // Enable or disable wallpaper blur.
-  if (sender == toggle_blur_) {
-    LockScreen::Get()->ToggleBlurForDebug();
+  if (sender->id() == ButtonId::kGlobalToggleBlur) {
+    Shell::Get()->wallpaper_controller()->UpdateWallpaperBlur(
+        !Shell::Get()->wallpaper_controller()->IsWallpaperBlurred());
     return;
   }
 
   // Enable or disable note action.
-  if (sender == toggle_note_action_) {
+  if (sender->id() == ButtonId::kGlobalToggleNoteAction) {
     debug_data_dispatcher_->ToggleLockScreenNoteButton();
     return;
   }
 
   // Enable or disable caps lock.
-  if (sender == toggle_caps_lock_) {
+  if (sender->id() == ButtonId::kGlobalToggleCapsLock) {
     ImeController* ime_controller = Shell::Get()->ime_controller();
     ime_controller->SetCapsLockEnabled(!ime_controller->IsCapsLockEnabled());
     return;
   }
 
-  // Iteratively adds more info to the dev channel labels to test 7 permutations
+  // Iteratively adds more info to the system info labels to test 7 permutations
   // and then disables the button.
-  if (sender == add_dev_channel_info_) {
-    DCHECK_LT(num_dev_channel_info_clicks_, 7u);
-    ++num_dev_channel_info_clicks_;
-    if (num_dev_channel_info_clicks_ == 7u)
-      add_dev_channel_info_->SetEnabled(false);
+  if (sender->id() == ButtonId::kGlobalAddSystemInfo) {
+    DCHECK_LT(num_system_info_clicks_, 7u);
+    ++num_system_info_clicks_;
+    if (num_system_info_clicks_ == 7u)
+      sender->SetEnabled(false);
 
-    std::string os_version =
-        num_dev_channel_info_clicks_ / 4 ? kDebugOsVersion : "";
+    std::string os_version = num_system_info_clicks_ / 4 ? kDebugOsVersion : "";
     std::string enterprise_info =
-        (num_dev_channel_info_clicks_ % 4) / 2 ? kDebugEnterpriseInfo : "";
+        (num_system_info_clicks_ % 4) / 2 ? kDebugEnterpriseInfo : "";
     std::string bluetooth_name =
-        num_dev_channel_info_clicks_ % 2 ? kDebugBluetoothName : "";
-    debug_data_dispatcher_->AddLockScreenDevChannelInfo(
-        os_version, enterprise_info, bluetooth_name);
-    return;
-  }
-
-  // Add or remove a user.
-  if (sender == add_user_ || sender == remove_user_) {
-    if (sender == add_user_)
-      ++num_users_;
-    else if (sender == remove_user_)
-      --num_users_;
-    if (num_users_ < 1u)
-      num_users_ = 1u;
-    debug_data_dispatcher_->SetUserCount(num_users_);
-    RebuildDebugUserColumn();
-    Layout();
+        num_system_info_clicks_ % 2 ? kDebugBluetoothName : "";
+    debug_data_dispatcher_->AddSystemInfo(os_version, enterprise_info,
+                                          bluetooth_name);
     return;
   }
 
   // Enable/disable auth. This is useful for testing auth failure scenarios on
   // Linux Desktop builds, where the cryptohome dbus stub accepts all passwords
   // as valid.
-  if (sender == toggle_auth_) {
+  if (sender->id() == ButtonId::kGlobalToggleAuth) {
     auto get_next_auth_state = [](LoginScreenController::ForceFailAuth auth) {
       switch (auth) {
         case LoginScreenController::ForceFailAuth::kOff:
@@ -545,20 +849,37 @@ void LockDebugView::ButtonPressed(views::Button* sender,
       return "Auth (allowed)";
     };
     force_fail_auth_ = get_next_auth_state(force_fail_auth_);
-    toggle_auth_->SetText(base::ASCIIToUTF16(get_auth_label(force_fail_auth_)));
+    global_action_toggle_auth_->SetText(
+        base::ASCIIToUTF16(get_auth_label(force_fail_auth_)));
+    Layout();
     Shell::Get()
         ->login_screen_controller()
         ->set_force_fail_auth_for_debug_overlay(force_fail_auth_);
     return;
   }
 
-  if (sender == toggle_debug_detachable_base_) {
+  if (sender->id() == ButtonId::kGlobalAddKioskApp) {
+    debug_data_dispatcher_->AddKioskApp(
+        Shelf::ForWindow(GetWidget()->GetNativeWindow())->shelf_widget());
+  }
+
+  if (sender->id() == ButtonId::kGlobalRemoveKioskApp) {
+    debug_data_dispatcher_->RemoveKioskApp(
+        Shelf::ForWindow(GetWidget()->GetNativeWindow())->shelf_widget());
+  }
+
+  if (sender->id() == ButtonId::kGlobalShowKioskError) {
+    Shell::Get()->login_screen_controller()->ShowKioskAppError(
+        "Test error message.");
+  }
+
+  if (sender->id() == ButtonId::kGlobalToggleDebugDetachableBase) {
     if (debug_detachable_base_model_->debugging_pairing_state()) {
       debug_detachable_base_model_->ClearDebugPairingState();
       // In authenticated state, per user column has a button to mark the
-      // current base as last used for the user - ut should get removed when the
+      // current base as last used for the user - it should get removed when the
       // detachable base debugging gets disabled.
-      RebuildDebugUserColumn();
+      UpdatePerUserActionContainer();
     } else {
       debug_detachable_base_model_->SetPairingState(
           DetachableBasePairingStatus::kNone,
@@ -569,17 +890,17 @@ void LockDebugView::ButtonPressed(views::Button* sender,
     return;
   }
 
-  if (sender == cycle_detachable_base_status_) {
+  if (sender->id() == ButtonId::kGlobalCycleDetachableBaseStatus) {
     debug_detachable_base_model_->SetPairingState(
         debug_detachable_base_model_->NextPairingStatus(),
         debug_detachable_base_model_->NextBaseId());
-    RebuildDebugUserColumn();
+    UpdatePerUserActionContainer();
     UpdateDetachableBaseColumn();
     Layout();
     return;
   }
 
-  if (sender == cycle_detachable_base_id_) {
+  if (sender->id() == ButtonId::kGlobalCycleDetachableBaseId) {
     debug_detachable_base_model_->SetPairingState(
         DetachableBasePairingStatus::kAuthenticated,
         debug_detachable_base_model_->NextBaseId());
@@ -588,112 +909,144 @@ void LockDebugView::ButtonPressed(views::Button* sender,
     return;
   }
 
-  for (size_t i = 0u; i < per_user_action_column_use_detachable_base_.size();
-       ++i) {
-    if (per_user_action_column_use_detachable_base_[i] == sender) {
-      debug_detachable_base_model_->SetBaseLastUsedForUser(
-          debug_data_dispatcher_->GetAccountIdForUserIndex(i));
-      return;
+  if (sender->id() == ButtonId::kGlobalCycleAuthErrorMessage) {
+    CycleAuthErrorMessage();
+    return;
+  }
+
+  // Show or hide warning banner.
+  if (sender->id() == ButtonId::kGlobalToggleWarningBanner) {
+    if (is_warning_banner_shown_) {
+      debug_data_dispatcher_->HideWarningBanner();
+    } else {
+      debug_data_dispatcher_->ShowWarningBanner(base::ASCIIToUTF16(
+          "A critical update is ready to install. Sign in to get started."));
     }
+    is_warning_banner_shown_ = !is_warning_banner_shown_;
   }
 
   // Enable or disable PIN.
-  for (size_t i = 0u; i < per_user_action_column_toggle_pin_.size(); ++i) {
-    if (per_user_action_column_toggle_pin_[i] == sender)
-      debug_data_dispatcher_->TogglePinStateForUserIndex(i);
-  }
+  if (sender->id() == ButtonId::kPerUserTogglePin)
+    debug_data_dispatcher_->TogglePinStateForUserIndex(sender->tag());
+
+  // Enable or disable tap.
+  if (sender->id() == ButtonId::kPerUserToggleTap)
+    debug_data_dispatcher_->ToggleTapStateForUserIndex(sender->tag());
 
   // Cycle easy unlock.
-  for (size_t i = 0u;
-       i < per_user_action_column_cycle_easy_unlock_state_.size(); ++i) {
-    if (per_user_action_column_cycle_easy_unlock_state_[i] == sender)
-      debug_data_dispatcher_->CycleEasyUnlockForUserIndex(i);
+  if (sender->id() == ButtonId::kPerUserCycleEasyUnlockState)
+    debug_data_dispatcher_->CycleEasyUnlockForUserIndex(sender->tag());
+
+  // Cycle fingerprint unlock state.
+  if (sender->id() == ButtonId::kPerUserCycleFingerprintState)
+    debug_data_dispatcher_->CycleFingerprintUnlockForUserIndex(sender->tag());
+
+  // Force online sign-in.
+  if (sender->id() == ButtonId::kPerUserForceOnlineSignIn)
+    debug_data_dispatcher_->ForceOnlineSignInForUserIndex(sender->tag());
+
+  // Enable or disable auth.
+  if (sender->id() == ButtonId::kPerUserToggleAuthEnabled)
+    debug_data_dispatcher_->ToggleAuthEnabledForUserIndex(sender->tag());
+
+  // Update the last used detachable base.
+  if (sender->id() == ButtonId::kPerUserUseDetachableBase) {
+    debug_detachable_base_model_->SetBaseLastUsedForUser(
+        debug_data_dispatcher_->GetAccountIdForUserIndex(sender->tag()));
+  }
+
+  // Convert this user to regular user or public account.
+  if (sender->id() == ButtonId::kPerUserTogglePublicAccount) {
+    debug_data_dispatcher_->TogglePublicAccountForUserIndex(sender->tag());
+    UpdatePerUserActionContainer();
+    Layout();
   }
 }
 
-void LockDebugView::RebuildDebugUserColumn() {
-  per_user_action_column_->RemoveAllChildViews(true /*delete_children*/);
-  per_user_action_column_toggle_pin_.clear();
-  per_user_action_column_cycle_easy_unlock_state_.clear();
-  per_user_action_column_use_detachable_base_.clear();
+void LockDebugView::UpdatePerUserActionContainer() {
+  per_user_action_view_container_->RemoveAllChildViews(
+      true /*delete_children*/);
 
-  for (size_t i = 0u; i < num_users_; ++i) {
+  int num_users = debug_data_dispatcher_->GetUserCount();
+  for (int i = 0; i < num_users; ++i) {
     auto* row = new NonAccessibleView();
     row->SetLayoutManager(
         std::make_unique<views::BoxLayout>(views::BoxLayout::kHorizontal));
 
-    views::View* toggle_pin =
-        AddButton("Toggle PIN", false /*add_to_debug_row*/);
-    per_user_action_column_toggle_pin_.push_back(toggle_pin);
-    row->AddChildView(toggle_pin);
+    auto* name = new views::Label();
+    name->SetText(debug_data_dispatcher_->GetDisplayNameForUserIndex(i));
+    name->SetSubpixelRenderingEnabled(false);
+    name->SetEnabledColor(SK_ColorWHITE);
+    name->SetAutoColorReadabilityEnabled(false);
+    // name->SetFontList(name->font_list().DeriveWithSizeDelta(3));
+    row->AddChildView(name);
 
-    views::View* toggle_click_auth =
-        AddButton("Cycle easy unlock", false /*add_to_debug_row*/);
-    per_user_action_column_cycle_easy_unlock_state_.push_back(
-        toggle_click_auth);
-    row->AddChildView(toggle_click_auth);
+    AddButton("Toggle PIN", ButtonId::kPerUserTogglePin, row)->set_tag(i);
+    AddButton("Toggle Tap", ButtonId::kPerUserToggleTap, row)->set_tag(i);
+    AddButton("Cycle easy unlock", ButtonId::kPerUserCycleEasyUnlockState, row)
+        ->set_tag(i);
+    AddButton("Cycle fingerprint unlock",
+              ButtonId::kPerUserCycleFingerprintState, row)
+        ->set_tag(i);
+    AddButton("Force online sign-in", ButtonId::kPerUserForceOnlineSignIn, row)
+        ->set_tag(i);
+    AddButton("Toggle auth enabled", ButtonId::kPerUserToggleAuthEnabled, row)
+        ->set_tag(i);
 
     if (debug_detachable_base_model_->debugging_pairing_state() &&
         debug_detachable_base_model_->GetPairingStatus() ==
             DetachableBasePairingStatus::kAuthenticated) {
-      views::View* use_detachable_base = AddButton("Set base used", false);
-      per_user_action_column_use_detachable_base_.push_back(
-          use_detachable_base);
-      row->AddChildView(use_detachable_base);
+      AddButton("Set base used", ButtonId::kPerUserUseDetachableBase, row)
+          ->set_tag(i);
     }
 
-    per_user_action_column_->AddChildView(row);
+    AddButton("Toggle Public Account", ButtonId::kPerUserTogglePublicAccount,
+              row)
+        ->set_tag(i);
+
+    per_user_action_view_container_->AddChildView(row);
   }
 }
 
-void LockDebugView::BuildDetachableBaseColumn() {
-  detachable_base_column_ = new NonAccessibleView();
-  detachable_base_column_->SetLayoutManager(
-      std::make_unique<views::BoxLayout>(views::BoxLayout::kVertical));
-  debug_row_->AddChildView(detachable_base_column_);
-
-  UpdateDetachableBaseColumn();
+void LockDebugView::UpdatePerUserActionContainerAndLayout() {
+  UpdatePerUserActionContainer();
+  Layout();
 }
 
 void LockDebugView::UpdateDetachableBaseColumn() {
-  detachable_base_column_->RemoveAllChildViews(true /*delete_children*/);
+  global_action_detachable_base_group_->RemoveAllChildViews(
+      true /*delete_children*/);
 
-  toggle_debug_detachable_base_ = AddButton("Detachable base debugging", false);
-  detachable_base_column_->AddChildView(
-      login_layout_util::WrapViewForPreferredSize(
-          toggle_debug_detachable_base_));
-
+  AddButton("Debug detachable base", ButtonId::kGlobalToggleDebugDetachableBase,
+            global_action_detachable_base_group_);
   if (!debug_detachable_base_model_->debugging_pairing_state())
     return;
 
   const std::string kPairingStatusText =
-      std::string("Pairing status : ") +
+      "Pairing status: " +
       DetachableBasePairingStatusToString(
           debug_detachable_base_model_->GetPairingStatus());
-  cycle_detachable_base_status_ = AddButton(kPairingStatusText, false);
+  AddButton(kPairingStatusText, ButtonId::kGlobalCycleDetachableBaseStatus,
+            global_action_detachable_base_group_);
 
-  detachable_base_column_->AddChildView(
-      login_layout_util::WrapViewForPreferredSize(
-          cycle_detachable_base_status_));
-
-  cycle_detachable_base_id_ =
-      AddButton(debug_detachable_base_model_->BaseButtonText(), false);
+  views::LabelButton* cycle_detachable_base_id =
+      AddButton(debug_detachable_base_model_->BaseButtonText(),
+                ButtonId::kGlobalCycleDetachableBaseId,
+                global_action_detachable_base_group_);
   bool base_authenticated = debug_detachable_base_model_->GetPairingStatus() ==
                             DetachableBasePairingStatus::kAuthenticated;
-  cycle_detachable_base_id_->SetEnabled(base_authenticated);
-
-  detachable_base_column_->AddChildView(
-      login_layout_util::WrapViewForPreferredSize(cycle_detachable_base_id_));
+  cycle_detachable_base_id->SetEnabled(base_authenticated);
 }
 
-views::MdTextButton* LockDebugView::AddButton(const std::string& text,
-                                              bool add_to_debug_row) {
+views::LabelButton* LockDebugView::AddButton(const std::string& text,
+                                             int id,
+                                             views::View* container) {
   // Creates a button with |text| that cannot be focused.
-  auto* button = views::MdTextButton::Create(this, base::ASCIIToUTF16(text));
+  auto* button = views::MdTextButton::CreateSecondaryUiButton(
+      this, base::ASCIIToUTF16(text));
+  button->set_id(id);
   button->SetFocusBehavior(views::View::FocusBehavior::NEVER);
-  if (add_to_debug_row)
-    debug_row_->AddChildView(
-        login_layout_util::WrapViewForPreferredSize(button));
+  container->AddChildView(login_views_utils::WrapViewForPreferredSize(button));
   return button;
 }
 

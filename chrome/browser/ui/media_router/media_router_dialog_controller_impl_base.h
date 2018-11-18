@@ -7,17 +7,18 @@
 
 #include "base/macros.h"
 #include "chrome/browser/media/router/media_router_dialog_controller.h"
+#include "chrome/browser/ui/media_router/media_router_ui_service.h"
 
 class MediaRouterAction;
-class MediaRouterActionController;
 
 namespace media_router {
 
-class MediaRouterUI;
+class MediaRouterUIBase;
 
 // The base class for desktop implementations of MediaRouterDialogController.
 // This class is not thread safe and must be called on the UI thread.
-class MediaRouterDialogControllerImplBase : public MediaRouterDialogController {
+class MediaRouterDialogControllerImplBase : public MediaRouterDialogController,
+                                            MediaRouterUIService::Observer {
  public:
   ~MediaRouterDialogControllerImplBase() override;
 
@@ -39,10 +40,17 @@ class MediaRouterDialogControllerImplBase : public MediaRouterDialogController {
   explicit MediaRouterDialogControllerImplBase(
       content::WebContents* web_contents);
 
-  // TODO(crbug.com/826091): Replace MediaRouterUI with MediaRouterUIBase.
-  void InitializeMediaRouterUI(MediaRouterUI* media_router_ui);
+  // Called by subclasses to initialize |media_router_ui| that they use.
+  void InitializeMediaRouterUI(MediaRouterUIBase* media_router_ui);
 
  private:
+  // MediaRouterUIService::Observer:
+  void OnServiceDisabled() override;
+
+  // MediaRouterActionController is responsible for showing and hiding the
+  // toolbar action. It's owned by MediaRouterUIService and it may be nullptr.
+  MediaRouterActionController* GetActionController();
+
   // |action_| refers to the MediaRouterAction on the toolbar, rather than
   // overflow menu. A MediaRouterAction is always created for the toolbar
   // first. Any subsequent creations for the overflow menu will not be set as
@@ -52,9 +60,9 @@ class MediaRouterDialogControllerImplBase : public MediaRouterDialogController {
   // when the overflow menu is opened and destroyed when the menu is closed.
   base::WeakPtr<MediaRouterAction> action_;
 
-  // |action_controller_| is responsible for showing and hiding the toolbar
-  // action. It's owned by MediaRouterUIService, which outlives |this|.
-  MediaRouterActionController* const action_controller_;
+  // |media_router_ui_service_| Service which provides
+  // MediaRouterActionController. It outlives |this|.
+  MediaRouterUIService* const media_router_ui_service_;
 
   DISALLOW_COPY_AND_ASSIGN(MediaRouterDialogControllerImplBase);
 };

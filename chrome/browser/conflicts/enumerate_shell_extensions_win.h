@@ -8,20 +8,18 @@
 #include <stdint.h>
 
 #include "base/callback_forward.h"
+#include "base/feature_list.h"
 
 namespace base {
 class FilePath;
 }
 
 // The path to the registry key where shell extensions are registered.
-extern const wchar_t kShellExtensionRegistryKey[];
+extern const wchar_t kApprovedShellExtensionRegistryKey[];
 
-// Enumerates registered shell extensions, and invokes |callback| once per shell
-// extension found. Must be called on a blocking sequence.
-// TODO(pmonette): Move this implementation detail to the .cc file when
-//                 enumerate_modules_model.cc gets deleted.
-void EnumerateShellExtensionPaths(
-    const base::RepeatingCallback<void(const base::FilePath&)>& callback);
+// This feature controls whether additional locations are enumerated to find
+// shell extensions in the registry.
+extern const base::Feature kExtendedShellExtensionsEnumeration;
 
 // Finds shell extensions installed on the computer by enumerating the registry.
 // In addition to the file path, the SizeOfImage and TimeDateStamp of the module
@@ -31,5 +29,15 @@ using OnShellExtensionEnumeratedCallback =
 void EnumerateShellExtensions(
     OnShellExtensionEnumeratedCallback on_shell_extension_enumerated,
     base::OnceClosure on_enumeration_finished);
+
+namespace internal {
+
+// Enumerates registered shell extensions, and invokes |callback| once per shell
+// extension found. Must be called on a blocking sequence.
+// Exposed for testing.
+void EnumerateShellExtensionPaths(
+    const base::RepeatingCallback<void(const base::FilePath&)>& callback);
+
+}  // namespace internal
 
 #endif  // CHROME_BROWSER_CONFLICTS_ENUMERATE_SHELL_EXTENSIONS_WIN_H_

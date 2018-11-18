@@ -5,8 +5,8 @@
 package org.chromium.chrome.browser.ntp.cards;
 
 import org.chromium.base.Log;
-import org.chromium.chrome.browser.ntp.ContextMenuManager;
-import org.chromium.chrome.browser.ntp.ContextMenuManager.ContextMenuItemId;
+import org.chromium.chrome.browser.native_page.ContextMenuManager;
+import org.chromium.chrome.browser.native_page.ContextMenuManager.ContextMenuItemId;
 import org.chromium.chrome.browser.ntp.snippets.CategoryInt;
 import org.chromium.chrome.browser.ntp.snippets.ContentSuggestionsCardLayout;
 import org.chromium.chrome.browser.ntp.snippets.KnownCategories;
@@ -110,13 +110,13 @@ public class SuggestionsCategoryInfo {
      */
     @Nullable
     public Boolean isContextMenuItemSupported(@ContextMenuItemId int menuItemId) {
-        if (menuItemId == ContextMenuManager.ID_REMOVE) return null;
-
-        if (mCategory == KnownCategories.RECENT_TABS) return false;
+        if (menuItemId == ContextMenuManager.ContextMenuItemId.REMOVE) return null;
 
         if (mCategory == KnownCategories.DOWNLOADS) {
-            if (menuItemId == ContextMenuManager.ID_OPEN_IN_INCOGNITO_TAB) return false;
-            if (menuItemId == ContextMenuManager.ID_SAVE_FOR_OFFLINE) return false;
+            if (menuItemId == ContextMenuManager.ContextMenuItemId.OPEN_IN_INCOGNITO_TAB
+                    || menuItemId == ContextMenuManager.ContextMenuItemId.SAVE_FOR_OFFLINE) {
+                return false;
+            }
         }
         return true;
     }
@@ -133,11 +133,9 @@ public class SuggestionsCategoryInfo {
             case KnownCategories.DOWNLOADS:
                 navigationDelegate.navigateToDownloadManager();
                 break;
-            case KnownCategories.FOREIGN_TABS:
-                navigationDelegate.navigateToRecentTabs();
-                break;
-            case KnownCategories.PHYSICAL_WEB_PAGES:
-            case KnownCategories.RECENT_TABS:
+            case KnownCategories.FOREIGN_TABS_DEPRECATED:
+            case KnownCategories.PHYSICAL_WEB_PAGES_DEPRECATED:
+            case KnownCategories.RECENT_TABS_DEPRECATED:
             case KnownCategories.ARTICLES:
             default:
                 Log.wtf(TAG, "'Empty State' action called for unsupported category: %d", mCategory);

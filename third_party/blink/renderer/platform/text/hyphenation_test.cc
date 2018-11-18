@@ -7,8 +7,7 @@
 #include "build/build_config.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/renderer/platform/fonts/font_global_context.h"
-#include "third_party/blink/renderer/platform/layout_locale.h"
+#include "third_party/blink/renderer/platform/text/layout_locale.h"
 
 using testing::ElementsAre;
 using testing::ElementsAreArray;
@@ -25,15 +24,15 @@ namespace blink {
 
 class NoHyphenation : public Hyphenation {
  public:
-  size_t LastHyphenLocation(const StringView&,
-                            size_t before_index) const override {
+  wtf_size_t LastHyphenLocation(const StringView&,
+                                wtf_size_t before_index) const override {
     return 0;
   }
 };
 
 class HyphenationTest : public testing::Test {
  protected:
-  void TearDown() override { FontGlobalContext::ClearForTesting(); }
+  void TearDown() override { LayoutLocale::ClearForTesting(); }
 
 #if defined(USE_MINIKIN_HYPHENATION) || defined(OS_MACOSX)
   // Get a |Hyphenation| instnace for the specified locale for testing.
@@ -72,23 +71,29 @@ TEST_F(HyphenationTest, Get) {
 }
 
 #if defined(USE_MINIKIN_HYPHENATION) || defined(OS_MACOSX)
-TEST_F(HyphenationTest, HyphenLocations) {
+// TODO(crbug.com/851413): Reenable this test.
+#if defined(OS_ANDROID)
+#define MAYBE_HyphenLocations DISABLED_HyphenLocations
+#else
+#define MAYBE_HyphenLocations HyphenLocations
+#endif
+TEST_F(HyphenationTest, MAYBE_HyphenLocations) {
   scoped_refptr<Hyphenation> hyphenation = GetHyphenation("en-us");
   ASSERT_TRUE(hyphenation) << "Cannot find the hyphenation engine";
 
   // Get all hyphenation points by |HyphenLocations|.
   const String word("hyphenation");
-  Vector<size_t, 8> locations = hyphenation->HyphenLocations(word);
+  Vector<wtf_size_t, 8> locations = hyphenation->HyphenLocations(word);
   EXPECT_GT(locations.size(), 0u);
 
-  for (unsigned i = 1; i < locations.size(); i++) {
+  for (wtf_size_t i = 1; i < locations.size(); i++) {
     ASSERT_GT(locations[i - 1], locations[i])
         << "hyphenLocations must return locations in the descending order";
   }
 
   // Test |LastHyphenLocation| returns all hyphenation points.
-  Vector<size_t, 8> actual;
-  for (unsigned offset = word.length();;) {
+  Vector<wtf_size_t, 8> actual;
+  for (wtf_size_t offset = word.length();;) {
     offset = hyphenation->LastHyphenLocation(word, offset);
     if (!offset)
       break;
@@ -98,7 +103,7 @@ TEST_F(HyphenationTest, HyphenLocations) {
 
   // Test |FirstHyphenLocation| returns all hyphenation points.
   actual.clear();
-  for (unsigned offset = 0;;) {
+  for (wtf_size_t offset = 0;;) {
     offset = hyphenation->FirstHyphenLocation(word, offset);
     if (!offset)
       break;
@@ -147,7 +152,7 @@ TEST_F(HyphenationTest, English) {
 #endif
   ASSERT_TRUE(hyphenation) << "Cannot find the hyphenation for en-us";
 
-  Vector<size_t, 8> locations = hyphenation->HyphenLocations("hyphenation");
+  Vector<wtf_size_t, 8> locations = hyphenation->HyphenLocations("hyphenation");
   EXPECT_THAT(locations, testing::AnyOf(ElementsAreArray({6, 2}),
                                         ElementsAreArray({7, 6, 2})));
 }
@@ -161,7 +166,8 @@ TEST_F(HyphenationTest, German) {
 #endif
   ASSERT_TRUE(hyphenation) << "Cannot find the hyphenation for de-1996";
 
-  Vector<size_t, 8> locations = hyphenation->HyphenLocations("konsonantien");
+  Vector<wtf_size_t, 8> locations =
+      hyphenation->HyphenLocations("konsonantien");
   EXPECT_THAT(locations, ElementsAreArray({8, 5, 3}));
 
   // Test words with non-ASCII (> U+0080) characters.

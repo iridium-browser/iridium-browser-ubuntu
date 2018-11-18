@@ -12,12 +12,14 @@ var INTERVAL_FOR_WAIT_UNTIL = 100; // ms
  *     test failed.
  */
 function reportPromise(promise, callback) {
-  promise.then(function() {
-    callback(/* error */ false);
-  }, function(error) {
-    console.error(error.stack || error);
-    callback(/* error */ true);
-  });
+  promise.then(
+      function() {
+        callback(/* error */ false);
+      },
+      function(/** @type {Error} */ error) {
+        console.error(error.stack || error);
+        callback(/* error */ true);
+      });
 }
 
 /**
@@ -95,15 +97,15 @@ function assertFileEntryPathsEqual(expectedPaths, fileEntries) {
  * @constructor
  */
 function TestCallRecorder() {
-  /** @private {!Array<!Argument>} */
+  /** @private {!Array<!Arguments>} */
   this.calls_ = [];
 
   /**
-   * The recording funciton. Bound in our constructor to ensure we always
+   * The recording function. Bound in our constructor to ensure we always
    * return the same object. This is necessary as some clients may make use
    * of object equality.
    *
-   * @type {function()}
+   * @type {function(*)}
    */
   this.callback = this.recordArguments_.bind(this);
 }
@@ -188,7 +190,7 @@ MockAPIEvent.prototype.dispatch = function(var_args) {
 
 /**
  * Stubs the chrome.storage API.
- * @construct
+ * @constructor
  * @struct
  */
 function MockChromeStorageAPI() {
@@ -196,7 +198,9 @@ function MockChromeStorageAPI() {
   this.state = {};
 
   window.chrome = window.chrome || {};
+  /** @suppress {const} */
   window.chrome.runtime = window.chrome.runtime || {};  // For lastError.
+  /** @suppress {checkTypes} */
   window.chrome.storage = {
     local: {
       get: this.get_.bind(this),
@@ -241,13 +245,17 @@ MockChromeStorageAPI.prototype.set_ = function(values, opt_callback) {
 function MockCommandLinePrivate() {
   this.flags_ = {};
   if (!chrome) {
+    /** @suppress {const|checkTypes} */
     chrome = {};
   }
   if (!chrome.commandLinePrivate) {
+    /** @suppress {checkTypes} */
     chrome.commandLinePrivate = {};
   }
   chrome.commandLinePrivate.hasSwitch = function(name, callback) {
-    callback(name in this.flags_);
+    window.setTimeout(() => {
+      callback(name in this.flags_);
+    }, 0);
   }.bind(this);
 }
 

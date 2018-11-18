@@ -5,12 +5,10 @@
 #include "src/optimized-compilation-info.h"
 
 #include "src/api.h"
-#include "src/ast/ast.h"
-#include "src/ast/scopes.h"
 #include "src/debug/debug.h"
 #include "src/isolate.h"
 #include "src/objects-inl.h"
-#include "src/parsing/parse-info.h"
+#include "src/objects/shared-function-info.h"
 #include "src/source-position.h"
 
 namespace v8 {
@@ -19,67 +17,75 @@ namespace internal {
 OptimizedCompilationInfo::OptimizedCompilationInfo(
     Zone* zone, Isolate* isolate, Handle<SharedFunctionInfo> shared,
     Handle<JSFunction> closure)
-    : OptimizedCompilationInfo({}, AbstractCode::OPTIMIZED_FUNCTION, zone) {
+    : OptimizedCompilationInfo(Code::OPTIMIZED_FUNCTION, zone) {
   shared_info_ = shared;
   closure_ = closure;
   optimization_id_ = isolate->NextOptimizationId();
-  dependencies_.reset(new CompilationDependencies(isolate, zone));
-
-  SetFlag(kCalledWithCodeStartRegister);
-  if (FLAG_function_context_specialization) MarkAsFunctionContextSpecializing();
-  if (FLAG_turbo_splitting) MarkAsSplittingEnabled();
-  if (!FLAG_turbo_disable_switch_jump_table) SetFlag(kSwitchJumpTableEnabled);
-  if (FLAG_untrusted_code_mitigations) MarkAsPoisoningRegisterArguments();
-
-  // TODO(yangguo): Disable this in case of debugging for crbug.com/826613
-  if (FLAG_analyze_environment_liveness) {
-    MarkAsAnalyzeEnvironmentLiveness();
-  }
 
   // Collect source positions for optimized code when profiling or if debugger
   // is active, to be able to get more precise source positions at the price of
   // more memory consumption.
-  if (isolate->NeedsSourcePositionsForProfiling()) {
+  if (isolate->NeedsDetailedOptimizedCodeLineInfo()) {
     MarkAsSourcePositionsEnabled();
   }
+
+  SetTracingFlags(shared->PassesFilter(FLAG_trace_turbo_filter));
 }
 
 OptimizedCompilationInfo::OptimizedCompilationInfo(
     Vector<const char> debug_name, Zone* zone, Code::Kind code_kind)
-    : OptimizedCompilationInfo(
-          debug_name, static_cast<AbstractCode::Kind>(code_kind), zone) {
-  if (code_kind == Code::BYTECODE_HANDLER) {
-    SetFlag(OptimizedCompilationInfo::kCalledWithCodeStartRegister);
-  }
-#if ENABLE_GDB_JIT_INTERFACE
-#if DEBUG
-  if (code_kind == Code::BUILTIN || code_kind == Code::STUB) {
-    MarkAsSourcePositionsEnabled();
-  }
-#endif
-#endif
+    : OptimizedCompilationInfo(code_kind, zone) {
+  debug_name_ = debug_name;
+
+  SetTracingFlags(
+      PassesFilter(debug_name, CStrVector(FLAG_trace_turbo_filter)));
 }
 
-OptimizedCompilationInfo::OptimizedCompilationInfo(
-    Vector<const char> debug_name, AbstractCode::Kind code_kind, Zone* zone)
-    : flags_(FLAG_untrusted_code_mitigations ? kUntrustedCodeMitigations : 0),
-      code_kind_(code_kind),
-      stub_key_(0),
-      builtin_index_(Builtins::kNoBuiltinId),
-      osr_offset_(BailoutId::None()),
-      zone_(zone),
-      deferred_handles_(nullptr),
-      dependencies_(nullptr),
-      bailout_reason_(BailoutReason::kNoReason),
-      optimization_id_(-1),
-      debug_name_(debug_name) {}
+OptimizedCompilationInfo::OptimizedCompilationInfo(Code::Kind code_kind,
+                                                   Zone* zone)
+    : code_kind_(code_kind), zone_(zone) {
+  ConfigureFlags();
+}
+
+void OptimizedCompilationInfo::ConfigureFlags() {
+  if (FLAG_untrusted_code_mitigations) SetFlag(kUntrustedCodeMitigations);
+
+  switch (code_kind_) {
+    case Code::OPTIMIZED_FUNCTION:
+      SetFlag(kCalledWithCodeStartRegister);
+      SetFlag(kSwitchJumpTableEnabled);
+      if (FLAG_function_context_specialization) {
+        MarkAsFunctionContextSpecializing();
+      }
+      if (FLAG_turbo_splitting) {
+        MarkAsSplittingEnabled();
+      }
+      if (FLAG_untrusted_code_mitigations) {
+        MarkAsPoisoningRegisterArguments();
+      }
+      if (FLAG_analyze_environment_liveness) {
+        // TODO(yangguo): Disable this in case of debugging for crbug.com/826613
+        MarkAsAnalyzeEnvironmentLiveness();
+      }
+      break;
+    case Code::BYTECODE_HANDLER:
+      SetFlag(kCalledWithCodeStartRegister);
+      break;
+    case Code::BUILTIN:
+    case Code::STUB:
+#if ENABLE_GDB_JIT_INTERFACE && DEBUG
+      MarkAsSourcePositionsEnabled();
+#endif  // ENABLE_GDB_JIT_INTERFACE && DEBUG
+      break;
+    default:
+      SetFlag(kSwitchJumpTableEnabled);
+      break;
+  }
+}
 
 OptimizedCompilationInfo::~OptimizedCompilationInfo() {
   if (GetFlag(kDisableFutureOptimization) && has_shared_info()) {
     shared_info()->DisableOptimization(bailout_reason());
-  }
-  if (dependencies()) {
-    dependencies()->Rollback();
   }
 }
 
@@ -95,12 +101,12 @@ void OptimizedCompilationInfo::set_deferred_handles(
   deferred_handles_.reset(deferred_handles);
 }
 
-void OptimizedCompilationInfo::ReopenHandlesInNewHandleScope() {
+void OptimizedCompilationInfo::ReopenHandlesInNewHandleScope(Isolate* isolate) {
   if (!shared_info_.is_null()) {
-    shared_info_ = Handle<SharedFunctionInfo>(*shared_info_);
+    shared_info_ = Handle<SharedFunctionInfo>(*shared_info_, isolate);
   }
   if (!closure_.is_null()) {
-    closure_ = Handle<JSFunction>(*closure_);
+    closure_ = Handle<JSFunction>(*closure_, isolate);
   }
 }
 
@@ -165,6 +171,13 @@ int OptimizedCompilationInfo::AddInlinedFunction(
   int id = static_cast<int>(inlined_functions_.size());
   inlined_functions_.push_back(InlinedFunctionHolder(inlined_function, pos));
   return id;
+}
+
+void OptimizedCompilationInfo::SetTracingFlags(bool passes_filter) {
+  if (!passes_filter) return;
+  if (FLAG_trace_turbo) SetFlag(kTraceTurboJson);
+  if (FLAG_trace_turbo_graph) SetFlag(kTraceTurboGraph);
+  if (FLAG_trace_turbo_scheduled) SetFlag(kTraceTurboScheduled);
 }
 
 }  // namespace internal

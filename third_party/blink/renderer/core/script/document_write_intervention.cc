@@ -168,7 +168,7 @@ bool MaybeDisallowFetchForDocWrittenScript(FetchParameters& params,
   // Do not block scripts if it is a page reload. This is to enable pages to
   // recover if blocking of a script is leading to a page break and the user
   // reloads the page.
-  const FrameLoadType load_type = document.Loader()->LoadType();
+  const WebFrameLoadType load_type = document.Loader()->LoadType();
   if (IsReloadLoadType(load_type)) {
     // Recording this metric since an increase in number of reloads for pages
     // where a script was blocked could be indicative of a page break.
@@ -199,9 +199,11 @@ bool MaybeDisallowFetchForDocWrittenScript(FetchParameters& params,
   return true;
 }
 
-void PossiblyFetchBlockedDocWriteScript(const Resource* resource,
-                                        Document& element_document,
-                                        const ScriptFetchOptions& options) {
+void PossiblyFetchBlockedDocWriteScript(
+    const Resource* resource,
+    Document& element_document,
+    const ScriptFetchOptions& options,
+    CrossOriginAttributeValue cross_origin) {
   if (!resource->ErrorOccurred()) {
     EmitWarningNotBlocked(resource->Url(), element_document);
     return;
@@ -214,7 +216,7 @@ void PossiblyFetchBlockedDocWriteScript(const Resource* resource,
   EmitErrorBlocked(resource->Url(), element_document);
 
   FetchParameters params = options.CreateFetchParameters(
-      resource->Url(), element_document.GetSecurityOrigin(),
+      resource->Url(), element_document.GetSecurityOrigin(), cross_origin,
       resource->Encoding(), FetchParameters::kIdleLoad);
   AddHeader(&params);
   ScriptResource::Fetch(params, element_document.Fetcher(), nullptr);

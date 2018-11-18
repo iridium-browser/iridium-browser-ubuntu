@@ -31,7 +31,7 @@ namespace policy {
 //   (b) new constants should only be appended at the end of the enumeration.
 //
 // Keep this in sync with EnterprisePolicyLoadStatus in histograms.xml.
-enum PolicyLoadStatus {
+enum PolicyLoadStatusForUma {
   // Policy blob was successfully loaded and parsed.
   LOAD_RESULT_SUCCESS,
 
@@ -51,7 +51,7 @@ enum PolicyLoadStatus {
 // Struct containing the result of a policy load - if |status| ==
 // LOAD_RESULT_SUCCESS, |policy| is initialized from the policy file on disk.
 struct PolicyLoadResult {
-  PolicyLoadStatus status;
+  PolicyLoadStatusForUma status;
   em::PolicyFetchResponse policy;
   em::PolicySigningKey key;
 };
@@ -329,9 +329,9 @@ void DesktopCloudPolicyStore::InstallLoadedPolicyAfterValidation(
   UMA_HISTOGRAM_ENUMERATION(
       "Enterprise.UserCloudPolicyStore.LoadValidationStatus",
       validator->status(), CloudPolicyValidatorBase::VALIDATION_STATUS_SIZE);
-  validation_status_ = validator->status();
+  validation_result_ = validator->GetValidationResult();
   if (!validator->success()) {
-    DVLOG(1) << "Validation failed: status=" << validation_status_;
+    DVLOG(1) << "Validation failed: status=" << validator->status();
     status_ = STATUS_VALIDATION_ERROR;
     NotifyStoreError();
     return;
@@ -358,24 +358,24 @@ void DesktopCloudPolicyStore::InstallLoadedPolicyAfterValidation(
 }
 
 void DesktopCloudPolicyStore::Store(const em::PolicyFetchResponse& policy) {
-  // Stop any pending requests to store policy, then validate the new policy
-  // before storing it.
+  // Cancel all pending requests.
   weak_factory_.InvalidateWeakPtrs();
+
   std::unique_ptr<em::PolicyFetchResponse> policy_copy(
       new em::PolicyFetchResponse(policy));
   Validate(
       std::move(policy_copy), std::unique_ptr<em::PolicySigningKey>(), true,
-      base::BindRepeating(&DesktopCloudPolicyStore::StorePolicyAfterValidation,
+      base::BindRepeating(&DesktopCloudPolicyStore::OnPolicyToStoreValidated,
                           weak_factory_.GetWeakPtr()));
 }
 
-void DesktopCloudPolicyStore::StorePolicyAfterValidation(
+void DesktopCloudPolicyStore::OnPolicyToStoreValidated(
     UserCloudPolicyValidator* validator) {
   UMA_HISTOGRAM_ENUMERATION(
       "Enterprise.UserCloudPolicyStore.StoreValidationStatus",
       validator->status(), CloudPolicyValidatorBase::VALIDATION_STATUS_SIZE);
-  validation_status_ = validator->status();
-  DVLOG(1) << "Policy validation complete: status = " << validation_status_;
+  validation_result_ = validator->GetValidationResult();
+  DVLOG(1) << "Policy validation complete: status = " << validator->status();
   if (!validator->success()) {
     status_ = STATUS_VALIDATION_ERROR;
     NotifyStoreError();
@@ -422,8 +422,8 @@ std::unique_ptr<UserCloudPolicyStore> UserCloudPolicyStore::Create(
       new UserCloudPolicyStore(policy_path, key_path, background_task_runner));
 }
 
-void UserCloudPolicyStore::SetSigninUsername(const std::string& username) {
-  signin_username_ = username;
+void UserCloudPolicyStore::SetSigninAccountId(const AccountId& account_id) {
+  account_id_ = account_id;
 }
 
 void UserCloudPolicyStore::Validate(
@@ -443,14 +443,14 @@ void UserCloudPolicyStore::Validate(
   // initialization is complete (http://crbug.com/342327).
   std::string owning_domain;
 
-  // Validate the username if the user is signed in. The signin_username_ can
+  // Validate the account id if the user is signed in. The account_id_ can
   // be empty during initial policy load because this happens before the
   // Prefs subsystem is initialized.
-  if (!signin_username_.empty()) {
-    DVLOG(1) << "Validating username: " << signin_username_;
-    validator->ValidateUsername(signin_username_, true);
-    owning_domain = gaia::ExtractDomainName(
-        gaia::CanonicalizeEmail(gaia::SanitizeEmail(signin_username_)));
+  if (account_id_.is_valid()) {
+    DVLOG(1) << "Validating account: " << account_id_;
+    validator->ValidateUser(account_id_);
+    owning_domain = gaia::ExtractDomainName(gaia::CanonicalizeEmail(
+        gaia::SanitizeEmail(account_id_.GetUserEmail())));
   }
 
   ValidateKeyAndSignature(validator.get(), cached_key.get(), owning_domain);

@@ -30,14 +30,20 @@ const CSSValue* AnimationPlayState::CSSValueFromComputedStyleInternal(
   CSSValueList* list = CSSValueList::CreateCommaSeparated();
   const CSSAnimationData* animation_data = style.Animations();
   if (animation_data) {
-    for (size_t i = 0; i < animation_data->PlayStateList().size(); ++i) {
+    for (wtf_size_t i = 0; i < animation_data->PlayStateList().size(); ++i) {
       list->Append(*ComputedStyleUtils::ValueForAnimationPlayState(
           animation_data->PlayStateList()[i]));
     }
   } else {
-    list->Append(*CSSIdentifierValue::Create(CSSValueRunning));
+    list->Append(*InitialValue());
   }
   return list;
+}
+
+const CSSValue* AnimationPlayState::InitialValue() const {
+  DEFINE_STATIC_LOCAL(Persistent<CSSValue>, value,
+                      (CSSIdentifierValue::Create(CSSValueRunning)));
+  return value;
 }
 
 }  // namespace CSSLonghand

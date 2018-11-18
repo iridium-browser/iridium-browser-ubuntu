@@ -32,9 +32,9 @@
 
 #include <algorithm>
 
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_mutation_callback.h"
+#include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/mutation_observer_init.h"
 #include "third_party/blink/renderer/core/dom/mutation_observer_registration.h"
 #include "third_party/blink/renderer/core/dom/mutation_record.h"
@@ -42,6 +42,7 @@
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/html/html_slot_element.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/microtask.h"
 
 namespace blink {
@@ -68,15 +69,10 @@ class MutationObserver::V8DelegateImpl final
     callback_->InvokeAndReportException(&observer, records, &observer);
   }
 
-  virtual void Trace(blink::Visitor* visitor) {
+  void Trace(blink::Visitor* visitor) override {
     visitor->Trace(callback_);
     MutationObserver::Delegate::Trace(visitor);
     ContextClient::Trace(visitor);
-  }
-
-  virtual void TraceWrappers(const ScriptWrappableVisitor* visitor) const {
-    visitor->TraceWrappers(callback_);
-    MutationObserver::Delegate::TraceWrappers(visitor);
   }
 
  private:
@@ -140,7 +136,7 @@ void MutationObserver::observe(Node* node,
   if (attributes || (!observer_init.hasAttributes() &&
                      (observer_init.hasAttributeOldValue() ||
                       observer_init.hasAttributeFilter())))
-    options |= kAttributes;
+    options |= kMutationTypeAttributes;
 
   if (observer_init.hasCharacterDataOldValue() &&
       observer_init.characterDataOldValue())
@@ -150,15 +146,15 @@ void MutationObserver::observe(Node* node,
       observer_init.hasCharacterData() && observer_init.characterData();
   if (character_data || (!observer_init.hasCharacterData() &&
                          observer_init.hasCharacterDataOldValue()))
-    options |= kCharacterData;
+    options |= kMutationTypeCharacterData;
 
   if (observer_init.childList())
-    options |= kChildList;
+    options |= kMutationTypeChildList;
 
   if (observer_init.subtree())
     options |= kSubtree;
 
-  if (!(options & kAttributes)) {
+  if (!(options & kMutationTypeAttributes)) {
     if (options & kAttributeOldValue) {
       exception_state.ThrowTypeError(
           "The options object may only set 'attributeOldValue' to true when "
@@ -172,14 +168,15 @@ void MutationObserver::observe(Node* node,
       return;
     }
   }
-  if (!((options & kCharacterData) || !(options & kCharacterDataOldValue))) {
+  if (!((options & kMutationTypeCharacterData) ||
+        !(options & kCharacterDataOldValue))) {
     exception_state.ThrowTypeError(
         "The options object may only set 'characterDataOldValue' to true when "
         "'characterData' is true or not present.");
     return;
   }
 
-  if (!(options & (kAttributes | kCharacterData | kChildList))) {
+  if (!(options & kMutationTypeAll)) {
     exception_state.ThrowTypeError(
         "The options object must set at least one of 'attributes', "
         "'characterData', or 'childList' to true.");
@@ -222,9 +219,9 @@ void MutationObserver::ObservationEnded(
 }
 
 static MutationObserverSet& ActiveMutationObservers() {
-  DEFINE_STATIC_LOCAL(MutationObserverSet, active_observers,
+  DEFINE_STATIC_LOCAL(Persistent<MutationObserverSet>, active_observers,
                       (new MutationObserverSet));
-  return active_observers;
+  return *active_observers;
 }
 
 using SlotChangeList = HeapVector<Member<HTMLSlotElement>>;
@@ -233,14 +230,15 @@ using SlotChangeList = HeapVector<Member<HTMLSlotElement>>;
 // similar-origin browsing context.
 // https://html.spec.whatwg.org/multipage/browsers.html#unit-of-related-similar-origin-browsing-contexts
 static SlotChangeList& ActiveSlotChangeList() {
-  DEFINE_STATIC_LOCAL(SlotChangeList, slot_change_list, (new SlotChangeList));
-  return slot_change_list;
+  DEFINE_STATIC_LOCAL(Persistent<SlotChangeList>, slot_change_list,
+                      (new SlotChangeList));
+  return *slot_change_list;
 }
 
 static MutationObserverSet& SuspendedMutationObservers() {
-  DEFINE_STATIC_LOCAL(MutationObserverSet, suspended_observers,
+  DEFINE_STATIC_LOCAL(Persistent<MutationObserverSet>, suspended_observers,
                       (new MutationObserverSet));
-  return suspended_observers;
+  return *suspended_observers;
 }
 
 static void EnsureEnqueueMicrotask() {
@@ -302,7 +300,7 @@ void MutationObserver::CancelInspectorAsyncTasks() {
 void MutationObserver::Deliver() {
   DCHECK(!ShouldBeSuspended());
 
-  // Calling clearTransientRegistrations() can modify m_registrations, so it's
+  // Calling ClearTransientRegistrations() can modify registrations_, so it's
   // necessary to make a copy of the transient registrations before operating on
   // them.
   HeapVector<Member<MutationObserverRegistration>, 1> transient_registrations;
@@ -377,14 +375,6 @@ void MutationObserver::Trace(blink::Visitor* visitor) {
   visitor->Trace(registrations_);
   ScriptWrappable::Trace(visitor);
   ContextClient::Trace(visitor);
-}
-
-void MutationObserver::TraceWrappers(
-    const ScriptWrappableVisitor* visitor) const {
-  visitor->TraceWrappers(delegate_);
-  for (auto record : records_)
-    visitor->TraceWrappers(record);
-  ScriptWrappable::TraceWrappers(visitor);
 }
 
 }  // namespace blink

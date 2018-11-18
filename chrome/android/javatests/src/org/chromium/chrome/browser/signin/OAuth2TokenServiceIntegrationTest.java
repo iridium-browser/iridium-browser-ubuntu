@@ -17,7 +17,6 @@ import org.junit.runner.RunWith;
 
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.BaseJUnit4ClassRunner;
-import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.test.util.ApplicationData;
@@ -26,7 +25,7 @@ import org.chromium.components.signin.AccountManagerFacade;
 import org.chromium.components.signin.ChromeSigninController;
 import org.chromium.components.signin.test.util.AccountHolder;
 import org.chromium.components.signin.test.util.FakeAccountManagerDelegate;
-import org.chromium.content.browser.test.NativeLibraryTestRule;
+import org.chromium.content_public.browser.test.NativeLibraryTestRule;
 
 /**
  * Integration test for the OAuth2TokenService.
@@ -122,77 +121,6 @@ public class OAuth2TokenServiceIntegrationTest {
     private void removeAccount(AccountHolder accountHolder) {
         mAccountManager.removeAccountHolderBlocking(accountHolder);
         ThreadUtils.runOnUiThreadBlocking(this::seedAccountTrackerService);
-    }
-
-    @Test
-    @MediumTest
-    @Feature({"Sync"})
-    public void testFireRefreshTokenAvailableNotifiesJavaObservers() {
-        ThreadUtils.runOnUiThreadBlocking(() -> {
-            // Adding an observer should not lead to a callback.
-            Assert.assertEquals(0, mObserver.getAvailableCallCount());
-
-            // An observer should be called with the correct account.
-            mOAuth2TokenService.fireRefreshTokenAvailable(TEST_ACCOUNT1);
-            Assert.assertEquals(1, mObserver.getAvailableCallCount());
-            Assert.assertEquals(TEST_ACCOUNT1, mObserver.getLastAccount());
-
-            // When mOAuth2TokenService, an observer should not be called.
-            mOAuth2TokenService.removeObserver(mObserver);
-            mOAuth2TokenService.fireRefreshTokenAvailable(TEST_ACCOUNT1);
-            Assert.assertEquals(1, mObserver.getAvailableCallCount());
-
-            // No other observer interface method should ever have been called.
-            Assert.assertEquals(0, mObserver.getRevokedCallCount());
-            Assert.assertEquals(0, mObserver.getLoadedCallCount());
-        });
-    }
-
-    @Test
-    @MediumTest
-    @Feature({"Sync"})
-    public void testFireRefreshTokenRevokedNotifiesJavaObservers() {
-        ThreadUtils.runOnUiThreadBlocking(() -> {
-            // Adding an observer should not lead to a callback.
-            Assert.assertEquals(0, mObserver.getRevokedCallCount());
-
-            // An observer should be called with the correct account.
-            mOAuth2TokenService.fireRefreshTokenRevoked(TEST_ACCOUNT1);
-            Assert.assertEquals(1, mObserver.getRevokedCallCount());
-            Assert.assertEquals(TEST_ACCOUNT1, mObserver.getLastAccount());
-
-            // When removed, an observer should not be called.
-            mOAuth2TokenService.removeObserver(mObserver);
-            mOAuth2TokenService.fireRefreshTokenRevoked(TEST_ACCOUNT2);
-            Assert.assertEquals(1, mObserver.getRevokedCallCount());
-
-            // No other observer interface method should ever have been called.
-            Assert.assertEquals(0, mObserver.getAvailableCallCount());
-            Assert.assertEquals(0, mObserver.getLoadedCallCount());
-        });
-    }
-
-    @Test
-    @MediumTest
-    @Feature({"Sync"})
-    public void testFireRefreshTokensLoadedNotifiesJavaObservers() {
-        ThreadUtils.runOnUiThreadBlocking(() -> {
-            // Adding an observer should not lead to a callback.
-            Assert.assertEquals(0, mObserver.getLoadedCallCount());
-
-            // An observer should be called with the correct account.
-            mOAuth2TokenService.fireRefreshTokensLoaded();
-            Assert.assertEquals(1, mObserver.getLoadedCallCount());
-
-            // When removed, an observer should not be called.
-            mOAuth2TokenService.removeObserver(mObserver);
-            mOAuth2TokenService.fireRefreshTokensLoaded();
-            Assert.assertEquals(1, mObserver.getLoadedCallCount());
-
-            // No other observer interface method should ever have been called.
-            Assert.assertEquals(0, mObserver.getAvailableCallCount());
-            Assert.assertEquals(0, mObserver.getRevokedCallCount());
-        });
     }
 
     @Test

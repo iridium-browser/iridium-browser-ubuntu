@@ -12,14 +12,22 @@
 
 #include "base/containers/circular_deque.h"
 #include "base/macros.h"
-#include "base/memory/memory_coordinator_client.h"
+#include "base/memory/memory_pressure_listener.h"
 #include "base/memory/weak_ptr.h"
+#include "base/sequenced_task_runner.h"
 #include "base/synchronization/lock.h"
 #include "base/time/time.h"
 #include "base/trace_event/memory_dump_provider.h"
 #include "base/trace_event/trace_event.h"
-#include "cc/resources/layer_tree_resource_provider.h"
+#include "cc/cc_export.h"
+#include "components/viz/common/resources/resource_format.h"
+#include "gpu/command_buffer/common/gl2_types.h"
+#include "ui/gfx/geometry/size.h"
+#include "ui/gfx/gpu_memory_buffer.h"
 
+namespace gfx {
+class GpuMemoryBuffer;
+}
 namespace gpu {
 namespace raster {
 class RasterInterface;
@@ -43,23 +51,36 @@ struct StagingBuffer {
 
   const gfx::Size size;
   const viz::ResourceFormat format;
-  std::unique_ptr<gfx::GpuMemoryBuffer> gpu_memory_buffer;
   base::TimeTicks last_usage;
-  unsigned texture_id;
-  unsigned image_id;
-  unsigned query_id;
-  uint64_t content_id;
+
+  // The following fields are initialized by OneCopyRasterBufferProvider.
+  // Storage for the staging buffer.  This can be a GPU native or shared memory
+  // GpuMemoryBuffer.
+  std::unique_ptr<gfx::GpuMemoryBuffer> gpu_memory_buffer;
+
+  // Id for image used to import the GpuMemoryBuffer to command buffer.
+  GLuint image_id = 0;
+
+  // Id for texture that's bound to the GpuMemoryBuffer image.
+  GLuint texture_id = 0;
+
+  // Id of command buffer query that tracks use of this staging buffer by the
+  // GPU.  In general, GPU synchronization is necessary for native
+  // GpuMemoryBuffers.
+  GLuint query_id = 0;
+
+  // Id of the content that's rastered into this staging buffer.  Used to
+  // retrieve staging buffer with known content for reuse for partial raster.
+  uint64_t content_id = 0;
 };
 
 class CC_EXPORT StagingBufferPool
-    : public base::trace_event::MemoryDumpProvider,
-      public base::MemoryCoordinatorClient {
+    : public base::trace_event::MemoryDumpProvider {
  public:
   ~StagingBufferPool() final;
 
   StagingBufferPool(scoped_refptr<base::SequencedTaskRunner> task_runner,
                     viz::RasterContextProvider* worker_context_provider,
-                    LayerTreeResourceProvider* resource_provider,
                     bool use_partial_raster,
                     int max_staging_buffer_usage_in_bytes);
   void Shutdown();
@@ -91,12 +112,11 @@ class CC_EXPORT StagingBufferPool
   void StagingStateAsValueInto(
       base::trace_event::TracedValue* staging_state) const;
 
-  // Overriden from base::MemoryCoordinatorClient.
-  void OnPurgeMemory() override;
+  void OnMemoryPressure(
+      base::MemoryPressureListener::MemoryPressureLevel level);
 
   scoped_refptr<base::SequencedTaskRunner> task_runner_;
   viz::RasterContextProvider* const worker_context_provider_;
-  LayerTreeResourceProvider* const resource_provider_;
   const bool use_partial_raster_;
 
   mutable base::Lock lock_;
@@ -113,6 +133,8 @@ class CC_EXPORT StagingBufferPool
   const base::TimeDelta staging_buffer_expiration_delay_;
   bool reduce_memory_usage_pending_;
   base::Closure reduce_memory_usage_callback_;
+
+  std::unique_ptr<base::MemoryPressureListener> memory_pressure_listener_;
 
   base::WeakPtrFactory<StagingBufferPool> weak_ptr_factory_;
 

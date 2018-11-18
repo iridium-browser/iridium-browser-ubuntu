@@ -12,10 +12,11 @@
 #include "base/callback.h"
 #include "base/files/file_path.h"
 #include "base/metrics/histogram_functions.h"
+#include "base/sequenced_task_runner.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/win/registry.h"
 #include "chrome/browser/conflicts/module_info_util_win.h"
@@ -47,14 +48,15 @@ bool IsMicrosoftIme(const wchar_t* ime_guid) {
       L"{fa445657-9379-11d6-b41a-00065b83ee53}",
   };
 
-  DCHECK(std::is_sorted(std::begin(kMicrosoftImeGuids),
-                        std::end(kMicrosoftImeGuids)));
+  auto comp = [](const wchar_t* lhs, const wchar_t* rhs) -> bool {
+    return base::CompareCaseInsensitiveASCII(lhs, rhs) == -1;
+  };
 
-  return std::binary_search(
-      std::begin(kMicrosoftImeGuids), std::end(kMicrosoftImeGuids), ime_guid,
-      [](const wchar_t* lhs, const wchar_t* rhs) {
-        return base::CompareCaseInsensitiveASCII(lhs, rhs) == -1;
-      });
+  DCHECK(std::is_sorted(std::begin(kMicrosoftImeGuids),
+                        std::end(kMicrosoftImeGuids), comp));
+
+  return std::binary_search(std::begin(kMicrosoftImeGuids),
+                            std::end(kMicrosoftImeGuids), ime_guid, comp);
 }
 
 // Returns the path to the in-proc server DLL for |guid|, or an empty path if
@@ -116,7 +118,7 @@ void EnumerateInputMethodEditors(OnImeEnumeratedCallback on_ime_enumerated,
                                  base::OnceClosure on_enumeration_finished) {
   base::PostTaskWithTraits(
       FROM_HERE,
-      {base::MayBlock(), base::TaskPriority::BACKGROUND,
+      {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
        base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
       base::BindOnce(&EnumerateImesOnBlockingSequence,
                      base::SequencedTaskRunnerHandle::Get(),

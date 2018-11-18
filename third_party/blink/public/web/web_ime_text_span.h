@@ -33,8 +33,9 @@
 
 #include <string>
 #include <vector>
-#include "services/ui/public/interfaces/ime/ime.mojom-shared.h"
-#include "third_party/blink/public/platform/web_color.h"
+
+#include "services/ws/public/mojom/ime/ime.mojom-shared.h"
+#include "third_party/skia/include/core/SkColor.h"
 
 namespace blink {
 
@@ -57,7 +58,7 @@ struct WebImeTextSpan {
       : type(Type::kComposition),
         start_offset(0),
         end_offset(0),
-        thickness(ui::mojom::ImeTextSpanThickness::kThin),
+        thickness(ws::mojom::ImeTextSpanThickness::kThin),
         background_color(0),
         suggestion_highlight_color(0),
         suggestions(std::vector<std::string>()) {}
@@ -66,9 +67,9 @@ struct WebImeTextSpan {
       Type ty,
       unsigned s,
       unsigned e,
-      ui::mojom::ImeTextSpanThickness th,
-      WebColor bc,
-      WebColor shc = 0,
+      ws::mojom::ImeTextSpanThickness th,
+      SkColor bc,
+      SkColor shc = 0,
       const std::vector<std::string>& su = std::vector<std::string>())
       : type(ty),
         start_offset(s),
@@ -89,10 +90,10 @@ struct WebImeTextSpan {
   Type type;
   unsigned start_offset;
   unsigned end_offset;
-  WebColor underline_color = 0x00000000;
-  ui::mojom::ImeTextSpanThickness thickness;
-  WebColor background_color;
-  WebColor suggestion_highlight_color;
+  SkColor underline_color = SK_ColorTRANSPARENT;
+  ws::mojom::ImeTextSpanThickness thickness;
+  SkColor background_color;
+  SkColor suggestion_highlight_color;
   std::vector<std::string> suggestions;
 };
 

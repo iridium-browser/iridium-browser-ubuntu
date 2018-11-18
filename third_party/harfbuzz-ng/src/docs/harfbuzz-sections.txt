@@ -8,6 +8,7 @@ HB_EXTERN
 <SECTION>
 <FILE>hb-blob</FILE>
 hb_blob_create
+hb_blob_create_from_file
 hb_blob_create_sub_blob
 hb_blob_copy_writable_or_fail
 hb_blob_destroy
@@ -168,6 +169,8 @@ hb_coretext_font_get_ct_font
 
 <SECTION>
 <FILE>hb-face</FILE>
+hb_face_count
+hb_face_t
 hb_face_create
 hb_face_create_for_tables
 hb_face_destroy
@@ -186,7 +189,11 @@ hb_face_set_glyph_count
 hb_face_set_index
 hb_face_set_upem
 hb_face_set_user_data
-hb_face_t
+hb_face_collect_unicodes
+hb_face_collect_variation_selectors
+hb_face_collect_variation_unicodes
+hb_face_builder_create
+hb_face_builder_add_table
 </SECTION>
 
 <SECTION>
@@ -206,10 +213,12 @@ hb_font_funcs_set_glyph_contour_point_func
 hb_font_funcs_set_glyph_extents_func
 hb_font_funcs_set_glyph_from_name_func
 hb_font_funcs_set_glyph_h_advance_func
+hb_font_funcs_set_glyph_h_advances_func
 hb_font_funcs_set_glyph_h_kerning_func
 hb_font_funcs_set_glyph_h_origin_func
 hb_font_funcs_set_glyph_name_func
 hb_font_funcs_set_glyph_v_advance_func
+hb_font_funcs_set_glyph_v_advances_func
 hb_font_funcs_set_glyph_v_kerning_func
 hb_font_funcs_set_glyph_v_origin_func
 hb_font_funcs_set_nominal_glyph_func
@@ -221,6 +230,8 @@ hb_font_get_face
 hb_font_get_glyph
 hb_font_get_glyph_advance_for_direction
 hb_font_get_glyph_advance_func_t
+hb_font_get_glyph_advances_for_direction
+hb_font_get_glyph_advances_func_t
 hb_font_get_glyph_contour_point
 hb_font_get_glyph_contour_point_for_origin
 hb_font_get_glyph_contour_point_func_t
@@ -231,6 +242,8 @@ hb_font_get_glyph_from_name
 hb_font_get_glyph_from_name_func_t
 hb_font_get_glyph_h_advance
 hb_font_get_glyph_h_advance_func_t
+hb_font_get_glyph_h_advances
+hb_font_get_glyph_h_advances_func_t
 hb_font_get_glyph_h_kerning
 hb_font_get_glyph_h_kerning_func_t
 hb_font_get_glyph_h_origin
@@ -243,6 +256,8 @@ hb_font_get_glyph_origin_for_direction
 hb_font_get_glyph_origin_func_t
 hb_font_get_glyph_v_advance
 hb_font_get_glyph_v_advance_func_t
+hb_font_get_glyph_v_advances
+hb_font_get_glyph_v_advances_func_t
 hb_font_get_glyph_v_kerning
 hb_font_get_glyph_v_kerning_func_t
 hb_font_get_glyph_v_origin
@@ -325,6 +340,7 @@ HB_GOBJECT_TYPE_FACE
 HB_GOBJECT_TYPE_FONT
 HB_GOBJECT_TYPE_FONT_FUNCS
 HB_GOBJECT_TYPE_GLYPH_FLAGS
+HB_GOBJECT_TYPE_MAP
 HB_GOBJECT_TYPE_MEMORY_MODE
 HB_GOBJECT_TYPE_OT_LAYOUT_GLYPH_CLASS
 HB_GOBJECT_TYPE_OT_MATH_CONSTANT
@@ -356,6 +372,7 @@ hb_gobject_face_get_type
 hb_gobject_font_funcs_get_type
 hb_gobject_font_get_type
 hb_gobject_glyph_flags_get_type
+hb_gobject_map_get_type
 hb_gobject_memory_mode_get_type
 hb_gobject_ot_layout_glyph_class_get_type
 hb_gobject_ot_math_constant_get_type
@@ -399,6 +416,26 @@ hb_icu_script_to_script
 </SECTION>
 
 <SECTION>
+<FILE>hb-map</FILE>
+HB_MAP_VALUE_INVALID
+hb_map_allocation_successful
+hb_map_clear
+hb_map_create
+hb_map_del
+hb_map_destroy
+hb_map_get
+hb_map_get_empty
+hb_map_get_population
+hb_map_get_user_data
+hb_map_has
+hb_map_is_empty
+hb_map_reference
+hb_map_set
+hb_map_set_user_data
+hb_map_t
+</SECTION>
+
+<SECTION>
 <FILE>hb-ot</FILE>
 <SUBSECTION Private>
 HB_OT_H_IN
@@ -425,6 +462,7 @@ HB_OT_TAG_GPOS
 HB_OT_TAG_GSUB
 HB_OT_TAG_JSTF
 hb_ot_layout_collect_lookups
+hb_ot_layout_collect_features
 hb_ot_layout_feature_get_lookups
 hb_ot_layout_feature_with_variations_get_lookups
 hb_ot_layout_get_attach_points
@@ -443,6 +481,7 @@ hb_ot_layout_language_get_feature_tags
 hb_ot_layout_language_get_required_feature
 hb_ot_layout_lookup_collect_glyphs
 hb_ot_layout_lookup_substitute_closure
+hb_ot_layout_lookups_substitute_closure
 hb_ot_layout_lookup_would_substitute
 hb_ot_layout_script_find_language
 hb_ot_layout_script_get_language_tags
@@ -527,9 +566,10 @@ hb_set_has
 hb_set_intersect
 hb_set_is_empty
 hb_set_is_equal
+hb_set_is_subset
 hb_set_next
-hb_set_previous
 hb_set_next_range
+hb_set_previous
 hb_set_previous_range
 hb_set_reference
 hb_set_set
@@ -542,6 +582,8 @@ hb_set_union
 
 <SECTION>
 <FILE>hb-shape</FILE>
+HB_FEATURE_GLOBAL_END
+HB_FEATURE_GLOBAL_START
 hb_feature_t
 hb_feature_from_string
 hb_feature_to_string
@@ -568,6 +610,7 @@ hb_shape_plan_t
 
 <SECTION>
 <FILE>hb-unicode</FILE>
+HB_UNICODE_MAX
 HB_UNICODE_MAX_DECOMPOSITION_LEN
 hb_unicode_combining_class
 hb_unicode_combining_class_func_t

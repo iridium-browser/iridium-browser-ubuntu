@@ -10,7 +10,7 @@ ANGLE uses git for version control. If you are not familiar with git, helpful do
 ### Required Tools
 On all platforms:
 
- * GN is the supported build system.  GYP is deprecated and support will be removed in the future but [instructions are available](gyp.md).
+ * GN is the build system.  GYP support has been removed.
  * Clang will be set up by the build system and used by default.  See below for platform-specific compiler choices.
  * [depot_tools](http://dev.chromium.org/developers/how-tos/install-depot-tools)
    * Required to generate projects and build files, contribute patches, run the unit tests or build the shader compiler on non-Windows systems.
@@ -21,12 +21,12 @@ On Windows:
    * Put `is_clang = false` in your gn args to compile with the Microsoft Visual C++ compiler instead of clang.
    * See the [Chromium Windows build instructions](https://chromium.googlesource.com/chromium/src/+/master/docs/windows_build_instructions.md) for more info.
    * Required for the packaged Windows 10 SDK.
- * [Windows 10 Standalone SDK version 10.0.15063 exactly](https://developer.microsoft.com/en-us/windows/downloads/windows-10-sdk)
+ * [Windows 10 Standalone SDK version 10.0.17134 exactly](https://developer.microsoft.com/en-us/windows/downloads/windows-10-sdk).
    * Comes with additional features that aid development, such as the Debug runtime for D3D11. Required for the D3D Compiler DLL.
  * [Cygwin's Bison, flex, and patch](https://cygwin.com/setup-x86_64.exe) (optional)
    * This is only required if you need to modify GLSL ES grammar files (`glslang.l` and `glslang.y` under `src/compiler/translator`, or `ExpressionParser.y` and `Tokenizer.l` in `src/compiler/preprocessor`).
      Use the latest versions of bison, flex and patch from the 64-bit cygwin distribution.
- * Non-googlers need to set DEPOT_TOOLS_WIN_TOOLCHAIN environment variable to 0.
+ * **IMPORTANT**: Non-googlers need to set `DEPOT_TOOLS_WIN_TOOLCHAIN` environment variable to 0.
 
 On Linux:
 

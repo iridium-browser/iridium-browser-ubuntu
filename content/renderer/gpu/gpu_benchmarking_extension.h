@@ -80,7 +80,20 @@ class GpuBenchmarking : public gin::Wrappable<GpuBenchmarking> {
   bool SendMessageToMicroBenchmark(int id, v8::Local<v8::Object> message);
   bool HasGpuChannel();
   bool HasGpuProcess();
+  void CrashGpuProcess();
   void GetGpuDriverBugWorkarounds(gin::Arguments* args);
+
+  // Starts/stops the sampling profiler. StartProfiling takes one optional
+  // argument, which is a file name for saving the data (relative to `pwd`
+  // or %USERDIR%); if omitted, it defaults to "profile.pb".
+  //
+  // DO NOT USE THIS IN CHROMIUM TESTS -- we don't want to fill up the bots'
+  // hard drives with profile data.
+  void StartProfiling(gin::Arguments* args);
+  void StopProfiling();
+
+  // Freezes a page, used to transition the page to the FROZEN lifecycle state.
+  void Freeze();
 
   RenderFrameImpl* render_frame_;
   mojom::InputInjectorPtr input_injector_;

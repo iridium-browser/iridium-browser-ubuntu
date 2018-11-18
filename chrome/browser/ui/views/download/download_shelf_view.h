@@ -27,10 +27,6 @@ namespace content {
 class PageNavigator;
 }
 
-namespace download {
-class DownloadItem;
-}
-
 namespace views {
 class ImageButton;
 class MdTextButton;
@@ -50,7 +46,6 @@ class DownloadShelfView : public views::AccessiblePaneView,
  public:
   DownloadShelfView(Browser* browser, BrowserView* parent);
   ~DownloadShelfView() override;
-
   // Sent from the DownloadItemView when the user opens an item.
   void OpenedDownload();
 
@@ -64,8 +59,6 @@ class DownloadShelfView : public views::AccessiblePaneView,
   // views::View:
   gfx::Size CalculatePreferredSize() const override;
   void Layout() override;
-  void ViewHierarchyChanged(
-      const ViewHierarchyChangedDetails& details) override;
 
   // gfx::AnimationDelegate.
   void AnimationProgressed(const gfx::Animation* animation) override;
@@ -96,8 +89,12 @@ class DownloadShelfView : public views::AccessiblePaneView,
   void ConfigureButtonForTheme(views::MdTextButton* button);
 
  protected:
+  // views::View:
+  void AddedToWidget() override;
+  void OnThemeChanged() override;
+
   // DownloadShelf:
-  void DoAddDownload(download::DownloadItem* download) override;
+  void DoAddDownload(DownloadUIModel::DownloadUIModelPtr download) override;
   void DoOpen() override;
   void DoClose(CloseReason reason) override;
   void DoHide() override;
@@ -107,6 +104,32 @@ class DownloadShelfView : public views::AccessiblePaneView,
   views::View* GetDefaultFocusableChild() override;
 
  private:
+  // Max number of download views we'll contain. Any time a view is added and
+  // we already have this many download views, one is removed.
+  static constexpr size_t kMaxDownloadViews = 15;
+
+  // Padding from left edge and first download view.
+  static constexpr int kStartPadding = 4;
+
+  // Padding from right edge and close button/show downloads link.
+  static constexpr int kEndPadding = 6;
+
+  // Padding between the show all link and close button.
+  static constexpr int kCloseAndLinkPadding = 6;
+
+  // New download item animation speed in milliseconds.
+  static constexpr int kNewItemAnimationDurationMs = 800;
+
+  // Shelf show/hide speed.
+  static constexpr int kShelfAnimationDurationMs = 120;
+
+  // Amount of time to delay if the mouse leaves the shelf by way of entering
+  // another window. This is much larger than the normal delay as opening a
+  // download is most likely going to trigger a new window to appear over the
+  // button. Delay the time so that the user has a chance to quickly close the
+  // other app and return to chrome with the download shelf still open.
+  static constexpr int kNotifyOnExitTimeMS = 5000;
+
   // Adds a View representing a download to this DownloadShelfView.
   // DownloadShelfView takes ownership of the View, and will delete it as
   // necessary.
@@ -120,9 +143,6 @@ class DownloadShelfView : public views::AccessiblePaneView,
 
   // Called on theme change.
   void UpdateColorsFromTheme();
-
-  // views::View:
-  void OnThemeChanged() override;
 
   // Called when the "close shelf" animation ended.
   void Closed();

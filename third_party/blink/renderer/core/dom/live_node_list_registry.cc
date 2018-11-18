@@ -23,7 +23,7 @@ void LiveNodeListRegistry::Add(const LiveNodeListBase* list,
 void LiveNodeListRegistry::Remove(const LiveNodeListBase* list,
                                   NodeListInvalidationType type) {
   Entry entry = {list, MaskForInvalidationType(type)};
-  auto it = std::find(data_.begin(), data_.end(), entry);
+  auto* it = std::find(data_.begin(), data_.end(), entry);
   DCHECK(it != data_.end());
   data_.erase(it);
   data_.ShrinkToReasonableCapacity();
@@ -43,13 +43,13 @@ void LiveNodeListRegistry::RecomputeMask() {
 }
 
 void LiveNodeListRegistry::ClearWeakMembers(Visitor*) {
-  auto it = std::remove_if(data_.begin(), data_.end(), [](Entry entry) {
+  auto* it = std::remove_if(data_.begin(), data_.end(), [](Entry entry) {
     return !ObjectAliveTrait<LiveNodeListBase>::IsHeapObjectAlive(entry.first);
   });
   if (it == data_.end())
     return;
 
-  data_.Shrink(it - data_.begin());
+  data_.Shrink(static_cast<wtf_size_t>(it - data_.begin()));
   data_.ShrinkToReasonableCapacity();
   RecomputeMask();
 }

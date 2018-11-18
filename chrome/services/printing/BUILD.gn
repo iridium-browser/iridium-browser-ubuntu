@@ -7,6 +7,8 @@ import("//services/service_manager/public/service_manifest.gni")
 
 source_set("lib") {
   sources = [
+    "pdf_nup_converter.cc",
+    "pdf_nup_converter.h",
     "pdf_to_pwg_raster_converter.cc",
     "pdf_to_pwg_raster_converter.h",
     "printing_service.cc",
@@ -15,6 +17,7 @@ source_set("lib") {
 
   deps = [
     "//base",
+    "//components/crash/core/common:crash_key",
     "//components/pwg_encoder",
     "//mojo/public/cpp/bindings",
   ]

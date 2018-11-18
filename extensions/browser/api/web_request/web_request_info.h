@@ -24,6 +24,10 @@
 #include "url/gurl.h"
 #include "url/origin.h"
 
+namespace content {
+class ResourceContext;
+}  // namespace content
+
 namespace net {
 class HttpResponseHeaders;
 class URLRequest;
@@ -55,6 +59,8 @@ struct WebRequestInfo {
   };
 
   WebRequestInfo();
+  WebRequestInfo(WebRequestInfo&& other);
+  WebRequestInfo& operator=(WebRequestInfo&& other);
 
   // Initializes a WebRequestInfo from a net::URLRequest. Should be used
   // sparingly, as we are moving away from direct URLRequest usage and toward
@@ -70,7 +76,9 @@ struct WebRequestInfo {
                  int render_frame_id,
                  std::unique_ptr<ExtensionNavigationUIData> navigation_ui_data,
                  int32_t routing_id,
-                 const network::ResourceRequest& request);
+                 content::ResourceContext* resource_context,
+                 const network::ResourceRequest& request,
+                 bool is_async);
 
   ~WebRequestInfo();
 
@@ -164,6 +172,9 @@ struct WebRequestInfo {
   // Helper used to log events relevant to WebRequest processing. See definition
   // of Logger above. This is always non-null.
   std::unique_ptr<Logger> logger;
+
+  // The ResourceContext associated with this request. May be null.
+  content::ResourceContext* resource_context = nullptr;
 
  private:
   void InitializeWebViewAndFrameData(

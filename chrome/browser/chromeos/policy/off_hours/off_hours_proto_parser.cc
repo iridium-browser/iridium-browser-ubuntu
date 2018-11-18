@@ -5,49 +5,29 @@
 #include "chrome/browser/chromeos/policy/off_hours/off_hours_proto_parser.h"
 
 #include "base/logging.h"
+#include "base/time/default_clock.h"
 #include "base/time/time.h"
+#include "chromeos/policy/weekly_time/time_utils.h"
 
 namespace em = enterprise_management;
 
 namespace policy {
 namespace off_hours {
-namespace {
-constexpr base::TimeDelta kDay = base::TimeDelta::FromDays(1);
-}  // namespace
 
-std::unique_ptr<WeeklyTime> ExtractWeeklyTimeFromProto(
-    const em::WeeklyTimeProto& container) {
-  if (!container.has_day_of_week() ||
-      container.day_of_week() == em::WeeklyTimeProto::DAY_OF_WEEK_UNSPECIFIED) {
-    LOG(ERROR) << "Day of week in interval is absent or unspecified.";
-    return nullptr;
-  }
-  if (!container.has_time()) {
-    LOG(ERROR) << "Time in interval is absent.";
-    return nullptr;
-  }
-  int time_of_day = container.time();
-  if (!(time_of_day >= 0 && time_of_day < kDay.InMilliseconds())) {
-    LOG(ERROR) << "Invalid time value: " << time_of_day
-               << ", the value should be in [0; " << kDay.InMilliseconds()
-               << ").";
-    return nullptr;
-  }
-  return std::make_unique<WeeklyTime>(container.day_of_week(), time_of_day);
-}
-
-std::vector<OffHoursInterval> ExtractOffHoursIntervalsFromProto(
-    const em::DeviceOffHoursProto& container) {
-  std::vector<OffHoursInterval> intervals;
+std::vector<WeeklyTimeInterval> ExtractWeeklyTimeIntervalsFromProto(
+    const em::DeviceOffHoursProto& container,
+    const std::string& timezone,
+    base::Clock* clock) {
+  int offset;
+  if (!weekly_time_utils::GetOffsetFromTimezoneToGmt(timezone, clock, &offset))
+    return {};
+  std::vector<WeeklyTimeInterval> intervals;
   for (const auto& entry : container.intervals()) {
-    if (!entry.has_start() || !entry.has_end()) {
-      LOG(WARNING) << "Skipping interval without start or/and end.";
-      continue;
-    }
-    auto start = ExtractWeeklyTimeFromProto(entry.start());
-    auto end = ExtractWeeklyTimeFromProto(entry.end());
-    if (start && end)
-      intervals.push_back(OffHoursInterval(*start, *end));
+    // The offset is to convert from |timezone| to GMT. Negate it to get the
+    // offset from GMT to |timezone|.
+    auto interval = WeeklyTimeInterval::ExtractFromProto(entry, -offset);
+    if (interval)
+      intervals.push_back(*interval);
   }
   return intervals;
 }
@@ -73,8 +53,9 @@ std::unique_ptr<base::DictionaryValue> ConvertOffHoursProtoToValue(
     return nullptr;
   auto off_hours = std::make_unique<base::DictionaryValue>();
   off_hours->SetString("timezone", *timezone);
-  std::vector<OffHoursInterval> intervals =
-      ExtractOffHoursIntervalsFromProto(container);
+  std::vector<WeeklyTimeInterval> intervals =
+      ExtractWeeklyTimeIntervalsFromProto(container, *timezone,
+                                          base::DefaultClock::GetInstance());
   auto intervals_value = std::make_unique<base::ListValue>();
   for (const auto& interval : intervals)
     intervals_value->Append(interval.ToValue());

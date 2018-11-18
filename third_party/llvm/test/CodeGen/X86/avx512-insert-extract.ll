@@ -24,7 +24,7 @@ define <8 x double> @test2(<8 x double> %x, double* %br, double %y) nounwind {
 ; CHECK-NEXT:    vmovhpd {{.*#+}} xmm2 = xmm0[0],mem[0]
 ; CHECK-NEXT:    vinsertf32x4 $0, %xmm2, %zmm0, %zmm2
 ; CHECK-NEXT:    vextractf32x4 $3, %zmm0, %xmm0
-; CHECK-NEXT:    vmovsd {{.*#+}} xmm0 = xmm1[0],xmm0[1]
+; CHECK-NEXT:    vblendpd {{.*#+}} xmm0 = xmm1[0],xmm0[1]
 ; CHECK-NEXT:    vinsertf32x4 $3, %xmm0, %zmm2, %zmm0
 ; CHECK-NEXT:    retq
   %rrr = load double, double* %br
@@ -195,21 +195,21 @@ define <16 x i32> @test11(<16 x i32>%a, <16 x i32>%b) {
 define i64 @test12(<16 x i64>%a, <16 x i64>%b, i64 %a1, i64 %b1) {
 ; KNL-LABEL: test12:
 ; KNL:       ## %bb.0:
-; KNL-NEXT:    vpcmpgtq %zmm0, %zmm2, %k0
-; KNL-NEXT:    kmovw %k0, %eax
-; KNL-NEXT:    testb $1, %al
-; KNL-NEXT:    cmoveq %rsi, %rdi
 ; KNL-NEXT:    movq %rdi, %rax
+; KNL-NEXT:    vpcmpgtq %zmm0, %zmm2, %k0
+; KNL-NEXT:    kmovw %k0, %ecx
+; KNL-NEXT:    testb $1, %cl
+; KNL-NEXT:    cmoveq %rsi, %rax
 ; KNL-NEXT:    vzeroupper
 ; KNL-NEXT:    retq
 ;
 ; SKX-LABEL: test12:
 ; SKX:       ## %bb.0:
-; SKX-NEXT:    vpcmpgtq %zmm0, %zmm2, %k0
-; SKX-NEXT:    kmovd %k0, %eax
-; SKX-NEXT:    testb $1, %al
-; SKX-NEXT:    cmoveq %rsi, %rdi
 ; SKX-NEXT:    movq %rdi, %rax
+; SKX-NEXT:    vpcmpgtq %zmm0, %zmm2, %k0
+; SKX-NEXT:    kmovd %k0, %ecx
+; SKX-NEXT:    testb $1, %cl
+; SKX-NEXT:    cmoveq %rsi, %rax
 ; SKX-NEXT:    vzeroupper
 ; SKX-NEXT:    retq
   %cmpvector_func.i = icmp slt <16 x i64> %a, %b
@@ -257,23 +257,23 @@ define i16 @test13(i32 %a, i32 %b) {
 define i64 @test14(<8 x i64>%a, <8 x i64>%b, i64 %a1, i64 %b1) {
 ; KNL-LABEL: test14:
 ; KNL:       ## %bb.0:
+; KNL-NEXT:    movq %rdi, %rax
 ; KNL-NEXT:    vpcmpgtq %zmm0, %zmm1, %k0
 ; KNL-NEXT:    kshiftrw $4, %k0, %k0
-; KNL-NEXT:    kmovw %k0, %eax
-; KNL-NEXT:    testb $1, %al
-; KNL-NEXT:    cmoveq %rsi, %rdi
-; KNL-NEXT:    movq %rdi, %rax
+; KNL-NEXT:    kmovw %k0, %ecx
+; KNL-NEXT:    testb $1, %cl
+; KNL-NEXT:    cmoveq %rsi, %rax
 ; KNL-NEXT:    vzeroupper
 ; KNL-NEXT:    retq
 ;
 ; SKX-LABEL: test14:
 ; SKX:       ## %bb.0:
+; SKX-NEXT:    movq %rdi, %rax
 ; SKX-NEXT:    vpcmpgtq %zmm0, %zmm1, %k0
 ; SKX-NEXT:    kshiftrw $4, %k0, %k0
-; SKX-NEXT:    kmovd %k0, %eax
-; SKX-NEXT:    testb $1, %al
-; SKX-NEXT:    cmoveq %rsi, %rdi
-; SKX-NEXT:    movq %rdi, %rax
+; SKX-NEXT:    kmovd %k0, %ecx
+; SKX-NEXT:    testb $1, %cl
+; SKX-NEXT:    cmoveq %rsi, %rax
 ; SKX-NEXT:    vzeroupper
 ; SKX-NEXT:    retq
   %cmpvector_func.i = icmp slt <8 x i64> %a, %b
@@ -1949,6 +1949,8 @@ define i96 @test_insertelement_variable_v96i1(<96 x i8> %a, i8 %b, i32 %index) {
 ; KNL-NEXT:    vpinsrb $14, 208(%rbp), %xmm3, %xmm3
 ; KNL-NEXT:    vpinsrb $15, 216(%rbp), %xmm3, %xmm3
 ; KNL-NEXT:    vinserti128 $1, %xmm3, %ymm2, %ymm2
+; KNL-NEXT:    movl 744(%rbp), %eax
+; KNL-NEXT:    andl $127, %eax
 ; KNL-NEXT:    vpxor %xmm3, %xmm3, %xmm3
 ; KNL-NEXT:    vpcmpeqb %ymm3, %ymm2, %ymm2
 ; KNL-NEXT:    vpternlogq $15, %zmm2, %zmm2, %zmm2
@@ -1956,8 +1958,6 @@ define i96 @test_insertelement_variable_v96i1(<96 x i8> %a, i8 %b, i32 %index) {
 ; KNL-NEXT:    vpternlogq $15, %zmm1, %zmm1, %zmm1
 ; KNL-NEXT:    vpcmpeqb %ymm3, %ymm0, %ymm0
 ; KNL-NEXT:    vpternlogq $15, %zmm0, %zmm0, %zmm0
-; KNL-NEXT:    movl 744(%rbp), %eax
-; KNL-NEXT:    andl $127, %eax
 ; KNL-NEXT:    cmpb $0, 736(%rbp)
 ; KNL-NEXT:    vmovdqa %ymm3, {{[0-9]+}}(%rsp)
 ; KNL-NEXT:    vmovdqa %ymm0, {{[0-9]+}}(%rsp)
@@ -2130,10 +2130,10 @@ define i96 @test_insertelement_variable_v96i1(<96 x i8> %a, i8 %b, i32 %index) {
 ; SKX-NEXT:    vpinsrb $14, 720(%rbp), %xmm2, %xmm2
 ; SKX-NEXT:    vpinsrb $15, 728(%rbp), %xmm2, %xmm2
 ; SKX-NEXT:    vinserti128 $1, %xmm2, %ymm1, %ymm1
-; SKX-NEXT:    vptestmb %zmm0, %zmm0, %k0
-; SKX-NEXT:    vptestmb %zmm1, %zmm1, %k1
 ; SKX-NEXT:    movl 744(%rbp), %eax
 ; SKX-NEXT:    andl $127, %eax
+; SKX-NEXT:    vptestmb %zmm0, %zmm0, %k0
+; SKX-NEXT:    vptestmb %zmm1, %zmm1, %k1
 ; SKX-NEXT:    cmpb $0, 736(%rbp)
 ; SKX-NEXT:    vpmovm2b %k1, %zmm0
 ; SKX-NEXT:    vmovdqa64 %zmm0, {{[0-9]+}}(%rsp)

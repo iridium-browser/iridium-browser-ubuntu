@@ -5,6 +5,7 @@
 #include "third_party/blink/renderer/modules/media_controls/elements/media_control_overflow_menu_list_element.h"
 
 #include "third_party/blink/public/platform/task_type.h"
+#include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/modules/media_controls/elements/media_control_overflow_menu_button_element.h"
 #include "third_party/blink/renderer/modules/media_controls/media_controls_impl.h"
@@ -21,11 +22,7 @@ MediaControlOverflowMenuListElement::MediaControlOverflowMenuListElement(
 
 void MediaControlOverflowMenuListElement::MaybeRecordTimeTaken(
     TimeTakenHistogram histogram_name) {
-  // TODO(mlamouri): we may end up hitting a race where both actions and dismiss
-  // are fired very close to eachother. This change is meant to prevent a crash
-  // but doesn't avoid the sometimes incorrect metrics recording.
-  if (!time_shown_)
-    return;
+  DCHECK(time_shown_);
 
   if (current_task_handle_.IsActive())
     current_task_handle_.Cancel();
@@ -40,9 +37,9 @@ void MediaControlOverflowMenuListElement::MaybeRecordTimeTaken(
   time_shown_.reset();
 }
 
-void MediaControlOverflowMenuListElement::DefaultEventHandler(Event* event) {
-  if (event->type() == EventTypeNames::click)
-    event->SetDefaultHandled();
+void MediaControlOverflowMenuListElement::DefaultEventHandler(Event& event) {
+  if (event.type() == EventTypeNames::click)
+    event.SetDefaultHandled();
 
   MediaControlPopupMenuElement::DefaultEventHandler(event);
 }
@@ -69,6 +66,12 @@ void MediaControlOverflowMenuListElement::SetIsWanted(bool wanted) {
 
 Element* MediaControlOverflowMenuListElement::PopupAnchor() const {
   return &GetMediaControls().OverflowButton();
+}
+
+void MediaControlOverflowMenuListElement::OnItemSelected() {
+  MaybeRecordTimeTaken(kTimeToAction);
+
+  MediaControlPopupMenuElement::OnItemSelected();
 }
 
 }  // namespace blink

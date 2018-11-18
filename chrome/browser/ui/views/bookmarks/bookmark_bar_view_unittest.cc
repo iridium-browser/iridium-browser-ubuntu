@@ -6,6 +6,7 @@
 
 #include <memory>
 
+#include "base/bind.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -119,7 +120,8 @@ class BookmarkBarViewTest : public BrowserWithTestWindowTest {
     // TemplateURLService is normally NULL during testing. Instant extended
     // needs this service so set a custom factory function.
     TemplateURLServiceFactory::GetInstance()->SetTestingFactory(
-        profile, &BookmarkBarViewTest::CreateTemplateURLService);
+        profile,
+        base::BindRepeating(&BookmarkBarViewTest::CreateTemplateURLService));
     return profile;
   }
 
@@ -209,6 +211,15 @@ TEST_F(BookmarkBarViewTest, ButtonsDynamicallyAddedAfterModelHasNodes) {
       0, 0, 5000, bookmark_bar_view_->bounds().height());
   bookmark_bar_view_->Layout();
   EXPECT_EQ(6, test_helper_->GetBookmarkButtonCount());
+
+  // Ensure buttons were added in the correct place.
+  int managed_button_index =
+      bookmark_bar_view_->GetIndexOf(test_helper_->managed_bookmarks_button());
+  for (int i = 0; i < test_helper_->GetBookmarkButtonCount(); ++i) {
+    views::View* button = test_helper_->GetBookmarkButton(i);
+    EXPECT_EQ(bookmark_bar_view_->GetIndexOf(button),
+              managed_button_index + 1 + i);
+  }
 }
 
 // Verifies buttons are added as the model and size change.
@@ -225,6 +236,14 @@ TEST_F(BookmarkBarViewTest, ButtonsDynamicallyAdded) {
       0, 0, 5000, bookmark_bar_view_->bounds().height());
   bookmark_bar_view_->Layout();
   EXPECT_EQ(6, test_helper_->GetBookmarkButtonCount());
+  // Ensure buttons were added in the correct place.
+  int managed_button_index =
+      bookmark_bar_view_->GetIndexOf(test_helper_->managed_bookmarks_button());
+  for (int i = 0; i < test_helper_->GetBookmarkButtonCount(); ++i) {
+    views::View* button = test_helper_->GetBookmarkButton(i);
+    EXPECT_EQ(bookmark_bar_view_->GetIndexOf(button),
+              managed_button_index + 1 + i);
+  }
 }
 
 TEST_F(BookmarkBarViewTest, AddNodesWhenBarAlreadySized) {

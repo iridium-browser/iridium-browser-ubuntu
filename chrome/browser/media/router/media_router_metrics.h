@@ -9,6 +9,7 @@
 
 #include "base/gtest_prod_util.h"
 #include "base/time/time.h"
+#include "chrome/browser/media/router/discovery/dial/dial_app_discovery_service.h"
 #include "chrome/browser/media/router/discovery/dial/safe_dial_device_description_parser.h"
 #include "chrome/browser/ui/media_router/media_cast_mode.h"
 #include "media/base/container_names.h"
@@ -81,14 +82,21 @@ class MediaRouterMetrics {
   ~MediaRouterMetrics();
 
   // UMA histogram names.
+  static const char kHistogramCloseLatency[];
   static const char kHistogramDialParsingError[];
+  static const char kHistogramDialFetchAppInfo[];
   static const char kHistogramIconClickLocation[];
   static const char kHistogramMediaRouterCastingSource[];
   static const char kHistogramMediaRouterFileFormat[];
   static const char kHistogramMediaRouterFileSize[];
   static const char kHistogramMediaSinkType[];
   static const char kHistogramPresentationUrlType[];
+  static const char kHistogramRecordSearchSinkOutcome[];
   static const char kHistogramRouteCreationOutcome[];
+  static const char kHistogramStartLocalLatency[];
+  static const char kHistogramStartLocalPosition[];
+  static const char kHistogramStartLocalSessionSuccessful[];
+  static const char kHistogramUiDeviceCount[];
   static const char kHistogramUiDialogPaint[];
   static const char kHistogramUiDialogLoadedWithData[];
   static const char kHistogramUiFirstAction[];
@@ -99,13 +107,16 @@ class MediaRouterMetrics {
 
   // Records the duration it takes for the Media Router dialog to open and
   // finish painting after a user clicks to open the dialog.
-  static void RecordMediaRouterDialogPaint(
-      const base::TimeDelta delta);
+  static void RecordMediaRouterDialogPaint(const base::TimeDelta& delta);
 
   // Records the duration it takes for the Media Router dialog to load its
   // initial data after a user clicks to open the dialog.
-  static void RecordMediaRouterDialogLoaded(
-      const base::TimeDelta delta);
+  static void RecordMediaRouterDialogLoaded(const base::TimeDelta& delta);
+
+  // Records the duration it takes from the user opening the Media Router dialog
+  // to the user closing the dialog. This is only called if closing the dialog
+  // is the first action the user takes.
+  static void RecordCloseDialogLatency(const base::TimeDelta& delta);
 
   // Records the first action the user took after the Media Router dialog
   // opened.
@@ -130,11 +141,34 @@ class MediaRouterMetrics {
   static void RecordDialParsingError(
       SafeDialDeviceDescriptionParser::ParsingError parsing_error);
 
+  // Records the result of a DIAL app info request.
+  static void RecordDialFetchAppInfo(DialAppInfoResultCode result_code);
+
   // Records the type of Presentation URL used by a web page.
   static void RecordPresentationUrlType(const GURL& url);
 
   // Records the type of the sink that media is being Cast to.
   static void RecordMediaSinkType(SinkIconType sink_icon_type);
+
+  // Records the number of devices shown in the Cast dialog. The device count
+  // may be 0.
+  static void RecordDeviceCount(int device_count);
+
+  // Records the index of the device the user has started casting to on the
+  // devices list. The index starts at 0.
+  static void RecordStartRouteDeviceIndex(int index);
+
+  // Records the time it takes from the Media Router dialog showing at least one
+  // device to the user starting to cast. This is called only if casting is the
+  // first action taken by the user, aside from selecting the sink to cast to.
+  static void RecordStartLocalSessionLatency(const base::TimeDelta& delta);
+
+  // Records whether or not an attempt to start casting was successful.
+  static void RecordStartLocalSessionSuccessful(bool success);
+
+  // Records whether or not a sink was found for the ID that the user manually
+  // entered and attempted to cast to.
+  static void RecordSearchSinkOutcome(bool success);
 };
 
 }  // namespace media_router

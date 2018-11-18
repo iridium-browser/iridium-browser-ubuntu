@@ -22,16 +22,14 @@ ImageNULL::~ImageNULL()
 {
 }
 
-egl::Error ImageNULL::initialize()
+egl::Error ImageNULL::initialize(const egl::Display *display)
 {
-    UNIMPLEMENTED();
-    return egl::EglBadAccess();
+    return egl::NoError();
 }
 
 gl::Error ImageNULL::orphan(const gl::Context *context, egl::ImageSibling *sibling)
 {
-    UNIMPLEMENTED();
-    return gl::InternalError();
+    return gl::NoError();
 }
 
 }  // namespace rx

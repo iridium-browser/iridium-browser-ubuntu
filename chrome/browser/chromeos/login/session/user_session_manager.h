@@ -5,12 +5,16 @@
 #ifndef CHROME_BROWSER_CHROMEOS_LOGIN_SESSION_USER_SESSION_MANAGER_H_
 #define CHROME_BROWSER_CHROMEOS_LOGIN_SESSION_USER_SESSION_MANAGER_H_
 
+#include <map>
 #include <memory>
+#include <set>
 #include <string>
+#include <vector>
 
 #include "base/callback.h"
 #include "base/containers/flat_map.h"
 #include "base/macros.h"
+#include "base/memory/ref_counted.h"
 #include "base/memory/singleton.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
@@ -20,13 +24,13 @@
 #include "chrome/browser/chromeos/eol_notification.h"
 #include "chrome/browser/chromeos/hats/hats_notification_controller.h"
 #include "chrome/browser/chromeos/login/oobe_screen.h"
-#include "chrome/browser/chromeos/login/quick_unlock/quick_unlock_notification_controller.h"
 #include "chrome/browser/chromeos/login/signin/oauth2_login_manager.h"
 #include "chrome/browser/chromeos/login/signin/token_handle_util.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chromeos/dbus/session_manager_client.h"
 #include "chromeos/login/auth/authenticator.h"
 #include "chromeos/login/auth/user_context.h"
+#include "components/arc/net/always_on_vpn_manager.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
 #include "net/base/network_change_notifier.h"
@@ -43,8 +47,8 @@ namespace base {
 class CommandLine;
 }
 
-namespace net {
-class URLRequestContextGetter;
+namespace network {
+class SharedURLLoaderFactory;
 }
 
 namespace user_manager {
@@ -277,8 +281,10 @@ class UserSessionManager
   // Update Easy unlock cryptohome keys for given user context.
   void UpdateEasyUnlockKeys(const UserContext& user_context);
 
-  // Returns the auth request context associated with auth data.
-  net::URLRequestContextGetter* GetAuthRequestContext() const;
+  // Returns the auth request context/URLLoaderFactory associated with auth
+  // data.
+  scoped_refptr<network::SharedURLLoaderFactory> GetAuthURLLoaderFactory()
+      const;
 
   // Removes a profile from the per-user input methods states map.
   void RemoveProfileForTesting(Profile* profile);
@@ -348,6 +354,16 @@ class UserSessionManager
   // created yet and user services were not yet initialized. Can store
   // information in Local State like GAIA ID.
   void StoreUserContextDataBeforeProfileIsCreated();
+
+  // Initializes |chromeos::DemoSession| if starting user session for demo mode.
+  // Runs |callback| when demo session initialization finishes, i.e. when the
+  // offline demo session resources are loaded. In addition, disables browser
+  // launch if demo session is started.
+  void InitDemoSessionIfNeeded(base::OnceClosure callback);
+
+  // Updates ARC file system compatibility pref, and then calls
+  // PrepareProfile().
+  void UpdateArcFileSystemCompatibilityAndPrepareProfile();
 
   void StartCrosSession();
   void PrepareProfile();
@@ -519,7 +535,7 @@ class UserSessionManager
 
   PendingUserSessions pending_user_sessions_;
 
-  base::ObserverList<chromeos::UserSessionStateObserver>
+  base::ObserverList<chromeos::UserSessionStateObserver>::Unchecked
       session_state_observer_list_;
 
   // OAuth2 session related members.
@@ -545,18 +561,6 @@ class UserSessionManager
   // Per-user-session EndofLife Notification
   std::map<Profile*, std::unique_ptr<EolNotification>, ProfileCompare>
       eol_notification_handler_;
-
-  // Per-user-session PIN Unlock Feature Notification
-  std::map<Profile*,
-           scoped_refptr<quick_unlock::QuickUnlockNotificationController>,
-           ProfileCompare>
-      pin_unlock_notification_handler_;
-
-  // Per-user-session Fingerprint Unlock Feature Notification
-  std::map<Profile*,
-           scoped_refptr<quick_unlock::QuickUnlockNotificationController>,
-           ProfileCompare>
-      fingerprint_unlock_notification_handler_;
 
   // Maps command-line switch types to the currently set command-line switches
   // for that type. Note: This is not per Profile/AccountId, because session
@@ -592,6 +596,8 @@ class UserSessionManager
 
   // Mapped to |chrome::AttemptRestart|, except in tests.
   base::RepeatingClosure attempt_restart_closure_;
+
+  std::unique_ptr<arc::AlwaysOnVpnManager> always_on_vpn_manager_;
 
   base::WeakPtrFactory<UserSessionManager> weak_factory_;
 

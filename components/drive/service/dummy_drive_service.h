@@ -7,6 +7,7 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 
 #include "components/drive/service/drive_service_interface.h"
@@ -36,6 +37,7 @@ class DummyDriveService : public DriveServiceInterface {
   google_apis::CancelCallback GetAllTeamDriveList(
       const google_apis::TeamDriveListCallback& callback) override;
   google_apis::CancelCallback GetAllFileList(
+      const std::string& team_drive_id,
       const google_apis::FileListCallback& callback) override;
   google_apis::CancelCallback GetFileListInDirectory(
       const std::string& directory_resource_id,
@@ -50,6 +52,10 @@ class DummyDriveService : public DriveServiceInterface {
   google_apis::CancelCallback GetChangeList(
       int64_t start_changestamp,
       const google_apis::ChangeListCallback& callback) override;
+  google_apis::CancelCallback GetChangeListByToken(
+      const std::string& team_drive_id,
+      const std::string& start_page_token,
+      const google_apis::ChangeListCallback& callback) override;
   google_apis::CancelCallback GetRemainingChangeList(
       const GURL& next_link,
       const google_apis::ChangeListCallback& callback) override;
@@ -62,14 +68,11 @@ class DummyDriveService : public DriveServiceInterface {
   google_apis::CancelCallback GetFileResource(
       const std::string& resource_id,
       const google_apis::FileResourceCallback& callback) override;
-  google_apis::CancelCallback GetShareUrl(
-      const std::string& resource_id,
-      const GURL& embed_origin,
-      const google_apis::GetShareUrlCallback& callback) override;
   google_apis::CancelCallback GetAboutResource(
       const google_apis::AboutResourceCallback& callback) override;
-  google_apis::CancelCallback GetAppList(
-      const google_apis::AppListCallback& callback) override;
+  google_apis::CancelCallback GetStartPageToken(
+      const std::string& team_drive_id,
+      const google_apis::StartPageTokenCallback& callback) override;
   google_apis::CancelCallback DeleteResource(
       const std::string& resource_id,
       const std::string& etag,
@@ -153,13 +156,6 @@ class DummyDriveService : public DriveServiceInterface {
       const UploadExistingFileOptions& options,
       const google_apis::FileResourceCallback& callback,
       const google_apis::ProgressCallback& progress_callback) override;
-  google_apis::CancelCallback AuthorizeApp(
-      const std::string& resource_id,
-      const std::string& app_id,
-      const google_apis::AuthorizeAppCallback& callback) override;
-  google_apis::CancelCallback UninstallApp(
-      const std::string& app_id,
-      const google_apis::EntryActionCallback& callback) override;
   google_apis::CancelCallback AddPermission(
       const std::string& resource_id,
       const std::string& email,

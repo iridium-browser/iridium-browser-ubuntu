@@ -14,6 +14,7 @@ import android.app.NotificationManager;
 import android.content.Context;
 import android.os.Build;
 import android.support.test.InstrumentationRegistry;
+import android.support.test.filters.MediumTest;
 import android.support.test.filters.SmallTest;
 
 import org.hamcrest.BaseMatcher;
@@ -25,6 +26,7 @@ import org.junit.Test;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.base.test.BaseJUnit4ClassRunner;
 import org.chromium.base.test.util.MinAndroidSdkLevel;
 import org.chromium.chrome.browser.notifications.NotificationChannelStatus;
@@ -32,8 +34,8 @@ import org.chromium.chrome.browser.notifications.NotificationManagerProxy;
 import org.chromium.chrome.browser.notifications.NotificationManagerProxyImpl;
 import org.chromium.chrome.browser.notifications.NotificationSettingsBridge;
 import org.chromium.chrome.browser.preferences.website.ContentSetting;
-import org.chromium.chrome.browser.preferences.website.NotificationInfo;
-import org.chromium.content.browser.test.NativeLibraryTestRule;
+import org.chromium.chrome.browser.preferences.website.PermissionInfo;
+import org.chromium.chrome.browser.test.ChromeBrowserTestRule;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -53,11 +55,11 @@ import java.util.List;
 public class SiteChannelsManagerTest {
     private SiteChannelsManager mSiteChannelsManager;
     @Rule
-    public NativeLibraryTestRule mNativeLibraryTestRule = new NativeLibraryTestRule();
+    public ChromeBrowserTestRule mChromeBrowserTestRule = new ChromeBrowserTestRule();
 
     @Before
     public void setUp() throws Exception {
-        mNativeLibraryTestRule.loadNativeLibraryAndInitBrowserProcess();
+        mChromeBrowserTestRule.loadNativeLibraryAndInitBrowserProcess();
 
         Context mContext = InstrumentationRegistry.getTargetContext();
         NotificationManagerProxy notificationManagerProxy = new NotificationManagerProxyImpl(
@@ -72,7 +74,7 @@ public class SiteChannelsManagerTest {
             if (channel.getId().startsWith(ChannelDefinitions.CHANNEL_ID_PREFIX_SITES)
                     || (channel.getGroup() != null
                                && channel.getGroup().equals(
-                                          ChannelDefinitions.CHANNEL_GROUP_ID_SITES))) {
+                                          ChannelDefinitions.ChannelGroupId.SITES))) {
                 notificationManagerProxy.deleteNotificationChannel(channel.getId());
             }
         }
@@ -191,7 +193,8 @@ public class SiteChannelsManagerTest {
     @MinAndroidSdkLevel(Build.VERSION_CODES.O)
     @SmallTest
     public void testBlockingPermissionInIncognitoCreatesNoChannels() throws Exception {
-        NotificationInfo info = new NotificationInfo("https://example-incognito.com", null, true);
+        PermissionInfo info = new PermissionInfo(
+                PermissionInfo.Type.NOTIFICATION, "https://example-incognito.com", null, true);
         ThreadUtils.runOnUiThreadBlocking(() -> info.setContentSetting(ContentSetting.BLOCK));
         assertThat(Arrays.asList(mSiteChannelsManager.getSiteChannels()), hasSize(0));
     }
@@ -227,5 +230,18 @@ public class SiteChannelsManagerTest {
                 return "UNAVAILABLE";
         }
         return null;
+    }
+
+    @Test
+    @MinAndroidSdkLevel(Build.VERSION_CODES.O)
+    @MediumTest
+    public void testGetChannelIdForOrigin_unknownOrigin() throws Exception {
+        String channelId = mSiteChannelsManager.getChannelIdForOrigin("https://unknown.com");
+
+        assertThat(channelId, is(ChannelDefinitions.ChannelId.SITES));
+
+        assertThat(RecordHistogram.getHistogramTotalCountForTesting(
+                           "Notifications.Android.SitesChannel"),
+                is(1));
     }
 }

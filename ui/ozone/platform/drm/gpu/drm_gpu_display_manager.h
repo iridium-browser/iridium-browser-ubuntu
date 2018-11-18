@@ -51,11 +51,12 @@ class DrmGpuDisplayManager {
   bool DisableDisplay(int64_t id);
   bool GetHDCPState(int64_t display_id, display::HDCPState* state);
   bool SetHDCPState(int64_t display_id, display::HDCPState state);
-  void SetColorCorrection(
-      int64_t id,
+  void SetColorMatrix(int64_t display_id,
+                      const std::vector<float>& color_matrix);
+  void SetGammaCorrection(
+      int64_t display_id,
       const std::vector<display::GammaRampRGBEntry>& degamma_lut,
-      const std::vector<display::GammaRampRGBEntry>& gamma_lut,
-      const std::vector<float>& correction_matrix);
+      const std::vector<display::GammaRampRGBEntry>& gamma_lut);
 
  private:
   DrmDisplay* FindDisplay(int64_t display_id);
@@ -66,8 +67,8 @@ class DrmGpuDisplayManager {
       const std::vector<std::unique_ptr<DrmDisplay>>& new_displays,
       const std::vector<std::unique_ptr<DrmDisplay>>& old_displays) const;
 
-  ScreenManager* screen_manager_;  // Not owned.
-  DrmDeviceManager* drm_device_manager_;  // Not owned.
+  ScreenManager* const screen_manager_;         // Not owned.
+  DrmDeviceManager* const drm_device_manager_;  // Not owned.
 
   std::vector<std::unique_ptr<DrmDisplay>> displays_;
 

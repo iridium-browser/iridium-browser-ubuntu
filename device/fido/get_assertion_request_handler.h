@@ -22,27 +22,32 @@ class Connector;
 
 namespace device {
 
-class FidoDevice;
-class FidoTask;
+class FidoAuthenticator;
 class AuthenticatorGetAssertionResponse;
 
-using SignResponseCallback = base::OnceCallback<void(
-    FidoReturnCode status_code,
-    base::Optional<AuthenticatorGetAssertionResponse> response_data)>;
+using SignResponseCallback =
+    base::OnceCallback<void(FidoReturnCode,
+                            base::Optional<AuthenticatorGetAssertionResponse>,
+                            FidoTransportProtocol)>;
 
 class COMPONENT_EXPORT(DEVICE_FIDO) GetAssertionRequestHandler
     : public FidoRequestHandler<AuthenticatorGetAssertionResponse> {
  public:
   GetAssertionRequestHandler(
       service_manager::Connector* connector,
-      const base::flat_set<FidoTransportProtocol>& protocols,
+      const base::flat_set<FidoTransportProtocol>& supported_transports,
       CtapGetAssertionRequest request_parameter,
       SignResponseCallback completion_callback);
   ~GetAssertionRequestHandler() override;
 
  private:
   // FidoRequestHandlerBase:
-  std::unique_ptr<FidoTask> CreateTaskForNewDevice(FidoDevice* device) override;
+  void DispatchRequest(FidoAuthenticator* authenticator) override;
+
+  void HandleResponse(
+      FidoAuthenticator* authenticator,
+      CtapDeviceResponseCode response_code,
+      base::Optional<AuthenticatorGetAssertionResponse> response);
 
   CtapGetAssertionRequest request_;
   base::WeakPtrFactory<GetAssertionRequestHandler> weak_factory_;

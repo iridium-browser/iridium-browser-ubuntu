@@ -3,7 +3,6 @@
 # found in the LICENSE file.
 
 import("//components/nacl/features.gni")
-import("//media/media_options.gni")
 import("//remoting/build/config/remoting_build.gni")
 
 group("remoting_all") {
@@ -158,7 +157,6 @@ test("remoting_unittests") {
     "//remoting/base:unit_tests",
     "//remoting/client:unit_tests",
     "//remoting/client/audio:unit_tests",
-    "//remoting/client/display:unit_tests",
     "//remoting/client/input:unit_tests",
     "//remoting/client/ui:unit_tests",
     "//remoting/protocol:unit_tests",
@@ -176,9 +174,7 @@ test("remoting_unittests") {
     ]
   }
 
-  if (enable_webrtc) {
-    deps += [ "//third_party/webrtc_overrides:init_webrtc" ]
-  }
+  deps += [ "//third_party/webrtc_overrides:init_webrtc" ]
 
   if (is_android) {
     deps += [ "//net/android:net_java" ]
@@ -193,6 +189,12 @@ test("remoting_unittests") {
       "comctl32.lib",
       "rpcrt4.lib",
       "wtsapi32.lib",
+    ]
+  }
+
+  if (!is_chromeos) {
+    deps += [
+      "//remoting/client/display:unit_tests",
     ]
   }
 }
@@ -221,9 +223,7 @@ if (enable_remoting_host) {
       "//third_party/webrtc_overrides",
     ]
 
-    if (enable_webrtc) {
-      deps += [ "//third_party/webrtc_overrides:init_webrtc" ]
-    }
+    deps += [ "//third_party/webrtc_overrides:init_webrtc" ]
 
     if (is_win) {
       defines += [ "_ALT_NO_EXCEPTIONS" ]

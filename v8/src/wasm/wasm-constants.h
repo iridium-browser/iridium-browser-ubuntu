@@ -5,6 +5,9 @@
 #ifndef V8_WASM_WASM_CONSTANTS_H_
 #define V8_WASM_WASM_CONSTANTS_H_
 
+#include <cstddef>
+#include <cstdint>
+
 namespace v8 {
 namespace internal {
 namespace wasm {
@@ -21,18 +24,20 @@ enum ValueTypeCode : uint8_t {
   kLocalF32 = 0x7d,
   kLocalF64 = 0x7c,
   kLocalS128 = 0x7b,
-  kLocalAnyRef = 0x6f
+  kLocalAnyFunc = 0x70,
+  kLocalAnyRef = 0x6f,
+  kLocalExceptRef = 0x68,
 };
 // Binary encoding of other types.
 constexpr uint8_t kWasmFunctionTypeCode = 0x60;
-constexpr uint8_t kWasmAnyFunctionTypeCode = 0x70;
 
 // Binary encoding of import/export kinds.
 enum ImportExportKindCode : uint8_t {
   kExternalFunction = 0,
   kExternalTable = 1,
   kExternalMemory = 2,
-  kExternalGlobal = 3
+  kExternalGlobal = 3,
+  kExternalException = 4
 };
 
 // Binary encoding of maximum and shared flags for memories.
@@ -61,17 +66,20 @@ enum SectionCode : int8_t {
   kDataSectionCode = 11,       // Data segments
   kNameSectionCode = 12,       // Name section (encoded as a string)
   kExceptionSectionCode = 13,  // Exception section
+  kSourceMappingURLSectionCode = 14,  // Source Map URL section
 
   // Helper values
   kFirstSectionInModule = kTypeSectionCode,
-  kLastKnownModuleSection = kExceptionSectionCode,
+  kLastKnownModuleSection = kSourceMappingURLSectionCode,
+  kFirstUnorderedSection = kNameSectionCode,
 };
 
 // Binary encoding of name section kinds.
 enum NameSectionKindCode : uint8_t { kModule = 0, kFunction = 1, kLocal = 2 };
 
-constexpr uint32_t kWasmPageSize = 0x10000;
-constexpr int kInvalidExceptionTag = -1;
+constexpr size_t kWasmPageSize = 0x10000;
+constexpr uint32_t kWasmPageSizeLog2 = 16;
+static_assert(kWasmPageSize == size_t{1} << kWasmPageSizeLog2, "consistency");
 
 // TODO(wasm): Wrap WasmCodePosition in a struct.
 using WasmCodePosition = int;

@@ -35,6 +35,7 @@ class AX_EXPORT AXEventGenerator : public AXTreeDelegate {
     LIVE_REGION_CREATED,
     LIVE_REGION_NODE_CHANGED,  // Fired on a node within a live region.
     LOAD_COMPLETE,
+    LOAD_START,
     MENU_ITEM_SELECTED,
     NAME_CHANGED,
     OTHER_ATTRIBUTE_CHANGED,
@@ -48,17 +49,27 @@ class AX_EXPORT AXEventGenerator : public AXTreeDelegate {
     VALUE_CHANGED,
   };
 
-  struct TargetedEvent {
-    TargetedEvent(ui::AXNode* node, Event event);
-    ui::AXNode* node;
+  struct EventParams {
+    EventParams(Event event, ax::mojom::EventFrom event_from);
     Event event;
+    ax::mojom::EventFrom event_from;
+
+    bool operator==(const EventParams& rhs);
+    bool operator<(const EventParams& rhs) const;
+  };
+
+  struct TargetedEvent {
+    TargetedEvent(ui::AXNode* node, const EventParams& event_params);
+    ui::AXNode* node;
+    const EventParams& event_params;
   };
 
   class AX_EXPORT Iterator
       : public std::iterator<std::input_iterator_tag, TargetedEvent> {
    public:
-    Iterator(const std::map<AXNode*, std::set<Event>>& map,
-             const std::map<AXNode*, std::set<Event>>::const_iterator& head);
+    Iterator(
+        const std::map<AXNode*, std::set<EventParams>>& map,
+        const std::map<AXNode*, std::set<EventParams>>::const_iterator& head);
     Iterator(const Iterator& other);
     ~Iterator();
 
@@ -67,9 +78,9 @@ class AX_EXPORT AXEventGenerator : public AXTreeDelegate {
     TargetedEvent operator*() const;
 
    private:
-    const std::map<AXNode*, std::set<Event>>& map_;
-    std::map<AXNode*, std::set<Event>>::const_iterator map_iter_;
-    std::set<Event>::const_iterator set_iter_;
+    const std::map<AXNode*, std::set<EventParams>>& map_;
+    std::map<AXNode*, std::set<EventParams>>::const_iterator map_iter_;
+    std::set<EventParams>::const_iterator set_iter_;
   };
 
   // If you use this constructor, you must call SetTree
@@ -108,6 +119,11 @@ class AX_EXPORT AXEventGenerator : public AXTreeDelegate {
   // efficiently remove duplicates, so events won't be retrieved in the
   // same order they were added.
   void AddEvent(ui::AXNode* node, Event event);
+
+  // Set the event_from field for all subsequent generated events.
+  void set_event_from(ax::mojom::EventFrom event_from) {
+    event_from_ = event_from;
+  }
 
  protected:
   // AXTreeDelegate overrides.
@@ -171,13 +187,17 @@ class AX_EXPORT AXEventGenerator : public AXTreeDelegate {
   void FireLiveRegionEvents(AXNode* node);
   void FireActiveDescendantEvents();
   void FireRelationSourceEvents(AXTree* tree, AXNode* target_node);
+  bool ShouldFireLoadEvents(AXNode* node);
 
   AXTree* tree_ = nullptr;  // Not owned.
-  std::map<AXNode*, std::set<Event>> tree_events_;
+  std::map<AXNode*, std::set<EventParams>> tree_events_;
 
   // Valid between the call to OnIntAttributeChanged and the call to
   // OnAtomicUpdateFinished. List of nodes whose active descendant changed.
   std::vector<AXNode*> active_descendant_changed_;
+
+  // The value of the event from field in TargetedEvent.
+  ax::mojom::EventFrom event_from_;
 };
 
 }  // namespace ui

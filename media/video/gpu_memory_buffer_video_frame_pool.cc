@@ -16,21 +16,25 @@
 
 #include "base/barrier_closure.h"
 #include "base/bind.h"
+#include "base/callback_helpers.h"
 #include "base/containers/circular_deque.h"
 #include "base/containers/stack_container.h"
 #include "base/location.h"
 #include "base/macros.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/default_tick_clock.h"
 #include "base/trace_event/memory_dump_manager.h"
 #include "base/trace_event/memory_dump_provider.h"
 #include "base/trace_event/trace_event.h"
+#include "build/build_config.h"
 #include "gpu/GLES2/gl2extchromium.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
 #include "media/base/bind_to_current_loop.h"
 #include "media/video/gpu_video_accelerator_factories.h"
 #include "third_party/libyuv/include/libyuv.h"
 #include "ui/gfx/buffer_format_util.h"
+#include "ui/gfx/color_space.h"
 #include "ui/gl/trace_util.h"
 
 namespace media {
@@ -179,9 +183,13 @@ class GpuMemoryBufferVideoFramePool::PoolImpl
 
   // Callback called when a VideoFrame generated with GetFrameResources is no
   // longer referenced.
-  // This must be called on the thread where |media_task_runner_| is current.
   void MailboxHoldersReleased(FrameResources* frame_resources,
                               const gpu::SyncToken& sync_token);
+
+  // Callback called when a VideoFrame generated with GetFrameResources has
+  // outlived its release SyncToken.
+  // This must be called on the thread where |media_task_runner_| is current.
+  void MailboxHoldersWaited(FrameResources* frame_resources);
 
   // Delete resources. This has to be called on the thread where |task_runner|
   // is current.
@@ -243,6 +251,12 @@ gfx::BufferFormat GpuMemoryBufferFormat(
     case GpuVideoAcceleratorFactories::OutputFormat::XB30:
       DCHECK_EQ(0u, plane);
       return gfx::BufferFormat::RGBX_1010102;
+    case GpuVideoAcceleratorFactories::OutputFormat::RGBA:
+      DCHECK_EQ(0u, plane);
+      return gfx::BufferFormat::RGBA_8888;
+    case GpuVideoAcceleratorFactories::OutputFormat::BGRA:
+      DCHECK_EQ(0u, plane);
+      return gfx::BufferFormat::BGRA_8888;
     case GpuVideoAcceleratorFactories::OutputFormat::UNDEFINED:
       NOTREACHED();
       break;
@@ -271,6 +285,12 @@ unsigned ImageInternalFormat(GpuVideoAcceleratorFactories::OutputFormat format,
       // Technically speaking we should say GL_RGB10_EXT, but that format is not
       // supported in OpenGLES.
       return GL_RGB10_A2_EXT;
+    case GpuVideoAcceleratorFactories::OutputFormat::RGBA:
+      DCHECK_EQ(0u, plane);
+      return GL_RGBA;
+    case GpuVideoAcceleratorFactories::OutputFormat::BGRA:
+      DCHECK_EQ(0u, plane);
+      return GL_BGRA_EXT;
     case GpuVideoAcceleratorFactories::OutputFormat::UNDEFINED:
       NOTREACHED();
       break;
@@ -283,6 +303,8 @@ size_t PlanesPerCopy(GpuVideoAcceleratorFactories::OutputFormat format) {
   switch (format) {
     case GpuVideoAcceleratorFactories::OutputFormat::I420:
     case GpuVideoAcceleratorFactories::OutputFormat::UYVY:
+    case GpuVideoAcceleratorFactories::OutputFormat::RGBA:
+    case GpuVideoAcceleratorFactories::OutputFormat::BGRA:
       return 1;
     case GpuVideoAcceleratorFactories::OutputFormat::NV12_DUAL_GMB:
     case GpuVideoAcceleratorFactories::OutputFormat::NV12_SINGLE_GMB:
@@ -310,6 +332,8 @@ VideoPixelFormat VideoFormat(
     case GpuVideoAcceleratorFactories::OutputFormat::XR30:
       return PIXEL_FORMAT_ARGB;
     case GpuVideoAcceleratorFactories::OutputFormat::XB30:
+    case GpuVideoAcceleratorFactories::OutputFormat::RGBA:
+    case GpuVideoAcceleratorFactories::OutputFormat::BGRA:
       return PIXEL_FORMAT_RGB32;
     case GpuVideoAcceleratorFactories::OutputFormat::UNDEFINED:
       NOTREACHED();
@@ -331,6 +355,9 @@ size_t NumGpuMemoryBuffers(GpuVideoAcceleratorFactories::OutputFormat format) {
       return 1;
     case GpuVideoAcceleratorFactories::OutputFormat::XR30:
     case GpuVideoAcceleratorFactories::OutputFormat::XB30:
+      return 1;
+    case GpuVideoAcceleratorFactories::OutputFormat::RGBA:
+    case GpuVideoAcceleratorFactories::OutputFormat::BGRA:
       return 1;
     case GpuVideoAcceleratorFactories::OutputFormat::UNDEFINED:
       NOTREACHED();
@@ -360,27 +387,29 @@ void CopyRowsToI420Buffer(int first_row,
                           uint8_t* output,
                           int dest_stride,
                           base::OnceClosure done) {
+  base::ScopedClosureRunner done_runner(std::move(done));
   TRACE_EVENT2("media", "CopyRowsToI420Buffer", "bytes_per_row", bytes_per_row,
                "rows", rows);
-  if (output) {
-    DCHECK_NE(dest_stride, 0);
-    DCHECK_LE(bytes_per_row, std::abs(dest_stride));
-    DCHECK_LE(bytes_per_row, source_stride);
-    DCHECK_GE(bit_depth, 8u);
 
-    if (bit_depth == 8) {
-      libyuv::CopyPlane(source + source_stride * first_row, source_stride,
-                        output + dest_stride * first_row, dest_stride,
-                        bytes_per_row, rows);
-    } else {
-      const int scale = 0x10000 >> (bit_depth - 8);
-      libyuv::Convert16To8Plane(
-          reinterpret_cast<const uint16*>(source + source_stride * first_row),
-          source_stride / 2, output + dest_stride * first_row, dest_stride,
-          scale, bytes_per_row, rows);
-    }
+  if (!output)
+    return;
+
+  DCHECK_NE(dest_stride, 0);
+  DCHECK_LE(bytes_per_row, std::abs(dest_stride));
+  DCHECK_LE(bytes_per_row, source_stride);
+  DCHECK_GE(bit_depth, 8u);
+
+  if (bit_depth == 8) {
+    libyuv::CopyPlane(source + source_stride * first_row, source_stride,
+                      output + dest_stride * first_row, dest_stride,
+                      bytes_per_row, rows);
+  } else {
+    const int scale = 0x10000 >> (bit_depth - 8);
+    libyuv::Convert16To8Plane(
+        reinterpret_cast<const uint16_t*>(source + source_stride * first_row),
+        source_stride / 2, output + dest_stride * first_row, dest_stride, scale,
+        bytes_per_row, rows);
   }
-  std::move(done).Run();
 }
 
 void CopyRowsToNV12Buffer(int first_row,
@@ -392,30 +421,33 @@ void CopyRowsToNV12Buffer(int first_row,
                           uint8_t* dest_uv,
                           int dest_stride_uv,
                           base::OnceClosure done) {
+  base::ScopedClosureRunner done_runner(std::move(done));
   TRACE_EVENT2("media", "CopyRowsToNV12Buffer", "bytes_per_row", bytes_per_row,
                "rows", rows);
-  if (dest_y && dest_uv) {
-    DCHECK_NE(dest_stride_y, 0);
-    DCHECK_NE(dest_stride_uv, 0);
-    DCHECK_LE(bytes_per_row, std::abs(dest_stride_y));
-    DCHECK_LE(bytes_per_row, std::abs(dest_stride_uv));
-    DCHECK_EQ(0, first_row % 2);
 
-    libyuv::I420ToNV12(
-        source_frame->visible_data(VideoFrame::kYPlane) +
-            first_row * source_frame->stride(VideoFrame::kYPlane),
-        source_frame->stride(VideoFrame::kYPlane),
-        source_frame->visible_data(VideoFrame::kUPlane) +
-            first_row / 2 * source_frame->stride(VideoFrame::kUPlane),
-        source_frame->stride(VideoFrame::kUPlane),
-        source_frame->visible_data(VideoFrame::kVPlane) +
-            first_row / 2 * source_frame->stride(VideoFrame::kVPlane),
-        source_frame->stride(VideoFrame::kVPlane),
-        dest_y + first_row * dest_stride_y, dest_stride_y,
-        dest_uv + first_row / 2 * dest_stride_uv, dest_stride_uv, bytes_per_row,
-        rows);
-  }
-  std::move(done).Run();
+  if (!dest_y || !dest_uv)
+    return;
+
+  DCHECK_NE(dest_stride_y, 0);
+  DCHECK_NE(dest_stride_uv, 0);
+  DCHECK_LE(bytes_per_row, std::abs(dest_stride_y));
+  DCHECK_LE(bytes_per_row, std::abs(dest_stride_uv));
+  DCHECK_EQ(0, first_row % 2);
+  DCHECK(source_frame->format() == PIXEL_FORMAT_I420 ||
+         source_frame->format() == PIXEL_FORMAT_YV12);
+  libyuv::I420ToNV12(
+      source_frame->visible_data(VideoFrame::kYPlane) +
+          first_row * source_frame->stride(VideoFrame::kYPlane),
+      source_frame->stride(VideoFrame::kYPlane),
+      source_frame->visible_data(VideoFrame::kUPlane) +
+          first_row / 2 * source_frame->stride(VideoFrame::kUPlane),
+      source_frame->stride(VideoFrame::kUPlane),
+      source_frame->visible_data(VideoFrame::kVPlane) +
+          first_row / 2 * source_frame->stride(VideoFrame::kVPlane),
+      source_frame->stride(VideoFrame::kVPlane),
+      dest_y + first_row * dest_stride_y, dest_stride_y,
+      dest_uv + first_row / 2 * dest_stride_uv, dest_stride_uv, bytes_per_row,
+      rows);
 }
 
 void CopyRowsToUYVYBuffer(int first_row,
@@ -425,25 +457,29 @@ void CopyRowsToUYVYBuffer(int first_row,
                           uint8_t* output,
                           int dest_stride,
                           base::OnceClosure done) {
+  base::ScopedClosureRunner done_runner(std::move(done));
   TRACE_EVENT2("media", "CopyRowsToUYVYBuffer", "bytes_per_row", width * 2,
                "rows", rows);
-  if (output) {
-    DCHECK_NE(dest_stride, 0);
-    DCHECK_LE(width, std::abs(dest_stride / 2));
-    DCHECK_EQ(0, first_row % 2);
-    libyuv::I420ToUYVY(
-        source_frame->visible_data(VideoFrame::kYPlane) +
-            first_row * source_frame->stride(VideoFrame::kYPlane),
-        source_frame->stride(VideoFrame::kYPlane),
-        source_frame->visible_data(VideoFrame::kUPlane) +
-            first_row / 2 * source_frame->stride(VideoFrame::kUPlane),
-        source_frame->stride(VideoFrame::kUPlane),
-        source_frame->visible_data(VideoFrame::kVPlane) +
-            first_row / 2 * source_frame->stride(VideoFrame::kVPlane),
-        source_frame->stride(VideoFrame::kVPlane),
-        output + first_row * dest_stride, dest_stride, width, rows);
-  }
-  std::move(done).Run();
+
+  if (!output)
+    return;
+
+  DCHECK_NE(dest_stride, 0);
+  DCHECK_LE(width, std::abs(dest_stride / 2));
+  DCHECK_EQ(0, first_row % 2);
+  DCHECK(source_frame->format() == PIXEL_FORMAT_I420 ||
+         source_frame->format() == PIXEL_FORMAT_YV12);
+  libyuv::I420ToUYVY(
+      source_frame->visible_data(VideoFrame::kYPlane) +
+          first_row * source_frame->stride(VideoFrame::kYPlane),
+      source_frame->stride(VideoFrame::kYPlane),
+      source_frame->visible_data(VideoFrame::kUPlane) +
+          first_row / 2 * source_frame->stride(VideoFrame::kUPlane),
+      source_frame->stride(VideoFrame::kUPlane),
+      source_frame->visible_data(VideoFrame::kVPlane) +
+          first_row / 2 * source_frame->stride(VideoFrame::kVPlane),
+      source_frame->stride(VideoFrame::kVPlane),
+      output + first_row * dest_stride, dest_stride, width, rows);
 }
 
 void CopyRowsToRGB10Buffer(bool is_argb,
@@ -454,60 +490,95 @@ void CopyRowsToRGB10Buffer(bool is_argb,
                            uint8_t* output,
                            int dest_stride,
                            base::OnceClosure done) {
+  base::ScopedClosureRunner done_runner(std::move(done));
   TRACE_EVENT2("media", "CopyRowsToXR30Buffer", "bytes_per_row", width * 2,
                "rows", rows);
-  if (output) {
-    DCHECK_NE(dest_stride, 0);
-    DCHECK_LE(width, std::abs(dest_stride / 2));
-    DCHECK_EQ(0, first_row % 2);
+  if (!output)
+    return;
 
-    int color_space = COLOR_SPACE_UNSPECIFIED;
-    if (source_frame->metadata()->GetInteger(VideoFrameMetadata::COLOR_SPACE,
-                                             &color_space)) {
-      color_space = COLOR_SPACE_UNSPECIFIED;
+  DCHECK_NE(dest_stride, 0);
+  DCHECK_LE(width, std::abs(dest_stride / 2));
+  DCHECK_EQ(0, first_row % 2);
+  DCHECK_EQ(source_frame->format(), PIXEL_FORMAT_YUV420P10);
+
+  const uint16_t* y_plane = reinterpret_cast<const uint16_t*>(
+      source_frame->visible_data(VideoFrame::kYPlane) +
+      first_row * source_frame->stride(VideoFrame::kYPlane));
+  const size_t y_plane_stride = source_frame->stride(VideoFrame::kYPlane) / 2;
+  const uint16_t* v_plane = reinterpret_cast<const uint16_t*>(
+      source_frame->visible_data(VideoFrame::kVPlane) +
+      first_row / 2 * source_frame->stride(VideoFrame::kVPlane));
+  const size_t v_plane_stride = source_frame->stride(VideoFrame::kVPlane) / 2;
+  const uint16_t* u_plane = reinterpret_cast<const uint16_t*>(
+      source_frame->visible_data(VideoFrame::kUPlane) +
+      first_row / 2 * source_frame->stride(VideoFrame::kUPlane));
+  const size_t u_plane_stride = source_frame->stride(VideoFrame::kUPlane) / 2;
+  uint8_t* dest_rgb10 = output + first_row * dest_stride;
+
+  SkYUVColorSpace skyuv = kRec709_SkYUVColorSpace;
+  source_frame->ColorSpace().ToSkYUVColorSpace(&skyuv);
+
+  if (skyuv == kRec601_SkYUVColorSpace) {
+    if (is_argb) {
+      libyuv::I010ToAR30(y_plane, y_plane_stride, u_plane, u_plane_stride,
+                         v_plane, v_plane_stride, dest_rgb10, dest_stride,
+                         width, rows);
+    } else {
+      libyuv::I010ToAB30(y_plane, y_plane_stride, u_plane, u_plane_stride,
+                         v_plane, v_plane_stride, dest_rgb10, dest_stride,
+                         width, rows);
     }
-    const uint16_t* y_plane = reinterpret_cast<const uint16_t*>(
-        source_frame->visible_data(VideoFrame::kYPlane) +
-        first_row * source_frame->stride(VideoFrame::kYPlane));
-    const size_t y_plane_stride = source_frame->stride(VideoFrame::kYPlane) / 2;
-    const uint16_t* v_plane = reinterpret_cast<const uint16_t*>(
-        source_frame->visible_data(VideoFrame::kVPlane) +
-        first_row / 2 * source_frame->stride(VideoFrame::kVPlane));
-    const size_t v_plane_stride = source_frame->stride(VideoFrame::kVPlane) / 2;
-    const uint16_t* u_plane = reinterpret_cast<const uint16_t*>(
-        source_frame->visible_data(VideoFrame::kUPlane) +
-        first_row / 2 * source_frame->stride(VideoFrame::kUPlane));
-    const size_t u_plane_stride = source_frame->stride(VideoFrame::kUPlane) / 2;
-    uint8_t* dest_ar30 = output + first_row * dest_stride;
-
-    switch (color_space) {
-      case COLOR_SPACE_HD_REC709:
-        if (is_argb) {
-          libyuv::H010ToAR30(y_plane, y_plane_stride, u_plane, u_plane_stride,
-                             v_plane, v_plane_stride, dest_ar30, dest_stride,
-                             width, rows);
-        } else {
-          libyuv::H010ToAB30(y_plane, y_plane_stride, u_plane, u_plane_stride,
-                             v_plane, v_plane_stride, dest_ar30, dest_stride,
-                             width, rows);
-        }
-        break;
-      case COLOR_SPACE_UNSPECIFIED:
-      case COLOR_SPACE_JPEG:
-      case COLOR_SPACE_SD_REC601:
-        if (is_argb) {
-          libyuv::I010ToAR30(y_plane, y_plane_stride, u_plane, u_plane_stride,
-                             v_plane, v_plane_stride, dest_ar30, dest_stride,
-                             width, rows);
-        } else {
-          libyuv::I010ToAB30(y_plane, y_plane_stride, u_plane, u_plane_stride,
-                             v_plane, v_plane_stride, dest_ar30, dest_stride,
-                             width, rows);
-        }
-        break;
+  } else {
+    if (is_argb) {
+      libyuv::H010ToAR30(y_plane, y_plane_stride, u_plane, u_plane_stride,
+                         v_plane, v_plane_stride, dest_rgb10, dest_stride,
+                         width, rows);
+    } else {
+      libyuv::H010ToAB30(y_plane, y_plane_stride, u_plane, u_plane_stride,
+                         v_plane, v_plane_stride, dest_rgb10, dest_stride,
+                         width, rows);
     }
   }
-  std::move(done).Run();
+}
+
+void CopyRowsToRGBABuffer(bool is_rgba,
+                          int first_row,
+                          int rows,
+                          int width,
+                          const scoped_refptr<VideoFrame>& source_frame,
+                          uint8_t* output,
+                          int dest_stride,
+                          base::OnceClosure done) {
+  base::ScopedClosureRunner done_runner(std::move(done));
+  TRACE_EVENT2("media", "CopyRowsToRGBABuffer", "bytes_per_row", width * 2,
+               "rows", rows);
+
+  if (!output)
+    return;
+
+  DCHECK_NE(dest_stride, 0);
+  DCHECK_LE(width, std::abs(dest_stride / 2));
+  DCHECK_EQ(0, first_row % 2);
+  DCHECK_EQ(source_frame->format(), PIXEL_FORMAT_I420A);
+
+  // libyuv uses little-endian for RGBx formats, whereas here we use big endian.
+  auto* func_ptr = is_rgba ? libyuv::I420AlphaToABGR : libyuv::I420AlphaToARGB;
+
+  func_ptr(source_frame->visible_data(VideoFrame::kYPlane) +
+               first_row * source_frame->stride(VideoFrame::kYPlane),
+           source_frame->stride(VideoFrame::kYPlane),
+           source_frame->visible_data(VideoFrame::kUPlane) +
+               first_row / 2 * source_frame->stride(VideoFrame::kUPlane),
+           source_frame->stride(VideoFrame::kUPlane),
+           source_frame->visible_data(VideoFrame::kVPlane) +
+               first_row / 2 * source_frame->stride(VideoFrame::kVPlane),
+           source_frame->stride(VideoFrame::kVPlane),
+           source_frame->visible_data(VideoFrame::kAPlane) +
+               first_row * source_frame->stride(VideoFrame::kAPlane),
+           source_frame->stride(VideoFrame::kAPlane),
+           output + first_row * dest_stride, dest_stride, width, rows,
+           // Textures are expected to be premultiplied by GL and compositors.
+           1 /* attenuate, meaning premultiply */);
 }
 
 gfx::Size CodedSize(const scoped_refptr<VideoFrame>& video_frame,
@@ -527,6 +598,8 @@ gfx::Size CodedSize(const scoped_refptr<VideoFrame>& video_frame,
     case GpuVideoAcceleratorFactories::OutputFormat::UYVY:
     case GpuVideoAcceleratorFactories::OutputFormat::XR30:
     case GpuVideoAcceleratorFactories::OutputFormat::XB30:
+    case GpuVideoAcceleratorFactories::OutputFormat::RGBA:
+    case GpuVideoAcceleratorFactories::OutputFormat::BGRA:
       output = gfx::Size((video_frame->visible_rect().width() + 1) & ~1,
                          video_frame->visible_rect().height());
       break;
@@ -547,26 +620,47 @@ void GpuMemoryBufferVideoFramePool::PoolImpl::CreateHardwareFrame(
     const scoped_refptr<VideoFrame>& video_frame,
     FrameReadyCB frame_ready_cb) {
   DCHECK(media_task_runner_->BelongsToCurrentThread());
-  // Lazily initialize output_format_ since VideoFrameOutputFormat() has to be
+  // Lazily initialize |output_format_| since VideoFrameOutputFormat() has to be
   // called on the media_thread while this object might be instantiated on any.
-  if (output_format_ == GpuVideoAcceleratorFactories::OutputFormat::UNDEFINED) {
-    output_format_ =
-        gpu_factories_->VideoFrameOutputFormat(video_frame->BitDepth());
+  const VideoPixelFormat pixel_format = video_frame->format();
+  if (output_format_ == GpuVideoAcceleratorFactories::OutputFormat::UNDEFINED)
+    output_format_ = gpu_factories_->VideoFrameOutputFormat(pixel_format);
+  // Bail if we have a change of GpuVideoAcceleratorFactories::OutputFormat;
+  // such changes should not happen in general (see https://crbug.com/875158).
+  if (output_format_ != gpu_factories_->VideoFrameOutputFormat(pixel_format)) {
+    std::move(frame_ready_cb).Run(video_frame);
+    return;
   }
 
+  bool is_software_backed_video_frame = !video_frame->HasTextures();
+#if defined(OS_LINUX)
+  is_software_backed_video_frame &= !video_frame->HasDmaBufs();
+#endif
+
   bool passthrough = false;
+#if defined(OS_MACOSX)
+  // GPU memory buffers do not support full-range YUV video on mac.
+  // Fortunately, the hardware decoders never produce full-range video.
+  // https://crbug/882627
+  gfx::ColorSpace color_space = video_frame->ColorSpace();
+  gfx::ColorSpace as_rgb = color_space.GetAsRGB();
+  gfx::ColorSpace as_full_range_rgb = color_space.GetAsFullRangeRGB();
+
+  if (color_space != as_rgb && as_rgb == as_full_range_rgb)
+    passthrough = true;
+#endif
   if (output_format_ == GpuVideoAcceleratorFactories::OutputFormat::UNDEFINED)
     passthrough = true;
-  switch (video_frame->format()) {
+  switch (pixel_format) {
     // Supported cases.
     case PIXEL_FORMAT_YV12:
     case PIXEL_FORMAT_I420:
     case PIXEL_FORMAT_YUV420P9:
     case PIXEL_FORMAT_YUV420P10:
     case PIXEL_FORMAT_YUV420P12:
+    case PIXEL_FORMAT_I420A:
       break;
     // Unsupported cases.
-    case PIXEL_FORMAT_I420A:
     case PIXEL_FORMAT_I422:
     case PIXEL_FORMAT_I444:
     case PIXEL_FORMAT_NV12:
@@ -587,6 +681,11 @@ void GpuMemoryBufferVideoFramePool::PoolImpl::CreateHardwareFrame(
     case PIXEL_FORMAT_YUV444P12:
     case PIXEL_FORMAT_Y16:
     case PIXEL_FORMAT_UNKNOWN:
+      if (is_software_backed_video_frame) {
+        UMA_HISTOGRAM_ENUMERATION(
+            "Media.GpuMemoryBufferVideoFramePool.UnsupportedFormat",
+            pixel_format, PIXEL_FORMAT_MAX + 1);
+      }
       passthrough = true;
   }
   // TODO(dcastagna): Handle odd positioned video frame input, see
@@ -631,18 +730,8 @@ bool GpuMemoryBufferVideoFramePool::PoolImpl::OnMemoryDump(
         dump->AddScalar("free_size",
                         base::trace_event::MemoryAllocatorDump::kUnitsBytes,
                         frame_resources->is_used() ? 0 : buffer_size_in_bytes);
-        auto shared_memory_guid =
-            plane_resource.gpu_memory_buffer->GetHandle().handle.GetGUID();
-        if (!shared_memory_guid.is_empty()) {
-          pmd->CreateSharedMemoryOwnershipEdge(dump->guid(), shared_memory_guid,
-                                               kImportance);
-        } else {
-          auto shared_buffer_guid =
-              plane_resource.gpu_memory_buffer->GetGUIDForTracing(
-                  tracing_process_id);
-          pmd->CreateSharedGlobalAllocatorDump(shared_buffer_guid);
-          pmd->AddOwnershipEdge(dump->guid(), shared_buffer_guid, kImportance);
-        }
+        plane_resource.gpu_memory_buffer->OnMemoryDump(
+            pmd, dump->guid(), tracing_process_id, kImportance);
       }
     }
   }
@@ -812,6 +901,20 @@ void GpuMemoryBufferVideoFramePool::PoolImpl::CopyVideoFrameToGpuMemoryBuffers(
                              buffer->stride(0), barrier));
           break;
         }
+
+        case GpuVideoAcceleratorFactories::OutputFormat::RGBA:
+        case GpuVideoAcceleratorFactories::OutputFormat::BGRA: {
+          const bool is_rgba = output_format_ ==
+                               GpuVideoAcceleratorFactories::OutputFormat::RGBA;
+          worker_task_runner_->PostTask(
+              FROM_HERE,
+              base::BindOnce(&CopyRowsToRGBABuffer, is_rgba, row, rows_to_copy,
+                             coded_size.width(), video_frame,
+                             static_cast<uint8_t*>(buffer->memory(0)),
+                             buffer->stride(0), barrier));
+          break;
+        }
+
         case GpuVideoAcceleratorFactories::OutputFormat::UNDEFINED:
           NOTREACHED();
       }
@@ -901,9 +1004,20 @@ void GpuMemoryBufferVideoFramePool::PoolImpl::
 #endif
       break;
     case GpuVideoAcceleratorFactories::OutputFormat::XR30:
+    case GpuVideoAcceleratorFactories::OutputFormat::XB30:
+      // TODO(mcasas): Enable this for ChromeOS https://crbug.com/776093.
+      allow_overlay = false;
+      // We've converted the YUV to RGB, fix the color space.
+      // TODO(hubbe): The libyuv YUV to RGB conversion may not have
+      // honored the color space conversion 100%. We should either fix
+      // libyuv or find a way for later passes to make up the difference.
+      frame->set_color_space(video_frame->ColorSpace().GetAsRGB());
+      break;
+    case GpuVideoAcceleratorFactories::OutputFormat::RGBA:
+    case GpuVideoAcceleratorFactories::OutputFormat::BGRA:
       allow_overlay = true;
       break;
-    default:
+    case GpuVideoAcceleratorFactories::OutputFormat::UNDEFINED:
       break;
   }
 
@@ -935,8 +1049,9 @@ void GpuMemoryBufferVideoFramePool::PoolImpl::Shutdown() {
       continue;
 
     media_task_runner_->PostTask(
-        FROM_HERE, base::Bind(&PoolImpl::DeleteFrameResources, gpu_factories_,
-                              base::Owned(frame_resources)));
+        FROM_HERE,
+        base::BindOnce(&PoolImpl::DeleteFrameResources, gpu_factories_,
+                       base::Owned(frame_resources)));
   }
   resources_pool_.clear();
 }
@@ -999,7 +1114,6 @@ GpuMemoryBufferVideoFramePool::PoolImpl::GetOrCreateFrameResources(
     gles2->TexParameteri(texture_target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     gles2->TexParameteri(texture_target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     gles2->TexParameteri(texture_target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    gles2->GenMailboxCHROMIUM(plane_resource.mailbox.name);
     gles2->ProduceTextureDirectCHROMIUM(plane_resource.texture_id,
                                         plane_resource.mailbox.name);
   }
@@ -1047,6 +1161,27 @@ void GpuMemoryBufferVideoFramePool::PoolImpl::MailboxHoldersReleased(
                                   frame_resources, release_sync_token));
     return;
   }
+
+  // TODO(sandersd): Remove once https://crbug.com/819914 is fixed. Correct
+  // clients must wait for READ_LOCK_FENCES_ENABLED frames to be read before
+  // returning the frame, so waiting on the sync token should be a no-op.
+  //
+  // If the context is lost, SignalSyncToken() drops its callbacks. Using a
+  // ScopedClosureRunner ensures MailboxHoldersWaited() is called if that
+  // happens.
+  std::unique_ptr<base::ScopedClosureRunner> waited_cb =
+      std::make_unique<base::ScopedClosureRunner>(base::BindOnce(
+          &GpuMemoryBufferVideoFramePool::PoolImpl::MailboxHoldersWaited, this,
+          frame_resources));
+  gpu_factories_->SignalSyncToken(
+      release_sync_token,
+      base::BindOnce(&base::ScopedClosureRunner::RunAndReset,
+                     std::move(waited_cb)));
+}
+
+void GpuMemoryBufferVideoFramePool::PoolImpl::MailboxHoldersWaited(
+    FrameResources* frame_resources) {
+  DCHECK(media_task_runner_->BelongsToCurrentThread());
 
   if (in_shutdown_) {
     DeleteFrameResources(gpu_factories_, frame_resources);

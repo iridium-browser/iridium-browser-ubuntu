@@ -12,9 +12,9 @@
 
 namespace blink {
 
-class LayoutPoint;
 struct PaintInfo;
 class LayoutObject;
+class LayoutPoint;
 
 class ObjectPainter : public ObjectPainterBase {
   STACK_ALLOCATED();
@@ -24,8 +24,7 @@ class ObjectPainter : public ObjectPainterBase {
       : layout_object_(layout_object) {}
 
   void PaintOutline(const PaintInfo&, const LayoutPoint& paint_offset);
-  void PaintInlineChildrenOutlines(const PaintInfo&,
-                                   const LayoutPoint& paint_offset);
+  void PaintInlineChildrenOutlines(const PaintInfo&);
   void AddPDFURLRectIfNeeded(const PaintInfo&, const LayoutPoint& paint_offset);
 
   // Paints the object atomically as if it created a new stacking context, for:
@@ -40,11 +39,9 @@ class ObjectPainter : public ObjectPainterBase {
   //
   // It is expected that the caller will call this function independent of the
   // value of paintInfo.phase, and this function will do atomic paint (for
-  // PaintPhaseForeground), normal paint (for PaintPhaseSelection and
-  // PaintPhaseTextClip) or nothing (other paint phases) according to
-  // paintInfo.phase.
-  void PaintAllPhasesAtomically(const PaintInfo&,
-                                const LayoutPoint& paint_offset);
+  // kForeground), normal paint (for kSelection and kTextClip) or nothing (other
+  // paint phases) according to paintInfo.phase.
+  void PaintAllPhasesAtomically(const PaintInfo&);
 
   const LayoutObject& layout_object_;
 };

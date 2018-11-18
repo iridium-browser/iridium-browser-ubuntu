@@ -35,9 +35,16 @@ AVFILTEROBJS-$(CONFIG_BLEND_FILTER) += vf_blend.o
 AVFILTEROBJS-$(CONFIG_COLORSPACE_FILTER) += vf_colorspace.o
 AVFILTEROBJS-$(CONFIG_HFLIP_FILTER)      += vf_hflip.o
 AVFILTEROBJS-$(CONFIG_THRESHOLD_FILTER)  += vf_threshold.o
+AVFILTEROBJS-$(CONFIG_NLMEANS_FILTER)    += vf_nlmeans.o
 
 CHECKASMOBJS-$(CONFIG_AVFILTER) += $(AVFILTEROBJS-yes)
 
+# swscale tests
+SWSCALEOBJS                             += sw_rgb.o
+
+CHECKASMOBJS-$(CONFIG_SWSCALE)  += $(SWSCALEOBJS)
+
+# libavutil tests
 AVUTILOBJS                              += fixed_dsp.o
 AVUTILOBJS                              += float_dsp.o
 
@@ -61,7 +68,7 @@ tests/checkasm/checkasm.o: CFLAGS += -Umain
 CHECKASM := tests/checkasm/checkasm$(EXESUF)
 
 $(CHECKASM): $(CHECKASMOBJS) $(FF_STATIC_DEP_LIBS)
-	$(LD) $(LDFLAGS) $(LDEXEFLAGS) $(LD_O) $(CHECKASMOBJS) $(FF_STATIC_DEP_LIBS) $(EXTRALIBS-avcodec) $(EXTRALIBS-avfilter) $(EXTRALIBS-avutil) $(EXTRALIBS-swresample) $(EXTRALIBS)
+	$(LD) $(LDFLAGS) $(LDEXEFLAGS) $(LD_O) $(CHECKASMOBJS) $(FF_STATIC_DEP_LIBS) $(EXTRALIBS-avcodec) $(EXTRALIBS-avfilter) $(EXTRALIBS-avformat) $(EXTRALIBS-avutil) $(EXTRALIBS-swresample) $(EXTRALIBS)
 
 checkasm: $(CHECKASM)
 

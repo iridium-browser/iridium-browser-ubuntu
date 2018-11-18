@@ -13,6 +13,7 @@
 #include "base/command_line.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
+#include "base/stl_util.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
@@ -115,7 +116,6 @@ void CreatePrintSettingsDictionary(base::DictionaryValue* dict) {
   dict->SetInteger(kSettingMarginsType, DEFAULT_MARGINS);
   dict->SetBoolean(kSettingPreviewModifiable, false);
   dict->SetBoolean(kSettingHeaderFooterEnabled, false);
-  dict->SetBoolean(kSettingGenerateDraftData, true);
   dict->SetBoolean(kSettingShouldPrintBackgrounds, false);
   dict->SetBoolean(kSettingShouldPrintSelectionOnly, false);
 }
@@ -203,14 +203,13 @@ class PrintRenderFrameHelperTestBase : public content::RenderViewTest {
   // according to the specified settings defined in the mock render thread.
   // Verify the page count is correct.
   void VerifyPreviewPageCount(int expected_count) {
-    const IPC::Message* page_cnt_msg =
+    const IPC::Message* preview_started_message =
         render_thread_->sink().GetUniqueMessageMatching(
-            PrintHostMsg_DidGetPreviewPageCount::ID);
-    ASSERT_TRUE(page_cnt_msg);
-    PrintHostMsg_DidGetPreviewPageCount::Param post_page_count_param;
-    PrintHostMsg_DidGetPreviewPageCount::Read(page_cnt_msg,
-                                              &post_page_count_param);
-    EXPECT_EQ(expected_count, std::get<0>(post_page_count_param).page_count);
+            PrintHostMsg_DidStartPreview::ID);
+    ASSERT_TRUE(preview_started_message);
+    PrintHostMsg_DidStartPreview::Param param;
+    PrintHostMsg_DidStartPreview::Read(preview_started_message, &param);
+    EXPECT_EQ(expected_count, std::get<0>(param).page_count);
   }
 #endif  // BUILDFLAG(ENABLE_PRINT_PREVIEW)
 
@@ -221,14 +220,8 @@ class PrintRenderFrameHelperTestBase : public content::RenderViewTest {
             PrintHostMsg_DidPrintDocument::ID);
     bool did_print = !!print_msg;
     ASSERT_EQ(expect_printed, did_print);
-    if (did_print) {
-      PrintHostMsg_DidPrintDocument::Param post_did_print_page_param;
-      PrintHostMsg_DidPrintDocument::Read(print_msg,
-                                          &post_did_print_page_param);
-    }
   }
 
-#if BUILDFLAG(ENABLE_BASIC_PRINTING)
   void OnPrintPages() {
     GetPrintRenderFrameHelper()->OnPrintPages();
     base::RunLoop().RunUntilIdle();
@@ -241,7 +234,6 @@ class PrintRenderFrameHelperTestBase : public content::RenderViewTest {
     helper->OnPrintPages();
     base::RunLoop().RunUntilIdle();
   }
-#endif  // BUILDFLAG(ENABLE_BASIC_PRINTING)
 
 #if BUILDFLAG(ENABLE_PRINT_PREVIEW)
   void VerifyPreviewRequest(bool expect_request) {
@@ -381,7 +373,6 @@ TEST_F(MAYBE_PrintRenderFrameHelperTest, PrintWithJavascript) {
 }
 #endif  // !BUILDFLAG(ENABLE_PRINT_PREVIEW)
 
-#if BUILDFLAG(ENABLE_BASIC_PRINTING)
 // Tests that printing pages work and sending and receiving messages through
 // that channel all works.
 TEST_F(MAYBE_PrintRenderFrameHelperTest, OnPrintPages) {
@@ -442,9 +433,7 @@ TEST_F(MAYBE_PrintRenderFrameHelperTest, BasicBeforePrintAfterPrintSubFrame) {
   VerifyPagesPrinted(true);
 }
 
-#endif  // BUILDFLAG(ENABLE_BASIC_PRINTING)
-
-#if defined(OS_MACOSX) && BUILDFLAG(ENABLE_BASIC_PRINTING)
+#if defined(OS_MACOSX)
 // TODO(estade): I don't think this test is worth porting to Linux. We will have
 // to rip out and replace most of the IPC code if we ever plan to improve
 // printing, and the comment below by sverrir suggests that it doesn't do much
@@ -487,7 +476,7 @@ TEST_F(MAYBE_PrintRenderFrameHelperTest, PrintWithIframe) {
   EXPECT_NE(0, image1.size().width());
   EXPECT_NE(0, image1.size().height());
 }
-#endif  // OS_MACOSX && ENABLE_BASIC_PRINTING
+#endif  // defined(OS_MACOSX)
 
 // Tests if we can print a page and verify its results.
 // This test prints HTML pages into a pseudo printer and check their outputs,
@@ -503,7 +492,7 @@ struct TestPageData {
   const wchar_t* file;
 };
 
-#if defined(OS_MACOSX) && BUILDFLAG(ENABLE_BASIC_PRINTING)
+#if defined(OS_MACOSX)
 const TestPageData kTestPages[] = {
     {
         "<html>"
@@ -523,19 +512,19 @@ const TestPageData kTestPages[] = {
         600, 780, nullptr, nullptr,
     },
 };
-#endif  // defined(OS_MACOSX) && BUILDFLAG(ENABLE_BASIC_PRINTING)
+#endif  // defined(OS_MACOSX)
 }  // namespace
 
 // TODO(estade): need to port MockPrinter to get this on Linux. This involves
 // hooking up Cairo to read a pdf stream, or accessing the cairo surface in the
 // metafile directly.
 // Same for printing via PDF on Windows.
-#if defined(OS_MACOSX) && BUILDFLAG(ENABLE_BASIC_PRINTING)
+#if defined(OS_MACOSX)
 TEST_F(MAYBE_PrintRenderFrameHelperTest, PrintLayoutTest) {
   bool baseline = false;
 
   EXPECT_TRUE(print_render_thread_->printer());
-  for (size_t i = 0; i < arraysize(kTestPages); ++i) {
+  for (size_t i = 0; i < base::size(kTestPages); ++i) {
     // Load an HTML page and print it.
     LoadHTML(kTestPages[i].page);
     OnPrintPages();
@@ -583,7 +572,7 @@ TEST_F(MAYBE_PrintRenderFrameHelperTest, PrintLayoutTest) {
     }
   }
 }
-#endif  // OS_MACOSX && ENABLE_BASIC_PRINTING
+#endif  // defined(OS_MACOSX)
 
 // These print preview tests do not work on Chrome OS yet.
 #if !defined(OS_CHROMEOS)
@@ -629,9 +618,10 @@ class MAYBE_PrintRenderFrameHelperPreviewTest
     if (got_preview_msg) {
       PrintHostMsg_MetafileReadyForPrinting::Param preview_param;
       PrintHostMsg_MetafileReadyForPrinting::Read(preview_msg, &preview_param);
-      EXPECT_NE(0, std::get<0>(preview_param).document_cookie);
-      EXPECT_NE(0, std::get<0>(preview_param).expected_pages_count);
-      EXPECT_NE(0U, std::get<0>(preview_param).content.data_size);
+      const auto& param = std::get<0>(preview_param);
+      EXPECT_NE(0, param.document_cookie);
+      EXPECT_NE(0, param.expected_pages_count);
+      EXPECT_NE(0U, param.content.metafile_data_region.GetSize());
     }
   }
 
@@ -652,17 +642,11 @@ class MAYBE_PrintRenderFrameHelperPreviewTest
   void VerifyDidPreviewPage(bool expect_generated, int page_number) {
     bool msg_found = false;
     uint32_t data_size = 0;
-    size_t msg_count = render_thread_->sink().message_count();
-    for (size_t i = 0; i < msg_count; ++i) {
-      const IPC::Message* msg = render_thread_->sink().GetMessageAt(i);
-      if (msg->type() == PrintHostMsg_DidPreviewPage::ID) {
-        PrintHostMsg_DidPreviewPage::Param page_param;
-        PrintHostMsg_DidPreviewPage::Read(msg, &page_param);
-        if (std::get<0>(page_param).page_number == page_number) {
-          msg_found = true;
-          data_size = std::get<0>(page_param).content.data_size;
-          break;
-        }
+    for (const auto& preview : print_render_thread_->print_preview_pages()) {
+      if (preview.first == page_number) {
+        msg_found = true;
+        data_size = preview.second;
+        break;
       }
     }
     EXPECT_EQ(expect_generated, msg_found) << "For page " << page_number;
@@ -1167,6 +1151,29 @@ TEST_F(MAYBE_PrintRenderFrameHelperPreviewTest, PrintPreviewForSelectedText) {
   EXPECT_EQ(0, print_render_thread_->print_preview_pages_remaining());
   VerifyDidPreviewPage(true, 0);
   VerifyPreviewPageCount(1);
+  VerifyPrintPreviewCancelled(false);
+  VerifyPrintPreviewFailed(false);
+  VerifyPrintPreviewGenerated(true);
+  VerifyPagesPrinted(false);
+}
+
+// Test to verify that preview generated only for two pages.
+TEST_F(MAYBE_PrintRenderFrameHelperPreviewTest, PrintPreviewForSelectedText2) {
+  LoadHTML(kMultipageHTML);
+  GetMainFrame()->SelectRange(blink::WebRange(1, 8),
+                              blink::WebLocalFrame::kHideSelectionHandle,
+                              blink::mojom::SelectionMenuBehavior::kHide);
+
+  // Fill in some dummy values.
+  base::DictionaryValue dict;
+  CreatePrintSettingsDictionary(&dict);
+  dict.SetBoolean(kSettingShouldPrintSelectionOnly, true);
+
+  OnPrintPreview(dict);
+
+  EXPECT_EQ(0, print_render_thread_->print_preview_pages_remaining());
+  VerifyDidPreviewPage(true, 0);
+  VerifyPreviewPageCount(2);
   VerifyPrintPreviewCancelled(false);
   VerifyPrintPreviewFailed(false);
   VerifyPrintPreviewGenerated(true);

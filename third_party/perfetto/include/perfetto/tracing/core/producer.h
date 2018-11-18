@@ -17,6 +17,7 @@
 #ifndef INCLUDE_PERFETTO_TRACING_CORE_PRODUCER_H_
 #define INCLUDE_PERFETTO_TRACING_CORE_PRODUCER_H_
 
+#include "perfetto/base/export.h"
 #include "perfetto/tracing/core/basic_types.h"
 
 namespace perfetto {
@@ -31,19 +32,19 @@ class SharedMemory;
 //    (e.g., the ability to get kernel ftraces, to list process stats).
 // 2. The service acknowledges the connection and sends over the SharedMemory
 //    region that will be used to exchange data (together with the signalling
-//    API Service::ProducerEndpoint::OnPageAcquired()/OnPageReleased()).
-// 3. At some point later on, the Service asks the Producer to on turn some of
+//    API TracingService::ProducerEndpoint::OnPageAcquired()/OnPageReleased()).
+// 3. At some point later on, the Service asks the Producer to turn on some of
 //    the previously registered data sources, together with some configuration
-//    parameters. This happens via the CreateDataSourceInstance() callback.
+//    parameters. This happens via the StartDataSource() callback.
 // 4. In response to that the Producer will spawn an instance of the given data
 //    source and inject its data into the shared memory buffer (obtained during
 //    OnConnect).
 // This interface is subclassed by:
 //  1. The actual producer code in the clients e.g., the ftrace reader process.
 //  2. The transport layer when interposing RPC between service and producers.
-class Producer {
+class PERFETTO_EXPORT Producer {
  public:
-  virtual ~Producer() = default;
+  virtual ~Producer();
 
   // Called by Service (or more typically by the transport layer, on behalf of
   // the remote Service), once the Producer <> Service connection has been
@@ -59,22 +60,50 @@ class Producer {
   // instance.
   virtual void OnDisconnect() = 0;
 
-  // TODO(primiano): rename the methods below to Start/StopDataSourceInstance
-  // in the next CLs.
+  // Called by the Service after OnConnect but before the first DataSource is
+  // created. Can be used for any setup required before tracing begins.
+  virtual void OnTracingSetup() = 0;
 
-  // Called by the Service to turn on one of the data source previously
-  // registered through Service::ProducerEndpoint::RegisterDataSource().
+  // The lifecycle methods below are always called in the following sequence:
+  // SetupDataSource  -> StartDataSource -> StopDataSource.
+  // Or, in the edge case where a trace is aborted immediately:
+  // SetupDataSource  -> StopDataSource.
+  // The Setup+Start call sequence is always guaranateed, regardless of the
+  // TraceConfig.deferred_start flags.
+  // Called by the Service to configure one of the data sources previously
+  // registered through TracingService::ProducerEndpoint::RegisterDataSource().
+  // This method is always called before StartDataSource. There is always a
+  // SetupDataSource() call before each StartDataSource() call.
   // Args:
   // - DataSourceInstanceID is an identifier chosen by the Service that should
   //   be assigned to the newly created data source instance. It is used to
-  //   match the TearDownDataSourceInstance() request below.
+  //   match the StopDataSource() request below.
   // - DataSourceConfig is the configuration for the new data source (e.g.,
   //   tells which trace categories to enable).
-  virtual void CreateDataSourceInstance(DataSourceInstanceID,
-                                        const DataSourceConfig&) = 0;
+  virtual void SetupDataSource(DataSourceInstanceID,
+                               const DataSourceConfig&) = 0;
+
+  // Called by the Service to turn on one of the data sources previously
+  // registered through TracingService::ProducerEndpoint::RegisterDataSource()
+  // and initialized through SetupDataSource().
+  // Both arguments are guaranteed to be identical to the ones passed to the
+  // prior SetupDataSource() call.
+  virtual void StartDataSource(DataSourceInstanceID,
+                               const DataSourceConfig&) = 0;
 
   // Called by the Service to shut down an existing data source instance.
-  virtual void TearDownDataSourceInstance(DataSourceInstanceID) = 0;
+  virtual void StopDataSource(DataSourceInstanceID) = 0;
+
+  // Called by the service to request the Producer to commit the data of the
+  // given data sources and return their chunks into the shared memory buffer.
+  // The Producer is expected to invoke NotifyFlushComplete(FlushRequestID) on
+  // the Service after the data has been committed. The producer has to either
+  // reply to the flush requests in order, or can just reply to the latest one
+  // Upon seeing a NotifyFlushComplete(N), the service will assume that all
+  // flushes < N have also been committed.
+  virtual void Flush(FlushRequestID,
+                     const DataSourceInstanceID* data_source_ids,
+                     size_t num_data_sources) = 0;
 };
 
 }  // namespace perfetto

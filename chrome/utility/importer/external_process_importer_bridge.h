@@ -11,7 +11,6 @@
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
-#include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/common/importer/importer_bridge.h"
 #include "chrome/common/importer/profile_import.mojom.h"
@@ -21,9 +20,6 @@ class GURL;
 struct ImportedBookmarkEntry;
 
 namespace importer {
-#if defined(OS_WIN)
-struct ImporterIE7PasswordInfo;
-#endif
 struct ImporterURLRow;
 struct SearchEngineInfo;
 }
@@ -41,7 +37,7 @@ class ExternalProcessImporterBridge : public ImporterBridge {
  public:
   // |observer| must outlive this object.
   ExternalProcessImporterBridge(
-      base::Value localized_strings,
+      const base::flat_map<uint32_t, std::string>& localized_strings,
       scoped_refptr<chrome::mojom::ThreadSafeProfileImportObserverPtr>
           observer);
 
@@ -50,11 +46,6 @@ class ExternalProcessImporterBridge : public ImporterBridge {
                     const base::string16& first_folder_name) override;
 
   void AddHomePage(const GURL& home_page) override;
-
-#if defined(OS_WIN)
-  void AddIE7PasswordInfo(
-      const importer::ImporterIE7PasswordInfo& password_info) override;
-#endif
 
   void SetFavicons(const favicon_base::FaviconUsageDataList& favicons) override;
 
@@ -86,7 +77,7 @@ class ExternalProcessImporterBridge : public ImporterBridge {
 
   // Holds strings needed by the external importer because the resource
   // bundle isn't available to the external process.
-  base::Value localized_strings_;
+  base::flat_map<uint32_t, std::string> localized_strings_;
 
   scoped_refptr<chrome::mojom::ThreadSafeProfileImportObserverPtr> observer_;
 

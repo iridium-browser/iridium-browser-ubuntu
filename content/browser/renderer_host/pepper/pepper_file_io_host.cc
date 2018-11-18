@@ -8,14 +8,14 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/files/file_util_proxy.h"
 #include "base/memory/weak_ptr.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/sequenced_task_runner.h"
+#include "base/task/post_task.h"
 #include "content/browser/renderer_host/pepper/pepper_file_ref_host.h"
 #include "content/browser/renderer_host/pepper/pepper_file_system_browser_host.h"
 #include "content/browser/renderer_host/pepper/pepper_security_helper.h"
-#include "content/common/fileapi/file_system_messages.h"
 #include "content/common/view_messages.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/render_process_host.h"
@@ -49,7 +49,7 @@ PepperFileIOHost::UIThreadStuff GetUIThreadStuffForInternalFileSystems(
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   RenderProcessHost* host = RenderProcessHost::FromID(render_process_id);
   if (host) {
-    stuff.resolved_render_process_id = base::GetProcId(host->GetHandle());
+    stuff.resolved_render_process_id = host->GetProcess().Pid();
     StoragePartition* storage_partition = host->GetStoragePartition();
     if (storage_partition)
       stuff.file_system_context = storage_partition->GetFileSystemContext();
@@ -62,7 +62,7 @@ base::ProcessId GetResolvedRenderProcessId(int render_process_id) {
   RenderProcessHost* host = RenderProcessHost::FromID(render_process_id);
   if (!host)
     return base::kNullProcessId;
-  return base::GetProcId(host->GetHandle());
+  return host->GetProcess().Pid();
 }
 
 bool GetPluginAllowedToCallRequestOSFileHandle(int render_process_id,
@@ -204,26 +204,21 @@ int32_t PepperFileIOHost::OnHostMsgOpen(
     if (!CanOpenFileSystemURLWithPepperFlags(
             open_flags, render_process_id_, file_system_url_))
       return PP_ERROR_NOACCESS;
-    BrowserThread::PostTaskAndReplyWithResult(
-        BrowserThread::UI,
-        FROM_HERE,
+    base::PostTaskWithTraitsAndReplyWithResult(
+        FROM_HERE, {BrowserThread::UI},
         base::Bind(&GetUIThreadStuffForInternalFileSystems, render_process_id_),
         base::Bind(&PepperFileIOHost::GotUIThreadStuffForInternalFileSystems,
-                   AsWeakPtr(),
-                   context->MakeReplyMessageContext(),
+                   AsWeakPtr(), context->MakeReplyMessageContext(),
                    platform_file_flags));
   } else {
     base::FilePath path = file_ref_host->GetExternalFilePath();
     if (!CanOpenWithPepperFlags(open_flags, render_process_id_, path))
       return PP_ERROR_NOACCESS;
-    BrowserThread::PostTaskAndReplyWithResult(
-        BrowserThread::UI,
-        FROM_HERE,
+    base::PostTaskWithTraitsAndReplyWithResult(
+        FROM_HERE, {BrowserThread::UI},
         base::Bind(&GetResolvedRenderProcessId, render_process_id_),
-        base::Bind(&PepperFileIOHost::GotResolvedRenderProcessId,
-                   AsWeakPtr(),
-                   context->MakeReplyMessageContext(),
-                   path,
+        base::Bind(&PepperFileIOHost::GotResolvedRenderProcessId, AsWeakPtr(),
+                   context->MakeReplyMessageContext(), path,
                    platform_file_flags));
   }
   state_manager_.SetPendingOperation(FileIOStateManager::OPERATION_EXCLUSIVE);
@@ -400,15 +395,12 @@ int32_t PepperFileIOHost::OnHostMsgRequestOSFileHandle(
 
   GURL document_url =
       browser_ppapi_host_->GetDocumentURLForInstance(pp_instance());
-  BrowserThread::PostTaskAndReplyWithResult(
-      BrowserThread::UI,
-      FROM_HERE,
-      base::Bind(&GetPluginAllowedToCallRequestOSFileHandle,
-                 render_process_id_,
+  base::PostTaskWithTraitsAndReplyWithResult(
+      FROM_HERE, {BrowserThread::UI},
+      base::Bind(&GetPluginAllowedToCallRequestOSFileHandle, render_process_id_,
                  document_url),
       base::Bind(&PepperFileIOHost::GotPluginAllowedToCallRequestOSFileHandle,
-                 AsWeakPtr(),
-                 context->MakeReplyMessageContext()));
+                 AsWeakPtr(), context->MakeReplyMessageContext()));
   return PP_OK_COMPLETIONPENDING;
 }
 
@@ -514,7 +506,7 @@ bool PepperFileIOHost::AddFileToReplyContext(
   // A non-zero resource id signals NaClIPCAdapter to create a NaClQuotaDesc.
   PP_Resource quota_file_io = check_quota_ ? pp_resource() : 0;
   file_handle.set_file_handle(transit_file, open_flags, quota_file_io);
-  reply_context->params.AppendHandle(file_handle);
+  reply_context->params.AppendHandle(std::move(file_handle));
   return true;
 }
 

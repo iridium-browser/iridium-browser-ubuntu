@@ -14,6 +14,7 @@
 #include "base/macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
+#include "base/task/post_task.h"
 #include "base/time/default_clock.h"
 #include "base/values.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
@@ -30,6 +31,7 @@
 #include "components/prefs/scoped_user_pref_update.h"
 #include "components/search_engines/template_url.h"
 #include "components/search_engines/template_url_service.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "jni/NotificationSettingsBridge_jni.h"
 #include "url/gurl.h"
@@ -239,31 +241,6 @@ void NotificationChannelsProviderAndroid::MigrateToChannelsIfNecessary(
   prefs->SetBoolean(prefs::kMigratedToSiteNotificationChannels, true);
 }
 
-void NotificationChannelsProviderAndroid::UnmigrateChannelsIfNecessary(
-    PrefService* prefs,
-    content_settings::ProviderInterface* pref_provider) {
-  if (!platform_supports_channels_ ||
-      !prefs->GetBoolean(prefs::kMigratedToSiteNotificationChannels)) {
-    return;
-  }
-  std::unique_ptr<content_settings::RuleIterator> it(
-      GetRuleIterator(CONTENT_SETTINGS_TYPE_NOTIFICATIONS, std::string(),
-                      false /* incognito */));
-  while (it && it->HasNext()) {
-    const content_settings::Rule& rule = it->Next();
-    pref_provider->SetWebsiteSetting(rule.primary_pattern,
-                                     rule.secondary_pattern,
-                                     CONTENT_SETTINGS_TYPE_NOTIFICATIONS,
-                                     content_settings::ResourceIdentifier(),
-                                     new base::Value(rule.value->Clone()));
-  }
-  for (auto& channel : bridge_->GetChannels())
-    bridge_->DeleteChannel(channel.id);
-  cached_channels_.clear();
-
-  prefs->SetBoolean(prefs::kMigratedToSiteNotificationChannels, false);
-}
-
 void NotificationChannelsProviderAndroid::ClearBlockedChannelsIfNecessary(
     PrefService* prefs,
     TemplateURLService* template_url_service) {
@@ -316,7 +293,7 @@ NotificationChannelsProviderAndroid::UpdateCachedChannels() const {
     // underlying state of NotificationChannelsProviderAndroid, and allows us to
     // notify observers as soon as we detect changes to channels.
     auto* provider = const_cast<NotificationChannelsProviderAndroid*>(this);
-    content::BrowserThread::GetTaskRunnerForThread(content::BrowserThread::UI)
+    base::CreateSingleThreadTaskRunnerWithTraits({content::BrowserThread::UI})
         ->PostTask(FROM_HERE,
                    base::BindOnce(
                        &NotificationChannelsProviderAndroid::NotifyObservers,
@@ -349,7 +326,7 @@ bool NotificationChannelsProviderAndroid::SetWebsiteSetting(
   InitCachedChannels();
 
   url::Origin origin = url::Origin::Create(GURL(primary_pattern.ToString()));
-  DCHECK(!origin.unique());
+  DCHECK(!origin.opaque());
   const std::string origin_string = origin.Serialize();
 
   ContentSetting setting = content_settings::ValueToContentSetting(value);
@@ -409,7 +386,7 @@ base::Time NotificationChannelsProviderAndroid::GetWebsiteSettingLastModified(
     return base::Time();
   }
   url::Origin origin = url::Origin::Create(GURL(primary_pattern.ToString()));
-  if (origin.unique())
+  if (origin.opaque())
     return base::Time();
   const std::string origin_string = origin.Serialize();
 
@@ -425,8 +402,6 @@ base::Time NotificationChannelsProviderAndroid::GetWebsiteSettingLastModified(
 void NotificationChannelsProviderAndroid::CreateChannelIfRequired(
     const std::string& origin_string,
     NotificationChannelStatus new_channel_status) {
-  // TODO(awdf): Maybe check cached incognito status here to make sure
-  // channels are never created in incognito mode.
   auto channel_entry = cached_channels_.find(origin_string);
   if (channel_entry == cached_channels_.end()) {
     base::Time timestamp = clock_->Now();
@@ -450,7 +425,7 @@ void NotificationChannelsProviderAndroid::CreateChannelForRule(
     const content_settings::Rule& rule) {
   url::Origin origin =
       url::Origin::Create(GURL(rule.primary_pattern.ToString()));
-  DCHECK(!origin.unique());
+  DCHECK(!origin.opaque());
   const std::string origin_string = origin.Serialize();
   ContentSetting content_setting =
       content_settings::ValueToContentSetting(rule.value.get());

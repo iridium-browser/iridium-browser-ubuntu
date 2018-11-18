@@ -12,6 +12,7 @@
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
+#include "chrome/browser/ui/extensions/hosted_app_browser_controller.h"
 #include "chrome/browser/ui/views/frame/browser_frame.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/frame/browser_window_property_manager_win.h"
@@ -21,10 +22,10 @@
 #include "chrome/common/chrome_constants.h"
 #include "ui/base/material_design/material_design_controller.h"
 #include "ui/base/theme_provider.h"
+#include "ui/base/win/hwnd_metrics.h"
 #include "ui/display/win/screen_win.h"
 #include "ui/gfx/geometry/point.h"
 #include "ui/views/controls/menu/native_menu_win.h"
-#include "ui/views/resources/grit/views_resources.h"
 
 ////////////////////////////////////////////////////////////////////////////////
 // BrowserDesktopWindowTreeHostWin, public:
@@ -83,7 +84,8 @@ int BrowserDesktopWindowTreeHostWin::GetInitialShowState() const {
 }
 
 bool BrowserDesktopWindowTreeHostWin::GetClientAreaInsets(
-    gfx::Insets* insets) const {
+    gfx::Insets* insets,
+    HMONITOR monitor) const {
   // Always use default insets for opaque frame.
   if (!ShouldUseNativeFrame())
     return false;
@@ -98,14 +100,11 @@ bool BrowserDesktopWindowTreeHostWin::GetClientAreaInsets(
     // In fullscreen mode there is no frame.
     *insets = gfx::Insets();
   } else {
-    const int frame_thickness =
-        display::win::ScreenWin::GetSystemMetricsForHwnd(
-            GetHWND(), SM_CXSIZEFRAME);
+    const int frame_thickness = ui::GetFrameThickness(monitor);
     // Reduce the Windows non-client border size because we extend the border
     // into our client area in UpdateDWMFrame(). The top inset must be 0 or
     // else Windows will draw a full native titlebar outside the client area.
-    *insets = gfx::Insets(0, frame_thickness, frame_thickness,
-                          frame_thickness) - GetClientEdgeThicknesses();
+    *insets = gfx::Insets(0, frame_thickness, frame_thickness, frame_thickness);
   }
   return true;
 }
@@ -190,7 +189,9 @@ void BrowserDesktopWindowTreeHostWin::PostHandleMSG(UINT message,
     }
     case WM_ERASEBKGND: {
       gfx::Insets insets;
-      if (!did_gdi_clear_ && GetClientAreaInsets(&insets)) {
+      if (!did_gdi_clear_ &&
+          GetClientAreaInsets(
+              &insets, MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST))) {
         // This is necessary to avoid white flashing in the titlebar area around
         // the minimize/maximize/close buttons.
         DCHECK_EQ(0, insets.top());
@@ -218,6 +219,9 @@ void BrowserDesktopWindowTreeHostWin::PostHandleMSG(UINT message,
 }
 
 views::FrameMode BrowserDesktopWindowTreeHostWin::GetFrameMode() const {
+  if (IsOpaqueHostedAppFrame())
+    return views::FrameMode::CUSTOM_DRAWN;
+
   const views::FrameMode system_frame_mode =
       ShouldCustomDrawSystemTitlebar()
           ? views::FrameMode::SYSTEM_DRAWN_NO_CONTROLS
@@ -246,6 +250,10 @@ bool BrowserDesktopWindowTreeHostWin::ShouldUseNativeFrame() const {
   // context of the BrowserView destructor.
   if (!browser_view_->browser())
     return false;
+
+  if (IsOpaqueHostedAppFrame())
+    return false;
+
   // We don't theme popup or app windows, so regardless of whether or not a
   // theme is active for normal browser windows, we don't want to use the custom
   // frame for popups/apps.
@@ -288,23 +296,6 @@ void BrowserDesktopWindowTreeHostWin::UpdateDWMFrame() {
   DwmExtendFrameIntoClientArea(GetHWND(), &margins);
 }
 
-gfx::Insets
-BrowserDesktopWindowTreeHostWin::GetClientEdgeThicknesses() const {
-  // Maximized windows have no visible client edge; the content goes to
-  // the edge of the screen.  Restored windows on Windows 10 don't paint
-  // the full 3D client edge, but paint content right to the edge of the
-  // client area.
-  if (IsMaximized() ||
-      (base::win::GetVersion() >= base::win::VERSION_WIN10))
-    return gfx::Insets();
-
-  const ui::ThemeProvider* const tp = GetWidget()->GetThemeProvider();
-    return gfx::Insets(
-        0, tp->GetImageSkiaNamed(IDR_CONTENT_LEFT_SIDE)->width(),
-        tp->GetImageSkiaNamed(IDR_CONTENT_BOTTOM_CENTER)->height(),
-        tp->GetImageSkiaNamed(IDR_CONTENT_RIGHT_SIDE)->width());
-}
-
 MARGINS BrowserDesktopWindowTreeHostWin::GetDWMFrameMargins() const {
   // Don't extend the glass in at all if it won't be visible.
   if (!ShouldUseNativeFrame() || GetWidget()->IsFullscreen() ||
@@ -318,23 +309,20 @@ MARGINS BrowserDesktopWindowTreeHostWin::GetDWMFrameMargins() const {
   tabstrip_bounds =
       display::win::ScreenWin::DIPToClientRect(hwnd, tabstrip_bounds);
 
-  // Extend inwards far enough to go under the semitransparent client edges.
-  const gfx::Insets thicknesses = GetClientEdgeThicknesses();
-  gfx::Point left_top = display::win::ScreenWin::DIPToClientPoint(
-      hwnd, gfx::Point(thicknesses.left(), thicknesses.top()));
-  gfx::Point right_bottom = display::win::ScreenWin::DIPToClientPoint(
-      hwnd, gfx::Point(thicknesses.right(), thicknesses.bottom()));
+  // The 2 px (not DIP) at the inner edges of Win 7 glass are a light and dark
+  // line, so we must inset further to account for those.
+  constexpr int kWin7GlassInset = 2;
+  const int inset =
+      (base::win::GetVersion() < base::win::VERSION_WIN8) ? kWin7GlassInset : 0;
+  return MARGINS{inset, inset, tabstrip_bounds.bottom() + inset, inset};
+}
 
-  if (base::win::GetVersion() < base::win::VERSION_WIN8) {
-    // The 2 px (not DIP) at the inner edges of the glass are a light and
-    // dark line, so we must inset further to account for those.
-    constexpr gfx::Vector2d kDWMEdgeThickness(2, 2);
-    left_top += kDWMEdgeThickness;
-    right_bottom += kDWMEdgeThickness;
-  }
-
-  return MARGINS{left_top.x(), right_bottom.x(),
-                 tabstrip_bounds.bottom() + left_top.y(), right_bottom.y()};
+bool BrowserDesktopWindowTreeHostWin::IsOpaqueHostedAppFrame() const {
+  // TODO(https://crbug.com/868239): Support Windows 7 Aero glass for hosted app
+  // window titlebar controls.
+  return extensions::HostedAppBrowserController::
+             IsForExperimentalHostedAppBrowser(browser_view_->browser()) &&
+         base::win::GetVersion() < base::win::VERSION_WIN10;
 }
 
 ////////////////////////////////////////////////////////////////////////////////

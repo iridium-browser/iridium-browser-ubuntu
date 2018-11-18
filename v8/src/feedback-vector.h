@@ -51,6 +51,7 @@ enum class FeedbackSlotKind {
   kLiteral,
   kForIn,
   kInstanceOf,
+  kCloneObject,
 
   kKindsNumber  // Last value indicating number of kinds.
 };
@@ -107,6 +108,10 @@ inline bool IsTypeProfileKind(FeedbackSlotKind kind) {
   return kind == FeedbackSlotKind::kTypeProfile;
 }
 
+inline bool IsCloneObjectKind(FeedbackSlotKind kind) {
+  return kind == FeedbackSlotKind::kCloneObject;
+}
+
 inline TypeofMode GetTypeofModeFromSlotKind(FeedbackSlotKind kind) {
   DCHECK(IsLoadGlobalICKind(kind));
   return (kind == FeedbackSlotKind::kLoadGlobalInsideTypeof)
@@ -129,7 +134,7 @@ inline LanguageMode GetLanguageModeFromSlotKind(FeedbackSlotKind kind) {
 
 std::ostream& operator<<(std::ostream& os, FeedbackSlotKind kind);
 
-typedef std::vector<Handle<Object>> ObjectHandles;
+typedef std::vector<MaybeObjectHandle> MaybeObjectHandles;
 
 class FeedbackMetadata;
 
@@ -140,7 +145,7 @@ class FeedbackMetadata;
 //  - optimized code cell (weak cell or Smi marker)
 // followed by an array of feedback slots, of length determined by the feedback
 // metadata.
-class FeedbackVector : public HeapObject {
+class FeedbackVector : public HeapObject, public NeverReadOnlySpaceObject {
  public:
   // Casting.
   static inline FeedbackVector* cast(Object* obj);
@@ -196,15 +201,19 @@ class FeedbackVector : public HeapObject {
 
   // Conversion from an integer index to the underlying array to a slot.
   static inline FeedbackSlot ToSlot(int index);
-  inline Object* Get(FeedbackSlot slot) const;
-  inline Object* get(int index) const;
+  inline MaybeObject* Get(FeedbackSlot slot) const;
+  inline MaybeObject* get(int index) const;
+  inline void Set(FeedbackSlot slot, MaybeObject* value,
+                  WriteBarrierMode mode = UPDATE_WRITE_BARRIER);
+  inline void set(int index, MaybeObject* value,
+                  WriteBarrierMode mode = UPDATE_WRITE_BARRIER);
   inline void Set(FeedbackSlot slot, Object* value,
                   WriteBarrierMode mode = UPDATE_WRITE_BARRIER);
   inline void set(int index, Object* value,
                   WriteBarrierMode mode = UPDATE_WRITE_BARRIER);
 
   // Gives access to raw memory which stores the array's data.
-  inline Object** slots_start();
+  inline MaybeObject** slots_start();
 
   // Returns slot kind for given slot.
   FeedbackSlotKind GetKind(FeedbackSlot slot) const;
@@ -213,9 +222,6 @@ class FeedbackVector : public HeapObject {
 
   V8_EXPORT_PRIVATE static Handle<FeedbackVector> New(
       Isolate* isolate, Handle<SharedFunctionInfo> shared);
-
-  static Handle<FeedbackVector> Copy(Isolate* isolate,
-                                     Handle<FeedbackVector> vector);
 
 #define DEFINE_SLOT_KIND_PREDICATE(Name) \
   bool Name(FeedbackSlot slot) const { return Name##Kind(GetKind(slot)); }
@@ -242,10 +248,7 @@ class FeedbackVector : public HeapObject {
     return GetLanguageModeFromSlotKind(GetKind(slot));
   }
 
-#ifdef OBJECT_PRINT
-  // For gdb debugging.
-  void Print();
-#endif  // OBJECT_PRINT
+  static void AssertNoLegacyTypes(MaybeObject* object);
 
   DECL_PRINTER(FeedbackVector)
   DECL_VERIFIER(FeedbackVector)
@@ -286,12 +289,10 @@ class FeedbackVector : public HeapObject {
 #undef FEEDBACK_VECTOR_FIELDS
 
   static const int kHeaderSize =
-      RoundUp<kPointerAlignment>(kUnalignedHeaderSize);
+      RoundUp<kPointerAlignment>(int{kUnalignedHeaderSize});
   static const int kFeedbackSlotsOffset = kHeaderSize;
 
   class BodyDescriptor;
-  // No weak fields.
-  typedef BodyDescriptor BodyDescriptorWeak;
 
   // Garbage collection support.
   static constexpr int SizeFor(int length) {
@@ -344,11 +345,14 @@ class V8_EXPORT_PRIVATE FeedbackVectorSpec {
     return AddSlot(FeedbackSlotKind::kLoadKeyed);
   }
 
-  FeedbackSlot AddStoreICSlot(LanguageMode language_mode) {
+  FeedbackSlotKind GetStoreICSlot(LanguageMode language_mode) {
     STATIC_ASSERT(LanguageModeSize == 2);
-    return AddSlot(is_strict(language_mode)
-                       ? FeedbackSlotKind::kStoreNamedStrict
-                       : FeedbackSlotKind::kStoreNamedSloppy);
+    return is_strict(language_mode) ? FeedbackSlotKind::kStoreNamedStrict
+                                    : FeedbackSlotKind::kStoreNamedSloppy;
+  }
+
+  FeedbackSlot AddStoreICSlot(LanguageMode language_mode) {
+    return AddSlot(GetStoreICSlot(language_mode));
   }
 
   FeedbackSlot AddStoreOwnICSlot() {
@@ -362,11 +366,14 @@ class V8_EXPORT_PRIVATE FeedbackVectorSpec {
                        : FeedbackSlotKind::kStoreGlobalSloppy);
   }
 
-  FeedbackSlot AddKeyedStoreICSlot(LanguageMode language_mode) {
+  FeedbackSlotKind GetKeyedStoreICSlotKind(LanguageMode language_mode) {
     STATIC_ASSERT(LanguageModeSize == 2);
-    return AddSlot(is_strict(language_mode)
-                       ? FeedbackSlotKind::kStoreKeyedStrict
-                       : FeedbackSlotKind::kStoreKeyedSloppy);
+    return is_strict(language_mode) ? FeedbackSlotKind::kStoreKeyedStrict
+                                    : FeedbackSlotKind::kStoreKeyedSloppy;
+  }
+
+  FeedbackSlot AddKeyedStoreICSlot(LanguageMode language_mode) {
+    return AddSlot(GetKeyedStoreICSlotKind(language_mode));
   }
 
   FeedbackSlot AddStoreInArrayLiteralICSlot() {
@@ -395,6 +402,10 @@ class V8_EXPORT_PRIVATE FeedbackVectorSpec {
 
   FeedbackSlot AddTypeProfileSlot();
 
+  FeedbackSlot AddCloneObjectSlot() {
+    return AddSlot(FeedbackSlotKind::kCloneObject);
+  }
+
 #ifdef OBJECT_PRINT
   // For gdb debugging.
   void Print();
@@ -410,6 +421,26 @@ class V8_EXPORT_PRIVATE FeedbackVectorSpec {
   }
 
   ZoneVector<unsigned char> slot_kinds_;
+
+  friend class SharedFeedbackSlot;
+};
+
+// Helper class that creates a feedback slot on-demand.
+class SharedFeedbackSlot {
+ public:
+  // FeedbackSlot default constructor constructs an invalid slot.
+  SharedFeedbackSlot(FeedbackVectorSpec* spec, FeedbackSlotKind kind)
+      : kind_(kind), spec_(spec) {}
+
+  FeedbackSlot Get() {
+    if (slot_.IsInvalid()) slot_ = spec_->AddSlot(kind_);
+    return slot_;
+  }
+
+ private:
+  FeedbackSlotKind kind_;
+  FeedbackSlot slot_;
+  FeedbackVectorSpec* spec_;
 };
 
 // FeedbackMetadata is an array-like object with a slot count (indicating how
@@ -442,11 +473,6 @@ class FeedbackMetadata : public HeapObject {
   V8_EXPORT_PRIVATE static Handle<FeedbackMetadata> New(
       Isolate* isolate, const FeedbackVectorSpec* spec = nullptr);
 
-#ifdef OBJECT_PRINT
-  // For gdb debugging.
-  void Print();
-#endif  // OBJECT_PRINT
-
   DECL_PRINTER(FeedbackMetadata)
   DECL_VERIFIER(FeedbackMetadata)
 
@@ -464,8 +490,6 @@ class FeedbackMetadata : public HeapObject {
   static const int kHeaderSize = kSlotCountOffset + kInt32Size;
 
   class BodyDescriptor;
-  // No weak fields.
-  typedef BodyDescriptor BodyDescriptorWeak;
 
  private:
   friend class AccessorAssembler;
@@ -494,14 +518,6 @@ class FeedbackMetadata : public HeapObject {
   DISALLOW_IMPLICIT_CONSTRUCTORS(FeedbackMetadata);
 };
 
-// The following asserts protect an optimization in type feedback vector
-// code that looks into the contents of a slot assuming to find a String,
-// a Symbol, an AllocationSite, a WeakCell, or a FixedArray.
-STATIC_ASSERT(WeakCell::kSize >= 2 * kPointerSize);
-STATIC_ASSERT(WeakCell::kValueOffset ==
-              AllocationSite::kTransitionInfoOrBoilerplateOffset);
-STATIC_ASSERT(WeakCell::kValueOffset == FixedArray::kLengthOffset);
-STATIC_ASSERT(WeakCell::kValueOffset == Name::kHashFieldSlot);
 // Verify that an empty hash field looks like a tagged object, but can't
 // possibly be confused with a pointer.
 STATIC_ASSERT((Name::kEmptyHashField & kHeapObjectTag) == kHeapObjectTag);
@@ -592,8 +608,8 @@ class FeedbackNexus final {
 
   InlineCacheState StateFromFeedback() const;
   int ExtractMaps(MapHandles* maps) const;
-  MaybeHandle<Object> FindHandlerForMap(Handle<Map> map) const;
-  bool FindHandlers(ObjectHandles* code_list, int length = -1) const;
+  MaybeObjectHandle FindHandlerForMap(Handle<Map> map) const;
+  bool FindHandlers(MaybeObjectHandles* code_list, int length = -1) const;
 
   bool IsCleared() const {
     InlineCacheState state = StateFromFeedback();
@@ -603,19 +619,22 @@ class FeedbackNexus final {
   // Clear() returns true if the state of the underlying vector was changed.
   bool Clear();
   void ConfigureUninitialized();
-  void ConfigurePremonomorphic();
+  void ConfigurePremonomorphic(Handle<Map> receiver_map);
+  // ConfigureMegamorphic() returns true if the state of the underlying vector
+  // was changed. Extra feedback is cleared if the 0 parameter version is used.
+  bool ConfigureMegamorphic();
   bool ConfigureMegamorphic(IcCheckType property_type);
 
-  inline Object* GetFeedback() const;
-  inline Object* GetFeedbackExtra() const;
+  inline MaybeObject* GetFeedback() const;
+  inline MaybeObject* GetFeedbackExtra() const;
 
   inline Isolate* GetIsolate() const;
 
   void ConfigureMonomorphic(Handle<Name> name, Handle<Map> receiver_map,
-                            Handle<Object> handler);
+                            const MaybeObjectHandle& handler);
 
   void ConfigurePolymorphic(Handle<Name> name, MapHandles const& maps,
-                            ObjectHandles* handlers);
+                            MaybeObjectHandles* handlers);
 
   BinaryOperationHint GetBinaryOperationFeedback() const;
   CompareOperationHint GetCompareOperationFeedback() const;
@@ -654,7 +673,11 @@ class FeedbackNexus final {
   // Returns false if given combination of indices is not allowed.
   bool ConfigureLexicalVarMode(int script_context_index,
                                int context_slot_index);
-  void ConfigureHandlerMode(Handle<Object> handler);
+  void ConfigureHandlerMode(const MaybeObjectHandle& handler);
+
+  // For CloneObject ICs
+  static constexpr int kCloneObjectPolymorphicEntrySize = 2;
+  void ConfigureCloneObject(Handle<Map> source_map, Handle<Map> result_map);
 
 // Bit positions in a smi that encodes lexical environment variable access.
 #define LEXICAL_MODE_BIT_FIELDS(V, _)  \
@@ -678,14 +701,17 @@ class FeedbackNexus final {
   std::vector<int> GetSourcePositions() const;
   std::vector<Handle<String>> GetTypesForSourcePositions(uint32_t pos) const;
 
- protected:
   inline void SetFeedback(Object* feedback,
+                          WriteBarrierMode mode = UPDATE_WRITE_BARRIER);
+  inline void SetFeedback(MaybeObject* feedback,
                           WriteBarrierMode mode = UPDATE_WRITE_BARRIER);
   inline void SetFeedbackExtra(Object* feedback_extra,
                                WriteBarrierMode mode = UPDATE_WRITE_BARRIER);
+  inline void SetFeedbackExtra(MaybeObject* feedback_extra,
+                               WriteBarrierMode mode = UPDATE_WRITE_BARRIER);
 
-  Handle<FixedArray> EnsureArrayOfSize(int length);
-  Handle<FixedArray> EnsureExtraArrayOfSize(int length);
+  Handle<WeakFixedArray> EnsureArrayOfSize(int length);
+  Handle<WeakFixedArray> EnsureExtraArrayOfSize(int length);
 
  private:
   // The reason for having a vector handle and a raw pointer is that we can and

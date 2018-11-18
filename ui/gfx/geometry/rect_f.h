@@ -23,7 +23,7 @@ namespace gfx {
 class InsetsF;
 
 // A floating version of gfx::Rect.
-class GFX_EXPORT RectF {
+class GEOMETRY_EXPORT RectF {
  public:
   constexpr RectF() = default;
   constexpr RectF(float width, float height) : size_(width, height) {}
@@ -69,6 +69,17 @@ class GFX_EXPORT RectF {
   constexpr PointF top_right() const { return PointF(right(), y()); }
   constexpr PointF bottom_left() const { return PointF(x(), bottom()); }
   constexpr PointF bottom_right() const { return PointF(right(), bottom()); }
+
+  constexpr PointF left_center() const {
+    return PointF(x(), y() + height() / 2);
+  }
+  constexpr PointF top_center() const { return PointF(x() + width() / 2, y()); }
+  constexpr PointF right_center() const {
+    return PointF(right(), y() + height() / 2);
+  }
+  constexpr PointF bottom_center() const {
+    return PointF(x() + width() / 2, bottom());
+  }
 
   Vector2dF OffsetFromOrigin() const { return Vector2dF(x(), y()); }
 
@@ -149,6 +160,9 @@ class GFX_EXPORT RectF {
   // at given |size|.
   void ClampToCenteredSize(const SizeF& size);
 
+  // Transpose x and y axis.
+  void Transpose();
+
   // Splits |this| in two halves, |left_half| and |right_half|.
   void SplitVertically(RectF* left_half, RectF* right_half) const;
 
@@ -211,9 +225,9 @@ inline RectF operator+(const Vector2dF& lhs, const RectF& rhs) {
   return rhs + lhs;
 }
 
-GFX_EXPORT RectF IntersectRects(const RectF& a, const RectF& b);
-GFX_EXPORT RectF UnionRects(const RectF& a, const RectF& b);
-GFX_EXPORT RectF SubtractRects(const RectF& a, const RectF& b);
+GEOMETRY_EXPORT RectF IntersectRects(const RectF& a, const RectF& b);
+GEOMETRY_EXPORT RectF UnionRects(const RectF& a, const RectF& b);
+GEOMETRY_EXPORT RectF SubtractRects(const RectF& a, const RectF& b);
 
 inline RectF ScaleRect(const RectF& r, float x_scale, float y_scale) {
   return RectF(r.x() * x_scale, r.y() * y_scale,
@@ -230,7 +244,7 @@ inline RectF ScaleRect(const RectF& r, float scale) {
 // points", except that we consider points on the right/bottom edges of the
 // rect to be outside the rect.  So technically one or both points will not be
 // contained within the rect, because they will appear on one of these edges.
-GFX_EXPORT RectF BoundingRect(const PointF& p1, const PointF& p2);
+GEOMETRY_EXPORT RectF BoundingRect(const PointF& p1, const PointF& p2);
 
 // This is declared here for use in gtest-based unit tests but is defined in
 // the //ui/gfx:test_support target. Depend on that to use this in your unit

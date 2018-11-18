@@ -29,13 +29,13 @@ void IterateFileCacheInternal(
 }
 
 // Runs the callback with arguments.
-void RunGetResourceEntryCallback(const GetResourceEntryCallback& callback,
+void RunGetResourceEntryCallback(GetResourceEntryCallback callback,
                                  std::unique_ptr<ResourceEntry> entry,
                                  FileError error) {
-  DCHECK(!callback.is_null());
+  DCHECK(callback);
   if (error != FILE_ERROR_OK)
     entry.reset();
-  callback.Run(error, std::move(entry));
+  std::move(callback).Run(error, std::move(entry));
 }
 
 // Runs the callback with arguments.
@@ -43,7 +43,7 @@ void RunReadDirectoryCallback(
     const DebugInfoCollector::ReadDirectoryCallback& callback,
     std::unique_ptr<ResourceEntryVector> entries,
     FileError error) {
-  DCHECK(!callback.is_null());
+  DCHECK(callback);
   if (error != FILE_ERROR_OK)
     entries.reset();
   callback.Run(error, std::move(entries));
@@ -62,32 +62,28 @@ DebugInfoCollector::DebugInfoCollector(
   DCHECK(file_system_);
 }
 
-DebugInfoCollector::~DebugInfoCollector() {
-}
+DebugInfoCollector::~DebugInfoCollector() = default;
 
-void DebugInfoCollector::GetResourceEntry(
-    const base::FilePath& file_path,
-    const GetResourceEntryCallback& callback) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK(!callback.is_null());
+void DebugInfoCollector::GetResourceEntry(const base::FilePath& file_path,
+                                          GetResourceEntryCallback callback) {
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  DCHECK(callback);
 
   std::unique_ptr<ResourceEntry> entry(new ResourceEntry);
   ResourceEntry* entry_ptr = entry.get();
   base::PostTaskAndReplyWithResult(
-      blocking_task_runner_.get(),
-      FROM_HERE,
-      base::Bind(&internal::ResourceMetadata::GetResourceEntryByPath,
-                 base::Unretained(metadata_),
-                 file_path,
-                 entry_ptr),
-      base::Bind(&RunGetResourceEntryCallback, callback, base::Passed(&entry)));
+      blocking_task_runner_.get(), FROM_HERE,
+      base::BindOnce(&internal::ResourceMetadata::GetResourceEntryByPath,
+                     base::Unretained(metadata_), file_path, entry_ptr),
+      base::BindOnce(&RunGetResourceEntryCallback, std::move(callback),
+                     base::Passed(&entry)));
 }
 
 void DebugInfoCollector::ReadDirectory(
     const base::FilePath& file_path,
     const ReadDirectoryCallback& callback) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK(!callback.is_null());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  DCHECK(callback);
 
   std::unique_ptr<ResourceEntryVector> entries(new ResourceEntryVector);
   ResourceEntryVector* entries_ptr = entries.get();
@@ -104,9 +100,9 @@ void DebugInfoCollector::ReadDirectory(
 void DebugInfoCollector::IterateFileCache(
     const IterateFileCacheCallback& iteration_callback,
     const base::Closure& completion_callback) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK(!iteration_callback.is_null());
-  DCHECK(!completion_callback.is_null());
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  DCHECK(iteration_callback);
+  DCHECK(completion_callback);
 
   blocking_task_runner_->PostTaskAndReply(
       FROM_HERE,
@@ -115,15 +111,14 @@ void DebugInfoCollector::IterateFileCache(
       completion_callback);
 }
 
-void DebugInfoCollector::GetMetadata(
-    const GetFilesystemMetadataCallback& callback) {
-  DCHECK(thread_checker_.CalledOnValidThread());
-  DCHECK(!callback.is_null());
+void DebugInfoCollector::GetMetadata(GetFilesystemMetadataCallback callback) {
+  DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+  DCHECK(callback);
 
   // Currently, this is just a proxy to the FileSystem.
   // TODO(hidehiko): Move the implementation to here to simplify the
   // FileSystem's implementation. crbug.com/237088
-  file_system_->GetMetadata(callback);
+  file_system_->GetMetadata(std::move(callback));
 }
 
 }  // namespace drive

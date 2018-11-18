@@ -16,6 +16,8 @@ const char* PaintInvalidationReasonToString(PaintInvalidationReason reason) {
       return "incremental";
     case PaintInvalidationReason::kRectangle:
       return "invalidate paint rectangle";
+    case PaintInvalidationReason::kHitTest:
+      return "hit testing change";
     case PaintInvalidationReason::kFull:
       return "full";
     case PaintInvalidationReason::kStyle:
@@ -50,16 +52,26 @@ const char* PaintInvalidationReasonToString(PaintInvalidationReason reason) {
       return "DocumentMarker change";
     case PaintInvalidationReason::kImage:
       return "image";
+    case PaintInvalidationReason::kUncacheable:
+      return "uncacheable";
+    case PaintInvalidationReason::kJustCreated:
+      return "just created";
+    case PaintInvalidationReason::kReordered:
+      return "reordered";
+    case PaintInvalidationReason::kChunkAppeared:
+      return "chunk appeared";
+    case PaintInvalidationReason::kChunkDisappeared:
+      return "chunk disappeared";
     case PaintInvalidationReason::kChunkUncacheable:
       return "chunk uncacheable";
     case PaintInvalidationReason::kChunkReordered:
       return "chunk reordered";
     case PaintInvalidationReason::kPaintProperty:
       return "paint property change";
+    case PaintInvalidationReason::kFullLayer:
+      return "full layer";
     case PaintInvalidationReason::kForTesting:
       return "for testing";
-    case PaintInvalidationReason::kDelayedFull:
-      return "delayed full";
   }
   NOTREACHED();
   return "";

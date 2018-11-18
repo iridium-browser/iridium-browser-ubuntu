@@ -28,7 +28,6 @@ class GFX_EXPORT NativePixmapDmaBuf : public gfx::NativePixmap {
                      const gfx::NativePixmapHandle& handle);
 
   // NativePixmap:
-  void* GetEGLClientBuffer() const override;
   bool AreDmaBufFdsValid() const override;
   size_t GetDmaBufFdCount() const override;
   int GetDmaBufFd(size_t plane) const override;
@@ -43,7 +42,8 @@ class GFX_EXPORT NativePixmapDmaBuf : public gfx::NativePixmap {
                             gfx::OverlayTransform plane_transform,
                             const gfx::Rect& display_bounds,
                             const gfx::RectF& crop_rect,
-                            bool enable_blend) override;
+                            bool enable_blend,
+                            std::unique_ptr<gfx::GpuFence> gpu_fence) override;
   gfx::NativePixmapHandle ExportHandle() override;
 
  protected:

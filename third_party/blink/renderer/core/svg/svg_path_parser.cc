@@ -234,9 +234,9 @@ bool SVGPathNormalizer::DecomposeArcToCubic(
 
   float theta_arc = theta2 - theta1;
   if (theta_arc < 0 && arc_segment.arc_sweep)
-    theta_arc += twoPiFloat;
+    theta_arc += kTwoPiFloat;
   else if (theta_arc > 0 && !arc_segment.arc_sweep)
-    theta_arc -= twoPiFloat;
+    theta_arc -= kTwoPiFloat;
 
   point_transform.MakeIdentity();
   point_transform.Rotate(angle);
@@ -245,7 +245,7 @@ bool SVGPathNormalizer::DecomposeArcToCubic(
   // Some results of atan2 on some platform implementations are not exact
   // enough. So that we get more cubic curves than expected here. Adding 0.001f
   // reduces the count of sgements to the correct count.
-  int segments = ceilf(fabsf(theta_arc / (piOverTwoFloat + 0.001f)));
+  int segments = ceilf(fabsf(theta_arc / (kPiOverTwoFloat + 0.001f)));
   for (int i = 0; i < segments; ++i) {
     float start_theta = theta1 + i * theta_arc / segments;
     float end_theta = theta1 + (i + 1) * theta_arc / segments;
@@ -275,6 +275,32 @@ bool SVGPathNormalizer::DecomposeArcToCubic(
     consumer_->EmitSegment(cubic_segment);
   }
   return true;
+}
+
+void SVGPathAbsolutizer::EmitSegment(const PathSegmentData& segment) {
+  PathSegmentData absolute_segment = segment;
+  if (!IsAbsolutePathSegType(segment.command)) {
+    absolute_segment.command = ToAbsolutePathSegType(segment.command);
+    if (segment.command != kPathSegArcRel) {
+      absolute_segment.point1 += current_point_;
+      absolute_segment.point2 += current_point_;
+    }
+    absolute_segment.target_point += current_point_;
+  }
+  consumer_->EmitSegment(absolute_segment);
+
+  if (absolute_segment.command == kPathSegClosePath) {
+    current_point_ = sub_path_point_;
+  } else if (absolute_segment.command == kPathSegLineToHorizontalAbs) {
+    current_point_.SetX(absolute_segment.target_point.X());
+  } else if (absolute_segment.command == kPathSegLineToVerticalAbs) {
+    current_point_.SetY(absolute_segment.target_point.Y());
+  } else {
+    current_point_ = absolute_segment.target_point;
+    if (absolute_segment.command == kPathSegMoveToAbs) {
+      sub_path_point_ = current_point_;
+    }
+  }
 }
 
 }  // namespace blink

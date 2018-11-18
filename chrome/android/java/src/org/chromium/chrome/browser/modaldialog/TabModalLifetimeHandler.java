@@ -5,6 +5,7 @@
 package org.chromium.chrome.browser.modaldialog;
 
 import org.chromium.chrome.browser.ChromeActivity;
+import org.chromium.chrome.browser.modaldialog.ModalDialogManager.ModalDialogType;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabObserver;
@@ -27,7 +28,8 @@ public class TabModalLifetimeHandler {
         @Override
         public void onDestroyed(Tab tab) {
             if (mActiveTab == tab) {
-                mManager.cancelAllDialogs(ModalDialogManager.TAB_MODAL);
+                mManager.dismissDialogsOfType(
+                        ModalDialogType.TAB, DialogDismissalCause.TAB_DESTROYED);
                 mActiveTab = null;
             }
         }
@@ -47,17 +49,18 @@ public class TabModalLifetimeHandler {
     public TabModalLifetimeHandler(ChromeActivity activity, ModalDialogManager manager) {
         mManager = manager;
         mPresenter = new TabModalPresenter(activity);
-        mManager.registerPresenter(mPresenter, ModalDialogManager.TAB_MODAL);
+        mManager.registerPresenter(mPresenter, ModalDialogType.TAB);
         mHasBottomControls = activity.getBottomSheet() != null;
 
         TabModelSelector tabModelSelector = activity.getTabModelSelector();
         mTabModelObserver = new TabModelSelectorTabModelObserver(tabModelSelector) {
             @Override
-            public void didSelectTab(Tab tab, TabModel.TabSelectionType type, int lastId) {
+            public void didSelectTab(Tab tab, @TabModel.TabSelectionType int type, int lastId) {
                 // Do not use lastId here since it can be the selected tab's ID if model is switched
                 // inside tab switcher.
                 if (tab != mActiveTab) {
-                    mManager.cancelAllDialogs(ModalDialogManager.TAB_MODAL);
+                    mManager.dismissDialogsOfType(
+                            ModalDialogType.TAB, DialogDismissalCause.TAB_SWITCHED);
                     if (mActiveTab != null) mActiveTab.removeObserver(mTabObserver);
 
                     mActiveTab = tab;
@@ -86,7 +89,7 @@ public class TabModalLifetimeHandler {
      */
     public boolean handleBackPress() {
         if (mPresenter.getModalDialog() == null) return false;
-        mPresenter.cancelCurrentDialog();
+        mPresenter.dismissCurrentDialog(DialogDismissalCause.NAVIGATE_BACK_OR_TOUCH_OUTSIDE);
         return true;
     }
 
@@ -101,9 +104,9 @@ public class TabModalLifetimeHandler {
     private void updateSuspensionState() {
         assert mActiveTab != null;
         if (mActiveTab.isUserInteractable()) {
-            mManager.resumeType(ModalDialogManager.TAB_MODAL);
+            mManager.resumeType(ModalDialogType.TAB);
         } else {
-            mManager.suspendType(ModalDialogManager.TAB_MODAL);
+            mManager.suspendType(ModalDialogType.TAB);
         }
     }
 }

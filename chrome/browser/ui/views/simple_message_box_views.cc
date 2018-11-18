@@ -21,7 +21,7 @@
 #include "components/strings/grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
-#include "ui/base/ui_features.h"
+#include "ui/display/screen.h"
 #include "ui/gfx/native_widget_types.h"
 #include "ui/views/controls/message_box_view.h"
 #include "ui/views/widget/widget.h"
@@ -30,6 +30,10 @@
 #if defined(OS_WIN)
 #include "ui/base/win/message_box_win.h"
 #include "ui/views/win/hwnd_util.h"
+#endif
+
+#if defined(OS_MACOSX)
+#include "chrome/browser/ui/cocoa/simple_message_box_cocoa.h"
 #endif
 
 namespace {
@@ -114,9 +118,21 @@ chrome::MessageBoxResult SimpleMessageBoxViews::Show(
                                 : chrome::MESSAGE_BOX_RESULT_NO);
     return chrome::MESSAGE_BOX_RESULT_DEFERRED;
   }
+#elif defined(OS_MACOSX)
+  if (!base::MessageLoopForUI::IsCurrent() ||
+      !base::RunLoop::IsRunningOnCurrentThread() ||
+      !ui::ResourceBundle::HasSharedInstance()) {
+    // Even though this function could return a value synchronously here in
+    // principle, in practice call sites do not expect any behavior other than a
+    // return of DEFERRED and an invocation of the callback.
+    std::move(callback).Run(
+        chrome::ShowMessageBoxCocoa(message, type, checkbox_text));
+    return chrome::MESSAGE_BOX_RESULT_DEFERRED;
+  }
 #else
   if (!base::MessageLoopForUI::IsCurrent() ||
-      !ui::ResourceBundle::HasSharedInstance()) {
+      !ui::ResourceBundle::HasSharedInstance() ||
+      !display::Screen::GetScreen()) {
     LOG(ERROR) << "Unable to show a dialog outside the UI thread message loop: "
                << title << " - " << message;
     std::move(callback).Run(chrome::MESSAGE_BOX_RESULT_NO);
@@ -262,7 +278,6 @@ void SimpleMessageBoxViews::Done() {
 
 namespace chrome {
 
-#if !defined(OS_MACOSX) || BUILDFLAG(MAC_VIEWS_BROWSER)
 void ShowWarningMessageBox(gfx::NativeWindow parent,
                            const base::string16& title,
                            const base::string16& message) {
@@ -306,7 +321,5 @@ MessageBoxResult ShowMessageBoxWithButtonText(gfx::NativeWindow parent,
                                      chrome::MESSAGE_BOX_TYPE_QUESTION,
                                      yes_text, no_text, base::string16());
 }
-
-#endif  // !OS_MACOSX || BUILDFLAG(MAC_VIEWS_BROWSER)
 
 }  // namespace chrome

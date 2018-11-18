@@ -17,13 +17,15 @@
 #include "base/process/process_iterator.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/post_task.h"
+#include "base/threading/scoped_blocking_call.h"
 #include "base/threading/thread.h"
-#include "base/threading/thread_restrictions.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "components/version_info/version_info.h"
 #include "content/public/browser/browser_child_process_host.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/process_type.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -80,7 +82,7 @@ ProcessData* MemoryDetails::ChromeBrowser() {
 
 void MemoryDetails::CollectProcessData(
     const std::vector<ProcessMemoryInformation>& child_info) {
-  base::AssertBlockingAllowed();
+  base::ScopedBlockingCall scoped_blocking_call(base::BlockingType::MAY_BLOCK);
 
   // Clear old data.
   process_data_[0].processes.clear();
@@ -119,7 +121,7 @@ void MemoryDetails::CollectProcessData(
     CollectProcessDataForChromeProcess(child_info, pid, chrome_processes);
 
   // Finally return to the browser thread.
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::UI},
       base::Bind(&MemoryDetails::CollectChildInfoOnUIThread, this));
 }

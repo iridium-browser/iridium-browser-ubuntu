@@ -34,9 +34,6 @@
 #if defined(IsMinimized)
 #undef IsMinimized
 #endif
-#if defined(CreateWindow)
-#undef CreateWindow
-#endif
 #endif
 
 namespace base {
@@ -52,6 +49,7 @@ namespace ui {
 class Accelerator;
 class Compositor;
 class DefaultThemeProvider;
+class GestureRecognizer;
 class InputMethod;
 class Layer;
 class NativeTheme;
@@ -327,14 +325,6 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   // during application shutdown when the last non-secondary widget is closed.
   static void CloseAllSecondaryWidgets();
 
-  // Converts a rectangle from one Widget's coordinate system to another's.
-  // Returns false if the conversion couldn't be made, because either these two
-  // Widgets do not have a common ancestor or they are not on the screen yet.
-  // The value of |*rect| won't be changed when false is returned.
-  static bool ConvertRect(const Widget* source,
-                          const Widget* target,
-                          gfx::Rect* rect);
-
   // Retrieves the Widget implementation associated with the given
   // NativeView or Window, or NULL if the supplied handle has no associated
   // Widget.
@@ -428,6 +418,9 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   // fit the entire size of the RootView. The RootView takes ownership of this
   // View, unless it is set as not being parent-owned.
   void SetContentsView(View* view);
+
+  // NOTE: This may not be the same view as WidgetDelegate::GetContentsView().
+  // See RootView::GetContentsView().
   View* GetContentsView();
 
   // Returns the bounds of the Widget in screen coordinates.
@@ -449,9 +442,8 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   // Sizes the window to the specified size and centerizes it.
   void CenterWindow(const gfx::Size& size);
 
-  // Like SetBounds(), but ensures the Widget is fully visible on screen,
-  // resizing and/or repositioning as necessary. This is only useful for
-  // non-child widgets.
+  // Like SetBounds(), but ensures the Widget is fully visible on screen or
+  // parent widget, resizing and/or repositioning as necessary.
   void SetBoundsConstrained(const gfx::Rect& bounds);
 
   // Sets whether animations that occur when visibility is changed are enabled.
@@ -552,6 +544,12 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   // in the Z-order to become visible, depending on the capabilities of the
   // underlying windowing system.
   void SetOpacity(float opacity);
+
+  // Sets the aspect ratio of the widget's content, which will be maintained
+  // during interactive resizing. This size disregards title bar and borders.
+  // Once set, some platforms ensure the content will only size to integer
+  // multiples of |aspect_ratio|.
+  void SetAspectRatio(const gfx::SizeF& aspect_ratio);
 
   // Flashes the frame of the window to draw attention to it. Currently only
   // implemented on Windows for non-Aura.
@@ -772,6 +770,10 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   // Whether the widget supports translucency.
   bool IsTranslucentWindowOpacitySupported() const;
 
+  // Returns the gesture recognizer which can handle touch/gesture events on
+  // this.
+  ui::GestureRecognizer* GetGestureRecognizer();
+
   // Called when the delegate's CanResize or CanMaximize changes.
   void OnSizeConstraintsChanged();
 
@@ -891,7 +893,7 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
 
   base::ObserverList<WidgetObserver> observers_;
 
-  base::ObserverList<WidgetRemovalsObserver> removals_observers_;
+  base::ObserverList<WidgetRemovalsObserver>::Unchecked removals_observers_;
 
   // Non-owned pointer to the Widget's delegate. If a NULL delegate is supplied
   // to Init() a default WidgetDelegate is created.

@@ -5,41 +5,44 @@
 #ifndef MEDIA_GPU_VAAPI_VAAPI_H264_ACCELERATOR_H_
 #define MEDIA_GPU_VAAPI_VAAPI_H264_ACCELERATOR_H_
 
-#include <va/va.h>
-
 #include "base/sequence_checker.h"
 #include "media/filters/vp9_parser.h"
 #include "media/gpu/h264_decoder.h"
 
+// Verbatim from va/va.h, where typedef is used.
+typedef struct _VAPictureH264 VAPictureH264;
+
 namespace media {
 
+template <class T> class DecodeSurfaceHandler;
 class H264Picture;
-class VaapiVideoDecodeAccelerator;
+class VASurface;
 class VaapiWrapper;
 
 class VaapiH264Accelerator : public H264Decoder::H264Accelerator {
  public:
-  VaapiH264Accelerator(VaapiVideoDecodeAccelerator* vaapi_dec,
+  VaapiH264Accelerator(DecodeSurfaceHandler<VASurface>* vaapi_dec,
                        const scoped_refptr<VaapiWrapper> vaapi_wrapper);
   ~VaapiH264Accelerator() override;
 
   // H264Decoder::H264Accelerator implementation.
   scoped_refptr<H264Picture> CreateH264Picture() override;
-  bool SubmitFrameMetadata(const H264SPS* sps,
-                           const H264PPS* pps,
-                           const H264DPB& dpb,
-                           const H264Picture::Vector& ref_pic_listp0,
-                           const H264Picture::Vector& ref_pic_listb0,
-                           const H264Picture::Vector& ref_pic_listb1,
-                           const scoped_refptr<H264Picture>& pic) override;
-  bool SubmitSlice(const H264PPS* pps,
-                   const H264SliceHeader* slice_hdr,
-                   const H264Picture::Vector& ref_pic_list0,
-                   const H264Picture::Vector& ref_pic_list1,
-                   const scoped_refptr<H264Picture>& pic,
-                   const uint8_t* data,
-                   size_t size) override;
-  bool SubmitDecode(const scoped_refptr<H264Picture>& pic) override;
+  Status SubmitFrameMetadata(const H264SPS* sps,
+                             const H264PPS* pps,
+                             const H264DPB& dpb,
+                             const H264Picture::Vector& ref_pic_listp0,
+                             const H264Picture::Vector& ref_pic_listb0,
+                             const H264Picture::Vector& ref_pic_listb1,
+                             const scoped_refptr<H264Picture>& pic) override;
+  Status SubmitSlice(const H264PPS* pps,
+                     const H264SliceHeader* slice_hdr,
+                     const H264Picture::Vector& ref_pic_list0,
+                     const H264Picture::Vector& ref_pic_list1,
+                     const scoped_refptr<H264Picture>& pic,
+                     const uint8_t* data,
+                     size_t size,
+                     const std::vector<SubsampleEntry>& subsamples) override;
+  Status SubmitDecode(const scoped_refptr<H264Picture>& pic) override;
   bool OutputPicture(const scoped_refptr<H264Picture>& pic) override;
   void Reset() override;
 
@@ -50,7 +53,7 @@ class VaapiH264Accelerator : public H264Decoder::H264Accelerator {
                              int num_pics);
 
   const scoped_refptr<VaapiWrapper> vaapi_wrapper_;
-  VaapiVideoDecodeAccelerator* vaapi_dec_;
+  DecodeSurfaceHandler<VASurface>* vaapi_dec_;
 
   SEQUENCE_CHECKER(sequence_checker_);
 

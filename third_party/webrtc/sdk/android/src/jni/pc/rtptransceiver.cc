@@ -62,6 +62,20 @@ ScopedJavaLocalRef<jobject> NativeToJavaRtpTransceiver(
       env, jlongFromPointer(transceiver.release()));
 }
 
+JavaRtpTransceiverGlobalOwner::JavaRtpTransceiverGlobalOwner(
+    JNIEnv* env,
+    const JavaRef<jobject>& j_transceiver)
+    : j_transceiver_(env, j_transceiver){};
+
+JavaRtpTransceiverGlobalOwner::JavaRtpTransceiverGlobalOwner(
+    JavaRtpTransceiverGlobalOwner&& other) = default;
+
+JavaRtpTransceiverGlobalOwner::~JavaRtpTransceiverGlobalOwner() {
+  if (j_transceiver_.obj()) {
+    Java_RtpTransceiver_dispose(AttachCurrentThreadIfNeeded(), j_transceiver_);
+  }
+}
+
 ScopedJavaLocalRef<jobject> JNI_RtpTransceiver_GetMediaType(
     JNIEnv* jni,
     const base::android::JavaParamRef<jclass>&,
@@ -75,7 +89,7 @@ ScopedJavaLocalRef<jstring> JNI_RtpTransceiver_GetMid(
     JNIEnv* jni,
     const base::android::JavaParamRef<jclass>&,
     jlong j_rtp_transceiver_pointer) {
-  rtc::Optional<std::string> mid =
+  absl::optional<std::string> mid =
       reinterpret_cast<RtpTransceiverInterface*>(j_rtp_transceiver_pointer)
           ->mid();
   return NativeToJavaString(jni, mid);
@@ -119,7 +133,7 @@ ScopedJavaLocalRef<jobject> JNI_RtpTransceiver_CurrentDirection(
     JNIEnv* jni,
     const base::android::JavaParamRef<jclass>&,
     jlong j_rtp_transceiver_pointer) {
-  rtc::Optional<RtpTransceiverDirection> direction =
+  absl::optional<RtpTransceiverDirection> direction =
       reinterpret_cast<RtpTransceiverInterface*>(j_rtp_transceiver_pointer)
           ->current_direction();
   return direction ? NativeToJavaRtpTransceiverDirection(jni, *direction)

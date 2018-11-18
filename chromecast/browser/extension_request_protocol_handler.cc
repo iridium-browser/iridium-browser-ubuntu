@@ -4,9 +4,14 @@
 
 #include "chromecast/browser/extension_request_protocol_handler.h"
 
+#include "base/bind.h"
+#include "chromecast/common/cast_redirect_manifest_handler.h"
+#include "content/common/net/url_request_user_data.h"
+#include "extensions/browser/extension_protocols.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/info_map.h"
 #include "extensions/common/extension.h"
+#include "net/base/upload_data_stream.h"
 #include "net/url_request/redirect_info.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_job.h"
@@ -15,6 +20,72 @@
 namespace chromecast {
 
 namespace {
+
+class UploadDataStreamRedirect : public net::UploadDataStream {
+ public:
+  UploadDataStreamRedirect(net::UploadDataStream* parent);
+  ~UploadDataStreamRedirect() override;
+
+ private:
+  // net::UploadDataStream implementation:
+  int InitInternal(const net::NetLogWithSource& net_log) override;
+  int ReadInternal(net::IOBuffer* buf, int buf_len) override;
+  void ResetInternal() override;
+
+  void PostInit();
+  void PostRead();
+
+  net::UploadDataStream* stream_;
+
+  DISALLOW_COPY_AND_ASSIGN(UploadDataStreamRedirect);
+};
+
+UploadDataStreamRedirect::UploadDataStreamRedirect(
+    net::UploadDataStream* parent)
+    : net::UploadDataStream(parent->is_chunked(), 0), stream_(parent) {}
+
+UploadDataStreamRedirect::~UploadDataStreamRedirect() {}
+
+void UploadDataStreamRedirect::PostInit() {
+  if (!is_chunked())
+    SetSize(stream_->size());
+}
+
+void UploadDataStreamRedirect::PostRead() {
+  if (is_chunked() && stream_->IsEOF())
+    SetIsFinalChunk();
+}
+
+int UploadDataStreamRedirect::InitInternal(
+    const net::NetLogWithSource& net_log) {
+  int ret = stream_->Init(base::BindOnce(
+                              [](UploadDataStreamRedirect* stream, int result) {
+                                stream->PostInit();
+                                stream->OnInitCompleted(result);
+                              },
+                              this),
+                          net_log);
+  if (ret == net::OK)
+    PostInit();
+  return ret;
+}
+
+int UploadDataStreamRedirect::ReadInternal(net::IOBuffer* buf, int buf_len) {
+  int ret = stream_->Read(buf, buf_len,
+                          base::BindOnce(
+                              [](UploadDataStreamRedirect* stream, int result) {
+                                stream->PostRead();
+                                stream->OnReadCompleted(result);
+                              },
+                              this));
+  if (ret != net::ERR_IO_PENDING)
+    PostRead();
+  return ret;
+}
+
+void UploadDataStreamRedirect::ResetInternal() {
+  stream_->Reset();
+}
 
 class CastExtensionURLRequestJob : public net::URLRequestJob,
                                    public net::URLRequest::Delegate {
@@ -45,7 +116,9 @@ class CastExtensionURLRequestJob : public net::URLRequestJob,
   void GetLoadTimingInfo(net::LoadTimingInfo* load_timing_info) const override;
   bool GetRemoteEndpoint(net::IPEndPoint* endpoint) const override;
   void PopulateNetErrorDetails(net::NetErrorDetails* details) const override;
-  bool IsRedirectResponse(GURL* location, int* http_status_code) override;
+  bool IsRedirectResponse(GURL* location,
+                          int* http_status_code,
+                          bool* insecure_scheme_was_upgraded) override;
   bool CopyFragmentOnRedirect(const GURL& location) const override;
   bool IsSafeRedirect(const GURL& location) override;
   bool NeedsAuth() override;
@@ -84,7 +157,25 @@ CastExtensionURLRequestJob::CastExtensionURLRequestJob(
     : net::URLRequestJob(request, network_delegate),
       sub_request_(request->context()->CreateRequest(redirect_url,
                                                      request->priority(),
-                                                     this)) {}
+                                                     this)) {
+  // Copy necessary information from the original request.
+  // (|URLRequest| is not copyable.)
+  sub_request_->set_method(request->method());
+  sub_request_->SetExtraRequestHeaders(request->extra_request_headers());
+  sub_request_->SetReferrer(request->referrer());
+  sub_request_->set_referrer_policy(request->referrer_policy());
+  if (request->get_upload()) {
+    sub_request_->set_upload(std::make_unique<UploadDataStreamRedirect>(
+        const_cast<net::UploadDataStream*>(request->get_upload())));
+  }
+  content::URLRequestUserData* user_data =
+      static_cast<content::URLRequestUserData*>(
+          request->GetUserData(content::URLRequestUserData::kUserDataKey));
+  sub_request_->SetUserData(
+      content::URLRequestUserData::kUserDataKey,
+      std::make_unique<content::URLRequestUserData>(
+          user_data->render_process_id(), user_data->render_frame_id()));
+}
 
 CastExtensionURLRequestJob::~CastExtensionURLRequestJob() {}
 
@@ -92,8 +183,10 @@ void CastExtensionURLRequestJob::Start() {
   sub_request_->Start();
 }
 
-bool CastExtensionURLRequestJob::IsRedirectResponse(GURL* location,
-                                                    int* http_status_code) {
+bool CastExtensionURLRequestJob::IsRedirectResponse(
+    GURL* location,
+    int* http_status_code,
+    bool* insecure_scheme_was_upgraded) {
   return false;
 }
 
@@ -265,6 +358,8 @@ net::URLRequestJob* ExtensionRequestProtocolHandler::MaybeCreateJob(
     // This can't be done in the constructor as extensions::ExtensionSystem::Get
     // will fail until after this is constructed.
     info_map_ = extensions::ExtensionSystem::Get(browser_context_)->info_map();
+    default_handler_ = extensions::CreateExtensionProtocolHandler(
+        false, const_cast<extensions::InfoMap*>(info_map_));
   }
 
   const extensions::Extension* extension =
@@ -275,14 +370,25 @@ net::URLRequestJob* ExtensionRequestProtocolHandler::MaybeCreateJob(
     return nullptr;
   }
 
+  const GURL& url = request->url();
   std::string cast_url;
-  if (!extension->manifest()->GetString("cast_url", &cast_url)) {
-    LOG(ERROR) << "No 'cast_url' value for extension";
-    return nullptr;
+  // See if we are being redirected to an extension-specific URL.
+  if (!CastRedirectHandler::ParseUrl(&cast_url, extension, url)) {
+    // Defer to the default handler to load from disk.
+    return default_handler_->MaybeCreateJob(request, network_delegate);
   }
 
-  // Replace chrome-extension://<id> with whatever the extension wants to go to.
-  cast_url.append(request->url().path());
+  // The above only handles the scheme, host & path, any query or fragment needs
+  // to be copied separately.
+  if (url.has_query()) {
+    cast_url.push_back('?');
+    url.query_piece().AppendToString(&cast_url);
+  }
+
+  if (url.has_ref()) {
+    cast_url.push_back('#');
+    url.ref_piece().AppendToString(&cast_url);
+  }
 
   // Force a redirect to the new URL but without changing where the webpage
   // thinks it is.

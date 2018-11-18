@@ -7,12 +7,9 @@
 #ifndef CORE_FXGE_FX_FONT_H_
 #define CORE_FXGE_FX_FONT_H_
 
-#include <memory>
-#include <utility>
 #include <vector>
 
 #include "core/fxcrt/fx_system.h"
-#include "core/fxcrt/unowned_ptr.h"
 #include "core/fxge/cfx_substfont.h"
 #include "core/fxge/dib/cfx_dibitmap.h"
 #include "core/fxge/fx_dib.h"
@@ -49,9 +46,6 @@ using CFX_TypeFace = SkTypeface;
 /* Other font flags */
 #define FXFONT_USEEXTERNATTR 0x80000
 #define FXFONT_CIDFONT 0x100000
-#ifdef PDF_ENABLE_XFA
-#define FXFONT_EXACTMATCH 0x80000000
-#endif  // PDF_ENABLE_XFA
 
 #define GET_TT_SHORT(w) (uint16_t)(((w)[0] << 8) | (w)[1])
 #define GET_TT_LONG(w) \

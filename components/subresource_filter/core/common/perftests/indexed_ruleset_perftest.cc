@@ -20,8 +20,8 @@
 #include "base/time/time.h"
 #include "base/timer/elapsed_timer.h"
 #include "components/subresource_filter/core/common/memory_mapped_ruleset.h"
-#include "components/subresource_filter/core/common/tools/filter_tool.h"
-#include "components/subresource_filter/core/common/tools/indexing_tool.h"
+#include "components/subresource_filter/tools/filter_tool.h"
+#include "components/subresource_filter/tools/indexing_tool.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/perf/perf_test.h"
 
@@ -35,15 +35,18 @@ class IndexedRulesetPerftest : public testing::Test {
 
   void SetUp() override {
     base::FilePath dir_path;
-    PathService::Get(base::DIR_SOURCE_ROOT, &dir_path);
+    base::PathService::Get(base::DIR_SOURCE_ROOT, &dir_path);
+
+    // The file contains the subresource URLs of the top-100 Alexa landing
+    // pages.
     base::FilePath request_path = dir_path.AppendASCII(
         "components/subresource_filter/core/common/perftests/"
-        "/data/httparchive_request_corpus.csv");
+        "/data/http_archive_top_100_page_requests");
     base::ReadFileToString(request_path, &requests_);
 
     unindexed_path_ = dir_path.AppendASCII(
         "components/subresource_filter/core/common/perftests/"
-        "data/UnindexedRules_7.54");
+        "data/UnindexedRules_8.0");
 
     ASSERT_TRUE(scoped_dir_.CreateUniqueTempDir());
     base::FilePath indexed_path =
@@ -55,9 +58,8 @@ class IndexedRulesetPerftest : public testing::Test {
     base::File indexed_file =
         base::File(indexed_path, base::File::FLAG_OPEN | base::File::FLAG_READ);
     ASSERT_TRUE(indexed_file.IsValid());
-    auto ruleset =
-        base::MakeRefCounted<subresource_filter::MemoryMappedRuleset>(
-            std::move(indexed_file));
+    auto ruleset = subresource_filter::MemoryMappedRuleset::CreateAndInitialize(
+        std::move(indexed_file));
     filter_tool_ = std::make_unique<FilterTool>(std::move(ruleset), &output_);
   }
 

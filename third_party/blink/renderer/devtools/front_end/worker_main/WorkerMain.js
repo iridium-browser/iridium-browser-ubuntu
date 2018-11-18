@@ -11,9 +11,9 @@ WorkerMain.WorkerMain = class extends Common.Object {
    */
   run() {
     const capabilities = SDK.Target.Capability.Browser | SDK.Target.Capability.Log | SDK.Target.Capability.Network |
-        SDK.Target.Capability.Target;
+        SDK.Target.Capability.Target | SDK.Target.Capability.Inspector;
     SDK.targetManager.createTarget(
-        'main', Common.UIString('Main'), capabilities, this._createMainConnection.bind(this), null);
+        'main', Common.UIString('Main'), capabilities, this._createMainConnection.bind(this), null, false /* isNodeJS */);
     InspectorFrontendHost.connectionReady();
     new MobileThrottling.NetworkPanelIndicator();
   }

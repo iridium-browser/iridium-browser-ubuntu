@@ -5,10 +5,10 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_HTML_MEDIA_AUTOPLAY_POLICY_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_HTML_MEDIA_AUTOPLAY_POLICY_H_
 
+#include "base/optional.h"
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
+#include "third_party/blink/renderer/platform/bindings/exception_code.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/wtf/optional.h"
 
 namespace blink {
 
@@ -49,6 +49,15 @@ class AutoplayPolicy final : public GarbageCollected<AutoplayPolicy> {
   // Returns true if the given |document| should force allow autoplay.
   static bool DocumentHasForceAllowFlag(const Document&);
 
+  // Returns true if the given |document| has the user exception flag.
+  static bool DocumentHasUserExceptionFlag(const Document&);
+
+  // Returns true if the given |document| should autoplay muted videos.
+  static bool DocumentShouldAutoplayMutedVideos(const Document&);
+
+  // Returns true if the given |document| is capturing user media.
+  static bool DocumentIsCapturingUserMedia(const Document&);
+
   explicit AutoplayPolicy(HTMLMediaElement*);
 
   void VideoWillBeDrawnToCanvas() const;
@@ -68,15 +77,12 @@ class AutoplayPolicy final : public GarbageCollected<AutoplayPolicy> {
   // Request the playback via play() method. This method will check the autoplay
   // restrictions and record metrics. This method can only be called once
   // per call of play().
-  Optional<ExceptionCode> RequestPlay();
+  base::Optional<DOMExceptionCode> RequestPlay();
 
   // Returns whether an umute action should pause an autoplaying element. The
   // method will check autoplay restrictions and record metrics. This method can
   // only be called once per call of setMuted().
   bool RequestAutoplayUnmute();
-
-  // Indicates the media element is autoplaying because of being muted.
-  bool IsAutoplayingMuted() const;
 
   // Indicates the media element is or will autoplay because of being
   // muted.
@@ -101,6 +107,10 @@ class AutoplayPolicy final : public GarbageCollected<AutoplayPolicy> {
   // navigation. In other words, with the unified autoplay policy applied, it
   // should only return `true` when MEI allowed autoplay.
   bool WasAutoplayInitiated() const;
+
+  // Ensure that `autoplay_initiated_` has a value. It is set to `false` to
+  // avoid false positives.
+  void EnsureAutoplayInitiatedSet();
 
   virtual void Trace(blink::Visitor*);
 
@@ -159,7 +169,7 @@ class AutoplayPolicy final : public GarbageCollected<AutoplayPolicy> {
 
   Member<AutoplayUmaHelper> autoplay_uma_helper_;
 
-  Optional<bool> autoplay_initiated_;
+  base::Optional<bool> autoplay_initiated_;
 
   DISALLOW_COPY_AND_ASSIGN(AutoplayPolicy);
 };

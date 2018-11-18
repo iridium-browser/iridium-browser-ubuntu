@@ -26,10 +26,7 @@ class PaintPropertyTreePrinterTest : public PaintControllerPaintTest {
   }
 };
 
-INSTANTIATE_TEST_CASE_P(
-    All,
-    PaintPropertyTreePrinterTest,
-    testing::ValuesIn(kSlimmingPaintNonV1TestConfigurations));
+INSTANTIATE_PAINT_TEST_CASE_P(PaintPropertyTreePrinterTest);
 
 TEST_P(PaintPropertyTreePrinterTest, SimpleTransformTree) {
   SetBodyInnerHTML("hello world");

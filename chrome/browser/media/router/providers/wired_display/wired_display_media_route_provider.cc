@@ -41,7 +41,7 @@ MediaSinkInternal CreateSinkForDisplay(const Display& display,
   const std::string sink_name =
       l10n_util::GetStringFUTF8(IDS_MEDIA_ROUTER_WIRED_DISPLAY_SINK_NAME,
                                 base::FormatNumber(display_index));
-  MediaSink sink(sink_id, sink_name, SinkIconType::GENERIC,
+  MediaSink sink(sink_id, sink_name, SinkIconType::WIRED_DISPLAY,
                  MediaRouteProviderId::WIRED_DISPLAY);
   MediaSinkInternal sink_internal;
   sink_internal.set_sink(sink);
@@ -95,7 +95,7 @@ WiredDisplayMediaRouteProvider::WiredDisplayMediaRouteProvider(
 }
 
 WiredDisplayMediaRouteProvider::~WiredDisplayMediaRouteProvider() {
-  if (is_observing_displays_ && PresentationReceiverWindowEnabled()) {
+  if (is_observing_displays_) {
     display::Screen::GetScreen()->RemoveObserver(this);
     is_observing_displays_ = false;
   }
@@ -113,7 +113,8 @@ void WiredDisplayMediaRouteProvider::CreateRoute(
   DCHECK(!base::ContainsKey(presentations_, presentation_id));
   base::Optional<Display> display = GetDisplayBySinkId(sink_id);
   if (!display) {
-    std::move(callback).Run(base::nullopt, std::string("Display not found"),
+    std::move(callback).Run(base::nullopt, nullptr,
+                            std::string("Display not found"),
                             RouteRequestResult::SINK_NOT_FOUND);
     return;
   }
@@ -133,7 +134,8 @@ void WiredDisplayMediaRouteProvider::CreateRoute(
   presentation.set_receiver(
       CreatePresentationReceiver(presentation_id, &presentation, *display));
   presentation.receiver()->Start(presentation_id, GURL(media_source));
-  std::move(callback).Run(route, base::nullopt, RouteRequestResult::OK);
+  std::move(callback).Run(route, nullptr, base::nullopt,
+                          RouteRequestResult::OK);
   NotifyRouteObservers();
 }
 
@@ -146,7 +148,7 @@ void WiredDisplayMediaRouteProvider::JoinRoute(
     bool incognito,
     JoinRouteCallback callback) {
   std::move(callback).Run(
-      base::nullopt,
+      base::nullopt, nullptr,
       std::string("Join should be handled by the presentation manager"),
       RouteRequestResult::UNKNOWN_ERROR);
 }
@@ -161,7 +163,7 @@ void WiredDisplayMediaRouteProvider::ConnectRouteByRouteId(
     bool incognito,
     ConnectRouteByRouteIdCallback callback) {
   std::move(callback).Run(
-      base::nullopt,
+      base::nullopt, nullptr,
       std::string("Connect should be handled by the presentation manager"),
       RouteRequestResult::UNKNOWN_ERROR);
 }
@@ -184,20 +186,16 @@ void WiredDisplayMediaRouteProvider::TerminateRoute(
 
 void WiredDisplayMediaRouteProvider::SendRouteMessage(
     const std::string& media_route_id,
-    const std::string& message,
-    SendRouteMessageCallback callback) {
+    const std::string& message) {
   // Messages should be handled by LocalPresentationManager.
   NOTREACHED();
-  std::move(callback).Run(false);
 }
 
 void WiredDisplayMediaRouteProvider::SendRouteBinaryMessage(
     const std::string& media_route_id,
-    const std::vector<uint8_t>& data,
-    SendRouteBinaryMessageCallback callback) {
+    const std::vector<uint8_t>& data) {
   // Messages should be handled by LocalPresentationManager.
   NOTREACHED();
-  std::move(callback).Run(false);
 }
 
 void WiredDisplayMediaRouteProvider::StartObservingMediaSinks(
@@ -206,7 +204,7 @@ void WiredDisplayMediaRouteProvider::StartObservingMediaSinks(
     return;
 
   // Start observing displays if |this| isn't already observing.
-  if (!is_observing_displays_ && PresentationReceiverWindowEnabled()) {
+  if (!is_observing_displays_) {
     display::Screen::GetScreen()->AddObserver(this);
     is_observing_displays_ = true;
   }
@@ -318,8 +316,6 @@ void WiredDisplayMediaRouteProvider::OnDisplayMetricsChanged(
 }
 
 std::vector<Display> WiredDisplayMediaRouteProvider::GetAllDisplays() const {
-  if (!PresentationReceiverWindowEnabled())
-    return {};
   return display::Screen::GetScreen()->GetAllDisplays();
 }
 
@@ -427,7 +423,13 @@ void WiredDisplayMediaRouteProvider::ReportSinkAvailability(
 
 void WiredDisplayMediaRouteProvider::RemovePresentationById(
     const std::string& presentation_id) {
-  presentations_.erase(presentation_id);
+  auto entry = presentations_.find(presentation_id);
+  if (entry == presentations_.end())
+    return;
+  media_router_->OnPresentationConnectionStateChanged(
+      entry->second.route().media_route_id(),
+      mojom::MediaRouter::PresentationConnectionState::TERMINATED);
+  presentations_.erase(entry);
   NotifyRouteObservers();
 }
 

@@ -92,12 +92,11 @@ SDK.CPUProfileDataModel = class extends SDK.ProfileTreeModel {
     if (!profile.timeDeltas)
       return null;
     let lastTimeUsec = profile.startTime;
-    const timestamps = new Array(profile.timeDeltas.length + 1);
+    const timestamps = new Array(profile.timeDeltas.length);
     for (let i = 0; i < profile.timeDeltas.length; ++i) {
-      timestamps[i] = lastTimeUsec;
       lastTimeUsec += profile.timeDeltas[i];
+      timestamps[i] = lastTimeUsec;
     }
-    timestamps[profile.timeDeltas.length] = lastTimeUsec;
     return timestamps;
   }
 
@@ -115,6 +114,7 @@ SDK.CPUProfileDataModel = class extends SDK.ProfileTreeModel {
         return !!node.callFrame.url && node.callFrame.url.startsWith('native ');
       return !!node['url'] && node['url'].startsWith('native ');
     }
+
     /**
      * @param {!Array<!Protocol.Profiler.ProfileNode>} nodes
      */
@@ -131,12 +131,29 @@ SDK.CPUProfileDataModel = class extends SDK.ProfileTreeModel {
           parentNode.children = [node.id];
       }
     }
+
+    /**
+     * @param {!Array<!Protocol.Profiler.ProfileNode>} nodes
+     * @param {!Array<number>|undefined} samples
+     */
+    function buildHitCountFromSamples(nodes, samples) {
+      if (typeof(nodes[0].hitCount) === 'number')
+        return;
+      console.assert(samples, 'Error: Neither hitCount nor samples are present in profile.');
+      for (let i = 0; i < nodes.length; ++i)
+        nodes[i].hitCount = 0;
+      for (let i = 0; i < samples.length; ++i)
+        ++nodeByIdMap.get(samples[i]).hitCount;
+    }
+
     /** @type {!Map<number, !Protocol.Profiler.ProfileNode>} */
     const nodeByIdMap = new Map();
     for (let i = 0; i < nodes.length; ++i) {
       const node = nodes[i];
       nodeByIdMap.set(node.id, node);
     }
+
+    buildHitCountFromSamples(nodes, this.samples);
     buildChildrenFromParents(nodes);
     this.totalHitCount = nodes.reduce((acc, node) => acc + node.hitCount, 0);
     const sampleTime = (this.profileEndTime - this.profileStartTime) / this.totalHitCount;
@@ -174,7 +191,7 @@ SDK.CPUProfileDataModel = class extends SDK.ProfileTreeModel {
       return;
     const samples = this.samples;
     const indices = timestamps.map((x, index) => index);
-    indices.sort((a, b) => timestamps[a] - timestamps[b]);
+    indices.stableSort((a, b) => timestamps[a] - timestamps[b]);
     for (let i = 0; i < timestamps.length; ++i) {
       let index = indices[i];
       if (index === i)
@@ -275,7 +292,8 @@ SDK.CPUProfileDataModel = class extends SDK.ProfileTreeModel {
       prevNodeId = nodeId;
       nodeId = nextNodeId;
     }
-    Common.console.warn(ls`DevTools: CPU profile parser is fixing ${count} missing samples.`);
+    if (count)
+      Common.console.warn(ls`DevTools: CPU profile parser is fixing ${count} missing samples.`);
     /**
      * @param {!SDK.ProfileNode} node
      * @return {!SDK.ProfileNode}

@@ -31,11 +31,6 @@ class UiTest : public testing::Test {
   void SetUp() override;
 
  protected:
-  enum InCct : bool {
-    kNotInCct = false,
-    kInCct = true,
-  };
-
   enum InWebVr : bool {
     kNotInWebVr = false,
     kInWebVr = true,
@@ -47,8 +42,7 @@ class UiTest : public testing::Test {
   };
 
   void CreateScene(const UiInitialState& state);
-  void CreateScene(InCct in_cct, InWebVr in_web_vr);
-  void CreateSceneForAutoPresentation();
+  void CreateScene(InWebVr in_web_vr);
 
  protected:
   void CreateSceneInternal(
@@ -106,7 +100,13 @@ class UiTest : public testing::Test {
 
   void GetBackgroundColor(SkColor* background_color) const;
 
-  std::unique_ptr<Ui> ui_;
+  // Synthesize a controller orientation that intersects the element, and cycle
+  // the controller button.  This offers a reasonably correct means of testing
+  // clicks on elements, that's true to hit testability, visbility, etc.
+  void ClickElement(UiElement* element);
+
+  std::unique_ptr<Ui> ui_instance_;
+  UiInterface* ui_ = nullptr;
   std::unique_ptr<MockUiBrowserInterface> browser_;
   MockContentInputDelegate* content_input_delegate_ = nullptr;
   Model* model_ = nullptr;

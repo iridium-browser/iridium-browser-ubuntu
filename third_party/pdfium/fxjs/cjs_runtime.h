@@ -7,7 +7,6 @@
 #ifndef FXJS_CJS_RUNTIME_H_
 #define FXJS_CJS_RUNTIME_H_
 
-#include <map>
 #include <memory>
 #include <set>
 #include <utility>
@@ -21,22 +20,22 @@
 
 class CJS_EventContext;
 
-class CJS_Runtime : public IJS_Runtime,
-                    public CFXJS_Engine,
-                    public Observable<CJS_Runtime> {
+class CJS_Runtime final : public IJS_Runtime,
+                          public CFXJS_Engine,
+                          public Observable<CJS_Runtime> {
  public:
   using FieldEvent = std::pair<WideString, JS_EVENT_T>;
-
-  static CJS_Runtime* RuntimeFromIsolateCurrentContext(v8::Isolate* pIsolate);
 
   explicit CJS_Runtime(CPDFSDK_FormFillEnvironment* pFormFillEnv);
   ~CJS_Runtime() override;
 
   // IJS_Runtime
+  CJS_Runtime* AsCJSRuntime() override;
   IJS_EventContext* NewEventContext() override;
   void ReleaseEventContext(IJS_EventContext* pContext) override;
   CPDFSDK_FormFillEnvironment* GetFormFillEnv() const override;
-  int ExecuteScript(const WideString& script, WideString* info) override;
+  Optional<IJS_Runtime::JS_Error> ExecuteScript(
+      const WideString& script) override;
 
   CJS_EventContext* GetCurrentEventContext() const;
 
@@ -65,8 +64,8 @@ class CJS_Runtime : public IJS_Runtime,
 
   std::vector<std::unique_ptr<CJS_EventContext>> m_EventContextArray;
   CPDFSDK_FormFillEnvironment::ObservedPtr m_pFormFillEnv;
-  bool m_bBlocking;
-  bool m_isolateManaged;
+  bool m_bBlocking = false;
+  bool m_isolateManaged = false;
   std::set<FieldEvent> m_FieldEventSet;
 };
 

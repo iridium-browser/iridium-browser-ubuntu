@@ -48,7 +48,7 @@ Emulation.DeviceModeToolbar = class {
     this._fillModeToolbar(modeToolbar);
     rightContainer.createChild('div', 'device-mode-toolbar-spacer');
     const optionsToolbar = new UI.Toolbar('device-mode-toolbar-options', rightContainer);
-    optionsToolbar.makeWrappable(true);
+    optionsToolbar.makeWrappable();
     this._fillOptionsToolbar(optionsToolbar);
 
     this._emulatedDevicesList = Emulation.EmulatedDevicesList.instance();
@@ -189,12 +189,11 @@ Emulation.DeviceModeToolbar = class {
    * @param {!UI.Toolbar} toolbar
    */
   _fillOptionsToolbar(toolbar) {
+    toolbar.appendToolbarItem(
+        this._wrapToolbarItem(createElementWithClass('div', 'device-mode-empty-toolbar-element')));
     const moreOptionsButton = new UI.ToolbarMenuButton(this._appendOptionsMenuItems.bind(this));
     moreOptionsButton.setTitle(Common.UIString('More options'));
     toolbar.appendToolbarItem(moreOptionsButton);
-
-    toolbar.appendToolbarItem(
-        this._wrapToolbarItem(createElementWithClass('div', 'device-mode-empty-toolbar-element')));
   }
 
   /**
@@ -305,6 +304,8 @@ Emulation.DeviceModeToolbar = class {
         Common.UIString('Add device type'));
     contextMenu.appendItemsAtLocation('deviceModeMenu');
     contextMenu.footerSection().appendItem(Common.UIString('Reset to defaults'), this._reset.bind(this));
+    contextMenu.footerSection().appendItem(
+        ls`Close DevTools`, InspectorFrontendHost.closeWindow.bind(InspectorFrontendHost));
 
     /**
      * @param {!UI.ContextMenuSection} section
@@ -519,6 +520,12 @@ Emulation.DeviceModeToolbar = class {
       this._heightInput.disabled = this._model.type() !== Emulation.DeviceModeModel.Type.Responsive;
       this._deviceScaleItem.setEnabled(this._model.type() === Emulation.DeviceModeModel.Type.Responsive);
       this._uaItem.setEnabled(this._model.type() === Emulation.DeviceModeModel.Type.Responsive);
+      if (this._model.type() === Emulation.DeviceModeModel.Type.Responsive) {
+        this._modeButton.setEnabled(true);
+        this._modeButton.setTitle(ls`Rotate`);
+      } else {
+        this._modeButton.setEnabled(false);
+      }
     }
 
     const size = this._model.appliedDeviceSize();
@@ -559,11 +566,6 @@ Emulation.DeviceModeToolbar = class {
         const modeCount = device ? device.modes.length : 0;
         this._modeButton.setEnabled(modeCount >= 2);
         this._modeButton.setTitle(modeCount === 2 ? Common.UIString('Rotate') : Common.UIString('Screen options'));
-      } else if (this._model.type() === Emulation.DeviceModeModel.Type.Responsive) {
-        this._modeButton.setEnabled(true);
-        this._modeButton.setTitle(Common.UIString('Rotate'));
-      } else {
-        this._modeButton.setEnabled(false);
       }
       this._cachedModelDevice = device;
     }

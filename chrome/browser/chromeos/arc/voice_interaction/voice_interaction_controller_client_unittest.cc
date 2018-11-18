@@ -15,6 +15,7 @@
 #include "components/arc/arc_prefs.h"
 #include "components/arc/arc_util.h"
 #include "components/arc/test/fake_arc_session.h"
+#include "components/language/core/browser/pref_names.h"
 #include "components/prefs/pref_service.h"
 #include "components/user_manager/scoped_user_manager.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -118,6 +119,25 @@ TEST_F(VoiceInteractionControllerClientTest, PrefChangeSendsNotification) {
       true,
       voice_interaction_controller()->voice_interaction_context_enabled());
 
+  ASSERT_EQ(false, prefs->GetBoolean(prefs::kVoiceInteractionHotwordEnabled));
+  prefs->SetBoolean(prefs::kVoiceInteractionHotwordEnabled, true);
+  ASSERT_EQ(true, prefs->GetBoolean(prefs::kVoiceInteractionHotwordEnabled));
+  voice_interaction_controller_client()->FlushMojoForTesting();
+  EXPECT_EQ(
+      true,
+      voice_interaction_controller()->voice_interaction_hotword_enabled());
+
+  // Default setting is true.
+  ASSERT_EQ(true,
+            prefs->GetBoolean(prefs::kVoiceInteractionNotificationEnabled));
+  prefs->SetBoolean(prefs::kVoiceInteractionNotificationEnabled, false);
+  ASSERT_EQ(false,
+            prefs->GetBoolean(prefs::kVoiceInteractionNotificationEnabled));
+  voice_interaction_controller_client()->FlushMojoForTesting();
+  EXPECT_EQ(
+      false,
+      voice_interaction_controller()->voice_interaction_notification_enabled());
+
   ASSERT_EQ(false,
             prefs->GetBoolean(prefs::kArcVoiceInteractionValuePropAccepted));
   prefs->SetBoolean(prefs::kArcVoiceInteractionValuePropAccepted, true);
@@ -127,6 +147,19 @@ TEST_F(VoiceInteractionControllerClientTest, PrefChangeSendsNotification) {
   EXPECT_EQ(
       true,
       voice_interaction_controller()->voice_interaction_setup_completed());
+
+  ASSERT_EQ("", prefs->GetString(language::prefs::kApplicationLocale));
+  prefs->SetString(language::prefs::kApplicationLocale, "en-CA");
+  ASSERT_EQ("en-CA", prefs->GetString(language::prefs::kApplicationLocale));
+  voice_interaction_controller_client()->FlushMojoForTesting();
+  EXPECT_EQ("en-CA", voice_interaction_controller()->locale());
+
+  ASSERT_EQ(false,
+            prefs->GetBoolean(prefs::kVoiceInteractionLaunchWithMicOpen));
+  prefs->SetBoolean(prefs::kVoiceInteractionLaunchWithMicOpen, true);
+  ASSERT_EQ(true, prefs->GetBoolean(prefs::kVoiceInteractionLaunchWithMicOpen));
+  voice_interaction_controller_client()->FlushMojoForTesting();
+  EXPECT_EQ(true, voice_interaction_controller()->launch_with_mic_open());
 }
 
 }  // namespace arc

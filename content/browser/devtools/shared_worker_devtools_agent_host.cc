@@ -4,6 +4,7 @@
 
 #include "content/browser/devtools/shared_worker_devtools_agent_host.h"
 
+#include "content/browser/devtools/devtools_renderer_channel.h"
 #include "content/browser/devtools/devtools_session.h"
 #include "content/browser/devtools/protocol/inspector_handler.h"
 #include "content/browser/devtools/protocol/network_handler.h"
@@ -15,6 +16,7 @@
 #include "content/browser/shared_worker/shared_worker_service_impl.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
+#include "third_party/blink/public/web/devtools_agent.mojom.h"
 
 namespace content {
 
@@ -66,24 +68,17 @@ bool SharedWorkerDevToolsAgentHost::Close() {
   return true;
 }
 
-bool SharedWorkerDevToolsAgentHost::AttachSession(DevToolsSession* session) {
+bool SharedWorkerDevToolsAgentHost::AttachSession(DevToolsSession* session,
+                                                  TargetRegistry* registry) {
   session->AddHandler(std::make_unique<protocol::InspectorHandler>());
-  session->AddHandler(std::make_unique<protocol::NetworkHandler>(GetId()));
+  session->AddHandler(std::make_unique<protocol::NetworkHandler>(
+      GetId(), devtools_worker_token_, GetIOContext()));
   session->AddHandler(std::make_unique<protocol::SchemaHandler>());
-  session->SetRenderer(worker_host_ ? worker_host_->process_id() : -1, nullptr);
-  if (state_ == WORKER_READY)
-    session->AttachToAgent(EnsureAgent());
   return true;
 }
 
 void SharedWorkerDevToolsAgentHost::DetachSession(DevToolsSession* session) {
   // Destroying session automatically detaches in renderer.
-}
-
-void SharedWorkerDevToolsAgentHost::DispatchProtocolMessage(
-    DevToolsSession* session,
-    const std::string& message) {
-  session->DispatchProtocolMessage(message);
 }
 
 bool SharedWorkerDevToolsAgentHost::Matches(SharedWorkerHost* worker_host) {
@@ -94,8 +89,7 @@ void SharedWorkerDevToolsAgentHost::WorkerReadyForInspection() {
   DCHECK_EQ(WORKER_NOT_READY, state_);
   DCHECK(worker_host_);
   state_ = WORKER_READY;
-  for (DevToolsSession* session : sessions())
-    session->AttachToAgent(EnsureAgent());
+  UpdateRendererChannel(IsAttached());
 }
 
 void SharedWorkerDevToolsAgentHost::WorkerRestarted(
@@ -106,8 +100,7 @@ void SharedWorkerDevToolsAgentHost::WorkerRestarted(
   worker_host_ = worker_host;
   for (auto* inspector : protocol::InspectorHandler::ForAgentHost(this))
     inspector->TargetReloadedAfterCrash();
-  for (DevToolsSession* session : sessions())
-    session->SetRenderer(worker_host_->process_id(), nullptr);
+  UpdateRendererChannel(IsAttached());
 }
 
 void SharedWorkerDevToolsAgentHost::WorkerDestroyed() {
@@ -116,19 +109,25 @@ void SharedWorkerDevToolsAgentHost::WorkerDestroyed() {
   state_ = WORKER_TERMINATED;
   for (auto* inspector : protocol::InspectorHandler::ForAgentHost(this))
     inspector->TargetCrashed();
-  for (DevToolsSession* session : sessions())
-    session->SetRenderer(-1, nullptr);
   worker_host_ = nullptr;
-  agent_ptr_.reset();
+  UpdateRendererChannel(IsAttached());
 }
 
-const blink::mojom::DevToolsAgentAssociatedPtr&
-SharedWorkerDevToolsAgentHost::EnsureAgent() {
-  DCHECK_EQ(WORKER_READY, state_);
-  DCHECK(worker_host_);
-  if (!agent_ptr_)
-    worker_host_->BindDevToolsAgent(mojo::MakeRequest(&agent_ptr_));
-  return agent_ptr_;
+void SharedWorkerDevToolsAgentHost::UpdateRendererChannel(bool force) {
+  if (state_ == WORKER_READY && force) {
+    blink::mojom::DevToolsAgentHostAssociatedPtrInfo host_ptr_info;
+    blink::mojom::DevToolsAgentHostAssociatedRequest host_request =
+        mojo::MakeRequest(&host_ptr_info);
+    blink::mojom::DevToolsAgentAssociatedPtr agent_ptr;
+    worker_host_->BindDevToolsAgent(std::move(host_ptr_info),
+                                    mojo::MakeRequest(&agent_ptr));
+    GetRendererChannel()->SetRenderer(std::move(agent_ptr),
+                                      std::move(host_request),
+                                      worker_host_->process_id(), nullptr);
+  } else {
+    GetRendererChannel()->SetRenderer(
+        nullptr, nullptr, ChildProcessHost::kInvalidUniqueID, nullptr);
+  }
 }
 
 }  // namespace content

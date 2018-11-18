@@ -13,12 +13,11 @@
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string16.h"
 #include "build/build_config.h"
-#include "components/viz/test/test_shared_bitmap_manager.h"
+#include "content/public/common/widget_type.h"
 #include "content/public/renderer/render_thread.h"
 #include "ipc/ipc_test_sink.h"
 #include "ipc/message_filter.h"
 #include "services/service_manager/public/mojom/connector.mojom.h"
-#include "third_party/blink/public/web/web_popup_type.h"
 
 #if defined(OS_MACOSX)
 #include "mojo/public/cpp/system/buffer.h"
@@ -47,7 +46,7 @@ class RenderMessageFilter;
 // This class is a very simple mock of RenderThread. It simulates an IPC channel
 // which supports only three messages:
 // ViewHostMsg_CreateWidget : sync message sent by the Widget.
-// ViewMsg_Close : async, send to the Widget.
+// WidgetMsg_Close : async, send to the Widget.
 class MockRenderThread : public RenderThread {
  public:
   MockRenderThread();
@@ -75,19 +74,15 @@ class MockRenderThread : public RenderThread {
   void RecordComputedAction(const std::string& action) override;
   std::unique_ptr<base::SharedMemory> HostAllocateSharedMemoryBuffer(
       size_t buffer_size) override;
-  viz::SharedBitmapManager* GetSharedBitmapManager() override;
   void RegisterExtension(v8::Extension* extension) override;
-  void ScheduleIdleHandler(int64_t initial_delay_ms) override;
-  void IdleHandler() override;
-  int64_t GetIdleNotificationDelayInMs() const override;
-  void SetIdleNotificationDelayInMs(
-      int64_t idle_notification_delay_in_ms) override;
   int PostTaskToAllWebWorkers(const base::Closure& closure) override;
   bool ResolveProxy(const GURL& url, std::string* proxy_list) override;
   base::WaitableEvent* GetShutdownEvent() override;
   int32_t GetClientId() override;
+  bool IsOnline() override;
   void SetRendererProcessType(
       blink::scheduler::RendererProcessType type) override;
+  blink::WebString GetUserAgent() const override;
 #if defined(OS_WIN)
   void PreCacheFont(const LOGFONT& log_font) override;
   void ReleaseCachedFonts() override;
@@ -109,7 +104,9 @@ class MockRenderThread : public RenderThread {
   // Dispatches control messages to observers.
   bool OnControlMessageReceived(const IPC::Message& msg);
 
-  base::ObserverList<RenderThreadObserver>& observers() { return observers_; }
+  base::ObserverList<RenderThreadObserver>::Unchecked& observers() {
+    return observers_;
+  }
 
   // The View expects to be returned a valid |reply.route_id| different from its
   // own. We do not keep track of the newly created widget in MockRenderThread,
@@ -118,9 +115,7 @@ class MockRenderThread : public RenderThread {
                       mojom::CreateNewWindowReply* reply);
 
   // The Widget expects to be returned a valid route_id.
-  void OnCreateWidget(int opener_id,
-                      blink::WebPopupType popup_type,
-                      int* route_id);
+  void OnCreateWidget(int opener_id, int* route_id);
 
   // Returns the request end of the InterfaceProvider interface whose client end
   // was passed in to construct RenderFrame with |routing_id|; if any. The
@@ -168,9 +163,8 @@ class MockRenderThread : public RenderThread {
   std::vector<scoped_refptr<IPC::MessageFilter> > filters_;
 
   // Observers to notify.
-  base::ObserverList<RenderThreadObserver> observers_;
+  base::ObserverList<RenderThreadObserver>::Unchecked observers_;
 
-  viz::TestSharedBitmapManager shared_bitmap_manager_;
   std::unique_ptr<service_manager::Connector> connector_;
   service_manager::mojom::ConnectorRequest pending_connector_request_;
 

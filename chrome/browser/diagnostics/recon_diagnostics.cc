@@ -29,7 +29,6 @@
 #include "components/version_info/version_info.h"
 
 #if defined(OS_WIN)
-#include "chrome/browser/win/enumerate_modules_model.h"
 #include "chrome/installer/util/install_util.h"
 #endif
 
@@ -59,7 +58,7 @@ class DiskSpaceTest : public DiagnosticsTest {
 
   bool ExecuteImpl(DiagnosticsModel::Observer* observer) override {
     base::FilePath data_dir;
-    if (!PathService::Get(chrome::DIR_USER_DATA, &data_dir))
+    if (!base::PathService::Get(chrome::DIR_USER_DATA, &data_dir))
       return false;
     int64_t disk_space = base::SysInfo::AmountOfFreeDiskSpace(data_dir);
     if (disk_space < 0) {
@@ -218,8 +217,6 @@ const TestPathInfo kPathsToTest[] = {
 };
 
 // Check that the user's data directory exists and the paths are writable.
-// If it is a system-wide install some paths are not expected to be writable.
-// This test depends on |InstallTypeTest| having run successfully.
 class PathTest : public DiagnosticsTest {
  public:
   explicit PathTest(const TestPathInfo& path_info)
@@ -232,7 +229,7 @@ class PathTest : public DiagnosticsTest {
       return false;
     }
     base::FilePath dir_or_file;
-    if (!PathService::Get(path_info_.path_id, &dir_or_file)) {
+    if (!base::PathService::Get(path_info_.path_id, &dir_or_file)) {
       RecordStopFailure(DIAG_RECON_PATH_PROVIDER, "Path provider failure");
       return false;
     }
@@ -266,7 +263,7 @@ class PathTest : public DiagnosticsTest {
         return true;
       }
     }
-    if (g_install_type->system_level() && !path_info_.test_writable) {
+    if (!path_info_.test_writable) {
       RecordSuccess("Path exists");
       return true;
     }
@@ -329,7 +326,7 @@ std::unique_ptr<DiagnosticsTest> MakeBookMarksTest() {
 
 std::unique_ptr<DiagnosticsTest> MakeLocalStateTest() {
   base::FilePath path;
-  PathService::Get(chrome::DIR_USER_DATA, &path);
+  base::PathService::Get(chrome::DIR_USER_DATA, &path);
   path = path.Append(chrome::kLocalStateFilename);
   return std::make_unique<JSONTest>(path, DIAGNOSTICS_JSON_LOCAL_STATE_TEST,
                                     50 * kOneKilobyte, JSONTest::CRITICAL);

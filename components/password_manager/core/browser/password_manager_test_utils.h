@@ -14,13 +14,17 @@
 #include "components/password_manager/core/browser/password_store.h"
 #include "testing/gmock/include/gmock/gmock.h"
 
+#if defined(SYNC_PASSWORD_REUSE_DETECTION_ENABLED)
+#include "components/password_manager/core/browser/password_hash_data.h"  // nogncheck
+#include "components/password_manager/core/browser/password_reuse_detector_consumer.h"  // nogncheck
+#endif
+
 namespace password_manager {
 
 // This template allows creating methods with signature conforming to
-// TestingFactoryFunction of the appropriate platform instance of
-// KeyedServiceFactory. Context is the browser context prescribed by
-// TestingFactoryFunction. Store is the PasswordStore version needed in the
-// tests which use this method.
+// TestingFactory of the appropriate platform instance of KeyedServiceFactory.
+// Context is the browser context prescribed by TestingFactory. Store is the
+// PasswordStore version needed in the tests which use this method.
 template <class Context, class Store>
 scoped_refptr<RefcountedKeyedService> BuildPasswordStore(Context* context) {
   scoped_refptr<password_manager::PasswordStore> store(new Store);
@@ -81,16 +85,40 @@ class MockPasswordStoreObserver : public PasswordStore::Observer {
   MOCK_METHOD1(OnLoginsChanged, void(const PasswordStoreChangeList& changes));
 };
 
-// TODO(crbug.com/706392): Fix password reuse detection for Android.
-#if !defined(OS_ANDROID) && !defined(OS_IOS)
+#if defined(SYNC_PASSWORD_REUSE_DETECTION_ENABLED)
 class MockPasswordReuseDetectorConsumer : public PasswordReuseDetectorConsumer {
  public:
   MockPasswordReuseDetectorConsumer();
   ~MockPasswordReuseDetectorConsumer() override;
 
   MOCK_METHOD4(OnReuseFound,
-               void(size_t, bool, const std::vector<std::string>&, int));
+               void(size_t,
+                    base::Optional<PasswordHashData>,
+                    const std::vector<std::string>&,
+                    int));
 };
+
+// Matcher class used to compare PasswordHashData in tests.
+class PasswordHashDataMatcher
+    : public ::testing::MatcherInterface<base::Optional<PasswordHashData>> {
+ public:
+  explicit PasswordHashDataMatcher(base::Optional<PasswordHashData> expected);
+  virtual ~PasswordHashDataMatcher() {}
+
+  // ::testing::MatcherInterface overrides
+  virtual bool MatchAndExplain(base::Optional<PasswordHashData> hash_data,
+                               ::testing::MatchResultListener* listener) const;
+  virtual void DescribeTo(::std::ostream* os) const;
+  virtual void DescribeNegationTo(::std::ostream* os) const;
+
+ private:
+  const base::Optional<PasswordHashData> expected_;
+
+  DISALLOW_COPY_AND_ASSIGN(PasswordHashDataMatcher);
+};
+
+::testing::Matcher<base::Optional<PasswordHashData>> Matches(
+    base::Optional<PasswordHashData> expected);
 #endif
 
 }  // namespace password_manager

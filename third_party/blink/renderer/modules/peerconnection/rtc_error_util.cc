@@ -5,50 +5,106 @@
 #include "third_party/blink/renderer/modules/peerconnection/rtc_error_util.h"
 
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 
 namespace blink {
 
-DOMException* CreateDOMExceptionFromWebRTCError(const WebRTCError& error) {
-  switch (error.GetType()) {
-    case WebRTCErrorType::kNone:
+DOMException* CreateDOMExceptionFromRTCError(const webrtc::RTCError& error) {
+  switch (error.type()) {
+    case webrtc::RTCErrorType::NONE:
       // This should never happen.
       NOTREACHED();
       break;
-    case WebRTCErrorType::kSyntaxError:
-      return DOMException::Create(kSyntaxError, error.message());
-      break;
-    case WebRTCErrorType::kInvalidModification:
-      return DOMException::Create(kInvalidModificationError, error.message());
-      break;
-    case WebRTCErrorType::kNetworkError:
-      return DOMException::Create(kNetworkError, error.message());
-      break;
-    case WebRTCErrorType::kOperationError:
-      return DOMException::Create(kOperationError, error.message());
-      break;
-    case WebRTCErrorType::kInvalidState:
-      return DOMException::Create(kInvalidStateError, error.message());
-    case WebRTCErrorType::kInvalidParameter:
+    case webrtc::RTCErrorType::SYNTAX_ERROR:
+      return DOMException::Create(DOMExceptionCode::kSyntaxError,
+                                  error.message());
+    case webrtc::RTCErrorType::INVALID_MODIFICATION:
+      return DOMException::Create(DOMExceptionCode::kInvalidModificationError,
+                                  error.message());
+    case webrtc::RTCErrorType::NETWORK_ERROR:
+      return DOMException::Create(DOMExceptionCode::kNetworkError,
+                                  error.message());
+    case webrtc::RTCErrorType::UNSUPPORTED_PARAMETER:
+    case webrtc::RTCErrorType::UNSUPPORTED_OPERATION:
+    case webrtc::RTCErrorType::RESOURCE_EXHAUSTED:
+    case webrtc::RTCErrorType::INTERNAL_ERROR:
+      return DOMException::Create(DOMExceptionCode::kOperationError,
+                                  error.message());
+    case webrtc::RTCErrorType::INVALID_STATE:
+      return DOMException::Create(DOMExceptionCode::kInvalidStateError,
+                                  error.message());
+    case webrtc::RTCErrorType::INVALID_PARAMETER:
       // One use of this value is to signal invalid SDP syntax.
       // According to spec, this should return an RTCError with name
       // "RTCError" and detail "sdp-syntax-error", with
       // "sdpLineNumber" set to indicate the line where the error
       // occured.
       // TODO(https://crbug.com/821806): Implement the RTCError object.
-      return DOMException::Create(kInvalidAccessError, error.message());
-    case WebRTCErrorType::kInternalError:
-      // Not a straightforward mapping, but used as a fallback at lower layers.
-      return DOMException::Create(kOperationError, error.message());
-      break;
-    case WebRTCErrorType::kUnsupportedParameter:
-    case WebRTCErrorType::kInvalidRange:
-      LOG(ERROR) << "Got unhandled WebRTC error "
-                 << static_cast<int>(error.GetType());
-      // No DOM equivalent. Needs per-error evaluation.
+      return DOMException::Create(DOMExceptionCode::kInvalidAccessError,
+                                  error.message());
+    case webrtc::RTCErrorType::INVALID_RANGE:
+    // INVALID_RANGE should create a RangeError, which isn't a DOMException
+    default:
+      LOG(ERROR) << "Got unhandled RTC error "
+                 << static_cast<int>(error.type());
+      // No DOM equivalent.
+      // Needs per-error evaluation or use ThrowExceptionFromRTCError.
       NOTREACHED();
       break;
   }
   NOTREACHED();
   return nullptr;
+}
+
+void ThrowExceptionFromRTCError(const webrtc::RTCError& error,
+                                ExceptionState& exception_state) {
+  switch (error.type()) {
+    case webrtc::RTCErrorType::NONE:
+      // This should never happen.
+      NOTREACHED();
+      break;
+    case webrtc::RTCErrorType::SYNTAX_ERROR:
+      exception_state.ThrowDOMException(DOMExceptionCode::kSyntaxError,
+                                        error.message());
+      return;
+    case webrtc::RTCErrorType::INVALID_MODIFICATION:
+      exception_state.ThrowDOMException(
+          DOMExceptionCode::kInvalidModificationError, error.message());
+      return;
+    case webrtc::RTCErrorType::NETWORK_ERROR:
+      exception_state.ThrowDOMException(DOMExceptionCode::kNetworkError,
+                                        error.message());
+      return;
+    case webrtc::RTCErrorType::UNSUPPORTED_PARAMETER:
+    case webrtc::RTCErrorType::UNSUPPORTED_OPERATION:
+    case webrtc::RTCErrorType::RESOURCE_EXHAUSTED:
+    case webrtc::RTCErrorType::INTERNAL_ERROR:
+      exception_state.ThrowDOMException(DOMExceptionCode::kOperationError,
+                                        error.message());
+      return;
+    case webrtc::RTCErrorType::INVALID_STATE:
+      exception_state.ThrowDOMException(DOMExceptionCode::kInvalidStateError,
+                                        error.message());
+      return;
+    case webrtc::RTCErrorType::INVALID_PARAMETER:
+      // One use of this value is to signal invalid SDP syntax.
+      // According to spec, this should return an RTCError with name
+      // "RTCError" and detail "sdp-syntax-error", with
+      // "sdpLineNumber" set to indicate the line where the error
+      // occured.
+      // TODO(https://crbug.com/821806): Implement the RTCError object.
+      exception_state.ThrowDOMException(DOMExceptionCode::kInvalidAccessError,
+                                        error.message());
+      return;
+    case webrtc::RTCErrorType::INVALID_RANGE:
+      exception_state.ThrowRangeError(error.message());
+      return;
+    default:
+      LOG(ERROR) << "Got unhandled RTC error "
+                 << static_cast<int>(error.type());
+      NOTREACHED();
+      break;
+  }
+  NOTREACHED();
 }
 }  // namespace blink

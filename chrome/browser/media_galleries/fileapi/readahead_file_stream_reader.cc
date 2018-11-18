@@ -7,8 +7,8 @@
 #include <stddef.h>
 
 #include <algorithm>
+#include <utility>
 
-#include "base/message_loop/message_loop.h"
 #include "base/numerics/safe_conversions.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
@@ -31,15 +31,16 @@ ReadaheadFileStreamReader::ReadaheadFileStreamReader(FileStreamReader* source)
 
 ReadaheadFileStreamReader::~ReadaheadFileStreamReader() {}
 
-int ReadaheadFileStreamReader::Read(
-    net::IOBuffer* buf, int buf_len, const net::CompletionCallback& callback) {
+int ReadaheadFileStreamReader::Read(net::IOBuffer* buf,
+                                    int buf_len,
+                                    net::CompletionOnceCallback callback) {
   DCHECK(!pending_sink_buffer_.get());
   DCHECK(pending_read_callback_.is_null());
 
   ReadFromSourceIfNeeded();
 
   scoped_refptr<net::DrainableIOBuffer> sink =
-      new net::DrainableIOBuffer(buf, buf_len);
+      base::MakeRefCounted<net::DrainableIOBuffer>(buf, buf_len);
   int result = FinishReadFromCacheOrStoredError(sink.get());
 
   // We are waiting for an source read to complete, so save the request.
@@ -47,15 +48,15 @@ int ReadaheadFileStreamReader::Read(
     DCHECK(!pending_sink_buffer_.get());
     DCHECK(pending_read_callback_.is_null());
     pending_sink_buffer_ = sink;
-    pending_read_callback_ = callback;
+    pending_read_callback_ = std::move(callback);
   }
 
   return result;
 }
 
 int64_t ReadaheadFileStreamReader::GetLength(
-    const net::Int64CompletionCallback& callback) {
-  return source_->GetLength(callback);
+    net::Int64CompletionOnceCallback callback) {
+  return source_->GetLength(std::move(callback));
 }
 
 int ReadaheadFileStreamReader::FinishReadFromCacheOrStoredError(
@@ -103,7 +104,8 @@ void ReadaheadFileStreamReader::ReadFromSourceIfNeeded() {
 
   source_has_pending_read_ = true;
 
-  scoped_refptr<net::IOBuffer> buf(new net::IOBuffer(kBufferSize));
+  scoped_refptr<net::IOBuffer> buf =
+      base::MakeRefCounted<net::IOBuffer>(kBufferSize);
   int result = source_->Read(
       buf.get(), kBufferSize,
       base::Bind(&ReadaheadFileStreamReader::OnFinishReadFromSource,
@@ -121,8 +123,8 @@ void ReadaheadFileStreamReader::OnFinishReadFromSource(net::IOBuffer* buf,
 
   // Either store the data read from |source_|, or store the error code.
   if (result > 0) {
-    scoped_refptr<net::DrainableIOBuffer> drainable_buffer(
-        new net::DrainableIOBuffer(buf, result));
+    scoped_refptr<net::DrainableIOBuffer> drainable_buffer =
+        base::MakeRefCounted<net::DrainableIOBuffer>(buf, result);
     buffers_.push(drainable_buffer);
     ReadFromSourceIfNeeded();
   } else {
@@ -139,9 +141,7 @@ void ReadaheadFileStreamReader::OnFinishReadFromSource(net::IOBuffer* buf,
     // dispatches another read.
     scoped_refptr<net::DrainableIOBuffer> sink = pending_sink_buffer_;
     pending_sink_buffer_ = NULL;
-    net::CompletionCallback completion_callback = pending_read_callback_;
-    pending_read_callback_.Reset();
-
-    completion_callback.Run(FinishReadFromCacheOrStoredError(sink.get()));
+    std::move(pending_read_callback_)
+        .Run(FinishReadFromCacheOrStoredError(sink.get()));
   }
 }

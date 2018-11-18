@@ -11,6 +11,7 @@ include_rules = [
     "+base/memory/ptr_util.h",
     "+base/memory/ref_counted.h",
     "+base/memory/weak_ptr.h",
+    "+base/metrics/histogram_macros.h",
     "+base/numerics",
     "+base/optional.h",
     "+base/process/process_metrics.h",
@@ -18,8 +19,8 @@ include_rules = [
     "+base/stl_util.h",
     "+base/strings",
     "+base/template_util.h",
-    "+base/threading/thread_checker.h",
-    "+base/threading/thread_local_storage.h",
+    "+base/test/metrics/histogram_tester.h",
+    "+base/threading",
     "+base/time/time.h",
     "+base/tuple.h",
     # To avoid recursive dependency, we impose a blanket ban on using other
@@ -28,9 +29,3 @@ include_rules = [
     "+third_party/blink/renderer/platform/wtf",
     "-v8",
 ]
-
-specific_include_rules = {
-  ".*_test\.cc": [
-    "+base/threading/thread.h"
-  ]
-}

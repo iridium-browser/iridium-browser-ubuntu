@@ -4,7 +4,6 @@
 
 #include "chrome/browser/conflicts/uninstall_application_win.h"
 
-#include <atlbase.h>
 #include <wrl/client.h>
 
 #include <memory>
@@ -22,6 +21,7 @@
 #include "base/strings/string_util.h"
 #include "base/synchronization/lock.h"
 #include "base/threading/sequenced_task_runner_handle.h"
+#include "base/win/atl.h"
 #include "base/win/scoped_variant.h"
 #include "chrome/browser/win/automation_controller.h"
 #include "chrome/browser/win/ui_automation_util.h"
@@ -197,6 +197,11 @@ void UninstallAppController::AutomationControllerDelegate::OnAutomationEvent(
 void UninstallAppController::AutomationControllerDelegate::OnFocusChangedEvent(
     IUIAutomation* automation,
     IUIAutomationElement* sender) const {
+  base::string16 combo_box_id(
+      GetCachedBstrValue(sender, UIA_AutomationIdPropertyId));
+  if (combo_box_id != L"SystemSettings_AppsFeatures_AppControl_ComboBox")
+    return;
+
   base::OnceClosure callback;
   {
     base::AutoLock auto_lock(on_automation_finished_lock_);
@@ -206,11 +211,6 @@ void UninstallAppController::AutomationControllerDelegate::OnFocusChangedEvent(
   // This callback can be null if the application name was already written in
   // the search box and this instance is awaiting destruction.
   if (!callback)
-    return;
-
-  base::string16 combo_box_id(
-      GetCachedBstrValue(sender, UIA_AutomationIdPropertyId));
-  if (combo_box_id != L"SystemSettings_AppsFeatures_AppControl_ComboBox")
     return;
 
   Microsoft::WRL::ComPtr<IUIAutomationElement> search_box;

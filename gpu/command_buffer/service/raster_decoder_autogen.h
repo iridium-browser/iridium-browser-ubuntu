@@ -20,12 +20,13 @@ error::Error RasterDecoderImpl::HandleDeleteTexturesImmediate(
           cmd_data);
   GLsizei n = static_cast<GLsizei>(c.n);
   uint32_t data_size;
-  if (!SafeMultiplyUint32(n, sizeof(GLuint), &data_size)) {
+  if (!gles2::SafeMultiplyUint32(n, sizeof(GLuint), &data_size)) {
     return error::kOutOfBounds;
   }
-  volatile const GLuint* textures = GetImmediateDataAs<volatile const GLuint*>(
-      c, data_size, immediate_data_size);
-  if (textures == NULL) {
+  volatile const GLuint* textures =
+      gles2::GetImmediateDataAs<volatile const GLuint*>(c, data_size,
+                                                        immediate_data_size);
+  if (textures == nullptr) {
     return error::kOutOfBounds;
   }
   DeleteTexturesHelper(n, textures);
@@ -72,12 +73,12 @@ error::Error RasterDecoderImpl::HandleGetIntegerv(
   }
   Result* result = GetSharedMemoryAs<Result*>(
       c.params_shm_id, c.params_shm_offset, Result::ComputeSize(num_values));
-  GLint* params = result ? result->GetData() : NULL;
+  GLint* params = result ? result->GetData() : nullptr;
   if (!validators_->g_l_state.IsValid(pname)) {
     LOCAL_SET_GL_ERROR_INVALID_ENUM("glGetIntegerv", pname, "pname");
     return error::kNoError;
   }
-  if (params == NULL) {
+  if (params == nullptr) {
     return error::kOutOfBounds;
   }
   LOCAL_COPY_REAL_GL_ERRORS_TO_WRAPPER("GetIntegerv");
@@ -101,18 +102,18 @@ error::Error RasterDecoderImpl::HandleGenQueriesEXTImmediate(
           cmd_data);
   GLsizei n = static_cast<GLsizei>(c.n);
   uint32_t data_size;
-  if (!SafeMultiplyUint32(n, sizeof(GLuint), &data_size)) {
+  if (!gles2::SafeMultiplyUint32(n, sizeof(GLuint), &data_size)) {
     return error::kOutOfBounds;
   }
-  volatile GLuint* queries =
-      GetImmediateDataAs<volatile GLuint*>(c, data_size, immediate_data_size);
-  if (queries == NULL) {
+  volatile GLuint* queries = gles2::GetImmediateDataAs<volatile GLuint*>(
+      c, data_size, immediate_data_size);
+  if (queries == nullptr) {
     return error::kOutOfBounds;
   }
   auto queries_copy = std::make_unique<GLuint[]>(n);
   GLuint* queries_safe = queries_copy.get();
   std::copy(queries, queries + n, queries_safe);
-  if (!CheckUniqueAndNonNullIds(n, queries_safe) ||
+  if (!gles2::CheckUniqueAndNonNullIds(n, queries_safe) ||
       !GenQueriesEXTHelper(n, queries_safe)) {
     return error::kInvalidArguments;
   }
@@ -127,27 +128,16 @@ error::Error RasterDecoderImpl::HandleDeleteQueriesEXTImmediate(
           cmd_data);
   GLsizei n = static_cast<GLsizei>(c.n);
   uint32_t data_size;
-  if (!SafeMultiplyUint32(n, sizeof(GLuint), &data_size)) {
+  if (!gles2::SafeMultiplyUint32(n, sizeof(GLuint), &data_size)) {
     return error::kOutOfBounds;
   }
-  volatile const GLuint* queries = GetImmediateDataAs<volatile const GLuint*>(
-      c, data_size, immediate_data_size);
-  if (queries == NULL) {
+  volatile const GLuint* queries =
+      gles2::GetImmediateDataAs<volatile const GLuint*>(c, data_size,
+                                                        immediate_data_size);
+  if (queries == nullptr) {
     return error::kOutOfBounds;
   }
   DeleteQueriesEXTHelper(n, queries);
-  return error::kNoError;
-}
-
-error::Error RasterDecoderImpl::HandleCompressedCopyTextureCHROMIUM(
-    uint32_t immediate_data_size,
-    const volatile void* cmd_data) {
-  const volatile raster::cmds::CompressedCopyTextureCHROMIUM& c =
-      *static_cast<const volatile raster::cmds::CompressedCopyTextureCHROMIUM*>(
-          cmd_data);
-  GLuint source_id = static_cast<GLuint>(c.source_id);
-  GLuint dest_id = static_cast<GLuint>(c.dest_id);
-  DoCompressedCopyTextureCHROMIUM(source_id, dest_id);
   return error::kNoError;
 }
 
@@ -198,18 +188,33 @@ error::Error RasterDecoderImpl::HandleUnpremultiplyAndDitherCopyCHROMIUM(
   return error::kNoError;
 }
 
-error::Error RasterDecoderImpl::HandleBeginRasterCHROMIUM(
+error::Error RasterDecoderImpl::HandleBeginRasterCHROMIUMImmediate(
     uint32_t immediate_data_size,
     const volatile void* cmd_data) {
-  const volatile raster::cmds::BeginRasterCHROMIUM& c =
-      *static_cast<const volatile raster::cmds::BeginRasterCHROMIUM*>(cmd_data);
-  GLuint texture_id = static_cast<GLuint>(c.texture_id);
+  const volatile raster::cmds::BeginRasterCHROMIUMImmediate& c =
+      *static_cast<const volatile raster::cmds::BeginRasterCHROMIUMImmediate*>(
+          cmd_data);
   GLuint sk_color = static_cast<GLuint>(c.sk_color);
   GLuint msaa_sample_count = static_cast<GLuint>(c.msaa_sample_count);
   GLboolean can_use_lcd_text = static_cast<GLboolean>(c.can_use_lcd_text);
   GLint color_type = static_cast<GLint>(c.color_type);
-  DoBeginRasterCHROMIUM(texture_id, sk_color, msaa_sample_count,
-                        can_use_lcd_text, color_type);
+  GLuint color_space_transfer_cache_id =
+      static_cast<GLuint>(c.color_space_transfer_cache_id);
+  uint32_t data_size;
+  if (!gles2::GLES2Util::ComputeDataSize<GLbyte, 16>(1, &data_size)) {
+    return error::kOutOfBounds;
+  }
+  if (data_size > immediate_data_size) {
+    return error::kOutOfBounds;
+  }
+  volatile const GLbyte* mailbox =
+      gles2::GetImmediateDataAs<volatile const GLbyte*>(c, data_size,
+                                                        immediate_data_size);
+  if (mailbox == nullptr) {
+    return error::kOutOfBounds;
+  }
+  DoBeginRasterCHROMIUM(sk_color, msaa_sample_count, can_use_lcd_text,
+                        color_type, color_space_transfer_cache_id, mailbox);
   return error::kNoError;
 }
 
@@ -218,18 +223,28 @@ error::Error RasterDecoderImpl::HandleRasterCHROMIUM(
     const volatile void* cmd_data) {
   const volatile raster::cmds::RasterCHROMIUM& c =
       *static_cast<const volatile raster::cmds::RasterCHROMIUM*>(cmd_data);
-  GLsizeiptr size = static_cast<GLsizeiptr>(c.size);
-  uint32_t data_size = size;
-  const void* list = GetSharedMemoryAs<const void*>(
-      c.list_shm_id, c.list_shm_offset, data_size);
-  if (size < 0) {
-    LOCAL_SET_GL_ERROR(GL_INVALID_VALUE, "glRasterCHROMIUM", "size < 0");
+  if (!features().chromium_raster_transport) {
+    return error::kUnknownCommand;
+  }
+
+  GLuint raster_shm_id = static_cast<GLuint>(c.raster_shm_id);
+  GLuint raster_shm_offset = static_cast<GLuint>(c.raster_shm_offset);
+  GLsizeiptr raster_shm_size = static_cast<GLsizeiptr>(c.raster_shm_size);
+  GLuint font_shm_id = static_cast<GLuint>(c.font_shm_id);
+  GLuint font_shm_offset = static_cast<GLuint>(c.font_shm_offset);
+  GLsizeiptr font_shm_size = static_cast<GLsizeiptr>(c.font_shm_size);
+  if (raster_shm_size < 0) {
+    LOCAL_SET_GL_ERROR(GL_INVALID_VALUE, "glRasterCHROMIUM",
+                       "raster_shm_size < 0");
     return error::kNoError;
   }
-  if (list == NULL) {
-    return error::kOutOfBounds;
+  if (font_shm_size < 0) {
+    LOCAL_SET_GL_ERROR(GL_INVALID_VALUE, "glRasterCHROMIUM",
+                       "font_shm_size < 0");
+    return error::kNoError;
   }
-  DoRasterCHROMIUM(size, list);
+  DoRasterCHROMIUM(raster_shm_id, raster_shm_offset, raster_shm_size,
+                   font_shm_id, font_shm_offset, font_shm_size);
   return error::kNoError;
 }
 
@@ -322,15 +337,15 @@ error::Error RasterDecoderImpl::HandleProduceTextureDirectImmediate(
           cmd_data);
   GLuint texture = static_cast<GLuint>(c.texture);
   uint32_t data_size;
-  if (!GLES2Util::ComputeDataSize<GLbyte, 16>(1, &data_size)) {
+  if (!gles2::GLES2Util::ComputeDataSize<GLbyte, 16>(1, &data_size)) {
     return error::kOutOfBounds;
   }
   if (data_size > immediate_data_size) {
     return error::kOutOfBounds;
   }
-  volatile const GLbyte* mailbox = GetImmediateDataAs<volatile const GLbyte*>(
+  volatile GLbyte* mailbox = gles2::GetImmediateDataAs<volatile GLbyte*>(
       c, data_size, immediate_data_size);
-  if (mailbox == NULL) {
+  if (mailbox == nullptr) {
     return error::kOutOfBounds;
   }
   DoProduceTextureDirect(texture, mailbox);
@@ -348,14 +363,15 @@ error::Error RasterDecoderImpl::HandleCreateAndConsumeTextureINTERNALImmediate(
   gfx::BufferUsage buffer_usage = static_cast<gfx::BufferUsage>(c.buffer_usage);
   viz::ResourceFormat format = static_cast<viz::ResourceFormat>(c.format);
   uint32_t data_size;
-  if (!GLES2Util::ComputeDataSize<GLbyte, 16>(1, &data_size)) {
+  if (!gles2::GLES2Util::ComputeDataSize<GLbyte, 16>(1, &data_size)) {
     return error::kOutOfBounds;
   }
   if (data_size > immediate_data_size) {
     return error::kOutOfBounds;
   }
-  volatile const GLbyte* mailbox = GetImmediateDataAs<volatile const GLbyte*>(
-      c, data_size, immediate_data_size);
+  volatile const GLbyte* mailbox =
+      gles2::GetImmediateDataAs<volatile const GLbyte*>(c, data_size,
+                                                        immediate_data_size);
   if (!validators_->gfx_buffer_usage.IsValid(buffer_usage)) {
     LOCAL_SET_GL_ERROR_INVALID_ENUM("glCreateAndConsumeTextureINTERNAL",
                                     buffer_usage, "buffer_usage");
@@ -366,7 +382,7 @@ error::Error RasterDecoderImpl::HandleCreateAndConsumeTextureINTERNALImmediate(
                                     "format");
     return error::kNoError;
   }
-  if (mailbox == NULL) {
+  if (mailbox == nullptr) {
     return error::kOutOfBounds;
   }
   DoCreateAndConsumeTextureINTERNAL(texture_id, use_buffer, buffer_usage,
@@ -420,13 +436,8 @@ error::Error RasterDecoderImpl::HandleTexStorage2D(
   const volatile raster::cmds::TexStorage2D& c =
       *static_cast<const volatile raster::cmds::TexStorage2D*>(cmd_data);
   GLuint texture_id = static_cast<GLuint>(c.texture_id);
-  GLsizei levels = static_cast<GLsizei>(c.levels);
   GLsizei width = static_cast<GLsizei>(c.width);
   GLsizei height = static_cast<GLsizei>(c.height);
-  if (levels < 0) {
-    LOCAL_SET_GL_ERROR(GL_INVALID_VALUE, "glTexStorage2D", "levels < 0");
-    return error::kNoError;
-  }
   if (width < 0) {
     LOCAL_SET_GL_ERROR(GL_INVALID_VALUE, "glTexStorage2D", "width < 0");
     return error::kNoError;
@@ -435,7 +446,7 @@ error::Error RasterDecoderImpl::HandleTexStorage2D(
     LOCAL_SET_GL_ERROR(GL_INVALID_VALUE, "glTexStorage2D", "height < 0");
     return error::kNoError;
   }
-  DoTexStorage2D(texture_id, levels, width, height);
+  DoTexStorage2D(texture_id, width, height);
   return error::kNoError;
 }
 
@@ -461,6 +472,20 @@ error::Error RasterDecoderImpl::HandleCopySubTexture(
     return error::kNoError;
   }
   DoCopySubTexture(source_id, dest_id, xoffset, yoffset, x, y, width, height);
+  return error::kNoError;
+}
+
+error::Error RasterDecoderImpl::HandleTraceEndCHROMIUM(
+    uint32_t immediate_data_size,
+    const volatile void* cmd_data) {
+  DoTraceEndCHROMIUM();
+  return error::kNoError;
+}
+
+error::Error RasterDecoderImpl::HandleResetActiveURLCHROMIUM(
+    uint32_t immediate_data_size,
+    const volatile void* cmd_data) {
+  DoResetActiveURLCHROMIUM();
   return error::kNoError;
 }
 

@@ -72,7 +72,7 @@ int InitSocketPoolHelper(ClientSocketPoolManager::SocketGroupType group_type,
                          RequestPriority request_priority,
                          HttpNetworkSession* session,
                          const ProxyInfo& proxy_info,
-                         QuicTransportVersion quic_version,
+                         quic::QuicTransportVersion quic_version,
                          const SSLConfig& ssl_config_for_origin,
                          const SSLConfig& ssl_config_for_proxy,
                          bool force_tunnel,
@@ -83,8 +83,7 @@ int InitSocketPoolHelper(ClientSocketPoolManager::SocketGroupType group_type,
                          ClientSocketHandle* socket_handle,
                          HttpNetworkSession::SocketPoolType socket_pool_type,
                          const OnHostResolutionCallback& resolution_callback,
-                         const CompletionCallback& callback,
-                         HttpRequestInfo::RequestMotivation motivation) {
+                         CompletionOnceCallback callback) {
   scoped_refptr<HttpProxySocketParams> http_proxy_params;
   scoped_refptr<SOCKSSocketParams> socks_params;
   std::unique_ptr<HostPortPair> proxy_host_port;
@@ -182,7 +181,7 @@ int InitSocketPoolHelper(ClientSocketPoolManager::SocketGroupType group_type,
       }
 
       if (!proxy_info.is_quic()) {
-        quic_version = QUIC_VERSION_UNSUPPORTED;
+        quic_version = quic::QUIC_VERSION_UNSUPPORTED;
       }
 
       http_proxy_params = new HttpProxySocketParams(
@@ -233,13 +232,13 @@ int InitSocketPoolHelper(ClientSocketPoolManager::SocketGroupType group_type,
 
     if (num_preconnect_streams) {
       RequestSocketsForPool(ssl_pool, connection_group, ssl_params,
-                            num_preconnect_streams, net_log, motivation);
+                            num_preconnect_streams, net_log);
       return OK;
     }
 
     return socket_handle->Init(connection_group, ssl_params, request_priority,
-                               socket_tag, respect_limits, callback, ssl_pool,
-                               net_log);
+                               socket_tag, respect_limits, std::move(callback),
+                               ssl_pool, net_log);
   }
 
   // Finally, get the connection started.
@@ -249,13 +248,13 @@ int InitSocketPoolHelper(ClientSocketPoolManager::SocketGroupType group_type,
         session->GetSocketPoolForHTTPProxy(socket_pool_type, *proxy_host_port);
     if (num_preconnect_streams) {
       RequestSocketsForPool(pool, connection_group, http_proxy_params,
-                            num_preconnect_streams, net_log, motivation);
+                            num_preconnect_streams, net_log);
       return OK;
     }
 
     return socket_handle->Init(connection_group, http_proxy_params,
                                request_priority, socket_tag, respect_limits,
-                               callback, pool, net_log);
+                               std::move(callback), pool, net_log);
   }
 
   if (proxy_info.is_socks()) {
@@ -263,13 +262,13 @@ int InitSocketPoolHelper(ClientSocketPoolManager::SocketGroupType group_type,
         session->GetSocketPoolForSOCKSProxy(socket_pool_type, *proxy_host_port);
     if (num_preconnect_streams) {
       RequestSocketsForPool(pool, connection_group, socks_params,
-                            num_preconnect_streams, net_log, motivation);
+                            num_preconnect_streams, net_log);
       return OK;
     }
 
     return socket_handle->Init(connection_group, socks_params, request_priority,
-                               socket_tag, respect_limits, callback, pool,
-                               net_log);
+                               socket_tag, respect_limits, std::move(callback),
+                               pool, net_log);
   }
 
   DCHECK(proxy_info.is_direct());
@@ -280,13 +279,13 @@ int InitSocketPoolHelper(ClientSocketPoolManager::SocketGroupType group_type,
       session->GetTransportSocketPool(socket_pool_type);
   if (num_preconnect_streams) {
     RequestSocketsForPool(pool, connection_group, tcp_params,
-                          num_preconnect_streams, net_log, motivation);
+                          num_preconnect_streams, net_log);
     return OK;
   }
 
   return socket_handle->Init(connection_group, tcp_params, request_priority,
-                             socket_tag, respect_limits, callback, pool,
-                             net_log);
+                             socket_tag, respect_limits, std::move(callback),
+                             pool, net_log);
 }
 
 }  // namespace
@@ -364,7 +363,7 @@ int InitSocketHandleForHttpRequest(
     RequestPriority request_priority,
     HttpNetworkSession* session,
     const ProxyInfo& proxy_info,
-    QuicTransportVersion quic_version,
+    quic::QuicTransportVersion quic_version,
     const SSLConfig& ssl_config_for_origin,
     const SSLConfig& ssl_config_for_proxy,
     PrivacyMode privacy_mode,
@@ -372,15 +371,15 @@ int InitSocketHandleForHttpRequest(
     const NetLogWithSource& net_log,
     ClientSocketHandle* socket_handle,
     const OnHostResolutionCallback& resolution_callback,
-    const CompletionCallback& callback) {
+    CompletionOnceCallback callback) {
   DCHECK(socket_handle);
   return InitSocketPoolHelper(
       group_type, endpoint, request_extra_headers, request_load_flags,
       request_priority, session, proxy_info, quic_version,
       ssl_config_for_origin, ssl_config_for_proxy, /*force_tunnel=*/false,
       privacy_mode, socket_tag, net_log, 0, socket_handle,
-      HttpNetworkSession::NORMAL_SOCKET_POOL, resolution_callback, callback,
-      HttpRequestInfo::NORMAL_MOTIVATION);
+      HttpNetworkSession::NORMAL_SOCKET_POOL, resolution_callback,
+      std::move(callback));
 }
 
 int InitSocketHandleForWebSocketRequest(
@@ -397,15 +396,15 @@ int InitSocketHandleForWebSocketRequest(
     const NetLogWithSource& net_log,
     ClientSocketHandle* socket_handle,
     const OnHostResolutionCallback& resolution_callback,
-    const CompletionCallback& callback) {
+    CompletionOnceCallback callback) {
   DCHECK(socket_handle);
   return InitSocketPoolHelper(
       group_type, endpoint, request_extra_headers, request_load_flags,
-      request_priority, session, proxy_info, QUIC_VERSION_UNSUPPORTED,
+      request_priority, session, proxy_info, quic::QUIC_VERSION_UNSUPPORTED,
       ssl_config_for_origin, ssl_config_for_proxy,
       /*force_tunnel=*/true, privacy_mode, SocketTag(), net_log, 0,
       socket_handle, HttpNetworkSession::WEBSOCKET_SOCKET_POOL,
-      resolution_callback, callback, HttpRequestInfo::NORMAL_MOTIVATION);
+      resolution_callback, std::move(callback));
 }
 
 int InitSocketHandleForRawConnect(const HostPortPair& host_port_pair,
@@ -418,16 +417,16 @@ int InitSocketHandleForRawConnect(const HostPortPair& host_port_pair,
                                   PrivacyMode privacy_mode,
                                   const NetLogWithSource& net_log,
                                   ClientSocketHandle* socket_handle,
-                                  const CompletionCallback& callback) {
+                                  CompletionOnceCallback callback) {
   DCHECK(socket_handle);
   HttpRequestHeaders request_extra_headers;
   return InitSocketPoolHelper(
       ClientSocketPoolManager::NORMAL_GROUP, host_port_pair,
       request_extra_headers, request_load_flags, request_priority, session,
-      proxy_info, QUIC_VERSION_UNSUPPORTED, ssl_config_for_origin,
+      proxy_info, quic::QUIC_VERSION_UNSUPPORTED, ssl_config_for_origin,
       ssl_config_for_proxy, /*force_tunnel=*/true, privacy_mode, SocketTag(),
       net_log, 0, socket_handle, HttpNetworkSession::NORMAL_SOCKET_POOL,
-      OnHostResolutionCallback(), callback, HttpRequestInfo::NORMAL_MOTIVATION);
+      OnHostResolutionCallback(), std::move(callback));
 }
 
 int InitSocketHandleForTlsConnect(const HostPortPair& endpoint,
@@ -440,16 +439,17 @@ int InitSocketHandleForTlsConnect(const HostPortPair& endpoint,
                                   PrivacyMode privacy_mode,
                                   const NetLogWithSource& net_log,
                                   ClientSocketHandle* socket_handle,
-                                  const CompletionCallback& callback) {
+                                  CompletionOnceCallback callback) {
   DCHECK(socket_handle);
   HttpRequestHeaders request_extra_headers;
   return InitSocketPoolHelper(
       ClientSocketPoolManager::SSL_GROUP, endpoint, request_extra_headers,
       request_load_flags, request_priority, session, proxy_info,
-      QUIC_VERSION_UNSUPPORTED, ssl_config_for_origin, ssl_config_for_proxy,
+      quic::QUIC_VERSION_UNSUPPORTED, ssl_config_for_origin,
+      ssl_config_for_proxy,
       /*force_tunnel=*/true, privacy_mode, SocketTag(), net_log, 0,
       socket_handle, HttpNetworkSession::NORMAL_SOCKET_POOL,
-      OnHostResolutionCallback(), callback, HttpRequestInfo::NORMAL_MOTIVATION);
+      OnHostResolutionCallback(), std::move(callback));
 }
 
 int PreconnectSocketsForHttpRequest(
@@ -464,15 +464,14 @@ int PreconnectSocketsForHttpRequest(
     const SSLConfig& ssl_config_for_proxy,
     PrivacyMode privacy_mode,
     const NetLogWithSource& net_log,
-    int num_preconnect_streams,
-    HttpRequestInfo::RequestMotivation motivation) {
+    int num_preconnect_streams) {
   return InitSocketPoolHelper(
       group_type, endpoint, request_extra_headers, request_load_flags,
-      request_priority, session, proxy_info, QUIC_VERSION_UNSUPPORTED,
+      request_priority, session, proxy_info, quic::QUIC_VERSION_UNSUPPORTED,
       ssl_config_for_origin, ssl_config_for_proxy,
       /*force_tunnel=*/false, privacy_mode, SocketTag(), net_log,
       num_preconnect_streams, NULL, HttpNetworkSession::NORMAL_SOCKET_POOL,
-      OnHostResolutionCallback(), CompletionCallback(), motivation);
+      OnHostResolutionCallback(), CompletionOnceCallback());
 }
 
 }  // namespace net

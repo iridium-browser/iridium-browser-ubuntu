@@ -18,14 +18,15 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/metrics/field_trial.h"
+#include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
+#include "base/task/post_task.h"
 #include "base/threading/thread.h"
 #include "base/time/time.h"
 #include "base/trace_event/trace_event.h"
-#include "components/net_log/chrome_net_log.h"
 #include "components/network_session_configurator/browser/network_session_configurator.h"
 #include "components/prefs/pref_service.h"
 #include "components/proxy_config/ios/proxy_service_factory.h"
@@ -34,10 +35,10 @@
 #include "components/version_info/version_info.h"
 #include "ios/web/public/user_agent.h"
 #include "ios/web/public/web_client.h"
+#include "ios/web/public/web_task_traits.h"
 #include "ios/web/public/web_thread.h"
+#include "net/base/logging_network_change_observer.h"
 #include "net/cert/cert_verifier.h"
-#include "net/cert/ct_known_logs.h"
-#include "net/cert/ct_log_verifier.h"
 #include "net/cert/ct_policy_enforcer.h"
 #include "net/cert/ct_verifier.h"
 #include "net/cert/multi_log_ct_verifier.h"
@@ -51,14 +52,16 @@
 #include "net/http/http_auth_preferences.h"
 #include "net/http/http_network_layer.h"
 #include "net/http/http_server_properties_impl.h"
+#include "net/log/net_log.h"
 #include "net/log/net_log_event_type.h"
 #include "net/proxy_resolution/pac_file_fetcher_impl.h"
 #include "net/proxy_resolution/proxy_config_service.h"
 #include "net/proxy_resolution/proxy_resolution_service.h"
 #include "net/socket/tcp_client_socket.h"
-#include "net/spdy/chromium/spdy_session.h"
+#include "net/spdy/spdy_session.h"
 #include "net/ssl/channel_id_service.h"
 #include "net/ssl/default_channel_id_store.h"
+#include "net/ssl/ssl_config_service_defaults.h"
 #include "net/url_request/data_protocol_handler.h"
 #include "net/url_request/file_protocol_handler.h"
 #include "net/url_request/static_http_user_agent_settings.h"
@@ -103,65 +106,6 @@ std::unique_ptr<net::HostResolver> CreateGlobalHostResolver(
   return global_host_resolver;
 }
 
-class IOSIOThread::LoggingNetworkChangeObserver
-    : public net::NetworkChangeNotifier::IPAddressObserver,
-      public net::NetworkChangeNotifier::ConnectionTypeObserver,
-      public net::NetworkChangeNotifier::NetworkChangeObserver {
- public:
-  // |net_log| must remain valid throughout our lifetime.
-  explicit LoggingNetworkChangeObserver(net::NetLog* net_log)
-      : net_log_(net_log) {
-    net::NetworkChangeNotifier::AddIPAddressObserver(this);
-    net::NetworkChangeNotifier::AddConnectionTypeObserver(this);
-    net::NetworkChangeNotifier::AddNetworkChangeObserver(this);
-  }
-
-  ~LoggingNetworkChangeObserver() override {
-    net::NetworkChangeNotifier::RemoveIPAddressObserver(this);
-    net::NetworkChangeNotifier::RemoveConnectionTypeObserver(this);
-    net::NetworkChangeNotifier::RemoveNetworkChangeObserver(this);
-  }
-
-  // NetworkChangeNotifier::IPAddressObserver implementation.
-  void OnIPAddressChanged() override {
-    VLOG(1) << "Observed a change to the network IP addresses";
-
-    net_log_->AddGlobalEntry(
-        net::NetLogEventType::NETWORK_IP_ADDRESSES_CHANGED);
-  }
-
-  // NetworkChangeNotifier::ConnectionTypeObserver implementation.
-  void OnConnectionTypeChanged(
-      net::NetworkChangeNotifier::ConnectionType type) override {
-    std::string type_as_string =
-        net::NetworkChangeNotifier::ConnectionTypeToString(type);
-
-    VLOG(1) << "Observed a change to network connectivity state "
-            << type_as_string;
-
-    net_log_->AddGlobalEntry(
-        net::NetLogEventType::NETWORK_CONNECTIVITY_CHANGED,
-        net::NetLog::StringCallback("new_connection_type", &type_as_string));
-  }
-
-  // NetworkChangeNotifier::NetworkChangeObserver implementation.
-  void OnNetworkChanged(
-      net::NetworkChangeNotifier::ConnectionType type) override {
-    std::string type_as_string =
-        net::NetworkChangeNotifier::ConnectionTypeToString(type);
-
-    VLOG(1) << "Observed a network change to state " << type_as_string;
-
-    net_log_->AddGlobalEntry(
-        net::NetLogEventType::NETWORK_CHANGED,
-        net::NetLog::StringCallback("new_connection_type", &type_as_string));
-  }
-
- private:
-  net::NetLog* net_log_;
-  DISALLOW_COPY_AND_ASSIGN(LoggingNetworkChangeObserver);
-};
-
 class SystemURLRequestContextGetter : public net::URLRequestContextGetter {
  public:
   explicit SystemURLRequestContextGetter(IOSIOThread* io_thread);
@@ -188,7 +132,7 @@ SystemURLRequestContextGetter::SystemURLRequestContextGetter(
     IOSIOThread* io_thread)
     : io_thread_(io_thread),
       network_task_runner_(
-          web::WebThread::GetTaskRunnerForThread(web::WebThread::IO)) {}
+          base::CreateSingleThreadTaskRunnerWithTraits({web::WebThread::IO})) {}
 
 SystemURLRequestContextGetter::~SystemURLRequestContextGetter() {}
 
@@ -230,21 +174,13 @@ IOSIOThread::Globals::~Globals() {}
 
 // |local_state| is passed in explicitly in order to (1) reduce implicit
 // dependencies and (2) make IOSIOThread more flexible for testing.
-IOSIOThread::IOSIOThread(PrefService* local_state,
-                         net_log::ChromeNetLog* net_log)
-    : net_log_(net_log),
-      globals_(nullptr),
-      weak_factory_(this) {
+IOSIOThread::IOSIOThread(PrefService* local_state, net::NetLog* net_log)
+    : net_log_(net_log), globals_(nullptr), weak_factory_(this) {
   pref_proxy_config_tracker_ =
       ProxyServiceFactory::CreatePrefProxyConfigTrackerOfLocalState(
           local_state);
   system_proxy_config_service_ = ProxyServiceFactory::CreateProxyConfigService(
       pref_proxy_config_tracker_.get());
-
-  ssl_config_service_manager_.reset(
-      ssl_config::SSLConfigServiceManager::CreateDefaultManager(
-          local_state,
-          web::WebThread::GetTaskRunnerForThread(web::WebThread::IO)));
 
   web::WebThread::SetDelegate(web::WebThread::IO, this);
 }
@@ -269,14 +205,14 @@ void IOSIOThread::SetGlobalsForTesting(Globals* globals) {
   globals_ = globals;
 }
 
-net_log::ChromeNetLog* IOSIOThread::net_log() {
+net::NetLog* IOSIOThread::net_log() {
   return net_log_;
 }
 
 void IOSIOThread::ChangedToOnTheRecord() {
   DCHECK_CURRENTLY_ON(web::WebThread::UI);
-  web::WebThread::PostTask(
-      web::WebThread::IO, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {web::WebThread::IO},
       base::Bind(&IOSIOThread::ChangedToOnTheRecordOnIOThread,
                  base::Unretained(this)));
 }
@@ -300,13 +236,11 @@ void IOSIOThread::Init() {
   DCHECK(!globals_);
   globals_ = new Globals;
 
-  // Add an observer that will emit network change events to the ChromeNetLog.
+  // Add an observer that will emit network change events to the NetLog.
   // Assuming NetworkChangeNotifier dispatches in FIFO order, we should be
   // logging the network change before other IO thread consumers respond to it.
-  network_change_observer_.reset(new LoggingNetworkChangeObserver(net_log_));
-
-  // Setup the HistogramWatcher to run on the IO thread.
-  net::NetworkChangeNotifier::InitHistogramWatcher();
+  network_change_observer_ =
+      std::make_unique<net::LoggingNetworkChangeObserver>(net_log_);
 
   globals_->system_network_delegate = CreateSystemNetworkDelegate();
   globals_->host_resolver = CreateGlobalHostResolver(net_log_);
@@ -315,22 +249,18 @@ void IOSIOThread::Init() {
 
   globals_->transport_security_state.reset(new net::TransportSecurityState());
 
-  std::vector<scoped_refptr<const net::CTLogVerifier>> ct_logs(
-      net::ct::CreateLogVerifiersForKnownLogs());
+  globals_->cert_transparency_verifier.reset(new net::MultiLogCTVerifier());
+  globals_->ct_policy_enforcer.reset(new net::DefaultCTPolicyEnforcer());
 
-  net::MultiLogCTVerifier* ct_verifier = new net::MultiLogCTVerifier();
-  globals_->cert_transparency_verifier.reset(ct_verifier);
-  // Add built-in logs
-  ct_verifier->AddLogs(ct_logs);
-
-  globals_->ct_policy_enforcer.reset(new net::CTPolicyEnforcer());
-
-  globals_->ssl_config_service = GetSSLConfigService();
+  globals_->ssl_config_service.reset(new net::SSLConfigServiceDefaults());
 
   CreateDefaultAuthHandlerFactory();
   globals_->http_server_properties.reset(new net::HttpServerPropertiesImpl());
   // In-memory cookie store.
-  globals_->system_cookie_store.reset(new net::CookieMonster(nullptr));
+  // TODO(crbug.com/801910): Hook up logging by passing in a non-null netlog.
+  globals_->system_cookie_store.reset(new net::CookieMonster(
+      nullptr /* store */, nullptr /* channel_id_service */,
+      nullptr /* netlog */));
   // In-memory channel ID store.
   globals_->system_channel_id_service.reset(
       new net::ChannelIDService(new net::DefaultChannelIDStore(nullptr)));
@@ -373,10 +303,7 @@ void IOSIOThread::CleanUp() {
   // Release objects that the net::URLRequestContext could have been pointing
   // to.
 
-  // Shutdown the HistogramWatcher on the IO thread.
-  net::NetworkChangeNotifier::ShutdownHistogramWatcher();
-
-  // This must be reset before the ChromeNetLog is destroyed.
+  // This must be reset before the NetLog is destroyed.
   network_change_observer_.reset();
 
   system_proxy_config_service_.reset();
@@ -391,11 +318,12 @@ void IOSIOThread::CreateDefaultAuthHandlerFactory() {
   std::vector<std::string> supported_schemes =
       base::SplitString(kSupportedAuthSchemes, ",", base::TRIM_WHITESPACE,
                         base::SPLIT_WANT_NONEMPTY);
-  globals_->http_auth_preferences.reset(
-      new net::HttpAuthPreferences(supported_schemes, std::string()));
+  globals_->http_auth_preferences =
+      std::make_unique<net::HttpAuthPreferences>();
   globals_->http_auth_handler_factory =
       net::HttpAuthHandlerRegistryFactory::Create(
-          globals_->http_auth_preferences.get(), globals_->host_resolver.get());
+          globals_->host_resolver.get(), globals_->http_auth_preferences.get(),
+          supported_schemes);
 }
 
 void IOSIOThread::ClearHostCache() {
@@ -409,10 +337,6 @@ void IOSIOThread::ClearHostCache() {
 const net::HttpNetworkSession::Params& IOSIOThread::NetworkSessionParams()
     const {
   return params_;
-}
-
-net::SSLConfigService* IOSIOThread::GetSSLConfigService() {
-  return ssl_config_service_manager_->Get();
 }
 
 void IOSIOThread::ChangedToOnTheRecordOnIOThread() {

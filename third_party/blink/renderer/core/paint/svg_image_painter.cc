@@ -4,65 +4,63 @@
 
 #include "third_party/blink/renderer/core/paint/svg_image_painter.h"
 
-#include "third_party/blink/renderer/core/frame/local_frame.h"
-#include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/layout/layout_image_resource.h"
 #include "third_party/blink/renderer/core/layout/svg/layout_svg_image.h"
-#include "third_party/blink/renderer/core/page/chrome_client.h"
-#include "third_party/blink/renderer/core/page/page.h"
-#include "third_party/blink/renderer/core/paint/object_painter.h"
 #include "third_party/blink/renderer/core/paint/paint_info.h"
-#include "third_party/blink/renderer/core/paint/svg_paint_context.h"
+#include "third_party/blink/renderer/core/paint/scoped_svg_paint_state.h"
+#include "third_party/blink/renderer/core/paint/svg_model_object_painter.h"
 #include "third_party/blink/renderer/core/svg/graphics/svg_image.h"
 #include "third_party/blink/renderer/core/svg/svg_image_element.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context.h"
 #include "third_party/blink/renderer/platform/graphics/paint/drawing_recorder.h"
-#include "third_party/blink/renderer/platform/graphics/paint/paint_record.h"
 #include "third_party/blink/renderer/platform/graphics/scoped_interpolation_quality.h"
 
 namespace blink {
 
 void SVGImagePainter::Paint(const PaintInfo& paint_info) {
   if (paint_info.phase != PaintPhase::kForeground ||
-      layout_svg_image_.Style()->Visibility() != EVisibility::kVisible ||
+      layout_svg_image_.StyleRef().Visibility() != EVisibility::kVisible ||
       !layout_svg_image_.ImageResource()->HasImage())
     return;
 
-  FloatRect bounding_box = layout_svg_image_.VisualRectInLocalSVGCoordinates();
-  if (!paint_info.GetCullRect().IntersectsCullRect(
-          layout_svg_image_.LocalToSVGParentTransform(), bounding_box))
-    return;
-
   PaintInfo paint_info_before_filtering(paint_info);
-  // Images cannot have children so do not call updateCullRect.
-  SVGTransformContext transform_context(
+
+  if (SVGModelObjectPainter(layout_svg_image_)
+          .CullRectSkipsPainting(paint_info_before_filtering)) {
+    return;
+  }
+  // Images cannot have children so do not call UpdateCullRect.
+
+  ScopedSVGTransformState transform_state(
       paint_info_before_filtering, layout_svg_image_,
       layout_svg_image_.LocalToSVGParentTransform());
   {
-    SVGPaintContext paint_context(layout_svg_image_,
-                                  paint_info_before_filtering);
-    if (paint_context.ApplyClipMaskAndFilterIfNecessary() &&
+    ScopedSVGPaintState paint_state(layout_svg_image_,
+                                    paint_info_before_filtering);
+    if (paint_state.ApplyClipMaskAndFilterIfNecessary() &&
         !DrawingRecorder::UseCachedDrawingIfPossible(
-            paint_context.GetPaintInfo().context, layout_svg_image_,
-            paint_context.GetPaintInfo().phase)) {
-      DrawingRecorder recorder(paint_context.GetPaintInfo().context,
+            paint_state.GetPaintInfo().context, layout_svg_image_,
+            paint_state.GetPaintInfo().phase)) {
+      if (RuntimeEnabledFeatures::PaintTouchActionRectsEnabled())
+        SVGModelObjectPainter::RecordHitTestData(layout_svg_image_, paint_info);
+      DrawingRecorder recorder(paint_state.GetPaintInfo().context,
                                layout_svg_image_,
-                               paint_context.GetPaintInfo().phase);
-      PaintForeground(paint_context.GetPaintInfo());
+                               paint_state.GetPaintInfo().phase);
+      PaintForeground(paint_state.GetPaintInfo());
     }
   }
 
-  if (layout_svg_image_.Style()->OutlineWidth()) {
-    PaintInfo outline_paint_info(paint_info_before_filtering);
-    outline_paint_info.phase = PaintPhase::kSelfOutlineOnly;
-    ObjectPainter(layout_svg_image_)
-        .PaintOutline(outline_paint_info, LayoutPoint(bounding_box.Location()));
-  }
+  SVGModelObjectPainter(layout_svg_image_)
+      .PaintOutline(paint_info_before_filtering);
 }
 
 void SVGImagePainter::PaintForeground(const PaintInfo& paint_info) {
   const LayoutImageResource* image_resource = layout_svg_image_.ImageResource();
-  IntSize image_viewport_size = ExpandedIntSize(ComputeImageViewportSize());
+  // TODO(fs): Reduce the number of conversions.
+  // (FloatSize -> IntSize -> LayoutSize currently.)
+  FloatSize float_image_viewport_size = ComputeImageViewportSize();
+  float_image_viewport_size.Scale(layout_svg_image_.StyleRef().EffectiveZoom());
+  IntSize image_viewport_size = ExpandedIntSize(float_image_viewport_size);
   if (image_viewport_size.IsEmpty())
     return;
 

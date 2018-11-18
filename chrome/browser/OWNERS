@@ -18,6 +18,8 @@ per-file browser_close_manager_browsertest.cc=creis@chromium.org
 per-file browser_navigator_browsertest.*=alexmos@chromium.org
 per-file browser_navigator_browsertest.*=file://content/OWNERS
 
+per-file certificate_manager_model*=mattm@chromium.org
+
 per-file chrome_content_browser_client.cc=*
 per-file chrome_content_browser_client.h=*
 per-file chrome_content_browser_client_browsertest.cc=*
@@ -81,7 +83,6 @@ per-file *_mac.h=mark@chromium.org
 per-file *_mac.h=rsesek@chromium.org
 per-file *_mac.h=thakis@chromium.org
 
-per-file media_router_resources.grdp*=apacible@chromium.org
 per-file media_router_resources.grdp*=imcheng@chromium.org
 per-file media_router_resources.grdp*=mfoltz@chromium.org
 
@@ -91,7 +92,6 @@ per-file shell_integration_linux*=thomasanderson@chromium.org
 
 per-file site_details*=creis@chromium.org
 per-file site_details*=nasko@chromium.org
-per-file site_details*=nick@chromium.org
 
 per-file site_per_process_interactive_browsertest.cc=file://content/OWNERS
 per-file site_per_process_interactive_browsertest.cc=kenrb@chromium.org

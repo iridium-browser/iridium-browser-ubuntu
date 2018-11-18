@@ -17,6 +17,7 @@
 #include "chrome/browser/ui/webui/print_preview/print_preview_ui.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
 #include "components/prefs/pref_service.h"
+#include "components/printing/common/print_messages.h"
 #include "components/web_modal/web_contents_modal_dialog_manager.h"
 #include "content/public/browser/plugin_service.h"
 #include "content/public/browser/site_instance.h"
@@ -30,7 +31,7 @@ namespace {
 
 scoped_refptr<base::RefCountedBytes> CreateTestData() {
   const unsigned char blob1[] =
-      "12346102356120394751634516591348710478123649165419234519234512349134";
+      "%PDF-1.4123461023561203947516345165913487104781236491654192345192345";
   std::vector<unsigned char> preview_data(blob1, blob1 + sizeof(blob1));
   return base::MakeRefCounted<base::RefCountedBytes>(preview_data);
 }
@@ -95,22 +96,16 @@ TEST_F(PrintPreviewUIUnitTest, PrintPreviewData) {
 
   scoped_refptr<base::RefCountedBytes> dummy_data = CreateTestData();
 
-  preview_ui->SetPrintPreviewDataForIndex(
-      printing::COMPLETE_PREVIEW_DOCUMENT_INDEX,
-      dummy_data.get());
+  preview_ui->SetPrintPreviewDataForIndexForTest(
+      printing::COMPLETE_PREVIEW_DOCUMENT_INDEX, dummy_data.get());
   preview_ui->GetPrintPreviewDataForIndex(
       printing::COMPLETE_PREVIEW_DOCUMENT_INDEX,
       &data);
   EXPECT_EQ(dummy_data->size(), data->size());
   EXPECT_EQ(dummy_data.get(), data.get());
 
-  // This should not cause any memory leaks.
-  dummy_data = base::MakeRefCounted<base::RefCountedBytes>();
-  preview_ui->SetPrintPreviewDataForIndex(printing::FIRST_PAGE_INDEX,
-                                          dummy_data.get());
-
   // Clear the preview data.
-  preview_ui->ClearAllPreviewData();
+  preview_ui->ClearAllPreviewDataForTest();
 
   preview_ui->GetPrintPreviewDataForIndex(
       printing::COMPLETE_PREVIEW_DOCUMENT_INDEX,
@@ -146,15 +141,15 @@ TEST_F(PrintPreviewUIUnitTest, PrintPreviewDraftPages) {
 
   scoped_refptr<base::RefCountedBytes> dummy_data = CreateTestData();
 
-  preview_ui->SetPrintPreviewDataForIndex(printing::FIRST_PAGE_INDEX,
-                                          dummy_data.get());
+  preview_ui->SetPrintPreviewDataForIndexForTest(printing::FIRST_PAGE_INDEX,
+                                                 dummy_data.get());
   preview_ui->GetPrintPreviewDataForIndex(printing::FIRST_PAGE_INDEX, &data);
   EXPECT_EQ(dummy_data->size(), data->size());
   EXPECT_EQ(dummy_data.get(), data.get());
 
   // Set and get the third page data.
-  preview_ui->SetPrintPreviewDataForIndex(printing::FIRST_PAGE_INDEX + 2,
-                                          dummy_data.get());
+  preview_ui->SetPrintPreviewDataForIndexForTest(printing::FIRST_PAGE_INDEX + 2,
+                                                 dummy_data.get());
   preview_ui->GetPrintPreviewDataForIndex(printing::FIRST_PAGE_INDEX + 2,
                                           &data);
   EXPECT_EQ(dummy_data->size(), data->size());
@@ -165,21 +160,21 @@ TEST_F(PrintPreviewUIUnitTest, PrintPreviewDraftPages) {
                                           &data);
   EXPECT_FALSE(data);
 
-  preview_ui->SetPrintPreviewDataForIndex(printing::FIRST_PAGE_INDEX + 1,
-                                          dummy_data.get());
+  preview_ui->SetPrintPreviewDataForIndexForTest(printing::FIRST_PAGE_INDEX + 1,
+                                                 dummy_data.get());
   preview_ui->GetPrintPreviewDataForIndex(printing::FIRST_PAGE_INDEX + 1,
                                           &data);
   EXPECT_EQ(dummy_data->size(), data->size());
   EXPECT_EQ(dummy_data.get(), data.get());
 
   // Clear the preview data.
-  preview_ui->ClearAllPreviewData();
+  preview_ui->ClearAllPreviewDataForTest();
   preview_ui->GetPrintPreviewDataForIndex(printing::FIRST_PAGE_INDEX, &data);
   EXPECT_FALSE(data);
 }
 
 // Test the browser-side print preview cancellation functionality.
-TEST_F(PrintPreviewUIUnitTest, GetCurrentPrintPreviewStatus) {
+TEST_F(PrintPreviewUIUnitTest, ShouldCancelRequest) {
   WebContents* initiator = browser()->tab_strip_model()->GetActiveWebContents();
   ASSERT_TRUE(initiator);
 
@@ -200,37 +195,21 @@ TEST_F(PrintPreviewUIUnitTest, GetCurrentPrintPreviewStatus) {
       preview_dialog->GetWebUI()->GetController());
   ASSERT_TRUE(preview_ui);
 
-  // Test with invalid |preview_ui_addr|.
-  bool cancel = false;
+  // Test with invalid UI ID.
   const int32_t kInvalidId = -5;
-  preview_ui->GetCurrentPrintPreviewStatus(kInvalidId, 0, &cancel);
-  EXPECT_TRUE(cancel);
+  EXPECT_TRUE(preview_ui->ShouldCancelRequest({0, kInvalidId}));
 
   const int kFirstRequestId = 1000;
   const int kSecondRequestId = 1001;
-  const int32_t preview_ui_addr = preview_ui->GetIDForPrintPreviewUI();
+  const int32_t preview_id = preview_ui->GetIDForPrintPreviewUI();
 
   // Test with kFirstRequestId.
   preview_ui->OnPrintPreviewRequest(kFirstRequestId);
-  cancel = true;
-  preview_ui->GetCurrentPrintPreviewStatus(preview_ui_addr, kFirstRequestId,
-                                           &cancel);
-  EXPECT_FALSE(cancel);
-
-  cancel = false;
-  preview_ui->GetCurrentPrintPreviewStatus(preview_ui_addr, kSecondRequestId,
-                                           &cancel);
-  EXPECT_TRUE(cancel);
+  EXPECT_FALSE(preview_ui->ShouldCancelRequest({kFirstRequestId, preview_id}));
+  EXPECT_TRUE(preview_ui->ShouldCancelRequest({kSecondRequestId, preview_id}));
 
   // Test with kSecondRequestId.
   preview_ui->OnPrintPreviewRequest(kSecondRequestId);
-  cancel = false;
-  preview_ui->GetCurrentPrintPreviewStatus(preview_ui_addr, kFirstRequestId,
-                                           &cancel);
-  EXPECT_TRUE(cancel);
-
-  cancel = true;
-  preview_ui->GetCurrentPrintPreviewStatus(preview_ui_addr, kSecondRequestId,
-                                           &cancel);
-  EXPECT_FALSE(cancel);
+  EXPECT_TRUE(preview_ui->ShouldCancelRequest({kFirstRequestId, preview_id}));
+  EXPECT_FALSE(preview_ui->ShouldCancelRequest({kSecondRequestId, preview_id}));
 }

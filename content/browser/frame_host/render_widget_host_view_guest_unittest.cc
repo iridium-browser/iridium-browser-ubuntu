@@ -12,6 +12,7 @@
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
+#include "components/viz/common/features.h"
 #include "components/viz/service/frame_sinks/frame_sink_manager_impl.h"
 #include "components/viz/service/surfaces/surface.h"
 #include "components/viz/service/surfaces/surface_manager.h"
@@ -27,7 +28,6 @@
 #include "content/public/test/mock_render_process_host.h"
 #include "content/public/test/test_browser_context.h"
 #include "content/public/test/test_browser_thread_bundle.h"
-#include "content/test/fake_renderer_compositor_frame_sink.h"
 #include "content/test/mock_render_widget_host_delegate.h"
 #include "content/test/mock_widget_impl.h"
 #include "content/test/test_render_view_host.h"
@@ -111,28 +111,13 @@ class TestBrowserPluginGuest : public BrowserPluginGuest {
 
   ~TestBrowserPluginGuest() override {}
 
-  void ResetTestData() { last_surface_info_ = viz::SurfaceInfo(); }
-
-  void set_has_attached_since_surface_set(bool has_attached_since_surface_set) {
-    BrowserPluginGuest::set_has_attached_since_surface_set_for_test(
-        has_attached_since_surface_set);
-  }
-
   void set_attached(bool attached) {
     BrowserPluginGuest::set_attached_for_test(attached);
   }
-
-  void SetChildFrameSurface(const viz::SurfaceInfo& surface_info) override {
-    last_surface_info_ = surface_info;
-  }
-
-  viz::SurfaceInfo last_surface_info_;
 };
 
 // TODO(wjmaclean): we should restructure RenderWidgetHostViewChildFrameTest to
-// look more like this one, and then this one could be derived from it. Also,
-// include CreateDelegatedFrame as part of the test class so we don't have to
-// repeat it here.
+// look more like this one, and then this one could be derived from it.
 class RenderWidgetHostViewGuestSurfaceTest
     : public testing::Test {
  public:
@@ -147,8 +132,7 @@ class RenderWidgetHostViewGuestSurfaceTest
     browser_context_.reset(new TestBrowserContext);
     MockRenderProcessHost* process_host =
         new MockRenderProcessHost(browser_context_.get());
-    web_contents_.reset(
-        TestWebContents::Create(browser_context_.get(), nullptr));
+    web_contents_ = TestWebContents::Create(browser_context_.get(), nullptr);
     // We don't own the BPG, the WebContents does.
     browser_plugin_guest_ = new TestBrowserPluginGuest(
         web_contents_.get(), &browser_plugin_guest_delegate_);
@@ -162,16 +146,6 @@ class RenderWidgetHostViewGuestSurfaceTest
     view_ = RenderWidgetHostViewGuest::Create(
         widget_host_, browser_plugin_guest_,
         (new TestRenderWidgetHostView(widget_host_))->GetWeakPtr());
-    viz::mojom::CompositorFrameSinkPtr sink;
-    viz::mojom::CompositorFrameSinkRequest sink_request =
-        mojo::MakeRequest(&sink);
-    viz::mojom::CompositorFrameSinkClientRequest client_request =
-        mojo::MakeRequest(&renderer_compositor_frame_sink_ptr_);
-    renderer_compositor_frame_sink_ =
-        std::make_unique<FakeRendererCompositorFrameSink>(
-            std::move(sink), std::move(client_request));
-    view_->DidCreateNewRendererCompositorFrameSink(
-        renderer_compositor_frame_sink_ptr_.get());
   }
 
   void TearDown() override {
@@ -192,14 +166,10 @@ class RenderWidgetHostViewGuestSurfaceTest
     DCHECK(view_);
     RenderWidgetHostViewChildFrame* rwhvcf =
         static_cast<RenderWidgetHostViewChildFrame*>(view_);
-    if (!rwhvcf->last_received_local_surface_id_.is_valid())
-      return viz::SurfaceId();
-    return viz::SurfaceId(rwhvcf->frame_sink_id_,
-                          rwhvcf->last_received_local_surface_id_);
+    return rwhvcf->last_activated_surface_info_.id();
   }
 
  protected:
-  ScopedMockRenderProcessHostFactory rph_factory_;
   TestBrowserThreadBundle thread_bundle_;
   std::unique_ptr<BrowserContext> browser_context_;
   MockRenderWidgetHostDelegate delegate_;
@@ -212,89 +182,11 @@ class RenderWidgetHostViewGuestSurfaceTest
   std::unique_ptr<MockWidgetImpl> widget_impl_;
   RenderWidgetHostImpl* widget_host_;
   RenderWidgetHostViewGuest* view_;
-  std::unique_ptr<FakeRendererCompositorFrameSink>
-      renderer_compositor_frame_sink_;
 
  private:
   viz::mojom::CompositorFrameSinkClientPtr renderer_compositor_frame_sink_ptr_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostViewGuestSurfaceTest);
 };
-
-namespace {
-viz::CompositorFrame CreateDelegatedFrame(float scale_factor,
-                                          gfx::Size size,
-                                          const gfx::Rect& damage) {
-  viz::CompositorFrame frame;
-  frame.metadata.device_scale_factor = scale_factor;
-  frame.metadata.begin_frame_ack = viz::BeginFrameAck(0, 1, true);
-
-  std::unique_ptr<viz::RenderPass> pass = viz::RenderPass::Create();
-  pass->SetNew(1, gfx::Rect(size), damage, gfx::Transform());
-  frame.render_pass_list.push_back(std::move(pass));
-  return frame;
-}
-}  // anonymous namespace
-
-TEST_F(RenderWidgetHostViewGuestSurfaceTest, TestGuestSurface) {
-  // TODO: fix for mash.
-  if (base::FeatureList::IsEnabled(features::kMash))
-    return;
-
-  gfx::Size view_size(100, 100);
-  gfx::Rect view_rect(view_size);
-  float scale_factor = 1.f;
-  viz::LocalSurfaceId local_surface_id(1, base::UnguessableToken::Create());
-
-  ASSERT_TRUE(browser_plugin_guest_);
-
-  view_->SetSize(view_size);
-  view_->Show();
-
-  browser_plugin_guest_->set_attached(true);
-  view_->SubmitCompositorFrame(
-      local_surface_id,
-      CreateDelegatedFrame(scale_factor, view_size, view_rect), nullptr);
-
-  viz::SurfaceId id = GetSurfaceId();
-
-  EXPECT_TRUE(id.is_valid());
-
-#if !defined(OS_ANDROID)
-  viz::SurfaceManager* manager = ImageTransportFactory::GetInstance()
-                                     ->GetContextFactoryPrivate()
-                                     ->GetFrameSinkManager()
-                                     ->surface_manager();
-  viz::Surface* surface = manager->GetSurfaceForId(id);
-  EXPECT_TRUE(surface);
-#endif
-  // Surface ID should have been passed to BrowserPluginGuest to
-  // be sent to the embedding renderer.
-  EXPECT_EQ(viz::SurfaceInfo(id, scale_factor, view_size),
-            browser_plugin_guest_->last_surface_info_);
-
-  browser_plugin_guest_->ResetTestData();
-  browser_plugin_guest_->set_has_attached_since_surface_set(true);
-
-  view_->SubmitCompositorFrame(
-      local_surface_id,
-      CreateDelegatedFrame(scale_factor, view_size, view_rect), nullptr);
-
-  // Since we have not changed the frame size and scale factor, the same surface
-  // id must be used.
-  DCHECK_EQ(id, GetSurfaceId());
-
-#if !defined(OS_ANDROID)
-  surface = manager->GetSurfaceForId(id);
-  EXPECT_TRUE(surface);
-#endif
-  // Surface ID should have been passed to BrowserPluginGuest to
-  // be sent to the embedding renderer.
-  EXPECT_EQ(viz::SurfaceInfo(id, scale_factor, view_size),
-            browser_plugin_guest_->last_surface_info_);
-
-  browser_plugin_guest_->set_attached(false);
-  browser_plugin_guest_->ResetTestData();
-}
 
 }  // namespace content

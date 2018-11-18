@@ -5,17 +5,16 @@
 #include "ios/chrome/browser/ui/ntp/ntp_tile_saver.h"
 
 #include "base/bind.h"
-#import "base/mac/bind_objc_block.h"
 #include "base/md5.h"
 #include "base/strings/sys_string_conversions.h"
-#include "base/task_scheduler/post_task.h"
-#include "base/threading/thread_restrictions.h"
+#include "base/task/post_task.h"
+#include "base/threading/scoped_blocking_call.h"
 #include "components/favicon/core/fallback_url_util.h"
 #include "components/ntp_tiles/ntp_tile.h"
-#import "ios/chrome/browser/ui/favicon/favicon_attributes.h"
 #import "ios/chrome/browser/ui/favicon/favicon_attributes_provider.h"
-#import "ios/chrome/browser/ui/ntp/ntp_tile.h"
 #include "ios/chrome/common/app_group/app_group_constants.h"
+#import "ios/chrome/common/favicon/favicon_attributes.h"
+#import "ios/chrome/common/ntp_tile/ntp_tile.h"
 #import "net/base/mac/url_conversions.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -129,15 +128,15 @@ void SaveMostVisitedToDisk(const ntp_tiles::NTPTilesVector& most_visited_data,
   UpdateTileList(most_visited_data);
 
   base::PostTaskWithTraitsAndReply(
-      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
       base::BindOnce(&ClearOutdatedIcons, most_visited_data,
                      favicons_directory),
-      base::Bind(base::BindBlockArc(
-                     ^(const ntp_tiles::NTPTilesVector& most_visited_data) {
-                       GetFaviconsAndSave(most_visited_data, favicon_provider,
-                                          favicons_directory);
-                     }),
-                 most_visited_data));
+      base::BindOnce(
+          ^(const ntp_tiles::NTPTilesVector& most_visited_data) {
+            GetFaviconsAndSave(most_visited_data, favicon_provider,
+                               favicons_directory);
+          },
+          most_visited_data));
 }
 
 void WriteSingleUpdatedTileToDisk(NTPTile* tile) {
@@ -184,13 +183,14 @@ void UpdateSingleFavicon(const GURL& site_url,
               [favicons_directory URLByAppendingPathComponent:faviconFileName];
           NSData* imageData = UIImagePNGRepresentation(attributes.faviconImage);
 
-          base::OnceCallback<void()> writeImage = base::BindBlockArc(^{
-            base::AssertBlockingAllowed();
+          base::OnceCallback<void()> writeImage = base::BindOnce(^{
+            base::ScopedBlockingCall scoped_blocking_call(
+                base::BlockingType::WILL_BLOCK);
             [imageData writeToURL:fileURL atomically:YES];
           });
 
           base::PostTaskWithTraits(
-              FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
+              FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
               std::move(writeImage));
         } else {
           NSDictionary* tiles = ReadSavedMostVisited();
@@ -208,13 +208,14 @@ void UpdateSingleFavicon(const GURL& site_url,
               GetFaviconFileName(net::GURLWithNSURL(siteNSURL));
           NSURL* fileURL =
               [favicons_directory URLByAppendingPathComponent:faviconFileName];
-          base::OnceCallback<void()> removeImage = base::BindBlockArc(^{
-            base::AssertBlockingAllowed();
+          base::OnceCallback<void()> removeImage = base::BindOnce(^{
+            base::ScopedBlockingCall scoped_blocking_call(
+                base::BlockingType::WILL_BLOCK);
             [[NSFileManager defaultManager] removeItemAtURL:fileURL error:nil];
           });
 
           base::PostTaskWithTraits(
-              FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
+              FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
               std::move(removeImage));
         }
       };

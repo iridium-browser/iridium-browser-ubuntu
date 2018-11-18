@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// gpu/command_buffer/service/gpu_preferences.h
+// gpu/config/gpu_preferences.h
 module gpu.mojom;
 
 import "ui/gfx/mojo/buffer_types.mojom";
@@ -51,7 +51,8 @@ struct GpuPreferences {
   bool enable_threaded_texture_mailboxes;
   bool gl_shader_interm_output;
   bool emulate_shader_precision;
-  bool enable_raster_decoder;
+  uint32 max_active_webgl_contexts;
+  bool enable_android_surface_control;
   bool enable_gpu_service_logging;
   bool enable_gpu_service_tracing;
   bool use_passthrough_cmd_decoder;
@@ -60,4 +61,11 @@ struct GpuPreferences {
 
   bool disable_gpu_driver_bug_workarounds;
   bool ignore_gpu_blacklist;
+  bool enable_oop_rasterization;
+  bool disable_oop_rasterization;
+  bool enable_oop_rasterization_ddl;
+  bool watchdog_starts_backgrounded;
+  bool enable_vulkan;
+  bool enable_gpu_benchmarking_extension;
+  bool enable_webgpu;
 };

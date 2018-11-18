@@ -25,6 +25,7 @@
 #include "net/cert/x509_certificate.h"
 #include "net/dns/host_resolver.h"
 #include "net/log/net_log_with_source.h"
+#include "net/test/test_data_directory.h"
 #include "url/gurl.h"
 
 namespace net {
@@ -106,20 +107,11 @@ bool GetLocalCertificatesDir(const base::FilePath& certificates_dir,
   }
 
   base::FilePath src_dir;
-  if (!PathService::Get(base::DIR_SOURCE_ROOT, &src_dir))
+  if (!base::PathService::Get(base::DIR_SOURCE_ROOT, &src_dir))
     return false;
 
   *local_certificates_dir = src_dir.Append(certificates_dir);
   return true;
-}
-
-std::unique_ptr<base::ListValue> GetTokenBindingParams(
-    std::vector<int> params) {
-  std::unique_ptr<base::ListValue> values(new base::ListValue());
-  for (int param : params) {
-    values->AppendInteger(param);
-  }
-  return values;
 }
 
 std::string OCSPStatusToString(
@@ -157,9 +149,32 @@ std::string OCSPDateToString(
       return "early";
     case BaseTestServer::SSLOptions::OCSP_DATE_LONG:
       return "long";
+    case BaseTestServer::SSLOptions::OCSP_DATE_LONGER:
+      return "longer";
   }
   NOTREACHED();
   return std::string();
+}
+
+std::string OCSPProducedToString(
+    BaseTestServer::SSLOptions::OCSPProduced ocsp_produced) {
+  switch (ocsp_produced) {
+    case BaseTestServer::SSLOptions::OCSPProduced::OCSP_PRODUCED_VALID:
+      return "valid";
+    case BaseTestServer::SSLOptions::OCSPProduced::OCSP_PRODUCED_BEFORE_CERT:
+      return "before";
+    case BaseTestServer::SSLOptions::OCSPProduced::OCSP_PRODUCED_AFTER_CERT:
+      return "after";
+    default:
+      NOTREACHED();
+      return std::string();
+  }
+}
+
+bool RegisterRootCertsInternal(const base::FilePath& file_path) {
+  TestRootCerts* root_certs = TestRootCerts::GetInstance();
+  return root_certs->AddFromFile(file_path.AppendASCII("ocsp-test-root.pem")) &&
+         root_certs->AddFromFile(file_path.AppendASCII("root_ca_cert.pem"));
 }
 
 }  // namespace
@@ -187,6 +202,7 @@ base::FilePath BaseTestServer::SSLOptions::GetCertificateFile() const {
     case CERT_BAD_VALIDITY:
       return base::FilePath(FILE_PATH_LITERAL("bad_validity.pem"));
     case CERT_AUTO:
+    case CERT_AUTO_WITH_INTERMEDIATE:
     case CERT_AUTO_AIA_INTERMEDIATE:
       return base::FilePath();
     default:
@@ -196,8 +212,10 @@ base::FilePath BaseTestServer::SSLOptions::GetCertificateFile() const {
 }
 
 std::string BaseTestServer::SSLOptions::GetOCSPArgument() const {
-  if (server_certificate != CERT_AUTO)
+  if (server_certificate != CERT_AUTO &&
+      server_certificate != CERT_AUTO_WITH_INTERMEDIATE) {
     return std::string();
+  }
 
   // |ocsp_responses| overrides when it is non-empty.
   if (!ocsp_responses.empty()) {
@@ -214,8 +232,10 @@ std::string BaseTestServer::SSLOptions::GetOCSPArgument() const {
 }
 
 std::string BaseTestServer::SSLOptions::GetOCSPDateArgument() const {
-  if (server_certificate != CERT_AUTO)
+  if (server_certificate != CERT_AUTO &&
+      server_certificate != CERT_AUTO_WITH_INTERMEDIATE) {
     return std::string();
+  }
 
   if (!ocsp_responses.empty()) {
     std::string arg;
@@ -231,20 +251,56 @@ std::string BaseTestServer::SSLOptions::GetOCSPDateArgument() const {
 }
 
 std::string BaseTestServer::SSLOptions::GetOCSPProducedArgument() const {
-  if (server_certificate != CERT_AUTO)
+  if (server_certificate != CERT_AUTO &&
+      server_certificate != CERT_AUTO_WITH_INTERMEDIATE) {
+    return std::string();
+  }
+
+  return OCSPProducedToString(ocsp_produced);
+}
+
+std::string BaseTestServer::SSLOptions::GetOCSPIntermediateArgument() const {
+  if (server_certificate != CERT_AUTO_WITH_INTERMEDIATE)
     return std::string();
 
-  switch (ocsp_produced) {
-    case OCSP_PRODUCED_VALID:
-      return "valid";
-    case OCSP_PRODUCED_BEFORE_CERT:
-      return "before";
-    case OCSP_PRODUCED_AFTER_CERT:
-      return "after";
-    default:
-      NOTREACHED();
-      return std::string();
+  // |ocsp_intermediate_responses| overrides when it is non-empty.
+  if (!ocsp_intermediate_responses.empty()) {
+    std::string arg;
+    for (size_t i = 0; i < ocsp_intermediate_responses.size(); i++) {
+      if (i != 0)
+        arg += ":";
+      arg += OCSPStatusToString(ocsp_intermediate_responses[i].status);
+    }
+    return arg;
   }
+
+  return OCSPStatusToString(ocsp_intermediate_status);
+}
+
+std::string BaseTestServer::SSLOptions::GetOCSPIntermediateDateArgument()
+    const {
+  if (server_certificate != CERT_AUTO_WITH_INTERMEDIATE)
+    return std::string();
+
+  if (!ocsp_intermediate_responses.empty()) {
+    std::string arg;
+    for (size_t i = 0; i < ocsp_intermediate_responses.size(); i++) {
+      if (i != 0)
+        arg += ":";
+      arg += OCSPDateToString(ocsp_intermediate_responses[i].date);
+    }
+    return arg;
+  }
+
+  return OCSPDateToString(ocsp_intermediate_date);
+}
+
+std::string BaseTestServer::SSLOptions::GetOCSPIntermediateProducedArgument()
+    const {
+  if (server_certificate != CERT_AUTO_WITH_INTERMEDIATE)
+    return std::string();
+
+  return OCSPProducedToString(ocsp_intermediate_produced);
 }
 
 BaseTestServer::BaseTestServer(Type type) : type_(type) {
@@ -352,9 +408,7 @@ bool BaseTestServer::GetFilePathWithReplacements(
   std::string new_file_path = original_file_path;
   bool first_query_parameter = true;
   const std::vector<StringPair>::const_iterator end = text_to_replace.end();
-  for (std::vector<StringPair>::const_iterator it = text_to_replace.begin();
-       it != end;
-       ++it) {
+  for (auto it = text_to_replace.begin(); it != end; ++it) {
     const std::string& old_text = it->first;
     const std::string& new_text = it->second;
     std::string base64_old;
@@ -377,25 +431,30 @@ bool BaseTestServer::GetFilePathWithReplacements(
   return true;
 }
 
+void BaseTestServer::RegisterTestCerts() {
+  bool added_root_certs = RegisterRootCertsInternal(GetTestCertsDirectory());
+  DCHECK(added_root_certs);
+}
+
 bool BaseTestServer::LoadTestRootCert() const {
   TestRootCerts* root_certs = TestRootCerts::GetInstance();
-  if (!root_certs)
-    return false;
+  DCHECK(root_certs);
 
   // Should always use absolute path to load the root certificate.
   base::FilePath root_certificate_path;
-  if (!GetLocalCertificatesDir(certificates_dir_, &root_certificate_path))
+  if (!GetLocalCertificatesDir(certificates_dir_, &root_certificate_path)) {
+    LOG(ERROR) << "Could not get local certificates directory from "
+               << certificates_dir_ << ".";
     return false;
-
-  if (ssl_options_.server_certificate == SSLOptions::CERT_AUTO ||
-      ssl_options_.server_certificate ==
-          SSLOptions::CERT_AUTO_AIA_INTERMEDIATE) {
-    return root_certs->AddFromFile(
-        root_certificate_path.AppendASCII("ocsp-test-root.pem"));
-  } else {
-    return root_certs->AddFromFile(
-        root_certificate_path.AppendASCII("root_ca_cert.pem"));
   }
+
+  if (!RegisterRootCertsInternal(root_certificate_path)) {
+    LOG(ERROR) << "Could not register root certificates from "
+               << root_certificate_path << ".";
+    return false;
+  }
+
+  return true;
 }
 
 scoped_refptr<X509Certificate> BaseTestServer::GetCertificate() const {
@@ -467,8 +526,10 @@ bool BaseTestServer::SetupWhenServerStarted() {
   DCHECK(host_port_pair_.port());
   DCHECK(!started_);
 
-  if (UsingSSL(type_) && !LoadTestRootCert())
-      return false;
+  if (UsingSSL(type_) && !LoadTestRootCert()) {
+    LOG(ERROR) << "Could not load test root certificate.";
+    return false;
+  }
 
   started_ = true;
   allowed_port_.reset(new ScopedPortException(host_port_pair_.port()));
@@ -509,7 +570,7 @@ bool BaseTestServer::GenerateArguments(base::DictionaryValue* arguments) const {
   }
 
   if (redirect_connect_to_localhost_) {
-    DCHECK_EQ(TYPE_BASIC_AUTH_PROXY, type_);
+    DCHECK(type_ == TYPE_BASIC_AUTH_PROXY || type_ == TYPE_PROXY);
     arguments->Set("redirect-connect-to-localhost",
                    std::make_unique<base::Value>());
   }
@@ -576,6 +637,25 @@ bool BaseTestServer::GenerateArguments(base::DictionaryValue* arguments) const {
     if (!ocsp_produced_arg.empty())
       arguments->SetString("ocsp-produced", ocsp_produced_arg);
 
+    std::string ocsp_intermediate_arg =
+        ssl_options_.GetOCSPIntermediateArgument();
+    if (!ocsp_intermediate_arg.empty())
+      arguments->SetString("ocsp-intermediate", ocsp_intermediate_arg);
+
+    std::string ocsp_intermediate_date_arg =
+        ssl_options_.GetOCSPIntermediateDateArgument();
+    if (!ocsp_intermediate_date_arg.empty()) {
+      arguments->SetString("ocsp-intermediate-date",
+                           ocsp_intermediate_date_arg);
+    }
+
+    std::string ocsp_intermediate_produced_arg =
+        ssl_options_.GetOCSPIntermediateProducedArgument();
+    if (!ocsp_intermediate_produced_arg.empty()) {
+      arguments->SetString("ocsp-intermediate-produced",
+                           ocsp_intermediate_produced_arg);
+    }
+
     if (ssl_options_.cert_serial != 0) {
       arguments->SetInteger("cert-serial", ssl_options_.cert_serial);
     }
@@ -637,13 +717,6 @@ bool BaseTestServer::GenerateArguments(base::DictionaryValue* arguments) const {
     if (ssl_options_.disable_extended_master_secret) {
       arguments->Set("disable-extended-master-secret",
                      std::make_unique<base::Value>());
-    }
-    if (!ssl_options_.supported_token_binding_params.empty()) {
-      std::unique_ptr<base::ListValue> token_binding_params(
-          new base::ListValue());
-      arguments->Set(
-          "token-binding-params",
-          GetTokenBindingParams(ssl_options_.supported_token_binding_params));
     }
   }
 

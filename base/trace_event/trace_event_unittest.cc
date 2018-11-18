@@ -1273,6 +1273,21 @@ TEST_F(TraceEventTestFixture, EnabledObserverFiresOnDisable) {
   TraceLog::GetInstance()->RemoveEnabledStateObserver(&observer);
 }
 
+TEST_F(TraceEventTestFixture, EnabledObserverOwnedByTraceLog) {
+  auto observer = std::make_unique<MockEnabledStateChangedObserver>();
+  EXPECT_CALL(*observer, OnTraceLogEnabled()).Times(1);
+  EXPECT_CALL(*observer, OnTraceLogDisabled()).Times(1);
+  TraceLog::GetInstance()->AddOwnedEnabledStateObserver(std::move(observer));
+  TraceLog::GetInstance()->SetEnabled(TraceConfig(kRecordAllCategoryFilter, ""),
+                                      TraceLog::RECORDING_MODE);
+  TraceLog::GetInstance()->SetDisabled();
+  TraceLog::ResetForTesting();
+  // These notifications won't be sent.
+  TraceLog::GetInstance()->SetEnabled(TraceConfig(kRecordAllCategoryFilter, ""),
+                                      TraceLog::RECORDING_MODE);
+  TraceLog::GetInstance()->SetDisabled();
+}
+
 // Tests the IsEnabled() state of TraceLog changes before callbacks.
 class AfterStateChangeEnabledStateObserver
     : public TraceLog::EnabledStateObserver {
@@ -1319,7 +1334,9 @@ class SelfRemovingEnabledStateObserver
   }
 };
 
-TEST_F(TraceEventTestFixture, SelfRemovingObserver) {
+// Self removing observers are not supported at the moment.
+// TODO(alph): We could add support once we have recursive locks.
+TEST_F(TraceEventTestFixture, DISABLED_SelfRemovingObserver) {
   ASSERT_EQ(0u, TraceLog::GetInstance()->GetObserverCountForTest());
 
   SelfRemovingEnabledStateObserver observer;
@@ -2696,6 +2713,16 @@ TEST_F(TraceEventTestFixture, TraceRecordAsMuchAsPossibleMode) {
     TraceLog::RECORDING_MODE);
   TraceBuffer* buffer = TraceLog::GetInstance()->trace_buffer();
   EXPECT_EQ(512000000UL, buffer->Capacity());
+  TraceLog::GetInstance()->SetDisabled();
+}
+
+TEST_F(TraceEventTestFixture, ConfigTraceBufferLimit) {
+  const size_t kLimit = 2048;
+  TraceConfig config(kRecordAllCategoryFilter, RECORD_UNTIL_FULL);
+  config.SetTraceBufferSizeInEvents(kLimit);
+  TraceLog::GetInstance()->SetEnabled(config, TraceLog::RECORDING_MODE);
+  TraceBuffer* buffer = TraceLog::GetInstance()->trace_buffer();
+  EXPECT_EQ(kLimit, buffer->Capacity());
   TraceLog::GetInstance()->SetDisabled();
 }
 

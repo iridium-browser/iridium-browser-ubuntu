@@ -13,29 +13,33 @@ import android.util.AttributeSet;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewStub;
-import android.widget.FrameLayout;
 
+import org.chromium.base.TraceEvent;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.compositor.layouts.eventfilter.EdgeSwipeHandler;
 import org.chromium.chrome.browser.compositor.resources.ResourceFactory;
 import org.chromium.chrome.browser.contextualsearch.SwipeRecognizer;
+import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.chrome.browser.util.ViewUtils;
 import org.chromium.chrome.browser.widget.ClipDrawableProgressBar.DrawingInfo;
 import org.chromium.chrome.browser.widget.ControlContainer;
 import org.chromium.chrome.browser.widget.ToolbarProgressBar;
 import org.chromium.chrome.browser.widget.ViewResourceFrameLayout;
-import org.chromium.ui.UiUtils;
+import org.chromium.ui.AsyncViewProvider;
+import org.chromium.ui.AsyncViewStub;
+import org.chromium.ui.KeyboardVisibilityDelegate;
+import org.chromium.ui.base.DeviceFormFactor;
 import org.chromium.ui.resources.dynamics.ViewResourceAdapter;
+import org.chromium.ui.widget.OptimizedFrameLayout;
 
 /**
  * Layout for the browser controls (omnibox, menu, tab strip, etc..).
  */
-public class ToolbarControlContainer extends FrameLayout implements ControlContainer {
+public class ToolbarControlContainer extends OptimizedFrameLayout implements ControlContainer {
     private final float mTabStripHeight;
 
     private Toolbar mToolbar;
     private ToolbarViewResourceFrameLayout mToolbarContainer;
-    private View mMenuBtn;
 
     private final SwipeRecognizer mSwipeRecognizer;
     private EdgeSwipeHandler mSwipeHandler;
@@ -66,6 +70,7 @@ public class ToolbarControlContainer extends FrameLayout implements ControlConta
 
     @Override
     public void getProgressBarDrawingInfo(DrawingInfo drawingInfoOut) {
+        if (mToolbar == null) return;
         // TODO(yusufo): Avoid casting to the layout without making the interface bigger.
         ToolbarProgressBar progressBar = ((ToolbarLayout) mToolbar).getProgressBar();
         if (progressBar != null) progressBar.getDrawingInfo(drawingInfoOut);
@@ -73,6 +78,7 @@ public class ToolbarControlContainer extends FrameLayout implements ControlConta
 
     @Override
     public int getToolbarBackgroundColor() {
+        if (mToolbar == null) return 0;
         return ((ToolbarLayout) mToolbar).getToolbarDataProvider().getPrimaryColor();
     }
 
@@ -84,24 +90,40 @@ public class ToolbarControlContainer extends FrameLayout implements ControlConta
 
     @Override
     public void initWithToolbar(int toolbarLayoutId) {
-        ViewStub toolbarStub = (ViewStub) findViewById(R.id.toolbar_stub);
-        toolbarStub.setLayoutResource(toolbarLayoutId);
-        toolbarStub.inflate();
+        try (TraceEvent te = TraceEvent.scoped("ToolbarControlContainer.initWithToolbar")) {
+            mToolbarContainer =
+                    (ToolbarViewResourceFrameLayout) findViewById(R.id.toolbar_container);
+            View viewStub = findViewById(R.id.toolbar_stub);
+            if (viewStub instanceof AsyncViewStub) {
+                AsyncViewStub toolbarStub = (AsyncViewStub) viewStub;
+                toolbarStub.setLayoutResource(toolbarLayoutId);
+                toolbarStub.setShouldInflateOnBackgroundThread(
+                        !DeviceFormFactor.isNonMultiDisplayContextOnTablet(getContext())
+                        && FeatureUtilities.shouldInflateToolbarOnBackgroundThread());
+                toolbarStub.inflate();
+                AsyncViewProvider<ToolbarLayout> toolbarProvider =
+                        AsyncViewProvider.of(toolbarStub, R.id.toolbar);
+                toolbarProvider.whenLoaded(this ::onToolbarInflationComplete);
+            } else {
+                ViewStub toolbarStub = (ViewStub) viewStub;
+                toolbarStub.setLayoutResource(toolbarLayoutId);
+                toolbarStub.inflate();
 
-        mToolbar = (Toolbar) findViewById(R.id.toolbar);
-        mToolbarContainer = (ToolbarViewResourceFrameLayout) findViewById(R.id.toolbar_container);
+                onToolbarInflationComplete(findViewById(R.id.toolbar));
+            }
+        }
+    }
+
+    private void onToolbarInflationComplete(ToolbarLayout toolbar) {
+        mToolbar = toolbar;
         mToolbarContainer.setToolbar(mToolbar);
-        mMenuBtn = findViewById(R.id.menu_button);
-
         if (mToolbar instanceof ToolbarTablet) {
-            // On tablet, draw a fake tab strip and toolbar until the compositor is ready to draw
-            // the real tab strip. (On phone, the toolbar is made entirely of Android views, which
-            // are already initialized.)
+            // On tablet, draw a fake tab strip and toolbar until the compositor is
+            // ready to draw the real tab strip. (On phone, the toolbar is made entirely
+            // of Android views, which are already initialized.)
             setBackgroundResource(R.drawable.toolbar_background);
         }
-
         assert mToolbar != null;
-        assert mMenuBtn != null;
     }
 
     @Override
@@ -284,8 +306,10 @@ public class ToolbarControlContainer extends FrameLayout implements ControlConta
         @Override
         public boolean shouldRecognizeSwipe(MotionEvent e1, MotionEvent e2) {
             if (isOnTabStrip(e1)) return false;
-            if (mToolbar.shouldIgnoreSwipeGesture()) return false;
-            if (UiUtils.isKeyboardShowing(getContext(), ToolbarControlContainer.this)) return false;
+            if (mToolbar != null && mToolbar.shouldIgnoreSwipeGesture()) return false;
+            if (KeyboardVisibilityDelegate.getInstance().isKeyboardShowing(
+                        getContext(), ToolbarControlContainer.this))
+                return false;
             return true;
         }
     }

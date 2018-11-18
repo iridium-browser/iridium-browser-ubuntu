@@ -40,7 +40,8 @@ class ShellContentBrowserClient : public ContentBrowserClient {
       content::RenderFrameHost* render_frame_host,
       const std::string& interface_name,
       mojo::ScopedMessagePipeHandle interface_pipe) override;
-  void RegisterInProcessServices(StaticServiceMap* services) override;
+  void RegisterInProcessServices(StaticServiceMap* services,
+                                 ServiceManagerConnection* connection) override;
   void RegisterOutOfProcessServices(OutOfProcessServiceMap* services) override;
   bool ShouldTerminateOnServiceQuit(
       const service_manager::Identity& id) override;
@@ -48,6 +49,10 @@ class ShellContentBrowserClient : public ContentBrowserClient {
       base::StringPiece name) override;
   void AppendExtraCommandLineSwitches(base::CommandLine* command_line,
                                       int child_process_id) override;
+  void AdjustUtilityServiceProcessCommandLine(
+      const service_manager::Identity& identity,
+      base::CommandLine* command_line) override;
+  std::string GetAcceptLangs(BrowserContext* context) override;
   void ResourceDispatcherHostCreated() override;
   std::string GetDefaultDownloadName() override;
   WebContentsViewDelegate* GetWebContentsViewDelegate(
@@ -72,11 +77,12 @@ class ShellContentBrowserClient : public ContentBrowserClient {
   scoped_refptr<LoginDelegate> CreateLoginDelegate(
       net::AuthChallengeInfo* auth_info,
       content::ResourceRequestInfo::WebContentsGetter web_contents_getter,
+      const content::GlobalRequestID& request_id,
       bool is_main_frame,
       const GURL& url,
+      scoped_refptr<net::HttpResponseHeaders> response_headers,
       bool first_auth_attempt,
-      const base::Callback<void(const base::Optional<net::AuthCredentials>&)>&
-          auth_required_callback) override;
+      LoginAuthRequiredCallback auth_required_callback) override;
 
 #if defined(OS_LINUX) || defined(OS_ANDROID)
   void GetAdditionalMappedFilesForChildProcess(

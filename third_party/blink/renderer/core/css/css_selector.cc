@@ -100,9 +100,11 @@ inline unsigned CSSSelector::SpecificityForOneSelector() const {
   // FIXME: Pseudo-elements and pseudo-classes do not have the same specificity.
   // This function isn't quite correct.
   // http://www.w3.org/TR/selectors/#specificity
+  if (ignore_specificity_)
+    return 0;
   switch (match_) {
     case kId:
-      return 0x010000;
+      return kIdSpecificity;
     case kPseudoClass:
       switch (GetPseudoType()) {
         case kPseudoHost:
@@ -120,7 +122,7 @@ inline unsigned CSSSelector::SpecificityForOneSelector() const {
         default:
           break;
       }
-      return 0x000100;
+      return kClassLikeSpecificity;
     case kClass:
     case kPseudoElement:
     case kAttributeExact:
@@ -130,11 +132,11 @@ inline unsigned CSSSelector::SpecificityForOneSelector() const {
     case kAttributeContain:
     case kAttributeBegin:
     case kAttributeEnd:
-      return 0x000100;
+      return kClassLikeSpecificity;
     case kTag:
       if (TagQName().LocalName() == UniversalSelectorAtom())
         return 0;
-      return 0x000001;
+      return kTagSpecificity;
     case kUnknown:
       return 0;
   }
@@ -216,9 +218,12 @@ PseudoId CSSSelector::GetPseudoId(PseudoType type) {
     case kPseudoVisited:
     case kPseudoAny:
     case kPseudoMatches:
+    case kPseudoIS:
     case kPseudoAnyLink:
     case kPseudoWebkitAnyLink:
     case kPseudoAutofill:
+    case kPseudoAutofillPreviewed:
+    case kPseudoAutofillSelected:
     case kPseudoHover:
     case kPseudoDrag:
     case kPseudoFocus:
@@ -276,6 +281,7 @@ PseudoId CSSSelector::GetPseudoId(PseudoType type) {
     case kPseudoFullScreenAncestor:
     case kPseudoFullscreen:
     case kPseudoSpatialNavigationFocus:
+    case kPseudoIsHtml:
     case kPseudoListBox:
     case kPseudoHostHasAppearance:
     case kPseudoSlotted:
@@ -298,6 +304,9 @@ struct NameToPseudoStruct {
 
 // These tables should be kept sorted.
 const static NameToPseudoStruct kPseudoTypeWithoutArgumentsMap[] = {
+    {"-internal-autofill-previewed", CSSSelector::kPseudoAutofillPreviewed},
+    {"-internal-autofill-selected", CSSSelector::kPseudoAutofillSelected},
+    {"-internal-is-html", CSSSelector::kPseudoIsHtml},
     {"-internal-list-box", CSSSelector::kPseudoListBox},
     {"-internal-media-controls-overlay-cast-button",
      CSSSelector::kPseudoWebKitCustomElement},
@@ -390,6 +399,7 @@ const static NameToPseudoStruct kPseudoTypeWithArgumentsMap[] = {
     {"cue", CSSSelector::kPseudoCue},
     {"host", CSSSelector::kPseudoHost},
     {"host-context", CSSSelector::kPseudoHostContext},
+    {"is", CSSSelector::kPseudoIS},
     {"lang", CSSSelector::kPseudoLang},
     {"matches", CSSSelector::kPseudoMatches},
     {"not", CSSSelector::kPseudoNot},
@@ -428,12 +438,12 @@ static CSSSelector::PseudoType NameToPseudoType(const AtomicString& name,
   const NameToPseudoStruct* pseudo_type_map_end;
   if (has_arguments) {
     pseudo_type_map = kPseudoTypeWithArgumentsMap;
-    pseudo_type_map_end = kPseudoTypeWithArgumentsMap +
-                          WTF_ARRAY_LENGTH(kPseudoTypeWithArgumentsMap);
+    pseudo_type_map_end =
+        kPseudoTypeWithArgumentsMap + arraysize(kPseudoTypeWithArgumentsMap);
   } else {
     pseudo_type_map = kPseudoTypeWithoutArgumentsMap;
     pseudo_type_map_end = kPseudoTypeWithoutArgumentsMap +
-                          WTF_ARRAY_LENGTH(kPseudoTypeWithoutArgumentsMap);
+                          arraysize(kPseudoTypeWithoutArgumentsMap);
   }
   NameToPseudoStruct dummy_key = {nullptr, CSSSelector::kPseudoUnknown};
   const NameToPseudoStruct* match =
@@ -555,7 +565,7 @@ void CSSSelector::UpdatePseudoType(const AtomicString& value,
         pseudo_type_ = kPseudoUnknown;
       break;
     case kPseudoShadow:
-      if (match_ != kPseudoElement || context.IsDynamicProfile())
+      if (match_ != kPseudoElement || context.IsLiveProfile())
         pseudo_type_ = kPseudoUnknown;
       break;
     case kPseudoBlinkInternalElement:
@@ -563,6 +573,7 @@ void CSSSelector::UpdatePseudoType(const AtomicString& value,
         pseudo_type_ = kPseudoUnknown;
       break;
     case kPseudoHostHasAppearance:
+    case kPseudoIsHtml:
     case kPseudoListBox:
     case kPseudoSpatialNavigationFocus:
     case kPseudoVideoPersistent:
@@ -577,6 +588,8 @@ void CSSSelector::UpdatePseudoType(const AtomicString& value,
     case kPseudoAny:
     case kPseudoAnyLink:
     case kPseudoAutofill:
+    case kPseudoAutofillPreviewed:
+    case kPseudoAutofillSelected:
     case kPseudoChecked:
     case kPseudoCornerPresent:
     case kPseudoDecrement:
@@ -606,6 +619,7 @@ void CSSSelector::UpdatePseudoType(const AtomicString& value,
     case kPseudoIncrement:
     case kPseudoIndeterminate:
     case kPseudoInvalid:
+    case kPseudoIS:
     case kPseudoLang:
     case kPseudoLastChild:
     case kPseudoLastOfType:
@@ -686,8 +700,9 @@ static void SerializeIdentifierOrAny(const AtomicString& identifier,
 
 static void SerializeNamespacePrefixIfNeeded(const AtomicString& prefix,
                                              const AtomicString& any,
-                                             StringBuilder& builder) {
-  if (prefix.IsNull())
+                                             StringBuilder& builder,
+                                             bool is_attribute_selector) {
+  if (prefix.IsNull() || (prefix.IsEmpty() && is_attribute_selector))
     return;
   SerializeIdentifierOrAny(prefix, any, builder);
   builder.Append('|');
@@ -696,7 +711,8 @@ static void SerializeNamespacePrefixIfNeeded(const AtomicString& prefix,
 const CSSSelector* CSSSelector::SerializeCompound(
     StringBuilder& builder) const {
   if (match_ == kTag && !tag_is_implicit_) {
-    SerializeNamespacePrefixIfNeeded(TagQName().Prefix(), g_star_atom, builder);
+    SerializeNamespacePrefixIfNeeded(TagQName().Prefix(), g_star_atom, builder,
+                                     IsAttributeSelector());
     SerializeIdentifierOrAny(TagQName().LocalName(), UniversalSelectorAtom(),
                              builder);
   }
@@ -755,6 +771,7 @@ const CSSSelector* CSSSelector::SerializeCompound(
         case kPseudoHostContext:
         case kPseudoAny:
         case kPseudoMatches:
+        case kPseudoIS:
           break;
         default:
           break;
@@ -774,7 +791,8 @@ const CSSSelector* CSSSelector::SerializeCompound(
     } else if (simple_selector->IsAttributeSelector()) {
       builder.Append('[');
       SerializeNamespacePrefixIfNeeded(simple_selector->Attribute().Prefix(),
-                                       g_star_atom, builder);
+                                       g_star_atom, builder,
+                                       simple_selector->IsAttributeSelector());
       SerializeIdentifier(simple_selector->Attribute().LocalName(), builder);
       switch (simple_selector->match_) {
         case kAttributeExact:
@@ -849,9 +867,6 @@ String CSSSelector::SelectorText() const {
       case kShadowDeep:
       case kShadowDeepAsDescendant:
         result = " /deep/ " + builder.ToString() + result;
-        break;
-      case kShadowPiercingDescendant:
-        result = " >>> " + builder.ToString() + result;
         break;
       case kDirectAdjacent:
         result = " + " + builder.ToString() + result;
@@ -934,6 +949,7 @@ static bool ValidateSubSelector(const CSSSelector* selector) {
     case CSSSelector::kPseudoHostContext:
     case CSSSelector::kPseudoNot:
     case CSSSelector::kPseudoSpatialNavigationFocus:
+    case CSSSelector::kPseudoIsHtml:
     case CSSSelector::kPseudoListBox:
     case CSSSelector::kPseudoHostHasAppearance:
       return true;
@@ -1072,7 +1088,6 @@ bool CSSSelector::HasDeepCombinatorOrShadowPseudo() const {
   return ForAnyInTagHistory(
       [](const CSSSelector& selector) -> bool {
         return selector.Relation() == CSSSelector::kShadowDeep ||
-               selector.Relation() == CSSSelector::kShadowPiercingDescendant ||
                selector.GetPseudoType() == CSSSelector::kPseudoShadow;
       },
       *this);
@@ -1082,7 +1097,6 @@ bool CSSSelector::NeedsUpdatedDistribution() const {
   return ForAnyInTagHistory(
       [](const CSSSelector& selector) -> bool {
         return selector.RelationIsAffectedByPseudoContent() ||
-               selector.GetPseudoType() == CSSSelector::kPseudoSlotted ||
                selector.GetPseudoType() == CSSSelector::kPseudoHostContext;
       },
       *this);
@@ -1091,6 +1105,14 @@ bool CSSSelector::NeedsUpdatedDistribution() const {
 bool CSSSelector::HasPseudoMatches() const {
   for (const CSSSelector* s = this; s; s = s->TagHistory()) {
     if (s->GetPseudoType() == CSSSelector::kPseudoMatches)
+      return true;
+  }
+  return false;
+}
+
+bool CSSSelector::HasPseudoIS() const {
+  for (const CSSSelector* s = this; s; s = s->TagHistory()) {
+    if (s->GetPseudoType() == CSSSelector::kPseudoIS)
       return true;
   }
   return false;

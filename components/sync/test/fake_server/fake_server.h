@@ -23,9 +23,20 @@
 #include "components/sync/engine_impl/loopback_server/persistent_bookmark_entity.h"
 #include "components/sync/engine_impl/loopback_server/persistent_tombstone_entity.h"
 #include "components/sync/engine_impl/loopback_server/persistent_unique_client_entity.h"
+#include "components/sync/protocol/client_commands.pb.h"
 #include "components/sync/protocol/sync.pb.h"
 
 namespace fake_server {
+
+// This function only compares one part of the markers, the time-independent
+// hashes of the data served in the update. Apart from this, the progress
+// markers for fake wallet data also include information about fetch time. This
+// is in-line with the server behavior and -- as it keeps changing -- allows
+// integration tests to wait for a GetUpdates call to finish, even if they don't
+// contain data updates.
+bool AreWalletDataProgressMarkersEquivalent(
+    const sync_pb::DataTypeProgressMarker& marker1,
+    const sync_pb::DataTypeProgressMarker& marker2);
 
 // A fake version of the Sync server used for testing. This class is not thread
 // safe.
@@ -79,6 +90,11 @@ class FakeServer : public syncer::LoopbackServer::ObserverForTests {
   // operations.
   void InjectEntity(std::unique_ptr<syncer::LoopbackServerEntity> entity);
 
+  // Sets the Wallet card and address data to be served in following GetUpdates
+  // requests (any further GetUpdates response will be empty, indicating no
+  // change, if the client already has received |wallet_entities|).
+  void SetWalletData(const std::vector<sync_pb::SyncEntity>& wallet_entities);
+
   // Modifies the entity on the server with the given |id|. The entity's
   // EntitySpecifics are replaced with |updated_specifics| and its version is
   // updated. If the given |id| does not exist or the ModelType of
@@ -106,6 +122,9 @@ class FakeServer : public syncer::LoopbackServer::ObserverForTests {
   // Puts the server in a state where all commands will fail with an
   // authentication error.
   void SetUnauthenticated();
+
+  // Sets the provided |client_command| in all subsequent successful requests.
+  void SetClientCommand(const sync_pb::ClientCommand& client_command);
 
   // Force the server to return |error_type| in the error_code field of
   // ClientToServerResponse on all subsequent sync requests. This method should
@@ -145,6 +164,9 @@ class FakeServer : public syncer::LoopbackServer::ObserverForTests {
   // This can be used to trigger exponential backoff in the client.
   void DisableNetwork();
 
+  // Enables strong consistency model (i.e. server detects conflicts).
+  void EnableStrongConsistencyWithConflictDetectionModel();
+
   // Implement LoopbackServer::ObserverForTests:
   void OnCommit(const std::string& committer_id,
                 syncer::ModelTypeSet committed_model_types) override;
@@ -164,6 +186,12 @@ class FakeServer : public syncer::LoopbackServer::ObserverForTests {
  private:
   // Returns whether a triggered error should be sent for the request.
   bool ShouldSendTriggeredError() const;
+  int SendToLoopbackServer(const std::string& request, std::string* response);
+  void InjectClientCommand(std::string* response);
+  void HandleWalletRequest(
+      const sync_pb::ClientToServerMessage& request,
+      const sync_pb::DataTypeProgressMarker& old_wallet_marker,
+      std::string* response_string);
 
   // Whether the server should act as if incoming connections are properly
   // authenticated.
@@ -191,8 +219,11 @@ class FakeServer : public syncer::LoopbackServer::ObserverForTests {
   bool alternate_triggered_errors_;
   int request_counter_;
 
+  // Client command to be included in every response.
+  sync_pb::ClientCommand client_command_;
+
   // FakeServer's observers.
-  base::ObserverList<Observer, true> observers_;
+  base::ObserverList<Observer, true>::Unchecked observers_;
 
   // When true, the server operates normally. When false, a failure is returned
   // on every request. This is used to simulate a network failure on the client.
@@ -207,6 +238,10 @@ class FakeServer : public syncer::LoopbackServer::ObserverForTests {
 
   std::unique_ptr<syncer::LoopbackServer> loopback_server_;
   std::unique_ptr<base::ScopedTempDir> loopback_server_storage_;
+
+  // The LoopbackServer does not know how to handle Wallet data properly, so
+  // the FakeServer handles those itself.
+  std::vector<sync_pb::SyncEntity> wallet_entities_;
 
   // Creates WeakPtr versions of the current FakeServer. This must be the last
   // data member!

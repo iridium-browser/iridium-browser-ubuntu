@@ -4,13 +4,18 @@
 
 #include "content/browser/media/capture/web_contents_video_capture_device.h"
 
+#include <utility>
+
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
+#include "base/task/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "content/browser/media/capture/mouse_cursor_overlay_controller.h"
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_media_capture_id.h"
@@ -31,17 +36,17 @@ class WebContentsVideoCaptureDevice::FrameTracker
           WebContentsVideoCaptureDevice::FrameTracker> {
  public:
   FrameTracker(base::WeakPtr<WebContentsVideoCaptureDevice> device,
-               CursorRenderer* cursor_renderer,
+               MouseCursorOverlayController* cursor_controller,
                int render_process_id,
                int main_render_frame_id)
       : device_(std::move(device)),
         device_task_runner_(base::ThreadTaskRunnerHandle::Get()),
-        cursor_renderer_(cursor_renderer) {
+        cursor_controller_(cursor_controller) {
     DCHECK(device_task_runner_);
-    DCHECK(cursor_renderer_);
+    DCHECK(cursor_controller_);
 
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, {BrowserThread::UI},
         base::BindOnce(
             [](base::WeakPtr<FrameTracker> self, int process_id, int frame_id) {
               if (self) {
@@ -53,10 +58,15 @@ class WebContentsVideoCaptureDevice::FrameTracker
             AsWeakPtr(), render_process_id, main_render_frame_id));
   }
 
-  ~FrameTracker() final { DCHECK_CURRENTLY_ON(BrowserThread::UI); }
+  ~FrameTracker() final {
+    DCHECK_CURRENTLY_ON(BrowserThread::UI);
+    if (is_capturing_)
+      DidStopCapturingWebContents();
+  }
 
   void WillStartCapturingWebContents(const gfx::Size& capture_size) {
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
+    DCHECK(!is_capturing_);
 
     auto* contents = web_contents();
     if (!contents) {
@@ -85,14 +95,18 @@ class WebContentsVideoCaptureDevice::FrameTracker
             << preferred_size.ToString() << " from a capture size of "
             << capture_size.ToString();
     contents->IncrementCapturerCount(preferred_size);
+    is_capturing_ = true;
   }
 
   void DidStopCapturingWebContents() {
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
     if (auto* contents = web_contents()) {
+      DCHECK(is_capturing_);
       contents->DecrementCapturerCount();
+      is_capturing_ = false;
     }
+    DCHECK(!is_capturing_);
   }
 
  private:
@@ -134,6 +148,7 @@ class WebContentsVideoCaptureDevice::FrameTracker
   void DidDestroyFullscreenWidget() final { OnPossibleTargetChange(); }
   void WebContentsDestroyed() final {
     Observe(nullptr);
+    is_capturing_ = false;
     OnPossibleTargetChange();
   }
 
@@ -165,10 +180,10 @@ class WebContentsVideoCaptureDevice::FrameTracker
 
       if (native_view != target_native_view_) {
         target_native_view_ = native_view;
-        // Note: CursorRenderer runs on the UI thread. It's also important that
-        // SetTargetView() be called in the current stack while |native_view| is
-        // known to be a valid pointer. http://crbug.com/818679
-        cursor_renderer_->SetTargetView(native_view);
+        // Note: MouseCursorOverlayController runs on the UI thread. It's also
+        // important that SetTargetView() be called in the current stack while
+        // |native_view| is known to be a valid pointer. http://crbug.com/818679
+        cursor_controller_->SetTargetView(native_view);
       }
     } else {
       device_task_runner_->PostTask(
@@ -176,7 +191,7 @@ class WebContentsVideoCaptureDevice::FrameTracker
           base::BindOnce(
               &WebContentsVideoCaptureDevice::OnTargetPermanentlyLost,
               device_));
-      cursor_renderer_->SetTargetView(gfx::NativeView());
+      cursor_controller_->SetTargetView(gfx::NativeView());
     }
   }
 
@@ -186,11 +201,14 @@ class WebContentsVideoCaptureDevice::FrameTracker
 
   // Owned by FrameSinkVideoCaptureDevice. This will be valid for the life of
   // FrameTracker because the FrameTracker deleter task will be posted to the UI
-  // thread before the CursorRenderer deleter task.
-  CursorRenderer* const cursor_renderer_;
+  // thread before the MouseCursorOverlayController deleter task.
+  MouseCursorOverlayController* const cursor_controller_;
 
   viz::FrameSinkId target_frame_sink_id_;
   gfx::NativeView target_native_view_ = gfx::NativeView();
+
+  // Indicates whether the WebContents's capturer count needs to be decremented.
+  bool is_capturing_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(FrameTracker);
 };
@@ -199,7 +217,7 @@ WebContentsVideoCaptureDevice::WebContentsVideoCaptureDevice(
     int render_process_id,
     int main_render_frame_id)
     : tracker_(new FrameTracker(AsWeakPtr(),
-                                cursor_renderer(),
+                                cursor_controller(),
                                 render_process_id,
                                 main_render_frame_id)) {}
 
@@ -218,16 +236,16 @@ WebContentsVideoCaptureDevice::Create(const std::string& device_id) {
 }
 
 void WebContentsVideoCaptureDevice::WillStart() {
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::UI},
       base::BindOnce(&FrameTracker::WillStartCapturingWebContents,
                      tracker_->AsWeakPtr(),
                      capture_params().SuggestConstraints().max_frame_size));
 }
 
 void WebContentsVideoCaptureDevice::DidStop() {
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::UI},
       base::BindOnce(&FrameTracker::DidStopCapturingWebContents,
                      tracker_->AsWeakPtr()));
 }

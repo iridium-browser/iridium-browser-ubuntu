@@ -102,9 +102,8 @@
 #   define NOMCX
 #   include <windows.h>
 #   include "unicode/uloc.h"
-#if U_PLATFORM_HAS_WINUWP_API == 0
 #   include "wintz.h"
-#else // U_PLATFORM_HAS_WINUWP_API
+#if U_PLATFORM_HAS_WINUWP_API
 typedef PVOID LPMSG; // TODO: figure out how to get rid of this typedef
 #include <Windows.Globalization.h>
 #include <windows.system.userprofile.h>
@@ -531,6 +530,28 @@ uprv_fmin(double x, double y)
 
     /* this should work for all flt point w/o NaN and Inf special cases */
     return (x > y ? y : x);
+}
+
+U_CAPI UBool U_EXPORT2
+uprv_add32_overflow(int32_t a, int32_t b, int32_t* res) {
+    // NOTE: Some compilers (GCC, Clang) have primitives available, like __builtin_add_overflow.
+    // This function could be optimized by calling one of those primitives.
+    auto a64 = static_cast<int64_t>(a);
+    auto b64 = static_cast<int64_t>(b);
+    int64_t res64 = a64 + b64;
+    *res = static_cast<int32_t>(res64);
+    return res64 != *res;
+}
+
+U_CAPI UBool U_EXPORT2
+uprv_mul32_overflow(int32_t a, int32_t b, int32_t* res) {
+    // NOTE: Some compilers (GCC, Clang) have primitives available, like __builtin_mul_overflow.
+    // This function could be optimized by calling one of those primitives.
+    auto a64 = static_cast<int64_t>(a);
+    auto b64 = static_cast<int64_t>(b);
+    int64_t res64 = a64 * b64;
+    *res = static_cast<int32_t>(res64);
+    return res64 != *res;
 }
 
 /**
@@ -1040,53 +1061,13 @@ uprv_tzname_clear_cache()
 #endif
 }
 
-// With the Universal Windows Platform we can just ask Windows for the name
-#if U_PLATFORM_HAS_WINUWP_API
-U_CAPI const char* U_EXPORT2
-uprv_getWindowsTimeZone()
-{
-    // Get default Windows timezone.   
-    ComPtr<IInspectable> calendar;
-    HRESULT hr = RoActivateInstance(
-        HStringReference(RuntimeClass_Windows_Globalization_Calendar).Get(),
-        &calendar);
-    if (SUCCEEDED(hr))
-    {
-        ComPtr<ABI::Windows::Globalization::ITimeZoneOnCalendar> timezone;
-        hr = calendar.As(&timezone);
-        if (SUCCEEDED(hr))
-        {
-            HString timezoneString;
-            hr = timezone->GetTimeZone(timezoneString.GetAddressOf());
-            if (SUCCEEDED(hr))
-            {
-                int32_t length = static_cast<int32_t>(wcslen(timezoneString.GetRawBuffer(NULL)));
-                char* asciiId = (char*)uprv_calloc(length + 1, sizeof(char));
-                if (asciiId != nullptr)
-                {
-                    u_UCharsToChars((UChar*)timezoneString.GetRawBuffer(NULL), asciiId, length);
-                    return asciiId;
-                }
-            }
-        }
-    }
-
-    // Failed
-    return nullptr;
-}
-#endif
-
 U_CAPI const char* U_EXPORT2
 uprv_tzname(int n)
 {
     (void)n; // Avoid unreferenced parameter warning.
     const char *tzid = NULL;
 #if U_PLATFORM_USES_ONLY_WIN32_API
-#if U_PLATFORM_HAS_WINUWP_API > 0
-    tzid = uprv_getWindowsTimeZone();
-#else
     tzid = uprv_detectWindowsTimeZone();
-#endif
 
     if (tzid != NULL) {
         return tzid;

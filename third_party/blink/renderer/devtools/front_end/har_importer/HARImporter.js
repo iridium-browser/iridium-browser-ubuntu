@@ -15,14 +15,25 @@ HARImporter.Importer = class {
 
     log.entries.sort((a, b) => a.startedDateTime - b.startedDateTime);
 
-    /** @type {!Map<string, !BrowserSDK.PageLoad>} */
+    /** @type {!Map<string, !SDK.NetworkLog.PageLoad>} */
     const pageLoads = new Map();
     /** @type {!Array<!SDK.NetworkRequest>} */
     const requests = [];
     for (const entry of log.entries) {
       let pageLoad = pageLoads.get(entry.pageref);
       const documentURL = pageLoad ? pageLoad.mainRequest.url() : entry.request.url;
-      const request = new SDK.NetworkRequest('har-' + requests.length, entry.request.url, documentURL, '', '', null);
+
+      let initiator = null;
+      if (entry._initiator) {
+        initiator = {
+          type: entry._initiator.type,
+          url: entry._initiator.url,
+          lineNumber: entry._initiator.lineNumber
+        };
+      }
+
+      const request = new SDK.NetworkRequest(
+          'har-' + requests.length, entry.request.url, documentURL, '', '', initiator);
       const page = pages.get(entry.pageref);
       if (!pageLoad && page) {
         pageLoad = HARImporter.Importer._buildPageLoad(page, request);
@@ -39,10 +50,10 @@ HARImporter.Importer = class {
   /**
    * @param {!HARImporter.HARPage} page
    * @param {!SDK.NetworkRequest} mainRequest
-   * @return {!BrowserSDK.PageLoad}
+   * @return {!SDK.NetworkLog.PageLoad}
    */
   static _buildPageLoad(page, mainRequest) {
-    const pageLoad = new BrowserSDK.PageLoad(mainRequest);
+    const pageLoad = new SDK.NetworkLog.PageLoad(mainRequest);
     pageLoad.startTime = page.startedDateTime;
     pageLoad.contentLoadTime = page.pageTimings.onContentLoad * 1000;
     pageLoad.loadTime = page.pageTimings.onLoad * 1000;
@@ -52,7 +63,7 @@ HARImporter.Importer = class {
   /**
    * @param {!SDK.NetworkRequest} request
    * @param {!HARImporter.HAREntry} entry
-   * @param {?BrowserSDK.PageLoad} pageLoad
+   * @param {?SDK.NetworkLog.PageLoad} pageLoad
    */
   static _fillRequestFromHAREntry(request, entry, pageLoad) {
     // Request data.
@@ -111,6 +122,10 @@ HARImporter.Importer = class {
     if (!resourceType)
       resourceType = Common.ResourceType.fromURL(entry.request.url) || Common.resourceTypes.Other;
     request.setResourceType(resourceType);
+
+    const priority = entry.customAsString('priority');
+    if (Protocol.Network.ResourcePriority.hasOwnProperty(priority))
+      request.setPriority(/** @type {!Protocol.Network.ResourcePriority} */ (priority));
 
     request.finished = true;
   }

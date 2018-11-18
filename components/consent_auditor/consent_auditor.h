@@ -7,21 +7,13 @@
 
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "base/macros.h"
+#include "base/memory/weak_ptr.h"
 #include "components/keyed_service/core/keyed_service.h"
-
-namespace syncer {
-class UserEventService;
-}
-
-namespace sync_pb {
-class UserEventSpecifics;
-}
-
-class PrefService;
-class PrefRegistrySimple;
+#include "components/sync/model/model_type_sync_bridge.h"
 
 namespace consent_auditor {
 
@@ -38,8 +30,10 @@ enum class Feature {
   PLAY_STORE = 1,
   BACKUP_AND_RESTORE = 2,
   GOOGLE_LOCATION_SERVICE = 3,
+  CHROME_UNIFIED_CONSENT = 4,
+  ASSISTANT_ACTIVITY_CONTROL = 5,
 
-  FEATURE_LAST = GOOGLE_LOCATION_SERVICE
+  FEATURE_LAST = ASSISTANT_ACTIVITY_CONTROL
 };
 
 // Whether a consent is given or not given.
@@ -48,52 +42,65 @@ enum class Feature {
 // GENERATED_JAVA_ENUM_PACKAGE: org.chromium.chrome.browser.consent_auditor
 enum class ConsentStatus { NOT_GIVEN, GIVEN };
 
+// TODO(vitaliii): Delete user-event-related code once USER_CONSENTS type is
+// fully launched.
 class ConsentAuditor : public KeyedService {
  public:
-  ConsentAuditor(PrefService* pref_service,
-                 syncer::UserEventService* user_event_service,
-                 const std::string& app_version,
-                 const std::string& app_locale);
-  ~ConsentAuditor() override;
+  ConsentAuditor() = default;
+  ~ConsentAuditor() override = default;
 
-  // KeyedService:
-  void Shutdown() override;
+  // Records the ARC Play |consent| for the signed-in GAIA account with the ID
+  // |account_id| (as defined in AccountInfo).
+  virtual void RecordArcPlayConsent(
+      const std::string& account_id,
+      const sync_pb::UserConsentTypes::ArcPlayTermsOfServiceConsent&
+          consent) = 0;
 
-  // Registers the preferences needed by this service.
-  static void RegisterProfilePrefs(PrefRegistrySimple* registry);
+  // Records the ARC Google Location Service |consent| for the signed-in GAIA
+  // account with the ID |account_id| (as defined in AccountInfo).
+  virtual void RecordArcGoogleLocationServiceConsent(
+      const std::string& account_id,
+      const sync_pb::UserConsentTypes::ArcGoogleLocationServiceConsent&
+          consent) = 0;
 
-  // Records a consent for |feature| for the signed-in GAIA account with
-  // the ID |account_id| (as defined in AccountInfo).
-  // Consent text consisted of strings with |consent_grd_ids|, and the UI
-  // element the user clicked had the ID |confirmation_grd_id|.
-  // Whether the consent was GIVEN or NOT_GIVEN is passed as |status|.
-  virtual void RecordGaiaConsent(const std::string& account_id,
-                                 Feature feature,
-                                 const std::vector<int>& description_grd_ids,
-                                 int confirmation_grd_id,
-                                 ConsentStatus status);
+  // Records the ARC Backup and Restore |consent| for the signed-in GAIA
+  // account with the ID |account_id| (as defined in AccountInfo).
+  virtual void RecordArcBackupAndRestoreConsent(
+      const std::string& account_id,
+      const sync_pb::UserConsentTypes::ArcBackupAndRestoreConsent& consent) = 0;
+
+  // Records the Sync |consent| for the signed-in GAIA account with the ID
+  // |account_id| (as defined in AccountInfo).
+  virtual void RecordSyncConsent(
+      const std::string& account_id,
+      const sync_pb::UserConsentTypes::SyncConsent& consent) = 0;
+
+  // Records the Chrome Unified |consent| for the signed-in GAIA account with
+  // the ID |accounts_id| (as defined in Account Info).
+  virtual void RecordUnifiedConsent(
+      const std::string& account_id,
+      const sync_pb::UserConsentTypes::UnifiedConsent& consent) = 0;
+
+  // Records the Assistant activity control |consent| for the signed-in GAIA
+  // account with the ID |accounts_id| (as defined in Account Info).
+  virtual void RecordAssistantActivityControlConsent(
+      const std::string& account_id,
+      const sync_pb::UserConsentTypes::AssistantActivityControlConsent&
+          consent) = 0;
 
   // Records that the user consented to a |feature|. The user was presented with
   // |description_text| and accepted it by interacting |confirmation_text|
   // (e.g. clicking on a button; empty if not applicable).
   // Returns true if successful.
-  void RecordLocalConsent(const std::string& feature,
-                          const std::string& description_text,
-                          const std::string& confirmation_text);
+  virtual void RecordLocalConsent(const std::string& feature,
+                                  const std::string& description_text,
+                                  const std::string& confirmation_text) = 0;
+
+  // Returns the underlying Sync integration point.
+  virtual base::WeakPtr<syncer::ModelTypeControllerDelegate>
+  GetControllerDelegate() = 0;
 
  private:
-  std::unique_ptr<sync_pb::UserEventSpecifics> ConstructUserConsent(
-      const std::string& account_id,
-      Feature feature,
-      const std::vector<int>& description_grd_ids,
-      int confirmation_grd_id,
-      ConsentStatus status);
-
-  PrefService* pref_service_;
-  syncer::UserEventService* user_event_service_;
-  std::string app_version_;
-  std::string app_locale_;
-
   DISALLOW_COPY_AND_ASSIGN(ConsentAuditor);
 };
 

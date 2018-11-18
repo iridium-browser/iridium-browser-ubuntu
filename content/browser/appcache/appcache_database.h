@@ -18,14 +18,14 @@
 #include "base/time/time.h"
 #include "content/common/appcache_interfaces.h"
 #include "content/common/content_export.h"
+#include "sql/statement_id.h"
 #include "url/gurl.h"
 #include "url/origin.h"
 
 namespace sql {
-class Connection;
+class Database;
 class MetaTable;
 class Statement;
-class StatementID;
 }
 
 namespace content {
@@ -41,9 +41,7 @@ FORWARD_DECLARE_TEST(AppCacheDatabaseTest, OnlineWhiteListRecords);
 FORWARD_DECLARE_TEST(AppCacheDatabaseTest, ReCreate);
 FORWARD_DECLARE_TEST(AppCacheDatabaseTest, DeletableResponseIds);
 FORWARD_DECLARE_TEST(AppCacheDatabaseTest, OriginUsage);
-FORWARD_DECLARE_TEST(AppCacheDatabaseTest, UpgradeSchema3to7);
-FORWARD_DECLARE_TEST(AppCacheDatabaseTest, UpgradeSchema4to7);
-FORWARD_DECLARE_TEST(AppCacheDatabaseTest, UpgradeSchema5or6to7);
+FORWARD_DECLARE_TEST(AppCacheDatabaseTest, UpgradeSchemaNukesDeprecatedVersion);
 FORWARD_DECLARE_TEST(AppCacheDatabaseTest, WasCorrutionDetected);
 class AppCacheDatabaseTest;
 class AppCacheStorageImplTest;
@@ -190,13 +188,13 @@ class CONTENT_EXPORT AppCacheDatabase {
   bool DeleteDeletableResponseIds(const std::vector<int64_t>& response_ids);
 
   // So our callers can wrap operations in transactions.
-  sql::Connection* db_connection() {
+  sql::Database* db_connection() {
     LazyOpen(true);
     return db_.get();
   }
 
  private:
-  bool RunCachedStatementWithIds(const sql::StatementID& statement_id,
+  bool RunCachedStatementWithIds(sql::StatementID statement_id,
                                  const char* sql,
                                  const std::vector<int64_t>& ids);
   bool RunUniqueStatementWithInt64Result(const char* sql, int64_t* result);
@@ -234,7 +232,7 @@ class CONTENT_EXPORT AppCacheDatabase {
   void OnDatabaseError(int err, sql::Statement* stmt);
 
   base::FilePath db_file_path_;
-  std::unique_ptr<sql::Connection> db_;
+  std::unique_ptr<sql::Database> db_;
   std::unique_ptr<sql::MetaTable> meta_table_;
   std::map<int64_t, base::Time> lazy_last_access_times_;
   bool is_disabled_;
@@ -258,9 +256,8 @@ class CONTENT_EXPORT AppCacheDatabase {
   FRIEND_TEST_ALL_PREFIXES(content::AppCacheDatabaseTest, ReCreate);
   FRIEND_TEST_ALL_PREFIXES(content::AppCacheDatabaseTest, DeletableResponseIds);
   FRIEND_TEST_ALL_PREFIXES(content::AppCacheDatabaseTest, OriginUsage);
-  FRIEND_TEST_ALL_PREFIXES(content::AppCacheDatabaseTest, UpgradeSchema3to7);
-  FRIEND_TEST_ALL_PREFIXES(content::AppCacheDatabaseTest, UpgradeSchema4to7);
-  FRIEND_TEST_ALL_PREFIXES(content::AppCacheDatabaseTest, UpgradeSchema5or6to7);
+  FRIEND_TEST_ALL_PREFIXES(content::AppCacheDatabaseTest,
+                           UpgradeSchemaNukesDeprecatedVersion);
   FRIEND_TEST_ALL_PREFIXES(content::AppCacheDatabaseTest, WasCorrutionDetected);
 
   DISALLOW_COPY_AND_ASSIGN(AppCacheDatabase);

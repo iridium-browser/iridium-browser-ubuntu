@@ -212,6 +212,9 @@ set(ENABLE_LINKER_BUILD_ID OFF CACHE BOOL "pass --build-id to ld")
 set(ENABLE_X86_RELAX_RELOCATIONS OFF CACHE BOOL
     "enable x86 relax relocations by default")
 
+set(ENABLE_EXPERIMENTAL_NEW_PASS_MANAGER FALSE CACHE BOOL
+  "Enable the experimental new pass manager by default.")
+
 # TODO: verify the values against LangStandards.def?
 set(CLANG_DEFAULT_STD_C "" CACHE STRING
   "Default standard to use for C/ObjC code (IDENT from LangStandards.def, empty for platform default)")
@@ -276,6 +279,9 @@ endif()
 set(CLANG_VENDOR_UTI "org.llvm.clang" CACHE STRING
   "Vendor-specific uti.")
 
+set(CLANG_PYTHON_BINDINGS_VERSIONS "" CACHE STRING
+    "Python versions to install libclang python bindings for")
+
 # The libdir suffix must exactly match whatever LLVM's configuration used.
 set(CLANG_LIBDIR_SUFFIX "${LLVM_LIBDIR_SUFFIX}")
 
@@ -283,23 +289,11 @@ set(CLANG_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 set(CLANG_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR})
 
 if( CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR AND NOT MSVC_IDE )
-  message(FATAL_ERROR "In-source builds are not allowed. CMake would overwrite "
-"the makefiles distributed with LLVM. Please create a directory and run cmake "
+  message(FATAL_ERROR "In-source builds are not allowed. "
+"Please create a directory and run cmake "
 "from there, passing the path to this source directory as the last argument. "
 "This process created the file `CMakeCache.txt' and the directory "
 "`CMakeFiles'. Please delete them.")
-endif()
-
-if( NOT CMAKE_SOURCE_DIR STREQUAL CMAKE_BINARY_DIR )
-  file(GLOB_RECURSE
-    tablegenned_files_on_include_dir
-    "${CLANG_SOURCE_DIR}/include/clang/*.inc")
-  if( tablegenned_files_on_include_dir )
-    message(FATAL_ERROR "Apparently there is a previous in-source build, "
-"probably as the result of running `configure' and `make' on "
-"${CLANG_SOURCE_DIR}. This may cause problems. The suspicious files are:\n"
-"${tablegenned_files_on_include_dir}\nPlease clean the source directory.")
-  endif()
 endif()
 
 # If CLANG_VERSION_* is specified, use it, if not use LLVM_VERSION_*.
@@ -424,11 +418,11 @@ endif()
 
 # Clang version information
 set(CLANG_EXECUTABLE_VERSION
-     "${CLANG_VERSION_MAJOR}.${CLANG_VERSION_MINOR}" CACHE STRING
-    "Version number that will be placed into the clang executable, in the form XX.YY")
+    "${CLANG_VERSION_MAJOR}" CACHE STRING
+    "Major version number that will be appended to the clang executable name")
 set(LIBCLANG_LIBRARY_VERSION
-     "${CLANG_VERSION_MAJOR}.${CLANG_VERSION_MINOR}" CACHE STRING
-    "Version number that will be placed into the libclang library , in the form XX.YY")
+    "${CLANG_VERSION_MAJOR}" CACHE STRING
+    "Major version number that will be appended to the libclang library")
 mark_as_advanced(CLANG_EXECUTABLE_VERSION LIBCLANG_LIBRARY_VERSION)
 
 option(CLANG_INCLUDE_TESTS
@@ -580,6 +574,10 @@ if (CLANG_ENABLE_BOOTSTRAP)
     endif()
   endif()
 
+  if(CLANG_BOOTSTRAP_EXTRA_DEPS)
+    add_dependencies(clang-bootstrap-deps ${CLANG_BOOTSTRAP_EXTRA_DEPS})
+  endif()
+
   add_custom_target(${NEXT_CLANG_STAGE}-clear
     DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/${NEXT_CLANG_STAGE}-cleared
     )
@@ -614,10 +612,15 @@ if (CLANG_ENABLE_BOOTSTRAP)
     LLVM_ENABLE_PROJECTS
     LLVM_ENABLE_RUNTIMES)
 
-  # We don't need to depend on compiler-rt if we're building instrumented
+  # We don't need to depend on compiler-rt/libcxx if we're building instrumented
   # because the next stage will use the same compiler used to build this stage.
-  if(TARGET compiler-rt AND NOT LLVM_BUILD_INSTRUMENTED)
-    add_dependencies(clang-bootstrap-deps compiler-rt)
+  if(NOT LLVM_BUILD_INSTRUMENTED)
+    if(TARGET compiler-rt)
+      add_dependencies(clang-bootstrap-deps compiler-rt)
+    endif()
+    if(TARGET cxx-headers)
+      add_dependencies(clang-bootstrap-deps cxx-headers)
+    endif()
   endif()
 
   set(C_COMPILER "clang")
@@ -746,6 +749,7 @@ endif()
 if (LLVM_ADD_NATIVE_VISUALIZERS_TO_SOLUTION)
   add_subdirectory(utils/ClangVisualizers)
 endif()
+add_subdirectory(utils/hmaptool)
 
 configure_file(
   ${CLANG_SOURCE_DIR}/include/clang/Config/config.h.cmake

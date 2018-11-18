@@ -4,6 +4,7 @@
 <link rel="import" href="../i18n_setup.html">
 <link rel="import" href="../icons.html">
 <link rel="import" href="../lifetime_browser_proxy.html">
+<link rel="import" href="../prefs/prefs.html">
 <link rel="import" href="../route.html">
 <link rel="import" href="../settings_page/main_page_behavior.html">
 <link rel="import" href="../settings_page/settings_animated_pages.html">
@@ -52,11 +53,11 @@
       }
 
       img {
-        -webkit-margin-end: var(--about-page-image-space);
+        margin-inline-end: var(--about-page-image-space);
       }
 
       iron-icon {
-        -webkit-margin-end: var(--about-page-image-space);
+        margin-inline-end: var(--about-page-image-space);
         min-width: 32px;  /* The width of the product-logo img. */
       }
 
@@ -64,12 +65,16 @@
         fill: var(--google-blue-500);
       }
 
-      iron-icon[icon='settings:error'] {
+      iron-icon[icon='cr:error'] {
         fill: var(--google-red-700);
       }
 
       .settings-box .start {
         overflow-x: auto;
+      }
+
+      paper-button {
+        white-space: nowrap;
       }
 
       #regulatoryInfo img {
@@ -260,7 +265,10 @@
           <div class="info-section">
             <div class="secondary">$i18nRaw{aboutProductLicense}</div>
 <if expr="chromeos">
-            <div class="secondary">$i18nRaw{aboutProductOsLicense}</div>
+            <div class="secondary"
+                inner-h-t-m-l="[[getAboutProductOsLicense_(
+                    showCrostiniLicense_)]]">
+            </div>
 </if>
           </div>
 <if expr="_google_chrome">
@@ -269,8 +277,16 @@
         </div>
 <if expr="chromeos">
         <div class="settings-box padded block" id="regulatoryInfo"
-            hidden$="[[!shouldShowRegulatoryInfo_(regulatoryInfo_)]]">
-          <img src="[[regulatoryInfo_.url]]" alt="[[regulatoryInfo_.text]]">
+            hidden$="[[!shouldShowRegulatoryOrSafetyInfo_(regulatoryInfo_)]]">
+<if expr="_google_chrome">
+          <div class="secondary" hidden$="[[!shouldShowSafetyInfo_()]]">
+            <a target="_blank" href="$i18n{aboutProductSafetyURL}">
+              $i18nRaw{aboutProductSafety}
+            </a>
+          </div>
+</if>
+          <img src="[[regulatoryInfo_.url]]" alt="[[regulatoryInfo_.text]]"
+              hidden$="[[!shouldShowRegulatoryInfo_(regulatoryInfo_)]]">
         </div>
 </if>
       </settings-section>

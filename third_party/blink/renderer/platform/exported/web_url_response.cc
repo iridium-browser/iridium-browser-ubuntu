@@ -70,28 +70,16 @@ class URLResponseExtraDataContainer : public ResourceResponse::ExtraData {
 
 }  // namespace
 
-// The purpose of this struct is to permit allocating a ResourceResponse on the
-// heap, which is otherwise disallowed by the DISALLOW_NEW_EXCEPT_PLACEMENT_NEW
-// annotation on ResourceResponse.
-struct WebURLResponse::ResourceResponseContainer {
-  ResourceResponseContainer() = default;
-
-  explicit ResourceResponseContainer(const ResourceResponse& r)
-      : resource_response(r) {}
-
-  ResourceResponse resource_response;
-};
-
 WebURLResponse::~WebURLResponse() = default;
 
 WebURLResponse::WebURLResponse()
-    : owned_resource_response_(new ResourceResponseContainer()),
-      resource_response_(&owned_resource_response_->resource_response) {}
+    : owned_resource_response_(std::make_unique<ResourceResponse>()),
+      resource_response_(owned_resource_response_.get()) {}
 
 WebURLResponse::WebURLResponse(const WebURLResponse& r)
     : owned_resource_response_(
-          new ResourceResponseContainer(*r.resource_response_)),
-      resource_response_(&owned_resource_response_->resource_response) {}
+          std::make_unique<ResourceResponse>(*r.resource_response_)),
+      resource_response_(owned_resource_response_.get()) {}
 
 WebURLResponse::WebURLResponse(const WebURL& url) : WebURLResponse() {
   SetURL(url);
@@ -169,6 +157,14 @@ WebURLResponse::HTTPVersion WebURLResponse::HttpVersion() const {
 void WebURLResponse::SetHTTPVersion(HTTPVersion version) {
   resource_response_->SetHTTPVersion(
       static_cast<ResourceResponse::HTTPVersion>(version));
+}
+
+int WebURLResponse::RequestId() const {
+  return resource_response_->RequestId();
+}
+
+void WebURLResponse::SetRequestId(int request_id) {
+  resource_response_->SetRequestId(request_id);
 }
 
 int WebURLResponse::HttpStatusCode() const {
@@ -253,7 +249,7 @@ void WebURLResponse::SetCTPolicyCompliance(
       resource_response_->SetCTPolicyCompliance(
           ResourceResponse::kCTPolicyComplies);
       break;
-    case net::ct::CTPolicyCompliance::CT_POLICY_MAX:
+    case net::ct::CTPolicyCompliance::CT_POLICY_COUNT:
       NOTREACHED();
       resource_response_->SetCTPolicyCompliance(
           ResourceResponse::kCTPolicyComplianceDetailsNotAvailable);
@@ -338,14 +334,12 @@ void WebURLResponse::SetWasFallbackRequiredByServiceWorker(bool value) {
   resource_response_->SetWasFallbackRequiredByServiceWorker(value);
 }
 
-void WebURLResponse::SetResponseTypeViaServiceWorker(
-    network::mojom::FetchResponseType value) {
-  resource_response_->SetResponseTypeViaServiceWorker(value);
+void WebURLResponse::SetType(network::mojom::FetchResponseType value) {
+  resource_response_->SetType(value);
 }
 
-network::mojom::FetchResponseType WebURLResponse::ResponseTypeViaServiceWorker()
-    const {
-  return resource_response_->ResponseTypeViaServiceWorker();
+network::mojom::FetchResponseType WebURLResponse::GetType() const {
+  return resource_response_->GetType();
 }
 
 void WebURLResponse::SetURLListViaServiceWorker(
@@ -385,14 +379,6 @@ void WebURLResponse::SetDidServiceWorkerNavigationPreload(bool value) {
   resource_response_->SetDidServiceWorkerNavigationPreload(value);
 }
 
-WebString WebURLResponse::DownloadFilePath() const {
-  return resource_response_->DownloadedFilePath();
-}
-
-void WebURLResponse::SetDownloadFilePath(const WebString& download_file_path) {
-  resource_response_->SetDownloadedFilePath(download_file_path);
-}
-
 WebString WebURLResponse::RemoteIPAddress() const {
   return resource_response_->RemoteIPAddress();
 }
@@ -411,6 +397,12 @@ void WebURLResponse::SetRemotePort(unsigned short remote_port) {
 
 void WebURLResponse::SetEncodedDataLength(long long length) {
   resource_response_->SetEncodedDataLength(length);
+}
+
+void WebURLResponse::SetIsSignedExchangeInnerResponse(
+    bool is_signed_exchange_inner_response) {
+  resource_response_->SetIsSignedExchangeInnerResponse(
+      is_signed_exchange_inner_response);
 }
 
 WebURLResponse::ExtraData* WebURLResponse::GetExtraData() const {
@@ -449,6 +441,10 @@ net::HttpResponseInfo::ConnectionInfo WebURLResponse::ConnectionInfo() const {
 void WebURLResponse::SetConnectionInfo(
     net::HttpResponseInfo::ConnectionInfo connection_info) {
   resource_response_->SetConnectionInfo(connection_info);
+}
+
+void WebURLResponse::SetAsyncRevalidationRequested(bool requested) {
+  resource_response_->SetAsyncRevalidationRequested(requested);
 }
 
 WebURLResponse::WebURLResponse(ResourceResponse& r) : resource_response_(&r) {}

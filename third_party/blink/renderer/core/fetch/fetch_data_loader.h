@@ -5,6 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_FETCH_FETCH_DATA_LOADER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_FETCH_FETCH_DATA_LOADER_H_
 
+#include "base/single_thread_task_runner.h"
 #include "mojo/public/cpp/system/data_pipe.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer.h"
@@ -43,8 +44,17 @@ class CORE_EXPORT FetchDataLoader
     }
     virtual void DidFetchDataLoadedFormData(FormData*) { NOTREACHED(); }
     virtual void DidFetchDataLoadedString(const String&) { NOTREACHED(); }
+    // This is called synchronously from FetchDataLoader::Start() to provide
+    // the target data pipe.  This may be a pipe extracted from the consumer
+    // or a new pipe that data will be copied into.
+    virtual void DidFetchDataStartedDataPipe(
+        mojo::ScopedDataPipeConsumerHandle handle) {
+      NOTREACHED();
+    }
     // This is called after all data are read from |handle| and written
     // to |out_data_pipe|, and |out_data_pipe| is closed or aborted.
+    // This may be called synchronously from FetchDataLoader::Start() or
+    // delayed to a later task.
     virtual void DidFetchDataLoadedDataPipe() { NOTREACHED(); }
 
     // This function is called when a "custom" FetchDataLoader (none of the
@@ -65,8 +75,9 @@ class CORE_EXPORT FetchDataLoader
   static FetchDataLoader* CreateLoaderAsFormData(
       const String& multipart_boundary);
   static FetchDataLoader* CreateLoaderAsString();
+  // The mojo::DataPipe consumer handle is provided via the
+  // Client::DidFetchStartedDataPipe() callback.
   static FetchDataLoader* CreateLoaderAsDataPipe(
-      mojo::ScopedDataPipeProducerHandle out_data_pipe,
       scoped_refptr<base::SingleThreadTaskRunner>);
 
   virtual ~FetchDataLoader() {}

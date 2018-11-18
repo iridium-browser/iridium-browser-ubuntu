@@ -22,11 +22,11 @@ PrintQueriesQueue::~PrintQueriesQueue() {
   queued_queries_.clear();
 }
 
-void PrintQueriesQueue::QueuePrinterQuery(PrinterQuery* job) {
+void PrintQueriesQueue::QueuePrinterQuery(PrinterQuery* query) {
   base::AutoLock lock(lock_);
-  DCHECK(job);
-  queued_queries_.push_back(base::WrapRefCounted(job));
-  DCHECK(job->is_valid());
+  DCHECK(query);
+  queued_queries_.push_back(base::WrapRefCounted(query));
+  DCHECK(query->is_valid());
 }
 
 scoped_refptr<PrinterQuery> PrintQueriesQueue::PopPrinterQuery(
@@ -105,8 +105,7 @@ void PrintJobManager::StopJobs(bool wait_for_finish) {
   PrintJobs to_stop;
   to_stop.swap(current_jobs_);
 
-  for (PrintJobs::const_iterator job = to_stop.begin(); job != to_stop.end();
-       ++job) {
+  for (auto job = to_stop.begin(); job != to_stop.end(); ++job) {
     // Wait for two minutes for the print job to be spooled.
     if (wait_for_finish)
       (*job)->FlushJob(base::TimeDelta::FromMinutes(2));

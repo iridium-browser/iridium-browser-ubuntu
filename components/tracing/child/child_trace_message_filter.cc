@@ -71,15 +71,16 @@ void ChildTraceMessageFilter::OnHistogramChanged(
     if (!repeat) {
       ipc_task_runner_->PostTask(
           FROM_HERE,
-          base::Bind(
+          base::BindOnce(
               &ChildTraceMessageFilter::SendAbortBackgroundTracingMessage,
               this));
     }
+    return;
   }
 
   ipc_task_runner_->PostTask(
-      FROM_HERE, base::Bind(&ChildTraceMessageFilter::SendTriggerMessage, this,
-                            histogram_name));
+      FROM_HERE, base::BindOnce(&ChildTraceMessageFilter::SendTriggerMessage,
+                                this, histogram_name));
 }
 
 void ChildTraceMessageFilter::SendTriggerMessage(
@@ -136,13 +137,14 @@ void ChildTraceMessageFilter::OnSetUMACallback(
 
     if (min >= histogram_lower_value && max <= histogram_upper_value) {
       ipc_task_runner_->PostTask(
-          FROM_HERE, base::Bind(&ChildTraceMessageFilter::SendTriggerMessage,
-                                this, histogram_name));
+          FROM_HERE,
+          base::BindOnce(&ChildTraceMessageFilter::SendTriggerMessage, this,
+                         histogram_name));
       break;
     } else if (!repeat) {
       ipc_task_runner_->PostTask(
           FROM_HERE,
-          base::Bind(
+          base::BindOnce(
               &ChildTraceMessageFilter::SendAbortBackgroundTracingMessage,
               this));
       break;

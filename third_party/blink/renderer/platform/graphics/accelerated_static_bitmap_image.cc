@@ -123,7 +123,7 @@ void AcceleratedStaticBitmapImage::RetainOriginalSkImage() {
   original_skia_image_ = texture_holder_->GetSkImage();
   original_skia_image_context_provider_wrapper_ = ContextProviderWrapper();
   DCHECK(original_skia_image_);
-  WebThread* thread = Platform::Current()->CurrentThread();
+  Thread* thread = Platform::Current()->CurrentThread();
   original_skia_image_thread_id_ = thread->ThreadId();
   original_skia_image_task_runner_ = thread->GetTaskRunner();
 }
@@ -214,8 +214,8 @@ PaintImage AcceleratedStaticBitmapImage::PaintImageForCurrentFrame() {
       .TakePaintImage();
 }
 
-void AcceleratedStaticBitmapImage::Draw(PaintCanvas* canvas,
-                                        const PaintFlags& flags,
+void AcceleratedStaticBitmapImage::Draw(cc::PaintCanvas* canvas,
+                                        const cc::PaintFlags& flags,
                                         const FloatRect& dst_rect,
                                         const FloatRect& src_rect,
                                         RespectImageOrientationEnum,
@@ -262,6 +262,8 @@ void AcceleratedStaticBitmapImage::CreateImageFromMailboxIfNeeded() {
 void AcceleratedStaticBitmapImage::EnsureMailbox(MailboxSyncMode mode,
                                                  GLenum filter) {
   if (!texture_holder_->IsMailboxTextureHolder()) {
+    TRACE_EVENT0("blink", "AcceleratedStaticBitmapImage::EnsureMailbox");
+
     if (!original_skia_image_) {
       // To ensure that the texture resource stays alive we only really need
       // to retain the source SkImage until the mailbox is consumed, but this
@@ -277,7 +279,7 @@ void AcceleratedStaticBitmapImage::EnsureMailbox(MailboxSyncMode mode,
 
 void AcceleratedStaticBitmapImage::Transfer() {
   CheckThread();
-  EnsureMailbox(kUnverifiedSyncToken, GL_NEAREST);
+  EnsureMailbox(kVerifiedSyncToken, GL_NEAREST);
   detach_thread_at_next_check_ = true;
 }
 

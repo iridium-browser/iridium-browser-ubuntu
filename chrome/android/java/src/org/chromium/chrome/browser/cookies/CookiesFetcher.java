@@ -4,15 +4,14 @@
 
 package org.chromium.chrome.browser.cookies;
 
-import android.os.AsyncTask;
-
 import org.chromium.base.ContextUtils;
 import org.chromium.base.ImportantFileWriterAndroid;
 import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.annotations.CalledByNative;
+import org.chromium.base.task.AsyncTask;
+import org.chromium.chrome.browser.crypto.CipherFactory;
 import org.chromium.chrome.browser.profiles.Profile;
-import org.chromium.content.browser.crypto.CipherFactory;
 
 import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
@@ -78,9 +77,9 @@ public class CookiesFetcher {
     }
 
     private static void restoreCookiesInternal() {
-        new AsyncTask<Void, Void, List<CanonicalCookie>>() {
+        new AsyncTask<List<CanonicalCookie>>() {
             @Override
-            protected List<CanonicalCookie> doInBackground(Void... voids) {
+            protected List<CanonicalCookie> doInBackground() {
                 // Read cookies from disk on a background thread to avoid strict mode violations.
                 List<CanonicalCookie> cookies = new ArrayList<CanonicalCookie>();
                 DataInputStream in = null;
@@ -127,7 +126,8 @@ public class CookiesFetcher {
                             cookie.getSameSite(), cookie.getPriority());
                 }
             }
-        }.executeOnExecutor(AsyncTask.SERIAL_EXECUTOR);
+        }
+                .executeOnExecutor(AsyncTask.SERIAL_EXECUTOR);
     }
 
     /**
@@ -150,9 +150,9 @@ public class CookiesFetcher {
      * Delete the cookies file. Called when we detect that all incognito tabs have been closed.
      */
     private static void scheduleDeleteCookiesFile() {
-        new AsyncTask<Void, Void, Void>() {
+        new AsyncTask<Void>() {
             @Override
-            protected Void doInBackground(Void... voids) {
+            protected Void doInBackground() {
                 File cookiesFile = new File(fetchFileName());
                 if (cookiesFile.exists()) {
                     if (!cookiesFile.delete()) {
@@ -161,7 +161,8 @@ public class CookiesFetcher {
                 }
                 return null;
             }
-        }.executeOnExecutor(AsyncTask.SERIAL_EXECUTOR);
+        }
+                .executeOnExecutor(AsyncTask.SERIAL_EXECUTOR);
     }
 
     @CalledByNative
@@ -177,13 +178,14 @@ public class CookiesFetcher {
         // Cookies fetching requires operations with the profile and must be
         // done in the main thread. Once that is done, do the save to disk
         // part in {@link AsyncTask} to avoid strict mode violations.
-        new AsyncTask<Void, Void, Void>() {
+        new AsyncTask<Void>() {
             @Override
-            protected Void doInBackground(Void... voids) {
+            protected Void doInBackground() {
                 saveFetchedCookiesToDisk(cookies);
                 return null;
             }
-        }.executeOnExecutor(AsyncTask.SERIAL_EXECUTOR);
+        }
+                .executeOnExecutor(AsyncTask.SERIAL_EXECUTOR);
     }
 
     private static void saveFetchedCookiesToDisk(CanonicalCookie[] cookies) {

@@ -29,7 +29,6 @@
 
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/web_editing_command_type.h"
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
 #include "third_party/blink/renderer/core/css/css_property_value_set.h"
 #include "third_party/blink/renderer/core/css_property_names.h"
 #include "third_party/blink/renderer/core/css_value_keywords.h"
@@ -53,6 +52,7 @@
 #include "third_party/blink/renderer/core/editing/ephemeral_range.h"
 #include "third_party/blink/renderer/core/editing/frame_selection.h"
 #include "third_party/blink/renderer/core/editing/iterators/text_iterator.h"
+#include "third_party/blink/renderer/core/editing/kill_ring.h"
 #include "third_party/blink/renderer/core/editing/selection_modifier.h"
 #include "third_party/blink/renderer/core/editing/selection_template.h"
 #include "third_party/blink/renderer/core/editing/set_selection_options.h"
@@ -64,9 +64,9 @@
 #include "third_party/blink/renderer/core/input/event_handler.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/page/page.h"
+#include "third_party/blink/renderer/core/scroll/scrollbar.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/histogram.h"
-#include "third_party/blink/renderer/platform/kill_ring.h"
-#include "third_party/blink/renderer/platform/scroll/scrollbar.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 
 #include <iterator>
@@ -158,7 +158,7 @@ InputEvent::InputType InputTypeFromCommandType(
       return InputType::kDeleteHardLineBackward;
     case CommandType::kDeleteToEndOfParagraph:
       return InputType::kDeleteHardLineForward;
-    // TODO(chongz): Find appreciate InputType for following commands.
+    // TODO(editing-dev): Find appreciate InputType for following commands.
     case CommandType::kDeleteToMark:
       return InputType::kNone;
 
@@ -377,7 +377,7 @@ static void PerformDelete(LocalFrame& frame) {
   frame.GetDocument()->UpdateStyleAndLayoutIgnorePendingStylesheets();
 
   frame.GetEditor().AddToKillRing(frame.GetEditor().SelectedRange());
-  // TODO(chongz): |Editor::performDelete()| has no direction.
+  // TODO(editing-dev): |Editor::performDelete()| has no direction.
   // https://github.com/w3c/editing/issues/130
   frame.GetEditor().DeleteSelectionWithSmartDelete(
       CanSmartCopyOrDelete(frame) ? DeleteMode::kSmart : DeleteMode::kSimple,
@@ -1281,7 +1281,7 @@ static const EditorInternalCommand* InternalCommand(
   static const EditorInternalCommand kEditorCommands[] = {
       // Lists all commands in blink::WebEditingCommandType.
       // Must be ordered by |commandType| for index lookup.
-      // Covered by unit tests in EditingCommandTest.cpp
+      // Covered by unit tests in editing_command_test.cc
       {WebEditingCommandType::kAlignJustified, ExecuteJustifyFull,
        SupportedFromMenuOrKeyBinding, EnabledInRichlyEditableText, StateNone,
        ValueStateOrNull, kNotTextInsertion, CanNotExecuteWhenDisabled},

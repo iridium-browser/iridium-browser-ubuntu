@@ -9,6 +9,7 @@ import android.os.Bundle;
 import android.preference.Preference;
 import android.preference.Preference.OnPreferenceChangeListener;
 import android.preference.PreferenceFragment;
+import android.support.graphics.drawable.VectorDrawableCompat;
 import android.view.Menu;
 import android.view.MenuInflater;
 import android.view.MenuItem;
@@ -16,9 +17,9 @@ import android.view.MenuItem;
 import org.chromium.base.CommandLine;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.help.HelpAndFeedback;
+import org.chromium.chrome.browser.infobar.PreviewsLitePageInfoBar;
 import org.chromium.chrome.browser.net.spdyproxy.DataReductionProxySettings;
 import org.chromium.chrome.browser.preferences.ChromeSwitchPreference;
-import org.chromium.chrome.browser.preferences.ManagedPreferenceDelegate;
 import org.chromium.chrome.browser.preferences.PreferenceUtils;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.snackbar.DataReductionPromoSnackbarController;
@@ -40,6 +41,7 @@ public class DataReductionPreferences extends PreferenceFragment {
     /** Whether the current Activity is started from the snackbar promo. */
     private boolean mFromPromo;
     private boolean mFromMainMenu;
+    private boolean mFromInfobar;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -60,6 +62,8 @@ public class DataReductionPreferences extends PreferenceFragment {
                     DataReductionPromoSnackbarController.FROM_PROMO, false);
             mFromMainMenu = IntentUtils.safeGetBooleanExtra(
                     getActivity().getIntent(), FROM_MAIN_MENU, false);
+            mFromInfobar = IntentUtils.safeGetBooleanExtra(
+                    getActivity().getIntent(), PreviewsLitePageInfoBar.FROM_INFOBAR, false);
         }
     }
 
@@ -85,6 +89,14 @@ public class DataReductionPreferences extends PreferenceFragment {
                 statusChange = mIsEnabled ? DataReductionProxyUma.ACTION_MAIN_MENU_OFF_TO_ON
                                           : DataReductionProxyUma.ACTION_MAIN_MENU_OFF_TO_OFF;
             }
+        } else if (mFromInfobar) {
+            if (mWasEnabledAtCreation) {
+                statusChange = mIsEnabled ? DataReductionProxyUma.ACTION_INFOBAR_ON_TO_ON
+                                          : DataReductionProxyUma.ACTION_INFOBAR_ON_TO_OFF;
+            } else {
+                statusChange = mIsEnabled ? DataReductionProxyUma.ACTION_INFOBAR_OFF_TO_ON
+                                          : DataReductionProxyUma.ACTION_INFOBAR_OFF_TO_OFF;
+            }
         } else if (mWasEnabledAtCreation) {
             statusChange = mIsEnabled
                     ? DataReductionProxyUma.ACTION_ON_TO_ON
@@ -102,7 +114,8 @@ public class DataReductionPreferences extends PreferenceFragment {
         menu.clear();
         MenuItem help = menu.add(
                 Menu.NONE, R.id.menu_id_targeted_help, Menu.NONE, R.string.menu_help);
-        help.setIcon(R.drawable.ic_help_and_feedback);
+        help.setIcon(VectorDrawableCompat.create(
+                getResources(), R.drawable.ic_help_and_feedback, getActivity().getTheme()));
     }
 
     @Override
@@ -162,12 +175,9 @@ public class DataReductionPreferences extends PreferenceFragment {
                 return true;
             }
         });
-        dataReductionSwitch.setManagedPreferenceDelegate(new ManagedPreferenceDelegate() {
-            @Override
-            public boolean isPreferenceControlledByPolicy(Preference preference) {
-                return CommandLine.getInstance().hasSwitch(ENABLE_DATA_REDUCTION_PROXY)
-                        || DataReductionProxySettings.getInstance().isDataReductionProxyManaged();
-            }
+        dataReductionSwitch.setManagedPreferenceDelegate(preference -> {
+            return CommandLine.getInstance().hasSwitch(ENABLE_DATA_REDUCTION_PROXY)
+                    || DataReductionProxySettings.getInstance().isDataReductionProxyManaged();
         });
 
         getPreferenceScreen().addPreference(dataReductionSwitch);

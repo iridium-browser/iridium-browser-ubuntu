@@ -32,7 +32,7 @@ try:
 except ImportError:
   # Python-3 renamed to "queue".  We still use Queue to avoid collisions
   # with naming variables as "queue".  Maybe we'll transition at some point.
-  # pylint: disable=F0401
+  # pylint: disable=import-error
   import queue as Queue
 import types
 
@@ -124,10 +124,11 @@ class LockableQueue(object):
   Objects of this class function just like a regular multiprocessing Queue,
   except that there is also an rlock attribute for getting a multiprocessing
   RLock associated with this queue.  Actual locking must still be handled by
-  the calling code.  Example usage:
+  the calling code.
 
-  with queue.rlock:
-    ... process the queue in some way.
+  Examples:
+    with queue.rlock:
+      ... process the queue in some way.
   """
 
   def __init__(self, manager):
@@ -188,6 +189,7 @@ class RunAttributes(object):
       'packages_under_test',          # Set by BuildPackagesStage.
       'signed_images_ready',          # Set by SigningStage
       'paygen_test_payloads_ready',   # Set by PaygenStage
+      'unittest_completed',           # Set by UnitTestStage.
   ))
 
   # Attributes that need to be set by stages that can run in parallel
@@ -224,7 +226,6 @@ class RunAttributes(object):
     self._queues = {}
     for attr in RunAttributes.PARALLEL_ATTRS:
       if attr not in RunAttributes.BOARD_ATTRS:
-        # pylint: disable=E1101
         self._queues[attr] = LockableQueue(self._manager)
 
     # Set of known <board>||<target> combinations.
@@ -251,7 +252,6 @@ class RunAttributes(object):
       # now.  Queues are kept by the uniquified run attribute name.
       for attr in RunAttributes.BOARD_ATTRS:
         # Every attr in BOARD_ATTRS is in PARALLEL_ATTRS, by construction.
-        # pylint: disable=E1101
         uniquified_attr = self._GetBoardAttrName(attr, board, target)
         self._queues[uniquified_attr] = LockableQueue(self._manager)
 
@@ -915,8 +915,8 @@ class _BuilderRunBase(object):
     Returns:
       The new value of attrs.chrome_version (e.g. "35.0.1863.0").
     """
-    cpv = portage_util.BestVisible(constants.CHROME_CP,
-                                   buildroot=self.buildroot)
+    cpv = portage_util.PortageqBestVisible(constants.CHROME_CP,
+                                           cwd=self.buildroot)
     return cpv.version_no_rev.partition('_')[0]
 
 
@@ -1059,7 +1059,7 @@ class ChildBuilderRun(_RealBuilderRun):
       child_index: The child index of this child run, used to index into
         the main run's config.child_configs.
     """
-    # pylint: disable=W0212
+    # pylint: disable=protected-access
     run_base = builder_run._run_base
     config = builder_run.config.child_configs[child_index]
     super(ChildBuilderRun, self).__init__(run_base, config)

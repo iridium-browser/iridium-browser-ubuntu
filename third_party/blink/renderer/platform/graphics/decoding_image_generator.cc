@@ -29,6 +29,7 @@
 
 #include <memory>
 #include "third_party/blink/renderer/platform/graphics/image_frame_generator.h"
+#include "third_party/blink/renderer/platform/graphics/skia/skia_utils.h"
 #include "third_party/blink/renderer/platform/image-decoders/image_decoder.h"
 #include "third_party/blink/renderer/platform/image-decoders/segment_reader.h"
 #include "third_party/blink/renderer/platform/instrumentation/platform_instrumentation.h"
@@ -44,11 +45,12 @@ DecodingImageGenerator::CreateAsSkImageGenerator(sk_sp<SkData> data) {
   scoped_refptr<SegmentReader> segment_reader =
       SegmentReader::CreateFromSkData(std::move(data));
   // We just need the size of the image, so we have to temporarily create an
-  // ImageDecoder. Since we only need the size, the premul and gamma settings
-  // don't really matter.
+  // ImageDecoder. Since we only need the size, the premul, high bit depth and
+  // gamma settings don't really matter.
+  const bool data_complete = true;
   std::unique_ptr<ImageDecoder> decoder = ImageDecoder::Create(
-      segment_reader, true, ImageDecoder::kAlphaPremultiplied,
-      ColorBehavior::TransformToSRGB());
+      segment_reader, data_complete, ImageDecoder::kAlphaPremultiplied,
+      ImageDecoder::kDefaultBitDepth, ColorBehavior::Ignore());
   if (!decoder || !decoder->IsSizeAvailable())
     return nullptr;
 
@@ -68,7 +70,8 @@ DecodingImageGenerator::CreateAsSkImageGenerator(sk_sp<SkData> data) {
       std::move(frame), info, std::move(segment_reader), std::move(frames),
       PaintImage::GetNextContentId(), true);
   return std::make_unique<SkiaPaintImageGenerator>(
-      std::move(generator), PaintImage::kDefaultFrameIndex);
+      std::move(generator), PaintImage::kDefaultFrameIndex,
+      PaintImage::kDefaultGeneratorClientId);
 }
 
 // static
@@ -114,19 +117,31 @@ bool DecodingImageGenerator::GetPixels(const SkImageInfo& dst_info,
                                        void* pixels,
                                        size_t row_bytes,
                                        size_t frame_index,
+                                       PaintImage::GeneratorClientId client_id,
                                        uint32_t lazy_pixel_ref) {
-  TRACE_EVENT1("blink", "DecodingImageGenerator::getPixels", "frame index",
-               static_cast<int>(frame_index));
+  TRACE_EVENT2("blink", "DecodingImageGenerator::getPixels", "frame index",
+               static_cast<int>(frame_index), "client_id", client_id);
 
   // Implementation only supports decoding to a supported size.
   if (dst_info.dimensions() != GetSupportedDecodeSize(dst_info.dimensions())) {
     return false;
   }
 
-  // TODO(vmpstr): We could do the color type conversion here by getting N32
-  // colortype decode first, and then converting to whatever was requested.
-  if (dst_info.colorType() != kN32_SkColorType) {
-    return false;
+  // Color type can be N32 or F16. Otherwise, decode to N32 and convert to
+  // the requested color type from N32.
+  SkImageInfo target_info = dst_info;
+  char* memory = static_cast<char*>(pixels);
+  size_t adjusted_row_bytes = row_bytes;
+  if ((target_info.colorType() != kN32_SkColorType) &&
+      (target_info.colorType() != kRGBA_F16_SkColorType)) {
+    target_info = target_info.makeColorType(kN32_SkColorType);
+    // row_bytes is the size of scanline, so it should be >= info.minRowBytes().
+    DCHECK(row_bytes >= dst_info.minRowBytes());
+    // row_bytes must be a multiple of dst_info.bytesPerPixel().
+    DCHECK_EQ(0ul, row_bytes % dst_info.bytesPerPixel());
+    adjusted_row_bytes =
+        target_info.bytesPerPixel() * (row_bytes / dst_info.bytesPerPixel());
+    memory = new char[target_info.computeMinByteSize()];
   }
 
   // Skip the check for alphaType.  blink::ImageFrame may have changed the
@@ -136,13 +151,11 @@ bool DecodingImageGenerator::GetPixels(const SkImageInfo& dst_info,
 
   // Pass decodeColorSpace to the decoder.  That is what we can expect the
   // output to be.
-  SkColorSpace* decode_color_space = GetSkImageInfo().colorSpace();
-  SkImageInfo decode_info =
-      dst_info.makeColorSpace(sk_ref_sp(decode_color_space));
+  sk_sp<SkColorSpace> decode_color_space = GetSkImageInfo().refColorSpace();
+  SkImageInfo decode_info = target_info.makeColorSpace(decode_color_space);
 
-  const bool needs_color_xform =
-      decode_color_space && dst_info.colorSpace() &&
-      !SkColorSpace::Equals(decode_color_space, dst_info.colorSpace());
+  const bool needs_color_xform = !ApproximatelyEqualSkColorSpaces(
+      decode_color_space, target_info.refColorSpace());
   ImageDecoder::AlphaOption alpha_option = ImageDecoder::kAlphaPremultiplied;
   if (needs_color_xform && !decode_info.isOpaque()) {
     alpha_option = ImageDecoder::kAlphaNotPremultiplied;
@@ -150,20 +163,26 @@ bool DecodingImageGenerator::GetPixels(const SkImageInfo& dst_info,
   }
 
   PlatformInstrumentation::WillDecodeLazyPixelRef(lazy_pixel_ref);
-  const bool decoded = frame_generator_->DecodeAndScale(
-      data_.get(), all_data_received_, frame_index, decode_info, pixels,
-      row_bytes, alpha_option);
+  bool decoded = frame_generator_->DecodeAndScale(
+      data_.get(), all_data_received_, frame_index, decode_info, memory,
+      adjusted_row_bytes, alpha_option, client_id);
   PlatformInstrumentation::DidDecodeLazyPixelRef();
 
   if (decoded && needs_color_xform) {
     TRACE_EVENT0("blink", "DecodingImageGenerator::getPixels - apply xform");
-    SkPixmap src(decode_info, pixels, row_bytes);
+    SkPixmap src(decode_info, memory, adjusted_row_bytes);
+    decoded =
+        decoded && src.readPixels(target_info, memory, adjusted_row_bytes);
+    DCHECK(decoded);
+  }
 
-    // kIgnore ensures that we perform the premultiply (if necessary) in the dst
-    // space.
-    const bool converted = src.readPixels(dst_info, pixels, row_bytes, 0, 0,
-                                          SkTransferFunctionBehavior::kIgnore);
-    DCHECK(converted);
+  // Convert the color type to the requested one if necessary
+  if (decoded && target_info.colorType() != dst_info.colorType()) {
+    decoded =
+        decoded && SkPixmap{target_info, memory, adjusted_row_bytes}.readPixels(
+                       SkPixmap{dst_info, pixels, row_bytes});
+    delete[] memory;
+    DCHECK(decoded);
   }
 
   return decoded;

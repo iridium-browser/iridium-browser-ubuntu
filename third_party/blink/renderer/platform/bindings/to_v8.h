@@ -10,13 +10,14 @@
 
 #include <utility>
 
+#include "base/optional.h"
+#include "third_party/blink/renderer/platform/bindings/callback_function_base.h"
+#include "third_party/blink/renderer/platform/bindings/callback_interface_base.h"
 #include "third_party/blink/renderer/platform/bindings/dom_data_store.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/bindings/v8_binding.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
-#include "third_party/blink/renderer/platform/wtf/optional.h"
 #include "v8/include/v8.h"
 
 namespace blink {
@@ -35,6 +36,34 @@ inline v8::Local<v8::Value> ToV8(ScriptWrappable* impl,
   wrapper = impl->Wrap(isolate, creation_context);
   DCHECK(!wrapper.IsEmpty());
   return wrapper;
+}
+
+// Callback function
+
+inline v8::Local<v8::Value> ToV8(CallbackFunctionBase* callback,
+                                 v8::Local<v8::Object> creation_context,
+                                 v8::Isolate* isolate) {
+  // |creation_context| is intentionally ignored. Callback functions are not
+  // wrappers nor clonable. ToV8 on a callback function must be used only when
+  // it's the same origin-domain in the same world.
+  DCHECK(!callback || (callback->CallbackRelevantScriptState()->GetContext() ==
+                       creation_context->CreationContext()));
+  return callback ? callback->CallbackFunction().As<v8::Value>()
+                  : v8::Null(isolate).As<v8::Value>();
+}
+
+// Callback interface
+
+inline v8::Local<v8::Value> ToV8(CallbackInterfaceBase* callback,
+                                 v8::Local<v8::Object> creation_context,
+                                 v8::Isolate* isolate) {
+  // |creation_context| is intentionally ignored. Callback interface objects
+  // are not wrappers nor clonable. ToV8 on a callback interface object must
+  // be used only when it's the same origin-domain in the same world.
+  DCHECK(!callback || (callback->CallbackRelevantScriptState()->GetContext() ==
+                       creation_context->CreationContext()));
+  return callback ? callback->CallbackObject().As<v8::Value>()
+                  : v8::Null(isolate).As<v8::Value>();
 }
 
 // Primitives
@@ -66,7 +95,7 @@ inline v8::Local<v8::Value> ToV8SignedIntegerInternal<8>(int64_t value,
                                                          v8::Isolate* isolate) {
   int32_t value_in32_bit = static_cast<int32_t>(value);
   if (value_in32_bit == value)
-    return v8::Integer::New(isolate, value);
+    return v8::Integer::New(isolate, value_in32_bit);
   // V8 doesn't have a 64-bit integer implementation.
   return v8::Number::New(isolate, value);
 }
@@ -88,7 +117,7 @@ inline v8::Local<v8::Value> ToV8UnsignedIntegerInternal<8>(
     v8::Isolate* isolate) {
   uint32_t value_in32_bit = static_cast<uint32_t>(value);
   if (value_in32_bit == value)
-    return v8::Integer::NewFromUnsigned(isolate, value);
+    return v8::Integer::NewFromUnsigned(isolate, value_in32_bit);
   // V8 doesn't have a 64-bit integer implementation.
   return v8::Number::New(isolate, value);
 }
@@ -177,14 +206,14 @@ inline v8::Local<v8::Value> ToV8SequenceInternal(
     v8::Local<v8::Object> creation_context,
     v8::Isolate*);
 
-template <typename T, size_t inlineCapacity>
+template <typename T, wtf_size_t inlineCapacity>
 inline v8::Local<v8::Value> ToV8(const Vector<T, inlineCapacity>& value,
                                  v8::Local<v8::Object> creation_context,
                                  v8::Isolate* isolate) {
   return ToV8SequenceInternal(value, creation_context, isolate);
 }
 
-template <typename T, size_t inlineCapacity>
+template <typename T, wtf_size_t inlineCapacity>
 inline v8::Local<v8::Value> ToV8(const HeapVector<T, inlineCapacity>& value,
                                  v8::Local<v8::Object> creation_context,
                                  v8::Isolate* isolate) {

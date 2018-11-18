@@ -12,13 +12,15 @@
 #include "base/win/windows_version.h"
 #include "ui/base/ui_base_features.h"
 #include "ui/display/win/screen_win.h"
+#include "ui/gfx/geometry/rect.h"
 
 namespace ui {
 namespace win {
 
 // static
 std::unique_ptr<DirectManipulationHelper>
-DirectManipulationHelper::CreateInstance(HWND window) {
+DirectManipulationHelper::CreateInstance(HWND window,
+                                         WindowEventTarget* event_target) {
   if (!::IsWindow(window))
     return nullptr;
 
@@ -33,7 +35,7 @@ DirectManipulationHelper::CreateInstance(HWND window) {
       base::WrapUnique(new DirectManipulationHelper());
   instance->window_ = window;
 
-  if (instance->Initialize())
+  if (instance->Initialize(event_target))
     return instance;
 
   return nullptr;
@@ -54,9 +56,8 @@ DirectManipulationHelper::CreateInstanceForTesting(
   std::unique_ptr<DirectManipulationHelper> instance =
       base::WrapUnique(new DirectManipulationHelper());
 
-  instance->event_handler_ =
-      Microsoft::WRL::Make<DirectManipulationHandler>(instance.get());
-  instance->event_handler_->SetWindowEventTarget(event_target);
+  instance->event_handler_ = Microsoft::WRL::Make<DirectManipulationHandler>(
+      instance.get(), event_target);
 
   instance->viewport_ = viewport;
 
@@ -70,11 +71,7 @@ DirectManipulationHelper::~DirectManipulationHelper() {
 
 DirectManipulationHelper::DirectManipulationHelper() {}
 
-// We only use Direct Manipulation as event handler so we can use any size for
-// the fake viewport.
-const RECT VIEWPORT_DEFAULT_RECT = {0, 0, 1000, 1000};
-
-bool DirectManipulationHelper::Initialize() {
+bool DirectManipulationHelper::Initialize(WindowEventTarget* event_target) {
   // IDirectManipulationUpdateManager is the first COM object created by the
   // application to retrieve other objects in the Direct Manipulation API.
   // It also serves to activate and deactivate Direct Manipulation functionality
@@ -115,7 +112,8 @@ bool DirectManipulationHelper::Initialize() {
   if (!SUCCEEDED(hr))
     return false;
 
-  event_handler_ = Microsoft::WRL::Make<DirectManipulationHandler>(this);
+  event_handler_ =
+      Microsoft::WRL::Make<DirectManipulationHandler>(this, event_target);
   if (!SUCCEEDED(hr))
     return false;
 
@@ -126,7 +124,10 @@ bool DirectManipulationHelper::Initialize() {
   if (!SUCCEEDED(hr))
     return false;
 
-  hr = viewport_->SetViewportRect(&VIEWPORT_DEFAULT_RECT);
+  // Set default rect for viewport before activate.
+  viewport_size_ = {1000, 1000};
+  RECT rect = gfx::Rect(viewport_size_).ToRECT();
+  hr = viewport_->SetViewportRect(&rect);
   if (!SUCCEEDED(hr))
     return false;
 
@@ -141,11 +142,24 @@ bool DirectManipulationHelper::Initialize() {
 }
 
 void DirectManipulationHelper::Activate() {
+  viewport_->Stop();
   manager_->Activate(window_);
 }
 
 void DirectManipulationHelper::Deactivate() {
+  viewport_->Stop();
   manager_->Deactivate(window_);
+}
+
+void DirectManipulationHelper::SetSize(const gfx::Size& size) {
+  if (viewport_size_ == size)
+    return;
+
+  viewport_->Stop();
+
+  viewport_size_ = size;
+  RECT rect = gfx::Rect(viewport_size_).ToRECT();
+  viewport_->SetViewportRect(&rect);
 }
 
 bool DirectManipulationHelper::OnPointerHitTest(
@@ -169,7 +183,7 @@ bool DirectManipulationHelper::OnPointerHitTest(
   static GetPointerTypeFn get_pointer_type = reinterpret_cast<GetPointerTypeFn>(
       GetProcAddress(GetModuleHandleA("user32.dll"), "GetPointerType"));
   if (get_pointer_type && get_pointer_type(pointer_id, &pointer_type) &&
-      pointer_type == PT_TOUCHPAD) {
+      pointer_type == PT_TOUCHPAD && event_target) {
     viewport_->SetContact(pointer_id);
     // Request begin frame for fake viewport.
     need_poll_events_ = true;
@@ -180,11 +194,10 @@ bool DirectManipulationHelper::OnPointerHitTest(
 HRESULT DirectManipulationHelper::ResetViewport(bool need_poll_events) {
   // By zooming the primary content to a rect that match the viewport rect, we
   // reset the content's transform to identity.
-  HRESULT hr = viewport_->ZoomToRect(
-      static_cast<float>(VIEWPORT_DEFAULT_RECT.left),
-      static_cast<float>(VIEWPORT_DEFAULT_RECT.top),
-      static_cast<float>(VIEWPORT_DEFAULT_RECT.right),
-      static_cast<float>(VIEWPORT_DEFAULT_RECT.bottom), FALSE);
+  HRESULT hr =
+      viewport_->ZoomToRect(static_cast<float>(0), static_cast<float>(0),
+                            static_cast<float>(viewport_size_.width()),
+                            static_cast<float>(viewport_size_.height()), FALSE);
   if (!SUCCEEDED(hr))
     return hr;
 
@@ -208,8 +221,9 @@ DirectManipulationHandler::DirectManipulationHandler() {
 }
 
 DirectManipulationHandler::DirectManipulationHandler(
-    DirectManipulationHelper* helper)
-    : helper_(helper) {}
+    DirectManipulationHelper* helper,
+    WindowEventTarget* event_target)
+    : helper_(helper), event_target_(event_target) {}
 
 DirectManipulationHandler::~DirectManipulationHandler() {}
 
@@ -282,12 +296,21 @@ HRESULT DirectManipulationHandler::OnViewportStatusChanged(
     IDirectManipulationViewport* viewport,
     DIRECTMANIPULATION_STATUS current,
     DIRECTMANIPULATION_STATUS previous) {
+  // MSDN never mention |viewport| are nullable and we never saw it is null when
+  // testing.
+  DCHECK(viewport);
+
   // The state of our viewport has changed! We'l be in one of three states:
   // - ENABLED: initial state
   // - READY: the previous gesture has been completed
   // - RUNNING: gesture updating
   // - INERTIA: finger leave touchpad content still updating by inertia
   HRESULT hr = S_OK;
+
+  // Windows should not call this when event_target_ is null since we do not
+  // pass the DM_POINTERHITTEST to DirectManipulation.
+  if (!event_target_)
+    return hr;
 
   if (current == previous)
     return hr;
@@ -357,8 +380,20 @@ bool DifferentLessThanOne(int f1, int f2) {
 HRESULT DirectManipulationHandler::OnContentUpdated(
     IDirectManipulationViewport* viewport,
     IDirectManipulationContent* content) {
+  // MSDN never mention these params are nullable and we never saw they are null
+  // when testing.
+  DCHECK(viewport);
+  DCHECK(content);
+
+  HRESULT hr = S_OK;
+
+  // Windows should not call this when event_target_ is null since we do not
+  // pass the DM_POINTERHITTEST to DirectManipulation.
+  if (!event_target_)
+    return hr;
+
   float xform[6];
-  HRESULT hr = content->GetContentTransform(xform, ARRAYSIZE(xform));
+  hr = content->GetContentTransform(xform, ARRAYSIZE(xform));
   if (!SUCCEEDED(hr))
     return hr;
 
@@ -426,7 +461,6 @@ HRESULT DirectManipulationHandler::OnContentUpdated(
 
 void DirectManipulationHandler::SetWindowEventTarget(
     WindowEventTarget* event_target) {
-  DCHECK(event_target);
   event_target_ = event_target;
 }
 

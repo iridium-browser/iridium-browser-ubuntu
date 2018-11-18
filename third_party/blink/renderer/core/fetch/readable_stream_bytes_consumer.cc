@@ -33,10 +33,17 @@ class ReadableStreamBytesConsumer::OnFulfilled final : public ScriptFunction {
   ScriptValue Call(ScriptValue v) override {
     bool done;
     v8::Local<v8::Value> item = v.V8Value();
-    DCHECK(item->IsObject());
-    v8::Local<v8::Value> value =
-        V8UnpackIteratorResult(v.GetScriptState(), item.As<v8::Object>(), &done)
-            .ToLocalChecked();
+    if (!item->IsObject()) {
+      consumer_->OnRejected();
+      return ScriptValue();
+    }
+    v8::Local<v8::Value> value;
+    if (!V8UnpackIteratorResult(v.GetScriptState(), item.As<v8::Object>(),
+                                &done)
+             .ToLocal(&value)) {
+      consumer_->OnRejected();
+      return ScriptValue();
+    }
     if (done) {
       consumer_->OnReadDone();
       return v;
@@ -91,7 +98,6 @@ ReadableStreamBytesConsumer::ReadableStreamBytesConsumer(
     ScriptValue stream_reader)
     : reader_(script_state->GetIsolate(), stream_reader.V8Value()),
       script_state_(script_state) {
-  reader_.SetPhantom();
 }
 
 ReadableStreamBytesConsumer::~ReadableStreamBytesConsumer() {}
@@ -115,14 +121,14 @@ BytesConsumer::Result ReadableStreamBytesConsumer::BeginRead(
   }
   if (!is_reading_) {
     is_reading_ = true;
-    ScriptState::Scope scope(script_state_.get());
-    ScriptValue reader(script_state_.get(),
+    ScriptState::Scope scope(script_state_);
+    ScriptValue reader(script_state_,
                        reader_.NewLocal(script_state_->GetIsolate()));
     // The owner must retain the reader.
     DCHECK(!reader.IsEmpty());
-    ReadableStreamOperations::DefaultReaderRead(script_state_.get(), reader)
-        .Then(OnFulfilled::CreateFunction(script_state_.get(), this),
-              OnRejected::CreateFunction(script_state_.get(), this));
+    ReadableStreamOperations::DefaultReaderRead(script_state_, reader)
+        .Then(OnFulfilled::CreateFunction(script_state_, this),
+              OnRejected::CreateFunction(script_state_, this));
   }
   return Result::kShouldWait;
 }
@@ -165,8 +171,10 @@ BytesConsumer::Error ReadableStreamBytesConsumer::GetError() const {
 }
 
 void ReadableStreamBytesConsumer::Trace(blink::Visitor* visitor) {
+  visitor->Trace(reader_);
   visitor->Trace(client_);
   visitor->Trace(pending_buffer_);
+  visitor->Trace(script_state_);
   BytesConsumer::Trace(visitor);
 }
 

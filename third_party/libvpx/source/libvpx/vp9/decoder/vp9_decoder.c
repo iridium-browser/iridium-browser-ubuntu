@@ -69,6 +69,7 @@ static void vp9_dec_free_mi(VP9_COMMON *cm) {
   cm->mip = NULL;
   vpx_free(cm->mi_grid_base);
   cm->mi_grid_base = NULL;
+  cm->mi_alloc_size = 0;
 }
 
 VP9Decoder *vp9_decoder_create(BufferPool *const pool) {
@@ -364,6 +365,8 @@ int vp9_receive_compressed_data(VP9Decoder *pbi, size_t size,
     if (cm->seg.enabled) vp9_swap_current_and_last_seg_map(cm);
   }
 
+  if (cm->show_frame) cm->cur_show_frame_fb_idx = cm->new_fb_idx;
+
   // Update progress in frame parallel decode.
   cm->last_width = cm->width;
   cm->last_height = cm->height;
@@ -394,7 +397,7 @@ int vp9_get_raw_frame(VP9Decoder *pbi, YV12_BUFFER_CONFIG *sd,
 
 #if CONFIG_VP9_POSTPROC
   if (!cm->show_existing_frame) {
-    ret = vp9_post_proc_frame(cm, sd, flags);
+    ret = vp9_post_proc_frame(cm, sd, flags, cm->width);
   } else {
     *sd = *cm->frame_to_show;
     ret = 0;

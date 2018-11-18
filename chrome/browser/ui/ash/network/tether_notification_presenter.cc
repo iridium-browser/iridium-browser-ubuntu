@@ -4,6 +4,7 @@
 
 #include "chrome/browser/ui/ash/network/tether_notification_presenter.h"
 
+#include "ash/public/cpp/network_icon_image_source.h"
 #include "ash/public/cpp/vector_icons/vector_icons.h"
 #include "base/bind.h"
 #include "base/memory/ptr_util.h"
@@ -122,10 +123,10 @@ TetherNotificationPresenter::TetherNotificationPresenter(
 TetherNotificationPresenter::~TetherNotificationPresenter() = default;
 
 void TetherNotificationPresenter::NotifyPotentialHotspotNearby(
-    const cryptauth::RemoteDevice& remote_device,
+    cryptauth::RemoteDeviceRef remote_device,
     int signal_strength) {
   PA_LOG(INFO) << "Displaying \"potential hotspot nearby\" notification for "
-               << "device with name \"" << remote_device.name << "\". "
+               << "device with name \"" << remote_device.name() << "\". "
                << "Notification ID = " << kPotentialHotspotNotificationId;
 
   hotspot_nearby_device_id_ =
@@ -142,7 +143,7 @@ void TetherNotificationPresenter::NotifyPotentialHotspotNearby(
           IDS_TETHER_NOTIFICATION_WIFI_AVAILABLE_ONE_DEVICE_TITLE),
       l10n_util::GetStringFUTF16(
           IDS_TETHER_NOTIFICATION_WIFI_AVAILABLE_ONE_DEVICE_MESSAGE,
-          base::ASCIIToUTF16(remote_device.name)),
+          base::ASCIIToUTF16(remote_device.name())),
       GetImageForSignalStrength(signal_strength), rich_notification_data));
 }
 
@@ -212,8 +213,7 @@ void TetherNotificationPresenter::NotifyConnectionToHostFailed() {
           IDS_TETHER_NOTIFICATION_CONNECTION_FAILED_TITLE),
       l10n_util::GetStringUTF16(
           IDS_TETHER_NOTIFICATION_CONNECTION_FAILED_MESSAGE),
-      gfx::Image() /* icon */, base::string16() /* display_source */,
-      GURL() /* origin_url */,
+      base::string16() /* display_source */, GURL() /* origin_url */,
       message_center::NotifierId(
           message_center::NotifierId::NotifierType::SYSTEM_COMPONENT,
           kNotifierTether),

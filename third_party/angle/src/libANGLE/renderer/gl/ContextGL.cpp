@@ -9,6 +9,7 @@
 
 #include "libANGLE/renderer/gl/ContextGL.h"
 
+#include "libANGLE/Context.h"
 #include "libANGLE/renderer/gl/BufferGL.h"
 #include "libANGLE/renderer/gl/CompilerGL.h"
 #include "libANGLE/renderer/gl/FenceNVGL.h"
@@ -31,7 +32,7 @@
 namespace rx
 {
 
-ContextGL::ContextGL(const gl::ContextState &state, RendererGL *renderer)
+ContextGL::ContextGL(const gl::ContextState &state, const std::shared_ptr<RendererGL> &renderer)
     : ContextImpl(state), mRenderer(renderer)
 {
 }
@@ -52,9 +53,10 @@ CompilerImpl *ContextGL::createCompiler()
 
 ShaderImpl *ContextGL::createShader(const gl::ShaderState &data)
 {
-    return new ShaderGL(data, getFunctions(), getWorkaroundsGL(),
-                        getExtensions().webglCompatibility,
-                        mRenderer->getMultiviewImplementationType());
+    const FunctionsGL *functions = getFunctions();
+    GLuint shader                = functions->createShader(ToGLenum(data.getShaderType()));
+
+    return new ShaderGL(data, shader, mRenderer->getMultiviewImplementationType(), functions);
 }
 
 ProgramImpl *ContextGL::createProgram(const gl::ProgramState &data)
@@ -65,14 +67,24 @@ ProgramImpl *ContextGL::createProgram(const gl::ProgramState &data)
 
 FramebufferImpl *ContextGL::createFramebuffer(const gl::FramebufferState &data)
 {
-    return new FramebufferGL(data, getFunctions(), getStateManager(), getWorkaroundsGL(),
-                             mRenderer->getBlitter(), mRenderer->getMultiviewClearer(), false);
+    const FunctionsGL *funcs = getFunctions();
+
+    GLuint fbo = 0;
+    funcs->genFramebuffers(1, &fbo);
+
+    return new FramebufferGL(data, fbo, false);
 }
 
 TextureImpl *ContextGL::createTexture(const gl::TextureState &state)
 {
-    return new TextureGL(state, getFunctions(), getWorkaroundsGL(), getStateManager(),
-                         mRenderer->getBlitter());
+    const FunctionsGL *functions = getFunctions();
+    StateManagerGL *stateManager = getStateManager();
+
+    GLuint texture = 0;
+    functions->genTextures(1, &texture);
+    stateManager->bindTexture(state.getType(), texture);
+
+    return new TextureGL(state, texture);
 }
 
 RenderbufferImpl *ContextGL::createRenderbuffer(const gl::RenderbufferState &state)
@@ -91,12 +103,12 @@ VertexArrayImpl *ContextGL::createVertexArray(const gl::VertexArrayState &data)
     return new VertexArrayGL(data, getFunctions(), getStateManager());
 }
 
-QueryImpl *ContextGL::createQuery(GLenum type)
+QueryImpl *ContextGL::createQuery(gl::QueryType type)
 {
     switch (type)
     {
-        case GL_COMMANDS_COMPLETED_CHROMIUM:
-            return new SyncQueryGL(type, getFunctions(), getStateManager());
+        case gl::QueryType::CommandsCompleted:
+            return new SyncQueryGL(type, getFunctions());
 
         default:
             return new StandardQueryGL(type, getFunctions(), getStateManager());
@@ -158,13 +170,16 @@ gl::Error ContextGL::finish(const gl::Context *context)
     return mRenderer->finish();
 }
 
-gl::Error ContextGL::drawArrays(const gl::Context *context, GLenum mode, GLint first, GLsizei count)
+angle::Result ContextGL::drawArrays(const gl::Context *context,
+                                    gl::PrimitiveMode mode,
+                                    GLint first,
+                                    GLsizei count)
 {
     return mRenderer->drawArrays(context, mode, first, count);
 }
 
 gl::Error ContextGL::drawArraysInstanced(const gl::Context *context,
-                                         GLenum mode,
+                                         gl::PrimitiveMode mode,
                                          GLint first,
                                          GLsizei count,
                                          GLsizei instanceCount)
@@ -173,7 +188,7 @@ gl::Error ContextGL::drawArraysInstanced(const gl::Context *context,
 }
 
 gl::Error ContextGL::drawElements(const gl::Context *context,
-                                  GLenum mode,
+                                  gl::PrimitiveMode mode,
                                   GLsizei count,
                                   GLenum type,
                                   const void *indices)
@@ -182,7 +197,7 @@ gl::Error ContextGL::drawElements(const gl::Context *context,
 }
 
 gl::Error ContextGL::drawElementsInstanced(const gl::Context *context,
-                                           GLenum mode,
+                                           gl::PrimitiveMode mode,
                                            GLsizei count,
                                            GLenum type,
                                            const void *indices,
@@ -192,7 +207,7 @@ gl::Error ContextGL::drawElementsInstanced(const gl::Context *context,
 }
 
 gl::Error ContextGL::drawRangeElements(const gl::Context *context,
-                                       GLenum mode,
+                                       gl::PrimitiveMode mode,
                                        GLuint start,
                                        GLuint end,
                                        GLsizei count,
@@ -203,14 +218,14 @@ gl::Error ContextGL::drawRangeElements(const gl::Context *context,
 }
 
 gl::Error ContextGL::drawArraysIndirect(const gl::Context *context,
-                                        GLenum mode,
+                                        gl::PrimitiveMode mode,
                                         const void *indirect)
 {
     return mRenderer->drawArraysIndirect(context, mode, indirect);
 }
 
 gl::Error ContextGL::drawElementsIndirect(const gl::Context *context,
-                                          GLenum mode,
+                                          gl::PrimitiveMode mode,
                                           GLenum type,
                                           const void *indirect)
 {
@@ -351,9 +366,12 @@ void ContextGL::popDebugGroup()
     mRenderer->popDebugGroup();
 }
 
-void ContextGL::syncState(const gl::Context *context, const gl::State::DirtyBits &dirtyBits)
+angle::Result ContextGL::syncState(const gl::Context *context,
+                                   const gl::State::DirtyBits &dirtyBits,
+                                   const gl::State::DirtyBits &bitMask)
 {
-    mRenderer->getStateManager()->syncState(context, dirtyBits);
+    mRenderer->getStateManager()->syncState(context, dirtyBits, bitMask);
+    return angle::Result::Continue();
 }
 
 GLint ContextGL::getGPUDisjoint()
@@ -366,13 +384,14 @@ GLint64 ContextGL::getTimestamp()
     return mRenderer->getTimestamp();
 }
 
-void ContextGL::onMakeCurrent(const gl::Context *context)
+gl::Error ContextGL::onMakeCurrent(const gl::Context *context)
 {
     // Queries need to be paused/resumed on context switches
-    ANGLE_SWALLOW_ERR(mRenderer->getStateManager()->onMakeCurrent(context));
+    ANGLE_TRY(mRenderer->getStateManager()->onMakeCurrent(context));
+    return gl::NoError();
 }
 
-const gl::Caps &ContextGL::getNativeCaps() const
+gl::Caps ContextGL::getNativeCaps() const
 {
     return mRenderer->getNativeCaps();
 }
@@ -412,6 +431,16 @@ const WorkaroundsGL &ContextGL::getWorkaroundsGL() const
     return mRenderer->getWorkarounds();
 }
 
+BlitGL *ContextGL::getBlitter() const
+{
+    return mRenderer->getBlitter();
+}
+
+ClearMultiviewGL *ContextGL::getMultiviewClearer() const
+{
+    return mRenderer->getMultiviewClearer();
+}
+
 gl::Error ContextGL::dispatchCompute(const gl::Context *context,
                                      GLuint numGroupsX,
                                      GLuint numGroupsY,
@@ -434,4 +463,16 @@ gl::Error ContextGL::memoryBarrierByRegion(const gl::Context *context, GLbitfiel
     return mRenderer->memoryBarrierByRegion(barriers);
 }
 
+void ContextGL::handleError(GLenum errorCode,
+                            const char *message,
+                            const char *file,
+                            const char *function,
+                            unsigned int line)
+{
+    std::stringstream errorStream;
+    errorStream << "Internal OpenGL error: " << gl::FmtHex(errorCode) << ", in " << file << ", "
+                << function << ":" << line << ". " << message;
+
+    mErrors->handleError(gl::Error(errorCode, errorCode, errorStream.str()));
+}
 }  // namespace rx

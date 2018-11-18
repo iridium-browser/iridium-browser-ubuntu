@@ -34,8 +34,8 @@
 #include "third_party/blink/renderer/core/frame/content_settings_client.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/page/page.h"
-#include "third_party/blink/renderer/modules/webdatabase/InspectorDatabaseAgent.h"
 #include "third_party/blink/renderer/modules/webdatabase/database.h"
+#include "third_party/blink/renderer/modules/webdatabase/inspector_database_agent.h"
 
 namespace blink {
 
@@ -51,7 +51,7 @@ DatabaseClient* DatabaseClient::FromPage(Page* page) {
 }
 
 DatabaseClient* DatabaseClient::From(ExecutionContext* context) {
-  return DatabaseClient::FromPage(ToDocument(context)->GetPage());
+  return DatabaseClient::FromPage(To<Document>(context)->GetPage());
 }
 
 const char DatabaseClient::kSupplementName[] = "DatabaseClient";
@@ -61,7 +61,7 @@ bool DatabaseClient::AllowDatabase(ExecutionContext* context,
                                    const String& display_name,
                                    unsigned estimated_size) {
   DCHECK(context->IsContextThread());
-  Document* document = ToDocument(context);
+  Document* document = To<Document>(context);
   DCHECK(document->GetFrame());
   if (document->GetFrame()->GetContentSettingsClient()) {
     return document->GetFrame()->GetContentSettingsClient()->AllowDatabase(

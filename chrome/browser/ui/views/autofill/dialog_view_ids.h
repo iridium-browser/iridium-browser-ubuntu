@@ -18,18 +18,28 @@ enum DialogViewId : int {
   // The following are the important containing views of the bubble.
   MAIN_CONTENT_VIEW_LOCAL,   // The main content view, for a local save bubble
   MAIN_CONTENT_VIEW_UPLOAD,  // The main content view, for an upload save bubble
-  REQUEST_CVC_VIEW,          // Secondary main content view for the CVC fix flow
   FOOTNOTE_VIEW,             // Contains the legal messages for upload save
+  SIGN_IN_PROMO_VIEW,        // Contains the sign-in promo view
+  MANAGE_CARDS_VIEW,         // The manage cards view
+
+  // The sub-view that contains the sign-in button in the promo.
+  SIGN_IN_VIEW,
 
   // The following are views::LabelButton objects (clickable).
-  OK_BUTTON,      // Can say [Save], [Next], and [Confirm] depend on context
-  CANCEL_BUTTON,  // Typically says [No thanks]
+  OK_BUTTON,            // Can say [Save], [Next], [Confirm],
+                        // or [Done] depending on context
+  CANCEL_BUTTON,        // Typically says [No thanks]
+  CLOSE_BUTTON,         // Typically says [Close]
+  MANAGE_CARDS_BUTTON,  // Typicall says [Manage cards]
 
   // The following are views::Link objects (clickable).
   LEARN_MORE_LINK,
 
   // The following are views::Textfield objects.
-  CVC_TEXTFIELD,  // Used for CVC entry
+  CARDHOLDER_NAME_TEXTFIELD,  // Used for cardholder name entry/confirmation
+
+  // The following are views::TooltipIcon objects.
+  CARDHOLDER_NAME_TOOLTIP,  // Appears during cardholder name entry/confirmation
 };
 
 }  // namespace autofill

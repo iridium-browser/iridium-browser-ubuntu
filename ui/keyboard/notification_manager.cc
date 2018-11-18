@@ -27,45 +27,42 @@ bool ValueNotificationConsolidator<T>::ShouldSendNotification(
 NotificationManager::NotificationManager() {}
 
 void NotificationManager::SendNotifications(
-    bool bounds_obscure_usable_region,
-    bool bounds_affect_layout,
-    bool is_locked,
-    const gfx::Rect& bounds,
-    const base::ObserverList<KeyboardControllerObserver>& observers) {
-  bool is_available = !bounds.IsEmpty();
-  bool send_availability_notification =
-      ShouldSendAvailabilityNotification(is_available);
+    bool does_occluded_bounds_affect_layout,
+    const gfx::Rect& visual_bounds,
+    const gfx::Rect& occluded_bounds,
+    const base::ObserverList<KeyboardControllerObserver>::Unchecked&
+        observers) {
+  bool is_visible = !visual_bounds.IsEmpty();
+  bool send_visibility_notification =
+      ShouldSendVisibilityNotification(is_visible);
 
   bool send_visual_bounds_notification =
-      ShouldSendVisualBoundsNotification(bounds);
+      ShouldSendVisualBoundsNotification(visual_bounds);
 
-  const gfx::Rect occluded_region =
-      bounds_obscure_usable_region ? bounds : gfx::Rect();
   bool send_occluded_bounds_notification =
-      ShouldSendOccludedBoundsNotification(occluded_region);
+      ShouldSendOccludedBoundsNotification(occluded_bounds);
 
   const gfx::Rect workspace_layout_offset_region =
-      bounds_affect_layout ? bounds : gfx::Rect();
+      does_occluded_bounds_affect_layout ? occluded_bounds : gfx::Rect();
   bool send_displaced_bounds_notification =
       ShouldSendWorkspaceDisplacementBoundsNotification(
           workspace_layout_offset_region);
 
   KeyboardStateDescriptor state;
-  state.is_available = is_available;
-  state.is_locked = is_locked;
-  state.visual_bounds = bounds;
-  state.occluded_bounds = occluded_region;
+  state.is_visible = is_visible;
+  state.visual_bounds = visual_bounds;
+  state.occluded_bounds = occluded_bounds;
   state.displaced_bounds = workspace_layout_offset_region;
 
   for (KeyboardControllerObserver& observer : observers) {
-    if (send_availability_notification)
-      observer.OnKeyboardAvailabilityChanged(is_available);
+    if (send_visibility_notification)
+      observer.OnKeyboardVisibilityStateChanged(is_visible);
 
     if (send_visual_bounds_notification)
-      observer.OnKeyboardVisibleBoundsChanged(bounds);
+      observer.OnKeyboardVisibleBoundsChanged(visual_bounds);
 
     if (send_occluded_bounds_notification)
-      observer.OnKeyboardWorkspaceOccludedBoundsChanged(occluded_region);
+      observer.OnKeyboardWorkspaceOccludedBoundsChanged(occluded_bounds);
 
     if (send_displaced_bounds_notification) {
       observer.OnKeyboardWorkspaceDisplacingBoundsChanged(
@@ -76,9 +73,9 @@ void NotificationManager::SendNotifications(
   }
 }
 
-bool NotificationManager::ShouldSendAvailabilityNotification(
-    bool current_availability) {
-  return availability_.ShouldSendNotification(current_availability);
+bool NotificationManager::ShouldSendVisibilityNotification(
+    bool current_visibility) {
+  return visibility_.ShouldSendNotification(current_visibility);
 }
 
 bool NotificationManager::ShouldSendVisualBoundsNotification(
@@ -99,8 +96,8 @@ bool NotificationManager::ShouldSendWorkspaceDisplacementBoundsNotification(
       CanonicalizeEmptyRectangles(new_bounds));
 }
 
-const gfx::Rect NotificationManager::CanonicalizeEmptyRectangles(
-    const gfx::Rect rect) const {
+gfx::Rect NotificationManager::CanonicalizeEmptyRectangles(
+    const gfx::Rect& rect) const {
   if (rect.IsEmpty()) {
     return gfx::Rect();
   }

@@ -26,10 +26,10 @@ class MediaCodecEncoder extends MediaCodecBridge {
     // Output buffers mapping with MediaCodec output buffers for the possible frame-merging.
     private SparseArray<ByteBuffer> mOutputBuffers = new SparseArray<>();
     // SPS and PPS NALs (Config frame).
-    private ByteBuffer mConfigData = null;
+    private ByteBuffer mConfigData;
 
     protected MediaCodecEncoder(MediaCodec mediaCodec, BitrateAdjuster bitrateAdjuster) {
-        super(mediaCodec, bitrateAdjuster);
+        super(mediaCodec, bitrateAdjuster, false);
     }
 
     @Override

@@ -19,6 +19,7 @@ load(
     "ABSL_DEFAULT_COPTS",
     "ABSL_TEST_COPTS",
     "ABSL_EXCEPTIONS_FLAG",
+    "ABSL_EXCEPTIONS_FLAG_LINKOPTS",
 )
 
 package(default_visibility = ["//visibility:public"])
@@ -26,10 +27,30 @@ package(default_visibility = ["//visibility:public"])
 licenses(["notice"])  # Apache 2.0
 
 cc_library(
+    name = "compressed_tuple",
+    hdrs = ["internal/compressed_tuple.h"],
+    copts = ABSL_DEFAULT_COPTS,
+    deps = [
+        "//absl/utility",
+    ],
+)
+
+cc_test(
+    name = "compressed_tuple_test",
+    srcs = ["internal/compressed_tuple_test.cc"],
+    copts = ABSL_TEST_COPTS,
+    deps = [
+        ":compressed_tuple",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_library(
     name = "fixed_array",
     hdrs = ["fixed_array.h"],
     copts = ABSL_DEFAULT_COPTS,
     deps = [
+        ":compressed_tuple",
         "//absl/algorithm",
         "//absl/base:core_headers",
         "//absl/base:dynamic_annotations",
@@ -42,6 +63,7 @@ cc_test(
     name = "fixed_array_test",
     srcs = ["fixed_array_test.cc"],
     copts = ABSL_TEST_COPTS + ABSL_EXCEPTIONS_FLAG,
+    linkopts = ABSL_EXCEPTIONS_FLAG_LINKOPTS,
     deps = [
         ":fixed_array",
         "//absl/base:exception_testing",
@@ -62,6 +84,29 @@ cc_test(
     ],
 )
 
+cc_test(
+    name = "fixed_array_exception_safety_test",
+    srcs = ["fixed_array_exception_safety_test.cc"],
+    copts = ABSL_TEST_COPTS + ABSL_EXCEPTIONS_FLAG,
+    linkopts = ABSL_EXCEPTIONS_FLAG_LINKOPTS,
+    deps = [
+        ":fixed_array",
+        "//absl/base:exception_safety_testing",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "fixed_array_benchmark",
+    srcs = ["fixed_array_benchmark.cc"],
+    copts = ABSL_TEST_COPTS + ["$(STACK_FRAME_UNLIMITED)"],
+    tags = ["benchmark"],
+    deps = [
+        ":fixed_array",
+        "@com_github_google_benchmark//:benchmark_main",
+    ],
+)
+
 cc_library(
     name = "inlined_vector",
     hdrs = ["inlined_vector.h"],
@@ -78,6 +123,7 @@ cc_test(
     name = "inlined_vector_test",
     srcs = ["inlined_vector_test.cc"],
     copts = ABSL_TEST_COPTS + ABSL_EXCEPTIONS_FLAG,
+    linkopts = ABSL_EXCEPTIONS_FLAG_LINKOPTS,
     deps = [
         ":inlined_vector",
         ":test_instance_tracker",
@@ -103,6 +149,19 @@ cc_test(
         "//absl/memory",
         "//absl/strings",
         "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_test(
+    name = "inlined_vector_benchmark",
+    srcs = ["inlined_vector_benchmark.cc"],
+    copts = ABSL_TEST_COPTS,
+    tags = ["benchmark"],
+    deps = [
+        ":inlined_vector",
+        "//absl/base",
+        "//absl/strings",
+        "@com_github_google_benchmark//:benchmark_main",
     ],
 )
 

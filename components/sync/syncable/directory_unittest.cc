@@ -73,7 +73,7 @@ void SyncableDirectoryTest::TearDown() {
 }
 
 DirOpenResult SyncableDirectoryTest::ReopenDirectory() {
-  // Use a TestDirectoryBackingStore and sql::Connection so we can have test
+  // Use a TestDirectoryBackingStore and sql::Database so we can have test
   // data persist across Directory object lifetimes while getting the
   // performance benefits of not writing to disk.
   dir_ = std::make_unique<Directory>(
@@ -147,8 +147,7 @@ void SyncableDirectoryTest::CheckPurgeEntriesWithTypeInSucceeded(
     EXPECT_EQ(4U, all_set.size());
     if (before_reload)
       EXPECT_EQ(6U, dir_->kernel()->metahandles_to_purge.size());
-    for (MetahandleSet::iterator iter = all_set.begin(); iter != all_set.end();
-         ++iter) {
+    for (auto iter = all_set.begin(); iter != all_set.end(); ++iter) {
       Entry e(&trans, GET_BY_HANDLE, *iter);
       const ModelType local_type = e.GetModelType();
       const ModelType server_type = e.GetServerModelType();
@@ -161,16 +160,15 @@ void SyncableDirectoryTest::CheckPurgeEntriesWithTypeInSucceeded(
     }
   }
 
-  for (ModelTypeSet::Iterator it = types_to_purge.First(); it.Good();
-       it.Inc()) {
-    EXPECT_FALSE(dir_->InitialSyncEndedForType(it.Get()));
+  for (ModelType type : types_to_purge) {
+    EXPECT_FALSE(dir_->InitialSyncEndedForType(type));
     sync_pb::DataTypeProgressMarker progress;
-    dir_->GetDownloadProgress(it.Get(), &progress);
+    dir_->GetDownloadProgress(type, &progress);
     EXPECT_EQ("", progress.token());
 
     ReadTransaction trans(FROM_HERE, dir_.get());
     sync_pb::DataTypeContext context;
-    dir_->GetDataTypeContext(&trans, it.Get(), &context);
+    dir_->GetDataTypeContext(&trans, type, &context);
     EXPECT_TRUE(context.SerializeAsString().empty());
   }
   EXPECT_FALSE(types_to_purge.Has(BOOKMARKS));
@@ -1008,9 +1006,7 @@ TEST_F(SyncableDirectoryTest, TestCaseChangeRename) {
 TEST_F(SyncableDirectoryTest, GetModelType) {
   TestIdFactory id_factory;
   ModelTypeSet protocol_types = ProtocolTypes();
-  for (ModelTypeSet::Iterator iter = protocol_types.First(); iter.Good();
-       iter.Inc()) {
-    ModelType datatype = iter.Get();
+  for (ModelType datatype : protocol_types) {
     SCOPED_TRACE(testing::Message("Testing model type ") << datatype);
     switch (datatype) {
       case UNSPECIFIED:
@@ -1436,8 +1432,7 @@ TEST_F(SyncableDirectoryTest, General) {
     dir()->GetChildHandlesById(&rtrans, rtrans.root_id(), &child_handles);
     EXPECT_EQ(1u, child_handles.size());
 
-    for (Directory::Metahandles::iterator i = child_handles.begin();
-         i != child_handles.end(); ++i) {
+    for (auto i = child_handles.begin(); i != child_handles.end(); ++i) {
       EXPECT_EQ(*i, written_metahandle);
     }
   }

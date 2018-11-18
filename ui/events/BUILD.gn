@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 import("//build/config/features.gni")
+import("//build/config/jumbo.gni")
 import("//build/config/ui.gni")
 import("//testing/test.gni")
 import("//ui/base/ui_features.gni")
@@ -16,13 +17,17 @@ if (is_ios) {
   import("//ios/build/config.gni")
 }
 
-static_library("dom_keycode_converter") {
-  sources = [
+jumbo_static_library("dom_keycode_converter") {
+  public = [
     "keycodes/dom/dom_code.h",
+    "keycodes/dom/dom_codes.h",
     "keycodes/dom/dom_key.h",
+    "keycodes/dom/keycode_converter.h",
+  ]
+
+  sources = [
     "keycodes/dom/dom_key_data.inc",
     "keycodes/dom/keycode_converter.cc",
-    "keycodes/dom/keycode_converter.h",
     "keycodes/dom/keycode_converter_data.inc",
   ]
 
@@ -33,6 +38,47 @@ static_library("dom_keycode_converter") {
   if (!is_ios) {
     deps += [ "//ipc:param_traits" ]
   }
+}
+
+static_library("dom_keyboard_layout") {
+  public = [
+    "keycodes/dom/dom_keyboard_layout.h",
+    "keycodes/dom/dom_keyboard_layout_manager.h",
+    "keycodes/dom/dom_keyboard_layout_map.h",
+  ]
+
+  sources = [
+    "keycodes/dom/dom_keyboard_layout.cc",
+    "keycodes/dom/dom_keyboard_layout_manager.cc",
+    "keycodes/dom/dom_keyboard_layout_map_base.cc",
+    "keycodes/dom/dom_keyboard_layout_map_base.h",
+  ]
+
+  # Make sure we don't compile two versions of dom_keyboard_layout_map*
+  if (is_mac) {
+    sources += [ "keycodes/dom/dom_keyboard_layout_map_mac.mm" ]
+  } else if (is_win) {
+    sources += [ "keycodes/dom/dom_keyboard_layout_map_win.cc" ]
+  } else {
+    sources += [ "keycodes/dom/dom_keyboard_layout_map_ozone.cc" ]
+  }
+
+  deps = [
+    ":dom_keycode_converter",
+    ":events_base",
+    "//base",
+    "//ui/events/ozone:events_ozone_layout",
+  ]
+
+  if (!is_ios) {
+    deps += [ "//ipc:param_traits" ]
+  }
+
+  # Expose the internals of this target to other packages in this BUILD file
+  # so the unit tests can access the private header files.
+  # Note: Only 'events_unittests' needs access in this file, however it uses a
+  # template which generates different target names on different platforms.
+  friend = [ ":*" ]
 }
 
 source_set("event_constants") {
@@ -47,10 +93,8 @@ source_set("platform_event") {
   ]
 }
 
-component("events_base") {
+jumbo_component("events_base") {
   sources = [
-    "android/scroller.cc",
-    "android/scroller.h",
     "base_event_utils.cc",
     "base_event_utils.h",
     "event_switches.cc",
@@ -75,16 +119,18 @@ component("events_base") {
     "keycodes/keyboard_code_conversion_win.cc",
     "keycodes/keyboard_code_conversion_win.h",
     "keycodes/keyboard_codes.h",
+    "mobile_scroller.cc",
+    "mobile_scroller.h",
   ]
 
   defines = [ "EVENTS_BASE_IMPLEMENTATION" ]
 
   deps = [
+    ":dom_keycode_converter",
     "//base/third_party/dynamic_annotations",
   ]
 
   public_deps = [
-    ":dom_keycode_converter",
     ":event_constants",
     ":platform_event",
     "//base",
@@ -106,66 +152,73 @@ component("events_base") {
       "Carbon.framework",
     ]
   }
-
-  if (is_chromecast && !is_android) {
-    sources += [
-      "chromecast/scroller.cc",
-      "chromecast/scroller.h",
-    ]
-  }
 }
 
-component("events") {
-  sources = [
+jumbo_component("events") {
+  public = [
     "cocoa/cocoa_event_utils.h",
-    "cocoa/cocoa_event_utils.mm",
-    "cocoa/events_mac.mm",
-    "event.cc",
     "event.h",
-    "event_dispatcher.cc",
     "event_dispatcher.h",
-    "event_handler.cc",
     "event_handler.h",
-    "event_modifiers.cc",
     "event_modifiers.h",
-    "event_processor.cc",
     "event_processor.h",
     "event_rewriter.h",
     "event_sink.h",
-    "event_source.cc",
     "event_source.h",
-    "event_target.cc",
     "event_target.h",
     "event_target_iterator.h",
     "event_targeter.h",
-    "event_utils.cc",
     "event_utils.h",
     "events_export.h",
-    "events_stub.cc",
-    "gestures/gesture_recognizer_impl_mac.cc",
+    "gestures/gesture_recognizer.h",
+    "gestures/gesture_recognizer_impl_mac.h",
+    "gestures/gesture_recognizer_observer.h",
     "gestures/gesture_types.h",
     "keyboard_hook.h",
+    "null_event_targeter.h",
+    "scoped_target_handler.h",
+    "system_input_injector.h",
+    "win/events_win_utils.h",
+    "win/system_event_state_lookup.h",
+  ]
+
+  sources = [
+    "cocoa/cocoa_event_utils.mm",
+    "cocoa/events_mac.mm",
+    "event.cc",
+    "event_dispatcher.cc",
+    "event_handler.cc",
+    "event_modifiers.cc",
+    "event_processor.cc",
+    "event_rewriter.cc",
+    "event_source.cc",
+    "event_target.cc",
+    "event_utils.cc",
+    "events_stub.cc",
+    "gestures/gesture_recognizer.cc",
+    "gestures/gesture_recognizer_impl_mac.cc",
+    "gestures/gesture_recognizer_observer.cc",
+    "gestures/gesture_types.cc",
     "keyboard_hook_base.cc",
     "keyboard_hook_base.h",
     "keycodes/platform_key_map_win.cc",
     "keycodes/platform_key_map_win.h",
+    "mac/keyboard_hook_mac.mm",
     "null_event_targeter.cc",
-    "null_event_targeter.h",
     "scoped_target_handler.cc",
-    "scoped_target_handler.h",
     "system_input_injector.cc",
-    "system_input_injector.h",
     "win/events_win.cc",
+    "win/events_win_utils.cc",
     "win/keyboard_hook_win.cc",
+    "win/keyboard_hook_win.h",
     "win/system_event_state_lookup.cc",
-    "win/system_event_state_lookup.h",
-    "x/keyboard_hook_posix.cc",
   ]
 
   defines = [ "EVENTS_IMPLEMENTATION" ]
 
   public_deps = [
     ":events_base",
+    "//ui/display",
     "//ui/latency",
   ]
   deps = [
@@ -173,13 +226,21 @@ component("events") {
     ":gesture_detection",
     "//base/third_party/dynamic_annotations",
     "//skia",
-    "//ui/display",
     "//ui/gfx",
     "//ui/gfx/geometry",
   ]
 
+  # Expose the internals of this target to other packages in this BUILD file
+  # so the unit tests can access the private header files.
+  # Note: Only 'events_unittests' needs access in this file, however it uses a
+  # template which generates different target names on different platforms.
+  friend = [ ":*" ]
+
   if (use_x11) {
-    sources += [ "x/events_x.cc" ]
+    sources += [
+      "x/events_x.cc",
+      "x/keyboard_hook_x11.cc",
+    ]
     configs += [ "//build/config/linux:x11" ]
     deps += [
       "//ui/events/devices",
@@ -197,23 +258,29 @@ component("events") {
     sources += [ "events_default.cc" ]
   }
 
+  if (is_win && use_ozone) {
+    sources -= [ "win/events_win.cc" ]
+  }
+
   if (use_ozone) {
+    public += [ "ozone/events_ozone.h" ]
     sources += [
       "ozone/events_ozone.cc",
-      "ozone/events_ozone.h",
+      "ozone/keyboard_hook_ozone.cc",
     ]
     deps += [ "//ui/events/ozone:events_ozone_layout" ]
   }
 
   if (use_aura) {
+    public += [
+      "gestures/gesture_provider_aura.h",
+      "gestures/gesture_recognizer_impl.h",
+      "gestures/motion_event_aura.h",
+    ]
     sources += [
       "gestures/gesture_provider_aura.cc",
-      "gestures/gesture_provider_aura.h",
-      "gestures/gesture_recognizer.h",
       "gestures/gesture_recognizer_impl.cc",
-      "gestures/gesture_recognizer_impl.h",
       "gestures/motion_event_aura.cc",
-      "gestures/motion_event_aura.h",
     ]
   }
 
@@ -222,16 +289,23 @@ component("events") {
   }
 
   if (is_android) {
-    sources += [
-      "android/drag_event_android.cc",
+    public += [
       "android/drag_event_android.h",
-      "android/gesture_event_android.cc",
+      "android/event_handler_android.h",
       "android/gesture_event_android.h",
       "android/gesture_event_type.h",
-      "android/key_event_utils.cc",
+      "android/key_event_android.h",
       "android/key_event_utils.h",
-      "android/motion_event_android.cc",
       "android/motion_event_android.h",
+    ]
+    sources += [
+      "android/drag_event_android.cc",
+      "android/event_handler_android.cc",
+      "android/gesture_event_android.cc",
+      "android/key_event_android.cc",
+      "android/key_event_utils.cc",
+      "android/keyboard_hook_android.cc",
+      "android/motion_event_android.cc",
     ]
     deps += [
       ":keyevent_jni_headers",
@@ -242,9 +316,18 @@ component("events") {
   if (is_mac) {
     libs = [ "AppKit.framework" ]
   }
+
+  if (is_fuchsia) {
+    public += [
+      "fuchsia/input_event_dispatcher.h",
+      "fuchsia/input_event_dispatcher_delegate.h",
+    ]
+    sources += [ "fuchsia/input_event_dispatcher.cc" ]
+    public_deps += [ "//third_party/fuchsia-sdk/sdk:input" ]
+  }
 }
 
-component("gesture_detection") {
+jumbo_component("gesture_detection") {
   sources = [
     "gesture_detection/bitset_32.h",
     "gesture_detection/filtered_gesture_provider.cc",
@@ -299,6 +382,8 @@ component("gesture_detection") {
 
   if (is_android) {
     sources += [ "gesture_detection/gesture_configuration_android.cc" ]
+  } else if (is_chromecast) {
+    sources += [ "gesture_detection/gesture_configuration_cast.cc" ]
   } else if (use_aura) {
     sources += [ "gesture_detection/gesture_configuration_aura.cc" ]
   } else {
@@ -306,7 +391,7 @@ component("gesture_detection") {
   }
 }
 
-static_library("test_support") {
+jumbo_static_library("test_support") {
   sources = [
     "test/cocoa_test_event_utils.h",
     "test/cocoa_test_event_utils.mm",
@@ -335,6 +420,7 @@ static_library("test_support") {
   ]
 
   public_deps = [
+    ":dom_keycode_converter",
     ":events",
     ":events_base",
     ":gesture_detection",
@@ -379,13 +465,15 @@ static_library("test_support") {
 if (!is_ios) {
   test("events_unittests") {
     sources = [
-      "android/scroller_unittest.cc",
       "blink/blink_event_util_unittest.cc",
       "blink/fling_booster_unittest.cc",
       "blink/input_handler_proxy_unittest.cc",
       "blink/input_scroll_elasticity_controller_unittest.cc",
-      "blink/snap_fling_controller_unittest.cc",
-      "blink/snap_fling_curve_unittest.cc",
+      "blink/prediction/input_predictor_unittest_helpers.cc",
+      "blink/prediction/input_predictor_unittest_helpers.h",
+      "blink/prediction/kalman_predictor_unittest.cc",
+      "blink/prediction/least_squares_predictor_unittest.cc",
+      "blink/scroll_predictor_unittest.cc",
       "blink/web_input_event_traits_unittest.cc",
       "blink/web_input_event_unittest.cc",
       "cocoa/events_mac_unittest.mm",
@@ -408,16 +496,20 @@ if (!is_ios) {
       "gesture_detection/velocity_tracker_unittest.cc",
       "gestures/blink/web_gesture_curve_impl_unittest.cc",
       "gestures/fling_curve_unittest.cc",
+      "keycodes/dom/dom_keyboard_layout_map_unittest.cc",
       "keycodes/dom/keycode_converter_unittest.cc",
       "keycodes/keyboard_code_conversion_unittest.cc",
       "keycodes/platform_key_map_win_unittest.cc",
+      "mobile_scroller_unittest.cc",
       "mojo/struct_traits_unittest.cc",
       "platform/platform_event_source_unittest.cc",
       "scoped_target_handler_unittest.cc",
       "win/event_utils_win_unittest.cc",
+      "win/keyboard_hook_win_unittest.cc",
     ]
 
     deps = [
+      ":dom_keyboard_layout",
       ":dom_keycode_converter",
       ":events",
       ":events_base",
@@ -427,8 +519,9 @@ if (!is_ios) {
       "//base/test:test_support",
       "//cc",
       "//ipc:test_support",
-      "//mojo/edk/test:run_all_unittests",
+      "//mojo/core/test:run_all_unittests",
       "//mojo/public/cpp/bindings",
+      "//mojo/public/cpp/test_support:test_utils",
       "//skia",
       "//testing/gmock",
       "//testing/gtest",
@@ -439,8 +532,8 @@ if (!is_ios) {
       "//ui/events/devices",
       "//ui/events/devices/mojo:test_interfaces",
       "//ui/events/gestures/blink",
-      "//ui/events/mojo:test_interfaces",
       "//ui/events/platform",
+      "//ui/gfx/geometry/mojo:struct_traits",
       "//ui/gfx/ipc/geometry",
     ]
 
@@ -448,7 +541,7 @@ if (!is_ios) {
       sources += [ "android/motion_event_android_unittest.cc" ]
     } else {
       data_deps = [
-        "//third_party/mesa:osmesa",
+        "//third_party/mesa_headers",
       ]
     }
 
@@ -469,7 +562,7 @@ if (!is_ios) {
       sources += [ "devices/device_data_manager_unittest.cc" ]
     }
 
-    if (use_ozone) {
+    if (use_ozone && (is_linux || is_chromeos)) {
       sources += [
         "ozone/chromeos/cursor_controller_unittest.cc",
         "ozone/evdev/event_converter_evdev_impl_unittest.cc",
@@ -503,6 +596,7 @@ if (!is_ios) {
     if (use_aura) {
       sources += [
         "gestures/gesture_provider_aura_unittest.cc",
+        "gestures/gesture_recognizer_impl_unittest.cc",
         "gestures/motion_event_aura_unittest.cc",
       ]
     }
@@ -513,6 +607,10 @@ if (!is_ios) {
 
     if (is_chromecast && !is_android) {
       sources += [ "chromecast/scroller_unittest.cc" ]
+    }
+
+    if (is_fuchsia) {
+      sources += [ "fuchsia/input_event_dispatcher_unittest.cc" ]
     }
   }
 }

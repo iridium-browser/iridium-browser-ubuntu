@@ -6,15 +6,15 @@
 
 #include <utility>
 
-#include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/logging.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/update_client/update_client_errors.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 
 namespace extensions {
@@ -27,9 +27,11 @@ using Result = update_client::CrxInstaller::Result;
 ExtensionInstaller::ExtensionInstaller(
     std::string extension_id,
     const base::FilePath& extension_root,
+    bool install_immediately,
     ExtensionInstallerCallback extension_installer_callback)
     : extension_id_(extension_id),
       extension_root_(extension_root),
+      install_immediately_(install_immediately),
       extension_installer_callback_(std::move(extension_installer_callback)) {}
 
 void ExtensionInstaller::OnUpdateError(int error) {
@@ -39,15 +41,16 @@ void ExtensionInstaller::OnUpdateError(int error) {
 void ExtensionInstaller::Install(const base::FilePath& unpack_path,
                                  const std::string& public_key,
                                  UpdateClientCallback update_client_callback) {
-  auto ui_thread = content::BrowserThread::GetTaskRunnerForThread(
-      content::BrowserThread::UI);
+  auto ui_thread = base::CreateSingleThreadTaskRunnerWithTraits(
+      {content::BrowserThread::UI});
   DCHECK(ui_thread);
   DCHECK(!extension_installer_callback_.is_null());
   if (base::PathExists(unpack_path)) {
-    ui_thread->PostTask(FROM_HERE,
-                        base::BindOnce(std::move(extension_installer_callback_),
-                                       extension_id_, public_key, unpack_path,
-                                       std::move(update_client_callback)));
+    ui_thread->PostTask(
+        FROM_HERE,
+        base::BindOnce(std::move(extension_installer_callback_), extension_id_,
+                       public_key, unpack_path, install_immediately_,
+                       std::move(update_client_callback)));
     return;
   }
   ui_thread->PostTask(FROM_HERE,

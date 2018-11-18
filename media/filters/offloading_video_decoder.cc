@@ -7,7 +7,7 @@
 #include "base/bind_helpers.h"
 #include "base/sequenced_task_runner.h"
 #include "base/synchronization/atomic_flag.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "media/base/bind_to_current_loop.h"
 #include "media/base/decoder_buffer.h"
 #include "media/base/video_frame.h"
@@ -154,7 +154,7 @@ void OffloadingVideoDecoder::Decode(scoped_refptr<DecoderBuffer> buffer,
                                     const DecodeCB& decode_cb) {
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
   DCHECK(buffer);
-  DCHECK(!decode_cb.is_null());
+  DCHECK(decode_cb);
 
   DecodeCB bound_decode_cb = BindToCurrentLoop(decode_cb);
   if (!offload_task_runner_) {

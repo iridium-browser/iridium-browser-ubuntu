@@ -39,7 +39,7 @@ VertexAttrib::VertexAttrib()
       divisor_(0),
       integer_(GL_FALSE),
       is_client_side_array_(false),
-      list_(NULL) {}
+      list_(nullptr) {}
 
 VertexAttrib::VertexAttrib(const VertexAttrib& other) = default;
 
@@ -86,8 +86,8 @@ bool VertexAttrib::CanAccess(GLuint index) const {
 
 VertexAttribManager::VertexAttribManager(bool do_buffer_refcounting)
     : num_fixed_attribs_(0),
-      element_array_buffer_(NULL),
-      manager_(NULL),
+      element_array_buffer_(nullptr),
+      manager_(nullptr),
       deleted_(false),
       is_bound_(false),
       do_buffer_refcounting_(do_buffer_refcounting),
@@ -98,7 +98,7 @@ VertexAttribManager::VertexAttribManager(VertexArrayManager* manager,
                                          uint32_t num_vertex_attribs,
                                          bool do_buffer_refcounting)
     : num_fixed_attribs_(0),
-      element_array_buffer_(NULL),
+      element_array_buffer_(nullptr),
       manager_(manager),
       deleted_(false),
       is_bound_(false),
@@ -115,7 +115,7 @@ VertexAttribManager::~VertexAttribManager() {
         glDeleteVertexArraysOES(1, &service_id_);
     }
     manager_->StopTracking(this);
-    manager_ = NULL;
+    manager_ = nullptr;
   }
 }
 
@@ -143,10 +143,10 @@ void VertexAttribManager::Initialize(uint32_t max_vertex_attribs,
 
 void VertexAttribManager::SetElementArrayBuffer(Buffer* buffer) {
   if (do_buffer_refcounting_ && is_bound_ && element_array_buffer_)
-    element_array_buffer_->OnUnbind(GL_ELEMENT_ARRAY_BUFFER);
+    element_array_buffer_->OnUnbind(GL_ELEMENT_ARRAY_BUFFER, false);
   element_array_buffer_ = buffer;
   if (do_buffer_refcounting_ && is_bound_ && buffer)
-    buffer->OnBind(GL_ELEMENT_ARRAY_BUFFER);
+    buffer->OnBind(GL_ELEMENT_ARRAY_BUFFER, false);
 }
 
 bool VertexAttribManager::Enable(GLuint index, bool enable) {
@@ -173,7 +173,7 @@ void VertexAttribManager::Unbind(Buffer* buffer, Buffer* bound_array_buffer) {
   DCHECK(is_bound_);
   if (element_array_buffer_.get() == buffer) {
     if (do_buffer_refcounting_)
-      buffer->OnUnbind(GL_ELEMENT_ARRAY_BUFFER);
+      buffer->OnUnbind(GL_ELEMENT_ARRAY_BUFFER, false);
     if (manager_ && manager_->have_context_)
       glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
     element_array_buffer_ = nullptr;
@@ -189,7 +189,7 @@ void VertexAttribManager::Unbind(Buffer* buffer, Buffer* bound_array_buffer) {
   for (uint32_t vv = 0; vv < vertex_attribs_.size(); ++vv) {
     if (vertex_attribs_[vv].buffer_ == buffer) {
       if (do_buffer_refcounting_)
-        buffer->OnUnbind(GL_ARRAY_BUFFER);
+        buffer->OnUnbind(GL_ARRAY_BUFFER, true);
       vertex_attribs_[vv].buffer_ = nullptr;
       if (manager_ && manager_->have_context_) {
         if (!new_buffer) {
@@ -218,16 +218,16 @@ void VertexAttribManager::SetIsBound(bool is_bound) {
   if (do_buffer_refcounting_) {
     if (element_array_buffer_) {
       if (is_bound)
-        element_array_buffer_->OnBind(GL_ELEMENT_ARRAY_BUFFER);
+        element_array_buffer_->OnBind(GL_ELEMENT_ARRAY_BUFFER, false);
       else
-        element_array_buffer_->OnUnbind(GL_ELEMENT_ARRAY_BUFFER);
+        element_array_buffer_->OnUnbind(GL_ELEMENT_ARRAY_BUFFER, false);
     }
     for (const auto& va : vertex_attribs_) {
       if (va.buffer_) {
         if (is_bound) {
-          va.buffer_->OnBind(GL_ARRAY_BUFFER);
+          va.buffer_->OnBind(GL_ARRAY_BUFFER, true);
         } else {
-          va.buffer_->OnUnbind(GL_ARRAY_BUFFER);
+          va.buffer_->OnUnbind(GL_ARRAY_BUFFER, true);
         }
       }
     }

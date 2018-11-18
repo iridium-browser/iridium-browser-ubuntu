@@ -12,16 +12,16 @@
  * have been selected to require 32 bits of precision and full IEEE conformance
  */
 
-#include <float.h>
 #include "Test.h"
 
-#if SK_SUPPORT_GPU
 #include "GrContext.h"
 #include "GrContextPriv.h"
 #include "GrProxyProvider.h"
 #include "GrTextureProxy.h"
 #include "ProxyUtils.h"
 #include "SkHalf.h"
+
+#include <float.h>
 
 static const int DEV_W = 100, DEV_H = 100;
 
@@ -98,5 +98,3 @@ DEF_GPUTEST_FOR_RENDERING_CONTEXTS(HalfFloatRGBATextureTest, reporter, ctxInfo) 
                       kMaxIntegerRepresentableInHalfFloatingPoint, HALF_RGBA_CONTROL_ARRAY_SIZE,
                       GrColorType::kRGBA_F16);
 }
-
-#endif

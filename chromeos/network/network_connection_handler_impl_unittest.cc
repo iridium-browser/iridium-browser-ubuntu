@@ -14,9 +14,9 @@
 #include "base/macros.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/scoped_task_environment.h"
-#include "chromeos/cert_loader.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/network/managed_network_configuration_handler_impl.h"
+#include "chromeos/network/network_cert_loader.h"
 #include "chromeos/network/network_configuration_handler.h"
 #include "chromeos/network/network_connection_observer.h"
 #include "chromeos/network/network_profile_handler.h"
@@ -148,8 +148,8 @@ class NetworkConnectionHandlerImplTest : public NetworkStateTest {
         crypto::ScopedPK11Slot(PK11_ReferenceSlot(test_nssdb_.slot())),
         crypto::ScopedPK11Slot(PK11_ReferenceSlot(test_nssdb_.slot()))));
 
-    CertLoader::Initialize();
-    CertLoader::ForceHardwareBackedForTesting();
+    NetworkCertLoader::Initialize();
+    NetworkCertLoader::ForceHardwareBackedForTesting();
 
     DBusThreadManager::Initialize();
 
@@ -201,7 +201,7 @@ class NetworkConnectionHandlerImplTest : public NetworkStateTest {
     NetworkStateTest::TearDown();
 
     DBusThreadManager::Shutdown();
-    CertLoader::Shutdown();
+    NetworkCertLoader::Shutdown();
   }
 
  protected:
@@ -239,8 +239,8 @@ class NetworkConnectionHandlerImplTest : public NetworkStateTest {
     return result;
   }
 
-  void StartCertLoader() {
-    CertLoader::Get()->SetUserNSSDB(test_nsscertdb_.get());
+  void StartNetworkCertLoader() {
+    NetworkCertLoader::Get()->SetUserNSSDB(test_nsscertdb_.get());
     scoped_task_environment_.RunUntilIdle();
   }
 
@@ -355,19 +355,46 @@ TEST_F(NetworkConnectionHandlerImplTest,
 }
 
 TEST_F(NetworkConnectionHandlerImplTest,
-       NetworkConnectionHandlerConnectProhibited) {
+       NetworkConnectionHandlerConnectBlockedByManagedOnly) {
   EXPECT_FALSE(ConfigureService(kConfigConnectable).empty());
   base::DictionaryValue global_config;
   global_config.SetKey(
       ::onc::global_network_config::kAllowOnlyPolicyNetworksToConnect,
       base::Value(true));
   SetupPolicy("[]", global_config, false /* load as device policy */);
+  SetupPolicy("[]", base::DictionaryValue(), true /* load as user policy */);
   LoginToRegularUser();
   Connect(kWifi0);
-  EXPECT_EQ(NetworkConnectionHandler::kErrorUnmanagedNetwork,
+  EXPECT_EQ(NetworkConnectionHandler::kErrorBlockedByPolicy,
             GetResultAndReset());
 
   SetupPolicy(kPolicyWifi0, global_config, false /* load as device policy */);
+  Connect(kWifi0);
+  EXPECT_EQ(kSuccessResult, GetResultAndReset());
+}
+
+TEST_F(NetworkConnectionHandlerImplTest,
+       NetworkConnectionHandlerConnectBlockedByBlacklist) {
+  EXPECT_FALSE(ConfigureService(kConfigConnectable).empty());
+
+  // Set a device policy which blocks wifi0.
+  base::Value::ListStorage blacklist;
+  blacklist.push_back(base::Value("7769666930"));  // hex(wifi0) = 7769666930
+  base::DictionaryValue global_config;
+  global_config.SetKey(::onc::global_network_config::kBlacklistedHexSSIDs,
+                       base::Value(blacklist));
+  SetupPolicy("[]", global_config, false /* load as device policy */);
+  SetupPolicy("[]", base::DictionaryValue(), true /* load as user policy */);
+
+  LoginToRegularUser();
+
+  Connect(kWifi0);
+  EXPECT_EQ(NetworkConnectionHandler::kErrorBlockedByPolicy,
+            GetResultAndReset());
+
+  // Set a user policy, which configures wifi0 (==whitelisted).
+  SetupPolicy(kPolicyWifi0, base::DictionaryValue(),
+              true /* load as user policy */);
   Connect(kWifi0);
   EXPECT_EQ(kSuccessResult, GetResultAndReset());
 }
@@ -430,7 +457,7 @@ const char* kPolicyWithCertPatternTemplate =
 
 // Handle certificates.
 TEST_F(NetworkConnectionHandlerImplTest, ConnectCertificateMissing) {
-  StartCertLoader();
+  StartNetworkCertLoader();
   SetupPolicy(base::StringPrintf(kPolicyWithCertPatternTemplate, "unknown"),
               base::DictionaryValue(),  // no global config
               true);                    // load as user policy
@@ -441,7 +468,7 @@ TEST_F(NetworkConnectionHandlerImplTest, ConnectCertificateMissing) {
 }
 
 TEST_F(NetworkConnectionHandlerImplTest, ConnectWithCertificateSuccess) {
-  StartCertLoader();
+  StartNetworkCertLoader();
   scoped_refptr<net::X509Certificate> cert = ImportTestClientCert();
   ASSERT_TRUE(cert.get());
 
@@ -472,9 +499,9 @@ TEST_F(NetworkConnectionHandlerImplTest,
   // loaded.
   EXPECT_EQ("", GetResultAndReset());
 
-  StartCertLoader();
+  StartNetworkCertLoader();
 
-  // |StartCertLoader| should have triggered certificate loading.
+  // |StartNetworkCertLoader| should have triggered certificate loading.
   // When the certificates got loaded, the connection request should have
   // proceeded and eventually succeeded.
   EXPECT_EQ(kSuccessResult, GetResultAndReset());

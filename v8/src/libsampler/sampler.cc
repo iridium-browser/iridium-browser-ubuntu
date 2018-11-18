@@ -21,19 +21,11 @@
 #include <mach/mach.h>
 // OpenBSD doesn't have <ucontext.h>. ucontext_t lives in <signal.h>
 // and is a typedef for struct sigcontext. There is no uc_mcontext.
-#elif(!V8_OS_ANDROID || defined(__BIONIC_HAVE_UCONTEXT_T)) && !V8_OS_OPENBSD
+#elif !V8_OS_OPENBSD
 #include <ucontext.h>
 #endif
 
 #include <unistd.h>
-
-// GLibc on ARM defines mcontext_t has a typedef for 'struct sigcontext'.
-// Old versions of the C library <signal.h> didn't define the type.
-#if V8_OS_ANDROID && !defined(__BIONIC_HAVE_UCONTEXT_T) && \
-    (defined(__arm__) || defined(__aarch64__)) && \
-    !defined(__BIONIC_HAVE_STRUCT_SIGCONTEXT)
-#include <asm/sigcontext.h>  // NOLINT
-#endif
 
 #elif V8_OS_WIN || V8_OS_CYGWIN
 
@@ -423,7 +415,7 @@ class SignalHandler {
 
   static void Restore() {
     if (signal_handler_installed_) {
-      sigaction(SIGPROF, &old_signal_handler_, 0);
+      sigaction(SIGPROF, &old_signal_handler_, nullptr);
       signal_handler_installed_ = false;
     }
   }
@@ -714,7 +706,8 @@ void Sampler::DoSample() {
   zx_handle_t profiled_thread = platform_data()->profiled_thread();
   if (profiled_thread == ZX_HANDLE_INVALID) return;
 
-  if (zx_task_suspend(profiled_thread) != ZX_OK) return;
+  zx_handle_t suspend_token = ZX_HANDLE_INVALID;
+  if (zx_task_suspend_token(profiled_thread, &suspend_token) != ZX_OK) return;
 
   // Wait for the target thread to become suspended, or to exit.
   // TODO(wez): There is currently no suspension count for threads, so there
@@ -726,7 +719,7 @@ void Sampler::DoSample() {
       profiled_thread, ZX_THREAD_SUSPENDED | ZX_THREAD_TERMINATED,
       zx_deadline_after(ZX_MSEC(100)), &signals);
   if (suspended != ZX_OK || (signals & ZX_THREAD_SUSPENDED) == 0) {
-    zx_task_resume(profiled_thread, 0);
+    zx_handle_close(suspend_token);
     return;
   }
 
@@ -747,7 +740,7 @@ void Sampler::DoSample() {
     SampleStack(state);
   }
 
-  zx_task_resume(profiled_thread, 0);
+  zx_handle_close(suspend_token);
 }
 
 // TODO(wez): Remove this once the Fuchsia SDK has rolled.

@@ -70,7 +70,7 @@ class CONTENT_EXPORT CacheStorageDispatcherHost
   void Has(const base::string16& cache_name,
            blink::mojom::CacheStorage::HasCallback callback) override;
   void Match(const content::ServiceWorkerFetchRequest& request,
-             const content::CacheStorageCacheQueryParams& match_params,
+             blink::mojom::QueryParamsPtr match_params,
              blink::mojom::CacheStorage::MatchCallback callback) override;
   void Open(const base::string16& cache_name,
             blink::mojom::CacheStorage::OpenCallback callback) override;
@@ -83,7 +83,7 @@ class CONTENT_EXPORT CacheStorageDispatcherHost
                      blink::mojom::CacheStorageError error);
   void OnMatchCallback(blink::mojom::CacheStorage::MatchCallback callback,
                        blink::mojom::CacheStorageError error,
-                       std::unique_ptr<ServiceWorkerResponse> response);
+                       blink::mojom::FetchAPIResponsePtr response);
   void OnOpenCallback(url::Origin origin,
                       blink::mojom::CacheStorage::OpenCallback callback,
                       CacheStorageCacheHandle cache_handle,

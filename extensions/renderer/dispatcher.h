@@ -100,6 +100,12 @@ class Dispatcher : public content::RenderThreadObserver,
                                 const v8::Local<v8::Context>& context,
                                 int world_id);
 
+  // Runs on worker thread and should not use any member variables.
+  static void DidStartServiceWorkerContextOnWorkerThread(
+      int64_t service_worker_version_id,
+      const GURL& service_worker_scope,
+      const GURL& script_url);
+
   // Runs on a different thread and should not use any member variables.
   static void WillDestroyServiceWorkerContextOnWorkerThread(
       v8::Local<v8::Context> v8_context,
@@ -158,7 +164,6 @@ class Dispatcher : public content::RenderThreadObserver,
 
   // RenderThreadObserver implementation:
   bool OnControlMessageReceived(const IPC::Message& message) override;
-  void IdleNotification() override;
 
   void OnActivateExtension(const std::string& extension_id);
   void OnCancelSuspend(const std::string& extension_id);
@@ -213,11 +218,9 @@ class Dispatcher : public content::RenderThreadObserver,
   // Sets up the host permissions for |extension|.
   void InitOriginPermissions(const Extension* extension);
 
-  // Updates the host permissions for the extension url to include only those in
-  // |new_patterns|, and remove from |old_patterns| that are no longer allowed.
-  void UpdateOriginPermissions(const GURL& extension_url,
-                               const URLPatternSet& old_patterns,
-                               const URLPatternSet& new_patterns);
+  // Updates the host permissions for the extension url to include only those
+  // the extension currently has, removing any old entries.
+  void UpdateOriginPermissions(const Extension& extension);
 
   // Enable custom element whitelist in Apps.
   void EnableCustomElementWhiteList();
@@ -256,9 +259,6 @@ class Dispatcher : public content::RenderThreadObserver,
   // The delegate for this dispatcher to handle embedder-specific logic.
   std::unique_ptr<DispatcherDelegate> delegate_;
 
-  // True if the IdleNotification timer should be set.
-  bool set_idle_notifications_;
-
   // The IDs of extensions that failed to load, mapped to the error message
   // generated on failure.
   std::map<std::string, std::string> extension_load_errors_;
@@ -272,10 +272,6 @@ class Dispatcher : public content::RenderThreadObserver,
   std::unique_ptr<UserScriptSetManager> user_script_set_manager_;
 
   std::unique_ptr<ScriptInjectionManager> script_injection_manager_;
-
-  // Same as above, but on a longer timer and will run even if the process is
-  // not idle, to ensure that IdleHandle gets called eventually.
-  std::unique_ptr<base::RepeatingTimer> forced_idle_timer_;
 
   // The extensions and apps that are active in this process.
   ExtensionIdSet active_extension_ids_;

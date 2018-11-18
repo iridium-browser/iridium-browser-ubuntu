@@ -7,6 +7,7 @@
 
 #include <cstddef>
 
+#include "base/containers/span.h"
 #include "base/macros.h"
 #include "base/unguessable_token.h"
 
@@ -14,7 +15,6 @@ namespace base {
 
 namespace subtle {
 class PlatformSharedMemoryRegion;
-class PlatformSharedMemoryRegionTest;
 }  // namespace subtle
 
 // Base class for scoped handles to a shared memory mapping created from a
@@ -70,7 +70,6 @@ class BASE_EXPORT SharedMemoryMapping {
   void* raw_memory_ptr() const { return memory_; }
 
  private:
-  friend class subtle::PlatformSharedMemoryRegionTest;
   friend class SharedMemoryTracker;
 
   void Unmap();
@@ -99,6 +98,43 @@ class BASE_EXPORT ReadOnlySharedMemoryMapping : public SharedMemoryMapping {
   // page-aligned. This is nullptr for invalid instances.
   const void* memory() const { return raw_memory_ptr(); }
 
+  // Returns a pointer to a page-aligned const T if the mapping is valid and
+  // large enough to contain a T, or nullptr otherwise.
+  template <typename T>
+  const T* GetMemoryAs() const {
+    if (!IsValid())
+      return nullptr;
+    if (sizeof(T) > size())
+      return nullptr;
+    return static_cast<const T*>(raw_memory_ptr());
+  }
+
+  // Returns a span of const T. The number of elements is autodeduced from the
+  // size of the shared memory mapping. The number of elements may be
+  // autodeduced as zero, i.e. the mapping is invalid or the size of the mapping
+  // isn't large enough to contain even one T: in that case, an empty span
+  // will be returned. The first element, if any, is guaranteed to be
+  // page-aligned.
+  template <typename T>
+  span<const T> GetMemoryAsSpan() const {
+    if (!IsValid())
+      return span<const T>();
+    size_t count = size() / sizeof(T);
+    return GetMemoryAsSpan<T>(count);
+  }
+
+  // Returns a span of const T with |count| elements if the mapping is valid and
+  // large enough to contain |count| elements, or an empty span otherwise. The
+  // first element, if any, is guaranteed to be page-aligned.
+  template <typename T>
+  span<const T> GetMemoryAsSpan(size_t count) const {
+    if (!IsValid())
+      return span<const T>();
+    if (size() / sizeof(T) < count)
+      return span<const T>();
+    return span<const T>(static_cast<const T*>(raw_memory_ptr()), count);
+  }
+
  private:
   friend class ReadOnlySharedMemoryRegion;
   ReadOnlySharedMemoryMapping(void* address,
@@ -125,8 +161,47 @@ class BASE_EXPORT WritableSharedMemoryMapping : public SharedMemoryMapping {
   // page-aligned. This is nullptr for invalid instances.
   void* memory() const { return raw_memory_ptr(); }
 
+  // Returns a pointer to a page-aligned T if the mapping is valid and large
+  // enough to contain a T, or nullptr otherwise.
+  template <typename T>
+  T* GetMemoryAs() const {
+    if (!IsValid())
+      return nullptr;
+    if (sizeof(T) > size())
+      return nullptr;
+    return static_cast<T*>(raw_memory_ptr());
+  }
+
+  // Returns a span of T. The number of elements is autodeduced from the size of
+  // the shared memory mapping. The number of elements may be autodeduced as
+  // zero, i.e. the mapping is invalid or the size of the mapping isn't large
+  // enough to contain even one T: in that case, an empty span will be returned.
+  // The first element, if any, is guaranteed to be page-aligned.
+  template <typename T>
+  span<T> GetMemoryAsSpan() const {
+    if (!IsValid())
+      return span<T>();
+    size_t count = size() / sizeof(T);
+    return GetMemoryAsSpan<T>(count);
+  }
+
+  // Returns a span of T with |count| elements if the mapping is valid and large
+  // enough to contain |count| elements, or an empty span otherwise. The first
+  // element, if any, is guaranteed to be page-aligned.
+  template <typename T>
+  span<T> GetMemoryAsSpan(size_t count) const {
+    if (!IsValid())
+      return span<T>();
+    if (size() / sizeof(T) < count)
+      return span<T>();
+    return span<T>(static_cast<T*>(raw_memory_ptr()), count);
+  }
+
  private:
-  friend class subtle::PlatformSharedMemoryRegion;
+  friend WritableSharedMemoryMapping MapAtForTesting(
+      subtle::PlatformSharedMemoryRegion* region,
+      off_t offset,
+      size_t size);
   friend class ReadOnlySharedMemoryRegion;
   friend class WritableSharedMemoryRegion;
   friend class UnsafeSharedMemoryRegion;

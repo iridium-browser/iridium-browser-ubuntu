@@ -6,6 +6,7 @@
 
 #import <UIKit/UIKit.h>
 
+#include "ios/chrome/browser/ui/collection_view/cells/collection_view_cell_constants.h"
 #import "ios/chrome/browser/ui/colors/MDCPalette+CrAdditions.h"
 #import "ios/third_party/material_components_ios/src/components/Palettes/src/MaterialPalettes.h"
 #import "ios/third_party/material_components_ios/src/components/Typography/src/MaterialTypography.h"
@@ -54,7 +55,7 @@ const CGFloat kHorizontalPadding = 16;
 
     _textLabel = [[UILabel alloc] init];
     _textLabel.translatesAutoresizingMaskIntoConstraints = NO;
-    _textLabel.font = [[MDCTypography fontLoader] mediumFontOfSize:14];
+    _textLabel.font = [UIFont systemFontOfSize:kUIKitMainFontSize];
     _textLabel.textColor = [[MDCPalette cr_redPalette] tint500];
     [contentView addSubview:_textLabel];
 

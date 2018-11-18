@@ -1,11 +1,11 @@
-//===-- sanitizer_coverage_fuchsia.cc ------------------------------------===//
+//===-- sanitizer_coverage_fuchsia.cc -------------------------------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
 // This file is distributed under the University of Illinois Open Source
 // License. See LICENSE.TXT for details.
 //
-//===---------------------------------------------------------------------===//
+//===----------------------------------------------------------------------===//
 //
 // Sanitizer Coverage Controller for Trace PC Guard, Fuchsia-specific version.
 //
@@ -147,8 +147,8 @@ class TracePcGuardController final {
       // any multi-thread synchronization issues with that.
       uintptr_t mapping;
       status =
-          _zx_vmar_map(_zx_vmar_root_self(), 0, vmo_, 0, MappingSize,
-                       ZX_VM_FLAG_PERM_READ | ZX_VM_FLAG_PERM_WRITE, &mapping);
+          _zx_vmar_map(_zx_vmar_root_self(), ZX_VM_PERM_READ | ZX_VM_PERM_WRITE,
+                       0, vmo_, 0, MappingSize, &mapping);
       CHECK_EQ(status, ZX_OK);
 
       // Hereafter other threads are free to start storing into

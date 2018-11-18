@@ -32,6 +32,8 @@ std::unique_ptr<Widget> CreateDragWidget(aura::Window* root_window) {
   params.opacity = Widget::InitParams::TRANSLUCENT_WINDOW;
   params.parent =
       root_window->GetChildById(kShellWindowId_DragImageAndTooltipContainer);
+  if (!params.parent)
+    params.context = root_window;  // Happens in tests.
   drag_widget->Init(params);
   drag_widget->SetOpacity(1.f);
   return drag_widget;
@@ -133,7 +135,7 @@ void DragImageView::OnPaint(gfx::Canvas* canvas) {
     if (image_rep.is_null())
       return;
     SkBitmap scaled = skia::ImageOperations::Resize(
-        image_rep.sk_bitmap(), skia::ImageOperations::RESIZE_LANCZOS3,
+        image_rep.GetBitmap(), skia::ImageOperations::RESIZE_LANCZOS3,
         drag_image_size_pixels.width(), drag_image_size_pixels.height());
     gfx::ImageSkia image_skia(gfx::ImageSkiaRep(scaled, device_scale));
     canvas->DrawImageInt(image_skia, 0, 0);

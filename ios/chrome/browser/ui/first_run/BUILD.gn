@@ -48,6 +48,7 @@ source_set("first_run") {
     "//ios/third_party/material_components_ios",
     "//ios/third_party/material_roboto_font_loader_ios",
     "//ios/web",
+    "//services/identity/public/cpp:cpp",
     "//ui/base",
     "//ui/gfx",
     "//url",
@@ -104,7 +105,6 @@ source_set("eg_tests") {
     "//ios/chrome/test/app:test_support",
     "//ios/chrome/test/earl_grey:test_support",
     "//ios/public/provider/chrome/browser/signin:test_support",
-    "//ios/testing:ios_test_support",
     "//ios/third_party/earl_grey:earl_grey+link",
     "//ui/base",
   ]

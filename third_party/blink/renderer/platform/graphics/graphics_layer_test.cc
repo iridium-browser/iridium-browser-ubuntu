@@ -28,30 +28,15 @@
 #include <memory>
 #include <utility>
 
+#include "cc/layers/picture_layer.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/public/platform/platform.h"
-#include "third_party/blink/public/platform/web_compositor_support.h"
-#include "third_party/blink/public/platform/web_layer.h"
-#include "third_party/blink/public/platform/web_layer_tree_view.h"
-#include "third_party/blink/public/platform/web_thread.h"
-#include "third_party/blink/renderer/platform/animation/compositor_animation.h"
-#include "third_party/blink/renderer/platform/animation/compositor_animation_client.h"
-#include "third_party/blink/renderer/platform/animation/compositor_animation_host.h"
-#include "third_party/blink/renderer/platform/animation/compositor_animation_timeline.h"
-#include "third_party/blink/renderer/platform/animation/compositor_float_animation_curve.h"
-#include "third_party/blink/renderer/platform/animation/compositor_keyframe_model.h"
-#include "third_party/blink/renderer/platform/animation/compositor_target_property.h"
-#include "third_party/blink/renderer/platform/graphics/compositor_element_id.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_controller_test.h"
-#include "third_party/blink/renderer/platform/graphics/paint/property_tree_state.h"
 #include "third_party/blink/renderer/platform/graphics/paint/scoped_paint_chunk_properties.h"
-#include "third_party/blink/renderer/platform/graphics/test/fake_scrollable_area.h"
-#include "third_party/blink/renderer/platform/scheduler/child/web_scheduler.h"
-#include "third_party/blink/renderer/platform/scroll/scrollable_area.h"
 #include "third_party/blink/renderer/platform/testing/fake_graphics_layer.h"
 #include "third_party/blink/renderer/platform/testing/fake_graphics_layer_client.h"
+#include "third_party/blink/renderer/platform/testing/paint_property_test_helpers.h"
 #include "third_party/blink/renderer/platform/testing/paint_test_configurations.h"
-#include "third_party/blink/renderer/platform/testing/web_layer_tree_view_impl_for_testing.h"
+#include "third_party/blink/renderer/platform/testing/viewport_layers_setup.h"
 #include "third_party/blink/renderer/platform/transforms/matrix_3d_transform_operation.h"
 #include "third_party/blink/renderer/platform/transforms/rotate_transform_operation.h"
 #include "third_party/blink/renderer/platform/transforms/translate_transform_operation.h"
@@ -60,55 +45,25 @@ namespace blink {
 
 class GraphicsLayerTest : public testing::Test, public PaintTestConfigurations {
  public:
-  GraphicsLayerTest() {
-    clip_layer_ = std::make_unique<FakeGraphicsLayer>(client_);
-    scroll_elasticity_layer_ = std::make_unique<FakeGraphicsLayer>(client_);
-    page_scale_layer_ = std::make_unique<FakeGraphicsLayer>(client_);
-    graphics_layer_ = std::make_unique<FakeGraphicsLayer>(client_);
-    graphics_layer_->SetDrawsContent(true);
-    clip_layer_->AddChild(scroll_elasticity_layer_.get());
-    scroll_elasticity_layer_->AddChild(page_scale_layer_.get());
-    page_scale_layer_->AddChild(graphics_layer_.get());
-    graphics_layer_->PlatformLayer()->SetScrollable(
-        clip_layer_->PlatformLayer()->Bounds());
-    platform_layer_ = graphics_layer_->PlatformLayer();
-    layer_tree_view_ = std::make_unique<WebLayerTreeViewImplForTesting>();
-    DCHECK(layer_tree_view_);
-    layer_tree_view_->SetRootLayer(*clip_layer_->PlatformLayer());
-    WebLayerTreeView::ViewportLayers viewport_layers;
-    viewport_layers.overscroll_elasticity =
-        scroll_elasticity_layer_->PlatformLayer();
-    viewport_layers.page_scale = page_scale_layer_->PlatformLayer();
-    viewport_layers.inner_viewport_container = clip_layer_->PlatformLayer();
-    viewport_layers.inner_viewport_scroll = graphics_layer_->PlatformLayer();
-    layer_tree_view_->RegisterViewportLayers(viewport_layers);
-    layer_tree_view_->SetViewportSize(WebSize(1, 1));
-
-    if (RuntimeEnabledFeatures::SlimmingPaintV175Enabled()) {
-      graphics_layer_->SetLayerState(
-          PropertyTreeState(PropertyTreeState::Root()), IntPoint());
-    }
-  }
-
-  ~GraphicsLayerTest() override {
-    graphics_layer_.reset();
-    layer_tree_view_.reset();
-  }
-
-  WebLayerTreeView* LayerTreeView() { return layer_tree_view_.get(); }
+  GraphicsLayerTest() = default;
+  ~GraphicsLayerTest() = default;
 
  protected:
   bool PaintWithoutCommit(GraphicsLayer& layer, const IntRect* interest_rect) {
     return layer.PaintWithoutCommit(interest_rect);
   }
 
-  const CompositedLayerRasterInvalidator* GetInternalRasterInvalidator(
+  void CommitAndFinishCycle(GraphicsLayer& layer) {
+    layer.GetPaintController().CommitNewDisplayItems();
+    layer.GetPaintController().FinishCycle();
+  }
+
+  const RasterInvalidator* GetInternalRasterInvalidator(
       const GraphicsLayer& layer) {
     return layer.raster_invalidator_.get();
   }
 
-  CompositedLayerRasterInvalidator& EnsureRasterInvalidator(
-      GraphicsLayer& layer) {
+  RasterInvalidator& EnsureRasterInvalidator(GraphicsLayer& layer) {
     return layer.EnsureRasterInvalidator();
   }
 
@@ -117,162 +72,87 @@ class GraphicsLayerTest : public testing::Test, public PaintTestConfigurations {
     return layer.paint_controller_.get();
   }
 
-  WebLayer* platform_layer_;
-  std::unique_ptr<FakeGraphicsLayer> graphics_layer_;
-  std::unique_ptr<FakeGraphicsLayer> page_scale_layer_;
-  std::unique_ptr<FakeGraphicsLayer> scroll_elasticity_layer_;
-  std::unique_ptr<FakeGraphicsLayer> clip_layer_;
-  FakeGraphicsLayerClient client_;
-
- private:
-  std::unique_ptr<WebLayerTreeViewImplForTesting> layer_tree_view_;
+  ViewportLayersSetup layers_;
 };
 
 INSTANTIATE_TEST_CASE_P(All,
                         GraphicsLayerTest,
-                        testing::Values(0, kSlimmingPaintV175));
-
-class AnimationForTesting : public CompositorAnimationClient {
- public:
-  AnimationForTesting() {
-    compositor_animation_ = CompositorAnimation::Create();
-  }
-
-  CompositorAnimation* GetCompositorAnimation() const override {
-    return compositor_animation_.get();
-  }
-
-  std::unique_ptr<CompositorAnimation> compositor_animation_;
-};
-
-TEST_P(GraphicsLayerTest, updateLayerShouldFlattenTransformWithAnimations) {
-  ASSERT_FALSE(platform_layer_->HasTickingAnimationForTesting());
-
-  std::unique_ptr<CompositorFloatAnimationCurve> curve =
-      CompositorFloatAnimationCurve::Create();
-  curve->AddKeyframe(
-      CompositorFloatKeyframe(0.0, 0.0,
-                              *CubicBezierTimingFunction::Preset(
-                                  CubicBezierTimingFunction::EaseType::EASE)));
-  std::unique_ptr<CompositorKeyframeModel> float_keyframe_model(
-      CompositorKeyframeModel::Create(*curve, CompositorTargetProperty::OPACITY,
-                                      0, 0));
-  int keyframe_model_id = float_keyframe_model->Id();
-
-  std::unique_ptr<CompositorAnimationTimeline> compositor_timeline =
-      CompositorAnimationTimeline::Create();
-  AnimationForTesting animation;
-
-  CompositorAnimationHost host(LayerTreeView()->CompositorAnimationHost());
-
-  host.AddTimeline(*compositor_timeline);
-  compositor_timeline->AnimationAttached(animation);
-
-  platform_layer_->SetElementId(CompositorElementId(platform_layer_->Id()));
-
-  animation.GetCompositorAnimation()->AttachElement(
-      platform_layer_->GetElementId());
-  ASSERT_TRUE(animation.GetCompositorAnimation()->IsElementAttached());
-
-  animation.GetCompositorAnimation()->AddKeyframeModel(
-      std::move(float_keyframe_model));
-
-  ASSERT_TRUE(platform_layer_->HasTickingAnimationForTesting());
-
-  graphics_layer_->SetShouldFlattenTransform(false);
-
-  platform_layer_ = graphics_layer_->PlatformLayer();
-  ASSERT_TRUE(platform_layer_);
-
-  ASSERT_TRUE(platform_layer_->HasTickingAnimationForTesting());
-  animation.GetCompositorAnimation()->RemoveKeyframeModel(keyframe_model_id);
-  ASSERT_FALSE(platform_layer_->HasTickingAnimationForTesting());
-
-  graphics_layer_->SetShouldFlattenTransform(true);
-
-  platform_layer_ = graphics_layer_->PlatformLayer();
-  ASSERT_TRUE(platform_layer_);
-
-  ASSERT_FALSE(platform_layer_->HasTickingAnimationForTesting());
-
-  animation.GetCompositorAnimation()->DetachElement();
-  ASSERT_FALSE(animation.GetCompositorAnimation()->IsElementAttached());
-
-  compositor_timeline->AnimationDestroyed(animation);
-  host.RemoveTimeline(*compositor_timeline.get());
-}
+                        testing::Values(0,
+                                        kBlinkGenPropertyTrees));
 
 TEST_P(GraphicsLayerTest, Paint) {
   IntRect interest_rect(1, 2, 3, 4);
-  EXPECT_TRUE(PaintWithoutCommit(*graphics_layer_, &interest_rect));
-  graphics_layer_->GetPaintController().CommitNewDisplayItems();
+  EXPECT_TRUE(PaintWithoutCommit(layers_.graphics_layer(), &interest_rect));
+  CommitAndFinishCycle(layers_.graphics_layer());
 
-  client_.SetNeedsRepaint(true);
-  EXPECT_TRUE(PaintWithoutCommit(*graphics_layer_, &interest_rect));
-  graphics_layer_->GetPaintController().CommitNewDisplayItems();
+  layers_.graphics_layer_client().SetNeedsRepaint(true);
+  EXPECT_TRUE(PaintWithoutCommit(layers_.graphics_layer(), &interest_rect));
+  CommitAndFinishCycle(layers_.graphics_layer());
 
-  client_.SetNeedsRepaint(false);
-  EXPECT_FALSE(PaintWithoutCommit(*graphics_layer_, &interest_rect));
+  layers_.graphics_layer_client().SetNeedsRepaint(false);
+  EXPECT_FALSE(PaintWithoutCommit(layers_.graphics_layer(), &interest_rect));
 
   interest_rect.Move(IntSize(10, 20));
-  EXPECT_TRUE(PaintWithoutCommit(*graphics_layer_, &interest_rect));
-  graphics_layer_->GetPaintController().CommitNewDisplayItems();
-  EXPECT_FALSE(PaintWithoutCommit(*graphics_layer_, &interest_rect));
+  EXPECT_TRUE(PaintWithoutCommit(layers_.graphics_layer(), &interest_rect));
+  CommitAndFinishCycle(layers_.graphics_layer());
+  EXPECT_FALSE(PaintWithoutCommit(layers_.graphics_layer(), &interest_rect));
 
-  graphics_layer_->SetNeedsDisplay();
-  EXPECT_TRUE(PaintWithoutCommit(*graphics_layer_, &interest_rect));
-  graphics_layer_->GetPaintController().CommitNewDisplayItems();
-  EXPECT_FALSE(PaintWithoutCommit(*graphics_layer_, &interest_rect));
+  layers_.graphics_layer().SetNeedsDisplay();
+  EXPECT_TRUE(PaintWithoutCommit(layers_.graphics_layer(), &interest_rect));
+  CommitAndFinishCycle(layers_.graphics_layer());
+  EXPECT_FALSE(PaintWithoutCommit(layers_.graphics_layer(), &interest_rect));
 }
 
 TEST_P(GraphicsLayerTest, PaintRecursively) {
-  if (!RuntimeEnabledFeatures::SlimmingPaintV175Enabled())
-    return;
-
   IntRect interest_rect(1, 2, 3, 4);
-  auto transform_root = TransformPaintPropertyNode::Root();
-  auto transform1 = TransformPaintPropertyNode::Create(
-      transform_root, TransformationMatrix().Translate(10, 20), FloatPoint3D());
-  auto transform2 = TransformPaintPropertyNode::Create(
-      transform1, TransformationMatrix().Scale(2), FloatPoint3D());
+  const auto& transform_root = TransformPaintPropertyNode::Root();
+  auto transform1 =
+      CreateTransform(transform_root, TransformationMatrix().Translate(10, 20));
+  auto transform2 =
+      CreateTransform(*transform1, TransformationMatrix().Scale(2));
 
-  client_.SetPainter([&](const GraphicsLayer* layer, GraphicsContext& context,
-                         GraphicsLayerPaintingPhase, const IntRect&) {
+  layers_.graphics_layer_client().SetPainter([&](const GraphicsLayer* layer,
+                                                 GraphicsContext& context,
+                                                 GraphicsLayerPaintingPhase,
+                                                 const IntRect&) {
     {
-      ScopedPaintChunkProperties properties(
-          context.GetPaintController(), transform1, *layer, kBackgroundType);
+      ScopedPaintChunkProperties properties(context.GetPaintController(),
+                                            transform1.get(), *layer,
+                                            kBackgroundType);
       PaintControllerTestBase::DrawRect(context, *layer, kBackgroundType,
                                         interest_rect);
     }
     {
-      ScopedPaintChunkProperties properties(
-          context.GetPaintController(), transform2, *layer, kForegroundType);
+      ScopedPaintChunkProperties properties(context.GetPaintController(),
+                                            transform2.get(), *layer,
+                                            kForegroundType);
       PaintControllerTestBase::DrawRect(context, *layer, kForegroundType,
                                         interest_rect);
     }
   });
 
-  transform1->Update(transform_root, TransformationMatrix().Translate(20, 30),
-                     FloatPoint3D());
-  EXPECT_TRUE(transform1->Changed(*transform_root));
-  EXPECT_TRUE(transform2->Changed(*transform_root));
-  client_.SetNeedsRepaint(true);
-  graphics_layer_->PaintRecursively();
+  transform1->Update(transform_root,
+                     TransformPaintPropertyNode::State{
+                         TransformationMatrix().Translate(20, 30)});
+  EXPECT_TRUE(transform1->Changed(transform_root));
+  EXPECT_TRUE(transform2->Changed(transform_root));
+  layers_.graphics_layer_client().SetNeedsRepaint(true);
+  layers_.graphics_layer().PaintRecursively();
 
-  EXPECT_FALSE(transform1->Changed(*transform_root));
-  EXPECT_FALSE(transform2->Changed(*transform_root));
+  EXPECT_FALSE(transform1->Changed(transform_root));
+  EXPECT_FALSE(transform2->Changed(transform_root));
 }
 
 TEST_P(GraphicsLayerTest, SetDrawsContentFalse) {
-  EXPECT_TRUE(graphics_layer_->DrawsContent());
-  graphics_layer_->GetPaintController();
-  EXPECT_NE(nullptr, GetInternalPaintController(*graphics_layer_));
-  EnsureRasterInvalidator(*graphics_layer_);
-  EXPECT_NE(nullptr, GetInternalRasterInvalidator(*graphics_layer_));
+  EXPECT_TRUE(layers_.graphics_layer().DrawsContent());
+  layers_.graphics_layer().GetPaintController();
+  EXPECT_NE(nullptr, GetInternalPaintController(layers_.graphics_layer()));
+  EnsureRasterInvalidator(layers_.graphics_layer());
+  EXPECT_NE(nullptr, GetInternalRasterInvalidator(layers_.graphics_layer()));
 
-  graphics_layer_->SetDrawsContent(false);
-  EXPECT_EQ(nullptr, GetInternalPaintController(*graphics_layer_));
-  EXPECT_EQ(nullptr, GetInternalRasterInvalidator(*graphics_layer_));
+  layers_.graphics_layer().SetDrawsContent(false);
+  EXPECT_EQ(nullptr, GetInternalPaintController(layers_.graphics_layer()));
+  EXPECT_EQ(nullptr, GetInternalRasterInvalidator(layers_.graphics_layer()));
 }
 
 }  // namespace blink

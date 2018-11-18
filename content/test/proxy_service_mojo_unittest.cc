@@ -14,6 +14,7 @@
 #include "base/values.h"
 #include "build/build_config.h"
 #include "content/test/test_mojo_proxy_resolver_factory.h"
+#include "net/base/completion_once_callback.h"
 #include "net/base/network_delegate_impl.h"
 #include "net/base/test_completion_callback.h"
 #include "net/dns/mock_host_resolver.h"
@@ -115,12 +116,12 @@ class LoggingMockHostResolver : public net::MockHostResolver {
   int Resolve(const RequestInfo& info,
               net::RequestPriority priority,
               net::AddressList* addresses,
-              const net::CompletionCallback& callback,
+              net::CompletionOnceCallback callback,
               std::unique_ptr<Request>* out_req,
               const net::NetLogWithSource& net_log) override {
     net_log.AddEvent(net::NetLogEventType::HOST_RESOLVER_IMPL_JOB);
-    return net::MockHostResolver::Resolve(info, priority, addresses, callback,
-                                          out_req, net_log);
+    return net::MockHostResolver::Resolve(
+        info, priority, addresses, std::move(callback), out_req, net_log);
   }
 };
 
@@ -157,12 +158,11 @@ class ProxyServiceMojoTest : public testing::Test {
 TEST_F(ProxyServiceMojoTest, Basic) {
   net::ProxyInfo info;
   net::TestCompletionCallback callback;
+  std::unique_ptr<net::ProxyResolutionService::Request> request;
   EXPECT_EQ(net::ERR_IO_PENDING,
             proxy_resolution_service_->ResolveProxy(
-                GURL("http://foo"),
-                std::string(),
-                &info, callback.callback(), nullptr,
-                nullptr, net::NetLogWithSource()));
+                GURL("http://foo"), std::string(), &info, callback.callback(),
+                &request, net::NetLogWithSource()));
 
   // PAC file fetcher should have a fetch triggered by the first
   // |ResolveProxy()| request.
@@ -180,11 +180,11 @@ TEST_F(ProxyServiceMojoTest, DnsResolution) {
   net::ProxyInfo info;
   net::TestCompletionCallback callback;
   net::BoundTestNetLog test_net_log;
+  std::unique_ptr<net::ProxyResolutionService::Request> request;
   EXPECT_EQ(net::ERR_IO_PENDING,
             proxy_resolution_service_->ResolveProxy(
-                GURL("http://foo"), std::string(),
-                &info, callback.callback(), nullptr,
-                nullptr, test_net_log.bound()));
+                GURL("http://foo"), std::string(), &info, callback.callback(),
+                &request, test_net_log.bound()));
 
   // PAC file fetcher should have a fetch triggered by the first
   // |ResolveProxy()| request.
@@ -213,11 +213,11 @@ TEST_F(ProxyServiceMojoTest, Error) {
   net::ProxyInfo info;
   net::TestCompletionCallback callback;
   net::BoundTestNetLog test_net_log;
+  std::unique_ptr<net::ProxyResolutionService::Request> request;
   EXPECT_EQ(net::ERR_IO_PENDING,
             proxy_resolution_service_->ResolveProxy(
-                GURL("http://foo"), std::string(),
-                &info, callback.callback(), nullptr,
-                nullptr, test_net_log.bound()));
+                GURL("http://foo"), std::string(), &info, callback.callback(),
+                &request, test_net_log.bound()));
 
   // PAC file fetcher should have a fetch triggered by the first
   // |ResolveProxy()| request.
@@ -243,11 +243,11 @@ TEST_F(ProxyServiceMojoTest, Error) {
 TEST_F(ProxyServiceMojoTest, ErrorOnInitialization) {
   net::ProxyInfo info;
   net::TestCompletionCallback callback;
+  std::unique_ptr<net::ProxyResolutionService::Request> request;
   EXPECT_EQ(net::ERR_IO_PENDING,
             proxy_resolution_service_->ResolveProxy(
-                GURL("http://foo"), std::string(),
-                &info, callback.callback(), nullptr,
-                nullptr, net::NetLogWithSource()));
+                GURL("http://foo"), std::string(), &info, callback.callback(),
+                &request, net::NetLogWithSource()));
 
   // PAC file fetcher should have a fetch triggered by the first
   // |ResolveProxy()| request.

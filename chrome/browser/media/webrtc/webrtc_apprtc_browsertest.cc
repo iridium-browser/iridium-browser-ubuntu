@@ -3,7 +3,6 @@
 // found in the LICENSE file.
 
 #include "base/command_line.h"
-#include "base/files/file_enumerator.h"
 #include "base/path_service.h"
 #include "base/process/launch.h"
 #include "base/rand_util.h"
@@ -199,7 +198,7 @@ class WebRtcApprtcBrowserTest : public WebRtcTestBase {
 
   base::FilePath GetSourceDir() {
     base::FilePath source_dir;
-    PathService::Get(base::DIR_SOURCE_ROOT, &source_dir);
+    base::PathService::Get(base::DIR_SOURCE_ROOT, &source_dir);
     return source_dir;
   }
 

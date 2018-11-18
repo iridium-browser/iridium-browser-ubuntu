@@ -19,8 +19,8 @@ from code_generator import (initialize_jinja_env, normalize_and_sort_includes,
 from idl_reader import IdlReader
 from utilities import (create_component_info_provider, write_file,
                        idl_filename_to_component)
-from v8_utilities import (binding_header_basename, v8_class_name,
-                          v8_class_name_or_partial, uncapitalize)
+from v8_utilities import (binding_header_filename, v8_class_name,
+                          v8_class_name_or_partial)
 
 # Make sure extension is .py, not .pyc or .pyo, so doesn't depend on caching
 MODULE_PYNAME = os.path.splitext(os.path.basename(__file__))[0] + '.py'
@@ -39,7 +39,7 @@ def get_install_functions(interfaces, feature_names):
         be installed on those interfaces.
     """
     return [
-        {'condition': 'OriginTrials::%sEnabled' % uncapitalize(feature_name),
+        {'condition': 'OriginTrials::%sEnabled' % feature_name,
          'name': feature_name,
          'install_method': 'install%s' % feature_name,
          'interface_is_global': interface_info.is_global,
@@ -127,12 +127,12 @@ def origin_trial_features_info(info_provider, reader, idl_filenames, target_comp
                     parent_interface_info.get('full_path'))
             if interface.is_partial and target_component != parent_component:
                 includes.add('bindings/%s/v8/%s' %
-                             (parent_component, binding_header_basename(interface.name)))
+                             (parent_component, binding_header_filename(interface.name)))
                 includes.add('bindings/%s/v8/%s' %
-                             (target_component, binding_header_basename(interface.name + 'Partial')))
+                             (target_component, binding_header_filename(interface.name + 'Partial')))
             else:
                 includes.add('bindings/%s/v8/%s' %
-                             (target_component, binding_header_basename(interface.name)))
+                             (target_component, binding_header_filename(interface.name)))
                 # If this is a partial interface in the same component as
                 # its parent, then treat it as a non-partial interface.
                 interface.is_partial = False
@@ -162,6 +162,7 @@ def origin_trial_features_context(generator_name, feature_info):
         'core/origin_trials/origin_trials.h',
         'platform/bindings/origin_trial_features.h',
         'platform/bindings/script_state.h',
+        'platform/bindings/v8_per_context_data.h',
         # TODO(iclelland): Remove the need to explicitly include this; it is
         # here because the ContextFeatureSettings code needs it.
         'bindings/core/v8/v8_window.h',

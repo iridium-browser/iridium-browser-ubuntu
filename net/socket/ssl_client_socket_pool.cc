@@ -132,8 +132,8 @@ SSLConnectJob::SSLConnectJob(const std::string& group_name,
                     : (params->privacy_mode() == PRIVACY_MODE_ENABLED
                            ? "pm/" + context.ssl_session_cache_shard
                            : context.ssl_session_cache_shard))),
-      callback_(
-          base::Bind(&SSLConnectJob::OnIOComplete, base::Unretained(this))) {}
+      callback_(base::BindRepeating(&SSLConnectJob::OnIOComplete,
+                                    base::Unretained(this))) {}
 
 SSLConnectJob::~SSLConnectJob() = default;
 
@@ -387,13 +387,6 @@ int SSLConnectJob::DoSSLConnectComplete(int result) {
                                  base::TimeDelta::FromMilliseconds(1),
                                  base::TimeDelta::FromMinutes(1), 100);
     }
-
-    if (ssl_info.dummy_pq_padding_received) {
-      UMA_HISTOGRAM_CUSTOM_TIMES("Net.SSL_Connection_Latency_PQPadding",
-                                 connect_duration,
-                                 base::TimeDelta::FromMilliseconds(1),
-                                 base::TimeDelta::FromMinutes(1), 100);
-    }
   }
 
   // Don't double-count the version interference probes.
@@ -505,7 +498,7 @@ SSLClientSocketPool::SSLClientSocketPool(
                                        ssl_session_cache_shard),
                 net_log)),
       ssl_config_service_(ssl_config_service) {
-  if (ssl_config_service_.get())
+  if (ssl_config_service_)
     ssl_config_service_->AddObserver(this);
   if (transport_pool_)
     base_.AddLowerLayeredPool(transport_pool_);
@@ -516,7 +509,7 @@ SSLClientSocketPool::SSLClientSocketPool(
 }
 
 SSLClientSocketPool::~SSLClientSocketPool() {
-  if (ssl_config_service_.get())
+  if (ssl_config_service_)
     ssl_config_service_->RemoveObserver(this);
 }
 
@@ -543,27 +536,24 @@ int SSLClientSocketPool::RequestSocket(const std::string& group_name,
                                        const SocketTag& socket_tag,
                                        RespectLimits respect_limits,
                                        ClientSocketHandle* handle,
-                                       const CompletionCallback& callback,
+                                       CompletionOnceCallback callback,
                                        const NetLogWithSource& net_log) {
   const scoped_refptr<SSLSocketParams>* casted_socket_params =
       static_cast<const scoped_refptr<SSLSocketParams>*>(socket_params);
 
   return base_.RequestSocket(group_name, *casted_socket_params, priority,
-                             socket_tag, respect_limits, handle, callback,
-                             net_log);
+                             socket_tag, respect_limits, handle,
+                             std::move(callback), net_log);
 }
 
-void SSLClientSocketPool::RequestSockets(
-    const std::string& group_name,
-    const void* params,
-    int num_sockets,
-    const NetLogWithSource& net_log,
-    HttpRequestInfo::RequestMotivation motivation) {
+void SSLClientSocketPool::RequestSockets(const std::string& group_name,
+                                         const void* params,
+                                         int num_sockets,
+                                         const NetLogWithSource& net_log) {
   const scoped_refptr<SSLSocketParams>* casted_params =
       static_cast<const scoped_refptr<SSLSocketParams>*>(params);
 
-  base_.RequestSockets(group_name, *casted_params, num_sockets, net_log,
-                       motivation);
+  base_.RequestSockets(group_name, *casted_params, num_sockets, net_log);
 }
 
 void SSLClientSocketPool::SetPriority(const std::string& group_name,

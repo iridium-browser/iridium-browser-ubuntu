@@ -21,27 +21,36 @@
 #include "chrome/browser/signin/fake_profile_oauth2_token_service_builder.h"
 #include "chrome/browser/signin/fake_signin_manager_builder.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
+#include "chrome/browser/signin/scoped_account_consistency.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/signin/test_signin_client_builder.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/sync/profile_sync_test_util.h"
+#include "chrome/browser/unified_consent/unified_consent_service_factory.h"
+#include "chrome/browser/unified_consent/unified_consent_test_util.h"
 #include "chrome/test/base/scoped_testing_local_state.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/account_id/account_id.h"
 #include "components/browser_sync/profile_sync_service_mock.h"
 #include "components/prefs/pref_service.h"
 #include "components/signin/core/browser/account_tracker_service.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
-#include "components/signin/core/browser/scoped_account_consistency.h"
 #include "components/signin/core/browser/signin_metrics.h"
 #include "components/signin/core/browser/signin_pref_names.h"
+#include "components/unified_consent/feature.h"
+#include "components/unified_consent/scoped_unified_consent.h"
+#include "components/unified_consent/unified_consent_service.h"
 #include "content/public/test/test_browser_thread_bundle.h"
+#include "google_apis/gaia/google_service_auth_error.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using ::testing::AtLeast;
 using ::testing::Return;
+using ::testing::ReturnRef;
 
-class DiceTurnSyncOnHelperTest;
+class DiceTurnSyncOnHelperTestBase;
 
 namespace {
 
@@ -63,7 +72,7 @@ const signin_metrics::Reason kSigninReason =
 class TestDiceTurnSyncOnHelperDelegate : public DiceTurnSyncOnHelper::Delegate {
  public:
   explicit TestDiceTurnSyncOnHelperDelegate(
-      DiceTurnSyncOnHelperTest* test_fixture);
+      DiceTurnSyncOnHelperTestBase* test_fixture);
   ~TestDiceTurnSyncOnHelperDelegate() override;
 
  private:
@@ -84,7 +93,7 @@ class TestDiceTurnSyncOnHelperDelegate : public DiceTurnSyncOnHelper::Delegate {
   void ShowSigninPageInNewProfile(Profile* new_profile,
                                   const std::string& username) override;
 
-  DiceTurnSyncOnHelperTest* test_fixture_;
+  DiceTurnSyncOnHelperTestBase* test_fixture_;
 };
 
 // Simple ProfileManager creating testing profiles.
@@ -150,10 +159,10 @@ class FakeUserPolicySigninService : public policy::UserPolicySigninService {
 
   // policy::UserPolicySigninServiceBase:
   void FetchPolicyForSignedInUser(
-      const std::string& username,
+      const AccountId& account_id,
       const std::string& dm_token,
       const std::string& client_id,
-      scoped_refptr<net::URLRequestContextGetter> profile_request_context,
+      scoped_refptr<network::SharedURLLoaderFactory> test_shared_loader_factory,
       const PolicyFetchCallback& callback) override {
     callback.Run(true);
   }
@@ -167,10 +176,12 @@ class FakeUserPolicySigninService : public policy::UserPolicySigninService {
 
 }  // namespace
 
-class DiceTurnSyncOnHelperTest : public testing::Test {
+class DiceTurnSyncOnHelperTestBase : public testing::Test {
  public:
-  DiceTurnSyncOnHelperTest()
-      : local_state_(TestingBrowserProcess::GetGlobal()) {
+  DiceTurnSyncOnHelperTestBase()
+      : local_state_(TestingBrowserProcess::GetGlobal()) {}
+
+  void SetUp() override {
     EXPECT_TRUE(temp_dir_.CreateUniqueTempDir());
     TestingBrowserProcess::GetGlobal()->SetProfileManager(
         new UnittestProfileManager(temp_dir_.GetPath()));
@@ -178,16 +189,22 @@ class DiceTurnSyncOnHelperTest : public testing::Test {
     TestingProfile::Builder profile_builder;
     profile_builder.AddTestingFactory(
         ProfileOAuth2TokenServiceFactory::GetInstance(),
-        BuildFakeProfileOAuth2TokenService);
-    profile_builder.AddTestingFactory(SigninManagerFactory::GetInstance(),
-                                      BuildFakeSigninManagerBase);
-    profile_builder.AddTestingFactory(ChromeSigninClientFactory::GetInstance(),
-                                      signin::BuildTestSigninClient);
-    profile_builder.AddTestingFactory(ProfileSyncServiceFactory::GetInstance(),
-                                      &BuildMockProfileSyncService);
+        base::BindRepeating(&BuildFakeProfileOAuth2TokenService));
+    profile_builder.AddTestingFactory(
+        SigninManagerFactory::GetInstance(),
+        base::BindRepeating(&BuildFakeSigninManagerBase));
+    profile_builder.AddTestingFactory(
+        ChromeSigninClientFactory::GetInstance(),
+        base::BindRepeating(&signin::BuildTestSigninClient));
+    profile_builder.AddTestingFactory(
+        ProfileSyncServiceFactory::GetInstance(),
+        base::BindRepeating(&BuildMockProfileSyncService));
     profile_builder.AddTestingFactory(
         policy::UserPolicySigninServiceFactory::GetInstance(),
-        &FakeUserPolicySigninService::Build);
+        base::BindRepeating(&FakeUserPolicySigninService::Build));
+    profile_builder.AddTestingFactory(
+        UnifiedConsentServiceFactory::GetInstance(),
+        base::BindRepeating(&BuildUnifiedConsentServiceForTesting));
     profile_ = profile_builder.Build();
     account_tracker_service_ =
         AccountTrackerServiceFactory::GetForProfile(profile());
@@ -201,7 +218,7 @@ class DiceTurnSyncOnHelperTest : public testing::Test {
     EXPECT_TRUE(token_service_->RefreshTokenIsAvailable(account_id_));
   }
 
-  ~DiceTurnSyncOnHelperTest() override {
+  ~DiceTurnSyncOnHelperTestBase() override {
     DCHECK(delegate_destroyed_);
     // Destroy extra profiles.
     TestingBrowserProcess::GetGlobal()->SetProfileManager(nullptr);
@@ -243,27 +260,23 @@ class DiceTurnSyncOnHelperTest : public testing::Test {
     browser_sync::ProfileSyncServiceMock* sync_service_mock =
         GetProfileSyncServiceMock();
     EXPECT_CALL(*sync_service_mock, GetSetupInProgressHandle()).Times(1);
-    EXPECT_CALL(*sync_service_mock, CanSyncStart())
-        .Times(AtLeast(0))
-        .WillRepeatedly(Return(true));
-    EXPECT_CALL(*sync_service_mock, IsEngineInitialized())
-        .Times(AtLeast(0))
-        .WillRepeatedly(Return(true));
+    ON_CALL(*sync_service_mock, GetDisableReasons())
+        .WillByDefault(Return(syncer::SyncService::DISABLE_REASON_NONE));
+    ON_CALL(*sync_service_mock, GetTransportState())
+        .WillByDefault(Return(syncer::SyncService::TransportState::ACTIVE));
   }
 
   void SetExpectationsForSyncStartupPending() {
     browser_sync::ProfileSyncServiceMock* sync_service_mock =
         GetProfileSyncServiceMock();
     EXPECT_CALL(*sync_service_mock, GetSetupInProgressHandle()).Times(1);
-    EXPECT_CALL(*sync_service_mock, CanSyncStart())
-        .Times(AtLeast(0))
-        .WillRepeatedly(Return(true));
-    EXPECT_CALL(*sync_service_mock, IsEngineInitialized())
-        .Times(AtLeast(0))
-        .WillRepeatedly(Return(false));
-    EXPECT_CALL(*sync_service_mock, waiting_for_auth())
-        .Times(AtLeast(0))
-        .WillRepeatedly(Return(true));
+    ON_CALL(*sync_service_mock, GetDisableReasons())
+        .WillByDefault(Return(syncer::SyncService::DISABLE_REASON_NONE));
+    ON_CALL(*sync_service_mock, GetTransportState())
+        .WillByDefault(
+            Return(syncer::SyncService::TransportState::INITIALIZING));
+    ON_CALL(*sync_service_mock, GetAuthError())
+        .WillByDefault(ReturnRef(kNoAuthError));
   }
 
   void CheckDelegateCalls() {
@@ -365,7 +378,6 @@ class DiceTurnSyncOnHelperTest : public testing::Test {
   bool expected_sync_settings_shown_ = false;
 
  private:
-  signin::ScopedAccountConsistencyDicePrepareMigration scoped_dice;
   content::TestBrowserThreadBundle thread_bundle_;
   base::ScopedTempDir temp_dir_;
   ScopedTestingLocalState local_state_;
@@ -386,12 +398,39 @@ class DiceTurnSyncOnHelperTest : public testing::Test {
   std::string new_profile_username_;
   bool sync_confirmation_shown_ = false;
   bool sync_settings_shown_ = false;
+
+  // Note: This needs to be a member variable for testing::ReturnRef.
+  const GoogleServiceAuthError kNoAuthError =
+      GoogleServiceAuthError::AuthErrorNone();
+};
+
+// Test class with only DiceMigration enabled.
+class DiceTurnSyncOnHelperTest : public DiceTurnSyncOnHelperTestBase {
+ public:
+  DiceTurnSyncOnHelperTest() = default;
+
+ private:
+  ScopedAccountConsistencyDiceMigration scoped_dice_;
+};
+
+// Test class with Dice and UnifiedConsent enabled.
+class DiceTurnSyncOnHelperTestWithUnifiedConsent
+    : public DiceTurnSyncOnHelperTestBase {
+ public:
+  DiceTurnSyncOnHelperTestWithUnifiedConsent()
+      : scoped_unified_consent_(
+            unified_consent::UnifiedConsentFeatureState::kEnabledNoBump) {}
+  ~DiceTurnSyncOnHelperTestWithUnifiedConsent() override {}
+
+ private:
+  ScopedAccountConsistencyDice scoped_dice_;
+  unified_consent::ScopedUnifiedConsent scoped_unified_consent_;
 };
 
 // TestDiceTurnSyncOnHelperDelegate implementation.
 
 TestDiceTurnSyncOnHelperDelegate::TestDiceTurnSyncOnHelperDelegate(
-    DiceTurnSyncOnHelperTest* test_fixture)
+    DiceTurnSyncOnHelperTestBase* test_fixture)
     : test_fixture_(test_fixture) {}
 
 TestDiceTurnSyncOnHelperDelegate::~TestDiceTurnSyncOnHelperDelegate() {
@@ -661,6 +700,30 @@ TEST_F(DiceTurnSyncOnHelperTest, ShowSyncDialogForEndConsumerAccount) {
   EXPECT_TRUE(token_service()->RefreshTokenIsAvailable(account_id()));
   EXPECT_EQ(account_id(), signin_manager()->GetAuthenticatedAccountId());
   CheckDelegateCalls();
+}
+
+// Tests that the user enabled unified consent,
+TEST_F(DiceTurnSyncOnHelperTestWithUnifiedConsent,
+       ShowSyncDialogForEndConsumerAccount_UnifiedConsentEnabled) {
+  ASSERT_TRUE(unified_consent::IsUnifiedConsentFeatureEnabled());
+  // Set expectations.
+  expected_sync_confirmation_shown_ = true;
+  sync_confirmation_result_ = LoginUIService::SyncConfirmationUIClosedResult::
+      SYNC_WITH_DEFAULT_SETTINGS;
+  SetExpectationsForSyncStartupCompleted();
+  EXPECT_CALL(*GetProfileSyncServiceMock(), SetFirstSetupComplete()).Times(1);
+
+  // Signin flow.
+  EXPECT_FALSE(signin_manager()->IsAuthenticated());
+  CreateDiceTurnOnSyncHelper(
+      DiceTurnSyncOnHelper::SigninAbortedMode::REMOVE_ACCOUNT);
+
+  // Check expectations.
+  EXPECT_TRUE(token_service()->RefreshTokenIsAvailable(account_id()));
+  EXPECT_EQ(account_id(), signin_manager()->GetAuthenticatedAccountId());
+  CheckDelegateCalls();
+  EXPECT_TRUE(UnifiedConsentServiceFactory::GetForProfile(profile())
+                  ->IsUnifiedConsentGiven());
 }
 
 // For enterprise user, tests that the user is signed in only after Sync engine

@@ -15,6 +15,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "content/browser/accessibility/accessibility_tree_formatter_blink.h"
 #include "content/browser/accessibility/browser_accessibility_manager.h"
 #include "content/browser/renderer_host/render_widget_host_view_base.h"
 #include "content/browser/web_contents/web_contents_impl.h"
@@ -48,6 +49,23 @@ void AccessibilityTreeFormatter::FormatAccessibilityTree(
     const base::DictionaryValue& dict,
     base::string16* contents) {
   RecursiveFormatAccessibilityTree(dict, contents);
+}
+
+base::string16 AccessibilityTreeFormatter::DumpAccessibilityTreeFromManager(
+    BrowserAccessibilityManager* ax_mgr,
+    bool internal) {
+  std::unique_ptr<AccessibilityTreeFormatter> formatter;
+  if (internal)
+    formatter.reset(new AccessibilityTreeFormatterBlink());
+  else
+    formatter.reset(Create());
+  base::string16 accessibility_contents_utf16;
+  std::vector<Filter> filters;
+  filters.push_back(Filter(base::ASCIIToUTF16("*"), Filter::ALLOW));
+  formatter->SetFilters(filters);
+  formatter->FormatAccessibilityTree(ax_mgr->GetRoot(),
+                                     &accessibility_contents_utf16);
+  return accessibility_contents_utf16;
 }
 
 std::unique_ptr<base::DictionaryValue>
@@ -107,16 +125,20 @@ bool AccessibilityTreeFormatter::MatchesFilters(
     const std::vector<Filter>& filters,
     const base::string16& text,
     bool default_result) {
-  std::vector<Filter>::const_iterator iter = filters.begin();
   bool allow = default_result;
-  for (iter = filters.begin(); iter != filters.end(); ++iter) {
-    if (base::MatchPattern(text, iter->match_str)) {
-      if (iter->type == Filter::ALLOW_EMPTY)
-        allow = true;
-      else if (iter->type == Filter::ALLOW)
-        allow = (!base::MatchPattern(text, base::UTF8ToUTF16("*=''")));
-      else
-        allow = false;
+  for (const auto& filter : filters) {
+    if (base::MatchPattern(text, filter.match_str)) {
+      switch (filter.type) {
+        case Filter::ALLOW_EMPTY:
+          allow = true;
+          break;
+        case Filter::ALLOW:
+          allow = (!base::MatchPattern(text, base::UTF8ToUTF16("*=''")));
+          break;
+        case Filter::DENY:
+          allow = false;
+          break;
+      }
     }
   }
   return allow;

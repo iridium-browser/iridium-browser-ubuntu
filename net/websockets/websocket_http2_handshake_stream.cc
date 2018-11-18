@@ -15,8 +15,8 @@
 #include "net/http/http_request_info.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_status_code.h"
-#include "net/spdy/chromium/spdy_http_utils.h"
-#include "net/spdy/chromium/spdy_session.h"
+#include "net/spdy/spdy_http_utils.h"
+#include "net/spdy/spdy_session.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/websockets/websocket_basic_stream.h"
 #include "net/websockets/websocket_deflate_parameters.h"
@@ -41,7 +41,7 @@ WebSocketHttp2HandshakeStream::WebSocketHttp2HandshakeStream(
     WebSocketStream::ConnectDelegate* connect_delegate,
     std::vector<std::string> requested_sub_protocols,
     std::vector<std::string> requested_extensions,
-    WebSocketStreamRequest* request)
+    WebSocketStreamRequestAPI* request)
     : result_(HandshakeResult::HTTP2_INCOMPLETE),
       session_(session),
       connect_delegate_(connect_delegate),
@@ -216,13 +216,6 @@ void WebSocketHttp2HandshakeStream::PopulateNetErrorDetails(
   return;
 }
 
-Error WebSocketHttp2HandshakeStream::GetTokenBindingSignature(
-    crypto::ECPrivateKey* key,
-    TokenBindingType tb_type,
-    std::vector<uint8_t>* out) {
-  return stream_->GetTokenBindingSignature(key, tb_type, out);
-}
-
 void WebSocketHttp2HandshakeStream::Drain(HttpNetworkSession* session) {
   Close(true /* not_reusable */);
 }
@@ -230,7 +223,7 @@ void WebSocketHttp2HandshakeStream::Drain(HttpNetworkSession* session) {
 void WebSocketHttp2HandshakeStream::SetPriority(RequestPriority priority) {
   priority_ = priority;
   if (stream_)
-    stream_->set_priority(priority_);
+    stream_->SetPriority(priority_);
 }
 
 HttpStream* WebSocketHttp2HandshakeStream::RenewStreamForAuth() {
@@ -262,7 +255,7 @@ void WebSocketHttp2HandshakeStream::OnHeadersSent() {
 }
 
 void WebSocketHttp2HandshakeStream::OnHeadersReceived(
-    const SpdyHeaderBlock& response_headers) {
+    const spdy::SpdyHeaderBlock& response_headers) {
   DCHECK(!response_headers_complete_);
   DCHECK(http_response_info_);
 
@@ -378,7 +371,7 @@ void WebSocketHttp2HandshakeStream::OnFinishOpeningHandshake() {
   DCHECK(http_response_info_);
   WebSocketDispatchOnFinishOpeningHandshake(
       connect_delegate_, request_info_->url, http_response_info_->headers,
-      http_response_info_->response_time);
+      http_response_info_->socket_address, http_response_info_->response_time);
 }
 
 void WebSocketHttp2HandshakeStream::OnFailure(const std::string& message) {

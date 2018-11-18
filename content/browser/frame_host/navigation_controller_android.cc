@@ -47,14 +47,16 @@ JNI_NavigationControllerImpl_CreateJavaNavigationEntry(
       ConvertUTF8ToJavaString(env, entry->GetOriginalRequestURL().spec()));
   ScopedJavaLocalRef<jstring> j_title(
       ConvertUTF16ToJavaString(env, entry->GetTitle()));
+  ScopedJavaLocalRef<jstring> j_referrer_url(
+      ConvertUTF8ToJavaString(env, entry->GetReferrer().url.spec()));
   ScopedJavaLocalRef<jobject> j_bitmap;
   const content::FaviconStatus& status = entry->GetFavicon();
   if (status.valid && status.image.ToSkBitmap()->computeByteSize() > 0)
     j_bitmap = gfx::ConvertToJavaBitmap(status.image.ToSkBitmap());
 
   return content::Java_NavigationControllerImpl_createNavigationEntry(
-      env, index, j_url, j_virtual_url, j_original_url, j_title, j_bitmap,
-      entry->GetTransitionType());
+      env, index, j_url, j_virtual_url, j_original_url, j_referrer_url, j_title,
+      j_bitmap, entry->GetTransitionType());
 }
 
 static void JNI_NavigationControllerImpl_AddNavigationEntryToHistory(
@@ -156,7 +158,13 @@ void NavigationControllerAndroid::ReloadBypassingCache(
   navigation_controller_->Reload(ReloadType::BYPASSING_CACHE, check_for_repost);
 }
 
-void NavigationControllerAndroid::RequestRestoreLoad(
+jboolean NavigationControllerAndroid::NeedsReload(
+    JNIEnv* env,
+    const JavaParamRef<jobject>& obj) {
+  return navigation_controller_->NeedsReload();
+}
+
+void NavigationControllerAndroid::SetNeedsReload(
     JNIEnv* env,
     const JavaParamRef<jobject>& obj) {
   navigation_controller_->SetNeedsReload();

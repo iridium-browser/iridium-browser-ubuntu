@@ -105,8 +105,8 @@ class TestPrintFrameContentMsgFilter : public content::BrowserMessageFilter {
   void CheckMessage(int document_cookie,
                     const PrintHostMsg_DidPrintContent_Params& param) {
     EXPECT_EQ(document_cookie, document_cookie_);
-    EXPECT_TRUE(param.metafile_data_handle.IsValid());
-    EXPECT_GT(param.data_size, 0u);
+    ASSERT_TRUE(param.metafile_data_region.IsValid());
+    EXPECT_GT(param.metafile_data_region.GetSize(), 0U);
   }
 
   const int document_cookie_;
@@ -243,7 +243,7 @@ class IsolateOriginsPrintBrowserTest : public PrintBrowserTest {
 
 constexpr char IsolateOriginsPrintBrowserTest::kIsolatedSite[];
 
-class PrintExtensionBrowserTest : public ExtensionBrowserTest {
+class PrintExtensionBrowserTest : public extensions::ExtensionBrowserTest {
  public:
   PrintExtensionBrowserTest() {}
   ~PrintExtensionBrowserTest() override {}
@@ -263,7 +263,7 @@ class PrintExtensionBrowserTest : public ExtensionBrowserTest {
     {
       base::ScopedAllowBlockingForTesting allow_blocking;
       base::FilePath test_data_dir;
-      PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir);
+      base::PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir);
       extension = LoadExtension(
           test_data_dir.AppendASCII("printing").AppendASCII("test_extension"));
       ASSERT_TRUE(extension);
@@ -525,21 +525,13 @@ IN_PROC_BROWSER_TEST_F(IsolateOriginsPrintBrowserTest, PrintIsolatedSubframe) {
 }
 
 // Printing preview a webpage.
-// Test that we won't use oopif printing by default, unless the
-// test is run with site-per-process flag enabled.
+// Test that we use oopif printing by default.
 IN_PROC_BROWSER_TEST_F(PrintBrowserTest, RegularPrinting) {
   ASSERT_TRUE(embedded_test_server()->Started());
   GURL url(embedded_test_server()->GetURL("/printing/test1.html"));
   ui_test_utils::NavigateToURL(browser(), url);
 
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kSitePerProcess) ||
-      base::FeatureList::IsEnabled(
-          printing::features::kUsePdfCompositorServiceForPrint)) {
-    EXPECT_TRUE(IsOopifEnabled());
-  } else {
-    EXPECT_FALSE(IsOopifEnabled());
-  }
+  EXPECT_TRUE(IsOopifEnabled());
 }
 
 // Printing preview a webpage with isolate-origins enabled.

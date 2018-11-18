@@ -29,7 +29,7 @@ if cros_build_lib.IsInsideChroot():
   # Only import portage after we've checked that we're inside the chroot.
   # Outside may not have portage, in which case the above may not happen.
   # We'll check in main() if the operation needs portage.
-  # pylint: disable=F0401
+  # pylint: disable=import-error
   import portage
 
 
@@ -67,6 +67,8 @@ HOST_PACKAGES = (
 # the cross-compilers to be installed first (because they need them to actually
 # build), so we have to delay their installation.
 HOST_POST_CROSS_PACKAGES = (
+    'dev-lang/rust',
+    'dev-util/cargo',
     'virtual/target-sdk-post-cross',
 )
 
@@ -105,6 +107,7 @@ TARGET_LLVM_PKGS_ENABLED = (
 LLVM_PKGS_TABLE = {
     'ex_libcxxabi' : ['--ex-pkg', 'sys-libs/libcxxabi'],
     'ex_libcxx' : ['--ex-pkg', 'sys-libs/libcxx'],
+    'ex_llvm-libunwind' : ['--ex-pkg', 'sys-libs/llvm-libunwind'],
 }
 
 # Overrides for {gcc,binutils}-config, pick a package with particular suffix.
@@ -132,6 +135,8 @@ class Crossdev(object):
       'llvm': 'sys-devel',
       'libcxxabi': 'sys-libs',
       'libcxx': 'sys-libs',
+      'elfutils': 'dev-libs',
+      'llvm-libunwind': 'sys-libs',
   }
 
   @classmethod
@@ -260,11 +265,11 @@ class Crossdev(object):
     cmdbase.extend(['--overlays', overlays])
     cmdbase.extend(['--ov-output', CROSSDEV_OVERLAY])
 
-    # Build target by the alphabetical order to make sure
-    # armv7a-cros-linux-gnueabihf builds after armv7a-cros-linux-gnueabi
+    # Build target by the reversed alphabetical order to make sure
+    # armv7a-cros-linux-gnueabihf builds before armv7a-cros-linux-gnueabi
     # because some dependency issue. This can be reverted once we
     # migrated to armv7a-cros-linux-gnueabihf. crbug.com/711369
-    for target in sorted(targets):
+    for target in sorted(targets, reverse=True):
       if config_only and target in configured_targets:
         continue
 
@@ -343,7 +348,6 @@ def GetInstalledPackageVersions(atom, root='/'):
     The list of versions of the package currently installed.
   """
   versions = []
-  # pylint: disable=E1101
   for pkg in PortageTrees(root)['vartree'].dbapi.match(atom, use_cache=0):
     version = portage.versions.cpv_getversion(pkg)
     versions.append(version)
@@ -362,7 +366,6 @@ def GetStablePackageVersion(atom, installed, root='/'):
     A string containing the latest version.
   """
   pkgtype = 'vartree' if installed else 'porttree'
-  # pylint: disable=E1101
   cpv = portage.best(PortageTrees(root)[pkgtype].dbapi.match(atom, use_cache=0))
   return portage.versions.cpv_getversion(cpv) if cpv else None
 
@@ -764,10 +767,15 @@ def GeneratePathWrapper(root, wrappath, path):
       'path': path,
       'relroot': os.path.relpath('/', os.path.dirname(wrappath)),
   }
+
+  # Do not use exec here, because exec invokes script with absolute path in
+  # argv0. Keeping relativeness allows us to remove abs path from compile result
+  # and leads directory independent build cache sharing in some distributed
+  # build system.
   wrapper = """#!/bin/sh
-base=$(realpath "$0")
-basedir=${base%%/*}
-exec "${basedir}/%(relroot)s%(path)s" "$@"
+basedir=$(dirname "$0")
+"${basedir}/%(relroot)s%(path)s" "$@"
+exit "$?"
 """ % replacements
   root_wrapper = root + wrappath
   if os.path.islink(root_wrapper):
@@ -799,11 +807,15 @@ def FixClangXXWrapper(root, path):
   -) The difference this time is that inside the elf file execution, $0 is
      set as .../usr/bin/clang++-3.9.elf, which contains 'clang++' in the name.
 
+  Update: Starting since clang 7, the clang and clang++ are symlinks to
+  clang-7 binary, not clang-7.0. The pattern match is extended to handle
+  both clang-7 and clang-7.0 cases for now. (https://crbug.com/837889)
+
   Args:
     root: The root tree to generate scripts / symlinks inside of
     path: The target elf for which LdsoWrapper was created
   """
-  if re.match(r'/usr/bin/clang-\d+\.\d+$', path):
+  if re.match(r'/usr/bin/clang-\d+(\.\d+)*$', path):
     logging.info('fixing clang++ invocation for %s', path)
     clangdir = os.path.dirname(root + path)
     clang = os.path.basename(path)
@@ -913,12 +925,35 @@ def _GetFilesForTarget(target, root='/'):
     if pkg == 'ex_go':
       continue
 
-    atom = GetPortagePackage(target, pkg)
+    # Use armv7a-cros-linux-gnueabi/compiler-rt for
+    # armv7a-cros-linux-gnueabihf/compiler-rt.
+    # Currently the armv7a-cros-linux-gnueabi is actually
+    # the same as armv7a-cros-linux-gnueabihf with different names.
+    # Because of that, for compiler-rt, it generates the same binary in
+    # the same location. To avoid the installation conflict, we do not
+    # install anything for 'armv7a-cros-linux-gnueabihf'. This would cause
+    # problem if other people try to use standalone armv7a-cros-linux-gnueabihf
+    # toolchain.
+    if 'compiler-rt' in pkg and 'armv7a-cros-linux-gnueabi' in target:
+      atom = GetPortagePackage(target, pkg)
+      cat, pn = atom.split('/')
+      ver = GetInstalledPackageVersions(atom, root=root)[0]
+      dblink = portage.dblink(cat, pn + '-' + ver, myroot=root,
+                              settings=portage.settings)
+      contents = dblink.getcontents()
+      if not contents:
+        if 'hf' in target:
+          new_target = 'armv7a-cros-linux-gnueabi'
+        else:
+          new_target = 'armv7a-cros-linux-gnueabihf'
+        atom = GetPortagePackage(new_target, pkg)
+    else:
+      atom = GetPortagePackage(target, pkg)
+
     cat, pn = atom.split('/')
     ver = GetInstalledPackageVersions(atom, root=root)[0]
     logging.info('packaging %s-%s', atom, ver)
 
-    # pylint: disable=E1101
     dblink = portage.dblink(cat, pn + '-' + ver, myroot=root,
                             settings=portage.settings)
     contents = dblink.getcontents()
@@ -1123,7 +1158,7 @@ def _ProcessSysrootWrappers(_target, output_dir, srcpath):
 
     # In order to optimize startup time in the chroot we run python a little
     # differently there.  Put it back to the more portable way here.
-    # See http://crbug.com/773138 for some details.
+    # See https://crbug.com/773138 for some details.
     if contents[0] == '#!/usr/bin/python2 -S':
       contents[0] = '#!/usr/bin/env python2'
 

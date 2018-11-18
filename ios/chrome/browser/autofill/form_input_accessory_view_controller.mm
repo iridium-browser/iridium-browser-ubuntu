@@ -4,301 +4,123 @@
 
 #import "ios/chrome/browser/autofill/form_input_accessory_view_controller.h"
 
-#include <memory>
-
-#include "base/ios/block_types.h"
 #include "base/mac/foundation_util.h"
-#include "base/mac/scoped_block.h"
-#import "components/autofill/core/browser/keyboard_accessory_metrics_logger.h"
-#import "components/autofill/ios/browser/js_suggestion_manager.h"
+#include "components/autofill/core/common/autofill_features.h"
 #import "ios/chrome/browser/autofill/form_input_accessory_view.h"
 #import "ios/chrome/browser/autofill/form_suggestion_view.h"
-#import "ios/chrome/browser/passwords/password_generation_utils.h"
 #include "ios/chrome/browser/ui/ui_util.h"
-#import "ios/chrome/browser/ui/util/constraints_ui_util.h"
-#import "ios/web/public/url_scheme_util.h"
-#include "ios/web/public/web_state/form_activity_params.h"
-#import "ios/web/public/web_state/js/crw_js_injection_receiver.h"
-#import "ios/web/public/web_state/ui/crw_web_view_proxy.h"
-#include "ios/web/public/web_state/url_verification_constants.h"
-#include "ios/web/public/web_state/web_state.h"
-#include "url/gurl.h"
+#import "ios/chrome/browser/ui/uikit_ui_util.h"
+#import "ios/chrome/common/ui_util/constraints_ui_util.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
 #error "This file requires ARC support."
 #endif
 
 namespace autofill {
-NSString* const kFormSuggestionAssistButtonPreviousElement = @"previousTap";
-NSString* const kFormSuggestionAssistButtonNextElement = @"nextTap";
-NSString* const kFormSuggestionAssistButtonDone = @"done";
 CGFloat const kInputAccessoryHeight = 44.0f;
 }  // namespace autofill
 
-namespace {
-
-// Finds all views of a particular kind if class |klass| in the subview
-// hierarchy of the given |root| view.
-NSArray* FindDescendantsOfClass(UIView* root, Class klass) {
-  DCHECK(root);
-  NSMutableArray* viewsToExamine = [NSMutableArray arrayWithObject:root];
-  NSMutableArray* descendants = [NSMutableArray array];
-
-  while ([viewsToExamine count]) {
-    UIView* view = [viewsToExamine lastObject];
-    if ([view isKindOfClass:klass])
-      [descendants addObject:view];
-
-    [viewsToExamine removeLastObject];
-    [viewsToExamine addObjectsFromArray:[view subviews]];
-  }
-
-  return descendants;
-}
-
-// Returns true if |item|'s action name contains |actionName|.
-bool ItemActionMatchesName(UIBarButtonItem* item, NSString* actionName) {
-  SEL itemAction = [item action];
-  if (!itemAction)
-    return false;
-  NSString* itemActionName = NSStringFromSelector(itemAction);
-
-  // We don't do a strict string match for the action name.
-  return [itemActionName rangeOfString:actionName].location != NSNotFound;
-}
-
-// Finds all UIToolbarItems associated with a given UIToolbar |toolbar| with
-// action selectors with a name that containts the action name specified by
-// |actionName|.
-NSArray* FindToolbarItemsForActionName(UIToolbar* toolbar,
-                                       NSString* actionName) {
-  NSMutableArray* toolbarItems = [NSMutableArray array];
-
-  for (UIBarButtonItem* item in [toolbar items]) {
-    if (ItemActionMatchesName(item, actionName))
-      [toolbarItems addObject:item];
-  }
-
-  return toolbarItems;
-}
-
-// Finds all UIToolbarItem(s) with action selectors of the name specified by
-// |actionName| in any UIToolbars in the view hierarchy below |root|.
-NSArray* FindDescendantToolbarItemsForActionName(UIView* root,
-                                                 NSString* actionName) {
-  NSMutableArray* descendants = [NSMutableArray array];
-
-  NSArray* toolbars = FindDescendantsOfClass(root, [UIToolbar class]);
-  for (UIToolbar* toolbar in toolbars) {
-    [descendants
-        addObjectsFromArray:FindToolbarItemsForActionName(toolbar, actionName)];
-  }
-
-  return descendants;
-}
-
-NSArray* FindDescendantToolbarItemsForActionName(
-    UITextInputAssistantItem* inputAssistantItem,
-    NSString* actionName) {
-  NSMutableArray* toolbarItems = [NSMutableArray array];
-
-  NSMutableArray* buttonGroupsGroup = [[NSMutableArray alloc] init];
-  if (inputAssistantItem.leadingBarButtonGroups)
-    [buttonGroupsGroup addObject:inputAssistantItem.leadingBarButtonGroups];
-  if (inputAssistantItem.trailingBarButtonGroups)
-    [buttonGroupsGroup addObject:inputAssistantItem.trailingBarButtonGroups];
-  for (NSArray* buttonGroups in buttonGroupsGroup) {
-    for (UIBarButtonItemGroup* group in buttonGroups) {
-      NSArray* items = group.barButtonItems;
-      for (UIBarButtonItem* item in items) {
-        if (ItemActionMatchesName(item, actionName))
-          [toolbarItems addObject:item];
-      }
-    }
-  }
-
-  return toolbarItems;
-}
-
-}  // namespace
-
 @interface FormInputAccessoryViewController ()
 
-// Allows injection of the JsSuggestionManager.
-- (instancetype)initWithWebState:(web::WebState*)webState
-             JSSuggestionManager:(JsSuggestionManager*)JSSuggestionManager
-                       providers:(NSArray*)providers;
+// Grey view used as the background of the keyboard to fix
+// http://crbug.com/847523
+@property(nonatomic, strong) UIView* grayBackgroundView;
+
+// The keyboard replacement view, if any.
+@property(nonatomic, weak) UIView* keyboardReplacementView;
+
+// The custom view that should be shown in the input accessory view.
+@property(nonatomic, strong) FormInputAccessoryView* customAccessoryView;
+
+// If this view controller is paused it shouldn't add its views to the keyboard.
+@property(nonatomic, getter=isPaused) BOOL paused;
 
 // Called when the keyboard will or did change frame.
 - (void)keyboardWillOrDidChangeFrame:(NSNotification*)notification;
 
-// Called when the keyboard is dismissed.
-- (void)keyboardDidHide:(NSNotification*)notification;
-
-// Hides the subviews in |accessoryView|.
-- (void)hideSubviewsInOriginalAccessoryView:(UIView*)accessoryView;
-
-// Attempts to execute/tap/send-an-event-to the iOS built-in "next" and
-// "previous" form assist controls. Returns NO if this attempt failed, YES
-// otherwise. [HACK]
-- (BOOL)executeFormAssistAction:(NSString*)actionName;
-
-// Asynchronously retrieves an accessory view from |_providers|.
-- (void)retrieveAccessoryViewForForm:(const web::FormActivityParams&)params
-                            webState:(web::WebState*)webState;
-
-// Clears the current custom accessory view and restores the default.
-- (void)reset;
-
 @end
 
 @implementation FormInputAccessoryViewController {
-  // The WebState this instance is observing. Will be null after
-  // -webStateDestroyed: has been called.
-  web::WebState* _webState;
-
-  // Bridge to observe the web state from Objective-C.
-  std::unique_ptr<web::WebStateObserverBridge> _webStateObserverBridge;
-
   // Last registered keyboard rectangle.
   CGRect _keyboardFrame;
 
-  // The custom view that should be shown in the input accessory view.
-  FormInputAccessoryView* _customAccessoryView;
-
-  // The JS manager for interacting with the underlying form.
-  JsSuggestionManager* _JSSuggestionManager;
-
-  // The original subviews in keyboard accessory view that were originally not
-  // hidden but were hidden when showing Autofill suggestions.
-  NSMutableArray* _hiddenOriginalSubviews;
-
-  // The objects that can provide a custom input accessory view while filling
-  // forms.
-  NSArray* _providers;
-
   // Whether suggestions have previously been shown.
   BOOL _suggestionsHaveBeenShown;
-
-  // The object that manages the currently-shown custom accessory view.
-  __weak id<FormInputAccessoryViewProvider> _currentProvider;
-
-  // Logs UMA metrics for the keyboard accessory.
-  std::unique_ptr<autofill::KeyboardAccessoryMetricsLogger>
-      _keyboardAccessoryMetricsLogger;
 }
 
-- (instancetype)initWithWebState:(web::WebState*)webState
-                       providers:(NSArray*)providers {
-  JsSuggestionManager* suggestionManager =
-      base::mac::ObjCCastStrict<JsSuggestionManager>(
-          [webState->GetJSInjectionReceiver()
-              instanceOfClass:[JsSuggestionManager class]]);
-  return [self initWithWebState:webState
-            JSSuggestionManager:suggestionManager
-                      providers:providers];
-}
+#pragma mark - Life Cycle
 
-- (instancetype)initWithWebState:(web::WebState*)webState
-             JSSuggestionManager:(JsSuggestionManager*)JSSuggestionManager
-                       providers:(NSArray*)providers {
+- (instancetype)init {
   self = [super init];
   if (self) {
-    DCHECK(webState);
-    _webState = webState;
-    _JSSuggestionManager = JSSuggestionManager;
-    _hiddenOriginalSubviews = [[NSMutableArray alloc] init];
-    _webStateObserverBridge =
-        std::make_unique<web::WebStateObserverBridge>(self);
-    _webState->AddObserver(_webStateObserverBridge.get());
-    _providers = [providers copy];
     _suggestionsHaveBeenShown = NO;
-    _keyboardAccessoryMetricsLogger.reset(
-        new autofill::KeyboardAccessoryMetricsLogger());
+
+    if (IsIPadIdiom()) {
+      _grayBackgroundView = [[UIView alloc] init];
+      _grayBackgroundView.translatesAutoresizingMaskIntoConstraints = NO;
+      // This color was obtained by try and error.
+      _grayBackgroundView.backgroundColor =
+          [[UIColor alloc] initWithRed:206 / 255.f
+                                 green:212 / 255.f
+                                  blue:217 / 255.f
+                                 alpha:1];
+
+      [[NSNotificationCenter defaultCenter]
+          addObserver:self
+             selector:@selector(keyboardWillOrDidChangeFrame:)
+                 name:UIKeyboardWillChangeFrameNotification
+               object:nil];
+    }
+    [[NSNotificationCenter defaultCenter]
+        addObserver:self
+           selector:@selector(keyboardWillOrDidChangeFrame:)
+               name:UIKeyboardDidChangeFrameNotification
+             object:nil];
+    [[NSNotificationCenter defaultCenter]
+        addObserver:self
+           selector:@selector(keyboardWillShow:)
+               name:UIKeyboardWillShowNotification
+             object:nil];
   }
   return self;
 }
 
-- (void)wasShown {
-  // There is no defined relation on the timing of JavaScript events and
-  // keyboard showing up. So it is necessary to listen to the keyboard
-  // notification to make sure the keyboard is updated.
-  if (IsIPadIdiom()) {
-    [[NSNotificationCenter defaultCenter]
-        addObserver:self
-           selector:@selector(keyboardWillOrDidChangeFrame:)
-               name:UIKeyboardWillChangeFrameNotification
-             object:nil];
-    [[NSNotificationCenter defaultCenter]
-        addObserver:self
-           selector:@selector(textInputDidBeginEditing:)
-               name:UITextFieldTextDidBeginEditingNotification
-             object:nil];
-    [[NSNotificationCenter defaultCenter]
-        addObserver:self
-           selector:@selector(textInputDidBeginEditing:)
-               name:UITextViewTextDidBeginEditingNotification
-             object:nil];
+#pragma mark - Public
+
+- (void)presentView:(UIView*)view {
+  if (self.paused) {
+    return;
   }
-  [[NSNotificationCenter defaultCenter]
-      addObserver:self
-         selector:@selector(keyboardWillOrDidChangeFrame:)
-             name:UIKeyboardDidChangeFrameNotification
-           object:nil];
-  [[NSNotificationCenter defaultCenter]
-      addObserver:self
-         selector:@selector(keyboardDidHide:)
-             name:UIKeyboardDidHideNotification
-           object:nil];
+  DCHECK(view);
+  DCHECK(!view.superview);
+  UIView* keyboardView = [self getKeyboardView];
+  view.accessibilityViewIsModal = YES;
+  [keyboardView.superview addSubview:view];
+  UIView* constrainingView =
+      [self recursiveGetKeyboardConstraintView:keyboardView];
+  DCHECK(constrainingView);
+  view.translatesAutoresizingMaskIntoConstraints = NO;
+  AddSameConstraints(view, constrainingView);
+  self.keyboardReplacementView = view;
 }
 
-- (void)wasHidden {
-  [_customAccessoryView removeFromSuperview];
-  [[NSNotificationCenter defaultCenter] removeObserver:self];
-}
+#pragma mark - FormInputAccessoryConsumer
 
-- (void)detachFromWebState {
-  [self reset];
-  if (_webState) {
-    _webState->RemoveObserver(_webStateObserverBridge.get());
-    _webStateObserverBridge.reset();
-    _webState = nullptr;
-  }
-}
-
-- (void)dealloc {
-  if (_webState) {
-    _webState->RemoveObserver(_webStateObserverBridge.get());
-    _webStateObserverBridge.reset();
-    _webState = nullptr;
-  }
-}
-
-- (id<CRWWebViewProxy>)webViewProxy {
-  return _webState ? _webState->GetWebViewProxy() : nil;
-}
-
-- (void)hideSubviewsInOriginalAccessoryView:(UIView*)accessoryView {
-  for (UIView* subview in [accessoryView subviews]) {
-    if (!subview.hidden) {
-      [_hiddenOriginalSubviews addObject:subview];
-      subview.hidden = YES;
-    }
-  }
-}
-
-- (void)showCustomInputAccessoryView:(UIView*)view {
+- (void)showCustomInputAccessoryView:(UIView*)view
+                  navigationDelegate:
+                      (id<FormInputAccessoryViewDelegate>)navigationDelegate {
   DCHECK(view);
   if (IsIPadIdiom()) {
     // On iPad, there's no inputAccessoryView available, so we attach the custom
     // view directly to the keyboard view instead.
-    [_customAccessoryView removeFromSuperview];
+    [self.customAccessoryView removeFromSuperview];
+    [self.grayBackgroundView removeFromSuperview];
 
     // If the keyboard isn't visible don't show the custom view.
     if (CGRectIntersection([UIScreen mainScreen].bounds, _keyboardFrame)
                 .size.height == 0 ||
         CGRectEqualToRect(_keyboardFrame, CGRectZero)) {
-      _customAccessoryView = nil;
+      self.customAccessoryView = nil;
       return;
     }
 
@@ -309,244 +131,83 @@ NSArray* FindDescendantToolbarItemsForActionName(
     if (formSuggestionView) {
       int numSuggestions = [[formSuggestionView suggestions] count];
       if (!_suggestionsHaveBeenShown && numSuggestions == 0) {
-        _customAccessoryView = nil;
+        self.customAccessoryView = nil;
         return;
       }
     }
     _suggestionsHaveBeenShown = YES;
 
-    _customAccessoryView = [[FormInputAccessoryView alloc] init];
-    [_customAccessoryView setUpWithCustomView:view];
-
-    CGFloat height = autofill::kInputAccessoryHeight;
-    CGRect contentFrame = self.webViewProxy.frame;
-    _customAccessoryView.frame = CGRectMake(contentFrame.origin.x, -height,
-                                            contentFrame.size.width, height);
-
-    UIView* keyboardView = [self getKeyboardView];
-    DCHECK(keyboardView);
-    [keyboardView addSubview:_customAccessoryView];
+    self.customAccessoryView = [[FormInputAccessoryView alloc] init];
+    [self.customAccessoryView setUpWithCustomView:view];
+    [self addCustomAccessoryViewIfNeeded];
   } else {
     // On iPhone, the custom view replaces the default UI of the
     // inputAccessoryView.
-    [self restoreDefaultInputAccessoryView];
-    UIView* inputAccessoryView = [self.webViewProxy keyboardAccessory];
-    if (inputAccessoryView) {
-      [self hideSubviewsInOriginalAccessoryView:inputAccessoryView];
-      _customAccessoryView = [[FormInputAccessoryView alloc] init];
-      [_customAccessoryView setUpWithNavigationDelegate:self customView:view];
-      [inputAccessoryView addSubview:_customAccessoryView];
-      AddSameConstraints(_customAccessoryView, inputAccessoryView);
+    [self restoreOriginalInputAccessoryView];
+    self.customAccessoryView = [[FormInputAccessoryView alloc] init];
+    [self.customAccessoryView setUpWithNavigationDelegate:navigationDelegate
+                                               customView:view];
+    [self addCustomAccessoryViewIfNeeded];
+  }
+}
+
+- (void)restoreOriginalKeyboardView {
+  [self restoreOriginalInputAccessoryView];
+  [self.keyboardReplacementView removeFromSuperview];
+  self.keyboardReplacementView = nil;
+  self.paused = NO;
+}
+
+- (void)pauseCustomKeyboardView {
+  [self removeCustomInputAccessoryView];
+  [self.keyboardReplacementView removeFromSuperview];
+  self.paused = YES;
+}
+
+- (void)continueCustomKeyboardView {
+  self.paused = NO;
+}
+
+- (void)removeAnimationsOnKeyboardView {
+  // Work Around. On focus event, keyboardReplacementView is animated but the
+  // keyboard isn't. Cancel the animation to match the keyboard behavior
+  if (self.keyboardReplacementView.superview) {
+    [self.keyboardReplacementView.layer removeAllAnimations];
+  }
+}
+
+#pragma mark - Private
+
+// Removes the custom views related to the input accessory view.
+- (void)removeCustomInputAccessoryView {
+  [self.customAccessoryView removeFromSuperview];
+  [self.grayBackgroundView removeFromSuperview];
+}
+
+// Removes the custom input accessory views and clears the references.
+- (void)restoreOriginalInputAccessoryView {
+  [self removeCustomInputAccessoryView];
+  self.customAccessoryView = nil;
+}
+
+// This searches in a keyboard view hierarchy for the best candidate to
+// constrain a view to the keyboard.
+- (UIView*)recursiveGetKeyboardConstraintView:(UIView*)view {
+  for (UIView* subview in view.subviews) {
+    // TODO(crbug.com/845472): verify this on iOS 10-12 and all devices.
+    // Currently only tested on X-iOS12, 6+-iOS11 and 7+-iOS10. iPhoneX, iOS 11
+    // and 12 uses "Dock" and iOS 10 uses "Backdrop". iPhone6+, iOS 11 uses
+    // "Dock".
+    if ([NSStringFromClass([subview class]) containsString:@"Dock"] ||
+        [NSStringFromClass([subview class]) containsString:@"Backdrop"]) {
+      return subview;
+    }
+    UIView* found = [self recursiveGetKeyboardConstraintView:subview];
+    if (found) {
+      return found;
     }
   }
-}
-
-- (void)restoreDefaultInputAccessoryView {
-  [_customAccessoryView removeFromSuperview];
-  _customAccessoryView = nil;
-  for (UIView* subview in _hiddenOriginalSubviews) {
-    subview.hidden = NO;
-  }
-  [_hiddenOriginalSubviews removeAllObjects];
-}
-
-- (void)closeKeyboardWithButtonPress {
-  [self closeKeyboardWithoutButtonPress];
-  if (_currentProvider && [_currentProvider getLogKeyboardAccessoryMetrics])
-    _keyboardAccessoryMetricsLogger->OnCloseButtonPressed();
-}
-
-- (void)closeKeyboardWithoutButtonPress {
-  BOOL performedAction =
-      [self executeFormAssistAction:autofill::kFormSuggestionAssistButtonDone];
-
-  if (!performedAction) {
-    // We could not find the built-in form assist controls, so try to focus
-    // the next or previous control using JavaScript.
-    [_JSSuggestionManager closeKeyboard];
-  }
-}
-
-- (BOOL)executeFormAssistAction:(NSString*)actionName {
-  NSArray* descendants = nil;
-  if (IsIPadIdiom()) {
-    UITextInputAssistantItem* inputAssistantItem =
-        [self.webViewProxy inputAssistantItem];
-    if (!inputAssistantItem)
-      return NO;
-    descendants =
-        FindDescendantToolbarItemsForActionName(inputAssistantItem, actionName);
-  } else {
-    UIView* inputAccessoryView = [self.webViewProxy keyboardAccessory];
-    if (!inputAccessoryView)
-      return NO;
-    descendants =
-        FindDescendantToolbarItemsForActionName(inputAccessoryView, actionName);
-  }
-
-  if (![descendants count])
-    return NO;
-
-  UIBarButtonItem* item = descendants[0];
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Warc-performSelector-leaks"
-  [[item target] performSelector:[item action] withObject:item];
-#pragma clang diagnostic pop
-  return YES;
-}
-
-#pragma mark -
-#pragma mark FormInputAccessoryViewDelegate
-
-- (void)selectPreviousElementWithButtonPress {
-  [self selectPreviousElementWithoutButtonPress];
-  if (_currentProvider && [_currentProvider getLogKeyboardAccessoryMetrics])
-    _keyboardAccessoryMetricsLogger->OnPreviousButtonPressed();
-}
-
-- (void)selectPreviousElementWithoutButtonPress {
-  BOOL performedAction =
-      [self executeFormAssistAction:
-                autofill::kFormSuggestionAssistButtonPreviousElement];
-  if (!performedAction) {
-    // We could not find the built-in form assist controls, so try to focus
-    // the next or previous control using JavaScript.
-    [_JSSuggestionManager selectPreviousElement];
-  }
-}
-
-- (void)selectNextElementWithButtonPress {
-  [self selectNextElementWithoutButtonPress];
-  if (_currentProvider && [_currentProvider getLogKeyboardAccessoryMetrics])
-    _keyboardAccessoryMetricsLogger->OnNextButtonPressed();
-}
-
-- (void)selectNextElementWithoutButtonPress {
-  BOOL performedAction = [self
-      executeFormAssistAction:autofill::kFormSuggestionAssistButtonNextElement];
-
-  if (!performedAction) {
-    // We could not find the built-in form assist controls, so try to focus
-    // the next or previous control using JavaScript.
-    [_JSSuggestionManager selectNextElement];
-  }
-}
-
-- (void)fetchPreviousAndNextElementsPresenceWithCompletionHandler:
-        (void (^)(BOOL, BOOL))completionHandler {
-  DCHECK(completionHandler);
-  [_JSSuggestionManager
-      fetchPreviousAndNextElementsPresenceWithCompletionHandler:
-          completionHandler];
-}
-
-#pragma mark -
-#pragma mark CRWWebStateObserver
-
-- (void)webState:(web::WebState*)webState didLoadPageWithSuccess:(BOOL)success {
-  DCHECK_EQ(_webState, webState);
-  [self reset];
-}
-
-- (void)webState:(web::WebState*)webState
-    didRegisterFormActivity:(const web::FormActivityParams&)params {
-  DCHECK_EQ(_webState, webState);
-  web::URLVerificationTrustLevel trustLevel;
-  const GURL pageURL(webState->GetCurrentURL(&trustLevel));
-  if (params.input_missing ||
-      trustLevel != web::URLVerificationTrustLevel::kAbsolute ||
-      !web::UrlHasWebScheme(pageURL) || !webState->ContentIsHTML()) {
-    [self reset];
-    return;
-  }
-
-  if (params.type == "blur" || params.type == "change" ||
-      params.type == "form_changed") {
-    return;
-  }
-
-  [self retrieveAccessoryViewForForm:params webState:webState];
-}
-
-- (void)webStateDestroyed:(web::WebState*)webState {
-  DCHECK_EQ(_webState, webState);
-  [self detachFromWebState];
-}
-
-- (void)reset {
-  if (_currentProvider) {
-    [_currentProvider inputAccessoryViewControllerDidReset:self];
-    _currentProvider = nil;
-  }
-  [self restoreDefaultInputAccessoryView];
-
-  _keyboardAccessoryMetricsLogger.reset(
-      new autofill::KeyboardAccessoryMetricsLogger());
-}
-
-- (void)retrieveAccessoryViewForForm:(const web::FormActivityParams&)params
-                            webState:(web::WebState*)webState {
-  __weak FormInputAccessoryViewController* weakSelf = self;
-  web::FormActivityParams strongParams = params;
-
-  // Build a block for each provider that will invoke its completion with YES
-  // if the provider can provide an accessory view for the specified form/field
-  // and NO otherwise.
-  NSMutableArray* findProviderBlocks = [[NSMutableArray alloc] init];
-  for (NSUInteger i = 0; i < [_providers count]; i++) {
-    passwords::PipelineBlock block =
-        ^(void (^completion)(BOOL success)) {
-          // Access all the providers through |self| to guarantee that both
-          // |self| and all the providers exist when the block is executed.
-          // |_providers| is immutable, so the subscripting is always valid.
-          FormInputAccessoryViewController* strongSelf = weakSelf;
-          if (!strongSelf)
-            return;
-          id<FormInputAccessoryViewProvider> provider =
-              strongSelf->_providers[i];
-          [provider checkIfAccessoryViewIsAvailableForForm:strongParams
-                                                  webState:webState
-                                         completionHandler:completion];
-        };
-    [findProviderBlocks addObject:block];
-  }
-
-  // Once the view is retrieved, update the UI.
-  AccessoryViewReadyCompletion readyCompletion =
-      ^(UIView* accessoryView, id<FormInputAccessoryViewProvider> provider) {
-        FormInputAccessoryViewController* strongSelf = weakSelf;
-        if (!strongSelf || !strongSelf->_currentProvider)
-          return;
-        DCHECK_EQ(strongSelf->_currentProvider, provider);
-        [provider setAccessoryViewDelegate:strongSelf];
-        [strongSelf showCustomInputAccessoryView:accessoryView];
-      };
-
-  // Once a provider is found, use it to retrieve the accessory view.
-  passwords::PipelineCompletionBlock onProviderFound =
-      ^(NSUInteger providerIndex) {
-        if (providerIndex == NSNotFound) {
-          [weakSelf reset];
-          return;
-        }
-        FormInputAccessoryViewController* strongSelf = weakSelf;
-        if (!strongSelf || !strongSelf->_webState)
-          return;
-        id<FormInputAccessoryViewProvider> provider =
-            strongSelf->_providers[providerIndex];
-        [strongSelf->_currentProvider
-            inputAccessoryViewControllerDidReset:self];
-        strongSelf->_currentProvider = provider;
-        [strongSelf->_currentProvider
-            retrieveAccessoryViewForForm:strongParams
-                                webState:webState
-                accessoryViewUpdateBlock:readyCompletion];
-      };
-
-  // Run all the blocks in |findProviderBlocks| until one invokes its
-  // completion with YES. The first one to do so will be passed to
-  // |onProviderFound|.
-  passwords::RunSearchPipeline(findProviderBlocks, onProviderFound);
+  return nil;
 }
 
 - (UIView*)getKeyboardView {
@@ -554,7 +215,15 @@ NSArray* FindDescendantToolbarItemsForActionName(
   if (windows.count < 2)
     return nil;
 
-  UIWindow* window = windows[1];
+  UIWindow* window;
+  if (autofill::features::IsPasswordManualFallbackEnabled()) {
+    // TODO(crbug.com/845472): verify this works on iPad with split view before
+    // making this the default.
+    window = windows.lastObject;
+  } else {
+    window = windows[1];
+  }
+
   for (UIView* subview in window.subviews) {
     if ([NSStringFromClass([subview class]) rangeOfString:@"PeripheralHost"]
             .location != NSNotFound) {
@@ -574,30 +243,106 @@ NSArray* FindDescendantToolbarItemsForActionName(
   return nil;
 }
 
+- (void)keyboardWillShow:(NSNotification*)notification {
+  // [iPhone, iOS 10] If the customAccessoryView has not been added to the
+  // hierarchy, do it here. This can happen is the view is provided before the
+  // keyboard view is created by the system, i.e. the first time the keyboard
+  // will appear.
+  if (!IsIPadIdiom()) {
+    [self addCustomAccessoryViewIfNeeded];
+    [self addCustomKeyboardViewIfNeeded];
+  }
+}
+
 - (void)keyboardWillOrDidChangeFrame:(NSNotification*)notification {
-  if (!_webState || !_currentProvider)
-    return;
   CGRect keyboardFrame =
       [notification.userInfo[UIKeyboardFrameEndUserInfoKey] CGRectValue];
-  // With iOS8 (beta) this method can be called even when the rect has not
-  // changed. When this is detected we exit early.
-  if (CGRectEqualToRect(CGRectIntegral(_keyboardFrame),
-                        CGRectIntegral(keyboardFrame))) {
+  UIView* keyboardView = [self getKeyboardView];
+  CGRect windowRect = keyboardView.window.bounds;
+  // On iPad when the keyboard is undocked, on iOS 10 and 11,
+  // `UIKeyboard*HideNotification` or `UIKeyboard*ShowNotification` are not
+  // being sent. So the check is done here.
+  if (CGRectContainsRect(windowRect, keyboardFrame)) {
+    _keyboardFrame = keyboardFrame;
+  } else {
+    _keyboardFrame = CGRectZero;
+  }
+  // On ipad we hide the views so they don't stick around at the bottom. Only
+  // needed on iPad because we add the view directly to the keyboard view.
+  if (IsIPadIdiom() && self.customAccessoryView) {
+    if (@available(iOS 11, *)) {
+    } else {
+      // [iPad iOS 10] There is a bug when constraining something to the
+      // keyboard view. So this updates the frame instead.
+      CGFloat height = autofill::kInputAccessoryHeight;
+      self.customAccessoryView.frame =
+          CGRectMake(keyboardView.frame.origin.x, -height,
+                     keyboardView.frame.size.width, height);
+    }
+    if (CGRectEqualToRect(_keyboardFrame, CGRectZero)) {
+      self.customAccessoryView.hidden = true;
+      self.grayBackgroundView.hidden = true;
+    } else {
+      self.customAccessoryView.hidden = false;
+      self.grayBackgroundView.hidden = false;
+    }
+  }
+}
+
+- (void)addCustomKeyboardViewIfNeeded {
+  if (self.isPaused) {
     return;
   }
-  _keyboardFrame = keyboardFrame;
-  [_currentProvider resizeAccessoryView];
+  if (self.keyboardReplacementView && !self.keyboardReplacementView.superview) {
+    [self presentView:self.keyboardReplacementView];
+  }
 }
 
-// On iPads running iOS 9 or later, when any text field or text view (e.g.
-// omnibox, settings, card unmask dialog) begins editing, reset ourselves so
-// that we don't present our custom view over the keyboard.
-- (void)textInputDidBeginEditing:(NSNotification*)notification {
-  [self reset];
-}
-
-- (void)keyboardDidHide:(NSNotification*)notification {
-  _keyboardFrame = CGRectZero;
+// Adds the customAccessoryView and the backgroundView (on iPads), if those are
+// not already in the hierarchy.
+- (void)addCustomAccessoryViewIfNeeded {
+  if (self.isPaused) {
+    return;
+  }
+  if (self.customAccessoryView && !self.customAccessoryView.superview) {
+    if (IsIPadIdiom()) {
+      UIView* keyboardView = [self getKeyboardView];
+      // [iPad iOS 10] There is a bug when constraining something to the
+      // keyboard view. So this sets the frame instead.
+      if (@available(iOS 11, *)) {
+        self.customAccessoryView.translatesAutoresizingMaskIntoConstraints = NO;
+        [keyboardView addSubview:self.customAccessoryView];
+        [NSLayoutConstraint activateConstraints:@[
+          [self.customAccessoryView.leadingAnchor
+              constraintEqualToAnchor:keyboardView.leadingAnchor],
+          [self.customAccessoryView.trailingAnchor
+              constraintEqualToAnchor:keyboardView.trailingAnchor],
+          [self.customAccessoryView.bottomAnchor
+              constraintEqualToAnchor:keyboardView.topAnchor],
+          [self.customAccessoryView.heightAnchor
+              constraintEqualToConstant:autofill::kInputAccessoryHeight]
+        ]];
+      } else {
+        CGFloat height = autofill::kInputAccessoryHeight;
+        self.customAccessoryView.frame =
+            CGRectMake(keyboardView.frame.origin.x, -height,
+                       keyboardView.frame.size.width, height);
+        [keyboardView addSubview:self.customAccessoryView];
+      }
+      if (!self.grayBackgroundView.superview) {
+        [keyboardView addSubview:self.grayBackgroundView];
+        [keyboardView sendSubviewToBack:self.grayBackgroundView];
+        AddSameConstraints(self.grayBackgroundView, keyboardView);
+      }
+    } else {
+      UIResponder* firstResponder = GetFirstResponder();
+      UIView* inputAccessoryView = firstResponder.inputAccessoryView;
+      if (inputAccessoryView) {
+        [inputAccessoryView addSubview:self.customAccessoryView];
+        AddSameConstraints(self.customAccessoryView, inputAccessoryView);
+      }
+    }
+  }
 }
 
 @end

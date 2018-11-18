@@ -9,14 +9,14 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/feature_list.h"
+#include "base/task/post_task.h"
 #include "content/browser/frame_host/render_frame_host_delegate.h"
 #include "content/browser/frame_host/render_frame_host_impl.h"
 #include "content/common/media/media_devices.h"
 #include "content/public/browser/browser_context.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_process_host.h"
-#include "content/public/common/content_features.h"
 #include "content/public/common/content_switches.h"
 #include "url/gurl.h"
 #include "url/origin.h"
@@ -43,12 +43,10 @@ MediaDevicesManager::BoolDeviceTypes DoCheckPermissionsOnUIThread(
       frame_host, origin, MEDIA_DEVICE_AUDIO_CAPTURE);
   bool mic_feature_policy = true;
   bool camera_feature_policy = true;
-  if (base::FeatureList::IsEnabled(features::kUseFeaturePolicyForPermissions)) {
-    mic_feature_policy = frame_host->IsFeatureEnabled(
-        blink::mojom::FeaturePolicyFeature::kMicrophone);
-    camera_feature_policy = frame_host->IsFeatureEnabled(
-        blink::mojom::FeaturePolicyFeature::kCamera);
-  }
+  mic_feature_policy = frame_host->IsFeatureEnabled(
+      blink::mojom::FeaturePolicyFeature::kMicrophone);
+  camera_feature_policy =
+      frame_host->IsFeatureEnabled(blink::mojom::FeaturePolicyFeature::kCamera);
 
   MediaDevicesManager::BoolDeviceTypes result;
   // Speakers.
@@ -118,8 +116,8 @@ void MediaDevicesPermissionChecker::CheckPermission(
     return;
   }
 
-  BrowserThread::PostTaskAndReplyWithResult(
-      BrowserThread::UI, FROM_HERE,
+  base::PostTaskWithTraitsAndReplyWithResult(
+      FROM_HERE, {BrowserThread::UI},
       base::BindOnce(&CheckSinglePermissionOnUIThread, device_type,
                      render_process_id, render_frame_id),
       std::move(callback));
@@ -138,8 +136,8 @@ void MediaDevicesPermissionChecker::CheckPermissions(
     return;
   }
 
-  BrowserThread::PostTaskAndReplyWithResult(
-      BrowserThread::UI, FROM_HERE,
+  base::PostTaskWithTraitsAndReplyWithResult(
+      FROM_HERE, {BrowserThread::UI},
       base::BindOnce(&DoCheckPermissionsOnUIThread, requested,
                      render_process_id, render_frame_id),
       std::move(callback));

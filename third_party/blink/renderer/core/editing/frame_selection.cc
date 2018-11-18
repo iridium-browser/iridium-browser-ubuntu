@@ -27,9 +27,8 @@
 
 #include <stdio.h>
 #include "third_party/blink/public/platform/web_scroll_into_view_params.h"
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
+#include "third_party/blink/renderer/core/accessibility/ax_object_cache.h"
 #include "third_party/blink/renderer/core/css/css_property_value_set.h"
-#include "third_party/blink/renderer/core/dom/ax_object_cache.h"
 #include "third_party/blink/renderer/core/dom/character_data.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
@@ -40,6 +39,7 @@
 #include "third_party/blink/renderer/core/dom/text.h"
 #include "third_party/blink/renderer/core/editing/caret_display_item_client.h"
 #include "third_party/blink/renderer/core/editing/commands/typing_command.h"
+#include "third_party/blink/renderer/core/editing/editing_behavior.h"
 #include "third_party/blink/renderer/core/editing/editing_utilities.h"
 #include "third_party/blink/renderer/core/editing/editor.h"
 #include "third_party/blink/renderer/core/editing/ephemeral_range.h"
@@ -80,6 +80,7 @@
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/page/spatial_navigation.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/geometry/float_quad.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context.h"
 #include "third_party/blink/renderer/platform/text/unicode_utilities.h"
@@ -241,7 +242,7 @@ void FrameSelection::DidSetSelectionDeprecated(
   if (!GetSelectionInDOMTree().IsNone() && !options.DoNotSetFocus()) {
     SetFocusedNodeIfNeeded();
     // |setFocusedNodeIfNeeded()| dispatches sync events "FocusOut" and
-    // "FocusIn", |m_frame| may associate to another document.
+    // "FocusIn", |frame_| may associate to another document.
     if (!IsAvailable() || GetDocument() != current_document) {
       // Once we get test case to reach here, we should change this
       // if-statement to |DCHECK()|.
@@ -291,8 +292,11 @@ void FrameSelection::DidSetSelectionDeprecated(
   NotifyAccessibilityForSelectionChange();
   NotifyCompositorForSelectionChange();
   NotifyEventHandlerForSelectionChange();
+  // The task source should be kDOMManipulation, but the spec doesn't say
+  // anything about this.
   frame_->DomWindow()->EnqueueDocumentEvent(
-      Event::Create(EventTypeNames::selectionchange));
+      *Event::Create(EventTypeNames::selectionchange),
+      TaskType::kMiscPlatformAPI);
 }
 
 void FrameSelection::NodeChildrenWillBeRemoved(ContainerNode& container) {
@@ -330,7 +334,7 @@ static DispatchEventResult DispatchSelectStart(
     return DispatchEventResult::kNotCanceled;
 
   return select_start_target->DispatchEvent(
-      Event::CreateCancelableBubble(EventTypeNames::selectstart));
+      *Event::CreateCancelableBubble(EventTypeNames::selectstart));
 }
 
 // The return value of |FrameSelection::modify()| is different based on
@@ -554,6 +558,14 @@ bool FrameSelection::Contains(const LayoutPoint& point) {
   if (!GetDocument().GetLayoutView())
     return false;
 
+  // This is a workaround of the issue that we sometimes get null from
+  // ComputeVisibleSelectionInDOMTree(), but non-null from flat tree.
+  // By running this, in case we get null, we also set the cached result in flat
+  // tree into null, so that this function can return false correctly.
+  // See crbug.com/846527 for details.
+  // TODO(editing-dev): Fix the inconsistency and then remove this call.
+  ComputeVisibleSelectionInDOMTree();
+
   // Treat a collapsed selection like no selection.
   const VisibleSelectionInFlatTree& visible_selection =
       ComputeVisibleSelectionInFlatTree();
@@ -561,8 +573,9 @@ bool FrameSelection::Contains(const LayoutPoint& point) {
     return false;
 
   HitTestRequest request(HitTestRequest::kReadOnly | HitTestRequest::kActive);
-  HitTestResult result(request, point);
-  GetDocument().GetLayoutView()->HitTest(result);
+  HitTestLocation location(point);
+  HitTestResult result(request, location);
+  GetDocument().GetLayoutView()->HitTest(location, result);
   Node* inner_node = result.InnerNode();
   if (!inner_node || !inner_node->GetLayoutObject())
     return false;
@@ -715,7 +728,7 @@ void FrameSelection::SelectAll(SetSelectionBy set_selection_by) {
 
   if (select_start_target) {
     const Document& expected_document = GetDocument();
-    if (select_start_target->DispatchEvent(Event::CreateCancelableBubble(
+    if (select_start_target->DispatchEvent(*Event::CreateCancelableBubble(
             EventTypeNames::selectstart)) != DispatchEventResult::kNotCanceled)
       return;
     // The frame may be detached due to selectstart event.
@@ -842,10 +855,6 @@ void FrameSelection::SetFrameIsFocused(bool flag) {
 bool FrameSelection::FrameIsFocusedAndActive() const {
   return focused_ && frame_->GetPage() &&
          frame_->GetPage()->GetFocusController().IsActive();
-}
-
-bool FrameSelection::NeedsLayoutSelectionUpdate() const {
-  return layout_selection_->HasPendingSelection();
 }
 
 void FrameSelection::CommitAppearanceIfNeeded() {
@@ -1083,6 +1092,13 @@ bool FrameSelection::SelectWordAroundCaret() {
     // for avoiding unnecessary canonicalization.
     VisiblePosition start = StartOfWord(position, word_side);
     VisiblePosition end = EndOfWord(position, word_side);
+
+    // TODO(editing-dev): |StartOfWord()| and |EndOfWord()| should not make null
+    // for non-null parameter.
+    // See http://crbug.com/872443
+    if (start.DeepEquivalent().IsNull() || end.DeepEquivalent().IsNull())
+      continue;
+
     String text =
         PlainText(EphemeralRange(start.DeepEquivalent(), end.DeepEquivalent()));
     if (!text.IsEmpty() && !IsSeparator(text.CharacterStartingAt(0))) {
@@ -1103,7 +1119,7 @@ bool FrameSelection::SelectWordAroundCaret() {
 }
 
 GranularityStrategy* FrameSelection::GetGranularityStrategy() {
-  // We do lazy initalization for m_granularityStrategy, because if we
+  // We do lazy initialization for granularity_strategy_, because if we
   // initialize it right in the constructor - the correct settings may not be
   // set yet.
   SelectionStrategy strategy_type = SelectionStrategy::kCharacter;
@@ -1209,20 +1225,9 @@ void FrameSelection::ClearDocumentCachedRange() {
   selection_editor_->ClearDocumentCachedRange();
 }
 
-WTF::Optional<unsigned> FrameSelection::LayoutSelectionStart() const {
-  return layout_selection_->SelectionStart();
-}
-WTF::Optional<unsigned> FrameSelection::LayoutSelectionEnd() const {
-  return layout_selection_->SelectionEnd();
-}
-
-void FrameSelection::ClearLayoutSelection() {
-  layout_selection_->ClearSelection();
-}
-
-std::pair<unsigned, unsigned> FrameSelection::LayoutSelectionStartEndForNG(
-    const NGPhysicalTextFragment& text_fragment) const {
-  return layout_selection_->SelectionStartEndForNG(text_fragment);
+LayoutSelectionStatus FrameSelection::ComputeLayoutSelectionStatus(
+    const NGPaintFragment& text_fragment) const {
+  return layout_selection_->ComputeSelectionStatus(text_fragment);
 }
 
 bool FrameSelection::IsDirectional() const {

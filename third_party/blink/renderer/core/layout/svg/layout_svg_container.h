@@ -48,7 +48,7 @@ class LayoutSVGContainer : public LayoutSVGModelObject {
     return Children()->LastChild();
   }
 
-  void Paint(const PaintInfo&, const LayoutPoint&) const override;
+  void Paint(const PaintInfo&) const override;
   void StyleDidChange(StyleDifference, const ComputedStyle* old_style) override;
   void SetNeedsBoundariesUpdate() final { needs_boundaries_update_ = true; }
   bool DidScreenScaleFactorChange() const {
@@ -79,15 +79,13 @@ class LayoutSVGContainer : public LayoutSVGModelObject {
   void AddChild(LayoutObject* child,
                 LayoutObject* before_child = nullptr) final;
   void RemoveChild(LayoutObject*) final;
-  void AddOutlineRects(Vector<LayoutRect>&,
-                       const LayoutPoint& additional_offset,
-                       IncludeBlockVisualOverflowOrNot) const final;
 
   FloatRect StrokeBoundingBox() const final { return stroke_bounding_box_; }
 
-  bool NodeAtFloatPoint(HitTestResult&,
-                        const FloatPoint& point_in_parent,
-                        HitTestAction) override;
+  bool NodeAtPoint(HitTestResult&,
+                   const HitTestLocation& location_in_container,
+                   const LayoutPoint& accumulated_offset,
+                   HitTestAction) override;
 
   // Called during layout to update the local transform.
   virtual SVGTransformChange CalculateLocalTransform();

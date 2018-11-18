@@ -15,7 +15,7 @@
 #include "components/offline_pages/core/prefetch/prefetch_types.h"
 #include "components/offline_pages/core/prefetch/store/prefetch_downloader_quota.h"
 #include "components/offline_pages/core/prefetch/store/prefetch_store.h"
-#include "sql/connection.h"
+#include "sql/database.h"
 #include "sql/statement.h"
 #include "sql/transaction.h"
 
@@ -26,9 +26,10 @@ namespace {
 using DownloadItem = DownloadArchivesTask::DownloadItem;
 using ItemsToDownload = DownloadArchivesTask::ItemsToDownload;
 
-ItemsToDownload FindItemsReadyForDownload(sql::Connection* db) {
+ItemsToDownload FindItemsReadyForDownload(sql::Database* db) {
   static const char kSql[] =
-      "SELECT offline_id, archive_body_name, archive_body_length"
+      "SELECT offline_id, archive_body_name, operation_name,"
+      " archive_body_length"
       " FROM prefetch_items"
       " WHERE state = ?"
       " ORDER BY creation_time DESC";
@@ -37,15 +38,18 @@ ItemsToDownload FindItemsReadyForDownload(sql::Connection* db) {
 
   ItemsToDownload items_to_download;
   while (statement.Step()) {
-    items_to_download.push_back({statement.ColumnInt64(0),
-                                 statement.ColumnString(1),
-                                 statement.ColumnInt64(2), std::string()});
+    DownloadItem item;
+    item.offline_id = statement.ColumnInt64(0);
+    item.archive_body_name = statement.ColumnString(1);
+    item.operation_name = statement.ColumnString(2);
+    item.archive_body_length = statement.ColumnInt64(3);
+    items_to_download.push_back(std::move(item));
   }
 
   return items_to_download;
 }
 
-std::unique_ptr<int> CountDownloadsInProgress(sql::Connection* db) {
+std::unique_ptr<int> CountDownloadsInProgress(sql::Database* db) {
   static const char kSql[] =
       "SELECT COUNT(offline_id) FROM prefetch_items WHERE state = ?";
   sql::Statement statement(db->GetCachedStatement(SQL_FROM_HERE, kSql));
@@ -55,7 +59,7 @@ std::unique_ptr<int> CountDownloadsInProgress(sql::Connection* db) {
   return std::make_unique<int>(statement.ColumnInt(0));
 }
 
-bool MarkItemAsDownloading(sql::Connection* db,
+bool MarkItemAsDownloading(sql::Database* db,
                            int64_t offline_id,
                            const std::string& guid) {
   // Code below only changes freshness time once, when the archive download is
@@ -78,10 +82,7 @@ bool MarkItemAsDownloading(sql::Connection* db,
 }
 
 std::unique_ptr<ItemsToDownload> SelectAndMarkItemsForDownloadSync(
-    sql::Connection* db) {
-  if (!db)
-    return nullptr;
-
+    sql::Database* db) {
   sql::Transaction transaction(db);
   if (!transaction.Begin())
     return nullptr;
@@ -160,6 +161,10 @@ const int DownloadArchivesTask::kMaxConcurrentDownloads = 2;
 // static
 const int DownloadArchivesTask::kMaxConcurrentDownloadsForLimitless = 4;
 
+DownloadArchivesTask::DownloadItem::DownloadItem() = default;
+DownloadArchivesTask::DownloadItem::DownloadItem(const DownloadItem& other) =
+    default;
+
 DownloadArchivesTask::DownloadArchivesTask(
     PrefetchStore* prefetch_store,
     PrefetchDownloader* prefetch_downloader)
@@ -182,7 +187,8 @@ void DownloadArchivesTask::Run() {
   prefetch_store_->Execute(
       base::BindOnce(SelectAndMarkItemsForDownloadSync),
       base::BindOnce(&DownloadArchivesTask::SendItemsToPrefetchDownloader,
-                     weak_ptr_factory_.GetWeakPtr()));
+                     weak_ptr_factory_.GetWeakPtr()),
+      std::unique_ptr<ItemsToDownload>());
 }
 
 void DownloadArchivesTask::SendItemsToPrefetchDownloader(
@@ -190,7 +196,8 @@ void DownloadArchivesTask::SendItemsToPrefetchDownloader(
   if (items_to_download) {
     for (const auto& download_item : *items_to_download) {
       prefetch_downloader_->StartDownload(download_item.guid,
-                                          download_item.archive_body_name);
+                                          download_item.archive_body_name,
+                                          download_item.operation_name);
       // Reports expected archive size in KiB (accepting values up to 100 MiB).
       UMA_HISTOGRAM_COUNTS_100000(
           "OfflinePages.Prefetching.DownloadExpectedFileSize",

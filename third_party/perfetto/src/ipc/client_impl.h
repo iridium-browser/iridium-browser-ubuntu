@@ -19,9 +19,9 @@
 
 #include "perfetto/base/scoped_file.h"
 #include "perfetto/base/task_runner.h"
+#include "perfetto/base/unix_socket.h"
 #include "perfetto/ipc/client.h"
 #include "src/ipc/buffered_frame_deserializer.h"
-#include "src/ipc/unix_socket.h"
 
 #include "src/ipc/wire_protocol.pb.h"
 
@@ -39,7 +39,7 @@ namespace ipc {
 
 class ServiceDescriptor;
 
-class ClientImpl : public Client, public UnixSocket::EventListener {
+class ClientImpl : public Client, public base::UnixSocket::EventListener {
  public:
   ClientImpl(const char* socket_name, base::TaskRunner*);
   ~ClientImpl() override;
@@ -49,16 +49,18 @@ class ClientImpl : public Client, public UnixSocket::EventListener {
   void UnbindService(ServiceID) override;
   base::ScopedFile TakeReceivedFD() override;
 
-  // UnixSocket::EventListener implementation.
-  void OnConnect(UnixSocket*, bool connected) override;
-  void OnDisconnect(UnixSocket*) override;
-  void OnDataAvailable(UnixSocket*) override;
+  // base::UnixSocket::EventListener implementation.
+  void OnConnect(base::UnixSocket*, bool connected) override;
+  void OnDisconnect(base::UnixSocket*) override;
+  void OnDataAvailable(base::UnixSocket*) override;
 
   RequestID BeginInvoke(ServiceID,
                         const std::string& method_name,
                         MethodID remote_method_id,
                         const ProtoMessage& method_args,
-                        base::WeakPtr<ServiceProxy>);
+                        bool drop_reply,
+                        base::WeakPtr<ServiceProxy>,
+                        int fd = -1);
 
  private:
   struct QueuedRequest {
@@ -74,12 +76,13 @@ class ClientImpl : public Client, public UnixSocket::EventListener {
   ClientImpl(const ClientImpl&) = delete;
   ClientImpl& operator=(const ClientImpl&) = delete;
 
-  bool SendFrame(const Frame&);
+  bool SendFrame(const Frame&, int fd = -1);
   void OnFrameReceived(const Frame&);
   void OnBindServiceReply(QueuedRequest, const Frame::BindServiceReply&);
   void OnInvokeMethodReply(QueuedRequest, const Frame::InvokeMethodReply&);
 
-  std::unique_ptr<UnixSocket> sock_;
+  bool invoking_method_reply_ = false;
+  std::unique_ptr<base::UnixSocket> sock_;
   base::TaskRunner* const task_runner_;
   RequestID last_request_id_ = 0;
   BufferedFrameDeserializer frame_deserializer_;

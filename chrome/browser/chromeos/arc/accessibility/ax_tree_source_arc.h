@@ -105,6 +105,9 @@ class AXTreeSourceArc
   // Resets tree state.
   void Reset();
 
+  void PopulateAXRole(mojom::AccessibilityNodeInfoData* node,
+                      ui::AXNodeData* out_data) const;
+
   // Maps an AccessibilityNodeInfo to its tree data.
   std::map<int32_t, mojom::AccessibilityNodeInfoData*> tree_map_;
   std::map<int32_t, int32_t> parent_map_;
@@ -117,7 +120,6 @@ class AXTreeSourceArc
   // A delegate that handles accessibility actions on behalf of this tree. The
   // delegate is valid during the lifetime of this tree.
   const Delegate* const delegate_;
-  std::unique_ptr<FocusStealer> focus_stealer_;
   std::string package_name_;
   std::map<mojom::AccessibilityNodeInfoData*, gfx::Rect>
       cached_computed_bounds_;

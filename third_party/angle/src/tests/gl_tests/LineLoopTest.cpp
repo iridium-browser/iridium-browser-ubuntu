@@ -25,28 +25,14 @@ class LineLoopTest : public ANGLETest
     {
         ANGLETest::SetUp();
 
-        const std::string vsSource =
-            R"(attribute highp vec4 position;
-            void main(void)
-            {
-                gl_Position = position;
-            })";
-
-        const std::string fsSource =
-            R"(uniform highp vec4 color;
-            void main(void)
-            {
-                gl_FragColor = color;
-            })";
-
-        mProgram = CompileProgram(vsSource, fsSource);
+        mProgram = CompileProgram(essl1_shaders::vs::Simple(), essl1_shaders::fs::UniformColor());
         if (mProgram == 0)
         {
             FAIL() << "shader compilation failed.";
         }
 
-        mPositionLocation = glGetAttribLocation(mProgram, "position");
-        mColorLocation    = glGetUniformLocation(mProgram, "color");
+        mPositionLocation = glGetAttribLocation(mProgram, essl1_shaders::PositionAttrib());
+        mColorLocation    = glGetUniformLocation(mProgram, essl1_shaders::ColorUniform());
 
         glBlendFunc(GL_ONE, GL_ONE);
         glEnable(GL_BLEND);
@@ -202,4 +188,9 @@ TEST_P(LineLoopTest, LineLoopUIntIndexBuffer)
 
 // Use this to select which configurations (e.g. which renderer, which GLES major version) these
 // tests should be run against.
-ANGLE_INSTANTIATE_TEST(LineLoopTest, ES2_D3D9(), ES2_D3D11(), ES2_OPENGL(), ES2_OPENGLES());
+ANGLE_INSTANTIATE_TEST(LineLoopTest,
+                       ES2_D3D9(),
+                       ES2_D3D11(),
+                       ES2_OPENGL(),
+                       ES2_OPENGLES(),
+                       ES2_VULKAN());

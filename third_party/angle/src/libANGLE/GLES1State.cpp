@@ -10,6 +10,7 @@
 #include "libANGLE/GLES1State.h"
 
 #include "libANGLE/Context.h"
+#include "libANGLE/GLES1Renderer.h"
 
 namespace gl
 {
@@ -69,8 +70,7 @@ void GLES1State::initialize(const Context *context, const State *state)
     mTexUnitEnables.resize(caps.maxMultitextureUnits);
     for (auto &enables : mTexUnitEnables)
     {
-        enables.enable2D      = false;
-        enables.enableCubeMap = false;
+        enables.reset();
     }
 
     mVertexArrayEnabled    = false;
@@ -138,23 +138,16 @@ void GLES1State::initialize(const Context *context, const State *state)
 
     mLogicOp = LogicalOperation::Copy;
 
-    mClipPlaneEnabled.resize(caps.maxClipPlanes, false);
-
-    mClipPlanes.resize(caps.maxClipPlanes, angle::Vector4(0.0f, 0.0f, 0.0f, 0.0f));
-
-    mPointParameters.pointSizeMin                = 0.1f;
-    mPointParameters.pointSizeMax                = 100.0f;
-    mPointParameters.pointFadeThresholdSize      = 0.1f;
-    mPointParameters.pointDistanceAttenuation[0] = 1.0f;
-    mPointParameters.pointDistanceAttenuation[1] = 0.0f;
-    mPointParameters.pointDistanceAttenuation[2] = 0.0f;
-
-    mPointParameters.pointSize = 1.0f;
+    mClipPlanes.resize(caps.maxClipPlanes, {false, angle::Vector4(0.0f, 0.0f, 0.0f, 0.0f)});
 
     mLineSmoothHint            = HintSetting::DontCare;
     mPointSmoothHint           = HintSetting::DontCare;
     mPerspectiveCorrectionHint = HintSetting::DontCare;
     mFogHint                   = HintSetting::DontCare;
+
+    // The user-specified point size, GL_POINT_SIZE_MAX,
+    // is initially equal to the implementation maximum.
+    mPointParameters.pointSizeMax = caps.maxAliasedPointSize;
 }
 
 void GLES1State::setAlphaFunc(AlphaTestFunc func, GLfloat ref)
@@ -213,6 +206,22 @@ MatrixType GLES1State::getMatrixMode() const
     return mMatrixMode;
 }
 
+GLint GLES1State::getCurrentMatrixStackDepth(GLenum queryType) const
+{
+    switch (queryType)
+    {
+        case GL_MODELVIEW_STACK_DEPTH:
+            return clampCast<GLint>(mModelviewMatrices.size());
+        case GL_PROJECTION_STACK_DEPTH:
+            return clampCast<GLint>(mProjectionMatrices.size());
+        case GL_TEXTURE_STACK_DEPTH:
+            return clampCast<GLint>(mTextureMatrices[mGLState->getActiveSampler()].size());
+        default:
+            UNREACHABLE();
+            return 0;
+    }
+}
+
 void GLES1State::pushMatrix()
 {
     auto &stack = currentMatrixStack();
@@ -241,6 +250,11 @@ GLES1State::MatrixStack &GLES1State::currentMatrixStack()
     }
 }
 
+const angle::Mat4 &GLES1State::getModelviewMatrix() const
+{
+    return mModelviewMatrices.back();
+}
+
 const GLES1State::MatrixStack &GLES1State::currentMatrixStack() const
 {
     switch (mMatrixMode)
@@ -264,8 +278,226 @@ void GLES1State::loadMatrix(const angle::Mat4 &m)
 
 void GLES1State::multMatrix(const angle::Mat4 &m)
 {
-    angle::Mat4 currentMatrix             = currentMatrixStack().back();
+    angle::Mat4 currentMatrix   = currentMatrixStack().back();
     currentMatrixStack().back() = currentMatrix.product(m);
 }
 
+void GLES1State::setLogicOp(LogicalOperation opcodePacked)
+{
+    mLogicOp = opcodePacked;
+}
+
+void GLES1State::setClientStateEnabled(ClientVertexArrayType clientState, bool enable)
+{
+    switch (clientState)
+    {
+        case ClientVertexArrayType::Vertex:
+            mVertexArrayEnabled = enable;
+            break;
+        case ClientVertexArrayType::Normal:
+            mNormalArrayEnabled = enable;
+            break;
+        case ClientVertexArrayType::Color:
+            mColorArrayEnabled = enable;
+            break;
+        case ClientVertexArrayType::PointSize:
+            mPointSizeArrayEnabled = enable;
+            break;
+        case ClientVertexArrayType::TextureCoord:
+            mTexCoordArrayEnabled[mClientActiveTexture] = enable;
+            break;
+        default:
+            UNREACHABLE();
+            break;
+    }
+}
+
+void GLES1State::setTexCoordArrayEnabled(unsigned int unit, bool enable)
+{
+    mTexCoordArrayEnabled[unit] = enable;
+}
+
+bool GLES1State::isClientStateEnabled(ClientVertexArrayType clientState) const
+{
+    switch (clientState)
+    {
+        case ClientVertexArrayType::Vertex:
+            return mVertexArrayEnabled;
+        case ClientVertexArrayType::Normal:
+            return mNormalArrayEnabled;
+        case ClientVertexArrayType::Color:
+            return mColorArrayEnabled;
+        case ClientVertexArrayType::PointSize:
+            return mPointSizeArrayEnabled;
+        case ClientVertexArrayType::TextureCoord:
+            return mTexCoordArrayEnabled[mClientActiveTexture];
+        default:
+            UNREACHABLE();
+            return false;
+    }
+}
+
+bool GLES1State::isTexCoordArrayEnabled(unsigned int unit) const
+{
+    ASSERT(unit < mTexCoordArrayEnabled.size());
+    return mTexCoordArrayEnabled[unit];
+}
+
+bool GLES1State::isTextureTargetEnabled(unsigned int unit, const TextureType type) const
+{
+    return mTexUnitEnables[unit].test(type);
+}
+
+LightModelParameters &GLES1State::lightModelParameters()
+{
+    return mLightModel;
+}
+
+const LightModelParameters &GLES1State::lightModelParameters() const
+{
+    return mLightModel;
+}
+
+LightParameters &GLES1State::lightParameters(unsigned int light)
+{
+    return mLights[light];
+}
+
+const LightParameters &GLES1State::lightParameters(unsigned int light) const
+{
+    return mLights[light];
+}
+
+MaterialParameters &GLES1State::materialParameters()
+{
+    return mMaterial;
+}
+
+const MaterialParameters &GLES1State::materialParameters() const
+{
+    return mMaterial;
+}
+
+bool GLES1State::isColorMaterialEnabled() const
+{
+    return mColorMaterialEnabled;
+}
+
+void GLES1State::setShadeModel(ShadingModel model)
+{
+    mShadeModel = model;
+}
+
+void GLES1State::setClipPlane(unsigned int plane, const GLfloat *equation)
+{
+    assert(plane < mClipPlanes.size());
+    mClipPlanes[plane].equation[0] = equation[0];
+    mClipPlanes[plane].equation[1] = equation[1];
+    mClipPlanes[plane].equation[2] = equation[2];
+    mClipPlanes[plane].equation[3] = equation[3];
+}
+
+void GLES1State::getClipPlane(unsigned int plane, GLfloat *equation) const
+{
+    assert(plane < mClipPlanes.size());
+    equation[0] = mClipPlanes[plane].equation[0];
+    equation[1] = mClipPlanes[plane].equation[1];
+    equation[2] = mClipPlanes[plane].equation[2];
+    equation[3] = mClipPlanes[plane].equation[3];
+}
+
+FogParameters &GLES1State::fogParameters()
+{
+    return mFog;
+}
+
+const FogParameters &GLES1State::fogParameters() const
+{
+    return mFog;
+}
+
+TextureEnvironmentParameters &GLES1State::textureEnvironment(unsigned int unit)
+{
+    assert(unit < mTextureEnvironments.size());
+    return mTextureEnvironments[unit];
+}
+
+const TextureEnvironmentParameters &GLES1State::textureEnvironment(unsigned int unit) const
+{
+    assert(unit < mTextureEnvironments.size());
+    return mTextureEnvironments[unit];
+}
+
+PointParameters &GLES1State::pointParameters()
+{
+    return mPointParameters;
+}
+
+const PointParameters &GLES1State::pointParameters() const
+{
+    return mPointParameters;
+}
+
+AttributesMask GLES1State::getVertexArraysAttributeMask() const
+{
+    AttributesMask attribsMask;
+
+    ClientVertexArrayType nonTexcoordArrays[] = {
+        ClientVertexArrayType::Vertex, ClientVertexArrayType::Normal, ClientVertexArrayType::Color,
+        ClientVertexArrayType::PointSize,
+    };
+
+    for (const ClientVertexArrayType attrib : nonTexcoordArrays)
+    {
+        attribsMask.set(GLES1Renderer::VertexArrayIndex(attrib, *this),
+                        isClientStateEnabled(attrib));
+    }
+
+    for (unsigned int i = 0; i < GLES1Renderer::kTexUnitCount; i++)
+    {
+        attribsMask.set(GLES1Renderer::TexCoordArrayIndex(i), isTexCoordArrayEnabled(i));
+    }
+
+    return attribsMask;
+}
+
+void GLES1State::setHint(GLenum target, GLenum mode)
+{
+    HintSetting setting = FromGLenum<HintSetting>(mode);
+    switch (target)
+    {
+        case GL_PERSPECTIVE_CORRECTION_HINT:
+            mPerspectiveCorrectionHint = setting;
+            break;
+        case GL_POINT_SMOOTH_HINT:
+            mPointSmoothHint = setting;
+            break;
+        case GL_LINE_SMOOTH_HINT:
+            mLineSmoothHint = setting;
+            break;
+        case GL_FOG_HINT:
+            mFogHint = setting;
+            break;
+        default:
+            UNREACHABLE();
+    }
+}
+
+GLenum GLES1State::getHint(GLenum target)
+{
+    switch (target)
+    {
+        case GL_PERSPECTIVE_CORRECTION_HINT:
+            return ToGLenum(mPerspectiveCorrectionHint);
+        case GL_POINT_SMOOTH_HINT:
+            return ToGLenum(mPointSmoothHint);
+        case GL_LINE_SMOOTH_HINT:
+            return ToGLenum(mLineSmoothHint);
+        case GL_FOG_HINT:
+            return ToGLenum(mFogHint);
+        default:
+            UNREACHABLE();
+            return 0;
+    }
+}
 }  // namespace gl

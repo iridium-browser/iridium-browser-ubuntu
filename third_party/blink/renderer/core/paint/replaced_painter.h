@@ -5,12 +5,13 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_REPLACED_PAINTER_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_PAINT_REPLACED_PAINTER_H_
 
+#include "third_party/blink/renderer/platform/geometry/layout_point.h"
 #include "third_party/blink/renderer/platform/wtf/allocator.h"
 
 namespace blink {
 
 struct PaintInfo;
-class LayoutPoint;
+class ScopedPaintState;
 class LayoutReplaced;
 
 class ReplacedPainter {
@@ -20,14 +21,15 @@ class ReplacedPainter {
   ReplacedPainter(const LayoutReplaced& layout_replaced)
       : layout_replaced_(layout_replaced) {}
 
-  void Paint(const PaintInfo&, const LayoutPoint&);
+  void Paint(const PaintInfo&);
 
-  // The adjustedPaintOffset should include the location (offset) of the object
-  // itself.
-  bool ShouldPaint(const PaintInfo&,
-                   const LayoutPoint& adjusted_paint_offset) const;
+  bool ShouldPaint(const ScopedPaintState&) const;
 
  private:
+  // Paint a hit test display item and record hit test data. This should be
+  // called in the background paint phase even if there is no other painted
+  // content.
+  void RecordHitTestData(const PaintInfo&, const LayoutPoint& paint_offset);
   const LayoutReplaced& layout_replaced_;
 };
 

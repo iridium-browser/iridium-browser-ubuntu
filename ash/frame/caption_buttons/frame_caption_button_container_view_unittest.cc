@@ -2,15 +2,16 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "ash/frame/caption_buttons/frame_caption_button_container_view.h"
+#include "ash/public/cpp/caption_buttons/frame_caption_button_container_view.h"
 
-#include "ash/ash_layout_constants.h"
-#include "ash/frame/caption_buttons/frame_caption_button.h"
+#include "ash/public/cpp/ash_layout_constants.h"
+#include "ash/public/cpp/caption_buttons/frame_caption_button.h"
 #include "ash/public/cpp/vector_icons/vector_icons.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/wm/tablet_mode/tablet_mode_controller.h"
 #include "ui/gfx/geometry/rect.h"
+#include "ui/views/test/test_views.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/widget/widget_delegate.h"
 
@@ -58,6 +59,7 @@ class FrameCaptionButtonContainerViewTest : public AshTestBase {
         new TestWidgetDelegate(maximize_allowed == MAXIMIZE_ALLOWED,
                                minimize_allowed == MINIMIZE_ALLOWED);
     params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+    params.context = CurrentContext();
     widget->Init(params);
     return widget;
   }
@@ -104,7 +106,7 @@ TEST_F(FrameCaptionButtonContainerViewTest, ButtonVisibility) {
   // All the buttons should be visible when minimizing and maximizing are
   // allowed.
   FrameCaptionButtonContainerView container1(
-      CreateTestWidget(MAXIMIZE_ALLOWED, MINIMIZE_ALLOWED));
+      CreateTestWidget(MAXIMIZE_ALLOWED, MINIMIZE_ALLOWED), nullptr);
   InitContainer(&container1);
   container1.Layout();
   FrameCaptionButtonContainerView::TestApi t1(&container1);
@@ -117,7 +119,7 @@ TEST_F(FrameCaptionButtonContainerViewTest, ButtonVisibility) {
   // The minimize button should be visible when minimizing is allowed but
   // maximizing is disallowed.
   FrameCaptionButtonContainerView container2(
-      CreateTestWidget(MAXIMIZE_DISALLOWED, MINIMIZE_ALLOWED));
+      CreateTestWidget(MAXIMIZE_DISALLOWED, MINIMIZE_ALLOWED), nullptr);
   InitContainer(&container2);
   container2.Layout();
   FrameCaptionButtonContainerView::TestApi t2(&container2);
@@ -130,7 +132,7 @@ TEST_F(FrameCaptionButtonContainerViewTest, ButtonVisibility) {
   // Neither the minimize button nor the size button should be visible when
   // neither minimizing nor maximizing are allowed.
   FrameCaptionButtonContainerView container3(
-      CreateTestWidget(MAXIMIZE_DISALLOWED, MINIMIZE_DISALLOWED));
+      CreateTestWidget(MAXIMIZE_DISALLOWED, MINIMIZE_DISALLOWED), nullptr);
   InitContainer(&container3);
   container3.Layout();
   FrameCaptionButtonContainerView::TestApi t3(&container3);
@@ -146,13 +148,12 @@ TEST_F(FrameCaptionButtonContainerViewTest, ButtonVisibility) {
 TEST_F(FrameCaptionButtonContainerViewTest,
        TestUpdateSizeButtonVisibilityAnimation) {
   FrameCaptionButtonContainerView container(
-      CreateTestWidget(MAXIMIZE_ALLOWED, MINIMIZE_ALLOWED));
+      CreateTestWidget(MAXIMIZE_ALLOWED, MINIMIZE_ALLOWED), nullptr);
 
   // Add an extra button to the left of the size button to verify that it is
   // repositioned similarly to the minimize button. This simulates the PWA menu
   // button being added to the left of the minimize button.
-  FrameCaptionButton* extra_button =
-      new FrameCaptionButton(&container, CAPTION_BUTTON_ICON_BACK);
+  views::View* extra_button = new views::StaticSizedView(gfx::Size(32, 32));
   container.AddChildViewAt(extra_button, 0);
 
   InitContainer(&container);

@@ -128,7 +128,7 @@ IntRect ConvertToPaintingRect(const LayoutObject& input_layout_object,
                               const IntRect& local_offset) {
   // Compute an offset between the partLayoutObject and the inputLayoutObject.
   LayoutSize offset_from_input_layout_object =
-      -part_layout_object.OffsetFromAncestorContainer(&input_layout_object);
+      -part_layout_object.OffsetFromAncestor(&input_layout_object);
   // Move the rect into partLayoutObject's coords.
   part_rect.Move(offset_from_input_layout_object);
   // Account for the local drawing offset.
@@ -148,7 +148,7 @@ bool ThemePainterDefault::PaintCheckbox(const Node* node,
                                         const PaintInfo& paint_info,
                                         const IntRect& rect) {
   WebThemeEngine::ExtraParams extra_params;
-  WebCanvas* canvas = paint_info.context.Canvas();
+  cc::PaintCanvas* canvas = paint_info.context.Canvas();
   extra_params.button.checked = LayoutTheme::IsChecked(node);
   extra_params.button.indeterminate = LayoutTheme::IsIndeterminate(node);
 
@@ -176,7 +176,7 @@ bool ThemePainterDefault::PaintRadio(const Node* node,
                                      const PaintInfo& paint_info,
                                      const IntRect& rect) {
   WebThemeEngine::ExtraParams extra_params;
-  WebCanvas* canvas = paint_info.context.Canvas();
+  cc::PaintCanvas* canvas = paint_info.context.Canvas();
   extra_params.button.checked = LayoutTheme::IsChecked(node);
 
   Platform::Current()->ThemeEngine()->Paint(canvas, WebThemeEngine::kPartRadio,
@@ -191,7 +191,7 @@ bool ThemePainterDefault::PaintButton(const Node* node,
                                       const PaintInfo& paint_info,
                                       const IntRect& rect) {
   WebThemeEngine::ExtraParams extra_params;
-  WebCanvas* canvas = paint_info.context.Canvas();
+  cc::PaintCanvas* canvas = paint_info.context.Canvas();
   extra_params.button.has_border = true;
   extra_params.button.background_color =
       UseMockTheme() ? 0xffc0c0c0 : kDefaultButtonBackgroundColor;
@@ -220,7 +220,7 @@ bool ThemePainterDefault::PaintTextField(const Node* node,
   extra_params.text_field.is_text_area = part == kTextAreaPart;
   extra_params.text_field.is_listbox = part == kListboxPart;
 
-  WebCanvas* canvas = paint_info.context.Canvas();
+  cc::PaintCanvas* canvas = paint_info.context.Canvas();
 
   Color background_color =
       style.VisitedDependentColor(GetCSSPropertyBackgroundColor());
@@ -259,7 +259,7 @@ bool ThemePainterDefault::PaintMenuList(const Node* node,
 
   SetupMenuListArrow(document, style, rect, extra_params);
 
-  WebCanvas* canvas = i.context.Canvas();
+  cc::PaintCanvas* canvas = i.context.Canvas();
   Platform::Current()->ThemeEngine()->Paint(
       canvas, WebThemeEngine::kPartMenuList, GetWebThemeState(node),
       WebRect(rect), &extra_params);
@@ -278,7 +278,7 @@ bool ThemePainterDefault::PaintMenuListButton(const Node* node,
   extra_params.menu_list.fill_content_area = false;
   SetupMenuListArrow(document, style, rect, extra_params);
 
-  WebCanvas* canvas = paint_info.context.Canvas();
+  cc::PaintCanvas* canvas = paint_info.context.Canvas();
   Platform::Current()->ThemeEngine()->Paint(
       canvas, WebThemeEngine::kPartMenuList, GetWebThemeState(node),
       WebRect(rect), &extra_params);
@@ -334,7 +334,7 @@ bool ThemePainterDefault::PaintSliderTrack(const LayoutObject& o,
                                            const PaintInfo& i,
                                            const IntRect& rect) {
   WebThemeEngine::ExtraParams extra_params;
-  WebCanvas* canvas = i.context.Canvas();
+  cc::PaintCanvas* canvas = i.context.Canvas();
   extra_params.slider.vertical =
       o.StyleRef().Appearance() == kSliderVerticalPart;
 
@@ -364,7 +364,7 @@ bool ThemePainterDefault::PaintSliderThumb(const Node* node,
                                            const PaintInfo& paint_info,
                                            const IntRect& rect) {
   WebThemeEngine::ExtraParams extra_params;
-  WebCanvas* canvas = paint_info.context.Canvas();
+  cc::PaintCanvas* canvas = paint_info.context.Canvas();
   extra_params.slider.vertical = style.Appearance() == kSliderThumbVerticalPart;
   extra_params.slider.in_drag = LayoutTheme::IsPressed(node);
 
@@ -392,7 +392,7 @@ bool ThemePainterDefault::PaintInnerSpinButton(const Node* node,
                                                const PaintInfo& paint_info,
                                                const IntRect& rect) {
   WebThemeEngine::ExtraParams extra_params;
-  WebCanvas* canvas = paint_info.context.Canvas();
+  cc::PaintCanvas* canvas = paint_info.context.Canvas();
   extra_params.inner_spin.spin_up =
       (LayoutTheme::ControlStatesForNode(node, style) & kSpinUpControlState);
   extra_params.inner_spin.read_only = LayoutTheme::IsReadOnlyControl(node);
@@ -420,7 +420,7 @@ bool ThemePainterDefault::PaintProgressBar(const LayoutObject& o,
   extra_params.progress_bar.value_rect_height = value_rect.Height();
 
   DirectionFlippingScope scope(o, i, rect);
-  WebCanvas* canvas = i.context.Canvas();
+  cc::PaintCanvas* canvas = i.context.Canvas();
   Platform::Current()->ThemeEngine()->Paint(
       canvas, WebThemeEngine::kPartProgressBar, GetWebThemeState(o.GetNode()),
       WebRect(rect), &extra_params);
@@ -455,7 +455,7 @@ bool ThemePainterDefault::PaintSearchFieldCancelButton(
   if (!base_layout_object.IsBox())
     return false;
   const LayoutBox& input_layout_box = ToLayoutBox(base_layout_object);
-  LayoutRect input_content_box = input_layout_box.ContentBoxRect();
+  LayoutRect input_content_box = input_layout_box.PhysicalContentBoxRect();
 
   // Make sure the scaled button stays square and will fit in its parent's box.
   LayoutUnit cancel_button_size =
@@ -466,7 +466,7 @@ bool ThemePainterDefault::PaintSearchFieldCancelButton(
   // pixel off-center, it will be one pixel closer to the bottom of the field.
   // This tends to look better with the text.
   LayoutRect cancel_button_rect(
-      cancel_button_object.OffsetFromAncestorContainer(&input_layout_box)
+      cancel_button_object.OffsetFromAncestor(&input_layout_box)
           .Width(),
       input_content_box.Y() +
           (input_content_box.Height() - cancel_button_size + 1) / 2,
@@ -482,7 +482,7 @@ bool ThemePainterDefault::PaintSearchFieldCancelButton(
       LayoutTheme::IsPressed(cancel_button_object.GetNode())
           ? cancel_pressed_image
           : cancel_image,
-      Image::kSyncDecode, painting_rect);
+      Image::kSyncDecode, FloatRect(painting_rect));
   return false;
 }
 

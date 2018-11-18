@@ -11,14 +11,12 @@
 #include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
 #include "build/build_config.h"
-#include "content/public/test/mock_render_process_host.h"
 #include "extensions/common/extension.h"
 
 #if defined(OS_WIN)
 #include "ui/base/win/scoped_ole_initializer.h"
 #endif
 
-class ExtensionService;
 class TestingProfile;
 
 namespace base {
@@ -34,6 +32,7 @@ namespace extensions {
 
 class Extension;
 class ExtensionPrefs;
+class ExtensionService;
 class TestExtensionSystem;
 
 // This class provides a minimal environment in which to create
@@ -84,7 +83,8 @@ class TestExtensionEnvironment {
 
   // Generates a valid packaged app manifest with the given ID. If |install|
   // it gets added to the ExtensionService in |profile|.
-  scoped_refptr<Extension> MakePackagedApp(const std::string& id, bool install);
+  scoped_refptr<const Extension> MakePackagedApp(const std::string& id,
+                                                 bool install);
 
   // Returns a test web contents that has a tab id.
   std::unique_ptr<content::WebContents> MakeTab() const;
@@ -108,14 +108,6 @@ class TestExtensionEnvironment {
 #if defined(OS_WIN)
   ui::ScopedOleInitializer ole_initializer_;
 #endif
-
-  // This makes sure that creating a renderer during a test will created a
-  // MockRenderProcessHost instead of a RenderProcessHostImpl.  It is important
-  // that the factory is created and registered before |profile_| and destroyed
-  // after |profile_|.
-  // TODO(lukasza): https://crbug.com/832100: Move the factory into
-  // TestingProfile, so individual tests don't need to worry about it.
-  content::ScopedMockRenderProcessHostFactory process_factory_;
 
   std::unique_ptr<TestingProfile> profile_;
   ExtensionService* extension_service_ = nullptr;

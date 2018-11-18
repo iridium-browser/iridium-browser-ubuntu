@@ -2,7 +2,9 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-static_library("core") {
+import("//build/config/jumbo.gni")
+
+jumbo_static_library("core") {
   sources = [
     "autofill_payment_instrument.cc",
     "autofill_payment_instrument.h",
@@ -69,18 +71,20 @@ static_library("core") {
     "//net",
     "//services/metrics/public/cpp:metrics_cpp",
     "//services/metrics/public/cpp:ukm_builders",
+    "//services/network/public/cpp",
     "//third_party/re2",
     "//ui/base",
     "//url",
   ]
 
   public_deps = [
+    "//services/network/public/cpp",
     "//third_party/icu",
     "//third_party/libaddressinput",
   ]
 }
 
-static_library("test_support") {
+jumbo_static_library("test_support") {
   testonly = true
   sources = [
     "payments_test_util.cc",
@@ -96,13 +100,16 @@ static_library("test_support") {
     "//base",
     "//components/autofill/core/browser",
     "//components/autofill/core/browser:test_support",
+    "//components/leveldb_proto:leveldb_proto",
     "//components/pref_registry",
     "//components/prefs",
     "//net:test_support",
+    "//services/network:test_support",
+    "//services/network/public/cpp",
   ]
 }
 
-source_set("unit_tests") {
+jumbo_source_set("unit_tests") {
   testonly = true
   sources = [
     "autofill_payment_instrument_unittest.cc",
@@ -135,11 +142,14 @@ source_set("unit_tests") {
     "//base/test:test_support",
     "//components/autofill/core/browser",
     "//components/autofill/core/browser:test_support",
+    "//components/leveldb_proto:leveldb_proto",
     "//components/strings:components_strings_grit",
     "//components/ukm",
     "//components/ukm:test_support",
     "//net:test_support",
     "//services/metrics/public/cpp:ukm_builders",
+    "//services/network:test_support",
+    "//services/network/public/cpp",
     "//testing/gmock",
     "//testing/gtest",
     "//third_party/libaddressinput:test_support",

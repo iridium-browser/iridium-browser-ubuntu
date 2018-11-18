@@ -24,15 +24,34 @@ namespace media {
 // and link in an implementation of VideoDecoderForMixer::Create.
 class VideoDecoderForMixer : public MediaPipelineBackend::VideoDecoder {
  public:
+  class Observer {
+   public:
+    // Notifies the observer that the video playback is ready to start. After
+    // this is called, SetPts may be reliably called to start playback at the
+    // desired time.
+    virtual void VideoReadyToPlay() = 0;
+
+   protected:
+    virtual ~Observer() {}
+  };
+
   static std::unique_ptr<VideoDecoderForMixer> Create(
       const MediaPipelineDeviceParams& params);
+
+  // On some platforms, graphics needs to be initialized before this component
+  // will function appropriately in tests. Add the initialization here if
+  // necessary.
+  static void InitializeGraphicsForTesting();
 
   ~VideoDecoderForMixer() override {}
 
   // Initializes the VideoDecoderForMixer. Called after allocation and before
   // Start is called. Gives the implementation a chance to initialize any
   // resources.
-  virtual void Initialize() = 0;
+  virtual bool Initialize() = 0;
+
+  // Sets the observer to be notified when the video is ready to play.
+  virtual void SetObserver(Observer* observer) = 0;
 
   // When called, playback is expected to start from |start_pts|.
   //
@@ -54,7 +73,7 @@ class VideoDecoderForMixer : public MediaPipelineBackend::VideoDecoder {
 
   // Returns the current video PTS. This will typically be the pts of the last
   // video frame displayed.
-  virtual int64_t GetCurrentPts() const = 0;
+  virtual bool GetCurrentPts(int64_t* timestamp, int64_t* pts) const = 0;
 
   // Set the playback rate. This is used to sync the audio to the video. This
   // call will change the rate of play of video in the following manner:
@@ -71,7 +90,7 @@ class VideoDecoderForMixer : public MediaPipelineBackend::VideoDecoder {
   // than the current pts, all video frames in this pts range will be repeated.
   // Implementation is encouraged to smooth out this transition, such that
   // minimal jitter in the video is shown, but that is not necessary.
-  virtual bool SetCurrentPts(int64_t pts) = 0;
+  virtual bool SetPts(int64_t timestamp, int64_t pts) = 0;
 
   // Returns number of frames dropped since the last call to Start(). This is
   // used to estimate video playback smoothness.

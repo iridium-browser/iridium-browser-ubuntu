@@ -38,7 +38,7 @@ namespace {
 const net::BackoffEntry::Policy kDefaultBackoffPolicy = {
   // Number of initial errors (in sequence) to ignore before applying
   // exponential back-off rules.
-  0,
+  5,
 
   // Initial delay for exponential back-off in ms.
   2000,
@@ -189,11 +189,10 @@ void ChromotingHost::OnSessionAuthenticationFailed(ClientSession* client) {
 void ChromotingHost::OnSessionClosed(ClientSession* client) {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
-  ClientSessions::iterator it =
-      std::find_if(clients_.begin(), clients_.end(),
-                   [client](const std::unique_ptr<ClientSession>& item) {
-                     return item.get() == client;
-                   });
+  auto it = std::find_if(clients_.begin(), clients_.end(),
+                         [client](const std::unique_ptr<ClientSession>& item) {
+                           return item.get() == client;
+                         });
   CHECK(it != clients_.end());
 
   bool was_authenticated = client->is_authenticated();

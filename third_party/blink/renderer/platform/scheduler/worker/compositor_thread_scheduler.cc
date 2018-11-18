@@ -9,43 +9,68 @@
 
 #include "base/callback.h"
 #include "base/message_loop/message_loop.h"
+#include "base/task/sequence_manager/task_queue.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "third_party/blink/renderer/platform/scheduler/base/task_queue.h"
+#include "third_party/blink/public/platform/task_type.h"
+#include "third_party/blink/renderer/platform/scheduler/child/features.h"
 #include "third_party/blink/renderer/platform/scheduler/common/scheduler_helper.h"
 
 namespace blink {
 namespace scheduler {
 
-CompositorThreadScheduler::CompositorThreadScheduler(
-    base::Thread* thread,
-    std::unique_ptr<TaskQueueManager> task_queue_manager)
-    : NonMainThreadScheduler(
-          std::make_unique<WorkerSchedulerHelper>(std::move(task_queue_manager),
-                                                  this)),
-      thread_(thread) {}
+namespace {
 
-CompositorThreadScheduler::~CompositorThreadScheduler() = default;
+CompositorThreadScheduler* g_compositor_thread_scheduler = nullptr;
 
-scoped_refptr<WorkerTaskQueue> CompositorThreadScheduler::DefaultTaskQueue() {
-  return helper_->DefaultWorkerTaskQueue();
+}  // namespace
+
+// static
+WebThreadScheduler* WebThreadScheduler::CompositorThreadScheduler() {
+  return g_compositor_thread_scheduler;
 }
 
-void CompositorThreadScheduler::Init() {}
+CompositorThreadScheduler::CompositorThreadScheduler(
+    std::unique_ptr<base::sequence_manager::SequenceManager> sequence_manager)
+    : NonMainThreadSchedulerImpl(std::move(sequence_manager),
+                                 TaskType::kCompositorThreadTaskQueueDefault),
+      input_task_queue_(
+          base::FeatureList::IsEnabled(kHighPriorityInputOnCompositorThread)
+              ? helper()->NewTaskQueue(
+                    base::sequence_manager::TaskQueue::Spec("input_tq")
+                        .SetShouldMonitorQuiescence(true))
+              : nullptr),
+      input_task_runner_(input_task_queue_
+                             ? input_task_queue_->CreateTaskRunner(
+                                   TaskType::kCompositorThreadTaskQueueInput)
+                             : nullptr),
+      compositor_metrics_helper_(helper()->HasCPUTimingForEachTask()) {
+  if (input_task_queue_) {
+    input_task_queue_->SetQueuePriority(
+        base::sequence_manager::TaskQueue::QueuePriority::kHighestPriority);
+  }
+  DCHECK(!g_compositor_thread_scheduler);
+  g_compositor_thread_scheduler = this;
+}
+
+CompositorThreadScheduler::~CompositorThreadScheduler() {
+  DCHECK_EQ(g_compositor_thread_scheduler, this);
+  g_compositor_thread_scheduler = nullptr;
+}
+
+scoped_refptr<NonMainThreadTaskQueue>
+CompositorThreadScheduler::DefaultTaskQueue() {
+  return helper()->DefaultNonMainThreadTaskQueue();
+}
+
+void CompositorThreadScheduler::InitImpl() {}
 
 void CompositorThreadScheduler::OnTaskCompleted(
-    WorkerTaskQueue* worker_task_queue,
-    const TaskQueue::Task& task,
-    base::TimeTicks start,
-    base::TimeTicks end,
-    base::Optional<base::TimeDelta> thread_time) {
-  compositor_metrics_helper_.RecordTaskMetrics(worker_task_queue, task, start,
-                                               end, thread_time);
-}
-
-scoped_refptr<base::SingleThreadTaskRunner>
-CompositorThreadScheduler::DefaultTaskRunner() {
-  return DefaultTaskQueue();
+    NonMainThreadTaskQueue* worker_task_queue,
+    const base::sequence_manager::Task& task,
+    const base::sequence_manager::TaskQueue::TaskTiming& task_timing) {
+  compositor_metrics_helper_.RecordTaskMetrics(worker_task_queue, task,
+                                               task_timing);
 }
 
 scoped_refptr<scheduler::SingleThreadIdleTaskRunner>
@@ -55,12 +80,32 @@ CompositorThreadScheduler::IdleTaskRunner() {
   // which runs them after the current frame has been drawn before the next
   // vsync. https://crbug.com/609532
   return base::MakeRefCounted<SingleThreadIdleTaskRunner>(
-      thread_->task_runner(), this);
+      helper()->DefaultTaskRunner(), this);
+}
+
+scoped_refptr<base::SingleThreadTaskRunner>
+CompositorThreadScheduler::InputTaskRunner() {
+  if (input_task_runner_)
+    return input_task_runner_;
+  return helper()->DefaultTaskRunner();
+}
+
+scoped_refptr<base::SingleThreadTaskRunner>
+CompositorThreadScheduler::V8TaskRunner() {
+  NOTREACHED();
+  return nullptr;
+}
+
+scoped_refptr<base::SingleThreadTaskRunner>
+CompositorThreadScheduler::CompositorTaskRunner() {
+  NOTREACHED();
+  return nullptr;
 }
 
 scoped_refptr<base::SingleThreadTaskRunner>
 CompositorThreadScheduler::IPCTaskRunner() {
-  return base::ThreadTaskRunnerHandle::Get();
+  NOTREACHED();
+  return nullptr;
 }
 
 bool CompositorThreadScheduler::CanExceedIdleDeadlineIfRequired() const {
@@ -73,15 +118,17 @@ bool CompositorThreadScheduler::ShouldYieldForHighPriorityWork() {
 
 void CompositorThreadScheduler::AddTaskObserver(
     base::MessageLoop::TaskObserver* task_observer) {
-  helper_->AddTaskObserver(task_observer);
+  helper()->AddTaskObserver(task_observer);
 }
 
 void CompositorThreadScheduler::RemoveTaskObserver(
     base::MessageLoop::TaskObserver* task_observer) {
-  helper_->RemoveTaskObserver(task_observer);
+  helper()->RemoveTaskObserver(task_observer);
 }
 
-void CompositorThreadScheduler::Shutdown() {}
+void CompositorThreadScheduler::Shutdown() {
+  input_task_queue_->ShutdownTaskQueue();
+}
 
 void CompositorThreadScheduler::OnIdleTaskPosted() {}
 

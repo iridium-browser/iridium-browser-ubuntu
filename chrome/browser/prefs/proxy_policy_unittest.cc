@@ -9,7 +9,6 @@
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop/message_loop.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/policy/chrome_browser_policy_connector.h"
 #include "chrome/browser/prefs/browser_prefs.h"
@@ -29,6 +28,10 @@
 #include "content/public/common/content_switches.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gtest/include/gtest/gtest.h"
+
+#if defined(OS_CHROMEOS)
+#include "chrome/browser/chromeos/settings/stub_install_attributes.h"
+#endif
 
 using ::testing::Return;
 using ::testing::_;
@@ -124,6 +127,10 @@ class ProxyPolicyTest : public testing::Test {
   base::CommandLine command_line_;
   MockConfigurationPolicyProvider provider_;
   std::unique_ptr<PolicyServiceImpl> policy_service_;
+
+#if defined(OS_CHROMEOS)
+  chromeos::ScopedStubInstallAttributes test_install_attributes_;
+#endif
 };
 
 TEST_F(ProxyPolicyTest, OverridesCommandLineOptions) {
@@ -146,7 +153,7 @@ TEST_F(ProxyPolicyTest, OverridesCommandLineOptions) {
   // there is no policy in effect.
   std::unique_ptr<PrefService> prefs(CreatePrefService(false));
   ProxyConfigDictionary dict(
-      prefs->GetDictionary(proxy_config::prefs::kProxy)->CreateDeepCopy());
+      prefs->GetDictionary(proxy_config::prefs::kProxy)->Clone());
   assertProxyMode(dict, ProxyPrefs::MODE_FIXED_SERVERS);
   assertProxyServer(dict, "789");
   assertPacUrl(dict, std::string());
@@ -157,7 +164,7 @@ TEST_F(ProxyPolicyTest, OverridesCommandLineOptions) {
   // line and replaced them with the policy versions.
   prefs = CreatePrefService(true);
   ProxyConfigDictionary dict2(
-      prefs->GetDictionary(proxy_config::prefs::kProxy)->CreateDeepCopy());
+      prefs->GetDictionary(proxy_config::prefs::kProxy)->Clone());
   assertProxyMode(dict2, ProxyPrefs::MODE_FIXED_SERVERS);
   assertProxyServer(dict2, "ghi");
   assertPacUrl(dict2, std::string());
@@ -178,7 +185,7 @@ TEST_F(ProxyPolicyTest, OverridesUnrelatedCommandLineOptions) {
   // there is no policy in effect.
   std::unique_ptr<PrefService> prefs = CreatePrefService(false);
   ProxyConfigDictionary dict(
-      prefs->GetDictionary(proxy_config::prefs::kProxy)->CreateDeepCopy());
+      prefs->GetDictionary(proxy_config::prefs::kProxy)->Clone());
   assertProxyMode(dict, ProxyPrefs::MODE_FIXED_SERVERS);
   assertProxyServer(dict, "789");
   assertPacUrl(dict, std::string());
@@ -190,7 +197,7 @@ TEST_F(ProxyPolicyTest, OverridesUnrelatedCommandLineOptions) {
   // set in policy.
   prefs = CreatePrefService(true);
   ProxyConfigDictionary dict2(
-      prefs->GetDictionary(proxy_config::prefs::kProxy)->CreateDeepCopy());
+      prefs->GetDictionary(proxy_config::prefs::kProxy)->Clone());
   assertProxyModeWithoutParams(dict2, ProxyPrefs::MODE_AUTO_DETECT);
 }
 
@@ -207,7 +214,7 @@ TEST_F(ProxyPolicyTest, OverridesCommandLineNoProxy) {
   // there is no policy in effect.
   std::unique_ptr<PrefService> prefs = CreatePrefService(false);
   ProxyConfigDictionary dict(
-      prefs->GetDictionary(proxy_config::prefs::kProxy)->CreateDeepCopy());
+      prefs->GetDictionary(proxy_config::prefs::kProxy)->Clone());
   assertProxyModeWithoutParams(dict, ProxyPrefs::MODE_DIRECT);
 
   // Try a second time time with the managed PrefStore in place, the
@@ -215,7 +222,7 @@ TEST_F(ProxyPolicyTest, OverridesCommandLineNoProxy) {
   // in place with the appropriate default value for this to work.
   prefs = CreatePrefService(true);
   ProxyConfigDictionary dict2(
-      prefs->GetDictionary(proxy_config::prefs::kProxy)->CreateDeepCopy());
+      prefs->GetDictionary(proxy_config::prefs::kProxy)->Clone());
   assertProxyModeWithoutParams(dict2, ProxyPrefs::MODE_AUTO_DETECT);
 }
 
@@ -232,7 +239,7 @@ TEST_F(ProxyPolicyTest, OverridesCommandLineAutoDetect) {
   // PrefStore.
   std::unique_ptr<PrefService> prefs = CreatePrefService(false);
   ProxyConfigDictionary dict(
-      prefs->GetDictionary(proxy_config::prefs::kProxy)->CreateDeepCopy());
+      prefs->GetDictionary(proxy_config::prefs::kProxy)->Clone());
   assertProxyModeWithoutParams(dict, ProxyPrefs::MODE_AUTO_DETECT);
 
   // Try a second time time with the managed PrefStore in place, the
@@ -240,7 +247,7 @@ TEST_F(ProxyPolicyTest, OverridesCommandLineAutoDetect) {
   // in place with the appropriate default value for this to work.
   prefs = CreatePrefService(true);
   ProxyConfigDictionary dict2(
-      prefs->GetDictionary(proxy_config::prefs::kProxy)->CreateDeepCopy());
+      prefs->GetDictionary(proxy_config::prefs::kProxy)->Clone());
   assertProxyModeWithoutParams(dict2, ProxyPrefs::MODE_DIRECT);
 }
 

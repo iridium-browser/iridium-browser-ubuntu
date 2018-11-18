@@ -18,7 +18,10 @@ CPDF_TextObjectItem::CPDF_TextObjectItem() : m_CharCode(0) {}
 
 CPDF_TextObjectItem::~CPDF_TextObjectItem() = default;
 
-CPDF_TextObject::CPDF_TextObject() {}
+CPDF_TextObject::CPDF_TextObject(int32_t content_stream)
+    : CPDF_PageObject(content_stream) {}
+
+CPDF_TextObject::CPDF_TextObject() : CPDF_TextObject(kNoContentStream) {}
 
 CPDF_TextObject::~CPDF_TextObject() {
   // Move m_CharCodes to a local variable so it will be captured in crash dumps,
@@ -145,34 +148,34 @@ CFX_Matrix CPDF_TextObject::GetTextMatrix() const {
 }
 
 void CPDF_TextObject::SetSegments(const ByteString* pStrs,
-                                  const float* pKerning,
-                                  int nsegs) {
+                                  const std::vector<float>& kernings,
+                                  size_t nSegs) {
   m_CharCodes.clear();
   m_CharPos.clear();
   CPDF_Font* pFont = m_TextState.GetFont();
   int nChars = 0;
-  for (int i = 0; i < nsegs; ++i)
+  for (size_t i = 0; i < nSegs; ++i)
     nChars += pFont->CountChar(pStrs[i].AsStringView());
-  nChars += nsegs - 1;
+  nChars += nSegs - 1;
   m_CharCodes.resize(nChars);
   m_CharPos.resize(nChars - 1);
   size_t index = 0;
-  for (int i = 0; i < nsegs; ++i) {
+  for (size_t i = 0; i < nSegs; ++i) {
     ByteStringView segment = pStrs[i].AsStringView();
     size_t offset = 0;
     while (offset < segment.GetLength()) {
       ASSERT(index < m_CharCodes.size());
-      m_CharCodes[index++] = pFont->GetNextChar(segment, offset);
+      m_CharCodes[index++] = pFont->GetNextChar(segment, &offset);
     }
-    if (i != nsegs - 1) {
-      m_CharPos[index - 1] = pKerning[i];
+    if (i != nSegs - 1) {
+      m_CharPos[index - 1] = kernings[i];
       m_CharCodes[index++] = CPDF_Font::kInvalidCharCode;
     }
   }
 }
 
 void CPDF_TextObject::SetText(const ByteString& str) {
-  SetSegments(&str, nullptr, 1);
+  SetSegments(&str, std::vector<float>(), 1);
   RecalcPositionData();
   SetDirty(true);
 }
@@ -270,17 +273,17 @@ CFX_PointF CPDF_TextObject::CalcPositionData(float horz_scale) {
     min_y = min_y * fontsize / 1000;
     max_y = max_y * fontsize / 1000;
   }
-  std::tie(m_Left, m_Right, m_Top, m_Bottom) =
-      GetTextMatrix().TransformRect(min_x, max_x, max_y, min_y);
+  SetRect(
+      GetTextMatrix().TransformRect(CFX_FloatRect(min_x, min_y, max_x, max_y)));
 
   if (!TextRenderingModeIsStrokeMode(m_TextState.GetTextMode()))
     return ret;
 
   float half_width = m_GraphState.GetLineWidth() / 2;
-  m_Left -= half_width;
-  m_Right += half_width;
-  m_Top += half_width;
-  m_Bottom -= half_width;
+  m_Rect.left -= half_width;
+  m_Rect.right += half_width;
+  m_Rect.top += half_width;
+  m_Rect.bottom -= half_width;
 
   return ret;
 }
@@ -290,10 +293,7 @@ void CPDF_TextObject::SetPosition(float x, float y) {
   float dy = y - m_Pos.y;
   m_Pos.x = x;
   m_Pos.y = y;
-  m_Left += dx;
-  m_Right += dx;
-  m_Top += dy;
-  m_Bottom += dy;
+  m_Rect.Translate(dx, dy);
 }
 
 void CPDF_TextObject::RecalcPositionData() {

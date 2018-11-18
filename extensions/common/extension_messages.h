@@ -18,14 +18,13 @@
 #include "content/public/common/socket_permission_request.h"
 #include "extensions/common/api/messaging/message.h"
 #include "extensions/common/api/messaging/port_id.h"
-#include "extensions/common/constants.h"
 #include "extensions/common/common_param_traits.h"
+#include "extensions/common/constants.h"
 #include "extensions/common/draggable_region.h"
 #include "extensions/common/event_filtering_info.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extensions_client.h"
 #include "extensions/common/host_id.h"
-#include "extensions/common/permissions/media_galleries_permission_data.h"
 #include "extensions/common/permissions/permission_set.h"
 #include "extensions/common/permissions/socket_permission_data.h"
 #include "extensions/common/permissions/usb_device_permission_data.h"
@@ -264,10 +263,6 @@ IPC_STRUCT_TRAITS_BEGIN(extensions::UsbDevicePermissionData)
   IPC_STRUCT_TRAITS_MEMBER(interface_class())
 IPC_STRUCT_TRAITS_END()
 
-IPC_STRUCT_TRAITS_BEGIN(extensions::MediaGalleriesPermissionData)
-  IPC_STRUCT_TRAITS_MEMBER(permission())
-IPC_STRUCT_TRAITS_END()
-
 IPC_STRUCT_TRAITS_BEGIN(extensions::Message)
   IPC_STRUCT_TRAITS_MEMBER(data)
   IPC_STRUCT_TRAITS_MEMBER(user_gesture)
@@ -291,6 +286,7 @@ IPC_STRUCT_TRAITS_END()
 // IPCs.
 IPC_STRUCT_BEGIN(ServiceWorkerIdentifier)
   IPC_STRUCT_MEMBER(GURL, scope)
+  IPC_STRUCT_MEMBER(int64_t, version_id)
   IPC_STRUCT_MEMBER(int, thread_id)
 IPC_STRUCT_END()
 
@@ -327,14 +323,16 @@ struct ExtensionMsg_Loaded_Params {
   ~ExtensionMsg_Loaded_Params();
   ExtensionMsg_Loaded_Params(const extensions::Extension* extension,
                              bool include_tab_permissions);
-  ExtensionMsg_Loaded_Params(const ExtensionMsg_Loaded_Params& other);
+
+  ExtensionMsg_Loaded_Params(ExtensionMsg_Loaded_Params&& other);
+  ExtensionMsg_Loaded_Params& operator=(ExtensionMsg_Loaded_Params&& other);
 
   // Creates a new extension from the data in this object.
   scoped_refptr<extensions::Extension> ConvertToExtension(
       std::string* error) const;
 
   // The subset of the extension manifest data we send to renderers.
-  linked_ptr<base::DictionaryValue> manifest;
+  base::DictionaryValue manifest;
 
   // The location the extension was installed from.
   extensions::Manifest::Location location;
@@ -361,6 +359,9 @@ struct ExtensionMsg_Loaded_Params {
 
   // Send creation flags so extension is initialized identically.
   int creation_flags;
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(ExtensionMsg_Loaded_Params);
 };
 
 struct ExtensionHostMsg_AutomationQuerySelector_Error {
@@ -686,6 +687,10 @@ IPC_MESSAGE_CONTROL1(ExtensionMsg_TransferBlobs,
 IPC_MESSAGE_CONTROL1(ExtensionMsg_SetWebViewPartitionID,
                      std::string /* webview_partition_id */)
 
+// Enable or disable spatial navigation.
+IPC_MESSAGE_ROUTED1(ExtensionMsg_SetSpatialNavigationEnabled,
+                    bool /* spatial_nav_enabled */)
+
 // Messages sent from the renderer to the browser:
 
 // A renderer sends this message when an extension process starts an API
@@ -700,18 +705,20 @@ IPC_MESSAGE_CONTROL2(ExtensionHostMsg_RequestForIOThread,
                      ExtensionHostMsg_Request_Params)
 
 // Notify the browser that the given extension added a listener to an event.
-IPC_MESSAGE_CONTROL4(ExtensionHostMsg_AddListener,
+IPC_MESSAGE_CONTROL5(ExtensionHostMsg_AddListener,
                      std::string /* extension_id */,
                      GURL /* listener_or_worker_scope_url */,
                      std::string /* name */,
+                     int64_t /* service_worker_version_id */,
                      int /* worker_thread_id */)
 
 // Notify the browser that the given extension removed a listener from an
 // event.
-IPC_MESSAGE_CONTROL4(ExtensionHostMsg_RemoveListener,
+IPC_MESSAGE_CONTROL5(ExtensionHostMsg_RemoveListener,
                      std::string /* extension_id */,
                      GURL /* listener_or_worker_scope_url */,
                      std::string /* name */,
+                     int64_t /* service_worker_version_id */,
                      int /* worker_thread_id */)
 
 // Notify the browser that the given extension added a listener to an event from
@@ -987,5 +994,40 @@ IPC_MESSAGE_CONTROL2(ExtensionHostMsg_IncrementServiceWorkerActivity,
 IPC_MESSAGE_CONTROL2(ExtensionHostMsg_DecrementServiceWorkerActivity,
                      int64_t /* service_worker_version_id */,
                      std::string /* request_uuid */)
+
+// Tells the browser that an event with |event_id| was successfully dispatched
+// to the worker with version |service_worker_version_id|.
+IPC_MESSAGE_CONTROL2(ExtensionHostMsg_EventAckWorker,
+                     int64_t /* service_worker_version_id */,
+                     int /* event_id */)
+
+// Tells the browser that an extension service worker context has started and
+// finished executing its top-level JavaScript.
+// Start corresponds to EmbeddedWorkerInstance::OnStarted notification.
+//
+// TODO(lazyboy): This is a workaround: ideally this IPC should be redundant
+// because it directly corresponds to EmbeddedWorkerInstance::OnStarted message.
+// However, because OnStarted message is on different mojo IPC pipe, and most
+// extension IPCs are on legacy IPC pipe, this IPC is necessary to ensure FIFO
+// ordering of this message with rest of the extension IPCs.
+// Two possible solutions to this:
+//   - Associate extension IPCs with Service Worker IPCs. This can be done (and
+//     will be a requirement) when extension IPCs are moved to mojo, but
+//     requires resolving or defining ordering dependencies amongst the
+//     extension messages, and any additional messages in Chrome.
+//   - Make Service Worker IPCs channel-associated so that there's FIFO
+//     guarantee between extension IPCs and Service Worker IPCs. This isn't
+//     straightforward as it changes SW IPC ordering with respect of rest of
+//     Chrome.
+// See https://crbug.com/879015#c4 for details.
+IPC_MESSAGE_CONTROL2(ExtensionHostMsg_DidStartServiceWorkerContext,
+                     std::string /* extension_id */,
+                     int64_t /* service_worker_version_id */)
+
+// Tells the browser that an extension service worker context has been
+// destroyed.
+IPC_MESSAGE_CONTROL2(ExtensionHostMsg_DidStopServiceWorkerContext,
+                     std::string /* extension_id */,
+                     int64_t /* service_worker_version_id */)
 
 #endif  // EXTENSIONS_COMMON_EXTENSION_MESSAGES_H_

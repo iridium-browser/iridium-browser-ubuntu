@@ -15,6 +15,7 @@
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
 #include "base/single_thread_task_runner.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/third_party/dynamic_annotations/dynamic_annotations.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
@@ -23,6 +24,7 @@
 #include "device/gamepad/gamepad_data_fetcher.h"
 #include "device/gamepad/gamepad_data_fetcher_manager.h"
 #include "device/gamepad/gamepad_user_gesture.h"
+#include "device/gamepad/public/cpp/gamepad_features.h"
 #include "mojo/public/cpp/system/platform_handle.h"
 
 namespace device {
@@ -83,17 +85,9 @@ GamepadProvider::~GamepadProvider() {
   DCHECK(data_fetchers_.empty());
 }
 
-base::SharedMemoryHandle GamepadProvider::DuplicateSharedMemoryHandle() {
-  return gamepad_shared_buffer_->shared_memory()->handle().Duplicate();
-}
-
-mojo::ScopedSharedBufferHandle GamepadProvider::GetSharedBufferHandle() {
-  // TODO(heke): Use mojo::SharedBuffer rather than base::SharedMemory in
-  // GamepadSharedBuffer. See crbug.com/670655 for details
-  return mojo::WrapSharedMemoryHandle(
-      gamepad_shared_buffer_->shared_memory()->GetReadOnlyHandle(),
-      sizeof(GamepadHardwareBuffer),
-      mojo::UnwrappedSharedMemoryHandleProtection::kReadOnly);
+base::ReadOnlySharedMemoryRegion
+GamepadProvider::DuplicateSharedMemoryRegion() {
+  return gamepad_shared_buffer_->DuplicateSharedMemoryRegion();
 }
 
 void GamepadProvider::GetCurrentGamepadData(Gamepads* data) {
@@ -103,7 +97,7 @@ void GamepadProvider::GetCurrentGamepadData(Gamepads* data) {
 }
 
 void GamepadProvider::PlayVibrationEffectOnce(
-    int pad_index,
+    uint32_t pad_index,
     mojom::GamepadHapticEffectType type,
     mojom::GamepadEffectParametersPtr params,
     mojom::GamepadHapticsManager::PlayVibrationEffectOnceCallback callback) {
@@ -126,7 +120,7 @@ void GamepadProvider::PlayVibrationEffectOnce(
 }
 
 void GamepadProvider::ResetVibrationActuator(
-    int pad_index,
+    uint32_t pad_index,
     mojom::GamepadHapticsManager::ResetVibrationActuatorCallback callback) {
   PadState* pad_state = GetConnectedPadState(pad_index);
   if (!pad_state) {
@@ -185,6 +179,9 @@ void GamepadProvider::OnDevicesChanged(base::SystemMonitor::DeviceType type) {
 }
 
 void GamepadProvider::Initialize(std::unique_ptr<GamepadDataFetcher> fetcher) {
+  sampling_interval_delta_ =
+      base::TimeDelta::FromMilliseconds(features::GetGamepadPollingInterval());
+
   base::SystemMonitor* monitor = base::SystemMonitor::Get();
   if (monitor)
     monitor->AddDevicesChangedObserver(this);
@@ -229,8 +226,7 @@ void GamepadProvider::RemoveSourceGamepadDataFetcher(GamepadSource source) {
 
 GamepadDataFetcher* GamepadProvider::GetSourceGamepadDataFetcher(
     GamepadSource source) {
-  for (GamepadFetcherVector::iterator it = data_fetchers_.begin();
-       it != data_fetchers_.end();) {
+  for (auto it = data_fetchers_.begin(); it != data_fetchers_.end();) {
     if ((*it)->source() == source) {
       return it->get();
     } else {
@@ -254,8 +250,7 @@ void GamepadProvider::DoAddGamepadDataFetcher(
 void GamepadProvider::DoRemoveSourceGamepadDataFetcher(GamepadSource source) {
   DCHECK(polling_thread_->task_runner()->BelongsToCurrentThread());
 
-  for (GamepadFetcherVector::iterator it = data_fetchers_.begin();
-       it != data_fetchers_.end();) {
+  for (auto it = data_fetchers_.begin(); it != data_fetchers_.end();) {
     if ((*it)->source() == source) {
       it = data_fetchers_.erase(it);
     } else {
@@ -287,7 +282,7 @@ void GamepadProvider::DoPoll() {
     devices_changed_ = false;
   }
 
-  for (unsigned i = 0; i < Gamepads::kItemsLengthCap; ++i)
+  for (size_t i = 0; i < Gamepads::kItemsLengthCap; ++i)
     pad_states_.get()[i].is_active = false;
 
   // Loop through each registered data fetcher and poll its gamepad data.
@@ -303,7 +298,7 @@ void GamepadProvider::DoPoll() {
   // Send out disconnect events using the last polled data before we wipe it out
   // in the mapping step.
   if (ever_had_user_gesture_) {
-    for (unsigned i = 0; i < Gamepads::kItemsLengthCap; ++i) {
+    for (size_t i = 0; i < Gamepads::kItemsLengthCap; ++i) {
       PadState& state = pad_states_.get()[i];
 
       if (!state.is_newly_active && !state.is_active &&
@@ -322,7 +317,7 @@ void GamepadProvider::DoPoll() {
     // Acquire the SeqLock. There is only ever one writer to this data.
     // See gamepad_shared_buffer.h.
     gamepad_shared_buffer_->WriteBegin();
-    for (unsigned i = 0; i < Gamepads::kItemsLengthCap; ++i) {
+    for (size_t i = 0; i < Gamepads::kItemsLengthCap; ++i) {
       PadState& state = pad_states_.get()[i];
       // Must run through the map+sanitize here or CheckForUserGesture may fail.
       MapAndSanitizeGamepadData(&state, &buffer->items[i], sanitize_);
@@ -331,7 +326,7 @@ void GamepadProvider::DoPoll() {
   }
 
   if (ever_had_user_gesture_) {
-    for (unsigned i = 0; i < Gamepads::kItemsLengthCap; ++i) {
+    for (size_t i = 0; i < Gamepads::kItemsLengthCap; ++i) {
       PadState& state = pad_states_.get()[i];
 
       if (state.is_newly_active && buffer->items[i].connected) {
@@ -351,7 +346,7 @@ void GamepadProvider::DoPoll() {
   // CheckForUserGesture call above. If we don't clear |is_newly_active| here,
   // we will notify again for the same gamepad on the next polling cycle.
   if (did_notify) {
-    for (unsigned i = 0; i < Gamepads::kItemsLengthCap; ++i)
+    for (size_t i = 0; i < Gamepads::kItemsLengthCap; ++i)
       pad_states_.get()[i].is_newly_active = false;
   }
 
@@ -372,12 +367,12 @@ void GamepadProvider::ScheduleDoPoll() {
 
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
       FROM_HERE, base::BindOnce(&GamepadProvider::DoPoll, Unretained(this)),
-      base::TimeDelta::FromMilliseconds(kDesiredSamplingIntervalMs));
+      sampling_interval_delta_);
   have_scheduled_do_poll_ = true;
 }
 
 void GamepadProvider::OnGamepadConnectionChange(bool connected,
-                                                int index,
+                                                uint32_t index,
                                                 const Gamepad& pad) {
   if (connection_change_client_)
     connection_change_client_->OnGamepadConnectionChange(connected, index, pad);

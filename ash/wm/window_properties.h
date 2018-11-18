@@ -20,6 +20,10 @@ class WindowState;
 }  // namespace wm
 
 // Used with kWidgetCreationType to indicate source of the widget creation.
+//
+// TODO: investigate removing this. If it's still needed, we can likely ask
+// the window service if it has a remote client for the window rather than using
+// a property. https://crbug.com/865616
 enum class WidgetCreationType {
   // The widget was created internally, and not at the request of a client.
   // For example, overview mode creates a number of widgets. These widgets are
@@ -42,17 +46,6 @@ enum class WidgetCreationType {
 // If this is set to true, the window stays in the same root window even if the
 // bounds outside of its root window is set.
 ASH_EXPORT extern const aura::WindowProperty<bool>* const kLockedToRootKey;
-
-// Maps to ui::mojom::WindowManager::kRenderParentTitleArea_Property.
-ASH_EXPORT extern const aura::WindowProperty<bool>* const
-    kRenderTitleAreaProperty;
-
-// Containers with this property (true) are aligned with physical pixel
-// boundary.
-extern const aura::WindowProperty<bool>* const kSnapChildrenToPixelBoundary;
-
-// Property to tell if the container uses the screen coordinates.
-extern const aura::WindowProperty<bool>* const kUsesScreenCoordinatesKey;
 
 ASH_EXPORT extern const aura::WindowProperty<WidgetCreationType>* const
     kWidgetCreationTypeKey;

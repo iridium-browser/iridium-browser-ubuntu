@@ -32,8 +32,10 @@
 
 #include <algorithm>
 #include <memory>
+
+#include "base/numerics/checked_math.h"
+#include "base/sys_byteorder.h"
 #include "third_party/blink/public/web/web_serialized_script_value_version.h"
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
 #include "third_party/blink/renderer/bindings/core/v8/idl_types.h"
 #include "third_party/blink/renderer/bindings/core/v8/native_value_traits_impl.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/serialization_tag.h"
@@ -43,23 +45,23 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_array_buffer.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_image_bitmap.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_message_port.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_mojo_handle.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_offscreen_canvas.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_shared_array_buffer.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
 #include "third_party/blink/renderer/core/imagebitmap/image_bitmap.h"
 #include "third_party/blink/renderer/core/messaging/message_port.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_buffer.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_shared_array_buffer.h"
 #include "third_party/blink/renderer/platform/bindings/dom_data_store.h"
 #include "third_party/blink/renderer/platform/bindings/dom_wrapper_world.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_state.h"
 #include "third_party/blink/renderer/platform/blob/blob_data.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/shared_buffer.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
-#include "third_party/blink/renderer/platform/wtf/byte_order.h"
-#include "third_party/blink/renderer/platform/wtf/checked_numeric.h"
 #include "third_party/blink/renderer/platform/wtf/dtoa/utils.h"
+#include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_buffer.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_hash.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
@@ -93,7 +95,7 @@ scoped_refptr<SerializedScriptValue> SerializedScriptValue::Create() {
 
 scoped_refptr<SerializedScriptValue> SerializedScriptValue::Create(
     const String& data) {
-  CheckedNumeric<size_t> data_buffer_size = data.length();
+  base::CheckedNumeric<size_t> data_buffer_size = data.length();
   data_buffer_size *= 2;
   if (!data_buffer_size.IsValid())
     return Create();
@@ -213,7 +215,7 @@ static void SwapWiredDataIfNeeded(uint8_t* buffer, size_t buffer_size) {
   size_t uchars_size = buffer_size / sizeof(UChar);
 
   for (size_t i = 0; i < uchars_size; ++i)
-    uchars[i] = ntohs(uchars[i]);
+    uchars[i] = base::NetToHost16(uchars[i]);
 }
 
 scoped_refptr<SerializedScriptValue> SerializedScriptValue::Create(
@@ -236,13 +238,12 @@ scoped_refptr<SerializedScriptValue> SerializedScriptValue::Create(
     return Create();
 
   DataBufferPtr data_buffer = AllocateBuffer(buffer->size());
-  buffer->ForEachSegment([&data_buffer](const char* segment,
-                                        size_t segment_size,
-                                        size_t segment_offset) {
-    std::copy(segment, segment + segment_size,
-              data_buffer.get() + segment_offset);
-    return true;
-  });
+  size_t offset = 0;
+  for (const auto& span : *buffer) {
+    std::copy(span.data(), span.data() + span.size(),
+              data_buffer.get() + offset);
+    offset += span.size();
+  }
   SwapWiredDataIfNeeded(data_buffer.get(), buffer->size());
 
   return base::AdoptRef(
@@ -259,6 +260,11 @@ SerializedScriptValue::SerializedScriptValue(DataBufferPtr data,
       data_buffer_size_(data_size),
       has_registered_external_allocation_(false),
       transferables_need_external_allocation_registration_(false) {}
+
+void SerializedScriptValue::SetImageBitmapContentsArray(
+    ImageBitmapContentsArray contents) {
+  image_bitmap_contents_array_ = std::move(contents);
+}
 
 SerializedScriptValue::DataBufferPtr SerializedScriptValue::AllocateBuffer(
     size_t buffer_size) {
@@ -288,7 +294,8 @@ String SerializedScriptValue::ToWireString() const {
   // Add the padding '\0', but don't put it in |m_dataBuffer|.
   // This requires direct use of uninitialized strings, though.
   UChar* destination;
-  size_t string_size_bytes = (data_buffer_size_ + 1) & ~1;
+  wtf_size_t string_size_bytes =
+      SafeCast<wtf_size_t>((data_buffer_size_ + 1) & ~1);
   String wire_string =
       String::CreateUninitialized(string_size_bytes / 2, destination);
   memcpy(destination, data_buffer_.get(), data_buffer_size_);
@@ -307,17 +314,18 @@ SerializedScriptValue::TransferImageBitmapContents(
   if (!image_bitmaps.size())
     return contents;
 
-  for (size_t i = 0; i < image_bitmaps.size(); ++i) {
+  for (wtf_size_t i = 0; i < image_bitmaps.size(); ++i) {
     if (image_bitmaps[i]->IsNeutered()) {
-      exception_state.ThrowDOMException(
-          kDataCloneError, "ImageBitmap at index " + String::Number(i) +
-                               " is already detached.");
+      exception_state.ThrowDOMException(DOMExceptionCode::kDataCloneError,
+                                        "ImageBitmap at index " +
+                                            String::Number(i) +
+                                            " is already detached.");
       return contents;
     }
   }
 
   HeapHashSet<Member<ImageBitmap>> visited;
-  for (size_t i = 0; i < image_bitmaps.size(); ++i) {
+  for (wtf_size_t i = 0; i < image_bitmaps.size(); ++i) {
     if (visited.Contains(image_bitmaps[i]))
       continue;
     visited.insert(image_bitmaps[i]);
@@ -342,19 +350,21 @@ void SerializedScriptValue::TransferOffscreenCanvas(
     return;
 
   HeapHashSet<Member<OffscreenCanvas>> visited;
-  for (size_t i = 0; i < offscreen_canvases.size(); i++) {
+  for (wtf_size_t i = 0; i < offscreen_canvases.size(); i++) {
     if (visited.Contains(offscreen_canvases[i].Get()))
       continue;
     if (offscreen_canvases[i]->IsNeutered()) {
-      exception_state.ThrowDOMException(
-          kDataCloneError, "OffscreenCanvas at index " + String::Number(i) +
-                               " is already detached.");
+      exception_state.ThrowDOMException(DOMExceptionCode::kDataCloneError,
+                                        "OffscreenCanvas at index " +
+                                            String::Number(i) +
+                                            " is already detached.");
       return;
     }
     if (offscreen_canvases[i]->RenderingContext()) {
-      exception_state.ThrowDOMException(
-          kDataCloneError, "OffscreenCanvas at index " + String::Number(i) +
-                               " has an associated context.");
+      exception_state.ThrowDOMException(DOMExceptionCode::kDataCloneError,
+                                        "OffscreenCanvas at index " +
+                                            String::Number(i) +
+                                            " has an associated context.");
       return;
     }
     visited.insert(offscreen_canvases[i].Get());
@@ -377,8 +387,8 @@ void SerializedScriptValue::CloneSharedArrayBuffers(
 
   HeapHashSet<Member<DOMArrayBufferBase>> visited;
   shared_array_buffers_contents_.Grow(array_buffers.size());
-  size_t i = 0;
-  for (auto it = array_buffers.begin(); it != array_buffers.end(); ++it) {
+  wtf_size_t i = 0;
+  for (auto* it = array_buffers.begin(); it != array_buffers.end(); ++it) {
     DOMSharedArrayBuffer* shared_array_buffer = *it;
     if (visited.Contains(shared_array_buffer))
       continue;
@@ -422,15 +432,24 @@ bool SerializedScriptValue::ExtractTransferables(
   if (value.IsEmpty() || value->IsUndefined())
     return true;
 
-  Vector<ScriptValue> transferable_array =
+  const Vector<ScriptValue>& transferable_array =
       NativeValueTraits<IDLSequence<ScriptValue>>::NativeValue(isolate, value,
                                                                exception_state);
   if (exception_state.HadException())
     return false;
 
+  return ExtractTransferables(isolate, transferable_array, transferables,
+                              exception_state);
+}
+
+bool SerializedScriptValue::ExtractTransferables(
+    v8::Isolate* isolate,
+    const Vector<ScriptValue>& object_sequence,
+    Transferables& transferables,
+    ExceptionState& exception_state) {
   // Validate the passed array of transferables.
-  uint32_t i = 0;
-  for (const auto& script_value : transferable_array) {
+  wtf_size_t i = 0;
+  for (const auto& script_value : object_sequence) {
     v8::Local<v8::Value> transferable_object = script_value.V8Value();
     // Validation of non-null objects, per HTML5 spec 10.3.3.
     if (IsUndefinedOrNull(transferable_object)) {
@@ -447,18 +466,32 @@ bool SerializedScriptValue::ExtractTransferables(
       // Check for duplicate MessagePorts.
       if (transferables.message_ports.Contains(port)) {
         exception_state.ThrowDOMException(
-            kDataCloneError, "Message port at index " + String::Number(i) +
-                                 " is a duplicate of an earlier port.");
+            DOMExceptionCode::kDataCloneError,
+            "Message port at index " + String::Number(i) +
+                " is a duplicate of an earlier port.");
         return false;
       }
       transferables.message_ports.push_back(port);
+    } else if (V8MojoHandle::hasInstance(transferable_object, isolate)) {
+      MojoHandle* handle = V8MojoHandle::ToImpl(
+          v8::Local<v8::Object>::Cast(transferable_object));
+      // Check for duplicate MojoHandles.
+      if (transferables.mojo_handles.Contains(handle)) {
+        exception_state.ThrowDOMException(
+            DOMExceptionCode::kDataCloneError,
+            "Mojo handle at index " + String::Number(i) +
+                " is a duplicate of an earlier handle.");
+        return false;
+      }
+      transferables.mojo_handles.push_back(handle);
     } else if (transferable_object->IsArrayBuffer()) {
       DOMArrayBuffer* array_buffer = V8ArrayBuffer::ToImpl(
           v8::Local<v8::Object>::Cast(transferable_object));
       if (transferables.array_buffers.Contains(array_buffer)) {
         exception_state.ThrowDOMException(
-            kDataCloneError, "ArrayBuffer at index " + String::Number(i) +
-                                 " is a duplicate of an earlier ArrayBuffer.");
+            DOMExceptionCode::kDataCloneError,
+            "ArrayBuffer at index " + String::Number(i) +
+                " is a duplicate of an earlier ArrayBuffer.");
         return false;
       }
       transferables.array_buffers.push_back(array_buffer);
@@ -467,7 +500,7 @@ bool SerializedScriptValue::ExtractTransferables(
           v8::Local<v8::Object>::Cast(transferable_object));
       if (transferables.array_buffers.Contains(shared_array_buffer)) {
         exception_state.ThrowDOMException(
-            kDataCloneError,
+            DOMExceptionCode::kDataCloneError,
             "SharedArrayBuffer at index " + String::Number(i) +
                 " is a duplicate of an earlier SharedArrayBuffer.");
         return false;
@@ -478,8 +511,9 @@ bool SerializedScriptValue::ExtractTransferables(
           v8::Local<v8::Object>::Cast(transferable_object));
       if (transferables.image_bitmaps.Contains(image_bitmap)) {
         exception_state.ThrowDOMException(
-            kDataCloneError, "ImageBitmap at index " + String::Number(i) +
-                                 " is a duplicate of an earlier ImageBitmap.");
+            DOMExceptionCode::kDataCloneError,
+            "ImageBitmap at index " + String::Number(i) +
+                " is a duplicate of an earlier ImageBitmap.");
         return false;
       }
       transferables.image_bitmaps.push_back(image_bitmap);
@@ -488,7 +522,7 @@ bool SerializedScriptValue::ExtractTransferables(
           v8::Local<v8::Object>::Cast(transferable_object));
       if (transferables.offscreen_canvases.Contains(offscreen_canvas)) {
         exception_state.ThrowDOMException(
-            kDataCloneError,
+            DOMExceptionCode::kDataCloneError,
             "OffscreenCanvas at index " + String::Number(i) +
                 " is a duplicate of an earlier OffscreenCanvas.");
         return false;
@@ -510,7 +544,7 @@ ArrayBufferArray SerializedScriptValue::ExtractNonSharedArrayBuffers(
   ArrayBufferArray result;
   // Partition array_buffers into [shared..., non_shared...], maintaining
   // relative ordering of elements with the same predicate value.
-  auto non_shared_begin =
+  auto* non_shared_begin =
       std::stable_partition(array_buffers.begin(), array_buffers.end(),
                             [](Member<DOMArrayBufferBase>& array_buffer) {
                               return array_buffer->IsShared();
@@ -518,8 +552,9 @@ ArrayBufferArray SerializedScriptValue::ExtractNonSharedArrayBuffers(
   // Copy the non-shared array buffers into result, and remove them from
   // array_buffers.
   result.AppendRange(non_shared_begin, array_buffers.end());
-  array_buffers.EraseAt(non_shared_begin - array_buffers.begin(),
-                        array_buffers.end() - non_shared_begin);
+  array_buffers.EraseAt(
+      static_cast<wtf_size_t>(non_shared_begin - array_buffers.begin()),
+      static_cast<wtf_size_t>(array_buffers.end() - non_shared_begin));
   return result;
 }
 
@@ -533,39 +568,44 @@ SerializedScriptValue::TransferArrayBufferContents(
   if (!array_buffers.size())
     return ArrayBufferContentsArray();
 
-  for (auto it = array_buffers.begin(); it != array_buffers.end(); ++it) {
+  for (auto* it = array_buffers.begin(); it != array_buffers.end(); ++it) {
     DOMArrayBufferBase* array_buffer = *it;
     if (array_buffer->IsNeutered()) {
-      size_t index = std::distance(array_buffers.begin(), it);
-      exception_state.ThrowDOMException(
-          kDataCloneError, "ArrayBuffer at index " + String::Number(index) +
-                               " is already neutered.");
+      wtf_size_t index =
+          static_cast<wtf_size_t>(std::distance(array_buffers.begin(), it));
+      exception_state.ThrowDOMException(DOMExceptionCode::kDataCloneError,
+                                        "ArrayBuffer at index " +
+                                            String::Number(index) +
+                                            " is already neutered.");
       return ArrayBufferContentsArray();
     }
   }
 
   contents.Grow(array_buffers.size());
   HeapHashSet<Member<DOMArrayBufferBase>> visited;
-  for (auto it = array_buffers.begin(); it != array_buffers.end(); ++it) {
+  for (auto* it = array_buffers.begin(); it != array_buffers.end(); ++it) {
     DOMArrayBufferBase* array_buffer_base = *it;
     if (visited.Contains(array_buffer_base))
       continue;
     visited.insert(array_buffer_base);
 
-    size_t index = std::distance(array_buffers.begin(), it);
+    wtf_size_t index =
+        static_cast<wtf_size_t>(std::distance(array_buffers.begin(), it));
     if (array_buffer_base->IsShared()) {
-      exception_state.ThrowDOMException(
-          kDataCloneError, "SharedArrayBuffer at index " +
-                               String::Number(index) + " is not transferable.");
+      exception_state.ThrowDOMException(DOMExceptionCode::kDataCloneError,
+                                        "SharedArrayBuffer at index " +
+                                            String::Number(index) +
+                                            " is not transferable.");
       return ArrayBufferContentsArray();
     } else {
       DOMArrayBuffer* array_buffer =
           static_cast<DOMArrayBuffer*>(array_buffer_base);
 
       if (!array_buffer->Transfer(isolate, contents.at(index))) {
-        exception_state.ThrowDOMException(
-            kDataCloneError, "ArrayBuffer at index " + String::Number(index) +
-                                 " could not be transferred.");
+        exception_state.ThrowDOMException(DOMExceptionCode::kDataCloneError,
+                                          "ArrayBuffer at index " +
+                                              String::Number(index) +
+                                              " could not be transferred.");
         return ArrayBufferContentsArray();
       }
     }

@@ -53,7 +53,8 @@ static void EncodePinnedTab(TabStripModel* model,
   std::unique_ptr<base::DictionaryValue> value(new base::DictionaryValue());
 
   content::WebContents* web_contents = model->GetWebContentsAt(index);
-  NavigationEntry* entry = web_contents->GetController().GetActiveEntry();
+  NavigationEntry* entry =
+      web_contents->GetController().GetLastCommittedEntry();
   if (entry) {
     value->SetString(kURL, entry->GetURL().spec());
     values->Append(std::move(value));
@@ -110,7 +111,7 @@ void PinnedTabCodec::WritePinnedTabs(Profile* profile,
   ListPrefUpdate update(prefs, prefs::kPinnedTabs);
   base::ListValue* values = update.Get();
   values->Clear();
-  for (StartupTabs::const_iterator i = tabs.begin(); i != tabs.end(); ++i)
+  for (auto i = tabs.begin(); i != tabs.end(); ++i)
     EncodeTab(*i, values);
 }
 

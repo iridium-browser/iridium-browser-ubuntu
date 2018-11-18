@@ -21,8 +21,8 @@
 
 class OAuth2TokenService;
 
-namespace net {
-class URLRequestContextGetter;
+namespace network {
+class SharedURLLoaderFactory;
 }
 
 namespace policy {
@@ -107,7 +107,7 @@ class POLICY_EXPORT CloudPolicyClientRegistrationHelper
   // GAIA to get information about the signed in user.
   std::string oauth_access_token_;
 
-  scoped_refptr<net::URLRequestContextGetter> context_;
+  scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory_;
   CloudPolicyClient* client_;
   enterprise_management::DeviceRegisterRequest::Type registration_type_;
   base::Closure callback_;

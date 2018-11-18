@@ -24,7 +24,7 @@
 // the impact of some pruning algorithm.
 // We assume that we already have a histogram of memory usage, such as:
 
-//   UMA_HISTOGRAM_COUNTS("Memory.RendererTotal", count);
+//   UMA_HISTOGRAM_COUNTS_1M("Memory.RendererTotal", count);
 
 // Somewhere in main thread initialization code, we'd probably define an
 // instance of a FieldTrial, with code such as:
@@ -487,6 +487,8 @@ class BASE_EXPORT FieldTrialList {
   // the trial does not exist. The first call of this function on a given field
   // trial will mark it as active, so that its state will be reported with usage
   // metrics, crashes, etc.
+  // Note: Direct use of this function and related FieldTrial functions is
+  // generally discouraged - instead please use base::Feature when possible.
   static std::string FindFullName(const std::string& trial_name);
 
   // Returns true if the named trial has been registered.

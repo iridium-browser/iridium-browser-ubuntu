@@ -56,7 +56,6 @@ class HTMLElement;
 class HTMLSpanElement;
 struct LocalCaretRect;
 class Node;
-class Pasteboard;
 
 // This file contains a set of helper functions used by the editing commands
 
@@ -137,7 +136,7 @@ inline ContainerNode* ParentCrossingShadowBoundaries<EditingInFlatTreeStrategy>(
   return FlatTreeTraversal::Parent(node);
 }
 
-void WriteImageNodeToPasteboard(Pasteboard*, const Node&, const String&);
+void WriteImageNodeToClipboard(const Node&, const String&);
 
 // boolean functions on Node
 
@@ -354,11 +353,11 @@ CORE_EXPORT String RepeatString(const String&, unsigned);
 
 // If current position is at grapheme boundary, return 0; otherwise, return the
 // distance to its nearest left grapheme boundary.
-size_t ComputeDistanceToLeftGraphemeBoundary(const Position&);
+wtf_size_t ComputeDistanceToLeftGraphemeBoundary(const Position&);
 
 // If current position is at grapheme boundary, return 0; otherwise, return the
 // distance to its nearest right grapheme boundary.
-size_t ComputeDistanceToRightGraphemeBoundary(const Position&);
+wtf_size_t ComputeDistanceToRightGraphemeBoundary(const Position&);
 
 // -------------------------------------------------------------------------
 // LocalCaretRect conversions

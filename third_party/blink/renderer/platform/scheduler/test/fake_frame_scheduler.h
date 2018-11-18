@@ -7,26 +7,29 @@
 
 #include <deque>
 
-#include "third_party/blink/renderer/platform/scheduler/child/worker_scheduler_proxy.h"
+#include "third_party/blink/renderer/platform/scheduler/main_thread/frame_scheduler_impl.h"
+#include "third_party/blink/renderer/platform/scheduler/main_thread/main_thread_task_queue.h"
 #include "third_party/blink/renderer/platform/scheduler/public/frame_scheduler.h"
-#include "third_party/blink/renderer/platform/scheduler/renderer/main_thread_task_queue.h"
+#include "third_party/blink/renderer/platform/scheduler/worker/worker_scheduler_proxy.h"
 
 namespace blink {
 namespace scheduler {
 
 class MainThreadTaskQueueForTest : public MainThreadTaskQueue {
  public:
+  using MainThreadTaskQueue::SetFrameSchedulerForTest;
+
   MainThreadTaskQueueForTest(QueueType queue_type)
       : MainThreadTaskQueue(nullptr,
                             Spec(MainThreadTaskQueue::NameForQueueType(
                                 MainThreadTaskQueue::QueueType::kTest)),
                             QueueCreationParams(queue_type),
                             nullptr) {}
-  ~MainThreadTaskQueueForTest() = default;
+  ~MainThreadTaskQueueForTest() override = default;
 };
 
 // A dummy FrameScheduler for tests.
-class FakeFrameScheduler : public FrameScheduler {
+class FakeFrameScheduler : public FrameSchedulerImpl {
  public:
   FakeFrameScheduler()
       : page_scheduler_(nullptr),
@@ -35,13 +38,16 @@ class FakeFrameScheduler : public FrameScheduler {
         frame_type_(FrameScheduler::FrameType::kSubframe),
         is_cross_origin_(false),
         is_exempt_from_throttling_(false) {}
+
   FakeFrameScheduler(PageScheduler* page_scheduler,
                      bool is_page_visible,
                      bool is_frame_visible,
                      FrameScheduler::FrameType frame_type,
                      bool is_cross_origin,
-                     bool is_exempt_from_throttling)
-      : page_scheduler_(page_scheduler),
+                     bool is_exempt_from_throttling,
+                     FrameScheduler::Delegate* delegate)
+      : FrameSchedulerImpl(nullptr, nullptr, delegate, nullptr, frame_type),
+        page_scheduler_(page_scheduler),
         is_page_visible_(is_page_visible),
         is_frame_visible_(is_frame_visible),
         frame_type_(frame_type),
@@ -58,7 +64,7 @@ class FakeFrameScheduler : public FrameScheduler {
     std::unique_ptr<FakeFrameScheduler> Build() {
       return std::make_unique<FakeFrameScheduler>(
           page_scheduler_, is_page_visible_, is_frame_visible_, frame_type_,
-          is_cross_origin_, is_exempt_from_throttling_);
+          is_cross_origin_, is_exempt_from_throttling_, delegate_);
     }
 
     Builder& SetPageScheduler(PageScheduler* page_scheduler) {
@@ -91,6 +97,11 @@ class FakeFrameScheduler : public FrameScheduler {
       return *this;
     }
 
+    Builder& SetDelegate(FrameScheduler::Delegate* delegate) {
+      delegate_ = delegate;
+      return *this;
+    }
+
    private:
     PageScheduler* page_scheduler_ = nullptr;
     bool is_page_visible_ = false;
@@ -99,14 +110,10 @@ class FakeFrameScheduler : public FrameScheduler {
         FrameScheduler::FrameType::kMainFrame;
     bool is_cross_origin_ = false;
     bool is_exempt_from_throttling_ = false;
+    FrameScheduler::Delegate* delegate_ = nullptr;
   };
 
   // FrameScheduler implementation:
-  std::unique_ptr<ThrottlingObserverHandle> AddThrottlingObserver(
-      ObserverType,
-      Observer*) override {
-    return nullptr;
-  }
   void SetFrameVisible(bool) override {}
   bool IsFrameVisible() const override { return is_frame_visible_; }
   bool IsPageVisible() const override { return is_page_visible_; }
@@ -123,7 +130,7 @@ class FakeFrameScheduler : public FrameScheduler {
   PageScheduler* GetPageScheduler() const override { return page_scheduler_; }
   WebScopedVirtualTimePauser CreateWebScopedVirtualTimePauser(
       const WTF::String& name,
-      WebScopedVirtualTimePauser::VirtualTaskDuration duration) {
+      WebScopedVirtualTimePauser::VirtualTaskDuration duration) override {
     return WebScopedVirtualTimePauser();
   }
   void DidStartProvisionalLoad(bool is_main_frame) override {}
@@ -138,6 +145,10 @@ class FakeFrameScheduler : public FrameScheduler {
     return is_exempt_from_throttling_;
   }
   std::unique_ptr<WorkerSchedulerProxy> CreateWorkerSchedulerProxy() {
+    return nullptr;
+  }
+  std::unique_ptr<blink::mojom::blink::PauseSubresourceLoadingHandle>
+  GetPauseSubresourceLoadingHandle() override {
     return nullptr;
   }
 

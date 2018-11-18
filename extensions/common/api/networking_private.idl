@@ -154,6 +154,7 @@ namespace networkingPrivate {
 
   dictionary APNProperties {
     DOMString AccessPointName;
+    DOMString? Authentication;
     DOMString? Language;
     DOMString? LocalizedName;
     DOMString? Name;
@@ -163,6 +164,7 @@ namespace networkingPrivate {
 
   dictionary ManagedAPNProperties {
     ManagedDOMString AccessPointName;
+    ManagedDOMString? Authentication;
     ManagedDOMString? Language;
     ManagedDOMString? LocalizedName;
     ManagedDOMString? Name;
@@ -585,6 +587,10 @@ namespace networkingPrivate {
     long? SignalStrength;
   };
 
+  dictionary EAPStateProperties {
+    DOMString? Outer;
+  };
+
   dictionary EthernetProperties {
     boolean? AutoConnect;
     DOMString? Authentication;
@@ -652,6 +658,7 @@ namespace networkingPrivate {
     DOMString? SSID;
     DOMString? Security;
     long? SignalStrength;
+    DOMString? TetheringState;
   };
 
   dictionary ManagedWiFiProperties {
@@ -669,15 +676,18 @@ namespace networkingPrivate {
     ManagedDOMString? SSID;
     ManagedDOMString Security;
     long? SignalStrength;
+    DOMString? TetheringState;
   };
 
   dictionary WiFiStateProperties {
     DOMString? BSSID;
+    EAPStateProperties? EAP;
     long? Frequency;
     DOMString? HexSSID;
     DOMString Security;
     long? SignalStrength;
     DOMString? SSID;
+    DOMString? TetheringState;
   };
 
   dictionary WiMAXProperties {
@@ -801,6 +811,9 @@ namespace networkingPrivate {
     // The network type associated with the device (Cellular, Ethernet, WiFi, or
     // WiMAX).
     NetworkType Type;
+
+    // Whether or not any managed networks are available/visible.
+    boolean? ManagedNetworkAvailable;
   };
 
   dictionary VerificationProperties {
@@ -862,6 +875,16 @@ namespace networkingPrivate {
     // If true, only policy networks may be connected to and no new networks may
     // be added or configured. Defaults to false.
     boolean? AllowOnlyPolicyNetworksToConnect;
+
+    // If true and a managed network is available in the visible network list,
+    // only policy networks may be connected to and no new networks may be added
+    // or configured. Defaults to false.
+    boolean? AllowOnlyPolicyNetworksToConnectIfAvailable;
+
+    // List of blacklisted networks. Connections to blacklisted networks are
+    // prohibited. Networks can be whitelisted again by specifying an explicit
+    // network configuration. Defaults to an empty list.
+    DOMString[]? BlacklistedHexSSIDs;
   };
 
   dictionary Certificate {

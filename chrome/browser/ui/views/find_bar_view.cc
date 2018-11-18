@@ -9,6 +9,7 @@
 #include "base/i18n/number_formatting.h"
 #include "base/macros.h"
 #include "base/strings/string_util.h"
+#include "build/build_config.h"
 #include "chrome/app/vector_icons/vector_icons.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/themes/theme_properties.h"
@@ -18,9 +19,9 @@
 #include "chrome/browser/ui/find_bar/find_notification_details.h"
 #include "chrome/browser/ui/find_bar/find_tab_helper.h"
 #include "chrome/browser/ui/view_ids.h"
+#include "chrome/browser/ui/views/chrome_layout_provider.h"
 #include "chrome/browser/ui/views/find_bar_host.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
-#include "chrome/browser/ui/views/harmony/chrome_layout_provider.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/vector_icons/vector_icons.h"
@@ -245,7 +246,12 @@ void FindBarView::UpdateForResult(const FindNotificationDetails& result,
   // http://crbug.com/34970: some IMEs get confused if we change the text
   // composed by them. To avoid this problem, we should check the IME status and
   // update the text only when the IME is not composing text.
-  if (find_text_->text() != find_text && !find_text_->IsIMEComposing()) {
+  //
+  // Find Bar hosts with global find pasteboards are expected to preserve the
+  // find text contents after clearing the find results as the normal
+  // prepopulation code does not run.
+  if (find_text_->text() != find_text && !find_text_->IsIMEComposing() &&
+      (!find_bar_host_->HasGlobalFindPasteboard() || !find_text.empty())) {
     find_text_->SetText(find_text);
     find_text_->SelectAll(true);
   }
@@ -316,7 +322,9 @@ void FindBarView::AddedToWidget() {
 
 void FindBarView::SetFocusAndSelection(bool select_all) {
   find_text_->RequestFocus();
-  GetWidget()->GetInputMethod()->ShowImeIfNeeded();
+#if !defined(OS_WIN)
+  GetWidget()->GetInputMethod()->ShowVirtualKeyboardIfEnabled();
+#endif
   if (select_all && !find_text_->text().empty())
     find_text_->SelectAll(true);
 }
@@ -412,6 +420,8 @@ void FindBarView::Find(const base::string16& search_text) {
 
   last_searched_text_ = search_text;
 
+  controller->OnUserChangedFindText(search_text);
+
   // When the user changes something in the text box we check the contents and
   // if the textbox contains something we set it as the new search string and
   // initiate search (even though old searches might be in progress).
@@ -453,18 +463,19 @@ void FindBarView::OnNativeThemeChanged(const ui::NativeTheme* theme) {
   SetBackground(std::make_unique<views::BubbleBackground>(border.get()));
   SetBorder(std::move(border));
 
-  match_count_text_->SetBackgroundColor(bg_color);
-  SkColor text_color =
-      theme->GetSystemColor(ui::NativeTheme::kColorId_TextfieldDefaultColor);
-  match_count_text_->SetEnabledColor(SkColorSetA(text_color, 0x69));
-  separator_->SetColor(SkColorSetA(text_color, 0x26));
-
-  const SkColor base_icon_color = GetNativeTheme()->GetSystemColor(
+  const SkColor base_foreground_color = GetNativeTheme()->GetSystemColor(
       ui::NativeTheme::kColorId_TextfieldDefaultColor);
+
+  match_count_text_->SetBackgroundColor(bg_color);
+  match_count_text_->SetEnabledColor(
+      SkColorSetA(base_foreground_color, gfx::kGoogleGreyAlpha700));
+  separator_->SetColor(
+      SkColorSetA(base_foreground_color, gfx::kGoogleGreyAlpha300));
+
   views::SetImageFromVectorIcon(find_previous_button_, kCaretUpIcon,
-                                base_icon_color);
+                                base_foreground_color);
   views::SetImageFromVectorIcon(find_next_button_, kCaretDownIcon,
-                                base_icon_color);
-  views::SetImageFromVectorIcon(close_button_, vector_icons::kClose16Icon,
-                                base_icon_color);
+                                base_foreground_color);
+  views::SetImageFromVectorIcon(close_button_, vector_icons::kCloseRoundedIcon,
+                                base_foreground_color);
 }

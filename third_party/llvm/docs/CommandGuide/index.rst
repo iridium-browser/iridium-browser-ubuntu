@@ -23,7 +23,9 @@ Basic Commands
    llvm-ar
    llvm-lib
    llvm-nm
+   llvm-objdump
    llvm-config
+   llvm-cxxmap
    llvm-diff
    llvm-cov
    llvm-profdata
@@ -53,5 +55,6 @@ Developer Tools
    tblgen
    lit
    llvm-build
+   llvm-exegesis
    llvm-pdbutil
    llvm-readobj

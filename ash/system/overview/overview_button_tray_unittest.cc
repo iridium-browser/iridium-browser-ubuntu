@@ -15,19 +15,23 @@
 #include "ash/system/status_area_widget_test_helper.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/test/ash_test_helper.h"
+#include "ash/window_factory.h"
 #include "ash/wm/overview/window_selector_controller.h"
 #include "ash/wm/splitview/split_view_controller.h"
 #include "ash/wm/tablet_mode/tablet_mode_controller.h"
+#include "ash/wm/tablet_mode/tablet_mode_controller_test_api.h"
 #include "ash/wm/window_state.h"
 #include "ash/wm/window_util.h"
 #include "base/command_line.h"
-#include "base/test/user_action_tester.h"
+#include "base/test/metrics/user_action_tester.h"
 #include "base/time/time.h"
+#include "services/ws/public/cpp/input_devices/input_device_client_test_api.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/window.h"
 #include "ui/compositor/scoped_animation_duration_scale_mode.h"
 #include "ui/display/display_switches.h"
 #include "ui/display/manager/display_manager.h"
+#include "ui/events/devices/input_device.h"
 #include "ui/events/event.h"
 #include "ui/events/event_constants.h"
 #include "ui/events/gestures/gesture_types.h"
@@ -70,9 +74,21 @@ class OverviewButtonTrayTest : public AshTestBase {
   OverviewButtonTrayTest() = default;
   ~OverviewButtonTrayTest() override = default;
 
-  void SetUp() override;
+  void SetUp() override {
+    base::CommandLine::ForCurrentProcess()->AppendSwitch(
+        ::switches::kUseFirstDisplayAsInternal);
 
-  void NotifySessionStateChanged();
+    AshTestBase::SetUp();
+
+    ws::InputDeviceClientTestApi().SetKeyboardDevices({ui::InputDevice(
+        3, ui::InputDeviceType::INPUT_DEVICE_INTERNAL, "keyboard")});
+    base::RunLoop().RunUntilIdle();
+  }
+
+  void NotifySessionStateChanged() {
+    GetTray()->OnSessionStateChanged(
+        Shell::Get()->session_controller()->GetSessionState());
+  }
 
  protected:
   views::ImageView* GetImageView(OverviewButtonTray* tray) {
@@ -82,17 +98,6 @@ class OverviewButtonTrayTest : public AshTestBase {
  private:
   DISALLOW_COPY_AND_ASSIGN(OverviewButtonTrayTest);
 };
-
-void OverviewButtonTrayTest::SetUp() {
-  base::CommandLine::ForCurrentProcess()->AppendSwitch(
-      ::switches::kUseFirstDisplayAsInternal);
-  AshTestBase::SetUp();
-}
-
-void OverviewButtonTrayTest::NotifySessionStateChanged() {
-  GetTray()->OnSessionStateChanged(
-      Shell::Get()->session_controller()->GetSessionState());
-}
 
 // Ensures that creation doesn't cause any crashes and adds the image icon.
 TEST_F(OverviewButtonTrayTest, BasicConstruction) {
@@ -104,10 +109,10 @@ TEST_F(OverviewButtonTrayTest, BasicConstruction) {
 // By default the system should not have TabletMode enabled.
 TEST_F(OverviewButtonTrayTest, TabletModeObserverOnTabletModeToggled) {
   ASSERT_FALSE(GetTray()->visible());
-  Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(true);
+  TabletModeControllerTestApi().EnterTabletMode();
   EXPECT_TRUE(GetTray()->visible());
 
-  Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(false);
+  TabletModeControllerTestApi().LeaveTabletMode();
   EXPECT_FALSE(GetTray()->visible());
 }
 
@@ -190,27 +195,35 @@ TEST_F(OverviewButtonTrayTest, TrayOverviewUserAction) {
 // By default the DisplayManger is in extended mode.
 TEST_F(OverviewButtonTrayTest, DisplaysOnBothDisplays) {
   UpdateDisplay("400x400,200x200");
+  base::RunLoop().RunUntilIdle();
   EXPECT_FALSE(GetTray()->visible());
   EXPECT_FALSE(GetSecondaryTray()->visible());
-  Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(true);
+  TabletModeControllerTestApi().EnterTabletMode();
+  base::RunLoop().RunUntilIdle();
+  // DisplayConfigurationObserver enables mirror mode when tablet mode is
+  // enabled. Disable mirror mode to test tablet mode with multiple displays.
+  display_manager()->SetMirrorMode(display::MirrorMode::kOff, base::nullopt);
+  base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(GetTray()->visible());
   EXPECT_TRUE(GetSecondaryTray()->visible());
-  Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(false);
 }
 
 // Tests if Maximize Mode is enabled before a secondary display is attached
 // that the second OverviewButtonTray should be created in a visible state.
-TEST_F(OverviewButtonTrayTest, SecondaryTrayCreatedVisible) {
-  Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(true);
+// TODO(oshima/jonross): This fails with RunIntilIdle after UpdateDisplay,
+// so disabling mirror mode after enabling tablet mode does not work.
+// https://crbug.com/798857.
+TEST_F(OverviewButtonTrayTest, DISABLED_SecondaryTrayCreatedVisible) {
+  TabletModeControllerTestApi().EnterTabletMode();
   UpdateDisplay("400x400,200x200");
+  base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(GetSecondaryTray()->visible());
-  Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(false);
 }
 
 // Tests that the tray loses visibility when a user logs out, and that it
 // regains visibility when a user logs back in.
 TEST_F(OverviewButtonTrayTest, VisibilityChangesForLoginStatus) {
-  Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(true);
+  TabletModeControllerTestApi().EnterTabletMode();
   ClearLogin();
   Shell::Get()->UpdateAfterLoginStatusChange(LoginStatus::NOT_LOGGED_IN);
   EXPECT_FALSE(GetTray()->visible());
@@ -223,7 +236,6 @@ TEST_F(OverviewButtonTrayTest, VisibilityChangesForLoginStatus) {
   SetUserAddingScreenRunning(false);
   NotifySessionStateChanged();
   EXPECT_TRUE(GetTray()->visible());
-  Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(false);
 }
 
 // Tests that the tray only renders as active while selection is ongoing. Any
@@ -247,7 +259,7 @@ TEST_F(OverviewButtonTrayTest, ActiveStateOnlyDuringOverviewMode) {
 
 // Test that a hide animation can complete.
 TEST_F(OverviewButtonTrayTest, HideAnimationAlwaysCompletes) {
-  Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(true);
+  TabletModeControllerTestApi().EnterTabletMode();
   EXPECT_TRUE(GetTray()->visible());
   GetTray()->SetVisible(false);
   EXPECT_FALSE(GetTray()->visible());
@@ -256,7 +268,7 @@ TEST_F(OverviewButtonTrayTest, HideAnimationAlwaysCompletes) {
 // Test that when a hide animation is aborted via deletion, the
 // OverviewButton is still hidden.
 TEST_F(OverviewButtonTrayTest, HideAnimationAlwaysCompletesOnDelete) {
-  Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(true);
+  TabletModeControllerTestApi().EnterTabletMode();
 
   // Long duration for hide animation, to allow it to be interrupted.
   std::unique_ptr<ui::ScopedAnimationDurationScaleMode> hide_duration(
@@ -280,7 +292,7 @@ TEST_F(OverviewButtonTrayTest, HideAnimationAlwaysCompletesOnDelete) {
 TEST_F(OverviewButtonTrayTest, VisibilityChangesForSystemModalWindow) {
   // TODO(jonross): When CreateTestWindow*() have been unified, use the
   // appropriate method to replace this setup. (crbug.com/483503)
-  std::unique_ptr<aura::Window> window(new aura::Window(nullptr));
+  std::unique_ptr<aura::Window> window = window_factory::NewWindow();
   window->SetProperty(aura::client::kModalKey, ui::MODAL_TYPE_SYSTEM);
   window->SetType(aura::client::WINDOW_TYPE_NORMAL);
   window->Init(ui::LAYER_TEXTURED);
@@ -288,9 +300,9 @@ TEST_F(OverviewButtonTrayTest, VisibilityChangesForSystemModalWindow) {
   ParentWindowInPrimaryRootWindow(window.get());
 
   ASSERT_TRUE(Shell::IsSystemModalWindowOpen());
-  Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(true);
+  TabletModeControllerTestApi().EnterTabletMode();
   EXPECT_TRUE(GetTray()->visible());
-  Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(false);
+  TabletModeControllerTestApi().LeaveTabletMode();
   EXPECT_FALSE(GetTray()->visible());
 }
 
@@ -317,7 +329,7 @@ TEST_F(OverviewButtonTrayTest, TransientChildQuickSwitch) {
 // Verify that quick switch works properly when in split view mode.
 TEST_F(OverviewButtonTrayTest, SplitviewModeQuickSwitch) {
   // Splitview is only available in tablet mode.
-  Shell::Get()->tablet_mode_controller()->EnableTabletModeWindowManager(true);
+  TabletModeControllerTestApi().EnterTabletMode();
 
   std::unique_ptr<aura::Window> window1 = CreateTestWindow();
   std::unique_ptr<aura::Window> window2 = CreateTestWindow();
@@ -347,6 +359,18 @@ TEST_F(OverviewButtonTrayTest, SplitviewModeQuickSwitch) {
   EXPECT_EQ(window2.get(), wm::GetActiveWindow());
 
   split_view_controller->EndSplitView();
+}
+
+// Tests that the tray remains visible when leaving tablet mode due to external
+// mouse being connected.
+TEST_F(OverviewButtonTrayTest, LeaveTabletModeBecauseExternalMouse) {
+  TabletModeControllerTestApi().OpenLidToAngle(315.0f);
+  EXPECT_TRUE(TabletModeControllerTestApi().IsTabletModeStarted());
+  ASSERT_TRUE(GetTray()->visible());
+
+  TabletModeControllerTestApi().AttachExternalMouse();
+  EXPECT_FALSE(TabletModeControllerTestApi().IsTabletModeStarted());
+  EXPECT_TRUE(GetTray()->visible());
 }
 
 }  // namespace ash

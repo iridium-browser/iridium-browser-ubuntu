@@ -9,8 +9,6 @@
  * PATENTS file, you can obtain it at www.aomedia.org/license/patent.
  */
 
-#define __AOM_MEM_C__
-
 #include "aom_mem.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -50,12 +48,11 @@ static void *GetActualMallocAddress(void *const mem) {
 
 void *aom_memalign(size_t align, size_t size) {
   void *x = NULL;
-  void *addr;
   const size_t aligned_size = GetAlignedMallocSize(size, align);
 #if defined(AOM_MAX_ALLOCABLE_MEMORY)
   if (!check_size_argument_overflow(1, aligned_size)) return NULL;
 #endif
-  addr = malloc(aligned_size);
+  void *const addr = malloc(aligned_size);
   if (addr) {
     x = align_addr((unsigned char *)addr + ADDRESS_STORAGE_SIZE, align);
     SetActualMallocAddress(x, addr);
@@ -79,11 +76,9 @@ void aom_free(void *memblk) {
   }
 }
 
-#if CONFIG_HIGHBITDEPTH
 void *aom_memset16(void *dest, int val, size_t length) {
   size_t i;
   uint16_t *dest16 = (uint16_t *)dest;
   for (i = 0; i < length; i++) *dest16++ = val;
   return dest;
 }
-#endif  // CONFIG_HIGHBITDEPTH

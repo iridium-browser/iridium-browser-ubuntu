@@ -11,11 +11,11 @@
 #ifndef LIBANGLE_BUFFER_H_
 #define LIBANGLE_BUFFER_H_
 
+#include "common/PackedEnums.h"
 #include "common/angleutils.h"
 #include "libANGLE/Debug.h"
 #include "libANGLE/Error.h"
 #include "libANGLE/IndexRangeCache.h"
-#include "libANGLE/PackedGLEnums.h"
 #include "libANGLE/RefCountObject.h"
 
 namespace rx
@@ -60,7 +60,8 @@ class BufferState final : angle::NonCopyable
     GLint64 mMapOffset;
     GLint64 mMapLength;
     int mBindingCount;
-    int mTransformFeedbackBindingCount;
+    int mTransformFeedbackIndexedBindingCount;
+    int mTransformFeedbackGenericBindingCount;
 };
 
 class Buffer final : public RefCountObject, public LabeledObject
@@ -68,12 +69,12 @@ class Buffer final : public RefCountObject, public LabeledObject
   public:
     Buffer(rx::GLImplFactory *factory, GLuint id);
     ~Buffer() override;
-    Error onDestroy(const Context *context) override;
+    void onDestroy(const Context *context) override;
 
     void setLabel(const std::string &label) override;
     const std::string &getLabel() const override;
 
-    Error bufferData(const Context *context,
+    Error bufferData(Context *context,
                      BufferBinding target,
                      const void *data,
                      GLsizeiptr size,
@@ -116,7 +117,8 @@ class Buffer final : public RefCountObject, public LabeledObject
 
     bool isBound() const;
     bool isBoundForTransformFeedbackAndOtherUse() const;
-    void onBindingChanged(bool bound, BufferBinding target);
+    void onTFBindingChanged(const Context *context, bool bound, bool indexed);
+    void onNonTFBindingChanged(const Context *context, int incr) { mState.mBindingCount += incr; }
 
   private:
     BufferState mState;

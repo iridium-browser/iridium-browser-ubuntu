@@ -137,7 +137,8 @@ class PageInfoBubbleView : public PageInfoBubbleViewBase,
   void SetIdentityInfo(const IdentityInfo& identity_info) override;
 #if defined(SAFE_BROWSING_DB_LOCAL)
   std::unique_ptr<PageInfoUI::SecurityDescription>
-  CreateSecurityDescriptionForPasswordReuse() const override;
+  CreateSecurityDescriptionForPasswordReuse(
+      bool is_enterprise_password) const override;
 #endif
 
   // Creates the contents of the |site_settings_view_|. The ownership of the
@@ -163,9 +164,7 @@ class PageInfoBubbleView : public PageInfoBubbleViewBase,
   // The view that contains the certificate, cookie, and permissions sections.
   views::View* site_settings_view_;
 
-  // The link that opens the "Cookies" dialog. Non-harmony mode only.
-  views::Link* cookie_link_legacy_;
-  // The bubble that opens the "Cookies" dialog. Harmony mode only.
+  // The button that opens the "Cookies" dialog.
   HoverButton* cookie_button_;
 
   // The view that contains the "Permissions" table of the bubble.

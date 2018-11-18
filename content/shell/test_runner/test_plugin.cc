@@ -13,21 +13,20 @@
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/memory/shared_memory.h"
+#include "base/no_destructor.h"
 #include "base/strings/stringprintf.h"
-#include "cc/blink/web_layer_impl.h"
 #include "cc/layers/texture_layer.h"
 #include "cc/resources/cross_thread_shared_bitmap.h"
 #include "components/viz/common/resources/bitmap_allocation.h"
 #include "content/shell/test_runner/web_test_delegate.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
 #include "third_party/blink/public/platform/platform.h"
+#include "third_party/blink/public/platform/scheduler/test/renderer_scheduler_test_support.h"
 #include "third_party/blink/public/platform/web_coalesced_input_event.h"
-#include "third_party/blink/public/platform/web_compositor_support.h"
 #include "third_party/blink/public/platform/web_gesture_event.h"
 #include "third_party/blink/public/platform/web_graphics_context_3d_provider.h"
 #include "third_party/blink/public/platform/web_input_event.h"
 #include "third_party/blink/public/platform/web_mouse_event.h"
-#include "third_party/blink/public/platform/web_thread.h"
 #include "third_party/blink/public/platform/web_touch_event.h"
 #include "third_party/blink/public/platform/web_touch_point.h"
 #include "third_party/blink/public/platform/web_url.h"
@@ -130,9 +129,7 @@ TestPlugin::TestPlugin(const blink::WebPluginParams& params,
       print_user_gesture_status_(false),
       can_process_drag_(false),
       supports_keyboard_focus_(false),
-      is_persistent_(params.mime_type == PluginPersistsMimeType()),
-      can_create_without_renderer_(params.mime_type ==
-                                   CanCreateWithoutRendererMimeType()) {
+      is_persistent_(params.mime_type == PluginPersistsMimeType()) {
   DCHECK_EQ(params.attribute_names.size(), params.attribute_values.size());
   size_t size = params.attribute_names.size();
   for (size_t i = 0; i < size; ++i) {
@@ -160,9 +157,6 @@ TestPlugin::TestPlugin(const blink::WebPluginParams& params,
     else if (attribute_name == "print-user-gesture-status")
       print_user_gesture_status_ = ParseBoolean(attribute_value);
   }
-  if (can_create_without_renderer_)
-    delegate_->PrintMessage(
-        std::string("TestPlugin: canCreateWithoutRenderer\n"));
 }
 
 TestPlugin::~TestPlugin() {}
@@ -178,7 +172,7 @@ bool TestPlugin::Initialize(blink::WebPluginContainer* container) {
   blink::Platform::GraphicsInfo gl_info;
   context_provider_ =
       blink::Platform::Current()->CreateOffscreenGraphicsContext3DProvider(
-          attrs, url, nullptr, &gl_info);
+          attrs, url, &gl_info);
   if (context_provider_ && !context_provider_->BindToCurrentThread())
     context_provider_ = nullptr;
   gl_ = context_provider_ ? context_provider_->ContextGL() : nullptr;
@@ -187,8 +181,8 @@ bool TestPlugin::Initialize(blink::WebPluginContainer* container) {
     return false;
 
   layer_ = cc::TextureLayer::CreateForMailbox(this);
-  web_layer_ = base::WrapUnique(new cc_blink::WebLayerImpl(layer_));
-  container_->SetWebLayer(web_layer_.get());
+  bool prevent_contents_opaque_changes = false;
+  container_->SetCcLayer(layer_.get(), prevent_contents_opaque_changes);
   if (re_request_touch_events_) {
     container_->RequestTouchEventType(
         blink::WebPluginContainer::kTouchEventRequestTypeSynthesizedMouse);
@@ -204,8 +198,7 @@ void TestPlugin::Destroy() {
   if (layer_.get())
     layer_->ClearTexture();
   if (container_)
-    container_->SetWebLayer(nullptr);
-  web_layer_.reset();
+    container_->SetCcLayer(nullptr, false);
   layer_ = nullptr;
   DestroyScene();
 
@@ -214,8 +207,8 @@ void TestPlugin::Destroy() {
 
   container_ = nullptr;
 
-  blink::Platform::Current()->MainThread()->GetTaskRunner()->DeleteSoon(
-      FROM_HERE, this);
+  blink::scheduler::GetSingleThreadTaskRunnerForTesting()->DeleteSoon(FROM_HERE,
+                                                                      this);
 }
 
 blink::WebPluginContainer* TestPlugin::Container() const {
@@ -259,7 +252,6 @@ void TestPlugin::UpdateGeometry(
 
     DrawSceneGL();
 
-    gl_->GenMailboxCHROMIUM(mailbox_.name);
     gl_->ProduceTextureDirectCHROMIUM(color_texture_, mailbox_.name);
     gl_->Flush();
     gl_->GenSyncTokenCHROMIUM(sync_token_.GetData());
@@ -318,8 +310,7 @@ bool TestPlugin::PrepareTransferableResource(
                                                  shared_bitmap_);
 
     *resource = viz::TransferableResource::MakeSoftware(
-        shared_bitmap_->id(), /*sequence_number=*/0, shared_bitmap_->size(),
-        viz::RGBA_8888);
+        shared_bitmap_->id(), shared_bitmap_->size(), viz::RGBA_8888);
     *release_callback = viz::SingleReleaseCallback::Create(
         base::BindOnce(&ReleaseSharedMemory, std::move(shared_bitmap_),
                        std::move(registration)));
@@ -330,14 +321,14 @@ bool TestPlugin::PrepareTransferableResource(
 
 TestPlugin::Primitive TestPlugin::ParsePrimitive(
     const blink::WebString& string) {
-  const CR_DEFINE_STATIC_LOCAL(blink::WebString, kPrimitiveNone, ("none"));
-  const CR_DEFINE_STATIC_LOCAL(blink::WebString, kPrimitiveTriangle,
-                               ("triangle"));
+  static const base::NoDestructor<blink::WebString> kPrimitiveNone("none");
+  static const base::NoDestructor<blink::WebString> kPrimitiveTriangle(
+      "triangle");
 
   Primitive primitive = PrimitiveNone;
-  if (string == kPrimitiveNone)
+  if (string == *kPrimitiveNone)
     primitive = PrimitiveNone;
-  else if (string == kPrimitiveTriangle)
+  else if (string == *kPrimitiveTriangle)
     primitive = PrimitiveTriangle;
   else
     NOTREACHED();
@@ -366,8 +357,8 @@ float TestPlugin::ParseOpacity(const blink::WebString& string) {
 }
 
 bool TestPlugin::ParseBoolean(const blink::WebString& string) {
-  const CR_DEFINE_STATIC_LOCAL(blink::WebString, kPrimitiveTrue, ("true"));
-  return string == kPrimitiveTrue;
+  static const base::NoDestructor<blink::WebString> kPrimitiveTrue("true");
+  return string == *kPrimitiveTrue;
 }
 
 bool TestPlugin::InitScene() {
@@ -612,29 +603,20 @@ TestPlugin* TestPlugin::Create(const blink::WebPluginParams& params,
 }
 
 const blink::WebString& TestPlugin::MimeType() {
-  const CR_DEFINE_STATIC_LOCAL(blink::WebString, kMimeType,
-                               ("application/x-webkit-test-webplugin"));
-  return kMimeType;
-}
-
-const blink::WebString& TestPlugin::CanCreateWithoutRendererMimeType() {
-  const CR_DEFINE_STATIC_LOCAL(
-      blink::WebString, kCanCreateWithoutRendererMimeType,
-      ("application/x-webkit-test-webplugin-can-create-without-renderer"));
-  return kCanCreateWithoutRendererMimeType;
+  static const base::NoDestructor<blink::WebString> kMimeType(
+      "application/x-webkit-test-webplugin");
+  return *kMimeType;
 }
 
 const blink::WebString& TestPlugin::PluginPersistsMimeType() {
-  const CR_DEFINE_STATIC_LOCAL(
-      blink::WebString, kPluginPersistsMimeType,
-      ("application/x-webkit-test-webplugin-persistent"));
-  return kPluginPersistsMimeType;
+  static const base::NoDestructor<blink::WebString> kPluginPersistsMimeType(
+      "application/x-webkit-test-webplugin-persistent");
+  return *kPluginPersistsMimeType;
 }
 
 bool TestPlugin::IsSupportedMimeType(const blink::WebString& mime_type) {
   return mime_type == TestPlugin::MimeType() ||
-         mime_type == PluginPersistsMimeType() ||
-         mime_type == CanCreateWithoutRendererMimeType();
+         mime_type == PluginPersistsMimeType();
 }
 
 }  // namespace test_runner

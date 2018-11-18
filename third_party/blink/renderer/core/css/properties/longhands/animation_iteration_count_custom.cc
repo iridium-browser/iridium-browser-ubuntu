@@ -30,16 +30,23 @@ const CSSValue* AnimationIterationCount::CSSValueFromComputedStyleInternal(
   CSSValueList* list = CSSValueList::CreateCommaSeparated();
   const CSSAnimationData* animation_data = style.Animations();
   if (animation_data) {
-    for (size_t i = 0; i < animation_data->IterationCountList().size(); ++i) {
+    for (wtf_size_t i = 0; i < animation_data->IterationCountList().size();
+         ++i) {
       list->Append(*ComputedStyleUtils::ValueForAnimationIterationCount(
           animation_data->IterationCountList()[i]));
     }
   } else {
-    list->Append(
-        *CSSPrimitiveValue::Create(CSSAnimationData::InitialIterationCount(),
-                                   CSSPrimitiveValue::UnitType::kNumber));
+    list->Append(*InitialValue());
   }
   return list;
+}
+
+const CSSValue* AnimationIterationCount::InitialValue() const {
+  DEFINE_STATIC_LOCAL(
+      Persistent<CSSValue>, value,
+      (CSSPrimitiveValue::Create(CSSAnimationData::InitialIterationCount(),
+                                 CSSPrimitiveValue::UnitType::kNumber)));
+  return value;
 }
 
 }  // namespace CSSLonghand

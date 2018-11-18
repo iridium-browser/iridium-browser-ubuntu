@@ -24,7 +24,7 @@
 #endif
 
 #if !defined(OS_IOS)
-#include "mojo/edk/embedder/embedder.h"  // nogncheck
+#include "mojo/core/embedder/embedder.h"  // nogncheck
 #endif
 
 namespace {
@@ -48,7 +48,7 @@ class GfxTestSuite : public base::TestSuite {
     ui::RegisterPathProvider();
 
     base::FilePath ui_test_pak_path;
-    ASSERT_TRUE(PathService::Get(ui::UI_TEST_PAK, &ui_test_pak_path));
+    ASSERT_TRUE(base::PathService::Get(ui::UI_TEST_PAK, &ui_test_pak_path));
     ui::ResourceBundle::InitSharedInstanceWithPakPath(ui_test_pak_path);
 
 #if defined(OS_WIN)
@@ -90,7 +90,7 @@ int main(int argc, char** argv) {
   GfxTestSuite test_suite(argc, argv);
 
 #if !defined(OS_IOS)
-  mojo::edk::Init();
+  mojo::core::Init();
 #endif
 
   return base::LaunchUnitTests(

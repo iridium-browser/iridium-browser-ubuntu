@@ -67,7 +67,9 @@ class LayoutListMarker final : public LayoutBox {
       LayoutUnit marker_inline_size);
 
   LayoutRect GetRelativeMarkerRect() const;
-  LayoutRect LocalSelectionRect() const final;
+  static LayoutRect RelativeSymbolMarkerRect(const ComputedStyle&, LayoutUnit);
+  static LayoutUnit WidthOfSymbol(const ComputedStyle&);
+
   bool IsImage() const override;
   const StyleImage* GetImage() const { return image_.Get(); }
   const LayoutListItem* ListItem() const { return list_item_; }
@@ -91,13 +93,11 @@ class LayoutListMarker final : public LayoutBox {
     return type == kLayoutObjectListMarker || LayoutBox::IsOfType(type);
   }
 
-  void Paint(const PaintInfo&, const LayoutPoint&) const override;
+  void Paint(const PaintInfo&) const override;
 
   void UpdateLayout() override;
 
-  void ImageChanged(WrappedImagePtr,
-                    CanDeferInvalidation,
-                    const IntRect* = nullptr) override;
+  void ImageChanged(WrappedImagePtr, CanDeferInvalidation) override;
 
   InlineBox* CreateInlineBox() override;
 

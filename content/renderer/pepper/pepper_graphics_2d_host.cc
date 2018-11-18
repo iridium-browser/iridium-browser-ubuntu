@@ -19,9 +19,9 @@
 #include "cc/paint/paint_flags.h"
 #include "cc/resources/cross_thread_shared_bitmap.h"
 #include "components/viz/common/gpu/context_provider.h"
-#include "components/viz/common/quads/shared_bitmap.h"
 #include "components/viz/common/resources/bitmap_allocation.h"
 #include "components/viz/common/resources/resource_sizes.h"
+#include "components/viz/common/resources/shared_bitmap.h"
 #include "content/public/renderer/render_thread.h"
 #include "content/public/renderer/renderer_ppapi_host.h"
 #include "content/renderer/pepper/gfx_conversion.h"
@@ -44,7 +44,7 @@
 #include "ppapi/proxy/ppapi_messages.h"
 #include "ppapi/shared_impl/ppb_view_shared.h"
 #include "ppapi/thunk/enter.h"
-#include "services/ui/public/cpp/gpu/context_provider_command_buffer.h"
+#include "services/ws/public/cpp/gpu/context_provider_command_buffer.h"
 #include "skia/ext/platform_canvas.h"
 #include "third_party/khronos/GLES2/gl2.h"
 #include "third_party/khronos/GLES2/gl2ext.h"
@@ -338,7 +338,7 @@ bool PepperGraphics2DHost::BindToInstance(
 // The |backing_bitmap| must be clipped to the |plugin_rect| to avoid painting
 // outside the plugin area. This can happen if the plugin has been resized since
 // PaintImageData verified the image is within the plugin size.
-void PepperGraphics2DHost::Paint(blink::WebCanvas* canvas,
+void PepperGraphics2DHost::Paint(cc::PaintCanvas* canvas,
                                  const gfx::Rect& plugin_rect,
                                  const gfx::Rect& paint_rect) {
   TRACE_EVENT0("pepper", "PepperGraphics2DHost::Paint");
@@ -387,8 +387,10 @@ void PepperGraphics2DHost::Paint(blink::WebCanvas* canvas,
     canvas->scale(scale_, scale_);
     pixel_origin.scale(1.0f / scale_);
   }
-  canvas->drawBitmap(backing_bitmap, pixel_origin.x(), pixel_origin.y(),
-                     &flags);
+  // TODO(khushalsagar): Can this be cached on image_data_, and invalidated when
+  // the bitmap changes?
+  canvas->drawImage(cc::PaintImage::CreateFromBitmap(std::move(backing_bitmap)),
+                    pixel_origin.x(), pixel_origin.y(), &flags);
 }
 
 void PepperGraphics2DHost::ViewInitiatedPaint() {
@@ -713,7 +715,6 @@ bool PepperGraphics2DHost::PrepareTransferableResource(
                        0, format, GL_UNSIGNED_BYTE, nullptr);
       }
 
-      gl->GenMailboxCHROMIUM(gpu_mailbox.name);
       gl->ProduceTextureDirectCHROMIUM(texture_id, gpu_mailbox.name);
     }
 
@@ -784,8 +785,7 @@ bool PepperGraphics2DHost::PrepareTransferableResource(
   image_data_->Unmap();
 
   *transferable_resource = viz::TransferableResource::MakeSoftware(
-      shared_bitmap->id(), /*sequence_number=*/0, pixel_image_size,
-      viz::RGBA_8888);
+      shared_bitmap->id(), pixel_image_size, viz::RGBA_8888);
   *release_callback = viz::SingleReleaseCallback::Create(base::BindOnce(
       &PepperGraphics2DHost::ReleaseSoftwareCallback, this->AsWeakPtr(),
       std::move(shared_bitmap), std::move(registration)));

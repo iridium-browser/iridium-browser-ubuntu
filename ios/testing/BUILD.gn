@@ -12,17 +12,16 @@ group("all_tests") {
   ]
 }
 
-source_set("ios_test_support") {
+source_set("embedded_test_server_support") {
   configs += [ "//build/config/compiler:enable_arc" ]
   testonly = true
 
   deps = [
-    "//base/test:test_support",
+    "//net:test_support",
   ]
-
   sources = [
-    "wait_util.h",
-    "wait_util.mm",
+    "embedded_test_server_handlers.cc",
+    "embedded_test_server_handlers.h",
   ]
 }
 
@@ -92,6 +91,7 @@ bundle_data("http_server_bundle_data") {
     "data/http_server_files/testpage.pdf",
     "data/http_server_files/two_pages.pdf",
     "data/http_server_files/user_agent_test_page.html",
+    "data/http_server_files/username_password_field_form.html",
     "data/http_server_files/window_close.html",
     "data/http_server_files/window_location.html",
     "data/http_server_files/window_location.js",

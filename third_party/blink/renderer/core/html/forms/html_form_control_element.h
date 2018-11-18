@@ -25,6 +25,8 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_HTML_FORMS_HTML_FORM_CONTROL_ELEMENT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_HTML_FORMS_HTML_FORM_CONTROL_ELEMENT_H_
 
+#include "third_party/blink/public/platform/web_string.h"
+#include "third_party/blink/public/web/web_autofill_state.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/html/forms/form_associated.h"
 #include "third_party/blink/renderer/core/html/forms/labelable_element.h"
@@ -122,10 +124,18 @@ class CORE_EXPORT HTMLFormControlElement : public LabelableElement,
 
   bool IsAutofocusable() const;
 
-  virtual bool ShouldShowFocusRingOnMouseFocus() const;
+  bool MayTriggerVirtualKeyboard() const override;
 
-  bool IsAutofilled() const { return is_autofilled_; }
-  void SetAutofilled(bool = true);
+  WebAutofillState GetAutofillState() const { return autofill_state_; }
+  bool IsAutofilled() const {
+    return autofill_state_ != WebAutofillState::kNotFilled;
+  }
+  void SetAutofillState(WebAutofillState = WebAutofillState::kAutofilled);
+
+  // The autofill section to which this element belongs (e.g. billing address,
+  // shipping address, .. .)
+  WebString AutofillSection() const { return autofill_section_; }
+  void SetAutofillSection(const WebString&);
 
   const AtomicString& autocapitalize() const final;
 
@@ -142,6 +152,10 @@ class CORE_EXPORT HTMLFormControlElement : public LabelableElement,
   bool BlocksFormSubmission() const { return blocks_form_submission_; }
   void SetBlocksFormSubmission(bool value) { blocks_form_submission_ = value; }
 
+  unsigned UniqueRendererFormControlId() const {
+    return unique_renderer_form_control_id_;
+  }
+
  protected:
   HTMLFormControlElement(const QualifiedName& tag_name, Document&);
 
@@ -150,8 +164,8 @@ class CORE_EXPORT HTMLFormControlElement : public LabelableElement,
   virtual void RequiredAttributeChanged();
   virtual void DisabledAttributeChanged();
   void AttachLayoutTree(AttachContext&) override;
-  InsertionNotificationRequest InsertedInto(ContainerNode*) override;
-  void RemovedFrom(ContainerNode*) override;
+  InsertionNotificationRequest InsertedInto(ContainerNode&) override;
+  void RemovedFrom(ContainerNode&) override;
   void WillChangeForm() override;
   void DidChangeForm() override;
   void DidMoveToNewDocument(Document& old_document) override;
@@ -162,7 +176,6 @@ class CORE_EXPORT HTMLFormControlElement : public LabelableElement,
   void DispatchBlurEvent(Element* new_focused_element,
                          WebFocusType,
                          InputDeviceCapabilities* source_capabilities) override;
-  void WillCallDefaultEventHandler(const Event&) final;
 
   void DidRecalcStyle(StyleRecalcChange) override;
 
@@ -190,21 +203,26 @@ class CORE_EXPORT HTMLFormControlElement : public LabelableElement,
   // Requests validity recalc for all ancestor fieldsets, if exist.
   void FieldSetAncestorsSetNeedsValidityCheck(Node*);
 
+  unsigned unique_renderer_form_control_id_;
+
+  WebString autofill_section_;
+  enum WebAutofillState autofill_state_;
+
   enum AncestorDisabledState {
     kAncestorDisabledStateUnknown,
     kAncestorDisabledStateEnabled,
     kAncestorDisabledStateDisabled
   };
+
   mutable AncestorDisabledState ancestor_disabled_state_;
   enum DataListAncestorState { kUnknown, kInsideDataList, kNotInsideDataList };
   mutable enum DataListAncestorState data_list_ancestor_state_;
   mutable bool may_have_field_set_ancestor_ : 1;
 
-  bool is_autofilled_ : 1;
   bool has_validation_message_ : 1;
-  // The initial value of m_willValidate depends on the derived class. We can't
-  // initialize it with a virtual function in the constructor. m_willValidate
-  // is not deterministic as long as m_willValidateInitialized is false.
+  // The initial value of will_validate_ depends on the derived class. We can't
+  // initialize it with a virtual function in the constructor. will_validate_
+  // is not deterministic as long as will_validate_initialized_ is false.
   mutable bool will_validate_initialized_ : 1;
   mutable bool will_validate_ : 1;
 

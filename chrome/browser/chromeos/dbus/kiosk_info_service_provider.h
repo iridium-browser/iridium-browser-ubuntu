@@ -21,13 +21,9 @@ namespace chromeos {
 // update_engine calls to get the required platform version of the
 // kiosk app that is configured to auto launch.
 // See http://crbug.com/577783 for details.
-//
 class KioskInfoService : public CrosDBusService::ServiceProviderInterface {
  public:
-  // TODO(teravest): Remove these extra parameters once this interface is fully
-  // migrated off of LibCrosService.
-  KioskInfoService(const std::string& service_interface,
-                   const std::string& method_name);
+  KioskInfoService();
   ~KioskInfoService() override;
 
   // CrosDBusService::ServiceProviderInterface
@@ -44,9 +40,6 @@ class KioskInfoService : public CrosDBusService::ServiceProviderInterface {
   void GetKioskAppRequiredPlatformVersion(
       dbus::MethodCall* method_call,
       dbus::ExportedObject::ResponseSender response_sender);
-
-  std::string service_interface_;
-  std::string method_name_;
 
   base::WeakPtrFactory<KioskInfoService> weak_ptr_factory_;
 

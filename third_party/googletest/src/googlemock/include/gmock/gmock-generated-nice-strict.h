@@ -30,8 +30,7 @@
 // THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-//
-// Author: wan@google.com (Zhanyong Wan)
+
 
 // Implements class templates NiceMock, NaggyMock, and StrictMock.
 //
@@ -63,6 +62,8 @@
 // In particular, nesting NiceMock, NaggyMock, and StrictMock is NOT
 // supported.
 
+// GOOGLETEST_CM0002 DO NOT DELETE
+
 #ifndef GMOCK_INCLUDE_GMOCK_GMOCK_GENERATED_NICE_STRICT_H_
 #define GMOCK_INCLUDE_GMOCK_GMOCK_GENERATED_NICE_STRICT_H_
 
@@ -80,6 +81,11 @@ class NiceMock : public MockClass {
   }
 
 #if GTEST_LANG_CXX11
+  // Ideally, we would inherit base class's constructors through a using
+  // declaration, which would preserve their visibility. However, many existing
+  // tests rely on the fact that current implementation reexports protected
+  // constructors as public. These tests would need to be cleaned up first.
+
   // Single argument constructor is special-cased so that it can be
   // made explicit.
   template <typename A>
@@ -193,6 +199,11 @@ class NaggyMock : public MockClass {
   }
 
 #if GTEST_LANG_CXX11
+  // Ideally, we would inherit base class's constructors through a using
+  // declaration, which would preserve their visibility. However, many existing
+  // tests rely on the fact that current implementation reexports protected
+  // constructors as public. These tests would need to be cleaned up first.
+
   // Single argument constructor is special-cased so that it can be
   // made explicit.
   template <typename A>
@@ -306,6 +317,11 @@ class StrictMock : public MockClass {
   }
 
 #if GTEST_LANG_CXX11
+  // Ideally, we would inherit base class's constructors through a using
+  // declaration, which would preserve their visibility. However, many existing
+  // tests rely on the fact that current implementation reexports protected
+  // constructors as public. These tests would need to be cleaned up first.
+
   // Single argument constructor is special-cased so that it can be
   // made explicit.
   template <typename A>

@@ -30,14 +30,6 @@ class WebContentsModalDialogManager
   WebContentsModalDialogManagerDelegate* delegate() const { return delegate_; }
   void SetDelegate(WebContentsModalDialogManagerDelegate* d);
 
-#if defined(OS_MACOSX)
-  // Note: This method is not defined inside components/web_modal/ as its
-  // definition (needed for Cocoa builds) depends on chrome/browser/ui/cocoa/.
-  static SingleWebContentsDialogManager* CreateNativeWebModalManager(
-      gfx::NativeWindow dialog,
-      SingleWebContentsDialogManagerDelegate* native_delegate);
-#endif
-
   // Allow clients to supply their own native dialog manager. Suitable for
   // bubble clients.
   void ShowDialogWithManager(
@@ -73,6 +65,9 @@ class WebContentsModalDialogManager
     DISALLOW_COPY_AND_ASSIGN(TestApi);
   };
 
+  // Closes all WebContentsModalDialogs.
+  void CloseAllDialogs();
+
  private:
   explicit WebContentsModalDialogManager(content::WebContents* web_contents);
   friend class content::WebContentsUserData<WebContentsModalDialogManager>;
@@ -87,15 +82,10 @@ class WebContentsModalDialogManager
     std::unique_ptr<SingleWebContentsDialogManager> manager;
   };
 
-  using WebContentsModalDialogList = base::circular_deque<DialogState>;
-
   // Blocks/unblocks interaction with renderer process.
   void BlockWebContentsInteraction(bool blocked);
 
   bool IsWebContentsVisible() const;
-
-  // Closes all WebContentsModalDialogs.
-  void CloseAllDialogs();
 
   // Overridden from content::WebContentsObserver:
   void DidFinishNavigation(
@@ -109,7 +99,7 @@ class WebContentsModalDialogManager
   WebContentsModalDialogManagerDelegate* delegate_;
 
   // All active dialogs.
-  WebContentsModalDialogList child_dialogs_;
+  base::circular_deque<DialogState> child_dialogs_;
 
   // Whether the WebContents' visibility is content::Visibility::HIDDEN.
   bool web_contents_is_hidden_;

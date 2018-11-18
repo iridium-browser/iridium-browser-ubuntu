@@ -32,7 +32,7 @@ def LoadCheckpoint(buildroot):
   """Restore completed stage info from checkpoint file."""
   completed_stages_file = _GetCheckpointFile(buildroot)
   if not os.path.exists(completed_stages_file):
-    logging.warning('Checkpoint file not found in buildroot %s' % buildroot)
+    logging.warning('Checkpoint file not found in buildroot %s', buildroot)
     return
 
   with open(completed_stages_file, 'r') as load_file:
@@ -226,7 +226,7 @@ class _Results(object):
     """Get a list of the exceptions that failed the build.
 
     Returns:
-       A list of RecordedTraceback objects.
+      A list of RecordedTraceback objects.
     """
     tracebacks = []
     for entry in self._results_log:

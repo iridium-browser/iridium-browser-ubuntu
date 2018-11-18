@@ -13,6 +13,7 @@
 #include "build/build_config.h"
 #include "content/public/common/content_switches.h"
 #include "content/shell/common/shell_switches.h"
+#include "services/service_manager/embedder/switches.h"
 
 #if defined(OS_ANDROID)
 #include "content/shell/android/shell_descriptors.h"
@@ -43,6 +44,15 @@ void ShellCrashReporterClient::GetProductNameAndVersion(
     const char** version) {
   *product_name = "content_shell";
   *version = CONTENT_SHELL_VERSION;
+}
+
+void ShellCrashReporterClient::GetProductNameAndVersion(
+    std::string* product_name,
+    std::string* version,
+    std::string* channel) {
+  *product_name = "content_shell";
+  *version = CONTENT_SHELL_VERSION;
+  *channel = "";
 }
 
 base::FilePath ShellCrashReporterClient::GetReporterLogFilename() {
@@ -79,7 +89,7 @@ bool ShellCrashReporterClient::EnableBreakpadForProcess(
     const std::string& process_type) {
   return process_type == switches::kRendererProcess ||
          process_type == switches::kPpapiPluginProcess ||
-         process_type == switches::kZygoteProcess ||
+         process_type == service_manager::switches::kZygoteProcess ||
          process_type == switches::kGpuProcess;
 }
 

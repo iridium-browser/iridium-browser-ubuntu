@@ -48,11 +48,21 @@
 // accounts menu is not open when this is called there will be a GREYAssert.
 + (void)tapAccountsMenuButton:(id<GREYMatcher>)buttonMatcher;
 
+// Focuses the omnibox by tapping and types |text| into it. The '\n' symbol can
+// be passed in order to commit the string.
++ (void)focusOmniboxAndType:(NSString*)text;
+
 // Open a new tab via the tools menu.
 + (void)openNewTab;
 
 // Open a new incognito tab via the tools menu.
 + (void)openNewIncognitoTab;
+
+// Open and clear browsing data from history.
++ (void)openAndClearBrowsingDataFromHistory;
+
+// Assert that history is empty.
++ (void)assertHistoryHasNoEntries;
 
 // Reloads the page via the reload button, and does not wait for the page to
 // finish loading.
@@ -66,14 +76,6 @@
 // for it to disappear. If the condition is not met within a timeout, a
 // GREYAssert is induced.
 + (void)waitForToolbarVisible:(BOOL)isVisible;
-
-// Signs in the identity for the specific |userEmail|. This must be called from
-// the NTP, and it doesn't dismiss the sign in confirmation page.
-+ (void)signInToIdentityByEmail:(NSString*)userEmail;
-
-// Confirms the sign in confirmation page, scrolls first to make the OK button
-// visible on short devices (e.g. iPhone 5s).
-+ (void)confirmSigninConfirmationDialog;
 
 @end
 

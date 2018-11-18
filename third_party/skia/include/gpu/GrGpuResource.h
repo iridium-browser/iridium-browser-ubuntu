@@ -9,6 +9,7 @@
 #define GrGpuResource_DEFINED
 
 #include "../private/GrTypesPriv.h"
+#include "../private/SkNoncopyable.h"
 #include "GrResourceKey.h"
 
 class GrContext;
@@ -132,8 +133,6 @@ private:
     mutable int32_t fPendingReads;
     mutable int32_t fPendingWrites;
 
-    // This class is used to manage conversion of refs to pending reads/writes.
-    friend class GrGpuResourceRef;
     friend class GrResourceCache; // to check IO ref counts.
 
     template <typename, GrIOType> friend class GrPendingIOResource;
@@ -283,12 +282,6 @@ protected:
     virtual void onAbandon() { }
 
     /**
-     * This entry point should be called whenever gpuMemorySize() should report a different size.
-     * The cache will call gpuMemorySize() to update the current size of the resource.
-     */
-    void didChangeGpuMemorySize() const;
-
-    /**
      * Allows subclasses to add additional backing information to the SkTraceMemoryDump.
      **/
     virtual void setMemoryBacking(SkTraceMemoryDump*, const SkString&) const {}
@@ -342,7 +335,6 @@ private:
     // This value reflects how recently this resource was accessed in the cache. This is maintained
     // by the cache.
     uint32_t fTimestamp;
-    uint32_t fExternalFlushCntWhenBecamePurgeable;
     GrStdSteadyClock::time_point fTimeWhenBecamePurgeable;
 
     static const size_t kInvalidGpuMemorySize = ~static_cast<size_t>(0);

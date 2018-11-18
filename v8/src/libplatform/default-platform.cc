@@ -61,9 +61,6 @@ bool PumpMessageLoop(v8::Platform* platform, v8::Isolate* isolate,
                                                                   behavior);
 }
 
-void EnsureEventLoopInitialized(v8::Platform* platform, v8::Isolate* isolate) {
-}
-
 void RunIdleTasks(v8::Platform* platform, v8::Isolate* isolate,
                   double idle_time_in_seconds) {
   static_cast<DefaultPlatform*>(platform)->RunIdleTasks(isolate,
@@ -143,11 +140,9 @@ bool DefaultPlatform::PumpMessageLoop(v8::Isolate* isolate,
   std::shared_ptr<DefaultForegroundTaskRunner> task_runner;
   {
     base::LockGuard<base::Mutex> guard(&lock_);
-    if (foreground_task_runner_map_.find(isolate) ==
-        foreground_task_runner_map_.end()) {
-      return failed_result;
-    }
-    task_runner = foreground_task_runner_map_[isolate];
+    auto it = foreground_task_runner_map_.find(isolate);
+    if (it == foreground_task_runner_map_.end()) return failed_result;
+    task_runner = it->second;
   }
 
   std::unique_ptr<Task> task = task_runner->PopTaskFromQueue(wait_for_work);
@@ -193,20 +188,21 @@ std::shared_ptr<TaskRunner> DefaultPlatform::GetForegroundTaskRunner(
   return foreground_task_runner_map_[isolate];
 }
 
-std::shared_ptr<TaskRunner> DefaultPlatform::GetWorkerThreadsTaskRunner(
-    v8::Isolate*) {
+void DefaultPlatform::CallOnWorkerThread(std::unique_ptr<Task> task) {
   EnsureBackgroundTaskRunnerInitialized();
-  return worker_threads_task_runner_;
+  worker_threads_task_runner_->PostTask(std::move(task));
 }
 
-void DefaultPlatform::CallOnWorkerThread(std::unique_ptr<Task> task) {
-  GetWorkerThreadsTaskRunner(nullptr)->PostTask(std::move(task));
+void DefaultPlatform::CallDelayedOnWorkerThread(std::unique_ptr<Task> task,
+                                                double delay_in_seconds) {
+  EnsureBackgroundTaskRunnerInitialized();
+  worker_threads_task_runner_->PostDelayedTask(std::move(task),
+                                               delay_in_seconds);
 }
 
 void DefaultPlatform::CallOnForegroundThread(v8::Isolate* isolate, Task* task) {
   GetForegroundTaskRunner(isolate)->PostTask(std::unique_ptr<Task>(task));
 }
-
 
 void DefaultPlatform::CallDelayedOnForegroundThread(Isolate* isolate,
                                                     Task* task,

@@ -25,9 +25,10 @@
 
 #include "third_party/blink/renderer/platform/geometry/int_rect.h"
 
+#include "base/numerics/checked_math.h"
 #include "third_party/blink/renderer/platform/geometry/float_rect.h"
 #include "third_party/blink/renderer/platform/geometry/layout_rect.h"
-#include "third_party/blink/renderer/platform/wtf/checked_numeric.h"
+#include "third_party/blink/renderer/platform/wtf/text/text_stream.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 #include "third_party/skia/include/core/SkRect.h"
@@ -36,6 +37,9 @@
 #include <algorithm>
 
 namespace blink {
+
+IntRect::IntRect(const gfx::Rect& rect)
+    : location_(rect.x(), rect.y()), size_(rect.width(), rect.height()) {}
 
 void IntRect::ShiftXEdgeTo(int edge) {
   int delta = edge - X();
@@ -166,20 +170,19 @@ IntRect::operator gfx::Rect() const {
 IntRect UnionRect(const Vector<IntRect>& rects) {
   IntRect result;
 
-  size_t count = rects.size();
-  for (size_t i = 0; i < count; ++i)
-    result.Unite(rects[i]);
+  for (const IntRect& rect : rects)
+    result.Unite(rect);
 
   return result;
 }
 
 IntRect UnionRectEvenIfEmpty(const Vector<IntRect>& rects) {
-  size_t count = rects.size();
+  wtf_size_t count = rects.size();
   if (!count)
     return IntRect();
 
   IntRect result = rects[0];
-  for (size_t i = 1; i < count; ++i)
+  for (wtf_size_t i = 1; i < count; ++i)
     result.UniteEvenIfEmpty(rects[i]);
 
   return result;
@@ -195,13 +198,18 @@ String IntRect::ToString() const {
 }
 
 bool IntRect::IsValid() const {
-  CheckedNumeric<int> max = location_.X();
+  base::CheckedNumeric<int> max = location_.X();
   max += size_.Width();
   if (!max.IsValid())
     return false;
   max = location_.Y();
   max += size_.Height();
   return max.IsValid();
+}
+
+WTF::TextStream& operator<<(WTF::TextStream& ts, const IntRect& r) {
+  return ts << "at (" << r.X() << "," << r.Y() << ") size " << r.Width() << "x"
+            << r.Height();
 }
 
 }  // namespace blink

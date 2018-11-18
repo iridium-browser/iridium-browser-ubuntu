@@ -32,8 +32,8 @@ import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.util.InfoBarTestAnimationListener;
 import org.chromium.chrome.test.util.InfoBarUtil;
-import org.chromium.content.browser.test.util.Criteria;
-import org.chromium.content.browser.test.util.CriteriaHelper;
+import org.chromium.content_public.browser.test.util.Criteria;
+import org.chromium.content_public.browser.test.util.CriteriaHelper;
 import org.chromium.net.test.EmbeddedTestServer;
 
 import java.util.List;
@@ -83,8 +83,7 @@ public class InfoBarContainerTest {
         mActivityTestRule.startMainActivityOnBlankPage();
 
         // Register for animation notifications
-        InfoBarContainer container =
-                mActivityTestRule.getActivity().getActivityTab().getInfoBarContainer();
+        InfoBarContainer container = mActivityTestRule.getInfoBarContainer();
         mListener =  new InfoBarTestAnimationListener();
         container.addAnimationListener(mListener);
 
@@ -294,8 +293,7 @@ public class InfoBarContainerTest {
     public void testAddAndDismissSurfaceFlingerOverlays() throws Exception {
         final ViewGroup decorView =
                 (ViewGroup) mActivityTestRule.getActivity().getWindow().getDecorView();
-        final InfoBarContainer infoBarContainer =
-                mActivityTestRule.getActivity().getActivityTab().getInfoBarContainer();
+        final InfoBarContainer infoBarContainer = mActivityTestRule.getInfoBarContainer();
 
         // Detect layouts. Note this doesn't actually need to be atomic (just final).
         final AtomicInteger layoutCount = new AtomicInteger();
@@ -347,7 +345,10 @@ public class InfoBarContainerTest {
                 // The InfoBarContainer subtracts itself from the transparent region.
                 Region transparentRegion = new Region(fullDisplayFrame);
                 infoBarContainer.gatherTransparentRegion(transparentRegion);
-                Assert.assertEquals(transparentRegion.getBounds(), fullDisplayFrameMinusContainer);
+                Assert.assertEquals(
+                        "Values did not match. Expected: " + transparentRegion.getBounds()
+                                + ", actual: " + fullDisplayFrameMinusContainer,
+                        transparentRegion.getBounds(), fullDisplayFrameMinusContainer);
             }
         });
 
@@ -375,7 +376,9 @@ public class InfoBarContainerTest {
                 decorView.gatherTransparentRegion(transparentRegion);
                 Region opaqueRegion = new Region(fullDisplayFrame);
                 opaqueRegion.op(transparentRegion, Region.Op.DIFFERENCE);
-                Assert.assertFalse(opaqueRegion.getBounds().intersect(containerDisplayFrame));
+                Assert.assertFalse("Opaque region " + opaqueRegion.getBounds()
+                                + " should not intersect " + containerDisplayFrame,
+                        opaqueRegion.getBounds().intersect(containerDisplayFrame));
             }
         });
 

@@ -4,12 +4,13 @@
 
 #include "third_party/blink/renderer/core/paint/box_painter.h"
 
+#include "base/optional.h"
 #include "third_party/blink/renderer/core/layout/background_bleed_avoidance.h"
 #include "third_party/blink/renderer/core/layout/layout_box.h"
 #include "third_party/blink/renderer/core/layout/layout_object.h"
 #include "third_party/blink/renderer/core/layout/layout_table.h"
 #include "third_party/blink/renderer/core/layout/layout_theme.h"
-#include "third_party/blink/renderer/core/paint/adjust_paint_offset_scope.h"
+#include "third_party/blink/renderer/core/layout/svg/layout_svg_foreign_object.h"
 #include "third_party/blink/renderer/core/paint/background_image_geometry.h"
 #include "third_party/blink/renderer/core/paint/box_decoration_data.h"
 #include "third_party/blink/renderer/core/paint/box_model_object_painter.h"
@@ -18,7 +19,8 @@
 #include "third_party/blink/renderer/core/paint/nine_piece_image_painter.h"
 #include "third_party/blink/renderer/core/paint/object_painter.h"
 #include "third_party/blink/renderer/core/paint/paint_info.h"
-#include "third_party/blink/renderer/core/paint/scroll_recorder.h"
+#include "third_party/blink/renderer/core/paint/scoped_paint_state.h"
+#include "third_party/blink/renderer/core/paint/svg_foreign_object_painter.h"
 #include "third_party/blink/renderer/core/paint/theme_painter.h"
 #include "third_party/blink/renderer/platform/geometry/layout_point.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context_state_saver.h"
@@ -26,33 +28,32 @@
 #include "third_party/blink/renderer/platform/graphics/paint/drawing_recorder.h"
 #include "third_party/blink/renderer/platform/graphics/paint/scoped_paint_chunk_properties.h"
 #include "third_party/blink/renderer/platform/length_functions.h"
-#include "third_party/blink/renderer/platform/wtf/optional.h"
 
 namespace blink {
 
-void BoxPainter::Paint(const PaintInfo& paint_info,
-                       const LayoutPoint& paint_offset) {
+void BoxPainter::Paint(const PaintInfo& paint_info) {
   // Default implementation. Just pass paint through to the children.
-  AdjustPaintOffsetScope adjustment(layout_box_, paint_info, paint_offset);
-  PaintChildren(adjustment.GetPaintInfo(), adjustment.AdjustedPaintOffset());
+  ScopedPaintState paint_state(layout_box_, paint_info);
+  PaintChildren(paint_state.GetPaintInfo());
 }
 
-void BoxPainter::PaintChildren(const PaintInfo& paint_info,
-                               const LayoutPoint& paint_offset) {
+void BoxPainter::PaintChildren(const PaintInfo& paint_info) {
   PaintInfo child_info(paint_info);
   for (LayoutObject* child = layout_box_.SlowFirstChild(); child;
        child = child->NextSibling()) {
-    if (!child->IsBoxModelObject() ||
-        !ToLayoutBoxModelObject(child)->HasSelfPaintingLayer())
-      child->Paint(child_info, paint_offset);
+    if (child->IsSVGForeignObject()) {
+      SVGForeignObjectPainter(ToLayoutSVGForeignObject(*child))
+          .PaintLayer(paint_info);
+    } else {
+      child->Paint(child_info);
+    }
   }
 }
 
 void BoxPainter::PaintBoxDecorationBackground(const PaintInfo& paint_info,
                                               const LayoutPoint& paint_offset) {
   LayoutRect paint_rect;
-  Optional<ScrollRecorder> scroll_recorder;
-  Optional<ScopedPaintChunkProperties> scoped_scroll_property;
+  base::Optional<ScopedBoxContentsPaintState> contents_paint_state;
   if (BoxModelObjectPainter::
           IsPaintingBackgroundOfPaintContainerIntoScrollingContentsLayer(
               &layout_box_, paint_info)) {
@@ -61,56 +62,42 @@ void BoxPainter::PaintBoxDecorationBackground(const PaintInfo& paint_info,
     // overflow rect.
     paint_rect = layout_box_.PhysicalLayoutOverflowRect();
 
-    scroll_recorder.emplace(paint_info.context, layout_box_, paint_info.phase,
-                            layout_box_.ScrolledContentOffset());
-    if (RuntimeEnabledFeatures::SlimmingPaintV175Enabled()) {
-      DCHECK_EQ(layout_box_.HasHiddenBackface(),
-                paint_info.context.GetPaintController()
-                    .CurrentPaintChunkProperties()
-                    .backface_hidden);
-      if (const auto* fragment = paint_info.FragmentToPaint(layout_box_)) {
-        scoped_scroll_property.emplace(
-            paint_info.context.GetPaintController(),
-            fragment->ContentsProperties(), layout_box_,
-            DisplayItem::PaintPhaseToScrollType(paint_info.phase));
-      }
-    }
+    contents_paint_state.emplace(paint_info, paint_offset, layout_box_);
+    paint_rect.MoveBy(contents_paint_state->PaintOffset());
 
     // The background painting code assumes that the borders are part of the
-    // paintRect so we expand the paintRect by the border size when painting the
-    // background into the scrolling contents layer.
+    // paint_rect so we expand the paint_rect by the border size when painting
+    // the background into the scrolling contents layer.
     paint_rect.Expand(layout_box_.BorderBoxOutsets());
   } else {
     paint_rect = layout_box_.BorderBoxRect();
+    paint_rect.MoveBy(paint_offset);
   }
 
-  paint_rect.MoveBy(paint_offset);
-  PaintBoxDecorationBackgroundWithRect(paint_info, paint_offset, paint_rect);
+  PaintBoxDecorationBackgroundWithRect(
+      contents_paint_state ? contents_paint_state->GetPaintInfo() : paint_info,
+      paint_rect);
 }
 
-LayoutRect BoxPainter::BoundsForDrawingRecorder(
-    const PaintInfo& paint_info,
-    const LayoutPoint& adjusted_paint_offset) {
+bool BoxPainter::BackgroundIsKnownToBeOpaque(const PaintInfo& paint_info) {
   LayoutRect bounds =
       BoxModelObjectPainter::
               IsPaintingBackgroundOfPaintContainerIntoScrollingContentsLayer(
                   &layout_box_, paint_info)
           ? layout_box_.LayoutOverflowRect()
           : layout_box_.SelfVisualOverflowRect();
-  bounds.MoveBy(adjusted_paint_offset);
-  return bounds;
+  return layout_box_.BackgroundIsKnownToBeOpaqueInRect(bounds);
 }
 
 void BoxPainter::PaintBoxDecorationBackgroundWithRect(
     const PaintInfo& paint_info,
-    const LayoutPoint& paint_offset,
     const LayoutRect& paint_rect) {
   bool painting_overflow_contents = BoxModelObjectPainter::
       IsPaintingBackgroundOfPaintContainerIntoScrollingContentsLayer(
           &layout_box_, paint_info);
   const ComputedStyle& style = layout_box_.StyleRef();
 
-  Optional<DisplayItemCacheSkipper> cache_skipper;
+  base::Optional<DisplayItemCacheSkipper> cache_skipper;
   // Disable cache in under-invalidation checking mode for MediaSliderPart
   // because we always paint using the latest data (buffered ranges, current
   // time and duration) which may be different from the cached data, and for
@@ -119,8 +106,7 @@ void BoxPainter::PaintBoxDecorationBackgroundWithRect(
   // non-delayed-invalidation animated background, which should be ignored.
   if (RuntimeEnabledFeatures::PaintUnderInvalidationCheckingEnabled() &&
       (style.Appearance() == kMediaSliderPart ||
-       layout_box_.FullPaintInvalidationReason() ==
-           PaintInvalidationReason::kDelayedFull)) {
+       layout_box_.ShouldDelayFullPaintInvalidation())) {
     cache_skipper.emplace(paint_info.context);
   }
 
@@ -142,10 +128,7 @@ void BoxPainter::PaintBoxDecorationBackgroundWithRect(
 
   if (RuntimeEnabledFeatures::SlimmingPaintV2Enabled() &&
       LayoutRect(EnclosingIntRect(paint_rect)) == paint_rect &&
-      // TODO(wkorman): Rename BoundsForDrawingRecorder as it's used
-      // here for another purpose.
-      layout_box_.BackgroundIsKnownToBeOpaqueInRect(
-          BoundsForDrawingRecorder(paint_info, LayoutPoint())))
+      BackgroundIsKnownToBeOpaque(paint_info))
     recorder.SetKnownToBeOpaque();
 
   bool needs_end_layer = false;
@@ -226,7 +209,7 @@ void BoxPainter::PaintBackground(const PaintInfo& paint_info,
   BackgroundImageGeometry geometry(layout_box_);
   BoxModelObjectPainter box_model_painter(layout_box_);
   box_model_painter.PaintFillLayers(paint_info, background_color,
-                                    layout_box_.Style()->BackgroundLayers(),
+                                    layout_box_.StyleRef().BackgroundLayers(),
                                     paint_rect, geometry, bleed_avoidance);
 }
 
@@ -235,7 +218,7 @@ void BoxPainter::PaintMask(const PaintInfo& paint_info,
   DCHECK_EQ(PaintPhase::kMask, paint_info.phase);
 
   if (!layout_box_.HasMask() ||
-      layout_box_.Style()->Visibility() != EVisibility::kVisible)
+      layout_box_.StyleRef().Visibility() != EVisibility::kVisible)
     return;
 
   if (DrawingRecorder::UseCachedDrawingIfPossible(
@@ -249,32 +232,17 @@ void BoxPainter::PaintMask(const PaintInfo& paint_info,
 
 void BoxPainter::PaintMaskImages(const PaintInfo& paint_info,
                                  const LayoutRect& paint_rect) {
+  // For mask images legacy layout painting handles multi-line boxes by giving
+  // the full width of the element, not the current line box, thereby clipping
+  // the offending edges.
+  bool include_logical_left_edge = true;
+  bool include_logical_right_edge = true;
+
   BackgroundImageGeometry geometry(layout_box_);
   BoxModelObjectPainter painter(layout_box_);
-  painter.PaintMaskImages(paint_info, paint_rect, layout_box_, geometry);
-}
-
-void BoxPainter::PaintClippingMask(const PaintInfo& paint_info,
-                                   const LayoutPoint& paint_offset) {
-  // SPv175 always paints clipping mask in PaintLayerPainter.
-  DCHECK(!RuntimeEnabledFeatures::SlimmingPaintV175Enabled());
-  DCHECK(paint_info.phase == PaintPhase::kClippingMask);
-
-  if (layout_box_.Style()->Visibility() != EVisibility::kVisible)
-    return;
-
-  if (!layout_box_.Layer() ||
-      layout_box_.Layer()->GetCompositingState() != kPaintsIntoOwnBacking)
-    return;
-
-  if (DrawingRecorder::UseCachedDrawingIfPossible(
-          paint_info.context, layout_box_, paint_info.phase))
-    return;
-
-  IntRect paint_rect =
-      PixelSnappedIntRect(LayoutRect(paint_offset, layout_box_.Size()));
-  DrawingRecorder recorder(paint_info.context, layout_box_, paint_info.phase);
-  paint_info.context.FillRect(paint_rect, Color::kBlack);
+  painter.PaintMaskImages(paint_info, paint_rect, layout_box_, geometry,
+                          include_logical_left_edge,
+                          include_logical_right_edge);
 }
 
 }  // namespace blink

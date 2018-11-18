@@ -55,6 +55,7 @@
 
 #include "third_party/blink/renderer/bindings/core/v8/script_controller.h"
 #include "third_party/blink/renderer/bindings/core/v8/window_proxy.h"
+#include "third_party/blink/renderer/core/dom/document_init.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/html_names.h"
 
@@ -70,6 +71,14 @@ HTMLDocument::HTMLDocument(const DocumentInit& initializer,
     DCHECK(InNoQuirksMode());
     LockCompatibilityMode();
   }
+}
+
+HTMLDocument* HTMLDocument::Create(const DocumentInit& initializer) {
+  return new HTMLDocument(initializer);
+}
+
+HTMLDocument* HTMLDocument::CreateForTest() {
+  return new HTMLDocument(DocumentInit::Create());
 }
 
 HTMLDocument::~HTMLDocument() = default;
@@ -127,8 +136,7 @@ static HashSet<StringImpl*>* CreateHtmlCaseInsensitiveAttributesSet() {
       &targetAttr,         &textAttr,       &typeAttr,     &valignAttr,
       &valuetypeAttr,      &vlinkAttr};
 
-  attr_set->ReserveCapacityForSize(
-      WTF_ARRAY_LENGTH(case_insensitive_attributes));
+  attr_set->ReserveCapacityForSize(arraysize(case_insensitive_attributes));
   for (const QualifiedName* attr : case_insensitive_attributes)
     attr_set->insert(attr->LocalName().Impl());
 

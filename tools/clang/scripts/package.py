@@ -8,6 +8,7 @@ to a tgz file."""
 
 import argparse
 import fnmatch
+import glob
 import itertools
 import os
 import shutil
@@ -229,12 +230,14 @@ def main():
   # Copy a whitelist of files to the directory we're going to tar up.
   # This supports the same patterns that the fnmatch module understands.
   exe_ext = '.exe' if sys.platform == 'win32' else ''
-  want = ['bin/llvm-symbolizer' + exe_ext,
+  want = ['bin/llvm-pdbutil' + exe_ext,
+          'bin/llvm-symbolizer' + exe_ext,
+          'bin/llvm-undname' + exe_ext,
           'bin/sancov' + exe_ext,
-          'lib/clang/*/asan_blacklist.txt',
-          'lib/clang/*/cfi_blacklist.txt',
           # Copy built-in headers (lib/clang/3.x.y/include).
           'lib/clang/*/include/*',
+          'lib/clang/*/share/asan_blacklist.txt',
+          'lib/clang/*/share/cfi_blacklist.txt',
           ]
   if sys.platform == 'win32':
     want.append('bin/clang-cl.exe')
@@ -250,7 +253,7 @@ def main():
                  # runtime libraries:
                  'lib/clang/*/lib/darwin/*asan_osx*',
                  'lib/clang/*/lib/darwin/*asan_iossim*',
-                 'lib/clang/*/lib/darwin/*fuzzer*',
+                 'lib/clang/*/lib/darwin/*fuzzer_no_main*',
                  'lib/clang/*/lib/darwin/*profile_osx*',
                  'lib/clang/*/lib/darwin/*profile_iossim*',
                  # And the OSX and ios builtin libraries (iossim is lipo'd into
@@ -267,15 +270,23 @@ def main():
     # but not dfsan.
     want.extend(['lib/clang/*/lib/linux/*[atm]san*',
                  'lib/clang/*/lib/linux/*ubsan*',
-                 'lib/clang/*/lib/linux/*libclang_rt.fuzzer*',
+                 'lib/clang/*/lib/linux/*libclang_rt.fuzzer_no_main*',
                  'lib/clang/*/lib/linux/*libclang_rt.san*',
                  'lib/clang/*/lib/linux/*profile*',
-                 'lib/clang/*/msan_blacklist.txt',
+                 'lib/clang/*/share/msan_blacklist.txt',
                  ])
   elif sys.platform == 'win32':
     want.extend(['lib/clang/*/lib/windows/clang_rt.asan*.dll',
                  'lib/clang/*/lib/windows/clang_rt.asan*.lib',
+                 'lib/clang/*/lib/windows/clang_rt.fuzzer_no_main*.lib',
+                 'lib/clang/*/lib/windows/clang_rt.profile*.lib',
                  'lib/clang/*/lib/windows/clang_rt.ubsan*.lib',
+                 ])
+
+  if sys.platform in ('linux2', 'darwin'):
+    # Include libclang_rt.builtins.a for Fuchsia targets.
+    want.extend(['lib/clang/*/aarch64-fuchsia/lib/libclang_rt.builtins.a',
+                 'lib/clang/*/x86_64-fuchsia/lib/libclang_rt.builtins.a',
                  ])
 
   for root, dirs, files in os.walk(LLVM_RELEASE_DIR):
@@ -298,7 +309,12 @@ def main():
             os.path.splitext(f)[1] in ['.so', '.a']):
         subprocess.call([EU_STRIP, '-g', dest])
 
-  stripped_binaries = ['clang', 'llvm-symbolizer', 'sancov']
+  stripped_binaries = ['clang',
+                       'llvm-pdbutil',
+                       'llvm-symbolizer',
+                       'llvm-undname',
+                       'sancov',
+                       ]
   if sys.platform.startswith('linux'):
     stripped_binaries.append('lld')
     stripped_binaries.append('llvm-ar')
@@ -352,7 +368,8 @@ def main():
   objdumpdir = 'llvmobjdump-' + stamp
   shutil.rmtree(objdumpdir, ignore_errors=True)
   os.makedirs(os.path.join(objdumpdir, 'bin'))
-  for filename in ['llvm-cxxfilt', 'llvm-nm', 'llvm-objdump', 'llvm-readobj']:
+  for filename in ['llvm-bcanalyzer', 'llvm-cxxfilt', 'llvm-nm', 'llvm-objdump',
+                   'llvm-readobj']:
     shutil.copy(os.path.join(LLVM_RELEASE_DIR, 'bin', filename + exe_ext),
                 os.path.join(objdumpdir, 'bin'))
   llvmobjdump_stamp_file_base = 'llvmobjdump_build_revision'
@@ -381,6 +398,23 @@ def main():
             filter=PrintTarProgress)
   MaybeUpload(args, cfiverifydir, platform)
 
+  # Zip up the SafeStack runtime for Linux
+  safestackdir = 'safestack-' + stamp
+  shutil.rmtree(safestackdir, ignore_errors=True)
+  os.makedirs(os.path.join(safestackdir, 'lib'))
+  for build in glob.glob(os.path.join(LLVM_RELEASE_DIR, 'lib', 'clang', '*')):
+    version = os.path.basename(build)
+    dest_dir = os.path.join(safestackdir, 'lib', 'clang', version,
+                            'lib', 'linux')
+    os.makedirs(dest_dir)
+    for lib in glob.glob(os.path.join(build, 'lib', 'linux',
+                                      '*libclang_rt.safestack*')):
+      shutil.copy(lib, dest_dir)
+  with tarfile.open(safestackdir + '.tgz', 'w:gz') as tar:
+    tar.add(os.path.join(safestackdir, 'lib'), arcname='lib',
+            filter=PrintTarProgress)
+  MaybeUpload(args, safestackdir, platform)
+
   # On Mac, lld isn't part of the main zip.  Upload it in a separate zip.
   if sys.platform == 'darwin':
     llddir = 'lld-' + stamp
@@ -388,12 +422,34 @@ def main():
     os.makedirs(os.path.join(llddir, 'bin'))
     shutil.copy(os.path.join(LLVM_RELEASE_DIR, 'bin', 'lld'),
                 os.path.join(llddir, 'bin'))
+    shutil.copy(os.path.join(LLVM_RELEASE_DIR, 'bin', 'llvm-ar'),
+                os.path.join(llddir, 'bin'))
     os.symlink('lld', os.path.join(llddir, 'bin', 'lld-link'))
     os.symlink('lld', os.path.join(llddir, 'bin', 'ld.lld'))
     with tarfile.open(llddir + '.tgz', 'w:gz') as tar:
       tar.add(os.path.join(llddir, 'bin'), arcname='bin',
               filter=PrintTarProgress)
     MaybeUpload(args, llddir, platform)
+
+  # On Linux and Mac, package and upload llvm-strip in a separate zip.
+  # This is used for the Fuchsia build.
+  if sys.platform == 'darwin' or sys.platform.startswith('linux'):
+    stripdir = 'llvmstrip-' + stamp
+    shutil.rmtree(stripdir, ignore_errors=True)
+    os.makedirs(os.path.join(stripdir, 'bin'))
+    shutil.copy(os.path.join(LLVM_RELEASE_DIR, 'bin', 'llvm-strip'),
+                os.path.join(stripdir, 'bin'))
+    llvmstrip_stamp_file_base = 'llvmstrip_build_revision'
+    llvmstrip_stamp_file = os.path.join(stripdir, llvmstrip_stamp_file_base)
+    with open(llvmstrip_stamp_file, 'w') as f:
+      f.write(expected_stamp)
+      f.write('\n')
+    with tarfile.open(stripdir + '.tgz', 'w:gz') as tar:
+      tar.add(os.path.join(stripdir, 'bin'), arcname='bin',
+              filter=PrintTarProgress)
+      tar.add(llvmstrip_stamp_file, arcname=llvmstrip_stamp_file_base,
+              filter=PrintTarProgress)
+    MaybeUpload(args, stripdir, platform)
 
   # Zip up the translation_unit tool.
   translation_unit_dir = 'translation_unit-' + stamp

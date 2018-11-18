@@ -9,6 +9,7 @@ optimize_webui("build") {
   host = "bookmarks"
   html_in_files = [ "bookmarks.html" ]
   html_out_files = [ "vulcanized.html" ]
+  html_out_files_polymer2 = [ "vulcanized.p2.html" ]
 
   input = rebase_path(".", root_build_dir)
   js_out_files = [ "crisper.js" ]
@@ -25,7 +26,6 @@ js_type_check("closure_compile") {
     ":constants",
     ":debouncer",
     ":dialog_focus_manager",
-    ":dnd_chip",
     ":dnd_manager",
     ":edit_dialog",
     ":folder_node",
@@ -109,19 +109,10 @@ js_library("dialog_focus_manager") {
   ]
 }
 
-js_library("dnd_chip") {
-  deps = [
-    ":types",
-    "//ui/webui/resources/js:cr",
-    "//ui/webui/resources/js:icon",
-  ]
-}
-
 js_library("dnd_manager") {
   deps = [
     ":api_listener",
     ":debouncer",
-    ":dnd_chip",
     ":folder_node",
     ":store",
     ":types",
@@ -139,7 +130,7 @@ js_library("edit_dialog") {
     ":api_listener",
     ":dialog_focus_manager",
     ":types",
-    "//third_party/polymer/v1_0/components-chromium/paper-input:paper-input-extracted",
+    "//ui/webui/resources/cr_elements/cr_input:cr_input",
     "//ui/webui/resources/js:assert",
     "//ui/webui/resources/js:cr",
     "//ui/webui/resources/js:load_time_data",
@@ -174,6 +165,7 @@ js_library("list") {
     ":item",
     ":store_client",
     "//third_party/polymer/v1_0/components-chromium/iron-list:iron-list-extracted",
+    "//ui/webui/resources/js:list_property_update_behavior",
     "//ui/webui/resources/js:load_time_data",
   ]
 }

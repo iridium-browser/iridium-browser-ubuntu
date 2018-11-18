@@ -6,7 +6,7 @@
 #include <string>
 #include <utility>
 
-#include "base/test/histogram_tester.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "base/test/simple_test_clock.h"
 #include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/profiles/profile.h"
@@ -36,7 +36,7 @@
 
 namespace subresource_filter {
 
-const char kSubresourceFilterActionsHistogram[] = "SubresourceFilter.Actions";
+const char kSubresourceFilterActionsHistogram[] = "SubresourceFilter.Actions2";
 
 class SubresourceFilterSettingsBrowserTest
     : public SubresourceFilterBrowserTest {
@@ -231,6 +231,7 @@ IN_PROC_BROWSER_TEST_F(SubresourceFilterSettingsBrowserTest,
 // android-only feature.
 IN_PROC_BROWSER_TEST_F(SubresourceFilterSettingsBrowserTest,
                        DoNotShowUIUntilThresholdReached) {
+  settings_manager()->set_should_use_smart_ui_for_testing(true);
   ASSERT_NO_FATAL_FAILURE(
       SetRulesetToDisallowURLsWithPathSuffix("included_script.js"));
   GURL a_url(embedded_test_server()->GetURL(
@@ -255,17 +256,16 @@ IN_PROC_BROWSER_TEST_F(SubresourceFilterSettingsBrowserTest,
   EXPECT_TRUE(client->did_show_ui_for_navigation());
 
   histogram_tester.ExpectBucketCount(kSubresourceFilterActionsHistogram,
-                                     kActionUISuppressed, 0);
+                                     SubresourceFilterAction::kUISuppressed, 0);
 
   // Second load should not trigger the UI, but should still filter content.
   ui_test_utils::NavigateToURL(browser(), a_url);
   EXPECT_FALSE(WasParsedScriptElementLoaded(web_contents()->GetMainFrame()));
 
-  bool use_smart_ui = settings_manager()->should_use_smart_ui();
-  EXPECT_EQ(client->did_show_ui_for_navigation(), !use_smart_ui);
+  EXPECT_EQ(client->did_show_ui_for_navigation(), false);
 
   histogram_tester.ExpectBucketCount(kSubresourceFilterActionsHistogram,
-                                     kActionUISuppressed, use_smart_ui ? 1 : 0);
+                                     SubresourceFilterAction::kUISuppressed, 1);
 
   ConfigureAsPhishingURL(b_url);
 
@@ -284,7 +284,7 @@ IN_PROC_BROWSER_TEST_F(SubresourceFilterSettingsBrowserTest,
   EXPECT_TRUE(client->did_show_ui_for_navigation());
 
   histogram_tester.ExpectBucketCount(kSubresourceFilterActionsHistogram,
-                                     kActionUISuppressed, use_smart_ui ? 1 : 0);
+                                     SubresourceFilterAction::kUISuppressed, 1);
 }
 
 }  // namespace subresource_filter

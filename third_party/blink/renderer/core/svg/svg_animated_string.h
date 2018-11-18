@@ -53,7 +53,6 @@ class SVGAnimatedString : public ScriptWrappable,
   virtual String animVal();
 
   void Trace(blink::Visitor*) override;
-  void TraceWrappers(const ScriptWrappableVisitor*) const override;
 
  protected:
   SVGAnimatedString(SVGElement* context_element,

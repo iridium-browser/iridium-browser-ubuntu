@@ -13,7 +13,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/chrome_manifest_url_handlers.h"
 #include "content/public/browser/resource_request_info.h"
@@ -24,6 +24,7 @@
 #include "extensions/common/file_util.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
 #include "mojo/public/cpp/system/file_data_pipe_producer.h"
+#include "net/base/completion_once_callback.h"
 #include "net/base/mime_util.h"
 #include "net/base/net_errors.h"
 #include "net/http/http_request_headers.h"
@@ -70,11 +71,10 @@ class URLRequestResourceBundleJob : public net::URLRequestSimpleJob {
   }
 
   // Overridden from URLRequestSimpleJob:
-  int GetRefCountedData(
-      std::string* mime_type,
-      std::string* charset,
-      scoped_refptr<base::RefCountedMemory>* data,
-      const net::CompletionCallback& callback) const override {
+  int GetRefCountedData(std::string* mime_type,
+                        std::string* charset,
+                        scoped_refptr<base::RefCountedMemory>* data,
+                        net::CompletionOnceCallback callback) const override {
     const ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
     *data = rb.LoadDataResourceBytes(resource_id_);
 
@@ -86,11 +86,11 @@ class URLRequestResourceBundleJob : public net::URLRequestSimpleJob {
     std::string* read_mime_type = new std::string;
     base::PostTaskWithTraitsAndReplyWithResult(
         FROM_HERE, {base::MayBlock()},
-        base::Bind(&net::GetMimeTypeFromFile, filename_,
-                   base::Unretained(read_mime_type)),
-        base::Bind(&URLRequestResourceBundleJob::OnMimeTypeRead,
-                   weak_factory_.GetWeakPtr(), mime_type, charset, *data,
-                   base::Owned(read_mime_type), callback));
+        base::BindOnce(&net::GetMimeTypeFromFile, filename_,
+                       base::Unretained(read_mime_type)),
+        base::BindOnce(&URLRequestResourceBundleJob::OnMimeTypeRead,
+                       weak_factory_.GetWeakPtr(), mime_type, charset, *data,
+                       base::Owned(read_mime_type), std::move(callback)));
 
     return net::ERR_IO_PENDING;
   }
@@ -106,7 +106,7 @@ class URLRequestResourceBundleJob : public net::URLRequestSimpleJob {
                       std::string* charset,
                       scoped_refptr<base::RefCountedMemory> data,
                       std::string* read_mime_type,
-                      const net::CompletionCallback& callback,
+                      net::CompletionOnceCallback callback,
                       bool read_result) {
     response_info_.headers->AddHeader(
         base::StringPrintf("%s: %s", net::HttpRequestHeaders::kContentType,
@@ -114,7 +114,7 @@ class URLRequestResourceBundleJob : public net::URLRequestSimpleJob {
     *out_mime_type = *read_mime_type;
     DetermineCharset(*read_mime_type, data.get(), charset);
     int result = read_result ? net::OK : net::ERR_INVALID_URL;
-    callback.Run(result);
+    std::move(callback).Run(result);
   }
 
   // We need the filename of the resource to determine the mime type.
@@ -149,7 +149,10 @@ class ResourceBundleFileLoader : public network::mojom::URLLoader {
   }
 
   // mojom::URLLoader implementation:
-  void FollowRedirect() override {
+  void FollowRedirect(const base::Optional<std::vector<std::string>>&
+                          to_be_removed_request_headers,
+                      const base::Optional<net::HttpRequestHeaders>&
+                          modified_request_headers) override {
     NOTREACHED() << "No redirects for local file loads.";
   }
   // Current implementation reads all resource data at start of resource
@@ -223,7 +226,7 @@ class ResourceBundleFileLoader : public network::mojom::URLLoader {
           base::StringPrintf("%s: %s", net::HttpRequestHeaders::kContentType,
                              head.mime_type.c_str()));
     }
-    client_->OnReceiveResponse(head, nullptr);
+    client_->OnReceiveResponse(head);
     client_->OnStartLoadingResponseBody(std::move(pipe.consumer_handle));
 
     uint32_t write_size = data->size();
@@ -310,7 +313,7 @@ net::URLRequestJob* MaybeCreateURLRequestResourceBundleJob(
   // Try to load extension resources from chrome resource file if
   // directory_path is a descendant of resources_path. resources_path
   // corresponds to src/chrome/browser/resources in source tree.
-  if (PathService::Get(chrome::DIR_RESOURCES, &resources_path) &&
+  if (base::PathService::Get(chrome::DIR_RESOURCES, &resources_path) &&
       // Since component extension resources are included in
       // component_extension_resources.pak file in resources_path, calculate
       // extension relative path against resources_path.
@@ -343,7 +346,7 @@ base::FilePath GetBundleResourcePath(
   // |chrome_resources_path| corresponds to src/chrome/browser/resources in
   // source tree.
   base::FilePath chrome_resources_path;
-  if (!PathService::Get(chrome::DIR_RESOURCES, &chrome_resources_path))
+  if (!base::PathService::Get(chrome::DIR_RESOURCES, &chrome_resources_path))
     return base::FilePath();
 
   // Since component extension resources are included in

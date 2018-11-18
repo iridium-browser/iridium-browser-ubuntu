@@ -36,6 +36,14 @@ bool ShouldSkipInvisibleTextAt(const Text& text,
   return layout_object->Style()->Visibility() != EVisibility::kVisible;
 }
 
+EVisibility FirstLetterVisibilityOf(const LayoutObject* layout_object) {
+  const LayoutTextFragment* text_fragment = ToLayoutTextFragment(layout_object);
+  DCHECK(text_fragment->IsRemainingTextLayoutObject());
+  return text_fragment->GetFirstLetterPseudoElement()
+      ->ComputedStyleRef()
+      .Visibility();
+}
+
 struct StringAndOffsetRange {
   String string;
   unsigned start;
@@ -90,12 +98,6 @@ void TextIteratorTextNodeHandler::HandleTextNodeWithLayoutNG() {
   DCHECK_LE(offset_, end_offset_);
   DCHECK_LE(end_offset_, text_node_->data().length());
 
-  if (ShouldSkipInvisibleTextAt(*text_node_, offset_,
-                                IgnoresStyleVisibility())) {
-    offset_ = end_offset_;
-    return;
-  }
-
   while (offset_ < end_offset_ && !text_state_.PositionNode()) {
     const EphemeralRange range_to_emit(Position(text_node_, offset_),
                                        Position(text_node_, end_offset_));
@@ -115,7 +117,9 @@ void TextIteratorTextNodeHandler::HandleTextNodeWithLayoutNG() {
       const unsigned run_end = std::min(end_offset_, unit.DOMEnd());
       if (run_start >= run_end ||
           unit.ConvertDOMOffsetToTextContent(run_start) ==
-              unit.ConvertDOMOffsetToTextContent(run_end)) {
+              unit.ConvertDOMOffsetToTextContent(run_end) ||
+          ShouldSkipInvisibleTextAt(*text_node_, run_start,
+                                    IgnoresStyleVisibility())) {
         offset_ = run_end;
         continue;
       }
@@ -125,7 +129,7 @@ void TextIteratorTextNodeHandler::HandleTextNodeWithLayoutNG() {
       const String& string = string_and_offsets.string;
       const unsigned text_content_start = string_and_offsets.start;
       const unsigned text_content_end = string_and_offsets.end;
-      text_state_.EmitText(text_node_, run_start, run_end, string,
+      text_state_.EmitText(*text_node_, run_start, run_end, string,
                            text_content_start, text_content_end);
       offset_ = run_end;
       return;
@@ -181,20 +185,23 @@ void TextIteratorTextNodeHandler::HandlePreFormattedTextNode() {
       HasVisibleTextNode(layout_object)) {
     if (!behavior_.CollapseTrailingSpace() ||
         (offset_ > 0 && str[offset_ - 1] == ' ')) {
-      SpliceBuffer(kSpaceCharacter, text_node_, nullptr, offset_, offset_);
+      EmitChar16Before(kSpaceCharacter, offset_);
       needs_handle_pre_formatted_text_node_ = true;
       return;
     }
   }
   if (ShouldHandleFirstLetter(*layout_object)) {
-    HandleTextNodeFirstLetter(ToLayoutTextFragment(layout_object));
+    LayoutTextFragment* remaining_text = ToLayoutTextFragment(layout_object);
+    const bool stops_in_first_letter =
+        end_offset_ <= remaining_text->TextStartOffset();
+
+    HandleTextNodeFirstLetter(remaining_text);
     if (first_letter_text_) {
       const String first_letter = first_letter_text_->GetText();
       const unsigned run_start = offset_;
-      const bool stops_in_first_letter = end_offset_ <= first_letter.length();
       const unsigned run_end =
           stops_in_first_letter ? end_offset_ : first_letter.length();
-      EmitText(text_node_, first_letter_text_, run_start, run_end);
+      EmitText(first_letter_text_, run_start, run_end);
       first_letter_text_ = nullptr;
       text_box_ = nullptr;
       offset_ = run_end;
@@ -202,10 +209,13 @@ void TextIteratorTextNodeHandler::HandlePreFormattedTextNode() {
         needs_handle_pre_formatted_text_node_ = true;
       return;
     }
-    // We are here only if the DOM and/or layout trees are broken.
-    // For robustness, we should stop processing this node.
-    NOTREACHED();
-    return;
+    DCHECK_NE(EVisibility::kVisible, FirstLetterVisibilityOf(remaining_text));
+    if (stops_in_first_letter) {
+      offset_ = end_offset_;
+      return;
+    }
+    // Fall through to handle remaining text.
+    offset_ = remaining_text->TextStartOffset();
   }
   if (layout_object->Style()->Visibility() != EVisibility::kVisible &&
       !IgnoresStyleVisibility())
@@ -219,7 +229,7 @@ void TextIteratorTextNodeHandler::HandlePreFormattedTextNode() {
   if (run_start >= run_end)
     return;
 
-  EmitText(text_node_, text_node_->GetLayoutObject(), run_start, run_end);
+  EmitText(text_node_->GetLayoutObject(), run_start, run_end);
 }
 
 void TextIteratorTextNodeHandler::HandleTextNodeInRange(const Text* node,
@@ -277,8 +287,20 @@ void TextIteratorTextNodeHandler::HandleTextNodeInRange(const Text* node,
     return;
   }
 
-  if (first_letter_text_)
-    layout_object = first_letter_text_;
+  if (should_handle_first_letter) {
+    if (first_letter_text_) {
+      layout_object = first_letter_text_;
+    } else {
+      DCHECK_NE(EVisibility::kVisible, FirstLetterVisibilityOf(layout_object));
+      if (end_offset_ <= layout_object->TextStartOffset()) {
+        offset_ = end_offset_;
+        text_box_ = nullptr;
+        return;
+      }
+      // Fall through to handle remaining text.
+      offset_ = layout_object->TextStartOffset();
+    }
+  }
 
   // Used when text boxes are out of order (Hebrew/Arabic w/ embeded LTR text)
   if (layout_object->ContainsReversedText()) {
@@ -311,9 +333,9 @@ void TextIteratorTextNodeHandler::HandleTextNodeWhole(const Text* node) {
 }
 
 // Restore the collapsed space for copy & paste. See http://crbug.com/318925
-size_t TextIteratorTextNodeHandler::RestoreCollapsedTrailingSpace(
+wtf_size_t TextIteratorTextNodeHandler::RestoreCollapsedTrailingSpace(
     InlineTextBox* next_text_box,
-    size_t subrun_end) {
+    wtf_size_t subrun_end) {
   if (next_text_box || !text_box_->Root().NextRootBox() ||
       text_box_->Root().LastChild() != text_box_)
     return subrun_end;
@@ -344,16 +366,18 @@ size_t TextIteratorTextNodeHandler::RestoreCollapsedTrailingSpace(
 void TextIteratorTextNodeHandler::HandleTextBox() {
   LayoutText* layout_object =
       first_letter_text_ ? first_letter_text_ : text_node_->GetLayoutObject();
-  const unsigned text_start_offset = layout_object->TextStartOffset();
 
   if (layout_object->Style()->Visibility() != EVisibility::kVisible &&
       !IgnoresStyleVisibility()) {
     text_box_ = nullptr;
   } else {
     String str = layout_object->GetText();
+    const unsigned text_start_offset = layout_object->TextStartOffset();
     // Start and end offsets in |str|, i.e., str[start..end - 1] should be
     // emitted (after handling whitespace collapsing).
-    const unsigned start = offset_ - layout_object->TextStartOffset();
+    DCHECK_GE(offset_, text_start_offset);
+    DCHECK_GE(end_offset_, text_start_offset);
+    const unsigned start = offset_ - text_start_offset;
     const unsigned end = end_offset_ - text_start_offset;
     while (text_box_) {
       const unsigned text_box_start = text_box_->Start();
@@ -375,11 +399,9 @@ void TextIteratorTextNodeHandler::HandleTextBox() {
           unsigned space_run_start = run_start - 1;
           while (space_run_start > 0 && str[space_run_start - 1] == ' ')
             --space_run_start;
-          EmitText(text_node_, layout_object, space_run_start,
-                   space_run_start + 1);
+          EmitText(layout_object, space_run_start, space_run_start + 1);
         } else {
-          SpliceBuffer(kSpaceCharacter, text_node_, nullptr, run_start,
-                       run_start);
+          EmitChar16Before(kSpaceCharacter, run_start);
         }
         return;
       }
@@ -417,14 +439,13 @@ void TextIteratorTextNodeHandler::HandleTextBox() {
           // We need to preserve new lines in case of PreLine.
           // See bug crbug.com/317365.
           if (layout_object->Style()->WhiteSpace() == EWhiteSpace::kPreLine) {
-            SpliceBuffer('\n', text_node_, nullptr, run_start, run_start);
+            EmitChar16Before('\n', run_start);
           } else {
-            SpliceBuffer(kSpaceCharacter, text_node_, nullptr, run_start,
-                         run_start + 1);
+            EmitReplacmentCodeUnit(kSpaceCharacter, run_start);
           }
           offset_ = text_start_offset + run_start + 1;
         } else {
-          size_t subrun_end = str.find('\n', run_start);
+          wtf_size_t subrun_end = str.find('\n', run_start);
           if (subrun_end == kNotFound || subrun_end > run_end) {
             subrun_end = run_end;
             subrun_end =
@@ -432,7 +453,7 @@ void TextIteratorTextNodeHandler::HandleTextBox() {
           }
 
           offset_ = text_start_offset + subrun_end;
-          EmitText(text_node_, layout_object, run_start, subrun_end);
+          EmitText(layout_object, run_start, subrun_end);
         }
 
         // If we are doing a subrun that doesn't go to the end of the text box,
@@ -464,13 +485,12 @@ void TextIteratorTextNodeHandler::HandleTextBox() {
           ++sorted_text_boxes_position_;
         return;
       }
-      // Advance and continue
-      if (run_start == run_end && run_end == end) {
-        // "<p>^ |(1) foo</p>" with ::first-letter reaches here.
-        // Where "^" is start of range and "|" is end of range.
+      // All remaining text boxes are after range end. Nothing left to emit.
+      if (text_box_start >= end) {
         offset_ = end_offset_;
         return;
       }
+      // Advance and continue
       text_box_ = next_text_box;
       if (layout_object->ContainsReversedText())
         ++sorted_text_boxes_position_;
@@ -522,28 +542,28 @@ void TextIteratorTextNodeHandler::HandleTextNodeFirstLetter(
   text_box_ = first_letter_text_->FirstTextBox();
 }
 
-bool TextIteratorTextNodeHandler::FixLeadingWhiteSpaceForReplacedElement(
-    const Node* parent) {
+bool TextIteratorTextNodeHandler::ShouldFixLeadingWhiteSpaceForReplacedElement()
+    const {
   // This is a hacky way for white space fixup in legacy layout. With LayoutNG,
   // we can get rid of this function.
   if (uses_layout_ng_)
     return false;
-
-  if (behavior_.CollapseTrailingSpace()) {
-    if (text_node_) {
-      String str = text_node_->GetLayoutObject()->GetText();
-      if (last_text_node_ended_with_collapsed_space_ && offset_ > 0 &&
-          str[offset_ - 1] == ' ') {
-        SpliceBuffer(kSpaceCharacter, parent, text_node_, 1, 1);
-        return true;
-      }
-    }
-  } else if (last_text_node_ended_with_collapsed_space_) {
-    SpliceBuffer(kSpaceCharacter, parent, text_node_, 1, 1);
+  if (!last_text_node_ended_with_collapsed_space_)
+    return false;
+  if (!behavior_.CollapseTrailingSpace())
     return true;
-  }
+  if (!text_node_)
+    return false;
+  const String str = text_node_->GetLayoutObject()->GetText();
+  return offset_ > 0 && str[offset_ - 1] == ' ';
+}
 
-  return false;
+bool TextIteratorTextNodeHandler::FixLeadingWhiteSpaceForReplacedElement() {
+  if (!ShouldFixLeadingWhiteSpaceForReplacedElement())
+    return false;
+  text_state_.EmitChar16AfterNode(kSpaceCharacter, *text_node_);
+  ResetCollapsedWhiteSpaceFixup();
+  return true;
 }
 
 void TextIteratorTextNodeHandler::ResetCollapsedWhiteSpaceFixup() {
@@ -552,25 +572,26 @@ void TextIteratorTextNodeHandler::ResetCollapsedWhiteSpaceFixup() {
   last_text_node_ended_with_collapsed_space_ = false;
 }
 
-void TextIteratorTextNodeHandler::SpliceBuffer(UChar c,
-                                               const Node* text_node,
-                                               const Node* offset_base_node,
-                                               unsigned text_start_offset,
-                                               unsigned text_end_offset) {
-  text_state_.SpliceBuffer(c, text_node, offset_base_node, text_start_offset,
-                           text_end_offset);
+void TextIteratorTextNodeHandler::EmitChar16Before(UChar code_unit,
+                                                   unsigned offset) {
+  text_state_.EmitChar16Before(code_unit, *text_node_, offset);
   ResetCollapsedWhiteSpaceFixup();
 }
 
-void TextIteratorTextNodeHandler::EmitText(const Node* text_node,
-                                           const LayoutText* layout_object,
+void TextIteratorTextNodeHandler::EmitReplacmentCodeUnit(UChar code_unit,
+                                                         unsigned offset) {
+  text_state_.EmitReplacmentCodeUnit(code_unit, *text_node_, offset);
+  ResetCollapsedWhiteSpaceFixup();
+}
+
+void TextIteratorTextNodeHandler::EmitText(const LayoutText* layout_object,
                                            unsigned text_start_offset,
                                            unsigned text_end_offset) {
   String string = behavior_.EmitsOriginalText() ? layout_object->OriginalText()
                                                 : layout_object->GetText();
   if (behavior_.EmitsSpaceForNbsp())
     string.Replace(kNoBreakSpaceCharacter, kSpaceCharacter);
-  text_state_.EmitText(text_node,
+  text_state_.EmitText(*text_node_,
                        text_start_offset + layout_object->TextStartOffset(),
                        text_end_offset + layout_object->TextStartOffset(),
                        string, text_start_offset, text_end_offset);

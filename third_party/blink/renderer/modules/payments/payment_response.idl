@@ -15,18 +15,22 @@ enum PaymentComplete {
 [
     RuntimeEnabled=PaymentRequest,
     SecureContext,
-    Exposed=Window
-] interface PaymentResponse {
+    Exposed=Window,
+    ActiveScriptWrappable
+] interface PaymentResponse : EventTarget {
     serializer = {attribute};
 
     readonly attribute DOMString requestId;
     readonly attribute DOMString methodName;
-    [CallWith=ScriptState, RaisesException] readonly attribute object details;
+    [CallWith=ScriptState] readonly attribute object details;
     readonly attribute PaymentAddress? shippingAddress;
     readonly attribute DOMString? shippingOption;
     readonly attribute DOMString? payerName;
     readonly attribute DOMString? payerEmail;
     readonly attribute DOMString? payerPhone;
 
-    [CallWith=ScriptState] Promise<void> complete(optional PaymentComplete paymentResult = "unknown");
+    [CallWith=ScriptState, NewObject] Promise<void> complete(optional PaymentComplete paymentResult = "unknown");
+    [CallWith=ScriptState, NewObject, RuntimeEnabled=PaymentRetry] Promise<void> retry(PaymentValidationErrors errorFields);
+
+    [RuntimeEnabled=PaymentRetry] attribute EventHandler onpayerdetailchange;
 };

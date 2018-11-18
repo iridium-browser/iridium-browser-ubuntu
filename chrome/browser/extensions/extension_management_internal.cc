@@ -135,9 +135,11 @@ bool IndividualSettings::Parse(const base::DictionaryValue* dict,
         URLPattern pattern(extension_scheme_mask);
         if (unparsed_str != URLPattern::kAllUrlsPattern)
           unparsed_str.append("/*");
+        // TODO(nrpeter): Remove effective TLD wildcard capability from
+        // URLPattern.
         URLPattern::ParseResult parse_result = pattern.Parse(
-            unparsed_str, URLPattern::ALLOW_WILDCARD_FOR_EFFECTIVE_TLD);
-        if (parse_result != URLPattern::PARSE_SUCCESS) {
+            unparsed_str, URLPattern::DENY_WILDCARD_FOR_EFFECTIVE_TLD);
+        if (parse_result != URLPattern::ParseResult::kSuccess) {
           LOG(WARNING) << kMalformedPreferenceWarning;
           LOG(WARNING) << "Invalid URL pattern '" + unparsed_str +
                               "' for attribute " + key;
@@ -149,12 +151,12 @@ bool IndividualSettings::Parse(const base::DictionaryValue* dict,
     return true;
   };
 
-  if (!parse_url_pattern_set(dict, schema_constants::kRuntimeBlockedHosts,
-                             &runtime_blocked_hosts))
+  if (!parse_url_pattern_set(dict, schema_constants::kPolicyBlockedHosts,
+                             &policy_blocked_hosts))
     return false;
 
-  if (!parse_url_pattern_set(dict, schema_constants::kRuntimeAllowedHosts,
-                             &runtime_allowed_hosts))
+  if (!parse_url_pattern_set(dict, schema_constants::kPolicyAllowedHosts,
+                             &policy_allowed_hosts))
     return false;
 
   // Parses the minimum version settings.
@@ -189,8 +191,8 @@ void IndividualSettings::Reset() {
   installation_mode = ExtensionManagement::INSTALLATION_ALLOWED;
   update_url.clear();
   blocked_permissions.clear();
-  runtime_blocked_hosts.ClearPatterns();
-  runtime_allowed_hosts.ClearPatterns();
+  policy_blocked_hosts.ClearPatterns();
+  policy_allowed_hosts.ClearPatterns();
   blocked_install_message.clear();
 }
 

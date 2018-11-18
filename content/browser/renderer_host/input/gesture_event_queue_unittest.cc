@@ -12,7 +12,6 @@
 
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/test/scoped_feature_list.h"
@@ -36,8 +35,8 @@ namespace content {
 
 class GestureEventQueueTest : public testing::Test,
                               public GestureEventQueueClient,
-                              public TouchpadTapSuppressionControllerClient,
-                              public FlingControllerClient {
+                              public FlingControllerEventSenderClient,
+                              public FlingControllerSchedulerClient {
  public:
   GestureEventQueueTest() : GestureEventQueueTest(false) {}
 
@@ -65,17 +64,13 @@ class GestureEventQueueTest : public testing::Test,
     queue_.reset();
   }
 
-  void SetUpForTapSuppression(int max_cancel_to_down_time_ms,
-                              int max_tap_gap_time_ms) {
+  void SetUpForTapSuppression(int max_cancel_to_down_time_ms) {
     GestureEventQueue::Config gesture_config;
     gesture_config.fling_config.touchscreen_tap_suppression_config.enabled =
         true;
     gesture_config.fling_config.touchscreen_tap_suppression_config
         .max_cancel_to_down_time =
         base::TimeDelta::FromMilliseconds(max_cancel_to_down_time_ms);
-    gesture_config.fling_config.touchscreen_tap_suppression_config
-        .max_tap_gap_time =
-        base::TimeDelta::FromMilliseconds(max_tap_gap_time_ms);
     queue_.reset(new GestureEventQueue(this, this, this, gesture_config));
   }
 
@@ -101,17 +96,18 @@ class GestureEventQueueTest : public testing::Test,
     }
   }
 
-  // TouchpadTapSuppressionControllerClient
-  void SendMouseEventImmediately(
-      const MouseEventWithLatencyInfo& event) override {}
-
-  // FlingControllerClient
+  // FlingControllerEventSenderClient
   void SendGeneratedWheelEvent(
       const MouseWheelEventWithLatencyInfo& wheel_event) override {}
   void SendGeneratedGestureScrollEvents(
       const GestureEventWithLatencyInfo& gesture_event) override {}
-  void SetNeedsBeginFrameForFlingProgress() override {}
-  void DidStopFlingingOnBrowser() override {}
+
+  // FlingControllerSchedulerClient
+  void ScheduleFlingProgress(
+      base::WeakPtr<FlingController> fling_controller) override {}
+  void DidStopFlingingOnBrowser(
+      base::WeakPtr<FlingController> fling_controller) override {}
+  bool NeedsBeginFrameForFlingProgress() override { return false; }
 
  protected:
   static GestureEventQueue::Config DefaultConfig() {
@@ -123,7 +119,10 @@ class GestureEventQueueTest : public testing::Test,
   }
 
   void SimulateGestureEvent(const WebGestureEvent& gesture) {
-    queue()->QueueEvent(GestureEventWithLatencyInfo(gesture));
+    GestureEventWithLatencyInfo gesture_event(gesture);
+    if (!queue()->FlingControllerFilterEvent(gesture_event)) {
+      queue()->DebounceOrQueueEvent(gesture_event);
+    }
   }
 
   void SimulateGestureEvent(WebInputEvent::Type type,
@@ -215,6 +214,9 @@ class GestureEventQueueTest : public testing::Test,
   }
 
   bool FlingInProgress() { return queue()->fling_in_progress_; }
+  bool FlingCancellationIsDeferred() {
+    return queue()->FlingCancellationIsDeferred();
+  }
 
   bool WillIgnoreNextACK() {
     return queue()->ignore_next_ack_;
@@ -1035,10 +1037,10 @@ TEST_F(GestureEventQueueTest, DebounceDefersFollowingGestureEvents) {
   EXPECT_EQ(2U, GestureEventQueueSize());
   EXPECT_EQ(2U, GestureEventDebouncingQueueSize());
 
+  base::RunLoop run_loop;
   base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
-      FROM_HERE, base::MessageLoop::QuitWhenIdleClosure(),
-      TimeDelta::FromMilliseconds(5));
-  base::RunLoop().Run();
+      FROM_HERE, run_loop.QuitClosure(), TimeDelta::FromMilliseconds(5));
+  run_loop.Run();
 
   // The deferred events are correctly queued in coalescing queue.
   EXPECT_EQ(0U, GetAndResetSentGestureEventCount());
@@ -1053,64 +1055,6 @@ TEST_F(GestureEventQueueTest, DebounceDefersFollowingGestureEvents) {
 
   for (unsigned i = 0; i < sizeof(expected) / sizeof(WebInputEvent::Type);
        i++) {
-    WebGestureEvent merged_event = GestureEventQueueEventAt(i);
-    EXPECT_EQ(expected[i], merged_event.GetType());
-  }
-}
-
-// Test that a GestureFlingStart is not filtered out by debouncing and that
-// GestureFlingStart causes debouncing queue to empty into gesture queue.
-TEST_F(GestureEventQueueTest, DebounceEndsWithFlingStartEvent) {
-  SetUpForDebounce(3);
-
-  SimulateGestureEvent(WebInputEvent::kGestureScrollUpdate,
-                       blink::kWebGestureDeviceTouchpad);
-  EXPECT_EQ(1U, GetAndResetSentGestureEventCount());
-  EXPECT_EQ(1U, GestureEventQueueSize());
-  EXPECT_EQ(0U, GestureEventDebouncingQueueSize());
-  EXPECT_TRUE(ScrollingInProgress());
-
-  SimulateGestureEvent(WebInputEvent::kGestureScrollEnd,
-                       blink::kWebGestureDeviceTouchpad);
-  EXPECT_EQ(0U, GetAndResetSentGestureEventCount());
-  EXPECT_EQ(1U, GestureEventQueueSize());
-  EXPECT_EQ(1U, GestureEventDebouncingQueueSize());
-
-  // The deferred events are correctly queued in coalescing queue. The GFS with
-  // touchpad source is not queued since it is handled by fling controller.
-  SimulateGestureFlingStartEvent(0, 10, blink::kWebGestureDeviceTouchpad);
-  EXPECT_EQ(0U, GetAndResetSentGestureEventCount());
-  EXPECT_EQ(2U, GestureEventQueueSize());
-  EXPECT_EQ(0U, GestureEventDebouncingQueueSize());
-  EXPECT_FALSE(ScrollingInProgress());
-  EXPECT_TRUE(FlingInProgress());
-
-  // While fling is in progress events don't get debounced.
-  SimulateGestureEvent(WebInputEvent::kGestureScrollBegin,
-                       blink::kWebGestureDeviceTouchpad);
-  EXPECT_EQ(0U, GetAndResetSentGestureEventCount());
-  EXPECT_EQ(3U, GestureEventQueueSize());
-  EXPECT_EQ(0U, GestureEventDebouncingQueueSize());
-
-  SimulateGestureEvent(WebInputEvent::kGestureScrollUpdate,
-                       blink::kWebGestureDeviceTouchpad);
-  EXPECT_EQ(0U, GetAndResetSentGestureEventCount());
-  EXPECT_EQ(4U, GestureEventQueueSize());
-  EXPECT_EQ(0U, GestureEventDebouncingQueueSize());
-
-  SimulateGestureEvent(WebInputEvent::kGestureScrollEnd,
-                       blink::kWebGestureDeviceTouchpad);
-  EXPECT_EQ(0U, GetAndResetSentGestureEventCount());
-  EXPECT_EQ(5U, GestureEventQueueSize());
-  EXPECT_EQ(0U, GestureEventDebouncingQueueSize());
-
-  // Verify that the coalescing queue contains the correct events.
-  WebInputEvent::Type expected[] = {
-      WebInputEvent::kGestureScrollUpdate, WebInputEvent::kGestureScrollEnd,
-      WebInputEvent::kGestureScrollBegin, WebInputEvent::kGestureScrollUpdate};
-
-  for (unsigned i = 0; i < sizeof(expected) / sizeof(WebInputEvent::Type);
-      i++) {
     WebGestureEvent merged_event = GestureEventQueueEventAt(i);
     EXPECT_EQ(expected[i], merged_event.GetType());
   }
@@ -1159,8 +1103,10 @@ TEST_F(GestureEventQueueTest, DebounceDropsDeferredEvents) {
 // Test that the fling cancelling tap down event and its following tap get
 // suppressed when tap suppression is enabled.
 TEST_F(GestureEventQueueTest, TapGetsSuppressedAfterTapDownCancellsFling) {
-  SetUpForTapSuppression(400, 200);
-  SimulateGestureFlingStartEvent(0, -10, blink::kWebGestureDeviceTouchscreen);
+  SetUpForTapSuppression(400);
+  // The velocity of the event must be large enough to make sure that the fling
+  // is still active when the tap down happens.
+  SimulateGestureFlingStartEvent(0, -1000, blink::kWebGestureDeviceTouchscreen);
   EXPECT_TRUE(FlingInProgress());
   // The fling start event is not sent to the renderer.
   EXPECT_EQ(0U, GetAndResetSentGestureEventCount());
@@ -1171,7 +1117,7 @@ TEST_F(GestureEventQueueTest, TapGetsSuppressedAfterTapDownCancellsFling) {
   // fling cancel event is not sent to the renderer.
   SimulateGestureEvent(WebInputEvent::kGestureFlingCancel,
                        blink::kWebGestureDeviceTouchscreen);
-  EXPECT_FALSE(FlingInProgress());
+  EXPECT_TRUE(FlingCancellationIsDeferred());
   EXPECT_EQ(0U, GetAndResetSentGestureEventCount());
   EXPECT_EQ(0U, GestureEventQueueSize());
   RunUntilIdle();

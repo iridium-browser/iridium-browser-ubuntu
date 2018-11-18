@@ -198,12 +198,9 @@ void MediaControlInputElement::UpdateShownState() {
   MediaControlElementBase::UpdateShownState();
 }
 
-void MediaControlInputElement::DefaultEventHandler(Event* event) {
-  if (event->type() == EventTypeNames::click) {
-    if (IsOverflowElement())
-      GetMediaControls().MaybeRecordOverflowTimeToAction();
+void MediaControlInputElement::DefaultEventHandler(Event& event) {
+  if (event.type() == EventTypeNames::click)
     MaybeRecordInteracted();
-  }
 
   HTMLInputElement::DefaultEventHandler(event);
 }

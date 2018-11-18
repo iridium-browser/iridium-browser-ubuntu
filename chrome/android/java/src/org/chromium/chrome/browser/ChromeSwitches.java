@@ -68,17 +68,26 @@ public abstract class ChromeSwitches {
     public static final String DISABLE_LOFI_SNACKBAR = "disable-lo-fi-snackbar";
 
     /**
-     * Forces the update menu item to show.
+     * Forces the update state to be set to the given state if the value is {@link
+     * org.chromium.chrome.browser.omaha.UpdateMenuItemHelper#NONE_SWITCH_VALUE}, {@link
+     * org.chromium.chrome.browser.omaha.UpdateMenuItemHelper#UPDATE_AVAILABLE_SWITCH_VALUE},
+     * {@link
+     * org.chromium.chrome.browser.omaha.UpdateMenuItemHelper#UNSUPPORTED_OS_VERSION_SWITCH_VALUE}.
      */
-    public static final String FORCE_SHOW_UPDATE_MENU_ITEM = "force-show-update-menu-item";
+    public static final String FORCE_UPDATE_MENU_UPDATE_TYPE = "force-update-menu-type";
 
     /**
-     * Forces the update menu badge to show.
+     * Forces the update menu badge to show. This requires the update type to be valid as well.
+     *
+     * @see #FORCE_UPDATE_MENU_UPDATE_TYPE
      */
     public static final String FORCE_SHOW_UPDATE_MENU_BADGE = "force-show-update-menu-badge";
 
     /**
-     * Sets the market URL for Chrome for use in testing.
+     * Sets the market URL for Chrome for use in testing. This requires setting {@link
+     * #FORCE_UPDATE_MENU_UPDATE_TYPE} to {@link
+     * org.chromium.chrome.browser.omaha.UpdateMenuItemHelper#UPDATE_AVAILABLE_SWITCH_VALUE}.
+     * @see #FORCE_UPDATE_MENU_UPDATE_TYPE
      */
     public static final String MARKET_URL_FOR_TESTING = "market-url-for-testing";
 
@@ -188,6 +197,23 @@ public abstract class ChromeSwitches {
      */
     public static final String DISABLE_DIGITAL_ASSET_LINK_VERIFICATION =
             "disable-digital-asset-link-verification-for-url";
+
+    /**
+     * Forces Trusted Web Activities to show the the Disclosure Toast every time.
+     */
+    public static final String FORCE_TRUSTED_WEB_ACTIVITY_DISCLOSURE =
+            "force-trusted-web-activity-disclosure";
+
+    /**
+     * Allows first-party apps to launch incognito custom tabs.
+     */
+    public static final String ENABLE_INCOGNITO_CUSTOM_TABS = "enable-incognito-custom-tabs";
+
+    /**
+     * Allows third-party apps to launch incognito custom tabs.
+     */
+    public static final String ALLOW_INCOGNITO_CUSTOM_TABS_FROM_THIRD_PARTY =
+            "allow-incognito-custom-tabs-from-third-party";
 
     // Prevent instantiation.
     private ChromeSwitches() {}

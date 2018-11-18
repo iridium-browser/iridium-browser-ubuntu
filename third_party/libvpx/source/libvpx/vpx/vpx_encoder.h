@@ -7,8 +7,8 @@
  *  in the file PATENTS.  All contributing project authors may
  *  be found in the AUTHORS file in the root of the source tree.
  */
-#ifndef VPX_VPX_ENCODER_H_
-#define VPX_VPX_ENCODER_H_
+#ifndef VPX_VPX_VPX_ENCODER_H_
+#define VPX_VPX_VPX_ENCODER_H_
 
 /*!\defgroup encoder Encoder Algorithm Interface
  * \ingroup codec
@@ -63,7 +63,7 @@ extern "C" {
  * fields to structures
  */
 #define VPX_ENCODER_ABI_VERSION \
-  (11 + VPX_CODEC_ABI_VERSION) /**<\hideinitializer*/
+  (14 + VPX_CODEC_ABI_VERSION) /**<\hideinitializer*/
 
 /*! \brief Encoder capabilities bitfield
  *
@@ -981,4 +981,4 @@ const vpx_image_t *vpx_codec_get_preview_frame(vpx_codec_ctx_t *ctx);
 #ifdef __cplusplus
 }
 #endif
-#endif  // VPX_VPX_ENCODER_H_
+#endif  // VPX_VPX_VPX_ENCODER_H_

@@ -84,7 +84,7 @@ class BaseGpuTest : public GpuServiceTest {
       gl_version = "2.1";
       extensions = "GL_EXT_timer_query";
     } else if (GetTimerType() == gl::GPUTiming::kTimerTypeDisjoint) {
-      gl_version = "opengl es 3.0";
+      gl_version = "OpenGL ES 3.0";
       extensions = "GL_EXT_disjoint_timer_query";
     } else if (GetTimerType() == gl::GPUTiming::kTimerTypeARB) {
       // TODO(sievers): The tracer should not depend on ARB_occlusion_query.
@@ -105,7 +105,7 @@ class BaseGpuTest : public GpuServiceTest {
   }
 
   void TearDown() override {
-    gpu_timing_client_ = NULL;
+    gpu_timing_client_ = nullptr;
     gl_fake_queries_.Reset();
     GpuServiceTest::TearDown();
   }

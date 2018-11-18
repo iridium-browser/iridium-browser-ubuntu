@@ -9,9 +9,9 @@
 #include "base/files/file_util.h"
 #include "base/location.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/task/lazy_task_runner.h"
+#include "base/task/post_task.h"
 #include "base/task_runner_util.h"
-#include "base/task_scheduler/lazy_task_runner.h"
-#include "base/task_scheduler/post_task.h"
 #include "components/autofill/core/common/password_form.h"
 #include "components/password_manager/core/browser/export/password_csv_writer.h"
 #include "components/password_manager/core/browser/password_manager_metrics_util.h"
@@ -163,8 +163,8 @@ void PasswordManagerExporter::OnPasswordsExported(
     UMA_HISTOGRAM_ENUMERATION("PasswordManager.ExportPasswordsToCSVResult",
                               ExportPasswordsResult::SUCCESS,
                               ExportPasswordsResult::COUNT);
-    UMA_HISTOGRAM_COUNTS("PasswordManager.ExportedPasswordsPerUserInCSV",
-                         password_count_);
+    UMA_HISTOGRAM_COUNTS_1M("PasswordManager.ExportedPasswordsPerUserInCSV",
+                            password_count_);
   } else {
     OnProgress(ExportProgressStatus::FAILED_WRITE_FAILED,
                destination_.DirName().BaseName().AsUTF8Unsafe());

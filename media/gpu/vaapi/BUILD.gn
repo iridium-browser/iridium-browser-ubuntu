@@ -53,6 +53,10 @@ action("libva_generate_stubs") {
 source_set("vaapi") {
   defines = [ "MEDIA_GPU_IMPLEMENTATION" ]
   sources = [
+    "accelerated_video_encoder.cc",
+    "accelerated_video_encoder.h",
+    "h264_encoder.cc",
+    "h264_encoder.h",
     "va_surface.cc",
     "va_surface.h",
     "vaapi_common.cc",
@@ -61,8 +65,6 @@ source_set("vaapi") {
     "vaapi_h264_accelerator.h",
     "vaapi_jpeg_decode_accelerator.cc",
     "vaapi_jpeg_decode_accelerator.h",
-    "vaapi_jpeg_decoder.cc",
-    "vaapi_jpeg_decoder.h",
     "vaapi_jpeg_encode_accelerator.cc",
     "vaapi_jpeg_encode_accelerator.h",
     "vaapi_jpeg_encoder.cc",
@@ -71,6 +73,8 @@ source_set("vaapi") {
     "vaapi_picture.h",
     "vaapi_picture_factory.cc",
     "vaapi_picture_factory.h",
+    "vaapi_utils.cc",
+    "vaapi_utils.h",
     "vaapi_video_decode_accelerator.cc",
     "vaapi_video_decode_accelerator.h",
     "vaapi_video_encode_accelerator.cc",
@@ -81,6 +85,8 @@ source_set("vaapi") {
     "vaapi_vp9_accelerator.h",
     "vaapi_wrapper.cc",
     "vaapi_wrapper.h",
+    "vp8_encoder.cc",
+    "vp8_encoder.h",
   ]
   sources += get_target_outputs(":libva_generate_stubs")
 
@@ -134,9 +140,27 @@ source_set("unit_test") {
     "//base/test:test_support",
     "//gpu:test_support",
     "//media/gpu:common",
+    "//mojo/core/embedder",
     "//testing/gmock",
     "//testing/gtest",
     "//ui/gfx:test_support",
     "//ui/gfx/geometry",
+  ]
+}
+
+source_set("jpeg_decode_accelerator_unit_test") {
+  testonly = true
+  sources = [
+    "vaapi_jpeg_decode_accelerator_unittest.cc",
+  ]
+  deps = [
+    ":vaapi",
+    "//base/test:test_support",
+    "//gpu:test_support",
+    "//media:test_support",
+    "//media/gpu:common",
+    "//testing/gmock",
+    "//testing/gtest",
+    "//ui/gfx:test_support",
   ]
 }

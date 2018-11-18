@@ -27,31 +27,33 @@
 #define THIRD_PARTY_BLINK_PUBLIC_PLATFORM_WEB_LAYER_TREE_VIEW_H_
 
 #include "base/callback.h"
+#include "cc/input/browser_controls_state.h"
+#include "cc/input/event_listener_properties.h"
+#include "cc/input/layer_selection_bound.h"
+#include "cc/input/overscroll_behavior.h"
+#include "cc/layers/layer.h"
+#include "cc/trees/element_id.h"
+#include "cc/trees/layer_tree_host.h"
 #include "cc/trees/layer_tree_mutator.h"
 #include "components/viz/common/surfaces/frame_sink_id.h"
-#include "third_party/blink/public/platform/web_browser_controls_state.h"
-#include "third_party/blink/public/platform/web_color.h"
 #include "third_party/blink/public/platform/web_common.h"
-#include "third_party/blink/public/platform/web_event_listener_properties.h"
-#include "third_party/blink/public/platform/web_float_point.h"
-#include "third_party/blink/public/platform/web_image_layer.h"
-#include "third_party/blink/public/platform/web_overscroll_behavior.h"
-#include "third_party/blink/public/platform/web_size.h"
-
+#include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkImage.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
 
+class SkBitmap;
+
 namespace cc {
 class AnimationHost;
+class PaintImage;
 }
 
-namespace blink {
+namespace gfx {
+class Size;
+class Vector2d;
+}  // namespace gfx
 
-class WebCompositeAndReadbackAsyncCallback;
-class WebLayer;
-class WebLayoutAndPaintAsyncCallback;
-struct WebPoint;
-class WebSelection;
+namespace blink {
 
 class WebLayerTreeView {
  public:
@@ -68,14 +70,15 @@ class WebLayerTreeView {
     kDidNotSwapActivationFails = 4,
     kSwapResultMax,
   };
-  using ReportTimeCallback = base::Callback<void(SwapResult, double)>;
+  using ReportTimeCallback =
+      base::OnceCallback<void(SwapResult, base::TimeTicks)>;
 
   virtual ~WebLayerTreeView() = default;
 
   // Initialization and lifecycle --------------------------------------
 
   // Sets the root of the tree. The root is set by way of the constructor.
-  virtual void SetRootLayer(const WebLayer&) {}
+  virtual void SetRootLayer(scoped_refptr<cc::Layer>) {}
   virtual void ClearRootLayer() {}
 
   // TODO(loyso): This should use CompositorAnimationHost. crbug.com/584551
@@ -84,10 +87,10 @@ class WebLayerTreeView {
   // View properties ---------------------------------------------------
 
   // Viewport size is given in physical pixels.
-  virtual WebSize GetViewportSize() const { return WebSize(); }
+  virtual gfx::Size GetViewportSize() const = 0;
 
   // Sets the background color for the viewport.
-  virtual void SetBackgroundColor(WebColor) {}
+  virtual void SetBackgroundColor(SkColor) {}
 
   // Sets whether this view is visible. In threaded mode, a view that is not
   // visible will not composite or trigger UpdateAnimations() or Layout() calls
@@ -105,7 +108,7 @@ class WebLayerTreeView {
   // If useAnchor is true, destination is a point on the screen that will remain
   // fixed for the duration of the animation.
   // If useAnchor is false, destination is the final top-left scroll position.
-  virtual void StartPageScaleAnimation(const WebPoint& destination,
+  virtual void StartPageScaleAnimation(const gfx::Vector2d& destination,
                                        bool use_anchor,
                                        float new_page_scale,
                                        double duration_sec) {}
@@ -120,8 +123,8 @@ class WebLayerTreeView {
   virtual void SetBrowserControlsShownRatio(float) {}
 
   // Update browser controls permitted and current states
-  virtual void UpdateBrowserControlsState(WebBrowserControlsState constraints,
-                                          WebBrowserControlsState current,
+  virtual void UpdateBrowserControlsState(cc::BrowserControlsState constraints,
+                                          cc::BrowserControlsState current,
                                           bool animate) {}
 
   // Set browser controls height. If |shrink_viewport| is set to true, then
@@ -135,7 +138,7 @@ class WebLayerTreeView {
 
   // Set the browser's behavior when overscroll happens, e.g. whether to glow
   // or navigate.
-  virtual void SetOverscrollBehavior(const WebOverscrollBehavior&) {}
+  virtual void SetOverscrollBehavior(const cc::OverscrollBehavior&) {}
 
   // Flow control and scheduling ---------------------------------------
 
@@ -143,34 +146,29 @@ class WebLayerTreeView {
   // dirty.
   virtual void SetNeedsBeginFrame() {}
 
-  // Relays the end of a fling animation.
-  virtual void DidStopFlinging() {}
-
   // Run layout and paint of all pending document changes asynchronously.
-  // The caller is resposible for keeping the WebLayoutAndPaintAsyncCallback
-  // object alive until it is called.
-  virtual void LayoutAndPaintAsync(WebLayoutAndPaintAsyncCallback*) {}
+  virtual void LayoutAndPaintAsync(base::OnceClosure callback) {}
 
-  // The caller is responsible for keeping the
-  // WebCompositeAndReadbackAsyncCallback object alive until it is called.
   virtual void CompositeAndReadbackAsync(
-      WebCompositeAndReadbackAsyncCallback*) {}
+      base::OnceCallback<void(const SkBitmap&)> callback) {}
 
-  // Synchronously run all lifecycle phases and compositor update with no
-  // raster. Should only be called by layout tests running in synchronous
-  // single-threaded mode.
-  virtual void SynchronouslyCompositeNoRasterForTesting() {}
+  // Synchronously performs the complete set of document lifecycle phases,
+  // including updates to the compositor state, optionally including
+  // rasterization.
+  virtual void UpdateAllLifecyclePhasesAndCompositeForTesting(bool do_raster) {}
 
   // Prevents updates to layer tree from becoming visible.
-  virtual void SetDeferCommits(bool defer_commits) {}
+  virtual std::unique_ptr<cc::ScopedDeferCommits> DeferCommits() {
+    return nullptr;
+  }
 
   struct ViewportLayers {
-    const WebLayer* overscroll_elasticity = nullptr;
-    const WebLayer* page_scale = nullptr;
-    const WebLayer* inner_viewport_container = nullptr;
-    const WebLayer* outer_viewport_container = nullptr;
-    const WebLayer* inner_viewport_scroll = nullptr;
-    const WebLayer* outer_viewport_scroll = nullptr;
+    cc::ElementId overscroll_elasticity_element_id;
+    scoped_refptr<cc::Layer> page_scale;
+    scoped_refptr<cc::Layer> inner_viewport_container;
+    scoped_refptr<cc::Layer> outer_viewport_container;
+    scoped_refptr<cc::Layer> inner_viewport_scroll;
+    scoped_refptr<cc::Layer> outer_viewport_scroll;
   };
 
   // Identify key viewport layers to the compositor.
@@ -178,7 +176,7 @@ class WebLayerTreeView {
   virtual void ClearViewportLayers() {}
 
   // Used to update the active selection bounds.
-  virtual void RegisterSelection(const WebSelection&) {}
+  virtual void RegisterSelection(const cc::LayerSelection&) {}
   virtual void ClearSelection() {}
 
   // Mutations are plumbed back to the layer tree via the mutator client.
@@ -189,8 +187,8 @@ class WebLayerTreeView {
   virtual void ForceRecalculateRasterScales() {}
 
   // Input properties ---------------------------------------------------
-  virtual void SetEventListenerProperties(WebEventListenerClass,
-                                          WebEventListenerProperties) {}
+  virtual void SetEventListenerProperties(cc::EventListenerClass,
+                                          cc::EventListenerProperties) {}
   virtual void UpdateEventRectsForSubframeIfNecessary() {}
   virtual void SetHaveScrollEventHandlers(bool) {}
 
@@ -199,9 +197,9 @@ class WebLayerTreeView {
 
   // Debugging / dangerous ---------------------------------------------
 
-  virtual WebEventListenerProperties EventListenerProperties(
-      WebEventListenerClass) const {
-    return WebEventListenerProperties::kNothing;
+  virtual cc::EventListenerProperties EventListenerProperties(
+      cc::EventListenerClass) const {
+    return cc::EventListenerProperties::kNone;
   }
   virtual bool HaveScrollEventHandlers() const { return false; }
 
@@ -225,7 +223,7 @@ class WebLayerTreeView {
 
   virtual void RequestBeginMainFrameNotExpected(bool new_state) {}
 
-  virtual void RequestDecode(const PaintImage& image,
+  virtual void RequestDecode(const cc::PaintImage& image,
                              base::OnceCallback<void(bool)> callback) {}
 };
 

@@ -11,7 +11,6 @@
 #include "base/mac/bundle_locations.h"
 #include "base/strings/sys_string_conversions.h"
 #include "components/dom_distiller/core/url_constants.h"
-#include "components/payments/core/features.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/version_info/version_info.h"
 #include "ios/chrome/browser/application_context.h"
@@ -25,6 +24,7 @@
 #include "ios/chrome/browser/ssl/ios_ssl_error_handler.h"
 #import "ios/chrome/browser/ui/chrome_web_view_factory.h"
 #include "ios/chrome/browser/unzip/unzip_service_creator.h"
+#import "ios/chrome/browser/web/error_page_util.h"
 #include "ios/chrome/grit/ios_resources.h"
 #include "ios/public/provider/chrome/browser/chrome_browser_provider.h"
 #include "ios/public/provider/chrome/browser/voice/audio_session_controller.h"
@@ -186,9 +186,7 @@ NSString* ChromeWebClient::GetDocumentStartScriptForMainFrame(
     [scripts addObject:GetPageScript(@"credential_manager")];
   }
 
-  if (base::FeatureList::IsEnabled(payments::features::kWebPayments)) {
-    [scripts addObject:GetPageScript(@"payment_request")];
-  }
+  [scripts addObject:GetPageScript(@"payment_request")];
 
   return [scripts componentsJoinedByString:@";"];
 }
@@ -206,6 +204,14 @@ void ChromeWebClient::AllowCertificateError(
   // or web_state used to fetch offline content in Reading List.
   IOSSSLErrorHandler::HandleSSLError(web_state, cert_error, info, request_url,
                                      overridable, callback);
+}
+
+void ChromeWebClient::PrepareErrorPage(NSError* error,
+                                       bool is_post,
+                                       bool is_off_the_record,
+                                       NSString** error_html) {
+  DCHECK(error);
+  *error_html = GetErrorPage(error, is_post, is_off_the_record);
 }
 
 void ChromeWebClient::RegisterServices(StaticServiceMap* services) {

@@ -108,8 +108,7 @@ bool IsPinnedToTaskbarHelper::ShortcutHasUnpinToTaskbarVerb(
 
   Microsoft::WRL::ComPtr<FolderItem> item;
   hresult = folder->ParseName(
-      base::win::ScopedBstr(shortcut.BaseName().value().c_str()),
-      item.GetAddressOf());
+      base::win::ScopedBstr(shortcut.BaseName().value()), item.GetAddressOf());
   if (FAILED(hresult) || !item) {
     error_occured_ = true;
     return false;
@@ -184,12 +183,12 @@ bool IsPinnedToTaskbarHelper::DirectoryContainsPinnedShortcutForProgram(
 
 bool IsPinnedToTaskbarHelper::GetResult() {
   base::FilePath current_exe;
-  PathService::Get(base::FILE_EXE, &current_exe);
+  base::PathService::Get(base::FILE_EXE, &current_exe);
 
   InstallUtil::ProgramCompare current_exe_compare(current_exe);
   // Look into the "Quick Launch\User Pinned\TaskBar" folder.
   base::FilePath taskbar_pins_dir;
-  PathService::Get(base::DIR_TASKBAR_PINS, &taskbar_pins_dir);
+  base::PathService::Get(base::DIR_TASKBAR_PINS, &taskbar_pins_dir);
   if (DirectoryContainsPinnedShortcutForProgram(taskbar_pins_dir,
                                                 current_exe_compare)) {
     return true;
@@ -197,8 +196,8 @@ bool IsPinnedToTaskbarHelper::GetResult() {
 
   // Check all folders in ImplicitAppShortcuts.
   base::FilePath implicit_app_shortcuts_dir;
-  PathService::Get(base::DIR_IMPLICIT_APP_SHORTCUTS,
-                   &implicit_app_shortcuts_dir);
+  base::PathService::Get(base::DIR_IMPLICIT_APP_SHORTCUTS,
+                         &implicit_app_shortcuts_dir);
   base::FileEnumerator directory_enum(implicit_app_shortcuts_dir, false,
                                       base::FileEnumerator::DIRECTORIES);
   for (base::FilePath directory = directory_enum.Next(); !directory.empty();

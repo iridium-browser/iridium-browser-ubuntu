@@ -7,28 +7,35 @@
 
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
+#include "third_party/blink/renderer/platform/graphics/animation_worklet_mutators_state.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 
 namespace blink {
 
+class AnimationTimeline;
 class Document;
 class KeyframeEffect;
 
 class CORE_EXPORT WorkletAnimationBase : public ScriptWrappable {
  public:
-  virtual ~WorkletAnimationBase() = default;
+  ~WorkletAnimationBase() override = default;
 
-  // Attempts to start the animation on the compositor side, returning true if
-  // it succeeds or false otherwise. If false is returned and failure_message
-  // was non-null, failure_message may be filled with an error description.
-  //
-  // On a false return it may still be possible to start the animation on the
-  // compositor later (e.g. if an incompatible property is removed from the
-  // element), so the caller should try again next main frame.
-  virtual bool StartOnCompositor(String* failure_message) = 0;
+  // Asks the animation to update its effect inherited time.
+  virtual void Update(TimingUpdateReason) = 0;
+
+  // Updates the animation on the compositor side to reflect the main thread
+  // state.
+  virtual void UpdateCompositingState() = 0;
+  virtual void InvalidateCompositingState() = 0;
 
   virtual Document* GetDocument() const = 0;
   virtual KeyframeEffect* GetEffect() const = 0;
+  virtual const WorkletAnimationId& GetWorkletAnimationId() const = 0;
+  virtual bool IsActiveAnimation() const = 0;
+  virtual void UpdateInputState(AnimationWorkletDispatcherInput*) = 0;
+  virtual void SetOutputState(
+      const AnimationWorkletOutput::AnimationState&) = 0;
+  virtual AnimationTimeline* GetTimeline() const = 0;
 };
 
 }  // namespace blink

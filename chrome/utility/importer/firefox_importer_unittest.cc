@@ -20,7 +20,7 @@
 #include "chrome/utility/importer/firefox_importer_unittest_utils.h"
 #include "chrome/utility/importer/nss_decryptor.h"
 #include "components/favicon_base/favicon_usage_data.h"
-#include "sql/connection.h"
+#include "sql/database.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace {
@@ -33,7 +33,7 @@ void ImportBookmarksFromVersion(base::StringPiece firefox_version,
                                 favicon_base::FaviconUsageDataList* favicons) {
   using ::testing::_;
   base::FilePath places_path;
-  ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &places_path));
+  ASSERT_TRUE(base::PathService::Get(chrome::DIR_TEST_DATA, &places_path));
   places_path =
       places_path.AppendASCII("import").AppendASCII("firefox").AppendASCII(
           firefox_version);
@@ -67,14 +67,14 @@ void ImportBookmarksFromVersion(base::StringPiece firefox_version,
 // same test between platforms.
 TEST(FirefoxImporterTest, MAYBE_NSS(Firefox3NSS3Decryptor)) {
   base::FilePath nss_path;
-  ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &nss_path));
+  ASSERT_TRUE(base::PathService::Get(chrome::DIR_TEST_DATA, &nss_path));
 #if defined(OS_MACOSX)
   nss_path = nss_path.AppendASCII("firefox3_nss_mac");
 #else
   nss_path = nss_path.AppendASCII("firefox3_nss");
 #endif  // !OS_MACOSX
   base::FilePath db_path;
-  ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &db_path));
+  ASSERT_TRUE(base::PathService::Get(chrome::DIR_TEST_DATA, &db_path));
   db_path = db_path.AppendASCII("firefox3_profile");
 
   FFUnitTestDecryptorProxy decryptor_proxy;
@@ -108,7 +108,7 @@ TEST(FirefoxImporterTest, MAYBE_NSS(FirefoxNSSDecryptorDeduceAuthScheme)) {
   ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
   base::FilePath signons_path =
       temp_dir.GetPath().AppendASCII("signons.sqlite");
-  sql::Connection db_conn;
+  sql::Database db_conn;
 
   ASSERT_TRUE(db_conn.Open(signons_path));
 
@@ -138,14 +138,14 @@ TEST(FirefoxImporterTest, MAYBE_NSS(FirefoxNSSDecryptorDeduceAuthScheme)) {
   db_conn.Close();
 
   base::FilePath nss_path;
-  ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &nss_path));
+  ASSERT_TRUE(base::PathService::Get(chrome::DIR_TEST_DATA, &nss_path));
 #if defined(OS_MACOSX)
   nss_path = nss_path.AppendASCII("firefox3_nss_mac");
 #else
   nss_path = nss_path.AppendASCII("firefox3_nss");
 #endif  // !OS_MACOSX
   base::FilePath db_path;
-  ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &db_path));
+  ASSERT_TRUE(base::PathService::Get(chrome::DIR_TEST_DATA, &db_path));
   db_path = db_path.AppendASCII("firefox3_profile");
 
   FFUnitTestDecryptorProxy decryptor_proxy;
@@ -221,7 +221,7 @@ TEST(FirefoxImporterTest, ImportBookmarks_Firefox57) {
 TEST(FirefoxImporterTest, ImportHistorySchema) {
   using ::testing::_;
   base::FilePath places_path;
-  ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &places_path));
+  ASSERT_TRUE(base::PathService::Get(chrome::DIR_TEST_DATA, &places_path));
   places_path =
       places_path.AppendASCII("import").AppendASCII("firefox").AppendASCII(
           "48.0.2");

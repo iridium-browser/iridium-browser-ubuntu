@@ -10,8 +10,8 @@ from __future__ import print_function
 import mock
 import os
 
+from chromite.lib import constants
 from chromite.lib import cros_build_lib
-from chromite.lib import cros_build_lib_unittest
 from chromite.lib import cros_test_lib
 from chromite.lib import git
 from chromite.lib import osutils
@@ -19,6 +19,7 @@ from chromite.lib import parallel
 from chromite.lib import parallel_unittest
 from chromite.lib import partial_mock
 from chromite.lib import portage_util
+from chromite.lib import repo_util
 from chromite.scripts import cros_mark_as_stable
 
 
@@ -141,8 +142,12 @@ class MarkAsStableCMDTest(cros_test_lib.MockTempDirTestCase):
           self._overlay_remote_ref[overlay].ref)
 
     self.PatchObject(git, 'GetTrackingBranchViaManifest')
-    self._commit_options = self._parser.parse_args(['commit'])
-    self._push_options = self._parser.parse_args(['push'])
+    # TODO: Remove explicit --buildroot after --srcroot remove and a normal
+    #       default is set.
+    self._commit_options = self._parser.parse_args(
+        ['commit', '--buildroot', constants.SOURCE_ROOT])
+    self._push_options = self._parser.parse_args(
+        ['push', '--buildroot', constants.SOURCE_ROOT])
 
   def testWorkOnPush(self):
     """Test _WorkOnPush."""
@@ -253,7 +258,7 @@ class MarkAsStableCMDTest(cros_test_lib.MockTempDirTestCase):
       self.assertEqual(list(new_package_atoms), [])
 
 
-class MainTests(cros_build_lib_unittest.RunCommandTestCase,
+class MainTests(cros_test_lib.RunCommandTestCase,
                 cros_test_lib.MockTempDirTestCase):
   """Tests for cros_mark_as_stable.main()."""
 
@@ -279,6 +284,8 @@ class MainTests(cros_build_lib_unittest.RunCommandTestCase,
       self._overlay_tracking_branch[overlay] = remote_ref.ref
       self._git_project_overlays[remote_ref.project_name] = [overlay]
 
+    self.PatchObject(portage_util, 'FindOverlays',
+                     return_value=self._overlays)
     self.PatchObject(git, 'GetTrackingBranchViaManifest',
                      side_effect=remote_refs)
 
@@ -296,9 +303,47 @@ class MainTests(cros_build_lib_unittest.RunCommandTestCase,
         ['push', '--all', '--overlays', ':'.join(self._overlays)])
     self.mock_work_on_push.assert_called_once_with(
         mock.ANY, self._overlay_tracking_branch, self._git_project_overlays)
+    options = self.mock_work_on_push.call_args[0][0]
+    self.assertEqual(options.buildroot, constants.SOURCE_ROOT)
+    self.assertIsNone(options.srcroot)
+
+  def testMainWithOverlayTypeCommit(self):
+    """Test Main with Commit options."""
+    cros_mark_as_stable.main(
+        ['commit', '--all', '--overlay-type', 'both'])
+    self.mock_work_on_commit.assert_called_once_with(
+        mock.ANY, self._overlays, self._overlay_tracking_branch,
+        self._git_project_overlays, 'manifest', None)
+    options = self.mock_work_on_commit.call_args[0][0]
+    self.assertEqual(options.buildroot, constants.SOURCE_ROOT)
+    self.assertIsNone(options.srcroot)
+
+  def testMainWithBuildroot(self):
+    """Test Main with Commit options."""
+    self.PatchObject(os.path, 'isdir', side_effect=lambda p: p == '/buildroot')
+
+    cros_mark_as_stable.main(
+        ['commit', '--all', '--overlay-type', 'both',
+         '--buildroot', '/buildroot'])
+
+    options = self.mock_work_on_commit.call_args[0][0]
+    self.assertEqual(options.buildroot, '/buildroot')
+    self.assertIsNone(options.srcroot)
+
+  def testMainWithSrcroot(self):
+    """Test Main with Commit options."""
+    self.PatchObject(os.path, 'isdir', side_effect=lambda p: p == '/buildroot')
+
+    cros_mark_as_stable.main(
+        ['commit', '--all', '--overlay-type', 'both',
+         '--srcroot', '/buildroot/src'])
+
+    options = self.mock_work_on_commit.call_args[0][0]
+    self.assertEqual(options.buildroot, '/buildroot')
+    self.assertIsNone(options.srcroot)
 
 
-class CleanStalePackagesTest(cros_build_lib_unittest.RunCommandTestCase):
+class CleanStalePackagesTest(cros_test_lib.RunCommandTestCase):
   """Tests for cros_mark_as_stable.CleanStalePackages."""
 
   def setUp(self):
@@ -327,7 +372,8 @@ class GitBranchTest(cros_test_lib.MockTestCase):
 
   def setUp(self):
     # Always stub RunCommmand out as we use it in every method.
-    self.rc_mock = self.PatchObject(cros_build_lib, 'RunCommand')
+    self.git_mock = self.PatchObject(git, 'RunGit')
+    self.start_mock = self.PatchObject(repo_util.Repository, 'StartBranch')
 
     self._branch_name = 'test_branch'
     self._target_manifest_branch = 'cros/test'
@@ -340,17 +386,15 @@ class GitBranchTest(cros_test_lib.MockTestCase):
     """Test init with no previous branch existing."""
     self.PatchObject(self._branch, 'Exists', return_value=False)
     cros_mark_as_stable.GitBranch.Checkout(self._branch)
-    self.rc_mock.assert_called_with(
-        ['repo', 'start', self._branch_name, '.'],
-        print_cmd=False, cwd='.', capture_output=True)
+    self.start_mock.assert_called_with(self._branch_name,
+                                       projects=['.'], cwd='.')
 
   def testCheckoutNoCreate(self):
     """Test init with previous branch existing."""
     self.PatchObject(self._branch, 'Exists', return_value=True)
     cros_mark_as_stable.GitBranch.Checkout(self._branch)
-    self.rc_mock.assert_called_with(
-        ['git', 'checkout', '-f', self._branch_name],
-        print_cmd=False, cwd='.', capture_output=True)
+    self.git_mock.assert_called_with('.', ['checkout', '-f', self._branch_name],
+                                     quiet=True)
 
   def testExists(self):
     """Test if branch exists that is created."""

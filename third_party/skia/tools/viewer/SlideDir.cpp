@@ -23,6 +23,7 @@
 #include "SkTypeface.h"
 
 #include <cmath>
+#include <utility>
 
 namespace {
 
@@ -71,9 +72,11 @@ protected:
         return SkRect::MakeIWH(isize.width(), isize.height());
     }
 
-    void onRender(SkCanvas* canvas) const override {
+    void onRender(SkCanvas* canvas, const RenderContext* ctx) const override {
         SkAutoCanvasRestore acr(canvas, true);
         canvas->clipRect(SkRect::Make(fSlide->getDimensions()), true);
+
+        // TODO: commit the context?
         fSlide->draw(canvas);
     }
 
@@ -145,8 +148,9 @@ public:
     void startUnfocus() {
         SkASSERT(fTarget);
 
-        SkTSwap(fM0, fM1);
-        SkTSwap(fOpacity0, fOpacity1);
+        using std::swap;
+        swap(fM0, fM1);
+        swap(fOpacity0, fOpacity1);
 
         fTimeBase = 0;
         fState = State::kUnfocusing;
@@ -245,7 +249,7 @@ private:
     using INHERITED = sksg::Animator;
 };
 
-SlideDir::SlideDir(const SkString& name, SkTArray<sk_sp<Slide>, true>&& slides, int columns)
+SlideDir::SlideDir(const SkString& name, SkTArray<sk_sp<Slide>>&& slides, int columns)
     : fSlides(std::move(slides))
     , fColumns(columns) {
     fName = name;

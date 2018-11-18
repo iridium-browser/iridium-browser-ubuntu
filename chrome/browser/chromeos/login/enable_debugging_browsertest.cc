@@ -154,7 +154,7 @@ class TestDebugDaemonClient : public FakeDebugDaemonClient {
 class EnableDebuggingTest : public LoginManagerTest {
  public:
   EnableDebuggingTest()
-      : LoginManagerTest(false),
+      : LoginManagerTest(false, true /* should_initialize_webui */),
         debug_daemon_client_(NULL),
         power_manager_client_(NULL) {}
   ~EnableDebuggingTest() override {}
@@ -376,7 +376,7 @@ class EnableDebuggingRequestedTest : public EnableDebuggingTest {
     local_state_dict.SetBoolean(prefs::kDebuggingFeaturesRequested, true);
 
     base::FilePath user_data_dir;
-    CHECK(PathService::Get(chrome::DIR_USER_DATA, &user_data_dir));
+    CHECK(base::PathService::Get(chrome::DIR_USER_DATA, &user_data_dir));
     base::FilePath local_state_path =
         user_data_dir.Append(chrome::kLocalStateFilename);
     CHECK(

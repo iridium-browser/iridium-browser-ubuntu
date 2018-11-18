@@ -11,9 +11,10 @@
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/frame/use_counter.h"
 #include "third_party/blink/renderer/core/page/page.h"
-#include "third_party/blink/renderer/modules/storage/storage.h"
+#include "third_party/blink/renderer/modules/storage/storage_area.h"
+#include "third_party/blink/renderer/modules/storage/storage_controller.h"
 #include "third_party/blink/renderer/modules/storage/storage_namespace.h"
-#include "third_party/blink/renderer/modules/storage/storage_namespace_controller.h"
+#include "third_party/blink/renderer/platform/weborigin/security_origin.h"
 
 namespace blink {
 
@@ -41,18 +42,18 @@ DOMWindowStorage& DOMWindowStorage::From(LocalDOMWindow& window) {
 }
 
 // static
-Storage* DOMWindowStorage::sessionStorage(LocalDOMWindow& window,
-                                          ExceptionState& exception_state) {
+StorageArea* DOMWindowStorage::sessionStorage(LocalDOMWindow& window,
+                                              ExceptionState& exception_state) {
   return From(window).sessionStorage(exception_state);
 }
 
 // static
-Storage* DOMWindowStorage::localStorage(LocalDOMWindow& window,
-                                        ExceptionState& exception_state) {
+StorageArea* DOMWindowStorage::localStorage(LocalDOMWindow& window,
+                                            ExceptionState& exception_state) {
   return From(window).localStorage(exception_state);
 }
 
-Storage* DOMWindowStorage::sessionStorage(
+StorageArea* DOMWindowStorage::sessionStorage(
     ExceptionState& exception_state) const {
   if (!GetSupplementable()->GetFrame())
     return nullptr;
@@ -77,7 +78,7 @@ Storage* DOMWindowStorage::sessionStorage(
   }
 
   if (session_storage_) {
-    if (!session_storage_->Area()->CanAccessStorage(document->GetFrame())) {
+    if (!session_storage_->CanAccessStorage()) {
       exception_state.ThrowSecurityError(access_denied_message);
       return nullptr;
     }
@@ -88,19 +89,20 @@ Storage* DOMWindowStorage::sessionStorage(
   if (!page)
     return nullptr;
 
-  StorageArea* storage_area =
-      StorageNamespaceController::From(page)->SessionStorage()->GetStorageArea(
-          document->GetSecurityOrigin());
-  if (!storage_area->CanAccessStorage(document->GetFrame())) {
+  auto storage_area = StorageNamespace::From(page)->GetWebStorageArea(
+      document->GetSecurityOrigin());
+  session_storage_ =
+      StorageArea::Create(document->GetFrame(), std::move(storage_area),
+                          StorageArea::StorageType::kSessionStorage);
+  if (!session_storage_->CanAccessStorage()) {
     exception_state.ThrowSecurityError(access_denied_message);
     return nullptr;
   }
-
-  session_storage_ = Storage::Create(document->GetFrame(), storage_area);
   return session_storage_;
 }
 
-Storage* DOMWindowStorage::localStorage(ExceptionState& exception_state) const {
+StorageArea* DOMWindowStorage::localStorage(
+    ExceptionState& exception_state) const {
   if (!GetSupplementable()->GetFrame())
     return nullptr;
 
@@ -124,7 +126,7 @@ Storage* DOMWindowStorage::localStorage(ExceptionState& exception_state) const {
   }
 
   if (local_storage_) {
-    if (!local_storage_->Area()->CanAccessStorage(document->GetFrame())) {
+    if (!local_storage_->CanAccessStorage()) {
       exception_state.ThrowSecurityError(access_denied_message);
       return nullptr;
     }
@@ -134,13 +136,15 @@ Storage* DOMWindowStorage::localStorage(ExceptionState& exception_state) const {
   Page* page = document->GetPage();
   if (!page || !page->GetSettings().GetLocalStorageEnabled())
     return nullptr;
-  StorageArea* storage_area =
-      StorageNamespace::LocalStorageArea(document->GetSecurityOrigin());
-  if (!storage_area->CanAccessStorage(document->GetFrame())) {
+  auto storage_area = StorageController::GetInstance()->GetWebLocalStorageArea(
+      document->GetSecurityOrigin());
+  local_storage_ =
+      StorageArea::Create(document->GetFrame(), std::move(storage_area),
+                          StorageArea::StorageType::kLocalStorage);
+  if (!local_storage_->CanAccessStorage()) {
     exception_state.ThrowSecurityError(access_denied_message);
     return nullptr;
   }
-  local_storage_ = Storage::Create(document->GetFrame(), storage_area);
   return local_storage_;
 }
 

@@ -4,6 +4,7 @@
 
 #include <stddef.h>
 
+#include "base/bind.h"
 #include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/macros.h"
@@ -15,6 +16,7 @@
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/prefs/session_startup_pref.h"
 #include "chrome/browser/sessions/session_restore_test_helper.h"
+#include "chrome/browser/sessions/tab_loader_tester.h"
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
@@ -96,6 +98,13 @@ class TabRestoreTest : public InProcessBrowserTest {
         base::FilePath().AppendASCII("session_history"),
         base::FilePath().AppendASCII("bot2.html"));
   }
+
+#if BUILDFLAG(ENABLE_SESSION_SERVICE)
+  void SetMaxSimultaneousLoadsForTesting(TabLoader* tab_loader) {
+    TabLoaderTester tester(tab_loader);
+    tester.SetMaxSimultaneousLoadsForTesting(1);
+  }
+#endif
 
  protected:
   void SetUpOnMainThread() override {
@@ -420,7 +429,13 @@ IN_PROC_BROWSER_TEST_F(TabRestoreTest, RestoreIntoSameWindow) {
 
 // Open a window with two tabs, close the window, then restore the window.
 // Ensure that the restored window has the expected bounds.
-IN_PROC_BROWSER_TEST_F(TabRestoreTest, RestoreWindowBounds) {
+#if defined(OS_LINUX)
+// Frequently hits "Check failed: is_loading_". See http://crbug.com/871010.
+#define MAYBE_RestoreWindowBounds DISABLED_RestoreWindowBounds
+#else
+#define MAYBE_RestoreWindowBounds RestoreWindowBounds
+#endif
+IN_PROC_BROWSER_TEST_F(TabRestoreTest, MAYBE_RestoreWindowBounds) {
   // Create a browser window with two tabs.
   ui_test_utils::NavigateToURLWithDisposition(
       browser(), url1_, WindowOpenDisposition::CURRENT_TAB,
@@ -510,6 +525,10 @@ IN_PROC_BROWSER_TEST_F(TabRestoreTest, RestoreTabFromClosedWindowByID) {
       static_cast<sessions::TabRestoreService::Window*>(entry);
   auto& tabs = entry_win->tabs;
   EXPECT_EQ(3u, tabs.size());
+  EXPECT_EQ(url::kAboutBlankURL, tabs[0]->navigations.front().virtual_url());
+  EXPECT_EQ(url1_, tabs[1]->navigations.front().virtual_url());
+  EXPECT_EQ(url2_, tabs[2]->navigations.front().virtual_url());
+  EXPECT_EQ(2, entry_win->selected_tab_index);
 
   // Find the Tab to restore.
   SessionID tab_id_to_restore = SessionID::InvalidValue();
@@ -541,6 +560,12 @@ IN_PROC_BROWSER_TEST_F(TabRestoreTest, RestoreTabFromClosedWindowByID) {
   EXPECT_EQ(2, browser->tab_strip_model()->count());
   EXPECT_EQ(url1_,
             browser->tab_strip_model()->GetActiveWebContents()->GetURL());
+
+  // Check that the window entry was adjusted.
+  EXPECT_EQ(2u, tabs.size());
+  EXPECT_EQ(url::kAboutBlankURL, tabs[0]->navigations.front().virtual_url());
+  EXPECT_EQ(url2_, tabs[1]->navigations.front().virtual_url());
+  EXPECT_EQ(1, entry_win->selected_tab_index);
 }
 
 // Tests that a duplicate history entry is not created when we restore a page
@@ -835,7 +860,14 @@ IN_PROC_BROWSER_TEST_F(TabRestoreTest,
   CloseBrowserSynchronously(browser2);
 
   // Limit the number of restored tabs that are loaded.
-  TabLoader::SetMaxLoadedTabCountForTest(2);
+  TabLoaderTester::SetMaxLoadedTabCountForTesting(2);
+
+  // When the tab loader is created configure it for this test. This ensures
+  // that no more than 1 loading slot is used for the test.
+  base::RepeatingCallback<void(TabLoader*)> callback =
+      base::BindRepeating(&TabRestoreTest::SetMaxSimultaneousLoadsForTesting,
+                          base::Unretained(this));
+  TabLoaderTester::SetConstructionCallbackForTesting(&callback);
 
   // Restore recently closed window.
   content::WindowedNotificationObserver open_window_observer(
@@ -862,5 +894,8 @@ IN_PROC_BROWSER_TEST_F(TabRestoreTest,
     EXPECT_FALSE(contents->IsLoading());
     EXPECT_TRUE(contents->GetController().NeedsReload());
   }
+
+  // Clean up the callback.
+  TabLoaderTester::SetConstructionCallbackForTesting(nullptr);
 }
 #endif  // BUILDFLAG(ENABLE_SESSION_SERVICE)

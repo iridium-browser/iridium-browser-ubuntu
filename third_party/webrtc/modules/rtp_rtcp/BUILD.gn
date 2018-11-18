@@ -9,6 +9,7 @@
 import("../../webrtc.gni")
 
 rtc_source_set("rtp_rtcp_format") {
+  visibility = [ "*" ]
   public = [
     "include/rtp_cvo.h",
     "include/rtp_header_extension_map.h",
@@ -39,7 +40,8 @@ rtc_source_set("rtp_rtcp_format") {
     "source/rtcp_packet/tmmbn.h",
     "source/rtcp_packet/tmmbr.h",
     "source/rtcp_packet/transport_feedback.h",
-    "source/rtcp_packet/voip_metric.h",
+    "source/rtp_generic_frame_descriptor.h",
+    "source/rtp_generic_frame_descriptor_extension.h",
     "source/rtp_header_extensions.h",
     "source/rtp_packet.h",
     "source/rtp_packet_received.h",
@@ -72,7 +74,8 @@ rtc_source_set("rtp_rtcp_format") {
     "source/rtcp_packet/tmmbn.cc",
     "source/rtcp_packet/tmmbr.cc",
     "source/rtcp_packet/transport_feedback.cc",
-    "source/rtcp_packet/voip_metric.cc",
+    "source/rtp_generic_frame_descriptor.cc",
+    "source/rtp_generic_frame_descriptor_extension.cc",
     "source/rtp_header_extension_map.cc",
     "source/rtp_header_extensions.cc",
     "source/rtp_packet.cc",
@@ -83,17 +86,18 @@ rtc_source_set("rtp_rtcp_format") {
   deps = [
     "..:module_api",
     "../..:webrtc_common",
-    "../../:typedefs",
     "../../api:array_view",
     "../../api:libjingle_peerconnection_api",
-    "../../api:optional",
-    "../../api:video_frame_api",
     "../../api/audio_codecs:audio_codecs_api",
+    "../../api/transport:network_control",
+    "../../api/video:video_frame",
     "../../common_video",
     "../../rtc_base:checks",
     "../../rtc_base:deprecation",
     "../../rtc_base:rtc_base_approved",
     "../../system_wrappers",
+    "//third_party/abseil-cpp/absl/types:optional",
+    "//third_party/abseil-cpp/absl/types:variant",
   ]
 }
 
@@ -105,10 +109,10 @@ rtc_static_library("rtp_rtcp") {
     "include/receive_statistics.h",
     "include/remote_ntp_time_estimator.h",
     "include/rtp_header_parser.h",
-    "include/rtp_payload_registry.h",
-    "include/rtp_receiver.h",
     "include/rtp_rtcp.h",
     "include/ulpfec_receiver.h",
+    "source/contributing_sources.cc",
+    "source/contributing_sources.h",
     "source/dtmf_queue.cc",
     "source/dtmf_queue.h",
     "source/fec_private_tables_bursty.cc",
@@ -146,18 +150,11 @@ rtc_static_library("rtp_rtcp") {
     "source/rtp_format_vp8.h",
     "source/rtp_format_vp9.cc",
     "source/rtp_format_vp9.h",
+    "source/rtp_header_extension_size.cc",
+    "source/rtp_header_extension_size.h",
     "source/rtp_header_parser.cc",
     "source/rtp_packet_history.cc",
     "source/rtp_packet_history.h",
-    "source/rtp_payload_registry.cc",
-    "source/rtp_receiver_audio.cc",
-    "source/rtp_receiver_audio.h",
-    "source/rtp_receiver_impl.cc",
-    "source/rtp_receiver_impl.h",
-    "source/rtp_receiver_strategy.cc",
-    "source/rtp_receiver_strategy.h",
-    "source/rtp_receiver_video.cc",
-    "source/rtp_receiver_video.h",
     "source/rtp_rtcp_config.h",
     "source/rtp_rtcp_impl.cc",
     "source/rtp_rtcp_impl.h",
@@ -179,7 +176,6 @@ rtc_static_library("rtp_rtcp") {
     "source/ulpfec_header_reader_writer.h",
     "source/ulpfec_receiver_impl.cc",
     "source/ulpfec_receiver_impl.h",
-    "source/video_codec_information.h",
   ]
 
   if (rtc_enable_bwe_test_logging) {
@@ -192,12 +188,14 @@ rtc_static_library("rtp_rtcp") {
     ":rtp_rtcp_format",
     "..:module_api",
     "../..:webrtc_common",
-    "../../:typedefs",
     "../../api:array_view",
     "../../api:libjingle_peerconnection_api",
-    "../../api:optional",
     "../../api:transport_api",
     "../../api/audio_codecs:audio_codecs_api",
+    "../../api/video:video_bitrate_allocation",
+    "../../api/video:video_bitrate_allocator",
+    "../../api/video_codecs:video_codecs_api",
+    "../../call:rtp_interfaces",
     "../../common_video",
     "../../logging:rtc_event_audio",
     "../../logging:rtc_event_log_api",
@@ -214,14 +212,14 @@ rtc_static_library("rtp_rtcp") {
     "../../rtc_base/system:fallthrough",
     "../../rtc_base/time:timestamp_extrapolator",
     "../../system_wrappers",
-    "../../system_wrappers:field_trial_api",
-    "../../system_wrappers:metrics_api",
+    "../../system_wrappers:field_trial",
+    "../../system_wrappers:metrics",
     "../audio_coding:audio_format_conversion",
     "../remote_bitrate_estimator",
+    "//third_party/abseil-cpp/absl/container:inlined_vector",
+    "//third_party/abseil-cpp/absl/memory",
+    "//third_party/abseil-cpp/absl/types:optional",
   ]
-
-  # TODO(jschuh): Bug 1348: fix this warning.
-  configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
 }
 
 rtc_source_set("rtcp_transceiver") {
@@ -241,13 +239,31 @@ rtc_source_set("rtcp_transceiver") {
     ":rtp_rtcp_format",
     "../../:webrtc_common",
     "../../api:array_view",
-    "../../api:optional",
+    "../../api:libjingle_peerconnection_api",
     "../../api:transport_api",
+    "../../api/video:video_bitrate_allocation",
     "../../rtc_base:checks",
     "../../rtc_base:rtc_base_approved",
+    "../../rtc_base:rtc_cancelable_task",
     "../../rtc_base:rtc_task_queue",
-    "../../rtc_base:weak_ptr",
     "../../system_wrappers",
+    "//third_party/abseil-cpp/absl/memory",
+    "//third_party/abseil-cpp/absl/types:optional",
+  ]
+}
+
+rtc_source_set("rtp_video_header") {
+  visibility = [ "*" ]
+  sources = [
+    "source/rtp_video_header.cc",
+    "source/rtp_video_header.h",
+  ]
+  deps = [
+    "../../:webrtc_common",
+    "../../api/video:video_frame",
+    "../../modules/video_coding:codec_globals_headers",
+    "//third_party/abseil-cpp/absl/container:inlined_vector",
+    "//third_party/abseil-cpp/absl/types:variant",
   ]
 }
 
@@ -264,9 +280,6 @@ rtc_source_set("fec_test_helper") {
     "../../rtc_base:checks",
     "../../rtc_base:rtc_base_approved",
   ]
-
-  # TODO(jschuh): bugs.webrtc.org/1348: fix this warning.
-  configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
 }
 
 rtc_source_set("mock_rtp_rtcp") {
@@ -287,10 +300,11 @@ rtc_source_set("mock_rtp_rtcp") {
     ":rtp_rtcp",
     ":rtp_rtcp_format",
     "..:module_api",
-    "../../api:optional",
+    "../../api/video:video_bitrate_allocation",
     "../../rtc_base:checks",
     "../../rtc_base:rtc_base_approved",
     "../../test:test_support",
+    "//third_party/abseil-cpp/absl/types:optional",
   ]
 }
 
@@ -331,6 +345,7 @@ if (rtc_include_tests) {
 
     sources = [
       "source/byte_io_unittest.cc",
+      "source/contributing_sources_unittest.cc",
       "source/fec_private_tables_bursty_unittest.cc",
       "source/flexfec_header_reader_writer_unittest.cc",
       "source/flexfec_receiver_unittest.cc",
@@ -362,7 +377,6 @@ if (rtc_include_tests) {
       "source/rtcp_packet/tmmbn_unittest.cc",
       "source/rtcp_packet/tmmbr_unittest.cc",
       "source/rtcp_packet/transport_feedback_unittest.cc",
-      "source/rtcp_packet/voip_metric_unittest.cc",
       "source/rtcp_packet_unittest.cc",
       "source/rtcp_receiver_unittest.cc",
       "source/rtcp_sender_unittest.cc",
@@ -370,16 +384,17 @@ if (rtc_include_tests) {
       "source/rtcp_transceiver_unittest.cc",
       "source/rtp_fec_unittest.cc",
       "source/rtp_format_h264_unittest.cc",
+      "source/rtp_format_unittest.cc",
       "source/rtp_format_video_generic_unittest.cc",
       "source/rtp_format_vp8_test_helper.cc",
       "source/rtp_format_vp8_test_helper.h",
       "source/rtp_format_vp8_unittest.cc",
       "source/rtp_format_vp9_unittest.cc",
+      "source/rtp_generic_frame_descriptor_extension_unittest.cc",
       "source/rtp_header_extension_map_unittest.cc",
+      "source/rtp_header_extension_size_unittest.cc",
       "source/rtp_packet_history_unittest.cc",
       "source/rtp_packet_unittest.cc",
-      "source/rtp_payload_registry_unittest.cc",
-      "source/rtp_receiver_unittest.cc",
       "source/rtp_rtcp_impl_unittest.cc",
       "source/rtp_sender_unittest.cc",
       "source/rtp_utility_unittest.cc",
@@ -387,11 +402,6 @@ if (rtc_include_tests) {
       "source/ulpfec_generator_unittest.cc",
       "source/ulpfec_header_reader_writer_unittest.cc",
       "source/ulpfec_receiver_unittest.cc",
-      "test/testAPI/test_api.cc",
-      "test/testAPI/test_api.h",
-      "test/testAPI/test_api_audio.cc",
-      "test/testAPI/test_api_rtcp.cc",
-      "test/testAPI/test_api_video.cc",
     ]
     deps = [
       ":fec_test_helper",
@@ -401,12 +411,13 @@ if (rtc_include_tests) {
       ":rtp_rtcp_format",
       "..:module_api",
       "../..:webrtc_common",
-      "../../:typedefs",
       "../../api:array_view",
       "../../api:libjingle_peerconnection_api",
-      "../../api:optional",
       "../../api:transport_api",
-      "../../api:video_frame_api",
+      "../../api/video:video_bitrate_allocation",
+      "../../api/video:video_bitrate_allocator",
+      "../../api/video:video_frame",
+      "../../api/video_codecs:video_codecs_api",
       "../../call:rtp_receiver",
       "../../common_video:common_video",
       "../../logging:mocks",
@@ -422,9 +433,9 @@ if (rtc_include_tests) {
       "../../test:test_common",
       "../../test:test_support",
       "../audio_coding:audio_format_conversion",
+      "../video_coding:codec_globals_headers",
+      "//third_party/abseil-cpp/absl/memory",
+      "//third_party/abseil-cpp/absl/types:optional",
     ]
-
-    # TODO(jschuh): bugs.webrtc.org/1348: fix this warning.
-    configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
   }
 }

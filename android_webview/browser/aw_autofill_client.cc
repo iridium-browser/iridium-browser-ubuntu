@@ -12,10 +12,10 @@
 #include "base/android/jni_string.h"
 #include "base/android/scoped_java_ref.h"
 #include "base/logging.h"
+#include "base/metrics/histogram_macros.h"
 #include "components/autofill/core/browser/autofill_popup_delegate.h"
 #include "components/autofill/core/browser/suggestion.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_service.h"
-#include "components/autofill/core/common/autofill_pref_names.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
 #include "components/prefs/pref_service_factory.h"
@@ -33,8 +33,6 @@ using base::android::JavaParamRef;
 using base::android::ScopedJavaLocalRef;
 using content::WebContents;
 
-DEFINE_WEB_CONTENTS_USER_DATA_KEY(android_webview::AwAutofillClient);
-
 namespace android_webview {
 
 // Ownership: The native object is created (if autofill enabled) and owned by
@@ -42,7 +40,7 @@ namespace android_webview {
 // autofill functionality at the java side. The java peer is owned by Java
 // AwContents. The native object only maintains a weak ref to it.
 AwAutofillClient::AwAutofillClient(WebContents* contents)
-    : web_contents_(contents), save_form_data_(false) {
+    : web_contents_(contents) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> delegate;
   delegate.Reset(
@@ -78,17 +76,28 @@ identity::IdentityManager* AwAutofillClient::GetIdentityManager() {
   return nullptr;
 }
 
+autofill::StrikeDatabase* AwAutofillClient::GetStrikeDatabase() {
+  return nullptr;
+}
+
 ukm::UkmRecorder* AwAutofillClient::GetUkmRecorder() {
   return nullptr;
+}
+
+ukm::SourceId AwAutofillClient::GetUkmSourceId() {
+  // UKM recording is not supported for WebViews.
+  return ukm::kInvalidSourceId;
 }
 
 autofill::AddressNormalizer* AwAutofillClient::GetAddressNormalizer() {
   return nullptr;
 }
 
-autofill::SaveCardBubbleController*
-AwAutofillClient::GetSaveCardBubbleController() {
-  return nullptr;
+security_state::SecurityLevel
+AwAutofillClient::GetSecurityLevelForUmaHistograms() {
+  // The metrics are not recorded for Android webview, so return the count value
+  // which will not be recorded.
+  return security_state::SecurityLevel::SECURITY_LEVEL_COUNT;
 }
 
 autofill::PersonalDataManager* AwAutofillClient::GetPersonalDataManager() {
@@ -108,6 +117,7 @@ void AwAutofillClient::ShowAutofillPopup(
     const gfx::RectF& element_bounds,
     base::i18n::TextDirection text_direction,
     const std::vector<autofill::Suggestion>& suggestions,
+    bool /*unused_autoselect_first_suggestion*/,
     base::WeakPtr<autofill::AutofillPopupDelegate> delegate) {
   suggestions_ = suggestions;
   delegate_ = delegate;
@@ -179,7 +189,12 @@ void AwAutofillClient::HideAutofillPopup() {
 }
 
 bool AwAutofillClient::IsAutocompleteEnabled() {
-  return GetSaveFormData();
+  bool enabled = GetSaveFormData();
+  if (!autocomplete_uma_recorded_) {
+    UMA_HISTOGRAM_BOOLEAN("Autofill.AutocompleteEnabled", enabled);
+    autocomplete_uma_recorded_ = true;
+  }
+  return enabled;
 }
 
 void AwAutofillClient::PropagateAutofillPredictions(
@@ -219,7 +234,7 @@ void AwAutofillClient::ExecuteCommand(int id) {
   NOTIMPLEMENTED();
 }
 
-bool AwAutofillClient::IsAutofillSupported() {
+bool AwAutofillClient::AreServerCardsSupported() {
   return true;
 }
 
@@ -238,7 +253,7 @@ void AwAutofillClient::SuggestionSelected(JNIEnv* env,
   }
 }
 
-void AwAutofillClient::ShowAutofillSettings() {
+void AwAutofillClient::ShowAutofillSettings(bool show_credit_card_settings) {
   NOTIMPLEMENTED();
 }
 
@@ -253,17 +268,39 @@ void AwAutofillClient::OnUnmaskVerificationResult(PaymentsRpcResult result) {
   NOTIMPLEMENTED();
 }
 
+void AwAutofillClient::ShowLocalCardMigrationDialog(
+    base::OnceClosure show_migration_dialog_closure) {
+  NOTIMPLEMENTED();
+}
+
+void AwAutofillClient::ConfirmMigrateLocalCardToCloud(
+    std::unique_ptr<base::DictionaryValue> legal_message,
+    const std::vector<autofill::MigratableCreditCard>& migratable_credit_cards,
+    LocalCardMigrationCallback start_migrating_cards_callback) {
+  NOTIMPLEMENTED();
+}
+
+void AwAutofillClient::ConfirmSaveAutofillProfile(
+    const autofill::AutofillProfile& profile,
+    base::OnceClosure callback) {
+  // Since there is no confirmation needed to save an Autofill Profile,
+  // running |callback| will proceed with saving |profile|.
+  std::move(callback).Run();
+}
+
 void AwAutofillClient::ConfirmSaveCreditCardLocally(
     const autofill::CreditCard& card,
-    const base::Closure& callback) {
+    bool show_prompt,
+    base::OnceClosure callback) {
   NOTIMPLEMENTED();
 }
 
 void AwAutofillClient::ConfirmSaveCreditCardToCloud(
     const autofill::CreditCard& card,
     std::unique_ptr<base::DictionaryValue> legal_message,
-    bool should_cvc_be_requested,
-    const base::Closure& callback) {
+    bool should_request_name_from_user,
+    bool show_prompt,
+    base::OnceCallback<void(const base::string16&)> callback) {
   NOTIMPLEMENTED();
 }
 
@@ -274,7 +311,7 @@ void AwAutofillClient::ConfirmCreditCardFillAssist(
 }
 
 void AwAutofillClient::LoadRiskData(
-    const base::Callback<void(const std::string&)>& callback) {
+    base::OnceCallback<void(const std::string&)> callback) {
   NOTIMPLEMENTED();
 }
 

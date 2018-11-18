@@ -31,6 +31,7 @@ class FrameTracker : public DevToolsEventListener {
 
   Status GetContextIdForFrame(const std::string& frame_id, int* context_id);
   WebView* GetTargetForFrame(const std::string& frame_id);
+  void DeleteTargetForFrame(const std::string& frame_id);
 
   // Overridden from DevToolsEventListener:
   Status OnConnected(DevToolsClient* client) override;
@@ -42,7 +43,6 @@ class FrameTracker : public DevToolsEventListener {
   std::map<std::string, int> frame_to_context_map_;
   std::map<std::string, std::unique_ptr<WebView>> frame_to_target_map_;
   WebView* web_view_;
-  const BrowserInfo* browser_info_;
 
   DISALLOW_COPY_AND_ASSIGN(FrameTracker);
 };

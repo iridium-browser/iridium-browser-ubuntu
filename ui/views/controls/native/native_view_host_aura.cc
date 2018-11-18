@@ -5,6 +5,7 @@
 #include "ui/views/controls/native/native_view_host_aura.h"
 
 #include "base/logging.h"
+#include "base/optional.h"
 #include "build/build_config.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/focus_client.h"
@@ -19,6 +20,7 @@
 #include "ui/views/view_constants_aura.h"
 #include "ui/views/view_properties.h"
 #include "ui/views/widget/widget.h"
+#include "ui/wm/core/window_util.h"
 
 namespace views {
 
@@ -68,34 +70,24 @@ class NativeViewHostAura::ClippingWindowDelegate : public aura::WindowDelegate {
   aura::Window* native_view_;
 };
 
-NativeViewHostAura::NativeViewHostAura(NativeViewHost* host)
-    : host_(host),
-      clipping_window_delegate_(new ClippingWindowDelegate()),
-      clipping_window_(clipping_window_delegate_.get()) {
-  // Set the type so descendant views (including popups) get positioned
-  // appropriately.
-  clipping_window_.SetType(aura::client::WINDOW_TYPE_CONTROL);
-  clipping_window_.Init(ui::LAYER_NOT_DRAWN);
-  clipping_window_.set_owned_by_parent(false);
-  clipping_window_.SetName("NativeViewHostAuraClip");
-  clipping_window_.layer()->SetMasksToBounds(true);
-  clipping_window_.SetProperty(views::kHostViewKey, static_cast<View*>(host_));
-}
+NativeViewHostAura::NativeViewHostAura(NativeViewHost* host) : host_(host) {}
 
 NativeViewHostAura::~NativeViewHostAura() {
   if (host_->native_view()) {
     host_->native_view()->RemoveObserver(this);
     host_->native_view()->ClearProperty(views::kHostViewKey);
     host_->native_view()->ClearProperty(aura::client::kHostWindowKey);
-    clipping_window_.ClearProperty(views::kHostViewKey);
-    if (host_->native_view()->parent() == &clipping_window_)
-      clipping_window_.RemoveChild(host_->native_view());
+    clipping_window_->ClearProperty(views::kHostViewKey);
+    if (host_->native_view()->parent() == clipping_window_.get())
+      clipping_window_->RemoveChild(host_->native_view());
   }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // NativeViewHostAura, NativeViewHostWrapper implementation:
 void NativeViewHostAura::AttachNativeView() {
+  if (!clipping_window_)
+    CreateClippingWindow();
   clipping_window_delegate_->set_native_view(host_->native_view());
   host_->native_view()->AddObserver(this);
   host_->native_view()->SetProperty(views::kHostViewKey,
@@ -107,10 +99,12 @@ void NativeViewHostAura::AttachNativeView() {
 }
 
 void NativeViewHostAura::NativeViewDetaching(bool destroyed) {
-  // This method causes a succession of window tree changes.
-  // ScopedPauseOcclusionTracking ensures that occlusion is recomputed at the
-  // end of the method instead of after each change.
-  aura::WindowOcclusionTracker::ScopedPauseOcclusionTracking pause_occlusion;
+  // This method causes a succession of window tree changes. ScopedPause ensures
+  // that occlusion is recomputed at the end of the method instead of after each
+  // change.
+  base::Optional<aura::WindowOcclusionTracker::ScopedPause> pause_occlusion;
+  if (clipping_window_)
+    pause_occlusion.emplace(clipping_window_->env());
 
   clipping_window_delegate_->set_native_view(NULL);
   RemoveClippingWindow();
@@ -148,13 +142,19 @@ void NativeViewHostAura::RemovedFromWidget() {
   }
 }
 
-bool NativeViewHostAura::SetCornerRadius(int corner_radius) {
-  mask_ = views::Painter::CreatePaintedLayer(
-      views::Painter::CreateSolidRoundRectPainter(SK_ColorBLACK,
-                                                  corner_radius));
-  mask_->layer()->SetFillsBoundsOpaquely(false);
+bool NativeViewHostAura::SetCustomMask(std::unique_ptr<ui::LayerOwner> mask) {
+#if defined(OS_WIN)
+  // TODO(crbug/843250): On Aura, layer masks don't play with HiDPI. Fix this
+  // and enable this on Windows.
+  return false;
+#else
+  UninstallMask();
+  mask_ = std::move(mask);
+  if (mask_)
+    mask_->layer()->SetFillsBoundsOpaquely(false);
   InstallMask();
   return true;
+#endif
 }
 
 void NativeViewHostAura::InstallClip(int x, int y, int w, int h) {
@@ -195,18 +195,17 @@ void NativeViewHostAura::ShowWidget(int x,
     }
   }
 
-  clipping_window_.SetBounds(clip_rect_ ? *clip_rect_
-                                        : gfx::Rect(x, y, w, h));
-  gfx::Point clip_offset = clipping_window_.bounds().origin();
+  clipping_window_->SetBounds(clip_rect_ ? *clip_rect_ : gfx::Rect(x, y, w, h));
+  gfx::Point clip_offset = clipping_window_->bounds().origin();
   host_->native_view()->SetBounds(
       gfx::Rect(x - clip_offset.x(), y - clip_offset.y(), native_w, native_h));
   host_->native_view()->Show();
-  clipping_window_.Show();
+  clipping_window_->Show();
 }
 
 void NativeViewHostAura::HideWidget() {
   host_->native_view()->Hide();
-  clipping_window_.Hide();
+  clipping_window_->Hide();
 }
 
 void NativeViewHostAura::SetFocus() {
@@ -214,6 +213,10 @@ void NativeViewHostAura::SetFocus() {
   aura::client::FocusClient* client = aura::client::GetFocusClient(window);
   if (client)
     client->FocusWindow(window);
+}
+
+gfx::NativeView NativeViewHostAura::GetNativeViewContainer() const {
+  return clipping_window_.get();
 }
 
 gfx::NativeViewAccessible NativeViewHostAura::GetNativeViewAccessible() {
@@ -231,8 +234,15 @@ void NativeViewHostAura::OnWindowBoundsChanged(
     const gfx::Rect& old_bounds,
     const gfx::Rect& new_bounds,
     ui::PropertyChangeReason reason) {
-  if (mask_)
+  if (mask_) {
+    // Having a mask means this layer has a render surface of its own. This
+    // means we want this layer snapped as the render surface uses this layer
+    // (its primary layer) to snap to the physical pixel grid.
+    // See https://crbug.com/843250 for more details.
+    wm::SnapWindowToPixelBoundary(window);
+
     mask_->layer()->SetBounds(gfx::Rect(host_->native_view()->bounds().size()));
+  }
 }
 
 void NativeViewHostAura::OnWindowDestroying(aura::Window* window) {
@@ -251,44 +261,72 @@ NativeViewHostWrapper* NativeViewHostWrapper::CreateWrapper(
   return new NativeViewHostAura(host);
 }
 
+void NativeViewHostAura::CreateClippingWindow() {
+  clipping_window_delegate_ = std::make_unique<ClippingWindowDelegate>();
+  // Use WINDOW_TYPE_CONTROLLER type so descendant views (including popups) get
+  // positioned appropriately.
+  clipping_window_ = std::make_unique<aura::Window>(
+      clipping_window_delegate_.get(), aura::client::WINDOW_TYPE_CONTROL,
+      host_->native_view()->env());
+  clipping_window_->Init(ui::LAYER_NOT_DRAWN);
+  clipping_window_->set_owned_by_parent(false);
+  clipping_window_->SetName("NativeViewHostAuraClip");
+  clipping_window_->layer()->SetMasksToBounds(true);
+  clipping_window_->SetProperty(views::kHostViewKey, static_cast<View*>(host_));
+}
+
 void NativeViewHostAura::AddClippingWindow() {
   RemoveClippingWindow();
 
   host_->native_view()->SetProperty(aura::client::kHostWindowKey,
                                     host_->GetWidget()->GetNativeView());
-  Widget::ReparentNativeView(host_->native_view(),
-                             &clipping_window_);
+  Widget::ReparentNativeView(host_->native_view(), clipping_window_.get());
   if (host_->GetWidget()->GetNativeView()) {
-    Widget::ReparentNativeView(&clipping_window_,
+    Widget::ReparentNativeView(clipping_window_.get(),
                                host_->GetWidget()->GetNativeView());
   }
 }
 
 void NativeViewHostAura::RemoveClippingWindow() {
-  clipping_window_.Hide();
+  clipping_window_->Hide();
   if (host_->native_view())
     host_->native_view()->ClearProperty(aura::client::kHostWindowKey);
 
-  if (host_->native_view()->parent() == &clipping_window_) {
+  if (host_->native_view()->parent() == clipping_window_.get()) {
     if (host_->GetWidget() && host_->GetWidget()->GetNativeView()) {
       Widget::ReparentNativeView(host_->native_view(),
                                  host_->GetWidget()->GetNativeView());
     } else {
-      clipping_window_.RemoveChild(host_->native_view());
+      clipping_window_->RemoveChild(host_->native_view());
     }
-    host_->native_view()->SetBounds(clipping_window_.bounds());
+    host_->native_view()->SetBounds(clipping_window_->bounds());
   }
-  if (clipping_window_.parent())
-    clipping_window_.parent()->RemoveChild(&clipping_window_);
+  if (clipping_window_->parent())
+    clipping_window_->parent()->RemoveChild(clipping_window_.get());
 }
 
 void NativeViewHostAura::InstallMask() {
   if (!mask_)
     return;
   if (host_->native_view()) {
+    // Setting a mask triggers this layer to have a render surface of its own.
+    // This means we cannot skip computing its subpixel offset positioning as
+    // the render surface uses this layer (its primary layer) to snap to the
+    // physical pixel grid.
+    // See https://crbug.com/843250 for more details.
+    wm::SnapWindowToPixelBoundary(host_->native_view());
+
     mask_->layer()->SetBounds(gfx::Rect(host_->native_view()->bounds().size()));
     host_->native_view()->layer()->SetMaskLayer(mask_->layer());
   }
+}
+
+void NativeViewHostAura::UninstallMask() {
+  if (!host_->native_view() || !mask_)
+    return;
+
+  host_->native_view()->layer()->SetMaskLayer(nullptr);
+  mask_.reset();
 }
 
 }  // namespace views

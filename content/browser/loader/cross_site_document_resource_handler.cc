@@ -7,8 +7,6 @@
 #include <string.h>
 
 #include <algorithm>
-#include <string>
-#include <unordered_set>
 #include <utility>
 
 #include "base/bind.h"
@@ -17,17 +15,20 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
+#include "base/task/post_task.h"
 #include "base/trace_event/trace_event.h"
 #include "content/browser/child_process_security_policy_impl.h"
 #include "content/browser/loader/detachable_resource_handler.h"
 #include "content/browser/loader/resource_request_info_impl.h"
 #include "content/browser/site_instance_impl.h"
+#include "content/browser/web_contents/web_contents_impl.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/resource_context.h"
-#include "content/public/browser/site_isolation_policy.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_client.h"
+#include "content/public/common/content_switches.h"
 #include "net/base/io_buffer.h"
 #include "net/base/mime_sniffer.h"
 #include "net/url_request/url_request.h"
@@ -35,111 +36,10 @@
 #include "services/metrics/public/cpp/ukm_recorder.h"
 
 using MimeType = network::CrossOriginReadBlocking::MimeType;
-using SniffingResult = network::CrossOriginReadBlocking::SniffingResult;
 
 namespace content {
 
-// An interface to enable incremental content sniffing. These are instantiated
-// for each each request; thus they can be stateful.
-class CrossSiteDocumentResourceHandler::ConfirmationSniffer {
- public:
-  virtual ~ConfirmationSniffer() = default;
-
-  // Called after data is read from the network. |sniffing_buffer| contains the
-  // entire response body delivered thus far. To support streaming,
-  // |new_data_offset| gives the offset into |sniffing_buffer| at which new data
-  // was appended since the last read.
-  virtual void OnDataAvailable(base::StringPiece sniffing_buffer,
-                               size_t new_data_offset) = 0;
-
-  // Returns true if the return value of IsConfirmedContentType() might change
-  // with the addition of more data. Returns false if a final decision is
-  // available.
-  virtual bool WantsMoreData() const = 0;
-
-  // Returns true if the data has been confirmed to be of the CORB-protected
-  // content type that this sniffer is intended to detect.
-  virtual bool IsConfirmedContentType() const = 0;
-
-  // Called when this sniffer's decision was used to block a response. This will
-  // only be invoked when an earlier call to IsConfirmedContentType() returned
-  // true.
-  virtual void LogBlockedResponse(ResourceType resource_type) const {}
-};
-
 namespace {
-
-void LogCrossSiteDocumentAction(
-    CrossSiteDocumentResourceHandler::Action action) {
-  UMA_HISTOGRAM_ENUMERATION("SiteIsolation.XSD.Browser.Action", action,
-                            CrossSiteDocumentResourceHandler::Action::kCount);
-}
-
-// A ConfirmationSniffer that wraps one of the sniffing functions from
-// network::CrossOriginReadBlocking.
-class SimpleConfirmationSniffer
-    : public CrossSiteDocumentResourceHandler::ConfirmationSniffer {
- public:
-  // The function pointer type corresponding to one of the available sniffing
-  // functions from network::CrossOriginReadBlocking.
-  using SnifferFunction =
-      decltype(&network::CrossOriginReadBlocking::SniffForHTML);
-
-  explicit SimpleConfirmationSniffer(SnifferFunction sniffer_function)
-      : sniffer_function_(sniffer_function) {}
-  ~SimpleConfirmationSniffer() override = default;
-
-  void OnDataAvailable(base::StringPiece sniffing_buffer,
-                       size_t new_data_offset) final {
-    DCHECK_LE(new_data_offset, sniffing_buffer.length());
-    if (new_data_offset == sniffing_buffer.length()) {
-      // No new data -- do nothing. This happens at end-of-stream.
-      return;
-    }
-    // The sniffing functions don't support streaming, so with each new chunk of
-    // data, call the sniffer on the whole buffer.
-    last_sniff_result_ = (*sniffer_function_)(sniffing_buffer);
-  }
-
-  bool WantsMoreData() const final {
-    // kNo and kYes results are final, meaning that sniffing can stop once they
-    // occur. A kMaybe result corresponds to an indeterminate state, that could
-    // change to kYes or kNo with more data.
-    return last_sniff_result_ == SniffingResult::kMaybe;
-  }
-
-  bool IsConfirmedContentType() const final {
-    // Only confirm the mime type if an affirmative pattern (e.g. an HTML tag,
-    // if using the HTML sniffer) was detected.
-    //
-    // Note that if the stream ends (or net::kMaxBytesToSniff has been reached)
-    // and |last_sniff_result_| is kMaybe, the response is allowed to go
-    // through.
-    return last_sniff_result_ == SniffingResult::kYes;
-  }
-
- private:
-  // The function that actually knows how to sniff for a content type.
-  SnifferFunction sniffer_function_;
-
-  // Result of sniffing the data available thus far.
-  SniffingResult last_sniff_result_ = SniffingResult::kMaybe;
-};
-
-// A ConfirmationSniffer for parser breakers (fetch-only resources). This logs
-// to an UMA histogram whenever it is the reason for a response being blocked.
-class FetchOnlyResourceSniffer : public SimpleConfirmationSniffer {
- public:
-  FetchOnlyResourceSniffer()
-      : SimpleConfirmationSniffer(
-            &network::CrossOriginReadBlocking::SniffForFetchOnlyResource) {}
-
-  void LogBlockedResponse(ResourceType resource_type) const final {
-    UMA_HISTOGRAM_ENUMERATION(
-        "SiteIsolation.XSD.Browser.BlockedForParserBreaker", resource_type,
-        content::RESOURCE_TYPE_LAST_TYPE);
-  }
-};
 
 // An IOBuffer to enable writing into a existing IOBuffer at a given offset.
 class LocalIoBufferWithOffset : public net::WrappedIOBuffer {
@@ -152,60 +52,6 @@ class LocalIoBufferWithOffset : public net::WrappedIOBuffer {
 
   scoped_refptr<net::IOBuffer> buf_;
 };
-
-// Headers from
-// https://fetch.spec.whatwg.org/#cors-safelisted-response-header-name.
-//
-// Note that XSDB doesn't block responses allowed through CORS - this means
-// that the list of allowed headers below doesn't have to consider header
-// names listed in the Access-Control-Expose-Headers header.
-const char* const kCorsSafelistedHeaders[] = {
-    "cache-control", "content-language", "content-type",
-    "expires",       "last-modified",    "pragma",
-};
-
-// Removes headers that should be blocked in cross-origin case.
-// See https://fetch.spec.whatwg.org/#cors-safelisted-response-header-name.
-void SanitizeResponseHeaders(
-    const scoped_refptr<net::HttpResponseHeaders>& headers) {
-  DCHECK(headers);
-  std::unordered_set<std::string> names_of_headers_to_remove;
-
-  size_t it = 0;
-  std::string name;
-  std::string value;
-  while (headers->EnumerateHeaderLines(&it, &name, &value)) {
-    // Don't remove CORS headers - doing so would lead to incorrect error
-    // messages for CORS-blocked responses (e.g. Blink would say "[...] No
-    // 'Access-Control-Allow-Origin' header is present [...]" instead of saying
-    // something like "[...] Access-Control-Allow-Origin' header has a value
-    // 'http://www2.localhost:8000' that is not equal to the supplied origin
-    // [...]").
-    if (base::StartsWith(name, "Access-Control-",
-                         base::CompareCase::INSENSITIVE_ASCII)) {
-      continue;
-    }
-
-    // Remove all other headers (but note the final exclusion below).
-    names_of_headers_to_remove.insert(base::ToLowerASCII(name));
-  }
-
-  // Exclude from removals headers from
-  // https://fetch.spec.whatwg.org/#cors-safelisted-response-header-name.
-  for (const char* header : kCorsSafelistedHeaders)
-    names_of_headers_to_remove.erase(header);
-
-  headers->RemoveHeaders(names_of_headers_to_remove);
-}
-
-// Sanitizes/strips metadata of a response we decided to block.
-void SanitizeResourceResponse(
-    const scoped_refptr<network::ResourceResponse>& response) {
-  DCHECK(response);
-  response->head.content_length = 0;
-  if (response->head.headers)
-    SanitizeResponseHeaders(response->head.headers);
-}
 
 }  // namespace
 
@@ -223,47 +69,31 @@ void CrossSiteDocumentResourceHandler::LogBlockedResponseOnUIThread(
   if (!web_contents)
     return;
 
-  ukm::UkmRecorder* recorder = ukm::UkmRecorder::Get();
-  ukm::SourceId source_id = ukm::UkmRecorder::GetNewSourceID();
-  recorder->UpdateSourceURL(source_id, web_contents->GetLastCommittedURL());
+  ukm::SourceId source_id = static_cast<WebContentsImpl*>(web_contents)
+                                ->GetUkmSourceIdForLastCommittedSource();
   ukm::builders::SiteIsolation_XSD_Browser_Blocked(source_id)
       .SetCanonicalMimeType(static_cast<int64_t>(canonical_mime_type))
       .SetContentLengthWasZero(content_length == 0)
       .SetContentResourceType(resource_type)
       .SetHttpResponseCode(http_response_code)
       .SetNeededSniffing(needed_sniffing)
-      .Record(recorder);
+      .Record(ukm::UkmRecorder::Get());
 }
 
-// static
 void CrossSiteDocumentResourceHandler::LogBlockedResponse(
     ResourceRequestInfoImpl* resource_request_info,
-    bool needed_sniffing,
-    MimeType canonical_mime_type,
-    int http_response_code,
-    int64_t content_length) {
+    int http_response_code) {
   DCHECK(resource_request_info);
-  DCHECK_NE(network::CrossOriginReadBlocking::MimeType::kInvalid,
-            canonical_mime_type);
+  DCHECK(analyzer_);
+  DCHECK_NE(network::CrossOriginReadBlocking::MimeType::kInvalidMimeType,
+            analyzer_->canonical_mime_type());
 
-  LogCrossSiteDocumentAction(
-      needed_sniffing
-          ? CrossSiteDocumentResourceHandler::Action::kBlockedAfterSniffing
-          : CrossSiteDocumentResourceHandler::Action::kBlockedWithoutSniffing);
-
-  UMA_HISTOGRAM_BOOLEAN(
-      "SiteIsolation.XSD.Browser.Blocked.ContentLength.WasAvailable",
-      content_length >= 0);
-  if (content_length >= 0) {
-    UMA_HISTOGRAM_COUNTS_10000(
-        "SiteIsolation.XSD.Browser.Blocked.ContentLength.ValueIfAvailable",
-        content_length);
-  }
+  analyzer_->LogBlockedResponse();
 
   ResourceType resource_type = resource_request_info->GetResourceType();
   UMA_HISTOGRAM_ENUMERATION("SiteIsolation.XSD.Browser.Blocked", resource_type,
                             content::RESOURCE_TYPE_LAST_TYPE);
-  switch (canonical_mime_type) {
+  switch (analyzer_->canonical_mime_type()) {
     case MimeType::kHtml:
       UMA_HISTOGRAM_ENUMERATION("SiteIsolation.XSD.Browser.Blocked.HTML",
                                 resource_type,
@@ -292,19 +122,24 @@ void CrossSiteDocumentResourceHandler::LogBlockedResponse(
     default:
       NOTREACHED();
   }
+  if (analyzer_->found_parser_breaker()) {
+    UMA_HISTOGRAM_ENUMERATION(
+        "SiteIsolation.XSD.Browser.BlockedForParserBreaker", resource_type,
+        content::RESOURCE_TYPE_LAST_TYPE);
+  }
 
   // The last committed URL is only available on the UI thread - we need to hop
   // onto the UI thread to log an UKM event.  Note that this is racey - by the
   // time the posted task runs, the WebContents could have been closed and/or
   // navigated to another URL.  This is understood and acceptable - this should
   // be rare enough to not matter for the collected UKM data.
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::UI},
       base::BindOnce(
           &CrossSiteDocumentResourceHandler::LogBlockedResponseOnUIThread,
           resource_request_info->GetWebContentsGetterForRequest(),
-          needed_sniffing, canonical_mime_type, resource_type,
-          http_response_code, content_length));
+          analyzer_->needs_sniffing(), analyzer_->canonical_mime_type(),
+          resource_type, http_response_code, analyzer_->content_length()));
 }
 
 // ResourceController that runs a closure on Resume(), and forwards failures
@@ -331,6 +166,14 @@ class CrossSiteDocumentResourceHandler::Controller : public ResourceController {
     } else {
       std::move(resume_callback_).Run();
     }
+  }
+
+  void ResumeForRedirect(const base::Optional<net::HttpRequestHeaders>&
+                             modified_request_headers) override {
+    DCHECK(!modified_request_headers.has_value())
+        << "Redirect with modified headers was not supported yet. "
+           "crbug.com/845683";
+    Resume();
   }
 
   void Cancel() override {
@@ -378,19 +221,26 @@ CrossSiteDocumentResourceHandler::~CrossSiteDocumentResourceHandler() {}
 void CrossSiteDocumentResourceHandler::OnResponseStarted(
     network::ResourceResponse* response,
     std::unique_ptr<ResourceController> controller) {
-  content_length_ = response->head.content_length;
   has_response_started_ = true;
-  http_response_code_ =
-      response->head.headers ? response->head.headers->response_code() : 0;
 
-  LogCrossSiteDocumentAction(
-      CrossSiteDocumentResourceHandler::Action::kResponseStarted);
+  if (request()->initiator().has_value()) {
+    const char* initiator_scheme_exception =
+        GetContentClient()
+            ->browser()
+            ->GetInitiatorSchemeBypassingDocumentBlocking();
+    is_initiator_scheme_excluded_ =
+        initiator_scheme_exception &&
+        request()->initiator().value().scheme() == initiator_scheme_exception;
+  }
 
-  should_block_based_on_headers_ = ShouldBlockBasedOnHeaders(response);
+  network::CrossOriginReadBlocking::LogAction(
+      network::CrossOriginReadBlocking::Action::kResponseStarted);
+
+  should_block_based_on_headers_ = ShouldBlockBasedOnHeaders(*response);
 
   // If blocking is possible, postpone forwarding |response| to the
   // |next_handler_|, until we have made the allow-vs-block decision
-  // (which might need more time depending on |needs_sniffing_|).
+  // (which might need more time depending on the sniffing needs).
   if (should_block_based_on_headers_) {
     pending_response_start_ = response;
     controller->Resume();
@@ -520,6 +370,12 @@ void CrossSiteDocumentResourceHandler::OnReadCompleted(
     return;
   }
 
+  // If |next_handler_->OnReadCompleted(...)| was not called above, then the
+  // response bytes are being accumulated in the local buffer we've allocated in
+  // ResumeOnWillRead.
+  const size_t new_data_offset = local_buffer_bytes_read_;
+  local_buffer_bytes_read_ += bytes_read;
+
   // If we intended to block the response and haven't sniffed yet, try to
   // confirm that we should block it.  If sniffing is needed, look at the local
   // buffer and either report that zero bytes were read (to indicate the
@@ -527,7 +383,7 @@ void CrossSiteDocumentResourceHandler::OnReadCompleted(
   // handler's buffer and resume the response without blocking.
   bool confirmed_blockable = false;
   ResourceRequestInfoImpl* info = GetRequestInfo();
-  if (!needs_sniffing_) {
+  if (!analyzer_->needs_sniffing()) {
     // If sniffing is impossible (e.g., because this is a range request), or
     // if sniffing is disabled due to a nosniff header AND the server returned
     // a protected mime type, then we have enough information to block
@@ -539,8 +395,6 @@ void CrossSiteDocumentResourceHandler::OnReadCompleted(
     // JSONP, or another allowable data type and we should let it through.
     // Record how many bytes were read to see how often it's too small.  (This
     // will typically be under 100,000.)
-    const size_t new_data_offset = local_buffer_bytes_read_;
-    local_buffer_bytes_read_ += bytes_read;
     DCHECK_LE(local_buffer_bytes_read_, next_handler_buffer_size_);
     const bool more_data_possible =
         bytes_read != 0 && local_buffer_bytes_read_ < net::kMaxBytesToSniff &&
@@ -553,29 +407,12 @@ void CrossSiteDocumentResourceHandler::OnReadCompleted(
         std::min(local_buffer_bytes_read_, net::kMaxBytesToSniff);
     base::StringPiece data(local_buffer_->data(), bytes_to_sniff);
 
-    for (size_t i = 0; i < sniffers_.size();) {
-      sniffers_[i]->OnDataAvailable(data, new_data_offset);
+    // If we have some new data, ask the |analyzer_| to sniff it.
+    analyzer_->SniffResponseBody(data, new_data_offset);
 
-      if (!more_data_possible || !sniffers_[i]->WantsMoreData()) {
-        if (sniffers_[i]->IsConfirmedContentType()) {
-          // We're done sniffing; this response is CORB-protected.
-          confirmed_blockable = true;
-          sniffers_[i]->LogBlockedResponse(info->GetResourceType());
-          break;
-        }
-
-        // This response is CORB-exempt as far as this sniffer is concerned;
-        // remove it from the list.
-        sniffers_.erase(sniffers_.begin() + i);
-      } else {
-        i++;
-      }
-    }
-
-    // When there are no sniffers left, the response is allowed.
-    const bool confirmed_allowed = sniffers_.empty();
+    const bool confirmed_allowed = analyzer_->ShouldAllow();
+    confirmed_blockable = analyzer_->ShouldBlock();
     DCHECK(!(confirmed_blockable && confirmed_allowed));
-    DCHECK(confirmed_blockable || confirmed_allowed || more_data_possible);
 
     // If sniffing didn't yield a conclusive response, and we haven't read too
     // many bytes yet or hit the end of the stream, buffer up some more data.
@@ -585,9 +422,14 @@ void CrossSiteDocumentResourceHandler::OnReadCompleted(
     }
   }
 
-  if (needs_sniffing_) {
-    UMA_HISTOGRAM_COUNTS("SiteIsolation.XSD.Browser.BytesReadForSniffing",
-                         local_buffer_bytes_read_);
+  // At this point the block-vs-allow decision was made, but might be still
+  // suppressed because of |is_initiator_scheme_excluded_|.  We perform the
+  // suppression at such a late point, because we want to ensure we only call
+  // LogInitiatorSchemeBypassingDocumentBlocking for cases that actuall matter
+  // in practice.
+  if (confirmed_blockable && is_initiator_scheme_excluded_) {
+    initiator_scheme_prevented_blocking_ = true;
+    confirmed_blockable = false;
   }
 
   // At this point we have already made a block-vs-allow decision and we know
@@ -615,13 +457,15 @@ void CrossSiteDocumentResourceHandler::OnReadCompleted(
                      : "null",
                  "url", request()->url().spec());
 
-    LogBlockedResponse(info, needs_sniffing_, canonical_mime_type_,
-                       http_response_code_, content_length_);
+    LogBlockedResponse(info, analyzer_->http_response_code());
 
     // Block the response and throw away the data.  Report zero bytes read.
     blocked_read_completed_ = true;
-    info->set_blocked_cross_site_document(true);
-    SanitizeResourceResponse(pending_response_start_);
+    info->set_blocked_response_from_reaching_renderer(true);
+    if (analyzer_->ShouldReportBlockedResponse())
+      info->set_should_report_corb_blocking(true);
+    network::CrossOriginReadBlocking::SanitizeBlockedResponse(
+        pending_response_start_);
 
     // Pass an empty/blocked body onto the next handler.  size of the two
     // buffers is the same (see OnWillRead).  After the next statement,
@@ -714,14 +558,21 @@ void CrossSiteDocumentResourceHandler::OnResponseCompleted(
     next_handler_->OnResponseCompleted(net::URLRequestStatus(),
                                        std::move(controller));
   } else {
-    // Only report XSDB status for successful (i.e. non-aborted,
+    // Only report CORB status for successful (i.e. non-aborted,
     // non-errored-out) requests.
     if (status.is_success()) {
-      LogCrossSiteDocumentAction(
-          needs_sniffing_
-              ? CrossSiteDocumentResourceHandler::Action::kAllowedAfterSniffing
-              : CrossSiteDocumentResourceHandler::Action::
-                    kAllowedWithoutSniffing);
+      analyzer_->LogAllowedResponse();
+      if (initiator_scheme_prevented_blocking_ &&
+          analyzer_->ShouldReportBlockedResponse() && GetRequestInfo()) {
+        base::PostTaskWithTraits(
+            FROM_HERE, {BrowserThread::UI},
+            base::BindOnce(&ContentBrowserClient::
+                               LogInitiatorSchemeBypassingDocumentBlocking,
+                           base::Unretained(GetContentClient()->browser()),
+                           request()->initiator().value(),
+                           GetRequestInfo()->GetChildID(),
+                           GetRequestInfo()->GetResourceType()));
+      }
     }
 
     next_handler_->OnResponseCompleted(status, std::move(controller));
@@ -729,215 +580,46 @@ void CrossSiteDocumentResourceHandler::OnResponseCompleted(
 }
 
 bool CrossSiteDocumentResourceHandler::ShouldBlockBasedOnHeaders(
-    network::ResourceResponse* response) {
-  // The checks in this method are ordered to rule out blocking in most cases as
-  // quickly as possible.  Checks that are likely to lead to returning false or
-  // that are inexpensive should be near the top.
-  const GURL& url = request()->url();
-  url::Origin target_origin = url::Origin::Create(url);
+    const network::ResourceResponse& response) {
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
-  // Check if the response's site needs to have its documents protected.  By
-  // default, this will usually return false.
-  // TODO(creis): This check can go away once the logic here is made fully
-  // backward compatible and we can enforce it always, regardless of Site
-  // Isolation policy.
-  switch (SiteIsolationPolicy::IsCrossSiteDocumentBlockingEnabled()) {
-    case SiteIsolationPolicy::XSDB_ENABLED_UNCONDITIONALLY:
-      break;
-    case SiteIsolationPolicy::XSDB_ENABLED_IF_ISOLATED:
-      if (!SiteIsolationPolicy::UseDedicatedProcessesForAllSites() &&
-          !ChildProcessSecurityPolicyImpl::GetInstance()->IsIsolatedOrigin(
-              target_origin)) {
-        return false;
-      }
-      break;
-    case SiteIsolationPolicy::XSDB_DISABLED:
-      return false;
-  }
-
-  // Treat a missing initiator as an empty origin to be safe, though we don't
-  // expect this to happen.  Unfortunately, this requires a copy.
-  url::Origin initiator;
-  if (request()->initiator().has_value())
-    initiator = request()->initiator().value();
-
-  // Don't block same-origin documents.
-  if (initiator.IsSameOriginWith(target_origin))
+  // Delegate most decisions to CrossOriginReadBlocking::ResponseAnalyzer.
+  analyzer_ =
+      std::make_unique<network::CrossOriginReadBlocking::ResponseAnalyzer>(
+          *request(), response);
+  if (analyzer_->ShouldAllow())
     return false;
 
-  // Only block documents from HTTP(S) schemes.  Checking the scheme of
-  // |target_origin| ensures that we also protect content of blob: and
-  // filesystem: URLs if their nested origins have a HTTP(S) scheme.
-  if (!network::CrossOriginReadBlocking::IsBlockableScheme(
-          target_origin.GetURL()))
+  // --disable-web-security also disables Cross-Origin Read Blocking (CORB).
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kDisableWebSecurity))
     return false;
-
-  // Allow requests from file:// URLs for now.
-  // TODO(creis): Limit this to when the allow_universal_access_from_file_urls
-  // preference is set.  See https://crbug.com/789781.
-  if (initiator.scheme() == url::kFileScheme)
-    return false;
-
-  // Give embedder a chance to skip document blocking for this response.
-  const char* initiator_scheme_exception =
-      GetContentClient()
-          ->browser()
-          ->GetInitatorSchemeBypassingDocumentBlocking();
-  if (initiator_scheme_exception &&
-      initiator.scheme() == initiator_scheme_exception) {
-    return false;
-  }
 
   // Only block if this is a request made from a renderer process.
   const ResourceRequestInfoImpl* info = GetRequestInfo();
   if (!info || info->GetChildID() == -1)
     return false;
 
-  // Allow the response through if it has valid CORS headers.
-  std::string cors_header;
-  response->head.headers->GetNormalizedHeader("access-control-allow-origin",
-                                              &cors_header);
-  if (network::CrossOriginReadBlocking::IsValidCorsHeaderSet(initiator,
-                                                             cors_header)) {
-    return false;
-  }
-
-  // Requests from foo.example.com will consult foo.example.com's service worker
-  // first (if one has been registered).  The service worker can handle requests
-  // initiated by foo.example.com even if they are cross-origin (e.g. requests
-  // for bar.example.com).  This is okay and should not be blocked by XSDB,
-  // unless the initiator opted out of CORS / opted into receiving an opaque
-  // response.  See also https://crbug.com/803672.
-  if (response->head.was_fetched_via_service_worker) {
-    switch (response->head.response_type_via_service_worker) {
-      case network::mojom::FetchResponseType::kBasic:
-      case network::mojom::FetchResponseType::kCORS:
-      case network::mojom::FetchResponseType::kDefault:
-      case network::mojom::FetchResponseType::kError:
-        // Non-opaque responses shouldn't be blocked.
-        return false;
-      case network::mojom::FetchResponseType::kOpaque:
-      case network::mojom::FetchResponseType::kOpaqueRedirect:
-        // Opaque responses are eligible for blocking. Continue on...
-        break;
-    }
-  }
-
-  // Don't block plugin requests with universal access (e.g., Flash).  Such
-  // requests are made without CORS, and thus dont have an Origin request
-  // header.  Other plugin requests (e.g., NaCl) are made using CORS and have an
-  // Origin request header.  If they fail the CORS check above, they should be
-  // blocked.
+  // Don't block some plugin requests.
+  //
+  // Note that in practice this exception only only matters to Flash and test
+  // plugins (both can issue requests without CORS and both will be covered by
+  // CORB::ShouldAllowForPlugin below).
+  //
+  // This exception is not needed for:
+  // - PNaCl (which always issues CORS requests)
+  // - PDF (which is already covered by the exception for chrome-extension://...
+  //   initiators and therefore doesn't need another exception here;
+  //   additionally PDF doesn't _really_ make *cross*-origin requests - it just
+  //   seems that way because of the usage of the Chrome extension).
   if (info->GetResourceType() == RESOURCE_TYPE_PLUGIN_RESOURCE &&
-      is_nocors_plugin_request_) {
+      is_nocors_plugin_request_ &&
+      network::CrossOriginReadBlocking::ShouldAllowForPlugin(
+          info->GetChildID())) {
     return false;
-  }
-
-  // We intend to block the response at this point.  However, we will usually
-  // sniff the contents to confirm the MIME type, to avoid blocking incorrectly
-  // labeled JavaScript, JSONP, etc files.
-  //
-  // Note: if there is a nosniff header, it means we should honor the response
-  // mime type without trying to confirm it.
-  std::string nosniff_header;
-  response->head.headers->GetNormalizedHeader("x-content-type-options",
-                                              &nosniff_header);
-  bool has_nosniff_header =
-      base::LowerCaseEqualsASCII(nosniff_header, "nosniff");
-
-  // CORB should look directly at the Content-Type header if one has been
-  // received from the network.  Ignoring |response->head.mime_type| helps avoid
-  // breaking legitimate websites (which might happen more often when blocking
-  // would be based on the mime type sniffed by MimeSniffingResourceHandler).
-  //
-  // TODO(nick): What if the mime type is omitted? Should that be treated the
-  // same as text/plain? https://crbug.com/795971
-  std::string mime_type;
-  if (response->head.headers)
-    response->head.headers->GetMimeType(&mime_type);
-  // Canonicalize the MIME type.  Note that even if it doesn't claim to be a
-  // blockable type (i.e., HTML, XML, JSON, or plain text), it may still fail
-  // the checks during the SniffForFetchOnlyResource() phase.
-  canonical_mime_type_ =
-      network::CrossOriginReadBlocking::GetCanonicalMimeType(mime_type);
-
-  // If this is a partial response, sniffing is not possible, so allow the
-  // response if it's not a protected mime type.
-  std::string range_header;
-  response->head.headers->GetNormalizedHeader("content-range", &range_header);
-  if (!range_header.empty()) {
-    needs_sniffing_ = false;
-    switch (canonical_mime_type_) {
-      case MimeType::kOthers:
-      case MimeType::kPlain:  // See also https://crbug.com/801709
-        return false;
-      case MimeType::kHtml:
-      case MimeType::kJson:
-      case MimeType::kXml:
-        return true;
-      case MimeType::kMax:
-        NOTREACHED();
-        return true;
-    }
-  }
-
-  // We need to sniff unprotected mime types (e.g. for parser breakers), and
-  // unless the nosniff header is set, we also need to sniff protected mime
-  // types to verify that they're not mislabeled.
-  needs_sniffing_ =
-      (canonical_mime_type_ == MimeType::kOthers) || !has_nosniff_header;
-
-  // Stylesheets shouldn't be sniffed for JSON parser breakers - see
-  // https://crbug.com/809259.
-  if (response->head.mime_type.empty() ||
-      base::LowerCaseEqualsASCII(response->head.mime_type, "text/css")) {
-    return false;
-  }
-
-  // Create one or more |sniffers_| to confirm that the body is actually the
-  // MIME type advertised in the Content-Type header.
-  if (needs_sniffing_) {
-    // When the MIME type is "text/plain", create sniffers for HTML, XML and
-    // JSON. If any of these sniffers match, the response will be blocked.
-    const bool use_all = canonical_mime_type_ == MimeType::kPlain;
-
-    // HTML sniffer.
-    if (use_all || canonical_mime_type_ == MimeType::kHtml) {
-      sniffers_.push_back(std::make_unique<SimpleConfirmationSniffer>(
-          &network::CrossOriginReadBlocking::SniffForHTML));
-    }
-
-    // XML sniffer.
-    if (use_all || canonical_mime_type_ == MimeType::kXml) {
-      sniffers_.push_back(std::make_unique<SimpleConfirmationSniffer>(
-          &network::CrossOriginReadBlocking::SniffForXML));
-    }
-
-    // JSON sniffer.
-    if (use_all || canonical_mime_type_ == MimeType::kJson) {
-      sniffers_.push_back(std::make_unique<SimpleConfirmationSniffer>(
-          &network::CrossOriginReadBlocking::SniffForJSON));
-    }
-
-    // Parser-breaker sniffer.
-    //
-    // Because these prefixes are an XSSI-defeating mechanism, CORB considers
-    // them distinctive enough to be worth blocking no matter the Content-Type
-    // header. So this sniffer is created unconditionally.
-    //
-    // For MimeType::kOthers, this will be the only sniffer that's active.
-    sniffers_.push_back(std::make_unique<FetchOnlyResourceSniffer>());
   }
 
   return true;
-}
-
-// static
-std::vector<std::string>
-CrossSiteDocumentResourceHandler::GetCorsSafelistedHeadersForTesting() {
-  return std::vector<std::string>(
-      kCorsSafelistedHeaders,
-      kCorsSafelistedHeaders + arraysize(kCorsSafelistedHeaders));
 }
 
 }  // namespace content

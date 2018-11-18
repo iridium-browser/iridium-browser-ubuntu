@@ -4,6 +4,17 @@
 
 #include "third_party/blink/renderer/platform/image-encoders/image_encoder.h"
 
+#include "build/build_config.h"
+
+#if defined(OS_WIN)
+#include <basetsd.h>  // Included before jpeglib.h because of INT32 clash
+#endif                // OS_WIN
+#include <stdio.h>    // Needed by jpeglib.h
+
+#include "jpeglib.h"  // for JPEG_MAX_DIMENSION
+
+#include "third_party/libwebp/src/webp/encode.h"  // for WEBP_MAX_DIMENSION
+
 namespace blink {
 
 bool ImageEncoder::Encode(Vector<unsigned char>* dst,
@@ -55,6 +66,20 @@ std::unique_ptr<ImageEncoder> ImageEncoder::Create(
   return image_encoder;
 }
 
+int ImageEncoder::MaxDimension(ImageEncodingMimeType mime_type) {
+  switch (mime_type) {
+    case kMimeTypePng:
+      return 65535;
+    case kMimeTypeJpeg:
+      return JPEG_MAX_DIMENSION;
+    case kMimeTypeWebp:
+      return WEBP_MAX_DIMENSION;
+    default:
+      NOTREACHED();
+  }
+  return -1;
+}
+
 int ImageEncoder::ComputeJpegQuality(double quality) {
   int compression_quality = 92;  // Default value
   if (0.0f <= quality && quality <= 1.0)
@@ -62,11 +87,8 @@ int ImageEncoder::ComputeJpegQuality(double quality) {
   return compression_quality;
 }
 
-SkWebpEncoder::Options ImageEncoder::ComputeWebpOptions(
-    double quality,
-    SkTransferFunctionBehavior unpremulBehavior) {
+SkWebpEncoder::Options ImageEncoder::ComputeWebpOptions(double quality) {
   SkWebpEncoder::Options options;
-  options.fUnpremulBehavior = unpremulBehavior;
 
   if (quality == 1.0) {
     // Choose a lossless encode.  When performing a lossless encode, higher

@@ -66,17 +66,33 @@ void PopulateMetrics(GlobalMemoryDumpPtr* global_dump,
 class FakeBackgroundProfilingTriggers : public BackgroundProfilingTriggers {
  public:
   explicit FakeBackgroundProfilingTriggers(ProfilingProcessHost* host)
-      : BackgroundProfilingTriggers(host), was_report_triggered_(false) {}
+      : BackgroundProfilingTriggers(host),
+        was_report_triggered_(false),
+        should_trigger_control_report_(false) {}
 
   using BackgroundProfilingTriggers::OnReceivedMemoryDump;
 
-  void Reset() { was_report_triggered_ = false; }
+  void Reset() {
+    should_trigger_control_report_ = false;
+    was_report_triggered_ = false;
+    pmf_at_last_upload_.clear();
+  }
   bool WasReportTriggered() const { return was_report_triggered_; }
 
+  bool ShouldTriggerControlReport(int content_process_type) const override {
+    return should_trigger_control_report_;
+  }
+  void SetControlTrigger(bool trigger_control_report) {
+    should_trigger_control_report_ = trigger_control_report;
+  }
+
  private:
-  void TriggerMemoryReport() override { was_report_triggered_ = true; }
+  void TriggerMemoryReport(std::string trigger_name) override {
+    was_report_triggered_ = true;
+  }
 
   bool was_report_triggered_;
+  bool should_trigger_control_report_;
 };
 
 class BackgroundProfilingTriggersTest : public testing::Test {
@@ -195,6 +211,40 @@ TEST_F(BackgroundProfilingTriggersTest, OnReceivedMemoryDump_ProfiledPids) {
   triggers_.OnReceivedMemoryDump(profiled_pids_, true,
                                  GlobalMemoryDump::MoveFrom(std::move(dump)));
   EXPECT_TRUE(triggers_.WasReportTriggered());
+
+  // Ensure control trigger work on browser process, no matter memory usage.
+  triggers_.Reset();
+  triggers_.SetControlTrigger(true);
+  dump = memory_instrumentation::mojom::GlobalMemoryDump::New();
+  PopulateMetrics(&dump, 1, ProcessType::BROWSER, 1, 1, 1);
+  triggers_.OnReceivedMemoryDump(profiled_pids_, true,
+                                 GlobalMemoryDump::MoveFrom(std::move(dump)));
+  EXPECT_TRUE(triggers_.WasReportTriggered());
+}
+
+TEST_F(BackgroundProfilingTriggersTest, HighWaterMark) {
+  GlobalMemoryDumpPtr dump(
+      memory_instrumentation::mojom::GlobalMemoryDump::New());
+  PopulateMetrics(&dump, 1, ProcessType::BROWSER, kProcessMallocTriggerKb,
+                  kProcessMallocTriggerKb, kProcessMallocTriggerKb);
+  triggers_.OnReceivedMemoryDump(profiled_pids_, true,
+                                 GlobalMemoryDump::MoveFrom(std::move(dump)));
+  EXPECT_TRUE(triggers_.WasReportTriggered());
+  triggers_.Reset();
+
+  // A small increase in memory should not trigger another report.
+  dump = memory_instrumentation::mojom::GlobalMemoryDump::New();
+  uint32_t small_increase = kProcessMallocTriggerKb + 10 * 1024;
+  PopulateMetrics(&dump, 1, ProcessType::BROWSER, small_increase,
+                  small_increase, small_increase);
+  EXPECT_FALSE(triggers_.WasReportTriggered());
+
+  // But a large increase should trigger another report.
+  dump = memory_instrumentation::mojom::GlobalMemoryDump::New();
+  uint32_t large_increase = kProcessMallocTriggerKb + 1000 * 1024;
+  PopulateMetrics(&dump, 1, ProcessType::BROWSER, large_increase,
+                  large_increase, large_increase);
+  EXPECT_FALSE(triggers_.WasReportTriggered());
 }
 
 // Non-profiled processes don't trigger.

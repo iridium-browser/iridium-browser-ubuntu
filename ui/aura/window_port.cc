@@ -8,13 +8,15 @@
 
 namespace aura {
 
+WindowPort::WindowPort(Type type) : type_(type) {}
+
 // static
 WindowPort* WindowPort::Get(Window* window) {
   return window ? window->port_ : nullptr;
 }
 
 // static
-base::ObserverList<WindowObserver, true>* WindowPort::GetObservers(
+base::ObserverList<WindowObserver, true>::Unchecked* WindowPort::GetObservers(
     Window* window) {
   return &(window->observers_);
 }

@@ -7,6 +7,7 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/lazy_instance.h"
+#include "base/message_loop/message_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_local.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -32,12 +33,7 @@ void ProxyToTaskRunner(scoped_refptr<SequencedTaskRunner> task_runner,
 
 }  // namespace
 
-RunLoop::Delegate::Delegate()
-    : should_quit_when_idle_callback_(base::BindRepeating(
-          [](Delegate* self) {
-            return self->active_run_loops_.top()->quit_when_idle_received_;
-          },
-          Unretained(this))) {
+RunLoop::Delegate::Delegate() {
   // The Delegate can be created on another thread. It is only bound in
   // RegisterDelegateForCurrentThread().
   DETACH_FROM_THREAD(bound_thread_checker_);
@@ -53,7 +49,7 @@ RunLoop::Delegate::~Delegate() {
 }
 
 bool RunLoop::Delegate::ShouldQuitWhenIdle() {
-  return should_quit_when_idle_callback_.Run();
+  return active_run_loops_.top()->quit_when_idle_received_;
 }
 
 // static
@@ -69,30 +65,6 @@ void RunLoop::RegisterDelegateForCurrentThread(Delegate* delegate) {
          "MessageLoop/ScopedTaskEnvironment on a thread that already had one?";
   tls_delegate.Get().Set(delegate);
   delegate->bound_ = true;
-}
-
-// static
-RunLoop::Delegate* RunLoop::OverrideDelegateForCurrentThreadForTesting(
-    Delegate* delegate,
-    Delegate::ShouldQuitWhenIdleCallback
-        overriding_should_quit_when_idle_callback) {
-  // Bind |delegate| to this thread.
-  DCHECK(!delegate->bound_);
-  DCHECK_CALLED_ON_VALID_THREAD(delegate->bound_thread_checker_);
-
-  // Overriding cannot be performed while running.
-  DCHECK(!IsRunningOnCurrentThread());
-
-  // Override the current Delegate (there must be one).
-  Delegate* overridden_delegate = tls_delegate.Get().Get();
-  DCHECK(overridden_delegate);
-  DCHECK(overridden_delegate->bound_);
-  overridden_delegate->should_quit_when_idle_callback_ =
-      std::move(overriding_should_quit_when_idle_callback);
-  tls_delegate.Get().Set(delegate);
-  delegate->bound_ = true;
-
-  return overridden_delegate;
 }
 
 RunLoop::RunLoop(Type type)
@@ -180,6 +152,7 @@ void RunLoop::QuitWhenIdle() {
 base::Closure RunLoop::QuitClosure() {
   // TODO(gab): Fix bad usage and enable this check, http://crbug.com/715235.
   // DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  allow_quit_current_deprecated_ = false;
 
   // Need to use ProxyToTaskRunner() as WeakPtrs vended from
   // |weak_factory_| may only be accessed on |origin_task_runner_|.
@@ -191,6 +164,7 @@ base::Closure RunLoop::QuitClosure() {
 base::Closure RunLoop::QuitWhenIdleClosure() {
   // TODO(gab): Fix bad usage and enable this check, http://crbug.com/715235.
   // DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  allow_quit_current_deprecated_ = false;
 
   // Need to use ProxyToTaskRunner() as WeakPtrs vended from
   // |weak_factory_| may only be accessed on |origin_task_runner_|.
@@ -229,13 +203,30 @@ void RunLoop::RemoveNestingObserverOnCurrentThread(NestingObserver* observer) {
 // static
 void RunLoop::QuitCurrentDeprecated() {
   DCHECK(IsRunningOnCurrentThread());
-  tls_delegate.Get().Get()->active_run_loops_.top()->Quit();
+  Delegate* delegate = tls_delegate.Get().Get();
+  DCHECK(delegate->active_run_loops_.top()->allow_quit_current_deprecated_)
+      << "Please migrate off QuitCurrentDeprecated(), e.g. to QuitClosure().";
+  delegate->active_run_loops_.top()->Quit();
 }
 
 // static
 void RunLoop::QuitCurrentWhenIdleDeprecated() {
   DCHECK(IsRunningOnCurrentThread());
-  tls_delegate.Get().Get()->active_run_loops_.top()->QuitWhenIdle();
+  Delegate* delegate = tls_delegate.Get().Get();
+  DCHECK(delegate->active_run_loops_.top()->allow_quit_current_deprecated_)
+      << "Please migrate off QuitCurrentWhenIdleDeprecated(), e.g. to "
+         "QuitWhenIdleClosure().";
+  delegate->active_run_loops_.top()->QuitWhenIdle();
+}
+
+// static
+Closure RunLoop::QuitCurrentWhenIdleClosureDeprecated() {
+  // TODO(844016): Fix callsites and enable this check, or remove the API.
+  // Delegate* delegate = tls_delegate.Get().Get();
+  // DCHECK(delegate->active_run_loops_.top()->allow_quit_current_deprecated_)
+  //     << "Please migrate off QuitCurrentWhenIdleClosureDeprecated(), e.g to "
+  //        "QuitWhenIdleClosure().";
+  return Bind(&RunLoop::QuitCurrentWhenIdleDeprecated);
 }
 
 #if DCHECK_IS_ON()

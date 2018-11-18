@@ -7,6 +7,7 @@
 #include "base/strings/string_util.h"
 #include "chrome/browser/android/download/download_controller_base.h"
 #include "net/cookies/canonical_cookie.h"
+#include "net/cookies/cookie_store.h"
 #include "net/http/http_request_headers.h"
 #include "net/http/http_response_headers.h"
 #include "net/url_request/url_request.h"
@@ -72,8 +73,9 @@ const char* InterceptDownloadResourceThrottle::GetNameForLogging() const {
 void InterceptDownloadResourceThrottle::CheckCookiePolicy(
     const net::CookieList& cookie_list) {
   DownloadInfo info(request_);
-  if (request_->context()->network_delegate()->CanGetCookies(*request_,
-                                                             cookie_list)) {
+  if (request_->context()->network_delegate()->CanGetCookies(
+          *request_, cookie_list,
+          /*allowed_from_caller=*/true)) {
     std::string cookie = net::CanonicalCookie::BuildCookieLine(cookie_list);
     if (!cookie.empty())
       info.cookie = cookie;

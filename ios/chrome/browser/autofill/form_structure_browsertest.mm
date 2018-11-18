@@ -11,7 +11,7 @@
 #include "base/path_service.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task_scheduler/task_scheduler.h"
+#include "base/task/task_scheduler/task_scheduler.h"
 #import "base/test/ios/wait_util.h"
 #include "base/test/scoped_feature_list.h"
 #include "components/autofill/core/browser/autofill_manager.h"
@@ -19,13 +19,18 @@
 #include "components/autofill/core/common/autofill_features.h"
 #import "components/autofill/ios/browser/autofill_agent.h"
 #include "components/autofill/ios/browser/autofill_driver_ios.h"
+#include "ios/chrome/browser/autofill/address_normalizer_factory.h"
 #import "ios/chrome/browser/autofill/autofill_controller.h"
 #import "ios/chrome/browser/autofill/form_suggestion_controller.h"
 #include "ios/chrome/browser/browser_state/test_chrome_browser_state.h"
 #include "ios/chrome/browser/chrome_paths.h"
 #include "ios/chrome/browser/infobars/infobar_manager_impl.h"
+#include "ios/chrome/browser/ssl/ios_security_state_tab_helper.h"
 #include "ios/chrome/browser/web/chrome_web_client.h"
 #import "ios/chrome/browser/web/chrome_web_test.h"
+#include "ios/web/public/web_state/web_frame.h"
+#include "ios/web/public/web_state/web_frame_util.h"
+#import "ios/web/public/web_state/web_frames_manager.h"
 #import "ios/web/public/web_state/web_state.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -41,13 +46,13 @@ const base::FilePath::CharType kTestName[] = FILE_PATH_LITERAL("heuristics");
 const base::FilePath& GetTestDataDir() {
   CR_DEFINE_STATIC_LOCAL(base::FilePath, dir, ());
   if (dir.empty())
-    PathService::Get(ios::DIR_TEST_DATA, &dir);
+    base::PathService::Get(ios::DIR_TEST_DATA, &dir);
   return dir;
 }
 
 base::FilePath GetIOSInputDirectory() {
   base::FilePath dir;
-  CHECK(PathService::Get(base::DIR_SOURCE_ROOT, &dir));
+  CHECK(base::PathService::Get(base::DIR_SOURCE_ROOT, &dir));
 
   return dir.AppendASCII("components")
       .AppendASCII("test")
@@ -59,7 +64,7 @@ base::FilePath GetIOSInputDirectory() {
 
 base::FilePath GetIOSOutputDirectory() {
   base::FilePath dir;
-  CHECK(PathService::Get(base::DIR_SOURCE_ROOT, &dir));
+  CHECK(base::PathService::Get(base::DIR_SOURCE_ROOT, &dir));
 
   return dir.AppendASCII("components")
       .AppendASCII("test")
@@ -81,12 +86,6 @@ const std::vector<base::FilePath> GetTestFiles() {
 
   base::mac::ClearAmIBundledCache();
   return files;
-}
-
-const std::set<std::string>& GetFailingTestNames() {
-  static std::set<std::string>* failing_test_names =
-      new std::set<std::string>{};
-  return *failing_test_names;
 }
 
 }  // namespace
@@ -112,7 +111,7 @@ class FormStructureBrowserTest
 
   // Serializes the given |forms| into a string.
   std::string FormStructuresToString(
-      const std::vector<std::unique_ptr<FormStructure>>& forms);
+      const AutofillManager::FormStructureMap& forms);
 
   FormSuggestionController* suggestionController_;
   AutofillController* autofillController_;
@@ -124,13 +123,25 @@ class FormStructureBrowserTest
 
 FormStructureBrowserTest::FormStructureBrowserTest()
     : ChromeWebTest(std::make_unique<ChromeWebClient>()),
-      DataDrivenTest(GetTestDataDir()) {}
+      DataDrivenTest(GetTestDataDir()) {
+  feature_list_.InitWithFeatures(
+      // Enabled
+      {},
+      // Disabled
+      {autofill::features::kAutofillEnforceMinRequiredFieldsForHeuristics,
+       autofill::features::kAutofillEnforceMinRequiredFieldsForQuery,
+       autofill::features::kAutofillEnforceMinRequiredFieldsForUpload,
+       autofill::features::kAutofillRestrictUnownedFieldsToFormlessCheckout});
+}
 
 void FormStructureBrowserTest::SetUp() {
   ChromeWebTest::SetUp();
-  feature_list_.InitAndDisableFeature(
-      autofill::features::kAutofillEnforceMinRequiredFieldsForUpload);
 
+  // AddressNormalizerFactory must be initialized in a blocking allowed scoped.
+  // Initialize it now as it may DCHECK if it is initialized during the test.
+  AddressNormalizerFactory::GetInstance();
+
+  IOSSecurityStateTabHelper::CreateForWebState(web_state());
   InfoBarManagerImpl::CreateForWebState(web_state());
   AutofillAgent* autofillAgent = [[AutofillAgent alloc]
       initWithPrefService:chrome_browser_state_->GetPrefs()
@@ -149,11 +160,6 @@ void FormStructureBrowserTest::SetUp() {
 void FormStructureBrowserTest::TearDown() {
   [autofillController_ detachFromWebState];
 
-  // TODO(crbug.com/776330): remove this manual sync.
-  // This is a workaround to manually sync the tasks posted by
-  // |CRWCertVerificationController verifyTrust:completionHandler:|.
-  // |WaitForBackgroundTasks| currently fails to wait for completion of them.
-  base::test::ios::SpinRunLoopWithMinDelay(base::TimeDelta::FromSecondsD(0.1));
   ChromeWebTest::TearDown();
 }
 
@@ -161,18 +167,30 @@ void FormStructureBrowserTest::GenerateResults(const std::string& input,
                                                std::string* output) {
   ASSERT_TRUE(LoadHtml(input));
   base::TaskScheduler::GetInstance()->FlushForTesting();
+  web::WebFrame* frame = web::GetMainWebFrame(web_state());
   AutofillManager* autofill_manager =
-      AutofillDriverIOS::FromWebState(web_state())->autofill_manager();
+      AutofillDriverIOS::FromWebStateAndWebFrame(web_state(), frame)
+          ->autofill_manager();
   ASSERT_NE(nullptr, autofill_manager);
-  const std::vector<std::unique_ptr<FormStructure>>& forms =
-      autofill_manager->form_structures_;
-  *output = FormStructureBrowserTest::FormStructuresToString(forms);
+  EXPECT_TRUE(base::test::ios::WaitUntilConditionOrTimeout(
+      base::test::ios::kWaitForActionTimeout, ^bool() {
+        return autofill_manager->NumFormsDetected() != 0;
+      }));
+  *output = FormStructuresToString(autofill_manager->form_structures());
 }
 
 std::string FormStructureBrowserTest::FormStructuresToString(
-    const std::vector<std::unique_ptr<FormStructure>>& forms) {
+    const AutofillManager::FormStructureMap& forms) {
+  std::map<base::TimeTicks, const FormStructure*> sorted_forms;
+  for (const auto& form_kv : forms) {
+    const auto* form = form_kv.second.get();
+    EXPECT_TRUE(
+        sorted_forms.emplace(form->form_parsed_timestamp(), form).second);
+  }
+
   std::string forms_string;
-  for (const std::unique_ptr<FormStructure>& form : forms) {
+  for (const auto& form_kv : sorted_forms) {
+    const auto* form = form_kv.second;
     for (const auto& field : *form) {
       std::string name = base::UTF16ToUTF8(field->name);
       if (base::StartsWith(name, "gChrome~field~",
@@ -181,7 +199,7 @@ std::string FormStructureBrowserTest::FormStructuresToString(
         // to have a behavior similar to other platforms.
         name = "";
       }
-      std::string section = field->section();
+      std::string section = field->section;
       if (base::StartsWith(section, "gChrome~field~",
                            base::CompareCase::SENSITIVE)) {
         // The name has been generated by iOS JavaScript. Output an empty name
@@ -200,6 +218,22 @@ std::string FormStructureBrowserTest::FormStructuresToString(
   return forms_string;
 }
 
+namespace {
+
+// To disable a data driven test, please add the name of the test file
+// (i.e., "NNN_some_site.html") as a literal to the initializer_list given
+// to the failing_test_names constructor.
+const std::set<std::string>& GetFailingTestNames() {
+  static std::set<std::string>* failing_test_names =
+      new std::set<std::string>{};
+  return *failing_test_names;
+}
+
+}  // namespace
+
+// If disabling a test, prefer to add the name names of the specific test cases
+// to GetFailingTestNames(), directly above, instead of renaming the test to
+// DISABLED_DataDrivenHeuristics.
 TEST_P(FormStructureBrowserTest, DataDrivenHeuristics) {
   bool is_expected_to_pass =
       !base::ContainsKey(GetFailingTestNames(), GetParam().BaseName().value());

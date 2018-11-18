@@ -6,11 +6,12 @@
 
 #include <limits>
 
+#include "device/gamepad/gamepad_data_fetcher.h"
 #include "device/gamepad/gamepad_standard_mappings.h"
 
 namespace {
-const uint32_t kVendorNintendo = 0x057e;
-const uint32_t kProductSwitchProController = 0x2009;
+const uint16_t kVendorNintendo = 0x057e;
+const uint16_t kProductSwitchProController = 0x2009;
 
 const uint8_t kRumbleMagnitudeMax = 0xff;
 
@@ -58,7 +59,8 @@ struct ControllerDataReport {
 };
 #pragma pack(pop)
 
-ControllerType ControllerTypeFromDeviceIds(int vendor_id, int product_id) {
+ControllerType ControllerTypeFromDeviceIds(uint16_t vendor_id,
+                                           uint16_t product_id) {
   if (vendor_id == kVendorNintendo) {
     switch (product_id) {
       case kProductSwitchProController:
@@ -177,7 +179,8 @@ namespace device {
 SwitchProControllerBase::~SwitchProControllerBase() = default;
 
 // static
-bool SwitchProControllerBase::IsSwitchPro(int vendor_id, int product_id) {
+bool SwitchProControllerBase::IsSwitchPro(uint16_t vendor_id,
+                                          uint16_t product_id) {
   return ControllerTypeFromDeviceIds(vendor_id, product_id) !=
          UNKNOWN_CONTROLLER;
 }
@@ -234,7 +237,7 @@ void SwitchProControllerBase::HandleInputReport(void* report,
       ControllerDataReport* controller_data =
           reinterpret_cast<ControllerDataReport*>(report);
       UpdatePadStateFromControllerData(*controller_data, pad);
-      pad->timestamp = ++report_id_;
+      pad->timestamp = GamepadDataFetcher::CurrentTimeInMicroseconds();
       break;
     }
     default:

@@ -71,7 +71,7 @@ class StubFunction : public ScriptFunction {
   size_t& call_count_;
 };
 
-class GarbageCollectedHolder : public GarbageCollectedScriptWrappable {
+class GarbageCollectedHolder final : public GarbageCollectedScriptWrappable {
  public:
   typedef ScriptPromiseProperty<Member<GarbageCollectedScriptWrappable>,
                                 Member<GarbageCollectedScriptWrappable>,
@@ -88,9 +88,9 @@ class GarbageCollectedHolder : public GarbageCollectedScriptWrappable {
     return this;
   }
 
-  virtual void Trace(blink::Visitor* visitor) {
-    GarbageCollectedScriptWrappable::Trace(visitor);
+  void Trace(blink::Visitor* visitor) override {
     visitor->Trace(property_);
+    GarbageCollectedScriptWrappable::Trace(visitor);
   }
 
  private:
@@ -102,7 +102,7 @@ class ScriptPromisePropertyTestBase {
   ScriptPromisePropertyTestBase()
       : page_(DummyPageHolder::Create(IntSize(1, 1))) {
     v8::HandleScope handle_scope(GetIsolate());
-    other_script_state_ = ScriptStateForTesting::Create(
+    other_script_state_ = ScriptState::Create(
         v8::Context::New(GetIsolate()),
         DOMWrapperWorld::EnsureIsolatedWorld(GetIsolate(), 1));
   }
@@ -115,7 +115,7 @@ class ScriptPromisePropertyTestBase {
     return ToScriptStateForMainWorld(GetDocument().GetFrame());
   }
   DOMWrapperWorld& MainWorld() { return MainScriptState()->World(); }
-  ScriptState* OtherScriptState() { return other_script_state_.get(); }
+  ScriptState* OtherScriptState() { return other_script_state_; }
   DOMWrapperWorld& OtherWorld() { return other_script_state_->World(); }
   ScriptState* CurrentScriptState() {
     return ScriptState::Current(GetIsolate());
@@ -155,7 +155,7 @@ class ScriptPromisePropertyTestBase {
 
  private:
   std::unique_ptr<DummyPageHolder> page_;
-  scoped_refptr<ScriptState> other_script_state_;
+  Persistent<ScriptState> other_script_state_;
 };
 
 // This is the main test class.
@@ -187,10 +187,7 @@ class ScriptPromisePropertyNonScriptWrappableResolutionTargetTest
       public testing::Test {
  public:
   template <typename T>
-  void Test(const T& value,
-            const char* expected,
-            const char* file,
-            size_t line) {
+  void Test(const T& value, const char* expected, const char* file, int line) {
     typedef ScriptPromiseProperty<Member<GarbageCollectedScriptWrappable>, T,
                                   ToV8UndefinedGenerator>
         Property;

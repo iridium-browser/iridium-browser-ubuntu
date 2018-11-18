@@ -6,6 +6,7 @@
 
 #include "third_party/blink/renderer/core/inspector/thread_debugger.h"
 #include "third_party/blink/renderer/platform/cross_thread_functional.h"
+#include "third_party/blink/renderer/platform/web_task_runner.h"
 
 namespace blink {
 
@@ -24,7 +25,7 @@ InspectorTaskRunner::IgnoreInterruptsScope::~IgnoreInterruptsScope() {
 
 InspectorTaskRunner::InspectorTaskRunner(
     scoped_refptr<base::SingleThreadTaskRunner> isolate_task_runner)
-    : isolate_task_runner_(isolate_task_runner) {}
+    : isolate_task_runner_(isolate_task_runner), condition_(mutex_) {}
 
 InspectorTaskRunner::~InspectorTaskRunner() = default;
 
@@ -84,18 +85,15 @@ bool InspectorTaskRunner::IsRunningTask() {
 InspectorTaskRunner::Task InspectorTaskRunner::TakeNextTask(
     InspectorTaskRunner::WaitMode wait_mode) {
   MutexLocker lock(mutex_);
-  bool timed_out = false;
 
-  static double infinite_time = std::numeric_limits<double>::max();
-  double absolute_time = wait_mode == kWaitForTask ? infinite_time : 0.0;
-  while (!disposed_ && !timed_out && queue_.IsEmpty())
-    timed_out = !condition_.TimedWait(mutex_, absolute_time);
-  DCHECK(!timed_out || absolute_time != infinite_time);
+  if (wait_mode == kWaitForTask) {
+    while (!disposed_ && queue_.IsEmpty())
+      condition_.Wait();
+  }
 
-  if (disposed_ || timed_out)
+  if (disposed_ || queue_.IsEmpty())
     return Task();
 
-  SECURITY_DCHECK(!queue_.IsEmpty());
   return queue_.TakeFirst();
 }
 
@@ -115,10 +113,11 @@ void InspectorTaskRunner::PerformSingleTask(Task task) {
 }
 
 void InspectorTaskRunner::PerformSingleTaskDontWait() {
-  DCHECK(isolate_task_runner_->BelongsToCurrentThread());
   Task task = TakeNextTask(kDontWaitForTask);
-  if (task)
+  if (task) {
+    DCHECK(isolate_task_runner_->BelongsToCurrentThread());
     PerformSingleTask(std::move(task));
+  }
 }
 
 void InspectorTaskRunner::V8InterruptCallback(v8::Isolate*, void* data) {

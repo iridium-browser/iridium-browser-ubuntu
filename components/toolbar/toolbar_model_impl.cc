@@ -16,13 +16,10 @@
 #include "components/toolbar/buildflags.h"
 #include "components/toolbar/toolbar_field_trial.h"
 #include "components/toolbar/toolbar_model_delegate.h"
-#include "components/url_formatter/elide_url.h"
-#include "components/url_formatter/url_formatter.h"
 #include "net/cert/cert_status_flags.h"
 #include "net/cert/x509_certificate.h"
 #include "net/ssl/ssl_connection_status_flags.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/material_design/material_design_controller.h"
 #include "ui/gfx/text_elider.h"
 #include "ui/gfx/vector_icon_types.h"
 
@@ -42,15 +39,37 @@ ToolbarModelImpl::~ToolbarModelImpl() {
 
 // ToolbarModelImpl Implementation.
 base::string16 ToolbarModelImpl::GetFormattedFullURL() const {
+  return GetFormattedURL(url_formatter::kFormatUrlOmitDefaults);
+}
+
+base::string16 ToolbarModelImpl::GetURLForDisplay() const {
+  url_formatter::FormatUrlTypes format_types =
+      url_formatter::kFormatUrlOmitDefaults;
+
+#if defined(OS_IOS)
+  format_types |= url_formatter::kFormatUrlTrimAfterHost;
+#endif
+
+  if (toolbar::features::IsHideSteadyStateUrlSchemeEnabled())
+    format_types |= url_formatter::kFormatUrlOmitHTTPS;
+
+  if (toolbar::features::IsHideSteadyStateUrlTrivialSubdomainsEnabled())
+    format_types |= url_formatter::kFormatUrlOmitTrivialSubdomains;
+
+  return GetFormattedURL(format_types);
+}
+
+base::string16 ToolbarModelImpl::GetFormattedURL(
+    url_formatter::FormatUrlTypes format_types) const {
   GURL url(GetURL());
   // Note that we can't unescape spaces here, because if the user copies this
   // and pastes it into another program, that program may think the URL ends at
   // the space.
   const base::string16 formatted_text =
       delegate_->FormattedStringWithEquivalentMeaning(
-          url, url_formatter::FormatUrl(
-                   url, url_formatter::kFormatUrlOmitDefaults,
-                   net::UnescapeRule::NORMAL, nullptr, nullptr, nullptr));
+          url,
+          url_formatter::FormatUrl(url, format_types, net::UnescapeRule::NORMAL,
+                                   nullptr, nullptr, nullptr));
 
   // Truncating the URL breaks editing and then pressing enter, but hopefully
   // people won't try to do much with such enormous URLs anyway. If this becomes
@@ -58,19 +77,6 @@ base::string16 ToolbarModelImpl::GetFormattedFullURL() const {
   // visible URL" where editing affects and reloads the "real underlying URL",
   // but this seems very tricky for little gain.
   return gfx::TruncateString(formatted_text, max_url_display_chars_,
-                             gfx::CHARACTER_BREAK);
-}
-
-base::string16 ToolbarModelImpl::GetURLForDisplay() const {
-  url_formatter::FormatUrlTypes format_types =
-      url_formatter::kFormatUrlOmitDefaults |
-      url_formatter::kFormatUrlOmitHTTPS |
-      url_formatter::kFormatUrlOmitTrivialSubdomains;
-  base::string16 result = url_formatter::FormatUrl(GetURL(), format_types,
-                                                   net::UnescapeRule::NORMAL,
-                                                   nullptr, nullptr, nullptr);
-
-  return gfx::TruncateString(result, max_url_display_chars_,
                              gfx::CHARACTER_BREAK);
 }
 
@@ -89,9 +95,6 @@ security_state::SecurityLevel ToolbarModelImpl::GetSecurityLevel(
 
 const gfx::VectorIcon& ToolbarModelImpl::GetVectorIcon() const {
 #if (!defined(OS_ANDROID) || BUILDFLAG(ENABLE_VR)) && !defined(OS_IOS)
-  const bool is_touch_ui =
-      ui::MaterialDesignController::IsTouchOptimizedUiEnabled();
-
   auto* const icon_override = delegate_->GetVectorIconOverride();
   if (icon_override)
     return *icon_override;
@@ -102,16 +105,14 @@ const gfx::VectorIcon& ToolbarModelImpl::GetVectorIcon() const {
   switch (GetSecurityLevel(false)) {
     case security_state::NONE:
     case security_state::HTTP_SHOW_WARNING:
-      return is_touch_ui ? toolbar::kHttp20Icon : toolbar::kHttpIcon;
+      return toolbar::kHttpIcon;
     case security_state::EV_SECURE:
     case security_state::SECURE:
-      return is_touch_ui ? toolbar::kHttpsValid20Icon
-                         : toolbar::kHttpsValidIcon;
+      return toolbar::kHttpsValidIcon;
     case security_state::SECURE_WITH_POLICY_INSTALLED_CERT:
       return vector_icons::kBusinessIcon;
     case security_state::DANGEROUS:
-      return is_touch_ui ? toolbar::kHttpsInvalid20Icon
-                         : toolbar::kHttpsInvalidIcon;
+      return toolbar::kHttpsInvalidIcon;
     case security_state::SECURITY_LEVEL_COUNT:
       NOTREACHED();
       return toolbar::kHttpIcon;
@@ -131,7 +132,7 @@ base::string16 ToolbarModelImpl::GetEVCertName() const {
 
   // Note: cert is guaranteed non-NULL or the security level would be NONE.
   scoped_refptr<net::X509Certificate> cert = delegate_->GetCertificate();
-  DCHECK(cert.get());
+  DCHECK(cert);
 
   // EV are required to have an organization name and country.
   DCHECK(!cert->subject().organization_names.empty());
@@ -140,6 +141,23 @@ base::string16 ToolbarModelImpl::GetEVCertName() const {
       IDS_SECURE_CONNECTION_EV,
       base::UTF8ToUTF16(cert->subject().organization_names[0]),
       base::UTF8ToUTF16(cert->subject().country_name));
+}
+
+base::string16 ToolbarModelImpl::GetSecureText() const {
+  switch (GetSecurityLevel(false)) {
+    case security_state::HTTP_SHOW_WARNING:
+      return l10n_util::GetStringUTF16(IDS_NOT_SECURE_VERBOSE_STATE);
+    case security_state::EV_SECURE:
+      return GetEVCertName();
+    case security_state::SECURE:
+      return l10n_util::GetStringUTF16(IDS_SECURE_VERBOSE_STATE);
+    case security_state::DANGEROUS:
+      return l10n_util::GetStringUTF16(delegate_->FailsMalwareCheck()
+                                           ? IDS_DANGEROUS_VERBOSE_STATE
+                                           : IDS_NOT_SECURE_VERBOSE_STATE);
+    default:
+      return base::string16();
+  }
 }
 
 base::string16 ToolbarModelImpl::GetSecureVerboseText() const {
@@ -153,34 +171,32 @@ base::string16 ToolbarModelImpl::GetSecureVerboseText() const {
                 toolbar::features::kSimplifyHttpsIndicator,
                 toolbar::features::kSimplifyHttpsIndicatorParameterName)
           : std::string();
-  switch (GetSecurityLevel(false)) {
-    case security_state::HTTP_SHOW_WARNING:
-      return l10n_util::GetStringUTF16(IDS_NOT_SECURE_VERBOSE_STATE);
-    case security_state::EV_SECURE:
-      if (parameter ==
-          toolbar::features::kSimplifyHttpsIndicatorParameterEvToSecure) {
-        return l10n_util::GetStringUTF16(IDS_SECURE_VERBOSE_STATE);
-      }
-      if (parameter ==
-          toolbar::features::kSimplifyHttpsIndicatorParameterBothToLock) {
-        return base::string16();
-      }
-      return GetEVCertName();
-    case security_state::SECURE:
-      if (parameter ==
-              toolbar::features::kSimplifyHttpsIndicatorParameterSecureToLock ||
-          parameter ==
-              toolbar::features::kSimplifyHttpsIndicatorParameterBothToLock) {
-        return base::string16();
-      }
+
+  auto security_level = GetSecurityLevel(false);
+  if (security_level == security_state::EV_SECURE) {
+    if (parameter ==
+        toolbar::features::kSimplifyHttpsIndicatorParameterEvToSecure) {
       return l10n_util::GetStringUTF16(IDS_SECURE_VERBOSE_STATE);
-    case security_state::DANGEROUS:
-      return l10n_util::GetStringUTF16(delegate_->FailsMalwareCheck()
-                                           ? IDS_DANGEROUS_VERBOSE_STATE
-                                           : IDS_NOT_SECURE_VERBOSE_STATE);
-    default:
+    }
+    if (parameter ==
+        toolbar::features::kSimplifyHttpsIndicatorParameterBothToLock) {
       return base::string16();
+    }
   }
+  if (security_level == security_state::SECURE) {
+    if (parameter !=
+        toolbar::features::kSimplifyHttpsIndicatorParameterKeepSecureChip) {
+      return base::string16();
+    }
+  }
+  return GetSecureText();
+}
+
+base::string16 ToolbarModelImpl::GetSecureAccessibilityText() const {
+  if (IsOfflinePage())
+    return l10n_util::GetStringUTF16(IDS_OFFLINE_VERBOSE_STATE);
+
+  return GetSecureText();
 }
 
 bool ToolbarModelImpl::ShouldDisplayURL() const {

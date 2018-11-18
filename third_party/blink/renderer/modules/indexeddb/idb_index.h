@@ -26,9 +26,9 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_INDEXEDDB_IDB_INDEX_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_INDEXEDDB_IDB_INDEX_H_
 
+#include "third_party/blink/public/common/indexeddb/web_idb_types.h"
 #include "third_party/blink/public/platform/modules/indexeddb/web_idb_cursor.h"
 #include "third_party/blink/public/platform/modules/indexeddb/web_idb_database.h"
-#include "third_party/blink/public/platform/modules/indexeddb/web_idb_types.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_cursor.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_key_path.h"
 #include "third_party/blink/renderer/modules/indexeddb/idb_key_range.h"
@@ -52,8 +52,8 @@ class IDBIndex final : public ScriptWrappable {
                           IDBTransaction* transaction) {
     return new IDBIndex(std::move(metadata), object_store, transaction);
   }
-  ~IDBIndex();
-  void Trace(blink::Visitor*);
+  ~IDBIndex() override;
+  void Trace(blink::Visitor*) override;
 
   // Implement the IDL
   const String& name() const { return Metadata().name; }

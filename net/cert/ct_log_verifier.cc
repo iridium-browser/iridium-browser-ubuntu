@@ -59,19 +59,18 @@ const EVP_MD* GetEvpAlg(ct::DigitallySigned::HashAlgorithm alg) {
 // static
 scoped_refptr<const CTLogVerifier> CTLogVerifier::Create(
     const base::StringPiece& public_key,
-    const base::StringPiece& description,
-    const base::StringPiece& dns_domain) {
+    std::string description,
+    std::string dns_domain) {
   scoped_refptr<CTLogVerifier> result(
-      new CTLogVerifier(description, dns_domain));
+      new CTLogVerifier(std::move(description), std::move(dns_domain)));
   if (!result->Init(public_key))
     return nullptr;
   return result;
 }
 
-CTLogVerifier::CTLogVerifier(const base::StringPiece& description,
-                             const base::StringPiece& dns_domain)
-    : description_(description.as_string()),
-      dns_domain_(dns_domain.as_string()),
+CTLogVerifier::CTLogVerifier(std::string description, std::string dns_domain)
+    : description_(std::move(description)),
+      dns_domain_(std::move(dns_domain)),
       hash_algorithm_(ct::DigitallySigned::HASH_ALGO_NONE),
       signature_algorithm_(ct::DigitallySigned::SIG_ALGO_ANONYMOUS),
       public_key_(NULL) {
@@ -178,7 +177,7 @@ bool CTLogVerifier::VerifyConsistencyProof(
   // 1. If "first" is an exact power of 2, then prepend "first_hash" to the
   // "consistency_path" array.
   base::StringPiece first_proof_node = old_tree_hash;
-  std::vector<std::string>::const_iterator iter = proof.nodes.begin();
+  auto iter = proof.nodes.begin();
   if (!IsPowerOfTwo(proof.first_tree_size)) {
     if (iter == proof.nodes.end())
       return false;

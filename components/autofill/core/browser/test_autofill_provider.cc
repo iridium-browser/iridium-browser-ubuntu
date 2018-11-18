@@ -11,7 +11,8 @@ void TestAutofillProvider::OnQueryFormFieldAutofill(
     int32_t id,
     const FormData& form,
     const FormFieldData& field,
-    const gfx::RectF& bounding_box) {}
+    const gfx::RectF& bounding_box,
+    bool autoselect_first_suggestion) {}
 
 void TestAutofillProvider::OnTextFieldDidChange(
     AutofillHandlerProxy* handler,
@@ -31,14 +32,6 @@ void TestAutofillProvider::OnSelectControlDidChange(
     const FormData& form,
     const FormFieldData& field,
     const gfx::RectF& bounding_box) {}
-
-bool TestAutofillProvider::OnFormSubmitted(AutofillHandlerProxy* handler,
-                                           const FormData& form,
-                                           bool known_success,
-                                           SubmissionSource source,
-                                           base::TimeTicks timestamp) {
-  return false;
-}
 
 void TestAutofillProvider::OnFocusNoLongerOnForm(
     AutofillHandlerProxy* handler) {}

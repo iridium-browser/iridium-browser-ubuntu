@@ -151,6 +151,7 @@ CompositorAnimations::CheckCanStartEffectOnCompositor(
     const Element& target_element,
     const Animation* animation_to_add,
     const EffectModel& effect,
+    const base::Optional<CompositorElementIdSet>& composited_element_ids,
     double animation_playback_rate) {
   const KeyframeEffectModelBase& keyframe_effect =
       ToKeyframeEffectModelBase(effect);
@@ -160,6 +161,16 @@ CompositorAnimations::CheckCanStartEffectOnCompositor(
     return FailureCode::Actionable("Animation does not affect any properties");
   }
 
+  if (composited_element_ids) {
+    // If we are going to check that we can animate these below, we need
+    // to have the UniqueID to compute the target ID.  Let's check it
+    // once in common in advance.
+    if (!target_element.GetLayoutObject() ||
+        !target_element.GetLayoutObject()->UniqueId()) {
+      return FailureCode::NonActionable("Target element has no layout");
+    }
+  }
+
   unsigned transform_property_count = 0;
   for (const auto& property : properties) {
     if (!property.IsCSSProperty()) {
@@ -167,6 +178,7 @@ CompositorAnimations::CheckCanStartEffectOnCompositor(
     }
 
     if (IsTransformRelatedCSSProperty(property)) {
+      // We use this later in computing element IDs too.
       if (target_element.GetLayoutObject() &&
           !target_element.GetLayoutObject()->IsTransformApplicable()) {
         return FailureCode::Actionable(
@@ -192,6 +204,8 @@ CompositorAnimations::CheckCanStartEffectOnCompositor(
             "Accelerated keyframe value could not be computed");
       }
 
+      CompositorElementIdNamespace property_namespace =
+          CompositorElementIdNamespace::kPrimary;
       // FIXME: Determine candidacy based on the CSSValue instead of a snapshot
       // AnimatableValue.
       switch (property.GetCSSProperty().PropertyID()) {
@@ -218,6 +232,17 @@ CompositorAnimations::CheckCanStartEffectOnCompositor(
             return FailureCode::Actionable(
                 "Filter-related property may affect surrounding pixels");
           }
+          property_namespace = CompositorElementIdNamespace::kEffectFilter;
+          break;
+        }
+        case CSSPropertyVariable: {
+          DCHECK(RuntimeEnabledFeatures::OffMainThreadCSSPaintEnabled());
+          if (!keyframe->GetAnimatableValue()->IsDouble()) {
+            // TODO(kevers): Extend support to other custom property types.
+            return FailureCode::Actionable(
+                "Accelerated animation cannot be applied to a custom property "
+                "that is not numeric-valued");
+          }
           break;
         }
         default:
@@ -230,6 +255,17 @@ CompositorAnimations::CheckCanStartEffectOnCompositor(
             builder.Append(property.GetCSSProperty().GetPropertyName());
           }
           return FailureCode::Actionable(builder.ToString());
+      }
+      if (composited_element_ids) {
+        CompositorElementId target_element_id =
+            CompositorElementIdFromUniqueObjectId(
+                target_element.GetLayoutObject()->UniqueId(),
+                property_namespace);
+        DCHECK(target_element_id);
+        if (!composited_element_ids->Contains(target_element_id)) {
+          return FailureCode::NonActionable(
+              "Target element does not have its own compositing layer");
+        }
       }
     }
   }
@@ -255,24 +291,6 @@ CompositorAnimations::CheckCanStartEffectOnCompositor(
         "animations");
   }
 
-  if (RuntimeEnabledFeatures::
-          TurnOff2DAndOpacityCompositorAnimationsEnabled()) {
-    LayoutObject* layout_object = target_element.GetLayoutObject();
-    if (layout_object && layout_object->PaintingLayer()) {
-      CompositingReasons compositing_reasons =
-          layout_object->PaintingLayer()->GetCompositingReasons();
-      bool has_other_compositing_reasons =
-          compositing_reasons != CompositingReason::kNone;
-      // If we are already compositing the element for other reasons, then not
-      // starting the animation on the compositor will not save memory and will
-      // have worse performance.
-      if (!has_other_compositing_reasons) {
-        return FailureCode::AcceleratableAnimNotAccelerated(
-            "Acceleratable animation not accelerated due to an experiment");
-      }
-    }
-  }
-
   return FailureCode::None();
 }
 
@@ -292,6 +310,7 @@ CompositorAnimations::CheckCanStartElementOnCompositor(
     // the DCHECK below.
     // DCHECK(document().lifecycle().state() >=
     // DocumentLifecycle::PrePaintClean);
+    DCHECK(target_element.GetLayoutObject());
     if (const auto* paint_properties = target_element.GetLayoutObject()
                                            ->FirstFragment()
                                            .PaintProperties()) {
@@ -327,10 +346,11 @@ CompositorAnimations::CheckCanStartAnimationOnCompositor(
     const Element& target_element,
     const Animation* animation_to_add,
     const EffectModel& effect,
+    const base::Optional<CompositorElementIdSet>& composited_element_ids,
     double animation_playback_rate) {
-  FailureCode code =
-      CheckCanStartEffectOnCompositor(timing, target_element, animation_to_add,
-                                      effect, animation_playback_rate);
+  FailureCode code = CheckCanStartEffectOnCompositor(
+      timing, target_element, animation_to_add, effect, composited_element_ids,
+      animation_playback_rate);
   if (!code.Ok()) {
     return code;
   }
@@ -379,17 +399,20 @@ void CompositorAnimations::CancelIncompatibleAnimationsOnCompositor(
 void CompositorAnimations::StartAnimationOnCompositor(
     const Element& element,
     int group,
-    WTF::Optional<double> start_time,
+    base::Optional<double> start_time,
     double time_offset,
     const Timing& timing,
     const Animation* animation,
     CompositorAnimation& compositor_animation,
     const EffectModel& effect,
-    Vector<int>& started_animation_ids,
+    Vector<int>& started_keyframe_model_ids,
     double animation_playback_rate) {
-  DCHECK(started_animation_ids.IsEmpty());
-  DCHECK(CheckCanStartAnimationOnCompositor(timing, element, animation, effect,
-                                            animation_playback_rate)
+  DCHECK(started_keyframe_model_ids.IsEmpty());
+  // TODO(petermayo): Find and pass the set of valid compositor elements before
+  // BlinkGenPropertyTrees is always on.
+  DCHECK(CheckCanStartAnimationOnCompositor(
+             timing, element, animation, effect,
+             base::Optional<CompositorElementIdSet>(), animation_playback_rate)
              .Ok());
 
   const KeyframeEffectModelBase& keyframe_effect =
@@ -403,14 +426,14 @@ void CompositorAnimations::StartAnimationOnCompositor(
   for (auto& compositor_keyframe_model : keyframe_models) {
     int id = compositor_keyframe_model->Id();
     compositor_animation.AddKeyframeModel(std::move(compositor_keyframe_model));
-    started_animation_ids.push_back(id);
+    started_keyframe_model_ids.push_back(id);
   }
-  DCHECK(!started_animation_ids.IsEmpty());
+  DCHECK(!started_keyframe_model_ids.IsEmpty());
 }
 
 void CompositorAnimations::CancelAnimationOnCompositor(
     const Element& element,
-    const Animation& animation,
+    CompositorAnimation* compositor_animation,
     int id) {
   if (!CheckCanStartElementOnCompositor(element).Ok()) {
     // When an element is being detached, we cancel any associated
@@ -420,8 +443,6 @@ void CompositorAnimations::CancelAnimationOnCompositor(
     // compositing update.
     return;
   }
-  CompositorAnimation* compositor_animation =
-      animation.GetCompositorAnimation();
   if (compositor_animation)
     compositor_animation->RemoveKeyframeModel(id);
 }
@@ -464,9 +485,7 @@ void CompositorAnimations::AttachCompositedLayers(
         !layer->GetCompositedLayerMapping()->MainGraphicsLayer())
       return;
 
-    if (!layer->GetCompositedLayerMapping()
-             ->MainGraphicsLayer()
-             ->PlatformLayer())
+    if (!layer->GetCompositedLayerMapping()->MainGraphicsLayer()->CcLayer())
       return;
   }
 
@@ -486,24 +505,24 @@ bool CompositorAnimations::ConvertTimingForCompositor(
   if (timing.end_delay != 0)
     return false;
 
-  if (std::isnan(timing.iteration_duration) || !timing.iteration_count ||
-      !timing.iteration_duration)
+  if (!timing.iteration_duration || !timing.iteration_count ||
+      timing.iteration_duration->is_zero())
     return false;
 
   out.adjusted_iteration_count =
       std::isfinite(timing.iteration_count) ? timing.iteration_count : -1;
-  out.scaled_duration = timing.iteration_duration;
+  out.scaled_duration = timing.iteration_duration.value();
   out.direction = timing.direction;
   // Compositor's time offset is positive for seeking into the animation.
   out.scaled_time_offset =
       -timing.start_delay / animation_playback_rate + time_offset;
-  out.playback_rate = timing.playback_rate * animation_playback_rate;
+  out.playback_rate = animation_playback_rate;
   out.fill_mode = timing.fill_mode == Timing::FillMode::AUTO
                       ? Timing::FillMode::NONE
                       : timing.fill_mode;
   out.iteration_start = timing.iteration_start;
 
-  DCHECK_GT(out.scaled_duration, 0);
+  DCHECK_GT(out.scaled_duration, AnimationTimeDelta());
   DCHECK(std::isfinite(out.scaled_time_offset));
   DCHECK(out.adjusted_iteration_count > 0 ||
          out.adjusted_iteration_count == -1);
@@ -554,7 +573,7 @@ void AddKeyframeToCurve(CompositorTransformAnimationCurve& curve,
 template <typename PlatformAnimationCurveType>
 void AddKeyframesToCurve(PlatformAnimationCurveType& curve,
                          const PropertySpecificKeyframeVector& keyframes) {
-  auto* last_keyframe = keyframes.back().get();
+  Keyframe::PropertySpecificKeyframe* last_keyframe = keyframes.back();
   for (const auto& keyframe : keyframes) {
     const TimingFunction* keyframe_timing_function = nullptr;
     // Ignore timing function of last frame.
@@ -564,7 +583,7 @@ void AddKeyframesToCurve(PlatformAnimationCurveType& curve,
       keyframe_timing_function = &keyframe->Easing();
 
     const AnimatableValue* value = keyframe->GetAnimatableValue();
-    AddKeyframeToCurve(curve, keyframe.get(), value, *keyframe_timing_function);
+    AddKeyframeToCurve(curve, keyframe, value, *keyframe_timing_function);
   }
 }
 
@@ -573,7 +592,7 @@ void AddKeyframesToCurve(PlatformAnimationCurveType& curve,
 void CompositorAnimations::GetAnimationOnCompositor(
     const Timing& timing,
     int group,
-    WTF::Optional<double> start_time,
+    base::Optional<double> start_time,
     double time_offset,
     const KeyframeEffectModelBase& effect,
     Vector<std::unique_ptr<CompositorKeyframeModel>>& keyframe_models,
@@ -591,7 +610,7 @@ void CompositorAnimations::GetAnimationOnCompositor(
     // the keyframe offset, so use a scale of 1.0. This is connected to
     // the known issue of how the Web Animations spec handles infinite
     // durations. See https://github.com/w3c/web-animations/issues/142
-    double scale = compositor_timing.scaled_duration;
+    double scale = compositor_timing.scaled_duration.InSecondsF();
     if (!std::isfinite(scale))
       scale = 1.0;
     const PropertySpecificKeyframeVector& values =
@@ -633,6 +652,18 @@ void CompositorAnimations::GetAnimationOnCompositor(
         transform_curve->SetTimingFunction(*timing.timing_function);
         transform_curve->SetScaledDuration(scale);
         curve = std::move(transform_curve);
+        break;
+      }
+      case CSSPropertyVariable: {
+        DCHECK(RuntimeEnabledFeatures::OffMainThreadCSSPaintEnabled());
+        target_property = CompositorTargetProperty::CSS_CUSTOM_PROPERTY;
+        // TODO(kevers): Extend support to non-float types.
+        std::unique_ptr<CompositorFloatAnimationCurve> float_curve =
+            CompositorFloatAnimationCurve::Create();
+        AddKeyframesToCurve(*float_curve, values);
+        float_curve->SetTimingFunction(*timing.timing_function);
+        float_curve->SetScaledDuration(scale);
+        curve = std::move(float_curve);
         break;
       }
       default:

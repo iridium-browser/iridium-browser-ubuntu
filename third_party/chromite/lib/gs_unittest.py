@@ -16,7 +16,6 @@ import string
 
 from chromite.lib import constants
 from chromite.lib import cros_build_lib
-from chromite.lib import cros_build_lib_unittest
 from chromite.lib import cros_test_lib
 from chromite.lib import gs
 from chromite.lib import osutils
@@ -77,7 +76,7 @@ PreconditionException: 412 Precondition Failed"""
     result = self._results['DoCommand'].LookupResult(
         (gsutil_cmd,), hook_args=(inst, gsutil_cmd), hook_kwargs=kwargs)
 
-    rc_mock = cros_build_lib_unittest.RunCommandMock()
+    rc_mock = cros_test_lib.RunCommandMock()
     rc_mock.AddCmdResult(
         partial_mock.ListRegex('gsutil'), result.returncode, result.output,
         result.error)
@@ -115,6 +114,13 @@ class CanonicalizeURLTest(cros_test_lib.TestCase):
     self._checkit(
         'https://storage.cloud.google.com/releases/some/file/t.gz',
         'gs://releases/some/file/t.gz')
+    self._checkit(
+        'https://pantheon.corp.google.com/storage/browser/releases/some/'
+        'file/t.gz',
+        'gs://releases/some/file/t.gz')
+    self._checkit(
+        'https://stainless.corp.google.com/browse/releases/some/file/t.gz',
+        'gs://releases/some/file/t.gz')
 
   def testDuplicateBase(self):
     """Test multiple prefixes in a single URL."""
@@ -126,7 +132,7 @@ class CanonicalizeURLTest(cros_test_lib.TestCase):
 
 
 class GsUrlToHttpTest(cros_test_lib.TestCase):
-  """Tests for the CanonicalizeURL function."""
+  """Tests for the GsUrlToHttp function."""
 
   def setUp(self):
     self.testUrls = [
@@ -152,12 +158,12 @@ class GsUrlToHttpTest(cros_test_lib.TestCase):
       self.assertEqual(gs.GsUrlToHttp(gs_url, directory=True), http_url)
 
   def testPrivateUrls(self):
-    """Test public https URLs."""
+    """Test private https URLs."""
     expected = [
         'https://storage.cloud.google.com/releases',
-        'https://pantheon.corp.google.com/storage/browser/releases/',
+        'https://stainless.corp.google.com/browse/releases/',
         'https://storage.cloud.google.com/releases/path',
-        'https://pantheon.corp.google.com/storage/browser/releases/path/',
+        'https://stainless.corp.google.com/browse/releases/path/',
         'https://storage.cloud.google.com/releases/path/file',
     ]
 
@@ -165,13 +171,13 @@ class GsUrlToHttpTest(cros_test_lib.TestCase):
       self.assertEqual(gs.GsUrlToHttp(gs_url, public=False), http_url)
 
   def testPrivateDirectoryUrls(self):
-    """Test public https URLs."""
+    """Test private https directory URLs."""
     expected = [
-        'https://pantheon.corp.google.com/storage/browser/releases',
-        'https://pantheon.corp.google.com/storage/browser/releases/',
-        'https://pantheon.corp.google.com/storage/browser/releases/path',
-        'https://pantheon.corp.google.com/storage/browser/releases/path/',
-        'https://pantheon.corp.google.com/storage/browser/releases/path/file',
+        'https://stainless.corp.google.com/browse/releases',
+        'https://stainless.corp.google.com/browse/releases/',
+        'https://stainless.corp.google.com/browse/releases/path',
+        'https://stainless.corp.google.com/browse/releases/path/',
+        'https://stainless.corp.google.com/browse/releases/path/file',
     ]
 
     for gs_url, http_url in zip(self.testUrls, expected):
@@ -954,7 +960,7 @@ class GSRetryFilterTest(cros_test_lib.TestCase):
     cmd = ['gsutil', 'ls', self.REMOTE_PATH]
     e = self._getException(cmd, self.ctx.RESUMABLE_DOWNLOAD_ERROR)
 
-    with mock.MagicMock() as self.ctx.GetTrackerFilenames:
+    with mock.patch.object(gs.GSContext, 'GetTrackerFilenames'):
       self.ctx._RetryFilter(e)
       self.assertFalse(self.ctx.GetTrackerFilenames.called)
 
@@ -963,7 +969,7 @@ class GSRetryFilterTest(cros_test_lib.TestCase):
     cmd = ['gsutil', 'cp', self.REMOTE_PATH, self.LOCAL_PATH]
     e = self._getException(cmd, 'One or more URLs matched no objects')
 
-    with mock.MagicMock() as self.ctx.GetTrackerFilenames:
+    with mock.patch.object(gs.GSContext, 'GetTrackerFilenames'):
       self.assertRaises(gs.GSNoSuchKey, self.ctx._RetryFilter, e)
       self.assertFalse(self.ctx.GetTrackerFilenames.called)
 
@@ -1471,7 +1477,7 @@ class CatTest(cros_test_lib.TempDirTestCase):
     filename = os.path.join(self.tempdir, 'myfile')
     content = 'foo'
     osutils.WriteFile(filename, content)
-    os.chmod(filename, 000)
+    os.chmod(filename, 0o000)
     with self.assertRaises(gs.GSContextException):
       ctx.Cat(filename)
 
@@ -1495,8 +1501,27 @@ class CatTest(cros_test_lib.TempDirTestCase):
       with self.assertRaises(gs.GSNoSuchKey):
         ctx.Cat(tempuri)
 
+  @cros_test_lib.NetworkTest()
+  def testStreamingRemoteFile(self):
+    """Test streaming a remote file."""
+    ctx = gs.GSContext()
+    with gs.TemporaryURL('chromite.cat') as url:
+      # The default chunksize is 0x100000 (1MB).
+      first_chunk = 'a' * 0x100000
+      second_chunk = 'aaaaaaaaabbbbbbccc'
+      ctx.CreateWithContents(url, first_chunk + second_chunk)
 
-class DryRunTest(cros_build_lib_unittest.RunCommandTestCase):
+      result = ctx.StreamingCat(url)
+      # Get the 1st chunk.
+      self.assertEquals(next(result), first_chunk)
+      # Then the second chunk.
+      self.assertEquals(next(result), second_chunk)
+      # At last, no more.
+      with self.assertRaises(StopIteration):
+        next(result)
+
+
+class DryRunTest(cros_test_lib.RunCommandTestCase):
   """Verify dry_run works for all of GSContext."""
 
   def setUp(self):
@@ -1575,6 +1600,13 @@ class DryRunTest(cros_build_lib_unittest.RunCommandTestCase):
     result = self.ctx.Stat('gs://foo/bar')
     self.assertEqual(result.content_length, 0)
     self.assertNotEqual(result.creation_time, None)
+
+  def testStreamingCat(self):
+    """Test StreamingCat in dry_run mode."""
+    result = self.ctx.StreamingCat('gs://foo/bar')
+    self.assertEqual(next(result), '')
+    with self.assertRaises(StopIteration):
+      next(result)
 
   def testVersion(self):
     """Test gsutil_version in dry_run mode."""

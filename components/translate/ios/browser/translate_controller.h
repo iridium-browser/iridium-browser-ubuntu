@@ -5,24 +5,28 @@
 #ifndef COMPONENTS_TRANSLATE_IOS_BROWSER_TRANSLATE_CONTROLLER_H_
 #define COMPONENTS_TRANSLATE_IOS_BROWSER_TRANSLATE_CONTROLLER_H_
 
+#include <memory>
 #include <string>
 
 #include "base/gtest_prod_util.h"
 #include "base/mac/scoped_nsobject.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "components/translate/core/common/translate_errors.h"
 #include "ios/web/public/web_state/web_state_observer.h"
+#include "services/network/public/cpp/simple_url_loader.h"
 
 @class JsTranslateManager;
 class GURL;
 
 namespace base {
 class DictionaryValue;
-}
+}  // namespace base
 
 namespace web {
+class NavigationContext;
 class WebState;
-}
+}  // namespace web
 
 namespace translate {
 
@@ -34,13 +38,14 @@ class TranslateController : public web::WebStateObserver {
   class Observer {
    public:
     // Called when the translate script is ready.
-    // In case of timeout, |success| is false.
-    virtual void OnTranslateScriptReady(bool success,
+    // |error_type| Indicates error code.
+    virtual void OnTranslateScriptReady(TranslateErrors::Type error_type,
                                         double load_time,
                                         double ready_time) = 0;
 
     // Called when the translation is complete.
-    virtual void OnTranslateComplete(bool success,
+    // |error_type| Indicates error code.
+    virtual void OnTranslateComplete(TranslateErrors::Type error_type,
                                      const std::string& original_language,
                                      double translation_time) = 0;
   };
@@ -62,10 +67,6 @@ class TranslateController : public web::WebStateObserver {
   void StartTranslation(const std::string& source_language,
                         const std::string& target_language);
 
-  // Checks the translation status and calls the observer when it is done.
-  // This method must be called after StartTranslation().
-  void CheckTranslateStatus();
-
   // Changes the JsTranslateManager used by this TranslateController.
   // Only used for testing.
   void SetJsTranslateManagerForTesting(JsTranslateManager* manager);
@@ -74,27 +75,43 @@ class TranslateController : public web::WebStateObserver {
   FRIEND_TEST_ALL_PREFIXES(TranslateControllerTest,
                            OnJavascriptCommandReceived);
   FRIEND_TEST_ALL_PREFIXES(TranslateControllerTest,
+                           OnIFrameJavascriptCommandReceived);
+  FRIEND_TEST_ALL_PREFIXES(TranslateControllerTest,
                            OnTranslateScriptReadyTimeoutCalled);
   FRIEND_TEST_ALL_PREFIXES(TranslateControllerTest,
                            OnTranslateScriptReadyCalled);
   FRIEND_TEST_ALL_PREFIXES(TranslateControllerTest, TranslationSuccess);
   FRIEND_TEST_ALL_PREFIXES(TranslateControllerTest, TranslationFailure);
+  FRIEND_TEST_ALL_PREFIXES(TranslateControllerTest, OnTranslateLoadJavascript);
 
   // Called when a JavaScript command is received.
   bool OnJavascriptCommandReceived(const base::DictionaryValue& command,
                                    const GURL& url,
-                                   bool interacting);
+                                   bool interacting,
+                                   bool is_main_frame,
+                                   web::WebFrame* sender_frame);
   // Methods to handle specific JavaScript commands.
   // Return false if the command is invalid.
   bool OnTranslateReady(const base::DictionaryValue& command);
   bool OnTranslateComplete(const base::DictionaryValue& command);
+  bool OnTranslateLoadJavaScript(const base::DictionaryValue& command);
+
+  // Use to fetch additional scripts needed for translate.
+  void FetchScript(const std::string& url);
+  // The callback when the script is fetched or a server error occurred.
+  void OnScriptFetchComplete(std::unique_ptr<std::string> response_body);
 
   // web::WebStateObserver implementation:
   void WebStateDestroyed(web::WebState* web_state) override;
+  void DidStartNavigation(web::WebState* web_state,
+                          web::NavigationContext* navigation_context) override;
 
   // The WebState this instance is observing. Will be null after
   // WebStateDestroyed has been called.
   web::WebState* web_state_ = nullptr;
+
+  // Used to fetch additional scripts needed for translate.
+  std::unique_ptr<network::SimpleURLLoader> script_fetcher_;
 
   Observer* observer_;
   base::scoped_nsobject<JsTranslateManager> js_manager_;

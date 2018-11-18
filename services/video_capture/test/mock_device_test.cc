@@ -14,14 +14,6 @@ using testing::_;
 using testing::Invoke;
 using testing::InvokeWithoutArgs;
 
-namespace {
-
-std::unique_ptr<media::VideoCaptureJpegDecoder> CreateJpegDecoder() {
-  return nullptr;
-}
-
-}  // anonymous namespace
-
 namespace video_capture {
 
 MockDeviceTest::MockDeviceTest() : ref_factory_(base::DoNothing()) {}
@@ -30,7 +22,7 @@ MockDeviceTest::~MockDeviceTest() = default;
 
 void MockDeviceTest::SetUp() {
   message_loop_ = std::make_unique<base::MessageLoop>();
-  auto mock_device_factory = std::make_unique<MockDeviceFactory>();
+  auto mock_device_factory = std::make_unique<media::MockDeviceFactory>();
   // We keep a pointer to the MockDeviceFactory as a member so that we can
   // invoke its AddMockDevice(). Ownership of the MockDeviceFactory is moved
   // to the DeviceFactoryMediaToMojoAdapter.
@@ -39,8 +31,9 @@ void MockDeviceTest::SetUp() {
       std::move(mock_device_factory));
   mock_device_factory_adapter_ =
       std::make_unique<DeviceFactoryMediaToMojoAdapter>(
-          ref_factory_.CreateRef(), std::move(video_capture_system),
-          base::Bind(CreateJpegDecoder));
+          std::move(video_capture_system), base::DoNothing(),
+          base::ThreadTaskRunnerHandle::Get());
+  mock_device_factory_adapter_->SetServiceRef(ref_factory_.CreateRef());
 
   mock_factory_binding_ = std::make_unique<mojo::Binding<mojom::DeviceFactory>>(
       mock_device_factory_adapter_.get(), mojo::MakeRequest(&factory_));

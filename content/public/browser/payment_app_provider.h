@@ -13,7 +13,7 @@
 #include "base/callback_forward.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/stored_payment_app.h"
-#include "third_party/blink/public/platform/modules/payments/payment_app.mojom.h"
+#include "third_party/blink/public/mojom/payments/payment_app.mojom.h"
 
 class SkBitmap;
 
@@ -74,6 +74,17 @@ class CONTENT_EXPORT PaymentAppProvider {
   // calling this interface.
   virtual void SetOpenedWindow(WebContents* web_contents) = 0;
   virtual void CloseOpenedWindow(BrowserContext* browser_context) = 0;
+
+  // Notify the opened payment handler window is closing or closed by user so as
+  // to abort payment request.
+  virtual void OnClosingOpenedWindow(BrowserContext* browser_context) = 0;
+
+  // Check whether given |sw_js_url| from |manifest_url| is allowed to register
+  // with |sw_scope|.
+  virtual bool IsValidInstallablePaymentApp(const GURL& manifest_url,
+                                            const GURL& sw_js_url,
+                                            const GURL& sw_scope,
+                                            std::string* error_message) = 0;
 
  protected:
   virtual ~PaymentAppProvider() {}

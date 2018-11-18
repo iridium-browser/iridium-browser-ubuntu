@@ -4,6 +4,7 @@
 
 import("//build/config/ui.gni")
 import("//chromeos/assistant/assistant.gni")
+import("//chromeos/services/ime/public/features.gni")
 import("//services/catalog/public/tools/catalog.gni")
 import("//services/service_manager/public/tools/test/service_test.gni")
 import("//testing/test.gni")
@@ -21,7 +22,10 @@ source_set("unit_tests") {
   testonly = true
   deps = [
     "//chromeos/services/device_sync:unit_tests",
+    "//chromeos/services/ime:unit_tests",
+    "//chromeos/services/machine_learning/public/cpp:unit_tests",
     "//chromeos/services/multidevice_setup:unit_tests",
+    "//chromeos/services/secure_channel:unit_tests",
   ]
 }
 
@@ -33,7 +37,9 @@ source_set("unit_tests") {
 # corresponding catalog entries in the "chromeos_services_unittests_catalog"
 # target below.
 service_test("chromeos_services_unittests") {
-  deps = []
+  deps = [
+    "//chromeos/services/ime:services_unittests",
+  ]
 
   if (enable_cros_assistant) {
     deps += [ "//chromeos/services/assistant:tests" ]
@@ -45,7 +51,7 @@ service_test("chromeos_services_unittests") {
 catalog("chromeos_services_unittests_catalog") {
   testonly = true
 
-  catalog_deps = []
+  catalog_deps = [ "//chromeos/services/ime:tests_catalog" ]
 
   if (enable_cros_assistant) {
     catalog_deps += [ "//chromeos/services/assistant:tests_catalog" ]

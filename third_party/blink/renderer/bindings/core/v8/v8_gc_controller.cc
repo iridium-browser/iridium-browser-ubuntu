@@ -33,11 +33,11 @@
 #include <algorithm>
 #include <unordered_map>
 #include <unordered_set>
+
 #include "third_party/blink/public/platform/blame_context.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/bindings/core/v8/active_script_wrappable.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_source_code.h"
-#include "third_party/blink/renderer/bindings/core/v8/v8_abstract_event_listener.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_node.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_script_runner.h"
@@ -45,12 +45,15 @@
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/dom/node.h"
 #include "third_party/blink/renderer/core/html/imports/html_imports_controller.h"
-#include "third_party/blink/renderer/core/inspector/InspectorTraceEvents.h"
+#include "third_party/blink/renderer/core/inspector/inspector_trace_events.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable_marking_visitor.h"
 #include "third_party/blink/renderer/platform/bindings/wrapper_type_info.h"
+#include "third_party/blink/renderer/platform/heap/heap_stats_collector.h"
 #include "third_party/blink/renderer/platform/histogram.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
+#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/partitions.h"
+#include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
 namespace blink {
 
@@ -72,6 +75,14 @@ Node* V8GCController::OpaqueRootForGC(v8::Isolate*, Node* node) {
   return node;
 }
 
+namespace {
+
+bool IsDOMWrapperClassId(uint16_t class_id) {
+  return class_id == WrapperTypeInfo::kNodeClassId ||
+         class_id == WrapperTypeInfo::kObjectClassId ||
+         class_id == WrapperTypeInfo::kCustomWrappableId;
+}
+
 class MinorGCUnmodifiedWrapperVisitor : public v8::PersistentHandleVisitor {
  public:
   explicit MinorGCUnmodifiedWrapperVisitor(v8::Isolate* isolate)
@@ -79,8 +90,11 @@ class MinorGCUnmodifiedWrapperVisitor : public v8::PersistentHandleVisitor {
 
   void VisitPersistentHandle(v8::Persistent<v8::Value>* value,
                              uint16_t class_id) override {
-    if (class_id != WrapperTypeInfo::kNodeClassId &&
-        class_id != WrapperTypeInfo::kObjectClassId) {
+    if (!IsDOMWrapperClassId(class_id))
+      return;
+
+    if (class_id == WrapperTypeInfo::kCustomWrappableId) {
+      v8::Persistent<v8::Object>::Cast(*value).MarkActive();
       return;
     }
 
@@ -122,13 +136,11 @@ class MinorGCUnmodifiedWrapperVisitor : public v8::PersistentHandleVisitor {
   v8::Isolate* isolate_;
 };
 
-static unsigned long long UsedHeapSize(v8::Isolate* isolate) {
+size_t UsedHeapSize(v8::Isolate* isolate) {
   v8::HeapStatistics heap_statistics;
   isolate->GetHeapStatistics(&heap_statistics);
   return heap_statistics.used_heap_size();
 }
-
-namespace {
 
 void VisitWeakHandlesForMinorGC(v8::Isolate* isolate) {
   MinorGCUnmodifiedWrapperVisitor visitor(isolate);
@@ -158,9 +170,6 @@ void V8GCController::GcPrologue(v8::Isolate* isolate,
   v8::HandleScope scope(isolate);
   switch (type) {
     case v8::kGCTypeScavenge:
-      if (ThreadState::Current())
-        ThreadState::Current()->WillStartV8GC(BlinkGC::kV8MinorGC);
-
       TRACE_EVENT_BEGIN1("devtools.timeline,v8", "MinorGC",
                          "usedHeapSizeBefore", UsedHeapSize(isolate));
       VisitWeakHandlesForMinorGC(isolate);
@@ -194,10 +203,59 @@ void V8GCController::GcPrologue(v8::Isolate* isolate,
 namespace {
 
 void UpdateCollectedPhantomHandles(v8::Isolate* isolate) {
-  ThreadHeapStats& heap_stats = ThreadState::Current()->Heap().HeapStats();
-  size_t count = isolate->NumberOfPhantomHandleResetsSinceLastCall();
-  heap_stats.DecreaseWrapperCount(count);
-  heap_stats.IncreaseCollectedWrapperCount(count);
+  ThreadHeapStatsCollector* stats_collector =
+      ThreadState::Current()->Heap().stats_collector();
+  const size_t count = isolate->NumberOfPhantomHandleResetsSinceLastCall();
+  stats_collector->DecreaseWrapperCount(count);
+  stats_collector->IncreaseCollectedWrapperCount(count);
+}
+
+void ScheduleFollowupGCs(ThreadState* thread_state,
+                         v8::GCCallbackFlags flags,
+                         bool is_unified) {
+  DCHECK(!thread_state->IsGCForbidden());
+  // Schedules followup garbage collections. Such garbage collections may be
+  // needed when:
+  // 1. GC is not precise because it has to scan on-stack pointers.
+  // 2. GC needs to reclaim chains persistent handles.
+
+  // v8::kGCCallbackFlagForced is used for testing GCs that need to verify
+  // that objects indeed died.
+  if (flags & v8::kGCCallbackFlagForced) {
+    if (!is_unified) {
+      thread_state->CollectGarbage(
+          BlinkGC::kHeapPointersOnStack, BlinkGC::kAtomicMarking,
+          BlinkGC::kEagerSweeping, BlinkGC::GCReason::kForcedGC);
+    }
+
+    // Forces a precise GC at the end of the current event loop.
+    thread_state->ScheduleFullGC();
+  }
+
+  // In the unified world there is little need to schedule followup garbage
+  // collections as the current GC already computed the whole transitive
+  // closure. We ignore chains of persistent handles here. Cleanup of such
+  // handle chains requires GC loops at the caller side, e.g., see thread
+  // termination.
+  if (is_unified)
+    return;
+
+  if ((flags & v8::kGCCallbackFlagCollectAllAvailableGarbage) ||
+      (flags & v8::kGCCallbackFlagCollectAllExternalMemory)) {
+    // This single GC is not enough. See the above comment.
+    thread_state->CollectGarbage(
+        BlinkGC::kHeapPointersOnStack, BlinkGC::kAtomicMarking,
+        BlinkGC::kEagerSweeping, BlinkGC::GCReason::kForcedGC);
+
+    // The conservative GC might have left floating garbage. Schedule
+    // precise GC to ensure that we collect all available garbage.
+    thread_state->SchedulePreciseGC();
+  }
+
+  // Schedules a precise GC for the next idle time period.
+  if (flags & v8::kGCCallbackScheduleIdleGarbageCollection) {
+    thread_state->ScheduleIdleGC();
+  }
 }
 
 }  // namespace
@@ -211,10 +269,11 @@ void V8GCController::GcEpilogue(v8::Isolate* isolate,
     case v8::kGCTypeScavenge:
       TRACE_EVENT_END1("devtools.timeline,v8", "MinorGC", "usedHeapSizeAfter",
                        UsedHeapSize(isolate));
-      // TODO(haraken): Remove this. See the comment in gcPrologue.
-      if (ThreadState::Current())
+      // Scavenger might have dropped nodes.
+      if (ThreadState::Current()) {
         ThreadState::Current()->ScheduleV8FollowupGCIfNeeded(
             BlinkGC::kV8MinorGC);
+      }
       break;
     case v8::kGCTypeMarkSweepCompact:
       TRACE_EVENT_END1("devtools.timeline,v8", "MajorGC", "usedHeapSizeAfter",
@@ -243,50 +302,9 @@ void V8GCController::GcEpilogue(v8::Isolate* isolate,
 
   ThreadState* current_thread_state = ThreadState::Current();
   if (current_thread_state && !current_thread_state->IsGCForbidden()) {
-    // v8::kGCCallbackFlagForced forces a Blink heap garbage collection
-    // when a garbage collection was forced from V8. This is either used
-    // for tests that force GCs from JavaScript to verify that objects die
-    // when expected.
-    if (flags & v8::kGCCallbackFlagForced) {
-      // This single GC is not enough for two reasons:
-      //   (1) The GC is not precise because the GC scans on-stack pointers
-      //       conservatively.
-      //   (2) One GC is not enough to break a chain of persistent handles. It's
-      //       possible that some heap allocated objects own objects that
-      //       contain persistent handles pointing to other heap allocated
-      //       objects. To break the chain, we need multiple GCs.
-      //
-      // Regarding (1), we force a precise GC at the end of the current event
-      // loop. So if you want to collect all garbage, you need to wait until the
-      // next event loop.  Regarding (2), it would be OK in practice to trigger
-      // only one GC per gcEpilogue, because GCController.collectAll() forces
-      // multiple V8's GC.
-      current_thread_state->CollectGarbage(
-          BlinkGC::kHeapPointersOnStack, BlinkGC::kAtomicMarking,
-          BlinkGC::kEagerSweeping, BlinkGC::kForcedGC);
-
-      // Forces a precise GC at the end of the current event loop.
-      current_thread_state->SetGCState(ThreadState::kFullGCScheduled);
-    }
-
-    // v8::kGCCallbackFlagCollectAllAvailableGarbage is used when V8 handles
-    // low memory notifications.
-    if ((flags & v8::kGCCallbackFlagCollectAllAvailableGarbage) ||
-        (flags & v8::kGCCallbackFlagCollectAllExternalMemory)) {
-      // This single GC is not enough. See the above comment.
-      current_thread_state->CollectGarbage(
-          BlinkGC::kHeapPointersOnStack, BlinkGC::kAtomicMarking,
-          BlinkGC::kEagerSweeping, BlinkGC::kForcedGC);
-
-      // The conservative GC might have left floating garbage. Schedule
-      // precise GC to ensure that we collect all available garbage.
-      current_thread_state->SchedulePreciseGC();
-    }
-
-    // Schedules a precise GC for the next idle time period.
-    if (flags & v8::kGCCallbackScheduleIdleGarbageCollection) {
-      current_thread_state->ScheduleIdleGC();
-    }
+    ScheduleFollowupGCs(
+        ThreadState::Current(), flags,
+        RuntimeEnabledFeatures::HeapUnifiedGarbageCollectionEnabled());
   }
 
   TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"),
@@ -294,116 +312,99 @@ void V8GCController::GcEpilogue(v8::Isolate* isolate,
                        InspectorUpdateCountersEvent::Data());
 }
 
-void V8GCController::CollectGarbage(v8::Isolate* isolate, bool only_minor_gc) {
-  v8::HandleScope handle_scope(isolate);
-  scoped_refptr<ScriptState> script_state = ScriptState::Create(
-      v8::Context::New(isolate),
-      DOMWrapperWorld::Create(isolate,
-                              DOMWrapperWorld::WorldType::kGarbageCollector));
-  ScriptState::Scope scope(script_state.get());
-  StringBuilder builder;
-  builder.Append("if (gc) gc(");
-  builder.Append(only_minor_gc ? "true" : "false");
-  builder.Append(")");
-  V8ScriptRunner::CompileAndRunInternalScript(
-      isolate, script_state.get(),
-      ScriptSourceCode(builder.ToString(), ScriptSourceLocationType::kInternal,
-                       nullptr, KURL(), TextPosition()));
-  script_state->DisposePerContextData();
-}
+void V8GCController::CollectAllGarbageForTesting(
+    v8::Isolate* isolate,
+    v8::EmbedderHeapTracer::EmbedderStackState stack_state) {
+  constexpr unsigned kNumberOfGCs = 5;
 
-void V8GCController::CollectAllGarbageForTesting(v8::Isolate* isolate) {
-  for (unsigned i = 0; i < 5; i++)
+  if (stack_state != v8::EmbedderHeapTracer::EmbedderStackState::kUnknown) {
+    V8PerIsolateData* data = V8PerIsolateData::From(isolate);
+    v8::EmbedderHeapTracer* tracer =
+        RuntimeEnabledFeatures::HeapUnifiedGarbageCollectionEnabled()
+            ? static_cast<v8::EmbedderHeapTracer*>(
+                  data->GetUnifiedHeapController())
+            : static_cast<v8::EmbedderHeapTracer*>(
+                  data->GetScriptWrappableMarkingVisitor());
+    // Passing a stack state is only supported when either wrapper tracing or
+    // unified heap is enabled.
+    CHECK(tracer);
+    for (unsigned i = 0; i < kNumberOfGCs; i++)
+      tracer->GarbageCollectionForTesting(stack_state);
+    return;
+  }
+
+  for (unsigned i = 0; i < kNumberOfGCs; i++)
     isolate->RequestGarbageCollectionForTesting(
         v8::Isolate::kFullGarbageCollection);
 }
 
-class DOMWrapperTracer : public v8::PersistentHandleVisitor {
+namespace {
+
+// Traces all DOM persistent handles using the provided visitor.
+class DOMWrapperTracer final : public v8::PersistentHandleVisitor {
  public:
   explicit DOMWrapperTracer(Visitor* visitor) : visitor_(visitor) {
     DCHECK(visitor_);
   }
 
   void VisitPersistentHandle(v8::Persistent<v8::Value>* value,
-                             uint16_t class_id) override {
-    if (class_id != WrapperTypeInfo::kNodeClassId &&
-        class_id != WrapperTypeInfo::kObjectClassId)
+                             uint16_t class_id) final {
+    if (!IsDOMWrapperClassId(class_id))
       return;
 
-    const v8::Persistent<v8::Object>& wrapper =
-        v8::Persistent<v8::Object>::Cast(*value);
+    WrapperTypeInfo* wrapper_type_info = const_cast<WrapperTypeInfo*>(
+        ToWrapperTypeInfo(v8::Persistent<v8::Object>::Cast(*value)));
 
-    ScriptWrappable* script_wrappable = ToScriptWrappable(wrapper);
-    visitor_->Trace(script_wrappable);
+    // WrapperTypeInfo pointer may have been cleared before termination GCs on
+    // worker threads.
+    if (!wrapper_type_info)
+      return;
+
+    wrapper_type_info->Trace(
+        visitor_, ToUntypedWrappable(v8::Persistent<v8::Object>::Cast(*value)));
   }
 
  private:
-  Visitor* visitor_;
+  Visitor* const visitor_;
 };
+
+// Purges all DOM persistent handles.
+class DOMWrapperPurger final : public v8::PersistentHandleVisitor {
+ public:
+  explicit DOMWrapperPurger(v8::Isolate* isolate)
+      : isolate_(isolate), scope_(isolate) {}
+
+  void VisitPersistentHandle(v8::Persistent<v8::Value>* value,
+                             uint16_t class_id) final {
+    if (!IsDOMWrapperClassId(class_id))
+      return;
+
+    // Clear out wrapper type information, essentially disconnecting the Blink
+    // wrappable from the V8 wrapper. This way, V8 cannot find the C++ object
+    // anymore.
+    int indices[] = {kV8DOMWrapperObjectIndex, kV8DOMWrapperTypeIndex};
+    void* values[] = {nullptr, nullptr};
+    v8::Local<v8::Object> wrapper = v8::Local<v8::Object>::New(
+        isolate_, v8::Persistent<v8::Object>::Cast(*value));
+    wrapper->SetAlignedPointerInInternalFields(base::size(indices), indices,
+                                               values);
+  }
+
+ private:
+  v8::Isolate* isolate_;
+  v8::HandleScope scope_;
+};
+
+}  // namespace
 
 void V8GCController::TraceDOMWrappers(v8::Isolate* isolate, Visitor* visitor) {
   DOMWrapperTracer tracer(visitor);
   isolate->VisitHandlesWithClassIds(&tracer);
 }
 
-class PendingActivityVisitor : public v8::PersistentHandleVisitor {
- public:
-  PendingActivityVisitor(v8::Isolate* isolate,
-                         ExecutionContext* execution_context)
-      : isolate_(isolate),
-        execution_context_(execution_context),
-        pending_activity_found_(false) {}
-
-  void VisitPersistentHandle(v8::Persistent<v8::Value>* value,
-                             uint16_t class_id) override {
-    // If we have already found any wrapper that has a pending activity,
-    // we don't need to check other wrappers.
-    if (pending_activity_found_)
-      return;
-
-    if (class_id != WrapperTypeInfo::kNodeClassId &&
-        class_id != WrapperTypeInfo::kObjectClassId)
-      return;
-
-    v8::Local<v8::Object> wrapper = v8::Local<v8::Object>::New(
-        isolate_, v8::Persistent<v8::Object>::Cast(*value));
-    DCHECK(V8DOMWrapper::HasInternalFieldsSet(wrapper));
-    // The ExecutionContext check is heavy, so it should be done at the last.
-    if (ToWrapperTypeInfo(wrapper)->IsActiveScriptWrappable() &&
-        ToScriptWrappable(wrapper)->HasPendingActivity()) {
-      // See the comment in MajorGCWrapperVisitor::VisitPersistentHandle.
-      ExecutionContext* context =
-          ToExecutionContext(wrapper->CreationContext());
-      if (context == execution_context_ && context &&
-          !context->IsContextDestroyed())
-        pending_activity_found_ = true;
-    }
-  }
-
-  bool PendingActivityFound() const { return pending_activity_found_; }
-
- private:
-  v8::Isolate* isolate_;
-  Persistent<ExecutionContext> execution_context_;
-  bool pending_activity_found_;
-};
-
-bool V8GCController::HasPendingActivity(v8::Isolate* isolate,
-                                        ExecutionContext* execution_context) {
-  // V8GCController::hasPendingActivity is used only when a worker checks if
-  // the worker contains any wrapper that has pending activities.
-  DCHECK(!IsMainThread());
-
-  DEFINE_THREAD_SAFE_STATIC_LOCAL(
-      CustomCountHistogram, scan_pending_activity_histogram,
-      ("Blink.ScanPendingActivityDuration", 1, 1000, 50));
-  double start_time = WTF::CurrentTimeMS();
-  v8::HandleScope scope(isolate);
-  PendingActivityVisitor visitor(isolate, execution_context);
-  ToIsolate(execution_context)->VisitHandlesWithClassIds(&visitor);
-  scan_pending_activity_histogram.Count(
-      static_cast<int>(WTF::CurrentTimeMS() - start_time));
-  return visitor.PendingActivityFound();
+void V8GCController::ClearDOMWrappers(v8::Isolate* isolate) {
+  DOMWrapperPurger purger(isolate);
+  isolate->VisitHandlesWithClassIds(&purger);
 }
 
 }  // namespace blink

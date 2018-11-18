@@ -16,6 +16,7 @@
 #include "cc/input/scroll_state.h"
 #include "cc/input/scrollbar.h"
 #include "cc/input/touch_action.h"
+#include "cc/trees/element_id.h"
 #include "cc/trees/swap_promise_monitor.h"
 
 namespace gfx {
@@ -50,8 +51,10 @@ struct CC_EXPORT InputHandlerScrollResult {
   // property scroll-boundary-behavior.
   OverscrollBehavior overscroll_behavior;
   // The current offset of the currently scrolling node. It is in DIP or
-  // physical pixels depending on the use-zoom-for-dsf flag.
-  gfx::Vector2dF current_offset;
+  // physical pixels depending on the use-zoom-for-dsf flag. If the currently
+  // scrolling node is the viewport, this would be the sum of the scroll offsets
+  // of the inner and outer node, representing the visual scroll offset.
+  gfx::Vector2dF current_visual_offset;
 };
 
 class CC_EXPORT InputHandlerClient {
@@ -60,7 +63,6 @@ class CC_EXPORT InputHandlerClient {
 
   virtual void WillShutdown() = 0;
   virtual void Animate(base::TimeTicks time) = 0;
-  virtual void MainThreadHasStoppedFlinging() = 0;
   virtual void ReconcileElasticOverscrollAndRootScroll() = 0;
   virtual void UpdateRootLayerStateForSynchronousInputHandler(
       const gfx::ScrollOffset& total_scroll_offset,
@@ -111,7 +113,6 @@ class CC_EXPORT InputHandler {
   enum ScrollInputType {
     TOUCHSCREEN,
     WHEEL,
-    NON_BUBBLING_GESTURE
   };
 
   enum class TouchStartOrMoveEventListenerType {
@@ -123,8 +124,7 @@ class CC_EXPORT InputHandler {
   // Binds a client to this handler to receive notifications. Only one client
   // can be bound to an InputHandler. The client must live at least until the
   // handler calls WillShutdown() on the client.
-  virtual void BindToClient(InputHandlerClient* client,
-                            bool wheel_scroll_latching_enabled) = 0;
+  virtual void BindToClient(InputHandlerClient* client) = 0;
 
   // Selects a layer to be scrolled using the |scroll_state| start position.
   // Returns SCROLL_STARTED if the layer at the coordinates can be scrolled,
@@ -163,10 +163,6 @@ class CC_EXPORT InputHandler {
   // ScrollBegin() returned SCROLL_STARTED.
   virtual InputHandlerScrollResult ScrollBy(ScrollState* scroll_state) = 0;
 
-  // Returns SCROLL_STARTED if a layer was actively being scrolled,
-  // SCROLL_IGNORED if not.
-  virtual ScrollStatus FlingScrollBegin() = 0;
-
   virtual void MouseMoveAt(const gfx::Point& mouse_position) = 0;
   virtual void MouseDown() = 0;
   virtual void MouseUp() = 0;
@@ -203,6 +199,11 @@ class CC_EXPORT InputHandler {
   virtual EventListenerProperties GetEventListenerProperties(
       EventListenerClass event_class) const = 0;
 
+  // Returns true if |viewport_point| hits a wheel event handler region that
+  // could block scrolling.
+  virtual bool HasBlockingWheelEventHandlerAt(
+      const gfx::Point& viewport_point) const = 0;
+
   // It returns the type of a touch start or move event listener at
   // |viewport_point|. Whether the page should be given the opportunity to
   // suppress scrolling by consuming touch events that started at
@@ -227,10 +228,11 @@ class CC_EXPORT InputHandler {
   virtual ScrollElasticityHelper* CreateScrollElasticityHelper() = 0;
 
   // Called by the single-threaded UI Compositor to get or set the scroll offset
-  // on the impl side. Retruns false if |layer_id| isn't in the active tree.
-  virtual bool GetScrollOffsetForLayer(int layer_id,
+  // on the impl side. Returns false if |element_id| isn't in the active tree.
+  virtual bool GetScrollOffsetForLayer(ElementId element_id,
                                        gfx::ScrollOffset* offset) = 0;
-  virtual bool ScrollLayerTo(int layer_id, const gfx::ScrollOffset& offset) = 0;
+  virtual bool ScrollLayerTo(ElementId element_id,
+                             const gfx::ScrollOffset& offset) = 0;
 
   virtual bool ScrollingShouldSwitchtoMainThread() = 0;
 

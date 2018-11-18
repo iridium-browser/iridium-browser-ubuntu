@@ -12,6 +12,7 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/metrics/user_metrics.h"
+#include "base/no_destructor.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "build/build_config.h"
@@ -28,6 +29,7 @@
 #include "chrome/browser/ui/extensions/app_launch_params.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
+#include "chrome/browser/ui/signin_view_controller.h"
 #include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui/md_bookmarks/md_bookmarks_ui.h"
@@ -37,7 +39,6 @@
 #include "chrome/common/url_constants.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/browser/bookmark_node.h"
-#include "components/signin/core/browser/signin_header_helper.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/common/constants.h"
@@ -45,12 +46,7 @@
 #include "net/base/url_util.h"
 #include "ui/base/window_open_disposition.h"
 
-#if defined(OS_WIN)
-#include "chrome/browser/win/enumerate_modules_model.h"
-#endif
-
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/genius_app/app_id.h"
 #include "chrome/browser/ui/settings_window_manager_chromeos.h"
 #include "extensions/browser/extension_registry.h"
 #endif
@@ -70,17 +66,16 @@ const char kHashMark[] = "#";
 void OpenBookmarkManagerForNode(Browser* browser, int64_t node_id) {
   GURL url = GURL(kChromeUIBookmarksURL)
                  .Resolve(base::StringPrintf(
-                     MdBookmarksUI::IsEnabled() ? "/?id=%s" : "/#%s",
-                     base::Int64ToString(node_id).c_str()));
+                     "/?id=%s", base::Int64ToString(node_id).c_str()));
   NavigateParams params(GetSingletonTabNavigateParams(browser, url));
   params.path_behavior = NavigateParams::IGNORE_AND_NAVIGATE;
-  ShowSingletonTabOverwritingNTP(browser, params);
+  ShowSingletonTabOverwritingNTP(browser, std::move(params));
 }
 
 void NavigateToSingletonTab(Browser* browser, const GURL& url) {
   NavigateParams params(GetSingletonTabNavigateParams(browser, url));
   params.path_behavior = NavigateParams::IGNORE_AND_NAVIGATE;
-  ShowSingletonTabOverwritingNTP(browser, params);
+  ShowSingletonTabOverwritingNTP(browser, std::move(params));
 }
 
 // Shows either the help app or the appropriate help page for |source|. If
@@ -92,7 +87,7 @@ void ShowHelpImpl(Browser* browser, Profile* profile, HelpSource source) {
 #if defined(OS_CHROMEOS) && defined(GOOGLE_CHROME_BUILD)
   const extensions::Extension* extension =
       extensions::ExtensionRegistry::Get(profile)->GetExtensionById(
-          genius_app::kGeniusAppId,
+          extension_misc::kGeniusAppId,
           extensions::ExtensionRegistry::EVERYTHING);
   if (!extension) {
     DCHECK(base::CommandLine::ForCurrentProcess()->HasSwitch(
@@ -152,20 +147,19 @@ std::string GenerateContentSettingsExceptionsSubPage(ContentSettingsType type) {
   // TODO(crbug.com/728353): Update the group names defined in
   // site_settings_helper once Options is removed from Chrome. Then this list
   // will no longer be needed.
-  typedef std::map<ContentSettingsType, std::string> ContentSettingPathMap;
-  CR_DEFINE_STATIC_LOCAL(
-      ContentSettingPathMap, kSettingsPathOverrides,
-      ({{CONTENT_SETTINGS_TYPE_AUTOMATIC_DOWNLOADS, "automaticDownloads"},
-        {CONTENT_SETTINGS_TYPE_BACKGROUND_SYNC, "backgroundSync"},
-        {CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC, "microphone"},
-        {CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA, "camera"},
-        {CONTENT_SETTINGS_TYPE_MIDI_SYSEX, "midiDevices"},
-        {CONTENT_SETTINGS_TYPE_PLUGINS, "flash"},
-        {CONTENT_SETTINGS_TYPE_ADS, "ads"},
-        {CONTENT_SETTINGS_TYPE_PPAPI_BROKER, "unsandboxedPlugins"}}));
-  const auto it = kSettingsPathOverrides.find(type);
+  static base::NoDestructor<std::map<ContentSettingsType, std::string>>
+      kSettingsPathOverrides(
+          {{CONTENT_SETTINGS_TYPE_AUTOMATIC_DOWNLOADS, "automaticDownloads"},
+           {CONTENT_SETTINGS_TYPE_BACKGROUND_SYNC, "backgroundSync"},
+           {CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC, "microphone"},
+           {CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA, "camera"},
+           {CONTENT_SETTINGS_TYPE_MIDI_SYSEX, "midiDevices"},
+           {CONTENT_SETTINGS_TYPE_PLUGINS, "flash"},
+           {CONTENT_SETTINGS_TYPE_ADS, "ads"},
+           {CONTENT_SETTINGS_TYPE_PPAPI_BROKER, "unsandboxedPlugins"}});
+  const auto it = kSettingsPathOverrides->find(type);
   const std::string content_type_path =
-      (it == kSettingsPathOverrides.end())
+      (it == kSettingsPathOverrides->end())
           ? site_settings::ContentSettingsTypeToGroupName(type)
           : it->second;
 
@@ -179,7 +173,7 @@ void ShowSiteSettingsImpl(Browser* browser, Profile* profile, const GURL& url) {
   std::string link_destination(chrome::kChromeUIContentSettingsURL);
   // TODO(https://crbug.com/444047): Site Details should work with file:// urls
   // when this bug is fixed, so add it to the whitelist when that happens.
-  if (!site_origin.unique() && (url.SchemeIsHTTPOrHTTPS() ||
+  if (!site_origin.opaque() && (url.SchemeIsHTTPOrHTTPS() ||
                                 url.SchemeIs(extensions::kExtensionScheme))) {
     std::string origin_string = site_origin.Serialize();
     url::RawCanonOutputT<char> percent_encoded_origin;
@@ -203,7 +197,7 @@ void ShowBookmarkManager(Browser* browser) {
   NavigateParams params(
       GetSingletonTabNavigateParams(browser, GURL(kChromeUIBookmarksURL)));
   params.path_behavior = NavigateParams::IGNORE_AND_NAVIGATE;
-  ShowSingletonTabOverwritingNTP(browser, params);
+  ShowSingletonTabOverwritingNTP(browser, std::move(params));
 }
 
 void ShowBookmarkManagerForNode(Browser* browser, int64_t node_id) {
@@ -216,7 +210,7 @@ void ShowHistory(Browser* browser) {
   NavigateParams params(
       GetSingletonTabNavigateParams(browser, GURL(kChromeUIHistoryURL)));
   params.path_behavior = NavigateParams::IGNORE_AND_NAVIGATE;
-  ShowSingletonTabOverwritingNTP(browser, params);
+  ShowSingletonTabOverwritingNTP(browser, std::move(params));
 }
 
 void ShowDownloads(Browser* browser) {
@@ -242,15 +236,7 @@ void ShowExtensions(Browser* browser,
     replacements.SetQueryStr(query);
     params.url = params.url.ReplaceComponents(replacements);
   }
-  ShowSingletonTabOverwritingNTP(browser, params);
-}
-
-void ShowConflicts(Browser* browser) {
-#if defined(OS_WIN)
-  EnumerateModulesModel::GetInstance()->AcknowledgeConflictNotification();
-#endif
-
-  ShowSingletonTab(browser, GURL(kChromeUIConflictsURL));
+  ShowSingletonTabOverwritingNTP(browser, std::move(params));
 }
 
 void ShowHelp(Browser* browser, HelpSource source) {
@@ -328,7 +314,7 @@ void ShowSettingsSubPageInTabbedBrowser(Browser* browser,
   GURL gurl = GetSettingsUrl(sub_page);
   NavigateParams params(GetSingletonTabNavigateParams(browser, gurl));
   params.path_behavior = NavigateParams::IGNORE_AND_NAVIGATE;
-  ShowSingletonTabOverwritingNTP(browser, params);
+  ShowSingletonTabOverwritingNTP(browser, std::move(params));
 }
 
 void ShowContentSettingsExceptions(Browser* browser,
@@ -385,7 +371,7 @@ void ShowAboutChrome(Browser* browser) {
   NavigateParams params(
       GetSingletonTabNavigateParams(browser, GURL(kChromeUIHelpURL)));
   params.path_behavior = NavigateParams::IGNORE_AND_NAVIGATE;
-  ShowSingletonTabOverwritingNTP(browser, params);
+  ShowSingletonTabOverwritingNTP(browser, std::move(params));
 #endif
 }
 
@@ -410,7 +396,7 @@ void ShowBrowserSignin(Browser* browser,
   browser = displayer->browser();
 
 #if defined(OS_CHROMEOS)
-  // ChromeOS doesn't have the avatar bubble.
+  // ChromeOS always loads the chrome://chrome-signin in a tab.
   const bool show_full_tab_chrome_signin_page = true;
 #else
   // When Desktop Identity Consistency (aka DICE) is not enabled, Chrome uses
@@ -427,7 +413,7 @@ void ShowBrowserSignin(Browser* browser,
       !signin::DiceMethodGreaterOrEqual(
           AccountConsistencyModeManager::GetMethodForProfile(
               browser->profile()),
-          signin::AccountConsistencyMethod::kDicePrepareMigration) &&
+          signin::AccountConsistencyMethod::kDiceMigration) &&
       browser->tab_strip_model()->empty();
 #endif  // defined(OS_CHROMEOS)
   if (show_full_tab_chrome_signin_page) {
@@ -438,9 +424,15 @@ void ShowBrowserSignin(Browser* browser,
             false));
     DCHECK_GT(browser->tab_strip_model()->count(), 0);
   } else {
-    browser->window()->ShowAvatarBubbleFromAvatarButton(
-        BrowserWindow::AVATAR_BUBBLE_MODE_SIGNIN,
-        signin::ManageAccountsParams(), access_point, false);
+#if defined(OS_CHROMEOS)
+    NOTREACHED();
+#else
+    profiles::BubbleViewMode bubble_view_mode =
+        manager->IsAuthenticated() ? profiles::BUBBLE_VIEW_MODE_GAIA_REAUTH
+                                   : profiles::BUBBLE_VIEW_MODE_GAIA_SIGNIN;
+    browser->signin_view_controller()->ShowSignin(bubble_view_mode, browser,
+                                                  access_point);
+#endif
   }
 }
 

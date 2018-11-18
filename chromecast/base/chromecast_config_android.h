@@ -5,11 +5,9 @@
 #ifndef CHROMECAST_BASE_CHROMECAST_CONFIG_ANDROID_H_
 #define CHROMECAST_BASE_CHROMECAST_CONFIG_ANDROID_H_
 
-#include <jni.h>
-
 #include "base/callback.h"
-#include "base/lazy_instance.h"
 #include "base/macros.h"
+#include "base/no_destructor.h"
 
 namespace chromecast {
 namespace android {
@@ -20,22 +18,20 @@ class ChromecastConfigAndroid {
 
   // Returns whether or not the user has allowed sending usage stats and
   // crash reports.
-  bool CanSendUsageStats();
+  virtual bool CanSendUsageStats() = 0;
 
   // Registers a handler to be notified when SendUsageStats is changed.
-  void SetSendUsageStatsChangedCallback(
-      base::RepeatingCallback<void(bool)> callback);
+  virtual void SetSendUsageStatsChangedCallback(
+      base::RepeatingCallback<void(bool)> callback) = 0;
 
-  void RunSendUsageStatsChangedCallback(bool enabled);
+  virtual void RunSendUsageStatsChangedCallback(bool enabled) = 0;
+
+ protected:
+  ChromecastConfigAndroid() {}
+
+  virtual ~ChromecastConfigAndroid() {}
 
  private:
-  friend struct base::LazyInstanceTraitsBase<ChromecastConfigAndroid>;
-
-  ChromecastConfigAndroid();
-  ~ChromecastConfigAndroid();
-
-  base::RepeatingCallback<void(bool)> send_usage_stats_changed_callback_;
-
   DISALLOW_COPY_AND_ASSIGN(ChromecastConfigAndroid);
 };
 

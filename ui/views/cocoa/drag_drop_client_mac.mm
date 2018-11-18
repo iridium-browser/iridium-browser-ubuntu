@@ -10,9 +10,9 @@
 #import "ui/base/dragdrop/os_exchange_data_provider_mac.h"
 #include "ui/gfx/image/image_skia_util_mac.h"
 #include "ui/views/drag_utils.h"
-#import "ui/views/cocoa/bridged_content_view.h"
-#import "ui/views/cocoa/bridged_native_widget.h"
 #include "ui/views/widget/native_widget_mac.h"
+#import "ui/views_bridge_mac/bridged_content_view.h"
+#import "ui/views_bridge_mac/bridged_native_widget_impl.h"
 
 @interface CocoaDragDropDataProvider ()
 - (id)initWithData:(const ui::OSExchangeData&)data;
@@ -57,7 +57,7 @@
 
 namespace views {
 
-DragDropClientMac::DragDropClientMac(BridgedNativeWidget* bridge,
+DragDropClientMac::DragDropClientMac(BridgedNativeWidgetImpl* bridge,
                                      View* root_view)
     : drop_helper_(root_view),
       operation_(0),
@@ -103,6 +103,12 @@ void DragDropClientMac::StartDragAndDrop(
 
   NSImage* image = gfx::NSImageFromImageSkiaWithColorSpace(
       provider.GetDragImage(), base::mac::GetSRGBColorSpace());
+
+  // TODO(crbug/876201): This shouldn't happen. When a repro for this
+  // is identified and the bug is fixed, change the early return to
+  // a DCHECK.
+  if (!image || NSEqualSizes([image size], NSZeroSize))
+    return;
 
   base::scoped_nsobject<NSPasteboardItem> item([[NSPasteboardItem alloc] init]);
   [item setDataProvider:data_source_.get()

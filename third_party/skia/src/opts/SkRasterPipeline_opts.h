@@ -8,34 +8,39 @@
 #ifndef SkRasterPipeline_opts_DEFINED
 #define SkRasterPipeline_opts_DEFINED
 
+#include "SkTypes.h"
 #include "../jumper/SkJumper.h"
 #include "../jumper/SkJumper_misc.h"
 
 #if !defined(__clang__)
     #define JUMPER_IS_SCALAR
-#elif defined(__ARM_NEON)
+#elif defined(SK_ARM_HAS_NEON)
     #define JUMPER_IS_NEON
-#elif defined(__AVX512F__)
+#elif SK_CPU_SSE_LEVEL >= SK_CPU_SSE_LEVEL_AVX512
     #define JUMPER_IS_AVX512
-#elif defined(__AVX2__) && defined(__F16C__) && defined(__FMA__)
+#elif SK_CPU_SSE_LEVEL >= SK_CPU_SSE_LEVEL_AVX2
     #define JUMPER_IS_HSW
-#elif defined(__AVX__)
+#elif SK_CPU_SSE_LEVEL >= SK_CPU_SSE_LEVEL_AVX
     #define JUMPER_IS_AVX
-#elif defined(__SSE4_1__)
+#elif SK_CPU_SSE_LEVEL >= SK_CPU_SSE_LEVEL_SSE41
     #define JUMPER_IS_SSE41
-#elif defined(__SSE2__)
+#elif SK_CPU_SSE_LEVEL >= SK_CPU_SSE_LEVEL_SSE2
     #define JUMPER_IS_SSE2
 #else
     #define JUMPER_IS_SCALAR
 #endif
 
 // Older Clangs seem to crash when generating non-optimized NEON code for ARMv7.
-#if defined(__clang__) && !defined(__OPTIMIZE__) && defined(__arm__)
+#if defined(__clang__) && !defined(__OPTIMIZE__) && defined(SK_CPU_ARM32)
     // Apple Clang 9 and vanilla Clang 5 are fine, and may even be conservative.
     #if defined(__apple_build_version__) && __clang_major__ < 9
         #define JUMPER_IS_SCALAR
     #elif __clang_major__ < 5
         #define JUMPER_IS_SCALAR
+    #endif
+
+    #if defined(JUMPER_IS_NEON) && defined(JUMPER_IS_SCALAR)
+        #undef  JUMPER_IS_NEON
     #endif
 #endif
 
@@ -127,7 +132,7 @@ namespace SK_OPTS_NS {
 
     SI F if_then_else(I32 c, F t, F e) { return vbslq_f32((U32)c,t,e); }
 
-    #if defined(__aarch64__)
+    #if defined(SK_CPU_ARM64)
         SI F     mad(F f, F m, F a) { return vfmaq_f32(a,f,m); }
         SI F  floor_(F v) { return vrndmq_f32(v); }
         SI F   sqrt_(F v) { return vsqrtq_f32(v); }
@@ -653,7 +658,7 @@ SI F approx_powf(F x, F y) {
 }
 
 SI F from_half(U16 h) {
-#if defined(__aarch64__) && !defined(SK_BUILD_FOR_GOOGLE3)  // Temporary workaround for some Google3 builds.
+#if defined(SK_CPU_ARM64) && !defined(SK_BUILD_FOR_GOOGLE3)  // Temporary workaround for some Google3 builds.
     return vcvt_f32_f16(h);
 
 #elif defined(JUMPER_IS_HSW) || defined(JUMPER_IS_AVX512)
@@ -673,7 +678,7 @@ SI F from_half(U16 h) {
 }
 
 SI U16 to_half(F f) {
-#if defined(__aarch64__) && !defined(SK_BUILD_FOR_GOOGLE3)  // Temporary workaround for some Google3 builds.
+#if defined(SK_CPU_ARM64) && !defined(SK_BUILD_FOR_GOOGLE3)  // Temporary workaround for some Google3 builds.
     return vcvt_f16_f32(f);
 
 #elif defined(JUMPER_IS_HSW) || defined(JUMPER_IS_AVX512)
@@ -702,7 +707,7 @@ static const size_t N = sizeof(F) / sizeof(float);
 
 // Any custom ABI to use for all (non-externally-facing) stage functions?
 // Also decide here whether to use narrow (compromise) or wide (ideal) stages.
-#if defined(__arm__) && defined(__ARM_NEON)
+#if defined(SK_CPU_ARM32) && defined(JUMPER_IS_NEON)
     // This lets us pass vectors more efficiently on 32-bit ARM.
     // We can still only pass 16 floats, so best as 4x {r,g,b,a}.
     #define ABI __attribute__((pcs("aapcs-vfp")))
@@ -717,7 +722,7 @@ static const size_t N = sizeof(F) / sizeof(float);
     // instead of {b,a} on the stack.  Narrow stages work best for __vectorcall.
     #define ABI __vectorcall
     #define JUMPER_NARROW_STAGES 1
-#elif defined(__x86_64__) || defined(__aarch64__)
+#elif defined(__x86_64__) || defined(SK_CPU_ARM64)
     // These platforms are ideal for wider stages, and their default ABI is ideal.
     #define ABI
     #define JUMPER_NARROW_STAGES 0
@@ -967,6 +972,12 @@ STAGE(dither, const float* rate) {
 
 // load 4 floats from memory, and splat them into r,g,b,a
 STAGE(uniform_color, const SkJumper_UniformColorCtx* c) {
+    r = c->r;
+    g = c->g;
+    b = c->b;
+    a = c->a;
+}
+STAGE(unbounded_uniform_color, const SkJumper_UniformColorCtx* c) {
     r = c->r;
     g = c->g;
     b = c->b;
@@ -1265,7 +1276,19 @@ STAGE(clamp_a_dst, Ctx::None) {
     db = min(db, da);
 }
 
+STAGE(clamp_gamut, Ctx::None) {
+    // If you're using this stage, a should already be in [0,1].
+    r = min(max(r, 0), a);
+    g = min(max(g, 0), a);
+    b = min(max(b, 0), a);
+}
+
 STAGE(set_rgb, const float* rgb) {
+    r = rgb[0];
+    g = rgb[1];
+    b = rgb[2];
+}
+STAGE(unbounded_set_rgb, const float* rgb) {
     r = rgb[0];
     g = rgb[1];
     b = rgb[2];
@@ -1274,12 +1297,6 @@ STAGE(swap_rb, Ctx::None) {
     auto tmp = r;
     r = b;
     b = tmp;
-}
-STAGE(invert, Ctx::None) {
-    r = inv(r);
-    g = inv(g);
-    b = inv(b);
-    a = inv(a);
 }
 
 STAGE(move_src_dst, Ctx::None) {
@@ -1315,50 +1332,6 @@ STAGE(unpremul, Ctx::None) {
 
 STAGE(force_opaque    , Ctx::None) {  a = 1; }
 STAGE(force_opaque_dst, Ctx::None) { da = 1; }
-
-SI F from_srgb_(F s) {
-    auto lo = s * (1/12.92f);
-    auto hi = mad(s*s, mad(s, 0.3000f, 0.6975f), 0.0025f);
-    return if_then_else(s < 0.055f, lo, hi);
-}
-
-STAGE(from_srgb, Ctx::None) {
-    r = from_srgb_(r);
-    g = from_srgb_(g);
-    b = from_srgb_(b);
-}
-STAGE(from_srgb_dst, Ctx::None) {
-    dr = from_srgb_(dr);
-    dg = from_srgb_(dg);
-    db = from_srgb_(db);
-}
-STAGE(to_srgb, Ctx::None) {
-    auto fn = [&](F l) {
-        // We tweak c and d for each instruction set to make sure fn(1) is exactly 1.
-    #if defined(JUMPER_IS_AVX512)
-        const float c = 1.130026340485f,
-                    d = 0.141387879848f;
-    #elif defined(JUMPER_IS_SSE2) || defined(JUMPER_IS_SSE41) || \
-          defined(JUMPER_IS_AVX ) || defined(JUMPER_IS_HSW )
-        const float c = 1.130048394203f,
-                    d = 0.141357362270f;
-    #elif defined(JUMPER_IS_NEON)
-        const float c = 1.129999995232f,
-                    d = 0.141381442547f;
-    #else
-        const float c = 1.129999995232f,
-                    d = 0.141377761960f;
-    #endif
-        F t = rsqrt(l);
-        auto lo = l * 12.92f;
-        auto hi = mad(t, mad(t, -0.0024542345f, 0.013832027f), c)
-                * rcp(d + t);
-        return if_then_else(l < 0.00465985f, lo, hi);
-    };
-    r = fn(r);
-    g = fn(g);
-    b = fn(b);
-}
 
 STAGE(rgb_to_hsl, Ctx::None) {
     F mx = max(r,g,b),
@@ -1475,38 +1448,6 @@ STAGE(lerp_565, const SkJumper_MemoryCtx* ctx) {
     a = lerp(da, a, ca);
 }
 
-STAGE(load_tables, const SkJumper_LoadTablesCtx* c) {
-    auto px = load<U32>((const uint32_t*)c->src + dx, tail);
-    r = gather(c->r, (px      ) & 0xff);
-    g = gather(c->g, (px >>  8) & 0xff);
-    b = gather(c->b, (px >> 16) & 0xff);
-    a = cast(        (px >> 24)) * (1/255.0f);
-}
-STAGE(load_tables_u16_be, const SkJumper_LoadTablesCtx* c) {
-    auto ptr = (const uint16_t*)c->src + 4*dx;
-
-    U16 R,G,B,A;
-    load4(ptr, tail, &R,&G,&B,&A);
-
-    // c->src is big-endian, so & 0xff grabs the 8 most signficant bits.
-    r = gather(c->r, expand(R) & 0xff);
-    g = gather(c->g, expand(G) & 0xff);
-    b = gather(c->b, expand(B) & 0xff);
-    a = (1/65535.0f) * cast(expand(bswap(A)));
-}
-STAGE(load_tables_rgb_u16_be, const SkJumper_LoadTablesCtx* c) {
-    auto ptr = (const uint16_t*)c->src + 3*dx;
-
-    U16 R,G,B;
-    load3(ptr, tail, &R,&G,&B);
-
-    // c->src is big-endian, so & 0xff grabs the 8 most signficant bits.
-    r = gather(c->r, expand(R) & 0xff);
-    g = gather(c->g, expand(G) & 0xff);
-    b = gather(c->b, expand(B) & 0xff);
-    a = 1.0f;
-}
-
 STAGE(byte_tables, const void* ctx) {  // TODO: rename Tables SkJumper_ByteTablesCtx
     struct Tables { const uint8_t *r, *g, *b, *a; };
     auto tables = (const Tables*)ctx;
@@ -1517,59 +1458,81 @@ STAGE(byte_tables, const void* ctx) {  // TODO: rename Tables SkJumper_ByteTable
     a = from_byte(gather(tables->a, to_unorm(a, 255)));
 }
 
-STAGE(byte_tables_rgb, const SkJumper_ByteTablesRGBCtx* ctx) {
-    int scale = ctx->n - 1;
-    r = from_byte(gather(ctx->r, to_unorm(r, scale)));
-    g = from_byte(gather(ctx->g, to_unorm(g, scale)));
-    b = from_byte(gather(ctx->b, to_unorm(b, scale)));
+SI F strip_sign(F x, U32* sign) {
+    U32 bits = bit_cast<U32>(x);
+    *sign = bits & 0x80000000;
+    return bit_cast<F>(bits ^ *sign);
 }
 
-SI F table(F v, const SkJumper_TableCtx* ctx) {
-    return gather(ctx->table, to_unorm(v, ctx->size - 1));
+SI F apply_sign(F x, U32 sign) {
+    return bit_cast<F>(sign | bit_cast<U32>(x));
 }
-STAGE(table_r, const SkJumper_TableCtx* ctx) { r = table(r, ctx); }
-STAGE(table_g, const SkJumper_TableCtx* ctx) { g = table(g, ctx); }
-STAGE(table_b, const SkJumper_TableCtx* ctx) { b = table(b, ctx); }
-STAGE(table_a, const SkJumper_TableCtx* ctx) { a = table(a, ctx); }
 
-SI F parametric(F v, const SkJumper_ParametricTransferFunction* ctx) {
-    F r = if_then_else(v <= ctx->D, mad(ctx->C, v, ctx->F)
-                                  , approx_powf(mad(ctx->A, v, ctx->B), ctx->G) + ctx->E);
-    return min(max(r, 0), 1.0f);  // Clamp to [0,1], with argument order mattering to handle NaN.
+STAGE(parametric, const SkJumper_ParametricTransferFunction* ctx) {
+    auto fn = [&](F v) {
+        U32 sign;
+        v = strip_sign(v, &sign);
+
+        F r = if_then_else(v <= ctx->D, mad(ctx->C, v, ctx->F)
+                                      , approx_powf(mad(ctx->A, v, ctx->B), ctx->G) + ctx->E);
+        return apply_sign(r, sign);
+    };
+    r = fn(r);
+    g = fn(g);
+    b = fn(b);
 }
-STAGE(parametric_r, const SkJumper_ParametricTransferFunction* ctx) { r = parametric(r, ctx); }
-STAGE(parametric_g, const SkJumper_ParametricTransferFunction* ctx) { g = parametric(g, ctx); }
-STAGE(parametric_b, const SkJumper_ParametricTransferFunction* ctx) { b = parametric(b, ctx); }
-STAGE(parametric_a, const SkJumper_ParametricTransferFunction* ctx) { a = parametric(a, ctx); }
 
 STAGE(gamma, const float* G) {
-    r = approx_powf(r, *G);
-    g = approx_powf(g, *G);
-    b = approx_powf(b, *G);
+    auto fn = [&](F v) {
+        U32 sign;
+        v = strip_sign(v, &sign);
+        return apply_sign(approx_powf(v, *G), sign);
+    };
+    r = fn(r);
+    g = fn(g);
+    b = fn(b);
 }
-STAGE(gamma_dst, const float* G) {
-    dr = approx_powf(dr, *G);
-    dg = approx_powf(dg, *G);
-    db = approx_powf(db, *G);
+
+STAGE(from_srgb, Ctx::None) {
+    auto fn = [](F s) {
+        U32 sign;
+        s = strip_sign(s, &sign);
+        auto lo = s * (1/12.92f);
+        auto hi = mad(s*s, mad(s, 0.3000f, 0.6975f), 0.0025f);
+        return apply_sign(if_then_else(s < 0.055f, lo, hi), sign);
+    };
+    r = fn(r);
+    g = fn(g);
+    b = fn(b);
 }
-
-STAGE(lab_to_xyz, Ctx::None) {
-    F L = r * 100.0f,
-      A = g * 255.0f - 128.0f,
-      B = b * 255.0f - 128.0f;
-
-    F Y = (L + 16.0f) * (1/116.0f),
-      X = Y + A*(1/500.0f),
-      Z = Y - B*(1/200.0f);
-
-    X = if_then_else(X*X*X > 0.008856f, X*X*X, (X - (16/116.0f)) * (1/7.787f));
-    Y = if_then_else(Y*Y*Y > 0.008856f, Y*Y*Y, (Y - (16/116.0f)) * (1/7.787f));
-    Z = if_then_else(Z*Z*Z > 0.008856f, Z*Z*Z, (Z - (16/116.0f)) * (1/7.787f));
-
-    // Adjust to D50 illuminant.
-    r = X * 0.96422f;
-    g = Y           ;
-    b = Z * 0.82521f;
+STAGE(to_srgb, Ctx::None) {
+    auto fn = [](F l) {
+        U32 sign;
+        l = strip_sign(l, &sign);
+        // We tweak c and d for each instruction set to make sure fn(1) is exactly 1.
+    #if defined(JUMPER_IS_AVX512)
+        const float c = 1.130026340485f,
+                    d = 0.141387879848f;
+    #elif defined(JUMPER_IS_SSE2) || defined(JUMPER_IS_SSE41) || \
+          defined(JUMPER_IS_AVX ) || defined(JUMPER_IS_HSW )
+        const float c = 1.130048394203f,
+                    d = 0.141357362270f;
+    #elif defined(JUMPER_IS_NEON)
+        const float c = 1.129999995232f,
+                    d = 0.141381442547f;
+    #else
+        const float c = 1.129999995232f,
+                    d = 0.141377761960f;
+    #endif
+        F t = rsqrt(l);
+        auto lo = l * 12.92f;
+        auto hi = mad(t, mad(t, -0.0024542345f, 0.013832027f), c)
+                * rcp(d + t);
+        return apply_sign(if_then_else(l < 0.00465985f, lo, hi), sign);
+    };
+    r = fn(r);
+    g = fn(g);
+    b = fn(b);
 }
 
 STAGE(load_a8, const SkJumper_MemoryCtx* ctx) {
@@ -1774,28 +1737,6 @@ STAGE(store_f16, const SkJumper_MemoryCtx* ctx) {
                               , to_half(a));
 }
 
-STAGE(load_u16_be, const SkJumper_MemoryCtx* ctx) {
-    auto ptr = ptr_at_xy<const uint16_t>(ctx, 4*dx,dy);
-
-    U16 R,G,B,A;
-    load4(ptr,tail, &R,&G,&B,&A);
-
-    r = (1/65535.0f) * cast(expand(bswap(R)));
-    g = (1/65535.0f) * cast(expand(bswap(G)));
-    b = (1/65535.0f) * cast(expand(bswap(B)));
-    a = (1/65535.0f) * cast(expand(bswap(A)));
-}
-STAGE(load_rgb_u16_be, const SkJumper_MemoryCtx* ctx) {
-    auto ptr = ptr_at_xy<const uint16_t>(ctx, 3*dx,dy);
-
-    U16 R,G,B;
-    load3(ptr,tail, &R,&G,&B);
-
-    r = (1/65535.0f) * cast(expand(bswap(R)));
-    g = (1/65535.0f) * cast(expand(bswap(G)));
-    b = (1/65535.0f) * cast(expand(bswap(B)));
-    a = 1.0f;
-}
 STAGE(store_u16_be, const SkJumper_MemoryCtx* ctx) {
     auto ptr = ptr_at_xy<uint16_t>(ctx, 4*dx,dy);
 
@@ -1808,15 +1749,23 @@ STAGE(store_u16_be, const SkJumper_MemoryCtx* ctx) {
 }
 
 STAGE(load_f32, const SkJumper_MemoryCtx* ctx) {
-    auto ptr = ptr_at_xy<const float>(ctx, 4*dx,dy);
+    auto ptr = ptr_at_xy<const float>(ctx, 4*dx,4*dy);
     load4(ptr,tail, &r,&g,&b,&a);
 }
 STAGE(load_f32_dst, const SkJumper_MemoryCtx* ctx) {
-    auto ptr = ptr_at_xy<const float>(ctx, 4*dx,dy);
+    auto ptr = ptr_at_xy<const float>(ctx, 4*dx,4*dy);
     load4(ptr,tail, &dr,&dg,&db,&da);
 }
+STAGE(gather_f32, const SkJumper_GatherCtx* ctx) {
+    const float* ptr;
+    U32 ix = ix_and_ptr(&ptr, ctx, r,g);
+    r = gather(ptr, 4*ix + 0);
+    g = gather(ptr, 4*ix + 1);
+    b = gather(ptr, 4*ix + 2);
+    a = gather(ptr, 4*ix + 3);
+}
 STAGE(store_f32, const SkJumper_MemoryCtx* ctx) {
-    auto ptr = ptr_at_xy<float>(ctx, 4*dx,dy);
+    auto ptr = ptr_at_xy<float>(ctx, 4*dx,4*dy);
     store4(ptr,tail, r,g,b,a);
 }
 
@@ -1890,6 +1839,14 @@ STAGE(matrix_2x3, const float* m) {
          G = mad(r,m[1], mad(g,m[3], m[5]));
     r = R;
     g = G;
+}
+STAGE(matrix_3x3, const float* m) {
+    auto R = mad(r,m[0], mad(g,m[3], b*m[6])),
+         G = mad(r,m[1], mad(g,m[4], b*m[7])),
+         B = mad(r,m[2], mad(g,m[5], b*m[8]));
+    r = R;
+    g = G;
+    b = B;
 }
 STAGE(matrix_3x4, const float* m) {
     auto R = mad(r,m[0], mad(g,m[3], mad(b,m[6], m[ 9]))),
@@ -2195,58 +2152,6 @@ STAGE(callback, SkJumper_CallbackCtx* c) {
     load4(c->read_from,0, &r,&g,&b,&a);
 }
 
-// Our general strategy is to recursively interpolate each dimension,
-// accumulating the index to sample at, and our current pixel stride to help accumulate the index.
-template <int dim>
-SI void color_lookup_table(const SkJumper_ColorLookupTableCtx* ctx,
-                           F& r, F& g, F& b, F a, U32 index, U32 stride) {
-    // We'd logically like to sample this dimension at x.
-    int limit = ctx->limits[dim-1];
-    F src;
-    switch(dim) {
-        case 1: src = r; break;
-        case 2: src = g; break;
-        case 3: src = b; break;
-        case 4: src = a; break;
-    }
-    F x = src * (limit - 1);
-
-    // We can't index an array by a float (darn) so we have to snap to nearby integers lo and hi.
-    U32 lo = trunc_(x          ),
-        hi = trunc_(x + 0.9999f);
-
-    // Recursively sample at lo and hi.
-    F lr = r, lg = g, lb = b,
-      hr = r, hg = g, hb = b;
-    color_lookup_table<dim-1>(ctx, lr,lg,lb,a, stride*lo + index, stride*limit);
-    color_lookup_table<dim-1>(ctx, hr,hg,hb,a, stride*hi + index, stride*limit);
-
-    // Linearly interpolate those colors based on their distance to x.
-    F t = x - cast(lo);
-    r = lerp(lr, hr, t);
-    g = lerp(lg, hg, t);
-    b = lerp(lb, hb, t);
-}
-
-// Bottom out our recursion at 0 dimensions, i.e. just return the colors at index.
-template<>
-inline void color_lookup_table<0>(const SkJumper_ColorLookupTableCtx* ctx,
-                                  F& r, F& g, F& b, F a, U32 index, U32 stride) {
-    r = gather(ctx->table, 3*index+0);
-    g = gather(ctx->table, 3*index+1);
-    b = gather(ctx->table, 3*index+2);
-}
-
-STAGE(clut_3D, const SkJumper_ColorLookupTableCtx* ctx) {
-    color_lookup_table<3>(ctx, r,g,b,a, 0,1);
-    // This 3D color lookup table leaves alpha alone.
-}
-STAGE(clut_4D, const SkJumper_ColorLookupTableCtx* ctx) {
-    color_lookup_table<4>(ctx, r,g,b,a, 0,1);
-    // "a" was really CMYK's K, so we just set alpha opaque.
-    a = 1.0f;
-}
-
 STAGE(gauss_a_to_rgba, Ctx::None) {
     // x = 1 - x;
     // exp(-x * x * 4) - 0.018f;
@@ -2264,7 +2169,7 @@ STAGE(gauss_a_to_rgba, Ctx::None) {
 }
 
 // A specialized fused image shader for clamp-x, clamp-y, non-sRGB sampling.
-STAGE(bilerp_clamp_8888, SkJumper_GatherCtx* ctx) {
+STAGE(bilerp_clamp_8888, const SkJumper_GatherCtx* ctx) {
     // (cx,cy) are the center of our sample.
     F cx = r,
       cy = g;
@@ -2319,7 +2224,7 @@ namespace lowp {
 
 #else  // We are compiling vector code with Clang... let's make some lowp stages!
 
-#if defined(__AVX2__)
+#if defined(JUMPER_IS_HSW) || defined(JUMPER_IS_AVX512)
     using U8  = uint8_t  __attribute__((ext_vector_type(16)));
     using U16 = uint16_t __attribute__((ext_vector_type(16)));
     using I16 =  int16_t __attribute__((ext_vector_type(16)));
@@ -2491,7 +2396,7 @@ static void start_pipeline(const size_t x0,     const size_t y0,
 SI U16 div255(U16 v) {
 #if 0
     return (v+127)/255;  // The ideal rounding divide by 255.
-#elif 1 && defined(__ARM_NEON)
+#elif 1 && defined(JUMPER_IS_NEON)
     // With NEON we can compute (v+127)/255 as (v + ((v+128)>>8) + 128)>>8
     // just as fast as we can do the approximation below, so might as well be correct!
     // First we compute v + ((v+128)>>8), then one more round of (...+128)>>8 to finish up.
@@ -2534,14 +2439,6 @@ SI D join(S lo, S hi) {
     memcpy((char*)&v + 1*sizeof(S), &hi, sizeof(S));
     return v;
 }
-template <typename V, typename H>
-SI V map(V v, H (*fn)(H)) {
-    H lo,hi;
-    split(v, &lo,&hi);
-    lo = fn(lo);
-    hi = fn(hi);
-    return join<V>(lo,hi);
-}
 
 SI F if_then_else(I32 c, F t, F e) {
     return bit_cast<F>( (bit_cast<I32>(t) & c) | (bit_cast<I32>(e) & ~c) );
@@ -2553,33 +2450,49 @@ SI F mad(F f, F m, F a) { return f*m+a; }
 SI U32 trunc_(F x) { return (U32)cast<I32>(x); }
 
 SI F rcp(F x) {
-#if defined(__AVX2__)
-    return map(x, _mm256_rcp_ps);
-#elif defined(__SSE__)
-    return map(x, _mm_rcp_ps);
-#elif defined(__ARM_NEON)
-    return map(x, +[](float32x4_t v) {
+#if defined(JUMPER_IS_HSW) || defined(JUMPER_IS_AVX512)
+    __m256 lo,hi;
+    split(x, &lo,&hi);
+    return join<F>(_mm256_rcp_ps(lo), _mm256_rcp_ps(hi));
+#elif defined(JUMPER_IS_SSE2) || defined(JUMPER_IS_SSE41) || defined(JUMPER_IS_AVX)
+    __m128 lo,hi;
+    split(x, &lo,&hi);
+    return join<F>(_mm_rcp_ps(lo), _mm_rcp_ps(hi));
+#elif defined(JUMPER_IS_NEON)
+    auto rcp = [](float32x4_t v) {
         auto est = vrecpeq_f32(v);
         return vrecpsq_f32(v,est)*est;
-    });
+    };
+    float32x4_t lo,hi;
+    split(x, &lo,&hi);
+    return join<F>(rcp(lo), rcp(hi));
 #else
     return 1.0f / x;
 #endif
 }
 SI F sqrt_(F x) {
-#if defined(__AVX2__)
-    return map(x, _mm256_sqrt_ps);
-#elif defined(__SSE__)
-    return map(x, _mm_sqrt_ps);
-#elif defined(__aarch64__)
-    return map(x, vsqrtq_f32);
-#elif defined(__ARM_NEON)
-    return map(x, +[](float32x4_t v) {
+#if defined(JUMPER_IS_HSW) || defined(JUMPER_IS_AVX512)
+    __m256 lo,hi;
+    split(x, &lo,&hi);
+    return join<F>(_mm256_sqrt_ps(lo), _mm256_sqrt_ps(hi));
+#elif defined(JUMPER_IS_SSE2) || defined(JUMPER_IS_SSE41) || defined(JUMPER_IS_AVX)
+    __m128 lo,hi;
+    split(x, &lo,&hi);
+    return join<F>(_mm_sqrt_ps(lo), _mm_sqrt_ps(hi));
+#elif defined(SK_CPU_ARM64)
+    float32x4_t lo,hi;
+    split(x, &lo,&hi);
+    return join<F>(vsqrtq_f32(lo), vsqrtq_f32(hi));
+#elif defined(JUMPER_IS_NEON)
+    auto sqrt = [](float32x4_t v) {
         auto est = vrsqrteq_f32(v);  // Estimate and two refinement steps for est = rsqrt(v).
         est *= vrsqrtsq_f32(v,est*est);
         est *= vrsqrtsq_f32(v,est*est);
         return v*est;                // sqrt(v) == v*rsqrt(v).
-    });
+    };
+    float32x4_t lo,hi;
+    split(x, &lo,&hi);
+    return join<F>(sqrt(lo), sqrt(hi));
 #else
     return F{
         sqrtf(x[0]), sqrtf(x[1]), sqrtf(x[2]), sqrtf(x[3]),
@@ -2589,17 +2502,24 @@ SI F sqrt_(F x) {
 }
 
 SI F floor_(F x) {
-#if defined(__aarch64__)
-    return map(x, vrndmq_f32);
-#elif defined(__AVX2__)
-    return map(x, +[](__m256 v){ return _mm256_floor_ps(v); });  // _mm256_floor_ps is a macro...
-#elif defined(__SSE4_1__)
-    return map(x, +[](__m128 v){ return    _mm_floor_ps(v); });  // _mm_floor_ps() is a macro too.
+#if defined(SK_CPU_ARM64)
+    float32x4_t lo,hi;
+    split(x, &lo,&hi);
+    return join<F>(vrndmq_f32(lo), vrndmq_f32(hi));
+#elif defined(JUMPER_IS_HSW) || defined(JUMPER_IS_AVX512)
+    __m256 lo,hi;
+    split(x, &lo,&hi);
+    return join<F>(_mm256_floor_ps(lo), _mm256_floor_ps(hi));
+#elif defined(JUMPER_IS_SSE41) || defined(JUMPER_IS_AVX)
+    __m128 lo,hi;
+    split(x, &lo,&hi);
+    return join<F>(_mm_floor_ps(lo), _mm_floor_ps(hi));
 #else
     F roundtrip = cast<F>(cast<I32>(x));
     return roundtrip - if_then_else(roundtrip > x, F(1), F(0));
 #endif
 }
+SI F fract(F x) { return x - floor_(x); }
 SI F abs_(F x) { return bit_cast<F>( bit_cast<I32>(x) & 0x7fffffff ); }
 
 // ~~~~~~ Basic / misc. stages ~~~~~~ //
@@ -2651,6 +2571,9 @@ STAGE_PP(set_rgb, const float rgb[3]) {
     b = from_float(rgb[2]);
 }
 
+STAGE_PP(clamp_0, Ctx::None) { /*definitely a noop*/ }
+STAGE_PP(clamp_1, Ctx::None) { /*_should_ be a noop*/ }
+
 STAGE_PP(clamp_a, Ctx::None) {
     r = min(r, a);
     g = min(g, a);
@@ -2660,6 +2583,11 @@ STAGE_PP(clamp_a_dst, Ctx::None) {
     dr = min(dr, da);
     dg = min(dg, da);
     db = min(db, da);
+}
+
+STAGE_PP(clamp_gamut, Ctx::None) {
+    // It shouldn't be possible to get out-of-gamut
+    // colors when working in lowp.
 }
 
 STAGE_PP(premul, Ctx::None) {
@@ -2694,13 +2622,6 @@ STAGE_PP(move_dst_src, Ctx::None) {
     g = dg;
     b = db;
     a = da;
-}
-
-STAGE_PP(invert, Ctx::None) {
-    r = inv(r);
-    g = inv(g);
-    b = inv(b);
-    a = inv(a);
 }
 
 // ~~~~~~ Blend modes ~~~~~~ //
@@ -2783,7 +2704,7 @@ SI V load(const T* ptr, size_t tail) {
     V v = 0;
     switch (tail & (N-1)) {
         case  0: memcpy(&v, ptr, sizeof(v)); break;
-    #if defined(__AVX2__)
+    #if defined(JUMPER_IS_HSW) || defined(JUMPER_IS_AVX512)
         case 15: v[14] = ptr[14];
         case 14: v[13] = ptr[13];
         case 13: v[12] = ptr[12];
@@ -2807,7 +2728,7 @@ template <typename V, typename T>
 SI void store(T* ptr, size_t tail, V v) {
     switch (tail & (N-1)) {
         case  0: memcpy(ptr, &v, sizeof(v)); break;
-    #if defined(__AVX2__)
+    #if defined(JUMPER_IS_HSW) || defined(JUMPER_IS_AVX512)
         case 15: ptr[14] = v[14];
         case 14: ptr[13] = v[13];
         case 13: ptr[12] = v[12];
@@ -2827,7 +2748,7 @@ SI void store(T* ptr, size_t tail, V v) {
     }
 }
 
-#if defined(__AVX2__)
+#if defined(JUMPER_IS_HSW) || defined(JUMPER_IS_AVX512)
     template <typename V, typename T>
     SI V gather(const T* ptr, U32 ix) {
         return V{ ptr[ix[ 0]], ptr[ix[ 1]], ptr[ix[ 2]], ptr[ix[ 3]],
@@ -2865,7 +2786,7 @@ SI void store(T* ptr, size_t tail, V v) {
 // ~~~~~~ 32-bit memory loads and stores ~~~~~~ //
 
 SI void from_8888(U32 rgba, U16* r, U16* g, U16* b, U16* a) {
-#if 1 && defined(__AVX2__)
+#if 1 && defined(JUMPER_IS_HSW) || defined(JUMPER_IS_AVX512)
     // Swap the middle 128-bit lanes to make _mm256_packus_epi32() in cast_U16() work out nicely.
     __m256i _01,_23;
     split(rgba, &_01, &_23);
@@ -2890,7 +2811,7 @@ SI void from_8888(U32 rgba, U16* r, U16* g, U16* b, U16* a) {
 }
 
 SI void load_8888_(const uint32_t* ptr, size_t tail, U16* r, U16* g, U16* b, U16* a) {
-#if 1 && defined(__ARM_NEON)
+#if 1 && defined(JUMPER_IS_NEON)
     uint8x8x4_t rgba;
     switch (tail & (N-1)) {
         case 0: rgba = vld4_u8     ((const uint8_t*)(ptr+0)         ); break;
@@ -2911,7 +2832,7 @@ SI void load_8888_(const uint32_t* ptr, size_t tail, U16* r, U16* g, U16* b, U16
 #endif
 }
 SI void store_8888_(uint32_t* ptr, size_t tail, U16 r, U16 g, U16 b, U16 a) {
-#if 1 && defined(__ARM_NEON)
+#if 1 && defined(JUMPER_IS_NEON)
     uint8x8x4_t rgba = {{
         cast<U8>(r),
         cast<U8>(g),
@@ -3194,14 +3115,23 @@ STAGE_PP(check_decal_mask, SkJumper_DecalTileCtx* ctx) {
     a = a & mask;
 }
 
+SI void round_F_to_U16(F    R, F    G, F    B, F    A, bool interpolatedInPremul,
+                       U16* r, U16* g, U16* b, U16* a) {
+    auto round = [](F x) { return cast<U16>(x * 255.0f + 0.5f); };
 
-SI U16 round_F_to_U16(F x) { return cast<U16>(x * 255.0f + 0.5f); }
+    F limit = interpolatedInPremul ? A
+                                   : 1;
+    *r = round(min(max(0,R), limit));
+    *g = round(min(max(0,G), limit));
+    *b = round(min(max(0,B), limit));
+    *a = round(A);  // we assume alpha is already in [0,1].
+}
 
 SI void gradient_lookup(const SkJumper_GradientCtx* c, U32 idx, F t,
                         U16* r, U16* g, U16* b, U16* a) {
 
     F fr, fg, fb, fa, br, bg, bb, ba;
-#if defined(__AVX2__)
+#if defined(JUMPER_IS_HSW) || defined(JUMPER_IS_AVX512)
     if (c->stopCount <=8) {
         __m256i lo, hi;
         split(idx, &lo, &hi);
@@ -3234,10 +3164,12 @@ SI void gradient_lookup(const SkJumper_GradientCtx* c, U32 idx, F t,
         bb = gather<F>(c->bs[2], idx);
         ba = gather<F>(c->bs[3], idx);
     }
-    *r = round_F_to_U16(mad(t, fr, br));
-    *g = round_F_to_U16(mad(t, fg, bg));
-    *b = round_F_to_U16(mad(t, fb, bb));
-    *a = round_F_to_U16(mad(t, fa, ba));
+    round_F_to_U16(mad(t, fr, br),
+                   mad(t, fg, bg),
+                   mad(t, fb, bb),
+                   mad(t, fa, ba),
+                   c->interpolatedInPremul,
+                   r,g,b,a);
 }
 
 STAGE_GP(gradient, const SkJumper_GradientCtx* c) {
@@ -3258,16 +3190,14 @@ STAGE_GP(evenly_spaced_gradient, const SkJumper_GradientCtx* c) {
     gradient_lookup(c, idx, t, &r, &g, &b, &a);
 }
 
-STAGE_GP(evenly_spaced_2_stop_gradient, const void* ctx) {
-    // TODO: Rename Ctx SkJumper_EvenlySpaced2StopGradientCtx.
-    struct Ctx { float f[4], b[4]; };
-    auto c = (const Ctx*)ctx;
-
+STAGE_GP(evenly_spaced_2_stop_gradient, const SkJumper_EvenlySpaced2StopGradientCtx* c) {
     auto t = x;
-    r = round_F_to_U16(mad(t, c->f[0], c->b[0]));
-    g = round_F_to_U16(mad(t, c->f[1], c->b[1]));
-    b = round_F_to_U16(mad(t, c->f[2], c->b[2]));
-    a = round_F_to_U16(mad(t, c->f[3], c->b[3]));
+    round_F_to_U16(mad(t, c->f[0], c->b[0]),
+                   mad(t, c->f[1], c->b[1]),
+                   mad(t, c->f[2], c->b[2]),
+                   mad(t, c->f[3], c->b[3]),
+                   c->interpolatedInPremul,
+                   &r,&g,&b,&a);
 }
 
 STAGE_GG(xy_to_unit_angle, Ctx::None) {
@@ -3327,25 +3257,23 @@ using NotImplemented = void(*)(void);
 
 static NotImplemented
         callback, load_rgba, store_rgba,
-        clamp_0, clamp_1,
+        unbounded_set_rgb, unbounded_uniform_color,
         unpremul, dither,
         from_srgb, from_srgb_dst, to_srgb,
         load_f16    , load_f16_dst    , store_f16    , gather_f16,
         load_f32    , load_f32_dst    , store_f32    , gather_f32,
         load_1010102, load_1010102_dst, store_1010102, gather_1010102,
-        load_u16_be, load_rgb_u16_be, store_u16_be,
-        load_tables_u16_be, load_tables_rgb_u16_be,
-        load_tables, byte_tables, byte_tables_rgb,
+        store_u16_be,
+        byte_tables,
         colorburn, colordodge, softlight, hue, saturation, color, luminosity,
-        matrix_3x4, matrix_4x5, matrix_4x3,
-        parametric_r, parametric_g, parametric_b, parametric_a,
-        table_r, table_g, table_b, table_a,
-        gamma, gamma_dst,
-        lab_to_xyz, rgb_to_hsl, hsl_to_rgb, clut_3D, clut_4D,
+        matrix_3x3, matrix_3x4, matrix_4x5, matrix_4x3,
+        parametric, gamma,
+        rgb_to_hsl, hsl_to_rgb,
         gauss_a_to_rgba,
         mirror_x, repeat_x,
         mirror_y, repeat_y,
         negate_x,
+        bilerp_clamp_8888,
         bilinear_nx, bilinear_ny, bilinear_px, bilinear_py,
         bicubic_n3x, bicubic_n1x, bicubic_p1x, bicubic_p3x,
         bicubic_n3y, bicubic_n1y, bicubic_p1y, bicubic_p3y,
@@ -3360,8 +3288,7 @@ static NotImplemented
         alter_2pt_conical_unswap,
         mask_2pt_conical_nan,
         mask_2pt_conical_degenerates,
-        apply_vector_mask,
-        bilerp_clamp_8888;
+        apply_vector_mask;
 
 #endif//defined(JUMPER_IS_SCALAR) controlling whether we build lowp stages
 }  // namespace lowp

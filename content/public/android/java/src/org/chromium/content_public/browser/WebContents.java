@@ -7,12 +7,14 @@ package org.chromium.content_public.browser;
 import android.graphics.Rect;
 import android.os.Handler;
 import android.os.Parcelable;
+import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 
 import org.chromium.base.Callback;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.ui.OverscrollRefreshHandler;
 import org.chromium.ui.base.EventForwarder;
+import org.chromium.ui.base.ViewAndroidDelegate;
 import org.chromium.ui.base.WindowAndroid;
 
 /**
@@ -58,44 +60,55 @@ public interface WebContents extends Parcelable {
     }
 
     /**
-     * Factory interface passed to {@link #setUserData()} for instantiation of
-     * class as user data.
-     *
-     * Constructor method reference comes handy for class Foo to provide the factory.
-     * Use lazy initialization to avoid having to generate too many anonymous reference.
-     *
-     * <code>
-     * public class Foo {
-     *     static final class FoofactoryLazyHolder {
-     *         private static final UserDataFactory<Foo> INSTANCE = Foo::new;
-     *     }
-     *     ....
-     *
-     *     webContents.setUserData(Foo.class, FooFactoryLazyHolder.INSTANCE);
-     *
-     *     ....
-     * }
-     * </code>
-     *
-     * @param <T> Class to instantiate.
+     * @return a default implementation of {@link InternalsHolder} that holds a reference to
+     * {@link WebContentsInternals} object owned by {@link WebContents} instance.
      */
-    public interface UserDataFactory<T> { T create(WebContents webContents); }
+    public static InternalsHolder createDefaultInternalsHolder() {
+        return new InternalsHolder() {
+            private WebContentsInternals mInternals;
+
+            @Override
+            public void set(WebContentsInternals internals) {
+                mInternals = internals;
+            }
+
+            @Override
+            public WebContentsInternals get() {
+                return mInternals;
+            }
+        };
+    }
 
     /**
-     * Sets holder of the objects used internally by WebContents for various features.
-     * This transfers the ownership of the objects to the caller since they will have the same
-     * lifecycle as that of the caller. The caller doesn't have to care about the objects inside
-     * the holder but should hold a reference to it and manage its lifetime.
-     *
-     * @param holder {@link #InternalsHolder} used to transfer the internal objects
-     *        from WebContents to the caller.
+     * Initialize various content objects of {@link WebContents} lifetime.
+     * @param productVersion Product version for accessibility.
+     * @param viewDelegate Delegate to add/remove anchor views.
+     * @param accessDelegate Handles dispatching all hidden or super methods to the containerView.
+     * @param windowAndroid An instance of the WindowAndroid.
+     * @param internalsHolder A holder of objects used internally by WebContents.
      */
-    void setInternalsHolder(InternalsHolder holder);
+    void initialize(String productVersion, ViewAndroidDelegate viewDelegate,
+            ViewEventSink.InternalAccessDelegate accessDelegate, WindowAndroid windowAndroid,
+            @NonNull InternalsHolder internalsHolder);
 
     /**
      * @return The top level WindowAndroid associated with this WebContents.  This can be null.
      */
     WindowAndroid getTopLevelNativeWindow();
+
+    /*
+     * Updates the native {@link WebContents} with a new window. This moves the NativeView and
+     * attached it to the new NativeWindow linked with the given {@link WindowAndroid}.
+     * TODO(jinsukkim): This should happen through view android tree instead.
+     * @param windowAndroid The new {@link WindowAndroid} for this {@link WebContents}.
+     */
+    void setTopLevelNativeWindow(WindowAndroid windowAndroid);
+
+    /**
+     * @return The {@link ViewAndroidDelegate} from which to get the container view.
+     *         This can be null.
+     */
+    ViewAndroidDelegate getViewAndroidDelegate();
 
     /**
      * Deletes the Web Contents object.
@@ -106,17 +119,6 @@ public interface WebContents extends Parcelable {
      * @return Whether or not the native object associated with this WebContent is destroyed.
      */
     boolean isDestroyed();
-
-    /**
-     * Retrieves or stores a user data object for this WebContents.
-     * @param key Class instance of the object used as the key.
-     * @param userDataFactory Factory that creates an object of the generic class. A new object
-     *        is created if it hasn't been created and non-null factory is given.
-     * @return The created or retrieved user data object. Can be null if the object was
-     *         not created yet, or {@code userDataFactory} is null, or the internal data
-     *         storage is already garbage-collected.
-     */
-    public <T> T getOrSetUserData(Class key, UserDataFactory<T> userDataFactory);
 
     /**
      * @return The navigation controller associated with this WebContents.
@@ -171,9 +173,10 @@ public interface WebContents extends Parcelable {
 
     /**
      * ChildProcessImportance on Android allows controls of the renderer process bindings
-     * independent of visibility.
+     * independent of visibility. Note this does not affect importance of subframe processes.
+     * @param mainFrameImportance importance of the main frame process.
      */
-    void setImportance(@ChildProcessImportance int importance);
+    void setImportance(@ChildProcessImportance int mainFrameImportance);
 
     /**
      * Suspends all media players for this WebContents.  Note: There may still
@@ -193,16 +196,6 @@ public interface WebContents extends Parcelable {
      * Get the Background color from underlying RenderWidgetHost for this WebContent.
      */
     int getBackgroundColor();
-
-    /**
-     * Shows an interstitial page driven by the passed in delegate.
-     *
-     * @param url The URL being blocked by the interstitial.
-     * @param interstitialPageDelegateAndroid The delegate handling the interstitial.
-     */
-    @VisibleForTesting
-    void showInterstitialPage(
-            String url, long interstitialPageDelegateAndroid);
 
     /**
      * @return Whether the page is currently showing an interstitial, such as a bad HTTPS page.
@@ -390,7 +383,7 @@ public interface WebContents extends Parcelable {
     void setOverscrollRefreshHandler(OverscrollRefreshHandler handler);
 
     /**
-     * Requests an image snapshot of the content.
+     * Requests an image snapshot of the content and stores it in the specified folder.
      *
      * @param width The width of the resulting bitmap, or 0 for "auto."
      * @param height The height of the resulting bitmap, or 0 for "auto."
@@ -398,7 +391,8 @@ public interface WebContents extends Parcelable {
      * @param callback May be called synchronously, or at a later point, to deliver the bitmap
      *                 result (or a failure code).
      */
-    void getContentBitmapAsync(int width, int height, String path, Callback<String> callback);
+    void writeContentBitmapToDiskAsync(
+            int width, int height, String path, Callback<String> callback);
 
     /**
      * Reloads all the Lo-Fi images in this WebContents.
@@ -428,35 +422,23 @@ public interface WebContents extends Parcelable {
     /**
      * Whether the WebContents has an active fullscreen video with native or custom controls.
      * The WebContents must be fullscreen when this method is called. Fullscreen videos may take a
-     * moment to register. This should only be called if AppHooks.shouldDetectVideoFullscreen()
-     * returns true.
+     * moment to register.
      */
     boolean hasActiveEffectivelyFullscreenVideo();
 
     /**
      * Whether the WebContents is allowed to enter Picture-in-Picture when it has an active
      * fullscreen video with native or custom controls.
-     * This should only be called if AppHooks.shouldDetectVideoFullscreen()
-     * returns true.
      */
     boolean isPictureInPictureAllowedForFullscreenVideo();
 
     /**
      * Gets a Rect containing the size of the currently playing fullscreen video. The position of
      * the rectangle is meaningless. Will return null if there is no such video. Fullscreen videos
-     * may take a moment to register. This should only be called if
-     * AppHooks.shouldDetectVideoFullscreen() returns true.
+     * may take a moment to register.
      */
     @Nullable
     Rect getFullscreenVideoSize();
-
-    /**
-     * Issues a fake notification about the renderer being killed.
-     *
-     * @param wasOomProtected True if the renderer was protected from the OS out-of-memory killer
-     *                        (e.g. renderer for the currently selected tab)
-     */
-    void simulateRendererKilledForTesting(boolean wasOomProtected);
 
     /**
      * Notifies the WebContents about the new persistent video status. It should be called whenever
@@ -487,4 +469,12 @@ public interface WebContents extends Parcelable {
      * @return The width of the view.
      */
     int getHeight();
+
+    /**
+     * Sets the Display Cutout safe area of the WebContents. These are insets from each edge
+     * in physical pixels
+     *
+     * @param insets The insets stored in a Rect.
+     */
+    void setDisplayCutoutSafeArea(Rect insets);
 }

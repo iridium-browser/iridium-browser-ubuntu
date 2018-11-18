@@ -19,7 +19,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
-#include "base/test/histogram_tester.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "components/gcm_driver/common/gcm_messages.h"
 #include "components/gcm_driver/crypto/gcm_decryption_result.h"
 #include "components/gcm_driver/crypto/gcm_key_store.h"
@@ -287,8 +287,8 @@ TEST_F(GCMEncryptionProviderTest, VerifiesExistingKeys) {
   std::string public_key, auth_secret;
   encryption_provider()->GetEncryptionInfo(
       kExampleAppId, "" /* empty authorized entity for non-InstanceID */,
-      base::Bind(&GCMEncryptionProviderTest::DidGetEncryptionInfo,
-                 base::Unretained(this), &public_key, &auth_secret));
+      base::BindOnce(&GCMEncryptionProviderTest::DidGetEncryptionInfo,
+                     base::Unretained(this), &public_key, &auth_secret));
 
   // Getting (or creating) the public key will be done asynchronously.
   base::RunLoop().RunUntilIdle();
@@ -305,7 +305,7 @@ TEST_F(GCMEncryptionProviderTest, VerifiesKeyRemovalGCMRegistration) {
   // non-InstanceID GCM registration.
 
   // Non-InstanceID callers pass an empty string for authorized_entity.
-  std::string authorized_entity_gcm = "";
+  std::string authorized_entity_gcm;
   std::string authorized_entity_1 = kExampleAuthorizedEntity + std::string("1");
   std::string authorized_entity_2 = kExampleAuthorizedEntity + std::string("2");
 
@@ -313,8 +313,8 @@ TEST_F(GCMEncryptionProviderTest, VerifiesKeyRemovalGCMRegistration) {
   std::string public_key, auth_secret;
   encryption_provider()->GetEncryptionInfo(
       kExampleAppId, authorized_entity_gcm,
-      base::Bind(&GCMEncryptionProviderTest::DidGetEncryptionInfo,
-                 base::Unretained(this), &public_key, &auth_secret));
+      base::BindOnce(&GCMEncryptionProviderTest::DidGetEncryptionInfo,
+                     base::Unretained(this), &public_key, &auth_secret));
 
   base::RunLoop().RunUntilIdle();
 
@@ -322,8 +322,9 @@ TEST_F(GCMEncryptionProviderTest, VerifiesKeyRemovalGCMRegistration) {
   std::string read_public_key, read_auth_secret;
   encryption_provider()->GetEncryptionInfo(
       kExampleAppId, authorized_entity_gcm,
-      base::Bind(&GCMEncryptionProviderTest::DidGetEncryptionInfo,
-                 base::Unretained(this), &read_public_key, &read_auth_secret));
+      base::BindOnce(&GCMEncryptionProviderTest::DidGetEncryptionInfo,
+                     base::Unretained(this), &read_public_key,
+                     &read_auth_secret));
 
   base::RunLoop().RunUntilIdle();
 
@@ -361,15 +362,15 @@ TEST_F(GCMEncryptionProviderTest, VerifiesKeyRemovalInstanceIDToken) {
   // affect an InstanceID token.
 
   // Non-InstanceID callers pass an empty string for authorized_entity.
-  std::string authorized_entity_gcm = "";
+  std::string authorized_entity_gcm;
   std::string authorized_entity_1 = kExampleAuthorizedEntity + std::string("1");
   std::string authorized_entity_2 = kExampleAuthorizedEntity + std::string("2");
 
   std::string public_key_1, auth_secret_1;
   encryption_provider()->GetEncryptionInfo(
       kExampleAppId, authorized_entity_1,
-      base::Bind(&GCMEncryptionProviderTest::DidGetEncryptionInfo,
-                 base::Unretained(this), &public_key_1, &auth_secret_1));
+      base::BindOnce(&GCMEncryptionProviderTest::DidGetEncryptionInfo,
+                     base::Unretained(this), &public_key_1, &auth_secret_1));
 
   base::RunLoop().RunUntilIdle();
 
@@ -382,8 +383,8 @@ TEST_F(GCMEncryptionProviderTest, VerifiesKeyRemovalInstanceIDToken) {
   std::string public_key_2, auth_secret_2;
   encryption_provider()->GetEncryptionInfo(
       kExampleAppId, authorized_entity_2,
-      base::Bind(&GCMEncryptionProviderTest::DidGetEncryptionInfo,
-                 base::Unretained(this), &public_key_2, &auth_secret_2));
+      base::BindOnce(&GCMEncryptionProviderTest::DidGetEncryptionInfo,
+                     base::Unretained(this), &public_key_2, &auth_secret_2));
 
   base::RunLoop().RunUntilIdle();
 
@@ -398,9 +399,9 @@ TEST_F(GCMEncryptionProviderTest, VerifiesKeyRemovalInstanceIDToken) {
   std::string read_public_key_1, read_auth_secret_1;
   encryption_provider()->GetEncryptionInfo(
       kExampleAppId, authorized_entity_1,
-      base::Bind(&GCMEncryptionProviderTest::DidGetEncryptionInfo,
-                 base::Unretained(this), &read_public_key_1,
-                 &read_auth_secret_1));
+      base::BindOnce(&GCMEncryptionProviderTest::DidGetEncryptionInfo,
+                     base::Unretained(this), &read_public_key_1,
+                     &read_auth_secret_1));
 
   base::RunLoop().RunUntilIdle();
 
@@ -427,9 +428,9 @@ TEST_F(GCMEncryptionProviderTest, VerifiesKeyRemovalInstanceIDToken) {
   std::string public_key_1_refreshed, auth_secret_1_refreshed;
   encryption_provider()->GetEncryptionInfo(
       kExampleAppId, authorized_entity_1,
-      base::Bind(&GCMEncryptionProviderTest::DidGetEncryptionInfo,
-                 base::Unretained(this), &public_key_1_refreshed,
-                 &auth_secret_1_refreshed));
+      base::BindOnce(&GCMEncryptionProviderTest::DidGetEncryptionInfo,
+                     base::Unretained(this), &public_key_1_refreshed,
+                     &auth_secret_1_refreshed));
 
   base::RunLoop().RunUntilIdle();
 

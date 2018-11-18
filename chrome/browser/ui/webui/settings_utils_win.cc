@@ -13,7 +13,7 @@
 #include "base/macros.h"
 #include "base/path_service.h"
 #include "base/single_thread_task_runner.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/browser_process.h"
@@ -42,9 +42,10 @@ class ManageCertificatesDialog : public ui::BaseShellDialogImpl {
     }
 
     RunState run_state = BeginRun(parent);
-    run_state.dialog_thread->task_runner()->PostTaskAndReply(
-        FROM_HERE, base::Bind(&ManageCertificatesDialog::ShowOnDialogThread,
-                              base::Unretained(this), run_state),
+    run_state.dialog_task_runner->PostTaskAndReply(
+        FROM_HERE,
+        base::Bind(&ManageCertificatesDialog::ShowOnDialogThread,
+                   base::Unretained(this), run_state),
         base::Bind(&ManageCertificatesDialog::OnDialogClosed,
                    base::Unretained(this), run_state, callback));
   }
@@ -76,15 +77,15 @@ void OpenConnectionDialogCallback() {
   // new dialog to be made for each call.  rundll32 uses the same global
   // dialog and it seems to share with the shortcut in control panel.
   base::FilePath rundll32;
-  PathService::Get(base::DIR_SYSTEM, &rundll32);
+  base::PathService::Get(base::DIR_SYSTEM, &rundll32);
   rundll32 = rundll32.AppendASCII("rundll32.exe");
 
   base::FilePath shell32dll;
-  PathService::Get(base::DIR_SYSTEM, &shell32dll);
+  base::PathService::Get(base::DIR_SYSTEM, &shell32dll);
   shell32dll = shell32dll.AppendASCII("shell32.dll");
 
   base::FilePath inetcpl;
-  PathService::Get(base::DIR_SYSTEM, &inetcpl);
+  base::PathService::Get(base::DIR_SYSTEM, &inetcpl);
   inetcpl = inetcpl.AppendASCII("inetcpl.cpl,,4");
 
   std::wstring args(shell32dll.value());

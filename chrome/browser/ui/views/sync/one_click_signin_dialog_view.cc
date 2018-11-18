@@ -10,12 +10,12 @@
 #include "base/logging.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_dialogs.h"
-#include "chrome/browser/ui/views/harmony/chrome_layout_provider.h"
+#include "chrome/browser/ui/views/chrome_layout_provider.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/constrained_window/constrained_window_views.h"
-#include "components/google/core/browser/google_util.h"
+#include "components/google/core/common/google_util.h"
 #include "components/strings/grit/components_strings.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
@@ -93,10 +93,10 @@ void OneClickSigninDialogView::Init() {
 
   // Column set for descriptive text and link.
   views::ColumnSet* cs = layout->AddColumnSet(0);
-  cs->AddColumn(views::GridLayout::FILL, views::GridLayout::CENTER, 1,
+  cs->AddColumn(views::GridLayout::FILL, views::GridLayout::CENTER, 1.0,
                 views::GridLayout::USE_PREF, 0, 0);
 
-  layout->StartRow(0, 0);
+  layout->StartRow(views::GridLayout::kFixedSize, 0);
 
   views::Label* label = new views::Label(l10n_util::GetStringFUTF16(
       IDS_ONE_CLICK_SIGNIN_DIALOG_MESSAGE_NEW, email_));
@@ -105,7 +105,7 @@ void OneClickSigninDialogView::Init() {
   label->SizeToFit(kMinimumDialogLabelWidth);
   layout->AddView(label);
 
-  layout->StartRow(0, 0);
+  layout->StartRow(views::GridLayout::kFixedSize, 0);
 
   learn_more_link_ = new views::Link(l10n_util::GetStringUTF16(IDS_LEARN_MORE));
   learn_more_link_->set_listener(this);

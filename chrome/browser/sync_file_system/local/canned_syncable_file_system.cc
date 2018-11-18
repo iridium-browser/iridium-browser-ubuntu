@@ -36,6 +36,7 @@
 #include "storage/browser/test/mock_special_storage_policy.h"
 #include "storage/browser/test/test_file_system_options.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "url/origin.h"
 
 using base::File;
 using storage::FileSystemContext;
@@ -215,20 +216,19 @@ void EnsureLastTaskRuns(base::SingleThreadTaskRunner* runner) {
 
 CannedSyncableFileSystem::CannedSyncableFileSystem(
     const GURL& origin,
-    leveldb::Env* env_override,
+    bool in_memory_file_system,
     const scoped_refptr<base::SingleThreadTaskRunner>& io_task_runner,
     const scoped_refptr<base::SingleThreadTaskRunner>& file_task_runner)
     : origin_(origin),
       type_(storage::kFileSystemTypeSyncable),
       result_(base::File::FILE_OK),
       sync_status_(sync_file_system::SYNC_STATUS_OK),
-      env_override_(env_override),
+      in_memory_file_system_(in_memory_file_system),
       io_task_runner_(io_task_runner),
       file_task_runner_(file_task_runner),
       is_filesystem_set_up_(false),
       is_filesystem_opened_(false),
-      sync_status_observers_(new ObserverList) {
-}
+      sync_status_observers_(new ObserverList) {}
 
 CannedSyncableFileSystem::~CannedSyncableFileSystem() {}
 
@@ -248,9 +248,8 @@ void CannedSyncableFileSystem::SetUp(QuotaMode quota_mode) {
   std::vector<std::string> additional_allowed_schemes;
   additional_allowed_schemes.push_back(origin_.scheme());
   storage::FileSystemOptions options(
-      storage::FileSystemOptions::PROFILE_MODE_NORMAL,
-      additional_allowed_schemes,
-      env_override_);
+      storage::FileSystemOptions::PROFILE_MODE_NORMAL, in_memory_file_system_,
+      additional_allowed_schemes);
 
   std::vector<std::unique_ptr<storage::FileSystemBackend>> additional_backends;
   additional_backends.push_back(SyncFileSystemBackend::CreateForTesting());
@@ -439,13 +438,12 @@ File::Error CannedSyncableFileSystem::ReadDirectory(
 }
 
 int64_t CannedSyncableFileSystem::Write(
-    net::URLRequestContext* url_request_context,
     const FileSystemURL& url,
     std::unique_ptr<storage::BlobDataHandle> blob_data_handle) {
   return RunOnThread<int64_t>(
       io_task_runner_.get(), FROM_HERE,
       base::BindOnce(&CannedSyncableFileSystem::DoWrite, base::Unretained(this),
-                     url_request_context, url, std::move(blob_data_handle)));
+                     url, std::move(blob_data_handle)));
 }
 
 int64_t CannedSyncableFileSystem::WriteString(const FileSystemURL& url,
@@ -638,7 +636,6 @@ void CannedSyncableFileSystem::DoReadDirectory(
 }
 
 void CannedSyncableFileSystem::DoWrite(
-    net::URLRequestContext* url_request_context,
     const FileSystemURL& url,
     std::unique_ptr<storage::BlobDataHandle> blob_data_handle,
     const WriteCallback& callback) {
@@ -646,7 +643,7 @@ void CannedSyncableFileSystem::DoWrite(
   EXPECT_TRUE(is_filesystem_opened_);
   WriteHelper* helper = new WriteHelper;
   operation_runner()->Write(
-      url_request_context, url, std::move(blob_data_handle), 0,
+      url, std::move(blob_data_handle), 0,
       base::Bind(&WriteHelper::DidWrite, base::Owned(helper), callback));
 }
 
@@ -659,10 +656,10 @@ void CannedSyncableFileSystem::DoWriteString(
   MockBlobURLRequestContext* url_request_context(
       new MockBlobURLRequestContext());
   WriteHelper* helper = new WriteHelper(url_request_context, data);
-  operation_runner()->Write(url_request_context, url,
+  operation_runner()->Write(url,
                             helper->scoped_text_blob()->GetBlobDataHandle(), 0,
-                            base::Bind(&WriteHelper::DidWrite,
-                                       base::Owned(helper), callback));
+                            base::BindRepeating(&WriteHelper::DidWrite,
+                                                base::Owned(helper), callback));
 }
 
 void CannedSyncableFileSystem::DoGetUsageAndQuota(
@@ -676,7 +673,7 @@ void CannedSyncableFileSystem::DoGetUsageAndQuota(
   EXPECT_TRUE(is_filesystem_opened_);
   DCHECK(quota_manager_.get());
   quota_manager_->GetUsageAndQuota(
-      origin_, storage_type(),
+      url::Origin::Create(origin_), storage_type(),
       base::BindOnce(&DidGetUsageAndQuota, std::move(callback), usage, quota));
 }
 

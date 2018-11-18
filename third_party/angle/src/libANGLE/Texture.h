@@ -21,6 +21,7 @@
 #include "libANGLE/Error.h"
 #include "libANGLE/FramebufferAttachment.h"
 #include "libANGLE/Image.h"
+#include "libANGLE/Observer.h"
 #include "libANGLE/Stream.h"
 #include "libANGLE/angletypes.h"
 #include "libANGLE/formatutils.h"
@@ -119,8 +120,8 @@ struct TextureState final : private angle::NonCopyable
     const ImageDesc &getBaseLevelDesc() const;
 
     // GLES1 emulation: For GL_OES_draw_texture
-    void setCrop(const gl::Rectangle& rect);
-    const gl::Rectangle& getCrop() const;
+    void setCrop(const gl::Rectangle &rect);
+    const gl::Rectangle &getCrop() const;
 
     // GLES1 emulation: Auto-mipmap generation is a texparameter
     void setGenerateMipmapHint(GLenum hint);
@@ -187,18 +188,21 @@ struct TextureState final : private angle::NonCopyable
 bool operator==(const TextureState &a, const TextureState &b);
 bool operator!=(const TextureState &a, const TextureState &b);
 
-class Texture final : public egl::ImageSibling, public LabeledObject
+class Texture final : public RefCountObject,
+                      public egl::ImageSibling,
+                      public LabeledObject,
+                      public angle::ObserverInterface
 {
   public:
     Texture(rx::GLImplFactory *factory, GLuint id, TextureType type);
     ~Texture() override;
 
-    Error onDestroy(const Context *context) override;
+    void onDestroy(const Context *context) override;
 
     void setLabel(const std::string &label) override;
     const std::string &getLabel() const override;
 
-    TextureType getType() const;
+    TextureType getType() const { return mState.mType; }
 
     void setSwizzleRed(GLenum swizzleRed);
     GLenum getSwizzleRed() const;
@@ -288,6 +292,7 @@ class Texture final : public egl::ImageSibling, public LabeledObject
                    const uint8_t *pixels);
     Error setSubImage(const Context *context,
                       const PixelUnpackState &unpackState,
+                      Buffer *unpackBuffer,
                       TextureTarget target,
                       GLint level,
                       const Box &area,
@@ -340,7 +345,7 @@ class Texture final : public egl::ImageSibling, public LabeledObject
                          GLint level,
                          const Offset &destOffset,
                          GLint sourceLevel,
-                         const Rectangle &sourceArea,
+                         const Box &sourceBox,
                          bool unpackFlipY,
                          bool unpackPremultiplyAlpha,
                          bool unpackUnmultiplyAlpha,
@@ -375,12 +380,17 @@ class Texture final : public egl::ImageSibling, public LabeledObject
 
     // FramebufferAttachmentObject implementation
     Extents getAttachmentSize(const ImageIndex &imageIndex) const override;
-    const Format &getAttachmentFormat(GLenum binding, const ImageIndex &imageIndex) const override;
+    Format getAttachmentFormat(GLenum binding, const ImageIndex &imageIndex) const override;
     GLsizei getAttachmentSamples(const ImageIndex &imageIndex) const override;
+    bool isRenderable(const Context *context,
+                      GLenum binding,
+                      const ImageIndex &imageIndex) const override;
+
+    bool getAttachmentFixedSampleLocations(const ImageIndex &imageIndex) const;
 
     // GLES1 emulation
-    void setCrop(const gl::Rectangle& rect);
-    const gl::Rectangle& getCrop() const;
+    void setCrop(const gl::Rectangle &rect);
+    const gl::Rectangle &getCrop() const;
     void setGenerateMipmapHint(GLenum generate);
     GLenum getGenerateMipmapHint() const;
 
@@ -389,9 +399,9 @@ class Texture final : public egl::ImageSibling, public LabeledObject
     GLuint getId() const override;
 
     // Needed for robust resource init.
-    Error ensureInitialized(const Context *context);
+    angle::Result ensureInitialized(const Context *context);
     InitState initState(const ImageIndex &imageIndex) const override;
-    InitState initState() const;
+    InitState initState() const { return mState.mInitState; }
     void setInitState(const ImageIndex &imageIndex, InitState initState) override;
 
     enum DirtyBitType
@@ -421,13 +431,19 @@ class Texture final : public egl::ImageSibling, public LabeledObject
         // Misc
         DIRTY_BIT_LABEL,
         DIRTY_BIT_USAGE,
+        DIRTY_BIT_IMPLEMENTATION,
 
         DIRTY_BIT_COUNT,
     };
     using DirtyBits = angle::BitSet<DIRTY_BIT_COUNT>;
 
-    void syncState();
+    angle::Result syncState(const Context *context);
     bool hasAnyDirtyBit() const { return mDirtyBits.any(); }
+
+    // ObserverInterface implementation.
+    void onSubjectStateChange(const gl::Context *context,
+                              angle::SubjectIndex index,
+                              angle::SubjectMessage message) override;
 
   private:
     rx::FramebufferAttachmentObjectImpl *getAttachmentImpl() const override;
@@ -453,9 +469,12 @@ class Texture final : public egl::ImageSibling, public LabeledObject
                                     size_t level,
                                     const gl::Box &area);
 
+    Error handleMipmapGenerationHint(const Context *context, int level);
+
     TextureState mState;
     DirtyBits mDirtyBits;
     rx::TextureImpl *mTexture;
+    angle::ObserverBinding mImplObserver;
 
     std::string mLabel;
 

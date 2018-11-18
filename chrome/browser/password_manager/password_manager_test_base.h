@@ -11,7 +11,6 @@
 #include "base/run_loop.h"
 #include "chrome/browser/ssl/cert_verifier_browser_test.h"
 #include "chrome/test/base/in_process_browser_test.h"
-#include "chrome/test/views/scoped_macviews_browser_mode.h"
 #include "components/password_manager/core/browser/password_store_consumer.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
@@ -59,11 +58,12 @@ class NavigationObserver : public content::WebContentsObserver {
   DISALLOW_COPY_AND_ASSIGN(NavigationObserver);
 };
 
-// Observes the save password prompt for a specified WebContents, keeps track of
-// whether or not it is currently shown, and allows accepting saving passwords
-// through it.
+// Checks the save password prompt for a specified WebContents and allows
+// accepting saving passwords through it.
 class BubbleObserver {
  public:
+  // The constructor doesn't start tracking |web_contents|. To check the status
+  // of the prompt one can even construct a temporary BubbleObserver.
   explicit BubbleObserver(content::WebContents* web_contents);
 
   // Checks if the save prompt is being currently available due to either manual
@@ -84,9 +84,8 @@ class BubbleObserver {
   // PasswordManagerBrowserTestBase.
   bool IsUpdatePromptShownAutomatically() const;
 
-  // Dismisses the prompt currently open and moves the controller to the
-  // inactive state.
-  void Dismiss() const;
+  // Hide the currently open prompt.
+  void Hide() const;
 
   // Expecting that the prompt is available, saves the password. At the end,
   // checks that the prompt is no longer available afterwards.
@@ -138,6 +137,18 @@ class PasswordManagerBrowserTestBase : public CertVerifierBrowserTest {
   void TearDownOnMainThread() override;
   void TearDownInProcessBrowserTestFixture() override;
 
+  // Bring up a new Chrome tab set up with password manager test hooks.
+  // @param[in] browser the browser running the password manager test, upon
+  // which this function will perform the setup steps.
+  // @param[out] a new tab on the browser set up with password manager test
+  // hooks.
+  static void SetUpOnMainThreadAndGetNewTab(
+      Browser* browser,
+      content::WebContents** web_contents);
+  // Make sure that the password store associated with the given browser
+  // processed all the previous calls, calls executed on another thread.
+  static void WaitForPasswordStore(Browser* browser);
+
  protected:
   // Wrapper around ui_test_utils::NavigateToURL that waits until
   // DidFinishLoad() fires. Normally this function returns after
@@ -145,14 +156,6 @@ class PasswordManagerBrowserTestBase : public CertVerifierBrowserTest {
   // would sometimes see the DidFinishLoad event from a previous navigation and
   // return immediately.
   void NavigateToFile(const std::string& path);
-
-  // Navigates to |filename| and runs |submission_script| to submit. Navigates
-  // back to |filename| and then verifies that |expected_element| has
-  // |expected_value|.
-  void VerifyPasswordIsSavedAndFilled(const std::string& filename,
-                                      const std::string& submission_script,
-                                      const std::string& expected_element,
-                                      const std::string& expected_value);
 
   // Waits until the "value" attribute of the HTML element with |element_id| is
   // equal to |expected_value|. If the current value is not as expected, this
@@ -198,18 +201,16 @@ class PasswordManagerBrowserTestBase : public CertVerifierBrowserTest {
 
   // Checks that |password_store| stores only one credential with |username| and
   // |password|.
-  void CheckThatCredentialsStored(const base::string16& username,
-                                  const base::string16& password);
+  void CheckThatCredentialsStored(const std::string& username,
+                                  const std::string& password);
 
   // Accessors
   // Return the first created tab with a custom ManagePasswordsUIController.
   content::WebContents* WebContents() const;
-  content::RenderViewHost* RenderViewHost() const;
   content::RenderFrameHost* RenderFrameHost() const;
   net::EmbeddedTestServer& https_test_server() { return https_test_server_; }
 
  private:
-  test::ScopedMacViewsBrowserMode views_mode_{true};
   net::EmbeddedTestServer https_test_server_;
   // A tab with some hooks injected.
   content::WebContents* web_contents_;

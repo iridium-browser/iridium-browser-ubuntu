@@ -62,7 +62,7 @@ class MockAutofillAgent : public AutofillAgent {
   MockAutofillAgent(RenderFrame* render_frame,
                     PasswordAutofillAgent* password_autofill_agent,
                     PasswordGenerationAgent* password_generation_agent,
-                    service_manager::BinderRegistry* registry)
+                    blink::AssociatedInterfaceRegistry* registry)
       : AutofillAgent(render_frame,
                       password_autofill_agent,
                       password_generation_agent,
@@ -114,6 +114,9 @@ void ChromeRenderViewTest::SetUp() {
 
   registry_ = std::make_unique<service_manager::BinderRegistry>();
 
+  // TODO(crbug/862989): Before this SetUp, the test agents defined at the end
+  // of this method should be injected into the creation of RenderViewImpl.
+  // In the current state, regular agents are created before the test agents.
   content::RenderViewTest::SetUp();
 
   RegisterMainFrameRemoteInterfaces();
@@ -122,12 +125,13 @@ void ChromeRenderViewTest::SetUp() {
   // store them directly (they're stored as RenderFrameObserver*).  So just
   // create another set.
   password_autofill_agent_ = new autofill::TestPasswordAutofillAgent(
-      view_->GetMainRenderFrame(), registry_.get());
+      view_->GetMainRenderFrame(), &associated_interfaces_);
   password_generation_ = new autofill::TestPasswordGenerationAgent(
-      view_->GetMainRenderFrame(), password_autofill_agent_, registry_.get());
+      view_->GetMainRenderFrame(), password_autofill_agent_,
+      &associated_interfaces_);
   autofill_agent_ = new NiceMock<MockAutofillAgent>(
       view_->GetMainRenderFrame(), password_autofill_agent_,
-      password_generation_, registry_.get());
+      password_generation_, &associated_interfaces_);
 }
 
 void ChromeRenderViewTest::TearDown() {

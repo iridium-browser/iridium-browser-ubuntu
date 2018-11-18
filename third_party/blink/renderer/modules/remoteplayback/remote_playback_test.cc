@@ -6,19 +6,19 @@
 
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/public/platform/modules/presentation/web_presentation_client.h"
 #include "third_party/blink/public/platform/modules/remoteplayback/web_remote_playback_state.h"
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
+#include "third_party/blink/renderer/bindings/core/v8/script_function.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_testing.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_remote_playback_availability_callback.h"
+#include "third_party/blink/renderer/core/dom/events/event_listener.h"
 #include "third_party/blink/renderer/core/dom/user_gesture_indicator.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/html/media/html_media_element.h"
 #include "third_party/blink/renderer/core/html/media/html_video_element.h"
 #include "third_party/blink/renderer/core/testing/dummy_page_holder.h"
-#include "third_party/blink/renderer/modules/presentation/mock_web_presentation_client.h"
 #include "third_party/blink/renderer/modules/presentation/presentation_controller.h"
 #include "third_party/blink/renderer/modules/remoteplayback/html_media_element_remote_playback.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 
@@ -52,8 +52,8 @@ class MockEventListenerForRemotePlayback : public EventListener {
 
 class MockPresentationController final : public PresentationController {
  public:
-  MockPresentationController(LocalFrame& frame, WebPresentationClient* client)
-      : PresentationController(frame, client) {}
+  explicit MockPresentationController(LocalFrame& frame)
+      : PresentationController(frame) {}
   ~MockPresentationController() override = default;
 
   MOCK_METHOD1(AddAvailabilityObserver,
@@ -79,10 +79,6 @@ class RemotePlaybackTest : public testing::Test,
   bool IsListening(RemotePlayback* remote_playback) {
     return remote_playback->is_listening_;
   }
-
-  // Has to outlive the page so that PresentationController doesn't crash trying
-  // to set it to null in ContextDestroyed().
-  MockWebPresentationClient presentation_client_;
 };
 
 TEST_F(RemotePlaybackTest, PromptCancelledRejectsWithNotAllowedError) {
@@ -95,14 +91,15 @@ TEST_F(RemotePlaybackTest, PromptCancelledRejectsWithNotAllowedError) {
   RemotePlayback* remote_playback =
       HTMLMediaElementRemotePlayback::remote(*element);
 
-  auto resolve = MockFunction::Create(scope.GetScriptState());
-  auto reject = MockFunction::Create(scope.GetScriptState());
+  auto* resolve = MockFunction::Create(scope.GetScriptState());
+  auto* reject = MockFunction::Create(scope.GetScriptState());
 
   EXPECT_CALL(*resolve, Call(testing::_)).Times(0);
   EXPECT_CALL(*reject, Call(testing::_)).Times(1);
 
-  std::unique_ptr<UserGestureIndicator> indicator = Frame::NotifyUserActivation(
-      &page_holder->GetFrame(), UserGestureToken::kNewGesture);
+  std::unique_ptr<UserGestureIndicator> indicator =
+      LocalFrame::NotifyUserActivation(&page_holder->GetFrame(),
+                                       UserGestureToken::kNewGesture);
   remote_playback->prompt(scope.GetScriptState())
       .Then(resolve->Bind(), reject->Bind());
   CancelPrompt(remote_playback);
@@ -126,16 +123,17 @@ TEST_F(RemotePlaybackTest, PromptConnectedRejectsWhenCancelled) {
   RemotePlayback* remote_playback =
       HTMLMediaElementRemotePlayback::remote(*element);
 
-  auto resolve = MockFunction::Create(scope.GetScriptState());
-  auto reject = MockFunction::Create(scope.GetScriptState());
+  auto* resolve = MockFunction::Create(scope.GetScriptState());
+  auto* reject = MockFunction::Create(scope.GetScriptState());
 
   EXPECT_CALL(*resolve, Call(testing::_)).Times(0);
   EXPECT_CALL(*reject, Call(testing::_)).Times(1);
 
   SetState(remote_playback, WebRemotePlaybackState::kConnected);
 
-  std::unique_ptr<UserGestureIndicator> indicator = Frame::NotifyUserActivation(
-      &page_holder->GetFrame(), UserGestureToken::kNewGesture);
+  std::unique_ptr<UserGestureIndicator> indicator =
+      LocalFrame::NotifyUserActivation(&page_holder->GetFrame(),
+                                       UserGestureToken::kNewGesture);
   remote_playback->prompt(scope.GetScriptState())
       .Then(resolve->Bind(), reject->Bind());
   CancelPrompt(remote_playback);
@@ -159,16 +157,17 @@ TEST_F(RemotePlaybackTest, PromptConnectedResolvesWhenDisconnected) {
   RemotePlayback* remote_playback =
       HTMLMediaElementRemotePlayback::remote(*element);
 
-  auto resolve = MockFunction::Create(scope.GetScriptState());
-  auto reject = MockFunction::Create(scope.GetScriptState());
+  auto* resolve = MockFunction::Create(scope.GetScriptState());
+  auto* reject = MockFunction::Create(scope.GetScriptState());
 
   EXPECT_CALL(*resolve, Call(testing::_)).Times(1);
   EXPECT_CALL(*reject, Call(testing::_)).Times(0);
 
   SetState(remote_playback, WebRemotePlaybackState::kConnected);
 
-  std::unique_ptr<UserGestureIndicator> indicator = Frame::NotifyUserActivation(
-      &page_holder->GetFrame(), UserGestureToken::kNewGesture);
+  std::unique_ptr<UserGestureIndicator> indicator =
+      LocalFrame::NotifyUserActivation(&page_holder->GetFrame(),
+                                       UserGestureToken::kNewGesture);
   remote_playback->prompt(scope.GetScriptState())
       .Then(resolve->Bind(), reject->Bind());
 
@@ -193,11 +192,11 @@ TEST_F(RemotePlaybackTest, StateChangeEvents) {
   RemotePlayback* remote_playback =
       HTMLMediaElementRemotePlayback::remote(*element);
 
-  auto connecting_handler =
+  auto* connecting_handler =
       new testing::StrictMock<MockEventListenerForRemotePlayback>();
-  auto connect_handler =
+  auto* connect_handler =
       new testing::StrictMock<MockEventListenerForRemotePlayback>();
-  auto disconnect_handler =
+  auto* disconnect_handler =
       new testing::StrictMock<MockEventListenerForRemotePlayback>();
 
   remote_playback->addEventListener(EventTypeNames::connecting,
@@ -243,8 +242,9 @@ TEST_F(RemotePlaybackTest,
   EXPECT_CALL(*resolve, Call(testing::_)).Times(0);
   EXPECT_CALL(*reject, Call(testing::_)).Times(1);
 
-  std::unique_ptr<UserGestureIndicator> indicator = Frame::NotifyUserActivation(
-      &page_holder->GetFrame(), UserGestureToken::kNewGesture);
+  std::unique_ptr<UserGestureIndicator> indicator =
+      LocalFrame::NotifyUserActivation(&page_holder->GetFrame(),
+                                       UserGestureToken::kNewGesture);
   remote_playback->prompt(scope.GetScriptState())
       .Then(resolve->Bind(), reject->Bind());
   HTMLMediaElementRemotePlayback::SetBooleanAttribute(
@@ -312,14 +312,15 @@ TEST_F(RemotePlaybackTest, PromptThrowsWhenBackendDisabled) {
   RemotePlayback* remote_playback =
       HTMLMediaElementRemotePlayback::remote(*element);
 
-  auto resolve = MockFunction::Create(scope.GetScriptState());
-  auto reject = MockFunction::Create(scope.GetScriptState());
+  auto* resolve = MockFunction::Create(scope.GetScriptState());
+  auto* reject = MockFunction::Create(scope.GetScriptState());
 
   EXPECT_CALL(*resolve, Call(testing::_)).Times(0);
   EXPECT_CALL(*reject, Call(testing::_)).Times(1);
 
-  std::unique_ptr<UserGestureIndicator> indicator = Frame::NotifyUserActivation(
-      &page_holder->GetFrame(), UserGestureToken::kNewGesture);
+  std::unique_ptr<UserGestureIndicator> indicator =
+      LocalFrame::NotifyUserActivation(&page_holder->GetFrame(),
+                                       UserGestureToken::kNewGesture);
   remote_playback->prompt(scope.GetScriptState())
       .Then(resolve->Bind(), reject->Bind());
 
@@ -385,7 +386,7 @@ TEST_F(RemotePlaybackTest, IsListening) {
 
   LocalFrame& frame = page_holder->GetFrame();
   MockPresentationController* mock_controller =
-      new MockPresentationController(frame, &presentation_client_);
+      new MockPresentationController(frame);
   Supplement<LocalFrame>::ProvideTo(
       frame, static_cast<PresentationController*>(mock_controller));
 

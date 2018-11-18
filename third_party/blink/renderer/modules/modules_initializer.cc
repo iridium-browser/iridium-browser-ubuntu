@@ -23,20 +23,19 @@
 #include "third_party/blink/renderer/core/html/canvas/html_canvas_element.h"
 #include "third_party/blink/renderer/core/html/media/html_media_element.h"
 #include "third_party/blink/renderer/core/inspector/inspector_session.h"
-#include "third_party/blink/renderer/core/leak_detector/blink_leak_detector.h"
 #include "third_party/blink/renderer/core/offscreencanvas/offscreen_canvas.h"
 #include "third_party/blink/renderer/core/origin_trials/origin_trials.h"
 #include "third_party/blink/renderer/core/page/chrome_client.h"
 #include "third_party/blink/renderer/core/workers/worker_clients.h"
 #include "third_party/blink/renderer/core/workers/worker_content_settings_client.h"
-#include "third_party/blink/renderer/modules/accessibility/InspectorAccessibilityAgent.h"
 #include "third_party/blink/renderer/modules/accessibility/ax_object_cache_impl.h"
+#include "third_party/blink/renderer/modules/accessibility/inspector_accessibility_agent.h"
 #include "third_party/blink/renderer/modules/animationworklet/animation_worklet_thread.h"
 #include "third_party/blink/renderer/modules/app_banner/app_banner_controller.h"
 #include "third_party/blink/renderer/modules/audio_output_devices/audio_output_device_client.h"
 #include "third_party/blink/renderer/modules/audio_output_devices/audio_output_device_client_impl.h"
 #include "third_party/blink/renderer/modules/audio_output_devices/html_media_element_audio_output_device.h"
-#include "third_party/blink/renderer/modules/cachestorage/InspectorCacheStorageAgent.h"
+#include "third_party/blink/renderer/modules/cache_storage/inspector_cache_storage_agent.h"
 #include "third_party/blink/renderer/modules/canvas/canvas2d/canvas_rendering_context_2d.h"
 #include "third_party/blink/renderer/modules/canvas/imagebitmap/image_bitmap_rendering_context.h"
 #include "third_party/blink/renderer/modules/canvas/offscreencanvas2d/offscreen_canvas_rendering_context_2d.h"
@@ -56,8 +55,8 @@
 #include "third_party/blink/renderer/modules/filesystem/local_file_system_client.h"
 #include "third_party/blink/renderer/modules/gamepad/navigator_gamepad.h"
 #include "third_party/blink/renderer/modules/indexed_db_names.h"
-#include "third_party/blink/renderer/modules/indexeddb/InspectorIndexedDBAgent.h"
 #include "third_party/blink/renderer/modules/indexeddb/indexed_db_client.h"
+#include "third_party/blink/renderer/modules/indexeddb/inspector_indexed_db_agent.h"
 #include "third_party/blink/renderer/modules/installation/installation_service_impl.h"
 #include "third_party/blink/renderer/modules/installedapp/installed_app_controller.h"
 #include "third_party/blink/renderer/modules/media_controls/media_controls_impl.h"
@@ -72,18 +71,21 @@
 #include "third_party/blink/renderer/modules/remoteplayback/html_media_element_remote_playback.h"
 #include "third_party/blink/renderer/modules/remoteplayback/remote_playback.h"
 #include "third_party/blink/renderer/modules/screen_orientation/screen_orientation_controller_impl.h"
-#include "third_party/blink/renderer/modules/serviceworkers/navigator_service_worker.h"
-#include "third_party/blink/renderer/modules/speech/speech_recognition_client_proxy.h"
-#include "third_party/blink/renderer/modules/storage/InspectorDOMStorageAgent.h"
+#include "third_party/blink/renderer/modules/service_worker/navigator_service_worker.h"
+#include "third_party/blink/renderer/modules/speech/speech_recognition_controller.h"
 #include "third_party/blink/renderer/modules/storage/dom_window_storage_controller.h"
-#include "third_party/blink/renderer/modules/storage/storage_namespace_controller.h"
+#include "third_party/blink/renderer/modules/storage/inspector_dom_storage_agent.h"
+#include "third_party/blink/renderer/modules/storage/storage_namespace.h"
 #include "third_party/blink/renderer/modules/time_zone_monitor/time_zone_monitor_client.h"
 #include "third_party/blink/renderer/modules/vr/navigator_vr.h"
 #include "third_party/blink/renderer/modules/vr/vr_controller.h"
-#include "third_party/blink/renderer/modules/webdatabase/InspectorDatabaseAgent.h"
 #include "third_party/blink/renderer/modules/webdatabase/database_client.h"
 #include "third_party/blink/renderer/modules/webdatabase/database_manager.h"
+#include "third_party/blink/renderer/modules/webdatabase/inspector_database_agent.h"
 #include "third_party/blink/renderer/modules/webdatabase/web_database_impl.h"
+#if defined(SUPPORT_WEBGL2_COMPUTE_CONTEXT)
+#include "third_party/blink/renderer/modules/webgl/webgl2_compute_rendering_context.h"
+#endif
 #include "third_party/blink/renderer/modules/webgl/webgl2_rendering_context.h"
 #include "third_party/blink/renderer/modules/webgl/webgl_rendering_context.h"
 #include "third_party/blink/renderer/modules/xr/xr_presentation_context.h"
@@ -126,6 +128,10 @@ void ModulesInitializer::Initialize() {
       std::make_unique<WebGLRenderingContext::Factory>());
   HTMLCanvasElement::RegisterRenderingContextFactory(
       std::make_unique<WebGL2RenderingContext::Factory>());
+#if defined(SUPPORT_WEBGL2_COMPUTE_CONTEXT)
+  HTMLCanvasElement::RegisterRenderingContextFactory(
+      std::make_unique<WebGL2ComputeRenderingContext::Factory>());
+#endif
   HTMLCanvasElement::RegisterRenderingContextFactory(
       std::make_unique<ImageBitmapRenderingContext::Factory>());
   HTMLCanvasElement::RegisterRenderingContextFactory(
@@ -138,6 +144,10 @@ void ModulesInitializer::Initialize() {
       std::make_unique<WebGLRenderingContext::Factory>());
   OffscreenCanvas::RegisterRenderingContextFactory(
       std::make_unique<WebGL2RenderingContext::Factory>());
+#if defined(SUPPORT_WEBGL2_COMPUTE_CONTEXT)
+  OffscreenCanvas::RegisterRenderingContextFactory(
+      std::make_unique<WebGL2ComputeRenderingContext::Factory>());
+#endif
 }
 
 void ModulesInitializer::InitLocalFrame(LocalFrame& frame) const {
@@ -159,7 +169,7 @@ void ModulesInitializer::InitLocalFrame(LocalFrame& frame) const {
 
 void ModulesInitializer::InstallSupplements(LocalFrame& frame) const {
   WebLocalFrameImpl* web_frame = WebLocalFrameImpl::FromFrame(&frame);
-  WebFrameClient* client = web_frame->Client();
+  WebLocalFrameClient* client = web_frame->Client();
   DCHECK(client);
   ProvidePushControllerTo(frame, client->PushClient());
   ProvideUserMediaTo(frame, UserMediaClient::Create(client->UserMediaClient()));
@@ -171,14 +181,13 @@ void ModulesInitializer::InstallSupplements(LocalFrame& frame) const {
 
   ScreenOrientationControllerImpl::ProvideTo(frame);
   if (RuntimeEnabledFeatures::PresentationEnabled())
-    PresentationController::ProvideTo(frame, client->PresentationClient());
+    PresentationController::ProvideTo(frame);
   if (RuntimeEnabledFeatures::AudioOutputDevicesEnabled()) {
     ProvideAudioOutputDeviceClientTo(frame,
                                      new AudioOutputDeviceClientImpl(frame));
   }
   InstalledAppController::ProvideTo(frame, client->GetRelatedAppsFetcher());
-  ::blink::ProvideSpeechRecognitionTo(
-      frame, SpeechRecognitionClientProxy::Create(client->SpeechRecognizer()));
+  ::blink::ProvideSpeechRecognitionTo(frame);
 }
 
 void ModulesInitializer::ProvideLocalFileSystemToWorker(
@@ -213,10 +222,10 @@ void ModulesInitializer::InitInspectorAgentSession(
   session->Append(
       new InspectorIndexedDBAgent(inspected_frames, session->V8Session()));
   session->Append(new DeviceOrientationInspectorAgent(inspected_frames));
+  session->Append(new InspectorDOMStorageAgent(inspected_frames));
   if (allow_view_agents) {
     session->Append(InspectorDatabaseAgent::Create(page));
-    session->Append(new InspectorAccessibilityAgent(page, dom_agent));
-    session->Append(InspectorDOMStorageAgent::Create(page));
+    session->Append(new InspectorAccessibilityAgent(inspected_frames, dom_agent));
     session->Append(InspectorCacheStorageAgent::Create(inspected_frames));
   }
 }
@@ -230,17 +239,18 @@ void ModulesInitializer::OnClearWindowObjectInMainWorld(
   NavigatorGamepad::From(document);
   NavigatorServiceWorker::From(document);
   DOMWindowStorageController::From(document);
-  if (OriginTrials::webVREnabled(document.GetExecutionContext()))
+  if (OriginTrials::WebVREnabled(document.GetExecutionContext()))
     NavigatorVR::From(document);
   if (RuntimeEnabledFeatures::PresentationEnabled() &&
       settings.GetPresentationReceiver()) {
-    // Call this in order to ensure the object is created.
+    // We eagerly create PresentationReceiver so that the frame creating the
+    // presentation can offer a connection to the presentation receiver.
     PresentationReceiver::From(document);
   }
 }
 
 std::unique_ptr<WebMediaPlayer> ModulesInitializer::CreateWebMediaPlayer(
-    WebFrameClient* web_frame_client,
+    WebLocalFrameClient* web_frame_client,
     HTMLMediaElement& html_media_element,
     const WebMediaPlayerSource& source,
     WebMediaPlayerClient* media_player_client,
@@ -264,7 +274,7 @@ void ModulesInitializer::ProvideModulesToPage(Page& page,
   MediaKeysController::ProvideMediaKeysTo(page);
   ::blink::ProvideContextFeaturesTo(page, ContextFeaturesClientImpl::Create());
   ::blink::ProvideDatabaseClientTo(page, new DatabaseClient);
-  StorageNamespaceController::ProvideStorageNamespaceTo(page, client);
+  StorageNamespace::ProvideSessionStorageNamespaceTo(page, client);
 }
 
 void ModulesInitializer::ForceNextWebGLContextCreationToFail() const {

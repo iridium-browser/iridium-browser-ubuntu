@@ -31,16 +31,16 @@ class ProgramGL : public ProgramImpl
               bool enablePathRendering);
     ~ProgramGL() override;
 
-    gl::LinkResult load(const gl::Context *contextImpl,
-                        gl::InfoLog &infoLog,
-                        gl::BinaryInputStream *stream) override;
+    angle::Result load(const gl::Context *context,
+                       gl::InfoLog &infoLog,
+                       gl::BinaryInputStream *stream) override;
     void save(const gl::Context *context, gl::BinaryOutputStream *stream) override;
     void setBinaryRetrievableHint(bool retrievable) override;
     void setSeparable(bool separable) override;
 
-    gl::LinkResult link(const gl::Context *contextImpl,
-                        const gl::ProgramLinkedResources &resources,
-                        gl::InfoLog &infoLog) override;
+    std::unique_ptr<LinkEvent> link(const gl::Context *contextImpl,
+                                    const gl::ProgramLinkedResources &resources,
+                                    gl::InfoLog &infoLog) override;
     GLboolean validate(const gl::Caps &caps, gl::InfoLog *infoLog) override;
 
     void setUniform1fv(GLint location, GLsizei count, const GLfloat *v) override;
@@ -69,25 +69,31 @@ class ProgramGL : public ProgramImpl
     void getUniformiv(const gl::Context *context, GLint location, GLint *params) const override;
     void getUniformuiv(const gl::Context *context, GLint location, GLuint *params) const override;
 
-    void setUniformBlockBinding(GLuint uniformBlockIndex, GLuint uniformBlockBinding) override;
-
     void setPathFragmentInputGen(const std::string &inputName,
                                  GLenum genMode,
                                  GLint components,
                                  const GLfloat *coeffs) override;
 
     void markUnusedUniformLocations(std::vector<gl::VariableLocation> *uniformLocations,
-                                    std::vector<gl::SamplerBinding> *samplerBindings) override;
+                                    std::vector<gl::SamplerBinding> *samplerBindings,
+                                    std::vector<gl::ImageBinding> *imageBindings) override;
 
-    GLuint getProgramID() const;
+    ANGLE_INLINE GLuint getProgramID() const { return mProgramID; }
 
     void enableSideBySideRenderingPath() const;
     void enableLayeredRenderingPath(int baseViewIndex) const;
+
+    angle::Result syncState(const gl::Context *context,
+                            const gl::Program::DirtyBits &dirtyBits) override;
 
   private:
     void preLink();
     bool checkLinkStatus(gl::InfoLog &infoLog);
     void postLink();
+    angle::Result linkImpl(const gl::Context *contextImpl,
+                           const gl::ProgramLinkedResources &resources,
+                           gl::InfoLog &infoLog);
+
     void reapplyUBOBindingsIfNeeded(const gl::Context *context);
 
     bool getUniformBlockSize(const std::string &blockName,
@@ -105,6 +111,7 @@ class ProgramGL : public ProgramImpl
     void getAtomicCounterBufferSizeMap(std::map<int, unsigned int> *sizeMapOut) const;
 
     void linkResources(const gl::ProgramLinkedResources &resources);
+    void setUniformBlockBinding(GLuint uniformBlockIndex, GLuint uniformBlockBinding);
 
     // Helper function, makes it simpler to type.
     GLint uniLoc(GLint glLocation) const { return mUniformRealLocationMap[glLocation]; }

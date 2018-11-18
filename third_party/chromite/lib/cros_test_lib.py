@@ -39,13 +39,11 @@ from chromite.lib import gob_util
 from chromite.lib import operation
 from chromite.lib import osutils
 from chromite.lib import parallel
+from chromite.lib import partial_mock
 from chromite.lib import remote_access
 from chromite.lib import retry_util
 from chromite.lib import terminal
 from chromite.lib import timeout_util
-
-
-site_config = config_lib.GetConfig()
 
 
 # Unit tests should never connect to the live prod or debug instances
@@ -523,6 +521,11 @@ class TestCase(unittest.TestCase):
   # List of vars chromite is globally sensitive to and that should
   # be suppressed for tests.
   ENVIRON_VARIABLE_SUPPRESSIONS = ('CROS_CACHEDIR',)
+
+  # The default diff is limited to 8 rows (of 80 cols).  Make this unlimited
+  # so we always see the output.  If it's too much, people can use loggers or
+  # pagers to scroll.
+  maxDiff = None
 
   def __init__(self, *args, **kwargs):
     unittest.TestCase.__init__(self, *args, **kwargs)
@@ -1138,6 +1141,13 @@ class MockTestCase(TestCase):
     """
     return self.StartPatcher(mock.patch.object(*args, **kwargs))
 
+  def PatchDict(self, *args, **kwargs):
+    """Create and start a mock.patch.dict().
+
+    stop() will be called automatically during tearDown.
+    """
+    return self.StartPatcher(mock.patch.dict(*args, **kwargs))
+
 
 # MockTestCase must be before TempDirTestCase in this inheritance order,
 # because MockTestCase.StartPatcher() calls may be for PartialMocks, which
@@ -1274,6 +1284,8 @@ class GerritTestCase(MockTempDirTestCase):
 
       self.PatchObject(gob_util, 'GetCookies', GetCookies)
 
+    site_params = config_lib.GetSiteParams()
+
     # Make all chromite code point to the test server.
     self.patched_params = {
         'EXTERNAL_GOB_HOST': gi.git_host,
@@ -1290,26 +1302,33 @@ class GerritTestCase(MockTempDirTestCase):
         'AOSP_GERRIT_URL': gi.gerrit_url,
 
         'MANIFEST_URL': '%s/%s' % (
-            gi.git_url, site_config.params.MANIFEST_PROJECT
+            gi.git_url, site_params.MANIFEST_PROJECT
         ),
         'MANIFEST_INT_URL': '%s/%s' % (
-            gi.git_url, site_config.params.MANIFEST_INT_PROJECT
+            gi.git_url, site_params.MANIFEST_INT_PROJECT
         ),
         'GIT_REMOTES': {
-            site_config.params.EXTERNAL_REMOTE: gi.gerrit_url,
-            site_config.params.INTERNAL_REMOTE: gi.gerrit_url,
-            site_config.params.CHROMIUM_REMOTE: gi.gerrit_url,
-            site_config.params.CHROME_REMOTE: gi.gerrit_url
+            site_params.EXTERNAL_REMOTE: gi.gerrit_url,
+            site_params.INTERNAL_REMOTE: gi.gerrit_url,
+            site_params.CHROMIUM_REMOTE: gi.gerrit_url,
+            site_params.CHROME_REMOTE: gi.gerrit_url
         }
     }
 
     for k in self.patched_params.iterkeys():
-      self.saved_params[k] = site_config.params.get(k)
+      self.saved_params[k] = site_params.get(k)
 
+    site_params.update(self.patched_params)
+
+    # site_config.params shouldn't be being used, but just to be safe...
+    site_config = config_lib.GetConfig()
     site_config._site_params.update(self.patched_params)
 
   def tearDown(self):
     # Restore the 'patched' site parameters.
+    site_params = config_lib.GetSiteParams()
+    site_params.update(self.saved_params)
+    site_config = config_lib.GetConfig()
     site_config._site_params.update(self.saved_params)
 
   def createProject(self, suffix, description='Test project', owners=None,
@@ -1887,6 +1906,75 @@ class TestProgram(unittest.TestProgram):
       if self._leaked_tempdir is not None:
         logging.info('Working directory %s left behind. Please cleanup later.',
                      self._leaked_tempdir)
+
+
+class PopenMock(partial_mock.PartialCmdMock):
+  """Provides a context where all _Popen instances are low-level mocked."""
+
+  TARGET = 'chromite.lib.cros_build_lib._Popen'
+  ATTRS = ('__init__',)
+  DEFAULT_ATTR = '__init__'
+
+  def __init__(self):
+    partial_mock.PartialCmdMock.__init__(self, create_tempdir=True)
+
+  def _target__init__(self, inst, cmd, *args, **kwargs):
+    result = self._results['__init__'].LookupResult(
+        (cmd,), hook_args=(inst, cmd,) + args, hook_kwargs=kwargs)
+
+    script = os.path.join(self.tempdir, 'mock_cmd.sh')
+    stdout = os.path.join(self.tempdir, 'output')
+    stderr = os.path.join(self.tempdir, 'error')
+    osutils.WriteFile(stdout, result.output)
+    osutils.WriteFile(stderr, result.error)
+    osutils.WriteFile(
+        script,
+        ['#!/bin/bash\n', 'cat %s\n' % stdout, 'cat %s >&2\n' % stderr,
+         'exit %s' % result.returncode])
+    os.chmod(script, 0o700)
+    kwargs['cwd'] = self.tempdir
+    self.backup['__init__'](inst, [script, '--'] + cmd, *args, **kwargs)
+
+
+class RunCommandMock(partial_mock.PartialCmdMock):
+  """Provides a context where all RunCommand invocations low-level mocked."""
+
+  TARGET = 'chromite.lib.cros_build_lib'
+  ATTRS = ('RunCommand',)
+  DEFAULT_ATTR = 'RunCommand'
+
+  def RunCommand(self, cmd, *args, **kwargs):
+    result = self._results['RunCommand'].LookupResult(
+        (cmd,), kwargs=kwargs, hook_args=(cmd,) + args, hook_kwargs=kwargs)
+
+    popen_mock = PopenMock()
+    popen_mock.AddCmdResult(partial_mock.Ignore(), result.returncode,
+                            result.output, result.error)
+    with popen_mock:
+      return self.backup['RunCommand'](cmd, *args, **kwargs)
+
+
+class RunCommandTestCase(MockTestCase):
+  """MockTestCase that mocks out RunCommand by default."""
+
+  def setUp(self):
+    self.rc = self.StartPatcher(RunCommandMock())
+    self.rc.SetDefaultCmdResult()
+    self.assertCommandCalled = self.rc.assertCommandCalled
+    self.assertCommandContains = self.rc.assertCommandContains
+
+    # These ENV variables affect RunCommand behavior, hide them.
+    self._old_envs = {e: os.environ.pop(e) for e in constants.ENV_PASSTHRU
+                      if e in os.environ}
+
+  def tearDown(self):
+    # Restore hidden ENVs.
+    if hasattr(self, '_old_envs'):
+      os.environ.update(self._old_envs)
+
+
+class RunCommandTempDirTestCase(RunCommandTestCase, TempDirTestCase):
+  """Convenience class mixing TempDirTestCase and RunCommandTestCase"""
 
 
 class main(TestProgram):

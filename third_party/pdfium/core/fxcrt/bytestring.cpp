@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cctype>
 #include <string>
+#include <utility>
 
 #include "core/fxcrt/cfx_utf8decoder.h"
 #include "core/fxcrt/fx_codepage.h"
@@ -18,6 +19,7 @@
 #include "core/fxcrt/fx_safe_types.h"
 #include "core/fxcrt/string_pool_template.h"
 #include "third_party/base/numerics/safe_math.h"
+#include "third_party/base/span.h"
 #include "third_party/base/stl_util.h"
 
 template class fxcrt::StringDataTemplate<char>;
@@ -53,41 +55,6 @@ const char* FX_strstr(const char* haystack,
   return nullptr;
 }
 
-#ifndef NDEBUG
-bool IsValidCodePage(uint16_t codepage) {
-  switch (codepage) {
-    case FX_CODEPAGE_DefANSI:
-    case FX_CODEPAGE_ShiftJIS:
-    case FX_CODEPAGE_ChineseSimplified:
-    case FX_CODEPAGE_Hangul:
-    case FX_CODEPAGE_ChineseTraditional:
-      return true;
-    default:
-      return false;
-  }
-}
-#endif
-
-ByteString GetByteString(uint16_t codepage, const WideStringView& wstr) {
-#ifndef NDEBUG
-  ASSERT(IsValidCodePage(codepage));
-#endif
-
-  int src_len = wstr.GetLength();
-  int dest_len =
-      FXSYS_WideCharToMultiByte(codepage, 0, wstr.unterminated_c_str(), src_len,
-                                nullptr, 0, nullptr, nullptr);
-  if (!dest_len)
-    return ByteString();
-
-  ByteString bstr;
-  char* dest_buf = bstr.GetBuffer(dest_len);
-  FXSYS_WideCharToMultiByte(codepage, 0, wstr.unterminated_c_str(), src_len,
-                            dest_buf, dest_len, nullptr, nullptr);
-  bstr.ReleaseBuffer(dest_len);
-  return bstr;
-}
-
 }  // namespace
 
 namespace fxcrt {
@@ -120,19 +87,21 @@ ByteString ByteString::FormatV(const char* pFormat, va_list argList) {
   va_end(argListCopy);
 
   if (nMaxLen <= 0)
-    return "";
+    return ByteString();
 
   ByteString ret;
-  char* buf = ret.GetBuffer(nMaxLen);
-  if (buf) {
+  {
+    // Span's lifetime must end before ReleaseBuffer() below.
+    pdfium::span<char> buf = ret.GetBuffer(nMaxLen);
+
     // In the following two calls, there's always space in the buffer for
     // a terminating NUL that's not included in nMaxLen.
-    memset(buf, 0, nMaxLen + 1);
+    memset(buf.data(), 0, nMaxLen + 1);
     va_copy(argListCopy, argList);
-    vsnprintf(buf, nMaxLen + 1, pFormat, argListCopy);
+    vsnprintf(buf.data(), nMaxLen + 1, pFormat, argListCopy);
     va_end(argListCopy);
-    ret.ReleaseBuffer(ret.GetStringLength());
   }
+  ret.ReleaseBuffer(ret.GetStringLength());
   return ret;
 }
 
@@ -238,9 +207,16 @@ const ByteString& ByteString::operator=(const ByteStringView& stringSrc) {
   return *this;
 }
 
-const ByteString& ByteString::operator=(const ByteString& stringSrc) {
-  if (m_pData != stringSrc.m_pData)
-    m_pData = stringSrc.m_pData;
+const ByteString& ByteString::operator=(const ByteString& that) {
+  if (m_pData != that.m_pData)
+    m_pData = that.m_pData;
+
+  return *this;
+}
+
+const ByteString& ByteString::operator=(ByteString&& that) {
+  if (m_pData != that.m_pData)
+    m_pData = std::move(that.m_pData);
 
   return *this;
 }
@@ -419,29 +395,29 @@ void ByteString::Reserve(size_t len) {
   GetBuffer(len);
 }
 
-char* ByteString::GetBuffer(size_t nMinBufLength) {
+pdfium::span<char> ByteString::GetBuffer(size_t nMinBufLength) {
   if (!m_pData) {
     if (nMinBufLength == 0)
-      return nullptr;
+      return pdfium::span<char>();
 
     m_pData.Reset(StringData::Create(nMinBufLength));
     m_pData->m_nDataLength = 0;
     m_pData->m_String[0] = 0;
-    return m_pData->m_String;
+    return pdfium::span<char>(m_pData->m_String, m_pData->m_nAllocLength);
   }
 
   if (m_pData->CanOperateInPlace(nMinBufLength))
-    return m_pData->m_String;
+    return pdfium::span<char>(m_pData->m_String, m_pData->m_nAllocLength);
 
   nMinBufLength = std::max(nMinBufLength, m_pData->m_nDataLength);
   if (nMinBufLength == 0)
-    return nullptr;
+    return pdfium::span<char>();
 
   RetainPtr<StringData> pNewData(StringData::Create(nMinBufLength));
   pNewData->CopyContents(*m_pData);
   pNewData->m_nDataLength = m_pData->m_nDataLength;
   m_pData.Swap(pNewData);
-  return m_pData->m_String;
+  return pdfium::span<char>(m_pData->m_String, m_pData->m_nAllocLength);
 }
 
 size_t ByteString::Delete(size_t index, size_t count) {
@@ -485,6 +461,10 @@ void ByteString::Concat(const char* pSrcData, size_t nSrcLen) {
   pNewData->CopyContents(*m_pData);
   pNewData->CopyContentsAt(m_pData->m_nDataLength, pSrcData, nSrcLen);
   m_pData.Swap(pNewData);
+}
+
+intptr_t ByteString::ReferenceCountForTesting() const {
+  return m_pData ? m_pData->m_nRefs : 0;
 }
 
 ByteString ByteString::Mid(size_t first, size_t count) const {
@@ -689,16 +669,7 @@ size_t ByteString::Replace(const ByteStringView& pOld,
 }
 
 WideString ByteString::UTF8Decode() const {
-  CFX_UTF8Decoder decoder;
-  for (size_t i = 0; i < GetLength(); i++) {
-    decoder.Input(static_cast<uint8_t>(m_pData->m_String[i]));
-  }
-  return WideString(decoder.GetResult());
-}
-
-// static
-ByteString ByteString::FromUnicode(const WideString& str) {
-  return GetByteString(0, str.AsStringView());
+  return WideString::FromUTF8(AsStringView());
 }
 
 int ByteString::Compare(const ByteStringView& str) const {

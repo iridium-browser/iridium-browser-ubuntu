@@ -8,11 +8,18 @@
 #define CORE_FXCRT_FX_EXTENSION_H_
 
 #include <cctype>
+#include <cmath>
 #include <cwctype>
 #include <memory>
 
 #include "core/fxcrt/fx_string.h"
+#include "third_party/base/span.h"
+
+#if defined(USE_SYSTEM_ICUUC)
+#include <unicode/uchar.h>
+#else
 #include "third_party/icu/source/common/unicode/uchar.h"
+#endif
 
 #define FX_INVALID_OFFSET static_cast<uint32_t>(-1)
 
@@ -20,9 +27,7 @@
 #define FX_IsOdd(a) ((a)&1)
 #endif  // PDF_ENABLE_XFA
 
-float FXSYS_wcstof(const wchar_t* pwsStr,
-                   int32_t iLength = -1,
-                   int32_t* pUsedLen = nullptr);
+float FXSYS_wcstof(const wchar_t* pwsStr, int32_t iLength, int32_t* pUsedLen);
 wchar_t* FXSYS_wcsncpy(wchar_t* dstStr, const wchar_t* srcStr, size_t count);
 int32_t FXSYS_wcsnicmp(const wchar_t* s1, const wchar_t* s2, size_t count);
 
@@ -82,11 +87,27 @@ inline int FXSYS_DecimalCharToInt(const wchar_t c) {
 }
 
 void FXSYS_IntToTwoHexChars(uint8_t c, char* buf);
-
 void FXSYS_IntToFourHexChars(uint16_t c, char* buf);
 
 size_t FXSYS_ToUTF16BE(uint32_t unicode, char* buf);
 
-uint32_t GetBits32(const uint8_t* pData, int bitpos, int nbits);
+// Strict order over floating types where NaNs may be present.
+template <typename T>
+bool FXSYS_SafeEQ(const T& lhs, const T& rhs) {
+  return (std::isnan(lhs) && std::isnan(rhs)) ||
+         (!std::isnan(lhs) && !std::isnan(rhs) && lhs == rhs);
+}
+
+template <typename T>
+bool FXSYS_SafeLT(const T& lhs, const T& rhs) {
+  if (std::isnan(lhs) && std::isnan(rhs))
+    return false;
+  if (std::isnan(lhs) || std::isnan(rhs))
+    return std::isnan(lhs) < std::isnan(rhs);
+  return lhs < rhs;
+}
+
+void FXSYS_SetTimeFunction(time_t (*func)());
+time_t FXSYS_time(time_t* tloc);
 
 #endif  // CORE_FXCRT_FX_EXTENSION_H_

@@ -10,14 +10,20 @@
 
 #include "base/macros.h"
 #include "base/observer_list.h"
+#import "ios/chrome/browser/ui/fullscreen/fullscreen_animator.h"
 #import "ios/chrome/browser/ui/fullscreen/fullscreen_model_observer.h"
 
-@class FullscreenAnimator;
 class FullscreenController;
 class FullscreenControllerObserver;
-@class FullscreenForegroundAnimator;
+@class FullscreenResetAnimator;
 @class FullscreenScrollEndAnimator;
 @class FullscreenScrollToTopAnimator;
+@class FullscreenWebViewResizer;
+@class ToolbarRevealAnimator;
+
+namespace web {
+class WebState;
+}
 
 // A helper object that listens to FullscreenModel changes and forwards this
 // information to FullscreenControllerObservers.
@@ -34,11 +40,12 @@ class FullscreenMediator : public FullscreenModelObserver {
     observers_.RemoveObserver(observer);
   }
 
-  // Instructs the mediator that a scroll-to-top animation has been triggered.
-  void ScrollToTop();
+  // Sets the WebState which view is to be resized.
+  void SetWebState(web::WebState* webState);
 
-  // Instructs the mediator that the app will be foregrounded.
-  void WillEnterForeground();
+  // Enters or exits fullscreen, animating the changes.
+  void EnterFullscreen();
+  void ExitFullscreen();
 
   // Instructs the mediator to stop observing its model.
   void Disconnect();
@@ -51,44 +58,28 @@ class FullscreenMediator : public FullscreenModelObserver {
   void FullscreenModelScrollEventEnded(FullscreenModel* model) override;
   void FullscreenModelWasReset(FullscreenModel* model) override;
 
-  // Sets up |animator|.  |animator| is expected to be a pointer to a data
-  // member of this object, and is used to reset the variable in the animation
-  // completion block.
-  void SetUpAnimator(__strong FullscreenAnimator** animator);
-
-  // Starts |animator| if it has animations to run.  |animator| is expected to
-  // be a pointer to a data member of this object, and will be reset when
-  // attempting to start an animator without any animation blocks.
-  void StartAnimator(__strong FullscreenAnimator** animator);
+  // Sets up |animator_| with |style|, notifies FullscreenControllerObservers,
+  // and starts the animation.
+  void AnimateWithStyle(FullscreenAnimatorStyle style);
 
   // Stops the current scroll end animation if one is in progress.  If
   // |update_model| is true, the FullscreenModel will be updated with the active
   // animator's current progress value.
   void StopAnimating(bool update_model);
 
-  // Stops |animator|.  |animator| is expected to be a pointer to a data member
-  // of this object, and is used to reset the variable.  If |update_model| is
-  // true, the FullscreenModel will be updated with the current progress of the
-  // animator before deallocation.
-  void StopAnimator(__strong FullscreenAnimator** animator, bool update_model);
-
-  // Checks whether |animator| is a valid pointer to one of the three animator
-  // data members of this class.  No-op for non-debug builds.
-  void VerifyAnimatorPointer(__strong FullscreenAnimator** animator) const;
-
   // The controller.
   FullscreenController* controller_ = nullptr;
   // The model.
   FullscreenModel* model_ = nullptr;
-  // The scroll end animator passed to observers.
-  __strong FullscreenScrollEndAnimator* scroll_end_animator_ = nil;
-  // The scroll to top animator passed to observers.
-  __strong FullscreenScrollToTopAnimator* scroll_to_top_animator_ = nil;
-  // The toolbar reveal animator for foreground events.
-  __strong FullscreenForegroundAnimator* foreground_animator_ = nil;
+  // The active animator.
+  __strong FullscreenAnimator* animator_ = nil;
   // The FullscreenControllerObservers that need to get notified of model
   // changes.
-  base::ObserverList<FullscreenControllerObserver> observers_;
+  base::ObserverList<FullscreenControllerObserver>::Unchecked observers_;
+
+  // Fullscreen resizer, used to resize the WebView based on the fullscreen
+  // progress.
+  FullscreenWebViewResizer* resizer_ = nil;
 
   DISALLOW_COPY_AND_ASSIGN(FullscreenMediator);
 };

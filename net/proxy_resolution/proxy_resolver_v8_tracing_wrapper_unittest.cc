@@ -30,6 +30,7 @@
 #include "net/proxy_resolution/proxy_resolver_error_observer.h"
 #include "net/test/event_waiter.h"
 #include "net/test/gtest_util.h"
+#include "net/test/test_with_scoped_task_environment.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
@@ -41,7 +42,7 @@ namespace net {
 
 namespace {
 
-class ProxyResolverV8TracingWrapperTest : public testing::Test {
+class ProxyResolverV8TracingWrapperTest : public TestWithScopedTaskEnvironment {
  public:
   void TearDown() override {
     // Drain any pending messages, which may be left over from cancellation.
@@ -53,7 +54,7 @@ class ProxyResolverV8TracingWrapperTest : public testing::Test {
 
 scoped_refptr<PacFileData> LoadScriptData(const char* filename) {
   base::FilePath path;
-  PathService::Get(base::DIR_SOURCE_ROOT, &path);
+  base::PathService::Get(base::DIR_SOURCE_ROOT, &path);
   path = path.AppendASCII("net");
   path = path.AppendASCII("data");
   path = path.AppendASCII("proxy_resolver_v8_tracing_unittest");
@@ -789,10 +790,19 @@ class BlockableHostResolver : public HostResolver {
   BlockableHostResolver()
       : num_cancelled_requests_(0), waiting_for_resolve_(false) {}
 
+  std::unique_ptr<ResolveHostRequest> CreateRequest(
+      const HostPortPair& host,
+      const NetLogWithSource& net_log,
+      const base::Optional<ResolveHostParameters>& optional_parameters)
+      override {
+    NOTIMPLEMENTED();
+    return nullptr;
+  }
+
   int Resolve(const RequestInfo& info,
               RequestPriority priority,
               AddressList* addresses,
-              const CompletionCallback& callback,
+              CompletionOnceCallback callback,
               std::unique_ptr<Request>* out_req,
               const NetLogWithSource& net_log) override {
     EXPECT_FALSE(callback.is_null());

@@ -4,8 +4,12 @@
 
 #include "headless/lib/browser/protocol/browser_handler.h"
 
+#include "base/task/post_task.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/web_contents.h"
 #include "headless/lib/browser/headless_browser_impl.h"
+#include "headless/lib/browser/headless_web_contents_impl.h"
 
 namespace headless {
 namespace protocol {
@@ -62,8 +66,8 @@ Response BrowserHandler::GetWindowBounds(
 }
 
 Response BrowserHandler::Close() {
-  content::BrowserThread::PostTask(
-      content::BrowserThread::UI, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {content::BrowserThread::UI},
       base::BindOnce(&HeadlessBrowserImpl::Shutdown, browser()));
   return Response::OK();
 }
@@ -71,7 +75,7 @@ Response BrowserHandler::Close() {
 Response BrowserHandler::SetWindowBounds(
     int window_id,
     std::unique_ptr<Browser::Bounds> window_bounds) {
-  HeadlessWebContentsImpl* web_contents =
+  HeadlessWebContentsImpl* web_contents = web_contents =
       browser()->GetWebContentsForWindowId(window_id);
   if (!web_contents)
     return Response::Error("Browser window not found");

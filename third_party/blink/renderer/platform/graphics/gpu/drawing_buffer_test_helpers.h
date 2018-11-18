@@ -6,6 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_GRAPHICS_GPU_DRAWING_BUFFER_TEST_HELPERS_H_
 
 #include "build/build_config.h"
+#include "cc/test/stub_decode_cache.h"
 #include "gpu/command_buffer/common/capabilities.h"
 #include "gpu/config/gpu_feature_info.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -37,10 +38,10 @@ class WebGraphicsContext3DProviderForTests
       : gl_(std::move(gl)) {}
 
   gpu::gles2::GLES2Interface* ContextGL() override { return gl_.get(); }
-  bool IsSoftwareRendering() const override { return false; }
 
   // Not used by WebGL code.
   GrContext* GetGrContext() override { return nullptr; }
+  gpu::webgpu::WebGPUInterface* WebGPUInterface() override { return nullptr; }
   bool BindToCurrentThread() override { return false; }
   const gpu::Capabilities& GetCapabilities() const override {
     return capabilities_;
@@ -51,11 +52,13 @@ class WebGraphicsContext3DProviderForTests
   viz::GLHelper* GetGLHelper() override { return nullptr; }
   void SetLostContextCallback(base::Closure) override {}
   void SetErrorMessageCallback(
-      base::RepeatingCallback<void(const char*, int32_t id)>) {}
-  void SignalQuery(uint32_t, base::OnceClosure) override {}
-  cc::ImageDecodeCache* ImageDecodeCache() override { return nullptr; }
+      base::RepeatingCallback<void(const char*, int32_t id)>) override {}
+  cc::ImageDecodeCache* ImageDecodeCache(SkColorType) override {
+    return &image_decode_cache_;
+  }
 
  private:
+  cc::StubDecodeCache image_decode_cache_;
   std::unique_ptr<gpu::gles2::GLES2Interface> gl_;
   gpu::Capabilities capabilities_;
   gpu::GpuFeatureInfo gpu_feature_info_;
@@ -108,12 +111,12 @@ class GLES2InterfaceForTests : public gpu::gles2::GLES2InterfaceStub,
     state_.renderbuffer_binding = renderbuffer;
   }
 
-  void Enable(GLenum cap) {
+  void Enable(GLenum cap) override {
     if (cap == GL_SCISSOR_TEST)
       state_.scissor_enabled = true;
   }
 
-  void Disable(GLenum cap) {
+  void Disable(GLenum cap) override {
     if (cap == GL_SCISSOR_TEST)
       state_.scissor_enabled = false;
   }
@@ -194,13 +197,9 @@ class GLES2InterfaceForTests : public gpu::gles2::GLES2InterfaceStub,
     }
   }
 
-  void GenMailboxCHROMIUM(GLbyte* mailbox) override {
+  void ProduceTextureDirectCHROMIUM(GLuint texture, GLbyte* mailbox) override {
     ++current_mailbox_byte_;
     memset(mailbox, current_mailbox_byte_, GL_MAILBOX_SIZE_CHROMIUM);
-  }
-
-  void ProduceTextureDirectCHROMIUM(GLuint texture,
-                                    const GLbyte* mailbox) override {
     if (!create_image_chromium_fail_) {
       ASSERT_TRUE(texture_sizes_.Contains(texture));
       most_recently_produced_size_ = texture_sizes_.at(texture);
@@ -232,7 +231,7 @@ class GLES2InterfaceForTests : public gpu::gles2::GLES2InterfaceStub,
   }
 
   MOCK_METHOD1(DestroyImageMock, void(GLuint imageId));
-  void DestroyImageCHROMIUM(GLuint image_id) {
+  void DestroyImageCHROMIUM(GLuint image_id) override {
     image_sizes_.erase(image_id);
     // No textures should be bound to this.
     CHECK(image_to_texture_map_.find(image_id) == image_to_texture_map_.end());
@@ -241,7 +240,7 @@ class GLES2InterfaceForTests : public gpu::gles2::GLES2InterfaceStub,
   }
 
   MOCK_METHOD1(BindTexImage2DMock, void(GLint imageId));
-  void BindTexImage2DCHROMIUM(GLenum target, GLint image_id) {
+  void BindTexImage2DCHROMIUM(GLenum target, GLint image_id) override {
     if (target == ImageCHROMIUMTextureTarget()) {
       texture_sizes_.Set(bound_textures_[target],
                          image_sizes_.find(image_id)->value);
@@ -251,7 +250,7 @@ class GLES2InterfaceForTests : public gpu::gles2::GLES2InterfaceStub,
   }
 
   MOCK_METHOD1(ReleaseTexImage2DMock, void(GLint imageId));
-  void ReleaseTexImage2DCHROMIUM(GLenum target, GLint image_id) {
+  void ReleaseTexImage2DCHROMIUM(GLenum target, GLint image_id) override {
     if (target == ImageCHROMIUMTextureTarget()) {
       image_sizes_.Set(current_image_id_, IntSize());
       image_to_texture_map_.erase(image_id);

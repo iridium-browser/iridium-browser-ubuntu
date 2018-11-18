@@ -20,7 +20,7 @@ source_set("constants") {
   ]
 }
 
-source_set("lib") {
+component("lib") {
   sources = [
     "catalog.cc",
     "catalog.h",
@@ -33,7 +33,10 @@ source_set("lib") {
     "instance.cc",
     "instance.h",
     "manifest_provider.h",
+    "service_options.h",
   ]
+
+  configs += [ "//build/config/compiler:wexit_time_destructors" ]
 
   deps = [
     ":constants",
@@ -48,6 +51,10 @@ source_set("lib") {
     # directory.mojom.h is #included by catalog.h
     "//components/services/filesystem/public/interfaces",
   ]
+
+  output_name = "catalog_lib"
+
+  defines = [ "IS_CATALOG_IMPL" ]
 }
 
 service_manifest("manifest") {

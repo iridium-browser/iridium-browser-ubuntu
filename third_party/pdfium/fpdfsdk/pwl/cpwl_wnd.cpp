@@ -12,7 +12,6 @@
 
 #include "core/fxge/cfx_renderdevice.h"
 #include "fpdfsdk/pwl/cpwl_scroll_bar.h"
-#include "third_party/base/ptr_util.h"
 #include "third_party/base/stl_util.h"
 
 namespace {
@@ -23,13 +22,8 @@ constexpr float kDefaultFontSize = 9.0f;
 
 CPWL_Wnd::CreateParams::CreateParams()
     : rcRectWnd(0, 0, 0, 0),
-      pSystemHandler(nullptr),
-      pFontMap(nullptr),
-      pProvider(nullptr),
-      pFocusHandler(nullptr),
       dwFlags(0),
       sBackgroundColor(),
-      pAttachedWidget(nullptr),
       nBorderStyle(BorderStyle::SOLID),
       dwBorderWidth(1),
       sBorderColor(),
@@ -37,8 +31,6 @@ CPWL_Wnd::CreateParams::CreateParams()
       nTransparency(255),
       fFontSize(kDefaultFontSize),
       sDash(3, 0, 0),
-      pAttachedData(nullptr),
-      pParentWnd(nullptr),
       pMsgControl(nullptr),
       eCursorType(FXCT_ARROW) {}
 
@@ -46,7 +38,7 @@ CPWL_Wnd::CreateParams::CreateParams(const CreateParams& other) = default;
 
 CPWL_Wnd::CreateParams::~CreateParams() = default;
 
-class CPWL_MsgControl : public Observable<CPWL_MsgControl> {
+class CPWL_MsgControl final : public Observable<CPWL_MsgControl> {
  public:
   explicit CPWL_MsgControl(CPWL_Wnd* pWnd) : m_pCreatedWnd(pWnd) {}
   ~CPWL_MsgControl() {}
@@ -128,10 +120,6 @@ CPWL_Wnd::CPWL_Wnd()
 
 CPWL_Wnd::~CPWL_Wnd() {
   ASSERT(!m_bCreated);
-}
-
-ByteString CPWL_Wnd::GetClassName() const {
-  return "CPWL_Wnd";
 }
 
 void CPWL_Wnd::Create(const CreateParams& cp) {
@@ -277,33 +265,32 @@ void CPWL_Wnd::DrawChildAppearance(CFX_RenderDevice* pDevice,
 }
 
 bool CPWL_Wnd::InvalidateRect(CFX_FloatRect* pRect) {
-  ObservedPtr thisObserved(this);
-  if (!IsValid())
+    if (!IsValid())
     return true;
 
+  ObservedPtr thisObserved(this);
   CFX_FloatRect rcRefresh = pRect ? *pRect : GetWindowRect();
-
   if (!HasFlag(PWS_NOREFRESHCLIP)) {
     CFX_FloatRect rcClip = GetClipRect();
-    if (!rcClip.IsEmpty()) {
+    if (!rcClip.IsEmpty())
       rcRefresh.Intersect(rcClip);
-    }
   }
 
   CFX_FloatRect rcWin = PWLtoWnd(rcRefresh);
   rcWin.Inflate(1, 1);
   rcWin.Normalize();
 
-  if (CFX_SystemHandler* pSH = GetSystemHandler()) {
-    if (CPDFSDK_Widget* widget = static_cast<CPDFSDK_Widget*>(
-            m_CreationParams.pAttachedWidget.Get())) {
-      pSH->InvalidateRect(widget, rcWin);
-      if (!thisObserved)
-        return false;
-    }
-  }
+  CFX_SystemHandler* pSH = GetSystemHandler();
+  if (!pSH)
+    return true;
 
-  return true;
+  CPDFSDK_Widget* widget =
+      ToCPDFSDKWidget(m_CreationParams.pAttachedWidget.Get());
+  if (!widget)
+    return true;
+
+  pSH->InvalidateRect(widget, rcWin);
+  return !!thisObserved;
 }
 
 #define PWL_IMPLEMENT_KEY_METHOD(key_method_name)                  \
@@ -355,11 +342,31 @@ PWL_IMPLEMENT_MOUSE_METHOD(OnRButtonUp)
 PWL_IMPLEMENT_MOUSE_METHOD(OnMouseMove)
 #undef PWL_IMPLEMENT_MOUSE_METHOD
 
+WideString CPWL_Wnd::GetText() {
+  return WideString();
+}
+
 WideString CPWL_Wnd::GetSelectedText() {
   return WideString();
 }
 
 void CPWL_Wnd::ReplaceSelection(const WideString& text) {}
+
+bool CPWL_Wnd::CanUndo() {
+  return false;
+}
+
+bool CPWL_Wnd::CanRedo() {
+  return false;
+}
+
+bool CPWL_Wnd::Undo() {
+  return false;
+}
+
+bool CPWL_Wnd::Redo() {
+  return false;
+}
 
 bool CPWL_Wnd::OnMouseWheel(short zDelta,
                             const CFX_PointF& point,
@@ -402,10 +409,6 @@ void CPWL_Wnd::NotifyLButtonDown(CPWL_Wnd* child, const CFX_PointF& pos) {}
 void CPWL_Wnd::NotifyLButtonUp(CPWL_Wnd* child, const CFX_PointF& pos) {}
 
 void CPWL_Wnd::NotifyMouseMove(CPWL_Wnd* child, const CFX_PointF& pos) {}
-
-CPWL_Wnd* CPWL_Wnd::GetParentWindow() const {
-  return m_CreationParams.pParentWnd;
-}
 
 CFX_FloatRect CPWL_Wnd::GetWindowRect() const {
   return m_rcWindow;
@@ -478,10 +481,6 @@ const CPWL_Dash& CPWL_Wnd::GetBorderDash() const {
   return m_CreationParams.sDash;
 }
 
-CPWL_Wnd::PrivateData* CPWL_Wnd::GetAttachedData() const {
-  return m_CreationParams.pAttachedData.Get();
-}
-
 CPWL_ScrollBar* CPWL_Wnd::GetVScrollBar() const {
   return HasFlag(PWS_VSCROLL) ? m_pVScrollBar.Get() : nullptr;
 }
@@ -548,11 +547,6 @@ bool CPWL_Wnd::WndHitTest(const CFX_PointF& point) const {
 
 bool CPWL_Wnd::ClientHitTest(const CFX_PointF& point) const {
   return IsValid() && IsVisible() && GetClientRect().Contains(point);
-}
-
-const CPWL_Wnd* CPWL_Wnd::GetRootWnd() const {
-  auto* pParent = m_CreationParams.pParentWnd;
-  return pParent ? pParent->GetRootWnd() : this;
 }
 
 bool CPWL_Wnd::SetVisible(bool bVisible) {
@@ -680,19 +674,7 @@ void CPWL_Wnd::SetFontSize(float fFontSize) {
 }
 
 CFX_SystemHandler* CPWL_Wnd::GetSystemHandler() const {
-  return m_CreationParams.pSystemHandler;
-}
-
-CPWL_Wnd::FocusHandlerIface* CPWL_Wnd::GetFocusHandler() const {
-  return m_CreationParams.pFocusHandler.Get();
-}
-
-CPWL_Wnd::ProviderIface* CPWL_Wnd::GetProvider() const {
-  return m_CreationParams.pProvider.Get();
-}
-
-IPVT_FontMap* CPWL_Wnd::GetFontMap() const {
-  return m_CreationParams.pFontMap;
+  return m_CreationParams.pSystemHandler.Get();
 }
 
 CFX_Color CPWL_Wnd::GetBorderLeftTopColor(BorderStyle nBorderStyle) const {

@@ -11,16 +11,22 @@ See gclient_smoketest.py for integration tests.
 import Queue
 import copy
 import logging
+import ntpath
 import os
 import sys
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import metrics
+# We have to disable monitoring before importing gclient.
+metrics.DISABLE_METRICS_COLLECTION = True
+
 import gclient
 import gclient_utils
 import gclient_scm
 from testing_support import trial_dir
+from third_party import mock
 
 
 def write(filename, content):
@@ -34,17 +40,19 @@ def write(filename, content):
 
 
 class SCMMock(object):
-  def __init__(self, unit_test, name, url):
-    self.unit_test = unit_test
+  unit_test = None
+  def __init__(self, parsed_url, root_dir, name, out_fh=None, out_cb=None,
+               print_outbuf=False):
+    self.unit_test.assertTrue(
+        parsed_url.startswith('svn://example.com/'), parsed_url)
+    self.unit_test.assertTrue(
+        root_dir.startswith(self.unit_test.root_dir), root_dir)
     self.name = name
-    self.url = url
+    self.url = parsed_url
 
   def RunCommand(self, command, options, args, file_list):
     self.unit_test.assertEquals('None', command)
     self.unit_test.processed.put((self.name, self.url))
-
-  def FullUrlForRelativeUrl(self, url):
-    return self.url + url
 
   # pylint: disable=no-self-use
   def DoesRemoteURLMatch(self, _):
@@ -61,23 +69,19 @@ class GclientTest(trial_dir.TestCase):
     self.previous_dir = os.getcwd()
     os.chdir(self.root_dir)
     # Manual mocks.
-    self._old_createscm = gclient.Dependency.CreateSCM
-    gclient.Dependency.CreateSCM = self._createscm
+    self._old_createscm = gclient.gclient_scm.GitWrapper
+    gclient.gclient_scm.GitWrapper = SCMMock
+    SCMMock.unit_test = self
     self._old_sys_stdout = sys.stdout
     sys.stdout = gclient.gclient_utils.MakeFileAutoFlush(sys.stdout)
     sys.stdout = gclient.gclient_utils.MakeFileAnnotated(sys.stdout)
 
   def tearDown(self):
     self.assertEquals([], self._get_processed())
-    gclient.Dependency.CreateSCM = self._old_createscm
+    gclient.gclient_scm.GitWrapper = self._old_createscm
     sys.stdout = self._old_sys_stdout
     os.chdir(self.previous_dir)
     super(GclientTest, self).tearDown()
-
-  def _createscm(self, parsed_url, root_dir, name, out_fh=None, out_cb=None):
-    self.assertTrue(parsed_url.startswith('svn://example.com/'), parsed_url)
-    self.assertTrue(root_dir.startswith(self.root_dir), root_dir)
-    return SCMMock(self, name, parsed_url)
 
   def testDependencies(self):
     self._dependencies('1')
@@ -143,11 +147,11 @@ class GclientTest(trial_dir.TestCase):
       self.assertEquals(first_3, actual[0:3])
     self.assertEquals(
         [
-          ('foo/dir1', 'svn://example.com/foo/dir1'),
-          ('foo/dir1/dir2', 'svn://example.com/bar/dir1/dir2'),
-          ('foo/dir1/dir2/dir3', 'svn://example.com/foo/dir1/dir2/dir3'),
+          ('foo/dir1', 'svn://example.com/dir1'),
+          ('foo/dir1/dir2', 'svn://example.com/dir1/dir2'),
+          ('foo/dir1/dir2/dir3', 'svn://example.com/dir1/dir2/dir3'),
           ('foo/dir1/dir2/dir3/dir4',
-           'svn://example.com/foo/dir1/dir2/dir3/dir4'),
+           'svn://example.com/dir1/dir2/dir3/dir4'),
         ],
         actual[3:])
 
@@ -198,13 +202,39 @@ class GclientTest(trial_dir.TestCase):
       pass
     return items
 
+  def _get_hooks(self):
+    """Retrieves the hooks that would be run"""
+    parser = gclient.OptionParser()
+    options, _ = parser.parse_args([])
+    options.force = True
+
+    client = gclient.GClient.LoadCurrentConfig(options)
+    work_queue = gclient_utils.ExecutionQueue(options.jobs, None, False)
+    for s in client.dependencies:
+      work_queue.enqueue(s)
+    work_queue.flush({}, None, [], options=options, patch_refs={},
+                     target_branches={})
+
+    return client.GetHooks(options)
+
   def testAutofix(self):
     # Invalid urls causes pain when specifying requirements. Make sure it's
     # auto-fixed.
     url = 'proto://host/path/@revision'
     d = gclient.Dependency(
-        None, 'name', url, url, None, None, None,
-        None, '', True, False, None, True)
+        parent=None,
+        name='name',
+        url=url,
+        managed=None,
+        custom_deps=None,
+        custom_vars=None,
+        custom_hooks=None,
+        deps_file='',
+        should_process=True,
+        should_recurse=False,
+        relative=False,
+        condition=None,
+        print_outbuf=True)
     self.assertEquals('proto://host/path@revision', d.url)
 
   def testStr(self):
@@ -214,108 +244,191 @@ class GclientTest(trial_dir.TestCase):
     obj.add_dependencies_and_close(
       [
         gclient.Dependency(
-          obj, 'foo', 'raw_url', 'url', None, None, None, None, 'DEPS', True,
-          False, None, True),
+            parent=obj,
+            name='foo',
+            url='svn://example.com/foo',
+            managed=None,
+            custom_deps=None,
+            custom_vars=None,
+            custom_hooks=None,
+            deps_file='DEPS',
+            should_process=True,
+            should_recurse=True,
+            relative=False,
+            condition=None,
+            print_outbuf=True),
         gclient.Dependency(
-          obj, 'bar', 'raw_url', 'url', None, None, None, None, 'DEPS', True,
-          False, None, True),
+            parent=obj,
+            name='bar',
+            url='svn://example.com/bar',
+            managed=None,
+            custom_deps=None,
+            custom_vars=None,
+            custom_hooks=None,
+            deps_file='DEPS',
+            should_process=True,
+            should_recurse=False,
+            relative=False,
+            condition=None,
+            print_outbuf=True),
       ],
       [])
     obj.dependencies[0].add_dependencies_and_close(
       [
         gclient.Dependency(
-          obj.dependencies[0], 'foo/dir1', 'raw_url', 'url', None, None, None,
-          None, 'DEPS', True, False, None, True),
+            parent=obj.dependencies[0],
+            name='foo/dir1',
+            url='svn://example.com/foo/dir1',
+            managed=None,
+            custom_deps=None,
+            custom_vars=None,
+            custom_hooks=None,
+            deps_file='DEPS',
+            should_process=True,
+            should_recurse=False,
+            relative=False,
+            condition=None,
+            print_outbuf=True),
       ],
       [])
+    # TODO(ehmaldonado): Improve this test.
     # Make sure __str__() works fine.
     # pylint: disable=protected-access
     obj.dependencies[0]._file_list.append('foo')
     str_obj = str(obj)
-    self.assertEquals(263, len(str_obj), '%d\n%s' % (len(str_obj), str_obj))
+    self.assertEquals(322, len(str_obj), '%d\n%s' % (len(str_obj), str_obj))
 
   def testHooks(self):
-    topdir = self.root_dir
-    gclient_fn = os.path.join(topdir, '.gclient')
-    fh = open(gclient_fn, 'w')
-    print >> fh, 'solutions = [{"name":"top","url":"svn://example.com/top"}]'
-    fh.close()
-    subdir_fn = os.path.join(topdir, 'top')
-    os.mkdir(subdir_fn)
-    deps_fn = os.path.join(subdir_fn, 'DEPS')
-    fh = open(deps_fn, 'w')
     hooks = [{'pattern':'.', 'action':['cmd1', 'arg1', 'arg2']}]
-    print >> fh, 'hooks = %s' % repr(hooks)
-    fh.close()
 
-    fh = open(os.path.join(subdir_fn, 'fake.txt'), 'w')
-    print >> fh, 'bogus content'
-    fh.close()
+    write('.gclient',
+          'solutions = [{\n'
+          '  "name": "top",\n'
+          '  "url": "svn://example.com/top"\n'
+          '}]')
+    write(os.path.join('top', 'DEPS'),
+          'hooks =  %s' % repr(hooks))
+    write(os.path.join('top', 'fake.txt'),
+          "bogus content")
 
-    os.chdir(topdir)
-
-    parser = gclient.OptionParser()
-    options, _ = parser.parse_args([])
-    options.force = True
-    client = gclient.GClient.LoadCurrentConfig(options)
-    work_queue = gclient_utils.ExecutionQueue(options.jobs, None, False)
-    for s in client.dependencies:
-      work_queue.enqueue(s)
-    work_queue.flush({}, None, [], options=options, patch_refs={})
     self.assertEqual(
-        [h.action for h in client.GetHooks(options)],
+        [h.action for h in self._get_hooks()],
         [tuple(x['action']) for x in hooks])
 
   def testCustomHooks(self):
-    topdir = self.root_dir
-    gclient_fn = os.path.join(topdir, '.gclient')
-    fh = open(gclient_fn, 'w')
-    extra_hooks = [{'name': 'append', 'pattern':'.', 'action':['supercmd']}]
-    print >> fh, ('solutions = [{"name":"top","url":"svn://example.com/top",'
-        '"custom_hooks": %s},' ) % repr(extra_hooks + [{'name': 'skip'}])
-    print >> fh, '{"name":"bottom","url":"svn://example.com/bottom"}]'
-    fh.close()
-    subdir_fn = os.path.join(topdir, 'top')
-    os.mkdir(subdir_fn)
-    deps_fn = os.path.join(subdir_fn, 'DEPS')
-    fh = open(deps_fn, 'w')
-    hooks = [{'pattern':'.', 'action':['cmd1', 'arg1', 'arg2']}]
-    hooks.append({'pattern':'.', 'action':['cmd2', 'arg1', 'arg2']})
+    extra_hooks = [{'name': 'append', 'pattern': '.', 'action': ['supercmd']}]
+
+    write('.gclient',
+          'solutions = [\n'
+          '  {\n'
+          '    "name": "top",\n'
+          '    "url": "svn://example.com/top",\n' +
+         ('    "custom_hooks": %s' % repr(extra_hooks + [{'name': 'skip'}])) +
+          '  },\n'
+          '  {\n'
+          '    "name": "bottom",\n'
+          '    "url": "svn://example.com/bottom"\n'
+          '  }\n'
+          ']')
+
+    hooks = [
+      {'pattern':'.', 'action': ['cmd1', 'arg1', 'arg2']},
+      {'pattern':'.', 'action': ['cmd2', 'arg1', 'arg2']},
+    ]
     skip_hooks = [
-        {'name': 'skip', 'pattern':'.', 'action':['cmd3', 'arg1', 'arg2']}]
-    skip_hooks.append(
-        {'name': 'skip', 'pattern':'.', 'action':['cmd4', 'arg1', 'arg2']})
-    print >> fh, 'hooks = %s' % repr(hooks + skip_hooks)
-    fh.close()
+        {'name': 'skip', 'pattern':'.', 'action': ['cmd3', 'arg1', 'arg2']},
+        {'name': 'skip', 'pattern':'.', 'action': ['cmd4', 'arg1', 'arg2']},
+    ]
+    write(os.path.join('top', 'DEPS'),
+          'hooks =  %s' % repr(hooks + skip_hooks))
 
     # Make sure the custom hooks for that project don't affect the next one.
-    subdir_fn = os.path.join(topdir, 'bottom')
-    os.mkdir(subdir_fn)
-    deps_fn = os.path.join(subdir_fn, 'DEPS')
-    fh = open(deps_fn, 'w')
-    sub_hooks = [{'pattern':'.', 'action':['response1', 'yes1', 'yes2']}]
-    sub_hooks.append(
-        {'name': 'skip', 'pattern':'.', 'action':['response2', 'yes', 'sir']})
-    print >> fh, 'hooks = %s' % repr(sub_hooks)
-    fh.close()
+    sub_hooks = [
+      {'pattern':'.', 'action':['response1', 'yes1', 'yes2']},
+      {'name': 'skip', 'pattern': '.', 'action': ['response2', 'yes', 'sir']},
+    ]
+    write(os.path.join('bottom', 'DEPS'),
+          'hooks =  %s' % repr(sub_hooks))
 
-    fh = open(os.path.join(subdir_fn, 'fake.txt'), 'w')
-    print >> fh, 'bogus content'
-    fh.close()
+    write(os.path.join('bottom', 'fake.txt'),
+          "bogus content")
 
-    os.chdir(topdir)
-
-    parser = gclient.OptionParser()
-    options, _ = parser.parse_args([])
-    options.force = True
-    client = gclient.GClient.LoadCurrentConfig(options)
-    work_queue = gclient_utils.ExecutionQueue(options.jobs, None, False)
-    for s in client.dependencies:
-      work_queue.enqueue(s)
-    work_queue.flush({}, None, [], options=options, patch_refs={})
     self.assertEqual(
-        [h.action for h in client.GetHooks(options)],
+        [h.action for h in self._get_hooks()],
         [tuple(x['action']) for x in hooks + extra_hooks + sub_hooks])
+
+  def testRecurseDepsAndHooks(self):
+    """Verifies that hooks in recursedeps are ran."""
+    write(
+        '.gclient',
+        'solutions = [\n'
+        '  { "name": "foo", "url": "svn://example.com/foo" },\n'
+        ']')
+    write(
+        os.path.join('foo', 'DEPS'),
+        'use_relative_paths = True\n'
+        'deps = {\n'
+        '  "bar": "/bar",\n'
+        '}\n'
+        'recursedeps = ["bar"]')
+    write(
+        os.path.join('foo', 'bar', 'DEPS'),
+        'hooks = [{\n'
+        '  "name": "toto",\n'
+        '  "pattern": ".",\n'
+        '  "action": ["tata", "titi"]\n'
+        '}]\n')
+    write(os.path.join('foo', 'bar', 'fake.txt'),
+          "bogus content")
+
+    self.assertEqual(
+        [h.action for h in self._get_hooks()],
+        [('tata', 'titi')])
+
+  def testRecurseDepsAndHooksCwd(self):
+    """Verifies that hooks run in the correct directory with our without
+    use_relative_hooks"""
+    write(
+        '.gclient',
+        'solutions = [\n'
+        '  { "name": "foo", "url": "svn://example.com/foo" },\n'
+        ']')
+    write(
+        os.path.join('foo', 'DEPS'),
+        'use_relative_paths = True\n'
+        'deps = {\n'
+        '  "bar": "/bar",\n'
+        '  "baz": "/baz",\n'
+        '}\n'
+        'recursedeps = ["bar", "baz"]')
+
+    write(
+        os.path.join('foo', 'bar', 'DEPS'),
+        'hooks = [{\n'
+        '  "name": "toto",\n'
+        '  "pattern": ".",\n'
+        '  "action": ["tata", "titi"]\n'
+        '}]\n')
+    write(os.path.join('foo', 'bar', 'fake.txt'),
+          "bogus content")
+
+    write(
+        os.path.join('foo', 'baz', 'DEPS'),
+        'use_relative_paths=True\n'
+        'use_relative_hooks=True\n'
+        'hooks = [{\n'
+        '  "name": "lazors",\n'
+        '  "pattern": ".",\n'
+        '  "action": ["fire", "lazors"]\n'
+        '}]\n')
+    write(os.path.join('foo', 'baz', 'fake.txt'),
+          "bogus content")
+
+    self.assertEqual([(h.action, h.effective_cwd) for h in self._get_hooks()],
+        [
+            (('tata', 'titi'), self.root_dir),
+            (('fire', 'lazors'), os.path.join(self.root_dir, "foo", "baz"))
+        ])
 
   def testTargetOS(self):
     """Verifies that specifying a target_os pulls in all relevant dependencies.
@@ -436,19 +549,10 @@ class GclientTest(trial_dir.TestCase):
         '  }]\n')
     write(
         os.path.join('foo', 'DEPS'),
-        'target_os = ["baz"]\n'
-        'deps_os = {\n'
-        '  "unix": { "foo/unix": "/unix", },\n'
-        '  "baz": { "foo/baz": "/baz", },\n'
-        '  "jaz": { "foo/jaz": "/jaz", },\n'
-        '}')
+        'target_os = ["baz"]\n')
     write(
         os.path.join('bar', 'DEPS'),
-        'deps_os = {\n'
-        '  "unix": { "bar/unix": "/unix", },\n'
-        '  "baz": { "bar/baz": "/baz", },\n'
-        '  "jaz": { "bar/jaz": "/jaz", },\n'
-        '}')
+        '')
 
     parser = gclient.OptionParser()
     options, _ = parser.parse_args(['--jobs', '1'])
@@ -457,15 +561,11 @@ class GclientTest(trial_dir.TestCase):
     obj = gclient.GClient.LoadCurrentConfig(options)
     obj.RunOnDeps('None', [])
     self.assertEqual(['unix'], sorted(obj.enforced_os))
-    self.assertEquals(
-        [
-          ('bar', 'svn://example.com/bar'),
-          ('bar/unix', 'svn://example.com/bar/unix'),
-          ('foo', 'svn://example.com/foo'),
-          ('foo/baz', 'svn://example.com/foo/baz'),
-          ('foo/unix', 'svn://example.com/foo/unix'),
-          ],
-        sorted(self._get_processed()))
+    self.assertEqual([('unix', 'baz'), ('unix',)],
+                     [dep.target_os for dep in obj.dependencies])
+    self.assertEqual([('foo', 'svn://example.com/foo'),
+                      ('bar', 'svn://example.com/bar')],
+                     self._get_processed())
 
   def testTargetOsForHooksInDepsFile(self):
     """Verifies that specifying a target_os value in a DEPS file runs the right
@@ -506,127 +606,65 @@ class GclientTest(trial_dir.TestCase):
     obj = gclient.GClient.LoadCurrentConfig(options)
     obj.RunOnDeps('None', args)
     self.assertEqual(['zippy'], sorted(obj.enforced_os))
-    all_hooks = [h.action for h in obj.GetHooks(options)]
+    all_hooks = obj.GetHooks(options)
     self.assertEquals(
         [('.', 'svn://example.com/'),],
         sorted(self._get_processed()))
-    self.assertEquals(all_hooks,
-                      [('python', 'do_a')])
-
-    # Test for OS that has extra hooks in hooks_os.
-    parser = gclient.OptionParser()
-    options, args = parser.parse_args(['--jobs', '1'])
-    options.deps_os = 'blorp'
-
-    obj = gclient.GClient.LoadCurrentConfig(options)
-    obj.RunOnDeps('None', args)
-    self.assertEqual(['blorp'], sorted(obj.enforced_os))
-    all_hooks = [h.action for h in obj.GetHooks(options)]
-    self.assertEquals(
-        [('.', 'svn://example.com/'),],
-        sorted(self._get_processed()))
-    self.assertEquals(all_hooks,
+    self.assertEquals([h.action for h in all_hooks],
                       [('python', 'do_a'),
                        ('python', 'do_b')])
+    self.assertEquals([h.condition for h in all_hooks],
+                      [None, 'checkout_blorp'])
 
+  def testOverride(self):
+    """Verifies expected behavior of URL overrides."""
+    write(
+        '.gclient',
+        'solutions = [\n'
+        '  { "name": "foo",\n'
+        '    "url": "svn://example.com/foo",\n'
+        '    "custom_deps": {\n'
+        '      "foo/bar": "svn://example.com/override",\n'
+        '      "foo/skip2": None,\n'
+        '      "foo/new": "svn://example.com/new",\n'
+        '    },\n'
+        '  },]\n')
+    write(
+        os.path.join('foo', 'DEPS'),
+        'vars = {\n'
+        '  "origin": "svn://example.com",\n'
+        '}\n'
+        'deps = {\n'
+        '  "foo/skip": None,\n'
+        '  "foo/bar": "{origin}/bar",\n'
+        '  "foo/baz": "{origin}/baz",\n'
+        '  "foo/skip2": "{origin}/skip2",\n'
+        '  "foo/rel": "/rel",\n'
+        '}')
+    parser = gclient.OptionParser()
+    options, _ = parser.parse_args(['--jobs', '1'])
 
-  def testUpdateWithOsDeps(self):
-    """Verifies that complicated deps_os constructs result in the
-    correct data also with multple operating systems. Also see
-    testDepsOsOverrideDepsInDepsFile."""
+    obj = gclient.GClient.LoadCurrentConfig(options)
+    obj.RunOnDeps('None', [])
 
-    test_data = [
-      # Tuples of deps, deps_os, os_list and expected_deps.
-      (
-        # OS with no overrides at all.
-        {'foo': 'default_foo'},
-        {'os1': { 'foo': None } },
-        ['os2'],
-        {'foo': 'default_foo'}
-        ),
-      (
-        # One OS wants to add a module.
-        {'foo': 'default_foo'},
-        {'os1': { 'bar': 'os1_bar' }},
-        ['os1'],
-        {'foo': 'default_foo',
-         'bar': {'should_process': True, 'url': 'os1_bar'}}
-        ),
-      (
-        # One OS wants to add a module. One doesn't care.
-        {'foo': 'default_foo'},
-        {'os1': { 'bar': 'os1_bar' }},
-        ['os1', 'os2'],
-        {'foo': 'default_foo',
-         'bar': {'should_process': True, 'url': 'os1_bar'}}
-        ),
-      (
-        # Two OSes want to add a module with the same definition.
-        {'foo': 'default_foo'},
-        {'os1': { 'bar': 'os12_bar' },
-         'os2': { 'bar': 'os12_bar' }},
-        ['os1', 'os2'],
-        {'foo': 'default_foo',
-         'bar': {'should_process': True, 'url': 'os12_bar'}}
-        ),
-      (
-        # One OS doesn't need module, one OS wants the default.
-        {'foo': 'default_foo'},
-        {'os1': { 'foo': None },
-         'os2': {}},
-        ['os1', 'os2'],
-        {'foo': 'default_foo'}
-        ),
-      (
-        # OS doesn't need module.
-        {'foo': 'default_foo'},
-        {'os1': { 'foo': None } },
-        ['os1'],
-        {'foo': 'default_foo'}
-        ),
-      (
-        # No-op override. Regression test for http://crbug.com/735418 .
-        {'foo': 'default_foo'},
-        {'os1': { 'foo': 'default_foo' } },
-        [],
-        {'foo': {'should_process': True, 'url': 'default_foo'}}
-        ),
-      ]
-    for deps, deps_os, target_os_list, expected_deps in test_data:
-      orig_deps = copy.deepcopy(deps)
-      result = gclient.Dependency.MergeWithOsDeps(
-          deps, deps_os, target_os_list, False)
-      self.assertEqual(result, expected_deps)
-      self.assertEqual(deps, orig_deps)
+    sol = obj.dependencies[0]
+    self.assertEqual([
+        ('foo', 'svn://example.com/foo'),
+        ('foo/bar', 'svn://example.com/override'),
+        ('foo/baz', 'svn://example.com/baz'),
+        ('foo/new', 'svn://example.com/new'),
+        ('foo/rel', 'svn://example.com/rel'),
+    ], self._get_processed())
 
-  def testUpdateWithOsDepsInvalid(self):
-    test_data = [
-      # Tuples of deps, deps_os, os_list.
-      (
-        # OS wants a different version of module.
-        {'foo': 'default_foo'},
-        {'os1': { 'foo': 'os1_foo'} },
-        ['os1'],
-        ),
-      (
-        # One OS doesn't need module, another OS wants a special version.
-        {'foo': 'default_foo'},
-        {'os1': { 'foo': None },
-         'os2': { 'foo': 'os2_foo'}},
-        ['os1', 'os2'],
-        ),
-      ]
-    for deps, deps_os, target_os_list in test_data:
-      with self.assertRaises(gclient_utils.Error):
-        gclient.Dependency.MergeWithOsDeps(deps, deps_os, target_os_list, False)
-
-  def testLateOverride(self):
-    """Verifies expected behavior of LateOverride."""
-    url = "git@github.com:dart-lang/spark.git"
-    d = gclient.Dependency(None, 'name', 'raw_url', 'url',
-                           None, None, None, None, '', True, False, None, True)
-    late_url = d.LateOverride(url)
-    self.assertEquals(url, late_url)
+    self.assertEqual(6, len(sol.dependencies))
+    self.assertEqual([
+        ('foo/bar', 'svn://example.com/override'),
+        ('foo/baz', 'svn://example.com/baz'),
+        ('foo/new', 'svn://example.com/new'),
+        ('foo/rel', 'svn://example.com/rel'),
+        ('foo/skip', None),
+        ('foo/skip2', None),
+    ], [(dep.name, dep.url) for dep in sol.dependencies])
 
   def testDepsOsOverrideDepsInDepsFile(self):
     """Verifies that a 'deps_os' path cannot override a 'deps' path. Also
@@ -667,56 +705,6 @@ class GclientTest(trial_dir.TestCase):
           ('foo', 'svn://example.com/foo'),
           ],
         sorted(self._get_processed()))
-
-  def testRecursionOverride(self):
-    """Verifies gclient respects the |recursion| var syntax.
-
-    We check several things here:
-    - |recursion| = 3 sets recursion on the foo dep to exactly 3
-      (we pull /fizz, but not /fuzz)
-    - pulling foo/bar at recursion level 1 (in .gclient) is overriden by
-      a later pull of foo/bar at recursion level 2 (in the dep tree)
-    """
-    write(
-        '.gclient',
-        'solutions = [\n'
-        '  { "name": "foo", "url": "svn://example.com/foo" },\n'
-        '  { "name": "foo/bar", "url": "svn://example.com/bar" },\n'
-          ']')
-    write(
-        os.path.join('foo', 'DEPS'),
-        'deps = {\n'
-        '  "bar": "/bar",\n'
-        '}\n'
-        'recursion = 3')
-    write(
-        os.path.join('bar', 'DEPS'),
-        'deps = {\n'
-        '  "baz": "/baz",\n'
-        '}')
-    write(
-        os.path.join('baz', 'DEPS'),
-        'deps = {\n'
-        '  "fizz": "/fizz",\n'
-        '}')
-    write(
-        os.path.join('fizz', 'DEPS'),
-        'deps = {\n'
-        '  "fuzz": "/fuzz",\n'
-        '}')
-
-    options, _ = gclient.OptionParser().parse_args([])
-    obj = gclient.GClient.LoadCurrentConfig(options)
-    obj.RunOnDeps('None', [])
-    self.assertEquals(
-        [
-          ('foo', 'svn://example.com/foo'),
-          ('foo/bar', 'svn://example.com/bar'),
-          ('bar', 'svn://example.com/foo/bar'),
-          ('baz', 'svn://example.com/foo/bar/baz'),
-          ('fizz', 'svn://example.com/foo/bar/baz/fizz'),
-        ],
-        self._get_processed())
 
   def testRecursedepsOverride(self):
     """Verifies gclient respects the |recursedeps| var syntax.
@@ -769,9 +757,9 @@ class GclientTest(trial_dir.TestCase):
     obj.RunOnDeps('None', [])
     self.assertEquals(
         [
-          ('bar', 'svn://example.com/foo/bar'),
-          ('baz', 'svn://example.com/foo/bar/baz'),
-          ('fizz', 'svn://example.com/foo/bar/baz/fizz'),
+          ('bar', 'svn://example.com/bar'),
+          ('baz', 'svn://example.com/baz'),
+          ('fizz', 'svn://example.com/fizz'),
           ('foo', 'svn://example.com/foo'),
           ('foo/bar', 'svn://example.com/bar'),
           ('foo/tar', 'svn://example.com/tar'),
@@ -785,7 +773,7 @@ class GclientTest(trial_dir.TestCase):
         '.gclient',
         'solutions = [\n'
         '  { "name": "foo", "url": "svn://example.com/foo" },\n'
-          ']')
+        ']')
     write(
         os.path.join('foo', 'DEPS'),
         'use_relative_paths = True\n'
@@ -802,125 +790,6 @@ class GclientTest(trial_dir.TestCase):
         os.path.join('baz', 'DEPS'),
         'deps = {\n'
         '  "fizz": "/fizz",\n'
-        '}')
-
-    options, _ = gclient.OptionParser().parse_args([])
-    obj = gclient.GClient.LoadCurrentConfig(options)
-    obj.RunOnDeps('None', [])
-    self.assertEquals(
-        [
-          ('foo', 'svn://example.com/foo'),
-          ('foo/bar', 'svn://example.com/foo/bar'),
-          ('foo/baz', 'svn://example.com/foo/bar/baz'),
-        ],
-        self._get_processed())
-
-  def testRelativeRecursion(self):
-    """Verifies that nested use_relative_paths is always respected."""
-    write(
-        '.gclient',
-        'solutions = [\n'
-        '  { "name": "foo", "url": "svn://example.com/foo" },\n'
-          ']')
-    write(
-        os.path.join('foo', 'DEPS'),
-        'use_relative_paths = True\n'
-        'deps = {\n'
-        '  "bar": "/bar",\n'
-        '}\n'
-        'recursedeps = ["bar"]')
-    write(
-        os.path.join('foo/bar', 'DEPS'),
-        'use_relative_paths = True\n'
-        'deps = {\n'
-        '  "baz": "/baz",\n'
-        '}')
-    write(
-        os.path.join('baz', 'DEPS'),
-        'deps = {\n'
-        '  "fizz": "/fizz",\n'
-        '}')
-
-    options, _ = gclient.OptionParser().parse_args([])
-    obj = gclient.GClient.LoadCurrentConfig(options)
-    obj.RunOnDeps('None', [])
-    self.assertEquals(
-        [
-          ('foo', 'svn://example.com/foo'),
-          ('foo/bar', 'svn://example.com/foo/bar'),
-          ('foo/bar/baz', 'svn://example.com/foo/bar/baz'),
-        ],
-        self._get_processed())
-
-  def testRecursionOverridesRecursedeps(self):
-    """Verifies gclient respects |recursion| over |recursedeps|.
-
-    |recursion| is set in a top-level DEPS file.  That value is meant
-    to affect how many subdeps are parsed via recursion.
-
-    |recursedeps| is set in each DEPS file to control whether or not
-    to recurse into the immediate next subdep.
-
-    This test verifies that if both syntaxes are mixed in a DEPS file,
-    we disable |recursedeps| support and only obey |recursion|.
-
-    Since this setting is evaluated per DEPS file, recursed DEPS
-    files will each be re-evaluated according to the per DEPS rules.
-    So a DEPS that only contains |recursedeps| could then override any
-    previous |recursion| setting.  There is extra processing to ensure
-    this does not happen.
-
-    For this test to work correctly, we need to use a DEPS chain that
-    only contains recursion controls in the top DEPS file.
-
-    In foo, |recursion| and |recursedeps| are specified.  When we see
-    |recursion|, we stop trying to use |recursedeps|.
-
-    There are 2 constructions of DEPS here that are key to this test:
-
-    (1) In foo, if we used |recursedeps| instead of |recursion|, we
-        would also pull in bar.  Since bar's DEPS doesn't contain any
-        recursion statements, we would stop processing at bar.
-
-    (2) In fizz, if we used |recursedeps| at all, we should pull in
-        fuzz.
-
-    We expect to keep going past bar (satisfying 1) and we don't
-    expect to pull in fuzz (satisfying 2).
-    """
-    write(
-        '.gclient',
-        'solutions = [\n'
-        '  { "name": "foo", "url": "svn://example.com/foo" },\n'
-        '  { "name": "foo/bar", "url": "svn://example.com/bar" },\n'
-          ']')
-    write(
-        os.path.join('foo', 'DEPS'),
-        'deps = {\n'
-        '  "bar": "/bar",\n'
-        '}\n'
-        'recursion = 3\n'
-        'recursedeps = ["bar"]')
-    write(
-        os.path.join('bar', 'DEPS'),
-        'deps = {\n'
-        '  "baz": "/baz",\n'
-        '}')
-    write(
-        os.path.join('baz', 'DEPS'),
-        'deps = {\n'
-        '  "fizz": "/fizz",\n'
-        '}')
-    write(
-        os.path.join('fizz', 'DEPS'),
-        'deps = {\n'
-        '  "fuzz": "/fuzz",\n'
-        '}\n'
-        'recursedeps = ["fuzz"]')
-    write(
-        os.path.join('fuzz', 'DEPS'),
-        'deps = {\n'
-        '  "tar": "/tar",\n'
         '}')
 
     options, _ = gclient.OptionParser().parse_args([])
@@ -930,14 +799,83 @@ class GclientTest(trial_dir.TestCase):
         [
           ('foo', 'svn://example.com/foo'),
           ('foo/bar', 'svn://example.com/bar'),
-          ('bar', 'svn://example.com/foo/bar'),
-          # Deps after this would have been skipped if we were obeying
-          # |recursedeps|.
-          ('baz', 'svn://example.com/foo/bar/baz'),
-          ('fizz', 'svn://example.com/foo/bar/baz/fizz'),
-          # And this dep would have been picked up if we were obeying
-          # |recursedeps|.
-          # 'svn://example.com/foo/bar/baz/fuzz',
+          ('foo/baz', 'svn://example.com/baz'),
+        ],
+        self._get_processed())
+
+  def testRelativeRecursion(self):
+    """Verifies that nested use_relative_paths is always respected."""
+    write(
+        '.gclient',
+        'solutions = [\n'
+        '  { "name": "foo", "url": "svn://example.com/foo" },\n'
+        ']')
+    write(
+        os.path.join('foo', 'DEPS'),
+        'use_relative_paths = True\n'
+        'deps = {\n'
+        '  "bar": "/bar",\n'
+        '}\n'
+        'recursedeps = ["bar"]')
+    write(
+        os.path.join('foo/bar', 'DEPS'),
+        'use_relative_paths = True\n'
+        'deps = {\n'
+        '  "baz": "/baz",\n'
+        '}')
+    write(
+        os.path.join('baz', 'DEPS'),
+        'deps = {\n'
+        '  "fizz": "/fizz",\n'
+        '}')
+
+    options, _ = gclient.OptionParser().parse_args([])
+    obj = gclient.GClient.LoadCurrentConfig(options)
+    obj.RunOnDeps('None', [])
+    self.assertEquals(
+        [
+          ('foo', 'svn://example.com/foo'),
+          ('foo/bar', 'svn://example.com/bar'),
+          ('foo/bar/baz', 'svn://example.com/baz'),
+        ],
+        self._get_processed())
+
+  def testRelativeRecursionInNestedDir(self):
+    """Verifies a gotcha of relative recursion where the parent uses relative
+    paths but not the dependency being recursed in. In that case the recursed
+    dependencies will only take into account the first directory of its path.
+    In this test it can be seen in baz being placed in foo/third_party."""
+    write(
+        '.gclient',
+        'solutions = [\n'
+        '  { "name": "foo", "url": "svn://example.com/foo" },\n'
+        ']')
+    write(
+        os.path.join('foo', 'DEPS'),
+        'use_relative_paths = True\n'
+        'deps = {\n'
+        '  "third_party/bar": "/bar",\n'
+        '}\n'
+        'recursedeps = ["third_party/bar"]')
+    write(
+        os.path.join('foo/third_party/bar', 'DEPS'),
+        'deps = {\n'
+        '  "baz": "/baz",\n'
+        '}')
+    write(
+        os.path.join('baz', 'DEPS'),
+        'deps = {\n'
+        '  "fizz": "/fizz",\n'
+        '}')
+
+    options, _ = gclient.OptionParser().parse_args([])
+    obj = gclient.GClient.LoadCurrentConfig(options)
+    obj.RunOnDeps('None', [])
+    self.assertEquals(
+        [
+          ('foo', 'svn://example.com/foo'),
+          ('foo/third_party/bar', 'svn://example.com/bar'),
+          ('foo/third_party/baz', 'svn://example.com/baz'),
         ],
         self._get_processed())
 
@@ -972,8 +910,8 @@ class GclientTest(trial_dir.TestCase):
     self.assertEquals(
         [
           ('foo', 'svn://example.com/foo'),
-          ('bar', 'svn://example.com/foo/bar'),
-          ('baz', 'svn://example.com/foo/bar/baz'),
+          ('bar', 'svn://example.com/bar'),
+          ('baz', 'svn://example.com/baz'),
         ],
         self._get_processed())
 
@@ -1008,7 +946,7 @@ class GclientTest(trial_dir.TestCase):
     self.assertEquals(
         [
           ('foo', 'svn://example.com/foo'),
-          ('bar', 'svn://example.com/foo/bar'),
+          ('bar', 'svn://example.com/bar'),
         ],
         self._get_processed())
 
@@ -1033,9 +971,51 @@ class GclientTest(trial_dir.TestCase):
     self.assertEquals(
         [
           ('foo', 'svn://example.com/foo'),
-          ('bar', 'svn://example.com/foo/bar'),
+          ('bar', 'svn://example.com/bar'),
         ],
         self._get_processed())
+
+  def testIgnoresGitDependenciesWhenFlagIsSet(self):
+    """Verifies that git deps are ignored if --ignore-dep-type git is set."""
+    write(
+        '.gclient',
+        'solutions = [\n'
+        '  { "name": "foo", "url": "https://example.com/foo",\n'
+        '    "deps_file" : ".DEPS.git",\n'
+        '  },\n'
+          ']')
+    write(
+        os.path.join('foo', 'DEPS'),
+        'vars = {\n'
+        '  "lemur_version": "version:1234",\n'
+        '}\n'
+        'deps = {\n'
+        '  "bar": "/bar",\n'
+        '  "baz": {\n'
+        '    "packages": [{\n'
+        '      "package": "lemur",\n'
+        '      "version": Var("lemur_version"),\n'
+        '    }],\n'
+        '    "dep_type": "cipd",\n'
+        '  }\n'
+        '}')
+    options, _ = gclient.OptionParser().parse_args([])
+    options.ignore_dep_type = 'git'
+    options.validate_syntax = True
+    obj = gclient.GClient.LoadCurrentConfig(options)
+
+    self.assertEquals(1, len(obj.dependencies))
+    sol = obj.dependencies[0]
+    sol._condition = 'some_condition'
+
+    sol.ParseDepsFile()
+    self.assertEquals(1, len(sol.dependencies))
+    dep = sol.dependencies[0]
+
+    self.assertIsInstance(dep, gclient.CipdDependency)
+    self.assertEquals(
+        'https://chrome-infra-packages.appspot.com/lemur@version:1234',
+        dep.url)
 
   def testDepsFromNotAllowedHostsUnspecified(self):
     """Verifies gclient works fine with DEPS without allowed_hosts."""
@@ -1156,7 +1136,7 @@ class GclientTest(trial_dir.TestCase):
       self._get_processed()
 
   def testCreatesCipdDependencies(self):
-    """Verifies something."""
+    """Verifies that CIPD deps are created correctly."""
     write(
         '.gclient',
         'solutions = [\n'
@@ -1195,6 +1175,46 @@ class GclientTest(trial_dir.TestCase):
         'https://chrome-infra-packages.appspot.com/lemur@version:1234',
         dep.url)
 
+  def testIgnoresCipdDependenciesWhenFlagIsSet(self):
+    """Verifies that CIPD deps are ignored if --ignore-dep-type cipd is set."""
+    write(
+        '.gclient',
+        'solutions = [\n'
+        '  { "name": "foo", "url": "https://example.com/foo",\n'
+        '    "deps_file" : ".DEPS.git",\n'
+        '  },\n'
+          ']')
+    write(
+        os.path.join('foo', 'DEPS'),
+        'vars = {\n'
+        '  "lemur_version": "version:1234",\n'
+        '}\n'
+        'deps = {\n'
+        '  "bar": "/bar",\n'
+        '  "baz": {\n'
+        '    "packages": [{\n'
+        '      "package": "lemur",\n'
+        '      "version": Var("lemur_version"),\n'
+        '    }],\n'
+        '    "dep_type": "cipd",\n'
+        '  }\n'
+        '}')
+    options, _ = gclient.OptionParser().parse_args([])
+    options.ignore_dep_type = 'cipd'
+    options.validate_syntax = True
+    obj = gclient.GClient.LoadCurrentConfig(options)
+
+    self.assertEquals(1, len(obj.dependencies))
+    sol = obj.dependencies[0]
+    sol._condition = 'some_condition'
+
+    sol.ParseDepsFile()
+    self.assertEquals(1, len(sol.dependencies))
+    dep = sol.dependencies[0]
+
+    self.assertIsInstance(dep, gclient.GitDependency)
+    self.assertEquals('https://example.com/bar', dep.url)
+
   def testSameDirAllowMultipleCipdDeps(self):
     """Verifies gclient allow multiple cipd deps under same directory."""
     parser = gclient.OptionParser()
@@ -1205,28 +1225,79 @@ class GclientTest(trial_dir.TestCase):
     obj.add_dependencies_and_close(
       [
         gclient.Dependency(
-          obj, 'foo', 'raw_url', 'url', None, None, None, None, 'DEPS', True,
-          False, None, True),
+            parent=obj,
+            name='foo',
+            url='svn://example.com/foo',
+            managed=None,
+            custom_deps=None,
+            custom_vars=None,
+            custom_hooks=None,
+            deps_file='DEPS',
+            should_process=True,
+            should_recurse=True,
+            relative=False,
+            condition=None,
+            print_outbuf=True),
       ],
       [])
     obj.dependencies[0].add_dependencies_and_close(
       [
-        gclient.CipdDependency(obj.dependencies[0], 'foo',
-                               {'package': 'foo_package',
-                                'version': 'foo_version'},
-                               cipd_root, None, True, False,
-                               'fake_condition', True),
-        gclient.CipdDependency(obj.dependencies[0], 'foo',
-                               {'package': 'bar_package',
-                                'version': 'bar_version'},
-                               cipd_root, None, True, False,
-                               'fake_condition', True),
+        gclient.CipdDependency(
+            parent=obj.dependencies[0],
+            name='foo',
+            dep_value={'package': 'foo_package',
+                       'version': 'foo_version'},
+            cipd_root=cipd_root,
+            custom_vars=None,
+            should_process=True,
+            relative=False,
+            condition='fake_condition'),
+        gclient.CipdDependency(
+            parent=obj.dependencies[0],
+            name='bar',
+            dep_value={'package': 'bar_package',
+                       'version': 'bar_version'},
+            cipd_root=cipd_root,
+            custom_vars=None,
+            should_process=True,
+            relative=False,
+            condition='fake_condition'),
       ],
       [])
     dep0 = obj.dependencies[0].dependencies[0]
     dep1 = obj.dependencies[0].dependencies[1]
     self.assertEquals('https://example.com/foo_package@foo_version', dep0.url)
     self.assertEquals('https://example.com/bar_package@bar_version', dep1.url)
+
+  def _testPosixpathImpl(self):
+    parser = gclient.OptionParser()
+    options, _ = parser.parse_args([])
+    obj = gclient.GClient('src', options)
+    cipd_root = obj.GetCipdRoot()
+
+    cipd_dep = gclient.CipdDependency(
+        parent=obj,
+        name='src/foo/bar/baz',
+        dep_value={
+          'package': 'baz_package',
+          'version': 'baz_version',
+        },
+        cipd_root=cipd_root,
+        custom_vars=None,
+        should_process=True,
+        relative=False,
+        condition=None)
+    self.assertEquals(cipd_dep._cipd_subdir, 'src/foo/bar/baz')
+
+  def testPosixpathCipdSubdir(self):
+    self._testPosixpathImpl()
+
+  # CIPD wants posixpath separators for subdirs, even on windows.
+  # See crbug.com/854219.
+  def testPosixpathCipdSubdirOnWindows(self):
+    with mock.patch('os.path', new=ntpath), (
+         mock.patch('os.sep', new=ntpath.sep)):
+      self._testPosixpathImpl()
 
   def testFuzzyMatchUrlByURL(self):
     write(
@@ -1246,8 +1317,8 @@ class GclientTest(trial_dir.TestCase):
     foo_sol = obj.dependencies[0]
     self.assertEqual(
         'https://example.com/foo.git',
-        foo_sol.FuzzyMatchUrl('https://example.com/foo.git',
-                                   ['https://example.com/foo.git', 'foo']))
+        foo_sol.FuzzyMatchUrl(['https://example.com/foo.git', 'foo'])
+    )
 
   def testFuzzyMatchUrlByURLNoGit(self):
     write(
@@ -1267,8 +1338,8 @@ class GclientTest(trial_dir.TestCase):
     foo_sol = obj.dependencies[0]
     self.assertEqual(
         'https://example.com/foo',
-        foo_sol.FuzzyMatchUrl('https://example.com/foo.git',
-                                   ['https://example.com/foo', 'foo']))
+        foo_sol.FuzzyMatchUrl(['https://example.com/foo', 'foo'])
+    )
 
   def testFuzzyMatchUrlByName(self):
     write(
@@ -1286,9 +1357,7 @@ class GclientTest(trial_dir.TestCase):
     options, _ = gclient.OptionParser().parse_args([])
     obj = gclient.GClient.LoadCurrentConfig(options)
     foo_sol = obj.dependencies[0]
-    self.assertEqual(
-        'foo',
-        foo_sol.FuzzyMatchUrl('https://example.com/foo.git', ['foo']))
+    self.assertEqual('foo', foo_sol.FuzzyMatchUrl(['foo']))
 
 
 if __name__ == '__main__':

@@ -39,8 +39,41 @@ enum AssistantAllowedState {
   DISALLOWED_BY_NONPRIMARY_USER,
   // Disallowed because current user is supervised user.
   DISALLOWED_BY_SUPERVISED_USER,
+  // Disallowed because current user is child user.
+  DISALLOWED_BY_CHILD_USER,
   // Disallowed because incognito mode.
-  DISALLOWED_BY_INCOGNITO
+  DISALLOWED_BY_INCOGNITO,
+  // Disallowed because the device is in demo mode.
+  DISALLOWED_BY_DEMO_MODE,
+  // Disallowed because the device is in public session.
+  DISALLOWED_BY_PUBLIC_SESSION
+};
+
+// Allows observing changes to voice interaction status and settings.
+interface VoiceInteractionObserver {
+  // Called when voice interaction session state changes.
+  OnVoiceInteractionStatusChanged(VoiceInteractionState state);
+
+  // Called when voice interaction is enabled/disabled in settings.
+  OnVoiceInteractionSettingsEnabled(bool enabled);
+
+  // Called when voice interaction service is allowed/disallowed to access
+  // the "context" (text and graphic content that is currently on screen).
+  OnVoiceInteractionContextEnabled(bool enabled);
+
+  // Called when hotword listening is enabled/disabled.
+  OnVoiceInteractionHotwordEnabled(bool enabled);
+
+  // Called when voice interaction setup flow completed.
+  OnVoiceInteractionSetupCompleted(bool completed);
+
+  // Called when assistant feature allowed state has changed.
+  OnAssistantFeatureAllowedChanged(AssistantAllowedState state);
+
+  // Called when locale is changed in pref. The locale is in the format can be
+  // "en-US" or simply "en". When locale is not set in pref, it returns empty
+  // string.
+  OnLocaleChanged(string locale);
 };
 
 // Interface for ash client (Chrome) to connect to the voice interaction
@@ -57,10 +90,38 @@ interface VoiceInteractionController {
   // interaction session.
   NotifyContextEnabled(bool enabled);
 
+  // Called when the hotword listening is enabled/disabled.
+  NotifyHotwordEnabled(bool enabled);
+
   // Called when the voice interaction setup complete status is changed.
   NotifySetupCompleted(bool completed);
 
   // Notify if voice interaction feature is allowed or not. e.g. not allowed
   // if disabled by policy.
   NotifyFeatureAllowed(AssistantAllowedState state);
+
+  // Called when the notification is enabled/disabled.
+  NotifyNotificationEnabled(bool enabled);
+
+  // Called when the locale is changed.
+  NotifyLocaleChanged(string locale);
+
+  // Called when the launch with mic open state is changed.
+  NotifyLaunchWithMicOpen(bool launch_with_mic_open);
+
+  // Return if the voice interaction setting is enabled/disabled.
+  IsSettingEnabled() => (bool enabled);
+
+  // Return the voice interaction setup complete status.
+  IsSetupCompleted() => (bool completed);
+
+  // Return if the user has granted permission to access screen "context", the
+  // text and graphics content that is currently on screen.
+  IsContextEnabled() => (bool enabled);
+
+  // Return the voice interaction hotword listening status.
+  IsHotwordEnabled() => (bool enabled);
+
+  // Add an observer.
+  AddObserver(VoiceInteractionObserver observer);
 };

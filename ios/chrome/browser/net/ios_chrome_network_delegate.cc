@@ -13,11 +13,12 @@
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/histogram_functions.h"
-#include "base/metrics/user_metrics.h"
 #include "base/path_service.h"
+#include "base/task/post_task.h"
 #include "components/prefs/pref_member.h"
 #include "components/prefs/pref_service.h"
 #include "ios/chrome/browser/pref_names.h"
+#include "ios/web/public/web_task_traits.h"
 #include "ios/web/public/web_thread.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
@@ -29,11 +30,6 @@ namespace {
 
 const char kDNTHeader[] = "DNT";
 
-void ReportInvalidReferrerSendOnUI() {
-  base::RecordAction(
-      base::UserMetricsAction("Net.URLRequest_StartJob_InvalidReferrer"));
-}
-
 void ReportInvalidReferrerSend(const GURL& target_url,
                                const GURL& referrer_url) {
   LOG(ERROR) << "Cancelling request to " << target_url
@@ -41,8 +37,6 @@ void ReportInvalidReferrerSend(const GURL& target_url,
   // Record information to help debug http://crbug.com/422871
   if (!target_url.SchemeIsHTTPOrHTTPS())
     return;
-  web::WebThread::PostTask(web::WebThread::UI, FROM_HERE,
-                           base::Bind(&ReportInvalidReferrerSendOnUI));
   base::debug::DumpWithoutCrashing();
   NOTREACHED();
 }
@@ -77,13 +71,13 @@ void IOSChromeNetworkDelegate::InitializePrefsOnUIThread(
   if (enable_do_not_track) {
     enable_do_not_track->Init(prefs::kEnableDoNotTrack, pref_service);
     enable_do_not_track->MoveToThread(
-        web::WebThread::GetTaskRunnerForThread(web::WebThread::IO));
+        base::CreateSingleThreadTaskRunnerWithTraits({web::WebThread::IO}));
   }
 }
 
 int IOSChromeNetworkDelegate::OnBeforeURLRequest(
     net::URLRequest* request,
-    const net::CompletionCallback& callback,
+    net::CompletionOnceCallback callback,
     GURL* new_url) {
   if (enable_do_not_track_ && enable_do_not_track_->GetValue())
     request->SetExtraRequestHeaderByName(kDNTHeader, "1", true /* override */);
@@ -96,36 +90,29 @@ void IOSChromeNetworkDelegate::OnCompleted(net::URLRequest* request,
   RecordNetworkErrorHistograms(request, net_error);
 }
 
-net::NetworkDelegate::AuthRequiredResponse
-IOSChromeNetworkDelegate::OnAuthRequired(
-    net::URLRequest* request,
-    const net::AuthChallengeInfo& auth_info,
-    const AuthCallback& callback,
-    net::AuthCredentials* credentials) {
-  return net::NetworkDelegate::AUTH_REQUIRED_RESPONSE_NO_ACTION;
-}
-
 bool IOSChromeNetworkDelegate::OnCanGetCookies(
     const net::URLRequest& request,
-    const net::CookieList& cookie_list) {
+    const net::CookieList& cookie_list,
+    bool allowed_from_caller) {
   // Null during tests, or when we're running in the system context.
   if (!cookie_settings_)
-    return true;
+    return allowed_from_caller;
 
-  return cookie_settings_->IsCookieAccessAllowed(request.url(),
-                                                 request.site_for_cookies());
+  return allowed_from_caller && cookie_settings_->IsCookieAccessAllowed(
+                                    request.url(), request.site_for_cookies());
 }
 
 bool IOSChromeNetworkDelegate::OnCanSetCookie(
     const net::URLRequest& request,
     const net::CanonicalCookie& cookie,
-    net::CookieOptions* options) {
+    net::CookieOptions* options,
+    bool allowed_from_caller) {
   // Null during tests, or when we're running in the system context.
   if (!cookie_settings_)
-    return true;
+    return allowed_from_caller;
 
-  return cookie_settings_->IsCookieAccessAllowed(request.url(),
-                                                 request.site_for_cookies());
+  return allowed_from_caller && cookie_settings_->IsCookieAccessAllowed(
+                                    request.url(), request.site_for_cookies());
 }
 
 bool IOSChromeNetworkDelegate::OnCanAccessFile(

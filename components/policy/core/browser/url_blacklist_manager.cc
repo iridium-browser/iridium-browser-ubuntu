@@ -5,8 +5,12 @@
 #include "components/policy/core/browser/url_blacklist_manager.h"
 
 #include <stdint.h>
+
+#include <algorithm>
 #include <limits>
+#include <set>
 #include <utility>
+#include <vector>
 
 #include "base/bind.h"
 #include "base/files/file_path.h"
@@ -18,10 +22,11 @@
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
+#include "base/task/post_task.h"
 #include "base/task_runner_util.h"
-#include "base/task_scheduler/post_task.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/values.h"
+#include "components/policy/core/browser/url_blacklist_policy_handler.h"
 #include "components/policy/core/common/policy_pref_names.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/prefs/pref_service.h"
@@ -64,13 +69,12 @@ const char* kBypassBlacklistWildcardForSchemes[] = {
 // Maximum filters per policy. Filters over this index are ignored.
 const size_t kMaxFiltersPerPolicy = 1000;
 
-// A task that builds the blacklist on a background thread.
-std::unique_ptr<URLBlacklist> BuildBlacklist(
-    std::unique_ptr<base::ListValue> block,
-    std::unique_ptr<base::ListValue> allow) {
-  std::unique_ptr<URLBlacklist> blacklist(new URLBlacklist);
-  blacklist->Block(block.get());
-  blacklist->Allow(allow.get());
+// Returns a blacklist based on the given |block| and |allow| pattern lists.
+std::unique_ptr<URLBlacklist> BuildBlacklist(const base::ListValue* block,
+                                             const base::ListValue* allow) {
+  auto blacklist = std::make_unique<URLBlacklist>();
+  blacklist->Block(block);
+  blacklist->Allow(allow);
   return blacklist;
 }
 
@@ -135,7 +139,11 @@ bool BypassBlacklistWildcardForURL(const GURL& url) {
 
 struct URLBlacklist::FilterComponents {
   FilterComponents() : port(0), match_subdomains(true), allow(true) {}
-  ~FilterComponents() {}
+  ~FilterComponents() = default;
+  FilterComponents(const FilterComponents&) = delete;
+  FilterComponents(FilterComponents&&) = default;
+  FilterComponents& operator=(const FilterComponents&) = delete;
+  FilterComponents& operator=(FilterComponents&&) = default;
 
   // Returns true if |this| represents the "*" filter in the blacklist.
   bool IsBlacklistWildcard() const {
@@ -158,12 +166,12 @@ URLBlacklist::URLBlacklist() : id_(0), url_matcher_(new URLMatcher) {}
 
 URLBlacklist::~URLBlacklist() {}
 
-void URLBlacklist::AddFilters(bool allow,
-                              const base::ListValue* list) {
+void URLBlacklist::AddFilters(bool allow, const base::ListValue* list) {
   URLMatcherConditionSet::Vector all_conditions;
   size_t size = std::min(kMaxFiltersPerPolicy, list->GetSize());
+  std::string pattern;
+  scoped_refptr<URLMatcherConditionSet> condition_set;
   for (size_t i = 0; i < size; ++i) {
-    std::string pattern;
     bool success = list->GetString(i, &pattern);
     DCHECK(success);
     FilterComponents components;
@@ -179,20 +187,14 @@ void URLBlacklist::AddFilters(bool allow,
       continue;
     }
 
-    scoped_refptr<URLMatcherConditionSet> condition_set =
-        CreateConditionSet(url_matcher_.get(),
-                           ++id_,
-                           components.scheme,
-                           components.host,
-                           components.match_subdomains,
-                           components.port,
-                           components.path,
-                           components.query,
-                           allow);
+    condition_set = CreateConditionSet(
+        url_matcher_.get(), ++id_, components.scheme, components.host,
+        components.match_subdomains, components.port, components.path,
+        components.query, allow);
     components.number_of_key_value_pairs =
         condition_set->query_conditions().size();
-    all_conditions.push_back(condition_set);
-    filters_[id_] = components;
+    all_conditions.push_back(std::move(condition_set));
+    filters_[id_] = std::move(components);
   }
   url_matcher_->AddConditionSets(all_conditions);
 }
@@ -390,9 +392,9 @@ scoped_refptr<URLMatcherConditionSet> URLBlacklist::CreateConditionSet(
     port_filter.reset(new URLMatcherPortFilter(ranges));
   }
 
-  return new URLMatcherConditionSet(id, conditions, query_conditions,
-                                    std::move(scheme_filter),
-                                    std::move(port_filter));
+  return base::MakeRefCounted<URLMatcherConditionSet>(
+      id, conditions, query_conditions, std::move(scheme_filter),
+      std::move(port_filter));
 }
 
 // static
@@ -426,18 +428,15 @@ bool URLBlacklist::FilterTakesPrecedence(const FilterComponents& lhs,
   return false;
 }
 
-URLBlacklistManager::URLBlacklistManager(
-    PrefService* pref_service,
-    OverrideBlacklistCallback override_blacklist)
+URLBlacklistManager::URLBlacklistManager(PrefService* pref_service)
     : pref_service_(pref_service),
-      override_blacklist_(override_blacklist),
       blacklist_(new URLBlacklist),
       ui_weak_ptr_factory_(this) {
   // This class assumes that it is created on the same thread that
   // |pref_service_| lives on.
   ui_task_runner_ = base::SequencedTaskRunnerHandle::Get();
   background_task_runner_ = base::CreateSequencedTaskRunnerWithTraits(
-      {base::MayBlock(), base::TaskPriority::BACKGROUND});
+      {base::TaskPriority::BEST_EFFORT});
 
   pref_change_registrar_.Init(pref_service_);
   base::Closure callback = base::Bind(&URLBlacklistManager::ScheduleUpdate,
@@ -448,8 +447,11 @@ URLBlacklistManager::URLBlacklistManager(
   // Start enforcing the policies without a delay when they are present at
   // startup.
   if (pref_service_->HasPrefPath(policy_prefs::kUrlBlacklist) ||
-      pref_service_->HasPrefPath(policy_prefs::kUrlWhitelist))
-    Update();
+      pref_service_->HasPrefPath(policy_prefs::kUrlWhitelist)) {
+    SetBlacklist(
+        BuildBlacklist(pref_service_->GetList(policy_prefs::kUrlBlacklist),
+                       pref_service_->GetList(policy_prefs::kUrlWhitelist)));
+  }
 }
 
 URLBlacklistManager::~URLBlacklistManager() {
@@ -463,27 +465,24 @@ void URLBlacklistManager::ScheduleUpdate() {
   // change the blacklist are updated in one message loop cycle. In those cases,
   // only rebuild the blacklist after all the preference updates are processed.
   ui_weak_ptr_factory_.InvalidateWeakPtrs();
-  ui_task_runner_->PostTask(
-      FROM_HERE,
-      base::Bind(&URLBlacklistManager::Update,
-                 ui_weak_ptr_factory_.GetWeakPtr()));
+  ui_task_runner_->PostTask(FROM_HERE,
+                            base::BindOnce(&URLBlacklistManager::Update,
+                                           ui_weak_ptr_factory_.GetWeakPtr()));
 }
 
 void URLBlacklistManager::Update() {
   DCHECK(ui_task_runner_->RunsTasksInCurrentSequence());
 
-  // The preferences can only be read on the UI thread.
-  std::unique_ptr<base::ListValue> block(
-      pref_service_->GetList(policy_prefs::kUrlBlacklist)->DeepCopy());
-  std::unique_ptr<base::ListValue> allow(
-      pref_service_->GetList(policy_prefs::kUrlWhitelist)->DeepCopy());
-
-  // The URLBlacklist is built on a background task. Once it's ready, it is
-  // passed to the URLBlacklistManager on the same thread as the
-  // background_task_runner_.
+  // The URLBlacklist is built in the background. Once it's ready, it is passed
+  // to the URLBlacklistManager back on ui_task_runner_.
   base::PostTaskAndReplyWithResult(
       background_task_runner_.get(), FROM_HERE,
-      base::BindOnce(&BuildBlacklist, std::move(block), std::move(allow)),
+      base::BindOnce(
+          &BuildBlacklist,
+          base::Owned(
+              pref_service_->GetList(policy_prefs::kUrlBlacklist)->DeepCopy()),
+          base::Owned(
+              pref_service_->GetList(policy_prefs::kUrlWhitelist)->DeepCopy())),
       base::BindOnce(&URLBlacklistManager::SetBlacklist,
                      ui_weak_ptr_factory_.GetWeakPtr()));
 }
@@ -508,23 +507,14 @@ URLBlacklist::URLBlacklistState URLBlacklistManager::GetURLBlacklistState(
   return blacklist_->GetURLBlacklistState(url);
 }
 
-bool URLBlacklistManager::ShouldBlockRequestForFrame(const GURL& url,
-                                                     int* reason) const {
-  DCHECK(ui_task_runner_->RunsTasksInCurrentSequence());
-
-  bool block = false;
-  if (override_blacklist_.Run(url, &block, reason))
-    return block;
-
-  *reason = net::ERR_BLOCKED_BY_ADMINISTRATOR;
-  return IsURLBlocked(url);
-}
-
 // static
 void URLBlacklistManager::RegisterProfilePrefs(
     user_prefs::PrefRegistrySyncable* registry) {
   registry->RegisterListPref(policy_prefs::kUrlBlacklist);
   registry->RegisterListPref(policy_prefs::kUrlWhitelist);
+  registry->RegisterIntegerPref(
+      policy_prefs::kSafeSitesFilterBehavior,
+      static_cast<int>(SafeSitesFilterBehavior::kSafeSitesFilterDisabled));
 }
 
 }  // namespace policy

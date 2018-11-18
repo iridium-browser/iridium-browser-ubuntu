@@ -8,6 +8,7 @@
 #include <string>
 
 #include "base/memory/ref_counted.h"
+#include "base/unguessable_token.h"
 #include "content/common/content_export.h"
 #include "content/common/navigation_params.h"
 #include "content/common/navigation_params.mojom.h"
@@ -32,8 +33,11 @@ struct CONTENT_EXPORT NavigationRequestInfo {
                         bool is_for_guests_only,
                         bool report_raw_headers,
                         bool is_prerendering,
+                        bool upgrade_if_insecure,
                         std::unique_ptr<network::SharedURLLoaderFactoryInfo>
-                            blob_url_loader_factory);
+                            blob_url_loader_factory,
+                        const base::UnguessableToken& devtools_navigation_token,
+                        const base::UnguessableToken& devtools_frame_token);
   NavigationRequestInfo(const NavigationRequestInfo& other);
   ~NavigationRequestInfo();
 
@@ -59,8 +63,16 @@ struct CONTENT_EXPORT NavigationRequestInfo {
 
   const bool is_prerendering;
 
+  // If set to true, any HTTP redirects of this request will be upgraded to
+  // HTTPS. This only applies for subframe navigations.
+  const bool upgrade_if_insecure;
+
   // URLLoaderFactory to facilitate loading blob URLs.
   std::unique_ptr<network::SharedURLLoaderFactoryInfo> blob_url_loader_factory;
+
+  const base::UnguessableToken devtools_navigation_token;
+
+  const base::UnguessableToken devtools_frame_token;
 };
 
 }  // namespace content

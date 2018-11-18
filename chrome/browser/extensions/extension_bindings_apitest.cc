@@ -9,18 +9,22 @@
 #include "chrome/browser/extensions/api/permissions/permissions_api.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/net/url_request_mock_util.h"
+#include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_tabstrip.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/test/browser_test_utils.h"
+#include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_host.h"
 #include "extensions/browser/process_manager.h"
 #include "extensions/common/extension_features.h"
 #include "extensions/test/extension_test_message_listener.h"
 #include "extensions/test/result_catcher.h"
+#include "extensions/test/test_extension_dir.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
 
@@ -38,10 +42,12 @@ class ExtensionBindingsApiTest
 
   void SetUp() override {
     if (GetParam() == NATIVE_BINDINGS) {
-      scoped_feature_list_.InitAndEnableFeature(features::kNativeCrxBindings);
+      scoped_feature_list_.InitAndEnableFeature(
+          extensions_features::kNativeCrxBindings);
     } else {
       DCHECK_EQ(JAVASCRIPT_BINDINGS, GetParam());
-      scoped_feature_list_.InitAndDisableFeature(features::kNativeCrxBindings);
+      scoped_feature_list_.InitAndDisableFeature(
+          extensions_features::kNativeCrxBindings);
     }
     ExtensionApiTest::SetUp();
   }
@@ -85,8 +91,8 @@ IN_PROC_BROWSER_TEST_P(ExtensionBindingsApiTest, LastError) {
   extensions::ExtensionHost* host = FindHostWithPath(manager, "/bg.html", 1);
 
   bool result = false;
-  ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
-      host->render_view_host(), "testLastError()", &result));
+  ASSERT_TRUE(content::ExecuteScriptAndExtractBool(host->host_contents(),
+                                                   "testLastError()", &result));
   EXPECT_TRUE(result);
 }
 
@@ -431,6 +437,204 @@ IN_PROC_BROWSER_TEST_P(ExtensionBindingsApiTest, UseAPIsAfterContextRemoval) {
 // ExtensionBindingsApiTest.UseAPIsAfterContextRemoval?
 IN_PROC_BROWSER_TEST_P(ExtensionBindingsApiTest, UseAppAPIAfterFrameRemoval) {
   ASSERT_TRUE(RunExtensionTest("crazy_extension"));
+}
+
+// Tests attaching two listeners from the same extension but different pages,
+// then removing one, and ensuring the second is still notified.
+// Regression test for https://crbug.com/868763.
+IN_PROC_BROWSER_TEST_P(
+    ExtensionBindingsApiTest,
+    MultipleEventListenersFromDifferentContextsAndTheSameExtension) {
+  // A script that listens for tab creation and populates the result in a
+  // global variable.
+  constexpr char kTestPageScript[] = R"(
+    window.tabEventId = -1;
+    function registerListener() {
+      chrome.tabs.onCreated.addListener((tab) => {
+        window.tabEventId = tab.id;
+      });
+    }
+  )";
+  TestExtensionDir test_dir;
+  test_dir.WriteManifest(R"(
+    {
+      "name": "Duplicate event listeners",
+      "manifest_version": 2,
+      "version": "0.1"
+    })");
+  test_dir.WriteFile(FILE_PATH_LITERAL("page.html"),
+                     R"(<html><script src="page.js"></script></html>)");
+  test_dir.WriteFile(FILE_PATH_LITERAL("page.js"), kTestPageScript);
+
+  const Extension* extension = LoadExtension(test_dir.UnpackedPath());
+  ASSERT_TRUE(extension);
+
+  // Set up: open two tabs to the same extension page, and wait for each to
+  // load.
+  const GURL page_url = extension->GetResourceURL("page.html");
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser(), page_url, WindowOpenDisposition::NEW_FOREGROUND_TAB,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+  content::WebContents* first_tab =
+      browser()->tab_strip_model()->GetActiveWebContents();
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser(), page_url, WindowOpenDisposition::NEW_FOREGROUND_TAB,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+  content::WebContents* second_tab =
+      browser()->tab_strip_model()->GetActiveWebContents();
+
+  // Initially, there are no listeners registered.
+  EventRouter* event_router = EventRouter::Get(profile());
+  EXPECT_FALSE(event_router->ExtensionHasEventListener(extension->id(),
+                                                       "tabs.onCreated"));
+
+  // Register both lsiteners, and verify they were added.
+  ASSERT_TRUE(content::ExecuteScript(first_tab, "registerListener()"));
+  ASSERT_TRUE(content::ExecuteScript(second_tab, "registerListener()"));
+  EXPECT_TRUE(event_router->ExtensionHasEventListener(extension->id(),
+                                                      "tabs.onCreated"));
+
+  // Close one of the extension pages.
+  constexpr bool add_to_history = false;
+  content::WebContentsDestroyedWatcher watcher(second_tab);
+  chrome::CloseWebContents(browser(), second_tab, add_to_history);
+  watcher.Wait();
+  // Hacky round trip to the renderer to flush IPCs.
+  ASSERT_TRUE(content::ExecuteScript(first_tab, ""));
+
+  // Since the second page is still open, the extension should still be
+  // registered as a listener.
+  EXPECT_TRUE(event_router->ExtensionHasEventListener(extension->id(),
+                                                      "tabs.onCreated"));
+
+  // Open a new tab.
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser(), GURL("chrome://newtab"),
+      WindowOpenDisposition::NEW_FOREGROUND_TAB,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+  content::WebContents* new_tab =
+      browser()->tab_strip_model()->GetActiveWebContents();
+
+  // The extension should have been notified about the new tab, and have
+  // recorded the result.
+  int result_tab_id = -1;
+  EXPECT_TRUE(content::ExecuteScriptAndExtractInt(
+      first_tab, "domAutomationController.send(window.tabEventId)",
+      &result_tab_id));
+  EXPECT_EQ(SessionTabHelper::IdForTab(new_tab).id(), result_tab_id);
+}
+
+// Verifies that user gestures are carried through extension messages.
+IN_PROC_BROWSER_TEST_P(ExtensionBindingsApiTest,
+                       UserGestureFromExtensionMessageTest) {
+  TestExtensionDir test_dir;
+  test_dir.WriteManifest(
+      R"({
+           "name": "User Gesture Content Script",
+           "manifest_version": 2,
+           "version": "0.1",
+           "background": { "scripts": ["background.js"] },
+           "content_scripts": [{
+             "matches": ["*://*.example.com:*/*"],
+             "js": ["content_script.js"],
+             "run_at": "document_end"
+           }]
+         })");
+  test_dir.WriteFile(FILE_PATH_LITERAL("content_script.js"),
+                     R"(const button = document.getElementById('go-button');
+                        button.addEventListener('click', () => {
+                          chrome.runtime.sendMessage('clicked');
+                        });)");
+  test_dir.WriteFile(FILE_PATH_LITERAL("background.js"),
+                     R"(chrome.runtime.onMessage.addListener((message) => {
+                        chrome.test.sendMessage(
+                            'Clicked: ' +
+                            chrome.test.isProcessingUserGesture());
+                        });)");
+
+  const Extension* extension = LoadExtension(test_dir.UnpackedPath());
+  ASSERT_TRUE(extension);
+
+  const GURL url = embedded_test_server()->GetURL(
+      "example.com", "/extensions/page_with_button.html");
+  ui_test_utils::NavigateToURL(browser(), url);
+
+  content::WebContents* tab =
+      browser()->tab_strip_model()->GetActiveWebContents();
+
+  {
+    // Passing a message without an active user gesture shouldn't result in a
+    // gesture being active on the receiving end.
+    ExtensionTestMessageListener listener(false);
+    content::EvalJsResult result =
+        content::EvalJs(tab, "document.getElementById('go-button').click()",
+                        content::EXECUTE_SCRIPT_NO_USER_GESTURE);
+    EXPECT_TRUE(result.value.is_none());
+
+    EXPECT_TRUE(listener.WaitUntilSatisfied());
+    EXPECT_EQ("Clicked: false", listener.message());
+  }
+
+  {
+    // If there is an active user gesture when the message is sent, we should
+    // synthesize a user gesture on the receiving end.
+    ExtensionTestMessageListener listener(false);
+    content::EvalJsResult result =
+        content::EvalJs(tab, "document.getElementById('go-button').click()");
+    EXPECT_TRUE(result.value.is_none());
+
+    EXPECT_TRUE(listener.WaitUntilSatisfied());
+    EXPECT_EQ("Clicked: true", listener.message());
+  }
+}
+
+// Verifies that user gestures from API calls are active when the callback is
+// triggered.
+IN_PROC_BROWSER_TEST_P(ExtensionBindingsApiTest,
+                       UserGestureInExtensionAPICallback) {
+  TestExtensionDir test_dir;
+  test_dir.WriteManifest(
+      R"({
+           "name": "User Gesture Extension API Callback",
+           "manifest_version": 2,
+           "version": "0.1"
+         })");
+  test_dir.WriteFile(FILE_PATH_LITERAL("page.html"), "<html></html>");
+
+  const Extension* extension = LoadExtension(test_dir.UnpackedPath());
+  ASSERT_TRUE(extension);
+
+  const GURL extension_page = extension->GetResourceURL("page.html");
+  ui_test_utils::NavigateToURL(browser(), extension_page);
+
+  content::WebContents* tab =
+      browser()->tab_strip_model()->GetActiveWebContents();
+
+  constexpr char kScript[] =
+      R"(chrome.tabs.query({}, (tabs) => {
+           let message;
+           if (chrome.runtime.lastError)
+             message = 'Unexpected error: ' + chrome.runtime.lastError;
+           else
+             message = 'Has gesture: ' + chrome.test.isProcessingUserGesture();
+           domAutomationController.send(message);
+         });)";
+
+  {
+    // Triggering an API without an active gesture shouldn't result in a
+    // gesture in the callback.
+    std::string message;
+    EXPECT_TRUE(content::ExecuteScriptWithoutUserGestureAndExtractString(
+        tab, kScript, &message));
+    EXPECT_EQ("Has gesture: false", message);
+  }
+  {
+    // If there was an active gesture at the time of the API call, there should
+    // be an active gesture in the callback.
+    std::string message;
+    EXPECT_TRUE(content::ExecuteScriptAndExtractString(tab, kScript, &message));
+    EXPECT_EQ("Has gesture: true", message);
+  }
 }
 
 // Run core bindings API tests with both native and JS-based bindings. This

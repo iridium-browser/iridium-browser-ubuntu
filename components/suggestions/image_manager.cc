@@ -9,8 +9,8 @@
 
 #include "base/bind.h"
 #include "base/location.h"
+#include "base/task/post_task.h"
 #include "base/task_runner_util.h"
-#include "base/task_scheduler/post_task.h"
 #include "components/image_fetcher/core/image_fetcher.h"
 #include "components/suggestions/image_encoder.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
@@ -83,8 +83,8 @@ ImageManager::ImageManager(
       weak_ptr_factory_(this) {
   database_->Init(kDatabaseUMAClientName, database_dir,
                   leveldb_proto::CreateSimpleOptions(),
-                  base::Bind(&ImageManager::OnDatabaseInit,
-                             weak_ptr_factory_.GetWeakPtr()));
+                  base::BindOnce(&ImageManager::OnDatabaseInit,
+                                 weak_ptr_factory_.GetWeakPtr()));
 }
 
 ImageManager::~ImageManager() {}
@@ -146,7 +146,7 @@ void ImageManager::SaveImageAndForward(
 
 bool ImageManager::GetImageURL(const GURL& url, GURL* image_url) {
   DCHECK(image_url);
-  std::map<GURL, GURL>::iterator it = image_url_map_.find(url);
+  auto it = image_url_map_.find(url);
   if (it == image_url_map_.end())
     return false;  // Not found.
   *image_url = it->second;
@@ -157,7 +157,7 @@ void ImageManager::QueueCacheRequest(const GURL& url,
                                      const GURL& image_url,
                                      ImageCallback callback) {
   // To be served when the database has loaded.
-  ImageCacheRequestMap::iterator it = pending_cache_requests_.find(url);
+  auto it = pending_cache_requests_.find(url);
   if (it != pending_cache_requests_.end()) {
     // Request already queued for this url.
     it->second.callbacks.push_back(callback);
@@ -175,7 +175,7 @@ void ImageManager::OnCacheImageDecoded(const GURL& url,
                                        const GURL& image_url,
                                        const ImageCallback& callback,
                                        std::unique_ptr<SkBitmap> bitmap) {
-  if (bitmap.get()) {
+  if (bitmap) {
     callback.Run(url, gfx::Image::CreateFrom1xBitmap(*bitmap));
   } else {
     image_fetcher_->FetchImage(
@@ -188,7 +188,7 @@ void ImageManager::OnCacheImageDecoded(const GURL& url,
 
 scoped_refptr<base::RefCountedMemory> ImageManager::GetEncodedImageFromCache(
     const GURL& url) {
-  ImageMap::iterator image_iter = image_map_.find(url.spec());
+  auto image_iter = image_map_.find(url.spec());
   if (image_iter != image_map_.end()) {
     return image_iter->second;
   }
@@ -200,7 +200,7 @@ void ImageManager::ServeFromCacheOrNetwork(const GURL& url,
                                            ImageCallback callback) {
   scoped_refptr<base::RefCountedMemory> encoded_data =
       GetEncodedImageFromCache(url);
-  if (encoded_data.get()) {
+  if (encoded_data) {
     base::PostTaskAndReplyWithResult(
         background_task_runner_.get(), FROM_HERE,
         base::Bind(&DecodeImage, encoded_data),
@@ -241,8 +241,8 @@ void ImageManager::SaveImage(const std::string& url, const SkBitmap& bitmap) {
   entries_to_save->push_back(std::make_pair(data.url(), data));
   database_->UpdateEntries(std::move(entries_to_save),
                            std::move(keys_to_remove),
-                           base::Bind(&ImageManager::OnDatabaseSave,
-                                      weak_ptr_factory_.GetWeakPtr()));
+                           base::BindOnce(&ImageManager::OnDatabaseSave,
+                                          weak_ptr_factory_.GetWeakPtr()));
 }
 
 void ImageManager::OnDatabaseInit(bool success) {
@@ -252,8 +252,8 @@ void ImageManager::OnDatabaseInit(bool success) {
     ServePendingCacheRequests();
     return;
   }
-  database_->LoadEntries(base::Bind(&ImageManager::OnDatabaseLoad,
-                                    weak_ptr_factory_.GetWeakPtr()));
+  database_->LoadEntries(base::BindOnce(&ImageManager::OnDatabaseLoad,
+                                        weak_ptr_factory_.GetWeakPtr()));
 }
 
 void ImageManager::OnDatabaseLoad(bool success,
@@ -280,8 +280,7 @@ void ImageManager::OnDatabaseSave(bool success) {
 
 void ImageManager::LoadEntriesInCache(
     std::unique_ptr<ImageDataVector> entries) {
-  for (ImageDataVector::iterator it = entries->begin(); it != entries->end();
-       ++it) {
+  for (auto it = entries->begin(); it != entries->end(); ++it) {
     std::vector<unsigned char> encoded_data(it->data().begin(),
                                             it->data().end());
 
@@ -291,10 +290,10 @@ void ImageManager::LoadEntriesInCache(
 }
 
 void ImageManager::ServePendingCacheRequests() {
-  for (ImageCacheRequestMap::iterator it = pending_cache_requests_.begin();
+  for (auto it = pending_cache_requests_.begin();
        it != pending_cache_requests_.end(); ++it) {
     const ImageCacheRequest& request = it->second;
-    for (CallbackVector::const_iterator callback_it = request.callbacks.begin();
+    for (auto callback_it = request.callbacks.begin();
          callback_it != request.callbacks.end(); ++callback_it) {
       ServeFromCacheOrNetwork(request.url, request.image_url, *callback_it);
     }

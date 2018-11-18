@@ -11,7 +11,8 @@
 #include "ios/web/public/global_state/ios_global_state.h"
 #include "ios/web/public/url_schemes.h"
 #import "ios/web/public/web_client.h"
-#include "mojo/edk/embedder/embedder.h"
+#include "ios/web/web_thread_impl.h"
+#include "mojo/core/embedder/embedder.h"
 #include "ui/base/ui_base_paths.h"
 
 #if !defined(__has_feature) || !__has_feature(objc_arc)
@@ -46,13 +47,14 @@ class WebMainRunnerImpl : public WebMainRunner {
     create_params.argc = params.argc;
     create_params.argv = params.argv;
     ios_global_state::Create(create_params);
+    web::WebThreadImpl::CreateTaskExecutor();
 
     if (delegate_) {
       delegate_->BasicStartupComplete();
     }
     completed_basic_startup_ = true;
 
-    mojo::edk::Init();
+    mojo::core::Init();
 
     // TODO(rohitrao): Should we instead require that all embedders call
     // SetWebClient()?

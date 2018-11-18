@@ -11,24 +11,31 @@
 // <include src="login_non_lock_shared.js">
 // <include src="oobe_screen_auto_enrollment_check.js">
 // <include src="oobe_screen_controller_pairing.js">
+// <include src="oobe_screen_demo_setup.js">
+// <include src="oobe_screen_demo_preferences.js">
 // <include src="oobe_screen_enable_debugging.js">
 // <include src="oobe_screen_eula.js">
 // <include src="oobe_screen_hid_detection.js">
 // <include src="oobe_screen_host_pairing.js">
 // <include src="oobe_screen_network.js">
 // <include src="oobe_screen_update.js">
+// <include src="oobe_screen_welcome.js">
+// <include src="multi_tap_detector.js">
+// <include src="web_view_helper.js">
+// <include src="demo_mode_test_helper.js">
 
 cr.define('cr.ui.Oobe', function() {
+
   return {
     /**
      * Initializes the OOBE flow.  This will cause all C++ handlers to
      * be invoked to do final setup.
      */
     initialize: function() {
-      this.setMDMode_();
       cr.ui.login.DisplayManager.initialize();
       login.HIDDetectionScreen.register();
       login.WrongHWIDScreen.register();
+      login.WelcomeScreen.register();
       login.NetworkScreen.register();
       login.EulaScreen.register();
       login.UpdateScreen.register();
@@ -43,10 +50,12 @@ cr.define('cr.ui.Oobe', function() {
       login.ErrorMessageScreen.register();
       login.TPMErrorMessageScreen.register();
       login.PasswordChangedScreen.register();
-      login.SupervisedUserCreationScreen.register();
       login.TermsOfServiceScreen.register();
       login.SyncConsentScreen.register();
+      login.FingerprintSetupScreen.register();
       login.ArcTermsOfServiceScreen.register();
+      login.RecommendAppsScreen.register();
+      login.AppDownloadingScreen.register();
       login.AppLaunchSplashScreen.register();
       login.ArcKioskSplashScreen.register();
       login.ConfirmPasswordScreen.register();
@@ -58,6 +67,11 @@ cr.define('cr.ui.Oobe', function() {
       login.VoiceInteractionValuePropScreen.register();
       login.WaitForContainerReadyScreen.register();
       login.DemoSetupScreen.register();
+      login.DemoPreferencesScreen.register();
+      login.DiscoverScreen.register();
+      login.MarketingOptInScreen.register();
+      login.AssistantOptInFlowScreen.register();
+      login.MultiDeviceSetupScreen.register();
 
       cr.ui.Bubble.decorate($('bubble-persistent'));
       $('bubble-persistent').persistent = true;
@@ -78,26 +92,19 @@ cr.define('cr.ui.Oobe', function() {
      */
     initializeA11yMenu: function() {
       cr.ui.Bubble.decorate($('accessibility-menu'));
-      $('connect-accessibility-link')
-          .addEventListener('click', Oobe.handleAccessibilityLinkClick);
-      $('eula-accessibility-link')
-          .addEventListener('click', Oobe.handleAccessibilityLinkClick);
-      $('update-accessibility-link')
-          .addEventListener('click', Oobe.handleAccessibilityLinkClick);
       // Same behaviour on hitting spacebar. See crbug.com/342991.
       function reactOnSpace(event) {
         if (event.keyCode == 32)
           Oobe.handleAccessibilityLinkClick(event);
       }
-      $('connect-accessibility-link').addEventListener('keyup', reactOnSpace);
-      $('eula-accessibility-link').addEventListener('keyup', reactOnSpace);
-      $('update-accessibility-link').addEventListener('keyup', reactOnSpace);
 
       $('high-contrast')
           .addEventListener('click', Oobe.handleHighContrastClick);
       $('large-cursor').addEventListener('click', Oobe.handleLargeCursorClick);
       $('spoken-feedback')
           .addEventListener('click', Oobe.handleSpokenFeedbackClick);
+      $('select-to-speak')
+          .addEventListener('click', Oobe.handleSelectToSpeakClick);
       $('screen-magnifier')
           .addEventListener('click', Oobe.handleScreenMagnifierClick);
       $('virtual-keyboard')
@@ -106,6 +113,8 @@ cr.define('cr.ui.Oobe', function() {
       $('high-contrast').addEventListener('keypress', Oobe.handleA11yKeyPress);
       $('large-cursor').addEventListener('keypress', Oobe.handleA11yKeyPress);
       $('spoken-feedback')
+          .addEventListener('keypress', Oobe.handleA11yKeyPress);
+      $('select-to-speak')
           .addEventListener('keypress', Oobe.handleA11yKeyPress);
       $('screen-magnifier')
           .addEventListener('keypress', Oobe.handleA11yKeyPress);
@@ -179,6 +188,14 @@ cr.define('cr.ui.Oobe', function() {
     },
 
     /**
+     * Select to speak checkbox handler.
+     */
+    handleSelectToSpeakClick: function(e) {
+      chrome.send('enableSelectToSpeak', [$('select-to-speak').checked]);
+      e.stopPropagation();
+    },
+
+    /**
      * Large cursor checkbox handler.
      */
     handleLargeCursorClick: function(e) {
@@ -215,16 +232,7 @@ cr.define('cr.ui.Oobe', function() {
      * @param {boolean} checked Is the checkbox checked?
      */
     setUsageStats: function(checked) {
-      $('usage-stats').checked = checked;
       $('oobe-eula-md').usageStatsChecked = checked;
-    },
-
-    /**
-     * Set OEM EULA URL.
-     * @param {text} oemEulaUrl OEM EULA URL.
-     */
-    setOemEulaUrl: function(oemEulaUrl) {
-      $('eula').setOemEulaUrl(oemEulaUrl);
     },
 
     /**
@@ -242,9 +250,15 @@ cr.define('cr.ui.Oobe', function() {
     refreshA11yInfo: function(data) {
       $('high-contrast').checked = data.highContrastEnabled;
       $('spoken-feedback').checked = data.spokenFeedbackEnabled;
+      $('select-to-speak').checked = data.selectToSpeakEnabled;
       $('screen-magnifier').checked = data.screenMagnifierEnabled;
+      $('docked-magnifier').checked = data.dockedMagnifierEnabled;
       $('large-cursor').checked = data.largeCursorEnabled;
       $('virtual-keyboard').checked = data.virtualKeyboardEnabled;
+
+      // TODO(katie): Remove this when launching features in OOBE screen.
+      if (!data.enableExperimentalA11yFeatures)
+        $('docked-magnifier-row').setAttribute('hidden', true);
 
       $('oobe-welcome-md').a11yStatus = data;
     },
@@ -258,13 +272,6 @@ cr.define('cr.ui.Oobe', function() {
       // Reload global local strings, process DOM tree again.
       loadTimeData.overrideValues(data);
       i18nTemplate.process(document, loadTimeData);
-
-      // Update language and input method menu lists.
-      setupSelect($('language-select'), data.languageList);
-      setupSelect($('keyboard-select'), data.inputMethodsList);
-      setupSelect($('timezone-select'), data.timezoneList);
-
-      this.setMDMode_();
 
       // Update localized content of the screens.
       Oobe.updateLocalizedContent();
@@ -297,17 +304,11 @@ cr.define('cr.ui.Oobe', function() {
     },
 
     /**
-     * This method takes care of switching to material-design OOBE.
-     * @private
+     * Updates OOBE configuration when it is loaded.
+     * @param {!OobeTypes.OobeConfiguration} configuration OOBE configuration.
      */
-    setMDMode_: function() {
-      if (loadTimeData.getString('newOobeUI') == 'on') {
-        $('oobe').setAttribute('md-mode', 'true');
-        $('popup-overlay').setAttribute('md-mode', 'true');
-      } else {
-        $('oobe').removeAttribute('md-mode');
-        $('popup-overlay').removeAttribute('md-mode');
-      }
+    updateOobeConfiguration: function(configuration) {
+      Oobe.getInstance().updateOobeConfiguration_(configuration);
     },
   };
 });

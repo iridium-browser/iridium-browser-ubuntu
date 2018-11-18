@@ -3,10 +3,12 @@
 // found in the LICENSE file.
 
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/public/web/web_find_options.h"
+#include "third_party/blink/public/mojom/frame/find_in_page.mojom-blink.h"
 #include "third_party/blink/public/web/web_script_source.h"
 #include "third_party/blink/renderer/bindings/core/v8/scroll_into_view_options_or_boolean.h"
 #include "third_party/blink/renderer/core/dom/element.h"
+#include "third_party/blink/renderer/core/frame/find_in_page.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/scroll_into_view_options.h"
 #include "third_party/blink/renderer/core/frame/scroll_to_options.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
@@ -19,17 +21,9 @@ namespace blink {
 
 namespace {
 
-typedef bool TestParamRootLayerScrolling;
-class ScrollIntoViewTest : public testing::WithParamInterface<bool>,
-                           private ScopedRootLayerScrollingForTest,
-                           public SimTest {
- protected:
-  ScrollIntoViewTest() : ScopedRootLayerScrollingForTest(GetParam()) {}
-};
+class ScrollIntoViewTest : public SimTest {};
 
-INSTANTIATE_TEST_CASE_P(All, ScrollIntoViewTest, testing::Bool());
-
-TEST_P(ScrollIntoViewTest, InstantScroll) {
+TEST_F(ScrollIntoViewTest, InstantScroll) {
   v8::HandleScope HandleScope(v8::Isolate::GetCurrent());
   WebView().Resize(WebSize(800, 600));
   SimRequest request("https://example.com/test.html", "text/html");
@@ -50,7 +44,7 @@ TEST_P(ScrollIntoViewTest, InstantScroll) {
   ASSERT_EQ(Window().scrollY(), content->OffsetTop());
 }
 
-TEST_P(ScrollIntoViewTest, ScrollPaddingOnBodyViewportDefining) {
+TEST_F(ScrollIntoViewTest, ScrollPaddingOnBodyViewportDefining) {
   v8::HandleScope HandleScope(v8::Isolate::GetCurrent());
   WebView().Resize(WebSize(300, 300));
   SimRequest request("https://example.com/test.html", "text/html");
@@ -79,7 +73,7 @@ TEST_P(ScrollIntoViewTest, ScrollPaddingOnBodyViewportDefining) {
   ASSERT_EQ(Window().scrollY(), target->OffsetTop() - 10);
 }
 
-TEST_P(ScrollIntoViewTest, ScrollPaddingOnHtmlViewportDefining) {
+TEST_F(ScrollIntoViewTest, ScrollPaddingOnHtmlViewportDefining) {
   v8::HandleScope HandleScope(v8::Isolate::GetCurrent());
   WebView().Resize(WebSize(300, 300));
   SimRequest request("https://example.com/test.html", "text/html");
@@ -108,7 +102,7 @@ TEST_P(ScrollIntoViewTest, ScrollPaddingOnHtmlViewportDefining) {
   ASSERT_EQ(Window().scrollY(), target->OffsetTop() - 10);
 }
 
-TEST_P(ScrollIntoViewTest, ScrollPaddingBodyOverflowHtmlViewportDefining) {
+TEST_F(ScrollIntoViewTest, ScrollPaddingBodyOverflowHtmlViewportDefining) {
   v8::HandleScope HandleScope(v8::Isolate::GetCurrent());
   WebView().Resize(WebSize(300, 300));
   SimRequest request("https://example.com/test.html", "text/html");
@@ -148,7 +142,7 @@ TEST_P(ScrollIntoViewTest, ScrollPaddingBodyOverflowHtmlViewportDefining) {
   ASSERT_EQ(Window().scrollY(), 10 - 2);
 }
 
-TEST_P(ScrollIntoViewTest, SmoothScroll) {
+TEST_F(ScrollIntoViewTest, SmoothScroll) {
   v8::HandleScope HandleScope(v8::Isolate::GetCurrent());
   WebView().Resize(WebSize(800, 600));
   SimRequest request("https://example.com/test.html", "text/html");
@@ -178,7 +172,7 @@ TEST_P(ScrollIntoViewTest, SmoothScroll) {
   ASSERT_EQ(Window().scrollY(), content->OffsetTop());
 }
 
-TEST_P(ScrollIntoViewTest, NestedContainer) {
+TEST_F(ScrollIntoViewTest, NestedContainer) {
   v8::HandleScope HandleScope(v8::Isolate::GetCurrent());
   WebView().Resize(WebSize(800, 600));
   SimRequest request("https://example.com/test.html", "text/html");
@@ -226,7 +220,7 @@ TEST_P(ScrollIntoViewTest, NestedContainer) {
             content->OffsetTop() - container->OffsetTop());
 }
 
-TEST_P(ScrollIntoViewTest, NewScrollIntoViewAbortsCurrentAnimation) {
+TEST_F(ScrollIntoViewTest, NewScrollIntoViewAbortsCurrentAnimation) {
   v8::HandleScope HandleScope(v8::Isolate::GetCurrent());
   WebView().Resize(WebSize(800, 600));
   SimRequest request("https://example.com/test.html", "text/html");
@@ -291,7 +285,7 @@ TEST_P(ScrollIntoViewTest, NewScrollIntoViewAbortsCurrentAnimation) {
   ASSERT_EQ(container1->scrollTop(), 0);
 }
 
-TEST_P(ScrollIntoViewTest, ScrollWindowAbortsCurrentAnimation) {
+TEST_F(ScrollIntoViewTest, ScrollWindowAbortsCurrentAnimation) {
   v8::HandleScope HandleScope(v8::Isolate::GetCurrent());
   WebView().Resize(WebSize(800, 600));
   SimRequest request("https://example.com/test.html", "text/html");
@@ -338,7 +332,7 @@ TEST_P(ScrollIntoViewTest, ScrollWindowAbortsCurrentAnimation) {
   ASSERT_EQ(container->scrollTop(), 0);
 }
 
-TEST_P(ScrollIntoViewTest, BlockAndInlineSettings) {
+TEST_F(ScrollIntoViewTest, BlockAndInlineSettings) {
   v8::HandleScope HandleScope(v8::Isolate::GetCurrent());
   WebView().Resize(WebSize(800, 600));
   SimRequest request("https://example.com/test.html", "text/html");
@@ -395,7 +389,7 @@ TEST_P(ScrollIntoViewTest, BlockAndInlineSettings) {
             content->OffsetTop() + content_height - window_height);
 }
 
-TEST_P(ScrollIntoViewTest, SmoothAndInstantInChain) {
+TEST_F(ScrollIntoViewTest, SmoothAndInstantInChain) {
   v8::HandleScope HandleScope(v8::Isolate::GetCurrent());
   WebView().Resize(WebSize(800, 600));
   SimRequest request("https://example.com/test.html", "text/html");
@@ -446,7 +440,7 @@ TEST_P(ScrollIntoViewTest, SmoothAndInstantInChain) {
             content->OffsetTop() - inner_container->OffsetTop());
 }
 
-TEST_P(ScrollIntoViewTest, SmoothScrollAnchor) {
+TEST_F(ScrollIntoViewTest, SmoothScrollAnchor) {
   v8::HandleScope HandleScope(v8::Isolate::GetCurrent());
   WebView().Resize(WebSize(800, 600));
   SimRequest request("https://example.com/test.html", "text/html");
@@ -480,7 +474,7 @@ TEST_P(ScrollIntoViewTest, SmoothScrollAnchor) {
             content->OffsetTop() - container->OffsetTop());
 }
 
-TEST_P(ScrollIntoViewTest, FindDoesNotScrollOverflowHidden) {
+TEST_F(ScrollIntoViewTest, FindDoesNotScrollOverflowHidden) {
   v8::HandleScope HandleScope(v8::Isolate::GetCurrent());
   WebView().Resize(WebSize(800, 600));
   SimRequest request("https://example.com/test.html", "text/html");
@@ -495,13 +489,14 @@ TEST_P(ScrollIntoViewTest, FindDoesNotScrollOverflowHidden) {
   Compositor().BeginFrame();
   ASSERT_EQ(container->scrollTop(), 0);
   const int kFindIdentifier = 12345;
-  WebFindOptions options;
-  MainFrame().Find(kFindIdentifier, WebString::FromUTF8("hello"), options,
-                   false);
+  auto options = mojom::blink::FindOptions::New();
+  options->run_synchronously_for_testing = true;
+  MainFrame().GetFindInPage()->FindInternal(
+      kFindIdentifier, WebString::FromUTF8("hello"), *options, false);
   ASSERT_EQ(container->scrollTop(), 0);
 }
 
-TEST_P(ScrollIntoViewTest, ApplyRootElementScrollBehaviorToViewport) {
+TEST_F(ScrollIntoViewTest, ApplyRootElementScrollBehaviorToViewport) {
   v8::HandleScope HandleScope(v8::Isolate::GetCurrent());
   WebView().Resize(WebSize(800, 600));
   SimRequest request("https://example.com/test.html", "text/html");
@@ -532,7 +527,7 @@ TEST_P(ScrollIntoViewTest, ApplyRootElementScrollBehaviorToViewport) {
 }
 
 // This test passes if it doesn't crash/hit an ASAN check.
-TEST_P(ScrollIntoViewTest, RemoveSequencedScrollableArea) {
+TEST_F(ScrollIntoViewTest, RemoveSequencedScrollableArea) {
   v8::HandleScope HandleScope(v8::Isolate::GetCurrent());
   WebView().Resize(WebSize(800, 600));
   SimRequest request("https://example.com/test.html", "text/html");

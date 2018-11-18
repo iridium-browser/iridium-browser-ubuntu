@@ -81,9 +81,9 @@ CONTENT_EXPORT extern const char kCommonScript[];
 // A struct for managing blink's settings.
 //
 // Adding new values to this class probably involves updating
-// blink::WebSettings, content/common/view_messages.h, browser/tab_contents/
-// render_view_host_delegate_helper.cc, browser/profiles/profile.cc,
-// and content/public/common/common_param_traits_macros.h
+// blink::WebSettings, content/common/view_messages.h,
+// browser/profiles/profile.cc, and
+// content/public/common/common_param_traits_macros.h
 struct CONTENT_EXPORT WebPreferences {
   ScriptFontFamilyMap standard_font_family_map;
   ScriptFontFamilyMap fixed_font_family_map;
@@ -118,6 +118,14 @@ struct CONTENT_EXPORT WebPreferences {
   // Preference to save data. When enabled, requests will contain the header
   // 'Save-Data: on'.
   bool data_saver_enabled;
+  // Whether data saver holdback for Web APIs is enabled. If enabled, data saver
+  // appears as disabled to the web consumers even if it has been actually
+  // enabled by the user.
+  bool data_saver_holdback_web_api_enabled;
+  // Whether data saver holdback is enabled when queried by the media APIs
+  // within Blink. If enabled, data saver appears as disabled to the media APIs
+  // even if it has been actually enabled by the user.
+  bool data_saver_holdback_media_api_enabled;
   bool local_storage_enabled;
   bool databases_enabled;
   bool application_cache_enabled;
@@ -180,7 +188,12 @@ struct CONTENT_EXPORT WebPreferences {
   bool supports_multiple_windows;
   bool viewport_enabled;
   bool viewport_meta_enabled;
+
+  // If true - Blink will clamp the minimum scale factor to the content width,
+  // preventing zoom beyond the visible content. This is really only needed if
+  // viewport_enabled is on.
   bool shrinks_viewport_contents_to_fit;
+
   ViewportStyle viewport_style;
   bool always_show_context_menu_on_touch;
   bool smooth_scroll_for_find_enabled;
@@ -216,13 +229,15 @@ struct CONTENT_EXPORT WebPreferences {
 
   bool immersive_mode_enabled;
 
-#if defined(OS_ANDROID)
+  bool double_tap_to_zoom_enabled;
+
   bool text_autosizing_enabled;
+
+#if defined(OS_ANDROID)
   float font_scale_factor;
   float device_scale_adjustment;
   bool force_enable_zoom;
   bool fullscreen_supported;
-  bool double_tap_to_zoom_enabled;
   std::string media_playback_gesture_whitelist_scope;
   GURL default_video_poster_url;
   bool support_deprecated_target_density_dpi;
@@ -271,9 +286,6 @@ struct CONTENT_EXPORT WebPreferences {
   // Whether download UI should be hidden on this page.
   bool hide_download_ui;
 
-  // If enabled, disabled video track when the video is in the background.
-  bool background_video_track_optimization_enabled;
-
   // Whether it is a presentation receiver.
   bool presentation_receiver;
 
@@ -290,11 +302,32 @@ struct CONTENT_EXPORT WebPreferences {
   AutoplayPolicy autoplay_policy;
 
   // Network quality threshold below which resources from iframes are assigned
-  // lowest priority.
+  // either kVeryLow or kVeryLow Blink priority.
   net::EffectiveConnectionType low_priority_iframes_threshold;
 
   // Whether Picture-in-Picture is enabled.
   bool picture_in_picture_enabled;
+
+  // Whether a translate service is available.
+  // blink's hrefTranslate attribute existence relies on the result.
+  // See https://github.com/dtapuska/html-translate
+  bool translate_service_available;
+
+  // A value other than net::EFFECTIVE_CONNECTION_TYPE_UNKNOWN implies that the
+  // network quality estimate related Web APIs are in the holdback mode. When
+  // the holdback is enabled, the related Web APIs return network quality
+  // estimate corresponding to |network_quality_estimator_web_holdback|
+  // regardless of the actual quality.
+  net::EffectiveConnectionType network_quality_estimator_web_holdback;
+
+  // Specifies how close a lazily loaded iframe or image should be from the
+  // viewport before it should start being loaded in, depending on the effective
+  // connection type of the current network. Blink will use the default distance
+  // threshold for effective connection types that aren't specified here.
+  std::map<net::EffectiveConnectionType, int>
+      lazy_frame_loading_distance_thresholds_px;
+  std::map<net::EffectiveConnectionType, int>
+      lazy_image_loading_distance_thresholds_px;
 
   // We try to keep the default values the same as the default values in
   // chrome, except for the cases where it would require lots of extra work for

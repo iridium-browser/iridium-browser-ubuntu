@@ -15,12 +15,12 @@
 #include "content/browser/service_worker/service_worker_context_wrapper.h"
 #include "content/common/service_worker/service_worker_types.h"
 #include "content/public/browser/notification_database_data.h"
-#include "content/public/common/notification_resources.h"
 #include "content/public/test/test_browser_context.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "content/test/mock_platform_notification_service.h"
 #include "content/test/test_content_browser_client.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "third_party/blink/public/common/notifications/notification_resources.h"
 #include "third_party/blink/public/mojom/service_worker/service_worker_registration.mojom.h"
 #include "url/gurl.h"
 
@@ -68,19 +68,19 @@ class PlatformNotificationContextTest : public ::testing::Test {
   // Callback to provide when registering a Service Worker with a Service
   // Worker Context. Will write the registration id to |store_registration_id|.
   void DidRegisterServiceWorker(int64_t* store_registration_id,
-                                ServiceWorkerStatusCode status,
+                                blink::ServiceWorkerStatusCode status,
                                 const std::string& status_message,
                                 int64_t service_worker_registration_id) {
     DCHECK(store_registration_id);
-    EXPECT_EQ(SERVICE_WORKER_OK, status);
+    EXPECT_EQ(blink::ServiceWorkerStatusCode::kOk, status);
 
     *store_registration_id = service_worker_registration_id;
   }
 
   // Callback to provide when unregistering a Service Worker. Will write the
   // resulting status code to |store_status|.
-  void DidUnregisterServiceWorker(ServiceWorkerStatusCode* store_status,
-                                  ServiceWorkerStatusCode status) {
+  void DidUnregisterServiceWorker(blink::ServiceWorkerStatusCode* store_status,
+                                  blink::ServiceWorkerStatusCode status) {
     DCHECK(store_status);
     *store_status = status;
   }
@@ -101,13 +101,13 @@ class PlatformNotificationContextTest : public ::testing::Test {
  protected:
   // Creates a new PlatformNotificationContextImpl instance. When using this
   // method, the underlying database will always be created in memory.
-  PlatformNotificationContextImpl* CreatePlatformNotificationContext() {
-    PlatformNotificationContextImpl* context =
-        new PlatformNotificationContextImpl(base::FilePath(), &browser_context_,
-                                            nullptr);
+  scoped_refptr<PlatformNotificationContextImpl>
+  CreatePlatformNotificationContext() {
+    auto context = base::MakeRefCounted<PlatformNotificationContextImpl>(
+        base::FilePath(), &browser_context_, nullptr);
     context->Initialize();
 
-    OverrideTaskRunnerForTesting(context);
+    OverrideTaskRunnerForTesting(context.get());
     return context;
   }
 
@@ -123,6 +123,11 @@ class PlatformNotificationContextTest : public ::testing::Test {
   // Returns whether the last invoked callback finished successfully.
   bool success() const { return success_; }
 
+  // Returns the next persistent notification id for tests.
+  int64_t next_persistent_notification_id() {
+    return next_persistent_notification_id_++;
+  }
+
   // Returns the NotificationDatabaseData associated with the last invoked
   // ReadNotificationData callback.
   const NotificationDatabaseData& database_data() const {
@@ -133,20 +138,22 @@ class PlatformNotificationContextTest : public ::testing::Test {
   const std::string& notification_id() const { return notification_id_; }
 
  private:
-  TestBrowserThreadBundle thread_bundle_;
+  TestBrowserThreadBundle thread_bundle_;  // Must be first member
   TestBrowserContext browser_context_;
 
   bool success_;
   NotificationDatabaseData database_data_;
   std::string notification_id_;
+  int64_t next_persistent_notification_id_ = 1;
 };
 
 TEST_F(PlatformNotificationContextTest, ReadNonExistentNotification) {
   scoped_refptr<PlatformNotificationContextImpl> context =
       CreatePlatformNotificationContext();
 
-  context->ReadNotificationData(
+  context->ReadNotificationDataAndRecordInteraction(
       "invalid-notification-id", GURL("https://example.com"),
+      PlatformNotificationContext::Interaction::NONE,
       base::Bind(&PlatformNotificationContextTest::DidReadNotificationData,
                  base::Unretained(this)));
 
@@ -165,6 +172,7 @@ TEST_F(PlatformNotificationContextTest, WriteReadNotification) {
   notification_database_data.origin = origin;
 
   context->WriteNotificationData(
+      next_persistent_notification_id(), kFakeServiceWorkerRegistrationId,
       origin, notification_database_data,
       base::Bind(&PlatformNotificationContextTest::DidWriteNotificationData,
                  base::Unretained(this)));
@@ -175,8 +183,8 @@ TEST_F(PlatformNotificationContextTest, WriteReadNotification) {
   ASSERT_TRUE(success());
   EXPECT_FALSE(notification_id().empty());
 
-  context->ReadNotificationData(
-      notification_id(), origin,
+  context->ReadNotificationDataAndRecordInteraction(
+      notification_id(), origin, PlatformNotificationContext::Interaction::NONE,
       base::Bind(&PlatformNotificationContextTest::DidReadNotificationData,
                  base::Unretained(this)));
 
@@ -206,10 +214,10 @@ TEST_F(PlatformNotificationContextTest, WriteReadReplacedNotification) {
 
   // Write the first notification with the given |tag|.
   context->WriteNotificationData(
+      next_persistent_notification_id(), kFakeServiceWorkerRegistrationId,
       origin, notification_database_data,
       base::Bind(&PlatformNotificationContextTest::DidWriteNotificationData,
                  base::Unretained(this)));
-
   base::RunLoop().RunUntilIdle();
 
   std::string read_notification_id = notification_id();
@@ -223,6 +231,7 @@ TEST_F(PlatformNotificationContextTest, WriteReadReplacedNotification) {
 
   // Write the second notification with the given |tag|.
   context->WriteNotificationData(
+      next_persistent_notification_id(), kFakeServiceWorkerRegistrationId,
       origin, notification_database_data,
       base::Bind(&PlatformNotificationContextTest::DidWriteNotificationData,
                  base::Unretained(this)));
@@ -277,6 +286,7 @@ TEST_F(PlatformNotificationContextTest, DeleteNotification) {
   NotificationDatabaseData notification_database_data;
 
   context->WriteNotificationData(
+      next_persistent_notification_id(), kFakeServiceWorkerRegistrationId,
       origin, notification_database_data,
       base::Bind(&PlatformNotificationContextTest::DidWriteNotificationData,
                  base::Unretained(this)));
@@ -297,8 +307,8 @@ TEST_F(PlatformNotificationContextTest, DeleteNotification) {
   // The notification existed, so it should have been removed successfully.
   ASSERT_TRUE(success());
 
-  context->ReadNotificationData(
-      notification_id(), origin,
+  context->ReadNotificationDataAndRecordInteraction(
+      notification_id(), origin, PlatformNotificationContext::Interaction::NONE,
       base::Bind(&PlatformNotificationContextTest::DidReadNotificationData,
                  base::Unretained(this)));
 
@@ -345,6 +355,7 @@ TEST_F(PlatformNotificationContextTest, ServiceWorkerUnregistered) {
 
   // Create a notification for that Service Worker registration.
   notification_context->WriteNotificationData(
+      next_persistent_notification_id(), kFakeServiceWorkerRegistrationId,
       origin, notification_database_data,
       base::Bind(&PlatformNotificationContextTest::DidWriteNotificationData,
                  base::Unretained(this)));
@@ -354,7 +365,7 @@ TEST_F(PlatformNotificationContextTest, ServiceWorkerUnregistered) {
   ASSERT_TRUE(success());
   EXPECT_FALSE(notification_id().empty());
 
-  ServiceWorkerStatusCode unregister_status;
+  blink::ServiceWorkerStatusCode unregister_status;
 
   // Now drop the Service Worker registration which owns that notification.
   embedded_worker_test_helper->context()->UnregisterServiceWorker(
@@ -363,11 +374,11 @@ TEST_F(PlatformNotificationContextTest, ServiceWorkerUnregistered) {
                   base::Unretained(this), &unregister_status));
 
   base::RunLoop().RunUntilIdle();
-  ASSERT_EQ(SERVICE_WORKER_OK, unregister_status);
+  ASSERT_EQ(blink::ServiceWorkerStatusCode::kOk, unregister_status);
 
   // And verify that the associated notification has indeed been dropped.
-  notification_context->ReadNotificationData(
-      notification_id(), origin,
+  notification_context->ReadNotificationDataAndRecordInteraction(
+      notification_id(), origin, PlatformNotificationContext::Interaction::NONE,
       base::Bind(&PlatformNotificationContextTest::DidReadNotificationData,
                  base::Unretained(this)));
 
@@ -384,6 +395,7 @@ TEST_F(PlatformNotificationContextTest, DestroyDatabaseOnStorageWiped) {
   NotificationDatabaseData notification_database_data;
 
   context->WriteNotificationData(
+      next_persistent_notification_id(), kFakeServiceWorkerRegistrationId,
       origin, notification_database_data,
       base::Bind(&PlatformNotificationContextTest::DidWriteNotificationData,
                  base::Unretained(this)));
@@ -401,8 +413,8 @@ TEST_F(PlatformNotificationContextTest, DestroyDatabaseOnStorageWiped) {
   // Verify that reading notification data fails because the data does not
   // exist anymore. Deliberately omit RunUntilIdle(), since this is unlikely to
   // be the case when OnStorageWiped gets called in production.
-  context->ReadNotificationData(
-      notification_id(), origin,
+  context->ReadNotificationDataAndRecordInteraction(
+      notification_id(), origin, PlatformNotificationContext::Interaction::NONE,
       base::Bind(&PlatformNotificationContextTest::DidReadNotificationData,
                  base::Unretained(this)));
 
@@ -424,8 +436,9 @@ TEST_F(PlatformNotificationContextTest, DestroyOnDiskDatabase) {
   OverrideTaskRunnerForTesting(context.get());
 
   // Trigger a read-operation to force creating the database.
-  context->ReadNotificationData(
+  context->ReadNotificationDataAndRecordInteraction(
       "invalid-notification-id", GURL("https://example.com"),
+      PlatformNotificationContext::Interaction::NONE,
       base::Bind(&PlatformNotificationContextTest::DidReadNotificationData,
                  base::Unretained(this)));
 
@@ -476,6 +489,7 @@ TEST_F(PlatformNotificationContextTest, ReadAllServiceWorkerDataFilled) {
   // test Service Worker Registration id.
   for (int i = 0; i < 10; ++i) {
     context->WriteNotificationData(
+        next_persistent_notification_id(), kFakeServiceWorkerRegistrationId,
         origin, notification_database_data,
         base::Bind(&PlatformNotificationContextTest::DidWriteNotificationData,
                    base::Unretained(this)));
@@ -516,10 +530,11 @@ TEST_F(PlatformNotificationContextTest, SynchronizeNotifications) {
   NotificationDatabaseData notification_database_data;
   notification_database_data.service_worker_registration_id =
       kFakeServiceWorkerRegistrationId;
-  PlatformNotificationData notification_data;
-  content::NotificationResources notification_resources;
+  blink::PlatformNotificationData notification_data;
+  blink::NotificationResources notification_resources;
 
   context->WriteNotificationData(
+      next_persistent_notification_id(), kFakeServiceWorkerRegistrationId,
       origin, notification_database_data,
       base::Bind(&PlatformNotificationContextTest::DidWriteNotificationData,
                  base::Unretained(this)));
@@ -558,8 +573,9 @@ TEST_F(PlatformNotificationContextTest, SynchronizeNotifications) {
   ASSERT_TRUE(success());
   ASSERT_EQ(0u, notification_database_datas.size());
 
-  context->ReadNotificationData(
+  context->ReadNotificationDataAndRecordInteraction(
       notification_id(), origin,
+      PlatformNotificationContext::Interaction::CLOSED,
       base::Bind(&PlatformNotificationContextTest::DidReadNotificationData,
                  base::Unretained(this)));
 

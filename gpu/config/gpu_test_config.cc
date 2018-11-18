@@ -69,6 +69,8 @@ GPUTestConfig::OS GetCurrentOS() {
         return GPUTestConfig::kOsMacSierra;
       case 13:
         return GPUTestConfig::kOsMacHighSierra;
+      case 14:
+        return GPUTestConfig::kOsMacMojave;
     }
   }
 #elif defined(OS_ANDROID)
@@ -188,6 +190,7 @@ bool GPUTestBotConfig::IsValid() const {
     case kOsMacElCapitan:
     case kOsMacSierra:
     case kOsMacHighSierra:
+    case kOsMacMojave:
     case kOsLinux:
     case kOsChromeOS:
     case kOsAndroid:
@@ -279,7 +282,7 @@ bool GPUTestBotConfig::LoadCurrentConfig(const GPUInfo* gpu_info) {
 // static
 bool GPUTestBotConfig::CurrentConfigMatches(const std::string& config_data) {
   GPUTestBotConfig my_config;
-  if (!my_config.LoadCurrentConfig(NULL))
+  if (!my_config.LoadCurrentConfig(nullptr))
     return false;
   return my_config.Matches(config_data);
 }
@@ -288,7 +291,7 @@ bool GPUTestBotConfig::CurrentConfigMatches(const std::string& config_data) {
 bool GPUTestBotConfig::CurrentConfigMatches(
     const std::vector<std::string>& configs) {
   GPUTestBotConfig my_config;
-  if (!my_config.LoadCurrentConfig(NULL))
+  if (!my_config.LoadCurrentConfig(nullptr))
     return false;
   for (size_t i = 0 ; i < configs.size(); ++i) {
     if (my_config.Matches(configs[i]))

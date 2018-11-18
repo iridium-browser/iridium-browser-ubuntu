@@ -4,7 +4,6 @@
 
 #include "chrome/browser/autofill/autofill_uitest_util.h"
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/ui/browser.h"
@@ -88,6 +87,15 @@ void AddTestCreditCard(Browser* browser, const CreditCard& card) {
 
   // AddCreditCard is asynchronous. Wait for it to finish before continuing the
   // tests.
+  observer.Wait();
+}
+
+void AddTestAutofillData(Browser* browser,
+                         const AutofillProfile& profile,
+                         const CreditCard& card) {
+  AddTestProfile(browser, profile);
+  PdmChangeWaiter observer(browser);
+  GetPersonalDataManager(browser->profile())->AddCreditCard(card);
   observer.Wait();
 }
 

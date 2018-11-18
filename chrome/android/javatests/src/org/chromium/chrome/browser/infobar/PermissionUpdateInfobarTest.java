@@ -19,15 +19,15 @@ import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.chrome.browser.ChromeSwitches;
 import org.chromium.chrome.browser.preferences.website.ContentSetting;
-import org.chromium.chrome.browser.preferences.website.GeolocationInfo;
+import org.chromium.chrome.browser.preferences.website.PermissionInfo;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 import org.chromium.chrome.test.util.ChromeTabUtils;
 import org.chromium.chrome.test.util.InfoBarTestAnimationListener;
 import org.chromium.chrome.test.util.browser.LocationSettingsTestUtil;
-import org.chromium.content.browser.test.util.Criteria;
-import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content_public.browser.WebContents;
+import org.chromium.content_public.browser.test.util.Criteria;
+import org.chromium.content_public.browser.test.util.CriteriaHelper;
 import org.chromium.net.test.EmbeddedTestServer;
 import org.chromium.ui.base.AndroidPermissionDelegate;
 import org.chromium.ui.base.PermissionCallback;
@@ -78,28 +78,19 @@ public class PermissionUpdateInfobarTest {
                 InstrumentationRegistry.getInstrumentation(), mActivityTestRule.getActivity());
 
         // Register for animation notifications
-        CriteriaHelper.pollInstrumentationThread(new Criteria() {
-            @Override
-            public boolean isSatisfied() {
-                if (mActivityTestRule.getActivity().getActivityTab() == null) return false;
-                if (mActivityTestRule.getActivity().getActivityTab().getInfoBarContainer()
-                        == null) {
-                    return false;
-                }
-                return true;
-            }
-        });
-        InfoBarContainer container =
-                mActivityTestRule.getActivity().getActivityTab().getInfoBarContainer();
+        CriteriaHelper.pollInstrumentationThread(
+                () -> mActivityTestRule.getInfoBarContainer() != null);
+        InfoBarContainer container = mActivityTestRule.getInfoBarContainer();
         mListener =  new InfoBarTestAnimationListener();
         container.addAnimationListener(mListener);
 
         final String locationUrl = mTestServer.getURL(GEOLOCATION_PAGE);
-        final GeolocationInfo geolocationSettings = ThreadUtils.runOnUiThreadBlockingNoException(
-                new Callable<GeolocationInfo>() {
+        final PermissionInfo geolocationSettings =
+                ThreadUtils.runOnUiThreadBlockingNoException(new Callable<PermissionInfo>() {
                     @Override
-                    public GeolocationInfo call() {
-                        return new GeolocationInfo(locationUrl, null, false);
+                    public PermissionInfo call() {
+                        return new PermissionInfo(
+                                PermissionInfo.Type.GEOLOCATION, locationUrl, null, false);
                     }
                 });
 
@@ -196,8 +187,10 @@ public class PermissionUpdateInfobarTest {
         }
 
         @Override
-        public void onRequestPermissionsResult(
-                int requestCode, String[] permissions, int[] grantResults) {}
+        public boolean handlePermissionResult(
+                int requestCode, String[] permissions, int[] grantResults) {
+            return false;
+        }
     }
 
 }

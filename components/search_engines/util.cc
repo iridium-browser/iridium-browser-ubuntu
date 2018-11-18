@@ -42,7 +42,7 @@ GURL GetDefaultSearchURLForSearchTerms(TemplateURLService* service,
   const TemplateURLRef& search_url = default_provider->url_ref();
   DCHECK(search_url.SupportsReplacement(service->search_terms_data()));
   TemplateURLRef::SearchTermsArgs search_terms_args(terms);
-  search_terms_args.append_extra_query_params = true;
+  search_terms_args.append_extra_query_params_from_command_line = true;
   return GURL(search_url.ReplaceSearchTerms(search_terms_args,
                                             service->search_terms_data()));
 }
@@ -137,8 +137,7 @@ void RemoveDuplicatePrepopulateIDs(
 TemplateURL* GetTemplateURLByID(
     const TemplateURLService::TemplateURLVector& template_urls,
     int64_t id) {
-  for (TemplateURLService::TemplateURLVector::const_iterator i(
-       template_urls.begin()); i != template_urls.end(); ++i) {
+  for (auto i(template_urls.begin()); i != template_urls.end(); ++i) {
     if ((*i)->id() == id) {
       return *i;
     }
@@ -149,8 +148,7 @@ TemplateURL* GetTemplateURLByID(
 TemplateURL* FindURLByPrepopulateID(
     const TemplateURLService::TemplateURLVector& template_urls,
     int prepopulate_id) {
-  for (std::vector<TemplateURL*>::const_iterator i = template_urls.begin();
-       i < template_urls.end(); ++i) {
+  for (auto i = template_urls.begin(); i < template_urls.end(); ++i) {
     if ((*i)->prepopulate_id() == prepopulate_id)
       return *i;
   }

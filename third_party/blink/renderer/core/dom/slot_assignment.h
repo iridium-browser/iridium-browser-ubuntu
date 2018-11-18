@@ -7,10 +7,7 @@
 
 #include "third_party/blink/renderer/core/dom/tree_ordered_map.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/runtime_enabled_features.h"
-#include "third_party/blink/renderer/platform/wtf/hash_map.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
-#include "third_party/blink/renderer/platform/wtf/text/atomic_string_hash.h"
 
 namespace blink {
 
@@ -25,7 +22,7 @@ class SlotAssignment final : public GarbageCollected<SlotAssignment> {
   }
 
   // Relevant DOM Standard: https://dom.spec.whatwg.org/#find-a-slot
-  HTMLSlotElement* FindSlot(const Node&) const;
+  HTMLSlotElement* FindSlot(const Node&);
   HTMLSlotElement* FindSlotByName(const AtomicString& slot_name) const;
 
   // DOM Standaard defines these two procedures:
@@ -46,16 +43,21 @@ class SlotAssignment final : public GarbageCollected<SlotAssignment> {
                                   const AtomicString& new_value);
 
   bool FindHostChildBySlotName(const AtomicString& slot_name) const;
+  void CallSlotChangeAfterRemovedFromAssignFunction(HTMLSlotElement& slot);
+  void CallSlotChangeAfterAdditionFromAssignFunction(
+      HTMLSlotElement& slot,
+      const HeapVector<Member<Node>>& added_assign_nodes);
+  void CallSlotChangeAfterAddition(HTMLSlotElement& slot);
+  void CallSlotChangeAfterRemoved(HTMLSlotElement& slot);
+  void CallSlotChangeIfNeeded(HTMLSlotElement& slot, Node& child);
+
+  HTMLSlotElement* FindSlotChange(HTMLSlotElement& slot, Node& child);
 
   void Trace(blink::Visitor*);
 
-  // For Incremental Shadow DOM
   bool NeedsAssignmentRecalc() const { return needs_assignment_recalc_; }
   void SetNeedsAssignmentRecalc();
   void RecalcAssignment();
-
-  // For Non-Incremental Shadow DOM
-  void RecalcDistribution();
 
  private:
   explicit SlotAssignment(ShadowRoot& owner);
@@ -65,6 +67,7 @@ class SlotAssignment final : public GarbageCollected<SlotAssignment> {
     kRenamed,
   };
 
+  HTMLSlotElement* FindSlotInManualSlotting(const Node&);
   HTMLSlotElement* FindSlotInUserAgentShadow(const Node&) const;
 
   void CollectSlots();
@@ -76,14 +79,11 @@ class SlotAssignment final : public GarbageCollected<SlotAssignment> {
                              const AtomicString& slot_name,
                              SlotMutationType);
 
-  // For Non-Incremental Shadow DOM
-  void RecalcAssignmentForDistribution();
-
   HeapVector<Member<HTMLSlotElement>> slots_;
   Member<TreeOrderedMap> slot_map_;
   WeakMember<ShadowRoot> owner_;
   unsigned needs_collect_slots_ : 1;
-  unsigned needs_assignment_recalc_ : 1;  // For Incremental Shadow DOM
+  unsigned needs_assignment_recalc_ : 1;
   unsigned slot_count_ : 30;
 };
 

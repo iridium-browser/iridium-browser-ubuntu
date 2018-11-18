@@ -13,11 +13,9 @@
 #include "core/fxcrt/unowned_ptr.h"
 #include "fpdfsdk/pwl/cpwl_edit_ctrl.h"
 
-#define PWL_CLASSNAME_EDIT "CPWL_Edit"
-
 class IPWL_Filler_Notify {
  public:
-  virtual ~IPWL_Filler_Notify() {}
+  virtual ~IPWL_Filler_Notify() = default;
 
   // Must write to |bBottom| and |fPopupRet|.
   virtual void QueryWherePopup(CPWL_Wnd::PrivateData* pAttached,
@@ -41,13 +39,12 @@ class IPWL_Filler_Notify {
 #endif  // PDF_ENABLE_XFA
 };
 
-class CPWL_Edit : public CPWL_EditCtrl {
+class CPWL_Edit final : public CPWL_EditCtrl {
  public:
   CPWL_Edit();
   ~CPWL_Edit() override;
 
   // CPWL_EditCtrl
-  ByteString GetClassName() const override;
   void OnCreated() override;
   bool RePosChildWnd() override;
   CFX_FloatRect GetClientRect() const override;
@@ -65,12 +62,9 @@ class CPWL_Edit : public CPWL_EditCtrl {
   void OnSetFocus() override;
   void OnKillFocus() override;
 
-  void SetAlignFormatV(PWL_EDIT_ALIGNFORMAT_V nFormat = PEAV_TOP,
-                       bool bPaint = true);  // 0:top 1:bottom 2:center
-
+  void SetAlignFormatVerticalCenter();
   void SetCharArray(int32_t nCharArray);
   void SetLimitChar(int32_t nLimitChar);
-
   void SetCharSpace(float fCharSpace);
 
   bool CanSelectAll() const;
@@ -84,7 +78,7 @@ class CPWL_Edit : public CPWL_EditCtrl {
 
   bool IsTextFull() const;
 
-  static float GetCharArrayAutoFontSize(CPDF_Font* pFont,
+  static float GetCharArrayAutoFontSize(const CPDF_Font* pFont,
                                         const CFX_FloatRect& rcPlate,
                                         int32_t nCharArray);
 
@@ -114,7 +108,6 @@ class CPWL_Edit : public CPWL_EditCtrl {
   bool IsVScrollBarVisible() const;
   void SetParamByFlag();
 
-  float GetCharArrayAutoFontSize(int32_t nCharArray);
   CFX_PointF GetWordRightBottomPoint(const CPVT_WordPlace& wpWord);
 
   CPVT_WordRange CombineWordRange(const CPVT_WordRange& wr1,

@@ -278,7 +278,7 @@ CodeGenRegBank &CodeGenTarget::getRegBank() const {
 
 void CodeGenTarget::ReadRegAltNameIndices() const {
   RegAltNameIndices = Records.getAllDerivedDefinitions("RegAltNameIndex");
-  std::sort(RegAltNameIndices.begin(), RegAltNameIndices.end(), LessRecord());
+  llvm::sort(RegAltNameIndices, LessRecord());
 }
 
 /// getRegisterByName - If there is a register with the specific AsmName,
@@ -303,7 +303,7 @@ std::vector<ValueTypeByHwMode> CodeGenTarget::getRegisterVTs(Record *R)
   }
 
   // Remove duplicates.
-  std::sort(Result.begin(), Result.end());
+  llvm::sort(Result);
   Result.erase(std::unique(Result.begin(), Result.end()), Result.end());
   return Result;
 }
@@ -314,7 +314,7 @@ void CodeGenTarget::ReadLegalValueTypes() const {
     LegalValueTypes.insert(LegalValueTypes.end(), RC.VTs.begin(), RC.VTs.end());
 
   // Remove duplicates.
-  std::sort(LegalValueTypes.begin(), LegalValueTypes.end());
+  llvm::sort(LegalValueTypes);
   LegalValueTypes.erase(std::unique(LegalValueTypes.begin(),
                                     LegalValueTypes.end()),
                         LegalValueTypes.end());
@@ -358,7 +358,7 @@ unsigned CodeGenTarget::getNumFixedInstructions() {
   return array_lengthof(FixedInstrs) - 1;
 }
 
-/// \brief Return all of the instructions defined by the target, ordered by
+/// Return all of the instructions defined by the target, ordered by
 /// their enum value.
 void CodeGenTarget::ComputeInstrsByEnum() const {
   const auto &Insts = getInstructions();
@@ -374,18 +374,24 @@ void CodeGenTarget::ComputeInstrsByEnum() const {
 
   for (const auto &I : Insts) {
     const CodeGenInstruction *CGI = I.second.get();
-    if (CGI->Namespace != "TargetOpcode")
+    if (CGI->Namespace != "TargetOpcode") {
       InstrsByEnum.push_back(CGI);
+      if (CGI->TheDef->getValueAsBit("isPseudo"))
+        ++NumPseudoInstructions;
+    }
   }
 
   assert(InstrsByEnum.size() == Insts.size() && "Missing predefined instr");
 
   // All of the instructions are now in random order based on the map iteration.
-  // Sort them by name.
-  std::sort(InstrsByEnum.begin() + EndOfPredefines, InstrsByEnum.end(),
-            [](const CodeGenInstruction *Rec1, const CodeGenInstruction *Rec2) {
-    return Rec1->TheDef->getName() < Rec2->TheDef->getName();
-  });
+  llvm::sort(
+      InstrsByEnum.begin() + EndOfPredefines, InstrsByEnum.end(),
+      [](const CodeGenInstruction *Rec1, const CodeGenInstruction *Rec2) {
+        const auto &D1 = *Rec1->TheDef;
+        const auto &D2 = *Rec2->TheDef;
+        return std::make_tuple(!D1.getValueAsBit("isPseudo"), D1.getName()) <
+               std::make_tuple(!D2.getValueAsBit("isPseudo"), D2.getName());
+      });
 }
 
 
@@ -507,11 +513,11 @@ CodeGenIntrinsicTable::CodeGenIntrinsicTable(const RecordKeeper &RC,
     if (isTarget == TargetOnly)
       Intrinsics.push_back(CodeGenIntrinsic(Defs[I]));
   }
-  std::sort(Intrinsics.begin(), Intrinsics.end(),
-            [](const CodeGenIntrinsic &LHS, const CodeGenIntrinsic &RHS) {
-              return std::tie(LHS.TargetPrefix, LHS.Name) <
-                     std::tie(RHS.TargetPrefix, RHS.Name);
-            });
+  llvm::sort(Intrinsics,
+             [](const CodeGenIntrinsic &LHS, const CodeGenIntrinsic &RHS) {
+               return std::tie(LHS.TargetPrefix, LHS.Name) <
+                      std::tie(RHS.TargetPrefix, RHS.Name);
+             });
   Targets.push_back({"", 0, 0});
   for (size_t I = 0, E = Intrinsics.size(); I < E; ++I)
     if (Intrinsics[I].TargetPrefix != Targets.back().Name) {
@@ -615,8 +621,12 @@ CodeGenIntrinsic::CodeGenIntrinsic(Record *R) {
     MVT::SimpleValueType VT;
     if (TyEl->isSubClassOf("LLVMMatchType")) {
       unsigned MatchTy = TyEl->getValueAsInt("Number");
-      assert(MatchTy < OverloadedVTs.size() &&
-             "Invalid matching number!");
+      if (MatchTy >= OverloadedVTs.size()) {
+        PrintError(R->getLoc(),
+                   "Parameter #" + Twine(i) + " has out of bounds matching "
+                   "number " + Twine(MatchTy));
+        PrintFatalError(Twine("ParamTypes is ") + TypeList->getAsString());
+      }
       VT = OverloadedVTs[MatchTy];
       // It only makes sense to use the extended and truncated vector element
       // variants with iAny types; otherwise, if the intrinsic is not
@@ -699,6 +709,6 @@ CodeGenIntrinsic::CodeGenIntrinsic(Record *R) {
   Properties = parseSDPatternOperatorProperties(R);
 
   // Sort the argument attributes for later benefit.
-  std::sort(ArgumentAttributes.begin(), ArgumentAttributes.end());
+  llvm::sort(ArgumentAttributes);
 }
 

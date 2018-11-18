@@ -4,7 +4,7 @@
 
 #include "third_party/blink/renderer/platform/graphics/paint/drawing_display_item.h"
 
-#include "third_party/blink/public/platform/web_display_item_list.h"
+#include "cc/paint/display_item_list.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_canvas.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -18,14 +18,16 @@ void DrawingDisplayItem::Replay(GraphicsContext& context) const {
     context.DrawRecord(record_);
 }
 
-void DrawingDisplayItem::AppendToWebDisplayItemList(
+void DrawingDisplayItem::AppendToDisplayItemList(
     const FloatSize& visual_rect_offset,
-    WebDisplayItemList* list) const {
+    cc::DisplayItemList& list) const {
   if (record_) {
+    list.StartPaint();
+    list.push<cc::DrawRecordOp>(record_);
     // Convert visual rect into the GraphicsLayer's coordinate space.
     auto visual_rect = VisualRect();
     visual_rect.Move(-visual_rect_offset);
-    list->AppendDrawingItem(EnclosingIntRect(visual_rect), record_);
+    list.EndPaintOfUnpaired(EnclosingIntRect(visual_rect));
   }
 }
 
@@ -39,18 +41,6 @@ void DrawingDisplayItem::PropertiesAsJSON(JSONObject& json) const {
   json.SetBoolean("opaque", known_to_be_opaque_);
 }
 #endif
-
-static bool RecordsEqual(sk_sp<const PaintRecord> record1,
-                         sk_sp<const PaintRecord> record2,
-                         const FloatRect& bounds) {
-  if (record1->size() != record2->size())
-    return false;
-
-  // TODO(enne): PaintRecord should have an operator==
-  sk_sp<SkData> data1 = ToSkPicture(record1, bounds)->serialize();
-  sk_sp<SkData> data2 = ToSkPicture(record2, bounds)->serialize();
-  return data1->equals(data2.get());
-}
 
 static SkBitmap RecordToBitmap(sk_sp<const PaintRecord> record,
                                const IntRect& bounds) {
@@ -105,7 +95,7 @@ bool DrawingDisplayItem::Equals(const DisplayItem& other) const {
   if (bounds != other_bounds)
     return false;
 
-  if (RecordsEqual(record, other_record, FloatRect(bounds)))
+  if (*record == *other_record)
     return true;
 
   // Sometimes the client may produce different records for the same visual

@@ -10,9 +10,9 @@ namespace blink {
 
 namespace {
 
-String TreatNullSourceAsEmpty(const String& source) {
+ParkableString TreatNullSourceAsEmpty(const ParkableString& source) {
   // ScriptSourceCode allows for the representation of the null/not-there-really
-  // ScriptSourceCode value.  Encoded by way of a m_source.isNull() being true,
+  // ScriptSourceCode value.  Encoded by way of a source_.IsNull() being true,
   // with the nullary constructor to be used to construct such a value.
   //
   // Should the other constructors be passed a null string, that is interpreted
@@ -20,7 +20,7 @@ String TreatNullSourceAsEmpty(const String& source) {
   // between such null string occurrences.  Do that by converting the latter
   // case's null strings into empty ones.
   if (source.IsNull())
-    return "";
+    return ParkableString();
 
   return source;
 }
@@ -49,13 +49,14 @@ String SourceMapUrlFromResponse(const ResourceResponse& response) {
 }  // namespace
 
 ScriptSourceCode::ScriptSourceCode(
-    const String& source,
+    const ParkableString& source,
     ScriptSourceLocationType source_location_type,
     SingleCachedMetadataHandler* cache_handler,
     const KURL& url,
     const TextPosition& start_position)
     : source_(TreatNullSourceAsEmpty(source)),
       cache_handler_(cache_handler),
+      not_streaming_reason_(ScriptStreamer::kInlineScript),
       url_(StripFragmentIdentifier(url)),
       start_position_(start_position),
       source_location_type_(source_location_type) {
@@ -63,15 +64,31 @@ ScriptSourceCode::ScriptSourceCode(
   DCHECK(source_location_type != ScriptSourceLocationType::kExternalFile);
 }
 
+ScriptSourceCode::ScriptSourceCode(
+    const String& source,
+    ScriptSourceLocationType source_location_type,
+    SingleCachedMetadataHandler* cache_handler,
+    const KURL& url,
+    const TextPosition& start_position)
+    : ScriptSourceCode(ParkableString(source.Impl()),
+                       source_location_type,
+                       cache_handler,
+                       url,
+                       start_position) {}
+
 ScriptSourceCode::ScriptSourceCode(ScriptStreamer* streamer,
-                                   ScriptResource* resource)
+                                   ScriptResource* resource,
+                                   ScriptStreamer::NotStreamingReason reason)
     : source_(TreatNullSourceAsEmpty(resource->SourceText())),
       cache_handler_(resource->CacheHandler()),
       streamer_(streamer),
+      not_streaming_reason_(reason),
       url_(StripFragmentIdentifier(resource->GetResponse().Url())),
       source_map_url_(SourceMapUrlFromResponse(resource->GetResponse())),
       start_position_(TextPosition::MinimumPosition()),
-      source_location_type_(ScriptSourceLocationType::kExternalFile) {}
+      source_location_type_(ScriptSourceLocationType::kExternalFile) {
+  DCHECK_EQ(!streamer, reason != ScriptStreamer::NotStreamingReason::kInvalid);
+}
 
 ScriptSourceCode::~ScriptSourceCode() = default;
 

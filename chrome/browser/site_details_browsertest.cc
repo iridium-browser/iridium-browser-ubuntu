@@ -14,11 +14,10 @@
 #include "base/bind_helpers.h"
 #include "base/files/file_path.h"
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
-#include "base/test/histogram_tester.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/metrics/metrics_memory_details.h"
@@ -167,18 +166,18 @@ void PrintTo(const SampleMatcherP2<P1, P2>& matcher, std::ostream* os) {
 
 }  // namespace
 
-class SiteDetailsBrowserTest : public ExtensionBrowserTest {
+class SiteDetailsBrowserTest : public extensions::ExtensionBrowserTest {
  public:
   SiteDetailsBrowserTest() {}
   ~SiteDetailsBrowserTest() override {}
 
   void SetUpOnMainThread() override {
-    ExtensionBrowserTest::SetUpOnMainThread();
+    extensions::ExtensionBrowserTest::SetUpOnMainThread();
     host_resolver()->AddRule("*", "127.0.0.1");
 
     // Add content/test/data so we can use cross_site_iframe_factory.html
     base::FilePath test_data_dir;
-    ASSERT_TRUE(PathService::Get(base::DIR_SOURCE_ROOT, &test_data_dir));
+    ASSERT_TRUE(base::PathService::Get(base::DIR_SOURCE_ROOT, &test_data_dir));
     embedded_test_server()->ServeFilesFromDirectory(
         test_data_dir.AppendASCII("content/test/data/"));
     ASSERT_TRUE(embedded_test_server()->Start());
@@ -580,8 +579,8 @@ IN_PROC_BROWSER_TEST_F(SiteDetailsBrowserTest, DISABLED_ManyIframes) {
                   ElementsAre(Bucket(12, 1), Bucket(29, 1), Bucket(68, 1))));
 }
 
-// Flaky on Windows and Mac. crbug.com/671891
-#if defined(OS_WIN) || defined(OS_MACOSX)
+// Flaky on Windows, Mac and ChromeOS. crbug.com/671891
+#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_CHROMEOS)
 #define MAYBE_IsolateExtensions DISABLED_IsolateExtensions
 #else
 #define MAYBE_IsolateExtensions IsolateExtensions

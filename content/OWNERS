@@ -8,7 +8,6 @@ jam@chromium.org
 jochen@chromium.org
 kinuko@chromium.org
 nasko@chromium.org
-nick@chromium.org
 pfeldman@chromium.org
 piman@chromium.org
 
@@ -27,5 +26,11 @@ per-file *.sb=rsesek@chromium.org
 
 # For Fuchsia-specific changes:
 per-file *_fuchsia*=file://build/fuchsia/OWNERS
+
+# For Mac-specific changes:
+per-file *_mac*=ellyjones@chromium.org
+per-file *_mac*=tapted@chromium.org
+per-file *.mm=ellyjones@chromium.org
+per-file *.mm=tapted@chromium.org
 
 # COMPONENT: Internals>Core

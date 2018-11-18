@@ -34,20 +34,17 @@
 #include "third_party/blink/renderer/platform/graphics/paint/paint_record.h"
 #include "third_party/blink/renderer/platform/wtf/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
-#include "third_party/blink/renderer/platform/wtf/noncopyable.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 
 namespace blink {
 
 class InterceptingCanvasBase : public SkCanvas {
-  WTF_MAKE_NONCOPYABLE(InterceptingCanvasBase);
 
  public:
   template <typename DerivedCanvas>
   class CanvasInterceptorBase {
     STACK_ALLOCATED();
-    WTF_MAKE_NONCOPYABLE(CanvasInterceptorBase);
 
    protected:
     CanvasInterceptorBase(InterceptingCanvasBase* canvas) : canvas_(canvas) {
@@ -63,6 +60,9 @@ class InterceptingCanvasBase : public SkCanvas {
     DerivedCanvas* Canvas() { return static_cast<DerivedCanvas*>(canvas_); }
     bool TopLevelCall() const { return canvas_->CallNestingDepth() == 1; }
     InterceptingCanvasBase* canvas_;
+
+   private:
+    DISALLOW_COPY_AND_ASSIGN(CanvasInterceptorBase);
   };
 
   void ResetStepCount() { call_count_ = 0; }
@@ -130,11 +130,6 @@ class InterceptingCanvasBase : public SkCanvas {
                       const SkScalar xpos[],
                       SkScalar const_y,
                       const SkPaint&) override = 0;
-  void onDrawTextOnPath(const void* text,
-                        size_t byte_length,
-                        const SkPath&,
-                        const SkMatrix*,
-                        const SkPaint&) override = 0;
   void onDrawTextBlob(const SkTextBlob*,
                       SkScalar x,
                       SkScalar y,
@@ -158,6 +153,8 @@ class InterceptingCanvasBase : public SkCanvas {
  private:
   unsigned call_nesting_depth_;
   unsigned call_count_;
+
+  DISALLOW_COPY_AND_ASSIGN(InterceptingCanvasBase);
 };
 
 template <typename DerivedCanvas>
@@ -285,15 +282,6 @@ class InterceptingCanvas : public InterceptingCanvasBase {
                       const SkPaint& paint) override {
     Interceptor interceptor(this);
     this->SkCanvas::onDrawPosTextH(text, byte_length, xpos, const_y, paint);
-  }
-
-  void onDrawTextOnPath(const void* text,
-                        size_t byte_length,
-                        const SkPath& path,
-                        const SkMatrix* matrix,
-                        const SkPaint& paint) override {
-    Interceptor interceptor(this);
-    this->SkCanvas::onDrawTextOnPath(text, byte_length, path, matrix, paint);
   }
 
   void onDrawTextBlob(const SkTextBlob* blob,

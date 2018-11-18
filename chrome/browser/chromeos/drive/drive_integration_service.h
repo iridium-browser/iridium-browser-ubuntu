@@ -6,12 +6,16 @@
 #define CHROME_BROWSER_CHROMEOS_DRIVE_DRIVE_INTEGRATION_SERVICE_H_
 
 #include <memory>
+#include <set>
+#include <string>
 
 #include "base/callback.h"
+#include "base/feature_list.h"
 #include "base/macros.h"
 #include "base/memory/singleton.h"
 #include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
+#include "chromeos/components/drivefs/drivefs_host.h"
 #include "components/drive/drive_notification_observer.h"
 #include "components/drive/file_errors.h"
 #include "components/drive/file_system_core_util.h"
@@ -28,11 +32,18 @@ class FilePath;
 class SequencedTaskRunner;
 }
 
+namespace drivefs {
+class DriveFsHost;
+
+namespace mojom {
+class DriveFs;
+}  // namespace mojom
+}  // namespace drivefs
+
 namespace drive {
 
 class DebugInfoCollector;
 class DownloadHandler;
-class DriveAppRegistry;
 class DriveServiceInterface;
 class EventLogger;
 class FileSystemInterface;
@@ -43,6 +54,15 @@ class FileCache;
 class ResourceMetadata;
 class ResourceMetadataStorage;
 }  // namespace internal
+
+// Mounting status. These values are persisted to logs. Entries should not be
+// renumbered and numeric values should never be reused.
+enum class DriveMountStatus {
+  kSuccess = 0,
+  kUnknownFailure = 1,
+  kTemporaryUnavailable = 2,
+  kMaxValue = kTemporaryUnavailable,
+};
 
 // Interface for classes that need to observe events from
 // DriveIntegrationService.  All events are notified on UI thread.
@@ -70,9 +90,12 @@ class DriveIntegrationServiceObserver {
 // created per-profile.
 class DriveIntegrationService : public KeyedService,
                                 public DriveNotificationObserver,
-                                public content::NotificationObserver {
+                                public content::NotificationObserver,
+                                public drivefs::DriveFsHost::MountObserver {
  public:
   class PreferenceWatcher;
+  using DriveFsMojoConnectionDelegateFactory = base::RepeatingCallback<
+      std::unique_ptr<drivefs::DriveFsHost::MojoConnectionDelegate>()>;
 
   // test_drive_service, test_mount_point_name, test_cache_root and
   // test_file_system are used by tests to inject customized instances.
@@ -86,7 +109,9 @@ class DriveIntegrationService : public KeyedService,
       DriveServiceInterface* test_drive_service,
       const std::string& test_mount_point_name,
       const base::FilePath& test_cache_root,
-      FileSystemInterface* test_file_system);
+      FileSystemInterface* test_file_system,
+      DriveFsMojoConnectionDelegateFactory
+          test_drivefs_mojo_connection_delegate_factory = {});
   ~DriveIntegrationService() override;
 
   // KeyedService override:
@@ -97,13 +122,33 @@ class DriveIntegrationService : public KeyedService,
 
   bool IsMounted() const;
 
+  // Returns the path of the mount point for drive. It is only valid to call if
+  // |IsMounted()|.
+  base::FilePath GetMountPointPath() const;
+
+  // Returns the path of DriveFS log if enabled or empty path.
+  base::FilePath GetDriveFsLogPath() const;
+
+  // Returns true if |local_path| resides inside |GetMountPointPath()|.
+  // In this case |drive_path| will contain 'drive' path of this file, e.g.
+  // reparented to the mount point.
+  // It is only valid to call if |IsMounted()|.
+  bool GetRelativeDrivePath(const base::FilePath& local_path,
+                            base::FilePath* drive_path) const;
+
   // Adds and removes the observer.
   void AddObserver(DriveIntegrationServiceObserver* observer);
   void RemoveObserver(DriveIntegrationServiceObserver* observer);
 
   // DriveNotificationObserver implementation.
-  void OnNotificationReceived() override;
+  void OnNotificationReceived(const std::set<std::string>& ids) override;
+  void OnNotificationTimerFired() override;
   void OnPushNotificationEnabled(bool enabled) override;
+
+  // MountObserver implementation.
+  void OnMounted(const base::FilePath& mount_path) override;
+  void OnUnmounted(base::Optional<base::TimeDelta> remount_delay) override;
+  void OnMountFailed(base::Optional<base::TimeDelta> remount_delay) override;
 
   EventLogger* event_logger() { return logger_.get(); }
   DriveServiceInterface* drive_service() { return drive_service_.get(); }
@@ -112,7 +157,6 @@ class DriveIntegrationService : public KeyedService,
   }
   FileSystemInterface* file_system() { return file_system_.get(); }
   DownloadHandler* download_handler() { return download_handler_.get(); }
-  DriveAppRegistry* drive_app_registry() { return drive_app_registry_.get(); }
   JobListInterface* job_list() { return scheduler_.get(); }
 
   // Clears all the local cache file, the local resource metadata, and
@@ -122,6 +166,13 @@ class DriveIntegrationService : public KeyedService,
   void ClearCacheAndRemountFileSystem(
       const base::Callback<void(bool)>& callback);
 
+  // Returns the DriveFsHost if it is enabled.
+  drivefs::DriveFsHost* GetDriveFsHost() const;
+
+  // Returns the mojo interface to the DriveFs daemon if it is enabled and
+  // connected.
+  drivefs::mojom::DriveFs* GetDriveFsInterface() const;
+
  private:
   enum State {
     NOT_INITIALIZED,
@@ -129,13 +180,23 @@ class DriveIntegrationService : public KeyedService,
     INITIALIZED,
     REMOUNTING,
   };
+  class DriveFsHolder;
+
+  // Manages passing changes in team drives to the drive notification manager.
+  class NotificationManager;
 
   // Returns true if Drive is enabled.
   // Must be called on UI thread.
   bool IsDriveEnabled();
 
-  // Registers remote file system for drive mount point.
+  // Registers remote file system for drive mount point. If DriveFS is enabled,
+  // but not yet mounted, this will start it mounting and wait for it to
+  // complete before adding the mount point.
   void AddDriveMountPoint();
+
+  // Registers remote file system for drive mount point.
+  bool AddDriveMountPointAfterMounted();
+
   // Unregisters drive mount point from File API.
   void RemoveDriveMountPoint();
 
@@ -143,6 +204,13 @@ class DriveIntegrationService : public KeyedService,
   // Used to implement ClearCacheAndRemountFileSystem().
   void AddBackDriveMountPoint(const base::Callback<void(bool)>& callback,
                               FileError error);
+
+  // Unregisters drive mount point, and if |remount_delay| is specified
+  // then tries to add it back after that delay. If |remount_delay| isn't
+  // specified, |failed_to_mount| is true and the user is offline, schedules a
+  // retry when the user is online.
+  void MaybeRemountFileSystem(base::Optional<base::TimeDelta> remount_delay,
+                              bool failed_to_mount);
 
   // Initializes the object. This function should be called before any
   // other functions.
@@ -161,6 +229,12 @@ class DriveIntegrationService : public KeyedService,
                const content::NotificationSource& source,
                const content::NotificationDetails& details) override;
 
+  // Migrate pinned files from the old Drive integration to DriveFS.
+  void MigratePinnedFiles();
+
+  // Pin all the files in |files_to_pin| with DriveFS.
+  void PinFiles(const std::vector<base::FilePath>& files_to_pin);
+
   friend class DriveIntegrationServiceFactory;
 
   Profile* profile_;
@@ -177,17 +251,24 @@ class DriveIntegrationService : public KeyedService,
   std::unique_ptr<internal::FileCache, util::DestroyHelper> cache_;
   std::unique_ptr<DriveServiceInterface> drive_service_;
   std::unique_ptr<JobScheduler> scheduler_;
-  std::unique_ptr<DriveAppRegistry> drive_app_registry_;
   std::unique_ptr<internal::ResourceMetadata, util::DestroyHelper>
       resource_metadata_;
   std::unique_ptr<FileSystemInterface> file_system_;
   std::unique_ptr<DownloadHandler> download_handler_;
   std::unique_ptr<DebugInfoCollector> debug_info_collector_;
 
-  base::ObserverList<DriveIntegrationServiceObserver> observers_;
+  base::ObserverList<DriveIntegrationServiceObserver>::Unchecked observers_;
   std::unique_ptr<PreferenceWatcher> preference_watcher_;
   std::unique_ptr<content::NotificationRegistrar>
       profile_notification_registrar_;
+
+  std::unique_ptr<DriveFsHolder> drivefs_holder_;
+  std::unique_ptr<NotificationManager> notification_manager_;
+  int drivefs_total_failures_count_ = 0;
+  int drivefs_consecutive_failures_count_ = 0;
+  bool remount_when_online_ = false;
+
+  base::TimeTicks mount_start_;
 
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate its weak pointers before any other members are destroyed.

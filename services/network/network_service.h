@@ -10,32 +10,51 @@
 #include <string>
 
 #include "base/component_export.h"
+#include "base/containers/span.h"
+#include "base/containers/unique_ptr_adapters.h"
 #include "base/macros.h"
+#include "base/memory/scoped_refptr.h"
+#include "base/optional.h"
+#include "base/time/time.h"
+#include "build/build_config.h"
 #include "mojo/public/cpp/bindings/binding.h"
+#include "net/http/http_auth_preferences.h"
+#include "net/log/net_log.h"
+#include "net/log/trace_net_log_observer.h"
 #include "services/network/keepalive_statistics_recorder.h"
 #include "services/network/network_change_manager.h"
-#include "services/network/network_service.h"
+#include "services/network/network_quality_estimator_manager.h"
+#include "services/network/public/mojom/net_log.mojom.h"
 #include "services/network/public/mojom/network_change_manager.mojom.h"
+#include "services/network/public/mojom/network_quality_estimator_manager.mojom.h"
 #include "services/network/public/mojom/network_service.mojom.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
 #include "services/service_manager/public/cpp/service.h"
 
 namespace net {
+class FileNetLogObserver;
 class HostResolver;
+class HttpAuthHandlerFactory;
 class LoggingNetworkChangeObserver;
-class NetLog;
 class NetworkQualityEstimator;
 class URLRequestContext;
 }  // namespace net
 
+namespace certificate_transparency {
+class STHDistributor;
+class STHReporter;
+}  // namespace certificate_transparency
+
 namespace network {
 
+class CRLSetDistributor;
 class NetworkContext;
+class NetworkUsageAccumulator;
 class URLRequestContextBuilderMojo;
 
 class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkService
     : public service_manager::Service,
-      public network::mojom::NetworkService {
+      public mojom::NetworkService {
  public:
   // |net_log| is an optional shared NetLog, which will be used instead of the
   // service's own NetLog. It must outlive the NetworkService.
@@ -47,6 +66,11 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkService
                  net::NetLog* net_log = nullptr);
 
   ~NetworkService() override;
+
+  // Call to inform the NetworkService that OSCrypt::SetConfig() has already
+  // been invoked, so OSCrypt::SetConfig() does not need to be called before
+  // encrypted storage can be used.
+  void set_os_crypt_is_configured();
 
   // Can be used to seed a NetworkContext with a consumer-configured
   // URLRequestContextBuilder, which |params| will then be applied to. The
@@ -64,6 +88,12 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkService
       std::unique_ptr<URLRequestContextBuilderMojo> builder,
       net::URLRequestContext** url_request_context);
 
+  // Sets the HostResolver used by the NetworkService. Must be called before any
+  // NetworkContexts have been created. Used in the legacy path only.
+  // TODO(mmenke): Remove once the NetworkService can create a correct
+  // HostResolver for ChromeOS.
+  void SetHostResolver(std::unique_ptr<net::HostResolver> host_resolver);
+
   // Allows late binding if the mojo request wasn't specified in the
   // constructor.
   void Bind(mojom::NetworkServiceRequest request);
@@ -75,50 +105,122 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkService
   // TODO(https://crbug.com/767450): Make it so NetworkService can always create
   // its own NetLog, instead of sharing one.
   static std::unique_ptr<NetworkService> Create(
-      network::mojom::NetworkServiceRequest request,
+      mojom::NetworkServiceRequest request,
       net::NetLog* net_log = nullptr);
 
   static std::unique_ptr<NetworkService> CreateForTesting();
 
   // These are called by NetworkContexts as they are being created and
   // destroyed.
+  // TODO(mmenke):  Remove once all NetworkContexts are owned by the
+  // NetworkService.
   void RegisterNetworkContext(NetworkContext* network_context);
   void DeregisterNetworkContext(NetworkContext* network_context);
 
+  // Invokes net::CreateNetLogEntriesForActiveObjects(observer) on all
+  // URLRequestContext's known to |this|.
+  void CreateNetLogEntriesForActiveObjects(
+      net::NetLog::ThreadSafeObserver* observer);
+
   // mojom::NetworkService implementation:
   void SetClient(mojom::NetworkServiceClientPtr client) override;
+  void StartNetLog(base::File file,
+                   mojom::NetLogCaptureMode capture_mode,
+                   base::Value constants) override;
+  void SetSSLKeyLogFile(const base::FilePath& file) override;
   void CreateNetworkContext(mojom::NetworkContextRequest request,
                             mojom::NetworkContextParamsPtr params) override;
+  void ConfigureStubHostResolver(
+      bool stub_resolver_enabled,
+      base::Optional<std::vector<mojom::DnsOverHttpsServerPtr>>
+          dns_over_https_servers) override;
   void DisableQuic() override;
+  void SetUpHttpAuth(
+      mojom::HttpAuthStaticParamsPtr http_auth_static_params) override;
+  void ConfigureHttpAuthPrefs(
+      mojom::HttpAuthDynamicParamsPtr http_auth_dynamic_params) override;
   void SetRawHeadersAccess(uint32_t process_id, bool allow) override;
   void GetNetworkChangeManager(
       mojom::NetworkChangeManagerRequest request) override;
+  void GetNetworkQualityEstimatorManager(
+      mojom::NetworkQualityEstimatorManagerRequest request) override;
+  void GetTotalNetworkUsages(
+      mojom::NetworkService::GetTotalNetworkUsagesCallback callback) override;
+  void UpdateSignedTreeHead(const net::ct::SignedTreeHead& sth) override;
+  void UpdateCRLSet(base::span<const uint8_t> crl_set) override;
+#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
+  void SetCryptConfig(mojom::CryptConfigPtr crypt_config) override;
+#endif
+#if defined(OS_MACOSX) && !defined(OS_IOS)
+  void SetEncryptionKey(const std::string& encryption_key) override;
+#endif
+  void AddCorbExceptionForPlugin(uint32_t process_id) override;
+  void RemoveCorbExceptionForPlugin(uint32_t process_id) override;
+#if defined(OS_ANDROID)
+  void OnApplicationStateChange(base::android::ApplicationState state) override;
+#endif
+
+  // Returns the shared HttpAuthHandlerFactory for the NetworkService, creating
+  // one if needed.
+  net::HttpAuthHandlerFactory* GetHttpAuthHandlerFactory();
+
+  // Notification that a URLLoader is about to start.
+  void OnBeforeURLRequest();
 
   bool quic_disabled() const { return quic_disabled_; }
   bool HasRawHeadersAccess(uint32_t process_id) const;
 
   mojom::NetworkServiceClient* client() { return client_.get(); }
   net::NetworkQualityEstimator* network_quality_estimator() {
-    return network_quality_estimator_.get();
+    return network_quality_estimator_manager_->GetNetworkQualityEstimator();
   }
   net::NetLog* net_log() const;
   KeepaliveStatisticsRecorder* keepalive_statistics_recorder() {
     return &keepalive_statistics_recorder_;
   }
   net::HostResolver* host_resolver() { return host_resolver_.get(); }
+  NetworkUsageAccumulator* network_usage_accumulator() {
+    return network_usage_accumulator_.get();
+  }
+
+  certificate_transparency::STHReporter* sth_reporter();
+  CRLSetDistributor* crl_set_distributor() {
+    return crl_set_distributor_.get();
+  }
+
+  bool os_crypt_config_set() const { return os_crypt_config_set_; }
+
+  static NetworkService* GetNetworkServiceForTesting();
 
  private:
-  class MojoNetLog;
-
   // service_manager::Service implementation.
   void OnBindInterface(const service_manager::BindSourceInfo& source_info,
                        const std::string& interface_name,
                        mojo::ScopedMessagePipeHandle interface_pipe) override;
 
-  std::unique_ptr<MojoNetLog> owned_net_log_;
-  // TODO(https://crbug.com/767450): Remove this, once Chrome no longer creates
-  // its own NetLog.
-  net::NetLog* net_log_;
+  void DestroyNetworkContexts();
+
+  // Called by a NetworkContext when its mojo pipe is closed. Deletes the
+  // context.
+  void OnNetworkContextConnectionClosed(NetworkContext* network_context);
+
+  // Starts the timer to call NetworkServiceClient::OnLoadingStateUpdate(), if
+  // timer isn't already running, |waiting_on_load_state_ack_| is false, and
+  // there are live URLLoaders.
+  // Only works when network service is enabled.
+  void MaybeStartUpdateLoadInfoTimer();
+
+  // Checks all pending requests and updates the load info if necessary.
+  void UpdateLoadInfo();
+
+  // Invoked once the browser has acknowledged receiving the previous LoadInfo.
+  // Starts timer call UpdateLoadInfo() again, if needed.
+  void AckUpdateLoadInfo();
+
+  net::NetLog* net_log_ = nullptr;
+
+  std::unique_ptr<net::FileNetLogObserver> file_net_log_observer_;
+  net::TraceNetLogObserver trace_net_log_observer_;
 
   mojom::NetworkServiceClientPtr client_;
 
@@ -135,18 +237,50 @@ class COMPONENT_EXPORT(NETWORK_SERVICE) NetworkService
 
   mojo::Binding<mojom::NetworkService> binding_;
 
-  std::unique_ptr<net::NetworkQualityEstimator> network_quality_estimator_;
+  std::unique_ptr<NetworkQualityEstimatorManager>
+      network_quality_estimator_manager_;
 
   std::unique_ptr<net::HostResolver> host_resolver_;
+  std::unique_ptr<NetworkUsageAccumulator> network_usage_accumulator_;
 
-  // NetworkContexts register themselves with the NetworkService so that they
-  // can be cleaned up when the NetworkService goes away. This is needed as
-  // NetworkContexts share global state with the NetworkService, so must be
-  // destroyed first.
+  // Must be above |http_auth_handler_factory_|, since it depends on this.
+  net::HttpAuthPreferences http_auth_preferences_;
+  std::unique_ptr<net::HttpAuthHandlerFactory> http_auth_handler_factory_;
+
+  // NetworkContexts created by CreateNetworkContext(). They call into the
+  // NetworkService when their connection is closed so that it can delete
+  // them.  It will also delete them when the NetworkService itself is torn
+  // down, as NetworkContexts share global state owned by the NetworkService, so
+  // must be destroyed first.
+  //
+  // NetworkContexts created by CreateNetworkContextWithBuilder() are not owned
+  // by the NetworkService, and must be destroyed by their owners before the
+  // NetworkService itself is.
+  std::set<std::unique_ptr<NetworkContext>, base::UniquePtrComparator>
+      owned_network_contexts_;
+
+  // List of all NetworkContexts that are associated with the NetworkService,
+  // including ones it does not own.
+  // TODO(mmenke): Once the NetworkService always owns NetworkContexts, merge
+  // this with |owned_network_contexts_|.
   std::set<NetworkContext*> network_contexts_;
+
   std::set<uint32_t> processes_with_raw_headers_access_;
 
   bool quic_disabled_ = false;
+
+  bool os_crypt_config_set_ = false;
+
+  std::unique_ptr<certificate_transparency::STHDistributor> sth_distributor_;
+  std::unique_ptr<CRLSetDistributor> crl_set_distributor_;
+
+  // A timer that periodically calls UpdateLoadInfo while there are pending
+  // loads and not waiting on an ACK from the client for the last sent
+  // LoadInfo callback.
+  base::OneShotTimer update_load_info_timer_;
+  // True if a LoadInfoList has been sent to the client, but has yet to be
+  // acknowledged.
+  bool waiting_on_load_state_ack_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(NetworkService);
 };

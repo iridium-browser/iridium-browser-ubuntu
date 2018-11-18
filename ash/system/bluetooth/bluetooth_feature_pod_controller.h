@@ -24,9 +24,12 @@ class BluetoothFeaturePodController : public FeaturePodControllerBase,
   // FeaturePodControllerBase:
   FeaturePodButton* CreateButton() override;
   void OnIconPressed() override;
+  void OnLabelPressed() override;
+  SystemTrayItemUmaType GetUmaType() const override;
 
  private:
   void UpdateButton();
+  void SetTooltipState(const base::string16& tooltip_state);
 
   // BluetoothObserver:
   void OnBluetoothRefresh() override;

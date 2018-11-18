@@ -10,14 +10,10 @@ from __future__ import print_function
 import ConfigParser
 import os
 
-from chromite.lib import config_lib
 from chromite.lib import constants
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_logging as logging
 from chromite.lib import git
-
-
-site_config = config_lib.GetConfig()
 
 
 class MalformedCQConfigException(Exception):
@@ -109,16 +105,6 @@ class CQConfigParser(object):
     """
     result = self.GetOption(constants.CQ_CONFIG_SECTION_GENERAL,
                             constants.CQ_CONFIG_IGNORED_STAGES)
-    return result.split() if result else []
-
-  def GetSubsystems(self):
-    """Get a list of subsystems from config for self.change.
-
-    Retuns:
-      A list of subsystems (strings).
-    """
-    result = self.GetOption(constants.CQ_CONFIG_SECTION_GENERAL,
-                            constants.CQ_CONFIG_SUBSYSTEM)
     return result.split() if result else []
 
   def GetConfigFlag(self, section, option):
@@ -312,7 +298,7 @@ class CQConfigParser(object):
     is found within the project checkout path, a config file path in the root of
     the checkout will be returned, in which case the file is not guaranteed to
     exist. See
-    http://chromium.org/chromium-os/build/bypassing-tests-on-a-per-project-basis
+    https://dev.chromium.org/chromium-os/build/bypassing-tests-on-a-per-project-basis
 
     Args:
       build_root: The path to the build root.

@@ -30,7 +30,7 @@
 #include "base/macros.h"
 #include "base/single_thread_task_runner.h"
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
+#include "third_party/blink/renderer/platform/bindings/name_client.h"
 #include "third_party/blink/renderer/platform/bindings/trace_wrapper_member.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/wtf/deque.h"
@@ -39,35 +39,30 @@
 namespace blink {
 
 class Document;
+class PendingScript;
 class ScriptLoader;
 
 class CORE_EXPORT ScriptRunner final
     : public GarbageCollectedFinalized<ScriptRunner>,
-      public TraceWrapperBase {
+      public NameClient {
  public:
   static ScriptRunner* Create(Document* document) {
     return new ScriptRunner(document);
   }
 
-  // Async scripts may either execute asynchronously (as their load
-  // completes), or 'in order'. See
-  // http://www.html5rocks.com/en/tutorials/speed/script-loading/ for more
-  // information.
-  enum AsyncExecutionType { kNone, kAsync, kInOrder };
-  void QueueScriptForExecution(ScriptLoader*, AsyncExecutionType);
+  void QueueScriptForExecution(PendingScript*);
   bool HasPendingScripts() const {
     return !pending_in_order_scripts_.IsEmpty() ||
            !pending_async_scripts_.IsEmpty();
   }
   void Suspend();
   void Resume();
-  void NotifyScriptReady(ScriptLoader*, AsyncExecutionType);
+  void NotifyScriptReady(PendingScript*);
   void NotifyScriptStreamerFinished();
 
   static void MovePendingScript(Document&, Document&, ScriptLoader*);
 
   void Trace(blink::Visitor*);
-  void TraceWrappers(const ScriptWrappableVisitor*) const override;
   const char* NameInHeapSnapshot() const override { return "ScriptRunner"; }
 
  private:
@@ -75,8 +70,8 @@ class CORE_EXPORT ScriptRunner final
 
   explicit ScriptRunner(Document*);
 
-  void MovePendingScript(ScriptRunner*, ScriptLoader*);
-  bool RemovePendingInOrderScript(ScriptLoader*);
+  void MovePendingScript(ScriptRunner*, PendingScript*);
+  bool RemovePendingInOrderScript(PendingScript*);
   void ScheduleReadyInOrderScripts();
 
   void PostTask(const base::Location&);
@@ -84,6 +79,7 @@ class CORE_EXPORT ScriptRunner final
   // Execute the first task in in_order_scripts_to_execute_soon_.
   // Returns true if task was run, and false otherwise.
   bool ExecuteInOrderTask();
+
   // Execute any task in async_scripts_to_execute_soon_.
   // Returns true if task was run, and false otherwise.
   bool ExecuteAsyncTask();
@@ -91,24 +87,25 @@ class CORE_EXPORT ScriptRunner final
   void ExecuteTask();
 
   // Try to start streaming a specific script or any available script.
-  void TryStream(ScriptLoader*);
+  void TryStream(PendingScript*);
   void TryStreamAny();
-  bool DoTryStream(ScriptLoader*);  // Implementation for both Try* methods.
+  bool DoTryStream(PendingScript*);  // Implementation for both Try* methods.
 
   Member<Document> document_;
 
-  HeapDeque<TraceWrapperMember<ScriptLoader>> pending_in_order_scripts_;
-  HeapHashSet<TraceWrapperMember<ScriptLoader>> pending_async_scripts_;
+  HeapDeque<TraceWrapperMember<PendingScript>> pending_in_order_scripts_;
+  HeapHashSet<TraceWrapperMember<PendingScript>> pending_async_scripts_;
 
   // http://www.whatwg.org/specs/web-apps/current-work/#set-of-scripts-that-will-execute-as-soon-as-possible
-  HeapDeque<TraceWrapperMember<ScriptLoader>> async_scripts_to_execute_soon_;
-  HeapDeque<TraceWrapperMember<ScriptLoader>> in_order_scripts_to_execute_soon_;
+  HeapDeque<TraceWrapperMember<PendingScript>> async_scripts_to_execute_soon_;
+  HeapDeque<TraceWrapperMember<PendingScript>>
+      in_order_scripts_to_execute_soon_;
 
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
 
-  int number_of_in_order_scripts_with_pending_notification_;
+  int number_of_in_order_scripts_with_pending_notification_ = 0;
 
-  bool is_suspended_;
+  bool is_suspended_ = false;
 
 #ifndef NDEBUG
   // We expect to have one posted task in flight for each script in either
@@ -116,7 +113,7 @@ class CORE_EXPORT ScriptRunner final
   // when the ScriptRunner is suspended, or when we take a Script out the
   // async_scripts_to_be_executed_soon_ queue for streaming. We'll use this
   // variable to account & check this invariant for debugging.
-  int number_of_extra_tasks_;
+  int number_of_extra_tasks_ = 0;
 #endif
   DISALLOW_COPY_AND_ASSIGN(ScriptRunner);
 };

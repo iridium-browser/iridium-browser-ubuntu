@@ -8,7 +8,6 @@
 
 #include <memory>
 
-#include "base/message_loop/message_loop.h"
 #include "base/strings/sys_string_conversions.h"
 #include "components/browser_sync/profile_sync_service_mock.h"
 #include "components/pref_registry/pref_registry_syncable.h"
@@ -19,8 +18,8 @@
 #include "ios/chrome/browser/prefs/browser_prefs.h"
 #include "ios/chrome/browser/signin/authentication_service_factory.h"
 #import "ios/chrome/browser/signin/authentication_service_fake.h"
-#include "ios/chrome/browser/sync/ios_chrome_profile_sync_service_factory.h"
 #include "ios/chrome/browser/sync/ios_chrome_profile_sync_test_util.h"
+#include "ios/chrome/browser/sync/profile_sync_service_factory.h"
 #include "ios/chrome/browser/sync/sync_setup_service.h"
 #include "ios/chrome/browser/sync/sync_setup_service_factory.h"
 #import "ios/chrome/browser/ui/settings/settings_navigation_controller.h"
@@ -74,14 +73,15 @@ void PassphraseCollectionViewControllerTest::SetUp() {
   TestChromeBrowserState::Builder test_cbs_builder;
   test_cbs_builder.AddTestingFactory(
       AuthenticationServiceFactory::GetInstance(),
-      AuthenticationServiceFake::CreateAuthenticationService);
+      base::BindRepeating(
+          &AuthenticationServiceFake::CreateAuthenticationService));
   test_cbs_builder.SetPrefService(CreatePrefService());
   chrome_browser_state_ = test_cbs_builder.Build();
 
   fake_sync_service_ = static_cast<browser_sync::ProfileSyncServiceMock*>(
-      IOSChromeProfileSyncServiceFactory::GetInstance()
-          ->SetTestingFactoryAndUse(chrome_browser_state_.get(),
-                                    CreateNiceProfileSyncServiceMock));
+      ProfileSyncServiceFactory::GetInstance()->SetTestingFactoryAndUse(
+          chrome_browser_state_.get(),
+          base::BindRepeating(&CreateNiceProfileSyncServiceMock)));
   ON_CALL(*fake_sync_service_, GetRegisteredDataTypes())
       .WillByDefault(Return(syncer::ModelTypeSet()));
   fake_sync_service_->Initialize();
@@ -89,8 +89,8 @@ void PassphraseCollectionViewControllerTest::SetUp() {
   // Set up non-default return values for our sync service mock.
   ON_CALL(*fake_sync_service_, IsPassphraseRequired())
       .WillByDefault(Return(true));
-  ON_CALL(*fake_sync_service_, IsEngineInitialized())
-      .WillByDefault(Return(true));
+  ON_CALL(*fake_sync_service_, GetTransportState())
+      .WillByDefault(Return(syncer::SyncService::TransportState::ACTIVE));
 
   ios::FakeChromeIdentityService* identityService =
       ios::FakeChromeIdentityService::GetInstanceFromChromeProvider();

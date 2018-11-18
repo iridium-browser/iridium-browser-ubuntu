@@ -7,6 +7,9 @@
 
 #import <UIKit/UIKit.h>
 
+#import "ios/chrome/browser/ui/popup_menu/popup_menu_consumer.h"
+#import "ios/chrome/browser/ui/popup_menu/public/popup_menu_ui_updating.h"
+
 namespace bookmarks {
 class BookmarkModel;
 }
@@ -18,22 +21,17 @@ class Tracker;
 class ReadingListModel;
 class WebStateList;
 
-// Type of popup menus.
-typedef NS_ENUM(NSInteger, PopupMenuType) {
-  PopupMenuTypeToolsMenu,
-  PopupMenuTypeNavigationBackward,
-  PopupMenuTypeNavigationForward,
-  PopupMenuTypeTabGrid,
-  PopupMenuTypeSearch,
-};
-
 // Mediator for the popup menu. This object is in charge of creating and
 // updating the items of the popup menu.
 @interface PopupMenuMediator : NSObject
 
+// Initializes the mediator with a |type| of popup menu, whether it
+// |isIncognito|, a |readingListModel| used to display the badge for the reading
+// list entry, and whether the mediator should |triggerNewIncognitoTabTip|.
 - (instancetype)initWithType:(PopupMenuType)type
-                 isIncognito:(BOOL)isIncognito
-            readingListModel:(ReadingListModel*)readingListModel
+                  isIncognito:(BOOL)isIncognito
+             readingListModel:(ReadingListModel*)readingListModel
+    triggerNewIncognitoTabTip:(BOOL)triggerNewIncognitoTabTip
     NS_DESIGNATED_INITIALIZER;
 - (instancetype)init NS_UNAVAILABLE;
 
@@ -41,7 +39,7 @@ typedef NS_ENUM(NSInteger, PopupMenuType) {
 // WebState.
 @property(nonatomic, assign) WebStateList* webStateList;
 // The TableView to be configured with this mediator.
-@property(nonatomic, strong) PopupMenuTableViewController* popupMenu;
+@property(nonatomic, strong) id<PopupMenuConsumer> popupMenu;
 // Dispatcher.
 @property(nonatomic, weak) id<BrowserCommands> dispatcher;
 // Records events for the use of in-product help. The mediator does not take

@@ -240,6 +240,7 @@ class BrowserActionsContainer : public views::View,
   void StopAnimating() override;
   void ShowToolbarActionBubble(
       std::unique_ptr<ToolbarActionsBarBubbleDelegate> controller) override;
+  bool CloseOverflowMenuIfOpen() override;
 
   // views::WidgetObserver:
   void OnWidgetClosing(views::Widget* widget) override;

@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cstring>
 #include <queue>
+#include <vector>
 
 #include "modules/video_coding/include/video_coding_defines.h"
 #include "modules/video_coding/jitter_estimator.h"
@@ -22,7 +23,6 @@
 #include "rtc_base/trace_event.h"
 #include "system_wrappers/include/clock.h"
 #include "system_wrappers/include/field_trial.h"
-#include "system_wrappers/include/metrics.h"
 
 namespace webrtc {
 namespace video_coding {
@@ -117,7 +117,8 @@ FrameBuffer::ReturnReason FrameBuffer::NextFrame(
 
         next_frame_it_ = frame_it;
         if (frame->RenderTime() == -1)
-          frame->SetRenderTime(timing_->RenderTimeMs(frame->timestamp, now_ms));
+          frame->SetRenderTime(
+              timing_->RenderTimeMs(frame->Timestamp(), now_ms));
         wait_ms = timing_->MaxWaitingTime(frame->RenderTime(), now_ms);
 
         // This will cause the frame buffer to prefer high framerate rather
@@ -146,16 +147,20 @@ FrameBuffer::ReturnReason FrameBuffer::NextFrame(
       if (!frame->delayed_by_retransmission()) {
         int64_t frame_delay;
 
-        if (inter_frame_delay_.CalculateDelay(frame->timestamp, &frame_delay,
+        if (inter_frame_delay_.CalculateDelay(frame->Timestamp(), &frame_delay,
                                               frame->ReceivedTime())) {
           jitter_estimator_->UpdateEstimate(frame_delay, frame->size());
         }
 
         float rtt_mult = protection_mode_ == kProtectionNackFEC ? 0.0 : 1.0;
+        if (RttMultExperiment::RttMultEnabled()) {
+          rtt_mult = RttMultExperiment::GetRttMultValue();
+        }
         timing_->SetJitterDelay(jitter_estimator_->GetJitterEstimate(rtt_mult));
         timing_->UpdateCurrentDelay(frame->RenderTime(), now_ms);
       } else {
-        if (webrtc::field_trial::IsEnabled("WebRTC-AddRttToPlayoutDelay"))
+        if (RttMultExperiment::RttMultEnabled() ||
+            webrtc::field_trial::IsEnabled("WebRTC-AddRttToPlayoutDelay"))
           jitter_estimator_->FrameNacked();
       }
 
@@ -163,7 +168,7 @@ FrameBuffer::ReturnReason FrameBuffer::NextFrame(
       if (HasBadRenderTiming(*frame, now_ms)) {
         jitter_estimator_->Reset();
         timing_->Reset();
-        frame->SetRenderTime(timing_->RenderTimeMs(frame->timestamp, now_ms));
+        frame->SetRenderTime(timing_->RenderTimeMs(frame->Timestamp(), now_ms));
       }
 
       UpdateJitterDelay();
@@ -177,17 +182,17 @@ FrameBuffer::ReturnReason FrameBuffer::NextFrame(
         const VideoLayerFrameId& frame_key = next_frame_it_->first;
 
         const bool frame_is_higher_spatial_layer_of_last_decoded_frame =
-            last_decoded_frame_timestamp_ == frame->timestamp &&
+            last_decoded_frame_timestamp_ == frame->Timestamp() &&
             last_decoded_frame_key.picture_id == frame_key.picture_id &&
             last_decoded_frame_key.spatial_layer < frame_key.spatial_layer;
 
-        if (AheadOrAt(last_decoded_frame_timestamp_, frame->timestamp) &&
+        if (AheadOrAt(last_decoded_frame_timestamp_, frame->Timestamp()) &&
             !frame_is_higher_spatial_layer_of_last_decoded_frame) {
           // TODO(brandtr): Consider clearing the entire buffer when we hit
           // these conditions.
           RTC_LOG(LS_WARNING)
               << "Frame with (timestamp:picture_id:spatial_id) ("
-              << frame->timestamp << ":" << frame->id.picture_id << ":"
+              << frame->Timestamp() << ":" << frame->id.picture_id << ":"
               << static_cast<int>(frame->id.spatial_layer) << ")"
               << " sent to decoder after frame with"
               << " (timestamp:picture_id:spatial_id) ("
@@ -198,7 +203,7 @@ FrameBuffer::ReturnReason FrameBuffer::NextFrame(
       }
 
       AdvanceLastDecodedFrame(next_frame_it_);
-      last_decoded_frame_timestamp_ = frame->timestamp;
+      last_decoded_frame_timestamp_ = frame->Timestamp();
       *frame_out = std::move(frame);
       return kFrameFound;
     }
@@ -219,10 +224,14 @@ bool FrameBuffer::HasBadRenderTiming(const EncodedFrame& frame,
                                      int64_t now_ms) {
   // Assume that render timing errors are due to changes in the video stream.
   int64_t render_time_ms = frame.RenderTimeMs();
-  const int64_t kMaxVideoDelayMs = 10000;
+  // Zero render time means render immediately.
+  if (render_time_ms == 0) {
+    return false;
+  }
   if (render_time_ms < 0) {
     return true;
   }
+  const int64_t kMaxVideoDelayMs = 10000;
   if (std::abs(render_time_ms - now_ms) > kMaxVideoDelayMs) {
     int frame_delay = static_cast<int>(std::abs(render_time_ms - now_ms));
     RTC_LOG(LS_WARNING)
@@ -293,7 +302,7 @@ void FrameBuffer::UpdatePlayoutDelays(const EncodedFrame& frame) {
     timing_->set_max_playout_delay(playout_delay.max_ms);
 
   if (!frame.delayed_by_retransmission())
-    timing_->IncomingTimestamp(frame.timestamp, frame.ReceivedTime());
+    timing_->IncomingTimestamp(frame.Timestamp(), frame.ReceivedTime());
 }
 
 int64_t FrameBuffer::InsertFrame(std::unique_ptr<EncodedFrame> frame) {
@@ -339,7 +348,7 @@ int64_t FrameBuffer::InsertFrame(std::unique_ptr<EncodedFrame> frame) {
 
   if (last_decoded_frame_it_ != frames_.end() &&
       id <= last_decoded_frame_it_->first) {
-    if (AheadOf(frame->timestamp, last_decoded_frame_timestamp_) &&
+    if (AheadOf(frame->Timestamp(), last_decoded_frame_timestamp_) &&
         frame->is_keyframe()) {
       // If this frame has a newer timestamp but an earlier picture id then we
       // assume there has been a jump in the picture id due to some encoder
@@ -483,20 +492,34 @@ bool FrameBuffer::UpdateFrameInfoWithIncomingFrame(const EncodedFrame& frame,
                                                    FrameMap::iterator info) {
   TRACE_EVENT0("webrtc", "FrameBuffer::UpdateFrameInfoWithIncomingFrame");
   const VideoLayerFrameId& id = frame.id;
-  info->second.num_missing_continuous = frame.num_references;
-  info->second.num_missing_decodable = frame.num_references;
 
   RTC_DCHECK(last_decoded_frame_it_ == frames_.end() ||
              last_decoded_frame_it_->first < info->first);
 
-  // Check how many dependencies that have already been fulfilled.
+  // In this function we determine how many missing dependencies this |frame|
+  // has to become continuous/decodable. If a frame that this |frame| depend
+  // on has already been decoded then we can ignore that dependency since it has
+  // already been fulfilled.
+  //
+  // For all other frames we will register a backwards reference to this |frame|
+  // so that |num_missing_continuous| and |num_missing_decodable| can be
+  // decremented as frames become continuous/are decoded.
+  struct Dependency {
+    VideoLayerFrameId id;
+    bool continuous;
+  };
+  std::vector<Dependency> not_yet_fulfilled_dependencies;
+
+  // Find all dependencies that have not yet been fulfilled.
   for (size_t i = 0; i < frame.num_references; ++i) {
     VideoLayerFrameId ref_key(frame.references[i], frame.id.spatial_layer);
     auto ref_info = frames_.find(ref_key);
 
-    // Does |frame| depend on a frame earlier than the last decoded frame?
+    // Does |frame| depend on a frame earlier than the last decoded one?
     if (last_decoded_frame_it_ != frames_.end() &&
         ref_key <= last_decoded_frame_it_->first) {
+      // Was that frame decoded? If not, this |frame| will never become
+      // decodable.
       if (ref_info == frames_.end()) {
         int64_t now_ms = clock_->TimeInMilliseconds();
         if (last_log_non_decoded_ms_ + kLogNonDecodedIntervalMs < now_ms) {
@@ -509,57 +532,51 @@ bool FrameBuffer::UpdateFrameInfoWithIncomingFrame(const EncodedFrame& frame,
         }
         return false;
       }
-
-      --info->second.num_missing_continuous;
-      --info->second.num_missing_decodable;
     } else {
-      if (ref_info == frames_.end())
-        ref_info = frames_.insert(std::make_pair(ref_key, FrameInfo())).first;
-
-      if (ref_info->second.continuous)
-        --info->second.num_missing_continuous;
-
-      // Add backwards reference so |frame| can be updated when new
-      // frames are inserted or decoded.
-      ref_info->second.dependent_frames[ref_info->second.num_dependent_frames] =
-          id;
-      RTC_DCHECK_LT(ref_info->second.num_dependent_frames,
-                    (FrameInfo::kMaxNumDependentFrames - 1));
-      // TODO(philipel): Look into why this could happen and handle
-      // appropriately.
-      if (ref_info->second.num_dependent_frames <
-          (FrameInfo::kMaxNumDependentFrames - 1)) {
-        ++ref_info->second.num_dependent_frames;
-      }
+      bool ref_continuous =
+          ref_info != frames_.end() && ref_info->second.continuous;
+      not_yet_fulfilled_dependencies.push_back({ref_key, ref_continuous});
     }
-    RTC_DCHECK_LE(ref_info->second.num_missing_continuous,
-                  ref_info->second.num_missing_decodable);
   }
 
-  // Check if we have the lower spatial layer frame.
+  // Does |frame| depend on the lower spatial layer?
   if (frame.inter_layer_predicted) {
-    ++info->second.num_missing_continuous;
-    ++info->second.num_missing_decodable;
-
     VideoLayerFrameId ref_key(frame.id.picture_id, frame.id.spatial_layer - 1);
-    // Gets or create the FrameInfo for the referenced frame.
-    auto ref_info = frames_.insert(std::make_pair(ref_key, FrameInfo())).first;
-    if (ref_info->second.continuous)
-      --info->second.num_missing_continuous;
+    auto ref_info = frames_.find(ref_key);
 
-    if (ref_info == last_decoded_frame_it_) {
-      --info->second.num_missing_decodable;
-    } else {
-      ref_info->second.dependent_frames[ref_info->second.num_dependent_frames] =
-          id;
-      ++ref_info->second.num_dependent_frames;
+    bool lower_layer_continuous =
+        ref_info != frames_.end() && ref_info->second.continuous;
+    bool lower_layer_decoded = last_decoded_frame_it_ != frames_.end() &&
+                               last_decoded_frame_it_->first == ref_key;
+
+    if (!lower_layer_continuous || !lower_layer_decoded) {
+      not_yet_fulfilled_dependencies.push_back(
+          {ref_key, lower_layer_continuous});
     }
-    RTC_DCHECK_LE(ref_info->second.num_missing_continuous,
-                  ref_info->second.num_missing_decodable);
   }
 
-  RTC_DCHECK_LE(info->second.num_missing_continuous,
-                info->second.num_missing_decodable);
+  info->second.num_missing_continuous = not_yet_fulfilled_dependencies.size();
+  info->second.num_missing_decodable = not_yet_fulfilled_dependencies.size();
+
+  for (const Dependency& dep : not_yet_fulfilled_dependencies) {
+    if (dep.continuous)
+      --info->second.num_missing_continuous;
+
+    // At this point we know we want to insert this frame, so here we
+    // intentionally get or create the FrameInfo for this dependency.
+    FrameInfo* dep_info = &frames_[dep.id];
+
+    if (dep_info->num_dependent_frames <
+        (FrameInfo::kMaxNumDependentFrames - 1)) {
+      dep_info->dependent_frames[dep_info->num_dependent_frames] = id;
+      ++dep_info->num_dependent_frames;
+    } else {
+      RTC_LOG(LS_WARNING) << "Frame with (picture_id:spatial_id) ("
+                          << dep.id.picture_id << ":"
+                          << static_cast<int>(dep.id.spatial_layer)
+                          << ") is referenced by too many frames.";
+    }
+  }
 
   return true;
 }
@@ -587,7 +604,7 @@ void FrameBuffer::UpdateJitterDelay() {
 
 void FrameBuffer::UpdateTimingFrameInfo() {
   TRACE_EVENT0("webrtc", "FrameBuffer::UpdateTimingFrameInfo");
-  rtc::Optional<TimingFrameInfo> info = timing_->GetTimingFrameInfo();
+  absl::optional<TimingFrameInfo> info = timing_->GetTimingFrameInfo();
   if (info && stats_callback_)
     stats_callback_->OnTimingFrameInfoUpdated(*info);
 }

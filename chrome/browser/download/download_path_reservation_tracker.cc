@@ -21,9 +21,9 @@
 #include "base/stl_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/task/lazy_task_runner.h"
+#include "base/task/post_task.h"
 #include "base/task_runner_util.h"
-#include "base/task_scheduler/lazy_task_runner.h"
-#include "base/task_scheduler/post_task.h"
 #include "base/third_party/icu/icu_utf.h"
 #include "build/build_config.h"
 #include "chrome/common/buildflags.h"
@@ -164,10 +164,23 @@ struct CreateReservationInfo {
   base::FilePath source_path;
   base::FilePath suggested_path;
   base::FilePath default_download_path;
+  base::FilePath temporary_path;
   bool create_target_directory;
   DownloadPathReservationTracker::FilenameConflictAction conflict_action;
   DownloadPathReservationTracker::ReservedPathCallback completion_callback;
 };
+
+// Check if |target_path| is writable.
+bool IsPathWritable(const CreateReservationInfo& info,
+                    const base::FilePath& target_path) {
+  if (base::PathIsWritable(target_path.DirName()))
+    return true;
+  // If a temporary file is already created under the same dir as |target_path|,
+  // return true. This is to avoid the windows network share issue. See
+  // http://crbug.com/383765.
+  return !info.temporary_path.empty() &&
+         info.temporary_path.DirName() == target_path.DirName();
+}
 
 // Verify that |target_path| can be written to and also resolve any conflicts if
 // necessary by uniquifying the filename.
@@ -178,10 +191,10 @@ PathValidationResult ValidatePathAndResolveConflicts(
   // to the user's Documents directory. We'll prompt them in this case. No
   // further amendments are made to the filename since the user is going to be
   // prompted.
-  if (!base::PathIsWritable(target_path->DirName())) {
+  if (!IsPathWritable(info, *target_path)) {
     DVLOG(1) << "Unable to write to path \"" << target_path->value() << "\"";
     base::FilePath target_dir;
-    PathService::Get(chrome::DIR_USER_DOCUMENTS, &target_dir);
+    base::PathService::Get(chrome::DIR_USER_DOCUMENTS, &target_dir);
     *target_path = target_dir.Append(target_path->BaseName());
     return PathValidationResult::PATH_NOT_WRITABLE;
   }
@@ -283,7 +296,7 @@ PathValidationResult CreateReservation(const CreateReservationInfo& info,
 // associated with |key| to |new_path|.
 void UpdateReservation(ReservationKey key, const base::FilePath& new_path) {
   DCHECK(g_reservation_map != NULL);
-  ReservationMap::iterator iter = g_reservation_map->find(key);
+  auto iter = g_reservation_map->find(key);
   if (iter != g_reservation_map->end()) {
     iter->second = new_path;
   } else {
@@ -401,6 +414,7 @@ void DownloadPathReservationTracker::GetReservedPath(
                                 source_path,
                                 target_path,
                                 default_path,
+                                download_item->GetTemporaryFilePath(),
                                 create_directory,
                                 conflict_action,
                                 callback};

@@ -12,7 +12,9 @@
 #include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
 #include "base/logging.h"
+#include "base/time/time.h"
 #include "components/sync/base/model_type.h"
+#include "components/sync/base/time.h"
 #include "components/sync/engine/net/network_resources.h"
 #include "components/sync/protocol/sync.pb.h"
 #include "components/sync/test/fake_server/bookmark_entity_builder.h"
@@ -145,10 +147,25 @@ void FakeServerHelperAndroid::InjectUniqueClientEntity(
   DeserializeEntitySpecifics(env, serialized_entity_specifics,
                              &entity_specifics);
 
+  int64_t now = syncer::TimeToProtoTime(base::Time::Now());
   fake_server_ptr->InjectEntity(
       syncer::PersistentUniqueClientEntity::CreateFromEntitySpecifics(
           base::android::ConvertJavaStringToUTF8(env, name), entity_specifics,
-          12345, 12345));
+          /*creation_time=*/now, /*last_modified_time=*/now));
+}
+
+void FakeServerHelperAndroid::SetWalletData(
+    JNIEnv* env,
+    const base::android::JavaParamRef<jobject>& obj,
+    jlong fake_server,
+    const base::android::JavaParamRef<jbyteArray>& serialized_entity) {
+  fake_server::FakeServer* fake_server_ptr =
+      reinterpret_cast<fake_server::FakeServer*>(fake_server);
+
+  sync_pb::SyncEntity entity;
+  DeserializeEntity(env, serialized_entity, &entity);
+
+  fake_server_ptr->SetWalletData({entity});
 }
 
 void FakeServerHelperAndroid::ModifyEntitySpecifics(
@@ -166,6 +183,17 @@ void FakeServerHelperAndroid::ModifyEntitySpecifics(
 
   fake_server_ptr->ModifyEntitySpecifics(
       base::android::ConvertJavaStringToUTF8(env, id), entity_specifics);
+}
+
+void FakeServerHelperAndroid::DeserializeEntity(JNIEnv* env,
+                                                jbyteArray serialized_entity,
+                                                sync_pb::SyncEntity* entity) {
+  int bytes_length = env->GetArrayLength(serialized_entity);
+  jbyte* bytes = env->GetByteArrayElements(serialized_entity, nullptr);
+  std::string string(reinterpret_cast<char*>(bytes), bytes_length);
+
+  if (!entity->ParseFromString(string))
+    NOTREACHED() << "Could not deserialize Entity";
 }
 
 void FakeServerHelperAndroid::DeserializeEntitySpecifics(

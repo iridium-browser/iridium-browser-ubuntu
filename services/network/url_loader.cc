@@ -4,12 +4,15 @@
 
 #include "services/network/url_loader.h"
 
+#include <limits>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "base/files/file.h"
 #include "base/memory/weak_ptr.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "mojo/public/cpp/system/simple_watcher.h"
@@ -24,18 +27,25 @@
 #include "net/url_request/url_request_context_getter.h"
 #include "services/network/chunked_data_pipe_upload_data_stream.h"
 #include "services/network/data_pipe_element_reader.h"
+#include "services/network/empty_url_loader_client.h"
 #include "services/network/loader_util.h"
+#include "services/network/network_usage_accumulator.h"
 #include "services/network/public/cpp/features.h"
 #include "services/network/public/cpp/net_adapters.h"
 #include "services/network/public/cpp/resource_request.h"
 #include "services/network/public/cpp/resource_response.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
 #include "services/network/resource_scheduler_client.h"
+#include "services/network/throttling/scoped_throttling_token.h"
 
 namespace network {
 
 namespace {
 constexpr size_t kDefaultAllocationSize = 512 * 1024;
+
+// Cannot use 0, because this means "default" in
+// mojo::core::Core::CreateDataPipe
+constexpr size_t kBlockedBodyAllocationSize = 1;
 
 // TODO: this duplicates some of PopulateResourceResponse in
 // content/browser/loader/resource_loader.cc
@@ -56,8 +66,12 @@ void PopulateResourceResponse(net::URLRequest* request,
       response_info.alpn_negotiated_protocol;
   response->head.connection_info = response_info.connection_info;
   response->head.socket_address = response_info.socket_address;
+  response->head.was_fetched_via_cache = request->was_cached();
   response->head.was_fetched_via_proxy = request->was_fetched_via_proxy();
+  response->head.proxy_server = request->proxy_server();
   response->head.network_accessed = response_info.network_accessed;
+  response->head.async_revalidation_requested =
+      response_info.async_revalidation_requested;
 
   response->head.effective_connection_type =
       net::EFFECTIVE_CONNECTION_TYPE_UNKNOWN;
@@ -110,8 +124,10 @@ class FileElementReader : public net::UploadFileElementReader {
  public:
   FileElementReader(ResourceRequestBody* resource_request_body,
                     base::TaskRunner* task_runner,
-                    const DataElement& element)
+                    const DataElement& element,
+                    base::File&& file)
       : net::UploadFileElementReader(task_runner,
+                                     std::move(file),
                                      element.path(),
                                      element.offset(),
                                      element.length(),
@@ -156,16 +172,18 @@ class RawFileElementReader : public net::UploadFileElementReader {
 // TODO: copied from content/browser/loader/upload_data_stream_builder.cc.
 std::unique_ptr<net::UploadDataStream> CreateUploadDataStream(
     ResourceRequestBody* body,
+    std::vector<base::File>& opened_files,
     base::SequencedTaskRunner* file_task_runner) {
   // In the case of a chunked upload, there will just be one element.
   if (body->elements()->size() == 1 &&
       body->elements()->begin()->type() ==
           DataElement::TYPE_CHUNKED_DATA_PIPE) {
-    return std::make_unique<network::ChunkedDataPipeUploadDataStream>(
+    return std::make_unique<ChunkedDataPipeUploadDataStream>(
         body, const_cast<DataElement&>(body->elements()->front())
                   .ReleaseChunkedDataPipeGetter());
   }
 
+  auto opened_file = opened_files.begin();
   std::vector<std::unique_ptr<net::UploadElementReader>> element_readers;
   for (const auto& element : *body->elements()) {
     switch (element.type()) {
@@ -174,8 +192,9 @@ std::unique_ptr<net::UploadDataStream> CreateUploadDataStream(
             std::make_unique<BytesElementReader>(body, element));
         break;
       case DataElement::TYPE_FILE:
+        DCHECK(opened_file != opened_files.end());
         element_readers.push_back(std::make_unique<FileElementReader>(
-            body, file_task_runner, element));
+            body, file_task_runner, element, std::move(*opened_file++)));
         break;
       case DataElement::TYPE_RAW_FILE:
         element_readers.push_back(std::make_unique<RawFileElementReader>(
@@ -201,6 +220,7 @@ std::unique_ptr<net::UploadDataStream> CreateUploadDataStream(
         break;
     }
   }
+  DCHECK(opened_file == opened_files.end());
 
   return std::make_unique<net::ElementsUploadDataStream>(
       std::move(element_readers), body->identifier());
@@ -213,7 +233,8 @@ class SSLPrivateKeyInternal : public net::SSLPrivateKey {
       : algorithm_perferences_(algorithm_perferences),
         ssl_private_key_(std::move(ssl_private_key)) {
     ssl_private_key_.set_connection_error_handler(
-        base::BindOnce(&SSLPrivateKeyInternal::HandleSSLPrivateKeyError, this));
+        base::BindOnce(&SSLPrivateKeyInternal::HandleSSLPrivateKeyError,
+                       base::Unretained(this)));
   }
 
   // net::SSLPrivateKey:
@@ -225,7 +246,7 @@ class SSLPrivateKeyInternal : public net::SSLPrivateKey {
             base::span<const uint8_t> input,
             net::SSLPrivateKey::SignCallback callback) override {
     std::vector<uint8_t> input_vector(input.begin(), input.end());
-    if (ssl_private_key_.encountered_error()) {
+    if (!ssl_private_key_ || ssl_private_key_.encountered_error()) {
       base::ThreadTaskRunnerHandle::Get()->PostTask(
           FROM_HERE,
           base::BindOnce(std::move(callback),
@@ -261,7 +282,7 @@ class SSLPrivateKeyInternal : public net::SSLPrivateKey {
 }  // namespace
 
 URLLoader::URLLoader(
-    scoped_refptr<net::URLRequestContextGetter> url_request_context_getter,
+    net::URLRequestContext* url_request_context,
     mojom::NetworkServiceClient* network_service_client,
     DeleteCallback delete_callback,
     mojom::URLLoaderRequest url_loader_request,
@@ -270,22 +291,24 @@ URLLoader::URLLoader(
     bool report_raw_headers,
     mojom::URLLoaderClientPtr url_loader_client,
     const net::NetworkTrafficAnnotationTag& traffic_annotation,
-    uint32_t process_id,
+    const mojom::URLLoaderFactoryParams* factory_params,
     uint32_t request_id,
     scoped_refptr<ResourceSchedulerClient> resource_scheduler_client,
-    base::WeakPtr<KeepaliveStatisticsRecorder> keepalive_statistics_recorder)
-    : url_request_context_getter_(url_request_context_getter),
+    base::WeakPtr<KeepaliveStatisticsRecorder> keepalive_statistics_recorder,
+    base::WeakPtr<NetworkUsageAccumulator> network_usage_accumulator)
+    : url_request_context_(url_request_context),
       network_service_client_(network_service_client),
       delete_callback_(std::move(delete_callback)),
       options_(options),
       resource_type_(request.resource_type),
       is_load_timing_enabled_(request.enable_load_timing),
-      process_id_(process_id),
+      factory_params_(std::move(factory_params)),
       render_frame_id_(request.render_frame_id),
       request_id_(request_id),
-      connected_(true),
       keepalive_(request.keepalive),
+      do_not_prompt_for_login_(request.do_not_prompt_for_login),
       binding_(this, std::move(url_loader_request)),
+      auth_challenge_responder_binding_(this),
       url_loader_client_(std::move(url_loader_client)),
       writable_handle_watcher_(FROM_HERE,
                                mojo::SimpleWatcher::ArmingPolicy::MANUAL,
@@ -296,7 +319,10 @@ URLLoader::URLLoader(
       report_raw_headers_(report_raw_headers),
       resource_scheduler_client_(std::move(resource_scheduler_client)),
       keepalive_statistics_recorder_(std::move(keepalive_statistics_recorder)),
+      network_usage_accumulator_(std::move(network_usage_accumulator)),
       first_auth_attempt_(true),
+      custom_proxy_pre_cache_headers_(request.custom_proxy_pre_cache_headers),
+      custom_proxy_post_cache_headers_(request.custom_proxy_post_cache_headers),
       weak_ptr_factory_(this) {
   DCHECK(delete_callback_);
   if (!base::FeatureList::IsEnabled(features::kNetworkService)) {
@@ -315,32 +341,32 @@ URLLoader::URLLoader(
   binding_.set_connection_error_handler(
       base::BindOnce(&URLLoader::OnConnectionError, base::Unretained(this)));
 
-  url_request_ =
-      url_request_context_getter_->GetURLRequestContext()->CreateRequest(
-          GURL(request.url), request.priority, this, traffic_annotation);
+  url_request_ = url_request_context_->CreateRequest(
+      GURL(request.url), request.priority, this, traffic_annotation);
   url_request_->set_method(request.method);
   url_request_->set_site_for_cookies(request.site_for_cookies);
   url_request_->set_attach_same_site_cookies(request.attach_same_site_cookies);
   url_request_->SetReferrer(ComputeReferrer(request.referrer));
   url_request_->set_referrer_policy(request.referrer_policy);
   url_request_->SetExtraRequestHeaders(request.headers);
-
-  // Resolve elements from request_body and prepare upload data.
-  if (request.request_body.get()) {
-    scoped_refptr<base::SequencedTaskRunner> task_runner =
-        base::CreateSequencedTaskRunnerWithTraits(
-            {base::MayBlock(), base::TaskPriority::USER_VISIBLE});
-    url_request_->set_upload(
-        CreateUploadDataStream(request.request_body.get(), task_runner.get()));
-
-    if (request.enable_upload_progress) {
-      upload_progress_tracker_ = std::make_unique<UploadProgressTracker>(
-          FROM_HERE,
-          base::BindRepeating(&URLLoader::SendUploadProgress,
-                              base::Unretained(this)),
-          url_request_.get());
-    }
+  if (!request.requested_with.empty()) {
+    // X-Requested-With header must be set here to avoid breaking CORS checks.
+    url_request_->SetExtraRequestHeaderByName("X-Requested-With",
+                                              request.requested_with, true);
   }
+  url_request_->set_upgrade_if_insecure(request.upgrade_if_insecure);
+
+  url_request_->SetUserData(kUserDataKey,
+                            std::make_unique<UnownedPointer>(this));
+
+  is_nocors_corb_excluded_request_ =
+      resource_type_ == factory_params_->corb_excluded_resource_type &&
+      request.fetch_request_mode == mojom::FetchRequestMode::kNoCORS &&
+      CrossOriginReadBlocking::ShouldAllowForPlugin(
+          factory_params_->process_id);
+
+  throttling_token_ = network::ScopedThrottlingToken::MaybeCreate(
+      url_request_->net_log().source().id, request.throttling_profile_id);
 
   url_request_->set_initiator(request.request_initiator);
 
@@ -350,6 +376,16 @@ URLLoader::URLLoader(
   }
 
   url_request_->SetLoadFlags(request.load_flags);
+
+  // Use allow credentials unless credential load flags have been explicitly
+  // set.
+  if (!request.allow_credentials) {
+    DCHECK((request.load_flags &
+            (net::LOAD_DO_NOT_SAVE_COOKIES | net::LOAD_DO_NOT_SEND_COOKIES |
+             net::LOAD_DO_NOT_SEND_AUTH_DATA)) == 0);
+    url_request_->set_allow_credentials(false);
+  }
+
   if (report_raw_headers_) {
     url_request_->SetRequestHeadersCallback(
         base::Bind(&net::HttpRawRequestHeaders::Assign,
@@ -359,14 +395,90 @@ URLLoader::URLLoader(
   }
 
   if (keepalive_ && keepalive_statistics_recorder_)
-    keepalive_statistics_recorder_->OnLoadStarted(process_id_);
+    keepalive_statistics_recorder_->OnLoadStarted(factory_params_->process_id);
 
+  // Resolve elements from request_body and prepare upload data.
+  if (request.request_body.get()) {
+    OpenFilesForUpload(request);
+    return;
+  }
+  ScheduleStart();
+}
+
+void URLLoader::OpenFilesForUpload(const ResourceRequest& request) {
+  std::vector<base::FilePath> paths;
+  for (const auto& element : *request.request_body.get()->elements()) {
+    if (element.type() == DataElement::TYPE_FILE)
+      paths.push_back(element.path());
+  }
+  if (paths.empty()) {
+    SetUpUpload(request, net::OK, std::vector<base::File>());
+    return;
+  }
+  if (!network_service_client_) {
+    // Defer calling NotifyCompleted to make sure the URLLoader finishes
+    // initializing before getting deleted.
+    base::SequencedTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE,
+        base::BindOnce(&URLLoader::NotifyCompleted, base::Unretained(this),
+                       net::ERR_ACCESS_DENIED));
+    return;
+  }
+  url_request_->LogBlockedBy("Opening Files");
+  network_service_client_->OnFileUploadRequested(
+      factory_params_->process_id, true /* async */, paths,
+      base::BindOnce(&OnFilesForUploadOpened, weak_ptr_factory_.GetWeakPtr(),
+                     request));
+}
+
+// static
+void URLLoader::OnFilesForUploadOpened(base::WeakPtr<URLLoader> self,
+                                       const ResourceRequest& request,
+                                       int error_code,
+                                       std::vector<base::File> opened_files) {
+  // If the URLLoader was already deleted, move the opened_files vector onto a
+  // sequence that can block so it gets destroyed there.
+  if (self) {
+    self->url_request_->LogUnblocked();
+    self->SetUpUpload(request, error_code, std::move(opened_files));
+  } else {
+    base::PostTaskWithTraits(
+        FROM_HERE, {base::MayBlock(), base::TaskPriority::USER_BLOCKING},
+        base::BindOnce(base::DoNothing::Once<std::vector<base::File>>(),
+                       std::move(opened_files)));
+  }
+}
+
+void URLLoader::SetUpUpload(const ResourceRequest& request,
+                            int error_code,
+                            std::vector<base::File> opened_files) {
+  if (error_code != net::OK) {
+    DCHECK(opened_files.empty());
+    NotifyCompleted(error_code);
+    return;
+  }
+  scoped_refptr<base::SequencedTaskRunner> task_runner =
+      base::CreateSequencedTaskRunnerWithTraits(
+          {base::MayBlock(), base::TaskPriority::USER_VISIBLE});
+  url_request_->set_upload(CreateUploadDataStream(
+      request.request_body.get(), opened_files, task_runner.get()));
+
+  if (request.enable_upload_progress) {
+    upload_progress_tracker_ = std::make_unique<UploadProgressTracker>(
+        FROM_HERE,
+        base::BindRepeating(&URLLoader::SendUploadProgress,
+                            base::Unretained(this)),
+        url_request_.get());
+  }
+  ScheduleStart();
+}
+
+void URLLoader::ScheduleStart() {
   bool defer = false;
   if (resource_scheduler_client_) {
     resource_scheduler_request_handle_ =
         resource_scheduler_client_->ScheduleRequest(
-            !(options_ & network::mojom::kURLLoadOptionSynchronous),
-            url_request_.get());
+            !(options_ & mojom::kURLLoadOptionSynchronous), url_request_.get());
     resource_scheduler_request_handle_->set_resume_callback(
         base::BindRepeating(&URLLoader::ResumeStart, base::Unretained(this)));
     resource_scheduler_request_handle_->WillStartRequest(&defer);
@@ -379,19 +491,36 @@ URLLoader::URLLoader(
 
 URLLoader::~URLLoader() {
   RecordBodyReadFromNetBeforePausedIfNeeded();
-
   if (keepalive_ && keepalive_statistics_recorder_)
-    keepalive_statistics_recorder_->OnLoadFinished(process_id_);
+    keepalive_statistics_recorder_->OnLoadFinished(factory_params_->process_id);
 }
 
-void URLLoader::FollowRedirect() {
+// static
+const void* const URLLoader::kUserDataKey = &URLLoader::kUserDataKey;
+
+void URLLoader::FollowRedirect(
+    const base::Optional<std::vector<std::string>>&
+        to_be_removed_request_headers,
+    const base::Optional<net::HttpRequestHeaders>& modified_request_headers) {
   if (!url_request_) {
     NotifyCompleted(net::ERR_UNEXPECTED);
     // |this| may have been deleted.
     return;
   }
 
-  url_request_->FollowDeferredRedirect();
+  if (!deferred_redirect_) {
+    NOTREACHED();
+    return;
+  }
+
+  deferred_redirect_ = false;
+
+  if (to_be_removed_request_headers.has_value()) {
+    for (const std::string& key : to_be_removed_request_headers.value())
+      url_request_->RemoveRequestHeaderByName(key);
+  }
+
+  url_request_->FollowDeferredRedirect(modified_request_headers);
 }
 
 void URLLoader::ProceedWithResponse() {
@@ -451,6 +580,9 @@ void URLLoader::OnReceivedRedirect(net::URLRequest* url_request,
   DCHECK(url_request == url_request_.get());
   DCHECK(url_request->status().is_success());
 
+  DCHECK(!deferred_redirect_);
+  deferred_redirect_ = true;
+
   // Send the redirect response to the client, allowing them to inspect it and
   // optionally follow the redirect.
   *defer_redirect = true;
@@ -468,18 +600,33 @@ void URLLoader::OnReceivedRedirect(net::URLRequest* url_request,
   url_loader_client_->OnReceiveRedirect(redirect_info, response->head);
 }
 
-void URLLoader::OnAuthRequired(net::URLRequest* unused,
+void URLLoader::OnAuthRequired(net::URLRequest* url_request,
                                net::AuthChallengeInfo* auth_info) {
   if (!network_service_client_) {
-    OnAuthRequiredResponse(base::nullopt);
+    OnAuthCredentials(base::nullopt);
     return;
   }
 
+  if (do_not_prompt_for_login_) {
+    OnAuthCredentials(base::nullopt);
+    return;
+  }
+
+  mojom::AuthChallengeResponderPtr auth_challenge_responder;
+  auto request = mojo::MakeRequest(&auth_challenge_responder);
+  DCHECK(!auth_challenge_responder_binding_.is_bound());
+  auth_challenge_responder_binding_.Bind(std::move(request));
+  auth_challenge_responder_binding_.set_connection_error_handler(
+      base::BindOnce(&URLLoader::DeleteSelf, base::Unretained(this)));
+
+  ResourceResponseHead head;
+  if (url_request->response_headers())
+    head.headers = url_request->response_headers();
   network_service_client_->OnAuthRequired(
-      process_id_, render_frame_id_, request_id_, url_request_->url(),
-      first_auth_attempt_, auth_info,
-      base::BindOnce(&URLLoader::OnAuthRequiredResponse,
-                     weak_ptr_factory_.GetWeakPtr()));
+      factory_params_->process_id, render_frame_id_, request_id_,
+      url_request_->url(), url_request_->site_for_cookies(),
+      first_auth_attempt_, auth_info, resource_type_, head,
+      std::move(auth_challenge_responder));
 
   first_auth_attempt_ = false;
 }
@@ -493,7 +640,7 @@ void URLLoader::OnCertificateRequested(net::URLRequest* unused,
   }
 
   network_service_client_->OnCertificateRequested(
-      process_id_, render_frame_id_, request_id_, cert_info,
+      factory_params_->process_id, render_frame_id_, request_id_, cert_info,
       base::BindOnce(&URLLoader::OnCertificateRequestedResponse,
                      weak_ptr_factory_.GetWeakPtr()));
 }
@@ -506,8 +653,8 @@ void URLLoader::OnSSLCertificateError(net::URLRequest* request,
     return;
   }
   network_service_client_->OnSSLCertificateError(
-      process_id_, render_frame_id_, request_id_, resource_type_,
-      url_request_->url(), ssl_info, fatal,
+      factory_params_->process_id, render_frame_id_, request_id_,
+      resource_type_, url_request_->url(), ssl_info, fatal,
       base::Bind(&URLLoader::OnSSLCertificateErrorResponse,
                  weak_ptr_factory_.GetWeakPtr(), ssl_info));
 }
@@ -528,12 +675,6 @@ void URLLoader::OnResponseStarted(net::URLRequest* url_request, int net_error) {
 
   // Do not account header bytes when reporting received body bytes to client.
   reported_total_encoded_bytes_ = url_request_->GetTotalReceivedBytes();
-
-  if (resource_scheduler_client_ && url_request->was_fetched_via_proxy() &&
-      url_request->was_fetched_via_spdy() &&
-      url_request->url().SchemeIs(url::kHttpScheme)) {
-    resource_scheduler_client_->OnReceivedSpdyProxiedHttpResponse();
-  }
 
   if (upload_progress_tracker_) {
     upload_progress_tracker_->OnUploadCompleted();
@@ -565,9 +706,40 @@ void URLLoader::OnResponseStarted(net::URLRequest* url_request, int net_error) {
       base::Bind(&URLLoader::OnResponseBodyStreamReady,
                  base::Unretained(this)));
 
-  if (!(options_ & mojom::kURLLoadOptionSniffMimeType) ||
-      !ShouldSniffContent(url_request_.get(), response_.get()))
+  // Figure out if we need to sniff (for MIME type detection or for CORB).
+  if (factory_params_->is_corb_enabled && !is_nocors_corb_excluded_request_ &&
+      (factory_params_->corb_excluded_initiator_scheme.empty() ||
+       factory_params_->corb_excluded_initiator_scheme !=
+           url_request->initiator().value_or(url::Origin()).scheme())) {
+    CrossOriginReadBlocking::LogAction(
+        CrossOriginReadBlocking::Action::kResponseStarted);
+
+    corb_analyzer_ =
+        std::make_unique<CrossOriginReadBlocking::ResponseAnalyzer>(
+            *url_request_, *response_);
+    is_more_corb_sniffing_needed_ = corb_analyzer_->needs_sniffing();
+    if (corb_analyzer_->ShouldBlock()) {
+      DCHECK(!is_more_corb_sniffing_needed_);
+      corb_analyzer_->LogBlockedResponse();
+      if (BlockResponseForCorb() == kWillCancelRequest)
+        return;
+    } else if (corb_analyzer_->ShouldAllow()) {
+      DCHECK(!is_more_corb_sniffing_needed_);
+      corb_analyzer_->LogAllowedResponse();
+    }
+  }
+  if ((options_ & mojom::kURLLoadOptionSniffMimeType) &&
+      ShouldSniffContent(url_request_.get(), response_.get())) {
+    is_more_mime_sniffing_needed_ = true;
+  }
+  if (!is_more_mime_sniffing_needed_ && !is_more_corb_sniffing_needed_) {
+    // Treat feed types as text/plain.
+    if (response_->head.mime_type == "application/rss+xml" ||
+        response_->head.mime_type == "application/atom+xml") {
+      response_->head.mime_type.assign("text/plain");
+    }
     SendResponseToClient();
+  }
 
   // Start reading...
   ReadMore();
@@ -590,8 +762,7 @@ void URLLoader::ReadMore() {
         &response_body_stream_, &pending_write_, &pending_write_buffer_size_);
     if (result != MOJO_RESULT_OK && result != MOJO_RESULT_SHOULD_WAIT) {
       // The response body stream is in a bad state. Bail.
-      // TODO: How should this be communicated to our client?
-      CloseResponseBodyStreamProducer();
+      NotifyCompleted(net::ERR_FAILED);
       return;
     }
 
@@ -624,12 +795,13 @@ void URLLoader::ReadMore() {
 }
 
 void URLLoader::DidRead(int num_bytes, bool completed_synchronously) {
+  size_t new_data_offset = pending_write_buffer_offset_;
   if (num_bytes > 0) {
     pending_write_buffer_offset_ += num_bytes;
 
-    // Only notify client of download progress in case DevTools are attached
-    // and we're done sniffing and started sending response.
-    if (report_raw_headers_ && !consumer_handle_.is_valid()) {
+    // Only notify client of download progress if we're done sniffing and
+    // started sending response.
+    if (!consumer_handle_.is_valid()) {
       int64_t total_encoded_bytes = url_request_->GetTotalReceivedBytes();
       int64_t delta = total_encoded_bytes - reported_total_encoded_bytes_;
       DCHECK_LE(0, delta);
@@ -645,18 +817,49 @@ void URLLoader::DidRead(int num_bytes, bool completed_synchronously) {
 
   bool complete_read = true;
   if (consumer_handle_.is_valid()) {
-    const std::string& type_hint = response_->head.mime_type;
-    std::string new_type;
-    bool made_final_decision = net::SniffMimeType(
-        pending_write_->buffer(), pending_write_buffer_offset_,
-        url_request_->url(), type_hint,
-        net::ForceSniffFileUrlsForHtml::kDisabled, &new_type);
-    // SniffMimeType() returns false if there is not enough data to determine
-    // the mime type. However, even if it returns false, it returns a new type
-    // that is probably better than the current one.
-    response_->head.mime_type.assign(new_type);
+    // Limit sniffing to the first net::kMaxBytesToSniff.
+    size_t data_length = pending_write_buffer_offset_;
+    if (data_length > net::kMaxBytesToSniff)
+      data_length = net::kMaxBytesToSniff;
+    base::StringPiece data(pending_write_->buffer(), data_length);
 
-    if (made_final_decision) {
+    if (is_more_mime_sniffing_needed_) {
+      const std::string& type_hint = response_->head.mime_type;
+      std::string new_type;
+      is_more_mime_sniffing_needed_ = !net::SniffMimeType(
+          data.data(), data.size(), url_request_->url(), type_hint,
+          net::ForceSniffFileUrlsForHtml::kDisabled, &new_type);
+      // SniffMimeType() returns false if there is not enough data to determine
+      // the mime type. However, even if it returns false, it returns a new type
+      // that is probably better than the current one.
+      response_->head.mime_type.assign(new_type);
+      response_->head.did_mime_sniff = true;
+    }
+
+    if (is_more_corb_sniffing_needed_) {
+      corb_analyzer_->SniffResponseBody(data, new_data_offset);
+      if (corb_analyzer_->ShouldBlock()) {
+        corb_analyzer_->LogBlockedResponse();
+        is_more_corb_sniffing_needed_ = false;
+        if (BlockResponseForCorb() == kWillCancelRequest)
+          return;
+      } else if (corb_analyzer_->ShouldAllow()) {
+        corb_analyzer_->LogAllowedResponse();
+        is_more_corb_sniffing_needed_ = false;
+      }
+    }
+
+    if (num_bytes <= 0 ||
+        pending_write_buffer_offset_ >= net::kMaxBytesToSniff) {
+      is_more_mime_sniffing_needed_ = false;
+
+      if (is_more_corb_sniffing_needed_) {
+        corb_analyzer_->LogAllowedResponse();
+        is_more_corb_sniffing_needed_ = false;
+      }
+    }
+
+    if (!is_more_mime_sniffing_needed_ && !is_more_corb_sniffing_needed_) {
       SendResponseToClient();
     } else {
       complete_read = false;
@@ -664,16 +867,23 @@ void URLLoader::DidRead(int num_bytes, bool completed_synchronously) {
   }
 
   if (!url_request_->status().is_success() || num_bytes == 0) {
-    CompletePendingWrite();
+    // There may be no |pending_write_| if a URLRequestJob cancelled itself in
+    // URLRequestJob::OnSuspend() after receiving headers, while there was no
+    // pending read.
+    // TODO(mmenke): That case is rather unfortunate - something should be done
+    // at the socket layer instead, both to make for a better API (Only complete
+    // reads when there's a pending read), and to cover all TCP socket uses,
+    // since the concern is the effect that entering suspend mode has on
+    // sockets. See https://crbug.com/651120.
+    if (pending_write_)
+      CompletePendingWrite(url_request_->status().is_success());
     NotifyCompleted(url_request_->status().ToNetError());
-
-    CloseResponseBodyStreamProducer();
-    // |this| may have been deleted.
+    // |this| will have been deleted.
     return;
   }
 
   if (complete_read) {
-    CompletePendingWrite();
+    CompletePendingWrite(true /* success */);
   }
   if (completed_synchronously) {
     base::ThreadTaskRunnerHandle::Get()->PostTask(
@@ -697,6 +907,37 @@ net::LoadState URLLoader::GetLoadStateForTesting() const {
   return url_request_->GetLoadState().state;
 }
 
+uint32_t URLLoader::GetRenderFrameId() const {
+  return render_frame_id_;
+}
+
+uint32_t URLLoader::GetProcessId() const {
+  return factory_params_->process_id;
+}
+
+// static
+URLLoader* URLLoader::ForRequest(const net::URLRequest& request) {
+  auto* pointer =
+      static_cast<UnownedPointer*>(request.GetUserData(kUserDataKey));
+  if (!pointer)
+    return nullptr;
+  return pointer->get();
+}
+
+void URLLoader::OnAuthCredentials(
+    const base::Optional<net::AuthCredentials>& credentials) {
+  auth_challenge_responder_binding_.Close();
+
+  if (!url_request_)
+    return;
+
+  if (!credentials.has_value()) {
+    url_request_->CancelAuth();
+  } else {
+    url_request_->SetAuth(credentials.value());
+  }
+}
+
 void URLLoader::NotifyCompleted(int error_code) {
   // Ensure sending the final upload progress message here, since
   // OnResponseCompleted can be called without OnResponseStarted on cancellation
@@ -706,79 +947,65 @@ void URLLoader::NotifyCompleted(int error_code) {
     upload_progress_tracker_ = nullptr;
   }
 
-  if (consumer_handle_.is_valid())
-    SendResponseToClient();
-
-  URLLoaderCompletionStatus status;
-  status.error_code = error_code;
-  if (error_code == net::ERR_QUIC_PROTOCOL_ERROR) {
-    net::NetErrorDetails details;
-    url_request_->PopulateNetErrorDetails(&details);
-    status.extended_error_code = details.quic_connection_error;
-  }
-  status.exists_in_cache = url_request_->response_info().was_cached;
-  status.completion_time = base::TimeTicks::Now();
-  status.encoded_data_length = url_request_->GetTotalReceivedBytes();
-  status.encoded_body_length = url_request_->GetRawBodyBytes();
-  status.decoded_body_length = total_written_bytes_;
-
-  if ((options_ & mojom::kURLLoadOptionSendSSLInfoForCertificateError) &&
-      net::IsCertStatusError(url_request_->ssl_info().cert_status) &&
-      !net::IsCertStatusMinorError(url_request_->ssl_info().cert_status)) {
-    status.ssl_info = url_request_->ssl_info();
+  if (network_usage_accumulator_) {
+    network_usage_accumulator_->OnBytesTransferred(
+        factory_params_->process_id, render_frame_id_,
+        url_request_->GetTotalReceivedBytes(),
+        url_request_->GetTotalSentBytes());
   }
 
-  url_loader_client_->OnComplete(status);
-  DeleteIfNeeded();
+  if (url_loader_client_) {
+    if (consumer_handle_.is_valid())
+      SendResponseToClient();
+
+    URLLoaderCompletionStatus status;
+    status.error_code = error_code;
+    if (error_code == net::ERR_QUIC_PROTOCOL_ERROR) {
+      net::NetErrorDetails details;
+      url_request_->PopulateNetErrorDetails(&details);
+      status.extended_error_code = details.quic_connection_error;
+    }
+    status.exists_in_cache = url_request_->response_info().was_cached;
+    status.completion_time = base::TimeTicks::Now();
+    status.encoded_data_length = url_request_->GetTotalReceivedBytes();
+    status.encoded_body_length = url_request_->GetRawBodyBytes();
+    status.decoded_body_length = total_written_bytes_;
+
+    if ((options_ & mojom::kURLLoadOptionSendSSLInfoForCertificateError) &&
+        net::IsCertStatusError(url_request_->ssl_info().cert_status) &&
+        !net::IsCertStatusMinorError(url_request_->ssl_info().cert_status)) {
+      status.ssl_info = url_request_->ssl_info();
+    }
+
+    url_loader_client_->OnComplete(status);
+  }
+
+  DeleteSelf();
 }
 
 void URLLoader::OnConnectionError() {
-  connected_ = false;
-  DeleteIfNeeded();
+  NotifyCompleted(net::ERR_FAILED);
 }
 
 void URLLoader::OnResponseBodyStreamConsumerClosed(MojoResult result) {
-  CloseResponseBodyStreamProducer();
+  NotifyCompleted(net::ERR_FAILED);
 }
 
 void URLLoader::OnResponseBodyStreamReady(MojoResult result) {
   if (result != MOJO_RESULT_OK) {
-    CloseResponseBodyStreamProducer();
+    NotifyCompleted(net::ERR_FAILED);
     return;
   }
 
   ReadMore();
 }
 
-void URLLoader::CloseResponseBodyStreamProducer() {
-  RecordBodyReadFromNetBeforePausedIfNeeded();
-
-  resource_scheduler_request_handle_.reset();
-  url_request_.reset();
-  peer_closed_handle_watcher_.Cancel();
-  writable_handle_watcher_.Cancel();
-  response_body_stream_.reset();
-
-  pending_write_buffer_offset_ = 0;
-  pending_write_ = nullptr;
-
-  // Make sure if a ResumeReadingBodyFromNet() call is received later, we don't
-  // try to do ReadMore().
-  paused_reading_body_ = false;
-
-  DeleteIfNeeded();
-}
-
-void URLLoader::DeleteIfNeeded() {
-  if (!connected_ && !HasDataPipe())
-    std::move(delete_callback_).Run(this);
+void URLLoader::DeleteSelf() {
+  std::move(delete_callback_).Run(this);
 }
 
 void URLLoader::SendResponseToClient() {
-  base::Optional<net::SSLInfo> ssl_info;
-  mojom::DownloadedTempFilePtr downloaded_file_ptr;
-  url_loader_client_->OnReceiveResponse(response_->head,
-                                        std::move(downloaded_file_ptr));
+  url_loader_client_->OnReceiveResponse(response_->head);
 
   net::IOBufferWithSize* metadata =
       url_request_->response_info().metadata.get();
@@ -793,9 +1020,18 @@ void URLLoader::SendResponseToClient() {
   response_ = nullptr;
 }
 
-void URLLoader::CompletePendingWrite() {
-  response_body_stream_ =
-      pending_write_->Complete(pending_write_buffer_offset_);
+void URLLoader::CompletePendingWrite(bool success) {
+  if (success) {
+    // The write can only be completed immediately in case of a success, since
+    // doing so invalidates memory of any attached NetToMojoIOBuffer's; but in
+    // case of an abort, particularly one caused by a suspend, the failure may
+    // be delivered to URLLoader while the disk_cache layer is still hanging on
+    // to the now-invalid IOBuffer in some worker thread trying to commit it to
+    // disk.  In case of an error, this will have to wait till everything is
+    // destroyed.
+    response_body_stream_ =
+        pending_write_->Complete(pending_write_buffer_offset_);
+  }
   total_written_bytes_ += pending_write_buffer_offset_;
   pending_write_ = nullptr;
   pending_write_buffer_offset_ = 0;
@@ -851,18 +1087,6 @@ void URLLoader::OnCertificateRequestedResponse(
   }
 }
 
-void URLLoader::OnAuthRequiredResponse(
-    const base::Optional<net::AuthCredentials>& credentials) {
-  if (!url_request_)
-    return;
-
-  if (!credentials.has_value()) {
-    url_request_->CancelAuth();
-  } else {
-    url_request_->SetAuth(credentials.value());
-  }
-}
-
 bool URLLoader::HasDataPipe() const {
   return pending_write_ || response_body_stream_.is_valid();
 }
@@ -884,6 +1108,73 @@ void URLLoader::RecordBodyReadFromNetBeforePausedIfNeeded() {
                << "body_read_before_paused_: " << body_read_before_paused_;
     }
   }
+}
+
+URLLoader::BlockResponseForCorbResult URLLoader::BlockResponseForCorb() {
+  // The response headers and body shouldn't yet be sent to the URLLoaderClient.
+  DCHECK(response_);
+  DCHECK(consumer_handle_.is_valid());
+
+  // Send stripped headers to the real URLLoaderClient.
+  CrossOriginReadBlocking::SanitizeBlockedResponse(response_);
+  url_loader_client_->OnReceiveResponse(response_->head);
+
+  // Send empty body to the real URLLoaderClient.
+  mojo::DataPipe empty_data_pipe(kBlockedBodyAllocationSize);
+  empty_data_pipe.producer_handle.reset();
+  url_loader_client_->OnStartLoadingResponseBody(
+      std::move(empty_data_pipe.consumer_handle));
+
+  // Tell the real URLLoaderClient that the response has been completed.
+  URLLoaderCompletionStatus status;
+  if (resource_type_ == factory_params_->corb_detachable_resource_type) {
+    // TODO(lukasza): https://crbug.com/827633#c5: Consider passing net::ERR_OK
+    // instead.  net::ERR_ABORTED was chosen for consistency with the old CORB
+    // implementation that used to go through DetachableResourceHandler.
+    status.error_code = net::ERR_ABORTED;
+  } else {
+    // CORB responses are reported as a success.
+    status.error_code = net::OK;
+  }
+  status.completion_time = base::TimeTicks::Now();
+  status.encoded_data_length = 0;
+  status.encoded_body_length = 0;
+  status.decoded_body_length = 0;
+  status.should_report_corb_blocking =
+      corb_analyzer_->ShouldReportBlockedResponse();
+  url_loader_client_->OnComplete(status);
+
+  // Reset the connection to the URLLoaderClient.  This helps ensure that we
+  // won't accidentally leak any data to the renderer from this point on.
+  url_loader_client_.reset();
+
+  // If the factory is asking to complete requests of this type, then we need to
+  // continue processing the response to make sure the network cache is
+  // populated.  Otherwise we can cancel the request.
+  if (resource_type_ == factory_params_->corb_detachable_resource_type) {
+    // Discard any remaining callbacks or data by rerouting the pipes to
+    // EmptyURLLoaderClient (deleting |self_ptr| when the URL request
+    // completes).
+    mojom::URLLoaderPtr self_ptr;
+    binding_.Close();
+    binding_.Bind(mojo::MakeRequest(&self_ptr));
+    binding_.set_connection_error_handler(
+        base::BindOnce(&URLLoader::OnConnectionError, base::Unretained(this)));
+    EmptyURLLoaderClient::DrainURLRequest(
+        mojo::MakeRequest(&url_loader_client_), std::move(self_ptr));
+
+    // Ask the caller to continue processing the request.
+    return kContinueRequest;
+  }
+  // Delete self and cancel the request - the caller doesn't need to continue.
+  //
+  // DeleteSelf is posted asynchronously, to make sure that the callers (e.g.
+  // URLLoader::OnResponseStarted and/or URLLoader::DidRead instance methods)
+  // can still safely dereference |this|.
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE,
+      base::BindOnce(&URLLoader::DeleteSelf, weak_ptr_factory_.GetWeakPtr()));
+  return kWillCancelRequest;
 }
 
 }  // namespace network

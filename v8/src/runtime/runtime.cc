@@ -4,13 +4,13 @@
 
 #include "src/runtime/runtime.h"
 
-#include "src/assembler.h"
 #include "src/base/hashmap.h"
 #include "src/contexts.h"
 #include "src/handles-inl.h"
 #include "src/heap/heap.h"
 #include "src/isolate.h"
 #include "src/objects-inl.h"
+#include "src/reloc-info.h"
 #include "src/runtime/runtime-utils.h"
 
 namespace v8 {
@@ -45,9 +45,7 @@ FOR_EACH_INTRINSIC_RETURN_PAIR(P)
   ,
 
 static const Runtime::Function kIntrinsicFunctions[] = {
-  FOR_EACH_INTRINSIC(F)
-  FOR_EACH_INTRINSIC(I)
-};
+    FOR_EACH_INTRINSIC(F) FOR_EACH_INLINE_INTRINSIC(I)};
 
 #undef I
 #undef F
@@ -98,6 +96,44 @@ void InitializeIntrinsicFunctionNames() {
 
 }  // namespace
 
+bool Runtime::NeedsExactContext(FunctionId id) {
+  switch (id) {
+    case Runtime::kAddPrivateField:
+    case Runtime::kCopyDataProperties:
+    case Runtime::kCreateDataProperty:
+    case Runtime::kCreatePrivateFieldSymbol:
+    case Runtime::kReThrow:
+    case Runtime::kThrow:
+    case Runtime::kThrowApplyNonFunction:
+    case Runtime::kThrowCalledNonCallable:
+    case Runtime::kThrowConstAssignError:
+    case Runtime::kThrowConstructorNonCallableError:
+    case Runtime::kThrowConstructedNonConstructable:
+    case Runtime::kThrowConstructorReturnedNonObject:
+    case Runtime::kThrowInvalidStringLength:
+    case Runtime::kThrowInvalidTypedArrayAlignment:
+    case Runtime::kThrowIteratorError:
+    case Runtime::kThrowIteratorResultNotAnObject:
+    case Runtime::kThrowNotConstructor:
+    case Runtime::kThrowRangeError:
+    case Runtime::kThrowReferenceError:
+    case Runtime::kThrowStackOverflow:
+    case Runtime::kThrowStaticPrototypeError:
+    case Runtime::kThrowSuperAlreadyCalledError:
+    case Runtime::kThrowSuperNotCalled:
+    case Runtime::kThrowSymbolAsyncIteratorInvalid:
+    case Runtime::kThrowSymbolIteratorInvalid:
+    case Runtime::kThrowThrowMethodMissing:
+    case Runtime::kThrowTypeError:
+    case Runtime::kThrowUnsupportedSuperError:
+    case Runtime::kThrowWasmError:
+    case Runtime::kThrowWasmStackOverflow:
+      return false;
+    default:
+      return true;
+  }
+}
+
 bool Runtime::IsNonReturning(FunctionId id) {
   switch (id) {
     case Runtime::kThrowUnsupportedSuperError:
@@ -113,6 +149,7 @@ bool Runtime::IsNonReturning(FunctionId id) {
     case Runtime::kThrowConstructorReturnedNonObject:
     case Runtime::kThrowInvalidStringLength:
     case Runtime::kThrowInvalidTypedArrayAlignment:
+    case Runtime::kThrowIteratorError:
     case Runtime::kThrowIteratorResultNotAnObject:
     case Runtime::kThrowThrowMethodMissing:
     case Runtime::kThrowSymbolIteratorInvalid:
@@ -159,31 +196,29 @@ const Runtime::Function* Runtime::FunctionForId(Runtime::FunctionId id) {
   return &(kIntrinsicFunctions[static_cast<int>(id)]);
 }
 
-
 const Runtime::Function* Runtime::RuntimeFunctionTable(Isolate* isolate) {
-  if (isolate->external_reference_redirector()) {
-    // When running with the simulator we need to provide a table which has
-    // redirected runtime entry addresses.
-    if (!isolate->runtime_state()->redirected_intrinsic_functions()) {
-      size_t function_count = arraysize(kIntrinsicFunctions);
-      Function* redirected_functions = new Function[function_count];
-      memcpy(redirected_functions, kIntrinsicFunctions,
-             sizeof(kIntrinsicFunctions));
-      for (size_t i = 0; i < function_count; i++) {
-        ExternalReference redirected_entry(static_cast<Runtime::FunctionId>(i),
-                                           isolate);
-        redirected_functions[i].entry = redirected_entry.address();
-      }
-      isolate->runtime_state()->set_redirected_intrinsic_functions(
-          redirected_functions);
+#ifdef USE_SIMULATOR
+  // When running with the simulator we need to provide a table which has
+  // redirected runtime entry addresses.
+  if (!isolate->runtime_state()->redirected_intrinsic_functions()) {
+    size_t function_count = arraysize(kIntrinsicFunctions);
+    Function* redirected_functions = new Function[function_count];
+    memcpy(redirected_functions, kIntrinsicFunctions,
+           sizeof(kIntrinsicFunctions));
+    for (size_t i = 0; i < function_count; i++) {
+      ExternalReference redirected_entry =
+          ExternalReference::Create(static_cast<Runtime::FunctionId>(i));
+      redirected_functions[i].entry = redirected_entry.address();
     }
-
-    return isolate->runtime_state()->redirected_intrinsic_functions();
-  } else {
-    return kIntrinsicFunctions;
+    isolate->runtime_state()->set_redirected_intrinsic_functions(
+        redirected_functions);
   }
-}
 
+  return isolate->runtime_state()->redirected_intrinsic_functions();
+#else
+  return kIntrinsicFunctions;
+#endif
+}
 
 std::ostream& operator<<(std::ostream& os, Runtime::FunctionId id) {
   return os << Runtime::FunctionForId(id)->name;

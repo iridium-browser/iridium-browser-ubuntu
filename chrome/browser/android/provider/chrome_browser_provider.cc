@@ -20,7 +20,7 @@
 #include "base/task/cancelable_task_tracker.h"
 #include "base/time/time.h"
 #include "chrome/browser/android/provider/blocking_ui_thread_async_request.h"
-#include "chrome/browser/android/provider/bookmark_model_observer_task.h"
+#include "chrome/browser/android/provider/bookmark_model_task.h"
 #include "chrome/browser/android/provider/run_on_ui_thread_blocking.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/managed_bookmark_service_factory.h"
@@ -104,21 +104,21 @@ const int64_t kInvalidBookmarkId = -1;
 
 jlong JNI_ChromeBrowserProvider_ConvertJLongObjectToPrimitive(
     JNIEnv* env,
-    jobject long_obj) {
+    const JavaRef<jobject>& long_obj) {
   ScopedJavaLocalRef<jclass> jlong_clazz = GetClass(env, "java/lang/Long");
   jmethodID long_value = MethodID::Get<MethodID::TYPE_INSTANCE>(
       env, jlong_clazz.obj(), "longValue", "()J");
-  return env->CallLongMethod(long_obj, long_value, NULL);
+  return env->CallLongMethod(long_obj.obj(), long_value, NULL);
 }
 
 jboolean JNI_ChromeBrowserProvider_ConvertJBooleanObjectToPrimitive(
     JNIEnv* env,
-    jobject boolean_object) {
+    const JavaRef<jobject>& boolean_object) {
   ScopedJavaLocalRef<jclass> jboolean_clazz =
       GetClass(env, "java/lang/Boolean");
   jmethodID boolean_value = MethodID::Get<MethodID::TYPE_INSTANCE>(
       env, jboolean_clazz.obj(), "booleanValue", "()Z");
-  return env->CallBooleanMethod(boolean_object, boolean_value, NULL);
+  return env->CallBooleanMethod(boolean_object.obj(), boolean_value, NULL);
 }
 
 base::Time ConvertJlongToTime(jlong value) {
@@ -126,24 +126,26 @@ base::Time ConvertJlongToTime(jlong value) {
          base::TimeDelta::FromMilliseconds((int64_t)value);
 }
 
-jint JNI_ChromeBrowserProvider_ConvertJIntegerToJint(JNIEnv* env,
-                                                     jobject integer_obj) {
+jint JNI_ChromeBrowserProvider_ConvertJIntegerToJint(
+    JNIEnv* env,
+    const JavaRef<jobject>& integer_obj) {
   ScopedJavaLocalRef<jclass> jinteger_clazz =
       GetClass(env, "java/lang/Integer");
   jmethodID int_value = MethodID::Get<MethodID::TYPE_INSTANCE>(
       env, jinteger_clazz.obj(), "intValue", "()I");
-  return env->CallIntMethod(integer_obj, int_value, NULL);
+  return env->CallIntMethod(integer_obj.obj(), int_value, NULL);
 }
 
 std::vector<base::string16> ConvertJStringArrayToString16Array(
     JNIEnv* env,
-    jobjectArray array) {
+    const JavaRef<jobjectArray>& array) {
   std::vector<base::string16> results;
-  if (array) {
-    jsize len = env->GetArrayLength(array);
+  if (!array.is_null()) {
+    jsize len = env->GetArrayLength(array.obj());
     for (int i = 0; i < len; i++) {
       ScopedJavaLocalRef<jstring> j_str(
-          env, static_cast<jstring>(env->GetObjectArrayElement(array, i)));
+          env,
+          static_cast<jstring>(env->GetObjectArrayElement(array.obj(), i)));
       results.push_back(ConvertJavaStringToUTF16(env, j_str));
     }
   }
@@ -216,80 +218,69 @@ class AddBookmarkTask : public BookmarkModelTask {
 };
 
 // Utility method to remove a bookmark.
-class RemoveBookmarkTask : public BookmarkModelObserverTask {
+class RemoveBookmarkTask : public BookmarkModelTask {
  public:
   explicit RemoveBookmarkTask(BookmarkModel* model)
-      : BookmarkModelObserverTask(model),
-        deleted_(0),
-        id_to_delete_(kInvalidBookmarkId) {}
-  ~RemoveBookmarkTask() override {}
+      : BookmarkModelTask(model) {}
 
   int Run(const int64_t id) {
-    id_to_delete_ = id;
-    RunOnUIThreadBlocking::Run(
-        base::Bind(&RemoveBookmarkTask::RunOnUIThread, model(), id));
-    return deleted_;
+    bool did_delete = false;
+    RunOnUIThreadBlocking::Run(base::Bind(&RemoveBookmarkTask::RunOnUIThread,
+                                          model(), id, &did_delete));
+    return did_delete ? 1 : 0;
   }
 
-  static void RunOnUIThread(BookmarkModel* model, const int64_t id) {
+  static void RunOnUIThread(BookmarkModel* model,
+                            const int64_t id,
+                            bool* did_delete) {
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
     const BookmarkNode* node = bookmarks::GetBookmarkNodeByID(model, id);
-    if (node && node->parent())
+    if (node && node->parent()) {
       model->Remove(node);
+      *did_delete = true;
+    }
   }
-
-  // Verify that the bookmark was actually removed. Called synchronously.
-  void BookmarkNodeRemoved(BookmarkModel* bookmark_model,
-                           const BookmarkNode* parent,
-                           int old_index,
-                           const BookmarkNode* node,
-                           const std::set<GURL>& removed_urls) override {
-    if (bookmark_model == model() && node->id() == id_to_delete_)
-        ++deleted_;
-  }
-
- private:
-  int deleted_;
-  int64_t id_to_delete_;
 
   DISALLOW_COPY_AND_ASSIGN(RemoveBookmarkTask);
 };
 
 // Utility method to update a bookmark.
-class UpdateBookmarkTask : public BookmarkModelObserverTask {
+class UpdateBookmarkTask : public BookmarkModelTask {
  public:
   explicit UpdateBookmarkTask(BookmarkModel* model)
-      : BookmarkModelObserverTask(model),
-        updated_(0),
-        id_to_update_(kInvalidBookmarkId){}
-  ~UpdateBookmarkTask() override {}
+      : BookmarkModelTask(model) {}
 
   int Run(const int64_t id,
           const base::string16& title,
           const base::string16& url,
           const int64_t parent_id) {
-    id_to_update_ = id;
-    RunOnUIThreadBlocking::Run(
-        base::Bind(&UpdateBookmarkTask::RunOnUIThread,
-                   model(), id, title, url, parent_id));
-    return updated_;
+    bool did_update = false;
+    RunOnUIThreadBlocking::Run(base::Bind(&UpdateBookmarkTask::RunOnUIThread,
+                                          model(), id, title, url, parent_id,
+                                          &did_update));
+    return did_update ? 1 : 0;
   }
 
   static void RunOnUIThread(BookmarkModel* model,
                             const int64_t id,
                             const base::string16& title,
                             const base::string16& url,
-                            const int64_t parent_id) {
+                            const int64_t parent_id,
+                            bool* did_update) {
     DCHECK_CURRENTLY_ON(BrowserThread::UI);
     const BookmarkNode* node = bookmarks::GetBookmarkNodeByID(model, id);
     if (node) {
-      if (node->GetTitle() != title)
+      if (node->GetTitle() != title) {
         model->SetTitle(node, title);
+        *did_update = true;
+      }
 
       if (node->type() == BookmarkNode::URL) {
         GURL bookmark_url = ParseAndMaybeAppendScheme(url, kDefaultUrlScheme);
-        if (bookmark_url != node->url())
+        if (bookmark_url != node->url()) {
           model->SetURL(node, bookmark_url);
+          *did_update = true;
+        }
       }
 
       if (parent_id >= 0 &&
@@ -297,22 +288,13 @@ class UpdateBookmarkTask : public BookmarkModelObserverTask {
         const BookmarkNode* new_parent =
             bookmarks::GetBookmarkNodeByID(model, parent_id);
 
-        if (new_parent)
+        if (new_parent) {
           model->Move(node, new_parent, 0);
+          *did_update = true;
+        }
       }
     }
   }
-
-  // Verify that the bookmark was actually updated. Called synchronously.
-  void BookmarkNodeChanged(BookmarkModel* bookmark_model,
-                           const BookmarkNode* node) override {
-    if (bookmark_model == model() && node->id() == id_to_update_)
-      ++updated_;
-  }
-
- private:
-  int updated_;
-  int64_t id_to_update_;
 
   DISALLOW_COPY_AND_ASSIGN(UpdateBookmarkTask);
 };
@@ -571,7 +553,7 @@ class SearchTermTask : public HistoryProviderTask {
     if (search_engine) {
       const TemplateURLRef* search_url = &search_engine->url_ref();
       TemplateURLRef::SearchTermsArgs search_terms_args(row->search_term());
-      search_terms_args.append_extra_query_params = true;
+      search_terms_args.append_extra_query_params_from_command_line = true;
       std::string url = search_url->ReplaceSearchTerms(
           search_terms_args, template_service->search_terms_data());
       if (!url.empty()) {
@@ -745,21 +727,21 @@ class RemoveSearchTermsFromAPITask : public SearchTermTask {
 // Fills the bookmark |row| with the given java objects.
 void JNI_ChromeBrowserProvider_FillBookmarkRow(
     JNIEnv* env,
-    jobject obj,
-    jstring url,
-    jobject created,
-    jobject isBookmark,
-    jobject date,
-    jbyteArray favicon,
-    jstring title,
-    jobject visits,
+    const JavaRef<jobject>& obj,
+    const JavaRef<jstring>& url,
+    const JavaRef<jobject>& created,
+    const JavaRef<jobject>& isBookmark,
+    const JavaRef<jobject>& date,
+    const JavaRef<jbyteArray>& favicon,
+    const JavaRef<jstring>& title,
+    const JavaRef<jobject>& visits,
     jlong parent_id,
     history::HistoryAndBookmarkRow* row,
     BookmarkModel* model) {
   // Needed because of the internal bookmark model task invocation.
   DCHECK(!BrowserThread::CurrentlyOn(BrowserThread::UI));
 
-  if (url) {
+  if (!url.is_null()) {
     base::string16 raw_url = ConvertJavaStringToUTF16(env, url);
     // GURL doesn't accept the URL without protocol, but the Android CTS
     // allows it. We are trying to prefix with 'http://' to see whether
@@ -770,29 +752,29 @@ void JNI_ChromeBrowserProvider_FillBookmarkRow(
     row->set_raw_url(base::UTF16ToUTF8(raw_url));
   }
 
-  if (created)
+  if (!created.is_null())
     row->set_created(ConvertJlongToTime(
         JNI_ChromeBrowserProvider_ConvertJLongObjectToPrimitive(env, created)));
 
-  if (isBookmark)
+  if (!isBookmark.is_null())
     row->set_is_bookmark(
         JNI_ChromeBrowserProvider_ConvertJBooleanObjectToPrimitive(env,
                                                                    isBookmark));
 
-  if (date)
+  if (!date.is_null())
     row->set_last_visit_time(ConvertJlongToTime(
         JNI_ChromeBrowserProvider_ConvertJLongObjectToPrimitive(env, date)));
 
-  if (favicon) {
+  if (!favicon.is_null()) {
     std::vector<uint8_t> bytes;
-    base::android::JavaByteArrayToByteVector(env, favicon, &bytes);
+    base::android::JavaByteArrayToByteVector(env, favicon.obj(), &bytes);
     row->set_favicon(base::RefCountedBytes::TakeVector(&bytes));
   }
 
-  if (title)
+  if (!title.is_null())
     row->set_title(ConvertJavaStringToUTF16(env, title));
 
-  if (visits)
+  if (!visits.is_null())
     row->set_visit_count(
         JNI_ChromeBrowserProvider_ConvertJIntegerToJint(env, visits));
 
@@ -803,15 +785,16 @@ void JNI_ChromeBrowserProvider_FillBookmarkRow(
 }
 
 // Fills the bookmark |row| with the given java objects if it is not null.
-void JNI_ChromeBrowserProvider_FillSearchRow(JNIEnv* env,
-                                             jobject obj,
-                                             jstring search_term,
-                                             jobject date,
-                                             history::SearchRow* row) {
-  if (search_term)
+void JNI_ChromeBrowserProvider_FillSearchRow(
+    JNIEnv* env,
+    const JavaRef<jobject>& obj,
+    const JavaRef<jstring>& search_term,
+    const JavaRef<jobject>& date,
+    history::SearchRow* row) {
+  if (!search_term.is_null())
     row->set_search_term(ConvertJavaStringToUTF16(env, search_term));
 
-  if (date)
+  if (!date.is_null())
     row->set_search_time(ConvertJlongToTime(
         JNI_ChromeBrowserProvider_ConvertJLongObjectToPrimitive(env, date)));
 }
@@ -1209,10 +1192,7 @@ void ChromeBrowserProvider::OnURLVisited(
 
 void ChromeBrowserProvider::OnURLsDeleted(
     history::HistoryService* history_service,
-    bool all_history,
-    bool expired,
-    const history::URLRows& deleted_rows,
-    const std::set<GURL>& favicon_urls) {
+    const history::DeletionInfo& deletion_info) {
   OnHistoryChanged();
 }
 

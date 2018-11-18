@@ -24,8 +24,8 @@ CompositorFrameSinkImpl::CompositorFrameSinkImpl(
           false /* is_root */,
           true /* needs_sync_points */)) {
   compositor_frame_sink_binding_.set_connection_error_handler(
-      base::Bind(&CompositorFrameSinkImpl::OnClientConnectionLost,
-                 base::Unretained(this)));
+      base::BindOnce(&CompositorFrameSinkImpl::OnClientConnectionLost,
+                     base::Unretained(this)));
 }
 
 CompositorFrameSinkImpl::~CompositorFrameSinkImpl() = default;
@@ -41,11 +41,34 @@ void CompositorFrameSinkImpl::SetWantsAnimateOnlyBeginFrames() {
 void CompositorFrameSinkImpl::SubmitCompositorFrame(
     const LocalSurfaceId& local_surface_id,
     CompositorFrame frame,
-    mojom::HitTestRegionListPtr hit_test_region_list,
+    base::Optional<HitTestRegionList> hit_test_region_list,
     uint64_t submit_time) {
+  SubmitCompositorFrameInternal(local_surface_id, std::move(frame),
+                                std::move(hit_test_region_list), submit_time,
+                                SubmitCompositorFrameSyncCallback());
+}
+
+void CompositorFrameSinkImpl::SubmitCompositorFrameSync(
+    const LocalSurfaceId& local_surface_id,
+    CompositorFrame frame,
+    base::Optional<HitTestRegionList> hit_test_region_list,
+    uint64_t submit_time,
+    SubmitCompositorFrameSyncCallback callback) {
+  SubmitCompositorFrameInternal(local_surface_id, std::move(frame),
+                                std::move(hit_test_region_list), submit_time,
+                                std::move(callback));
+}
+
+void CompositorFrameSinkImpl::SubmitCompositorFrameInternal(
+    const LocalSurfaceId& local_surface_id,
+    CompositorFrame frame,
+    base::Optional<HitTestRegionList> hit_test_region_list,
+    uint64_t submit_time,
+    mojom::CompositorFrameSink::SubmitCompositorFrameSyncCallback callback) {
   const auto result = support_->MaybeSubmitCompositorFrame(
-      local_surface_id, std::move(frame), std::move(hit_test_region_list));
-  if (result == CompositorFrameSinkSupport::ACCEPTED)
+      local_surface_id, std::move(frame), std::move(hit_test_region_list),
+      submit_time, std::move(callback));
+  if (result == SubmitResult::ACCEPTED)
     return;
 
   const char* reason =

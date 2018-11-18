@@ -12,8 +12,10 @@
 #include "base/lazy_instance.h"
 #include "base/md5.h"
 #include "base/strings/string_util.h"
+#include "base/task/post_task.h"
 #include "components/data_use_measurement/core/data_use_user_data.h"
 #include "components/safe_browsing/browser/threat_details_cache.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/load_flags.h"
@@ -51,8 +53,8 @@ void ThreatDetailsCacheCollector::StartCacheCollection(
 
   // Post a task in the message loop, so the callers don't need to
   // check if we call their callback immediately.
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::UI},
       base::BindOnce(&ThreatDetailsCacheCollector::OpenEntry, this));
 }
 
@@ -125,7 +127,7 @@ void ThreatDetailsCacheCollector::OpenEntry() {
 
 ClientSafeBrowsingReportRequest::Resource*
 ThreatDetailsCacheCollector::GetResource(const GURL& url) {
-  ResourceMap::iterator it = resources_->find(url.spec());
+  auto it = resources_->find(url.spec());
   if (it != resources_->end()) {
     return it->second.get();
   }
@@ -136,7 +138,7 @@ void ThreatDetailsCacheCollector::OnURLLoaderComplete(
     std::unique_ptr<std::string> response_body) {
   DVLOG(1) << "OnURLLoaderComplete";
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  DCHECK(current_load_.get());
+  DCHECK(current_load_);
   if (current_load_->NetError() == net::ERR_CACHE_MISS) {
     // Cache miss, skip this resource.
     DVLOG(1) << "Cache miss for url: " << current_load_->GetFinalURL();
@@ -165,7 +167,7 @@ void ThreatDetailsCacheCollector::OnURLLoaderComplete(
   ReadResponse(resource);
   std::string data;
   if (response_body)
-    data = *response_body.get();
+    data = *response_body;
   ReadData(resource, data);
   AdvanceEntry();
 }
@@ -225,8 +227,8 @@ void ThreatDetailsCacheCollector::AdvanceEntry() {
   current_load_.reset();
 
   // Create a task so we don't take over the UI thread for too long.
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::UI},
       base::BindOnce(&ThreatDetailsCacheCollector::OpenEntry, this));
 }
 
@@ -234,7 +236,7 @@ void ThreatDetailsCacheCollector::AllDone(bool success) {
   DVLOG(1) << "AllDone";
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   *result_ = success;
-  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE, callback_);
+  base::PostTaskWithTraits(FROM_HERE, {BrowserThread::UI}, callback_);
   callback_.Reset();
 }
 

@@ -18,7 +18,7 @@
 #include "chromeos/components/tether/host_scanner_operation.h"
 #include "chromeos/components/tether/notification_presenter.h"
 #include "chromeos/network/network_state_handler.h"
-#include "components/cryptauth/remote_device.h"
+#include "components/cryptauth/remote_device_ref.h"
 #include "components/session_manager/core/session_manager_observer.h"
 
 namespace session_manager {
@@ -26,6 +26,14 @@ class SessionManager;
 }  // namespace session_manager
 
 namespace chromeos {
+
+namespace device_sync {
+class DeviceSyncClient;
+}  // namespace device_sync
+
+namespace secure_channel {
+class SecureChannelClient;
+}  // namespace secure_channel
 
 namespace tether {
 
@@ -53,6 +61,8 @@ class HostScannerImpl : public HostScanner,
   };
 
   HostScannerImpl(
+      device_sync::DeviceSyncClient* device_sync_client,
+      secure_channel::SecureChannelClient* secure_channel_client,
       NetworkStateHandler* network_state_handler,
       session_manager::SessionManager* session_manager,
       TetherHostFetcher* tether_host_fetcher,
@@ -78,7 +88,7 @@ class HostScannerImpl : public HostScanner,
   void OnTetherAvailabilityResponse(
       const std::vector<HostScannerOperation::ScannedDeviceInfo>&
           scanned_device_list_so_far,
-      const std::vector<cryptauth::RemoteDevice>&
+      const cryptauth::RemoteDeviceRefList&
           gms_core_notifications_disabled_devices,
       bool is_final_scan_result) override;
 
@@ -97,7 +107,7 @@ class HostScannerImpl : public HostScanner,
     HOST_SCAN_RESULT_MAX
   };
 
-  void OnTetherHostsFetched(const cryptauth::RemoteDeviceList& tether_hosts);
+  void OnTetherHostsFetched(const cryptauth::RemoteDeviceRefList& tether_hosts);
   void SetCacheEntry(
       const HostScannerOperation::ScannedDeviceInfo& scanned_device_info);
   void OnFinalScanResultReceived(
@@ -107,6 +117,8 @@ class HostScannerImpl : public HostScanner,
   bool IsPotentialHotspotNotificationShowing();
   bool CanAvailableHostNotificationBeShown();
 
+  device_sync::DeviceSyncClient* device_sync_client_;
+  secure_channel::SecureChannelClient* secure_channel_client_;
   NetworkStateHandler* network_state_handler_;
   session_manager::SessionManager* session_manager_;
   TetherHostFetcher* tether_host_fetcher_;
@@ -127,7 +139,7 @@ class HostScannerImpl : public HostScanner,
   std::unique_ptr<HostScannerOperation> host_scanner_operation_;
   std::unordered_set<std::string> tether_guids_in_cache_before_scan_;
 
-  base::ObserverList<Observer> observer_list_;
+  base::ObserverList<Observer>::Unchecked observer_list_;
   base::WeakPtrFactory<HostScannerImpl> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(HostScannerImpl);

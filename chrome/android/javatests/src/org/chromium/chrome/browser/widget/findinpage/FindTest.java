@@ -34,7 +34,6 @@ import org.junit.runner.RunWith;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.test.util.CommandLineFlags;
 import org.chromium.base.test.util.Feature;
-import org.chromium.base.test.util.FlakyTest;
 import org.chromium.base.test.util.RetryOnFailure;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeSwitches;
@@ -43,11 +42,11 @@ import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
 import org.chromium.chrome.test.util.FullscreenTestUtils;
 import org.chromium.chrome.test.util.MenuUtils;
-import org.chromium.content.browser.test.util.Criteria;
-import org.chromium.content.browser.test.util.CriteriaHelper;
-import org.chromium.content.browser.test.util.KeyUtils;
-import org.chromium.content.browser.test.util.TouchCommon;
-import org.chromium.content.browser.test.util.UiUtils;
+import org.chromium.content_public.browser.test.util.Criteria;
+import org.chromium.content_public.browser.test.util.CriteriaHelper;
+import org.chromium.content_public.browser.test.util.KeyUtils;
+import org.chromium.content_public.browser.test.util.TouchCommon;
+import org.chromium.content_public.browser.test.util.UiUtils;
 import org.chromium.net.test.EmbeddedTestServer;
 
 import java.util.concurrent.Callable;
@@ -73,7 +72,7 @@ public class FindTest {
 
     @After
     public void tearDown() throws Exception {
-        mTestServer.stopAndDestroyServer();
+        if (mTestServer != null) mTestServer.stopAndDestroyServer();
     }
 
     /**
@@ -424,7 +423,7 @@ public class FindTest {
     @Test
     @MediumTest
     @Feature({"FindInPage"})
-    @FlakyTest(message = "https://crbug.com/673930")
+    @RetryOnFailure
     public void testBackKeyDoesNotDismissFindWhenImeIsPresent() throws InterruptedException {
         mActivityTestRule.loadUrl(mTestServer.getURL(FILEPATH));
         findInPageFromMenu();
@@ -461,13 +460,9 @@ public class FindTest {
 
     private void waitForIME(final boolean imePresent) {
         // Wait for IME to appear.
-        CriteriaHelper.pollUiThread(new Criteria("IME is not getting shown!") {
-            @Override
-            public boolean isSatisfied() {
-                return org.chromium.ui.UiUtils.isKeyboardShowing(
-                               mActivityTestRule.getActivity(), getFindQueryText())
-                        == imePresent;
-            }
-        });
+        CriteriaHelper.pollUiThread(Criteria.equals(imePresent,
+                ()
+                        -> mActivityTestRule.getKeyboardDelegate().isKeyboardShowing(
+                                mActivityTestRule.getActivity(), getFindQueryText())));
     }
 }

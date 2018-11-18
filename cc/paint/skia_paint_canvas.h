@@ -36,7 +36,8 @@ class CC_PAINT_EXPORT SkiaPaintCanvas final : public PaintCanvas {
   explicit SkiaPaintCanvas(SkCanvas* canvas,
                            ImageProvider* image_provider = nullptr,
                            ContextFlushes context_flushes = ContextFlushes());
-  explicit SkiaPaintCanvas(const SkBitmap& bitmap);
+  explicit SkiaPaintCanvas(const SkBitmap& bitmap,
+                           ImageProvider* image_provider = nullptr);
   explicit SkiaPaintCanvas(const SkBitmap& bitmap, const SkSurfaceProps& props);
   // If |target_color_space| is non-nullptr, then this will wrap |canvas| in a
   // SkColorSpaceXformCanvas.
@@ -106,10 +107,6 @@ class CC_PAINT_EXPORT SkiaPaintCanvas final : public PaintCanvas {
                      const SkRect& dst,
                      const PaintFlags* flags,
                      SrcRectConstraint constraint) override;
-  void drawBitmap(const SkBitmap& bitmap,
-                  SkScalar left,
-                  SkScalar top,
-                  const PaintFlags* flags) override;
 
   void drawTextBlob(scoped_refptr<PaintTextBlob> blob,
                     SkScalar x,
@@ -130,7 +127,6 @@ class CC_PAINT_EXPORT SkiaPaintCanvas final : public PaintCanvas {
   using PaintCanvas::clipRect;
   using PaintCanvas::clipRRect;
   using PaintCanvas::clipPath;
-  using PaintCanvas::drawBitmap;
   using PaintCanvas::drawColor;
   using PaintCanvas::drawImage;
   using PaintCanvas::drawPicture;
@@ -142,9 +138,6 @@ class CC_PAINT_EXPORT SkiaPaintCanvas final : public PaintCanvas {
       PlaybackParams::CustomDataRasterCallback custom_raster_callback);
 
  private:
-  // We always need skia shaders since the ops will be played on an SkCanvas.
-  static const bool kCreateSkiaShaders;
-
   void WrapCanvasInColorSpaceXformCanvas(
       sk_sp<SkColorSpace> target_color_space);
   void FlushAfterDrawIfNeeded();

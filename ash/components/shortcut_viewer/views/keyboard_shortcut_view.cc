@@ -6,7 +6,6 @@
 
 #include <algorithm>
 
-#include "ash/components/resources/grit/ash_components_resources.h"
 #include "ash/components/shortcut_viewer/keyboard_shortcut_viewer_metadata.h"
 #include "ash/components/shortcut_viewer/vector_icons/vector_icons.h"
 #include "ash/components/shortcut_viewer/views/keyboard_shortcut_item_list_view.h"
@@ -14,14 +13,17 @@
 #include "ash/components/shortcut_viewer/views/ksv_search_box_view.h"
 #include "ash/components/strings/grit/ash_components_strings.h"
 #include "ash/public/cpp/app_list/internal_app_id_constants.h"
+#include "ash/public/cpp/resources/grit/ash_public_unscaled_resources.h"
 #include "ash/public/cpp/shelf_item.h"
 #include "ash/public/cpp/window_properties.h"
-#include "ash/resources/grit/ash_resources.h"
 #include "base/bind.h"
 #include "base/i18n/string_search.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
 #include "base/metrics/user_metrics_action.h"
 #include "base/strings/string_number_conversions.h"
+#include "base/time/time.h"
+#include "base/trace_event/trace_event.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/window.h"
 #include "ui/base/accelerators/accelerator.h"
@@ -29,7 +31,9 @@
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/chromeos/search_box/search_box_view_base.h"
+#include "ui/events/event_constants.h"
 #include "ui/gfx/paint_vector_icon.h"
+#include "ui/gfx/presentation_feedback.h"
 #include "ui/views/background.h"
 #include "ui/views/border.h"
 #include "ui/views/controls/image_view.h"
@@ -48,6 +52,8 @@ namespace {
 
 KeyboardShortcutView* g_ksv_view = nullptr;
 
+constexpr base::nullopt_t kAllCategories = base::nullopt;
+
 // Setups the illustration views for search states, including an icon and a
 // descriptive text.
 void SetupSearchIllustrationView(views::View* illustration_view,
@@ -55,7 +61,7 @@ void SetupSearchIllustrationView(views::View* illustration_view,
                                  int message_id) {
   constexpr int kSearchIllustrationIconSize = 150;
   constexpr SkColor kSearchIllustrationIconColor =
-      SkColorSetARGBMacro(0xFF, 0xDA, 0xDC, 0xE0);
+      SkColorSetARGB(0xFF, 0xDA, 0xDC, 0xE0);
 
   illustration_view->set_owned_by_client();
   constexpr int kTopPadding = 98;
@@ -71,7 +77,7 @@ void SetupSearchIllustrationView(views::View* illustration_view,
   illustration_view->AddChildView(image_view);
 
   constexpr SkColor kSearchIllustrationTextColor =
-      SkColorSetARGBMacro(0xFF, 0x20, 0x21, 0x24);
+      SkColorSetARGB(0xFF, 0x20, 0x21, 0x24);
   views::Label* text = new views::Label(l10n_util::GetStringUTF16(message_id));
   text->SetEnabledColor(kSearchIllustrationTextColor);
   constexpr int kLabelFontSizeDelta = 1;
@@ -96,23 +102,26 @@ KeyboardShortcutView::~KeyboardShortcutView() {
 }
 
 // static
-views::Widget* KeyboardShortcutView::Show(gfx::NativeWindow context) {
+views::Widget* KeyboardShortcutView::Toggle(base::TimeTicks start_time,
+                                            aura::Window* context) {
   if (g_ksv_view) {
-    // If there is a KeyboardShortcutView window open already, just activate
-    // it.
-    g_ksv_view->GetWidget()->Activate();
+    if (g_ksv_view->GetWidget()->IsActive())
+      g_ksv_view->GetWidget()->Close();
+    else
+      g_ksv_view->GetWidget()->Activate();
   } else {
+    TRACE_EVENT0("shortcut_viewer", "CreateWidget");
     base::RecordAction(
         base::UserMetricsAction("KeyboardShortcutViewer.CreateWindow"));
 
-    constexpr gfx::Size kKSVWindowSize(800, 512);
-    gfx::Rect window_bounds(kKSVWindowSize);
-    if (context) {
-      window_bounds = context->GetRootWindow()->GetBoundsInScreen();
-      window_bounds.ClampToCenteredSize(kKSVWindowSize);
-    }
-    views::Widget::CreateWindowWithContextAndBounds(new KeyboardShortcutView(),
-                                                    context, window_bounds);
+    views::Widget::InitParams params;
+    params.delegate = new KeyboardShortcutView;
+    params.name = "KeyboardShortcutWidget";
+    // Intentionally don't set bounds. The window will be sized and centered
+    // based on CalculatePreferredSize().
+    views::Widget* widget = new views::Widget;
+    params.context = context;
+    widget->Init(params);
 
     // Set frame view Active and Inactive colors, both are SK_ColorWHITE.
     aura::Window* window = g_ksv_view->GetWidget()->GetNativeWindow();
@@ -123,7 +132,7 @@ views::Widget* KeyboardShortcutView::Show(gfx::NativeWindow context) {
     const ash::ShelfID shelf_id(app_list::kInternalAppIdKeyboardShortcutViewer);
     window->SetProperty(ash::kShelfIDKey,
                         new std::string(shelf_id.Serialize()));
-    window->SetProperty<int>(ash::kShelfItemTypeKey, ash::TYPE_DIALOG);
+    window->SetProperty<int>(ash::kShelfItemTypeKey, ash::TYPE_APP);
 
     // We don't want the KSV window to have a title (per design), however the
     // shelf uses the window title to set the shelf item's tooltip text. The
@@ -134,7 +143,7 @@ views::Widget* KeyboardShortcutView::Show(gfx::NativeWindow context) {
     window->SetTitle(l10n_util::GetStringUTF16(IDS_KSV_TITLE));
     gfx::ImageSkia* icon =
         ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
-            IDR_KEYBOARD_SHORTCUT_VIEWER_LOGO_192);
+            IDR_SHORTCUT_VIEWER_LOGO_192);
     // The new gfx::ImageSkia instance is owned by the window itself.
     window->SetProperty(aura::client::kWindowIconKey,
                         new gfx::ImageSkia(*icon));
@@ -142,10 +151,24 @@ views::Widget* KeyboardShortcutView::Show(gfx::NativeWindow context) {
     g_ksv_view->AddAccelerator(
         ui::Accelerator(ui::VKEY_W, ui::EF_CONTROL_DOWN));
 
+    g_ksv_view->needs_init_all_categories_ = false;
+    g_ksv_view->did_first_paint_ = false;
     g_ksv_view->GetWidget()->Show();
     g_ksv_view->search_box_view_->search_box()->RequestFocus();
+
+    widget->GetCompositor()->RequestPresentationTimeForNextFrame(base::BindOnce(
+        [](base::TimeTicks start_time,
+           const gfx::PresentationFeedback& feedback) {
+          UMA_HISTOGRAM_TIMES("Keyboard.ShortcutViewer.StartupTime",
+                              feedback.timestamp - start_time);
+        },
+        start_time));
   }
   return g_ksv_view->GetWidget();
+}
+
+const char* KeyboardShortcutView::GetClassName() const {
+  return "KeyboardShortcutView";
 }
 
 bool KeyboardShortcutView::AcceleratorPressed(
@@ -186,6 +209,34 @@ void KeyboardShortcutView::Layout() {
                           content_bounds.height() - search_box_used_height);
 }
 
+gfx::Size KeyboardShortcutView::CalculatePreferredSize() const {
+  return gfx::Size(800, 512);
+}
+
+void KeyboardShortcutView::OnPaint(gfx::Canvas* canvas) {
+  views::View::OnPaint(canvas);
+
+  // Skip if it is the first OnPaint event.
+  if (!did_first_paint_) {
+    did_first_paint_ = true;
+    needs_init_all_categories_ = true;
+    return;
+  }
+
+  if (!needs_init_all_categories_)
+    return;
+
+  needs_init_all_categories_ = false;
+  // Cannot post a task right after initializing the first category, it will
+  // have a chance to end up in the same group of drawing commands sent to
+  // compositor. We can wait for the second OnPaint, which means previous
+  // drawing commands have been sent to compositor for the next frame and new
+  // coming commands will be sent for the next-next frame.
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::BindOnce(&KeyboardShortcutView::InitCategoriesTabbedPane,
+                                weak_factory_.GetWeakPtr(), kAllCategories));
+}
+
 void KeyboardShortcutView::QueryChanged(search_box::SearchBoxViewBase* sender) {
   const bool query_empty = sender->IsSearchBoxTrimmedQueryEmpty();
   if (is_search_box_empty_ != query_empty) {
@@ -209,7 +260,7 @@ void KeyboardShortcutView::QueryChanged(search_box::SearchBoxViewBase* sender) {
 
 void KeyboardShortcutView::BackButtonPressed() {
   search_box_view_->ClearSearch();
-  search_box_view_->SetSearchBoxActive(false);
+  search_box_view_->SetSearchBoxActive(false, ui::ET_UNKNOWN);
 }
 
 void KeyboardShortcutView::ActiveChanged(
@@ -224,7 +275,7 @@ void KeyboardShortcutView::ActiveChanged(
   UpdateViewsLayout(is_search_box_active);
 }
 
-KeyboardShortcutView::KeyboardShortcutView() {
+KeyboardShortcutView::KeyboardShortcutView() : weak_factory_(this) {
   DCHECK_EQ(g_ksv_view, nullptr);
   g_ksv_view = this;
 
@@ -234,6 +285,7 @@ KeyboardShortcutView::KeyboardShortcutView() {
 }
 
 void KeyboardShortcutView::InitViews() {
+  TRACE_EVENT0("shortcut_viewer", "InitViews");
   // Init search box view.
   search_box_view_ = std::make_unique<KSVSearchBoxView>(this);
   search_box_view_->Init();
@@ -252,6 +304,9 @@ void KeyboardShortcutView::InitViews() {
   AddChildView(search_results_container_);
 
   // Init views of KeyboardShortcutItemView.
+  // TODO(https://crbug.com/843394): Observe changes in keyboard layout and
+  // clear the cache.
+  KeyboardShortcutItemView::ClearKeycodeToString16Cache();
   for (const auto& item : GetKeyboardShortcutItemList()) {
     for (auto category : item.categories) {
       shortcut_views_.emplace_back(
@@ -272,10 +327,16 @@ void KeyboardShortcutView::InitViews() {
       new views::TabbedPane(views::TabbedPane::Orientation::kVertical,
                             views::TabbedPane::TabStripStyle::kHighlight);
   AddChildView(categories_tabbed_pane_);
-  InitCategoriesTabbedPane();
+
+  // Initial Layout of KeyboardShortcutItemView is time consuming. To speed up
+  // the startup time, we only initialize the first category pane, which is
+  // visible to user, and defer initialization of other categories in the
+  // background.
+  InitCategoriesTabbedPane(ShortcutCategory::kPopular);
 }
 
-void KeyboardShortcutView::InitCategoriesTabbedPane() {
+void KeyboardShortcutView::InitCategoriesTabbedPane(
+    base::Optional<ShortcutCategory> initial_category) {
   // If the tab count is 0, |GetSelectedTabIndex()| will return -1, which we do
   // not want to cache.
   active_tab_index_ =
@@ -290,6 +351,7 @@ void KeyboardShortcutView::InitCategoriesTabbedPane() {
   categories_tabbed_pane_->child_at(0)->RemoveAllChildViews(true);
   categories_tabbed_pane_->child_at(1)->RemoveAllChildViews(true);
 
+  const bool first_init = initial_category.has_value();
   ShortcutCategory current_category = ShortcutCategory::kUnknown;
   KeyboardShortcutItemListView* item_list_view;
   for (const auto& item_view : shortcut_views_) {
@@ -303,6 +365,13 @@ void KeyboardShortcutView::InitCategoriesTabbedPane() {
       categories_tabbed_pane_->AddTab(GetStringForCategory(current_category),
                                       scroller);
     }
+
+    // If |first_init| is true, we only initialize the pane with the
+    // KeyboardShortcutItemView in the specific category in |initial_category|.
+    // Otherwise, we will initialize all the panes.
+    if (first_init && category != initial_category.value())
+      continue;
+
     if (item_list_view->has_children())
       item_list_view->AddHorizontalSeparator();
     views::StyledLabel* description_label_view =
@@ -313,6 +382,7 @@ void KeyboardShortcutView::InitCategoriesTabbedPane() {
     // Remove the search query highlight.
     description_label_view->Layout();
   }
+  Layout();
 }
 
 void KeyboardShortcutView::UpdateViewsLayout(bool is_search_box_active) {
@@ -331,7 +401,7 @@ void KeyboardShortcutView::UpdateViewsLayout(bool is_search_box_active) {
     if (!categories_tabbed_pane_->visible()) {
       // Repopulate |categories_tabbed_pane_| child views, which were removed
       // when they were added to |search_results_container_|.
-      InitCategoriesTabbedPane();
+      InitCategoriesTabbedPane(kAllCategories);
       // Select the category that was active before entering search mode.
       categories_tabbed_pane_->SelectTabAt(active_tab_index_);
     }
@@ -344,6 +414,7 @@ void KeyboardShortcutView::UpdateViewsLayout(bool is_search_box_active) {
 
 void KeyboardShortcutView::ShowSearchResults(
     const base::string16& search_query) {
+  const base::TimeTicks start_time = base::TimeTicks::Now();
   search_results_container_->RemoveAllChildViews(true);
   auto* search_container_content_view = search_no_result_view_.get();
   auto found_items_list_view = std::make_unique<KeyboardShortcutItemListView>();
@@ -419,6 +490,21 @@ void KeyboardShortcutView::ShowSearchResults(
   search_results_container_->AddChildView(search_container_content_view);
   Layout();
   SchedulePaint();
+  constexpr int kBucketCount = 100;
+  UMA_HISTOGRAM_CUSTOM_MICROSECONDS_TIMES(
+      "Keyboard.ShortcutViewer.SearchUpdateTime",
+      base::TimeTicks::Now() - start_time,
+      base::TimeDelta::FromMicroseconds(50), base::TimeDelta::FromSeconds(1),
+      kBucketCount);
+  GetWidget()->GetCompositor()->RequestPresentationTimeForNextFrame(
+      base::BindOnce(
+          [](base::TimeTicks start_time,
+             const gfx::PresentationFeedback& feedback) {
+            UMA_HISTOGRAM_TIMES(
+                "Keyboard.ShortcutViewer.SearchUpdateTimeVisual",
+                feedback.timestamp - start_time);
+          },
+          start_time));
 }
 
 bool KeyboardShortcutView::CanMaximize() const {
@@ -430,6 +516,10 @@ bool KeyboardShortcutView::CanMinimize() const {
 }
 
 bool KeyboardShortcutView::CanResize() const {
+  return false;
+}
+
+bool KeyboardShortcutView::ShouldShowWindowTitle() const {
   return false;
 }
 

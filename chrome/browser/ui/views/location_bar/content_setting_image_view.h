@@ -33,10 +33,14 @@ class BubbleDialogDelegateView;
 // The ContentSettingImageView displays an icon and optional text label for
 // various content settings affordances in the location bar (i.e. plugin
 // blocking, geolocation).
-class ContentSettingImageView : public IconLabelBubbleView {
+class ContentSettingImageView : public IconLabelBubbleView,
+                                public views::WidgetObserver {
  public:
   class Delegate {
    public:
+    // Gets the color to use for the ink highlight.
+    virtual SkColor GetContentSettingInkDropColor() const = 0;
+
     // Gets the web contents the ContentSettingImageView is for.
     virtual content::WebContents* GetContentSettingWebContents() = 0;
 
@@ -48,9 +52,6 @@ class ContentSettingImageView : public IconLabelBubbleView {
     // Invoked when a bubble is shown.
     virtual void OnContentSettingImageBubbleShown(
         ContentSettingImageModel::ImageType type) const {}
-
-   protected:
-    virtual ~Delegate() {}
   };
 
   ContentSettingImageView(std::unique_ptr<ContentSettingImageModel> image_model,
@@ -71,46 +72,26 @@ class ContentSettingImageView : public IconLabelBubbleView {
   void OnBoundsChanged(const gfx::Rect& previous_bounds) override;
   bool GetTooltipText(const gfx::Point& p,
                       base::string16* tooltip) const override;
+  bool OnMousePressed(const ui::MouseEvent& event) override;
+  bool OnKeyPressed(const ui::KeyEvent& event) override;
   void OnNativeThemeChanged(const ui::NativeTheme* native_theme) override;
-  SkColor GetInkDropBaseColor() const override;
   SkColor GetTextColor() const override;
-  bool ShouldShowLabel() const override;
   bool ShouldShowSeparator() const override;
-  double WidthMultiplier() const override;
-  bool IsShrinking() const override;
   bool ShowBubble(const ui::Event& event) override;
   bool IsBubbleShowing() const override;
+  SkColor GetInkDropBaseColor() const override;
 
   ContentSettingImageModel::ImageType GetTypeForTesting() const;
 
  private:
-  // The total animation time, including open and close as well as an
-  // intervening "stay open" period.
-  static const int kAnimationDurationMS;
-
-  // gfx::AnimationDelegate:
-  void AnimationEnded(const gfx::Animation* animation) override;
-  void AnimationProgressed(const gfx::Animation* animation) override;
-  void AnimationCanceled(const gfx::Animation* animation) override;
-
   // views::WidgetObserver:
   void OnWidgetDestroying(views::Widget* widget) override;
-  void OnWidgetVisibilityChanged(views::Widget* widget, bool visible) override;
 
   // Updates the image and tooltip to match the current model state.
   void UpdateImage();
 
-  // Animates the view in and disables highlighting for hover and focus.
-  // TODO(bruthig): See crbug.com/669253. Since the ink drop highlight currently
-  // cannot handle host resizes, the highlight needs to be disabled when the
-  // animation is running.
-  void AnimateIn();
-
   Delegate* delegate_;  // Weak.
   std::unique_ptr<ContentSettingImageModel> content_setting_image_model_;
-  gfx::SlideAnimation slide_animator_;
-  bool pause_animation_;
-  double pause_animation_state_;
   views::BubbleDialogDelegateView* bubble_view_;
   base::Optional<SkColor> icon_color_;
 

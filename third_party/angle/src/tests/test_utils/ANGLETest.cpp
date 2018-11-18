@@ -91,6 +91,55 @@ std::array<angle::Vector3, 4> GetIndexedQuadVertices()
 
 static constexpr std::array<GLushort, 6> IndexedQuadIndices = {{0, 1, 2, 0, 2, 3}};
 
+const char *GetColorName(GLColor color)
+{
+    if (color == GLColor::red)
+    {
+        return "Red";
+    }
+
+    if (color == GLColor::green)
+    {
+        return "Green";
+    }
+
+    if (color == GLColor::blue)
+    {
+        return "Blue";
+    }
+
+    if (color == GLColor::white)
+    {
+        return "White";
+    }
+
+    if (color == GLColor::black)
+    {
+        return "Black";
+    }
+
+    if (color == GLColor::transparentBlack)
+    {
+        return "Transparent Black";
+    }
+
+    if (color == GLColor::yellow)
+    {
+        return "Yellow";
+    }
+
+    if (color == GLColor::magenta)
+    {
+        return "Magenta";
+    }
+
+    if (color == GLColor::cyan)
+    {
+        return "Cyan";
+    }
+
+    return nullptr;
+}
 }  // anonymous namespace
 
 GLColorRGB::GLColorRGB() : R(0), G(0), B(0)
@@ -139,6 +188,19 @@ testing::AssertionResult GLColor::ExpectNear(const GLColor &expected, const GLCo
     return result;
 }
 
+void CreatePixelCenterWindowCoords(const std::vector<Vector2> &pixelPoints,
+                                   int windowWidth,
+                                   int windowHeight,
+                                   std::vector<Vector3> *outVertices)
+{
+    for (Vector2 pixelPoint : pixelPoints)
+    {
+        outVertices->emplace_back(Vector3((pixelPoint[0] + 0.5f) * 2.0f / windowWidth - 1.0f,
+                                          (pixelPoint[1] + 0.5f) * 2.0f / windowHeight - 1.0f,
+                                          0.0f));
+    }
+}
+
 angle::Vector4 GLColor::toNormalizedVector() const
 {
     return angle::Vector4(ColorNorm(R), ColorNorm(G), ColorNorm(B), ColorNorm(A));
@@ -164,6 +226,12 @@ bool operator!=(const GLColor &a, const GLColor &b)
 
 std::ostream &operator<<(std::ostream &ostream, const GLColor &color)
 {
+    const char *colorName = GetColorName(color);
+    if (colorName)
+    {
+        return ostream << colorName;
+    }
+
     ostream << "(" << static_cast<unsigned int>(color.R) << ", "
             << static_cast<unsigned int>(color.G) << ", " << static_cast<unsigned int>(color.B)
             << ", " << static_cast<unsigned int>(color.A) << ")";
@@ -218,6 +286,7 @@ ANGLETestBase::ANGLETestBase(const angle::PlatformParameters &params)
       mQuadVertexBuffer(0),
       mQuadIndexBuffer(0),
       m2DTexturedQuadProgram(0),
+      m3DTexturedQuadProgram(0),
       mDeferContextInit(false)
 {
     mEGLWindow = new EGLWindow(params.majorVersion, params.minorVersion, params.eglParameters);
@@ -255,6 +324,10 @@ ANGLETestBase::~ANGLETestBase()
     if (m2DTexturedQuadProgram)
     {
         glDeleteProgram(m2DTexturedQuadProgram);
+    }
+    if (m3DTexturedQuadProgram)
+    {
+        glDeleteProgram(m3DTexturedQuadProgram);
     }
     SafeDelete(mEGLWindow);
 }
@@ -462,6 +535,8 @@ void ANGLETestBase::drawQuad(GLuint program,
 
     GLint positionLocation = glGetAttribLocation(program, positionAttribName.c_str());
 
+    std::array<angle::Vector3, 6> quadVertices;
+
     if (useVertexBuffer)
     {
         setupQuadVertexBuffer(positionAttribZ, positionAttribXYScale);
@@ -470,7 +545,7 @@ void ANGLETestBase::drawQuad(GLuint program,
     }
     else
     {
-        auto quadVertices = GetQuadVertices();
+        quadVertices = GetQuadVertices();
         for (angle::Vector3 &vertex : quadVertices)
         {
             vertex.x() *= positionAttribXYScale;
@@ -624,13 +699,72 @@ GLuint ANGLETestBase::get2DTexturedQuadProgram()
     return m2DTexturedQuadProgram;
 }
 
+GLuint ANGLETestBase::get3DTexturedQuadProgram()
+{
+    if (m3DTexturedQuadProgram)
+    {
+        return m3DTexturedQuadProgram;
+    }
+
+    const std::string &vs =
+        R"(#version 300 es
+        in vec2 position;
+        out vec2 texCoord;
+        void main()
+        {
+            gl_Position = vec4(position, 0, 1);
+            texCoord = position * 0.5 + vec2(0.5);
+        })";
+
+    const std::string &fs =
+        R"(#version 300 es
+        precision highp float;
+
+        in vec2 texCoord;
+        out vec4 my_FragColor;
+
+        uniform highp sampler3D tex;
+        uniform float u_layer;
+
+        void main()
+        {
+            my_FragColor = texture(tex, vec3(texCoord, u_layer));
+        })";
+
+    m3DTexturedQuadProgram = CompileProgram(vs, fs);
+    return m3DTexturedQuadProgram;
+}
+
 void ANGLETestBase::draw2DTexturedQuad(GLfloat positionAttribZ,
                                        GLfloat positionAttribXYScale,
                                        bool useVertexBuffer)
 {
     ASSERT_NE(0u, get2DTexturedQuadProgram());
-    return drawQuad(get2DTexturedQuadProgram(), "position", positionAttribZ, positionAttribXYScale,
-                    useVertexBuffer);
+    drawQuad(get2DTexturedQuadProgram(), "position", positionAttribZ, positionAttribXYScale,
+             useVertexBuffer);
+}
+
+void ANGLETestBase::draw3DTexturedQuad(GLfloat positionAttribZ,
+                                       GLfloat positionAttribXYScale,
+                                       bool useVertexBuffer,
+                                       float layer)
+{
+    GLuint program = get3DTexturedQuadProgram();
+    ASSERT_NE(0u, program);
+    GLint activeProgram = 0;
+    glGetIntegerv(GL_CURRENT_PROGRAM, &activeProgram);
+    if (static_cast<GLuint>(activeProgram) != program)
+    {
+        glUseProgram(program);
+    }
+    glUniform1f(glGetUniformLocation(program, "u_layer"), layer);
+
+    drawQuad(program, "position", positionAttribZ, positionAttribXYScale, useVertexBuffer);
+
+    if (static_cast<GLuint>(activeProgram) != program)
+    {
+        glUseProgram(static_cast<GLuint>(activeProgram));
+    }
 }
 
 GLuint ANGLETestBase::compileShader(GLenum type, const std::string &source)
@@ -759,6 +893,16 @@ bool ANGLETestBase::extensionRequestable(const std::string &extName)
         reinterpret_cast<const char *>(glGetString(GL_REQUESTABLE_EXTENSIONS_ANGLE)), extName);
 }
 
+bool ANGLETestBase::ensureExtensionEnabled(const std::string &extName)
+{
+    if (extensionEnabled("GL_ANGLE_request_extension") && extensionRequestable(extName))
+    {
+        glRequestExtensionANGLE(extName.c_str());
+    }
+
+    return extensionEnabled(extName);
+}
+
 bool ANGLETestBase::eglDisplayExtensionEnabled(EGLDisplay display, const std::string &extName)
 {
     return CheckExtensionExists(eglQueryString(display, EGL_EXTENSIONS), extName);
@@ -882,6 +1026,11 @@ void ANGLETestBase::setContextProgramCacheEnabled(bool enabled)
     mEGLWindow->setContextProgramCacheEnabled(enabled);
 }
 
+void ANGLETestBase::setContextVirtualization(bool enabled)
+{
+    mEGLWindow->setContextVirtualization(enabled);
+}
+
 void ANGLETestBase::setDeferContextInit(bool enabled)
 {
     mDeferContextInit = enabled;
@@ -985,7 +1134,8 @@ bool IsAMD()
 {
     std::string rendererString(reinterpret_cast<const char *>(glGetString(GL_RENDERER)));
     return (rendererString.find("AMD") != std::string::npos) ||
-           (rendererString.find("ATI") != std::string::npos);
+           (rendererString.find("ATI") != std::string::npos) ||
+           (rendererString.find("Radeon") != std::string::npos);
 }
 
 bool IsNVIDIA()

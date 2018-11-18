@@ -28,12 +28,14 @@ struct MediaDeviceInfo {
 
 struct VideoInputDeviceCapabilities {
   string device_id;
+  string group_id;
   array<media.mojom.VideoCaptureFormat> formats;
   FacingMode facing_mode;
 };
 
 struct AudioInputDeviceCapabilities {
   string device_id;
+  string group_id;
   media.mojom.AudioParameters parameters;
 };
 

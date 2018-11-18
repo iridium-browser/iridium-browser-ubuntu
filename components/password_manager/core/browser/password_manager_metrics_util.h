@@ -10,7 +10,6 @@
 #include <string>
 
 #include "components/autofill/core/common/password_form.h"
-#include "components/password_manager/core/browser/password_reuse_defines.h"
 #include "components/password_manager/core/common/credential_manager_types.h"
 
 namespace password_manager {
@@ -50,13 +49,13 @@ enum UIDismissalReason {
   CLICKED_CANCEL,
   CLICKED_NEVER,
   CLICKED_MANAGE,
-  CLICKED_DONE,
+  CLICKED_DONE_OBSOLETE,         // obsolete
   CLICKED_UNBLACKLIST_OBSOLETE,  // obsolete.
-  CLICKED_OK,
-  CLICKED_CREDENTIAL_OBSOLETE,  // obsolete.
+  CLICKED_OK_OBSOLETE,           // obsolete
+  CLICKED_CREDENTIAL_OBSOLETE,   // obsolete.
   AUTO_SIGNIN_TOAST_TIMEOUT,
   AUTO_SIGNIN_TOAST_CLICKED_OBSOLETE,  // obsolete.
-  CLICKED_BRAND_NAME,
+  CLICKED_BRAND_NAME_OBSOLETE,         // obsolete.
   CLICKED_PASSWORDS_DASHBOARD,
   NUM_UI_RESPONSES,
 };
@@ -77,6 +76,8 @@ enum PasswordSyncState {
   NOT_SYNCING_FAILED_READ,
   NOT_SYNCING_DUPLICATE_TAGS,
   NOT_SYNCING_SERVER_ERROR,
+  NOT_SYNCING_FAILED_CLEANUP,
+  NOT_SYNCING_FAILED_DECRYPTION,
   NUM_SYNC_STATES
 };
 
@@ -179,13 +180,6 @@ enum ReauthToAccessPasswordInSettingsEvent {
   REAUTH_COUNT
 };
 
-// Metrics: PasswordManager.IE7LookupResult
-enum IE7LookupResultStatus {
-  IE7_RESULTS_ABSENT = 0,
-  IE7_RESULTS_PRESENT = 1,
-  IE7_RESULTS_COUNT
-};
-
 // Specifies the type of PasswordFormManagers and derived classes to distinguish
 // the context in which a PasswordFormManager is being created and used.
 enum class CredentialSourceType {
@@ -197,18 +191,38 @@ enum class CredentialSourceType {
   kCredentialManagementAPI
 };
 
+// Metrics: PasswordManager.DeleteCorruptedPasswordsResult
+// Metrics: PasswordManager.DeleteUndecryptableLoginsReturnValue
+// A passwords is considered corrupted if it's stored locally using lost
+// encryption key.
+enum class DeleteCorruptedPasswordsResult {
+  // No corrupted entries were deleted.
+  kSuccessNoDeletions = 0,
+  // There were corrupted entries that were successfully deleted.
+  kSuccessPasswordsDeleted = 1,
+  // There was at least one corrupted entry that failed to be removed (it's
+  // possible that other corrupted entries were deleted).
+  kItemFailure = 2,
+  // Encryption is unavailable, it's impossible to determine which entries are
+  // corrupted.
+  kEncryptionUnavailable = 3,
+  kMaxValue = kEncryptionUnavailable,
+};
+
 #if defined(SYNC_PASSWORD_REUSE_DETECTION_ENABLED)
 enum class SyncPasswordHashChange {
   SAVED_ON_CHROME_SIGNIN,
   SAVED_IN_CONTENT_AREA,
   CLEARED_ON_CHROME_SIGNOUT,
   CHANGED_IN_CONTENT_AREA,
+  NOT_SYNC_PASSWORD_CHANGE,
   SAVED_SYNC_PASSWORD_CHANGE_COUNT
 };
 
 enum class IsSyncPasswordHashSaved {
   NOT_SAVED,
-  SAVED,
+  SAVED_VIA_STRING_PREF,
+  SAVED_VIA_LIST_PREF,
   IS_SYNC_PASSWORD_HASH_SAVED_COUNT
 };
 #endif
@@ -223,10 +237,8 @@ enum ShowAllSavedPasswordsContext {
   // The "Show all saved passwords..." fallback is shown below a list of
   // available passwords.
   SHOW_ALL_SAVED_PASSWORDS_CONTEXT_PASSWORD,
-  // The "Show all saved passwords..." fallback is shown when no available
-  // passwords can be suggested to the user, e.g. because none are saved or
-  // because of technical issues.
-  SHOW_ALL_SAVED_PASSWORDS_CONTEXT_MANUAL_FALLBACK,
+  // Obsolete.
+  SHOW_ALL_SAVED_PASSWORDS_CONTEXT_MANUAL_FALLBACK_DEPRECATED,
   // The "Show all saved  passwords..." fallback is shown in context menu.
   SHOW_ALL_SAVED_PASSWORDS_CONTEXT_CONTEXT_MENU,
   SHOW_ALL_SAVED_PASSWORDS_CONTEXT_COUNT
@@ -250,6 +262,32 @@ enum class ExportPasswordsResult {
   WRITE_FAILED = 2,
   NO_CONSUMER = 3,  // Only used on Android.
   COUNT,
+};
+
+// Used in UMA histograms, please do NOT reorder.
+// Metric: "PasswordManager.ReusedPasswordType".
+enum class PasswordType {
+  // Passwords saved by password manager.
+  SAVED_PASSWORD = 0,
+  // Passwords used for Chrome sign-in.
+  SYNC_PASSWORD = 1,
+  // Other Gaia passwords used in Chrome other than the sync password.
+  OTHER_GAIA_PASSWORD = 2,
+  // Passwords captured from enterprise login page.
+  ENTERPRISE_PASSWORD = 3,
+  PASSWORD_TYPE_COUNT
+};
+
+enum class LinuxBackendMigrationStatus {
+  // No migration was attempted (this value should not occur).
+  kNotAttempted = 0,
+  // The last attempt was not completed.
+  kFailed = 1,
+  // All the data is in the encrypted loginDB.
+  kCopiedAll = 2,
+  // The standard login database is encrypted.
+  kLoginDBReplaced = 3,
+  kMaxValue = kLoginDBReplaced
 };
 
 // A version of the UMA_HISTOGRAM_BOOLEAN macro that allows the |name|
@@ -318,15 +356,8 @@ void LogCredentialManagerGetResult(CredentialManagerGetResult result,
 void LogPasswordReuse(int password_length,
                       int saved_passwords,
                       int number_matches,
-                      bool password_field_detected);
-
-// Log when the user selects the "Login not secure" warning in the password
-// autofill dropdown to show more information about the warning.
-void LogShowedHttpNotSecureExplanation();
-
-// Log that the Form-Not-Secure warning was shown. Should be called at most once
-// per main-frame navigation.
-void LogShowedFormNotSecureWarningOnCurrentNavigation();
+                      bool password_field_detected,
+                      PasswordType reused_password_type);
 
 // Log the context in which the "Show all saved passwords" fallback was shown.
 void LogContextOfShowAllSavedPasswordsShown(
@@ -349,12 +380,26 @@ void LogPasswordAcceptedSaveUpdateSubmissionIndicatorEvent(
 // Log a frame of a submitted password form.
 void LogSubmittedFormFrame(SubmittedFormFrame frame);
 
+// Log a return value of LoginDatabase::DeleteUndecryptableLogins method.
+void LogDeleteUndecryptableLoginsReturnValue(
+    DeleteCorruptedPasswordsResult result);
+
+// Log a result of removing passwords that couldn't be decrypted with the
+// present encryption key on MacOS.
+void LogDeleteCorruptedPasswordsResult(DeleteCorruptedPasswordsResult result);
+
 #if defined(SYNC_PASSWORD_REUSE_DETECTION_ENABLED)
 // Log a save sync password change event.
 void LogSyncPasswordHashChange(SyncPasswordHashChange event);
 
 // Log whether a sync password hash saved.
-void LogIsSyncPasswordHashSaved(IsSyncPasswordHashSaved state);
+void LogIsSyncPasswordHashSaved(IsSyncPasswordHashSaved state,
+                                bool is_under_advanced_protection);
+
+// Log the number of Gaia password hashes saved, and the number of enterprise
+// password hashes saved.
+void LogProtectedPasswordHashCounts(size_t gaia_hash_count,
+                                    size_t enterprise_hash_count);
 #endif
 
 }  // namespace metrics_util

@@ -26,6 +26,8 @@
 #include "llvm/CodeGen/TargetLowering.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
+#include "llvm/CodeGen/ValueTypes.h"
+#include "llvm/Config/llvm-config.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DebugInfoMetadata.h"
@@ -34,7 +36,6 @@
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/ModuleSlotTracker.h"
 #include "llvm/IR/Value.h"
-#include "llvm/IR/ValueTypes.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Compiler.h"
@@ -45,6 +46,7 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetIntrinsicInfo.h"
 #include "llvm/Target/TargetMachine.h"
+#include "SDNodeDbgValue.h"
 #include <cstdint>
 #include <iterator>
 
@@ -179,6 +181,7 @@ std::string SDNode::getOperationName(const SelectionDAG *G) const {
   case ISD::FNEG:                       return "fneg";
   case ISD::FSQRT:                      return "fsqrt";
   case ISD::STRICT_FSQRT:               return "strict_fsqrt";
+  case ISD::FCBRT:                      return "fcbrt";
   case ISD::FSIN:                       return "fsin";
   case ISD::STRICT_FSIN:                return "strict_fsin";
   case ISD::FCOS:                       return "fcos";
@@ -251,7 +254,6 @@ std::string SDNode::getOperationName(const SelectionDAG *G) const {
   case ISD::FPOWI:                      return "fpowi";
   case ISD::STRICT_FPOWI:               return "strict_fpowi";
   case ISD::SETCC:                      return "setcc";
-  case ISD::SETCCE:                     return "setcce";
   case ISD::SETCCCARRY:                 return "setcccarry";
   case ISD::SELECT:                     return "select";
   case ISD::VSELECT:                    return "vselect";
@@ -425,15 +427,28 @@ static Printable PrintNodeId(const SDNode &Node) {
 
 // Print the MMO with more information from the SelectionDAG.
 static void printMemOperand(raw_ostream &OS, const MachineMemOperand &MMO,
-                            const SelectionDAG *G) {
-  const MachineFunction &MF = G->getMachineFunction();
-  const Function &F = MF.getFunction();
-  const MachineFrameInfo &MFI = MF.getFrameInfo();
-  const TargetInstrInfo *TII = G->getSubtarget().getInstrInfo();
-  ModuleSlotTracker MST(F.getParent());
-  MST.incorporateFunction(F);
+                            const MachineFunction *MF, const Module *M,
+                            const MachineFrameInfo *MFI,
+                            const TargetInstrInfo *TII, LLVMContext &Ctx) {
+  ModuleSlotTracker MST(M);
+  if (MF)
+    MST.incorporateFunction(MF->getFunction());
   SmallVector<StringRef, 0> SSNs;
-  MMO.print(OS, MST, SSNs, *G->getContext(), &MFI, TII);
+  MMO.print(OS, MST, SSNs, Ctx, MFI, TII);
+}
+
+static void printMemOperand(raw_ostream &OS, const MachineMemOperand &MMO,
+                            const SelectionDAG *G) {
+  if (G) {
+    const MachineFunction *MF = &G->getMachineFunction();
+    return printMemOperand(OS, MMO, MF, MF->getFunction().getParent(),
+                           &MF->getFrameInfo(), G->getSubtarget().getInstrInfo(),
+                           *G->getContext());
+  } else {
+    LLVMContext Ctx;
+    return printMemOperand(OS, MMO, /*MF=*/nullptr, /*M=*/nullptr,
+                           /*MFI=*/nullptr, /*TII=*/nullptr, Ctx);
+  }
 }
 
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)
@@ -465,9 +480,6 @@ void SDNode::print_details(raw_ostream &OS, const SelectionDAG *G) const {
   if (getFlags().hasExact())
     OS << " exact";
 
-  if (getFlags().hasUnsafeAlgebra())
-    OS << " unsafe";
-
   if (getFlags().hasNoNaNs())
     OS << " nnan";
 
@@ -482,6 +494,12 @@ void SDNode::print_details(raw_ostream &OS, const SelectionDAG *G) const {
 
   if (getFlags().hasAllowContract())
     OS << " contract";
+
+  if (getFlags().hasApproximateFuncs())
+    OS << " afn";
+
+  if (getFlags().hasAllowReassociation())
+    OS << " reassoc";
 
   if (getFlags().hasVectorReduction())
     OS << " vector-reduction";
@@ -665,7 +683,24 @@ void SDNode::print_details(raw_ostream &OS, const SelectionDAG *G) const {
     OS << ':' << L->getLine();
     if (unsigned C = L->getColumn())
       OS << ':' << C;
+
+    for (SDDbgValue *Dbg : G->GetDbgValues(this)) {
+      if (Dbg->getKind() != SDDbgValue::SDNODE || Dbg->isInvalidated())
+        continue;
+      Dbg->dump(OS);
+    }
   }
+}
+
+LLVM_DUMP_METHOD void SDDbgValue::dump(raw_ostream &OS) const {
+ OS << " DbgVal";
+ if (kind==SDNODE)
+   OS << '(' << u.s.ResNo << ')';
+ OS << ":\"" << Var->getName() << '"';
+#ifndef NDEBUG
+ if (Expr->getNumElements())
+   Expr->dump();
+#endif
 }
 
 /// Return true if this node is so simple that we should just print it inline
@@ -820,5 +855,9 @@ void SDNode::print(raw_ostream &OS, const SelectionDAG *G) const {
   for (unsigned i = 0, e = getNumOperands(); i != e; ++i) {
     if (i) OS << ", "; else OS << " ";
     printOperand(OS, G, getOperand(i));
+  }
+  if (DebugLoc DL = getDebugLoc()) {
+    OS << ", ";
+    DL.print(OS);
   }
 }

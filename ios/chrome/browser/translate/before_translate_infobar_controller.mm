@@ -8,16 +8,18 @@
 #import <UIKit/UIKit.h>
 
 #include "base/logging.h"
+#include "base/mac/foundation_util.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/strings/grit/components_strings.h"
 #include "components/translate/core/browser/translate_infobar_delegate.h"
+#import "ios/chrome/browser/infobars/infobar_controller+protected.h"
+#include "ios/chrome/browser/infobars/infobar_controller_delegate.h"
 #include "ios/chrome/browser/translate/language_selection_context.h"
 #include "ios/chrome/browser/translate/language_selection_delegate.h"
 #include "ios/chrome/browser/translate/language_selection_handler.h"
 #include "ios/chrome/browser/translate/translate_infobar_tags.h"
-#import "ios/chrome/browser/ui/infobars/infobar_view.h"
-#import "ios/chrome/browser/ui/infobars/infobar_view_delegate.h"
+#import "ios/chrome/browser/ui/infobars/confirm_infobar_view.h"
 #import "ios/chrome/browser/ui/util/top_view_controller.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/image/image.h"
@@ -28,35 +30,36 @@
 
 @interface BeforeTranslateInfoBarController ()<LanguageSelectionDelegate>
 
-// Action for any of the user defined buttons.
-- (void)infoBarButtonDidPress:(id)sender;
-// Action for any of the user defined links.
-- (void)infobarLinkDidPress:(NSUInteger)tag;
-// Changes the text on the view to match the language.
-- (void)updateInfobarLabelOnView:(InfoBarView*)view;
+// Overrides superclass property.
+@property(nonatomic, readonly)
+    translate::TranslateInfoBarDelegate* infoBarDelegate;
 
 @end
 
 @implementation BeforeTranslateInfoBarController {
-  translate::TranslateInfoBarDelegate* _translateInfoBarDelegate;  // weak
   // Stores whether the user is currently choosing in the UIPickerView the
   // original language, or the target language.
   TranslateInfoBarIOSTag::Tag _languageSelectionType;
+  __weak ConfirmInfoBarView* _infoBarView;
 }
 
 @synthesize languageSelectionHandler = _languageSelectionHandler;
+@dynamic infoBarDelegate;
 
 #pragma mark -
 #pragma mark InfoBarControllerProtocol
 
-- (InfoBarView*)viewForDelegate:(infobars::InfoBarDelegate*)delegate
-                          frame:(CGRect)frame {
-  InfoBarView* infoBarView;
-  _translateInfoBarDelegate = delegate->AsTranslateInfoBarDelegate();
-  infoBarView =
-      [[InfoBarView alloc] initWithFrame:frame delegate:self.delegate];
+- (instancetype)initWithInfoBarDelegate:
+    (translate::TranslateInfoBarDelegate*)infoBarDelegate {
+  return [super initWithInfoBarDelegate:infoBarDelegate];
+}
+
+- (UIView<InfoBarViewSizing>*)viewForFrame:(CGRect)frame {
+  ConfirmInfoBarView* infoBarView =
+      [[ConfirmInfoBarView alloc] initWithFrame:frame];
+  _infoBarView = infoBarView;
   // Icon
-  gfx::Image icon = _translateInfoBarDelegate->GetIcon();
+  gfx::Image icon = self.infoBarDelegate->GetIcon();
   if (!icon.IsEmpty())
     [infoBarView addLeftIcon:icon.ToUIImage()];
 
@@ -79,11 +82,11 @@
   return infoBarView;
 }
 
-- (void)updateInfobarLabelOnView:(InfoBarView*)view {
-  NSString* originalLanguage = base::SysUTF16ToNSString(
-      _translateInfoBarDelegate->original_language_name());
-  NSString* targetLanguage = base::SysUTF16ToNSString(
-      _translateInfoBarDelegate->target_language_name());
+- (void)updateInfobarLabelOnView:(ConfirmInfoBarView*)view {
+  NSString* originalLanguage =
+      base::SysUTF16ToNSString(self.infoBarDelegate->original_language_name());
+  NSString* targetLanguage =
+      base::SysUTF16ToNSString(self.infoBarDelegate->target_language_name());
   base::string16 originalLanguageWithLink =
       base::SysNSStringToUTF16([[view class]
           stringAsLink:originalLanguage
@@ -105,21 +108,31 @@
 #pragma mark - Handling of User Events
 
 - (void)infoBarButtonDidPress:(id)sender {
-  // This press might have occurred after the user has already pressed a button,
-  // in which case the view has been detached from the delegate and this press
-  // should be ignored.
-  if (!self.delegate) {
+  if ([self shouldIgnoreUserInteraction])
     return;
-  }
-  if ([sender isKindOfClass:[UIButton class]]) {
-    NSUInteger buttonId = static_cast<UIButton*>(sender).tag;
-    DCHECK(buttonId == TranslateInfoBarIOSTag::BEFORE_ACCEPT ||
-           buttonId == TranslateInfoBarIOSTag::BEFORE_DENY);
-    self.delegate->InfoBarButtonDidPress(buttonId);
+
+  NSUInteger buttonId = base::mac::ObjCCastStrict<UIButton>(sender).tag;
+  switch (buttonId) {
+    case TranslateInfoBarIOSTag::BEFORE_ACCEPT:
+      self.infoBarDelegate->Translate();
+      break;
+    case TranslateInfoBarIOSTag::BEFORE_DENY:
+      self.infoBarDelegate->TranslationDeclined();
+      if (self.infoBarDelegate->ShouldShowNeverTranslateShortcut())
+        self.infoBarDelegate->ShowNeverTranslateInfobar();
+      else
+        self.delegate->RemoveInfoBar();
+      break;
+    default:
+      NOTREACHED() << "Unexpected Translate button label";
+      break;
   }
 }
 
 - (void)infobarLinkDidPress:(NSUInteger)tag {
+  if ([self shouldIgnoreUserInteraction])
+    return;
+
   _languageSelectionType = static_cast<TranslateInfoBarIOSTag::Tag>(tag);
   DCHECK(_languageSelectionType ==
              TranslateInfoBarIOSTag::BEFORE_SOURCE_LANGUAGE ||
@@ -131,13 +144,13 @@
   int originalLanguageIndex = -1;
   int targetLanguageIndex = -1;
 
-  for (size_t i = 0; i < _translateInfoBarDelegate->num_languages(); ++i) {
-    if (_translateInfoBarDelegate->language_code_at(i) ==
-        _translateInfoBarDelegate->original_language_code()) {
+  for (size_t i = 0; i < self.infoBarDelegate->num_languages(); ++i) {
+    if (self.infoBarDelegate->language_code_at(i) ==
+        self.infoBarDelegate->original_language_code()) {
       originalLanguageIndex = i;
     }
-    if (_translateInfoBarDelegate->language_code_at(i) ==
-        _translateInfoBarDelegate->target_language_code()) {
+    if (self.infoBarDelegate->language_code_at(i) ==
+        self.infoBarDelegate->target_language_code()) {
       targetLanguageIndex = i;
     }
   }
@@ -152,10 +165,10 @@
     selectedRow = targetLanguageIndex;
     disabledRow = originalLanguageIndex;
   }
-  LanguageSelectionContext* context = [LanguageSelectionContext
-      contextWithLanguageData:_translateInfoBarDelegate
-                 initialIndex:selectedRow
-             unavailableIndex:disabledRow];
+  LanguageSelectionContext* context =
+      [LanguageSelectionContext contextWithLanguageData:self.infoBarDelegate
+                                           initialIndex:selectedRow
+                                       unavailableIndex:disabledRow];
   [self.languageSelectionHandler showLanguageSelectorWithContext:context
                                                         delegate:self];
 }
@@ -163,17 +176,20 @@
 #pragma mark - LanguageSelectionDelegate
 
 - (void)languageSelectorSelectedLanguage:(std::string)languageCode {
+  if ([self shouldIgnoreUserInteraction])
+    return;
+
   if (_languageSelectionType ==
           TranslateInfoBarIOSTag::BEFORE_SOURCE_LANGUAGE &&
-      languageCode != _translateInfoBarDelegate->target_language_code()) {
-    _translateInfoBarDelegate->UpdateOriginalLanguage(languageCode);
+      languageCode != self.infoBarDelegate->target_language_code()) {
+    self.infoBarDelegate->UpdateOriginalLanguage(languageCode);
   }
   if (_languageSelectionType ==
           TranslateInfoBarIOSTag::BEFORE_TARGET_LANGUAGE &&
-      languageCode != _translateInfoBarDelegate->original_language_code()) {
-    _translateInfoBarDelegate->UpdateTargetLanguage(languageCode);
+      languageCode != self.infoBarDelegate->original_language_code()) {
+    self.infoBarDelegate->UpdateTargetLanguage(languageCode);
   }
-  [self updateInfobarLabelOnView:self.view];
+  [self updateInfobarLabelOnView:_infoBarView];
 }
 
 - (void)languageSelectorClosedWithoutSelection {

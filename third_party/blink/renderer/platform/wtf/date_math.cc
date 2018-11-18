@@ -77,6 +77,7 @@
 #include <time.h>
 #include <algorithm>
 #include <limits>
+#include <memory>
 #include "build/build_config.h"
 #include "third_party/blink/renderer/platform/wtf/ascii_ctype.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
@@ -85,6 +86,8 @@
 #include "third_party/blink/renderer/platform/wtf/string_extras.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 #include "third_party/blink/renderer/platform/wtf/time.h"
+
+#include <unicode/timezone.h>
 
 #if defined(OS_WIN)
 #include <windows.h>
@@ -493,7 +496,7 @@ static bool ParseLong(const char* string,
   return true;
 }
 
-// Odd case where 'exec' is allowed to be 0, to accomodate a caller in WebCore.
+// Odd case where 'exec' is allowed to be 0, to accommodate a caller in WebCore.
 static double ParseDateFromNullTerminatedCharacters(const char* date_string,
                                                     bool& have_tz,
                                                     int& offset) {
@@ -646,7 +649,7 @@ static double ParseDateFromNullTerminatedCharacters(const char* date_string,
 
     ParseLong(date_string, &new_pos_str, 10, &hour);
     // Do not check for errno here since we want to continue
-    // even if errno was set becasue we are still looking
+    // even if errno was set because we are still looking
     // for the timezone!
 
     // Read a number? If not, this might be a timezone name.
@@ -749,7 +752,7 @@ static double ParseDateFromNullTerminatedCharacters(const char* date_string,
       }
       have_tz = true;
     } else {
-      for (size_t i = 0; i < WTF_ARRAY_LENGTH(known_zones); ++i) {
+      for (size_t i = 0; i < arraysize(known_zones); ++i) {
         if (0 == strncasecmp(date_string, known_zones[i].tz_name,
                              strlen(known_zones[i].tz_name))) {
           offset = known_zones[i].tz_offset;
@@ -804,29 +807,26 @@ double ParseDateFromNullTerminatedCharacters(const char* date_string) {
 }
 
 // See http://tools.ietf.org/html/rfc2822#section-3.3 for more information.
-String MakeRFC2822DateString(unsigned day_of_week,
-                             unsigned day,
-                             unsigned month,
-                             unsigned year,
-                             unsigned hours,
-                             unsigned minutes,
-                             unsigned seconds,
-                             int utc_offset) {
+String MakeRFC2822DateString(const Time date, int utc_offset) {
+  Time::Exploded time_exploded;
+  date.UTCExplode(&time_exploded);
+
   StringBuilder string_builder;
-  string_builder.Append(kWeekdayName[day_of_week]);
+  string_builder.Append(kWeekdayName[time_exploded.day_of_week]);
   string_builder.Append(", ");
-  string_builder.AppendNumber(day);
+  string_builder.AppendNumber(time_exploded.day_of_month);
   string_builder.Append(' ');
-  string_builder.Append(kMonthName[month]);
+  // |month| is 1-based in Exploded
+  string_builder.Append(kMonthName[time_exploded.month - 1]);
   string_builder.Append(' ');
-  string_builder.AppendNumber(year);
+  string_builder.AppendNumber(time_exploded.year);
   string_builder.Append(' ');
 
-  AppendTwoDigitNumber(string_builder, hours);
+  AppendTwoDigitNumber(string_builder, time_exploded.hour);
   string_builder.Append(':');
-  AppendTwoDigitNumber(string_builder, minutes);
+  AppendTwoDigitNumber(string_builder, time_exploded.minute);
   string_builder.Append(':');
-  AppendTwoDigitNumber(string_builder, seconds);
+  AppendTwoDigitNumber(string_builder, time_exploded.second);
   string_builder.Append(' ');
 
   string_builder.Append(utc_offset > 0 ? '+' : '-');
@@ -838,9 +838,11 @@ String MakeRFC2822DateString(unsigned day_of_week,
 }
 
 double ConvertToLocalTime(double ms) {
-  double utc_offset = CalculateUTCOffset();
-  double dst_offset = CalculateDSTOffset(ms, utc_offset);
-  return (ms + utc_offset + dst_offset);
+  std::unique_ptr<icu::TimeZone> timezone(icu::TimeZone::createDefault());
+  int32_t raw_offset, dst_offset;
+  UErrorCode status = U_ZERO_ERROR;
+  timezone->getOffset(ms, false, raw_offset, dst_offset, status);
+  return (ms + static_cast<double>(raw_offset + dst_offset));
 }
 
 }  // namespace WTF

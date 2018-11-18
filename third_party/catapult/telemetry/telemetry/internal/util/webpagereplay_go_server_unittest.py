@@ -2,9 +2,10 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import mock
 import unittest
 import urllib2
+
+import mock
 
 import py_utils
 
@@ -22,6 +23,7 @@ class WebPageReplayGoServerTest(unittest.TestCase):
         py_utils.GetHostOsName())
 
   @decorators.Disabled('chromeos')  # crbug.com/750323
+  @decorators.Disabled('win')  # crbug.com/864294
   def testSmokeStartingWebPageReplayGoServer(self):
     with webpagereplay_go_server.ReplayServer(
         self.archive_path, replay_host='127.0.0.1', http_port=0, https_port=0,

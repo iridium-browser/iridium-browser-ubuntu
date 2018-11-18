@@ -54,6 +54,7 @@ using NativeCPUContext = FxsaveUContext;
 
 void InitializeContext(NativeCPUContext* context) {
   context->ucontext.uc_mcontext.gregs[REG_EAX] = 0xabcd1234;
+  context->ucontext.uc_mcontext.fpregs = &context->ucontext.__fpregs_mem;
   // glibc and bionic use an unsigned long for status, but the kernel treats
   // status as two uint16_t, with the upper 16 bits called "magic" which, if set
   // to X86_FXSR_MAGIC, indicate that an fxsave follows.
@@ -78,6 +79,7 @@ using NativeCPUContext = ucontext_t;
 
 void InitializeContext(NativeCPUContext* context) {
   context->uc_mcontext.gregs[REG_RAX] = 0xabcd1234abcd1234;
+  context->uc_mcontext.fpregs = &context->__fpregs_mem;
   memset(&context->__fpregs_mem, 44, sizeof(context->__fpregs_mem));
 }
 
@@ -264,6 +266,36 @@ void ExpectContext(const CPUContext& actual, const NativeCPUContext& expected) {
                    sizeof(actual.arm64->fpsimd)),
             0);
 }
+#elif defined(ARCH_CPU_MIPS_FAMILY)
+using NativeCPUContext = ucontext_t;
+
+void InitializeContext(NativeCPUContext* context) {
+  for (size_t reg = 0; reg < arraysize(context->uc_mcontext.gregs); ++reg) {
+    context->uc_mcontext.gregs[reg] = reg;
+  }
+  memset(&context->uc_mcontext.fpregs, 44, sizeof(context->uc_mcontext.fpregs));
+}
+
+void ExpectContext(const CPUContext& actual, const NativeCPUContext& expected) {
+#if defined(ARCH_CPU_MIPSEL)
+  EXPECT_EQ(actual.architecture, kCPUArchitectureMIPSEL);
+#define CPU_ARCH_NAME mipsel
+#elif defined(ARCH_CPU_MIPS64EL)
+  EXPECT_EQ(actual.architecture, kCPUArchitectureMIPS64EL);
+#define CPU_ARCH_NAME mips64
+#endif
+
+  for (size_t reg = 0; reg < arraysize(expected.uc_mcontext.gregs); ++reg) {
+    EXPECT_EQ(actual.CPU_ARCH_NAME->regs[reg], expected.uc_mcontext.gregs[reg]);
+  }
+
+  EXPECT_EQ(memcmp(&actual.CPU_ARCH_NAME->fpregs,
+                   &expected.uc_mcontext.fpregs,
+                   sizeof(actual.CPU_ARCH_NAME->fpregs)),
+            0);
+#undef CPU_ARCH_NAME
+}
+
 #else
 #error Port.
 #endif

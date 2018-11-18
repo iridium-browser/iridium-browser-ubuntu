@@ -13,6 +13,8 @@
 #include "chrome/browser/chromeos/login/users/mock_user_manager.h"
 #include "chrome/browser/notifications/notification_display_service_tester.h"
 #include "chrome/grit/generated_resources.h"
+#include "chrome/test/base/scoped_testing_local_state.h"
+#include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/fake_auth_policy_client.h"
@@ -26,9 +28,10 @@ namespace chromeos {
 
 namespace {
 
-const char kProfileSigninNotificationId[] = "chrome://settings/signin/";
-const char kDisplayName[] = "DisplayName";
-const char kGivenName[] = "Given Name";
+constexpr char kProfileSigninNotificationId[] = "chrome://settings/signin/";
+constexpr char kProfileEmail[] = "user@example.com";
+constexpr char kDisplayName[] = "DisplayName";
+constexpr char kGivenName[] = "Given Name";
 
 MATCHER_P(UserAccountDataEq, value, "Compares two UserAccountData") {
   const user_manager::UserManager::UserAccountData& expected_data = value;
@@ -42,7 +45,8 @@ MATCHER_P(UserAccountDataEq, value, "Compares two UserAccountData") {
 class AuthPolicyCredentialsManagerTest : public testing::Test {
  public:
   AuthPolicyCredentialsManagerTest()
-      : user_manager_enabler_(std::make_unique<MockUserManager>()) {}
+      : user_manager_enabler_(std::make_unique<MockUserManager>()),
+        local_state_(TestingBrowserProcess::GetGlobal()) {}
   ~AuthPolicyCredentialsManagerTest() override = default;
 
   void SetUp() override {
@@ -51,22 +55,24 @@ class AuthPolicyCredentialsManagerTest : public testing::Test {
     fake_auth_policy_client()->DisableOperationDelayForTesting();
 
     TestingProfile::Builder profile_builder;
-    profile_builder.SetProfileName("user@gmail.com");
-    profile_ = profile_builder.Build();
-    account_id_ = AccountId::AdFromUserEmailObjGuid(
-        profile()->GetProfileUserName(), "1234567890");
+    profile_builder.SetProfileName(kProfileEmail);
+    account_id_ =
+        AccountId::AdFromUserEmailObjGuid(kProfileEmail, "1234567890");
     mock_user_manager()->AddUser(account_id_);
-    display_service_ =
-        std::make_unique<NotificationDisplayServiceTester>(profile());
 
     base::RunLoop run_loop;
     fake_auth_policy_client()->set_on_get_status_closure(
         run_loop.QuitClosure());
 
-    auth_policy_credentials_manager_ = static_cast<
-        AuthPolicyCredentialsManager*>(
-        AuthPolicyCredentialsManagerFactory::BuildForProfileIfActiveDirectory(
-            profile()));
+    profile_ = profile_builder.Build();
+    display_service_ =
+        std::make_unique<NotificationDisplayServiceTester>(profile());
+
+    auth_policy_credentials_manager_ =
+        static_cast<AuthPolicyCredentialsManager*>(
+            AuthPolicyCredentialsManagerFactory::GetInstance()
+                ->GetServiceForBrowserContext(profile(), false /* create */));
+    EXPECT_TRUE(auth_policy_credentials_manager_);
 
     EXPECT_CALL(*mock_user_manager(),
                 SaveForceOnlineSignin(account_id(), false));
@@ -76,6 +82,7 @@ class AuthPolicyCredentialsManagerTest : public testing::Test {
 
   void TearDown() override {
     EXPECT_CALL(*mock_user_manager(), Shutdown());
+    profile_.reset();
     chromeos::NetworkHandler::Shutdown();
     chromeos::DBusThreadManager::Shutdown();
   }
@@ -128,6 +135,8 @@ class AuthPolicyCredentialsManagerTest : public testing::Test {
   user_manager::ScopedUserManager user_manager_enabler_;
 
   std::unique_ptr<NotificationDisplayServiceTester> display_service_;
+
+  ScopedTestingLocalState local_state_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(AuthPolicyCredentialsManagerTest);

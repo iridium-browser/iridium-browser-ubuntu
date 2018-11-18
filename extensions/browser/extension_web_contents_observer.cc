@@ -19,6 +19,7 @@
 #include "extensions/browser/mojo/interface_registration.h"
 #include "extensions/browser/process_manager.h"
 #include "extensions/browser/renderer_startup_helper.h"
+#include "extensions/browser/url_loader_factory_manager.h"
 #include "extensions/browser/view_type_utils.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
@@ -83,11 +84,12 @@ void ExtensionWebContentsObserver::InitializeRenderFrame(
     return;
 
   // |render_frame_host->GetProcess()| is an extension process. Grant permission
-  // to commit pages from chrome-extension:// origins.
+  // to request pages from the extension's origin.
   content::ChildProcessSecurityPolicy* security_policy =
       content::ChildProcessSecurityPolicy::GetInstance();
   int process_id = render_frame_host->GetProcess()->GetID();
-  security_policy->GrantScheme(process_id, extensions::kExtensionScheme);
+  security_policy->GrantRequestOrigin(
+      process_id, url::Origin::Create(frame_extension->url()));
 
   // Notify the render frame of the view type.
   render_frame_host->Send(new ExtensionMsg_NotifyRenderViewType(
@@ -133,7 +135,7 @@ void ExtensionWebContentsObserver::RenderFrameCreated(
       type == Manifest::TYPE_LEGACY_PACKAGED_APP) {
     ExtensionPrefs* prefs = ExtensionPrefs::Get(browser_context_);
     if (prefs->AllowFileAccess(extension->id())) {
-      content::ChildProcessSecurityPolicy::GetInstance()->GrantScheme(
+      content::ChildProcessSecurityPolicy::GetInstance()->GrantRequestScheme(
           render_frame_host->GetProcess()->GetID(), url::kFileScheme);
     }
   }
@@ -171,6 +173,8 @@ void ExtensionWebContentsObserver::RenderFrameHostChanged(
 
 void ExtensionWebContentsObserver::ReadyToCommitNavigation(
     content::NavigationHandle* navigation_handle) {
+  URLLoaderFactoryManager::ReadyToCommitNavigation(navigation_handle);
+
   if (navigation_handle->IsInMainFrame() &&
       !navigation_handle->IsSameDocument()) {
     ExtensionApiFrameIdMap::Get()->OnMainFrameReadyToCommitNavigation(
@@ -215,6 +219,25 @@ void ExtensionWebContentsObserver::OnInterfaceRequestFromFrame(
   registry_.TryBindInterface(interface_name, interface_pipe, render_frame_host);
 }
 
+void ExtensionWebContentsObserver::MediaPictureInPictureChanged(
+    bool is_picture_in_picture) {
+  DCHECK(initialized_);
+  if (GetViewType(web_contents()) == VIEW_TYPE_EXTENSION_BACKGROUND_PAGE) {
+    ProcessManager* const process_manager =
+        ProcessManager::Get(browser_context_);
+    const Extension* const extension =
+        process_manager->GetExtensionForWebContents(web_contents());
+    if (extension == nullptr)
+      return;
+    if (is_picture_in_picture)
+      process_manager->IncrementLazyKeepaliveCount(extension, Activity::MEDIA,
+                                                   Activity::kPictureInPicture);
+    else
+      process_manager->DecrementLazyKeepaliveCount(extension, Activity::MEDIA,
+                                                   Activity::kPictureInPicture);
+  }
+}
+
 bool ExtensionWebContentsObserver::OnMessageReceived(
     const IPC::Message& message,
     content::RenderFrameHost* render_frame_host) {
@@ -236,7 +259,8 @@ void ExtensionWebContentsObserver::PepperInstanceCreated() {
     const Extension* const extension =
         process_manager->GetExtensionForWebContents(web_contents());
     if (extension)
-      process_manager->IncrementLazyKeepaliveCount(extension);
+      process_manager->IncrementLazyKeepaliveCount(
+          extension, Activity::PEPPER_API, std::string());
   }
 }
 
@@ -248,7 +272,8 @@ void ExtensionWebContentsObserver::PepperInstanceDeleted() {
     const Extension* const extension =
         process_manager->GetExtensionForWebContents(web_contents());
     if (extension)
-      process_manager->DecrementLazyKeepaliveCount(extension);
+      process_manager->DecrementLazyKeepaliveCount(
+          extension, Activity::PEPPER_API, std::string());
   }
 }
 
@@ -282,11 +307,10 @@ const Extension* ExtensionWebContentsObserver::GetExtensionFromFrame(
     const url::Origin& origin(render_frame_host->GetLastCommittedOrigin());
     // Without site isolation, this check is needed to eliminate non-extension
     // schemes. With site isolation, this is still needed to exclude sandboxed
-    // extension frames with a unique origin.
+    // extension frames with an opaque origin.
     const GURL site_url(render_frame_host->GetSiteInstance()->GetSiteURL());
-    if (origin.unique() ||
-        site_url != content::SiteInstance::GetSiteForURL(browser_context,
-                                                         origin.GetURL()))
+    if (origin.opaque() || site_url != content::SiteInstance::GetSiteForURL(
+                                           browser_context, origin.GetURL()))
       return nullptr;
   }
 

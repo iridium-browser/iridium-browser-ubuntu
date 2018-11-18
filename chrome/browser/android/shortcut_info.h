@@ -9,10 +9,25 @@
 
 #include <vector>
 
+#include "base/optional.h"
 #include "base/strings/string16.h"
-#include "content/public/common/manifest.h"
-#include "third_party/blink/public/platform/modules/screen_orientation/web_screen_orientation_lock_type.h"
+#include "third_party/blink/public/common/manifest/manifest.h"
+#include "third_party/blink/public/common/screen_orientation/web_screen_orientation_lock_type.h"
+#include "third_party/skia/include/core/SkColor.h"
 #include "url/gurl.h"
+
+// https://wicg.github.io/web-share-target/#dom-sharetargetparams
+struct ShareTargetParams {
+  base::string16 title;
+  base::string16 text;
+  base::string16 url;
+};
+
+// https://wicg.github.io/web-share-target/#dom-sharetarget
+struct ShareTarget {
+  GURL action;
+  ShareTargetParams params;
+};
 
 // Information needed to create a shortcut via ShortcutHelper.
 struct ShortcutInfo {
@@ -71,7 +86,7 @@ struct ShortcutInfo {
   ~ShortcutInfo();
 
   // Updates the info based on the given |manifest|.
-  void UpdateFromManifest(const content::Manifest& manifest);
+  void UpdateFromManifest(const blink::Manifest& manifest);
 
   // Updates the source of the shortcut.
   void UpdateSource(const Source source);
@@ -85,8 +100,8 @@ struct ShortcutInfo {
   blink::WebDisplayMode display;
   blink::WebScreenOrientationLockType orientation;
   Source source;
-  int64_t theme_color;
-  int64_t background_color;
+  base::Optional<SkColor> theme_color;
+  base::Optional<SkColor> background_color;
   GURL splash_screen_url;
   int ideal_splash_image_size_in_px;
   int minimum_splash_image_size_in_px;
@@ -94,7 +109,7 @@ struct ShortcutInfo {
   GURL best_primary_icon_url;
   GURL best_badge_icon_url;
   std::vector<std::string> icon_urls;
-  GURL share_target_url_template;
+  base::Optional<ShareTarget> share_target;
 };
 
 #endif  // CHROME_BROWSER_ANDROID_SHORTCUT_INFO_H_

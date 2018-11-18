@@ -75,7 +75,7 @@ class SignalSenderVerificationTest : public testing::Test {
 
     // Start the test service.
     ASSERT_TRUE(test_service_->StartService());
-    ASSERT_TRUE(test_service_->WaitUntilServiceIsStarted());
+    test_service_->WaitUntilServiceIsStarted();
     ASSERT_TRUE(test_service_->HasDBusThread());
     ASSERT_TRUE(test_service_->has_ownership());
 
@@ -84,7 +84,7 @@ class SignalSenderVerificationTest : public testing::Test {
     options.service_name = test_service_->service_name();
     test_service2_.reset(new TestService(options));
     ASSERT_TRUE(test_service2_->StartService());
-    ASSERT_TRUE(test_service2_->WaitUntilServiceIsStarted());
+    test_service2_->WaitUntilServiceIsStarted();
     ASSERT_TRUE(test_service2_->HasDBusThread());
     ASSERT_FALSE(test_service2_->has_ownership());
 
@@ -205,7 +205,8 @@ TEST_F(SignalSenderVerificationTest, TestSignalRejected) {
   ASSERT_EQ("", test_signal_string_);
 }
 
-TEST_F(SignalSenderVerificationTest, TestOwnerChanged) {
+// Flaky. https://crbug.com/785555
+TEST_F(SignalSenderVerificationTest, DISABLED_TestOwnerChanged) {
   const char kMessage[] = "hello, world";
 
   // Send the test signal from the exported object.
@@ -253,7 +254,8 @@ TEST_F(SignalSenderVerificationTest, TestOwnerChanged) {
   ASSERT_EQ(kNewMessage, test_signal_string_);
 }
 
-TEST_F(SignalSenderVerificationTest, TestOwnerStealing) {
+// Flaky. https://crbug.com/785555
+TEST_F(SignalSenderVerificationTest, DISABLED_TestOwnerStealing) {
   // Release and acquire the name ownership.
   // latest_name_owner_ should be non empty as |test_service_| owns the name.
   ASSERT_FALSE(latest_name_owner_.empty());
@@ -273,7 +275,7 @@ TEST_F(SignalSenderVerificationTest, TestOwnerStealing) {
   options.service_name = test_service_->service_name();
   TestService stealable_test_service(options);
   ASSERT_TRUE(stealable_test_service.StartService());
-  ASSERT_TRUE(stealable_test_service.WaitUntilServiceIsStarted());
+  stealable_test_service.WaitUntilServiceIsStarted();
   ASSERT_TRUE(stealable_test_service.HasDBusThread());
   ASSERT_TRUE(stealable_test_service.has_ownership());
 

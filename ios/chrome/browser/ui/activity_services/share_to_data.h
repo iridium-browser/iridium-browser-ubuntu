@@ -8,32 +8,42 @@
 #import <UIKit/UIKit.h>
 
 #include "ios/chrome/browser/ui/activity_services/chrome_activity_item_thumbnail_generator.h"
+#include "ios/web/public/user_agent.h"
 #include "url/gurl.h"
 
 @interface ShareToData : NSObject
 
 // Designated initializer.
 - (id)initWithShareURL:(const GURL&)shareURL
-    passwordManagerURL:(const GURL&)passwordManagerURL
+            visibleURL:(const GURL&)visibleURL
                  title:(NSString*)title
        isOriginalTitle:(BOOL)isOriginalTitle
        isPagePrintable:(BOOL)isPagePrintable
+      isPageSearchable:(BOOL)isPageSearchable
+             userAgent:(web::UserAgentType)userAgent
     thumbnailGenerator:(ThumbnailGeneratorBlock)thumbnailGenerator;
 
-// The URL to be shared with share extensions.
+// The URL to be shared with share extensions. This URL is the canonical URL of
+// the page.
 @property(nonatomic, readonly) const GURL& shareURL;
-// The URL to be shared with password managers.
-@property(nonatomic, readonly) const GURL& passwordManagerURL;
+// The visible URL of the page.
+@property(nonatomic, readonly) const GURL& visibleURL;
 
 // NSURL versions of 'shareURL' and 'passwordManagerURL'. Use only for passing
 // to libraries that take NSURL.
 @property(nonatomic, readonly) NSURL* shareNSURL;
 @property(nonatomic, readonly) NSURL* passwordManagerNSURL;
 
+// Title to be shared (not nil).
 @property(nonatomic, readonly, copy) NSString* title;
+// Whether the title was provided by the page (i.e., was not generated from
+// the url).
 @property(nonatomic, readonly, assign) BOOL isOriginalTitle;
+// Whether the page is printable or not.
 @property(nonatomic, readonly, assign) BOOL isPagePrintable;
-@property(nonatomic, strong) UIImage* image;
+// Whether FindInPage can be enabled for this page.
+@property(nonatomic, readonly, assign) BOOL isPageSearchable;
+@property(nonatomic, readonly, assign) web::UserAgentType userAgent;
 @property(nonatomic, copy) ThumbnailGeneratorBlock thumbnailGenerator;
 
 @end

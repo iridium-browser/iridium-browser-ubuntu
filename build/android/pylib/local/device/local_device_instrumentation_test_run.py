@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 import contextlib
+import copy
 import hashlib
 import json
 import logging
@@ -126,6 +127,7 @@ class LocalDeviceInstrumentationTestRun(
         env, test_instance)
     self._flag_changers = {}
     self._replace_package_contextmanager = None
+    self._shared_prefs_to_restore = []
 
   #override
   def TestPackage(self):
@@ -153,7 +155,11 @@ class LocalDeviceInstrumentationTestRun(
           self._replace_package_contextmanager = system_app.ReplaceSystemApp(
               dev, self._test_instance.replace_system_package.package,
               self._test_instance.replace_system_package.replacement_apk)
+          # Pylint is not smart enough to realize that this field has
+          # an __enter__ method, and will complain loudly.
+          # pylint: disable=no-member
           self._replace_package_contextmanager.__enter__()
+          # pylint: enable=no-member
 
         steps.append(replace_package)
 
@@ -222,6 +228,10 @@ class LocalDeviceInstrumentationTestRun(
           shared_pref = shared_prefs.SharedPrefs(
               dev, setting['package'], setting['filename'],
               use_encrypted_path=setting.get('supports_encrypted_path', False))
+          pref_to_restore = copy.copy(shared_pref)
+          pref_to_restore.Load()
+          self._shared_prefs_to_restore.append(pref_to_restore)
+
           shared_preference_utils.ApplySharedPreferenceSetting(
               shared_pref, setting)
 
@@ -307,13 +317,23 @@ class LocalDeviceInstrumentationTestRun(
 
       valgrind_tools.SetChromeTimeoutScale(dev, None)
 
+      # Restore any shared preference files that we stored during setup.
+      # This should be run sometime before the replace package contextmanager
+      # gets exited so we don't have to special case restoring files of
+      # replaced system apps.
+      for pref_to_restore in self._shared_prefs_to_restore:
+        pref_to_restore.Commit(force_commit=True)
+
       if self._replace_package_contextmanager:
+        # See pylint-related commend above with __enter__()
+        # pylint: disable=no-member
         self._replace_package_contextmanager.__exit__(*sys.exc_info())
+        # pylint: enable=no-member
 
     self._env.parallel_devices.pMap(individual_device_tear_down)
 
   def _CreateFlagChangerIfNeeded(self, device):
-    if not str(device) in self._flag_changers:
+    if str(device) not in self._flag_changers:
       self._flag_changers[str(device)] = flag_changer.FlagChanger(
         device, "test-cmdline-file")
 
@@ -659,8 +679,11 @@ class LocalDeviceInstrumentationTestRun(
             dir=dev.GetExternalStoragePath()) as dev_test_list_json:
           junit4_runner_class = self._test_instance.junit4_runner_class
           test_package = self._test_instance.test_package
-          extras = {}
-          extras['log'] = 'true'
+          extras = {
+            'log': 'true',
+            # Workaround for https://github.com/mockito/mockito/issues/922
+            'notPackage': 'net.bytebuddy',
+          }
           extras[_EXTRA_TEST_LIST] = dev_test_list_json.name
           target = '%s/%s' % (test_package, junit4_runner_class)
           timeout = 120

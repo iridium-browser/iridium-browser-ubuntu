@@ -35,7 +35,7 @@
 #include "media/video/picture.h"
 #include "media/video/video_decode_accelerator.h"
 #include "ppapi/c/pp_errors.h"
-#include "services/ui/public/cpp/gpu/context_provider_command_buffer.h"
+#include "services/ws/public/cpp/gpu/context_provider_command_buffer.h"
 #include "third_party/skia/include/gpu/GrTypes.h"
 
 namespace content {
@@ -60,7 +60,7 @@ bool IsCodecSupported(media::VideoCodec codec) {
 // YUV->RGB converter class using a shader and FBO.
 class VideoDecoderShim::YUVConverter {
  public:
-  YUVConverter(scoped_refptr<ui::ContextProviderCommandBuffer>);
+  YUVConverter(scoped_refptr<ws::ContextProviderCommandBuffer>);
   ~YUVConverter();
   bool Initialize();
   void Convert(const scoped_refptr<media::VideoFrame>& frame, GLuint tex_out);
@@ -71,7 +71,7 @@ class VideoDecoderShim::YUVConverter {
   GLuint CreateProgram(const char* name, GLuint vshader, GLuint fshader);
   GLuint CreateTexture();
 
-  scoped_refptr<ui::ContextProviderCommandBuffer> context_provider_;
+  scoped_refptr<ws::ContextProviderCommandBuffer> context_provider_;
   gpu::gles2::GLES2Interface* gl_;
   GLuint frame_buffer_;
   GLuint vertex_buffer_;
@@ -101,7 +101,7 @@ class VideoDecoderShim::YUVConverter {
 };
 
 VideoDecoderShim::YUVConverter::YUVConverter(
-    scoped_refptr<ui::ContextProviderCommandBuffer> context_provider)
+    scoped_refptr<ws::ContextProviderCommandBuffer> context_provider)
     : context_provider_(std::move(context_provider)),
       gl_(context_provider_->ContextGL()),
       frame_buffer_(0),
@@ -365,13 +365,13 @@ void VideoDecoderShim::YUVConverter::Convert(
     // numbers that are used in the transformation from YUV to RGB color values.
     // They are taken from the following webpage:
     // http://www.fourcc.org/fccyvrgb.php
-    const float yuv_to_rgb_rec601[9] = {
+    static const float yuv_to_rgb_rec601[9] = {
         1.164f, 1.164f, 1.164f, 0.0f, -.391f, 2.018f, 1.596f, -.813f, 0.0f,
     };
-    const float yuv_to_rgb_jpeg[9] = {
+    static const float yuv_to_rgb_jpeg[9] = {
         1.f, 1.f, 1.f, 0.0f, -.34414f, 1.772f, 1.402f, -.71414f, 0.0f,
     };
-    const float yuv_to_rgb_rec709[9] = {
+    static const float yuv_to_rgb_rec709[9] = {
         1.164f, 1.164f, 1.164f, 0.0f, -0.213f, 2.112f, 1.793f, -0.533f, 0.0f,
     };
 
@@ -381,25 +381,31 @@ void VideoDecoderShim::YUVConverter::Convert(
     //   Y - 16   : Gives 16 values of head and footroom for overshooting
     //   U - 128  : Turns unsigned U into signed U [-128,127]
     //   V - 128  : Turns unsigned V into signed V [-128,127]
-    const float yuv_adjust_constrained[3] = {
+    static const float yuv_adjust_constrained[3] = {
         -0.0625f, -0.5f, -0.5f,
     };
     // Same as above, but without the head and footroom.
-    const float yuv_adjust_full[3] = {
+    static const float yuv_adjust_full[3] = {
         0.0f, -0.5f, -0.5f,
     };
 
     yuv_adjust = yuv_adjust_constrained;
+    // TODO(hubbe): Should default to 709
     yuv_matrix = yuv_to_rgb_rec601;
 
-    int result;
-    if (frame->metadata()->GetInteger(media::VideoFrameMetadata::COLOR_SPACE,
-                                      &result)) {
-      if (result == media::COLOR_SPACE_JPEG) {
-        yuv_matrix = yuv_to_rgb_jpeg;
-        yuv_adjust = yuv_adjust_full;
-      } else if (result == media::COLOR_SPACE_HD_REC709) {
-        yuv_matrix = yuv_to_rgb_rec709;
+    SkYUVColorSpace sk_yuv_color_space;
+    if (frame->ColorSpace().ToSkYUVColorSpace(&sk_yuv_color_space)) {
+      switch (sk_yuv_color_space) {
+        case kJPEG_SkYUVColorSpace:
+          yuv_matrix = yuv_to_rgb_jpeg;
+          yuv_adjust = yuv_adjust_full;
+          break;
+        case kRec709_SkYUVColorSpace:
+          yuv_matrix = yuv_to_rgb_rec709;
+          break;
+        case kRec601_SkYUVColorSpace:
+          // Current default.
+          break;
       }
     }
 
@@ -842,7 +848,7 @@ VideoDecoderShim::VideoDecoderShim(
 VideoDecoderShim::~VideoDecoderShim() {
   DCHECK(RenderThreadImpl::current());
   // Delete any remaining textures.
-  TextureIdMap::iterator it = texture_id_map_.begin();
+  auto it = texture_id_map_.begin();
   for (; it != texture_id_map_.end(); ++it)
     DeleteTexture(it->second);
   texture_id_map_.clear();
@@ -929,20 +935,20 @@ void VideoDecoderShim::AssignPictureBuffers(
     NOTREACHED();
     return;
   }
-  DCHECK_EQ(buffers.size(), pending_texture_mailboxes_.size());
+  std::vector<gpu::Mailbox> mailboxes = host_->TakeMailboxes();
+  DCHECK_EQ(buffers.size(), mailboxes.size());
   GLuint num_textures = base::checked_cast<GLuint>(buffers.size());
   std::vector<uint32_t> local_texture_ids(num_textures);
   gpu::gles2::GLES2Interface* gles2 = context_provider_->ContextGL();
   for (uint32_t i = 0; i < num_textures; i++) {
     DCHECK_EQ(1u, buffers[i].client_texture_ids().size());
-    local_texture_ids[i] = gles2->CreateAndConsumeTextureCHROMIUM(
-        pending_texture_mailboxes_[i].name);
+    local_texture_ids[i] =
+        gles2->CreateAndConsumeTextureCHROMIUM(mailboxes[i].name);
     // Map the plugin texture id to the local texture id.
     uint32_t plugin_texture_id = buffers[i].client_texture_ids()[0];
     texture_id_map_[plugin_texture_id] = local_texture_ids[i];
     available_textures_.insert(plugin_texture_id);
   }
-  pending_texture_mailboxes_.clear();
   SendPictures();
 }
 
@@ -1018,21 +1024,16 @@ void VideoDecoderShim::OnOutputComplete(std::unique_ptr<PendingFrame> frame) {
            ++it) {
         textures_to_dismiss_.insert(it->first);
       }
-      for (TextureIdSet::const_iterator it = available_textures_.begin();
-           it != available_textures_.end();
-           ++it) {
+      for (auto it = available_textures_.begin();
+           it != available_textures_.end(); ++it) {
         DismissTexture(*it);
       }
       available_textures_.clear();
       FlushCommandBuffer();
 
-      DCHECK(pending_texture_mailboxes_.empty());
-      for (uint32_t i = 0; i < texture_pool_size_; i++)
-        pending_texture_mailboxes_.push_back(gpu::Mailbox::Generate());
-
-      host_->RequestTextures(texture_pool_size_,
-                             frame->video_frame->coded_size(), GL_TEXTURE_2D,
-                             pending_texture_mailboxes_);
+      host_->ProvidePictureBuffers(texture_pool_size_, media::PIXEL_FORMAT_ARGB,
+                                   1, frame->video_frame->coded_size(),
+                                   GL_TEXTURE_2D);
       texture_size_ = frame->video_frame->coded_size();
     }
 
@@ -1047,7 +1048,7 @@ void VideoDecoderShim::SendPictures() {
   while (!pending_frames_.empty() && !available_textures_.empty()) {
     const std::unique_ptr<PendingFrame>& frame = pending_frames_.front();
 
-    TextureIdSet::iterator it = available_textures_.begin();
+    auto it = available_textures_.begin();
     uint32_t texture_id = *it;
     available_textures_.erase(it);
 

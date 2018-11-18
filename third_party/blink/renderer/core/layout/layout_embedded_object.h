@@ -50,11 +50,8 @@ class LayoutEmbeddedObject final : public LayoutEmbeddedContent {
   }
 
  private:
-  void PaintContents(const PaintInfo&, const LayoutPoint&) const final;
-  void PaintReplaced(const PaintInfo&, const LayoutPoint&) const final;
-  void Paint(const PaintInfo&, const LayoutPoint&) const final;
-  PaintInvalidationReason InvalidatePaint(
-      const PaintInvalidatorContext&) const final;
+  void PaintReplaced(const PaintInfo&,
+                     const LayoutPoint& paint_offset) const final;
 
   void UpdateLayout() final;
 
@@ -62,12 +59,8 @@ class LayoutEmbeddedObject final : public LayoutEmbeddedContent {
     return type == kLayoutObjectEmbeddedObject ||
            LayoutEmbeddedContent::IsOfType(type);
   }
+  void ComputeIntrinsicSizingInfo(IntrinsicSizingInfo&) const override;
   bool NeedsPreferredWidthsRecalculation() const override;
-  bool GetNestedIntrinsicSizingInfo(IntrinsicSizingInfo&) const override;
-
-  PaintLayerType LayerTypeRequired() const final;
-
-  ScrollResult Scroll(ScrollGranularity, const FloatSize&) final;
 
   CompositingReasons AdditionalCompositingReasons() const override;
 

@@ -10,6 +10,7 @@
 #include "base/memory/ptr_util.h"
 #include "third_party/blink/renderer/platform/heap/blink_gc.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
+#include "third_party/blink/renderer/platform/wtf/hash_set.h"
 #include "third_party/blink/renderer/platform/wtf/threading_primitives.h"
 
 #include <bitset>
@@ -35,18 +36,28 @@
 
 namespace blink {
 
+namespace incremental_marking_test {
+class IncrementalMarkingTestDriver;
+}
+
 class NormalPageArena;
 class BasePage;
 class ThreadState;
 class ThreadHeap;
 
 class PLATFORM_EXPORT HeapCompact final {
+  friend class incremental_marking_test::IncrementalMarkingTestDriver;
+
  public:
-  static std::unique_ptr<HeapCompact> Create() {
-    return base::WrapUnique(new HeapCompact);
+  static std::unique_ptr<HeapCompact> Create(ThreadHeap* heap) {
+    return base::WrapUnique(new HeapCompact(heap));
   }
 
   ~HeapCompact();
+
+  // Remove slot from traced_slots_ when a registered slot is destructed by
+  // mutator
+  void RemoveSlot(MovableReference* slot);
 
   // Determine if a GC for the given type and reason should also perform
   // additional heap compaction.
@@ -80,7 +91,7 @@ class PLATFORM_EXPORT HeapCompact final {
   void RegisterMovingObjectReference(MovableReference* slot);
 
   // See |Heap::registerMovingObjectCallback()| documentation.
-  void RegisterMovingObjectCallback(MovableReference,
+  void RegisterMovingObjectCallback(MovableReference*,
                                     MovingObjectCallback,
                                     void* callback_data);
 
@@ -129,13 +140,13 @@ class PLATFORM_EXPORT HeapCompact final {
  private:
   class MovableObjectFixups;
 
-  HeapCompact();
+  explicit HeapCompact(ThreadHeap*);
 
   // Sample the amount of fragmentation and heap memory currently residing
   // on the freelists of the arenas we're able to compact. The computed
   // numbers will be subsequently used to determine if a heap compaction
   // is on order (shouldCompact().)
-  void UpdateHeapResidency(ThreadHeap*);
+  void UpdateHeapResidency();
 
   // Parameters controlling when compaction should be done:
 
@@ -145,6 +156,8 @@ class PLATFORM_EXPORT HeapCompact final {
   // Freelist size threshold that must be exceeded before compaction
   // should be considered.
   static const size_t kFreeListSizeThreshold = 512 * 1024;
+
+  ThreadHeap* const heap_;
 
   MovableObjectFixups& Fixups();
 
@@ -162,12 +175,10 @@ class PLATFORM_EXPORT HeapCompact final {
   // the range of BlinkGC::ArenaIndices.
   unsigned compactable_arenas_;
 
-  // Stats, number of (complete) pages freed/decommitted +
-  // bytes freed (which will include partial pages.)
-  size_t freed_pages_;
-  size_t freed_size_;
-
-  double start_compaction_time_ms_;
+  // The set is to remember slots that traced during
+  // marking phases. The mapping between the slots and the backing stores are
+  // created at the atomic pause phase.
+  HashSet<MovableReference*> traced_slots_;
 
   static bool force_compaction_gc_;
 };

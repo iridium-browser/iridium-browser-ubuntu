@@ -24,7 +24,6 @@
 #include <memory>
 
 #include "third_party/blink/renderer/core/layout/api/line_layout_item.h"
-#include "third_party/blink/renderer/core/layout/api/selection_state.h"
 #include "third_party/blink/renderer/core/layout/line/inline_flow_box.h"
 #include "third_party/blink/renderer/platform/text/bidi_context.h"
 
@@ -145,7 +144,7 @@ class RootInlineBox : public InlineFlowBox {
                    LayoutUnit line_top,
                    LayoutUnit line_bottom) override;
 
-  SelectionState GetSelectionState() const final;
+  bool IsSelected() const final;
   InlineBox* FirstSelectedBox() const;
   InlineBox* LastSelectedBox() const;
 
@@ -205,8 +204,16 @@ class RootInlineBox : public InlineFlowBox {
     return InlineFlowBox::LogicalBottomLayoutOverflow(LineBottom());
   }
 
-  Node* GetLogicalStartBoxWithNode(InlineBox*&) const;
-  Node* GetLogicalEndBoxWithNode(InlineBox*&) const;
+  typedef void (*CustomInlineBoxRangeReverse)(
+      Vector<InlineBox*>::iterator first,
+      Vector<InlineBox*>::iterator last);
+  void CollectLeafBoxesInLogicalOrder(
+      Vector<InlineBox*>&,
+      CustomInlineBoxRangeReverse custom_reverse_implementation =
+          nullptr) const;
+
+  const InlineBox* GetLogicalStartNonPseudoBox() const;
+  const InlineBox* GetLogicalEndNonPseudoBox() const;
 
   const char* BoxName() const override;
 

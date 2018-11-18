@@ -7,22 +7,23 @@
 #include <utility>
 
 #include "base/memory/ptr_util.h"
+#include "base/task/post_task.h"
 #include "build/build_config.h"
-#include "chromecast/browser/extensions/api/generated_api_registration.h"
 #include "chromecast/browser/extensions/cast_extension_host_delegate.h"
 #include "chromecast/browser/extensions/cast_extension_system_factory.h"
 #include "chromecast/browser/extensions/cast_extension_web_contents_observer.h"
 #include "chromecast/browser/extensions/cast_extensions_api_client.h"
+#include "chromecast/browser/extensions/cast_extensions_browser_api_provider.h"
 #include "components/version_info/version_info.h"
 #include "content/public/browser/browser_context.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/resource_request_info.h"
 #include "extensions/browser/api/extensions_api_client.h"
-#include "extensions/browser/api/generated_api_registration.h"
 #include "extensions/browser/api/runtime/runtime_api_delegate.h"
+#include "extensions/browser/core_extensions_browser_api_provider.h"
 #include "extensions/browser/event_router.h"
-#include "extensions/browser/extension_function_registry.h"
 #include "extensions/browser/mojo/interface_registration.h"
 #include "extensions/browser/null_app_sorting.h"
 #include "extensions/browser/updater/null_extension_cache.h"
@@ -43,6 +44,9 @@ CastExtensionsBrowserClient::CastExtensionsBrowserClient(
   // Set to UNKNOWN to enable all APIs.
   // TODO(achaulk): figure out what channel to use here.
   SetCurrentChannel(version_info::Channel::UNKNOWN);
+
+  AddAPIProvider(std::make_unique<CoreExtensionsBrowserAPIProvider>());
+  AddAPIProvider(std::make_unique<CastExtensionsBrowserAPIProvider>());
 }
 
 CastExtensionsBrowserClient::~CastExtensionsBrowserClient() {}
@@ -172,7 +176,20 @@ bool CastExtensionsBrowserClient::DidVersionUpdate(BrowserContext* context) {
 
 void CastExtensionsBrowserClient::PermitExternalProtocolHandler() {}
 
+bool CastExtensionsBrowserClient::IsInDemoMode() {
+  return false;
+}
+
+bool CastExtensionsBrowserClient::IsScreensaverInDemoMode(
+    const std::string& app_id) {
+  return false;
+}
+
 bool CastExtensionsBrowserClient::IsRunningInForcedAppMode() {
+  return false;
+}
+
+bool CastExtensionsBrowserClient::IsAppModeForcedForApp(const ExtensionId& id) {
   return false;
 }
 
@@ -183,15 +200,6 @@ bool CastExtensionsBrowserClient::IsLoggedInAsPublicAccount() {
 ExtensionSystemProvider*
 CastExtensionsBrowserClient::GetExtensionSystemFactory() {
   return CastExtensionSystemFactory::GetInstance();
-}
-
-void CastExtensionsBrowserClient::RegisterExtensionFunctions(
-    ExtensionFunctionRegistry* registry) const {
-  // Register core extension-system APIs.
-  api::GeneratedFunctionRegistry::RegisterAll(registry);
-
-  // cast_shell-only APIs.
-  cast::api::CastGeneratedFunctionRegistry::RegisterAll(registry);
 }
 
 void CastExtensionsBrowserClient::RegisterExtensionInterfaces(
@@ -218,8 +226,8 @@ void CastExtensionsBrowserClient::BroadcastEventToRenderers(
     const std::string& event_name,
     std::unique_ptr<base::ListValue> args) {
   if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, {BrowserThread::UI},
         base::BindOnce(&CastExtensionsBrowserClient::BroadcastEventToRenderers,
                        base::Unretained(this), histogram_value, event_name,
                        std::move(args)));
@@ -277,10 +285,6 @@ bool CastExtensionsBrowserClient::IsLockScreenContext(
 std::string CastExtensionsBrowserClient::GetApplicationLocale() {
   // TODO(b/70902491): Use system locale.
   return "en-US";
-}
-
-bool CastExtensionsBrowserClient::IsAppModeForcedForApp(const ExtensionId& id) {
-  return false;
 }
 
 }  // namespace extensions

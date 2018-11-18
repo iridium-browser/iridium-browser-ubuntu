@@ -41,11 +41,22 @@ class URLRequestClassifier;
 // http://crbug.com/527460
 class DataUseMeasurement {
  public:
+  // Returns true if the |request| is initiated by user traffic.
+  static bool IsUserRequest(const net::URLRequest& request);
+
+  // Returns true if the NTA hash is one used by metrics (UMA, UKM) component.
+  static bool IsMetricsServiceRequest(
+      int32_t network_traffic_annotation_hash_id);
+
+  // Returns the content-type saved in the request userdata when the response
+  // headers were received.
+  static DataUseUserData::DataUseContentType GetContentTypeForRequest(
+      const net::URLRequest& request);
+
   DataUseMeasurement(
       std::unique_ptr<URLRequestClassifier> url_request_classifier,
-      const metrics::UpdateUsagePrefCallbackType& metrics_data_use_forwarder,
       DataUseAscriber* ascriber);
-  ~DataUseMeasurement();
+  virtual ~DataUseMeasurement();
 
   // Called before a request is sent.
   void OnBeforeURLRequest(net::URLRequest* request);
@@ -73,6 +84,12 @@ class DataUseMeasurement {
       base::android::ApplicationState application_state);
 #endif
 
+  // Updates the data use to metrics service. |is_metrics_service_usage|
+  // indicates if the data use is from metrics component.
+  virtual void UpdateDataUseToMetricsService(int64_t total_bytes,
+                                             bool is_cellular,
+                                             bool is_metrics_service_usage) = 0;
+
  private:
   friend class DataUseMeasurementTest;
   FRIEND_TEST_ALL_PREFIXES(DataUseMeasurementTest,
@@ -84,6 +101,16 @@ class DataUseMeasurement {
   // Returns the current application state (Foreground or Background). It always
   // returns Foreground if Chrome is not running on Android.
   DataUseUserData::AppState CurrentAppState() const;
+
+  // Makes the full name of the histogram. It is made from |prefix| and suffix
+  // which is made based on network and application status. suffix is a string
+  // representing whether the data use was on the send ("Upstream") or receive
+  // ("Downstream") path, and whether the app was in the "Foreground" or
+  // "Background".
+  std::string GetHistogramNameWithConnectionType(
+      const char* prefix,
+      TrafficDirection dir,
+      DataUseUserData::AppState app_state) const;
 
   // Makes the full name of the histogram. It is made from |prefix| and suffix
   // which is made based on network and application status. suffix is a string
@@ -116,23 +143,17 @@ class DataUseMeasurement {
                         TrafficDirection dir,
                         int64_t bytes);
 
-  // Updates the data use of the |request|, thus |request| must be non-null.
-  void UpdateDataUsePrefs(const net::URLRequest& request) const;
-
   // Reports the message size of the service requests.
   void ReportServicesMessageSizeUMA(const net::URLRequest& request);
 
   // Records data use histograms of services. It gets the size of exchanged
   // message, its direction (which is upstream or downstream) and reports to the
   // histogram DataUse.Services.{Dimensions} with, services as the buckets.
-  // |app_state| indicates the app state which can be foreground, background, or
-  // unknown.
-  void ReportDataUsageServices(
-      data_use_measurement::DataUseUserData::ServiceName service,
-      TrafficDirection dir,
-      DataUseUserData::AppState app_state,
-      bool is_connection_cellular,
-      int64_t message_size) const;
+  // |app_state| indicates the app state which can be foreground, or background.
+  void ReportDataUsageServices(int32_t traffic_annotation_hash,
+                               TrafficDirection dir,
+                               DataUseUserData::AppState app_state,
+                               int64_t message_size) const;
 
   // Records data use histograms split on TrafficDirection, AppState and
   // TabState.
@@ -155,12 +176,6 @@ class DataUseMeasurement {
 
   // Classifier for identifying if an URL request is user initiated.
   std::unique_ptr<URLRequestClassifier> url_request_classifier_;
-
-  // Callback for updating data use prefs.
-  // TODO(rajendrant): If a similar mechanism would need be used for components
-  // other than metrics, then the better approach would be to refactor this
-  // class to support registering arbitrary observers. crbug.com/601185
-  metrics::UpdateUsagePrefCallbackType metrics_data_use_forwarder_;
 
   // DataUseAscriber used to get the attributes of data use.
   DataUseAscriber* ascriber_;
@@ -192,10 +207,6 @@ class DataUseMeasurement {
   // True if app is in background and first network read has not yet happened.
   bool no_reads_since_background_;
 #endif
-
-  // User traffic data use by content type is logged in 1KB increments. The
-  // remaining bytes are saved in this array until logged next time.
-  int16_t user_traffic_content_type_bytes_[DataUseUserData::TYPE_MAX];
 
   DISALLOW_COPY_AND_ASSIGN(DataUseMeasurement);
 };

@@ -55,7 +55,8 @@ class SyncableFileOperationRunnerTest : public testing::Test {
   // operations in the tests.
   SyncableFileOperationRunnerTest()
       : thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP),
-        in_memory_env_(leveldb_chrome::NewMemEnv(leveldb::Env::Default())),
+        in_memory_env_(
+            leveldb_chrome::NewMemEnv("SyncableFileOperationRunnerTest")),
         file_system_(GURL("http://example.com"),
                      in_memory_env_.get(),
                      base::ThreadTaskRunnerHandle::Get().get(),
@@ -136,7 +137,6 @@ class SyncableFileOperationRunnerTest : public testing::Test {
     SCOPED_TRACE(testing::Message() << location.ToString());
     EXPECT_EQ(expect, status);
     ++callback_count_;
-    base::RunLoop::QuitCurrentWhenIdleDeprecated();
   }
 
   bool CreateTempFile(base::FilePath* path) {
@@ -316,7 +316,6 @@ TEST_F(SyncableFileOperationRunnerTest, Write) {
 
   ResetCallbackStatus();
   file_system_.operation_runner()->Write(
-      &url_request_context_,
       URL(kFile), blob.GetBlobDataHandle(), 0, GetWriteCallback(FROM_HERE));
   content::RunAllTasksUntilIdle();
   EXPECT_EQ(0, callback_count_);
@@ -385,10 +384,12 @@ TEST_F(SyncableFileOperationRunnerTest, CopyInForeignFile) {
   EXPECT_EQ(1, callback_count_);
 
   // Now the file must have been created and have the same content as temp_path.
+  // TODO(mek): AdaptCallbackForRepeating is needed here because
+  // CannedSyncableFileSystem hasn't switched to OnceCallback yet.
   ResetCallbackStatus();
   file_system_.DoVerifyFile(
       URL(kFile), kTestData,
-      ExpectStatus(FROM_HERE, File::FILE_OK));
+      base::AdaptCallbackForRepeating(ExpectStatus(FROM_HERE, File::FILE_OK)));
   content::RunAllTasksUntilIdle();
   EXPECT_EQ(1, callback_count_);
 }
@@ -408,7 +409,7 @@ TEST_F(SyncableFileOperationRunnerTest, Cancel) {
           URL(kFile), 10, ExpectStatus(FROM_HERE, File::FILE_OK));
   file_system_.operation_runner()->Cancel(
       id, ExpectStatus(FROM_HERE, File::FILE_ERROR_INVALID_OPERATION));
-  base::RunLoop().Run();
+  content::RunAllTasksUntilIdle();
   EXPECT_EQ(2, callback_count_);
 }
 

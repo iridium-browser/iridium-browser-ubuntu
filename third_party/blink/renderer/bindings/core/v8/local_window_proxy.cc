@@ -41,6 +41,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_page_popup_controller_binding.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_window.h"
 #include "third_party/blink/renderer/core/frame/csp/content_security_policy.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_client.h"
 #include "third_party/blink/renderer/core/html/document_name_collection.h"
@@ -65,6 +66,11 @@
 
 namespace blink {
 
+void LocalWindowProxy::Trace(blink::Visitor* visitor) {
+  visitor->Trace(script_state_);
+  WindowProxy::Trace(visitor);
+}
+
 void LocalWindowProxy::DisposeContext(Lifecycle next_status,
                                       FrameReuseStatus frame_reuse_status) {
   DCHECK(next_status == Lifecycle::kGlobalObjectIsDetached ||
@@ -73,13 +79,13 @@ void LocalWindowProxy::DisposeContext(Lifecycle next_status,
   if (lifecycle_ != Lifecycle::kContextIsInitialized)
     return;
 
-  ScriptState::Scope scope(script_state_.get());
+  ScriptState::Scope scope(script_state_);
   v8::Local<v8::Context> context = script_state_->GetContext();
   // The embedder could run arbitrary code in response to the
   // willReleaseScriptContext callback, so all disposing should happen after
   // it returns.
   GetFrame()->Client()->WillReleaseScriptContext(context, world_->GetWorldId());
-  MainThreadDebugger::Instance()->ContextWillBeDestroyed(script_state_.get());
+  MainThreadDebugger::Instance()->ContextWillBeDestroyed(script_state_);
 
   if (next_status == Lifecycle::kGlobalObjectIsDetached) {
     // Clean up state on the global proxy, which will be reused.
@@ -138,7 +144,7 @@ void LocalWindowProxy::Initialize() {
 
   CreateContext();
 
-  ScriptState::Scope scope(script_state_.get());
+  ScriptState::Scope scope(script_state_);
   v8::Local<v8::Context> context = script_state_->GetContext();
   if (global_proxy_.IsEmpty()) {
     global_proxy_.Set(GetIsolate(), context->Global());
@@ -169,8 +175,8 @@ void LocalWindowProxy::Initialize() {
   {
     TRACE_EVENT1("v8", "ContextCreatedNotification", "IsMainFrame",
                  GetFrame()->IsMainFrame());
-    MainThreadDebugger::Instance()->ContextCreated(script_state_.get(),
-                                                   GetFrame(), origin);
+    MainThreadDebugger::Instance()->ContextCreated(script_state_, GetFrame(),
+                                                   origin);
     GetFrame()->Client()->DidCreateScriptContext(context, world_->GetWorldId());
   }
 
@@ -238,7 +244,7 @@ void LocalWindowProxy::CreateContext() {
 
   script_state_ = ScriptState::Create(context, world_);
 
-  InitializeV8ExtrasBinding(script_state_.get());
+  InitializeV8ExtrasBinding(script_state_);
 
   DCHECK(lifecycle_ == Lifecycle::kContextIsUninitialized ||
          lifecycle_ == Lifecycle::kGlobalObjectIsDetached);
@@ -276,7 +282,7 @@ void LocalWindowProxy::InstallConditionalFeatures() {
     // for origin trials, which do not apply to extensions). Some conditional
     // bindings cannot be enabled until the execution context is available
     // (e.g. parsing the document, inspecting HTTP headers).
-    InstallOriginTrialFeatures(wrapper_type_info, script_state_.get(),
+    InstallOriginTrialFeatures(wrapper_type_info, script_state_,
                                v8::Local<v8::Object>(),
                                v8::Local<v8::Function>());
   }
@@ -333,7 +339,7 @@ void LocalWindowProxy::UpdateDocumentProperty() {
   TRACE_EVENT1("v8", "LocalWindowProxy::UpdateDocumentProperty", "IsMainFrame",
                GetFrame()->IsMainFrame());
 
-  ScriptState::Scope scope(script_state_.get());
+  ScriptState::Scope scope(script_state_);
   v8::Local<v8::Context> context = script_state_->GetContext();
   v8::Local<v8::Value> document_wrapper =
       ToV8(GetFrame()->GetDocument(), context->Global(), GetIsolate());
@@ -379,17 +385,17 @@ void LocalWindowProxy::SetSecurityToken(const SecurityOrigin* origin) {
                                     ->IsDisplayingInitialEmptyDocument() ||
                                 origin->DomainWasSetInDOM());
   if (origin && !use_default_security_token)
-    token = origin->ToString();
+    token = origin->ToTokenForFastCheck();
 
-  // 3. The ToString() method on SecurityOrigin returns the string "null" for
+  // 3. The ToTokenForFastCheck method on SecurityOrigin returns null string for
   //    empty security origins and for security origins that should only allow
   //    access to themselves (i.e. opaque origins). Using the default security
   //    token serves for two purposes: it allows fast-path security checks for
   //    accesses inside the same context, and forces a full CanAccess() check
-  //    for contexts that don't inherit the same origin, which will always fail.
+  //    for contexts that don't inherit the same origin.
   v8::HandleScope handle_scope(GetIsolate());
   v8::Local<v8::Context> context = script_state_->GetContext();
-  if (token.IsEmpty() || token == "null") {
+  if (token.IsNull()) {
     context->UseDefaultSecurityToken();
     return;
   }
@@ -397,14 +403,14 @@ void LocalWindowProxy::SetSecurityToken(const SecurityOrigin* origin) {
   if (world_->IsIsolatedWorld()) {
     const SecurityOrigin* frame_security_origin =
         GetFrame()->GetDocument()->GetSecurityOrigin();
-    String frame_security_token = frame_security_origin->ToString();
+    String frame_security_token = frame_security_origin->ToTokenForFastCheck();
     // We need to check the return value of domainWasSetInDOM() on the
     // frame's SecurityOrigin because, if that's the case, only
     // SecurityOrigin::domain_ would have been modified.
     // domain_ is not used by SecurityOrigin::toString(), so we would end
     // up generating the same token that was already set.
     if (frame_security_origin->DomainWasSetInDOM() ||
-        frame_security_token.IsEmpty() || frame_security_token == "null") {
+        frame_security_token.IsNull()) {
       context->UseDefaultSecurityToken();
       return;
     }
@@ -513,7 +519,7 @@ void LocalWindowProxy::NamedItemAdded(HTMLDocument* document,
   if (lifecycle_ != Lifecycle::kContextIsInitialized)
     return;
 
-  ScriptState::Scope scope(script_state_.get());
+  ScriptState::Scope scope(script_state_);
   v8::Local<v8::Object> document_wrapper =
       world_->DomDataStore().Get(document, GetIsolate());
   document_wrapper
@@ -537,7 +543,7 @@ void LocalWindowProxy::NamedItemRemoved(HTMLDocument* document,
 
   if (document->HasNamedItem(name))
     return;
-  ScriptState::Scope scope(script_state_.get());
+  ScriptState::Scope scope(script_state_);
   v8::Local<v8::Object> document_wrapper =
       world_->DomDataStore().Get(document, GetIsolate());
   document_wrapper

@@ -11,13 +11,15 @@
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/sequenced_task_runner.h"
+#include "base/task/post_task.h"
 #include "content/browser/dom_storage/dom_storage_context_impl.h"
 #include "content/browser/dom_storage/dom_storage_context_wrapper.h"
 #include "content/browser/dom_storage/dom_storage_task_runner.h"
 #include "content/browser/dom_storage/session_storage_context_mojo.h"
-#include "content/common/dom_storage/dom_storage_namespace_ids.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/content_features.h"
+#include "third_party/blink/public/common/dom_storage/session_storage_namespace_id.h"
 
 namespace content {
 
@@ -25,7 +27,7 @@ namespace content {
 scoped_refptr<SessionStorageNamespaceImpl> SessionStorageNamespaceImpl::Create(
     scoped_refptr<DOMStorageContextWrapper> context) {
   return SessionStorageNamespaceImpl::Create(
-      std::move(context), AllocateSessionStorageNamespaceId());
+      std::move(context), blink::AllocateSessionStorageNamespaceId());
 }
 
 // static
@@ -60,7 +62,8 @@ scoped_refptr<SessionStorageNamespaceImpl>
 SessionStorageNamespaceImpl::CloneFrom(
     scoped_refptr<DOMStorageContextWrapper> context,
     std::string namespace_id,
-    const std::string& namespace_id_to_clone) {
+    const std::string& namespace_id_to_clone,
+    bool immediately) {
   if (context->mojo_session_state()) {
     DCHECK(base::FeatureList::IsEnabled(features::kMojoSessionStorage));
     auto result = base::WrapRefCounted(
@@ -69,7 +72,11 @@ SessionStorageNamespaceImpl::CloneFrom(
         FROM_HERE,
         base::BindOnce(&SessionStorageContextMojo::CloneSessionNamespace,
                        base::Unretained(context->mojo_session_state()),
-                       namespace_id_to_clone, result->namespace_id_));
+                       namespace_id_to_clone, result->namespace_id_,
+                       immediately
+                           ? SessionStorageContextMojo::CloneType::kImmediate
+                           : SessionStorageContextMojo::CloneType::
+                                 kWaitForCloneOnNamespace));
     return result;
   }
   scoped_refptr<DOMStorageContextImpl> context_impl = context->context();
@@ -95,8 +102,8 @@ bool SessionStorageNamespaceImpl::should_persist() const {
 
 scoped_refptr<SessionStorageNamespaceImpl>
 SessionStorageNamespaceImpl::Clone() {
-  return CloneFrom(context_wrapper_, AllocateSessionStorageNamespaceId(),
-                   namespace_id_);
+  return CloneFrom(context_wrapper_, blink::AllocateSessionStorageNamespaceId(),
+                   namespace_id_, true);
 }
 
 bool SessionStorageNamespaceImpl::IsFromContext(
@@ -145,8 +152,8 @@ SessionStorageNamespaceImpl::~SessionStorageNamespaceImpl() {
     if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
       // If this fails to post then that's fine, as the mojo state should
       // already be destructed.
-      BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                              deleteNamespaceRunner.Release());
+      base::PostTaskWithTraits(FROM_HERE, {BrowserThread::UI},
+                               deleteNamespaceRunner.Release());
     }
   }
 }

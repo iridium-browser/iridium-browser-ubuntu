@@ -8,49 +8,46 @@
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
 #include "base/single_thread_task_runner.h"
+#include "components/scheduling_metrics/task_duration_metric_reporter.h"
 #include "third_party/blink/public/platform/scheduler/single_thread_idle_task_runner.h"
 #include "third_party/blink/public/platform/web_thread_type.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
-#include "third_party/blink/renderer/platform/scheduler/child/compositor_metrics_helper.h"
-#include "third_party/blink/renderer/platform/scheduler/public/non_main_thread_scheduler.h"
-#include "third_party/blink/renderer/platform/scheduler/util/task_duration_metric_reporter.h"
-
-namespace base {
-class Thread;
-}
+#include "third_party/blink/renderer/platform/scheduler/worker/compositor_metrics_helper.h"
+#include "third_party/blink/renderer/platform/scheduler/worker/non_main_thread_scheduler_impl.h"
 
 namespace blink {
 namespace scheduler {
 
 class PLATFORM_EXPORT CompositorThreadScheduler
-    : public NonMainThreadScheduler,
+    : public NonMainThreadSchedulerImpl,
       public SingleThreadIdleTaskRunner::Delegate {
  public:
-  CompositorThreadScheduler(
-      base::Thread* thread,
-      std::unique_ptr<TaskQueueManager> task_queue_manager);
+  explicit CompositorThreadScheduler(
+      std::unique_ptr<base::sequence_manager::SequenceManager>
+          sequence_manager);
 
   ~CompositorThreadScheduler() override;
 
-  // WorkerScheduler:
-  scoped_refptr<WorkerTaskQueue> DefaultTaskQueue() override;
-  void Init() override;
-  void OnTaskCompleted(WorkerTaskQueue* worker_task_queue,
-                       const TaskQueue::Task& task,
-                       base::TimeTicks start,
-                       base::TimeTicks end,
-                       base::Optional<base::TimeDelta> thread_time) override;
+  // NonMainThreadSchedulerImpl:
+  scoped_refptr<NonMainThreadTaskQueue> DefaultTaskQueue() override;
+  void OnTaskCompleted(NonMainThreadTaskQueue* worker_task_queue,
+                       const base::sequence_manager::Task& task,
+                       const base::sequence_manager::TaskQueue::TaskTiming&
+                           task_timing) override;
 
-  // ChildScheduler:
-  scoped_refptr<base::SingleThreadTaskRunner> DefaultTaskRunner() override;
+  // WebThreadScheduler:
   scoped_refptr<scheduler::SingleThreadIdleTaskRunner> IdleTaskRunner()
       override;
+  scoped_refptr<base::SingleThreadTaskRunner> V8TaskRunner() override;
+  scoped_refptr<base::SingleThreadTaskRunner> CompositorTaskRunner() override;
   scoped_refptr<base::SingleThreadTaskRunner> IPCTaskRunner() override;
+  scoped_refptr<base::SingleThreadTaskRunner> InputTaskRunner() override;
   bool ShouldYieldForHighPriorityWork() override;
   bool CanExceedIdleDeadlineIfRequired() const override;
   void AddTaskObserver(base::MessageLoop::TaskObserver* task_observer) override;
   void RemoveTaskObserver(
       base::MessageLoop::TaskObserver* task_observer) override;
+  void AddRAILModeObserver(WebRAILModeObserver*) override {}
   void Shutdown() override;
 
   // SingleThreadIdleTaskRunner::Delegate:
@@ -59,8 +56,13 @@ class PLATFORM_EXPORT CompositorThreadScheduler
   void DidProcessIdleTask() override;
   base::TimeTicks NowTicks() override;
 
+ protected:
+  // NonMainThreadScheduler:
+  void InitImpl() override;
+
  private:
-  base::Thread* thread_;
+  scoped_refptr<NonMainThreadTaskQueue> input_task_queue_;
+  scoped_refptr<base::SingleThreadTaskRunner> input_task_runner_;
 
   CompositorMetricsHelper compositor_metrics_helper_;
 

@@ -32,9 +32,8 @@ IndexedDBClient::IndexedDBClient(WorkerClients& clients)
     : Supplement<WorkerClients>(clients) {}
 
 IndexedDBClient* IndexedDBClient::From(ExecutionContext* context) {
-  if (context->IsDocument()) {
-    return Supplement<LocalFrame>::From<IndexedDBClient>(
-        ToDocument(*context).GetFrame());
+  if (auto* document = DynamicTo<Document>(context)) {
+    return Supplement<LocalFrame>::From<IndexedDBClient>(document->GetFrame());
   }
 
   WorkerClients* clients = ToWorkerGlobalScope(*context).Clients();
@@ -47,8 +46,7 @@ bool IndexedDBClient::AllowIndexedDB(ExecutionContext* context,
   DCHECK(context->IsContextThread());
   SECURITY_DCHECK(context->IsDocument() || context->IsWorkerGlobalScope());
 
-  if (context->IsDocument()) {
-    Document* document = ToDocument(context);
+  if (auto* document = DynamicTo<Document>(context)) {
     LocalFrame* frame = document->GetFrame();
     if (!frame)
       return false;
@@ -68,12 +66,6 @@ const char IndexedDBClient::kSupplementName[] = "IndexedDBClient";
 void IndexedDBClient::Trace(blink::Visitor* visitor) {
   Supplement<LocalFrame>::Trace(visitor);
   Supplement<WorkerClients>::Trace(visitor);
-}
-
-void IndexedDBClient::TraceWrappers(
-    const ScriptWrappableVisitor* visitor) const {
-  Supplement<LocalFrame>::TraceWrappers(visitor);
-  Supplement<WorkerClients>::TraceWrappers(visitor);
 }
 
 void ProvideIndexedDBClientTo(LocalFrame& frame, IndexedDBClient* client) {

@@ -7,6 +7,7 @@ include_rules = [
   "+components/nacl/common",
   "+components/network_session_configurator/common",
   "+components/pref_registry",
+  "+components/sessions",
   "+components/update_client",
   "+components/user_prefs",
   "+components/web_modal",
@@ -14,7 +15,6 @@ include_rules = [
 
   # Pieces of content_shell reused in app_shell.
   # TODO(jamescook): Eliminate these. http://crbug.com/438283
-  "+content/shell/browser/shell_application_mac.h",
   "+content/shell/browser/shell_browser_context.h",
   "+content/shell/browser/shell_devtools_manager_delegate.h",
   "+content/shell/browser/shell_url_request_context_getter.h",
@@ -31,6 +31,7 @@ include_rules = [
   "+net",
 
   "+ppapi",
+  "+services/network/session_cleanup_cookie_store.h",
   "+storage/browser/quota",
   "+third_party/skia/include",
 
@@ -39,6 +40,7 @@ include_rules = [
   "+ui/chromeos",
   "+ui/display",
   "+ui/ozone/public",
+  "+ui/platform_window",
   "+ui/views",
   "+ui/wm",
 

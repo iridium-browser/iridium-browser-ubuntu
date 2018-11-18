@@ -9,11 +9,11 @@
 
 #include "apps/switches.h"
 #include "base/macros.h"
-#include "chrome/browser/apps/app_browsertest_util.h"
 #include "chrome/browser/apps/app_shim/app_shim_host_manager_mac.h"
 #include "chrome/browser/apps/app_shim/extension_app_shim_handler_mac.h"
+#include "chrome/browser/apps/platform_apps/app_browsertest_util.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/browser_shutdown.h"
+#include "chrome/browser/lifetime/browser_shutdown.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/test/base/interactive_test_utils.h"
@@ -44,6 +44,9 @@ class FakeHost : public apps::AppShimHandler::Host {
   void OnAppRequestUserAttention(AppShimAttentionType type) override {}
   base::FilePath GetProfilePath() const override { return profile_path_; }
   std::string GetAppId() const override { return app_id_; }
+  views::BridgeFactoryHost* GetViewsBridgeFactoryHost() const override {
+    return nullptr;
+  }
 
  private:
   base::FilePath profile_path_;
@@ -121,7 +124,7 @@ IN_PROC_BROWSER_TEST_F(AppShimQuitTest, QuitWithKeyEvent) {
             atStart:NO];
 
   // This will time out if the event above does not terminate Chrome.
-  content::RunMessageLoop();
+  RunUntilBrowserProcessQuits();
 
   EXPECT_FALSE(handler_->FindHost(profile(), extension_id_));
   EXPECT_TRUE(browser_shutdown::IsTryingToQuit());

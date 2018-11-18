@@ -137,9 +137,9 @@ Network.NetworkPanel = class extends UI.Panel {
         SDK.ResourceTreeModel, SDK.ResourceTreeModel.Events.WillReloadPage, this._willReloadPage, this);
     SDK.targetManager.addModelListener(SDK.ResourceTreeModel, SDK.ResourceTreeModel.Events.Load, this._load, this);
     this._networkLogView.addEventListener(Network.NetworkLogView.Events.RequestSelected, this._onRequestSelected, this);
-    BrowserSDK.networkLog.addEventListener(BrowserSDK.NetworkLog.Events.RequestAdded, this._onUpdateRequest, this);
-    BrowserSDK.networkLog.addEventListener(BrowserSDK.NetworkLog.Events.RequestUpdated, this._onUpdateRequest, this);
-    BrowserSDK.networkLog.addEventListener(BrowserSDK.NetworkLog.Events.Reset, this._onNetworkLogReset, this);
+    SDK.networkLog.addEventListener(SDK.NetworkLog.Events.RequestAdded, this._onUpdateRequest, this);
+    SDK.networkLog.addEventListener(SDK.NetworkLog.Events.RequestUpdated, this._onUpdateRequest, this);
+    SDK.networkLog.addEventListener(SDK.NetworkLog.Events.Reset, this._onNetworkLogReset, this);
   }
 
   /**
@@ -191,7 +191,7 @@ Network.NetworkPanel = class extends UI.Panel {
     }
     this._panelToolbar.appendToolbarItem(UI.Toolbar.createActionButton(this._toggleRecordAction));
     const clearButton = new UI.ToolbarButton(Common.UIString('Clear'), 'largeicon-clear');
-    clearButton.addEventListener(UI.ToolbarButton.Events.Click, () => BrowserSDK.networkLog.reset(), this);
+    clearButton.addEventListener(UI.ToolbarButton.Events.Click, () => SDK.networkLog.reset(), this);
     this._panelToolbar.appendToolbarItem(clearButton);
     this._panelToolbar.appendSeparator();
     const recordFilmStripButton = new UI.ToolbarSettingToggle(
@@ -247,6 +247,7 @@ Network.NetworkPanel = class extends UI.Panel {
    */
   _createThrottlingConditionsSelect() {
     const toolbarItem = new UI.ToolbarComboBox(null);
+    toolbarItem.setTitle(ls`Throttling`);
     toolbarItem.setMaxWidth(160);
     MobileThrottling.throttlingManager().decorateSelectWithNetworkThrottling(toolbarItem.selectElement());
     return toolbarItem;
@@ -254,7 +255,7 @@ Network.NetworkPanel = class extends UI.Panel {
 
   _toggleRecording() {
     if (!this._preserveLogSetting.get() && !this._toggleRecordAction.toggled())
-      BrowserSDK.networkLog.reset();
+      SDK.networkLog.reset();
     this._toggleRecord(!this._toggleRecordAction.toggled());
   }
 
@@ -268,7 +269,7 @@ Network.NetworkPanel = class extends UI.Panel {
       this._filmStripRecorder.stopRecording(this._filmStripAvailable.bind(this));
     // TODO(einbinder) This should be moved to a setting/action that NetworkLog owns but NetworkPanel controls, but
     // always be present in the command menu.
-    BrowserSDK.networkLog.setIsRecording(toggled);
+    SDK.networkLog.setIsRecording(toggled);
   }
 
   /**
@@ -379,20 +380,6 @@ Network.NetworkPanel = class extends UI.Panel {
    */
   elementsToRestoreScrollPositionsFor() {
     return this._networkLogView.elementsToRestoreScrollPositionsFor();
-  }
-
-  /**
-   * @override
-   * @param {!KeyboardEvent} event
-   */
-  handleShortcut(event) {
-    if (this._networkItemView && event.keyCode === UI.KeyboardShortcut.Keys.Esc.code) {
-      this._showRequest(null);
-      event.handled = true;
-      return;
-    }
-
-    super.handleShortcut(event);
   }
 
   /**
@@ -702,7 +689,7 @@ Network.NetworkPanel.FilmStripRecorder = class {
 /**
  * @implements {UI.ActionDelegate}
  */
-Network.NetworkPanel.RecordActionDelegate = class {
+Network.NetworkPanel.ActionDelegate = class {
   /**
    * @override
    * @param {!UI.Context} context
@@ -712,8 +699,24 @@ Network.NetworkPanel.RecordActionDelegate = class {
   handleAction(context, actionId) {
     const panel = UI.context.flavor(Network.NetworkPanel);
     console.assert(panel && panel instanceof Network.NetworkPanel);
-    panel._toggleRecording();
-    return true;
+    switch (actionId) {
+      case 'network.toggle-recording':
+        panel._toggleRecording();
+        return true;
+      case 'network.hide-request-details':
+        if (!panel._networkItemView)
+          return false;
+        panel._showRequest(null);
+        return true;
+      case 'network.search':
+        const selection = UI.inspectorView.element.window().getSelection();
+        let queryCandidate = '';
+        if (selection.rangeCount)
+          queryCandidate = selection.toString().replace(/\r?\n.*/, '');
+        Network.SearchNetworkView.openSearch(queryCandidate);
+        return true;
+    }
+    return false;
   }
 };
 
@@ -764,32 +767,5 @@ Network.SearchNetworkView = class extends Search.SearchView {
    */
   createScope() {
     return new Network.NetworkSearchScope();
-  }
-};
-
-/**
- * @implements {UI.ActionDelegate}
- */
-Network.NetworkPanel.SearchActionDelegate = class {
-  /**
-   * @override
-   * @param {!UI.Context} context
-   * @param {string} actionId
-   * @return {boolean}
-   */
-  handleAction(context, actionId) {
-    this._showSearch();
-    return true;
-  }
-
-  /**
-   * @return {!Promise}
-   */
-  _showSearch() {
-    const selection = UI.inspectorView.element.window().getSelection();
-    let queryCandidate = '';
-    if (selection.rangeCount)
-      queryCandidate = selection.toString().replace(/\r?\n.*/, '');
-    return Network.SearchNetworkView.openSearch(queryCandidate);
   }
 };

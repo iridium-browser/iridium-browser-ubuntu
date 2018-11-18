@@ -59,6 +59,9 @@ const base::FilePath::CharType kDeviceExtensionLocalCache[] =
 const base::FilePath::CharType kSigninProfileComponentPolicy[] =
     FILE_PATH_LITERAL("/var/cache/signin_profile_component_policy");
 
+const base::FilePath::CharType kPreinstalledComponents[] =
+    FILE_PATH_LITERAL("/mnt/stateful_partition/unencrypted/");
+
 bool PathProvider(int key, base::FilePath* result) {
   switch (key) {
     case FILE_DEFAULT_APP_ORDER:
@@ -103,6 +106,9 @@ bool PathProvider(int key, base::FilePath* result) {
     case DIR_SIGNIN_PROFILE_COMPONENT_POLICY:
       *result = base::FilePath(kSigninProfileComponentPolicy);
       break;
+    case DIR_PREINSTALLED_COMPONENTS:
+      *result = base::FilePath(kPreinstalledComponents);
+      break;
     default:
       return false;
   }
@@ -112,7 +118,7 @@ bool PathProvider(int key, base::FilePath* result) {
 }  // namespace
 
 void RegisterPathProvider() {
-  PathService::RegisterProvider(PathProvider, PATH_START, PATH_END);
+  base::PathService::RegisterProvider(PathProvider, PATH_START, PATH_END);
 }
 
 void RegisterStubPathOverrides(const base::FilePath& stubs_dir) {
@@ -120,44 +126,34 @@ void RegisterStubPathOverrides(const base::FilePath& stubs_dir) {
   // Override these paths on the desktop, so that enrollment and cloud policy
   // work and can be tested.
   base::FilePath parent = base::MakeAbsoluteFilePath(stubs_dir);
-  PathService::Override(
-      DIR_USER_POLICY_KEYS,
-      parent.AppendASCII("stub_user_policy"));
+  base::PathService::Override(DIR_USER_POLICY_KEYS,
+                              parent.AppendASCII("stub_user_policy"));
   const bool is_absolute = true;
   const bool create = false;
-  PathService::OverrideAndCreateIfNeeded(
-      FILE_OWNER_KEY,
-      parent.AppendASCII("stub_owner.key"),
-      is_absolute,
+  base::PathService::OverrideAndCreateIfNeeded(
+      FILE_OWNER_KEY, parent.AppendASCII("stub_owner.key"), is_absolute,
       create);
-  PathService::OverrideAndCreateIfNeeded(
-      FILE_INSTALL_ATTRIBUTES,
-      parent.AppendASCII("stub_install_attributes.pb"),
-      is_absolute,
+  base::PathService::OverrideAndCreateIfNeeded(
+      FILE_INSTALL_ATTRIBUTES, parent.AppendASCII("stub_install_attributes.pb"),
+      is_absolute, create);
+  base::PathService::OverrideAndCreateIfNeeded(
+      FILE_MACHINE_INFO, parent.AppendASCII("stub_machine-info"), is_absolute,
       create);
-  PathService::OverrideAndCreateIfNeeded(
-      FILE_MACHINE_INFO,
-      parent.AppendASCII("stub_machine-info"),
-      is_absolute,
-      create);
-  PathService::OverrideAndCreateIfNeeded(
-      FILE_VPD,
-      parent.AppendASCII("stub_vpd"),
-      is_absolute,
-      create);
-  PathService::Override(
+  base::PathService::OverrideAndCreateIfNeeded(
+      FILE_VPD, parent.AppendASCII("stub_vpd"), is_absolute, create);
+  base::PathService::Override(
       DIR_DEVICE_LOCAL_ACCOUNT_EXTENSIONS,
       parent.AppendASCII("stub_device_local_account_extensions"));
-  PathService::Override(
+  base::PathService::Override(
       DIR_DEVICE_LOCAL_ACCOUNT_EXTERNAL_DATA,
       parent.AppendASCII("stub_device_local_account_external_data"));
-  PathService::Override(
+  base::PathService::Override(
       DIR_DEVICE_LOCAL_ACCOUNT_COMPONENT_POLICY,
       parent.AppendASCII("stub_device_local_account_component_policy"));
-  PathService::Override(
+  base::PathService::Override(
       DIR_DEVICE_EXTENSION_LOCAL_CACHE,
       parent.AppendASCII("stub_device_local_extension_cache"));
-  PathService::Override(
+  base::PathService::Override(
       DIR_SIGNIN_PROFILE_COMPONENT_POLICY,
       parent.AppendASCII("stub_signin_profile_component_policy"));
 }

@@ -30,12 +30,12 @@
 
 #include "third_party/blink/renderer/modules/filesystem/directory_reader_sync.h"
 
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
 #include "third_party/blink/renderer/modules/filesystem/directory_entry.h"
 #include "third_party/blink/renderer/modules/filesystem/directory_entry_sync.h"
 #include "third_party/blink/renderer/modules/filesystem/entry_sync.h"
 #include "third_party/blink/renderer/modules/filesystem/file_entry_sync.h"
 #include "third_party/blink/renderer/modules/filesystem/file_system_callbacks.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 
 namespace blink {
 
@@ -78,7 +78,7 @@ class DirectoryReaderSync::ErrorCallbackHelper final
     ErrorCallbackBase::Trace(visitor);
   }
 
-  void Invoke(FileError::ErrorCode error) override {
+  void Invoke(base::File::Error error) override {
     reader_->error_code_ = error;
   }
 
@@ -94,18 +94,16 @@ DirectoryReaderSync::DirectoryReaderSync(DOMFileSystemBase* file_system,
 
 EntrySyncHeapVector DirectoryReaderSync::readEntries(
     ExceptionState& exception_state) {
-  if (!callbacks_id_) {
-    callbacks_id_ = Filesystem()->ReadDirectory(
+  if (!has_called_read_directory_) {
+    Filesystem()->ReadDirectory(
         this, full_path_, EntriesCallbackHelper::Create(this),
         ErrorCallbackHelper::Create(this), DOMFileSystemBase::kSynchronous);
+    has_called_read_directory_ = true;
   }
 
-  if (error_code_ == FileError::kOK && has_more_entries_ &&
-      entries_.IsEmpty()) {
-    CHECK(Filesystem()->WaitForAdditionalResult(callbacks_id_));
-  }
+  DCHECK(!has_more_entries_);
 
-  if (error_code_ != FileError::kOK) {
+  if (error_code_ != base::File::FILE_OK) {
     FileError::ThrowDOMException(exception_state, error_code_);
     return EntrySyncHeapVector();
   }

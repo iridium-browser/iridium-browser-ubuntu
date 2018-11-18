@@ -18,6 +18,10 @@
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/password_manager/core/browser/android_affiliation/fake_affiliation_api.h"
 #include "components/password_manager/core/browser/android_affiliation/mock_affiliation_consumer.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
+#include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
+#include "services/network/test/test_network_connection_tracker.h"
+#include "services/network/test/test_url_loader_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -47,7 +51,10 @@ class AffiliationServiceTest : public testing::Test {
   AffiliationServiceTest()
       : main_task_runner_(new base::TestSimpleTaskRunner),
         main_task_runner_handle_(main_task_runner_),
-        background_task_runner_(new base::TestMockTimeTaskRunner) {}
+        background_task_runner_(new base::TestMockTimeTaskRunner),
+        test_shared_loader_factory_(
+            base::MakeRefCounted<network::WeakWrapperSharedURLLoaderFactory>(
+                &test_url_loader_factory_)) {}
   ~AffiliationServiceTest() override {}
 
  protected:
@@ -73,8 +80,13 @@ class AffiliationServiceTest : public testing::Test {
   void SetUp() override {
     base::FilePath database_path;
     ASSERT_TRUE(CreateTemporaryFile(&database_path));
+    network::TestNetworkConnectionTracker* network_connection_tracker =
+        network::TestNetworkConnectionTracker::GetInstance();
+    network_connection_tracker->SetConnectionType(
+        network::mojom::ConnectionType::CONNECTION_ETHERNET);
     service_.reset(new AffiliationService(background_task_runner()));
-    service_->Initialize(nullptr, database_path);
+    service_->Initialize(test_shared_loader_factory_,
+                         network_connection_tracker, database_path);
     // Note: the background task runner is purposely not pumped here, so that
     // the tests also verify that the service can be used synchronously right
     // away after having been constructed.
@@ -92,6 +104,8 @@ class AffiliationServiceTest : public testing::Test {
   scoped_refptr<base::TestSimpleTaskRunner> main_task_runner_;
   base::ThreadTaskRunnerHandle main_task_runner_handle_;
   scoped_refptr<base::TestMockTimeTaskRunner> background_task_runner_;
+  network::TestURLLoaderFactory test_url_loader_factory_;
+  scoped_refptr<network::SharedURLLoaderFactory> test_shared_loader_factory_;
 
   ScopedFakeAffiliationAPI fake_affiliation_api_;
   MockAffiliationConsumer mock_consumer_;

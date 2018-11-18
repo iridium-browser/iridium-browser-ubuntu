@@ -25,15 +25,6 @@
 }
 
 - (void)setScript:(NSString*)script {
-  // The translation script uses performance.now() for metrics, which is not
-  // supported except on iOS 8.0. To make the translation script work on these
-  // iOS versions, add some JavaScript to |script| that defines an
-  // implementation of performance.now().
-  NSString* const kPerformancePlaceholder =
-      @"var performance = window['performance'] || {};"
-      @"performance.now = performance['now'] ||"
-      @"(function () { return Date.now(); });\n";
-  script = [kPerformancePlaceholder stringByAppendingString:script];
   NSString* path =
       [base::mac::FrameworkBundle() pathForResource:@"translate_ios"
                                              ofType:@"js"];
@@ -43,18 +34,10 @@
                                                 encoding:NSUTF8StringEncoding
                                                    error:&error];
   DCHECK(!error && [content length]);
-  script = [script stringByAppendingString:content];
+  // Prepend so callbacks defined in translate_ios.js can be installed.
+  script = [content stringByAppendingString:script];
+
   _translationScript = [script copy];
-}
-
-- (void)injectWaitUntilTranslateReadyScript {
-  [self.receiver executeJavaScript:@"__gCrWeb.translate.checkTranslateReady()"
-                 completionHandler:nil];
-}
-
-- (void)injectTranslateStatusScript {
-  [self.receiver executeJavaScript:@"__gCrWeb.translate.checkTranslateStatus()"
-                 completionHandler:nil];
 }
 
 - (void)startTranslationFrom:(const std::string&)source
@@ -73,6 +56,24 @@
 
 #pragma mark -
 #pragma mark CRWJSInjectionManager methods
+
+- (void)inject {
+  NSString* script = [self injectionContent];
+
+  // Reset any state if previously injected.
+  if ([self hasBeenInjected]) {
+    NSString* resetScript =
+        @"try {"
+         "  cr.googleTranslate.revert();"
+         "} catch (e) {"
+         "}";
+    script = [resetScript stringByAppendingString:script];
+  }
+
+  // The scripts need to be re-injected to ensure that the logic that
+  // initializes translate can be restarted properly.
+  [[self receiver] injectScript:script forClass:[self class]];
+}
 
 - (NSString*)injectionContent {
   DCHECK(_translationScript);

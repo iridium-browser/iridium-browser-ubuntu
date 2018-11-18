@@ -14,6 +14,7 @@
 #include "src/globals.h"
 #include "src/handles.h"
 #include "src/machine-type.h"
+#include "src/maybe-handles.h"
 #include "src/objects.h"
 #include "src/type-hints.h"
 #include "src/vector-slot-pair.h"
@@ -23,6 +24,7 @@ namespace v8 {
 namespace internal {
 
 // Forward declarations.
+enum class AbortReason : uint8_t;
 class Zone;
 
 namespace compiler {
@@ -37,6 +39,10 @@ size_t hash_value(BaseTaggedness);
 
 std::ostream& operator<<(std::ostream&, BaseTaggedness);
 
+size_t hash_value(LoadSensitivity);
+
+std::ostream& operator<<(std::ostream&, LoadSensitivity);
+
 // An access descriptor for loads/stores of fixed structures like field
 // accesses of heap objects. Accesses from either tagged or untagged base
 // pointers are supported; untagging is done automatically during lowering.
@@ -45,27 +51,31 @@ struct FieldAccess {
   int offset;                     // offset of the field, without tag.
   MaybeHandle<Name> name;         // debugging only.
   MaybeHandle<Map> map;           // map of the field value (if known).
-  Type* type;                     // type of the field.
+  Type type;                      // type of the field.
   MachineType machine_type;       // machine type of the field.
   WriteBarrierKind write_barrier_kind;  // write barrier hint.
+  LoadSensitivity load_sensitivity;     // load safety for poisoning.
 
   FieldAccess()
       : base_is_tagged(kTaggedBase),
         offset(0),
         type(Type::None()),
         machine_type(MachineType::None()),
-        write_barrier_kind(kFullWriteBarrier) {}
+        write_barrier_kind(kFullWriteBarrier),
+        load_sensitivity(LoadSensitivity::kUnsafe) {}
 
   FieldAccess(BaseTaggedness base_is_tagged, int offset, MaybeHandle<Name> name,
-              MaybeHandle<Map> map, Type* type, MachineType machine_type,
-              WriteBarrierKind write_barrier_kind)
+              MaybeHandle<Map> map, Type type, MachineType machine_type,
+              WriteBarrierKind write_barrier_kind,
+              LoadSensitivity load_sensitivity = LoadSensitivity::kUnsafe)
       : base_is_tagged(base_is_tagged),
         offset(offset),
         name(name),
         map(map),
         type(type),
         machine_type(machine_type),
-        write_barrier_kind(write_barrier_kind) {}
+        write_barrier_kind(write_barrier_kind),
+        load_sensitivity(load_sensitivity) {}
 
   int tag() const { return base_is_tagged == kTaggedBase ? kHeapObjectTag : 0; }
 };
@@ -90,24 +100,28 @@ void Operator1<FieldAccess>::PrintParameter(std::ostream& os,
 struct ElementAccess {
   BaseTaggedness base_is_tagged;  // specifies if the base pointer is tagged.
   int header_size;                // size of the header, without tag.
-  Type* type;                     // type of the element.
+  Type type;                      // type of the element.
   MachineType machine_type;       // machine type of the element.
   WriteBarrierKind write_barrier_kind;  // write barrier hint.
+  LoadSensitivity load_sensitivity;     // load safety for poisoning.
 
   ElementAccess()
       : base_is_tagged(kTaggedBase),
         header_size(0),
         type(Type::None()),
         machine_type(MachineType::None()),
-        write_barrier_kind(kFullWriteBarrier) {}
+        write_barrier_kind(kFullWriteBarrier),
+        load_sensitivity(LoadSensitivity::kUnsafe) {}
 
-  ElementAccess(BaseTaggedness base_is_tagged, int header_size, Type* type,
-                MachineType machine_type, WriteBarrierKind write_barrier_kind)
+  ElementAccess(BaseTaggedness base_is_tagged, int header_size, Type type,
+                MachineType machine_type, WriteBarrierKind write_barrier_kind,
+                LoadSensitivity load_sensitivity = LoadSensitivity::kUnsafe)
       : base_is_tagged(base_is_tagged),
         header_size(header_size),
         type(type),
         machine_type(machine_type),
-        write_barrier_kind(write_barrier_kind) {}
+        write_barrier_kind(write_barrier_kind),
+        load_sensitivity(load_sensitivity) {}
 
   int tag() const { return base_is_tagged == kTaggedBase ? kHeapObjectTag : 0; }
 };
@@ -149,6 +163,29 @@ std::ostream& operator<<(std::ostream&, CheckParameters const&);
 
 CheckParameters const& CheckParametersOf(Operator const*) V8_WARN_UNUSED_RESULT;
 
+class CheckIfParameters final {
+ public:
+  explicit CheckIfParameters(DeoptimizeReason reason,
+                             const VectorSlotPair& feedback)
+      : reason_(reason), feedback_(feedback) {}
+
+  VectorSlotPair const& feedback() const { return feedback_; }
+  DeoptimizeReason reason() const { return reason_; }
+
+ private:
+  DeoptimizeReason reason_;
+  VectorSlotPair feedback_;
+};
+
+bool operator==(CheckIfParameters const&, CheckIfParameters const&);
+
+size_t hash_value(CheckIfParameters const&);
+
+std::ostream& operator<<(std::ostream&, CheckIfParameters const&);
+
+CheckIfParameters const& CheckIfParametersOf(Operator const*)
+    V8_WARN_UNUSED_RESULT;
+
 enum class CheckFloat64HoleMode : uint8_t {
   kNeverReturnHole,  // Never return the hole (deoptimize instead).
   kAllowReturnHole   // Allow to return the hole (signaling NaN).
@@ -158,8 +195,31 @@ size_t hash_value(CheckFloat64HoleMode);
 
 std::ostream& operator<<(std::ostream&, CheckFloat64HoleMode);
 
-CheckFloat64HoleMode CheckFloat64HoleModeOf(const Operator*)
+class CheckFloat64HoleParameters {
+ public:
+  CheckFloat64HoleParameters(CheckFloat64HoleMode mode,
+                             VectorSlotPair const& feedback)
+      : mode_(mode), feedback_(feedback) {}
+
+  CheckFloat64HoleMode mode() const { return mode_; }
+  VectorSlotPair const& feedback() const { return feedback_; }
+
+ private:
+  CheckFloat64HoleMode mode_;
+  VectorSlotPair feedback_;
+};
+
+CheckFloat64HoleParameters const& CheckFloat64HoleParametersOf(Operator const*)
     V8_WARN_UNUSED_RESULT;
+
+std::ostream& operator<<(std::ostream&, CheckFloat64HoleParameters const&);
+
+size_t hash_value(CheckFloat64HoleParameters const&);
+
+bool operator==(CheckFloat64HoleParameters const&,
+                CheckFloat64HoleParameters const&);
+bool operator!=(CheckFloat64HoleParameters const&,
+                CheckFloat64HoleParameters const&);
 
 enum class CheckTaggedInputMode : uint8_t {
   kNumber,
@@ -168,7 +228,7 @@ enum class CheckTaggedInputMode : uint8_t {
 
 size_t hash_value(CheckTaggedInputMode);
 
-std::ostream& operator<<(std::ostream&, CheckTaggedInputMode);
+V8_EXPORT_PRIVATE std::ostream& operator<<(std::ostream&, CheckTaggedInputMode);
 
 class CheckTaggedInputParameters {
  public:
@@ -370,7 +430,7 @@ Handle<Map> DoubleMapParameterOf(const Operator* op) V8_WARN_UNUSED_RESULT;
 Handle<Map> FastMapParameterOf(const Operator* op) V8_WARN_UNUSED_RESULT;
 
 // Parameters for TransitionAndStoreNonNumberElement.
-Type* ValueTypeParameterOf(const Operator* op) V8_WARN_UNUSED_RESULT;
+Type ValueTypeParameterOf(const Operator* op) V8_WARN_UNUSED_RESULT;
 
 // A hint for speculative number operations.
 enum class NumberOperationHint : uint8_t {
@@ -415,14 +475,14 @@ bool IsRestLengthOf(const Operator* op) V8_WARN_UNUSED_RESULT;
 
 class AllocateParameters {
  public:
-  AllocateParameters(Type* type, PretenureFlag pretenure)
+  AllocateParameters(Type type, PretenureFlag pretenure)
       : type_(type), pretenure_(pretenure) {}
 
-  Type* type() const { return type_; }
+  Type type() const { return type_; }
   PretenureFlag pretenure() const { return pretenure_; }
 
  private:
-  Type* type_;
+  Type type_;
   PretenureFlag pretenure_;
 };
 
@@ -436,7 +496,7 @@ bool operator==(AllocateParameters const&, AllocateParameters const&);
 
 PretenureFlag PretenureFlagOf(const Operator* op) V8_WARN_UNUSED_RESULT;
 
-Type* AllocateTypeOf(const Operator* op) V8_WARN_UNUSED_RESULT;
+Type AllocateTypeOf(const Operator* op) V8_WARN_UNUSED_RESULT;
 
 UnicodeEncoding UnicodeEncodingOf(const Operator*) V8_WARN_UNUSED_RESULT;
 
@@ -556,6 +616,7 @@ class V8_EXPORT_PRIVATE SimplifiedOperatorBuilder final
 
   const Operator* ToBoolean();
 
+  const Operator* StringConcat();
   const Operator* StringEqual();
   const Operator* StringLessThan();
   const Operator* StringLessThanOrEqual();
@@ -581,13 +642,17 @@ class V8_EXPORT_PRIVATE SimplifiedOperatorBuilder final
   const Operator* PlainPrimitiveToFloat64();
 
   const Operator* ChangeTaggedSignedToInt32();
+  const Operator* ChangeTaggedSignedToInt64();
   const Operator* ChangeTaggedToInt32();
+  const Operator* ChangeTaggedToInt64();
   const Operator* ChangeTaggedToUint32();
   const Operator* ChangeTaggedToFloat64();
   const Operator* ChangeTaggedToTaggedSigned();
   const Operator* ChangeInt31ToTaggedSigned();
   const Operator* ChangeInt32ToTagged();
+  const Operator* ChangeInt64ToTagged();
   const Operator* ChangeUint32ToTagged();
+  const Operator* ChangeUint64ToTagged();
   const Operator* ChangeFloat64ToTagged(CheckForMinusZeroMode);
   const Operator* ChangeFloat64ToTaggedPointer();
   const Operator* ChangeTaggedToBit();
@@ -597,16 +662,17 @@ class V8_EXPORT_PRIVATE SimplifiedOperatorBuilder final
   const Operator* TruncateTaggedToBit();
   const Operator* TruncateTaggedPointerToBit();
 
-  const Operator* MaskIndexWithBound();
+  const Operator* PoisonIndex();
   const Operator* CompareMaps(ZoneHandleSet<Map>);
   const Operator* MapGuard(ZoneHandleSet<Map> maps);
 
   const Operator* CheckBounds(const VectorSlotPair& feedback);
   const Operator* CheckEqualsInternalizedString();
   const Operator* CheckEqualsSymbol();
-  const Operator* CheckFloat64Hole(CheckFloat64HoleMode);
+  const Operator* CheckFloat64Hole(CheckFloat64HoleMode, VectorSlotPair const&);
   const Operator* CheckHeapObject();
-  const Operator* CheckIf(DeoptimizeReason deoptimize_reason);
+  const Operator* CheckIf(DeoptimizeReason deoptimize_reason,
+                          const VectorSlotPair& feedback = VectorSlotPair());
   const Operator* CheckInternalizedString();
   const Operator* CheckMaps(CheckMapsFlags, ZoneHandleSet<Map>,
                             const VectorSlotPair& = VectorSlotPair());
@@ -625,6 +691,8 @@ class V8_EXPORT_PRIVATE SimplifiedOperatorBuilder final
   const Operator* CheckedInt32Mul(CheckForMinusZeroMode);
   const Operator* CheckedInt32Sub();
   const Operator* CheckedInt32ToTaggedSigned(const VectorSlotPair& feedback);
+  const Operator* CheckedInt64ToInt32(const VectorSlotPair& feedback);
+  const Operator* CheckedInt64ToTaggedSigned(const VectorSlotPair& feedback);
   const Operator* CheckedTaggedSignedToInt32(const VectorSlotPair& feedback);
   const Operator* CheckedTaggedToFloat64(CheckTaggedInputMode,
                                          const VectorSlotPair& feedback);
@@ -638,6 +706,8 @@ class V8_EXPORT_PRIVATE SimplifiedOperatorBuilder final
   const Operator* CheckedUint32Mod();
   const Operator* CheckedUint32ToInt32(const VectorSlotPair& feedback);
   const Operator* CheckedUint32ToTaggedSigned(const VectorSlotPair& feedback);
+  const Operator* CheckedUint64ToInt32(const VectorSlotPair& feedback);
+  const Operator* CheckedUint64ToTaggedSigned(const VectorSlotPair& feedback);
 
   const Operator* ConvertReceiver(ConvertReceiverMode);
 
@@ -650,6 +720,7 @@ class V8_EXPORT_PRIVATE SimplifiedOperatorBuilder final
   const Operator* ObjectIsDetectableCallable();
   const Operator* ObjectIsMinusZero();
   const Operator* ObjectIsNaN();
+  const Operator* NumberIsNaN();
   const Operator* ObjectIsNonCallable();
   const Operator* ObjectIsNumber();
   const Operator* ObjectIsReceiver();
@@ -679,9 +750,6 @@ class V8_EXPORT_PRIVATE SimplifiedOperatorBuilder final
   // new-cons-string length, first, second
   const Operator* NewConsString();
 
-  // array-buffer-was-neutered buffer
-  const Operator* ArrayBufferWasNeutered();
-
   // ensure-writable-fast-elements object, elements
   const Operator* EnsureWritableFastElements();
 
@@ -692,9 +760,8 @@ class V8_EXPORT_PRIVATE SimplifiedOperatorBuilder final
   // transition-elements-kind object, from-map, to-map
   const Operator* TransitionElementsKind(ElementsTransition transition);
 
-  const Operator* Allocate(Type* type, PretenureFlag pretenure = NOT_TENURED);
-  const Operator* AllocateRaw(Type* type,
-                              PretenureFlag pretenure = NOT_TENURED);
+  const Operator* Allocate(Type type, PretenureFlag pretenure = NOT_TENURED);
+  const Operator* AllocateRaw(Type type, PretenureFlag pretenure = NOT_TENURED);
 
   const Operator* LoadFieldByIndex();
   const Operator* LoadField(FieldAccess const&);
@@ -717,16 +784,24 @@ class V8_EXPORT_PRIVATE SimplifiedOperatorBuilder final
 
   // store-element [base + index], object value, only with fast arrays.
   const Operator* TransitionAndStoreNonNumberElement(Handle<Map> fast_map,
-                                                     Type* value_type);
+                                                     Type value_type);
 
   // load-typed-element buffer, [base + external + index]
   const Operator* LoadTypedElement(ExternalArrayType const&);
 
+  // load-data-view-element buffer, [base + index]
+  const Operator* LoadDataViewElement(ExternalArrayType const&);
+
   // store-typed-element buffer, [base + external + index], value
   const Operator* StoreTypedElement(ExternalArrayType const&);
 
+  // store-data-view-element buffer, [base + index], value
+  const Operator* StoreDataViewElement(ExternalArrayType const&);
+
   // Abort (for terminating execution on internal error).
   const Operator* RuntimeAbort(AbortReason reason);
+
+  const Operator* DateNow();
 
  private:
   Zone* zone() const { return zone_; }

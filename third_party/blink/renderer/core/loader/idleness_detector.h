@@ -6,9 +6,9 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_LOADER_IDLENESS_DETECTOR_H_
 
 #include "base/macros.h"
+#include "base/task/sequence_manager/task_time_observer.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/scheduler/base/task_time_observer.h"
 #include "third_party/blink/renderer/platform/timer.h"
 
 namespace blink {
@@ -16,14 +16,14 @@ namespace blink {
 class LocalFrame;
 class ResourceFetcher;
 
-// IdlenessDetector observes network request count everytime a load is
-// finshed after DOMContentLoadedEventEnd is fired, and emit network almost idle
-// signal when there are no more than 2 network connection active in 0.5 second,
-// and emit network idle signal when there is 0 network connection active in 0.5
-// second.
+// IdlenessDetector observes the resource request count every time a load is
+// finshed after DOMContentLoadedEventEnd is fired. It emits a network almost
+// idle signal when there are no more than 2 network connections active in 0.5
+// seconds, and a network idle signal when there are 0 network connections
+// active in 0.5 seconds.
 class CORE_EXPORT IdlenessDetector
     : public GarbageCollectedFinalized<IdlenessDetector>,
-      public scheduler::TaskTimeObserver {
+      public base::sequence_manager::TaskTimeObserver {
  public:
   explicit IdlenessDetector(LocalFrame*);
 
@@ -50,9 +50,10 @@ class CORE_EXPORT IdlenessDetector
   static constexpr TimeDelta kNetworkQuietWatchdog = TimeDelta::FromSeconds(2);
   static constexpr int kNetworkQuietMaximumConnections = 2;
 
-  // scheduler::TaskTimeObserver implementation
-  void WillProcessTask(double start_time) override;
-  void DidProcessTask(double start_time, double end_time) override;
+  // TaskTimeObserver implementation.
+  void WillProcessTask(base::TimeTicks start_time) override;
+  void DidProcessTask(base::TimeTicks start_time,
+                      base::TimeTicks end_time) override;
 
   void Stop();
   void NetworkQuietTimerFired(TimerBase*);
@@ -63,6 +64,7 @@ class CORE_EXPORT IdlenessDetector
   bool in_network_0_quiet_period_ = true;
   bool in_network_2_quiet_period_ = true;
 
+  TimeDelta network_quiet_window_ = kNetworkQuietWindow;
   // Store the accumulated time of network quiet.
   TimeTicks network_0_quiet_;
   TimeTicks network_2_quiet_;

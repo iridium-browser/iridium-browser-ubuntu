@@ -12,10 +12,12 @@
 #include "base/path_service.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/post_task.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "components/offline_pages/content/renovations/render_frame_script_injector.h"
 #include "components/offline_pages/core/renovations/page_renovation_loader.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/isolated_world_ids.h"
@@ -133,10 +135,10 @@ void PageRenovatorBrowserTest::SetUpOnMainThread() {
   // load our renovation script.
   base::FilePath pak_dir;
 #if defined(OS_ANDROID)
-  PathService::Get(base::DIR_ANDROID_APP_DATA, &pak_dir);
+  base::PathService::Get(base::DIR_ANDROID_APP_DATA, &pak_dir);
   pak_dir = pak_dir.Append(FILE_PATH_LITERAL("paks"));
 #else
-  PathService::Get(base::DIR_MODULE, &pak_dir);
+  base::PathService::Get(base::DIR_MODULE, &pak_dir);
 #endif  // OS_ANDROID
   base::FilePath pak_file =
       pak_dir.Append(FILE_PATH_LITERAL("components_tests_resources.pak"));
@@ -191,8 +193,7 @@ void PageRenovatorBrowserTest::InitializeWithRealRenovations(
 void PageRenovatorBrowserTest::QuitRunLoop() {
   base::Closure quit_task =
       content::GetDeferredQuitTaskForRunLoop(run_loop_.get());
-  content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
-                                   quit_task);
+  base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI}, quit_task);
 }
 
 IN_PROC_BROWSER_TEST_F(PageRenovatorBrowserTest, CorrectRenovationsRun) {
@@ -200,7 +201,7 @@ IN_PROC_BROWSER_TEST_F(PageRenovatorBrowserTest, CorrectRenovationsRun) {
   InitializeWithTestingRenovations(GURL("http://foo.bar/"));
   // This should run FooPageRenovation and AlwaysRenovation, but not
   // BarPageRenovation.
-  page_renovator_->RunRenovations(base::Bind(
+  page_renovator_->RunRenovations(base::BindOnce(
       &PageRenovatorBrowserTest::QuitRunLoop, base::Unretained(this)));
   content::RunThisRunLoop(run_loop_.get());
 
@@ -212,9 +213,9 @@ IN_PROC_BROWSER_TEST_F(PageRenovatorBrowserTest, CorrectRenovationsRun) {
   std::unique_ptr<base::Value> alwaysResult =
       content::ExecuteScriptAndGetValue(render_frame_, kCheckAlwaysScript);
 
-  ASSERT_TRUE(fooResult.get() != nullptr);
-  ASSERT_TRUE(barResult.get() != nullptr);
-  ASSERT_TRUE(alwaysResult.get() != nullptr);
+  ASSERT_TRUE(fooResult != nullptr);
+  ASSERT_TRUE(barResult != nullptr);
+  ASSERT_TRUE(alwaysResult != nullptr);
   EXPECT_TRUE(fooResult->GetBool());
   EXPECT_FALSE(barResult->GetBool());
   EXPECT_TRUE(alwaysResult->GetBool());
@@ -223,7 +224,7 @@ IN_PROC_BROWSER_TEST_F(PageRenovatorBrowserTest, CorrectRenovationsRun) {
 IN_PROC_BROWSER_TEST_F(PageRenovatorBrowserTest, WikipediaRenovationRuns) {
   Navigate(kWikipediaTestPagePath);
   InitializeWithRealRenovations(GURL("http://en.m.wikipedia.org/"));
-  page_renovator_->RunRenovations(base::Bind(
+  page_renovator_->RunRenovations(base::BindOnce(
       &PageRenovatorBrowserTest::QuitRunLoop, base::Unretained(this)));
   content::RunThisRunLoop(run_loop_.get());
 
@@ -233,8 +234,8 @@ IN_PROC_BROWSER_TEST_F(PageRenovatorBrowserTest, WikipediaRenovationRuns) {
       content::ExecuteScriptAndGetValue(render_frame_,
                                         kCheckUnfoldHeadingScript);
 
-  ASSERT_TRUE(unfoldBlockResult.get() != nullptr);
-  ASSERT_TRUE(unfoldHeadingResult.get() != nullptr);
+  ASSERT_TRUE(unfoldBlockResult != nullptr);
+  ASSERT_TRUE(unfoldHeadingResult != nullptr);
   EXPECT_TRUE(unfoldBlockResult->GetBool());
   EXPECT_TRUE(unfoldHeadingResult->GetBool());
 }

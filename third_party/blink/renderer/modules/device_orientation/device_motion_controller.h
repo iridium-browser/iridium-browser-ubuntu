@@ -5,12 +5,14 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_DEVICE_ORIENTATION_DEVICE_MOTION_CONTROLLER_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_DEVICE_ORIENTATION_DEVICE_MOTION_CONTROLLER_H_
 
+#include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/frame/device_single_window_event_controller.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
 
 namespace blink {
 
 class Event;
+class DeviceMotionEventPump;
 
 class MODULES_EXPORT DeviceMotionController final
     : public DeviceSingleWindowEventController,
@@ -28,12 +30,12 @@ class MODULES_EXPORT DeviceMotionController final
   void DidAddEventListener(LocalDOMWindow*,
                            const AtomicString& event_type) override;
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  private:
   explicit DeviceMotionController(Document&);
 
-  // Inherited from DeviceEventControllerBase.
+  // Inherited from PlatformEventController.
   void RegisterWithDispatcher() override;
   void UnregisterWithDispatcher() override;
   bool HasLastData() override;
@@ -42,6 +44,8 @@ class MODULES_EXPORT DeviceMotionController final
   Event* LastEvent() const override;
   const AtomicString& EventTypeName() const override;
   bool IsNullEvent(Event*) const override;
+
+  Member<DeviceMotionEventPump> motion_event_pump_;
 };
 
 }  // namespace blink

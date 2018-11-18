@@ -7,7 +7,7 @@
 
 #include "third_party/blink/public/mojom/service_worker/service_worker_error_type.mojom-blink.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
-#include "third_party/blink/renderer/modules/serviceworkers/respond_with_observer.h"
+#include "third_party/blink/renderer/modules/service_worker/respond_with_observer.h"
 
 namespace blink {
 
@@ -28,10 +28,13 @@ class MODULES_EXPORT PaymentRequestRespondWithObserver final
                                                    WaitUntilObserver*);
 
   void OnResponseRejected(mojom::ServiceWorkerResponseError) override;
-  void OnResponseFulfilled(const ScriptValue&) override;
+  void OnResponseFulfilled(const ScriptValue&,
+                           ExceptionState::ContextType,
+                           const char* interface_name,
+                           const char* property_name) override;
   void OnNoResponse() override;
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  private:
   PaymentRequestRespondWithObserver(ExecutionContext*,

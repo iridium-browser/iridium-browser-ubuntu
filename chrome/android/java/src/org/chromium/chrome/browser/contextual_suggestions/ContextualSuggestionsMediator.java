@@ -4,21 +4,41 @@
 
 package org.chromium.chrome.browser.contextual_suggestions;
 
+import static org.chromium.chrome.browser.dependency_injection.ChromeCommonQualifiers.LAST_USED_PROFILE;
+
+import android.content.Context;
+import android.os.Handler;
+import android.os.SystemClock;
 import android.support.annotation.Nullable;
 import android.text.TextUtils;
 import android.view.View;
 
+import org.chromium.base.ContextUtils;
 import org.chromium.base.VisibleForTesting;
+import org.chromium.base.metrics.RecordHistogram;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.ChromeFeatureList;
+import org.chromium.chrome.browser.compositor.layouts.EmptyOverviewModeObserver;
+import org.chromium.chrome.browser.compositor.layouts.LayoutManager;
+import org.chromium.chrome.browser.compositor.layouts.LayoutManagerChrome;
+import org.chromium.chrome.browser.compositor.layouts.OverviewModeBehavior;
+import org.chromium.chrome.browser.contextual_suggestions.ContextualSuggestionsBridge.ContextualSuggestionsResult;
+import org.chromium.chrome.browser.dependency_injection.ActivityScope;
 import org.chromium.chrome.browser.feature_engagement.TrackerFactory;
 import org.chromium.chrome.browser.fullscreen.ChromeFullscreenManager;
 import org.chromium.chrome.browser.fullscreen.ChromeFullscreenManager.FullscreenListener;
+import org.chromium.chrome.browser.fullscreen.FullscreenManager;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
-import org.chromium.chrome.browser.util.MathUtils;
+import org.chromium.chrome.browser.toolbar.ToolbarManager;
+import org.chromium.chrome.browser.toolbar.ToolbarPhone;
+import org.chromium.chrome.browser.util.AccessibilityUtil;
+import org.chromium.chrome.browser.widget.ListMenuButton;
+import org.chromium.chrome.browser.widget.bottomsheet.BottomSheet;
 import org.chromium.chrome.browser.widget.bottomsheet.BottomSheet.StateChangeReason;
 import org.chromium.chrome.browser.widget.bottomsheet.BottomSheetObserver;
 import org.chromium.chrome.browser.widget.bottomsheet.EmptyBottomSheetObserver;
+import org.chromium.chrome.browser.widget.textbubble.ImageTextBubble;
 import org.chromium.chrome.browser.widget.textbubble.TextBubble;
 import org.chromium.components.feature_engagement.EventConstants;
 import org.chromium.components.feature_engagement.FeatureConstants;
@@ -29,19 +49,34 @@ import org.chromium.ui.widget.ViewRectProvider;
 import java.util.Collections;
 import java.util.List;
 
+import javax.inject.Inject;
+import javax.inject.Named;
+import javax.inject.Provider;
+
 /**
  * A mediator for the contextual suggestions UI component responsible for interacting with
  * the contextual suggestions C++ components (via a bridge), updating the model, and communicating
  * with the component coordinator(s).
  */
-class ContextualSuggestionsMediator implements EnabledStateMonitor.Observer, FetchHelper.Delegate {
+@ActivityScope
+class ContextualSuggestionsMediator
+        implements EnabledStateMonitor.Observer, FetchHelper.Delegate, ListMenuButton.Delegate {
+    private static final int IPH_AUTO_DISMISS_TIMEOUT_MS = 6000;
+    private static final int IPH_AUTO_DISMISS_ACCESSIBILITY_TIMEOUT_MS = 10000;
+    private static boolean sOverrideIPHTimeoutForTesting;
+
     private final Profile mProfile;
     private final TabModelSelector mTabModelSelector;
-    private final ContextualSuggestionsCoordinator mCoordinator;
     private final ContextualSuggestionsModel mModel;
     private final ChromeFullscreenManager mFullscreenManager;
-    private final View mIphParentView;
+    private final ToolbarManager mToolbarManager;
     private final EnabledStateMonitor mEnabledStateMonitor;
+    private final Handler mHandler = new Handler();
+    private final Provider<ContextualSuggestionsSource> mSuggestionSourceProvider;
+    private @Nullable final OverviewModeBehavior mOverviewModeBehavior;
+    private final boolean mRequireReverseScrollForIPH;
+
+    private ContextualSuggestionsCoordinator mCoordinator;
 
     private @Nullable ContextualSuggestionsSource mSuggestionsSource;
     private @Nullable FetchHelper mFetchHelper;
@@ -49,49 +84,80 @@ class ContextualSuggestionsMediator implements EnabledStateMonitor.Observer, Fet
     private @Nullable BottomSheetObserver mSheetObserver;
     private @Nullable TextBubble mHelpBubble;
 
-    private boolean mDidSuggestionsShowForTab;
-    private boolean mHasRecordedPeekEventForTab;
+    private boolean mModelPreparedForCurrentTab;
+    private boolean mSuggestionsSetOnBottomSheet;
+    private boolean mHasRecordedButtonShownForTab;
+
+    /**
+     * Whether the browser controls have fully hidden at least once since the last time
+     * #clearSuggestions() was called. This is used as a proxy for whether the user has scrolled
+     * down on the current page.
+     */
+    private boolean mHaveBrowserControlsFullyHidden;
+    private int mFullscreenToken = FullscreenManager.INVALID_TOKEN;
+
+    private boolean mHasPeekDelayPassed;
+
+    /** Whether the content sheet is observed to be opened for the first time. */
+    private boolean mHasSheetBeenOpened;
+
+    /**
+     * Whether in-product help may be shown. This is set to false if the IPH system indicates that
+     * it wouldn't trigger our IPH if requested and when we attempt to show the IPH bubble.
+     */
+    private boolean mCanShowIph;
 
     /**
      * Construct a new {@link ContextualSuggestionsMediator}.
-     * @param profile The regular {@link Profile}.
+     * @param profile The last used {@link Profile}.
      * @param tabModelSelector The {@link TabModelSelector} for the containing activity.
      * @param fullscreenManager The {@link ChromeFullscreenManager} to listen for browser controls
-     *                          events.
-     * @param coordinator The {@link ContextualSuggestionsCoordinator} for the component.
+     *         events.
      * @param model The {@link ContextualSuggestionsModel} for the component.
-     * @param iphParentView The parent {@link View} used to anchor an in-product help bubble.
+     * @param toolbarManager The {@link ToolbarManager} for the containing activity.
+     * @param layoutManager The {@link LayoutManager} used to retrieve the
+     *         {@link OverviewModeBehavior} if it exists.
+     * @param enabledStateMonitor The state monitor that will alert the mediator if the enabled
+     *         state for contextual suggestions changes.
+     * @param suggestionSourceProvider The provider of {@link ContextualSuggestionsSource}
+     *         instances.
      */
-    ContextualSuggestionsMediator(Profile profile, TabModelSelector tabModelSelector,
-            ChromeFullscreenManager fullscreenManager, ContextualSuggestionsCoordinator coordinator,
-            ContextualSuggestionsModel model, View iphParentView) {
-        mProfile = profile;
+    @Inject
+    ContextualSuggestionsMediator(@Named(LAST_USED_PROFILE) Profile profile,
+            TabModelSelector tabModelSelector, ChromeFullscreenManager fullscreenManager,
+            ContextualSuggestionsModel model, ToolbarManager toolbarManager,
+            LayoutManager layoutManager, EnabledStateMonitor enabledStateMonitor,
+            Provider<ContextualSuggestionsSource> suggestionSourceProvider) {
+        mProfile = profile.getOriginalProfile();
         mTabModelSelector = tabModelSelector;
-        mCoordinator = coordinator;
         mModel = model;
         mFullscreenManager = fullscreenManager;
-        mIphParentView = iphParentView;
 
-        // Create a state monitor that will alert this mediator if the enabled state for contextual
-        // suggestions changes.
-        mEnabledStateMonitor =
-                ContextualSuggestionsDependencyFactory.getInstance().createEnabledStateMonitor(
-                        this);
+        mToolbarManager = toolbarManager;
+        mSuggestionSourceProvider = suggestionSourceProvider;
 
-        fullscreenManager.addListener(new FullscreenListener() {
+        mEnabledStateMonitor = enabledStateMonitor;
+        mEnabledStateMonitor.addObserver(this);
+        if (mEnabledStateMonitor.getEnabledState()) {
+            enable();
+        }
+
+        mFullscreenManager.addListener(new FullscreenListener() {
             @Override
             public void onContentOffsetChanged(float offset) {}
 
             @Override
             public void onControlsOffsetChanged(
                     float topOffset, float bottomOffset, boolean needsAnimate) {
-                // When the controls scroll completely off-screen, the suggestions are "shown" but
-                // remain hidden since their offset from the bottom of the screen is determined by
-                // the top controls.
-                if (!mDidSuggestionsShowForTab && mModel.hasSuggestions()
-                        && areBrowserControlsHidden() && mSuggestionsSource != null) {
-                    showContentInSheet();
+                if (!mHaveBrowserControlsFullyHidden) {
+                    mHaveBrowserControlsFullyHidden =
+                            mFullscreenManager.areBrowserControlsOffScreen();
+                } else if (mCanShowIph && mRequireReverseScrollForIPH
+                        && mFullscreenManager.areBrowserControlsFullyVisible()) {
+                    mHandler.postDelayed(() -> maybeShowHelpBubble(),
+                            ToolbarPhone.LOC_BAR_WIDTH_CHANGE_ANIMATION_DURATION_MS);
                 }
+                reportToolbarButtonShown();
             }
 
             @Override
@@ -100,12 +166,34 @@ class ContextualSuggestionsMediator implements EnabledStateMonitor.Observer, Fet
             @Override
             public void onBottomControlsHeightChanged(int bottomControlsHeight) {}
         });
+
+        if (layoutManager instanceof LayoutManagerChrome) {
+            mOverviewModeBehavior = (LayoutManagerChrome) layoutManager;
+            mOverviewModeBehavior.addOverviewModeObserver(new EmptyOverviewModeObserver() {
+                @Override
+                public void onOverviewModeFinishedHiding() {
+                    reportToolbarButtonShown();
+                }
+            });
+        } else {
+            mOverviewModeBehavior = null;
+        }
+
+        mRequireReverseScrollForIPH = ChromeFeatureList.isEnabled(
+                ChromeFeatureList.CONTEXTUAL_SUGGESTIONS_IPH_REVERSE_SCROLL);
+    }
+
+    /**
+     * Sets the {@link ContextualSuggestionsCoordinator} for bidirectional communication.
+     */
+    void initialize(ContextualSuggestionsCoordinator coordinator) {
+        // TODO(pshmakov): get rid of this circular dependency by establishing an observer-observable
+        // relationship between Mediator and Coordinator;
+        mCoordinator = coordinator;
     }
 
     /** Destroys the mediator. */
     void destroy() {
-        mEnabledStateMonitor.destroy();
-
         if (mFetchHelper != null) {
             mFetchHelper.destroy();
             mFetchHelper = null;
@@ -117,40 +205,42 @@ class ContextualSuggestionsMediator implements EnabledStateMonitor.Observer, Fet
         }
 
         if (mHelpBubble != null) mHelpBubble.dismiss();
-    }
 
-    /** Called when accessibility mode changes. */
-    void onAccessibilityModeChanged() {
-        mEnabledStateMonitor.onAccessibilityModeChanged();
-    }
-
-    /**
-     * @return Whether the browser controls are currently completely hidden.
-     */
-    private boolean areBrowserControlsHidden() {
-        return MathUtils.areFloatsEqual(-mFullscreenManager.getTopControlOffset(),
-                mFullscreenManager.getTopControlsHeight());
+        mEnabledStateMonitor.removeObserver(this);
     }
 
     @Override
     public void onEnabledStateChanged(boolean enabled) {
         if (enabled) {
-            mSuggestionsSource = ContextualSuggestionsDependencyFactory.getInstance()
-                                         .createContextualSuggestionSource(mProfile);
-            mFetchHelper = ContextualSuggestionsDependencyFactory.getInstance().createFetchHelper(
-                    this, mTabModelSelector);
+            enable();
         } else {
-            clearSuggestions();
+            disable();
+        }
+    }
 
-            if (mFetchHelper != null) {
-                mFetchHelper.destroy();
-                mFetchHelper = null;
-            }
+    private void enable() {
+        mSuggestionsSource = mSuggestionSourceProvider.get();
+        mFetchHelper = new FetchHelper(this, mTabModelSelector);
 
-            if (mSuggestionsSource != null) {
-                mSuggestionsSource.destroy();
-                mSuggestionsSource = null;
-            }
+        Tracker tracker = TrackerFactory.getTrackerForProfile(mProfile);
+        tracker.addOnInitializedCallback(success -> {
+            if (!success) return;
+            mCanShowIph =
+                    tracker.wouldTriggerHelpUI(FeatureConstants.CONTEXTUAL_SUGGESTIONS_FEATURE);
+        });
+    }
+
+    private void disable() {
+        clearSuggestions();
+
+        if (mFetchHelper != null) {
+            mFetchHelper.destroy();
+            mFetchHelper = null;
+        }
+
+        if (mSuggestionsSource != null) {
+            mSuggestionsSource.destroy();
+            mSuggestionsSource = null;
         }
     }
 
@@ -169,21 +259,84 @@ class ContextualSuggestionsMediator implements EnabledStateMonitor.Observer, Fet
         reportEvent(ContextualSuggestionsEvent.FETCH_REQUESTED);
         mCurrentRequestUrl = url;
         mSuggestionsSource.fetchSuggestions(url, (suggestionsResult) -> {
-            if (mSuggestionsSource == null) return;
+            if (mTabModelSelector.getCurrentTab() == null
+                    || mTabModelSelector.getCurrentTab().getWebContents() == null
+                    || mSuggestionsSource == null) {
+                return;
+            }
+            assert mFetchHelper != null;
 
             // Avoiding double fetches causing suggestions for incorrect context.
             if (!TextUtils.equals(url, mCurrentRequestUrl)) return;
 
             List<ContextualSuggestionsCluster> clusters = suggestionsResult.getClusters();
 
-            if (clusters.size() > 0 && clusters.get(0).getSuggestions().size() > 0) {
-                preloadContentInSheet(
-                        generateClusterList(clusters), suggestionsResult.getPeekText());
-                // If the controls are already off-screen, show the suggestions immediately so they
-                // are available on reverse scroll.
-                if (areBrowserControlsHidden()) showContentInSheet();
+            if (clusters.isEmpty() || clusters.get(0).getSuggestions().isEmpty()) return;
+
+            for (ContextualSuggestionsCluster cluster : clusters) {
+                cluster.buildChildren();
             }
+
+            prepareModel(clusters, suggestionsResult.getPeekText());
+
+            mToolbarManager.enableExperimentalButton(
+                    view -> onToolbarButtonClicked(),
+                    R.drawable.contextual_suggestions,
+                    R.string.contextual_suggestions_button_description);
+            RecordHistogram.recordBooleanHistogram(
+                    "ContextualSuggestions.ResultsReturnedInOverviewMode", isOverviewModeVisible());
+            reportToolbarButtonShown();
         });
+    }
+
+    private void onToolbarButtonClicked() {
+        if (mSuggestionsSetOnBottomSheet || !mModelPreparedForCurrentTab) return;
+
+        maybeShowContentInSheet();
+        mCoordinator.showSuggestions(mSuggestionsSource);
+        mCoordinator.expandBottomSheet();
+    }
+
+    // TODO(twellington): Use peek criteria to determine when to show toolbar button or remove
+    //                   entirely.
+    private void setPeekConditions(ContextualSuggestionsResult suggestionsResult) {
+        PeekConditions peekConditions = suggestionsResult.getPeekConditions();
+        long remainingDelay =
+                mFetchHelper.getFetchTimeBaselineMillis(mTabModelSelector.getCurrentTab())
+                + Math.round(peekConditions.getMinimumSecondsOnPage() * 1000)
+                - SystemClock.uptimeMillis();
+
+        if (remainingDelay <= 0) {
+            // Don't postDelayed if the minimum delay has passed so that the suggestions may
+            // be shown through the following call to show contents in the bottom sheet.
+            mHasPeekDelayPassed = true;
+        } else {
+            // Once delay expires, the bottom sheet can be peeked if the browser controls are
+            // already hidden, or the next time the browser controls are fully hidden and
+            // reshown. Note that this triggering on the latter case is handled by
+            // FullscreenListener#onControlsOffsetChanged() in this class.
+            mHandler.postDelayed(() -> {
+                mHasPeekDelayPassed = true;
+                maybeShowContentInSheet();
+            }, remainingDelay);
+        }
+    }
+
+    private void reportToolbarButtonShown() {
+        if (mHasRecordedButtonShownForTab || !mFullscreenManager.areBrowserControlsFullyVisible()
+                || isOverviewModeVisible() || mSuggestionsSource == null
+                || !mModel.hasSuggestions()) {
+            return;
+        }
+
+        mHasRecordedButtonShownForTab = true;
+        reportEvent(ContextualSuggestionsEvent.UI_BUTTON_SHOWN);
+        TrackerFactory.getTrackerForProfile(mProfile).notifyEvent(
+                EventConstants.CONTEXTUAL_SUGGESTIONS_BUTTON_SHOWN);
+        if (mCanShowIph && !mRequireReverseScrollForIPH) {
+            mHandler.postDelayed(() -> maybeShowHelpBubble(),
+                    ToolbarPhone.LOC_BAR_WIDTH_CHANGE_ANIMATION_DURATION_MS);
+        }
     }
 
     @Override
@@ -199,78 +352,127 @@ class ContextualSuggestionsMediator implements EnabledStateMonitor.Observer, Fet
         }
     }
 
+    // ListMenuButton.Delegate implementation.
+    @Override
+    public ListMenuButton.Item[] getItems() {
+        final Context context = ContextUtils.getApplicationContext();
+        if (ChromeFeatureList.isEnabled(ChromeFeatureList.CONTEXTUAL_SUGGESTIONS_OPT_OUT)) {
+            return new ListMenuButton.Item[] {
+                    new ListMenuButton.Item(context, R.string.menu_preferences, true),
+                    new ListMenuButton.Item(context, R.string.menu_send_feedback, true)};
+        } else {
+            return new ListMenuButton.Item[] {
+                    new ListMenuButton.Item(context, R.string.menu_send_feedback, true)};
+        }
+    }
+
+    @Override
+    public void onItemSelected(ListMenuButton.Item item) {
+        if (item.getTextId() == R.string.menu_preferences) {
+            mCoordinator.showSettings();
+        } else if (item.getTextId() == R.string.menu_send_feedback) {
+            mCoordinator.showFeedback();
+        } else {
+            assert false : "Unhandled item detected.";
+        }
+    }
+
+    private void removeSuggestionsFromSheet() {
+        if (mSheetObserver != null) {
+            mCoordinator.removeBottomSheetObserver(mSheetObserver);
+            mSheetObserver = null;
+        }
+        mCoordinator.removeSuggestions();
+
+        // Wait until suggestions are fully removed to reset {@code mSuggestionsSetOnBottomSheet}.
+        mCoordinator.addBottomSheetObserver(new EmptyBottomSheetObserver() {
+            @Override
+            public void onSheetContentChanged(@Nullable BottomSheet.BottomSheetContent newContent) {
+                if (!(newContent instanceof ContextualSuggestionsBottomSheetContent)) {
+                    mSuggestionsSetOnBottomSheet = false;
+                    mCoordinator.removeBottomSheetObserver(this);
+                }
+            }
+        });
+    }
+
     /**
      * Called when suggestions are cleared either due to the user explicitly dismissing
      * suggestions via the close button or due to the FetchHelper signaling state should
      * be cleared.
      */
     private void clearSuggestions() {
-        // TODO(twellington): Does this signal need to go back to FetchHelper?
-        mDidSuggestionsShowForTab = false;
-        mHasRecordedPeekEventForTab = false;
-        mModel.setClusterList(new ClusterList(Collections.emptyList()));
+        mModelPreparedForCurrentTab = false;
+
+        // Remove suggestions before clearing model state so that views don't respond to model
+        // changes while suggestions are hiding. See https://crbug.com/840579.
+        removeSuggestionsFromSheet();
+        mToolbarManager.disableExperimentalButton();
+
+        mHasRecordedButtonShownForTab = false;
+        mHasSheetBeenOpened = false;
+        mHandler.removeCallbacksAndMessages(null);
+        mHasPeekDelayPassed = false;
+        mHaveBrowserControlsFullyHidden = false;
+        mModel.setClusterList(Collections.emptyList());
         mModel.setCloseButtonOnClickListener(null);
-        mModel.setDefaultToolbarClickListener(null);
+        mModel.setMenuButtonDelegate(null);
         mModel.setTitle(null);
-        mCoordinator.removeSuggestions();
         mCurrentRequestUrl = "";
 
         if (mSuggestionsSource != null) mSuggestionsSource.clearState();
 
-        if (mSheetObserver != null) {
-            mCoordinator.removeBottomSheetObserver(mSheetObserver);
-        }
-
         if (mHelpBubble != null) mHelpBubble.dismiss();
     }
 
-    private void preloadContentInSheet(ClusterList clusters, String title) {
+    private void prepareModel(List<ContextualSuggestionsCluster> clusters, String title) {
         if (mSuggestionsSource == null) return;
 
         mModel.setClusterList(clusters);
         mModel.setCloseButtonOnClickListener(view -> {
             TrackerFactory.getTrackerForProfile(mProfile).notifyEvent(
                     EventConstants.CONTEXTUAL_SUGGESTIONS_DISMISSED);
-            reportEvent(ContextualSuggestionsEvent.UI_CLOSED);
+            @ContextualSuggestionsEvent
+            int openedEvent =
+                    mHasSheetBeenOpened ? ContextualSuggestionsEvent.UI_DISMISSED_AFTER_OPEN
+                                        : ContextualSuggestionsEvent.UI_DISMISSED_WITHOUT_OPEN;
+            reportEvent(openedEvent);
+            removeSuggestionsFromSheet();
 
-            clearSuggestions();
         });
-        mModel.setDefaultToolbarClickListener(view -> mCoordinator.expandBottomSheet());
-        mModel.setTitle(title);
-        mCoordinator.preloadContentInSheet();
+        mModel.setMenuButtonDelegate(this);
+        mModel.setTitle(!TextUtils.isEmpty(title)
+                        ? title
+                        : ContextUtils.getApplicationContext().getResources().getString(
+                                  R.string.contextual_suggestions_button_description));
+
+        mModelPreparedForCurrentTab = true;
     }
 
-    private void showContentInSheet() {
-        mDidSuggestionsShowForTab = true;
+    private void maybeShowContentInSheet() {
+        if (!mModel.hasSuggestions() || mSuggestionsSource == null) return;
+
+        mSuggestionsSetOnBottomSheet = true;
 
         mSheetObserver = new EmptyBottomSheetObserver() {
             @Override
-            public void onSheetFullyPeeked() {
-                if (mHasRecordedPeekEventForTab) return;
-
-                mHasRecordedPeekEventForTab = true;
-                TrackerFactory.getTrackerForProfile(mProfile).notifyEvent(
-                        EventConstants.CONTEXTUAL_SUGGESTIONS_PEEKED);
-                reportEvent(ContextualSuggestionsEvent.UI_PEEK_REVERSE_SCROLL);
-
-                maybeShowHelpBubble();
-            }
-
-            @Override
-            public void onSheetOffsetChanged(float heightFraction) {
+            public void onSheetOffsetChanged(float heightFraction, float offsetPx) {
                 if (mHelpBubble != null) mHelpBubble.dismiss();
             }
 
             @Override
             public void onSheetOpened(@StateChangeReason int reason) {
-                TrackerFactory.getTrackerForProfile(mProfile).notifyEvent(
-                        EventConstants.CONTEXTUAL_SUGGESTIONS_OPENED);
+                if (!mHasSheetBeenOpened) {
+                    mHasSheetBeenOpened = true;
+                    TrackerFactory.getTrackerForProfile(mProfile).notifyEvent(
+                            EventConstants.CONTEXTUAL_SUGGESTIONS_OPENED);
+                    reportEvent(ContextualSuggestionsEvent.UI_OPENED);
+                }
+            }
 
-                mCoordinator.showSuggestions(mSuggestionsSource);
-                mCoordinator.removeBottomSheetObserver(this);
-                mSheetObserver = null;
-
-                reportEvent(ContextualSuggestionsEvent.UI_OPENED);
+            @Override
+            public void onSheetClosed(int reason) {
+                removeSuggestionsFromSheet();
             }
         };
 
@@ -279,25 +481,47 @@ class ContextualSuggestionsMediator implements EnabledStateMonitor.Observer, Fet
     }
 
     private void maybeShowHelpBubble() {
+        View anchorView = mToolbarManager.getExperimentalButtonView();
+        if (!mCanShowIph || mToolbarManager.isUrlBarFocused() || anchorView == null
+                || anchorView.getVisibility() != View.VISIBLE
+                || !mFullscreenManager.areBrowserControlsFullyVisible()
+                || mSuggestionsSource == null || !mModel.hasSuggestions()) {
+            return;
+        }
+
+        // Either we'll fail to show or we'll successfully show. Either way, we can't show IPH
+        // after this attempt.
+        mCanShowIph = false;
         Tracker tracker = TrackerFactory.getTrackerForProfile(mProfile);
         if (!tracker.shouldTriggerHelpUI(FeatureConstants.CONTEXTUAL_SUGGESTIONS_FEATURE)) {
             return;
         }
 
-        ViewRectProvider rectProvider = new ViewRectProvider(mIphParentView);
-        rectProvider.setInsetPx(0,
-                mIphParentView.getResources().getDimensionPixelSize(R.dimen.toolbar_shadow_height),
-                0, 0);
-        mHelpBubble = new TextBubble(mIphParentView.getContext(), mIphParentView,
-                R.string.contextual_suggestions_in_product_help,
-                R.string.contextual_suggestions_in_product_help, rectProvider);
+        ViewRectProvider rectProvider = new ViewRectProvider(anchorView);
+        rectProvider.setInsetPx(0, 0, 0,
+                anchorView.getResources().getDimensionPixelOffset(
+                        R.dimen.text_bubble_menu_anchor_y_inset));
 
-        mHelpBubble.setDismissOnTouchInteraction(true);
+        mHelpBubble = new ImageTextBubble(anchorView.getContext(), anchorView,
+                R.string.contextual_suggestions_in_product_help,
+                R.string.contextual_suggestions_in_product_help_accessibility, true, rectProvider,
+                R.drawable.ic_logo_googleg_24dp);
+
+        mHelpBubble.setDismissOnTouchInteraction(false);
+        if (!sOverrideIPHTimeoutForTesting) {
+            mHelpBubble.setAutoDismissTimeout(AccessibilityUtil.isAccessibilityEnabled()
+                            ? IPH_AUTO_DISMISS_ACCESSIBILITY_TIMEOUT_MS
+                            : IPH_AUTO_DISMISS_TIMEOUT_MS);
+        }
         mHelpBubble.addOnDismissListener(() -> {
             tracker.dismissed(FeatureConstants.CONTEXTUAL_SUGGESTIONS_FEATURE);
+            mFullscreenManager.getBrowserVisibilityDelegate().hideControlsPersistent(
+                    mFullscreenToken);
+            mFullscreenToken = FullscreenManager.INVALID_TOKEN;
             mHelpBubble = null;
         });
-
+        mFullscreenToken =
+                mFullscreenManager.getBrowserVisibilityDelegate().showControlsPersistent();
         mHelpBubble.show();
     }
 
@@ -314,16 +538,23 @@ class ContextualSuggestionsMediator implements EnabledStateMonitor.Observer, Fet
         mSuggestionsSource.reportEvent(mTabModelSelector.getCurrentTab().getWebContents(), event);
     }
 
-    private ClusterList generateClusterList(List<ContextualSuggestionsCluster> clusters) {
-        for (ContextualSuggestionsCluster cluster : clusters) {
-            cluster.buildChildren();
-        }
-
-        return new ClusterList(clusters);
+    private boolean isOverviewModeVisible() {
+        return mOverviewModeBehavior != null && mOverviewModeBehavior.overviewVisible();
     }
 
     @VisibleForTesting
-    void showContentInSheetForTesting() {
-        showContentInSheet();
+    void showContentInSheetForTesting(boolean disablePeekDelay) {
+        if (disablePeekDelay) mHasPeekDelayPassed = true;
+        maybeShowContentInSheet();
+    }
+
+    @VisibleForTesting
+    TextBubble getHelpBubbleForTesting() {
+        return mHelpBubble;
+    }
+
+    @VisibleForTesting
+    static void setOverrideIPHTimeoutForTesting(boolean override) {
+        sOverrideIPHTimeoutForTesting = override;
     }
 }

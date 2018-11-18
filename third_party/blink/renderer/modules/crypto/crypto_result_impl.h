@@ -33,8 +33,8 @@
 
 #include "third_party/blink/public/platform/web_crypto.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
+#include "third_party/blink/renderer/platform/bindings/exception_code.h"
 #include "third_party/blink/renderer/platform/crypto_result.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 
@@ -57,7 +57,7 @@ class MODULES_EXPORT CryptoResultImpl final : public CryptoResult {
  public:
   static CryptoResultImpl* Create(ScriptState*);
 
-  ~CryptoResultImpl();
+  ~CryptoResultImpl() override;
 
   void CompleteWithError(WebCryptoErrorType, const WebString&) override;
   void CompleteWithBuffer(const void* bytes, unsigned bytes_size) override;
@@ -73,7 +73,7 @@ class MODULES_EXPORT CryptoResultImpl final : public CryptoResult {
 
   WebCryptoResult Result() { return WebCryptoResult(this, cancel_.get()); }
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  private:
   class Resolver;

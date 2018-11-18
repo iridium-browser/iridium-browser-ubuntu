@@ -15,8 +15,10 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/post_task.h"
 #include "base/values.h"
 #include "chrome/browser/devtools/devtools_window.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/devtools_external_agent_proxy.h"
@@ -43,10 +45,8 @@ const char kPageReloadCommand[] = "{'method': 'Page.reload', id: 1}";
 const char kWebViewSocketPrefix[] = "webview_devtools_remote";
 
 static void ScheduleTaskDefault(const base::Closure& task) {
-  BrowserThread::PostDelayedTask(
-      BrowserThread::UI,
-      FROM_HERE,
-      task,
+  base::PostDelayedTaskWithTraits(
+      FROM_HERE, {BrowserThread::UI}, task,
       base::TimeDelta::FromMilliseconds(kPollingIntervalMs));
 }
 
@@ -365,11 +365,15 @@ class DevToolsDeviceDiscovery::DiscoveryRequest
     : public base::RefCountedThreadSafe<DiscoveryRequest,
                                         BrowserThread::DeleteOnUIThread> {
  public:
-  DiscoveryRequest(AndroidDeviceManager* device_manager,
-                   const DevToolsDeviceDiscovery::DeviceListCallback& callback);
+  static void Start(
+      AndroidDeviceManager* device_manager,
+      const DevToolsDeviceDiscovery::DeviceListCallback& callback);
+
  private:
   friend struct BrowserThread::DeleteOnThread<BrowserThread::UI>;
   friend class base::DeleteHelper<DiscoveryRequest>;
+  explicit DiscoveryRequest(
+      const DevToolsDeviceDiscovery::DeviceListCallback& callback);
   virtual ~DiscoveryRequest();
 
   void ReceivedDevices(const AndroidDeviceManager::Devices& devices);
@@ -387,13 +391,20 @@ class DevToolsDeviceDiscovery::DiscoveryRequest
   DevToolsDeviceDiscovery::CompleteDevices complete_devices_;
 };
 
-DevToolsDeviceDiscovery::DiscoveryRequest::DiscoveryRequest(
+// static
+void DevToolsDeviceDiscovery::DiscoveryRequest::Start(
     AndroidDeviceManager* device_manager,
+    const DevToolsDeviceDiscovery::DeviceListCallback& callback) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  auto request = base::WrapRefCounted(new DiscoveryRequest(callback));
+  device_manager->QueryDevices(
+      base::Bind(&DiscoveryRequest::ReceivedDevices, request));
+}
+
+DevToolsDeviceDiscovery::DiscoveryRequest::DiscoveryRequest(
     const DevToolsDeviceDiscovery::DeviceListCallback& callback)
     : callback_(callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  device_manager->QueryDevices(
-      base::Bind(&DiscoveryRequest::ReceivedDevices, this));
 }
 
 DevToolsDeviceDiscovery::DiscoveryRequest::~DiscoveryRequest() {
@@ -417,7 +428,7 @@ void DevToolsDeviceDiscovery::DiscoveryRequest::ReceivedDeviceInfo(
   scoped_refptr<RemoteDevice> remote_device =
       new RemoteDevice(device->serial(), device_info);
   complete_devices_.push_back(std::make_pair(device, remote_device));
-  for (RemoteBrowsers::iterator it = remote_device->browsers().begin();
+  for (auto it = remote_device->browsers().begin();
        it != remote_device->browsers().end(); ++it) {
     device->SendJsonRequest(
         (*it)->socket(),
@@ -552,10 +563,8 @@ DevToolsDeviceDiscovery::RemoteDevice::RemoteDevice(
       model_(device_info.model),
       connected_(device_info.connected),
       screen_size_(device_info.screen_size) {
-  for (std::vector<AndroidDeviceManager::BrowserInfo>::const_iterator it =
-      device_info.browser_info.begin();
-      it != device_info.browser_info.end();
-      ++it) {
+  for (auto it = device_info.browser_info.begin();
+       it != device_info.browser_info.end(); ++it) {
     browsers_.push_back(new RemoteBrowser(serial, *it));
   }
 }
@@ -599,10 +608,9 @@ DevToolsDeviceDiscovery::CreateBrowserAgentHost(
 
 void DevToolsDeviceDiscovery::RequestDeviceList() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  new DiscoveryRequest(
-      device_manager_,
-      base::Bind(&DevToolsDeviceDiscovery::ReceivedDeviceList,
-                 weak_factory_.GetWeakPtr()));
+  DiscoveryRequest::Start(
+      device_manager_, base::Bind(&DevToolsDeviceDiscovery::ReceivedDeviceList,
+                                  weak_factory_.GetWeakPtr()));
 }
 
 void DevToolsDeviceDiscovery::ReceivedDeviceList(

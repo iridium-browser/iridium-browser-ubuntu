@@ -14,7 +14,7 @@
 #include "base/metrics/histogram_functions.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/threading/thread_restrictions.h"
+#include "base/threading/scoped_blocking_call.h"
 #include "build/build_config.h"
 
 #if defined(OS_ANDROID)
@@ -31,14 +31,14 @@ static_assert(File::FROM_BEGIN == SEEK_SET && File::FROM_CURRENT == SEEK_CUR &&
 namespace {
 
 #if defined(OS_BSD) || defined(OS_MACOSX) || defined(OS_NACL) || \
-    defined(OS_ANDROID) && __ANDROID_API__ < 21
+  defined(OS_FUCHSIA) || (defined(OS_ANDROID) && __ANDROID_API__ < 21)
 int CallFstat(int fd, stat_wrapper_t *sb) {
-  AssertBlockingAllowed();
+  ScopedBlockingCall scoped_blocking_call(BlockingType::MAY_BLOCK);
   return fstat(fd, sb);
 }
 #else
 int CallFstat(int fd, stat_wrapper_t *sb) {
-  AssertBlockingAllowed();
+  ScopedBlockingCall scoped_blocking_call(BlockingType::MAY_BLOCK);
   return fstat64(fd, sb);
 }
 #endif
@@ -179,12 +179,12 @@ void File::Close() {
     return;
 
   SCOPED_FILE_TRACE("Close");
-  AssertBlockingAllowed();
+  ScopedBlockingCall scoped_blocking_call(BlockingType::MAY_BLOCK);
   file_.reset();
 }
 
 int64_t File::Seek(Whence whence, int64_t offset) {
-  AssertBlockingAllowed();
+  ScopedBlockingCall scoped_blocking_call(BlockingType::MAY_BLOCK);
   DCHECK(IsValid());
 
   SCOPED_FILE_TRACE_WITH_SIZE("Seek", offset);
@@ -201,7 +201,7 @@ int64_t File::Seek(Whence whence, int64_t offset) {
 }
 
 int File::Read(int64_t offset, char* data, int size) {
-  AssertBlockingAllowed();
+  ScopedBlockingCall scoped_blocking_call(BlockingType::MAY_BLOCK);
   DCHECK(IsValid());
   if (size < 0)
     return -1;
@@ -223,7 +223,7 @@ int File::Read(int64_t offset, char* data, int size) {
 }
 
 int File::ReadAtCurrentPos(char* data, int size) {
-  AssertBlockingAllowed();
+  ScopedBlockingCall scoped_blocking_call(BlockingType::MAY_BLOCK);
   DCHECK(IsValid());
   if (size < 0)
     return -1;
@@ -244,14 +244,14 @@ int File::ReadAtCurrentPos(char* data, int size) {
 }
 
 int File::ReadNoBestEffort(int64_t offset, char* data, int size) {
-  AssertBlockingAllowed();
+  ScopedBlockingCall scoped_blocking_call(BlockingType::MAY_BLOCK);
   DCHECK(IsValid());
   SCOPED_FILE_TRACE_WITH_SIZE("ReadNoBestEffort", size);
   return HANDLE_EINTR(pread(file_.get(), data, size, offset));
 }
 
 int File::ReadAtCurrentPosNoBestEffort(char* data, int size) {
-  AssertBlockingAllowed();
+  ScopedBlockingCall scoped_blocking_call(BlockingType::MAY_BLOCK);
   DCHECK(IsValid());
   if (size < 0)
     return -1;
@@ -261,7 +261,7 @@ int File::ReadAtCurrentPosNoBestEffort(char* data, int size) {
 }
 
 int File::Write(int64_t offset, const char* data, int size) {
-  AssertBlockingAllowed();
+  ScopedBlockingCall scoped_blocking_call(BlockingType::MAY_BLOCK);
 
   if (IsOpenAppend(file_.get()))
     return WriteAtCurrentPos(data, size);
@@ -275,8 +275,17 @@ int File::Write(int64_t offset, const char* data, int size) {
   int bytes_written = 0;
   int rv;
   do {
+#if defined(OS_ANDROID)
+    // In case __USE_FILE_OFFSET64 is not used, we need to call pwrite64()
+    // instead of pwrite().
+    static_assert(sizeof(int64_t) == sizeof(off64_t),
+                  "off64_t must be 64 bits");
+    rv = HANDLE_EINTR(pwrite64(file_.get(), data + bytes_written,
+                               size - bytes_written, offset + bytes_written));
+#else
     rv = HANDLE_EINTR(pwrite(file_.get(), data + bytes_written,
                              size - bytes_written, offset + bytes_written));
+#endif
     if (rv <= 0)
       break;
 
@@ -287,7 +296,7 @@ int File::Write(int64_t offset, const char* data, int size) {
 }
 
 int File::WriteAtCurrentPos(const char* data, int size) {
-  AssertBlockingAllowed();
+  ScopedBlockingCall scoped_blocking_call(BlockingType::MAY_BLOCK);
   DCHECK(IsValid());
   if (size < 0)
     return -1;
@@ -309,7 +318,7 @@ int File::WriteAtCurrentPos(const char* data, int size) {
 }
 
 int File::WriteAtCurrentPosNoBestEffort(const char* data, int size) {
-  AssertBlockingAllowed();
+  ScopedBlockingCall scoped_blocking_call(BlockingType::MAY_BLOCK);
   DCHECK(IsValid());
   if (size < 0)
     return -1;
@@ -331,7 +340,7 @@ int64_t File::GetLength() {
 }
 
 bool File::SetLength(int64_t length) {
-  AssertBlockingAllowed();
+  ScopedBlockingCall scoped_blocking_call(BlockingType::MAY_BLOCK);
   DCHECK(IsValid());
 
   SCOPED_FILE_TRACE_WITH_SIZE("SetLength", length);
@@ -339,7 +348,7 @@ bool File::SetLength(int64_t length) {
 }
 
 bool File::SetTimes(Time last_access_time, Time last_modified_time) {
-  AssertBlockingAllowed();
+  ScopedBlockingCall scoped_blocking_call(BlockingType::MAY_BLOCK);
   DCHECK(IsValid());
 
   SCOPED_FILE_TRACE("SetTimes");
@@ -386,10 +395,7 @@ File File::Duplicate() const {
   if (other_fd == -1)
     return File(File::GetLastFileError());
 
-  File other(other_fd);
-  if (async())
-    other.async_ = true;
-  return other;
+  return File(other_fd, async());
 }
 
 // Static.
@@ -434,7 +440,7 @@ File::Error File::OSErrorToFileError(int saved_errno) {
 #if !defined(OS_NACL)
 // TODO(erikkay): does it make sense to support FLAG_EXCLUSIVE_* here?
 void File::DoInitialize(const FilePath& path, uint32_t flags) {
-  AssertBlockingAllowed();
+  ScopedBlockingCall scoped_blocking_call(BlockingType::MAY_BLOCK);
   DCHECK(!IsValid());
 
   int open_flags = 0;
@@ -520,7 +526,7 @@ void File::DoInitialize(const FilePath& path, uint32_t flags) {
 #endif  // !defined(OS_NACL)
 
 bool File::Flush() {
-  AssertBlockingAllowed();
+  ScopedBlockingCall scoped_blocking_call(BlockingType::MAY_BLOCK);
   DCHECK(IsValid());
   SCOPED_FILE_TRACE("Flush");
 

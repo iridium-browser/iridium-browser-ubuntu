@@ -16,13 +16,9 @@ import sys
 from chromite.cli import command
 from chromite.lib import commandline
 from chromite.lib import cros_build_lib
-from chromite.lib import cros_build_lib_unittest
 from chromite.lib import cros_test_lib
 from chromite.lib import gs
 from chromite.lib import path_util
-
-
-# pylint: disable=protected-access
 
 
 class TestShutDownException(cros_test_lib.TestCase):
@@ -30,6 +26,7 @@ class TestShutDownException(cros_test_lib.TestCase):
 
   def testShutDownException(self):
     """Test that ShutDownException can be pickled."""
+    # pylint: disable=protected-access
     ex = commandline._ShutDownException(signal.SIGTERM, 'Received SIGTERM')
     ex2 = cPickle.loads(cPickle.dumps(ex))
     self.assertEqual(ex.signal, ex2.signal)
@@ -363,7 +360,6 @@ class CacheTest(cros_test_lib.MockTempDirTestCase):
     self.parser = commandline.ArgumentParser(caching=True)
 
   def _CheckCall(self, cwd_retval, args_to_parse, expected, assert_func):
-    # pylint: disable=E1101
     self.cwd_mock.return_value = cwd_retval
     self.parser.parse_args(args_to_parse)
     cache_dir_mock = self.parser.ConfigureCacheDir
@@ -542,7 +538,7 @@ class ScriptWrapperMainTest(cros_test_lib.MockTestCase):
   def testRestartInChrootPreserveArgs(self):
     """Verify args to ScriptWrapperMain are passed through to chroot.."""
     # Setup Mocks/Fakes
-    rc = self.StartPatcher(cros_build_lib_unittest.RunCommandMock())
+    rc = self.StartPatcher(cros_test_lib.RunCommandMock())
     rc.SetDefaultCmdResult()
 
     def findTarget(target):
@@ -564,7 +560,7 @@ class ScriptWrapperMainTest(cros_test_lib.MockTestCase):
   def testRestartInChrootWithChrootArgs(self):
     """Verify args and chroot args from exception are used."""
     # Setup Mocks/Fakes
-    rc = self.StartPatcher(cros_build_lib_unittest.RunCommandMock())
+    rc = self.StartPatcher(cros_test_lib.RunCommandMock())
     rc.SetDefaultCmdResult()
 
     def findTarget(_):

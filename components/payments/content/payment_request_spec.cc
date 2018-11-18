@@ -55,10 +55,8 @@ void PopulateValidatedMethodData(
   method_data_vector.reserve(method_data_mojom.size());
   for (const mojom::PaymentMethodDataPtr& method_data_entry :
        method_data_mojom) {
-    for (const std::string& method : method_data_entry->supported_methods) {
-      (*stringified_method_data)[method].insert(
-          method_data_entry->stringified_data);
-    }
+    (*stringified_method_data)[method_data_entry->supported_method].insert(
+        method_data_entry->stringified_data);
 
     method_data_vector.push_back(ConvertPaymentMethodData(method_data_entry));
   }
@@ -103,9 +101,103 @@ void PaymentRequestSpec::UpdateWith(mojom::PaymentDetailsPtr details) {
   RecomputeSpecForDetails();
 }
 
+void PaymentRequestSpec::Retry(mojom::PaymentValidationErrorsPtr errors) {
+  if (!errors)
+    return;
+
+  shipping_address_errors_ = std::move(errors->shipping_address);
+  payer_errors_ = std::move(errors->payer);
+  current_update_reason_ = UpdateReason::RETRY;
+  NotifyOnSpecUpdated();
+  current_update_reason_ = UpdateReason::NONE;
+}
+
+base::string16 PaymentRequestSpec::GetShippingAddressError(
+    autofill::ServerFieldType type) {
+  if (!shipping_address_errors_)
+    return base::string16();
+
+  if (type == autofill::ADDRESS_HOME_STREET_ADDRESS)
+    return base::UTF8ToUTF16(shipping_address_errors_->address_line);
+
+  if (type == autofill::ADDRESS_HOME_CITY)
+    return base::UTF8ToUTF16(shipping_address_errors_->city);
+
+  if (type == autofill::ADDRESS_HOME_COUNTRY)
+    return base::UTF8ToUTF16(shipping_address_errors_->country);
+
+  if (type == autofill::ADDRESS_HOME_DEPENDENT_LOCALITY)
+    return base::UTF8ToUTF16(shipping_address_errors_->dependent_locality);
+
+  if (type == autofill::COMPANY_NAME)
+    return base::UTF8ToUTF16(shipping_address_errors_->organization);
+
+  if (type == autofill::PHONE_HOME_WHOLE_NUMBER)
+    return base::UTF8ToUTF16(shipping_address_errors_->phone);
+
+  if (type == autofill::ADDRESS_HOME_ZIP)
+    return base::UTF8ToUTF16(shipping_address_errors_->postal_code);
+
+  if (type == autofill::NAME_FULL)
+    return base::UTF8ToUTF16(shipping_address_errors_->recipient);
+
+  if (type == autofill::ADDRESS_HOME_STATE)
+    return base::UTF8ToUTF16(shipping_address_errors_->region);
+
+  if (type == autofill::ADDRESS_HOME_SORTING_CODE)
+    return base::UTF8ToUTF16(shipping_address_errors_->sorting_code);
+
+  return base::string16();
+}
+
+base::string16 PaymentRequestSpec::GetPayerError(
+    autofill::ServerFieldType type) {
+  if (!payer_errors_)
+    return base::string16();
+
+  if (type == autofill::EMAIL_ADDRESS)
+    return base::UTF8ToUTF16(payer_errors_->email);
+
+  if (type == autofill::NAME_FULL)
+    return base::UTF8ToUTF16(payer_errors_->name);
+
+  if (type == autofill::PHONE_HOME_WHOLE_NUMBER)
+    return base::UTF8ToUTF16(payer_errors_->phone);
+
+  return base::string16();
+}
+
+bool PaymentRequestSpec::has_shipping_address_error() const {
+  return shipping_address_errors_ && request_shipping() &&
+         !(shipping_address_errors_->address_line.empty() &&
+           shipping_address_errors_->city.empty() &&
+           shipping_address_errors_->country.empty() &&
+           shipping_address_errors_->dependent_locality.empty() &&
+           shipping_address_errors_->organization.empty() &&
+           shipping_address_errors_->phone.empty() &&
+           shipping_address_errors_->postal_code.empty() &&
+           shipping_address_errors_->recipient.empty() &&
+           shipping_address_errors_->region.empty() &&
+           shipping_address_errors_->region_code.empty() &&
+           shipping_address_errors_->sorting_code.empty());
+}
+
+bool PaymentRequestSpec::has_payer_error() const {
+  return payer_errors_ &&
+         (request_payer_email() || request_payer_name() ||
+          request_payer_phone()) &&
+         !(payer_errors_->email.empty() && payer_errors_->name.empty() &&
+           payer_errors_->phone.empty());
+}
+
 void PaymentRequestSpec::RecomputeSpecForDetails() {
+  // Clear the shipping address errors when the merchant updates the price based
+  // on the shipping address that the user has newly fixed or selected.
+  shipping_address_errors_.reset();
+
   // Reparse the |details_| and update the observers.
   UpdateSelectedShippingOption(/*after_update=*/true);
+
   NotifyOnSpecUpdated();
   current_update_reason_ = UpdateReason::NONE;
 }
@@ -155,15 +247,15 @@ bool PaymentRequestSpec::IsMethodSupportedThroughBasicCard(
 
 base::string16 PaymentRequestSpec::GetFormattedCurrencyAmount(
     const mojom::PaymentCurrencyAmountPtr& currency_amount) {
-  CurrencyFormatter* formatter = GetOrCreateCurrencyFormatter(
-      currency_amount->currency, currency_amount->currency_system, app_locale_);
+  CurrencyFormatter* formatter =
+      GetOrCreateCurrencyFormatter(currency_amount->currency, app_locale_);
   return formatter->Format(currency_amount->value);
 }
 
 std::string PaymentRequestSpec::GetFormattedCurrencyCode(
     const mojom::PaymentCurrencyAmountPtr& currency_amount) {
-  CurrencyFormatter* formatter = GetOrCreateCurrencyFormatter(
-      currency_amount->currency, currency_amount->currency_system, app_locale_);
+  CurrencyFormatter* formatter =
+      GetOrCreateCurrencyFormatter(currency_amount->currency, app_locale_);
 
   return formatter->formatted_currency_code();
 }
@@ -214,10 +306,6 @@ PaymentRequestSpec::GetShippingOptions() const {
   return details_->shipping_options;
 }
 
-bool PaymentRequestSpec::HasBasicCardMethodName() const {
-  return !supported_card_networks_set_.empty();
-}
-
 const mojom::PaymentDetailsModifierPtr*
 PaymentRequestSpec::GetApplicableModifier(
     PaymentInstrument* selected_instrument) const {
@@ -241,7 +329,7 @@ PaymentRequestSpec::GetApplicableModifier(
         &payment_method_identifiers_set, &stringified_method_data);
 
     if (selected_instrument->IsValidForModifier(
-            modifier->method_data->supported_methods,
+            modifier->method_data->supported_method,
             !modifier->method_data->supported_networks.empty(),
             supported_card_networks_set,
             !modifier->method_data->supported_types.empty(), supported_types)) {
@@ -282,6 +370,10 @@ void PaymentRequestSpec::UpdateSelectedShippingOption(bool after_update) {
             break;
         }
       }
+
+      // Update shipping address errors
+      if (details_->shipping_address_errors)
+        shipping_address_errors_ = std::move(details_->shipping_address_errors);
     }
     return;
   }
@@ -306,14 +398,13 @@ void PaymentRequestSpec::NotifyOnSpecUpdated() {
 
 CurrencyFormatter* PaymentRequestSpec::GetOrCreateCurrencyFormatter(
     const std::string& currency_code,
-    const std::string& currency_system,
     const std::string& locale_name) {
   // Create a currency formatter for |currency_code|, or if already created
   // return the cached version.
   std::pair<std::map<std::string, CurrencyFormatter>::iterator, bool>
       emplace_result = currency_formatters_.emplace(
           std::piecewise_construct, std::forward_as_tuple(currency_code),
-          std::forward_as_tuple(currency_code, currency_system, locale_name));
+          std::forward_as_tuple(currency_code, locale_name));
 
   return &(emplace_result.first->second);
 }

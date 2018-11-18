@@ -6,17 +6,23 @@
 #define SYSTEM_API_DBUS_CRYPTOHOME_DBUS_CONSTANTS_H_
 
 namespace cryptohome {
+
+// Interface exposed by the cryptohome daemon.
+
 const char kCryptohomeInterface[] = "org.chromium.CryptohomeInterface";
 const char kCryptohomeServicePath[] = "/org/chromium/Cryptohome";
 const char kCryptohomeServiceName[] = "org.chromium.Cryptohome";
-// Methods
+
+// Methods of the |kCryptohomeInterface| interface:
 const char kCryptohomeMigrateKey[] = "MigrateKey";
-const char kCryptohomeRemove[] = "Remove";
+const char kCryptohomeMigrateKeyEx[] = "MigrateKeyEx";
+const char kCryptohomeRemoveEx[] = "RemoveEx";
 const char kCryptohomeGetSystemSalt[] = "GetSystemSalt";
 const char kCryptohomeGetSanitizedUsername[] = "GetSanitizedUsername";
 const char kCryptohomeIsMounted[] = "IsMounted";
 const char kCryptohomeMount[] = "Mount";
 const char kCryptohomeMountGuest[] = "MountGuest";
+const char kCryptohomeMountGuestEx[] = "MountGuestEx";
 const char kCryptohomeUnmount[] = "Unmount";
 const char kCryptohomeTpmIsReady[] = "TpmIsReady";
 const char kCryptohomeTpmIsEnabled[] = "TpmIsEnabled";
@@ -40,10 +46,6 @@ const char kCryptohomeRemoveTrackedSubdirectories[] =
     "RemoveTrackedSubdirectories";
 const char kCryptohomeAsyncRemoveTrackedSubdirectories[] =
     "AsyncRemoveTrackedSubdirectories";
-const char kCryptohomeDoAutomaticFreeDiskSpaceControl[] =
-    "DoAutomaticFreeDiskSpaceControl";
-const char kCryptohomeAsyncDoAutomaticFreeDiskSpaceControl[] =
-    "AsyncDoAutomaticFreeDiskSpaceControl";
 const char kCryptohomeAsyncDoesUsersExist[] = "AsyncDoesUsersExist";
 const char kCryptohomeInstallAttributesGet[] = "InstallAttributesGet";
 const char kCryptohomeInstallAttributesSet[] = "InstallAttributesSet";
@@ -132,16 +134,18 @@ const char kCryptohomeRemoveFirmwareManagementParameters[] =
 const char kCryptohomeMigrateToDircrypto[] = "MigrateToDircrypto";
 const char kCryptohomeNeedsDircryptoMigration[] = "NeedsDircryptoMigration";
 const char kCryptohomeGetSupportedKeyPolicies[] = "GetSupportedKeyPolicies";
-const char kCryptohomeRespondKeyChallenge[] = "RespondKeyChallenge";
+const char kCryptohomeIsQuotaSupported[] = "IsQuotaSupported";
+const char kCryptohomeGetCurrentSpaceForUid[] = "GetCurrentSpaceForUid";
+const char kCryptohomeGetCurrentSpaceForGid[] = "GetCurrentSpaceForGid";
 
-// Signals
+// Signals of the |kCryptohomeInterface| interface:
 const char kSignalAsyncCallStatus[] = "AsyncCallStatus";
 const char kSignalAsyncCallStatusWithData[] = "AsyncCallStatusWithData";
 const char kSignalTpmInitStatus[] = "TpmInitStatus";
 const char kSignalCleanupUsersRemoved[] = "CleanupUsersRemoved";
 const char kSignalLowDiskSpace[] = "LowDiskSpace";
 const char kSignalDircryptoMigrationProgress[] = "DircryptoMigrationProgress";
-const char kSignalKeyChallenge[] = "KeyChallenge";
+
 // Error code
 enum MountError {
   MOUNT_ERROR_NONE = 0,
@@ -156,6 +160,8 @@ enum MountError {
   MOUNT_ERROR_OLD_ENCRYPTION = 1 << 7,
   // Previous migration attempt was aborted in the middle. Must resume it first.
   MOUNT_ERROR_PREVIOUS_MIGRATION_INCOMPLETE = 1 << 8,
+  // The operation to remove a key failed.
+  MOUNT_ERROR_REMOVE_FAILED = 1 << 9,
   MOUNT_ERROR_RECREATED = 1 << 31,
 };
 // Status code signaled from MigrateToDircrypto().
@@ -170,6 +176,15 @@ enum DircryptoMigrationStatus {
   DIRCRYPTO_MIGRATION_INITIALIZING = 1,
   DIRCRYPTO_MIGRATION_IN_PROGRESS = 2,
 };
+
+// Interface for key delegate service to be used by the cryptohome daemon.
+
+const char kCryptohomeKeyDelegateInterface[] =
+    "org.chromium.CryptohomeKeyDelegateInterface";
+
+// Methods of the |kCryptohomeKeyDelegateInterface| interface:
+const char kCryptohomeKeyDelegateChallengeKey[] = "ChallengeKey";
+
 }  // namespace cryptohome
 
 #endif  // SYSTEM_API_DBUS_CRYPTOHOME_DBUS_CONSTANTS_H_

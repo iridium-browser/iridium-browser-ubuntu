@@ -51,15 +51,14 @@ class SVGStyleElement final : public SVGElement, public StyleElement {
 
   void DispatchPendingEvent();
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  private:
   SVGStyleElement(Document&, const CreateElementFlags);
 
   void ParseAttribute(const AttributeModificationParams&) override;
-  InsertionNotificationRequest InsertedInto(ContainerNode*) override;
-  void DidNotifySubtreeInsertionsToDocument() override;
-  void RemovedFrom(ContainerNode*) override;
+  InsertionNotificationRequest InsertedInto(ContainerNode&) override;
+  void RemovedFrom(ContainerNode&) override;
   void ChildrenChanged(const ChildrenChange&) override;
 
   void FinishParsingChildren() override;

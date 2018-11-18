@@ -21,12 +21,12 @@
 #include "net/http/http_auth_controller.h"
 #include "net/http/proxy_client_socket.h"
 #include "net/log/net_log_with_source.h"
-#include "net/quic/chromium/quic_stream_factory.h"
+#include "net/quic/quic_stream_factory.h"
 #include "net/socket/next_proto.h"
 #include "net/socket/ssl_client_socket.h"
 #include "net/socket/ssl_client_socket_pool.h"
 #include "net/socket/transport_client_socket_pool.h"
-#include "net/spdy/chromium/spdy_session.h"
+#include "net/spdy/spdy_session.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 
 namespace net {
@@ -66,7 +66,7 @@ class NET_EXPORT_PRIVATE HttpProxyClientSocketWrapper
       SSLClientSocketPool* ssl_pool,
       const scoped_refptr<TransportSocketParams>& transport_params,
       const scoped_refptr<SSLSocketParams>& ssl_params,
-      QuicTransportVersion quic_version,
+      quic::QuicTransportVersion quic_version,
       const std::string& user_agent,
       const HostPortPair& endpoint,
       HttpAuthCache* http_auth_cache,
@@ -96,13 +96,11 @@ class NET_EXPORT_PRIVATE HttpProxyClientSocketWrapper
   NextProto GetProxyNegotiatedProtocol() const override;
 
   // StreamSocket implementation.
-  int Connect(const CompletionCallback& callback) override;
+  int Connect(CompletionOnceCallback callback) override;
   void Disconnect() override;
   bool IsConnected() const override;
   bool IsConnectedAndIdle() const override;
   const NetLogWithSource& NetLog() const override;
-  void SetSubresourceSpeculation() override;
-  void SetOmniboxSpeculation() override;
   bool WasEverUsed() const override;
   bool WasAlpnNegotiated() const override;
   NextProto GetNegotiatedProtocol() const override;
@@ -116,10 +114,14 @@ class NET_EXPORT_PRIVATE HttpProxyClientSocketWrapper
   // Socket implementation.
   int Read(IOBuffer* buf,
            int buf_len,
-           const CompletionCallback& callback) override;
+           CompletionOnceCallback callback) override;
+  int ReadIfReady(IOBuffer* buf,
+                  int buf_len,
+                  CompletionOnceCallback callback) override;
+  int CancelReadIfReady() override;
   int Write(IOBuffer* buf,
             int buf_len,
-            const CompletionCallback& callback,
+            CompletionOnceCallback callback,
             const NetworkTrafficAnnotationTag& traffic_annotation) override;
   int SetReceiveBufferSize(int32_t size) override;
   int SetSendBufferSize(int32_t size) override;
@@ -193,7 +195,7 @@ class NET_EXPORT_PRIVATE HttpProxyClientSocketWrapper
   const scoped_refptr<TransportSocketParams> transport_params_;
   const scoped_refptr<SSLSocketParams> ssl_params_;
 
-  QuicTransportVersion quic_version_;
+  quic::QuicTransportVersion quic_version_;
 
   const std::string user_agent_;
   const HostPortPair endpoint_;

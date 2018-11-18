@@ -45,8 +45,8 @@
 
 namespace es2
 {
-Context::Context(egl::Display *display, const Context *shareContext, EGLint clientVersion, const egl::Config *config)
-	: egl::Context(display), clientVersion(clientVersion), config(config)
+Context::Context(egl::Display *display, const Context *shareContext, const egl::Config *config)
+	: egl::Context(display), config(config)
 {
 	sw::Context *context = new sw::Context();
 	device = new es2::Device(context);
@@ -316,7 +316,7 @@ void Context::makeCurrent(gl::Surface *surface)
 
 EGLint Context::getClientVersion() const
 {
-	return clientVersion;
+	return 3;
 }
 
 EGLint Context::getConfigID() const
@@ -1603,48 +1603,26 @@ bool Context::getBuffer(GLenum target, es2::Buffer **buffer) const
 		*buffer = getElementArrayBuffer();
 		break;
 	case GL_COPY_READ_BUFFER:
-		if(clientVersion >= 3)
-		{
-			*buffer = getCopyReadBuffer();
-			break;
-		}
-		else return false;
+		*buffer = getCopyReadBuffer();
+		break;
 	case GL_COPY_WRITE_BUFFER:
-		if(clientVersion >= 3)
-		{
-			*buffer = getCopyWriteBuffer();
-			break;
-		}
-		else return false;
+		*buffer = getCopyWriteBuffer();
+		break;
 	case GL_PIXEL_PACK_BUFFER:
-		if(clientVersion >= 3)
-		{
-			*buffer = getPixelPackBuffer();
-			break;
-		}
-		else return false;
+		*buffer = getPixelPackBuffer();
+		break;
 	case GL_PIXEL_UNPACK_BUFFER:
-		if(clientVersion >= 3)
-		{
-			*buffer = getPixelUnpackBuffer();
-			break;
-		}
-		else return false;
+		*buffer = getPixelUnpackBuffer();
+		break;
 	case GL_TRANSFORM_FEEDBACK_BUFFER:
-		if(clientVersion >= 3)
 		{
 			TransformFeedback* transformFeedback = getTransformFeedback();
 			*buffer = transformFeedback ? static_cast<es2::Buffer*>(transformFeedback->getGenericBuffer()) : nullptr;
-			break;
 		}
-		else return false;
+		break;
 	case GL_UNIFORM_BUFFER:
-		if(clientVersion >= 3)
-		{
-			*buffer = getGenericUniformBuffer();
-			break;
-		}
-		else return false;
+		*buffer = getGenericUniformBuffer();
+		break;
 	default:
 		return false;
 	}
@@ -1734,16 +1712,17 @@ void Context::samplerParameteri(GLuint sampler, GLenum pname, GLint param)
 
 	switch(pname)
 	{
-	case GL_TEXTURE_MIN_FILTER:   samplerObject->setMinFilter(static_cast<GLenum>(param));   break;
-	case GL_TEXTURE_MAG_FILTER:   samplerObject->setMagFilter(static_cast<GLenum>(param));   break;
-	case GL_TEXTURE_WRAP_S:       samplerObject->setWrapS(static_cast<GLenum>(param));       break;
-	case GL_TEXTURE_WRAP_T:       samplerObject->setWrapT(static_cast<GLenum>(param));       break;
-	case GL_TEXTURE_WRAP_R:       samplerObject->setWrapR(static_cast<GLenum>(param));       break;
-	case GL_TEXTURE_MIN_LOD:      samplerObject->setMinLod(static_cast<GLfloat>(param));     break;
-	case GL_TEXTURE_MAX_LOD:      samplerObject->setMaxLod(static_cast<GLfloat>(param));     break;
-	case GL_TEXTURE_COMPARE_MODE: samplerObject->setCompareMode(static_cast<GLenum>(param)); break;
-	case GL_TEXTURE_COMPARE_FUNC: samplerObject->setCompareFunc(static_cast<GLenum>(param)); break;
-	default:                      UNREACHABLE(pname); break;
+	case GL_TEXTURE_MIN_FILTER:         samplerObject->setMinFilter(static_cast<GLenum>(param));      break;
+	case GL_TEXTURE_MAG_FILTER:         samplerObject->setMagFilter(static_cast<GLenum>(param));      break;
+	case GL_TEXTURE_WRAP_S:             samplerObject->setWrapS(static_cast<GLenum>(param));          break;
+	case GL_TEXTURE_WRAP_T:             samplerObject->setWrapT(static_cast<GLenum>(param));          break;
+	case GL_TEXTURE_WRAP_R:             samplerObject->setWrapR(static_cast<GLenum>(param));          break;
+	case GL_TEXTURE_MIN_LOD:            samplerObject->setMinLod(static_cast<GLfloat>(param));        break;
+	case GL_TEXTURE_MAX_LOD:            samplerObject->setMaxLod(static_cast<GLfloat>(param));        break;
+	case GL_TEXTURE_COMPARE_MODE:       samplerObject->setCompareMode(static_cast<GLenum>(param));    break;
+	case GL_TEXTURE_COMPARE_FUNC:       samplerObject->setCompareFunc(static_cast<GLenum>(param));    break;
+	case GL_TEXTURE_MAX_ANISOTROPY_EXT: samplerObject->setMaxAnisotropy(static_cast<GLfloat>(param)); break;
+	default:                            UNREACHABLE(pname); break;
 	}
 }
 
@@ -1756,16 +1735,17 @@ void Context::samplerParameterf(GLuint sampler, GLenum pname, GLfloat param)
 
 	switch(pname)
 	{
-	case GL_TEXTURE_MIN_FILTER:   samplerObject->setMinFilter(static_cast<GLenum>(roundf(param)));   break;
-	case GL_TEXTURE_MAG_FILTER:   samplerObject->setMagFilter(static_cast<GLenum>(roundf(param)));   break;
-	case GL_TEXTURE_WRAP_S:       samplerObject->setWrapS(static_cast<GLenum>(roundf(param)));       break;
-	case GL_TEXTURE_WRAP_T:       samplerObject->setWrapT(static_cast<GLenum>(roundf(param)));       break;
-	case GL_TEXTURE_WRAP_R:       samplerObject->setWrapR(static_cast<GLenum>(roundf(param)));       break;
-	case GL_TEXTURE_MIN_LOD:      samplerObject->setMinLod(param);                                   break;
-	case GL_TEXTURE_MAX_LOD:      samplerObject->setMaxLod(param);                                   break;
-	case GL_TEXTURE_COMPARE_MODE: samplerObject->setCompareMode(static_cast<GLenum>(roundf(param))); break;
-	case GL_TEXTURE_COMPARE_FUNC: samplerObject->setCompareFunc(static_cast<GLenum>(roundf(param))); break;
-	default:                      UNREACHABLE(pname); break;
+	case GL_TEXTURE_MIN_FILTER:         samplerObject->setMinFilter(static_cast<GLenum>(roundf(param)));   break;
+	case GL_TEXTURE_MAG_FILTER:         samplerObject->setMagFilter(static_cast<GLenum>(roundf(param)));   break;
+	case GL_TEXTURE_WRAP_S:             samplerObject->setWrapS(static_cast<GLenum>(roundf(param)));       break;
+	case GL_TEXTURE_WRAP_T:             samplerObject->setWrapT(static_cast<GLenum>(roundf(param)));       break;
+	case GL_TEXTURE_WRAP_R:             samplerObject->setWrapR(static_cast<GLenum>(roundf(param)));       break;
+	case GL_TEXTURE_MIN_LOD:            samplerObject->setMinLod(param);                                   break;
+	case GL_TEXTURE_MAX_LOD:            samplerObject->setMaxLod(param);                                   break;
+	case GL_TEXTURE_COMPARE_MODE:       samplerObject->setCompareMode(static_cast<GLenum>(roundf(param))); break;
+	case GL_TEXTURE_COMPARE_FUNC:       samplerObject->setCompareFunc(static_cast<GLenum>(roundf(param))); break;
+	case GL_TEXTURE_MAX_ANISOTROPY_EXT: samplerObject->setMaxAnisotropy(param);                            break;
+	default:                            UNREACHABLE(pname); break;
 	}
 }
 
@@ -1778,16 +1758,17 @@ GLint Context::getSamplerParameteri(GLuint sampler, GLenum pname)
 
 	switch(pname)
 	{
-	case GL_TEXTURE_MIN_FILTER:   return static_cast<GLint>(samplerObject->getMinFilter());
-	case GL_TEXTURE_MAG_FILTER:   return static_cast<GLint>(samplerObject->getMagFilter());
-	case GL_TEXTURE_WRAP_S:       return static_cast<GLint>(samplerObject->getWrapS());
-	case GL_TEXTURE_WRAP_T:       return static_cast<GLint>(samplerObject->getWrapT());
-	case GL_TEXTURE_WRAP_R:       return static_cast<GLint>(samplerObject->getWrapR());
-	case GL_TEXTURE_MIN_LOD:      return static_cast<GLint>(roundf(samplerObject->getMinLod()));
-	case GL_TEXTURE_MAX_LOD:      return static_cast<GLint>(roundf(samplerObject->getMaxLod()));
-	case GL_TEXTURE_COMPARE_MODE: return static_cast<GLint>(samplerObject->getCompareMode());
-	case GL_TEXTURE_COMPARE_FUNC: return static_cast<GLint>(samplerObject->getCompareFunc());
-	default:                      UNREACHABLE(pname); return 0;
+	case GL_TEXTURE_MIN_FILTER:         return static_cast<GLint>(samplerObject->getMinFilter());
+	case GL_TEXTURE_MAG_FILTER:         return static_cast<GLint>(samplerObject->getMagFilter());
+	case GL_TEXTURE_WRAP_S:             return static_cast<GLint>(samplerObject->getWrapS());
+	case GL_TEXTURE_WRAP_T:             return static_cast<GLint>(samplerObject->getWrapT());
+	case GL_TEXTURE_WRAP_R:             return static_cast<GLint>(samplerObject->getWrapR());
+	case GL_TEXTURE_MIN_LOD:            return static_cast<GLint>(roundf(samplerObject->getMinLod()));
+	case GL_TEXTURE_MAX_LOD:            return static_cast<GLint>(roundf(samplerObject->getMaxLod()));
+	case GL_TEXTURE_COMPARE_MODE:       return static_cast<GLint>(samplerObject->getCompareMode());
+	case GL_TEXTURE_COMPARE_FUNC:       return static_cast<GLint>(samplerObject->getCompareFunc());
+	case GL_TEXTURE_MAX_ANISOTROPY_EXT: return static_cast<GLint>(samplerObject->getMaxAnisotropy());
+	default:                            UNREACHABLE(pname); return 0;
 	}
 }
 
@@ -1800,16 +1781,17 @@ GLfloat Context::getSamplerParameterf(GLuint sampler, GLenum pname)
 
 	switch(pname)
 	{
-	case GL_TEXTURE_MIN_FILTER:   return static_cast<GLfloat>(samplerObject->getMinFilter());
-	case GL_TEXTURE_MAG_FILTER:   return static_cast<GLfloat>(samplerObject->getMagFilter());
-	case GL_TEXTURE_WRAP_S:       return static_cast<GLfloat>(samplerObject->getWrapS());
-	case GL_TEXTURE_WRAP_T:       return static_cast<GLfloat>(samplerObject->getWrapT());
-	case GL_TEXTURE_WRAP_R:       return static_cast<GLfloat>(samplerObject->getWrapR());
-	case GL_TEXTURE_MIN_LOD:      return samplerObject->getMinLod();
-	case GL_TEXTURE_MAX_LOD:      return samplerObject->getMaxLod();
-	case GL_TEXTURE_COMPARE_MODE: return static_cast<GLfloat>(samplerObject->getCompareMode());
-	case GL_TEXTURE_COMPARE_FUNC: return static_cast<GLfloat>(samplerObject->getCompareFunc());
-	default:                      UNREACHABLE(pname); return 0;
+	case GL_TEXTURE_MIN_FILTER:         return static_cast<GLfloat>(samplerObject->getMinFilter());
+	case GL_TEXTURE_MAG_FILTER:         return static_cast<GLfloat>(samplerObject->getMagFilter());
+	case GL_TEXTURE_WRAP_S:             return static_cast<GLfloat>(samplerObject->getWrapS());
+	case GL_TEXTURE_WRAP_T:             return static_cast<GLfloat>(samplerObject->getWrapT());
+	case GL_TEXTURE_WRAP_R:             return static_cast<GLfloat>(samplerObject->getWrapR());
+	case GL_TEXTURE_MIN_LOD:            return samplerObject->getMinLod();
+	case GL_TEXTURE_MAX_LOD:            return samplerObject->getMaxLod();
+	case GL_TEXTURE_COMPARE_MODE:       return static_cast<GLfloat>(samplerObject->getCompareMode());
+	case GL_TEXTURE_COMPARE_FUNC:       return static_cast<GLfloat>(samplerObject->getCompareFunc());
+	case GL_TEXTURE_MAX_ANISOTROPY_EXT: return samplerObject->getMaxAnisotropy();
+	default:                            UNREACHABLE(pname); return 0;
 	}
 }
 
@@ -2191,214 +2173,199 @@ template<typename T> bool Context::getIntegerv(GLenum pname, T *params) const
 	case GL_MAX_COLOR_ATTACHMENTS: // Note: MAX_COLOR_ATTACHMENTS_EXT added by GL_EXT_draw_buffers
 		*params = MAX_COLOR_ATTACHMENTS;
 		return true;
-	default:
-		break;
-	}
-
-	if(clientVersion >= 3)
-	{
-		switch(pname)
+	case GL_TEXTURE_BINDING_2D_ARRAY:
+		if(mState.activeSampler > MAX_COMBINED_TEXTURE_IMAGE_UNITS - 1)
 		{
-		case GL_TEXTURE_BINDING_2D_ARRAY:
-			if(mState.activeSampler > MAX_COMBINED_TEXTURE_IMAGE_UNITS - 1)
+			error(GL_INVALID_OPERATION);
+			return false;
+		}
+
+		*params = mState.samplerTexture[TEXTURE_2D_ARRAY][mState.activeSampler].name();
+		return true;
+	case GL_COPY_READ_BUFFER_BINDING:
+		*params = mState.copyReadBuffer.name();
+		return true;
+	case GL_COPY_WRITE_BUFFER_BINDING:
+		*params = mState.copyWriteBuffer.name();
+		return true;
+	case GL_MAJOR_VERSION:
+		*params = 3;
+		return true;
+	case GL_MINOR_VERSION:
+		*params = 0;
+		return true;
+	case GL_MAX_3D_TEXTURE_SIZE:
+		*params = IMPLEMENTATION_MAX_3D_TEXTURE_SIZE;
+		return true;
+	case GL_MAX_ARRAY_TEXTURE_LAYERS:
+		*params = IMPLEMENTATION_MAX_TEXTURE_SIZE;
+		return true;
+	case GL_MAX_COMBINED_FRAGMENT_UNIFORM_COMPONENTS:
+		*params = MAX_COMBINED_FRAGMENT_UNIFORM_COMPONENTS;
+		return true;
+	case GL_MAX_COMBINED_UNIFORM_BLOCKS:
+		*params = MAX_VERTEX_UNIFORM_BLOCKS + MAX_FRAGMENT_UNIFORM_BLOCKS;
+		return true;
+	case GL_MAX_COMBINED_VERTEX_UNIFORM_COMPONENTS:
+		*params = MAX_COMBINED_VERTEX_UNIFORM_COMPONENTS;
+		return true;
+	case GL_MAX_ELEMENT_INDEX:
+		*params = MAX_ELEMENT_INDEX;
+		return true;
+	case GL_MAX_ELEMENTS_INDICES:
+		*params = MAX_ELEMENTS_INDICES;
+		return true;
+	case GL_MAX_ELEMENTS_VERTICES:
+		*params = MAX_ELEMENTS_VERTICES;
+		return true;
+	case GL_MAX_FRAGMENT_INPUT_COMPONENTS:
+		*params = MAX_FRAGMENT_INPUT_VECTORS * 4;
+		return true;
+	case GL_MAX_FRAGMENT_UNIFORM_BLOCKS:
+		*params = MAX_FRAGMENT_UNIFORM_BLOCKS;
+		return true;
+	case GL_MAX_FRAGMENT_UNIFORM_COMPONENTS:
+		*params = MAX_FRAGMENT_UNIFORM_COMPONENTS;
+		return true;
+	case GL_MAX_PROGRAM_TEXEL_OFFSET:
+		// Note: SwiftShader has no actual texel offset limit, so this limit can be modified if required.
+		// In any case, any behavior outside the specified range is valid since the spec mentions:
+		// (see OpenGL ES 3.0.5, 3.8.10.1 Scale Factor and Level of Detail, p.153)
+		// "If any of the offset values are outside the range of the  implementation-defined values
+		//  MIN_PROGRAM_TEXEL_OFFSET and MAX_PROGRAM_TEXEL_OFFSET, results of the texture lookup are
+		//  undefined."
+		*params = MAX_PROGRAM_TEXEL_OFFSET;
+		return true;
+	case GL_MAX_SERVER_WAIT_TIMEOUT:
+		*params = 0;
+		return true;
+	case GL_MAX_TEXTURE_LOD_BIAS:
+		*params = MAX_TEXTURE_LOD_BIAS;
+		return true;
+	case GL_MAX_TRANSFORM_FEEDBACK_INTERLEAVED_COMPONENTS:
+		*params = sw::MAX_TRANSFORM_FEEDBACK_INTERLEAVED_COMPONENTS;
+		return true;
+	case GL_MAX_TRANSFORM_FEEDBACK_SEPARATE_ATTRIBS:
+		*params = MAX_TRANSFORM_FEEDBACK_SEPARATE_ATTRIBS;
+		return true;
+	case GL_MAX_TRANSFORM_FEEDBACK_SEPARATE_COMPONENTS:
+		*params = sw::MAX_TRANSFORM_FEEDBACK_SEPARATE_COMPONENTS;
+		return true;
+	case GL_MAX_UNIFORM_BLOCK_SIZE:
+		*params = MAX_UNIFORM_BLOCK_SIZE;
+		return true;
+	case GL_MAX_UNIFORM_BUFFER_BINDINGS:
+		*params = MAX_UNIFORM_BUFFER_BINDINGS;
+		return true;
+	case GL_MAX_VARYING_COMPONENTS:
+		*params = MAX_VARYING_VECTORS * 4;
+		return true;
+	case GL_MAX_VERTEX_OUTPUT_COMPONENTS:
+		*params = MAX_VERTEX_OUTPUT_VECTORS * 4;
+		return true;
+	case GL_MAX_VERTEX_UNIFORM_BLOCKS:
+		*params = MAX_VERTEX_UNIFORM_BLOCKS;
+		return true;
+	case GL_MAX_VERTEX_UNIFORM_COMPONENTS:
+		*params = MAX_VERTEX_UNIFORM_COMPONENTS;
+		return true;
+	case GL_MIN_PROGRAM_TEXEL_OFFSET:
+		// Note: SwiftShader has no actual texel offset limit, so this limit can be modified if required.
+		// In any case, any behavior outside the specified range is valid since the spec mentions:
+		// (see OpenGL ES 3.0.5, 3.8.10.1 Scale Factor and Level of Detail, p.153)
+		// "If any of the offset values are outside the range of the  implementation-defined values
+		//  MIN_PROGRAM_TEXEL_OFFSET and MAX_PROGRAM_TEXEL_OFFSET, results of the texture lookup are
+		//  undefined."
+		*params = MIN_PROGRAM_TEXEL_OFFSET;
+		return true;
+	case GL_NUM_EXTENSIONS:
+		GLuint numExtensions;
+		getExtensions(0, &numExtensions);
+		*params = numExtensions;
+		return true;
+	case GL_NUM_PROGRAM_BINARY_FORMATS:
+		*params = NUM_PROGRAM_BINARY_FORMATS;
+		return true;
+	case GL_PACK_ROW_LENGTH:
+		*params = mState.packParameters.rowLength;
+		return true;
+	case GL_PACK_SKIP_PIXELS:
+		*params = mState.packParameters.skipPixels;
+		return true;
+	case GL_PACK_SKIP_ROWS:
+		*params = mState.packParameters.skipRows;
+		return true;
+	case GL_PIXEL_PACK_BUFFER_BINDING:
+		*params = mState.pixelPackBuffer.name();
+		return true;
+	case GL_PIXEL_UNPACK_BUFFER_BINDING:
+		*params = mState.pixelUnpackBuffer.name();
+		return true;
+	case GL_PROGRAM_BINARY_FORMATS:
+		// Since NUM_PROGRAM_BINARY_FORMATS is 0, the input
+		// should be a 0 sized array, so don't write to params
+		return true;
+	case GL_READ_BUFFER:
+		{
+			Framebuffer* framebuffer = getReadFramebuffer();
+			*params = framebuffer ? framebuffer->getReadBuffer() : GL_NONE;
+		}
+		return true;
+	case GL_SAMPLER_BINDING:
+		*params = mState.sampler[mState.activeSampler].name();
+		return true;
+	case GL_UNIFORM_BUFFER_BINDING:
+		*params = mState.genericUniformBuffer.name();
+		return true;
+	case GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT:
+		*params = UNIFORM_BUFFER_OFFSET_ALIGNMENT;
+		return true;
+	case GL_UNPACK_IMAGE_HEIGHT:
+		*params = mState.unpackParameters.imageHeight;
+		return true;
+	case GL_UNPACK_ROW_LENGTH:
+		*params = mState.unpackParameters.rowLength;
+		return true;
+	case GL_UNPACK_SKIP_IMAGES:
+		*params = mState.unpackParameters.skipImages;
+		return true;
+	case GL_UNPACK_SKIP_PIXELS:
+		*params = mState.unpackParameters.skipPixels;
+		return true;
+	case GL_UNPACK_SKIP_ROWS:
+		*params = mState.unpackParameters.skipRows;
+		return true;
+	case GL_VERTEX_ARRAY_BINDING:
+		*params = getCurrentVertexArray()->name;
+		return true;
+	case GL_TRANSFORM_FEEDBACK_BINDING:
+		{
+			TransformFeedback* transformFeedback = getTransformFeedback(mState.transformFeedback);
+			if(transformFeedback)
 			{
-				error(GL_INVALID_OPERATION);
+				*params = transformFeedback->name;
+			}
+			else
+			{
 				return false;
 			}
-
-			*params = mState.samplerTexture[TEXTURE_2D_ARRAY][mState.activeSampler].name();
-			return true;
-		case GL_COPY_READ_BUFFER_BINDING:
-			*params = mState.copyReadBuffer.name();
-			return true;
-		case GL_COPY_WRITE_BUFFER_BINDING:
-			*params = mState.copyWriteBuffer.name();
-			return true;
-		case GL_MAJOR_VERSION:
-			*params = clientVersion;
-			return true;
-		case GL_MAX_3D_TEXTURE_SIZE:
-			*params = IMPLEMENTATION_MAX_TEXTURE_SIZE;
-			return true;
-		case GL_MAX_ARRAY_TEXTURE_LAYERS:
-			*params = IMPLEMENTATION_MAX_TEXTURE_SIZE;
-			return true;
-		case GL_MAX_COMBINED_FRAGMENT_UNIFORM_COMPONENTS:
-			*params = MAX_COMBINED_FRAGMENT_UNIFORM_COMPONENTS;
-			return true;
-		case GL_MAX_COMBINED_UNIFORM_BLOCKS:
-			*params = MAX_VERTEX_UNIFORM_BLOCKS + MAX_FRAGMENT_UNIFORM_BLOCKS;
-			return true;
-		case GL_MAX_COMBINED_VERTEX_UNIFORM_COMPONENTS:
-			*params = MAX_COMBINED_VERTEX_UNIFORM_COMPONENTS;
-			return true;
-		case GL_MAX_ELEMENT_INDEX:
-			*params = MAX_ELEMENT_INDEX;
-			return true;
-		case GL_MAX_ELEMENTS_INDICES:
-			*params = MAX_ELEMENTS_INDICES;
-			return true;
-		case GL_MAX_ELEMENTS_VERTICES:
-			*params = MAX_ELEMENTS_VERTICES;
-			return true;
-		case GL_MAX_FRAGMENT_INPUT_COMPONENTS:
-			*params = MAX_FRAGMENT_INPUT_VECTORS * 4;
-			return true;
-		case GL_MAX_FRAGMENT_UNIFORM_BLOCKS:
-			*params = MAX_FRAGMENT_UNIFORM_BLOCKS;
-			return true;
-		case GL_MAX_FRAGMENT_UNIFORM_COMPONENTS:
-			*params = MAX_FRAGMENT_UNIFORM_COMPONENTS;
-			return true;
-		case GL_MAX_PROGRAM_TEXEL_OFFSET:
-			// Note: SwiftShader has no actual texel offset limit, so this limit can be modified if required.
-			// In any case, any behavior outside the specified range is valid since the spec mentions:
-			// (see OpenGL ES 3.0.5, 3.8.10.1 Scale Factor and Level of Detail, p.153)
-			// "If any of the offset values are outside the range of the  implementation-defined values
-			//  MIN_PROGRAM_TEXEL_OFFSET and MAX_PROGRAM_TEXEL_OFFSET, results of the texture lookup are
-			//  undefined."
-			*params = MAX_PROGRAM_TEXEL_OFFSET;
-			return true;
-		case GL_MAX_SERVER_WAIT_TIMEOUT:
-			*params = 0;
-			return true;
-		case GL_MAX_TEXTURE_LOD_BIAS:
-			*params = MAX_TEXTURE_LOD_BIAS;
-			return true;
-		case GL_MAX_TRANSFORM_FEEDBACK_INTERLEAVED_COMPONENTS:
-			*params = sw::MAX_TRANSFORM_FEEDBACK_INTERLEAVED_COMPONENTS;
-			return true;
-		case GL_MAX_TRANSFORM_FEEDBACK_SEPARATE_ATTRIBS:
-			*params = MAX_TRANSFORM_FEEDBACK_SEPARATE_ATTRIBS;
-			return true;
-		case GL_MAX_TRANSFORM_FEEDBACK_SEPARATE_COMPONENTS:
-			*params = sw::MAX_TRANSFORM_FEEDBACK_SEPARATE_COMPONENTS;
-			return true;
-		case GL_MAX_UNIFORM_BLOCK_SIZE:
-			*params = MAX_UNIFORM_BLOCK_SIZE;
-			return true;
-		case GL_MAX_UNIFORM_BUFFER_BINDINGS:
-			*params = MAX_UNIFORM_BUFFER_BINDINGS;
-			return true;
-		case GL_MAX_VARYING_COMPONENTS:
-			*params = MAX_VARYING_VECTORS * 4;
-			return true;
-		case GL_MAX_VERTEX_OUTPUT_COMPONENTS:
-			*params = MAX_VERTEX_OUTPUT_VECTORS * 4;
-			return true;
-		case GL_MAX_VERTEX_UNIFORM_BLOCKS:
-			*params = MAX_VERTEX_UNIFORM_BLOCKS;
-			return true;
-		case GL_MAX_VERTEX_UNIFORM_COMPONENTS:
-			*params = MAX_VERTEX_UNIFORM_COMPONENTS;
-			return true;
-		case GL_MIN_PROGRAM_TEXEL_OFFSET:
-			// Note: SwiftShader has no actual texel offset limit, so this limit can be modified if required.
-			// In any case, any behavior outside the specified range is valid since the spec mentions:
-			// (see OpenGL ES 3.0.5, 3.8.10.1 Scale Factor and Level of Detail, p.153)
-			// "If any of the offset values are outside the range of the  implementation-defined values
-			//  MIN_PROGRAM_TEXEL_OFFSET and MAX_PROGRAM_TEXEL_OFFSET, results of the texture lookup are
-			//  undefined."
-			*params = MIN_PROGRAM_TEXEL_OFFSET;
-			return true;
-		case GL_MINOR_VERSION:
-			*params = 0;
-			return true;
-		case GL_NUM_EXTENSIONS:
-			GLuint numExtensions;
-			getExtensions(0, &numExtensions);
-			*params = numExtensions;
-			return true;
-		case GL_NUM_PROGRAM_BINARY_FORMATS:
-			*params = NUM_PROGRAM_BINARY_FORMATS;
-			return true;
-		case GL_PACK_ROW_LENGTH:
-			*params = mState.packParameters.rowLength;
-			return true;
-		case GL_PACK_SKIP_PIXELS:
-			*params = mState.packParameters.skipPixels;
-			return true;
-		case GL_PACK_SKIP_ROWS:
-			*params = mState.packParameters.skipRows;
-			return true;
-		case GL_PIXEL_PACK_BUFFER_BINDING:
-			*params = mState.pixelPackBuffer.name();
-			return true;
-		case GL_PIXEL_UNPACK_BUFFER_BINDING:
-			*params = mState.pixelUnpackBuffer.name();
-			return true;
-		case GL_PROGRAM_BINARY_FORMATS:
-			// Since NUM_PROGRAM_BINARY_FORMATS is 0, the input
-			// should be a 0 sized array, so don't write to params
-			return true;
-		case GL_READ_BUFFER:
-			{
-				Framebuffer* framebuffer = getReadFramebuffer();
-				*params = framebuffer ? framebuffer->getReadBuffer() : GL_NONE;
-			}
-			return true;
-		case GL_SAMPLER_BINDING:
-			*params = mState.sampler[mState.activeSampler].name();
-			return true;
-		case GL_UNIFORM_BUFFER_BINDING:
-			*params = mState.genericUniformBuffer.name();
-			return true;
-		case GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT:
-			*params = UNIFORM_BUFFER_OFFSET_ALIGNMENT;
-			return true;
-		case GL_UNIFORM_BUFFER_SIZE:
-			*params = static_cast<T>(mState.genericUniformBuffer->size());
-			return true;
-		case GL_UNIFORM_BUFFER_START:
-			*params = static_cast<T>(mState.genericUniformBuffer->offset());
-			return true;
-		case GL_UNPACK_IMAGE_HEIGHT:
-			*params = mState.unpackParameters.imageHeight;
-			return true;
-		case GL_UNPACK_ROW_LENGTH:
-			*params = mState.unpackParameters.rowLength;
-			return true;
-		case GL_UNPACK_SKIP_IMAGES:
-			*params = mState.unpackParameters.skipImages;
-			return true;
-		case GL_UNPACK_SKIP_PIXELS:
-			*params = mState.unpackParameters.skipPixels;
-			return true;
-		case GL_UNPACK_SKIP_ROWS:
-			*params = mState.unpackParameters.skipRows;
-			return true;
-		case GL_VERTEX_ARRAY_BINDING:
-			*params = getCurrentVertexArray()->name;
-			return true;
-		case GL_TRANSFORM_FEEDBACK_BINDING:
-			{
-				TransformFeedback* transformFeedback = getTransformFeedback(mState.transformFeedback);
-				if(transformFeedback)
-				{
-					*params = transformFeedback->name;
-				}
-				else
-				{
-					return false;
-				}
-			}
-			return true;
-		case GL_TRANSFORM_FEEDBACK_BUFFER_BINDING:
-			{
-				TransformFeedback* transformFeedback = getTransformFeedback(mState.transformFeedback);
-				if(transformFeedback)
-				{
-					*params = transformFeedback->getGenericBufferName();
-				}
-				else
-				{
-					return false;
-				}
-			}
-			return true;
-		default:
-			break;
 		}
+		return true;
+	case GL_TRANSFORM_FEEDBACK_BUFFER_BINDING:
+		{
+			TransformFeedback* transformFeedback = getTransformFeedback(mState.transformFeedback);
+			if(transformFeedback)
+			{
+				*params = transformFeedback->getGenericBufferName();
+			}
+			else
+			{
+				return false;
+			}
+		}
+		return true;
+	default:
+		break;
 	}
 
 	return false;
@@ -2440,7 +2407,7 @@ template<typename T> bool Context::getTransformFeedbackiv(GLuint index, GLenum p
 		if(transformFeedback->getBuffer(index))
 		{
 			*param = transformFeedback->getOffset(index);
-		break;
+			break;
 		}
 		else return false;
 	default:
@@ -2460,13 +2427,14 @@ template<typename T> bool Context::getUniformBufferiv(GLuint index, GLenum pname
 	case GL_UNIFORM_BUFFER_BINDING:
 	case GL_UNIFORM_BUFFER_SIZE:
 	case GL_UNIFORM_BUFFER_START:
-		if(index >= MAX_UNIFORM_BUFFER_BINDINGS)
-		{
-			return error(GL_INVALID_VALUE, true);
-		}
 		break;
 	default:
-		break;
+		return false;
+	}
+
+	if(index >= MAX_UNIFORM_BUFFER_BINDINGS)
+	{
+		return error(GL_INVALID_VALUE, true);
 	}
 
 	const BufferBinding& uniformBuffer = mState.uniformBuffers[index];
@@ -2636,8 +2604,6 @@ bool Context::getQueryParameterInfo(GLenum pname, GLenum *type, unsigned int *nu
 	case GL_TEXTURE_BINDING_2D_ARRAY:
 	case GL_UNIFORM_BUFFER_BINDING:
 	case GL_UNIFORM_BUFFER_OFFSET_ALIGNMENT:
-	case GL_UNIFORM_BUFFER_SIZE:
-	case GL_UNIFORM_BUFFER_START:
 	case GL_UNPACK_IMAGE_HEIGHT:
 	case GL_UNPACK_ROW_LENGTH:
 	case GL_UNPACK_SKIP_IMAGES:
@@ -2817,14 +2783,15 @@ bool Context::applyRenderTarget()
 void Context::applyState(GLenum drawMode)
 {
 	Framebuffer *framebuffer = getDrawFramebuffer();
+	bool frontFaceCCW = (mState.frontFace == GL_CCW);
 
 	if(mState.cullFaceEnabled)
 	{
-		device->setCullMode(es2sw::ConvertCullMode(mState.cullMode, mState.frontFace));
+		device->setCullMode(es2sw::ConvertCullMode(mState.cullMode, mState.frontFace), frontFaceCCW);
 	}
 	else
 	{
-		device->setCullMode(sw::CULL_NONE);
+		device->setCullMode(sw::CULL_NONE, frontFaceCCW);
 	}
 
 	if(mDepthStateDirty)
@@ -3119,13 +3086,13 @@ void Context::applyTextures(sw::SamplerType samplerType)
 			TextureType textureType = programObject->getSamplerTextureType(samplerType, samplerIndex);
 
 			Texture *texture = getSamplerTexture(textureUnit, textureType);
+			Sampler *samplerObject = mState.sampler[textureUnit];
 
-			if(texture->isSamplerComplete())
+			if(texture->isSamplerComplete(samplerObject))
 			{
 				GLenum wrapS, wrapT, wrapR, minFilter, magFilter, compFunc, compMode;
-				GLfloat minLOD, maxLOD;
+				GLfloat minLOD, maxLOD, maxAnisotropy;
 
-				Sampler *samplerObject = mState.sampler[textureUnit];
 				if(samplerObject)
 				{
 					wrapS = samplerObject->getWrapS();
@@ -3137,6 +3104,7 @@ void Context::applyTextures(sw::SamplerType samplerType)
 					maxLOD = samplerObject->getMaxLod();
 					compFunc = samplerObject->getCompareFunc();
 					compMode = samplerObject->getCompareMode();
+					maxAnisotropy = samplerObject->getMaxAnisotropy();
 				}
 				else
 				{
@@ -3149,9 +3117,9 @@ void Context::applyTextures(sw::SamplerType samplerType)
 					maxLOD = texture->getMaxLOD();
 					compFunc = texture->getCompareFunc();
 					compMode = texture->getCompareMode();
+					maxAnisotropy = texture->getMaxAnisotropy();
 				}
 
-				GLfloat maxAnisotropy = texture->getMaxAnisotropy();
 				GLint baseLevel = texture->getBaseLevel();
 				GLint maxLevel = texture->getMaxLevel();
 				GLenum swizzleR = texture->getSwizzleR();
@@ -3175,6 +3143,7 @@ void Context::applyTextures(sw::SamplerType samplerType)
 				device->setMipmapFilter(samplerType, samplerIndex, es2sw::ConvertMipMapFilter(minFilter));
 				device->setMaxAnisotropy(samplerType, samplerIndex, maxAnisotropy);
 				device->setHighPrecisionFiltering(samplerType, samplerIndex, mState.textureFilteringHint == GL_NICEST);
+				device->setSyncRequired(samplerType, samplerIndex, texture->requiresSync());
 
 				applyTexture(samplerType, samplerIndex, texture);
 			}
@@ -3329,9 +3298,9 @@ void Context::readPixels(GLint x, GLint y, GLsizei width, GLsizei height, GLenum
 		return error(GL_INVALID_OPERATION);
 	}
 
-	if(!IsValidReadPixelsFormatType(framebuffer, format, type, clientVersion))
+	if(!ValidateReadPixelsFormatType(framebuffer, format, type))
 	{
-		return error(GL_INVALID_OPERATION);
+		return;
 	}
 
 	GLsizei outputWidth = (mState.packParameters.rowLength > 0) ? mState.packParameters.rowLength : width;
@@ -3353,8 +3322,12 @@ void Context::readPixels(GLint x, GLint y, GLsizei width, GLsizei height, GLenum
 	egl::Image *renderTarget = nullptr;
 	switch(format)
 	{
-	case GL_DEPTH_COMPONENT:   // GL_NV_read_depth
+	case GL_DEPTH_COMPONENT:     // GL_NV_read_depth
+	case GL_DEPTH_STENCIL_OES:   // GL_NV_read_depth_stencil
 		renderTarget = framebuffer->getDepthBuffer();
+		break;
+	case GL_STENCIL_INDEX_OES:   // GL_NV_read_stencil
+		renderTarget = framebuffer->getStencilBuffer();
 		break;
 	default:
 		renderTarget = framebuffer->getReadRenderTarget();
@@ -3366,15 +3339,68 @@ void Context::readPixels(GLint x, GLint y, GLsizei width, GLsizei height, GLenum
 		return error(GL_INVALID_OPERATION);
 	}
 
-	sw::RectF rect((float)x, (float)y, (float)(x + width), (float)(y + height));
-	sw::Rect dstRect(0, 0, width, height);
-	rect.clip(0.0f, 0.0f, (float)renderTarget->getWidth(), (float)renderTarget->getHeight());
+	sw::SliceRectF srcRect((float)x, (float)y, (float)(x + width), (float)(y + height), 0);
+	sw::SliceRect dstRect(0, 0, width, height, 0);
+	srcRect.clip(0.0f, 0.0f, (float)renderTarget->getWidth(), (float)renderTarget->getHeight());
 
-	sw::Surface *externalSurface = sw::Surface::create(width, height, 1, gl::ConvertReadFormatType(format, type), pixels, outputPitch, outputPitch * outputHeight);
-	sw::SliceRectF sliceRect(rect);
-	sw::SliceRect dstSliceRect(dstRect);
-	device->blit(renderTarget, sliceRect, externalSurface, dstSliceRect, false, false, false);
-	delete externalSurface;
+	if(format != GL_DEPTH_STENCIL_OES)   // The blitter only handles reading either depth or stencil.
+	{
+		sw::Surface *externalSurface = sw::Surface::create(width, height, 1, es2::ConvertReadFormatType(format, type), pixels, outputPitch, outputPitch  *  outputHeight);
+		device->blit(renderTarget, srcRect, externalSurface, dstRect, false, false, false);
+		externalSurface->lockExternal(0, 0, 0, sw::LOCK_READONLY, sw::PUBLIC);
+		externalSurface->unlockExternal();
+		delete externalSurface;
+	}
+	else   // format == GL_DEPTH_STENCIL_OES
+	{
+		ASSERT(renderTarget->getInternalFormat() == sw::FORMAT_D32F_LOCKABLE);
+		float *depth = (float*)renderTarget->lockInternal((int)srcRect.x0, (int)srcRect.y0, 0, sw::LOCK_READONLY, sw::PUBLIC);
+		uint8_t *stencil = (uint8_t*)renderTarget->lockStencil((int)srcRect.x0, (int)srcRect.y0, 0, sw::PUBLIC);
+
+		switch(type)
+		{
+		case GL_UNSIGNED_INT_24_8_OES:
+			{
+				uint32_t *output = (uint32_t*)pixels;
+
+				for(int y = 0; y < height; y++)
+				{
+					for(int x = 0; x < width; x++)
+					{
+						output[x] = ((uint32_t)roundf(depth[x] * 0xFFFFFF00) & 0xFFFFFF00) | stencil[x];
+					}
+
+					depth += renderTarget->getInternalPitchP();
+					stencil += renderTarget->getStencilPitchB();
+					(uint8_t*&)output += outputPitch;
+				}
+			}
+			break;
+		case GL_FLOAT_32_UNSIGNED_INT_24_8_REV:
+			{
+				struct D32FS8 { float depth32f; unsigned int stencil24_8; };
+				D32FS8 *output = (D32FS8*)pixels;
+
+				for(int y = 0; y < height; y++)
+				{
+					for(int x = 0; x < width; x++)
+					{
+						output[x].depth32f = depth[x];
+						output[x].stencil24_8 = stencil[x];
+					}
+
+					depth += renderTarget->getInternalPitchP();
+					stencil += renderTarget->getStencilPitchB();
+					(uint8_t*&)output += outputPitch;
+				}
+			}
+			break;
+		default: UNREACHABLE(type);
+		}
+
+		renderTarget->unlockInternal();
+		renderTarget->unlockStencil();
+	}
 
 	renderTarget->release();
 }
@@ -4145,12 +4171,14 @@ void Context::blitFramebuffer(GLint srcX0, GLint srcY0, GLint srcX1, GLint srcY1
 			return error(GL_INVALID_OPERATION);
 		}
 
-		// From the ANGLE_framebuffer_blit extension:
-		// "Calling BlitFramebufferANGLE will result in an INVALID_OPERATION error if <mask>
-		//  includes COLOR_BUFFER_BIT and the source and destination color formats to not match."
-		if((clientVersion < 3) && (readRenderbuffer->getSamples() > 0) && (readFormat != drawFormat))
+		if((readRenderbuffer->getSamples() > 0) && (readFormat != drawFormat))
 		{
-			return error(GL_INVALID_OPERATION);
+			// RGBA8 and BGRA8 should be interchangeable here
+			if(!(((readFormat == GL_RGBA8) && (drawFormat == GL_BGRA8_EXT)) ||
+				 ((readFormat == GL_BGRA8_EXT) && (drawFormat == GL_RGBA8))))
+			{
+				return error(GL_INVALID_OPERATION);
+			}
 		}
 
 		blitRenderTarget = true;
@@ -4344,12 +4372,12 @@ EGLenum Context::validateSharedImage(EGLenum target, GLuint name, GLuint texture
 			return EGL_BAD_ACCESS;
 		}
 
-		if(textureLevel != 0 && !texture->isSamplerComplete())
+		if(textureLevel != 0 && !texture->isSamplerComplete(nullptr))
 		{
 			return EGL_BAD_PARAMETER;
 		}
 
-		if(textureLevel == 0 && !(texture->isSamplerComplete() && texture->getTopLevel() == 0))
+		if(textureLevel == 0 && !(texture->isSamplerComplete(nullptr) && texture->getTopLevel() == 0))
 		{
 			return EGL_BAD_PARAMETER;
 		}
@@ -4421,7 +4449,7 @@ const GLubyte *Context::getExtensions(GLuint index, GLuint *numExt) const
 	// OES extensions
 	// EXT extensions
 	// Vendor extensions
-	static const char *es2extensions[] =
+	static const char *extensions[] =
 	{
 		"GL_OES_compressed_ETC1_RGB8_texture",
 		"GL_OES_depth24",
@@ -4432,6 +4460,7 @@ const GLubyte *Context::getExtensions(GLuint index, GLuint *numExt) const
 		"GL_OES_EGL_image_external",
 		"GL_OES_EGL_sync",
 		"GL_OES_element_index_uint",
+		"GL_OES_fbo_render_mipmap",
 		"GL_OES_framebuffer_object",
 		"GL_OES_packed_depth_stencil",
 		"GL_OES_rgb8_rgba8",
@@ -4443,8 +4472,10 @@ const GLubyte *Context::getExtensions(GLuint index, GLuint *numExt) const
 		"GL_OES_texture_half_float_linear",
 		"GL_OES_texture_npot",
 		"GL_OES_texture_3D",
+		"GL_OES_vertex_array_object",
 		"GL_OES_vertex_half_float",
 		"GL_EXT_blend_minmax",
+		"GL_EXT_color_buffer_float",   // OpenGL ES 3.0 specific.
 		"GL_EXT_color_buffer_half_float",
 		"GL_EXT_draw_buffers",
 		"GL_EXT_instanced_arrays",
@@ -4467,24 +4498,15 @@ const GLubyte *Context::getExtensions(GLuint index, GLuint *numExt) const
 		"GL_APPLE_texture_format_BGRA8888",
 		"GL_CHROMIUM_color_buffer_float_rgba", // A subset of EXT_color_buffer_float on top of OpenGL ES 2.0
 		"GL_CHROMIUM_texture_filtering_hint",
+		"GL_NV_depth_buffer_float2",
 		"GL_NV_fence",
 		"GL_NV_framebuffer_blit",
 		"GL_NV_read_depth",
+		"GL_NV_read_depth_stencil",
+		"GL_NV_read_stencil",
 	};
 
-	// Extensions exclusive to OpenGL ES 3.0 and above.
-	static const char *es3extensions[] =
-	{
-		"GL_EXT_color_buffer_float",
-	};
-
-	GLuint numES2extensions = sizeof(es2extensions) / sizeof(es2extensions[0]);
-	GLuint numExtensions = numES2extensions;
-
-	if(clientVersion >= 3)
-	{
-		numExtensions += sizeof(es3extensions) / sizeof(es3extensions[0]);
-	}
+	GLuint numExtensions = sizeof(extensions) / sizeof(extensions[0]);
 
 	if(numExt)
 	{
@@ -4499,17 +4521,9 @@ const GLubyte *Context::getExtensions(GLuint index, GLuint *numExt) const
 
 		if(extensionsCat.empty() && (numExtensions > 0))
 		{
-			for(const char *extension : es2extensions)
+			for(const char *extension : extensions)
 			{
 				extensionsCat += std::string(extension) + " ";
-			}
-
-			if(clientVersion >= 3)
-			{
-				for(const char *extension : es3extensions)
-				{
-					extensionsCat += std::string(extension) + " ";
-				}
 			}
 		}
 
@@ -4521,20 +4535,12 @@ const GLubyte *Context::getExtensions(GLuint index, GLuint *numExt) const
 		return nullptr;
 	}
 
-	if(index < numES2extensions)
-	{
-		return (const GLubyte*)es2extensions[index];
-	}
-	else
-	{
-		return (const GLubyte*)es3extensions[index - numES2extensions];
-	}
+	return (const GLubyte*)extensions[index];
 }
 
 }
 
-NO_SANITIZE_FUNCTION egl::Context *es2CreateContext(egl::Display *display, const egl::Context *shareContext, int clientVersion, const egl::Config *config)
+NO_SANITIZE_FUNCTION egl::Context *es2CreateContext(egl::Display *display, const egl::Context *shareContext, const egl::Config *config)
 {
-	ASSERT(!shareContext || shareContext->getClientVersion() == clientVersion);   // Should be checked by eglCreateContext
-	return new es2::Context(display, static_cast<const es2::Context*>(shareContext), clientVersion, config);
+	return new es2::Context(display, static_cast<const es2::Context*>(shareContext), config);
 }

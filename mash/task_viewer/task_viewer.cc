@@ -293,13 +293,14 @@ void TaskViewer::RemoveWindow(views::Widget* widget) {
   DCHECK(it != windows_.end());
   windows_.erase(it);
   if (windows_.empty())
-    base::RunLoop::QuitCurrentWhenIdleDeprecated();
+    context()->QuitNow();
 }
 
 void TaskViewer::OnStart() {
-  aura_init_ = views::AuraInit::Create(
-      context()->connector(), context()->identity(), "views_mus_resources.pak",
-      std::string(), nullptr, views::AuraInit::Mode::AURA_MUS);
+  views::AuraInit::InitParams params;
+  params.connector = context()->connector();
+  params.identity = context()->identity();
+  aura_init_ = views::AuraInit::Create(params);
   if (!aura_init_)
     context()->QuitNow();
 }

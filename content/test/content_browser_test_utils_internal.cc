@@ -14,6 +14,7 @@
 
 #include "base/containers/stack.h"
 #include "base/strings/stringprintf.h"
+#include "base/task/post_task.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "content/browser/compositor/surface_utils.h"
@@ -22,15 +23,14 @@
 #include "content/browser/frame_host/render_frame_host_delegate.h"
 #include "content/browser/frame_host/render_frame_proxy_host.h"
 #include "content/browser/renderer_host/delegated_frame_host.h"
-#include "content/common/frame_resize_params.h"
+#include "content/common/frame_visual_properties.h"
 #include "content/common/view_messages.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/file_select_listener.h"
 #include "content/public/browser/navigation_handle.h"
 #include "content/public/browser/render_frame_host.h"
-#include "content/public/browser/resource_dispatcher_host.h"
-#include "content/public/browser/resource_throttle.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/file_chooser_file_info.h"
 #include "content/public/common/use_zoom_for_dsf_policy.h"
 #include "content/public/test/browser_test_utils.h"
 #include "content/public/test/content_browser_test_utils.h"
@@ -236,14 +236,12 @@ std::string FrameTreeVisualizer::DepictFrameTree(FrameTreeNode* root) {
     SiteInstanceImpl* site_instance =
         static_cast<SiteInstanceImpl*>(legend_entry.second);
     std::string description = site_instance->GetSiteURL().spec();
-    if (site_instance->IsDefaultSubframeSiteInstance())
-      description = "default subframe process";
     base::StringAppendF(&result, "\n%s%s = %s", prefix,
                         legend_entry.first.c_str(), description.c_str());
     // Highlight some exceptionable conditions.
     if (site_instance->active_frame_count() == 0)
       result.append(" (active_frame_count == 0)");
-    if (!site_instance->GetProcess()->HasConnection())
+    if (!site_instance->GetProcess()->IsInitializedAndNotDead())
       result.append(" (no process)");
     prefix = "      ";
   }
@@ -284,47 +282,25 @@ Shell* OpenPopup(const ToRenderFrameHost& opener,
   return new_shell;
 }
 
-namespace {
-
-class HttpRequestStallThrottle : public ResourceThrottle {
- public:
-  // ResourceThrottle
-  void WillStartRequest(bool* defer) override { *defer = true; }
-
-  const char* GetNameForLogging() const override {
-    return "HttpRequestStallThrottle";
-  }
-};
-
-}  // namespace
-
-NavigationStallDelegate::NavigationStallDelegate(const GURL& url) : url_(url) {}
-
-void NavigationStallDelegate::RequestBeginning(
-    net::URLRequest* request,
-    content::ResourceContext* resource_context,
-    content::AppCacheService* appcache_service,
-    ResourceType resource_type,
-    std::vector<std::unique_ptr<content::ResourceThrottle>>* throttles) {
-  DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
-  if (request->url() == url_)
-    throttles->push_back(std::make_unique<HttpRequestStallThrottle>());
-}
-
 FileChooserDelegate::FileChooserDelegate(const base::FilePath& file)
       : file_(file), file_chosen_(false) {}
 
-void FileChooserDelegate::RunFileChooser(RenderFrameHost* render_frame_host,
-                                         const FileChooserParams& params) {
+FileChooserDelegate::~FileChooserDelegate() = default;
+
+void FileChooserDelegate::RunFileChooser(
+    RenderFrameHost* render_frame_host,
+    std::unique_ptr<content::FileSelectListener> listener,
+    const blink::mojom::FileChooserParams& params) {
   // Send the selected file to the renderer process.
-  FileChooserFileInfo file_info;
-  file_info.file_path = file_;
-  std::vector<FileChooserFileInfo> files;
-  files.push_back(file_info);
-  render_frame_host->FilesSelectedInChooser(files, FileChooserParams::Open);
+  auto file_info = blink::mojom::FileChooserFileInfo::NewNativeFile(
+      blink::mojom::NativeFileInfo::New(file_, base::string16()));
+  std::vector<blink::mojom::FileChooserFileInfoPtr> files;
+  files.push_back(std::move(file_info));
+  listener->FileSelected(std::move(files),
+                         blink::mojom::FileChooserParams::Mode::kOpen);
 
   file_chosen_ = true;
-  params_ = params;
+  params_ = params.Clone();
 }
 
 FrameTestNavigationManager::FrameTestNavigationManager(
@@ -363,93 +339,6 @@ void UrlCommitObserver::DidFinishNavigation(
       navigation_handle->GetFrameTreeNodeId() == frame_tree_node_id_) {
     run_loop_.Quit();
   }
-}
-
-UpdateResizeParamsMessageFilter::UpdateResizeParamsMessageFilter()
-    : content::BrowserMessageFilter(FrameMsgStart),
-      screen_space_rect_run_loop_(std::make_unique<base::RunLoop>()),
-      screen_space_rect_received_(false) {}
-
-void UpdateResizeParamsMessageFilter::WaitForRect() {
-  screen_space_rect_run_loop_->Run();
-}
-
-void UpdateResizeParamsMessageFilter::ResetRectRunLoop() {
-  last_rect_ = gfx::Rect();
-  screen_space_rect_run_loop_.reset(new base::RunLoop);
-  screen_space_rect_received_ = false;
-}
-
-viz::FrameSinkId UpdateResizeParamsMessageFilter::GetOrWaitForId() {
-  // No-opt if already quit.
-  frame_sink_id_run_loop_.Run();
-  return frame_sink_id_;
-}
-
-UpdateResizeParamsMessageFilter::~UpdateResizeParamsMessageFilter() {}
-
-void UpdateResizeParamsMessageFilter::OnUpdateResizeParams(
-    const viz::SurfaceId& surface_id,
-    const FrameResizeParams& resize_params) {
-  gfx::Rect screen_space_rect_in_dip = resize_params.screen_space_rect;
-  if (IsUseZoomForDSFEnabled()) {
-    screen_space_rect_in_dip =
-        gfx::Rect(gfx::ScaleToFlooredPoint(
-                      resize_params.screen_space_rect.origin(),
-                      1.f / resize_params.screen_info.device_scale_factor),
-                  gfx::ScaleToCeiledSize(
-                      resize_params.screen_space_rect.size(),
-                      1.f / resize_params.screen_info.device_scale_factor));
-  }
-  // Track each rect updates.
-  content::BrowserThread::PostTask(
-      content::BrowserThread::UI, FROM_HERE,
-      base::BindOnce(&UpdateResizeParamsMessageFilter::OnUpdatedFrameRectOnUI,
-                     this, screen_space_rect_in_dip));
-
-  // Record the received value. We cannot check the current state of the child
-  // frame, as it can only be processed on the UI thread, and we cannot block
-  // here.
-  frame_sink_id_ = surface_id.frame_sink_id();
-
-  // There can be several updates before a valid viz::FrameSinkId is ready. Do
-  // not quit |run_loop_| until after we receive a valid one.
-  if (!frame_sink_id_.is_valid())
-    return;
-
-  // We can't nest on the IO thread. So tests will wait on the UI thread, so
-  // post there to exit the nesting.
-  content::BrowserThread::GetTaskRunnerForThread(content::BrowserThread::UI)
-      ->PostTask(FROM_HERE,
-                 base::BindOnce(
-                     &UpdateResizeParamsMessageFilter::OnUpdatedFrameSinkIdOnUI,
-                     this));
-}
-
-void UpdateResizeParamsMessageFilter::OnUpdatedFrameRectOnUI(
-    const gfx::Rect& rect) {
-  last_rect_ = rect;
-  if (!screen_space_rect_received_) {
-    screen_space_rect_received_ = true;
-    // Tests looking at the rect currently expect all received input to finish
-    // processing before the test continutes.
-    screen_space_rect_run_loop_->QuitWhenIdle();
-  }
-}
-
-void UpdateResizeParamsMessageFilter::OnUpdatedFrameSinkIdOnUI() {
-  frame_sink_id_run_loop_.Quit();
-}
-
-bool UpdateResizeParamsMessageFilter::OnMessageReceived(
-    const IPC::Message& message) {
-  IPC_BEGIN_MESSAGE_MAP(UpdateResizeParamsMessageFilter, message)
-    IPC_MESSAGE_HANDLER(FrameHostMsg_UpdateResizeParams, OnUpdateResizeParams)
-  IPC_END_MESSAGE_MAP()
-
-  // We do not consume the message, so that we can verify the effects of it
-  // being processed.
-  return false;
 }
 
 RenderProcessHostKillWaiter::RenderProcessHostKillWaiter(
@@ -507,8 +396,6 @@ bool ShowWidgetMessageFilter::OnMessageReceived(const IPC::Message& message) {
 }
 
 void ShowWidgetMessageFilter::Wait() {
-  initial_rect_ = gfx::Rect();
-  routing_id_ = MSG_ROUTING_NONE;
   message_loop_runner_->Run();
 }
 
@@ -520,8 +407,8 @@ void ShowWidgetMessageFilter::Reset() {
 
 void ShowWidgetMessageFilter::OnShowWidget(int route_id,
                                            const gfx::Rect& initial_rect) {
-  content::BrowserThread::PostTask(
-      content::BrowserThread::UI, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {content::BrowserThread::UI},
       base::BindOnce(&ShowWidgetMessageFilter::OnShowWidgetOnUI, this, route_id,
                      initial_rect));
 }
@@ -529,8 +416,8 @@ void ShowWidgetMessageFilter::OnShowWidget(int route_id,
 #if defined(OS_MACOSX) || defined(OS_ANDROID)
 void ShowWidgetMessageFilter::OnShowPopup(
     const FrameHostMsg_ShowPopup_Params& params) {
-  content::BrowserThread::PostTask(
-      content::BrowserThread::UI, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {content::BrowserThread::UI},
       base::Bind(&ShowWidgetMessageFilter::OnShowWidgetOnUI, this,
                  MSG_ROUTING_NONE, params.bounds));
 }
@@ -541,6 +428,15 @@ void ShowWidgetMessageFilter::OnShowWidgetOnUI(int route_id,
   initial_rect_ = initial_rect;
   routing_id_ = route_id;
   message_loop_runner_->Quit();
+}
+
+SwapoutACKMessageFilter::SwapoutACKMessageFilter()
+    : BrowserMessageFilter(FrameMsgStart) {}
+
+SwapoutACKMessageFilter::~SwapoutACKMessageFilter() {}
+
+bool SwapoutACKMessageFilter::OnMessageReceived(const IPC::Message& message) {
+  return message.type() == FrameHostMsg_SwapOut_ACK::ID;
 }
 
 }  // namespace content

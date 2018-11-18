@@ -32,13 +32,13 @@ import org.chromium.chrome.browser.document.ChromeLauncherActivity;
 import org.chromium.chrome.browser.locale.DefaultSearchEngineDialogHelperUtils;
 import org.chromium.chrome.browser.locale.LocaleManager;
 import org.chromium.chrome.browser.locale.LocaleManager.SearchEnginePromoType;
+import org.chromium.chrome.browser.search_engines.TemplateUrl;
 import org.chromium.chrome.browser.search_engines.TemplateUrlService;
-import org.chromium.chrome.browser.search_engines.TemplateUrlService.TemplateUrl;
 import org.chromium.chrome.browser.searchwidget.SearchActivity;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.MultiActivityTestRule;
-import org.chromium.content.browser.test.util.Criteria;
-import org.chromium.content.browser.test.util.CriteriaHelper;
+import org.chromium.content_public.browser.test.util.Criteria;
+import org.chromium.content_public.browser.test.util.CriteriaHelper;
 
 import java.util.List;
 
@@ -236,13 +236,13 @@ public class FirstRunIntegrationTest {
     @Test
     @MediumTest
     public void testDefaultSearchEngine_DontShow() throws Exception {
-        runSearchEnginePromptTest(LocaleManager.SEARCH_ENGINE_PROMO_DONT_SHOW);
+        runSearchEnginePromptTest(LocaleManager.SearchEnginePromoType.DONT_SHOW);
     }
 
     @Test
     @MediumTest
     public void testDefaultSearchEngine_ShowExisting() throws Exception {
-        runSearchEnginePromptTest(LocaleManager.SEARCH_ENGINE_PROMO_SHOW_EXISTING);
+        runSearchEnginePromptTest(LocaleManager.SearchEnginePromoType.SHOW_EXISTING);
     }
 
     private void runSearchEnginePromptTest(@SearchEnginePromoType final int searchPromoType)
@@ -256,7 +256,7 @@ public class FirstRunIntegrationTest {
 
             @Override
             public List<TemplateUrl> getSearchEnginesForPromoDialog(int promoType) {
-                return TemplateUrlService.getInstance().getSearchEngines();
+                return TemplateUrlService.getInstance().getTemplateUrls();
             }
         };
         LocaleManager.setInstanceForTest(mockManager);
@@ -305,7 +305,7 @@ public class FirstRunIntegrationTest {
         }
 
         // Select a default search engine.
-        if (searchPromoType == LocaleManager.SEARCH_ENGINE_PROMO_DONT_SHOW) {
+        if (searchPromoType == LocaleManager.SearchEnginePromoType.DONT_SHOW) {
             Assert.assertFalse("Search engine page was shown.",
                     freProperties.getBoolean(FirstRunActivityBase.SHOW_SEARCH_ENGINE_PAGE));
         } else {

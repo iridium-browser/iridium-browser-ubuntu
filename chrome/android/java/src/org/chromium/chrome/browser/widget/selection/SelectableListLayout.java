@@ -9,10 +9,10 @@ import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.graphics.drawable.Drawable;
 import android.support.annotation.VisibleForTesting;
+import android.support.v4.view.ViewCompat;
 import android.support.v4.widget.DrawerLayout;
 import android.support.v7.widget.LinearLayoutManager;
 import android.support.v7.widget.RecyclerView;
-import android.support.v7.widget.RecyclerView.Adapter;
 import android.support.v7.widget.RecyclerView.AdapterDataObserver;
 import android.support.v7.widget.RecyclerView.ItemAnimator;
 import android.support.v7.widget.RecyclerView.OnScrollListener;
@@ -26,7 +26,6 @@ import android.widget.TextView;
 
 import org.chromium.base.ApiCompatibilityUtils;
 import org.chromium.chrome.R;
-import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.chrome.browser.widget.FadingShadow;
 import org.chromium.chrome.browser.widget.FadingShadowView;
 import org.chromium.chrome.browser.widget.LoadingView;
@@ -53,8 +52,7 @@ public class SelectableListLayout<E>
         extends FrameLayout implements DisplayStyleObserver, SelectionObserver<E> {
 
     private static final int WIDE_DISPLAY_MIN_PADDING_DP = 16;
-
-    private Adapter<RecyclerView.ViewHolder> mAdapter;
+    private RecyclerView.Adapter mAdapter;
     private ViewStub mToolbarStub;
     private TextView mEmptyView;
     private LoadingView mLoadingView;
@@ -84,7 +82,7 @@ public class SelectableListLayout<E>
             // long as the adapter data changes, we show the recycler view, and hide loading view.
             mLoadingView.hideLoadingUI();
 
-            mToolbar.onDataChanged(mAdapter.getItemCount());
+            mToolbar.setSearchEnabled(mAdapter.getItemCount() != 0);
         }
 
         @Override
@@ -128,19 +126,48 @@ public class SelectableListLayout<E>
     }
 
     /**
-     * Initializes the RecyclerView.
+     * Creates a RecyclerView for the given adapter.
      *
      * @param adapter The adapter that provides a binding from an app-specific data set to views
      *                that are displayed within the RecyclerView.
      * @return The RecyclerView itself.
      */
-    public RecyclerView initializeRecyclerView(Adapter<RecyclerView.ViewHolder> adapter) {
-        mAdapter = adapter;
-        mAdapter.registerAdapterDataObserver(mAdapterObserver);
+    public RecyclerView initializeRecyclerView(RecyclerView.Adapter adapter) {
+        return initializeRecyclerView(adapter, null);
+    }
 
-        mRecyclerView = (RecyclerView) findViewById(R.id.recycler_view);
+    /**
+     * Initializes the layout with the given recycler view and adapter.
+     *
+     * @param adapter The adapter that provides a binding from an app-specific data set to views
+     *                that are displayed within the RecyclerView.
+     * @param recyclerView The recycler view to be shown.
+     * @return The RecyclerView itself.
+     */
+    public RecyclerView initializeRecyclerView(
+            RecyclerView.Adapter adapter, @Nullable RecyclerView recyclerView) {
+        mAdapter = adapter;
+
+        if (recyclerView == null) {
+            mRecyclerView = (RecyclerView) findViewById(R.id.recycler_view);
+            mRecyclerView.setLayoutManager(new LinearLayoutManager(getContext()));
+        } else {
+            mRecyclerView = recyclerView;
+
+            // Replace the inflated recycler view with the one supplied to this method.
+            FrameLayout contentView = (FrameLayout) findViewById(R.id.list_content);
+            RecyclerView existingView = (RecyclerView) contentView.findViewById(R.id.recycler_view);
+            contentView.removeView(existingView);
+            contentView.addView(mRecyclerView, 0);
+        }
+
         mRecyclerView.setAdapter(mAdapter);
-        mRecyclerView.setLayoutManager(new LinearLayoutManager(getContext()));
+        initializeRecyclerViewProperties();
+        return mRecyclerView;
+    }
+
+    private void initializeRecyclerViewProperties() {
+        mAdapter.registerAdapterDataObserver(mAdapterObserver);
 
         mRecyclerView.setHasFixedSize(true);
         mRecyclerView.addOnScrollListener(new OnScrollListener() {
@@ -151,8 +178,6 @@ public class SelectableListLayout<E>
         });
 
         mItemAnimator = mRecyclerView.getItemAnimator();
-
-        return mRecyclerView;
     }
 
     /**
@@ -173,19 +198,23 @@ public class SelectableListLayout<E>
      *                                   background color will be used.
      * @param listener The OnMenuItemClickListener to set on the toolbar.
      * @param showShadowOnSelection Whether to show the toolbar shadow on selection.
+     * @param updateStatusBarColor Whether the status bar color should be updated to match the
+     *                             toolbar color. If true, the status bar will only be updated if
+     *                             the current device fully supports theming and is on Android M+.
      * @return The initialized SelectionToolbar.
      */
     public SelectableListToolbar<E> initializeToolbar(int toolbarLayoutId,
             SelectionDelegate<E> delegate, int titleResId, @Nullable DrawerLayout drawerLayout,
             int normalGroupResId, int selectedGroupResId,
             @Nullable Integer normalBackgroundColorResId,
-            @Nullable OnMenuItemClickListener listener, boolean showShadowOnSelection) {
+            @Nullable OnMenuItemClickListener listener, boolean showShadowOnSelection,
+            boolean updateStatusBarColor) {
         mToolbarStub.setLayoutResource(toolbarLayoutId);
         @SuppressWarnings("unchecked")
         SelectableListToolbar<E> toolbar = (SelectableListToolbar<E>) mToolbarStub.inflate();
         mToolbar = toolbar;
         mToolbar.initialize(delegate, titleResId, drawerLayout, normalGroupResId,
-                selectedGroupResId, normalBackgroundColorResId);
+                selectedGroupResId, normalBackgroundColorResId, updateStatusBarColor);
 
         if (listener != null) {
             mToolbar.setOnMenuItemClickListener(listener);
@@ -259,8 +288,7 @@ public class SelectableListLayout<E>
     public void onDisplayStyleChanged(DisplayStyle newDisplayStyle) {
         int padding = getPaddingForDisplayStyle(newDisplayStyle, getResources());
 
-        ApiCompatibilityUtils.setPaddingRelative(mRecyclerView,
-                padding, mRecyclerView.getPaddingTop(),
+        ViewCompat.setPaddingRelative(mRecyclerView, padding, mRecyclerView.getPaddingTop(),
                 padding, mRecyclerView.getPaddingBottom());
     }
 
@@ -308,7 +336,6 @@ public class SelectableListLayout<E>
         if (mToolbar == null || mRecyclerView == null) return;
 
         boolean showShadow = mRecyclerView.canScrollVertically(-1)
-                || (mToolbar.isSearching() && !FeatureUtilities.isChromeModernDesignEnabled())
                 || (mToolbar.getSelectionDelegate().isSelectionEnabled() && mShowShadowOnSelection);
         mToolbarShadow.setVisibility(showShadow ? View.VISIBLE : View.GONE);
     }
@@ -324,5 +351,26 @@ public class SelectableListLayout<E>
     @VisibleForTesting
     public View getToolbarShadowForTests() {
         return mToolbarShadow;
+    }
+
+    /**
+     * Called when the user presses the back key. Note that this method is not called automatically.
+     * The embedding UI must call this method
+     * when a backpress is detected for the event to be handled.
+     * @return Whether this event is handled.
+     */
+    public boolean onBackPressed() {
+        SelectionDelegate selectionDelegate = mToolbar.getSelectionDelegate();
+        if (selectionDelegate.isSelectionEnabled()) {
+            selectionDelegate.clearSelection();
+            return true;
+        }
+
+        if (mToolbar.isSearching()) {
+            mToolbar.hideSearchView();
+            return true;
+        }
+
+        return false;
     }
 }

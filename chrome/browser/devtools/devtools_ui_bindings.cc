@@ -21,6 +21,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/post_task.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -40,6 +41,7 @@
 #include "components/prefs/scoped_user_pref_update.h"
 #include "components/sync_preferences/pref_service_syncable.h"
 #include "components/zoom/page_zoom.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_security_policy.h"
 #include "content/public/browser/devtools_external_agent_proxy.h"
@@ -62,15 +64,9 @@
 #include "extensions/common/permissions/permissions_data.h"
 #include "ipc/ipc_channel.h"
 #include "net/base/escape.h"
-#include "net/base/io_buffer.h"
 #include "net/base/net_errors.h"
-#include "net/base/url_util.h"
-#include "net/cert/x509_certificate.h"
 #include "net/http/http_response_headers.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
-#include "net/url_request/url_fetcher.h"
-#include "net/url_request/url_fetcher_response_writer.h"
-#include "services/network/public/cpp/features.h"
 #include "services/network/public/cpp/simple_url_loader.h"
 #include "services/network/public/cpp/simple_url_loader_stream_consumer.h"
 #include "third_party/blink/public/public_buildflags.h"
@@ -106,7 +102,11 @@ static const char kConfigNetworkDiscoveryEnabled[] = "networkDiscoveryEnabled";
 static const char kConfigNetworkDiscoveryConfig[] = "networkDiscoveryConfig";
 
 // This constant should be in sync with
-// the constant at shell_devtools_frontend.cc.
+// the constant
+// kShellMaxMessageChunkSize in content/shell/browser/shell_devtools_bindings.cc
+// and
+// kLayoutTestMaxMessageChunkSize in
+// content/shell/browser/layout_test/devtools_protocol_test_bindings.cc.
 const size_t kMaxMessageChunkSize = IPC::Channel::kMaximumMessageSize / 4;
 
 typedef std::vector<DevToolsUIBindings*> DevToolsUIBindingsList;
@@ -206,68 +206,6 @@ std::unique_ptr<base::DictionaryValue> BuildObjectForResponse(
 
   response->Set("headers", std::move(headers));
   return response;
-}
-
-// ResponseWriter -------------------------------------------------------------
-
-class ResponseWriter : public net::URLFetcherResponseWriter {
- public:
-  ResponseWriter(base::WeakPtr<DevToolsUIBindings> bindings, int stream_id);
-  ~ResponseWriter() override;
-
-  // URLFetcherResponseWriter overrides:
-  int Initialize(const net::CompletionCallback& callback) override;
-  int Write(net::IOBuffer* buffer,
-            int num_bytes,
-            const net::CompletionCallback& callback) override;
-  int Finish(int net_error, const net::CompletionCallback& callback) override;
-
- private:
-  base::WeakPtr<DevToolsUIBindings> bindings_;
-  int stream_id_;
-
-  DISALLOW_COPY_AND_ASSIGN(ResponseWriter);
-};
-
-ResponseWriter::ResponseWriter(base::WeakPtr<DevToolsUIBindings> bindings,
-                               int stream_id)
-    : bindings_(bindings),
-      stream_id_(stream_id) {
-  DCHECK(!base::FeatureList::IsEnabled(network::features::kNetworkService));
-}
-
-ResponseWriter::~ResponseWriter() {
-}
-
-int ResponseWriter::Initialize(const net::CompletionCallback& callback) {
-  return net::OK;
-}
-
-int ResponseWriter::Write(net::IOBuffer* buffer,
-                          int num_bytes,
-                          const net::CompletionCallback& callback) {
-  std::string chunk = std::string(buffer->data(), num_bytes);
-  bool encoded = false;
-  if (!base::IsStringUTF8(chunk)) {
-    encoded = true;
-    base::Base64Encode(chunk, &chunk);
-  }
-
-  base::Value* id = new base::Value(stream_id_);
-  base::Value* chunkValue = new base::Value(chunk);
-  base::Value* encodedValue = new base::Value(encoded);
-
-  content::BrowserThread::PostTask(
-      content::BrowserThread::UI, FROM_HERE,
-      base::BindOnce(&DevToolsUIBindings::CallClientFunction, bindings_,
-                     "DevToolsAPI.streamWrite", base::Owned(id),
-                     base::Owned(chunkValue), base::Owned(encodedValue)));
-  return num_bytes;
-}
-
-int ResponseWriter::Finish(int net_error,
-                           const net::CompletionCallback& callback) {
-  return net::OK;
 }
 
 GURL SanitizeFrontendURL(const GURL& url,
@@ -567,8 +505,7 @@ DevToolsUIBindings* DevToolsUIBindings::ForWebContents(
     return NULL;
   DevToolsUIBindingsList* instances =
       g_devtools_ui_bindings_instances.Pointer();
-  for (DevToolsUIBindingsList::iterator it(instances->begin());
-       it != instances->end(); ++it) {
+  for (auto it(instances->begin()); it != instances->end(); ++it) {
     if ((*it)->web_contents() == web_contents)
       return *it;
   }
@@ -599,9 +536,6 @@ DevToolsUIBindings::DevToolsUIBindings(content::WebContents* web_contents)
 }
 
 DevToolsUIBindings::~DevToolsUIBindings() {
-  for (const auto& pair : pending_requests_)
-    delete pair.first;
-
   if (agent_host_.get())
     agent_host_->DetachClient(this);
 
@@ -615,8 +549,7 @@ DevToolsUIBindings::~DevToolsUIBindings() {
   // Remove self from global list.
   DevToolsUIBindingsList* instances =
       g_devtools_ui_bindings_instances.Pointer();
-  DevToolsUIBindingsList::iterator it(
-      std::find(instances->begin(), instances->end(), this));
+  auto it(std::find(instances->begin(), instances->end(), this));
   DCHECK(it != instances->end());
   instances->erase(it);
 }
@@ -690,8 +623,7 @@ void DevToolsUIBindings::SendMessageAck(int request_id,
 
 void DevToolsUIBindings::InnerAttach() {
   DCHECK(agent_host_.get());
-  // Note: we could use ForceAttachClient here to disconnect other clients
-  // if any problems arise.
+  // TODO(dgozman): handle return value of AttachClient.
   agent_host_->AttachClient(this);
 }
 
@@ -771,27 +703,12 @@ void DevToolsUIBindings::LoadNetworkResource(const DispatchCallback& callback,
           setting:
             "It's not possible to disable this feature from settings."
           chrome_policy {
-            DeveloperToolsDisabled {
+            DeveloperToolsAvailability {
               policy_options {mode: MANDATORY}
-              DeveloperToolsDisabled: true
+              DeveloperToolsAvailability: 2
             }
           }
         })");
-
-  if (!base::FeatureList::IsEnabled(network::features::kNetworkService)) {
-    net::URLFetcher* fetcher =
-        net::URLFetcher::Create(gurl, net::URLFetcher::GET, this,
-                                traffic_annotation)
-            .release();
-    pending_requests_[fetcher] = callback;
-    fetcher->SetRequestContext(profile_->GetRequestContext());
-    fetcher->SetExtraRequestHeaders(headers);
-    fetcher->SaveResponseWithWriter(
-        std::unique_ptr<net::URLFetcherResponseWriter>(
-            new ResponseWriter(weak_factory_.GetWeakPtr(), stream_id)));
-    fetcher->Start();
-    return;
-  }
 
   auto resource_request = std::make_unique<network::ResourceRequest>();
   resource_request->url = gurl;
@@ -906,7 +823,7 @@ void DevToolsUIBindings::IndexPath(
 
 void DevToolsUIBindings::StopIndexing(int index_request_id) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  IndexingJobsMap::iterator it = indexing_jobs_.find(index_request_id);
+  auto it = indexing_jobs_.find(index_request_id);
   if (it == indexing_jobs_.end())
     return;
   it->second->Stop();
@@ -1188,19 +1105,6 @@ void DevToolsUIBindings::JsonReceived(const DispatchCallback& callback,
   callback.Run(&message_value);
 }
 
-void DevToolsUIBindings::OnURLFetchComplete(const net::URLFetcher* source) {
-  DCHECK(!base::FeatureList::IsEnabled(network::features::kNetworkService));
-
-  DCHECK(source);
-  PendingRequestsMap::iterator it = pending_requests_.find(source);
-  DCHECK(it != pending_requests_.end());
-
-  auto response = BuildObjectForResponse(source->GetResponseHeaders());
-  it->second.Run(response.get());
-  pending_requests_.erase(it);
-  delete source;
-}
-
 void DevToolsUIBindings::DeviceCountChanged(int count) {
   base::Value value(count);
   CallClientFunction("DevToolsAPI.deviceCountUpdated", &value, NULL,
@@ -1255,13 +1159,32 @@ void DevToolsUIBindings::FilePathsChanged(
     const std::vector<std::string>& changed_paths,
     const std::vector<std::string>& added_paths,
     const std::vector<std::string>& removed_paths) {
-  base::ListValue changed, added, removed;
-  changed.AppendStrings(changed_paths);
-  added.AppendStrings(added_paths);
-  removed.AppendStrings(removed_paths);
-
-  CallClientFunction("DevToolsAPI.fileSystemFilesChangedAddedRemoved", &changed,
-                     &added, &removed);
+  const int kMaxPathsPerMessage = 1000;
+  size_t changed_index = 0;
+  size_t added_index = 0;
+  size_t removed_index = 0;
+  // Dispatch limited amount of file paths in a time to avoid
+  // IPC max message size limit. See https://crbug.com/797817.
+  while (changed_index < changed_paths.size() ||
+         added_index < added_paths.size() ||
+         removed_index < removed_paths.size()) {
+    int budget = kMaxPathsPerMessage;
+    base::ListValue changed, added, removed;
+    while (budget > 0 && changed_index < changed_paths.size()) {
+      changed.AppendString(changed_paths[changed_index++]);
+      --budget;
+    }
+    while (budget > 0 && added_index < added_paths.size()) {
+      added.AppendString(added_paths[added_index++]);
+      --budget;
+    }
+    while (budget > 0 && removed_index < removed_paths.size()) {
+      removed.AppendString(removed_paths[removed_index++]);
+      --budget;
+    }
+    CallClientFunction("DevToolsAPI.fileSystemFilesChangedAddedRemoved",
+                       &changed, &added, &removed);
+  }
 }
 
 void DevToolsUIBindings::IndexingTotalWorkCalculated(
@@ -1304,8 +1227,7 @@ void DevToolsUIBindings::SearchCompleted(
     const std::vector<std::string>& file_paths) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   base::ListValue file_paths_value;
-  for (std::vector<std::string>::const_iterator it(file_paths.begin());
-       it != file_paths.end(); ++it) {
+  for (auto it(file_paths.begin()); it != file_paths.end(); ++it) {
     file_paths_value.AppendString(*it);
   }
   base::Value request_id_value(request_id);
@@ -1338,9 +1260,9 @@ void DevToolsUIBindings::AddDevToolsExtensionsToClient() {
       continue;
 
     // Each devtools extension will need to be able to run in the devtools
-    // process. Grant each specific extension's origin permission to load
-    // documents.
-    content::ChildProcessSecurityPolicy::GetInstance()->GrantOrigin(
+    // process. Grant the devtools process the ability to request URLs from the
+    // extension.
+    content::ChildProcessSecurityPolicy::GetInstance()->GrantRequestOrigin(
         web_contents_->GetMainFrame()->GetProcess()->GetID(),
         url::Origin::Create(extension->url()));
 

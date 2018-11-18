@@ -6,9 +6,9 @@ mojom = "//ui/events/mojo/event.mojom"
 public_headers = [ "//ui/events/event.h" ]
 traits_headers = [ "//ui/events/mojo/event_struct_traits.h" ]
 public_deps = [
-  "//mojo/common:common_custom_types",
   "//ui/events",
   "//ui/events:dom_keycode_converter",
+  "//ui/gfx/geometry/mojo",
   "//ui/latency/mojo:interfaces",
 ]
 deps = [
@@ -23,5 +23,6 @@ sources = [
 type_mappings = [
   "ui.mojom.Event=std::unique_ptr<ui::Event>[move_only]",
   "ui.mojom.EventMomentumPhase=ui::EventMomentumPhase",
+  "ui.mojom.PointerDetails=ui::PointerDetails",
   "ui.mojom.ScrollEventPhase=ui::ScrollEventPhase",
 ]

@@ -51,11 +51,13 @@ _SECONDS_TO_NANOS = int(1e9)
 # The amount of time a test executable may run before it gets killed.
 _TEST_TIMEOUT_SECONDS = 30*60
 
+# Tests that use SpawnedTestServer must run the LocalTestServerSpawner on the
+# host machine.
 # TODO(jbudorick): Move this up to the test instance if the net test server is
 # handled outside of the APK for the remote_device environment.
 _SUITE_REQUIRES_TEST_SERVER_SPAWNER = [
   'components_browsertests', 'content_unittests', 'content_browsertests',
-  'net_unittests', 'unit_tests'
+  'net_unittests', 'services_unittests', 'unit_tests'
 ]
 
 # No-op context manager. If we used Python 3, we could change this to
@@ -150,6 +152,7 @@ class _ApkDelegate(object):
       extras[gtest_test_instance.EXTRA_SHARD_NANO_TIMEOUT] = int(
           kwargs['timeout'] * _SECONDS_TO_NANOS)
 
+    # pylint: disable=redefined-variable-type
     command_line_file = _NullContextManager()
     if flags:
       if len(flags) > _MAX_INLINE_FLAGS_LENGTH:
@@ -167,6 +170,7 @@ class _ApkDelegate(object):
         extras[_EXTRA_TEST_LIST] = test_list_file.name
       else:
         extras[_EXTRA_TEST] = test[0]
+    # pylint: enable=redefined-variable-type
 
     stdout_file = device_temp_file.DeviceTempFile(
         device.adb, dir=device.GetExternalStoragePath(), suffix='.gtest_out')
@@ -281,11 +285,13 @@ class LocalDeviceGtestRun(local_device_test_run.LocalDeviceTestRun):
     assert isinstance(test_instance, gtest_test_instance.GtestTestInstance)
     super(LocalDeviceGtestRun, self).__init__(env, test_instance)
 
+    # pylint: disable=redefined-variable-type
     if self._test_instance.apk:
       self._delegate = _ApkDelegate(self._test_instance, env.tool)
     elif self._test_instance.exe_dist_dir:
       self._delegate = _ExeDelegate(self, self._test_instance.exe_dist_dir,
                                     self._env.tool)
+    # pylint: enable=redefined-variable-type
     self._crashes = set()
     self._servers = collections.defaultdict(list)
 
@@ -391,11 +397,19 @@ class LocalDeviceGtestRun(local_device_test_run.LocalDeviceTestRun):
       retries = 1
       if self._test_instance.wait_for_java_debugger:
         timeout = None
+
+      flags = list(self._test_instance.flags)
+      flags.append('--gtest_list_tests')
+
       # TODO(crbug.com/726880): Remove retries when no longer necessary.
       for i in range(0, retries+1):
+        logging.info('flags:')
+        for f in flags:
+          logging.info('  %s', f)
+
         raw_test_list = crash_handler.RetryOnSystemCrash(
             lambda d: self._delegate.Run(
-                None, d, flags='--gtest_list_tests', timeout=timeout),
+                None, d, flags=' '.join(flags), timeout=timeout),
             device=dev)
         tests = gtest_test_instance.ParseGTestListTests(raw_test_list)
         if not tests:

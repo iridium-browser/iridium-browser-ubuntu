@@ -7,11 +7,15 @@
 namespace net {
 
 SSLConfigServiceDefaults::SSLConfigServiceDefaults() = default;
+SSLConfigServiceDefaults::~SSLConfigServiceDefaults() = default;
 
 void SSLConfigServiceDefaults::GetSSLConfig(SSLConfig* config) {
   *config = default_config_;
 }
 
-SSLConfigServiceDefaults::~SSLConfigServiceDefaults() = default;
+bool SSLConfigServiceDefaults::CanShareConnectionWithClientCerts(
+    const std::string& hostname) const {
+  return false;
+}
 
 }  // namespace net

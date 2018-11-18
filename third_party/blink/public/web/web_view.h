@@ -31,13 +31,14 @@
 #ifndef THIRD_PARTY_BLINK_PUBLIC_WEB_WEB_VIEW_H_
 #define THIRD_PARTY_BLINK_PUBLIC_WEB_WEB_VIEW_H_
 
+#include "base/time/time.h"
+#include "third_party/blink/public/common/manifest/web_display_mode.h"
 #include "third_party/blink/public/mojom/page/page_visibility_state.mojom-shared.h"
-#include "third_party/blink/public/platform/web_color.h"
-#include "third_party/blink/public/platform/web_display_mode.h"
 #include "third_party/blink/public/platform/web_drag_operation.h"
 #include "third_party/blink/public/platform/web_focus_type.h"
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/web/web_widget.h"
+#include "third_party/skia/include/core/SkColor.h"
 
 namespace blink {
 
@@ -51,9 +52,9 @@ class WebRemoteFrame;
 class WebSettings;
 class WebString;
 class WebViewClient;
+class WebWidgetClient;
 struct WebDeviceEmulationParams;
 struct WebFloatPoint;
-struct WebMediaPlayerAction;
 struct WebPluginAction;
 struct WebPoint;
 struct WebWindowFeatures;
@@ -71,6 +72,7 @@ class WebView : protected WebWidget {
 
   // WebWidget overrides.
   using WebWidget::Close;
+  using WebWidget::LifecycleUpdate;
   using WebWidget::Size;
   using WebWidget::Resize;
   using WebWidget::ResizeVisualViewport;
@@ -78,15 +80,15 @@ class WebView : protected WebWidget {
   using WebWidget::DidExitFullscreen;
   using WebWidget::BeginFrame;
   using WebWidget::UpdateAllLifecyclePhases;
-  using WebWidget::Paint;
-  using WebWidget::PaintIgnoringCompositing;
+  using WebWidget::UpdateLifecycle;
+  using WebWidget::PaintContent;
   using WebWidget::LayoutAndPaintAsync;
   using WebWidget::CompositeAndReadbackAsync;
   using WebWidget::ThemeChanged;
   using WebWidget::HandleInputEvent;
   using WebWidget::DispatchBufferedTouchEvents;
   using WebWidget::SetCursorVisibilityState;
-  using WebWidget::ApplyViewportDeltas;
+  using WebWidget::ApplyViewportChanges;
   using WebWidget::MouseCaptureLost;
   using WebWidget::SetFocus;
   using WebWidget::SelectionBounds;
@@ -111,6 +113,7 @@ class WebView : protected WebWidget {
   // client may be null, while PageVisibilityState defines the initial
   // visibility of the page.
   BLINK_EXPORT static WebView* Create(WebViewClient*,
+                                      WebWidgetClient*,
                                       mojom::PageVisibilityState,
                                       WebView* opener);
 
@@ -189,11 +192,6 @@ class WebView : protected WebWidget {
                                         WebRemoteFrame* from,
                                         WebLocalFrame* to) {}
 
-  // Animate a scale into the specified rect where multiple targets were
-  // found from previous tap gesture.
-  // Returns false if it doesn't do any zooming.
-  virtual bool ZoomToMultipleTargetsRect(const WebRect&) = 0;
-
   // Zoom ----------------------------------------------------------------
 
   // Returns the current zoom level.  0 is "original size", and each increment
@@ -232,6 +230,11 @@ class WebView : protected WebWidget {
   // Scales the page without affecting layout by using the visual viewport.
   virtual void SetPageScaleFactor(float) = 0;
 
+  // Minimum and Maximum as computed as a combination of default, page defined,
+  // UA, etc. constraints.
+  virtual float MinimumPageScaleFactor() const = 0;
+  virtual float MaximumPageScaleFactor() const = 0;
+
   // Sets the offset of the visual viewport within the main frame, in
   // partial CSS pixels. The offset will be clamped so the visual viewport
   // stays within the frame's bounds.
@@ -269,8 +272,10 @@ class WebView : protected WebWidget {
 
   // Returns the "preferred" contents size, defined as the preferred minimum
   // width of the main document's contents and the minimum height required to
-  // display the main document without scrollbars.  The returned size has the
-  // page zoom factor applied.
+  // display the main document without scrollbars. If the document is in quirks
+  // mode (does not have <!doctype html>), the height will stretch to fill the
+  // viewport. The returned size has the page zoom factor applied. The lifecycle
+  // must be updated to at least layout before calling (see: |UpdateLifecycle|).
   virtual WebSize ContentsPreferredMinimumSize() = 0;
 
   // Sets the display mode of the web app.
@@ -308,11 +313,6 @@ class WebView : protected WebWidget {
   virtual void DisableAutoResizeMode() = 0;
 
   // Media ---------------------------------------------------------------
-
-  // Performs the specified media player action on the node at the given
-  // location.
-  virtual void PerformMediaPlayerAction(const WebMediaPlayerAction&,
-                                        const WebPoint& location) = 0;
 
   // Performs the specified plugin action on the node at the given location.
   virtual void PerformPluginAction(const WebPluginAction&,
@@ -361,12 +361,6 @@ class WebView : protected WebWidget {
   // Hides any popup (suggestions, selects...) that might be showing.
   virtual void HidePopups() = 0;
 
-  // Generate a synthetic touch event applying the result of a tap
-  // disambiguation popup.
-  virtual void ResolveTapDisambiguation(double timestamp_seconds,
-                                        WebPoint tap_viewport_offset,
-                                        bool is_long_press) = 0;
-
   // Visited link state --------------------------------------------------
 
   // Tells all WebView instances to update the visited link state for the
@@ -411,7 +405,7 @@ class WebView : protected WebWidget {
   // PageOverlay ----------------------------------------------------------
 
   // Overlay this WebView with a solid color.
-  virtual void SetPageOverlayColor(WebColor) = 0;
+  virtual void SetPageOverlayColor(SkColor) = 0;
 
   // Page Importance Signals ----------------------------------------------
 
@@ -426,8 +420,8 @@ class WebView : protected WebWidget {
 
   // Lifecycle state ------------------------------------------------------
 
-  // Freeze the page and all the local frames.
-  virtual void FreezePage() = 0;
+  // Freezes or unfreezes the page and all the local frames.
+  virtual void SetPageFrozen(bool frozen) = 0;
 
   // Testing functionality for TestRunner ---------------------------------
 

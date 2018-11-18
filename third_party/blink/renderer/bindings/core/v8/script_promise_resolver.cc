@@ -14,9 +14,6 @@ ScriptPromiseResolver::ScriptPromiseResolver(ScriptState* script_state)
     : PausableObject(ExecutionContext::From(script_state)),
       state_(kPending),
       script_state_(script_state),
-      timer_(GetExecutionContext()->GetTaskRunner(TaskType::kMicrotask),
-             this,
-             &ScriptPromiseResolver::OnTimerFired),
       resolver_(script_state) {
   if (GetExecutionContext()->IsContextDestroyed()) {
     state_ = kDetached;
@@ -24,19 +21,25 @@ ScriptPromiseResolver::ScriptPromiseResolver(ScriptState* script_state)
   }
 }
 
+void ScriptPromiseResolver::Reject(ExceptionState& exception_state) {
+  DCHECK(exception_state.HadException());
+  Reject(exception_state.GetException());
+  exception_state.ClearException();
+}
+
 void ScriptPromiseResolver::Pause() {
-  timer_.Stop();
+  deferred_resolve_task_.Cancel();
 }
 
 void ScriptPromiseResolver::Unpause() {
   if (state_ == kResolving || state_ == kRejecting)
-    timer_.StartOneShot(TimeDelta(), FROM_HERE);
+    ScheduleResolveOrReject();
 }
 
 void ScriptPromiseResolver::Detach() {
   if (state_ == kDetached)
     return;
-  timer_.Stop();
+  deferred_resolve_task_.Cancel();
   state_ = kDetached;
   resolver_.Clear();
   value_.Clear();
@@ -55,17 +58,6 @@ void ScriptPromiseResolver::KeepAliveWhilePending() {
   keep_alive_ = this;
 }
 
-void ScriptPromiseResolver::OnTimerFired(TimerBase*) {
-  DCHECK(state_ == kResolving || state_ == kRejecting);
-  if (!GetScriptState()->ContextIsValid()) {
-    Detach();
-    return;
-  }
-
-  ScriptState::Scope scope(script_state_.get());
-  ResolveOrRejectImmediately();
-}
-
 void ScriptPromiseResolver::ResolveOrRejectImmediately() {
   DCHECK(!GetExecutionContext()->IsContextDestroyed());
   DCHECK(!GetExecutionContext()->IsContextPaused());
@@ -80,7 +72,26 @@ void ScriptPromiseResolver::ResolveOrRejectImmediately() {
   Detach();
 }
 
+void ScriptPromiseResolver::ScheduleResolveOrReject() {
+  deferred_resolve_task_ = PostCancellableTask(
+      *GetExecutionContext()->GetTaskRunner(TaskType::kMicrotask), FROM_HERE,
+      WTF::Bind(&ScriptPromiseResolver::ResolveOrRejectDeferred,
+                WrapPersistent(this)));
+}
+
+void ScriptPromiseResolver::ResolveOrRejectDeferred() {
+  DCHECK(state_ == kResolving || state_ == kRejecting);
+  if (!GetScriptState()->ContextIsValid()) {
+    Detach();
+    return;
+  }
+
+  ScriptState::Scope scope(script_state_);
+  ResolveOrRejectImmediately();
+}
+
 void ScriptPromiseResolver::Trace(blink::Visitor* visitor) {
+  visitor->Trace(script_state_);
   PausableObject::Trace(visitor);
 }
 

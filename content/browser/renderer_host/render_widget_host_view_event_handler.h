@@ -30,6 +30,7 @@ class WebTouchEvent;
 }  // namespace blink
 
 namespace ui {
+enum class DomCode;
 class TextInputClient;
 class TouchSelectionController;
 }
@@ -41,6 +42,7 @@ class OverscrollController;
 class RenderWidgetHostImpl;
 class RenderWidgetHostViewBase;
 class TouchSelectionControllerClientAura;
+class HitTestDebugKeyEventObserver;
 
 // Provides an implementation of ui::EventHandler for use with
 // RenderWidgetHostViewBase. A delegate is required in order to provide platform
@@ -144,7 +146,7 @@ class CONTENT_EXPORT RenderWidgetHostViewEventHandler
   void UnlockMouse();
 
   // Start/Stop processing of future system keyboard events.
-  bool LockKeyboard(base::Optional<base::flat_set<int>> keys);
+  bool LockKeyboard(base::Optional<base::flat_set<ui::DomCode>> codes);
   void UnlockKeyboard();
   bool IsKeyboardLocked() const;
 
@@ -178,6 +180,8 @@ class CONTENT_EXPORT RenderWidgetHostViewEventHandler
   FRIEND_TEST_ALL_PREFIXES(
       RenderWidgetHostViewAuraTest,
       KeyEventRoutingKeyboardLockAndChildPopupWithoutInputGrab);
+  friend class MockPointerLockRenderWidgetHostView;
+
   // Returns true if the |event| passed in can be forwarded to the renderer.
   bool CanRendererHandleEvent(const ui::MouseEvent* event,
                               bool mouse_locked,
@@ -286,6 +290,8 @@ class CONTENT_EXPORT RenderWidgetHostViewEventHandler
   Delegate* const delegate_;
   aura::Window* window_;
   MouseWheelPhaseHandler mouse_wheel_phase_handler_;
+
+  std::unique_ptr<HitTestDebugKeyEventObserver> debug_observer_;
 
   DISALLOW_COPY_AND_ASSIGN(RenderWidgetHostViewEventHandler);
 };

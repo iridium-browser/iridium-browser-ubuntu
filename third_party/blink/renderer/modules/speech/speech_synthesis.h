@@ -69,7 +69,7 @@ class MODULES_EXPORT SpeechSynthesis final
     return ContextClient::GetExecutionContext();
   }
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  private:
   explicit SpeechSynthesis(ExecutionContext*);
@@ -89,11 +89,21 @@ class MODULES_EXPORT SpeechSynthesis final
   void HandleSpeakingCompleted(SpeechSynthesisUtterance*, bool error_occurred);
   void FireEvent(const AtomicString& type,
                  SpeechSynthesisUtterance*,
-                 unsigned long char_index,
+                 uint32_t char_index,
                  const String& name);
+
+  void FireErrorEvent(SpeechSynthesisUtterance*,
+                      unsigned long char_index,
+                      const String& error);
 
   // Returns the utterance at the front of the queue.
   SpeechSynthesisUtterance* CurrentSpeechUtterance() const;
+
+  // Gets a timestamp in millis that is safe to expose to the web.
+  // Returns false if it cannot get a timestamp.
+  bool GetElapsedTimeMillis(double* millis);
+
+  bool IsAllowedToStartByAutoplay() const;
 
   Member<PlatformSpeechSynthesizer> platform_speech_synthesizer_;
   HeapVector<Member<SpeechSynthesisVoice>> voice_list_;

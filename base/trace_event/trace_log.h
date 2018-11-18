@@ -125,8 +125,15 @@ class BASE_EXPORT TraceLog : public MemoryDumpProvider {
     // TraceLog::IsEnabled() is false at this point.
     virtual void OnTraceLogDisabled() = 0;
   };
+  // Adds an observer. Cannot be called from within the observer callback.
   void AddEnabledStateObserver(EnabledStateObserver* listener);
+  // Removes an observer. Cannot be called from within the observer callback.
   void RemoveEnabledStateObserver(EnabledStateObserver* listener);
+  // Adds an observer that is owned by TraceLog. This is useful for agents that
+  // implement tracing feature that needs to stay alive as long as TraceLog
+  // does.
+  void AddOwnedEnabledStateObserver(
+      std::unique_ptr<EnabledStateObserver> listener);
   bool HasEnabledStateObserver(EnabledStateObserver* listener) const;
 
   // Asynchronous enabled state listeners. When tracing is enabled or disabled,
@@ -177,6 +184,14 @@ class BASE_EXPORT TraceLog : public MemoryDumpProvider {
 
   // Cancels tracing and discards collected data.
   void CancelTracing(const OutputCallback& cb);
+
+  typedef void (*AddTraceEventOverrideCallback)(const TraceEvent&);
+  typedef void (*OnFlushCallback)();
+  // The callback will be called up until the point where the flush is
+  // finished, i.e. must be callable until OutputCallback is called with
+  // has_more_events==false.
+  void SetAddTraceEventOverride(const AddTraceEventOverrideCallback& override,
+                                const OnFlushCallback& on_flush_callback);
 
   // Called by TRACE_EVENT* macros, don't call this directly.
   // The name parameter is a category group for example:
@@ -361,6 +376,7 @@ class BASE_EXPORT TraceLog : public MemoryDumpProvider {
                            ConvertTraceConfigToInternalOptions);
   FRIEND_TEST_ALL_PREFIXES(TraceEventTestFixture,
                            TraceRecordAsMuchAsPossibleMode);
+  FRIEND_TEST_ALL_PREFIXES(TraceEventTestFixture, ConfigTraceBufferLimit);
 
   friend class base::NoDestructor<TraceLog>;
 
@@ -388,6 +404,11 @@ class BASE_EXPORT TraceLog : public MemoryDumpProvider {
   TraceLog();
   ~TraceLog() override;
   void AddMetadataEventsWhileLocked();
+  template <typename T>
+  void AddMetadataEventWhileLocked(int thread_id,
+                                   const char* metadata_name,
+                                   const char* arg_name,
+                                   const T& value);
 
   InternalTraceOptions trace_options() const {
     return static_cast<InternalTraceOptions>(
@@ -459,10 +480,17 @@ class BASE_EXPORT TraceLog : public MemoryDumpProvider {
   int num_traces_recorded_;
   std::unique_ptr<TraceBuffer> logged_events_;
   std::vector<std::unique_ptr<TraceEvent>> metadata_events_;
-  bool dispatching_to_observer_list_;
-  std::vector<EnabledStateObserver*> enabled_state_observer_list_;
+
+  // The lock protects observers access.
+  mutable Lock observers_lock_;
+  bool dispatching_to_observers_ = false;
+  std::vector<EnabledStateObserver*> enabled_state_observers_;
   std::map<AsyncEnabledStateObserver*, RegisteredAsyncObserver>
       async_observers_;
+  // Manages ownership of the owned observers. The owned observers will also be
+  // added to |enabled_state_observers_|.
+  std::vector<std::unique_ptr<EnabledStateObserver>>
+      owned_enabled_state_observer_copy_;
 
   std::string process_name_;
   std::unordered_map<int, std::string> process_labels_;
@@ -505,10 +533,12 @@ class BASE_EXPORT TraceLog : public MemoryDumpProvider {
 
   // Set when asynchronous Flush is in progress.
   OutputCallback flush_output_callback_;
-  scoped_refptr<SingleThreadTaskRunner> flush_task_runner_;
+  scoped_refptr<SequencedTaskRunner> flush_task_runner_;
   ArgumentFilterPredicate argument_filter_predicate_;
   subtle::AtomicWord generation_;
   bool use_worker_thread_;
+  subtle::AtomicWord trace_event_override_;
+  subtle::AtomicWord on_flush_callback_;
 
   FilterFactoryForTesting filter_factory_for_testing_;
 

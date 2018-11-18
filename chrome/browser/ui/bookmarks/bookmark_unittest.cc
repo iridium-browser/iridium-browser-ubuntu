@@ -4,6 +4,7 @@
 
 #include <memory>
 
+#include "base/bind.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
 #include "chrome/browser/search_engines/template_url_service_factory.h"
@@ -27,8 +28,9 @@ TEST_F(BookmarkTest, DetachedBookmarkBarOnNTP) {
 // Verify that the detached bookmark bar is hidden on custom NTP pages.
 TEST_F(BookmarkTest, DetachedBookmarkBarOnCustomNTP) {
   // Create a empty commited web contents.
-  content::WebContents* web_contents = content::WebContents::Create(
-      content::WebContents::CreateParams(browser()->profile()));
+  std::unique_ptr<content::WebContents> web_contents =
+      content::WebContents::Create(
+          content::WebContents::CreateParams(browser()->profile()));
   web_contents->GetController().LoadURL(GURL(url::kAboutBlankURL),
                                         content::Referrer(),
                                         ui::PAGE_TRANSITION_LINK,
@@ -41,7 +43,8 @@ TEST_F(BookmarkTest, DetachedBookmarkBarOnCustomNTP) {
 
   // Verify that the detached bookmark bar is hidden.
   EXPECT_EQ(BookmarkBar::HIDDEN, browser()->bookmark_bar_state());
-  browser()->tab_strip_model()->AppendWebContents(web_contents, true);
+  browser()->tab_strip_model()->AppendWebContents(std::move(web_contents),
+                                                  true);
   EXPECT_EQ(BookmarkBar::HIDDEN, browser()->bookmark_bar_state());
 }
 
@@ -56,7 +59,8 @@ class BookmarkInstantExtendedTest : public BrowserWithTestWindowTest {
     // TemplateURLService is normally NULL during testing. Instant extended
     // needs this service so set a custom factory function.
     TemplateURLServiceFactory::GetInstance()->SetTestingFactory(
-        profile, &BookmarkInstantExtendedTest::CreateTemplateURLService);
+        profile, base::BindRepeating(
+                     &BookmarkInstantExtendedTest::CreateTemplateURLService));
     return profile;
   }
 

@@ -9,7 +9,7 @@
 #include "base/files/file_enumerator.h"
 #include "base/location.h"
 #include "base/logging.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "ui/events/ozone/device/device_event.h"
 #include "ui/events/ozone/device/device_event_observer.h"
 
@@ -59,8 +59,8 @@ void DeviceManagerManual::RemoveObserver(DeviceEventObserver* observer) {
 
 void DeviceManagerManual::StartWatching() {
   if (!watcher_.Watch(base::FilePath(kDevInput), false,
-                      base::Bind(&DeviceManagerManual::OnWatcherEvent,
-                                 weak_ptr_factory_.GetWeakPtr()))) {
+                      base::BindRepeating(&DeviceManagerManual::OnWatcherEvent,
+                                          weak_ptr_factory_.GetWeakPtr()))) {
     LOG(ERROR) << "Failed to start FilePathWatcher";
   }
 }

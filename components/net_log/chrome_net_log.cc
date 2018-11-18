@@ -14,23 +14,16 @@
 #include "base/values.h"
 #include "build/build_config.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_event_store.h"
-#include "components/net_log/net_export_file_writer.h"
 #include "components/version_info/version_info.h"
 #include "net/log/file_net_log_observer.h"
 #include "net/log/net_log_util.h"
-#include "net/log/trace_net_log_observer.h"
 
 namespace net_log {
 
-ChromeNetLog::ChromeNetLog() {
-  trace_net_log_observer_.reset(new net::TraceNetLogObserver());
-  trace_net_log_observer_->WatchForTraceStart(this);
-}
+ChromeNetLog::ChromeNetLog() {}
 
 ChromeNetLog::~ChromeNetLog() {
-  net_export_file_writer_.reset();
   ClearFileNetLogObserver();
-  trace_net_log_observer_->StopWatchForTraceStart();
 }
 
 void ChromeNetLog::StartWritingToFile(
@@ -47,12 +40,6 @@ void ChromeNetLog::StartWritingToFile(
   file_net_log_observer_->StartObserving(this, capture_mode);
 }
 
-NetExportFileWriter* ChromeNetLog::net_export_file_writer() {
-  if (!net_export_file_writer_)
-    net_export_file_writer_ = base::WrapUnique(new NetExportFileWriter(this));
-  return net_export_file_writer_.get();
-}
-
 // static
 std::unique_ptr<base::Value> ChromeNetLog::GetConstants(
     const base::CommandLine::StringType& command_line_string,
@@ -60,6 +47,18 @@ std::unique_ptr<base::Value> ChromeNetLog::GetConstants(
   std::unique_ptr<base::DictionaryValue> constants_dict =
       net::GetNetConstants();
   DCHECK(constants_dict);
+
+  auto platform_dict =
+      GetPlatformConstants(command_line_string, channel_string);
+  if (platform_dict)
+    constants_dict->MergeDictionary(platform_dict.get());
+  return constants_dict;
+}
+
+std::unique_ptr<base::DictionaryValue> ChromeNetLog::GetPlatformConstants(
+    const base::CommandLine::StringType& command_line_string,
+    const std::string& channel_string) {
+  auto constants_dict = std::make_unique<base::DictionaryValue>();
 
   // Add a dictionary with the version of the client and its command line
   // arguments.
@@ -84,7 +83,7 @@ std::unique_ptr<base::Value> ChromeNetLog::GetConstants(
   data_reduction_proxy::DataReductionProxyEventStore::AddConstants(
       constants_dict.get());
 
-  return std::move(constants_dict);
+  return constants_dict;
 }
 
 void ChromeNetLog::ShutDownBeforeTaskScheduler() {

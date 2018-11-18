@@ -8,7 +8,6 @@
 #include <utility>
 #include <vector>
 
-#include "base/debug/alias.h"
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/numerics/safe_conversions.h"
@@ -327,16 +326,6 @@ Optional<Value> JSONParser::ParseToken(Token token) {
 }
 
 Optional<Value> JSONParser::ConsumeDictionary() {
-  // Attempt to alias 4KB of the buffer about to be read. Need to alias multiple
-  // sites as the crashpad heuristics only grab a few hundred bytes in
-  // front/behind heap pointers on the stack.
-  // TODO(gab): Remove this after diagnosis of https://crbug.com/791487 is
-  // complete.
-  const char* initial_pos[16];
-  for (size_t i = 0; i < arraysize(initial_pos); ++i)
-    initial_pos[i] = pos() + i * 256;
-  debug::Alias(&initial_pos);
-
   if (ConsumeChar() != '{') {
     ReportError(JSONReader::JSON_UNEXPECTED_TOKEN, 1);
     return nullopt;
@@ -482,7 +471,8 @@ bool JSONParser::ConsumeStringRaw(StringBuilder* out) {
       ConsumeChar();
       *out = std::move(string);
       return true;
-    } else if (next_char != '\\') {
+    }
+    if (next_char != '\\') {
       // If this character is not an escape sequence...
       ConsumeChar();
       string.Append(next_char);
@@ -725,16 +715,14 @@ bool JSONParser::ReadInt(bool allow_leading_zeros) {
 }
 
 Optional<Value> JSONParser::ConsumeLiteral() {
-  if (ConsumeIfMatch("true")) {
+  if (ConsumeIfMatch("true"))
     return Value(true);
-  } else if (ConsumeIfMatch("false")) {
+  if (ConsumeIfMatch("false"))
     return Value(false);
-  } else if (ConsumeIfMatch("null")) {
+  if (ConsumeIfMatch("null"))
     return Value(Value::Type::NONE);
-  } else {
-    ReportError(JSONReader::JSON_SYNTAX_ERROR, 1);
-    return nullopt;
-  }
+  ReportError(JSONReader::JSON_SYNTAX_ERROR, 1);
+  return nullopt;
 }
 
 bool JSONParser::ConsumeIfMatch(StringPiece match) {

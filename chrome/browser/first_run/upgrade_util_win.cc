@@ -32,9 +32,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/install_static/install_util.h"
-#include "chrome/installer/util/browser_distribution.h"
 #include "chrome/installer/util/google_update_constants.h"
-#include "chrome/installer/util/install_util.h"
 #include "chrome/installer/util/util_constants.h"
 #include "components/prefs/pref_service.h"
 #include "ui/base/ui_base_switches.h"
@@ -46,7 +44,7 @@
 namespace {
 
 bool GetNewerChromeFile(base::FilePath* path) {
-  if (!PathService::Get(base::DIR_EXE, path))
+  if (!base::PathService::Get(base::DIR_EXE, path))
     return false;
   *path = path->Append(installer::kChromeNewExe);
   return true;
@@ -81,7 +79,7 @@ namespace upgrade_util {
 
 bool RelaunchChromeBrowser(const base::CommandLine& command_line) {
   base::FilePath chrome_exe;
-  if (!PathService::Get(base::FILE_EXE, &chrome_exe)) {
+  if (!base::PathService::Get(base::FILE_EXE, &chrome_exe)) {
     NOTREACHED();
     return false;
   }
@@ -96,6 +94,8 @@ bool RelaunchChromeBrowser(const base::CommandLine& command_line) {
   // the version directory being kept open in the relaunched child process.
   base::LaunchOptions launch_options;
   launch_options.current_directory = chrome_exe.DirName();
+  // Give the new process the right to bring its windows to the foreground.
+  launch_options.grant_foreground_privilege = true;
   return base::LaunchProcess(chrome_exe_command_line, launch_options).IsValid();
 }
 
@@ -112,14 +112,13 @@ bool SwapNewChromeExeIfPresent() {
 
   // If this is a system-level install, ask Google Update to launch an elevated
   // process to rename Chrome executables.
-  if (!InstallUtil::IsPerUserInstall())
+  if (install_static::IsSystemInstall())
     return InvokeGoogleUpdateForRename();
 
   // If this is a user-level install, directly launch a process to rename Chrome
   // executables. Obtain the command to launch the process from the registry.
   base::win::RegKey key;
-  if (key.Open(HKEY_CURRENT_USER,
-               BrowserDistribution::GetDistribution()->GetVersionKey().c_str(),
+  if (key.Open(HKEY_CURRENT_USER, install_static::GetClientsKeyPath().c_str(),
                KEY_QUERY_VALUE | KEY_WOW64_32KEY) == ERROR_SUCCESS) {
     std::wstring rename_cmd;
     if (key.ReadValue(google_update::kRegRenameCmdField,

@@ -18,7 +18,7 @@
 #include "components/offline_pages/core/offline_page_metadata_store_test_util.h"
 #include "components/offline_pages/core/offline_page_types.h"
 #include "components/offline_pages/core/offline_store_types.h"
-#include "components/offline_pages/core/task_test_base.h"
+#include "components/offline_pages/task/task_test_base.h"
 
 namespace offline_pages {
 class ModelTaskTestBase : public TaskTestBase,
@@ -48,7 +48,7 @@ class ModelTaskTestBase : public TaskTestBase,
   OfflinePageMetadataStoreTestUtil* store_test_util() {
     return &store_test_util_;
   }
-  OfflinePageMetadataStoreSQL* store() { return store_test_util_.store(); }
+  OfflinePageMetadataStore* store() { return store_test_util_.store(); }
   OfflinePageItemGenerator* generator() { return &generator_; }
   ArchiveManager* archive_manager() { return archive_manager_.get(); }
   ClientPolicyController* policy_controller() { return &policy_controller_; }

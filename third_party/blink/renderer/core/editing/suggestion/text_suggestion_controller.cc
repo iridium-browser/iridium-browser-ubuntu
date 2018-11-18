@@ -102,6 +102,7 @@ EphemeralRangeInFlatTree ComputeRangeSurroundingCaret(
 struct SuggestionInfosWithNodeAndHighlightColor {
   STACK_ALLOCATED();
 
+ public:
   Persistent<Node> text_node;
   Color highlight_color;
   Vector<TextSuggestionInfo> suggestion_infos;
@@ -165,7 +166,7 @@ SuggestionInfosWithNodeAndHighlightColor ComputeSuggestionInfos(
     const SuggestionMarker* marker =
         ToSuggestionMarker(node_marker_pair.second);
     const Vector<String>& marker_suggestions = marker->Suggestions();
-    for (size_t suggestion_index = 0;
+    for (wtf_size_t suggestion_index = 0;
          suggestion_index < marker_suggestions.size(); ++suggestion_index) {
       const String& suggestion = marker_suggestions[suggestion_index];
       if (suggestion_infos.size() == max_number_of_suggestions)
@@ -224,8 +225,10 @@ void TextSuggestionController::HandlePotentialSuggestionTap(
 
   const std::pair<const Node*, const DocumentMarker*>& node_and_marker =
       FirstMarkerIntersectingRange(
-          range_to_check, DocumentMarker::kSpelling | DocumentMarker::kGrammar |
-                              DocumentMarker::kSuggestion);
+          range_to_check,
+          DocumentMarker::MarkerTypes(DocumentMarker::kSpelling |
+                                      DocumentMarker::kGrammar |
+                                      DocumentMarker::kSuggestion));
   if (!node_and_marker.first)
     return;
 
@@ -255,7 +258,7 @@ void TextSuggestionController::ReplaceActiveSuggestionRange(
   const HeapVector<std::pair<Member<Node>, Member<DocumentMarker>>>&
       node_marker_pairs =
           GetFrame().GetDocument()->Markers().MarkersIntersectingRange(
-              range_to_check, DocumentMarker::kActiveSuggestion);
+              range_to_check, DocumentMarker::MarkerTypes::ActiveSuggestion());
 
   if (node_marker_pairs.IsEmpty())
     return;
@@ -291,16 +294,16 @@ void TextSuggestionController::ApplyTextSuggestion(int32_t marker_tag,
   const HeapVector<std::pair<Member<Node>, Member<DocumentMarker>>>&
       node_marker_pairs =
           GetFrame().GetDocument()->Markers().MarkersIntersectingRange(
-              range_to_check, DocumentMarker::kSuggestion);
+              range_to_check, DocumentMarker::MarkerTypes::Suggestion());
 
-  const Node* marker_text_node = nullptr;
+  const Text* marker_text_node = nullptr;
   SuggestionMarker* marker = nullptr;
   for (const std::pair<Member<Node>, Member<DocumentMarker>>& node_marker_pair :
        node_marker_pairs) {
     SuggestionMarker* suggestion_marker =
         ToSuggestionMarker(node_marker_pair.second);
     if (suggestion_marker->Tag() == marker_tag) {
-      marker_text_node = node_marker_pair.first;
+      marker_text_node = ToText(node_marker_pair.first);
       marker = suggestion_marker;
       break;
     }
@@ -310,7 +313,7 @@ void TextSuggestionController::ApplyTextSuggestion(int32_t marker_tag,
     OnSuggestionMenuClosed();
     return;
   }
-
+  DCHECK(marker_text_node);
   const EphemeralRange& range_to_replace =
       EphemeralRange(Position(marker_text_node, marker->StartOffset()),
                      Position(marker_text_node, marker->EndOffset()));
@@ -325,7 +328,7 @@ void TextSuggestionController::ApplyTextSuggestion(int32_t marker_tag,
 
   if (marker->IsMisspelling()) {
     GetFrame().GetDocument()->Markers().RemoveSuggestionMarkerByTag(
-        marker_text_node, marker->Tag());
+        *marker_text_node, marker->Tag());
   } else {
     marker->SetSuggestion(suggestion_index, new_suggestion);
   }
@@ -356,7 +359,7 @@ void TextSuggestionController::OnSuggestionMenuClosed() {
     return;
 
   GetDocument().Markers().RemoveMarkersOfTypes(
-      DocumentMarker::kActiveSuggestion);
+      DocumentMarker::MarkerTypes::ActiveSuggestion());
   GetFrame().Selection().SetCaretVisible(true);
   is_suggestion_menu_open_ = false;
 }
@@ -381,7 +384,7 @@ void TextSuggestionController::SuggestionMenuTimeoutCallback(
   const HeapVector<std::pair<Member<Node>, Member<DocumentMarker>>>&
       node_suggestion_marker_pairs =
           GetFrame().GetDocument()->Markers().MarkersIntersectingRange(
-              range_to_check, DocumentMarker::kSuggestion);
+              range_to_check, DocumentMarker::MarkerTypes::Suggestion());
   if (!node_suggestion_marker_pairs.IsEmpty()) {
     ShowSuggestionMenu(node_suggestion_marker_pairs, max_number_of_suggestions);
     return;
@@ -391,7 +394,7 @@ void TextSuggestionController::SuggestionMenuTimeoutCallback(
   const HeapVector<std::pair<Member<Node>, Member<DocumentMarker>>>
       node_spelling_marker_pairs =
           GetFrame().GetDocument()->Markers().MarkersIntersectingRange(
-              range_to_check, DocumentMarker::MisspellingMarkers());
+              range_to_check, DocumentMarker::MarkerTypes::Misspelling());
   if (!node_spelling_marker_pairs.IsEmpty())
     ShowSpellCheckMenu(node_spelling_marker_pairs.front());
 
@@ -416,7 +419,7 @@ void TextSuggestionController::ShowSpellCheckMenu(
   GetFrame().Selection().SetCaretVisible(false);
   GetDocument().Markers().AddActiveSuggestionMarker(
       active_suggestion_range, SK_ColorTRANSPARENT,
-      ui::mojom::ImeTextSpanThickness::kNone,
+      ws::mojom::ImeTextSpanThickness::kNone,
       LayoutTheme::GetTheme().PlatformActiveSpellingMarkerHighlightColor());
 
   Vector<String> suggestions;
@@ -432,7 +435,7 @@ void TextSuggestionController::ShowSpellCheckMenu(
 
   const IntRect& absolute_bounds = GetFrame().Selection().AbsoluteCaretBounds();
   const IntRect& viewport_bounds =
-      GetFrame().View()->ContentsToViewport(absolute_bounds);
+      GetFrame().View()->FrameToViewport(absolute_bounds);
 
   text_suggestion_host_->ShowSpellCheckSuggestionMenu(
       viewport_bounds.X(), viewport_bounds.MaxY(), std::move(misspelled_word),
@@ -453,7 +456,7 @@ void TextSuggestionController::ShowSuggestionMenu(
       suggestion_infos_with_node_and_highlight_color.suggestion_infos;
   int span_union_start = suggestion_infos[0].span_start;
   int span_union_end = suggestion_infos[0].span_end;
-  for (size_t i = 1; i < suggestion_infos.size(); ++i) {
+  for (wtf_size_t i = 1; i < suggestion_infos.size(); ++i) {
     span_union_start =
         std::min(span_union_start, suggestion_infos[i].span_start);
     span_union_end = std::max(span_union_end, suggestion_infos[i].span_end);
@@ -478,7 +481,7 @@ void TextSuggestionController::ShowSuggestionMenu(
                                     Position(text_node, span_union_end));
 
   GetDocument().Markers().AddActiveSuggestionMarker(
-      marker_range, SK_ColorTRANSPARENT, ui::mojom::ImeTextSpanThickness::kThin,
+      marker_range, SK_ColorTRANSPARENT, ws::mojom::ImeTextSpanThickness::kThin,
       suggestion_infos_with_node_and_highlight_color.highlight_color);
 
   is_suggestion_menu_open_ = true;
@@ -508,7 +511,7 @@ void TextSuggestionController::CallMojoShowTextSuggestionMenu(
 
   const IntRect& absolute_bounds = GetFrame().Selection().AbsoluteCaretBounds();
   const IntRect& viewport_bounds =
-      GetFrame().View()->ContentsToViewport(absolute_bounds);
+      GetFrame().View()->FrameToViewport(absolute_bounds);
 
   text_suggestion_host_->ShowTextSuggestionMenu(
       viewport_bounds.X(), viewport_bounds.MaxY(), misspelled_word,
@@ -580,7 +583,8 @@ TextSuggestionController::FirstMarkerTouchingSelection(
 
 void TextSuggestionController::AttemptToDeleteActiveSuggestionRange() {
   const std::pair<const Node*, const DocumentMarker*>& node_and_marker =
-      FirstMarkerTouchingSelection(DocumentMarker::kActiveSuggestion);
+      FirstMarkerTouchingSelection(
+          DocumentMarker::MarkerTypes::ActiveSuggestion());
   if (!node_and_marker.first)
     return;
 

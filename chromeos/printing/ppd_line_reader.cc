@@ -9,6 +9,7 @@
 #include <utility>
 
 #include "base/strings/string_util.h"
+#include "net/base/completion_once_callback.h"
 #include "net/base/io_buffer.h"
 #include "net/filter/gzip_header.h"
 #include "net/filter/gzip_source_stream.h"
@@ -44,7 +45,7 @@ class StringSourceStream : public net::SourceStream {
   // This source always reads sychronously, so never uses the callback.
   int Read(net::IOBuffer* dest_buffer,
            int buffer_size,
-           const net::CompletionCallback&) override {
+           net::CompletionOnceCallback) override {
     int read_size = src_.size() - read_ofs_;
     if (read_size > buffer_size) {
       read_size = buffer_size;
@@ -64,7 +65,7 @@ class PpdLineReaderImpl : public PpdLineReader {
  public:
   PpdLineReaderImpl(const std::string& ppd_contents, size_t max_line_length)
       : max_line_length_(max_line_length),
-        read_buf_(new net::IOBuffer(kReadBufCapacity)) {
+        read_buf_(base::MakeRefCounted<net::IOBuffer>(kReadBufCapacity)) {
     input_ = std::make_unique<StringSourceStream>(ppd_contents);
     if (IsGZipped(ppd_contents)) {
       input_ = net::GzipSourceStream::Create(std::move(input_),
@@ -167,6 +168,8 @@ class PpdLineReaderImpl : public PpdLineReader {
   // stream or string source stream depending on the source data.
   std::unique_ptr<net::SourceStream> input_;
 };
+
+constexpr int PpdLineReaderImpl::kReadBufCapacity;
 
 }  // namespace
 

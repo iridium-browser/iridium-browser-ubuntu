@@ -25,8 +25,9 @@
 
 #include "third_party/blink/renderer/core/editing/editing_utilities.h"
 
+#include "third_party/blink/renderer/core/clipboard/clipboard_mime_types.h"
 #include "third_party/blink/renderer/core/clipboard/data_object.h"
-#include "third_party/blink/renderer/core/clipboard/pasteboard.h"
+#include "third_party/blink/renderer/core/clipboard/system_clipboard.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
 #include "third_party/blink/renderer/core/dom/node_computed_style.h"
@@ -71,7 +72,7 @@
 #include "third_party/blink/renderer/core/layout/layout_object.h"
 #include "third_party/blink/renderer/core/layout/layout_table_cell.h"
 #include "third_party/blink/renderer/core/svg/svg_image_element.h"
-#include "third_party/blink/renderer/platform/clipboard/clipboard_mime_types.h"
+#include "third_party/blink/renderer/platform/graphics/static_bitmap_image.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
@@ -86,7 +87,7 @@ namespace {
 std::ostream& operator<<(std::ostream& os, PositionMoveType type) {
   static const char* const kTexts[] = {"CodeUnit", "BackwardDeletion",
                                        "GraphemeCluster"};
-  const auto& it = std::begin(kTexts) + static_cast<size_t>(type);
+  auto* const* const it = std::begin(kTexts) + static_cast<size_t>(type);
   DCHECK_GE(it, std::begin(kTexts)) << "Unknown PositionMoveType value";
   DCHECK_LT(it, std::end(kTexts)) << "Unknown PositionMoveType value";
   return os << *it;
@@ -118,7 +119,7 @@ InputEvent::EventCancelable InputTypeIsCancelable(
 UChar WhitespaceRebalancingCharToAppend(const String& string,
                                         bool start_is_start_of_paragraph,
                                         bool should_emit_nbsp_before_end,
-                                        size_t index,
+                                        wtf_size_t index,
                                         UChar previous) {
   DCHECK_LT(index, string.length());
 
@@ -457,7 +458,7 @@ ContainerNode* HighestEditableRoot(const PositionInFlatTree& position) {
 }
 
 bool IsEditablePosition(const Position& position) {
-  const Node* node = position.ParentAnchoredEquivalent().AnchorNode();
+  const Node* node = position.ComputeContainerNode();
   if (!node)
     return false;
   DCHECK(node->GetDocument().IsActive());
@@ -1065,7 +1066,7 @@ String StringWithRebalancedWhitespace(const String& string,
   rebalanced_string.ReserveCapacity(length);
 
   UChar char_to_append = 0;
-  for (size_t index = 0; index < length; index++) {
+  for (wtf_size_t index = 0; index < length; index++) {
     char_to_append = WhitespaceRebalancingCharToAppend(
         string, start_is_start_of_paragraph, should_emit_nbs_pbefore_end, index,
         char_to_append);
@@ -1550,28 +1551,30 @@ bool IsInPasswordField(const Position& position) {
 
 // If current position is at grapheme boundary, return 0; otherwise, return the
 // distance to its nearest left grapheme boundary.
-size_t ComputeDistanceToLeftGraphemeBoundary(const Position& position) {
+wtf_size_t ComputeDistanceToLeftGraphemeBoundary(const Position& position) {
   const Position& adjusted_position = PreviousPositionOf(
       NextPositionOf(position, PositionMoveType::kGraphemeCluster),
       PositionMoveType::kGraphemeCluster);
   DCHECK_EQ(position.AnchorNode(), adjusted_position.AnchorNode());
   DCHECK_GE(position.ComputeOffsetInContainerNode(),
             adjusted_position.ComputeOffsetInContainerNode());
-  return static_cast<size_t>(position.ComputeOffsetInContainerNode() -
-                             adjusted_position.ComputeOffsetInContainerNode());
+  return static_cast<wtf_size_t>(
+      position.ComputeOffsetInContainerNode() -
+      adjusted_position.ComputeOffsetInContainerNode());
 }
 
 // If current position is at grapheme boundary, return 0; otherwise, return the
 // distance to its nearest right grapheme boundary.
-size_t ComputeDistanceToRightGraphemeBoundary(const Position& position) {
+wtf_size_t ComputeDistanceToRightGraphemeBoundary(const Position& position) {
   const Position& adjusted_position = NextPositionOf(
       PreviousPositionOf(position, PositionMoveType::kGraphemeCluster),
       PositionMoveType::kGraphemeCluster);
   DCHECK_EQ(position.AnchorNode(), adjusted_position.AnchorNode());
   DCHECK_GE(adjusted_position.ComputeOffsetInContainerNode(),
             position.ComputeOffsetInContainerNode());
-  return static_cast<size_t>(adjusted_position.ComputeOffsetInContainerNode() -
-                             position.ComputeOffsetInContainerNode());
+  return static_cast<wtf_size_t>(
+      adjusted_position.ComputeOffsetInContainerNode() -
+      position.ComputeOffsetInContainerNode());
 }
 
 FloatQuad LocalToAbsoluteQuadOf(const LocalCaretRect& caret_rect) {
@@ -1602,13 +1605,13 @@ DispatchEventResult DispatchBeforeInputInsertText(
     const StaticRangeVector* ranges) {
   if (!target)
     return DispatchEventResult::kNotCanceled;
-  // TODO(chongz): Pass appropriate |ranges| after it's defined on spec.
+  // TODO(editing-dev): Pass appropriate |ranges| after it's defined on spec.
   // http://w3c.github.io/editing/input-events.html#dom-inputevent-inputtype
   InputEvent* before_input_event = InputEvent::CreateBeforeInput(
       input_type, data, InputTypeIsCancelable(input_type),
       InputEvent::EventIsComposing::kNotComposing,
       ranges ? ranges : TargetRangesForInputEvent(*target));
-  return target->DispatchEvent(before_input_event);
+  return target->DispatchEvent(*before_input_event);
 }
 
 DispatchEventResult DispatchBeforeInputEditorCommand(
@@ -1620,7 +1623,7 @@ DispatchEventResult DispatchBeforeInputEditorCommand(
   InputEvent* before_input_event = InputEvent::CreateBeforeInput(
       input_type, g_null_atom, InputTypeIsCancelable(input_type),
       InputEvent::EventIsComposing::kNotComposing, ranges);
-  return target->DispatchEvent(before_input_event);
+  return target->DispatchEvent(*before_input_event);
 }
 
 DispatchEventResult DispatchBeforeInputDataTransfer(
@@ -1645,14 +1648,14 @@ DispatchEventResult DispatchBeforeInputDataTransfer(
         TargetRangesForInputEvent(*target));
   } else {
     const String& data = data_transfer->getData(kMimeTypeTextPlain);
-    // TODO(chongz): Pass appropriate |ranges| after it's defined on spec.
+    // TODO(editing-dev): Pass appropriate |ranges| after it's defined on spec.
     // http://w3c.github.io/editing/input-events.html#dom-inputevent-inputtype
     before_input_event = InputEvent::CreateBeforeInput(
         input_type, data, InputTypeIsCancelable(input_type),
         InputEvent::EventIsComposing::kNotComposing,
         TargetRangesForInputEvent(*target));
   }
-  return target->DispatchEvent(before_input_event);
+  return target->DispatchEvent(*before_input_event);
 }
 
 // |IsEmptyNonEditableNodeInEditable()| is introduced for fixing
@@ -1701,7 +1704,7 @@ static scoped_refptr<Image> ImageFromNode(const Node& node) {
 
   if (layout_object->IsCanvas()) {
     return ToHTMLCanvasElement(const_cast<Node&>(node))
-        .CopiedImage(kFrontBuffer, kPreferNoAcceleration);
+        .Snapshot(kFrontBuffer, kPreferNoAcceleration);
   }
 
   if (!layout_object->IsImage())
@@ -1727,15 +1730,13 @@ AtomicString GetUrlStringFromNode(const Node& node) {
   return AtomicString();
 }
 
-void WriteImageNodeToPasteboard(Pasteboard* pasteboard,
-                                const Node& node,
-                                const String& title) {
+void WriteImageNodeToClipboard(const Node& node, const String& title) {
   const scoped_refptr<Image> image = ImageFromNode(node);
   if (!image.get())
     return;
   const KURL url_string = node.GetDocument().CompleteURL(
       StripLeadingAndTrailingHTMLSpaces(GetUrlStringFromNode(node)));
-  pasteboard->WriteImage(image.get(), url_string, title);
+  SystemClipboard::GetInstance().WriteImage(image.get(), url_string, title);
 }
 
 Element* FindEventTargetFrom(LocalFrame& frame,

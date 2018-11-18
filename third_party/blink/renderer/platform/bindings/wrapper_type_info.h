@@ -32,16 +32,18 @@
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_BINDINGS_WRAPPER_TYPE_INFO_H_
 
 #include "gin/public/wrapper_info.h"
-#include "third_party/blink/renderer/platform/bindings/active_script_wrappable_base.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/wtf/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "v8/include/v8.h"
 
 namespace blink {
 
+class ActiveScriptWrappableBase;
+class CustomWrappable;
 class DOMWrapperWorld;
 class ScriptWrappable;
+class Visitor;
 
 ScriptWrappable* ToScriptWrappable(
     const v8::PersistentBase<v8::Object>& wrapper);
@@ -87,6 +89,7 @@ struct WrapperTypeInfo {
   enum WrapperClassId {
     kNodeClassId = 1,  // NodeClassId must be smaller than ObjectClassId.
     kObjectClassId,
+    kCustomWrappableId,
   };
 
   enum ActiveScriptWrappableInheritance {
@@ -99,15 +102,8 @@ struct WrapperTypeInfo {
         v8::External::Cast(*type_info_wrapper)->Value());
   }
 
-  static void WrapperCreated() {
-    ThreadState::Current()->Heap().HeapStats().IncreaseWrapperCount(1);
-  }
-
-  static void WrapperDestroyed() {
-    ThreadHeapStats& heap_stats = ThreadState::Current()->Heap().HeapStats();
-    heap_stats.DecreaseWrapperCount(1);
-    heap_stats.IncreaseCollectedWrapperCount(1);
-  }
+  PLATFORM_EXPORT static void WrapperCreated();
+  PLATFORM_EXPORT static void WrapperDestroyed();
 
   bool Equals(const WrapperTypeInfo* that) const { return this == that; }
 
@@ -150,6 +146,11 @@ struct WrapperTypeInfo {
            kInheritFromActiveScriptWrappable;
   }
 
+  // Garbage collection support for when the type depends the WrapperTypeInfo
+  // object.
+  PLATFORM_EXPORT void Trace(Visitor*, void*) const;
+  PLATFORM_EXPORT void TraceWithWrappers(Visitor*, void*) const;
+
   // This field must be the first member of the struct WrapperTypeInfo.
   // See also static_assert() in .cpp file.
   const gin::GinEmbedder gin_embedder;
@@ -187,6 +188,23 @@ inline ScriptWrappable* ToScriptWrappable(
 
 inline ScriptWrappable* ToScriptWrappable(v8::Local<v8::Object> wrapper) {
   return GetInternalField<ScriptWrappable, kV8DOMWrapperObjectIndex>(wrapper);
+}
+
+inline CustomWrappable* ToCustomWrappable(
+    const v8::PersistentBase<v8::Object>& wrapper) {
+  return GetInternalField<CustomWrappable, kV8DOMWrapperObjectIndex>(wrapper);
+}
+
+inline CustomWrappable* ToCustomWrappable(v8::Local<v8::Object> wrapper) {
+  return GetInternalField<CustomWrappable, kV8DOMWrapperObjectIndex>(wrapper);
+}
+
+inline void* ToUntypedWrappable(const v8::PersistentBase<v8::Object>& wrapper) {
+  return GetInternalField<void, kV8DOMWrapperObjectIndex>(wrapper);
+}
+
+inline void* ToUntypedWrappable(v8::Local<v8::Object> wrapper) {
+  return GetInternalField<void, kV8DOMWrapperObjectIndex>(wrapper);
 }
 
 inline const WrapperTypeInfo* ToWrapperTypeInfo(

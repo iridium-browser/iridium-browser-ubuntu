@@ -247,23 +247,6 @@ float FontBuilder::GetComputedSizeFromSpecifiedSize(
       specified_size);
 }
 
-static FontOrientation ComputeFontOrientation(const ComputedStyle& style) {
-  if (style.IsHorizontalWritingMode())
-    return FontOrientation::kHorizontal;
-
-  switch (style.GetTextOrientation()) {
-    case ETextOrientation::kMixed:
-      return FontOrientation::kVerticalMixed;
-    case ETextOrientation::kUpright:
-      return FontOrientation::kVerticalUpright;
-    case ETextOrientation::kSideways:
-      return FontOrientation::kVerticalRotated;
-    default:
-      NOTREACHED();
-      return FontOrientation::kVerticalMixed;
-  }
-}
-
 void FontBuilder::CheckForGenericFamilyChange(
     const FontDescription& old_description,
     FontDescription& new_description) {
@@ -344,7 +327,7 @@ void FontBuilder::UpdateAdjustedSize(FontDescription& font_description,
       font_description, style.EffectiveZoom(), adjusted_size);
 
   adjusted_size = TextAutosizer::ComputeAutosizedFontSize(
-      adjusted_size, style.TextAutosizingMultiplier());
+      adjusted_size, style.TextAutosizingMultiplier(), style.EffectiveZoom());
   font_description.SetAdjustedSize(adjusted_size);
 }
 
@@ -354,7 +337,7 @@ void FontBuilder::UpdateComputedSize(FontDescription& font_description,
       GetComputedSizeFromSpecifiedSize(font_description, style.EffectiveZoom(),
                                        font_description.SpecifiedSize());
   computed_size = TextAutosizer::ComputeAutosizedFontSize(
-      computed_size, style.TextAutosizingMultiplier());
+      computed_size, style.TextAutosizingMultiplier(), style.EffectiveZoom());
   font_description.SetComputedSize(computed_size);
 }
 
@@ -423,7 +406,7 @@ void FontBuilder::CreateFont(FontSelector* font_selector,
 
   FontDescription description = style.GetFontDescription();
 
-  UpdateFontDescription(description, ComputeFontOrientation(style));
+  UpdateFontDescription(description, style.ComputeFontOrientation());
 
   UpdateSpecifiedSize(description, style);
   UpdateComputedSize(description, style);
@@ -448,7 +431,7 @@ void FontBuilder::CreateFontForDocument(FontSelector* font_selector,
   UpdateSpecifiedSize(font_description, document_style);
   UpdateComputedSize(font_description, document_style);
 
-  font_description.SetOrientation(ComputeFontOrientation(document_style));
+  font_description.SetOrientation(document_style.ComputeFontOrientation());
   document_style.SetFontDescription(font_description);
   document_style.GetFont().Update(font_selector);
 }

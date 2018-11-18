@@ -6,7 +6,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_CREDENTIALMANAGER_CREDENTIAL_MANAGER_PROXY_H_
 
 #include "third_party/blink/public/platform/modules/credentialmanager/credential_manager.mojom-blink.h"
-#include "third_party/blink/public/platform/modules/webauth/authenticator.mojom-blink.h"
+#include "third_party/blink/public/platform/modules/webauthn/authenticator.mojom-blink.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
@@ -35,16 +35,14 @@ class MODULES_EXPORT CredentialManagerProxy
  public:
   static const char kSupplementName[];
 
-  explicit CredentialManagerProxy(Document*);
+  explicit CredentialManagerProxy(Document&);
   virtual ~CredentialManagerProxy();
 
-  ::password_manager::mojom::blink::CredentialManager* CredentialManager() {
+  mojom::blink::CredentialManager* CredentialManager() {
     return credential_manager_.get();
   }
 
-  ::webauth::mojom::blink::Authenticator* Authenticator() {
-    return authenticator_.get();
-  }
+  mojom::blink::Authenticator* Authenticator() { return authenticator_.get(); }
 
   void FlushCredentialManagerConnectionForTesting() {
     credential_manager_.FlushForTesting();
@@ -53,13 +51,11 @@ class MODULES_EXPORT CredentialManagerProxy
   // Both flavors must be called only with arguments representing a valid
   // context corresponding to an attached Document.
   static CredentialManagerProxy* From(ScriptState*);
-  static CredentialManagerProxy* From(Document*);
+  static CredentialManagerProxy* From(Document&);
 
  private:
-  // TODO(crbug.com/740081): Merge |credential_manager_| and |authenticator_|
-  // into a single Mojo interface.
-  ::password_manager::mojom::blink::CredentialManagerPtr credential_manager_;
-  ::webauth::mojom::blink::AuthenticatorPtr authenticator_;
+  mojom::blink::AuthenticatorPtr authenticator_;
+  mojom::blink::CredentialManagerPtr credential_manager_;
 };
 
 }  // namespace blink

@@ -5,8 +5,6 @@ classes are both controllers and renderers for each widget. The hierarchy is:
 
 * CFWL_Widget
     * CFWL_Form
-        * CFWL_FormProxy
-            * CFWL_ComboBoxProxy
     * CFWL_Caret
     * CFWL_CheckBox
     * CFWL_ComboBox
@@ -48,7 +46,7 @@ and CXFA classes.
     * CFWL_EventMouse
     * CFWL_EventScroll
     * CFWL_EventSelectChanged
-    * CFWL_EventTextChanged
+    * CFWL_EventTextWillChange
     * CFWL_EventValidate
 
 The widgets use IFWL_ThemeProvider for rendering everything, calling

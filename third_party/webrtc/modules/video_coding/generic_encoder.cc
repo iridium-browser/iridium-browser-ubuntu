@@ -1,18 +1,18 @@
 /*
-*  Copyright (c) 2012 The WebRTC project authors. All Rights Reserved.
-*
-*  Use of this source code is governed by a BSD-style license
-*  that can be found in the LICENSE file in the root of the source
-*  tree. An additional intellectual property rights grant can be found
-*  in the file PATENTS.  All contributing project authors may
-*  be found in the AUTHORS file in the root of the source tree.
-*/
+ *  Copyright (c) 2012 The WebRTC project authors. All Rights Reserved.
+ *
+ *  Use of this source code is governed by a BSD-style license
+ *  that can be found in the LICENSE file in the root of the source
+ *  tree. An additional intellectual property rights grant can be found
+ *  in the file PATENTS.  All contributing project authors may
+ *  be found in the AUTHORS file in the root of the source tree.
+ */
 
 #include "modules/video_coding/generic_encoder.h"
 
 #include <vector>
 
-#include "api/optional.h"
+#include "absl/types/optional.h"
 #include "api/video/i420_buffer.h"
 #include "modules/include/module_common_types_public.h"
 #include "modules/video_coding/encoded_frame.h"
@@ -31,6 +31,9 @@ const int kMessagesThrottlingThreshold = 2;
 const int kThrottleRatio = 100000;
 }  // namespace
 
+VCMEncodedFrameCallback::TimingFramesLayerInfo::TimingFramesLayerInfo() {}
+VCMEncodedFrameCallback::TimingFramesLayerInfo::~TimingFramesLayerInfo() {}
+
 VCMGenericEncoder::VCMGenericEncoder(
     VideoEncoder* encoder,
     VCMEncodedFrameCallback* encoded_frame_callback,
@@ -38,8 +41,9 @@ VCMGenericEncoder::VCMGenericEncoder(
     : encoder_(encoder),
       vcm_encoded_frame_callback_(encoded_frame_callback),
       internal_source_(internal_source),
-      encoder_params_({BitrateAllocation(), 0, 0, 0}),
-      streams_or_svc_num_(0) {}
+      encoder_params_({VideoBitrateAllocation(), 0, 0, 0}),
+      streams_or_svc_num_(0),
+      codec_type_(VideoCodecType::kVideoCodecGeneric) {}
 
 VCMGenericEncoder::~VCMGenericEncoder() {}
 
@@ -69,8 +73,8 @@ int32_t VCMGenericEncoder::InitEncode(const VideoCodec* settings,
   if (encoder_->InitEncode(settings, number_of_cores, max_payload_size) != 0) {
     RTC_LOG(LS_ERROR) << "Failed to initialize the encoder associated with "
                          "codec type: "
-                      << CodecTypeToPayloadString(settings->codecType)
-                      << " (" << settings->codecType <<")";
+                      << CodecTypeToPayloadString(settings->codecType) << " ("
+                      << settings->codecType << ")";
     return -1;
   }
   vcm_encoded_frame_callback_->Reset();
@@ -150,9 +154,9 @@ int32_t VCMGenericEncoder::RequestFrame(
   // VideoSendStreamTest.VideoSendStreamStopSetEncoderRateToZero, set
   // internal_source to true and use FakeEncoder. And the latter will
   // happily encode this 1x1 frame and pass it on down the pipeline.
-  return encoder_->Encode(VideoFrame(I420Buffer::Create(1, 1),
-                                     kVideoRotation_0, 0),
-                          NULL, &frame_types);
+  return encoder_->Encode(
+      VideoFrame(I420Buffer::Create(1, 1), kVideoRotation_0, 0), NULL,
+      &frame_types);
   return 0;
 }
 
@@ -177,7 +181,7 @@ VCMEncodedFrameCallback::VCMEncodedFrameCallback(
       incorrect_capture_time_logged_messages_(0),
       reordered_frames_logged_messages_(0),
       stalled_encoder_logged_messages_(0) {
-  rtc::Optional<AlrExperimentSettings> experiment_settings =
+  absl::optional<AlrExperimentSettings> experiment_settings =
       AlrExperimentSettings::CreateFromFieldTrial(
           AlrExperimentSettings::kStrictPacingAndProbingExperimentName);
   if (experiment_settings) {
@@ -248,10 +252,10 @@ void VCMEncodedFrameCallback::OnEncodeStarted(uint32_t rtp_timestamp,
       rtp_timestamp, capture_time_ms, rtc::TimeMillis());
 }
 
-rtc::Optional<int64_t> VCMEncodedFrameCallback::ExtractEncodeStartTime(
+absl::optional<int64_t> VCMEncodedFrameCallback::ExtractEncodeStartTime(
     size_t simulcast_svc_idx,
     EncodedImage* encoded_image) {
-  rtc::Optional<int64_t> result;
+  absl::optional<int64_t> result;
   size_t num_simulcast_svc_streams = timing_frames_info_.size();
   if (simulcast_svc_idx < num_simulcast_svc_streams) {
     auto encode_start_list =
@@ -261,13 +265,14 @@ rtc::Optional<int64_t> VCMEncodedFrameCallback::ExtractEncodeStartTime(
     // Because some hardware encoders don't preserve capture timestamp we
     // use RTP timestamps here.
     while (!encode_start_list->empty() &&
-           IsNewerTimestamp(encoded_image->_timeStamp,
+           IsNewerTimestamp(encoded_image->Timestamp(),
                             encode_start_list->front().rtp_timestamp)) {
       post_encode_callback_->OnDroppedFrame(DropReason::kDroppedByEncoder);
       encode_start_list->pop_front();
     }
     if (encode_start_list->size() > 0 &&
-        encode_start_list->front().rtp_timestamp == encoded_image->_timeStamp) {
+        encode_start_list->front().rtp_timestamp ==
+            encoded_image->Timestamp()) {
       result.emplace(encode_start_list->front().encode_start_time_ms);
       if (encoded_image->capture_time_ms_ !=
           encode_start_list->front().capture_time_ms) {
@@ -307,9 +312,9 @@ rtc::Optional<int64_t> VCMEncodedFrameCallback::ExtractEncodeStartTime(
 
 void VCMEncodedFrameCallback::FillTimingInfo(size_t simulcast_svc_idx,
                                              EncodedImage* encoded_image) {
-  rtc::Optional<size_t> outlier_frame_size;
-  rtc::Optional<int64_t> encode_start_ms;
-  uint8_t timing_flags = TimingFrameFlags::kNotTriggered;
+  absl::optional<size_t> outlier_frame_size;
+  absl::optional<int64_t> encode_start_ms;
+  uint8_t timing_flags = VideoSendTiming::kNotTriggered;
   {
     rtc::CritScope crit(&timing_params_lock_);
 
@@ -335,7 +340,7 @@ void VCMEncodedFrameCallback::FillTimingInfo(size_t simulcast_svc_idx,
     // Outliers trigger timing frames, but do not affect scheduled timing
     // frames.
     if (outlier_frame_size && encoded_image->_length >= *outlier_frame_size) {
-      timing_flags |= TimingFrameFlags::kTriggeredBySize;
+      timing_flags |= VideoSendTiming::kTriggeredBySize;
     }
 
     // Check if it's time to send a timing frame.
@@ -347,7 +352,7 @@ void VCMEncodedFrameCallback::FillTimingInfo(size_t simulcast_svc_idx,
     if (last_timing_frame_time_ms_ == -1 ||
         timing_frame_delay_ms >= timing_frames_thresholds_.delay_ms ||
         timing_frame_delay_ms == 0) {
-      timing_flags = TimingFrameFlags::kTriggeredByTimer;
+      timing_flags |= VideoSendTiming::kTriggeredByTimer;
       last_timing_frame_time_ms_ = encoded_image->capture_time_ms_;
     }
   }  // rtc::CritScope crit(&timing_params_lock_);
@@ -361,8 +366,8 @@ void VCMEncodedFrameCallback::FillTimingInfo(size_t simulcast_svc_idx,
     int64_t clock_offset_ms = now_ms - encoded_image->timing_.encode_finish_ms;
     // Translate capture timestamp to local WebRTC clock.
     encoded_image->capture_time_ms_ += clock_offset_ms;
-    encoded_image->_timeStamp =
-        static_cast<uint32_t>(encoded_image->capture_time_ms_ * 90);
+    encoded_image->SetTimestamp(
+        static_cast<uint32_t>(encoded_image->capture_time_ms_ * 90));
     encode_start_ms.emplace(encoded_image->timing_.encode_start_ms +
                             clock_offset_ms);
   }
@@ -376,7 +381,7 @@ void VCMEncodedFrameCallback::FillTimingInfo(size_t simulcast_svc_idx,
     encoded_image->SetEncodeTime(*encode_start_ms, now_ms);
     encoded_image->timing_.flags = timing_flags;
   } else {
-    encoded_image->timing_.flags = TimingFrameFlags::kInvalid;
+    encoded_image->timing_.flags = VideoSendTiming::kInvalid;
   }
 }
 
@@ -385,22 +390,11 @@ EncodedImageCallback::Result VCMEncodedFrameCallback::OnEncodedImage(
     const CodecSpecificInfo* codec_specific,
     const RTPFragmentationHeader* fragmentation_header) {
   TRACE_EVENT_INSTANT1("webrtc", "VCMEncodedFrameCallback::Encoded",
-                       "timestamp", encoded_image._timeStamp);
-  size_t simulcast_svc_idx = 0;
-  if (codec_specific->codecType == kVideoCodecVP9) {
-    if (codec_specific->codecSpecific.VP9.num_spatial_layers > 1)
-      simulcast_svc_idx = codec_specific->codecSpecific.VP9.spatial_idx;
-  } else if (codec_specific->codecType == kVideoCodecVP8) {
-    simulcast_svc_idx = codec_specific->codecSpecific.VP8.simulcastIdx;
-  } else if (codec_specific->codecType == kVideoCodecGeneric) {
-    simulcast_svc_idx = codec_specific->codecSpecific.generic.simulcast_idx;
-  } else if (codec_specific->codecType == kVideoCodecH264) {
-    // TODO(ilnik): When h264 simulcast is landed, extract simulcast idx here.
-  }
-
+                       "timestamp", encoded_image.Timestamp());
+  const size_t spatial_idx = encoded_image.SpatialIndex().value_or(0);
   EncodedImage image_copy(encoded_image);
 
-  FillTimingInfo(simulcast_svc_idx, &image_copy);
+  FillTimingInfo(spatial_idx, &image_copy);
 
   // Piggyback ALR experiment group id and simulcast id into the content type.
   uint8_t experiment_id =
@@ -416,7 +410,7 @@ EncodedImageCallback::Result VCMEncodedFrameCallback::OnEncodedImage(
   // id in content type to +1 of that is actual simulcast index. This is because
   // value 0 on the wire is reserved for 'no simulcast stream specified'.
   RTC_CHECK(videocontenttypehelpers::SetSimulcastId(
-      &image_copy.content_type_, static_cast<uint8_t>(simulcast_svc_idx + 1)));
+      &image_copy.content_type_, static_cast<uint8_t>(spatial_idx + 1)));
 
   Result result = post_encode_callback_->OnEncodedImage(
       image_copy, codec_specific, fragmentation_header);

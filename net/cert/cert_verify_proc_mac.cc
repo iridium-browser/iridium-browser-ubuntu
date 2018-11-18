@@ -182,7 +182,7 @@ OSStatus CreateTrustPolicies(int flags, ScopedCFTypeRef<CFArrayRef>* policies) {
   // revocation checking policies and instead respect the application-level
   // revocation preference.
   status = x509_util::CreateRevocationPolicies(
-      (flags & CertVerifier::VERIFY_REV_CHECKING_ENABLED), local_policies);
+      (flags & CertVerifyProc::VERIFY_REV_CHECKING_ENABLED), local_policies);
   if (status)
     return status;
 
@@ -312,7 +312,7 @@ void GetCandidateEVPolicy(const X509Certificate* cert_input,
   ev_policy_oid->clear();
 
   scoped_refptr<ParsedCertificate> cert(ParsedCertificate::Create(
-      x509_util::DupCryptoBuffer(cert_input->cert_buffer()), {}, nullptr));
+      bssl::UpRef(cert_input->cert_buffer()), {}, nullptr));
   if (!cert)
     return;
 
@@ -354,8 +354,8 @@ bool CheckCertChainEV(const X509Certificate* cert,
   // or AnyPolicy.
   for (size_t i = 0; i < cert_chain.size() - 1; ++i) {
     scoped_refptr<ParsedCertificate> intermediate_cert(
-        ParsedCertificate::Create(
-            x509_util::DupCryptoBuffer(cert_chain[i].get()), {}, nullptr));
+        ParsedCertificate::Create(bssl::UpRef(cert_chain[i].get()), {},
+                                  nullptr));
     if (!intermediate_cert)
       return false;
     if (!HasPolicyOrAnyPolicy(intermediate_cert.get(), ev_policy_oid))
@@ -546,7 +546,7 @@ int BuildAndEvaluateSecTrustRef(CFArrayRef cert_array,
 
   // Note: For EV certificates, the Apple TP will handle setting these flags
   // as part of EV evaluation.
-  if (flags & CertVerifier::VERIFY_REV_CHECKING_ENABLED) {
+  if (flags & CertVerifyProc::VERIFY_REV_CHECKING_ENABLED) {
     // Require a positive result from an OCSP responder or a CRL (or both)
     // for every certificate in the chain. The Apple TP automatically
     // excludes the self-signed root from this requirement. If a certificate
@@ -830,7 +830,7 @@ int VerifyWithGivenFlags(X509Certificate* cert,
       break;
   }
 
-  if (flags & CertVerifier::VERIFY_REV_CHECKING_ENABLED)
+  if (flags & CertVerifyProc::VERIFY_REV_CHECKING_ENABLED)
     verify_result->cert_status |= CERT_STATUS_REV_CHECKING_ENABLED;
 
   if (*completed_chain_crl_result == kCRLSetRevoked)
@@ -908,7 +908,7 @@ int VerifyWithGivenFlags(X509Certificate* cert,
             weak_key_or_signature_algorithm = true;
             policy_fail_already_mapped = true;
           } else if (policy_failed &&
-                     (flags & CertVerifier::VERIFY_REV_CHECKING_ENABLED) &&
+                     (flags & CertVerifyProc::VERIFY_REV_CHECKING_ENABLED) &&
                      chain_info[index].StatusCodes[status_code_index] ==
                          CSSMERR_TP_VERIFY_ACTION_FAILED &&
                      base::mac::IsOS10_12()) {
@@ -985,12 +985,6 @@ bool CertVerifyProcMac::SupportsAdditionalTrustAnchors() const {
   return false;
 }
 
-bool CertVerifyProcMac::SupportsOCSPStapling() const {
-  // TODO(rsleevi): Plumb an OCSP response into the Mac system library.
-  // https://crbug.com/430714
-  return false;
-}
-
 int CertVerifyProcMac::VerifyInternal(
     X509Certificate* cert,
     const std::string& hostname,
@@ -1019,17 +1013,17 @@ int CertVerifyProcMac::VerifyInternal(
     // EV policies check out and the verification succeeded. See if revocation
     // checking still needs to be done before it can be marked as EV.
     if (completed_chain_crl_result == kCRLSetUnknown &&
-        !(flags & CertVerifier::VERIFY_REV_CHECKING_ENABLED)) {
+        !(flags & VERIFY_REV_CHECKING_ENABLED)) {
       // If this is an EV cert and it wasn't covered by CRLSets and revocation
       // checking wasn't already on, try again with revocation forced on.
       //
       // Restore the input state of |*verify_result|, so that the
       // re-verification starts with a clean slate.
       *verify_result = input_verify_result;
-      int tmp_rv = VerifyWithGivenFlags(
-          verify_result->verified_cert.get(), hostname,
-          flags | CertVerifier::VERIFY_REV_CHECKING_ENABLED, crl_set,
-          verify_result, &completed_chain_crl_result);
+      int tmp_rv =
+          VerifyWithGivenFlags(verify_result->verified_cert.get(), hostname,
+                               flags | VERIFY_REV_CHECKING_ENABLED, crl_set,
+                               verify_result, &completed_chain_crl_result);
       // If re-verification failed, return those results without setting EV
       // status.
       if (tmp_rv != OK)

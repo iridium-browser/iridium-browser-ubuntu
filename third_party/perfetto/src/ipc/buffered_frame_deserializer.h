@@ -25,6 +25,8 @@
 #include <sys/mman.h>
 
 #include "perfetto/base/page_allocator.h"
+#include "perfetto/base/utils.h"
+#include "perfetto/ipc/basic_types.h"
 
 namespace perfetto {
 namespace ipc {
@@ -81,7 +83,8 @@ class BufferedFrameDeserializer {
     size_t size;
   };
 
-  explicit BufferedFrameDeserializer(size_t max_capacity = 128 * 1024);
+  // |max_capacity| is overridable only for tests.
+  explicit BufferedFrameDeserializer(size_t max_capacity = kIPCBufferSize);
   ~BufferedFrameDeserializer();
 
   // This function doesn't really belong here as it does Serialization, unlike
@@ -98,7 +101,7 @@ class BufferedFrameDeserializer {
   // buffer previously returned by BeginReceive() (the return value of recv()).
   // Returns false if a header > |max_capacity| is received, in which case the
   // caller is expected to shutdown the socket and terminate the ipc.
-  bool EndReceive(size_t recv_size) __attribute__((warn_unused_result));
+  bool EndReceive(size_t recv_size) PERFETTO_WARN_UNUSED_RESULT;
 
   // Decodes and returns the next decoded frame in the buffer if any, nullptr
   // if no further frames have been decoded.

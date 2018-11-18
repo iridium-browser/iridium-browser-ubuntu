@@ -69,12 +69,18 @@ class CC_EXPORT SchedulerStateMachine {
   };
   static const char* BeginImplFrameStateToString(BeginImplFrameState state);
 
+  // The scheduler uses a deadline to wait for main thread updates before
+  // submitting a compositor frame. BeginImplFrameDeadlineMode specifies when
+  // the deadline should run.
   enum class BeginImplFrameDeadlineMode {
-    NONE,
-    IMMEDIATE,
-    REGULAR,
-    LATE,
-    BLOCKED,
+    NONE,  // No deadline should be scheduled e.g. for synchronous compositor.
+    IMMEDIATE,  // Deadline should be scheduled to run immediately.
+    REGULAR,  // Deadline should be scheduled to run at the deadline provided by
+              // in the BeginFrameArgs.
+    LATE,  // Deadline should be scheduled run when the next frame is expected
+           // to arrive.
+    BLOCKED,  // Deadline should be blocked indefinitely until the next frame
+              // arrives.
   };
   static const char* BeginImplFrameDeadlineModeToString(
       BeginImplFrameDeadlineMode mode);
@@ -168,6 +174,8 @@ class CC_EXPORT SchedulerStateMachine {
   BeginImplFrameState begin_impl_frame_state() const {
     return begin_impl_frame_state_;
   }
+
+  // Returns BeginImplFrameDeadlineMode computed based on current state.
   BeginImplFrameDeadlineMode CurrentBeginImplFrameDeadlineMode() const;
 
   // If the main thread didn't manage to produce a new frame in time for the
@@ -246,13 +254,18 @@ class CC_EXPORT SchedulerStateMachine {
   // Indicates production should be skipped to recover latency.
   void SetSkipNextBeginMainFrameToReduceLatency(bool skip);
 
-  // Resourceless software draws are allowed even when invisible.
+  // For Android WebView, resourceless software draws are allowed even when
+  // invisible.
   void SetResourcelessSoftwareDraw(bool resourceless_draw);
 
   // Indicates whether drawing would, at this time, make sense.
   // CanDraw can be used to suppress flashes or checkerboarding
   // when such behavior would be undesirable.
   void SetCanDraw(bool can);
+
+  // For Android WebView, indicates that the draw should be skipped because the
+  // frame sink is not ready to receive frames.
+  void SetSkipDraw(bool skip);
 
   // Indicates that scheduled BeginMainFrame is started.
   void NotifyBeginMainFrameStarted();
@@ -315,12 +328,19 @@ class CC_EXPORT SchedulerStateMachine {
   bool BeginFrameNeededForVideo() const;
   bool ProactiveBeginFrameWanted() const;
 
+  // Indicates if we should post the deadline to draw immediately. This is true
+  // when we aren't expecting a commit or activation, or we're prioritizing
+  // active tree draw (see ImplLatencyTakesPriority()).
+  bool ShouldTriggerBeginImplFrameDeadlineImmediately() const;
+
+  // Indicates if we shouldn't schedule a deadline. Used to defer drawing until
+  // the entire pipeline is flushed and active tree is ready to draw for
+  // headless.
+  bool ShouldBlockDeadlineIndefinitely() const;
+
   bool ShouldPerformImplSideInvalidation() const;
   bool CouldCreatePendingTree() const;
   bool ShouldDeferInvalidatingForMainFrame() const;
-
-  bool ShouldTriggerBeginImplFrameDeadlineImmediately() const;
-  bool ShouldBlockDeadlineIndefinitely() const;
 
   bool ShouldAbortCurrentFrame() const;
 
@@ -386,6 +406,7 @@ class CC_EXPORT SchedulerStateMachine {
   bool begin_frame_source_paused_ = false;
   bool resourceless_draw_ = false;
   bool can_draw_ = false;
+  bool skip_draw_ = false;
   bool has_pending_tree_ = false;
   bool pending_tree_is_ready_for_activation_ = false;
   bool active_tree_needs_first_draw_ = false;

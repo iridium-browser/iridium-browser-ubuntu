@@ -26,11 +26,17 @@ class GPU_IPC_SERVICE_EXPORT RasterCommandBufferStub
   gpu::ContextResult Initialize(
       CommandBufferStub* share_group,
       const GPUCreateCommandBufferConfig& init_params,
-      std::unique_ptr<base::SharedMemory> shared_state_shm) override;
+      base::UnsafeSharedMemoryRegion shared_state_shm) override;
 
  private:
   void OnTakeFrontBuffer(const Mailbox& mailbox) override;
   void OnReturnFrontBuffer(const Mailbox& mailbox, bool is_lost) override;
+  void OnSwapBuffers(uint64_t swap_id, uint32_t flags) override;
+  void SetActiveURL(GURL url) override;
+  void ResetActiveURL() override;
+
+  GURL original_url_;
+  size_t original_url_hash_;
 
   DISALLOW_COPY_AND_ASSIGN(RasterCommandBufferStub);
 };

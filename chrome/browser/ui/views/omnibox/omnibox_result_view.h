@@ -22,7 +22,9 @@
 #include "ui/views/controls/image_view.h"
 #include "ui/views/view.h"
 
+class OmniboxMatchCellView;
 class OmniboxPopupContentsView;
+class OmniboxTabSwitchButton;
 enum class OmniboxPart;
 enum class OmniboxPartState;
 enum class OmniboxTint;
@@ -31,19 +33,11 @@ namespace gfx {
 class Image;
 }
 
-class OmniboxImageView;
-class OmniboxSeparatedLineView;
-class OmniboxSuggestionView;
-class OmniboxTabSwitchButton;
-class OmniboxTextView;
-
 class OmniboxResultView : public views::View,
                           private gfx::AnimationDelegate,
                           public views::ButtonListener {
  public:
-  OmniboxResultView(OmniboxPopupContentsView* model,
-                    int model_index,
-                    const gfx::FontList& font_list);
+  OmniboxResultView(OmniboxPopupContentsView* model, int model_index);
   ~OmniboxResultView() override;
 
   // Helper to get the color for |part| using the current state and tint.
@@ -61,6 +55,9 @@ class OmniboxResultView : public views::View,
   // Invoked when this result view has been selected.
   void OnSelected();
 
+  // Whether |this| matches the model's selected index.
+  bool IsSelected() const;
+
   OmniboxPartState GetThemeState() const;
   OmniboxTint GetTint() const;
 
@@ -68,14 +65,18 @@ class OmniboxResultView : public views::View,
   void OnMatchIconUpdated();
 
   // Stores the image in a local data member and schedules a repaint.
-  void SetAnswerImage(const gfx::ImageSkia& image);
+  void SetRichSuggestionImage(const gfx::ImageSkia& image);
 
   // views::ButtonListener:
 
   // Called when tab switch button pressed, due to being a listener.
   void ButtonPressed(views::Button* sender, const ui::Event& event) override;
 
+  // Called to indicate tab switch button has been focused.
+  void ProvideButtonFocusHint();
+
   // views::View:
+  void Layout() override;
   bool OnMousePressed(const ui::MouseEvent& event) override;
   bool OnMouseDragged(const ui::MouseEvent& event) override;
   void OnMouseReleased(const ui::MouseEvent& event) override;
@@ -86,32 +87,20 @@ class OmniboxResultView : public views::View,
   void OnNativeThemeChanged(const ui::NativeTheme* theme) override;
 
  private:
-  // Create instance and add it as a child.
-  OmniboxImageView* AddOmniboxImageView();
-  OmniboxTextView* AddOmniboxTextView(const gfx::FontList& font_list);
-
   // Returns the height of the text portion of the result view.
   int GetTextHeight() const;
 
   gfx::Image GetIcon() const;
 
-  // Returns the height of the the description section of answer suggestions.
-  int GetAnswerHeight() const;
-
-  // Returns the margin that should appear at the top and bottom of the result.
-  int GetVerticalMargin() const;
-
   // Sets the hovered state of this result.
   void SetHovered(bool hovered);
 
-  // Whether |this| matches the model's selected index.
-  bool IsSelected() const;
-
-  // Call model's OpenMatch() with the selected index and provided disposition.
-  void OpenMatch(WindowOpenDisposition disposition);
+  // Call model's OpenMatch() with the selected index and provided disposition
+  // and timestamp the match was selected (base::TimeTicks() if unknown).
+  void OpenMatch(WindowOpenDisposition disposition,
+                 base::TimeTicks match_selection_timestamp);
 
   // views::View:
-  void Layout() override;
   const char* GetClassName() const override;
   void OnBoundsChanged(const gfx::Rect& previous_bounds) override;
 
@@ -125,9 +114,6 @@ class OmniboxResultView : public views::View,
   // Whether this view is in the hovered state.
   bool is_hovered_;
 
-  // Cache the font height as a minor optimization.
-  int font_height_;
-
   // The data this class is built to display (the "Omnibox Result").
   AutocompleteMatch match_;
 
@@ -135,8 +121,8 @@ class OmniboxResultView : public views::View,
   std::unique_ptr<gfx::SlideAnimation> animation_;
 
   // Weak pointers for easy reference.
-  OmniboxSuggestionView* suggestion_view_;  // The leading (or left) view.
-  OmniboxSeparatedLineView* keyword_view_;  // The trailing (or right) view.
+  OmniboxMatchCellView* suggestion_view_;  // The leading (or left) view.
+  OmniboxMatchCellView* keyword_view_;     // The trailing (or right) view.
   std::unique_ptr<OmniboxTabSwitchButton> suggestion_tab_switch_button_;
 
   DISALLOW_COPY_AND_ASSIGN(OmniboxResultView);

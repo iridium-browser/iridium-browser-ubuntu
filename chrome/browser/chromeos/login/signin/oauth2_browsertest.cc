@@ -8,21 +8,25 @@
 #include <utility>
 
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/stringprintf.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/task/post_task.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/chromeos/login/existing_user_controller.h"
+#include "chrome/browser/chromeos/login/screens/gaia_view.h"
 #include "chrome/browser/chromeos/login/signin/oauth2_login_manager.h"
 #include "chrome/browser/chromeos/login/signin/oauth2_login_manager_factory.h"
 #include "chrome/browser/chromeos/login/signin_specifics.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/login/test/oobe_base_test.h"
+#include "chrome/browser/chromeos/login/ui/login_display_host.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/extensions/chrome_extension_test_notification_observer.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/signin/account_tracker_service_factory.h"
 #include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/browser/signin/signin_error_controller_factory.h"
 #include "chrome/browser/ui/browser.h"
@@ -35,15 +39,16 @@
 #include "chrome/test/base/ui_test_utils.h"
 #include "chromeos/login/auth/key.h"
 #include "chromeos/login/auth/user_context.h"
+#include "components/account_id/account_id.h"
 #include "components/browser_sync/browser_sync_switches.h"
 #include "components/prefs/pref_service.h"
-#include "components/signin/core/account_id/account_id.h"
 #include "components/signin/core/browser/account_tracker_service.h"
 #include "components/signin/core/browser/fake_auth_status_provider.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_error_controller.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/test/browser_test_utils.h"
@@ -70,6 +75,7 @@ const char kTestGaiaId[] = "12345";
 const char kTestEmail[] = "username@gmail.com";
 const char kTestRawEmail[] = "User.Name@gmail.com";
 const char kTestAccountPassword[] = "fake-password";
+const char kTestAccountServices[] = "[]";
 const char kTestAuthCode[] = "fake-auth-code";
 const char kTestGaiaUberToken[] = "fake-uber-token";
 const char kTestAuthLoginAccessToken[] = "fake-access-token";
@@ -80,6 +86,14 @@ const char kTestSessionSIDCookie[] = "fake-session-SID-cookie";
 const char kTestSessionLSIDCookie[] = "fake-session-LSID-cookie";
 const char kTestSession2SIDCookie[] = "fake-session2-SID-cookie";
 const char kTestSession2LSIDCookie[] = "fake-session2-LSID-cookie";
+const char kTestIdTokenAdvancedProtectionEnabled[] =
+    "dummy-header."
+    "eyAic2VydmljZXMiOiBbInRpYSJdIH0="  // payload: { "services": ["tia"] }
+    ".dummy-signature";
+const char kTestIdTokenAdvancedProtectionDisabled[] =
+    "dummy-header."
+    "eyAic2VydmljZXMiOiBbXSB9"  // payload: { "services": [] }
+    ".dummy-signature";
 
 std::string PickAccountId(Profile* profile,
                           const std::string& gaia_id,
@@ -187,8 +201,8 @@ class RequestDeferrer {
 
   void InterceptRequest(const HttpRequest& request) {
     start_event_.Signal();
-    content::BrowserThread::PostTask(
-        content::BrowserThread::UI, FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, {content::BrowserThread::UI},
         base::BindOnce(&RequestDeferrer::QuitRunnerOnUIThread,
                        base::Unretained(this)));
     blocking_event_.Wait();
@@ -227,7 +241,7 @@ class OAuth2Test : public OobeBaseTest {
         base::Bind(&OAuth2Test::InterceptRequest, base::Unretained(this)));
   }
 
-  void SetupGaiaServerForNewAccount() {
+  void SetupGaiaServerForNewAccount(bool is_under_advanced_protection) {
     FakeGaia::MergeSessionParams params;
     params.auth_sid_cookie = kTestAuthSIDCookie;
     params.auth_lsid_cookie = kTestAuthLSIDCookie;
@@ -237,6 +251,9 @@ class OAuth2Test : public OobeBaseTest {
     params.gaia_uber_token = kTestGaiaUberToken;
     params.session_sid_cookie = kTestSessionSIDCookie;
     params.session_lsid_cookie = kTestSessionLSIDCookie;
+    params.id_token = is_under_advanced_protection
+                          ? kTestIdTokenAdvancedProtectionEnabled
+                          : kTestIdTokenAdvancedProtectionDisabled;
     fake_gaia_->SetMergeSessionParams(params);
     SetupFakeGaiaForLogin(kTestEmail, kTestGaiaId, kTestRefreshToken);
   }
@@ -336,7 +353,8 @@ class OAuth2Test : public OobeBaseTest {
       return false;
     }
 
-    UserContext user_context(account_id);
+    UserContext user_context(user_manager::UserType::USER_TYPE_REGULAR,
+                             account_id);
     user_context.SetKey(Key(password));
     controller->Login(user_context, SigninSpecifics());
     content::WindowedNotificationObserver(
@@ -371,8 +389,9 @@ class OAuth2Test : public OobeBaseTest {
     EXPECT_EQ(merge_session_waiter.final_state(), final_state);
   }
 
-  void StartNewUserSession(bool wait_for_merge) {
-    SetupGaiaServerForNewAccount();
+  void StartNewUserSession(bool wait_for_merge,
+                           bool is_under_advanced_protection) {
+    SetupGaiaServerForNewAccount(is_under_advanced_protection);
     SimulateNetworkOnline();
     WaitForGaiaPageLoad();
 
@@ -382,8 +401,11 @@ class OAuth2Test : public OobeBaseTest {
 
     // Use capitalized and dotted user name on purpose to make sure
     // our email normalization kicks in.
-    GetLoginDisplay()->ShowSigninScreenForCreds(kTestRawEmail,
-                                                kTestAccountPassword);
+    LoginDisplayHost::default_host()
+        ->GetOobeUI()
+        ->GetGaiaScreenView()
+        ->ShowSigninScreenForTest(kTestRawEmail, kTestAccountPassword,
+                                  kTestAccountServices);
     session_start_waiter.Wait();
 
     if (wait_for_merge) {
@@ -426,8 +448,8 @@ class CookieReader : public base::RefCountedThreadSafe<CookieReader> {
 
   void ReadCookies(Profile* profile) {
     context_ = profile->GetRequestContext();
-    content::BrowserThread::PostTask(
-        content::BrowserThread::IO, FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, {content::BrowserThread::IO},
         base::BindOnce(&CookieReader::ReadCookiesOnIOThread, this));
     run_loop_ = std::make_unique<base::RunLoop>();
     run_loop_->Run();
@@ -456,8 +478,8 @@ class CookieReader : public base::RefCountedThreadSafe<CookieReader> {
 
   void OnGetAllCookiesOnUIThread(const net::CookieList& cookies) {
     cookie_list_ = cookies;
-    content::BrowserThread::PostTask(
-        content::BrowserThread::UI, FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, {content::BrowserThread::UI},
         base::BindOnce(&CookieReader::OnCookiesReadyOnUIThread, this));
   }
 
@@ -472,7 +494,8 @@ class CookieReader : public base::RefCountedThreadSafe<CookieReader> {
 
 // PRE_MergeSession is testing merge session for a new profile.
 IN_PROC_BROWSER_TEST_F(OAuth2Test, PRE_PRE_PRE_MergeSession) {
-  StartNewUserSession(true);
+  StartNewUserSession(/*wait_for_merge=*/true,
+                      /*is_under_advanced_protectionis_true=*/false);
   // Check for existence of refresh token.
   std::string account_id = PickAccountId(profile(), kTestGaiaId, kTestEmail);
   ProfileOAuth2TokenService* token_service =
@@ -551,7 +574,8 @@ IN_PROC_BROWSER_TEST_F(OAuth2Test, DISABLED_MergeSession) {
 
 // Sets up a new user with stored refresh token.
 IN_PROC_BROWSER_TEST_F(OAuth2Test, PRE_OverlappingContinueSessionRestore) {
-  StartNewUserSession(true);
+  StartNewUserSession(/*wait_for_merge=*/true,
+                      /*is_under_advanced_protectionis_true=*/false);
 }
 
 // Tests that ContinueSessionRestore could be called multiple times.
@@ -621,7 +645,11 @@ IN_PROC_BROWSER_TEST_F(OAuth2Test, TerminateOnBadMergeSessionAfterOnlineAuth) {
   fake_gaia_->SetMergeSessionParams(params);
 
   // Simulate an online sign-in.
-  GetLoginDisplay()->ShowSigninScreenForCreds(kTestEmail, kTestAccountPassword);
+  LoginDisplayHost::default_host()
+      ->GetOobeUI()
+      ->GetGaiaScreenView()
+      ->ShowSigninScreenForTest(kTestRawEmail, kTestAccountPassword,
+                                kTestAccountServices);
 
   // User session should be terminated.
   termination_waiter.Wait();
@@ -631,9 +659,33 @@ IN_PROC_BROWSER_TEST_F(OAuth2Test, TerminateOnBadMergeSessionAfterOnlineAuth) {
   WaitForMergeSessionCompletion(OAuth2LoginManager::SESSION_RESTORE_FAILED);
 }
 
+IN_PROC_BROWSER_TEST_F(OAuth2Test, VerifyInAdvancedProtectionAfterOnlineAuth) {
+  StartNewUserSession(/*wait_for_merge=*/true,
+                      /*is_under_advanced_protectionis_true=*/true);
+
+  // Verify that AccountInfo is properly updated.
+  AccountTrackerService* account_tracker =
+      AccountTrackerServiceFactory::GetInstance()->GetForProfile(profile());
+  EXPECT_TRUE(
+      account_tracker->GetAccountInfo(kTestEmail).is_under_advanced_protection);
+}
+
+IN_PROC_BROWSER_TEST_F(OAuth2Test,
+                       VerifyNotInAdvancedProtectionAfterOnlineAuth) {
+  StartNewUserSession(/*wait_for_merge=*/true,
+                      /*is_under_advanced_protectionis_true=*/false);
+
+  // Verify that AccountInfo is properly updated.
+  AccountTrackerService* account_tracker =
+      AccountTrackerServiceFactory::GetInstance()->GetForProfile(profile());
+  EXPECT_FALSE(
+      account_tracker->GetAccountInfo(kTestEmail).is_under_advanced_protection);
+}
+
 // Sets up a new user with stored refresh token.
 IN_PROC_BROWSER_TEST_F(OAuth2Test, PRE_SetInvalidTokenStatus) {
-  StartNewUserSession(true);
+  StartNewUserSession(/*wait_for_merge=*/true,
+                      /*is_under_advanced_protectionis_true=*/false);
 }
 
 // Tests that an auth error reported by SigninErrorController marks invalid auth
@@ -656,6 +708,7 @@ IN_PROC_BROWSER_TEST_F(OAuth2Test, SetInvalidTokenStatus) {
   ExistingUserController* const controller =
       ExistingUserController::current_controller();
   UserContext user_context(
+      user_manager::USER_TYPE_REGULAR,
       AccountId::FromUserEmailGaiaId(kTestEmail, kTestGaiaId));
   user_context.SetKey(Key(kTestAccountPassword));
   controller->Login(user_context, SigninSpecifics());
@@ -717,10 +770,9 @@ class FakeGoogle {
     std::unique_ptr<BasicHttpResponse> http_response(new BasicHttpResponse());
     if (request_path == kHelloPagePath) {  // Serving "google" page.
       start_event_.Signal();
-      content::BrowserThread::PostTask(
-          content::BrowserThread::UI, FROM_HERE,
-          base::BindOnce(&FakeGoogle::QuitRunnerOnUIThread,
-                         base::Unretained(this)));
+      base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI},
+                               base::BindOnce(&FakeGoogle::QuitRunnerOnUIThread,
+                                              base::Unretained(this)));
 
       http_response->set_code(net::HTTP_OK);
       http_response->set_content_type("text/html");
@@ -849,7 +901,8 @@ Browser* FindOrCreateVisibleBrowser(Profile* profile) {
 }
 
 IN_PROC_BROWSER_TEST_F(MergeSessionTest, PageThrottle) {
-  StartNewUserSession(false);
+  StartNewUserSession(/*wait_for_merge=*/false,
+                      /*is_under_advanced_protectionis_true=*/false);
 
   // Try to open a page from google.com.
   Browser* browser = FindOrCreateVisibleBrowser(profile());
@@ -895,7 +948,8 @@ IN_PROC_BROWSER_TEST_F(MergeSessionTest, PageThrottle) {
 }
 
 IN_PROC_BROWSER_TEST_F(MergeSessionTest, XHRThrottle) {
-  StartNewUserSession(false);
+  StartNewUserSession(/*wait_for_merge=*/false,
+                      /*is_under_advanced_protectionis_true=*/false);
 
   // Wait until we get send merge session request.
   WaitForMergeSessionToStart();

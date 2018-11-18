@@ -27,23 +27,22 @@
 #include "sdk/android/generated_peerconnection_jni/jni/PeerConnectionFactory_jni.h"
 #include "sdk/android/native_api/jni/java_types.h"
 #include "sdk/android/src/jni/jni_helpers.h"
+#include "sdk/android/src/jni/logging/logsink.h"
 #include "sdk/android/src/jni/pc/androidnetworkmonitor.h"
 #include "sdk/android/src/jni/pc/audio.h"
 #include "sdk/android/src/jni/pc/icecandidate.h"
 #include "sdk/android/src/jni/pc/media.h"
 #include "sdk/android/src/jni/pc/ownedfactoryandthreads.h"
 #include "sdk/android/src/jni/pc/peerconnection.h"
+#include "sdk/android/src/jni/pc/sslcertificateverifierwrapper.h"
 #include "sdk/android/src/jni/pc/video.h"
 #include "system_wrappers/include/field_trial.h"
-// Adding 'nogncheck' to disable the gn include headers check.
-// We don't want to depend on 'system_wrappers:field_trial_default' because
-// clients should be able to provide their own implementation.
-#include "system_wrappers/include/field_trial_default.h"  // nogncheck
 
 namespace webrtc {
 namespace jni {
 
 namespace {
+
 PeerConnectionFactoryInterface::Options
 JavaToNativePeerConnectionFactoryOptions(JNIEnv* jni,
                                          const JavaRef<jobject>& options) {
@@ -53,6 +52,8 @@ JavaToNativePeerConnectionFactoryOptions(JNIEnv* jni,
       Java_Options_getDisableNetworkMonitor(jni, options);
   bool enable_aes128_sha1_32_crypto_cipher =
       Java_Options_getEnableAes128Sha1_32CryptoCipher(jni, options);
+  bool enable_gcm_crypto_suites =
+      Java_Options_getEnableGcmCryptoSuites(jni, options);
 
   PeerConnectionFactoryInterface::Options native_options;
 
@@ -64,8 +65,25 @@ JavaToNativePeerConnectionFactoryOptions(JNIEnv* jni,
 
   native_options.crypto_options.enable_aes128_sha1_32_crypto_cipher =
       enable_aes128_sha1_32_crypto_cipher;
+  native_options.crypto_options.enable_gcm_crypto_suites =
+      enable_gcm_crypto_suites;
   return native_options;
 }
+
+// Place static objects into a container that gets leaked so we avoid
+// non-trivial destructor.
+struct StaticObjectContainer {
+  // Field trials initialization string
+  std::unique_ptr<std::string> field_trials_init_string;
+  // Set in PeerConnectionFactory_InjectLoggable().
+  std::unique_ptr<JNILogSink> jni_log_sink;
+};
+
+StaticObjectContainer& GetStaticObjects() {
+  static StaticObjectContainer* static_objects = new StaticObjectContainer();
+  return *static_objects;
+}
+
 }  // namespace
 
 // Note: Some of the video-specific PeerConnectionFactory methods are
@@ -74,12 +92,8 @@ JavaToNativePeerConnectionFactoryOptions(JNIEnv* jni,
 // instead of "video.cc", which doesn't bring in the video-specific
 // dependencies.
 
-// Field trials initialization string
-static char* field_trials_init_string = nullptr;
-
 // Set in PeerConnectionFactory_initializeAndroidGlobals().
 static bool factory_static_initialized = false;
-static bool video_hw_acceleration_enabled = true;
 
 void PeerConnectionFactoryNetworkThreadReady() {
   RTC_LOG(LS_INFO) << "Network thread JavaCallback";
@@ -108,9 +122,7 @@ jobject NativeToJavaPeerConnectionFactory(
     rtc::NetworkMonitorFactory* network_monitor_factory) {
   jni::OwnedFactoryAndThreads* owned_factory = new jni::OwnedFactoryAndThreads(
       std::move(network_thread), std::move(worker_thread),
-      std::move(signaling_thread), nullptr /* legacy_encoder_factory */,
-      nullptr /* legacy_decoder_factory */, network_monitor_factory,
-      pcf.release());
+      std::move(signaling_thread), network_monitor_factory, pcf.release());
   owned_factory->InvokeJavaCallbacksOnFactoryThreads();
 
   return Java_PeerConnectionFactory_Constructor(
@@ -120,9 +132,7 @@ jobject NativeToJavaPeerConnectionFactory(
 
 static void JNI_PeerConnectionFactory_InitializeAndroidGlobals(
     JNIEnv* jni,
-    const JavaParamRef<jclass>&,
-    jboolean video_hw_acceleration) {
-  video_hw_acceleration_enabled = video_hw_acceleration;
+    const JavaParamRef<jclass>&) {
   if (!factory_static_initialized) {
     JVM::Initialize(GetJVM());
     factory_static_initialized = true;
@@ -133,18 +143,18 @@ static void JNI_PeerConnectionFactory_InitializeFieldTrials(
     JNIEnv* jni,
     const JavaParamRef<jclass>&,
     const JavaParamRef<jstring>& j_trials_init_string) {
-  field_trials_init_string = NULL;
-  if (!j_trials_init_string.is_null()) {
-    const char* init_string =
-        jni->GetStringUTFChars(j_trials_init_string.obj(), NULL);
-    int init_string_length =
-        jni->GetStringUTFLength(j_trials_init_string.obj());
-    field_trials_init_string = new char[init_string_length + 1];
-    rtc::strcpyn(field_trials_init_string, init_string_length + 1, init_string);
-    jni->ReleaseStringUTFChars(j_trials_init_string.obj(), init_string);
-    RTC_LOG(LS_INFO) << "initializeFieldTrials: " << field_trials_init_string;
+  std::unique_ptr<std::string>& field_trials_init_string =
+      GetStaticObjects().field_trials_init_string;
+
+  if (j_trials_init_string.is_null()) {
+    field_trials_init_string = nullptr;
+    field_trial::InitFieldTrialsFromString(nullptr);
+    return;
   }
-  field_trial::InitFieldTrialsFromString(field_trials_init_string);
+  field_trials_init_string = absl::make_unique<std::string>(
+      JavaToNativeString(jni, j_trials_init_string));
+  RTC_LOG(LS_INFO) << "initializeFieldTrials: " << *field_trials_init_string;
+  field_trial::InitFieldTrialsFromString(field_trials_init_string->c_str());
 }
 
 static void JNI_PeerConnectionFactory_InitializeInternalTracer(
@@ -240,53 +250,13 @@ jlong CreatePeerConnectionFactoryForJava(
   std::unique_ptr<RtcEventLogFactoryInterface> rtc_event_log_factory(
       CreateRtcEventLogFactory());
 
-  cricket::WebRtcVideoEncoderFactory* legacy_video_encoder_factory = nullptr;
-  cricket::WebRtcVideoDecoderFactory* legacy_video_decoder_factory = nullptr;
-  std::unique_ptr<cricket::MediaEngineInterface> media_engine;
-  if (jencoder_factory.is_null() && jdecoder_factory.is_null()) {
-#if defined(USE_BUILTIN_SW_CODECS)
-    // This uses the legacy API, which automatically uses the internal SW
-    // codecs in WebRTC.
-    if (video_hw_acceleration_enabled) {
-      legacy_video_encoder_factory = CreateLegacyVideoEncoderFactory();
-      legacy_video_decoder_factory = CreateLegacyVideoDecoderFactory();
-    }
-    media_engine.reset(CreateMediaEngine(
-        audio_device_module, audio_encoder_factory, audio_decoder_factory,
-        legacy_video_encoder_factory, legacy_video_decoder_factory, audio_mixer,
-        audio_processor));
-#endif
-  } else {
-    // This uses the new API, does not automatically include software codecs.
-    std::unique_ptr<VideoEncoderFactory> video_encoder_factory = nullptr;
-    if (jencoder_factory.is_null()) {
-#if defined(USE_BUILTIN_SW_CODECS)
-      legacy_video_encoder_factory = CreateLegacyVideoEncoderFactory();
-      video_encoder_factory = std::unique_ptr<VideoEncoderFactory>(
-          WrapLegacyVideoEncoderFactory(legacy_video_encoder_factory));
-#endif
-    } else {
-      video_encoder_factory = std::unique_ptr<VideoEncoderFactory>(
-          CreateVideoEncoderFactory(jni, jencoder_factory));
-    }
-
-    std::unique_ptr<VideoDecoderFactory> video_decoder_factory = nullptr;
-    if (jdecoder_factory.is_null()) {
-#if defined(USE_BUILTIN_SW_CODECS)
-      legacy_video_decoder_factory = CreateLegacyVideoDecoderFactory();
-      video_decoder_factory = std::unique_ptr<VideoDecoderFactory>(
-          WrapLegacyVideoDecoderFactory(legacy_video_decoder_factory));
-#endif
-    } else {
-      video_decoder_factory = std::unique_ptr<VideoDecoderFactory>(
-          CreateVideoDecoderFactory(jni, jdecoder_factory));
-    }
-
-    media_engine.reset(CreateMediaEngine(
-        audio_device_module, audio_encoder_factory, audio_decoder_factory,
-        std::move(video_encoder_factory), std::move(video_decoder_factory),
-        audio_mixer, audio_processor));
-  }
+  std::unique_ptr<cricket::MediaEngineInterface> media_engine(CreateMediaEngine(
+      audio_device_module, audio_encoder_factory, audio_decoder_factory,
+      std::unique_ptr<VideoEncoderFactory>(
+          CreateVideoEncoderFactory(jni, jencoder_factory)),
+      std::unique_ptr<VideoDecoderFactory>(
+          CreateVideoDecoderFactory(jni, jdecoder_factory)),
+      audio_mixer, audio_processor));
 
   rtc::scoped_refptr<PeerConnectionFactoryInterface> factory(
       CreateModularPeerConnectionFactory(
@@ -302,8 +272,7 @@ jlong CreatePeerConnectionFactoryForJava(
   }
   OwnedFactoryAndThreads* owned_factory = new OwnedFactoryAndThreads(
       std::move(network_thread), std::move(worker_thread),
-      std::move(signaling_thread), legacy_video_encoder_factory,
-      legacy_video_decoder_factory, network_monitor_factory, factory.release());
+      std::move(signaling_thread), network_monitor_factory, factory.release());
   owned_factory->InvokeJavaCallbacksOnFactoryThreads();
   return jlongFromPointer(owned_factory);
 }
@@ -335,11 +304,8 @@ static void JNI_PeerConnectionFactory_FreeFactory(JNIEnv*,
                                                   const JavaParamRef<jclass>&,
                                                   jlong j_p) {
   delete reinterpret_cast<OwnedFactoryAndThreads*>(j_p);
-  if (field_trials_init_string) {
-    field_trial::InitFieldTrialsFromString(NULL);
-    delete field_trials_init_string;
-    field_trials_init_string = NULL;
-  }
+  field_trial::InitFieldTrialsFromString(nullptr);
+  GetStaticObjects().field_trials_init_string = nullptr;
 }
 
 static void JNI_PeerConnectionFactory_InvokeThreadsCallbacks(
@@ -412,35 +378,14 @@ static void JNI_PeerConnectionFactory_StopAecDump(JNIEnv* jni,
   factory->StopAecDump();
 }
 
-static void JNI_PeerConnectionFactory_SetOptions(
-    JNIEnv* jni,
-    const JavaParamRef<jobject>&,
-    jlong native_factory,
-    const JavaParamRef<jobject>& options) {
-  rtc::scoped_refptr<PeerConnectionFactoryInterface> factory(
-      factoryFromJava(native_factory));
-  PeerConnectionFactoryInterface::Options options_to_set =
-      JavaToNativePeerConnectionFactoryOptions(jni, options);
-  factory->SetOptions(options_to_set);
-
-  if (options_to_set.disable_network_monitor) {
-    OwnedFactoryAndThreads* owner =
-        reinterpret_cast<OwnedFactoryAndThreads*>(native_factory);
-    if (owner->network_monitor_factory()) {
-      rtc::NetworkMonitorFactory::ReleaseFactory(
-          owner->network_monitor_factory());
-      owner->clear_network_monitor_factory();
-    }
-  }
-}
-
 static jlong JNI_PeerConnectionFactory_CreatePeerConnection(
     JNIEnv* jni,
     const JavaParamRef<jclass>&,
     jlong factory,
     const JavaParamRef<jobject>& j_rtc_config,
     const JavaParamRef<jobject>& j_constraints,
-    jlong observer_p) {
+    jlong observer_p,
+    const JavaParamRef<jobject>& j_sslCertificateVerifier) {
   rtc::scoped_refptr<PeerConnectionFactoryInterface> f(
       reinterpret_cast<PeerConnectionFactoryInterface*>(
           factoryFromJava(factory)));
@@ -451,18 +396,20 @@ static jlong JNI_PeerConnectionFactory_CreatePeerConnection(
       PeerConnectionInterface::RTCConfigurationType::kAggressive);
   JavaToNativeRTCConfiguration(jni, j_rtc_config, &rtc_config);
 
-  // Generate non-default certificate.
-  rtc::KeyType key_type = GetRtcConfigKeyType(jni, j_rtc_config);
-  if (key_type != rtc::KT_DEFAULT) {
-    rtc::scoped_refptr<rtc::RTCCertificate> certificate =
-        rtc::RTCCertificateGenerator::GenerateCertificate(
-            rtc::KeyParams(key_type), rtc::nullopt);
-    if (!certificate) {
-      RTC_LOG(LS_ERROR) << "Failed to generate certificate. KeyType: "
-                        << key_type;
-      return 0;
+  if (rtc_config.certificates.empty()) {
+    // Generate non-default certificate.
+    rtc::KeyType key_type = GetRtcConfigKeyType(jni, j_rtc_config);
+    if (key_type != rtc::KT_DEFAULT) {
+      rtc::scoped_refptr<rtc::RTCCertificate> certificate =
+          rtc::RTCCertificateGenerator::GenerateCertificate(
+              rtc::KeyParams(key_type), absl::nullopt);
+      if (!certificate) {
+        RTC_LOG(LS_ERROR) << "Failed to generate certificate. KeyType: "
+                          << key_type;
+        return 0;
+      }
+      rtc_config.certificates.push_back(certificate);
     }
-    rtc_config.certificates.push_back(certificate);
   }
 
   std::unique_ptr<MediaConstraintsInterface> constraints;
@@ -470,8 +417,20 @@ static jlong JNI_PeerConnectionFactory_CreatePeerConnection(
     constraints = JavaToNativeMediaConstraints(jni, j_constraints);
     CopyConstraintsIntoRtcConfiguration(constraints.get(), &rtc_config);
   }
-  rtc::scoped_refptr<PeerConnectionInterface> pc(
-      f->CreatePeerConnection(rtc_config, nullptr, nullptr, observer.get()));
+
+  PeerConnectionDependencies peer_connection_dependencies(observer.get());
+  if (!j_sslCertificateVerifier.is_null()) {
+    peer_connection_dependencies.tls_cert_verifier =
+        absl::make_unique<SSLCertificateVerifierWrapper>(
+            jni, j_sslCertificateVerifier);
+  }
+
+  rtc::scoped_refptr<PeerConnectionInterface> pc(f->CreatePeerConnection(
+      rtc_config, std::move(peer_connection_dependencies)));
+  if (pc == nullptr) {
+    return 0;
+  }
+
   return jlongFromPointer(
       new OwnedPeerConnection(pc, std::move(observer), std::move(constraints)));
 }
@@ -480,13 +439,12 @@ static jlong JNI_PeerConnectionFactory_CreateVideoSource(
     JNIEnv* jni,
     const JavaParamRef<jclass>&,
     jlong native_factory,
-    const JavaParamRef<jobject>& j_surface_texture_helper,
     jboolean is_screencast) {
   OwnedFactoryAndThreads* factory =
       reinterpret_cast<OwnedFactoryAndThreads*>(native_factory);
-  return jlongFromPointer(CreateVideoSource(
-      jni, factory->signaling_thread(), factory->worker_thread(),
-      j_surface_texture_helper, is_screencast));
+  return jlongFromPointer(CreateVideoSource(jni, factory->signaling_thread(),
+                                            factory->worker_thread(),
+                                            is_screencast));
 }
 
 static jlong JNI_PeerConnectionFactory_CreateVideoTrack(
@@ -503,27 +461,39 @@ static jlong JNI_PeerConnectionFactory_CreateVideoTrack(
   return jlongFromPointer(track.release());
 }
 
-static void JNI_PeerConnectionFactory_SetVideoHwAccelerationOptions(
-    JNIEnv* jni,
-    const JavaParamRef<jclass>&,
-    jlong native_factory,
-    const JavaParamRef<jobject>& local_egl_context,
-    const JavaParamRef<jobject>& remote_egl_context) {
-#if defined(USE_BUILTIN_SW_CODECS)
-  OwnedFactoryAndThreads* owned_factory =
-      reinterpret_cast<OwnedFactoryAndThreads*>(native_factory);
-  SetEglContext(jni, owned_factory->legacy_encoder_factory(),
-                local_egl_context);
-  SetEglContext(jni, owned_factory->legacy_decoder_factory(),
-                remote_egl_context);
-#endif
-}
-
 static jlong JNI_PeerConnectionFactory_GetNativePeerConnectionFactory(
     JNIEnv* jni,
     const JavaParamRef<jclass>&,
     jlong native_factory) {
   return jlongFromPointer(factoryFromJava(native_factory));
+}
+
+static void JNI_PeerConnectionFactory_InjectLoggable(
+    JNIEnv* jni,
+    const JavaParamRef<jclass>&,
+    const JavaParamRef<jobject>& j_logging,
+    jint nativeSeverity) {
+  std::unique_ptr<JNILogSink>& jni_log_sink = GetStaticObjects().jni_log_sink;
+
+  // If there is already a LogSink, remove it from LogMessage.
+  if (jni_log_sink) {
+    rtc::LogMessage::RemoveLogToStream(jni_log_sink.get());
+  }
+  jni_log_sink = absl::make_unique<JNILogSink>(jni, j_logging);
+  rtc::LogMessage::AddLogToStream(
+      jni_log_sink.get(), static_cast<rtc::LoggingSeverity>(nativeSeverity));
+  rtc::LogMessage::LogToDebug(rtc::LS_NONE);
+}
+
+static void JNI_PeerConnectionFactory_DeleteLoggable(
+    JNIEnv* jni,
+    const JavaParamRef<jclass>&) {
+  std::unique_ptr<JNILogSink>& jni_log_sink = GetStaticObjects().jni_log_sink;
+
+  if (jni_log_sink) {
+    rtc::LogMessage::RemoveLogToStream(jni_log_sink.get());
+    jni_log_sink.reset();
+  }
 }
 
 }  // namespace jni

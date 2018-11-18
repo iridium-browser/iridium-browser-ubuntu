@@ -279,6 +279,13 @@ TEST(CharacterTest, TestEmojiEmojiDefault) {
   EXPECT_FALSE(Character::IsEmojiEmojiDefault(0x1F202));
 }
 
+TEST(CharacterTest, EmojificationV11) {
+  // Infinity and Chess pawn were given the emoji class, but have default text
+  // presentation in Unicode 11.
+  EXPECT_TRUE(Character::IsEmojiTextDefault(0x265F));
+  EXPECT_TRUE(Character::IsEmojiTextDefault(0x267E));
+}
+
 TEST(CharacterTest, TestEmojiModifierBase) {
   EXPECT_TRUE(Character::IsEmojiModifierBase(0x261D));
   EXPECT_TRUE(Character::IsEmojiModifierBase(0x1F470));
@@ -329,6 +336,50 @@ TEST(CharacterTest, Truncation) {
   EXPECT_FALSE(Character::IsNormalizedCanvasSpaceCharacter(test_char));
   test_char = kBase + 0x9;
   EXPECT_FALSE(Character::IsNormalizedCanvasSpaceCharacter(test_char));
+}
+
+TEST(CharacterTest, IsBidiControl) {
+  EXPECT_TRUE(Character::IsBidiControl(0x202A));  // LEFT-TO-RIGHT EMBEDDING
+  EXPECT_TRUE(Character::IsBidiControl(0x202B));  // RIGHT-TO-LEFT EMBEDDING
+  EXPECT_TRUE(Character::IsBidiControl(0x202D));  // LEFT-TO-RIGHT OVERRIDE
+  EXPECT_TRUE(Character::IsBidiControl(0x202E));  // RIGHT-TO-LEFT OVERRIDE
+  EXPECT_TRUE(Character::IsBidiControl(0x202C));  // POP DIRECTIONAL FORMATTING
+  EXPECT_TRUE(Character::IsBidiControl(0x2066));  // LEFT-TO-RIGHT ISOLATE
+  EXPECT_TRUE(Character::IsBidiControl(0x2067));  // RIGHT-TO-LEFT ISOLATE
+  EXPECT_TRUE(Character::IsBidiControl(0x2068));  // FIRST STRONG ISOLATE
+  EXPECT_TRUE(Character::IsBidiControl(0x2069));  // POP DIRECTIONAL ISOLATE
+  EXPECT_TRUE(Character::IsBidiControl(0x200E));  // LEFT-TO-RIGHT MARK
+  EXPECT_TRUE(Character::IsBidiControl(0x200F));  // RIGHT-TO-LEFT MARK
+  EXPECT_TRUE(Character::IsBidiControl(0x061C));  // ARABIC LETTER MARK
+  EXPECT_FALSE(Character::IsBidiControl('A'));
+  EXPECT_FALSE(Character::IsBidiControl('0'));
+  EXPECT_FALSE(Character::IsBidiControl(0x05D0));
+}
+
+TEST(CharacterTest, IsNonCharacter) {
+  // See http://www.unicode.org/faq/private_use.html#nonchar4
+  EXPECT_FALSE(Character::IsNonCharacter(0xFDD0 - 1));
+  for (UChar32 bmp_noncharacter = 0xFDD0; bmp_noncharacter < 0xFDEF;
+       ++bmp_noncharacter) {
+    EXPECT_TRUE(Character::IsNonCharacter(bmp_noncharacter));
+  }
+  EXPECT_FALSE(Character::IsNonCharacter(0xFDEF + 1));
+
+  EXPECT_FALSE(Character::IsNonCharacter(0xFFFE - 1));
+  EXPECT_TRUE(Character::IsNonCharacter(0xFFFE));
+  EXPECT_TRUE(Character::IsNonCharacter(0xFFFF));
+  EXPECT_FALSE(Character::IsNonCharacter(0xFFFF + 1));
+
+  for (uint32_t supplementary_plane_prefix = 0x10000;
+       supplementary_plane_prefix < 0x100000;
+       supplementary_plane_prefix += 0x10000) {
+    EXPECT_FALSE(
+        Character::IsNonCharacter(supplementary_plane_prefix + 0xFFFE - 1));
+    EXPECT_TRUE(Character::IsNonCharacter(supplementary_plane_prefix + 0xFFFE));
+    EXPECT_TRUE(Character::IsNonCharacter(supplementary_plane_prefix + 0xFFFF));
+    EXPECT_FALSE(
+        Character::IsNonCharacter(supplementary_plane_prefix + 0xFFFF + 1));
+  }
 }
 
 }  // namespace blink

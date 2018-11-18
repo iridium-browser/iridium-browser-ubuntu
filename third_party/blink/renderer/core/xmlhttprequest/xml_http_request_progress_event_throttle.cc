@@ -28,20 +28,20 @@
 #include "third_party/blink/renderer/core/xmlhttprequest/xml_http_request_progress_event_throttle.h"
 
 #include "third_party/blink/public/platform/platform.h"
-#include "third_party/blink/public/platform/web_thread.h"
 #include "third_party/blink/renderer/core/event_type_names.h"
 #include "third_party/blink/renderer/core/events/progress_event.h"
-#include "third_party/blink/renderer/core/inspector/InspectorTraceEvents.h"
+#include "third_party/blink/renderer/core/inspector/inspector_trace_events.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/core/xmlhttprequest/xml_http_request.h"
-#include "third_party/blink/renderer/platform/scheduler/child/web_scheduler.h"
+#include "third_party/blink/renderer/platform/scheduler/public/thread.h"
+#include "third_party/blink/renderer/platform/scheduler/public/thread_scheduler.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 
 namespace blink {
 
-static const double kMinimumProgressEventDispatchingIntervalInSeconds =
-    .05;  // 50 ms per specification.
+static constexpr TimeDelta kMinimumProgressEventDispatchingInterval =
+    TimeDelta::FromMilliseconds(50);  // 50 ms per specification.
 
 XMLHttpRequestProgressEventThrottle::DeferredEvent::DeferredEvent() {
   Clear();
@@ -96,7 +96,7 @@ void XMLHttpRequestProgressEventThrottle::DispatchProgressEvent(
   // we don't have to worry about event dispatching while suspended.
   if (type != EventTypeNames::progress) {
     target_->DispatchEvent(
-        ProgressEvent::Create(type, length_computable, loaded, total));
+        *ProgressEvent::Create(type, length_computable, loaded, total));
     return;
   }
 
@@ -105,7 +105,7 @@ void XMLHttpRequestProgressEventThrottle::DispatchProgressEvent(
   } else {
     DispatchProgressProgressEvent(ProgressEvent::Create(
         EventTypeNames::progress, length_computable, loaded, total));
-    StartOneShot(kMinimumProgressEventDispatchingIntervalInSeconds, FROM_HERE);
+    StartOneShot(kMinimumProgressEventDispatchingInterval, FROM_HERE);
   }
 }
 
@@ -133,7 +133,7 @@ void XMLHttpRequestProgressEventThrottle::DispatchReadyStateChangeEvent(
     // readystatechange should have been already dispatched if necessary.
     probe::AsyncTask async_task(target_->GetExecutionContext(), target_,
                                 "progress", target_->IsAsync());
-    target_->DispatchEvent(event);
+    target_->DispatchEvent(*event);
   }
 }
 
@@ -147,7 +147,7 @@ void XMLHttpRequestProgressEventThrottle::DispatchProgressProgressEvent(
                      target_->GetExecutionContext(), target_));
     probe::AsyncTask async_task(target_->GetExecutionContext(), target_,
                                 "progress", target_->IsAsync());
-    target_->DispatchEvent(Event::Create(EventTypeNames::readystatechange));
+    target_->DispatchEvent(*Event::Create(EventTypeNames::readystatechange));
   }
 
   if (target_->readyState() != state)
@@ -156,7 +156,7 @@ void XMLHttpRequestProgressEventThrottle::DispatchProgressProgressEvent(
   has_dispatched_progress_progress_event_ = true;
   probe::AsyncTask async_task(target_->GetExecutionContext(), target_,
                               "progress", target_->IsAsync());
-  target_->DispatchEvent(progress_event);
+  target_->DispatchEvent(*progress_event);
 }
 
 void XMLHttpRequestProgressEventThrottle::Fired() {
@@ -169,7 +169,7 @@ void XMLHttpRequestProgressEventThrottle::Fired() {
   DispatchProgressProgressEvent(deferred_.Take());
 
   // Watch if another "progress" ProgressEvent arrives in the next 50ms.
-  StartOneShot(kMinimumProgressEventDispatchingIntervalInSeconds, FROM_HERE);
+  StartOneShot(kMinimumProgressEventDispatchingInterval, FROM_HERE);
 }
 
 void XMLHttpRequestProgressEventThrottle::Pause() {

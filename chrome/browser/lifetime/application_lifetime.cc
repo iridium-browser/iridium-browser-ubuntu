@@ -13,16 +13,16 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
 #include "base/process/process.h"
 #include "base/process/process_handle.h"
+#include "base/task/post_task.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_platform_part.h"
-#include "chrome/browser/browser_shutdown.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/download/download_core_service.h"
 #include "chrome/browser/lifetime/browser_close_manager.h"
+#include "chrome/browser/lifetime/browser_shutdown.h"
 #include "chrome/browser/metrics/thread_watcher.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -31,9 +31,11 @@
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/pref_names.h"
 #include "components/keep_alive_registry/keep_alive_registry.h"
+#include "components/language/core/browser/pref_names.h"
 #include "components/language/core/common/locale_util.h"
 #include "components/metrics/metrics_service.h"
 #include "components/prefs/pref_service.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/notification_service.h"
@@ -102,17 +104,19 @@ bool SetLocaleForNextStart(PrefService* local_state) {
                              &login_screen_locales) &&
       !login_screen_locales->empty() &&
       login_screen_locales->GetString(0, &login_screen_locale)) {
-    local_state->SetString(prefs::kApplicationLocale, login_screen_locale);
+    local_state->SetString(language::prefs::kApplicationLocale,
+                           login_screen_locale);
     return true;
   }
 
   // Login screen should show up in owner's locale.
   std::string owner_locale = local_state->GetString(prefs::kOwnerLocale);
-  std::string pref_locale = local_state->GetString(prefs::kApplicationLocale);
+  std::string pref_locale =
+      local_state->GetString(language::prefs::kApplicationLocale);
   language::ConvertToActualUILocale(&pref_locale);
   if (!owner_locale.empty() && pref_locale != owner_locale &&
-      !local_state->IsManagedPreference(prefs::kApplicationLocale)) {
-    local_state->SetString(prefs::kApplicationLocale, owner_locale);
+      !local_state->IsManagedPreference(language::prefs::kApplicationLocale)) {
+    local_state->SetString(language::prefs::kApplicationLocale, owner_locale);
     return true;
   }
 
@@ -259,8 +263,8 @@ void AttemptRestart() {
   // Make sure we don't send stop request to the session manager.
   g_send_stop_request_to_session_manager = false;
   // Run exit process in clean stack.
-  content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
-                                   base::Bind(&ExitCleanly));
+  base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI},
+                           base::Bind(&ExitCleanly));
 #else
   // Set the flag to restore state after the restart.
   pref_service->SetBoolean(prefs::kRestartLastSessionOnShutdown, true);

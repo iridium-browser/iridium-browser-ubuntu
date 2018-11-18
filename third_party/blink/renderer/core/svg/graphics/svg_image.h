@@ -41,9 +41,9 @@ namespace blink {
 class Document;
 class Page;
 class PaintController;
-class LayoutReplaced;
 class SVGImageChromeClient;
 class SVGImageForContainer;
+struct IntrinsicSizingInfo;
 
 // SVGImage does not use Skia to draw images (as BitmapImage does) but instead
 // handles drawing itself. Internally, SVGImage creates a detached & sandboxed
@@ -65,8 +65,6 @@ class CORE_EXPORT SVGImage final : public Image {
 
   static bool IsInSVGImage(const Node*);
 
-  LayoutReplaced* EmbeddedReplacedContent() const;
-
   bool IsSVGImage() const override { return true; }
   IntSize Size() const override { return intrinsic_size_; }
 
@@ -75,6 +73,7 @@ class CORE_EXPORT SVGImage final : public Image {
 
   void StartAnimation() override;
   void ResetAnimation() override;
+  void RestoreAnimation();
 
   PaintImage::CompletionState completion_state() const {
     return load_state_ == LoadState::kLoadCompleted
@@ -94,7 +93,7 @@ class CORE_EXPORT SVGImage final : public Image {
                                           const FloatRect& src_rect);
 
   // Service CSS and SMIL animations.
-  void ServiceAnimations(double monotonic_animation_start_time);
+  void ServiceAnimations(base::TimeTicks monotonic_animation_start_time);
 
   void UpdateUseCounters(const Document&) const;
 
@@ -103,6 +102,18 @@ class CORE_EXPORT SVGImage final : public Image {
   // thus also independent of current zoom level.
   FloatSize ConcreteObjectSize(const FloatSize& default_object_size) const;
 
+  // Get the intrinsic dimensions (width, height and aspect ratio) from this
+  // SVGImage. Returns true if successful.
+  bool GetIntrinsicSizingInfo(IntrinsicSizingInfo&) const;
+
+  // Returns true if intrinsic dimensions can be extracted. (Essentially
+  // returns true if GetIntrinsicSizingInfo would.)
+  bool HasIntrinsicSizingInfo() const;
+
+  // Unlike the above (HasIntrinsicSizingInfo) - which only indicates that
+  // dimensions can be read - this returns true if those dimensions are not
+  // empty (i.e if the concrete object size resolved using an empty default
+  // object size is non-empty.)
   bool HasIntrinsicDimensions() const;
 
   sk_sp<PaintRecord> PaintRecordForContainer(const KURL&,
@@ -141,15 +152,15 @@ class CORE_EXPORT SVGImage final : public Image {
   // FIXME: Implement this to be less conservative.
   bool CurrentFrameKnownToBeOpaque() override { return false; }
 
-  void Draw(PaintCanvas*,
-            const PaintFlags&,
+  void Draw(cc::PaintCanvas*,
+            const cc::PaintFlags&,
             const FloatRect& from_rect,
             const FloatRect& to_rect,
             RespectImageOrientationEnum,
             ImageClampingMode,
             ImageDecodingMode) override;
-  void DrawForContainer(PaintCanvas*,
-                        const PaintFlags&,
+  void DrawForContainer(cc::PaintCanvas*,
+                        const cc::PaintFlags&,
                         const FloatSize&,
                         float,
                         const FloatRect&,
@@ -175,10 +186,10 @@ class CORE_EXPORT SVGImage final : public Image {
   // Otherwise returns a pointer to the new PaintRecord.
   sk_sp<PaintRecord> PaintRecordForCurrentFrame(const IntRect& bounds,
                                                 const KURL&,
-                                                PaintCanvas* = nullptr);
+                                                cc::PaintCanvas* = nullptr);
 
-  void DrawInternal(PaintCanvas*,
-                    const PaintFlags&,
+  void DrawInternal(cc::PaintCanvas*,
+                    const cc::PaintFlags&,
                     const FloatRect& from_rect,
                     const FloatRect& to_rect,
                     RespectImageOrientationEnum,
@@ -188,13 +199,13 @@ class CORE_EXPORT SVGImage final : public Image {
   template <typename Func>
   void ForContainer(const FloatSize&, Func&&);
 
-  bool ApplyShader(PaintFlags&, const SkMatrix& local_matrix) override;
+  bool ApplyShader(cc::PaintFlags&, const SkMatrix& local_matrix) override;
   bool ApplyShaderForContainer(const FloatSize&,
                                float zoom,
                                const KURL&,
-                               PaintFlags&,
+                               cc::PaintFlags&,
                                const SkMatrix& local_matrix);
-  bool ApplyShaderInternal(PaintFlags&,
+  bool ApplyShaderInternal(cc::PaintFlags&,
                            const SkMatrix& local_matrix,
                            const KURL&);
 
@@ -231,6 +242,8 @@ class CORE_EXPORT SVGImage final : public Image {
 
   Persistent<SVGImageLocalFrameClient> frame_client_;
   FRIEND_TEST_ALL_PREFIXES(SVGImageTest, SupportsSubsequenceCaching);
+  FRIEND_TEST_ALL_PREFIXES(SVGImageTest, JankTrackerDisabled);
+  FRIEND_TEST_ALL_PREFIXES(SVGImageTest, SetSizeOnVisualViewport);
 };
 
 DEFINE_IMAGE_TYPE_CASTS(SVGImage);

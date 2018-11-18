@@ -37,6 +37,7 @@ class ViscaWebcam : public Webcam {
     INQUIRY_PAN,
     INQUIRY_TILT,
     INQUIRY_ZOOM,
+    INQUIRY_FOCUS,
   };
 
   using CommandCompleteCallback =
@@ -76,7 +77,7 @@ class ViscaWebcam : public Webcam {
                        api::serial::SendError error);
   void ReceiveLoop(const CommandCompleteCallback& callback);
   void OnReceiveCompleted(const CommandCompleteCallback& callback,
-                          std::vector<char> data,
+                          std::vector<uint8_t> data,
                           api::serial::ReceiveError error);
 
   // Callback function that will be called after the send and reply of a command
@@ -98,6 +99,7 @@ class ViscaWebcam : public Webcam {
   void GetPan(const GetPTZCompleteCallback& callback) override;
   void GetTilt(const GetPTZCompleteCallback& callback) override;
   void GetZoom(const GetPTZCompleteCallback& callback) override;
+  void GetFocus(const GetPTZCompleteCallback& callback) override;
   void SetPan(int value,
               int pan_speed,
               const SetPTZCompleteCallback& callback) override;
@@ -115,6 +117,9 @@ class ViscaWebcam : public Webcam {
              bool tilt,
              bool zoom,
              const SetPTZCompleteCallback& callback) override;
+  void SetFocus(int value, const SetPTZCompleteCallback& callback) override;
+  void SetAutofocusState(AutofocusState state,
+                         const SetPTZCompleteCallback& callback) override;
 
   // Used only in unit tests in place of Open().
   void OpenForTesting(std::unique_ptr<SerialConnection> serial_connection);

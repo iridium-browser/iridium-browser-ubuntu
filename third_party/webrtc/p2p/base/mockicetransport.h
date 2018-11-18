@@ -47,6 +47,10 @@ class MockIceTransport : public IceTransportInternal {
   IceTransportState GetState() const override {
     return IceTransportState::STATE_INIT;
   }
+  webrtc::IceTransportState GetIceTransportState() const override {
+    return webrtc::IceTransportState::kNew;
+  }
+
   const std::string& transport_name() const override { return transport_name_; }
   int component() const override { return 0; }
   void SetIceRole(IceRole role) override {}
@@ -57,10 +61,8 @@ class MockIceTransport : public IceTransportInternal {
   void SetRemoteIceParameters(const IceParameters& ice_params) override {}
   void SetRemoteIceMode(IceMode mode) override {}
   void SetIceConfig(const IceConfig& config) override {}
-  rtc::Optional<int> GetRttEstimate() override { return rtc::nullopt; }
+  absl::optional<int> GetRttEstimate() override { return absl::nullopt; }
   void MaybeStartGathering() override {}
-  void SetMetricsObserver(webrtc::MetricsObserverInterface* observer) override {
-  }
   void AddRemoteCandidate(const Candidate& candidate) override {}
   void RemoveRemoteCandidate(const Candidate& candidate) override {}
   IceGatheringState gathering_state() const override {

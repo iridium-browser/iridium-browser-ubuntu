@@ -96,7 +96,7 @@ class TryjobTestPrintKnownConfigs(TryjobTest):
 
     # We have at least 100 lines of output, and no error out.
     self.assertGreater(len(output.GetStdoutLines()), 100)
-    self.assertFalse(output.GetStderr())
+    self.assertEqual('', output.GetStderr())
 
   def testListProduction(self):
     """Test we can generate results for --production --list."""
@@ -106,7 +106,19 @@ class TryjobTestPrintKnownConfigs(TryjobTest):
 
     # We have at least 100 lines of output, and no error out.
     self.assertGreater(len(output.GetStdoutLines()), 100)
-    self.assertFalse(output.GetStderr())
+    self.assertEqual('', output.GetStderr())
+
+  def testListTryjobsEmpty(self):
+    """Test we can generate ~empty results for failed --list search."""
+    with cros_build_lib.OutputCapturer() as output:
+      cros_tryjob.PrintKnownConfigs(
+          self.site_config, production=False,
+          build_config_fragments=['this-is-not-a-builder-name'])
+
+    # We have fewer than 6 lines of output, and no error out.
+    self.assertLess(len(output.GetStdoutLines()), 6)
+    self.assertEqual('', output.GetStderr())
+
 
 class TryjobTestParsing(TryjobTest):
   """Test cros try command line parsing."""
@@ -179,7 +191,9 @@ class TryjobTestParsing(TryjobTest):
         '--yes',
         '--latest-toolchain', '--nochromesdk',
         '--hwtest', '--notests', '--novmtests', '--noimagetests',
-        '--local', '--buildroot', '/buildroot',
+        '--local',
+        '--buildroot', '/buildroot',
+        '--git-cache-dir', '/git-cache',
         '--timeout', '5', '--sanity-check-build',
         '--gerrit-patches', '123', '-g', '*123', '-g', '123..456',
         '--local-patches', 'chromiumos/chromite:tryjob', '-p', 'other:other',
@@ -194,6 +208,7 @@ class TryjobTestParsing(TryjobTest):
     self.expected.update({
         'where': cros_tryjob.LOCAL,
         'buildroot': '/buildroot',
+        'git_cache_dir': '/git-cache',
         'branch': 'master',
         'yes': True,
         'list': True,
@@ -218,7 +233,9 @@ class TryjobTestParsing(TryjobTest):
         '--yes',
         '--latest-toolchain', '--nochromesdk',
         '--hwtest', '--notests', '--novmtests', '--noimagetests',
-        '--cbuildbot', '--buildroot', '/buildroot',
+        '--cbuildbot',
+        '--buildroot', '/buildroot',
+        '--git-cache-dir', '/git-cache',
         '--timeout', '5', '--sanity-check-build',
         '--gerrit-patches', '123', '-g', '*123', '-g', '123..456',
         '--local-patches', 'chromiumos/chromite:tryjob', '-p', 'other:other',
@@ -232,6 +249,7 @@ class TryjobTestParsing(TryjobTest):
     self.expected.update({
         'where': cros_tryjob.CBUILDBOT,
         'buildroot': '/buildroot',
+        'git_cache_dir': '/git-cache',
         'branch': 'master',
         'yes': True,
         'list': True,
@@ -275,6 +293,7 @@ class TryjobTestAdjustOptions(TryjobTest):
     cros_tryjob.AdjustOptions(options)
 
     self.assertIsNone(options.buildroot)
+    self.assertIsNone(options.git_cache_dir)
 
   def testLocalDefault(self):
     """Test default local buildroot."""
@@ -284,15 +303,20 @@ class TryjobTestAdjustOptions(TryjobTest):
     cros_tryjob.AdjustOptions(options)
 
     self.assertTrue(options.buildroot.endswith('/tryjob'))
+    self.assertTrue(options.git_cache_dir.endswith('/tryjob/.git_cache'))
 
   def testLocalExplicit(self):
     """Test explicit local buildroot."""
-    self.SetupCommandMock(['--local', '--buildroot', '/buildroot', 'config'])
+    self.SetupCommandMock(['--local',
+                           '--buildroot', '/buildroot',
+                           '--git-cache-dir', '/git-cache',
+                           'config'])
     options = self.cmd_mock.inst.options
 
     cros_tryjob.AdjustOptions(options)
 
     self.assertEqual(options.buildroot, '/buildroot')
+    self.assertEqual(options.git_cache_dir, '/git-cache')
 
   def testCbuildbotDefault(self):
     """Test default cbuildbot buildroot."""
@@ -302,24 +326,34 @@ class TryjobTestAdjustOptions(TryjobTest):
     cros_tryjob.AdjustOptions(options)
 
     self.assertTrue(options.buildroot.endswith('/cbuild'))
+    self.assertTrue(options.git_cache_dir.endswith('/cbuild/.git_cache'))
 
   def testCbuildbotExplicit(self):
     """Test explicit cbuildbot buildroot."""
     self.SetupCommandMock(['--cbuildbot',
                            '--buildroot', '/buildroot',
+                           '--git-cache-dir', '/git-cache',
                            'config'])
     options = self.cmd_mock.inst.options
 
     cros_tryjob.AdjustOptions(options)
 
     self.assertEqual(options.buildroot, '/buildroot')
+    self.assertEqual(options.git_cache_dir, '/git-cache')
 
+
+class PromptException(Exception):
+  """Raise this in tests, instead of using an interactive prompt."""
 
 class TryjobTestVerifyOptions(TryjobTest):
   """Test cros_tryjob.VerifyOptions."""
 
   def setUp(self):
     self.site_config = config_lib.GetConfig()
+
+    # Raise an exception instead of blocking the test on a prompt.
+    self.PatchObject(cros_build_lib, 'BooleanPrompt',
+                     side_effect=PromptException)
 
   def testEmpty(self):
     """Test option verification with no options."""
@@ -434,6 +468,58 @@ class TryjobTestVerifyOptions(TryjobTest):
         '--production',
         'eve-pre-cq', 'eve-release'
     ])
+
+    cros_tryjob.VerifyOptions(self.cmd_mock.inst.options, self.site_config)
+
+  def testUnknownConfig(self):
+    """Test option verification with production configs on branches."""
+
+    # We have no way of knowing if the config is production or not on a branch,
+    # so don't prompt at all
+    self.SetupCommandMock([
+        'bogus-config'
+    ])
+
+    with self.assertRaises(PromptException):
+      cros_tryjob.VerifyOptions(self.cmd_mock.inst.options, self.site_config)
+
+  def testBranchUnknownConfig(self):
+    """Test option verification with production configs on branches."""
+
+    # We have no way of knowing if the config is production or not on a branch,
+    # so don't prompt at all
+    self.SetupCommandMock([
+        '--branch', 'old_branch',
+        '--gerrit-patches', '123', '-g', '*123', '-g', '123..456',
+        'bogus-config'
+    ])
+
+    cros_tryjob.VerifyOptions(self.cmd_mock.inst.options, self.site_config)
+
+  def testBranchProductionUnknownConfig(self):
+    """Test option verification with production configs on branches."""
+
+    # We have no way of knowing if the config is production or not on a branch,
+    # so don't prompt at all
+    self.SetupCommandMock([
+        '--branch', 'old_branch',
+        '--production',
+        'bogus-config'
+    ])
+
+    cros_tryjob.VerifyOptions(self.cmd_mock.inst.options, self.site_config)
+
+  def testBranchProductionConfigTryjob(self):
+    """Test option verification with production configs on branches."""
+
+    # We have no way of knowing if the config is production or not on a branch,
+    # so don't prompt at all
+    self.SetupCommandMock([
+        '--branch', 'old_branch',
+        '--gerrit-patches', '123', '-g', '*123', '-g', '123..456',
+        'eve-release'
+    ])
+
     cros_tryjob.VerifyOptions(self.cmd_mock.inst.options, self.site_config)
 
   def testProductionPatches(self):
@@ -534,6 +620,15 @@ class TryjobTestCbuildbotArgs(TryjobTest):
         '--remote-trybot', '-b', 'master', '-g', '123',
     ])
 
+  def testCbuildbotArgsSimpleStaging(self):
+    args_in = ['--staging', '-g', '123', 'foo-build']
+
+    args_out = self.helperOptionsToCbuildbotArgs(args_in)
+
+    self.assertEqual(args_out, [
+        '--remote-trybot', '-b', 'master', '-g', '123',
+    ])
+
   def testCbuildbotArgsSimpleLocal(self):
     args_in = [
         '--local', '-g', '123', 'foo-build',
@@ -545,6 +640,7 @@ class TryjobTestCbuildbotArgs(TryjobTest):
     self.assertEqual(args_out, [
         '--no-buildbot-tags', '--debug',
         '--buildroot', mock.ANY,
+        '--git-cache-dir', mock.ANY,
         '-b', 'master',
         '-g', '123',
     ])
@@ -604,6 +700,7 @@ class TryjobTestCbuildbotArgs(TryjobTest):
     self.assertEqual(args_out, [
         '--no-buildbot-tags', '--debug',
         '--buildroot', '/buildroot',
+        '--git-cache-dir', '/buildroot/.git_cache',
         '-b', 'source_branch',
         '-g', '123', '-g', '*123', '-g', '123..456',
         '--latest-toolchain', '--nochromesdk',
@@ -636,9 +733,10 @@ class TryjobTestCbuildbotArgs(TryjobTest):
     args_out = self.helperOptionsToCbuildbotArgs(args_in)
 
     self.assertEqual(args_out, [
-        '--buildbot', '--nobootstrap', '--noreexec',
-        '--no-buildbot-tags', '--debug',
+        '--debug', '--nobootstrap', '--noreexec',
+        '--no-buildbot-tags',
         '--buildroot', '/buildroot',
+        '--git-cache-dir', '/buildroot/.git_cache',
         '-b', 'source_branch',
         '-g', '123', '-g', '*123', '-g', '123..456',
         '--latest-toolchain', '--nochromesdk',
@@ -672,6 +770,7 @@ class TryjobTestCbuildbotArgs(TryjobTest):
     self.assertEqual(args_out, [
         '--no-buildbot-tags', '--buildbot',
         '--buildroot', mock.ANY,
+        '--git-cache-dir', mock.ANY,
         '-b', 'master',
     ])
 
@@ -698,7 +797,7 @@ class TryjobTestDisplayLabel(TryjobTest):
 
   def testMasterKnownProduction(self):
     label = self.FindLabel(['--production', 'eve-paladin'])
-    self.assertEqual(label, 'cq')
+    self.assertEqual(label, 'production_tryjob')
 
   def testMasterUnknownProduction(self):
     label = self.FindLabel(['--production', 'bogus-config'])

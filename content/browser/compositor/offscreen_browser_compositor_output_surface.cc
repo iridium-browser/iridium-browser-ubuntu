@@ -8,7 +8,6 @@
 
 #include "base/logging.h"
 #include "build/build_config.h"
-#include "cc/resources/resource_provider.h"
 #include "components/viz/common/resources/resource_format_utils.h"
 #include "components/viz/service/display/output_surface_client.h"
 #include "components/viz/service/display/output_surface_frame.h"
@@ -19,7 +18,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "gpu/command_buffer/client/context_support.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
-#include "services/ui/public/cpp/gpu/context_provider_command_buffer.h"
+#include "services/ws/public/cpp/gpu/context_provider_command_buffer.h"
 #include "third_party/khronos/GLES2/gl2.h"
 #include "third_party/khronos/GLES2/gl2ext.h"
 
@@ -31,7 +30,7 @@ static viz::ResourceFormat kFboTextureFormat = viz::RGBA_8888;
 
 OffscreenBrowserCompositorOutputSurface::
     OffscreenBrowserCompositorOutputSurface(
-        scoped_refptr<ui::ContextProviderCommandBuffer> context,
+        scoped_refptr<ws::ContextProviderCommandBuffer> context,
         const UpdateVSyncParametersCallback& update_vsync_parameters_callback,
         std::unique_ptr<viz::CompositorOverlayCandidateValidator>
             overlay_candidate_validator)
@@ -161,7 +160,8 @@ void OffscreenBrowserCompositorOutputSurface::SwapBuffers(
       sync_token,
       base::BindOnce(
           &OffscreenBrowserCompositorOutputSurface::OnSwapBuffersComplete,
-          weak_ptr_factory_.GetWeakPtr(), frame.latency_info, ++swap_id_));
+          weak_ptr_factory_.GetWeakPtr(), frame.latency_info,
+          frame.need_presentation_feedback));
 }
 
 bool OffscreenBrowserCompositorOutputSurface::IsDisplayedAsOverlayPlane()
@@ -178,11 +178,6 @@ OffscreenBrowserCompositorOutputSurface::GetOverlayBufferFormat() const {
   return gfx::BufferFormat::RGBX_8888;
 }
 
-bool OffscreenBrowserCompositorOutputSurface::SurfaceIsSuspendForRecycle()
-    const {
-  return false;
-}
-
 GLenum
 OffscreenBrowserCompositorOutputSurface::GetFramebufferCopyTextureFormat() {
   return GLCopyTextureInternalFormat(kFboTextureFormat);
@@ -197,10 +192,11 @@ void OffscreenBrowserCompositorOutputSurface::OnReflectorChanged() {
 
 void OffscreenBrowserCompositorOutputSurface::OnSwapBuffersComplete(
     const std::vector<ui::LatencyInfo>& latency_info,
-    uint64_t swap_id) {
-  RenderWidgetHostImpl::OnGpuSwapBuffersCompleted(latency_info);
-  client_->DidReceiveSwapBuffersAck(swap_id);
-  client_->DidReceivePresentationFeedback(swap_id, gfx::PresentationFeedback());
+    bool need_presentation_feedback) {
+  latency_tracker_.OnGpuSwapBuffersCompleted(latency_info);
+  client_->DidReceiveSwapBuffersAck();
+  if (need_presentation_feedback)
+    client_->DidReceivePresentationFeedback(gfx::PresentationFeedback());
 }
 
 #if BUILDFLAG(ENABLE_VULKAN)
@@ -210,5 +206,9 @@ OffscreenBrowserCompositorOutputSurface::GetVulkanSurface() {
   return nullptr;
 }
 #endif
+
+unsigned OffscreenBrowserCompositorOutputSurface::UpdateGpuFence() {
+  return 0;
+}
 
 }  // namespace content

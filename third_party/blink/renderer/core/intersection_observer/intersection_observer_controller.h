@@ -7,6 +7,7 @@
 
 #include "third_party/blink/renderer/core/dom/pausable_object.h"
 #include "third_party/blink/renderer/core/intersection_observer/intersection_observer.h"
+#include "third_party/blink/renderer/platform/bindings/name_client.h"
 #include "third_party/blink/renderer/platform/bindings/trace_wrapper_member.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/wtf/hash_set.h"
@@ -21,23 +22,22 @@ class Document;
 class IntersectionObserverController
     : public GarbageCollectedFinalized<IntersectionObserverController>,
       public PausableObject,
-      public TraceWrapperBase {
+      public NameClient {
   USING_GARBAGE_COLLECTED_MIXIN(IntersectionObserverController);
 
  public:
   static IntersectionObserverController* Create(Document*);
-  ~IntersectionObserverController();
+  ~IntersectionObserverController() override;
 
   void Unpause() override;
 
   void ScheduleIntersectionObserverForDelivery(IntersectionObserver&);
   void DeliverIntersectionObservations();
   void ComputeTrackedIntersectionObservations();
-  void AddTrackedObserver(IntersectionObserver&);
-  void RemoveTrackedObserversForRoot(const Node&);
+  void AddTrackedTarget(Element&);
+  void RemoveTrackedTarget(Element&);
 
-  void Trace(blink::Visitor*);
-  void TraceWrappers(const ScriptWrappableVisitor*) const override;
+  void Trace(blink::Visitor*) override;
   const char* NameInHeapSnapshot() const override {
     return "IntersectionObserverController";
   }
@@ -47,8 +47,9 @@ class IntersectionObserverController
   void PostTaskToDeliverObservations();
 
  private:
-  // IntersectionObservers for which this is the tracking document.
-  HeapHashSet<WeakMember<IntersectionObserver>> tracked_intersection_observers_;
+  // Elements in this document which are the target of an
+  // IntersectionObservation.
+  HeapHashSet<WeakMember<Element>> tracked_observation_targets_;
   // IntersectionObservers for which this is the execution context of the
   // callback.
   HeapHashSet<TraceWrapperMember<IntersectionObserver>>

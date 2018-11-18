@@ -57,92 +57,105 @@ void Format::initialize(VkPhysicalDevice physicalDevice, const angle::Format &an
 }}  // namespace rx
 """
 
-empty_format_entry_template = """{space}case angle::Format::ID::{format_id}:
-{space}    // This format is not implemented in Vulkan.
-{space}    break;
+empty_format_entry_template = """case angle::FormatID::{format_id}:
+// This format is not implemented in Vulkan.
+break;
 """
 
-format_entry_template = """{space}case angle::Format::ID::{format_id}:
-{space}{{
-{space}    internalFormat = {internal_format};
-{space}    textureFormatID = angle::Format::ID::{texture};
-{space}    vkTextureFormat = {vk_texture_format};
-{space}    bufferFormatID = angle::Format::ID::{buffer};
-{space}    vkBufferFormat = {vk_buffer_format};
-{space}    dataInitializerFunction = {initializer};
-{space}    break;
-{space}}}
+format_entry_template = """case angle::FormatID::{format_id}:
+internalFormat = {internal_format};
+{texture_template}
+{buffer_template}
+break;
 """
 
-# This currently only handles texture fallback formats.
-fallback_format_entry_template = """{space}case angle::Format::ID::{format_id}:
-{space}{{
-{space}    internalFormat = {internal_format};
-{space}    if (!HasFullFormatSupport(physicalDevice, {vk_texture_format}))
-{space}    {{
-{space}        textureFormatID = angle::Format::ID::{fallback_texture};
-{space}        vkTextureFormat = {fallback_vk_texture_format};
-{space}        dataInitializerFunction = {fallback_initializer};
-{space}        ASSERT(HasFullFormatSupport(physicalDevice, {fallback_vk_texture_format}));
-{space}    }}
-{space}    else
-{space}    {{
-{space}        textureFormatID = angle::Format::ID::{texture};
-{space}        vkTextureFormat = {vk_texture_format};
-{space}        dataInitializerFunction = {initializer};
-{space}    }}
-{space}    bufferFormatID = angle::Format::ID::{buffer};
-{space}    vkBufferFormat = {vk_buffer_format};
-{space}    break;
-{space}}}
-"""
+texture_basic_template = """textureFormatID = {texture};
+vkTextureFormat = {vk_texture_format};
+textureInitializerFunction = {texture_initializer};"""
+
+texture_struct_template="{{{texture}, {vk_texture_format}, {texture_initializer}}}"
+
+texture_fallback_template = """{{
+static constexpr TextureFormatInitInfo kInfo[] = {{{texture_list}}};
+initTextureFallback(physicalDevice, kInfo, ArraySize(kInfo));
+}}"""
+
+buffer_basic_template = """bufferFormatID = {buffer};
+vkBufferFormat = {vk_buffer_format};
+vkBufferFormatIsPacked = {vk_buffer_format_is_packed};
+vertexLoadFunction = {vertex_load_function};
+vertexLoadRequiresConversion = {vertex_load_converts};"""
+
+buffer_struct_template="""{{{buffer}, {vk_buffer_format}, {vk_buffer_format_is_packed}, 
+{vertex_load_function}, {vertex_load_converts}}}"""
+
+buffer_fallback_template = """{{
+static constexpr BufferFormatInitInfo kInfo[] = {{{buffer_list}}};
+initBufferFallback(physicalDevice, kInfo, ArraySize(kInfo));
+}}"""
+
+def is_packed(format_id):
+    return "true" if "_PACK" in format_id else "false"
 
 def gen_format_case(angle, internal_format, vk_json_data):
-
     vk_map = vk_json_data["map"]
     vk_overrides = vk_json_data["overrides"]
     vk_fallbacks = vk_json_data["fallbacks"]
-
-    args = {
-        "space": "        ",
-        "format_id": angle,
-        "internal_format": internal_format
-    }
+    args = dict(format_id=angle, internal_format=internal_format,
+                texture_template="", buffer_template="")
 
     if ((angle not in vk_map) and (angle not in vk_overrides) and
         (angle not in vk_fallbacks)) or angle == 'NONE':
         return empty_format_entry_template.format(**args)
 
-    template = format_entry_template
+    def get_formats(format, type):
+        format = vk_overrides.get(format, {}).get(type, format)
+        if format not in vk_map:
+            return []
+        fallbacks = vk_fallbacks.get(format, {}).get(type, [])
+        if not isinstance(fallbacks, list):
+            fallbacks = [fallbacks]
+        return [format] + fallbacks
 
-    if angle in vk_map:
-        args["buffer"] = angle
-        args["texture"] = angle
+    def texture_args(format):
+        return dict(
+            texture="angle::FormatID::" + format,
+            vk_texture_format=vk_map[format],
+            texture_initializer=angle_format.get_internal_format_initializer(internal_format,
+                                                                             format)
+        )
 
-    if angle in vk_overrides:
-        args.update(vk_overrides[angle])
+    def buffer_args(format):
+        return dict(
+            buffer="angle::FormatID::" + format,
+            vk_buffer_format=vk_map[format],
+            vk_buffer_format_is_packed=is_packed(vk_map[format]),
+            vertex_load_function=angle_format.get_vertex_copy_function(angle, format),
+            vertex_load_converts='false' if angle == format else 'true',
+        )
 
-    if angle in vk_fallbacks:
-        template = fallback_format_entry_template
-        fallback = vk_fallbacks[angle]
-        assert not "buffer" in fallback, "Buffer fallbacks not yet supported"
-        assert "texture" in fallback, "Fallback must have a texture fallback"
+    textures = get_formats(angle, "texture")
+    if len(textures) == 1:
+        args.update(texture_template=texture_basic_template)
+        args.update(texture_args(textures[0]))
+    elif len(textures) > 1:
+        args.update(
+            texture_template=texture_fallback_template,
+            texture_list=", ".join(texture_struct_template.format(**texture_args(i))
+                                   for i in textures)
+        )
 
-        args["fallback_texture"] = fallback["texture"]
-        args["fallback_vk_texture_format"] = vk_map[fallback["texture"]]
-        args["fallback_initializer"] = angle_format.get_internal_format_initializer(
-            internal_format, fallback["texture"])
+    buffers = get_formats(angle, "buffer")
+    if len(buffers) == 1:
+        args.update(buffer_template=buffer_basic_template)
+        args.update(buffer_args(buffers[0]))
+    elif len(buffers) > 1:
+        args.update(
+            buffer_template=buffer_fallback_template,
+            buffer_list=", ".join(buffer_struct_template.format(**buffer_args(i)) for i in buffers)
+        )
 
-    assert "buffer" in args, "Missing buffer format for " + angle
-    assert "texture" in args, "Missing texture format for " + angle
-
-    args["vk_buffer_format"]  = vk_map[args["buffer"]]
-    args["vk_texture_format"] = vk_map[args["texture"]]
-
-    args["initializer"] = angle_format.get_internal_format_initializer(
-        internal_format, args["texture"])
-
-    return template.format(**args)
+    return format_entry_template.format(**args).format(**args)
 
 input_file_name = 'vk_format_map.json'
 out_file_name = 'vk_format_table'

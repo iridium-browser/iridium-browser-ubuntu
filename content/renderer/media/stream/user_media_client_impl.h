@@ -12,6 +12,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/sequence_checker.h"
+#include "base/single_thread_task_runner.h"
 #include "content/common/content_export.h"
 #include "content/common/media/media_devices.h"
 #include "content/public/renderer/render_frame_observer.h"
@@ -58,6 +59,7 @@ class CONTENT_EXPORT UserMediaClientImpl : public RenderFrameObserver,
   void ApplyConstraints(
       const blink::WebApplyConstraintsRequest& web_request) override;
   void StopTrack(const blink::WebMediaStreamTrack& web_track) override;
+  bool IsCapturing() override;
 
   // RenderFrameObserver override
   void WillCommitProvisionalLoad() override;

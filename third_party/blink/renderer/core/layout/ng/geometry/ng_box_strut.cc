@@ -4,19 +4,10 @@
 
 #include "third_party/blink/renderer/core/layout/ng/geometry/ng_box_strut.h"
 
+#include "third_party/blink/renderer/platform/geometry/layout_rect_outsets.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
-
-bool NGBoxStrut::IsEmpty() const {
-  return *this == NGBoxStrut();
-}
-
-bool NGBoxStrut::operator==(const NGBoxStrut& other) const {
-  return std::tie(other.inline_start, other.inline_end, other.block_start,
-                  other.block_end) ==
-         std::tie(inline_start, inline_end, block_start, block_end);
-}
 
 NGPhysicalBoxStrut NGBoxStrut::ConvertToPhysical(
     WritingMode writing_mode,
@@ -45,8 +36,6 @@ NGPhysicalBoxStrut NGBoxStrut::ConvertToPhysical(
   }
 }
 
-// Converts physical dimensions to logical ones per
-// https://drafts.csswg.org/css-writing-modes-3/#logical-to-physical
 NGBoxStrut NGPhysicalBoxStrut::ConvertToLogical(WritingMode writing_mode,
                                                 TextDirection direction) const {
   NGBoxStrut strut;
@@ -80,9 +69,36 @@ std::ostream& operator<<(std::ostream& stream, const NGBoxStrut& value) {
   return stream << value.ToString();
 }
 
-NGPixelSnappedPhysicalBoxStrut NGPhysicalBoxStrut::SnapToDevicePixels() const {
-  return NGPixelSnappedPhysicalBoxStrut(top.Round(), right.Round(),
-                                        bottom.Round(), left.Round());
+NGBoxStrut::NGBoxStrut(const NGLineBoxStrut& line_relative,
+                       bool is_flipped_lines) {
+  if (!is_flipped_lines) {
+    *this = {line_relative.inline_start, line_relative.inline_end,
+             line_relative.line_over, line_relative.line_under};
+  } else {
+    *this = {line_relative.inline_start, line_relative.inline_end,
+             line_relative.line_under, line_relative.line_over};
+  }
+}
+
+NGLineBoxStrut::NGLineBoxStrut(const NGBoxStrut& flow_relative,
+                               bool is_flipped_lines) {
+  if (!is_flipped_lines) {
+    *this = {flow_relative.inline_start, flow_relative.inline_end,
+             flow_relative.block_start, flow_relative.block_end};
+  } else {
+    *this = {flow_relative.inline_start, flow_relative.inline_end,
+             flow_relative.block_end, flow_relative.block_start};
+  }
+}
+
+LayoutRectOutsets NGPhysicalBoxStrut::ToLayoutRectOutsets() const {
+  return LayoutRectOutsets(top, right, bottom, left);
+}
+
+std::ostream& operator<<(std::ostream& stream, const NGLineBoxStrut& value) {
+  return stream << "Inline: (" << value.inline_start << " " << value.inline_end
+                << ") Line: (" << value.line_over << " " << value.line_under
+                << ") ";
 }
 
 }  // namespace blink

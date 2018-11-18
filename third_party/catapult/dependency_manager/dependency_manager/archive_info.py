@@ -48,7 +48,7 @@ class ArchiveInfo(object):
       # Remove stale unzip results
       if self._stale_unzip_path_glob:
         for path in glob.glob(self._stale_unzip_path_glob):
-          shutil.rmtree(path)
+          shutil.rmtree(path, ignore_errors=True)
       # TODO(aiolos): Replace UnzipFile with zipfile.extractall once python
       # version 2.7.4 or later can safely be assumed.
       dependency_manager_util.UnzipArchive(
@@ -62,8 +62,7 @@ class ArchiveInfo(object):
   def ShouldUnzipArchive(self):
     if not self._has_minimum_data:
       raise exceptions.ArchiveError(
-          'Missing needed info to unzip archive. Known data: %s',
-          self.data_string)
+          'Missing needed info to unzip archive. Know data: %s' % self)
     return not os.path.exists(self._dependency_path)
 
   @property

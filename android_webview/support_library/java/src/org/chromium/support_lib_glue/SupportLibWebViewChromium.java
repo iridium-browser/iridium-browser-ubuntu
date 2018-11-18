@@ -4,10 +4,15 @@
 
 package org.chromium.support_lib_glue;
 
+import android.net.Uri;
+import android.webkit.WebChromeClient;
+import android.webkit.WebViewClient;
+
 import com.android.webview.chromium.SharedWebViewChromium;
 
 import org.chromium.android_webview.AwContents;
 import org.chromium.support_lib_boundary.VisualStateCallbackBoundaryInterface;
+import org.chromium.support_lib_boundary.WebMessageBoundaryInterface;
 import org.chromium.support_lib_boundary.WebViewProviderBoundaryInterface;
 import org.chromium.support_lib_boundary.util.BoundaryInterfaceReflectionUtil;
 
@@ -36,5 +41,39 @@ class SupportLibWebViewChromium implements WebViewProviderBoundaryInterface {
                         visualStateCallback.onComplete(requestId);
                     }
                 });
+    }
+
+    @Override
+    public /* WebMessagePort */ InvocationHandler[] createWebMessageChannel() {
+        return SupportLibWebMessagePortAdapter.fromMessagePorts(
+                mSharedWebViewChromium.createWebMessageChannel());
+    }
+
+    @Override
+    public void postMessageToMainFrame(
+            /* WebMessage */ InvocationHandler message, Uri targetOrigin) {
+        WebMessageBoundaryInterface messageBoundaryInterface =
+                BoundaryInterfaceReflectionUtil.castToSuppLibClass(
+                        WebMessageBoundaryInterface.class, message);
+        mSharedWebViewChromium.postMessageToMainFrame(messageBoundaryInterface.getData(),
+                targetOrigin.toString(),
+                SupportLibWebMessagePortAdapter.toMessagePorts(
+                        messageBoundaryInterface.getPorts()));
+    }
+
+    @Override
+    public WebViewClient getWebViewClient() {
+        return mSharedWebViewChromium.getWebViewClient();
+    }
+
+    @Override
+    public WebChromeClient getWebChromeClient() {
+        return mSharedWebViewChromium.getWebChromeClient();
+    }
+
+    @Override
+    public /* WebViewRenderer */ InvocationHandler getWebViewRenderer() {
+        return BoundaryInterfaceReflectionUtil.createInvocationHandlerFor(
+                new SupportLibWebViewRendererAdapter(mSharedWebViewChromium.getRenderProcess()));
     }
 }

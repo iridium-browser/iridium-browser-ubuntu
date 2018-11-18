@@ -37,6 +37,7 @@
 #include "third_party/blink/renderer/core/html/forms/html_select_element.h"
 #include "third_party/blink/renderer/core/html/html_div_element.h"
 #include "third_party/blink/renderer/core/paint/paint_layer.h"
+#include "third_party/blink/renderer/core/paint/paint_layer_scrollable_area.h"
 #include "third_party/blink/renderer/platform/scroll/scroll_alignment.h"
 #include "third_party/blink/renderer/platform/scroll/scroll_types.h"
 
@@ -69,7 +70,7 @@ unsigned LayoutListBox::size() const {
 }
 
 LayoutUnit LayoutListBox::DefaultItemHeight() const {
-  const SimpleFontData* font_data = Style()->GetFont().PrimaryFont();
+  const SimpleFontData* font_data = StyleRef().GetFont().PrimaryFont();
   if (!font_data)
     return LayoutUnit();
   return LayoutUnit(font_data->GetFontMetrics().Height() +
@@ -126,7 +127,7 @@ void LayoutListBox::ComputeIntrinsicLogicalWidths(
     LayoutUnit& max_logical_width) const {
   LayoutBlockFlow::ComputeIntrinsicLogicalWidths(min_logical_width,
                                                  max_logical_width);
-  if (Style()->Width().IsPercentOrCalc())
+  if (StyleRef().Width().IsPercentOrCalc())
     min_logical_width = LayoutUnit();
 }
 

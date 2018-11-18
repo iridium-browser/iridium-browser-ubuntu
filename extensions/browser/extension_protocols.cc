@@ -21,7 +21,6 @@
 #include "base/logging.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop/message_loop.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/histogram_functions.h"
@@ -32,11 +31,12 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/timer/elapsed_timer.h"
 #include "build/build_config.h"
 #include "content/public/browser/browser_context.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/file_url_loader.h"
 #include "content/public/browser/navigation_ui_data.h"
@@ -124,7 +124,7 @@ class GeneratedBackgroundPageJob : public net::URLRequestSimpleJob {
   int GetData(std::string* mime_type,
               std::string* charset,
               std::string* data,
-              const net::CompletionCallback& callback) const override {
+              net::CompletionOnceCallback callback) const override {
     GenerateBackgroundPageContents(extension_.get(), mime_type, charset, data);
     return net::OK;
   }
@@ -197,15 +197,15 @@ class URLRequestExtensionJob : public net::URLRequestFileJob {
                          const std::string& content_security_policy,
                          bool send_cors_header,
                          bool follow_symlinks_anywhere,
-                         ContentVerifyJob* verify_job)
+                         scoped_refptr<ContentVerifyJob> verify_job)
       : net::URLRequestFileJob(
             request,
             network_delegate,
             base::FilePath(),
             base::CreateTaskRunnerWithTraits(
-                {base::MayBlock(), base::TaskPriority::BACKGROUND,
+                {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
                  base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN})),
-        verify_job_(verify_job),
+        verify_job_(std::move(verify_job)),
         seek_position_(0),
         bytes_read_(0),
         directory_path_(directory_path),
@@ -240,7 +240,9 @@ class URLRequestExtensionJob : public net::URLRequestFileJob {
                    base::Owned(last_modified_time)));
   }
 
-  bool IsRedirectResponse(GURL* location, int* http_status_code) override {
+  bool IsRedirectResponse(GURL* location,
+                          int* http_status_code,
+                          bool* insecure_scheme_was_upgraded) override {
     return false;
   }
 
@@ -263,7 +265,7 @@ class URLRequestExtensionJob : public net::URLRequestFileJob {
       // proceed; see crbug.com/703888.
       if (verify_job_.get()) {
         std::string tmp;
-        verify_job_->BytesRead(0, base::string_as_array(&tmp));
+        verify_job_->BytesRead(0, base::data(tmp));
         verify_job_->DoneReading();
       }
     }
@@ -280,7 +282,8 @@ class URLRequestExtensionJob : public net::URLRequestFileJob {
 
   void OnReadComplete(net::IOBuffer* buffer, int result) override {
     if (result >= 0)
-      UMA_HISTOGRAM_COUNTS("ExtensionUrlRequest.OnReadCompleteResult", result);
+      UMA_HISTOGRAM_COUNTS_1M("ExtensionUrlRequest.OnReadCompleteResult",
+                              result);
     else
       base::UmaHistogramSparse("ExtensionUrlRequest.OnReadCompleteError",
                                -result);
@@ -299,8 +302,9 @@ class URLRequestExtensionJob : public net::URLRequestFileJob {
 
  private:
   ~URLRequestExtensionJob() override {
-    UMA_HISTOGRAM_COUNTS("ExtensionUrlRequest.TotalKbRead", bytes_read_ / 1024);
-    UMA_HISTOGRAM_COUNTS("ExtensionUrlRequest.SeekPosition", seek_position_);
+    UMA_HISTOGRAM_COUNTS_1M("ExtensionUrlRequest.TotalKbRead",
+                            bytes_read_ / 1024);
+    UMA_HISTOGRAM_COUNTS_1M("ExtensionUrlRequest.SeekPosition", seek_position_);
     if (request_timer_.get())
       UMA_HISTOGRAM_TIMES("ExtensionUrlRequest.Latency",
                           request_timer_->Elapsed());
@@ -642,7 +646,7 @@ ExtensionProtocolHandler::MaybeCreateJob(
   if (g_test_handler)
     g_test_handler->Run(&directory_path, &relative_path);
 
-  ContentVerifyJob* verify_job = nullptr;
+  scoped_refptr<ContentVerifyJob> verify_job;
   ContentVerifier* verifier = extension_info_map_->content_verifier();
   if (verifier) {
     verify_job =
@@ -651,15 +655,10 @@ ExtensionProtocolHandler::MaybeCreateJob(
       verify_job->Start(verifier);
   }
 
-  return new URLRequestExtensionJob(request,
-                                    network_delegate,
-                                    extension_id,
-                                    directory_path,
-                                    relative_path,
-                                    content_security_policy,
-                                    send_cors_header,
-                                    follow_symlinks_anywhere,
-                                    verify_job);
+  return new URLRequestExtensionJob(
+      request, network_delegate, extension_id, directory_path, relative_path,
+      content_security_policy, send_cors_header, follow_symlinks_anywhere,
+      std::move(verify_job));
 }
 
 bool ExtensionProtocolHandler::IsSafeRedirectTarget(
@@ -683,8 +682,9 @@ class FileLoaderObserver : public content::FileURLLoaderObserver {
       : verify_job_(std::move(verify_job)) {}
   ~FileLoaderObserver() override {
     base::AutoLock auto_lock(lock_);
-    UMA_HISTOGRAM_COUNTS("ExtensionUrlRequest.TotalKbRead", bytes_read_ / 1024);
-    UMA_HISTOGRAM_COUNTS("ExtensionUrlRequest.SeekPosition", seek_position_);
+    UMA_HISTOGRAM_COUNTS_1M("ExtensionUrlRequest.TotalKbRead",
+                            bytes_read_ / 1024);
+    UMA_HISTOGRAM_COUNTS_1M("ExtensionUrlRequest.SeekPosition", seek_position_);
     if (request_timer_.get())
       UMA_HISTOGRAM_TIMES("ExtensionUrlRequest.Latency",
                           request_timer_->Elapsed());
@@ -693,20 +693,6 @@ class FileLoaderObserver : public content::FileURLLoaderObserver {
   void OnStart() override {
     base::AutoLock auto_lock(lock_);
     request_timer_.reset(new base::ElapsedTimer());
-  }
-
-  void OnOpenComplete(int result) override {
-    if (result < 0) {
-      // This can happen when the file is unreadable (which can happen during
-      // corruption or third-party interaction). We need to be sure to inform
-      // the verification job that we've finished reading so that it can
-      // proceed; see crbug.com/703888.
-      if (verify_job_.get()) {
-        std::string tmp;
-        verify_job_->BytesRead(0, base::string_as_array(&tmp));
-        verify_job_->DoneReading();
-      }
-    }
   }
 
   void OnSeekComplete(int64_t result) override {
@@ -723,8 +709,8 @@ class FileLoaderObserver : public content::FileURLLoaderObserver {
                    size_t num_bytes_read,
                    base::File::Error read_result) override {
     if (read_result == base::File::FILE_OK) {
-      UMA_HISTOGRAM_COUNTS("ExtensionUrlRequest.OnReadCompleteResult",
-                           read_result);
+      UMA_HISTOGRAM_COUNTS_1M("ExtensionUrlRequest.OnReadCompleteResult",
+                              read_result);
       base::AutoLock auto_lock(lock_);
       bytes_read_ += num_bytes_read;
       if (verify_job_.get())
@@ -755,17 +741,30 @@ class FileLoaderObserver : public content::FileURLLoaderObserver {
 
 class ExtensionURLLoaderFactory : public network::mojom::URLLoaderFactory {
  public:
-  // |frame_host| is the RenderFrameHost which is either being navigated or
-  // loading a subresource. For navigation requests, |frame_url| is empty; for
-  // subresource requests it's the URL of the currently committed navigation on
-  // |frame_host|.
-  explicit ExtensionURLLoaderFactory(
-      content::RenderFrameHost* frame_host,
-      const GURL& frame_url,
-      scoped_refptr<extensions::InfoMap> extension_info_map)
-      : frame_host_(frame_host),
-        frame_url_(frame_url),
-        extension_info_map_(std::move(extension_info_map)) {}
+  ExtensionURLLoaderFactory(int render_process_id, int render_frame_id)
+      : render_process_id_(render_process_id) {
+    content::RenderProcessHost* process_host =
+        content::RenderProcessHost::FromID(render_process_id);
+    browser_context_ = process_host->GetBrowserContext();
+    is_web_view_request_ = WebViewGuest::FromFrameID(
+                               render_process_id_, render_frame_id) != nullptr;
+    Init();
+  }
+
+  ExtensionURLLoaderFactory(content::BrowserContext* browser_context,
+                            bool is_web_view_request)
+      : browser_context_(browser_context),
+        is_web_view_request_(is_web_view_request),
+        render_process_id_(-1) {
+    Init();
+  }
+
+  void Init() {
+    extension_info_map_ =
+        extensions::ExtensionSystem::Get(browser_context_)->info_map();
+    DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
+  }
+
   ~ExtensionURLLoaderFactory() override = default;
 
   // network::mojom::URLLoaderFactory:
@@ -778,24 +777,21 @@ class ExtensionURLLoaderFactory : public network::mojom::URLLoaderFactory {
                             const net::MutableNetworkTrafficAnnotationTag&
                                 traffic_annotation) override {
     DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-    DCHECK(!request.download_to_file);
-    const content::RenderProcessHost* process_host = frame_host_->GetProcess();
-    BrowserContext* browser_context = process_host->GetBrowserContext();
 
     const std::string extension_id = request.url.host();
-    ExtensionRegistry* registry = ExtensionRegistry::Get(browser_context);
+    ExtensionRegistry* registry = ExtensionRegistry::Get(browser_context_);
     scoped_refptr<const Extension> extension =
         registry->GetExtensionById(extension_id, ExtensionRegistry::EVERYTHING);
     const ExtensionSet& enabled_extensions = registry->enabled_extensions();
-    const ProcessMap* process_map = ProcessMap::Get(browser_context);
+    const ProcessMap* process_map = ProcessMap::Get(browser_context_);
     bool incognito_enabled =
-        extensions::util::IsIncognitoEnabled(extension_id, browser_context);
+        extensions::util::IsIncognitoEnabled(extension_id, browser_context_);
 
     if (!AllowExtensionResourceLoad(
             request.url,
             static_cast<content::ResourceType>(request.resource_type),
             static_cast<ui::PageTransition>(request.transition_type),
-            process_host->GetID(), browser_context->IsOffTheRecord(),
+            render_process_id_, browser_context_->IsOffTheRecord(),
             extension.get(), incognito_enabled, enabled_extensions,
             *process_map)) {
       client->OnComplete(
@@ -830,13 +826,9 @@ class ExtensionURLLoaderFactory : public network::mojom::URLLoaderFactory {
     bool send_cors_header = false;
     bool follow_symlinks_anywhere = false;
     if (extension) {
-      const bool is_web_view_request =
-          WebViewGuest::FromWebContents(
-              content::WebContents::FromRenderFrameHost(frame_host_)) !=
-          nullptr;
-      GetSecurityPolicyForURL(request.url, extension.get(), is_web_view_request,
-                              &content_security_policy, &send_cors_header,
-                              &follow_symlinks_anywhere);
+      GetSecurityPolicyForURL(request.url, extension.get(),
+                              is_web_view_request_, &content_security_policy,
+                              &send_cors_header, &follow_symlinks_anywhere);
     }
 
     if (IsBackgroundPageURL(request.url)) {
@@ -860,7 +852,7 @@ class ExtensionURLLoaderFactory : public network::mojom::URLLoaderFactory {
         return;
       }
 
-      client->OnReceiveResponse(head, nullptr);
+      client->OnReceiveResponse(head);
       client->OnStartLoadingResponseBody(std::move(pipe.consumer_handle));
       client->OnComplete(network::URLLoaderCompletionStatus(net::OK));
       return;
@@ -900,9 +892,7 @@ class ExtensionURLLoaderFactory : public network::mojom::URLLoaderFactory {
       std::string new_relative_path;
       SharedModuleInfo::ParseImportedPath(path, &new_extension_id,
                                           &new_relative_path);
-      BrowserContext* browser_context =
-          frame_host_->GetProcess()->GetBrowserContext();
-      ExtensionRegistry* registry = ExtensionRegistry::Get(browser_context);
+      ExtensionRegistry* registry = ExtensionRegistry::Get(browser_context_);
       const Extension* new_extension =
           registry->enabled_extensions().GetByID(new_extension_id);
       if (SharedModuleInfo::ImportsExtensionById(extension.get(),
@@ -955,8 +945,8 @@ class ExtensionURLLoaderFactory : public network::mojom::URLLoaderFactory {
       bool send_cors_header) {
     request.url = net::FilePathToFileURL(*read_file_path);
 
-    content::BrowserThread::PostTask(
-        content::BrowserThread::IO, FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, {content::BrowserThread::IO},
         base::BindOnce(
             &StartVerifyJob, std::move(request), std::move(loader),
             std::move(client), std::move(content_verifier), resource,
@@ -971,7 +961,7 @@ class ExtensionURLLoaderFactory : public network::mojom::URLLoaderFactory {
       scoped_refptr<ContentVerifier> content_verifier,
       const ExtensionResource& resource,
       scoped_refptr<net::HttpResponseHeaders> response_headers) {
-    ContentVerifyJob* verify_job = nullptr;
+    scoped_refptr<ContentVerifyJob> verify_job;
     if (content_verifier) {
       verify_job = content_verifier->CreateJobFor(resource.extension_id(),
                                                   resource.extension_root(),
@@ -982,12 +972,16 @@ class ExtensionURLLoaderFactory : public network::mojom::URLLoaderFactory {
 
     content::CreateFileURLLoader(
         request, std::move(loader), std::move(client),
-        std::make_unique<FileLoaderObserver>(verify_job),
+        std::make_unique<FileLoaderObserver>(std::move(verify_job)),
         std::move(response_headers));
   }
 
-  content::RenderFrameHost* const frame_host_;
-  const GURL frame_url_;
+  content::BrowserContext* browser_context_;
+  bool is_web_view_request_;
+  // We store the ID and get RenderProcessHost each time it's needed. This is to
+  // avoid holding on to stale pointers if we get requests past the lifetime of
+  // the objects.
+  const int render_process_id_;
   scoped_refptr<extensions::InfoMap> extension_info_map_;
   mojo::BindingSet<network::mojom::URLLoaderFactory> bindings_;
 
@@ -1047,29 +1041,16 @@ void SetExtensionProtocolTestHandler(ExtensionProtocolTestHandler* handler) {
 
 std::unique_ptr<network::mojom::URLLoaderFactory>
 CreateExtensionNavigationURLLoaderFactory(
-    content::RenderFrameHost* frame_host,
-    scoped_refptr<extensions::InfoMap> extension_info_map) {
-  return std::make_unique<ExtensionURLLoaderFactory>(
-      frame_host, GURL(), std::move(extension_info_map));
+    content::BrowserContext* browser_context,
+    bool is_web_view_request) {
+  return std::make_unique<ExtensionURLLoaderFactory>(browser_context,
+                                                     is_web_view_request);
 }
 
 std::unique_ptr<network::mojom::URLLoaderFactory>
-MaybeCreateExtensionSubresourceURLLoaderFactory(
-    content::RenderFrameHost* frame_host,
-    const GURL& frame_url,
-    scoped_refptr<extensions::InfoMap> extension_info_map) {
-  // Ensure we have a non-empty URL so that the factory we create knows it's
-  // only for subresources.
-  CHECK(!frame_url.is_empty());
-
-  // TODO(rockot): We can probably avoid creating this factory in cases where
-  // |frame_url| corresponds to a non-extensions URL and the URL in question
-  // cannot have any active content scripts running and has no access to
-  // any extension's web accessible resources. For now we always create a
-  // factory, because the loader itself correctly prevents disallowed resources
-  // from loading in an invalid context.
-  return std::make_unique<ExtensionURLLoaderFactory>(
-      frame_host, frame_url, std::move(extension_info_map));
+CreateExtensionURLLoaderFactory(int render_process_id, int render_frame_id) {
+  return std::make_unique<ExtensionURLLoaderFactory>(render_process_id,
+                                                     render_frame_id);
 }
 
 }  // namespace extensions

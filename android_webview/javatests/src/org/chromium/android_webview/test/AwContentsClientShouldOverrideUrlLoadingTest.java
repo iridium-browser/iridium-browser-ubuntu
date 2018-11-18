@@ -26,15 +26,14 @@ import org.chromium.base.test.util.CallbackHelper;
 import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.base.test.util.RetryOnFailure;
-import org.chromium.content.browser.test.util.Criteria;
-import org.chromium.content.browser.test.util.CriteriaHelper;
-import org.chromium.content.browser.test.util.DOMUtils;
-import org.chromium.content.browser.test.util.TestCallbackHelperContainer
-        .OnEvaluateJavaScriptResultHelper;
-import org.chromium.content.browser.test.util.TestCallbackHelperContainer.OnPageStartedHelper;
-import org.chromium.content.browser.test.util.TestCallbackHelperContainer.OnReceivedErrorHelper;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.content_public.browser.NavigationHistory;
+import org.chromium.content_public.browser.test.util.Criteria;
+import org.chromium.content_public.browser.test.util.CriteriaHelper;
+import org.chromium.content_public.browser.test.util.DOMUtils;
+import org.chromium.content_public.browser.test.util.TestCallbackHelperContainer.OnEvaluateJavaScriptResultHelper;
+import org.chromium.content_public.browser.test.util.TestCallbackHelperContainer.OnPageStartedHelper;
+import org.chromium.content_public.browser.test.util.TestCallbackHelperContainer.OnReceivedErrorHelper;
 import org.chromium.content_public.common.ContentUrlConstants;
 import org.chromium.net.test.util.TestWebServer;
 
@@ -699,7 +698,7 @@ public class AwContentsClientShouldOverrideUrlLoadingTest {
         Assert.assertEquals(indirectLoadCallCount, mShouldOverrideUrlLoadingHelper.getCallCount());
 
         // Simulate touch, hasUserGesture must be true only on the first call.
-        DOMUtils.clickNode(mAwContents.getContentViewCore(), "link");
+        DOMUtils.clickNode(mAwContents.getWebContents(), "link");
 
         mShouldOverrideUrlLoadingHelper.waitForCallback(indirectLoadCallCount, 1);
         Assert.assertEquals(
@@ -996,7 +995,7 @@ public class AwContentsClientShouldOverrideUrlLoadingTest {
 
             // Clicking on an about:blank link should always navigate to the page directly
             int currentCallCount = mContentsClient.getOnPageFinishedHelper().getCallCount();
-            DOMUtils.clickNode(mAwContents.getContentViewCore(), "link");
+            DOMUtils.clickNode(mAwContents.getWebContents(), "link");
             mContentsClient.getOnPageFinishedHelper().waitForCallback(
                     currentCallCount, 1, WAIT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
 
@@ -1036,7 +1035,7 @@ public class AwContentsClientShouldOverrideUrlLoadingTest {
             Assert.assertNull(mActivityTestRule.getActivity().getLastSentIntent());
 
             // Clicking on a link should create an intent.
-            DOMUtils.clickNode(mAwContents.getContentViewCore(), "link");
+            DOMUtils.clickNode(mAwContents.getWebContents(), "link");
             mActivityTestRule.pollUiThread(
                     () -> mActivityTestRule.getActivity().getLastSentIntent() != null);
             Assert.assertEquals(testUrl,

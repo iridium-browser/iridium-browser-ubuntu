@@ -10,7 +10,6 @@
 
 #include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
-#include "net/base/completion_callback.h"
 #include "net/base/completion_once_callback.h"
 #include "net/base/net_errors.h"
 #include "net/base/proxy_server.h"
@@ -24,14 +23,15 @@
 #include "net/socket/socket_tag.h"
 #include "net/socket/socket_test_util.h"
 #include "net/socket/websocket_endpoint_lock_manager.h"
-#include "net/spdy/chromium/spdy_session.h"
-#include "net/spdy/chromium/spdy_session_key.h"
-#include "net/spdy/chromium/spdy_test_util_common.h"
+#include "net/spdy/spdy_session.h"
+#include "net/spdy/spdy_session_key.h"
+#include "net/spdy/spdy_test_util_common.h"
 #include "net/ssl/ssl_config.h"
 #include "net/ssl/ssl_info.h"
 #include "net/test/cert_test_util.h"
 #include "net/test/gtest_util.h"
 #include "net/test/test_data_directory.h"
+#include "net/test/test_with_scoped_task_environment.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
 #include "net/websockets/websocket_basic_handshake_stream.h"
 #include "net/websockets/websocket_stream.h"
@@ -69,7 +69,7 @@ class MockClientSocketHandleFactory {
     auto socket_handle = std::make_unique<ClientSocketHandle>();
     socket_handle->Init("a", scoped_refptr<MockTransportSocketParams>(), MEDIUM,
                         SocketTag(), ClientSocketPool::RespectLimits::ENABLED,
-                        CompletionCallback(), &pool_, NetLogWithSource());
+                        CompletionOnceCallback(), &pool_, NetLogWithSource());
     return socket_handle;
   }
 
@@ -96,19 +96,31 @@ class TestConnectDelegate : public WebSocketStream::ConnectDelegate {
           ssl_error_callbacks,
       const SSLInfo& ssl_info,
       bool fatal) override {}
+  int OnAuthRequired(scoped_refptr<AuthChallengeInfo> auth_info,
+
+                     scoped_refptr<HttpResponseHeaders> response_headers,
+                     const HostPortPair& host_port_pair,
+                     base::OnceCallback<void(const AuthCredentials*)> callback,
+                     base::Optional<AuthCredentials>* credentials) override {
+    *credentials = base::nullopt;
+    return OK;
+  }
 };
 
-class MockWebSocketStreamRequest : public WebSocketStreamRequest {
+class MockWebSocketStreamRequestAPI : public WebSocketStreamRequestAPI {
  public:
-  ~MockWebSocketStreamRequest() override = default;
+  ~MockWebSocketStreamRequestAPI() override = default;
 
-  MOCK_METHOD1(OnHandshakeStreamCreated,
-               void(WebSocketHandshakeStreamBase* handshake_stream));
+  MOCK_METHOD1(OnBasicHandshakeStreamCreated,
+               void(WebSocketBasicHandshakeStream* handshake_stream));
+  MOCK_METHOD1(OnHttp2HandshakeStreamCreated,
+               void(WebSocketHttp2HandshakeStream* handshake_stream));
   MOCK_METHOD1(OnFailure, void(const std::string& message));
 };
 
 class WebSocketHandshakeStreamCreateHelperTest
-    : public TestWithParam<HandshakeStreamType> {
+    : public TestWithParam<HandshakeStreamType>,
+      public WithScopedTaskEnvironment {
  protected:
   std::unique_ptr<WebSocketStream> CreateAndInitializeStream(
       const std::vector<std::string>& sub_protocols,
@@ -123,7 +135,19 @@ class WebSocketHandshakeStreamCreateHelperTest
                                                        sub_protocols);
     create_helper.set_stream_request(&stream_request_);
 
-    EXPECT_CALL(stream_request_, OnHandshakeStreamCreated(_)).Times(1);
+    switch (GetParam()) {
+      case BASIC_HANDSHAKE_STREAM:
+        EXPECT_CALL(stream_request_, OnBasicHandshakeStreamCreated(_)).Times(1);
+        break;
+
+      case HTTP2_HANDSHAKE_STREAM:
+        EXPECT_CALL(stream_request_, OnHttp2HandshakeStreamCreated(_)).Times(1);
+        break;
+
+      default:
+        NOTREACHED();
+    }
+
     EXPECT_CALL(stream_request_, OnFailure(_)).Times(0);
 
     HttpRequestInfo request_info;
@@ -133,17 +157,7 @@ class WebSocketHandshakeStreamCreateHelperTest
     request_info.traffic_annotation =
         MutableNetworkTrafficAnnotationTag(TRAFFIC_ANNOTATION_FOR_TESTS);
 
-    HttpRequestHeaders headers;
-    headers.SetHeader("Host", "www.example.org");
-    headers.SetHeader("Connection", "Upgrade");
-    headers.SetHeader("Pragma", "no-cache");
-    headers.SetHeader("Cache-Control", "no-cache");
-    headers.SetHeader("Upgrade", "websocket");
-    headers.SetHeader("Origin", kOrigin);
-    headers.SetHeader("Sec-WebSocket-Version", "13");
-    headers.SetHeader("User-Agent", "");
-    headers.SetHeader("Accept-Encoding", "gzip, deflate");
-    headers.SetHeader("Accept-Language", "en-us,fr");
+    auto headers = WebSocketCommonTestHeaders();
 
     switch (GetParam()) {
       case BASIC_HANDSHAKE_STREAM: {
@@ -187,22 +201,22 @@ class WebSocketHandshakeStreamCreateHelperTest
       }
       case HTTP2_HANDSHAKE_STREAM: {
         SpdyTestUtil spdy_util;
-        SpdyHeaderBlock request_header_block = WebSocketHttp2Request(
+        spdy::SpdyHeaderBlock request_header_block = WebSocketHttp2Request(
             kPath, "www.example.org", kOrigin, extra_request_headers);
-        SpdySerializedFrame request_headers(spdy_util.ConstructSpdyHeaders(
-            1, std::move(request_header_block), DEFAULT_PRIORITY, false));
+        spdy::SpdySerializedFrame request_headers(
+            spdy_util.ConstructSpdyHeaders(1, std::move(request_header_block),
+                                           DEFAULT_PRIORITY, false));
         MockWrite writes[] = {CreateMockWrite(request_headers, 0)};
 
-        SpdyHeaderBlock response_header_block =
+        spdy::SpdyHeaderBlock response_header_block =
             WebSocketHttp2Response(extra_response_headers);
-        SpdySerializedFrame response_headers(
+        spdy::SpdySerializedFrame response_headers(
             spdy_util.ConstructSpdyResponseHeaders(
                 1, std::move(response_header_block), false));
         MockRead reads[] = {CreateMockRead(response_headers, 1),
                             MockRead(ASYNC, 0, 2)};
 
-        SequencedSocketData data(reads, arraysize(reads), writes,
-                                 arraysize(writes));
+        SequencedSocketData data(reads, writes);
 
         SSLSocketDataProvider ssl(ASYNC, OK);
         ssl.ssl_info.cert =
@@ -250,9 +264,10 @@ class WebSocketHandshakeStreamCreateHelperTest
     }
   }
 
+ private:
   MockClientSocketHandleFactory socket_handle_factory_;
   TestConnectDelegate connect_delegate_;
-  StrictMock<MockWebSocketStreamRequest> stream_request_;
+  StrictMock<MockWebSocketStreamRequestAPI> stream_request_;
   WebSocketEndpointLockManager websocket_endpoint_lock_manager_;
 };
 

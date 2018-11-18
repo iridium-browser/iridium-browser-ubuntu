@@ -2,7 +2,6 @@
 
 include_rules = [
   "+cc/base",
-  "+cc/ipc",
   "+cc/output",
   "+cc/resources",
   "+cc/scheduler",
@@ -10,18 +9,25 @@ include_rules = [
   "+components/viz/service/display/output_surface_frame.h",
   "+components/viz/service/display/output_surface.h",
   "+components/viz/service/display/overlay_candidate_validator.h",
+  "+components/viz/service/display/resource_metadata.h",
+  "+components/viz/service/display/shared_bitmap_manager.h",
+  "+components/viz/service/display/skia_output_surface.h",
   "+components/viz/service/display/software_output_device.h",
+  "+gpu/config/gpu_feature_info.h",
+  "+components/viz/service/gl/gpu_service_impl.h",
   "+gpu/GLES2",
   "+gpu/command_buffer/client",
   "+gpu/command_buffer/common",
   "+gpu/command_buffer/service",
-  "+gpu/ipc/client",
-  "+gpu/ipc/common",
-  "+gpu/ipc/in_process_command_buffer.h",
-  "+gpu/ipc/service",
+  "+gpu/config",
+  "+gpu/ipc",
+  "+gpu/skia_bindings",
+  "+gpu/vulkan",
   "+mojo/public/cpp/bindings",
   "+mojo/public/cpp/system",
   "+skia",
+  "+third_party/khronos/GLES2/gl2.h",
+  "+third_party/khronos/GLES2/gl2ext.h",
   "+third_party/skia",
   "+ui/accelerated_widget_mac",
   "+ui/display",
@@ -41,10 +47,6 @@ specific_include_rules = {
   ".*_unittest\.cc": [
     "+cc/test",
     "+third_party/khronos/GLES2",
-  ],
-  # TODO(kylechar): Move this class to components/viz/service/frame_sinks/.
-  "external_begin_frame_controller_impl.h": [
-    "+components/viz/service/display/display.h",
   ],
   # TODO(kylechar): Break these dependencies.
   "gpu_display_provider.cc": [

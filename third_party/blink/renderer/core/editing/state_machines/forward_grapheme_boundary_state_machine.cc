@@ -45,7 +45,7 @@ std::ostream& operator<<(
       FOR_EACH_FORWARD_GRAPHEME_BOUNDARY_STATE(V)
 #undef V
   };
-  const auto& it = std::begin(kTexts) + static_cast<size_t>(state);
+  auto* const* const it = std::begin(kTexts) + static_cast<size_t>(state);
   DCHECK_GE(it, std::begin(kTexts)) << "Unknown state value";
   DCHECK_LT(it, std::end(kTexts)) << "Unknown state value";
   return os << *it;
@@ -163,8 +163,7 @@ ForwardGraphemeBoundaryStateMachine::FeedFollowingCodeUnit(UChar code_unit) {
         if (Character::IsRegionalIndicator(prev_code_point_) &&
             Character::IsRegionalIndicator(code_point)) {
           if (preceding_ris_count_ % 2 == 0) {
-            // Odd numbered RI case, note that m_prevCodePoint is also
-            // RI.
+            // Odd numbered RI case, note that prev_code_point_ is also RI.
             boundary_offset_ += 2;
           }
           return Finish();

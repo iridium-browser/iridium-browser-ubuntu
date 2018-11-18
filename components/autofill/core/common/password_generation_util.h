@@ -5,7 +5,11 @@
 #ifndef COMPONENTS_AUTOFILL_CORE_COMMON_PASSWORD_GENERATION_UTIL_H_
 #define COMPONENTS_AUTOFILL_CORE_COMMON_PASSWORD_GENERATION_UTIL_H_
 
+#include "components/autofill/core/common/password_form.h"
+#include "ui/gfx/geometry/rect_f.h"
+
 namespace autofill {
+
 namespace password_generation {
 
 // Enumerates various events related to the password generation process.
@@ -58,8 +62,7 @@ enum PasswordGenerationEvent {
   // User focused the password field containing the generated password.
   EDITING_POPUP_SHOWN,
 
-  // Generation enabled because autocomplete attributes for username and
-  // new-password are set.
+  // Generation enabled because autocomplete attributes for new-password is set.
   AUTOCOMPLETE_ATTRIBUTES_ENABLED_GENERATION,
 
   // Generation is triggered by the user from the context menu.
@@ -68,8 +71,31 @@ enum PasswordGenerationEvent {
   // Context menu with generation item was shown.
   PASSWORD_GENERATION_CONTEXT_MENU_SHOWN,
 
+  // The generated password was removed from the field because a credential
+  // was autofilled.
+  PASSWORD_DELETED_BY_AUTOFILLING,
+
   // Number of enum entries, used for UMA histogram reporting macros.
   EVENT_ENUM_COUNT
+};
+
+// These values are used for metrics. Entries should not be renumbered and
+// numeric values should never be reused.
+// Metric: PasswordGeneration.UserEvent
+enum class PasswordGenerationUserEvent {
+  // The generated password was accepted by the user.
+  kPasswordAccepted = 0,
+  // The generated password was edited by the user in the field in which
+  // it was filled after being accepted.
+  kPasswordEdited = 1,
+  // The generated password was deleted by the user from the field
+  // in which it was filled after being accepted.
+  kPasswordDeleted = 2,
+  // The generated password was rejected by the user from the modal
+  // dialog, either by pressing "Cancel" in the dialog or by dismissing it.
+  // Only used on Android.
+  kPasswordRejectedInDialog = 3,
+  kMaxValue = kPasswordRejectedInDialog
 };
 
 // Wrapper to store the user interactions with the password generation bubble.
@@ -90,9 +116,38 @@ struct PasswordGenerationActions {
   ~PasswordGenerationActions();
 };
 
+struct PasswordGenerationUIData {
+  PasswordGenerationUIData(const gfx::RectF& bounds,
+                           int max_length,
+                           const base::string16& generation_element,
+                           base::i18n::TextDirection text_direction,
+                           const autofill::PasswordForm& password_form);
+  PasswordGenerationUIData();
+  ~PasswordGenerationUIData();
+
+  // Location at which to display a popup if needed. This location is specified
+  // in the renderer's coordinate system. The popup will be anchored at
+  // |bounds|.
+  gfx::RectF bounds;
+
+  // Maximum length of the generated password.
+  int max_length;
+
+  // Name of the password field to which the generation popup is attached.
+  base::string16 generation_element;
+
+  // Direction of the text for |generation_element|.
+  base::i18n::TextDirection text_direction;
+
+  // The form associated with the password field.
+  autofill::PasswordForm password_form;
+};
+
 void LogUserActions(PasswordGenerationActions actions);
 
 void LogPasswordGenerationEvent(PasswordGenerationEvent event);
+
+void LogPasswordGenerationUserEvent(PasswordGenerationUserEvent event);
 
 // Enumerates user actions after password generation bubble is shown.
 // These are visible for testing purposes.

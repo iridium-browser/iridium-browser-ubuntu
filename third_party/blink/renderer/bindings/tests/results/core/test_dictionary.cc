@@ -8,14 +8,13 @@
 // DO NOT MODIFY!
 
 // clang-format off
-#include "test_dictionary.h"
+#include "third_party/blink/renderer/bindings/tests/results/core/test_dictionary.h"
 
-#include "bindings/tests/idls/core/test_interface_garbage_collected.h"
-#include "bindings/tests/idls/core/test_interface_implementation.h"
-#include "bindings/tests/idls/core/test_object.h"
-#include "core/dom/element.h"
-#include "core/dom/events/event_target.h"
-#include "platform/wtf/vector.h"
+#include "third_party/blink/renderer/bindings/tests/idls/core/test_interface_implementation.h"
+#include "third_party/blink/renderer/bindings/tests/idls/core/test_object.h"
+#include "third_party/blink/renderer/core/dom/element.h"
+#include "third_party/blink/renderer/core/dom/events/event_target.h"
+#include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
 
@@ -23,11 +22,11 @@ TestDictionary::TestDictionary() {
   setDoubleOrStringMember(DoubleOrString::FromDouble(3.14));
   setEnumMember("foo");
   setLongMember(1);
+  setMemberWithHyphenInName(false);
   setOtherDoubleOrStringMember(DoubleOrString::FromString("default string value"));
   setRestrictedDoubleMember(3.14);
   setStringOrNullMember("default string value");
   setStringSequenceMember(Vector<String>());
-  setTestInterfaceGarbageCollectedSequenceMember(HeapVector<Member<TestInterfaceGarbageCollected>>());
   setTestInterfaceSequenceMember(HeapVector<Member<TestInterfaceImplementation>>());
   setTreatNullAsStringSequenceMember(Vector<String>());
   setUnionMemberWithSequenceDefault(DoubleOrDoubleSequence::FromDoubleSequence(Vector<double>()));
@@ -49,6 +48,10 @@ void TestDictionary::setAnyMember(ScriptValue value) {
   any_member_ = value;
 }
 
+void TestDictionary::setCallbackFunctionMember(V8VoidCallbackFunction* value) {
+  callback_function_member_ = value;
+}
+
 void TestDictionary::setDictionaryMember(Dictionary value) {
   dictionary_member_ = value;
 }
@@ -57,12 +60,12 @@ void TestDictionary::setDoubleOrNullOrDoubleOrNullSequenceMember(const DoubleOrD
   double_or_null_or_double_or_null_sequence_member_ = value;
 }
 
-void TestDictionary::setDoubleOrNullRecordMember(const Vector<std::pair<String, Optional<double>>>& value) {
+void TestDictionary::setDoubleOrNullRecordMember(const Vector<std::pair<String, base::Optional<double>>>& value) {
   double_or_null_record_member_ = value;
   has_double_or_null_record_member_ = true;
 }
 
-void TestDictionary::setDoubleOrNullSequenceMember(const Vector<Optional<double>>& value) {
+void TestDictionary::setDoubleOrNullSequenceMember(const Vector<base::Optional<double>>& value) {
   double_or_null_sequence_member_ = value;
   has_double_or_null_sequence_member_ = true;
 }
@@ -108,6 +111,7 @@ void TestDictionary::setObjectMember(ScriptValue value) {
 void TestDictionary::setObjectOrNullMember(ScriptValue value) {
   object_or_null_member_ = value;
 }
+
 void TestDictionary::setObjectOrNullMemberToNull() {
   object_or_null_member_ = ScriptValue();
 }
@@ -119,6 +123,10 @@ void TestDictionary::setOtherDoubleOrStringMember(const DoubleOrString& value) {
 void TestDictionary::setRecordMember(const Vector<std::pair<String, int8_t>>& value) {
   record_member_ = value;
   has_record_member_ = true;
+}
+
+void TestDictionary::setRequiredCallbackFunctionMember(V8VoidCallbackFunction* value) {
+  required_callback_function_member_ = value;
 }
 
 void TestDictionary::setStringOrNullRecordMember(const Vector<std::pair<String, String>>& value) {
@@ -150,11 +158,6 @@ void TestDictionary::setTestEnumOrTestEnumSequenceMember(const TestEnumOrTestEnu
 
 void TestDictionary::setTestInterface2OrUint8ArrayMember(const TestInterface2OrUint8Array& value) {
   test_interface_2_or_uint8_array_member_ = value;
-}
-
-void TestDictionary::setTestInterfaceGarbageCollectedSequenceMember(const HeapVector<Member<TestInterfaceGarbageCollected>>& value) {
-  test_interface_garbage_collected_sequence_member_ = value;
-  has_test_interface_garbage_collected_sequence_member_ = true;
 }
 
 void TestDictionary::setTestInterfaceSequenceMember(const HeapVector<Member<TestInterfaceImplementation>>& value) {
@@ -196,6 +199,7 @@ void TestDictionary::setUnionWithTypedefs(const FloatOrBoolean& value) {
 }
 
 void TestDictionary::Trace(blink::Visitor* visitor) {
+  visitor->Trace(callback_function_member_);
   visitor->Trace(double_or_null_or_double_or_null_sequence_member_);
   visitor->Trace(double_or_string_member_);
   visitor->Trace(double_or_string_sequence_member_);
@@ -206,13 +210,11 @@ void TestDictionary::Trace(blink::Visitor* visitor) {
   visitor->Trace(garbage_collected_record_member_);
   visitor->Trace(internal_dictionary_sequence_member_);
   visitor->Trace(other_double_or_string_member_);
+  visitor->Trace(required_callback_function_member_);
   visitor->Trace(test_enum_or_null_or_test_enum_sequence_member_);
   visitor->Trace(test_enum_or_test_enum_or_null_sequence_member_);
   visitor->Trace(test_enum_or_test_enum_sequence_member_);
   visitor->Trace(test_interface_2_or_uint8_array_member_);
-  visitor->Trace(test_interface_garbage_collected_member_);
-  visitor->Trace(test_interface_garbage_collected_or_null_member_);
-  visitor->Trace(test_interface_garbage_collected_sequence_member_);
   visitor->Trace(test_interface_member_);
   visitor->Trace(test_interface_or_null_member_);
   visitor->Trace(test_interface_sequence_member_);

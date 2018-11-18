@@ -7,7 +7,7 @@
 #include <utility>
 
 #include "base/sequenced_task_runner.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "chrome/browser/profiles/incognito_helpers.h"
 #include "chrome/browser/profiles/profile.h"
 #include "components/dom_distiller/content/browser/distiller_page_web_contents.h"
@@ -19,6 +19,7 @@
 #include "components/leveldb_proto/proto_database_impl.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/storage_partition.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 
 namespace dom_distiller {
 
@@ -56,7 +57,7 @@ KeyedService* DomDistillerServiceFactory::BuildServiceInstanceFor(
     content::BrowserContext* profile) const {
   scoped_refptr<base::SequencedTaskRunner> background_task_runner =
       base::CreateSequencedTaskRunnerWithTraits(
-          {base::MayBlock(), base::TaskPriority::BACKGROUND});
+          {base::MayBlock(), base::TaskPriority::BEST_EFFORT});
 
   std::unique_ptr<leveldb_proto::ProtoDatabaseImpl<ArticleEntry>> db(
       new leveldb_proto::ProtoDatabaseImpl<ArticleEntry>(
@@ -73,7 +74,7 @@ KeyedService* DomDistillerServiceFactory::BuildServiceInstanceFor(
   std::unique_ptr<DistillerURLFetcherFactory> distiller_url_fetcher_factory(
       new DistillerURLFetcherFactory(
           content::BrowserContext::GetDefaultStoragePartition(profile)
-              ->GetURLRequestContext()));
+              ->GetURLLoaderFactoryForBrowserProcess()));
 
   dom_distiller::proto::DomDistillerOptions options;
   if (VLOG_IS_ON(1)) {

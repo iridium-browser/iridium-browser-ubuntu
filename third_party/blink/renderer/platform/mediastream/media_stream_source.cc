@@ -29,6 +29,8 @@
  */
 
 #include "third_party/blink/renderer/platform/mediastream/media_stream_source.h"
+
+#include "third_party/blink/renderer/platform/mediastream/media_stream_center.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
 
 namespace blink {
@@ -55,6 +57,10 @@ MediaStreamSource::MediaStreamSource(const String& id,
       remote_(remote),
       ready_state_(ready_state),
       requires_consumer_(requires_consumer) {}
+
+void MediaStreamSource::SetGroupId(const String& group_id) {
+  group_id_ = group_id;
+}
 
 void MediaStreamSource::SetReadyState(ReadyState ready_state) {
   if (ready_state_ != kReadyStateEnded && ready_state_ != ready_state) {
@@ -90,10 +96,11 @@ void MediaStreamSource::AddObserver(MediaStreamSource::Observer* observer) {
   observers_.insert(observer);
 }
 
-void MediaStreamSource::SetAudioProcessingProperties(bool echo_cancellation,
-                                                     bool auto_gain_control,
-                                                     bool noise_supression) {
-  echo_cancellation_ = echo_cancellation;
+void MediaStreamSource::SetAudioProcessingProperties(
+    EchoCancellationMode echo_cancellation_mode,
+    bool auto_gain_control,
+    bool noise_supression) {
+  echo_cancellation_mode_ = echo_cancellation_mode;
   auto_gain_control_ = auto_gain_control;
   noise_supression_ = noise_supression;
 }
@@ -117,13 +124,37 @@ bool MediaStreamSource::RemoveAudioConsumer(
 
 void MediaStreamSource::GetSettings(WebMediaStreamTrack::Settings& settings) {
   settings.device_id = Id();
+  settings.group_id = GroupId();
 
-  if (echo_cancellation_)
-    settings.echo_cancellation = *echo_cancellation_;
+  if (echo_cancellation_mode_) {
+    switch (*echo_cancellation_mode_) {
+      case EchoCancellationMode::kDisabled:
+        settings.echo_cancellation = false;
+        settings.echo_cancellation_type.Reset();
+        break;
+      case EchoCancellationMode::kBrowser:
+        settings.echo_cancellation = true;
+        settings.echo_cancellation_type =
+            WebString::FromASCII(blink::kEchoCancellationTypeBrowser);
+        break;
+      case EchoCancellationMode::kAec3:
+        settings.echo_cancellation = true;
+        settings.echo_cancellation_type =
+            WebString::FromASCII(blink::kEchoCancellationTypeAec3);
+        break;
+      case EchoCancellationMode::kSystem:
+        settings.echo_cancellation = true;
+        settings.echo_cancellation_type =
+            WebString::FromASCII(blink::kEchoCancellationTypeSystem);
+        break;
+    }
+  }
   if (auto_gain_control_)
     settings.auto_gain_control = *auto_gain_control_;
   if (noise_supression_)
     settings.noise_supression = *noise_supression_;
+
+  MediaStreamCenter::Instance().GetSourceSettings(this, settings);
 }
 
 void MediaStreamSource::SetAudioFormat(size_t number_of_channels,
@@ -155,5 +186,13 @@ STATIC_ASSERT_ENUM(WebMediaStreamSource::kReadyStateMuted,
                    MediaStreamSource::kReadyStateMuted);
 STATIC_ASSERT_ENUM(WebMediaStreamSource::kReadyStateEnded,
                    MediaStreamSource::kReadyStateEnded);
+STATIC_ASSERT_ENUM(WebMediaStreamSource::EchoCancellationMode::kDisabled,
+                   MediaStreamSource::EchoCancellationMode::kDisabled);
+STATIC_ASSERT_ENUM(WebMediaStreamSource::EchoCancellationMode::kBrowser,
+                   MediaStreamSource::EchoCancellationMode::kBrowser);
+STATIC_ASSERT_ENUM(WebMediaStreamSource::EchoCancellationMode::kAec3,
+                   MediaStreamSource::EchoCancellationMode::kAec3);
+STATIC_ASSERT_ENUM(WebMediaStreamSource::EchoCancellationMode::kSystem,
+                   MediaStreamSource::EchoCancellationMode::kSystem);
 
 }  // namespace blink

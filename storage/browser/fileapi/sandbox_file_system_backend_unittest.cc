@@ -79,9 +79,10 @@ class SandboxFileSystemBackendTest : public testing::Test {
 
   void SetUpNewDelegate(const storage::FileSystemOptions& options) {
     delegate_.reset(new SandboxFileSystemBackendDelegate(
-        NULL /* quota_manager_proxy */,
+        nullptr /* quota_manager_proxy */,
         base::ThreadTaskRunnerHandle::Get().get(), data_dir_.GetPath(),
-        NULL /* special_storage_policy */, options));
+        nullptr /* special_storage_policy */, options,
+        nullptr /* env_override */));
   }
 
   void SetUpNewBackend(const storage::FileSystemOptions& options) {
@@ -257,10 +258,9 @@ TEST_F(SandboxFileSystemBackendTest, GetRootPathGetWithoutCreate) {
   for (size_t i = 0; i < arraysize(kRootPathTestCases); ++i) {
     SCOPED_TRACE(testing::Message() << "RootPath (create=false) #" << i << " "
                  << kRootPathTestCases[i].expected_path);
-    EXPECT_FALSE(GetRootPath(GURL(kRootPathTestCases[i].origin_url),
-                             kRootPathTestCases[i].type,
-                             storage::OPEN_FILE_SYSTEM_FAIL_IF_NONEXISTENT,
-                             NULL));
+    EXPECT_FALSE(GetRootPath(
+        GURL(kRootPathTestCases[i].origin_url), kRootPathTestCases[i].type,
+        storage::OPEN_FILE_SYSTEM_FAIL_IF_NONEXISTENT, nullptr));
   }
 }
 
@@ -271,10 +271,9 @@ TEST_F(SandboxFileSystemBackendTest, GetRootPathInIncognito) {
   for (size_t i = 0; i < arraysize(kRootPathTestCases); ++i) {
     SCOPED_TRACE(testing::Message() << "RootPath (incognito) #" << i << " "
                  << kRootPathTestCases[i].expected_path);
-    EXPECT_FALSE(GetRootPath(GURL(kRootPathTestCases[i].origin_url),
-                             kRootPathTestCases[i].type,
-                             storage::OPEN_FILE_SYSTEM_CREATE_IF_NONEXISTENT,
-                             NULL));
+    EXPECT_FALSE(GetRootPath(
+        GURL(kRootPathTestCases[i].origin_url), kRootPathTestCases[i].type,
+        storage::OPEN_FILE_SYSTEM_CREATE_IF_NONEXISTENT, nullptr));
   }
 }
 
@@ -286,7 +285,7 @@ TEST_F(SandboxFileSystemBackendTest, GetRootPathFileURI) {
     EXPECT_FALSE(GetRootPath(GURL(kRootPathFileURITestCases[i].origin_url),
                              kRootPathFileURITestCases[i].type,
                              storage::OPEN_FILE_SYSTEM_CREATE_IF_NONEXISTENT,
-                             NULL));
+                             nullptr));
   }
 }
 

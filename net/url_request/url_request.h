@@ -14,6 +14,7 @@
 #include "base/debug/leak_tracker.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/memory/weak_ptr.h"
 #include "base/optional.h"
 #include "base/strings/string16.h"
 #include "base/supports_user_data.h"
@@ -34,6 +35,7 @@
 #include "net/http/http_request_headers.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_response_info.h"
+#include "net/log/net_log_event_type.h"
 #include "net/log/net_log_with_source.h"
 #include "net/net_buildflags.h"
 #include "net/socket/connection_attempts.h"
@@ -349,17 +351,20 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
   ReferrerPolicy referrer_policy() const { return referrer_policy_; }
   void set_referrer_policy(ReferrerPolicy referrer_policy);
 
-  // If this request should include a referred Token Binding, this returns the
-  // hostname of the referrer that indicated this request should include a
-  // referred Token Binding. Otherwise, this returns the empty string.
-  const std::string& token_binding_referrer() const {
-    return token_binding_referrer_;
-  }
-
   // Sets the delegate of the request.  This is only to allow creating a request
   // before creating its delegate.  |delegate| must be non-NULL and the request
   // must not yet have a Delegate set.
   void set_delegate(Delegate* delegate);
+
+  // Sets whether credentials are allowed.
+  // If credentials are allowed, the request will send and save HTTP
+  // cookies, as well as authentication to the origin server. If not,
+  // they will not be sent, however proxy-level authentication will
+  // still occur.
+  // Setting this to false is equivalent to setting the
+  // LOAD_DO_NOT_SAVE_COOKIES, LOAD_DO_NOT_SEND_COOKIES, and
+  // LOAD_DO_NOT_SEND_AUTH_DATA flags. See https://crbug.com/799935.
+  void set_allow_credentials(bool allow_credentials);
 
   // Sets the upload data.
   void set_upload(std::unique_ptr<UploadDataStream> upload);
@@ -609,8 +614,11 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
   void StopCaching();
 
   // This method may be called to follow a redirect that was deferred in
-  // response to an OnReceivedRedirect call.
-  void FollowDeferredRedirect();
+  // response to an OnReceivedRedirect call. If non-null,
+  // |modified_request_headers| are changes applied to the request headers after
+  // updating them for the redirect.
+  void FollowDeferredRedirect(
+      const base::Optional<net::HttpRequestHeaders>& modified_request_headers);
 
   // One of the following two methods should be called in response to an
   // OnAuthRequired() callback (and only then).
@@ -712,6 +720,16 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
   void set_socket_tag(const SocketTag& socket_tag);
   const SocketTag& socket_tag() const { return socket_tag_; }
 
+  // |upgrade_if_insecure| should be set to true if this request (including
+  // redirects) should be upgraded to HTTPS due to an Upgrade-Insecure-Requests
+  // requirement.
+  void set_upgrade_if_insecure(bool upgrade_if_insecure) {
+    upgrade_if_insecure_ = upgrade_if_insecure;
+  }
+  bool upgrade_if_insecure() const { return upgrade_if_insecure_; }
+
+  base::WeakPtr<URLRequest> GetWeakPtr();
+
  protected:
   // Allow the URLRequestJob class to control the is_pending() flag.
   void set_is_pending(bool value) { is_pending_ = value; }
@@ -719,8 +737,12 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
   // Allow the URLRequestJob class to set our status too.
   void set_status(URLRequestStatus status);
 
-  // Allow the URLRequestJob to redirect this request.
-  void Redirect(const RedirectInfo& redirect_info);
+  // Allow the URLRequestJob to redirect this request. If non-null,
+  // |modified_request_headers| are changes applied to the request headers after
+  // updating them for the redirect.
+  void Redirect(
+      const RedirectInfo& redirect_info,
+      const base::Optional<net::HttpRequestHeaders>& modified_request_headers);
 
   // Called by URLRequestJob to allow interception when a redirect occurs.
   void NotifyReceivedRedirect(const RedirectInfo& redirect_info,
@@ -797,13 +819,16 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
                     CookieOptions* options) const;
   bool CanEnablePrivacyMode() const;
 
-  // Called just before calling a delegate that may block a request.
-  void OnCallToDelegate();
+  // Called just before calling a delegate that may block a request. |type|
+  // should be the delegate's event type,
+  // e.g. NetLogEventType::NETWORK_DELEGATE_AUTH_REQUIRED.
+  void OnCallToDelegate(NetLogEventType type);
   // Called when the delegate lets a request continue.  Also called on
   // cancellation.
   void OnCallToDelegateComplete();
 
 #if BUILDFLAG(ENABLE_REPORTING)
+  std::string GetUserAgent() const;
   void MaybeGenerateNetworkErrorLoggingReport();
 #endif  // BUILDFLAG(ENABLE_REPORTING)
 
@@ -828,7 +853,6 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
   std::string method_;  // "GET", "POST", etc. Should be all uppercase.
   std::string referrer_;
   ReferrerPolicy referrer_policy_;
-  std::string token_binding_referrer_;
   FirstPartyURLPolicy first_party_url_policy_;
   HttpRequestHeaders extra_request_headers_;
   int load_flags_;  // Flags indicating the request type for the load;
@@ -878,6 +902,10 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
   // A globally unique identifier for this request.
   const uint64_t identifier_;
 
+  // If |calling_delegate_| is true, the event type of the delegate being
+  // called.
+  NetLogEventType delegate_event_type_;
+
   // True if this request is currently calling a delegate, or is blocked waiting
   // for the URL request or network delegate to resume it.
   bool calling_delegate_;
@@ -888,10 +916,6 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
   bool use_blocked_by_as_load_param_;
 
   base::debug::LeakTracker<URLRequest> leak_tracker_;
-
-  // Callback passed to the network delegate to notify us when a blocked request
-  // is ready to be resumed or canceled.
-  CompletionCallback before_request_callback_;
 
   // Safe-guard to ensure that we do not send multiple "I am completed"
   // messages to network delegate.
@@ -930,7 +954,11 @@ class NET_EXPORT URLRequest : public base::SupportsUserData {
   RequestHeadersCallback request_headers_callback_;
   ResponseHeadersCallback response_headers_callback_;
 
+  bool upgrade_if_insecure_;
+
   THREAD_CHECKER(thread_checker_);
+
+  base::WeakPtrFactory<URLRequest> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(URLRequest);
 };

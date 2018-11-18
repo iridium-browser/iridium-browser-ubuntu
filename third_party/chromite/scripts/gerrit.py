@@ -25,10 +25,14 @@ from chromite.lib import cros_logging as logging
 from chromite.lib import gerrit
 from chromite.lib import git
 from chromite.lib import gob_util
+from chromite.lib import memoize
 from chromite.lib import terminal
+from chromite.lib import uri_lib
 
 
-site_config = config_lib.GetConfig()
+# Locate actions that are exposed to the user.  All functions that start
+# with "UserAct" are fair game.
+ACTION_PREFIX = 'UserAct'
 
 
 COLOR = None
@@ -88,7 +92,7 @@ def GetGerrit(opts, cl=None):
   gob = opts.gob
   if cl is not None:
     if cl.startswith('*'):
-      gob = site_config.params.INTERNAL_GOB_INSTANCE
+      gob = config_lib.GetSiteParams().INTERNAL_GOB_INSTANCE
       cl = cl[1:]
     elif ':' in cl:
       gob, cl = cl.split(':', 1)
@@ -102,23 +106,22 @@ def GetGerrit(opts, cl=None):
 def GetApprovalSummary(_opts, cls):
   """Return a dict of the most important approvals"""
   approvs = dict([(x, '') for x in GERRIT_SUMMARY_CATS])
-  if 'approvals' in cls['currentPatchSet']:
-    for approver in cls['currentPatchSet']['approvals']:
-      cats = GERRIT_APPROVAL_MAP.get(approver['type'])
-      if not cats:
-        logging.warning('unknown gerrit approval type: %s', approver['type'])
-        continue
-      cat = cats[0].strip()
-      val = int(approver['value'])
-      if not cat in approvs:
-        # Ignore the extended categories in the summary view.
-        continue
-      elif approvs[cat] == '':
-        approvs[cat] = val
-      elif val < 0:
-        approvs[cat] = min(approvs[cat], val)
-      else:
-        approvs[cat] = max(approvs[cat], val)
+  for approver in cls.get('currentPatchSet', {}).get('approvals', []):
+    cats = GERRIT_APPROVAL_MAP.get(approver['type'])
+    if not cats:
+      logging.warning('unknown gerrit approval type: %s', approver['type'])
+      continue
+    cat = cats[0].strip()
+    val = int(approver['value'])
+    if not cat in approvs:
+      # Ignore the extended categories in the summary view.
+      continue
+    elif approvs[cat] == '':
+      approvs[cat] = val
+    elif val < 0:
+      approvs[cat] = min(approvs[cat], val)
+    else:
+      approvs[cat] = max(approvs[cat], val)
   return approvs
 
 
@@ -154,11 +157,12 @@ def PrettyPrintCl(opts, cl, lims=None, show_approvals=True):
 def PrintCls(opts, cls, lims=None, show_approvals=True):
   """Print all results based on the requested format."""
   if opts.raw:
+    site_params = config_lib.GetSiteParams()
     pfx = ''
     # Special case internal Chrome GoB as that is what most devs use.
     # They can always redirect the list elsewhere via the -g option.
-    if opts.gob == site_config.params.INTERNAL_GOB_INSTANCE:
-      pfx = site_config.params.INTERNAL_CHANGE_PREFIX
+    if opts.gob == site_params.INTERNAL_GOB_INSTANCE:
+      pfx = site_params.INTERNAL_CHANGE_PREFIX
     for cl in cls:
       print('%s%s' % (pfx, cl['number']))
 
@@ -205,10 +209,12 @@ def FilteredQuery(opts, query, helper=None):
     # Strip off common leading names since the result is still
     # unique over the whole tree.
     if not opts.verbose:
-      for pfx in ('chromeos', 'chromiumos', 'external', 'overlays', 'platform',
-                  'third_party'):
+      for pfx in ('aosp', 'chromeos', 'chromiumos', 'external', 'overlays',
+                  'platform', 'third_party'):
         if cl['project'].startswith('%s/' % pfx):
           cl['project'] = cl['project'][len(pfx) + 1:]
+
+      cl['url'] = uri_lib.ShortenUri(cl['url'])
 
     ret.append(cl)
 
@@ -292,7 +298,7 @@ def UserActDeps(opts, query):
   """List CLs matching a query, and all transitive dependencies of those CLs"""
   cls = _Query(opts, query, raw=False)
 
-  @cros_build_lib.Memoize
+  @memoize.Memoize
   def _QueryChange(cl, helper=None):
     return _Query(opts, cl, raw=False, helper=helper)
 
@@ -499,11 +505,9 @@ def UserActAccount(opts):
           (acct['_account_id'], acct['name'], acct['email']))
 
 
-def main(argv):
-  # Locate actions that are exposed to the user.  All functions that start
-  # with "UserAct" are fair game.
-  act_pfx = 'UserAct'
-  actions = [x for x in globals() if x.startswith(act_pfx)]
+def GetParser():
+  """Returns the parser to use for this module."""
+  actions = [x for x in globals() if x.startswith(ACTION_PREFIX)]
 
   usage = """%(prog)s [options] <action> [action args]
 
@@ -529,24 +533,25 @@ ready.
   $ gerrit --json search 'assignee:self'    # Dump all pending CLs in JSON.
 
 Actions:"""
-  indent = max([len(x) - len(act_pfx) for x in actions])
+  indent = max([len(x) - len(ACTION_PREFIX) for x in actions])
   for a in sorted(actions):
-    cmd = a[len(act_pfx):]
+    cmd = a[len(ACTION_PREFIX):]
     # Sanity check for devs adding new commands.  Should be quick.
     if cmd != cmd.lower().capitalize():
       raise RuntimeError('callback "%s" is misnamed; should be "%s"' %
                          (cmd, cmd.lower().capitalize()))
     usage += '\n  %-*s: %s' % (indent, cmd.lower(), globals()[a].__doc__)
 
+  site_params = config_lib.GetSiteParams()
   parser = commandline.ArgumentParser(usage=usage)
   parser.add_argument('-i', '--internal', dest='gob', action='store_const',
-                      default=site_config.params.EXTERNAL_GOB_INSTANCE,
-                      const=site_config.params.INTERNAL_GOB_INSTANCE,
+                      default=site_params.EXTERNAL_GOB_INSTANCE,
+                      const=site_params.INTERNAL_GOB_INSTANCE,
                       help='Query internal Chromium Gerrit instance')
   parser.add_argument('-g', '--gob',
-                      default=site_config.params.EXTERNAL_GOB_INSTANCE,
+                      default=site_params.EXTERNAL_GOB_INSTANCE,
                       help=('Gerrit (on borg) instance to query (default: %s)' %
-                            (site_config.params.EXTERNAL_GOB_INSTANCE)))
+                            (site_params.EXTERNAL_GOB_INSTANCE)))
   parser.add_argument('--sort', default='number',
                       help='Key to sort on (number, project); use "unsorted" '
                            'to disable')
@@ -567,35 +572,40 @@ Actions:"""
                       help='Limit output to the specific project')
   parser.add_argument('-t', '--topic',
                       help='Limit output to the specific topic')
-  parser.add_argument('args', nargs='+')
+  parser.add_argument('action', help='The gerrit action to perform')
+  parser.add_argument('args', nargs='*', help='Action arguments')
+
+  return parser
+
+
+def main(argv):
+  parser = GetParser()
   opts = parser.parse_args(argv)
 
   # A cache of gerrit helpers we'll load on demand.
   opts.gerrit = {}
   opts.Freeze()
 
-  # pylint: disable=W0603
+  # pylint: disable=global-statement
   global COLOR
   COLOR = terminal.Color(enabled=opts.color)
 
   # Now look up the requested user action and run it.
-  cmd = opts.args[0].lower()
-  args = opts.args[1:]
-  functor = globals().get(act_pfx + cmd.capitalize())
+  functor = globals().get(ACTION_PREFIX + opts.action.capitalize())
   if functor:
     argspec = inspect.getargspec(functor)
     if argspec.varargs:
       arg_min = getattr(functor, 'arg_min', len(argspec.args))
-      if len(args) < arg_min:
+      if len(opts.args) < arg_min:
         parser.error('incorrect number of args: %s expects at least %s' %
-                     (cmd, arg_min))
-    elif len(argspec.args) - 1 != len(args):
+                     (opts.action, arg_min))
+    elif len(argspec.args) - 1 != len(opts.args):
       parser.error('incorrect number of args: %s expects %s' %
-                   (cmd, len(argspec.args) - 1))
+                   (opts.action, len(argspec.args) - 1))
     try:
-      functor(opts, *args)
+      functor(opts, *opts.args)
     except (cros_build_lib.RunCommandError, gerrit.GerritException,
             gob_util.GOBError) as e:
       cros_build_lib.Die(e.message)
   else:
-    parser.error('unknown action: %s' % (cmd,))
+    parser.error('unknown action: %s' % (opts.action,))

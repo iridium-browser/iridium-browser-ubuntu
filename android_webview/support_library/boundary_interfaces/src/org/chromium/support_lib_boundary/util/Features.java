@@ -98,4 +98,46 @@ public class Features {
     // SafeBrowsingResponse.showInterstitial
     public static final String SAFE_BROWSING_RESPONSE_SHOW_INTERSTITIAL =
             "SAFE_BROWSING_RESPONSE_SHOW_INTERSTITIAL";
+
+    // WebMessagePortCompat.postMessage
+    public static final String WEB_MESSAGE_PORT_POST_MESSAGE = "WEB_MESSAGE_PORT_POST_MESSAGE";
+
+    // WebMessagePortCompat.close
+    public static final String WEB_MESSAGE_PORT_CLOSE = "WEB_MESSAGE_PORT_CLOSE";
+
+    // WebMessagePortCompat.setWebMessageCallback(WebMessageCallbackCompat)
+    // WebMessagePortCompat.setWebMessageCallback(WebMessageCallbackCompat, Handler)
+    public static final String WEB_MESSAGE_PORT_SET_MESSAGE_CALLBACK =
+            "WEB_MESSAGE_PORT_SET_MESSAGE_CALLBACK";
+
+    // WebViewCompat.createWebMessageChannel
+    public static final String CREATE_WEB_MESSAGE_CHANNEL = "CREATE_WEB_MESSAGE_CHANNEL";
+
+    // WebViewCompat.postWebMessage
+    public static final String POST_WEB_MESSAGE = "POST_WEB_MESSAGE";
+
+    // WebMessageCallbackCompat.onMessage
+    public static final String WEB_MESSAGE_CALLBACK_ON_MESSAGE = "WEB_MESSAGE_CALLBACK_ON_MESSAGE";
+
+    // WebViewCompat.getWebViewClient
+    public static final String GET_WEB_VIEW_CLIENT = "GET_WEB_VIEW_CLIENT";
+
+    // WebViewCompat.getWebChromeClient
+    public static final String GET_WEB_CHROME_CLIENT = "GET_WEB_CHROME_CLIENT";
+
+    // WebViewCompat.setProxyOverride
+    // WebViewCompat.clearProxyOverride
+    public static final String PROXY_OVERRIDE = "PROXY_OVERRIDE:2";
+
+    // WebViewCompat.getWebViewRenderer
+    public static final String GET_WEB_VIEW_RENDERER = "GET_WEB_VIEW_RENDERER";
+
+    // WebViewRenderer.terminate
+    public static final String WEB_VIEW_RENDERER_TERMINATE = "WEB_VIEW_RENDERER_TERMINATE";
+
+    // TracingController.getInstance
+    // TracingController.isTracing
+    // TracingController.start
+    // TracingController.stop
+    public static final String TRACING_CONTROLLER_BASIC_USAGE = "TRACING_CONTROLLER_BASIC_USAGE";
 }

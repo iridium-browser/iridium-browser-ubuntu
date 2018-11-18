@@ -6,25 +6,29 @@
 
 #include <memory>
 
+#include "base/single_thread_task_runner.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/public/platform/scheduler/test/renderer_scheduler_test_support.h"
 #include "third_party/blink/public/platform/web_url_loader_mock_factory.h"
+#include "third_party/blink/renderer/bindings/core/v8/referrer_script_info.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_source_code.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_streamer_thread.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_core.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_binding_for_testing.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_code_cache.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_script_runner.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/script/classic_pending_script.h"
 #include "third_party/blink/renderer/core/script/classic_script.h"
 #include "third_party/blink/renderer/core/script/mock_script_element_base.h"
 #include "third_party/blink/renderer/core/testing/dummy_page_holder.h"
+#include "third_party/blink/renderer/platform/cross_origin_attribute_value.h"
 #include "third_party/blink/renderer/platform/exported/wrapped_resource_response.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_loader.h"
 #include "third_party/blink/renderer/platform/loader/fetch/script_fetch_options.h"
-#include "third_party/blink/renderer/platform/scheduler/child/web_scheduler.h"
+#include "third_party/blink/renderer/platform/scheduler/public/thread_scheduler.h"
 #include "third_party/blink/renderer/platform/testing/unit_test_helpers.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_encoding.h"
 #include "v8/include/v8.h"
@@ -53,7 +57,9 @@ class ScriptStreamingTest : public testing::Test {
         url, WrappedResourceResponse(ResourceResponse()), "");
     pending_script_ = ClassicPendingScript::Fetch(
         url, dummy_page_holder_->GetDocument(), ScriptFetchOptions(),
-        UTF8Encoding(), element, FetchParameters::kNoDefer);
+        kCrossOriginAttributeNotSet, UTF8Encoding(), element,
+        FetchParameters::kNoDefer);
+    pending_script_->SetSchedulingType(ScriptSchedulingType::kParserBlocking);
     ScriptStreamer::SetSmallScriptThresholdForTesting(0);
     Platform::Current()->GetURLLoaderMockFactory()->UnregisterURL(url);
 
@@ -62,13 +68,19 @@ class ScriptStreamingTest : public testing::Test {
     GetResource()->SetResponse(response);
   }
 
-  ~ScriptStreamingTest() {
+  ~ScriptStreamingTest() override {
     if (pending_script_)
       pending_script_->Dispose();
   }
 
   ClassicPendingScript* GetPendingScript() const {
     return pending_script_.Get();
+  }
+
+  ScriptSourceCode GetScriptSourceCode() const {
+    ClassicScript* classic_script = GetPendingScript()->GetSource(NullURL());
+    DCHECK(classic_script);
+    return classic_script->GetScriptSourceCode();
   }
 
   Settings* GetSettings() const {
@@ -80,8 +92,8 @@ class ScriptStreamingTest : public testing::Test {
   }
 
  protected:
-  void AppendData(const char* data) {
-    GetResource()->AppendData(data, strlen(data));
+  void AppendData(ScriptResource* resource, const char* data) {
+    resource->AppendData(data, strlen(data));
     // Yield control to the background thread, so that V8 gets a chance to
     // process the data before the main thread adds more. Note that we
     // cannot fully control in what kind of chunks the data is passed to V8
@@ -90,23 +102,31 @@ class ScriptStreamingTest : public testing::Test {
     test::YieldCurrentThread();
   }
 
-  void AppendPadding() {
+  void AppendData(const char* data) { AppendData(GetResource(), data); }
+
+  void AppendPadding(ScriptResource* resource) {
     for (int i = 0; i < 10; ++i) {
-      AppendData(
-          " /* this is padding to make the script long enough, so "
-          "that V8's buffer gets filled and it starts processing "
-          "the data */ ");
+      AppendData(resource,
+                 " /* this is padding to make the script long enough, so "
+                 "that V8's buffer gets filled and it starts processing "
+                 "the data */ ");
     }
   }
 
+  void AppendPadding() { AppendPadding(GetResource()); }
+
   void Finish() {
-    GetResource()->Loader()->DidFinishLoading(0.0, 0, 0, 0, false);
+    GetResource()->Loader()->DidFinishLoading(
+        TimeTicks(), 0, 0, 0, false,
+        std::vector<network::cors::PreflightTimingInfo>());
     GetResource()->SetStatus(ResourceStatus::kCached);
   }
 
   void ProcessTasksUntilStreamingComplete() {
-    while (ScriptStreamerThread::Shared()->IsRunningTask()) {
-      test::RunPendingTasks();
+    if (!RuntimeEnabledFeatures::ScheduledScriptStreamingEnabled()) {
+      while (ScriptStreamerThread::Shared()->IsRunningTask()) {
+        test::RunPendingTasks();
+      }
     }
     // Once more, because the "streaming complete" notification might only
     // now be in the task queue.
@@ -139,9 +159,10 @@ class TestPendingScriptClient final
 TEST_F(ScriptStreamingTest, CompilingStreamedScript) {
   // Test that we can successfully compile a streamed script.
   V8TestingScope scope;
-  ScriptStreamer::StartStreaming(
-      GetPendingScript(), ScriptStreamer::kParsingBlocking, GetSettings(),
-      scope.GetScriptState(), loading_task_runner_);
+  ScriptStreamer::NotStreamingReason reason;
+  ScriptStreamer::StartStreaming(GetPendingScript(), loading_task_runner_,
+                                 &reason);
+  GetPendingScript()->SetNotStreamingReasonForTest(reason);
   TestPendingScriptClient* client = new TestPendingScriptClient;
   GetPendingScript()->WatchForLoad(client);
 
@@ -157,19 +178,15 @@ TEST_F(ScriptStreamingTest, CompilingStreamedScript) {
   // has completed its tasks.
   ProcessTasksUntilStreamingComplete();
   EXPECT_TRUE(client->Finished());
-  bool error_occurred = false;
-  ScriptSourceCode source_code = GetPendingScript()
-                                     ->GetSource(NullURL(), error_occurred)
-                                     ->GetScriptSourceCode();
-  EXPECT_FALSE(error_occurred);
+  ScriptSourceCode source_code = GetScriptSourceCode();
   EXPECT_TRUE(source_code.Streamer());
   v8::TryCatch try_catch(scope.GetIsolate());
   v8::Local<v8::Script> script;
   v8::ScriptCompiler::CompileOptions compile_options;
-  V8ScriptRunner::ProduceCacheOptions produce_cache_options;
+  V8CodeCache::ProduceCacheOptions produce_cache_options;
   v8::ScriptCompiler::NoCacheReason no_cache_reason;
   std::tie(compile_options, produce_cache_options, no_cache_reason) =
-      V8ScriptRunner::GetCompileOptions(kV8CacheOptionsDefault, source_code);
+      V8CodeCache::GetCompileOptions(kV8CacheOptionsDefault, source_code);
   EXPECT_TRUE(V8ScriptRunner::CompileScript(
                   scope.GetScriptState(), source_code, kSharableCrossOrigin,
                   compile_options, no_cache_reason, ReferrerScriptInfo())
@@ -182,9 +199,10 @@ TEST_F(ScriptStreamingTest, CompilingStreamedScriptWithParseError) {
   // the V8 side typically finished before loading finishes: make sure we
   // handle it gracefully.
   V8TestingScope scope;
-  ScriptStreamer::StartStreaming(
-      GetPendingScript(), ScriptStreamer::kParsingBlocking, GetSettings(),
-      scope.GetScriptState(), loading_task_runner_);
+  ScriptStreamer::NotStreamingReason reason;
+  ScriptStreamer::StartStreaming(GetPendingScript(), loading_task_runner_,
+                                 &reason);
+  GetPendingScript()->SetNotStreamingReasonForTest(reason);
   TestPendingScriptClient* client = new TestPendingScriptClient;
   GetPendingScript()->WatchForLoad(client);
   AppendData("function foo() {");
@@ -202,19 +220,15 @@ TEST_F(ScriptStreamingTest, CompilingStreamedScriptWithParseError) {
   Finish();
   EXPECT_TRUE(client->Finished());
 
-  bool error_occurred = false;
-  ScriptSourceCode source_code = GetPendingScript()
-                                     ->GetSource(NullURL(), error_occurred)
-                                     ->GetScriptSourceCode();
-  EXPECT_FALSE(error_occurred);
+  ScriptSourceCode source_code = GetScriptSourceCode();
   EXPECT_TRUE(source_code.Streamer());
   v8::TryCatch try_catch(scope.GetIsolate());
   v8::Local<v8::Script> script;
   v8::ScriptCompiler::CompileOptions compile_options;
-  V8ScriptRunner::ProduceCacheOptions produce_cache_options;
+  V8CodeCache::ProduceCacheOptions produce_cache_options;
   v8::ScriptCompiler::NoCacheReason no_cache_reason;
   std::tie(compile_options, produce_cache_options, no_cache_reason) =
-      V8ScriptRunner::GetCompileOptions(kV8CacheOptionsDefault, source_code);
+      V8CodeCache::GetCompileOptions(kV8CacheOptionsDefault, source_code);
   EXPECT_FALSE(V8ScriptRunner::CompileScript(
                    scope.GetScriptState(), source_code, kSharableCrossOrigin,
                    compile_options, no_cache_reason, ReferrerScriptInfo())
@@ -226,9 +240,10 @@ TEST_F(ScriptStreamingTest, CancellingStreaming) {
   // Test that the upper layers (PendingScript and up) can be ramped down
   // while streaming is ongoing, and ScriptStreamer handles it gracefully.
   V8TestingScope scope;
-  ScriptStreamer::StartStreaming(
-      GetPendingScript(), ScriptStreamer::kParsingBlocking, GetSettings(),
-      scope.GetScriptState(), loading_task_runner_);
+  ScriptStreamer::NotStreamingReason reason;
+  ScriptStreamer::StartStreaming(GetPendingScript(), loading_task_runner_,
+                                 &reason);
+  GetPendingScript()->SetNotStreamingReasonForTest(reason);
   TestPendingScriptClient* client = new TestPendingScriptClient;
   GetPendingScript()->WatchForLoad(client);
   AppendData("function foo() {");
@@ -249,15 +264,52 @@ TEST_F(ScriptStreamingTest, CancellingStreaming) {
   EXPECT_FALSE(client->Finished());
 }
 
+TEST_F(ScriptStreamingTest, DataAfterCancellingStreaming) {
+  // Test that the upper layers (PendingScript and up) can be ramped down
+  // before streaming is started, and ScriptStreamer handles it gracefully.
+  V8TestingScope scope;
+  ScriptStreamer::NotStreamingReason reason;
+  ScriptStreamer::StartStreaming(GetPendingScript(), loading_task_runner_,
+                                 &reason);
+  GetPendingScript()->SetNotStreamingReasonForTest(reason);
+  TestPendingScriptClient* client = new TestPendingScriptClient;
+  GetPendingScript()->WatchForLoad(client);
+
+  // In general, we cannot control what the background thread is doing
+  // (whether it's parsing or waiting for more data). In this test, we have
+  // given it so little data that it's surely waiting for more.
+
+  EXPECT_FALSE(client->Finished());
+
+  // Keep the resource alive
+  Persistent<ScriptResource> resource = GetResource();
+
+  // Simulate cancelling the network load (e.g., because the user navigated
+  // away).
+  GetPendingScript()->Dispose();
+  pending_script_ = nullptr;  // This would destroy m_resource, but we are still
+                              // holding on to it here.
+
+  // Make sure the streaming starts.
+  AppendPadding(resource);
+  resource.Clear();
+
+  // The V8 side will complete too. This should not crash. We don't receive
+  // any results from the streaming and the client doesn't get notified.
+  ProcessTasksUntilStreamingComplete();
+  EXPECT_FALSE(client->Finished());
+}
+
 TEST_F(ScriptStreamingTest, SuppressingStreaming) {
   // If we notice during streaming that there is a code cache, streaming
   // is suppressed (V8 doesn't parse while the script is loading), and the
   // upper layer (ScriptResourceClient) should get a notification when the
   // script is loaded.
   V8TestingScope scope;
-  ScriptStreamer::StartStreaming(
-      GetPendingScript(), ScriptStreamer::kParsingBlocking, GetSettings(),
-      scope.GetScriptState(), loading_task_runner_);
+  ScriptStreamer::NotStreamingReason reason;
+  ScriptStreamer::StartStreaming(GetPendingScript(), loading_task_runner_,
+                                 &reason);
+  GetPendingScript()->SetNotStreamingReasonForTest(reason);
   TestPendingScriptClient* client = new TestPendingScriptClient;
   GetPendingScript()->WatchForLoad(client);
   AppendData("function foo() {");
@@ -265,20 +317,16 @@ TEST_F(ScriptStreamingTest, SuppressingStreaming) {
 
   SingleCachedMetadataHandler* cache_handler = GetResource()->CacheHandler();
   EXPECT_TRUE(cache_handler);
-  cache_handler->SetCachedMetadata(
-      V8ScriptRunner::TagForCodeCache(cache_handler), "X", 1,
-      CachedMetadataHandler::kCacheLocally);
+  cache_handler->SetCachedMetadata(V8CodeCache::TagForCodeCache(cache_handler),
+                                   "X", 1,
+                                   CachedMetadataHandler::kCacheLocally);
 
   AppendPadding();
   Finish();
   ProcessTasksUntilStreamingComplete();
   EXPECT_TRUE(client->Finished());
 
-  bool error_occurred = false;
-  ScriptSourceCode source_code = GetPendingScript()
-                                     ->GetSource(NullURL(), error_occurred)
-                                     ->GetScriptSourceCode();
-  EXPECT_FALSE(error_occurred);
+  ScriptSourceCode source_code = GetScriptSourceCode();
   // ScriptSourceCode doesn't refer to the streamer, since we have suppressed
   // the streaming and resumed the non-streaming code path for script
   // compilation.
@@ -290,9 +338,10 @@ TEST_F(ScriptStreamingTest, EmptyScripts) {
   // (ScriptResourceClient) should be notified when an empty script has been
   // loaded.
   V8TestingScope scope;
-  ScriptStreamer::StartStreaming(
-      GetPendingScript(), ScriptStreamer::kParsingBlocking, GetSettings(),
-      scope.GetScriptState(), loading_task_runner_);
+  ScriptStreamer::NotStreamingReason reason;
+  ScriptStreamer::StartStreaming(GetPendingScript(), loading_task_runner_,
+                                 &reason);
+  GetPendingScript()->SetNotStreamingReasonForTest(reason);
   TestPendingScriptClient* client = new TestPendingScriptClient;
   GetPendingScript()->WatchForLoad(client);
 
@@ -302,11 +351,7 @@ TEST_F(ScriptStreamingTest, EmptyScripts) {
   // through a background thread.
   EXPECT_TRUE(client->Finished());
 
-  bool error_occurred = false;
-  ScriptSourceCode source_code = GetPendingScript()
-                                     ->GetSource(NullURL(), error_occurred)
-                                     ->GetScriptSourceCode();
-  EXPECT_FALSE(error_occurred);
+  ScriptSourceCode source_code = GetScriptSourceCode();
   EXPECT_FALSE(source_code.Streamer());
 }
 
@@ -315,9 +360,10 @@ TEST_F(ScriptStreamingTest, SmallScripts) {
   V8TestingScope scope;
   ScriptStreamer::SetSmallScriptThresholdForTesting(100);
 
-  ScriptStreamer::StartStreaming(
-      GetPendingScript(), ScriptStreamer::kParsingBlocking, GetSettings(),
-      scope.GetScriptState(), loading_task_runner_);
+  ScriptStreamer::NotStreamingReason reason;
+  ScriptStreamer::StartStreaming(GetPendingScript(), loading_task_runner_,
+                                 &reason);
+  GetPendingScript()->SetNotStreamingReasonForTest(reason);
   TestPendingScriptClient* client = new TestPendingScriptClient;
   GetPendingScript()->WatchForLoad(client);
 
@@ -329,11 +375,7 @@ TEST_F(ScriptStreamingTest, SmallScripts) {
   // through a background thread.
   EXPECT_TRUE(client->Finished());
 
-  bool error_occurred = false;
-  ScriptSourceCode source_code = GetPendingScript()
-                                     ->GetSource(NullURL(), error_occurred)
-                                     ->GetScriptSourceCode();
-  EXPECT_FALSE(error_occurred);
+  ScriptSourceCode source_code = GetScriptSourceCode();
   EXPECT_FALSE(source_code.Streamer());
 }
 
@@ -343,9 +385,10 @@ TEST_F(ScriptStreamingTest, ScriptsWithSmallFirstChunk) {
   V8TestingScope scope;
   ScriptStreamer::SetSmallScriptThresholdForTesting(100);
 
-  ScriptStreamer::StartStreaming(
-      GetPendingScript(), ScriptStreamer::kParsingBlocking, GetSettings(),
-      scope.GetScriptState(), loading_task_runner_);
+  ScriptStreamer::NotStreamingReason reason;
+  ScriptStreamer::StartStreaming(GetPendingScript(), loading_task_runner_,
+                                 &reason);
+  GetPendingScript()->SetNotStreamingReasonForTest(reason);
   TestPendingScriptClient* client = new TestPendingScriptClient;
   GetPendingScript()->WatchForLoad(client);
 
@@ -359,19 +402,15 @@ TEST_F(ScriptStreamingTest, ScriptsWithSmallFirstChunk) {
 
   ProcessTasksUntilStreamingComplete();
   EXPECT_TRUE(client->Finished());
-  bool error_occurred = false;
-  ScriptSourceCode source_code = GetPendingScript()
-                                     ->GetSource(NullURL(), error_occurred)
-                                     ->GetScriptSourceCode();
-  EXPECT_FALSE(error_occurred);
+  ScriptSourceCode source_code = GetScriptSourceCode();
   EXPECT_TRUE(source_code.Streamer());
   v8::TryCatch try_catch(scope.GetIsolate());
   v8::Local<v8::Script> script;
   v8::ScriptCompiler::CompileOptions compile_options;
-  V8ScriptRunner::ProduceCacheOptions produce_cache_options;
+  V8CodeCache::ProduceCacheOptions produce_cache_options;
   v8::ScriptCompiler::NoCacheReason no_cache_reason;
   std::tie(compile_options, produce_cache_options, no_cache_reason) =
-      V8ScriptRunner::GetCompileOptions(kV8CacheOptionsDefault, source_code);
+      V8CodeCache::GetCompileOptions(kV8CacheOptionsDefault, source_code);
   EXPECT_TRUE(V8ScriptRunner::CompileScript(
                   scope.GetScriptState(), source_code, kSharableCrossOrigin,
                   compile_options, no_cache_reason, ReferrerScriptInfo())
@@ -385,9 +424,10 @@ TEST_F(ScriptStreamingTest, EncodingChanges) {
   V8TestingScope scope;
   GetResource()->SetEncodingForTest("windows-1252");
 
-  ScriptStreamer::StartStreaming(
-      GetPendingScript(), ScriptStreamer::kParsingBlocking, GetSettings(),
-      scope.GetScriptState(), loading_task_runner_);
+  ScriptStreamer::NotStreamingReason reason;
+  ScriptStreamer::StartStreaming(GetPendingScript(), loading_task_runner_,
+                                 &reason);
+  GetPendingScript()->SetNotStreamingReasonForTest(reason);
   TestPendingScriptClient* client = new TestPendingScriptClient;
   GetPendingScript()->WatchForLoad(client);
 
@@ -401,19 +441,15 @@ TEST_F(ScriptStreamingTest, EncodingChanges) {
 
   ProcessTasksUntilStreamingComplete();
   EXPECT_TRUE(client->Finished());
-  bool error_occurred = false;
-  ScriptSourceCode source_code = GetPendingScript()
-                                     ->GetSource(NullURL(), error_occurred)
-                                     ->GetScriptSourceCode();
-  EXPECT_FALSE(error_occurred);
+  ScriptSourceCode source_code = GetScriptSourceCode();
   EXPECT_TRUE(source_code.Streamer());
   v8::TryCatch try_catch(scope.GetIsolate());
   v8::Local<v8::Script> script;
   v8::ScriptCompiler::CompileOptions compile_options;
-  V8ScriptRunner::ProduceCacheOptions produce_cache_options;
+  V8CodeCache::ProduceCacheOptions produce_cache_options;
   v8::ScriptCompiler::NoCacheReason no_cache_reason;
   std::tie(compile_options, produce_cache_options, no_cache_reason) =
-      V8ScriptRunner::GetCompileOptions(kV8CacheOptionsDefault, source_code);
+      V8CodeCache::GetCompileOptions(kV8CacheOptionsDefault, source_code);
   EXPECT_TRUE(V8ScriptRunner::CompileScript(
                   scope.GetScriptState(), source_code, kSharableCrossOrigin,
                   compile_options, no_cache_reason, ReferrerScriptInfo())
@@ -429,9 +465,10 @@ TEST_F(ScriptStreamingTest, EncodingFromBOM) {
   // This encoding is wrong on purpose.
   GetResource()->SetEncodingForTest("windows-1252");
 
-  ScriptStreamer::StartStreaming(
-      GetPendingScript(), ScriptStreamer::kParsingBlocking, GetSettings(),
-      scope.GetScriptState(), loading_task_runner_);
+  ScriptStreamer::NotStreamingReason reason;
+  ScriptStreamer::StartStreaming(GetPendingScript(), loading_task_runner_,
+                                 &reason);
+  GetPendingScript()->SetNotStreamingReasonForTest(reason);
   TestPendingScriptClient* client = new TestPendingScriptClient;
   GetPendingScript()->WatchForLoad(client);
 
@@ -444,19 +481,15 @@ TEST_F(ScriptStreamingTest, EncodingFromBOM) {
   Finish();
   ProcessTasksUntilStreamingComplete();
   EXPECT_TRUE(client->Finished());
-  bool error_occurred = false;
-  ScriptSourceCode source_code = GetPendingScript()
-                                     ->GetSource(NullURL(), error_occurred)
-                                     ->GetScriptSourceCode();
-  EXPECT_FALSE(error_occurred);
+  ScriptSourceCode source_code = GetScriptSourceCode();
   EXPECT_TRUE(source_code.Streamer());
   v8::TryCatch try_catch(scope.GetIsolate());
   v8::Local<v8::Script> script;
   v8::ScriptCompiler::CompileOptions compile_options;
-  V8ScriptRunner::ProduceCacheOptions produce_cache_options;
+  V8CodeCache::ProduceCacheOptions produce_cache_options;
   v8::ScriptCompiler::NoCacheReason no_cache_reason;
   std::tie(compile_options, produce_cache_options, no_cache_reason) =
-      V8ScriptRunner::GetCompileOptions(kV8CacheOptionsDefault, source_code);
+      V8CodeCache::GetCompileOptions(kV8CacheOptionsDefault, source_code);
   EXPECT_TRUE(V8ScriptRunner::CompileScript(
                   scope.GetScriptState(), source_code, kSharableCrossOrigin,
                   compile_options, no_cache_reason, ReferrerScriptInfo())
@@ -467,9 +500,10 @@ TEST_F(ScriptStreamingTest, EncodingFromBOM) {
 // A test for crbug.com/711703. Should not crash.
 TEST_F(ScriptStreamingTest, GarbageCollectDuringStreaming) {
   V8TestingScope scope;
-  ScriptStreamer::StartStreaming(
-      GetPendingScript(), ScriptStreamer::kParsingBlocking, GetSettings(),
-      scope.GetScriptState(), loading_task_runner_);
+  ScriptStreamer::NotStreamingReason reason;
+  ScriptStreamer::StartStreaming(GetPendingScript(), loading_task_runner_,
+                                 &reason);
+  GetPendingScript()->SetNotStreamingReasonForTest(reason);
 
   TestPendingScriptClient* client = new TestPendingScriptClient;
   GetPendingScript()->WatchForLoad(client);
@@ -478,7 +512,7 @@ TEST_F(ScriptStreamingTest, GarbageCollectDuringStreaming) {
   pending_script_ = nullptr;
   ThreadState::Current()->CollectGarbage(
       BlinkGC::kNoHeapPointersOnStack, BlinkGC::kAtomicMarking,
-      BlinkGC::kEagerSweeping, BlinkGC::kForcedGC);
+      BlinkGC::kEagerSweeping, BlinkGC::GCReason::kForcedGC);
 }
 
 }  // namespace

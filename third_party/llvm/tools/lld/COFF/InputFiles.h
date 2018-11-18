@@ -13,6 +13,7 @@
 #include "Config.h"
 #include "lld/Common/LLVM.h"
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/LTO/LTO.h"
 #include "llvm/Object/Archive.h"
@@ -144,6 +145,8 @@ public:
   // if we are not producing a PDB.
   llvm::pdb::DbiModuleDescriptorBuilder *ModuleDBI = nullptr;
 
+  const coff_section *AddrsigSec = nullptr;
+
 private:
   void initializeChunks();
   void initializeSymbols();
@@ -157,10 +160,24 @@ private:
       COFFSymbolRef COFFSym,
       const llvm::object::coff_aux_section_definition *Def);
 
+  void readAssociativeDefinition(
+      COFFSymbolRef COFFSym,
+      const llvm::object::coff_aux_section_definition *Def,
+      uint32_t ParentSection);
+
+  void recordPrevailingSymbolForMingw(
+      COFFSymbolRef COFFSym,
+      llvm::DenseMap<StringRef, uint32_t> &PrevailingSectionMap);
+
+  void maybeAssociateSEHForMingw(
+      COFFSymbolRef Sym, const llvm::object::coff_aux_section_definition *Def,
+      const llvm::DenseMap<StringRef, uint32_t> &PrevailingSectionMap);
+
   llvm::Optional<Symbol *>
   createDefined(COFFSymbolRef Sym,
                 std::vector<const llvm::object::coff_aux_section_definition *>
-                    &ComdatDefs);
+                    &ComdatDefs,
+                bool &PrevailingComdat);
   Symbol *createRegular(COFFSymbolRef Sym);
   Symbol *createUndefined(COFFSymbolRef Sym);
 
@@ -201,15 +218,14 @@ private:
 // for details about the format.
 class ImportFile : public InputFile {
 public:
-  explicit ImportFile(MemoryBufferRef M)
-      : InputFile(ImportKind, M), Live(!Config->DoGC) {}
+  explicit ImportFile(MemoryBufferRef M) : InputFile(ImportKind, M) {}
 
   static bool classof(const InputFile *F) { return F->kind() == ImportKind; }
 
   static std::vector<ImportFile *> Instances;
 
-  DefinedImportData *ImpSym = nullptr;
-  DefinedImportThunk *ThunkSym = nullptr;
+  Symbol *ImpSym = nullptr;
+  Symbol *ThunkSym = nullptr;
   std::string DLLName;
 
 private:
@@ -221,12 +237,15 @@ public:
   Chunk *Location = nullptr;
 
   // We want to eliminate dllimported symbols if no one actually refers them.
-  // This "Live" bit is used to keep track of which import library members
+  // These "Live" bits are used to keep track of which import library members
   // are actually in use.
   //
   // If the Live bit is turned off by MarkLive, Writer will ignore dllimported
-  // symbols provided by this import library member.
-  bool Live;
+  // symbols provided by this import library member. We also track whether the
+  // imported symbol is used separately from whether the thunk is used in order
+  // to avoid creating unnecessary thunks.
+  bool Live = !Config->DoGC;
+  bool ThunkLive = !Config->DoGC;
 };
 
 // Used for LTO.
@@ -234,7 +253,7 @@ class BitcodeFile : public InputFile {
 public:
   explicit BitcodeFile(MemoryBufferRef M) : InputFile(BitcodeKind, M) {}
   static bool classof(const InputFile *F) { return F->kind() == BitcodeKind; }
-  ArrayRef<Symbol *> getSymbols() { return SymbolBodies; }
+  ArrayRef<Symbol *> getSymbols() { return Symbols; }
   MachineTypes getMachineType() override;
   static std::vector<BitcodeFile *> Instances;
   std::unique_ptr<llvm::lto::InputFile> Obj;
@@ -242,7 +261,7 @@ public:
 private:
   void parse() override;
 
-  std::vector<Symbol *> SymbolBodies;
+  std::vector<Symbol *> Symbols;
 };
 } // namespace coff
 

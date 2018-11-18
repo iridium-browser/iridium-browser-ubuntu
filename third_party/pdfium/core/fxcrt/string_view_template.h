@@ -10,11 +10,9 @@
 #include <algorithm>
 #include <iterator>
 #include <type_traits>
-#include <utility>
 #include <vector>
 
 #include "core/fxcrt/fx_system.h"
-#include "core/fxcrt/unowned_ptr.h"
 #include "third_party/base/optional.h"
 #include "third_party/base/span.h"
 #include "third_party/base/stl_util.h"
@@ -81,7 +79,10 @@ class StringViewTemplate {
     return *this;
   }
 
-  StringViewTemplate& operator=(const StringViewTemplate& src) = default;
+  StringViewTemplate& operator=(const StringViewTemplate& src) {
+    m_Span = src.m_Span;
+    return *this;
+  }
 
   const_iterator begin() const {
     return reinterpret_cast<const_iterator>(m_Span.begin());
@@ -231,8 +232,12 @@ inline bool operator<(const T* lhs, const StringViewTemplate<T>& rhs) {
   return rhs > lhs;
 }
 
+// Workaround for one of the cases external template classes are
+// failing in GCC before version 7 with -O0
+#if !defined(__GNUC__) || __GNUC__ >= 7
 extern template class StringViewTemplate<char>;
 extern template class StringViewTemplate<wchar_t>;
+#endif
 
 using ByteStringView = StringViewTemplate<char>;
 using WideStringView = StringViewTemplate<wchar_t>;

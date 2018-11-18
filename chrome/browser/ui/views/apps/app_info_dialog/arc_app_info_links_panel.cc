@@ -8,7 +8,7 @@
 
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_utils.h"
-#include "chrome/browser/ui/views/harmony/chrome_layout_provider.h"
+#include "chrome/browser/ui/views/chrome_layout_provider.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/arc/common/app.mojom.h"
 #include "components/arc/intent_helper/arc_intent_helper_bridge.h"
@@ -61,22 +61,23 @@ void ArcAppInfoLinksPanel::LinkClicked(views::Link* source, int event_flags) {
   }
 }
 
-void ArcAppInfoLinksPanel::OnAppReadyChanged(const std::string& app_id,
-                                             bool ready) {
-  if (app_id == arc::kSettingsAppId)
-    UpdateLink(ready);
-}
-
-void ArcAppInfoLinksPanel::OnAppRemoved(const std::string& app_id) {
-  if (app_id == arc::kSettingsAppId)
-    UpdateLink(false);
-}
-
 void ArcAppInfoLinksPanel::OnAppRegistered(
     const std::string& app_id,
     const ArcAppListPrefs::AppInfo& app_info) {
   if (app_id == arc::kSettingsAppId)
     UpdateLink(app_info.ready);
+}
+
+void ArcAppInfoLinksPanel::OnAppStatesChanged(
+    const std::string& app_id,
+    const ArcAppListPrefs::AppInfo& app_info) {
+  if (app_id == arc::kSettingsAppId)
+    UpdateLink(app_info.ready);
+}
+
+void ArcAppInfoLinksPanel::OnAppRemoved(const std::string& app_id) {
+  if (app_id == arc::kSettingsAppId)
+    UpdateLink(false);
 }
 
 void ArcAppInfoLinksPanel::UpdateLink(bool enabled) {

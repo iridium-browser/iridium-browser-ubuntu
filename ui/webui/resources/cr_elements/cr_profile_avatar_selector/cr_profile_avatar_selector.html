@@ -1,7 +1,9 @@
-<link rel="import" href="chrome://resources/html/polymer.html">
+<link rel="import" href="../../html/polymer.html">
 
-<link rel="import" href="chrome://resources/html/icon.html">
+<link rel="import" href="../shared_vars_css.html">
+<link rel="import" href="../../html/icon.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-button/paper-button.html">
+<link rel="import" href="chrome://resources/polymer/v1_0/paper-styles/color.html">
 <link rel="import" href="cr_profile_avatar_selector_grid.html">
 
 <dom-module id="cr-profile-avatar-selector">
@@ -16,16 +18,11 @@
       }
 
       #avatar-grid .avatar {
-        --paper-button: {
-          background: var(--paper-grey-300);
-        };
-        --paper-button-flat-keyboard-focus: {
-          background: var(--paper-grey-400);
-        };
+        background-color: var(--paper-grey-300);
         background-position: center;
         background-repeat: no-repeat;
         border: 1px solid rgba(0, 0, 0, .12);
-        border-radius: 2px;
+        border-radius: var(--cr-card-border-radius);
         display: flex;
         height: var(--avatar-size);
         margin: calc(var(--avatar-spacing) / 2);
@@ -34,6 +31,10 @@
         width: var(--avatar-size);
 
         @apply --avatar-selector-avatar;
+      }
+
+      #avatar-grid .avatar.keyboard-focus {
+        background-color: var(--paper-grey-400);
       }
 
       #avatar-grid .avatar.iron-selected {

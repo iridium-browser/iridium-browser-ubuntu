@@ -4,7 +4,10 @@
 
 #include "ash/system/model/clock_model.h"
 
+#include "ash/session/session_controller.h"
+#include "ash/shell.h"
 #include "ash/system/date/clock_observer.h"
+#include "ash/system/model/system_tray_model.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 
 namespace ash {
@@ -33,6 +36,24 @@ void ClockModel::RemoveObserver(ClockObserver* observer) {
 void ClockModel::SetUse24HourClock(bool use_24_hour) {
   hour_clock_type_ = use_24_hour ? base::k24HourClock : base::k12HourClock;
   NotifyDateFormatChanged();
+}
+
+bool ClockModel::IsLoggedIn() const {
+  return Shell::Get()->session_controller()->login_status() !=
+         LoginStatus::NOT_LOGGED_IN;
+}
+
+bool ClockModel::IsSettingsAvailable() const {
+  return Shell::Get()->session_controller()->ShouldEnableSettings() ||
+         can_set_time();
+}
+
+void ClockModel::ShowDateSettings() {
+  Shell::Get()->system_tray_model()->client_ptr()->ShowDateSettings();
+}
+
+void ClockModel::ShowSetTimeDialog() {
+  Shell::Get()->system_tray_model()->client_ptr()->ShowSetTimeDialog();
 }
 
 void ClockModel::NotifyRefreshClock() {

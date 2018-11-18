@@ -93,9 +93,9 @@ void CrashReporterClient::GetProductNameAndVersion(const char** product_name,
                                                    const char** version) {
 }
 
-void CrashReporterClient::GetProductNameAndVersion(const char** product_name,
-                                                   const char** version,
-                                                   const char** channel) {}
+void CrashReporterClient::GetProductNameAndVersion(std::string* product_name,
+                                                   std::string* version,
+                                                   std::string* channel) {}
 
 base::FilePath CrashReporterClient::GetReporterLogFilename() {
   return base::FilePath();
@@ -168,6 +168,17 @@ bool CrashReporterClient::ShouldEnableBreakpadMicrodumps() {
 #else
   return false;
 #endif
+}
+#endif
+
+#if defined(OS_ANDROID) || defined(OS_LINUX)
+void CrashReporterClient::GetSanitizationInformation(
+    const char* const** annotations_whitelist,
+    void** target_module,
+    bool* sanitize_stacks) {
+  *annotations_whitelist = nullptr;
+  *target_module = nullptr;
+  *sanitize_stacks = false;
 }
 #endif
 

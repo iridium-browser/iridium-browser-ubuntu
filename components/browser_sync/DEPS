@@ -8,7 +8,6 @@ include_rules = [
   "+components/invalidation",
   "+components/keyed_service/core",
   "+components/password_manager/core/browser",
-  "+components/password_manager/sync/browser",
   "+components/pref_registry",
   "+components/prefs",
   "+components/reading_list/features",
@@ -24,4 +23,6 @@ include_rules = [
   "+google_apis",
   "+net",
   "+services/identity/public/cpp",
+  "+services/network/public/cpp",
+  "+services/network/test",
 ]

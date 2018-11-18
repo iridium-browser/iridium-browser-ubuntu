@@ -32,7 +32,7 @@ namespace WTF {
 
 // TODO(esprehn): See if we can generalize IntToStringT in
 // base/strings/string_number_conversions.cc, and use unsigned type expansion
-// optimization here instead of CheckedNumeric::UnsignedAbs().
+// optimization here instead of base::CheckedNumeric::UnsignedAbs().
 template <typename IntegerType>
 class IntegerToStringConverter {
  public:
@@ -40,7 +40,7 @@ class IntegerToStringConverter {
                 "IntegerType must be a type of integer.");
 
   explicit IntegerToStringConverter(IntegerType input) {
-    LChar* end = buffer_ + WTF_ARRAY_LENGTH(buffer_);
+    LChar* end = buffer_ + arraysize(buffer_);
     begin_ = end;
 
     // We need to switch to the unsigned type when negating the value since

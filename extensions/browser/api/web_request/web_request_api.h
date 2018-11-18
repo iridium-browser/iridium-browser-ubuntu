@@ -14,12 +14,15 @@
 #include <utility>
 #include <vector>
 
+#include "base/containers/unique_ptr_adapters.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string_util.h"
 #include "base/time/time.h"
+#include "content/public/browser/content_browser_client.h"
+#include "content/public/browser/global_request_id.h"
 #include "extensions/browser/api/declarative/rules_registry.h"
 #include "extensions/browser/api/declarative_webrequest/request_stage.h"
 #include "extensions/browser/api/web_request/web_request_api_helpers.h"
@@ -29,10 +32,12 @@
 #include "extensions/browser/extension_function.h"
 #include "extensions/common/url_pattern_set.h"
 #include "ipc/ipc_sender.h"
-#include "net/base/completion_callback.h"
+#include "net/base/auth.h"
+#include "net/base/completion_once_callback.h"
 #include "net/base/network_delegate.h"
 #include "net/http/http_request_headers.h"
 #include "services/network/public/mojom/url_loader_factory.mojom.h"
+#include "services/network/public/mojom/websocket.mojom.h"
 
 class ExtensionWebRequestTimeTracker;
 class GURL;
@@ -59,9 +64,7 @@ enum class WebRequestResourceType : uint8_t;
 
 class InfoMap;
 class WebRequestEventDetails;
-class WebRequestEventRouterDelegate;
 struct WebRequestInfo;
-class WebRequestProxyingURLLoaderFactory;
 class WebRequestRulesRegistry;
 
 // Support class for the WebRequest API. Lives on the UI thread. Most of the
@@ -69,8 +72,105 @@ class WebRequestRulesRegistry;
 // extensions::EventRouter to deal with event listeners. There is one instance
 // per BrowserContext which is shared with incognito.
 class WebRequestAPI : public BrowserContextKeyedAPI,
-                      public EventRouter::Observer {
+                      public EventRouter::Observer,
+                      public ExtensionRegistryObserver {
  public:
+  // A callback used to asynchronously respond to an intercepted authentication
+  // request when the Network Service is enabled. If |should_cancel| is true
+  // the request will be cancelled. Otherwise any supplied |credentials| will be
+  // used. If no credentials are supplied, default browser behavior will follow
+  // (e.g. UI prompt for login).
+  using AuthRequestCallback = base::OnceCallback<void(
+      const base::Optional<net::AuthCredentials>& credentials,
+      bool should_cancel)>;
+
+  // An interface which is held by ProxySet defined below.
+  class Proxy {
+   public:
+    virtual ~Proxy() {}
+
+    // Asks the Proxy to handle an auth request on behalf of one of its known
+    // in-progress network requests. If the request will *not* be handled by
+    // the proxy, |callback| should be invoked with |base::nullopt|.
+    virtual void HandleAuthRequest(
+        net::AuthChallengeInfo* auth_info,
+        scoped_refptr<net::HttpResponseHeaders> response_headers,
+        int32_t request_id,
+        AuthRequestCallback callback);
+  };
+
+  // A ProxySet is a set of proxies used by WebRequestAPI: It holds Proxy
+  // instances, and removes all proxies when the ResourceContext it is bound to
+  // is destroyed.
+  class ProxySet : public base::SupportsUserData::Data {
+   public:
+    ProxySet();
+    ~ProxySet() override;
+
+    // Gets or creates a ProxySet from the given ResourceContext.
+    static ProxySet* GetFromResourceContext(
+        content::ResourceContext* resource_context);
+
+    // Add a Proxy.
+    void AddProxy(std::unique_ptr<Proxy> proxy);
+    // Remove a Proxy. The removed proxy is deleted upon this call.
+    void RemoveProxy(Proxy* proxy);
+
+    // Associates |proxy| with |id|. |proxy| must already be registered within
+    // this ProxySet.
+    //
+    // Each Proxy may be responsible for multiple requests, but any given
+    // request identified by |id| must be associated with only a single proxy.
+    void AssociateProxyWithRequestId(Proxy* proxy,
+                                     const content::GlobalRequestID& id);
+
+    // Disassociates |proxy| with |id|. |proxy| must already be registered
+    // within this ProxySet.
+    void DisassociateProxyWithRequestId(Proxy* proxy,
+                                        const content::GlobalRequestID& id);
+
+    Proxy* GetProxyFromRequestId(const content::GlobalRequestID& id);
+
+    void MaybeProxyAuthRequest(
+        net::AuthChallengeInfo* auth_info,
+        scoped_refptr<net::HttpResponseHeaders> response_headers,
+        const content::GlobalRequestID& request_id,
+        AuthRequestCallback callback);
+
+   private:
+    // Although these members are initialized on the UI thread, we expect at
+    // least one memory barrier before actually calling Generate in the IO
+    // thread, so we don't protect them with a lock.
+    std::set<std::unique_ptr<Proxy>, base::UniquePtrComparator> proxies_;
+
+    // Bi-directional mapping between request ID and Proxy for faster lookup.
+    std::map<content::GlobalRequestID, Proxy*> request_id_to_proxy_map_;
+    std::map<Proxy*, std::set<content::GlobalRequestID>>
+        proxy_to_request_id_map_;
+
+    DISALLOW_COPY_AND_ASSIGN(ProxySet);
+  };
+
+  class RequestIDGenerator
+      : public base::RefCountedThreadSafe<RequestIDGenerator> {
+   public:
+    RequestIDGenerator() = default;
+    int64_t Generate() {
+      DCHECK_CURRENTLY_ON(content::BrowserThread::IO);
+      return ++id_;
+    }
+
+   private:
+    friend class base::RefCountedThreadSafe<RequestIDGenerator>;
+    ~RequestIDGenerator() {}
+
+    // Although this initialization can be done in a thread other than the IO
+    // thread, we expect at least one memory barrier before actually calling
+    // Generate in the IO thread, so we don't protect the variable with a lock.
+    int64_t id_ = 0;
+    DISALLOW_COPY_AND_ASSIGN(RequestIDGenerator);
+  };
+
   explicit WebRequestAPI(content::BrowserContext* context);
   ~WebRequestAPI() override;
 
@@ -79,7 +179,6 @@ class WebRequestAPI : public BrowserContextKeyedAPI,
   void Shutdown() override;
 
   // EventRouter::Observer overrides:
-  void OnListenerAdded(const EventListenerInfo& details) override;
   void OnListenerRemoved(const EventListenerInfo& details) override;
 
   // If any WebRequest event listeners are currently active for this
@@ -94,6 +193,31 @@ class WebRequestAPI : public BrowserContextKeyedAPI,
       bool is_navigation,
       network::mojom::URLLoaderFactoryRequest* factory_request);
 
+  // Any request which requires authentication to complete will be bounced
+  // through this method iff Network Service is enabled.
+  //
+  // If this returns |true|, |callback| will eventually be invoked on the UI
+  // thread.
+  bool MaybeProxyAuthRequest(
+      net::AuthChallengeInfo* auth_info,
+      scoped_refptr<net::HttpResponseHeaders> response_headers,
+      const content::GlobalRequestID& request_id,
+      bool is_main_frame,
+      AuthRequestCallback callback);
+
+  // If any WebRequest event listeners are currently active for this
+  // BrowserContext, |*request| is swapped out for a new request which proxies
+  // through an internal WebSocket implementation. This supports lifetime
+  // observation and control on behalf of the WebRequest API.
+  //
+  // Only used when the Network Service is enabled.
+  void MaybeProxyWebSocket(
+      content::RenderFrameHost* frame,
+      network::mojom::WebSocketRequest* request,
+      network::mojom::AuthenticationHandlerPtr* auth_handler);
+
+  void ForceProxyForTesting();
+
  private:
   friend class BrowserContextKeyedAPIFactory<WebRequestAPI>;
 
@@ -102,25 +226,33 @@ class WebRequestAPI : public BrowserContextKeyedAPI,
   static const bool kServiceRedirectedInIncognito = true;
   static const bool kServiceIsNULLWhileTesting = true;
 
-  static void RemoveProxyThreadSafe(
-      base::WeakPtr<WebRequestAPI> weak_self,
-      WebRequestProxyingURLLoaderFactory* factory);
-  void RemoveProxy(WebRequestProxyingURLLoaderFactory* factory);
+  // Indicates whether or not the WebRequestAPI may have one or more proxies
+  // installed to support the API with Network Service enabled.
+  bool MayHaveProxies() const;
 
-  // A count of active event listeners registered in this BrowserContext. This
-  // is eventually consistent with the state of
-  int listener_count_ = 0;
+  // Checks if |MayHaveProxies()| has changed from false to true, and resets
+  // URLLoaderFactories if so.
+  void UpdateMayHaveProxies();
+
+  // ExtensionRegistryObserver implementation.
+  void OnExtensionLoaded(content::BrowserContext* browser_context,
+                         const Extension* extension) override;
+  void OnExtensionUnloaded(content::BrowserContext* browser_context,
+                           const Extension* extension,
+                           UnloadedExtensionReason reason) override;
+
+  // A count of active extensions for this BrowserContext that use web request
+  // permissions.
+  int web_request_extension_count_ = 0;
 
   content::BrowserContext* const browser_context_;
   InfoMap* const info_map_;
 
-  // Active proxying URLLoaderFactory instances. Only used when the Network
-  // Service is enabled.
-  std::map<WebRequestProxyingURLLoaderFactory*,
-           scoped_refptr<WebRequestProxyingURLLoaderFactory>>
-      proxies_;
+  scoped_refptr<RequestIDGenerator> request_id_generator_;
 
-  base::WeakPtrFactory<WebRequestAPI> weak_ptr_factory_;
+  // Stores the last result of |MayHaveProxies()|, so it can be used in
+  // |UpdateMayHaveProxies()|.
+  bool may_have_proxies_;
 
   DISALLOW_COPY_AND_ASSIGN(WebRequestAPI);
 };
@@ -132,6 +264,7 @@ class ExtensionWebRequestEventRouter {
  public:
   struct BlockedRequest;
 
+  // The events denoting the lifecycle of a given network request.
   enum EventTypes {
     kInvalidEvent = 0,
     kOnBeforeRequest = 1 << 0,
@@ -201,12 +334,16 @@ class ExtensionWebRequestEventRouter {
 
   // Dispatches the OnBeforeRequest event to any extensions whose filters match
   // the given request. Returns net::ERR_IO_PENDING if an extension is
-  // intercepting the request, OK otherwise.
+  // intercepting the request and OK if the request should proceed normally.
+  // net::ERR_BLOCKED_BY_CLIENT is returned if the request should be blocked. In
+  // this case, |should_collapse_initiator| might be set to true indicating
+  // whether the DOM element which initiated the request should be blocked.
   int OnBeforeRequest(void* browser_context,
                       const extensions::InfoMap* extension_info_map,
                       WebRequestInfo* request,
-                      const net::CompletionCallback& callback,
-                      GURL* new_url);
+                      net::CompletionOnceCallback callback,
+                      GURL* new_url,
+                      bool* should_collapse_initiator);
 
   // Dispatches the onBeforeSendHeaders event. This is fired for HTTP(s)
   // requests only, and allows modification of the outgoing request headers.
@@ -215,7 +352,7 @@ class ExtensionWebRequestEventRouter {
   int OnBeforeSendHeaders(void* browser_context,
                           const extensions::InfoMap* extension_info_map,
                           const WebRequestInfo* request,
-                          const net::CompletionCallback& callback,
+                          net::CompletionOnceCallback callback,
                           net::HttpRequestHeaders* headers);
 
   // Dispatches the onSendHeaders event. This is fired for HTTP(s) requests
@@ -238,7 +375,7 @@ class ExtensionWebRequestEventRouter {
       void* browser_context,
       const extensions::InfoMap* extension_info_map,
       const WebRequestInfo* request,
-      const net::CompletionCallback& callback,
+      net::CompletionOnceCallback callback,
       const net::HttpResponseHeaders* original_response_headers,
       scoped_refptr<net::HttpResponseHeaders>* override_response_headers,
       GURL* allowed_unsafe_redirect_url);
@@ -253,7 +390,7 @@ class ExtensionWebRequestEventRouter {
       const extensions::InfoMap* extension_info_map,
       const WebRequestInfo* request,
       const net::AuthChallengeInfo& auth_info,
-      const net::NetworkDelegate::AuthCallback& callback,
+      net::NetworkDelegate::AuthCallback callback,
       net::AuthCredentials* credentials);
 
   // Dispatches the onBeforeRedirect event. This is fired for HTTP(s) requests
@@ -566,9 +703,6 @@ class ExtensionWebRequestEventRouter {
   // respective rules registry.
   std::map<RulesRegistryKey,
       scoped_refptr<extensions::WebRequestRulesRegistry> > rules_registries_;
-
-  std::unique_ptr<extensions::WebRequestEventRouterDelegate>
-      web_request_event_router_delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(ExtensionWebRequestEventRouter);
 };

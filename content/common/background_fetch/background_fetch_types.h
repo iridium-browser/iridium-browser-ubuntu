@@ -11,25 +11,17 @@
 
 #include "content/common/content_export.h"
 #include "content/common/service_worker/service_worker_types.h"
+#include "third_party/blink/public/common/manifest/manifest.h"
+#include "third_party/blink/public/mojom/fetch/fetch_api_response.mojom.h"
+
+namespace blink {
+namespace mojom {
+enum class BackgroundFetchFailureReason;
+enum class BackgroundFetchResult;
+}  // namespace mojom
+}  // namespace blink
 
 namespace content {
-
-// Represents the definition of an icon developers can optionally provide with a
-// Background Fetch fetch. Analogous to the following structure in the spec:
-// https://wicg.github.io/background-fetch/#background-fetch-manager
-//
-// Parsing of the icon definitions as well as fetching an appropriate icon will
-// be done by Blink in the renderer process. The browser process is expected to
-// treat these values as opaque strings.
-struct CONTENT_EXPORT IconDefinition {
-  IconDefinition();
-  IconDefinition(const IconDefinition& other);
-  ~IconDefinition();
-
-  std::string src;
-  std::string sizes;
-  std::string type;
-};
 
 // Represents the optional options a developer can provide when starting a new
 // Background Fetch fetch. Analogous to the following structure in the spec:
@@ -39,7 +31,7 @@ struct CONTENT_EXPORT BackgroundFetchOptions {
   BackgroundFetchOptions(const BackgroundFetchOptions& other);
   ~BackgroundFetchOptions();
 
-  std::vector<IconDefinition> icons;
+  std::vector<blink::Manifest::ImageResource> icons;
   std::string title;
   uint64_t download_total = 0;
 };
@@ -49,6 +41,15 @@ struct CONTENT_EXPORT BackgroundFetchOptions {
 // https://wicg.github.io/background-fetch/#background-fetch-registration
 struct CONTENT_EXPORT BackgroundFetchRegistration {
   BackgroundFetchRegistration();
+  BackgroundFetchRegistration(
+      const std::string& developer_id,
+      const std::string& unique_id,
+      uint64_t upload_total,
+      uint64_t uploaded,
+      uint64_t download_total,
+      uint64_t downloaded,
+      blink::mojom::BackgroundFetchResult result,
+      blink::mojom::BackgroundFetchFailureReason failure_reason);
   BackgroundFetchRegistration(const BackgroundFetchRegistration& other);
   ~BackgroundFetchRegistration();
 
@@ -64,19 +65,24 @@ struct CONTENT_EXPORT BackgroundFetchRegistration {
   uint64_t uploaded = 0;
   uint64_t download_total = 0;
   uint64_t downloaded = 0;
-  // TODO(crbug.com/699957): Support the `activeFetches` member.
+  blink::mojom::BackgroundFetchResult result;
+  blink::mojom::BackgroundFetchFailureReason failure_reason;
 };
 
 // Represents a request/response pair for a settled Background Fetch fetch.
 // Analogous to the following structure in the spec:
 // http://wicg.github.io/background-fetch/#backgroundfetchsettledfetch
 struct CONTENT_EXPORT BackgroundFetchSettledFetch {
+  static blink::mojom::FetchAPIResponsePtr CloneResponse(
+      const blink::mojom::FetchAPIResponsePtr& response);
   BackgroundFetchSettledFetch();
   BackgroundFetchSettledFetch(const BackgroundFetchSettledFetch& other);
+  BackgroundFetchSettledFetch& operator=(
+      const BackgroundFetchSettledFetch& other);
   ~BackgroundFetchSettledFetch();
 
   ServiceWorkerFetchRequest request;
-  ServiceWorkerResponse response;
+  blink::mojom::FetchAPIResponsePtr response;
 };
 
 }  // namespace content

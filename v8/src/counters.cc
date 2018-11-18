@@ -118,7 +118,8 @@ Counters::Counters(Isolate* isolate)
       STATS_COUNTER_TS_LIST(SC)
 #undef SC
       // clang format on
-      runtime_call_stats_() {
+      runtime_call_stats_(),
+      worker_thread_runtime_call_stats_() {
   static const struct {
     Histogram Counters::*member;
     const char* caption;
@@ -215,24 +216,6 @@ Counters::Counters(Isolate* isolate)
         Histogram(histogram.caption, 1000, 500000, 50, this);
   }
 
-  // For n = 100, low = 4000, high = 2000000: the factor = 1.06.
-  static const struct {
-    Histogram Counters::*member;
-    AggregatedMemoryHistogram<Histogram> Counters::*aggregated;
-    const char* caption;
-  } kMemoryHistograms[] = {
-#define HM(name, caption) \
-  {&Counters::name##_, &Counters::aggregated_##name##_, #caption},
-      HISTOGRAM_MEMORY_LIST(HM)
-#undef HM
-  };
-  for (const auto& histogram : kMemoryHistograms) {
-    this->*histogram.member =
-        Histogram(histogram.caption, 4000, 2000000, 100, this);
-    this->*histogram.aggregated =
-        AggregatedMemoryHistogram<Histogram>(&(this->*histogram.member));
-  }
-
   // clang-format off
   static const struct {
     StatsCounter Counters::*member;
@@ -323,7 +306,6 @@ void Counters::ResetCreateHistogramFunction(CreateHistogramCallback f) {
 
 #define HM(name, caption) name##_.Reset();
     HISTOGRAM_LEGACY_MEMORY_LIST(HM)
-    HISTOGRAM_MEMORY_LIST(HM)
 #undef HM
 }
 
@@ -508,7 +490,7 @@ bool RuntimeCallStats::IsCalledOnTheSameThread() {
 }
 
 void RuntimeCallStats::Print() {
-  OFStream os(stdout);
+  StdoutStream os;
   Print(os);
 }
 
@@ -546,6 +528,65 @@ void RuntimeCallStats::Dump(v8::tracing::TracedValue* value) {
     if (GetCounter(i)->count() > 0) GetCounter(i)->Dump(value);
   }
   in_use_ = false;
+}
+
+WorkerThreadRuntimeCallStats::WorkerThreadRuntimeCallStats()
+    : tls_key_(base::Thread::CreateThreadLocalKey()) {}
+
+WorkerThreadRuntimeCallStats::~WorkerThreadRuntimeCallStats() {
+  base::Thread::DeleteThreadLocalKey(tls_key_);
+}
+
+RuntimeCallStats* WorkerThreadRuntimeCallStats::NewTable() {
+  DCHECK(FLAG_runtime_stats);
+  std::unique_ptr<RuntimeCallStats> new_table =
+      base::make_unique<RuntimeCallStats>();
+  RuntimeCallStats* result = new_table.get();
+
+  base::LockGuard<base::Mutex> lock(&mutex_);
+  tables_.push_back(std::move(new_table));
+  return result;
+}
+
+void WorkerThreadRuntimeCallStats::AddToMainTable(
+    RuntimeCallStats* main_call_stats) {
+  base::LockGuard<base::Mutex> lock(&mutex_);
+  for (auto& worker_stats : tables_) {
+    DCHECK_NE(main_call_stats, worker_stats.get());
+    main_call_stats->Add(worker_stats.get());
+    worker_stats->Reset();
+  }
+}
+
+WorkerThreadRuntimeCallStatsScope::WorkerThreadRuntimeCallStatsScope(
+    WorkerThreadRuntimeCallStats* worker_stats)
+    : table_(nullptr) {
+  if (V8_LIKELY(!FLAG_runtime_stats)) return;
+
+  table_ = reinterpret_cast<RuntimeCallStats*>(
+      base::Thread::GetThreadLocal(worker_stats->GetKey()));
+  if (table_ == nullptr) {
+    table_ = worker_stats->NewTable();
+    base::Thread::SetThreadLocal(worker_stats->GetKey(), table_);
+  }
+
+  if (FLAG_runtime_stats &
+      v8::tracing::TracingCategoryObserver::ENABLED_BY_TRACING) {
+    table_->Reset();
+  }
+}
+
+WorkerThreadRuntimeCallStatsScope::~WorkerThreadRuntimeCallStatsScope() {
+  if (V8_LIKELY(table_ == nullptr)) return;
+
+  if ((FLAG_runtime_stats &
+       v8::tracing::TracingCategoryObserver::ENABLED_BY_TRACING)) {
+    auto value = v8::tracing::TracedValue::Create();
+    table_->Dump(value.get());
+    TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("v8.runtime_stats"),
+                         "V8.RuntimeStats", TRACE_EVENT_SCOPE_THREAD,
+                         "runtime-call-stats", std::move(value));
+  }
 }
 
 }  // namespace internal

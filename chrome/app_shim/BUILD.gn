@@ -17,9 +17,13 @@ source_set("app_shim") {
   deps = [
     "//chrome:strings",
     "//chrome/common",
+    "//chrome/common:mojo_bindings",
+    "//content/public/browser",
     "//ipc",
-    "//mojo/edk",
+    "//mojo/core/embedder",
+    "//ui/accelerated_widget_mac",
     "//ui/base",
+    "//ui/views:views",
   ]
 }
 

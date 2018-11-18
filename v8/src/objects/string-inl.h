@@ -8,6 +8,7 @@
 #include "src/objects/string.h"
 
 #include "src/conversions-inl.h"
+#include "src/handles-inl.h"
 #include "src/heap/factory.h"
 #include "src/objects/name-inl.h"
 #include "src/string-hasher-inl.h"
@@ -18,13 +19,23 @@
 namespace v8 {
 namespace internal {
 
-SMI_ACCESSORS(String, length, kLengthOffset)
-SYNCHRONIZED_SMI_ACCESSORS(String, length, kLengthOffset)
+INT32_ACCESSORS(String, length, kLengthOffset)
+
+int String::synchronized_length() const {
+  return base::AsAtomic32::Acquire_Load(
+      reinterpret_cast<const int32_t*>(FIELD_ADDR(this, kLengthOffset)));
+}
+
+void String::synchronized_set_length(int value) {
+  base::AsAtomic32::Release_Store(
+      reinterpret_cast<int32_t*>(FIELD_ADDR(this, kLengthOffset)), value);
+}
 
 CAST_ACCESSOR(ConsString)
 CAST_ACCESSOR(ExternalOneByteString)
 CAST_ACCESSOR(ExternalString)
 CAST_ACCESSOR(ExternalTwoByteString)
+CAST_ACCESSOR(InternalizedString)
 CAST_ACCESSOR(SeqOneByteString)
 CAST_ACCESSOR(SeqString)
 CAST_ACCESSOR(SeqTwoByteString)
@@ -147,8 +158,8 @@ bool String::IsOneByteRepresentationUnderneath() {
       return true;
     case kTwoByteStringTag:
       return false;
-    default:  // Cons or sliced string.  Need to go deeper.
-      return GetUnderlying()->IsOneByteRepresentation();
+    default:  // Cons, sliced, thin, strings need to go deeper.
+      return GetUnderlying()->IsOneByteRepresentationUnderneath();
   }
 }
 
@@ -162,8 +173,8 @@ bool String::IsTwoByteRepresentationUnderneath() {
       return false;
     case kTwoByteStringTag:
       return true;
-    default:  // Cons or sliced string.  Need to go deeper.
-      return GetUnderlying()->IsTwoByteRepresentation();
+    default:  // Cons, sliced, thin, strings need to go deeper.
+      return GetUnderlying()->IsTwoByteRepresentationUnderneath();
   }
 }
 
@@ -195,7 +206,7 @@ Char FlatStringReader::Get(int index) {
 template <typename Char>
 class SequentialStringKey : public StringTableKey {
  public:
-  explicit SequentialStringKey(Vector<const Char> string, uint32_t seed)
+  explicit SequentialStringKey(Vector<const Char> string, uint64_t seed)
       : StringTableKey(StringHasher::HashSequentialString<Char>(
             string.start(), string.length(), seed)),
         string_(string) {}
@@ -205,7 +216,7 @@ class SequentialStringKey : public StringTableKey {
 
 class OneByteStringKey : public SequentialStringKey<uint8_t> {
  public:
-  OneByteStringKey(Vector<const uint8_t> str, uint32_t seed)
+  OneByteStringKey(Vector<const uint8_t> str, uint64_t seed)
       : SequentialStringKey<uint8_t>(str, seed) {}
 
   bool IsMatch(Object* string) override {
@@ -225,9 +236,10 @@ class SeqOneByteSubStringKey : public StringTableKey {
 #pragma warning(push)
 #pragma warning(disable : 4789)
 #endif
-  SeqOneByteSubStringKey(Handle<SeqOneByteString> string, int from, int length)
+  SeqOneByteSubStringKey(Isolate* isolate, Handle<SeqOneByteString> string,
+                         int from, int length)
       : StringTableKey(StringHasher::HashSequentialString(
-            string->GetChars() + from, length, string->GetHeap()->HashSeed())),
+            string->GetChars() + from, length, isolate->heap()->HashSeed())),
         string_(string),
         from_(from),
         length_(length) {
@@ -250,7 +262,7 @@ class SeqOneByteSubStringKey : public StringTableKey {
 
 class TwoByteStringKey : public SequentialStringKey<uc16> {
  public:
-  explicit TwoByteStringKey(Vector<const uc16> str, uint32_t seed)
+  explicit TwoByteStringKey(Vector<const uc16> str, uint64_t seed)
       : SequentialStringKey<uc16>(str, seed) {}
 
   bool IsMatch(Object* string) override {
@@ -263,7 +275,7 @@ class TwoByteStringKey : public SequentialStringKey<uc16> {
 // Utf8StringKey carries a vector of chars as key.
 class Utf8StringKey : public StringTableKey {
  public:
-  explicit Utf8StringKey(Vector<const char> string, uint32_t seed)
+  explicit Utf8StringKey(Vector<const char> string, uint64_t seed)
       : StringTableKey(StringHasher::ComputeUtf8Hash(string, seed, &chars_)),
         string_(string) {}
 
@@ -289,25 +301,26 @@ bool String::Equals(String* other) {
   return SlowEquals(other);
 }
 
-bool String::Equals(Handle<String> one, Handle<String> two) {
+bool String::Equals(Isolate* isolate, Handle<String> one, Handle<String> two) {
   if (one.is_identical_to(two)) return true;
   if (one->IsInternalizedString() && two->IsInternalizedString()) {
     return false;
   }
-  return SlowEquals(one, two);
+  return SlowEquals(isolate, one, two);
 }
 
-Handle<String> String::Flatten(Handle<String> string, PretenureFlag pretenure) {
+Handle<String> String::Flatten(Isolate* isolate, Handle<String> string,
+                               PretenureFlag pretenure) {
   if (string->IsConsString()) {
     Handle<ConsString> cons = Handle<ConsString>::cast(string);
     if (cons->IsFlat()) {
-      string = handle(cons->first());
+      string = handle(cons->first(), isolate);
     } else {
-      return SlowFlatten(cons, pretenure);
+      return SlowFlatten(isolate, cons, pretenure);
     }
   }
   if (string->IsThinString()) {
-    string = handle(Handle<ThinString>::cast(string)->actual());
+    string = handle(Handle<ThinString>::cast(string)->actual(), isolate);
     DCHECK(!string->IsConsString());
   }
   return string;
@@ -491,10 +504,11 @@ String* SlicedString::parent() {
   return String::cast(READ_FIELD(this, kParentOffset));
 }
 
-void SlicedString::set_parent(String* parent, WriteBarrierMode mode) {
+void SlicedString::set_parent(Isolate* isolate, String* parent,
+                              WriteBarrierMode mode) {
   DCHECK(parent->IsSeqString() || parent->IsExternalString());
   WRITE_FIELD(this, kParentOffset, parent);
-  CONDITIONAL_WRITE_BARRIER(GetHeap(), this, kParentOffset, parent, mode);
+  CONDITIONAL_WRITE_BARRIER(this, kParentOffset, parent, mode);
 }
 
 SMI_ACCESSORS(SlicedString, offset, kOffsetOffset)
@@ -505,9 +519,10 @@ String* ConsString::first() {
 
 Object* ConsString::unchecked_first() { return READ_FIELD(this, kFirstOffset); }
 
-void ConsString::set_first(String* value, WriteBarrierMode mode) {
+void ConsString::set_first(Isolate* isolate, String* value,
+                           WriteBarrierMode mode) {
   WRITE_FIELD(this, kFirstOffset, value);
-  CONDITIONAL_WRITE_BARRIER(GetHeap(), this, kFirstOffset, value, mode);
+  CONDITIONAL_WRITE_BARRIER(this, kFirstOffset, value, mode);
 }
 
 String* ConsString::second() {
@@ -518,9 +533,10 @@ Object* ConsString::unchecked_second() {
   return RELAXED_READ_FIELD(this, kSecondOffset);
 }
 
-void ConsString::set_second(String* value, WriteBarrierMode mode) {
+void ConsString::set_second(Isolate* isolate, String* value,
+                            WriteBarrierMode mode) {
   WRITE_FIELD(this, kSecondOffset, value);
-  CONDITIONAL_WRITE_BARRIER(GetHeap(), this, kSecondOffset, value, mode);
+  CONDITIONAL_WRITE_BARRIER(this, kSecondOffset, value, mode);
 }
 
 ACCESSORS(ThinString, actual, String, kActualOffset);
@@ -529,9 +545,9 @@ HeapObject* ThinString::unchecked_actual() const {
   return reinterpret_cast<HeapObject*>(READ_FIELD(this, kActualOffset));
 }
 
-bool ExternalString::is_short() {
+bool ExternalString::is_uncached() const {
   InstanceType type = map()->instance_type();
-  return (type & kShortExternalStringMask) == kShortExternalStringTag;
+  return (type & kUncachedExternalStringMask) == kUncachedExternalStringTag;
 }
 
 Address ExternalString::resource_as_address() {
@@ -539,7 +555,7 @@ Address ExternalString::resource_as_address() {
 }
 
 void ExternalString::set_address_as_resource(Address address) {
-  DCHECK(IsAligned(reinterpret_cast<intptr_t>(address), kPointerSize));
+  DCHECK(IsAligned(address, kPointerSize));
   *reinterpret_cast<Address*>(FIELD_ADDR(this, kResourceOffset)) = address;
   if (IsExternalOneByteString()) {
     ExternalOneByteString::cast(this)->update_data_cache();
@@ -555,7 +571,7 @@ uint32_t ExternalString::resource_as_uint32() {
 
 void ExternalString::set_uint32_as_resource(uint32_t value) {
   *reinterpret_cast<uintptr_t*>(FIELD_ADDR(this, kResourceOffset)) = value;
-  if (is_short()) return;
+  if (is_uncached()) return;
   const char** data_field =
       reinterpret_cast<const char**>(FIELD_ADDR(this, kResourceDataOffset));
   *data_field = nullptr;
@@ -566,10 +582,18 @@ const ExternalOneByteString::Resource* ExternalOneByteString::resource() {
 }
 
 void ExternalOneByteString::update_data_cache() {
-  if (is_short()) return;
+  if (is_uncached()) return;
   const char** data_field =
       reinterpret_cast<const char**>(FIELD_ADDR(this, kResourceDataOffset));
   *data_field = resource()->data();
+}
+
+void ExternalOneByteString::SetResource(
+    Isolate* isolate, const ExternalOneByteString::Resource* resource) {
+  set_resource(resource);
+  size_t new_payload = resource == nullptr ? 0 : resource->length();
+  if (new_payload > 0)
+    isolate->heap()->UpdateExternalString(this, 0, new_payload);
 }
 
 void ExternalOneByteString::set_resource(
@@ -594,10 +618,18 @@ const ExternalTwoByteString::Resource* ExternalTwoByteString::resource() {
 }
 
 void ExternalTwoByteString::update_data_cache() {
-  if (is_short()) return;
+  if (is_uncached()) return;
   const uint16_t** data_field =
       reinterpret_cast<const uint16_t**>(FIELD_ADDR(this, kResourceDataOffset));
   *data_field = resource()->data();
+}
+
+void ExternalTwoByteString::SetResource(
+    Isolate* isolate, const ExternalTwoByteString::Resource* resource) {
+  set_resource(resource);
+  size_t new_payload = resource == nullptr ? 0 : resource->length() * 2;
+  if (new_payload > 0)
+    isolate->heap()->UpdateExternalString(this, 0, new_payload);
 }
 
 void ExternalTwoByteString::set_resource(
@@ -710,8 +742,7 @@ class String::SubStringRange::iterator final {
   typedef uc16* pointer;
   typedef uc16& reference;
 
-  iterator(const iterator& other)
-      : content_(other.content_), offset_(other.offset_) {}
+  iterator(const iterator& other) = default;
 
   uc16 operator*() { return content_.Get(offset_); }
   bool operator==(const iterator& other) const {

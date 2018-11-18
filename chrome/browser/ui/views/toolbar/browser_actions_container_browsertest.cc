@@ -1,4 +1,4 @@
-// Copyright 2013 The Chromium Authors. All rights reserved.
+// Copyright 2018 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
@@ -18,7 +18,6 @@
 #include "chrome/browser/ui/views/frame/browser_view.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_action_view.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
-#include "chrome/test/views/scoped_macviews_browser_mode.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/extension.h"
@@ -28,8 +27,6 @@
 #include "ui/views/test/test_views.h"
 #include "ui/views/view.h"
 
-namespace {
-
 // TODO(devlin): Continue moving any tests that should be platform independent
 // from this file to the crossplatform tests in
 // chrome/browser/ui/toolbar/browser_actions_bar_browsertest.cc.
@@ -38,15 +35,7 @@ namespace {
 // from the overflow menu results in it "popping" out (growing the container
 // size by 1), rather than just reordering the extensions.
 
-// The two drag & drop tests are currently restricted to Views browsers in the
-// absence of a good way to abstract drag & drop actions.
-class BrowserActionsBarViewsBrowserTest : public BrowserActionsBarBrowserTest {
- private:
-  test::ScopedMacViewsBrowserMode views_mode_{true};
-};
-}  // namespace
-
-IN_PROC_BROWSER_TEST_F(BrowserActionsBarViewsBrowserTest, DragBrowserActions) {
+IN_PROC_BROWSER_TEST_F(BrowserActionsBarBrowserTest, DragBrowserActions) {
   LoadExtensions();
 
   // Sanity check: All extensions showing; order is A B C.
@@ -75,7 +64,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsBarViewsBrowserTest, DragBrowserActions) {
   browser_action_drag_data.Write(profile(), &drop_data);
   ToolbarActionView* view = container->GetViewForId(extension_b()->id());
   // ...to the right of extension B.
-  gfx::Point location(view->x() + view->width(), view->y());
+  gfx::PointF location(view->x() + view->width(), view->y());
   ui::DropTargetEvent target_event(
       drop_data, location, location, ui::DragDropTypes::DRAG_MOVE);
 
@@ -110,7 +99,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsBarViewsBrowserTest, DragBrowserActions) {
   BrowserActionDragData browser_action_drag_data2(extension_a()->id(), 1u);
   browser_action_drag_data2.Write(profile(), &drop_data2);
   // ...to the left of extension B (which is now at index 0).
-  location = gfx::Point(view->x(), view->y());
+  location = gfx::PointF(view->x(), view->y());
   ui::DropTargetEvent target_event2(
       drop_data2, location, location, ui::DragDropTypes::DRAG_MOVE);
 
@@ -139,7 +128,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsBarViewsBrowserTest, DragBrowserActions) {
   BrowserActionDragData browser_action_drag_data3(extension_c()->id(), 2u);
   browser_action_drag_data3.Write(profile(), &drop_data3);
   // ...to the left of extension B (which is back in index 1 on the main bar).
-  location = gfx::Point(view->x(), view->y());
+  location = gfx::PointF(view->x(), view->y());
   ui::DropTargetEvent target_event3(
       drop_data3, location, location, ui::DragDropTypes::DRAG_MOVE);
 
@@ -159,7 +148,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsBarViewsBrowserTest, DragBrowserActions) {
 
 // Test that changes performed in one container affect containers in other
 // windows so that it is consistent.
-IN_PROC_BROWSER_TEST_F(BrowserActionsBarViewsBrowserTest, MultipleWindows) {
+IN_PROC_BROWSER_TEST_F(BrowserActionsBarBrowserTest, MultipleWindows) {
   LoadExtensions();
   BrowserActionsContainer* first =
       BrowserView::GetBrowserViewForBrowser(browser())->toolbar()->
@@ -189,12 +178,12 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsBarViewsBrowserTest, MultipleWindows) {
   browser_action_drag_data.Write(profile(), &drop_data);
   ToolbarActionView* view = first->GetViewForId(extension_b()->id());
   // ...to the right of extension B.
-  gfx::Point location(view->x() + view->width(), view->y());
+  gfx::PointF location(view->x() + view->width(), view->y());
   ui::DropTargetEvent target_event(
       drop_data, location, location, ui::DragDropTypes::DRAG_MOVE);
 
   // Drag and drop.
-  first->toolbar_actions_bar()->OnDragStarted();
+  first->toolbar_actions_bar()->OnDragStarted(0u);
   first->OnDragUpdated(target_event);
 
   // Semi-random placement for a regression test for crbug.com/539744.
@@ -276,8 +265,6 @@ class BrowserActionsContainerOverflowTest
  private:
   void SetUpOnMainThread() override;
   void TearDownOnMainThread() override;
-
-  test::ScopedMacViewsBrowserMode views_mode_{true};
 
   // The main BrowserActionsContainer (owned by the browser view).
   BrowserActionsContainer* main_bar_;
@@ -421,7 +408,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsContainerOverflowTest,
   BrowserActionDragData browser_action_drag_data(extension_a()->id(), 0u);
   browser_action_drag_data.Write(profile(), &drop_data);
   ToolbarActionView* view = overflow_bar()->GetViewForId(extension_c()->id());
-  gfx::Point location(view->x(), view->y());
+  gfx::PointF location(view->x(), view->y());
   ui::DropTargetEvent target_event(
       drop_data, location, location, ui::DragDropTypes::DRAG_MOVE);
 
@@ -440,7 +427,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsContainerOverflowTest,
   BrowserActionDragData browser_action_drag_data2(extension_a()->id(), 1u);
   browser_action_drag_data2.Write(profile(), &drop_data2);
   view = main_bar()->GetViewForId(extension_b()->id());
-  location = gfx::Point(view->x(), view->y());
+  location = gfx::PointF(view->x(), view->y());
   ui::DropTargetEvent target_event2(
       drop_data2, location, location, ui::DragDropTypes::DRAG_MOVE);
 
@@ -457,7 +444,7 @@ IN_PROC_BROWSER_TEST_F(BrowserActionsContainerOverflowTest,
   ui::OSExchangeData drop_data3;
   BrowserActionDragData browser_action_drag_data3(extension_c()->id(), 2u);
   browser_action_drag_data3.Write(profile(), &drop_data3);
-  location = gfx::Point(view->x(), view->y());
+  location = gfx::PointF(view->x(), view->y());
   ui::DropTargetEvent target_event3(
       drop_data3, location, location, ui::DragDropTypes::DRAG_MOVE);
 

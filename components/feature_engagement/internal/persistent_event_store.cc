@@ -13,7 +13,7 @@ namespace feature_engagement {
 namespace {
 // Corresponds to a UMA suffix "LevelDBOpenResults" in histograms.xml.
 // Please do not change.
-const char kDatabaseUMAName[] = "FeatureEngagementTrackerEventStore";
+const char kDBUMAName[] = "FeatureEngagementTrackerEventStore";
 
 using KeyEventPair = std::pair<std::string, Event>;
 using KeyEventList = std::vector<KeyEventPair>;
@@ -37,10 +37,9 @@ PersistentEventStore::~PersistentEventStore() = default;
 void PersistentEventStore::Load(const OnLoadedCallback& callback) {
   DCHECK(!ready_);
 
-  db_->Init(kDatabaseUMAName, storage_dir_,
-            leveldb_proto::CreateSimpleOptions(),
-            base::Bind(&PersistentEventStore::OnInitComplete,
-                       weak_ptr_factory_.GetWeakPtr(), callback));
+  db_->Init(kDBUMAName, storage_dir_, leveldb_proto::CreateSimpleOptions(),
+            base::BindOnce(&PersistentEventStore::OnInitComplete,
+                           weak_ptr_factory_.GetWeakPtr(), callback));
 }
 
 bool PersistentEventStore::IsReady() const {
@@ -54,7 +53,7 @@ void PersistentEventStore::WriteEvent(const Event& event) {
 
   db_->UpdateEntries(std::move(entries),
                      std::make_unique<std::vector<std::string>>(),
-                     base::Bind(&NoopUpdateCallback));
+                     base::BindOnce(&NoopUpdateCallback));
 }
 
 void PersistentEventStore::DeleteEvent(const std::string& event_name) {
@@ -63,7 +62,7 @@ void PersistentEventStore::DeleteEvent(const std::string& event_name) {
   deletes->push_back(event_name);
 
   db_->UpdateEntries(std::make_unique<KeyEventList>(), std::move(deletes),
-                     base::Bind(&NoopUpdateCallback));
+                     base::BindOnce(&NoopUpdateCallback));
 }
 
 void PersistentEventStore::OnInitComplete(const OnLoadedCallback& callback,
@@ -75,15 +74,15 @@ void PersistentEventStore::OnInitComplete(const OnLoadedCallback& callback,
     return;
   }
 
-  db_->LoadEntries(base::Bind(&PersistentEventStore::OnLoadComplete,
-                              weak_ptr_factory_.GetWeakPtr(), callback));
+  db_->LoadEntries(base::BindOnce(&PersistentEventStore::OnLoadComplete,
+                                  weak_ptr_factory_.GetWeakPtr(), callback));
 }
 
 void PersistentEventStore::OnLoadComplete(
     const OnLoadedCallback& callback,
     bool success,
     std::unique_ptr<std::vector<Event>> entries) {
-  stats::RecordEventDbLoadEvent(success, *entries.get());
+  stats::RecordEventDbLoadEvent(success, *entries);
   ready_ = success;
   callback.Run(success, std::move(entries));
 }

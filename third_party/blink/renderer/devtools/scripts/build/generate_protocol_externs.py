@@ -28,11 +28,20 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 import os
+import os.path as path
 import re
+import sys
 try:
     import json
 except ImportError:
     import simplejson as json
+
+sys.path.append(
+    path.normpath(
+        path.join(
+            path.dirname(path.abspath(__file__)),
+            os.pardir, os.pardir, os.pardir, os.pardir, os.pardir, 'inspector_protocol')))
+import pdl  # pylint: disable=F0401
 
 type_traits = {
     "any": "*",
@@ -97,8 +106,8 @@ def param_name(param):
 
 def load_schema(file, domains):
     input_file = open(file, "r")
-    json_string = input_file.read()
-    parsed_json = json.loads(json_string)
+    parsed_json = pdl.loads(input_file.read(), file)
+    input_file.close()
     domains.extend(parsed_json["domains"])
 
 
@@ -222,7 +231,10 @@ def generate_protocol_externs(output_path, file1, file2):
                     output_file.write("\n/** @typedef {%s} */\nProtocol.%s.%s;\n" %
                                       (type_traits[type["type"]], domain_name, type["id"]))
 
-        output_file.write("/** @interface */\n")
+        if domain_name in ["Runtime", "Debugger", "HeapProfiler"]:
+            output_file.write("/** @constructor */\n")
+        else:
+            output_file.write("/** @interface */\n")
         output_file.write("Protocol.%sDispatcher = function() {};\n" % domain_name)
         if "events" in domain:
             for event in domain["events"]:

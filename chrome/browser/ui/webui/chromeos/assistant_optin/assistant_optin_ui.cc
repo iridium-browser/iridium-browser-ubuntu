@@ -6,14 +6,18 @@
 
 #include <memory>
 
+#include "ash/public/cpp/shell_window_ids.h"
 #include "base/bind.h"
 #include "base/macros.h"
-#include "chrome/browser/chromeos/arc/voice_interaction/arc_voice_interaction_arc_home_service.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/ui/webui/chromeos/assistant_optin/value_prop_screen_handler.h"
+#include "chrome/browser/ui/browser_dialogs.h"
+#include "chrome/browser/ui/webui/chromeos/login/base_screen_handler.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/grit/browser_resources.h"
+#include "components/arc/arc_prefs.h"
+#include "components/prefs/pref_service.h"
+#include "content/public/browser/host_zoom_map.h"
 #include "content/public/browser/web_ui.h"
 #include "content/public/browser/web_ui_data_source.h"
 
@@ -23,8 +27,8 @@ namespace {
 
 bool is_active = false;
 
-constexpr int kAssistantOptInDialogWidth = 576;
-constexpr int kAssistantOptInDialogHeight = 480;
+constexpr int kAssistantOptInDialogWidth = 768;
+constexpr int kAssistantOptInDialogHeight = 640;
 
 }  // namespace
 
@@ -34,63 +38,42 @@ AssistantOptInUI::AssistantOptInUI(content::WebUI* web_ui)
   content::WebUIDataSource* source =
       content::WebUIDataSource::Create(chrome::kChromeUIAssistantOptInHost);
 
-  AddScreenHandler(std::make_unique<ValuePropScreenHandler>(
-      base::BindOnce(&AssistantOptInUI::OnExit, weak_factory_.GetWeakPtr())));
+  auto assistant_handler = std::make_unique<AssistantOptInFlowScreenHandler>();
+  auto* assistant_handler_ptr = assistant_handler.get();
+  web_ui->AddMessageHandler(std::move(assistant_handler));
+  assistant_handler_ptr->SetupAssistantConnection();
 
   base::DictionaryValue localized_strings;
-  for (auto* handler : screen_handlers_)
-    handler->GetLocalizedStrings(&localized_strings);
+  assistant_handler_ptr->GetLocalizedStrings(&localized_strings);
   source->AddLocalizedStrings(localized_strings);
-
   source->SetJsonPath("strings.js");
-
   source->AddResourcePath("assistant_optin.js", IDR_ASSISTANT_OPTIN_JS);
+  source->AddResourcePath("assistant_logo.png", IDR_ASSISTANT_LOGO_PNG);
   source->SetDefaultResource(IDR_ASSISTANT_OPTIN_HTML);
-
   content::WebUIDataSource::Add(Profile::FromWebUI(web_ui), source);
+
+  // Do not zoom for Assistant opt-in web contents.
+  content::HostZoomMap* zoom_map =
+      content::HostZoomMap::GetForWebContents(web_ui->GetWebContents());
+  DCHECK(zoom_map);
+  zoom_map->SetZoomLevelForHost(web_ui->GetWebContents()->GetURL().host(), 0);
 }
 
-AssistantOptInUI::~AssistantOptInUI() {}
-
-void AssistantOptInUI::AddScreenHandler(
-    std::unique_ptr<BaseWebUIHandler> handler) {
-  screen_handlers_.push_back(handler.get());
-  web_ui()->AddMessageHandler(std::move(handler));
-}
-
-void AssistantOptInUI::OnExit(AssistantOptInScreenExitCode exit_code) {
-  switch (exit_code) {
-    case AssistantOptInScreenExitCode::VALUE_PROP_SKIPPED:
-      // TODO(updowndota) Update the action to use the new Assistant service.
-      GetVoiceInteractionHomeService()->OnAssistantCanceled();
-      CloseDialog(nullptr);
-      break;
-    case AssistantOptInScreenExitCode::VALUE_PROP_ACCEPTED:
-      // TODO(updowndota) Update the action to use the new Assistant service.
-      GetVoiceInteractionHomeService()->OnAssistantAppRequested();
-      CloseDialog(nullptr);
-      break;
-    default:
-      NOTREACHED();
-  }
-}
-
-arc::ArcVoiceInteractionArcHomeService*
-AssistantOptInUI::GetVoiceInteractionHomeService() {
-  Profile* const profile = Profile::FromWebUI(web_ui());
-  arc::ArcVoiceInteractionArcHomeService* const home_service =
-      arc::ArcVoiceInteractionArcHomeService::GetForBrowserContext(profile);
-  DCHECK(home_service);
-  return home_service;
-}
+AssistantOptInUI::~AssistantOptInUI() = default;
 
 // AssistantOptInDialog
 
 // static
-void AssistantOptInDialog::Show() {
+void AssistantOptInDialog::Show(
+    ash::mojom::AssistantSetup::StartAssistantOptInFlowCallback callback) {
   DCHECK(!is_active);
-  AssistantOptInDialog* dialog = new AssistantOptInDialog();
-  dialog->ShowSystemDialog(true);
+  AssistantOptInDialog* dialog = new AssistantOptInDialog(std::move(callback));
+
+  int container_id = dialog->GetDialogModalType() == ui::MODAL_TYPE_NONE
+                         ? ash::kShellWindowId_DefaultContainer
+                         : ash::kShellWindowId_LockSystemModalContainer;
+  chrome::ShowWebDialogInContainer(
+      container_id, ProfileManager::GetActiveUserProfile(), dialog, true);
 }
 
 // static
@@ -98,9 +81,11 @@ bool AssistantOptInDialog::IsActive() {
   return is_active;
 }
 
-AssistantOptInDialog::AssistantOptInDialog()
+AssistantOptInDialog::AssistantOptInDialog(
+    ash::mojom::AssistantSetup::StartAssistantOptInFlowCallback callback)
     : SystemWebDialogDelegate(GURL(chrome::kChromeUIAssistantOptInURL),
-                              base::string16()) {
+                              base::string16()),
+      callback_(std::move(callback)) {
   DCHECK(!is_active);
   is_active = true;
 }
@@ -119,6 +104,15 @@ std::string AssistantOptInDialog::GetDialogArgs() const {
 
 bool AssistantOptInDialog::ShouldShowDialogTitle() const {
   return false;
+}
+
+void AssistantOptInDialog::OnDialogClosed(const std::string& json_retval) {
+  PrefService* prefs = ProfileManager::GetActiveUserProfile()->GetPrefs();
+  const bool completed =
+      prefs->GetBoolean(arc::prefs::kVoiceInteractionEnabled) &&
+      prefs->GetBoolean(arc::prefs::kArcVoiceInteractionValuePropAccepted);
+  std::move(callback_).Run(completed);
+  SystemWebDialogDelegate::OnDialogClosed(json_retval);
 }
 
 }  // namespace chromeos

@@ -93,68 +93,20 @@ class TestNetworkConfigurationObserver : public NetworkConfigurationObserver {
   TestNetworkConfigurationObserver() = default;
 
   // NetworkConfigurationObserver
-  void OnConfigurationCreated(
-      const std::string& service_path,
-      const std::string& profile_path,
-      const base::DictionaryValue& properties,
-      NetworkConfigurationObserver::Source source) override {
-    ASSERT_EQ(0u, configurations_.count(service_path));
-    configurations_[service_path] = properties.CreateDeepCopy();
-    profiles_[profile_path].insert(service_path);
+  void OnConfigurationRemoved(const std::string& service_path,
+                              const std::string& guid) override {
+    ASSERT_EQ(removed_configurations_.end(),
+              removed_configurations_.find(service_path));
+    removed_configurations_[service_path] = guid;
   }
 
-  void OnConfigurationRemoved(
-      const std::string& service_path,
-      const std::string& guid,
-      NetworkConfigurationObserver::Source source) override {
-    ASSERT_EQ(1u, configurations_.count(service_path));
-    configurations_.erase(service_path);
-    for (auto& p : profiles_) {
-      p.second.erase(service_path);
-    }
-  }
-
-  void OnConfigurationProfileChanged(
-      const std::string& service_path,
-      const std::string& profile_path,
-      NetworkConfigurationObserver::Source source) override {
-    for (auto& p : profiles_) {
-      p.second.erase(service_path);
-    }
-    profiles_[profile_path].insert(service_path);
-  }
-
-  void OnPropertiesSet(const std::string& service_path,
-                       const std::string& guid,
-                       const base::DictionaryValue& set_properties,
-                       NetworkConfigurationObserver::Source source) override {
-    configurations_[service_path]->MergeDictionary(&set_properties);
-  }
-
-  bool HasConfiguration(const std::string& service_path) {
-    return configurations_.count(service_path) == 1;
-  }
-
-  std::string GetStringProperty(const std::string& service_path,
-                                const std::string& property) {
-    if (!HasConfiguration(service_path))
-      return "";
-    std::string result;
-    configurations_[service_path]->GetStringWithoutPathExpansion(property,
-                                                                 &result);
-    return result;
-  }
-
-  bool HasConfigurationInProfile(const std::string& service_path,
-                                 const std::string& profile_path) {
-    if (profiles_.count(profile_path) == 0)
-      return false;
-    return profiles_[profile_path].count(service_path) == 1;
+  bool HasRemovedConfiguration(const std::string& service_path) {
+    return removed_configurations_.find(service_path) !=
+           removed_configurations_.end();
   }
 
  private:
-  std::map<std::string, std::unique_ptr<base::DictionaryValue>> configurations_;
-  std::map<std::string, std::set<std::string>> profiles_;
+  std::map<std::string, std::string> removed_configurations_;
 
   DISALLOW_COPY_AND_ASSIGN(TestNetworkConfigurationObserver);
 };
@@ -230,6 +182,14 @@ class NetworkConfigurationHandlerTest : public testing::Test {
     get_properties_ = dictionary.CreateDeepCopy();
   }
 
+  void ManagerGetPropertiesCallback(const std::string& success_callback_name,
+                                    DBusMethodCallStatus call_status,
+                                    const base::DictionaryValue& result) {
+    if (call_status == chromeos::DBUS_METHOD_CALL_SUCCESS)
+      success_callback_name_ = success_callback_name;
+    manager_get_properties_ = result.CreateDeepCopy();
+  }
+
   void CreateConfigurationCallback(const std::string& service_path,
                                    const std::string& guid) {
     create_service_path_ = service_path;
@@ -248,7 +208,7 @@ class NetworkConfigurationHandlerTest : public testing::Test {
         base::Value(NetworkProfileHandler::GetSharedProfilePath()));
 
     network_configuration_handler_->CreateShillConfiguration(
-        properties, NetworkConfigurationObserver::SOURCE_USER_ACTION,
+        properties,
         base::Bind(
             &NetworkConfigurationHandlerTest::CreateConfigurationCallback,
             base::Unretained(this)),
@@ -324,6 +284,18 @@ class NetworkConfigurationHandlerTest : public testing::Test {
     return true;
   }
 
+  bool GetReceivedStringManagerProperty(const std::string& key,
+                                        std::string* result) {
+    if (!manager_get_properties_)
+      return false;
+    const base::Value* value =
+        manager_get_properties_->FindKeyOfType(key, base::Value::Type::STRING);
+    if (!value)
+      return false;
+    *result = value->GetString();
+    return true;
+  }
+
   FakeShillServiceClient* GetShillServiceClient() {
     return static_cast<FakeShillServiceClient*>(
         DBusThreadManager::Get()->GetShillServiceClient());
@@ -342,6 +314,7 @@ class NetworkConfigurationHandlerTest : public testing::Test {
   std::string success_callback_name_;
   std::string get_properties_path_;
   std::unique_ptr<base::DictionaryValue> get_properties_;
+  std::unique_ptr<base::DictionaryValue> manager_get_properties_;
   std::string create_service_path_;
 };
 
@@ -431,8 +404,7 @@ TEST_F(NetworkConfigurationHandlerTest, SetProperties) {
   base::DictionaryValue value;
   value.SetString(shill::kSSIDProperty, kNetworkName);
   network_configuration_handler_->SetShillProperties(
-      kServicePath, value, NetworkConfigurationObserver::SOURCE_USER_ACTION,
-      base::DoNothing(), base::Bind(&ErrorCallback));
+      kServicePath, value, base::DoNothing(), base::Bind(&ErrorCallback));
   base::RunLoop().RunUntilIdle();
 
   const base::DictionaryValue* properties =
@@ -497,8 +469,7 @@ TEST_F(NetworkConfigurationHandlerTest, CreateConfiguration) {
   std::string service_path;
   std::string guid;
   network_configuration_handler_->CreateShillConfiguration(
-      value, NetworkConfigurationObserver::SOURCE_USER_ACTION,
-      base::Bind(&CopyServiceResult, &success, &service_path, &guid),
+      value, base::Bind(&CopyServiceResult, &success, &service_path, &guid),
       base::Bind(&ErrorCallback));
   base::RunLoop().RunUntilIdle();
 
@@ -514,7 +485,7 @@ TEST_F(NetworkConfigurationHandlerTest, RemoveConfiguration) {
 
   TestCallback test_callback;
   network_configuration_handler_->RemoveConfiguration(
-      "/service/2", NetworkConfigurationObserver::SOURCE_USER_ACTION,
+      "/service/2",
       base::Bind(&TestCallback::Run, base::Unretained(&test_callback)),
       base::Bind(&ErrorCallback));
 
@@ -538,7 +509,7 @@ TEST_F(NetworkConfigurationHandlerTest, RemoveConfigurationFromCurrentProfile) {
 
   TestCallback test_callback;
   network_configuration_handler_->RemoveConfigurationFromCurrentProfile(
-      "/service/2", NetworkConfigurationObserver::SOURCE_USER_ACTION,
+      "/service/2",
       base::Bind(&TestCallback::Run, base::Unretained(&test_callback)),
       base::Bind(&ErrorCallback));
 
@@ -564,7 +535,7 @@ TEST_F(NetworkConfigurationHandlerTest,
   TestCallback test_callback;
   std::string error;
   network_configuration_handler_->RemoveConfigurationFromCurrentProfile(
-      "/service/3", NetworkConfigurationObserver::SOURCE_USER_ACTION,
+      "/service/3",
       base::Bind(&TestCallback::Run, base::Unretained(&test_callback)),
       base::Bind(&RecordError, base::Unretained(&error)));
 
@@ -588,7 +559,7 @@ TEST_F(NetworkConfigurationHandlerTest, StubSetAndClearProperties) {
                            base::Value(test_passphrase));
   network_configuration_handler_->SetShillProperties(
       service_path, properties_to_set,
-      NetworkConfigurationObserver::SOURCE_USER_ACTION,
+
       base::Bind(&NetworkConfigurationHandlerTest::SuccessCallback,
                  base::Unretained(this), "SetProperties"),
       base::Bind(&ErrorCallback));
@@ -635,8 +606,7 @@ TEST_F(NetworkConfigurationHandlerTest, StubGetNameFromWifiHex) {
   base::DictionaryValue properties_to_set;
   properties_to_set.SetKey(shill::kWifiHexSsid, base::Value(wifi_hex));
   network_configuration_handler_->SetShillProperties(
-      service_path, properties_to_set,
-      NetworkConfigurationObserver::SOURCE_USER_ACTION, base::DoNothing(),
+      service_path, properties_to_set, base::DoNothing(),
       base::Bind(&ErrorCallback));
   base::RunLoop().RunUntilIdle();
   std::string wifi_hex_result;
@@ -678,7 +648,6 @@ TEST_F(NetworkConfigurationHandlerTest, StubCreateConfiguration) {
 
 TEST_F(NetworkConfigurationHandlerTest, NetworkConfigurationObserver) {
   const std::string service_path("/service/test_wifi");
-  const std::string test_passphrase("test_passphrase");
 
   auto network_configuration_observer =
       std::make_unique<TestNetworkConfigurationObserver>();
@@ -686,54 +655,36 @@ TEST_F(NetworkConfigurationHandlerTest, NetworkConfigurationObserver) {
       network_configuration_observer.get());
   CreateTestConfiguration(service_path, shill::kTypeWifi);
 
-  EXPECT_TRUE(network_configuration_observer->HasConfiguration(service_path));
-  EXPECT_TRUE(network_configuration_observer->HasConfigurationInProfile(
-      service_path, NetworkProfileHandler::GetSharedProfilePath()));
-  EXPECT_EQ(shill::kTypeWifi, network_configuration_observer->GetStringProperty(
-                                  service_path, shill::kTypeProperty));
-
-  base::DictionaryValue properties_to_set;
-  properties_to_set.SetKey(shill::kPassphraseProperty,
-                           base::Value(test_passphrase));
-  network_configuration_handler_->SetShillProperties(
-      service_path, properties_to_set,
-      NetworkConfigurationObserver::SOURCE_USER_ACTION, base::DoNothing(),
-      base::Bind(&ErrorCallback));
-  base::RunLoop().RunUntilIdle();
-  EXPECT_EQ(test_passphrase, network_configuration_observer->GetStringProperty(
-                                 service_path, shill::kPassphraseProperty));
-
-  std::string user_profile = "/profiles/user1";
-  std::string userhash = "user1";
-  DBusThreadManager::Get()
-      ->GetShillProfileClient()
-      ->GetTestInterface()
-      ->AddProfile(user_profile, userhash);
-
-  network_configuration_handler_->SetNetworkProfile(
-      service_path, user_profile,
-      NetworkConfigurationObserver::SOURCE_USER_ACTION, base::DoNothing(),
-      base::Bind(&ErrorCallback));
-  base::RunLoop().RunUntilIdle();
-  EXPECT_TRUE(network_configuration_observer->HasConfiguration(service_path));
-  EXPECT_FALSE(network_configuration_observer->HasConfigurationInProfile(
-      service_path, NetworkProfileHandler::GetSharedProfilePath()));
-  EXPECT_TRUE(network_configuration_observer->HasConfigurationInProfile(
-      service_path, user_profile));
+  EXPECT_FALSE(
+      network_configuration_observer->HasRemovedConfiguration(service_path));
 
   network_configuration_handler_->RemoveConfiguration(
-      service_path, NetworkConfigurationObserver::SOURCE_USER_ACTION,
-      base::DoNothing(), base::Bind(&ErrorCallback));
+      service_path, base::DoNothing(), base::Bind(&ErrorCallback));
   base::RunLoop().RunUntilIdle();
 
-  EXPECT_FALSE(network_configuration_observer->HasConfiguration(service_path));
-  EXPECT_FALSE(network_configuration_observer->HasConfigurationInProfile(
-      service_path, NetworkProfileHandler::GetSharedProfilePath()));
-  EXPECT_FALSE(network_configuration_observer->HasConfigurationInProfile(
-      service_path, user_profile));
+  EXPECT_TRUE(
+      network_configuration_observer->HasRemovedConfiguration(service_path));
 
   network_configuration_handler_->RemoveObserver(
       network_configuration_observer.get());
+}
+
+TEST_F(NetworkConfigurationHandlerTest, AlwaysOnVpn) {
+  const std::string vpn_package = "com.android.vpn";
+
+  network_configuration_handler_->SetManagerProperty(
+      shill::kAlwaysOnVpnPackageProperty, base::Value(vpn_package),
+      base::DoNothing(), base::Bind(&ErrorCallback));
+
+  DBusThreadManager::Get()->GetShillManagerClient()->GetProperties(
+      Bind(&NetworkConfigurationHandlerTest::ManagerGetPropertiesCallback,
+           base::Unretained(this), "ManagerGetProperties"));
+  base::RunLoop().RunUntilIdle();
+  std::string package_result;
+  EXPECT_EQ("ManagerGetProperties", success_callback_name_);
+  EXPECT_TRUE(GetReceivedStringManagerProperty(
+      shill::kAlwaysOnVpnPackageProperty, &package_result));
+  EXPECT_EQ(vpn_package, package_result);
 }
 
 }  // namespace chromeos

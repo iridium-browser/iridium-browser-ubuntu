@@ -24,7 +24,7 @@ import org.chromium.chrome.R;
 import org.chromium.chrome.browser.findinpage.FindInPageBridge;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.util.MathUtils;
-import org.chromium.ui.UiUtils;
+import org.chromium.ui.KeyboardVisibilityDelegate;
 import org.chromium.ui.base.LocalizationUtils;
 import org.chromium.ui.interpolators.BakedBezierInterpolator;
 
@@ -128,9 +128,9 @@ class FindResultBar extends View {
 
         mFindInPageBridge = findInPageBridge;
         mTab = tab;
-        mTab.getContentViewCore().getContainerView().addView(
-                this, new FrameLayout.LayoutParams(mBarTouchWidth,
-                ViewGroup.LayoutParams.MATCH_PARENT, Gravity.END));
+        mTab.getContentView().addView(this,
+                new FrameLayout.LayoutParams(
+                        mBarTouchWidth, ViewGroup.LayoutParams.MATCH_PARENT, Gravity.END));
         setTranslationX(
                 MathUtils.flipSignIf(mBarTouchWidth, LocalizationUtils.isLayoutRtl()));
 
@@ -190,7 +190,7 @@ class FindResultBar extends View {
             // We decided it's more important to get the keyboard out of the
             // way asap; the user can compensate if their next MotionEvent
             // scrolls somewhere unintended.
-            UiUtils.hideKeyboard(this);
+            KeyboardVisibilityDelegate.getInstance().hideKeyboard(this);
 
             // Identify which drawn tickmark is closest to the user's finger.
             int closest = Collections.binarySearch(mTickmarks,

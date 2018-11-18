@@ -5,7 +5,6 @@
 #include "third_party/blink/renderer/modules/presentation/presentation_availability.h"
 
 #include "third_party/blink/public/mojom/page/page_visibility_state.mojom-blink.h"
-#include "third_party/blink/public/platform/modules/presentation/web_presentation_client.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/core/dom/document.h"
@@ -36,7 +35,7 @@ PresentationAvailability::PresentationAvailability(
     const WTF::Vector<KURL>& urls,
     bool value)
     : PausableObject(execution_context),
-      PageVisibilityObserver(ToDocument(execution_context)->GetPage()),
+      PageVisibilityObserver(To<Document>(execution_context)->GetPage()),
       urls_(urls),
       value_(value),
       state_(State::kActive) {
@@ -71,7 +70,7 @@ void PresentationAvailability::AvailabilityChanged(
     return;
 
   value_ = value;
-  DispatchEvent(Event::Create(EventTypeNames::change));
+  DispatchEvent(*Event::Create(EventTypeNames::change));
 }
 
 bool PresentationAvailability::HasPendingActivity() const {
@@ -108,7 +107,7 @@ void PresentationAvailability::UpdateListening() {
     return;
 
   if (state_ == State::kActive &&
-      (ToDocument(GetExecutionContext())->GetPageVisibilityState() ==
+      (To<Document>(GetExecutionContext())->GetPageVisibilityState() ==
        mojom::PageVisibilityState::kVisible))
     controller->GetAvailabilityState()->AddObserver(this);
   else

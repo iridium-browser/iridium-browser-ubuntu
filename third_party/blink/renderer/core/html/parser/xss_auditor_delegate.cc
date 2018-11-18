@@ -66,10 +66,6 @@ String XSSInfo::BuildConsoleError() const {
   return message.ToString();
 }
 
-bool XSSInfo::IsSafeToSendToAnotherThread() const {
-  return original_url_.IsSafeToSendToAnotherThread();
-}
-
 XSSAuditorDelegate::XSSAuditorDelegate(Document* document)
     : document_(document), did_send_notifications_(false) {
   DCHECK(IsMainThread());
@@ -119,9 +115,6 @@ void XSSAuditorDelegate::DidBlockScript(const XSSInfo& xss_info) {
 
   if (!did_send_notifications_ && local_frame->Client()) {
     did_send_notifications_ = true;
-
-    local_frame->Client()->DidDetectXSS(document_->Url(),
-                                        xss_info.did_block_entire_page_);
 
     if (!report_url_.IsEmpty())
       PingLoader::SendViolationReport(local_frame, report_url_,

@@ -6,6 +6,7 @@
 #define CONTENT_BROWSER_SERVICE_WORKER_SERVICE_WORKER_CONTEXT_CORE_OBSERVER_H_
 
 #include <stdint.h>
+#include <string>
 
 #include "base/callback.h"
 #include "base/strings/string16.h"
@@ -63,6 +64,7 @@ class ServiceWorkerContextCoreObserver {
   virtual void OnRunningStateChanged(int64_t version_id,
                                      EmbeddedWorkerStatus running_status) {}
   virtual void OnVersionStateChanged(int64_t version_id,
+                                     const GURL& scope,
                                      ServiceWorkerVersion::Status status) {}
   virtual void OnVersionDevToolsRoutingIdChanged(int64_t version_id,
                                                  int process_id,
@@ -71,24 +73,29 @@ class ServiceWorkerContextCoreObserver {
       int64_t version_id,
       base::Time script_response_time,
       base::Time script_last_modified) {}
-  virtual void OnErrorReported(int64_t version_id,
-                               int process_id,
-                               int thread_id,
-                               const ErrorInfo& info) {}
+  virtual void OnErrorReported(int64_t version_id, const ErrorInfo& info) {}
   virtual void OnReportConsoleMessage(int64_t version_id,
-                                      int process_id,
-                                      int thread_id,
                                       const ConsoleMessage& message) {}
-  // |web_contents_getter| is only set in PlzNavigate.
-  virtual void OnControlleeAdded(
-      int64_t version_id,
-      const std::string& uuid,
-      int process_id,
-      int route_id,
-      const base::Callback<WebContents*(void)>& web_contents_getter,
-      blink::mojom::ServiceWorkerProviderType type) {}
+  virtual void OnControlleeAdded(int64_t version_id,
+                                 const GURL& scope,
+                                 const std::string& uuid,
+                                 const ServiceWorkerClientInfo& info) {}
   virtual void OnControlleeRemoved(int64_t version_id,
+                                   const GURL& scope,
                                    const std::string& uuid) {}
+  virtual void OnNoControllees(int64_t version_id, const GURL& scope) {}
+  // Called when the ServiceWorkerContainer.register() promise is resolved.
+  //
+  // This is called before the service worker registration is persisted to
+  // storage. The implementation cannot assume that the ServiceWorkerContextCore
+  // will find the registration at this point.
+  virtual void OnRegistrationCompleted(int64_t registration_id,
+                                       const GURL& pattern) {}
+  // Called after a service worker registration is persisted to storage.
+  //
+  // This happens after OnRegistrationCompleted(). The implementation can assume
+  // that ServiceWorkerContextCore will find the registration, and can safely
+  // add user data to the registration.
   virtual void OnRegistrationStored(int64_t registration_id,
                                     const GURL& pattern) {}
   virtual void OnRegistrationDeleted(int64_t registration_id,

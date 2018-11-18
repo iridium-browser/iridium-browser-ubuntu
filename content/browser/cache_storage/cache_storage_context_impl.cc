@@ -7,10 +7,11 @@
 #include "base/bind.h"
 #include "base/files/file_path.h"
 #include "base/sequenced_task_runner.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "content/browser/blob_storage/chrome_blob_storage_context.h"
 #include "content/browser/cache_storage/cache_storage_manager.h"
 #include "content/public/browser/browser_context.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "net/url_request/url_request_context_getter.h"
 #include "storage/browser/blob/blob_storage_context.h"
@@ -36,7 +37,7 @@ void CacheStorageContextImpl::Init(
   is_incognito_ = user_data_directory.empty();
   scoped_refptr<base::SequencedTaskRunner> cache_task_runner =
       base::CreateSequencedTaskRunnerWithTraits(
-          {base::MayBlock(), base::TaskPriority::BACKGROUND,
+          {base::MayBlock(), base::TaskPriority::USER_VISIBLE,
            base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN});
 
   // This thread-hopping antipattern is needed here for some unit tests, where
@@ -49,8 +50,8 @@ void CacheStorageContextImpl::Init(
     return;
   }
 
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::IO},
       base::BindOnce(&CacheStorageContextImpl::CreateCacheStorageManager, this,
                      user_data_directory, cache_task_runner,
                      std::move(quota_manager_proxy)));
@@ -59,8 +60,8 @@ void CacheStorageContextImpl::Init(
 void CacheStorageContextImpl::Shutdown() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::IO},
       base::BindOnce(&CacheStorageContextImpl::ShutdownOnIO, this));
 }
 
@@ -85,19 +86,20 @@ void CacheStorageContextImpl::GetAllOriginsInfo(
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   if (!cache_manager_) {
-    BrowserThread::PostTask(
-        BrowserThread::IO, FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, {BrowserThread::IO},
         base::BindOnce(callback, std::vector<CacheStorageUsageInfo>()));
     return;
   }
 
-  cache_manager_->GetAllOriginsUsage(callback);
+  cache_manager_->GetAllOriginsUsage(CacheStorageOwner::kCacheAPI, callback);
 }
 
 void CacheStorageContextImpl::DeleteForOrigin(const GURL& origin) {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (cache_manager_)
-    cache_manager_->DeleteOriginData(url::Origin::Create(origin));
+    cache_manager_->DeleteOriginData(url::Origin::Create(origin),
+                                     CacheStorageOwner::kCacheAPI);
 }
 
 void CacheStorageContextImpl::AddObserver(
@@ -128,7 +130,12 @@ void CacheStorageContextImpl::CreateCacheStorageManager(
 void CacheStorageContextImpl::ShutdownOnIO() {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
-  cache_manager_.reset();
+  // Release |cache_manager_|. New clients will get a nullptr if they request
+  // an instance of CacheStorageManager after this. Any other client that
+  // ref-wrapped |cache_manager_| will be able to continue using it, and the
+  // CacheStorageManager will be destroyed when all the references are
+  // destroyed.
+  cache_manager_ = nullptr;
 }
 
 }  // namespace content

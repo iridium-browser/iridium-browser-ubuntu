@@ -24,14 +24,14 @@
 
 #include "third_party/blink/renderer/core/html/forms/text_control_element.h"
 
-#include "third_party/blink/renderer/bindings/core/v8/exception_messages.h"
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
-#include "third_party/blink/renderer/core/dom/ax_object_cache.h"
+#include "third_party/blink/renderer/core/accessibility/ax_object_cache.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
+#include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/dom/text.h"
+#include "third_party/blink/renderer/core/editing/editing_behavior.h"
 #include "third_party/blink/renderer/core/editing/editing_utilities.h"
 #include "third_party/blink/renderer/core/editing/editor.h"
 #include "third_party/blink/renderer/core/editing/frame_selection.h"
@@ -55,6 +55,8 @@
 #include "third_party/blink/renderer/core/layout/layout_theme.h"
 #include "third_party/blink/renderer/core/page/focus_controller.h"
 #include "third_party/blink/renderer/core/page/page.h"
+#include "third_party/blink/renderer/platform/bindings/exception_messages.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
@@ -101,10 +103,11 @@ void TextControlElement::DispatchBlurEvent(
                                                      source_capabilities);
 }
 
-void TextControlElement::DefaultEventHandler(Event* event) {
-  if (event->type() == EventTypeNames::webkitEditableContentChanged &&
+void TextControlElement::DefaultEventHandler(Event& event) {
+  if (event.type() == EventTypeNames::webkitEditableContentChanged &&
       GetLayoutObject() && GetLayoutObject()->IsTextControl()) {
     last_change_was_user_edit_ = !GetDocument().IsRunningExecCommand();
+    user_has_edited_the_field_ |= last_change_was_user_edit_;
 
     if (IsFocused()) {
       // Updating the cache in SelectionChanged() isn't enough because
@@ -124,9 +127,9 @@ void TextControlElement::DefaultEventHandler(Event* event) {
   HTMLFormControlElementWithState::DefaultEventHandler(event);
 }
 
-void TextControlElement::ForwardEvent(Event* event) {
-  if (event->type() == EventTypeNames::blur ||
-      event->type() == EventTypeNames::focus)
+void TextControlElement::ForwardEvent(Event& event) {
+  if (event.type() == EventTypeNames::blur ||
+      event.type() == EventTypeNames::focus)
     return;
   InnerEditorElement()->DefaultEventHandler(event);
 }
@@ -279,9 +282,10 @@ void TextControlElement::setRangeText(const String& replacement,
                                       ExceptionState& exception_state) {
   if (start > end) {
     exception_state.ThrowDOMException(
-        kIndexSizeError, "The provided start value (" + String::Number(start) +
-                             ") is larger than the provided end value (" +
-                             String::Number(end) + ").");
+        DOMExceptionCode::kIndexSizeError,
+        "The provided start value (" + String::Number(start) +
+            ") is larger than the provided end value (" + String::Number(end) +
+            ").");
     return;
   }
   if (OpenShadowRoot())
@@ -488,8 +492,8 @@ VisiblePosition TextControlElement::VisiblePositionForIndex(int index) const {
   return CreateVisiblePosition(it.EndPosition(), TextAffinity::kUpstream);
 }
 
-// TODO(yosin): We should move |TextControlElement::indexForVisiblePosition()|
-// to "AXLayoutObject.cpp" since this funciton is used only there.
+// TODO(yosin): We should move |TextControlElement::IndexForVisiblePosition()|
+// to "ax_layout_object.cc" since this function is used only there.
 int TextControlElement::IndexForVisiblePosition(
     const VisiblePosition& pos) const {
   Position index_position = pos.DeepEquivalent().ParentAnchoredEquivalent();
@@ -674,13 +678,15 @@ void TextControlElement::setMaxLength(int new_value,
                                       ExceptionState& exception_state) {
   int min = minLength();
   if (new_value < 0) {
-    exception_state.ThrowDOMException(
-        kIndexSizeError, "The value provided (" + String::Number(new_value) +
-                             ") is not positive or 0.");
+    exception_state.ThrowDOMException(DOMExceptionCode::kIndexSizeError,
+                                      "The value provided (" +
+                                          String::Number(new_value) +
+                                          ") is not positive or 0.");
   } else if (min >= 0 && new_value < min) {
     exception_state.ThrowDOMException(
-        kIndexSizeError, ExceptionMessages::IndexExceedsMinimumBound(
-                             "maxLength", new_value, min));
+        DOMExceptionCode::kIndexSizeError,
+        ExceptionMessages::IndexExceedsMinimumBound("maxLength", new_value,
+                                                    min));
   } else {
     SetIntegralAttribute(maxlengthAttr, new_value);
   }
@@ -690,13 +696,15 @@ void TextControlElement::setMinLength(int new_value,
                                       ExceptionState& exception_state) {
   int max = maxLength();
   if (new_value < 0) {
-    exception_state.ThrowDOMException(
-        kIndexSizeError, "The value provided (" + String::Number(new_value) +
-                             ") is not positive or 0.");
+    exception_state.ThrowDOMException(DOMExceptionCode::kIndexSizeError,
+                                      "The value provided (" +
+                                          String::Number(new_value) +
+                                          ") is not positive or 0.");
   } else if (max >= 0 && new_value > max) {
     exception_state.ThrowDOMException(
-        kIndexSizeError, ExceptionMessages::IndexExceedsMaximumBound(
-                             "minLength", new_value, max));
+        DOMExceptionCode::kIndexSizeError,
+        ExceptionMessages::IndexExceedsMaximumBound("minLength", new_value,
+                                                    max));
   } else {
     SetIntegralAttribute(minlengthAttr, new_value);
   }
@@ -724,7 +732,7 @@ void TextControlElement::SelectionChanged(bool user_triggered) {
       frame->Selection().GetSelectionInDOMTree();
   if (selection.Type() != kRangeSelection)
     return;
-  DispatchEvent(Event::CreateBubble(EventTypeNames::select));
+  DispatchEvent(*Event::CreateBubble(EventTypeNames::select));
 }
 
 void TextControlElement::ScheduleSelectEvent() {
@@ -953,13 +961,11 @@ void TextControlElement::SetSuggestedValue(const String& value) {
   if (!suggested_value_.IsEmpty() && !InnerEditorValue().IsEmpty()) {
     // If there is an inner editor value, hide it so the suggested value can be
     // shown to the user.
-    static_cast<TextControlInnerEditorElement*>(InnerEditorElement())
-        ->SetVisibility(false);
+    InnerEditorElement()->SetVisibility(false);
   } else if (suggested_value_.IsEmpty() && InnerEditorElement()) {
     // If there is no suggested value and there is an InnerEditorElement, reset
     // its visibility.
-    static_cast<TextControlInnerEditorElement*>(InnerEditorElement())
-        ->SetVisibility(true);
+    InnerEditorElement()->SetVisibility(true);
   }
 
   UpdatePlaceholderText();
@@ -1000,7 +1006,14 @@ void TextControlElement::CloneNonAttributePropertiesFrom(
   const TextControlElement& source_element =
       static_cast<const TextControlElement&>(source);
   last_change_was_user_edit_ = source_element.last_change_was_user_edit_;
+  user_has_edited_the_field_ = source_element.user_has_edited_the_field_;
   HTMLFormControlElement::CloneNonAttributePropertiesFrom(source, flag);
+}
+
+ETextOverflow TextControlElement::ValueForTextOverflow() const {
+  if (GetDocument().FocusedElement() == this)
+    return ETextOverflow::kClip;
+  return ComputedStyleRef().TextOverflow();
 }
 
 }  // namespace blink

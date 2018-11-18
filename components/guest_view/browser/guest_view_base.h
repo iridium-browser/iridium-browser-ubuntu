@@ -120,9 +120,9 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   // This creates a WebContents and initializes |this| GuestViewBase to use the
   // newly created WebContents.
   using WebContentsCreatedCallback =
-      base::Callback<void(content::WebContents*)>;
+      base::OnceCallback<void(content::WebContents*)>;
   void Init(const base::DictionaryValue& create_params,
-            const WebContentsCreatedCallback& callback);
+            WebContentsCreatedCallback callback);
 
   void InitWithWebContents(const base::DictionaryValue& create_params,
                            content::WebContents* guest_web_contents);
@@ -233,9 +233,8 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   // Given a set of initialization parameters, a concrete subclass of
   // GuestViewBase can create a specialized WebContents that it returns back to
   // GuestViewBase.
-  virtual void CreateWebContents(
-      const base::DictionaryValue& create_params,
-      const WebContentsCreatedCallback& callback) = 0;
+  virtual void CreateWebContents(const base::DictionaryValue& create_params,
+                                 WebContentsCreatedCallback callback) = 0;
 
   // This method is called after the guest has been attached to an embedder and
   // suspended resource loads have been resumed.
@@ -291,7 +290,7 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   // Signals that the guest view is ready.  The default implementation signals
   // immediately, but derived class can override this if they need to do
   // asynchronous setup.
-  virtual void SignalWhenReady(const base::Closure& callback);
+  virtual void SignalWhenReady(base::OnceClosure callback);
 
   // This method is called immediately before suspended resource loads have been
   // resumed on attachment to an embedder.
@@ -341,7 +340,7 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   void WillAttach(content::WebContents* embedder_web_contents,
                   int browser_plugin_instance_id,
                   bool is_full_page_plugin,
-                  const base::Closure& completion_callback) final;
+                  base::OnceClosure completion_callback) final;
 
   // WebContentsDelegate implementation.
   void ActivateContents(content::WebContents* contents) final;
@@ -358,7 +357,8 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
   void ResizeDueToAutoResize(content::WebContents* web_contents,
                              const gfx::Size& new_size) final;
   void RunFileChooser(content::RenderFrameHost* render_frame_host,
-                      const content::FileChooserParams& params) final;
+                      std::unique_ptr<content::FileSelectListener> listener,
+                      const blink::mojom::FileChooserParams& params) final;
   bool ShouldFocusPageAfterCrash() final;
   void UpdatePreferredSize(content::WebContents* web_contents,
                            const gfx::Size& pref_size) final;
@@ -381,12 +381,12 @@ class GuestViewBase : public content::BrowserPluginGuestDelegate,
                   int element_instance_id,
                   bool is_full_page_plugin,
                   base::OnceClosure perform_attach,
-                  const base::Closure& completion_callback);
+                  base::OnceClosure completion_callback);
 
   void SendQueuedEvents();
 
   void CompleteInit(std::unique_ptr<base::DictionaryValue> create_params,
-                    const WebContentsCreatedCallback& callback,
+                    WebContentsCreatedCallback callback,
                     content::WebContents* guest_web_contents);
 
   // Dispatches the onResize event to the embedder.

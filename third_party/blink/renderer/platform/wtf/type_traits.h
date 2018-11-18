@@ -25,6 +25,7 @@
 #include <cstddef>
 #include <type_traits>
 #include <utility>
+#include "base/template_util.h"
 #include "build/build_config.h"
 #include "third_party/blink/renderer/platform/wtf/compiler.h"
 
@@ -167,10 +168,10 @@ struct IsTraceable<std::pair<T, U>> {
   static const bool value = IsTraceable<T>::value || IsTraceable<U>::value;
 };
 
-// This is used to check that DISALLOW_NEW_EXCEPT_PLACEMENT_NEW objects are not
+// This is used to check that DISALLOW_NEW objects are not
 // stored in off-heap Vectors, HashTables etc.
 template <typename T>
-struct AllowsOnlyPlacementNew {
+struct IsDisallowNew {
  private:
   using YesType = char;
   struct NoType {
@@ -178,7 +179,7 @@ struct AllowsOnlyPlacementNew {
   };
 
   template <typename U>
-  static YesType CheckMarker(typename U::IsAllowOnlyPlacementNew*);
+  static YesType CheckMarker(typename U::IsDisallowNewMarker*);
   template <typename U>
   static NoType CheckMarker(...);
 
@@ -261,6 +262,14 @@ class IsPointerToGarbageCollectedType<T*, false> {
  public:
   static const bool value = IsGarbageCollectedType<T>::value;
 };
+
+template <typename T, typename = void>
+struct IsStackAllocatedType : std::false_type {};
+
+template <typename T>
+struct IsStackAllocatedType<
+    T,
+    base::void_t<typename T::IsStackAllocatedTypeMarker>> : std::true_type {};
 
 }  // namespace WTF
 

@@ -5,10 +5,10 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_HEAP_PAGE_MEMORY_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_HEAP_PAGE_MEMORY_H_
 
+#include "base/atomic_ref_count.h"
 #include "third_party/blink/renderer/platform/heap/heap.h"
 #include "third_party/blink/renderer/platform/heap/heap_page.h"
 #include "third_party/blink/renderer/platform/wtf/allocator.h"
-#include "third_party/blink/renderer/platform/wtf/allocator/partitions.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
 #include "third_party/blink/renderer/platform/wtf/compiler.h"
 
@@ -92,7 +92,7 @@ class PageMemoryRegion : public MemoryRegion {
       return 0;
     size_t offset = BlinkPageAddress(address) - Base();
     DCHECK_EQ(offset % kBlinkPageSize, 0u);
-    return offset / kBlinkPageSize;
+    return static_cast<unsigned>(offset / kBlinkPageSize);
   }
 
   static PageMemoryRegion* Allocate(size_t, unsigned num_pages, RegionTree*);
@@ -101,7 +101,7 @@ class PageMemoryRegion : public MemoryRegion {
   // A thread owns a page, but not a region. Represent the in-use
   // bitmap such that thread non-interference comes for free.
   bool in_use_[kBlinkPagesPerRegion];
-  int num_pages_;
+  base::AtomicRefCount num_pages_;
   RegionTree* region_tree_;
 };
 
@@ -169,15 +169,6 @@ class PageMemory {
 
   WARN_UNUSED_RESULT bool Commit() {
     reserved_->MarkPageUsed(WritableStart());
-    // Check that in-use page isn't also marked as being a non-heap page
-    // by the current heap's negative cache. That cache is invalidated
-    // when allocating new pages, but crbug.com/649485 suggests that
-    // we do get out of sync somehow.
-    //
-    // TODO(sof): consider removing check once bug has been diagnosed
-    // and addressed.
-    CHECK(!ThreadState::Current()->Heap().IsAddressInHeapDoesNotContainCache(
-        WritableStart()));
     return writable_.Commit();
   }
 

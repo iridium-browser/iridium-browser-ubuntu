@@ -137,8 +137,6 @@ def get_put_forward_interfaces_from_definition(definition):
 
 
 def get_unforgeable_attributes_from_definition(definition):
-    if 'Unforgeable' in definition.extended_attributes:
-        return sorted(definition.attributes)
     return sorted(attribute for attribute in definition.attributes
                   if 'Unforgeable' in attribute.extended_attributes)
 
@@ -274,7 +272,10 @@ class InterfaceInfoCollector(object):
         extended_attributes = definition.extended_attributes
         implemented_as = extended_attributes.get('ImplementedAs')
         full_path = os.path.realpath(idl_filename)
-        this_include_path = include_path(idl_filename, implemented_as)
+        if interface_info['is_dictionary']:
+            this_include_path = include_path(idl_filename)
+        else:
+            this_include_path = include_path(idl_filename, implemented_as)
         if definition.is_partial:
             # We don't create interface_info for partial interfaces, but
             # adds paths to another dict.

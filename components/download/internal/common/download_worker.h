@@ -8,17 +8,19 @@
 #include <memory>
 
 #include "base/macros.h"
+#include "base/memory/scoped_refptr.h"
 #include "base/memory/weak_ptr.h"
 #include "components/download/public/common/download_export.h"
 #include "components/download/public/common/download_request_handle_interface.h"
 #include "components/download/public/common/download_url_parameters.h"
 #include "components/download/public/common/url_download_handler.h"
 
-namespace network {
-class SharedURLLoaderFactory;
+namespace net {
+class URLRequestContextGetter;
 }
 
 namespace download {
+class DownloadURLLoaderFactoryGetter;
 
 // Helper class used to send subsequent range requests to fetch slices of the
 // file after handling response of the original non-range request.
@@ -34,7 +36,8 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadWorker
     // destination file.
     virtual void OnInputStreamReady(
         DownloadWorker* worker,
-        std::unique_ptr<InputStream> input_stream) = 0;
+        std::unique_ptr<InputStream> input_stream,
+        std::unique_ptr<DownloadCreateInfo> download_create_info) = 0;
   };
 
   DownloadWorker(DownloadWorker::Delegate* delegate,
@@ -48,7 +51,9 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadWorker
   // Send network request to ask for a download.
   void SendRequest(
       std::unique_ptr<DownloadUrlParameters> params,
-      scoped_refptr<network::SharedURLLoaderFactory> shared_url_loader_factory);
+      scoped_refptr<download::DownloadURLLoaderFactoryGetter>
+          url_loader_factory_getter,
+      scoped_refptr<net::URLRequestContextGetter> url_request_context_getter);
 
   // Download operations.
   void Pause();
@@ -60,7 +65,8 @@ class COMPONENTS_DOWNLOAD_EXPORT DownloadWorker
   void OnUrlDownloadStarted(
       std::unique_ptr<DownloadCreateInfo> create_info,
       std::unique_ptr<InputStream> input_stream,
-      scoped_refptr<network::SharedURLLoaderFactory> shared_url_loader_factory,
+      scoped_refptr<download::DownloadURLLoaderFactoryGetter>
+          url_loader_factory_getter,
       const DownloadUrlParameters::OnStartedCallback& callback) override;
   void OnUrlDownloadStopped(UrlDownloadHandler* downloader) override;
   void OnUrlDownloadHandlerCreated(

@@ -9,11 +9,11 @@
 
 #include "SkTypes.h"
 
-#if SK_SUPPORT_GPU && defined(SK_VULKAN)
+#if defined(SK_VULKAN)
 
+#include "GrBackendSurface.h"
 #include "GrContextFactory.h"
 #include "GrContextPriv.h"
-#include "GrTest.h"
 #include "GrTexture.h"
 #include "Test.h"
 #include "vk/GrVkCopyPipeline.h"

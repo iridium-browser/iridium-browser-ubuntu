@@ -12,8 +12,9 @@
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/optional.h"
 #include "base/threading/thread_checker.h"
-#include "components/component_updater/timer.h"
+#include "components/component_updater/update_scheduler.h"
 
 namespace base {
 class TimeTicks;
@@ -37,6 +38,7 @@ class CrxUpdateService : public ComponentUpdateService,
 
  public:
   CrxUpdateService(scoped_refptr<Configurator> config,
+                   std::unique_ptr<UpdateScheduler> scheduler,
                    scoped_refptr<UpdateClient> update_client);
   ~CrxUpdateService() override;
 
@@ -59,25 +61,29 @@ class CrxUpdateService : public ComponentUpdateService,
   void OnEvent(Events event, const std::string& id) override;
 
   // Overrides for OnDemandUpdater.
-  void OnDemandUpdate(const std::string& id, Callback callback) override;
+  void OnDemandUpdate(const std::string& id,
+                      Priority priority,
+                      Callback callback) override;
 
  private:
   void Start();
   void Stop();
 
-  bool CheckForUpdates();
+  bool CheckForUpdates(UpdateScheduler::OnFinishedCallback on_finished);
 
-  void OnDemandUpdateInternal(const std::string& id, Callback callback);
+  void OnDemandUpdateInternal(const std::string& id,
+                              Priority priority,
+                              Callback callback);
   bool OnDemandUpdateWithCooldown(const std::string& id);
 
   bool DoUnregisterComponent(const CrxComponent& component);
 
-  const CrxComponent* GetComponent(const std::string& id) const;
+  base::Optional<CrxComponent> GetComponent(const std::string& id) const;
 
   const CrxUpdateItem* GetComponentState(const std::string& id) const;
 
-  void OnUpdate(const std::vector<std::string>& ids,
-                std::vector<CrxComponent>* components);
+  std::vector<base::Optional<CrxComponent>> GetCrxComponents(
+      const std::vector<std::string>& ids);
   void OnUpdateComplete(Callback callback,
                         const base::TimeTicks& start_time,
                         update_client::Error error);
@@ -85,10 +91,9 @@ class CrxUpdateService : public ComponentUpdateService,
   base::ThreadChecker thread_checker_;
 
   scoped_refptr<Configurator> config_;
+  std::unique_ptr<UpdateScheduler> scheduler_;
 
   scoped_refptr<UpdateClient> update_client_;
-
-  Timer timer_;
 
   // A collection of every registered component.
   using Components = std::map<std::string, CrxComponent>;

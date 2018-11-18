@@ -18,6 +18,7 @@
 #include "base/files/file_util.h"
 #include "base/memory/memory_pressure_monitor_chromeos.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/process/memory.h"
 #include "base/process/process_handle.h"  // kNullProcessHandle.
 #include "base/process/process_metrics.h"
 #include "base/strings/string16.h"
@@ -29,12 +30,13 @@
 #include "chrome/browser/chromeos/arc/process/arc_process_service.h"
 #include "chrome/browser/memory/memory_kills_monitor.h"
 #include "chrome/browser/resource_coordinator/tab_lifecycle_unit_external.h"
+#include "chrome/browser/resource_coordinator/tab_manager_stats_collector.h"
+#include "chrome/browser/resource_coordinator/utils.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_constants.h"
-#include "chrome/common/chrome_features.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "components/arc/arc_bridge_service.h"
 #include "components/arc/arc_service_manager.h"
@@ -46,7 +48,7 @@
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_widget_host.h"
-#include "content/public/browser/zygote_host_linux.h"
+#include "services/service_manager/zygote/zygote_host_linux.h"
 #include "ui/wm/public/activation_client.h"
 
 using base::ProcessHandle;
@@ -69,10 +71,6 @@ wm::ActivationClient* GetActivationClient() {
   return wm::GetActivationClient(ash::Shell::GetPrimaryRootWindow());
 }
 
-bool IsArcMemoryManagementEnabled() {
-  return base::FeatureList::IsEnabled(features::kArcMemoryManagement);
-}
-
 void OnSetOomScoreAdj(bool success, const std::string& output) {
   VLOG(2) << "OnSetOomScoreAdj " << success << " " << output;
   if (!success)
@@ -84,7 +82,7 @@ void OnSetOomScoreAdj(bool success, const std::string& output) {
 }  // namespace
 
 // static
-const int TabManagerDelegate::kLowestOomScore = -1000;
+const int TabManagerDelegate::kPersistentArcAppOomScore = -100;
 
 std::ostream& operator<<(std::ostream& os, const ProcessType& type) {
   switch (type) {
@@ -148,8 +146,12 @@ ProcessType TabManagerDelegate::Candidate::GetProcessTypeInternal() const {
   if (lifecycle_unit()) {
     if (lifecycle_unit_sort_key_.last_focused_time == base::TimeTicks::Max())
       return ProcessType::FOCUSED_TAB;
-    if (!lifecycle_unit()->CanDiscard(DiscardReason::kProactive))
+    DecisionDetails decision_details;
+    if (!lifecycle_unit()->CanDiscard(
+            ::mojom::LifecycleUnitDiscardReason::PROACTIVE,
+            &decision_details)) {
       return ProcessType::PROTECTED_BACKGROUND_TAB;
+    }
     return ProcessType::BACKGROUND_TAB;
   }
   NOTREACHED() << "Unexpected process type";
@@ -247,12 +249,8 @@ int TabManagerDelegate::MemoryStat::TargetMemoryToFreeKB() {
 }
 
 int TabManagerDelegate::MemoryStat::EstimatedMemoryFreedKB(
-    base::ProcessHandle pid) {
-  std::unique_ptr<base::ProcessMetrics> process_metrics(
-      base::ProcessMetrics::CreateProcessMetrics(pid));
-  base::ProcessMetrics::TotalsSummary summary =
-      process_metrics->GetTotalsSummary();
-  return summary.private_clean_kb + summary.private_dirty_kb + summary.swap_kb;
+    base::ProcessHandle handle) {
+  return GetPrivateMemoryKB(handle);
 }
 
 TabManagerDelegate::TabManagerDelegate(
@@ -297,7 +295,8 @@ void TabManagerDelegate::OnBrowserSetLastActive(Browser* browser) {
   if (!contents)
     return;
 
-  base::ProcessHandle pid = contents->GetMainFrame()->GetProcess()->GetHandle();
+  base::ProcessHandle pid =
+      contents->GetMainFrame()->GetProcess()->GetProcess().Handle();
   AdjustFocusedTabScore(pid);
 }
 
@@ -334,18 +333,21 @@ void TabManagerDelegate::ScheduleEarlyOomPrioritiesAdjustment() {
   AdjustOomPriorities();
 }
 
-// If able to get the list of ARC procsses, prioritize tabs and apps as a whole.
-// Otherwise try to kill tabs only.
-void TabManagerDelegate::LowMemoryKill(DiscardReason reason) {
+// If able to get the list of ARC processes, prioritize tabs and apps as a
+// whole. Otherwise try to kill tabs only.
+void TabManagerDelegate::LowMemoryKill(
+    ::mojom::LifecycleUnitDiscardReason reason) {
   arc::ArcProcessService* arc_process_service = arc::ArcProcessService::Get();
+  base::TimeTicks now = base::TimeTicks::Now();
   if (arc_process_service &&
       arc_process_service->RequestAppProcessList(
           base::BindRepeating(&TabManagerDelegate::LowMemoryKillImpl,
-                              weak_ptr_factory_.GetWeakPtr(), reason))) {
+                              weak_ptr_factory_.GetWeakPtr(),
+                              now, reason))) {
     return;
   }
 
-  LowMemoryKillImpl(reason, std::vector<arc::ArcProcess>());
+  LowMemoryKillImpl(now, reason, std::vector<arc::ArcProcess>());
 }
 
 int TabManagerDelegate::GetCachedOomScore(ProcessHandle process_handle) {
@@ -378,9 +380,10 @@ void TabManagerDelegate::OnFocusTabScoreAdjustmentTimeout() {
   // Sets OOM score.
   VLOG(3) << "Set OOM score " << chrome::kLowestRendererOomScore
           << " for focused tab " << pid;
-  std::map<int, int> dict;
-  dict[pid] = chrome::kLowestRendererOomScore;
-  GetDebugDaemonClient()->SetOomScoreAdj(dict, base::Bind(&OnSetOomScoreAdj));
+  if (!base::AdjustOOMScore(pid, chrome::kLowestRendererOomScore))
+    LOG(ERROR) << "Failed to set oom_score_adj to "
+               << chrome::kLowestRendererOomScore
+               << " for focused tab, pid: " << pid;
 }
 
 void TabManagerDelegate::AdjustFocusedTabScore(base::ProcessHandle pid) {
@@ -419,7 +422,7 @@ void TabManagerDelegate::Observe(int type,
     case content::NOTIFICATION_RENDERER_PROCESS_TERMINATED: {
       content::RenderProcessHost* host =
           content::Source<content::RenderProcessHost>(source).ptr();
-      oom_score_map_.erase(host->GetHandle());
+      oom_score_map_.erase(host->GetProcess().Handle());
       // Coming here we know that a renderer was just killed and memory should
       // come back into the pool. However - the memory pressure observer did
       // not yet update its status and therefore we ask it to redo the
@@ -442,7 +445,7 @@ void TabManagerDelegate::Observe(int type,
             content::Source<content::RenderWidgetHost>(source)
                 .ptr()
                 ->GetProcess();
-        AdjustFocusedTabScore(render_host->GetHandle());
+        AdjustFocusedTabScore(render_host->GetProcess().Handle());
       }
       // Do not handle the "else" case when it changes to invisible because
       // 1. The behavior is a bit awkward in that when switching from tab A to
@@ -471,15 +474,14 @@ void TabManagerDelegate::Observe(int type,
 // 2) last time a tab was selected
 // 3) is the tab currently selected
 void TabManagerDelegate::AdjustOomPriorities() {
-  if (IsArcMemoryManagementEnabled()) {
-    arc::ArcProcessService* arc_process_service = arc::ArcProcessService::Get();
-    if (arc_process_service &&
-        arc_process_service->RequestAppProcessList(
-            base::Bind(&TabManagerDelegate::AdjustOomPrioritiesImpl,
-                       weak_ptr_factory_.GetWeakPtr()))) {
-      return;
-    }
+  arc::ArcProcessService* arc_process_service = arc::ArcProcessService::Get();
+  if (arc_process_service &&
+      arc_process_service->RequestAppProcessList(
+          base::Bind(&TabManagerDelegate::AdjustOomPrioritiesImpl,
+                     weak_ptr_factory_.GetWeakPtr()))) {
+    return;
   }
+
   // Pass in a dummy list if unable to get ARC processes.
   AdjustOomPrioritiesImpl(std::vector<arc::ArcProcess>());
 }
@@ -533,8 +535,9 @@ bool TabManagerDelegate::KillArcProcess(const int nspid) {
 }
 
 bool TabManagerDelegate::KillTab(LifecycleUnit* lifecycle_unit,
-                                 DiscardReason reason) {
-  return lifecycle_unit->CanDiscard(reason) && lifecycle_unit->Discard(reason);
+                                 ::mojom::LifecycleUnitDiscardReason reason) {
+  bool did_discard = lifecycle_unit->Discard(reason);
+  return did_discard;
 }
 
 chromeos::DebugDaemonClient* TabManagerDelegate::GetDebugDaemonClient() {
@@ -542,7 +545,8 @@ chromeos::DebugDaemonClient* TabManagerDelegate::GetDebugDaemonClient() {
 }
 
 void TabManagerDelegate::LowMemoryKillImpl(
-    DiscardReason reason,
+    base::TimeTicks start_time,
+    ::mojom::LifecycleUnitDiscardReason reason,
     std::vector<arc::ArcProcess> arc_processes) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
   VLOG(2) << "LowMemoryKillImpl";
@@ -569,6 +573,7 @@ void TabManagerDelegate::LowMemoryKillImpl(
   // The list is sorted by descending importance, so we go through the list
   // backwards.
   const TimeTicks now = TimeTicks::Now();
+  base::TimeTicks first_kill_time;
   for (auto it = candidates.rbegin(); it != candidates.rend(); ++it) {
     MEMORY_LOG(ERROR) << "Target memory to free: " << target_memory_to_free_kb
                       << " KB";
@@ -596,6 +601,9 @@ void TabManagerDelegate::LowMemoryKillImpl(
       int estimated_memory_freed_kb =
           mem_stat_->EstimatedMemoryFreedKB(it->app()->pid());
       if (KillArcProcess(it->app()->nspid())) {
+        if (first_kill_time.is_null()) {
+          first_kill_time = base::TimeTicks::Now();
+        }
         recently_killed_arc_processes_[it->app()->process_name()] = now;
         target_memory_to_free_kb -= estimated_memory_freed_kb;
         memory::MemoryKillsMonitor::LogLowMemoryKill("APP",
@@ -614,6 +622,9 @@ void TabManagerDelegate::LowMemoryKillImpl(
       int estimated_memory_freed_kb =
           it->lifecycle_unit()->GetEstimatedMemoryFreedOnDiscardKB();
       if (KillTab(it->lifecycle_unit(), reason)) {
+        if (first_kill_time.is_null()) {
+          first_kill_time = base::TimeTicks::Now();
+        }
         target_memory_to_free_kb -= estimated_memory_freed_kb;
         memory::MemoryKillsMonitor::LogLowMemoryKill("TAB",
                                                      estimated_memory_freed_kb);
@@ -627,12 +638,17 @@ void TabManagerDelegate::LowMemoryKillImpl(
     MEMORY_LOG(ERROR)
         << "Unable to kill enough candidates to meet target_memory_to_free_kb ";
   }
+  if (!first_kill_time.is_null()) {
+    TimeDelta delta = first_kill_time - start_time;
+    MEMORY_LOG(ERROR) << "Time to first kill " << delta;
+    UMA_HISTOGRAM_MEDIUM_TIMES("Arc.LowMemoryKiller.FirstKillLatency", delta);
+  }
 }
 
 void TabManagerDelegate::AdjustOomPrioritiesImpl(
     std::vector<arc::ArcProcess> arc_processes) {
   std::vector<TabManagerDelegate::Candidate> candidates;
-  std::vector<TabManagerDelegate::Candidate> apps_non_killable;
+  std::vector<TabManagerDelegate::Candidate> apps_persistent;
 
   // Least important first.
   LifecycleUnitVector lifecycle_units = GetLifecycleUnits();
@@ -640,15 +656,15 @@ void TabManagerDelegate::AdjustOomPrioritiesImpl(
       GetSortedCandidates(std::move(lifecycle_units), arc_processes);
   for (auto& candidate : all_candidates) {
     // TODO(cylee|yusukes): Consider using IsImportant() instead of
-    // IsKernelKillable() for simplicity.
+    // IsPersistent() for simplicity.
     // TODO(cylee): Also consider protecting FOCUSED_TAB from the kernel OOM
     // killer so that Chrome and the kernel do the same regarding OOM handling.
-    if (!candidate.app() || candidate.app()->IsKernelKillable()) {
+    if (candidate.app() && candidate.app()->IsPersistent()) {
+      // Add persistent apps to |apps_persistent|.
+      apps_persistent.emplace_back(std::move(candidate));
+    } else {
       // Add tabs and killable apps to |candidates|.
       candidates.emplace_back(std::move(candidate));
-    } else {
-      // Add non-killable apps to |apps_non_killable|.
-      apps_non_killable.emplace_back(std::move(candidate));
     }
   }
 
@@ -679,9 +695,10 @@ void TabManagerDelegate::AdjustOomPrioritiesImpl(
 
   ProcessScoreMap new_map;
 
-  // Make the apps non-killable.
-  DistributeOomScoreInRange(apps_non_killable.begin(), apps_non_killable.end(),
-                            kLowestOomScore, kLowestOomScore, &new_map);
+  // Make the apps harder to kill.
+  DistributeOomScoreInRange(apps_persistent.begin(), apps_persistent.end(),
+                            kPersistentArcAppOomScore,
+                            kPersistentArcAppOomScore, &new_map);
 
   // Higher priority part.
   DistributeOomScoreInRange(candidates.begin(), lower_priority_part,
@@ -741,7 +758,13 @@ void TabManagerDelegate::DistributeOomScoreInRange(
     // current cached score.
     if (oom_score_map_[pid] != score) {
       VLOG(3) << "Update OOM score " << score << " for " << *cur;
-      oom_scores_to_change[pid] = static_cast<int32_t>(score);
+      if (cur->app()) {
+        oom_scores_to_change[pid] = static_cast<int32_t>(score);
+      } else {
+        if (!base::AdjustOOMScore(pid, score))
+          LOG(ERROR) << "Failed to set oom_score_adj to " << score
+                     << " for process " << pid;
+      }
     }
     priority += priority_increment;
   }

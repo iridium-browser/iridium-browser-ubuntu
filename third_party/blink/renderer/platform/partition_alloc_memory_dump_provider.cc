@@ -6,26 +6,15 @@
 
 #include <unordered_map>
 
+#include "base/allocator/partition_allocator/partition_alloc.h"
 #include "base/strings/stringprintf.h"
-#include "base/trace_event/heap_profiler_allocation_context_tracker.h"
-#include "base/trace_event/heap_profiler_allocation_register.h"
 #include "base/trace_event/process_memory_dump.h"
-#include "base/trace_event/trace_event_memory_overhead.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/partitions.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
 
 namespace {
-
-void ReportAllocation(void* address, size_t size, const char* type_name) {
-  PartitionAllocMemoryDumpProvider::Instance()->insert(address, size,
-                                                       type_name);
-}
-
-void ReportFree(void* address) {
-  PartitionAllocMemoryDumpProvider::Instance()->Remove(address);
-}
 
 const char kPartitionAllocDumpName[] = "partition_alloc";
 const char kPartitionsDumpName[] = "partitions";
@@ -38,7 +27,7 @@ std::string GetPartitionDumpName(const char* partition_name) {
 // This class is used to invert the dependency of PartitionAlloc on the
 // PartitionAllocMemoryDumpProvider. This implements an interface that will
 // be called with memory statistics for each bucket in the allocator.
-class PartitionStatsDumperImpl final : public WTF::PartitionStatsDumper {
+class PartitionStatsDumperImpl final : public base::PartitionStatsDumper {
   DISALLOW_NEW();
   WTF_MAKE_NONCOPYABLE(PartitionStatsDumperImpl);
 
@@ -50,10 +39,10 @@ class PartitionStatsDumperImpl final : public WTF::PartitionStatsDumper {
 
   // PartitionStatsDumper implementation.
   void PartitionDumpTotals(const char* partition_name,
-                           const WTF::PartitionMemoryStats*) override;
+                           const base::PartitionMemoryStats*) override;
   void PartitionsDumpBucketStats(
       const char* partition_name,
-      const WTF::PartitionBucketMemoryStats*) override;
+      const base::PartitionBucketMemoryStats*) override;
 
   size_t TotalActiveBytes() const { return total_active_bytes_; }
 
@@ -65,7 +54,7 @@ class PartitionStatsDumperImpl final : public WTF::PartitionStatsDumper {
 
 void PartitionStatsDumperImpl::PartitionDumpTotals(
     const char* partition_name,
-    const WTF::PartitionMemoryStats* memory_stats) {
+    const base::PartitionMemoryStats* memory_stats) {
   total_active_bytes_ += memory_stats->total_active_bytes;
   std::string dump_name = GetPartitionDumpName(partition_name);
   base::trace_event::MemoryAllocatorDump* allocator_dump =
@@ -86,7 +75,7 @@ void PartitionStatsDumperImpl::PartitionDumpTotals(
 
 void PartitionStatsDumperImpl::PartitionsDumpBucketStats(
     const char* partition_name,
-    const WTF::PartitionBucketMemoryStats* memory_stats) {
+    const base::PartitionBucketMemoryStats* memory_stats) {
   DCHECK(memory_stats->is_valid);
   std::string dump_name = GetPartitionDumpName(partition_name);
   if (memory_stats->is_direct_map) {
@@ -132,20 +121,6 @@ bool PartitionAllocMemoryDumpProvider::OnMemoryDump(
   using base::trace_event::MemoryDumpLevelOfDetail;
 
   MemoryDumpLevelOfDetail level_of_detail = args.level_of_detail;
-  if (allocation_register_.is_enabled()) {
-    // Overhead should always be reported, regardless of light vs. heavy.
-    base::trace_event::TraceEventMemoryOverhead overhead;
-    std::unordered_map<base::trace_event::AllocationContext,
-                       base::trace_event::AllocationMetrics>
-        metrics_by_context;
-    // Dump only the overhead estimation in non-detailed dumps.
-    if (level_of_detail == MemoryDumpLevelOfDetail::DETAILED) {
-      allocation_register_.UpdateAndReturnsMetrics(metrics_by_context);
-    }
-    allocation_register_.EstimateTraceMemoryOverhead(&overhead);
-    memory_dump->DumpHeapUsage(metrics_by_context, overhead, "partition_alloc");
-  }
-
   PartitionStatsDumperImpl partition_stats_dumper(memory_dump, level_of_detail);
 
   base::trace_event::MemoryAllocatorDump* partitions_dump =
@@ -169,43 +144,7 @@ bool PartitionAllocMemoryDumpProvider::OnMemoryDump(
   return true;
 }
 
-// |m_allocationRegister| should be initialized only when necessary to avoid
-// waste of memory.
 PartitionAllocMemoryDumpProvider::PartitionAllocMemoryDumpProvider() = default;
-
 PartitionAllocMemoryDumpProvider::~PartitionAllocMemoryDumpProvider() = default;
-
-void PartitionAllocMemoryDumpProvider::OnHeapProfilingEnabled(bool enabled) {
-  if (enabled) {
-    allocation_register_.SetEnabled();
-    WTF::PartitionAllocHooks::SetAllocationHook(ReportAllocation);
-    WTF::PartitionAllocHooks::SetFreeHook(ReportFree);
-  } else {
-    WTF::PartitionAllocHooks::SetAllocationHook(nullptr);
-    WTF::PartitionAllocHooks::SetFreeHook(nullptr);
-    allocation_register_.SetDisabled();
-  }
-}
-
-void PartitionAllocMemoryDumpProvider::insert(void* address,
-                                              size_t size,
-                                              const char* type_name) {
-  base::trace_event::AllocationContext context;
-  if (!base::trace_event::AllocationContextTracker::
-           GetInstanceForCurrentThread()
-               ->GetContextSnapshot(&context))
-    return;
-
-  context.type_name = type_name;
-  if (!allocation_register_.is_enabled())
-    return;
-  allocation_register_.Insert(address, size, context);
-}
-
-void PartitionAllocMemoryDumpProvider::Remove(void* address) {
-  if (!allocation_register_.is_enabled())
-    return;
-  allocation_register_.Remove(address);
-}
 
 }  // namespace blink

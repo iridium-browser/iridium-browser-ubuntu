@@ -56,6 +56,9 @@ class AppSyncUIState : public KeyedService,
 
   Status status() const { return status_; }
 
+  // KeyedService implementation.
+  void Shutdown() override;
+
  private:
   void StartObserving();
   void StopObserving();
@@ -84,7 +87,7 @@ class AppSyncUIState : public KeyedService,
   base::OneShotTimer max_syncing_status_timer_;
 
   Status status_;
-  base::ObserverList<AppSyncUIStateObserver> observers_;
+  base::ObserverList<AppSyncUIStateObserver>::Unchecked observers_;
 
   extensions::ExtensionRegistry* extension_registry_;
 

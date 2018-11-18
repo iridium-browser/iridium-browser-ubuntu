@@ -7,17 +7,20 @@
 #include <stdint.h>
 
 #include <algorithm>
+#include <string>
 #include <vector>
 
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/location.h"
+#include "base/logging.h"
 #include "base/macros.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_util.h"
 #include "base/threading/thread_task_runner_handle.h"
-#include "chromeos/chromeos_switches.h"
+#include "chromeos/dbus/dbus_switches.h"
+#include "chromeos/dbus/util/version_loader.h"
 #include "dbus/bus.h"
 #include "dbus/message.h"
 #include "dbus/object_path.h"
@@ -28,12 +31,13 @@ namespace chromeos {
 
 namespace {
 
+const char kReleaseChannelCanary[] = "canary-channel";
 const char kReleaseChannelDev[] = "dev-channel";
 const char kReleaseChannelBeta[] = "beta-channel";
 const char kReleaseChannelStable[] = "stable-channel";
 
 // List of release channels ordered by stability.
-const char* kReleaseChannelsList[] = {kReleaseChannelDev,
+const char* kReleaseChannelsList[] = {kReleaseChannelCanary, kReleaseChannelDev,
                                       kReleaseChannelBeta,
                                       kReleaseChannelStable};
 
@@ -47,6 +51,9 @@ const int kStateTransitionDownloadingDelayMs = 250;
 // Size of parts of a "new" image which are downloaded each
 // |kStateTransitionDownloadingDelayMs| during fake AU.
 const int64_t kDownloadSizeDelta = 1 << 19;
+
+// Version number of the image being installed during fake AU.
+const char kStubVersion[] = "1234.0.0.0";
 
 // Returns UPDATE_STATUS_ERROR on error.
 UpdateEngineClient::UpdateStatusOperation UpdateStatusFromString(
@@ -373,6 +380,17 @@ class UpdateEngineClientImpl : public UpdateEngineClient {
       return;
     }
     status.status = UpdateStatusFromString(current_operation);
+    // TODO(hunyadym, https://crbug.com/864672): Add a new DBus call to
+    // determine this based on the Omaha response, and not version comparison.
+    const std::string current_version =
+        version_loader::GetVersion(version_loader::VERSION_SHORT);
+    status.is_rollback =
+        version_loader::IsRollback(current_version, status.new_version);
+    if (status.is_rollback) {
+      LOG(WARNING) << "New image is a rollback from " << current_version
+                   << " to " << status.new_version << ".";
+    }
+
     last_status_ = status;
     for (auto& observer : observers_)
       observer.UpdateStatusChanged(status);
@@ -497,6 +515,17 @@ class UpdateEngineClientImpl : public UpdateEngineClient {
     status.download_progress = progress;
     status.status = UpdateStatusFromString(current_operation);
     status.new_version = new_version;
+    // TODO(hunyadym, https://crbug.com/864672): Add a new DBus call to
+    // determine this based on the Omaha response, and not version comparison.
+    const std::string current_version =
+        version_loader::GetVersion(version_loader::VERSION_SHORT);
+    status.is_rollback =
+        version_loader::IsRollback(current_version, status.new_version);
+    if (status.is_rollback) {
+      LOG(WARNING) << "New image is a rollback from " << current_version
+                   << " to " << new_version << ".";
+    }
+
     status.new_size = new_size;
 
     last_status_ = status;
@@ -513,7 +542,7 @@ class UpdateEngineClientImpl : public UpdateEngineClient {
   }
 
   dbus::ObjectProxy* update_engine_proxy_;
-  base::ObserverList<Observer> observers_;
+  base::ObserverList<Observer>::Unchecked observers_;
   Status last_status_;
 
   // True after update_engine's D-Bus service has become available.
@@ -563,7 +592,9 @@ class UpdateEngineClientStubImpl : public UpdateEngineClient {
     last_status_.status = UPDATE_STATUS_CHECKING_FOR_UPDATE;
     last_status_.download_progress = 0.0;
     last_status_.last_checked_time = 0;
+    last_status_.new_version = "0.0.0.0";
     last_status_.new_size = 0;
+    last_status_.is_rollback = false;
     base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE,
         base::BindOnce(&UpdateEngineClientStubImpl::StateTransition,
@@ -636,6 +667,7 @@ class UpdateEngineClientStubImpl : public UpdateEngineClient {
         } else {
           next_status = UPDATE_STATUS_DOWNLOADING;
           last_status_.download_progress += 0.01;
+          last_status_.new_version = kStubVersion;
           last_status_.new_size = kDownloadSizeDelta;
           delay_ms = kStateTransitionDownloadingDelayMs;
         }
@@ -644,7 +676,7 @@ class UpdateEngineClientStubImpl : public UpdateEngineClient {
         next_status = UPDATE_STATUS_FINALIZING;
         break;
       case UPDATE_STATUS_FINALIZING:
-        next_status = UPDATE_STATUS_IDLE;
+        next_status = UPDATE_STATUS_UPDATED_NEED_REBOOT;
         break;
     }
     last_status_.status = next_status;
@@ -659,7 +691,7 @@ class UpdateEngineClientStubImpl : public UpdateEngineClient {
     }
   }
 
-  base::ObserverList<Observer> observers_;
+  base::ObserverList<Observer>::Unchecked observers_;
 
   std::string current_channel_;
   std::string target_channel_;

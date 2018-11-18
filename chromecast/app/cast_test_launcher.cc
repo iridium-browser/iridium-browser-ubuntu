@@ -10,7 +10,7 @@
 #include "chromecast/app/cast_main_delegate.h"
 #include "content/public/test/test_launcher.h"
 #include "ipc/ipc_channel.h"
-#include "mojo/edk/embedder/embedder.h"
+#include "mojo/core/embedder/embedder.h"
 
 namespace chromecast {
 namespace shell {
@@ -21,7 +21,10 @@ class CastTestLauncherDelegate : public content::TestLauncherDelegate {
   ~CastTestLauncherDelegate() override {}
 
   int RunTestSuite(int argc, char** argv) override {
-    return base::TestSuite(argc, argv).Run();
+    base::TestSuite test_suite(argc, argv);
+    // Browser tests are expected not to tear-down various globals.
+    test_suite.DisableCheckForLeakedGlobals();
+    return test_suite.Run();
   }
 
   bool AdjustChildProcessCommandLine(
@@ -49,6 +52,6 @@ int main(int argc, char** argv) {
     parallel_jobs /= 2U;
   }
   chromecast::shell::CastTestLauncherDelegate launcher_delegate;
-  mojo::edk::Init();
+  mojo::core::Init();
   return content::LaunchTests(&launcher_delegate, parallel_jobs, argc, argv);
 }

@@ -10,8 +10,10 @@
 #include "base/bind.h"
 #include "base/location.h"
 #include "base/logging.h"
+#include "base/no_destructor.h"
 #include "chrome/browser/profiles/profile.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/storage_partition.h"
 #include "net/base/registry_controlled_domains/registry_controlled_domain.h"
 #include "net/cookies/canonical_cookie.h"
 #include "net/cookies/cookie_util.h"
@@ -23,23 +25,12 @@
 using content::BrowserThread;
 
 namespace {
-
 const char kGlobalCookieSetURL[] = "chrome://cookieset";
-
-void OnCookieFetchComplete(
-    const BrowsingDataCookieHelper::FetchCallback& callback,
-    const net::CookieList& cookies) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  DCHECK(!callback.is_null());
-  BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                          base::BindOnce(callback, cookies));
-}
-
 }  // namespace
 
 BrowsingDataCookieHelper::BrowsingDataCookieHelper(
-    net::URLRequestContextGetter* request_context_getter)
-    : request_context_getter_(request_context_getter) {
+    content::StoragePartition* storage_partition)
+    : storage_partition_(storage_partition) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 }
 
@@ -49,42 +40,20 @@ BrowsingDataCookieHelper::~BrowsingDataCookieHelper() {
 void BrowsingDataCookieHelper::StartFetching(const FetchCallback& callback) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!callback.is_null());
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
-      base::BindOnce(&BrowsingDataCookieHelper::FetchCookiesOnIOThread, this,
-                     callback));
+  storage_partition_->GetCookieManagerForBrowserProcess()->GetAllCookies(
+      callback);
 }
 
 void BrowsingDataCookieHelper::DeleteCookie(
     const net::CanonicalCookie& cookie) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
-      base::BindOnce(&BrowsingDataCookieHelper::DeleteCookieOnIOThread, this,
-                     cookie));
-}
-
-void BrowsingDataCookieHelper::FetchCookiesOnIOThread(
-    const FetchCallback& callback) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  DCHECK(!callback.is_null());
-  request_context_getter_->GetURLRequestContext()
-      ->cookie_store()
-      ->GetAllCookiesAsync(base::BindOnce(&OnCookieFetchComplete, callback));
-}
-
-void BrowsingDataCookieHelper::DeleteCookieOnIOThread(
-    const net::CanonicalCookie& cookie) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  request_context_getter_->GetURLRequestContext()->cookie_store()->
-      DeleteCanonicalCookieAsync(
-          cookie, net::CookieStore::DeleteCallback());
+  storage_partition_->GetCookieManagerForBrowserProcess()
+      ->DeleteCanonicalCookie(cookie, base::DoNothing());
 }
 
 CannedBrowsingDataCookieHelper::CannedBrowsingDataCookieHelper(
-    net::URLRequestContextGetter* request_context_getter)
-    : BrowsingDataCookieHelper(request_context_getter) {
-}
+    content::StoragePartition* storage_partition)
+    : BrowsingDataCookieHelper(storage_partition) {}
 
 CannedBrowsingDataCookieHelper::~CannedBrowsingDataCookieHelper() {
   Reset();
@@ -178,9 +147,9 @@ void CannedBrowsingDataCookieHelper::AddCookie(
   // counting cookies multiple times if they are stored in multiple cookie
   // sets.  B) Replace the GetCookieFor method call below with:
   // "GetCookiesFor(frame_url.GetOrigin());"
-  CR_DEFINE_STATIC_LOCAL(const GURL, origin_cookie_url, (kGlobalCookieSetURL));
+  static const base::NoDestructor<GURL> origin_cookie_url(kGlobalCookieSetURL);
   canonical_cookie::CookieHashSet* cookie_set =
-      GetCookiesFor(origin_cookie_url);
+      GetCookiesFor(*origin_cookie_url);
   DeleteMatchingCookie(cookie, cookie_set);
   cookie_set->insert(cookie);
 }

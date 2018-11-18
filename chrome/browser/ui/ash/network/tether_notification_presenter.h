@@ -8,14 +8,13 @@
 #include <memory>
 #include <string>
 
-#include "ash/system/network/network_icon.h"
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
 #include "chromeos/components/tether/notification_presenter.h"
 #include "chromeos/network/network_state.h"
-#include "components/cryptauth/remote_device.h"
+#include "components/cryptauth/remote_device_ref.h"
 #include "ui/message_center/public/cpp/notification.h"
 
 class Profile;
@@ -41,9 +40,8 @@ class TetherNotificationPresenter : public NotificationPresenter {
   ~TetherNotificationPresenter() override;
 
   // NotificationPresenter:
-  void NotifyPotentialHotspotNearby(
-      const cryptauth::RemoteDevice& remote_device,
-      int signal_strength) override;
+  void NotifyPotentialHotspotNearby(cryptauth::RemoteDeviceRef remote_device,
+                                    int signal_strength) override;
   void NotifyMultiplePotentialHotspotsNearby() override;
   NotificationPresenter::PotentialHotspotNotificationState
   GetPotentialHotspotNotificationState() override;

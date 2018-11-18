@@ -19,7 +19,7 @@ ContentCredentialManager::ContentCredentialManager(
 ContentCredentialManager::~ContentCredentialManager() {}
 
 void ContentCredentialManager::BindRequest(
-    mojom::CredentialManagerRequest request) {
+    blink::mojom::CredentialManagerRequest request) {
   DCHECK(!binding_.is_bound());
   binding_.Bind(std::move(request));
 
@@ -29,7 +29,7 @@ void ContentCredentialManager::BindRequest(
   // case the renderer will try to reconnect when the next call to the API is
   // made. Make sure this implementation will no longer be bound to a broken
   // pipe once that happens, so the DCHECK above will succeed.
-  binding_.set_connection_error_handler(base::Bind(
+  binding_.set_connection_error_handler(base::BindOnce(
       &ContentCredentialManager::DisconnectBinding, base::Unretained(this)));
 }
 

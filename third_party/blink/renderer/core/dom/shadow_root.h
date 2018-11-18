@@ -27,13 +27,13 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_DOM_SHADOW_ROOT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_DOM_SHADOW_ROOT_H_
 
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/style_sheet_list.h"
 #include "third_party/blink/renderer/core/dom/container_node.h"
 #include "third_party/blink/renderer/core/dom/document_fragment.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/dom/tree_scope.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable_visitor.h"
 #include "third_party/blink/renderer/platform/bindings/trace_wrapper_member.h"
 
@@ -47,6 +47,8 @@ class StringOrTrustedHTML;
 class WhitespaceAttacher;
 
 enum class ShadowRootType { V0, kOpen, kClosed, kUserAgent };
+
+enum class ShadowRootSlotting { kManual, kAuto };
 
 class CORE_EXPORT ShadowRoot final : public DocumentFragment, public TreeScope {
   DEFINE_WRAPPERTYPEINFO();
@@ -106,8 +108,8 @@ class CORE_EXPORT ShadowRoot final : public DocumentFragment, public TreeScope {
   void AttachLayoutTree(AttachContext&) override;
   void DetachLayoutTree(const AttachContext& = AttachContext()) override;
 
-  InsertionNotificationRequest InsertedInto(ContainerNode*) override;
-  void RemovedFrom(ContainerNode*) override;
+  InsertionNotificationRequest InsertedInto(ContainerNode&) override;
+  void RemovedFrom(ContainerNode&) override;
 
   void SetNeedsAssignmentRecalc();
   bool NeedsSlotAssignmentRecalc() const;
@@ -118,7 +120,6 @@ class CORE_EXPORT ShadowRoot final : public DocumentFragment, public TreeScope {
   unsigned ChildShadowRootCount() const { return child_shadow_root_count_; }
 
   void RecalcStyle(StyleRecalcChange);
-  void RecalcStylesForReattach();
   void RebuildLayoutTree(WhitespaceAttacher&);
 
   void RegisterScopedHTMLStyleChild();
@@ -139,7 +140,6 @@ class CORE_EXPORT ShadowRoot final : public DocumentFragment, public TreeScope {
   bool NeedsDistributionRecalc() const { return needs_distribution_recalc_; }
 
   void DistributeIfNeeded();
-  void DistributeV1();
 
   Element* ActiveElement() const;
 
@@ -157,6 +157,12 @@ class CORE_EXPORT ShadowRoot final : public DocumentFragment, public TreeScope {
   void SetDelegatesFocus(bool flag) { delegates_focus_ = flag; }
   bool delegatesFocus() const { return delegates_focus_; }
 
+  void SetSlotting(ShadowRootSlotting slotting);
+  bool IsManualSlotting() {
+    return slotting_ ==
+           static_cast<unsigned short>(ShadowRootSlotting::kManual);
+  }
+
   bool ContainsShadowRoots() const { return child_shadow_root_count_; }
 
   StyleSheetList& StyleSheets();
@@ -164,8 +170,7 @@ class CORE_EXPORT ShadowRoot final : public DocumentFragment, public TreeScope {
     style_sheet_list_ = style_sheet_list;
   }
 
-  virtual void Trace(blink::Visitor*);
-  virtual void TraceWrappers(const ScriptWrappableVisitor*) const;
+  void Trace(blink::Visitor*) override;
 
  private:
   ShadowRoot(Document&, ShadowRootType);
@@ -189,8 +194,9 @@ class CORE_EXPORT ShadowRoot final : public DocumentFragment, public TreeScope {
   unsigned short type_ : 2;
   unsigned short registered_with_parent_shadow_root_ : 1;
   unsigned short delegates_focus_ : 1;
+  unsigned short slotting_ : 1;
   unsigned short needs_distribution_recalc_ : 1;
-  unsigned short unused_ : 11;
+  unsigned short unused_ : 10;
 
   DISALLOW_COPY_AND_ASSIGN(ShadowRoot);
 };

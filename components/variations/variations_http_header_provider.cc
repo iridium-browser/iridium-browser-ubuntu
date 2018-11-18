@@ -21,6 +21,27 @@
 
 namespace variations {
 
+// The following documents how adding/removing http headers for web content
+// requests are implemented when Network Service is enabled or not enabled.
+//
+// When Network Service is not enabled, adding headers is implemented in
+// ChromeResourceDispatcherHostDelegate::RequestBeginning() by calling
+// variations::AppendVariationHeaders(), and removing headers is implemented in
+// ChromeNetworkDelegate::OnBeforeRedirect() by calling
+// variations::StripVariationHeaderIfNeeded().
+//
+// When Network Service is enabled, adding/removing headers is implemented by
+// request consumers, and how it is implemented depends on the request type.
+// There are three cases:
+// 1. Subresources request in renderer, it is implemented
+// in URLLoaderThrottleProviderImpl::CreateThrottles() by adding a
+// GoogleURLLoaderThrottle to a content::URLLoaderThrottle vector.
+// 2. Navigations/Downloads request in browser, it is implemented in
+// ChromeContentBrowserClient::CreateURLLoaderThrottles() by also adding a
+// GoogleURLLoaderThrottle to a content::URLLoaderThrottle vector.
+// 3. SimpleURLLoader in browser, it is implemented in a SimpleURLLoader wrapper
+// function variations::CreateSimpleURLLoaderWithVariationsHeaders().
+
 // static
 VariationsHttpHeaderProvider* VariationsHttpHeaderProvider::GetInstance() {
   return base::Singleton<VariationsHttpHeaderProvider>::get();
@@ -80,6 +101,14 @@ VariationsHttpHeaderProvider::ForceVariationIds(
   return ForceIdsResult::SUCCESS;
 }
 
+void VariationsHttpHeaderProvider::AddObserver(Observer* observer) {
+  observer_list_.AddObserver(observer);
+}
+
+void VariationsHttpHeaderProvider::RemoveObserver(Observer* observer) {
+  observer_list_.RemoveObserver(observer);
+}
+
 void VariationsHttpHeaderProvider::ResetForTesting() {
   base::AutoLock scoped_lock(lock_);
 
@@ -87,6 +116,11 @@ void VariationsHttpHeaderProvider::ResetForTesting() {
   // re-inited. Note: This is a no-op if this is not currently observing.
   base::FieldTrialList::RemoveObserver(this);
   variation_ids_cache_initialized_ = false;
+  variation_ids_set_.clear();
+  default_variation_ids_set_.clear();
+  synthetic_variation_ids_set_.clear();
+  cached_variation_ids_header_.clear();
+  cached_variation_ids_header_signed_in_.clear();
 }
 
 VariationsHttpHeaderProvider::VariationsHttpHeaderProvider()
@@ -184,6 +218,11 @@ void VariationsHttpHeaderProvider::UpdateVariationIDsHeaderValue() {
   // with such discrepancies.
   cached_variation_ids_header_ = GenerateBase64EncodedProto(false);
   cached_variation_ids_header_signed_in_ = GenerateBase64EncodedProto(true);
+
+  for (auto& observer : observer_list_) {
+    observer.VariationIdsHeaderUpdated(cached_variation_ids_header_,
+                                       cached_variation_ids_header_signed_in_);
+  }
 }
 
 std::string VariationsHttpHeaderProvider::GenerateBase64EncodedProto(
@@ -220,10 +259,10 @@ std::string VariationsHttpHeaderProvider::GenerateBase64EncodedProto(
   // This is the bottleneck for the creation of the header, so validate the size
   // here. Force a hard maximum on the ID count in case the Variations server
   // returns too many IDs and DOSs receiving servers with large requests.
-  DCHECK_LE(total_id_count, 10U);
+  DCHECK_LE(total_id_count, 20U);
   UMA_HISTOGRAM_COUNTS_100("Variations.Headers.ExperimentCount",
                            total_id_count);
-  if (total_id_count > 20)
+  if (total_id_count > 30)
     return std::string();
 
   std::string serialized;

@@ -75,7 +75,7 @@
 #include "base/win/scoped_com_initializer.h"
 #include "base/win/scoped_handle.h"
 #include "media/audio/agc_audio_stream.h"
-#include "media/audio/audio_manager.h"
+#include "media/audio/win/audio_manager_win.h"
 #include "media/base/audio_converter.h"
 #include "media/base/audio_parameters.h"
 #include "media/base/media_export.h"
@@ -84,7 +84,6 @@ namespace media {
 
 class AudioBlockFifo;
 class AudioBus;
-class AudioManagerWin;
 
 // AudioInputStream implementation using Windows Core Audio APIs.
 class MEDIA_EXPORT WASAPIAudioInputStream
@@ -112,6 +111,7 @@ class MEDIA_EXPORT WASAPIAudioInputStream
   void SetVolume(double volume) override;
   double GetVolume() override;
   bool IsMuted() override;
+  void SetOutputDeviceForAec(const std::string& output_device_id) override;
 
   bool started() const { return started_; }
 
@@ -133,9 +133,9 @@ class MEDIA_EXPORT WASAPIAudioInputStream
   // function returns false with |*hr| == S_FALSE, the OS supports a closest
   // match but we don't support conversion to it.
   bool DesiredFormatIsSupported(HRESULT* hr);
+  void SetupConverterAndStoreFormatInfo();
   HRESULT InitializeAudioEngine();
   void ReportOpenResult(HRESULT hr) const;
-
   // Reports stats for format related audio client initilization
   // (IAudioClient::Initialize) errors, that is if |hr| is an error related to
   // the format.
@@ -147,8 +147,7 @@ class MEDIA_EXPORT WASAPIAudioInputStream
   // Reports delay stats based on |capture_time|. Detects and counts glitches
   // based on |frames_in_buffer|, |discontinuity_flagged|, and
   // |device_position|.
-  void ReportDelayStatsAndUpdateGlitchCount(UINT32 frames_in_buffer,
-                                            bool discontinuity_flagged,
+  void ReportDelayStatsAndUpdateGlitchCount(bool discontinuity_flagged,
                                             UINT64 device_position,
                                             base::TimeTicks capture_time);
 
@@ -188,30 +187,34 @@ class MEDIA_EXPORT WASAPIAudioInputStream
   std::unique_ptr<base::DelegateSimpleThread> capture_thread_;
 
   // Contains the desired output audio format which is set up at construction,
-  // that is the audio format this class should output data to the sink in.
+  // that is the audio format this class should output data to the sink in, that
+  // is the format after the converter.
   WAVEFORMATEX output_format_;
 
   // Contains the audio format we get data from the audio engine in. Set to
-  // |output_format_| at construction and might be changed to a close match
-  // if the audio engine doesn't support the originally set format.
+  // |output_format_| at construction and might be changed to a close match if
+  // the audio engine doesn't support the originally set format. Note that this
+  // is also the format after the fifo, i.e. the input format to the converter
+  // if any.
   WAVEFORMATEX input_format_;
 
   bool opened_ = false;
   bool started_ = false;
   StreamOpenResult open_result_ = OPEN_RESULT_OK;
 
-  // Size in bytes of each audio frame (4 bytes for 16-bit stereo PCM)
-  size_t frame_size_ = 0;
+  // Size in bytes of each audio frame before the converter (4 bytes for 16-bit
+  // stereo PCM). Note that this is the same before and after the fifo.
+  size_t frame_size_bytes_ = 0;
 
-  // Size in audio frames of each audio packet where an audio packet
-  // is defined as the block of data which the user received in each
-  // OnData() callback.
+  // Size in audio frames of each audio packet (buffer) after the fifo but
+  // before the converter.
   size_t packet_size_frames_ = 0;
 
-  // Size in bytes of each audio packet.
+  // Size in bytes of each audio packet (buffer) after the fifo but before the
+  // converter.
   size_t packet_size_bytes_ = 0;
 
-  // Length of the audio endpoint buffer.
+  // Length of the audio endpoint buffer, i.e. the buffer size before the fifo.
   uint32_t endpoint_buffer_size_frames_ = 0;
 
   // Contains the unique name of the selected endpoint device.
@@ -244,6 +247,11 @@ class MEDIA_EXPORT WASAPIAudioInputStream
   // The IAudioCaptureClient interface enables a client to read input data
   // from a capture endpoint buffer.
   Microsoft::WRL::ComPtr<IAudioCaptureClient> audio_capture_client_;
+
+  // The IAudioClock interface is used to get the current timestamp, as the
+  // timestamp from IAudioCaptureClient::GetBuffer can be unreliable with some
+  // devices.
+  Microsoft::WRL::ComPtr<IAudioClock> audio_clock_;
 
   // The ISimpleAudioVolume interface enables a client to control the
   // master volume level of an audio session.

@@ -121,6 +121,7 @@ class GLES2_IMPL_EXPORT QueryTracker {
     };
 
     Query(GLuint id, GLenum target, const QuerySyncManager::QueryInfo& info);
+    ~Query();
 
     GLenum target() const {
       return target_;
@@ -169,9 +170,16 @@ class GLES2_IMPL_EXPORT QueryTracker {
       return state_ == kPending;
     }
 
-    bool CheckResultsAvailable(CommandBufferHelper* helper);
+    // Checks whether the result of this query is available.
+    // If the result is pending and |flush_if_pending| is true, this will ensure
+    // that at least the commands up till the EndQuery for this query are
+    // flushed.
+    bool CheckResultsAvailable(CommandBufferHelper* helper,
+                               bool flush_if_pending);
 
     uint64_t GetResult() const;
+
+    void SetCompletedCallback(base::OnceClosure callback);
 
    private:
     friend class QueryTracker;
@@ -189,6 +197,8 @@ class GLES2_IMPL_EXPORT QueryTracker {
     uint32_t flush_count_;
     uint64_t client_begin_time_us_;  // Only used for latency query target.
     uint64_t result_;
+
+    base::Optional<base::OnceClosure> on_completed_callback_;
   };
 
   explicit QueryTracker(MappedMemoryManager* manager);

@@ -70,25 +70,6 @@ class OAuth2TokenServiceDelegateAndroid : public OAuth2TokenServiceDelegate {
   void ValidateAccounts(const std::string& signed_in_account_id,
                         bool force_notifications);
 
-  // Triggers a notification to all observers of the OAuth2TokenService that a
-  // refresh token is now available. This may cause observers to retry
-  // operations that require authentication.
-  virtual void FireRefreshTokenAvailableFromJava(
-      JNIEnv* env,
-      const base::android::JavaParamRef<jobject>& obj,
-      const base::android::JavaParamRef<jstring>& account_name);
-  // Triggers a notification to all observers of the OAuth2TokenService that a
-  // refresh token is now available.
-  virtual void FireRefreshTokenRevokedFromJava(
-      JNIEnv* env,
-      const base::android::JavaParamRef<jobject>& obj,
-      const base::android::JavaParamRef<jstring>& account_name);
-  // Triggers a notification to all observers of the OAuth2TokenService that all
-  // refresh tokens have now been loaded.
-  virtual void FireRefreshTokensLoadedFromJava(
-      JNIEnv* env,
-      const base::android::JavaParamRef<jobject>& obj);
-
   // Overridden from OAuth2TokenService to complete signout of all
   // OA2TService aware accounts.
   void RevokeAllCredentials() override;
@@ -98,7 +79,7 @@ class OAuth2TokenServiceDelegateAndroid : public OAuth2TokenServiceDelegate {
  protected:
   OAuth2AccessTokenFetcher* CreateAccessTokenFetcher(
       const std::string& account_id,
-      net::URLRequestContextGetter* getter,
+      scoped_refptr<network::SharedURLLoaderFactory> url_factory,
       OAuth2AccessTokenConsumer* consumer) override;
 
   // Overridden from OAuth2TokenService to intercept token fetch requests and
@@ -118,12 +99,6 @@ class OAuth2TokenServiceDelegateAndroid : public OAuth2TokenServiceDelegate {
  private:
   std::string MapAccountIdToAccountName(const std::string& account_id) const;
   std::string MapAccountNameToAccountId(const std::string& account_name) const;
-
-  struct ErrorInfo {
-    ErrorInfo();
-    explicit ErrorInfo(const GoogleServiceAuthError& error);
-    GoogleServiceAuthError error;
-  };
 
   enum RefreshTokenLoadStatus {
     RT_LOAD_NOT_START,
@@ -146,7 +121,7 @@ class OAuth2TokenServiceDelegateAndroid : public OAuth2TokenServiceDelegate {
   base::android::ScopedJavaGlobalRef<jobject> java_ref_;
 
   // Maps account_id to the last error for that account.
-  std::map<std::string, ErrorInfo> errors_;
+  std::map<std::string, GoogleServiceAuthError> errors_;
 
   AccountTrackerService* account_tracker_service_;
   RefreshTokenLoadStatus fire_refresh_token_loaded_;

@@ -28,7 +28,7 @@ namespace sync_file_system {
 class MockRemoteFileSyncService : public RemoteFileSyncService {
  public:
   MockRemoteFileSyncService();
-  virtual ~MockRemoteFileSyncService();
+  ~MockRemoteFileSyncService() override;
 
   // RemoteFileSyncService overrides.
   MOCK_METHOD1(AddServiceObserver,
@@ -88,8 +88,8 @@ class MockRemoteFileSyncService : public RemoteFileSyncService {
   // For default implementation.
   ::testing::NiceMock<MockLocalChangeProcessor> mock_local_change_processor_;
 
-  base::ObserverList<Observer> service_observers_;
-  base::ObserverList<FileStatusObserver> file_status_observers_;
+  base::ObserverList<Observer>::Unchecked service_observers_;
+  base::ObserverList<FileStatusObserver>::Unchecked file_status_observers_;
 
   RemoteServiceState state_;
 

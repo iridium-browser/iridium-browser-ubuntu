@@ -18,7 +18,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/run_loop.h"
 #include "base/stl_util.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "base/time/time.h"
 #include "base/values.h"
 #include "chromeos/login/login_state.h"
@@ -656,7 +656,7 @@ class LockScreenItemStorageTest : public ExtensionsTest {
     ListBuilder app_handlers_builder;
     app_handlers_builder.Append(DictionaryBuilder()
                                     .Set("action", "new_note")
-                                    .SetBoolean("enabled_on_lock_screen", true)
+                                    .Set("enabled_on_lock_screen", true)
                                     .Build());
     scoped_refptr<const Extension> extension =
         ExtensionBuilder()

@@ -5,39 +5,34 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_INTERSECTION_OBSERVER_ELEMENT_INTERSECTION_OBSERVER_DATA_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_INTERSECTION_OBSERVER_ELEMENT_INTERSECTION_OBSERVER_DATA_H_
 
-#include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
+#include "third_party/blink/renderer/core/dom/dom_high_res_time_stamp.h"
+#include "third_party/blink/renderer/platform/bindings/name_client.h"
 #include "third_party/blink/renderer/platform/bindings/trace_wrapper_member.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 
 namespace blink {
 
-class Node;
 class IntersectionObservation;
 class IntersectionObserver;
 
 class ElementIntersectionObserverData
     : public GarbageCollected<ElementIntersectionObserverData>,
-      public TraceWrapperBase {
+      public NameClient {
  public:
   ElementIntersectionObserverData();
 
   IntersectionObservation* GetObservationFor(IntersectionObserver&);
-  void AddObserver(IntersectionObserver&);
-  void RemoveObserver(IntersectionObserver&);
   void AddObservation(IntersectionObservation&);
   void RemoveObservation(IntersectionObserver&);
-  void ActivateValidIntersectionObservers(Node&);
-  void DeactivateAllIntersectionObservers(Node&);
+  bool HasObservations() const { return !intersection_observations_.IsEmpty(); }
+  void ComputeObservations(unsigned flags);
 
   void Trace(blink::Visitor*);
-  void TraceWrappers(const ScriptWrappableVisitor*) const override;
   const char* NameInHeapSnapshot() const override {
     return "ElementIntersectionObserverData";
   }
 
  private:
-  // IntersectionObservers for which the Node owning this data is root.
-  HeapHashSet<WeakMember<IntersectionObserver>> intersection_observers_;
   // IntersectionObservations for which the Node owning this data is target.
   HeapHashMap<TraceWrapperMember<IntersectionObserver>,
               Member<IntersectionObservation>>

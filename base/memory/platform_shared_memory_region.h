@@ -10,6 +10,7 @@
 #include "base/compiler_specific.h"
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
+#include "base/memory/shared_memory_handle.h"
 #include "base/unguessable_token.h"
 #include "build/build_config.h"
 
@@ -17,7 +18,7 @@
 #include <mach/mach.h>
 #include "base/mac/scoped_mach_port.h"
 #elif defined(OS_FUCHSIA)
-#include "base/fuchsia/scoped_zx_handle.h"
+#include <lib/zx/vmo.h>
 #elif defined(OS_WIN)
 #include "base/win/scoped_handle.h"
 #include "base/win/windows_types.h"
@@ -31,7 +32,7 @@ namespace base {
 namespace subtle {
 
 #if defined(OS_POSIX) && (!defined(OS_MACOSX) || defined(OS_IOS)) && \
-    !defined(OS_FUCHSIA) && !defined(OS_ANDROID)
+    !defined(OS_ANDROID)
 // Helper structs to keep two descriptors on POSIX. It's needed to support
 // ConvertToReadOnly().
 struct BASE_EXPORT FDPair {
@@ -88,6 +89,23 @@ class BASE_EXPORT PlatformSharedMemoryRegion {
     kReadOnly,  // ReadOnlySharedMemoryRegion
     kWritable,  // WritableSharedMemoryRegion
     kUnsafe,    // UnsafeSharedMemoryRegion
+    kMaxValue = kUnsafe
+  };
+
+  // Errors that can occur during Shared Memory construction.
+  // These match tools/metrics/histograms/enums.xml.
+  // This enum is append-only.
+  enum class CreateError {
+    SUCCESS = 0,
+    SIZE_ZERO = 1,
+    SIZE_TOO_LARGE = 2,
+    INITIALIZE_ACL_FAILURE = 3,
+    INITIALIZE_SECURITY_DESC_FAILURE = 4,
+    SET_SECURITY_DESC_FAILURE = 5,
+    CREATE_FILE_MAPPING_FAILURE = 6,
+    REDUCE_PERMISSIONS_FAILURE = 7,
+    ALREADY_EXISTS = 8,
+    kMaxValue = ALREADY_EXISTS
   };
 
 // Platform-specific shared memory type used by this class.
@@ -95,8 +113,8 @@ class BASE_EXPORT PlatformSharedMemoryRegion {
   using PlatformHandle = mach_port_t;
   using ScopedPlatformHandle = mac::ScopedMachSendRight;
 #elif defined(OS_FUCHSIA)
-  using PlatformHandle = zx_handle_t;
-  using ScopedPlatformHandle = ScopedZxHandle;
+  using PlatformHandle = zx::unowned_vmo;
+  using ScopedPlatformHandle = zx::vmo;
 #elif defined(OS_WIN)
   using PlatformHandle = HANDLE;
   using ScopedPlatformHandle = win::ScopedHandle;
@@ -128,6 +146,15 @@ class BASE_EXPORT PlatformSharedMemoryRegion {
                                          Mode mode,
                                          size_t size,
                                          const UnguessableToken& guid);
+
+  // As Take, above, but from a SharedMemoryHandle. This takes ownership of the
+  // handle. |mode| must be kUnsafe or kReadOnly; the latter must be used with a
+  // handle created with SharedMemoryHandle::GetReadOnlyHandle().
+  // TODO(crbug.com/795291): this should only be used while transitioning from
+  // the old shared memory API, and should be removed when done.
+  static PlatformSharedMemoryRegion TakeFromSharedMemoryHandle(
+      const SharedMemoryHandle& handle,
+      Mode mode);
 
   // Default constructor initializes an invalid instance, i.e. an instance that
   // doesn't wrap any valid platform handle.
@@ -172,6 +199,12 @@ class BASE_EXPORT PlatformSharedMemoryRegion {
   bool ConvertToReadOnly(void* mapped_addr);
 #endif  // defined(OS_MACOSX) && !defined(OS_IOS)
 
+  // Converts the region to unsafe. Returns whether the operation succeeded.
+  // Makes the current instance invalid on failure. Can be called only in
+  // kWritable mode, all other modes will CHECK-fail. The object will have
+  // kUnsafe mode after this call on success.
+  bool ConvertToUnsafe();
+
   // Maps |size| bytes of the shared memory region starting with the given
   // |offset| into the caller's address space. |offset| must be aligned to value
   // of |SysInfo::VMAllocationGranularity()|. Fails if requested bytes are out
@@ -207,6 +240,11 @@ class BASE_EXPORT PlatformSharedMemoryRegion {
                              Mode mode,
                              size_t size,
                              const UnguessableToken& guid);
+
+  bool MapAtInternal(off_t offset,
+                     size_t size,
+                     void** memory,
+                     size_t* mapped_size) const;
 
   ScopedPlatformHandle handle_;
   Mode mode_ = Mode::kReadOnly;

@@ -25,11 +25,11 @@
 
 #include "third_party/blink/renderer/core/editing/commands/split_text_node_command.h"
 
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/text.h"
 #include "third_party/blink/renderer/core/editing/editing_utilities.h"
 #include "third_party/blink/renderer/core/editing/markers/document_marker_controller.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
 
 namespace blink {
@@ -58,7 +58,7 @@ void SplitTextNodeCommand::DoApply(EditingState*) {
 
   text1_ = Text::Create(GetDocument(), prefix_text);
   DCHECK(text1_);
-  GetDocument().Markers().MoveMarkers(text2_.Get(), offset_, text1_.Get());
+  GetDocument().Markers().MoveMarkers(*text2_, offset_, *text1_);
 
   InsertText1AndTrimText2();
 }
@@ -74,8 +74,7 @@ void SplitTextNodeCommand::DoUnapply() {
   text2_->insertData(0, prefix_text, ASSERT_NO_EXCEPTION);
   GetDocument().UpdateStyleAndLayout();
 
-  GetDocument().Markers().MoveMarkers(text1_.Get(), prefix_text.length(),
-                                      text2_.Get());
+  GetDocument().Markers().MoveMarkers(*text1_, prefix_text.length(), *text2_);
   text1_->remove(ASSERT_NO_EXCEPTION);
 }
 
@@ -87,7 +86,7 @@ void SplitTextNodeCommand::DoReapply() {
   if (!parent || !HasEditableStyle(*parent))
     return;
 
-  GetDocument().Markers().MoveMarkers(text2_.Get(), offset_, text1_.Get());
+  GetDocument().Markers().MoveMarkers(*text2_, offset_, *text1_);
 
   InsertText1AndTrimText2();
 }

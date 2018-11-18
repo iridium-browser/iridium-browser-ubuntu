@@ -18,7 +18,6 @@ namespace blink {
 class DynamicModuleResolver;
 class ExecutionContext;
 class ModuleMap;
-class ModuleScriptLoaderRegistry;
 class ModuleTreeLinkerRegistry;
 class ScriptState;
 
@@ -28,19 +27,20 @@ class ScriptState;
 // components together.
 class ModulatorImplBase : public Modulator {
  public:
-  virtual ~ModulatorImplBase();
-  void Trace(blink::Visitor*);
-  virtual void TraceWrappers(const ScriptWrappableVisitor*) const;
+  ~ModulatorImplBase() override;
+  void Trace(blink::Visitor*) override;
+
+ protected:
+  explicit ModulatorImplBase(ScriptState*);
 
   ExecutionContext* GetExecutionContext() const;
 
- protected:
-  explicit ModulatorImplBase(scoped_refptr<ScriptState>);
-
-  ScriptState* GetScriptState() override { return script_state_.get(); }
+  ScriptState* GetScriptState() override { return script_state_; }
 
  private:
   // Implements Modulator
+
+  bool IsScriptingDisabled() const override;
 
   ScriptModuleResolver* GetScriptModuleResolver() override {
     return script_module_resolver_.Get();
@@ -48,32 +48,35 @@ class ModulatorImplBase : public Modulator {
   base::SingleThreadTaskRunner* TaskRunner() override {
     return task_runner_.get();
   }
-  ReferrerPolicy GetReferrerPolicy() override;
-  const SecurityOrigin* GetSecurityOriginForFetch() override;
 
-  void FetchTree(const ModuleScriptFetchRequest&, ModuleTreeClient*) override;
-  void FetchDescendantsForInlineScript(ModuleScript*,
-                                       ModuleTreeClient*) override;
-  void FetchSingle(const ModuleScriptFetchRequest&,
-                   ModuleGraphLevel,
-                   SingleModuleClient*) override;
+  void FetchTree(
+      const KURL&,
+      FetchClientSettingsObjectSnapshot* fetch_client_settings_object,
+      mojom::RequestContextType destination,
+      const ScriptFetchOptions&,
+      ModuleScriptCustomFetchType,
+      ModuleTreeClient*) override;
+  void FetchDescendantsForInlineScript(
+      ModuleScript*,
+      FetchClientSettingsObjectSnapshot* fetch_client_settings_object,
+      mojom::RequestContextType destination,
+      ModuleTreeClient*) override;
+  void FetchSingle(
+      const ModuleScriptFetchRequest&,
+      FetchClientSettingsObjectSnapshot* fetch_client_settings_object,
+      ModuleGraphLevel,
+      ModuleScriptCustomFetchType,
+      SingleModuleClient*) override;
   ModuleScript* GetFetchedModuleScript(const KURL&) override;
   bool HasValidContext() override;
-  void FetchNewSingleModule(const ModuleScriptFetchRequest&,
-                            ModuleGraphLevel,
-                            ModuleScriptLoaderClient*) override;
+  KURL ResolveModuleSpecifier(const String& module_request,
+                              const KURL& base_url,
+                              String* failure_reason) final;
   void ResolveDynamically(const String& specifier,
                           const KURL&,
                           const ReferrerScriptInfo&,
                           ScriptPromiseResolver*) override;
   ModuleImportMeta HostGetImportMetaProperties(ScriptModule) const override;
-  ScriptModule CompileModule(const String& script,
-                             const KURL& source_url,
-                             const KURL& base_url,
-                             const ScriptFetchOptions&,
-                             AccessControlStatus,
-                             const TextPosition&,
-                             ExceptionState&) override;
   ScriptValue InstantiateModule(ScriptModule) override;
   Vector<ModuleRequest> ModuleRequestsFromScriptModule(ScriptModule) override;
   ScriptValue ExecuteModule(const ModuleScript*, CaptureEvalErrorFlag) override;
@@ -85,10 +88,9 @@ class ModulatorImplBase : public Modulator {
   // modification of |reason|.
   virtual bool IsDynamicImportForbidden(String* reason) = 0;
 
-  scoped_refptr<ScriptState> script_state_;
+  Member<ScriptState> script_state_;
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
   TraceWrapperMember<ModuleMap> map_;
-  Member<ModuleScriptLoaderRegistry> loader_registry_;
   TraceWrapperMember<ModuleTreeLinkerRegistry> tree_linker_registry_;
   Member<ScriptModuleResolver> script_module_resolver_;
   Member<DynamicModuleResolver> dynamic_module_resolver_;

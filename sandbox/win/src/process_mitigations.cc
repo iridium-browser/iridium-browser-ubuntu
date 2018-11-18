@@ -30,12 +30,6 @@ using GetProcessMitigationPolicyFunction =
     decltype(&GetProcessMitigationPolicy);
 using SetThreadInformationFunction = decltype(&SetThreadInformation);
 
-// Defines that will eventually be in winbase.h.
-// TODO(pennymac): Remove these once the toolchain updates sufficiently.  Values
-// and formatting match 10.0.17133.0 SDK.
-#define PROCESS_CREATION_MITIGATION_POLICY2_RESTRICT_INDIRECT_BRANCH_PREDICTION_ALWAYS_ON \
-  (0x00000001ui64 << 16)
-
 // Returns a two-element array of mitigation flags supported on this machine.
 // - This function is only useful on >= base::win::VERSION_WIN8.
 const ULONG64* GetSupportedMitigations() {
@@ -83,7 +77,16 @@ bool ApplyProcessMitigationsToCurrentProcess(MitigationFlags flags) {
 
     // Check for SetDefaultDllDirectories since it requires KB2533623.
     if (set_default_dll_directories) {
-      if (!set_default_dll_directories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS) &&
+#if defined(COMPONENT_BUILD)
+      const DWORD directory_flags = LOAD_LIBRARY_SEARCH_DEFAULT_DIRS;
+#else
+      // In a non-component build, all DLLs will be loaded manually, or via
+      // manifest definition, so these flags can be stronger. This prevents DLL
+      // planting in the application directory.
+      const DWORD directory_flags =
+          LOAD_LIBRARY_SEARCH_SYSTEM32 | LOAD_LIBRARY_SEARCH_USER_DIRS;
+#endif
+      if (!set_default_dll_directories(directory_flags) &&
           ERROR_ACCESS_DENIED != ::GetLastError()) {
         return false;
       }

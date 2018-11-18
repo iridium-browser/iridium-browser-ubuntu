@@ -131,9 +131,11 @@ source_set("api") {
     ]
 
     public_deps += [
+      "//extensions/browser/api/cec_private",
       "//extensions/browser/api/clipboard",
       "//extensions/browser/api/diagnostics",
       "//extensions/browser/api/networking_config",
+      "//extensions/browser/api/system_power_source",
       "//extensions/browser/api/virtual_keyboard",
       "//extensions/browser/api/vpn_provider",
       "//extensions/browser/api/webcam_private",
@@ -142,17 +144,17 @@ source_set("api") {
     deps += [
       "//chromeos",
       "//chromeos:media_perception_proto",
+      "//chromeos/services/media_perception/public/mojom",
+      "//chromeos/services/media_perception/public/mojom:mojom_js_data_deps",
     ]
   }
 }
 
-json_schema_api("api_registration") {
-  sources = extensions_api_schema_files
+function_registration("api_registration") {
+  sources = extensions_api_schema_files + extensions_api_uncompiled_sources
   impl_dir = "//extensions/browser/api"
-  bundle_registration = true
   bundle_name = ""
   root_namespace = extensions_api_root_namespace
-  uncompiled_sources = extensions_api_uncompiled_sources
 
   deps = [
     ":api",

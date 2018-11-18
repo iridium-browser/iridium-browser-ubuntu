@@ -9,6 +9,7 @@
 #include "base/memory/ptr_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "build/build_config.h"
 #include "net/base/net_errors.h"
 #include "net/base/test_completion_callback.h"
 #include "net/dns/mock_host_resolver.h"
@@ -17,6 +18,7 @@
 #include "net/log/net_log_with_source.h"
 #include "net/ssl/ssl_info.h"
 #include "net/test/gtest_util.h"
+#include "net/test/test_with_scoped_task_environment.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/platform_test.h"
@@ -42,13 +44,14 @@ typedef MockSSPILibrary MockAuthLibrary;
 typedef test::MockGSSAPILibrary MockAuthLibrary;
 #endif
 
-class HttpAuthHandlerNegotiateTest : public PlatformTest {
+class HttpAuthHandlerNegotiateTest : public PlatformTest,
+                                     public WithScopedTaskEnvironment {
  public:
   void SetUp() override {
     auth_library_ = new MockAuthLibrary();
     resolver_.reset(new MockHostResolver());
-    resolver_->rules()->AddIPLiteralRule("alias", "10.0.0.2",
-                                           "canonical.example.com");
+    resolver_->rules_map()[HostResolverSource::SYSTEM]->AddIPLiteralRule(
+        "alias", "10.0.0.2", "canonical.example.com");
 
     http_auth_preferences_.reset(new MockAllowHttpAuthPreferences());
     factory_.reset(new HttpAuthHandlerNegotiate::Factory());

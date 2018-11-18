@@ -12,6 +12,7 @@
 
 #include "rtc_base/constructormagic.h"
 #include "rtc_base/scoped_ref_ptr.h"
+#include "rtc_base/system/rtc_export.h"
 
 #if defined(USE_X11)
 #include "modules/desktop_capture/x11/shared_x_display.h"
@@ -26,7 +27,7 @@ namespace webrtc {
 
 // An object that stores initialization parameters for screen and window
 // capturers.
-class DesktopCaptureOptions {
+class RTC_EXPORT DesktopCaptureOptions {
  public:
   // Returns instance of DesktopCaptureOptions with default parameters. On Linux
   // also initializes X window connection. x_display() will be set to null if
@@ -72,6 +73,9 @@ class DesktopCaptureOptions {
       rtc::scoped_refptr<FullScreenChromeWindowDetector> detector) {
     full_screen_window_detector_ = detector;
   }
+
+  bool allow_iosurface() const { return allow_iosurface_; }
+  void set_allow_iosurface(bool allow) { allow_iosurface_ = allow; }
 #endif
 
   // Flag indicating that the capturer should use screen change notifications.
@@ -105,9 +109,7 @@ class DesktopCaptureOptions {
   }
   // Allowing directx based capturer or not, this capturer works on windows 7
   // with platform update / windows 8 or upper.
-  bool allow_directx_capturer() const {
-    return allow_directx_capturer_;
-  }
+  bool allow_directx_capturer() const { return allow_directx_capturer_; }
   void set_allow_directx_capturer(bool enabled) {
     allow_directx_capturer_ = enabled;
   }
@@ -122,6 +124,7 @@ class DesktopCaptureOptions {
   rtc::scoped_refptr<DesktopConfigurationMonitor> configuration_monitor_;
   rtc::scoped_refptr<FullScreenChromeWindowDetector>
       full_screen_window_detector_;
+  bool allow_iosurface_ = false;
 #endif
 
 #if defined(WEBRTC_WIN)

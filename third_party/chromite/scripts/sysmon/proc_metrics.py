@@ -35,21 +35,27 @@ class _ProcessMetricsCollector(object):
 
   def __init__(self):
     self._metrics = [
+        _ProcessMetric('apache',
+                       test_func=partial(_is_process_name, 'apache2')),
         _ProcessMetric('autoserv',
                        test_func=_is_parent_autoserv),
-        _ProcessMetric('sysmon',
-                       test_func=partial(_is_python_module,
-                                         'chromite.scripts.sysmon')),
+        _ProcessMetric('gs_offloader',
+                       test_func=_is_gs_offloader),
         _ProcessMetric('job_aborter',
                        test_func=partial(_is_python_module,
                                          'lucifer.cmd.job_aborter')),
         _ProcessMetric('job_reporter',
                        test_func=partial(_is_python_module,
                                          'lucifer.cmd.job_reporter')),
-        _ProcessMetric('lucifer_run_job',
-                       test_func=_is_lucifer_run_job),
-        _ProcessMetric('apache',
-                       test_func=_is_apache),
+        _ProcessMetric('lucifer',
+                       test_func=partial(_is_process_name, 'lucifer')),
+        _ProcessMetric('lxc-start',
+                       test_func=partial(_is_process_name, 'lxc-start')),
+        _ProcessMetric('lxc-attach',
+                       test_func=partial(_is_process_name, 'lxc-attach')),
+        _ProcessMetric('sysmon',
+                       test_func=partial(_is_python_module,
+                                         'chromite.scripts.sysmon')),
     ]
     self._other_metric = _ProcessMetric('other')
 
@@ -119,12 +125,15 @@ def _is_autoserv(proc):
   # This relies on the autoserv script being run directly.  The script should
   # be named autoserv exactly and start with a shebang that is /usr/bin/python,
   # NOT /bin/env
-  return proc.name() == 'autoserv'
+  return _is_process_name('autoserv', proc)
 
 
-def _is_apache(proc):
-  """Return whether a proc is an apache2 process."""
-  return proc.name() == 'apache2'
+def _is_gs_offloader(proc):
+  """Return whether proc is a gs_offloader process."""
+  cmdline = proc.cmdline()
+  return (len(cmdline) >= 2
+          and cmdline[0].endswith('python')
+          and cmdline[1].endswith('gs_offloader.py'))
 
 
 def _is_python_module(module, proc):
@@ -135,6 +144,6 @@ def _is_python_module(module, proc):
           cmdline[1:3] == ['-m', module])
 
 
-def _is_lucifer_run_job(proc):
-  """Return whether proc is a lucifer_run_job process."""
-  return proc.name() == 'lucifer_run_job'
+def _is_process_name(name, proc):
+  """Return whether process proc is named name."""
+  return proc.name() == name

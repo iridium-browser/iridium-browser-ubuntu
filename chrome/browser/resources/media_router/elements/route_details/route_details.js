@@ -99,6 +99,9 @@ Polymer({
    *     current route or the current route's sink.
    */
   computeCastButtonHidden_: function(route, changeRouteSourceAvailable) {
+    if (route === undefined || changeRouteSourceAvailable === undefined)
+      return false;
+
     return !((route && route.canJoin) || changeRouteSourceAvailable);
   },
 
@@ -191,7 +194,7 @@ Polymer({
    * @private
    */
   shouldShowWebUiControls_: function(route) {
-    return route && route.supportsWebUiController;
+    return !!route && !!route.supportsWebUiController;
   },
 
   /**

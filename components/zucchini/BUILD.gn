@@ -2,9 +2,27 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import("//build/buildflag_header.gni")
 import("//chrome/process_version_rc_template.gni")
-import("//testing/libfuzzer/fuzzer_test.gni")
 import("//testing/test.gni")
+
+buildflag_header("buildflags") {
+  header = "buildflags.h"
+
+  # Disable DEX on Windows Official Builds.
+  _enable_dex = !(is_win && is_official_build)
+  _enable_elf = true
+  _enable_win = true
+
+  # Disable ZTF (Zucchini Text Format) on official builds it is for testing only.
+  _enable_ztf = !is_official_build
+  flags = [
+    "ENABLE_DEX=$_enable_dex",
+    "ENABLE_ELF=$_enable_elf",
+    "ENABLE_WIN=$_enable_win",
+    "ENABLE_ZTF=$_enable_ztf",
+  ]
+}
 
 static_library("zucchini_lib") {
   sources = [
@@ -26,10 +44,14 @@ static_library("zucchini_lib") {
     "disassembler.h",
     "disassembler_dex.cc",
     "disassembler_dex.h",
+    "disassembler_elf.cc",
+    "disassembler_elf.h",
     "disassembler_no_op.cc",
     "disassembler_no_op.h",
     "disassembler_win32.cc",
     "disassembler_win32.h",
+    "disassembler_ztf.cc",
+    "disassembler_ztf.h",
     "element_detection.cc",
     "element_detection.h",
     "encoded_view.cc",
@@ -43,6 +65,8 @@ static_library("zucchini_lib") {
     "image_index.cc",
     "image_index.h",
     "image_utils.h",
+    "imposed_ensemble_matcher.cc",
+    "imposed_ensemble_matcher.h",
     "io_utils.cc",
     "io_utils.h",
     "patch_reader.cc",
@@ -50,20 +74,25 @@ static_library("zucchini_lib") {
     "patch_utils.h",
     "patch_writer.cc",
     "patch_writer.h",
+    "reference_bytes_mixer.cc",
+    "reference_bytes_mixer.h",
     "reference_set.cc",
     "reference_set.h",
     "rel32_finder.cc",
     "rel32_finder.h",
     "rel32_utils.cc",
     "rel32_utils.h",
-    "reloc_utils.cc",
-    "reloc_utils.h",
+    "reloc_elf.cc",
+    "reloc_elf.h",
+    "reloc_win32.cc",
+    "reloc_win32.h",
     "suffix_array.h",
     "target_pool.cc",
     "target_pool.h",
     "targets_affinity.cc",
     "targets_affinity.h",
     "type_dex.h",
+    "type_elf.h",
     "type_win_pe.h",
     "typed_value.h",
     "zucchini.h",
@@ -76,6 +105,7 @@ static_library("zucchini_lib") {
   ]
 
   deps = [
+    ":buildflags",
     "//base",
   ]
 }
@@ -107,7 +137,6 @@ executable("zucchini") {
     ":zucchini_io",
     ":zucchini_lib",
     "//base",
-    "//build/config:exe_and_shlib_deps",
   ]
 
   if (is_win) {
@@ -122,31 +151,6 @@ if (is_win) {
   }
 }
 
-# To download the corpus for local fuzzing use:
-# gsutil -m rsync \
-#   gs://clusterfuzz-corpus/libfuzzer/zucchini_disassembler_win32_fuzzer \
-#   components/zucchini/testdata/disassembler_win32_fuzzer
-fuzzer_test("zucchini_disassembler_win32_fuzzer") {
-  sources = [
-    "disassembler_win32_fuzzer.cc",
-  ]
-  deps = [
-    ":zucchini_lib",
-    "//base",
-  ]
-}
-
-fuzzer_test("zucchini_patch_fuzzer") {
-  sources = [
-    "patch_fuzzer.cc",
-  ]
-  deps = [
-    ":zucchini_lib",
-    "//base",
-  ]
-  seed_corpus = "testdata/patch_fuzzer"
-}
-
 test("zucchini_unittests") {
   sources = [
     "abs32_utils_unittest.cc",
@@ -158,11 +162,14 @@ test("zucchini_unittests") {
     "buffer_view_unittest.cc",
     "crc32_unittest.cc",
     "disassembler_dex_unittest.cc",
+    "disassembler_elf_unittest.cc",
+    "disassembler_ztf_unittest.cc",
     "element_detection_unittest.cc",
     "encoded_view_unittest.cc",
     "equivalence_map_unittest.cc",
     "image_index_unittest.cc",
     "image_utils_unittest.cc",
+    "imposed_ensemble_matcher_unittest.cc",
     "io_utils_unittest.cc",
     "mapped_file_unittest.cc",
     "patch_read_write_unittest.cc",
@@ -170,7 +177,8 @@ test("zucchini_unittests") {
     "reference_set_unittest.cc",
     "rel32_finder_unittest.cc",
     "rel32_utils_unittest.cc",
-    "reloc_utils_unittest.cc",
+    "reloc_elf_unittest.cc",
+    "reloc_win32_unittest.cc",
     "suffix_array_unittest.cc",
     "target_pool_unittest.cc",
     "targets_affinity_unittest.cc",
@@ -207,4 +215,25 @@ test("zucchini_integration_test") {
     "//base/test:test_support",
     "//testing/gtest",
   ]
+}
+
+# Group to build and depend on all the Zucchini related fuzzers.
+group("zucchini_fuzzers") {
+  testonly = true
+  deps = [
+    "//components/zucchini/fuzzers:zucchini_disassembler_dex_fuzzer",
+    "//components/zucchini/fuzzers:zucchini_disassembler_win32_fuzzer",
+    "//components/zucchini/fuzzers:zucchini_patch_fuzzer",
+  ]
+
+  # Ensure protoc is available.
+  # Disabled on Windows due to crbug/844826.
+  if (current_toolchain == host_toolchain && !is_win) {
+    deps += [
+      "//components/zucchini/fuzzers:zucchini_apply_fuzzer",
+      "//components/zucchini/fuzzers:zucchini_imposed_ensemble_matcher_fuzzer",
+      "//components/zucchini/fuzzers:zucchini_raw_gen_fuzzer",
+      "//components/zucchini/fuzzers:zucchini_ztf_gen_fuzzer",
+    ]
+  }
 }

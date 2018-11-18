@@ -21,9 +21,9 @@
 #include "base/memory/singleton.h"
 #include "base/process/process.h"
 #include "base/process/process_iterator.h"
+#include "base/task/post_task.h"
+#include "base/task/task_traits.h"
 #include "base/task_runner_util.h"
-#include "base/task_scheduler/post_task.h"
-#include "base/task_scheduler/task_traits.h"
 #include "base/trace_event/trace_event.h"
 #include "components/arc/arc_bridge_service.h"
 #include "components/arc/arc_browser_context_keyed_service_factory_base.h"
@@ -291,13 +291,13 @@ bool ArcProcessService::RequestAppProcessList(
 
 void ArcProcessService::OnReceiveProcessList(
     const RequestProcessListCallback& callback,
-    std::vector<mojom::RunningAppProcessInfoPtr> instance_processes) {
+    std::vector<mojom::RunningAppProcessInfoPtr> processes) {
   DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
 
   base::PostTaskAndReplyWithResult(
       task_runner_.get(), FROM_HERE,
       base::Bind(&UpdateAndReturnProcessList, nspid_to_pid_,
-                 base::Passed(&instance_processes)),
+                 base::Passed(&processes)),
       callback);
 }
 

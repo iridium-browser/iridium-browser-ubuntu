@@ -4,6 +4,8 @@
 
 #include "net/http/http_auth_handler_ntlm.h"
 
+#include <utility>
+
 #if !defined(NTLM_SSPI)
 #include "base/base64.h"
 #endif
@@ -38,11 +40,14 @@ bool HttpAuthHandlerNTLM::Init(HttpAuthChallengeTokenizer* tok,
 }
 
 int HttpAuthHandlerNTLM::GenerateAuthTokenImpl(
-    const AuthCredentials* credentials, const HttpRequestInfo* request,
-    const CompletionCallback& callback, std::string* auth_token) {
+    const AuthCredentials* credentials,
+    const HttpRequestInfo* request,
+    CompletionOnceCallback callback,
+    std::string* auth_token) {
 #if defined(NTLM_SSPI)
   return auth_sspi_.GenerateAuthToken(credentials, CreateSPN(origin_),
-                                      channel_bindings_, auth_token, callback);
+                                      channel_bindings_, auth_token,
+                                      std::move(callback));
 #else  // !defined(NTLM_SSPI)
   // TODO(cbentzel): Shouldn't be hitting this case.
   if (!credentials) {
@@ -80,9 +85,8 @@ int HttpAuthHandlerNTLM::GenerateAuthTokenImpl(
     }
   }
 
-  ntlm::Buffer next_token = GetNextToken(
-      ntlm::Buffer(reinterpret_cast<const uint8_t*>(decoded_auth_data.data()),
-                   decoded_auth_data.size()));
+  std::vector<uint8_t> next_token =
+      GetNextToken(base::as_bytes(base::make_span(decoded_auth_data)));
   if (next_token.empty())
     return ERR_UNEXPECTED;
 

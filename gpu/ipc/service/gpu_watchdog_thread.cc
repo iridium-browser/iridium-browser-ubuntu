@@ -65,9 +65,9 @@ GpuWatchdogThread::GpuWatchdogThread()
       watched_thread_handle_(0),
       arm_cpu_time_(),
 #endif
-      suspended_(false),
+      suspension_counter_(this),
 #if defined(USE_X11)
-      display_(NULL),
+      display_(nullptr),
       window_(0),
       atom_(x11::None),
       host_tty_(-1),
@@ -93,11 +93,14 @@ GpuWatchdogThread::GpuWatchdogThread()
 }
 
 // static
-std::unique_ptr<GpuWatchdogThread> GpuWatchdogThread::Create() {
+std::unique_ptr<GpuWatchdogThread> GpuWatchdogThread::Create(
+    bool start_backgrounded) {
   auto watchdog_thread = base::WrapUnique(new GpuWatchdogThread);
   base::Thread::Options options;
   options.timer_slack = base::TIMER_SLACK_MAXIMUM;
   watchdog_thread->StartWithOptions(options);
+  if (start_backgrounded)
+    watchdog_thread->OnBackgrounded();
   return watchdog_thread;
 }
 
@@ -118,6 +121,24 @@ void GpuWatchdogThread::CheckArmed() {
 
 void GpuWatchdogThread::ReportProgress() {
   CheckArmed();
+}
+
+void GpuWatchdogThread::OnBackgrounded() {
+  // As we stop the task runner before destroying this class, the unretained
+  // reference will always outlive the task.
+  task_runner()->PostTask(
+      FROM_HERE,
+      base::BindOnce(&GpuWatchdogThread::OnBackgroundedOnWatchdogThread,
+                     base::Unretained(this)));
+}
+
+void GpuWatchdogThread::OnForegrounded() {
+  // As we stop the task runner before destroying this class, the unretained
+  // reference will always outlive the task.
+  task_runner()->PostTask(
+      FROM_HERE,
+      base::BindOnce(&GpuWatchdogThread::OnForegroundedOnWatchdogThread,
+                     base::Unretained(this)));
 }
 
 void GpuWatchdogThread::Init() {
@@ -144,8 +165,62 @@ void GpuWatchdogThread::GpuWatchdogTaskObserver::WillProcessTask(
 void GpuWatchdogThread::GpuWatchdogTaskObserver::DidProcessTask(
     const base::PendingTask& pending_task) {}
 
+GpuWatchdogThread::SuspensionCounter::SuspensionCounterRef::
+    SuspensionCounterRef(SuspensionCounter* counter)
+    : counter_(counter) {
+  counter_->OnAddRef();
+}
+
+GpuWatchdogThread::SuspensionCounter::SuspensionCounterRef::
+    ~SuspensionCounterRef() {
+  counter_->OnReleaseRef();
+}
+
+GpuWatchdogThread::SuspensionCounter::SuspensionCounter(
+    GpuWatchdogThread* watchdog_thread)
+    : watchdog_thread_(watchdog_thread) {
+  // This class will only be used on the watchdog thread, but is constructed on
+  // the main thread. Detach.
+  DETACH_FROM_SEQUENCE(watchdog_thread_sequence_checker_);
+}
+
+std::unique_ptr<GpuWatchdogThread::SuspensionCounter::SuspensionCounterRef>
+GpuWatchdogThread::SuspensionCounter::Take() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(watchdog_thread_sequence_checker_);
+  return std::make_unique<SuspensionCounterRef>(this);
+}
+
+bool GpuWatchdogThread::SuspensionCounter::HasRefs() const {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(watchdog_thread_sequence_checker_);
+  return suspend_count_ > 0;
+}
+
+void GpuWatchdogThread::SuspensionCounter::OnWatchdogThreadStopped() {
+  DETACH_FROM_SEQUENCE(watchdog_thread_sequence_checker_);
+
+  // Null the |watchdog_thread_| ptr at shutdown to avoid trying to suspend or
+  // resume after the thread is stopped.
+  watchdog_thread_ = nullptr;
+}
+
+void GpuWatchdogThread::SuspensionCounter::OnAddRef() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(watchdog_thread_sequence_checker_);
+  suspend_count_++;
+  if (watchdog_thread_ && suspend_count_ == 1)
+    watchdog_thread_->SuspendStateChanged();
+}
+
+void GpuWatchdogThread::SuspensionCounter::OnReleaseRef() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(watchdog_thread_sequence_checker_);
+  DCHECK_GT(suspend_count_, 0u);
+  suspend_count_--;
+  if (watchdog_thread_ && suspend_count_ == 0)
+    watchdog_thread_->SuspendStateChanged();
+}
+
 GpuWatchdogThread::~GpuWatchdogThread() {
   Stop();
+  suspension_counter_.OnWatchdogThreadStopped();
 
 #if defined(OS_WIN)
   CloseHandle(watched_thread_handle_);
@@ -182,7 +257,7 @@ void GpuWatchdogThread::OnAcknowledge() {
   weak_factory_.InvalidateWeakPtrs();
   armed_ = false;
 
-  if (suspended_) {
+  if (suspension_counter_.HasRefs()) {
     responsive_acknowledge_count_ = 0;
     return;
   }
@@ -219,7 +294,7 @@ void GpuWatchdogThread::OnCheck(bool after_suspend) {
 
   // Do not create any new termination tasks if one has already been created
   // or the system is suspended.
-  if (armed_ || suspended_)
+  if (armed_ || suspension_counter_.HasRefs())
     return;
 
   armed_ = true;
@@ -258,7 +333,7 @@ void GpuWatchdogThread::OnCheck(bool after_suspend) {
 
 void GpuWatchdogThread::OnCheckTimeout() {
   // Should not get here while the system is suspended.
-  DCHECK(!suspended_);
+  DCHECK(!suspension_counter_.HasRefs());
 
   // If the watchdog woke up significantly behind schedule, disarm and reset
   // the watchdog check. This is to prevent the watchdog thread from terminating
@@ -296,7 +371,12 @@ void GpuWatchdogThread::OnCheckTimeout() {
 // Use the --disable-gpu-watchdog command line switch to disable this.
 void GpuWatchdogThread::DeliberatelyTerminateToRecoverFromHang() {
   // Should not get here while the system is suspended.
-  DCHECK(!suspended_);
+  DCHECK(!suspension_counter_.HasRefs());
+
+  if (alternative_terminate_for_testing_) {
+    alternative_terminate_for_testing_.Run();
+    return;
+  }
 
 #if defined(OS_WIN)
   // Defer termination until a certain amount of CPU time has elapsed on the
@@ -429,11 +509,11 @@ void GpuWatchdogThread::DeliberatelyTerminateToRecoverFromHang() {
 
 #if defined(USE_X11)
 void GpuWatchdogThread::SetupXServer() {
-  display_ = XOpenDisplay(NULL);
+  display_ = XOpenDisplay(nullptr);
   if (display_) {
     window_ =
         XCreateWindow(display_, DefaultRootWindow(display_), 0, 0, 1, 1, 0,
-                      CopyFromParent, InputOutput, CopyFromParent, 0, NULL);
+                      CopyFromParent, InputOutput, CopyFromParent, 0, nullptr);
     atom_ = XInternAtom(display_, "CHECK", x11::False);
   }
   host_tty_ = GetActiveTTY();
@@ -469,21 +549,34 @@ void GpuWatchdogThread::OnAddPowerObserver() {
 }
 
 void GpuWatchdogThread::OnSuspend() {
-  suspended_ = true;
-  suspend_time_ = base::Time::Now();
-
-  // When suspending force an acknowledgement to cancel any pending termination
-  // tasks.
-  OnAcknowledge();
+  power_suspend_ref_ = suspension_counter_.Take();
 }
 
 void GpuWatchdogThread::OnResume() {
-  suspended_ = false;
-  resume_time_ = base::Time::Now();
+  power_suspend_ref_.reset();
+}
 
-  // After resuming jump-start the watchdog again.
-  armed_ = false;
-  OnCheck(true);
+void GpuWatchdogThread::OnBackgroundedOnWatchdogThread() {
+  background_suspend_ref_ = suspension_counter_.Take();
+}
+
+void GpuWatchdogThread::OnForegroundedOnWatchdogThread() {
+  background_suspend_ref_.reset();
+}
+
+void GpuWatchdogThread::SuspendStateChanged() {
+  if (suspension_counter_.HasRefs()) {
+    suspend_time_ = base::Time::Now();
+    // When suspending force an acknowledgement to cancel any pending
+    // termination tasks.
+    OnAcknowledge();
+  } else {
+    resume_time_ = base::Time::Now();
+
+    // After resuming jump-start the watchdog again.
+    armed_ = false;
+    OnCheck(true);
+  }
 }
 
 #if defined(OS_WIN)
@@ -537,5 +630,14 @@ int GpuWatchdogThread::GetActiveTTY() const {
   return -1;
 }
 #endif
+
+void GpuWatchdogThread::SetAlternativeTerminateFunctionForTesting(
+    base::RepeatingClosure on_terminate) {
+  alternative_terminate_for_testing_ = std::move(on_terminate);
+}
+
+void GpuWatchdogThread::SetTimeoutForTesting(base::TimeDelta timeout) {
+  timeout_ = timeout;
+}
 
 }  // namespace gpu

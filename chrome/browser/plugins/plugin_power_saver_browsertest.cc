@@ -161,10 +161,10 @@ void VerifyPluginMarkedEssential(content::WebContents* contents,
   EXPECT_TRUE(PluginLoaded(contents, element_id));
 }
 
-void VerifyVisualStateUpdated(const base::Closure& done_cb,
+void VerifyVisualStateUpdated(base::OnceClosure done_cb,
                               bool visual_state_updated) {
   ASSERT_TRUE(visual_state_updated);
-  done_cb.Run();
+  std::move(done_cb).Run();
 }
 
 bool SnapshotMatches(const base::FilePath& reference, const SkBitmap& bitmap) {
@@ -180,10 +180,10 @@ bool SnapshotMatches(const base::FilePath& reference, const SkBitmap& bitmap) {
   int w = 0;
   int h = 0;
   std::vector<unsigned char> decoded;
-  if (!gfx::PNGCodec::Decode(reinterpret_cast<unsigned char*>(
-                                 base::string_as_array(&reference_data)),
-                             reference_data.size(), gfx::PNGCodec::FORMAT_BGRA,
-                             &decoded, &w, &h)) {
+  if (!gfx::PNGCodec::Decode(
+          reinterpret_cast<const unsigned char*>(base::data(reference_data)),
+          reference_data.size(), gfx::PNGCodec::FORMAT_BGRA, &decoded, &w,
+          &h)) {
     return false;
   }
 
@@ -372,10 +372,12 @@ class PluginPowerSaverBrowserTest : public InProcessBrowserTest {
         base::FilePath(FILE_PATH_LITERAL("plugin_power_saver")),
         base::FilePath(expected_filename));
 
-    GetActiveWebContents()->GetMainFrame()->InsertVisualStateCallback(
-        base::Bind(&VerifyVisualStateUpdated,
-                   base::MessageLoop::QuitWhenIdleClosure()));
-    content::RunMessageLoop();
+    {
+      base::RunLoop run_loop;
+      GetActiveWebContents()->GetMainFrame()->InsertVisualStateCallback(
+          base::BindOnce(&VerifyVisualStateUpdated, run_loop.QuitClosure()));
+      run_loop.Run();
+    }
 
     content::RenderWidgetHost* rwh =
         GetActiveWebContents()->GetRenderViewHost()->GetWidget();
@@ -386,12 +388,14 @@ class PluginPowerSaverBrowserTest : public InProcessBrowserTest {
     }
 
     bool snapshot_matches = false;
-    base::RunLoop run_loop;
-    rwh->GetView()->CopyFromSurface(
-        gfx::Rect(), gfx::Size(),
-        base::BindOnce(&CompareSnapshotToReference, reference,
-                       &snapshot_matches, run_loop.QuitClosure()));
-    run_loop.Run();
+    {
+      base::RunLoop run_loop;
+      rwh->GetView()->CopyFromSurface(
+          gfx::Rect(), gfx::Size(),
+          base::BindOnce(&CompareSnapshotToReference, reference,
+                         &snapshot_matches, run_loop.QuitClosure()));
+      run_loop.Run();
+    }
 
     return snapshot_matches;
   }

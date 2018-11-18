@@ -7,10 +7,12 @@
 
 #include <stdint.h>
 
+#include <memory>
 #include <string>
 #include <vector>
 
 #include "base/callback.h"
+#include "base/containers/span.h"
 #include "base/macros.h"
 #include "device/bluetooth/bluetooth_remote_gatt_characteristic.h"
 #include "device/bluetooth/bluetooth_remote_gatt_descriptor.h"
@@ -33,7 +35,7 @@ class MockBluetoothGattCharacteristic
                                   bool is_local,
                                   Properties properties,
                                   Permissions permissions);
-  virtual ~MockBluetoothGattCharacteristic();
+  ~MockBluetoothGattCharacteristic() override;
 
   MOCK_CONST_METHOD0(GetIdentifier, std::string());
   MOCK_CONST_METHOD0(GetUUID, BluetoothUUID());
@@ -47,8 +49,13 @@ class MockBluetoothGattCharacteristic
                      std::vector<BluetoothRemoteGattDescriptor*>());
   MOCK_CONST_METHOD1(GetDescriptor,
                      BluetoothRemoteGattDescriptor*(const std::string&));
-  MOCK_METHOD1(AddDescriptor, bool(BluetoothRemoteGattDescriptor*));
   MOCK_METHOD1(UpdateValue, bool(const std::vector<uint8_t>&));
+#if defined(OS_CHROMEOS)
+  MOCK_METHOD3(StartNotifySession,
+               void(NotificationType,
+                    const NotifySessionCallback&,
+                    const ErrorCallback&));
+#endif
   MOCK_METHOD2(StartNotifySession,
                void(const NotifySessionCallback&, const ErrorCallback&));
   MOCK_METHOD2(StopNotifySession,
@@ -59,26 +66,36 @@ class MockBluetoothGattCharacteristic
                void(const std::vector<uint8_t>&,
                     const base::Closure&,
                     const ErrorCallback&));
+#if defined(OS_CHROMEOS)
+  MOCK_METHOD3(PrepareWriteRemoteCharacteristic,
+               void(const std::vector<uint8_t>&,
+                    const base::Closure&,
+                    const ErrorCallback&));
+#endif
+  MOCK_METHOD1(WriteWithoutResponse, bool(base::span<const uint8_t>));
 
   void AddMockDescriptor(
       std::unique_ptr<MockBluetoothGattDescriptor> mock_descriptor);
-  std::vector<BluetoothRemoteGattDescriptor*> GetMockDescriptors() const;
-  BluetoothRemoteGattDescriptor* GetMockDescriptor(
-      const std::string& identifier) const;
 
  protected:
+#if defined(OS_CHROMEOS)
+  MOCK_METHOD4(SubscribeToNotifications,
+               void(BluetoothRemoteGattDescriptor*,
+                    NotificationType,
+                    const base::Closure&,
+                    const ErrorCallback&));
+#else
   MOCK_METHOD3(SubscribeToNotifications,
                void(BluetoothRemoteGattDescriptor*,
                     const base::Closure&,
                     const ErrorCallback&));
+#endif
   MOCK_METHOD3(UnsubscribeFromNotifications,
                void(BluetoothRemoteGattDescriptor*,
                     const base::Closure&,
                     const ErrorCallback&));
 
  private:
-  std::vector<std::unique_ptr<MockBluetoothGattDescriptor>> mock_descriptors_;
-
   DISALLOW_COPY_AND_ASSIGN(MockBluetoothGattCharacteristic);
 };
 

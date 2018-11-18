@@ -2,11 +2,12 @@
 
 <link rel="import" href="chrome://resources/cr_components/chromeos/network/network_siminfo.html">
 <link rel="import" href="chrome://resources/cr_elements/chromeos/network/cr_network_icon.html">
+<link rel="import" href="chrome://resources/cr_elements/cr_toggle/cr_toggle.html">
 <link rel="import" href="chrome://resources/cr_elements/policy/cr_policy_indicator.html">
+<link rel="import" href="chrome://resources/cr_elements/shared_vars_css.html">
 <link rel="import" href="chrome://resources/html/i18n_behavior.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/iron-collapse/iron-collapse.html">
 <link rel="import" href="chrome://resources/polymer/v1_0/paper-icon-button/paper-icon-button-light.html">
-<link rel="import" href="chrome://resources/polymer/v1_0/paper-toggle-button/paper-toggle-button.html">
 <link rel="import" href="../settings_page/settings_subpage.html">
 <link rel="import" href="../settings_shared_css.html">
 
@@ -14,7 +15,12 @@
   <template>
     <style include="internet-shared iron-flex">
       network-siminfo {
-        -webkit-padding-start: var(--settings-box-row-padding);
+        padding-inline-start: var(--settings-box-row-padding);
+      }
+
+      #outerBox {
+        padding: 0 var(--settings-box-row-padding);
+        @apply(--network-summary-item-outer-box);
       }
 
       #details {
@@ -23,18 +29,19 @@
         flex: auto;
       }
 
-      #networkName {
+      #networkTitleText {
         color: #333;
         font-weight: 500;
+        @apply(--network-summary-item-title);
       }
 
       #networkState {
-        color: var(--paper-grey-600);
+        color: var(--cr-secondary-text-color);
         font-size: inherit;
         font-weight: 400;
       }
     </style>
-    <div class="settings-box two-line">
+    <div id="outerBox" class="settings-box two-line">
       <div actionable class="flex layout horizontal center"
           on-click="onShowDetailsTap_">
         <div id="details" no-flex$="[[showSimInfo_(deviceState)]]">
@@ -42,7 +49,9 @@
               device-state="[[deviceState]]">
           </cr-network-icon>
           <div class="flex">
-            <div id="networkName">[[getNetworkName_(activeNetworkState)]]</div>
+            <div id="networkTitleText">
+              [[getTitleText_(activeNetworkState)]]
+            </div>
             <div id="networkState">
               [[getNetworkStateText_(activeNetworkState, deviceState)]]
             </div>
@@ -74,12 +83,12 @@
 
       <template is="dom-if" if="[[enableToggleIsVisible_(deviceState)]]">
         <div class="separator"></div>
-        <paper-toggle-button  id="deviceEnabledButton"
+        <cr-toggle id="deviceEnabledButton"
             aria-label$="[[getToggleA11yString_(deviceState)]]"
             checked="[[deviceIsEnabled_(deviceState)]]"
             disabled="[[!enableToggleIsEnabled_(deviceState)]]"
-            on-click="onDeviceEnabledTap_">
-        </paper-toggle-button>
+            on-change="onDeviceEnabledChange_">
+        </cr-toggle>
       </template>
     </div>
   </template>

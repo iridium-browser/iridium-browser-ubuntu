@@ -67,9 +67,9 @@ TEST_F(NGBlockNodeForTest, ChildFloatBeforeInline) {
   )HTML");
   NGBlockNode container(ToLayoutBox(GetLayoutObjectByElementId("container")));
   NGLayoutInputNode child1 = container.FirstChild();
-  EXPECT_TRUE(child1 && child1.IsBlock());
+  EXPECT_TRUE(child1 && child1.IsInline());
   NGLayoutInputNode child2 = child1.NextSibling();
-  EXPECT_TRUE(child2 && child2.IsBlock());
+  EXPECT_EQ(child2, nullptr);
 }
 
 TEST_F(NGBlockNodeForTest, ChildFloatAfterInline) {
@@ -97,7 +97,7 @@ TEST_F(NGBlockNodeForTest, ChildFloatOnly) {
   )HTML");
   NGBlockNode container(ToLayoutBox(GetLayoutObjectByElementId("container")));
   NGLayoutInputNode child1 = container.FirstChild();
-  EXPECT_TRUE(child1 && child1.IsBlock());
+  EXPECT_TRUE(child1 && child1.IsInline());
   NGLayoutInputNode child2 = child1.NextSibling();
   EXPECT_EQ(child2, nullptr);
 }
@@ -114,7 +114,7 @@ TEST_F(NGBlockNodeForTest, ChildFloatWithSpaces) {
   )HTML");
   NGBlockNode container(ToLayoutBox(GetLayoutObjectByElementId("container")));
   NGLayoutInputNode child1 = container.FirstChild();
-  EXPECT_TRUE(child1 && child1.IsBlock());
+  EXPECT_TRUE(child1 && child1.IsInline());
   NGLayoutInputNode child2 = child1.NextSibling();
   EXPECT_EQ(child2, nullptr);
 }
@@ -159,7 +159,8 @@ TEST_F(NGBlockNodeForTest, MinAndMaxContent) {
   const int kWidth = 30;
 
   NGBlockNode box(ToLayoutBox(GetLayoutObjectByElementId("box")));
-  MinMaxSize sizes = box.ComputeMinMaxSize(MinMaxSizeInput());
+  MinMaxSize sizes =
+      box.ComputeMinMaxSize(WritingMode::kHorizontalTb, MinMaxSizeInput());
   EXPECT_EQ(LayoutUnit(kWidth), sizes.min_size);
   EXPECT_EQ(LayoutUnit(kWidth), sizes.max_size);
 }

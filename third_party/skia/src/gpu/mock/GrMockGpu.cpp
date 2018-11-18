@@ -47,19 +47,25 @@ sk_sp<GrGpu> GrMockGpu::Make(const GrMockOptions* mockOptions,
     return sk_sp<GrGpu>(new GrMockGpu(context, *mockOptions, contextOptions));
 }
 
-
-GrGpuRTCommandBuffer* GrMockGpu::createCommandBuffer(
-                                            GrRenderTarget* rt, GrSurfaceOrigin origin,
-                                            const GrGpuRTCommandBuffer::LoadAndStoreInfo&,
-                                            const GrGpuRTCommandBuffer::StencilLoadAndStoreInfo&) {
+GrGpuRTCommandBuffer* GrMockGpu::getCommandBuffer(
+                                GrRenderTarget* rt, GrSurfaceOrigin origin,
+                                const GrGpuRTCommandBuffer::LoadAndStoreInfo&,
+                                const GrGpuRTCommandBuffer::StencilLoadAndStoreInfo&) {
     return new GrMockGpuRTCommandBuffer(this, rt, origin);
 }
 
-GrGpuTextureCommandBuffer* GrMockGpu::createCommandBuffer(GrTexture* texture,
-                                                          GrSurfaceOrigin origin) {
+GrGpuTextureCommandBuffer* GrMockGpu::getCommandBuffer(GrTexture* texture, GrSurfaceOrigin origin) {
     return new GrMockGpuTextureCommandBuffer(texture, origin);
 }
 
+void GrMockGpu::submit(GrGpuCommandBuffer* buffer) {
+    if (buffer->asRTCommandBuffer()) {
+        this->submitCommandBuffer(
+                        static_cast<GrMockGpuRTCommandBuffer*>(buffer->asRTCommandBuffer()));
+    }
+
+    delete buffer;
+}
 
 void GrMockGpu::submitCommandBuffer(const GrMockGpuRTCommandBuffer* cmdBuffer) {
     for (int i = 0; i < cmdBuffer->numDraws(); ++i) {
@@ -69,12 +75,17 @@ void GrMockGpu::submitCommandBuffer(const GrMockGpuRTCommandBuffer* cmdBuffer) {
 
 GrMockGpu::GrMockGpu(GrContext* context, const GrMockOptions& options,
                      const GrContextOptions& contextOptions)
-        : INHERITED(context) {
+        : INHERITED(context)
+        , fMockOptions(options) {
     fCaps.reset(new GrMockCaps(contextOptions, options));
 }
 
 sk_sp<GrTexture> GrMockGpu::onCreateTexture(const GrSurfaceDesc& desc, SkBudgeted budgeted,
                                             const GrMipLevel texels[], int mipLevelCount) {
+    if (fMockOptions.fFailTextureAllocations) {
+        return nullptr;
+    }
+
     GrMipMapsStatus mipMapsStatus = mipLevelCount > 1 ? GrMipMapsStatus::kValid
                                                       : GrMipMapsStatus::kNotAllocated;
     GrMockTextureInfo texInfo;
@@ -181,8 +192,15 @@ GrStencilAttachment* GrMockGpu::createStencilAttachmentForRenderTarget(const GrR
 
 #if GR_TEST_UTILS
 GrBackendTexture GrMockGpu::createTestingOnlyBackendTexture(const void* pixels, int w, int h,
-                                                            GrPixelConfig config, bool isRT,
-                                                            GrMipMapped mipMapped) {
+                                                            GrColorType colorType, bool isRT,
+                                                            GrMipMapped mipMapped,
+                                                            size_t rowBytes) {
+
+    GrPixelConfig config = GrColorTypeToPixelConfig(colorType, GrSRGBEncoded::kNo);
+    if (!this->caps()->isConfigTexturable(config)) {
+        return GrBackendTexture();  // invalid
+    }
+
     GrMockTextureInfo info;
     info.fConfig = config;
     info.fID = NextExternalTextureID();
@@ -211,9 +229,8 @@ void GrMockGpu::deleteTestingOnlyBackendTexture(const GrBackendTexture& tex) {
 }
 
 GrBackendRenderTarget GrMockGpu::createTestingOnlyBackendRenderTarget(int w, int h,
-                                                                      GrColorType colorType,
-                                                                      GrSRGBEncoded srgbEncoded) {
-    auto config = GrColorTypeToPixelConfig(colorType, srgbEncoded);
+                                                                      GrColorType colorType) {
+    auto config = GrColorTypeToPixelConfig(colorType, GrSRGBEncoded::kNo);
     if (kUnknown_GrPixelConfig == config) {
         return {};
     }

@@ -11,13 +11,10 @@
 
 #include "SkAdvancedTypefaceMetrics.h"
 #include "SkBitSet.h"
-#include "SkGlyphCache.h"
+#include "SkPDFCanon.h"
 #include "SkPDFTypes.h"
-#include "SkTDArray.h"
+#include "SkStrikeCache.h"
 #include "SkTypeface.h"
-
-class SkPDFCanon;
-class SkPDFFont;
 
 /** \class SkPDFFont
     A PDF Object class representing a font.  The font may have resources
@@ -42,6 +39,7 @@ public:
     SkAdvancedTypefaceMetrics::FontType getType() const { return fFontType; }
 
     static SkAdvancedTypefaceMetrics::FontType FontType(const SkAdvancedTypefaceMetrics&);
+    static void GetType1GlyphNames(const SkTypeface&, SkString*);
 
     static bool IsMultiByte(SkAdvancedTypefaceMetrics::FontType type) {
         return type == SkAdvancedTypefaceMetrics::kType1CID_Font ||
@@ -84,6 +82,7 @@ public:
      *  @param glyphID   Specify which section of a large font is of interest.
      */
     static sk_sp<SkPDFFont> GetFontResource(SkPDFCanon* canon,
+                                            SkGlyphCache* cache,
                                             SkTypeface* typeface,
                                             SkGlyphID glyphID);
 
@@ -92,6 +91,9 @@ public:
      *  @return nullptr only when typeface is bad.
      */
     static const SkAdvancedTypefaceMetrics* GetMetrics(SkTypeface* typeface,
+                                                       SkPDFCanon* canon);
+
+    static const std::vector<SkUnichar>& GetUnicodeMap(const SkTypeface* typeface,
                                                        SkPDFCanon* canon);
 
     /** Subset the font based on current usage.

@@ -1,7 +1,6 @@
 // Copyright 2018 The Chromium Authors. All rights reserved.
-// Use of this source code is govered by a BSD-style
-// license that can be found in the LICENSE file or at
-// https://developers.google.com/open-source/licenses/bsd
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
 syntax = "proto2";
 
@@ -23,6 +22,18 @@ message AboutMeSettingsUi {
   // The official first and full name.
   // optional string first_name = 6;
   optional string full_name = 7;
+}
+
+// Only the provided fields will be updated.
+message AboutMeSettingsUiUpdate {
+  optional string name = 1;
+  optional string name_pronunciation = 2;
+  optional WeatherUnit weather_unit = 3;
+}
+
+message AboutMeSettingsUiUpdateResult {
+  // Localized message to display to the users regarding email optin status.
+  optional string email_optin_message = 2;
 }
 
 enum WeatherUnit {

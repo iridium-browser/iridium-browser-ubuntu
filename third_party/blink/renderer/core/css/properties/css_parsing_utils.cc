@@ -33,6 +33,7 @@
 #include "third_party/blink/renderer/core/css/parser/css_parser_token_range.h"
 #include "third_party/blink/renderer/core/css/parser/css_property_parser_helpers.h"
 #include "third_party/blink/renderer/core/css/properties/css_property.h"
+#include "third_party/blink/renderer/core/css/properties/longhand.h"
 #include "third_party/blink/renderer/core/css_property_names.h"
 #include "third_party/blink/renderer/core/css_value_keywords.h"
 #include "third_party/blink/renderer/core/frame/use_counter.h"
@@ -235,9 +236,9 @@ CSSBasicShapeCircleValue* ConsumeBasicShapeCircle(
   if (CSSPropertyParserHelpers::ConsumeIdent<CSSValueAt>(args)) {
     CSSValue* center_x = nullptr;
     CSSValue* center_y = nullptr;
-    if (!ConsumePosition(
-            args, context, CSSPropertyParserHelpers::UnitlessQuirk::kForbid,
-            WebFeature::kThreeValuedPositionBasicShape, center_x, center_y))
+    if (!ConsumePosition(args, context,
+                         CSSPropertyParserHelpers::UnitlessQuirk::kForbid,
+                         base::Optional<WebFeature>(), center_x, center_y))
       return nullptr;
     shape->SetCenterX(center_x);
     shape->SetCenterY(center_y);
@@ -263,9 +264,9 @@ CSSBasicShapeEllipseValue* ConsumeBasicShapeEllipse(
   if (CSSPropertyParserHelpers::ConsumeIdent<CSSValueAt>(args)) {
     CSSValue* center_x = nullptr;
     CSSValue* center_y = nullptr;
-    if (!ConsumePosition(
-            args, context, CSSPropertyParserHelpers::UnitlessQuirk::kForbid,
-            WebFeature::kThreeValuedPositionBasicShape, center_x, center_y))
+    if (!ConsumePosition(args, context,
+                         CSSPropertyParserHelpers::UnitlessQuirk::kForbid,
+                         base::Optional<WebFeature>(), center_x, center_y))
       return nullptr;
     shape->SetCenterX(center_x);
     shape->SetCenterY(center_y);
@@ -415,116 +416,6 @@ bool ConsumeTranslate3d(CSSParserTokenRange& args,
   return true;
 }
 
-CSSValue* ConsumeTransformValue(CSSParserTokenRange& range,
-                                const CSSParserContext& context,
-                                bool use_legacy_parsing) {
-  CSSValueID function_id = range.Peek().FunctionId();
-  if (function_id == CSSValueInvalid)
-    return nullptr;
-  CSSParserTokenRange args = CSSPropertyParserHelpers::ConsumeFunction(range);
-  if (args.AtEnd())
-    return nullptr;
-  CSSFunctionValue* transform_value = CSSFunctionValue::Create(function_id);
-  CSSValue* parsed_value = nullptr;
-  switch (function_id) {
-    case CSSValueRotate:
-    case CSSValueRotateX:
-    case CSSValueRotateY:
-    case CSSValueRotateZ:
-    case CSSValueSkewX:
-    case CSSValueSkewY:
-    case CSSValueSkew:
-      parsed_value = CSSPropertyParserHelpers::ConsumeAngle(
-          args, &context, WebFeature::kUnitlessZeroAngleTransform);
-      if (!parsed_value)
-        return nullptr;
-      if (function_id == CSSValueSkew &&
-          CSSPropertyParserHelpers::ConsumeCommaIncludingWhitespace(args)) {
-        transform_value->Append(*parsed_value);
-        parsed_value = CSSPropertyParserHelpers::ConsumeAngle(
-            args, &context, WebFeature::kUnitlessZeroAngleTransform);
-        if (!parsed_value)
-          return nullptr;
-      }
-      break;
-    case CSSValueScaleX:
-    case CSSValueScaleY:
-    case CSSValueScaleZ:
-    case CSSValueScale:
-      parsed_value =
-          CSSPropertyParserHelpers::ConsumeNumber(args, kValueRangeAll);
-      if (!parsed_value)
-        return nullptr;
-      if (function_id == CSSValueScale &&
-          CSSPropertyParserHelpers::ConsumeCommaIncludingWhitespace(args)) {
-        transform_value->Append(*parsed_value);
-        parsed_value =
-            CSSPropertyParserHelpers::ConsumeNumber(args, kValueRangeAll);
-        if (!parsed_value)
-          return nullptr;
-      }
-      break;
-    case CSSValuePerspective:
-      if (!ConsumePerspective(args, context, transform_value,
-                              use_legacy_parsing)) {
-        return nullptr;
-      }
-      break;
-    case CSSValueTranslateX:
-    case CSSValueTranslateY:
-    case CSSValueTranslate:
-      parsed_value = CSSPropertyParserHelpers::ConsumeLengthOrPercent(
-          args, context.Mode(), kValueRangeAll);
-      if (!parsed_value)
-        return nullptr;
-      if (function_id == CSSValueTranslate &&
-          CSSPropertyParserHelpers::ConsumeCommaIncludingWhitespace(args)) {
-        transform_value->Append(*parsed_value);
-        parsed_value = CSSPropertyParserHelpers::ConsumeLengthOrPercent(
-            args, context.Mode(), kValueRangeAll);
-        if (!parsed_value)
-          return nullptr;
-      }
-      break;
-    case CSSValueTranslateZ:
-      parsed_value = CSSPropertyParserHelpers::ConsumeLength(
-          args, context.Mode(), kValueRangeAll);
-      break;
-    case CSSValueMatrix:
-    case CSSValueMatrix3d:
-      if (!ConsumeNumbers(args, transform_value,
-                          (function_id == CSSValueMatrix3d) ? 16 : 6)) {
-        return nullptr;
-      }
-      break;
-    case CSSValueScale3d:
-      if (!ConsumeNumbers(args, transform_value, 3))
-        return nullptr;
-      break;
-    case CSSValueRotate3d:
-      if (!ConsumeNumbers(args, transform_value, 3) ||
-          !CSSPropertyParserHelpers::ConsumeCommaIncludingWhitespace(args)) {
-        return nullptr;
-      }
-      parsed_value = CSSPropertyParserHelpers::ConsumeAngle(
-          args, &context, WebFeature::kUnitlessZeroAngleTransform);
-      if (!parsed_value)
-        return nullptr;
-      break;
-    case CSSValueTranslate3d:
-      if (!ConsumeTranslate3d(args, context.Mode(), transform_value))
-        return nullptr;
-      break;
-    default:
-      return nullptr;
-  }
-  if (parsed_value)
-    transform_value->Append(*parsed_value);
-  if (!args.AtEnd())
-    return nullptr;
-  return transform_value;
-}
-
 }  // namespace
 
 bool IsSelfPositionKeyword(CSSValueID id) {
@@ -545,6 +436,17 @@ bool IsContentPositionKeyword(CSSValueID id) {
 
 bool IsContentPositionOrLeftOrRightKeyword(CSSValueID id) {
   return IsContentPositionKeyword(id) || IsLeftOrRightKeyword(id);
+}
+
+CSSValue* ConsumeScrollOffset(CSSParserTokenRange& range) {
+  range.ConsumeWhitespace();
+  if (CSSPropertyParserHelpers::IdentMatches<CSSValueAuto>(range.Peek().Id()))
+    return CSSPropertyParserHelpers::ConsumeIdent(range);
+  CSSValue* value = CSSPropertyParserHelpers::ConsumeLengthOrPercent(
+      range, kHTMLStandardMode, kValueRangeNonNegative);
+  if (!range.AtEnd())
+    return nullptr;
+  return value;
 }
 
 CSSValue* ConsumeSelfPositionOverflowPosition(
@@ -568,28 +470,6 @@ CSSValue* ConsumeSelfPositionOverflowPosition(
                                 CSSValuePair::kDropIdenticalValues);
   }
   return self_position;
-}
-
-CSSValue* ConsumeSimplifiedDefaultPosition(
-    CSSParserTokenRange& range,
-    IsPositionKeyword is_position_keyword) {
-  DCHECK(is_position_keyword);
-  CSSValueID id = range.Peek().Id();
-  if (IsNormalOrStretch(id) || is_position_keyword(id))
-    return CSSPropertyParserHelpers::ConsumeIdent(range);
-
-  if (IsBaselineKeyword(id))
-    return ConsumeBaselineKeyword(range);
-
-  return nullptr;
-}
-
-CSSValue* ConsumeSimplifiedSelfPosition(CSSParserTokenRange& range,
-                                        IsPositionKeyword is_position_keyword) {
-  DCHECK(is_position_keyword);
-  return IsAuto(range.Peek().Id())
-             ? CSSPropertyParserHelpers::ConsumeIdent(range)
-             : ConsumeSimplifiedDefaultPosition(range, is_position_keyword);
 }
 
 CSSValue* ConsumeContentDistributionOverflowPosition(
@@ -623,35 +503,6 @@ CSSValue* ConsumeContentDistributionOverflowPosition(
   if (is_position_keyword(range.Peek().Id())) {
     return CSSContentDistributionValue::Create(
         CSSValueInvalid, range.ConsumeIncludingWhitespace().Id(), overflow);
-  }
-
-  return nullptr;
-}
-
-CSSValue* ConsumeSimplifiedContentPosition(
-    CSSParserTokenRange& range,
-    IsPositionKeyword is_position_keyword) {
-  DCHECK(is_position_keyword);
-  CSSValueID id = range.Peek().Id();
-  if (CSSPropertyParserHelpers::IdentMatches<CSSValueNormal>(id) ||
-      is_position_keyword(id)) {
-    return CSSContentDistributionValue::Create(
-        CSSValueInvalid, range.ConsumeIncludingWhitespace().Id(),
-        CSSValueInvalid);
-  }
-
-  if (IsBaselineKeyword(id)) {
-    CSSValue* baseline = ConsumeBaselineKeyword(range);
-    if (!baseline)
-      return nullptr;
-    return CSSContentDistributionValue::Create(
-        CSSValueInvalid, GetBaselineKeyword(*baseline), CSSValueInvalid);
-  }
-
-  if (IsContentDistributionKeyword(id)) {
-    return CSSContentDistributionValue::Create(
-        range.ConsumeIncludingWhitespace().Id(), CSSValueInvalid,
-        CSSValueInvalid);
   }
 
   return nullptr;
@@ -713,14 +564,14 @@ bool ConsumeAnimationShorthand(
   const unsigned longhand_count = shorthand.length();
   DCHECK_LE(longhand_count, kMaxNumAnimationLonghands);
 
-  for (size_t i = 0; i < longhand_count; ++i)
+  for (unsigned i = 0; i < longhand_count; ++i)
     longhands[i] = CSSValueList::CreateCommaSeparated();
 
   do {
     bool parsed_longhand[kMaxNumAnimationLonghands] = {false};
     do {
       bool found_property = false;
-      for (size_t i = 0; i < longhand_count; ++i) {
+      for (unsigned i = 0; i < longhand_count; ++i) {
         if (parsed_longhand[i])
           continue;
 
@@ -738,10 +589,11 @@ bool ConsumeAnimationShorthand(
         return false;
     } while (!range.AtEnd() && range.Peek().GetType() != kCommaToken);
 
-    // TODO(timloh): This will make invalid longhands, see crbug.com/386459
-    for (size_t i = 0; i < longhand_count; ++i) {
-      if (!parsed_longhand[i])
-        longhands[i]->Append(*CSSInitialValue::Create());
+    for (unsigned i = 0; i < longhand_count; ++i) {
+      if (!parsed_longhand[i]) {
+        longhands[i]->Append(
+            *ToLonghand(shorthand.properties()[i])->InitialValue());
+      }
       parsed_longhand[i] = false;
     }
   } while (CSSPropertyParserHelpers::ConsumeCommaIncludingWhitespace(range));
@@ -795,25 +647,18 @@ CSSValue* ConsumeMaskSourceType(CSSParserTokenRange& range) {
 CSSPrimitiveValue* ConsumeLengthOrPercentCountNegative(
     CSSParserTokenRange& range,
     const CSSParserContext& context,
-    WTF::Optional<WebFeature> negativeSize) {
+    base::Optional<WebFeature> negative_size) {
   CSSPrimitiveValue* result =
       ConsumeLengthOrPercent(range, context.Mode(), kValueRangeNonNegative,
                              CSSPropertyParserHelpers::UnitlessQuirk::kForbid);
-  if (result || !negativeSize)
-    return result;
-
-  result =
-      ConsumeLengthOrPercent(range, context.Mode(), kValueRangeAll,
-                             CSSPropertyParserHelpers::UnitlessQuirk::kForbid);
-
-  if (result)
-    context.Count(*negativeSize);
+  if (!result && negative_size)
+    context.Count(*negative_size);
   return result;
 }
 
 CSSValue* ConsumeBackgroundSize(CSSParserTokenRange& range,
                                 const CSSParserContext& context,
-                                WTF::Optional<WebFeature> negativeSize,
+                                base::Optional<WebFeature> negative_size,
                                 ParsingStyle parsing_style) {
   if (CSSPropertyParserHelpers::IdentMatches<CSSValueContain, CSSValueCover>(
           range.Peek().Id())) {
@@ -824,8 +669,10 @@ CSSValue* ConsumeBackgroundSize(CSSParserTokenRange& range,
       CSSPropertyParserHelpers::ConsumeIdent<CSSValueAuto>(range);
   if (!horizontal) {
     horizontal =
-        ConsumeLengthOrPercentCountNegative(range, context, negativeSize);
+        ConsumeLengthOrPercentCountNegative(range, context, negative_size);
   }
+  if (!horizontal)
+    return nullptr;
 
   CSSValue* vertical = nullptr;
   if (!range.AtEnd()) {
@@ -833,7 +680,7 @@ CSSValue* ConsumeBackgroundSize(CSSParserTokenRange& range,
       range.ConsumeIncludingWhitespace();
     } else {
       vertical =
-          ConsumeLengthOrPercentCountNegative(range, context, negativeSize);
+          ConsumeLengthOrPercentCountNegative(range, context, negative_size);
     }
   } else if (parsing_style == ParsingStyle::kLegacy) {
     // Legacy syntax: "-webkit-background-size: 10px" is equivalent to
@@ -892,9 +739,9 @@ CSSValue* ParseBackgroundBox(CSSParserTokenRange& range,
 CSSValue* ParseBackgroundOrMaskSize(CSSParserTokenRange& range,
                                     const CSSParserContext& context,
                                     const CSSParserLocalContext& local_context,
-                                    WTF::Optional<WebFeature> negativeSize) {
+                                    base::Optional<WebFeature> negative_size) {
   return CSSPropertyParserHelpers::ConsumeCommaSeparatedList(
-      ConsumeBackgroundSize, range, context, negativeSize,
+      ConsumeBackgroundSize, range, context, negative_size,
       local_context.UseAliasParsing() ? ParsingStyle::kLegacy
                                       : ParsingStyle::kNotLegacy);
 }
@@ -974,7 +821,7 @@ bool ParseBackgroundOrMask(bool important,
     CSSValue* origin_value = nullptr;
     do {
       bool found_property = false;
-      for (size_t i = 0; i < longhand_count; ++i) {
+      for (unsigned i = 0; i < longhand_count; ++i) {
         if (parsed_longhand[i])
           continue;
 
@@ -1035,7 +882,7 @@ bool ParseBackgroundOrMask(bool important,
     } while (!range.AtEnd() && range.Peek().GetType() != kCommaToken);
 
     // TODO(timloh): This will make invalid longhands, see crbug.com/386459
-    for (size_t i = 0; i < longhand_count; ++i) {
+    for (unsigned i = 0; i < longhand_count; ++i) {
       const CSSProperty& property = *shorthand.properties()[i];
       if (property.IDEquals(CSSPropertyBackgroundColor) && !range.AtEnd()) {
         if (parsed_longhand[i])
@@ -1056,7 +903,7 @@ bool ParseBackgroundOrMask(bool important,
   if (!range.AtEnd())
     return false;
 
-  for (size_t i = 0; i < longhand_count; ++i) {
+  for (unsigned i = 0; i < longhand_count; ++i) {
     const CSSProperty& property = *shorthand.properties()[i];
     if (property.IDEquals(CSSPropertyBackgroundSize) && longhands[i] &&
         context.UseLegacyBackgroundSizeShorthandBehavior())
@@ -1369,8 +1216,7 @@ CSSValue* ConsumeColumnWidth(CSSParserTokenRange& range) {
   // otherwise when used in the 'columns' shorthand property.
   CSSPrimitiveValue* column_width = CSSPropertyParserHelpers::ConsumeLength(
       range, kHTMLStandardMode, kValueRangeNonNegative);
-  if (!column_width ||
-      (!column_width->IsCalculated() && column_width->GetDoubleValue() == 0))
+  if (!column_width)
     return nullptr;
   return column_width;
 }
@@ -1531,7 +1377,7 @@ CSSValue* ConsumeFontStyle(CSSParserTokenRange& range,
       CSSPropertyParserHelpers::ConsumeIdent<CSSValueOblique>(range);
 
   CSSPrimitiveValue* start_angle =
-      CSSPropertyParserHelpers::ConsumeAngle(range, nullptr, WTF::nullopt);
+      CSSPropertyParserHelpers::ConsumeAngle(range, nullptr, base::nullopt);
   if (!start_angle)
     return oblique_identifier;
   if (!IsAngleWithinLimits(start_angle))
@@ -1544,7 +1390,7 @@ CSSValue* ConsumeFontStyle(CSSParserTokenRange& range,
   }
 
   CSSPrimitiveValue* end_angle =
-      CSSPropertyParserHelpers::ConsumeAngle(range, nullptr, WTF::nullopt);
+      CSSPropertyParserHelpers::ConsumeAngle(range, nullptr, base::nullopt);
   if (!end_angle || !IsAngleWithinLimits(end_angle))
     return nullptr;
 
@@ -1570,7 +1416,7 @@ CSSValue* ConsumeFontStretch(CSSParserTokenRange& range,
 
   CSSPrimitiveValue* start_percent =
       CSSPropertyParserHelpers::ConsumePercent(range, kValueRangeNonNegative);
-  if (!start_percent || start_percent->GetFloatValue() <= 0)
+  if (!start_percent)
     return nullptr;
 
   // In a non-font-face context, more than one percentage is not allowed.
@@ -1579,7 +1425,7 @@ CSSValue* ConsumeFontStretch(CSSParserTokenRange& range,
 
   CSSPrimitiveValue* end_percent =
       CSSPropertyParserHelpers::ConsumePercent(range, kValueRangeNonNegative);
-  if (!end_percent || end_percent->GetFloatValue() <= 0)
+  if (!end_percent)
     return nullptr;
 
   return CombineToRangeListOrNull(start_percent, end_percent);
@@ -1730,7 +1576,7 @@ CSSValue* ConsumeGridBreadth(CSSParserTokenRange& range,
   }
   return CSSPropertyParserHelpers::ConsumeLengthOrPercent(
       range, css_parser_mode, kValueRangeNonNegative,
-      CSSPropertyParserHelpers::UnitlessQuirk::kAllow);
+      CSSPropertyParserHelpers::UnitlessQuirk::kForbid);
 }
 
 CSSValue* ConsumeFitContent(CSSParserTokenRange& range,
@@ -2318,7 +2164,7 @@ CSSValue* ConsumeRay(CSSParserTokenRange& range,
   while (!function_args.AtEnd()) {
     if (!angle) {
       angle = CSSPropertyParserHelpers::ConsumeAngle(
-          function_args, &context, WTF::Optional<WebFeature>());
+          function_args, &context, base::Optional<WebFeature>());
       if (angle)
         continue;
     }
@@ -2401,7 +2247,7 @@ CSSValue* ConsumePathOrNone(CSSParserTokenRange& range) {
 CSSValue* ConsumeOffsetRotate(CSSParserTokenRange& range,
                               const CSSParserContext& context) {
   CSSValue* angle = CSSPropertyParserHelpers::ConsumeAngle(
-      range, &context, Optional<WebFeature>());
+      range, &context, base::Optional<WebFeature>());
   CSSValue* keyword =
       CSSPropertyParserHelpers::ConsumeIdent<CSSValueAuto, CSSValueReverse>(
           range);
@@ -2409,8 +2255,8 @@ CSSValue* ConsumeOffsetRotate(CSSParserTokenRange& range,
     return nullptr;
 
   if (!angle) {
-    angle = CSSPropertyParserHelpers::ConsumeAngle(range, &context,
-                                                   Optional<WebFeature>());
+    angle = CSSPropertyParserHelpers::ConsumeAngle(
+        range, &context, base::Optional<WebFeature>());
   }
 
   CSSValueList* list = CSSValueList::CreateSpaceSeparated();
@@ -2419,41 +2265,6 @@ CSSValue* ConsumeOffsetRotate(CSSParserTokenRange& range,
   if (angle)
     list->Append(*angle);
   return list;
-}
-
-bool ConsumePlaceAlignment(CSSParserTokenRange& range,
-                           ConsumePlaceAlignmentValue consume_alignment_value,
-                           CSSValue*& align_value,
-                           CSSValue*& justify_value) {
-  DCHECK(consume_alignment_value);
-  DCHECK(!align_value);
-  DCHECK(!justify_value);
-
-  bool is_baseline = IsBaselineKeyword(range.Peek().Id());
-  bool is_content_alignment =
-      consume_alignment_value == ConsumeSimplifiedContentPosition;
-  align_value = consume_alignment_value(range, is_content_alignment
-                                                   ? IsContentPositionKeyword
-                                                   : IsSelfPositionKeyword);
-  if (!align_value)
-    return false;
-
-  // justify-content property does not allow the <baseline-position> values.
-  if (is_content_alignment) {
-    if (range.AtEnd() && is_baseline)
-      return false;
-    if (IsBaselineKeyword(range.Peek().Id()))
-      return false;
-  }
-
-  justify_value = range.AtEnd()
-                      ? align_value
-                      : consume_alignment_value(
-                            range, is_content_alignment
-                                       ? IsContentPositionOrLeftOrRightKeyword
-                                       : IsSelfPositionOrLeftOrRightKeyword);
-
-  return justify_value && range.AtEnd();
 }
 
 bool ConsumeRadii(CSSValue* horizontal_radii[4],
@@ -2546,6 +2357,116 @@ CSSValue* ConsumeTextDecorationLine(CSSParserTokenRange& range) {
   if (!list->length())
     return nullptr;
   return list;
+}
+
+CSSValue* ConsumeTransformValue(CSSParserTokenRange& range,
+                                const CSSParserContext& context,
+                                bool use_legacy_parsing) {
+  CSSValueID function_id = range.Peek().FunctionId();
+  if (function_id == CSSValueInvalid)
+    return nullptr;
+  CSSParserTokenRange args = CSSPropertyParserHelpers::ConsumeFunction(range);
+  if (args.AtEnd())
+    return nullptr;
+  CSSFunctionValue* transform_value = CSSFunctionValue::Create(function_id);
+  CSSValue* parsed_value = nullptr;
+  switch (function_id) {
+    case CSSValueRotate:
+    case CSSValueRotateX:
+    case CSSValueRotateY:
+    case CSSValueRotateZ:
+    case CSSValueSkewX:
+    case CSSValueSkewY:
+    case CSSValueSkew:
+      parsed_value = CSSPropertyParserHelpers::ConsumeAngle(
+          args, &context, WebFeature::kUnitlessZeroAngleTransform);
+      if (!parsed_value)
+        return nullptr;
+      if (function_id == CSSValueSkew &&
+          CSSPropertyParserHelpers::ConsumeCommaIncludingWhitespace(args)) {
+        transform_value->Append(*parsed_value);
+        parsed_value = CSSPropertyParserHelpers::ConsumeAngle(
+            args, &context, WebFeature::kUnitlessZeroAngleTransform);
+        if (!parsed_value)
+          return nullptr;
+      }
+      break;
+    case CSSValueScaleX:
+    case CSSValueScaleY:
+    case CSSValueScaleZ:
+    case CSSValueScale:
+      parsed_value =
+          CSSPropertyParserHelpers::ConsumeNumber(args, kValueRangeAll);
+      if (!parsed_value)
+        return nullptr;
+      if (function_id == CSSValueScale &&
+          CSSPropertyParserHelpers::ConsumeCommaIncludingWhitespace(args)) {
+        transform_value->Append(*parsed_value);
+        parsed_value =
+            CSSPropertyParserHelpers::ConsumeNumber(args, kValueRangeAll);
+        if (!parsed_value)
+          return nullptr;
+      }
+      break;
+    case CSSValuePerspective:
+      if (!ConsumePerspective(args, context, transform_value,
+                              use_legacy_parsing)) {
+        return nullptr;
+      }
+      break;
+    case CSSValueTranslateX:
+    case CSSValueTranslateY:
+    case CSSValueTranslate:
+      parsed_value = CSSPropertyParserHelpers::ConsumeLengthOrPercent(
+          args, context.Mode(), kValueRangeAll);
+      if (!parsed_value)
+        return nullptr;
+      if (function_id == CSSValueTranslate &&
+          CSSPropertyParserHelpers::ConsumeCommaIncludingWhitespace(args)) {
+        transform_value->Append(*parsed_value);
+        parsed_value = CSSPropertyParserHelpers::ConsumeLengthOrPercent(
+            args, context.Mode(), kValueRangeAll);
+        if (!parsed_value)
+          return nullptr;
+      }
+      break;
+    case CSSValueTranslateZ:
+      parsed_value = CSSPropertyParserHelpers::ConsumeLength(
+          args, context.Mode(), kValueRangeAll);
+      break;
+    case CSSValueMatrix:
+    case CSSValueMatrix3d:
+      if (!ConsumeNumbers(args, transform_value,
+                          (function_id == CSSValueMatrix3d) ? 16 : 6)) {
+        return nullptr;
+      }
+      break;
+    case CSSValueScale3d:
+      if (!ConsumeNumbers(args, transform_value, 3))
+        return nullptr;
+      break;
+    case CSSValueRotate3d:
+      if (!ConsumeNumbers(args, transform_value, 3) ||
+          !CSSPropertyParserHelpers::ConsumeCommaIncludingWhitespace(args)) {
+        return nullptr;
+      }
+      parsed_value = CSSPropertyParserHelpers::ConsumeAngle(
+          args, &context, WebFeature::kUnitlessZeroAngleTransform);
+      if (!parsed_value)
+        return nullptr;
+      break;
+    case CSSValueTranslate3d:
+      if (!ConsumeTranslate3d(args, context.Mode(), transform_value))
+        return nullptr;
+      break;
+    default:
+      return nullptr;
+  }
+  if (parsed_value)
+    transform_value->Append(*parsed_value);
+  if (!args.AtEnd())
+    return nullptr;
+  return transform_value;
 }
 
 CSSValue* ConsumeTransformList(CSSParserTokenRange& range,

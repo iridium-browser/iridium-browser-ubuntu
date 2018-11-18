@@ -4,11 +4,12 @@
 
 #include "ash/system/date/date_view.h"
 
+#include "ash/public/cpp/ash_features.h"
+#include "ash/session/session_controller.h"
 #include "ash/shell.h"
 #include "ash/strings/grit/ash_strings.h"
 #include "ash/system/model/clock_model.h"
 #include "ash/system/model/system_tray_model.h"
-#include "ash/system/tray/system_tray_controller.h"
 #include "ash/system/tray/tray_constants.h"
 #include "ash/system/tray/tray_popup_item_style.h"
 #include "ash/system/tray/tray_popup_utils.h"
@@ -68,6 +69,7 @@ base::string16 FormatDayOfWeek(const base::Time& time) {
 }  // namespace
 
 BaseDateTimeView::~BaseDateTimeView() {
+  model_->RemoveObserver(this);
   timer_.Stop();
 }
 
@@ -78,17 +80,37 @@ void BaseDateTimeView::UpdateText() {
   SetTimer(now);
 }
 
+void BaseDateTimeView::UpdateTimeFormat() {
+  UpdateText();
+}
+
 void BaseDateTimeView::GetAccessibleNodeData(ui::AXNodeData* node_data) {
   ActionableView::GetAccessibleNodeData(node_data);
   node_data->role = ax::mojom::Role::kTime;
 }
 
-BaseDateTimeView::BaseDateTimeView(SystemTrayItem* owner)
+void BaseDateTimeView::OnDateFormatChanged() {
+  UpdateTimeFormat();
+}
+
+void BaseDateTimeView::OnSystemClockTimeUpdated() {
+  UpdateTimeFormat();
+}
+
+void BaseDateTimeView::OnSystemClockCanSetTimeChanged(bool can_set_time) {}
+
+void BaseDateTimeView::Refresh() {}
+
+base::HourClockType BaseDateTimeView::GetHourTypeForTesting() const {
+  return model_->hour_clock_type();
+}
+
+BaseDateTimeView::BaseDateTimeView(SystemTrayItem* owner, ClockModel* model)
     : ActionableView(owner, TrayPopupInkDropStyle::INSET_BOUNDS),
-      hour_type_(
-          Shell::Get()->system_tray_model()->clock()->hour_clock_type()) {
+      model_(model) {
   SetTimer(base::Time::Now());
   SetFocusBehavior(FocusBehavior::NEVER);
+  model_->AddObserver(this);
 }
 
 void BaseDateTimeView::SetTimer(const base::Time& now) {
@@ -115,7 +137,7 @@ void BaseDateTimeView::SetTimer(const base::Time& now) {
 
 void BaseDateTimeView::UpdateTextInternal(const base::Time& now) {
   SetAccessibleName(base::TimeFormatTimeOfDayWithHourClockType(
-                        now, hour_type_, base::kKeepAmPm) +
+                        now, model_->hour_clock_type(), base::kKeepAmPm) +
                     base::ASCIIToUTF16(", ") +
                     base::TimeFormatFriendlyDate(now));
 
@@ -128,8 +150,8 @@ void BaseDateTimeView::ChildPreferredSizeChanged(views::View* child) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-DateView::DateView(SystemTrayItem* owner)
-    : BaseDateTimeView(owner), action_(DateAction::NONE) {
+DateView::DateView(SystemTrayItem* owner, ClockModel* model)
+    : BaseDateTimeView(owner, model), action_(DateAction::NONE) {
   auto box_layout = std::make_unique<views::BoxLayout>(
       views::BoxLayout::kHorizontal,
       gfx::Insets(0, kTrayPopupLabelHorizontalPadding), 0);
@@ -143,6 +165,8 @@ DateView::DateView(SystemTrayItem* owner)
   TrayPopupItemStyle style(TrayPopupItemStyle::FontStyle::SYSTEM_INFO);
   style.SetupLabel(date_label_);
   AddChildView(date_label_);
+
+  OnSystemClockCanSetTimeChanged(model_->can_set_time());
 }
 
 DateView::~DateView() = default;
@@ -160,28 +184,27 @@ void DateView::SetAction(DateAction action) {
     SetInkDropMode(views::InkDropHostView::InkDropMode::ON);
 }
 
-void DateView::UpdateTimeFormat() {
-  hour_type_ = Shell::Get()->system_tray_model()->clock()->hour_clock_type();
-  UpdateText();
-}
-
-base::HourClockType DateView::GetHourTypeForTesting() const {
-  return hour_type_;
-}
-
 void DateView::UpdateTextInternal(const base::Time& now) {
   BaseDateTimeView::UpdateTextInternal(now);
   date_label_->SetText(l10n_util::GetStringFUTF16(
       IDS_ASH_STATUS_TRAY_DATE, FormatDayOfWeek(now), FormatDate(now)));
+  date_label_->NotifyAccessibilityEvent(ax::mojom::Event::kTextChanged, true);
+}
+
+void DateView::OnSystemClockCanSetTimeChanged(bool can_set_time) {
+  // Outside of a logged-in session, the date button should launch the set time
+  // dialog if the time can be set.
+  if (model_->IsLoggedIn())
+    SetAction(can_set_time ? DateAction::SET_SYSTEM_TIME : DateAction::NONE);
 }
 
 bool DateView::PerformAction(const ui::Event& event) {
   switch (action_) {
     case DateAction::SHOW_DATE_SETTINGS:
-      Shell::Get()->system_tray_controller()->ShowDateSettings();
+      model_->ShowDateSettings();
       break;
     case DateAction::SET_SYSTEM_TIME:
-      Shell::Get()->system_tray_controller()->ShowSetTimeDialog();
+      model_->ShowSetTimeDialog();
       break;
     case DateAction::NONE:
       return false;
@@ -192,22 +215,14 @@ bool DateView::PerformAction(const ui::Event& event) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-TimeView::TimeView(ClockLayout clock_layout) : BaseDateTimeView(nullptr) {
+TimeView::TimeView(ClockLayout clock_layout, ClockModel* model)
+    : BaseDateTimeView(nullptr, model) {
   SetupLabels();
   UpdateTextInternal(base::Time::Now());
   UpdateClockLayout(clock_layout);
 }
 
 TimeView::~TimeView() = default;
-
-void TimeView::UpdateTimeFormat() {
-  hour_type_ = Shell::Get()->system_tray_model()->clock()->hour_clock_type();
-  UpdateText();
-}
-
-base::HourClockType TimeView::GetHourTypeForTesting() const {
-  return hour_type_;
-}
 
 void TimeView::UpdateTextInternal(const base::Time& now) {
   // Just in case |now| is null, do NOT update time; otherwise, it will
@@ -220,9 +235,11 @@ void TimeView::UpdateTextInternal(const base::Time& now) {
 
   BaseDateTimeView::UpdateTextInternal(now);
   base::string16 current_time = base::TimeFormatTimeOfDayWithHourClockType(
-      now, hour_type_, base::kDropAmPm);
+      now, model_->hour_clock_type(), base::kDropAmPm);
   horizontal_label_->SetText(current_time);
   horizontal_label_->SetTooltipText(base::TimeFormatFriendlyDate(now));
+  horizontal_label_->NotifyAccessibilityEvent(ax::mojom::Event::kTextChanged,
+                                              true);
 
   // Calculate vertical clock layout labels.
   size_t colon_pos = current_time.find(base::ASCIIToUTF16(":"));
@@ -230,12 +247,16 @@ void TimeView::UpdateTextInternal(const base::Time& now) {
   base::string16 minute = current_time.substr(colon_pos + 1);
 
   // Sometimes pad single-digit hours with a zero for aesthetic reasons.
-  if (hour.length() == 1 && hour_type_ == base::k24HourClock &&
+  if (hour.length() == 1 && model_->hour_clock_type() == base::k24HourClock &&
       !base::i18n::IsRTL())
     hour = base::ASCIIToUTF16("0") + hour;
 
   vertical_label_hours_->SetText(hour);
   vertical_label_minutes_->SetText(minute);
+  vertical_label_hours_->NotifyAccessibilityEvent(
+      ax::mojom::Event::kTextChanged, true);
+  vertical_label_minutes_->NotifyAccessibilityEvent(
+      ax::mojom::Event::kTextChanged, true);
   Layout();
 }
 
@@ -283,11 +304,28 @@ void TimeView::UpdateClockLayout(ClockLayout clock_layout) {
   Layout();
 }
 
+void TimeView::SetTextColorBasedOnSession(
+    session_manager::SessionState session_state) {
+  auto set_color = [&](std::unique_ptr<views::Label>& label) {
+    label->SetEnabledColor(TrayIconColor(session_state));
+  };
+
+  set_color(horizontal_label_);
+  set_color(vertical_label_hours_);
+  set_color(vertical_label_minutes_);
+}
+
+void TimeView::Refresh() {
+  UpdateText();
+}
+
 void TimeView::SetBorderFromLayout(ClockLayout clock_layout) {
-  if (clock_layout == ClockLayout::HORIZONTAL_CLOCK)
+  if (!features::IsSystemTrayUnifiedEnabled() &&
+      clock_layout == ClockLayout::HORIZONTAL_CLOCK) {
     SetBorder(views::CreateEmptyBorder(gfx::Insets(0, kTrayImageItemPadding)));
-  else
+  } else {
     SetBorder(views::NullBorder());
+  }
 }
 
 void TimeView::SetupLabels() {

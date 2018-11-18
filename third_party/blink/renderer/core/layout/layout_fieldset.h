@@ -32,9 +32,12 @@ class LayoutFieldset final : public LayoutBlockFlow {
  public:
   explicit LayoutFieldset(Element*);
 
-  LayoutBox* FindInFlowLegend() const;
+  static LayoutBox* FindInFlowLegend(const LayoutBlock& fieldset);
+  LayoutBox* FindInFlowLegend() const { return FindInFlowLegend(*this); }
 
   const char* GetName() const override { return "LayoutFieldset"; }
+
+  bool CreatesNewFormattingContext() const final { return true; }
 
  private:
   bool IsOfType(LayoutObjectType type) const override {
@@ -46,9 +49,11 @@ class LayoutFieldset final : public LayoutBlockFlow {
 
   void ComputePreferredLogicalWidths() override;
 
-  void PaintBoxDecorationBackground(const PaintInfo&,
-                                    const LayoutPoint&) const override;
-  void PaintMask(const PaintInfo&, const LayoutPoint&) const override;
+  void PaintBoxDecorationBackground(
+      const PaintInfo&,
+      const LayoutPoint& paint_offset) const override;
+  void PaintMask(const PaintInfo&,
+                 const LayoutPoint& paint_offset) const override;
 };
 
 DEFINE_LAYOUT_OBJECT_TYPE_CASTS(LayoutFieldset, IsFieldset());

@@ -98,6 +98,10 @@ public:
     return cast<PointerType>(Instruction::getType());
   }
 
+  /// Get allocation size in bits. Returns None if size can't be determined,
+  /// e.g. in case of a VLA.
+  Optional<uint64_t> getAllocationSizeInBits(const DataLayout &DL) const;
+
   /// Return the type that is being allocated by the instruction.
   Type *getAllocatedType() const { return AllocatedType; }
   /// for use only in special circumstances that need to generically
@@ -730,6 +734,8 @@ public:
   BinOp getOperation() const {
     return static_cast<BinOp>(getSubclassDataFromInstruction() >> 5);
   }
+
+  static StringRef getOperationName(BinOp Op);
 
   void setOperation(BinOp Operation) {
     unsigned short SubclassData = getSubclassDataFromInstruction();
@@ -1719,7 +1725,7 @@ public:
     return Attrs.getDereferenceableOrNullBytes(i);
   }
 
-  /// @brief Determine if the return value is marked with NoAlias attribute.
+  /// Determine if the return value is marked with NoAlias attribute.
   bool returnDoesNotAlias() const {
     return Attrs.hasAttribute(AttributeList::ReturnIndex, Attribute::NoAlias);
   }
@@ -1763,7 +1769,7 @@ public:
     addAttribute(AttributeList::FunctionIndex, Attribute::WriteOnly);
   }
 
-  /// @brief Determine if the call can access memmory only using pointers based
+  /// Determine if the call can access memmory only using pointers based
   /// on its arguments.
   bool onlyAccessesArgMemory() const {
     return hasFnAttr(Attribute::ArgMemOnly);
@@ -1772,7 +1778,7 @@ public:
     addAttribute(AttributeList::FunctionIndex, Attribute::ArgMemOnly);
   }
 
-  /// @brief Determine if the function may only access memory that is
+  /// Determine if the function may only access memory that is
   /// inaccessible from the IR.
   bool onlyAccessesInaccessibleMemory() const {
     return hasFnAttr(Attribute::InaccessibleMemOnly);
@@ -1781,7 +1787,7 @@ public:
     addAttribute(AttributeList::FunctionIndex, Attribute::InaccessibleMemOnly);
   }
 
-  /// @brief Determine if the function may only access memory that is
+  /// Determine if the function may only access memory that is
   /// either inaccessible from the IR or pointed to by its arguments.
   bool onlyAccessesInaccessibleMemOrArgMem() const {
     return hasFnAttr(Attribute::InaccessibleMemOrArgMemOnly);
@@ -2426,7 +2432,7 @@ public:
 
   /// Return the shuffle mask value for the specified element of the mask.
   /// Return -1 if the element is undef.
-  static int getMaskValue(Constant *Mask, unsigned Elt);
+  static int getMaskValue(const Constant *Mask, unsigned Elt);
 
   /// Return the shuffle mask value of this instruction for the given element
   /// index. Return -1 if the element is undef.
@@ -2436,7 +2442,8 @@ public:
 
   /// Convert the input shuffle mask operand to a vector of integers. Undefined
   /// elements of the mask are returned as -1.
-  static void getShuffleMask(Constant *Mask, SmallVectorImpl<int> &Result);
+  static void getShuffleMask(const Constant *Mask,
+                             SmallVectorImpl<int> &Result);
 
   /// Return the mask for this instruction as a vector of integers. Undefined
   /// elements of the mask are returned as -1.
@@ -2448,6 +2455,198 @@ public:
     SmallVector<int, 16> Mask;
     getShuffleMask(Mask);
     return Mask;
+  }
+
+  /// Return true if this shuffle returns a vector with a different number of
+  /// elements than its source vectors.
+  /// Examples: shufflevector <4 x n> A, <4 x n> B, <1,2,3>
+  ///           shufflevector <4 x n> A, <4 x n> B, <1,2,3,4,5>
+  bool changesLength() const {
+    unsigned NumSourceElts = Op<0>()->getType()->getVectorNumElements();
+    unsigned NumMaskElts = getMask()->getType()->getVectorNumElements();
+    return NumSourceElts != NumMaskElts;
+  }
+
+  /// Return true if this shuffle returns a vector with a greater number of
+  /// elements than its source vectors.
+  /// Example: shufflevector <2 x n> A, <2 x n> B, <1,2,3>
+  bool increasesLength() const {
+    unsigned NumSourceElts = Op<0>()->getType()->getVectorNumElements();
+    unsigned NumMaskElts = getMask()->getType()->getVectorNumElements();
+    return NumSourceElts < NumMaskElts;
+  }
+
+  /// Return true if this shuffle mask chooses elements from exactly one source
+  /// vector.
+  /// Example: <7,5,undef,7>
+  /// This assumes that vector operands are the same length as the mask.
+  static bool isSingleSourceMask(ArrayRef<int> Mask);
+  static bool isSingleSourceMask(const Constant *Mask) {
+    assert(Mask->getType()->isVectorTy() && "Shuffle needs vector constant.");
+    SmallVector<int, 16> MaskAsInts;
+    getShuffleMask(Mask, MaskAsInts);
+    return isSingleSourceMask(MaskAsInts);
+  }
+
+  /// Return true if this shuffle chooses elements from exactly one source
+  /// vector without changing the length of that vector.
+  /// Example: shufflevector <4 x n> A, <4 x n> B, <3,0,undef,3>
+  /// TODO: Optionally allow length-changing shuffles.
+  bool isSingleSource() const {
+    return !changesLength() && isSingleSourceMask(getMask());
+  }
+
+  /// Return true if this shuffle mask chooses elements from exactly one source
+  /// vector without lane crossings. A shuffle using this mask is not
+  /// necessarily a no-op because it may change the number of elements from its
+  /// input vectors or it may provide demanded bits knowledge via undef lanes.
+  /// Example: <undef,undef,2,3>
+  static bool isIdentityMask(ArrayRef<int> Mask);
+  static bool isIdentityMask(const Constant *Mask) {
+    assert(Mask->getType()->isVectorTy() && "Shuffle needs vector constant.");
+    SmallVector<int, 16> MaskAsInts;
+    getShuffleMask(Mask, MaskAsInts);
+    return isIdentityMask(MaskAsInts);
+  }
+
+  /// Return true if this shuffle chooses elements from exactly one source
+  /// vector without lane crossings and does not change the number of elements
+  /// from its input vectors.
+  /// Example: shufflevector <4 x n> A, <4 x n> B, <4,undef,6,undef>
+  bool isIdentity() const {
+    return !changesLength() && isIdentityMask(getShuffleMask());
+  }
+
+  /// Return true if this shuffle lengthens exactly one source vector with
+  /// undefs in the high elements.
+  bool isIdentityWithPadding() const;
+
+  /// Return true if this shuffle extracts the first N elements of exactly one
+  /// source vector.
+  bool isIdentityWithExtract() const;
+
+  /// Return true if this shuffle concatenates its 2 source vectors. This
+  /// returns false if either input is undefined. In that case, the shuffle is
+  /// is better classified as an identity with padding operation.
+  bool isConcat() const;
+
+  /// Return true if this shuffle mask chooses elements from its source vectors
+  /// without lane crossings. A shuffle using this mask would be
+  /// equivalent to a vector select with a constant condition operand.
+  /// Example: <4,1,6,undef>
+  /// This returns false if the mask does not choose from both input vectors.
+  /// In that case, the shuffle is better classified as an identity shuffle.
+  /// This assumes that vector operands are the same length as the mask
+  /// (a length-changing shuffle can never be equivalent to a vector select).
+  static bool isSelectMask(ArrayRef<int> Mask);
+  static bool isSelectMask(const Constant *Mask) {
+    assert(Mask->getType()->isVectorTy() && "Shuffle needs vector constant.");
+    SmallVector<int, 16> MaskAsInts;
+    getShuffleMask(Mask, MaskAsInts);
+    return isSelectMask(MaskAsInts);
+  }
+
+  /// Return true if this shuffle chooses elements from its source vectors
+  /// without lane crossings and all operands have the same number of elements.
+  /// In other words, this shuffle is equivalent to a vector select with a
+  /// constant condition operand.
+  /// Example: shufflevector <4 x n> A, <4 x n> B, <undef,1,6,3>
+  /// This returns false if the mask does not choose from both input vectors.
+  /// In that case, the shuffle is better classified as an identity shuffle.
+  /// TODO: Optionally allow length-changing shuffles.
+  bool isSelect() const {
+    return !changesLength() && isSelectMask(getMask());
+  }
+
+  /// Return true if this shuffle mask swaps the order of elements from exactly
+  /// one source vector.
+  /// Example: <7,6,undef,4>
+  /// This assumes that vector operands are the same length as the mask.
+  static bool isReverseMask(ArrayRef<int> Mask);
+  static bool isReverseMask(const Constant *Mask) {
+    assert(Mask->getType()->isVectorTy() && "Shuffle needs vector constant.");
+    SmallVector<int, 16> MaskAsInts;
+    getShuffleMask(Mask, MaskAsInts);
+    return isReverseMask(MaskAsInts);
+  }
+
+  /// Return true if this shuffle swaps the order of elements from exactly
+  /// one source vector.
+  /// Example: shufflevector <4 x n> A, <4 x n> B, <3,undef,1,undef>
+  /// TODO: Optionally allow length-changing shuffles.
+  bool isReverse() const {
+    return !changesLength() && isReverseMask(getMask());
+  }
+
+  /// Return true if this shuffle mask chooses all elements with the same value
+  /// as the first element of exactly one source vector.
+  /// Example: <4,undef,undef,4>
+  /// This assumes that vector operands are the same length as the mask.
+  static bool isZeroEltSplatMask(ArrayRef<int> Mask);
+  static bool isZeroEltSplatMask(const Constant *Mask) {
+    assert(Mask->getType()->isVectorTy() && "Shuffle needs vector constant.");
+    SmallVector<int, 16> MaskAsInts;
+    getShuffleMask(Mask, MaskAsInts);
+    return isZeroEltSplatMask(MaskAsInts);
+  }
+
+  /// Return true if all elements of this shuffle are the same value as the
+  /// first element of exactly one source vector without changing the length
+  /// of that vector.
+  /// Example: shufflevector <4 x n> A, <4 x n> B, <undef,0,undef,0>
+  /// TODO: Optionally allow length-changing shuffles.
+  /// TODO: Optionally allow splats from other elements.
+  bool isZeroEltSplat() const {
+    return !changesLength() && isZeroEltSplatMask(getMask());
+  }
+
+  /// Return true if this shuffle mask is a transpose mask.
+  /// Transpose vector masks transpose a 2xn matrix. They read corresponding
+  /// even- or odd-numbered vector elements from two n-dimensional source
+  /// vectors and write each result into consecutive elements of an
+  /// n-dimensional destination vector. Two shuffles are necessary to complete
+  /// the transpose, one for the even elements and another for the odd elements.
+  /// This description closely follows how the TRN1 and TRN2 AArch64
+  /// instructions operate.
+  ///
+  /// For example, a simple 2x2 matrix can be transposed with:
+  ///
+  ///   ; Original matrix
+  ///   m0 = < a, b >
+  ///   m1 = < c, d >
+  ///
+  ///   ; Transposed matrix
+  ///   t0 = < a, c > = shufflevector m0, m1, < 0, 2 >
+  ///   t1 = < b, d > = shufflevector m0, m1, < 1, 3 >
+  ///
+  /// For matrices having greater than n columns, the resulting nx2 transposed
+  /// matrix is stored in two result vectors such that one vector contains
+  /// interleaved elements from all the even-numbered rows and the other vector
+  /// contains interleaved elements from all the odd-numbered rows. For example,
+  /// a 2x4 matrix can be transposed with:
+  ///
+  ///   ; Original matrix
+  ///   m0 = < a, b, c, d >
+  ///   m1 = < e, f, g, h >
+  ///
+  ///   ; Transposed matrix
+  ///   t0 = < a, e, c, g > = shufflevector m0, m1 < 0, 4, 2, 6 >
+  ///   t1 = < b, f, d, h > = shufflevector m0, m1 < 1, 5, 3, 7 >
+  static bool isTransposeMask(ArrayRef<int> Mask);
+  static bool isTransposeMask(const Constant *Mask) {
+    assert(Mask->getType()->isVectorTy() && "Shuffle needs vector constant.");
+    SmallVector<int, 16> MaskAsInts;
+    getShuffleMask(Mask, MaskAsInts);
+    return isTransposeMask(MaskAsInts);
+  }
+
+  /// Return true if this shuffle transposes the elements of its inputs without
+  /// changing the length of the vectors. This operation may also be known as a
+  /// merge or interleave. See the description for isTransposeMask() for the
+  /// exact specification.
+  /// Example: shufflevector <4 x n> A, <4 x n> B, <0,4,2,6>
+  bool isTranspose() const {
+    return !changesLength() && isTransposeMask(getMask());
   }
 
   /// Change values in a shuffle permute mask assuming the two vector operands
@@ -3179,6 +3378,33 @@ protected:
   BranchInst *cloneImpl() const;
 
 public:
+  /// Iterator type that casts an operand to a basic block.
+  ///
+  /// This only makes sense because the successors are stored as adjacent
+  /// operands for branch instructions.
+  struct succ_op_iterator
+      : iterator_adaptor_base<succ_op_iterator, value_op_iterator,
+                              std::random_access_iterator_tag, BasicBlock *,
+                              ptrdiff_t, BasicBlock *, BasicBlock *> {
+    explicit succ_op_iterator(value_op_iterator I) : iterator_adaptor_base(I) {}
+
+    BasicBlock *operator*() const { return cast<BasicBlock>(*I); }
+    BasicBlock *operator->() const { return operator*(); }
+  };
+
+  /// The const version of `succ_op_iterator`.
+  struct const_succ_op_iterator
+      : iterator_adaptor_base<const_succ_op_iterator, const_value_op_iterator,
+                              std::random_access_iterator_tag,
+                              const BasicBlock *, ptrdiff_t, const BasicBlock *,
+                              const BasicBlock *> {
+    explicit const_succ_op_iterator(const_value_op_iterator I)
+        : iterator_adaptor_base(I) {}
+
+    const BasicBlock *operator*() const { return cast<BasicBlock>(*I); }
+    const BasicBlock *operator->() const { return operator*(); }
+  };
+
   static BranchInst *Create(BasicBlock *IfTrue,
                             Instruction *InsertBefore = nullptr) {
     return new(1) BranchInst(IfTrue, InsertBefore);
@@ -3232,6 +3458,18 @@ public:
   /// branch weight metadata associated with the instruction so that it
   /// continues to map correctly to each operand.
   void swapSuccessors();
+
+  iterator_range<succ_op_iterator> successors() {
+    return make_range(
+        succ_op_iterator(std::next(value_op_begin(), isConditional() ? 1 : 0)),
+        succ_op_iterator(value_op_end()));
+  }
+
+  iterator_range<const_succ_op_iterator> successors() const {
+    return make_range(const_succ_op_iterator(
+                          std::next(value_op_begin(), isConditional() ? 1 : 0)),
+                      const_succ_op_iterator(value_op_end()));
+  }
 
   // Methods for support type inquiry through isa, cast, and dyn_cast:
   static bool classof(const Instruction *I) {
@@ -3646,6 +3884,33 @@ protected:
   IndirectBrInst *cloneImpl() const;
 
 public:
+  /// Iterator type that casts an operand to a basic block.
+  ///
+  /// This only makes sense because the successors are stored as adjacent
+  /// operands for indirectbr instructions.
+  struct succ_op_iterator
+      : iterator_adaptor_base<succ_op_iterator, value_op_iterator,
+                              std::random_access_iterator_tag, BasicBlock *,
+                              ptrdiff_t, BasicBlock *, BasicBlock *> {
+    explicit succ_op_iterator(value_op_iterator I) : iterator_adaptor_base(I) {}
+
+    BasicBlock *operator*() const { return cast<BasicBlock>(*I); }
+    BasicBlock *operator->() const { return operator*(); }
+  };
+
+  /// The const version of `succ_op_iterator`.
+  struct const_succ_op_iterator
+      : iterator_adaptor_base<const_succ_op_iterator, const_value_op_iterator,
+                              std::random_access_iterator_tag,
+                              const BasicBlock *, ptrdiff_t, const BasicBlock *,
+                              const BasicBlock *> {
+    explicit const_succ_op_iterator(const_value_op_iterator I)
+        : iterator_adaptor_base(I) {}
+
+    const BasicBlock *operator*() const { return cast<BasicBlock>(*I); }
+    const BasicBlock *operator->() const { return operator*(); }
+  };
+
   static IndirectBrInst *Create(Value *Address, unsigned NumDests,
                                 Instruction *InsertBefore = nullptr) {
     return new IndirectBrInst(Address, NumDests, InsertBefore);
@@ -3686,6 +3951,16 @@ public:
   }
   void setSuccessor(unsigned i, BasicBlock *NewSucc) {
     setOperand(i + 1, NewSucc);
+  }
+
+  iterator_range<succ_op_iterator> successors() {
+    return make_range(succ_op_iterator(std::next(value_op_begin())),
+                      succ_op_iterator(value_op_end()));
+  }
+
+  iterator_range<const_succ_op_iterator> successors() const {
+    return make_range(const_succ_op_iterator(std::next(value_op_begin())),
+                      const_succ_op_iterator(value_op_end()));
   }
 
   // Methods for support type inquiry through isa, cast, and dyn_cast:
@@ -3841,7 +4116,7 @@ public:
   void setDoesNotThrow() {
     addAttribute(AttributeList::FunctionIndex, Attribute::NoUnwind);
   }
-  
+
   /// Return the function called, or null if this is an
   /// indirect function invocation.
   ///
@@ -5071,6 +5346,25 @@ inline Value *getPointerOperand(Value *V) {
   if (auto *Gep = dyn_cast<GetElementPtrInst>(V))
     return Gep->getPointerOperand();
   return nullptr;
+}
+
+/// A helper function that returns the alignment of load or store instruction.
+inline unsigned getLoadStoreAlignment(Value *I) {
+  assert((isa<LoadInst>(I) || isa<StoreInst>(I)) &&
+         "Expected Load or Store instruction");
+  if (auto *LI = dyn_cast<LoadInst>(I))
+    return LI->getAlignment();
+  return cast<StoreInst>(I)->getAlignment();
+}
+
+/// A helper function that returns the address space of the pointer operand of
+/// load or store instruction.
+inline unsigned getLoadStoreAddressSpace(Value *I) {
+  assert((isa<LoadInst>(I) || isa<StoreInst>(I)) &&
+         "Expected Load or Store instruction");
+  if (auto *LI = dyn_cast<LoadInst>(I))
+    return LI->getPointerAddressSpace();
+  return cast<StoreInst>(I)->getPointerAddressSpace();
 }
 
 } // end namespace llvm

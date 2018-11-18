@@ -10,19 +10,26 @@
 #include <utility>
 
 #include "base/atomic_sequence_num.h"
+#include "base/bind.h"
 #include "base/memory/ptr_util.h"
 #include "base/metrics/histogram.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/rand_util.h"
 #include "base/stl_util.h"
+#include "base/threading/sequenced_task_runner_handle.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/resource_coordinator/resource_coordinator_web_contents_observer.h"
+#include "chrome/browser/resource_coordinator/lifecycle_unit_state.mojom.h"
+#include "chrome/browser/resource_coordinator/tab_helper.h"
+#include "chrome/browser/resource_coordinator/tab_lifecycle_unit_external.h"
+#include "chrome/browser/resource_coordinator/tab_lifecycle_unit_source.h"
 #include "chrome/browser/resource_coordinator/tab_manager_web_contents_data.h"
 #include "chrome/browser/resource_coordinator/time.h"
 #include "chrome/browser/sessions/session_restore.h"
 #include "components/metrics/system_memory_stats_recorder.h"
+#include "content/public/browser/browser_thread.h"
+#include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/swap_metrics_driver.h"
 #include "services/metrics/public/cpp/ukm_builders.h"
 #include "services/metrics/public/cpp/ukm_recorder.h"
@@ -31,7 +38,10 @@ namespace resource_coordinator {
 
 namespace {
 
-const char* kSessionTypeName[] = {"SessionRestore", "BackgroundTabOpening"};
+using LoadingState = TabLoadTracker::LoadingState;
+
+const char* const kSessionTypeName[] = {"SessionRestore",
+                                        "BackgroundTabOpening"};
 
 constexpr int kSamplingOdds = 10;
 
@@ -58,8 +68,9 @@ bool ShouldReportExpectedTaskQueueingDurationToUKM(
 }
 
 ukm::SourceId GetUkmSourceId(content::WebContents* contents) {
-  ResourceCoordinatorWebContentsObserver* observer =
-      ResourceCoordinatorWebContentsObserver::FromWebContents(contents);
+  resource_coordinator::ResourceCoordinatorTabHelper* observer =
+      resource_coordinator::ResourceCoordinatorTabHelper::FromWebContents(
+          contents);
   if (!observer)
     return ukm::kInvalidSourceId;
 
@@ -117,8 +128,15 @@ class TabManagerStatsCollector::SwapMetricsDelegate
   const SessionType session_type_;
 };
 
-TabManagerStatsCollector::TabManagerStatsCollector() {
+TabManagerStatsCollector::TabManagerStatsCollector() : weak_factory_(this) {
   SessionRestore::AddObserver(this);
+
+  // Post an after startup task that starts the periodic sampling of freezing
+  // and discarding stats.
+  content::BrowserThread::PostAfterStartupTask(
+      FROM_HERE, base::SequencedTaskRunnerHandle::Get(),
+      base::BindOnce(&TabManagerStatsCollector::StartPeriodicSampling,
+                     weak_factory_.GetWeakPtr()));
 }
 
 TabManagerStatsCollector::~TabManagerStatsCollector() {
@@ -168,21 +186,23 @@ void TabManagerStatsCollector::RecordSwitchToTab(
   DCHECK(new_data);
 
   if (is_session_restore_loading_tabs_) {
-    UMA_HISTOGRAM_ENUMERATION(kHistogramSessionRestoreSwitchToTab,
-                              new_data->tab_loading_state(),
-                              TAB_LOADING_STATE_MAX);
+    UMA_HISTOGRAM_ENUMERATION(
+        kHistogramSessionRestoreSwitchToTab,
+        static_cast<int32_t>(new_data->tab_loading_state()),
+        static_cast<int32_t>(LoadingState::kMaxValue) + 1);
   }
   if (is_in_background_tab_opening_session_) {
-    UMA_HISTOGRAM_ENUMERATION(kHistogramBackgroundTabOpeningSwitchToTab,
-                              new_data->tab_loading_state(),
-                              TAB_LOADING_STATE_MAX);
+    UMA_HISTOGRAM_ENUMERATION(
+        kHistogramBackgroundTabOpeningSwitchToTab,
+        static_cast<int32_t>(new_data->tab_loading_state()),
+        static_cast<int32_t>(LoadingState::kMaxValue) + 1);
   }
 
   if (old_contents)
     foreground_contents_switched_to_times_.erase(old_contents);
   DCHECK(
       !base::ContainsKey(foreground_contents_switched_to_times_, new_contents));
-  if (new_data->tab_loading_state() != TAB_IS_LOADED) {
+  if (new_data->tab_loading_state() != LoadingState::LOADED) {
     foreground_contents_switched_to_times_.insert(
         std::make_pair(new_contents, NowTicks()));
   }
@@ -441,6 +461,121 @@ void TabManagerStatsCollector::UpdateSessionAndSequence() {
   sequence_ = 0;
 }
 
+void TabManagerStatsCollector::StartPeriodicSampling() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  // Post a first task with a random delay less than the sampling interval.
+  base::TimeDelta delay = base::TimeDelta::FromSeconds(
+      base::RandInt(0, kLowFrequencySamplingInterval.InSeconds()));
+  base::SequencedTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE,
+      base::BindOnce(&TabManagerStatsCollector::PerformPeriodicSample,
+                     weak_factory_.GetWeakPtr()),
+      delay);
+}
+
+void TabManagerStatsCollector::PerformPeriodicSample() {
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+
+  sample_start_time_ = NowTicks();
+
+  // Iterate over the tabs and get their data. The TabManager owns us and
+  // outlives us, so will always exist.
+  LifecycleUnitVector lifecycle_units =
+      g_browser_process->GetTabManager()->GetSortedLifecycleUnits();
+  for (auto* lifecycle_unit : lifecycle_units) {
+    DecisionDetails freeze_decision;
+    lifecycle_unit->CanFreeze(&freeze_decision);
+    RecordDecisionDetails(lifecycle_unit, freeze_decision,
+                          LifecycleUnitState::FROZEN);
+
+    DecisionDetails discard_decision;
+    lifecycle_unit->CanDiscard(LifecycleUnitDiscardReason::PROACTIVE,
+                               &discard_decision);
+    RecordDecisionDetails(lifecycle_unit, discard_decision,
+                          LifecycleUnitState::DISCARDED);
+  }
+
+  // Determine when the next sample should run based on when this cycle
+  // started.
+  base::TimeDelta delay =
+      (sample_start_time_ + kLowFrequencySamplingInterval) - NowTicks();
+
+  // In the very unlikely case that the system is so busy that another sample
+  // should already have been taken, then skip a cycle and wait a full sampling
+  // period. This provides rudimentary rate limiting that prevents these samples
+  // from taking up too much time.
+  if (delay <= base::TimeDelta())
+    delay = kLowFrequencySamplingInterval;
+
+  // Schedule the next sample.
+  base::SequencedTaskRunnerHandle::Get()->PostDelayedTask(
+      FROM_HERE,
+      base::BindOnce(&TabManagerStatsCollector::PerformPeriodicSample,
+                     weak_factory_.GetWeakPtr()),
+      delay);
+}
+
+// static
+void TabManagerStatsCollector::RecordDecisionDetails(
+    LifecycleUnit* lifecycle_unit,
+    const DecisionDetails& decision_details,
+    LifecycleUnitState target_state) {
+  ukm::SourceId ukm_source_id = lifecycle_unit->GetUkmSourceId();
+  if (ukm_source_id == ukm::kInvalidSourceId)
+    return;
+
+  // Don't log anything for invalid decision details (trivial reasons: crashed
+  // tabs, navigations not yet committed, etc).
+  if (decision_details.reasons().empty())
+    return;
+
+  ukm::builders::TabManager_LifecycleStateChange builder(ukm_source_id);
+
+  builder.SetOldLifecycleState(
+      static_cast<int64_t>(lifecycle_unit->GetState()));
+  builder.SetNewLifecycleState(static_cast<int64_t>(target_state));
+  // No LifecycleStateChangeReason is set right now, indicating that this is a
+  // theoretical state change rather than an actual one. This differentiates
+  // sampled lifecycle transitions from actual ones.
+
+  // We only currently report transitions for tabs, so this lookup should never
+  // fail. It will start failing once we add ARC processes as LifecycleUnits.
+  // TODO(chrisha): This should be time since the navigation was committed (the
+  // load started), but that information is currently only persisted inside the
+  // CU-graph. Using time since navigation finished is a cheap approximation for
+  // the time being.
+  auto* tab = lifecycle_unit->AsTabLifecycleUnitExternal();
+  auto* contents = tab->GetWebContents();
+  auto* nav_entry = contents->GetController().GetLastCommittedEntry();
+  if (nav_entry) {
+    auto timestamp = nav_entry->GetTimestamp();
+    if (!timestamp.is_null()) {
+      auto elapsed = base::Time::Now() - timestamp;
+      builder.SetTimeSinceNavigationMs(elapsed.InMilliseconds());
+    }
+  }
+
+  // Set visibility related data.
+  // |time_since_visible| is:
+  // - Zero if the LifecycleUnit is currently visible.
+  // - Time since creation if the LifecycleUnit was never visible.
+  // - Time since visible if the LifecycleUnit was visible in the past.
+  auto visibility = lifecycle_unit->GetVisibility();
+  base::TimeDelta time_since_visible;  // Zero.
+  if (visibility != content::Visibility::VISIBLE)
+    time_since_visible = NowTicks() - lifecycle_unit->GetWallTimeWhenHidden();
+  builder.SetTimeSinceVisibilityStateChangeMs(
+      time_since_visible.InMilliseconds());
+  builder.SetVisibilityState(static_cast<int64_t>(visibility));
+
+  // This populates all of the relevant Success/Failure fields, as well as
+  // Outcome.
+  decision_details.Populate(&builder);
+
+  builder.Record(ukm::UkmRecorder::Get());
+}
+
 // static
 const char TabManagerStatsCollector::
     kHistogramSessionRestoreForegroundTabExpectedTaskQueueingDuration[] =
@@ -505,5 +640,9 @@ const char TabManagerStatsCollector::kHistogramSessionOverlapSessionRestore[] =
 const char
     TabManagerStatsCollector::kHistogramSessionOverlapBackgroundTabOpening[] =
         "TabManager.SessionOverlap.BackgroundTabOpening";
+
+// static
+constexpr base::TimeDelta
+    TabManagerStatsCollector::kLowFrequencySamplingInterval;
 
 }  // namespace resource_coordinator

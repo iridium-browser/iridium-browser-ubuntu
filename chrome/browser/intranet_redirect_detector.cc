@@ -22,6 +22,7 @@
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/network_service_instance.h"
 #include "content/public/browser/storage_partition.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
@@ -48,11 +49,11 @@ IntranetRedirectDetector::IntranetRedirectDetector()
                      weak_ptr_factory_.GetWeakPtr()),
       base::TimeDelta::FromSeconds(kStartFetchDelaySeconds));
 
-  net::NetworkChangeNotifier::AddNetworkChangeObserver(this);
+  content::GetNetworkConnectionTracker()->AddNetworkConnectionObserver(this);
 }
 
 IntranetRedirectDetector::~IntranetRedirectDetector() {
-  net::NetworkChangeNotifier::RemoveNetworkChangeObserver(this);
+  content::GetNetworkConnectionTracker()->RemoveNetworkConnectionObserver(this);
 }
 
 // static
@@ -117,9 +118,8 @@ void IntranetRedirectDetector::FinishSleep() {
     resource_request->url = random_url;
     resource_request->method = "HEAD";
     // We don't want these fetches to affect existing state in the profile.
-    resource_request->load_flags =
-        net::LOAD_DISABLE_CACHE | net::LOAD_DO_NOT_SAVE_COOKIES |
-        net::LOAD_DO_NOT_SEND_COOKIES | net::LOAD_DO_NOT_SEND_AUTH_DATA;
+    resource_request->load_flags = net::LOAD_DISABLE_CACHE;
+    resource_request->allow_credentials = false;
     network::mojom::URLLoaderFactory* loader_factory =
         g_browser_process->system_network_context_manager()
             ->GetURLLoaderFactory();
@@ -191,9 +191,9 @@ void IntranetRedirectDetector::OnSimpleLoaderComplete(
           redirect_origin_.spec() : std::string());
 }
 
-void IntranetRedirectDetector::OnNetworkChanged(
-    net::NetworkChangeNotifier::ConnectionType type) {
-  if (type == net::NetworkChangeNotifier::CONNECTION_NONE)
+void IntranetRedirectDetector::OnConnectionChanged(
+    network::mojom::ConnectionType type) {
+  if (type == network::mojom::ConnectionType::CONNECTION_NONE)
     return;
   // If a request is already scheduled, do not scheduled yet another one.
   if (in_sleep_)

@@ -14,49 +14,47 @@
 #include "ash/ash_export.h"
 #include "base/macros.h"
 #include "base/strings/string16.h"
-#include "ui/aura/client/transient_window_client_observer.h"
 #include "ui/aura/window_observer.h"
 #include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/views/widget/widget_delegate.h"
 
 namespace aura {
+class PropertyConverter;
 class Window;
-class WindowManagerClient;
 }  // namespace aura
 
 namespace gfx {
 class Insets;
 }
 
-namespace ui {
+namespace ws {
 namespace mojom {
 enum class WindowType;
 }
-}  // namespace ui
+}  // namespace ws
 
 namespace ash {
 
-class WindowManager;
-
-// Provides the non-client frame for mus Windows.
-class ASH_EXPORT NonClientFrameController
-    : public views::WidgetDelegateView,
-      public aura::WindowObserver,
-      public aura::client::TransientWindowClientObserver {
+// Provides the non-client frame and contents view for windows created by remote
+// app processes.
+class ASH_EXPORT NonClientFrameController : public views::WidgetDelegate,
+                                            public aura::WindowObserver {
  public:
   // Creates a new NonClientFrameController and window to render the non-client
   // frame decorations. This deletes itself when |window| is destroyed. |parent|
   // is the parent to place the newly created window in, and may be null. If
-  // |parent| is null |context| is used to determine the parent Window. One of
-  // |parent| or |context| must be non-null.
+  // |parent| is null, |context| is used to determine the parent Window. One of
+  // |parent| or |context| must be non-null. |window_manager_client| may be
+  // null for now. |bounds| is screen coordinates when |parent| is null,
+  // otherwise local coordinates, see views::Widget::InitParams::bounds.
   NonClientFrameController(
       aura::Window* parent,
       aura::Window* context,
       const gfx::Rect& bounds,
-      ui::mojom::WindowType window_type,
-      std::map<std::string, std::vector<uint8_t>>* properties,
-      WindowManager* window_manager);
+      ws::mojom::WindowType window_type,
+      aura::PropertyConverter* property_converter,
+      std::map<std::string, std::vector<uint8_t>>* properties);
 
   // Returns the NonClientFrameController for the specified window, null if
   // one was not created.
@@ -71,22 +69,22 @@ class ASH_EXPORT NonClientFrameController
 
   aura::Window* window() { return window_; }
 
-  aura::WindowManagerClient* window_manager_client() {
-    return window_manager_client_;
-  }
+  // Stores |cursor| as this window's active cursor. It does not actually update
+  // the active cursor by calling into CursorManager, but will update the return
+  // value provided by the associated window's aura::WindowDelegate::GetCursor.
+  void StoreCursor(const ui::Cursor& cursor);
 
-  void SetClientArea(const gfx::Insets& insets,
-                     const std::vector<gfx::Rect>& additional_client_areas);
-
- private:
-  ~NonClientFrameController() override;
-
-  // views::WidgetDelegateView:
+  // views::WidgetDelegate:
   base::string16 GetWindowTitle() const override;
   bool CanResize() const override;
   bool CanMaximize() const override;
   bool CanMinimize() const override;
+  bool CanActivate() const override;
   bool ShouldShowWindowTitle() const override;
+  void DeleteDelegate() override;
+  views::Widget* GetWidget() override;
+  const views::Widget* GetWidget() const override;
+  views::View* GetContentsView() override;
   views::ClientView* CreateClientView(views::Widget* widget) override;
 
   // aura::WindowObserver:
@@ -95,24 +93,17 @@ class ASH_EXPORT NonClientFrameController
                                intptr_t old) override;
   void OnWindowDestroyed(aura::Window* window) override;
 
-  // aura::client::TransientWindowClientObserver:
-  void OnTransientChildWindowAdded(aura::Window* parent,
-                                   aura::Window* transient_child) override;
-  void OnTransientChildWindowRemoved(aura::Window* parent,
-                                     aura::Window* transient_child) override;
-
-  aura::WindowManagerClient* window_manager_client_;
+ private:
+  ~NonClientFrameController() override;
 
   views::Widget* widget_;
+  views::View* contents_view_ = nullptr;
 
   // WARNING: as widget delays destruction there is a portion of time when this
   // is null.
   aura::Window* window_;
 
   bool did_init_native_widget_ = false;
-
-  gfx::Insets client_area_insets_;
-  std::vector<gfx::Rect> additional_client_areas_;
 
   DISALLOW_COPY_AND_ASSIGN(NonClientFrameController);
 };

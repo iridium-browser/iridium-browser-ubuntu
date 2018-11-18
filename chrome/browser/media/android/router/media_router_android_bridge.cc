@@ -6,10 +6,10 @@
 
 #include "base/android/jni_android.h"
 #include "base/android/jni_string.h"
-#include "chrome/browser/media/android/remote/media_controller_bridge.h"
+#include "chrome/browser/media/android/remote/flinging_controller_bridge.h"
 #include "chrome/browser/media/android/router/media_router_android.h"
-#include "content/public/browser/media_controller.h"
 #include "jni/ChromeMediaRouter_jni.h"
+#include "media/base/media_controller.h"
 
 using base::android::ConvertUTF8ToJavaString;
 using base::android::ConvertJavaStringToUTF8;
@@ -84,15 +84,14 @@ void MediaRouterAndroidBridge::TerminateRoute(const MediaRoute::Id& route_id) {
 }
 
 void MediaRouterAndroidBridge::SendRouteMessage(const MediaRoute::Id& route_id,
-                                                const std::string& message,
-                                                int callback_id) {
+                                                const std::string& message) {
   JNIEnv* env = base::android::AttachCurrentThread();
   ScopedJavaLocalRef<jstring> jroute_id =
       base::android::ConvertUTF8ToJavaString(env, route_id);
   ScopedJavaLocalRef<jstring> jmessage =
       base::android::ConvertUTF8ToJavaString(env, message);
   Java_ChromeMediaRouter_sendStringMessage(env, java_media_router_, jroute_id,
-                                           jmessage, callback_id);
+                                           jmessage);
 }
 
 void MediaRouterAndroidBridge::DetachRoute(const MediaRoute::Id& route_id) {
@@ -120,21 +119,22 @@ void MediaRouterAndroidBridge::StopObservingMediaSinks(
                                                  jsource_id);
 }
 
-std::unique_ptr<content::MediaController>
-MediaRouterAndroidBridge::GetMediaController(const MediaRoute::Id& route_id) {
+std::unique_ptr<media::FlingingController>
+MediaRouterAndroidBridge::GetFlingingController(
+    const MediaRoute::Id& route_id) {
   JNIEnv* env = base::android::AttachCurrentThread();
   ScopedJavaLocalRef<jstring> jroute_id =
       base::android::ConvertUTF8ToJavaString(env, route_id);
 
-  ScopedJavaGlobalRef<jobject> media_controller;
+  ScopedJavaGlobalRef<jobject> flinging_controller;
 
-  media_controller.Reset(Java_ChromeMediaRouter_getMediaControllerBridge(
+  flinging_controller.Reset(Java_ChromeMediaRouter_getFlingingControllerBridge(
       env, java_media_router_, jroute_id));
 
-  if (media_controller.is_null())
+  if (flinging_controller.is_null())
     return nullptr;
 
-  return std::make_unique<MediaControllerBridge>(media_controller);
+  return std::make_unique<FlingingControllerBridge>(flinging_controller);
 }
 
 void MediaRouterAndroidBridge::OnSinksReceived(
@@ -178,29 +178,24 @@ void MediaRouterAndroidBridge::OnRouteRequestError(
       ConvertJavaStringToUTF8(jerror_text), jroute_request_id);
 }
 
-void MediaRouterAndroidBridge::OnRouteClosed(
+void MediaRouterAndroidBridge::OnRouteTerminated(
     JNIEnv* env,
     const JavaRef<jobject>& obj,
     const JavaRef<jstring>& jmedia_route_id) {
-  native_media_router_->OnRouteClosed(
+  native_media_router_->OnRouteTerminated(
       ConvertJavaStringToUTF8(env, jmedia_route_id));
 }
 
-void MediaRouterAndroidBridge::OnRouteClosedWithError(
+void MediaRouterAndroidBridge::OnRouteClosed(
     JNIEnv* env,
     const JavaRef<jobject>& obj,
     const JavaRef<jstring>& jmedia_route_id,
-    const JavaRef<jstring>& jmessage) {
-  native_media_router_->OnRouteClosedWithError(
+    const JavaRef<jstring>& jerror) {
+  native_media_router_->OnRouteClosed(
       ConvertJavaStringToUTF8(env, jmedia_route_id),
-      ConvertJavaStringToUTF8(env, jmessage));
-}
-
-void MediaRouterAndroidBridge::OnMessageSentResult(JNIEnv* env,
-                                                   const JavaRef<jobject>& obj,
-                                                   jboolean jsuccess,
-                                                   jint jcallback_id) {
-  native_media_router_->OnMessageSentResult(jsuccess, jcallback_id);
+      jerror.is_null()
+          ? base::nullopt
+          : base::make_optional(ConvertJavaStringToUTF8(env, jerror)));
 }
 
 void MediaRouterAndroidBridge::OnMessage(

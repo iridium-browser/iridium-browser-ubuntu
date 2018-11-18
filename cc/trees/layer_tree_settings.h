@@ -93,7 +93,7 @@ class CC_EXPORT LayerTreeSettings {
   ManagedMemoryPolicy memory_policy;
   size_t decoded_image_working_set_budget_bytes = 128 * 1024 * 1024;
   int max_preraster_distance_in_screen_pixels = 1000;
-  viz::ResourceFormat preferred_tile_format;
+  bool use_rgba_4444 = false;
   bool unpremultiply_and_dither_low_bit_depth_tiles = false;
 
   bool enable_mask_tiling = true;
@@ -138,10 +138,6 @@ class CC_EXPORT LayerTreeSettings {
   // produces the active tree as its 'sync tree'.
   bool commit_to_active_tree = true;
 
-  // Whether to use out of process raster.  If true, whenever gpu raster
-  // would have been used, out of process gpu raster will be used instead.
-  bool enable_oop_rasterization = false;
-
   // Whether image animations can be reset to the beginning to avoid skipping
   // many frames.
   bool enable_image_animation_resync = true;
@@ -149,13 +145,26 @@ class CC_EXPORT LayerTreeSettings {
   // Whether to use edge anti-aliasing for all layer types that supports it.
   bool enable_edge_anti_aliasing = true;
 
-  // Whether to request presentation time regardless if existance of
+  // Whether to request presentation time regardless if existence of
   // presentation time callbacks.
   bool always_request_presentation_time = false;
 
   // Whether SetViewportSizeAndScale should update the painted scale factor or
   // the device scale factor.
   bool use_painted_device_scale_factor = false;
+
+  // Whether a HitTestRegionList should be built from the active layer tree when
+  // submitting a CompositorFrame.
+  bool build_hit_test_data = false;
+
+  // When false, sync tokens are expected to be present, and are verified,
+  // before transfering gpu resources to the display compositor.
+  bool delegated_sync_points_required = true;
+
+  // When true, LayerTreeHostImplClient will be posting a task to call
+  // DidReceiveCompositorFrameAck, used by the Compositor but not the
+  // LayerTreeView.
+  bool send_compositor_frame_ack = true;
 };
 
 }  // namespace cc

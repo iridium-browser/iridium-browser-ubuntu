@@ -32,7 +32,7 @@ class TextIteratorTextNodeHandler {
   bool HandleRemainingTextRuns();
 
   // Returns true if a leading white space is emitted before a replaced element.
-  bool FixLeadingWhiteSpaceForReplacedElement(const Node*);
+  bool FixLeadingWhiteSpaceForReplacedElement();
 
   void ResetCollapsedWhiteSpaceFixup();
 
@@ -53,8 +53,8 @@ class TextIteratorTextNodeHandler {
   bool ShouldHandleFirstLetter(const LayoutText&) const;
   bool ShouldProceedToRemainingText() const;
   void ProceedToRemainingText();
-  size_t RestoreCollapsedTrailingSpace(InlineTextBox* next_text_box,
-                                       size_t subrun_end);
+  wtf_size_t RestoreCollapsedTrailingSpace(InlineTextBox* next_text_box,
+                                           wtf_size_t subrun_end);
 
   void HandleTextNodeWithLayoutNG();
 
@@ -63,13 +63,15 @@ class TextIteratorTextNodeHandler {
     return behavior_.IgnoresStyleVisibility();
   }
 
-  void SpliceBuffer(UChar,
-                    const Node* text_node,
-                    const Node* offset_base_node,
-                    unsigned text_start_offset,
-                    unsigned text_end_offset);
-  void EmitText(const Node* text_node,
-                const LayoutText* layout_object,
+  bool ShouldFixLeadingWhiteSpaceForReplacedElement() const;
+
+  // Emits |code_unit| before |offset| of characters in |text_node_|.
+  void EmitChar16Before(UChar code_unit, unsigned offset);
+  // Emits |code_unit| as replacement of a code unit after |offset| in
+  // |text_node_|.
+  void EmitReplacmentCodeUnit(UChar code_unit, unsigned offset);
+
+  void EmitText(const LayoutText* layout_object,
                 unsigned text_start_offset,
                 unsigned text_end_offset);
 
@@ -99,7 +101,7 @@ class TextIteratorTextNodeHandler {
 
   // Used when text boxes are out of order (Hebrew/Arabic w/ embeded LTR text)
   Vector<InlineTextBox*> sorted_text_boxes_;
-  size_t sorted_text_boxes_position_ = 0;
+  wtf_size_t sorted_text_boxes_position_ = 0;
 
   const TextIteratorBehavior behavior_;
 

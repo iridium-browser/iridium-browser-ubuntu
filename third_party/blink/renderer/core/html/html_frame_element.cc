@@ -39,6 +39,12 @@ inline HTMLFrameElement::HTMLFrameElement(Document& document)
 
 DEFINE_NODE_FACTORY(HTMLFrameElement)
 
+const HashSet<AtomicString>& HTMLFrameElement::GetCheckedAttributeNames()
+    const {
+  DEFINE_STATIC_LOCAL(HashSet<AtomicString>, attribute_set, ({"src"}));
+  return attribute_set;
+}
+
 bool HTMLFrameElement::LayoutObjectIsNeeded(const ComputedStyle&) const {
   // For compatibility, frames render even when display: none is set.
   return ContentFrame();
@@ -76,8 +82,8 @@ void HTMLFrameElement::ParseAttribute(
   }
 }
 
-ParsedFeaturePolicy HTMLFrameElement::ConstructContainerPolicy(Vector<String>*,
-                                                               bool*) const {
+ParsedFeaturePolicy HTMLFrameElement::ConstructContainerPolicy(
+    Vector<String>*) const {
   // Frame elements are not allowed to enable the fullscreen feature. Add an
   // empty whitelist for the fullscreen feature so that the framed content is
   // unable to use the API, regardless of origin.

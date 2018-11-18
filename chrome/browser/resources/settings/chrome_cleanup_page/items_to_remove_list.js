@@ -5,8 +5,19 @@
 cr.exportPath('settings');
 
 /**
- * The default number of items to show for files and registry keys on the
- * detailed view when user-initiated cleanups are enabled.
+ * For each line in the item list, the text field will be shown in normal style
+ * at front of the line. The highlightSuffix will be appended to the end of line
+ * and emphasized with bold font.
+ * @typedef {{
+ *   text: string,
+ *   highlightSuffix: ?string,
+ * }}
+ */
+settings.ChromeCleanupRemovalListItem;
+
+/**
+ * The default number of items to show for files, registry keys and extensions
+ * on the detailed view when user-initiated cleanups are enabled.
  */
 settings.CHROME_CLEANUP_DEFAULT_ITEMS_TO_SHOW = 4;
 
@@ -17,14 +28,7 @@ settings.CHROME_CLEANUP_DEFAULT_ITEMS_TO_SHOW = 4;
  * TODO(crbug.com/776538): Update the strings to say that some items are only
  *                         changed and not removed.
  *
- * Examples:
- *
- *    <!-- Items list initially expanded. -->
- *    <items-to-remove-list
- *        title="Files and programs:"
- *        initially-expanded="true"
- *        items-to-show="[[filesToShow]]">
- *    </items-to-remove-list>
+ * Example:
  *
  *    <!-- Items list initially shows |CHROME_CLEANUP_DEFAULT_ITEMS_TO_SHOW|
  *         items. If there are more than |CHROME_CLEANUP_DEFAULT_ITEMS_TO_SHOW|
@@ -39,26 +43,15 @@ Polymer({
   is: 'items-to-remove-list',
 
   properties: {
-    titleVisible: {
-      type: Boolean,
-      value: true,
-    },
-
     title: {
       type: String,
       value: '',
     },
 
-    /** @type {!Array<string>} */
-    itemsToShow: Array,
-
-    /**
-     * If true, all items from |itemsToShow| will be presented on the card
-     * by default, and the "show more" link will be omitted.
-     */
-    initiallyExpanded: {
-      type: Boolean,
-      value: false,
+    /** @type {!Array<settings.ChromeCleanupRemovalListItem>} */
+    itemsToShow: {
+      type: Array,
+      observer: 'updateVisibleState_',
     },
 
     /**
@@ -71,11 +64,9 @@ Polymer({
     },
 
     /**
-     * The items to be shown to the user the first time this component is
-     * rendered. If |initiallyExpanded| is true, then it includes all items
-     * from |itemsToShow|. Otherwise, it contains the first
-     * |CHROME_CLEANUP_DEFAULT_ITEMS_TO_SHOW| items.
-     * @private {?Array<string>}
+     * The first |CHROME_CLEANUP_DEFAULT_ITEMS_TO_SHOW| items of |itemsToShow|
+     * if the list is longer than |CHROME_CLEANUP_DEFAULT_ITEMS_TO_SHOW|.
+     * @private {?Array<settings.ChromeCleanupRemovalListItem>}
      */
     initialItems_: Array,
 
@@ -83,7 +74,7 @@ Polymer({
      * The remaining items to be presented that are not included in
      * |initialItems_|. Items in this list are only shown to the user if
      * |expanded_| is true.
-     * @private {?Array<string>}
+     * @private {?Array<settings.ChromeCleanupRemovalListItem>}
      */
     remainingItems_: Array,
 
@@ -98,8 +89,6 @@ Polymer({
     },
   },
 
-  observers: ['updateVisibleState_(itemsToShow, initiallyExpanded)'],
-
   /** @private */
   expandList_: function() {
     this.expanded_ = true;
@@ -110,24 +99,19 @@ Polymer({
    * Decides which elements will be visible in the card and if the "show more"
    * link will be rendered.
    *
-   * Cases handled:
-   *  1. If |initiallyExpanded|, then all items will be visible.
-   *  2. Otherwise:
-   *     (A) If size(itemsToShow) < CHROME_CLEANUP_DEFAULT_ITEMS_TO_SHOW, then
-   *         all items will be visible.
-   *     (B) Otherwise, exactly |CHROME_CLEANUP_DEFAULT_ITEMS_TO_SHOW - 1| will
-   *         be visible and the "show more" link will be rendered. The list
-   *         presented to the user will contain exactly
-   *         |CHROME_CLEANUP_DEFAULT_ITEMS_TO_SHOW| elements, and the last one
-   *         will be the "show more" link.
+   * 1. If size(itemsToShow) < CHROME_CLEANUP_DEFAULT_ITEMS_TO_SHOW, then all
+   *    items will be visible.
+   * 2. Otherwise, exactly |CHROME_CLEANUP_DEFAULT_ITEMS_TO_SHOW - 1| will be
+   *    visible and the "show more" link will be rendered. The list presented to
+   *    the user will contain exactly |CHROME_CLEANUP_DEFAULT_ITEMS_TO_SHOW|
+   *    elements, and the last one will be the "show more" link.
    *
-   * @param {!Array<string>} itemsToShow
-   * @param {boolean} initiallyExpanded
+   * @param {!Array<settings.ChromeCleanupRemovalListItem>} itemsToShow
    */
-  updateVisibleState_: function(itemsToShow, initiallyExpanded) {
+  updateVisibleState_: function(itemsToShow) {
     // Start expanded if there are less than
     // |settings.CHROME_CLEANUP_DEFAULT_ITEMS_TO_SHOW| items to show.
-    this.expanded_ = initiallyExpanded ||
+    this.expanded_ =
         itemsToShow.length <= settings.CHROME_CLEANUP_DEFAULT_ITEMS_TO_SHOW;
 
     if (this.expanded_) {
@@ -156,5 +140,14 @@ Polymer({
    */
   remainingItemsClass_: function(expanded) {
     return expanded ? 'visible-item' : 'hidden-item';
+  },
+
+  /**
+   * @param {settings.ChromeCleanupRemovalListItem} item
+   * @return {boolean} Whether a highlight suffix exists.
+   * @private
+   */
+  hasHighlightSuffix_: function(item) {
+    return item.highlightSuffix !== null;
   },
 });

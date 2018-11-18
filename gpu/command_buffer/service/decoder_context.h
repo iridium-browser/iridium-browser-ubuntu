@@ -15,6 +15,7 @@
 #include "gpu/command_buffer/common/capabilities.h"
 #include "gpu/command_buffer/common/constants.h"
 #include "gpu/command_buffer/common/context_result.h"
+#include "gpu/command_buffer/service/abstract_texture.h"
 #include "gpu/command_buffer/service/async_api_interface.h"
 #include "gpu/gpu_gles2_export.h"
 #include "ui/gfx/geometry/rect.h"
@@ -26,8 +27,8 @@ class GLSurface;
 }  // namespace gl
 
 namespace gpu {
-class TextureBase;
 class QueryManager;
+class TextureBase;
 struct ContextCreationAttribs;
 
 namespace gles2 {
@@ -35,6 +36,7 @@ class ContextGroup;
 class ErrorState;
 class FeatureInfo;
 class GpuFenceManager;
+class Outputter;
 class Texture;
 struct ContextState;
 struct DisallowedFeatures;
@@ -80,6 +82,9 @@ class GPU_GLES2_EXPORT DecoderContext : public AsyncAPIInterface {
   // Gets the associated GLContext.
   virtual gl::GLContext* GetGLContext() = 0;
 
+  // Gets the associated GLSurface.
+  virtual gl::GLSurface* GetGLSurface() = 0;
+
   // Make this decoder's GL context current.
   virtual bool MakeCurrent() = 0;
 
@@ -102,6 +107,11 @@ class GPU_GLES2_EXPORT DecoderContext : public AsyncAPIInterface {
 
   // Gets the QueryManager for this context.
   virtual QueryManager* GetQueryManager() = 0;
+
+  // Set a callback to be called when a query is complete.  If the query is
+  // invalid, the callback must be called immediately.
+  virtual void SetQueryCallback(unsigned int query_client_id,
+                                base::OnceClosure callback) = 0;
 
   // Gets the GpuFenceManager for this context.
   virtual gles2::GpuFenceManager* GetGpuFenceManager() = 0;
@@ -177,6 +187,15 @@ class GPU_GLES2_EXPORT DecoderContext : public AsyncAPIInterface {
   //
   virtual gles2::ContextGroup* GetContextGroup() = 0;
   virtual gles2::ErrorState* GetErrorState() = 0;
+  virtual std::unique_ptr<gpu::gles2::AbstractTexture> CreateAbstractTexture(
+      unsigned /* GLenum */ target,
+      unsigned /* GLenum */ internal_format,
+      int /* GLsizei */ width,
+      int /* GLsizei */ height,
+      int /* GLsizei */ depth,
+      int /* GLint */ border,
+      unsigned /* GLenum */ format,
+      unsigned /* GLenum */ type) = 0;
 
   //
   // Methods required by Texture.
@@ -213,6 +232,16 @@ class GPU_GLES2_EXPORT DecoderContext : public AsyncAPIInterface {
                             int width,
                             int height,
                             int depth) = 0;
+  //
+  // Methods required by InProcessCommandBuffer
+  //
+  // Set to true to LOG every command.
+  virtual void SetLogCommands(bool log_commands) = 0;
+
+  //
+  // Methods required by GpuTracer
+  //
+  virtual gles2::Outputter* outputter() const = 0;
 };
 
 }  // namespace gpu

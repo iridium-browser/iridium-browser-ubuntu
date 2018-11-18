@@ -8,38 +8,46 @@
 #include <unordered_map>
 #include <utility>
 
+#include "ash/system/message_center/arc/arc_notification_content_view.h"
+#include "ash/system/message_center/arc/arc_notification_surface.h"
+#include "ash/system/message_center/arc/arc_notification_surface_manager.h"
+#include "ash/system/message_center/arc/arc_notification_view.h"
+#include "ash/system/message_center/arc/mock_arc_notification_item.h"
+#include "ash/system/message_center/arc/mock_arc_notification_surface.h"
 #include "base/command_line.h"
 #include "base/observer_list.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/test/base/testing_profile.h"
+#include "chrome/test/views/chrome_views_test_base.h"
 #include "chromeos/chromeos_switches.h"
 #include "components/arc/arc_bridge_service.h"
 #include "components/arc/common/accessibility_helper.mojom.h"
 #include "components/exo/shell_surface.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/arc/notification/arc_notification_content_view.h"
-#include "ui/arc/notification/arc_notification_surface.h"
-#include "ui/arc/notification/arc_notification_surface_manager.h"
-#include "ui/arc/notification/arc_notification_view.h"
-#include "ui/arc/notification/mock_arc_notification_item.h"
 #include "ui/aura/window.h"
 #include "ui/display/display.h"
 #include "ui/display/manager/managed_display_info.h"
 #include "ui/message_center/public/cpp/notification.h"
-#include "ui/views/test/views_test_base.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
+
+using ash::ArcNotificationItem;
+using ash::ArcNotificationSurface;
+using ash::ArcNotificationSurfaceManager;
+using ash::ArcNotificationView;
+using ash::MockArcNotificationItem;
+using ash::MockArcNotificationSurface;
 
 namespace arc {
 
 namespace {
 
-const char kNotificationKey[] = "unit.test.notification";
+constexpr char kNotificationKey[] = "unit.test.notification";
 
 }  // namespace
 
-class ArcAccessibilityHelperBridgeTest : public views::ViewsTestBase {
+class ArcAccessibilityHelperBridgeTest : public ChromeViewsTestBase {
  public:
   class TestArcAccessibilityHelperBridge : public ArcAccessibilityHelperBridge {
    public:
@@ -103,68 +111,13 @@ class ArcAccessibilityHelperBridgeTest : public views::ViewsTestBase {
 
    private:
     std::map<std::string, ArcNotificationSurface*> surfaces_;
-    base::ObserverList<Observer> observers_;
-  };
-
-  class FakeArcNotificationSurface : public ArcNotificationSurface {
-   public:
-    explicit FakeArcNotificationSurface(std::string notification_key)
-        : notification_key_(notification_key),
-          ax_tree_id_(-1),
-          native_view_host_(nullptr),
-          window_(new aura::Window(nullptr)),
-          content_window_(new aura::Window(nullptr)) {
-      window_->Init(ui::LAYER_NOT_DRAWN);
-      content_window_->Init(ui::LAYER_NOT_DRAWN);
-    }
-
-    ~FakeArcNotificationSurface() override {
-      window_.reset();
-      content_window_.reset();
-    }
-
-    gfx::Size GetSize() const override { return gfx::Size(); }
-
-    aura::Window* GetWindow() const override { return window_.get(); }
-
-    aura::Window* GetContentWindow() const override {
-      return content_window_.get();
-    }
-
-    const std::string& GetNotificationKey() const override {
-      return notification_key_;
-    }
-
-    void Attach(views::NativeViewHost* native_view_host) override {
-      native_view_host_ = native_view_host;
-    }
-
-    void Detach() override { native_view_host_ = nullptr; }
-
-    bool IsAttached() const override { return native_view_host_ != nullptr; }
-
-    views::NativeViewHost* GetAttachedHost() const override {
-      return native_view_host_;
-    }
-
-    void FocusSurfaceWindow() override {}
-
-    void SetAXTreeId(int32_t ax_tree_id) override { ax_tree_id_ = ax_tree_id; }
-
-    int32_t GetAXTreeId() const override { return ax_tree_id_; }
-
-   private:
-    const std::string notification_key_;
-    int32_t ax_tree_id_;
-    views::NativeViewHost* native_view_host_;
-    std::unique_ptr<aura::Window> window_;
-    std::unique_ptr<aura::Window> content_window_;
+    base::ObserverList<Observer>::Unchecked observers_;
   };
 
   ArcAccessibilityHelperBridgeTest() = default;
 
   void SetUp() override {
-    views::ViewsTestBase::SetUp();
+    ChromeViewsTestBase::SetUp();
 
     testing_profile_ = std::make_unique<TestingProfile>();
     bridge_service_ = std::make_unique<ArcBridgeService>();
@@ -182,7 +135,7 @@ class ArcAccessibilityHelperBridgeTest : public views::ViewsTestBase {
     bridge_service_.reset();
     testing_profile_.reset();
 
-    views::ViewsTestBase::TearDown();
+    ChromeViewsTestBase::TearDown();
   }
 
   TestArcAccessibilityHelperBridge* accessibility_helper_bridge() {
@@ -230,11 +183,10 @@ class ArcAccessibilityHelperBridgeTest : public views::ViewsTestBase {
 };
 
 TEST_F(ArcAccessibilityHelperBridgeTest, TaskAndAXTreeLifecycle) {
-  base::CommandLine::ForCurrentProcess()->AppendSwitch(
-      chromeos::switches::kEnableChromeVoxArcSupport);
-
   TestArcAccessibilityHelperBridge* helper_bridge =
       accessibility_helper_bridge();
+  helper_bridge->set_filter_type_all_for_test();
+
   const auto& task_id_to_tree = helper_bridge->task_id_to_tree_for_test();
   ASSERT_EQ(0U, task_id_to_tree.size());
 
@@ -245,8 +197,7 @@ TEST_F(ArcAccessibilityHelperBridgeTest, TaskAndAXTreeLifecycle) {
   event1->node_data.push_back(arc::mojom::AccessibilityNodeInfoData::New());
   event1->node_data[0]->id = 1;
   event1->node_data[0]->string_properties =
-      std::unordered_map<arc::mojom::AccessibilityStringProperty,
-                         std::string>();
+      base::flat_map<arc::mojom::AccessibilityStringProperty, std::string>();
   event1->node_data[0]->string_properties.value().insert(
       std::make_pair(arc::mojom::AccessibilityStringProperty::PACKAGE_NAME,
                      "com.android.vending"));
@@ -268,8 +219,7 @@ TEST_F(ArcAccessibilityHelperBridgeTest, TaskAndAXTreeLifecycle) {
   event2->node_data.push_back(arc::mojom::AccessibilityNodeInfoData::New());
   event2->node_data[0]->id = 2;
   event2->node_data[0]->string_properties =
-      std::unordered_map<arc::mojom::AccessibilityStringProperty,
-                         std::string>();
+      base::flat_map<arc::mojom::AccessibilityStringProperty, std::string>();
   event2->node_data[0]->string_properties.value().insert(
       std::make_pair(arc::mojom::AccessibilityStringProperty::PACKAGE_NAME,
                      "com.android.vending"));
@@ -288,8 +238,7 @@ TEST_F(ArcAccessibilityHelperBridgeTest, TaskAndAXTreeLifecycle) {
   event2->node_data.push_back(arc::mojom::AccessibilityNodeInfoData::New());
   event2->node_data[0]->id = 3;
   event2->node_data[0]->string_properties =
-      std::unordered_map<arc::mojom::AccessibilityStringProperty,
-                         std::string>();
+      base::flat_map<arc::mojom::AccessibilityStringProperty, std::string>();
   event2->node_data[0]->string_properties.value().insert(
       std::make_pair(arc::mojom::AccessibilityStringProperty::PACKAGE_NAME,
                      "com.google.music"));
@@ -318,9 +267,6 @@ TEST_F(ArcAccessibilityHelperBridgeTest, TaskAndAXTreeLifecycle) {
 // mojo: notification 2 removed
 // wayland: surface 2 removed
 TEST_F(ArcAccessibilityHelperBridgeTest, NotificationEventArriveFirst) {
-  base::CommandLine::ForCurrentProcess()->AppendSwitch(
-      chromeos::switches::kEnableChromeVoxArcSupport);
-
   TestArcAccessibilityHelperBridge* helper_bridge =
       accessibility_helper_bridge();
   arc_notification_surface_manager_->AddObserver(helper_bridge);
@@ -342,7 +288,7 @@ TEST_F(ArcAccessibilityHelperBridgeTest, NotificationEventArriveFirst) {
   EXPECT_EQ(1U, notification_key_to_tree_.size());
 
   // wayland: surface 1 added
-  FakeArcNotificationSurface test_surface(kNotificationKey);
+  MockArcNotificationSurface test_surface(kNotificationKey);
   arc_notification_surface_manager_->AddSurface(&test_surface);
 
   // Confirm that axtree id is set to the surface.
@@ -359,7 +305,7 @@ TEST_F(ArcAccessibilityHelperBridgeTest, NotificationEventArriveFirst) {
       arc::mojom::AccessibilityNotificationStateType::SURFACE_REMOVED);
 
   // Ax tree of the surface should be reset as the tree no longer exists.
-  EXPECT_EQ(-1, test_surface.GetAXTreeId());
+  EXPECT_EQ(ui::AXTreeIDUnknown(), test_surface.GetAXTreeId());
 
   EXPECT_EQ(0U, notification_key_to_tree_.size());
 
@@ -391,7 +337,7 @@ TEST_F(ArcAccessibilityHelperBridgeTest, NotificationEventArriveFirst) {
   EXPECT_EQ(1U, notification_key_to_tree_.size());
 
   // wayland: surface 2 added
-  FakeArcNotificationSurface test_surface_2(kNotificationKey);
+  MockArcNotificationSurface test_surface_2(kNotificationKey);
   arc_notification_surface_manager_->AddSurface(&test_surface_2);
 
   EXPECT_EQ(tree_data2.tree_id, test_surface_2.GetAXTreeId());
@@ -407,107 +353,6 @@ TEST_F(ArcAccessibilityHelperBridgeTest, NotificationEventArriveFirst) {
   arc_notification_surface_manager_->RemoveSurface(&test_surface_2);
 }
 
-// This is the case for testing backward compatibility with creating
-// notification by WINDOW_STATE_CHANGED event.
-//
-// mojo: notification 1 created
-// wayland: surface 1 created
-// mojo: notification 2 created
-// wayland: surface 1 removed
-// wayland: surface 2 created
-// wayland: surface 2 removed
-//
-// wayland: surface 3 created
-// mojo: notification 3 created
-// wayland: surface 3 removed
-TEST_F(ArcAccessibilityHelperBridgeTest, NotificationBackwardCompat) {
-  base::CommandLine::ForCurrentProcess()->AppendSwitch(
-      chromeos::switches::kEnableChromeVoxArcSupport);
-
-  TestArcAccessibilityHelperBridge* helper_bridge =
-      accessibility_helper_bridge();
-  arc_notification_surface_manager_->AddObserver(helper_bridge);
-
-  const auto& notification_key_to_tree_ =
-      helper_bridge->notification_key_to_tree_for_test();
-  ASSERT_EQ(0U, notification_key_to_tree_.size());
-
-  // mojo: notification 1 created
-  auto event1 = arc::mojom::AccessibilityEventData::New();
-  event1->event_type = arc::mojom::AccessibilityEventType::WINDOW_STATE_CHANGED;
-  event1->notification_key = base::make_optional<std::string>(kNotificationKey);
-  event1->node_data.push_back(arc::mojom::AccessibilityNodeInfoData::New());
-  helper_bridge->OnAccessibilityEvent(event1.Clone());
-
-  EXPECT_EQ(1U, notification_key_to_tree_.size());
-
-  // wayland: surface 1 added
-  FakeArcNotificationSurface test_surface1(kNotificationKey);
-  arc_notification_surface_manager_->AddSurface(&test_surface1);
-
-  auto it = notification_key_to_tree_.find(kNotificationKey);
-  EXPECT_NE(notification_key_to_tree_.end(), it);
-  AXTreeSourceArc* tree = it->second.get();
-  ui::AXTreeData tree_data;
-  tree->GetTreeData(&tree_data);
-  EXPECT_EQ(tree_data.tree_id, test_surface1.GetAXTreeId());
-
-  // mojo: notification 2 created
-  auto event2 = arc::mojom::AccessibilityEventData::New();
-  event2->event_type = arc::mojom::AccessibilityEventType::WINDOW_STATE_CHANGED;
-  event2->notification_key = base::make_optional<std::string>(kNotificationKey);
-  event2->node_data.push_back(arc::mojom::AccessibilityNodeInfoData::New());
-  helper_bridge->OnAccessibilityEvent(event2.Clone());
-
-  auto it2 = notification_key_to_tree_.find(kNotificationKey);
-  EXPECT_NE(notification_key_to_tree_.end(), it);
-  AXTreeSourceArc* tree2 = it2->second.get();
-  ui::AXTreeData tree_data2;
-  tree2->GetTreeData(&tree_data2);
-  EXPECT_EQ(tree_data2.tree_id, test_surface1.GetAXTreeId());
-
-  // wayland: surface 1 removed
-  arc_notification_surface_manager_->RemoveSurface(&test_surface1);
-
-  EXPECT_EQ(1U, notification_key_to_tree_.size());
-
-  // wayland: surface 2 added
-  FakeArcNotificationSurface test_surface2(kNotificationKey);
-  arc_notification_surface_manager_->AddSurface(&test_surface2);
-
-  EXPECT_EQ(tree_data2.tree_id, test_surface2.GetAXTreeId());
-
-  // wayland: surface 2 removed
-  arc_notification_surface_manager_->RemoveSurface(&test_surface2);
-
-  EXPECT_EQ(0U, notification_key_to_tree_.size());
-
-  // wayland: surface 3 added
-  FakeArcNotificationSurface test_surface3(kNotificationKey);
-  arc_notification_surface_manager_->AddSurface(&test_surface3);
-
-  // mojo: notification 3 created
-  auto event3 = arc::mojom::AccessibilityEventData::New();
-  event3->event_type = arc::mojom::AccessibilityEventType::WINDOW_STATE_CHANGED;
-  event3->notification_key = base::make_optional<std::string>(kNotificationKey);
-  event3->node_data.push_back(arc::mojom::AccessibilityNodeInfoData::New());
-  helper_bridge->OnAccessibilityEvent(event3.Clone());
-
-  EXPECT_EQ(1U, notification_key_to_tree_.size());
-
-  auto it3 = notification_key_to_tree_.find(kNotificationKey);
-  EXPECT_NE(notification_key_to_tree_.end(), it3);
-  AXTreeSourceArc* tree3 = it3->second.get();
-  ui::AXTreeData tree_data3;
-  tree3->GetTreeData(&tree_data3);
-  EXPECT_EQ(tree_data3.tree_id, test_surface3.GetAXTreeId());
-
-  // wayland: surface 3 removed
-  arc_notification_surface_manager_->RemoveSurface(&test_surface3);
-
-  EXPECT_EQ(0U, notification_key_to_tree_.size());
-}
-
 // This is the case where surface creation/removal arrive before mojo events.
 //
 // wayland: surface 1 added
@@ -515,9 +360,6 @@ TEST_F(ArcAccessibilityHelperBridgeTest, NotificationBackwardCompat) {
 // mojo: notification 1 created
 // mojo: notification 1 removed
 TEST_F(ArcAccessibilityHelperBridgeTest, NotificationSurfaceArriveFirst) {
-  base::CommandLine::ForCurrentProcess()->AppendSwitch(
-      chromeos::switches::kEnableChromeVoxArcSupport);
-
   TestArcAccessibilityHelperBridge* helper_bridge =
       accessibility_helper_bridge();
   arc_notification_surface_manager_->AddObserver(helper_bridge);
@@ -527,7 +369,7 @@ TEST_F(ArcAccessibilityHelperBridgeTest, NotificationSurfaceArriveFirst) {
   ASSERT_EQ(0U, notification_key_to_tree_.size());
 
   // wayland: surface 1 added
-  FakeArcNotificationSurface test_surface(kNotificationKey);
+  MockArcNotificationSurface test_surface(kNotificationKey);
   arc_notification_surface_manager_->AddSurface(&test_surface);
 
   // wayland: surface 1 removed
@@ -555,12 +397,11 @@ TEST_F(ArcAccessibilityHelperBridgeTest, NotificationSurfaceArriveFirst) {
 
 TEST_F(ArcAccessibilityHelperBridgeTest,
        TextSelectionChangeActivateNotificationWidget) {
-  base::CommandLine::ForCurrentProcess()->AppendSwitch(
-      chromeos::switches::kEnableChromeVoxArcSupport);
+  accessibility_helper_bridge()->set_filter_type_all_for_test();
 
   // Prepare notification surface.
-  std::unique_ptr<FakeArcNotificationSurface> surface =
-      std::make_unique<FakeArcNotificationSurface>(kNotificationKey);
+  std::unique_ptr<MockArcNotificationSurface> surface =
+      std::make_unique<MockArcNotificationSurface>(kNotificationKey);
   arc_notification_surface_manager_->AddSurface(surface.get());
 
   // Prepare notification view with ArcNotificationContentView.
@@ -611,12 +452,11 @@ TEST_F(ArcAccessibilityHelperBridgeTest,
 }
 
 TEST_F(ArcAccessibilityHelperBridgeTest, TextSelectionChangedFocusContentView) {
-  base::CommandLine::ForCurrentProcess()->AppendSwitch(
-      chromeos::switches::kEnableChromeVoxArcSupport);
+  accessibility_helper_bridge()->set_filter_type_all_for_test();
 
   // Prepare notification surface.
-  std::unique_ptr<FakeArcNotificationSurface> surface =
-      std::make_unique<FakeArcNotificationSurface>(kNotificationKey);
+  std::unique_ptr<MockArcNotificationSurface> surface =
+      std::make_unique<MockArcNotificationSurface>(kNotificationKey);
   arc_notification_surface_manager_->AddSurface(surface.get());
 
   // Prepare notification view with ArcNotificationContentView.

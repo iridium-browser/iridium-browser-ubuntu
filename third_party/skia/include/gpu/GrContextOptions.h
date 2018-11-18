@@ -12,11 +12,13 @@
 #include "SkTypes.h"
 #include "GrTypes.h"
 #include "../private/GrTypesPriv.h"
+#include "GrDriverBugWorkarounds.h"
 
 #include <vector>
 
 class SkExecutor;
 
+#if SK_SUPPORT_GPU
 struct GrContextOptions {
     enum class Enable {
         /** Forces an option to be disabled. */
@@ -76,6 +78,13 @@ struct GrContextOptions {
     bool fDoManualMipmapping = false;
 
     /**
+     * Disables the coverage counting path renderer. Coverage counting can sometimes cause new
+     * rendering artifacts along shared edges if care isn't taken to ensure both contours wind in
+     * the same direction.
+     */
+    bool fDisableCoverageCountingPaths = false;
+
+    /**
      * Disables distance field rendering for paths. Distance field computation can be expensive,
      * and yields no benefit if a path is not rendered multiple times with different transforms.
      */
@@ -88,14 +97,6 @@ struct GrContextOptions {
     bool fAllowPathMaskCaching = true;
 
     /**
-     * If true, sRGB support will not be enabled unless sRGB decoding can be disabled (via an
-     * extension). If mixed use of "legacy" mode and sRGB/color-correct mode is not required, this
-     * can be set to false, which will significantly expand the number of devices that qualify for
-     * sRGB support.
-     */
-    bool fRequireDecodeDisableForSRGB = true;
-
-    /**
      * If true, the GPU will not be used to perform YUV -> RGB conversion when generating
      * textures from codec-backed images.
      */
@@ -104,7 +105,7 @@ struct GrContextOptions {
     /**
      * The maximum size of cache textures used for Skia's Glyph cache.
      */
-    float fGlyphCacheTextureMaximumBytes = 2048 * 1024 * 4;
+    size_t fGlyphCacheTextureMaximumBytes = 2048 * 1024 * 4;
 
     /**
      * Below this threshold size in device space distance field fonts won't be used. Distance field
@@ -171,6 +172,20 @@ struct GrContextOptions {
     Enable fSortRenderTargets = Enable::kDefault;
 
     /**
+     * Allow Ganesh to more aggressively reorder operations. This is an optional
+     * behavior that is only relevant when 'fSortRenderTargets' is enabled.
+     * Eventually this will just be what is done and will not be optional.
+     */
+    Enable fReduceOpListSplitting = Enable::kDefault;
+
+    /**
+     * Some ES3 contexts report the ES2 external image extension, but not the ES3 version.
+     * If support for external images is critical, enabling this option will cause Ganesh to limit
+     * shaders to the ES2 shading language in that situation.
+     */
+    bool fPreferExternalImagesOverES3 = false;
+
+    /**
      * Disables correctness workarounds that are enabled for particular GPUs, OSes, or drivers.
      * This does not affect code path choices that are made for perfomance reasons nor does it
      * override other GrContextOption settings.
@@ -216,7 +231,7 @@ struct GrContextOptions {
     /**
      * Include or exclude specific GPU path renderers.
      */
-    GpuPathRenderers fGpuPathRenderers = GpuPathRenderers::kDefault;
+    GpuPathRenderers fGpuPathRenderers = GpuPathRenderers::kAll;
 
     /**
      * Disables using multiple texture units to batch multiple images into a single draw on
@@ -232,6 +247,13 @@ struct GrContextOptions {
      */
     Enable fDistanceFieldGlyphVerticesAlwaysHaveW = Enable::kDefault;
 #endif
+
+    GrDriverBugWorkarounds fDriverBugWorkarounds;
 };
+#else
+struct GrContextOptions {
+    struct PersistentCache {};
+};
+#endif
 
 #endif

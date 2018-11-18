@@ -25,7 +25,6 @@
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "content/test/test_background_sync_context.h"
 #include "mojo/public/cpp/bindings/interface_ptr.h"
-#include "net/base/network_change_notifier.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/mojom/service_worker/service_worker_registration.mojom.h"
 
@@ -41,19 +40,21 @@ const char kServiceWorkerScript[] = "https://example.com/a/script.js";
 // Callbacks from SetUp methods
 void RegisterServiceWorkerCallback(bool* called,
                                    int64_t* store_registration_id,
-                                   ServiceWorkerStatusCode status,
+                                   blink::ServiceWorkerStatusCode status,
                                    const std::string& status_message,
                                    int64_t registration_id) {
-  EXPECT_EQ(SERVICE_WORKER_OK, status) << ServiceWorkerStatusToString(status);
+  EXPECT_EQ(blink::ServiceWorkerStatusCode::kOk, status)
+      << blink::ServiceWorkerStatusToString(status);
   *called = true;
   *store_registration_id = registration_id;
 }
 
 void FindServiceWorkerRegistrationCallback(
     scoped_refptr<ServiceWorkerRegistration>* out_registration,
-    ServiceWorkerStatusCode status,
+    blink::ServiceWorkerStatusCode status,
     scoped_refptr<ServiceWorkerRegistration> registration) {
-  EXPECT_EQ(SERVICE_WORKER_OK, status) << ServiceWorkerStatusToString(status);
+  EXPECT_EQ(blink::ServiceWorkerStatusCode::kOk, status)
+      << blink::ServiceWorkerStatusToString(status);
   *out_registration = std::move(registration);
 }
 
@@ -88,14 +89,13 @@ class BackgroundSyncServiceImplTest : public testing::Test {
  public:
   BackgroundSyncServiceImplTest()
       : thread_bundle_(
-            new TestBrowserThreadBundle(TestBrowserThreadBundle::IO_MAINLOOP)),
-        network_change_notifier_(net::NetworkChangeNotifier::CreateMock()) {
+            new TestBrowserThreadBundle(TestBrowserThreadBundle::IO_MAINLOOP)) {
     default_sync_registration_ = blink::mojom::SyncRegistration::New();
   }
 
   void SetUp() override {
     // Don't let the tests be confused by the real-world device connectivity
-    background_sync_test_util::SetIgnoreNetworkChangeNotifier(true);
+    background_sync_test_util::SetIgnoreNetworkChanges(true);
 
     CreateTestHelper();
     CreateStoragePartition();
@@ -113,7 +113,7 @@ class BackgroundSyncServiceImplTest : public testing::Test {
     background_sync_context_ = nullptr;
 
     // Restore the network observer functionality for subsequent tests
-    background_sync_test_util::SetIgnoreNetworkChangeNotifier(false);
+    background_sync_test_util::SetIgnoreNetworkChanges(false);
   }
 
   // SetUp helper methods
@@ -126,7 +126,7 @@ class BackgroundSyncServiceImplTest : public testing::Test {
             GetPermissionStatus(PermissionType::BACKGROUND_SYNC, _, _))
         .WillByDefault(
             testing::Return(blink::mojom::PermissionStatus::GRANTED));
-    embedded_worker_helper_->browser_context()->SetPermissionManager(
+    embedded_worker_helper_->browser_context()->SetPermissionControllerDelegate(
         std::move(mock_permission_manager));
   }
 
@@ -142,7 +142,8 @@ class BackgroundSyncServiceImplTest : public testing::Test {
   void CreateBackgroundSyncContext() {
     // Registering for background sync includes a check for having a same-origin
     // main frame. Use a test context that allows control over that check.
-    background_sync_context_ = new TestBackgroundSyncContext();
+    background_sync_context_ =
+        base::MakeRefCounted<TestBackgroundSyncContext>();
     background_sync_context_->Init(embedded_worker_helper_->context_wrapper());
 
     // Tests do not expect the sync event to fire immediately after
@@ -155,8 +156,8 @@ class BackgroundSyncServiceImplTest : public testing::Test {
     BackgroundSyncNetworkObserver* network_observer =
         background_sync_context_->background_sync_manager()
             ->GetNetworkObserverForTesting();
-    network_observer->NotifyManagerIfNetworkChangedForTesting(
-        net::NetworkChangeNotifier::CONNECTION_NONE);
+    network_observer->NotifyManagerIfConnectionChangedForTesting(
+        network::mojom::ConnectionType::CONNECTION_NONE);
     base::RunLoop().RunUntilIdle();
   }
 
@@ -166,15 +167,15 @@ class BackgroundSyncServiceImplTest : public testing::Test {
     options.scope = GURL(kServiceWorkerPattern);
     embedded_worker_helper_->context()->RegisterServiceWorker(
         GURL(kServiceWorkerScript), options,
-        base::AdaptCallbackForRepeating(base::BindOnce(
-            &RegisterServiceWorkerCallback, &called, &sw_registration_id_)));
+        base::BindOnce(&RegisterServiceWorkerCallback, &called,
+                       &sw_registration_id_));
     base::RunLoop().RunUntilIdle();
     EXPECT_TRUE(called);
 
     embedded_worker_helper_->context_wrapper()->FindReadyRegistrationForId(
         sw_registration_id_, GURL(kServiceWorkerPattern).GetOrigin(),
-        base::AdaptCallbackForRepeating(base::BindOnce(
-            FindServiceWorkerRegistrationCallback, &sw_registration_)));
+        base::BindOnce(FindServiceWorkerRegistrationCallback,
+                       &sw_registration_));
     base::RunLoop().RunUntilIdle();
     EXPECT_TRUE(sw_registration_);
   }
@@ -208,7 +209,6 @@ class BackgroundSyncServiceImplTest : public testing::Test {
   }
 
   std::unique_ptr<TestBrowserThreadBundle> thread_bundle_;
-  std::unique_ptr<net::NetworkChangeNotifier> network_change_notifier_;
   std::unique_ptr<EmbeddedWorkerTestHelper> embedded_worker_helper_;
   std::unique_ptr<StoragePartitionImpl> storage_partition_impl_;
   scoped_refptr<BackgroundSyncContext> background_sync_context_;

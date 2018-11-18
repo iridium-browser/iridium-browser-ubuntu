@@ -200,6 +200,7 @@ class Texture2DTest : public TexCoordDrawTest
                                !extensionEnabled("GL_CHROMIUM_color_buffer_float_rgb"));
         }
 
+        // clang-format off
         GLfloat sourceImageData[4][16] =
         {
             { // R
@@ -227,31 +228,24 @@ class Texture2DTest : public TexCoordDrawTest
                 1.0f, 1.0f, 0.0f, 1.0f
             },
         };
+        // clang-format on
 
-        GLenum imageFormats[] =
-        {
-            GL_R32F,
-            GL_RG32F,
-            GL_RGB32F,
-            GL_RGBA32F,
+        GLenum imageFormats[] = {
+            GL_R32F, GL_RG32F, GL_RGB32F, GL_RGBA32F,
         };
 
-        GLenum sourceUnsizedFormats[] =
-        {
-            GL_RED,
-            GL_RG,
-            GL_RGB,
-            GL_RGBA,
+        GLenum sourceUnsizedFormats[] = {
+            GL_RED, GL_RG, GL_RGB, GL_RGBA,
         };
 
         GLuint textures[2];
 
         glGenTextures(2, textures);
 
-        GLfloat *imageData = sourceImageData[sourceImageChannels - 1];
-        GLenum sourceImageFormat = imageFormats[sourceImageChannels - 1];
+        GLfloat *imageData         = sourceImageData[sourceImageChannels - 1];
+        GLenum sourceImageFormat   = imageFormats[sourceImageChannels - 1];
         GLenum sourceUnsizedFormat = sourceUnsizedFormats[sourceImageChannels - 1];
-        GLenum destImageFormat = imageFormats[destImageChannels - 1];
+        GLenum destImageFormat     = imageFormats[destImageChannels - 1];
 
         glBindTexture(GL_TEXTURE_2D, textures[0]);
         if (getClientMajorVersion() >= 3)
@@ -661,7 +655,6 @@ class SamplerArrayTest : public TexCoordDrawTest
     GLint mTexture1UniformLocation;
 };
 
-
 class SamplerArrayAsFunctionParameterTest : public SamplerArrayTest
 {
   protected:
@@ -755,13 +748,7 @@ class TextureSizeTextureArrayTest : public TexCoordDrawTest
 
     std::string getVertexShaderSource() override
     {
-        return std::string(
-            "#version 300 es\n"
-            "in vec4 position;\n"
-            "void main()\n"
-            "{\n"
-            "    gl_Position = vec4(position.xy, 0.0, 1.0);\n"
-            "}\n");
+        return std::string(essl3_shaders::vs::Simple());
     }
 
     std::string getFragmentShaderSource() override
@@ -1196,7 +1183,7 @@ TEST_P(Texture2DTest, NegativeAPISubImage)
 
     setUpProgram();
 
-    const GLubyte *pixels[20] = { 0 };
+    const GLubyte *pixels[20] = {0};
     glTexSubImage2D(GL_TEXTURE_2D, 0, 1, 1, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
     EXPECT_GL_ERROR(GL_INVALID_VALUE);
 
@@ -1237,10 +1224,6 @@ TEST_P(Texture2DTest, QueryBinding)
 
 TEST_P(Texture2DTest, ZeroSizedUploads)
 {
-    // TODO(lucferron): Enable this test on Vulkan after Sampler Arrays are implemented.
-    // http://anglebug.com/2462
-    ANGLE_SKIP_TEST_IF(IsVulkan());
-
     glBindTexture(GL_TEXTURE_2D, mTexture2D);
     EXPECT_GL_ERROR(GL_NO_ERROR);
 
@@ -1251,7 +1234,7 @@ TEST_P(Texture2DTest, ZeroSizedUploads)
     glUniform1i(mTexture2DUniformLocation, 0);
     drawQuad(mProgram, "position", 0.5f);
 
-    const GLubyte *pixel[4] = { 0 };
+    const GLubyte *pixel[4] = {0};
 
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixel);
     EXPECT_GL_NO_ERROR();
@@ -1387,26 +1370,91 @@ TEST_P(Texture2DTestWithDrawScale, MipmapsTwice)
 // https://code.google.com/p/angleproject/issues/detail?id=849
 TEST_P(TextureCubeTest, CubeMapFBO)
 {
-    GLuint fbo;
-    glGenFramebuffers(1, &fbo);
+    GLFramebuffer fbo;
     glBindFramebuffer(GL_FRAMEBUFFER, fbo);
 
     glBindTexture(GL_TEXTURE_CUBE_MAP, mTextureCube);
-    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_CUBE_MAP_POSITIVE_Y, mTextureCube, 0);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_CUBE_MAP_POSITIVE_Y,
+                           mTextureCube, 0);
 
     EXPECT_GLENUM_EQ(GL_FRAMEBUFFER_COMPLETE, glCheckFramebufferStatus(GL_FRAMEBUFFER));
-
-    glDeleteFramebuffers(1, &fbo);
-
     EXPECT_GL_NO_ERROR();
+
+    // Test clearing the six mip faces individually.
+    std::array<GLColor, 6> faceColors = {{GLColor::red, GLColor::green, GLColor::blue,
+                                          GLColor::yellow, GLColor::cyan, GLColor::magenta}};
+
+    for (size_t faceIndex = 0; faceIndex < 6; ++faceIndex)
+    {
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                               GL_TEXTURE_CUBE_MAP_POSITIVE_X + faceIndex, mTextureCube, 0);
+
+        Vector4 clearColorF = faceColors[faceIndex].toNormalizedVector();
+        glClearColor(clearColorF.x(), clearColorF.y(), clearColorF.z(), clearColorF.w());
+        glClear(GL_COLOR_BUFFER_BIT);
+
+        EXPECT_PIXEL_COLOR_EQ(0, 0, faceColors[faceIndex]);
+    }
+
+    // Iterate the faces again to make sure the colors haven't changed.
+    for (size_t faceIndex = 0; faceIndex < 6; ++faceIndex)
+    {
+        glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                               GL_TEXTURE_CUBE_MAP_POSITIVE_X + faceIndex, mTextureCube, 0);
+        EXPECT_PIXEL_COLOR_EQ(0, 0, faceColors[faceIndex])
+            << "face color " << faceIndex << " shouldn't change";
+    }
 }
 
-// Test that glTexSubImage2D works properly when glTexStorage2DEXT has initialized the image with a default color.
+// Tests clearing a cube map with a scissor enabled.
+TEST_P(TextureCubeTest, CubeMapFBOScissoredClear)
+{
+    // TODO(jie.a.chen): Diagnose and fix. http://anglebug.com/2822
+    ANGLE_SKIP_TEST_IF(IsVulkan() && IsIntel() && IsWindows());
+
+    constexpr size_t kSize = 16;
+
+    GLFramebuffer fbo;
+    glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+    glViewport(0, 0, kSize, kSize);
+
+    GLTexture texcube;
+    glBindTexture(GL_TEXTURE_CUBE_MAP, texcube);
+    for (GLenum face = 0; face < 6; face++)
+    {
+        glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + face, 0, GL_RGBA, kSize, kSize, 0, GL_RGBA,
+                     GL_UNSIGNED_BYTE, nullptr);
+    }
+    ASSERT_GL_NO_ERROR();
+
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_CUBE_MAP_POSITIVE_Y,
+                           texcube, 0);
+
+    EXPECT_GLENUM_EQ(GL_FRAMEBUFFER_COMPLETE, glCheckFramebufferStatus(GL_FRAMEBUFFER));
+    ASSERT_GL_NO_ERROR();
+
+    glClearColor(1.0f, 0.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::red);
+
+    glEnable(GL_SCISSOR_TEST);
+    glScissor(kSize / 2, 0, kSize / 2, kSize);
+    glClearColor(0.0f, 1.0f, 0.0f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+
+    EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::red);
+    EXPECT_PIXEL_COLOR_EQ(kSize / 2 + 1, 0, GLColor::green);
+
+    ASSERT_GL_NO_ERROR();
+}
+
+// Test that glTexSubImage2D works properly when glTexStorage2DEXT has initialized the image with a
+// default color.
 TEST_P(Texture2DTest, TexStorage)
 {
     ANGLE_SKIP_TEST_IF(getClientMajorVersion() < 3 && !extensionEnabled("GL_EXT_texture_storage"));
 
-    int width = getWindowWidth();
+    int width  = getWindowWidth();
     int height = getWindowHeight();
 
     GLuint tex2D;
@@ -1424,8 +1472,8 @@ TEST_P(Texture2DTest, TexStorage)
     }
 
     // ANGLE internally uses RGBA as the DirectX format for RGB images
-    // therefore glTexStorage2DEXT initializes the image to a default color to get a consistent alpha color.
-    // The data is kept in a CPU-side image and the image is marked as dirty.
+    // therefore glTexStorage2DEXT initializes the image to a default color to get a consistent
+    // alpha color. The data is kept in a CPU-side image and the image is marked as dirty.
     if (getClientMajorVersion() >= 3)
     {
         glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGB8, 16, 16);
@@ -1455,12 +1503,13 @@ TEST_P(Texture2DTest, TexStorage)
     EXPECT_EQ(255, pixel.A);
 }
 
-// Test that glTexSubImage2D combined with a PBO works properly when glTexStorage2DEXT has initialized the image with a default color.
+// Test that glTexSubImage2D combined with a PBO works properly when glTexStorage2DEXT has
+// initialized the image with a default color.
 TEST_P(Texture2DTest, TexStorageWithPBO)
 {
     if (extensionEnabled("NV_pixel_buffer_object"))
     {
-        int width = getWindowWidth();
+        int width  = getWindowWidth();
         int height = getWindowHeight();
 
         GLuint tex2D;
@@ -1484,8 +1533,8 @@ TEST_P(Texture2DTest, TexStorageWithPBO)
         glBufferData(GL_PIXEL_UNPACK_BUFFER, 3 * 16 * 16, pixels.data(), GL_STATIC_DRAW);
 
         // ANGLE internally uses RGBA as the DirectX format for RGB images
-        // therefore glTexStorage2DEXT initializes the image to a default color to get a consistent alpha color.
-        // The data is kept in a CPU-side image and the image is marked as dirty.
+        // therefore glTexStorage2DEXT initializes the image to a default color to get a consistent
+        // alpha color. The data is kept in a CPU-side image and the image is marked as dirty.
         glTexStorage2DEXT(GL_TEXTURE_2D, 1, GL_RGB8, 16, 16);
 
         // Initializes the color of the upper-left 8x8 pixels, leaves the other pixels untouched.
@@ -1564,21 +1613,24 @@ TEST_P(Texture2DTest, CopySubImageFloat_RGBA_RGB)
 
 TEST_P(Texture2DTest, CopySubImageFloat_RGBA_RGBA)
 {
+    // TODO(lucferron): This test fails only on linux and intel.
+    // http://anglebug.com/2726
+    ANGLE_SKIP_TEST_IF(IsVulkan() && IsLinux() && IsIntel());
+
     // Ignore SDK layers messages on D3D11 FL 9.3 (http://anglebug.com/1284)
     ANGLE_SKIP_TEST_IF(IsD3D11_FL93());
 
     testFloatCopySubImage(4, 4);
 }
 
-// Port of https://www.khronos.org/registry/webgl/conformance-suites/1.0.3/conformance/textures/texture-npot.html
-// Run against GL_ALPHA/UNSIGNED_BYTE format, to ensure that D3D11 Feature Level 9_3 correctly handles GL_ALPHA
+// Port of
+// https://www.khronos.org/registry/webgl/conformance-suites/1.0.3/conformance/textures/texture-npot.html
+// Run against GL_ALPHA/UNSIGNED_BYTE format, to ensure that D3D11 Feature Level 9_3 correctly
+// handles GL_ALPHA
 TEST_P(Texture2DTest, TextureNPOT_GL_ALPHA_UBYTE)
 {
-    // TODO(lucferron): DIRTY_BIT_UNPACK_STATE isn't implemented on Vulkan yet.
-    ANGLE_SKIP_TEST_IF(IsVulkan());
-
     const int npotTexSize = 5;
-    const int potTexSize = 4; // Should be less than npotTexSize
+    const int potTexSize  = 4;  // Should be less than npotTexSize
     GLuint tex2D;
 
     if (extensionEnabled("GL_OES_texture_npot"))
@@ -1598,21 +1650,19 @@ TEST_P(Texture2DTest, TextureNPOT_GL_ALPHA_UBYTE)
     glGenTextures(1, &tex2D);
     glBindTexture(GL_TEXTURE_2D, tex2D);
 
-    std::vector<GLubyte> pixels(1 * npotTexSize * npotTexSize);
-    for (size_t pixelId = 0; pixelId < npotTexSize * npotTexSize; ++pixelId)
-    {
-        pixels[pixelId] = 64;
-    }
+    const std::vector<GLubyte> pixels(1 * npotTexSize * npotTexSize, 64);
 
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 
     // Check that an NPOT texture not on level 0 generates INVALID_VALUE
-    glTexImage2D(GL_TEXTURE_2D, 1, GL_ALPHA, npotTexSize, npotTexSize, 0, GL_ALPHA, GL_UNSIGNED_BYTE, pixels.data());
+    glTexImage2D(GL_TEXTURE_2D, 1, GL_ALPHA, npotTexSize, npotTexSize, 0, GL_ALPHA,
+                 GL_UNSIGNED_BYTE, pixels.data());
     EXPECT_GL_ERROR(GL_INVALID_VALUE);
 
     // Check that an NPOT texture on level 0 succeeds
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_ALPHA, npotTexSize, npotTexSize, 0, GL_ALPHA, GL_UNSIGNED_BYTE, pixels.data());
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_ALPHA, npotTexSize, npotTexSize, 0, GL_ALPHA,
+                 GL_UNSIGNED_BYTE, pixels.data());
     EXPECT_GL_NO_ERROR();
 
     // Check that generateMipmap fails on NPOT
@@ -1643,7 +1693,8 @@ TEST_P(Texture2DTest, TextureNPOT_GL_ALPHA_UBYTE)
     EXPECT_PIXEL_EQ(getWindowWidth() / 2, getWindowHeight() / 2, 0, 0, 0, 64);
 
     // Check that glTexImage2D for POT texture succeeds
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_ALPHA, potTexSize, potTexSize, 0, GL_ALPHA, GL_UNSIGNED_BYTE, pixels.data());
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_ALPHA, potTexSize, potTexSize, 0, GL_ALPHA, GL_UNSIGNED_BYTE,
+                 pixels.data());
     EXPECT_GL_NO_ERROR();
 
     // Check that generateMipmap for an POT texture succeeds
@@ -1665,10 +1716,6 @@ TEST_P(Texture2DTest, TextureNPOT_GL_ALPHA_UBYTE)
 // ANGLE previously rejected this if GL_OES_texture_npot wasn't active, which is incorrect.
 TEST_P(Texture2DTest, NPOTSubImageParameters)
 {
-    // TODO(lucferron): Generate mipmap on vulkan isn't implemented yet. Re-enable this when it
-    // is.
-    ANGLE_SKIP_TEST_IF(IsVulkan());
-
     glActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, mTexture2D);
 
@@ -2191,9 +2238,9 @@ TEST_P(Texture2DTestES3, SetImageWhenBaseLevelOutOfRange)
     EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::green);
 }
 
-// In the D3D11 renderer, we need to initialize some texture formats, to fill empty channels. EG RBA->RGBA8, with 1.0
-// in the alpha channel. This test covers a bug where redefining array textures with these formats does not work as
-// expected.
+// In the D3D11 renderer, we need to initialize some texture formats, to fill empty channels. EG
+// RBA->RGBA8, with 1.0 in the alpha channel. This test covers a bug where redefining array textures
+// with these formats does not work as expected.
 TEST_P(Texture2DArrayTestES3, RedefineInittableArray)
 {
     std::vector<GLubyte> pixelData;
@@ -2209,7 +2256,8 @@ TEST_P(Texture2DArrayTestES3, RedefineInittableArray)
     glUniform1i(mTextureArrayLocation, 0);
 
     // The first draw worked correctly.
-    glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_RGB, 4, 4, 2, 0, GL_RGB, GL_UNSIGNED_BYTE, &pixelData[0]);
+    glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_RGB, 4, 4, 2, 0, GL_RGB, GL_UNSIGNED_BYTE,
+                 &pixelData[0]);
 
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
@@ -2219,7 +2267,8 @@ TEST_P(Texture2DArrayTestES3, RedefineInittableArray)
     EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::green);
 
     // The dimension of the respecification must match the original exactly to trigger the bug.
-    glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_RGB, 4, 4, 2, 0, GL_RGB, GL_UNSIGNED_BYTE, &pixelData[0]);
+    glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_RGB, 4, 4, 2, 0, GL_RGB, GL_UNSIGNED_BYTE,
+                 &pixelData[0]);
     drawQuad(mProgram, "position", 1.0f);
     EXPECT_PIXEL_COLOR_EQ(0, 0, GLColor::green);
 
@@ -2367,7 +2416,7 @@ TEST_P(TextureSizeTextureArrayTest, BaseLevelVariesInTextureArray)
     glUniform1i(mTexture0Location, 0);
     glUniform1i(mTexture1Location, 1);
 
-    drawQuad(mProgram, "position", 0.5f);
+    drawQuad(mProgram, essl3_shaders::PositionAttrib(), 0.5f);
     EXPECT_GL_NO_ERROR();
     // Red channel: width of level 1 of texture A: 32.
     // Green channel: width of level 3 of texture B: 16.
@@ -2721,7 +2770,18 @@ class TextureLimitsTest : public ANGLETest
         setConfigAlphaBits(8);
     }
 
-    ~TextureLimitsTest()
+    void SetUp() override
+    {
+        ANGLETest::SetUp();
+
+        glGetIntegerv(GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS, &mMaxVertexTextures);
+        glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS, &mMaxFragmentTextures);
+        glGetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &mMaxCombinedTextures);
+
+        ASSERT_GL_NO_ERROR();
+    }
+
+    void TearDown() override
     {
         if (mProgram != 0)
         {
@@ -2733,17 +2793,8 @@ class TextureLimitsTest : public ANGLETest
                 glDeleteTextures(static_cast<GLsizei>(mTextures.size()), &mTextures[0]);
             }
         }
-    }
 
-    void SetUp() override
-    {
-        ANGLETest::SetUp();
-
-        glGetIntegerv(GL_MAX_VERTEX_TEXTURE_IMAGE_UNITS, &mMaxVertexTextures);
-        glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS, &mMaxFragmentTextures);
-        glGetIntegerv(GL_MAX_COMBINED_TEXTURE_IMAGE_UNITS, &mMaxCombinedTextures);
-
-        ASSERT_GL_NO_ERROR();
+        ANGLETest::TearDown();
     }
 
     void compileProgramWithTextureCounts(const std::string &vertexPrefix,
@@ -2875,7 +2926,7 @@ class TextureLimitsTest : public ANGLETest
             std::stringstream uniformNameStr;
             uniformNameStr << vertexTexturePrefix << texIndex;
             const std::string &uniformName = uniformNameStr.str();
-            GLint location = glGetUniformLocation(mProgram, uniformName.c_str());
+            GLint location                 = glGetUniformLocation(mProgram, uniformName.c_str());
             ASSERT_NE(-1, location);
 
             glUniform1i(location, texIndex);
@@ -2889,7 +2940,7 @@ class TextureLimitsTest : public ANGLETest
             std::stringstream uniformNameStr;
             uniformNameStr << fragmentTexturePrefix << texIndex;
             const std::string &uniformName = uniformNameStr.str();
-            GLint location = glGetUniformLocation(mProgram, uniformName.c_str());
+            GLint location                 = glGetUniformLocation(mProgram, uniformName.c_str());
             ASSERT_NE(-1, location);
 
             glUniform1i(location, texIndex + vertexTextureCount);
@@ -3085,9 +3136,9 @@ class Texture2DNorm16TestES3 : public Texture2DTestES3
 
         GLubyte expectedValue = (type == GL_SHORT) ? 0xFF : static_cast<GLubyte>(pixelValue >> 8);
 
-        EXPECT_PIXEL_COLOR_EQ(
-            0, 0, SliceFormatColor(
-                      format, GLColor(expectedValue, expectedValue, expectedValue, expectedValue)));
+        EXPECT_PIXEL_COLOR_EQ(0, 0,
+                              SliceFormatColor(format, GLColor(expectedValue, expectedValue,
+                                                               expectedValue, expectedValue)));
 
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
@@ -3096,7 +3147,7 @@ class Texture2DNorm16TestES3 : public Texture2DTestES3
 
     void testNorm16Render(GLint internalformat, GLenum format, GLenum type)
     {
-        GLushort pixelValue = 0x6A35;
+        GLushort pixelValue  = 0x6A35;
         GLushort imageData[] = {pixelValue, pixelValue, pixelValue, pixelValue};
 
         setUpProgram();
@@ -3116,9 +3167,9 @@ class Texture2DNorm16TestES3 : public Texture2DTestES3
         drawQuad(mProgram, "position", 0.5f);
 
         GLubyte expectedValue = static_cast<GLubyte>(pixelValue >> 8);
-        EXPECT_PIXEL_COLOR_EQ(
-            0, 0, SliceFormatColor(
-                      format, GLColor(expectedValue, expectedValue, expectedValue, expectedValue)));
+        EXPECT_PIXEL_COLOR_EQ(0, 0,
+                              SliceFormatColor(format, GLColor(expectedValue, expectedValue,
+                                                               expectedValue, expectedValue)));
 
         glBindRenderbuffer(GL_RENDERBUFFER, mRenderbuffer);
         glRenderbufferStorage(GL_RENDERBUFFER, internalformat, 1, 1);
@@ -3167,8 +3218,6 @@ TEST_P(Texture2DNorm16TestES3, TextureNorm16Test)
 // GLES 3.0.4 section 3.8.3.
 TEST_P(Texture2DTestES3, UnpackSkipImages2D)
 {
-    ANGLE_SKIP_TEST_IF(IsIntel() && IsWindows() && IsDesktopOpenGL());
-
     // TODO(ynovikov): re-enable once root cause of http://anglebug.com/1429 is fixed
     ANGLE_SKIP_TEST_IF(IsAndroid() && IsAdreno() && IsOpenGLES());
 
@@ -3296,8 +3345,8 @@ TEST_P(Texture2DTestES3, DepthTexturesWithMipmaps)
 {
     // TODO(cwallez) this is failing on Intel Win7 OpenGL.
     // TODO(zmo) this is faling on Win Intel HD 530 Debug.
-    // http://anglebugs.com/1706
-    ANGLE_SKIP_TEST_IF(IsIntel() && IsWindows());
+    // http://anglebug.com/1706
+    ANGLE_SKIP_TEST_IF(IsIntel() && IsWindows() && IsOpenGL());
 
     const int size = getWindowWidth();
 
@@ -3721,8 +3770,84 @@ TEST_P(Texture2DTestES3, NegativeTextureBaseLevelAndMaxLevel)
     EXPECT_GL_NO_ERROR();
 }
 
-// Use this to select which configurations (e.g. which renderer, which GLES major version) these tests should be run against.
-// TODO(oetuaho): Enable all below tests on OpenGL. Requires a fix for ANGLE bug 1278.
+// Test setting base level after calling generateMipmap on a LUMA texture.
+// Covers http://anglebug.com/2498
+TEST_P(Texture2DTestES3, GenerateMipmapAndBaseLevelLUMA)
+{
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, mTexture2D);
+
+    constexpr const GLsizei kWidth  = 8;
+    constexpr const GLsizei kHeight = 8;
+    std::array<GLubyte, kWidth * kHeight * 2> whiteData;
+    whiteData.fill(255u);
+
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_LUMINANCE_ALPHA, kWidth, kHeight, 0, GL_LUMINANCE_ALPHA,
+                 GL_UNSIGNED_BYTE, whiteData.data());
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glGenerateMipmap(GL_TEXTURE_2D);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_BASE_LEVEL, 1);
+    EXPECT_GL_NO_ERROR();
+
+    drawQuad(mProgram, "position", 0.5f);
+    EXPECT_PIXEL_COLOR_EQ(0, 0, angle::GLColor::white);
+}
+
+// Covers a bug in the D3D11 backend: http://anglebug.com/2772
+// When using a sampler the texture was created as if it has mipmaps,
+// regardless what you specified in GL_TEXTURE_MIN_FILTER via
+// glSamplerParameteri() -- mistakenly the default value
+// GL_NEAREST_MIPMAP_LINEAR or the value set via glTexParameteri() was
+// evaluated.
+// If you didn't provide mipmaps and didn't let the driver generate them
+// this led to not sampling your texture data when minification occurred.
+TEST_P(Texture2DTestES3, MinificationWithSamplerNoMipmapping)
+{
+    const std::string vs =
+        "#version 300 es\n"
+        "out vec2 texcoord;\n"
+        "in vec4 position;\n"
+        "void main()\n"
+        "{\n"
+        "    gl_Position = vec4(position.xy * 0.1, 0.0, 1.0);\n"
+        "    texcoord = (position.xy * 0.5) + 0.5;\n"
+        "}\n";
+
+    const std::string fs =
+        "#version 300 es\n"
+        "precision highp float;\n"
+        "uniform highp sampler2D tex;\n"
+        "in vec2 texcoord;\n"
+        "out vec4 fragColor;\n"
+        "void main()\n"
+        "{\n"
+        "    fragColor = texture(tex, texcoord);\n"
+        "}\n";
+    ANGLE_GL_PROGRAM(program, vs, fs);
+
+    GLSampler sampler;
+    glBindSampler(0, sampler);
+    glSamplerParameteri(sampler, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glSamplerParameteri(sampler, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+
+    glActiveTexture(GL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, mTexture2D);
+
+    const GLsizei texWidth  = getWindowWidth();
+    const GLsizei texHeight = getWindowHeight();
+    const std::vector<GLColor> whiteData(texWidth * texHeight, GLColor::white);
+
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, texWidth, texHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                 whiteData.data());
+    EXPECT_GL_NO_ERROR();
+
+    drawQuad(program, "position", 0.5f);
+    EXPECT_PIXEL_COLOR_EQ(getWindowWidth() / 2, getWindowHeight() / 2, angle::GLColor::white);
+}
+
+// Use this to select which configurations (e.g. which renderer, which GLES major version) these
+// tests should be run against.
 ANGLE_INSTANTIATE_TEST(Texture2DTest,
                        ES2_D3D9(),
                        ES2_D3D11(),
@@ -3736,13 +3861,15 @@ ANGLE_INSTANTIATE_TEST(TextureCubeTest,
                        ES2_D3D11_FL10_0(),
                        ES2_D3D11_FL9_3(),
                        ES2_OPENGL(),
-                       ES2_OPENGLES());
+                       ES2_OPENGLES(),
+                       ES2_VULKAN());
 ANGLE_INSTANTIATE_TEST(Texture2DTestWithDrawScale,
                        ES2_D3D9(),
                        ES2_D3D11(),
                        ES2_D3D11_FL9_3(),
                        ES2_OPENGL(),
-                       ES2_OPENGLES());
+                       ES2_OPENGLES(),
+                       ES2_VULKAN());
 ANGLE_INSTANTIATE_TEST(Sampler2DAsFunctionParameterTest,
                        ES2_D3D9(),
                        ES2_D3D11(),
@@ -3805,7 +3932,7 @@ ANGLE_INSTANTIATE_TEST(SamplerInStructAndOtherVariableTest,
                        ES2_D3D9(),
                        ES2_OPENGL(),
                        ES2_OPENGLES());
-ANGLE_INSTANTIATE_TEST(TextureLimitsTest, ES2_D3D11(), ES2_OPENGL(), ES2_OPENGLES());
+ANGLE_INSTANTIATE_TEST(TextureLimitsTest, ES2_D3D11(), ES2_OPENGL(), ES2_OPENGLES(), ES2_VULKAN());
 ANGLE_INSTANTIATE_TEST(Texture2DNorm16TestES3, ES3_D3D11(), ES3_OPENGL(), ES3_OPENGLES());
 ANGLE_INSTANTIATE_TEST(TextureCubeTestES3, ES3_D3D11(), ES3_OPENGL(), ES3_OPENGLES());
 

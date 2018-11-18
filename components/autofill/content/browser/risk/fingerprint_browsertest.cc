@@ -18,7 +18,7 @@
 #include "content/public/common/service_manager_connection.h"
 #include "content/public/test/content_browser_test.h"
 #include "content/public/test/test_utils.h"
-#include "device/geolocation/public/cpp/scoped_geolocation_overrider.h"
+#include "services/device/public/cpp/test/scoped_geolocation_overrider.h"
 #include "services/device/public/mojom/geoposition.mojom.h"
 #include "services/service_manager/public/cpp/connector.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -46,7 +46,7 @@ void GetFingerprintInternal(
     const std::string& app_locale,
     const std::string& user_agent,
     const base::TimeDelta& timeout,
-    const base::Callback<void(std::unique_ptr<Fingerprint>)>& callback,
+    base::OnceCallback<void(std::unique_ptr<Fingerprint>)> callback,
     service_manager::Connector* connector);
 
 }  // namespace internal
@@ -199,9 +199,6 @@ class AutofillRiskFingerprintTest : public content::ContentBrowserTest {
   const gfx::Rect unavailable_screen_bounds_;
 
   std::unique_ptr<device::ScopedGeolocationOverrider> geolocation_overrider_;
-
-  // A message loop to block on the asynchronous loading of the fingerprint.
-  base::MessageLoopForUI message_loop_;
 };
 
 // Test that getting a fingerprint works on some basic level.

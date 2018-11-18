@@ -6,7 +6,6 @@
 
 #include "ash/drag_drop/drag_drop_tracker.h"
 #include "ash/drag_drop/drag_image_view.h"
-#include "ash/public/cpp/config.h"
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
 #include "base/command_line.h"
@@ -16,7 +15,6 @@
 #include "ui/aura/client/capture_client.h"
 #include "ui/aura/client/drag_drop_client_observer.h"
 #include "ui/aura/client/drag_drop_delegate.h"
-#include "ui/aura/env.h"
 #include "ui/aura/test/test_window_delegate.h"
 #include "ui/aura/window_event_dispatcher.h"
 #include "ui/aura/window_tree_host.h"
@@ -230,7 +228,7 @@ class EventTargetTestDelegate : public aura::client::DragDropDelegate {
     kPerformDropInvoked
   };
 
-  EventTargetTestDelegate(aura::Window* window) : window_(window) {}
+  explicit EventTargetTestDelegate(aura::Window* window) : window_(window) {}
   State state() const { return state_; }
 
   // aura::client::DragDropDelegate:
@@ -260,16 +258,6 @@ class EventTargetTestDelegate : public aura::client::DragDropDelegate {
 
   DISALLOW_COPY_AND_ASSIGN(EventTargetTestDelegate);
 };
-
-std::unique_ptr<views::Widget> CreateFramelessWidget() {
-  std::unique_ptr<views::Widget> widget = std::make_unique<views::Widget>();
-  views::Widget::InitParams params;
-  params.type = views::Widget::InitParams::TYPE_WINDOW_FRAMELESS;
-  params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
-  widget->Init(params);
-  widget->Show();
-  return widget;
-}
 
 void AddViewToWidgetAndResize(views::Widget* widget, views::View* view) {
   if (!widget->GetContentsView()) {
@@ -302,13 +290,14 @@ void DispatchGesture(ui::EventType gesture_type, gfx::Point location) {
 
 class DragDropControllerTest : public AshTestBase {
  public:
-  DragDropControllerTest() : AshTestBase() {}
+  DragDropControllerTest() = default;
   ~DragDropControllerTest() override = default;
 
   void SetUp() override {
     AshTestBase::SetUp();
     drag_drop_controller_.reset(new TestDragDropController);
     drag_drop_controller_->set_should_block_during_drag_drop(false);
+    drag_drop_controller_->set_enabled(true);
     aura::client::SetDragDropClient(Shell::GetPrimaryRootWindow(),
                                     drag_drop_controller_.get());
   }
@@ -353,6 +342,17 @@ class DragDropControllerTest : public AshTestBase {
   }
 
  protected:
+  std::unique_ptr<views::Widget> CreateFramelessWidget() {
+    std::unique_ptr<views::Widget> widget = std::make_unique<views::Widget>();
+    views::Widget::InitParams params;
+    params.type = views::Widget::InitParams::TYPE_WINDOW_FRAMELESS;
+    params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
+    params.context = CurrentContext();
+    widget->Init(params);
+    widget->Show();
+    return widget;
+  }
+
   std::unique_ptr<TestDragDropController> drag_drop_controller_;
 
  private:
@@ -360,9 +360,6 @@ class DragDropControllerTest : public AshTestBase {
 };
 
 TEST_F(DragDropControllerTest, DragDropInSingleViewTest) {
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;  // DragDropController not created in mash.
-
   std::unique_ptr<views::Widget> widget = CreateTestWidget();
   DragTestView* drag_view = new DragTestView;
   AddViewToWidgetAndResize(widget.get(), drag_view);
@@ -404,9 +401,6 @@ TEST_F(DragDropControllerTest, DragDropInSingleViewTest) {
 }
 
 TEST_F(DragDropControllerTest, DragDropWithZeroDragUpdates) {
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;  // DragDropController not created in mash.
-
   std::unique_ptr<views::Widget> widget = CreateTestWidget();
   DragTestView* drag_view = new DragTestView;
   AddViewToWidgetAndResize(widget.get(), drag_view);
@@ -445,9 +439,6 @@ TEST_F(DragDropControllerTest, DragDropWithZeroDragUpdates) {
 }
 
 TEST_F(DragDropControllerTest, DragDropInMultipleViewsSingleWidgetTest) {
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;  // DragDropController not created in mash.
-
   std::unique_ptr<views::Widget> widget = CreateFramelessWidget();
   DragTestView* drag_view1 = new DragTestView;
   AddViewToWidgetAndResize(widget.get(), drag_view1);
@@ -503,9 +494,6 @@ TEST_F(DragDropControllerTest, DragDropInMultipleViewsSingleWidgetTest) {
 }
 
 TEST_F(DragDropControllerTest, DragDropInMultipleViewsMultipleWidgetsTest) {
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;  // DragDropController not created in mash.
-
   std::unique_ptr<views::Widget> widget1 = CreateFramelessWidget();
   DragTestView* drag_view1 = new DragTestView;
   AddViewToWidgetAndResize(widget1.get(), drag_view1);
@@ -566,9 +554,6 @@ TEST_F(DragDropControllerTest, DragDropInMultipleViewsMultipleWidgetsTest) {
 }
 
 TEST_F(DragDropControllerTest, ViewRemovedWhileInDragDropTest) {
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;  // DragDropController not created in mash.
-
   std::unique_ptr<views::Widget> widget = CreateTestWidget();
   std::unique_ptr<DragTestView> drag_view(new DragTestView);
   AddViewToWidgetAndResize(widget.get(), drag_view.get());
@@ -622,9 +607,6 @@ TEST_F(DragDropControllerTest, ViewRemovedWhileInDragDropTest) {
 }
 
 TEST_F(DragDropControllerTest, DragLeavesClipboardAloneTest) {
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;  // DragDropController not created in mash.
-
   ui::Clipboard* cb = ui::Clipboard::GetForCurrentThread();
   std::string clip_str("I am on the clipboard");
   {
@@ -663,9 +645,6 @@ TEST_F(DragDropControllerTest, DragLeavesClipboardAloneTest) {
 }
 
 TEST_F(DragDropControllerTest, WindowDestroyedDuringDragDrop) {
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;  // DragDropController not created in mash.
-
   std::unique_ptr<views::Widget> widget = CreateTestWidget();
   DragTestView* drag_view = new DragTestView;
   AddViewToWidgetAndResize(widget.get(), drag_view);
@@ -712,9 +691,6 @@ TEST_F(DragDropControllerTest, WindowDestroyedDuringDragDrop) {
 }
 
 TEST_F(DragDropControllerTest, SyntheticEventsDuringDragDrop) {
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;  // DragDropController not created in mash.
-
   std::unique_ptr<views::Widget> widget = CreateTestWidget();
   DragTestView* drag_view = new DragTestView;
   AddViewToWidgetAndResize(widget.get(), drag_view);
@@ -765,9 +741,6 @@ TEST_F(DragDropControllerTest, SyntheticEventsDuringDragDrop) {
 }
 
 TEST_F(DragDropControllerTest, PressingEscapeCancelsDragDrop) {
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;  // DragDropController not created in mash.
-
   std::unique_ptr<views::Widget> widget = CreateTestWidget();
   DragTestView* drag_view = new DragTestView;
   AddViewToWidgetAndResize(widget.get(), drag_view);
@@ -810,9 +783,6 @@ TEST_F(DragDropControllerTest, PressingEscapeCancelsDragDrop) {
 }
 
 TEST_F(DragDropControllerTest, CaptureLostCancelsDragDrop) {
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;  // DragDropController not created in mash.
-
   std::unique_ptr<views::Widget> widget = CreateTestWidget();
   DragTestView* drag_view = new DragTestView;
   AddViewToWidgetAndResize(widget.get(), drag_view);
@@ -861,9 +831,6 @@ TEST_F(DragDropControllerTest, CaptureLostCancelsDragDrop) {
 }
 
 TEST_F(DragDropControllerTest, TouchDragDropInMultipleWindows) {
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;  // DragDropController not created in mash.
-
   base::CommandLine::ForCurrentProcess()->AppendSwitch(
       switches::kEnableTouchDragDrop);
   std::unique_ptr<views::Widget> widget1 = CreateFramelessWidget();
@@ -926,9 +893,6 @@ TEST_F(DragDropControllerTest, TouchDragDropInMultipleWindows) {
 }
 
 TEST_F(DragDropControllerTest, TouchDragDropCancelsOnLongTap) {
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;  // DragDropController not created in mash.
-
   base::CommandLine::ForCurrentProcess()->AppendSwitch(
       switches::kEnableTouchDragDrop);
   std::unique_ptr<views::Widget> widget = CreateTestWidget();
@@ -955,9 +919,6 @@ TEST_F(DragDropControllerTest, TouchDragDropCancelsOnLongTap) {
 }
 
 TEST_F(DragDropControllerTest, TouchDragDropLongTapGestureIsForwarded) {
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;  // DragDropController not created in mash.
-
   base::CommandLine::ForCurrentProcess()->AppendSwitch(
       switches::kEnableTouchDragDrop);
   std::unique_ptr<views::Widget> widget = CreateTestWidget();
@@ -1001,9 +962,6 @@ class DragImageWindowObserver : public aura::WindowObserver {
 // Verifies the drag image moves back to the position where drag is started
 // across displays when drag is cancelled.
 TEST_F(DragDropControllerTest, DragCancelAcrossDisplays) {
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;  // DragDropController not created in mash.
-
   UpdateDisplay("400x400,400x400");
   aura::Window::Windows root_windows = Shell::Get()->GetAllRootWindows();
   for (aura::Window::Windows::iterator iter = root_windows.begin();
@@ -1081,9 +1039,6 @@ TEST_F(DragDropControllerTest, DragCancelAcrossDisplays) {
 
 // Verifies that a drag is aborted if a display is disconnected during the drag.
 TEST_F(DragDropControllerTest, DragCancelOnDisplayDisconnect) {
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;  // DragDropController not created in mash.
-
   UpdateDisplay("400x400,400x400");
   for (aura::Window* root : Shell::Get()->GetAllRootWindows()) {
     aura::client::SetDragDropClient(root, drag_drop_controller_.get());
@@ -1121,9 +1076,6 @@ TEST_F(DragDropControllerTest, DragCancelOnDisplayDisconnect) {
 }
 
 TEST_F(DragDropControllerTest, TouchDragDropCompletesOnFling) {
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;  // DragDropController not created in mash.
-
   base::CommandLine::ForCurrentProcess()->AppendSwitch(
       switches::kEnableTouchDragDrop);
   ui::GestureConfiguration::GetInstance()
@@ -1179,9 +1131,6 @@ TEST_F(DragDropControllerTest, TouchDragDropCompletesOnFling) {
 }
 
 TEST_F(DragDropControllerTest, DragStartedAndEndedEvents) {
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;  // DragDropController not created in mash.
-
   TestObserver observer;
   drag_drop_controller_->AddObserver(&observer);
 
@@ -1208,10 +1157,27 @@ TEST_F(DragDropControllerTest, DragStartedAndEndedEvents) {
   drag_drop_controller_->RemoveObserver(&observer);
 }
 
-TEST_F(DragDropControllerTest, EventTarget) {
-  if (Shell::GetAshConfig() == Config::MASH)
-    return;  // DragDropController not created in mash.
+TEST_F(DragDropControllerTest, SetEnabled) {
+  TestObserver observer;
+  drag_drop_controller_->AddObserver(&observer);
 
+  // Data for the drag.
+  ui::OSExchangeData data;
+  data.SetString(base::UTF8ToUTF16("I am being dragged"));
+  std::unique_ptr<views::Widget> widget = CreateTestWidget();
+  aura::Window* window = widget->GetNativeWindow();
+
+  // Cannot start a drag when the controller is disabled.
+  drag_drop_controller_->set_enabled(false);
+  drag_drop_controller_->StartDragAndDrop(
+      data, window->GetRootWindow(), window, gfx::Point(5, 5),
+      ui::DragDropTypes::DRAG_MOVE, ui::DragDropTypes::DRAG_EVENT_SOURCE_MOUSE);
+  EXPECT_EQ(TestObserver::State::kNotInvoked, observer.state());
+
+  drag_drop_controller_->RemoveObserver(&observer);
+}
+
+TEST_F(DragDropControllerTest, EventTarget) {
   std::unique_ptr<aura::Window> window(CreateTestWindowInShellWithDelegate(
       aura::test::TestWindowDelegate::CreateSelfDestroyingDelegate(), -1,
       gfx::Rect(0, 0, 100, 100)));

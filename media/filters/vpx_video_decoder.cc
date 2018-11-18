@@ -35,14 +35,14 @@
 
 namespace media {
 
-// Always try to use three threads for video decoding.  There is little reason
-// not to since current day CPUs tend to be multi-core and we measured
-// performance benefits on older machines such as P4s with hyperthreading.
-static const int kDecodeThreads = 2;
-static const int kMaxDecodeThreads = 32;
-
 // Returns the number of threads.
-static int GetThreadCount(const VideoDecoderConfig& config) {
+static int GetVpxVideoDecoderThreadCount(const VideoDecoderConfig& config) {
+  // Always try to use at least two threads for video decoding.  There is little
+  // reason not to since current day CPUs tend to be multi-core and we measured
+  // performance benefits on older machines such as P4s with hyperthreading.
+  constexpr int kDecodeThreads = 2;
+  constexpr int kMaxDecodeThreads = 32;
+
   // Refer to http://crbug.com/93932 for tsan suppressions on decoding.
   int decode_threads = kDecodeThreads;
 
@@ -80,7 +80,7 @@ static std::unique_ptr<vpx_codec_ctx> InitializeVpxContext(
   vpx_codec_dec_cfg_t vpx_config = {0};
   vpx_config.w = config.coded_size().width();
   vpx_config.h = config.coded_size().height();
-  vpx_config.threads = GetThreadCount(config);
+  vpx_config.threads = GetVpxVideoDecoderThreadCount(config);
 
   vpx_codec_err_t status = vpx_codec_dec_init(
       context.get(),
@@ -138,6 +138,7 @@ void VpxVideoDecoder::Initialize(
     const InitCB& init_cb,
     const OutputCB& output_cb,
     const WaitingForDecryptionKeyCB& /* waiting_for_decryption_key_cb */) {
+  DVLOG(1) << __func__ << ": " << config.AsHumanReadableString();
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(config.IsValidConfig());
 
@@ -158,9 +159,10 @@ void VpxVideoDecoder::Initialize(
 
 void VpxVideoDecoder::Decode(scoped_refptr<DecoderBuffer> buffer,
                              const DecodeCB& decode_cb) {
+  DVLOG(3) << __func__ << ": " << buffer->AsHumanReadableString();
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   DCHECK(buffer);
-  DCHECK(!decode_cb.is_null());
+  DCHECK(decode_cb);
   DCHECK_NE(state_, kUninitialized)
       << "Called Decode() before successful Initialize()";
 
@@ -365,14 +367,19 @@ bool VpxVideoDecoder::VpxDecode(const DecoderBuffer* buffer,
 
   // Default to the color space from the config, but if the bistream specifies
   // one, prefer that instead.
-  ColorSpace color_space = config_.color_space();
-  if (vpx_image->cs == VPX_CS_BT_709)
-    color_space = COLOR_SPACE_HD_REC709;
-  else if (vpx_image->cs == VPX_CS_BT_601 || vpx_image->cs == VPX_CS_SMPTE_170)
-    color_space = COLOR_SPACE_SD_REC601;
-  (*video_frame)
-      ->metadata()
-      ->SetInteger(VideoFrameMetadata::COLOR_SPACE, color_space);
+  switch (config_.color_space()) {
+    case COLOR_SPACE_UNSPECIFIED:
+      break;
+    case COLOR_SPACE_HD_REC709:
+      (*video_frame)->set_color_space(gfx::ColorSpace::CreateREC709());
+      break;
+    case COLOR_SPACE_SD_REC601:
+      (*video_frame)->set_color_space(gfx::ColorSpace::CreateREC601());
+      break;
+    case COLOR_SPACE_JPEG:
+      (*video_frame)->set_color_space(gfx::ColorSpace::CreateJpeg());
+      break;
+  }
 
   if (config_.color_space_info().IsSpecified()) {
     // config_.color_space_info() comes from the color tag which is
@@ -504,6 +511,10 @@ bool VpxVideoDecoder::CopyVpxImageToVideoFrame(
       codec_format = vpx_image_alpha ? PIXEL_FORMAT_I420A : PIXEL_FORMAT_I420;
       break;
 
+    case VPX_IMG_FMT_I422:
+      codec_format = PIXEL_FORMAT_I422;
+      break;
+
     case VPX_IMG_FMT_I444:
       codec_format = PIXEL_FORMAT_I444;
       break;
@@ -596,26 +607,18 @@ bool VpxVideoDecoder::CopyVpxImageToVideoFrame(
     return true;
   }
 
-  DCHECK(codec_format == PIXEL_FORMAT_I420 ||
-         codec_format == PIXEL_FORMAT_I420A);
-
   *video_frame = frame_pool_.CreateFrame(codec_format, visible_size,
                                          gfx::Rect(visible_size),
                                          config_.natural_size(), kNoTimestamp);
   if (!(*video_frame))
     return false;
 
-  libyuv::I420Copy(
-      vpx_image->planes[VPX_PLANE_Y], vpx_image->stride[VPX_PLANE_Y],
-      vpx_image->planes[VPX_PLANE_U], vpx_image->stride[VPX_PLANE_U],
-      vpx_image->planes[VPX_PLANE_V], vpx_image->stride[VPX_PLANE_V],
-      (*video_frame)->visible_data(VideoFrame::kYPlane),
-      (*video_frame)->stride(VideoFrame::kYPlane),
-      (*video_frame)->visible_data(VideoFrame::kUPlane),
-      (*video_frame)->stride(VideoFrame::kUPlane),
-      (*video_frame)->visible_data(VideoFrame::kVPlane),
-      (*video_frame)->stride(VideoFrame::kVPlane), coded_size.width(),
-      coded_size.height());
+  for (int plane = 0; plane < 3; plane++) {
+    libyuv::CopyPlane(
+        vpx_image->planes[plane], vpx_image->stride[plane],
+        (*video_frame)->visible_data(plane), (*video_frame)->stride(plane),
+        (*video_frame)->row_bytes(plane), (*video_frame)->rows(plane));
+  }
 
   return true;
 }

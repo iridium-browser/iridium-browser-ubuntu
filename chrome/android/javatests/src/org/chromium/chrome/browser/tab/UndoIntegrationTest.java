@@ -26,9 +26,9 @@ import org.chromium.chrome.browser.tabmodel.TabModel;
 import org.chromium.chrome.browser.tabmodel.TabModelUtils;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.ChromeTabbedActivityTestRule;
-import org.chromium.content.browser.test.util.Criteria;
-import org.chromium.content.browser.test.util.CriteriaHelper;
-import org.chromium.content.browser.test.util.DOMUtils;
+import org.chromium.content_public.browser.test.util.Criteria;
+import org.chromium.content_public.browser.test.util.CriteriaHelper;
+import org.chromium.content_public.browser.test.util.DOMUtils;
 
 import java.util.concurrent.TimeoutException;
 
@@ -80,7 +80,7 @@ public class UndoIntegrationTest {
         final Tab tab = TabModelUtils.getCurrentTab(model);
 
         // Clock on the link that will trigger a delayed window popup.
-        DOMUtils.clickNode(tab.getContentViewCore(), "link");
+        DOMUtils.clickNode(tab.getWebContents(), "link");
 
         // Attempt to close the tab, which will delay closing until the undo timeout goes away.
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {

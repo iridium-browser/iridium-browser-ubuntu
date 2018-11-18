@@ -45,7 +45,7 @@ public class BrowserSessionDataProvider {
     public BrowserSessionDataProvider(Intent intent) {
         if (intent == null) assert false;
         mSession = CustomTabsSessionToken.getSessionTokenFromIntent(intent);
-        mIsTrustedIntent = IntentHandler.isIntentChromeOrFirstParty(intent);
+        mIsTrustedIntent = IntentHandler.notSecureIsIntentChromeOrFirstParty(intent);
 
         mAnimationBundle = IntentUtils.safeGetBundleExtra(
                 intent, CustomTabsIntent.EXTRA_EXIT_ANIMATION_BUNDLE);
@@ -104,7 +104,10 @@ public class BrowserSessionDataProvider {
 
     /**
      * Checks whether or not the Intent is from Chrome or other trusted first party.
+     *
+     * @deprecated This method is not reliable, see https://crbug.com/832124
      */
+    @Deprecated
     public boolean isTrustedIntent() {
         return mIsTrustedIntent;
     }

@@ -29,11 +29,12 @@ class FakeDataTypeController : public DirectoryDataTypeController {
 
   // DirectoryDataTypeController implementation.
   bool ShouldLoadModelBeforeConfigure() const override;
-  void LoadModels(const ModelLoadCallback& model_load_callback) override;
-  void RegisterWithBackend(base::Callback<void(bool)> set_downloaded,
+  void LoadModels(const ConfigureContext& configure_context,
+                  const ModelLoadCallback& model_load_callback) override;
+  void RegisterWithBackend(base::OnceCallback<void(bool)> set_downloaded,
                            ModelTypeConfigurer* configurer) override;
-  void StartAssociating(const StartCallback& start_callback) override;
-  void Stop() override;
+  void StartAssociating(StartCallback start_callback) override;
+  void Stop(ShutdownReason shutdown_reason) override;
   ChangeProcessor* GetChangeProcessor() const override;
   State state() const override;
   bool ReadyForStart() const override;
@@ -55,6 +56,8 @@ class FakeDataTypeController : public DirectoryDataTypeController {
     return register_with_backend_call_count_;
   }
 
+  int clear_metadata_call_count() const { return clear_metadata_call_count_; }
+
  private:
   DataTypeController::State state_;
   bool model_load_delayed_;
@@ -64,6 +67,7 @@ class FakeDataTypeController : public DirectoryDataTypeController {
   bool ready_for_start_;
   bool should_load_model_before_configure_;
   int register_with_backend_call_count_;
+  int clear_metadata_call_count_;
 };
 
 }  // namespace syncer

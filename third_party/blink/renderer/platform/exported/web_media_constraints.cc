@@ -72,6 +72,10 @@ void MaybeEmitNamedBoolean(StringBuilder& builder,
 
 }  // namespace
 
+const char kEchoCancellationTypeBrowser[] = "browser";
+const char kEchoCancellationTypeAec3[] = "aec3";
+const char kEchoCancellationTypeSystem[] = "system";
+
 class WebMediaConstraintsPrivate final
     : public ThreadSafeRefCounted<WebMediaConstraintsPrivate> {
  public:
@@ -168,7 +172,7 @@ LongConstraint::LongConstraint(const char* name)
       has_exact_(false),
       has_ideal_(false) {}
 
-bool LongConstraint::Matches(long value) const {
+bool LongConstraint::Matches(int32_t value) const {
   if (has_min_ && value < min_) {
     return false;
   }
@@ -352,6 +356,7 @@ WebMediaTrackConstraintSet::WebMediaTrackConstraintSet()
       sample_rate("sampleRate"),
       sample_size("sampleSize"),
       echo_cancellation("echoCancellation"),
+      echo_cancellation_type("echoCancellationType"),
       latency("latency"),
       channel_count("channelCount"),
       device_id("deviceId"),
@@ -373,8 +378,6 @@ WebMediaTrackConstraintSet::WebMediaTrackConstraintSet()
       goog_highpass_filter("googHighpassFilter"),
       goog_typing_noise_detection("googTypingNoiseDetection"),
       goog_experimental_noise_suppression("googExperimentalNoiseSuppression"),
-      goog_beamforming("googBeamforming"),
-      goog_array_geometry("googArrayGeometry"),
       goog_audio_mirroring("googAudioMirroring"),
       goog_da_echo_cancellation("googDAEchoCancellation"),
       goog_noise_reduction("googNoiseReduction"),
@@ -401,8 +404,7 @@ WebMediaTrackConstraintSet::WebMediaTrackConstraintSet()
       goog_cpu_overuse_encode_usage("googCpuOveruseEncodeUsage"),
       goog_high_start_bitrate("googHighStartBitrate"),
       goog_payload_padding("googPayloadPadding"),
-      goog_latency_ms("latencyMs"),
-      goog_power_line_frequency("googPowerLineFrequency") {}
+      goog_latency_ms("latencyMs") {}
 
 std::vector<const BaseConstraint*> WebMediaTrackConstraintSet::AllConstraints()
     const {
@@ -415,6 +417,7 @@ std::vector<const BaseConstraint*> WebMediaTrackConstraintSet::AllConstraints()
                                   &sample_rate,
                                   &sample_size,
                                   &echo_cancellation,
+                                  &echo_cancellation_type,
                                   &latency,
                                   &channel_count,
                                   &device_id,
@@ -436,8 +439,6 @@ std::vector<const BaseConstraint*> WebMediaTrackConstraintSet::AllConstraints()
                                   &goog_highpass_filter,
                                   &goog_typing_noise_detection,
                                   &goog_experimental_noise_suppression,
-                                  &goog_beamforming,
-                                  &goog_array_geometry,
                                   &goog_audio_mirroring,
                                   &goog_da_echo_cancellation,
                                   &goog_noise_reduction,
@@ -462,14 +463,13 @@ std::vector<const BaseConstraint*> WebMediaTrackConstraintSet::AllConstraints()
                                   &goog_cpu_overuse_encode_usage,
                                   &goog_high_start_bitrate,
                                   &goog_payload_padding,
-                                  &goog_latency_ms,
-                                  &goog_power_line_frequency};
+                                  &goog_latency_ms};
   const int element_count = sizeof(temp) / sizeof(temp[0]);
   return std::vector<const BaseConstraint*>(&temp[0], &temp[element_count]);
 }
 
 bool WebMediaTrackConstraintSet::IsEmpty() const {
-  for (const auto& constraint : AllConstraints()) {
+  for (auto* const constraint : AllConstraints()) {
     if (!constraint->IsEmpty())
       return false;
   }
@@ -479,7 +479,7 @@ bool WebMediaTrackConstraintSet::IsEmpty() const {
 bool WebMediaTrackConstraintSet::HasMandatoryOutsideSet(
     const std::vector<std::string>& good_names,
     std::string& found_name) const {
-  for (const auto& constraint : AllConstraints()) {
+  for (auto* const constraint : AllConstraints()) {
     if (constraint->HasMandatory()) {
       if (std::find(good_names.begin(), good_names.end(),
                     constraint->GetName()) == good_names.end()) {
@@ -499,7 +499,7 @@ bool WebMediaTrackConstraintSet::HasMandatory() const {
 WebString WebMediaTrackConstraintSet::ToString() const {
   StringBuilder builder;
   bool first = true;
-  for (const auto& constraint : AllConstraints()) {
+  for (auto* const constraint : AllConstraints()) {
     if (!constraint->IsEmpty()) {
       if (!first)
         builder.Append(", ");

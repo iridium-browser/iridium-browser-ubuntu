@@ -4,18 +4,18 @@
 
 #include "content/renderer/webgraphicscontext3d_provider_impl.h"
 
+#include "cc/paint/paint_image.h"
 #include "cc/tiles/gpu_image_decode_cache.h"
 #include "components/viz/common/gl_helper.h"
 #include "gpu/command_buffer/client/context_support.h"
-#include "services/ui/public/cpp/gpu/context_provider_command_buffer.h"
+#include "services/ws/public/cpp/gpu/context_provider_command_buffer.h"
+#include "third_party/skia/include/gpu/GrContext.h"
 
 namespace content {
 
 WebGraphicsContext3DProviderImpl::WebGraphicsContext3DProviderImpl(
-    scoped_refptr<ui::ContextProviderCommandBuffer> provider,
-    bool software_rendering)
-    : provider_(std::move(provider)), software_rendering_(software_rendering) {
-}
+    scoped_refptr<ws::ContextProviderCommandBuffer> provider)
+    : provider_(std::move(provider)) {}
 
 WebGraphicsContext3DProviderImpl::~WebGraphicsContext3DProviderImpl() {
   provider_->RemoveObserver(this);
@@ -32,6 +32,11 @@ bool WebGraphicsContext3DProviderImpl::BindToCurrentThread() {
 
 gpu::gles2::GLES2Interface* WebGraphicsContext3DProviderImpl::ContextGL() {
   return provider_->ContextGL();
+}
+
+gpu::webgpu::WebGPUInterface*
+WebGraphicsContext3DProviderImpl::WebGPUInterface() {
+  return provider_->WebGPUInterface();
 }
 
 GrContext* WebGraphicsContext3DProviderImpl::GetGrContext() {
@@ -56,10 +61,6 @@ viz::GLHelper* WebGraphicsContext3DProviderImpl::GetGLHelper() {
   return gl_helper_.get();
 }
 
-bool WebGraphicsContext3DProviderImpl::IsSoftwareRendering() const {
-  return software_rendering_;
-}
-
 void WebGraphicsContext3DProviderImpl::SetLostContextCallback(
     base::RepeatingClosure c) {
   context_lost_callback_ = std::move(c);
@@ -70,19 +71,17 @@ void WebGraphicsContext3DProviderImpl::SetErrorMessageCallback(
   provider_->ContextSupport()->SetErrorMessageCallback(std::move(c));
 }
 
-void WebGraphicsContext3DProviderImpl::SignalQuery(uint32_t query,
-                                                   base::OnceClosure callback) {
-  provider_->ContextSupport()->SignalQuery(query, std::move(callback));
-}
-
 void WebGraphicsContext3DProviderImpl::OnContextLost() {
   if (!context_lost_callback_.is_null())
     context_lost_callback_.Run();
 }
 
-cc::ImageDecodeCache* WebGraphicsContext3DProviderImpl::ImageDecodeCache() {
-  if (image_decode_cache_)
-    return image_decode_cache_.get();
+cc::ImageDecodeCache* WebGraphicsContext3DProviderImpl::ImageDecodeCache(
+    SkColorType color_type) {
+  DCHECK(GetGrContext()->colorTypeSupportedAsImage(color_type));
+  auto cache_iterator = image_decode_cache_map_.find(color_type);
+  if (cache_iterator != image_decode_cache_map_.end())
+    return cache_iterator->second.get();
 
   // This denotes the allocated GPU memory budget for the cache used for
   // book-keeping. The cache indicates when the total memory locked exceeds this
@@ -92,10 +91,16 @@ cc::ImageDecodeCache* WebGraphicsContext3DProviderImpl::ImageDecodeCache() {
   // TransferCache is used only with OOP raster.
   const bool use_transfer_cache = false;
 
-  image_decode_cache_ = std::make_unique<cc::GpuImageDecodeCache>(
-      provider_.get(), use_transfer_cache, kN32_SkColorType,
-      kMaxWorkingSetBytes, provider_->ContextCapabilities().max_texture_size);
-  return image_decode_cache_.get();
+  auto insertion_result = image_decode_cache_map_.insert(
+      std::pair<SkColorType, std::unique_ptr<cc::ImageDecodeCache>>(
+          color_type, std::make_unique<cc::GpuImageDecodeCache>(
+                          provider_.get(), use_transfer_cache, color_type,
+                          kMaxWorkingSetBytes,
+                          provider_->ContextCapabilities().max_texture_size,
+                          cc::PaintImage::kDefaultGeneratorClientId)));
+  DCHECK(insertion_result.second);
+  cache_iterator = insertion_result.first;
+  return cache_iterator->second.get();
 }
 
 }  // namespace content

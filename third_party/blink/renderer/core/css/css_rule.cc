@@ -30,7 +30,7 @@ namespace blink {
 
 struct SameSizeAsCSSRule : public GarbageCollectedFinalized<SameSizeAsCSSRule>,
                            public ScriptWrappable {
-  virtual ~SameSizeAsCSSRule();
+  ~SameSizeAsCSSRule() override;
   unsigned char bitfields;
   void* pointer_union;
 };
@@ -64,18 +64,10 @@ void CSSRule::Trace(blink::Visitor* visitor) {
   // pre-oilpan world, where the parent link is mysteriously zeroed under
   // some circumstances.
   if (parent_is_rule_)
-    visitor->Trace(parent_rule_);
+    visitor->TraceWithWrappers(parent_rule_);
   else
-    visitor->Trace(parent_style_sheet_);
+    visitor->TraceWithWrappers(parent_style_sheet_);
   ScriptWrappable::Trace(visitor);
-}
-
-void CSSRule::TraceWrappers(const ScriptWrappableVisitor* visitor) const {
-  if (parent_is_rule_)
-    visitor->TraceWrappersWithManualWriteBarrier(parent_rule_);
-  else
-    visitor->TraceWrappersWithManualWriteBarrier(parent_style_sheet_);
-  ScriptWrappable::TraceWrappers(visitor);
 }
 
 }  // namespace blink

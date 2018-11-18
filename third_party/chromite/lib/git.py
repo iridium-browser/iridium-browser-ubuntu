@@ -10,6 +10,7 @@ from __future__ import print_function
 import collections
 import datetime
 import errno
+import fnmatch
 import hashlib
 import os
 import re
@@ -21,65 +22,6 @@ from chromite.lib import constants
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_logging as logging
 from chromite.lib import osutils
-
-
-# Retry a git operation if git returns a error response with any of these
-# messages. It's all observed 'bad' GoB responses so far.
-GIT_TRANSIENT_ERRORS = (
-    # crbug.com/285832
-    r'! \[remote rejected\].*\(error in hook\)',
-
-    # crbug.com/289932
-    r'! \[remote rejected\].*\(failed to lock\)',
-
-    # crbug.com/307156
-    r'! \[remote rejected\].*\(error in Gerrit backend\)',
-
-    # crbug.com/285832
-    r'remote error: Internal Server Error',
-
-    # crbug.com/294449
-    r'fatal: Couldn\'t find remote ref ',
-
-    # crbug.com/220543
-    r'git fetch_pack: expected ACK/NAK, got',
-
-    # crbug.com/189455
-    r'protocol error: bad pack header',
-
-    # crbug.com/202807
-    r'The remote end hung up unexpectedly',
-
-    # crbug.com/298189
-    r'TLS packet with unexpected length was received',
-
-    # crbug.com/187444
-    r'RPC failed; result=\d+, HTTP code = \d+',
-
-    # crbug.com/315421, b2/18249316
-    r'The requested URL returned error: 5',
-
-    # crbug.com/388876
-    r'Connection timed out',
-
-    # crbug.com/451458, b/19202011
-    r'repository cannot accept new pushes; contact support',
-
-    # crbug.com/535306
-    r'Service Temporarily Unavailable',
-
-    # crbug.com/675262
-    r'Connection refused',
-
-    # crbug.com/725233
-    r'Operation too slow',
-)
-
-GIT_TRANSIENT_ERRORS_RE = re.compile('|'.join(GIT_TRANSIENT_ERRORS),
-                                     re.IGNORECASE)
-
-DEFAULT_RETRY_INTERVAL = 3
-DEFAULT_RETRIES = 10
 
 
 class GitException(Exception):
@@ -141,9 +83,22 @@ def IsSubmoduleCheckoutRoot(path, remote, url):
   return False
 
 
-def IsGitRepo(cwd):
-  """Checks if there's a git repo rooted at a directory."""
-  return os.path.isdir(os.path.join(cwd, '.git'))
+def GetGitGitdir(pwd):
+  """Probes for a git gitdir directory rooted at a directory.
+
+  Args:
+    pwd: Directory to probe. If a checkout, should be the root.
+
+  Returns:
+    Path of the gitdir directory. None if the directory is not a git repo.
+  """
+  if os.path.isdir(os.path.join(pwd, '.git')):
+    return os.path.join(pwd, '.git')
+  # Is this directory a bare repo with no checkout?
+  if os.path.isdir(os.path.join(
+      pwd, 'objects')) and os.path.isdir(os.path.join(pwd, 'refs')):
+    return pwd
+  return None
 
 
 def IsGitRepositoryCorrupted(cwd):
@@ -205,6 +160,29 @@ def GetGitRepoRevision(cwd, branch='HEAD', short=False):
   if short:
     cmd.insert(1, '--short')
   return RunGit(cwd, cmd).output.strip()
+
+
+def IsReachable(cwd, to_ref, from_ref):
+  """Determine whether one commit ref is reachable from another.
+
+  Args:
+    cwd: The git repository to work with.
+    to_ref: The commit ref that may be reachable.
+    from_ref: The commit ref that |to_ref| may be reachable from.
+
+  Returns:
+    True if |to_ref| is reachable from |from_ref|.
+
+  Raises:
+    RunCommandError: if some error occurs, such as a commit ref not existing.
+  """
+  try:
+    RunGit(cwd, ['merge-base', '--is-ancestor', to_ref, from_ref])
+  except cros_build_lib.RunCommandError as e:
+    if e.result.returncode == 1:
+      return False
+    raise
+  return True
 
 
 def DoesCommitExistInRepo(cwd, commit):
@@ -312,11 +290,11 @@ class ProjectCheckout(dict):
       return False
 
     # Old heuristic.
-    site_config = config_lib.GetConfig()
-    if (self['remote'] not in site_config.params.CROS_REMOTES or
-        self['remote'] not in site_config.params.BRANCHABLE_PROJECTS):
+    site_params = config_lib.GetSiteParams()
+    if (self['remote'] not in site_params.CROS_REMOTES or
+        self['remote'] not in site_params.BRANCHABLE_PROJECTS):
       return False
-    return re.match(site_config.params.BRANCHABLE_PROJECTS[self['remote']],
+    return re.match(site_params.BRANCHABLE_PROJECTS[self['remote']],
                     self['name'])
 
   def IsPinnableProject(self):
@@ -490,11 +468,11 @@ class Manifest(object):
         remote_name, StripRefs(upstream),
     )
 
-    site_config = config_lib.GetConfig()
-    attrs['pushable'] = remote in site_config.params.GIT_REMOTES
+    site_params = config_lib.GetSiteParams()
+    attrs['pushable'] = remote in site_params.GIT_REMOTES
     if attrs['pushable']:
       attrs['push_remote'] = remote
-      attrs['push_remote_url'] = site_config.params.GIT_REMOTES[remote]
+      attrs['push_remote_url'] = site_params.GIT_REMOTES[remote]
       attrs['push_url'] = '%s/%s' % (attrs['push_remote_url'], attrs['name'])
     groups = set(attrs.get('groups', 'default').replace(',', ' ').split())
     groups.add('default')
@@ -801,7 +779,6 @@ def RunGit(git_repo, cmd, **kwargs):
   Returns:
     A CommandResult object.
   """
-
   kwargs.setdefault('print_cmd', False)
   kwargs.setdefault('cwd', git_repo)
   kwargs.setdefault('capture_output', True)
@@ -819,21 +796,33 @@ def Init(git_repo):
   RunGit(git_repo, ['init'])
 
 
-def Clone(git_repo, git_url, branch=None):
+def Clone(dest_path, git_url, reference=None, depth=None, branch=None,
+          single_branch=False):
   """Clone a git repository, into the given directory.
 
   Args:
-    git_repo: Path for where to create a git repo. Directory will be created if
-              it doesnt exist.
-    git_url: Url to clone the git repository from.
-    branch: Branch to checkout ('stabilize.5978.51.B'), or None.
+    dest_path: Path to clone into. Will be created if it doesn't exist.
+    git_url: Git URL to clone from.
+    reference: Path to a git repositry to reference in the clone. See
+      documentation for `git clone --reference`.
+    depth: Create a shallow clone with the given history depth. Cannot be used
+      with 'reference'.
+    branch: Branch to use for the initial HEAD. Defaults to the remote's HEAD.
+    single_branch: Clone only the requested branch.
   """
-  osutils.SafeMakedirs(git_repo)
-
-  cmd = ['clone', git_url, git_repo]
+  if reference and depth:
+    raise ValueError('reference and depth are mutually exclusive')
+  osutils.SafeMakedirs(dest_path)
+  cmd = ['clone', git_url, dest_path]
+  if reference:
+    cmd += ['--reference', reference]
+  if depth:
+    cmd += ['--depth', str(int(depth))]
   if branch:
-    cmd += ['-b', branch]
-  RunGit(git_repo, cmd)
+    cmd += ['--branch', branch]
+  if single_branch:
+    cmd += ['--single-branch']
+  RunGit(dest_path, cmd, print_cmd=True)
 
 
 def ShallowFetch(git_repo, git_url, sparse_checkout=None):
@@ -862,6 +851,15 @@ def ShallowFetch(git_repo, git_url, sparse_checkout=None):
   RunGit(git_repo, ['pull', 'origin', 'master'],
          print_cmd=True, redirect_stderr=True, capture_output=False)
   logging.info('ShallowFetch completed in %s.', utcnow() - start)
+
+
+def FindGitTopLevel(path):
+  """Returns the top-level directory of the given git working tree path."""
+  try:
+    ret = RunGit(path, ['rev-parse', '--show-toplevel'])
+    return ret.output.strip()
+  except cros_build_lib.RunCommandError:
+    return None
 
 
 def GetProjectUserEmail(git_repo):
@@ -1246,7 +1244,7 @@ def UploadCL(git_repo, remote, branch, local_branch='HEAD', draft=False,
   return GitPush(git_repo, local_branch, remote_ref, **kwargs)
 
 
-def GitPush(git_repo, refspec, push_to, force=False,
+def GitPush(git_repo, refspec, push_to, force=False, dry_run=False,
             capture_output=True, skip=False, **kwargs):
   """Wrapper for pushing to a branch.
 
@@ -1255,17 +1253,18 @@ def GitPush(git_repo, refspec, push_to, force=False,
     refspec: The local ref to push to the remote.
     push_to: A RemoteRef object representing the remote ref to push to.
     force: Whether to bypass non-fastforward checks.
+    dry_run: If True, do everything except actually push the remote ref.
     capture_output: Whether to capture output for this command.
-    skip: Do not actually push anything.
+    skip: Log the git command that would have been run, but don't run it; this
+      avoids e.g. remote access checks that still apply to |dry_run|.
   """
   cmd = ['push', push_to.remote, '%s:%s' % (refspec, push_to.ref)]
   if force:
     cmd.append('--force')
+  if dry_run:
+    cmd.append('--dry-run')
 
   if skip:
-    # git-push has a --dry-run option but we can't use it because that still
-    # runs push-access checks, and we want the skip mode to be available to
-    # users who can't really push to remote.
     logging.info('Would have run "%s"', cmd)
     return
 
@@ -1449,3 +1448,25 @@ def GarbageCollection(git_repo, prune_all=False):
   if prune_all:
     cmd.append('--prune=all')
   RunGit(git_repo, cmd)
+
+
+def DeleteStaleLocks(git_repo):
+  """Clean up stale locks left behind in a git repo.
+
+  This might occur if an earlier git command was killed during an operation.
+  Warning: This is dangerous because these locks are intended to prevent
+  corruption. Only use this if you are sure that no other git process is
+  accessing the repo (such as at the beginning of a fresh build).
+
+  Args"
+    git_repo: Directory of git repository.
+  """
+  git_gitdir = GetGitGitdir(git_repo)
+  if not git_gitdir:
+    raise GitException("Not a valid git repo: %s" % git_repo)
+
+  for root, _, filenames in os.walk(git_gitdir):
+    for filename in fnmatch.filter(filenames, '*.lock'):
+      p = os.path.join(root, filename)
+      logging.info('Found stale git lock, removing: %s', p)
+      os.remove(p)

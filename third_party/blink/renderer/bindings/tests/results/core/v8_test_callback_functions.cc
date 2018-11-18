@@ -8,21 +8,22 @@
 // DO NOT MODIFY!
 
 // clang-format off
-#include "v8_test_callback_functions.h"
+#include "third_party/blink/renderer/bindings/tests/results/core/v8_test_callback_functions.h"
 
 #include "base/memory/scoped_refptr.h"
-#include "bindings/core/v8/exception_state.h"
-#include "bindings/core/v8/idl_types.h"
-#include "bindings/core/v8/native_value_traits_impl.h"
-#include "bindings/core/v8/v8_any_callback_function_optional_any_arg.h"
-#include "bindings/core/v8/v8_dom_configuration.h"
-#include "bindings/core/v8/v8_long_callback_function.h"
-#include "bindings/core/v8/v8_void_callback_function.h"
-#include "core/execution_context/execution_context.h"
-#include "core/html/custom/v0_custom_element_processing_stack.h"
-#include "platform/bindings/runtime_call_stats.h"
-#include "platform/bindings/v8_object_constructor.h"
-#include "platform/wtf/get_ptr.h"
+#include "third_party/blink/renderer/bindings/core/v8/idl_types.h"
+#include "third_party/blink/renderer/bindings/core/v8/native_value_traits_impl.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_any_callback_function_optional_any_arg.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_dom_configuration.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_long_callback_function.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_void_callback_function.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
+#include "third_party/blink/renderer/core/html/custom/v0_custom_element_processing_stack.h"
+#include "third_party/blink/renderer/platform/bindings/exception_messages.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
+#include "third_party/blink/renderer/platform/bindings/runtime_call_stats.h"
+#include "third_party/blink/renderer/platform/bindings/v8_object_constructor.h"
+#include "third_party/blink/renderer/platform/wtf/get_ptr.h"
 
 namespace blink {
 
@@ -159,7 +160,7 @@ static void voidMethodOptionalCallbackFunctionInArgMethod(const v8::FunctionCall
   }
   if (info[0]->IsFunction()) {
     voidCallbackFunctionArg = V8VoidCallbackFunction::Create(info[0].As<v8::Function>());
-  } else if (info[0]->IsNullOrUndefined()) {
+  } else if (info[0]->IsUndefined()) {
     voidCallbackFunctionArg = nullptr;
   } else {
     V8ThrowException::ThrowTypeError(info.GetIsolate(), ExceptionMessages::FailedToExecute("voidMethodOptionalCallbackFunctionInArg", "TestCallbackFunctions", "The callback provided as parameter 1 is not a function."));
@@ -180,7 +181,7 @@ static void voidMethodNullableCallbackFunctionInArgMethod(const v8::FunctionCall
   V8VoidCallbackFunction* voidCallbackFunctionArg;
   if (info[0]->IsFunction()) {
     voidCallbackFunctionArg = V8VoidCallbackFunction::Create(info[0].As<v8::Function>());
-  } else if (0 < info.Length() && info[0]->IsNullOrUndefined()) {
+  } else if (info[0]->IsNullOrUndefined()) {
     voidCallbackFunctionArg = nullptr;
   } else {
     V8ThrowException::ThrowTypeError(info.GetIsolate(), ExceptionMessages::FailedToExecute("voidMethodNullableCallbackFunctionInArg", "TestCallbackFunctions", "The callback provided as parameter 1 is not a function."));
@@ -255,7 +256,7 @@ void V8TestCallbackFunctions::customElementCallbacksMethodMethodCallback(const v
 }
 
 static const V8DOMConfiguration::AccessorConfiguration V8TestCallbackFunctionsAccessors[] = {
-    { "customElementsCallbacksReadonlyAttribute", V8TestCallbackFunctions::customElementsCallbacksReadonlyAttributeAttributeGetterCallback, nullptr, V8PrivateProperty::kNoCachedAccessor, static_cast<v8::PropertyAttribute>(v8::ReadOnly), V8DOMConfiguration::kOnPrototype, V8DOMConfiguration::kCheckHolder, V8DOMConfiguration::kHasSideEffect, V8DOMConfiguration::kAllWorlds },
+    { "customElementsCallbacksReadonlyAttribute", V8TestCallbackFunctions::customElementsCallbacksReadonlyAttributeAttributeGetterCallback, nullptr, V8PrivateProperty::kNoCachedAccessor, static_cast<v8::PropertyAttribute>(v8::ReadOnly), V8DOMConfiguration::kOnPrototype, V8DOMConfiguration::kCheckHolder, V8DOMConfiguration::kHasSideEffect, V8DOMConfiguration::kAlwaysCallGetter, V8DOMConfiguration::kAllWorlds },
 };
 
 static const V8DOMConfiguration::MethodConfiguration V8TestCallbackFunctionsMethods[] = {
@@ -286,10 +287,10 @@ static void installV8TestCallbackFunctionsTemplate(
   // Register IDL constants, attributes and operations.
   V8DOMConfiguration::InstallAccessors(
       isolate, world, instanceTemplate, prototypeTemplate, interfaceTemplate,
-      signature, V8TestCallbackFunctionsAccessors, WTF_ARRAY_LENGTH(V8TestCallbackFunctionsAccessors));
+      signature, V8TestCallbackFunctionsAccessors, base::size(V8TestCallbackFunctionsAccessors));
   V8DOMConfiguration::InstallMethods(
       isolate, world, instanceTemplate, prototypeTemplate, interfaceTemplate,
-      signature, V8TestCallbackFunctionsMethods, WTF_ARRAY_LENGTH(V8TestCallbackFunctionsMethods));
+      signature, V8TestCallbackFunctionsMethods, base::size(V8TestCallbackFunctionsMethods));
 
   // Custom signature
 

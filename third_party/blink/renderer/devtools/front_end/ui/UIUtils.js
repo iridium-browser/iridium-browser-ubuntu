@@ -1657,7 +1657,8 @@ UI.ThemeSupport = class {
     this._themeName = setting.get() || 'default';
     this._themableProperties = new Set([
       'color', 'box-shadow', 'text-shadow', 'outline-color', 'background-image', 'background-color',
-      'border-left-color', 'border-right-color', 'border-top-color', 'border-bottom-color', '-webkit-border-image'
+      'border-left-color', 'border-right-color', 'border-top-color', 'border-bottom-color', '-webkit-border-image',
+      'fill', 'stroke'
     ]);
     /** @type {!Map<string, string>} */
     this._cachedThemePatches = new Map();
@@ -2017,4 +2018,30 @@ UI.createInlineButton = function(toolbarButton) {
   toolbar.appendToolbarItem(toolbarButton);
   shadowRoot.appendChild(toolbar.element);
   return element;
+};
+
+/**
+ * @param {string} text
+ * @param {number} maxLength
+ * @return {!DocumentFragment}
+ */
+UI.createExpandableText = function(text, maxLength) {
+  const fragment = createDocumentFragment();
+  fragment.textContent = text.slice(0, maxLength);
+  const hiddenText = text.slice(maxLength);
+
+  const expandButton = fragment.createChild('span', 'expandable-inline-button');
+  expandButton.setAttribute('data-text', ls`Show ${Number.withThousandsSeparator(hiddenText.length)} more`);
+  expandButton.addEventListener('click', () => {
+    if (expandButton.parentElement)
+      expandButton.parentElement.insertBefore(createTextNode(hiddenText), expandButton);
+    expandButton.remove();
+  });
+
+  const copyButton = fragment.createChild('span', 'expandable-inline-button');
+  copyButton.setAttribute('data-text', ls`Copy`);
+  copyButton.addEventListener('click', () => {
+    InspectorFrontendHost.copyText(text);
+  });
+  return fragment;
 };

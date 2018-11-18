@@ -7,7 +7,6 @@
 
 #include "third_party/blink/renderer/bindings/core/v8/script_promise.h"
 #include "third_party/blink/renderer/core/dom/context_lifecycle_observer.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
 #include "third_party/blink/renderer/core/html/media/html_media_element.h"
 #include "third_party/blink/renderer/modules/modules_export.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
@@ -26,7 +25,7 @@ class MODULES_EXPORT HTMLMediaElementAudioOutputDevice final
  public:
   static const char kSupplementName[];
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
   static String sinkId(HTMLMediaElement&);
   static ScriptPromise setSinkId(ScriptState*,
                                  HTMLMediaElement&,

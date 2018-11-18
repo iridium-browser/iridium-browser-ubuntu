@@ -55,9 +55,9 @@ std::string CreateEnrollmentPublicMetadata() {
 }  // namespace
 
 CryptAuthEnrollerImpl::CryptAuthEnrollerImpl(
-    std::unique_ptr<CryptAuthClientFactory> client_factory,
+    CryptAuthClientFactory* client_factory,
     std::unique_ptr<SecureMessageDelegate> secure_message_delegate)
-    : client_factory_(std::move(client_factory)),
+    : client_factory_(client_factory),
       secure_message_delegate_(std::move(secure_message_delegate)),
       weak_ptr_factory_(this) {}
 
@@ -134,7 +134,8 @@ void CryptAuthEnrollerImpl::OnSetupEnrollmentSuccess(
                  weak_ptr_factory_.GetWeakPtr()));
 }
 
-void CryptAuthEnrollerImpl::OnSetupEnrollmentFailure(const std::string& error) {
+void CryptAuthEnrollerImpl::OnSetupEnrollmentFailure(
+    NetworkRequestError error) {
   PA_LOG(WARNING) << "SetupEnrollment API failed with error: " << error;
   callback_.Run(false);
 }
@@ -224,7 +225,7 @@ void CryptAuthEnrollerImpl::OnFinishEnrollmentSuccess(
 }
 
 void CryptAuthEnrollerImpl::OnFinishEnrollmentFailure(
-    const std::string& error) {
+    NetworkRequestError error) {
   PA_LOG(WARNING) << "FinishEnrollment API failed with error: " << error;
   callback_.Run(false);
 }

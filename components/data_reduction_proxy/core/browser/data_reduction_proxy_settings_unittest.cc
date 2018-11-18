@@ -15,7 +15,7 @@
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram_samples.h"
-#include "base/test/histogram_tester.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "base/test/mock_entropy_provider.h"
 #include "base/test/simple_test_clock.h"
 #include "base/time/clock.h"
@@ -236,7 +236,7 @@ TEST(DataReductionProxySettingsStandaloneTest, TestEndToEndSecureProxyCheck) {
         net::MockRead(net::SYNCHRONOUS, test_case.net_error_code),
     };
     net::StaticSocketDataProvider socket_data_provider(
-        mock_reads, arraysize(mock_reads), nullptr, 0);
+        mock_reads, base::span<net::MockWrite>());
     mock_socket_factory.AddSocketDataProvider(&socket_data_provider);
 
     // Toggle the pref to trigger the secure proxy check.

@@ -70,6 +70,7 @@ class LazyBackgroundTaskQueueTest : public ExtensionsTest {
   ~LazyBackgroundTaskQueueTest() override {}
 
   int task_run_count() { return task_run_count_; }
+  TestProcessManager* process_manager() { return process_manager_; }
 
   // A simple callback for AddPendingTask.
   void RunPendingTask(ExtensionHost* host) {
@@ -77,14 +78,9 @@ class LazyBackgroundTaskQueueTest : public ExtensionsTest {
   }
 
   // Creates and registers an extension without a background page.
-  scoped_refptr<Extension> CreateSimpleExtension() {
-    scoped_refptr<Extension> extension =
-        ExtensionBuilder()
-            .SetManifest(DictionaryBuilder()
-                             .Set("name", "No background")
-                             .Set("version", "1")
-                             .Set("manifest_version", 2)
-                             .Build())
+  scoped_refptr<const Extension> CreateSimpleExtension() {
+    scoped_refptr<const Extension> extension =
+        ExtensionBuilder("No background")
             .SetID("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
             .Build();
     ExtensionRegistry::Get(browser_context())->AddEnabled(extension);
@@ -92,19 +88,10 @@ class LazyBackgroundTaskQueueTest : public ExtensionsTest {
   }
 
   // Creates and registers an extension with a lazy background page.
-  scoped_refptr<Extension> CreateLazyBackgroundExtension() {
-    scoped_refptr<Extension> extension =
-        ExtensionBuilder()
-            .SetManifest(
-                DictionaryBuilder()
-                    .Set("name", "Lazy background")
-                    .Set("version", "1")
-                    .Set("manifest_version", 2)
-                    .Set("background", DictionaryBuilder()
-                                           .Set("page", "background.html")
-                                           .SetBoolean("persistent", false)
-                                           .Build())
-                    .Build())
+  scoped_refptr<const Extension> CreateLazyBackgroundExtension() {
+    scoped_refptr<const Extension> extension =
+        ExtensionBuilder("Lazy background")
+            .SetBackgroundPage(ExtensionBuilder::BackgroundPage::EVENT)
             .SetID("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
             .Build();
     ExtensionRegistry::Get(browser_context())->AddEnabled(extension);
@@ -115,6 +102,15 @@ class LazyBackgroundTaskQueueTest : public ExtensionsTest {
   void SetUp() override {
     ExtensionsTest::SetUp();
     user_prefs::UserPrefs::Set(browser_context(), &testing_pref_service_);
+
+    process_manager_ = static_cast<TestProcessManager*>(
+        ProcessManagerFactory::GetInstance()->SetTestingFactoryAndUse(
+            browser_context(), base::BindRepeating(&CreateTestProcessManager)));
+  }
+
+  void TearDown() override {
+    process_manager_ = nullptr;
+    ExtensionsTest::TearDown();
   }
 
  private:
@@ -122,6 +118,7 @@ class LazyBackgroundTaskQueueTest : public ExtensionsTest {
 
   // The total number of pending tasks that have been executed.
   int task_run_count_;
+  TestProcessManager* process_manager_ = nullptr;
 
   DISALLOW_COPY_AND_ASSIGN(LazyBackgroundTaskQueueTest);
 };
@@ -131,11 +128,12 @@ TEST_F(LazyBackgroundTaskQueueTest, ShouldEnqueueTask) {
   LazyBackgroundTaskQueue queue(browser_context());
 
   // Build a simple extension with no background page.
-  scoped_refptr<Extension> no_background = CreateSimpleExtension();
+  scoped_refptr<const Extension> no_background = CreateSimpleExtension();
   EXPECT_FALSE(queue.ShouldEnqueueTask(browser_context(), no_background.get()));
 
   // Build another extension with a background page.
-  scoped_refptr<Extension> with_background = CreateLazyBackgroundExtension();
+  scoped_refptr<const Extension> with_background =
+      CreateLazyBackgroundExtension();
   EXPECT_TRUE(
       queue.ShouldEnqueueTask(browser_context(), with_background.get()));
 }
@@ -143,15 +141,10 @@ TEST_F(LazyBackgroundTaskQueueTest, ShouldEnqueueTask) {
 // Tests that adding tasks actually increases the pending task count, and that
 // multiple extensions can have pending tasks.
 TEST_F(LazyBackgroundTaskQueueTest, AddPendingTask) {
-  // Get our TestProcessManager.
-  TestProcessManager* process_manager = static_cast<TestProcessManager*>(
-      ProcessManagerFactory::GetInstance()->SetTestingFactoryAndUse(
-          browser_context(), CreateTestProcessManager));
-
   LazyBackgroundTaskQueue queue(browser_context());
 
   // Build a simple extension with no background page.
-  scoped_refptr<Extension> no_background = CreateSimpleExtension();
+  scoped_refptr<const Extension> no_background = CreateSimpleExtension();
 
   // Adding a pending task increases the number of extensions with tasks, but
   // doesn't run the task.
@@ -173,14 +166,15 @@ TEST_F(LazyBackgroundTaskQueueTest, AddPendingTask) {
 
   // Adding a task on an extension with a lazy background page tries to create
   // a background host, and if that fails, runs the task immediately.
-  scoped_refptr<Extension> lazy_background = CreateLazyBackgroundExtension();
+  scoped_refptr<const Extension> lazy_background =
+      CreateLazyBackgroundExtension();
   queue.AddPendingTask(browser_context(),
                        lazy_background->id(),
                        base::Bind(&LazyBackgroundTaskQueueTest::RunPendingTask,
                                   base::Unretained(this)));
-  EXPECT_EQ(2u, queue.pending_tasks_.size());
+  EXPECT_EQ(1u, queue.pending_tasks_.size());
   // The process manager tried to create a background host.
-  EXPECT_EQ(1, process_manager->create_count());
+  EXPECT_EQ(1, process_manager()->create_count());
   // The task ran immediately because the creation failed.
   EXPECT_EQ(1, task_run_count());
 }
@@ -190,7 +184,7 @@ TEST_F(LazyBackgroundTaskQueueTest, ProcessPendingTasks) {
   LazyBackgroundTaskQueue queue(browser_context());
 
   // ProcessPendingTasks is a no-op if there are no tasks.
-  scoped_refptr<Extension> extension = CreateSimpleExtension();
+  scoped_refptr<const Extension> extension = CreateSimpleExtension();
   queue.ProcessPendingTasks(NULL, browser_context(), extension.get());
   EXPECT_EQ(0, task_run_count());
 
@@ -211,6 +205,43 @@ TEST_F(LazyBackgroundTaskQueueTest, ProcessPendingTasks) {
   // Processing tasks when there is one pending runs the task and removes the
   // extension from the list of extensions with pending tasks.
   queue.ProcessPendingTasks(NULL, browser_context(), extension.get());
+  EXPECT_EQ(1, task_run_count());
+  EXPECT_EQ(0u, queue.pending_tasks_.size());
+}
+
+// Tests that if a pending task was added before the extension with a lazy
+// background page is loaded, then we will create the lazy background page when
+// the extension is loaded.
+TEST_F(LazyBackgroundTaskQueueTest, CreateLazyBackgroundPageOnExtensionLoaded) {
+  LazyBackgroundTaskQueue queue(browser_context());
+
+  scoped_refptr<const Extension> lazy_background =
+      ExtensionBuilder("Lazy background")
+          .SetBackgroundPage(ExtensionBuilder::BackgroundPage::EVENT)
+          .SetID("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+          .Build();
+
+  queue.OnExtensionLoaded(browser_context(), lazy_background.get());
+  // Did not try to create a background host because there are no queued tasks.
+  EXPECT_EQ(0, process_manager()->create_count());
+
+  queue.AddPendingTask(browser_context(), lazy_background->id(),
+                       base::Bind(&LazyBackgroundTaskQueueTest::RunPendingTask,
+                                  base::Unretained(this)));
+  EXPECT_EQ(1u, queue.pending_tasks_.size());
+  // Did not try to create a background host because extension is not yet
+  // loaded.
+  EXPECT_EQ(0, process_manager()->create_count());
+  // The task is queued.
+  EXPECT_EQ(0, task_run_count());
+
+  ExtensionRegistry::Get(browser_context())->AddEnabled(lazy_background);
+  queue.OnExtensionLoaded(browser_context(), lazy_background.get());
+
+  // The process manager tried to create a background host because there is a
+  // queued task.
+  EXPECT_EQ(1, process_manager()->create_count());
+  // The queued task ran because the creation failed.
   EXPECT_EQ(1, task_run_count());
   EXPECT_EQ(0u, queue.pending_tasks_.size());
 }

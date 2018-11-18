@@ -9,13 +9,14 @@
 
 #include <vector>
 
-#include "fxjs/JS_Define.h"
+#include "fxjs/js_define.h"
 
-class CJS_Report : public CJS_Object {
+class CJS_Report final : public CJS_Object {
  public:
+  static int GetObjDefnID();
   static void DefineJSObjects(CFXJS_Engine* pEngine, FXJSOBJTYPE eObjType);
 
-  explicit CJS_Report(v8::Local<v8::Object> pObject);
+  CJS_Report(v8::Local<v8::Object> pObject, CJS_Runtime* pRuntime);
   ~CJS_Report() override;
 
   JS_STATIC_METHOD(save, CJS_Report);
@@ -26,9 +27,9 @@ class CJS_Report : public CJS_Object {
   static const char kName[];
   static const JSMethodSpec MethodSpecs[];
 
-  CJS_Return save(CJS_Runtime* pRuntime,
+  CJS_Result save(CJS_Runtime* pRuntime,
                   const std::vector<v8::Local<v8::Value>>& params);
-  CJS_Return writeText(CJS_Runtime* pRuntime,
+  CJS_Result writeText(CJS_Runtime* pRuntime,
                        const std::vector<v8::Local<v8::Value>>& params);
 };
 

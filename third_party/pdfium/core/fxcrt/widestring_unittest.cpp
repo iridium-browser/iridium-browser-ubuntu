@@ -5,6 +5,7 @@
 #include "core/fxcrt/widestring.h"
 
 #include <algorithm>
+#include <iterator>
 #include <vector>
 
 #include "core/fxcrt/fx_string.h"
@@ -20,6 +21,10 @@ TEST(WideString, ElementAccess) {
 #ifndef NDEBUG
   EXPECT_DEATH({ abc[4]; }, ".*");
 #endif
+
+  pdfium::span<const wchar_t> abc_span = abc.AsSpan();
+  EXPECT_EQ(3u, abc_span.size());
+  EXPECT_EQ(0, wmemcmp(abc_span.data(), L"abc", 3));
 
   WideString mutable_abc = abc;
   EXPECT_EQ(abc.c_str(), mutable_abc.c_str());
@@ -47,6 +52,37 @@ TEST(WideString, ElementAccess) {
   EXPECT_DEATH({ mutable_abc.SetAt(3, L'g'); }, ".*");
   EXPECT_EQ(L"abc", abc);
 #endif
+}
+
+TEST(WideString, Assign) {
+  {
+    // Copy-assign.
+    WideString string1;
+    EXPECT_EQ(0, string1.ReferenceCountForTesting());
+    {
+      WideString string2(L"abc");
+      EXPECT_EQ(1, string2.ReferenceCountForTesting());
+
+      string1 = string2;
+      EXPECT_EQ(2, string1.ReferenceCountForTesting());
+      EXPECT_EQ(2, string2.ReferenceCountForTesting());
+    }
+    EXPECT_EQ(1, string1.ReferenceCountForTesting());
+  }
+  {
+    // Move-assign.
+    WideString string1;
+    EXPECT_EQ(0, string1.ReferenceCountForTesting());
+    {
+      WideString string2(L"abc");
+      EXPECT_EQ(1, string2.ReferenceCountForTesting());
+
+      string1 = std::move(string2);
+      EXPECT_EQ(1, string1.ReferenceCountForTesting());
+      EXPECT_EQ(0, string2.ReferenceCountForTesting());
+    }
+    EXPECT_EQ(1, string1.ReferenceCountForTesting());
+  }
 }
 
 TEST(WideString, OperatorLT) {
@@ -357,6 +393,13 @@ TEST(WideString, OperatorNE) {
   EXPECT_TRUE(c_string1 != wide_string);
   EXPECT_TRUE(c_string2 != wide_string);
   EXPECT_TRUE(c_string3 != wide_string);
+}
+
+TEST(WideString, OperatorPlus) {
+  EXPECT_EQ(L"I like dogs", L"I like " + WideString(L"dogs"));
+  EXPECT_EQ(L"Dogs like me", WideString(L"Dogs") + L" like me");
+  EXPECT_EQ(L"Oh no, error number 42",
+            L"Oh no, error number " + WideString::Format(L"%d", 42));
 }
 
 TEST(WideString, ConcatInPlace) {
@@ -813,20 +856,21 @@ TEST(WideString, Reserve) {
 }
 
 TEST(WideString, GetBuffer) {
+  WideString str1;
   {
-    WideString str;
-    wchar_t* buffer = str.GetBuffer(12);
-    wcscpy(buffer, L"clams");
-    str.ReleaseBuffer(str.GetStringLength());
-    EXPECT_EQ(L"clams", str);
+    pdfium::span<wchar_t> buffer = str1.GetBuffer(12);
+    wcscpy(buffer.data(), L"clams");
   }
+  str1.ReleaseBuffer(str1.GetStringLength());
+  EXPECT_EQ(L"clams", str1);
+
+  WideString str2(L"cl");
   {
-    WideString str(L"cl");
-    wchar_t* buffer = str.GetBuffer(12);
-    wcscpy(buffer + 2, L"ams");
-    str.ReleaseBuffer(str.GetStringLength());
-    EXPECT_EQ(L"clams", str);
+    pdfium::span<wchar_t> buffer = str2.GetBuffer(12);
+    wcscpy(buffer.data() + 2, L"ams");
   }
+  str2.ReleaseBuffer(str2.GetStringLength());
+  EXPECT_EQ(L"clams", str2);
 }
 
 TEST(WideString, ReleaseBuffer) {
@@ -953,6 +997,53 @@ TEST(WideString, UTF16LE_Encode) {
               utf16le_encode_cases[i].ws.UTF16LE_Encode())
         << " for case number " << i;
   }
+}
+
+TEST(WideString, ToDefANSI) {
+  EXPECT_EQ("", WideString().ToDefANSI());
+#if _FX_PLATFORM_ == _FX_PLATFORM_WINDOWS_
+  const char* kResult =
+      "x"
+      "?"
+      "\xff"
+      "A"
+      "?"
+      "y";
+#else
+  const char* kResult =
+      "x"
+      "\x80"
+      "\xff"
+      "y";
+#endif
+  EXPECT_EQ(kResult, WideString(L"x"
+                                L"\u0080"
+                                L"\u00ff"
+                                L"\u0100"
+                                L"\u208c"
+                                L"y")
+                         .ToDefANSI());
+}
+
+TEST(WideString, FromLocal) {
+  EXPECT_EQ(L"", WideString::FromLocal(ByteStringView()));
+#if _FX_PLATFORM_ == _FX_PLATFORM_WINDOWS_
+  const wchar_t* kResult =
+      L"x"
+      L"\u20ac"
+      L"\u00ff"
+      L"y";
+#else
+  const wchar_t* kResult =
+      L"x"
+      L"\u0080"
+      L"\u00ff"
+      L"y";
+#endif
+  EXPECT_EQ(kResult, WideString::FromLocal("x"
+                                           "\x80"
+                                           "\xff"
+                                           "y"));
 }
 
 TEST(WideStringView, FromVector) {
@@ -1344,12 +1435,34 @@ TEST(WideString, FormatOutOfRangeChar) {
   EXPECT_NE(L"", WideString::Format(L"unsupported char '%c'", 0x00FF00FF));
 }
 
+TEST(WideString, FormatString) {
+  // %ls and wide characters are the reliable combination across platforms.
+  EXPECT_EQ(L"", WideString::Format(L"%ls", L""));
+  EXPECT_EQ(L"", WideString::Format(L"%ls", WideString().c_str()));
+  EXPECT_EQ(L"clams", WideString::Format(L"%ls", L"clams"));
+  EXPECT_EQ(L"cla", WideString::Format(L"%.3ls", L"clams"));
+  EXPECT_EQ(L"\u043e\u043f", WideString(L"\u043e\u043f"));
+
+#if _FX_OS_ != _FX_OS_MACOSX_
+  // See https://bugs.chromium.org/p/pdfium/issues/detail?id=1132
+  EXPECT_EQ(L"\u043e\u043f", WideString::Format(L"\u043e\u043f"));
+  EXPECT_EQ(L"\u043e\u043f", WideString::Format(L"%ls", L"\u043e\u043f"));
+  EXPECT_EQ(L"\u043e", WideString::Format(L"%.1ls", L"\u043e\u043f"));
+#endif
+}
+
 TEST(WideString, Empty) {
   WideString empty_str;
   EXPECT_TRUE(empty_str.IsEmpty());
   EXPECT_EQ(0u, empty_str.GetLength());
+
   const wchar_t* cstr = empty_str.c_str();
+  EXPECT_NE(nullptr, cstr);
   EXPECT_EQ(0u, wcslen(cstr));
+
+  pdfium::span<const wchar_t> cspan = empty_str.AsSpan();
+  EXPECT_TRUE(cspan.empty());
+  EXPECT_EQ(nullptr, cspan.data());
 }
 
 TEST(CFX_WidString, InitializerList) {
@@ -1405,6 +1518,15 @@ TEST(WideString, MultiCharIterator) {
   }
   EXPECT_TRUE(any_present);
   EXPECT_EQ(static_cast<int32_t>(L'a' + L'b' + L'c'), sum);
+}
+
+TEST(WideString, StdBegin) {
+  WideString one_str(L"abc");
+  std::vector<wchar_t> vec(std::begin(one_str), std::end(one_str));
+  ASSERT_EQ(3u, vec.size());
+  EXPECT_EQ(L'a', vec[0]);
+  EXPECT_EQ(L'b', vec[1]);
+  EXPECT_EQ(L'c', vec[2]);
 }
 
 TEST(WideString, AnyAllNoneOf) {

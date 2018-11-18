@@ -10,6 +10,7 @@
 #include "src/globals.h"
 #include "src/machine-type.h"
 #include "src/utils.h"
+#include "src/zone/zone.h"
 
 namespace v8 {
 namespace internal {
@@ -109,7 +110,7 @@ V8_EXPORT_PRIVATE StackSlotRepresentation const& StackSlotRepresentationOf(
 MachineRepresentation AtomicStoreRepresentationOf(Operator const* op)
     V8_WARN_UNUSED_RESULT;
 
-MachineType AtomicOpRepresentationOf(Operator const* op) V8_WARN_UNUSED_RESULT;
+MachineType AtomicOpType(Operator const* op) V8_WARN_UNUSED_RESULT;
 
 // Interface for building machine-level operators. These operators are
 // machine-level but machine-independent and thus define a language suitable
@@ -139,8 +140,6 @@ class V8_EXPORT_PRIVATE MachineOperatorBuilder final
     kWord64Popcnt = 1u << 15,
     kWord32ReverseBits = 1u << 16,
     kWord64ReverseBits = 1u << 17,
-    kWord32ReverseBytes = 1u << 18,
-    kWord64ReverseBytes = 1u << 19,
     kInt32AbsWithOverflow = 1u << 20,
     kInt64AbsWithOverflow = 1u << 21,
     kSpeculationFence = 1u << 22,
@@ -149,9 +148,8 @@ class V8_EXPORT_PRIVATE MachineOperatorBuilder final
         kFloat64RoundUp | kFloat32RoundTruncate | kFloat64RoundTruncate |
         kFloat64RoundTiesAway | kFloat32RoundTiesEven | kFloat64RoundTiesEven |
         kWord32Ctz | kWord64Ctz | kWord32Popcnt | kWord64Popcnt |
-        kWord32ReverseBits | kWord64ReverseBits | kWord32ReverseBytes |
-        kWord64ReverseBytes | kInt32AbsWithOverflow | kInt64AbsWithOverflow |
-        kSpeculationFence
+        kWord32ReverseBits | kWord64ReverseBits | kInt32AbsWithOverflow |
+        kInt64AbsWithOverflow | kSpeculationFence
   };
   typedef base::Flags<Flag, unsigned> Flags;
 
@@ -237,8 +235,8 @@ class V8_EXPORT_PRIVATE MachineOperatorBuilder final
   const OptionalOperator Word64Popcnt();
   const OptionalOperator Word32ReverseBits();
   const OptionalOperator Word64ReverseBits();
-  const OptionalOperator Word32ReverseBytes();
-  const OptionalOperator Word64ReverseBytes();
+  const Operator* Word32ReverseBytes();
+  const Operator* Word64ReverseBytes();
   const OptionalOperator Int32AbsWithOverflow();
   const OptionalOperator Int64AbsWithOverflow();
 
@@ -301,6 +299,10 @@ class V8_EXPORT_PRIVATE MachineOperatorBuilder final
   // This operator reinterprets the bits of a tagged pointer as word.
   const Operator* BitcastTaggedToWord();
 
+  // This operator reinterprets the bits of a tagged MaybeObject pointer as
+  // word.
+  const Operator* BitcastMaybeObjectToWord();
+
   // This operator reinterprets the bits of a word as tagged pointer.
   const Operator* BitcastWordToTagged();
 
@@ -317,6 +319,7 @@ class V8_EXPORT_PRIVATE MachineOperatorBuilder final
   // the input value is representable in the target value.
   const Operator* ChangeFloat32ToFloat64();
   const Operator* ChangeFloat64ToInt32();   // narrowing
+  const Operator* ChangeFloat64ToInt64();
   const Operator* ChangeFloat64ToUint32();  // narrowing
   const Operator* ChangeFloat64ToUint64();
   const Operator* TruncateFloat64ToUint32();
@@ -328,6 +331,7 @@ class V8_EXPORT_PRIVATE MachineOperatorBuilder final
   const Operator* TryTruncateFloat64ToUint64();
   const Operator* ChangeInt32ToFloat64();
   const Operator* ChangeInt32ToInt64();
+  const Operator* ChangeInt64ToFloat64();
   const Operator* ChangeUint32ToFloat64();
   const Operator* ChangeUint32ToUint64();
 
@@ -601,16 +605,14 @@ class V8_EXPORT_PRIVATE MachineOperatorBuilder final
   const Operator* StackSlot(MachineRepresentation rep, int alignment = 0);
 
   // Destroy value by masking when misspeculating.
-  const Operator* PoisonOnSpeculationTagged();
-  const Operator* PoisonOnSpeculationWord();
+  const Operator* TaggedPoisonOnSpeculation();
+  const Operator* Word32PoisonOnSpeculation();
+  const Operator* Word64PoisonOnSpeculation();
 
   // Access to the machine stack.
   const Operator* LoadStackPointer();
   const Operator* LoadFramePointer();
   const Operator* LoadParentFramePointer();
-
-  // Access to the root register.
-  const Operator* LoadRootsPointer();
 
   // atomic-load [base + index]
   const Operator* Word32AtomicLoad(LoadRepresentation rep);
@@ -621,33 +623,52 @@ class V8_EXPORT_PRIVATE MachineOperatorBuilder final
   // atomic-store [base + index], value
   const Operator* Word64AtomicStore(MachineRepresentation rep);
   // atomic-exchange [base + index], value
-  const Operator* Word32AtomicExchange(MachineType rep);
+  const Operator* Word32AtomicExchange(MachineType type);
   // atomic-exchange [base + index], value
-  const Operator* Word64AtomicExchange(MachineType rep);
+  const Operator* Word64AtomicExchange(MachineType type);
   // atomic-compare-exchange [base + index], old_value, new_value
-  const Operator* Word32AtomicCompareExchange(MachineType rep);
+  const Operator* Word32AtomicCompareExchange(MachineType type);
   // atomic-compare-exchange [base + index], old_value, new_value
-  const Operator* Word64AtomicCompareExchange(MachineType rep);
+  const Operator* Word64AtomicCompareExchange(MachineType type);
   // atomic-add [base + index], value
-  const Operator* Word32AtomicAdd(MachineType rep);
+  const Operator* Word32AtomicAdd(MachineType type);
   // atomic-sub [base + index], value
-  const Operator* Word32AtomicSub(MachineType rep);
+  const Operator* Word32AtomicSub(MachineType type);
   // atomic-and [base + index], value
-  const Operator* Word32AtomicAnd(MachineType rep);
+  const Operator* Word32AtomicAnd(MachineType type);
   // atomic-or [base + index], value
-  const Operator* Word32AtomicOr(MachineType rep);
+  const Operator* Word32AtomicOr(MachineType type);
   // atomic-xor [base + index], value
   const Operator* Word32AtomicXor(MachineType rep);
-  // atomic-load [base + index]
+  // atomic-add [base + index], value
   const Operator* Word64AtomicAdd(MachineType rep);
   // atomic-sub [base + index], value
-  const Operator* Word64AtomicSub(MachineType rep);
+  const Operator* Word64AtomicSub(MachineType type);
   // atomic-and [base + index], value
-  const Operator* Word64AtomicAnd(MachineType rep);
+  const Operator* Word64AtomicAnd(MachineType type);
   // atomic-or [base + index], value
-  const Operator* Word64AtomicOr(MachineType rep);
+  const Operator* Word64AtomicOr(MachineType type);
   // atomic-xor [base + index], value
   const Operator* Word64AtomicXor(MachineType rep);
+  // atomic-pair-load [base + index]
+  const Operator* Word32AtomicPairLoad();
+  // atomic-pair-sub [base + index], value_high, value-low
+  const Operator* Word32AtomicPairStore();
+  // atomic-pair-add [base + index], value_high, value_low
+  const Operator* Word32AtomicPairAdd();
+  // atomic-pair-sub [base + index], value_high, value-low
+  const Operator* Word32AtomicPairSub();
+  // atomic-pair-and [base + index], value_high, value_low
+  const Operator* Word32AtomicPairAnd();
+  // atomic-pair-or [base + index], value_high, value_low
+  const Operator* Word32AtomicPairOr();
+  // atomic-pair-xor [base + index], value_high, value_low
+  const Operator* Word32AtomicPairXor();
+  // atomic-pair-exchange [base + index], value_high, value_low
+  const Operator* Word32AtomicPairExchange();
+  // atomic-pair-compare-exchange [base + index], old_value_high, old_value_low,
+  // new_value_high, new_value_low
+  const Operator* Word32AtomicPairCompareExchange();
 
   const OptionalOperator SpeculationFence();
 
@@ -666,25 +687,26 @@ class V8_EXPORT_PRIVATE MachineOperatorBuilder final
 
 // Pseudo operators that translate to 32/64-bit operators depending on the
 // word-size of the target machine assumed by this builder.
-#define PSEUDO_OP_LIST(V) \
-  V(Word, And)            \
-  V(Word, Or)             \
-  V(Word, Xor)            \
-  V(Word, Shl)            \
-  V(Word, Shr)            \
-  V(Word, Sar)            \
-  V(Word, Ror)            \
-  V(Word, Clz)            \
-  V(Word, Equal)          \
-  V(Int, Add)             \
-  V(Int, Sub)             \
-  V(Int, Mul)             \
-  V(Int, Div)             \
-  V(Int, Mod)             \
-  V(Int, LessThan)        \
-  V(Int, LessThanOrEqual) \
-  V(Uint, Div)            \
-  V(Uint, LessThan)       \
+#define PSEUDO_OP_LIST(V)      \
+  V(Word, And)                 \
+  V(Word, Or)                  \
+  V(Word, Xor)                 \
+  V(Word, Shl)                 \
+  V(Word, Shr)                 \
+  V(Word, Sar)                 \
+  V(Word, Ror)                 \
+  V(Word, Clz)                 \
+  V(Word, Equal)               \
+  V(Word, PoisonOnSpeculation) \
+  V(Int, Add)                  \
+  V(Int, Sub)                  \
+  V(Int, Mul)                  \
+  V(Int, Div)                  \
+  V(Int, Mod)                  \
+  V(Int, LessThan)             \
+  V(Int, LessThanOrEqual)      \
+  V(Uint, Div)                 \
+  V(Uint, LessThan)            \
   V(Uint, Mod)
 #define PSEUDO_OP(Prefix, Suffix)                                \
   const Operator* Prefix##Suffix() {                             \

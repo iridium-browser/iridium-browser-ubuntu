@@ -18,7 +18,7 @@ source_set("test_support") {
     "//components/content_settings/core/common",
     "//components/gcm_driver:gcm_driver",
     "//components/signin/core/browser",
-    "//mojo/edk",
+    "//mojo/core/embedder",
     "//net",
     "//testing/gtest",
     "//ui/base",
@@ -29,7 +29,14 @@ source_set("test_support") {
     "//base/test:test_support",
   ]
 
-  if (!is_ios) {
+  if (is_ios) {
+    sources += [
+      "ios_components_test_initializer.cc",
+      "ios_components_test_initializer.h",
+    ]
+
+    deps += [ "//services/network:test_support" ]
+  } else {
     deps += [
       "//components/invalidation/impl",
       "//components/policy/core/browser",
@@ -52,7 +59,7 @@ source_set("run_all_unittests") {
     ":test_support",
   ]
 
-  if (enable_basic_printing || enable_print_preview) {
+  if (enable_basic_printing) {
     defines = [ "HAS_SERVICE_IN_UNIT_TEST" ]
     deps += [
       ":components_unittests_catalog_source",
@@ -61,13 +68,11 @@ source_set("run_all_unittests") {
   }
 }
 
-if (enable_basic_printing || enable_print_preview) {
+if (enable_basic_printing) {
   # There is only one service in catalog, which depends on printing feature.
   # When more services are added, the condition can be moved inside of catalog.
   catalog("components_unittests_catalog") {
-    embedded_services = [
-      "//components/printing/service:pdf_compositor_service_unittest_manifest",
-    ]
+    embedded_services = [ "//components/services/pdf_compositor:pdf_compositor_service_unittest_manifest" ]
   }
 
   catalog_cpp_source("components_unittests_catalog_source") {

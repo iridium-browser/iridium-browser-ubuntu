@@ -8,6 +8,7 @@
 from __future__ import print_function
 
 import contextlib
+import copy
 import fnmatch
 import json
 import os
@@ -23,7 +24,6 @@ from chromite.cbuildbot import topology
 from chromite.lib import auth
 from chromite.lib import buildbucket_lib
 from chromite.lib import builder_status_lib
-from chromite.lib import config_lib
 from chromite.lib import constants
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_logging as logging
@@ -44,6 +44,7 @@ class BuilderStage(object):
   """Parent class for stages to be performed by a builder."""
   # Used to remove 'Stage' suffix of stage class when generating stage name.
   name_stage_re = re.compile(r'(\w+)Stage')
+  category = constants.UNCATEGORIZED_STAGE
 
   # TODO(sosa): Remove these once we have a SEND/RECIEVE IPC mechanism
   # implemented.
@@ -67,7 +68,8 @@ class BuilderStage(object):
     assert match, 'Class name %s does not end with Stage' % cls.__name__
     return match.group(1)
 
-  def __init__(self, builder_run, suffix=None, attempt=None, max_retry=None):
+  def __init__(self, builder_run, suffix=None, attempt=None, max_retry=None,
+               build_root=None):
     """Create a builder stage.
 
     Args:
@@ -78,6 +80,7 @@ class BuilderStage(object):
         also specified.
       max_retry: The maximum number of retries. Defaults to None. Is only valid
         if |attempt| is also specified.
+      build_root: Override the builder_run build_root.
     """
     self._run = builder_run
 
@@ -97,9 +100,12 @@ class BuilderStage(object):
     # TODO(mtennant): Replace self._boards with a self._run.boards?
     self._boards = self._run.config.boards
 
-    # TODO(mtennant): Try to rely on just self._run.buildroot directly, if
-    # the os.path.abspath can be applied there instead.
-    self._build_root = os.path.abspath(self._run.buildroot)
+    self._build_root = os.path.abspath(build_root or self._run.buildroot)
+
+    self.build_config = self._run.config.name
+    self.metrics_branch = self._run.options.branch
+    self.metrics_tryjob = self._run.options.remote_trybot
+
     self._prebuilt_type = None
     if self._run.ShouldUploadPrebuilts():
       self._prebuilt_type = self._run.config.build_type
@@ -118,8 +124,7 @@ class BuilderStage(object):
     self._portage_extra_env = {}
     useflags = self._run.config.useflags[:]
 
-    if self._run.options.clobber:
-      self._portage_extra_env['IGNORE_PREFLIGHT_BINHOST'] = '1'
+    self._portage_extra_env['IGNORE_PREFLIGHT_BINHOST'] = '1'
 
     if self._run.options.chrome_root:
       self._portage_extra_env['CHROME_ORIGIN'] = 'LOCAL_SOURCE'
@@ -213,10 +218,12 @@ class BuilderStage(object):
       kwargs['build_id'] = build_id
       self._build_stage_id = db.InsertBuildStage(**kwargs)
 
-  def _FinishBuildStageInCIDBAndMonarch(self, status, elapsed_time_seconds=0):
+  def _FinishBuildStageInCIDBAndMonarch(self, stage_result, status,
+                                        elapsed_time_seconds=0):
     """Mark the stage as finished in cidb.
 
     Args:
+      stage_result: results_lib.Results.* object of this stage.
       status: The finish status of the build. Enum type
           constants.BUILDER_COMPLETED_STATUSES
       elapsed_time_seconds: (optional) Elapsed time in stage, in seconds.
@@ -230,9 +237,29 @@ class BuilderStage(object):
               'build_config': self._run.config.name,
               'important': self._run.config.important}
 
-    metrics.SecondsDistribution(constants.MON_STAGE_DURATION).add(
+    metrics.CumulativeSecondsDistribution(constants.MON_STAGE_DURATION).add(
         elapsed_time_seconds, fields=fields)
     metrics.Counter(constants.MON_STAGE_COMP_COUNT).increment(fields=fields)
+    common_metrics_fields = {
+        'branch_name': self.metrics_branch,
+        'build_config': self.build_config,
+        'tryjob': self.metrics_tryjob,
+    }
+    duration_metrics_fields = copy.deepcopy(common_metrics_fields)
+    duration_metrics_fields.update({'stage': self.name,
+                                    'status': status})
+    if self.metrics_branch is not None:
+      metrics.FloatMetric(constants.MON_STAGE_INSTANCE_DURATION).set(
+          elapsed_time_seconds, fields=duration_metrics_fields)
+    if (isinstance(stage_result, BaseException) and
+        self._build_stage_id is not None):
+      failed_metrics_fields = copy.deepcopy(common_metrics_fields)
+      failed_metrics_fields.update({'failed_stage': self.name,
+                                    'category': self.category})
+      _, db = self._run.GetCIDBHandle()
+      if db:
+        failures_lib.ReportStageFailure(db, self._build_stage_id, stage_result,
+                                        metrics_fields=failed_metrics_fields)
 
   def _StartBuildStageInCIDB(self):
     """Mark the stage as inflight in cidb."""
@@ -262,23 +289,8 @@ class BuilderStage(object):
     elif result == results_lib.Results.SKIPPED:
       return constants.BUILDER_STATUS_SKIPPED
     else:
-      logging.info('Translating result %s to fail.' % result)
+      logging.info('Translating result %s to fail.', result)
       return constants.BUILDER_STATUS_FAILED
-
-  def _ExtractOverlays(self):
-    """Extracts list of overlays into class."""
-    overlays = portage_util.FindOverlays(
-        self._run.config.overlays, buildroot=self._build_root)
-    push_overlays = portage_util.FindOverlays(
-        self._run.config.push_overlays, buildroot=self._build_root)
-
-    # Sanity checks.
-    # We cannot push to overlays that we don't rev.
-    assert set(push_overlays).issubset(set(overlays))
-    # Either has to be a master or not have any push overlays.
-    assert self._run.config.master or not push_overlays
-
-    return overlays, push_overlays
 
   def GetRepoRepository(self, **kwargs):
     """Create a new repo repository object."""
@@ -309,37 +321,31 @@ class BuilderStage(object):
       An instance of buildbucket_lib.BuildbucketClient if the build is using
       Buildbucket as the scheduler; else, None.
     """
-    buildbucket_client = None
+    if buildbucket_lib.GetServiceAccount(constants.CHROMEOS_SERVICE_ACCOUNT):
+      return buildbucket_lib.BuildbucketClient(
+          auth.GetAccessToken, None,
+          service_account_json=constants.CHROMEOS_SERVICE_ACCOUNT)
 
-    if config_lib.UseBuildbucketScheduler(self._run.config):
-      if buildbucket_lib.GetServiceAccount(constants.CHROMEOS_SERVICE_ACCOUNT):
-        buildbucket_client = buildbucket_lib.BuildbucketClient(
-            auth.GetAccessToken, None,
-            service_account_json=constants.CHROMEOS_SERVICE_ACCOUNT)
+    if self._run.InProduction():
+      # If the build using Buildbucket is running on buildbot and
+      # is in production mode, buildbucket_client cannot be None.
+      raise buildbucket_lib.NoBuildbucketClientException(
+          'Buildbucket_client is None. '
+          'Please check if the buildbot has a valid service account file. '
+          'Please find the service account json file at %s.' %
+          constants.CHROMEOS_SERVICE_ACCOUNT)
 
-      if buildbucket_client is None and self._run.InProduction():
-        # If the build using Buildbucket is running on buildbot and
-        # is in production mode, buildbucket_client cannot be None.
-        raise buildbucket_lib.NoBuildbucketClientException(
-            'Buildbucket_client is None. '
-            'Please check if the buildbot has a valid service account file. '
-            'Please find the service account json file at %s.' %
-            constants.CHROMEOS_SERVICE_ACCOUNT)
-
-    return buildbucket_client
+    return None
 
   def GetScheduledSlaveBuildbucketIds(self):
     """Get buildbucket_ids list of the scheduled slave builds.
 
     Returns:
-      If slaves were scheduled by Buildbucket, return a list of
-      buildbucket_ids (strings) of the slave builds. The list doesn't
+      A list of buildbucket_ids (strings) of the slave builds. The list doesn't
       contain the old builds which were retried in Buildbucket.
-      If slaves were scheduled by git commits, return None.
     """
     buildbucket_ids = None
-    if (config_lib.UseBuildbucketScheduler(self._run.config) and
-        config_lib.IsMasterBuild(self._run.config)):
+    if self._run.config.slave_configs:
       buildbucket_ids = buildbucket_lib.GetBuildbucketIds(
           self._run.attrs.metadata)
 
@@ -359,8 +365,9 @@ class BuilderStage(object):
     failure_msg_manager = failure_message_lib.FailureMessageManager()
     failure_messages = failure_msg_manager.ConstructStageFailureMessages(
         stage_failures)
-    master_build_id = next(failure.master_build_id for
-                           failure in stage_failures)
+    master_build_id = None
+    if stage_failures:
+      master_build_id = stage_failures[0].master_build_id
     aborted = builder_status_lib.BuilderStatusManager.AbortedBySelfDestruction(
         db, build_id, master_build_id)
 
@@ -441,15 +448,8 @@ class BuilderStage(object):
       The value of the environment variable, as a string. If no such variable
       can be found, return the empty string.
     """
-    cwd = os.path.join(self._build_root, 'src', 'scripts')
-    if board:
-      portageq = 'portageq-%s' % board
-    else:
-      portageq = 'portageq'
-    binhost = cros_build_lib.RunCommand(
-        [portageq, 'envvar', envvar], cwd=cwd, redirect_stdout=True,
-        enter_chroot=True, error_code_ok=True)
-    return binhost.output.rstrip('\n')
+    return portage_util.PortageqEnvvar(envvar, board=board,
+                                       allow_undefined=True)
 
   def _GetSlaveConfigs(self):
     """Get the slave configs for the current build config.
@@ -626,7 +626,7 @@ class BuilderStage(object):
 
   def HandleSkip(self):
     """Run if the stage is skipped."""
-    pass
+    # This is a hook used by some subclasses.
 
   def _RecordResult(self, *args, **kwargs):
     """Record a successful or failed result."""
@@ -643,7 +643,8 @@ class BuilderStage(object):
     skip_stage = self._ShouldSkipStage()
     previous_record = results_lib.Results.PreviouslyCompletedRecord(self.name)
     if skip_stage:
-      self._BeginStepForBuildbot(' : [SKIPPED]')
+      # We do not log the beginning of a skipped stage.
+      pass
     elif previous_record is not None:
       self._BeginStepForBuildbot(' : [PREVIOUSLY PROCESSED]')
     else:
@@ -660,7 +661,6 @@ class BuilderStage(object):
 
       if skip_stage:
         self._StartBuildStageInCIDB()
-        self._PrintLoudly('Not running Stage %s' % self.name)
         self.HandleSkip()
         result = results_lib.Results.SKIPPED
         return
@@ -734,13 +734,8 @@ class BuilderStage(object):
       self._RecordResult(self.name, result, description, prefix=self._prefix,
                          board=board, time=elapsed_time,
                          build_stage_id=self._build_stage_id)
-      self._FinishBuildStageInCIDBAndMonarch(cidb_result, elapsed_time)
-      if isinstance(result, BaseException) and self._build_stage_id is not None:
-        _, db = self._run.GetCIDBHandle()
-        if db:
-          failures_lib.ReportStageFailureToCIDB(db,
-                                                self._build_stage_id,
-                                                result)
+      self._FinishBuildStageInCIDBAndMonarch(result,
+                                             cidb_result, elapsed_time)
 
       try:
         self.Finish()
@@ -778,6 +773,7 @@ class ForgivingBuilderStage(BuilderStage):
 
 class RetryStage(object):
   """Retry a given stage multiple times to see if it passes."""
+  category = constants.UNCATEGORIZED_STAGE
 
   def __init__(self, builder_run, max_retry, stage, *args, **kwargs):
     """Create a RetryStage object.
@@ -826,6 +822,7 @@ class RetryStage(object):
 
 class RepeatStage(object):
   """Run a given stage multiple times to see if it fails."""
+  category = constants.UNCATEGORIZED_STAGE
 
   def __init__(self, builder_run, count, stage, *args, **kwargs):
     """Create a RepeatStage object.
@@ -982,7 +979,7 @@ class ArchivingStageMixin(object):
   @property
   def archive(self):
     """Retrieve the Archive object to use."""
-    # pylint: disable=W0201
+    # pylint: disable=attribute-defined-outside-init
     if not hasattr(self, '_archive'):
       self._archive = self._run.GetArchive()
 
@@ -1079,7 +1076,7 @@ class ArchivingStageMixin(object):
     Returns:
       True is the build should not be copied to this moblab url
     """
-    bot_filter_list = ['paladin', 'trybot', 'pfq']
+    bot_filter_list = ['paladin', 'trybot', 'pfq', 'pre-cq', 'tryjob']
     if (url.find('moblab') and
         any(bot_id.find(filter) != -1 for filter in bot_filter_list)):
       return True
@@ -1197,7 +1194,7 @@ class ArchivingStageMixin(object):
           if c_file:
             with tempfile.NamedTemporaryFile() as f:
               logging.info('Export tags to gcloud via %s.', f.name)
-              logging.debug('Exporting: %s' % d[constants.METADATA_TAGS])
+              logging.debug('Exporting: %s', d[constants.METADATA_TAGS])
               osutils.WriteFile(f.name, json.dumps(d[constants.METADATA_TAGS]),
                                 atomic=True, makedirs=True)
               commands.ExportToGCloud(self._build_root, c_file, f.name,

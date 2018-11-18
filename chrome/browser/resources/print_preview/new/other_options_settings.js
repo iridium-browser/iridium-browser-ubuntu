@@ -5,82 +5,143 @@
 Polymer({
   is: 'print-preview-other-options-settings',
 
-  behaviors: [SettingsBehavior],
+  behaviors: [SettingsBehavior, I18nBehavior],
 
   properties: {
     disabled: Boolean,
+
+    /**
+     * @private {!Array<!{name: string,
+     *                    label: string,
+     *                    value: (boolean | undefined),
+     *                    managed: (boolean | undefined),
+     *                    available: (boolean | undefined)}>}
+     */
+    options_: {
+      type: Array,
+      value: function() {
+        return [
+          {name: 'headerFooter', label: 'optionHeaderFooter'},
+          {name: 'duplex', label: 'optionTwoSided'},
+          {name: 'cssBackground', label: 'optionBackgroundColorsAndImages'},
+          {name: 'rasterize', label: 'optionRasterize'},
+          {name: 'selectionOnly', label: 'optionSelectionOnly'},
+        ];
+      },
+    },
+
+    /**
+     * The index of the checkbox that should display the "Options" title.
+     * @private {number}
+     */
+    firstIndex_: {
+      type: Number,
+      value: 0,
+    },
   },
 
   observers: [
-    'onHeaderFooterSettingChange_(settings.headerFooter.value)',
-    'onDuplexSettingChange_(settings.duplex.value)',
-    'onCssBackgroundSettingChange_(settings.cssBackground.value)',
-    'onRasterizeSettingChange_(settings.rasterize.value)',
-    'onSelectionOnlySettingChange_(settings.selectionOnly.value)',
+    'onHeaderFooterSettingChange_(settings.headerFooter.*)',
+    'onDuplexSettingChange_(settings.duplex.*)',
+    'onCssBackgroundSettingChange_(settings.cssBackground.*)',
+    'onRasterizeSettingChange_(settings.rasterize.*)',
+    'onSelectionOnlySettingChange_(settings.selectionOnly.*)',
   ],
 
-  /**
-   * @param {boolean} value The new value of the header footer setting.
-   * @private
-   */
-  onHeaderFooterSettingChange_: function(value) {
-    this.$$('#header-footer').checked = value;
-  },
+  /** @private {!Map<string, ?number>} */
+  timeouts_: new Map(),
+
+  /** @private {!Map<string, boolean>} */
+  previousValues_: new Map(),
 
   /**
-   * @param {boolean} value The new value of the duplex setting.
-   * @private
+   * @param {string} settingName The name of the setting to updated.
+   * @param {boolean} newValue The new value for the setting.
    */
-  onDuplexSettingChange_: function(value) {
-    this.$$('#duplex').checked = value;
-  },
+  updateSettingWithTimeout_: function(settingName, newValue) {
+    const timeout = this.timeouts_.get(settingName);
+    if (timeout != null)
+      clearTimeout(timeout);
 
-  /**
-   * @param {boolean} value The new value of the css background setting.
-   * @private
-   */
-  onCssBackgroundSettingChange_: function(value) {
-    this.$$('#css-background').checked = value;
-  },
+    this.timeouts_.set(settingName, setTimeout(() => {
+                         this.timeouts_.delete(settingName);
+                         if (this.previousValues_.get(settingName) == newValue)
+                           return;
+                         this.previousValues_.set(settingName, newValue);
+                         this.setSetting(settingName, newValue);
 
-  /**
-   * @param {boolean} value The new value of the rasterize setting.
-   * @private
-   */
-  onRasterizeSettingChange_: function(value) {
-    this.$$('#rasterize').checked = value;
+                         // For tests only
+                         this.fire('update-checkbox-setting', settingName);
+                       }, 200));
   },
 
   /**
-   * @param {boolean} value The new value of the selection only setting.
+   * @param {number} index The index of the option to update.
    * @private
    */
-  onSelectionOnlySettingChange_: function(value) {
-    this.$$('#selection-only').checked = value;
+  updateOptionFromSetting_: function(index) {
+    const setting = this.getSetting(this.options_[index].name);
+    this.set(`options_.${index}.available`, setting.available);
+    this.set(`options_.${index}.value`, setting.value);
+    this.set(`options_.${index}.managed`, setting.setByPolicy);
+
+    // Update first index
+    const availableOptions = this.options_.filter(option => !!option.available);
+    if (availableOptions.length > 0)
+      this.firstIndex_ = this.options_.indexOf(availableOptions[0]);
+  },
+
+  /**
+   * @param {boolean} managed Whether the setting is managed by policy.
+   * @param {boolean} disabled value of this.disabled
+   * @return {boolean} Whether the checkbox should be disabled.
+   * @private
+   */
+  getDisabled_: function(managed, disabled) {
+    return managed || disabled;
   },
 
   /** @private */
-  onHeaderFooterChange_: function() {
-    this.setSetting('headerFooter', this.$$('#header-footer').checked);
+  onHeaderFooterSettingChange_: function() {
+    this.updateOptionFromSetting_(0);
   },
 
   /** @private */
-  onDuplexChange_: function() {
-    this.setSetting('duplex', this.$$('#duplex').checked);
+  onDuplexSettingChange_: function() {
+    this.updateOptionFromSetting_(1);
   },
 
   /** @private */
-  onCssBackgroundChange_: function() {
-    this.setSetting('cssBackground', this.$$('#css-background').checked);
+  onCssBackgroundSettingChange_: function() {
+    this.updateOptionFromSetting_(2);
   },
 
   /** @private */
-  onRasterizeChange_: function() {
-    this.setSetting('rasterize', this.$$('#rasterize').checked);
+  onRasterizeSettingChange_: function() {
+    this.updateOptionFromSetting_(3);
   },
 
   /** @private */
-  onSelectionOnlyChange_: function() {
-    this.setSetting('selectionOnly', this.$$('#selection-only').checked);
+  onSelectionOnlySettingChange_: function() {
+    this.updateOptionFromSetting_(4);
+  },
+
+  /**
+   * @param {!Event} e Contains the checkbox item that was checked.
+   * @private
+   */
+  onChange_: function(e) {
+    const name = e.model.item.name;
+    this.updateSettingWithTimeout_(name, this.$$(`#${name}`).checked);
+  },
+
+  /**
+   * @param {number} index The index of the settings section.
+   * @return {string} Class string containing 'first-visible' if the settings
+   *     section is the first visible.
+   * @private
+   */
+  getClass_: function(index) {
+    return index === this.firstIndex_ ? 'first-visible' : '';
   },
 });

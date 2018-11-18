@@ -60,12 +60,7 @@ void MockInputRouterClient::OnSetWhiteListedTouchAction(
   white_listed_touch_action_ = white_listed_touch_action;
 }
 
-void MockInputRouterClient::DidStopFlinging() {
-}
-
 void MockInputRouterClient::DidStartScrollingViewport() {}
-
-void MockInputRouterClient::SetNeedsBeginFrameForFlingProgress() {}
 
 void MockInputRouterClient::ForwardGestureEventWithLatencyInfo(
     const blink::WebGestureEvent& gesture_event,
@@ -73,6 +68,15 @@ void MockInputRouterClient::ForwardGestureEventWithLatencyInfo(
   if (input_router_)
     input_router_->SendGestureEvent(
         GestureEventWithLatencyInfo(gesture_event, latency_info));
+
+  if (gesture_event.SourceDevice() != blink::kWebGestureDeviceTouchpad)
+    return;
+
+  if (gesture_event.GetType() == WebInputEvent::kGestureScrollBegin) {
+    is_wheel_scroll_in_progress_ = true;
+  } else if (gesture_event.GetType() == WebInputEvent::kGestureScrollEnd) {
+    is_wheel_scroll_in_progress_ = false;
+  }
 }
 
 void MockInputRouterClient::ForwardWheelEventWithLatencyInfo(
@@ -82,6 +86,10 @@ void MockInputRouterClient::ForwardWheelEventWithLatencyInfo(
     input_router_->SendWheelEvent(
         MouseWheelEventWithLatencyInfo(wheel_event, latency_info));
   }
+}
+
+bool MockInputRouterClient::IsWheelScrollInProgress() {
+  return is_wheel_scroll_in_progress_;
 }
 
 bool MockInputRouterClient::GetAndResetFilterEventCalled() {
@@ -100,6 +108,10 @@ cc::TouchAction MockInputRouterClient::GetAndResetWhiteListedTouchAction() {
   cc::TouchAction white_listed_touch_action = white_listed_touch_action_;
   white_listed_touch_action_ = cc::kTouchActionAuto;
   return white_listed_touch_action;
+}
+
+bool MockInputRouterClient::NeedsBeginFrameForFlingProgress() {
+  return false;
 }
 
 }  // namespace content

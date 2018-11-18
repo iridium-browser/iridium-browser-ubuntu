@@ -5,18 +5,15 @@
 #include "third_party/blink/renderer/platform/scheduler/renderer/webthread_impl_for_renderer_scheduler.h"
 
 #include "base/location.h"
-#include "third_party/blink/renderer/platform/scheduler/base/task_queue.h"
+#include "base/task/sequence_manager/task_queue.h"
 #include "third_party/blink/renderer/platform/scheduler/main_thread/main_thread_scheduler_impl.h"
-#include "third_party/blink/renderer/platform/scheduler/renderer/renderer_web_scheduler_impl.h"
 
 namespace blink {
 namespace scheduler {
 
 WebThreadImplForRendererScheduler::WebThreadImplForRendererScheduler(
     MainThreadSchedulerImpl* scheduler)
-    : web_scheduler_(new RendererWebSchedulerImpl(scheduler)),
-      task_runner_(scheduler->DefaultTaskQueue()),
-      idle_task_runner_(scheduler->IdleTaskRunner()),
+    : task_runner_(scheduler->DefaultTaskRunner()),
       scheduler_(scheduler),
       thread_id_(base::PlatformThread::CurrentId()) {}
 
@@ -27,13 +24,8 @@ blink::PlatformThreadId WebThreadImplForRendererScheduler::ThreadId() const {
   return thread_id_;
 }
 
-blink::WebScheduler* WebThreadImplForRendererScheduler::Scheduler() const {
-  return web_scheduler_.get();
-}
-
-SingleThreadIdleTaskRunner*
-WebThreadImplForRendererScheduler::GetIdleTaskRunner() const {
-  return idle_task_runner_.get();
+blink::ThreadScheduler* WebThreadImplForRendererScheduler::Scheduler() {
+  return scheduler_;
 }
 
 scoped_refptr<base::SingleThreadTaskRunner>
@@ -52,12 +44,12 @@ void WebThreadImplForRendererScheduler::RemoveTaskObserverInternal(
 }
 
 void WebThreadImplForRendererScheduler::AddTaskTimeObserverInternal(
-    TaskTimeObserver* task_time_observer) {
+    base::sequence_manager::TaskTimeObserver* task_time_observer) {
   scheduler_->AddTaskTimeObserver(task_time_observer);
 }
 
 void WebThreadImplForRendererScheduler::RemoveTaskTimeObserverInternal(
-    TaskTimeObserver* task_time_observer) {
+    base::sequence_manager::TaskTimeObserver* task_time_observer) {
   scheduler_->RemoveTaskTimeObserver(task_time_observer);
 }
 

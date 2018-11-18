@@ -18,8 +18,6 @@
 using content::WebContents;
 using content::WebPreferences;
 
-DEFINE_WEB_CONTENTS_USER_DATA_KEY(vr::VrTabHelper);
-
 namespace vr {
 
 VrTabHelper::VrTabHelper(content::WebContents* contents)
@@ -77,21 +75,10 @@ bool VrTabHelper::IsUiSuppressedInVr(content::WebContents* contents,
     // and permission request dialog are supported in VR before we disable this
     // suppression.
     case UiSuppressedElement::kFileAccessPermission:
+    case UiSuppressedElement::kContextMenu:
       suppress = true;
       break;
-    // The following are not suppressed if kVrBrowsingNativeAndroidUi is
-    // enabled.
-    case UiSuppressedElement::kPermissionRequest:
-    case UiSuppressedElement::kDownloadPermission:
-    case UiSuppressedElement::kAutofill:
-    case UiSuppressedElement::kJavascriptDialog:
-    case UiSuppressedElement::kMediaPermission:
-    case UiSuppressedElement::kQuotaPermission:
-#if defined(OS_ANDROID)
-      suppress = !base::FeatureList::IsEnabled(
-          chrome::android::kVrBrowsingNativeAndroidUi);
-#endif
-      break;
+    case UiSuppressedElement::kPlaceholderForPreviousHighValue:
     case UiSuppressedElement::kCount:
       suppress = false;
       NOTREACHED();

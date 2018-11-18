@@ -31,21 +31,22 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_SVG_PROPERTIES_SVG_PROPERTY_TEAR_OFF_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_SVG_PROPERTIES_SVG_PROPERTY_TEAR_OFF_H_
 
-#include "third_party/blink/renderer/core/dom/qualified_name.h"
 #include "third_party/blink/renderer/core/svg/properties/svg_property.h"
-#include "third_party/blink/renderer/core/svg/svg_element.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
+#include "third_party/blink/renderer/platform/bindings/trace_wrapper_member.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 
 namespace blink {
 
 class ExceptionState;
+class SVGAnimatedPropertyBase;
+class SVGElement;
 
 enum PropertyIsAnimValType { kPropertyIsNotAnimVal, kPropertyIsAnimVal };
 
 class SVGPropertyTearOffBase : public ScriptWrappable {
  public:
-  virtual ~SVGPropertyTearOffBase() = default;
+  ~SVGPropertyTearOffBase() override = default;
 
   PropertyIsAnimValType PropertyIsAnimVal() const {
     return property_is_anim_val_;
@@ -56,45 +57,26 @@ class SVGPropertyTearOffBase : public ScriptWrappable {
 
   virtual void CommitChange();
 
-  SVGElement* contextElement() const { return context_element_; }
+  SVGAnimatedPropertyBase* GetBinding() { return binding_; }
+  SVGElement* ContextElement() const { return context_element_; }
 
-  const QualifiedName& AttributeName() { return attribute_name_; }
+  void Bind(SVGAnimatedPropertyBase* binding);
 
-  void AttachToSVGElementAttribute(SVGElement* context_element,
-                                   const QualifiedName& attribute_name) {
-    DCHECK(!IsImmutable());
-    DCHECK(context_element);
-    DCHECK(attribute_name != QualifiedName::Null());
-    context_element_ = context_element;
-    // Requires SVGPropertyTearOffBase to be the left-most class in the
-    // inheritance hierarchy.
-    ScriptWrappableMarkingVisitor::WriteBarrier(context_element_.Get());
-    attribute_name_ = attribute_name;
-  }
-
-  void TraceWrappers(const ScriptWrappableVisitor* visitor) const override {
-    visitor->TraceWrappersWithManualWriteBarrier(context_element_.Get());
-    ScriptWrappable::TraceWrappers(visitor);
-  }
+  void Trace(Visitor*) override;
 
   static void ThrowReadOnly(ExceptionState&);
 
  protected:
-  SVGPropertyTearOffBase(SVGElement* context_element,
-                         PropertyIsAnimValType property_is_anim_val,
-                         const QualifiedName& attribute_name)
-      : context_element_(context_element),
-        property_is_anim_val_(property_is_anim_val),
-        attribute_name_(attribute_name) {}
+  SVGPropertyTearOffBase(SVGAnimatedPropertyBase* binding,
+                         PropertyIsAnimValType property_is_anim_val);
+  SVGPropertyTearOffBase(SVGElement* context_element);
+
+  void EnsureAnimValUpdated();
 
  private:
-  // This raw pointer is safe since the SVG element is guaranteed to be kept
-  // alive by a V8 wrapper.
-  // See http://crbug.com/528275 for the detail.
-  UntracedMember<SVGElement> context_element_;
-
+  TraceWrapperMember<SVGElement> context_element_;
+  Member<SVGAnimatedPropertyBase> binding_;
   PropertyIsAnimValType property_is_anim_val_;
-  QualifiedName attribute_name_;
 };
 
 template <typename Property>
@@ -102,31 +84,27 @@ class SVGPropertyTearOff : public SVGPropertyTearOffBase {
  public:
   Property* Target() {
     if (IsAnimVal())
-      contextElement()->EnsureAttributeAnimValUpdated();
+      EnsureAnimValUpdated();
 
     return target_.Get();
   }
 
   void SetTarget(Property* target) { target_ = target; }
 
-  virtual void Trace(blink::Visitor* visitor) {
+  void Trace(blink::Visitor* visitor) override {
     visitor->Trace(target_);
     SVGPropertyTearOffBase::Trace(visitor);
   }
 
-  virtual void TraceWrappers(const ScriptWrappableVisitor* visitor) const {
-    SVGPropertyTearOffBase::TraceWrappers(visitor);
-  }
-
  protected:
   SVGPropertyTearOff(Property* target,
-                     SVGElement* context_element,
-                     PropertyIsAnimValType property_is_anim_val,
-                     const QualifiedName& attribute_name)
-      : SVGPropertyTearOffBase(context_element,
-                               property_is_anim_val,
-                               attribute_name),
-        target_(target) {
+                     SVGAnimatedPropertyBase* binding,
+                     PropertyIsAnimValType property_is_anim_val)
+      : SVGPropertyTearOffBase(binding, property_is_anim_val), target_(target) {
+    DCHECK(target_);
+  }
+  SVGPropertyTearOff(Property* target, SVGElement* context_element)
+      : SVGPropertyTearOffBase(context_element), target_(target) {
     DCHECK(target_);
   }
 

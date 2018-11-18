@@ -6,7 +6,7 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "components/drive/chromeos/file_system_interface.h"
 #include "content/public/browser/browser_thread.h"
 
@@ -22,7 +22,7 @@ void RunCloseCallbackAndReplyTask(const base::Closure& close_callback,
                                   FileError error) {
   if (!close_callback.is_null())
     close_callback.Run();
-  DCHECK(!reply.is_null());
+  DCHECK(reply);
   reply.Run(error);
 }
 
@@ -61,8 +61,8 @@ void WriteOnCacheFileAndReply(FileSystemInterface* file_system,
                               const FileOperationCallback& reply) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(file_system);
-  DCHECK(!callback.is_null());
-  DCHECK(!reply.is_null());
+  DCHECK(callback);
+  DCHECK(reply);
 
   file_system->OpenFile(
       path,

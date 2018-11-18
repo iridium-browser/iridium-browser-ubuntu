@@ -25,14 +25,20 @@ class KeyboardLock final : public GarbageCollectedFinalized<KeyboardLock>,
   ~KeyboardLock();
 
   ScriptPromise lock(ScriptState*, const Vector<String>&);
-  void unlock();
+  void unlock(ScriptState*);
 
   // ContextLifecycleObserver override.
   void Trace(blink::Visitor*) override;
 
  private:
+  // Returns true if the local frame is attached to the renderer.
+  bool IsLocalFrameAttached();
+
   // Returns true if |service_| is initialized and ready to be called.
   bool EnsureServiceConnected();
+
+  // Returns true if the current frame is a top-level browsing context.
+  bool CalledFromSupportedContext(ExecutionContext*);
 
   void LockRequestFinished(ScriptPromiseResolver*,
                            mojom::KeyboardLockRequestResult);

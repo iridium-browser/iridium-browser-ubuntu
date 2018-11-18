@@ -14,6 +14,7 @@
 #include <stdio.h>
 #include <list>
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
 #include <vector>
@@ -22,6 +23,7 @@
 #include "p2p/client/basicportallocator.h"
 #include "rtc_base/asyncinvoker.h"
 #include "rtc_base/asyncpacketsocket.h"
+#include "rtc_base/sslcertificate.h"
 
 namespace rtc {
 class AsyncResolver;
@@ -49,42 +51,87 @@ class TurnPort : public Port {
                          // packets.
   };
   // Create a TURN port using the shared UDP socket, |socket|.
-  static TurnPort* Create(rtc::Thread* thread,
-                          rtc::PacketSocketFactory* factory,
-                          rtc::Network* network,
-                          rtc::AsyncPacketSocket* socket,
-                          const std::string& username,  // ice username.
-                          const std::string& password,  // ice password.
-                          const ProtocolAddress& server_address,
-                          const RelayCredentials& credentials,
-                          int server_priority,
-                          const std::string& origin,
-                          webrtc::TurnCustomizer* customizer) {
-    return new TurnPort(thread, factory, network, socket, username, password,
-                        server_address, credentials, server_priority, origin,
-                        customizer);
+  static std::unique_ptr<TurnPort> Create(
+      rtc::Thread* thread,
+      rtc::PacketSocketFactory* factory,
+      rtc::Network* network,
+      rtc::AsyncPacketSocket* socket,
+      const std::string& username,  // ice username.
+      const std::string& password,  // ice password.
+      const ProtocolAddress& server_address,
+      const RelayCredentials& credentials,
+      int server_priority,
+      const std::string& origin,
+      webrtc::TurnCustomizer* customizer) {
+    // Using `new` to access a non-public constructor.
+    return absl::WrapUnique(new TurnPort(
+        thread, factory, network, socket, username, password, server_address,
+        credentials, server_priority, origin, customizer));
+  }
+  // TODO(steveanton): Remove once downstream clients have moved to |Create|.
+  static std::unique_ptr<TurnPort> CreateUnique(
+      rtc::Thread* thread,
+      rtc::PacketSocketFactory* factory,
+      rtc::Network* network,
+      rtc::AsyncPacketSocket* socket,
+      const std::string& username,  // ice username.
+      const std::string& password,  // ice password.
+      const ProtocolAddress& server_address,
+      const RelayCredentials& credentials,
+      int server_priority,
+      const std::string& origin,
+      webrtc::TurnCustomizer* customizer) {
+    return Create(thread, factory, network, socket, username, password,
+                  server_address, credentials, server_priority, origin,
+                  customizer);
   }
 
   // Create a TURN port that will use a new socket, bound to |network| and
   // using a port in the range between |min_port| and |max_port|.
-  static TurnPort* Create(rtc::Thread* thread,
-                          rtc::PacketSocketFactory* factory,
-                          rtc::Network* network,
-                          uint16_t min_port,
-                          uint16_t max_port,
-                          const std::string& username,  // ice username.
-                          const std::string& password,  // ice password.
-                          const ProtocolAddress& server_address,
-                          const RelayCredentials& credentials,
-                          int server_priority,
-                          const std::string& origin,
-                          const std::vector<std::string>& tls_alpn_protocols,
-                          const std::vector<std::string>& tls_elliptic_curves,
-                          webrtc::TurnCustomizer* customizer) {
-    return new TurnPort(thread, factory, network, min_port, max_port, username,
-                        password, server_address, credentials, server_priority,
-                        origin, tls_alpn_protocols, tls_elliptic_curves,
-                        customizer);
+  static std::unique_ptr<TurnPort> Create(
+      rtc::Thread* thread,
+      rtc::PacketSocketFactory* factory,
+      rtc::Network* network,
+      uint16_t min_port,
+      uint16_t max_port,
+      const std::string& username,  // ice username.
+      const std::string& password,  // ice password.
+      const ProtocolAddress& server_address,
+      const RelayCredentials& credentials,
+      int server_priority,
+      const std::string& origin,
+      const std::vector<std::string>& tls_alpn_protocols,
+      const std::vector<std::string>& tls_elliptic_curves,
+      webrtc::TurnCustomizer* customizer,
+      rtc::SSLCertificateVerifier* tls_cert_verifier = nullptr) {
+    // Using `new` to access a non-public constructor.
+    return absl::WrapUnique(
+        new TurnPort(thread, factory, network, min_port, max_port, username,
+                     password, server_address, credentials, server_priority,
+                     origin, tls_alpn_protocols, tls_elliptic_curves,
+                     customizer, tls_cert_verifier));
+  }
+  // TODO(steveanton): Remove once downstream clients have moved to |Create|.
+  static std::unique_ptr<TurnPort> CreateUnique(
+      rtc::Thread* thread,
+      rtc::PacketSocketFactory* factory,
+      rtc::Network* network,
+      uint16_t min_port,
+      uint16_t max_port,
+      const std::string& username,  // ice username.
+      const std::string& password,  // ice password.
+      const ProtocolAddress& server_address,
+      const RelayCredentials& credentials,
+      int server_priority,
+      const std::string& origin,
+      const std::vector<std::string>& tls_alpn_protocols,
+      const std::vector<std::string>& tls_elliptic_curves,
+      webrtc::TurnCustomizer* customizer,
+      rtc::SSLCertificateVerifier* tls_cert_verifier = nullptr) {
+    return Create(thread, factory, network, min_port, max_port, username,
+                  password, server_address, credentials, server_priority,
+                  origin, tls_alpn_protocols, tls_elliptic_curves, customizer,
+                  tls_cert_verifier);
   }
 
   ~TurnPort() override;
@@ -214,12 +261,15 @@ class TurnPort : public Port {
            const std::string& origin,
            const std::vector<std::string>& tls_alpn_protocols,
            const std::vector<std::string>& tls_elliptic_curves,
-           webrtc::TurnCustomizer* customizer);
+           webrtc::TurnCustomizer* customizer,
+           rtc::SSLCertificateVerifier* tls_cert_verifier = nullptr);
 
   // NOTE: This method needs to be accessible for StacPort
   // return true if entry was created (i.e channel_number consumed).
   bool CreateOrRefreshEntry(const rtc::SocketAddress& addr,
                             int channel_number);
+
+  rtc::DiffServCodePoint StunDscpValue() const override;
 
  private:
   enum {
@@ -303,6 +353,7 @@ class TurnPort : public Port {
   TlsCertPolicy tls_cert_policy_ = TlsCertPolicy::TLS_CERT_POLICY_SECURE;
   std::vector<std::string> tls_alpn_protocols_;
   std::vector<std::string> tls_elliptic_curves_;
+  rtc::SSLCertificateVerifier* tls_cert_verifier_;
   RelayCredentials credentials_;
   AttemptedServerSet attempted_server_addresses_;
 
@@ -310,6 +361,7 @@ class TurnPort : public Port {
   SocketOptionsMap socket_options_;
   rtc::AsyncResolverInterface* resolver_;
   int error_;
+  rtc::DiffServCodePoint stun_dscp_value_;
 
   StunRequestManager request_manager_;
   std::string realm_;       // From 401/438 response message.
@@ -329,7 +381,8 @@ class TurnPort : public Port {
 
   rtc::AsyncInvoker invoker_;
 
-  // Optional TurnCustomizer that can modify outgoing messages.
+  // Optional TurnCustomizer that can modify outgoing messages. Once set, this
+  // must outlive the TurnPort's lifetime.
   webrtc::TurnCustomizer *turn_customizer_ = nullptr;
 
   friend class TurnEntry;

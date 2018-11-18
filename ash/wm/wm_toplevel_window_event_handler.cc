@@ -4,7 +4,6 @@
 
 #include "ash/wm/wm_toplevel_window_event_handler.h"
 
-#include "ash/public/cpp/config.h"
 #include "ash/shell.h"
 #include "ash/wm/resize_shadow_controller.h"
 #include "ash/wm/tablet_mode/tablet_mode_controller.h"
@@ -19,11 +18,6 @@
 #include "ui/aura/window_observer.h"
 #include "ui/base/hit_test.h"
 #include "ui/events/event.h"
-
-namespace {
-const double kMinHorizVelocityForWindowSwipe = 1100;
-const double kMinVertVelocityForWindowMinimize = 1000;
-}
 
 namespace ash {
 namespace wm {
@@ -60,11 +54,6 @@ bool CanStartOneFingerDrag(int window_component) {
 }
 
 void ShowResizeShadow(aura::Window* window, int component) {
-  if (Shell::GetAshConfig() == Config::MASH) {
-    // TODO: http://crbug.com/640773.
-    return;
-  }
-
   // Window resize in tablet mode is disabled (except in splitscreen).
   if (Shell::Get()
           ->tablet_mode_controller()
@@ -79,11 +68,6 @@ void ShowResizeShadow(aura::Window* window, int component) {
 }
 
 void HideResizeShadow(aura::Window* window) {
-  if (Shell::GetAshConfig() == Config::MASH) {
-    // TODO: http://crbug.com/640773.
-    return;
-  }
-
   ResizeShadowController* resize_shadow_controller =
       Shell::Get()->resize_shadow_controller();
   if (resize_shadow_controller)
@@ -231,7 +215,7 @@ void WmToplevelWindowEventHandler::OnGestureEvent(ui::GestureEvent* event,
   if (event->type() == ui::ET_GESTURE_END)
     UpdateGestureTarget(nullptr);
   else if (event->type() == ui::ET_GESTURE_BEGIN)
-    UpdateGestureTarget(target);
+    UpdateGestureTarget(target, event->location());
 
   if (event->handled())
     return;
@@ -342,57 +326,9 @@ void WmToplevelWindowEventHandler::OnGestureEvent(ui::GestureEvent* event,
       event->StopPropagation();
       return;
     case ui::ET_SCROLL_FLING_START:
-      CompleteDrag(DragResult::SUCCESS);
-
-      // TODO(pkotwicz): Fix tests which inadvertently start flings and check
-      // window_resizer_->IsMove() instead of the hittest component at |event|'s
-      // location.
-      if (GetNonClientComponent(target, event->location()) != HTCAPTION ||
-          !GetWindowState(target)->IsNormalOrSnapped()) {
-        return;
-      }
-
-      if (event->details().velocity_y() > kMinVertVelocityForWindowMinimize) {
-        SetWindowStateTypeFromGesture(target,
-                                      mojom::WindowStateType::MINIMIZED);
-      } else if (event->details().velocity_y() <
-                 -kMinVertVelocityForWindowMinimize) {
-        SetWindowStateTypeFromGesture(target,
-                                      mojom::WindowStateType::MAXIMIZED);
-      } else if (event->details().velocity_x() >
-                 kMinHorizVelocityForWindowSwipe) {
-        SetWindowStateTypeFromGesture(target,
-                                      mojom::WindowStateType::RIGHT_SNAPPED);
-      } else if (event->details().velocity_x() <
-                 -kMinHorizVelocityForWindowSwipe) {
-        SetWindowStateTypeFromGesture(target,
-                                      mojom::WindowStateType::LEFT_SNAPPED);
-      }
-      event->StopPropagation();
-      return;
+      FALLTHROUGH;
     case ui::ET_GESTURE_SWIPE:
-      DCHECK_GT(event->details().touch_points(), 0);
-      if (event->details().touch_points() == 1)
-        return;
-      if (!GetWindowState(target)->IsNormalOrSnapped())
-        return;
-
-      CompleteDrag(DragResult::SUCCESS);
-
-      if (event->details().swipe_down()) {
-        SetWindowStateTypeFromGesture(target,
-                                      mojom::WindowStateType::MINIMIZED);
-      } else if (event->details().swipe_up()) {
-        SetWindowStateTypeFromGesture(target,
-                                      mojom::WindowStateType::MAXIMIZED);
-      } else if (event->details().swipe_right()) {
-        SetWindowStateTypeFromGesture(target,
-                                      mojom::WindowStateType::RIGHT_SNAPPED);
-      } else {
-        SetWindowStateTypeFromGesture(target,
-                                      mojom::WindowStateType::LEFT_SNAPPED);
-      }
-      event->StopPropagation();
+      HandleFlingOrSwipe(event);
       return;
     default:
       return;
@@ -404,24 +340,38 @@ bool WmToplevelWindowEventHandler::AttemptToStartDrag(
     const gfx::Point& point_in_parent,
     int window_component,
     ::wm::WindowMoveSource source,
-    const EndClosure& end_closure) {
-  if (window_resizer_.get())
+    EndClosure end_closure) {
+  if (!PrepareForDrag(window, point_in_parent, window_component, source)) {
+    // Treat failure to start as a revert.
+    if (end_closure)
+      std::move(end_closure).Run(DragResult::REVERT);
     return false;
-  std::unique_ptr<WindowResizer> resizer(
-      CreateWindowResizer(window, point_in_parent, window_component, source));
-  if (!resizer)
-    return false;
+  }
 
-  end_closure_ = end_closure;
-  window_resizer_.reset(new ScopedWindowResizer(this, std::move(resizer)));
-
-  pre_drag_window_bounds_ = window->bounds();
+  end_closure_ = std::move(end_closure);
   in_gesture_drag_ = (source == ::wm::WINDOW_MOVE_SOURCE_TOUCH);
   return true;
 }
 
 void WmToplevelWindowEventHandler::RevertDrag() {
   CompleteDrag(DragResult::REVERT);
+}
+
+bool WmToplevelWindowEventHandler::PrepareForDrag(
+    aura::Window* window,
+    const gfx::Point& point_in_parent,
+    int window_component,
+    ::wm::WindowMoveSource source) {
+  if (window_resizer_)
+    return false;
+
+  std::unique_ptr<WindowResizer> resizer(
+      CreateWindowResizer(window, point_in_parent, window_component, source));
+  if (!resizer)
+    return false;
+  window_resizer_ =
+      std::make_unique<ScopedWindowResizer>(this, std::move(resizer));
+  return true;
 }
 
 bool WmToplevelWindowEventHandler::CompleteDrag(DragResult result) {
@@ -446,12 +396,8 @@ bool WmToplevelWindowEventHandler::CompleteDrag(DragResult result) {
 
   first_finger_hittest_ = HTNOWHERE;
   in_gesture_drag_ = false;
-  if (!end_closure_.is_null()) {
-    // Clear local state in case running the closure deletes us.
-    EndClosure end_closure = end_closure_;
-    end_closure_.Reset();
-    end_closure.Run(result);
-  }
+  if (end_closure_)
+    std::move(end_closure_).Run(result);
   return true;
 }
 
@@ -547,44 +493,17 @@ void WmToplevelWindowEventHandler::HandleCaptureLost(ui::LocatedEvent* event) {
   }
 }
 
-void WmToplevelWindowEventHandler::SetWindowStateTypeFromGesture(
-    aura::Window* window,
-    mojom::WindowStateType new_state_type) {
-  wm::WindowState* window_state = GetWindowState(window);
-  // TODO(oshima): Move extra logic (set_unminimize_to_restore_bounds,
-  // SetRestoreBoundsInParent) that modifies the window state
-  // into WindowState.
-  switch (new_state_type) {
-    case mojom::WindowStateType::MINIMIZED:
-      if (window_state->CanMinimize()) {
-        window_state->Minimize();
-        window_state->set_unminimize_to_restore_bounds(true);
-        window_state->SetRestoreBoundsInParent(pre_drag_window_bounds_);
-      }
-      break;
-    case mojom::WindowStateType::MAXIMIZED:
-      if (window_state->CanMaximize()) {
-        window_state->SetRestoreBoundsInParent(pre_drag_window_bounds_);
-        window_state->Maximize();
-      }
-      break;
-    case mojom::WindowStateType::LEFT_SNAPPED:
-      if (window_state->CanSnap()) {
-        window_state->SetRestoreBoundsInParent(pre_drag_window_bounds_);
-        const wm::WMEvent event(wm::WM_EVENT_SNAP_LEFT);
-        window_state->OnWMEvent(&event);
-      }
-      break;
-    case mojom::WindowStateType::RIGHT_SNAPPED:
-      if (window_state->CanSnap()) {
-        window_state->SetRestoreBoundsInParent(pre_drag_window_bounds_);
-        const wm::WMEvent event(wm::WM_EVENT_SNAP_RIGHT);
-        window_state->OnWMEvent(&event);
-      }
-      break;
-    default:
-      NOTREACHED();
-  }
+void WmToplevelWindowEventHandler::HandleFlingOrSwipe(ui::GestureEvent* event) {
+  UpdateGestureTarget(nullptr);
+  if (!window_resizer_)
+    return;
+
+  std::unique_ptr<ScopedWindowResizer> resizer(std::move(window_resizer_));
+  resizer->resizer()->FlingOrSwipe(event);
+  first_finger_hittest_ = HTNOWHERE;
+  in_gesture_drag_ = false;
+  if (end_closure_)
+    std::move(end_closure_).Run(DragResult::SUCCESS);
 }
 
 void WmToplevelWindowEventHandler::ResizerWindowDestroyed() {
@@ -601,7 +520,10 @@ void WmToplevelWindowEventHandler::OnWindowDestroying(aura::Window* window) {
     UpdateGestureTarget(nullptr);
 }
 
-void WmToplevelWindowEventHandler::UpdateGestureTarget(aura::Window* target) {
+void WmToplevelWindowEventHandler::UpdateGestureTarget(
+    aura::Window* target,
+    const gfx::Point& location) {
+  event_location_in_gesture_target_ = location;
   if (gesture_target_ == target)
     return;
 

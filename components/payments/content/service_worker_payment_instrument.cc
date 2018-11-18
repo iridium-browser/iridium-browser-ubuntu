@@ -13,6 +13,7 @@
 #include "content/public/browser/payment_app_provider.h"
 #include "content/public/browser/web_contents.h"
 #include "ui/gfx/image/image_skia.h"
+#include "url/origin.h"
 
 namespace payments {
 
@@ -20,14 +21,14 @@ namespace payments {
 // resource Id.
 ServiceWorkerPaymentInstrument::ServiceWorkerPaymentInstrument(
     content::BrowserContext* browser_context,
-    const GURL& top_level_origin,
+    const GURL& top_origin,
     const GURL& frame_origin,
     const PaymentRequestSpec* spec,
     std::unique_ptr<content::StoredPaymentApp> stored_payment_app_info,
     PaymentRequestDelegate* payment_request_delegate)
     : PaymentInstrument(0, PaymentInstrument::Type::SERVICE_WORKER_APP),
       browser_context_(browser_context),
-      top_level_origin_(top_level_origin),
+      top_origin_(top_origin),
       frame_origin_(frame_origin),
       spec_(spec),
       stored_payment_app_info_(std::move(stored_payment_app_info)),
@@ -37,7 +38,7 @@ ServiceWorkerPaymentInstrument::ServiceWorkerPaymentInstrument(
       needs_installation_(false),
       weak_ptr_factory_(this) {
   DCHECK(browser_context_);
-  DCHECK(top_level_origin_.is_valid());
+  DCHECK(top_origin_.is_valid());
   DCHECK(frame_origin_.is_valid());
   DCHECK(spec_);
 
@@ -55,14 +56,14 @@ ServiceWorkerPaymentInstrument::ServiceWorkerPaymentInstrument(
 // resource Id.
 ServiceWorkerPaymentInstrument::ServiceWorkerPaymentInstrument(
     content::WebContents* web_contents,
-    const GURL& top_level_origin,
+    const GURL& top_origin,
     const GURL& frame_origin,
     const PaymentRequestSpec* spec,
     std::unique_ptr<WebAppInstallationInfo> installable_payment_app_info,
     const std::string& enabled_method,
     PaymentRequestDelegate* payment_request_delegate)
     : PaymentInstrument(0, PaymentInstrument::Type::SERVICE_WORKER_APP),
-      top_level_origin_(top_level_origin),
+      top_origin_(top_origin),
       frame_origin_(frame_origin),
       spec_(spec),
       delegate_(nullptr),
@@ -74,7 +75,7 @@ ServiceWorkerPaymentInstrument::ServiceWorkerPaymentInstrument(
       installable_enabled_method_(enabled_method),
       weak_ptr_factory_(this) {
   DCHECK(web_contents_);
-  DCHECK(top_level_origin_.is_valid());
+  DCHECK(top_origin_.is_valid());
   DCHECK(frame_origin_.is_valid());
   DCHECK(spec_);
 
@@ -105,6 +106,13 @@ void ServiceWorkerPaymentInstrument::ValidateCanMakePayment(
     ValidateCanMakePaymentCallback callback) {
   // Returns true for payment app that needs installation.
   if (needs_installation_) {
+    OnCanMakePayment(std::move(callback), true);
+    return;
+  }
+
+  // Returns true if we are in incognito (avoiding sending the event to the
+  // payment handler).
+  if (payment_request_delegate_->IsIncognito()) {
     OnCanMakePayment(std::move(callback), true);
     return;
   }
@@ -156,33 +164,20 @@ ServiceWorkerPaymentInstrument::CreateCanMakePaymentEventData() {
   mojom::CanMakePaymentEventDataPtr event_data =
       mojom::CanMakePaymentEventData::New();
 
-  event_data->top_level_origin = top_level_origin_;
+  event_data->top_origin = top_origin_;
   event_data->payment_request_origin = frame_origin_;
 
   for (const auto& modifier : spec_->details().modifiers) {
-    std::vector<std::string>::const_iterator it =
-        modifier->method_data->supported_methods.begin();
-    for (; it != modifier->method_data->supported_methods.end(); it++) {
-      if (supported_url_methods.find(*it) != supported_url_methods.end())
-        break;
+    if (base::ContainsKey(supported_url_methods,
+                          modifier->method_data->supported_method)) {
+      event_data->modifiers.emplace_back(modifier.Clone());
     }
-    if (it == modifier->method_data->supported_methods.end())
-      continue;
-
-    event_data->modifiers.emplace_back(modifier.Clone());
   }
 
   for (const auto& data : spec_->method_data()) {
-    std::vector<std::string>::const_iterator it =
-        data->supported_methods.begin();
-    for (; it != data->supported_methods.end(); it++) {
-      if (supported_url_methods.find(*it) != supported_url_methods.end())
-        break;
+    if (base::ContainsKey(supported_url_methods, data->supported_method)) {
+      event_data->method_data.push_back(data.Clone());
     }
-    if (it == data->supported_methods.end())
-      continue;
-
-    event_data->method_data.push_back(data.Clone());
   }
 
   return event_data;
@@ -228,7 +223,7 @@ ServiceWorkerPaymentInstrument::CreatePaymentRequestEventData() {
   mojom::PaymentRequestEventDataPtr event_data =
       mojom::PaymentRequestEventData::New();
 
-  event_data->top_level_origin = top_level_origin_;
+  event_data->top_origin = top_origin_;
   event_data->payment_request_origin = frame_origin_;
 
   if (spec_->details().id.has_value())
@@ -244,29 +239,16 @@ ServiceWorkerPaymentInstrument::CreatePaymentRequestEventData() {
                              stored_payment_app_info_->enabled_methods.end());
   }
   for (const auto& modifier : spec_->details().modifiers) {
-    std::vector<std::string>::const_iterator it =
-        modifier->method_data->supported_methods.begin();
-    for (; it != modifier->method_data->supported_methods.end(); it++) {
-      if (supported_methods.find(*it) != supported_methods.end())
-        break;
+    if (base::ContainsKey(supported_methods,
+                          modifier->method_data->supported_method)) {
+      event_data->modifiers.emplace_back(modifier.Clone());
     }
-    if (it == modifier->method_data->supported_methods.end())
-      continue;
-
-    event_data->modifiers.emplace_back(modifier.Clone());
   }
 
   for (const auto& data : spec_->method_data()) {
-    std::vector<std::string>::const_iterator it =
-        data->supported_methods.begin();
-    for (; it != data->supported_methods.end(); it++) {
-      if (supported_methods.find(*it) != supported_methods.end())
-        break;
+    if (base::ContainsKey(supported_methods, data->supported_method)) {
+      event_data->method_data.push_back(data.Clone());
     }
-    if (it == data->supported_methods.end())
-      continue;
-
-    event_data->method_data.push_back(data.Clone());
   }
 
   return event_data;
@@ -297,15 +279,9 @@ base::string16 ServiceWorkerPaymentInstrument::GetMissingInfoLabel() const {
 }
 
 bool ServiceWorkerPaymentInstrument::IsValidForCanMakePayment() const {
-  // This instrument should not be used when can_make_payment_result_ is false
-  // , so this interface should not be invoked.
+  // This instrument should not be used when can_make_payment_result_ is false,
+  // so this interface should not be invoked.
   DCHECK(can_make_payment_result_);
-
-  // Returns false for PaymentRequest.CanMakePayment query if the app needs
-  // installation.
-  if (needs_installation_)
-    return false;
-
   return true;
 }
 
@@ -323,38 +299,29 @@ base::string16 ServiceWorkerPaymentInstrument::GetSublabel() const {
   if (needs_installation_) {
     DCHECK(GURL(installable_web_app_info_->sw_scope).is_valid());
     return base::UTF8ToUTF16(
-        GURL(installable_web_app_info_->sw_scope).GetOrigin().spec());
+        url::Origin::Create(GURL(installable_web_app_info_->sw_scope)).host());
   }
-  return base::UTF8ToUTF16(stored_payment_app_info_->scope.GetOrigin().spec());
+  return base::UTF8ToUTF16(
+      url::Origin::Create(stored_payment_app_info_->scope).host());
 }
 
 bool ServiceWorkerPaymentInstrument::IsValidForModifier(
-    const std::vector<std::string>& methods,
+    const std::string& method,
     bool supported_networks_specified,
     const std::set<std::string>& supported_networks,
     bool supported_types_specified,
     const std::set<autofill::CreditCard::CardType>& supported_types) const {
   // Payment app that needs installation only supports url based payment
   // methods.
-  if (needs_installation_) {
-    return std::find(methods.begin(), methods.end(),
-                     installable_enabled_method_) != methods.end();
-  }
+  if (needs_installation_)
+    return installable_enabled_method_ == method;
 
-  std::vector<std::string> matched_methods;
-  for (const auto& modifier_supported_method : methods) {
-    if (base::ContainsValue(stored_payment_app_info_->enabled_methods,
-                            modifier_supported_method)) {
-      matched_methods.emplace_back(modifier_supported_method);
-    }
-  }
-
-  if (matched_methods.empty())
+  if (!base::ContainsValue(stored_payment_app_info_->enabled_methods, method))
     return false;
 
   // Return true if 'basic-card' is not the only matched payment method. This
   // assumes that there is no duplicated payment methods.
-  if (matched_methods.size() > 1U || matched_methods[0] != "basic-card")
+  if (method != "basic-card")
     return true;
 
   // Checking the capabilities of this instrument against the modifier.

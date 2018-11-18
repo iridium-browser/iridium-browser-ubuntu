@@ -13,8 +13,6 @@
 #include "components/password_manager/core/browser/password_manager.h"
 #include "components/strings/grit/components_strings.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/render_view_host.h"
-#include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/web_contents.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/views/widget/widget.h"
@@ -32,9 +30,10 @@ class LoginHandlerViews : public LoginHandler, public views::DialogDelegate {
   LoginHandlerViews(
       net::AuthChallengeInfo* auth_info,
       content::ResourceRequestInfo::WebContentsGetter web_contents_getter,
-      const base::Callback<void(const base::Optional<net::AuthCredentials>&)>&
-          auth_required_callback)
-      : LoginHandler(auth_info, web_contents_getter, auth_required_callback),
+      LoginAuthRequiredCallback auth_required_callback)
+      : LoginHandler(auth_info,
+                     web_contents_getter,
+                     std::move(auth_required_callback)),
         login_view_(nullptr),
         dialog_(nullptr) {
     chrome::RecordDialogCreation(chrome::DialogIdentifier::LOGIN_HANDLER);
@@ -63,10 +62,6 @@ class LoginHandlerViews : public LoginHandler, public views::DialogDelegate {
 
   void WindowClosing() override {
     DCHECK_CURRENTLY_ON(content::BrowserThread::UI);
-    content::WebContents* web_contents = GetWebContentsForLogin();
-    if (web_contents)
-      web_contents->GetRenderViewHost()->GetWidget()->SetIgnoreInputEvents(
-          false);
 
     // Reference is no longer valid.
     dialog_ = NULL;
@@ -163,10 +158,9 @@ namespace chrome {
 scoped_refptr<LoginHandler> CreateLoginHandlerViews(
     net::AuthChallengeInfo* auth_info,
     content::ResourceRequestInfo::WebContentsGetter web_contents_getter,
-    const base::Callback<void(const base::Optional<net::AuthCredentials>&)>&
-        auth_required_callback) {
-  return base::MakeRefCounted<LoginHandlerViews>(auth_info, web_contents_getter,
-                                                 auth_required_callback);
+    LoginAuthRequiredCallback auth_required_callback) {
+  return base::MakeRefCounted<LoginHandlerViews>(
+      auth_info, web_contents_getter, std::move(auth_required_callback));
 }
 
 }  // namespace chrome

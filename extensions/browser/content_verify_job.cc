@@ -8,7 +8,7 @@
 
 #include "base/metrics/histogram_macros.h"
 #include "base/stl_util.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "base/timer/elapsed_timer.h"
 #include "content/public/browser/browser_thread.h"
 #include "crypto/secure_hash.h"
@@ -61,8 +61,8 @@ ContentVerifyJob::ContentVerifyJob(const ExtensionId& extension_id,
       failed_(false) {}
 
 ContentVerifyJob::~ContentVerifyJob() {
-  UMA_HISTOGRAM_COUNTS("ExtensionContentVerifyJob.TimeSpentUS",
-                       time_spent_.InMicroseconds());
+  UMA_HISTOGRAM_COUNTS_1M("ExtensionContentVerifyJob.TimeSpentUS",
+                          time_spent_.InMicroseconds());
 }
 
 void ContentVerifyJob::Start(ContentVerifier* verifier) {
@@ -90,6 +90,7 @@ void ContentVerifyJob::DidGetContentHashOnIO(
 
 void ContentVerifyJob::BytesRead(int count, const char* data) {
   base::AutoLock auto_lock(lock_);
+  DCHECK(!done_reading_);
   BytesReadImpl(count, data);
 }
 
@@ -100,6 +101,7 @@ void ContentVerifyJob::DoneReading() {
     return;
   if (g_ignore_verification_for_tests)
     return;
+  DCHECK(!done_reading_);
   done_reading_ = true;
   if (hashes_ready_) {
     if (!FinishBlock()) {
@@ -167,7 +169,7 @@ bool ContentVerifyJob::FinishBlock() {
     current_hash_ = crypto::SecureHash::Create(crypto::SecureHash::SHA256);
   }
   std::string final(crypto::kSHA256Length, 0);
-  current_hash_->Finish(base::string_as_array(& final), final.size());
+  current_hash_->Finish(base::data(final), final.size());
   current_hash_.reset();
   current_hash_byte_count_ = 0;
 
@@ -218,7 +220,7 @@ void ContentVerifyJob::OnHashesReady(
   if (!queue_.empty()) {
     std::string tmp;
     queue_.swap(tmp);
-    BytesReadImpl(tmp.size(), base::string_as_array(&tmp));
+    BytesReadImpl(tmp.size(), base::data(tmp));
     if (failed_)
       return;
   }

@@ -699,13 +699,7 @@ TEST_P(GLES2DecoderManualInitTest, CopyTexImage2DUnsizedInternalFormat) {
     DoBindFramebuffer(GL_FRAMEBUFFER, 0, 0);
     GLenum internal_format = kUnsizedInternalFormats[i];
     DoBindTexture(GL_TEXTURE_2D, client_texture_id_, kServiceTextureId);
-    EXPECT_CALL(*gl_, CopyTexImage2D(target, level, internal_format, 0, 0,
-                                     width, height, border))
-        .Times(1)
-        .RetiresOnSaturation();
-    CopyTexImage2D cmd;
-    cmd.Init(target, level, internal_format, 0, 0, width, height);
-    EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+    DoCopyTexImage2D(target, level, internal_format, 0, 0, width, height, border);
     EXPECT_EQ(GL_NO_ERROR, GetGLError());
 
     TextureRef* ref = manager->GetTexture(client_texture_id_);
@@ -732,16 +726,13 @@ TEST_P(GLES2DecoderManualInitTest, CopyTexImage2DUnsizedInternalFormat) {
     bool complete =
         (DoCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE);
     if (complete) {
-      EXPECT_CALL(*gl_, CopyTexImage2D(target, level, internal_format, 0, 0,
-                                       width, height, border))
-          .Times(1)
-          .RetiresOnSaturation();
-    }
-    cmd.Init(target, level, internal_format, 0, 0, width, height);
-    EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
-    if (complete) {
+      DoCopyTexImage2D(target, level, internal_format,
+                       0, 0, width, height, border);
       EXPECT_EQ(GL_NO_ERROR, GetGLError());
     } else {
+      CopyTexImage2D cmd;
+      cmd.Init(target, level, internal_format, 0, 0, width, height);
+      EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
       EXPECT_EQ(GL_INVALID_FRAMEBUFFER_OPERATION, GetGLError());
     }
   }
@@ -789,13 +780,8 @@ TEST_P(GLES2DecoderManualInitTest, CopyTexImage2DUnsizedInternalFormatES3) {
     DoBindFramebuffer(GL_FRAMEBUFFER, 0, 0);
     GLenum internal_format = kUnsizedInternalFormats[i].unsized;
     DoBindTexture(GL_TEXTURE_2D, client_texture_id_, kServiceTextureId);
-    EXPECT_CALL(*gl_, CopyTexImage2D(target, level, internal_format, 0, 0,
-                                     width, height, border))
-        .Times(1)
-        .RetiresOnSaturation();
-    CopyTexImage2D cmd;
-    cmd.Init(target, level, internal_format, 0, 0, width, height);
-    EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+    DoCopyTexImage2D(target, level, internal_format,
+                     0, 0, width, height, border);
     EXPECT_EQ(GL_NO_ERROR, GetGLError());
 
     TextureRef* ref = manager->GetTexture(client_texture_id_);
@@ -827,16 +813,13 @@ TEST_P(GLES2DecoderManualInitTest, CopyTexImage2DUnsizedInternalFormatES3) {
     bool complete =
         (DoCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE);
     if (complete) {
-      EXPECT_CALL(*gl_, CopyTexImage2D(target, level, internal_format, 0, 0,
-                                       width, height, border))
-          .Times(1)
-          .RetiresOnSaturation();
-    }
-    cmd.Init(target, level, internal_format, 0, 0, width, height);
-    EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
-    if (complete) {
+      DoCopyTexImage2D(target, level, internal_format,
+                       0, 0, width, height, border);
       EXPECT_EQ(GL_NO_ERROR, GetGLError());
     } else {
+      CopyTexImage2D cmd;
+      cmd.Init(target, level, internal_format, 0, 0, width, height);
+      EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
       EXPECT_EQ(GL_INVALID_FRAMEBUFFER_OPERATION, GetGLError());
     }
   }
@@ -2096,7 +2079,7 @@ TEST_P(GLES2DecoderManualInitTest, CompressedTexImage2DS3TC) {
 TEST_P(GLES2DecoderManualInitTest, CompressedTexImage2DETC1) {
   InitState init;
   init.extensions = "GL_OES_compressed_ETC1_RGB8_texture";
-  init.gl_version = "opengl es 2.0";
+  init.gl_version = "OpenGL ES 2.0";
   init.bind_generates_resource = true;
   InitDecoder(init);
   const uint32_t kBucketId = 123;
@@ -2202,7 +2185,7 @@ TEST_P(GLES2DecoderTest, CopySubTextureCHROMIUMBadTarget) {
 TEST_P(GLES2DecoderManualInitTest, EGLImageExternalBindTexture) {
   InitState init;
   init.extensions = "GL_OES_EGL_image_external";
-  init.gl_version = "opengl es 2.0";
+  init.gl_version = "OpenGL ES 2.0";
   init.bind_generates_resource = true;
   InitDecoder(init);
   EXPECT_CALL(*gl_, BindTexture(GL_TEXTURE_EXTERNAL_OES, kNewServiceId));
@@ -2220,7 +2203,7 @@ TEST_P(GLES2DecoderManualInitTest, EGLImageExternalBindTexture) {
 TEST_P(GLES2DecoderManualInitTest, EGLImageExternalGetBinding) {
   InitState init;
   init.extensions = "GL_OES_EGL_image_external";
-  init.gl_version = "opengl es 2.0";
+  init.gl_version = "OpenGL ES 2.0";
   init.bind_generates_resource = true;
   InitDecoder(init);
   DoBindTexture(GL_TEXTURE_EXTERNAL_OES, client_texture_id_, kServiceTextureId);
@@ -2250,7 +2233,7 @@ TEST_P(GLES2DecoderManualInitTest, EGLImageExternalGetBinding) {
 TEST_P(GLES2DecoderManualInitTest, EGLImageExternalTextureDefaults) {
   InitState init;
   init.extensions = "GL_OES_EGL_image_external";
-  init.gl_version = "opengl es 2.0";
+  init.gl_version = "OpenGL ES 2.0";
   init.bind_generates_resource = true;
   InitDecoder(init);
   DoBindTexture(GL_TEXTURE_EXTERNAL_OES, client_texture_id_, kServiceTextureId);
@@ -2267,7 +2250,7 @@ TEST_P(GLES2DecoderManualInitTest, EGLImageExternalTextureDefaults) {
 TEST_P(GLES2DecoderManualInitTest, EGLImageExternalTextureParam) {
   InitState init;
   init.extensions = "GL_OES_EGL_image_external";
-  init.gl_version = "opengl es 2.0";
+  init.gl_version = "OpenGL ES 2.0";
   init.bind_generates_resource = true;
   InitDecoder(init);
   DoBindTexture(GL_TEXTURE_EXTERNAL_OES, client_texture_id_, kServiceTextureId);
@@ -2315,7 +2298,7 @@ TEST_P(GLES2DecoderManualInitTest, EGLImageExternalTextureParam) {
 TEST_P(GLES2DecoderManualInitTest, EGLImageExternalTextureParamInvalid) {
   InitState init;
   init.extensions = "GL_OES_EGL_image_external";
-  init.gl_version = "opengl es 2.0";
+  init.gl_version = "OpenGL ES 2.0";
   init.bind_generates_resource = true;
   InitDecoder(init);
   DoBindTexture(GL_TEXTURE_EXTERNAL_OES, client_texture_id_, kServiceTextureId);
@@ -2347,7 +2330,7 @@ TEST_P(GLES2DecoderManualInitTest, EGLImageExternalTextureParamInvalid) {
 TEST_P(GLES2DecoderManualInitTest, EGLImageExternalTexImage2DError) {
   InitState init;
   init.extensions = "GL_OES_EGL_image_external";
-  init.gl_version = "opengl es 2.0";
+  init.gl_version = "OpenGL ES 2.0";
   init.bind_generates_resource = true;
   InitDecoder(init);
 
@@ -2841,63 +2824,6 @@ TEST_P(GLES2DecoderTest, TexSubImage2DDoesNotClearAfterTexImage2DNULLThenData) {
   EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
 }
 
-TEST_P(GLES2DecoderManualInitTest,
-       TexSubImage2DNotClearAfterTexImage2DNULLThenDataWithTexImage2DIsFaster) {
-  gpu::GpuDriverBugWorkarounds workarounds;
-  workarounds.texsubimage_faster_than_teximage = true;
-  InitState init;
-  init.bind_generates_resource = true;
-  InitDecoderWithWorkarounds(init, workarounds);
-  DoBindTexture(GL_TEXTURE_2D, client_texture_id_, kServiceTextureId);
-  DoTexImage2D(
-      GL_TEXTURE_2D, 0, GL_RGBA, 2, 2, 0, GL_RGBA, GL_UNSIGNED_BYTE, 0, 0);
-
-  {
-    // Uses texSubimage internally because the above workaround is active and
-    // the update is for the full size of the texture.
-    EXPECT_CALL(*gl_,
-                TexSubImage2D(
-                    GL_TEXTURE_2D, 0, 0, 0, 2, 2, GL_RGBA, GL_UNSIGNED_BYTE, _))
-        .Times(1)
-        .RetiresOnSaturation();
-    TexImage2D cmd;
-    cmd.Init(GL_TEXTURE_2D, 0, GL_RGBA, 2, 2, GL_RGBA, GL_UNSIGNED_BYTE,
-             shared_memory_id_, kSharedMemoryOffset);
-    EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
-  }
-
-  EXPECT_CALL(*gl_,
-              TexSubImage2D(GL_TEXTURE_2D,
-                            0,
-                            1,
-                            1,
-                            1,
-                            1,
-                            GL_RGBA,
-                            GL_UNSIGNED_BYTE,
-                            shared_memory_address_))
-      .Times(1)
-      .RetiresOnSaturation();
-  TexSubImage2D cmd;
-  cmd.Init(GL_TEXTURE_2D, 0, 1, 1, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE,
-           shared_memory_id_, kSharedMemoryOffset, GL_FALSE);
-  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
-  // Test if we call it again it does not clear.
-  EXPECT_CALL(*gl_,
-              TexSubImage2D(GL_TEXTURE_2D,
-                            0,
-                            1,
-                            1,
-                            1,
-                            1,
-                            GL_RGBA,
-                            GL_UNSIGNED_BYTE,
-                            shared_memory_address_))
-      .Times(1)
-      .RetiresOnSaturation();
-  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
-}
-
 TEST_P(GLES2DecoderTest, TexSubImage2DClearsAfterTexImage2DWithDataThenNULL) {
   DoBindTexture(GL_TEXTURE_2D, client_texture_id_, kServiceTextureId);
   // Put in data (so it should be marked as cleared)
@@ -3115,81 +3041,6 @@ TEST_P(GLES2DecoderTest, TextureUsageAngleExtNotEnabledByDefault) {
   EXPECT_EQ(GL_INVALID_ENUM, GetGLError());
 }
 
-TEST_P(GLES2DecoderTest, ProduceAndConsumeTextureCHROMIUM) {
-  Mailbox mailbox = Mailbox::Generate();
-  GLuint new_texture_id = kNewClientId;
-
-  DoBindTexture(GL_TEXTURE_2D, client_texture_id_, kServiceTextureId);
-  DoTexImage2D(
-      GL_TEXTURE_2D, 0, GL_RGBA, 3, 1, 0, GL_RGBA, GL_UNSIGNED_BYTE, 0, 0);
-  DoTexImage2D(
-      GL_TEXTURE_2D, 1, GL_RGBA, 2, 4, 0, GL_RGBA, GL_UNSIGNED_BYTE, 0, 0);
-  TextureRef* texture_ref =
-      group().texture_manager()->GetTexture(client_texture_id_);
-  ASSERT_TRUE(texture_ref != nullptr);
-  Texture* texture = texture_ref->texture();
-  EXPECT_EQ(kServiceTextureId, texture->service_id());
-
-  ProduceTextureDirectCHROMIUMImmediate& produce_cmd =
-      *GetImmediateAs<ProduceTextureDirectCHROMIUMImmediate>();
-  produce_cmd.Init(client_texture_id_, mailbox.name);
-  EXPECT_EQ(error::kNoError,
-            ExecuteImmediateCmd(produce_cmd, sizeof(mailbox.name)));
-  EXPECT_EQ(GL_NO_ERROR, GetGLError());
-
-  // Texture didn't change.
-  GLsizei width;
-  GLsizei height;
-  GLenum type;
-  GLenum internal_format;
-
-  EXPECT_TRUE(
-      texture->GetLevelSize(GL_TEXTURE_2D, 0, &width, &height, nullptr));
-  EXPECT_EQ(3, width);
-  EXPECT_EQ(1, height);
-  EXPECT_TRUE(texture->GetLevelType(GL_TEXTURE_2D, 0, &type, &internal_format));
-  EXPECT_EQ(static_cast<GLenum>(GL_RGBA), internal_format);
-  EXPECT_EQ(static_cast<GLenum>(GL_UNSIGNED_BYTE), type);
-
-  EXPECT_TRUE(
-      texture->GetLevelSize(GL_TEXTURE_2D, 1, &width, &height, nullptr));
-  EXPECT_EQ(2, width);
-  EXPECT_EQ(4, height);
-  EXPECT_TRUE(texture->GetLevelType(GL_TEXTURE_2D, 1, &type, &internal_format));
-  EXPECT_EQ(static_cast<GLenum>(GL_RGBA), internal_format);
-  EXPECT_EQ(static_cast<GLenum>(GL_UNSIGNED_BYTE), type);
-
-  // Service ID has not changed.
-  EXPECT_EQ(kServiceTextureId, texture->service_id());
-
-  CreateAndConsumeTextureINTERNALImmediate& consume_cmd =
-      *GetImmediateAs<CreateAndConsumeTextureINTERNALImmediate>();
-  consume_cmd.Init(new_texture_id, mailbox.name);
-  EXPECT_EQ(error::kNoError,
-            ExecuteImmediateCmd(consume_cmd, sizeof(mailbox.name)));
-  EXPECT_EQ(GL_NO_ERROR, GetGLError());
-
-  // Texture is redefined.
-  EXPECT_TRUE(
-      texture->GetLevelSize(GL_TEXTURE_2D, 0, &width, &height, nullptr));
-  EXPECT_EQ(3, width);
-  EXPECT_EQ(1, height);
-  EXPECT_TRUE(texture->GetLevelType(GL_TEXTURE_2D, 0, &type, &internal_format));
-  EXPECT_EQ(static_cast<GLenum>(GL_RGBA), internal_format);
-  EXPECT_EQ(static_cast<GLenum>(GL_UNSIGNED_BYTE), type);
-
-  EXPECT_TRUE(
-      texture->GetLevelSize(GL_TEXTURE_2D, 1, &width, &height, nullptr));
-  EXPECT_EQ(2, width);
-  EXPECT_EQ(4, height);
-  EXPECT_TRUE(texture->GetLevelType(GL_TEXTURE_2D, 1, &type, &internal_format));
-  EXPECT_EQ(static_cast<GLenum>(GL_RGBA), internal_format);
-  EXPECT_EQ(static_cast<GLenum>(GL_UNSIGNED_BYTE), type);
-
-  // Service ID is restored.
-  EXPECT_EQ(kServiceTextureId, texture->service_id());
-}
-
 TEST_P(GLES2DecoderTest, ProduceAndConsumeDirectTextureCHROMIUM) {
   Mailbox mailbox = Mailbox::Generate();
 
@@ -3337,7 +3188,7 @@ TEST_P(GLES2DecoderTest, CreateAndConsumeTextureCHROMIUMInvalidTexture) {
 TEST_P(GLES2DecoderManualInitTest, DepthTextureBadArgs) {
   InitState init;
   init.extensions = "GL_ANGLE_depth_texture";
-  init.gl_version = "opengl es 2.0";
+  init.gl_version = "OpenGL ES 2.0";
   init.has_depth = true;
   init.has_stencil = true;
   init.request_depth = true;
@@ -3401,7 +3252,7 @@ TEST_P(GLES2DecoderManualInitTest, DepthTextureBadArgs) {
 TEST_P(GLES2DecoderManualInitTest, GenerateMipmapDepthTexture) {
   InitState init;
   init.extensions = "GL_ANGLE_depth_texture";
-  init.gl_version = "opengl es 2.0";
+  init.gl_version = "OpenGL ES 2.0";
   init.has_depth = true;
   init.has_stencil = true;
   init.request_depth = true;
@@ -3514,9 +3365,6 @@ TEST_P(GLES2DecoderTest, OrphanGLImageWithTexImage2D) {
 TEST_P(GLES2DecoderTest, GLImageAttachedAfterSubTexImage2D) {
   // Specifically tests that TexSubImage2D is not optimized to TexImage2D
   // in the presence of image attachments.
-  ASSERT_FALSE(
-      feature_info()->workarounds().texsubimage_faster_than_teximage);
-
   scoped_refptr<gl::GLImage> image(new gl::GLImageStub);
   GetImageManagerForTest()->AddImage(image.get(), 1);
   DoBindTexture(GL_TEXTURE_2D, client_texture_id_, kServiceTextureId);
@@ -3664,13 +3512,14 @@ class MockGLImage : public gl::GLImage {
   MOCK_METHOD1(CopyTexImage, bool(unsigned));
   MOCK_METHOD3(CopyTexSubImage,
                bool(unsigned, const gfx::Point&, const gfx::Rect&));
-  MOCK_METHOD6(ScheduleOverlayPlane,
+  MOCK_METHOD7(ScheduleOverlayPlane,
                bool(gfx::AcceleratedWidget,
                     int,
                     gfx::OverlayTransform,
                     const gfx::Rect&,
                     const gfx::RectF&,
-                    bool));
+                    bool,
+                    std::unique_ptr<gfx::GpuFence> gpu_fence));
   MOCK_METHOD1(SetColorSpace, void(const gfx::ColorSpace&));
   MOCK_METHOD0(Flush, void());
   MOCK_METHOD3(OnMemoryDump,
@@ -3679,7 +3528,7 @@ class MockGLImage : public gl::GLImage {
                     const std::string&));
 
  protected:
-  virtual ~MockGLImage() = default;
+  ~MockGLImage() override = default;
 };
 
 TEST_P(GLES2DecoderWithShaderTest, CopyTexImage) {
@@ -3819,7 +3668,7 @@ TEST_P(GLES2DecoderWithShaderTest, CopyTexImage) {
 TEST_P(GLES2DecoderManualInitTest, DrawWithGLImageExternal) {
   InitState init;
   init.extensions = "GL_OES_EGL_image_external";
-  init.gl_version = "opengl es 2.0";
+  init.gl_version = "OpenGL ES 2.0";
   init.has_alpha = true;
   init.has_depth = true;
   init.request_alpha = true;
@@ -3859,7 +3708,7 @@ TEST_P(GLES2DecoderManualInitTest, DrawWithGLImageExternal) {
 TEST_P(GLES2DecoderManualInitTest, TexImage2DFloatOnGLES2) {
   InitState init;
   init.extensions = "GL_OES_texture_float";
-  init.gl_version = "opengl es 2.0";
+  init.gl_version = "OpenGL ES 2.0";
   InitDecoder(init);
   DoBindTexture(GL_TEXTURE_2D, client_texture_id_, kServiceTextureId);
   DoTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 16, 17, 0, GL_RGBA, GL_FLOAT, 0, 0);
@@ -3882,7 +3731,7 @@ TEST_P(GLES2DecoderManualInitTest, TexImage2DFloatOnGLES2) {
 TEST_P(GLES2DecoderManualInitTest, TexImage2DFloatOnGLES3) {
   InitState init;
   init.extensions = "GL_OES_texture_float GL_EXT_color_buffer_float";
-  init.gl_version = "opengl es 3.0";
+  init.gl_version = "OpenGL ES 3.0";
   InitDecoder(init);
   DoBindTexture(GL_TEXTURE_2D, client_texture_id_, kServiceTextureId);
   DoTexImage2DConvertInternalFormat(GL_TEXTURE_2D, 0, GL_RGBA, 16, 17, 0,
@@ -3909,7 +3758,7 @@ TEST_P(GLES2DecoderManualInitTest, TexImage2DFloatOnGLES3) {
 TEST_P(GLES2DecoderManualInitTest, TexSubImage2DFloatOnGLES3) {
   InitState init;
   init.extensions = "GL_OES_texture_float GL_EXT_color_buffer_float";
-  init.gl_version = "opengl es 3.0";
+  init.gl_version = "OpenGL ES 3.0";
   InitDecoder(init);
   const int kWidth = 8;
   const int kHeight = 4;
@@ -3946,7 +3795,7 @@ TEST_P(GLES2DecoderManualInitTest, TexSubImage2DFloatOnGLES3) {
 TEST_P(GLES2DecoderManualInitTest, TexSubImage2DFloatDoesClearOnGLES3) {
   InitState init;
   init.extensions = "GL_OES_texture_float GL_EXT_color_buffer_float";
-  init.gl_version = "opengl es 3.0";
+  init.gl_version = "OpenGL ES 3.0";
   InitDecoder(init);
   const int kWidth = 8;
   const int kHeight = 4;
@@ -4046,7 +3895,7 @@ TEST_P(GLES2DecoderManualInitTest, TexImage2DFloatConvertsFormatDesktop) {
 TEST_P(GLES2DecoderManualInitTest, TexImage2Dnorm16OnGLES2) {
   InitState init;
   init.extensions = "GL_EXT_texture_norm16";
-  init.gl_version = "opengl es 2.0";
+  init.gl_version = "OpenGL ES 2.0";
   InitDecoder(init);
   DoBindTexture(GL_TEXTURE_2D, client_texture_id_, kServiceTextureId);
   DoTexImage2D(GL_TEXTURE_2D, 0, GL_RED, 16, 17, 0, GL_RED, GL_UNSIGNED_SHORT,
@@ -4056,7 +3905,7 @@ TEST_P(GLES2DecoderManualInitTest, TexImage2Dnorm16OnGLES2) {
 TEST_P(GLES2DecoderManualInitTest, TexImage2Dnorm16OnGLES3) {
   InitState init;
   init.extensions = "GL_EXT_texture_norm16";
-  init.gl_version = "opengl es 3.0";
+  init.gl_version = "OpenGL ES 3.0";
   InitDecoder(init);
   DoBindTexture(GL_TEXTURE_2D, client_texture_id_, kServiceTextureId);
   DoTexImage2D(GL_TEXTURE_2D, 0, GL_R16_EXT, 16, 17, 0, GL_RED,
@@ -4826,6 +4675,114 @@ TEST_P(GLES2DecoderTest, CopySubTextureCHROMIUMTwiceClearsUnclearedTexture) {
   ASSERT_TRUE(texture_ref != nullptr);
   Texture* texture = texture_ref->texture();
   EXPECT_TRUE(texture->SafeToRenderFrom());
+}
+
+TEST_P(GLES3DecoderTest, ImmutableTextureBaseLevelMaxLevelClamping) {
+  GLenum kTarget = GL_TEXTURE_3D;
+  GLint kBaseLevel = 1416354905;
+  GLint kMaxLevel = 800;
+  GLsizei kLevels = 4;
+  GLenum kInternalFormat = GL_R8;
+  GLsizei kWidth = 20;
+  GLsizei kHeight = 20;
+  GLsizei kDepth = 20;
+  GLint kClampedBaseLevel = kLevels - 1;
+  GLint kClampedMaxLevel = kLevels - 1;
+
+  DoBindTexture(kTarget, client_texture_id_, kServiceTextureId);
+  TextureRef* texture_ref =
+      group().texture_manager()->GetTexture(client_texture_id_);
+  ASSERT_TRUE(texture_ref != nullptr);
+  Texture* texture = texture_ref->texture();
+
+  // Before TexStorage3D call, base/max levels are not clamped.
+  {
+    EXPECT_CALL(*gl_, TexParameteri(kTarget, GL_TEXTURE_BASE_LEVEL, kBaseLevel))
+        .Times(1)
+        .RetiresOnSaturation();
+    TexParameteri cmd;
+    cmd.Init(kTarget, GL_TEXTURE_BASE_LEVEL, kBaseLevel);
+    EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  }
+  {
+    EXPECT_CALL(*gl_, TexParameteri(kTarget, GL_TEXTURE_MAX_LEVEL, kMaxLevel))
+        .Times(1)
+        .RetiresOnSaturation();
+    TexParameteri cmd;
+    cmd.Init(kTarget, GL_TEXTURE_MAX_LEVEL, kMaxLevel);
+    EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  }
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+  EXPECT_EQ(kBaseLevel, texture->base_level());
+  EXPECT_EQ(kMaxLevel, texture->max_level());
+
+  {
+    EXPECT_CALL(*gl_, TexStorage3D(kTarget, kLevels, kInternalFormat, kWidth,
+                                   kHeight, kDepth))
+        .Times(1)
+        .RetiresOnSaturation();
+    TexStorage3D cmd;
+    cmd.Init(kTarget, kLevels, kInternalFormat, kWidth, kHeight, kDepth);
+    EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+    EXPECT_EQ(GL_NO_ERROR, GetGLError());
+  }
+  EXPECT_EQ(kClampedBaseLevel, texture->base_level());
+  EXPECT_EQ(kClampedMaxLevel, texture->max_level());
+
+  GLint kNewBaseLevel = 827344;
+  GLint kNewMaxLevel = 17619;
+  // After TexStorage3D call, base/max levels are clamped.
+  {
+    EXPECT_CALL(
+        *gl_, TexParameteri(kTarget, GL_TEXTURE_BASE_LEVEL, kClampedBaseLevel))
+        .Times(1)
+        .RetiresOnSaturation();
+    TexParameteri cmd;
+    cmd.Init(kTarget, GL_TEXTURE_BASE_LEVEL, kNewBaseLevel);
+    EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  }
+  {
+    EXPECT_CALL(*gl_,
+                TexParameteri(kTarget, GL_TEXTURE_MAX_LEVEL, kClampedMaxLevel))
+        .Times(1)
+        .RetiresOnSaturation();
+    TexParameteri cmd;
+    cmd.Init(kTarget, GL_TEXTURE_MAX_LEVEL, kNewMaxLevel);
+    EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  }
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+  EXPECT_EQ(kClampedBaseLevel, texture->base_level());
+  EXPECT_EQ(kClampedMaxLevel, texture->max_level());
+
+  // GetTexParameteriv still returns unclamped values.
+  {
+    EXPECT_CALL(*gl_, GetError())
+        .WillOnce(Return(GL_NO_ERROR))
+        .WillOnce(Return(GL_NO_ERROR))
+        .RetiresOnSaturation();
+    typedef GetTexParameteriv::Result Result;
+    Result* result = static_cast<Result*>(shared_memory_address_);
+    result->size = 0;
+    GetTexParameteriv cmd;
+    cmd.Init(kTarget, GL_TEXTURE_BASE_LEVEL, shared_memory_id_,
+             shared_memory_offset_);
+    EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+    EXPECT_EQ(kNewBaseLevel, static_cast<GLint>(result->GetData()[0]));
+  }
+  {
+    EXPECT_CALL(*gl_, GetError())
+        .WillOnce(Return(GL_NO_ERROR))
+        .WillOnce(Return(GL_NO_ERROR))
+        .RetiresOnSaturation();
+    typedef GetTexParameteriv::Result Result;
+    Result* result = static_cast<Result*>(shared_memory_address_);
+    result->size = 0;
+    GetTexParameteriv cmd;
+    cmd.Init(kTarget, GL_TEXTURE_MAX_LEVEL, shared_memory_id_,
+             shared_memory_offset_);
+    EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+    EXPECT_EQ(kNewMaxLevel, static_cast<GLint>(result->GetData()[0]));
+  }
 }
 
 // TODO(gman): Complete this test.

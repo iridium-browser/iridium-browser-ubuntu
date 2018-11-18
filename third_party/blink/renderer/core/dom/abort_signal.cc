@@ -10,7 +10,10 @@
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/event_target_names.h"
 #include "third_party/blink/renderer/core/event_type_names.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
+#include "third_party/blink/renderer/platform/heap/persistent.h"
 #include "third_party/blink/renderer/platform/heap/visitor.h"
+#include "third_party/blink/renderer/platform/wtf/functional.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 
 namespace blink {
@@ -41,7 +44,7 @@ void AbortSignal::SignalAbort() {
     std::move(closure).Run();
   }
   abort_algorithms_.clear();
-  DispatchEvent(Event::Create(EventTypeNames::abort));
+  DispatchEvent(*Event::Create(EventTypeNames::abort));
 }
 
 void AbortSignal::Follow(AbortSignal* parentSignal) {

@@ -16,14 +16,15 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/sys_info.h"
-#include "base/third_party/dynamic_annotations/dynamic_annotations.h"
 #include "base/threading/platform_thread.h"
 #include "base/timer/hi_res_timer_manager.h"
 #include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
+#include "components/tracing/common/tracing_sampler_profiler.h"
 #include "components/viz/service/main/viz_main_impl.h"
 #include "content/common/content_constants_internal.h"
 #include "content/common/content_switches_internal.h"
+#include "content/common/skia_utils.h"
 #include "content/gpu/gpu_child_thread.h"
 #include "content/gpu/gpu_process.h"
 #include "content/public/common/content_client.h"
@@ -34,16 +35,15 @@
 #include "gpu/command_buffer/service/gpu_switches.h"
 #include "gpu/config/gpu_driver_bug_list.h"
 #include "gpu/config/gpu_info_collector.h"
+#include "gpu/config/gpu_preferences.h"
 #include "gpu/config/gpu_switches.h"
 #include "gpu/config/gpu_util.h"
 #include "gpu/ipc/common/gpu_memory_buffer_support.h"
-#include "gpu/ipc/common/gpu_preferences_util.h"
 #include "gpu/ipc/service/gpu_config.h"
 #include "gpu/ipc/service/gpu_init.h"
 #include "gpu/ipc/service/gpu_watchdog_thread.h"
 #include "media/gpu/buildflags.h"
 #include "third_party/angle/src/gpu_info_util/SystemInfo.h"
-#include "third_party/skia/include/core/SkGraphics.h"
 #include "ui/events/platform/platform_event_source.h"
 #include "ui/gfx/switches.h"
 #include "ui/gl/gl_context.h"
@@ -78,12 +78,10 @@
 #endif
 
 #if defined(OS_LINUX)
-#include "content/common/font_config_ipc_linux.h"
 #include "content/gpu/gpu_sandbox_hook_linux.h"
-#include "content/public/common/common_sandbox_support_linux.h"
 #include "content/public/common/sandbox_init.h"
 #include "services/service_manager/sandbox/linux/sandbox_linux.h"
-#include "third_party/skia/include/ports/SkFontConfigInterface.h"
+#include "services/service_manager/zygote/common/common_sandbox_support_linux.h"
 #endif
 
 #if defined(OS_MACOSX)
@@ -206,7 +204,7 @@ int GpuMain(const MainFunctionParams& parameters) {
   if (command_line.HasSwitch(switches::kGpuPreferences)) {
     std::string value =
         command_line.GetSwitchValueASCII(switches::kGpuPreferences);
-    bool success = gpu::SwitchValueToGpuPreferences(value, &gpu_preferences);
+    bool success = gpu_preferences.FromSwitchValue(value);
     CHECK(success);
   }
 
@@ -299,6 +297,10 @@ int GpuMain(const MainFunctionParams& parameters) {
 
   gpu_init->set_sandbox_helper(&sandbox_helper);
 
+  // Since GPU initialization calls into skia, its important to initialize skia
+  // before it.
+  InitializeSkia();
+
   // Gpu initialization may fail for various reasons, in which case we will need
   // to tear down this process. However, we can not do so safely until the IPC
   // channel is set up, because the detection of early return of a child process
@@ -325,13 +327,21 @@ int GpuMain(const MainFunctionParams& parameters) {
   if (client)
     client->PostIOThreadCreated(gpu_process.io_task_runner());
 
-  GpuChildThread* child_thread = new GpuChildThread(
-      std::move(gpu_init), std::move(deferred_messages.Get()));
+  base::RunLoop run_loop;
+  GpuChildThread* child_thread =
+      new GpuChildThread(run_loop.QuitClosure(), std::move(gpu_init),
+                         std::move(deferred_messages.Get()));
   deferred_messages.Get().clear();
 
   child_thread->Init(start_time);
 
   gpu_process.set_main_thread(child_thread);
+
+  // Setup tracing sampler profiler as early as possible.
+  auto tracing_sampler_profiler =
+      std::make_unique<tracing::TracingSamplerProfiler>(
+          base::PlatformThread::CurrentId());
+  tracing_sampler_profiler->OnMessageLoopStarted();
 
 #if defined(OS_ANDROID)
   base::trace_event::MemoryDumpManager::GetInstance()->RegisterDumpProvider(
@@ -339,20 +349,11 @@ int GpuMain(const MainFunctionParams& parameters) {
       nullptr);
 #endif
 
-  if (command_line.HasSwitch(switches::kEnableOOPRasterization)) {
-    SkGraphics::Init();
-#if defined(OS_LINUX)
-    // Set up the font IPC so that the GPU process can create typefaces.
-    SkFontConfigInterface::SetGlobal(new FontConfigIPC(GetSandboxFD()))
-        ->unref();
-#endif
-  }
-
   base::HighResolutionTimerManager hi_res_timer_manager;
 
   {
     TRACE_EVENT0("gpu", "Run Message Loop");
-    base::RunLoop().Run();
+    run_loop.Run();
   }
 
   return dead_on_arrival ? RESULT_CODE_GPU_DEAD_ON_ARRIVAL : 0;

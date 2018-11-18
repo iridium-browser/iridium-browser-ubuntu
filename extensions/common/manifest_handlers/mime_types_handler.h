@@ -44,8 +44,7 @@ class MimeTypesHandler {
   const std::set<std::string>& mime_type_set() const { return mime_type_set_; }
 
   // Returns true if this MimeTypesHandler has a plugin associated with it (for
-  // the mimeHandlerPrivate API). Returns false if the MimeTypesHandler is for
-  // the streamsPrivate API.
+  // the mimeHandlerPrivate API).
   bool HasPlugin() const;
 
   // If HasPlugin() returns true, this will return the plugin path for the
@@ -74,7 +73,7 @@ class MimeTypesHandlerParser : public extensions::ManifestHandler {
   bool Parse(extensions::Extension* extension, base::string16* error) override;
 
  private:
-  const std::vector<std::string> Keys() const override;
+  base::span<const char* const> Keys() const override;
 };
 
 #endif  // EXTENSIONS_COMMON_MANIFEST_HANDLERS_MIME_TYPES_HANDLER_H_

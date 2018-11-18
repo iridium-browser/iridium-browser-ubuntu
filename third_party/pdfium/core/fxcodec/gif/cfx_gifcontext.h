@@ -11,12 +11,14 @@
 #include <vector>
 
 #include "core/fxcodec/codec/ccodec_gifmodule.h"
+#include "core/fxcodec/codec/cfx_codec_memory.h"
 #include "core/fxcodec/gif/cfx_gif.h"
 #include "core/fxcodec/gif/cfx_lzwdecompressor.h"
 #include "core/fxcrt/fx_string.h"
 #include "core/fxcrt/unowned_ptr.h"
+#include "third_party/base/span.h"
 
-class CFX_GifContext : public CCodec_GifModule::Context {
+class CFX_GifContext : public CodecModuleIface::Context {
  public:
   CFX_GifContext(CCodec_GifModule* gif_module,
                  CCodec_GifModule::Delegate* delegate);
@@ -39,8 +41,8 @@ class CFX_GifContext : public CCodec_GifModule::Context {
   CFX_GifDecodeStatus ReadHeader();
   CFX_GifDecodeStatus GetFrame();
   CFX_GifDecodeStatus LoadFrame(int32_t frame_num);
-  void SetInputBuffer(uint8_t* src_buf, uint32_t src_size);
-  uint32_t GetAvailInput(uint8_t** avail_buf) const;
+  void SetInputBuffer(RetainPtr<CFX_CodecMemory> codec_memory);
+  uint32_t GetAvailInput() const;
   size_t GetFrameNum() const { return images_.size(); }
 
   UnownedPtr<CCodec_GifModule> gif_module_;
@@ -49,12 +51,8 @@ class CFX_GifContext : public CCodec_GifModule::Context {
   uint8_t global_pal_exp_;
   uint32_t img_row_offset_;
   uint32_t img_row_avail_size_;
-  uint32_t avail_in_;
   int32_t decode_status_;
-  uint32_t skip_size_;
-  ByteString cmt_data_;
   std::unique_ptr<CFX_GifGraphicControlExtension> graphic_control_extension_;
-  uint8_t* next_in_;
   std::vector<std::unique_ptr<CFX_GifImage>> images_;
   std::unique_ptr<CFX_LZWDecompressor> lzw_decompressor_;
   int width_;
@@ -66,15 +64,18 @@ class CFX_GifContext : public CCodec_GifModule::Context {
   uint8_t img_pass_num_;
 
  protected:
-  uint8_t* ReadData(uint8_t** dest_buf_pp, uint32_t data_size);
+  bool ReadAllOrNone(uint8_t* dest, uint32_t size);
   CFX_GifDecodeStatus ReadGifSignature();
   CFX_GifDecodeStatus ReadLogicalScreenDescriptor();
+
+  RetainPtr<CFX_CodecMemory> input_buffer_;
 
  private:
   void SaveDecodingStatus(int32_t status);
   CFX_GifDecodeStatus DecodeExtension();
   CFX_GifDecodeStatus DecodeImageInfo();
   void DecodingFailureAtTailCleanup(CFX_GifImage* gif_image);
+  bool ScanForTerminalMarker();
 };
 
 #endif  // CORE_FXCODEC_GIF_CFX_GIFCONTEXT_H_

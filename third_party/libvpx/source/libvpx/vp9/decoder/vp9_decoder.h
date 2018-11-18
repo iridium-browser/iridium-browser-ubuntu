@@ -8,8 +8,8 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef VP9_DECODER_VP9_DECODER_H_
-#define VP9_DECODER_VP9_DECODER_H_
+#ifndef VPX_VP9_DECODER_VP9_DECODER_H_
+#define VPX_VP9_DECODER_VP9_DECODER_H_
 
 #include "./vpx_config.h"
 
@@ -72,6 +72,8 @@ typedef struct VP9Decoder {
   int inv_tile_order;
   int need_resync;   // wait for key/intra-only frame.
   int hold_ref_buf;  // hold the reference buffer.
+
+  int row_mt;
 } VP9Decoder;
 
 int vp9_receive_compressed_data(struct VP9Decoder *pbi, size_t size,
@@ -129,4 +131,4 @@ static INLINE void decrease_ref_count(int idx, RefCntBuffer *const frame_bufs,
 }  // extern "C"
 #endif
 
-#endif  // VP9_DECODER_VP9_DECODER_H_
+#endif  // VPX_VP9_DECODER_VP9_DECODER_H_

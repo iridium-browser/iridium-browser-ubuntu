@@ -19,33 +19,33 @@ const CJX_MethodSpec CJX_DataWindow::MethodSpecs[] = {
 
 CJX_DataWindow::CJX_DataWindow(CScript_DataWindow* window)
     : CJX_Object(window) {
-  DefineMethods(MethodSpecs, FX_ArraySize(MethodSpecs));
+  DefineMethods(MethodSpecs);
 }
 
 CJX_DataWindow::~CJX_DataWindow() {}
 
-CJS_Return CJX_DataWindow::moveCurrentRecord(
+CJS_Result CJX_DataWindow::moveCurrentRecord(
     CFX_V8* runtime,
     const std::vector<v8::Local<v8::Value>>& params) {
-  return CJS_Return(true);
+  return CJS_Result::Success();
 }
 
-CJS_Return CJX_DataWindow::record(
+CJS_Result CJX_DataWindow::record(
     CFX_V8* runtime,
     const std::vector<v8::Local<v8::Value>>& params) {
-  return CJS_Return(true);
+  return CJS_Result::Success();
 }
 
-CJS_Return CJX_DataWindow::gotoRecord(
+CJS_Result CJX_DataWindow::gotoRecord(
     CFX_V8* runtime,
     const std::vector<v8::Local<v8::Value>>& params) {
-  return CJS_Return(true);
+  return CJS_Result::Success();
 }
 
-CJS_Return CJX_DataWindow::isRecordGroup(
+CJS_Result CJX_DataWindow::isRecordGroup(
     CFX_V8* runtime,
     const std::vector<v8::Local<v8::Value>>& params) {
-  return CJS_Return(true);
+  return CJS_Result::Success();
 }
 
 void CJX_DataWindow::recordsBefore(CFXJSE_Value* pValue,

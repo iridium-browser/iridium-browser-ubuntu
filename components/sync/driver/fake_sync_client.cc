@@ -9,16 +9,9 @@
 #include "components/sync/base/extensions_activity.h"
 #include "components/sync/base/sync_prefs.h"
 #include "components/sync/driver/fake_sync_service.h"
+#include "components/sync/model/model_type_sync_bridge.h"
 
 namespace syncer {
-
-namespace {
-
-void DummyRegisterPlatformTypesCallback(SyncService* sync_service,
-                                        ModelTypeSet,
-                                        ModelTypeSet) {}
-
-}  // namespace
 
 FakeSyncClient::FakeSyncClient()
     : bridge_(nullptr),
@@ -38,8 +31,6 @@ FakeSyncClient::FakeSyncClient(SyncApiComponentFactory* factory)
 
 FakeSyncClient::~FakeSyncClient() {}
 
-void FakeSyncClient::Initialize() {}
-
 SyncService* FakeSyncClient::GetSyncService() {
   return sync_service_.get();
 }
@@ -50,6 +41,10 @@ PrefService* FakeSyncClient::GetPrefService() {
 
 base::FilePath FakeSyncClient::GetLocalSyncBackendFolder() {
   return base::FilePath();
+}
+
+ModelTypeStoreService* FakeSyncClient::GetModelTypeStoreService() {
+  return nullptr;
 }
 
 bookmarks::BookmarkModel* FakeSyncClient::GetBookmarkModel() {
@@ -64,6 +59,10 @@ history::HistoryService* FakeSyncClient::GetHistoryService() {
   return nullptr;
 }
 
+sync_sessions::SessionSyncService* FakeSyncClient::GetSessionSyncService() {
+  return nullptr;
+}
+
 bool FakeSyncClient::HasPasswordStore() {
   return false;
 }
@@ -72,9 +71,11 @@ base::Closure FakeSyncClient::GetPasswordStateChangedCallback() {
   return base::DoNothing();
 }
 
-SyncApiComponentFactory::RegisterDataTypesMethod
-FakeSyncClient::GetRegisterPlatformTypesCallback() {
-  return base::Bind(&DummyRegisterPlatformTypesCallback);
+DataTypeController::TypeVector FakeSyncClient::CreateDataTypeControllers(
+    LocalDeviceInfoProvider* local_device_info_provider) {
+  DCHECK(factory_);
+  return factory_->CreateCommonDataTypeControllers(
+      /*disabled_types=*/ModelTypeSet(), local_device_info_provider);
 }
 
 autofill::PersonalDataManager* FakeSyncClient::GetPersonalDataManager() {
@@ -93,18 +94,14 @@ scoped_refptr<ExtensionsActivity> FakeSyncClient::GetExtensionsActivity() {
   return scoped_refptr<ExtensionsActivity>();
 }
 
-sync_sessions::SyncSessionsClient* FakeSyncClient::GetSyncSessionsClient() {
-  return nullptr;
-}
-
 base::WeakPtr<SyncableService> FakeSyncClient::GetSyncableServiceForType(
     ModelType type) {
   return base::WeakPtr<SyncableService>();
 }
 
-base::WeakPtr<ModelTypeSyncBridge> FakeSyncClient::GetSyncBridgeForModelType(
-    ModelType type) {
-  return bridge_->AsWeakPtr();
+base::WeakPtr<ModelTypeControllerDelegate>
+FakeSyncClient::GetControllerDelegateForModelType(ModelType type) {
+  return bridge_->change_processor()->GetControllerDelegate();
 }
 
 scoped_refptr<ModelSafeWorker> FakeSyncClient::CreateModelWorkerForGroup(

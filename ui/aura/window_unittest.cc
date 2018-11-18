@@ -17,7 +17,7 @@
 #include "base/strings/stringprintf.h"
 #include "build/build_config.h"
 #include "cc/trees/layer_tree_frame_sink.h"
-#include "services/ui/public/interfaces/window_tree_constants.mojom.h"
+#include "services/ws/public/mojom/window_tree_constants.mojom.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/aura/client/capture_client.h"
 #include "ui/aura/client/focus_change_observer.h"
@@ -422,14 +422,14 @@ TEST_P(WindowTest, ContainsMouse) {
 // Tests that the root window gets a valid LocalSurfaceId.
 TEST_P(WindowTest, RootWindowHasValidLocalSurfaceId) {
   // When mus is hosting viz, the LocalSurfaceId is sent from mus.
-  if (GetParam() == BackendType::MASH)
+  if (GetParam() != Env::Mode::LOCAL)
     return;
   EXPECT_TRUE(root_window()->GetLocalSurfaceId().is_valid());
 }
 
 TEST_P(WindowTest, WindowEmbeddingClientHasValidLocalSurfaceId) {
   // When mus is hosting viz, the LocalSurfaceId is sent from mus.
-  if (GetParam() == BackendType::MASH)
+  if (GetParam() != Env::Mode::LOCAL)
     return;
   std::unique_ptr<Window> window(CreateTestWindow(
       SK_ColorWHITE, 1, gfx::Rect(10, 10, 300, 200), root_window()));
@@ -1583,30 +1583,30 @@ TEST_P(WindowTest, EventTargetingPolicy) {
       &d121, 121, gfx::Rect(150, 150, 50, 50), w12.get()));
 
   EXPECT_EQ(w121.get(), w1->GetEventHandlerForPoint(gfx::Point(160, 160)));
-  w12->SetEventTargetingPolicy(ui::mojom::EventTargetingPolicy::TARGET_ONLY);
+  w12->SetEventTargetingPolicy(ws::mojom::EventTargetingPolicy::TARGET_ONLY);
   EXPECT_EQ(w12.get(), w1->GetEventHandlerForPoint(gfx::Point(160, 160)));
   w12->SetEventTargetingPolicy(
-      ui::mojom::EventTargetingPolicy::TARGET_AND_DESCENDANTS);
+      ws::mojom::EventTargetingPolicy::TARGET_AND_DESCENDANTS);
 
   EXPECT_EQ(w12.get(), w1->GetEventHandlerForPoint(gfx::Point(10, 10)));
-  w12->SetEventTargetingPolicy(ui::mojom::EventTargetingPolicy::NONE);
+  w12->SetEventTargetingPolicy(ws::mojom::EventTargetingPolicy::NONE);
   EXPECT_EQ(w11.get(), w1->GetEventHandlerForPoint(gfx::Point(10, 10)));
   w12->SetEventTargetingPolicy(
-      ui::mojom::EventTargetingPolicy::TARGET_AND_DESCENDANTS);
+      ws::mojom::EventTargetingPolicy::TARGET_AND_DESCENDANTS);
 
   EXPECT_EQ(w121.get(), w1->GetEventHandlerForPoint(gfx::Point(160, 160)));
-  w121->SetEventTargetingPolicy(ui::mojom::EventTargetingPolicy::NONE);
+  w121->SetEventTargetingPolicy(ws::mojom::EventTargetingPolicy::NONE);
   EXPECT_EQ(w12.get(), w1->GetEventHandlerForPoint(gfx::Point(160, 160)));
-  w12->SetEventTargetingPolicy(ui::mojom::EventTargetingPolicy::NONE);
+  w12->SetEventTargetingPolicy(ws::mojom::EventTargetingPolicy::NONE);
   EXPECT_EQ(w111.get(), w1->GetEventHandlerForPoint(gfx::Point(160, 160)));
-  w111->SetEventTargetingPolicy(ui::mojom::EventTargetingPolicy::NONE);
+  w111->SetEventTargetingPolicy(ws::mojom::EventTargetingPolicy::NONE);
   EXPECT_EQ(w11.get(), w1->GetEventHandlerForPoint(gfx::Point(160, 160)));
 
   w11->SetEventTargetingPolicy(
-      ui::mojom::EventTargetingPolicy::DESCENDANTS_ONLY);
+      ws::mojom::EventTargetingPolicy::DESCENDANTS_ONLY);
   EXPECT_EQ(nullptr, w1->GetEventHandlerForPoint(gfx::Point(160, 160)));
   w111->SetEventTargetingPolicy(
-      ui::mojom::EventTargetingPolicy::TARGET_AND_DESCENDANTS);
+      ws::mojom::EventTargetingPolicy::TARGET_AND_DESCENDANTS);
   EXPECT_EQ(w111.get(), w1->GetEventHandlerForPoint(gfx::Point(160, 160)));
 }
 
@@ -1638,6 +1638,13 @@ TEST_P(WindowTest, Transform) {
 }
 
 TEST_P(WindowTest, TransformGesture) {
+  // This test is only applicable to LOCAL mode as it's setting a transform on
+  // host() and expecting events to be transformed while routing the event
+  // directly through host(). In MUS mode the window-service does the
+  // transformation.
+  if (GetParam() == Env::Mode::MUS)
+    return;
+
   gfx::Size size = host()->GetBoundsInPixels().size();
 
   std::unique_ptr<GestureTrackPositionDelegate> delegate(
@@ -1792,7 +1799,7 @@ class WindowObserverTest : public WindowTest,
         ui::PropertyChangeReason::NOT_FROM_ANIMATION;
   };
 
-  struct LayerRecreatedInfo {
+  struct CountAndWindow {
     int count = 0;
     Window* window = nullptr;
   };
@@ -1812,6 +1819,8 @@ class WindowObserverTest : public WindowTest,
     return window_opacity_info_;
   }
 
+  const CountAndWindow& alpha_shape_info() const { return alpha_shape_info_; }
+
   const WindowTargetTransformChangingInfo&
   window_target_transform_changing_info() const {
     return window_target_transform_changing_info_;
@@ -1821,7 +1830,7 @@ class WindowObserverTest : public WindowTest,
     return window_transformed_info_;
   }
 
-  const LayerRecreatedInfo& layer_recreated_info() const {
+  const CountAndWindow& layer_recreated_info() const {
     return layer_recreated_info_;
   }
 
@@ -1897,6 +1906,11 @@ class WindowObserverTest : public WindowTest,
     window_opacity_info_.reason = reason;
   }
 
+  void OnWindowAlphaShapeSet(Window* window) override {
+    ++alpha_shape_info_.count;
+    alpha_shape_info_.window = window;
+  }
+
   void OnWindowTargetTransformChanging(
       Window* window,
       const gfx::Transform& new_transform) override {
@@ -1928,7 +1942,8 @@ class WindowObserverTest : public WindowTest,
   WindowOpacityInfo window_opacity_info_;
   WindowTargetTransformChangingInfo window_target_transform_changing_info_;
   WindowTransformedInfo window_transformed_info_;
-  LayerRecreatedInfo layer_recreated_info_;
+  CountAndWindow alpha_shape_info_;
+  CountAndWindow layer_recreated_info_;
 
   DISALLOW_COPY_AND_ASSIGN(WindowObserverTest);
 };
@@ -2141,6 +2156,22 @@ TEST_P(WindowObserverTest, WindowOpacityChangedAnimation) {
   EXPECT_EQ(window.get(), window_opacity_info().window);
   EXPECT_EQ(ui::PropertyChangeReason::FROM_ANIMATION,
             window_opacity_info().reason);
+}
+
+// Verify that WindowObserver::OnWindowAlphaShapeSet() is notified when an alpha
+// shape is set for a window.
+TEST_P(WindowObserverTest, WindowAlphaShapeChanged) {
+  std::unique_ptr<Window> window(CreateTestWindowWithId(1, root_window()));
+  window->AddObserver(this);
+
+  auto shape = std::make_unique<ui::Layer::ShapeRects>();
+  shape->emplace_back(0, 0, 10, 20);
+
+  EXPECT_EQ(0, alpha_shape_info().count);
+  EXPECT_EQ(nullptr, alpha_shape_info().window);
+  window->layer()->SetAlphaShape(std::move(shape));
+  EXPECT_EQ(1, alpha_shape_info().count);
+  EXPECT_EQ(window.get(), alpha_shape_info().window);
 }
 
 // Verify that WindowObserver::OnWindow(TargetTransformChanging|Transformed)()
@@ -3208,6 +3239,12 @@ TEST_P(WindowTest, WindowDestroyCompletesAnimations) {
 }
 
 TEST_P(WindowTest, RootWindowUsesCompositorFrameSinkId) {
+  // MUS doesn't create context_factory_private, which results in this test
+  // failing.
+  // TODO(sky): figure out the right thing here.
+  if (GetParam() == Env::Mode::MUS)
+    return;
+
   EXPECT_EQ(host()->compositor()->frame_sink_id(),
             root_window()->GetFrameSinkId());
   EXPECT_TRUE(root_window()->GetFrameSinkId().is_valid());
@@ -3264,15 +3301,11 @@ TEST_P(WindowTest, LocalSurfaceIdChanges) {
 
 INSTANTIATE_TEST_CASE_P(/* no prefix */,
                         WindowTest,
-                        ::testing::Values(BackendType::CLASSIC,
-                                          BackendType::MUS,
-                                          BackendType::MASH));
+                        ::testing::Values(Env::Mode::LOCAL, Env::Mode::MUS));
 
 INSTANTIATE_TEST_CASE_P(/* no prefix */,
                         WindowObserverTest,
-                        ::testing::Values(BackendType::CLASSIC,
-                                          BackendType::MUS,
-                                          BackendType::MASH));
+                        ::testing::Values(Env::Mode::LOCAL, Env::Mode::MUS));
 
 }  // namespace
 }  // namespace test

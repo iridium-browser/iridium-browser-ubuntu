@@ -184,7 +184,7 @@ TEST_F(FileUtilTest, LoadExtensionWithUnderscoreAndMetadataFolder) {
 
 TEST_F(FileUtilTest, LoadExtensionWithValidLocales) {
   base::FilePath install_dir;
-  ASSERT_TRUE(PathService::Get(DIR_TEST_DATA, &install_dir));
+  ASSERT_TRUE(base::PathService::Get(DIR_TEST_DATA, &install_dir));
   install_dir = install_dir.AppendASCII("extension_with_locales");
 
   std::string error;
@@ -196,7 +196,7 @@ TEST_F(FileUtilTest, LoadExtensionWithValidLocales) {
 
 TEST_F(FileUtilTest, LoadExtensionWithoutLocalesFolder) {
   base::FilePath install_dir;
-  ASSERT_TRUE(PathService::Get(DIR_TEST_DATA, &install_dir));
+  ASSERT_TRUE(base::PathService::Get(DIR_TEST_DATA, &install_dir));
   install_dir = install_dir.AppendASCII("extension_without_locales");
 
   std::string error;
@@ -288,7 +288,7 @@ TEST_F(FileUtilTest,
 
 TEST_F(FileUtilTest, LoadExtensionGivesHelpfullErrorOnMissingManifest) {
   base::FilePath install_dir;
-  ASSERT_TRUE(PathService::Get(DIR_TEST_DATA, &install_dir));
+  ASSERT_TRUE(base::PathService::Get(DIR_TEST_DATA, &install_dir));
   install_dir =
       install_dir.AppendASCII("file_util").AppendASCII("missing_manifest");
 
@@ -302,7 +302,7 @@ TEST_F(FileUtilTest, LoadExtensionGivesHelpfullErrorOnMissingManifest) {
 
 TEST_F(FileUtilTest, LoadExtensionGivesHelpfullErrorOnBadManifest) {
   base::FilePath install_dir;
-  ASSERT_TRUE(PathService::Get(DIR_TEST_DATA, &install_dir));
+  ASSERT_TRUE(base::PathService::Get(DIR_TEST_DATA, &install_dir));
   install_dir =
       install_dir.AppendASCII("file_util").AppendASCII("bad_manifest");
 
@@ -487,7 +487,7 @@ TEST_F(FileUtilTest, WarnOnPrivateKey) {
 // Try to install an extension with a zero-length icon file.
 TEST_F(FileUtilTest, CheckZeroLengthAndMissingIconFile) {
   base::FilePath install_dir;
-  ASSERT_TRUE(PathService::Get(DIR_TEST_DATA, &install_dir));
+  ASSERT_TRUE(base::PathService::Get(DIR_TEST_DATA, &install_dir));
 
   base::FilePath ext_dir =
       install_dir.AppendASCII("file_util").AppendASCII("bad_icon");
@@ -501,7 +501,7 @@ TEST_F(FileUtilTest, CheckZeroLengthAndMissingIconFile) {
 // Try to install an unpacked extension with a zero-length icon file.
 TEST_F(FileUtilTest, CheckZeroLengthAndMissingIconFileUnpacked) {
   base::FilePath install_dir;
-  ASSERT_TRUE(PathService::Get(DIR_TEST_DATA, &install_dir));
+  ASSERT_TRUE(base::PathService::Get(DIR_TEST_DATA, &install_dir));
 
   base::FilePath ext_dir =
       install_dir.AppendASCII("file_util").AppendASCII("bad_icon");
@@ -511,6 +511,45 @@ TEST_F(FileUtilTest, CheckZeroLengthAndMissingIconFileUnpacked) {
       ext_dir, Manifest::UNPACKED, Extension::NO_FLAGS, &error));
   EXPECT_FALSE(extension);
   EXPECT_EQ("Could not load extension icon 'missing-icon.png'.", error);
+}
+
+// Try to install an unpacked extension with an invisible icon. This
+// should fail.
+TEST_F(FileUtilTest, CheckInvisibleIconFileUnpacked) {
+  base::FilePath install_dir;
+  ASSERT_TRUE(base::PathService::Get(DIR_TEST_DATA, &install_dir));
+
+  base::FilePath ext_dir =
+      install_dir.AppendASCII("file_util").AppendASCII("invisible_icon");
+
+  // Set the flag that enables the error.
+  file_util::SetReportErrorForInvisibleIconForTesting(true);
+  std::string error;
+  scoped_refptr<Extension> extension(file_util::LoadExtension(
+      ext_dir, Manifest::UNPACKED, Extension::NO_FLAGS, &error));
+  file_util::SetReportErrorForInvisibleIconForTesting(false);
+  EXPECT_FALSE(extension);
+  EXPECT_EQ("The icon is not sufficiently visible 'invisible_icon.png'.",
+            error);
+}
+
+// Try to install a packed extension with an invisible icon. This should
+// succeed.
+TEST_F(FileUtilTest, CheckInvisibleIconFilePacked) {
+  base::FilePath install_dir;
+  ASSERT_TRUE(base::PathService::Get(DIR_TEST_DATA, &install_dir));
+
+  base::FilePath ext_dir =
+      install_dir.AppendASCII("file_util").AppendASCII("invisible_icon");
+
+  // Set the flag that enables the error.
+  file_util::SetReportErrorForInvisibleIconForTesting(true);
+  std::string error;
+  scoped_refptr<Extension> extension(file_util::LoadExtension(
+      ext_dir, Manifest::INTERNAL, Extension::NO_FLAGS, &error));
+  file_util::SetReportErrorForInvisibleIconForTesting(false);
+  EXPECT_TRUE(extension);
+  EXPECT_TRUE(error.empty());
 }
 
 TEST_F(FileUtilTest, ExtensionURLToRelativeFilePath) {

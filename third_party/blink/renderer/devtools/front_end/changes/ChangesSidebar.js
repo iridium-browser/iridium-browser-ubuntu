@@ -24,6 +24,17 @@ Changes.ChangesSidebar = class extends UI.Widget {
   }
 
   /**
+   * @param {!Workspace.UISourceCode} uiSourceCode
+   * @param {boolean=} omitFocus
+   */
+  selectUISourceCode(uiSourceCode, omitFocus) {
+    const treeElement = this._treeElements.get(uiSourceCode);
+    if (!treeElement)
+      return;
+    treeElement.select(omitFocus);
+  }
+
+  /**
    * @return {?Workspace.UISourceCode}
    */
   selectedUISourceCode() {
@@ -92,7 +103,7 @@ Changes.ChangesSidebar.UISourceCodeTreeElement = class extends UI.TreeElement {
     this.listItemElement.classList.add('navigator-' + uiSourceCode.contentType().name() + '-tree-item');
 
     let iconType = 'largeicon-navigator-file';
-    if (this.uiSourceCode.contentType() === Common.resourceTypes.Snippet)
+    if (Snippets.isSnippetsUISourceCode(this.uiSourceCode))
       iconType = 'largeicon-navigator-snippet';
     const defaultIcon = UI.Icon.create(iconType, 'icon');
     this.setLeadingIcons([defaultIcon]);

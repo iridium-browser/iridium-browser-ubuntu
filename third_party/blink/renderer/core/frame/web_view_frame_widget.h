@@ -7,9 +7,11 @@
 
 #include "base/macros.h"
 #include "base/memory/scoped_refptr.h"
+#include "base/single_thread_task_runner.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/frame/web_frame_widget_base.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
+#include "third_party/blink/renderer/platform/graphics/apply_viewport_changes.h"
 #include "third_party/blink/renderer/platform/heap/member.h"
 #include "third_party/blink/renderer/platform/heap/self_keep_alive.h"
 
@@ -35,12 +37,10 @@ class WebWidgetClient;
 // https://goo.gl/7yVrnb.
 class CORE_EXPORT WebViewFrameWidget : public WebFrameWidgetBase {
  public:
-  explicit WebViewFrameWidget(WebWidgetClient&,
-                              WebViewImpl&,
-                              WebLocalFrameImpl&);
-  virtual ~WebViewFrameWidget();
+  explicit WebViewFrameWidget(WebWidgetClient&, WebViewImpl&);
+  ~WebViewFrameWidget() override;
 
-  // WebFrameWidget overrides:
+  // WebWidget overrides:
   void Close() override;
   WebSize Size() override;
   void Resize(const WebSize&) override;
@@ -48,22 +48,18 @@ class CORE_EXPORT WebViewFrameWidget : public WebFrameWidgetBase {
   void DidEnterFullscreen() override;
   void DidExitFullscreen() override;
   void SetSuppressFrameRequestsWorkaroundFor704763Only(bool) final;
-  void BeginFrame(double last_frame_time_monotonic) override;
+  void BeginFrame(base::TimeTicks last_frame_time) override;
+  void RecordEndOfFrameMetrics(base::TimeTicks frame_begin_time) override;
   void UpdateLifecycle(LifecycleUpdate requested_update) override;
-  void UpdateAllLifecyclePhasesAndCompositeForTesting() override;
-  void Paint(WebCanvas*, const WebRect& view_port) override;
-  void LayoutAndPaintAsync(WebLayoutAndPaintAsyncCallback*) override;
+  void PaintContent(cc::PaintCanvas*, const WebRect& view_port) override;
+  void LayoutAndPaintAsync(base::OnceClosure callback) override;
   void CompositeAndReadbackAsync(
-      WebCompositeAndReadbackAsyncCallback*) override;
+      base::OnceCallback<void(const SkBitmap&)>) override;
   void ThemeChanged() override;
   WebInputEventResult HandleInputEvent(const WebCoalescedInputEvent&) override;
   WebInputEventResult DispatchBufferedTouchEvents() override;
   void SetCursorVisibilityState(bool is_visible) override;
-  void ApplyViewportDeltas(const WebFloatSize& visual_viewport_delta,
-                           const WebFloatSize& layout_viewport_delta,
-                           const WebFloatSize& elastic_overscroll_delta,
-                           float scale_factor,
-                           float browser_controls_shown_ratio_delta) override;
+  void ApplyViewportChanges(const ApplyViewportChangesArgs&) override;
   void RecordWheelAndTouchScrollingCount(bool has_scrolled_by_wheel,
                                          bool has_scrolled_by_touch) override;
   void MouseCaptureLost() override;
@@ -73,43 +69,45 @@ class CORE_EXPORT WebViewFrameWidget : public WebFrameWidgetBase {
   bool IsWebView() const override { return false; }
   bool IsPagePopup() const override { return false; }
   void WillCloseLayerTreeView() override;
-  WebColor BackgroundColor() const override;
+  SkColor BackgroundColor() const override;
   WebPagePopup* GetPagePopup() const override;
-  void UpdateBrowserControlsState(WebBrowserControlsState constraints,
-                                  WebBrowserControlsState current,
+  void UpdateBrowserControlsState(cc::BrowserControlsState constraints,
+                                  cc::BrowserControlsState current,
                                   bool animate) override;
+  WebURL GetURLForDebugTrace() override;
+
+  // WebFrameWidget overrides:
   void SetVisibilityState(mojom::PageVisibilityState) override;
-  void SetBackgroundColorOverride(WebColor) override;
+  void SetBackgroundColorOverride(SkColor) override;
   void ClearBackgroundColorOverride() override;
-  void SetBaseBackgroundColorOverride(WebColor) override;
+  void SetBaseBackgroundColorOverride(SkColor) override;
   void ClearBaseBackgroundColorOverride() override;
-  void SetBaseBackgroundColor(WebColor) override;
-  WebLocalFrameImpl* LocalRoot() const override;
+  void SetBaseBackgroundColor(SkColor) override;
   WebInputMethodController* GetActiveWebInputMethodController() const override;
   bool ScrollFocusedEditableElementIntoView() override;
 
   // WebFrameWidgetBase overrides:
+  void Initialize() override;
+  void SetLayerTreeView(WebLayerTreeView*) override;
   bool ForSubframe() const override { return false; }
   void ScheduleAnimation() override;
-  base::WeakPtr<CompositorMutatorImpl> EnsureCompositorMutator(
+  base::WeakPtr<AnimationWorkletMutatorDispatcherImpl>
+  EnsureCompositorMutatorDispatcher(
       scoped_refptr<base::SingleThreadTaskRunner>*) override;
   void SetRootGraphicsLayer(GraphicsLayer*) override;
   GraphicsLayer* RootGraphicsLayer() const override;
-  void SetRootLayer(WebLayer*) override;
+  void SetRootLayer(scoped_refptr<cc::Layer>) override;
   WebLayerTreeView* GetLayerTreeView() const override;
   CompositorAnimationHost* AnimationHost() const override;
-  WebWidgetClient* Client() const override { return client_; }
   WebHitTestResult HitTestResultAt(const WebPoint&) override;
   HitTestResult CoreHitTestResultAt(const WebPoint&) override;
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  private:
   PageWidgetEventHandler* GetPageWidgetEventHandler() override;
 
-  WebWidgetClient* client_;
   scoped_refptr<WebViewImpl> web_view_;
-  Member<WebLocalFrameImpl> main_frame_;
 
   SelfKeepAlive<WebViewFrameWidget> self_keep_alive_;
 

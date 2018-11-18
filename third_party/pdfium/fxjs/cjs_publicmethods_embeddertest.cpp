@@ -180,7 +180,8 @@ TEST_F(CJS_PublicMethodsEmbedderTest, AFSimple_CalculateSum) {
   auto* page = LoadPage(0);
   ASSERT_TRUE(page);
 
-  CJS_Runtime runtime(static_cast<CPDFSDK_FormFillEnvironment*>(form_handle()));
+  CJS_Runtime runtime(
+      CPDFSDKFormFillEnvironmentFromFPDFFormHandle(form_handle()));
   runtime.NewEventContext();
 
   WideString result;
@@ -195,7 +196,7 @@ TEST_F(CJS_PublicMethodsEmbedderTest, AFSimple_CalculateSum) {
   params.push_back(runtime.NewString("SUM"));
   params.push_back(ary);
 
-  CJS_Return ret = CJS_PublicMethods::AFSimple_Calculate(&runtime, params);
+  CJS_Result ret = CJS_PublicMethods::AFSimple_Calculate(&runtime, params);
   UnloadPage(page);
 
   runtime.GetCurrentEventContext()->GetEventHandler()->m_pValue = nullptr;
@@ -214,7 +215,8 @@ TEST_F(CJS_PublicMethodsEmbedderTest, AFNumber_Keystroke) {
   auto* page = LoadPage(0);
   ASSERT_TRUE(page);
 
-  CJS_Runtime runtime(static_cast<CPDFSDK_FormFillEnvironment*>(form_handle()));
+  CJS_Runtime runtime(
+      CPDFSDKFormFillEnvironmentFromFPDFFormHandle(form_handle()));
   runtime.NewEventContext();
 
   auto* handler = runtime.GetCurrentEventContext()->GetEventHandler();
@@ -224,10 +226,10 @@ TEST_F(CJS_PublicMethodsEmbedderTest, AFNumber_Keystroke) {
   WideString change = L"";
 
   handler->m_pValue = &result;
-  handler->m_pbRc = &valid;
-  handler->m_pWideStrChange = &change;
+  handler->SetRCForTest(&valid);
+  handler->SetStrChangeForTest(&change);
 
-  handler->m_bWillCommit = 0;
+  handler->ResetWillCommitForTest();
   handler->SetSelStart(0);
   handler->SetSelEnd(0);
 
@@ -235,7 +237,7 @@ TEST_F(CJS_PublicMethodsEmbedderTest, AFNumber_Keystroke) {
   params.push_back(runtime.NewString(L"-10"));
   params.push_back(runtime.NewString(L""));
 
-  CJS_Return ret = CJS_PublicMethods::AFNumber_Keystroke(&runtime, params);
+  CJS_Result ret = CJS_PublicMethods::AFNumber_Keystroke(&runtime, params);
   EXPECT_TRUE(valid);
   EXPECT_TRUE(!ret.HasError());
   EXPECT_TRUE(!ret.HasReturn());
@@ -245,6 +247,6 @@ TEST_F(CJS_PublicMethodsEmbedderTest, AFNumber_Keystroke) {
   // Keep the *SAN bots happy. One of these is an UnownedPtr, another seems to
   // used during destruction. Clear them all to be safe and consistent.
   handler->m_pValue = nullptr;
-  handler->m_pbRc = nullptr;
-  handler->m_pWideStrChange = nullptr;
+  handler->SetRCForTest(nullptr);
+  handler->SetStrChangeForTest(nullptr);
 }

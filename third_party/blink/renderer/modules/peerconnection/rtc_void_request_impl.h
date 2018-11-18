@@ -34,7 +34,6 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_void_function.h"
 #include "third_party/blink/renderer/bindings/modules/v8/v8_rtc_peer_connection_error_callback.h"
 #include "third_party/blink/renderer/core/dom/context_lifecycle_observer.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/peerconnection/rtc_void_request.h"
 
@@ -55,12 +54,12 @@ class RTCVoidRequestImpl final : public RTCVoidRequest,
 
   // RTCVoidRequest
   void RequestSucceeded() override;
-  void RequestFailed(const WebRTCError&) override;
+  void RequestFailed(const webrtc::RTCError&) override;
 
   // ContextLifecycleObserver
   void ContextDestroyed(ExecutionContext*) override;
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  private:
   RTCVoidRequestImpl(ExecutionContext*,

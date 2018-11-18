@@ -5,12 +5,15 @@
 #ifndef CHROME_BROWSER_UI_VIEWS_HUNG_RENDERER_VIEW_H_
 #define CHROME_BROWSER_UI_VIEWS_HUNG_RENDERER_VIEW_H_
 
+#include <memory>
+#include <vector>
+
+#include "base/callback.h"
 #include "base/macros.h"
 #include "base/scoped_observer.h"
 #include "components/favicon/content/content_favicon_driver.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/render_process_host_observer.h"
+#include "content/public/browser/render_widget_host_observer.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "ui/base/models/table_model.h"
 #include "ui/views/controls/button/button.h"
@@ -28,7 +31,7 @@ class Label;
 // Provides functionality to display information about a hung renderer.
 class HungPagesTableModel : public ui::TableModel,
                             public content::RenderProcessHostObserver,
-                            public content::NotificationObserver {
+                            public content::RenderWidgetHostObserver {
  public:
   class Delegate {
    public:
@@ -47,7 +50,15 @@ class HungPagesTableModel : public ui::TableModel,
   ~HungPagesTableModel() override;
 
   void InitForWebContents(content::WebContents* hung_contents,
-                          content::RenderWidgetHost* render_widget_host);
+                          content::RenderWidgetHost* render_widget_host,
+                          base::RepeatingClosure hang_monitor_restarter);
+
+  // Resets the model to the uninitialized state (e.g. unregisters observers
+  // added by InitForWebContents and disassociates this model from any
+  // particular WebContents and/or RenderWidgetHost).
+  void Reset();
+
+  void RestartHangMonitorTimeout();
 
   // Returns the hung RenderWidgetHost, or null if there aren't any WebContents.
   content::RenderWidgetHost* GetRenderWidgetHost();
@@ -59,14 +70,13 @@ class HungPagesTableModel : public ui::TableModel,
   void SetObserver(ui::TableModelObserver* observer) override;
 
   // Overridden from RenderProcessHostObserver:
-  void RenderProcessExited(content::RenderProcessHost* host,
-                           base::TerminationStatus status,
-                           int exit_code) override;
+  void RenderProcessExited(
+      content::RenderProcessHost* host,
+      const content::ChildProcessTerminationInfo& info) override;
 
-  // Overridden from NotificationObserver:
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) override;
+  // Overridden from RenderWidgetHostObserver:
+  void RenderWidgetHostDestroyed(
+      content::RenderWidgetHost* widget_host) override;
 
  private:
   friend class HungRendererDialogViewBrowserTest;
@@ -108,10 +118,15 @@ class HungPagesTableModel : public ui::TableModel,
 
   content::RenderWidgetHost* render_widget_host_ = nullptr;
 
+  // Callback that restarts the hang timeout (e.g. if the user wants to wait
+  // some more until the renderer process responds).
+  base::RepeatingClosure hang_monitor_restarter_;
+
   ScopedObserver<content::RenderProcessHost, content::RenderProcessHostObserver>
       process_observer_;
 
-  content::NotificationRegistrar notification_registrar_;
+  ScopedObserver<content::RenderWidgetHost, content::RenderWidgetHostObserver>
+      widget_observer_;
 
   DISALLOW_COPY_AND_ASSIGN(HungPagesTableModel);
 };
@@ -130,7 +145,8 @@ class HungRendererDialogView : public views::DialogDelegateView,
 
   // Shows or hides the hung renderer dialog for the given WebContents.
   static void Show(content::WebContents* contents,
-                   content::RenderWidgetHost* render_widget_host);
+                   content::RenderWidgetHost* render_widget_host,
+                   base::RepeatingClosure hang_monitor_restarter);
   static void Hide(content::WebContents* contents,
                    content::RenderWidgetHost* render_widget_host);
 
@@ -139,7 +155,8 @@ class HungRendererDialogView : public views::DialogDelegateView,
 
   virtual void ShowForWebContents(
       content::WebContents* contents,
-      content::RenderWidgetHost* render_widget_host);
+      content::RenderWidgetHost* render_widget_host,
+      base::RepeatingClosure hang_monitor_restarter);
   virtual void EndForWebContents(content::WebContents* contents,
                                  content::RenderWidgetHost* render_widget_host);
 

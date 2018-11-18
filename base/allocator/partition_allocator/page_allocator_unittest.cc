@@ -11,12 +11,12 @@
 #include "build/build_config.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-#if defined(OS_POSIX) && !defined(OS_FUCHSIA)
+#if defined(OS_POSIX)
 #include <setjmp.h>
 #include <signal.h>
 #include <sys/mman.h>
 #include <sys/time.h>
-#endif  // defined(OS_POSIX) && !defined(OS_FUCHSIA)
+#endif  // defined(OS_POSIX)
 
 #if !defined(MEMORY_TOOL_REPLACES_ALLOCATOR)
 
@@ -33,6 +33,37 @@ constexpr size_t kHugeMemoryAmount =
     std::max(internal::kASLRMask, std::size_t{2} * internal::kASLRMask);
 
 }  // namespace
+
+TEST(PageAllocatorTest, Rounding) {
+  EXPECT_EQ(0u, RoundUpToSystemPage(0u));
+  EXPECT_EQ(kSystemPageSize, RoundUpToSystemPage(1));
+  EXPECT_EQ(kSystemPageSize, RoundUpToSystemPage(kSystemPageSize - 1));
+  EXPECT_EQ(kSystemPageSize, RoundUpToSystemPage(kSystemPageSize));
+  EXPECT_EQ(2 * kSystemPageSize, RoundUpToSystemPage(kSystemPageSize + 1));
+  EXPECT_EQ(0u, RoundDownToSystemPage(0u));
+  EXPECT_EQ(0u, RoundDownToSystemPage(kSystemPageSize - 1));
+  EXPECT_EQ(kSystemPageSize, RoundDownToSystemPage(kSystemPageSize));
+  EXPECT_EQ(kSystemPageSize, RoundDownToSystemPage(kSystemPageSize + 1));
+  EXPECT_EQ(kSystemPageSize, RoundDownToSystemPage(2 * kSystemPageSize - 1));
+  EXPECT_EQ(0u, RoundUpToPageAllocationGranularity(0u));
+  EXPECT_EQ(kPageAllocationGranularity, RoundUpToPageAllocationGranularity(1));
+  EXPECT_EQ(kPageAllocationGranularity,
+            RoundUpToPageAllocationGranularity(kPageAllocationGranularity - 1));
+  EXPECT_EQ(kPageAllocationGranularity,
+            RoundUpToPageAllocationGranularity(kPageAllocationGranularity));
+  EXPECT_EQ(2 * kPageAllocationGranularity,
+            RoundUpToPageAllocationGranularity(kPageAllocationGranularity + 1));
+  EXPECT_EQ(0u, RoundDownToPageAllocationGranularity(0u));
+  EXPECT_EQ(
+      0u, RoundDownToPageAllocationGranularity(kPageAllocationGranularity - 1));
+  EXPECT_EQ(kPageAllocationGranularity,
+            RoundDownToPageAllocationGranularity(kPageAllocationGranularity));
+  EXPECT_EQ(kPageAllocationGranularity, RoundDownToPageAllocationGranularity(
+                                            kPageAllocationGranularity + 1));
+  EXPECT_EQ(
+      kPageAllocationGranularity,
+      RoundDownToPageAllocationGranularity(2 * kPageAllocationGranularity - 1));
+}
 
 // Test that failed page allocations invoke base::ReleaseReservation().
 // We detect this by making a reservation and ensuring that after failure, we
@@ -103,7 +134,7 @@ TEST(PageAllocatorTest, AllocAndFreePages) {
 }
 
 // Test permission setting on POSIX, where we can set a trap handler.
-#if defined(OS_POSIX) && !defined(OS_FUCHSIA)
+#if defined(OS_POSIX)
 
 namespace {
 sigjmp_buf g_continuation;
@@ -186,7 +217,7 @@ TEST(PageAllocatorTest, ReadExecutePages) {
   FreePages(buffer, kPageAllocationGranularity);
 }
 
-#endif  // defined(OS_POSIX) && !defined(OS_FUCHSIA)
+#endif  // defined(OS_POSIX)
 
 }  // namespace base
 

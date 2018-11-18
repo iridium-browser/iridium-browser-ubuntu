@@ -27,6 +27,11 @@ MojoRendererFactory::MojoRendererFactory(
 
 MojoRendererFactory::~MojoRendererFactory() = default;
 
+void MojoRendererFactory::SetGetTypeSpecificIdCB(
+    const GetTypeSpecificIdCB& get_type_specific_id) {
+  get_type_specific_id_ = get_type_specific_id;
+}
+
 std::unique_ptr<Renderer> MojoRendererFactory::CreateRenderer(
     const scoped_refptr<base::SingleThreadTaskRunner>& media_task_runner,
     const scoped_refptr<base::TaskRunner>& /* worker_task_runner */,
@@ -38,7 +43,7 @@ std::unique_ptr<Renderer> MojoRendererFactory::CreateRenderer(
 
   // |get_gpu_factories_cb_| can be null in the HLS/MediaPlayerRenderer case,
   // when we do not need to create video overlays.
-  if (!get_gpu_factories_cb_.is_null()) {
+  if (get_gpu_factories_cb_) {
     overlay_factory =
         std::make_unique<VideoOverlayFactory>(get_gpu_factories_cb_.Run());
   }
@@ -52,7 +57,10 @@ mojom::RendererPtr MojoRendererFactory::GetRendererPtr() {
   mojom::RendererPtr renderer_ptr;
 
   if (interface_factory_) {
-    interface_factory_->CreateRenderer(hosted_renderer_type_, std::string(),
+    interface_factory_->CreateRenderer(hosted_renderer_type_,
+                                       get_type_specific_id_.is_null()
+                                           ? std::string()
+                                           : get_type_specific_id_.Run(),
                                        mojo::MakeRequest(&renderer_ptr));
   } else {
     NOTREACHED();

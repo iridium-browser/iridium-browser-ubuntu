@@ -10,12 +10,17 @@
 #include "base/files/file_path.h"
 #include "base/memory/ref_counted.h"
 #include "base/sequenced_task_runner.h"
+#include "base/single_thread_task_runner.h"
 #include "components/download/internal/background_service/blob_task_proxy.h"
 #include "components/download/public/background_service/clients.h"
 
 namespace content {
 class BrowserContext;
 }  // namespace content
+
+namespace network {
+class NetworkConnectionTracker;
+}
 
 namespace download {
 
@@ -35,6 +40,7 @@ class TaskScheduler;
 DownloadService* BuildDownloadService(
     content::BrowserContext* browser_context,
     std::unique_ptr<DownloadClientMap> clients,
+    network::NetworkConnectionTracker* network_connection_tracker,
     const base::FilePath& storage_dir,
     const scoped_refptr<base::SequencedTaskRunner>& background_task_runner,
     std::unique_ptr<TaskScheduler> task_scheduler);
@@ -44,6 +50,7 @@ DownloadService* BuildDownloadService(
 DownloadService* BuildInMemoryDownloadService(
     content::BrowserContext* browser_context,
     std::unique_ptr<DownloadClientMap> clients,
+    network::NetworkConnectionTracker* network_connection_tracker,
     const base::FilePath& storage_dir,
     BlobTaskProxy::BlobContextGetter blob_context_getter,
     scoped_refptr<base::SingleThreadTaskRunner> io_task_runner);

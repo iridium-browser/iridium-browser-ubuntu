@@ -26,6 +26,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_DOM_RANGE_BOUNDARY_POINT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_DOM_RANGE_BOUNDARY_POINT_H_
 
+#include "third_party/blink/renderer/core/dom/character_data.h"
 #include "third_party/blink/renderer/core/dom/node.h"
 #include "third_party/blink/renderer/core/dom/node_traversal.h"
 #include "third_party/blink/renderer/core/editing/position.h"
@@ -127,8 +128,8 @@ inline bool RangeBoundaryPoint::IsOffsetValid() const {
 
 inline const Position RangeBoundaryPoint::ToPosition() const {
   EnsureOffsetIsValid();
-  // TODO(yosin): We should return |Position::beforeAnchor| when
-  // |m_containerNode| isn't |Text| node.
+  // TODO(yosin): We should return |Position::BeforeAnchor| when
+  // |container_node_| isn't a |Text| node.
   return Position(container_node_.Get(), offset_in_container_);
 }
 

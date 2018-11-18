@@ -79,6 +79,7 @@ public:
                                                  xformedSigma,
                                                  xformedSigma,
                                                  GrTextureDomain::kIgnore_Mode,
+                                                 kPremul_SkAlphaType,
                                                  SkBackingFit::kExact));
             if (!rtc2) {
                 return nullptr;
@@ -95,7 +96,7 @@ public:
         return mask;
     }
     float sigma() const { return fSigma; }
-    SkRect rect() const { return fRect; }
+    const SkRect& rect() const { return fRect; }
     float cornerRadius() const { return fCornerRadius; }
 
     static std::unique_ptr<GrFragmentProcessor> Make(GrContext* context, float sigma,
@@ -114,11 +115,12 @@ private:
             , fRect(rect)
             , fCornerRadius(cornerRadius)
             , fNinePatchSampler(std::move(ninePatchSampler)) {
-        this->addTextureSampler(&fNinePatchSampler);
+        this->setTextureSamplerCnt(1);
     }
     GrGLSLFragmentProcessor* onCreateGLSLInstance() const override;
     void onGetGLSLProcessorKey(const GrShaderCaps&, GrProcessorKeyBuilder*) const override;
     bool onIsEqual(const GrFragmentProcessor&) const override;
+    const TextureSampler& onTextureSampler(int) const override;
     GR_DECLARE_FRAGMENT_PROCESSOR_TEST
     float fSigma;
     SkRect fRect;

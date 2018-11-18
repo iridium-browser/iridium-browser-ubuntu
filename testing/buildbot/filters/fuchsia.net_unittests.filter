@@ -1,9 +1,5 @@
 # TODO(fuchsia): Fix these tests and remove the filter. https://crbug.com/731302 .
 
-# Timeout on the bots exceeding 45s on the bots (apperently due to slow IO).
--DiskCacheTest.BlockFiles_Grow
--DiskCacheBackendTest.SimpleCacheDeleteQuickly
-
 # Exceeds FD limit, ZX-1127.
 -PacFileFetcherImplTest.Priority
 
@@ -25,7 +21,12 @@
 -DiskCacheEntryTest.ExternalAsyncIONoBuffer
 
 # Flaky, https://crbug.com/813631.
--URLRequestQuicTest.CancelPushIfCached_AllCached
+-URLRequestQuicTest.CancelPushIfCached_*
+-URLRequestQuicTest.DoNotCancelPushIfNotFoundInCache
 
 # Flaky, https://crbug.com/814811.
 -URLRequestTest.NetworkDelegateProxyError
+
+# SocketPosix::IsConnected has a different behavior on Fuchsia.
+# https://crbug.com/887587.
+-TCPSocketTest.BeforeConnectCallback

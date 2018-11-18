@@ -8,7 +8,7 @@
 
 #include "base/memory/ptr_util.h"
 #include "base/observer_list.h"
-#include "base/test/histogram_tester.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "chrome/browser/notifications/notification_display_service_tester.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/browser_with_test_window_test.h"
@@ -27,12 +27,6 @@ namespace tether {
 namespace {
 
 const char kTetherSettingsSubpage[] = "networks?type=Tether";
-
-cryptauth::RemoteDevice CreateTestRemoteDevice() {
-  cryptauth::RemoteDevice device = cryptauth::GenerateTestRemoteDevices(1)[0];
-  device.name = "testDevice";
-  return device;
-}
 
 }  // namespace
 
@@ -89,7 +83,8 @@ class TetherNotificationPresenterTest : public BrowserWithTestWindowTest {
   };
 
  protected:
-  TetherNotificationPresenterTest() : test_device_(CreateTestRemoteDevice()) {}
+  TetherNotificationPresenterTest()
+      : test_device_(cryptauth::CreateRemoteDeviceRefListForTest(1)[0]) {}
 
   void SetUp() override {
     BrowserWithTestWindowTest::SetUp();
@@ -189,7 +184,7 @@ class TetherNotificationPresenterTest : public BrowserWithTestWindowTest {
     has_verified_metrics_ = true;
   }
 
-  const cryptauth::RemoteDevice test_device_;
+  cryptauth::RemoteDeviceRef test_device_;
 
   base::HistogramTester histogram_tester_;
   bool has_verified_metrics_;
@@ -251,7 +246,7 @@ TEST_F(TetherNotificationPresenterTest,
        TestSetupRequiredNotification_RemoveProgrammatically) {
   EXPECT_FALSE(
       display_service_->GetNotification(GetSetupRequiredNotificationId()));
-  notification_presenter_->NotifySetupRequired(test_device_.name,
+  notification_presenter_->NotifySetupRequired(test_device_.name(),
                                                kTestNetworkSignalStrength);
 
   base::Optional<message_center::Notification> notification =
@@ -270,7 +265,7 @@ TEST_F(TetherNotificationPresenterTest,
        TestSetupRequiredNotification_TapNotification) {
   EXPECT_FALSE(
       display_service_->GetNotification(GetSetupRequiredNotificationId()));
-  notification_presenter_->NotifySetupRequired(test_device_.name,
+  notification_presenter_->NotifySetupRequired(test_device_.name(),
                                                kTestNetworkSignalStrength);
 
   base::Optional<message_center::Notification> notification =

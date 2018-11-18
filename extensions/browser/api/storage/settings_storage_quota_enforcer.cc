@@ -8,7 +8,6 @@
 
 #include "base/bind.h"
 #include "base/json/json_writer.h"
-#include "base/message_loop/message_loop.h"
 #include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "extensions/common/extension_api.h"
@@ -75,8 +74,7 @@ SettingsStorageQuotaEnforcer::~SettingsStorageQuotaEnforcer() {}
 
 size_t SettingsStorageQuotaEnforcer::GetBytesInUse(const std::string& key) {
   LazyCalculateUsage();
-  std::map<std::string, size_t>::iterator maybe_used =
-      used_per_setting_.find(key);
+  auto maybe_used = used_per_setting_.find(key);
   return maybe_used == used_per_setting_.end() ? 0u : maybe_used->second;
 }
 

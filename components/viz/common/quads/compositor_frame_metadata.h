@@ -10,18 +10,31 @@
 #include <vector>
 
 #include "base/optional.h"
+#include "build/build_config.h"
 #include "components/viz/common/frame_sinks/begin_frame_args.h"
 #include "components/viz/common/quads/frame_deadline.h"
-#include "components/viz/common/quads/selection.h"
 #include "components/viz/common/surfaces/surface_id.h"
+#include "components/viz/common/surfaces/surface_range.h"
 #include "components/viz/common/viz_common_export.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/geometry/size_f.h"
 #include "ui/gfx/geometry/vector2d_f.h"
-#include "ui/gfx/selection_bound.h"
 #include "ui/latency/latency_info.h"
 
+#if defined(OS_ANDROID)
+#include "components/viz/common/quads/selection.h"
+#include "ui/gfx/selection_bound.h"
+#endif  // defined(OS_ANDROID)
+
 namespace viz {
+
+// Compares two frame tokens, handling cases where the token wraps around the
+// 32-bit max value.
+inline bool FrameTokenGT(uint32_t token1, uint32_t token2) {
+  // There will be underflow in the subtraction if token1 was created
+  // after token2.
+  return (token2 - token1) > 0x80000000u;
+}
 
 class VIZ_COMMON_EXPORT CompositorFrameMetadata {
  public:
@@ -41,13 +54,8 @@ class VIZ_COMMON_EXPORT CompositorFrameMetadata {
   gfx::Vector2dF root_scroll_offset;
   float page_scale_factor = 0.f;
 
-  // These limits can be used together with the scroll/scale fields above to
-  // determine if scrolling/scaling in a particular direction is possible.
   gfx::SizeF scrollable_viewport_size;
-  gfx::SizeF root_layer_size;
-  float min_page_scale_factor = 0.f;
-  float max_page_scale_factor = 0.f;
-  bool root_overflow_y_hidden = false;
+
   bool may_contain_video = false;
 
   // WebView makes quality decisions for rastering resourceless software frames
@@ -56,24 +64,10 @@ class VIZ_COMMON_EXPORT CompositorFrameMetadata {
   // depending on this anymore.
   bool is_resourceless_software_draw_with_scroll_or_animation = false;
 
-  // Used to position the Android location top bar and page content, whose
-  // precise position is computed by the renderer compositor.
-  float top_controls_height = 0.f;
-  float top_controls_shown_ratio = 0.f;
-
-  // Used to position Android bottom bar, whose position is computed by the
-  // renderer compositor.
-  float bottom_controls_height = 0.f;
-  float bottom_controls_shown_ratio = 0.f;
-
   // This color is usually obtained from the background color of the <body>
   // element. It can be used for filling in gutter areas around the frame when
   // it's too small to fill the box the parent reserved for it.
   SkColor root_background_color = SK_ColorWHITE;
-
-  // Provides selection region updates relative to the current viewport. If the
-  // selection is empty or otherwise unused, the bound types will indicate such.
-  Selection<gfx::SelectionBound> selection;
 
   std::vector<ui::LatencyInfo> latency_info;
 
@@ -84,7 +78,7 @@ class VIZ_COMMON_EXPORT CompositorFrameMetadata {
   // determine which surfaces to retain and which to evict. It will likely
   // be unnecessary for the embedder to explicitly specify which surfaces to
   // retain. Thus, this field will likely go away.
-  std::vector<SurfaceId> referenced_surfaces;
+  std::vector<SurfaceRange> referenced_surfaces;
 
   // This is the set of dependent SurfaceIds that should be active in the
   // display compositor before this CompositorFrame can be activated. Note
@@ -114,15 +108,49 @@ class VIZ_COMMON_EXPORT CompositorFrameMetadata {
   // BeginFrameAck for the BeginFrame that this CompositorFrame answers.
   BeginFrameAck begin_frame_ack;
 
-  // Once the display compositor processes a frame containing a non-zero frame
-  // token, the token is sent to embedder of the frame. This is helpful when
-  // the embedder wants to do something after a particular frame is processed.
+  // An identifier for the frame. This is used to identify the frame for
+  // presentation-feedback, or when the frame-token is sent to the embedder.
+  // For comparing |frame_token| from different frames, use |FrameTokenGT()|
+  // instead of directly comparing them, since the tokens wrap around back to 1
+  // after the 32-bit max value.
+  // TODO(crbug.com/850386): A custom type would be better to avoid incorrect
+  // comparisons.
   uint32_t frame_token = 0;
 
-  // Once the display compositor presents a frame containing a non-zero
-  // presentation token, a presentation feedback will be provided to
-  // CompositorFrameSinkClient.
-  uint32_t presentation_token = 0;
+  // Once the display compositor processes a frame with
+  // |send_frame_token_to_embedder| flag turned on, the |frame_token| for the
+  // frame is sent to embedder of the frame. This is helpful when the embedder
+  // wants to do something after a particular frame is processed.
+  bool send_frame_token_to_embedder = false;
+
+  // Once the display compositor presents a frame with
+  // |request_presentation_feedback| flag turned on, a presentation feedback
+  // will be provided to CompositorFrameSinkClient.
+  bool request_presentation_feedback = false;
+
+  // These limits can be used together with the scroll/scale fields above to
+  // determine if scrolling/scaling in a particular direction is possible.
+  float min_page_scale_factor = 0.f;
+
+  // Used to position the location top bar and page content, whose precise
+  // position is computed by the renderer compositor.
+  float top_controls_height = 0.f;
+  float top_controls_shown_ratio = 0.f;
+
+#if defined(OS_ANDROID)
+  float max_page_scale_factor = 0.f;
+  gfx::SizeF root_layer_size;
+  bool root_overflow_y_hidden = false;
+
+  // Used to position Android bottom bar, whose position is computed by the
+  // renderer compositor.
+  float bottom_controls_height = 0.f;
+  float bottom_controls_shown_ratio = 0.f;
+
+  // Provides selection region updates relative to the current viewport. If the
+  // selection is empty or otherwise unused, the bound types will indicate such.
+  Selection<gfx::SelectionBound> selection;
+#endif  // defined(OS_ANDROID)
 
  private:
   CompositorFrameMetadata(const CompositorFrameMetadata& other);

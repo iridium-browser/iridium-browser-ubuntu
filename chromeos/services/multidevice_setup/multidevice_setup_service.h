@@ -11,19 +11,46 @@
 #include "services/service_manager/public/cpp/binder_registry.h"
 #include "services/service_manager/public/cpp/service.h"
 
+class PrefService;
+class PrefRegistrySimple;
+
+namespace cryptauth {
+class GcmDeviceInfoProvider;
+}  // namespace cryptauth
+
 namespace chromeos {
+
+namespace device_sync {
+class DeviceSyncClient;
+}  // namespace device_sync
 
 namespace multidevice_setup {
 
-class MultiDeviceSetupImpl;
+class AndroidSmsAppHelperDelegate;
+class AndroidSmsPairingStateTracker;
+class AuthTokenValidator;
+class MultiDeviceSetupBase;
+class PrivilegedHostDeviceSetterBase;
+class OobeCompletionTracker;
 
 // Service which provides an implementation for mojom::MultiDeviceSetup. This
 // service creates one implementation and shares it among all connection
 // requests.
 class MultiDeviceSetupService : public service_manager::Service {
  public:
-  MultiDeviceSetupService();
+  MultiDeviceSetupService(
+      PrefService* pref_service,
+      device_sync::DeviceSyncClient* device_sync_client,
+      AuthTokenValidator* auth_token_validator,
+      OobeCompletionTracker* oobe_completion_tracker,
+      std::unique_ptr<AndroidSmsAppHelperDelegate>
+          android_sms_app_helper_delegate,
+      std::unique_ptr<AndroidSmsPairingStateTracker>
+          android_sms_pairing_state_tracker,
+      const cryptauth::GcmDeviceInfoProvider* gcm_device_info_provider);
   ~MultiDeviceSetupService() override;
+
+  static void RegisterProfilePrefs(PrefRegistrySimple* registry);
 
  private:
   // service_manager::Service:
@@ -32,9 +59,9 @@ class MultiDeviceSetupService : public service_manager::Service {
                        const std::string& interface_name,
                        mojo::ScopedMessagePipeHandle interface_pipe) override;
 
-  void BindRequest(mojom::MultiDeviceSetupRequest request);
-
-  std::unique_ptr<MultiDeviceSetupImpl> multidevice_setup_impl_;
+  std::unique_ptr<MultiDeviceSetupBase> multidevice_setup_;
+  std::unique_ptr<PrivilegedHostDeviceSetterBase>
+      privileged_host_device_setter_;
 
   service_manager::BinderRegistry registry_;
 

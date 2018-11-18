@@ -13,6 +13,7 @@
 
 #include "base/base64.h"
 #include "base/command_line.h"
+#include "base/debug/profiler.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/macros.h"
@@ -20,6 +21,7 @@
 #include "cc/layers/layer.h"
 #include "cc/paint/skia_paint_canvas.h"
 #include "cc/trees/layer_tree_host.h"
+#include "content/common/input/actions_parser.h"
 #include "content/common/input/synthetic_gesture_params.h"
 #include "content/common/input/synthetic_pinch_gesture_params.h"
 #include "content/common/input/synthetic_pointer_action_list_params.h"
@@ -31,8 +33,7 @@
 #include "content/public/renderer/chrome_object_extensions_utils.h"
 #include "content/public/renderer/render_thread.h"
 #include "content/public/renderer/v8_value_converter.h"
-#include "content/renderer/gpu/actions_parser.h"
-#include "content/renderer/gpu/render_widget_compositor.h"
+#include "content/renderer/gpu/layer_tree_view.h"
 #include "content/renderer/render_thread_impl.h"
 #include "content/renderer/render_view_impl.h"
 #include "content/renderer/skia_benchmarking_extension.h"
@@ -53,6 +54,7 @@
 #include "third_party/skia/include/core/SkGraphics.h"
 #include "third_party/skia/include/core/SkPicture.h"
 #include "third_party/skia/include/core/SkPictureRecorder.h"
+#include "third_party/skia/include/docs/SkXPSDocument.h"
 // Note that headers in third_party/skia/src are fragile.  This is
 // an experimental, fragile, and diagnostic-only document type.
 #include "third_party/skia/src/utils/SkMultiPictureDocument.h"
@@ -60,12 +62,16 @@
 #include "v8/include/v8.h"
 
 #if defined(OS_WIN) && !defined(NDEBUG)
+// XpsObjectModel.h indirectly includes <wincrypt.h> which is
+// incompatible with Chromium's OpenSSL. By including wincrypt_shim.h
+// first, problems are avoided.
+#include "base/win/wincrypt_shim.h"
+
 #include <XpsObjectModel.h>
 #include <objbase.h>
 #include <wrl/client.h>
 #endif
 
-using blink::WebCanvas;
 using blink::WebLocalFrame;
 using blink::WebImageCache;
 using blink::WebPrivatePtr;
@@ -182,11 +188,7 @@ class CallbackAndContext : public base::RefCounted<CallbackAndContext> {
 
 class GpuBenchmarkingContext {
  public:
-  GpuBenchmarkingContext()
-      : web_frame_(nullptr),
-        web_view_(nullptr),
-        render_view_impl_(nullptr),
-        compositor_(nullptr) {}
+  GpuBenchmarkingContext() = default;
 
   bool Init(bool init_compositor) {
     web_frame_ = WebLocalFrame::FrameForCurrentContext();
@@ -209,8 +211,8 @@ class GpuBenchmarkingContext {
     if (!init_compositor)
       return true;
 
-    compositor_ = render_view_impl_->GetWidget()->compositor();
-    if (!compositor_) {
+    layer_tree_view_ = render_view_impl_->GetWidget()->layer_tree_view();
+    if (!layer_tree_view_) {
       web_frame_ = nullptr;
       web_view_ = nullptr;
       render_view_impl_ = nullptr;
@@ -232,16 +234,16 @@ class GpuBenchmarkingContext {
     DCHECK(render_view_impl_ != nullptr);
     return render_view_impl_;
   }
-  RenderWidgetCompositor* compositor() const {
-    DCHECK(compositor_ != nullptr);
-    return compositor_;
+  LayerTreeView* layer_tree_view() const {
+    DCHECK(layer_tree_view_ != nullptr);
+    return layer_tree_view_;
   }
 
  private:
-  WebLocalFrame* web_frame_;
-  WebView* web_view_;
-  RenderViewImpl* render_view_impl_;
-  RenderWidgetCompositor* compositor_;
+  WebLocalFrame* web_frame_ = nullptr;
+  WebView* web_view_ = nullptr;
+  RenderViewImpl* render_view_impl_ = nullptr;
+  LayerTreeView* layer_tree_view_ = nullptr;
 
   DISALLOW_COPY_AND_ASSIGN(GpuBenchmarkingContext);
 };
@@ -286,7 +288,11 @@ bool BeginSmoothScroll(GpuBenchmarkingContext* context,
                        float speed_in_pixels_s,
                        bool prevent_fling,
                        float start_x,
-                       float start_y) {
+                       float start_y,
+                       float fling_velocity,
+                       bool precise_scrolling_deltas,
+                       bool scroll_by_page,
+                       bool cursor_visible) {
   gfx::Rect rect = context->render_view_impl()->GetWidget()->ViewRect();
   rect -= rect.OffsetFromOrigin();
   if (!rect.Contains(start_x, start_y)) {
@@ -295,19 +301,16 @@ bool BeginSmoothScroll(GpuBenchmarkingContext* context,
   }
 
   if (gesture_source_type == SyntheticGestureParams::MOUSE_INPUT) {
-    // Ensure the mouse is centered and visible, in case it will
+    // Ensure the mouse is visible and move to start position, in case it will
     // trigger any hover or mousemove effects.
     context->web_view()->SetIsActive(true);
-    blink::WebRect content_rect =
-        context->render_view_impl()->GetWidget()->ViewRect();
-    blink::WebMouseEvent mouseMove(
-        blink::WebInputEvent::kMouseMove, blink::WebInputEvent::kNoModifiers,
-        ui::EventTimeStampToSeconds(ui::EventTimeForNow()));
-    mouseMove.SetPositionInWidget((content_rect.x + content_rect.width / 2.0),
-                                  (content_rect.y + content_rect.height / 2.0));
+    blink::WebMouseEvent mouseMove(blink::WebInputEvent::kMouseMove,
+                                   blink::WebInputEvent::kNoModifiers,
+                                   ui::EventTimeForNow());
+    mouseMove.SetPositionInWidget(start_x, start_y);
     context->web_view()->HandleInputEvent(
         blink::WebCoalescedInputEvent(mouseMove));
-    context->web_view()->SetCursorVisibilityState(true);
+    context->web_view()->SetCursorVisibilityState(cursor_visible);
   }
 
   scoped_refptr<CallbackAndContext> callback_and_context =
@@ -326,31 +329,47 @@ bool BeginSmoothScroll(GpuBenchmarkingContext* context,
 
   gesture_params.speed_in_pixels_s = speed_in_pixels_s;
   gesture_params.prevent_fling = prevent_fling;
+  gesture_params.precise_scrolling_deltas = precise_scrolling_deltas;
+  gesture_params.scroll_by_page = scroll_by_page;
 
   gesture_params.anchor.SetPoint(start_x, start_y);
 
+  DCHECK(gesture_source_type != SyntheticGestureParams::TOUCH_INPUT ||
+         fling_velocity == 0);
   float distance_length = pixels_to_scroll;
   gfx::Vector2dF distance;
-  if (direction == "down")
+  if (direction == "down") {
     distance.set_y(-distance_length);
-  else if (direction == "up")
+    gesture_params.fling_velocity_y = fling_velocity;
+  } else if (direction == "up") {
     distance.set_y(distance_length);
-  else if (direction == "right")
+    gesture_params.fling_velocity_y = -fling_velocity;
+  } else if (direction == "right") {
     distance.set_x(-distance_length);
-  else if (direction == "left")
+    gesture_params.fling_velocity_x = fling_velocity;
+  } else if (direction == "left") {
     distance.set_x(distance_length);
-  else if (direction == "upleft") {
+    gesture_params.fling_velocity_x = -fling_velocity;
+  } else if (direction == "upleft") {
     distance.set_y(distance_length);
     distance.set_x(distance_length);
+    gesture_params.fling_velocity_x = -fling_velocity;
+    gesture_params.fling_velocity_y = -fling_velocity;
   } else if (direction == "upright") {
     distance.set_y(distance_length);
     distance.set_x(-distance_length);
+    gesture_params.fling_velocity_x = fling_velocity;
+    gesture_params.fling_velocity_y = -fling_velocity;
   } else if (direction == "downleft") {
     distance.set_y(-distance_length);
     distance.set_x(distance_length);
+    gesture_params.fling_velocity_x = -fling_velocity;
+    gesture_params.fling_velocity_y = fling_velocity;
   } else if (direction == "downright") {
     distance.set_y(-distance_length);
     distance.set_x(-distance_length);
+    gesture_params.fling_velocity_x = fling_velocity;
+    gesture_params.fling_velocity_y = fling_velocity;
   } else {
     return false;
   }
@@ -439,8 +458,10 @@ static void PrintDocumentTofile(v8::Isolate* isolate,
   if (!base::PathIsWritable(path.DirName())) {
     std::string msg("Path is not writable: ");
     msg.append(path.DirName().MaybeAsASCII());
-    isolate->ThrowException(v8::Exception::Error(v8::String::NewFromUtf8(
-        isolate, msg.c_str(), v8::String::kNormalString, msg.length())));
+    isolate->ThrowException(v8::Exception::Error(
+        v8::String::NewFromUtf8(isolate, msg.c_str(),
+                                v8::NewStringType::kNormal, msg.length())
+            .ToLocalChecked()));
     return;
   }
   SkFILEWStream wStream(path.MaybeAsASCII().c_str());
@@ -470,7 +491,7 @@ static sk_sp<SkDocument> MakeXPSDocument(SkWStream* s) {
     LOG(ERROR) << "CoCreateInstance(CLSID_XpsOMObjectFactory, ...) failed:"
                << logging::SystemErrorCodeToString(hr);
   }
-  return SkDocument::MakeXPS(s, factory.Get());
+  return SkXPS::MakeDocument(s, factory.Get());
 }
 #endif
 }  // namespace
@@ -549,8 +570,12 @@ gin::ObjectTemplateBuilder GpuBenchmarking::GetObjectTemplateBuilder(
                  &GpuBenchmarking::SendMessageToMicroBenchmark)
       .SetMethod("hasGpuChannel", &GpuBenchmarking::HasGpuChannel)
       .SetMethod("hasGpuProcess", &GpuBenchmarking::HasGpuProcess)
+      .SetMethod("crashGpuProcess", &GpuBenchmarking::CrashGpuProcess)
       .SetMethod("getGpuDriverBugWorkarounds",
-                 &GpuBenchmarking::GetGpuDriverBugWorkarounds);
+                 &GpuBenchmarking::GetGpuDriverBugWorkarounds)
+      .SetMethod("startProfiling", &GpuBenchmarking::StartProfiling)
+      .SetMethod("stopProfiling", &GpuBenchmarking::StopProfiling)
+      .SetMethod("freeze", &GpuBenchmarking::Freeze);
 }
 
 void GpuBenchmarking::SetNeedsDisplayOnAllLayers() {
@@ -558,7 +583,7 @@ void GpuBenchmarking::SetNeedsDisplayOnAllLayers() {
   if (!context.Init(true))
     return;
 
-  context.compositor()->SetNeedsDisplayOnAllLayers();
+  context.layer_tree_view()->SetNeedsDisplayOnAllLayers();
 }
 
 void GpuBenchmarking::SetRasterizeOnlyVisibleContent() {
@@ -566,7 +591,7 @@ void GpuBenchmarking::SetRasterizeOnlyVisibleContent() {
   if (!context.Init(true))
     return;
 
-  context.compositor()->SetRasterizeOnlyVisibleContent();
+  context.layer_tree_view()->SetRasterizeOnlyVisibleContent();
 }
 
 namespace {
@@ -585,8 +610,10 @@ void GpuBenchmarking::PrintPagesToXPS(v8::Isolate* isolate,
   PrintDocumentTofile(isolate, filename, &MakeXPSDocument);
 #else
   std::string msg("PrintPagesToXPS is unsupported.");
-  isolate->ThrowException(v8::Exception::Error(v8::String::NewFromUtf8(
-      isolate, msg.c_str(), v8::String::kNormalString, msg.length())));
+  isolate->ThrowException(v8::Exception::Error(
+      v8::String::NewFromUtf8(isolate, msg.c_str(), v8::NewStringType::kNormal,
+                              msg.length())
+          .ToLocalChecked()));
 #endif
 }
 
@@ -596,7 +623,7 @@ void GpuBenchmarking::PrintToSkPicture(v8::Isolate* isolate,
   if (!context.Init(true))
     return;
 
-  const cc::Layer* root_layer = context.compositor()->GetRootLayer();
+  const cc::Layer* root_layer = context.layer_tree_view()->GetRootLayer();
   if (!root_layer)
     return;
 
@@ -605,8 +632,10 @@ void GpuBenchmarking::PrintToSkPicture(v8::Isolate* isolate,
       !base::PathIsWritable(dirpath)) {
     std::string msg("Path is not writable: ");
     msg.append(dirpath.MaybeAsASCII());
-    isolate->ThrowException(v8::Exception::Error(v8::String::NewFromUtf8(
-        isolate, msg.c_str(), v8::String::kNormalString, msg.length())));
+    isolate->ThrowException(v8::Exception::Error(
+        v8::String::NewFromUtf8(isolate, msg.c_str(),
+                                v8::NewStringType::kNormal, msg.length())
+            .ToLocalChecked()));
     return;
   }
 
@@ -639,21 +668,34 @@ bool GpuBenchmarking::SmoothScrollBy(gin::Arguments* args) {
   int gesture_source_type = SyntheticGestureParams::DEFAULT_INPUT;
   std::string direction = "down";
   float speed_in_pixels_s = 800;
+  bool precise_scrolling_deltas = true;
+  bool scroll_by_page = false;
+  bool cursor_visible = true;
 
   if (!GetOptionalArg(args, &pixels_to_scroll) ||
-      !GetOptionalArg(args, &callback) ||
-      !GetOptionalArg(args, &start_x) ||
+      !GetOptionalArg(args, &callback) || !GetOptionalArg(args, &start_x) ||
       !GetOptionalArg(args, &start_y) ||
       !GetOptionalArg(args, &gesture_source_type) ||
       !GetOptionalArg(args, &direction) ||
-      !GetOptionalArg(args, &speed_in_pixels_s)) {
+      !GetOptionalArg(args, &speed_in_pixels_s) ||
+      !GetOptionalArg(args, &precise_scrolling_deltas) ||
+      !GetOptionalArg(args, &scroll_by_page) ||
+      !GetOptionalArg(args, &cursor_visible)) {
     return false;
   }
 
+  // For all touch inputs, always scroll by precise deltas.
+  DCHECK(gesture_source_type != SyntheticGestureParams::TOUCH_INPUT ||
+         precise_scrolling_deltas);
+  // Scroll by page only for mouse inputs.
+  DCHECK(!scroll_by_page ||
+         gesture_source_type == SyntheticGestureParams::MOUSE_INPUT);
+
   EnsureRemoteInterface();
-  return BeginSmoothScroll(&context, args, input_injector_, pixels_to_scroll,
-                           callback, gesture_source_type, direction,
-                           speed_in_pixels_s, true, start_x, start_y);
+  return BeginSmoothScroll(
+      &context, args, input_injector_, pixels_to_scroll, callback,
+      gesture_source_type, direction, speed_in_pixels_s, true, start_x, start_y,
+      0, precise_scrolling_deltas, scroll_by_page, cursor_visible);
 }
 
 bool GpuBenchmarking::SmoothDrag(gin::Arguments* args) {
@@ -698,21 +740,32 @@ bool GpuBenchmarking::Swipe(gin::Arguments* args) {
   float start_x = rect.width / 2;
   float start_y = rect.height / 2;
   float speed_in_pixels_s = 800;
+  float fling_velocity = 0;
+  int gesture_source_type = SyntheticGestureParams::TOUCH_INPUT;
 
   if (!GetOptionalArg(args, &direction) ||
       !GetOptionalArg(args, &pixels_to_scroll) ||
-      !GetOptionalArg(args, &callback) ||
-      !GetOptionalArg(args, &start_x) ||
+      !GetOptionalArg(args, &callback) || !GetOptionalArg(args, &start_x) ||
       !GetOptionalArg(args, &start_y) ||
-      !GetOptionalArg(args, &speed_in_pixels_s)) {
+      !GetOptionalArg(args, &speed_in_pixels_s) ||
+      !GetOptionalArg(args, &fling_velocity) ||
+      !GetOptionalArg(args, &gesture_source_type)) {
     return false;
   }
+
+  // For touchpad swipe, we should be given a fling velocity, but it is not
+  // needed for touchscreen swipe, because we will calculate the velocity in
+  // our code.
+  if (gesture_source_type == SyntheticGestureParams::TOUCHPAD_INPUT &&
+      fling_velocity == 0)
+    fling_velocity = 1000;
 
   EnsureRemoteInterface();
   return BeginSmoothScroll(
       &context, args, input_injector_, -pixels_to_scroll, callback,
-      1,  // TOUCH_INPUT
-      direction, speed_in_pixels_s, false, start_x, start_y);
+      gesture_source_type, direction, speed_in_pixels_s, false, start_x,
+      start_y, fling_velocity, true /* precise_scrolling_deltas */,
+      false /* scroll_by_page */, true /* cursor_visible */);
 }
 
 bool GpuBenchmarking::ScrollBounce(gin::Arguments* args) {
@@ -800,12 +853,12 @@ bool GpuBenchmarking::PinchBy(gin::Arguments* args) {
   float anchor_y;
   v8::Local<v8::Function> callback;
   float relative_pointer_speed_in_pixels_s = 800;
+  int gesture_source_type = SyntheticGestureParams::DEFAULT_INPUT;
 
-  if (!GetArg(args, &scale_factor) ||
-      !GetArg(args, &anchor_x) ||
-      !GetArg(args, &anchor_y) ||
-      !GetOptionalArg(args, &callback) ||
-      !GetOptionalArg(args, &relative_pointer_speed_in_pixels_s)) {
+  if (!GetArg(args, &scale_factor) || !GetArg(args, &anchor_x) ||
+      !GetArg(args, &anchor_y) || !GetOptionalArg(args, &callback) ||
+      !GetOptionalArg(args, &relative_pointer_speed_in_pixels_s) ||
+      !GetOptionalArg(args, &gesture_source_type)) {
     return false;
   }
 
@@ -822,6 +875,27 @@ bool GpuBenchmarking::PinchBy(gin::Arguments* args) {
   gesture_params.anchor.SetPoint(anchor_x, anchor_y);
   gesture_params.relative_pointer_speed_in_pixels_s =
       relative_pointer_speed_in_pixels_s;
+
+  if (gesture_source_type < 0 ||
+      gesture_source_type > SyntheticGestureParams::GESTURE_SOURCE_TYPE_MAX) {
+    args->ThrowTypeError("Unknown gesture source type");
+    return false;
+  }
+
+  gesture_params.gesture_source_type =
+      static_cast<SyntheticGestureParams::GestureSourceType>(
+          gesture_source_type);
+
+  switch (gesture_params.gesture_source_type) {
+    case SyntheticGestureParams::DEFAULT_INPUT:
+    case SyntheticGestureParams::TOUCH_INPUT:
+    case SyntheticGestureParams::MOUSE_INPUT:
+      break;
+    case SyntheticGestureParams::PEN_INPUT:
+      args->ThrowTypeError(
+          "Gesture is not implemented for the given source type");
+      return false;
+  }
 
   scoped_refptr<CallbackAndContext> callback_and_context =
       new CallbackAndContext(args->isolate(), callback,
@@ -853,8 +927,9 @@ void GpuBenchmarking::SetBrowserControlsShown(bool show) {
   if (!context.Init(false))
     return;
   context.web_view()->UpdateBrowserControlsState(
-      blink::kWebBrowserControlsBoth,
-      show ? blink::kWebBrowserControlsShown : blink::kWebBrowserControlsHidden,
+      cc::BrowserControlsState::kBoth,
+      show ? cc::BrowserControlsState::kShown
+           : cc::BrowserControlsState::kHidden,
       false);
 }
 
@@ -864,7 +939,7 @@ float GpuBenchmarking::VisualViewportY() {
     return 0.0;
   float y = context.web_view()->VisualViewportOffset().y;
   blink::WebRect rect(0, y, 0, 0);
-  context.render_view_impl()->ConvertViewportToWindow(&rect);
+  context.render_view_impl()->WidgetClient()->ConvertViewportToWindow(&rect);
   return rect.y;
 }
 
@@ -874,7 +949,7 @@ float GpuBenchmarking::VisualViewportX() {
     return 0.0;
   float x = context.web_view()->VisualViewportOffset().x;
   blink::WebRect rect(x, 0, 0, 0);
-  context.render_view_impl()->ConvertViewportToWindow(&rect);
+  context.render_view_impl()->WidgetClient()->ConvertViewportToWindow(&rect);
   return rect.x;
 }
 
@@ -884,7 +959,7 @@ float GpuBenchmarking::VisualViewportHeight() {
     return 0.0;
   float height = context.web_view()->VisualViewportSize().height;
   blink::WebRect rect(0, 0, 0, height);
-  context.render_view_impl()->ConvertViewportToWindow(&rect);
+  context.render_view_impl()->WidgetClient()->ConvertViewportToWindow(&rect);
   return rect.height;
 }
 
@@ -894,7 +969,7 @@ float GpuBenchmarking::VisualViewportWidth() {
     return 0.0;
   float width = context.web_view()->VisualViewportSize().width;
   blink::WebRect rect(0, 0, width, 0);
-  context.render_view_impl()->ConvertViewportToWindow(&rect);
+  context.render_view_impl()->WidgetClient()->ConvertViewportToWindow(&rect);
   return rect.width;
 }
 
@@ -1019,10 +1094,10 @@ int GpuBenchmarking::RunMicroBenchmark(gin::Arguments* args) {
   std::unique_ptr<base::Value> value =
       V8ValueConverter::Create()->FromV8Value(arguments, v8_context);
 
-  return context.compositor()->ScheduleMicroBenchmark(
+  return context.layer_tree_view()->ScheduleMicroBenchmark(
       name, std::move(value),
-      base::Bind(&OnMicroBenchmarkCompleted,
-                 base::RetainedRef(callback_and_context)));
+      base::BindOnce(&OnMicroBenchmarkCompleted,
+                     base::RetainedRef(callback_and_context)));
 }
 
 bool GpuBenchmarking::SendMessageToMicroBenchmark(
@@ -1037,8 +1112,8 @@ bool GpuBenchmarking::SendMessageToMicroBenchmark(
   std::unique_ptr<base::Value> value =
       V8ValueConverter::Create()->FromV8Value(message, v8_context);
 
-  return context.compositor()->SendMessageToMicroBenchmark(id,
-                                                           std::move(value));
+  return context.layer_tree_view()->SendMessageToMicroBenchmark(
+      id, std::move(value));
 }
 
 bool GpuBenchmarking::HasGpuChannel() {
@@ -1056,23 +1131,76 @@ bool GpuBenchmarking::HasGpuProcess() {
   return has_gpu_process;
 }
 
+void GpuBenchmarking::CrashGpuProcess() {
+  gpu::GpuChannelHost* gpu_channel =
+      RenderThreadImpl::current()->GetGpuChannel();
+  if (!gpu_channel)
+    return;
+  gpu_channel->CrashGpuProcessForTesting();
+}
+
 void GpuBenchmarking::GetGpuDriverBugWorkarounds(gin::Arguments* args) {
   std::vector<std::string> gpu_driver_bug_workarounds;
   gpu::GpuChannelHost* gpu_channel =
       RenderThreadImpl::current()->GetGpuChannel();
   if (!gpu_channel)
     return;
+  const gpu::GpuFeatureInfo& gpu_feature_info =
+      gpu_channel->gpu_feature_info();
   const std::vector<int32_t>& workarounds =
-      gpu_channel->gpu_feature_info().enabled_gpu_driver_bug_workarounds;
+      gpu_feature_info.enabled_gpu_driver_bug_workarounds;
   for (int32_t workaround : workarounds) {
     gpu_driver_bug_workarounds.push_back(
         gpu::GpuDriverBugWorkaroundTypeToString(
             static_cast<gpu::GpuDriverBugWorkaroundType>(workaround)));
   }
 
+  // This code must be kept in sync with compositor_util's
+  // GetDriverBugWorkaroundsImpl.
+  for (auto ext : base::SplitString(gpu_feature_info.disabled_extensions,
+                                    " ",
+                                    base::TRIM_WHITESPACE,
+                                    base::SPLIT_WANT_NONEMPTY)) {
+    gpu_driver_bug_workarounds.push_back("disabled_extension_" + ext);
+  }
+  for (auto ext : base::SplitString(gpu_feature_info.disabled_webgl_extensions,
+                                    " ",
+                                    base::TRIM_WHITESPACE,
+                                    base::SPLIT_WANT_NONEMPTY)) {
+    gpu_driver_bug_workarounds.push_back("disabled_webgl_extension_" + ext);
+  }
+
   v8::Local<v8::Value> result;
   if (gin::TryConvertToV8(args->isolate(), gpu_driver_bug_workarounds, &result))
     args->Return(result);
+}
+
+void GpuBenchmarking::StartProfiling(gin::Arguments* args) {
+  if (base::debug::BeingProfiled())
+    return;
+  std::string file_name;
+  if (!GetOptionalArg(args, &file_name))
+    return;
+  if (!file_name.length())
+    file_name = "profile.pb";
+  base::debug::StartProfiling(file_name);
+  base::debug::RestartProfilingAfterFork();
+}
+
+void GpuBenchmarking::StopProfiling() {
+  if (base::debug::BeingProfiled())
+    base::debug::StopProfiling();
+}
+
+void GpuBenchmarking::Freeze() {
+  GpuBenchmarkingContext context;
+  if (!context.Init(true))
+    return;
+  // TODO(fmeawad): Instead of forcing a visibility change, only allow
+  // freezing a page if it was already hidden.
+  context.web_view()->SetVisibilityState(
+      blink::mojom::PageVisibilityState::kHidden, false);
+  context.web_view()->SetPageFrozen(true);
 }
 
 }  // namespace content

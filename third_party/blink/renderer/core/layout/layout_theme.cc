@@ -21,8 +21,12 @@
 
 #include "third_party/blink/renderer/core/layout/layout_theme.h"
 
+#include <string>
+
+#include "base/feature_list.h"
+#include "base/metrics/field_trial_params.h"
+#include "third_party/blink/public/common/features.h"
 #include "third_party/blink/public/platform/platform.h"
-#include "third_party/blink/public/platform/web_fallback_theme_engine.h"
 #include "third_party/blink/public/platform/web_rect.h"
 #include "third_party/blink/public/web/blink.h"
 #include "third_party/blink/renderer/core/css_value_keywords.h"
@@ -47,20 +51,53 @@
 #include "third_party/blink/renderer/core/layout/layout_theme_mobile.h"
 #include "third_party/blink/renderer/core/page/focus_controller.h"
 #include "third_party/blink/renderer/core/page/page.h"
+#include "third_party/blink/renderer/core/paint/fallback_theme.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
 #include "third_party/blink/renderer/platform/file_metadata.h"
 #include "third_party/blink/renderer/platform/fonts/font_selector.h"
+#include "third_party/blink/renderer/platform/fonts/string_truncator.h"
+#include "third_party/blink/renderer/platform/graphics/color.h"
 #include "third_party/blink/renderer/platform/graphics/touch_action.h"
 #include "third_party/blink/renderer/platform/layout_test_support.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/text/platform_locale.h"
-#include "third_party/blink/renderer/platform/text/string_truncator.h"
 #include "third_party/blink/renderer/platform/theme.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
+#include "ui/native_theme/native_theme.h"
 
 // The methods in this file are shared by all themes on every platform.
 
 namespace blink {
+
+namespace {
+
+void GetAutofillPreviewColorsFromFieldTrial(std::string* color,
+                                            std::string* background_color) {
+  constexpr char kAutofillDefaultBackgroundColor[] = "#FAFFBD";
+  constexpr char kAutofillDefaultColor[] = "#000000";
+
+  if (base::FeatureList::IsEnabled(features::kAutofillPreviewStyleExperiment)) {
+    std::string bg_color_param = base::GetFieldTrialParamValueByFeature(
+        features::kAutofillPreviewStyleExperiment,
+        features::kAutofillPreviewStyleExperimentBgColorParameterName);
+    std::string color_param = base::GetFieldTrialParamValueByFeature(
+        features::kAutofillPreviewStyleExperiment,
+        features::kAutofillPreviewStyleExperimentColorParameterName);
+    if (Color().SetFromString(bg_color_param.c_str()) &&
+        Color().SetFromString(color_param.c_str())) {
+      *background_color = bg_color_param;
+      *color = color_param;
+      return;
+    }
+  }
+
+  // Fallback to the default colors if the experiment is not enabled or if a
+  // color param is invalid.
+  *background_color = std::string(kAutofillDefaultBackgroundColor);
+  *color = std::string(kAutofillDefaultColor);
+}
+
+}  // namespace
 
 // Wrapper function defined in WebKit.h
 void SetMockThemeEnabledForTest(bool value) {
@@ -263,7 +300,23 @@ void LayoutTheme::AdjustStyle(ComputedStyle& style, Element* e) {
 }
 
 String LayoutTheme::ExtraDefaultStyleSheet() {
-  return g_empty_string;
+  std::string color, background_color;
+  GetAutofillPreviewColorsFromFieldTrial(&color, &background_color);
+  // TODO(crbug.com/880258): Use different styles for
+  // `-internal-autofill-previewed` and `-internal-autofill-selected`.
+  constexpr char const format[] =
+      "input:-internal-autofill-previewed,"
+      "input:-internal-autofill-selected,"
+      "textarea:-internal-autofill-previewed,"
+      "textarea:-internal-autofill-selected,"
+      "select:-internal-autofill-previewed,"
+      "select:-internal-autofill-selected "
+      "{"
+      "  background-color: %s !important;"
+      "  background-image:none !important;"
+      "  color: %s !important;"
+      "}";
+  return String::Format(format, background_color.c_str(), color.c_str());
 }
 
 String LayoutTheme::ExtraQuirksStyleSheet() {
@@ -581,12 +634,12 @@ void LayoutTheme::AdjustInnerSpinButtonStyle(ComputedStyle&) const {}
 
 void LayoutTheme::AdjustMenuListStyle(ComputedStyle&, Element*) const {}
 
-double LayoutTheme::AnimationRepeatIntervalForProgressBar() const {
-  return 0;
+TimeDelta LayoutTheme::AnimationRepeatIntervalForProgressBar() const {
+  return TimeDelta();
 }
 
-double LayoutTheme::AnimationDurationForProgressBar() const {
-  return 0;
+TimeDelta LayoutTheme::AnimationDurationForProgressBar() const {
+  return TimeDelta();
 }
 
 bool LayoutTheme::ShouldHaveSpinButton(HTMLInputElement* input_element) const {
@@ -883,8 +936,9 @@ void LayoutTheme::AdjustCheckboxStyleUsingFallbackTheme(
   if (!style.Width().IsIntrinsicOrAuto() && !style.Height().IsAuto())
     return;
 
-  IntSize size = Platform::Current()->FallbackThemeEngine()->GetSize(
-      WebFallbackThemeEngine::kPartCheckbox);
+  IntSize size(GetFallbackTheme().GetPartSize(ui::NativeTheme::kCheckbox,
+                                              ui::NativeTheme::kNormal,
+                                              ui::NativeTheme::ExtraParams()));
   float zoom_level = style.EffectiveZoom();
   size.SetWidth(size.Width() * zoom_level);
   size.SetHeight(size.Height() * zoom_level);
@@ -906,8 +960,9 @@ void LayoutTheme::AdjustRadioStyleUsingFallbackTheme(
   if (!style.Width().IsIntrinsicOrAuto() && !style.Height().IsAuto())
     return;
 
-  IntSize size = Platform::Current()->FallbackThemeEngine()->GetSize(
-      WebFallbackThemeEngine::kPartRadio);
+  IntSize size(GetFallbackTheme().GetPartSize(ui::NativeTheme::kRadio,
+                                              ui::NativeTheme::kNormal,
+                                              ui::NativeTheme::ExtraParams()));
   float zoom_level = style.EffectiveZoom();
   size.SetWidth(size.Width() * zoom_level);
   size.SetHeight(size.Height() * zoom_level);

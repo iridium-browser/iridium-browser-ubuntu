@@ -74,6 +74,8 @@ class SVGPaintServer {
 // is set to a fallback color.
 struct SVGPaintDescription {
   STACK_ALLOCATED();
+
+ public:
   SVGPaintDescription()
       : resource(nullptr), is_valid(false), has_fallback(false) {}
   SVGPaintDescription(Color color)
@@ -103,7 +105,7 @@ class LayoutSVGResourcePaintServer : public LayoutSVGResourceContainer {
   ~LayoutSVGResourcePaintServer() override;
 
   virtual SVGPaintServer PreparePaintServer(
-      const LayoutObject&,
+      const SVGResourceClient&,
       const FloatRect& object_bounding_box) = 0;
 
   // Helper utilities used in to access the underlying resources for DRT.

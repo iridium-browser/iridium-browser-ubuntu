@@ -8,6 +8,7 @@
 
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
+#include "components/viz/common/surfaces/parent_local_surface_id_allocator.h"
 #include "components/viz/host/host_frame_sink_manager.h"
 #include "content/browser/compositor/image_transport_factory.h"
 #include "content/browser/compositor/surface_utils.h"
@@ -51,8 +52,6 @@ void InitNavigateParams(FrameHostMsg_DidCommitProvisionalLoad_Params* params,
   params->transition = transition;
   params->redirects = std::vector<GURL>();
   params->should_update_history = false;
-  params->searchable_form_url = GURL();
-  params->searchable_form_encoding = std::string();
   params->did_create_new_entry = did_create_new_entry;
   params->gesture = NavigationGestureUser;
   params->method = "GET";
@@ -63,12 +62,12 @@ TestRenderWidgetHostView::TestRenderWidgetHostView(RenderWidgetHost* rwh)
     : RenderWidgetHostViewBase(rwh),
       is_showing_(false),
       is_occluded_(false),
-      did_swap_compositor_frame_(false),
-      background_color_(SK_ColorWHITE) {
+      did_swap_compositor_frame_(false) {
 #if defined(OS_ANDROID)
   frame_sink_id_ = AllocateFrameSinkId();
   GetHostFrameSinkManager()->RegisterFrameSinkId(frame_sink_id_, this);
 #else
+  default_background_color_ = SK_ColorWHITE;
   // Not all tests initialize or need an image transport factory.
   if (ImageTransportFactory::GetInstance()) {
     frame_sink_id_ = AllocateFrameSinkId();
@@ -148,14 +147,6 @@ gfx::Rect TestRenderWidgetHostView::GetViewBounds() const {
   return gfx::Rect();
 }
 
-void TestRenderWidgetHostView::SetBackgroundColor(SkColor color) {
-  background_color_ = color;
-}
-
-SkColor TestRenderWidgetHostView::background_color() const {
-  return background_color_;
-}
-
 #if defined(OS_MACOSX)
 void TestRenderWidgetHostView::SetActive(bool active) {
   // <viettrungluu@gmail.com>: Do I need to do anything here?
@@ -164,10 +155,6 @@ void TestRenderWidgetHostView::SetActive(bool active) {
 void TestRenderWidgetHostView::SpeakSelection() {
 }
 #endif
-
-gfx::Vector2d TestRenderWidgetHostView::GetOffsetFromRootSurface() {
-  return gfx::Vector2d();
-}
 
 gfx::Rect TestRenderWidgetHostView::GetBoundsInRootWindow() {
   return gfx::Rect();
@@ -181,16 +168,17 @@ void TestRenderWidgetHostView::DidCreateNewRendererCompositorFrameSink(
 void TestRenderWidgetHostView::SubmitCompositorFrame(
     const viz::LocalSurfaceId& local_surface_id,
     viz::CompositorFrame frame,
-    viz::mojom::HitTestRegionListPtr hit_test_region_list) {
+    base::Optional<viz::HitTestRegionList> hit_test_region_list) {
   did_swap_compositor_frame_ = true;
-  uint32_t frame_token = frame.metadata.frame_token;
-  if (frame_token)
-    OnFrameTokenChanged(frame_token);
+  if (frame.metadata.send_frame_token_to_embedder)
+    OnFrameTokenChanged(frame.metadata.frame_token);
 }
 
 void TestRenderWidgetHostView::TakeFallbackContentFrom(
     RenderWidgetHostView* view) {
-  SetBackgroundColor(view->background_color());
+  base::Optional<SkColor> color = view->GetBackgroundColor();
+  if (color)
+    SetBackgroundColor(*color);
 }
 
 bool TestRenderWidgetHostView::LockMouse() {
@@ -200,8 +188,12 @@ bool TestRenderWidgetHostView::LockMouse() {
 void TestRenderWidgetHostView::UnlockMouse() {
 }
 
-viz::FrameSinkId TestRenderWidgetHostView::GetFrameSinkId() {
+const viz::FrameSinkId& TestRenderWidgetHostView::GetFrameSinkId() const {
   return frame_sink_id_;
+}
+
+const viz::LocalSurfaceId& TestRenderWidgetHostView::GetLocalSurfaceId() const {
+  return viz::ParentLocalSurfaceIdAllocator::InvalidLocalSurfaceId();
 }
 
 viz::SurfaceId TestRenderWidgetHostView::GetCurrentSurfaceId() const {
@@ -218,15 +210,19 @@ void TestRenderWidgetHostView::OnFrameTokenChanged(uint32_t frame_token) {
   OnFrameTokenChangedForView(frame_token);
 }
 
+void TestRenderWidgetHostView::UpdateBackgroundColor() {}
+
 TestRenderViewHost::TestRenderViewHost(
     SiteInstance* instance,
     std::unique_ptr<RenderWidgetHostImpl> widget,
     RenderViewHostDelegate* delegate,
+    int32_t routing_id,
     int32_t main_frame_routing_id,
     bool swapped_out)
     : RenderViewHostImpl(instance,
                          std::move(widget),
                          delegate,
+                         routing_id,
                          main_frame_routing_id,
                          swapped_out,
                          false /* has_initialized_audio_host */),
@@ -288,7 +284,7 @@ void TestRenderViewHost::SimulateWasHidden() {
 }
 
 void TestRenderViewHost::SimulateWasShown() {
-  GetWidget()->WasShown(ui::LatencyInfo());
+  GetWidget()->WasShown(false /* record_presentation_time */);
 }
 
 WebPreferences TestRenderViewHost::TestComputeWebkitPrefs() {

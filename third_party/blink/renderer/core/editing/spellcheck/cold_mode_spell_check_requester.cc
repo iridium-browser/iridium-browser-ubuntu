@@ -8,9 +8,12 @@
 #include "third_party/blink/renderer/core/dom/idle_deadline.h"
 #include "third_party/blink/renderer/core/editing/editing_utilities.h"
 #include "third_party/blink/renderer/core/editing/ephemeral_range.h"
+#include "third_party/blink/renderer/core/editing/frame_selection.h"
 #include "third_party/blink/renderer/core/editing/iterators/character_iterator.h"
+#include "third_party/blink/renderer/core/editing/selection_template.h"
 #include "third_party/blink/renderer/core/editing/spellcheck/spell_check_requester.h"
 #include "third_party/blink/renderer/core/editing/spellcheck/spell_checker.h"
+#include "third_party/blink/renderer/core/editing/visible_position.h"
 #include "third_party/blink/renderer/core/editing/visible_units.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
@@ -20,18 +23,7 @@ namespace blink {
 namespace {
 
 const int kColdModeChunkSize = 16384;  // in UTF16 code units
-const int kInvalidLength = -1;
 const int kInvalidChunkIndex = -1;
-
-bool ShouldCheckNode(const Node& node) {
-  if (!node.IsElementNode())
-    return false;
-  // TODO(editing-dev): Make |Position| constructors take const parameters.
-  const Position& position = Position::FirstPositionInNode(node);
-  if (!IsEditablePosition(position))
-    return false;
-  return SpellChecker::IsSpellCheckingEnabledAt(position);
-}
 
 }  // namespace
 
@@ -43,22 +35,27 @@ ColdModeSpellCheckRequester* ColdModeSpellCheckRequester::Create(
 
 void ColdModeSpellCheckRequester::Trace(blink::Visitor* visitor) {
   visitor->Trace(frame_);
-  visitor->Trace(next_node_);
-  visitor->Trace(current_root_editable_);
-  visitor->Trace(current_chunk_start_);
+  visitor->Trace(root_editable_);
+  visitor->Trace(remaining_check_range_);
 }
 
 ColdModeSpellCheckRequester::ColdModeSpellCheckRequester(LocalFrame& frame)
     : frame_(frame),
-      last_checked_dom_tree_version_(0),
+      last_chunk_index_(kInvalidChunkIndex),
       needs_more_invocation_for_testing_(false) {}
 
-bool ColdModeSpellCheckRequester::FullDocumentChecked() const {
+bool ColdModeSpellCheckRequester::FullyChecked() const {
   if (needs_more_invocation_for_testing_) {
     needs_more_invocation_for_testing_ = false;
     return false;
   }
-  return !next_node_;
+  // Note that DOM mutations between cold mode invocations may corrupt the
+  // stored states, in which case we also consider checking as finished.
+  return !root_editable_ || !remaining_check_range_ ||
+         remaining_check_range_->collapsed() ||
+         !remaining_check_range_->IsConnected() ||
+         !root_editable_->contains(
+             remaining_check_range_->commonAncestorContainer());
 }
 
 SpellCheckRequester& ColdModeSpellCheckRequester::GetSpellCheckRequester()
@@ -66,117 +63,108 @@ SpellCheckRequester& ColdModeSpellCheckRequester::GetSpellCheckRequester()
   return GetFrame().GetSpellChecker().GetSpellCheckRequester();
 }
 
+const Element* ColdModeSpellCheckRequester::CurrentFocusedEditable() const {
+  const Position position =
+      GetFrame().Selection().GetSelectionInDOMTree().Extent();
+  if (position.IsNull())
+    return nullptr;
+
+  const ContainerNode* root = HighestEditableRoot(position);
+  if (!root || !root->isConnected() || !root->IsElementNode())
+    return nullptr;
+
+  const Element* element = ToElement(root);
+  if (!element->IsSpellCheckingEnabled() ||
+      !SpellChecker::IsSpellCheckingEnabledAt(position))
+    return nullptr;
+
+  return element;
+}
+
 void ColdModeSpellCheckRequester::Invoke(IdleDeadline* deadline) {
   TRACE_EVENT0("blink", "ColdModeSpellCheckRequester::invoke");
-
-  Node* body = GetFrame().GetDocument()->body();
-  if (!body) {
-    ResetCheckingProgress();
-    last_checked_dom_tree_version_ = GetFrame().GetDocument()->DomTreeVersion();
-    return;
-  }
 
   // TODO(xiaochengh): Figure out if this has any performance impact.
   GetFrame().GetDocument()->UpdateStyleAndLayout();
 
-  if (last_checked_dom_tree_version_ !=
-      GetFrame().GetDocument()->DomTreeVersion())
-    ResetCheckingProgress();
-
-  while (next_node_ && deadline->timeRemaining() > 0)
-    Step();
-  last_checked_dom_tree_version_ = GetFrame().GetDocument()->DomTreeVersion();
-}
-
-void ColdModeSpellCheckRequester::ResetCheckingProgress() {
-  next_node_ = GetFrame().GetDocument()->body();
-  current_root_editable_ = nullptr;
-  current_full_length_ = kInvalidLength;
-  current_chunk_index_ = kInvalidChunkIndex;
-  current_chunk_start_ = Position();
-}
-
-void ColdModeSpellCheckRequester::Step() {
-  if (!next_node_)
-    return;
-
-  if (!current_root_editable_) {
-    SearchForNextRootEditable();
+  const Element* current_focused = CurrentFocusedEditable();
+  if (!current_focused) {
+    ClearProgress();
     return;
   }
 
-  if (current_full_length_ == kInvalidLength) {
-    InitializeForCurrentRootEditable();
-    return;
+  if (root_editable_ != current_focused) {
+    ClearProgress();
+    root_editable_ = current_focused;
+    last_chunk_index_ = 0;
+    remaining_check_range_ = Range::Create(root_editable_->GetDocument());
+    remaining_check_range_->selectNodeContents(
+        const_cast<Element*>(root_editable_.Get()), ASSERT_NO_EXCEPTION);
   }
 
-  DCHECK(current_chunk_index_ != kInvalidChunkIndex);
-  RequestCheckingForNextChunk();
-}
-
-void ColdModeSpellCheckRequester::SearchForNextRootEditable() {
-  // TODO(xiaochengh): Figure out if such small steps, which result in frequent
-  // calls of |timeRemaining()|, have any performance impact. We might not want
-  // to check remaining time so frequently in a page with millions of nodes.
-
-  if (ShouldCheckNode(*next_node_)) {
-    current_root_editable_ = ToElement(next_node_);
-    return;
+  while (deadline->timeRemaining() > 0) {
+    if (FullyChecked()) {
+      SetHasFullyChecked();
+      return;
+    }
+    RequestCheckingForNextChunk();
   }
-
-  next_node_ =
-      FlatTreeTraversal::Next(*next_node_, GetFrame().GetDocument()->body());
 }
 
-void ColdModeSpellCheckRequester::InitializeForCurrentRootEditable() {
-  const EphemeralRange& full_range =
-      EphemeralRange::RangeOfContents(*current_root_editable_);
-  current_full_length_ = TextIterator::RangeLength(full_range);
+void ColdModeSpellCheckRequester::ClearProgress() {
+  root_editable_ = nullptr;
+  last_chunk_index_ = kInvalidChunkIndex;
+  if (!remaining_check_range_)
+    return;
+  remaining_check_range_->Dispose();
+  remaining_check_range_ = nullptr;
+}
 
-  current_chunk_index_ = 0;
-  current_chunk_start_ = full_range.StartPosition();
+void ColdModeSpellCheckRequester::SetHasFullyChecked() {
+  DCHECK(root_editable_);
+  last_chunk_index_ = kInvalidChunkIndex;
+  if (!remaining_check_range_)
+    return;
+  remaining_check_range_->Dispose();
+  remaining_check_range_ = nullptr;
 }
 
 void ColdModeSpellCheckRequester::RequestCheckingForNextChunk() {
-  // Check the full content if it is short.
-  if (current_full_length_ <= kColdModeChunkSize) {
-    GetSpellCheckRequester().RequestCheckingFor(
-        EphemeralRange::RangeOfContents(*current_root_editable_));
-    FinishCheckingCurrentRootEditable();
+  DCHECK(root_editable_);
+  DCHECK(!FullyChecked());
+
+  const EphemeralRange remaining_range(remaining_check_range_);
+  const int remaining_length = TextIterator::RangeLength(
+      remaining_range,
+      // Same behavior used in |CalculateCharacterSubrange()|
+      TextIteratorBehavior::EmitsObjectReplacementCharacterBehavior());
+  if (remaining_length == 0) {
+    SetHasFullyChecked();
     return;
   }
 
-  const Position& chunk_end =
-      CalculateCharacterSubrange(
-          EphemeralRange(current_chunk_start_,
-                         Position::LastPositionInNode(*current_root_editable_)),
-          0, kColdModeChunkSize)
+  const int chunk_index = last_chunk_index_ + 1;
+  const Position chunk_start = remaining_range.StartPosition();
+  const Position chunk_end =
+      CalculateCharacterSubrange(remaining_range, 0,
+                                 std::min(remaining_length, kColdModeChunkSize))
           .EndPosition();
-  if (chunk_end <= current_chunk_start_) {
-    FinishCheckingCurrentRootEditable();
-    return;
-  }
-  const EphemeralRange chunk_range(current_chunk_start_, chunk_end);
-  const EphemeralRange& check_range = ExpandEndToSentenceBoundary(chunk_range);
-  GetSpellCheckRequester().RequestCheckingFor(check_range,
-                                              current_chunk_index_);
 
-  current_chunk_start_ = check_range.EndPosition();
-  ++current_chunk_index_;
+  // Chromium spellchecker requires complete sentences to be checked. However,
+  // EndOfSentence() sometimes returns null or out-of-editable positions, which
+  // are corrected here.
+  const Position extended_end =
+      EndOfSentence(CreateVisiblePosition(chunk_end)).DeepEquivalent();
+  const Position check_end =
+      extended_end.IsNull() || extended_end < chunk_end
+          ? chunk_end
+          : std::min(extended_end, remaining_range.EndPosition());
+  const EphemeralRange check_range(chunk_start, check_end);
 
-  if (current_chunk_index_ * kColdModeChunkSize >= current_full_length_)
-    FinishCheckingCurrentRootEditable();
-}
+  GetSpellCheckRequester().RequestCheckingFor(check_range, chunk_index);
 
-void ColdModeSpellCheckRequester::FinishCheckingCurrentRootEditable() {
-  DCHECK_EQ(next_node_, current_root_editable_);
-  next_node_ = FlatTreeTraversal::NextSkippingChildren(
-      *next_node_, GetFrame().GetDocument()->body());
-
-  current_root_editable_ = nullptr;
-  current_full_length_ = kInvalidLength;
-  current_chunk_index_ = kInvalidChunkIndex;
-  current_chunk_start_ = Position();
+  last_chunk_index_ = chunk_index;
+  remaining_check_range_->setStart(check_range.EndPosition());
 }
 
 }  // namespace blink

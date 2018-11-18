@@ -133,6 +133,19 @@ class InputMethodPrivateNotifyImeMenuItemActivatedFunction
       InputMethodPrivateNotifyImeMenuItemActivatedFunction);
 };
 
+class InputMethodPrivateGetCompositionBoundsFunction
+    : public UIThreadExtensionFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("inputMethodPrivate.getCompositionBounds",
+                             INPUTMETHODPRIVATE_GETCOMPOSITIONBOUNDS)
+
+ protected:
+  ~InputMethodPrivateGetCompositionBoundsFunction() override {}
+
+  // ExtensionFunction:
+  ResponseAction Run() override;
+};
+
 class InputImeEventRouter : public InputImeEventRouterBase {
  public:
   explicit InputImeEventRouter(Profile* profile);
@@ -143,8 +156,7 @@ class InputImeEventRouter : public InputImeEventRouterBase {
       const std::vector<extensions::InputComponentInfo>& input_components);
   void UnregisterAllImes(const std::string& extension_id);
 
-  chromeos::InputMethodEngine* GetEngine(const std::string& extension_id,
-                                         const std::string& component_id);
+  chromeos::InputMethodEngine* GetEngine(const std::string& extension_id);
   input_method::InputMethodEngineBase* GetActiveEngine(
       const std::string& extension_id) override;
 

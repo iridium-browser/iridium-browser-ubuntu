@@ -180,21 +180,36 @@ Protocol.InspectorBackend.DevToolsStubErrorCode = -32015;
 Protocol.inspectorBackend = new Protocol.InspectorBackend();
 
 /**
- * @interface
+ * @unrestricted
  */
-Protocol.InspectorBackend.Connection = function() {};
+Protocol.InspectorBackend.Connection = class {
+  /**
+   * @param {string} domain
+   * @param {!Protocol.InspectorBackend.Connection.MessageObject} messageObject
+   */
+  sendMessage(domain, messageObject) {
+    this.sendRawMessage(JSON.stringify(messageObject));
+  }
 
-Protocol.InspectorBackend.Connection.prototype = {
   /**
    * @param {string} message
    */
-  sendMessage(message) {},
+  sendRawMessage(message) {}
 
   /**
    * @return {!Promise}
    */
-  disconnect() {},
+  disconnect() {}
 };
+
+/**
+ * @typedef {!{
+ *   id: number,
+ *   method: string,
+ *   params: (!Object|undefined)
+ * }}
+ */
+Protocol.InspectorBackend.Connection.MessageObject;
 
 /**
  * @typedef {!{
@@ -214,9 +229,10 @@ Protocol.InspectorBackend.Connection.Factory;
  */
 Protocol.TargetBase = class extends Common.Object {
   /**
-   *  @param {!Protocol.InspectorBackend.Connection.Factory} connectionFactory
+   * @param {!Protocol.InspectorBackend.Connection.Factory} connectionFactory
+   * @param {boolean} isNodeJS
    */
-  constructor(connectionFactory) {
+  constructor(connectionFactory, isNodeJS) {
     super();
     this._connection =
         connectionFactory({onMessage: this._onMessage.bind(this), onDisconnect: this._onDisconnect.bind(this)});
@@ -233,6 +249,7 @@ Protocol.TargetBase = class extends Common.Object {
     }
     if (!Protocol.InspectorBackend.sendRawMessageForTesting)
       Protocol.InspectorBackend.sendRawMessageForTesting = this._sendRawMessageForTesting.bind(this);
+    this._isNodeJS = isNodeJS;
   }
 
   /**
@@ -287,17 +304,16 @@ Protocol.TargetBase = class extends Common.Object {
       messageObject.params = params;
 
     const wrappedCallback = this._wrap(callback, domain, method);
-    const message = JSON.stringify(messageObject);
 
     if (Protocol.InspectorBackend.Options.dumpInspectorProtocolMessages)
-      this._dumpProtocolMessage('frontend: ' + message, '[FE] ' + domain);
+      this._dumpProtocolMessage('frontend: ' + JSON.stringify(messageObject), '[FE] ' + domain);
     if (this.hasEventListeners(Protocol.TargetBase.Events.MessageSent)) {
       this.dispatchEventToListeners(
           Protocol.TargetBase.Events.MessageSent,
           {domain, method, params: JSON.parse(JSON.stringify(params)), id: messageId});
     }
 
-    this._connection.sendMessage(message);
+    this._connection.sendMessage(domain, messageObject);
     ++this._pendingResponsesCount;
     this._callbacks[messageId] = wrappedCallback;
   }
@@ -346,6 +362,8 @@ Protocol.TargetBase = class extends Common.Object {
 
 
     const messageObject = /** @type {!Object} */ ((typeof message === 'string') ? JSON.parse(message) : message);
+
+    Protocol.NodeURL.patch(this, messageObject);
 
     if ('id' in messageObject) {  // just a response for some request
       const callback = this._callbacks[messageObject.id];
@@ -485,6 +503,17 @@ Protocol.TargetBase = class extends Common.Object {
         Protocol.InspectorBackend._AgentPrototype.prototype.dispatchResponse.bind(
             this._agent(domain), messageObject, methodName, callback),
         0);
+  }
+
+  /**
+   * @return {boolean}
+   */
+  isNodeJS() {
+    return this._isNodeJS;
+  }
+
+  markAsNodeJSForTest() {
+    this._isNodeJS = true;
   }
 };
 

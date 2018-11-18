@@ -22,8 +22,8 @@
 #include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/files/file_util.h"
-#include "base/message_loop/message_loop.h"
 #include "base/strings/string_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/synchronization/lock.h"
 #include "base/task_runner.h"
 #include "base/threading/thread_restrictions.h"
@@ -109,7 +109,8 @@ int URLRequestFileJob::ReadRawData(IOBuffer* dest, int dest_size) {
 }
 
 bool URLRequestFileJob::IsRedirectResponse(GURL* location,
-                                           int* http_status_code) {
+                                           int* http_status_code,
+                                           bool* insecure_scheme_was_upgraded) {
   if (meta_info_.is_directory) {
     // This happens when we discovered the file is a directory, so needs a
     // slash at the end of the path.
@@ -118,6 +119,7 @@ bool URLRequestFileJob::IsRedirectResponse(GURL* location,
     GURL::Replacements replacements;
     replacements.SetPathStr(new_path);
 
+    *insecure_scheme_was_upgraded = false;
     *location = request_->url().ReplaceComponents(replacements);
     *http_status_code = 301;  // simulate a permanent redirect
     return true;
@@ -175,6 +177,17 @@ void URLRequestFileJob::SetExtraRequestHeaders(
       }
     }
   }
+}
+
+void URLRequestFileJob::GetResponseInfo(HttpResponseInfo* info) {
+  if (!serve_mime_type_as_content_type_ || !meta_info_.mime_type_result)
+    return;
+  auto headers =
+      base::MakeRefCounted<net::HttpResponseHeaders>("HTTP/1.1 200 OK");
+  headers->AddHeader(base::StringPrintf("%s: %s",
+                                        net::HttpRequestHeaders::kContentType,
+                                        meta_info_.mime_type.c_str()));
+  info->headers = headers;
 }
 
 void URLRequestFileJob::OnOpenComplete(int result) {}

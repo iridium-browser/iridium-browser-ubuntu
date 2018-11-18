@@ -36,6 +36,8 @@ TEST(WebInputEventUtilTest, MotionEventConversion) {
   pointer.orientation = -base::kPiFloat / 2;
   pointer.tilt_x = 60;
   pointer.tilt_y = 70;
+  pointer.twist = 160;
+  pointer.tangential_pressure = 0;
   for (MotionEvent::ToolType tool_type : tool_types) {
     pointer.tool_type = tool_type;
     MotionEventGeneric event(MotionEvent::Action::DOWN, base::TimeTicks::Now(),
@@ -46,7 +48,7 @@ TEST(WebInputEventUtilTest, MotionEventConversion) {
     WebTouchEvent expected_event(
         WebInputEvent::kTouchStart,
         WebInputEvent::kShiftKey | WebInputEvent::kAltKey,
-        (event.GetEventTime() - base::TimeTicks()).InSecondsF());
+        event.GetEventTime());
     expected_event.touches_length = 1;
     WebTouchPoint expected_pointer;
     expected_pointer.id = pointer.id;
@@ -60,6 +62,8 @@ TEST(WebInputEventUtilTest, MotionEventConversion) {
     if (tool_type == MotionEvent::ToolType::STYLUS) {
       expected_pointer.tilt_x = 60;
       expected_pointer.tilt_y = 70;
+      expected_pointer.twist = 160;
+      expected_pointer.tangential_pressure = 0;
     } else {
       expected_pointer.tilt_x = 0;
       expected_pointer.tilt_y = 0;
@@ -107,8 +111,7 @@ TEST(WebInputEventUtilTest, ScrollUpdateConversion) {
       ui::CreateWebGestureEventFromGestureEventData(event);
   EXPECT_EQ(WebInputEvent::kGestureScrollUpdate, web_event.GetType());
   EXPECT_EQ(0, web_event.GetModifiers());
-  EXPECT_EQ((timestamp - base::TimeTicks()).InSecondsF(),
-            web_event.TimeStampSeconds());
+  EXPECT_EQ(timestamp, web_event.TimeStamp());
   EXPECT_EQ(pos.x(), web_event.PositionInWidget().x);
   EXPECT_EQ(pos.y(), web_event.PositionInWidget().y);
   EXPECT_EQ(raw_pos.x(), web_event.PositionInScreen().x);

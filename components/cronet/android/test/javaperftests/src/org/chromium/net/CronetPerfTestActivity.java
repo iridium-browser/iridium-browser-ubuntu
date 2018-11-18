@@ -7,7 +7,6 @@ package org.chromium.net;
 import android.annotation.TargetApi;
 import android.app.Activity;
 import android.net.Uri;
-import android.os.AsyncTask;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Debug;
@@ -17,6 +16,7 @@ import org.json.JSONObject;
 
 import org.chromium.base.ContextUtils;
 import org.chromium.base.PathUtils;
+import org.chromium.base.task.AsyncTask;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -555,9 +555,9 @@ public class CronetPerfTestActivity extends Activity {
         }
     }
 
-    private class BenchmarkTask extends AsyncTask<Void, Void, Void> {
+    private class BenchmarkTask extends AsyncTask<Void> {
         @Override
-        protected Void doInBackground(Void... unused) {
+        protected Void doInBackground() {
             JSONObject results = new JSONObject();
             for (Mode mode : Mode.values()) {
                 for (Direction direction : Direction.values()) {
@@ -622,6 +622,6 @@ public class CronetPerfTestActivity extends Activity {
         PathUtils.setPrivateDataDirectorySuffix(PRIVATE_DATA_DIRECTORY_SUFFIX);
         mConfig = getIntent().getData();
         // Execute benchmarks on another thread to avoid networking on main thread.
-        new BenchmarkTask().execute();
+        new BenchmarkTask().executeOnExecutor(AsyncTask.SERIAL_EXECUTOR);
     }
 }

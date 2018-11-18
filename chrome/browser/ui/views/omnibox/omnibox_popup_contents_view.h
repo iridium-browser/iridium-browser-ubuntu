@@ -26,15 +26,18 @@ class OmniboxView;
 // A view representing the contents of the autocomplete popup.
 class OmniboxPopupContentsView : public views::View, public OmniboxPopupView {
  public:
-  OmniboxPopupContentsView(const gfx::FontList& font_list,
-                           OmniboxView* omnibox_view,
+  OmniboxPopupContentsView(OmniboxView* omnibox_view,
                            OmniboxEditModel* edit_model,
                            LocationBarView* location_bar_view);
   ~OmniboxPopupContentsView() override;
 
   // Opens a match from the list specified by |index| with the type of tab or
   // window specified by |disposition|.
-  void OpenMatch(size_t index, WindowOpenDisposition disposition);
+  void OpenMatch(WindowOpenDisposition disposition,
+                 base::TimeTicks match_selection_timestamp);
+  void OpenMatch(size_t index,
+                 WindowOpenDisposition disposition,
+                 base::TimeTicks match_selection_timestamp);
 
   // Returns the icon that should be displayed next to |match|. If the icon is
   // available as a vector icon, it will be |vector_icon_color|.
@@ -50,6 +53,17 @@ class OmniboxPopupContentsView : public views::View, public OmniboxPopupView {
   // Returns true if the line specified by |index| is selected.
   virtual bool IsSelectedIndex(size_t index) const;
 
+  // If the selected index has a tab switch button, whether it's "focused" via
+  // the tab key. Invalid if the selected index does not have a tab switch
+  // button.
+  bool IsButtonSelected() const;
+
+  // Called by the active result view to inform model (due to mouse event).
+  void UnselectButton();
+
+  // Called to inform result view of button focus.
+  void ProvideButtonFocusHint(size_t line);
+
   // OmniboxPopupView:
   bool IsOpen() const override;
   void InvalidateLine(size_t line) override;
@@ -61,7 +75,6 @@ class OmniboxPopupContentsView : public views::View, public OmniboxPopupView {
 
   // views::View:
   void Layout() override;
-  views::View* GetTooltipHandlerForPoint(const gfx::Point& point) override;
   bool OnMouseDragged(const ui::MouseEvent& event) override;
   void OnGestureEvent(ui::GestureEvent* event) override;
   void GetAccessibleNodeData(ui::AXNodeData* node_data) override;
@@ -113,9 +126,6 @@ class OmniboxPopupContentsView : public views::View, public OmniboxPopupView {
   OmniboxView* omnibox_view_;
 
   LocationBarView* location_bar_view_;
-
-  // The font list used for result rows, based on the omnibox font list.
-  gfx::FontList font_list_;
 
   int start_margin_;
   int end_margin_;

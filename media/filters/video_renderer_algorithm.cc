@@ -41,7 +41,7 @@ VideoRendererAlgorithm::VideoRendererAlgorithm(
       wall_clock_time_cb_(wall_clock_time_cb),
       frame_duration_calculator_(kMovingAverageSamples),
       frame_dropping_disabled_(false) {
-  DCHECK(!wall_clock_time_cb_.is_null());
+  DCHECK(wall_clock_time_cb_);
   Reset();
 }
 
@@ -165,12 +165,20 @@ scoped_refptr<VideoFrame> VideoRendererAlgorithm::Render(
   }
 
   // Step 7: Drop frames which occur prior to the frame to be rendered. If any
-  // frame has a zero render count it should be reported as dropped.
+  // frame unexpectedly has a zero render count it should be reported as
+  // dropped. When using cadence some frames may be expected to be skipped and
+  // should not be counted as dropped.
   if (frame_to_render > 0) {
     if (frames_dropped) {
       for (int i = 0; i < frame_to_render; ++i) {
         const ReadyFrame& frame = frame_queue_[i];
+
+        // If a frame was ever rendered, don't count it as dropped.
         if (frame.render_count != frame.drop_count)
+          continue;
+
+        // If we expected to never render the frame, don't count it as dropped.
+        if (cadence_estimator_.has_cadence() && !frame.ideal_render_count)
           continue;
 
         // If frame dropping is disabled, ignore the results of the algorithm
@@ -329,9 +337,10 @@ void VideoRendererAlgorithm::EnqueueFrame(
   DCHECK(!frame->metadata()->IsTrue(VideoFrameMetadata::END_OF_STREAM));
 
   ReadyFrame ready_frame(frame);
-  auto it = frame_queue_.empty() ? frame_queue_.end()
-                                 : std::lower_bound(frame_queue_.begin(),
-                                                    frame_queue_.end(), frame);
+  auto it = frame_queue_.empty()
+                ? frame_queue_.end()
+                : std::lower_bound(frame_queue_.begin(), frame_queue_.end(),
+                                   ready_frame);
   DCHECK_GE(it - frame_queue_.begin(), 0);
 
   // Drop any frames inserted before or at the last rendered frame if we've

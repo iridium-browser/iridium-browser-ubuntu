@@ -9,6 +9,8 @@
 #include "third_party/blink/renderer/core/css/parser/css_property_parser_helpers.h"
 #include "third_party/blink/renderer/core/css/properties/css_parsing_utils.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
+#include "third_party/blink/renderer/core/style/reference_clip_path_operation.h"
+#include "third_party/blink/renderer/core/style/shape_clip_path_operation.h"
 
 namespace blink {
 namespace CSSLonghand {
@@ -36,7 +38,7 @@ const CSSValue* ClipPath::CSSValueFromComputedStyleInternal(
     }
     if (operation->GetType() == ClipPathOperation::REFERENCE) {
       return CSSURIValue::Create(
-          AtomicString(ToReferenceClipPathOperation(operation)->Url()));
+          ToReferenceClipPathOperation(operation)->Url());
     }
   }
   return CSSIdentifierValue::Create(CSSValueNone);

@@ -20,9 +20,10 @@ import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.jsdialog.JavascriptModalDialogView;
+import org.chromium.chrome.browser.modaldialog.DialogDismissalCause;
 import org.chromium.chrome.browser.modaldialog.ModalDialogManager;
 import org.chromium.chrome.browser.modaldialog.ModalDialogView;
-import org.chromium.chrome.browser.vr_shell.VrShellDelegate;
+import org.chromium.chrome.browser.vr.VrModuleProvider;
 import org.chromium.ui.base.WindowAndroid;
 
 /**
@@ -98,7 +99,7 @@ public class JavascriptAppModalDialog
         // Cache the native dialog pointer so that we can use it to return the response.
         mNativeDialogPointer = nativeDialogPointer;
 
-        if (VrShellDelegate.isInVr()) {
+        if (VrModuleProvider.getDelegate().isInVr()) {
             // Use JavascriptModalDialogView while in VR.
             ChromeActivity activity = (ChromeActivity) window.getActivity().get();
             mModalDialogManager = activity.getModalDialogManager();
@@ -108,7 +109,7 @@ public class JavascriptAppModalDialog
             assert !(this instanceof JavascriptAppPromptDialog);
             mDialogView = JavascriptModalDialogView.create(this, mTitle, mMessage, null, false,
                     mPositiveButtonTextId, mNegativeButtonTextId);
-            mModalDialogManager.showDialog(mDialogView, ModalDialogManager.TAB_MODAL);
+            mModalDialogManager.showDialog(mDialogView, ModalDialogManager.ModalDialogType.TAB);
         } else {
             LayoutInflater inflater = LayoutInflater.from(context);
             ViewGroup layout = (ViewGroup) inflater.inflate(R.layout.js_modal_dialog, null);
@@ -150,13 +151,13 @@ public class JavascriptAppModalDialog
     @Override
     public void onClick(@ModalDialogView.ButtonType int buttonType) {
         switch (buttonType) {
-            case ModalDialogView.BUTTON_POSITIVE:
-                confirm(mDialogView.getPromptText(), false);
-                mModalDialogManager.dismissDialog(mDialogView);
+            case ModalDialogView.ButtonType.POSITIVE:
+                mModalDialogManager.dismissDialog(
+                        mDialogView, DialogDismissalCause.POSITIVE_BUTTON_CLICKED);
                 break;
-            case ModalDialogView.BUTTON_NEGATIVE:
-                cancel(false);
-                mModalDialogManager.dismissDialog(mDialogView);
+            case ModalDialogView.ButtonType.NEGATIVE:
+                mModalDialogManager.dismissDialog(
+                        mDialogView, DialogDismissalCause.NEGATIVE_BUTTON_CLICKED);
                 break;
             default:
                 Log.e(TAG, "Unexpected button pressed in dialog: " + buttonType);
@@ -164,12 +165,20 @@ public class JavascriptAppModalDialog
     }
 
     @Override
-    public void onCancel() {
-        cancel(false);
+    public void onDismiss(@DialogDismissalCause int dismissalCause) {
+        // TODO(https://crbug.com/874537): Add suppression logic in the refactor and make sure it
+        // doesn't break VR.
+        switch (dismissalCause) {
+            case DialogDismissalCause.POSITIVE_BUTTON_CLICKED:
+                confirm(mDialogView.getPromptText(), false);
+                break;
+            case DialogDismissalCause.DISMISSED_BY_NATIVE:
+                break;
+            default:
+                cancel(false);
+        }
+        mDialogView = null;
     }
-
-    @Override
-    public void onDismiss() {}
 
     protected void prepare(final ViewGroup layout) {
         // Display the checkbox for suppressing dialogs if necessary.
@@ -213,7 +222,8 @@ public class JavascriptAppModalDialog
         if (mDialog != null) {
             mDialog.dismiss();
         } else {
-            mModalDialogManager.dismissDialog(mDialogView);
+            mModalDialogManager.dismissDialog(
+                    mDialogView, DialogDismissalCause.DISMISSED_BY_NATIVE);
         }
         mNativeDialogPointer = 0;
     }

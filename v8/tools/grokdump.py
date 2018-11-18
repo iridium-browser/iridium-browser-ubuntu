@@ -761,7 +761,7 @@ class MinidumpReader(object):
 
   def IsValidExceptionStackAddress(self, address):
     if not self.IsValidAddress(address): return False
-    return self.isExceptionStackAddress(address)
+    return self.IsExceptionStackAddress(address)
 
   def IsModuleAddress(self, address):
     return self.GetModuleForAddress(address) != None
@@ -1230,9 +1230,6 @@ class Map(HeapObject):
 
   def DependentCodeOffset(self):
     return self.CodeCacheOffset() + self.heap.PointerSize()
-
-  def WeakCellCacheOffset(self):
-    return self.DependentCodeOffset() + self.heap.PointerSize()
 
   def ReadByte(self, offset):
     return self.heap.reader.ReadU8(self.address + offset)
@@ -1718,9 +1715,9 @@ class V8Heap(object):
     "EXTERNAL_SYMBOL_TYPE": ExternalString,
     "EXTERNAL_SYMBOL_WITH_ONE_BYTE_DATA_TYPE": ExternalString,
     "EXTERNAL_ONE_BYTE_SYMBOL_TYPE": ExternalString,
-    "SHORT_EXTERNAL_SYMBOL_TYPE": ExternalString,
-    "SHORT_EXTERNAL_SYMBOL_WITH_ONE_BYTE_DATA_TYPE": ExternalString,
-    "SHORT_EXTERNAL_ONE_BYTE_SYMBOL_TYPE": ExternalString,
+    "UNCACHED_EXTERNAL_SYMBOL_TYPE": ExternalString,
+    "UNCACHED_EXTERNAL_SYMBOL_WITH_ONE_BYTE_DATA_TYPE": ExternalString,
+    "UNCACHED_EXTERNAL_ONE_BYTE_SYMBOL_TYPE": ExternalString,
     "STRING_TYPE": SeqString,
     "ONE_BYTE_STRING_TYPE": SeqString,
     "CONS_STRING_TYPE": ConsString,
@@ -1732,7 +1729,7 @@ class V8Heap(object):
     "ODDBALL_TYPE": Oddball,
     "FIXED_ARRAY_TYPE": FixedArray,
     "HASH_TABLE_TYPE": FixedArray,
-    "BOILERPLATE_DESCRIPTION_TYPE": FixedArray,
+    "OBJECT_BOILERPLATE_DESCRIPTION_TYPE": FixedArray,
     "SCOPE_INFO_TYPE": FixedArray,
     "JS_FUNCTION_TYPE": JSFunction,
     "SHARED_FUNCTION_INFO_TYPE": SharedFunctionInfo,
@@ -3323,7 +3320,7 @@ DUMP_FILE_RE = re.compile(r"[-_0-9a-zA-Z][-\._0-9a-zA-Z]*\.dmp$")
 class InspectionWebServer(BaseHTTPServer.HTTPServer):
   def __init__(self, port_number, switches, minidump_name):
     BaseHTTPServer.HTTPServer.__init__(
-        self, ('', port_number), InspectionWebHandler)
+        self, ('localhost', port_number), InspectionWebHandler)
     splitpath = os.path.split(minidump_name)
     self.dumppath = splitpath[0]
     self.dumpfilename = splitpath[1]

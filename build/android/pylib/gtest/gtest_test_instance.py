@@ -16,6 +16,7 @@ from pylib.constants import host_paths
 from pylib.base import base_test_result
 from pylib.base import test_instance
 from pylib.symbols import stack_symbolizer
+from pylib.utils import test_filter
 
 with host_paths.SysPath(host_paths.BUILD_COMMON_PATH):
   import unittest_util # pylint: disable=import-error
@@ -234,35 +235,6 @@ def ParseGTestXML(xml_content):
   return results
 
 
-def ConvertTestFilterFileIntoGTestFilterArgument(input_lines):
-  """Converts test filter file contents into --gtest_filter argument.
-
-  See //testing/buildbot/filters/README.md for description of the
-  syntax that |input_lines| are expected to follow.
-
-  See
-  https://github.com/google/googletest/blob/master/googletest/docs/AdvancedGuide.md#running-a-subset-of-the-tests
-  for description of the syntax that --gtest_filter argument should follow.
-
-  Args:
-    input_lines: An iterable (e.g. a list or a file) containing input lines.
-  Returns:
-    a string suitable for feeding as an argument of --gtest_filter parameter.
-  """
-  # Strip comments and whitespace from each line and filter non-empty lines.
-  stripped_lines = (l.split('#', 1)[0].strip() for l in input_lines)
-  filter_lines = list(l for l in stripped_lines if l)
-
-  # Split the tests into positive and negative patterns (gtest treats
-  # every pattern after the first '-' sign as an exclusion).
-  positive_patterns = ':'.join(l for l in filter_lines if l[0] != '-')
-  negative_patterns = ':'.join(l[1:] for l in filter_lines if l[0] == '-')
-  if negative_patterns:
-    negative_patterns = '-' + negative_patterns
-
-  # Join the filter lines into one, big --gtest_filter argument.
-  return positive_patterns + negative_patterns
-
 def TestNameWithoutDisabledPrefix(test_name):
   """Modify the test name without disabled prefix if prefix 'DISABLED_' or
   'FLAKY_' presents.
@@ -294,7 +266,7 @@ class GtestTestInstance(test_instance.TestInstance):
     self._shard_timeout = args.shard_timeout
     self._store_tombstones = args.store_tombstones
     self._suite = args.suite_name[0]
-    self._symbolizer = stack_symbolizer.Symbolizer(None, False)
+    self._symbolizer = stack_symbolizer.Symbolizer(None)
     self._total_external_shards = args.test_launcher_total_shards
     self._wait_for_java_debugger = args.wait_for_java_debugger
 
@@ -338,14 +310,7 @@ class GtestTestInstance(test_instance.TestInstance):
       error_func('Could not find apk or executable for %s' % self._suite)
 
     self._data_deps = []
-    if args.test_filter:
-      self._gtest_filter = args.test_filter
-    elif args.test_filter_file:
-      with open(args.test_filter_file, 'r') as f:
-        self._gtest_filter = ConvertTestFilterFileIntoGTestFilterArgument(f)
-    else:
-      self._gtest_filter = None
-
+    self._gtest_filter = test_filter.InitializeFilterFromArgs(args)
     self._run_disabled = args.run_disabled
 
     self._data_deps_delegate = data_deps_delegate
@@ -533,7 +498,9 @@ class GtestTestInstance(test_instance.TestInstance):
     disabled_filter_items = []
 
     if disabled_prefixes is None:
-      disabled_prefixes = ['FAILS_', 'PRE_', 'MANUAL_']
+      disabled_prefixes = ['FAILS_', 'PRE_']
+      if '--run-manual' not in self._flags:
+        disabled_prefixes += ['MANUAL_']
       if not self._run_disabled:
         disabled_prefixes += ['DISABLED_', 'FLAKY_']
 
@@ -555,4 +522,3 @@ class GtestTestInstance(test_instance.TestInstance):
   def TearDown(self):
     """Do nothing."""
     pass
-

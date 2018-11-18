@@ -16,10 +16,6 @@ namespace content {
 class NavigationHandle;
 }
 
-namespace user_prefs {
-class PrefRegistrySyncable;
-};
-
 constexpr char kBlockTabUnderFormatMessage[] =
     "Chrome stopped this site from navigating to %s, see "
     "https://www.chromestatus.com/feature/5675755719622656 for more details.";
@@ -32,9 +28,7 @@ constexpr char kBlockTabUnderFormatMessage[] =
 //    a. It has no user gesture.
 //    b. It is renderer-initiated.
 //    c. It is cross site to the last committed URL in the tab.
-//    d. The target site has a Site Engagement score below some threshold (by
-//       default, a score of 0).
-//    e. The navigation started in the background.
+//    d. The navigation started in the background.
 // 2. The tab has opened a popup and hasn't received a user gesture since then.
 //    This information is tracked by the PopupOpenerTabHelper.
 //
@@ -74,8 +68,6 @@ class TabUnderNavigationThrottle : public content::NavigationThrottle {
     kCount
   };
 
-  static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
-
   static std::unique_ptr<content::NavigationThrottle> MaybeCreate(
       content::NavigationHandle* handle);
 
@@ -86,7 +78,7 @@ class TabUnderNavigationThrottle : public content::NavigationThrottle {
 
   // This method is described at the top of this file.
   //
-  // Note: This method should be robust to navigations at any stage.
+  // Note: This method must be called before navigation commit.
   bool IsSuspiciousClientRedirect() const;
 
   content::NavigationThrottle::ThrottleCheckResult MaybeBlockNavigation();
@@ -94,17 +86,15 @@ class TabUnderNavigationThrottle : public content::NavigationThrottle {
 
   bool HasOpenedPopupSinceLastUserGesture() const;
 
+  // Returns true if tab-unders are allowed due to content settings. Currently,
+  // tab-unders blocking is governed by the same setting as popups.
+  bool TabUndersAllowedBySettings() const;
+
   // content::NavigationThrottle:
   content::NavigationThrottle::ThrottleCheckResult WillStartRequest() override;
   content::NavigationThrottle::ThrottleCheckResult WillRedirectRequest()
       override;
   const char* GetNameForLogging() override;
-
-  // Threshold for a site's engagement score to be considered non-suspicious.
-  // Any tab-under target URL with engagement > |engagement_threshold_| will not
-  // be considered a suspicious redirect. If this member is -1, this threshold
-  // will not apply and all sites will be candidates for blocking.
-  const int engagement_threshold_ = 0;
 
   // Store whether we're off the record as a member to avoid looking it up all
   // the time.

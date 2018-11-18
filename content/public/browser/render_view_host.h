@@ -20,7 +20,6 @@ class FilePath;
 }
 
 namespace blink {
-struct WebMediaPlayerAction;
 struct WebPluginAction;
 }
 
@@ -98,12 +97,6 @@ class CONTENT_EXPORT RenderViewHost : public IPC::Sender {
   // Instructs the RenderView to send back updates to the preferred size.
   virtual void EnablePreferredSizeMode() = 0;
 
-  // Tells the renderer to perform the given action on the media player
-  // located at the given point.
-  virtual void ExecuteMediaPlayerActionAtLocation(
-      const gfx::Point& location,
-      const blink::WebMediaPlayerAction& action) = 0;
-
   // Tells the renderer to perform the given action on the plugin located at
   // the given point.
   virtual void ExecutePluginActionAtLocation(
@@ -139,9 +132,6 @@ class CONTENT_EXPORT RenderViewHost : public IPC::Sender {
 
   // Passes a list of Webkit preferences to the renderer.
   virtual void UpdateWebkitPreferences(const WebPreferences& prefs) = 0;
-
-  // Notify the render view host to select the word around the caret.
-  virtual void SelectWordAroundCaret() = 0;
 
  private:
   // This interface should only be implemented inside content.

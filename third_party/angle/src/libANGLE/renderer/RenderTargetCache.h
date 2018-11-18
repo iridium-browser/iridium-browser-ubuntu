@@ -26,9 +26,17 @@ class RenderTargetCache final : angle::NonCopyable
     RenderTargetCache();
     ~RenderTargetCache();
 
-    gl::Error update(const gl::Context *context,
-                     const gl::FramebufferState &state,
-                     const gl::Framebuffer::DirtyBits &dirtyBits);
+    // Update all RenderTargets from the dirty bits.
+    angle::Result update(const gl::Context *context,
+                         const gl::FramebufferState &state,
+                         const gl::Framebuffer::DirtyBits &dirtyBits);
+
+    // Update individual RenderTargets.
+    angle::Result updateColorRenderTarget(const gl::Context *context,
+                                          const gl::FramebufferState &state,
+                                          size_t colorIndex);
+    angle::Result updateDepthStencilRenderTarget(const gl::Context *context,
+                                                 const gl::FramebufferState &state);
 
     using RenderTargetArray = gl::AttachmentArray<RenderTargetT *>;
 
@@ -38,15 +46,9 @@ class RenderTargetCache final : angle::NonCopyable
     RenderTargetT *getColorRead(const gl::FramebufferState &state) const;
 
   private:
-    gl::Error updateCachedRenderTarget(const gl::Context *context,
-                                       const gl::FramebufferAttachment *attachment,
-                                       RenderTargetT **cachedRenderTarget);
-
-    gl::Error updateColorRenderTarget(const gl::Context *context,
-                                      const gl::FramebufferState &state,
-                                      size_t colorIndex);
-    gl::Error updateDepthStencilRenderTarget(const gl::Context *context,
-                                             const gl::FramebufferState &state);
+    angle::Result updateCachedRenderTarget(const gl::Context *context,
+                                           const gl::FramebufferAttachment *attachment,
+                                           RenderTargetT **cachedRenderTarget);
 
     gl::AttachmentArray<RenderTargetT *> mColorRenderTargets;
     // We only support a single Depth/Stencil RenderTarget currently.
@@ -65,9 +67,9 @@ RenderTargetCache<RenderTargetT>::~RenderTargetCache()
 }
 
 template <typename RenderTargetT>
-gl::Error RenderTargetCache<RenderTargetT>::update(const gl::Context *context,
-                                                   const gl::FramebufferState &state,
-                                                   const gl::Framebuffer::DirtyBits &dirtyBits)
+angle::Result RenderTargetCache<RenderTargetT>::update(const gl::Context *context,
+                                                       const gl::FramebufferState &state,
+                                                       const gl::Framebuffer::DirtyBits &dirtyBits)
 {
     for (auto dirtyBit : dirtyBits)
     {
@@ -96,7 +98,7 @@ gl::Error RenderTargetCache<RenderTargetT>::update(const gl::Context *context,
         }
     }
 
-    return gl::NoError();
+    return angle::Result::Continue();
 }
 
 template <typename RenderTargetT>
@@ -112,7 +114,7 @@ RenderTargetT *RenderTargetCache<RenderTargetT>::getDepthStencil() const
 }
 
 template <typename RenderTargetT>
-gl::Error RenderTargetCache<RenderTargetT>::updateColorRenderTarget(
+angle::Result RenderTargetCache<RenderTargetT>::updateColorRenderTarget(
     const gl::Context *context,
     const gl::FramebufferState &state,
     size_t colorIndex)
@@ -122,7 +124,7 @@ gl::Error RenderTargetCache<RenderTargetT>::updateColorRenderTarget(
 }
 
 template <typename RenderTargetT>
-gl::Error RenderTargetCache<RenderTargetT>::updateDepthStencilRenderTarget(
+angle::Result RenderTargetCache<RenderTargetT>::updateDepthStencilRenderTarget(
     const gl::Context *context,
     const gl::FramebufferState &state)
 {
@@ -131,7 +133,7 @@ gl::Error RenderTargetCache<RenderTargetT>::updateDepthStencilRenderTarget(
 }
 
 template <typename RenderTargetT>
-gl::Error RenderTargetCache<RenderTargetT>::updateCachedRenderTarget(
+angle::Result RenderTargetCache<RenderTargetT>::updateCachedRenderTarget(
     const gl::Context *context,
     const gl::FramebufferAttachment *attachment,
     RenderTargetT **cachedRenderTarget)
@@ -143,7 +145,7 @@ gl::Error RenderTargetCache<RenderTargetT>::updateCachedRenderTarget(
         ANGLE_TRY(attachment->getRenderTarget(context, &newRenderTarget));
     }
     *cachedRenderTarget = newRenderTarget;
-    return gl::NoError();
+    return angle::Result::Continue();
 }
 
 template <typename RenderTargetT>

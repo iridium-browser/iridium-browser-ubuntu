@@ -31,9 +31,6 @@ except ImportError:
   mock = None
 
 
-site_config = config_lib.GetConfig()
-
-
 _MAXIMUM_GERRIT_NUMBER_LENGTH = 7
 _GERRIT_CHANGE_ID_PREFIX = 'I'
 _GERRIT_CHANGE_ID_LENGTH = 40
@@ -484,11 +481,12 @@ def StripPrefix(text):
   Returns:
     A tuple of the corresponding remote and the stripped text.
   """
-  remote = site_config.params.EXTERNAL_REMOTE
-  prefix = site_config.params.INTERNAL_CHANGE_PREFIX
+  site_params = config_lib.GetSiteParams()
+  remote = site_params.EXTERNAL_REMOTE
+  prefix = site_params.INTERNAL_CHANGE_PREFIX
   if text.startswith(prefix):
     text = text[len(prefix):]
-    remote = site_config.params.INTERNAL_REMOTE
+    remote = site_params.INTERNAL_REMOTE
 
   return remote, text
 
@@ -505,7 +503,7 @@ def AddPrefix(patch, text):
   Returns:
     |text| with an added prefix for internal patches; otherwise, returns text.
   """
-  return '%s%s' % (site_config.params.CHANGE_PREFIX[patch.remote], text)
+  return '%s%s' % (config_lib.GetSiteParams().CHANGE_PREFIX[patch.remote], text)
 
 
 def ParsePatchDep(text, no_change_id=False, no_sha1=False,
@@ -692,7 +690,7 @@ class PatchQuery(object):
     elif self.sha1:
       # We assume sha1 is unique, but in rare cases (e.g. two branches with
       # the same history) it is not. We don't handle that.
-      self.id = '%s%s' % (site_config.params.CHANGE_PREFIX[self.remote],
+      self.id = '%s%s' % (config_lib.GetSiteParams().CHANGE_PREFIX[self.remote],
                           self.sha1)
 
   def LookupAliases(self):
@@ -716,7 +714,7 @@ class PatchQuery(object):
     if self.sha1:
       l.append(self.sha1)
 
-    return ['%s%s' % (site_config.params.CHANGE_PREFIX[self.remote], x)
+    return ['%s%s' % (config_lib.GetSiteParams().CHANGE_PREFIX[self.remote], x)
             for x in l if x is not None]
 
   def ToGerritQueryText(self):
@@ -807,7 +805,7 @@ class GitRepoPatch(PatchQuery):
     # belongs to. Differs from project_url as that may point to a local
     # repo or a gerrit review repo.
     self.git_remote_url = '%s/%s' % (
-        site_config.params.GIT_REMOTES.get(remote), project)
+        config_lib.GetSiteParams().GIT_REMOTES.get(remote), project)
     self.project_url = project_url
     self._project = project
     self._tracking_branch = tracking_branch
@@ -831,7 +829,7 @@ class GitRepoPatch(PatchQuery):
   @property
   def internal(self):
     """Whether patch is to an internal cros project."""
-    return self.remote == site_config.params.INTERNAL_REMOTE
+    return self.remote == config_lib.GetSiteParams().INTERNAL_REMOTE
 
   def _GetFooters(self, msg):
     """Get the Git footers of the specified commit message.
@@ -1465,7 +1463,7 @@ class GitRepoPatch(PatchQuery):
     """Returns custom string to identify this patch."""
     s = '%s:%s' % (self.project, self.ref)
     if self.sha1 is not None:
-      s = '%s:%s%s' % (s, site_config.params.CHANGE_PREFIX[self.remote],
+      s = '%s:%s%s' % (s, config_lib.GetSiteParams().CHANGE_PREFIX[self.remote],
                        self.sha1[:8])
     # TODO(ferringb,build): This gets a bit long in output; should likely
     # do some form of truncation to it.
@@ -1741,8 +1739,9 @@ class GerritFetchOnlyPatch(GitRepoPatch):
     if self.owner_email:
       self.owner = self.owner_email.split('@', 1)[0]
 
+    site_params = config_lib.GetSiteParams()
     self.url = gob_util.GetChangePageUrl(
-        site_config.params.GERRIT_HOSTS[self.remote], int(self.gerrit_number))
+        site_params.GERRIT_HOSTS[self.remote], int(self.gerrit_number))
     self.fail_count = fail_count
     self.pass_count = pass_count
     self.total_fail_count = total_fail_count
@@ -1841,7 +1840,7 @@ class GerritPatch(GerritFetchOnlyPatch):
     """Construct a GerritPatch object from Gerrit query results.
 
     Gerrit query JSON fields are documented at:
-    http://gerrit-documentation.googlecode.com/svn/Documentation/2.2.1/json.html
+    https://gerrit-review.googlesource.com/Documentation/json.html
 
     Args:
       patch_dict: A dictionary containing the parsed JSON gerrit query results.
@@ -1867,12 +1866,13 @@ class GerritPatch(GerritFetchOnlyPatch):
         current_patch_set.get('number'),
         owner_email=patch_dict['owner']['email'])
 
-    prefix_str = site_config.params.CHANGE_PREFIX[self.remote]
+    prefix_str = config_lib.GetSiteParams().CHANGE_PREFIX[self.remote]
     self.gerrit_number_str = '%s%s' % (prefix_str, self.gerrit_number)
     self.url = patch_dict['url']
     # status - Current state of this change.  Can be one of
     # ['NEW', 'SUBMITTED', 'MERGED', 'ABANDONED'].
     self.status = patch_dict['status']
+    self.private = patch_dict.get('private', False)
     self._approvals = []
     if 'currentPatchSet' in self.patch_dict:
       self._approvals = self.patch_dict['currentPatchSet'].get('approvals', [])
@@ -1892,7 +1892,7 @@ class GerritPatch(GerritFetchOnlyPatch):
     typically before passing it to the GerritPatch constructor.
 
     Old interface:
-      http://gerrit-documentation.googlecode.com/svn/Documentation/2.6/json.html
+      https://gerrit-review.googlesource.com/Documentation/json.html
 
     New interface:
       https://gerrit-review.googlesource.com/Documentation/rest-api-changes.html#json-entities
@@ -1917,6 +1917,7 @@ class GerritPatch(GerritFetchOnlyPatch):
           'url': gob_util.GetChangePageUrl(host, change['_number']),
           'status': change['status'],
           'subject': change.get('subject'),
+          'private': change.get('is_private', False),
       }
       current_revision = change.get('current_revision', '')
       current_revision_info = change.get('revisions', {}).get(current_revision)
@@ -2041,6 +2042,10 @@ class GerritPatch(GerritFetchOnlyPatch):
     return all(self.HasApproval(field, value)
                for field, value in flags.iteritems())
 
+  def IsPrivate(self):
+    """Return whether this CL is currently marked Private."""
+    return self.private
+
   def WasVetoed(self):
     """Return whether this CL was vetoed with VRIF=-1 or CRVW=-2."""
     return self.HasApproval('VRIF', '-1') or self.HasApproval('CRVW', '-2')
@@ -2060,6 +2065,8 @@ class GerritPatch(GerritFetchOnlyPatch):
     """
     if self.IsDraft():
       return PatchNotSubmittable(self, 'is a draft.')
+    elif self.IsPrivate():
+      return PatchNotSubmittable(self, 'is marked private still.')
 
     if self.status != 'NEW':
       statuses = {
@@ -2080,6 +2087,8 @@ class GerritPatch(GerritFetchOnlyPatch):
       return PatchNotSubmittable(self, 'is not marked Verified=+1.')
     elif not self.HasApproval('COMR', ('1', '2')):
       return PatchNotSubmittable(self, 'is not marked Commit-Queue>=+1.')
+
+    return None
 
   def GetLatestApproval(self, field):
     """Return most recent value of specific field on the current patchset.
@@ -2113,7 +2122,7 @@ class GerritPatch(GerritFetchOnlyPatch):
     # goto/createCherryPickCommitMessage
     old_footers = self._GetFooters(msg)
 
-    gerrit_host = site_config.params.GERRIT_HOSTS[self.remote]
+    gerrit_host = config_lib.GetSiteParams().GERRIT_HOSTS[self.remote]
     reviewed_on = 'https://%s/%s' % (gerrit_host, self.gerrit_number)
     if ('Reviewed-on', reviewed_on) not in old_footers:
       msg += 'Reviewed-on: %s\n' % reviewed_on
@@ -2129,7 +2138,7 @@ class GerritPatch(GerritFetchOnlyPatch):
     """Returns custom string to identify this patch."""
     s = '%s:%s' % (self.owner, self.gerrit_number_str)
     if self.sha1 is not None:
-      s = '%s:%s%s' % (s, site_config.params.CHANGE_PREFIX[self.remote],
+      s = '%s:%s%s' % (s, config_lib.GetSiteParams().CHANGE_PREFIX[self.remote],
                        self.sha1[:8])
     if self._subject_line:
       s += ':"%s"' % (self._subject_line,)
@@ -2309,6 +2318,7 @@ def PrepareRemotePatches(patches):
              tag: Denotes whether the project is an internal or external
                   project.
   """
+  site_params = config_lib.GetSiteParams()
   patch_info = []
   for patch in patches:
     try:
@@ -2322,11 +2332,11 @@ def PrepareRemotePatches(patches):
     if tag not in constants.PATCH_TAGS:
       raise ValueError('Bad remote patch format.  Unknown tag %s' % tag)
 
-    remote = site_config.params.EXTERNAL_REMOTE
+    remote = site_params.EXTERNAL_REMOTE
     if tag == constants.INTERNAL_PATCH_TAG:
-      remote = site_config.params.INTERNAL_REMOTE
+      remote = site_params.INTERNAL_REMOTE
 
-    push_url = site_config.params.GIT_REMOTES[remote]
+    push_url = site_params.GIT_REMOTES[remote]
     patch_info.append(UploadedLocalPatch(os.path.join(push_url, project),
                                          project, ref, tracking_branch,
                                          original_branch,

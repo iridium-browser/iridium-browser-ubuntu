@@ -12,6 +12,7 @@
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "base/scoped_observer.h"
 #include "build/build_config.h"
 #include "content/browser/frame_host/frame_tree.h"
 #include "content/browser/frame_host/navigator_delegate.h"
@@ -21,6 +22,7 @@
 #include "content/public/browser/interstitial_page.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
+#include "content/public/browser/render_widget_host_observer.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/renderer_preferences.h"
 #include "url/gurl.h"
@@ -45,6 +47,7 @@ enum ResourceRequestAction {
 class CONTENT_EXPORT InterstitialPageImpl : public InterstitialPage,
                                             public NotificationObserver,
                                             public RenderFrameHostDelegate,
+                                            public RenderWidgetHostObserver,
                                             public RenderViewHostDelegate,
                                             public RenderWidgetHostDelegate,
                                             public NavigatorDelegate {
@@ -134,6 +137,11 @@ class CONTENT_EXPORT InterstitialPageImpl : public InterstitialPage,
                          const gfx::Rect& initial_rect,
                          bool user_gesture) override;
   void SetFocusedFrame(FrameTreeNode* node, SiteInstance* source) override;
+  Visibility GetVisibility() const override;
+  void AudioContextPlaybackStarted(RenderFrameHost* host,
+                                   int context_id) override;
+  void AudioContextPlaybackStopped(RenderFrameHost* host,
+                                   int context_id) override;
 
   // RenderViewHostDelegate implementation:
   RenderViewHostDelegateView* GetDelegateView() override;
@@ -147,8 +155,7 @@ class CONTENT_EXPORT InterstitialPageImpl : public InterstitialPage,
       BrowserContext* browser_context) const override;
   void CreateNewWidget(int32_t render_process_id,
                        int32_t route_id,
-                       mojom::WidgetPtr widget,
-                       blink::WebPopupType popup_type) override;
+                       mojom::WidgetPtr widget) override;
   void CreateNewFullscreenWidget(int32_t render_process_id,
                                  int32_t route_id,
                                  mojom::WidgetPtr widget) override;
@@ -166,6 +173,7 @@ class CONTENT_EXPORT InterstitialPageImpl : public InterstitialPage,
   void RenderWidgetDeleted(RenderWidgetHostImpl* render_widget_host) override;
   KeyboardEventProcessingResult PreHandleKeyboardEvent(
       const NativeWebKeyboardEvent& event) override;
+  bool PreHandleMouseEvent(const blink::WebMouseEvent& event) override;
   void HandleKeyboardEvent(const NativeWebKeyboardEvent& event) override;
   TextInputManager* GetTextInputManager() override;
   RenderWidgetHostInputEventRouter* GetInputEventRouter() override;
@@ -207,6 +215,9 @@ class CONTENT_EXPORT InterstitialPageImpl : public InterstitialPage,
 
     DISALLOW_COPY_AND_ASSIGN(UnderlyingContentObserver);
   };
+
+  // RenderWidgetHostObserver implementation:
+  void RenderWidgetHostDestroyed(RenderWidgetHost* widget_host) override;
 
   // Disable the interstitial:
   // - if it is not yet showing, then it won't be shown.
@@ -305,6 +316,8 @@ class CONTENT_EXPORT InterstitialPageImpl : public InterstitialPage,
   std::unique_ptr<InterstitialPageDelegate> delegate_;
 
   scoped_refptr<SessionStorageNamespace> session_storage_namespace_;
+
+  ScopedObserver<RenderWidgetHost, RenderWidgetHostObserver> widget_observer_;
 
   base::WeakPtrFactory<InterstitialPageImpl> weak_ptr_factory_;
 

@@ -46,7 +46,8 @@ class MODULES_EXPORT OffscreenCanvasRenderingContext2D final
     DCHECK(!Host() || Host()->IsOffscreenCanvas());
     return static_cast<OffscreenCanvas*>(Host());
   }
-  ScriptPromise commit(ScriptState*, ExceptionState&);
+
+  void commit();
 
   // CanvasRenderingContext implementation
   ~OffscreenCanvasRenderingContext2D() override;
@@ -63,7 +64,7 @@ class MODULES_EXPORT OffscreenCanvasRenderingContext2D final
   }
   scoped_refptr<StaticBitmapImage> GetImage(AccelerationHint) const final;
   void Reset() override;
-  void RestoreCanvasMatrixClipStack(PaintCanvas* c) const override {
+  void RestoreCanvasMatrixClipStack(cc::PaintCanvas* c) const override {
     RestoreMatrixClipStack(c);
   }
 
@@ -92,17 +93,16 @@ class MODULES_EXPORT OffscreenCanvasRenderingContext2D final
 
   bool ParseColorOrCurrentColor(Color&, const String& color_string) const final;
 
-  PaintCanvas* DrawingCanvas() const final;
-  PaintCanvas* ExistingDrawingCanvas() const final;
+  cc::PaintCanvas* DrawingCanvas() const final;
+  cc::PaintCanvas* ExistingDrawingCanvas() const final;
   void DisableDeferral(DisableDeferralReason) final;
 
-  void DidDraw(const SkIRect& dirty_rect) final;  // overrides
-                                                  // BaseRenderingContext2D and
-                                                  // CanvasRenderingContext
+  void DidDraw() final;
+  void DidDraw(const SkIRect& dirty_rect) final;
 
   bool StateHasFilter() final;
   sk_sp<PaintFilter> StateGetFilter() final;
-  void SnapshotStateForFilter() final {}
+  void SnapshotStateForFilter() final;
 
   void ValidateStateStack() const final;
 
@@ -111,14 +111,16 @@ class MODULES_EXPORT OffscreenCanvasRenderingContext2D final
 
   ImageBitmap* TransferToImageBitmap(ScriptState*) final;
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
+
+  void PushFrame() override;
 
  protected:
   OffscreenCanvasRenderingContext2D(
       OffscreenCanvas*,
       const CanvasContextCreationAttributesCore& attrs);
 
-  virtual void NeedsFinalizeFrame() {
+  void NeedsFinalizeFrame() override {
     CanvasRenderingContext::NeedsFinalizeFrame();
   }
 
@@ -140,7 +142,7 @@ class MODULES_EXPORT OffscreenCanvasRenderingContext2D final
                         double* max_width = nullptr);
   const Font& AccessFont();
 
-  scoped_refptr<StaticBitmapImage> TransferToStaticBitmapImage();
+  scoped_refptr<CanvasResource> ProduceFrame();
 
   String ColorSpaceAsString() const override;
   CanvasPixelFormat PixelFormat() const override;

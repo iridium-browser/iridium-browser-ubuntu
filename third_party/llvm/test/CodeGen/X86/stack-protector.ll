@@ -5,6 +5,7 @@
 ; RUN: llc -mtriple=amd64-pc-openbsd < %s -o - | FileCheck --check-prefix=OPENBSD-AMD64 %s
 ; RUN: llc -mtriple=i386-pc-windows-msvc < %s -o - | FileCheck -check-prefix=MSVC-I386 %s
 ; RUN: llc -mtriple=x86_64-w64-mingw32 < %s -o - | FileCheck --check-prefix=MINGW-X64 %s
+; RUN: llc -mtriple=x86_64-pc-linux-gnu < %s -o - | FileCheck --check-prefix=IGNORE_INTRIN %s
 
 %struct.foo = type { [16 x i8] }
 %struct.foo.0 = type { [4 x i8] }
@@ -93,7 +94,7 @@ entry:
 ; MSVC-I386: calll @__security_check_cookie@4
 
 ; MINGW-X64-LABEL: test1b:
-; MINGW-X64: mov{{l|q}} __stack_chk_guard
+; MINGW-X64: mov{{l|q}} .refptr.__stack_chk_guard
 ; MINGW-X64: callq __stack_chk_fail
 
   %a.addr = alloca i8*, align 8
@@ -134,7 +135,7 @@ entry:
 ; MSVC-I386: calll @__security_check_cookie@4
 
 ; MINGW-X64-LABEL: test1c:
-; MINGW-X64: mov{{l|q}} __stack_chk_guard
+; MINGW-X64: mov{{l|q}} .refptr.__stack_chk_guard
 ; MINGW-X64: callq __stack_chk_fail
 
   %a.addr = alloca i8*, align 8
@@ -175,7 +176,7 @@ entry:
 ; MSVC-I386: calll @__security_check_cookie@4
 
 ; MINGW-X64-LABEL: test1d:
-; MINGW-X64: mov{{l|q}} __stack_chk_guard
+; MINGW-X64: mov{{l|q}} .refptr.__stack_chk_guard
 ; MINGW-X64: callq __stack_chk_fail
 
   %a.addr = alloca i8*, align 8
@@ -254,7 +255,7 @@ entry:
 ; DARWIN-X64: callq ___stack_chk_fail
 
 ; MINGW-X64-LABEL: test2b:
-; MINGW-X64: mov{{l|q}} __stack_chk_guard
+; MINGW-X64: mov{{l|q}} .refptr.__stack_chk_guard
 ; MINGW-X64: callq __stack_chk_fail
 
   %a.addr = alloca i8*, align 8
@@ -297,7 +298,7 @@ entry:
 ; MSVC-I386: calll @__security_check_cookie@4
 
 ; MINGW-X64-LABEL: test2c:
-; MINGW-X64: mov{{l|q}} __stack_chk_guard
+; MINGW-X64: mov{{l|q}} .refptr.__stack_chk_guard
 ; MINGW-X64: callq __stack_chk_fail
 
   %a.addr = alloca i8*, align 8
@@ -340,7 +341,7 @@ entry:
 ; MSVC-I386: calll @__security_check_cookie@4
 
 ; MINGW-X64-LABEL: test2d:
-; MINGW-X64: mov{{l|q}} __stack_chk_guard
+; MINGW-X64: mov{{l|q}} .refptr.__stack_chk_guard
 ; MINGW-X64: callq __stack_chk_fail
 
   %a.addr = alloca i8*, align 8
@@ -464,7 +465,7 @@ entry:
 ; MSVC-I386: calll @__security_check_cookie@4
 
 ; MINGW-X64-LABEL: test3c:
-; MINGW-X64: mov{{l|q}} __stack_chk_guard
+; MINGW-X64: mov{{l|q}} .refptr.__stack_chk_guard
 ; MINGW-X64: callq __stack_chk_fail
 
   %a.addr = alloca i8*, align 8
@@ -505,7 +506,7 @@ entry:
 ; MSVC-I386: calll @__security_check_cookie@4
 
 ; MINGW-X64-LABEL: test3d:
-; MINGW-X64: mov{{l|q}} __stack_chk_guard
+; MINGW-X64: mov{{l|q}} .refptr.__stack_chk_guard
 ; MINGW-X64: callq __stack_chk_fail
 
   %a.addr = alloca i8*, align 8
@@ -631,7 +632,7 @@ entry:
 ; MSVC-I386: calll @__security_check_cookie@4
 
 ; MINGW-X64-LABEL: test4c:
-; MINGW-X64: mov{{l|q}} __stack_chk_guard
+; MINGW-X64: mov{{l|q}} .refptr.__stack_chk_guard
 ; MINGW-X64: callq __stack_chk_fail
 
   %a.addr = alloca i8*, align 8
@@ -674,7 +675,7 @@ entry:
 ; MSVC-I386: calll @__security_check_cookie@4
 
 ; MINGW-X64-LABEL: test4d:
-; MINGW-X64: mov{{l|q}} __stack_chk_guard
+; MINGW-X64: mov{{l|q}} .refptr.__stack_chk_guard
 ; MINGW-X64: callq __stack_chk_fail
 
   %a.addr = alloca i8*, align 8
@@ -827,7 +828,7 @@ entry:
 ; MSVC-I386: calll @__security_check_cookie@4
 
 ; MINGW-X64-LABEL: test5d:
-; MINGW-X64: mov{{l|q}} __stack_chk_guard
+; MINGW-X64: mov{{l|q}} .refptr.__stack_chk_guard
 ; MINGW-X64: callq __stack_chk_fail
 
   %a.addr = alloca i8*, align 8
@@ -945,7 +946,7 @@ entry:
 ; MSVC-I386: calll @__security_check_cookie@4
 
 ; MINGW-X64-LABEL: test6c:
-; MINGW-X64: mov{{l|q}} __stack_chk_guard
+; MINGW-X64: mov{{l|q}} .refptr.__stack_chk_guard
 ; MINGW-X64: callq __stack_chk_fail
 
   %retval = alloca i32, align 4
@@ -986,7 +987,7 @@ entry:
 ; MSVC-I386: calll @__security_check_cookie@4
 
 ; MINGW-X64-LABEL: test6d:
-; MINGW-X64: mov{{l|q}} __stack_chk_guard
+; MINGW-X64: mov{{l|q}} .refptr.__stack_chk_guard
 ; MINGW-X64: callq __stack_chk_fail
 
   %retval = alloca i32, align 4
@@ -1098,7 +1099,7 @@ entry:
 ; MSVC-I386: calll @__security_check_cookie@4
 
 ; MINGW-X64-LABEL: test7c:
-; MINGW-X64: mov{{l|q}} __stack_chk_guard
+; MINGW-X64: mov{{l|q}} .refptr.__stack_chk_guard
 ; MINGW-X64: .seh_endproc
 
   %a = alloca i32, align 4
@@ -1134,7 +1135,7 @@ entry:
 ; MSVC-I386: calll @__security_check_cookie@4
 
 ; MINGW-X64-LABEL: test7d:
-; MINGW-X64: mov{{l|q}} __stack_chk_guard
+; MINGW-X64: mov{{l|q}} .refptr.__stack_chk_guard
 ; MINGW-X64: callq __stack_chk_fail
 
   %a = alloca i32, align 4
@@ -1239,7 +1240,7 @@ entry:
 ; MSVC-I386: calll @__security_check_cookie@4
 
 ; MINGW-X64-LABEL: test8c:
-; MINGW-X64: mov{{l|q}} __stack_chk_guard
+; MINGW-X64: mov{{l|q}} .refptr.__stack_chk_guard
 ; MINGW-X64: callq __stack_chk_fail
 
   %b = alloca i32, align 4
@@ -1274,7 +1275,7 @@ entry:
 ; MSVC-I386: calll @__security_check_cookie@4
 
 ; MINGW-X64-LABEL: test8d:
-; MINGW-X64: mov{{l|q}} __stack_chk_guard
+; MINGW-X64: mov{{l|q}} .refptr.__stack_chk_guard
 ; MINGW-X64: callq __stack_chk_fail
 
   %b = alloca i32, align 4
@@ -2849,7 +2850,7 @@ entry:
 ; MSVC-I386: calll @__security_check_cookie@4
 
 ; MINGW-X64-LABEL: test19d:
-; MINGW-X64: mov{{l|q}} __stack_chk_guard
+; MINGW-X64: mov{{l|q}} .refptr.__stack_chk_guard
 ; MINGW-X64: callq __stack_chk_fail
 
   %c = alloca %struct.pair, align 4
@@ -4081,6 +4082,20 @@ entry:
   ret void, !dbg !9
 }
 
+define i32 @IgnoreIntrinsicTest() #1 {
+; IGNORE_INTRIN: IgnoreIntrinsicTest:
+  %1 = alloca i32, align 4
+  %2 = bitcast i32* %1 to i8*
+  call void @llvm.lifetime.start.p0i8(i64 4, i8* nonnull %2)
+  store volatile i32 1, i32* %1, align 4
+  %3 = load volatile i32, i32* %1, align 4
+  %4 = mul nsw i32 %3, 42
+  call void @llvm.lifetime.end.p0i8(i64 4, i8* nonnull %2)
+  ret i32 %4
+; IGNORE_INTRIN-NOT: callq __stack_chk_fail
+; IGNORE_INTRIN:     .cfi_endproc
+}
+
 declare double @testi_aux()
 declare i8* @strcpy(i8*, i8*)
 declare i32 @printf(i8*, ...)
@@ -4093,6 +4108,8 @@ declare i32 @__gxx_personality_v0(...)
 declare i32* @getp()
 declare i32 @dummy(...)
 declare void @llvm.memcpy.p0i8.p0i8.i64(i8* nocapture, i8* nocapture readonly, i64, i1)
+declare void @llvm.lifetime.start.p0i8(i64, i8* nocapture)
+declare void @llvm.lifetime.end.p0i8(i64, i8* nocapture)
 
 attributes #0 = { ssp }
 attributes #1 = { sspstrong }

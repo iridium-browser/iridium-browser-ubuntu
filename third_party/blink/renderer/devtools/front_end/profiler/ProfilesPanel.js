@@ -383,6 +383,15 @@ Profiler.ProfilesPanel = class extends UI.PanelWithSidebar {
   }
 
   /**
+   * @override
+   * @param {number} nodeIndex
+   * @return {!Promise<?Element>}
+   */
+  async linkifyObject(nodeIndex) {
+    return null;
+  }
+
+  /**
    * @param {!Profiler.ProfileHeader} profile
    * @return {!UI.Widget}
    */

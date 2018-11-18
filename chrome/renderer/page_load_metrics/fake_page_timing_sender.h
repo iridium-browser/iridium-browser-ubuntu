@@ -68,9 +68,11 @@ class FakePageTimingSender : public PageTimingSender {
       return actual_timings_;
     }
 
-    void UpdateTiming(const mojom::PageLoadTimingPtr& timing,
-                      const mojom::PageLoadMetadataPtr& metadata,
-                      const mojom::PageLoadFeaturesPtr& new_features);
+    void UpdateTiming(
+        const mojom::PageLoadTimingPtr& timing,
+        const mojom::PageLoadMetadataPtr& metadata,
+        const mojom::PageLoadFeaturesPtr& new_features,
+        const std::vector<mojom::ResourceDataUpdatePtr>& resources);
 
    private:
     std::vector<mojom::PageLoadTimingPtr> expected_timings_;
@@ -86,7 +88,8 @@ class FakePageTimingSender : public PageTimingSender {
   ~FakePageTimingSender() override;
   void SendTiming(const mojom::PageLoadTimingPtr& timing,
                   const mojom::PageLoadMetadataPtr& metadata,
-                  mojom::PageLoadFeaturesPtr new_features) override;
+                  mojom::PageLoadFeaturesPtr new_features,
+                  std::vector<mojom::ResourceDataUpdatePtr> resources) override;
 
  private:
   PageTimingValidator* const validator_;

@@ -72,6 +72,10 @@ class TestUrlRequestCallback {
   std::unique_ptr<UrlResponseInfo> response_info_;
   // Owned by UrlRequest, only valid until UrlRequest is destroyed.
   Cronet_ErrorPtr last_error_ = nullptr;
+  // Values copied from |last_error_| valid after UrlRequest is destroyed.
+  Cronet_Error_ERROR_CODE last_error_code_ =
+      Cronet_Error_ERROR_CODE_ERROR_OTHER;
+  std::string last_error_message_;
 
   ResponseStep response_step_ = NOTHING;
 
@@ -82,10 +86,10 @@ class TestUrlRequestCallback {
   int response_data_length_ = 0;
   std::string response_as_string_;
 
-  TestUrlRequestCallback();
+  explicit TestUrlRequestCallback(bool direct_executor);
   virtual ~TestUrlRequestCallback();
 
-  Cronet_ExecutorPtr CreateExecutor(bool direct);
+  Cronet_ExecutorPtr GetExecutor();
 
   Cronet_UrlRequestCallbackPtr CreateUrlRequestCallback();
 
@@ -107,9 +111,7 @@ class TestUrlRequestCallback {
     step_block_.Reset();
   }
 
-  Cronet_ExecutorPtr executor() { return executor_; }
-
-  void ShutdownExecutor() { executor_thread_.reset(); }
+  void ShutdownExecutor();
 
   bool IsDone() { return done_.IsSignaled(); }
 
@@ -204,8 +206,8 @@ class TestUrlRequestCallback {
   // When false response data is not accuumulated for better performance.
   bool accumulate_response_data_ = true;
 
-  // Whether to permit calls on the network thread.
-  bool allow_direct_executor_ = false;
+  // Whether to create direct executors.
+  const bool direct_executor_;
 
   // Conditionally fail on certain steps.
   FailureType failure_type_ = NONE;
@@ -216,6 +218,9 @@ class TestUrlRequestCallback {
 
   // Signaled on each step when |auto_advance_| is false.
   base::WaitableEvent step_block_;
+
+  // Lock that synchronizes access to |executor_| and |executor_thread_|.
+  base::Lock executor_lock_;
 
   // Executor that runs callback tasks.
   Cronet_ExecutorPtr executor_ = nullptr;

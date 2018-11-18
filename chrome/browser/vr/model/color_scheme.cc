@@ -58,8 +58,8 @@ void InitializeColorSchemes() {
   normal_scheme.web_vr_floor_edge = SK_ColorBLACK;
   normal_scheme.web_vr_floor_center = 0xD9212121;
   normal_scheme.web_vr_floor_grid = 0xD9212121;
-  normal_scheme.loading_indicator_foreground = 0xFF2979FF;
-  normal_scheme.loading_indicator_background = 0xFF454545;
+  normal_scheme.loading_indicator_foreground = MakeColor(0x4285F4, 100);
+  normal_scheme.loading_indicator_background = MakeColor(0xD1E1FC, 100);
   normal_scheme.exit_warning_foreground = SK_ColorWHITE;
   normal_scheme.exit_warning_background = 0xCC1A1A1A;
   normal_scheme.web_vr_transient_toast_foreground = 0xFFF3F3F3;
@@ -110,11 +110,22 @@ void InitializeColorSchemes() {
   normal_scheme.url_bar_button.foreground_disabled = MakeBlack(24);
   normal_scheme.url_text_emphasized = MakeBlack(80);
   normal_scheme.url_text_deemphasized = MakeBlack(30);
+  normal_scheme.menu_text = MakeBlack(87);
   normal_scheme.omnibox_background = 0xFFEEEEEE;
   normal_scheme.omnibox_text_selection.cursor = 0xFF5595FE;      // TODO
   normal_scheme.omnibox_text_selection.background = 0xFFC6DAFC;  // TODO
   normal_scheme.omnibox_text_selection.foreground = normal_scheme.url_bar_text;
   normal_scheme.hyperlink = MakeColor(0x4285F4, 100);
+
+  normal_scheme.tab_item_background = normal_scheme.omnibox_background;
+  normal_scheme.tab_item_text = normal_scheme.url_bar_text;
+  normal_scheme.tab_mode_button_selected = normal_scheme.disc_button_colors;
+  normal_scheme.tab_mode_button_selected.foreground = MakeWhite(100);
+  normal_scheme.tab_mode_button_selected.background = MakeColor(0x4286F4, 100);
+  normal_scheme.tab_mode_button_selected.background_hover =
+      MakeColor(0x4B89ED, 100);
+  normal_scheme.tab_mode_button_selected.background_down =
+      MakeColor(0x5F7DAD, 100);
 
   normal_scheme.dimmer_inner = 0xCC0D0D0D;
   normal_scheme.dimmer_outer = 0xE6000000;
@@ -136,6 +147,8 @@ void InitializeColorSchemes() {
   normal_scheme.controller_label_callout = SK_ColorWHITE;
   normal_scheme.controller_button = 0xFFEFEFEF;
   normal_scheme.controller_button_down = 0xFF2979FF;
+  normal_scheme.controller_battery_full = 0xFFEFEFEF;
+  normal_scheme.controller_battery_empty = 0xCCB3B3B3;
 
   normal_scheme.reposition_label = SK_ColorWHITE;
   normal_scheme.reposition_label_background = 0xAA333333;
@@ -214,10 +227,14 @@ void InitializeColorSchemes() {
   incognito_scheme.url_bar_button.foreground_disabled = MakeWhite(24);
   incognito_scheme.url_text_emphasized = MakeWhite(80);
   incognito_scheme.url_text_deemphasized = MakeWhite(30);
+  incognito_scheme.menu_text = MakeWhite(87);
   incognito_scheme.omnibox_background = incognito_scheme.url_bar_background;
   incognito_scheme.omnibox_text_selection.foreground =
       incognito_scheme.url_bar_text;
   incognito_scheme.omnibox_text_selection.background = MakeWhite(8);
+
+  incognito_scheme.tab_item_background = incognito_scheme.omnibox_background;
+  incognito_scheme.tab_item_text = incognito_scheme.url_bar_text;
 
   incognito_scheme.normal_factor = 0.0f;
   incognito_scheme.incognito_factor = 1.0f;
@@ -294,6 +311,7 @@ void ColorScheme::UpdateForComponent(const base::Version& component_version) {
         normal_scheme.modal_prompt_background;
     normal_scheme.url_bar_background = MakeColor(0xEEEEEE, 87);
     normal_scheme.omnibox_background = MakeColor(0xEEEEEE, 100);
+    normal_scheme.tab_item_background = normal_scheme.omnibox_background;
 
     ColorScheme& incognito_scheme = g_incognito_scheme.Get();
     incognito_scheme.disc_button_colors.background = MakeColor(0x263238, 100);
@@ -301,6 +319,7 @@ void ColorScheme::UpdateForComponent(const base::Version& component_version) {
     incognito_scheme.disc_button_colors.background_down = 0xCC212B31;
     incognito_scheme.url_bar_background = MakeColor(0x263238, 87);
     incognito_scheme.omnibox_background = MakeColor(0x263238, 100);
+    incognito_scheme.tab_item_background = incognito_scheme.omnibox_background;
   }
 }
 

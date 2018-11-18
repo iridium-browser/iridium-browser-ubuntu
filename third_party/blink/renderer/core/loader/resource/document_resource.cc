@@ -23,6 +23,7 @@
 #include "third_party/blink/renderer/core/loader/resource/document_resource.h"
 
 #include "services/network/public/mojom/request_context_frame_type.mojom-blink.h"
+#include "third_party/blink/renderer/core/dom/document_init.h"
 #include "third_party/blink/renderer/core/dom/xml_document.h"
 #include "third_party/blink/renderer/platform/loader/fetch/fetch_parameters.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_fetcher.h"
@@ -37,19 +38,21 @@ DocumentResource* DocumentResource::FetchSVGDocument(FetchParameters& params,
                                                      ResourceClient* client) {
   DCHECK_EQ(params.GetResourceRequest().GetFrameType(),
             network::mojom::RequestContextFrameType::kNone);
-  params.SetRequestContext(WebURLRequest::kRequestContextImage);
+  DCHECK_EQ(params.GetResourceRequest().GetFetchRequestMode(),
+            network::mojom::FetchRequestMode::kSameOrigin);
+  params.SetRequestContext(mojom::RequestContextType::IMAGE);
   return ToDocumentResource(
       fetcher->RequestResource(params, SVGDocumentResourceFactory(), client));
 }
 
 DocumentResource::DocumentResource(
     const ResourceRequest& request,
-    Type type,
+    ResourceType type,
     const ResourceLoaderOptions& options,
     const TextResourceDecoderOptions& decoder_options)
     : TextResource(request, type, options, decoder_options) {
   // FIXME: We'll support more types to support HTMLImports.
-  DCHECK_EQ(type, kSVGDocument);
+  DCHECK_EQ(type, ResourceType::kSVGDocument);
 }
 
 DocumentResource::~DocumentResource() = default;
@@ -70,7 +73,7 @@ void DocumentResource::NotifyFinished() {
 }
 
 bool DocumentResource::MimeTypeAllowed() const {
-  DCHECK_EQ(GetType(), kSVGDocument);
+  DCHECK_EQ(GetType(), ResourceType::kSVGDocument);
   AtomicString mime_type = GetResponse().MimeType();
   if (GetResponse().IsHTTP())
     mime_type = HttpContentType();
@@ -80,7 +83,7 @@ bool DocumentResource::MimeTypeAllowed() const {
 
 Document* DocumentResource::CreateDocument(const KURL& url) {
   switch (GetType()) {
-    case kSVGDocument:
+    case ResourceType::kSVGDocument:
       return XMLDocument::CreateSVG(DocumentInit::Create().WithURL(url));
     default:
       // FIXME: We'll add more types to support HTMLImports.

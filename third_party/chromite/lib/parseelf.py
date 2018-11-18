@@ -17,6 +17,16 @@ from elftools.elf import elffile
 from elftools.common import utils
 
 
+def GetSymbolTableSize(elf):
+  """Get Symbole Table size by parsing section header."""
+  for i in range(elf['e_shnum']):
+    # pylint: disable=protected-access
+    section_header = elf._get_section_header(i)
+    if section_header['sh_type'] == 'SHT_DYNSYM':
+      return section_header['sh_size']
+  return 0
+
+
 def ParseELFSymbols(elf):
   """Parses list of symbols in an ELF file.
 
@@ -37,21 +47,18 @@ def ParseELFSymbols(elf):
       continue
 
     # Find strtab and symtab virtual addresses.
-    strtab_ptr = None
     symtab_ptr = None
     dthash_ptr = None
     symbol_size = elf.structs.Elf_Sym.sizeof()
     for tag in segment.iter_tags():
       if tag.entry.d_tag == 'DT_SYMTAB':
         symtab_ptr = tag.entry.d_ptr
-      if tag.entry.d_tag == 'DT_STRTAB':
-        strtab_ptr = tag.entry.d_ptr
       if tag.entry.d_tag == 'DT_SYMENT':
         assert symbol_size == tag.entry.d_val
       if tag.entry.d_tag == 'DT_HASH':
         dthash_ptr = tag.entry.d_ptr
 
-    stringtable = segment._get_stringtable()  # pylint: disable=W0212
+    stringtable = segment._get_stringtable()  # pylint: disable=protected-access
 
     symtab_offset = next(elf.address_offsets(symtab_ptr))
 
@@ -65,9 +72,9 @@ def ParseELFSymbols(elf):
       elf.stream.seek(dthash_ptr + 4)
       nsymbols = struct.unpack(fmt, elf.stream.read(4))[0]
     else:
-      # If DT_HASH is not defined, assume that symtab ends right before strtab.
-      # This is the same assumption that glibc makes in dl-addr.c.
-      nsymbols = (strtab_ptr - symtab_ptr) / symbol_size
+      # Get the size of DYNSYM section from section header.
+      symtab_size = int(GetSymbolTableSize(elf))
+      nsymbols = symtab_size / symbol_size
 
     # The first symbol is always local undefined, unnamed so we ignore it.
     for i in range(1, nsymbols):
@@ -145,6 +152,7 @@ def ParseELF(root, rel_path, ldpaths=None, parse_symbols=False):
 
   for path in ('interp', 'realpath'):
     if not result[path] is None and result[path].startswith(root):
+      # pylint: disable=unsubscriptable-object
       result[path] = result[path][len(root):]
 
   result['type'] = elf.header.e_type

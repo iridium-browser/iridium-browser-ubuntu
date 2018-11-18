@@ -29,8 +29,7 @@ class V8IntersectionObserverDelegate final
 
   ExecutionContext* GetExecutionContext() const override;
 
-  virtual void Trace(blink::Visitor*);
-  virtual void TraceWrappers(const ScriptWrappableVisitor*) const;
+  void Trace(blink::Visitor*) override;
 
   void Deliver(const HeapVector<Member<IntersectionObserverEntry>>&,
                IntersectionObserver&) override;

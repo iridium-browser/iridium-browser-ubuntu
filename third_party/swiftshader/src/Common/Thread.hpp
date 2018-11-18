@@ -65,7 +65,7 @@ namespace sw
 			typedef pthread_key_t LocalStorageKey;
 		#endif
 
-		static LocalStorageKey allocateLocalStorageKey();
+		static LocalStorageKey allocateLocalStorageKey(void (*destructor)(void *storage) = free);
 		static void freeLocalStorageKey(LocalStorageKey key);
 		static void *allocateLocalStorage(LocalStorageKey key, size_t size);
 		static void *getLocalStorage(LocalStorageKey key);
@@ -114,9 +114,9 @@ namespace sw
 
 	#if PERF_PROFILE
 	int64_t atomicExchange(int64_t volatile *target, int64_t value);
+	int atomicExchange(int volatile *target, int value);
 	#endif
 
-	int atomicExchange(int volatile *target, int value);
 	int atomicIncrement(int volatile *value);
 	int atomicDecrement(int volatile *value);
 	int atomicAdd(int volatile *target, int value);
@@ -145,13 +145,13 @@ namespace sw
 		#endif
 	}
 
-	inline Thread::LocalStorageKey Thread::allocateLocalStorageKey()
+	inline Thread::LocalStorageKey Thread::allocateLocalStorageKey(void (*destructor)(void *storage))
 	{
 		#if defined(_WIN32)
 			return TlsAlloc();
 		#else
 			LocalStorageKey key;
-			pthread_key_create(&key, free);
+			pthread_key_create(&key, destructor);
 			return key;
 		#endif
 	}
@@ -241,11 +241,10 @@ namespace sw
 			return InterlockedExchange64(target, value);
 		#else
 			int ret;
-			__asm__ __volatile__("lock; xchg8 %0,(%1)" : "=r" (ret) :"r" (target), "0" (value) : "memory" );
+			__asm__ __volatile__("lock; xchg8 %x0,(%x1)" : "=r" (ret) :"r" (target), "0" (value) : "memory" );
 			return ret;
 		#endif
 	}
-	#endif
 
 	inline int atomicExchange(volatile int *target, int value)
 	{
@@ -253,10 +252,11 @@ namespace sw
 			return InterlockedExchange((volatile long*)target, (long)value);
 		#else
 			int ret;
-			__asm__ __volatile__("lock; xchgl %0,(%1)" : "=r" (ret) :"r" (target), "0" (value) : "memory" );
+			__asm__ __volatile__("lock; xchgl %x0,(%x1)" : "=r" (ret) :"r" (target), "0" (value) : "memory" );
 			return ret;
 		#endif
 	}
+	#endif
 
 	inline int atomicIncrement(volatile int *value)
 	{

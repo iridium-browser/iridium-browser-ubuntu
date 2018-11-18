@@ -83,12 +83,24 @@ login.createScreen('ErrorMessageScreen', 'error-message', function() {
     // Error screen initial error state.
     error_state_: ERROR_STATE.UNKNOWN,
 
-    // Whether the screen can be cancelled.
-    cancelable_: false,
+    /**
+     * Whether the screen can be closed.
+     * @type {boolean}
+     */
+    get closable() {
+      return Oobe.getInstance().hasUserPods;
+    },
+
+    /**
+     * Returns default event target element.
+     * @type {Object}
+     */
+    get defaultControl() {
+      return $('error-message-md');
+    },
 
     /** @override */
     decorate: function() {
-      cr.ui.DropDown.decorate($('offline-networks-list'));
       this.updateLocalizedContent();
 
       var self = this;
@@ -240,6 +252,8 @@ login.createScreen('ErrorMessageScreen', 'error-message', function() {
       $('connecting-indicator').innerHTML =
           loadTimeData.getStringF('connectingIndicatorText', ellipsis);
 
+      $('offline-network-control').setCrOncStrings();
+
       this.onContentChange_();
     },
 
@@ -249,17 +263,14 @@ login.createScreen('ErrorMessageScreen', 'error-message', function() {
      */
     onBeforeShow: function(data) {
       cr.ui.Oobe.clearErrors();
-      cr.ui.DropDown.show('offline-networks-list', false);
       $('login-header-bar').signinUIState = SIGNIN_UI_STATE.ERROR;
-      this.cancelable_ = $('pod-row').pods.length;
-      $('error-message-back-button').disabled = !this.cancelable_;
+      $('error-message-back-button').disabled = !this.closable;
     },
 
     /**
      * Event handler that is invoked just before the screen is hidden.
      */
     onBeforeHide: function() {
-      cr.ui.DropDown.hide('offline-networks-list');
       $('login-header-bar').signinUIState = SIGNIN_UI_STATE.HIDDEN;
     },
 
@@ -277,7 +288,6 @@ login.createScreen('ErrorMessageScreen', 'error-message', function() {
         // Hide header bar and progress dots, because there are no way
         // from the error screen about broken local state.
         Oobe.getInstance().headerHidden = true;
-        $('progress-dots').hidden = true;
       }
       this.onContentChange_();
     },
@@ -313,16 +323,6 @@ login.createScreen('ErrorMessageScreen', 'error-message', function() {
     onContentChange_: function() {
       if (Oobe.getInstance().currentScreen === this) {
         Oobe.getInstance().updateScreenSize(this);
-        if (window.getComputedStyle($('offline-networks-list-dropdown-label2'))
-                .display == 'none') {
-          $('offline-networks-list-dropdown')
-              .setAttribute(
-                  'aria-labelledby', 'offline-networks-list-dropdown-label1');
-        } else {
-          $('offline-networks-list-dropdown')
-              .setAttribute(
-                  'aria-labelledby', 'offline-networks-list-dropdown-label2');
-        }
       }
     },
 
@@ -388,7 +388,7 @@ login.createScreen('ErrorMessageScreen', 'error-message', function() {
      * Cancels error screen and drops to user pods.
      */
     cancel: function() {
-      if (this.cancelable_)
+      if (this.closable)
         Oobe.showUserPods();
     },
   };

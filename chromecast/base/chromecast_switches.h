@@ -28,9 +28,6 @@ extern const char kOverrideMetricsUploadUrl[];
 // Network switches
 extern const char kNoWifi[];
 
-// App switches
-extern const char kAllowHiddenMediaPlayback[];
-
 // Switches to communicate app state information
 extern const char kLastLaunchedApp[];
 extern const char kPreviousApp[];
@@ -70,14 +67,23 @@ extern const char kVSyncInterval[];
 
 // Graphics switches
 extern const char kDesktopWindow1080p[];
+extern const char kForceMediaResolutionHeight[];
+extern const char kForceMediaResolutionWidth[];
 
 // UI switches
 extern const char kEnableInput[];
 extern const char kSystemGestureStartWidth[];
 extern const char kSystemGestureStartHeight[];
+extern const char kBottomSystemGestureStartHeight[];
+extern const char kBackGestureHorizontalThreshold[];
+extern const char kEnableTopDragGesture[];
 
 // Background color used when Chromium hasn't rendered anything yet.
 extern const char kCastAppBackgroundColor[];
+
+extern const char kMixerServiceEndpoint[];
+extern const char kCastMemoryPressureCriticalFraction[];
+extern const char kCastMemoryPressureModerateFraction[];
 
 }  // namespace switches
 
@@ -101,6 +107,12 @@ int GetSwitchValueInt(const std::string& switch_name, const int default_value);
 // the |default_value| is returned.
 int GetSwitchValueNonNegativeInt(const std::string& switch_name,
                                  const int default_value);
+
+// Gets a floating point value from switch |switch_name|. If the switch is not
+// present in the command line, or the value is not a number, the
+// |default_value| is returned.
+double GetSwitchValueDouble(const std::string& switch_name,
+                            const double default_value);
 
 // Gets a color value from the format "#AARRGGBB" (hex).
 uint32_t GetSwitchValueColor(const std::string& switch_name,

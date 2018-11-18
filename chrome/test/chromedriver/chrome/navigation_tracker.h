@@ -64,7 +64,6 @@ class NavigationTracker : public DevToolsEventListener,
  private:
   DevToolsClient* client_;
   LoadingState loading_state_;
-  const BrowserInfo* browser_info_;
   const JavaScriptDialogManager* dialog_manager_;
   std::set<std::string> pending_frame_set_;
   std::set<std::string> scheduled_frame_set_;
@@ -75,8 +74,6 @@ class NavigationTracker : public DevToolsEventListener,
   bool timed_out_;
 
   void ResetLoadingState(LoadingState loading_state);
-  bool IsExpectingFrameLoadingEvents();
-  bool IsEventLoopPausedByDialogs();
 
   DISALLOW_COPY_AND_ASSIGN(NavigationTracker);
 };

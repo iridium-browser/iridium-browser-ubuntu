@@ -7,23 +7,28 @@
 #include "PreprocessorTest.h"
 #include "compiler/preprocessor/Token.h"
 
+namespace angle
+{
+
 class LocationTest : public PreprocessorTest
 {
 protected:
-    void expectLocation(int count,
-                        const char* const string[],
-                        const int length[],
-                        const pp::SourceLocation& location)
-    {
-        ASSERT_TRUE(mPreprocessor.init(count, string, length));
+  LocationTest() : PreprocessorTest(SH_GLES2_SPEC) {}
 
-        pp::Token token;
-        mPreprocessor.lex(&token);
-        EXPECT_EQ(pp::Token::IDENTIFIER, token.type);
-        EXPECT_EQ("foo", token.text);
+  void expectLocation(int count,
+                      const char *const string[],
+                      const int length[],
+                      const pp::SourceLocation &location)
+  {
+      ASSERT_TRUE(mPreprocessor.init(count, string, length));
 
-        EXPECT_EQ(location.file, token.location.file);
-        EXPECT_EQ(location.line, token.location.line);
+      pp::Token token;
+      mPreprocessor.lex(&token);
+      EXPECT_EQ(pp::Token::IDENTIFIER, token.type);
+      EXPECT_EQ("foo", token.text);
+
+      EXPECT_EQ(location.file, token.location.file);
+      EXPECT_EQ(location.line, token.location.line);
     }
 };
 
@@ -411,3 +416,5 @@ static const LineExpressionTestParam kParamsLineExpressionTest[] = {
     {"16 >> 2", 4}};
 
 INSTANTIATE_TEST_CASE_P(All, LineExpressionTest, testing::ValuesIn(kParamsLineExpressionTest));
+
+}  // namespace angle

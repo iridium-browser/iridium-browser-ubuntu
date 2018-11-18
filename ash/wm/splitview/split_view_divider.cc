@@ -6,8 +6,8 @@
 
 #include <memory>
 
-#include "ash/ash_constants.h"
 #include "ash/display/screen_orientation_controller.h"
+#include "ash/public/cpp/ash_constants.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/shell.h"
 #include "ash/wm/overview/rounded_rect_view.h"
@@ -25,7 +25,10 @@
 #include "ui/views/view.h"
 #include "ui/views/view_targeter_delegate.h"
 #include "ui/views/widget/widget.h"
+#include "ui/views/widget/widget_delegate.h"
 #include "ui/wm/core/coordinate_conversion.h"
+#include "ui/wm/core/transient_window_manager.h"
+#include "ui/wm/core/window_util.h"
 #include "ui/wm/public/activation_client.h"
 
 namespace ash {
@@ -383,6 +386,7 @@ gfx::Rect SplitViewDivider::GetDividerBoundsInScreen(bool is_dragging) {
 void SplitViewDivider::AddObservedWindow(aura::Window* window) {
   if (!base::ContainsValue(observed_windows_, window)) {
     window->AddObserver(this);
+    ::wm::TransientWindowManager::GetOrCreate(window)->AddObserver(this);
     observed_windows_.push_back(window);
   }
 }
@@ -392,23 +396,88 @@ void SplitViewDivider::RemoveObservedWindow(aura::Window* window) {
       std::find(observed_windows_.begin(), observed_windows_.end(), window);
   if (iter != observed_windows_.end()) {
     window->RemoveObserver(this);
+    ::wm::TransientWindowManager::GetOrCreate(window)->RemoveObserver(this);
     observed_windows_.erase(iter);
   }
+}
+
+void SplitViewDivider::OnWindowDragStarted(aura::Window* dragged_window) {
+  is_dragging_window_ = true;
+  SetAlwaysOnTop(false);
+  // Make sure |divider_widget_| is placed below the dragged window.
+  dragged_window->parent()->StackChildBelow(divider_widget_->GetNativeWindow(),
+                                            dragged_window);
+}
+
+void SplitViewDivider::OnWindowDragEnded() {
+  is_dragging_window_ = false;
+  SetAlwaysOnTop(true);
 }
 
 void SplitViewDivider::OnWindowDestroying(aura::Window* window) {
   RemoveObservedWindow(window);
 }
 
+void SplitViewDivider::OnWindowBoundsChanged(aura::Window* window,
+                                             const gfx::Rect& old_bounds,
+                                             const gfx::Rect& new_bounds,
+                                             ui::PropertyChangeReason reason) {
+  // We only care about the bounds change of windows in
+  // |transient_windows_observer_|.
+  if (!transient_windows_observer_.IsObserving(window))
+    return;
+
+  // |window|'s transient parent must be one of the windows in
+  // |observed_windows_|.
+  aura::Window* transient_parent = nullptr;
+  for (auto* observed_window : observed_windows_) {
+    if (::wm::HasTransientAncestor(window, observed_window)) {
+      transient_parent = observed_window;
+      break;
+    }
+  }
+  DCHECK(transient_parent);
+
+  gfx::Rect transient_bounds = window->GetBoundsInScreen();
+  transient_bounds.AdjustToFit(transient_parent->GetBoundsInScreen());
+  window->SetBoundsInScreen(
+      transient_bounds,
+      display::Screen::GetScreen()->GetDisplayNearestWindow(window));
+}
+
 void SplitViewDivider::OnWindowActivated(ActivationReason reason,
                                          aura::Window* gained_active,
                                          aura::Window* lost_active) {
-  if (base::ContainsValue(observed_windows_, gained_active)) {
-    divider_widget_->SetAlwaysOnTop(true);
+  if (!is_dragging_window_ &&
+      (!gained_active ||
+       base::ContainsValue(observed_windows_, gained_active))) {
+    SetAlwaysOnTop(true);
   } else {
-    divider_widget_->SetAlwaysOnTop(false);
-    divider_widget_->Deactivate();
+    // If |gained_active| is not one of the observed windows, or there is one
+    // window that is currently being dragged, |divider_widget_| should not
+    // be placed on top.
+    SetAlwaysOnTop(false);
   }
+}
+
+void SplitViewDivider::OnTransientChildAdded(aura::Window* window,
+                                             aura::Window* transient) {
+  // For now, we only care about dialog bubbles type transient child. We may
+  // observe other types transient child window as well if need arises in the
+  // future.
+  views::Widget* widget = views::Widget::GetWidgetForNativeWindow(transient);
+  if (!widget || !widget->widget_delegate()->AsBubbleDialogDelegate())
+    return;
+
+  // At this moment, the transient window may not have the valid bounds yet.
+  // Start observe the transient window.
+  transient_windows_observer_.Add(transient);
+}
+
+void SplitViewDivider::OnTransientChildRemoved(aura::Window* window,
+                                               aura::Window* transient) {
+  if (transient_windows_observer_.IsObserving(transient))
+    transient_windows_observer_.Remove(transient);
 }
 
 void SplitViewDivider::CreateDividerWidget(aura::Window* root_window) {
@@ -417,6 +486,7 @@ void SplitViewDivider::CreateDividerWidget(aura::Window* root_window) {
   divider_widget_ = new views::Widget;
   views::Widget::InitParams params(views::Widget::InitParams::TYPE_POPUP);
   params.opacity = views::Widget::InitParams::OPAQUE_WINDOW;
+  params.activatable = views::Widget::InitParams::ACTIVATABLE_NO;
   params.parent =
       Shell::GetContainer(root_window, kShellWindowId_AlwaysOnTopContainer);
   DividerView* divider_view = new DividerView(this);
@@ -425,6 +495,22 @@ void SplitViewDivider::CreateDividerWidget(aura::Window* root_window) {
   divider_widget_->SetContentsView(divider_view);
   divider_widget_->SetBounds(GetDividerBoundsInScreen(false /* is_dragging */));
   divider_widget_->Show();
+}
+
+void SplitViewDivider::SetAlwaysOnTop(bool on_top) {
+  if (on_top) {
+    divider_widget_->SetAlwaysOnTop(true);
+
+    // Special handling when put divider into always_on_top container. We want
+    // to put it at the bottom so it won't block other always_on_top windows.
+    aura::Window* always_on_top_container =
+        Shell::GetContainer(divider_widget_->GetNativeWindow()->GetRootWindow(),
+                            kShellWindowId_AlwaysOnTopContainer);
+    always_on_top_container->StackChildAtBottom(
+        divider_widget_->GetNativeWindow());
+  } else {
+    divider_widget_->SetAlwaysOnTop(false);
+  }
 }
 
 }  // namespace ash

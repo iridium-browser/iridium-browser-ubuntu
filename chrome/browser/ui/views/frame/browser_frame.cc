@@ -26,6 +26,7 @@
 #include "chrome/browser/ui/views/frame/top_container_view.h"
 #include "chrome/common/chrome_switches.h"
 #include "ui/base/hit_test.h"
+#include "ui/base/material_design/material_design_controller.h"
 #include "ui/events/event_handler.h"
 #include "ui/gfx/font_list.h"
 #include "ui/native_theme/native_theme_dark_aura.h"
@@ -56,17 +57,10 @@ BrowserFrame::BrowserFrame(BrowserView* browser_view)
   set_is_secondary_widget(false);
   // Don't focus anything on creation, selecting a tab will set the focus.
   set_focus_on_creation(false);
+  md_observer_.Add(ui::MaterialDesignController::GetInstance());
 }
 
-BrowserFrame::~BrowserFrame() {
-}
-
-// static
-const gfx::FontList& BrowserFrame::GetTitleFontList() {
-  static const gfx::FontList* title_font_list = new gfx::FontList();
-  ANNOTATE_LEAKING_OBJECT_PTR(title_font_list);
-  return *title_font_list;
-}
+BrowserFrame::~BrowserFrame() {}
 
 void BrowserFrame::InitBrowserFrame() {
   native_browser_frame_ =
@@ -112,8 +106,8 @@ gfx::Rect BrowserFrame::GetBoundsForTabStrip(views::View* tabstrip) const {
       browser_frame_view_->GetBoundsForTabStrip(tabstrip) : gfx::Rect();
 }
 
-int BrowserFrame::GetTopInset(bool restored) const {
-  return browser_frame_view_->GetTopInset(restored);
+int BrowserFrame::GetTopInset() const {
+  return browser_frame_view_->GetTopInset(false);
 }
 
 int BrowserFrame::GetThemeBackgroundXInset() const {
@@ -141,7 +135,7 @@ void BrowserFrame::GetWindowPlacement(gfx::Rect* bounds,
   return native_browser_frame_->GetWindowPlacement(bounds, show_state);
 }
 
-bool BrowserFrame::PreHandleKeyboardEvent(
+content::KeyboardEventProcessingResult BrowserFrame::PreHandleKeyboardEvent(
     const content::NativeWebKeyboardEvent& event) {
   return native_browser_frame_->PreHandleKeyboardEvent(event);
 }
@@ -180,7 +174,7 @@ const ui::ThemeProvider* BrowserFrame::GetThemeProvider() const {
 }
 
 const ui::NativeTheme* BrowserFrame::GetNativeTheme() const {
-#if defined(OS_WIN) || defined(OS_CHROMEOS)
+#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_CHROMEOS)
   if (browser_view_->browser()->profile()->GetProfileType() ==
           Profile::INCOGNITO_PROFILE &&
       ThemeServiceFactory::GetForProfile(browser_view_->browser()->profile())
@@ -189,20 +183,6 @@ const ui::NativeTheme* BrowserFrame::GetNativeTheme() const {
   }
 #endif
   return views::Widget::GetNativeTheme();
-}
-
-void BrowserFrame::SchedulePaintInRect(const gfx::Rect& rect) {
-  views::Widget::SchedulePaintInRect(rect);
-
-  // Paint the frame caption area and window controls during immersive reveal.
-  if (browser_view_ &&
-      browser_view_->immersive_mode_controller()->IsRevealed()) {
-    // This function should not be reentrant because the TopContainerView
-    // paints to a layer for the duration of the immersive reveal.
-    views::View* top_container = browser_view_->top_container();
-    CHECK(top_container->layer());
-    top_container->SchedulePaintInRect(rect);
-  }
 }
 
 void BrowserFrame::OnNativeWidgetWorkspaceChanged() {
@@ -262,12 +242,12 @@ ui::MenuModel* BrowserFrame::GetSystemMenuModel() {
   return menu_model_builder_->menu_model();
 }
 
-views::Button* BrowserFrame::GetNewAvatarMenuButton() {
-  // Note: This profile switcher is being replaced with a toolbar menu button.
-  // See ToolbarView.
-  return browser_frame_view_->GetProfileSwitcherButton();
-}
-
 void BrowserFrame::OnMenuClosed() {
   menu_runner_.reset();
+}
+
+void BrowserFrame::OnMdModeChanged() {
+  client_view()->InvalidateLayout();
+  non_client_view()->InvalidateLayout();
+  GetRootView()->Layout();
 }

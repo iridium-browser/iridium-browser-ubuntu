@@ -13,7 +13,6 @@ import os
 import tempfile
 
 from chromite.lib import constants
-from chromite.lib import cros_build_lib_unittest
 from chromite.lib import cros_test_lib
 from chromite.lib import git
 from chromite.lib import partial_mock
@@ -29,7 +28,7 @@ class DetermineCheckoutTest(cros_test_lib.MockTempDirTestCase):
   """Verify functionality for figuring out what checkout we're in."""
 
   def setUp(self):
-    self.rc_mock = cros_build_lib_unittest.RunCommandMock()
+    self.rc_mock = cros_test_lib.RunCommandMock()
     self.StartPatcher(self.rc_mock)
     self.rc_mock.SetDefaultCmdResult()
 
@@ -126,7 +125,7 @@ class FindCacheDirTest(cros_test_lib.MockTempDirTestCase):
     self.gclient_root = os.path.join(self.tempdir, 'gclient')
     self.nocheckout_root = os.path.join(self.tempdir, 'nothing')
 
-    self.rc_mock = self.StartPatcher(cros_build_lib_unittest.RunCommandMock())
+    self.rc_mock = self.StartPatcher(cros_test_lib.RunCommandMock())
     self.cwd_mock = self.PatchObject(os, 'getcwd')
 
   def testRepoRoot(self):
@@ -141,7 +140,8 @@ class FindCacheDirTest(cros_test_lib.MockTempDirTestCase):
     self.cwd_mock.return_value = self.gclient_root
     self.assertEquals(
         path_util.FindCacheDir(),
-        os.path.join(self.gclient_root, path_util.CHROME_CACHE_DIR))
+        os.path.join(self.gclient_root, 'src', 'build',
+                     path_util.CHROME_CACHE_DIR))
 
   def testTempdir(self):
     """Test when we are not in any checkout."""

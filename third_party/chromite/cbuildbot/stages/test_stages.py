@@ -40,6 +40,7 @@ class UnitTestStage(generic_stages.BoardSpecificBuilderStage,
 
   option_name = 'tests'
   config_name = 'unittests'
+  category = constants.PRODUCT_OS_STAGE
 
   # If the unit tests take longer than 90 minutes, abort. They usually take
   # thirty minutes to run, but they can take twice as long if the machine is
@@ -48,6 +49,16 @@ class UnitTestStage(generic_stages.BoardSpecificBuilderStage,
   # If the processes hang, parallel_emerge will print a status report after 60
   # minutes, so we picked 90 minutes because it gives us a little buffer time.
   UNIT_TEST_TIMEOUT = 90 * 60
+
+  def HandleSkip(self):
+    """Launch DebugSymbolsStage if UnitTestStage is skipped."""
+    self.board_runattrs.SetParallel('unittest_completed', True)
+    return super(UnitTestStage, self).HandleSkip()
+
+  def _HandleStageException(self, exc_info):
+    """Launch DebugSymbolStage if UnitTestStage is raising an exception."""
+    self.board_runattrs.SetParallel('unittest_completed', True)
+    return super(UnitTestStage, self)._HandleStageException(exc_info)
 
   def PerformStage(self):
     extra_env = {}
@@ -59,15 +70,12 @@ class UnitTestStage(generic_stages.BoardSpecificBuilderStage,
                             self._current_board,
                             blacklist=self._run.config.unittest_blacklist,
                             extra_env=extra_env)
+    # The attribute 'unittest_completed' is used in DebugSymbolsStage.
+    self.board_runattrs.SetParallel('unittest_completed', True)
     # Package UnitTest binaries.
     tarball = commands.BuildUnitTestTarball(
         self._build_root, self._current_board, self.archive_path)
     self.UploadArtifact(tarball, archive=False)
-
-    if os.path.exists(os.path.join(self.GetImageDirSymlink(),
-                                   'au-generator.zip')):
-      commands.TestAuZip(self._build_root,
-                         self.GetImageDirSymlink())
 
 
 class HWTestStage(generic_stages.BoardSpecificBuilderStage,
@@ -76,7 +84,7 @@ class HWTestStage(generic_stages.BoardSpecificBuilderStage,
 
   option_name = 'tests'
   config_name = 'hw_tests'
-  stage_name = 'HWTest'
+  category = constants.TEST_INFRA_STAGE
 
   PERF_RESULTS_EXTENSION = 'results'
 
@@ -113,7 +121,7 @@ class HWTestStage(generic_stages.BoardSpecificBuilderStage,
     self._board_name = lab_board_name or board
 
   # Disable complaint about calling _HandleStageException.
-  # pylint: disable=W0212
+  # pylint: disable=protected-access
   def _HandleStageException(self, exc_info):
     """Override and don't set status to FAIL but FORGIVEN instead."""
     exc_type = exc_info[0]
@@ -138,34 +146,6 @@ class HWTestStage(generic_stages.BoardSpecificBuilderStage,
         return self._HandleExceptionAsSuccess(exc_info)
 
     return super(HWTestStage, self)._HandleStageException(exc_info)
-
-  def GenerateSubsysResult(self, json_dump_dict, subsystems):
-    """Generate the pass/fail subsystems dict.
-
-    Args:
-      json_dump_dict: the parsed json_dump dictionary.
-      subsystems: A set of subsystems that current board will test.
-
-    Returns:
-      A tuple, first element is the pass subsystem set; the second is the fail
-      subsystem set
-    """
-    if not subsystems or not json_dump_dict:
-      return None
-
-    pass_subsystems = set()
-    fail_subsystems = set()
-    for test_result in json_dump_dict.get('tests', dict()).values():
-      test_subsys = set([attr[10:] for attr in test_result.get('attributes')
-                         if attr.startswith('subsystem:')])
-      # Only track the test result of the subsystems current board tests.
-      target_subsys = subsystems & test_subsys
-      if test_result.get('status') == 'GOOD':
-        pass_subsystems |= target_subsys
-      else:
-        fail_subsystems |= target_subsys
-    pass_subsystems -= fail_subsystems
-    return (pass_subsystems, fail_subsystems)
 
   def ReportHWTestResults(self, json_dump_dict, build_id, db):
     """Report HWTests results to cidb.
@@ -216,7 +196,7 @@ class HWTestStage(generic_stages.BoardSpecificBuilderStage,
       logging.PrintBuildbotStepWarnings()
       logging.warning('missing test artifacts')
       logging.warning('Cannot run %s because UploadTestArtifacts failed. '
-                      'See UploadTestArtifacts for details.' % self.stage_name)
+                      'See UploadTestArtifacts for details.', self.stage_name)
       return False
 
     return True
@@ -232,25 +212,23 @@ class HWTestStage(generic_stages.BoardSpecificBuilderStage,
   def PerformStage(self):
     if self.suite_config.suite == constants.HWTEST_AFDO_SUITE:
       arch = self._GetPortageEnvVar('ARCH', self._current_board)
-      cpv = portage_util.BestVisible(constants.CHROME_CP,
-                                     buildroot=self._build_root)
+      cpv = portage_util.PortageqBestVisible(constants.CHROME_CP,
+                                             cwd=self._build_root)
       if afdo.CheckAFDOPerfData(cpv, arch, gs.GSContext()):
         logging.info('AFDO profile already generated for arch %s '
                      'and Chrome %s. Not generating it again',
                      arch, cpv.version_no_rev.split('_')[0])
         return
 
-    if self.suite_config.suite in [constants.HWTEST_CTS_FOLLOWER_SUITE,
-                                   constants.HWTEST_CTS_QUAL_SUITE,
+    if self.suite_config.suite in [constants.HWTEST_CTS_QUAL_SUITE,
                                    constants.HWTEST_GTS_QUAL_SUITE]:
       # Increase the priority for CTS/GTS qualification suite as we want stable
       # build to have higher priority than beta build (again higher than dev).
       try:
         cros_vers = self._run.GetVersionInfo().VersionString().split('.')
-        if not isinstance(self.suite_config.priority, (int, long)):
-          # Convert CTS/GTS priority to corresponding integer value.
-          self.suite_config.priority = constants.HWTEST_PRIORITIES_MAP[
-              self.suite_config.priority]
+        # Convert priority to corresponding integer value.
+        self.suite_config.priority = constants.HWTEST_PRIORITIES_MAP[
+            self.suite_config.priority]
         # We add 1/10 of the branch version to the priority. This results in a
         # modest priority bump the older the branch is. Typically beta priority
         # would be dev + [1..4] and stable priority dev + [5..9].
@@ -261,12 +239,6 @@ class HWTestStage(generic_stages.BoardSpecificBuilderStage,
                       self.suite_config.priority)
 
     build = '/'.join([self._bot_id, self.version])
-
-    # Get the subsystems set for the board to test
-    if self.suite_config.suite == constants.HWTEST_PROVISION_SUITE:
-      subsystems = set()
-    else:
-      subsystems = self._GetSubsystems()
 
     skip_duts_check = False
     if config_lib.IsCanaryType(self._run.config.build_type):
@@ -293,7 +265,6 @@ class HWTestStage(generic_stages.BoardSpecificBuilderStage,
         suite_args=self.suite_config.suite_args,
         offload_failures_only=self.suite_config.offload_failures_only,
         debug=not self.TestsEnabled(self._run),
-        subsystems=subsystems,
         skip_duts_check=skip_duts_check,
         job_keyvals=self.GetJobKeyvals(),
         test_args=test_args)
@@ -301,50 +272,57 @@ class HWTestStage(generic_stages.BoardSpecificBuilderStage,
     if config_lib.IsCQType(self._run.config.build_type):
       self.ReportHWTestResults(cmd_result.json_dump_result, build_id, db)
 
-    subsys_tuple = self.GenerateSubsysResult(cmd_result.json_dump_result,
-                                             subsystems)
     if db:
-      if not subsys_tuple:
-        db.InsertBuildMessage(build_id, message_type=constants.SUBSYSTEMS,
-                              message_subtype=constants.SUBSYSTEM_UNUSED,
-                              board=self._current_board)
-      else:
-        logging.info('pass_subsystems: %s, fail_subsystems: %s',
-                     subsys_tuple[0], subsys_tuple[1])
-        for s in subsys_tuple[0]:
-          db.InsertBuildMessage(build_id, message_type=constants.SUBSYSTEMS,
-                                message_subtype=constants.SUBSYSTEM_PASS,
-                                message_value=str(s), board=self._current_board)
-        for s in subsys_tuple[1]:
-          db.InsertBuildMessage(build_id, message_type=constants.SUBSYSTEMS,
-                                message_subtype=constants.SUBSYSTEM_FAIL,
-                                message_value=str(s), board=self._current_board)
+      db.InsertBuildMessage(build_id, message_type=constants.SUBSYSTEMS,
+                            message_subtype=constants.SUBSYSTEM_UNUSED,
+                            board=self._current_board)
     if cmd_result.to_raise:
       raise cmd_result.to_raise
 
-  def _GetSubsystems(self):
-    """Return a set of subsystem strings for the current board.
 
-    Returns an empty set if there are no subsystems.
-    """
-    per_board_dict = self._run.attrs.metadata.GetDict()['board-metadata']
-    current_board_dict = per_board_dict.get(self._current_board)
-    if not current_board_dict:
-      return set()
-    subsystems = set(current_board_dict.get('subsystems_to_test', []))
-    # 'subsystem:all' indicates to skip the subsystem logic
-    if 'all' in subsystems:
-      return set()
-    return subsystems
+class SkylabHWTestStage(HWTestStage):
+  """Stage that runs tests in the Autotest lab with Skylab."""
+
+  category = constants.TEST_INFRA_STAGE
+
+  def PerformStage(self):
+    build = '/'.join([self._bot_id, self.version])
+
+    cmd_result = commands.RunSkylabHWTestSuite(
+        build, self.suite_config.suite, self._board_name,
+        model=self._model,
+        pool=self.suite_config.pool,
+        wait_for_results=self.wait_for_results,
+        priority=self.suite_config.priority,
+        timeout_mins=self.suite_config.timeout_mins,
+        retry=self.suite_config.retry,
+        max_retries=self.suite_config.max_retries,
+        suite_args=self.suite_config.suite_args)
+
+    if cmd_result.to_raise:
+      raise cmd_result.to_raise
 
 
 class ASyncHWTestStage(HWTestStage, generic_stages.ForgivingBuilderStage):
   """Stage that fires and forgets hw test suites to the Autotest lab."""
 
   stage_name = "ASyncHWTest"
+  category = constants.TEST_INFRA_STAGE
 
   def __init__(self, *args, **kwargs):
     super(ASyncHWTestStage, self).__init__(*args, **kwargs)
+    self.wait_for_results = False
+
+
+class ASyncSkylabHWTestStage(SkylabHWTestStage,
+                             generic_stages.ForgivingBuilderStage):
+  """Stage that fires and forgets skylab hw test suites to the Autotest lab."""
+
+  stage_name = "ASyncSkylabHWTest"
+  category = constants.TEST_INFRA_STAGE
+
+  def __init__(self, *args, **kwargs):
+    super(ASyncSkylabHWTestStage, self).__init__(*args, **kwargs)
     self.wait_for_results = False
 
 
@@ -354,6 +332,7 @@ class ImageTestStage(generic_stages.BoardSpecificBuilderStage,
 
   option_name = 'image_test'
   config_name = 'image_test'
+  category = constants.CI_INFRA_STAGE
 
   # Give the tests 60 minutes to run. Image tests should be really quick but
   # the umount/rmdir bug (see osutils.UmountDir) may take a long time.
@@ -418,6 +397,7 @@ class BinhostTestStage(generic_stages.BuilderStage):
   """Stage that verifies Chrome prebuilts."""
 
   config_name = 'binhost_test'
+  category = constants.CI_INFRA_STAGE
 
   def PerformStage(self):
     # Verify our binhosts.
@@ -431,15 +411,23 @@ class BranchUtilTestStage(generic_stages.BuilderStage):
   """Stage that verifies branching works on the latest manifest version."""
 
   config_name = 'branch_util_test'
+  category = constants.CI_INFRA_STAGE
 
   def PerformStage(self):
     assert (hasattr(self._run.attrs, 'manifest_manager') and
             self._run.attrs.manifest_manager is not None), \
         'Must run ManifestVersionedSyncStage before this stage.'
     manifest_manager = self._run.attrs.manifest_manager
-    commands.RunBranchUtilTest(
-        self._build_root,
-        manifest_manager.GetCurrentVersionInfo().VersionString())
+
+    args = [
+        '--branch-name', 'test_branch',
+        '--version', manifest_manager.GetCurrentVersionInfo().VersionString(),
+    ]
+
+    if self._run.options.git_cache_dir:
+      args.extend(['--git-cache-dir', self._run.options.git_cache_dir])
+
+    commands.RunLocalTryjob(self._build_root, 'branch-util-tryjob', args)
 
 
 class CrosSigningTestStage(generic_stages.BuilderStage):
@@ -448,13 +436,110 @@ class CrosSigningTestStage(generic_stages.BuilderStage):
   This requires an internal source code checkout.
   """
 
+  category = constants.CI_INFRA_STAGE
+
   def PerformStage(self):
     """Run the cros-signing unittests."""
     commands.RunCrosSigningTests(self._build_root)
 
 
+class UnexpectedTryjobResult(Exception):
+  """Thrown if a nested tryjob passes or fails unexpectedly."""
+
+class CbuildbotLaunchTestBuildStage(generic_stages.BuilderStage):
+  """Perform a single build with cbuildbot_launch."""
+  category = constants.CI_INFRA_STAGE
+
+  def __init__(self, builder_run, tryjob_buildroot, branch, build_config,
+               expect_success=True, **kwargs):
+    """Init.
+
+    Args:
+      builder_run: See builder_run on ArchiveStage
+      tryjob_buildroot: buildroot to use for test build, NOT current build.
+      branch: Branch to build. None means 'current' branch.
+      build_config: Name of build config to build.
+      expect_success: Is the test build expected to pass?
+    """
+    super(CbuildbotLaunchTestBuildStage, self).__init__(builder_run, **kwargs)
+
+    self.build_config = build_config
+    self.tryjob_buildroot = tryjob_buildroot
+    self.branch = branch
+    self.expect_success = expect_success
+
+  def PerformStage(self):
+    args = ['--branch', self.branch]
+    if self._run.options.git_cache_dir:
+      args.extend(['--git-cache-dir', self._run.options.git_cache_dir])
+
+    try:
+      commands.RunLocalTryjob(
+          self._build_root, self.build_config, args, self.tryjob_buildroot)
+      if not self.expect_success:
+        raise UnexpectedTryjobResult('Build passed unexpectedly.')
+    except failures_lib.BuildScriptFailure:
+      if self.expect_success:
+        raise UnexpectedTryjobResult('Build failed unexpectedly.')
+
+
+class CbuildbotLaunchTestStage(generic_stages.BuilderStage):
+  """Stage that runs Chromite tests, including network tests."""
+  category = constants.CI_INFRA_STAGE
+
+  def __init__(self, builder_run, **kwargs):
+    """Init.
+
+    Args:
+      builder_run: See builder_run on ArchiveStage
+    """
+    super(CbuildbotLaunchTestStage, self).__init__(builder_run, **kwargs)
+    self.tryjob_buildroot = None
+
+
+  def RunCbuildbotLauncher(
+      self, suffix, branch, build_config, expect_success):
+    """Run a new stage to test a cbuildbot_launch subbuild."""
+    substage = CbuildbotLaunchTestBuildStage(
+        self._run,
+        tryjob_buildroot=self.tryjob_buildroot,
+        branch=branch,
+        build_config=build_config,
+        expect_success=expect_success,
+        suffix=suffix)
+    substage.Run()
+
+  def PerformStage(self):
+    """Run sample cbuildbot_launch tests."""
+    # TODO: Move this tempdir, it's a problem.
+    with osutils.TempDir() as tryjob_buildroot:
+      self.tryjob_buildroot = tryjob_buildroot
+
+      # Iniitial build fails.
+      self.RunCbuildbotLauncher(
+          'Initial Build (fail)', self._run.options.branch, 'fail-build',
+          expect_success=False)
+
+      # Test cleanup after a fail.
+      self.RunCbuildbotLauncher(
+          'Second Build (pass)', self._run.options.branch, 'success-build',
+          expect_success=True)
+
+      # Test reduced cleanup after a pass.
+      self.RunCbuildbotLauncher(
+          'Third Build (pass)', self._run.options.branch, 'success-build',
+          expect_success=True)
+
+      # Test branch transition.
+      self.RunCbuildbotLauncher(
+          'Branch Build (pass)', 'release-R68-10718.B', 'success-build',
+          expect_success=True)
+
+
 class ChromiteTestStage(generic_stages.BuilderStage):
   """Stage that runs Chromite tests, including network tests."""
+
+  category = constants.CI_INFRA_STAGE
 
   def PerformStage(self):
     """Run the chromite unittests."""
@@ -462,7 +547,7 @@ class ChromiteTestStage(generic_stages.BuilderStage):
         os.path.join(self._build_root, 'chromite'))
 
     cmd = [
-        os.path.join(buildroot_chromite, 'cbuildbot', 'run_tests'),
+        os.path.join(buildroot_chromite, 'run_tests'),
         # TODO(crbug.com/682381): When tests can pass, add '--network',
     ]
     # TODO: Remove enter_chroot=True when we have virtualenv support.
@@ -472,6 +557,8 @@ class ChromiteTestStage(generic_stages.BuilderStage):
 
 class CidbIntegrationTestStage(generic_stages.BuilderStage):
   """Stage that runs the CIDB integration tests."""
+
+  category = constants.CI_INFRA_STAGE
 
   def PerformStage(self):
     """Run the CIDB integration tests."""
@@ -495,6 +582,8 @@ class DebugInfoTestStage(generic_stages.BoardSpecificBuilderStage,
     * whether clang is used
     * whether FORTIFY is enabled, etc.
   """
+
+  category = constants.CI_INFRA_STAGE
 
   def PerformStage(self):
     cmd = ['debug_info_test',

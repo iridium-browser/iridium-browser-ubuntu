@@ -9,13 +9,6 @@ import("//build/config/android/rules.gni")
 import("generate_resource_rewriter.gni")
 import("glue.gni")
 
-webview_public_framework_ijar = "frameworks.public.interface.jar"
-
-generate_interface_jar("public_framework_ijar") {
-  input_jar = webview_public_framework_jar
-  output_jar = "$target_out_dir/$webview_public_framework_ijar"
-}
-
 generate_resource_rewriter("glue_resource_rewriter") {
   # Change deps? please modify glue_library_deps variable.
   deps = glue_library_deps
@@ -27,26 +20,32 @@ android_library("glue") {
   deps = glue_library_deps
   srcjar_deps = [ ":glue_resource_rewriter" ]
 
-  alternative_android_sdk_ijar_dep = ":public_framework_ijar"
-  _ijar = webview_public_framework_ijar
-  _ijar_dir = get_label_info(alternative_android_sdk_ijar_dep, "target_out_dir")
-  alternative_android_sdk_ijar = "$_ijar_dir/$_ijar"
-  alternative_android_sdk_jar = webview_public_framework_jar
+  alternative_android_sdk_dep =
+      "//third_party/android_system_sdk:public_framework_system_java"
+
   java_files = [
-    "java/src/com/android/webview/chromium/SharedStatics.java",
     "java/src/com/android/webview/chromium/CallbackConverter.java",
     "java/src/com/android/webview/chromium/ContentSettingsAdapter.java",
     "java/src/com/android/webview/chromium/CookieManagerAdapter.java",
     "java/src/com/android/webview/chromium/DrawGLFunctor.java",
     "java/src/com/android/webview/chromium/FontPreloadingWorkaround.java",
     "java/src/com/android/webview/chromium/GeolocationPermissionsAdapter.java",
+    "java/src/com/android/webview/chromium/GlueApiHelperForM.java",
+    "java/src/com/android/webview/chromium/GlueApiHelperForN.java",
+    "java/src/com/android/webview/chromium/GlueApiHelperForO.java",
+    "java/src/com/android/webview/chromium/GlueApiHelperForOMR1.java",
+    "java/src/com/android/webview/chromium/GlueApiHelperForP.java",
     "java/src/com/android/webview/chromium/GraphicsUtils.java",
     "java/src/com/android/webview/chromium/MonochromeLibraryPreloader.java",
     "java/src/com/android/webview/chromium/SafeBrowsingResponseAdapter.java",
     "java/src/com/android/webview/chromium/ServiceWorkerClientAdapter.java",
     "java/src/com/android/webview/chromium/ServiceWorkerControllerAdapter.java",
     "java/src/com/android/webview/chromium/ServiceWorkerSettingsAdapter.java",
+    "java/src/com/android/webview/chromium/SharedStatics.java",
+    "java/src/com/android/webview/chromium/SharedTracingControllerAdapter.java",
+    "java/src/com/android/webview/chromium/SplitApkWorkaround.java",
     "java/src/com/android/webview/chromium/TokenBindingManagerAdapter.java",
+    "java/src/com/android/webview/chromium/TracingControllerAdapter.java",
     "java/src/com/android/webview/chromium/WebBackForwardListChromium.java",
     "java/src/com/android/webview/chromium/WebHistoryItemChromium.java",
     "java/src/com/android/webview/chromium/WebIconDatabaseAdapter.java",
@@ -61,6 +60,7 @@ android_library("glue") {
     "java/src/com/android/webview/chromium/WebViewChromiumFactoryProvider.java",
     "java/src/com/android/webview/chromium/WebViewChromiumFactoryProviderForO.java",
     "java/src/com/android/webview/chromium/WebViewChromiumFactoryProviderForOMR1.java",
+    "java/src/com/android/webview/chromium/WebViewChromiumFactoryProviderForP.java",
     "java/src/com/android/webview/chromium/SharedWebViewChromium.java",
     "java/src/com/android/webview/chromium/WebViewContentsClientAdapter.java",
     "java/src/com/android/webview/chromium/WebViewDatabaseAdapter.java",

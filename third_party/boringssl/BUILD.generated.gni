@@ -57,7 +57,9 @@ crypto_sources = [
   "src/crypto/bytestring/cbb.c",
   "src/crypto/bytestring/cbs.c",
   "src/crypto/bytestring/internal.h",
+  "src/crypto/bytestring/unicode.c",
   "src/crypto/chacha/chacha.c",
+  "src/crypto/chacha/internal.h",
   "src/crypto/cipher_extra/cipher_extra.c",
   "src/crypto/cipher_extra/derive_key.c",
   "src/crypto/cipher_extra/e_aesccm.c",
@@ -67,7 +69,6 @@ crypto_sources = [
   "src/crypto/cipher_extra/e_null.c",
   "src/crypto/cipher_extra/e_rc2.c",
   "src/crypto/cipher_extra/e_rc4.c",
-  "src/crypto/cipher_extra/e_ssl3.c",
   "src/crypto/cipher_extra/e_tls.c",
   "src/crypto/cipher_extra/internal.h",
   "src/crypto/cipher_extra/tls_cbc.c",
@@ -78,6 +79,7 @@ crypto_sources = [
   "src/crypto/cpu-aarch64-fuchsia.c",
   "src/crypto/cpu-aarch64-linux.c",
   "src/crypto/cpu-arm-linux.c",
+  "src/crypto/cpu-arm-linux.h",
   "src/crypto/cpu-arm.c",
   "src/crypto/cpu-intel.c",
   "src/crypto/cpu-ppc64le.c",
@@ -91,7 +93,7 @@ crypto_sources = [
   "src/crypto/dsa/dsa.c",
   "src/crypto/dsa/dsa_asn1.c",
   "src/crypto/ec_extra/ec_asn1.c",
-  "src/crypto/ecdh/ecdh.c",
+  "src/crypto/ecdh_extra/ecdh_extra.c",
   "src/crypto/ecdsa_extra/ecdsa_asn1.c",
   "src/crypto/engine/engine.c",
   "src/crypto/err/err.c",
@@ -167,6 +169,7 @@ crypto_sources = [
   "src/crypto/refcount_c11.c",
   "src/crypto/refcount_lock.c",
   "src/crypto/rsa_extra/rsa_asn1.c",
+  "src/crypto/rsa_extra/rsa_print.c",
   "src/crypto/stack/stack.c",
   "src/crypto/thread.c",
   "src/crypto/thread_none.c",
@@ -248,6 +251,7 @@ crypto_sources = [
   "src/crypto/x509v3/v3_int.c",
   "src/crypto/x509v3/v3_lib.c",
   "src/crypto/x509v3/v3_ncons.c",
+  "src/crypto/x509v3/v3_ocsp.c",
   "src/crypto/x509v3/v3_pci.c",
   "src/crypto/x509v3/v3_pcia.c",
   "src/crypto/x509v3/v3_pcons.c",
@@ -258,6 +262,12 @@ crypto_sources = [
   "src/crypto/x509v3/v3_skey.c",
   "src/crypto/x509v3/v3_sxnet.c",
   "src/crypto/x509v3/v3_utl.c",
+  "src/third_party/fiat/curve25519.c",
+  "src/third_party/fiat/curve25519_tables.h",
+  "src/third_party/fiat/internal.h",
+]
+
+crypto_headers = [
   "src/include/openssl/aead.h",
   "src/include/openssl/aes.h",
   "src/include/openssl/arm_arch.h",
@@ -284,6 +294,7 @@ crypto_sources = [
   "src/include/openssl/dh.h",
   "src/include/openssl/digest.h",
   "src/include/openssl/dsa.h",
+  "src/include/openssl/e_os2.h",
   "src/include/openssl/ec.h",
   "src/include/openssl/ec_key.h",
   "src/include/openssl/ecdh.h",
@@ -327,18 +338,10 @@ crypto_sources = [
   "src/include/openssl/x509.h",
   "src/include/openssl/x509_vfy.h",
   "src/include/openssl/x509v3.h",
-  "src/third_party/fiat/curve25519.c",
-  "src/third_party/fiat/curve25519_tables.h",
-  "src/third_party/fiat/internal.h",
 ]
 
 ssl_sources = [
-  "src/include/openssl/dtls1.h",
-  "src/include/openssl/ssl.h",
-  "src/include/openssl/ssl3.h",
-  "src/include/openssl/tls1.h",
   "src/ssl/bio_ssl.cc",
-  "src/ssl/custom_extensions.cc",
   "src/ssl/d1_both.cc",
   "src/ssl/d1_lib.cc",
   "src/ssl/d1_pkt.cc",
@@ -375,6 +378,13 @@ ssl_sources = [
   "src/ssl/tls13_server.cc",
   "src/ssl/tls_method.cc",
   "src/ssl/tls_record.cc",
+]
+
+ssl_headers = [
+  "src/include/openssl/dtls1.h",
+  "src/include/openssl/ssl.h",
+  "src/include/openssl/ssl3.h",
+  "src/include/openssl/tls1.h",
 ]
 
 crypto_sources_ios_aarch64 = [
@@ -539,12 +549,14 @@ crypto_sources_win_x86_64 = [
 ]
 
 fuzzers = [
+  "arm_cpuinfo",
   "bn_div",
   "bn_mod_exp",
   "cert",
   "client",
   "dtls_client",
   "dtls_server",
+  "pkcs12",
   "pkcs8",
   "privkey",
   "read_pem",

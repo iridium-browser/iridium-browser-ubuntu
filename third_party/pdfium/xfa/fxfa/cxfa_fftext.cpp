@@ -42,9 +42,9 @@ void CXFA_FFText::RenderWidget(CXFA_Graphics* pGS,
   CFX_RectF rtText = GetRectWithoutRotate();
   CXFA_Margin* margin = m_pNode->GetMarginIfExists();
   if (margin) {
-    CXFA_LayoutItem* pItem = this;
+    CXFA_ContentLayoutItem* pItem = this;
     if (!pItem->GetPrev() && !pItem->GetNext()) {
-      XFA_RectWithoutMargin(rtText, margin);
+      XFA_RectWithoutMargin(&rtText, margin);
     } else {
       float fTopInset = 0;
       float fBottomInset = 0;
@@ -78,7 +78,7 @@ bool CXFA_FFText::PerformLayout() {
     return true;
 
   pTextLayout->m_Blocks.clear();
-  CXFA_LayoutItem* pItem = this;
+  CXFA_ContentLayoutItem* pItem = this;
   if (!pItem->GetPrev() && !pItem->GetNext())
     return true;
 

@@ -4,22 +4,28 @@
 
 #include "chrome/browser/ui/toolbar/media_router_action.h"
 
+#include "base/bind.h"
+#include "base/location.h"
 #include "base/metrics/user_metrics.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/post_task.h"
 #include "chrome/browser/media/router/media_router.h"
 #include "chrome/browser/media/router/media_router_factory.h"
 #include "chrome/browser/media/router/media_router_metrics.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/media_router/media_router_dialog_controller_impl_base.h"
+#include "chrome/browser/ui/media_router/media_router_ui_service.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/toolbar/component_toolbar_actions_factory.h"
-#include "chrome/browser/ui/toolbar/media_router_action_platform_delegate.h"
+#include "chrome/browser/ui/toolbar/media_router_action_controller.h"
 #include "chrome/browser/ui/toolbar/toolbar_action_view_delegate.h"
 #include "chrome/common/media_router/issue.h"
 #include "chrome/common/media_router/media_route.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/vector_icons/vector_icons.h"
+#include "content/public/browser/browser_task_traits.h"
+#include "content/public/browser/browser_thread.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/gfx/color_palette.h"
 #include "ui/gfx/image/image_skia.h"
@@ -47,9 +53,9 @@ MediaRouterAction::MediaRouterAction(Browser* browser,
       delegate_(nullptr),
       browser_(browser),
       toolbar_actions_bar_(toolbar_actions_bar),
-      platform_delegate_(MediaRouterActionPlatformDelegate::Create(browser)),
       tab_strip_model_observer_(this),
       toolbar_actions_bar_observer_(this),
+      skip_close_overflow_menu_for_testing_(false),
       weak_ptr_factory_(this) {
   DCHECK(browser_);
   DCHECK(toolbar_actions_bar_);
@@ -134,11 +140,18 @@ gfx::NativeView MediaRouterAction::GetPopupNativeView() {
 }
 
 ui::MenuModel* MediaRouterAction::GetContextMenu() {
+  // If there is an existing context menu, destroy it before we instantiate a
+  // new one.
+  DestroyContextMenu();
+  MediaRouterActionController* controller =
+      media_router::MediaRouterUIService::Get(browser_->profile())
+          ->action_controller();
   if (toolbar_actions_bar_->IsActionVisibleOnMainBar(this)) {
-    contextual_menu_ = MediaRouterContextualMenu::CreateForToolbar(browser_);
+    contextual_menu_ =
+        MediaRouterContextualMenu::CreateForToolbar(browser_, controller);
   } else {
     contextual_menu_ =
-        MediaRouterContextualMenu::CreateForOverflowMenu(browser_);
+        MediaRouterContextualMenu::CreateForOverflowMenu(browser_, controller);
   }
   return contextual_menu_->menu_model();
 }
@@ -148,6 +161,14 @@ void MediaRouterAction::OnContextMenuClosed() {
       !GetMediaRouterDialogController()->IsShowingMediaRouterDialog()) {
     toolbar_actions_bar_->UndoPopOut();
   }
+  // We must destroy the context menu asynchronously to prevent it from being
+  // destroyed before the command execution.
+  // TODO(takumif): Using task sequence to order operations is fragile. Consider
+  // other ways to do so when we move the icon to the trusted area.
+  base::PostTaskWithTraits(
+      FROM_HERE, {content::BrowserThread::UI},
+      base::BindOnce(&MediaRouterAction::DestroyContextMenu,
+                     weak_ptr_factory_.GetWeakPtr()));
 }
 
 bool MediaRouterAction::ExecuteAction(bool by_user) {
@@ -159,11 +180,14 @@ bool MediaRouterAction::ExecuteAction(bool by_user) {
   }
 
   GetMediaRouterDialogController()->ShowMediaRouterDialog();
-  if (GetPlatformDelegate()) {
+  if (!skip_close_overflow_menu_for_testing_) {
+    // TODO(karandeepb): Instead of checking the return value of
+    // CloseOverflowMenuIfOpen, just check
+    // ToolbarActionsBar::IsActionVisibleOnMainBar.
     media_router::MediaRouterMetrics::RecordMediaRouterDialogOrigin(
-        GetPlatformDelegate()->CloseOverflowMenuIfOpen() ?
-        media_router::MediaRouterDialogOpenOrigin::OVERFLOW_MENU :
-        media_router::MediaRouterDialogOpenOrigin::TOOLBAR);
+        toolbar_actions_bar_->CloseOverflowMenuIfOpen()
+            ? media_router::MediaRouterDialogOpenOrigin::OVERFLOW_MENU
+            : media_router::MediaRouterDialogOpenOrigin::TOOLBAR);
   }
   return true;
 }
@@ -261,10 +285,6 @@ MediaRouterAction::GetMediaRouterDialogController() {
       web_contents);
 }
 
-MediaRouterActionPlatformDelegate* MediaRouterAction::GetPlatformDelegate() {
-  return platform_delegate_.get();
-}
-
 void MediaRouterAction::MaybeUpdateIcon() {
   const gfx::VectorIcon& new_icon = GetCurrentIcon();
 
@@ -293,4 +313,8 @@ const gfx::VectorIcon& MediaRouterAction::GetCurrentIcon() const {
 
   return has_local_display_route_ ? vector_icons::kMediaRouterActiveIcon
                                   : vector_icons::kMediaRouterIdleIcon;
+}
+
+void MediaRouterAction::DestroyContextMenu() {
+  contextual_menu_.reset();
 }

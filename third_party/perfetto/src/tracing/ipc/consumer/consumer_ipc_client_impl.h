@@ -21,13 +21,15 @@
 
 #include <vector>
 
+#include "perfetto/base/scoped_file.h"
 #include "perfetto/base/weak_ptr.h"
 #include "perfetto/ipc/service_proxy.h"
 #include "perfetto/tracing/core/basic_types.h"
-#include "perfetto/tracing/core/service.h"
+#include "perfetto/tracing/core/trace_packet.h"
+#include "perfetto/tracing/core/tracing_service.h"
 #include "perfetto/tracing/ipc/consumer_ipc_client.h"
 
-#include "protos/tracing_service/consumer_port.ipc.h"
+#include "perfetto/ipc/consumer_port.ipc.h"
 
 namespace perfetto {
 
@@ -46,7 +48,7 @@ class TraceConfig;
 // IPC channel to the remote Service. This class is the glue layer between the
 // generic Service interface exposed to the clients of the library and the
 // actual IPC transport.
-class ConsumerIPCClientImpl : public Service::ConsumerEndpoint,
+class ConsumerIPCClientImpl : public TracingService::ConsumerEndpoint,
                               public ipc::ServiceProxy::EventListener {
  public:
   ConsumerIPCClientImpl(const char* service_sock_name,
@@ -54,13 +56,15 @@ class ConsumerIPCClientImpl : public Service::ConsumerEndpoint,
                         base::TaskRunner*);
   ~ConsumerIPCClientImpl() override;
 
-  // Service::ConsumerEndpoint implementation.
+  // TracingService::ConsumerEndpoint implementation.
   // These methods are invoked by the actual Consumer(s) code by clients of the
   // tracing library, which know nothing about the IPC transport.
-  void EnableTracing(const TraceConfig&) override;
+  void EnableTracing(const TraceConfig&, base::ScopedFile) override;
+  void StartTracing() override;
   void DisableTracing() override;
   void ReadBuffers() override;
   void FreeBuffers() override;
+  void Flush(uint32_t timeout_ms, FlushCallback) override;
 
   // ipc::ServiceProxy::EventListener implementation.
   // These methods are invoked by the IPC layer, which knows nothing about
@@ -69,7 +73,7 @@ class ConsumerIPCClientImpl : public Service::ConsumerEndpoint,
   void OnDisconnect() override;
 
  private:
-  void OnReadBuffersResponse(ipc::AsyncResult<ReadBuffersResponse>);
+  void OnReadBuffersResponse(ipc::AsyncResult<protos::ReadBuffersResponse>);
 
   // TODO(primiano): think to dtor order, do we rely on any specific sequence?
   Consumer* const consumer_;
@@ -79,9 +83,16 @@ class ConsumerIPCClientImpl : public Service::ConsumerEndpoint,
 
   // The proxy interface for the consumer port of the service. It is bound
   // to |ipc_channel_| and (de)serializes method invocations over the wire.
-  ConsumerPortProxy consumer_port_;
+  protos::ConsumerPortProxy consumer_port_;
 
   bool connected_ = false;
+
+  // When a packet is too big to fit into a ReadBuffersResponse IPC, the service
+  // will chunk it into several IPCs, each containing few slices of the packet
+  // (a packet's slice is always guaranteed to be << kIPCBufferSize). When
+  // chunking happens this field accumulates the slices received until the
+  // one with |last_slice_for_packet| == true is received.
+  TracePacket partial_packet_;
 
   base::WeakPtrFactory<ConsumerIPCClientImpl> weak_ptr_factory_;
 };

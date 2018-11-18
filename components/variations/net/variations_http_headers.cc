@@ -6,13 +6,21 @@
 
 #include <stddef.h>
 
+#include <vector>
+
 #include "base/macros.h"
 #include "base/metrics/histogram_macros.h"
+#include "base/stl_util.h"
 #include "base/strings/string_util.h"
-#include "components/google/core/browser/google_util.h"
+#include "components/google/core/common/google_util.h"
 #include "components/variations/variations_http_header_provider.h"
 #include "net/http/http_request_headers.h"
+#include "net/traffic_annotation/network_traffic_annotation.h"
+#include "net/url_request/redirect_info.h"
 #include "net/url_request/url_request.h"
+#include "services/network/public/cpp/resource_request.h"
+#include "services/network/public/cpp/resource_response.h"
+#include "services/network/public/cpp/simple_url_loader.h"
 #include "url/gurl.h"
 
 namespace variations {
@@ -37,8 +45,6 @@ const char* kSuffixesToSetHeadersFor[] = {
 const char* kHostsToSetHeadersFor[] = {
     "googleweblight.com",
 };
-
-const char kClientData[] = "X-Client-Data";
 
 // The result of checking if a URL should have variations headers appended.
 // This enum is used to record UMA histogram values, and should not be
@@ -68,12 +74,12 @@ bool IsGoogleDomain(const GURL& url) {
   // Some domains don't have international TLD extensions, so testing for them
   // is very straight forward.
   const std::string host = url.host();
-  for (size_t i = 0; i < arraysize(kSuffixesToSetHeadersFor); ++i) {
+  for (size_t i = 0; i < base::size(kSuffixesToSetHeadersFor); ++i) {
     if (base::EndsWith(host, kSuffixesToSetHeadersFor[i],
                        base::CompareCase::INSENSITIVE_ASCII))
       return true;
   }
-  for (size_t i = 0; i < arraysize(kHostsToSetHeadersFor); ++i) {
+  for (size_t i = 0; i < base::size(kHostsToSetHeadersFor); ++i) {
     if (base::LowerCaseEqualsASCII(host, kHostsToSetHeadersFor[i]))
       return true;
   }
@@ -86,9 +92,23 @@ void LogUrlValidationHistogram(URLValidationResult result) {
                             URL_VALIDATION_RESULT_SIZE);
 }
 
+// Removes variations headers for requests when a redirect to a non-Google URL
+// occurs. This function is used as the callback parameter for
+// SimpleURLLoader::SetOnRedirectCallback() when
+// CreateSimpleURLLoaderWithVariationsHeaders() creates a SimpleURLLoader
+// object.
+void RemoveVariationsHeader(const net::RedirectInfo& redirect_info,
+                            const network::ResourceResponseHead& response_head,
+                            std::vector<std::string>* to_be_removed_headers) {
+  if (!ShouldAppendVariationHeaders(redirect_info.new_url))
+    to_be_removed_headers->push_back(kClientDataHeader);
+}
+
 }  // namespace
 
-void AppendVariationHeaders(const GURL& url,
+const char kClientDataHeader[] = "X-Client-Data";
+
+bool AppendVariationHeaders(const GURL& url,
                             InIncognito incognito,
                             SignedIn signed_in,
                             net::HttpRequestHeaders* headers) {
@@ -100,36 +120,60 @@ void AppendVariationHeaders(const GURL& url,
   //         international TLD domains *.google.<TLD> or *.youtube.<TLD>.
   // 2. Only transmit for non-Incognito profiles.
   // 3. For the X-Client-Data header, only include non-empty variation IDs.
-  if ((incognito == InIncognito::kYes) ||
-      !internal::ShouldAppendVariationHeaders(url))
-    return;
+  if ((incognito == InIncognito::kYes) || !ShouldAppendVariationHeaders(url))
+    return false;
 
   const std::string variation_ids_header =
       VariationsHttpHeaderProvider::GetInstance()->GetClientDataHeader(
           signed_in == SignedIn::kYes);
   if (!variation_ids_header.empty()) {
     // Note that prior to M33 this header was named X-Chrome-Variations.
-    headers->SetHeaderIfMissing(kClientData, variation_ids_header);
+    headers->SetHeaderIfMissing(kClientDataHeader, variation_ids_header);
+    return true;
   }
+  return false;
 }
 
-std::set<std::string> GetVariationHeaderNames() {
-  std::set<std::string> headers;
-  headers.insert(kClientData);
-  return headers;
+bool AppendVariationHeadersUnknownSignedIn(const GURL& url,
+                                           InIncognito incognito,
+                                           net::HttpRequestHeaders* headers) {
+  // Note: It's OK to pass SignedIn::kNo if it's unknown, as it does not affect
+  // transmission of experiments coming from the variations server.
+  return AppendVariationHeaders(url, incognito, SignedIn::kNo, headers);
 }
 
 void StripVariationHeaderIfNeeded(const GURL& new_location,
                                   net::URLRequest* request) {
-  if (!internal::ShouldAppendVariationHeaders(new_location)) {
-    for (const std::string& header : GetVariationHeaderNames())
-      request->RemoveRequestHeaderByName(header);
-  }
+  if (!ShouldAppendVariationHeaders(new_location))
+    request->RemoveRequestHeaderByName(kClientDataHeader);
 }
 
-namespace internal {
+std::unique_ptr<network::SimpleURLLoader>
+CreateSimpleURLLoaderWithVariationsHeaders(
+    std::unique_ptr<network::ResourceRequest> request,
+    InIncognito incognito,
+    SignedIn signed_in,
+    const net::NetworkTrafficAnnotationTag& annotation_tag) {
+  bool variation_headers_added = AppendVariationHeaders(
+      request->url, incognito, signed_in, &request->headers);
+  std::unique_ptr<network::SimpleURLLoader> simple_url_loader =
+      network::SimpleURLLoader::Create(std::move(request), annotation_tag);
+  if (variation_headers_added) {
+    simple_url_loader->SetOnRedirectCallback(
+        base::BindRepeating(&RemoveVariationsHeader));
+  }
+  return simple_url_loader;
+}
 
-// static
+std::unique_ptr<network::SimpleURLLoader>
+CreateSimpleURLLoaderWithVariationsHeadersUnknownSignedIn(
+    std::unique_ptr<network::ResourceRequest> request,
+    InIncognito incognito,
+    const net::NetworkTrafficAnnotationTag& annotation_tag) {
+  return CreateSimpleURLLoaderWithVariationsHeaders(
+      std::move(request), incognito, SignedIn::kNo, annotation_tag);
+}
+
 bool ShouldAppendVariationHeaders(const GURL& url) {
   if (!url.is_valid()) {
     LogUrlValidationHistogram(INVALID_URL);
@@ -152,7 +196,5 @@ bool ShouldAppendVariationHeaders(const GURL& url) {
   LogUrlValidationHistogram(SHOULD_APPEND);
   return true;
 }
-
-}  // namespace internal
 
 }  // namespace variations

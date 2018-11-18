@@ -10,6 +10,7 @@
 #include "SkPaint.h"
 
 #include <cmath>
+#include <utility>
 
 namespace {
 
@@ -162,7 +163,8 @@ LinearGradient4fContext::shadeSpan(int x, int y, SkPMColor dst[], int count) {
         bias1 = dither_cell[rowIndex + 1];
 
         if (x & 1) {
-            SkTSwap(bias0, bias1);
+            using std::swap;
+            swap(bias0, bias1);
         }
     }
 
@@ -183,16 +185,16 @@ LinearGradient4fContext::shadeSpan(int x, int y, SkPMColor dst[], int count) {
 }
 
 void SkLinearGradient::
-LinearGradient4fContext::shadeSpan4f(int x, int y, SkPM4f dst[], int count) {
+LinearGradient4fContext::shadeSpan4f(int x, int y, SkPMColor4f dst[], int count) {
     SkASSERT(count > 0);
 
     // 4f dests are dithered at a later stage, if needed.
     static constexpr float bias0 = 0,
                            bias1 = 0;
     if (fColorsArePremul) {
-        this->shadePremulSpan<SkPM4f, ApplyPremul::False>(x, y, dst, count, bias0, bias1);
+        this->shadePremulSpan<SkPMColor4f, ApplyPremul::False>(x, y, dst, count, bias0, bias1);
     } else {
-        this->shadePremulSpan<SkPM4f, ApplyPremul::True >(x, y, dst, count, bias0, bias1);
+        this->shadePremulSpan<SkPMColor4f, ApplyPremul::True >(x, y, dst, count, bias0, bias1);
     }
 }
 
@@ -262,7 +264,8 @@ LinearGradient4fContext::shadeSpanInternal(int x, int y, dstType dst[], int coun
         dst   += n;
 
         if (n & 1) {
-            SkTSwap(bias4f0, bias4f1);
+            using std::swap;
+            swap(bias4f0, bias4f1);
         }
     }
 }

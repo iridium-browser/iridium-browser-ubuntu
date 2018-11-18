@@ -9,10 +9,9 @@
 #include "base/bind.h"
 #include "base/callback.h"
 #include "base/command_line.h"
-#include "base/files/file_util.h"
 #include "base/path_service.h"
 #include "base/sys_info.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
@@ -61,7 +60,7 @@ base::FilePath GetOobeCompleteFlagPath() {
     return base::FilePath(kOobeCompleteFlagFilePath);
   } else {
     base::FilePath user_data_dir;
-    PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
+    base::PathService::Get(chrome::DIR_USER_DATA, &user_data_dir);
     return user_data_dir.AppendASCII(".oobe_completed");
   }
 }
@@ -86,7 +85,6 @@ namespace chromeos {
 void StartupUtils::RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterBooleanPref(prefs::kOobeComplete, false);
   registry->RegisterStringPref(prefs::kOobeScreenPending, "");
-  registry->RegisterBooleanPref(prefs::kOobeMdMode, false);
   registry->RegisterIntegerPref(prefs::kDeviceRegistered, -1);
   registry->RegisterBooleanPref(prefs::kEnrollmentRecoveryRequired, false);
   registry->RegisterStringPref(prefs::kInitialLocale, "en-US");
@@ -143,9 +141,9 @@ bool StartupUtils::IsDeviceRegistered() {
       g_browser_process->local_state()->GetInteger(prefs::kDeviceRegistered);
   if (value > 0) {
     // Recreate flag file in case it was lost.
-    base::PostTaskWithTraits(FROM_HERE,
-                             {base::TaskPriority::BACKGROUND, base::MayBlock()},
-                             base::BindOnce(&CreateOobeCompleteFlagFile));
+    base::PostTaskWithTraits(
+        FROM_HERE, {base::TaskPriority::BEST_EFFORT, base::MayBlock()},
+        base::BindOnce(&CreateOobeCompleteFlagFile));
     return true;
   } else if (value == 0) {
     return false;
@@ -164,12 +162,12 @@ bool StartupUtils::IsDeviceRegistered() {
 void StartupUtils::MarkDeviceRegistered(base::OnceClosure done_callback) {
   SaveIntegerPreferenceForced(prefs::kDeviceRegistered, 1);
   if (done_callback.is_null()) {
-    base::PostTaskWithTraits(FROM_HERE,
-                             {base::TaskPriority::BACKGROUND, base::MayBlock()},
-                             base::BindOnce(&CreateOobeCompleteFlagFile));
+    base::PostTaskWithTraits(
+        FROM_HERE, {base::TaskPriority::BEST_EFFORT, base::MayBlock()},
+        base::BindOnce(&CreateOobeCompleteFlagFile));
   } else {
     base::PostTaskWithTraitsAndReply(
-        FROM_HERE, {base::TaskPriority::BACKGROUND, base::MayBlock()},
+        FROM_HERE, {base::TaskPriority::BEST_EFFORT, base::MayBlock()},
         base::BindOnce(&CreateOobeCompleteFlagFile), std::move(done_callback));
   }
 }

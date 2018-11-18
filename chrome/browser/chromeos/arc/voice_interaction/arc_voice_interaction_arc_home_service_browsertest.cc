@@ -17,8 +17,8 @@
 #include "chrome/test/base/interactive_test_utils.h"
 #include "content/public/test/browser_test.h"
 #include "content/public/test/test_utils.h"
+#include "ui/accessibility/ax_assistant_structure.h"
 #include "ui/accessibility/ax_tree_update.h"
-#include "ui/accessibility/platform/ax_snapshot_node_android_platform.h"
 
 namespace arc {
 
@@ -63,9 +63,11 @@ class ArcVoiceInteractionArcHomeServiceTest : public InProcessBrowserTest {
                        base::Unretained(&waiter)),
         ui::kAXModeComplete);
     waiter.Wait();
-    auto node = ui::AXSnapshotNodeAndroid::Create(waiter.snapshot(), false);
+    std::unique_ptr<ui::AssistantTree> tree =
+        ui::CreateAssistantTree(waiter.snapshot(), false);
+
     return ArcVoiceInteractionArcHomeService::
-        CreateVoiceInteractionStructureForTesting(*node);
+        CreateVoiceInteractionStructureForTesting(*tree, *tree->nodes.front());
   }
 
  private:
@@ -140,8 +142,16 @@ IN_PROC_BROWSER_TEST_F(ArcVoiceInteractionArcHomeServiceTest,
   ASSERT_EQ(base::UTF16ToUTF8(child->children[0]->text), "1");
 }
 
+// Flaky on chromeos: http://crbug.com/870319
+#if defined(OS_CHROMEOS)
+#define MAYBE_VoiceInteractionStructureMultipleSelectionTest \
+  DISABLED_VoiceInteractionStructureMultipleSelectionTest
+#else
+#define MAYBE_VoiceInteractionStructureMultipleSelectionTest \
+  VoiceInteractionStructureMultipleSelectionTest
+#endif
 IN_PROC_BROWSER_TEST_F(ArcVoiceInteractionArcHomeServiceTest,
-                       VoiceInteractionStructureMultipleSelectionTest) {
+                       MAYBE_VoiceInteractionStructureMultipleSelectionTest) {
   auto result = GetVoiceInteractionStructure(
       "<html>"
       "  <body>"

@@ -15,7 +15,9 @@
 #include "base/values.h"
 #include "net/http/http_status_code.h"
 #include "net/traffic_annotation/network_traffic_annotation_test_helper.h"
-#include "net/url_request/url_request_test_util.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
+#include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
+#include "services/network/test/test_url_loader_factory.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -30,12 +32,12 @@ namespace {
 class TestingWebHistoryService : public WebHistoryService {
  public:
   explicit TestingWebHistoryService(
-      const scoped_refptr<net::URLRequestContextGetter>& request_context)
+      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory)
       // NOTE: Simply pass null object for IdentityManager. WebHistoryService's
       // only usage of this object is to fetch access tokens via RequestImpl,
       // and TestWebHistoryService deliberately replaces this flow with
       // TestRequest.
-      : WebHistoryService(nullptr, request_context),
+      : WebHistoryService(nullptr, url_loader_factory),
         expected_url_(GURL()),
         expected_audio_history_value_(false),
         current_expected_post_data_("") {}
@@ -135,8 +137,8 @@ class TestRequest : public WebHistoryService::Request {
   void Start() override {
     is_pending_ = true;
     base::ThreadTaskRunnerHandle::Get()->PostTask(
-        FROM_HERE,
-        base::Bind(&TestRequest::MimicReturnFromFetch, base::Unretained(this)));
+        FROM_HERE, base::BindOnce(&TestRequest::MimicReturnFromFetch,
+                                  base::Unretained(this)));
   }
 
   void MimicReturnFromFetch() {
@@ -215,9 +217,10 @@ std::string TestingWebHistoryService::GetExpectedAudioHistoryValue() {
 class WebHistoryServiceTest : public testing::Test {
  public:
   WebHistoryServiceTest()
-      : url_request_context_(new net::TestURLRequestContextGetter(
-            base::ThreadTaskRunnerHandle::Get())),
-        web_history_service_(url_request_context_) {}
+      : test_shared_loader_factory_(
+            base::MakeRefCounted<network::WeakWrapperSharedURLLoaderFactory>(
+                &test_url_loader_factory_)),
+        web_history_service_(test_shared_loader_factory_) {}
 
   ~WebHistoryServiceTest() override {}
 
@@ -234,7 +237,8 @@ class WebHistoryServiceTest : public testing::Test {
 
  private:
   base::test::ScopedTaskEnvironment scoped_task_environment_;
-  scoped_refptr<net::URLRequestContextGetter> url_request_context_;
+  network::TestURLLoaderFactory test_url_loader_factory_;
+  scoped_refptr<network::SharedURLLoaderFactory> test_shared_loader_factory_;
   TestingWebHistoryService web_history_service_;
 
   DISALLOW_COPY_AND_ASSIGN(WebHistoryServiceTest);
@@ -250,8 +254,8 @@ TEST_F(WebHistoryServiceTest, GetAudioHistoryEnabled) {
       PARTIAL_TRAFFIC_ANNOTATION_FOR_TESTS);
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
-      base::Bind(&TestingWebHistoryService::EnsureNoPendingRequestsRemain,
-                 base::Unretained(web_history_service())));
+      base::BindOnce(&TestingWebHistoryService::EnsureNoPendingRequestsRemain,
+                     base::Unretained(web_history_service())));
 }
 
 TEST_F(WebHistoryServiceTest, SetAudioHistoryEnabledTrue) {
@@ -267,8 +271,8 @@ TEST_F(WebHistoryServiceTest, SetAudioHistoryEnabledTrue) {
       PARTIAL_TRAFFIC_ANNOTATION_FOR_TESTS);
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
-      base::Bind(&TestingWebHistoryService::EnsureNoPendingRequestsRemain,
-                 base::Unretained(web_history_service())));
+      base::BindOnce(&TestingWebHistoryService::EnsureNoPendingRequestsRemain,
+                     base::Unretained(web_history_service())));
 }
 
 TEST_F(WebHistoryServiceTest, SetAudioHistoryEnabledFalse) {
@@ -284,8 +288,8 @@ TEST_F(WebHistoryServiceTest, SetAudioHistoryEnabledFalse) {
       PARTIAL_TRAFFIC_ANNOTATION_FOR_TESTS);
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
-      base::Bind(&TestingWebHistoryService::EnsureNoPendingRequestsRemain,
-                 base::Unretained(web_history_service())));
+      base::BindOnce(&TestingWebHistoryService::EnsureNoPendingRequestsRemain,
+                     base::Unretained(web_history_service())));
 }
 
 TEST_F(WebHistoryServiceTest, MultipleRequests) {
@@ -311,8 +315,8 @@ TEST_F(WebHistoryServiceTest, MultipleRequests) {
   // Check that both requests are no longer pending.
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE,
-      base::Bind(&TestingWebHistoryService::EnsureNoPendingRequestsRemain,
-                 base::Unretained(web_history_service())));
+      base::BindOnce(&TestingWebHistoryService::EnsureNoPendingRequestsRemain,
+                     base::Unretained(web_history_service())));
 }
 
 TEST_F(WebHistoryServiceTest, VerifyReadResponse) {

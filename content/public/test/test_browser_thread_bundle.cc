@@ -5,10 +5,14 @@
 #include "content/public/test/test_browser_thread_bundle.h"
 
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop/message_loop_current.h"
 #include "base/run_loop.h"
+#include "base/task/post_task.h"
 #include "base/test/scoped_task_environment.h"
+#include "base/threading/thread_task_runner_handle.h"
 #include "content/browser/after_startup_task_utils.h"
+#include "content/browser/scheduler/browser_task_executor.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/test/test_browser_thread.h"
 #include "content/public/test/test_utils.h"
@@ -18,6 +22,19 @@
 #endif
 
 namespace content {
+
+namespace {
+
+base::test::ScopedTaskEnvironment::MainThreadType GetThreadTypeFromOptions(
+    int options) {
+  if (options & TestBrowserThreadBundle::PLAIN_MAINLOOP)
+    return base::test::ScopedTaskEnvironment::MainThreadType::DEFAULT;
+  if (options & TestBrowserThreadBundle::IO_MAINLOOP)
+    return base::test::ScopedTaskEnvironment::MainThreadType::IO;
+  return base::test::ScopedTaskEnvironment::MainThreadType::UI;
+}
+
+}  // namespace
 
 TestBrowserThreadBundle::TestBrowserThreadBundle()
     : TestBrowserThreadBundle(DEFAULT) {}
@@ -55,8 +72,10 @@ TestBrowserThreadBundle::~TestBrowserThreadBundle() {
     // blocked upon it could make a test flaky whereas by flushing we guarantee
     // it will blow up).
     RunAllTasksUntilIdle();
-    CHECK(base::MessageLoop::current()->IsIdleForTesting());
+    CHECK(!scoped_task_environment_->MainThreadHasPendingTask());
   }
+
+  BrowserTaskExecutor::ResetForTesting();
 
   // |scoped_task_environment_| needs to explicitly go away before fake threads
   // in order for DestructionObservers hooked to the main MessageLoop to be able
@@ -77,6 +96,8 @@ void TestBrowserThreadBundle::Init() {
   CHECK(!(options_ & IO_MAINLOOP) || !(options_ & REAL_IO_THREAD));
   // There must be a thread to start to use DONT_CREATE_BROWSER_THREADS
   CHECK((options_ & ~IO_MAINLOOP) != DONT_CREATE_BROWSER_THREADS);
+  // Check for conflicting main loop options.
+  CHECK(!(options_ & IO_MAINLOOP) || !(options_ & PLAIN_MAINLOOP));
 
 #if defined(OS_WIN)
   // Similar to Chrome's UI thread, we need to initialize COM separately for
@@ -86,23 +107,25 @@ void TestBrowserThreadBundle::Init() {
   CHECK(com_initializer_->Succeeded());
 #endif
 
+  BrowserTaskExecutor::Create();
+
   // Create the ScopedTaskEnvironment if it doesn't already exist. A
   // ScopedTaskEnvironment may already exist if this TestBrowserThreadBundle is
   // instantiated in a test whose parent fixture provides a
   // ScopedTaskEnvironment.
-  if (!base::MessageLoop::current()) {
+  if (!base::ThreadTaskRunnerHandle::IsSet()) {
     scoped_task_environment_ =
         std::make_unique<base::test::ScopedTaskEnvironment>(
-            options_ & IO_MAINLOOP
-                ? base::test::ScopedTaskEnvironment::MainThreadType::IO
-                : base::test::ScopedTaskEnvironment::MainThreadType::UI);
+            GetThreadTypeFromOptions(options_));
   }
-  CHECK(options_ & IO_MAINLOOP ? base::MessageLoopForIO::IsCurrent()
-                               : base::MessageLoopForUI::IsCurrent());
+  if (options_ & IO_MAINLOOP)
+    CHECK(base::MessageLoopCurrentForIO::IsSet());
+  else if (!(options_ & PLAIN_MAINLOOP))
+    CHECK(base::MessageLoopCurrentForUI::IsSet());
 
   // Set the current thread as the UI thread.
   ui_thread_ = std::make_unique<TestBrowserThread>(
-      BrowserThread::UI, base::MessageLoop::current());
+      BrowserThread::UI, base::ThreadTaskRunnerHandle::Get());
 
   if (!(options_ & DONT_CREATE_BROWSER_THREADS))
     CreateBrowserThreads();
@@ -116,7 +139,7 @@ void TestBrowserThreadBundle::CreateBrowserThreads() {
     io_thread_->StartIOThread();
   } else {
     io_thread_ = std::make_unique<TestBrowserThread>(
-        BrowserThread::IO, base::MessageLoop::current());
+        BrowserThread::IO, base::ThreadTaskRunnerHandle::Get());
   }
 
   threads_created_ = true;
@@ -138,8 +161,8 @@ void TestBrowserThreadBundle::RunIOThreadUntilIdle() {
   base::WaitableEvent io_thread_idle(
       base::WaitableEvent::ResetPolicy::MANUAL,
       base::WaitableEvent::InitialState::NOT_SIGNALED);
-  BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::IO},
       base::BindOnce(
           [](base::WaitableEvent* io_thread_idle) {
             base::RunLoop(base::RunLoop::Type::kNestableTasksAllowed)

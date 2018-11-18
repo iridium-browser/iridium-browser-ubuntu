@@ -37,8 +37,7 @@ class SymbolTable {
 public:
   template <class ELFT> void addFile(InputFile *File);
   template <class ELFT> void addCombinedLTOObject();
-  template <class ELFT> void addSymbolWrap(StringRef Name);
-  void applySymbolWrap();
+  void wrap(Symbol *Sym, Symbol *Real, Symbol *Wrap);
 
   ArrayRef<Symbol *> getSymbols() const { return SymVector; }
 
@@ -77,7 +76,8 @@ public:
                                    uint8_t Visibility, bool CanOmitFromDynSym,
                                    InputFile *File);
 
-  template <class ELFT> void fetchIfLazy(StringRef Name);
+  template <class ELFT> void fetchLazy(Symbol *Sym);
+
   void scanVersionScript();
 
   Symbol *find(StringRef Name);
@@ -119,15 +119,6 @@ private:
   // can have the same name. We use this map to handle "extern C++ {}"
   // directive in version scripts.
   llvm::Optional<llvm::StringMap<std::vector<Symbol *>>> DemangledSyms;
-
-  struct WrappedSymbol {
-    Symbol *Sym;
-    Symbol *Real;
-    Symbol *Wrap;
-  };
-
-  // For -wrap.
-  std::vector<WrappedSymbol> WrappedSymbols;
 
   // For LTO.
   std::unique_ptr<BitcodeCompiler> LTO;

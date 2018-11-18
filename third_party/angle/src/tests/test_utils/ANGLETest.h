@@ -37,20 +37,29 @@
 #define EXPECT_EGL_SUCCESS() EXPECT_EGL_ERROR(EGL_SUCCESS)
 
 // EGLBoolean is |unsigned int| but EGL_TRUE is 0, not 0u.
-#define ASSERT_EGL_TRUE(a) ASSERT_EQ(static_cast<EGLBoolean>(EGL_TRUE), (a))
-#define ASSERT_EGL_FALSE(a) ASSERT_EQ(static_cast<EGLBoolean>(EGL_FALSE), (a))
-#define EXPECT_EGL_TRUE(a) EXPECT_EQ(static_cast<EGLBoolean>(EGL_TRUE), (a))
-#define EXPECT_EGL_FALSE(a) EXPECT_EQ(static_cast<EGLBoolean>(EGL_FALSE), (a))
+#define ASSERT_EGL_TRUE(a) ASSERT_EQ(static_cast<EGLBoolean>(EGL_TRUE), static_cast<EGLBoolean>(a))
+#define ASSERT_EGL_FALSE(a) \
+    ASSERT_EQ(static_cast<EGLBoolean>(EGL_FALSE), static_cast<EGLBoolean>(a))
+#define EXPECT_EGL_TRUE(a) EXPECT_EQ(static_cast<EGLBoolean>(EGL_TRUE), static_cast<EGLBoolean>(a))
+#define EXPECT_EGL_FALSE(a) \
+    EXPECT_EQ(static_cast<EGLBoolean>(EGL_FALSE), static_cast<EGLBoolean>(a))
 
 #define ASSERT_EGL_ERROR(err) ASSERT_EQ((err), eglGetError())
 #define ASSERT_EGL_SUCCESS() ASSERT_EGL_ERROR(EGL_SUCCESS)
 
-#define ASSERT_GLENUM_EQ(expected, actual) ASSERT_EQ(static_cast<GLenum>(expected), static_cast<GLenum>(actual))
-#define EXPECT_GLENUM_EQ(expected, actual) EXPECT_EQ(static_cast<GLenum>(expected), static_cast<GLenum>(actual))
+#define ASSERT_GLENUM_EQ(expected, actual) \
+    ASSERT_EQ(static_cast<GLenum>(expected), static_cast<GLenum>(actual))
+#define EXPECT_GLENUM_EQ(expected, actual) \
+    EXPECT_EQ(static_cast<GLenum>(expected), static_cast<GLenum>(actual))
 #define ASSERT_GLENUM_NE(expected, actual) \
     ASSERT_NE(static_cast<GLenum>(expected), static_cast<GLenum>(actual))
 #define EXPECT_GLENUM_NE(expected, actual) \
     EXPECT_NE(static_cast<GLenum>(expected), static_cast<GLenum>(actual))
+
+#define ASSERT_EGLENUM_EQ(expected, actual) \
+    ASSERT_EQ(static_cast<EGLenum>(expected), static_cast<EGLenum>(actual))
+#define EXPECT_EGLENUM_EQ(expected, actual) \
+    EXPECT_EQ(static_cast<EGLenum>(expected), static_cast<EGLenum>(actual))
 
 namespace angle
 {
@@ -111,6 +120,14 @@ static constexpr GLColor32F kFloatBlue  = {0.0f, 0.0f, 1.0f, 1.0f};
 
 struct WorkaroundsD3D;
 
+// The input here for pixelPoints are the expected integer window coordinates, we add .5 to every
+// one of them and re-scale the numbers to be between [-1,1]. Using this technique, we can make
+// sure the rasterization stage will end up drawing pixels at the expected locations.
+void CreatePixelCenterWindowCoords(const std::vector<Vector2> &pixelPoints,
+                                   int windowWidth,
+                                   int windowHeight,
+                                   std::vector<Vector3> *outVertices);
+
 // Useful to cast any type to GLubyte.
 template <typename TR, typename TG, typename TB, typename TA>
 GLColor MakeGLColor(TR r, TG g, TB b, TA a)
@@ -159,25 +176,24 @@ GLColor32F ReadColor32F(GLint x, GLint y);
 #define EXPECT_PIXEL_COLOR32F_EQ(x, y, angleColor) EXPECT_EQ(angleColor, angle::ReadColor32F(x, y))
 
 #define EXPECT_PIXEL_RECT_EQ(x, y, width, height, color)                                           \
-    \
-{                                                                                           \
+                                                                                                   \
+    {                                                                                              \
         std::vector<GLColor> actualColors(width *height);                                          \
         glReadPixels((x), (y), (width), (height), GL_RGBA, GL_UNSIGNED_BYTE, actualColors.data()); \
         std::vector<GLColor> expectedColors(width *height, color);                                 \
         EXPECT_EQ(expectedColors, actualColors);                                                   \
-    \
-}
+    }
 
-#define EXPECT_PIXEL_NEAR(x, y, r, g, b, a, abs_error) \
-{ \
-    GLubyte pixel[4]; \
-    glReadPixels((x), (y), 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel); \
-    EXPECT_GL_NO_ERROR(); \
-    EXPECT_NEAR((r), pixel[0], abs_error); \
-    EXPECT_NEAR((g), pixel[1], abs_error); \
-    EXPECT_NEAR((b), pixel[2], abs_error); \
-    EXPECT_NEAR((a), pixel[3], abs_error); \
-}
+#define EXPECT_PIXEL_NEAR(x, y, r, g, b, a, abs_error)                  \
+    {                                                                   \
+        GLubyte pixel[4];                                               \
+        glReadPixels((x), (y), 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixel); \
+        EXPECT_GL_NO_ERROR();                                           \
+        EXPECT_NEAR((r), pixel[0], abs_error);                          \
+        EXPECT_NEAR((g), pixel[1], abs_error);                          \
+        EXPECT_NEAR((b), pixel[2], abs_error);                          \
+        EXPECT_NEAR((a), pixel[3], abs_error);                          \
+    }
 
 #define EXPECT_PIXEL32F_NEAR(x, y, r, g, b, a, abs_error)       \
                                                                 \
@@ -199,14 +215,13 @@ GLColor32F ReadColor32F(GLint x, GLint y);
     EXPECT_PIXEL32F_NEAR(x, y, angleColor.R, angleColor.G, angleColor.B, angleColor.A, abs_error)
 
 #define EXPECT_COLOR_NEAR(expected, actual, abs_error) \
-    \
-{                                               \
+                                                       \
+    {                                                  \
         EXPECT_NEAR(expected.R, actual.R, abs_error);  \
         EXPECT_NEAR(expected.G, actual.G, abs_error);  \
         EXPECT_NEAR(expected.B, actual.B, abs_error);  \
         EXPECT_NEAR(expected.A, actual.A, abs_error);  \
-    \
-}
+    }
 #define EXPECT_PIXEL32F_NEAR(x, y, r, g, b, a, abs_error)       \
                                                                 \
     {                                                           \
@@ -228,7 +243,7 @@ class ANGLETestBase;
 
 struct TestPlatformContext final : private angle::NonCopyable
 {
-    bool ignoreMessages    = false;
+    bool ignoreMessages        = false;
     ANGLETestBase *currentTest = nullptr;
 };
 
@@ -299,9 +314,16 @@ class ANGLETestBase
                             GLfloat positionAttribXYScale,
                             bool useVertexBuffer);
 
+    // The layer parameter chooses the 3D texture layer to sample from.
+    void draw3DTexturedQuad(GLfloat positionAttribZ,
+                            GLfloat positionAttribXYScale,
+                            bool useVertexBuffer,
+                            float layer);
+
     static GLuint compileShader(GLenum type, const std::string &source);
     static bool extensionEnabled(const std::string &extName);
     static bool extensionRequestable(const std::string &extName);
+    static bool ensureExtensionEnabled(const std::string &extName);
     static bool eglClientExtensionEnabled(const std::string &extName);
     static bool eglDeviceExtensionEnabled(EGLDeviceEXT device, const std::string &extName);
 
@@ -326,6 +348,7 @@ class ANGLETestBase
     void setClientArraysEnabled(bool enabled);
     void setRobustResourceInit(bool enabled);
     void setContextProgramCacheEnabled(bool enabled);
+    void setContextVirtualization(bool enabled);
 
     // Some EGL extension tests would like to defer the Context init until the test body.
     void setDeferContextInit(bool enabled);
@@ -345,6 +368,9 @@ class ANGLETestBase
     static OSWindow *GetOSWindow() { return mOSWindow; }
 
     GLuint get2DTexturedQuadProgram();
+
+    // Has a float uniform "u_layer" to choose the 3D texture layer.
+    GLuint get3DTexturedQuadProgram();
 
     angle::PlatformMethods mPlatformMethods;
 
@@ -383,6 +409,7 @@ class ANGLETestBase
 
     // Used for texture rendering.
     GLuint m2DTexturedQuadProgram;
+    GLuint m3DTexturedQuadProgram;
 
     TestPlatformContext mPlatformContext;
 
@@ -444,13 +471,13 @@ bool IsRelease();
 
 // Note: git cl format messes up this formatting.
 #define ANGLE_SKIP_TEST_IF(COND)                              \
-    \
-if(COND)                                                      \
-    \
-{                                                      \
+                                                              \
+    if (COND)                                                 \
+                                                              \
+    {                                                         \
         std::cout << "Test skipped: " #COND "." << std::endl; \
         return;                                               \
-    \
-} ANGLE_EMPTY_STATEMENT
+    }                                                         \
+    ANGLE_EMPTY_STATEMENT
 
 #endif  // ANGLE_TESTS_ANGLE_TEST_H_

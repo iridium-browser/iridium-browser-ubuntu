@@ -9,6 +9,7 @@
 
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/utf_string_conversions.h"
+#include "content/public/common/media_stream_request.h"
 #include "content/renderer/media/stream/media_stream_constraints_util_sets.h"
 #include "content/renderer/media/stream/media_stream_constraints_util_video_device.h"
 #include "third_party/blink/public/platform/web_string.h"
@@ -151,14 +152,12 @@ AudioCaptureSettings::AudioCaptureSettings(const char* failed_constraint_name)
 
 AudioCaptureSettings::AudioCaptureSettings(
     std::string device_id,
-    const media::AudioParameters& audio_parameters,
     bool enable_hotword,
     bool disable_local_echo,
     bool enable_automatic_output_device_selection,
     const AudioProcessingProperties& audio_processing_properties)
     : failed_constraint_name_(nullptr),
       device_id_(std::move(device_id)),
-      audio_parameters_(audio_parameters),
       hotword_enabled_(enable_hotword),
       disable_local_echo_(disable_local_echo),
       render_to_associated_sink_(enable_automatic_output_device_selection),
@@ -234,16 +233,6 @@ bool GetConstraintValueAsString(
   return false;
 }
 
-rtc::Optional<bool> ConstraintToOptional(
-    const blink::WebMediaConstraints& constraints,
-    const blink::BooleanConstraint blink::WebMediaTrackConstraintSet::*picker) {
-  bool value;
-  if (GetConstraintValueAsBoolean(constraints, picker, &value)) {
-    return rtc::Optional<bool>(value);
-  }
-  return rtc::Optional<bool>();
-}
-
 std::string GetMediaStreamSource(
     const blink::WebMediaConstraints& constraints) {
   std::string source;
@@ -265,12 +254,13 @@ bool IsDeviceCapture(const blink::WebMediaConstraints& constraints) {
 
 VideoTrackAdapterSettings SelectVideoTrackAdapterSettings(
     const blink::WebMediaTrackConstraintSet& basic_constraint_set,
-    const ResolutionSet& resolution_set,
-    const NumericRangeSet<double>& frame_rate_set,
+    const media_constraints::ResolutionSet& resolution_set,
+    const media_constraints::NumericRangeSet<double>& frame_rate_set,
     const media::VideoCaptureFormat& source_format) {
-  ResolutionSet::Point resolution = resolution_set.SelectClosestPointToIdeal(
-      basic_constraint_set, source_format.frame_size.height(),
-      source_format.frame_size.width());
+  media_constraints::ResolutionSet::Point resolution =
+      resolution_set.SelectClosestPointToIdeal(
+          basic_constraint_set, source_format.frame_size.height(),
+          source_format.frame_size.width());
   int track_max_height = static_cast<int>(std::round(resolution.height()));
   int track_max_width = static_cast<int>(std::round(resolution.width()));
   double track_min_aspect_ratio =
@@ -327,11 +317,15 @@ blink::WebMediaStreamSource::Capabilities ComputeCapabilitiesForVideoSource(
     const blink::WebString& device_id,
     const media::VideoCaptureFormats& formats,
     media::VideoFacingMode facing_mode,
-    bool is_device_capture) {
+    bool is_device_capture,
+    const base::Optional<std::string>& group_id) {
   blink::WebMediaStreamSource::Capabilities capabilities;
-  capabilities.device_id = device_id;
-  if (is_device_capture)
+  capabilities.device_id = std::move(device_id);
+  if (is_device_capture) {
     capabilities.facing_mode = ToWebFacingMode(facing_mode);
+    if (group_id)
+      capabilities.group_id = blink::WebString::FromUTF8(*group_id);
+  }
   if (!formats.empty()) {
     int max_width = 1;
     int max_height = 1;

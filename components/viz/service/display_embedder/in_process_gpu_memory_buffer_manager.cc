@@ -4,6 +4,8 @@
 
 #include "components/viz/service/display_embedder/in_process_gpu_memory_buffer_manager.h"
 
+#include "base/bind.h"
+#include "gpu/ipc/common/gpu_client_ids.h"
 #include "gpu/ipc/common/gpu_memory_buffer_impl.h"
 #include "gpu/ipc/common/gpu_memory_buffer_support.h"
 #include "gpu/ipc/in_process_command_buffer.h"
@@ -15,7 +17,7 @@ namespace viz {
 InProcessGpuMemoryBufferManager::InProcessGpuMemoryBufferManager(
     gpu::GpuChannelManager* channel_manager)
     : gpu_memory_buffer_support_(new gpu::GpuMemoryBufferSupport()),
-      client_id_(gpu::InProcessCommandBuffer::kGpuMemoryBufferClientId),
+      client_id_(gpu::kInProcessCommandBufferClientId),
       channel_manager_(channel_manager),
       weak_factory_(this) {
   weak_ptr_ = weak_factory_.GetWeakPtr();
@@ -34,7 +36,7 @@ InProcessGpuMemoryBufferManager::CreateGpuMemoryBuffer(
       channel_manager_->gpu_memory_buffer_factory()->CreateGpuMemoryBuffer(
           id, size, format, usage, client_id_, surface_handle);
   return gpu_memory_buffer_support_->CreateGpuMemoryBufferImplFromHandle(
-      buffer_handle, size, format, usage,
+      std::move(buffer_handle), size, format, usage,
       base::Bind(&InProcessGpuMemoryBufferManager::DestroyGpuMemoryBuffer,
                  weak_ptr_, id, client_id_));
 }

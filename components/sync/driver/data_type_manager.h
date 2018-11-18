@@ -13,9 +13,12 @@
 #include "components/sync/driver/data_type_controller.h"
 #include "components/sync/driver/data_type_status_table.h"
 #include "components/sync/engine/configure_reason.h"
+#include "components/sync/engine/shutdown_reason.h"
 #include "components/sync/model/sync_error.h"
 
 namespace syncer {
+
+struct ConfigureContext;
 
 // This interface is for managing the start up and shut down life cycle
 // of many different syncable data types.
@@ -62,32 +65,35 @@ class DataTypeManager {
   // running data types that are not in the desired_types set will be
   // stopped.  Any stopped data types that are in the desired_types
   // set will be started.  All other data types are left in their
-  // current state.  A SYNC_CONFIGURE_START notification will be sent
-  // to the UI thread when configuration is started and a
-  // SYNC_CONFIGURE_DONE notification will be sent (with a
-  // ConfigureResult detail) when configuration is complete.
+  // current state.
   //
   // Note that you may call Configure() while configuration is in
   // progress.  Configuration will be complete only when the
   // desired_types supplied in the last call to Configure is achieved.
   virtual void Configure(ModelTypeSet desired_types,
-                         ConfigureReason reason) = 0;
+                         const ConfigureContext& context) = 0;
 
   // Resets the error state for |type| and triggers a reconfiguration if
   // necessary.
   virtual void ReenableType(ModelType type) = 0;
 
+  // Informs the data type manager that the ready-for-start status of a
+  // controller has changed. If the controller is not ready any more, it will
+  // stop |type|. Otherwise, it will trigger reconfiguration so that |type| gets
+  // started again.
+  virtual void ReadyForStartChanged(ModelType type) = 0;
+
   // Resets all data type error state.
   virtual void ResetDataTypeErrors() = 0;
 
-  virtual void PurgeForMigration(ModelTypeSet undesired_types,
-                                 ConfigureReason reason) = 0;
+  virtual void PurgeForMigration(ModelTypeSet undesired_types) = 0;
 
-  // Synchronously stops all registered data types.  If called after
+  // Synchronously stops all registered data types. If called after
   // Configure() is called but before it finishes, it will abort the
   // configure and any data types that have been started will be
   // stopped.
-  virtual void Stop() = 0;
+  // If called with reason |DISABLE_SYNC|, purges sync data for all datatypes.
+  virtual void Stop(ShutdownReason reason) = 0;
 
   // Get the set of current active data types (those chosen or configured by the
   // user which have not also encountered a runtime error). Note that during

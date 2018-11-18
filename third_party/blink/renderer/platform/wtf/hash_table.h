@@ -25,11 +25,11 @@
 
 #include <memory>
 
+#include "base/numerics/checked_math.h"
 #include "third_party/blink/renderer/platform/wtf/alignment.h"
 #include "third_party/blink/renderer/platform/wtf/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/allocator/partition_allocator.h"
 #include "third_party/blink/renderer/platform/wtf/assertions.h"
-#include "third_party/blink/renderer/platform/wtf/conditional_destructor.h"
 #include "third_party/blink/renderer/platform/wtf/construct_traits.h"
 #include "third_party/blink/renderer/platform/wtf/hash_traits.h"
 
@@ -295,13 +295,26 @@ class HashTableConstIterator final {
       ++position_;
   }
 
+  void ReverseSkipEmptyBuckets() {
+    // Don't need to check for out-of-bounds positions, as begin position is
+    // always going to be a non-empty bucket.
+    while (HashTableType::IsEmptyOrDeletedBucket(*position_)) {
+#if DCHECK_IS_ON()
+      DCHECK_NE(position_, begin_position_);
+#endif
+      --position_;
+    }
+  }
+
   HashTableConstIterator(PointerType position,
+                         PointerType begin_position,
                          PointerType end_position,
                          const HashTableType* container)
       : position_(position),
         end_position_(end_position)
 #if DCHECK_IS_ON()
         ,
+        begin_position_(begin_position),
         container_(container),
         container_modifications_(container->Modifications())
 #endif
@@ -310,6 +323,7 @@ class HashTableConstIterator final {
   }
 
   HashTableConstIterator(PointerType position,
+                         PointerType begin_position,
                          PointerType end_position,
                          const HashTableType* container,
                          HashItemKnownGoodTag)
@@ -317,6 +331,7 @@ class HashTableConstIterator final {
         end_position_(end_position)
 #if DCHECK_IS_ON()
         ,
+        begin_position_(begin_position),
         container_(container),
         container_modifications_(container->Modifications())
 #endif
@@ -359,6 +374,18 @@ class HashTableConstIterator final {
 
   // postfix ++ intentionally omitted
 
+  const_iterator& operator--() {
+#if DCHECK_IS_ON()
+    DCHECK_NE(position_, begin_position_);
+#endif
+    CheckModifications();
+    --position_;
+    ReverseSkipEmptyBuckets();
+    return *this;
+  }
+
+  // postfix -- intentionally omitted
+
   // Comparison.
   bool operator==(const const_iterator& other) const {
     return position_ == other.position_;
@@ -385,6 +412,7 @@ class HashTableConstIterator final {
   PointerType position_;
   PointerType end_position_;
 #if DCHECK_IS_ON()
+  PointerType begin_position_;
   const HashTableType* container_;
   int64_t container_modifications_;
 #endif
@@ -456,14 +484,16 @@ class HashTableIterator final {
                          Allocator>;
 
   HashTableIterator(PointerType pos,
+                    PointerType begin,
                     PointerType end,
                     const HashTableType* container)
-      : iterator_(pos, end, container) {}
+      : iterator_(pos, begin, end, container) {}
   HashTableIterator(PointerType pos,
+                    PointerType begin,
                     PointerType end,
                     const HashTableType* container,
                     HashItemKnownGoodTag tag)
-      : iterator_(pos, end, container, tag) {}
+      : iterator_(pos, begin, end, container, tag) {}
 
  public:
   HashTableIterator() = default;
@@ -482,6 +512,13 @@ class HashTableIterator final {
   }
 
   // postfix ++ intentionally omitted
+
+  iterator& operator--() {
+    --iterator_;
+    return *this;
+  }
+
+  // postfix -- intentionally omitted
 
   // Comparison.
   bool operator==(const iterator& other) const {
@@ -534,8 +571,7 @@ struct Mover {
   STATIC_ONLY(Mover);
   static void Move(T&& from, T& to) {
     to.~T();
-    ConstructTraits<T, Traits, Allocator>::ConstructAndNotifyElement(
-        &to, std::move(from));
+    new (NotNull, &to) T(std::move(from));
   }
 };
 
@@ -543,10 +579,9 @@ template <typename T, typename Allocator, typename Traits>
 struct Mover<T, Allocator, Traits, true> {
   STATIC_ONLY(Mover);
   static void Move(T&& from, T& to) {
-    to.~T();
     Allocator::EnterGCForbiddenScope();
-    ConstructTraits<T, Traits, Allocator>::ConstructAndNotifyElement(
-        &to, std::move(from));
+    to.~T();
+    new (NotNull, &to) T(std::move(from));
     Allocator::LeaveGCForbiddenScope();
   }
 };
@@ -573,6 +608,8 @@ class IdentityHashTranslator {
 template <typename HashTableType, typename ValueType>
 struct HashTableAddResult final {
   STACK_ALLOCATED();
+
+ public:
   HashTableAddResult(const HashTableType* container,
                      ValueType* stored_value,
                      bool is_new_entry)
@@ -656,15 +693,7 @@ template <typename Key,
           typename Traits,
           typename KeyTraits,
           typename Allocator>
-class HashTable final
-    : public ConditionalDestructor<HashTable<Key,
-                                             Value,
-                                             Extractor,
-                                             HashFunctions,
-                                             Traits,
-                                             KeyTraits,
-                                             Allocator>,
-                                   Allocator::kIsGarbageCollected> {
+class HashTable final {
   DISALLOW_NEW();
 
  public:
@@ -695,9 +724,15 @@ class HashTable final
   typedef HashTableAddResult<HashTable, ValueType> AddResult;
 
   HashTable();
-  void Finalize() {
-    DCHECK(!Allocator::kIsGarbageCollected);
+
+  // For design of the destructor, please refer to
+  // [here](https://docs.google.com/document/d/1AoGTvb3tNLx2tD1hNqAfLRLmyM59GM0O-7rCHTT_7_U/)
+  ~HashTable() {
     if (LIKELY(!table_))
+      return;
+    // If this is called during sweeping, it must not touch other heap objects
+    // such as the backing.
+    if (Allocator::IsSweepForbidden())
       return;
     EnterAccessForbiddenScope();
     DeleteAllBucketsAndDeallocate(table_, table_size_);
@@ -795,6 +830,8 @@ class HashTable final
   template <typename HashTranslator, typename T>
   const ValueType* Lookup(const T&) const;
 
+  ValueType** GetBufferSlot() { return &table_; }
+
   template <typename VisitorDispatcher, typename A = Allocator>
   std::enable_if_t<A::kIsGarbageCollected> Trace(VisitorDispatcher);
 
@@ -877,23 +914,25 @@ class HashTable final
   }
 
   iterator MakeIterator(ValueType* pos) {
-    return iterator(pos, table_ + table_size_, this);
+    return iterator(pos, table_, table_ + table_size_, this);
   }
   const_iterator MakeConstIterator(const ValueType* pos) const {
-    return const_iterator(pos, table_ + table_size_, this);
+    return const_iterator(pos, table_, table_ + table_size_, this);
   }
   iterator MakeKnownGoodIterator(ValueType* pos) {
-    return iterator(pos, table_ + table_size_, this, kHashItemKnownGood);
+    return iterator(pos, table_, table_ + table_size_, this,
+                    kHashItemKnownGood);
   }
   const_iterator MakeKnownGoodConstIterator(const ValueType* pos) const {
-    return const_iterator(pos, table_ + table_size_, this, kHashItemKnownGood);
+    return const_iterator(pos, table_, table_ + table_size_, this,
+                          kHashItemKnownGood);
   }
 
   static const unsigned kMaxLoad = 2;
   static const unsigned kMinLoad = 6;
 
   unsigned TableSizeMask() const {
-    size_t mask = table_size_ - 1;
+    unsigned mask = table_size_ - 1;
     DCHECK_EQ((mask & table_size_), 0u);
     return mask;
   }
@@ -1566,7 +1605,7 @@ template <typename Key,
 Value*
 HashTable<Key, Value, Extractor, HashFunctions, Traits, KeyTraits, Allocator>::
     AllocateTable(unsigned size) {
-  size_t alloc_size = size * sizeof(ValueType);
+  size_t alloc_size = base::CheckMul(size, sizeof(ValueType)).ValueOrDie();
   ValueType* result;
   // Assert that we will not use memset on things with a vtable entry.  The
   // compiler will also check this on some platforms. We would like to check
@@ -1576,13 +1615,13 @@ HashTable<Key, Value, Extractor, HashFunctions, Traits, KeyTraits, Allocator>::
   static_assert(
       !Traits::kEmptyValueIsZero || !std::is_polymorphic<KeyType>::value,
       "empty value cannot be zero for things with a vtable");
-  static_assert(Allocator::kIsGarbageCollected ||
-                    ((!AllowsOnlyPlacementNew<KeyType>::value ||
-                      !IsTraceable<KeyType>::value) &&
-                     (!AllowsOnlyPlacementNew<ValueType>::value ||
-                      !IsTraceable<ValueType>::value)),
-                "Cannot put DISALLOW_NEW_EXCEPT_PLACEMENT_NEW objects that "
-                "have trace methods into an off-heap HashTable");
+  static_assert(
+      Allocator::kIsGarbageCollected ||
+          ((!IsDisallowNew<KeyType>::value || !IsTraceable<KeyType>::value) &&
+           (!IsDisallowNew<ValueType>::value ||
+            !IsTraceable<ValueType>::value)),
+      "Cannot put DISALLOW_NEW objects that "
+      "have trace methods into an off-heap HashTable");
 
   if (Traits::kEmptyValueIsZero) {
     result = Allocator::template AllocateZeroedHashTableBacking<ValueType,
@@ -1631,10 +1670,7 @@ void HashTable<Key,
       }
     }
   }
-  // Notify if this is a weak table since immediately freeing a weak hash table
-  // backing may cause a use-after-free when the weak callback is called.
-  Allocator::FreeHashTableBacking(table,
-                                  Traits::kWeakHandlingFlag == kWeakHandling);
+  Allocator::FreeHashTableBacking(table);
 }
 
 template <typename Key,
@@ -1758,6 +1794,10 @@ HashTable<Key, Value, Extractor, HashFunctions, Traits, KeyTraits, Allocator>::
       new_entry = reinserted_entry;
     }
   }
+  // Rescan the contents of the backing store as no write barriers were emitted
+  // during re-insertion. Traits::NeedsToForbidGCOnMove ensures that no
+  // garbage collection is triggered during moving.
+  Allocator::TraceMarkedBackingStore(table_);
 
   deleted_count_ = 0;
 
@@ -2085,9 +2125,6 @@ template <typename VisitorDispatcher, typename A>
 std::enable_if_t<A::kIsGarbageCollected>
 HashTable<Key, Value, Extractor, HashFunctions, Traits, KeyTraits, Allocator>::
     Trace(VisitorDispatcher visitor) {
-  if (!table_)
-    return;
-
   if (Traits::kWeakHandlingFlag == kNoWeakHandling) {
     // Strong HashTable.
     DCHECK(IsTraceableInCollectionTrait<Traits>::value);
@@ -2128,6 +2165,8 @@ HashTable<Key, Value, Extractor, HashFunctions, Traits, KeyTraits, Allocator>::
 template <typename HashTableType, typename Traits>
 struct HashTableConstIteratorAdapter {
   STACK_ALLOCATED();
+
+ public:
   HashTableConstIteratorAdapter() = default;
   HashTableConstIteratorAdapter(
       const typename HashTableType::const_iterator& impl)
@@ -2149,7 +2188,11 @@ struct HashTableConstIteratorAdapter {
     return *this;
   }
   // postfix ++ intentionally omitted
-
+  HashTableConstIteratorAdapter& operator--() {
+    --impl_;
+    return *this;
+  }
+  // postfix -- intentionally omitted
   typename HashTableType::const_iterator impl_;
 };
 
@@ -2183,6 +2226,12 @@ struct HashTableIteratorAdapter {
     return *this;
   }
   // postfix ++ intentionally omitted
+
+  HashTableIteratorAdapter& operator--() {
+    --impl_;
+    return *this;
+  }
+  // postfix -- intentionally omitted
 
   operator HashTableConstIteratorAdapter<HashTableType, Traits>() {
     typename HashTableType::const_iterator i = impl_;

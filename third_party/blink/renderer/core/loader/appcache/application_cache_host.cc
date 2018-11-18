@@ -37,7 +37,6 @@
 #include "third_party/blink/public/platform/web_url_request.h"
 #include "third_party/blink/public/platform/web_url_response.h"
 #include "third_party/blink/public/platform/web_vector.h"
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
 #include "third_party/blink/renderer/core/events/application_cache_error_event.h"
 #include "third_party/blink/renderer/core/events/progress_event.h"
 #include "third_party/blink/renderer/core/frame/deprecation.h"
@@ -46,13 +45,14 @@
 #include "third_party/blink/renderer/core/frame/local_frame_client.h"
 #include "third_party/blink/renderer/core/frame/settings.h"
 #include "third_party/blink/renderer/core/frame/use_counter.h"
-#include "third_party/blink/renderer/core/inspector/InspectorApplicationCacheAgent.h"
+#include "third_party/blink/renderer/core/inspector/inspector_application_cache_agent.h"
 #include "third_party/blink/renderer/core/loader/appcache/application_cache.h"
 #include "third_party/blink/renderer/core/loader/document_loader.h"
 #include "third_party/blink/renderer/core/loader/frame_loader.h"
 #include "third_party/blink/renderer/core/page/frame_tree.h"
 #include "third_party/blink/renderer/core/page/page.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/exported/wrapped_resource_request.h"
 #include "third_party/blink/renderer/platform/exported/wrapped_resource_response.h"
 #include "third_party/blink/renderer/platform/weborigin/security_origin.h"
@@ -165,7 +165,9 @@ void ApplicationCacheHost::SelectCacheWithManifest(const KURL& manifest_url) {
     // navigation algorithm. The navigation will not result in the same resource
     // being loaded, because "foreign" entries are never picked during
     // navigation. see ApplicationCacheGroup::selectCache()
-    frame->Navigate(*document, document->Url(), true, UserGestureStatus::kNone);
+    frame->ScheduleNavigation(*document, document->Url(),
+                              WebFrameLoadType::kReplaceCurrentItem,
+                              UserGestureStatus::kNone);
   }
 }
 
@@ -298,7 +300,7 @@ void ApplicationCacheHost::DispatchDOMEvent(
   } else {
     event = Event::Create(event_type);
   }
-  dom_application_cache_->DispatchEvent(event);
+  dom_application_cache_->DispatchEvent(*event);
 }
 
 ApplicationCacheHost::Status ApplicationCacheHost::GetStatus() const {

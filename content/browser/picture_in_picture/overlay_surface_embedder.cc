@@ -11,30 +11,54 @@ namespace content {
 OverlaySurfaceEmbedder::OverlaySurfaceEmbedder(OverlayWindow* window)
     : window_(window) {
   DCHECK(window_);
-  surface_layer_ = std::make_unique<ui::Layer>(ui::LAYER_TEXTURED);
-  surface_layer_->SetMasksToBounds(true);
+  // Add window background.
+  window_background_layer_ = window_->GetWindowBackgroundLayer();
+  window_background_layer_->SetBounds(
+      gfx::Rect(gfx::Point(0, 0), window_->GetBounds().size()));
+
+  // Add |window_background_layer_| to |window_| and stack it at the bottom.
+  window_->GetLayer()->Add(window_background_layer_);
+  window_->GetLayer()->StackAtBottom(window_background_layer_);
+
+  video_layer_ = window_->GetVideoLayer();
+  video_layer_->SetMasksToBounds(true);
 
   // The frame provided by the parent window's layer needs to show through
-  // |surface_layer_|.
-  surface_layer_->SetFillsBoundsOpaquely(false);
-  // |surface_layer_| bounds are set with the (0, 0) origin point. The
+  // |video_layer_|.
+  video_layer_->SetFillsBoundsOpaquely(false);
+  // |video_layer_| bounds are set with the (0, 0) origin point. The
   // positioning of |window_| is dictated by itself.
-  // TODO(apacible): Update |surface_layer_| size when the window is resized.
-  // http://crbug.com/726621
-  surface_layer_->SetBounds(
+  video_layer_->SetBounds(
       gfx::Rect(gfx::Point(0, 0), window_->GetBounds().size()));
-  window_->GetLayer()->Add(surface_layer_.get());
+
+  // Add |video_layer_| to |window_| and stack it above
+  // |window_background_layer_|.
+  window_->GetLayer()->Add(video_layer_);
+  window_->GetLayer()->StackAbove(video_layer_, window_background_layer_);
 }
 
 OverlaySurfaceEmbedder::~OverlaySurfaceEmbedder() = default;
 
-void OverlaySurfaceEmbedder::SetPrimarySurfaceId(
-    const viz::SurfaceId& surface_id) {
+void OverlaySurfaceEmbedder::SetSurfaceId(const viz::SurfaceId& surface_id) {
+  video_layer_ = window_->GetVideoLayer();
   // SurfaceInfo has information about the embedded surface.
-  surface_layer_->SetShowPrimarySurface(
+  video_layer_->SetShowPrimarySurface(
       surface_id, window_->GetBounds().size(), SK_ColorBLACK,
       cc::DeadlinePolicy::UseDefaultDeadline(),
       true /* stretch_content_to_fill_bounds */);
+  video_layer_->SetFallbackSurfaceId(surface_id);
+}
+
+void OverlaySurfaceEmbedder::UpdateLayerBounds() {
+  // Update the size of window background.
+  window_background_layer_ = window_->GetWindowBackgroundLayer();
+  window_background_layer_->SetBounds(
+      gfx::Rect(gfx::Point(0, 0), window_->GetBounds().size()));
+
+  // Update the size and position of the video to stretch on the entire window.
+  video_layer_ = window_->GetVideoLayer();
+  video_layer_->SetBounds(window_->GetVideoBounds());
+  video_layer_->SetSurfaceSize(window_->GetVideoBounds().size());
 }
 
 }  // namespace content

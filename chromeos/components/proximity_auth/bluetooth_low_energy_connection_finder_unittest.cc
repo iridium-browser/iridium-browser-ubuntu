@@ -18,9 +18,9 @@
 #include "base/time/time.h"
 #include "chromeos/components/proximity_auth/logging/logging.h"
 #include "components/cryptauth/connection.h"
-#include "components/cryptauth/cryptauth_test_util.h"
 #include "components/cryptauth/fake_connection.h"
-#include "components/cryptauth/remote_device.h"
+#include "components/cryptauth/remote_device_ref.h"
+#include "components/cryptauth/remote_device_test_util.h"
 #include "components/cryptauth/wire_message.h"
 #include "device/bluetooth/bluetooth_adapter_factory.h"
 #include "device/bluetooth/bluetooth_uuid.h"
@@ -75,7 +75,7 @@ class MockBluetoothLowEnergyConnectionFinder
  public:
   MockBluetoothLowEnergyConnectionFinder()
       : BluetoothLowEnergyConnectionFinder(
-            cryptauth::CreateLERemoteDeviceForTest(),
+            cryptauth::CreateRemoteDeviceRefForTest(),
             kBLEGattServiceUUID,
             std::make_unique<FakeEidGenerator>(this)) {}
 
@@ -94,7 +94,7 @@ class MockBluetoothLowEnergyConnectionFinder
   cryptauth::FakeConnection* ExpectCreateConnection() {
     std::unique_ptr<cryptauth::FakeConnection> connection(
         new cryptauth::FakeConnection(
-            cryptauth::CreateLERemoteDeviceForTest()));
+            cryptauth::CreateRemoteDeviceRefForTest()));
     cryptauth::FakeConnection* connection_alias = connection.get();
     EXPECT_CALL(*this, CreateConnectionProxy())
         .WillOnce(Return(connection.release()));
@@ -151,7 +151,7 @@ class ProximityAuthBluetoothLowEnergyConnectionFinderTest
             adapter_.get(),
             0,
             cryptauth::kTestRemoteDeviceName,
-            cryptauth::kTestRemoteDeviceBluetoothAddress,
+            std::string(),
             false,
             false)),
         last_discovery_session_alias_(nullptr) {
@@ -206,8 +206,10 @@ class ProximityAuthBluetoothLowEnergyConnectionFinderTest
     uuid_list.push_back(advertisement_uuid);
     device::BluetoothDevice::ServiceDataMap service_data_map;
     service_data_map[advertisement_uuid] = eid_vector;
-    device_->UpdateAdvertisementData(kRssi, uuid_list, service_data_map,
-                                     {} /* manufacturer_data */, nullptr);
+    device_->UpdateAdvertisementData(kRssi, base::nullopt /* flags */,
+                                     uuid_list, base::nullopt /* tx_power */,
+                                     service_data_map,
+                                     {} /* manufacturer_data */);
   }
 
   scoped_refptr<device::MockBluetoothAdapter> adapter_;
@@ -298,8 +300,8 @@ TEST_F(ProximityAuthBluetoothLowEnergyConnectionFinderTest,
 
   // Prepare second device with valid EID.
   NiceMock<device::MockBluetoothDevice> other_device(
-      adapter_.get(), 0, cryptauth::kTestRemoteDeviceName,
-      cryptauth::kTestRemoteDeviceBluetoothAddress, false, false);
+      adapter_.get(), 0, cryptauth::kTestRemoteDeviceName, std::string(), false,
+      false);
   PrepareDevice(&other_device, kEidForPreviousTimeQuantum);
 
   // Add the devices. Only one connection is expected.
@@ -322,8 +324,8 @@ TEST_F(ProximityAuthBluetoothLowEnergyConnectionFinderTest,
   // Creating a connection.
   base::RunLoop run_loop;
   EXPECT_FALSE(last_found_connection_);
-  connection->SetStatus(cryptauth::Connection::IN_PROGRESS);
-  connection->SetStatus(cryptauth::Connection::CONNECTED);
+  connection->SetStatus(cryptauth::Connection::Status::IN_PROGRESS);
+  connection->SetStatus(cryptauth::Connection::Status::CONNECTED);
   run_loop.RunUntilIdle();
   EXPECT_TRUE(last_found_connection_);
 }
@@ -341,7 +343,7 @@ TEST_F(ProximityAuthBluetoothLowEnergyConnectionFinderTest,
   // Trying to create a connection.
   connection_finder_.DeviceAdded(adapter_.get(), device_.get());
   ASSERT_FALSE(last_found_connection_);
-  connection->SetStatus(cryptauth::Connection::IN_PROGRESS);
+  connection->SetStatus(cryptauth::Connection::Status::IN_PROGRESS);
 
   // Preparing to restart the discovery session.
   device::BluetoothAdapter::DiscoverySessionCallback discovery_callback;
@@ -353,7 +355,7 @@ TEST_F(ProximityAuthBluetoothLowEnergyConnectionFinderTest,
   // Connection fails.
   {
     base::RunLoop run_loop;
-    connection->SetStatus(cryptauth::Connection::DISCONNECTED);
+    connection->SetStatus(cryptauth::Connection::Status::DISCONNECTED);
     run_loop.RunUntilIdle();
   }
 
@@ -375,8 +377,8 @@ TEST_F(ProximityAuthBluetoothLowEnergyConnectionFinderTest,
   {
     base::RunLoop run_loop;
     EXPECT_FALSE(last_found_connection_);
-    connection->SetStatus(cryptauth::Connection::IN_PROGRESS);
-    connection->SetStatus(cryptauth::Connection::CONNECTED);
+    connection->SetStatus(cryptauth::Connection::Status::IN_PROGRESS);
+    connection->SetStatus(cryptauth::Connection::Status::CONNECTED);
     run_loop.RunUntilIdle();
   }
   EXPECT_TRUE(last_found_connection_);
@@ -426,8 +428,8 @@ TEST_F(ProximityAuthBluetoothLowEnergyConnectionFinderTest,
   // Completing the connection.
   base::RunLoop run_loop;
   ASSERT_FALSE(last_found_connection_);
-  connection->SetStatus(cryptauth::Connection::IN_PROGRESS);
-  connection->SetStatus(cryptauth::Connection::CONNECTED);
+  connection->SetStatus(cryptauth::Connection::Status::IN_PROGRESS);
+  connection->SetStatus(cryptauth::Connection::Status::CONNECTED);
   run_loop.RunUntilIdle();
   EXPECT_TRUE(last_found_connection_);
 }

@@ -20,7 +20,7 @@
 #include "chromeos/login/auth/key.h"
 #include "chromeos/login/auth/user_context.h"
 #include "chromeos/login_event_recorder.h"
-#include "components/signin/core/account_id/account_id.h"
+#include "components/account_id/account_id.h"
 #include "crypto/sha2.h"
 #include "google_apis/gaia/gaia_auth_util.h"
 
@@ -44,18 +44,34 @@ void RecordEndMarker(const std::string& marker) {
 
 }  // namespace
 
+// static
+scoped_refptr<ExtendedAuthenticatorImpl> ExtendedAuthenticatorImpl::Create(
+    NewAuthStatusConsumer* consumer) {
+  auto extended_authenticator =
+      base::WrapRefCounted(new ExtendedAuthenticatorImpl(consumer));
+  SystemSaltGetter::Get()->GetSystemSalt(base::Bind(
+      &ExtendedAuthenticatorImpl::OnSaltObtained, extended_authenticator));
+  return extended_authenticator;
+}
+
+// static
+scoped_refptr<ExtendedAuthenticatorImpl> ExtendedAuthenticatorImpl::Create(
+    AuthStatusConsumer* consumer) {
+  auto extended_authenticator =
+      base::WrapRefCounted(new ExtendedAuthenticatorImpl(consumer));
+  SystemSaltGetter::Get()->GetSystemSalt(base::Bind(
+      &ExtendedAuthenticatorImpl::OnSaltObtained, extended_authenticator));
+  return extended_authenticator;
+}
+
 ExtendedAuthenticatorImpl::ExtendedAuthenticatorImpl(
     NewAuthStatusConsumer* consumer)
     : salt_obtained_(false), consumer_(consumer), old_consumer_(NULL) {
-  SystemSaltGetter::Get()->GetSystemSalt(
-      base::Bind(&ExtendedAuthenticatorImpl::OnSaltObtained, this));
 }
 
 ExtendedAuthenticatorImpl::ExtendedAuthenticatorImpl(
     AuthStatusConsumer* consumer)
     : salt_obtained_(false), consumer_(NULL), old_consumer_(consumer) {
-  SystemSaltGetter::Get()->GetSystemSalt(
-      base::Bind(&ExtendedAuthenticatorImpl::OnSaltObtained, this));
 }
 
 void ExtendedAuthenticatorImpl::SetConsumer(AuthStatusConsumer* consumer) {
@@ -80,33 +96,6 @@ void ExtendedAuthenticatorImpl::AuthenticateToCheck(
       base::Bind(&ExtendedAuthenticatorImpl::DoAuthenticateToCheck,
                  this,
                  success_callback));
-}
-
-void ExtendedAuthenticatorImpl::CreateMount(
-    const AccountId& account_id,
-    const std::vector<cryptohome::KeyDefinition>& keys,
-    const ResultCallback& success_callback) {
-  RecordStartMarker("MountEx");
-
-  cryptohome::Identification id(account_id);
-  cryptohome::MountRequest mount;
-  for (size_t i = 0; i < keys.size(); i++) {
-    cryptohome::KeyDefinitionToKey(keys[i], mount.mutable_create()->add_keys());
-  }
-  UserContext context(account_id);
-  Key key(keys.front().secret);
-  key.SetLabel(keys.front().label);
-  context.SetKey(key);
-  cryptohome::AuthorizationRequest auth;
-  cryptohome::Key* auth_key = auth.mutable_key();
-  if (!key.GetLabel().empty()) {
-    auth_key->mutable_data()->set_label(key.GetLabel());
-  }
-  auth_key->set_secret(key.GetSecret());
-  DBusThreadManager::Get()->GetCryptohomeClient()->MountEx(
-      id, auth, mount,
-      base::BindOnce(&ExtendedAuthenticatorImpl::OnMountComplete, this,
-                     "MountEx", context, success_callback));
 }
 
 void ExtendedAuthenticatorImpl::AddKey(const UserContext& context,
@@ -185,7 +174,8 @@ void ExtendedAuthenticatorImpl::DoAuthenticateToMount(
   RecordStartMarker("MountEx");
   const Key* const key = user_context.GetKey();
   DBusThreadManager::Get()->GetCryptohomeClient()->MountEx(
-      cryptohome::Identification(user_context.GetAccountId()),
+      cryptohome::CreateAccountIdentifierFromAccountId(
+          user_context.GetAccountId()),
       cryptohome::CreateAuthorizationRequest(key->GetLabel(), key->GetSecret()),
       cryptohome::MountRequest(),
       base::BindOnce(&ExtendedAuthenticatorImpl::OnMountComplete, this,

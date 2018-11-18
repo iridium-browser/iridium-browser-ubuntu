@@ -18,12 +18,12 @@ const int32_t kActivatableShellWindowIds[] = {
     kShellWindowId_LockActionHandlerContainer,
     kShellWindowId_LockScreenContainer, kShellWindowId_SystemModalContainer,
     kShellWindowId_AlwaysOnTopContainer, kShellWindowId_AppListContainer,
-    kShellWindowId_DefaultContainer,
+    kShellWindowId_DefaultContainer, kShellWindowId_AppListTabletModeContainer,
 
-    // Panel, launcher and status are intentionally checked after other
-    // containers even though these layers are higher. The user expects their
-    // windows to be focused before these elements.
-    kShellWindowId_PanelContainer, kShellWindowId_ShelfContainer,
+    // Launcher and status are intentionally checked after other containers
+    // even though these layers are higher. The user expects their windows
+    // to be focused before these elements.
+    kShellWindowId_ShelfContainer, kShellWindowId_ShelfBubbleContainer,
     kShellWindowId_StatusContainer,
 };
 

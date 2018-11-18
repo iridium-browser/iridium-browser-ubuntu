@@ -37,6 +37,19 @@ cr.define('extensions', function() {
       'onItemIdChanged_(data.id, delegate)',
     ],
 
+    listeners: {
+      'view-enter-start': 'onViewEnterStart_',
+    },
+
+    /**
+     * Focuses the back button when page is loaded.
+     * @private
+     */
+    onViewEnterStart_: function() {
+      Polymer.RenderStatus.afterNextRender(
+          this, () => cr.ui.focusWithoutInk(this.$.closeButton));
+    },
+
     /** @private */
     onItemIdChanged_: function() {
       // Clear the size, since this view is reused, such that no obsolete size
@@ -148,8 +161,7 @@ cr.define('extensions', function() {
      */
     shouldShowOptionsSection_: function() {
       return this.data.incognitoAccess.isEnabled ||
-          this.data.fileAccess.isEnabled || this.data.runOnAllUrls.isEnabled ||
-          this.data.errorCollection.isEnabled;
+          this.data.fileAccess.isEnabled || this.data.errorCollection.isEnabled;
     },
 
     /**
@@ -214,12 +226,6 @@ cr.define('extensions', function() {
     },
 
     /** @private */
-    onAllowOnAllSitesChange_: function() {
-      this.delegate.setItemAllowedOnAllSites(
-          this.data.id, this.$$('#allow-on-all-sites').checked);
-    },
-
-    /** @private */
     onCollectErrorsChange_: function() {
       this.delegate.setItemCollectsErrors(
           this.data.id, this.$$('#collect-errors').checked);
@@ -269,6 +275,23 @@ cr.define('extensions', function() {
         default:
           return '';
       }
+    },
+
+    /**
+     * @return {boolean}
+     * @private
+     */
+    hasPermissions_: function() {
+      return this.data.permissions.simplePermissions.length > 0 ||
+          !!this.data.permissions.hostAccess;
+    },
+
+    /**
+     * @return {boolean}
+     * @private
+     */
+    showRuntimeHostPermissions_: function() {
+      return !!this.data.permissions.hostAccess;
     },
   });
 

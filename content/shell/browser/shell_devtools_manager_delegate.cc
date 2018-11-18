@@ -180,13 +180,31 @@ ShellDevToolsManagerDelegate::ShellDevToolsManagerDelegate(
 ShellDevToolsManagerDelegate::~ShellDevToolsManagerDelegate() {
 }
 
+BrowserContext* ShellDevToolsManagerDelegate::GetDefaultBrowserContext() {
+  return browser_context_;
+}
+
+void ShellDevToolsManagerDelegate::ClientAttached(
+    content::DevToolsAgentHost* agent_host,
+    content::DevToolsAgentHostClient* client) {
+  // Make sure we don't receive notifications twice for the same client.
+  CHECK(clients_.find(client) == clients_.end());
+  clients_.insert(client);
+}
+
+void ShellDevToolsManagerDelegate::ClientDetached(
+    content::DevToolsAgentHost* agent_host,
+    content::DevToolsAgentHostClient* client) {
+  clients_.erase(client);
+}
+
 scoped_refptr<DevToolsAgentHost>
 ShellDevToolsManagerDelegate::CreateNewTarget(const GURL& url) {
   Shell* shell = Shell::CreateNewWindow(browser_context_,
                                         url,
                                         nullptr,
                                         gfx::Size());
-  if (switches::IsRunLayoutTestSwitchPresent())
+  if (switches::IsRunWebTestsSwitchPresent())
     SecondaryTestWindowObserver::CreateForWebContents(shell->web_contents());
   return DevToolsAgentHost::GetOrCreateFor(shell->web_contents());
 }

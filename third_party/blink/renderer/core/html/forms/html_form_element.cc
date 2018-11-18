@@ -26,6 +26,7 @@
 #include "third_party/blink/renderer/core/html/forms/html_form_element.h"
 
 #include <limits>
+#include "base/auto_reset.h"
 #include "third_party/blink/public/platform/web_insecure_request_policy.h"
 #include "third_party/blink/renderer/bindings/core/v8/radio_node_list_or_element.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_controller.h"
@@ -60,7 +61,6 @@
 #include "third_party/blink/renderer/core/loader/form_submission.h"
 #include "third_party/blink/renderer/core/loader/mixed_content_checker.h"
 #include "third_party/blink/renderer/core/loader/navigation_scheduler.h"
-#include "third_party/blink/renderer/platform/wtf/auto_reset.h"
 #include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 
 namespace blink {
@@ -74,8 +74,10 @@ HTMLFormElement::HTMLFormElement(Document& document)
       has_elements_associated_by_parser_(false),
       has_elements_associated_by_form_attribute_(false),
       did_finish_parsing_children_(false),
-      is_in_reset_function_(false),
-      was_demoted_(false) {}
+      is_in_reset_function_(false) {
+  static unsigned next_nique_renderer_form_id = 0;
+  unique_renderer_form_id_ = next_nique_renderer_form_id++;
+}
 
 HTMLFormElement* HTMLFormElement::Create(Document& document) {
   UseCounter::Count(document, WebFeature::kFormElement);
@@ -102,46 +104,11 @@ bool HTMLFormElement::IsValidElement() {
       nullptr, kCheckValidityDispatchNoEvent);
 }
 
-bool HTMLFormElement::LayoutObjectIsNeeded(const ComputedStyle& style) const {
-  if (!was_demoted_)
-    return HTMLElement::LayoutObjectIsNeeded(style);
-
-  ContainerNode* node = parentNode();
-  if (!node || !node->GetLayoutObject())
-    return HTMLElement::LayoutObjectIsNeeded(style);
-  LayoutObject* parent_layout_object = node->GetLayoutObject();
-  // FIXME: Shouldn't we also check for table caption (see |formIsTablePart|
-  // below).
-  // FIXME: This check is not correct for Shadow DOM.
-  bool parent_is_table_element_part =
-      (parent_layout_object->IsTable() && IsHTMLTableElement(*node)) ||
-      (parent_layout_object->IsTableRow() && IsHTMLTableRowElement(*node)) ||
-      (parent_layout_object->IsTableSection() && node->HasTagName(tbodyTag)) ||
-      (parent_layout_object->IsLayoutTableCol() && node->HasTagName(colTag)) ||
-      (parent_layout_object->IsTableCell() && IsHTMLTableRowElement(*node));
-
-  if (!parent_is_table_element_part)
-    return true;
-
-  EDisplay display = style.Display();
-  bool form_is_table_part =
-      display == EDisplay::kTable || display == EDisplay::kInlineTable ||
-      display == EDisplay::kTableRowGroup ||
-      display == EDisplay::kTableHeaderGroup ||
-      display == EDisplay::kTableFooterGroup ||
-      display == EDisplay::kTableRow ||
-      display == EDisplay::kTableColumnGroup ||
-      display == EDisplay::kTableColumn || display == EDisplay::kTableCell ||
-      display == EDisplay::kTableCaption;
-
-  return form_is_table_part;
-}
-
 Node::InsertionNotificationRequest HTMLFormElement::InsertedInto(
-    ContainerNode* insertion_point) {
+    ContainerNode& insertion_point) {
   HTMLElement::InsertedInto(insertion_point);
   LogAddElementIfIsolatedWorldAndInDocument("form", methodAttr, actionAttr);
-  if (insertion_point->isConnected())
+  if (insertion_point.isConnected())
     GetDocument().DidAssociateFormControl(this);
   return kInsertionDone;
 }
@@ -152,7 +119,7 @@ void NotifyFormRemovedFromTree(const T& elements, Node& root) {
     element->FormRemovedFromTree(root);
 }
 
-void HTMLFormElement::RemovedFrom(ContainerNode* insertion_point) {
+void HTMLFormElement::RemovedFrom(ContainerNode& insertion_point) {
   // We don't need to take care of form association by 'form' content
   // attribute becuse IdTargetObserver handles it.
   if (has_elements_associated_by_parser_) {
@@ -163,7 +130,7 @@ void HTMLFormElement::RemovedFrom(ContainerNode* insertion_point) {
     } else {
       ListedElement::List elements;
       CollectListedElements(
-          NodeTraversal::HighestAncestorOrSelf(*insertion_point), elements);
+          NodeTraversal::HighestAncestorOrSelf(insertion_point), elements);
       NotifyFormRemovedFromTree(elements, root);
       CollectListedElements(root, elements);
       NotifyFormRemovedFromTree(elements, root);
@@ -175,7 +142,7 @@ void HTMLFormElement::RemovedFrom(ContainerNode* insertion_point) {
     } else {
       HeapVector<Member<HTMLImageElement>> images;
       CollectImageElements(
-          NodeTraversal::HighestAncestorOrSelf(*insertion_point), images);
+          NodeTraversal::HighestAncestorOrSelf(insertion_point), images);
       NotifyFormRemovedFromTree(images, root);
       CollectImageElements(root, images);
       NotifyFormRemovedFromTree(images, root);
@@ -210,7 +177,7 @@ HTMLElement* HTMLFormElement::item(unsigned index) {
   return elements()->item(index);
 }
 
-void HTMLFormElement::SubmitImplicitly(Event* event,
+void HTMLFormElement::SubmitImplicitly(Event& event,
                                        bool from_implicit_submission_trigger) {
   int submission_trigger_count = 0;
   bool seen_default_button = false;
@@ -222,7 +189,7 @@ void HTMLFormElement::SubmitImplicitly(Event* event,
       if (from_implicit_submission_trigger)
         seen_default_button = true;
       if (control->IsSuccessfulSubmitButton()) {
-        control->DispatchSimulatedClick(event);
+        control->DispatchSimulatedClick(&event);
         return;
       }
       if (from_implicit_submission_trigger) {
@@ -282,7 +249,7 @@ bool HTMLFormElement::ValidateInteractively() {
 }
 
 void HTMLFormElement::PrepareForSubmission(
-    Event* event,
+    Event& event,
     HTMLFormControlElement* submit_button) {
   LocalFrame* frame = GetDocument().GetFrame();
   if (!frame || is_submitting_ || in_user_js_submit_event_)
@@ -322,14 +289,13 @@ void HTMLFormElement::PrepareForSubmission(
                 "the end of the file. Please add an explicit end tag "
                 "('</" +
                 tag_name + ">')"));
-        DispatchEvent(Event::Create(EventTypeNames::error));
+        DispatchEvent(*Event::Create(EventTypeNames::error));
         return;
       }
     }
   }
 
   bool skip_validation = !GetDocument().GetPage() || NoValidate();
-  DCHECK(event);
   if (submit_button && submit_button->FormNoValidate())
     skip_validation = true;
 
@@ -340,19 +306,20 @@ void HTMLFormElement::PrepareForSubmission(
 
   bool should_submit;
   {
-    AutoReset<bool> submit_event_handler_scope(&in_user_js_submit_event_, true);
+    base::AutoReset<bool> submit_event_handler_scope(&in_user_js_submit_event_,
+                                                     true);
     frame->Client()->DispatchWillSendSubmitEvent(this);
     should_submit =
-        DispatchEvent(Event::CreateCancelableBubble(EventTypeNames::submit)) ==
+        DispatchEvent(*Event::CreateCancelableBubble(EventTypeNames::submit)) ==
         DispatchEventResult::kNotCanceled;
   }
   if (should_submit) {
     planned_navigation_ = nullptr;
-    Submit(event, submit_button);
+    Submit(&event, submit_button);
   }
   if (!planned_navigation_)
     return;
-  AutoReset<bool> submit_scope(&is_submitting_, true);
+  base::AutoReset<bool> submit_scope(&is_submitting_, true);
   ScheduleFormSubmission(planned_navigation_);
   planned_navigation_ = nullptr;
 }
@@ -393,7 +360,7 @@ void HTMLFormElement::Submit(Event* event,
 
   // Delay dispatching 'close' to dialog until done submitting.
   EventQueueScope scope_for_dialog_close;
-  AutoReset<bool> submit_scope(&is_submitting_, true);
+  base::AutoReset<bool> submit_scope(&is_submitting_, true);
 
   if (event && !submit_button) {
     // In a case of implicit submission without a submit button, 'submit'
@@ -441,7 +408,7 @@ void HTMLFormElement::ConstructFormDataSet(
   // TODO(tkent): We might move the event dispatching later than the
   // ListedElements iteration.
   if (RuntimeEnabledFeatures::FormDataEventEnabled())
-    DispatchEvent(FormDataEvent::Create(form_data));
+    DispatchEvent(*FormDataEvent::Create(form_data));
 
   if (submit_button)
     submit_button->SetActivatedSubmit(true);
@@ -484,6 +451,10 @@ void HTMLFormElement::ScheduleFormSubmission(FormSubmission* submission) {
   }
 
   if (submission->Action().ProtocolIsJavaScript()) {
+    if (FastHasAttribute(disabledAttr)) {
+      UseCounter::Count(GetDocument(),
+                        WebFeature::kFormDisabledAttributePresentAndSubmit);
+    }
     GetDocument()
         .GetFrame()
         ->GetScriptController()
@@ -508,6 +479,10 @@ void HTMLFormElement::ScheduleFormSubmission(FormSubmission* submission) {
     UseCounter::Count(GetDocument().GetFrame(),
                       WebFeature::kMixedContentFormsSubmitted);
   }
+  if (FastHasAttribute(disabledAttr)) {
+    UseCounter::Count(GetDocument(),
+                      WebFeature::kFormDisabledAttributePresentAndSubmit);
+  }
 
   // TODO(lukasza): Investigate if the code below can uniformly handle remote
   // and local frames (i.e. by calling virtual Frame::navigate from a timer).
@@ -520,8 +495,11 @@ void HTMLFormElement::ScheduleFormSubmission(FormSubmission* submission) {
     FrameLoadRequest frame_load_request =
         submission->CreateFrameLoadRequest(&GetDocument());
     frame_load_request.GetResourceRequest().SetHasUserGesture(
-        Frame::HasTransientUserActivation(GetDocument().GetFrame()));
-    ToRemoteFrame(target_frame)->Navigate(frame_load_request);
+        LocalFrame::HasTransientUserActivation(GetDocument().GetFrame()));
+    // TODO(dgozman): we lose information about triggering event and desired
+    // navigation policy here.
+    ToRemoteFrame(target_frame)
+        ->Navigate(frame_load_request, WebFrameLoadType::kStandard);
   }
 }
 
@@ -532,7 +510,7 @@ void HTMLFormElement::reset() {
 
   is_in_reset_function_ = true;
 
-  if (DispatchEvent(Event::CreateCancelableBubble(EventTypeNames::reset)) !=
+  if (DispatchEvent(*Event::CreateCancelableBubble(EventTypeNames::reset)) !=
       DispatchEventResult::kNotCanceled) {
     is_in_reset_function_ = false;
     return;
@@ -577,6 +555,8 @@ void HTMLFormElement::ParseAttribute(
     attributes_.UpdateEncodingType(params.new_value);
   } else if (name == accept_charsetAttr) {
     attributes_.SetAcceptCharset(params.new_value);
+  } else if (name == disabledAttr) {
+    UseCounter::Count(GetDocument(), WebFeature::kFormDisabledAttributePresent);
   } else {
     HTMLElement::ParseAttribute(params);
   }
@@ -830,12 +810,6 @@ void HTMLFormElement::FinishParsingChildren() {
   did_finish_parsing_children_ = true;
 }
 
-void HTMLFormElement::CloneNonAttributePropertiesFrom(const Element& source,
-                                                      CloneChildrenFlag flag) {
-  was_demoted_ = ToHTMLFormElement(source).was_demoted_;
-  HTMLElement::CloneNonAttributePropertiesFrom(source, flag);
-}
-
 void HTMLFormElement::AnonymousNamedGetter(
     const AtomicString& name,
     RadioNodeListOrElement& return_value) {
@@ -877,12 +851,6 @@ void HTMLFormElement::AnonymousNamedGetter(
   }
 
   return_value.SetRadioNodeList(GetRadioNodeList(name, only_match_img));
-}
-
-void HTMLFormElement::SetDemoted(bool demoted) {
-  if (demoted)
-    UseCounter::Count(GetDocument(), WebFeature::kDemotedFormElement);
-  was_demoted_ = demoted;
 }
 
 void HTMLFormElement::InvalidateDefaultButtonStyle() const {

@@ -27,6 +27,8 @@
 #include "base/macros.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/posix/unix_domain_socket.h"
+#include "base/stl_util.h"
+#include "base/strings/stringprintf.h"
 #include "build/build_config.h"
 #include "sandbox/linux/syscall_broker/broker_client.h"
 #include "sandbox/linux/tests/scoped_temporary_file.h"
@@ -731,7 +733,7 @@ TEST(BrokerProcess, CreateFile) {
   unlink(permfile_name);
 }
 
-void TestStatHelper(bool fast_check_in_client) {
+void TestStatHelper(bool fast_check_in_client, bool follow_links) {
   ScopedTemporaryFile tmp_file;
   EXPECT_EQ(12, write(tmp_file.fd(), "blahblahblah", 12));
 
@@ -759,7 +761,8 @@ void TestStatHelper(bool fast_check_in_client) {
     ASSERT_TRUE(open_broker.Init(base::BindRepeating(&NoOpCallback)));
 
     memset(&sb, 0, sizeof(sb));
-    EXPECT_EQ(-kFakeErrnoSentinel, open_broker.Stat(tempfile_name, &sb));
+    EXPECT_EQ(-kFakeErrnoSentinel,
+              open_broker.Stat(tempfile_name, follow_links, &sb));
   }
 
   BrokerCommandSet command_set;
@@ -773,7 +776,8 @@ void TestStatHelper(bool fast_check_in_client) {
     ASSERT_TRUE(open_broker.Init(base::BindRepeating(&NoOpCallback)));
 
     memset(&sb, 0, sizeof(sb));
-    EXPECT_EQ(-kFakeErrnoSentinel, open_broker.Stat(nonesuch_name, &sb));
+    EXPECT_EQ(-kFakeErrnoSentinel,
+              open_broker.Stat(nonesuch_name, follow_links, &sb));
   }
   {
     // Actual file with no permission to see file.
@@ -783,7 +787,8 @@ void TestStatHelper(bool fast_check_in_client) {
     ASSERT_TRUE(open_broker.Init(base::BindRepeating(&NoOpCallback)));
 
     memset(&sb, 0, sizeof(sb));
-    EXPECT_EQ(-kFakeErrnoSentinel, open_broker.Stat(tempfile_name, &sb));
+    EXPECT_EQ(-kFakeErrnoSentinel,
+              open_broker.Stat(tempfile_name, follow_links, &sb));
   }
   {
     // Nonexistent file with permissions to see file.
@@ -794,20 +799,29 @@ void TestStatHelper(bool fast_check_in_client) {
     ASSERT_TRUE(open_broker.Init(base::BindRepeating(&NoOpCallback)));
 
     memset(&sb, 0, sizeof(sb));
-    EXPECT_EQ(-ENOENT, open_broker.Stat(nonesuch_name, &sb));
+    EXPECT_EQ(-ENOENT, open_broker.Stat(nonesuch_name, follow_links, &sb));
 
     // Gets denied all the way back to root since no create permission.
-    EXPECT_EQ(-kFakeErrnoSentinel, open_broker.Stat(leading_path1, &sb));
-    EXPECT_EQ(-kFakeErrnoSentinel, open_broker.Stat(leading_path2, &sb));
-    EXPECT_EQ(-kFakeErrnoSentinel, open_broker.Stat(leading_path3, &sb));
+    EXPECT_EQ(-kFakeErrnoSentinel,
+              open_broker.Stat(leading_path1, follow_links, &sb));
+    EXPECT_EQ(-kFakeErrnoSentinel,
+              open_broker.Stat(leading_path2, follow_links, &sb));
+    EXPECT_EQ(-kFakeErrnoSentinel,
+              open_broker.Stat(leading_path3, follow_links, &sb));
 
     // Not fooled by substrings.
-    EXPECT_EQ(-kFakeErrnoSentinel, open_broker.Stat(bad_leading_path1, &sb));
-    EXPECT_EQ(-kFakeErrnoSentinel, open_broker.Stat(bad_leading_path2, &sb));
-    EXPECT_EQ(-kFakeErrnoSentinel, open_broker.Stat(bad_leading_path3, &sb));
-    EXPECT_EQ(-kFakeErrnoSentinel, open_broker.Stat(bad_leading_path4, &sb));
-    EXPECT_EQ(-kFakeErrnoSentinel, open_broker.Stat(bad_leading_path5, &sb));
-    EXPECT_EQ(-kFakeErrnoSentinel, open_broker.Stat(bad_leading_path6, &sb));
+    EXPECT_EQ(-kFakeErrnoSentinel,
+              open_broker.Stat(bad_leading_path1, follow_links, &sb));
+    EXPECT_EQ(-kFakeErrnoSentinel,
+              open_broker.Stat(bad_leading_path2, follow_links, &sb));
+    EXPECT_EQ(-kFakeErrnoSentinel,
+              open_broker.Stat(bad_leading_path3, follow_links, &sb));
+    EXPECT_EQ(-kFakeErrnoSentinel,
+              open_broker.Stat(bad_leading_path4, follow_links, &sb));
+    EXPECT_EQ(-kFakeErrnoSentinel,
+              open_broker.Stat(bad_leading_path5, follow_links, &sb));
+    EXPECT_EQ(-kFakeErrnoSentinel,
+              open_broker.Stat(bad_leading_path6, follow_links, &sb));
   }
   {
     // Nonexistent file with permissions to create file.
@@ -818,22 +832,28 @@ void TestStatHelper(bool fast_check_in_client) {
     ASSERT_TRUE(open_broker.Init(base::BindRepeating(&NoOpCallback)));
 
     memset(&sb, 0, sizeof(sb));
-    EXPECT_EQ(-ENOENT, open_broker.Stat(nonesuch_name, &sb));
+    EXPECT_EQ(-ENOENT, open_broker.Stat(nonesuch_name, follow_links, &sb));
 
     // Gets ENOENT all the way back to root since it has create permission.
-    EXPECT_EQ(-ENOENT, open_broker.Stat(leading_path1, &sb));
-    EXPECT_EQ(-ENOENT, open_broker.Stat(leading_path2, &sb));
+    EXPECT_EQ(-ENOENT, open_broker.Stat(leading_path1, follow_links, &sb));
+    EXPECT_EQ(-ENOENT, open_broker.Stat(leading_path2, follow_links, &sb));
 
     // But can always get the root.
-    EXPECT_EQ(0, open_broker.Stat(leading_path3, &sb));
+    EXPECT_EQ(0, open_broker.Stat(leading_path3, follow_links, &sb));
 
     // Not fooled by substrings.
-    EXPECT_EQ(-kFakeErrnoSentinel, open_broker.Stat(bad_leading_path1, &sb));
-    EXPECT_EQ(-kFakeErrnoSentinel, open_broker.Stat(bad_leading_path2, &sb));
-    EXPECT_EQ(-kFakeErrnoSentinel, open_broker.Stat(bad_leading_path3, &sb));
-    EXPECT_EQ(-kFakeErrnoSentinel, open_broker.Stat(bad_leading_path4, &sb));
-    EXPECT_EQ(-kFakeErrnoSentinel, open_broker.Stat(bad_leading_path5, &sb));
-    EXPECT_EQ(-kFakeErrnoSentinel, open_broker.Stat(bad_leading_path6, &sb));
+    EXPECT_EQ(-kFakeErrnoSentinel,
+              open_broker.Stat(bad_leading_path1, follow_links, &sb));
+    EXPECT_EQ(-kFakeErrnoSentinel,
+              open_broker.Stat(bad_leading_path2, follow_links, &sb));
+    EXPECT_EQ(-kFakeErrnoSentinel,
+              open_broker.Stat(bad_leading_path3, follow_links, &sb));
+    EXPECT_EQ(-kFakeErrnoSentinel,
+              open_broker.Stat(bad_leading_path4, follow_links, &sb));
+    EXPECT_EQ(-kFakeErrnoSentinel,
+              open_broker.Stat(bad_leading_path5, follow_links, &sb));
+    EXPECT_EQ(-kFakeErrnoSentinel,
+              open_broker.Stat(bad_leading_path6, follow_links, &sb));
   }
   {
     // Actual file with permissions to see file.
@@ -844,7 +864,7 @@ void TestStatHelper(bool fast_check_in_client) {
     ASSERT_TRUE(open_broker.Init(base::BindRepeating(&NoOpCallback)));
 
     memset(&sb, 0, sizeof(sb));
-    EXPECT_EQ(0, open_broker.Stat(tempfile_name, &sb));
+    EXPECT_EQ(0, open_broker.Stat(tempfile_name, follow_links, &sb));
 
     // Following fields may never be consistent but should be non-zero.
     // Don't trust the platform to define fields with any particular sign.
@@ -869,11 +889,13 @@ void TestStatHelper(bool fast_check_in_client) {
 }
 
 TEST(BrokerProcess, StatFileClient) {
-  TestStatHelper(true);
+  TestStatHelper(true, true);
+  TestStatHelper(true, false);
 }
 
 TEST(BrokerProcess, StatFileHost) {
-  TestStatHelper(false);
+  TestStatHelper(false, true);
+  TestStatHelper(false, false);
 }
 
 void TestRenameHelper(bool fast_check_in_client) {
@@ -1430,6 +1452,86 @@ TEST(BrokerProcess, UnlinkClient) {
 
 TEST(BrokerProcess, UnlinkHost) {
   TestUnlinkHelper(false);
+}
+
+TEST(BrokerProcess, IsSyscallAllowed) {
+  const struct {
+    int sysno;
+    BrokerCommand command;
+  } kSyscallToCommandMap[] = {
+#if defined(__NR_access)
+    {__NR_access, COMMAND_ACCESS},
+#endif
+    {__NR_faccessat, COMMAND_ACCESS},
+#if defined(__NR_mkdir)
+    {__NR_mkdir, COMMAND_MKDIR},
+#endif
+    {__NR_mkdirat, COMMAND_MKDIR},
+#if defined(__NR_open)
+    {__NR_open, COMMAND_OPEN},
+#endif
+    {__NR_openat, COMMAND_OPEN},
+#if defined(__NR_readlink)
+    {__NR_readlink, COMMAND_READLINK},
+#endif
+    {__NR_readlinkat, COMMAND_READLINK},
+#if defined(__NR_rename)
+    {__NR_rename, COMMAND_RENAME},
+#endif
+    {__NR_renameat, COMMAND_RENAME},
+#if defined(__NR_rmdir)
+    {__NR_rmdir, COMMAND_RMDIR},
+#endif
+#if defined(__NR_stat)
+    {__NR_stat, COMMAND_STAT},
+#endif
+#if defined(__NR_lstat)
+    {__NR_lstat, COMMAND_STAT},
+#endif
+#if defined(__NR_fstatat)
+    {__NR_fstatat, COMMAND_STAT},
+#endif
+#if defined(__NR_newfstatat)
+    {__NR_newfstatat, COMMAND_STAT},
+#endif
+#if defined(__NR_stat64)
+    {__NR_stat64, COMMAND_STAT},
+#endif
+#if defined(__NR_lstat64)
+    {__NR_lstat64, COMMAND_STAT},
+#endif
+#if defined(__NR_unlink)
+    {__NR_unlink, COMMAND_UNLINK},
+#endif
+    {__NR_unlinkat, COMMAND_UNLINK},
+  };
+
+  for (const auto& test : kSyscallToCommandMap) {
+    // Test with fast_check_in_client.
+    {
+      SCOPED_TRACE(base::StringPrintf("fast check, sysno=%d", test.sysno));
+      BrokerProcess process(ENOSYS, MakeBrokerCommandSet({test.command}), {},
+                            true, true);
+      EXPECT_TRUE(process.IsSyscallAllowed(test.sysno));
+      for (const auto& other : kSyscallToCommandMap) {
+        SCOPED_TRACE(base::StringPrintf("others test, sysno=%d", other.sysno));
+        EXPECT_EQ(other.command == test.command,
+                  process.IsSyscallAllowed(other.sysno));
+      }
+    }
+
+    // Test without fast_check_in_client.
+    {
+      SCOPED_TRACE(base::StringPrintf("no fast check, sysno=%d", test.sysno));
+      BrokerProcess process(ENOSYS, MakeBrokerCommandSet({test.command}), {},
+                            false, true);
+      EXPECT_TRUE(process.IsSyscallAllowed(test.sysno));
+      for (const auto& other : kSyscallToCommandMap) {
+        SCOPED_TRACE(base::StringPrintf("others test, sysno=%d", other.sysno));
+        EXPECT_TRUE(process.IsSyscallAllowed(other.sysno));
+      }
+    }
+  }
 }
 
 }  // namespace syscall_broker

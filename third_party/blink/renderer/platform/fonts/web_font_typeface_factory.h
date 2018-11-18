@@ -5,7 +5,7 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_FONTS_WEB_FONT_TYPEFACE_FACTORY_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_FONTS_WEB_FONT_TYPEFACE_FACTORY_H_
 
-#include "third_party/skia/include/ports/SkFontMgr.h"
+#include "third_party/skia/include/core/SkFontMgr.h"
 
 #include "build/build_config.h"
 #if defined(OS_WIN) || defined(OS_MACOSX)
@@ -27,6 +27,7 @@ class WebFontTypefaceFactory {
   static sk_sp<SkFontMgr> FontManagerForVariations();
   static sk_sp<SkFontMgr> FontManagerForSbix();
   static sk_sp<SkFontMgr> FreeTypeFontManager();
+  static sk_sp<SkFontMgr> FontManagerForColrCpal();
 
  private:
   // These values are written to logs.  New enum values can be added, but
@@ -38,7 +39,8 @@ class WebFontTypefaceFactory {
     kSuccessCbdtCblcColorFont = 3,
     kSuccessCff2Font = 4,
     kSuccessSbixFont = 5,
-    kMaxWebFontInstantiationResult = 6
+    kSuccessColrCpalFont = 6,
+    kMaxWebFontInstantiationResult = 7
   };
 
   static sk_sp<SkFontMgr> DefaultFontManager();

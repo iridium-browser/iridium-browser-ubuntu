@@ -36,6 +36,8 @@
 #include "third_party/blink/renderer/platform/fonts/font_cache.h"
 #include "third_party/blink/renderer/platform/fonts/font_description.h"
 #include "third_party/blink/renderer/platform/fonts/font_metrics.h"
+#include "third_party/blink/renderer/platform/fonts/string_truncator.h"
+#include "third_party/blink/renderer/platform/fonts/text_run_paint_info.h"
 #include "third_party/blink/renderer/platform/geometry/float_point.h"
 #include "third_party/blink/renderer/platform/geometry/float_rect.h"
 #include "third_party/blink/renderer/platform/geometry/int_point.h"
@@ -47,7 +49,6 @@
 #include "third_party/blink/renderer/platform/graphics/static_bitmap_image.h"
 #include "third_party/blink/renderer/platform/runtime_enabled_features.h"
 #include "third_party/blink/renderer/platform/text/bidi_text_run.h"
-#include "third_party/blink/renderer/platform/text/string_truncator.h"
 #include "third_party/blink/renderer/platform/text/text_run.h"
 #include "third_party/blink/renderer/platform/transforms/affine_transform.h"
 #include "third_party/blink/renderer/platform/weborigin/kurl.h"
@@ -259,7 +260,11 @@ std::unique_ptr<DragImage> DragImage::Create(const KURL& url,
   scaled_image_size.Scale(device_scale_factor);
   std::unique_ptr<CanvasResourceProvider> resource_provider(
       CanvasResourceProvider::Create(
-          scaled_image_size, CanvasResourceProvider::kSoftwareResourceUsage));
+          scaled_image_size, CanvasResourceProvider::kSoftwareResourceUsage,
+          nullptr,  // context_provider_wrapper
+          0,        // msaa_sample_count
+          CanvasColorParams(), CanvasResourceProvider::kDefaultPresentationMode,
+          nullptr));  // canvas_resource_dispatcher
   if (!resource_provider)
     return nullptr;
 
@@ -283,7 +288,7 @@ std::unique_ptr<DragImage> DragImage::Create(const KURL& url,
       url_string = StringTruncator::CenterTruncate(
           url_string, image_size.Width() - (kDragLabelBorderX * 2.0f),
           url_font);
-    IntPoint text_pos(
+    FloatPoint text_pos(
         kDragLabelBorderX,
         image_size.Height() -
             (kLabelBorderYOffset + url_font_data->GetFontMetrics().Descent()));

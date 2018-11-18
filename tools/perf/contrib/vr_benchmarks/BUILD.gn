@@ -18,10 +18,12 @@ group("vr_perf_tests") {
     "./vr_story_set.py",
     "./webvr_sample_pages.py",
     "./webvr_wpr_pages.py",
+    "./webxr_sample_pages.py",
     "//chrome/android/shared_preference_files/test/",
     "//third_party/gvr-android-sdk/test-apks/vr_services/vr_services_current.apk",
     "//third_party/gvr-android-sdk/test-apks/vr_keyboard/vr_keyboard_current.apk",
-    "//chrome/test/data/vr/webvr_info/samples/",
+    "//chrome/test/data/xr/webvr_info/samples/",
+    "//chrome/test/data/xr/webxr_samples/",
 
     # Necessary for running on bots
     "//testing/scripts/common.py",
@@ -30,6 +32,7 @@ group("vr_perf_tests") {
   ]
   data_deps = [
     "//chrome/android:vr_nfc_simulator_apk",
+    "//testing:run_perf_test",
   ]
 
   # We'll only ever use the assets if it's a Chrome-branded build. We don't have

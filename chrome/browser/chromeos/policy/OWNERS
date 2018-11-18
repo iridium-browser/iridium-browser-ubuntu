@@ -1,6 +1,4 @@
-bartfab@chromium.org
-atwilson@chromium.org
-emaxx@chromium.org
-pastarmovj@chromium.org
+set noparent
+file://chromeos/policy/OWNERS
 
 # COMPONENT: Enterprise

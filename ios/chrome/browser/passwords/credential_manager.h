@@ -8,6 +8,7 @@
 #include "components/password_manager/core/browser/credential_manager_impl.h"
 
 namespace web {
+class WebFrame;
 class WebState;
 }
 
@@ -35,7 +36,9 @@ class CredentialManager {
   // PreventSilentAccess on CredentialManagerImpl.
   bool HandleScriptCommand(const base::DictionaryValue& json,
                            const GURL& origin_url,
-                           bool user_is_interacting);
+                           bool user_is_interacting,
+                           bool is_main_frame,
+                           web::WebFrame* sender_frame);
 
   // Passed as callback to CredentialManagerImpl::Get.
   void SendGetResponse(

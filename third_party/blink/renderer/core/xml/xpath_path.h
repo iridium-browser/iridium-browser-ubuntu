@@ -32,7 +32,7 @@
 
 namespace blink {
 
-namespace XPath {
+namespace xpath {
 
 class Predicate;
 class Step;
@@ -41,7 +41,7 @@ class Filter final : public Expression {
  public:
   Filter(Expression*, HeapVector<Member<Predicate>>&);
   ~Filter() override;
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
   Value Evaluate(EvaluationContext&) const override;
 
@@ -56,7 +56,7 @@ class LocationPath final : public Expression {
  public:
   LocationPath();
   ~LocationPath() override;
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
   Value Evaluate(EvaluationContext&) const override;
   void SetAbsolute(bool value) {
@@ -79,7 +79,7 @@ class Path final : public Expression {
  public:
   Path(Expression*, LocationPath*);
   ~Path() override;
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
   Value Evaluate(EvaluationContext&) const override;
 
@@ -90,7 +90,7 @@ class Path final : public Expression {
   Member<LocationPath> path_;
 };
 
-}  // namespace XPath
+}  // namespace xpath
 
 }  // namespace blink
 #endif  // THIRD_PARTY_BLINK_RENDERER_CORE_XML_XPATH_PATH_H_

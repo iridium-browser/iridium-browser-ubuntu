@@ -4,9 +4,9 @@
 
 #include "chrome/browser/ui/webui/chromeos/login/error_screen_handler.h"
 
-#include "base/message_loop/message_loop.h"
 #include "base/time/time.h"
 #include "chrome/browser/chromeos/login/screens/error_screen.h"
+#include "chrome/browser/ui/webui/chromeos/network_element_localized_strings_provider.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/login/localized_values_builder.h"
@@ -103,8 +103,12 @@ void ErrorScreenHandler::DeclareLocalizedValues(
   builder->Add("rebootButton", IDS_RELAUNCH_BUTTON);
   builder->Add("diagnoseButton", IDS_DIAGNOSE_BUTTON);
   builder->Add("configureCertsButton", IDS_MANAGE_CERTIFICATES);
-  builder->Add("continueButton", IDS_NETWORK_SELECTION_CONTINUE_BUTTON);
+  builder->Add("continueButton", IDS_WELCOME_SELECTION_CONTINUE_BUTTON);
   builder->Add("okButton", IDS_APP_OK);
+  builder->Add("proxySettingsMenuName",
+               IDS_NETWORK_PROXY_SETTINGS_LIST_ITEM_NAME);
+  builder->Add("addWiFiNetworkMenuName", IDS_NETWORK_ADD_WI_FI_LIST_ITEM_NAME);
+  network_element::AddLocalizedValuesToBuilder(builder);
 }
 
 void ErrorScreenHandler::Initialize() {
@@ -116,11 +120,6 @@ void ErrorScreenHandler::Initialize() {
     Show();
     show_on_init_ = false;
   }
-}
-
-void ErrorScreenHandler::OnConnectToNetworkRequested() {
-  if (showing_ && screen_)
-    screen_->OnUserAction(ErrorScreen::kUserActionConnectRequested);
 }
 
 void ErrorScreenHandler::HandleHideCaptivePortal() {

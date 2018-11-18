@@ -1,5 +1,9 @@
 # Being ported, https://crbug.com/754861.
 
+# https://crbug.com/780317 - Flakily timeout under QEMU s/w emulation of ARM64.
+-BluetoothBlocklistTest.InvalidUUID
+-WebBluetoothDeviceIdTest.DefaultConstructor
+
 # These rely on chmod() for MakeFileUnread/writable(), https://crbug.com/759853.
 -BaseFileTest.ReadonlyBaseFile
 -BaseFileTest.RenameWithError
@@ -30,6 +34,9 @@
 -MediaStreamManagerTest.MakeMediaAccessRequest
 -MediaStreamManagerTest.MakeMultipleRequests
 
+# Flaky: https://crbug.com/879213
+-IndexedDBDispatcherHostTest.NotifyIndexedDBContentChanged
+
 # Failing: https://crbug.com/771701.
 -IndexedDBFactoryTest.DataFormatVersion
 
@@ -58,8 +65,8 @@
 -RenderWidgetHostViewAuraOverscrollTest.GestureScrollDebounceOverscrolls
 -RenderWidgetHostViewAuraOverscrollTest.GestureScrollDebounceTimerOverscroll
 -RenderWidgetHostViewAuraOverscrollTest.TouchGestureEndDispatchedAfterOverscrollComplete
--RenderWidgetHostViewAuraWheelScrollLatchingEnabledTest.TimerBasedWheelEventPhaseInfo
--RenderWidgetHostViewAuraAsyncWheelEventsEnabledTest.TimerBasedWheelEventPhaseInfo
+-RenderWidgetHostViewAuraTest.SyntheticFlingCancelAtTouchpadScrollBegin
+-RenderWidgetHostViewAuraTest.TimerBasedWheelEventPhaseInfo
 
-# Flaky, https://crbug.com/813795, https://crbug.com/800465.
--RTCRtpSenderTest.ReplaceTrack*
+# Flaky, https://crbug.com/884250.
+-ReferrerSanitizerTest.SanitizesPolicyForNonEmptyReferrers

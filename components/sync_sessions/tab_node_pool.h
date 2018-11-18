@@ -11,6 +11,7 @@
 #include <set>
 #include <string>
 
+#include "base/feature_list.h"
 #include "base/macros.h"
 #include "components/sessions/core/session_id.h"
 
@@ -28,6 +29,8 @@ namespace sync_sessions {
 // 1. Associated   : Sync node is used and associated with a tab.
 // 2. Free         : Sync node is unused.
 
+extern const base::Feature kTabNodePoolImmediateDeletion;
+
 class TabNodePool {
  public:
   TabNodePool();
@@ -42,18 +45,18 @@ class TabNodePool {
 
   static const int kInvalidTabNodeID;
 
-  // Fills |tab_node_id| with a tab node associated with |tab_id|.
-  // If tab_id is already associated with a tab_node_id, reuses the existing
-  // association. Otherwise attempts to get the next free tab node and
-  // associate it with |tab_id|. If none are available, will create a new tab
-  // node.
-  // Returns true if a pre-existing tab node could be reused, false if a new one
-  // had to be created.
-  bool GetTabNodeForTab(SessionID tab_id, int* tab_node_id);
+  // Returns the tab node associated with |tab_id| or kInvalidTabNodeID if
+  // no association existed.
+  int GetTabNodeIdFromTabId(SessionID tab_id) const;
 
   // Returns the tab_id for |tab_node_id| if it is associated else returns an
   // invalid ID.
   SessionID GetTabIdFromTabNodeId(int tab_node_id) const;
+
+  // Gets the next free tab node (or creates a new one if needed) and associates
+  // it to |tab_id|. Returns the tab node ID associated to |tab_id|. |tab_id|
+  // must not be previously associated.
+  int AssociateWithFreeTabNode(SessionID tab_id);
 
   // Reassociates |tab_node_id| with |tab_id|. If |tab_node_id| is not already
   // known, it is added to the tab node pool before being associated.
@@ -68,21 +71,17 @@ class TabNodePool {
   // does not grow too large.
   void CleanupTabNodes(std::set<int>* deleted_node_ids);
 
-  // Clear tab pool.
-  void Clear();
+  // Deletes all known mappings for |tab_node_id|. As opposed to FreeTab(), it
+  // does NOT free the node for later reuse. This is used for foreign sessions
+  // when remote deletions are received.
+  void DeleteTabNode(int tab_node_id);
 
-  // Return the number of tab nodes this client currently has allocated
-  // (including both free and associated nodes).
-  size_t Capacity() const;
+  // Returns tab node IDs for all known (used or free) tab nodes.
+  std::set<int> GetAllTabNodeIds() const;
 
-  // Return empty status (all tab nodes are in use).
-  bool Empty() const;
-
-  // Return full status (no tab nodes are in use).
-  bool Full();
+  int GetMaxUsedTabNodeIdForTest() const;
 
  private:
-  friend class SyncTabNodePoolTest;
   using TabNodeIDToTabIDMap = std::map<int, SessionID>;
   using TabIDToTabNodeIDMap = std::map<SessionID, int>;
 
@@ -107,9 +106,13 @@ class TabNodePool {
   // The node ids for the set of free sync nodes.
   std::set<int> free_nodes_pool_;
 
-  // The maximum used tab_node id for a sync node. A new sync node will always
-  // be created with max_used_tab_node_id_ + 1.
+  // The maximum used tab_node id for a sync node.
   int max_used_tab_node_id_;
+
+  // Not actual tab nodes, but instead represent "holes", i.e. tab node IDs
+  // that are not used within the range [0..max_used_tab_node_id_). This
+  // allows AssociateWithFreeTabNode() to return a compact distribution of IDs.
+  std::set<int> missing_nodes_pool_;
 
   DISALLOW_COPY_AND_ASSIGN(TabNodePool);
 };

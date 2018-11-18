@@ -8,7 +8,6 @@
 #include <utility>
 
 #include "ash/public/cpp/vector_icons/vector_icons.h"
-#include "ash/resources/grit/ash_resources.h"
 #include "ash/strings/grit/ash_strings.h"
 #include "ash/system/tray/system_tray_notifier.h"
 #include "base/strings/string16.h"
@@ -107,7 +106,7 @@ void LocaleNotificationController::OnLocaleChanged(
           l10n_util::GetStringUTF16(IDS_ASH_STATUS_TRAY_LOCALE_CHANGE_TITLE),
           l10n_util::GetStringFUTF16(IDS_ASH_STATUS_TRAY_LOCALE_CHANGE_MESSAGE,
                                      from, to),
-          gfx::Image(), base::string16() /* display_source */, GURL(),
+          base::string16() /* display_source */, GURL(),
           message_center::NotifierId(
               message_center::NotifierId::SYSTEM_COMPONENT, kNotifierLocale),
           optional, new LocaleNotificationDelegate(std::move(callback)),

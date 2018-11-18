@@ -22,7 +22,7 @@
 #include "base/sequenced_task_runner.h"
 #include "base/strings/string_util.h"
 #include "base/strings/sys_string_conversions.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "components/device_event_log/device_event_log.h"
 #include "services/device/hid/hid_connection_win.h"
@@ -66,9 +66,8 @@ void HidServiceWin::Connect(const std::string& device_guid,
   }
 
   task_runner_->PostTask(
-      FROM_HERE,
-      base::BindOnce(callback, base::MakeRefCounted<HidConnectionWin>(
-                                   device_info, std::move(file))));
+      FROM_HERE, base::BindOnce(callback, HidConnectionWin::Create(
+                                              device_info, std::move(file))));
 }
 
 base::WeakPtr<HidService> HidServiceWin::GetWeakPtr() {

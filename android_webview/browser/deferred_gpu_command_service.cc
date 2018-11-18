@@ -15,11 +15,11 @@
 #include "content/public/browser/gpu_data_manager.h"
 #include "content/public/browser/gpu_utils.h"
 #include "content/public/common/content_switches.h"
-#include "gpu/command_buffer/service/gpu_preferences.h"
 #include "gpu/command_buffer/service/gpu_switches.h"
 #include "gpu/command_buffer/service/sync_point_manager.h"
 #include "gpu/config/gpu_feature_info.h"
 #include "gpu/config/gpu_info.h"
+#include "gpu/config/gpu_preferences.h"
 #include "gpu/config/gpu_util.h"
 #include "ui/gl/gl_share_group.h"
 
@@ -53,6 +53,78 @@ ScopedAllowGL::~ScopedAllowGL() {
   }
 }
 
+// gpu::CommandBufferTaskExectuor::Sequence implementation that encapsulates a
+// SyncPointOrderData, and posts tasks to the task executors global task queue.
+class TaskForwardingSequence : public gpu::CommandBufferTaskExecutor::Sequence {
+ public:
+  explicit TaskForwardingSequence(DeferredGpuCommandService* service)
+      : gpu::CommandBufferTaskExecutor::Sequence(),
+        service_(service),
+        sync_point_order_data_(
+            service->sync_point_manager()->CreateSyncPointOrderData()),
+        weak_ptr_factory_(this) {}
+  ~TaskForwardingSequence() override { sync_point_order_data_->Destroy(); }
+
+  // CommandBufferTaskExecutor::Sequence implementation.
+  gpu::SequenceId GetSequenceId() override {
+    return sync_point_order_data_->sequence_id();
+  }
+
+  bool ShouldYield() override { return false; }
+
+  // Should not be called because BlockThreadOnWaitSyncToken() returns true,
+  // and the client should not disable sequences to wait for sync tokens.
+  void SetEnabled(bool enabled) override { NOTREACHED(); }
+
+  void ScheduleTask(base::OnceClosure task,
+                    std::vector<gpu::SyncToken> sync_token_fences) override {
+    uint32_t order_num =
+        sync_point_order_data_->GenerateUnprocessedOrderNumber();
+    // Use a weak ptr because the task executor holds the tasks, and the
+    // sequence will be destroyed before the task executor.
+    service_->ScheduleTask(
+        base::BindOnce(&TaskForwardingSequence::RunTask,
+                       weak_ptr_factory_.GetWeakPtr(), std::move(task),
+                       std::move(sync_token_fences), order_num),
+        false /* out_of_order */);
+  }
+
+  // Should not be called because tasks aren't reposted to wait for sync tokens,
+  // or for yielding execution since ShouldYield() returns false.
+  void ContinueTask(base::OnceClosure task) override { NOTREACHED(); }
+
+ private:
+  // Method to wrap scheduled task with the order number processing required for
+  // sync tokens.
+  void RunTask(base::OnceClosure task,
+               std::vector<gpu::SyncToken> sync_token_fences,
+               uint32_t order_num) {
+    // Block thread when waiting for sync token. This avoids blocking when we
+    // encounter the wait command later.
+    for (const auto& sync_token : sync_token_fences) {
+      base::WaitableEvent completion;
+      if (service_->sync_point_manager()->Wait(
+              sync_token, sync_point_order_data_->sequence_id(), order_num,
+              base::BindOnce(&base::WaitableEvent::Signal,
+                             base::Unretained(&completion)))) {
+        TRACE_EVENT0("android_webview",
+                     "TaskForwardingSequence::RunTask::WaitSyncToken");
+        completion.Wait();
+      }
+    }
+    sync_point_order_data_->BeginProcessingOrderNumber(order_num);
+    std::move(task).Run();
+    sync_point_order_data_->FinishProcessingOrderNumber(order_num);
+  }
+
+  // Raw ptr is ok because the task executor (service) is guaranteed to outlive
+  // its task sequences.
+  DeferredGpuCommandService* const service_;
+  scoped_refptr<gpu::SyncPointOrderData> sync_point_order_data_;
+  base::WeakPtrFactory<TaskForwardingSequence> weak_ptr_factory_;
+  DISALLOW_COPY_AND_ASSIGN(TaskForwardingSequence);
+};
+
 // static
 DeferredGpuCommandService*
 DeferredGpuCommandService::CreateDeferredGpuCommandService() {
@@ -62,16 +134,14 @@ DeferredGpuCommandService::CreateDeferredGpuCommandService() {
   gpu::GpuPreferences gpu_preferences =
       content::GetGpuPreferencesFromCommandLine();
   bool success = gpu::InitializeGLThreadSafe(
-      base::CommandLine::ForCurrentProcess(),
-      gpu_preferences.ignore_gpu_blacklist,
-      gpu_preferences.disable_gpu_driver_bug_workarounds,
-      gpu_preferences.log_gpu_control_list_decisions, &gpu_info,
+      base::CommandLine::ForCurrentProcess(), gpu_preferences, &gpu_info,
       &gpu_feature_info);
   if (!success) {
     LOG(FATAL) << "gpu::InitializeGLThreadSafe() failed.";
   }
-  return new DeferredGpuCommandService(gpu_preferences, gpu_info,
-                                       gpu_feature_info);
+  return new DeferredGpuCommandService(
+      std::make_unique<gpu::SyncPointManager>(), gpu_preferences, gpu_info,
+      gpu_feature_info);
 }
 
 // static
@@ -82,14 +152,17 @@ DeferredGpuCommandService* DeferredGpuCommandService::GetInstance() {
 }
 
 DeferredGpuCommandService::DeferredGpuCommandService(
+    std::unique_ptr<gpu::SyncPointManager> sync_point_manager,
     const gpu::GpuPreferences& gpu_preferences,
     const gpu::GPUInfo& gpu_info,
     const gpu::GpuFeatureInfo& gpu_feature_info)
-    : gpu::InProcessCommandBuffer::Service(gpu_preferences,
-                                           nullptr,
-                                           nullptr,
-                                           gpu_feature_info),
-      sync_point_manager_(new gpu::SyncPointManager()),
+    : gpu::CommandBufferTaskExecutor(gpu_preferences,
+                                     gpu_feature_info,
+                                     sync_point_manager.get(),
+                                     nullptr,
+                                     nullptr,
+                                     gl::GLSurfaceFormat()),
+      sync_point_manager_(std::move(sync_point_manager)),
       gpu_info_(gpu_info) {}
 
 DeferredGpuCommandService::~DeferredGpuCommandService() {
@@ -110,10 +183,14 @@ void DeferredGpuCommandService::RequestProcessGL(bool for_idle) {
 }
 
 // Called from different threads!
-void DeferredGpuCommandService::ScheduleTask(base::OnceClosure task) {
+void DeferredGpuCommandService::ScheduleTask(base::OnceClosure task,
+                                             bool out_of_order) {
   {
     base::AutoLock lock(tasks_lock_);
-    tasks_.push(std::move(task));
+    if (out_of_order)
+      tasks_.emplace_front(std::move(task));
+    else
+      tasks_.emplace_back(std::move(task));
   }
   if (ScopedAllowGL::IsAllowed()) {
     RunTasks();
@@ -127,6 +204,15 @@ size_t DeferredGpuCommandService::IdleQueueSize() {
   return idle_tasks_.size();
 }
 
+std::unique_ptr<gpu::CommandBufferTaskExecutor::Sequence>
+DeferredGpuCommandService::CreateSequence() {
+  return std::make_unique<TaskForwardingSequence>(this);
+}
+
+void DeferredGpuCommandService::ScheduleOutOfOrderTask(base::OnceClosure task) {
+  ScheduleTask(std::move(task), true /* out_of_order */);
+}
+
 void DeferredGpuCommandService::ScheduleDelayedWork(
     base::OnceClosure callback) {
   {
@@ -137,10 +223,8 @@ void DeferredGpuCommandService::ScheduleDelayedWork(
 }
 
 void DeferredGpuCommandService::PerformIdleWork(bool is_idle) {
-  TRACE_EVENT1("android_webview",
-               "DeferredGpuCommandService::PerformIdleWork",
-               "is_idle",
-               is_idle);
+  TRACE_EVENT1("android_webview", "DeferredGpuCommandService::PerformIdleWork",
+               "is_idle", is_idle);
   DCHECK(ScopedAllowGL::IsAllowed());
   static const base::TimeDelta kMaxIdleAge =
       base::TimeDelta::FromMilliseconds(16);
@@ -172,10 +256,12 @@ void DeferredGpuCommandService::PerformAllIdleWork() {
   }
 }
 
-bool DeferredGpuCommandService::UseVirtualizedGLContexts() { return true; }
+bool DeferredGpuCommandService::ForceVirtualizedGLContexts() const {
+  return true;
+}
 
-gpu::SyncPointManager* DeferredGpuCommandService::sync_point_manager() {
-  return sync_point_manager_.get();
+bool DeferredGpuCommandService::ShouldCreateMemoryTracker() const {
+  return false;
 }
 
 void DeferredGpuCommandService::RunTasks() {
@@ -191,7 +277,7 @@ void DeferredGpuCommandService::RunTasks() {
     {
       base::AutoLock lock(tasks_lock_);
       task = std::move(tasks_.front());
-      tasks_.pop();
+      tasks_.pop_front();
     }
     std::move(task).Run();
     {
@@ -199,14 +285,6 @@ void DeferredGpuCommandService::RunTasks() {
       has_more_tasks = tasks_.size() > 0;
     }
   }
-}
-
-void DeferredGpuCommandService::AddRef() const {
-  base::RefCountedThreadSafe<DeferredGpuCommandService>::AddRef();
-}
-
-void DeferredGpuCommandService::Release() const {
-  base::RefCountedThreadSafe<DeferredGpuCommandService>::Release();
 }
 
 bool DeferredGpuCommandService::BlockThreadOnWaitSyncToken() const {

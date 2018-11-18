@@ -8,8 +8,9 @@
 
 #include "base/command_line.h"
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop/message_loop_current.h"
 #include "base/strings/string16.h"
+#include "build/build_config.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/views/frame/browser_view.h"
@@ -137,6 +138,11 @@ bool RenderViewContextMenuViews::GetAcceleratorForCommandId(
     case IDC_CONTENT_CONTEXT_EXIT_FULLSCREEN:
       // Esc only works in HTML5 (site-triggered) fullscreen.
       if (IsHTML5Fullscreen()) {
+        // Per UX design feedback, do not show an accelerator when press and
+        // hold is required to exit fullscreen.
+        if (IsPressAndHoldEscRequiredToExitFullscreen())
+          return false;
+
         *accel = ui::Accelerator(ui::VKEY_ESCAPE, ui::EF_NONE);
         return true;
       }
@@ -159,6 +165,18 @@ bool RenderViewContextMenuViews::GetAcceleratorForCommandId(
     case IDC_VIEW_SOURCE:
       *accel = ui::Accelerator(ui::VKEY_U, ui::EF_CONTROL_DOWN);
       return true;
+
+    case IDC_CONTENT_CONTEXT_EMOJI:
+#if defined(OS_WIN)
+      *accel = ui::Accelerator(ui::VKEY_OEM_PERIOD, ui::EF_COMMAND_DOWN);
+      return true;
+#elif defined(OS_MACOSX)
+      *accel = ui::Accelerator(ui::VKEY_SPACE,
+                               ui::EF_COMMAND_DOWN | ui::EF_CONTROL_DOWN);
+      return true;
+#else
+      return false;
+#endif
 
     default:
       return false;
@@ -278,8 +296,7 @@ void RenderViewContextMenuViews::Show() {
   }
   // Enable recursive tasks on the message loop so we can get updates while
   // the context menu is being displayed.
-  base::MessageLoop::ScopedNestableTaskAllower allow(
-      base::MessageLoop::current());
+  base::MessageLoopCurrent::ScopedNestableTaskAllower allow;
   RunMenuAt(top_level_widget, screen_point, params().source_type);
 }
 

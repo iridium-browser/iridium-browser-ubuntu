@@ -9,14 +9,14 @@
 
 #include "base/command_line.h"
 #include "base/logging.h"
-#include "base/memory/ptr_util.h"
 #include "base/single_thread_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "build/build_config.h"
 #include "components/network_session_configurator/browser/network_session_configurator.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/cookie_store_factory.h"
 #include "content/public/common/content_switches.h"
@@ -27,7 +27,6 @@
 #include "net/cert/cert_verifier.h"
 #include "net/cert/ct_policy_enforcer.h"
 #include "net/cert/ct_policy_status.h"
-#include "net/cert/do_nothing_ct_verifier.h"
 #include "net/cookies/cookie_store.h"
 #include "net/dns/host_resolver.h"
 #include "net/dns/mapped_host_resolver.h"
@@ -49,24 +48,40 @@
 #endif  // BUILDFLAG(ENABLE_REPORTING)
 
 namespace content {
-
 namespace {
 
-// TODO(rsleevi): Embedders should see https://crbug.com/700973 before using
-// this pattern.
-class IgnoresCTPolicyEnforcer : public net::CTPolicyEnforcer {
+net::CertVerifier* g_cert_verifier_for_testing = nullptr;
+
+// A CertVerifier that forwards all requests to
+// |g_cert_verifier_for_profile_io_data_testing|. This is used to allow
+// BrowserContexts to have their own std::unique_ptr<net::CertVerifier> while
+// forwarding calls to the shared verifier.
+class WrappedCertVerifierForTesting : public net::CertVerifier {
  public:
-  IgnoresCTPolicyEnforcer() = default;
-  ~IgnoresCTPolicyEnforcer() override = default;
+  WrappedCertVerifierForTesting() = default;
+  ~WrappedCertVerifierForTesting() override = default;
 
-  net::ct::CTPolicyCompliance CheckCompliance(
-      net::X509Certificate* cert,
-      const net::SCTList& verified_scts,
-      const net::NetLogWithSource& net_log) override {
-    return net::ct::CTPolicyCompliance::CT_POLICY_COMPLIES_VIA_SCTS;
+  // CertVerifier implementation
+  int Verify(const RequestParams& params,
+             net::CertVerifyResult* verify_result,
+             net::CompletionOnceCallback callback,
+             std::unique_ptr<Request>* out_req,
+             const net::NetLogWithSource& net_log) override {
+    verify_result->Reset();
+    if (!g_cert_verifier_for_testing)
+      return net::ERR_FAILED;
+    return g_cert_verifier_for_testing->Verify(
+        params, verify_result, std::move(callback), out_req, net_log);
   }
-};
+  void SetConfig(const Config& config) override {
+    if (!g_cert_verifier_for_testing)
+      return;
+    return g_cert_verifier_for_testing->SetConfig(config);
+  }
 
+ private:
+  DISALLOW_COPY_AND_ASSIGN(WrappedCertVerifierForTesting);
+};
 }  // namespace
 
 ShellURLRequestContextGetter::ShellURLRequestContextGetter(
@@ -104,13 +119,24 @@ void ShellURLRequestContextGetter::NotifyContextShuttingDown() {
   url_request_context_ = nullptr;  // deletes it
 }
 
+std::string ShellURLRequestContextGetter::GetAcceptLanguages() {
+  return "en-us,en";
+}
+
+void ShellURLRequestContextGetter::SetCertVerifierForTesting(
+    net::CertVerifier* cert_verifier) {
+  g_cert_verifier_for_testing = cert_verifier;
+}
+
 std::unique_ptr<net::NetworkDelegate>
 ShellURLRequestContextGetter::CreateNetworkDelegate() {
-  return base::WrapUnique(new ShellNetworkDelegate);
+  return std::make_unique<ShellNetworkDelegate>();
 }
 
 std::unique_ptr<net::CertVerifier>
 ShellURLRequestContextGetter::GetCertVerifier() {
+  if (g_cert_verifier_for_testing)
+    return std::make_unique<WrappedCertVerifierForTesting>();
   return net::CertVerifier::CreateDefault();
 }
 
@@ -140,20 +166,17 @@ net::URLRequestContext* ShellURLRequestContextGetter::GetURLRequestContext() {
     builder.set_net_log(net_log_);
     builder.set_network_delegate(CreateNetworkDelegate());
     std::unique_ptr<net::CookieStore> cookie_store =
-        CreateCookieStore(CookieStoreConfig());
+        CreateCookieStore(CookieStoreConfig(), net_log_);
     std::unique_ptr<net::ChannelIDService> channel_id_service =
         std::make_unique<net::ChannelIDService>(
             new net::DefaultChannelIDStore(nullptr));
     cookie_store->SetChannelIDServiceID(channel_id_service->GetUniqueID());
     builder.SetCookieAndChannelIdStores(std::move(cookie_store),
                                         std::move(channel_id_service));
-    builder.set_accept_language("en-us,en");
+    builder.set_accept_language(GetAcceptLanguages());
     builder.set_user_agent(GetShellUserAgent());
 
     builder.SetCertVerifier(GetCertVerifier());
-    builder.set_ct_verifier(base::WrapUnique(new net::DoNothingCTVerifier));
-    builder.set_ct_policy_enforcer(
-        base::WrapUnique(new IgnoresCTPolicyEnforcer));
 
     std::unique_ptr<net::ProxyResolutionService> proxy_resolution_service =
         GetProxyService();
@@ -194,9 +217,8 @@ net::URLRequestContext* ShellURLRequestContextGetter::GetURLRequestContext() {
     // ShellContentBrowserClient::IsHandledURL().
 
     for (auto& protocol_handler : protocol_handlers_) {
-      builder.SetProtocolHandler(
-          protocol_handler.first,
-          base::WrapUnique(protocol_handler.second.release()));
+      builder.SetProtocolHandler(protocol_handler.first,
+                                 std::move(protocol_handler.second));
     }
     protocol_handlers_.clear();
 
@@ -212,13 +234,18 @@ net::URLRequestContext* ShellURLRequestContextGetter::GetURLRequestContext() {
 #if BUILDFLAG(ENABLE_REPORTING)
     if (base::FeatureList::IsEnabled(network::features::kReporting)) {
       std::unique_ptr<net::ReportingPolicy> reporting_policy =
-          std::make_unique<net::ReportingPolicy>();
-      if (command_line.HasSwitch(switches::kRunLayoutTest))
+          net::ReportingPolicy::Create();
+      if (command_line.HasSwitch(switches::kRunWebTests))
         reporting_policy->delivery_interval =
             base::TimeDelta::FromMilliseconds(100);
       builder.set_reporting_policy(std::move(reporting_policy));
     }
+
+    builder.set_network_error_logging_enabled(
+        base::FeatureList::IsEnabled(network::features::kNetworkErrorLogging));
 #endif  // BUILDFLAG(ENABLE_REPORTING)
+
+    builder.set_enable_brotli(true);
 
     url_request_context_ = builder.Build();
   }
@@ -228,11 +255,7 @@ net::URLRequestContext* ShellURLRequestContextGetter::GetURLRequestContext() {
 
 scoped_refptr<base::SingleThreadTaskRunner>
     ShellURLRequestContextGetter::GetNetworkTaskRunner() const {
-  return BrowserThread::GetTaskRunnerForThread(BrowserThread::IO);
-}
-
-net::HostResolver* ShellURLRequestContextGetter::host_resolver() {
-  return url_request_context_->host_resolver();
+  return base::CreateSingleThreadTaskRunnerWithTraits({BrowserThread::IO});
 }
 
 }  // namespace content

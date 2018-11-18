@@ -9,7 +9,7 @@
 #ifndef LIBANGLE_VALIDATION_ES3_H_
 #define LIBANGLE_VALIDATION_ES3_H_
 
-#include "libANGLE/PackedGLEnums.h"
+#include "common/PackedEnums.h"
 
 #include <GLES3/gl3.h>
 
@@ -146,11 +146,11 @@ bool ValidateES3TexStorage3DParameters(Context *context,
                                        GLsizei height,
                                        GLsizei depth);
 
-bool ValidateBeginQuery(Context *context, GLenum target, GLuint id);
+bool ValidateBeginQuery(Context *context, QueryType target, GLuint id);
 
-bool ValidateEndQuery(Context *context, GLenum target);
+bool ValidateEndQuery(Context *context, QueryType target);
 
-bool ValidateGetQueryiv(Context *context, GLenum target, GLenum pname, GLint *params);
+bool ValidateGetQueryiv(Context *context, QueryType target, GLenum pname, GLint *params);
 
 bool ValidateGetQueryObjectuiv(Context *context, GLuint id, GLenum pname, GLuint *params);
 
@@ -178,7 +178,7 @@ bool ValidateInvalidateSubFramebuffer(Context *context,
 bool ValidateClearBuffer(Context *context);
 
 bool ValidateDrawRangeElements(Context *context,
-                               GLenum mode,
+                               PrimitiveMode mode,
                                GLuint start,
                                GLuint end,
                                GLsizei count,
@@ -264,6 +264,35 @@ bool ValidateCopyTexSubImage3D(Context *context,
                                GLint y,
                                GLsizei width,
                                GLsizei height);
+bool ValidateCopyTexture3DANGLE(Context *context,
+                                GLuint sourceId,
+                                GLint sourceLevel,
+                                TextureTarget destTarget,
+                                GLuint destId,
+                                GLint destLevel,
+                                GLint internalFormat,
+                                GLenum destType,
+                                GLboolean unpackFlipY,
+                                GLboolean unpackPremultiplyAlpha,
+                                GLboolean unpackUnmultiplyAlpha);
+bool ValidateCopySubTexture3DANGLE(Context *context,
+                                   GLuint sourceId,
+                                   GLint sourceLevel,
+                                   TextureTarget destTarget,
+                                   GLuint destId,
+                                   GLint destLevel,
+                                   GLint xoffset,
+                                   GLint yoffset,
+                                   GLint zoffset,
+                                   GLint x,
+                                   GLint y,
+                                   GLint z,
+                                   GLsizei width,
+                                   GLsizei height,
+                                   GLsizei depth,
+                                   GLboolean unpackFlipY,
+                                   GLboolean unpackPremultiplyAlpha,
+                                   GLboolean unpackUnmultiplyAlpha);
 bool ValidateTexImage3D(Context *context,
                         TextureType target,
                         GLint level,
@@ -347,7 +376,7 @@ bool ValidateDeleteTransformFeedbacks(Context *context, GLint n, const GLuint *i
 bool ValidateGenVertexArrays(Context *context, GLint n, GLuint *arrays);
 bool ValidateDeleteVertexArrays(Context *context, GLint n, const GLuint *arrays);
 
-bool ValidateBeginTransformFeedback(Context *context, GLenum primitiveMode);
+bool ValidateBeginTransformFeedback(Context *context, PrimitiveMode primitiveMode);
 
 bool ValidateGetBufferPointerv(Context *context, BufferBinding target, GLenum pname, void **params);
 bool ValidateGetBufferPointervRobustANGLE(Context *context,
@@ -413,7 +442,7 @@ bool ValidateGetSynciv(Context *context,
                        GLint *values);
 
 bool ValidateDrawElementsInstanced(Context *context,
-                                   GLenum mode,
+                                   PrimitiveMode mode,
                                    GLsizei count,
                                    GLenum type,
                                    const void *indices,
@@ -539,7 +568,7 @@ bool ValidateUniformBlockBinding(Context *context,
                                  GLuint uniformBlockIndex,
                                  GLuint uniformBlockBinding);
 bool ValidateDrawArraysInstanced(Context *context,
-                                 GLenum mode,
+                                 PrimitiveMode mode,
                                  GLint first,
                                  GLsizei count,
                                  GLsizei primcount);
@@ -592,6 +621,17 @@ bool ValidateGetInternalformativ(Context *context,
                                  GLenum pname,
                                  GLsizei bufSize,
                                  GLint *params);
+
+bool ValidateBindFragDataLocationIndexedEXT(Context *context,
+                                            GLuint program,
+                                            GLuint colorNumber,
+                                            GLuint index,
+                                            const char *name);
+bool ValidateBindFragDataLocationEXT(Context *context,
+                                     GLuint program,
+                                     GLuint colorNumber,
+                                     const char *name);
+bool ValidateGetFragDataIndexEXT(Context *context, GLuint program, const char *name);
 
 }  // namespace gl
 

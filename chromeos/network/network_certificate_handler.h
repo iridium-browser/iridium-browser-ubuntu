@@ -8,14 +8,15 @@
 #include <string>
 
 #include "base/macros.h"
-#include "chromeos/cert_loader.h"
 #include "chromeos/chromeos_export.h"
+#include "chromeos/network/network_cert_loader.h"
 
 namespace chromeos {
 
 // This class maintains user and server CA certificate lists for network
 // configuration UI.
-class CHROMEOS_EXPORT NetworkCertificateHandler : public CertLoader::Observer {
+class CHROMEOS_EXPORT NetworkCertificateHandler
+    : public NetworkCertLoader::Observer {
  public:
   class Observer {
    public:
@@ -76,13 +77,14 @@ class CHROMEOS_EXPORT NetworkCertificateHandler : public CertLoader::Observer {
   void NotifyCertificatsChangedForTest();
 
  private:
-  // CertLoader::Observer
+  // NetworkCertLoader::Observer
   void OnCertificatesLoaded(
       const net::ScopedCERTCertificateList& cert_list) override;
 
   void ProcessCertificates(const net::ScopedCERTCertificateList& cert_list);
 
-  base::ObserverList<NetworkCertificateHandler::Observer> observer_list_;
+  base::ObserverList<NetworkCertificateHandler::Observer>::Unchecked
+      observer_list_;
 
   std::vector<Certificate> server_ca_certificates_;
   std::vector<Certificate> user_certificates_;

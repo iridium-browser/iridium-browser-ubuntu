@@ -10,10 +10,11 @@
 #include "ash/shell.h"
 #include "ash/test/ash_test_base.h"
 #include "ash/test/ash_test_helper.h"
+#include "ash/window_factory.h"
 #include "ash/wm/lock_state_controller.h"
 #include "ash/wm/window_state.h"
 #include "ash/wm/window_util.h"
-#include "services/ui/public/interfaces/window_manager_constants.mojom.h"
+#include "services/ws/public/mojom/window_tree_constants.mojom.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/client/window_parenting_client.h"
 #include "ui/base/ui_base_types.h"
@@ -113,6 +114,10 @@ class LockScreenAshFocusRulesTest : public AshTestBase {
     return CreateWindowInContainer(kShellWindowId_LockScreenContainer);
   }
 
+  aura::Window* CreateWindowInShelfContainer() {
+    return CreateWindowInContainer(kShellWindowId_ShelfContainer);
+  }
+
   aura::Window* CreateWindowInLockSystemModalContainer() {
     aura::Window* window =
         CreateWindowInContainer(kShellWindowId_LockSystemModalContainer);
@@ -131,15 +136,15 @@ class LockScreenAshFocusRulesTest : public AshTestBase {
   aura::Window* CreateWindowInContainer(int container_id) {
     aura::Window* root_window = Shell::GetPrimaryRootWindow();
     aura::Window* container = Shell::GetContainer(root_window, container_id);
-    aura::Window* window = new aura::Window(nullptr);
+    aura::Window* window = window_factory::NewWindow().release();
     window->set_id(0);
     window->SetType(aura::client::WINDOW_TYPE_NORMAL);
     window->Init(ui::LAYER_TEXTURED);
     window->Show();
     window->SetProperty(aura::client::kResizeBehaviorKey,
-                        ui::mojom::kResizeBehaviorCanMaximize |
-                            ui::mojom::kResizeBehaviorCanMinimize |
-                            ui::mojom::kResizeBehaviorCanResize);
+                        ws::mojom::kResizeBehaviorCanMaximize |
+                            ws::mojom::kResizeBehaviorCanMinimize |
+                            ws::mojom::kResizeBehaviorCanResize);
     container->AddChild(window);
     return window;
   }
@@ -251,6 +256,24 @@ TEST_F(LockScreenAshFocusRulesTest,
 
   // Upon unlocking the session, the system modal window should be reactivated.
   EXPECT_TRUE(wm::IsActiveWindow(system_modal_window.get()));
+}
+
+// Verifies that the shelf can be activated in login/lock screen even if there
+// is a lock system modal present.
+TEST_F(LockScreenAshFocusRulesTest,
+       AllowShelfActivationWithLockSystemModalWindow) {
+  BlockUserSession(BLOCKED_BY_LOCK_SCREEN);
+  EXPECT_TRUE(Shell::Get()->session_controller()->IsScreenLocked());
+
+  std::unique_ptr<aura::Window> lock_window(CreateWindowInLockContainer());
+  std::unique_ptr<aura::Window> lock_shelf_window(
+      CreateWindowInShelfContainer());
+  std::unique_ptr<aura::Window> lock_system_modal_window(
+      CreateWindowInLockSystemModalContainer());
+  EXPECT_TRUE(wm::IsActiveWindow(lock_system_modal_window.get()));
+
+  wm::ActivateWindow(lock_shelf_window.get());
+  EXPECT_TRUE(wm::IsActiveWindow(lock_shelf_window.get()));
 }
 
 }  // namespace ash

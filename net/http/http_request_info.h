@@ -19,16 +19,6 @@ namespace net {
 class UploadDataStream;
 
 struct NET_EXPORT HttpRequestInfo {
-  enum RequestMotivation{
-    // TODO(mbelshe): move these into Client Socket.
-    PRECONNECT_MOTIVATED,  // Request was motivated by a prefetch.
-    OMNIBOX_MOTIVATED,     // Request was motivated by the omnibox.
-    NORMAL_MOTIVATION,     // No special motivation associated with the request.
-    EARLY_LOAD_MOTIVATED,  // When browser asks a tab to open an URL, this short
-                           // circuits that path (of waiting for the renderer to
-                           // do the URL request), and starts loading ASAP.
-  };
-
   HttpRequestInfo();
   HttpRequestInfo(const HttpRequestInfo& other);
   ~HttpRequestInfo();
@@ -48,16 +38,9 @@ struct NET_EXPORT HttpRequestInfo {
   // Any load flags (see load_flags.h).
   int load_flags;
 
-  // The motivation behind this request.
-  RequestMotivation motivation;
-
   // If enabled, then request must be sent over connection that cannot be
   // tracked by the server (e.g. without channel id).
   PrivacyMode privacy_mode;
-
-  // If present, the host of the referrer whose TokenBindingID should be
-  // included in a referred TokenBinding.
-  std::string token_binding_referrer;
 
   // Tag applied to all sockets used to service request.
   SocketTag socket_tag;

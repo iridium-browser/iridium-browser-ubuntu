@@ -13,19 +13,14 @@
 #include "base/component_export.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
-#include "base/optional.h"
 #include "device/fido/fido_device.h"
 
 namespace device {
 
 // Encapsulates per-device request logic shared between MakeCredential and
-// GetAssertion. Handles issuing the AuthenticatorGetInfo command to tokens,
-// caching device info, and distinguishing U2F tokens from CTAP tokens.
+// GetAssertion.
 //
-// FidoTask is owned by FidoRequestHandler and manages all interaction with
-// |device_|. It is created when a new device is discovered by FidoDiscovery and
-// destroyed when the device is removed or when a successful response has been
-// issued to the relying party from another authenticator.
+// TODO(martinkr): FidoTask should be subsumed by FidoDeviceAuthenticator.
 class COMPONENT_EXPORT(DEVICE_FIDO) FidoTask {
  public:
   // The |device| must outlive the FidoTask instance.
@@ -42,27 +37,12 @@ class COMPONENT_EXPORT(DEVICE_FIDO) FidoTask {
   // Asynchronously initiates CTAP request operation for a single device.
   virtual void StartTask() = 0;
 
-  // Invokes the AuthenticatorGetInfo method on |device_|. If successful and a
-  // well formed response is received, then |device_| is deemed to support CTAP
-  // protocol and |ctap_callback| is invoked, which sends CBOR encoded command
-  // to the authenticator. For all failure cases, |device_| is assumed to
-  // support the U2F protocol as FidoDiscovery selects only devices that support
-  // either the U2F or CTAP protocols during discovery. Therefore |u2f_callback|
-  // is invoked, which sends APDU encoded request to authenticator.
-  void GetAuthenticatorInfo(base::OnceClosure ctap_callback,
-                            base::OnceClosure u2f_callback);
-
   FidoDevice* device() const {
     DCHECK(device_);
     return device_;
   }
 
  private:
-  void OnAuthenticatorInfoReceived(
-      base::OnceClosure ctap_callback,
-      base::OnceClosure u2f_callback,
-      base::Optional<std::vector<uint8_t>> response);
-
   FidoDevice* const device_;
   base::WeakPtrFactory<FidoTask> weak_factory_;
 

@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/core/events/promise_rejection_event.h"
 
+#include "third_party/blink/renderer/core/event_names.h"
 #include "third_party/blink/renderer/platform/bindings/dom_wrapper_world.h"
 
 namespace blink {
@@ -60,14 +61,9 @@ bool PromiseRejectionEvent::CanBeDispatchedInWorld(
 }
 
 void PromiseRejectionEvent::Trace(blink::Visitor* visitor) {
+  visitor->Trace(promise_);
+  visitor->Trace(reason_);
   Event::Trace(visitor);
-}
-
-void PromiseRejectionEvent::TraceWrappers(
-    const ScriptWrappableVisitor* visitor) const {
-  visitor->TraceWrappers(promise_);
-  visitor->TraceWrappers(reason_);
-  Event::TraceWrappers(visitor);
 }
 
 }  // namespace blink

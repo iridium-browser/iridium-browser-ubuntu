@@ -31,6 +31,7 @@
 //
 
 #include <memory>
+#include <set>
 
 #include "common/angleutils.h"
 #include "compiler/translator/ExtensionBehavior.h"
@@ -81,14 +82,17 @@ class TSymbolTable : angle::NonCopyable, TSymbolTableBase
     // successful, and false if the declaration failed due to redefinition.
     bool declare(TSymbol *symbol);
 
+    // Only used to declare internal variables.
+    bool declareInternal(TSymbol *symbol);
+
     // Functions are always declared at global scope.
     void declareUserDefinedFunction(TFunction *function, bool insertUnmangledName);
 
     // These return the TFunction pointer to keep using to refer to this function.
     const TFunction *markFunctionHasPrototypeDeclaration(const ImmutableString &mangledName,
-                                                         bool *hadPrototypeDeclarationOut);
+                                                         bool *hadPrototypeDeclarationOut) const;
     const TFunction *setFunctionParameterNamesFromDefinition(const TFunction *function,
-                                                             bool *wasDefinedOut);
+                                                             bool *wasDefinedOut) const;
 
     // Return false if the gl_in array size has already been initialized with a mismatching value.
     bool setGlInArraySize(unsigned int inputArraySize);
@@ -107,6 +111,10 @@ class TSymbolTable : angle::NonCopyable, TSymbolTableBase
     // with a reference to a short-lived char * is fine to pass here.
     const TSymbol *find(const ImmutableString &name, int shaderVersion) const;
 
+    const TSymbol *findUserDefined(const ImmutableString &name) const;
+
+    TFunction *findUserDefinedFunction(const ImmutableString &name) const;
+
     const TSymbol *findGlobal(const ImmutableString &name) const;
 
     const TSymbol *findBuiltIn(const ImmutableString &name, int shaderVersion) const;
@@ -117,15 +125,11 @@ class TSymbolTable : angle::NonCopyable, TSymbolTableBase
     // for the specified TBasicType
     TPrecision getDefaultPrecision(TBasicType type) const;
 
-    // This records invariant varyings declared through
-    // "invariant varying_name;".
-    void addInvariantVarying(const ImmutableString &originalName);
+    // This records invariant varyings declared through "invariant varying_name;".
+    void addInvariantVarying(const TVariable &variable);
 
-    // If this returns false, the varying could still be invariant
-    // if it is set as invariant during the varying variable
-    // declaration - this piece of information is stored in the
-    // variable's type, not here.
-    bool isVaryingInvariant(const ImmutableString &originalName) const;
+    // If this returns false, the varying could still be invariant if it is set as invariant during the varying variable declaration - this piece of information is stored in the variable's type, not here.
+    bool isVaryingInvariant(const TVariable &variable) const;
 
     void setGlobalInvariant(bool invariant);
 
@@ -142,17 +146,26 @@ class TSymbolTable : angle::NonCopyable, TSymbolTableBase
 
   private:
     friend class TSymbolUniqueId;
+
+    struct VariableMetadata
+    {
+        VariableMetadata();
+        bool staticRead;
+        bool staticWrite;
+        bool invariant;
+    };
+
     int nextUniqueIdValue();
 
     class TSymbolTableLevel;
-
-    TFunction *findUserDefinedFunction(const ImmutableString &name) const;
 
     void initSamplerDefaultPrecision(TBasicType samplerType);
 
     void initializeBuiltInVariables(sh::GLenum shaderType,
                                     ShShaderSpec spec,
                                     const ShBuiltInResources &resources);
+
+    VariableMetadata *getOrCreateVariableMetadata(const TVariable &variable);
 
     std::vector<std::unique_ptr<TSymbolTableLevel>> mTable;
 
@@ -161,19 +174,14 @@ class TSymbolTable : angle::NonCopyable, TSymbolTableBase
     typedef TMap<TBasicType, TPrecision> PrecisionStackLevel;
     std::vector<std::unique_ptr<PrecisionStackLevel>> mPrecisionStack;
 
+    bool mGlobalInvariant;
+
     int mUniqueIdCounter;
 
     static const int kLastBuiltInId;
 
     sh::GLenum mShaderType;
     ShBuiltInResources mResources;
-
-    struct VariableMetadata
-    {
-        VariableMetadata();
-        bool staticRead;
-        bool staticWrite;
-    };
 
     // Indexed by unique id. Map instead of vector since the variables are fairly sparse.
     std::map<int, VariableMetadata> mVariableMetadata;

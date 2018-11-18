@@ -31,12 +31,12 @@
 #include "third_party/blink/renderer/platform/graphics/logging_canvas.h"
 
 #include <unicode/unistr.h>
+#include "base/sys_byteorder.h"
 #include "build/build_config.h"
 #include "third_party/blink/renderer/platform/geometry/int_size.h"
 #include "third_party/blink/renderer/platform/graphics/skia/image_pixel_locker.h"
 #include "third_party/blink/renderer/platform/graphics/skia/skia_utils.h"
 #include "third_party/blink/renderer/platform/image-encoders/image_encoder.h"
-#include "third_party/blink/renderer/platform/wtf/byte_swap.h"
 #include "third_party/blink/renderer/platform/wtf/hex_number.h"
 #include "third_party/blink/renderer/platform/wtf/text/base64.h"
 #include "third_party/blink/renderer/platform/wtf/text/text_encoding.h"
@@ -53,6 +53,8 @@ namespace {
 
 struct VerbParams {
   STACK_ALLOCATED();
+
+ public:
   String name;
   unsigned point_count;
   unsigned point_offset;
@@ -232,7 +234,7 @@ std::unique_ptr<JSONObject> ObjectForSkPath(const SkPath& path) {
     std::unique_ptr<JSONObject> path_point_item = JSONObject::Create();
     path_point_item->SetString("verb", verb_params.name);
     DCHECK_LE(verb_params.point_count + verb_params.point_offset,
-              WTF_ARRAY_LENGTH(points));
+              arraysize(points));
     path_point_item->SetArray(
         "points", ArrayForSkPoints(verb_params.point_count,
                                    points + verb_params.point_offset));
@@ -273,7 +275,6 @@ std::unique_ptr<JSONObject> ObjectForBitmapData(const SkBitmap& bitmap) {
   SkPngEncoder::Options options;
   options.fFilterFlags = SkPngEncoder::FilterFlag::kSub;
   options.fZLibLevel = 3;
-  options.fUnpremulBehavior = SkTransferFunctionBehavior::kIgnore;
   if (!ImageEncoder::Encode(&output, src, options)) {
     return nullptr;
   }
@@ -483,11 +484,8 @@ std::unique_ptr<JSONObject> ObjectForSkPaint(const SkPaint& paint) {
   paint_item->SetString("hinting", HintingName(paint.getHinting()));
   if (paint.getBlendMode() != SkBlendMode::kSrcOver)
     paint_item->SetString("blendMode", SkBlendMode_Name(paint.getBlendMode()));
-  if (const auto* filter = paint.getImageFilter()) {
-    SkString str;
-    filter->toString(&str);
-    paint_item->SetString("imageFilter", str.c_str());
-  }
+  if (paint.getImageFilter())
+    paint_item->SetString("imageFilter", "SkImageFilter");
   return paint_item;
 }
 
@@ -523,8 +521,9 @@ String StringForUTF32LEText(const void* text, size_t byte_length) {
   // Swap LE to BE
   size_t char_length = length / sizeof(UChar32);
   WTF::Vector<UChar32> utf32be(char_length);
+  const UChar32* utf32le = static_cast<const UChar32*>(text);
   for (size_t i = 0; i < char_length; ++i)
-    utf32be[i] = WTF::Bswap32(static_cast<UChar32*>(text)[i]);
+    utf32be[i] = base::ByteSwap(utf32le[i]);
   utf16 = icu::UnicodeString::fromUTF32(utf32be.data(),
                                         static_cast<int32_t>(byte_length));
 #else
@@ -783,21 +782,6 @@ void LoggingCanvas::onDrawPosTextH(const void* text,
   params->SetDouble("constY", const_y);
   params->SetObject("paint", ObjectForSkPaint(paint));
   this->SkCanvas::onDrawPosTextH(text, byte_length, xpos, const_y, paint);
-}
-
-void LoggingCanvas::onDrawTextOnPath(const void* text,
-                                     size_t byte_length,
-                                     const SkPath& path,
-                                     const SkMatrix* matrix,
-                                     const SkPaint& paint) {
-  AutoLogger logger(this);
-  JSONObject* params = logger.LogItemWithParams("drawTextOnPath");
-  params->SetString("text", StringForText(text, byte_length, paint));
-  params->SetObject("path", ObjectForSkPath(path));
-  if (matrix)
-    params->SetArray("matrix", ArrayForSkMatrix(*matrix));
-  params->SetObject("paint", ObjectForSkPaint(paint));
-  this->SkCanvas::onDrawTextOnPath(text, byte_length, path, matrix, paint);
 }
 
 void LoggingCanvas::onDrawTextBlob(const SkTextBlob* blob,

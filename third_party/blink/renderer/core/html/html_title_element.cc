@@ -22,12 +22,12 @@
 
 #include "third_party/blink/renderer/core/html/html_title_element.h"
 
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
+#include "base/auto_reset.h"
 #include "third_party/blink/renderer/core/dom/child_list_mutation_scope.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/text.h"
 #include "third_party/blink/renderer/core/html_names.h"
-#include "third_party/blink/renderer/platform/wtf/auto_reset.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
 namespace blink {
@@ -41,16 +41,16 @@ inline HTMLTitleElement::HTMLTitleElement(Document& document)
 DEFINE_NODE_FACTORY(HTMLTitleElement)
 
 Node::InsertionNotificationRequest HTMLTitleElement::InsertedInto(
-    ContainerNode* insertion_point) {
+    ContainerNode& insertion_point) {
   HTMLElement::InsertedInto(insertion_point);
   if (IsInDocumentTree())
     GetDocument().SetTitleElement(this);
   return kInsertionDone;
 }
 
-void HTMLTitleElement::RemovedFrom(ContainerNode* insertion_point) {
+void HTMLTitleElement::RemovedFrom(ContainerNode& insertion_point) {
   HTMLElement::RemovedFrom(insertion_point);
-  if (insertion_point->IsInDocumentTree())
+  if (insertion_point.IsInDocumentTree())
     GetDocument().RemoveTitle(this);
 }
 
@@ -76,7 +76,7 @@ void HTMLTitleElement::setText(const String& value) {
 
   {
     // Avoid calling Document::setTitleElement() during intermediate steps.
-    AutoReset<bool> inhibit_title_update_scope(
+    base::AutoReset<bool> inhibit_title_update_scope(
         &ignore_title_updates_when_children_change_, !value.IsEmpty());
     RemoveChildren(kOmitSubtreeModifiedEvent);
   }

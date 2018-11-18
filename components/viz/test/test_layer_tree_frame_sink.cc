@@ -13,7 +13,6 @@
 #include "cc/trees/layer_tree_frame_sink_client.h"
 #include "components/viz/common/frame_sinks/begin_frame_args.h"
 #include "components/viz/common/frame_sinks/copy_output_request.h"
-#include "components/viz/common/resources/shared_bitmap_manager.h"
 #include "components/viz/service/display/direct_renderer.h"
 #include "components/viz/service/display/output_surface.h"
 #include "components/viz/service/frame_sinks/compositor_frame_sink_support.h"
@@ -26,7 +25,6 @@ static constexpr FrameSinkId kLayerTreeFrameSinkId(1, 1);
 TestLayerTreeFrameSink::TestLayerTreeFrameSink(
     scoped_refptr<ContextProvider> compositor_context_provider,
     scoped_refptr<RasterContextProvider> worker_context_provider,
-    SharedBitmapManager* shared_bitmap_manager,
     gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
     const RendererSettings& renderer_settings,
     scoped_refptr<base::SingleThreadTaskRunner> compositor_task_runner,
@@ -37,8 +35,7 @@ TestLayerTreeFrameSink::TestLayerTreeFrameSink(
     : LayerTreeFrameSink(std::move(compositor_context_provider),
                          std::move(worker_context_provider),
                          std::move(compositor_task_runner),
-                         gpu_memory_buffer_manager,
-                         shared_bitmap_manager),
+                         gpu_memory_buffer_manager),
       synchronous_composite_(synchronous_composite),
       disable_display_vsync_(disable_display_vsync),
       renderer_settings_(renderer_settings),
@@ -48,9 +45,6 @@ TestLayerTreeFrameSink::TestLayerTreeFrameSink(
       client_provided_begin_frame_source_(begin_frame_source),
       external_begin_frame_source_(this),
       weak_ptr_factory_(this) {
-  // Always use sync tokens so that code paths in resource provider that deal
-  // with sync tokens are tested.
-  capabilities_.delegated_sync_points_required = true;
 }
 
 TestLayerTreeFrameSink::~TestLayerTreeFrameSink() {
@@ -76,7 +70,9 @@ bool TestLayerTreeFrameSink::BindToClient(
   if (!LayerTreeFrameSink::BindToClient(client))
     return false;
 
-  frame_sink_manager_ = std::make_unique<FrameSinkManagerImpl>();
+  shared_bitmap_manager_ = std::make_unique<TestSharedBitmapManager>();
+  frame_sink_manager_ =
+      std::make_unique<FrameSinkManagerImpl>(shared_bitmap_manager_.get());
 
   std::unique_ptr<OutputSurface> display_output_surface =
       test_client_->CreateDisplayOutputSurface(context_provider());
@@ -94,7 +90,8 @@ bool TestLayerTreeFrameSink::BindToClient(
       begin_frame_source_ = std::make_unique<DelayBasedBeginFrameSource>(
           std::make_unique<DelayBasedTimeSource>(compositor_task_runner_.get()),
           BeginFrameSource::kNotRestartableId);
-      begin_frame_source_->SetAuthoritativeVSyncInterval(
+      begin_frame_source_->OnUpdateVSyncParameters(
+          base::TimeTicks::Now(),
           base::TimeDelta::FromMilliseconds(1000.f / refresh_rate_));
       display_begin_frame_source_ = begin_frame_source_.get();
     }
@@ -104,7 +101,7 @@ bool TestLayerTreeFrameSink::BindToClient(
   }
 
   display_ = std::make_unique<Display>(
-      shared_bitmap_manager(), renderer_settings_, frame_sink_id_,
+      shared_bitmap_manager_.get(), renderer_settings_, frame_sink_id_,
       std::move(display_output_surface), std::move(scheduler),
       compositor_task_runner_);
 
@@ -128,11 +125,13 @@ bool TestLayerTreeFrameSink::BindToClient(
 }
 
 void TestLayerTreeFrameSink::DetachFromClient() {
-  // The shared_bitmap_manager() has ownership of shared memory for each
+  // This acts like the |shared_bitmap_manager_| is a global object, while
+  // in fact it is tied to the lifetime of this class and is destroyed below:
+  // The shared_bitmap_manager_ has ownership of shared memory for each
   // SharedBitmapId that has been reported from the client. Since the client is
   // gone that memory can be freed. If we don't then it would leak.
   for (const auto& id : owned_bitmaps_)
-    shared_bitmap_manager()->ChildDeletedSharedBitmap(id);
+    shared_bitmap_manager_->ChildDeletedSharedBitmap(id);
   owned_bitmaps_.clear();
 
   if (display_begin_frame_source_) {
@@ -146,6 +145,7 @@ void TestLayerTreeFrameSink::DetachFromClient() {
   begin_frame_source_ = nullptr;
   parent_local_surface_id_allocator_ = nullptr;
   frame_sink_manager_ = nullptr;
+  shared_bitmap_manager_ = nullptr;
   test_client_ = nullptr;
   LayerTreeFrameSink::DetachFromClient();
 }
@@ -163,16 +163,19 @@ void TestLayerTreeFrameSink::SubmitCompositorFrame(CompositorFrame frame) {
 
   gfx::Size frame_size = frame.size_in_pixels();
   float device_scale_factor = frame.device_scale_factor();
-  if (!local_surface_id_.is_valid() || frame_size != display_size_ ||
+  LocalSurfaceId local_surface_id =
+      parent_local_surface_id_allocator_->GetCurrentLocalSurfaceId();
+
+  if (frame_size != display_size_ ||
       device_scale_factor != device_scale_factor_) {
-    local_surface_id_ = parent_local_surface_id_allocator_->GenerateId();
-    display_->SetLocalSurfaceId(local_surface_id_, device_scale_factor);
+    local_surface_id = parent_local_surface_id_allocator_->GenerateId();
+    display_->SetLocalSurfaceId(local_surface_id, device_scale_factor);
     display_->Resize(frame_size);
     display_size_ = frame_size;
     device_scale_factor_ = device_scale_factor;
   }
 
-  support_->SubmitCompositorFrame(local_surface_id_, std::move(frame));
+  support_->SubmitCompositorFrame(local_surface_id, std::move(frame));
 
   // TODO(vmpstr): In layout tests, we request this call. However, with site
   // isolation we don't get an activation yet. Previously the call to the
@@ -186,7 +189,7 @@ void TestLayerTreeFrameSink::SubmitCompositorFrame(CompositorFrame frame) {
   // https://crbug.com/667551 tracks the progress of fixing this.
   if (support_->last_activated_surface_id().is_valid()) {
     for (auto& copy_request : copy_requests_)
-      support_->RequestCopyOfOutput(local_surface_id_, std::move(copy_request));
+      support_->RequestCopyOfOutput(local_surface_id, std::move(copy_request));
   }
   copy_requests_.clear();
 
@@ -210,14 +213,14 @@ void TestLayerTreeFrameSink::DidNotProduceFrame(const BeginFrameAck& ack) {
 void TestLayerTreeFrameSink::DidAllocateSharedBitmap(
     mojo::ScopedSharedBufferHandle buffer,
     const SharedBitmapId& id) {
-  bool ok = shared_bitmap_manager()->ChildAllocatedSharedBitmap(
-      std::move(buffer), id);
+  bool ok =
+      shared_bitmap_manager_->ChildAllocatedSharedBitmap(std::move(buffer), id);
   DCHECK(ok);
   owned_bitmaps_.insert(id);
 }
 
 void TestLayerTreeFrameSink::DidDeleteSharedBitmap(const SharedBitmapId& id) {
-  shared_bitmap_manager()->ChildDeletedSharedBitmap(id);
+  shared_bitmap_manager_->ChildDeletedSharedBitmap(id);
   owned_bitmaps_.erase(id);
 }
 
@@ -233,15 +236,8 @@ void TestLayerTreeFrameSink::DidReceiveCompositorFrameAck(
 
 void TestLayerTreeFrameSink::DidPresentCompositorFrame(
     uint32_t presentation_token,
-    base::TimeTicks time,
-    base::TimeDelta refresh,
-    uint32_t flags) {
-  client_->DidPresentCompositorFrame(presentation_token, time, refresh, flags);
-}
-
-void TestLayerTreeFrameSink::DidDiscardCompositorFrame(
-    uint32_t presentation_token) {
-  client_->DidDiscardCompositorFrame(presentation_token);
+    const gfx::PresentationFeedback& feedback) {
+  client_->DidPresentCompositorFrame(presentation_token, feedback);
 }
 
 void TestLayerTreeFrameSink::OnBeginFrame(const BeginFrameArgs& args) {
@@ -271,6 +267,9 @@ void TestLayerTreeFrameSink::DisplayDidDrawAndSwap() {
 
 void TestLayerTreeFrameSink::DisplayDidReceiveCALayerParams(
     const gfx::CALayerParams& ca_layer_params) {}
+
+void TestLayerTreeFrameSink::DisplayDidCompleteSwapWithSize(
+    const gfx::Size& pixel_Size) {}
 
 void TestLayerTreeFrameSink::OnNeedsBeginFrames(bool needs_begin_frames) {
   support_->SetNeedsBeginFrame(needs_begin_frames);

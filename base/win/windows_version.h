@@ -11,8 +11,17 @@
 
 #include "base/base_export.h"
 #include "base/macros.h"
+#include "base/version.h"
 
 typedef void* HANDLE;
+struct _OSVERSIONINFOEXW;
+struct _SYSTEM_INFO;
+
+namespace base {
+namespace test {
+class ScopedOSInfoOverride;
+}  // namespace test
+}  // namespace base
 
 namespace base {
 namespace win {
@@ -100,6 +109,7 @@ class BASE_EXPORT OSInfo {
 
   Version version() const { return version_; }
   Version Kernel32Version() const;
+  base::Version Kernel32BaseVersion() const;
   // The next two functions return arrays of values, [major, minor(, build)].
   VersionNumber version_number() const { return version_number_; }
   VersionType version_type() const { return version_type_; }
@@ -116,12 +126,15 @@ class BASE_EXPORT OSInfo {
   static WOW64Status GetWOW64StatusForProcess(HANDLE process_handle);
 
  private:
-  OSInfo();
+  friend class base::test::ScopedOSInfoOverride;
+  static OSInfo** GetInstanceStorage();
+
+  OSInfo(const _OSVERSIONINFOEXW& version_info,
+         const _SYSTEM_INFO& system_info,
+         int os_type);
   ~OSInfo();
 
   Version version_;
-  mutable Version kernel32_version_;
-  mutable bool got_kernel32_version_;
   VersionNumber version_number_;
   VersionType version_type_;
   ServicePack service_pack_;

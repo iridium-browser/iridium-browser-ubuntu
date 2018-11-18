@@ -137,7 +137,6 @@ def main():
     ui_chromeos_dir = os.path.join(ui_dir, 'chromeos')
     grd_files = [
       os.path.join(ash_base_dir, 'ash_strings.grd'),
-      os.path.join(ash_base_dir, 'resources', 'ash_resources.grd'),
       os.path.join(ash_components_dir, 'ash_components_strings.grd'),
       os.path.join(ash_components_dir, 'resources',
                    'ash_components_resources.grd'),
@@ -156,6 +155,8 @@ def main():
       os.path.join(chrome_dir, 'renderer', 'resources',
                    'renderer_resources.grd'),
       os.path.join(device_base_dir, 'bluetooth', 'bluetooth_strings.grd'),
+      os.path.join(device_base_dir, 'fido', 'fido_strings.grd'),
+      os.path.join(src_dir, 'chromeos', 'chromeos_strings.grd'),
       os.path.join(src_dir, 'extensions', 'strings', 'extensions_strings.grd'),
       os.path.join(src_dir, 'ui', 'resources', 'ui_resources.grd'),
       os.path.join(src_dir, 'ui', 'webui', 'resources', 'webui_resources.grd'),

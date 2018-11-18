@@ -19,8 +19,10 @@
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_platform_part.h"
+#include "chrome/browser/chromeos/login/demo_mode/demo_session.h"
 #include "chrome/browser/chromeos/login/easy_unlock/easy_unlock_service.h"
 #include "chrome/browser/chromeos/login/lock/screen_locker.h"
+#include "chrome/browser/chromeos/login/lock_screen_utils.h"
 #include "chrome/browser/chromeos/login/quick_unlock/quick_unlock_factory.h"
 #include "chrome/browser/chromeos/login/quick_unlock/quick_unlock_storage.h"
 #include "chrome/browser/chromeos/login/reauth_stats.h"
@@ -31,6 +33,7 @@
 #include "chrome/browser/chromeos/login/users/multi_profile_user_controller.h"
 #include "chrome/browser/chromeos/policy/browser_policy_connector_chromeos.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
+#include "chrome/browser/ui/ash/login_screen_client.h"
 #include "chrome/browser/ui/webui/chromeos/login/l10n_util.h"
 #include "chrome/browser/ui/webui/chromeos/login/signin_screen_handler.h"
 #include "chrome/grit/generated_resources.h"
@@ -39,9 +42,9 @@
 #include "chromeos/cryptohome/cryptohome_parameters.h"
 #include "chromeos/dbus/cryptohome_client.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
+#include "components/account_id/account_id.h"
 #include "components/arc/arc_util.h"
 #include "components/prefs/pref_service.h"
-#include "components/signin/core/account_id/account_id.h"
 #include "components/user_manager/known_user.h"
 #include "components/user_manager/user_manager.h"
 #include "components/user_manager/user_type.h"
@@ -97,7 +100,7 @@ bool GetEnterpriseDomain(std::string* out_domain) {
 // Get locales information of public account user.
 // Returns a list of available locales.
 // |public_session_recommended_locales|: This can be nullptr if we don't have
-// recommanded locales.
+// recommended locales.
 // |out_selected_locale|: Output value of the initially selected locale.
 // |out_multiple_locales|: Output value indicates whether we have multiple
 // recommended locales.
@@ -292,9 +295,8 @@ class UserSelectionScreen::DircryptoMigrationChecker {
       return;
     }
 
-    const cryptohome::Identification cryptohome_id(account_id);
     DBusThreadManager::Get()->GetCryptohomeClient()->NeedsDircryptoMigration(
-        cryptohome_id,
+        cryptohome::CreateAccountIdentifierFromAccountId(account_id),
         base::BindOnce(&DircryptoMigrationChecker::
                            OnCryptohomeNeedsDircryptoMigrationCallback,
                        weak_ptr_factory_.GetWeakPtr(), account_id));
@@ -358,14 +360,9 @@ void UserSelectionScreen::InitEasyUnlock() {
   proximity_auth::ScreenlockBridge::Get()->SetLockHandler(this);
 }
 
-void UserSelectionScreen::SetLoginDisplayDelegate(
-    LoginDisplay::Delegate* login_display_delegate) {
-  login_display_delegate_ = login_display_delegate;
-}
-
 // static
 void UserSelectionScreen::FillUserDictionary(
-    user_manager::User* user,
+    const user_manager::User* user,
     bool is_owner,
     bool is_signin_to_add,
     proximity_auth::mojom::AuthType auth_type,
@@ -400,7 +397,7 @@ void UserSelectionScreen::FillUserDictionary(
 
 // static
 void UserSelectionScreen::FillMultiProfileUserPrefs(
-    user_manager::User* user,
+    const user_manager::User* user,
     base::DictionaryValue* user_dict,
     bool is_signin_to_add) {
   if (!is_signin_to_add) {
@@ -457,39 +454,26 @@ bool UserSelectionScreen::ShouldForceOnlineSignIn(
 }
 
 // static
-void UserSelectionScreen::FillUserMojoStruct(
-    const user_manager::User* user,
-    bool is_owner,
-    bool is_signin_to_add,
-    proximity_auth::mojom::AuthType auth_type,
-    const std::vector<std::string>* public_session_recommended_locales,
-    ash::mojom::LoginUserInfo* user_info) {
-  user_info->basic_user_info = ash::mojom::UserInfo::New();
-  user_info->basic_user_info->type = user->GetType();
-  user_info->basic_user_info->account_id = user->GetAccountId();
-  user_info->basic_user_info->display_name =
-      base::UTF16ToUTF8(user->GetDisplayName());
-  user_info->basic_user_info->display_email = user->display_email();
-
+ash::mojom::UserAvatarPtr UserSelectionScreen::BuildMojoUserAvatarForUser(
+    const user_manager::User* user) {
+  auto avatar = ash::mojom::UserAvatar::New();
   if (!user->GetImage().isNull()) {
-    user_info->basic_user_info->avatar = user->GetImage();
+    avatar->image = user->GetImage();
   } else {
-    user_info->basic_user_info->avatar =
-        *ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
-            IDR_LOGIN_DEFAULT_USER);
+    avatar->image = *ui::ResourceBundle::GetSharedInstance().GetImageSkiaNamed(
+        IDR_LOGIN_DEFAULT_USER);
   }
 
   // TODO(jdufault): Unify image handling between this code and
   // user_image_source::GetUserImageInternal.
   auto load_image_from_resource = [&](int resource_id) {
     auto& rb = ui::ResourceBundle::GetSharedInstance();
-    base::StringPiece avatar =
+    base::StringPiece avatar_data =
         rb.GetRawDataResourceForScale(resource_id, rb.GetMaxScaleFactor());
-    user_info->basic_user_info->avatar_bytes.assign(avatar.begin(),
-                                                    avatar.end());
+    avatar->bytes.assign(avatar_data.begin(), avatar_data.end());
   };
   if (user->has_image_bytes()) {
-    user_info->basic_user_info->avatar_bytes.assign(
+    avatar->bytes.assign(
         user->image_bytes()->front(),
         user->image_bytes()->front() + user->image_bytes()->size());
   } else if (user->HasDefaultImage()) {
@@ -500,37 +484,7 @@ void UserSelectionScreen::FillUserMojoStruct(
     load_image_from_resource(IDR_LOGIN_DEFAULT_USER);
   }
 
-  user_info->auth_type = auth_type;
-  user_info->is_signed_in = user->is_logged_in();
-  user_info->is_device_owner = is_owner;
-  user_info->can_remove = CanRemoveUser(user);
-  user_info->allow_fingerprint_unlock = AllowFingerprintForUser(user);
-
-  // Fill multi-profile data.
-  if (!is_signin_to_add) {
-    user_info->is_multiprofile_allowed = true;
-  } else {
-    GetMultiProfilePolicy(user, &user_info->is_multiprofile_allowed,
-                          &user_info->multiprofile_policy);
-  }
-
-  // Fill public session data.
-  if (user->GetType() == user_manager::USER_TYPE_PUBLIC_ACCOUNT) {
-    user_info->public_account_info = ash::mojom::PublicAccountInfo::New();
-    std::string domain;
-    if (GetEnterpriseDomain(&domain))
-      user_info->public_account_info->enterprise_domain = domain;
-
-    std::string selected_locale;
-    bool has_multiple_locales;
-    std::unique_ptr<base::ListValue> available_locales =
-        GetPublicSessionLocales(public_session_recommended_locales,
-                                &selected_locale, &has_multiple_locales);
-    user_info->public_account_info->available_locales =
-        std::move(available_locales);
-    user_info->public_account_info->default_locale = selected_locale;
-    user_info->public_account_info->show_advanced_view = has_multiple_locales;
-  }
+  return avatar;
 }
 
 void UserSelectionScreen::SetHandler(LoginDisplayWebUIHandler* handler) {
@@ -557,8 +511,7 @@ void UserSelectionScreen::Init(const user_manager::UserList& users) {
 }
 
 void UserSelectionScreen::OnBeforeUserRemoved(const AccountId& account_id) {
-  for (user_manager::UserList::iterator it = users_.begin(); it != users_.end();
-       ++it) {
+  for (auto it = users_.cbegin(); it != users_.cend(); ++it) {
     if ((*it)->GetAccountId() == account_id) {
       users_.erase(it);
       break;
@@ -603,11 +556,10 @@ const user_manager::UserList UserSelectionScreen::PrepareUserListForSending(
   size_t max_non_owner_users = has_owner ? kMaxUsers - 1 : kMaxUsers;
   size_t non_owner_count = 0;
 
-  for (user_manager::UserList::const_iterator it = users.begin();
-       it != users.end(); ++it) {
-    bool is_owner = ((*it)->GetAccountId() == owner);
+  for (user_manager::User* user : users) {
+    bool is_owner = user->GetAccountId() == owner;
     bool is_public_account =
-        ((*it)->GetType() == user_manager::USER_TYPE_PUBLIC_ACCOUNT);
+        user->GetType() == user_manager::USER_TYPE_PUBLIC_ACCOUNT;
 
     if ((is_public_account && !is_signin_to_add) || is_owner ||
         (!is_public_account && non_owner_count < max_non_owner_users)) {
@@ -615,11 +567,11 @@ const user_manager::UserList UserSelectionScreen::PrepareUserListForSending(
         ++non_owner_count;
       if (is_owner && users_to_send.size() > kMaxUsers) {
         // Owner is always in the list.
-        users_to_send.insert(users_to_send.begin() + (kMaxUsers - 1), *it);
+        users_to_send.insert(users_to_send.begin() + (kMaxUsers - 1), user);
         while (users_to_send.size() > kMaxUsers)
           users_to_send.erase(users_to_send.begin() + kMaxUsers);
       } else if (users_to_send.size() < kMaxUsers) {
-        users_to_send.push_back(*it);
+        users_to_send.push_back(user);
       }
     }
   }
@@ -742,14 +694,19 @@ void UserSelectionScreen::AttemptEasySignin(const AccountId& account_id,
                                             const std::string& key_label) {
   DCHECK_EQ(GetScreenType(), SIGNIN_SCREEN);
 
-  UserContext user_context(account_id);
+  const user_manager::User* const user =
+      user_manager::UserManager::Get()->FindUser(account_id);
+  DCHECK(user);
+  UserContext user_context(*user);
   user_context.SetAuthFlow(UserContext::AUTH_FLOW_EASY_UNLOCK);
   user_context.SetKey(Key(secret));
   user_context.GetKey()->SetLabel(key_label);
 
-  // login display delegate not exist in views-based lock screen.
-  if (login_display_delegate_)
-    login_display_delegate_->Login(user_context, SigninSpecifics());
+  // LoginDisplayHost does not exist in views-based lock screen.
+  if (LoginDisplayHost::default_host()) {
+    LoginDisplayHost::default_host()->GetLoginDisplay()->delegate()->Login(
+        user_context, SigninSpecifics());
+  }
 }
 
 void UserSelectionScreen::Show() {}
@@ -794,16 +751,15 @@ UserSelectionScreen::UpdateAndReturnUserListForWebUI() {
 
   user_auth_type_map_.clear();
 
-  for (user_manager::UserList::const_iterator it = users_to_send_.begin();
-       it != users_to_send_.end(); ++it) {
-    const AccountId& account_id = (*it)->GetAccountId();
+  for (const user_manager::User* user : users_to_send_) {
+    const AccountId& account_id = user->GetAccountId();
     bool is_owner = (account_id == owner);
     const bool is_public_account =
-        ((*it)->GetType() == user_manager::USER_TYPE_PUBLIC_ACCOUNT);
+        user->GetType() == user_manager::USER_TYPE_PUBLIC_ACCOUNT;
     const proximity_auth::mojom::AuthType initial_auth_type =
         is_public_account
             ? proximity_auth::mojom::AuthType::EXPAND_THEN_USER_CLICK
-            : (ShouldForceOnlineSignIn(*it)
+            : (ShouldForceOnlineSignIn(user)
                    ? proximity_auth::mojom::AuthType::ONLINE_SIGN_IN
                    : proximity_auth::mojom::AuthType::OFFLINE_PASSWORD);
     user_auth_type_map_[account_id] = initial_auth_type;
@@ -814,9 +770,9 @@ UserSelectionScreen::UpdateAndReturnUserListForWebUI() {
                 public_session_recommended_locales_.end()
             ? nullptr
             : &public_session_recommended_locales_[account_id];
-    FillUserDictionary(*it, is_owner, is_signin_to_add, initial_auth_type,
+    FillUserDictionary(user, is_owner, is_signin_to_add, initial_auth_type,
                        public_session_recommended_locales, user_dict.get());
-    user_dict->SetBoolean(kKeyCanRemove, CanRemoveUser(*it));
+    user_dict->SetBoolean(kKeyCanRemove, CanRemoveUser(user));
     users_list->Append(std::move(user_dict));
   }
 
@@ -833,32 +789,78 @@ UserSelectionScreen::UpdateAndReturnUserListForMojo() {
 
   user_auth_type_map_.clear();
 
-  for (user_manager::UserList::const_iterator it = users_to_send_.begin();
-       it != users_to_send_.end(); ++it) {
-    const AccountId& account_id = (*it)->GetAccountId();
+  for (const user_manager::User* user : users_to_send_) {
+    const AccountId& account_id = user->GetAccountId();
     bool is_owner = owner == account_id;
     const bool is_public_account =
-        ((*it)->GetType() == user_manager::USER_TYPE_PUBLIC_ACCOUNT);
+        user->GetType() == user_manager::USER_TYPE_PUBLIC_ACCOUNT;
     const proximity_auth::mojom::AuthType initial_auth_type =
         is_public_account
             ? proximity_auth::mojom::AuthType::EXPAND_THEN_USER_CLICK
-            : (ShouldForceOnlineSignIn(*it)
+            : (ShouldForceOnlineSignIn(user)
                    ? proximity_auth::mojom::AuthType::ONLINE_SIGN_IN
                    : proximity_auth::mojom::AuthType::OFFLINE_PASSWORD);
     user_auth_type_map_[account_id] = initial_auth_type;
 
-    ash::mojom::LoginUserInfoPtr login_user_info =
-        ash::mojom::LoginUserInfo::New();
-    const std::vector<std::string>* public_session_recommended_locales =
-        public_session_recommended_locales_.find(account_id) ==
-                public_session_recommended_locales_.end()
-            ? nullptr
-            : &public_session_recommended_locales_[account_id];
-    FillUserMojoStruct(*it, is_owner, is_signin_to_add, initial_auth_type,
-                       public_session_recommended_locales,
-                       login_user_info.get());
-    login_user_info->can_remove = CanRemoveUser(*it);
-    user_info_list.push_back(std::move(login_user_info));
+    ash::mojom::LoginUserInfoPtr user_info = ash::mojom::LoginUserInfo::New();
+    user_info->basic_user_info = ash::mojom::UserInfo::New();
+    user_info->basic_user_info->type = user->GetType();
+    user_info->basic_user_info->account_id = user->GetAccountId();
+    user_info->basic_user_info->display_name =
+        base::UTF16ToUTF8(user->GetDisplayName());
+    user_info->basic_user_info->display_email = user->display_email();
+    user_info->basic_user_info->avatar = BuildMojoUserAvatarForUser(user);
+    user_info->auth_type = initial_auth_type;
+    user_info->is_signed_in = user->is_logged_in();
+    user_info->is_device_owner = is_owner;
+    user_info->can_remove = CanRemoveUser(user);
+    user_info->allow_fingerprint_unlock = AllowFingerprintForUser(user);
+
+    // Fill multi-profile data.
+    if (!is_signin_to_add) {
+      user_info->is_multiprofile_allowed = true;
+    } else {
+      GetMultiProfilePolicy(user, &user_info->is_multiprofile_allowed,
+                            &user_info->multiprofile_policy);
+    }
+
+    // Fill public session data.
+    if (user->GetType() == user_manager::USER_TYPE_PUBLIC_ACCOUNT) {
+      user_info->public_account_info = ash::mojom::PublicAccountInfo::New();
+      std::string domain;
+      if (GetEnterpriseDomain(&domain))
+        user_info->public_account_info->enterprise_domain = domain;
+
+      const std::vector<std::string>* public_session_recommended_locales =
+          public_session_recommended_locales_.find(account_id) ==
+                  public_session_recommended_locales_.end()
+              ? nullptr
+              : &public_session_recommended_locales_[account_id];
+      std::string selected_locale;
+      bool has_multiple_locales;
+      std::unique_ptr<base::ListValue> available_locales =
+          GetPublicSessionLocales(public_session_recommended_locales,
+                                  &selected_locale, &has_multiple_locales);
+      DCHECK(available_locales);
+      user_info->public_account_info->available_locales =
+          lock_screen_utils::FromListValueToLocaleItem(
+              std::move(available_locales));
+      user_info->public_account_info->default_locale = selected_locale;
+      user_info->public_account_info->show_advanced_view = has_multiple_locales;
+      // Do not show expanded view when in demo mode.
+      user_info->public_account_info->show_expanded_view =
+          !DemoSession::IsDeviceInDemoMode();
+    }
+
+    user_info->can_remove = CanRemoveUser(user);
+
+    // Send a request to get keyboard layouts for default locale.
+    if (is_public_account && LoginScreenClient::HasInstance()) {
+      LoginScreenClient::Get()->RequestPublicSessionKeyboardLayouts(
+          account_id, user_info->public_account_info->default_locale);
+    }
+
+    user_info_list.push_back(std::move(user_info));
   }
 
   return user_info_list;

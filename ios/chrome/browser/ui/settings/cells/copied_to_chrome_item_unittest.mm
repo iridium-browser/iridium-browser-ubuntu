@@ -30,8 +30,10 @@ TEST_F(CopiedToChromeItemTest, InitializeCell) {
   CopiedToChromeCell* copiedToChromeCell = cell;
   EXPECT_NSEQ(l10n_util::GetNSString(IDS_IOS_AUTOFILL_DESCRIBE_LOCAL_COPY),
               copiedToChromeCell.textLabel.text);
-  EXPECT_NSEQ([l10n_util::GetNSString(IDS_AUTOFILL_CLEAR_LOCAL_COPY_BUTTON)
-                  uppercaseString],
+
+  NSString* buttonText =
+      l10n_util::GetNSString(IDS_AUTOFILL_CLEAR_LOCAL_COPY_BUTTON);
+  EXPECT_NSEQ(buttonText,
               [copiedToChromeCell.button titleForState:UIControlStateNormal]);
 }
 

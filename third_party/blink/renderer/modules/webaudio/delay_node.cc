@@ -27,12 +27,11 @@
 
 #include <memory>
 
-#include "third_party/blink/renderer/bindings/core/v8/exception_messages.h"
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_basic_processor_handler.h"
 #include "third_party/blink/renderer/modules/webaudio/delay_options.h"
 #include "third_party/blink/renderer/modules/webaudio/delay_processor.h"
+#include "third_party/blink/renderer/platform/bindings/exception_messages.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
 
 namespace blink {
@@ -65,12 +64,14 @@ scoped_refptr<DelayHandler> DelayHandler::Create(AudioNode& node,
 
 DelayNode::DelayNode(BaseAudioContext& context, double max_delay_time)
     : AudioNode(context),
-      delay_time_(AudioParam::Create(context,
-                                     kParamTypeDelayDelayTime,
-                                     "Delay.delayTime",
-                                     0.0,
-                                     0.0,
-                                     max_delay_time)) {
+      delay_time_(
+          AudioParam::Create(context,
+                             kParamTypeDelayDelayTime,
+                             0.0,
+                             AudioParamHandler::AutomationRate::kAudio,
+                             AudioParamHandler::AutomationRateMode::kVariable,
+                             0.0,
+                             max_delay_time)) {
   SetHandler(DelayHandler::Create(*this, context.sampleRate(),
                                   delay_time_->Handler(), max_delay_time));
 }
@@ -95,7 +96,7 @@ DelayNode* DelayNode::Create(BaseAudioContext& context,
 
   if (max_delay_time <= 0 || max_delay_time >= kMaximumAllowedDelayTime) {
     exception_state.ThrowDOMException(
-        kNotSupportedError,
+        DOMExceptionCode::kNotSupportedError,
         ExceptionMessages::IndexOutsideRange(
             "max delay time", max_delay_time, 0.0,
             ExceptionMessages::kExclusiveBound, kMaximumAllowedDelayTime,

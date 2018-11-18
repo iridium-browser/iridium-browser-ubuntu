@@ -11,6 +11,7 @@
 #include <memory>
 #include <vector>
 
+#include "core/fxcrt/unowned_ptr.h"
 #include "fxjs/cfx_v8.h"
 #include "fxjs/cfxjse_formcalc_context.h"
 #include "v8/include/v8.h"
@@ -19,16 +20,14 @@
 #include "xfa/fxfa/parser/cxfa_script.h"
 #include "xfa/fxfa/parser/xfa_resolvenode_rs.h"
 
-#define XFA_RESOLVENODE_TagName 0x0002
-
 class CFXJSE_ResolveProcessor;
-class CFXJS_Engine;
+class CJS_Runtime;
 class CXFA_List;
 
-class CFXJSE_Engine : public CFX_V8 {
+class CFXJSE_Engine final : public CFX_V8 {
  public:
   static CXFA_Object* ToObject(const v8::FunctionCallbackInfo<v8::Value>& info);
-  static CXFA_Object* ToObject(CFXJSE_Value* pValue, CFXJSE_Class* pClass);
+  static CXFA_Object* ToObject(CFXJSE_Value* pValue);
   static void GlobalPropertyGetter(CFXJSE_Value* pObject,
                                    const ByteStringView& szPropName,
                                    CFXJSE_Value* pValue);
@@ -41,7 +40,7 @@ class CFXJSE_Engine : public CFX_V8 {
   static void NormalPropertySetter(CFXJSE_Value* pObject,
                                    const ByteStringView& szPropName,
                                    CFXJSE_Value* pValue);
-  static CJS_Return NormalMethodCall(
+  static CJS_Result NormalMethodCall(
       const v8::FunctionCallbackInfo<v8::Value>& info,
       const WideString& functionName);
   static int32_t NormalPropTypeGetter(CFXJSE_Value* pObject,
@@ -51,11 +50,11 @@ class CFXJSE_Engine : public CFX_V8 {
                                       const ByteStringView& szPropName,
                                       bool bQueryIn);
 
-  CFXJSE_Engine(CXFA_Document* pDocument, CFXJS_Engine* fxjs_engine);
+  CFXJSE_Engine(CXFA_Document* pDocument, CJS_Runtime* fxjs_runtime);
   ~CFXJSE_Engine() override;
 
-  void SetEventParam(CXFA_EventParam param) { m_eventParam = param; }
-  CXFA_EventParam* GetEventParam() { return &m_eventParam; }
+  void SetEventParam(CXFA_EventParam* param) { m_eventParam = param; }
+  CXFA_EventParam* GetEventParam() const { return m_eventParam.Get(); }
   bool RunScript(CXFA_Script::Type eScriptType,
                  const WideStringView& wsScript,
                  CFXJSE_Value* pRetValue,
@@ -68,7 +67,7 @@ class CFXJSE_Engine : public CFX_V8 {
                       CXFA_Node* bindNode);
   CFXJSE_Value* GetJSValueFromMap(CXFA_Object* pObject);
   void AddToCacheList(std::unique_ptr<CXFA_List> pList);
-  CXFA_Object* GetThisObject() const { return m_pThisObject; }
+  CXFA_Object* GetThisObject() const { return m_pThisObject.Get(); }
 
   int32_t GetIndexByName(CXFA_Node* refNode);
   int32_t GetIndexByClassName(CXFA_Node* refNode);
@@ -76,7 +75,7 @@ class CFXJSE_Engine : public CFX_V8 {
 
   void SetNodesOfRunScript(std::vector<CXFA_Node*>* pArray);
   void AddNodesOfRunScript(CXFA_Node* pNode);
-  CFXJSE_Class* GetJseNormalClass();
+  CFXJSE_Class* GetJseNormalClass() const { return m_pJsClass.Get(); }
 
   void SetRunAtType(XFA_AttributeEnum eRunAt) { m_eRunAtType = eRunAt; }
   bool IsRunAtClient() { return m_eRunAtType != XFA_AttributeEnum::Server; }
@@ -99,29 +98,30 @@ class CFXJSE_Engine : public CFX_V8 {
                        uint32_t dwFlag,
                        bool bSetting);
   bool IsStrictScopeInJavaScript();
-  CXFA_Object* GetVariablesThis(CXFA_Object* pObject, bool bScriptNode = false);
+  CXFA_Object* GetVariablesThis(CXFA_Object* pObject, bool bScriptNode);
   bool QueryVariableValue(CXFA_Node* pScriptNode,
                           const ByteStringView& szPropName,
                           CFXJSE_Value* pValue,
                           bool bGetter);
   bool RunVariablesScript(CXFA_Node* pScriptNode);
 
+  UnownedPtr<CJS_Runtime> const m_pSubordinateRuntime;
   UnownedPtr<CXFA_Document> const m_pDocument;
   std::unique_ptr<CFXJSE_Context> m_JsContext;
-  CFXJSE_Class* m_pJsClass;
-  CXFA_Script::Type m_eScriptType;
+  UnownedPtr<CFXJSE_Class> m_pJsClass;
+  CXFA_Script::Type m_eScriptType = CXFA_Script::Type::Unknown;
   std::map<CXFA_Object*, std::unique_ptr<CFXJSE_Value>> m_mapObjectToValue;
   std::map<CXFA_Object*, std::unique_ptr<CFXJSE_Context>>
       m_mapVariableToContext;
-  CXFA_EventParam m_eventParam;
+  UnownedPtr<CXFA_EventParam> m_eventParam;
   std::vector<CXFA_Node*> m_upObjectArray;
   // CacheList holds the List items so we can clean them up when we're done.
   std::vector<std::unique_ptr<CXFA_List>> m_CacheList;
-  std::vector<CXFA_Node*>* m_pScriptNodeArray;
-  std::unique_ptr<CFXJSE_ResolveProcessor> m_ResolveProcessor;
+  UnownedPtr<std::vector<CXFA_Node*>> m_pScriptNodeArray;
+  std::unique_ptr<CFXJSE_ResolveProcessor> const m_ResolveProcessor;
   std::unique_ptr<CFXJSE_FormCalcContext> m_FM2JSContext;
-  CXFA_Object* m_pThisObject;
-  XFA_AttributeEnum m_eRunAtType;
+  UnownedPtr<CXFA_Object> m_pThisObject;
+  XFA_AttributeEnum m_eRunAtType = XFA_AttributeEnum::Client;
 };
 
 #endif  //  FXJS_CFXJSE_ENGINE_H_

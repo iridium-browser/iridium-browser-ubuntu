@@ -19,10 +19,6 @@
         border-top: none;
       }
 
-      :host(.three-line) {
-        min-height: var(--settings-row-three-line-min-height);
-      }
-
       :host([elide-label]),
       :host([elide-label]) #outerRow,
       :host([elide-label]) #outerRow > div.flex {
@@ -44,19 +40,23 @@
         min-height: var(--settings-row-min-height);
       }
 
+      #labelWrapper {
+        padding: 12px 0;
+      }
+
       #labelWrapper,
       ::slotted([slot='more-actions']) {
-        -webkit-margin-end: var(--settings-control-label-spacing);
+        margin-inline-end: var(--settings-control-label-spacing);
       }
 
       cr-policy-pref-indicator {
-        -webkit-margin-end: var(--settings-controlled-by-spacing);
+        margin-inline-end: var(--settings-controlled-by-spacing);
       }
     </style>
     <div id="outerRow" noSubLabel$="[[!subLabel]]">
       <div class="flex" id="labelWrapper" hidden$="[[!label]]">
-        <div id="label" class="label">[[label]]</div>
-        <div id="subLabel" class="secondary label">[[subLabel]]</div>
+        <div class="label"  aria-hidden="true">[[label]]</div>
+        <div class="secondary label">[[subLabel]]</div>
       </div>
       <slot name="more-actions"></slot>
       <template is="dom-if" if="[[hasPrefPolicyIndicator(pref.*)]]">
@@ -66,8 +66,7 @@
       <cr-toggle id="control" checked="{{checked}}"
           on-change="onChange_"
           aria-label$="[[getAriaLabel_(label, ariaLabel)]]"
-          aria-describedby="subLabel"
-          disabled="[[controlDisabled_(disabled, pref)]]">
+          disabled="[[controlDisabled(disabled, pref)]]">
       </cr-toggle>
     </div>
   </template>

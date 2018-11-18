@@ -10,6 +10,7 @@
 #include <set>
 #include <string>
 
+#include "ash/system/message_center/arc/arc_notification_surface_manager.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
 #include "chrome/browser/chromeos/arc/accessibility/ax_tree_source_arc.h"
 #include "chrome/browser/ui/app_list/arc/arc_app_list_prefs.h"
@@ -17,7 +18,7 @@
 #include "components/arc/connection_observer.h"
 #include "components/keyed_service/core/keyed_service.h"
 #include "ui/accessibility/ax_host_delegate.h"
-#include "ui/arc/notification/arc_notification_surface_manager.h"
+#include "ui/aura/window_tracker.h"
 #include "ui/wm/public/activation_change_observer.h"
 
 class Profile;
@@ -41,7 +42,7 @@ class ArcAccessibilityHelperBridge
       public wm::ActivationChangeObserver,
       public AXTreeSourceArc::Delegate,
       public ArcAppListPrefs::Observer,
-      public ArcNotificationSurfaceManager::Observer {
+      public ash::ArcNotificationSurfaceManager::Observer {
  public:
   // Returns singleton instance for the given BrowserContext,
   // or nullptr if the browser |context| is not allowed to use ARC.
@@ -56,13 +57,17 @@ class ArcAccessibilityHelperBridge
   void SetNativeChromeVoxArcSupport(bool enabled);
 
   // Receives the result of setting native ChromeVox Arc support.
-  void OnSetNativeChromeVoxArcSupportProcessed(bool enabled, bool processed);
+  void OnSetNativeChromeVoxArcSupportProcessed(
+      std::unique_ptr<aura::WindowTracker> window_tracker,
+      bool enabled,
+      bool processed);
 
   // KeyedService overrides.
   void Shutdown() override;
 
   // ConnectionObserver<mojom::AccessibilityHelperInstance> overrides.
   void OnConnectionReady() override;
+  void OnConnectionClosed() override;
 
   // mojom::AccessibilityHelperHost overrides.
   void OnAccessibilityEventDeprecated(
@@ -81,8 +86,10 @@ class ArcAccessibilityHelperBridge
   void OnTaskDestroyed(int32_t task_id) override;
 
   // ArcNotificationSurfaceManager::Observer overrides.
-  void OnNotificationSurfaceAdded(ArcNotificationSurface* surface) override;
-  void OnNotificationSurfaceRemoved(ArcNotificationSurface* surface) override;
+  void OnNotificationSurfaceAdded(
+      ash::ArcNotificationSurface* surface) override;
+  void OnNotificationSurfaceRemoved(
+      ash::ArcNotificationSurface* surface) override {}
 
   const std::map<int32_t, std::unique_ptr<AXTreeSourceArc>>&
   task_id_to_tree_for_test() const {
@@ -93,6 +100,8 @@ class ArcAccessibilityHelperBridge
   notification_key_to_tree_for_test() const {
     return notification_key_to_tree_;
   }
+
+  void set_filter_type_all_for_test() { use_filter_type_all_for_test_ = true; }
 
  protected:
   virtual aura::Window* GetActiveWindow();
@@ -107,16 +116,19 @@ class ArcAccessibilityHelperBridge
 
   void OnAccessibilityStatusChanged(
       const chromeos::AccessibilityStatusEventDetails& event_details);
+  arc::mojom::AccessibilityFilterType GetFilterTypeForProfile(Profile* profile);
   void UpdateFilterType();
-  void UpdateTouchExplorationPassThrough(aura::Window* window);
+  void UpdateWindowProperties(aura::Window* window);
+  void SetExploreByTouchEnabled(bool enabled);
   void UpdateTreeIdOfNotificationSurface(const std::string& notification_key,
-                                         uint32_t tree_id);
+                                         ui::AXTreeID tree_id);
 
-  AXTreeSourceArc* GetOrCreateFromTaskId(int32_t task_id);
+  AXTreeSourceArc* GetFromTaskId(int32_t task_id);
+  AXTreeSourceArc* CreateFromTaskId(int32_t task_id);
   AXTreeSourceArc* GetFromNotificationKey(const std::string& notification_key);
   AXTreeSourceArc* CreateFromNotificationKey(
       const std::string& notification_key);
-  AXTreeSourceArc* GetFromTreeId(int32_t tree_id) const;
+  AXTreeSourceArc* GetFromTreeId(ui::AXTreeID tree_id) const;
 
   bool activation_observer_added_ = false;
   Profile* const profile_;
@@ -126,16 +138,7 @@ class ArcAccessibilityHelperBridge
       notification_key_to_tree_;
   std::unique_ptr<chromeos::AccessibilityStatusSubscription>
       accessibility_status_subscription_;
-
-  // Map for managing notifications in backward compatible way, creating
-  // notification with WINDOW_STATE_CHANGED event.
-  // Key: notification key
-  // Value: retain counter
-  // TODO(yawano): Remove this after this becomes unnecessary.
-  std::map<std::string, int32_t> backward_compat_notification_keys_;
-
-  // TODO(yawano): Remove this after this becomes unnecessary.
-  std::set<std::string> notification_keys_;
+  bool use_filter_type_all_for_test_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(ArcAccessibilityHelperBridge);
 };

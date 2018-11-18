@@ -4,12 +4,16 @@
 
 #include "chrome/browser/ui/views/media_router/media_router_dialog_controller_views.h"
 
-#include "base/feature_list.h"
-#include "chrome/browser/ui/webui/media_router/media_router_dialog_controller_webui_impl.h"
-#include "chrome/common/chrome_features.h"
+#include <memory>
 
-DEFINE_WEB_CONTENTS_USER_DATA_KEY(
-    media_router::MediaRouterDialogControllerViews);
+#include "build/build_config.h"
+#include "chrome/browser/media/router/media_router_feature.h"
+#include "chrome/browser/ui/browser_finder.h"
+#include "chrome/browser/ui/toolbar/media_router_action.h"
+#include "chrome/browser/ui/views/frame/browser_view.h"
+#include "chrome/browser/ui/views/media_router/cast_dialog_view.h"
+#include "chrome/browser/ui/views/toolbar/toolbar_view.h"
+#include "chrome/browser/ui/webui/media_router/media_router_dialog_controller_webui_impl.h"
 
 namespace media_router {
 
@@ -17,7 +21,7 @@ namespace media_router {
 MediaRouterDialogControllerImplBase*
 MediaRouterDialogControllerImplBase::GetOrCreateForWebContents(
     content::WebContents* web_contents) {
-  if (base::FeatureList::IsEnabled(features::kViewsCastDialog)) {
+  if (ShouldUseViewsDialog()) {
     return MediaRouterDialogControllerViews::GetOrCreateForWebContents(
         web_contents);
   } else {
@@ -28,6 +32,8 @@ MediaRouterDialogControllerImplBase::GetOrCreateForWebContents(
 
 MediaRouterDialogControllerViews::~MediaRouterDialogControllerViews() {
   Reset();
+  if (CastDialogView::GetCurrentDialogWidget())
+    CastDialogView::GetCurrentDialogWidget()->RemoveObserver(this);
 }
 
 // static
@@ -41,21 +47,47 @@ MediaRouterDialogControllerViews::GetOrCreateForWebContents(
 }
 
 void MediaRouterDialogControllerViews::CreateMediaRouterDialog() {
+  base::Time dialog_creation_time = base::Time::Now();
   MediaRouterDialogControllerImplBase::CreateMediaRouterDialog();
-  // TODO(crbug.com/826091): Implement this method.
+
+  Browser* browser = chrome::FindBrowserWithWebContents(initiator());
+  if (!browser)
+    return;
+
+  ui_ = std::make_unique<MediaRouterViewsUI>();
+  InitializeMediaRouterUI(ui_.get());
+  BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser);
+  if (browser_view->toolbar()->cast_button()) {
+    CastDialogView::ShowDialogWithToolbarAction(ui_.get(), browser,
+                                                dialog_creation_time);
+  } else {
+    CastDialogView::ShowDialogTopCentered(ui_.get(), browser,
+                                          dialog_creation_time);
+  }
+  CastDialogView::GetCurrentDialogWidget()->AddObserver(this);
 }
 
 void MediaRouterDialogControllerViews::CloseMediaRouterDialog() {
-  // TODO(crbug.com/826091): Implement this method.
+  CastDialogView::HideDialog();
 }
 
 bool MediaRouterDialogControllerViews::IsShowingMediaRouterDialog() const {
-  // TODO(crbug.com/826091): Implement this method.
-  return false;
+  return CastDialogView::IsShowing();
 }
 
 void MediaRouterDialogControllerViews::Reset() {
   MediaRouterDialogControllerImplBase::Reset();
+  ui_.reset();
+}
+
+void MediaRouterDialogControllerViews::OnWidgetClosing(views::Widget* widget) {
+  DCHECK_EQ(CastDialogView::GetCurrentDialogWidget(), widget);
+  Reset();
+}
+
+void MediaRouterDialogControllerViews::OnWidgetDestroying(
+    views::Widget* widget) {
+  widget->RemoveObserver(this);
 }
 
 MediaRouterDialogControllerViews::MediaRouterDialogControllerViews(

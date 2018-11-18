@@ -71,8 +71,10 @@ void RendererURLLoaderThrottle::WillStartRequest(
 
 void RendererURLLoaderThrottle::WillRedirectRequest(
     const net::RedirectInfo& redirect_info,
-    const network::ResourceResponseHead& response_head,
-    bool* defer) {
+    const network::ResourceResponseHead& /* response_head */,
+    bool* /* defer */,
+    std::vector<std::string>* /* to_be_removed_headers */,
+    net::HttpRequestHeaders* /* modified_headers */) {
   // If |blocked_| is true, the resource load has been canceled and there
   // shouldn't be such a notification.
   DCHECK(!blocked_);
@@ -91,7 +93,7 @@ void RendererURLLoaderThrottle::WillRedirectRequest(
 
 void RendererURLLoaderThrottle::WillProcessResponse(
     const GURL& response_url,
-    const network::ResourceResponseHead& response_head,
+    network::ResourceResponseHead* response_head,
     bool* defer) {
   // If |blocked_| is true, the resource load has been canceled and there
   // shouldn't be such a notification.

@@ -3,7 +3,7 @@
 // found in the LICENSE file.
 
 // This header defines macros to export component's symbols.
-// See "platform/PlatformExport.h" for details.
+// See "platform/platform_export.h" for details.
 
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_CORE_EXPORT_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_CORE_EXPORT_H_
@@ -43,27 +43,23 @@
 #endif  // !defined(COMPONENT_BUILD)
 
 //
-// CORE_TEMPLATE_CLASS_EXPORT
 // CORE_EXTERN_TEMPLATE_EXPORT
 // CORE_TEMPLATE_EXPORT
 //
 #if BLINK_CORE_IMPLEMENTATION
 
 #if defined(COMPILER_MSVC)
-#define CORE_TEMPLATE_CLASS_EXPORT
-#define CORE_EXTERN_TEMPLATE_EXPORT CORE_EXPORT
+#define CORE_EXTERN_TEMPLATE_EXPORT
 #define CORE_TEMPLATE_EXPORT CORE_EXPORT
 #endif
 
 #if defined(COMPILER_GCC)
-#define CORE_TEMPLATE_CLASS_EXPORT CORE_EXPORT
 #define CORE_EXTERN_TEMPLATE_EXPORT CORE_EXPORT
 #define CORE_TEMPLATE_EXPORT
 #endif
 
 #else  // BLINK_CORE_IMPLEMENTATION
 
-#define CORE_TEMPLATE_CLASS_EXPORT
 #define CORE_EXTERN_TEMPLATE_EXPORT CORE_EXPORT
 #define CORE_TEMPLATE_EXPORT
 

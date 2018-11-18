@@ -25,37 +25,46 @@ namespace compiler {
 class CodeAssemblerState;
 }
 
+template <typename T>
+static constexpr T FirstFromVarArgs(T x, ...) noexcept {
+  return x;
+}
+
 // Convenience macro to avoid generating named accessors for all builtins.
 #define BUILTIN_CODE(isolate, name) \
   (isolate)->builtins()->builtin_handle(Builtins::k##name)
 
 class Builtins {
  public:
-  ~Builtins();
+  explicit Builtins(Isolate* isolate) : isolate_(isolate) {}
 
   void TearDown();
 
-  // Garbage collection support.
-  void IterateBuiltins(RootVisitor* v);
-
   // Disassembler support.
-  const char* Lookup(byte* pc);
+  const char* Lookup(Address pc);
 
   enum Name : int32_t {
 #define DEF_ENUM(Name, ...) k##Name,
-    BUILTIN_LIST_ALL(DEF_ENUM)
+    BUILTIN_LIST(DEF_ENUM, DEF_ENUM, DEF_ENUM, DEF_ENUM, DEF_ENUM, DEF_ENUM,
+                 DEF_ENUM, DEF_ENUM, DEF_ENUM)
 #undef DEF_ENUM
-        builtin_count
+        builtin_count,
+
+#define EXTRACT_NAME(Name, ...) k##Name,
+    // Define kFirstBytecodeHandler,
+    kFirstBytecodeHandler =
+        FirstFromVarArgs(BUILTIN_LIST_BYTECODE_HANDLERS(EXTRACT_NAME) 0)
+#undef EXTRACT_NAME
   };
 
   static const int32_t kNoBuiltinId = -1;
 
-  static bool IsBuiltinId(int maybe_id) {
+  static constexpr bool IsBuiltinId(int maybe_id) {
     return 0 <= maybe_id && maybe_id < builtin_count;
   }
 
   // The different builtin kinds are documented in builtins-definitions.h.
-  enum Kind { CPP, API, TFJ, TFC, TFS, TFH, ASM };
+  enum Kind { CPP, API, TFJ, TFC, TFS, TFH, BCH, DLH, ASM };
 
   static BailoutId GetContinuationBailoutId(Name name);
   static Name GetBuiltinFromBailoutId(BailoutId);
@@ -75,23 +84,8 @@ class Builtins {
   // Used by BuiltinDeserializer and CreateOffHeapTrampolines in isolate.cc.
   void set_builtin(int index, HeapObject* builtin);
 
-  Code* builtin(int index) {
-    DCHECK(IsBuiltinId(index));
-    // Code::cast cannot be used here since we access builtins
-    // during the marking phase of mark sweep. See IC::Clear.
-    return reinterpret_cast<Code*>(builtins_[index]);
-  }
-
-  Address builtin_address(int index) {
-    DCHECK(IsBuiltinId(index));
-    return reinterpret_cast<Address>(&builtins_[index]);
-  }
-
+  Code* builtin(int index);
   V8_EXPORT_PRIVATE Handle<Code> builtin_handle(int index);
-
-  // Used by lazy deserialization to determine whether a given builtin has been
-  // deserialized. See the DeserializeLazy builtin.
-  Object** builtins_table_address() { return &builtins_[0]; }
 
   V8_EXPORT_PRIVATE static Callable CallableFor(Isolate* isolate, Name name);
 
@@ -113,17 +107,55 @@ class Builtins {
   // necessarily mean that its kind is Code::BUILTIN.
   static bool IsBuiltin(const Code* code);
 
+  // As above, but safe to access off the main thread since the check is done
+  // by handle location. Similar to Heap::IsRootHandle.
+  bool IsBuiltinHandle(Handle<HeapObject> maybe_code, int* index) const;
+
   // True, iff the given code object is a builtin with off-heap embedded code.
-  static bool IsEmbeddedBuiltin(const Code* code);
+  static bool IsIsolateIndependentBuiltin(const Code* code);
 
   // Returns true iff the given builtin can be lazy-loaded from the snapshot.
   // This is true in general for most builtins with the exception of a few
   // special cases such as CompileLazy and DeserializeLazy.
   static bool IsLazy(int index);
 
+  static constexpr int kFirstWideBytecodeHandler =
+      kFirstBytecodeHandler + kNumberOfBytecodeHandlers;
+  static constexpr int kFirstExtraWideBytecodeHandler =
+      kFirstWideBytecodeHandler + kNumberOfWideBytecodeHandlers;
+  STATIC_ASSERT(kFirstExtraWideBytecodeHandler +
+                    kNumberOfWideBytecodeHandlers ==
+                builtin_count);
+
+  // Returns the index of the appropriate lazy deserializer in the builtins
+  // table.
+  static constexpr int LazyDeserializerForBuiltin(const int index) {
+    return index < kFirstWideBytecodeHandler
+               ? (index < kFirstBytecodeHandler
+                      ? Builtins::kDeserializeLazy
+                      : Builtins::kDeserializeLazyHandler)
+               : (index < kFirstExtraWideBytecodeHandler
+                      ? Builtins::kDeserializeLazyWideHandler
+                      : Builtins::kDeserializeLazyExtraWideHandler);
+  }
+
+  static constexpr bool IsLazyDeserializer(int builtin_index) {
+    return builtin_index == kDeserializeLazy ||
+           builtin_index == kDeserializeLazyHandler ||
+           builtin_index == kDeserializeLazyWideHandler ||
+           builtin_index == kDeserializeLazyExtraWideHandler;
+  }
+
+  static bool IsLazyDeserializer(Code* code);
+
   // Helper methods used for testing isolate-independent builtins.
   // TODO(jgruber,v8:6666): Remove once all builtins have been migrated.
   static bool IsIsolateIndependent(int index);
+
+  // Wasm runtime stubs are treated specially by wasm. To guarantee reachability
+  // through near jumps, their code is completely copied into a fresh off-heap
+  // area.
+  static bool IsWasmRuntimeStub(int index);
 
   bool is_initialized() const { return initialized_; }
 
@@ -143,20 +175,20 @@ class Builtins {
   static void Generate_Adaptor(MacroAssembler* masm, Address builtin_address,
                                ExitFrameType exit_frame_type);
 
+  static void Generate_CEntry(MacroAssembler* masm, int result_size,
+                              SaveFPRegsMode save_doubles, ArgvMode argv_mode,
+                              bool builtin_exit_frame);
+
   static bool AllowDynamicFunction(Isolate* isolate, Handle<JSFunction> target,
                                    Handle<JSObject> target_global_proxy);
 
- private:
-  Builtins();
-
-#ifdef V8_EMBEDDED_BUILTINS
   // Creates a trampoline code object that jumps to the given off-heap entry.
   // The result should not be used directly, but only from the related Factory
   // function.
   static Handle<Code> GenerateOffHeapTrampolineFor(Isolate* isolate,
                                                    Address off_heap_entry);
-#endif
 
+ private:
   static void Generate_CallFunction(MacroAssembler* masm,
                                     ConvertReceiverMode mode);
 
@@ -184,19 +216,15 @@ class Builtins {
   static void Generate_##Name(compiler::CodeAssemblerState* state);
 
   BUILTIN_LIST(IGNORE_BUILTIN, IGNORE_BUILTIN, DECLARE_TF, DECLARE_TF,
-               DECLARE_TF, DECLARE_TF, DECLARE_ASM)
+               DECLARE_TF, DECLARE_TF, IGNORE_BUILTIN, IGNORE_BUILTIN,
+               DECLARE_ASM)
 
 #undef DECLARE_ASM
 #undef DECLARE_TF
 
-  // Note: These are always Code objects, but to conform with
-  // IterateBuiltins() above which assumes Object**'s for the callback
-  // function f, we use an Object* array here.
-  Object* builtins_[builtin_count];
-  bool initialized_;
+  Isolate* isolate_;
+  bool initialized_ = false;
 
-  friend class Factory;  // For GenerateOffHeapTrampolineFor.
-  friend class Isolate;
   friend class SetupIsolateDelegate;
 
   DISALLOW_COPY_AND_ASSIGN(Builtins);

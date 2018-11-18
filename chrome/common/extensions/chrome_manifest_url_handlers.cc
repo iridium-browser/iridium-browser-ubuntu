@@ -24,8 +24,8 @@
 #include "extensions/common/manifest_url_handlers.h"
 #include "extensions/common/permissions/api_permission.h"
 
-#if defined(USE_AURA)
-#include "ui/keyboard/keyboard_resource_util.h"  // nogncheck
+#if defined(OS_CHROMEOS)
+#include "ui/keyboard/keyboard_resource_util.h"
 #endif
 
 namespace extensions {
@@ -82,8 +82,9 @@ bool DevToolsPageHandler::Parse(Extension* extension, base::string16* error) {
   return true;
 }
 
-const std::vector<std::string> DevToolsPageHandler::Keys() const {
-  return SingleKey(keys::kDevToolsPage);
+base::span<const char* const> DevToolsPageHandler::Keys() const {
+  static constexpr const char* kKeys[] = {keys::kDevToolsPage};
+  return kKeys;
 }
 
 URLOverridesHandler::URLOverridesHandler() {
@@ -128,7 +129,7 @@ bool URLOverridesHandler::Parse(Extension* extension, base::string16* error) {
       URLPattern pattern(URLPattern::SCHEME_CHROMEUI);
       std::string url =
           base::StringPrintf(kOverrideExtentUrlPatternFormat, page.c_str());
-      if (pattern.Parse(url) != URLPattern::PARSE_SUCCESS) {
+      if (pattern.Parse(url) != URLPattern::ParseResult::kSuccess) {
         *error = ErrorUtils::FormatErrorMessageUTF16(
             errors::kInvalidURLPatternError, url);
         return false;
@@ -178,8 +179,9 @@ bool URLOverridesHandler::Validate(
   return true;
 }
 
-const std::vector<std::string> URLOverridesHandler::Keys() const {
-  return SingleKey(keys::kChromeURLOverrides);
+base::span<const char* const> URLOverridesHandler::Keys() const {
+  static constexpr const char* kKeys[] = {keys::kChromeURLOverrides};
+  return kKeys;
 }
 
 }  // namespace extensions

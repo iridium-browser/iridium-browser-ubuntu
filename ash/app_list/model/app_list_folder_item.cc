@@ -11,10 +11,10 @@
 
 namespace app_list {
 
-AppListFolderItem::AppListFolderItem(const std::string& id,
-                                     FolderType folder_type)
+AppListFolderItem::AppListFolderItem(const std::string& id)
     : AppListItem(id),
-      folder_type_(folder_type),
+      folder_type_(id == ash::kOemFolderId ? FOLDER_TYPE_OEM
+                                           : FOLDER_TYPE_NORMAL),
       item_list_(new AppListItemList),
       folder_image_(item_list_.get()) {
   folder_image_.AddObserver(this);
@@ -68,6 +68,10 @@ std::string AppListFolderItem::GenerateId() {
 
 void AppListFolderItem::OnFolderImageUpdated() {
   SetIcon(folder_image_.icon());
+}
+
+void AppListFolderItem::NotifyOfDraggedItem(AppListItem* dragged_item) {
+  folder_image_.UpdateDraggedItem(dragged_item);
 }
 
 }  // namespace app_list

@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 
+#include "base/bind_helpers.h"
 #include "base/command_line.h"
 #include "base/format_macros.h"
 #include "base/i18n/rtl.h"
@@ -26,6 +27,8 @@
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/base/clipboard/scoped_clipboard_writer.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
+#include "ui/base/emoji/emoji_panel_helper.h"
+#include "ui/base/ime/constants.h"
 #include "ui/base/ime/input_method_base.h"
 #include "ui/base/ime/input_method_delegate.h"
 #include "ui/base/ime/input_method_factory.h"
@@ -38,6 +41,7 @@
 #include "ui/events/event.h"
 #include "ui/events/event_processor.h"
 #include "ui/events/event_utils.h"
+#include "ui/events/keycodes/dom/dom_code.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/events/test/event_generator.h"
 #include "ui/events/test/keyboard_layout.h"
@@ -95,7 +99,7 @@ class MockInputMethod : public ui::InputMethodBase {
   void OnCaretBoundsChanged(const ui::TextInputClient* client) override {}
   void CancelComposition(const ui::TextInputClient* client) override;
   bool IsCandidatePopupOpen() const override;
-  void ShowImeIfNeeded() override {}
+  void ShowVirtualKeyboardIfEnabled() override {}
 
   bool untranslated_ime_message_called() const {
     return untranslated_ime_message_called_;
@@ -155,7 +159,7 @@ ui::EventDispatchDetails MockInputMethod::DispatchKeyEvent(ui::KeyEvent* key) {
 // which trigger the appropriate NSResponder action messages for composition.
 #if defined(OS_MACOSX)
   if (key->is_char())
-    return DispatchKeyEventPostIME(key);
+    return DispatchKeyEventPostIME(key, base::NullCallback());
 #endif
 
   // Checks whether the key event is from EventGenerator on Windows which will
@@ -175,9 +179,9 @@ ui::EventDispatchDetails MockInputMethod::DispatchKeyEvent(ui::KeyEvent* key) {
     ui::KeyEvent mock_key(ui::ET_KEY_PRESSED,
                           ui::VKEY_PROCESSKEY,
                           key->flags());
-    dispatch_details = DispatchKeyEventPostIME(&mock_key);
+    dispatch_details = DispatchKeyEventPostIME(&mock_key, base::NullCallback());
   } else {
-    dispatch_details = DispatchKeyEventPostIME(key);
+    dispatch_details = DispatchKeyEventPostIME(key, base::NullCallback());
   }
 
   if (key->handled() || dispatch_details.dispatcher_destroyed)
@@ -551,9 +555,13 @@ class TextfieldTest : public ViewsTestBase, public TextfieldController {
     SendKeyEvent(key_code, false, false);
   }
 
-  void SendKeyEvent(base::char16 ch) { SendKeyEvent(ch, ui::EF_NONE); }
+  void SendKeyEvent(base::char16 ch) { SendKeyEvent(ch, ui::EF_NONE, false); }
 
   void SendKeyEvent(base::char16 ch, int flags) {
+    SendKeyEvent(ch, flags, false);
+  }
+
+  void SendKeyEvent(base::char16 ch, int flags, bool from_vk) {
     if (ch < 0x80) {
       ui::KeyboardCode code =
           ch == ' ' ? ui::VKEY_SPACE :
@@ -564,7 +572,12 @@ class TextfieldTest : public ViewsTestBase, public TextfieldController {
       // keyboard. So they are dispatched directly to the input method. But on
       // Mac, key events don't pass through InputMethod. Hence they are
       // dispatched regularly.
-      ui::KeyEvent event(ch, ui::VKEY_UNKNOWN, flags);
+      ui::KeyEvent event(ch, ui::VKEY_UNKNOWN, ui::DomCode::NONE, flags);
+      if (from_vk) {
+        ui::Event::Properties properties;
+        properties[ui::kPropertyFromVK] = std::vector<uint8_t>();
+        event.SetProperties(properties);
+      }
 #if defined(OS_MACOSX)
       event_generator_->Dispatch(&event);
 #else
@@ -572,6 +585,15 @@ class TextfieldTest : public ViewsTestBase, public TextfieldController {
 #endif
     }
   }
+
+  // Send a key to trigger MockInputMethod::DispatchKeyEvent(). Note the
+  // specific VKEY isn't used (MockInputMethod will mock a ui::VKEY_PROCESSKEY
+  // whenever it has a test composition). However, on Mac, it can't be a letter
+  // (e.g. VKEY_A) since all native character events on Mac are unicode events
+  // and don't have a meaningful ui::KeyEvent that would trigger
+  // DispatchKeyEvent(). It also can't be VKEY_ENTER, since those key events may
+  // need to be suppressed when interacting with real system IME.
+  void DispatchMockInputMethodKeyEvent() { SendKeyEvent(ui::VKEY_INSERT); }
 
   // Sends a platform-specific move (and select) to the logical start of line.
   // Eg. this should move (and select) to the right end of line for RTL text.
@@ -697,16 +719,10 @@ class TextfieldTest : public ViewsTestBase, public TextfieldController {
         textfield_->GetSelectedRange().length() == text.length();
 
     int menu_index = 0;
-#if defined(OS_MACOSX)
-    // On Mac, the Look Up item should appear at the top of the menu if the
-    // textfield has a selection.
-    if (textfield_has_selection) {
-      EXPECT_TRUE(menu->IsEnabledAt(menu_index++ /* LOOK UP */));
+    if (ui::IsEmojiPanelSupported()) {
+      EXPECT_TRUE(menu->IsEnabledAt(menu_index++ /* EMOJI */));
       EXPECT_TRUE(menu->IsEnabledAt(menu_index++ /* Separator */));
     }
-    EXPECT_TRUE(menu->IsEnabledAt(menu_index++ /* EMOJI */));
-    EXPECT_TRUE(menu->IsEnabledAt(menu_index++ /* Separator */));
-#endif
 
     EXPECT_EQ(can_undo, menu->IsEnabledAt(menu_index++ /* UNDO */));
     EXPECT_TRUE(menu->IsEnabledAt(menu_index++ /* Separator */));
@@ -1051,27 +1067,18 @@ TEST_F(TextfieldTest, MoveUpDownAndModifySelection) {
 
   textfield_->SetSelectionRange(gfx::Range(6));
 
-  // Shift+[Up/Down] on Mac should execute the command
-  // MOVE_[UP/DOWN]_AND_MODIFY_SELECTION. On other platforms, textfield won't
-  // handle these events.
+  // Shift+[Up/Down] should select the text to the beginning and end of the
+  // line, respectively.
   SendKeyEvent(ui::VKEY_UP, true /* shift */, false /* command */);
   EXPECT_TRUE(textfield_->key_received());
-#if defined(OS_MACOSX)
   EXPECT_TRUE(textfield_->key_handled());
   EXPECT_EQ(gfx::Range(6, 0), textfield_->GetSelectedRange());
-#else
-  EXPECT_FALSE(textfield_->key_handled());
-#endif
   textfield_->clear();
 
   SendKeyEvent(ui::VKEY_DOWN, true /* shift */, false /* command */);
   EXPECT_TRUE(textfield_->key_received());
-#if defined(OS_MACOSX)
   EXPECT_TRUE(textfield_->key_handled());
   EXPECT_EQ(gfx::Range(6, 11), textfield_->GetSelectedRange());
-#else
-  EXPECT_FALSE(textfield_->key_handled());
-#endif
   textfield_->clear();
 }
 
@@ -1287,8 +1294,15 @@ TEST_F(TextfieldTest, TextInputType_InsertionTest) {
   EXPECT_EQ(ui::TEXT_INPUT_TYPE_PASSWORD, textfield_->GetTextInputType());
 
   SendKeyEvent(ui::VKEY_A);
-  SendKeyEvent(kHebrewLetterSamekh);
+  EXPECT_EQ(-1, textfield_->GetPasswordCharRevealIndex());
+  SendKeyEvent(kHebrewLetterSamekh, ui::EF_NONE, true /* from_vk */);
+#if !defined(OS_MACOSX)
+  // Don't verifies the password character reveal on MacOS, because on MacOS,
+  // the text insertion is not done through TextInputClient::InsertChar().
+  EXPECT_EQ(1, textfield_->GetPasswordCharRevealIndex());
+#endif
   SendKeyEvent(ui::VKEY_B);
+  EXPECT_EQ(-1, textfield_->GetPasswordCharRevealIndex());
 
   EXPECT_EQ(WideToUTF16(L"a\x05E1"
                         L"b"),
@@ -1713,7 +1727,7 @@ TEST_F(TextfieldTest, DragAndDrop_AcceptDrop) {
   EXPECT_EQ(ui::OSExchangeData::STRING, formats);
   EXPECT_TRUE(format_types.empty());
   EXPECT_TRUE(textfield_->CanDrop(data));
-  gfx::Point drop_point(GetCursorPositionX(6), 0);
+  gfx::PointF drop_point(GetCursorPositionX(6), 0);
   ui::DropTargetEvent drop(data, drop_point, drop_point,
       ui::DragDropTypes::DRAG_COPY | ui::DragDropTypes::DRAG_MOVE);
   EXPECT_EQ(ui::DragDropTypes::DRAG_COPY | ui::DragDropTypes::DRAG_MOVE,
@@ -1807,7 +1821,7 @@ TEST_F(TextfieldTest, DragAndDrop_ToTheRight) {
   EXPECT_TRUE(format_types.empty());
 
   // Drop "ello" after "w".
-  const gfx::Point kDropPoint(GetCursorPositionX(7), cursor_y);
+  const gfx::PointF kDropPoint(GetCursorPositionX(7), cursor_y);
   EXPECT_TRUE(textfield_->CanDrop(data));
   ui::DropTargetEvent drop_a(data, kDropPoint, kDropPoint, operations);
   EXPECT_EQ(ui::DragDropTypes::DRAG_MOVE, textfield_->OnDragUpdated(drop_a));
@@ -1859,7 +1873,7 @@ TEST_F(TextfieldTest, DragAndDrop_ToTheLeft) {
 
   // Drop " worl" after "h".
   EXPECT_TRUE(textfield_->CanDrop(data));
-  gfx::Point drop_point(GetCursorPositionX(1), cursor_y);
+  gfx::PointF drop_point(GetCursorPositionX(1), cursor_y);
   ui::DropTargetEvent drop_a(data, drop_point, drop_point, operations);
   EXPECT_EQ(ui::DragDropTypes::DRAG_MOVE, textfield_->OnDragUpdated(drop_a));
   EXPECT_EQ(ui::DragDropTypes::DRAG_MOVE, textfield_->OnPerformDrop(drop_a));
@@ -1895,7 +1909,7 @@ TEST_F(TextfieldTest, DragAndDrop_Canceled) {
   textfield_->WriteDragDataForView(nullptr, point, &data);
   EXPECT_TRUE(textfield_->CanDrop(data));
   // Drag the text over somewhere valid, outside the current selection.
-  gfx::Point drop_point(GetCursorPositionX(2), cursor_y);
+  gfx::PointF drop_point(GetCursorPositionX(2), cursor_y);
   ui::DropTargetEvent drop(data, drop_point, drop_point,
                            ui::DragDropTypes::DRAG_MOVE);
   EXPECT_EQ(ui::DragDropTypes::DRAG_MOVE, textfield_->OnDragUpdated(drop));
@@ -2005,14 +2019,7 @@ TEST_F(TextfieldTest, TextInputClientTest) {
   textfield_->clear();
 
   on_before_user_action_ = on_after_user_action_ = 0;
-
-  // Send a key to trigger MockInputMethod::DispatchKeyEvent(). Note the
-  // specific VKEY isn't used (MockInputMethod will mock a ui::VKEY_PROCESSKEY
-  // whenever it has a test composition). However, on Mac, it can't be a letter
-  // (e.g. VKEY_A) since all native character events on Mac are unicode events
-  // and don't have a meaningful ui::KeyEvent that would trigger
-  // DispatchKeyEvent().
-  SendKeyEvent(ui::VKEY_RETURN);
+  DispatchMockInputMethodKeyEvent();
 
   EXPECT_TRUE(textfield_->key_received());
   EXPECT_FALSE(textfield_->key_handled());
@@ -2026,7 +2033,7 @@ TEST_F(TextfieldTest, TextInputClientTest) {
   input_method_->SetResultTextForNextKey(UTF8ToUTF16("123"));
   on_before_user_action_ = on_after_user_action_ = 0;
   textfield_->clear();
-  SendKeyEvent(ui::VKEY_RETURN);
+  DispatchMockInputMethodKeyEvent();
   EXPECT_TRUE(textfield_->key_received());
   EXPECT_FALSE(textfield_->key_handled());
   EXPECT_FALSE(client->HasCompositionText());
@@ -2038,7 +2045,7 @@ TEST_F(TextfieldTest, TextInputClientTest) {
   input_method_->Clear();
   input_method_->SetCompositionTextForNextKey(composition);
   textfield_->clear();
-  SendKeyEvent(ui::VKEY_RETURN);
+  DispatchMockInputMethodKeyEvent();
   EXPECT_TRUE(client->HasCompositionText());
   EXPECT_STR_EQ("0123321456789", textfield_->text());
 
@@ -3432,6 +3439,69 @@ TEST_F(TextfieldTest, SendingDeletePreservesShiftFlag) {
   EXPECT_EQ(ui::EF_SHIFT_DOWN, textfield_->event_flags());
 }
 
+TEST_F(TextfieldTest, EmojiItem_EmptyField) {
+  InitTextfield();
+  EXPECT_TRUE(textfield_->context_menu_controller());
+
+  // Enable the emoji feature.
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndEnableFeature(features::kEnableEmojiContextMenu);
+
+  // A normal empty field may show the Emoji option (if supported).
+  ui::MenuModel* context_menu = GetContextMenuModel();
+  EXPECT_TRUE(context_menu);
+  EXPECT_GT(context_menu->GetItemCount(), 0);
+  // Not all OS/versions support the emoji menu.
+  EXPECT_EQ(ui::IsEmojiPanelSupported(),
+            context_menu->GetLabelAt(0) ==
+                l10n_util::GetStringUTF16(IDS_CONTENT_CONTEXT_EMOJI));
+}
+
+TEST_F(TextfieldTest, EmojiItem_ReadonlyField) {
+  InitTextfield();
+  EXPECT_TRUE(textfield_->context_menu_controller());
+
+  // Enable the emoji feature.
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndEnableFeature(features::kEnableEmojiContextMenu);
+
+  textfield_->SetReadOnly(true);
+  // In no case is the emoji option showing on a read-only field.
+  ui::MenuModel* context_menu = GetContextMenuModel();
+  EXPECT_TRUE(context_menu);
+  EXPECT_GT(context_menu->GetItemCount(), 0);
+  EXPECT_NE(context_menu->GetLabelAt(0),
+            l10n_util::GetStringUTF16(IDS_CONTENT_CONTEXT_EMOJI));
+}
+
+TEST_F(TextfieldTest, EmojiItem_FieldWithText) {
+  InitTextfield();
+  EXPECT_TRUE(textfield_->context_menu_controller());
+
+#if defined(OS_MACOSX)
+  // On Mac, when there is text, the "Look up" item (+ separator) takes the top
+  // position, and emoji comes after.
+  constexpr int kExpectedEmojiIndex = 2;
+#else
+  constexpr int kExpectedEmojiIndex = 0;
+#endif
+
+  // Enable the emoji feature.
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndEnableFeature(features::kEnableEmojiContextMenu);
+
+  // A field with text may still show the Emoji option (if supported).
+  textfield_->SetText(base::ASCIIToUTF16("some text"));
+  textfield_->SelectAll(false);
+  ui::MenuModel* context_menu = GetContextMenuModel();
+  EXPECT_TRUE(context_menu);
+  EXPECT_GT(context_menu->GetItemCount(), 0);
+  // Not all OS/versions support the emoji menu.
+  EXPECT_EQ(ui::IsEmojiPanelSupported(),
+            context_menu->GetLabelAt(kExpectedEmojiIndex) ==
+                l10n_util::GetStringUTF16(IDS_CONTENT_CONTEXT_EMOJI));
+}
+
 #if defined(OS_MACOSX)
 // Tests to see if the BiDi submenu items are updated correctly when the
 // textfield's text direction is changed.
@@ -3470,6 +3540,10 @@ TEST_F(TextfieldTest, LookUpItemUpdate) {
   InitTextfield();
   EXPECT_TRUE(textfield_->context_menu_controller());
 
+  // Make sure the Emoji feature is disabled for this test.
+  base::test::ScopedFeatureList scoped_feature_list;
+  scoped_feature_list.InitAndDisableFeature(features::kEnableEmojiContextMenu);
+
   const base::string16 kTextOne = ASCIIToUTF16("crake");
   textfield_->SetText(kTextOne);
   textfield_->SelectAll(false);
@@ -3480,6 +3554,11 @@ TEST_F(TextfieldTest, LookUpItemUpdate) {
   EXPECT_EQ(context_menu->GetLabelAt(0),
             l10n_util::GetStringFUTF16(IDS_CONTENT_CONTEXT_LOOK_UP, kTextOne));
 
+#if !defined(OS_MACOSX)
+  // Mac context menus don't behave this way: it's not possible to update the
+  // text while the menu is still "open", but also the selection can't change
+  // while the menu is open (because the user can't interact with the rest of
+  // the app).
   const base::string16 kTextTwo = ASCIIToUTF16("rail");
   textfield_->SetText(kTextTwo);
   textfield_->SelectAll(false);
@@ -3489,6 +3568,7 @@ TEST_F(TextfieldTest, LookUpItemUpdate) {
   EXPECT_GT(context_menu->GetItemCount(), 0);
   EXPECT_EQ(context_menu->GetLabelAt(0),
             l10n_util::GetStringFUTF16(IDS_CONTENT_CONTEXT_LOOK_UP, kTextTwo));
+#endif
 }
 
 // Tests to see if the look up item is hidden for password fields.
@@ -3550,6 +3630,124 @@ TEST_F(TextfieldTest, AccessibilitySelectionEvents) {
   // Has not changed.
   EXPECT_EQ(previous_selection_fired_count,
             textfield_->GetAccessibilitySelectionFiredCount());
+}
+
+TEST_F(TextfieldTest, FocusReasonMouse) {
+  InitTextfield();
+  widget_->GetFocusManager()->ClearFocus();
+  EXPECT_EQ(ui::TextInputClient::FOCUS_REASON_NONE,
+            textfield_->GetFocusReason());
+
+  const auto& bounds = textfield_->bounds();
+  MouseClick(bounds, 10);
+
+  EXPECT_EQ(ui::TextInputClient::FOCUS_REASON_MOUSE,
+            textfield_->GetFocusReason());
+}
+
+TEST_F(TextfieldTest, FocusReasonTouchTap) {
+  InitTextfield();
+  widget_->GetFocusManager()->ClearFocus();
+  EXPECT_EQ(ui::TextInputClient::FOCUS_REASON_NONE,
+            textfield_->GetFocusReason());
+
+  ui::GestureEventDetails tap_details(ui::ET_GESTURE_TAP_DOWN);
+  tap_details.set_primary_pointer_type(
+      ui::EventPointerType::POINTER_TYPE_TOUCH);
+  GestureEventForTest tap(GetCursorPositionX(0), 0, tap_details);
+  textfield_->OnGestureEvent(&tap);
+
+  EXPECT_EQ(ui::TextInputClient::FOCUS_REASON_TOUCH,
+            textfield_->GetFocusReason());
+}
+
+TEST_F(TextfieldTest, FocusReasonPenTap) {
+  InitTextfield();
+  widget_->GetFocusManager()->ClearFocus();
+  EXPECT_EQ(ui::TextInputClient::FOCUS_REASON_NONE,
+            textfield_->GetFocusReason());
+
+  ui::GestureEventDetails tap_details(ui::ET_GESTURE_TAP_DOWN);
+  tap_details.set_primary_pointer_type(ui::EventPointerType::POINTER_TYPE_PEN);
+  GestureEventForTest tap(GetCursorPositionX(0), 0, tap_details);
+  textfield_->OnGestureEvent(&tap);
+
+  EXPECT_EQ(ui::TextInputClient::FOCUS_REASON_PEN,
+            textfield_->GetFocusReason());
+}
+
+TEST_F(TextfieldTest, FocusReasonMultipleEvents) {
+  InitTextfield();
+  widget_->GetFocusManager()->ClearFocus();
+  EXPECT_EQ(ui::TextInputClient::FOCUS_REASON_NONE,
+            textfield_->GetFocusReason());
+
+  // Pen tap, followed by a touch tap
+  {
+    ui::GestureEventDetails tap_details(ui::ET_GESTURE_TAP_DOWN);
+    tap_details.set_primary_pointer_type(
+        ui::EventPointerType::POINTER_TYPE_PEN);
+    GestureEventForTest tap(GetCursorPositionX(0), 0, tap_details);
+    textfield_->OnGestureEvent(&tap);
+  }
+
+  {
+    ui::GestureEventDetails tap_details(ui::ET_GESTURE_TAP_DOWN);
+    tap_details.set_primary_pointer_type(
+        ui::EventPointerType::POINTER_TYPE_TOUCH);
+    GestureEventForTest tap(GetCursorPositionX(0), 0, tap_details);
+    textfield_->OnGestureEvent(&tap);
+  }
+
+  EXPECT_EQ(ui::TextInputClient::FOCUS_REASON_PEN,
+            textfield_->GetFocusReason());
+}
+
+TEST_F(TextfieldTest, FocusReasonFocusBlurFocus) {
+  InitTextfield();
+  widget_->GetFocusManager()->ClearFocus();
+  EXPECT_EQ(ui::TextInputClient::FOCUS_REASON_NONE,
+            textfield_->GetFocusReason());
+
+  // Pen tap, blur, then programmatic focus.
+  ui::GestureEventDetails tap_details(ui::ET_GESTURE_TAP_DOWN);
+  tap_details.set_primary_pointer_type(ui::EventPointerType::POINTER_TYPE_PEN);
+  GestureEventForTest tap(GetCursorPositionX(0), 0, tap_details);
+  textfield_->OnGestureEvent(&tap);
+
+  widget_->GetFocusManager()->ClearFocus();
+
+  textfield_->RequestFocus();
+
+  EXPECT_EQ(ui::TextInputClient::FOCUS_REASON_OTHER,
+            textfield_->GetFocusReason());
+}
+
+TEST_F(TextfieldTest, ChangeTextDirectionAndLayoutAlignmentTest) {
+  InitTextfield();
+
+  textfield_->ChangeTextDirectionAndLayoutAlignment(
+      base::i18n::TextDirection::RIGHT_TO_LEFT);
+  EXPECT_EQ(textfield_->GetTextDirection(),
+            base::i18n::TextDirection::RIGHT_TO_LEFT);
+  EXPECT_EQ(textfield_->GetHorizontalAlignment(),
+            gfx::HorizontalAlignment::ALIGN_RIGHT);
+
+  textfield_->ChangeTextDirectionAndLayoutAlignment(
+      base::i18n::TextDirection::RIGHT_TO_LEFT);
+  const base::string16& text = test_api_->GetRenderText()->GetDisplayText();
+  base::i18n::TextDirection text_direction =
+      base::i18n::GetFirstStrongCharacterDirection(text);
+  EXPECT_EQ(textfield_->GetTextDirection(), text_direction);
+  EXPECT_EQ(textfield_->GetHorizontalAlignment(),
+            gfx::HorizontalAlignment::ALIGN_RIGHT);
+
+  textfield_->ChangeTextDirectionAndLayoutAlignment(
+      base::i18n::TextDirection::LEFT_TO_RIGHT);
+  EXPECT_EQ(textfield_->GetTextDirection(),
+            base::i18n::TextDirection::LEFT_TO_RIGHT);
+  EXPECT_EQ(textfield_->GetHorizontalAlignment(),
+            gfx::HorizontalAlignment::ALIGN_LEFT);
 }
 
 }  // namespace views

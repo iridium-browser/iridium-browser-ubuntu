@@ -14,6 +14,7 @@
 
 class AutocompleteResult;
 class GURL;
+class QueryInOmnibox;
 class SessionID;
 class TemplateURL;
 class TemplateURLService;
@@ -28,9 +29,10 @@ namespace gfx {
 class Image;
 }
 
-typedef base::Callback<void(const SkBitmap& bitmap)> BitmapFetchedCallback;
-typedef base::OnceCallback<void(const gfx::Image& favicon)>
-    FaviconFetchedCallback;
+using BitmapFetchedCallback =
+    base::RepeatingCallback<void(int result_index, const SkBitmap& bitmap)>;
+using FaviconFetchedCallback =
+    base::OnceCallback<void(const gfx::Image& favicon)>;
 
 // Interface that allows the omnibox component to interact with its embedder
 // (e.g., getting information about the current page, retrieving objects
@@ -82,6 +84,9 @@ class OmniboxClient {
   // Returns whether |url| corresponds to the user's home page.
   virtual bool IsHomePage(const GURL& url) const;
 
+  // Returns false if Default Search is disabled by a policy.
+  virtual bool IsDefaultSearchProviderEnabled() const;
+
   // Returns the session ID of the current page.
   virtual const SessionID& GetSessionID() const = 0;
 
@@ -89,6 +94,7 @@ class OmniboxClient {
   virtual TemplateURLService* GetTemplateURLService();
   virtual const AutocompleteSchemeClassifier& GetSchemeClassifier() const = 0;
   virtual AutocompleteClassifier* GetAutocompleteClassifier();
+  virtual QueryInOmnibox* GetQueryInOmnibox();
 
   // Returns the icon corresponding to |match| if match is an extension match
   // and an empty icon otherwise.
@@ -98,6 +104,9 @@ class OmniboxClient {
   // Returns the given |vector_icon_type| with the correct size.
   virtual gfx::Image GetSizedIcon(const gfx::VectorIcon& vector_icon_type,
                                   SkColor vector_icon_color) const;
+
+  // Returns the given |icon| with the correct size.
+  virtual gfx::Image GetSizedIcon(const gfx::Image& icon) const;
 
   // Checks whether |template_url| is an extension keyword; if so, asks the
   // ExtensionOmniboxEventRouter to process |match| for it and returns true.
@@ -125,13 +134,15 @@ class OmniboxClient {
                                const BitmapFetchedCallback& on_bitmap_fetched) {
   }
 
-  // Fetches the favicon for |page_url| if the embedder supports fetching
-  // favicons (not all embedders do). Returns the favicon if it is synchronously
-  // available. Otherwise, this method returns an empty gfx::Image and
-  // |on_favicon_fetched| may or may not be called asynchronously later.
-  // |on_favicon_fetched| will never be run synchronously.
+  // These two methods fetch favicons if the embedder supports it. Not all
+  // embedders do. These methods return the favicon synchronously if possible.
+  // Otherwise, they return an empty gfx::Image and |on_favicon_fetched| may or
+  // may not be called asynchronously later. |on_favicon_fetched| will never be
+  // run synchronously, and will never be run with an empty result.
   virtual gfx::Image GetFaviconForPageUrl(
       const GURL& page_url,
+      FaviconFetchedCallback on_favicon_fetched);
+  virtual gfx::Image GetFaviconForDefaultSearchProvider(
       FaviconFetchedCallback on_favicon_fetched);
 
   // Called when the current autocomplete match has changed.
@@ -142,7 +153,6 @@ class OmniboxClient {
                              bool user_input_in_progress,
                              const base::string16& user_text,
                              const AutocompleteResult& result,
-                             bool is_popup_open,
                              bool has_focus) {}
 
   // Called when input has been accepted.
@@ -159,6 +169,9 @@ class OmniboxClient {
 
   // Discards the state for all pending and transient navigations.
   virtual void DiscardNonCommittedNavigations() {}
+
+  // Presents translation prompt for current tab web contents.
+  virtual void PromptPageTranslation() {}
 };
 
 #endif  // COMPONENTS_OMNIBOX_BROWSER_OMNIBOX_CLIENT_H_

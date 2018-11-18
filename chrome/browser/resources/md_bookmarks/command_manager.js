@@ -23,9 +23,7 @@ cr.define('bookmarks', function() {
       },
 
       /** @private {Set<string>} */
-      menuIds_: {
-        type: Object,
-      },
+      menuIds_: Object,
 
       /** @private */
       hasAnySublabel_: {
@@ -40,7 +38,10 @@ cr.define('bookmarks', function() {
        * or elsewhere in the UI.
        * @private {MenuSource}
        */
-      menuSource_: MenuSource.NONE,
+      menuSource_: {
+        type: Number,
+        value: MenuSource.NONE,
+      },
 
       /** @private */
       globalCanEdit_: Boolean,
@@ -68,6 +69,9 @@ cr.define('bookmarks', function() {
       this.addShortcut_(Command.OPEN_NEW_TAB, 'Ctrl|Enter', 'Meta|Enter');
       this.addShortcut_(Command.OPEN_NEW_WINDOW, 'Shift|Enter');
 
+      // Note: the undo shortcut is also defined in md_bookmarks_ui.cc
+      // TODO(b/893033): de-duplicate shortcut by moving all shortcut
+      // definitions from JS to C++.
       this.addShortcut_(Command.UNDO, 'Ctrl|z', 'Meta|z');
       this.addShortcut_(Command.REDO, 'Ctrl|y Ctrl|Shift|Z', 'Meta|Shift|Z');
 
@@ -702,7 +706,7 @@ cr.define('bookmarks', function() {
      * @private
      */
     computeHasAnySublabel_: function() {
-      if (!this.menuIds_)
+      if (this.menuIds_ == undefined || this.menuCommands_ == undefined)
         return false;
 
       return this.menuCommands_.some(
@@ -795,7 +799,7 @@ cr.define('bookmarks', function() {
      * @private
      */
     onMenuMousedown_: function(e) {
-      if (e.path[0] != this.$.dropdown.getIfExists())
+      if (e.path[0].tagName != 'DIALOG')
         return;
 
       this.closeCommandMenu();

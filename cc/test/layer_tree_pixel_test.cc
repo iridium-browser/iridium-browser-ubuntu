@@ -45,12 +45,17 @@ LayerTreePixelTest::CreateLayerTreeFrameSink(
   scoped_refptr<TestInProcessContextProvider> compositor_context_provider;
   scoped_refptr<TestInProcessContextProvider> worker_context_provider;
   if (test_type_ == PIXEL_TEST_GL) {
-    compositor_context_provider =
-        new TestInProcessContextProvider(nullptr, false);
+    compositor_context_provider = new TestInProcessContextProvider(
+        /*enable_oop_rasterization=*/false, /*support_locking=*/false);
     worker_context_provider = new TestInProcessContextProvider(
-        compositor_context_provider.get(), false);
+        /*enable_oop_rasterization=*/false, /*support_locking=*/true);
+    // Bind worker context to main thread like it is in production. This is
+    // needed to fully initialize the context. Compositor context is bound to
+    // the impl thread in LayerTreeFrameSink::BindToCurrentThread().
+    gpu::ContextResult result = worker_context_provider->BindToCurrentThread();
+    DCHECK_EQ(result, gpu::ContextResult::kSuccess);
   }
-  constexpr bool disable_display_vsync = false;
+  static constexpr bool disable_display_vsync = false;
   bool synchronous_composite =
       !HasImplThread() &&
       !layer_tree_host()->GetSettings().single_thread_proxy_scheduler;
@@ -61,9 +66,8 @@ LayerTreePixelTest::CreateLayerTreeFrameSink(
   auto delegating_output_surface =
       std::make_unique<viz::TestLayerTreeFrameSink>(
           compositor_context_provider, worker_context_provider,
-          shared_bitmap_manager(), gpu_memory_buffer_manager(), test_settings,
-          ImplThreadTaskRunner(), synchronous_composite, disable_display_vsync,
-          refresh_rate);
+          gpu_memory_buffer_manager(), test_settings, ImplThreadTaskRunner(),
+          synchronous_composite, disable_display_vsync, refresh_rate);
   delegating_output_surface->SetEnlargePassTextureAmount(
       enlarge_texture_amount_);
   return delegating_output_surface;
@@ -78,8 +82,10 @@ LayerTreePixelTest::CreateDisplayOutputSurfaceOnThread(
     // mimic texture transport from the renderer process to the Display
     // compositor.
     auto display_context_provider =
-        base::MakeRefCounted<TestInProcessContextProvider>(nullptr, false);
-    display_context_provider->BindToCurrentThread();
+        base::MakeRefCounted<TestInProcessContextProvider>(
+            /*enable_oop_rasterization=*/false, /*support_locking=*/false);
+    gpu::ContextResult result = display_context_provider->BindToCurrentThread();
+    DCHECK_EQ(result, gpu::ContextResult::kSuccess);
 
     bool flipped_output_surface = false;
     display_output_surface = std::make_unique<PixelTestOutputSurface>(
@@ -116,8 +122,17 @@ void LayerTreePixelTest::BeginTest() {
 }
 
 void LayerTreePixelTest::AfterTest() {
+  // Bitmap comparison.
+  if (ref_file_.empty()) {
+    EXPECT_TRUE(
+        MatchesBitmap(*result_bitmap_, expected_bitmap_, *pixel_comparator_));
+    return;
+  }
+
+  // File comparison.
   base::FilePath test_data_dir;
-  EXPECT_TRUE(PathService::Get(viz::Paths::DIR_TEST_DATA, &test_data_dir));
+  EXPECT_TRUE(
+      base::PathService::Get(viz::Paths::DIR_TEST_DATA, &test_data_dir));
   base::FilePath ref_file_path = test_data_dir.Append(ref_file_);
 
   base::CommandLine* cmd = base::CommandLine::ForCurrentProcess();
@@ -197,6 +212,17 @@ void LayerTreePixelTest::RunPixelTest(
   content_root_ = content_root;
   readback_target_ = nullptr;
   ref_file_ = file_name;
+  RunTest(CompositorMode::THREADED);
+}
+
+void LayerTreePixelTest::RunPixelTest(PixelTestType test_type,
+                                      scoped_refptr<Layer> content_root,
+                                      const SkBitmap& expected_bitmap) {
+  test_type_ = test_type;
+  content_root_ = content_root;
+  readback_target_ = nullptr;
+  ref_file_ = base::FilePath();
+  expected_bitmap_ = expected_bitmap;
   RunTest(CompositorMode::THREADED);
 }
 

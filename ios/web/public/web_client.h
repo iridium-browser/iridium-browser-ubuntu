@@ -13,7 +13,7 @@
 #include "base/callback.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_piece.h"
-#include "base/task_scheduler/task_scheduler.h"
+#include "base/task/task_scheduler/task_scheduler.h"
 #include "base/values.h"
 #include "ios/web/public/user_agent.h"
 #include "mojo/public/cpp/system/message_pipe.h"
@@ -157,7 +157,8 @@ class WebClient {
       const std::string& interface_name,
       mojo::ScopedMessagePipeHandle interface_pipe) {}
 
-  // Informs the embedder that a certificate error has occurred. If
+  // Informs the embedder that a certificate error has occurred. |cert_error| is
+  // a network error code defined in //net/base/net_error_list.h. If
   // |overridable| is true, the user can ignore the error and continue. The
   // embedder can call the |callback| asynchronously (an argument of true means
   // that |cert_error| should be ignored and web// should load the page).
@@ -168,6 +169,15 @@ class WebClient {
       const GURL& request_url,
       bool overridable,
       const base::Callback<void(bool)>& callback);
+
+  // Returns the information to display when a navigation error occurs.
+  // |error| and |error_html| are always valid pointers. Embedder may set
+  // |error_html| to an HTML page containing the details of the error and maybe
+  // links to more info.
+  virtual void PrepareErrorPage(NSError* error,
+                                bool is_post,
+                                bool is_off_the_record,
+                                NSString** error_html);
 
   // Allows upper layers to inject experimental flags to the web layer.
   // TODO(crbug.com/734150): Clean up this flag after experiment. If need for a

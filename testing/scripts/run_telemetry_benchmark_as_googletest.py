@@ -41,6 +41,7 @@ import common
 # Add src/testing/ into sys.path for importing xvfb.
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 import xvfb
+import test_env
 
 # Unfortunately we need to copy these variables from ../test_env.py.
 # Importing it and using its get_sandbox_env breaks test runs on Linux
@@ -65,7 +66,7 @@ def main():
   for output_format in args.output_format:
     rest_args.append('--output-format=' + output_format)
 
-  rc, perf_results, json_test_results = run_benchmark(args, rest_args,
+  rc, perf_results, json_test_results, _ = run_benchmark(args, rest_args,
       'histograms' in args.output_format)
 
   if perf_results:
@@ -85,6 +86,22 @@ def main():
   return rc
 
 def run_benchmark(args, rest_args, histogram_results):
+  """  Run benchmark with args.
+
+  Args:
+    args: the option object resulted from parsing commandline args required for
+      IsolatedScriptTest contract (see
+      https://cs.chromium.org/chromium/build/scripts/slave/recipe_modules/chromium_tests/steps.py?rcl=d31f256fb860701e6dc02544f2beffe4e17c9b92&l=1639).
+    rest_args: the args (list of strings) for running Telemetry benchmark.
+    histogram_results: a boolean describes whether to output histograms format
+      for the benchmark.
+
+  Returns: a tuple of (rc, perf_results, json_test_results, benchmark_log)
+    rc: the return code of benchmark
+    perf_results: json object contains the perf test results
+    json_test_results: json object contains the Pass/Fail data of the benchmark.
+    benchmark_log: string contains the stdout/stderr of the benchmark run.
+  """
   env = os.environ.copy()
   env['CHROME_HEADLESS'] = '1'
 
@@ -93,6 +110,8 @@ def run_benchmark(args, rest_args, histogram_results):
   # all the time on Linux.
   env[CHROME_SANDBOX_ENV] = CHROME_SANDBOX_PATH
   tempfile_dir = tempfile.mkdtemp('telemetry')
+  benchmark_log = ''
+  stdoutfile = os.path.join(tempfile_dir, 'benchmark_log.txt')
   valid = True
   num_failures = 0
   perf_results = None
@@ -107,15 +126,19 @@ def run_benchmark(args, rest_args, histogram_results):
     cmd_args = cmd_args + [
       '--story-filter=' + filter_regex
     ]
+  rc = 1  # Set default returncode in case there is an exception.
   try:
     cmd = [sys.executable] + cmd_args + [
       '--output-dir', tempfile_dir,
       '--output-format=json-test-results',
     ]
     if args.xvfb:
-      rc = xvfb.run_executable(cmd, env)
+      rc = xvfb.run_executable(cmd, env=env, stdoutfile=stdoutfile)
     else:
-      rc = common.run_command(cmd, env=env)
+      rc = test_env.run_command_with_output(cmd, env=env, stdoutfile=stdoutfile)
+
+    with open(stdoutfile) as f:
+      benchmark_log = f.read()
 
     # If we have also output chartjson read it in and return it.
     # results-chart.json is the file name output by telemetry when the
@@ -145,13 +168,16 @@ def run_benchmark(args, rest_args, histogram_results):
           results, indent=2)
     valid = False
   finally:
-    shutil.rmtree(tempfile_dir)
+    # Add ignore_errors=True because otherwise rmtree may fail due to leaky
+    # processes of tests are still holding opened handles to files under
+    # |tempfile_dir|. For example, see crbug.com/865896
+    shutil.rmtree(tempfile_dir, ignore_errors=True)
 
   if not valid and num_failures == 0:
     if rc == 0:
       rc = 1  # Signal an abnormal exit.
 
-  return rc, perf_results, json_test_results
+  return rc, perf_results, json_test_results, benchmark_log
 
 
 # This is not really a "script test" so does not need to manually add

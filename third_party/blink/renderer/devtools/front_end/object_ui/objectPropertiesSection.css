@@ -4,11 +4,6 @@
  * found in the LICENSE file.
  */
 
-.object-properties-section-separator {
-    flex-shrink: 0;
-    padding-right: 5px;
-}
-
 .object-properties-section-dimmed {
     opacity: 0.6;
 }
@@ -54,4 +49,19 @@
 
 .object-properties-section .editable-div {
     overflow: hidden;
+}
+
+.name-and-value {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: normal;
+}
+
+.editing-sub-part .name-and-value {
+    overflow: visible;
+    display: inline-flex;
+}
+
+.property-prompt {
+    margin-left: 4px;
 }

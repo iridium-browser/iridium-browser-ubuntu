@@ -13,6 +13,19 @@ namespace gpu {
 
 class Buffer;
 
+struct SerializableSkiaHandle {
+  SerializableSkiaHandle() = default;
+  SerializableSkiaHandle(uint32_t handle_id,
+                         uint32_t shm_id,
+                         uint32_t byte_offset)
+      : handle_id(handle_id), shm_id(shm_id), byte_offset(byte_offset) {}
+  ~SerializableSkiaHandle() = default;
+
+  uint32_t handle_id = 0u;
+  uint32_t shm_id = 0u;
+  uint32_t byte_offset = 0u;
+};
+
 // DiscardableHandleBase is the base class for the discardable handle
 // implementation. In order to facilitate transfering handles across the
 // command buffer, DiscardableHandleBase is backed by a gpu::Buffer and an
@@ -70,9 +83,7 @@ class GPU_EXPORT DiscardableHandleBase {
 // handle (via the constructor), and can Lock an existing handle.
 class GPU_EXPORT ClientDiscardableHandle : public DiscardableHandleBase {
  public:
-  using Id = IdType<ClientDiscardableHandle,
-                    uint64_t,
-                    std::numeric_limits<uint64_t>::max()>;
+  using Id = IdType32<ClientDiscardableHandle>;
 
   ClientDiscardableHandle();  // Constructs an invalid handle.
   ClientDiscardableHandle(scoped_refptr<Buffer> buffer,
@@ -91,17 +102,15 @@ class GPU_EXPORT ClientDiscardableHandle : public DiscardableHandleBase {
   // re-used on the client.
   bool CanBeReUsed() const;
 
-  // Gets an Id which uniquely identifies this ClientDiscardableHandle within
-  // the ClientDiscardableManager which created it.
-  Id GetId() const;
-
-  bool IsValid() const { return !GetId().is_null(); }
+  // Returns true if this handle is backed by valid shared memory.
+  bool IsValid() const { return shm_id() > 0; }
 };
 
 // ServiceDiscardableHandle can wrap an existing handle (via the constructor),
 // and can unlock and delete this handle.
 class GPU_EXPORT ServiceDiscardableHandle : public DiscardableHandleBase {
  public:
+  ServiceDiscardableHandle();  // Constructs an invalid handle.
   ServiceDiscardableHandle(scoped_refptr<Buffer> buffer,
                            uint32_t byte_offset,
                            int32_t shm_id);

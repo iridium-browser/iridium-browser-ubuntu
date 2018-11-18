@@ -34,77 +34,94 @@
 #include "third_party/blink/renderer/platform/graphics/graphics_context.h"
 #include "third_party/blink/renderer/platform/graphics/paint/paint_flags.h"
 #include "third_party/skia/include/effects/SkCornerPathEffect.h"
+#include "third_party/skia/third_party/skcms/skcms.h"
+#include "ui/gfx/icc_profile.h"
+
+#include <algorithm>
+#include <cmath>
 
 namespace blink {
 
-static const struct CompositOpToXfermodeMode {
-  CompositeOperator composit_op;
-  SkBlendMode xfermode_mode;
-} kGMapCompositOpsToXfermodeModes[] = {
-    {kCompositeClear, SkBlendMode::kClear},
-    {kCompositeCopy, SkBlendMode::kSrc},
-    {kCompositeSourceOver, SkBlendMode::kSrcOver},
-    {kCompositeSourceIn, SkBlendMode::kSrcIn},
-    {kCompositeSourceOut, SkBlendMode::kSrcOut},
-    {kCompositeSourceAtop, SkBlendMode::kSrcATop},
-    {kCompositeDestinationOver, SkBlendMode::kDstOver},
-    {kCompositeDestinationIn, SkBlendMode::kDstIn},
-    {kCompositeDestinationOut, SkBlendMode::kDstOut},
-    {kCompositeDestinationAtop, SkBlendMode::kDstATop},
-    {kCompositeXOR, SkBlendMode::kXor},
-    {kCompositePlusLighter, SkBlendMode::kPlus}};
-
-// Keep this array in sync with the WebBlendMode enum in
-// public/platform/WebBlendMode.h.
-static const SkBlendMode kGMapBlendOpsToXfermodeModes[] = {
-    SkBlendMode::kSrcOver,     // WebBlendModeNormal
-    SkBlendMode::kMultiply,    // WebBlendModeMultiply
-    SkBlendMode::kScreen,      // WebBlendModeScreen
-    SkBlendMode::kOverlay,     // WebBlendModeOverlay
-    SkBlendMode::kDarken,      // WebBlendModeDarken
-    SkBlendMode::kLighten,     // WebBlendModeLighten
-    SkBlendMode::kColorDodge,  // WebBlendModeColorDodge
-    SkBlendMode::kColorBurn,   // WebBlendModeColorBurn
-    SkBlendMode::kHardLight,   // WebBlendModeHardLight
-    SkBlendMode::kSoftLight,   // WebBlendModeSoftLight
-    SkBlendMode::kDifference,  // WebBlendModeDifference
-    SkBlendMode::kExclusion,   // WebBlendModeExclusion
-    SkBlendMode::kHue,         // WebBlendModeHue
-    SkBlendMode::kSaturation,  // WebBlendModeSaturation
-    SkBlendMode::kColor,       // WebBlendModeColor
-    SkBlendMode::kLuminosity   // WebBlendModeLuminosity
-};
-
 SkBlendMode WebCoreCompositeToSkiaComposite(CompositeOperator op,
-                                            WebBlendMode blend_mode) {
-  DCHECK(op == kCompositeSourceOver || blend_mode == WebBlendMode::kNormal);
-  if (blend_mode != WebBlendMode::kNormal) {
-    if (static_cast<uint8_t>(blend_mode) >=
-        SK_ARRAY_COUNT(kGMapBlendOpsToXfermodeModes)) {
-      SkDEBUGF(
-          ("GraphicsContext::setPlatformCompositeOperation unknown "
-           "WebBlendMode %d\n",
-           blend_mode));
-      return SkBlendMode::kSrcOver;
-    }
-    return kGMapBlendOpsToXfermodeModes[static_cast<uint8_t>(blend_mode)];
+                                            BlendMode blend_mode) {
+  if (blend_mode != BlendMode::kNormal) {
+    DCHECK(op == kCompositeSourceOver);
+    return WebCoreBlendModeToSkBlendMode(blend_mode);
   }
 
-  const CompositOpToXfermodeMode* table = kGMapCompositOpsToXfermodeModes;
-  if (static_cast<uint8_t>(op) >=
-      SK_ARRAY_COUNT(kGMapCompositOpsToXfermodeModes)) {
-    SkDEBUGF(
-        ("GraphicsContext::setPlatformCompositeOperation unknown "
-         "CompositeOperator %d\n",
-         op));
-    return SkBlendMode::kSrcOver;
+  switch (op) {
+    case kCompositeClear:
+      return SkBlendMode::kClear;
+    case kCompositeCopy:
+      return SkBlendMode::kSrc;
+    case kCompositeSourceOver:
+      return SkBlendMode::kSrcOver;
+    case kCompositeSourceIn:
+      return SkBlendMode::kSrcIn;
+    case kCompositeSourceOut:
+      return SkBlendMode::kSrcOut;
+    case kCompositeSourceAtop:
+      return SkBlendMode::kSrcATop;
+    case kCompositeDestinationOver:
+      return SkBlendMode::kDstOver;
+    case kCompositeDestinationIn:
+      return SkBlendMode::kDstIn;
+    case kCompositeDestinationOut:
+      return SkBlendMode::kDstOut;
+    case kCompositeDestinationAtop:
+      return SkBlendMode::kDstATop;
+    case kCompositeXOR:
+      return SkBlendMode::kXor;
+    case kCompositePlusLighter:
+      return SkBlendMode::kPlus;
   }
-  SkASSERT(table[static_cast<uint8_t>(op)].composit_op == op);
-  return table[static_cast<uint8_t>(op)].xfermode_mode;
+
+  NOTREACHED();
+  return SkBlendMode::kSrcOver;
 }
 
-CompositeOperator CompositeOperatorFromSkia(SkBlendMode xfer_mode) {
-  switch (xfer_mode) {
+SkBlendMode WebCoreBlendModeToSkBlendMode(BlendMode blend_mode) {
+  switch (blend_mode) {
+    case BlendMode::kNormal:
+      return SkBlendMode::kSrcOver;
+    case BlendMode::kMultiply:
+      return SkBlendMode::kMultiply;
+    case BlendMode::kScreen:
+      return SkBlendMode::kScreen;
+    case BlendMode::kOverlay:
+      return SkBlendMode::kOverlay;
+    case BlendMode::kDarken:
+      return SkBlendMode::kDarken;
+    case BlendMode::kLighten:
+      return SkBlendMode::kLighten;
+    case BlendMode::kColorDodge:
+      return SkBlendMode::kColorDodge;
+    case BlendMode::kColorBurn:
+      return SkBlendMode::kColorBurn;
+    case BlendMode::kHardLight:
+      return SkBlendMode::kHardLight;
+    case BlendMode::kSoftLight:
+      return SkBlendMode::kSoftLight;
+    case BlendMode::kDifference:
+      return SkBlendMode::kDifference;
+    case BlendMode::kExclusion:
+      return SkBlendMode::kExclusion;
+    case BlendMode::kHue:
+      return SkBlendMode::kHue;
+    case BlendMode::kSaturation:
+      return SkBlendMode::kSaturation;
+    case BlendMode::kColor:
+      return SkBlendMode::kColor;
+    case BlendMode::kLuminosity:
+      return SkBlendMode::kLuminosity;
+  }
+
+  NOTREACHED();
+  return SkBlendMode::kSrcOver;
+}
+
+CompositeOperator CompositeOperatorFromSkBlendMode(SkBlendMode blend_mode) {
+  switch (blend_mode) {
     case SkBlendMode::kClear:
       return kCompositeClear;
     case SkBlendMode::kSrc:
@@ -135,44 +152,44 @@ CompositeOperator CompositeOperatorFromSkia(SkBlendMode xfer_mode) {
   return kCompositeSourceOver;
 }
 
-WebBlendMode BlendModeFromSkia(SkBlendMode xfer_mode) {
-  switch (xfer_mode) {
+BlendMode BlendModeFromSkBlendMode(SkBlendMode blend_mode) {
+  switch (blend_mode) {
     case SkBlendMode::kSrcOver:
-      return WebBlendMode::kNormal;
+      return BlendMode::kNormal;
     case SkBlendMode::kMultiply:
-      return WebBlendMode::kMultiply;
+      return BlendMode::kMultiply;
     case SkBlendMode::kScreen:
-      return WebBlendMode::kScreen;
+      return BlendMode::kScreen;
     case SkBlendMode::kOverlay:
-      return WebBlendMode::kOverlay;
+      return BlendMode::kOverlay;
     case SkBlendMode::kDarken:
-      return WebBlendMode::kDarken;
+      return BlendMode::kDarken;
     case SkBlendMode::kLighten:
-      return WebBlendMode::kLighten;
+      return BlendMode::kLighten;
     case SkBlendMode::kColorDodge:
-      return WebBlendMode::kColorDodge;
+      return BlendMode::kColorDodge;
     case SkBlendMode::kColorBurn:
-      return WebBlendMode::kColorBurn;
+      return BlendMode::kColorBurn;
     case SkBlendMode::kHardLight:
-      return WebBlendMode::kHardLight;
+      return BlendMode::kHardLight;
     case SkBlendMode::kSoftLight:
-      return WebBlendMode::kSoftLight;
+      return BlendMode::kSoftLight;
     case SkBlendMode::kDifference:
-      return WebBlendMode::kDifference;
+      return BlendMode::kDifference;
     case SkBlendMode::kExclusion:
-      return WebBlendMode::kExclusion;
+      return BlendMode::kExclusion;
     case SkBlendMode::kHue:
-      return WebBlendMode::kHue;
+      return BlendMode::kHue;
     case SkBlendMode::kSaturation:
-      return WebBlendMode::kSaturation;
+      return BlendMode::kSaturation;
     case SkBlendMode::kColor:
-      return WebBlendMode::kColor;
+      return BlendMode::kColor;
     case SkBlendMode::kLuminosity:
-      return WebBlendMode::kLuminosity;
+      return BlendMode::kLuminosity;
     default:
       break;
   }
-  return WebBlendMode::kNormal;
+  return BlendMode::kNormal;
 }
 
 SkMatrix AffineTransformToSkMatrix(const AffineTransform& source) {
@@ -295,27 +312,52 @@ InterpolationQuality ComputeInterpolationQuality(float src_width,
   return kInterpolationDefault;
 }
 
-int ClampedAlphaForBlending(float alpha) {
-  if (alpha < 0)
-    return 0;
-  int rounded_alpha = roundf(alpha * 256);
-  if (rounded_alpha > 256)
-    rounded_alpha = 256;
-  return rounded_alpha;
-}
-
 SkColor ScaleAlpha(SkColor color, float alpha) {
-  return ScaleAlpha(color, ClampedAlphaForBlending(alpha));
+  const auto clamped_alpha = std::max(0.0f, std::min(1.0f, alpha));
+  const auto rounded_alpha = std::lround(SkColorGetA(color) * clamped_alpha);
+
+  return SkColorSetA(color, rounded_alpha);
 }
 
-SkColor ScaleAlpha(SkColor color, int alpha) {
-  int a = (SkColorGetA(color) * alpha) >> 8;
-  return (color & 0x00FFFFFF) | (a << 24);
+gfx::ColorSpace SkColorSpaceToGfxColorSpace(
+    const sk_sp<SkColorSpace> color_space) {
+  if (!color_space)
+    return gfx::ColorSpace::CreateSRGB();
+
+  SkMatrix44 toXYZD50;
+  SkColorSpaceTransferFn transfer_fn;
+  if (color_space->toXYZD50(&toXYZD50) &&
+      color_space->isNumericalTransferFn(&transfer_fn))
+    return gfx::ColorSpace::CreateCustom(toXYZD50, transfer_fn);
+
+  // Use an intermediate ICC profile to convert the color space data structure.
+  // If this fails, we fall back to sRGB.
+  sk_sp<SkData> sk_profile = color_space->serialize();
+  if (sk_profile) {
+    gfx::ICCProfile icc_profile =
+        gfx::ICCProfile::FromData(sk_profile->data(), sk_profile->size());
+    if (icc_profile.IsValid())
+      return icc_profile.GetColorSpace();
+  }
+  return gfx::ColorSpace::CreateSRGB();
+}
+
+bool ApproximatelyEqualSkColorSpaces(sk_sp<SkColorSpace> src_color_space,
+                                     sk_sp<SkColorSpace> dst_color_space) {
+  if ((!src_color_space && dst_color_space) ||
+      (src_color_space && !dst_color_space))
+    return false;
+  if (!src_color_space && !dst_color_space)
+    return true;
+  skcms_ICCProfile src_profile, dst_profile;
+  src_color_space->toProfile(&src_profile);
+  dst_color_space->toProfile(&dst_profile);
+  return skcms_ApproximatelyEqualProfiles(&src_profile, &dst_profile);
 }
 
 template <typename PrimitiveType>
 void DrawFocusRingPrimitive(const PrimitiveType&,
-                            PaintCanvas*,
+                            cc::PaintCanvas*,
                             const PaintFlags&,
                             float corner_radius) {
   NOTREACHED();  // Missing an explicit specialization?
@@ -323,7 +365,7 @@ void DrawFocusRingPrimitive(const PrimitiveType&,
 
 template <>
 void DrawFocusRingPrimitive<SkRect>(const SkRect& rect,
-                                    PaintCanvas* canvas,
+                                    cc::PaintCanvas* canvas,
                                     const PaintFlags& flags,
                                     float corner_radius) {
   SkRRect rrect;
@@ -334,7 +376,7 @@ void DrawFocusRingPrimitive<SkRect>(const SkRect& rect,
 
 template <>
 void DrawFocusRingPrimitive<SkPath>(const SkPath& path,
-                                    PaintCanvas* canvas,
+                                    cc::PaintCanvas* canvas,
                                     const PaintFlags& flags,
                                     float corner_radius) {
   PaintFlags path_flags = flags;
@@ -345,7 +387,7 @@ void DrawFocusRingPrimitive<SkPath>(const SkPath& path,
 
 template <typename PrimitiveType>
 void DrawPlatformFocusRing(const PrimitiveType& primitive,
-                           PaintCanvas* canvas,
+                           cc::PaintCanvas* canvas,
                            SkColor color,
                            float width) {
   PaintFlags flags;
@@ -372,11 +414,11 @@ void DrawPlatformFocusRing(const PrimitiveType& primitive,
 }
 
 template void PLATFORM_EXPORT DrawPlatformFocusRing<SkRect>(const SkRect&,
-                                                            PaintCanvas*,
+                                                            cc::PaintCanvas*,
                                                             SkColor,
                                                             float width);
 template void PLATFORM_EXPORT DrawPlatformFocusRing<SkPath>(const SkPath&,
-                                                            PaintCanvas*,
+                                                            cc::PaintCanvas*,
                                                             SkColor,
                                                             float width);
 

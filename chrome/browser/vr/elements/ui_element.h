@@ -21,10 +21,12 @@
 #include "chrome/browser/vr/elements/draw_phase.h"
 #include "chrome/browser/vr/elements/ui_element_name.h"
 #include "chrome/browser/vr/elements/ui_element_type.h"
+#include "chrome/browser/vr/frame_lifecycle.h"
 #include "chrome/browser/vr/model/camera_model.h"
 #include "chrome/browser/vr/model/reticle_model.h"
 #include "chrome/browser/vr/model/sounds.h"
 #include "chrome/browser/vr/target_property.h"
+#include "chrome/browser/vr/vr_ui_export.h"
 #include "ui/gfx/geometry/point3_f.h"
 #include "ui/gfx/geometry/quaternion.h"
 #include "ui/gfx/geometry/rect_f.h"
@@ -36,15 +38,12 @@ namespace base {
 class TimeTicks;
 }
 
-namespace blink {
-class WebGestureEvent;
-}
-
 namespace vr {
 
 class KeyframeModel;
 class SkiaSurfaceProvider;
 class UiElementRenderer;
+class InputEvent;
 struct CameraModel;
 struct EditedText;
 
@@ -56,7 +55,7 @@ enum LayoutAlignment {
   BOTTOM,
 };
 
-struct EventHandlers {
+struct VR_UI_EXPORT EventHandlers {
   EventHandlers();
   EventHandlers(const EventHandlers& other);
   ~EventHandlers();
@@ -65,6 +64,7 @@ struct EventHandlers {
   base::RepeatingCallback<void(const gfx::PointF&)> hover_move;
   base::RepeatingCallback<void()> button_down;
   base::RepeatingCallback<void()> button_up;
+  base::RepeatingCallback<void(const gfx::PointF&)> touch_move;
   base::RepeatingCallback<void(bool)> focus_change;
 };
 
@@ -96,7 +96,7 @@ struct HitTestResult {
   float distance_to_plane;
 };
 
-class UiElement : public cc::AnimationTarget {
+class VR_UI_EXPORT UiElement : public cc::AnimationTarget {
  public:
   UiElement();
   ~UiElement() override;
@@ -105,18 +105,6 @@ class UiElement : public cc::AnimationTarget {
     kTranslateIndex = 0,
     kRotateIndex = 1,
     kScaleIndex = 2,
-  };
-
-  enum UpdatePhase {
-    kDirty = 0,
-    kUpdatedBindings,
-    kUpdatedAnimations,
-    kUpdatedComputedOpacity,
-    kUpdatedSize,
-    kUpdatedLayout,
-    kUpdatedWorldSpaceTransform,
-    kUpdatedTextures,
-    kClean = kUpdatedTextures,
   };
 
   UiElementName name() const { return name_; }
@@ -140,14 +128,17 @@ class UiElement : public cc::AnimationTarget {
   void UpdateBindings();
 
   // Returns true if the element has been updated in any visible way.
-  bool DoBeginFrame(const gfx::Transform& head_pose);
+  bool DoBeginFrame(const gfx::Transform& head_pose,
+                    bool force_animations_to_completion);
 
   // Returns true if the element has changed size or position, or otherwise
   // warrants re-rendering the scene.
   virtual bool PrepareToDraw();
 
   // Returns true if the element updated its texture.
-  virtual bool UpdateTexture();
+  virtual bool HasDirtyTexture() const;
+
+  virtual void UpdateTexture();
 
   bool IsHitTestable() const;
 
@@ -157,18 +148,24 @@ class UiElement : public cc::AnimationTarget {
   virtual void Initialize(SkiaSurfaceProvider* provider);
 
   // Controller interaction methods.
-  virtual void OnHoverEnter(const gfx::PointF& position);
-  virtual void OnHoverLeave();
-  virtual void OnMove(const gfx::PointF& position);
-  virtual void OnButtonDown(const gfx::PointF& position);
-  virtual void OnButtonUp(const gfx::PointF& position);
-  virtual void OnFlingCancel(std::unique_ptr<blink::WebGestureEvent> gesture,
+  virtual void OnHoverEnter(const gfx::PointF& position,
+                            base::TimeTicks timestamp);
+  virtual void OnHoverLeave(base::TimeTicks timestamp);
+  virtual void OnHoverMove(const gfx::PointF& position,
+                           base::TimeTicks timestamp);
+  virtual void OnButtonDown(const gfx::PointF& position,
+                            base::TimeTicks timestamp);
+  virtual void OnButtonUp(const gfx::PointF& position,
+                          base::TimeTicks timestamp);
+  virtual void OnTouchMove(const gfx::PointF& position,
+                           base::TimeTicks timestamp);
+  virtual void OnFlingCancel(std::unique_ptr<InputEvent> gesture,
                              const gfx::PointF& position);
-  virtual void OnScrollBegin(std::unique_ptr<blink::WebGestureEvent> gesture,
+  virtual void OnScrollBegin(std::unique_ptr<InputEvent> gesture,
                              const gfx::PointF& position);
-  virtual void OnScrollUpdate(std::unique_ptr<blink::WebGestureEvent> gesture,
+  virtual void OnScrollUpdate(std::unique_ptr<InputEvent> gesture,
                               const gfx::PointF& position);
-  virtual void OnScrollEnd(std::unique_ptr<blink::WebGestureEvent> gesture,
+  virtual void OnScrollEnd(std::unique_ptr<InputEvent> gesture,
                            const gfx::PointF& position);
 
   // Whether the point (relative to the origin of the element), should be
@@ -177,7 +174,7 @@ class UiElement : public cc::AnimationTarget {
   // shapes. Points within the rectangular area are mapped from 0:1 as follows,
   // though will extend outside this range when outside of the element:
   // [(0.0, 0.0), (1.0, 0.0)
-  //  (1.0, 0.0), (1.0, 1.0)]
+  //  (0.0, 1.0), (1.0, 1.0)]
   virtual bool LocalHitTest(const gfx::PointF& point) const;
 
   // Performs a hit test for the ray supplied in the request and populates the
@@ -189,6 +186,9 @@ class UiElement : public cc::AnimationTarget {
 
   // If true, the object has a non-zero opacity.
   bool IsVisible() const;
+
+  // If true, the object is both visible and opaque.
+  bool IsVisibleAndOpaque() const;
 
   // For convenience, sets opacity to |opacity_when_visible_|.
   virtual void SetVisible(bool visible);
@@ -232,6 +232,11 @@ class UiElement : public cc::AnimationTarget {
   gfx::SizeF size() const;
   void SetSize(float width, float hight);
   virtual void OnSetSize(const gfx::SizeF& size);
+
+  // Setter and getter for the clip rect in relative tex coordinates, the same
+  // system used for hit testing.
+  gfx::RectF GetClipRect() const;
+  void SetClipRect(const gfx::RectF& rect);
 
   gfx::PointF local_origin() const { return local_origin_; }
 
@@ -353,17 +358,18 @@ class UiElement : public cc::AnimationTarget {
   // Transformations are applied relative to the parent element, rather than
   // absolutely.
   void AddChild(std::unique_ptr<UiElement> child);
+
+  // These functions return the removed element.
   std::unique_ptr<UiElement> RemoveChild(UiElement* to_remove);
+  std::unique_ptr<UiElement> ReplaceChild(UiElement* to_remove,
+                                          std::unique_ptr<UiElement> to_add);
+
   UiElement* parent() { return parent_; }
   const UiElement* parent() const { return parent_; }
 
   void AddBinding(std::unique_ptr<BindingBase> binding);
   const std::vector<std::unique_ptr<BindingBase>>& bindings() {
     return bindings_;
-  }
-
-  void set_visibility_bindings_depend_on_child_visibility(bool value) {
-    visibility_bindings_depend_on_child_visibility_ = value;
   }
 
   gfx::Point3F GetCenter() const;
@@ -395,6 +401,16 @@ class UiElement : public cc::AnimationTarget {
   void NotifyClientSizeAnimated(const gfx::SizeF& size,
                                 int target_property_id,
                                 cc::KeyframeModel* keyframe_model) override;
+  void NotifyClientFilterAnimated(const cc::FilterOperations& filter,
+                                  int target_property_id,
+                                  cc::KeyframeModel* keyframe_model) override {}
+  void NotifyClientColorAnimated(SkColor color,
+                                 int target_property_id,
+                                 cc::KeyframeModel* keyframe_model) override {}
+  void NotifyClientScrollOffsetAnimated(
+      const gfx::ScrollOffset& scroll_offset,
+      int target_property_id,
+      cc::KeyframeModel* keyframe_model) override {}
 
   void SetTransitionedProperties(const std::set<TargetProperty>& properties);
   void SetTransitionDuration(base::TimeDelta delta);
@@ -404,17 +420,23 @@ class UiElement : public cc::AnimationTarget {
   void RemoveKeyframeModels(int target_property);
   bool IsAnimatingProperty(TargetProperty property) const;
 
-  // Recursive method that sizes and lays out element subtrees. This method may
-  // be overridden by elements that have custom layout requirements.
-  virtual bool SizeAndLayOut();
-
-  void DoLayOutChildren();
+  // Recursive method that sizes and lays out element subtrees.
+  bool SizeAndLayOut();
 
   // Handles positioning adjustments for children. This will be overridden by
   // UiElements providing custom layout modes. See the documentation of the
-  // override for their particular functionality. The base implementation
-  // applies anchoring.
-  virtual void LayOutChildren();
+  // override for their particular functionality.  This method is specific to
+  // children that contribute to the parent's bounds.  These elements may not
+  // use anchoring or centering attributes, as they themselves determine where
+  // the parent boundaries will be.
+  virtual void LayOutContributingChildren();
+
+  // Similar to LayOutContributingChildren, but runs after the parent's size has
+  // been determined.  The default implementation applies anchoring.
+  virtual void LayOutNonContributingChildren();
+
+  // Recursive method that clips element subtrees, using the clip rect set.
+  void ClipChildren();
 
   UiElement* FirstLaidOutChild() const;
   UiElement* LastLaidOutChild() const;
@@ -423,7 +445,7 @@ class UiElement : public cc::AnimationTarget {
   virtual gfx::Transform GetTargetLocalTransform() const;
 
   void UpdateComputedOpacity();
-  void UpdateWorldSpaceTransform(bool parent_changed);
+  bool UpdateWorldSpaceTransform(bool parent_changed);
 
   std::vector<std::unique_ptr<UiElement>>& children() { return children_; }
   const std::vector<std::unique_ptr<UiElement>>& children() const {
@@ -431,6 +453,7 @@ class UiElement : public cc::AnimationTarget {
   }
 
   void set_update_phase(UpdatePhase phase) { update_phase_ = phase; }
+  UpdatePhase update_phase() const { return update_phase_; }
 
   // This is true for all elements that respect the given view model matrix. If
   // this is ignored (say for head-locked elements that draw in screen space),
@@ -461,15 +484,14 @@ class UiElement : public cc::AnimationTarget {
   virtual void DumpGeometry(std::ostringstream* os) const;
 #endif
 
-  // This is to be used only during the texture / size updated phase (i.e., to
-  // change your size based on your old size).
-  gfx::SizeF stale_size() const;
-
   // Set the sounds that play when an applicable handler is executed.  Elements
   // that override element hover and click methods must manage their own sounds.
   void SetSounds(Sounds sounds, AudioDelegate* delegate);
 
-  bool resizable_by_layout() { return resizable_by_layout_; }
+  bool clips_descendants() const { return clips_descendants_; }
+  void set_clip_descendants(bool clips) { clips_descendants_ = clips; }
+
+  bool resizable_by_layout() const { return resizable_by_layout_; }
   void set_resizable_by_layout(bool resizable) {
     resizable_by_layout_ = resizable;
   }
@@ -483,6 +505,12 @@ class UiElement : public cc::AnimationTarget {
   }
 
  protected:
+  // This method may be overridden by elements that have custom layout
+  // requirements.
+  virtual bool SizeAndLayOutChildren();
+
+  gfx::RectF GetAbsoluteClipRect() const;
+
   Animation& animation() { return animation_; }
 
   virtual const Sounds& GetSounds() const;
@@ -493,8 +521,6 @@ class UiElement : public cc::AnimationTarget {
   void set_world_space_transform_dirty() {
     world_space_transform_dirty_ = true;
   }
-
-  UpdatePhase update_phase() const { return update_phase_; }
 
   EventHandlers event_handlers_;
 
@@ -508,6 +534,12 @@ class UiElement : public cc::AnimationTarget {
   // ancestors), or its animation will cause it to become locally visible.
   bool IsOrWillBeLocallyVisible() const;
 
+  // Recursive method that clips element subtrees, given that a parent is
+  // clipped. Receives a clipping rect in absolute scale.
+  void ClipChildren(const gfx::RectF& abs_clip);
+
+  virtual gfx::RectF ComputeContributingChildrenBounds();
+
   // Valid IDs are non-negative.
   int id_ = -1;
 
@@ -520,12 +552,20 @@ class UiElement : public cc::AnimationTarget {
   // A signal to the input routing machinery that this element accepts scrolls.
   bool scrollable_ = false;
 
-  // If true, events such as OnButtonDown, OnBubbleUp, etc, get bubbled up the
+  // If true, events such as OnButtonDown, OnHoverEnter, etc, get bubbled up the
   // parent chain.
   bool bubble_events_ = false;
 
   // The size of the object.  This does not affect children.
   gfx::SizeF size_;
+
+  // The clip of the object. The rect dimensions are relative to the element's
+  // size, with the origin at its center. Use the getter and setter to
+  // manipulate the rect in relative tex coordinates.
+  gfx::RectF clip_rect_ = {-0.5f, 0.5f, 1.0f, 1.0f};
+
+  // Indicates that this element clips its descendants with its size.
+  bool clips_descendants_ = false;
 
   // The local orgin of the element. This can be updated, say, so that an
   // element can contain its children, even if they are not centered about its
@@ -629,12 +669,6 @@ class UiElement : public cc::AnimationTarget {
   bool descendants_updated_ = false;
 
   std::vector<std::unique_ptr<BindingBase>> bindings_;
-
-  // This value causes us to recurse into our children in DoBeginFrame. This
-  // should not be necessary, but we currently have instances where a parent
-  // node's behavior depends on the visibility of its children.
-  // TODO(crbug.com/829880): remove this once we've simplified our bindings.
-  bool visibility_bindings_depend_on_child_visibility_ = false;
 
   UpdatePhase update_phase_ = kClean;
 

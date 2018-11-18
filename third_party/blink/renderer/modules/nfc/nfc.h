@@ -20,6 +20,7 @@ namespace blink {
 class NFCPushOptions;
 using NFCPushMessage = StringOrArrayBufferOrNFCMessage;
 class NFCWatchOptions;
+class ScriptPromiseResolver;
 
 class NFC final : public ScriptWrappable,
                   public PageVisibilityObserver,
@@ -32,7 +33,7 @@ class NFC final : public ScriptWrappable,
  public:
   static NFC* Create(LocalFrame*);
 
-  virtual ~NFC();
+  ~NFC() override;
 
   void Dispose();
 
@@ -51,7 +52,7 @@ class NFC final : public ScriptWrappable,
   ScriptPromise watch(ScriptState*, V8MessageCallback*, const NFCWatchOptions&);
 
   // Cancels watch operation with id.
-  ScriptPromise cancelWatch(ScriptState*, long id);
+  ScriptPromise cancelWatch(ScriptState*, int32_t id);
 
   // Cancels all watch operations.
   ScriptPromise cancelWatch(ScriptState*);
@@ -61,7 +62,6 @@ class NFC final : public ScriptWrappable,
 
   // Interface required by garbage collection.
   void Trace(blink::Visitor*) override;
-  void TraceWrappers(const ScriptWrappableVisitor*) const override;
 
  private:
   // Returns boolean indicating whether NFC is supported in this context. If

@@ -23,7 +23,7 @@
 #include "ash/wm/window_util.h"
 #include "ash/wm/wm_event.h"
 #include "base/auto_reset.h"
-#include "services/ui/public/interfaces/window_manager_constants.mojom.h"
+#include "services/ws/public/mojom/window_tree_constants.mojom.h"
 #include "ui/aura/client/aura_constants.h"
 #include "ui/aura/layout_manager.h"
 #include "ui/aura/window.h"
@@ -32,6 +32,7 @@
 #include "ui/compositor/scoped_layer_animation_settings.h"
 #include "ui/display/display.h"
 #include "ui/display/screen.h"
+#include "ui/views/painter.h"
 #include "ui/wm/core/coordinate_conversion.h"
 #include "ui/wm/core/ime_util_chromeos.h"
 #include "ui/wm/core/window_util.h"
@@ -39,6 +40,9 @@
 namespace ash {
 namespace wm {
 namespace {
+
+// TODO(edcourtney): Move this to a PIP specific file, once it's created.
+const int kPipRoundedCornerRadius = 8;
 
 bool IsTabletModeEnabled() {
   return Shell::Get()
@@ -193,6 +197,10 @@ bool WindowState::IsTrustedPinned() const {
   return GetStateType() == mojom::WindowStateType::TRUSTED_PINNED;
 }
 
+bool WindowState::IsPip() const {
+  return GetStateType() == mojom::WindowStateType::PIP;
+}
+
 bool WindowState::IsNormalStateType() const {
   return GetStateType() == mojom::WindowStateType::NORMAL ||
          GetStateType() == mojom::WindowStateType::DEFAULT;
@@ -211,28 +219,32 @@ bool WindowState::IsUserPositionable() const {
           window_->type() == aura::client::WINDOW_TYPE_PANEL);
 }
 
+bool WindowState::HasMaximumWidthOrHeight() const {
+  if (!window_->delegate())
+    return false;
+
+  const gfx::Size max_size = window_->delegate()->GetMaximumSize();
+  return max_size.width() || max_size.height();
+}
+
 bool WindowState::CanMaximize() const {
   // Window must allow maximization and have no maximum width or height.
   if ((window_->GetProperty(aura::client::kResizeBehaviorKey) &
-       ui::mojom::kResizeBehaviorCanMaximize) == 0) {
+       ws::mojom::kResizeBehaviorCanMaximize) == 0) {
     return false;
   }
 
-  if (!window_->delegate())
-    return true;
-
-  const gfx::Size max_size = window_->delegate()->GetMaximumSize();
-  return !max_size.width() && !max_size.height();
+  return !HasMaximumWidthOrHeight();
 }
 
 bool WindowState::CanMinimize() const {
   return (window_->GetProperty(aura::client::kResizeBehaviorKey) &
-          ui::mojom::kResizeBehaviorCanMinimize) != 0;
+          ws::mojom::kResizeBehaviorCanMinimize) != 0;
 }
 
 bool WindowState::CanResize() const {
   return (window_->GetProperty(aura::client::kResizeBehaviorKey) &
-          ui::mojom::kResizeBehaviorCanResize) != 0;
+          ws::mojom::kResizeBehaviorCanResize) != 0;
 }
 
 bool WindowState::CanActivate() const {
@@ -240,14 +252,16 @@ bool WindowState::CanActivate() const {
 }
 
 bool WindowState::CanSnap() const {
-  if (!CanResize() || window_->type() == aura::client::WINDOW_TYPE_PANEL ||
-      ::wm::GetTransientParent(window_)) {
+  const bool is_panel_window =
+      window_->type() == aura::client::WINDOW_TYPE_PANEL;
+
+  if (!CanResize() || is_panel_window || IsPip())
     return false;
-  }
-  // If a window cannot be maximized, assume it cannot snap either.
-  // TODO(oshima): We should probably snap if the maximum size is greater than
-  // the snapped size.
-  return CanMaximize();
+
+  // Allow windows with no maximum width or height to be snapped.
+  // TODO(oshima): We should probably snap if the maximum size is defined
+  // and greater than the snapped size.
+  return !HasMaximumWidthOrHeight();
 }
 
 bool WindowState::HasRestoreBounds() const {
@@ -304,8 +318,6 @@ void WindowState::DisableAlwaysOnTop(aura::Window* window_on_top) {
 }
 
 void WindowState::RestoreAlwaysOnTop() {
-  if (delegate() && delegate()->RestoreAlwaysOnTop(this))
-    return;
   if (cached_always_on_top_) {
     cached_always_on_top_ = false;
     window_->SetProperty(aura::client::kAlwaysOnTopKey, true);
@@ -495,7 +507,6 @@ WindowState::WindowState(aura::Window* window)
       unminimize_to_restore_bounds_(false),
       hide_shelf_when_fullscreen_(true),
       autohide_shelf_when_maximized_or_fullscreen_(false),
-      minimum_visibility_(false),
       cached_always_on_top_(false),
       ignore_property_change_(false),
       current_state_(new DefaultState(ToWindowStateType(GetShowState()))) {
@@ -599,7 +610,7 @@ void WindowState::SetBoundsDirect(const gfx::Rect& bounds) {
         std::max(min_size.height(), actual_new_bounds.height()));
   }
   BoundsSetter().SetBounds(window_, actual_new_bounds);
-  wm::SnapWindowToPixelBoundary(window_);
+  ::wm::SnapWindowToPixelBoundary(window_);
 }
 
 void WindowState::SetBoundsConstrained(const gfx::Rect& bounds) {
@@ -622,7 +633,8 @@ void WindowState::SetBoundsDirectAnimated(const gfx::Rect& bounds) {
   SetBoundsDirect(bounds);
 }
 
-void WindowState::SetBoundsDirectCrossFade(const gfx::Rect& new_bounds) {
+void WindowState::SetBoundsDirectCrossFade(const gfx::Rect& new_bounds,
+                                           gfx::Tween::Type animation_type) {
   // Some test results in invoking CrossFadeToBounds when window is not visible.
   // No animation is necessary in that case, thus just change the bounds and
   // quit.
@@ -649,7 +661,30 @@ void WindowState::SetBoundsDirectCrossFade(const gfx::Rect& new_bounds) {
   // Resize the window to the new size, which will force a layout and paint.
   SetBoundsDirect(new_bounds);
 
-  CrossFadeAnimation(window_, std::move(old_layer_owner), gfx::Tween::EASE_OUT);
+  CrossFadeAnimation(window_, std::move(old_layer_owner), animation_type);
+}
+
+void WindowState::UpdatePipRoundedCorners() {
+  auto* layer = window()->layer();
+  if (!IsPip()) {
+    // Only remove the mask layer if it is from the existing PIP mask.
+    if (layer && pip_mask_ && layer->layer_mask_layer() == pip_mask_->layer())
+      layer->SetMaskLayer(nullptr);
+    pip_mask_.reset();
+    return;
+  }
+
+  gfx::Rect bounds = window()->bounds();
+  if (layer && (!pip_mask_ || pip_mask_->layer()->size() != bounds.size())) {
+    layer->SetMaskLayer(nullptr);
+    pip_mask_ = views::Painter::CreatePaintedLayer(
+        views::Painter::CreateSolidRoundRectPainter(SK_ColorBLACK,
+                                                    kPipRoundedCornerRadius));
+    pip_mask_->layer()->SetBounds(bounds);
+    pip_mask_->layer()->SetFillsBoundsOpaquely(false);
+    layer->SetFillsBoundsOpaquely(false);
+    layer->SetMaskLayer(pip_mask_->layer());
+  }
 }
 
 WindowState* GetActiveWindowState() {

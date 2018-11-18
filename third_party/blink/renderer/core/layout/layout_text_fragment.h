@@ -52,7 +52,8 @@ class CORE_EXPORT LayoutTextFragment final : public LayoutText {
   bool IsTextFragment() const override { return true; }
 
   Position PositionForCaretOffset(unsigned) const override;
-  Optional<unsigned> CaretOffsetForPosition(const Position&) const override;
+  base::Optional<unsigned> CaretOffsetForPosition(
+      const Position&) const override;
 
   unsigned Start() const { return start_; }
   unsigned FragmentLength() const { return fragment_length_; }
@@ -69,7 +70,9 @@ class CORE_EXPORT LayoutTextFragment final : public LayoutText {
 
   scoped_refptr<StringImpl> OriginalText() const override;
 
-  void SetText(scoped_refptr<StringImpl>, bool force = false) override;
+  void SetText(scoped_refptr<StringImpl>,
+               bool force = false,
+               bool avoid_layout_and_only_paint = false) override;
   void SetTextFragment(scoped_refptr<StringImpl>,
                        unsigned start,
                        unsigned length);
@@ -93,6 +96,7 @@ class CORE_EXPORT LayoutTextFragment final : public LayoutText {
   }
 
   Text* AssociatedTextNode() const;
+  LayoutText* GetFirstLetterPart() const override;
 
  protected:
   void WillBeDestroyed() override;
@@ -101,7 +105,7 @@ class CORE_EXPORT LayoutTextFragment final : public LayoutText {
   LayoutBlock* BlockForAccompanyingFirstLetter() const;
   UChar PreviousCharacter() const override;
 
-  void UpdateHitTestResult(HitTestResult&, const LayoutPoint&) override;
+  void UpdateHitTestResult(HitTestResult&, const LayoutPoint&) const override;
 
   unsigned start_;
   unsigned fragment_length_;
@@ -115,8 +119,8 @@ class CORE_EXPORT LayoutTextFragment final : public LayoutText {
 DEFINE_TYPE_CASTS(LayoutTextFragment,
                   LayoutObject,
                   object,
-                  ToLayoutText(object)->IsTextFragment(),
-                  ToLayoutText(object).IsTextFragment());
+                  (object->IsText() && ToLayoutText(object)->IsTextFragment()),
+                  (object.IsText() && ToLayoutText(object).IsTextFragment()));
 
 }  // namespace blink
 

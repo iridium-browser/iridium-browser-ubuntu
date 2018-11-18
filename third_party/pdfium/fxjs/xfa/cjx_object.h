@@ -15,12 +15,15 @@
 #include "core/fxcrt/unowned_ptr.h"
 #include "core/fxcrt/widestring.h"
 #include "core/fxcrt/xml/cfx_xmlelement.h"
-#include "fxjs/CJX_Define.h"
+#include "fxjs/jse_define.h"
 #include "third_party/base/optional.h"
+#include "third_party/base/span.h"
 #include "xfa/fxfa/fxfa_basic.h"
+#include "xfa/fxfa/parser/cxfa_measurement.h"
 
 class CFXJSE_Value;
 class CFX_V8;
+class CJX_Object;
 class CXFA_CalcData;
 class CXFA_Document;
 class CXFA_LayoutItem;
@@ -28,7 +31,7 @@ class CXFA_Node;
 class CXFA_Object;
 struct XFA_MAPMODULEDATA;
 
-typedef CJS_Return (*CJX_MethodCall)(
+typedef CJS_Result (*CJX_MethodCall)(
     CJX_Object* obj,
     CFX_V8* runtime,
     const std::vector<v8::Local<v8::Value>>& params);
@@ -56,12 +59,10 @@ class CJX_Object {
   explicit CJX_Object(CXFA_Object* obj);
   virtual ~CJX_Object();
 
-  JS_PROP(className);
-
-  CXFA_Object* GetXFAObject() { return object_.Get(); }
-  const CXFA_Object* GetXFAObject() const { return object_.Get(); }
+  JSE_PROP(className);
 
   CXFA_Document* GetDocument() const;
+  CXFA_Object* GetXFAObject() const { return object_.Get(); }
 
   void SetCalcRecursionCount(size_t count) { calc_recursion_count_ = count; }
   size_t GetCalcRecursionCount() const { return calc_recursion_count_; }
@@ -70,14 +71,14 @@ class CJX_Object {
   CXFA_LayoutItem* GetLayoutItem() const { return layout_item_; }
 
   bool HasMethod(const WideString& func) const;
-  CJS_Return RunMethod(const WideString& func,
+  CJS_Result RunMethod(const WideString& func,
                        const std::vector<v8::Local<v8::Value>>& params);
 
   bool HasAttribute(XFA_Attribute eAttr);
-  bool SetAttribute(XFA_Attribute eAttr,
+  void SetAttribute(XFA_Attribute eAttr,
                     const WideStringView& wsValue,
                     bool bNotify);
-  bool SetAttribute(const WideStringView& wsAttr,
+  void SetAttribute(const WideStringView& wsAttr,
                     const WideStringView& wsValue,
                     bool bNotify);
   void RemoveAttribute(const WideStringView& wsAttr);
@@ -88,7 +89,7 @@ class CJX_Object {
   Optional<WideString> TryAttribute(XFA_Attribute eAttr, bool bUseDefault);
 
   Optional<WideString> TryContent(bool bScriptModify, bool bProto);
-  bool SetContent(const WideString& wsContent,
+  void SetContent(const WideString& wsContent,
                   const WideString& wsXMLValue,
                   bool bNotify,
                   bool bScriptModify,
@@ -177,11 +178,11 @@ class CJX_Object {
   Optional<WideString> TryNamespace();
 
   Optional<int32_t> TryInteger(XFA_Attribute eAttr, bool bUseDefault);
-  bool SetInteger(XFA_Attribute eAttr, int32_t iValue, bool bNotify);
+  void SetInteger(XFA_Attribute eAttr, int32_t iValue, bool bNotify);
   int32_t GetInteger(XFA_Attribute eAttr);
 
   Optional<WideString> TryCData(XFA_Attribute eAttr, bool bUseDefault);
-  bool SetCData(XFA_Attribute eAttr,
+  void SetCData(XFA_Attribute eAttr,
                 const WideString& wsValue,
                 bool bNotify,
                 bool bScriptModify);
@@ -189,17 +190,17 @@ class CJX_Object {
 
   Optional<XFA_AttributeEnum> TryEnum(XFA_Attribute eAttr,
                                       bool bUseDefault) const;
-  bool SetEnum(XFA_Attribute eAttr, XFA_AttributeEnum eValue, bool bNotify);
+  void SetEnum(XFA_Attribute eAttr, XFA_AttributeEnum eValue, bool bNotify);
   XFA_AttributeEnum GetEnum(XFA_Attribute eAttr) const;
 
   Optional<bool> TryBoolean(XFA_Attribute eAttr, bool bUseDefault);
-  bool SetBoolean(XFA_Attribute eAttr, bool bValue, bool bNotify);
+  void SetBoolean(XFA_Attribute eAttr, bool bValue, bool bNotify);
   bool GetBoolean(XFA_Attribute eAttr);
 
   Optional<CXFA_Measurement> TryMeasure(XFA_Attribute eAttr,
                                         bool bUseDefault) const;
   Optional<float> TryMeasureAsFloat(XFA_Attribute attr) const;
-  bool SetMeasure(XFA_Attribute eAttr, CXFA_Measurement mValue, bool bNotify);
+  void SetMeasure(XFA_Attribute eAttr, CXFA_Measurement mValue, bool bNotify);
   CXFA_Measurement GetMeasure(XFA_Attribute eAttr) const;
 
   void MergeAllData(CXFA_Object* pDstModule);
@@ -218,11 +219,10 @@ class CJX_Object {
   void ThrowTooManyOccurancesException(const WideString& obj) const;
 
  protected:
-  void DefineMethods(const CJX_MethodSpec method_specs[], size_t count);
-
+  void DefineMethods(pdfium::span<const CJX_MethodSpec> methods);
   void MoveBufferMapData(CXFA_Object* pSrcModule, CXFA_Object* pDstModule);
   void SetMapModuleString(void* pKey, const WideStringView& wsValue);
-  void ThrowException(const wchar_t* str, ...) const;
+  void ThrowException(const WideString& str) const;
 
  private:
   void Script_Boolean_DefaultValue(CFXJSE_Value* pValue,
@@ -241,7 +241,7 @@ class CJX_Object {
 
   void OnChanged(XFA_Attribute eAttr, bool bNotify, bool bScriptModify);
   void OnChanging(XFA_Attribute eAttr, bool bNotify);
-  bool SetUserData(void* pKey,
+  void SetUserData(void* pKey,
                    void* pData,
                    const XFA_MAPDATABLOCKCALLBACKINFO* pCallbackInfo);
 
@@ -283,6 +283,18 @@ class CJX_Object {
   std::unique_ptr<CXFA_CalcData> calc_data_;
   std::map<ByteString, CJX_MethodCall> method_specs_;
   size_t calc_recursion_count_ = 0;
+};
+
+typedef void (CJX_Object::*XFA_ATTRIBUTE_CALLBACK)(CFXJSE_Value* pValue,
+                                                   bool bSetting,
+                                                   XFA_Attribute eAttribute);
+
+struct XFA_SCRIPTATTRIBUTEINFO {
+  uint32_t uHash;
+  const wchar_t* pName;
+  XFA_ATTRIBUTE_CALLBACK callback;
+  XFA_Attribute attribute;
+  XFA_ScriptType eValueType;
 };
 
 #endif  // FXJS_XFA_CJX_OBJECT_H_

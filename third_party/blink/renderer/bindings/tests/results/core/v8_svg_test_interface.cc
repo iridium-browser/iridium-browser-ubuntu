@@ -8,19 +8,20 @@
 // DO NOT MODIFY!
 
 // clang-format off
-#include "v8_svg_test_interface.h"
+#include "third_party/blink/renderer/bindings/tests/results/core/v8_svg_test_interface.h"
 
 #include "base/memory/scoped_refptr.h"
-#include "bindings/core/v8/exception_state.h"
-#include "bindings/core/v8/idl_types.h"
-#include "bindings/core/v8/native_value_traits_impl.h"
-#include "bindings/core/v8/v8_dom_configuration.h"
-#include "core/execution_context/execution_context.h"
-#include "core/html/custom/v0_custom_element_processing_stack.h"
-#include "core/svg_names.h"
-#include "platform/bindings/runtime_call_stats.h"
-#include "platform/bindings/v8_object_constructor.h"
-#include "platform/wtf/get_ptr.h"
+#include "third_party/blink/renderer/bindings/core/v8/idl_types.h"
+#include "third_party/blink/renderer/bindings/core/v8/native_value_traits_impl.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_dom_configuration.h"
+#include "third_party/blink/renderer/core/execution_context/execution_context.h"
+#include "third_party/blink/renderer/core/html/custom/v0_custom_element_processing_stack.h"
+#include "third_party/blink/renderer/core/svg_names.h"
+#include "third_party/blink/renderer/platform/bindings/exception_messages.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
+#include "third_party/blink/renderer/platform/bindings/runtime_call_stats.h"
+#include "third_party/blink/renderer/platform/bindings/v8_object_constructor.h"
+#include "third_party/blink/renderer/platform/wtf/get_ptr.h"
 
 namespace blink {
 
@@ -108,7 +109,7 @@ void V8SVGTestInterface::typeAttributeSetterCallback(const v8::FunctionCallbackI
 }
 
 static const V8DOMConfiguration::AccessorConfiguration V8SVGTestInterfaceAccessors[] = {
-    { "type", V8SVGTestInterface::typeAttributeGetterCallback, V8SVGTestInterface::typeAttributeSetterCallback, V8PrivateProperty::kNoCachedAccessor, static_cast<v8::PropertyAttribute>(v8::None), V8DOMConfiguration::kOnPrototype, V8DOMConfiguration::kCheckHolder, V8DOMConfiguration::kHasSideEffect, V8DOMConfiguration::kAllWorlds },
+    { "type", V8SVGTestInterface::typeAttributeGetterCallback, V8SVGTestInterface::typeAttributeSetterCallback, V8PrivateProperty::kNoCachedAccessor, static_cast<v8::PropertyAttribute>(v8::None), V8DOMConfiguration::kOnPrototype, V8DOMConfiguration::kCheckHolder, V8DOMConfiguration::kHasSideEffect, V8DOMConfiguration::kAlwaysCallGetter, V8DOMConfiguration::kAllWorlds },
 };
 
 static void installV8SVGTestInterfaceTemplate(
@@ -128,7 +129,7 @@ static void installV8SVGTestInterfaceTemplate(
   // Register IDL constants, attributes and operations.
   V8DOMConfiguration::InstallAccessors(
       isolate, world, instanceTemplate, prototypeTemplate, interfaceTemplate,
-      signature, V8SVGTestInterfaceAccessors, WTF_ARRAY_LENGTH(V8SVGTestInterfaceAccessors));
+      signature, V8SVGTestInterfaceAccessors, base::size(V8SVGTestInterfaceAccessors));
 
   // Custom signature
 

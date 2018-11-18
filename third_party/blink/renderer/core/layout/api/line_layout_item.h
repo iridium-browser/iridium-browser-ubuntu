@@ -23,14 +23,13 @@ class HitTestRequest;
 class HitTestLocation;
 class LayoutObject;
 class LineLayoutBox;
-class LineLayoutBoxModel;
 class LineLayoutAPIShim;
 
 static LayoutObject* const kHashTableDeletedValue =
     reinterpret_cast<LayoutObject*>(-1);
 
 class LineLayoutItem {
-  DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
+  DISALLOW_NEW();
 
  public:
   explicit LineLayoutItem(LayoutObject* layout_object)
@@ -73,11 +72,6 @@ class LineLayoutItem {
   // Intentionally returns a LineLayoutBox to avoid exposing LayoutBlock
   // to the line layout code.
   LineLayoutBox ContainingBlock() const;
-
-  // Implemented in LineLayoutBoxModel.h
-  // Intentionally returns a LineLayoutBoxModel to avoid exposing
-  // LayoutBoxModelObject to the line layout code.
-  LineLayoutBoxModel EnclosingBoxModelObject() const;
 
   LineLayoutItem Container() const {
     return LineLayoutItem(layout_object_->Container());
@@ -127,7 +121,7 @@ class LineLayoutItem {
     if (IsSVGInlineText())
       return false;
 
-    return Style()->PreserveNewline();
+    return StyleRef().PreserveNewline();
   }
 
   unsigned length() const { return layout_object_->length(); }
@@ -246,9 +240,7 @@ class LineLayoutItem {
                                             accumulated_offset);
   }
 
-  SelectionState GetSelectionState() const {
-    return layout_object_->GetSelectionState();
-  }
+  bool IsSelected() const { return layout_object_->IsSelected(); }
 
   // TODO(dgrogan/eae): Needed for Color::current. Can we move this somewhere?
   Color ResolveColor(const ComputedStyle& style_to_use,
@@ -295,9 +287,11 @@ class LineLayoutItem {
     return layout_object_->DocumentBeingDestroyed();
   }
 
-  LayoutRect VisualRect() const { return layout_object_->VisualRect(); }
-  LayoutRect PartialInvalidationRect() const {
-    return layout_object_->PartialInvalidationRect();
+  LayoutRect VisualRectForInlineBox() const {
+    return layout_object_->VisualRectForInlineBox();
+  }
+  LayoutRect PartialInvalidationVisualRectForInlineBox() const {
+    return layout_object_->PartialInvalidationVisualRectForInlineBox();
   }
 
   bool IsHashTableDeletedValue() const {

@@ -52,18 +52,14 @@ class MODULES_EXPORT OfflineAudioContext final : public BaseAudioContext {
 
   ~OfflineAudioContext() override;
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
   size_t length() const { return total_render_frames_; }
 
   ScriptPromise startOfflineRendering(ScriptState*);
 
   ScriptPromise suspendContext(ScriptState*, double);
-  ScriptPromise resumeContext(ScriptState*) final;
-
-  // This is to implement the pure virtual method from BaseAudioContext.
-  // CANNOT be called from an OfflineAudioContext.
-  ScriptPromise suspendContext(ScriptState*) final;
+  ScriptPromise resumeContext(ScriptState*);
 
   void RejectPendingResolvers() override;
 
@@ -84,6 +80,9 @@ class MODULES_EXPORT OfflineAudioContext final : public BaseAudioContext {
   // frame as a unique key, the associated promise resolver can be retrieved
   // from the map (m_scheduledSuspends) and resolved.
   void ResolveSuspendOnMainThread(size_t);
+
+  // OfflineAudioContext is not affected by Autoplay, so this MUST do nothing.
+  void NotifySourceNodeStart() final {}
 
   // The HashMap with 'zero' key is needed because |currentSampleFrame| can be
   // zero.

@@ -55,6 +55,7 @@ import gerrit_util
 import git_cache
 import git_common
 import git_footers
+import metrics
 import owners
 import owners_finder
 import presubmit_support
@@ -80,8 +81,15 @@ REFS_THAT_ALIAS_TO_OTHER_REFS = {
 DEFAULT_LINT_REGEX = r"(.*\.cpp|.*\.cc|.*\.h)"
 DEFAULT_LINT_IGNORE_REGEX = r"$^"
 
+# File name for yapf style config files.
+YAPF_CONFIG_FILENAME = '.style.yapf'
+
 # Buildbucket master name prefix.
 MASTER_PREFIX = 'master.'
+
+# TODO(crbug.com/881860): Remove
+# Log gerrit failures to a gerrit_util.GERRIT_ERR_LOG_FILE.
+GERRIT_ERR_LOGGER = logging.getLogger('GerritErrorLogs')
 
 # Shortcut since it quickly becomes redundant.
 Fore = colorama.Fore
@@ -106,8 +114,7 @@ def DieWithError(message, change_desc=None):
 
 def SaveDescriptionBackup(change_desc):
   backup_path = os.path.expanduser(DESCRIPTION_BACKUP_FILE)
-  print('\nError after CL description prompt -- saving description to %s\n' %
-        backup_path)
+  print('\nsaving CL description to %s\n' % backup_path)
   backup_file = open(backup_path, 'w')
   backup_file.write(change_desc.description)
   backup_file.close()
@@ -351,10 +358,11 @@ def _buildbucket_retry(operation_name, http, *args, **kwargs):
       raise BuildbucketResponseException(msg)
 
     if response.status == 200:
-      if not content_json:
+      if content_json is None:
         raise BuildbucketResponseException(
             'Buildbucket returns invalid json content: %s.\n'
-            'Please file bugs at http://crbug.com, label "Infra-BuildBucket".' %
+            'Please file bugs at http://crbug.com, '
+            'component "Infra>Platform>BuildBucket".' %
             content)
       return content_json
     if response.status < 500 or try_count >= 2:
@@ -665,6 +673,88 @@ def print_try_jobs(options, builds):
   print('Total: %d try jobs' % total)
 
 
+def _ComputeDiffLineRanges(files, upstream_commit):
+  """Gets the changed line ranges for each file since upstream_commit.
+
+  Parses a git diff on provided files and returns a dict that maps a file name
+  to an ordered list of range tuples in the form (start_line, count).
+  Ranges are in the same format as a git diff.
+  """
+  # If files is empty then diff_output will be a full diff.
+  if len(files) == 0:
+    return {}
+
+  # Take diff and find the line ranges where there are changes.
+  diff_cmd = BuildGitDiffCmd('-U0', upstream_commit, files, allow_prefix=True)
+  diff_output = RunGit(diff_cmd)
+
+  pattern = r'(?:^diff --git a/(?:.*) b/(.*))|(?:^@@.*\+(.*) @@)'
+  # 2 capture groups
+  # 0 == fname of diff file
+  # 1 == 'diff_start,diff_count' or 'diff_start'
+  # will match each of
+  # diff --git a/foo.foo b/foo.py
+  # @@ -12,2 +14,3 @@
+  # @@ -12,2 +17 @@
+  # running re.findall on the above string with pattern will give
+  # [('foo.py', ''), ('', '14,3'), ('', '17')]
+
+  curr_file = None
+  line_diffs = {}
+  for match in re.findall(pattern, diff_output, flags=re.MULTILINE):
+    if match[0] != '':
+      # Will match the second filename in diff --git a/a.py b/b.py.
+      curr_file = match[0]
+      line_diffs[curr_file] = []
+    else:
+      # Matches +14,3
+      if ',' in match[1]:
+        diff_start, diff_count = match[1].split(',')
+      else:
+        # Single line changes are of the form +12 instead of +12,1.
+        diff_start = match[1]
+        diff_count = 1
+
+      diff_start = int(diff_start)
+      diff_count = int(diff_count)
+
+      # If diff_count == 0 this is a removal we can ignore.
+      line_diffs[curr_file].append((diff_start, diff_count))
+
+  return line_diffs
+
+
+def _FindYapfConfigFile(fpath,
+                        yapf_config_cache,
+                        top_dir=None,
+                        default_style=None):
+  """Checks if a yapf file is in any parent directory of fpath until top_dir.
+
+  Recursively checks parent directories to find yapf file
+  and if no yapf file is found returns default_style.
+  Uses yapf_config_cache as a cache for previously found files.
+  """
+  # Return result if we've already computed it.
+  if fpath in yapf_config_cache:
+    return yapf_config_cache[fpath]
+
+  # Check if there is a style file in the current directory.
+  yapf_file = os.path.join(fpath, YAPF_CONFIG_FILENAME)
+  dirname = os.path.dirname(fpath)
+  if os.path.isfile(yapf_file):
+    ret = yapf_file
+  elif fpath == top_dir or dirname == fpath:
+    # If we're at the top level directory, or if we're at root
+    # use the chromium default yapf style.
+    ret = default_style
+  else:
+    # Otherwise recurse on the current directory.
+    ret = _FindYapfConfigFile(dirname, yapf_config_cache, top_dir,
+                              default_style)
+  yapf_config_cache[fpath] = ret
+  return ret
+
+
 def write_try_results_json(output_file, builds):
   """Writes a subset of the data from fetch_try_jobs to a file as JSON.
 
@@ -690,7 +780,7 @@ def write_try_results_json(output_file, builds):
 
   converted = []
   for _, build in sorted(builds.items()):
-      converted.append(convert_build_dict(build))
+    converted.append(convert_build_dict(build))
   write_json(output_file, converted)
 
 
@@ -914,57 +1004,6 @@ def _get_gerrit_project_config_file(remote_url):
     yield project_config_file
 
 
-def _is_git_numberer_enabled(remote_url, remote_ref):
-  """Returns True if Git Numberer is enabled on this ref."""
-  # TODO(tandrii): this should be deleted once repos below are 100% on Gerrit.
-  KNOWN_PROJECTS_WHITELIST = [
-      'chromium/src',
-      'external/webrtc',
-      'v8/v8',
-      'infra/experimental',
-      # For webrtc.googlesource.com/src.
-      'src',
-  ]
-
-  assert remote_ref and remote_ref.startswith('refs/'), remote_ref
-  url_parts = urlparse.urlparse(remote_url)
-  project_name = url_parts.path.lstrip('/').rstrip('git./')
-  for known in KNOWN_PROJECTS_WHITELIST:
-    if project_name.endswith(known):
-      break
-  else:
-    # Early exit to avoid extra fetches for repos that aren't using Git
-    # Numberer.
-    return False
-
-  with _get_gerrit_project_config_file(remote_url) as project_config_file:
-    if project_config_file is None:
-      # Failed to fetch project.config, which shouldn't happen on open source
-      # repos KNOWN_PROJECTS_WHITELIST.
-      return False
-    def get_opts(x):
-      code, out = RunGitWithCode(
-          ['config', '-f', project_config_file, '--get-all',
-           'plugin.git-numberer.validate-%s-refglob' % x])
-      if code == 0:
-        return out.strip().splitlines()
-      return []
-    enabled, disabled = map(get_opts, ['enabled', 'disabled'])
-
-  logging.info('validator config enabled %s disabled %s refglobs for '
-               '(this ref: %s)', enabled, disabled, remote_ref)
-
-  def match_refglobs(refglobs):
-    for refglob in refglobs:
-      if remote_ref == refglob or fnmatch.fnmatch(remote_ref, refglob):
-        return True
-    return False
-
-  if match_refglobs(disabled):
-    return False
-  return match_refglobs(enabled)
-
-
 def ShortBranchName(branch):
   """Convert a name like 'refs/heads/foo' to just 'foo'."""
   return branch.replace('refs/heads/', '', 1)
@@ -1112,6 +1151,7 @@ class Changelist(object):
     self.cc = None
     self.more_cc = []
     self._remote = None
+    self._cached_remote_url = (False, None)  # (is_cached, value)
 
     self._codereview_impl = None
     self._codereview = None
@@ -1341,6 +1381,10 @@ class Changelist(object):
 
     Returns None if there is no remote.
     """
+    is_cached, value = self._cached_remote_url
+    if is_cached:
+      return value
+
     remote, _ = self.GetRemoteBranch()
     url = RunGit(['config', 'remote.%s.url' % remote], error_ok=True).strip()
 
@@ -1349,6 +1393,7 @@ class Changelist(object):
       url = RunGit(['config', 'remote.%s.url' % remote],
                    error_ok=True,
                    cwd=url).strip()
+    self._cached_remote_url = (True, url)
     return url
 
   def GetIssue(self):
@@ -1519,13 +1564,14 @@ class Changelist(object):
         new_description += foot + '\n'
     self.UpdateDescription(new_description, force)
 
-  def RunHook(self, committing, may_prompt, verbose, change):
+  def RunHook(self, committing, may_prompt, verbose, change, parallel):
     """Calls sys.exit() if the hook fails; returns a HookResults otherwise."""
     try:
       return presubmit_support.DoPresubmitChecks(change, committing,
           verbose=verbose, output_stream=sys.stdout, input_stream=sys.stdin,
           default_presubmit=None, may_prompt=may_prompt,
-          gerrit_obj=self._codereview_impl.GetGerritObjForPresubmit())
+          gerrit_obj=self._codereview_impl.GetGerritObjForPresubmit(),
+          parallel=parallel)
     except presubmit_support.PresubmitFailure as e:
       DieWithError('%s\nMaybe your depot_tools is out of date?' % e)
 
@@ -1589,9 +1635,9 @@ class Changelist(object):
                                             change)
         change.SetDescriptionText(change_description.description)
       hook_results = self.RunHook(committing=False,
-                                may_prompt=not options.force,
-                                verbose=options.verbose,
-                                change=change)
+                                  may_prompt=not options.force,
+                                  verbose=options.verbose,
+                                  change=change, parallel=options.parallel)
       if not hook_results.should_continue():
         return 1
       if not options.reviewers and hook_results.reviewers:
@@ -2252,13 +2298,14 @@ class _RietveldChangelistImpl(_ChangelistCodereviewBase):
           DieWithError("Must specify reviewers to send email.", change_desc)
         upload_args.append('--send_mail')
 
-      # We check this before applying rietveld.private assuming that in
-      # rietveld.cc only addresses which we can send private CLs to are listed
-      # if rietveld.private is set, and so we should ignore rietveld.cc only
-      # when --private is specified explicitly on the command line.
-      if options.private:
-        logging.warn('rietveld.cc is ignored since private flag is specified.  '
-                     'You need to review and add them manually if necessary.')
+      # We only skip auto-CC-ing addresses from rietveld.cc when --private or
+      # --no-autocc is explicitly specified on the command line. Should private
+      # CL be created due to rietveld.private value, we assume that rietveld.cc
+      # only contains addresses where private CLs are allowed to be sent.
+      if options.private or options.no_autocc:
+        logging.warn('rietveld.cc is ignored since private/no-autocc flag is '
+                     'specified. You need to review and add them manually if '
+                     'necessary.')
         cc = self.GetCCListWithoutDefault()
       else:
         cc = self.GetCCList()
@@ -2396,6 +2443,37 @@ class _GerritChangelistImpl(_ChangelistCodereviewBase):
         self._gerrit_server = 'https://%s' % self._gerrit_host
     return self._gerrit_server
 
+  def _GetGerritProject(self):
+    """Returns Gerrit project name based on remote git URL."""
+    remote_url = self.GetRemoteUrl()
+    if remote_url is None:
+      logging.warn('can\'t detect Gerrit project.')
+      return None
+    project = urlparse.urlparse(remote_url).path.strip('/')
+    if project.endswith('.git'):
+      project = project[:-len('.git')]
+    # *.googlesource.com hosts ensure that Git/Gerrit projects don't start with
+    # 'a/' prefix, because 'a/' prefix is used to force authentication in
+    # gitiles/git-over-https protocol. E.g.,
+    # https://chromium.googlesource.com/a/v8/v8 refers to the same repo/project
+    # as
+    # https://chromium.googlesource.com/v8/v8
+    if project.startswith('a/'):
+      project = project[len('a/'):]
+    return project
+
+  def _GerritChangeIdentifier(self):
+    """Handy method for gerrit_util.ChangeIdentifier for a given CL.
+
+    Not to be confused by value of "Change-Id:" footer.
+    If Gerrit project can be determined, this will speed up Gerrit HTTP API RPC.
+    """
+    project = self._GetGerritProject()
+    if project:
+      return gerrit_util.ChangeIdentifier(project, self.GetIssue())
+    # Fall back on still unique, but less efficient change number.
+    return str(self.GetIssue())
+
   @classmethod
   def IssueConfigKey(cls):
     return 'gerritissue'
@@ -2414,13 +2492,16 @@ class _GerritChangelistImpl(_ChangelistCodereviewBase):
       # For projects with unusual authentication schemes.
       # See http://crbug.com/603378.
       return
-    # Lazy-loader to identify Gerrit and Git hosts.
-    if gerrit_util.GceAuthenticator.is_gce():
+
+    # Check presence of cookies only if using cookies-based auth method.
+    cookie_auth = gerrit_util.Authenticator.get()
+    if not isinstance(cookie_auth, gerrit_util.CookiesAuthenticator):
       return
+
+    # Lazy-loader to identify Gerrit and Git hosts.
     self.GetCodereviewServer()
     git_host = self._GetGitHost()
     assert self._gerrit_server and self._gerrit_host
-    cookie_auth = gerrit_util.CookiesAuthenticator()
 
     gerrit_auth = cookie_auth.get_auth_header(self._gerrit_host)
     git_auth = cookie_auth.get_auth_header(git_host)
@@ -2462,7 +2543,7 @@ class _GerritChangelistImpl(_ChangelistCodereviewBase):
     # Warm change details cache now to avoid RPCs later, reducing latency for
     # developers.
     self._GetChangeDetail(
-        ['DETAILED_ACCOUNTS', 'CURRENT_REVISION', 'CURRENT_COMMIT'])
+        ['DETAILED_ACCOUNTS', 'CURRENT_REVISION', 'CURRENT_COMMIT', 'LABELS'])
 
     status = self._GetChangeDetail()['status']
     if status in ('MERGED', 'ABANDONED'):
@@ -2470,10 +2551,15 @@ class _GerritChangelistImpl(_ChangelistCodereviewBase):
                    (self.GetIssueURL(),
                     'submitted' if status == 'MERGED' else 'abandoned'))
 
-    if gerrit_util.GceAuthenticator.is_gce():
+    # TODO(vadimsh): For some reason the chunk of code below was skipped if
+    # 'is_gce' is True. I'm just refactoring it to be 'skip if not cookies'.
+    # Apparently this check is not very important? Otherwise get_auth_email
+    # could have been added to other implementations of Authenticator.
+    cookies_auth = gerrit_util.Authenticator.get()
+    if not isinstance(cookies_auth, gerrit_util.CookiesAuthenticator):
       return
-    cookies_user = gerrit_util.CookiesAuthenticator().get_auth_email(
-        self._GetGerritHost())
+
+    cookies_user = cookies_auth.get_auth_email(self._GetGerritHost())
     if self.GetIssueOwner() == cookies_user:
       return
     logging.debug('change %s owner is %s, cookies user is %s',
@@ -2489,7 +2575,6 @@ class _GerritChangelistImpl(_ChangelistCodereviewBase):
             'Uploading may fail due to lack of permissions.' %
             (self.GetIssue(), self.GetIssueOwner(), details['email']))
       confirm_or_exit(action='upload')
-
 
   def _PostUnsetIssueProperties(self):
     """Which branch-specific properties to erase when unsetting issue."""
@@ -2565,28 +2650,31 @@ class _GerritChangelistImpl(_ChangelistCodereviewBase):
     return data['revisions'][current_rev]['commit']['message']
 
   def UpdateDescriptionRemote(self, description, force=False):
-    if gerrit_util.HasPendingChangeEdit(self._GetGerritHost(), self.GetIssue()):
+    if gerrit_util.HasPendingChangeEdit(
+        self._GetGerritHost(), self._GerritChangeIdentifier()):
       if not force:
         confirm_or_exit(
             'The description cannot be modified while the issue has a pending '
             'unpublished edit. Either publish the edit in the Gerrit web UI '
             'or delete it.\n\n', action='delete the unpublished edit')
 
-      gerrit_util.DeletePendingChangeEdit(self._GetGerritHost(),
-                                          self.GetIssue())
-    gerrit_util.SetCommitMessage(self._GetGerritHost(), self.GetIssue(),
-                                 description, notify='NONE')
+      gerrit_util.DeletePendingChangeEdit(
+        self._GetGerritHost(), self._GerritChangeIdentifier())
+    gerrit_util.SetCommitMessage(
+        self._GetGerritHost(), self._GerritChangeIdentifier(),
+        description, notify='NONE')
 
   def AddComment(self, message, publish=None):
-    gerrit_util.SetReview(self._GetGerritHost(), self.GetIssue(),
-                          msg=message, ready=publish)
+    gerrit_util.SetReview(
+        self._GetGerritHost(), self._GerritChangeIdentifier(),
+        msg=message, ready=publish)
 
   def GetCommentsSummary(self, readable=True):
     # DETAILED_ACCOUNTS is to get emails in accounts.
     messages = self._GetChangeDetail(
         options=['MESSAGES', 'DETAILED_ACCOUNTS']).get('messages', [])
     file_comments = gerrit_util.GetChangeComments(
-        self._GetGerritHost(), self.GetIssue())
+        self._GetGerritHost(), self._GerritChangeIdentifier())
 
     # Build dictionary of file comments for easy access and sorting later.
     # {author+date: {path: {patchset: {line: url+message}}}}
@@ -2652,22 +2740,22 @@ class _GerritChangelistImpl(_ChangelistCodereviewBase):
     return summary
 
   def CloseIssue(self):
-    gerrit_util.AbandonChange(self._GetGerritHost(), self.GetIssue(), msg='')
+    gerrit_util.AbandonChange(
+        self._GetGerritHost(), self._GerritChangeIdentifier(), msg='')
 
   def SubmitIssue(self, wait_for_merge=True):
-    gerrit_util.SubmitChange(self._GetGerritHost(), self.GetIssue(),
-                             wait_for_merge=wait_for_merge)
+    gerrit_util.SubmitChange(
+        self._GetGerritHost(), self._GerritChangeIdentifier(),
+        wait_for_merge=wait_for_merge)
 
-  def _GetChangeDetail(self, options=None, issue=None,
-                       no_cache=False):
-    """Returns details of the issue by querying Gerrit and caching results.
+  def _GetChangeDetail(self, options=None, no_cache=False):
+    """Returns details of associated Gerrit change and caching results.
 
     If fresh data is needed, set no_cache=True which will clear cache and
     thus new data will be fetched from Gerrit.
     """
     options = options or []
-    issue = issue or self.GetIssue()
-    assert issue, 'issue is required to query Gerrit'
+    assert self.GetIssue(), 'issue is required to query Gerrit'
 
     # Optimization to avoid multiple RPCs:
     if (('CURRENT_REVISION' in options or 'ALL_REVISIONS' in options) and
@@ -2675,15 +2763,15 @@ class _GerritChangelistImpl(_ChangelistCodereviewBase):
       options.append('CURRENT_COMMIT')
 
     # Normalize issue and options for consistent keys in cache.
-    issue = str(issue)
+    cache_key = str(self.GetIssue())
     options = [o.upper() for o in options]
 
     # Check in cache first unless no_cache is True.
     if no_cache:
-      self._detail_cache.pop(issue, None)
+      self._detail_cache.pop(cache_key, None)
     else:
       options_set = frozenset(options)
-      for cached_options_set, data in self._detail_cache.get(issue, []):
+      for cached_options_set, data in self._detail_cache.get(cache_key, []):
         # Assumption: data fetched before with extra options is suitable
         # for return for a smaller set of options.
         # For example, if we cached data for
@@ -2695,27 +2783,28 @@ class _GerritChangelistImpl(_ChangelistCodereviewBase):
 
     try:
       data = gerrit_util.GetChangeDetail(
-          self._GetGerritHost(), str(issue), options)
+          self._GetGerritHost(), self._GerritChangeIdentifier(), options)
     except gerrit_util.GerritError as e:
       if e.http_status == 404:
-        raise GerritChangeNotExists(issue, self.GetCodereviewServer())
+        raise GerritChangeNotExists(self.GetIssue(), self.GetCodereviewServer())
       raise
 
-    self._detail_cache.setdefault(issue, []).append((frozenset(options), data))
+    self._detail_cache.setdefault(cache_key, []).append(
+        (frozenset(options), data))
     return data
 
-  def _GetChangeCommit(self, issue=None):
-    issue = issue or self.GetIssue()
-    assert issue, 'issue is required to query Gerrit'
+  def _GetChangeCommit(self):
+    assert self.GetIssue(), 'issue must be set to query Gerrit'
     try:
-      data = gerrit_util.GetChangeCommit(self._GetGerritHost(), str(issue))
+      data = gerrit_util.GetChangeCommit(
+          self._GetGerritHost(), self._GerritChangeIdentifier())
     except gerrit_util.GerritError as e:
       if e.http_status == 404:
-        raise GerritChangeNotExists(issue, self.GetCodereviewServer())
+        raise GerritChangeNotExists(self.GetIssue(), self.GetCodereviewServer())
       raise
     return data
 
-  def CMDLand(self, force, bypass_hooks, verbose):
+  def CMDLand(self, force, bypass_hooks, verbose, parallel):
     if git_common.is_dirty_git_tree('land'):
       return 1
     detail = self._GetChangeDetail(['CURRENT_REVISION', 'LABELS'])
@@ -2748,7 +2837,8 @@ class _GerritChangelistImpl(_ChangelistCodereviewBase):
           committing=True,
           may_prompt=not force,
           verbose=verbose,
-          change=self.GetChange(self.GetCommonAncestorWithUpstream(), None))
+          change=self.GetChange(self.GetCommonAncestorWithUpstream(), None),
+          parallel=parallel)
       if not hook_results.should_continue():
         return 1
 
@@ -2794,7 +2884,10 @@ class _GerritChangelistImpl(_ChangelistCodereviewBase):
     remote_url = self._changelist.GetRemoteUrl()
     if remote_url.endswith('.git'):
       remote_url = remote_url[:-len('.git')]
+    remote_url = remote_url.rstrip('/')
+
     fetch_info = revision_info['fetch']['http']
+    fetch_info['url'] = fetch_info['url'].rstrip('/')
 
     if remote_url != fetch_info['url']:
       DieWithError('Trying to patch a change from %s but this repo appears '
@@ -3017,6 +3110,7 @@ class _GerritChangelistImpl(_ChangelistCodereviewBase):
       change_id = git_footers.get_footer_change_id(change_desc.description)[0]
 
     assert change_desc
+    SaveDescriptionBackup(change_desc)
     commits = RunGitSilent(['rev-list', '%s..%s' % (parent,
                                                     ref_to_push)]).splitlines()
     if len(commits) > 1:
@@ -3041,7 +3135,7 @@ class _GerritChangelistImpl(_ChangelistCodereviewBase):
     if options.send_mail:
       refspec_opts.append('ready')
       refspec_opts.append('notify=ALL')
-    elif not self.GetIssue():
+    elif not self.GetIssue() and options.squash:
       refspec_opts.append('wip')
     else:
       refspec_opts.append('notify=NONE')
@@ -3075,12 +3169,67 @@ class _GerritChangelistImpl(_ChangelistCodereviewBase):
     refspec = '%s:refs/for/%s%s' % (ref_to_push, branch, refspec_suffix)
 
     try:
+      # TODO(crbug.com/881860): Remove.
+      # Clear the log after each git-cl upload run by setting mode='w'.
+      handler = logging.FileHandler(gerrit_util.GERRIT_ERR_LOG_FILE, mode='w')
+      handler.setFormatter(logging.Formatter('%(asctime)s %(message)s'))
+
+      GERRIT_ERR_LOGGER.addHandler(handler)
+      GERRIT_ERR_LOGGER.setLevel(logging.INFO)
+      # Don't propagate to root logger, so that logs are not printed.
+      GERRIT_ERR_LOGGER.propagate = 0
+
+      # Get interesting headers from git push, to be displayed to the user if
+      # subsequent Gerrit RPC calls fail.
+      env = os.environ.copy()
+      env['GIT_CURL_VERBOSE'] = '1'
+      class FilterHeaders(object):
+        """Filter git push headers and store them in a file.
+
+        Regular git push output is printed directly.
+        """
+
+        def __init__(self):
+          # The output from git push that we want to store in a file.
+          self._output = ''
+          # Keeps track of whether the current line is part of a request header.
+          self._on_header = False
+          # Keeps track of repeated empty lines, which mark the end of a request
+          # header.
+          self._last_line_empty = False
+
+        def __call__(self, line):
+          """Handle a single line of git push output."""
+          if not line:
+            # Two consecutive empty lines mark the end of a header.
+            if self._last_line_empty:
+              self._on_header = False
+            self._last_line_empty = True
+            return
+
+          self._last_line_empty = False
+          # A line starting with '>' marks the beggining of a request header.
+          if line[0] == '>':
+            self._on_header = True
+            GERRIT_ERR_LOGGER.info(line)
+          # Lines not starting with '*' or '<', and not part of a request header
+          # should be displayed to the user.
+          elif line[0] not in '*<' and not self._on_header:
+            print(line)
+            # Flush after every line: useful for seeing progress when running as
+            # recipe.
+            sys.stdout.flush()
+          # Filter out the cookie and authorization headers.
+          elif ('cookie: ' not in line.lower()
+                and 'authorization: ' not in line.lower()):
+            GERRIT_ERR_LOGGER.info(line)
+
+      filter_fn = FilterHeaders()
       push_stdout = gclient_utils.CheckCallAndFilter(
           ['git', 'push', self.GetRemoteUrl(), refspec],
-          print_stdout=True,
-          # Flush after every line: useful for seeing progress when running as
-          # recipe.
-          filter_fn=lambda _: sys.stdout.flush())
+          print_stdout=False,
+          filter_fn=filter_fn,
+          env=env)
     except subprocess2.CalledProcessError:
       DieWithError('Failed to create a change. Please examine output above '
                    'for the reason of the failure.\n'
@@ -3104,7 +3253,7 @@ class _GerritChangelistImpl(_ChangelistCodereviewBase):
     reviewers = sorted(change_desc.get_reviewers())
 
     # Add cc's from the CC_LIST and --cc flag (if any).
-    if not options.private:
+    if not options.private and not options.no_autocc:
       cc = self.GetCCList().split(',')
     else:
       cc = []
@@ -3114,9 +3263,14 @@ class _GerritChangelistImpl(_ChangelistCodereviewBase):
     if change_desc.get_cced():
       cc.extend(change_desc.get_cced())
 
-    gerrit_util.AddReviewers(
-        self._GetGerritHost(), self.GetIssue(), reviewers, cc,
-        notify=bool(options.send_mail))
+    if self.GetIssue():
+      # GetIssue() is not set in case of non-squash uploads according to tests.
+      # TODO(agable): non-squash uploads in git cl should be removed.
+      gerrit_util.AddReviewers(
+          self._GetGerritHost(),
+          self._GerritChangeIdentifier(),
+          reviewers, cc,
+          notify=bool(options.send_mail))
 
     if change_desc.get_reviewers(tbr_only=True):
       labels = self._GetChangeDetail(['LABELS']).get('labels', {})
@@ -3125,7 +3279,8 @@ class _GerritChangelistImpl(_ChangelistCodereviewBase):
         score = max([int(x) for x in labels['Code-Review']['values'].keys()])
       print('Adding self-LGTM (Code-Review +%d) because of TBRs.' % score)
       gerrit_util.SetReview(
-          self._GetGerritHost(), self.GetIssue(),
+          self._GetGerritHost(),
+          self._GerritChangeIdentifier(),
           msg='Self-approving for TBR',
           labels={'Code-Review': score})
 
@@ -3217,8 +3372,10 @@ class _GerritChangelistImpl(_ChangelistCodereviewBase):
       labels['Commit-Queue'] = 1
       notify = False
     if labels:
-      gerrit_util.SetReview(self._GetGerritHost(), self.GetIssue(),
-                            labels=labels, notify=notify)
+      gerrit_util.SetReview(
+          self._GetGerritHost(),
+          self._GerritChangeIdentifier(),
+          labels=labels, notify=notify)
 
   def SetCQState(self, new_state):
     """Sets the Commit-Queue label assuming canonical CQ config for Gerrit."""
@@ -3229,8 +3386,9 @@ class _GerritChangelistImpl(_ChangelistCodereviewBase):
     }
     labels = {'Commit-Queue': vote_map[new_state]}
     notify = False if new_state == _CQState.DRY_RUN else None
-    gerrit_util.SetReview(self._GetGerritHost(), self.GetIssue(),
-                          labels=labels, notify=notify)
+    gerrit_util.SetReview(
+        self._GetGerritHost(), self._GerritChangeIdentifier(),
+        labels=labels, notify=notify)
 
   def CannotTriggerTryJobReason(self):
     try:
@@ -4065,14 +4223,22 @@ class _GitCookiesChecker(object):
     return found
 
 
+@metrics.collector.collect_metrics('git cl creds-check')
 def CMDcreds_check(parser, args):
   """Checks credentials and suggests changes."""
   _, _ = parser.parse_args(args)
 
-  if gerrit_util.GceAuthenticator.is_gce():
+  # Code below checks .gitcookies. Abort if using something else.
+  authn = gerrit_util.Authenticator.get()
+  if not isinstance(authn, gerrit_util.CookiesAuthenticator):
+    if isinstance(authn, gerrit_util.GceAuthenticator):
+      DieWithError(
+          'This command is not designed for GCE, are you on a bot?\n'
+          'If you need to run this on GCE, export SKIP_GCE_AUTH_FOR_GIT=1 '
+          'in your env.')
     DieWithError(
-        'This command is not designed for GCE, are you on a bot?\n'
-        'If you need to run this, export SKIP_GCE_AUTH_FOR_GIT=1 in your env.')
+        'This command is not designed for bot environment. It checks '
+        '~/.gitcookies file not generally used on bots.')
 
   checker = _GitCookiesChecker()
   checker.ensure_configured_gitcookies()
@@ -4087,6 +4253,7 @@ def CMDcreds_check(parser, args):
 
 
 @subcommand.usage('[repo root containing codereview.settings]')
+@metrics.collector.collect_metrics('git cl config')
 def CMDconfig(parser, args):
   """Edits configuration for this tree."""
 
@@ -4122,6 +4289,7 @@ def CMDconfig(parser, args):
   return 0
 
 
+@metrics.collector.collect_metrics('git cl baseurl')
 def CMDbaseurl(parser, args):
   """Gets or sets base-url for this branch."""
   branchref = RunGit(['symbolic-ref', 'HEAD']).strip()
@@ -4186,7 +4354,7 @@ def get_cl_statuses(changes, fine_grained, max_processes=None):
       return (cl, cl.GetStatus())
     except:
       # See http://crbug.com/629863.
-      logging.exception('failed to fetch status for %s:', cl)
+      logging.exception('failed to fetch status for cl %s:', cl.GetIssue())
       raise
 
   threads_count = len(changes)
@@ -4312,6 +4480,7 @@ def upload_branch_deps(cl, args):
   return 0
 
 
+@metrics.collector.collect_metrics('git cl archive')
 def CMDarchive(parser, args):
   """Archives and deletes branches associated with closed changelists."""
   parser.add_option(
@@ -4393,6 +4562,7 @@ def CMDarchive(parser, args):
   return 0
 
 
+@metrics.collector.collect_metrics('git cl status')
 def CMDstatus(parser, args):
   """Show status of changelists.
 
@@ -4526,6 +4696,7 @@ def write_json(path, contents):
 
 
 @subcommand.usage('[issue_number]')
+@metrics.collector.collect_metrics('git cl issue')
 def CMDissue(parser, args):
   """Sets or displays the current code review issue number.
 
@@ -4546,9 +4717,20 @@ def CMDissue(parser, args):
                        '--format=%(refname)']).splitlines()
     # Reverse issue lookup.
     issue_branch_map = {}
+
+    git_config = {}
+    for config in RunGit(['config', '--get-regexp',
+                          r'branch\..*issue']).splitlines():
+      name, _space, val = config.partition(' ')
+      git_config[name] = val
+
     for branch in branches:
-      cl = Changelist(branchref=branch)
-      issue_branch_map.setdefault(cl.GetIssue(), []).append(branch)
+      for cls in _CODEREVIEW_IMPLEMENTATIONS.values():
+        config_key = _git_branch_config_key(ShortBranchName(branch),
+                                            cls.IssueConfigKey())
+        issue = git_config.get(config_key)
+        if issue:
+          issue_branch_map.setdefault(int(issue), []).append(branch)
     if not args:
       args = sorted(issue_branch_map.iterkeys())
     result = {}
@@ -4581,6 +4763,7 @@ def CMDissue(parser, args):
   return 0
 
 
+@metrics.collector.collect_metrics('git cl comments')
 def CMDcomments(parser, args):
   """Shows or posts review comments for any changelist."""
   parser.add_option('-a', '--add-comment', dest='comment',
@@ -4640,12 +4823,12 @@ def CMDcomments(parser, args):
       dct = c.__dict__.copy()
       dct['date'] = dct['date'].strftime('%Y-%m-%d %H:%M:%S.%f')
       return dct
-    with open(options.json_file, 'wb') as f:
-      json.dump(map(pre_serialize, summary), f)
+    write_json(options.json_file, map(pre_serialize, summary))
   return 0
 
 
 @subcommand.usage('[codereview url or issue id]')
+@metrics.collector.collect_metrics('git cl description')
 def CMDdescription(parser, args):
   """Brings up the editor for the current CL's description."""
   parser.add_option('-d', '--display', action='store_true',
@@ -4730,6 +4913,7 @@ def CreateDescriptionFromLog(args):
   return RunGit(['log', '--pretty=format:%s\n\n%b'] + log_args)
 
 
+@metrics.collector.collect_metrics('git cl lint')
 def CMDlint(parser, args):
   """Runs cpplint on the current changelist."""
   parser.add_option('--filter', action='append', metavar='-x,+y',
@@ -4785,6 +4969,7 @@ def CMDlint(parser, args):
   return 0
 
 
+@metrics.collector.collect_metrics('git cl presubmit')
 def CMDpresubmit(parser, args):
   """Runs presubmit tests on the current changelist."""
   parser.add_option('-u', '--upload', action='store_true',
@@ -4793,6 +4978,9 @@ def CMDpresubmit(parser, args):
                     help='Run checks even if tree is dirty')
   parser.add_option('--all', action='store_true',
                     help='Run checks against all files, not just modified ones')
+  parser.add_option('--parallel', action='store_true',
+                    help='Run all tests specified by input_api.RunTests in all '
+                         'PRESUBMIT files in parallel.')
   auth.add_auth_options(parser)
   options, args = parser.parse_args(args)
   auth_config = auth.extract_auth_config_from_options(options)
@@ -4827,7 +5015,8 @@ def CMDpresubmit(parser, args):
       committing=not options.upload,
       may_prompt=False,
       verbose=options.verbose,
-      change=change)
+      change=change,
+      parallel=options.parallel)
   return 0
 
 
@@ -4925,6 +5114,7 @@ def cleanup_list(l):
 
 
 @subcommand.usage('[flags]')
+@metrics.collector.collect_metrics('git cl upload')
 def CMDupload(parser, args):
   """Uploads the current changelist to codereview.
 
@@ -5009,10 +5199,16 @@ def CMDupload(parser, args):
                     help='Sends your change to the CQ after an approval. Only '
                          'works on repos that have the Auto-Submit label '
                          'enabled')
+  parser.add_option('--parallel', action='store_true',
+                    help='Run all tests specified by input_api.RunTests in all '
+                         'PRESUBMIT files in parallel.')
+
+  parser.add_option('--no-autocc', action='store_true',
+                    help='Disables automatic addition of CC emails')
+  parser.add_option('--private', action='store_true',
+                    help='Set the review private. This implies --no-autocc.')
 
   # TODO: remove Rietveld flags
-  parser.add_option('--private', action='store_true',
-                    help='set the review private (rietveld only)')
   parser.add_option('--email', default=None,
                     help='email address to use to connect to Rietveld')
 
@@ -5050,6 +5246,7 @@ def CMDupload(parser, args):
 
 
 @subcommand.usage('--description=<description file>')
+@metrics.collector.collect_metrics('git cl split')
 def CMDsplit(parser, args):
   """Splits a branch into smaller branches and uploads CLs.
 
@@ -5067,6 +5264,13 @@ def CMDsplit(parser, args):
                     default=False,
                     help="List the files and reviewers for each CL that would "
                          "be created, but don't create branches or CLs.")
+  parser.add_option("--cq-dry-run", action='store_true',
+                    help="If set, will do a cq dry run for each uploaded CL. "
+                         "Please be careful when doing this; more than ~10 CLs "
+                         "has the potential to overload our build "
+                         "infrastructure. Try to upload these not during high "
+                         "load times (usually 11-3 Mountain View time). Email "
+                         "infra-dev@chromium.org with any questions.")
   options, _ = parser.parse_args(args)
 
   if not options.description_file:
@@ -5076,10 +5280,12 @@ def CMDsplit(parser, args):
     return CMDupload(OptionParser(), args)
 
   return split_cl.SplitCl(options.description_file, options.comment_file,
-                          Changelist, WrappedCMDupload, options.dry_run)
+                          Changelist, WrappedCMDupload, options.dry_run,
+                          options.cq_dry_run)
 
 
 @subcommand.usage('DEPRECATED')
+@metrics.collector.collect_metrics('git cl commit')
 def CMDdcommit(parser, args):
   """DEPRECATED: Used to commit the current changelist via git-svn."""
   message = ('git-cl no longer supports committing to SVN repositories via '
@@ -5094,6 +5300,7 @@ CHERRY_PICK_BRANCH = 'git-cl-cherry-pick'
 
 
 @subcommand.usage('[upstream branch to apply against]')
+@metrics.collector.collect_metrics('git cl land')
 def CMDland(parser, args):
   """Commits the current changelist via git.
 
@@ -5116,6 +5323,9 @@ def CMDland(parser, args):
                     help="external contributor for patch (appended to " +
                          "description and used as author for git). Should be " +
                          "formatted as 'First Last <email@example.com>'")
+  parser.add_option('--parallel', action='store_true',
+                    help='Run all tests specified by input_api.RunTests in all '
+                         'PRESUBMIT files in parallel.')
   auth.add_auth_options(parser)
   (options, args) = parser.parse_args(args)
   auth_config = auth.extract_auth_config_from_options(options)
@@ -5143,7 +5353,7 @@ def CMDland(parser, args):
                  '  If you would rather have `git cl land` upload '
                  'automatically for you, see http://crbug.com/642759')
   return cl._codereview_impl.CMDLand(options.force, options.bypass_hooks,
-                                     options.verbose)
+                                     options.verbose, options.parallel)
 
 
 def PushToGitWithAutoRebase(remote, branch, original_description,
@@ -5220,6 +5430,7 @@ def IsFatalPushFailure(push_stdout):
 
 
 @subcommand.usage('<patch url or issue id or issue url>')
+@metrics.collector.collect_metrics('git cl patch')
 def CMDpatch(parser, args):
   """Patches in a code review."""
   parser.add_option('-b', dest='newbranch',
@@ -5350,6 +5561,7 @@ def GetTreeStatusReason():
   return status['message']
 
 
+@metrics.collector.collect_metrics('git cl tree')
 def CMDtree(parser, args):
   """Shows the status of the tree."""
   _, args = parser.parse_args(args)
@@ -5366,6 +5578,7 @@ def CMDtree(parser, args):
   return 0
 
 
+@metrics.collector.collect_metrics('git cl try')
 def CMDtry(parser, args):
   """Triggers try jobs using either BuildBucket or CQ dry run."""
   group = optparse.OptionGroup(parser, 'Try job options')
@@ -5479,6 +5692,7 @@ def CMDtry(parser, args):
   return 0
 
 
+@metrics.collector.collect_metrics('git cl try-results')
 def CMDtry_results(parser, args):
   """Prints info about try jobs associated with current CL."""
   group = optparse.OptionGroup(parser, 'Try job results options')
@@ -5541,6 +5755,7 @@ def CMDtry_results(parser, args):
 
 
 @subcommand.usage('[new upstream branch]')
+@metrics.collector.collect_metrics('git cl upstream')
 def CMDupstream(parser, args):
   """Prints or sets the name of the upstream branch, if any."""
   _, args = parser.parse_args(args)
@@ -5562,6 +5777,7 @@ def CMDupstream(parser, args):
   return 0
 
 
+@metrics.collector.collect_metrics('git cl web')
 def CMDweb(parser, args):
   """Opens the current CL in the web browser."""
   _, args = parser.parse_args(args)
@@ -5577,6 +5793,7 @@ def CMDweb(parser, args):
   return 0
 
 
+@metrics.collector.collect_metrics('git cl set-commit')
 def CMDset_commit(parser, args):
   """Sets the commit bit to trigger the Commit Queue."""
   parser.add_option('-d', '--dry-run', action='store_true',
@@ -5607,6 +5824,7 @@ def CMDset_commit(parser, args):
   return 0
 
 
+@metrics.collector.collect_metrics('git cl set-close')
 def CMDset_close(parser, args):
   """Closes the issue."""
   _add_codereview_issue_select_options(parser)
@@ -5625,6 +5843,7 @@ def CMDset_close(parser, args):
   return 0
 
 
+@metrics.collector.collect_metrics('git cl diff')
 def CMDdiff(parser, args):
   """Shows differences between local tree and last upload."""
   parser.add_option(
@@ -5663,8 +5882,13 @@ def CMDdiff(parser, args):
   return 0
 
 
+@metrics.collector.collect_metrics('git cl owners')
 def CMDowners(parser, args):
   """Finds potential owners for reviewing."""
+  parser.add_option(
+      '--ignore-current',
+      action='store_true',
+      help='Ignore the CL\'s current reviewers and start from scratch.')
   parser.add_option(
       '--no-color',
       action='store_true',
@@ -5701,18 +5925,21 @@ def CMDowners(parser, args):
       affected_files,
       change.RepositoryRoot(),
       author,
-      cl.GetReviewers(),
+      [] if options.ignore_current else cl.GetReviewers(),
       fopen=file, os_path=os.path,
       disable_color=options.no_color,
       override_files=change.OriginalOwnersFiles()).run()
 
 
-def BuildGitDiffCmd(diff_type, upstream_commit, args):
+def BuildGitDiffCmd(diff_type, upstream_commit, args, allow_prefix=False):
   """Generates a diff command."""
   # Generate diff for the current branch's changes.
-  diff_cmd = ['-c', 'core.quotePath=false', 'diff',
-              '--no-ext-diff', '--no-prefix', diff_type,
-              upstream_commit, '--']
+  diff_cmd = ['-c', 'core.quotePath=false', 'diff', '--no-ext-diff']
+
+  if not allow_prefix:
+    diff_cmd += ['--no-prefix']
+
+  diff_cmd += [diff_type, upstream_commit, '--']
 
   if args:
     for arg in args:
@@ -5730,6 +5957,7 @@ def MatchingFileType(file_name, extensions):
 
 
 @subcommand.usage('[files or directories to diff]')
+@metrics.collector.collect_metrics('git cl format')
 def CMDformat(parser, args):
   """Runs auto-formatting tools (clang-format etc.) on the diff."""
   CLANG_EXTS = ['.cc', '.cpp', '.h', '.m', '.mm', '.proto', '.java']
@@ -5780,7 +6008,7 @@ def CMDformat(parser, args):
   diff_files = [x for x in diff_files if os.path.isfile(x)]
 
   if opts.js:
-    CLANG_EXTS.append('.js')
+    CLANG_EXTS.extend(['.js', '.ts'])
 
   clang_diff_files = [x for x in diff_files if MatchingFileType(x, CLANG_EXTS)]
   python_diff_files = [x for x in diff_files if MatchingFileType(x, ['.py'])]
@@ -5832,23 +6060,59 @@ def CMDformat(parser, args):
 
   # Similar code to above, but using yapf on .py files rather than clang-format
   # on C/C++ files
-  if opts.python:
+  if opts.python and python_diff_files:
     yapf_tool = gclient_utils.FindExecutable('yapf')
     if yapf_tool is None:
       DieWithError('yapf not found in PATH')
 
-    if opts.full:
-      if python_diff_files:
-        cmd = [yapf_tool]
-        if not opts.dry_run and not opts.diff:
-          cmd.append('-i')
-        stdout = RunCommand(cmd + python_diff_files, cwd=top_dir)
+    # If we couldn't find a yapf file we'll default to the chromium style
+    # specified in depot_tools.
+    depot_tools_path = os.path.dirname(os.path.abspath(__file__))
+    chromium_default_yapf_style = os.path.join(depot_tools_path,
+                                               YAPF_CONFIG_FILENAME)
+
+    # Note: yapf still seems to fix indentation of the entire file
+    # even if line ranges are specified.
+    # See https://github.com/google/yapf/issues/499
+    if not opts.full:
+      py_line_diffs = _ComputeDiffLineRanges(python_diff_files, upstream_commit)
+
+    # Used for caching.
+    yapf_configs = {}
+    for f in python_diff_files:
+      # Find the yapf style config for the current file, defaults to depot
+      # tools default.
+      yapf_config = _FindYapfConfigFile(
+          os.path.abspath(f), yapf_configs, top_dir,
+          chromium_default_yapf_style)
+
+      cmd = [yapf_tool, '--style', yapf_config, f]
+
+      has_formattable_lines = False
+      if not opts.full:
+        # Only run yapf over changed line ranges.
+        for diff_start, diff_len in py_line_diffs[f]:
+          diff_end = diff_start + diff_len - 1
+          # Yapf errors out if diff_end < diff_start but this
+          # is a valid line range diff for a removal.
+          if diff_end >= diff_start:
+            has_formattable_lines = True
+            cmd += ['-l', '{}-{}'.format(diff_start, diff_end)]
+        # If all line diffs were removals we have nothing to format.
+        if not has_formattable_lines:
+          continue
+
+      if opts.diff or opts.dry_run:
+        cmd += ['--diff']
+        # Will return non-zero exit code if non-empty diff.
+        stdout = RunCommand(cmd, error_ok=True, cwd=top_dir)
         if opts.diff:
           sys.stdout.write(stdout)
-    else:
-      # TODO(sbc): yapf --lines mode still has some issues.
-      # https://github.com/google/yapf/issues/154
-      DieWithError('--python currently only works with --full')
+        elif len(stdout) > 0:
+          return_value = 2
+      else:
+        cmd += ['-i']
+        RunCommand(cmd, cwd=top_dir)
 
   # Dart's formatter does not have the nice property of only operating on
   # modified chunks, so hard code full.
@@ -5919,6 +6183,7 @@ def GetDirtyMetricsDirs(diff_files):
 
 
 @subcommand.usage('<codereview url or issue id>')
+@metrics.collector.collect_metrics('git cl checkout')
 def CMDcheckout(parser, args):
   """Checks out a branch associated with a given Rietveld or Gerrit issue."""
   _, args = parser.parse_args(args)
@@ -5982,13 +6247,26 @@ class OptionParser(optparse.OptionParser):
         '-v', '--verbose', action='count', default=0,
         help='Use 2 times for more debugging info')
 
-  def parse_args(self, args=None, values=None):
-    options, args = optparse.OptionParser.parse_args(self, args, values)
+  def parse_args(self, args=None, _values=None):
+    # Create an optparse.Values object that will store only the actual passed
+    # options, without the defaults.
+    actual_options = optparse.Values()
+    _, args = optparse.OptionParser.parse_args(self, args, actual_options)
+    # Create an optparse.Values object with the default options.
+    options = optparse.Values(self.get_default_values().__dict__)
+    # Update it with the options passed by the user.
+    options._update_careful(actual_options.__dict__)
+    # Store the options passed by the user in an _actual_options attribute.
+    # We store only the keys, and not the values, since the values can contain
+    # arbitrary information, which might be PII.
+    metrics.collector.add('arguments', actual_options.__dict__.keys())
+
     levels = [logging.WARNING, logging.INFO, logging.DEBUG]
     logging.basicConfig(
         level=levels[min(options.verbose, len(levels) - 1)],
         format='[%(levelname).1s%(asctime)s %(process)d %(thread)d '
                '%(filename)s] %(message)s')
+
     return options, args
 
 
@@ -6002,6 +6280,8 @@ def main(argv):
   global settings
   settings = Settings()
 
+  if not metrics.DISABLE_METRICS_COLLECTION:
+    metrics.collector.add('project_urls', [settings.GetViewVCUrl().strip('/+')])
   colorize_CMDstatus_doc()
   dispatcher = subcommand.CommandDispatcher(__name__)
   try:
@@ -6022,8 +6302,5 @@ if __name__ == '__main__':
   # unit testing.
   fix_encoding.fix_encoding()
   setup_color.init()
-  try:
+  with metrics.collector.print_notice_and_exit():
     sys.exit(main(sys.argv[1:]))
-  except KeyboardInterrupt:
-    sys.stderr.write('interrupted\n')
-    sys.exit(1)

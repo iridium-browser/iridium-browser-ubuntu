@@ -20,6 +20,7 @@
 #include "components/invalidation/public/object_id_invalidation_map.h"
 #include "google_apis/gaia/gaia_constants.h"
 #include "net/url_request/url_request_context_getter.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 
 static const char* kOAuth2Scopes[] = {
   GaiaConstants::kGoogleTalkOAuth2Scope
@@ -57,27 +58,28 @@ namespace invalidation {
 
 TiclInvalidationService::TiclInvalidationService(
     const std::string& user_agent,
-    std::unique_ptr<IdentityProvider> identity_provider,
+    IdentityProvider* identity_provider,
     std::unique_ptr<TiclSettingsProvider> settings_provider,
     gcm::GCMDriver* gcm_driver,
-    const scoped_refptr<net::URLRequestContextGetter>& request_context)
-    : OAuth2TokenService::Consumer("ticl_invalidation"),
-      user_agent_(user_agent),
-      identity_provider_(std::move(identity_provider)),
+    const scoped_refptr<net::URLRequestContextGetter>& request_context,
+    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
+    network::NetworkConnectionTracker* network_connection_tracker)
+    : user_agent_(user_agent),
+      identity_provider_(identity_provider),
       settings_provider_(std::move(settings_provider)),
-      invalidator_registrar_(new syncer::InvalidatorRegistrar()),
+      invalidator_registrar_(new syncer::DeprecatedInvalidatorRegistrar()),
       request_access_token_backoff_(&kRequestAccessTokenBackoffPolicy),
       network_channel_type_(GCM_NETWORK_CHANNEL),
       gcm_driver_(gcm_driver),
       request_context_(request_context),
-      logger_() {}
+      url_loader_factory_(std::move(url_loader_factory)),
+      network_connection_tracker_(network_connection_tracker) {}
 
 TiclInvalidationService::~TiclInvalidationService() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   invalidator_registrar_->UpdateInvalidatorState(
       syncer::INVALIDATOR_SHUTTING_DOWN);
   settings_provider_->RemoveObserver(this);
-  identity_provider_->RemoveActiveAccountRefreshTokenObserver(this);
   identity_provider_->RemoveObserver(this);
   if (IsStarted()) {
     StopInvalidator();
@@ -101,7 +103,6 @@ void TiclInvalidationService::Init(
   }
 
   identity_provider_->AddObserver(this);
-  identity_provider_->AddActiveAccountRefreshTokenObserver(this);
   settings_provider_->AddObserver(this);
 }
 
@@ -185,29 +186,34 @@ void TiclInvalidationService::RequestDetailedStatus(
 
 void TiclInvalidationService::RequestAccessToken() {
   // Only one active request at a time.
-  if (access_token_request_ != nullptr)
+  if (access_token_fetcher_ != nullptr)
     return;
   request_access_token_retry_timer_.Stop();
   OAuth2TokenService::ScopeSet oauth2_scopes;
   for (size_t i = 0; i < arraysize(kOAuth2Scopes); i++)
     oauth2_scopes.insert(kOAuth2Scopes[i]);
-  // Invalidate previous token, otherwise token service will return the same
-  // token again.
-  const std::string& account_id = identity_provider_->GetActiveAccountId();
-  OAuth2TokenService* token_service = identity_provider_->GetTokenService();
-  token_service->InvalidateAccessToken(account_id, oauth2_scopes,
-                                       access_token_);
+  // Invalidate previous token, otherwise the identity provider will return the
+  // same token again.
+  identity_provider_->InvalidateAccessToken(oauth2_scopes, access_token_);
   access_token_.clear();
-  access_token_request_ =
-      token_service->StartRequest(account_id, oauth2_scopes, this);
+  access_token_fetcher_ = identity_provider_->FetchAccessToken(
+      "ticl_invalidation", oauth2_scopes,
+      base::BindOnce(&TiclInvalidationService::OnAccessTokenRequestCompleted,
+                     base::Unretained(this)));
 }
 
-void TiclInvalidationService::OnGetTokenSuccess(
-    const OAuth2TokenService::Request* request,
-    const std::string& access_token,
-    const base::Time& expiration_time) {
-  DCHECK_EQ(access_token_request_.get(), request);
-  access_token_request_.reset();
+void TiclInvalidationService::OnAccessTokenRequestCompleted(
+    GoogleServiceAuthError error,
+    std::string access_token) {
+  access_token_fetcher_.reset();
+  if (error.state() == GoogleServiceAuthError::NONE)
+    OnAccessTokenRequestSucceeded(access_token);
+  else
+    OnAccessTokenRequestFailed(error);
+}
+
+void TiclInvalidationService::OnAccessTokenRequestSucceeded(
+    std::string access_token) {
   // Reset backoff time after successful response.
   request_access_token_backoff_.Reset();
   access_token_ = access_token;
@@ -218,22 +224,18 @@ void TiclInvalidationService::OnGetTokenSuccess(
   }
 }
 
-void TiclInvalidationService::OnGetTokenFailure(
-    const OAuth2TokenService::Request* request,
-    const GoogleServiceAuthError& error) {
-  DCHECK_EQ(access_token_request_.get(), request);
+void TiclInvalidationService::OnAccessTokenRequestFailed(
+    GoogleServiceAuthError error) {
   DCHECK_NE(error.state(), GoogleServiceAuthError::NONE);
-  access_token_request_.reset();
   switch (error.state()) {
     case GoogleServiceAuthError::CONNECTION_FAILED:
     case GoogleServiceAuthError::SERVICE_UNAVAILABLE: {
       // Transient error. Retry after some time.
       request_access_token_backoff_.InformOfRequest(false);
       request_access_token_retry_timer_.Start(
-            FROM_HERE,
-            request_access_token_backoff_.GetTimeUntilRelease(),
-            base::Bind(&TiclInvalidationService::RequestAccessToken,
-                       base::Unretained(this)));
+          FROM_HERE, request_access_token_backoff_.GetTimeUntilRelease(),
+          base::BindOnce(&TiclInvalidationService::RequestAccessToken,
+                         base::Unretained(this)));
       break;
     }
     case GoogleServiceAuthError::SERVICE_ERROR:
@@ -253,21 +255,19 @@ void TiclInvalidationService::OnActiveAccountLogin() {
     StartInvalidator(network_channel_type_);
 }
 
-void TiclInvalidationService::OnRefreshTokenAvailable(
-    const std::string& account_id) {
+void TiclInvalidationService::OnActiveAccountRefreshTokenUpdated() {
   if (!IsStarted() && IsReadyToStart())
     StartInvalidator(network_channel_type_);
 }
 
-void TiclInvalidationService::OnRefreshTokenRevoked(
-    const std::string& account_id) {
+void TiclInvalidationService::OnActiveAccountRefreshTokenRemoved() {
   access_token_.clear();
   if (IsStarted())
     UpdateInvalidatorCredentials();
 }
 
 void TiclInvalidationService::OnActiveAccountLogout() {
-  access_token_request_.reset();
+  access_token_fetcher_.reset();
   request_access_token_retry_timer_.Stop();
 
   if (gcm_invalidation_bridge_)
@@ -320,23 +320,9 @@ void TiclInvalidationService::OnIncomingInvalidation(
 std::string TiclInvalidationService::GetOwnerName() const { return "TICL"; }
 
 bool TiclInvalidationService::IsReadyToStart() {
-  if (identity_provider_->GetActiveAccountId().empty()) {
-    DVLOG(2) << "Not starting TiclInvalidationService: User is not signed in.";
-    return false;
-  }
-
-  OAuth2TokenService* token_service = identity_provider_->GetTokenService();
-  if (!token_service) {
-    DVLOG(2)
-        << "Not starting TiclInvalidationService: "
-        << "OAuth2TokenService unavailable.";
-    return false;
-  }
-
-  if (!token_service->RefreshTokenIsAvailable(
-          identity_provider_->GetActiveAccountId())) {
-    DVLOG(2)
-        << "Not starting TiclInvalidationServce: Waiting for refresh token.";
+  if (!identity_provider_->IsActiveAccountAvailable()) {
+    DVLOG(2) << "Not starting TiclInvalidationService: "
+             << "active account is not available";
     return false;
   }
 
@@ -344,7 +330,7 @@ bool TiclInvalidationService::IsReadyToStart() {
 }
 
 bool TiclInvalidationService::IsStarted() const {
-  return invalidator_.get() != nullptr;
+  return invalidator_ != nullptr;
 }
 
 void TiclInvalidationService::StartInvalidator(
@@ -370,6 +356,7 @@ void TiclInvalidationService::StartInvalidator(
     case PUSH_CLIENT_CHANNEL: {
       notifier::NotifierOptions options =
           ParseNotifierOptions(*base::CommandLine::ForCurrentProcess());
+      options.network_connection_tracker = network_connection_tracker_;
       options.request_context_getter = request_context_;
       options.auth_mechanism = "X-OAUTH2";
       network_channel_options_.SetString("Options.HostPort",
@@ -382,11 +369,12 @@ void TiclInvalidationService::StartInvalidator(
       break;
     }
     case GCM_NETWORK_CHANNEL: {
-      gcm_invalidation_bridge_.reset(new GCMInvalidationBridge(
-          gcm_driver_, identity_provider_.get()));
+      gcm_invalidation_bridge_ = std::make_unique<GCMInvalidationBridge>(
+          gcm_driver_, identity_provider_);
       network_channel_creator =
           syncer::NonBlockingInvalidator::MakeGCMNetworkChannelCreator(
-              request_context_, gcm_invalidation_bridge_->CreateDelegate());
+              url_loader_factory_->Clone(), network_connection_tracker_,
+              gcm_invalidation_bridge_->CreateDelegate());
       break;
     }
     default: {

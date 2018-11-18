@@ -10,7 +10,6 @@
 #include "ash/public/cpp/ash_features.h"
 #include "ash/session/session_controller.h"
 #include "ash/shell.h"
-#include "ash/shell_port.h"
 #include "ash/system/tray/system_tray.h"
 #include "ash/system/tray/system_tray_item.h"
 #include "ash/system/tray/tray_bubble_wrapper.h"
@@ -24,8 +23,6 @@
 #include "ui/views/border.h"
 #include "ui/views/view.h"
 #include "ui/views/widget/widget.h"
-
-using views::TrayBubbleView;
 
 namespace ash {
 
@@ -199,7 +196,7 @@ void SystemTrayBubble::InitView(views::View* anchor,
     init_params->max_height = GetDetailedBubbleMaxHeight();
   }
 
-  system_tray_view_ = new SystemTrayView(system_tray_type, items);
+  system_tray_view_ = new SystemTrayView(tray_, system_tray_type, items);
 
   init_params->delegate = tray_;
   // Place the bubble on same display as this system tray.

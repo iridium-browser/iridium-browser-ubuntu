@@ -6,6 +6,7 @@
 #define CHROME_BROWSER_VR_KEYBOARD_DELEGATE_H_
 
 #include "base/memory/weak_ptr.h"
+#include "chrome/browser/vr/vr_export.h"
 
 namespace gfx {
 class Point3F;
@@ -15,12 +16,15 @@ class Transform;
 
 namespace vr {
 
+class KeyboardUiInterface;
 struct CameraModel;
+struct TextInputInfo;
 
-class KeyboardDelegate {
+class VR_EXPORT KeyboardDelegate {
  public:
   virtual ~KeyboardDelegate() {}
 
+  virtual void SetUiInterface(KeyboardUiInterface* ui) {}
   virtual void ShowKeyboard() = 0;
   virtual void HideKeyboard() = 0;
   virtual void SetTransform(const gfx::Transform&) = 0;
@@ -35,9 +39,12 @@ class KeyboardDelegate {
                                    const gfx::PointF& touch_position) {}
   virtual void OnHoverEnter(const gfx::PointF& position) {}
   virtual void OnHoverLeave() {}
-  virtual void OnMove(const gfx::PointF& position) {}
+  virtual void OnHoverMove(const gfx::PointF& position) {}
   virtual void OnButtonDown(const gfx::PointF& position) {}
   virtual void OnButtonUp(const gfx::PointF& position) {}
+
+  // Called to update GVR keyboard with the given text input info.
+  virtual void UpdateInput(const TextInputInfo& info) {}
 };
 
 }  // namespace vr

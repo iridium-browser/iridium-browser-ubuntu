@@ -34,11 +34,7 @@ namespace {
 class MockCompositor : public WindowAndroidCompositor {
  public:
   ~MockCompositor() override {}
-  base::WeakPtr<ui::WindowAndroidCompositor> GetWeakPtr() override {
-    return nullptr;
-  }
-  void IncrementReadbackRequestCount() override {}
-  void DecrementReadbackRequestCount() override {}
+  void AttachLayerForReadback(scoped_refptr<cc::Layer>) override {}
   void RequestCopyOfOutputOnRootLayer(
       std::unique_ptr<viz::CopyOutputRequest>) override {}
   void SetNeedsAnimate() override {}
@@ -52,6 +48,7 @@ class MockCompositor : public WindowAndroidCompositor {
     return nullptr;
   }
   bool IsDrawingFirstVisibleFrame() const override { return false; }
+  void SetVSyncPaused(bool paused) override {}
 };
 
 class MockGlowClient : public OverscrollGlowClient {
@@ -221,10 +218,9 @@ TEST_F(OverscrollControllerAndroidUnitTest,
   controller_->OnOverscrolled(params);
 
   // Generate a consumed scroll update.
-  blink::WebGestureEvent event(
-      blink::WebInputEvent::kGestureScrollUpdate,
-      blink::WebInputEvent::kNoModifiers,
-      ui::EventTimeStampToSeconds(ui::EventTimeForNow()));
+  blink::WebGestureEvent event(blink::WebInputEvent::kGestureScrollUpdate,
+                               blink::WebInputEvent::kNoModifiers,
+                               ui::EventTimeForNow());
   controller_->OnGestureEventAck(event, INPUT_EVENT_ACK_STATE_CONSUMED);
 
   testing::Mock::VerifyAndClearExpectations(&refresh_);

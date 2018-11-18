@@ -19,8 +19,8 @@ namespace chromeos {
 // Numeric ids are provided to facilitate interpretation of log files only,
 // they are subject to change without notice.
 enum class ScreenExitCode {
-  // "Continue" was pressed on network screen and network is online.
-  NETWORK_CONNECTED = 0,
+  // "Continue" was pressed on welcome screen.
+  WELCOME_CONTINUED = 0,
   HID_DETECTION_COMPLETED = 1,
   // Connection failed while trying to load a WebPageScreen.
   CONNECTION_FAILED = 2,
@@ -57,7 +57,23 @@ enum class ScreenExitCode {
   WAIT_FOR_CONTAINER_READY_FINISHED = 30,
   WAIT_FOR_CONTAINER_READY_ERROR = 31,
   SYNC_CONSENT_FINISHED = 32,
-  DEMO_MODE_SETUP_CLOSED = 33,
+  DEMO_MODE_SETUP_FINISHED = 33,
+  DEMO_MODE_SETUP_CANCELED = 34,
+  RECOMMEND_APPS_SKIPPED = 35,
+  RECOMMEND_APPS_SELECTED = 36,
+  DEMO_MODE_PREFERENCES_CONTINUED = 37,
+  DEMO_MODE_PREFERENCES_CANCELED = 38,
+  APP_DOWNLOADING_FINISHED = 39,
+  ARC_TERMS_OF_SERVICE_BACK = 40,
+  DISCOVER_FINISHED = 41,
+  NETWORK_BACK = 42,
+  NETWORK_CONNECTED = 43,
+  NETWORK_OFFLINE_DEMO_SETUP = 44,
+  FINGERPRINT_SETUP_FINISHED = 45,
+  MARKETING_OPT_IN_FINISHED = 46,
+  ASSISTANT_OPTIN_FLOW_FINISHED = 47,
+  MULTIDEVICE_SETUP_FINISHED = 48,
+  UPDATE_REJECT_OVER_CELLULAR = 49,
   EXIT_CODES_COUNT  // not a real code, must be the last
 };
 

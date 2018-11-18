@@ -26,8 +26,8 @@ import org.chromium.chrome.browser.preferences.website.SingleCategoryPreferences
 import org.chromium.chrome.browser.preferences.website.SingleWebsitePreferences;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.util.ActivityUtils;
-import org.chromium.content.browser.test.util.Criteria;
-import org.chromium.content.browser.test.util.CriteriaHelper;
+import org.chromium.content_public.browser.test.util.Criteria;
+import org.chromium.content_public.browser.test.util.CriteriaHelper;
 
 /**
  * Instrumentation tests for the Notification Platform Bridge.
@@ -57,8 +57,8 @@ public class NotificationPlatformBridgeIntentTest {
     @MediumTest
     @Feature({"Browser", "Notifications"})
     public void testLaunchNotificationPreferencesForCategory() {
-        Assert.assertFalse(
-                "The native library should not be loaded yet", LibraryLoader.isInitialized());
+        Assert.assertFalse("The native library should not be loaded yet",
+                LibraryLoader.getInstance().isInitialized());
 
         final Context context = InstrumentationRegistry.getInstrumentation()
                                         .getTargetContext()
@@ -93,8 +93,8 @@ public class NotificationPlatformBridgeIntentTest {
     @MediumTest
     @Feature({"Browser", "Notifications"})
     public void testLaunchNotificationPreferencesForWebsite() {
-        Assert.assertFalse(
-                "The native library should not be loaded yet", LibraryLoader.isInitialized());
+        Assert.assertFalse("The native library should not be loaded yet",
+                LibraryLoader.getInstance().isInitialized());
 
         final Context context = InstrumentationRegistry.getInstrumentation()
                                         .getTargetContext()
@@ -135,8 +135,8 @@ public class NotificationPlatformBridgeIntentTest {
     @MediumTest
     @Feature({"Browser", "Notifications"})
     public void testLaunchProcessForNotificationActivation() throws Exception {
-        Assert.assertFalse(
-                "The native library should not be loaded yet", LibraryLoader.isInitialized());
+        Assert.assertFalse("The native library should not be loaded yet",
+                LibraryLoader.getInstance().isInitialized());
         Assert.assertNull(NotificationPlatformBridge.getInstanceForTests());
 
         Context context = InstrumentationRegistry.getInstrumentation()
@@ -164,7 +164,8 @@ public class NotificationPlatformBridgeIntentTest {
             }
         });
 
-        Assert.assertTrue("The native library should be loaded now", LibraryLoader.isInitialized());
+        Assert.assertTrue("The native library should be loaded now",
+                LibraryLoader.getInstance().isInitialized());
         Assert.assertNotNull(NotificationPlatformBridge.getInstanceForTests());
     }
 }

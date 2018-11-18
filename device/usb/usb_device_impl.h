@@ -21,9 +21,7 @@
 #include "device/usb/usb_descriptors.h"
 #include "device/usb/usb_device.h"
 
-struct libusb_device;
 struct libusb_device_descriptor;
-struct libusb_device_handle;
 
 namespace base {
 class SequencedTaskRunner;
@@ -31,15 +29,12 @@ class SequencedTaskRunner;
 
 namespace device {
 
+class ScopedLibusbDeviceHandle;
 class UsbDeviceHandleImpl;
-class UsbContext;
-
-typedef struct libusb_device_handle* PlatformUsbDeviceHandle;
 
 class UsbDeviceImpl : public UsbDevice {
  public:
-  UsbDeviceImpl(scoped_refptr<UsbContext> context,
-                ScopedLibusbDeviceRef platform_device,
+  UsbDeviceImpl(ScopedLibusbDeviceRef platform_device,
                 const libusb_device_descriptor& descriptor);
 
   // UsbDevice implementation:
@@ -79,16 +74,14 @@ class UsbDeviceImpl : public UsbDevice {
       OpenCallback callback,
       scoped_refptr<base::TaskRunner> task_runner,
       scoped_refptr<base::SequencedTaskRunner> blocking_task_runner);
-  void Opened(PlatformUsbDeviceHandle platform_handle,
+  void Opened(ScopedLibusbDeviceHandle platform_handle,
               OpenCallback callback,
               scoped_refptr<base::SequencedTaskRunner> blocking_task_runner);
 
   base::ThreadChecker thread_checker_;
-  const ScopedLibusbDeviceRef platform_device_;
   bool visited_ = false;
 
-  // Retain the context so that it will not be released before UsbDevice.
-  const scoped_refptr<UsbContext> context_;
+  const ScopedLibusbDeviceRef platform_device_;
 
   DISALLOW_COPY_AND_ASSIGN(UsbDeviceImpl);
 };

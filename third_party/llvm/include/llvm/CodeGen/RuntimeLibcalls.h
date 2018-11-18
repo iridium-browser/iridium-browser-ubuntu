@@ -15,7 +15,7 @@
 #ifndef LLVM_CODEGEN_RUNTIMELIBCALLS_H
 #define LLVM_CODEGEN_RUNTIMELIBCALLS_H
 
-#include "llvm/IR/ValueTypes.h"
+#include "llvm/CodeGen/ValueTypes.h"
 
 namespace llvm {
 namespace RTLIB {
@@ -29,7 +29,7 @@ namespace RTLIB {
   ///
   enum Libcall {
 #define HANDLE_LIBCALL(code, name) code,
-    #include "RuntimeLibcalls.def"
+    #include "llvm/IR/RuntimeLibcalls.def"
 #undef HANDLE_LIBCALL
   };
 

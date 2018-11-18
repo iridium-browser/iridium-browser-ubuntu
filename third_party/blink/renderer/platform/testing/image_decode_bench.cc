@@ -21,7 +21,7 @@
 #include "base/command_line.h"
 #include "base/memory/scoped_refptr.h"
 #include "base/message_loop/message_loop.h"
-#include "mojo/edk/embedder/embedder.h"
+#include "mojo/core/embedder/embedder.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/platform/image-decoders/image_decoder.h"
 #include "third_party/blink/renderer/platform/shared_buffer.h"
@@ -40,7 +40,7 @@ scoped_refptr<SharedBuffer> ReadFile(const char* name) {
   }
 
   file.seekg(0, std::ios::end);
-  int file_size = file.tellg();
+  std::streampos file_size = file.tellg();
   file.seekg(0, std::ios::beg);
 
   if (!file || file_size <= 0) {
@@ -48,7 +48,12 @@ scoped_refptr<SharedBuffer> ReadFile(const char* name) {
     exit(2);
   }
 
-  Vector<char> buffer(file_size);
+  if (file_size > std::numeric_limits<wtf_size_t>::max()) {
+    fprintf(stderr, "File size too large %s\n", name);
+    exit(2);
+  }
+
+  Vector<char> buffer(static_cast<wtf_size_t>(file_size));
   if (!file.read(buffer.data(), file_size)) {
     fprintf(stderr, "Error reading file %s\n", name);
     exit(2);
@@ -72,8 +77,10 @@ void DecodeFailure(ImageMeta* image) {
 }
 
 void DecodeImageData(SharedBuffer* data, ImageMeta* image) {
+  const bool data_complete = true;
   std::unique_ptr<ImageDecoder> decoder = ImageDecoder::Create(
-      data, true, ImageDecoder::kAlphaPremultiplied, ColorBehavior::Ignore());
+      data, data_complete, ImageDecoder::kAlphaPremultiplied,
+      ImageDecoder::kDefaultBitDepth, ColorBehavior::Ignore());
 
   auto start = CurrentTimeTicks();
 
@@ -122,11 +129,8 @@ int ImageDecodeBenchMain(int argc, char* argv[]) {
     }
   }
 
-  // Create a web platform. blink::Platform can't be used directly because it
-  // has a protected constructor.
-
-  class WebPlatform : public Platform {};
-  Platform::Initialize(new WebPlatform());
+  std::unique_ptr<Platform> platform = std::make_unique<Platform>();
+  Platform::CreateMainThreadAndInitialize(platform.get());
 
   // Read entire file content into |data| (a contiguous block of memory) then
   // decode it to verify the image and record its ImageMeta data.
@@ -155,6 +159,6 @@ int ImageDecodeBenchMain(int argc, char* argv[]) {
 
 int main(int argc, char* argv[]) {
   base::MessageLoop message_loop;
-  mojo::edk::Init();
+  mojo::core::Init();
   return blink::ImageDecodeBenchMain(argc, argv);
 }

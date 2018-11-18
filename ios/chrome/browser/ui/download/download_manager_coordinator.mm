@@ -4,11 +4,13 @@
 
 #import "ios/chrome/browser/ui/download/download_manager_coordinator.h"
 
+#import <MobileCoreServices/MobileCoreServices.h>
 #import <StoreKit/StoreKit.h>
 
 #include <memory>
 
 #import "base/logging.h"
+#include "base/mac/scoped_cftyperef.h"
 #include "base/metrics/histogram_functions.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
@@ -145,6 +147,7 @@ class UnopenedDownloadsTracker : public web::DownloadTaskObserver,
 @synthesize animatesPresentation = _animatesPresentation;
 @synthesize downloadTask = _downloadTask;
 @synthesize webStateList = _webStateList;
+@synthesize bottomMarginHeightAnchor = _bottomMarginHeightAnchor;
 
 - (void)dealloc {
   [[InstallationNotifier sharedInstance] unregisterForNotifications:self];
@@ -155,6 +158,7 @@ class UnopenedDownloadsTracker : public web::DownloadTaskObserver,
 
   _viewController = [[DownloadManagerViewController alloc] init];
   _viewController.delegate = self;
+  _viewController.bottomMarginHeightAnchor = self.bottomMarginHeightAnchor;
   _mediator.SetDownloadTask(_downloadTask);
   _mediator.SetConsumer(_viewController);
 
@@ -269,7 +273,9 @@ class UnopenedDownloadsTracker : public web::DownloadTaskObserver,
                                     : DownloadedFileAction::OpenedInOtherApp;
   UMA_HISTOGRAM_ENUMERATION("Download.IOSDownloadedFileAction", action,
                             DownloadedFileAction::Count);
-  _unopenedDownloads.Remove(_downloadTask);
+  if (_downloadTask) {  // _downloadTask can be null if coordinator was stopped.
+    _unopenedDownloads.Remove(_downloadTask);
+  }
 }
 
 #pragma mark - ContainedPresenterDelegate
@@ -334,6 +340,12 @@ class UnopenedDownloadsTracker : public web::DownloadTaskObserver,
   NSURL* URL = [NSURL fileURLWithPath:base::SysUTF8ToNSString(path.value())];
   _openInController =
       [UIDocumentInteractionController interactionControllerWithURL:URL];
+
+  base::ScopedCFTypeRef<CFStringRef> MIMEType(
+      base::SysUTF8ToCFStringRef(_downloadTask->GetMimeType()));
+  CFStringRef UTI = UTTypeCreatePreferredIdentifierForTag(
+      kUTTagClassMIMEType, MIMEType.get(), nullptr);
+  _openInController.UTI = CFBridgingRelease(UTI);
   _openInController.delegate = self;
 
   BOOL menuShown =

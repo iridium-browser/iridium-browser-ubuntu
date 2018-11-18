@@ -57,15 +57,20 @@ class HidDetectionTest : public OobeBaseTest {
                    base::Unretained(fake_input_service_manager_.get())));
   }
 
-  ~HidDetectionTest() override {}
-
-  void SetUpOnMainThread() override { OobeBaseTest::SetUpOnMainThread(); }
+  ~HidDetectionTest() override {
+    service_manager::ServiceContext::ClearGlobalBindersForTesting(
+        device::mojom::kServiceName);
+  }
 
   void SetUpInProcessBrowserTestFixture() override {
     OobeBaseTest::SetUpInProcessBrowserTestFixture();
 
     mock_adapter_ = new testing::NiceMock<device::MockBluetoothAdapter>();
     SetUpBluetoothMock(mock_adapter_, true);
+
+    // Note: The SecureChannel service, which is never destroyed until the
+    // browser process is killed, utilizes |mock_adapter_|.
+    testing::Mock::AllowLeak(mock_adapter_.get());
   }
 
   void AddUsbMouse(const std::string& mouse_id) {
@@ -110,7 +115,7 @@ IN_PROC_BROWSER_TEST_F(HidDetectionTest, NoDevicesConnected) {
 }
 
 IN_PROC_BROWSER_TEST_F(HidDetectionSkipTest, BothDevicesPreConnected) {
-  OobeScreenWaiter(OobeScreen::SCREEN_OOBE_NETWORK).Wait();
+  OobeScreenWaiter(OobeScreen::SCREEN_OOBE_WELCOME).Wait();
 }
 
 }  // namespace chromeos

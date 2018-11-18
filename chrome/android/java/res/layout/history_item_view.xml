@@ -5,7 +5,7 @@
 
 <org.chromium.chrome.browser.history.HistoryItemView
     xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:chrome="http://schemas.android.com/apk/res-auto"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content" >
 
@@ -15,12 +15,12 @@
 
         <include layout="@layout/modern_list_item_view" />
 
-        <org.chromium.chrome.browser.widget.TintedImageButton
+        <android.support.v7.widget.AppCompatImageButton
             android:id="@+id/remove"
             style="@style/ListItemEndIconSmall"
             android:contentDescription="@string/remove"
             android:src="@drawable/btn_delete_24dp"
-            chrome:chrometint="@color/black_alpha_38" />
+            app:tint="@color/light_icon_color" />
     </LinearLayout>
 
 </org.chromium.chrome.browser.history.HistoryItemView>

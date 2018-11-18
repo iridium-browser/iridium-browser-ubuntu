@@ -23,11 +23,6 @@
 #include "net/base/net_export.h"
 #include "net/base/request_priority.h"
 #include "net/http/http_raw_request_headers.h"
-#include "net/ssl/token_binding.h"
-
-namespace crypto {
-class ECPrivateKey;
-}
 
 namespace net {
 
@@ -66,10 +61,8 @@ class NET_EXPORT_PRIVATE HttpStream {
   // synchronously, in which case the result will be passed to the callback
   // when available. Returns OK on success.
   //
-  // The callback will only be invoked once the first full set of headers have
-  // been received, at which point |response| will have been populated with that
-  // set of headers, and is safe to read, until/unless ReadResponseHeaders is
-  // called.
+  // Some fields in |response| may be filled by this method, but it will not
+  // contain complete information until ReadResponseHeaders returns.
   //
   // |response| must remain valid until all sets of headers has been read, or
   // the HttpStream is destroyed. There's typically only one set of
@@ -79,14 +72,14 @@ class NET_EXPORT_PRIVATE HttpStream {
                           CompletionOnceCallback callback) = 0;
 
   // Reads from the underlying socket until the next set of response headers
-  // have been completely received.  This may only be called on 1xx responses
-  // after SendRequest has completed successfully, to read the next set of
-  // headers.
+  // have been completely received. Normally this is called once per request,
+  // however it may be called again in the event of a 1xx response to read the
+  // next set of headers.
   //
   // ERR_IO_PENDING is returned if the operation could not be completed
   // synchronously, in which case the result will be passed to the callback when
   // available. Returns OK on success. The response headers are available in
-  // the HttpResponseInfo passed in to original call to SendRequest.
+  // the HttpResponseInfo passed in the original call to SendRequest.
   virtual int ReadResponseHeaders(CompletionOnceCallback callback) = 0;
 
   // Reads response body data, up to |buf_len| bytes. |buf_len| should be a
@@ -170,13 +163,6 @@ class NET_EXPORT_PRIVATE HttpStream {
   // any. Returns true and fills in |endpoint| if it is available; returns false
   // and does not modify |endpoint| if it is unavailable.
   virtual bool GetRemoteEndpoint(IPEndPoint* endpoint) = 0;
-
-  // Generates the signature used in Token Binding using |*key| and for a Token
-  // Binding of type |tb_type|, putting the signature in |*out|. Returns OK or
-  // ERR_FAILED.
-  virtual Error GetTokenBindingSignature(crypto::ECPrivateKey* key,
-                                         TokenBindingType tb_type,
-                                         std::vector<uint8_t>* out) = 0;
 
   // In the case of an HTTP error or redirect, flush the response body (usually
   // a simple error or "this page has moved") so that we can re-use the

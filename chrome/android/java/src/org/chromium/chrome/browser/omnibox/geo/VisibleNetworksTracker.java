@@ -5,12 +5,12 @@
 package org.chromium.chrome.browser.omnibox.geo;
 
 import android.content.Context;
-import android.os.AsyncTask;
 import android.os.SystemClock;
 
 import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
+import org.chromium.base.task.AsyncTask;
 
 import javax.annotation.Nullable;
 
@@ -28,7 +28,7 @@ class VisibleNetworksTracker {
     private static long sVisibleNetworksTime = Long.MAX_VALUE;
 
     @Nullable
-    private static AsyncTask<Void, Void, VisibleNetworks> sOngoingRefresh;
+    private static AsyncTask<VisibleNetworks> sOngoingRefresh;
 
     private static VisibleNetworks sVisibleNetworksForTesting;
     private static boolean sUseVisibleNetworksForTesting;
@@ -68,9 +68,9 @@ class VisibleNetworksTracker {
         if (isValidCachedVisibleNetworks() || sOngoingRefresh != null) {
             return;
         }
-        sOngoingRefresh = new AsyncTask<Void, Void, VisibleNetworks>() {
+        sOngoingRefresh = new AsyncTask<VisibleNetworks>() {
             @Override
-            protected VisibleNetworks doInBackground(Void... params) {
+            protected VisibleNetworks doInBackground() {
                 VisibleNetworks visibleNetworks = null;
                 try {
                     // Include all visible wifis and cells.

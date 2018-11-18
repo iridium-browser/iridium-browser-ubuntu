@@ -40,6 +40,8 @@
 
 namespace blink {
 
+class StyleSVGResource;
+
 typedef RefVector<Length> SVGDashArray;
 
 enum SVGPaintType {
@@ -120,8 +122,11 @@ enum EPaintOrder {
 };
 
 struct SVGPaint {
-  SVGPaint() : type(SVG_PAINTTYPE_NONE) {}
-  SVGPaint(Color color) : type(SVG_PAINTTYPE_RGBCOLOR), color(color) {}
+  CORE_EXPORT SVGPaint();
+  SVGPaint(Color color);
+  SVGPaint(const SVGPaint& paint);
+  CORE_EXPORT ~SVGPaint();
+  CORE_EXPORT SVGPaint& operator=(const SVGPaint& paint);
 
   CORE_EXPORT bool operator==(const SVGPaint&) const;
   bool operator!=(const SVGPaint& other) const { return !(*this == other); }
@@ -145,13 +150,14 @@ struct SVGPaint {
     return type == SVG_PAINTTYPE_CURRENTCOLOR ||
            type == SVG_PAINTTYPE_URI_CURRENTCOLOR;
   }
+  StyleSVGResource* Resource() const { return resource.get(); }
 
   const Color& GetColor() const { return color; }
-  const String& GetUrl() const { return url; }
+  const AtomicString& GetUrl() const;
 
-  SVGPaintType type;
+  scoped_refptr<StyleSVGResource> resource;
   Color color;
-  String url;
+  SVGPaintType type;
 };
 
 // Inherited/Non-Inherited Style Datastructures
@@ -266,11 +272,15 @@ class CORE_EXPORT StyleMiscData : public RefCounted<StyleMiscData> {
     return !(*this == other);
   }
 
+  Length baseline_shift_value;
+
   Color flood_color;
-  float flood_opacity;
   Color lighting_color;
 
-  Length baseline_shift_value;
+  float flood_opacity;
+
+  bool flood_color_is_current_color;
+  bool lighting_color_is_current_color;
 
  private:
   StyleMiscData();
@@ -283,6 +293,7 @@ class StyleResourceData : public RefCounted<StyleResourceData> {
   static scoped_refptr<StyleResourceData> Create() {
     return base::AdoptRef(new StyleResourceData);
   }
+  ~StyleResourceData();
   scoped_refptr<StyleResourceData> Copy() const {
     return base::AdoptRef(new StyleResourceData(*this));
   }
@@ -292,7 +303,7 @@ class StyleResourceData : public RefCounted<StyleResourceData> {
     return !(*this == other);
   }
 
-  AtomicString masker;
+  scoped_refptr<StyleSVGResource> masker;
 
  private:
   StyleResourceData();
@@ -306,6 +317,7 @@ class StyleInheritedResourceData
   static scoped_refptr<StyleInheritedResourceData> Create() {
     return base::AdoptRef(new StyleInheritedResourceData);
   }
+  ~StyleInheritedResourceData();
   scoped_refptr<StyleInheritedResourceData> Copy() const {
     return base::AdoptRef(new StyleInheritedResourceData(*this));
   }
@@ -315,9 +327,9 @@ class StyleInheritedResourceData
     return !(*this == other);
   }
 
-  AtomicString marker_start;
-  AtomicString marker_mid;
-  AtomicString marker_end;
+  scoped_refptr<StyleSVGResource> marker_start;
+  scoped_refptr<StyleSVGResource> marker_mid;
+  scoped_refptr<StyleSVGResource> marker_end;
 
  private:
   StyleInheritedResourceData();

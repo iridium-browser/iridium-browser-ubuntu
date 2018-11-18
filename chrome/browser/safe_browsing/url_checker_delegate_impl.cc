@@ -5,6 +5,7 @@
 #include "chrome/browser/safe_browsing/url_checker_delegate_impl.h"
 
 #include "base/bind.h"
+#include "base/task/post_task.h"
 #include "chrome/browser/data_reduction_proxy_util.h"
 #include "chrome/browser/prerender/prerender_contents.h"
 #include "chrome/browser/prerender/prerender_final_status.h"
@@ -14,6 +15,9 @@
 #include "components/safe_browsing/common/safe_browsing_prefs.h"
 #include "components/safe_browsing/db/database_manager.h"
 #include "components/safe_browsing/db/v4_protocol_manager_util.h"
+#include "components/safe_browsing/features.h"
+#include "components/safe_browsing/triggers/suspicious_site_trigger.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
 #include "services/network/public/cpp/features.h"
@@ -49,8 +53,8 @@ void StartDisplayingBlockingPage(
   }
 
   // Tab is gone or it's being prerendered.
-  content::BrowserThread::PostTask(content::BrowserThread::IO, FROM_HERE,
-                                   base::Bind(resource.callback, false));
+  base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::IO},
+                           base::Bind(resource.callback, false));
 }
 
 }  // namespace
@@ -60,10 +64,20 @@ UrlCheckerDelegateImpl::UrlCheckerDelegateImpl(
     scoped_refptr<SafeBrowsingUIManager> ui_manager)
     : database_manager_(std::move(database_manager)),
       ui_manager_(std::move(ui_manager)),
-      threat_types_(
-          CreateSBThreatTypeSet({safe_browsing::SB_THREAT_TYPE_URL_MALWARE,
-                                 safe_browsing::SB_THREAT_TYPE_URL_PHISHING,
-                                 safe_browsing::SB_THREAT_TYPE_URL_UNWANTED})) {
+      threat_types_(CreateSBThreatTypeSet({
+// TODO(crbug.com/835961): Enable on Android when list is available.
+#if defined(SAFE_BROWSING_DB_LOCAL)
+            safe_browsing::SB_THREAT_TYPE_SUSPICIOUS_SITE,
+#endif
+            safe_browsing::SB_THREAT_TYPE_URL_MALWARE,
+            safe_browsing::SB_THREAT_TYPE_URL_PHISHING,
+            safe_browsing::SB_THREAT_TYPE_URL_UNWANTED
+      })) {
+  if (base::FeatureList::IsEnabled(safe_browsing::kBillingInterstitial)) {
+    SBThreatTypeSet billing =
+        CreateSBThreatTypeSet({safe_browsing::SB_THREAT_TYPE_BILLING});
+    threat_types_.insert(billing.begin(), billing.end());
+  }
 }
 
 UrlCheckerDelegateImpl::~UrlCheckerDelegateImpl() = default;
@@ -71,8 +85,8 @@ UrlCheckerDelegateImpl::~UrlCheckerDelegateImpl() = default;
 void UrlCheckerDelegateImpl::MaybeDestroyPrerenderContents(
     const base::Callback<content::WebContents*()>& web_contents_getter) {
   // Destroy the prefetch with FINAL_STATUS_SAFEBROSWING.
-  content::BrowserThread::PostTask(
-      content::BrowserThread::UI, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {content::BrowserThread::UI},
       base::BindOnce(&DestroyPrerenderContents, web_contents_getter));
 }
 
@@ -82,8 +96,8 @@ void UrlCheckerDelegateImpl::StartDisplayingBlockingPageHelper(
     const net::HttpRequestHeaders& headers,
     bool is_main_frame,
     bool has_user_gesture) {
-  content::BrowserThread::PostTask(
-      content::BrowserThread::UI, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {content::BrowserThread::UI},
       base::BindOnce(&StartDisplayingBlockingPage, ui_manager_, resource));
 }
 
@@ -104,6 +118,14 @@ bool UrlCheckerDelegateImpl::ShouldSkipRequestCheck(
   return !base::FeatureList::IsEnabled(network::features::kNetworkService) &&
          IsDataReductionProxyResourceThrottleEnabledForUrl(resource_context,
                                                            original_url);
+}
+
+void UrlCheckerDelegateImpl::NotifySuspiciousSiteDetected(
+    const base::RepeatingCallback<content::WebContents*()>&
+        web_contents_getter) {
+  base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI},
+                           base::BindOnce(&NotifySuspiciousSiteTriggerDetected,
+                                          web_contents_getter));
 }
 
 const SBThreatTypeSet& UrlCheckerDelegateImpl::GetThreatTypes() {

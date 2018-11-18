@@ -29,6 +29,7 @@
 #include "third_party/blink/renderer/platform/image-decoders/webp/webp_image_decoder.h"
 
 #include "build/build_config.h"
+#include "third_party/blink/renderer/platform/histogram.h"
 #include "third_party/skia/include/core/SkData.h"
 
 #if defined(ARCH_CPU_BIG_ENDIAN)
@@ -115,6 +116,50 @@ void alphaBlendNonPremultiplied(blink::ImageFrame& src,
   }
 }
 
+// Do not rename entries nor reuse numeric values. See the following link for
+// descriptions: https://developers.google.com/speed/webp/docs/riff_container.
+enum WebPFileFormat {
+  kSimpleLossyFileFormat = 0,
+  kSimpleLosslessFileFormat = 1,
+  kExtendedAlphaFileFormat = 2,
+  kExtendedAnimationFileFormat = 3,
+  kExtendedAnimationWithAlphaFileFormat = 4,
+  kUnknownFileFormat = 5,
+  kCountWebPFileFormats
+};
+
+// This method parses |blob|'s header and emits a UMA with the file format, as
+// defined by WebP, see WebPFileFormat.
+void UpdateWebPFileFormatUMA(const sk_sp<SkData>& blob) {
+  if (!IsMainThread())
+    return;
+
+  WebPBitstreamFeatures features{};
+  if (WebPGetFeatures(blob->bytes(), blob->size(), &features) != VP8_STATUS_OK)
+    return;
+
+  // These constants are defined verbatim in webp_dec.c::ParseHeadersInternal().
+  constexpr int kLossyFormat = 1;
+  constexpr int kLosslessFormat = 2;
+
+  WebPFileFormat file_format = kUnknownFileFormat;
+  if (features.has_alpha && features.has_animation)
+    file_format = kExtendedAnimationWithAlphaFileFormat;
+  else if (features.has_animation)
+    file_format = kExtendedAnimationFileFormat;
+  else if (features.has_alpha)
+    file_format = kExtendedAlphaFileFormat;
+  else if (features.format == kLossyFormat)
+    file_format = kSimpleLossyFileFormat;
+  else if (features.format == kLosslessFormat)
+    file_format = kSimpleLosslessFileFormat;
+
+  DEFINE_THREAD_SAFE_STATIC_LOCAL(
+      blink::EnumerationHistogram, file_format_histogram,
+      ("Blink.DecodedImage.WebPFileFormat", kCountWebPFileFormats));
+  file_format_histogram.Count(file_format);
+}
+
 }  // namespace
 
 namespace blink {
@@ -122,7 +167,10 @@ namespace blink {
 WEBPImageDecoder::WEBPImageDecoder(AlphaOption alpha_option,
                                    const ColorBehavior& color_behavior,
                                    size_t max_decoded_bytes)
-    : ImageDecoder(alpha_option, color_behavior, max_decoded_bytes),
+    : ImageDecoder(alpha_option,
+                   ImageDecoder::kDefaultBitDepth,
+                   color_behavior,
+                   max_decoded_bytes),
       decoder_(nullptr),
       format_flags_(0),
       frame_background_has_alpha_(false),
@@ -232,6 +280,8 @@ bool WEBPImageDecoder::UpdateDemuxer() {
     if (!SetSize(width, height))
       return SetFailed();
 
+    UpdateWebPFileFormatUMA(consolidated_data_);
+
     format_flags_ = WebPDemuxGetI(demux_, WEBP_FF_FORMAT_FLAGS);
     if (!(format_flags_ & ANIMATION_FLAG)) {
       repetition_count_ = kAnimationNone;
@@ -313,11 +363,10 @@ void WEBPImageDecoder::ReadColorProfile() {
       reinterpret_cast<const char*>(chunk_iterator.chunk.bytes);
   size_t profile_size = chunk_iterator.chunk.size;
 
-  sk_sp<SkColorSpace> color_space =
-      SkColorSpace::MakeICC(profile_data, profile_size);
-  if (color_space) {
-    if (color_space->type() == SkColorSpace::kRGB_Type)
-      SetEmbeddedColorSpace(std::move(color_space));
+  if (auto profile = ColorProfile::Create(profile_data, profile_size)) {
+    if (profile->GetProfile()->data_color_space == skcms_Signature_RGB) {
+      SetEmbeddedColorProfile(std::move(profile));
+    }
   } else {
     DLOG(ERROR) << "Failed to parse image ICC profile";
   }
@@ -346,18 +395,18 @@ void WEBPImageDecoder::ApplyPostProcessing(size_t frame_index) {
   // space and then immediately after, perform a linear premultiply
   // and linear blending.  Can we find a way to perform the
   // premultiplication and blending in a linear space?
-  SkColorSpaceXform* xform = ColorTransform();
+  ColorProfileTransform* xform = ColorTransform();
   if (xform) {
-    const SkColorSpaceXform::ColorFormat kSrcFormat =
-        SkColorSpaceXform::kBGRA_8888_ColorFormat;
-    const SkColorSpaceXform::ColorFormat kDstFormat =
-        SkColorSpaceXform::kRGBA_8888_ColorFormat;
+    skcms_PixelFormat kSrcFormat = skcms_PixelFormat_BGRA_8888;
+    skcms_PixelFormat kDstFormat = skcms_PixelFormat_RGBA_8888;
+    skcms_AlphaFormat alpha_format = skcms_AlphaFormat_Unpremul;
     for (int y = decoded_height_; y < decoded_height; ++y) {
       const int canvas_y = top + y;
       uint8_t* row = reinterpret_cast<uint8_t*>(buffer.GetAddr(left, canvas_y));
-      bool color_converison_successful = xform->apply(
-          kDstFormat, row, kSrcFormat, row, width, kUnpremul_SkAlphaType);
-      DCHECK(color_converison_successful);
+      bool color_conversion_successful = skcms_Transform(
+          row, kSrcFormat, alpha_format, xform->SrcProfile(), row, kDstFormat,
+          alpha_format, xform->DstProfile(), width);
+      DCHECK(color_conversion_successful);
       uint8_t* pixel = row;
       for (int x = 0; x < width; ++x, pixel += 4) {
         const int canvas_x = left + x;

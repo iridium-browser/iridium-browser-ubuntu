@@ -33,9 +33,8 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Format.h"
-#include "llvm/Support/ManagedStatic.h"
+#include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/MemoryBuffer.h"
-#include "llvm/Support/PrettyStackTrace.h"
 #include "llvm/Support/Program.h"
 #include "llvm/Support/Signals.h"
 #include "llvm/Support/TargetSelect.h"
@@ -81,6 +80,11 @@ cl::opt<bool> ExternalOnly("extern-only",
 cl::alias ExternalOnly2("g", cl::desc("Alias for --extern-only"),
                         cl::aliasopt(ExternalOnly), cl::Grouping,
                         cl::ZeroOrMore);
+
+cl::opt<bool> NoWeakSymbols("no-weak",
+                            cl::desc("Show only non-weak symbols"));
+cl::alias NoWeakSymbols2("W", cl::desc("Alias for --no-weak"),
+                         cl::aliasopt(NoWeakSymbols), cl::Grouping);
 
 cl::opt<bool> BSDFormat("B", cl::desc("Alias for --format=bsd"),
                         cl::Grouping);
@@ -705,7 +709,7 @@ static void sortAndPrintSymbolList(SymbolicFile &Obj, bool printName,
 
     if (ReverseSort)
       Cmp = [=](const NMSymbol &A, const NMSymbol &B) { return Cmp(B, A); };
-    std::sort(SymbolList.begin(), SymbolList.end(), Cmp);
+    llvm::sort(SymbolList, Cmp);
   }
 
   if (!PrintFileName) {
@@ -753,6 +757,24 @@ static void sortAndPrintSymbolList(SymbolicFile &Obj, bool printName,
     }
   }
 
+  auto writeFileName = [&](raw_ostream &S) {
+    if (!ArchitectureName.empty())
+      S << "(for architecture " << ArchitectureName << "):";
+    if (OutputFormat == posix && !ArchiveName.empty())
+      S << ArchiveName << "[" << CurrentFilename << "]: ";
+    else {
+      if (!ArchiveName.empty())
+        S << ArchiveName << ":";
+      S << CurrentFilename << ": ";
+    }
+  };
+
+  if (SymbolList.empty()) {
+    if (PrintFileName)
+      writeFileName(errs());
+    errs() << "no symbols\n";
+  }
+
   for (SymbolListT::iterator I = SymbolList.begin(), E = SymbolList.end();
        I != E; ++I) {
     uint32_t SymFlags;
@@ -769,20 +791,13 @@ static void sortAndPrintSymbolList(SymbolicFile &Obj, bool printName,
 
     bool Undefined = SymFlags & SymbolRef::SF_Undefined;
     bool Global = SymFlags & SymbolRef::SF_Global;
+    bool Weak = SymFlags & SymbolRef::SF_Weak;
     if ((!Undefined && UndefinedOnly) || (Undefined && DefinedOnly) ||
-        (!Global && ExternalOnly) || (SizeSort && !PrintAddress))
+        (!Global && ExternalOnly) || (SizeSort && !PrintAddress) ||
+        (Weak && NoWeakSymbols))
       continue;
-    if (PrintFileName) {
-      if (!ArchitectureName.empty())
-        outs() << "(for architecture " << ArchitectureName << "):";
-      if (OutputFormat == posix && !ArchiveName.empty())
-        outs() << ArchiveName << "[" << CurrentFilename << "]: ";
-      else {
-        if (!ArchiveName.empty())
-          outs() << ArchiveName << ":";
-        outs() << CurrentFilename << ": ";
-      }
-    }
+    if (PrintFileName)
+      writeFileName(outs());
     if ((JustSymbolName ||
          (UndefinedOnly && MachO && OutputFormat != darwin)) &&
         OutputFormat != posix) {
@@ -1588,8 +1603,10 @@ dumpSymbolNamesFromObject(SymbolicFile &Obj, bool printName,
         }
       }
 
-      // Trying adding symbol from the function starts table.
+      // Trying adding symbol from the function starts table and LC_MAIN entry
+      // point.
       SmallVector<uint64_t, 8> FoundFns;
+      uint64_t lc_main_offset = UINT64_MAX;
       for (const auto &Command : MachO->load_commands()) {
         if (Command.C.cmd == MachO::LC_FUNCTION_STARTS) {
           // We found a function starts segment, parse the addresses for 
@@ -1598,6 +1615,10 @@ dumpSymbolNamesFromObject(SymbolicFile &Obj, bool printName,
             MachO->getLinkeditDataLoadCommand(Command);
 
           MachO->ReadULEB128s(LLC.dataoff, FoundFns);
+        } else if (Command.C.cmd == MachO::LC_MAIN) {
+          MachO::entry_point_command LCmain =
+            MachO->getEntryPointCommand(Command);
+          lc_main_offset = LCmain.entryoff;
         }
       }
       // See if these addresses are already in the symbol table.
@@ -1647,7 +1668,10 @@ dumpSymbolNamesFromObject(SymbolicFile &Obj, bool printName,
           F.NDesc = 0;
           F.IndirectName = StringRef();
           SymbolList.push_back(F);
-          FOS << "<redacted function " << f << ">";
+          if (FoundFns[f] == lc_main_offset)
+            FOS << "<redacted LC_MAIN>";
+          else
+            FOS << "<redacted function " << f << ">";
           FOS << '\0';
           FunctionStartsAdded++;
         }
@@ -2007,11 +2031,7 @@ static void dumpSymbolNamesFromFile(std::string &Filename) {
 }
 
 int main(int argc, char **argv) {
-  // Print a stack trace if we signal out.
-  sys::PrintStackTraceOnErrorSignal(argv[0]);
-  PrettyStackTraceProgram X(argc, argv);
-
-  llvm_shutdown_obj Y; // Call llvm_shutdown() on exit.
+  InitLLVM X(argc, argv);
   cl::ParseCommandLineOptions(argc, argv, "llvm symbol table dumper\n");
 
   // llvm-nm only reads binary files.

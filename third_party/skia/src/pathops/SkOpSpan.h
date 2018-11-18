@@ -177,6 +177,12 @@ protected:
 
 class SkOpSpanBase {
 public:
+    enum class Collapsed {
+        kNo,
+        kYes,
+        kError,
+    };
+
     void addOpp(SkOpSpanBase* opp);
 
     void bumpSpanAdds() {
@@ -193,7 +199,7 @@ public:
         return fCoinEnd;
     }
 
-    bool collapsed(double s, double e) const;
+    Collapsed collapsed(double s, double e) const;
     bool contains(const SkOpSpanBase* ) const;
     const SkOpPtT* contains(const SkOpSegment* ) const;
 
@@ -415,7 +421,6 @@ public:
         if (fAlreadyAdded) {
             return true;
         }
-        fAlreadyAdded = true;
         return false;
     }
 
@@ -481,6 +486,10 @@ public:
     bool isCoincident() const {
         SkASSERT(!final());
         return fCoincident != this;
+    }
+
+    void markAdded() {
+        fAlreadyAdded = true;
     }
 
     SkOpSpanBase* next() const {
@@ -563,7 +572,7 @@ private:  // no direct access to internals to avoid treating a span base as a sp
     int fOppValue;  // normally 0 -- when binary coincident edges combine, opp value goes here
     int fTopTTry; // specifies direction and t value to try next
     bool fDone;  // if set, this span to next higher T has been processed
-    mutable bool fAlreadyAdded;
+    bool fAlreadyAdded;
 };
 
 #endif

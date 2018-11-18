@@ -78,6 +78,8 @@ void BaseScreen::OnHide() {}
 
 void BaseScreen::OnClose() {}
 
+void BaseScreen::OnConfigurationChanged() {}
+
 bool BaseScreen::IsStatusAreaDisplayed() {
   return true;
 }
@@ -96,7 +98,7 @@ void BaseScreen::CommitContextChanges() {
 }
 
 void BaseScreen::Finish(ScreenExitCode exit_code) {
-  base_screen_delegate_->OnExit(*this, exit_code, &context_);
+  base_screen_delegate_->OnExit(exit_code);
 }
 
 void BaseScreen::OnUserAction(const std::string& action_id) {
@@ -117,6 +119,12 @@ void BaseScreen::OnContextChanged(const base::DictionaryValue& diff) {
   context_.ApplyChanges(diff, &keys);
   for (const auto& key : keys)
     OnContextKeyUpdated(key);
+}
+
+void BaseScreen::SetConfiguration(base::Value* configuration, bool notify) {
+  configuration_ = configuration;
+  if (notify)
+    OnConfigurationChanged();
 }
 
 }  // namespace chromeos

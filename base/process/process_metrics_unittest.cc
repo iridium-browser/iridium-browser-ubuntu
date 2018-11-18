@@ -33,7 +33,7 @@
 namespace base {
 namespace debug {
 
-#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_WIN)
 namespace {
 
 void BusyWork(std::vector<std::string>* vec) {
@@ -321,7 +321,7 @@ TEST_F(SystemMetricsTest, ParseVmstat) {
 }
 #endif  // defined(OS_LINUX) || defined(OS_ANDROID)
 
-#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+#if defined(OS_LINUX) || defined(OS_CHROMEOS) || defined(OS_WIN)
 
 // Test that ProcessMetrics::GetPlatformIndependentCPUUsage() doesn't return
 // negative values when the number of threads running on the process decreases
@@ -352,15 +352,25 @@ TEST_F(SystemMetricsTest, TestNoNegativeCpuUsage) {
   thread2.task_runner()->PostTask(FROM_HERE, BindOnce(&BusyWork, &vec2));
   thread3.task_runner()->PostTask(FROM_HERE, BindOnce(&BusyWork, &vec3));
 
+  TimeDelta prev_cpu_usage = metrics->GetCumulativeCPUUsage();
+  EXPECT_GE(prev_cpu_usage, TimeDelta());
   EXPECT_GE(metrics->GetPlatformIndependentCPUUsage(), 0.0);
 
   thread1.Stop();
+  TimeDelta current_cpu_usage = metrics->GetCumulativeCPUUsage();
+  EXPECT_GE(current_cpu_usage, prev_cpu_usage);
+  prev_cpu_usage = current_cpu_usage;
   EXPECT_GE(metrics->GetPlatformIndependentCPUUsage(), 0.0);
 
   thread2.Stop();
+  current_cpu_usage = metrics->GetCumulativeCPUUsage();
+  EXPECT_GE(current_cpu_usage, prev_cpu_usage);
+  prev_cpu_usage = current_cpu_usage;
   EXPECT_GE(metrics->GetPlatformIndependentCPUUsage(), 0.0);
 
   thread3.Stop();
+  current_cpu_usage = metrics->GetCumulativeCPUUsage();
+  EXPECT_GE(current_cpu_usage, prev_cpu_usage);
   EXPECT_GE(metrics->GetPlatformIndependentCPUUsage(), 0.0);
 }
 
@@ -618,6 +628,29 @@ TEST(ProcessMetricsTestLinux, GetPageFaultCounts) {
   ASSERT_GE(counts_after.major, counts.major);
 }
 #endif  // defined(OS_ANDROID) || defined(OS_LINUX)
+
+#if defined(OS_WIN)
+TEST(ProcessMetricsTest, GetDiskUsageBytesPerSecond) {
+  ScopedTempDir temp_dir;
+  ASSERT_TRUE(temp_dir.CreateUniqueTempDir());
+  const FilePath temp_path = temp_dir.GetPath().AppendASCII("dummy");
+
+  ProcessHandle handle = GetCurrentProcessHandle();
+  std::unique_ptr<ProcessMetrics> metrics(
+      ProcessMetrics::CreateProcessMetrics(handle));
+
+  // First access is returning zero bytes.
+  EXPECT_EQ(metrics->GetDiskUsageBytesPerSecond(), 0U);
+
+  // Write a megabyte on disk.
+  const int kMegabyte = 1024 * 1014;
+  std::string data(kMegabyte, 'x');
+  ASSERT_EQ(kMegabyte, base::WriteFile(temp_path, data.c_str(), data.size()));
+
+  // Validate that the counters move up.
+  EXPECT_GT(metrics->GetDiskUsageBytesPerSecond(), 0U);
+}
+#endif  // defined(OS_WIN)
 
 }  // namespace debug
 }  // namespace base

@@ -41,8 +41,7 @@ class LayoutHTMLCanvas final : public LayoutReplaced {
   }
   PaintLayerType LayerTypeRequired() const override;
 
-  PaintInvalidationReason InvalidatePaint(
-      const PaintInvalidatorContext&) const final;
+  void InvalidatePaint(const PaintInvalidatorContext&) const final;
 
   void CanvasSizeChanged();
 
@@ -51,7 +50,8 @@ class LayoutHTMLCanvas final : public LayoutReplaced {
   const char* GetName() const override { return "LayoutHTMLCanvas"; }
 
  private:
-  void PaintReplaced(const PaintInfo&, const LayoutPoint&) const override;
+  void PaintReplaced(const PaintInfo&,
+                     const LayoutPoint& paint_offset) const override;
   void IntrinsicSizeChanged() override { CanvasSizeChanged(); }
 
   CompositingReasons AdditionalCompositingReasons() const override;

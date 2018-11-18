@@ -7,13 +7,14 @@ package org.chromium.chromoting.base;
 import android.accounts.Account;
 import android.app.Activity;
 import android.content.Context;
-import android.os.AsyncTask;
 import android.os.Handler;
 import android.os.Looper;
 
 import com.google.android.gms.auth.GoogleAuthException;
 import com.google.android.gms.auth.GoogleAuthUtil;
 import com.google.android.gms.auth.UserRecoverableAuthException;
+
+import org.chromium.base.task.AsyncTask;
 
 import java.io.IOException;
 
@@ -94,9 +95,9 @@ public class OAuthTokenFetcher {
     }
 
     private void fetchImpl(final String expiredToken) {
-        new AsyncTask<Void, Void, Void>() {
+        new AsyncTask<Void>() {
             @Override
-            protected Void doInBackground(Void... params) {
+            protected Void doInBackground() {
                 try {
                     if (expiredToken != null) {
                         GoogleAuthUtil.clearToken(mContext, expiredToken);
@@ -114,7 +115,8 @@ public class OAuthTokenFetcher {
                 }
                 return null;
             }
-        }.execute();
+        }
+                .executeOnExecutor(AsyncTask.SERIAL_EXECUTOR);
     }
 
     private void handleTokenReceived(final String token) {

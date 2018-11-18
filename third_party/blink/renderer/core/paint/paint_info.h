@@ -107,9 +107,6 @@ struct CORE_EXPORT PaintInfo {
   bool SkipRootBackground() const {
     return paint_flags_ & kPaintLayerPaintingSkipRootBackground;
   }
-  bool PaintRootBackgroundOnly() const {
-    return paint_flags_ & kPaintLayerPaintingRootBackgroundOnly;
-  }
 
   bool IsPrinting() const { return global_paint_flags_ & kGlobalPaintPrinting; }
 
@@ -118,7 +115,7 @@ struct CORE_EXPORT PaintInfo {
   }
 
   DisplayItem::Type DisplayItemTypeForClipping() const {
-    return DisplayItem::PaintPhaseToClipBoxType(phase);
+    return DisplayItem::PaintPhaseToClipType(phase);
   }
 
   const LayoutBoxModelObject* PaintContainer() const {
@@ -130,6 +127,10 @@ struct CORE_EXPORT PaintInfo {
   PaintLayerFlags PaintFlags() const { return paint_flags_; }
 
   const CullRect& GetCullRect() const { return cull_rect_; }
+
+  void ApplyInfiniteCullRect() {
+    cull_rect_ = CullRect(LayoutRect::InfiniteIntRect());
+  }
 
   void UpdateCullRect(const AffineTransform& local_to_parent_transform) {
     cull_rect_.UpdateCullRect(local_to_parent_transform);
@@ -156,6 +157,10 @@ struct CORE_EXPORT PaintInfo {
     return nullptr;
   }
 
+  void SetFragmentLogicalTopInFlowThread(LayoutUnit fragment_logical_top) {
+    fragment_logical_top_in_flow_thread_ = fragment_logical_top;
+  }
+
   // FIXME: Introduce setters/getters at some point. Requires a lot of changes
   // throughout layout/.
   GraphicsContext& context;
@@ -176,7 +181,7 @@ struct CORE_EXPORT PaintInfo {
   const bool suppress_painting_descendants_;
 
   // TODO(chrishtr): temporary while we implement CullRect everywhere.
-  friend class SVGPaintContext;
+  friend class ScopedSVGPaintState;
   friend class SVGShapePainter;
 };
 

@@ -18,6 +18,7 @@
 #include "net/base/proxy_server.h"
 #include "net/proxy_resolution/proxy_info.h"
 #include "net/proxy_resolution/proxy_resolver.h"
+#include "url/gurl.h"
 
 #if defined(OS_IOS)
 #include <CFNetwork/CFProxySupport.h>
@@ -189,7 +190,7 @@ class ProxyResolverMac : public ProxyResolver {
   // ProxyResolver methods:
   int GetProxyForURL(const GURL& url,
                      ProxyInfo* results,
-                     const CompletionCallback& callback,
+                     CompletionOnceCallback callback,
                      std::unique_ptr<Request>* request,
                      const NetLogWithSource& net_log) override;
 
@@ -207,11 +208,21 @@ ProxyResolverMac::~ProxyResolverMac() {}
 // inspired by http://developer.apple.com/samplecode/CFProxySupportTool/
 int ProxyResolverMac::GetProxyForURL(const GURL& query_url,
                                      ProxyInfo* results,
-                                     const CompletionCallback& /*callback*/,
+                                     CompletionOnceCallback /*callback*/,
                                      std::unique_ptr<Request>* /*request*/,
                                      const NetLogWithSource& net_log) {
+  // OS X's system resolver does not support WebSocket URLs in proxy.pac, as of
+  // version 10.13.5. See https://crbug.com/862121.
+  GURL mutable_query_url = query_url;
+  if (query_url.SchemeIsWSOrWSS()) {
+    GURL::Replacements replacements;
+    replacements.SetSchemeStr(query_url.SchemeIsCryptographic() ? "https"
+                                                                : "http");
+    mutable_query_url = query_url.ReplaceComponents(replacements);
+  }
+
   base::ScopedCFTypeRef<CFStringRef> query_ref(
-      base::SysUTF8ToCFStringRef(query_url.spec()));
+      base::SysUTF8ToCFStringRef(mutable_query_url.spec()));
   base::ScopedCFTypeRef<CFURLRef> query_url_ref(
       CFURLCreateWithString(kCFAllocatorDefault, query_ref.get(), NULL));
   if (!query_url_ref.get())
@@ -345,7 +356,7 @@ ProxyResolverFactoryMac::ProxyResolverFactoryMac()
 int ProxyResolverFactoryMac::CreateProxyResolver(
     const scoped_refptr<PacFileData>& pac_script,
     std::unique_ptr<ProxyResolver>* resolver,
-    const CompletionCallback& callback,
+    CompletionOnceCallback callback,
     std::unique_ptr<Request>* request) {
   resolver->reset(new ProxyResolverMac(pac_script));
   return OK;

@@ -24,10 +24,6 @@ declare_args() {
   # a class has an empty destructor which would be unnecessarily invoked
   # when finalized.
   blink_gc_plugin_option_warn_unneeded_finalizer = false
-
-  # Set to true to have the clang Blink GC plugin additionally check if a
-  # TraceWrappers method also dispatches to all its base classes.
-  blink_gc_plugin_option_warn_trace_wrappers_missing_base_dispatch = false
 }
 
 # features ---------------------------------------------------------------------
@@ -58,7 +54,7 @@ config("blink_pch") {
       # This is a string rather than a file GN knows about. It has to match
       # exactly what's in the /FI flag below, and what might appear in the
       # source code in quotes for an #include directive.
-      precompiled_header = rebase_path("build/win/precompile.h", root_build_dir)
+      precompiled_header = rebase_path("build/win/precompile.h", "//")
 
       # This is a file that GN will compile with the above header. It will be
       # implicitly added to the sources (potentially multiple times, with one
@@ -77,13 +73,6 @@ config("blink_pch") {
 # config -----------------------------------------------------------------------
 
 config("config") {
-  include_dirs = [
-    ".",
-    "..",
-    "$root_gen_dir/third_party/blink/renderer",
-    "$root_gen_dir/third_party/blink",
-  ]
-
   cflags = []
   defines = []
 
@@ -142,14 +131,6 @@ config("config") {
         "-plugin-arg-blink-gc-plugin",
         "-Xclang",
         "warn-unneeded-finalizer",
-      ]
-    }
-    if (blink_gc_plugin_option_warn_trace_wrappers_missing_base_dispatch) {
-      cflags += [
-        "-Xclang",
-        "-plugin-arg-blink-gc-plugin",
-        "-Xclang",
-        "warn_trace_wrappers_missing_base_dispatch",
       ]
     }
   }

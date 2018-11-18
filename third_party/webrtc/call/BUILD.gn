@@ -10,11 +10,17 @@ import("../webrtc.gni")
 
 rtc_source_set("call_interfaces") {
   sources = [
+    "audio_receive_stream.cc",
     "audio_receive_stream.h",
     "audio_send_stream.h",
+    "audio_state.cc",
     "audio_state.h",
     "call.h",
+    "call_config.cc",
+    "call_config.h",
+    "flexfec_receive_stream.cc",
     "flexfec_receive_stream.h",
+    "packet_receiver.h",
     "syncable.cc",
     "syncable.h",
   ]
@@ -25,26 +31,31 @@ rtc_source_set("call_interfaces") {
     ":rtp_interfaces",
     ":video_stream_api",
     "..:webrtc_common",
-    "../:typedefs",
     "../api:fec_controller_api",
     "../api:libjingle_peerconnection_api",
-    "../api:optional",
     "../api:transport_api",
     "../api/audio:audio_mixer_api",
     "../api/audio_codecs:audio_codecs_api",
+    "../api/transport:network_control",
+    "../modules/audio_device:audio_device",
+    "../modules/audio_processing:audio_processing",
     "../modules/audio_processing:audio_processing_statistics",
     "../rtc_base:audio_format_to_string",
     "../rtc_base:rtc_base",
     "../rtc_base:rtc_base_approved",
+    "//third_party/abseil-cpp/absl/types:optional",
   ]
 }
 
 # TODO(nisse): These RTP targets should be moved elsewhere
 # when interfaces have stabilized. See also TODO for |mock_rtp_interfaces|.
 rtc_source_set("rtp_interfaces") {
+  # Client code SHOULD NOT USE THIS TARGET, but for now it needs to be public
+  # because there exists client code that uses it.
+  # TODO(bugs.webrtc.org/9808): Move to private visibility as soon as that
+  # client code gets updated.
+  visibility = [ "*" ]
   sources = [
-    "bitrate_constraints.cc",
-    "bitrate_constraints.h",
     "rtcp_packet_sink_interface.h",
     "rtp_config.cc",
     "rtp_config.h",
@@ -54,8 +65,13 @@ rtc_source_set("rtp_interfaces") {
   ]
   deps = [
     "../api:array_view",
-    "../api:optional",
+    "../api:fec_controller_api",
+    "../api:libjingle_peerconnection_api",
+    "../api/transport:bitrate_settings",
+    "../logging:rtc_event_log_api",
+    "../modules/rtp_rtcp:rtp_rtcp_format",
     "../rtc_base:rtc_base_approved",
+    "//third_party/abseil-cpp/absl/types:optional",
   ]
 }
 
@@ -79,31 +95,49 @@ rtc_source_set("rtp_receiver") {
     "..:webrtc_common",
     "../api:array_view",
     "../api:libjingle_peerconnection_api",
-    "../api:optional",
     "../modules/rtp_rtcp",
     "../modules/rtp_rtcp:rtp_rtcp_format",
     "../rtc_base:checks",
     "../rtc_base:rtc_base_approved",
+    "//third_party/abseil-cpp/absl/memory",
+    "//third_party/abseil-cpp/absl/types:optional",
   ]
 }
 
 rtc_source_set("rtp_sender") {
   sources = [
+    "rtp_payload_params.cc",
+    "rtp_payload_params.h",
     "rtp_transport_controller_send.cc",
     "rtp_transport_controller_send.h",
+    "rtp_video_sender.cc",
+    "rtp_video_sender.h",
+    "rtp_video_sender_interface.h",
   ]
   deps = [
     ":bitrate_configurator",
     ":rtp_interfaces",
     "..:webrtc_common",
+    "../api:fec_controller_api",
+    "../api:transport_api",
+    "../api/transport:network_control",
+    "../api/video_codecs:video_codecs_api",
+    "../logging:rtc_event_log_api",
     "../modules/congestion_controller",
-    "../modules/congestion_controller/network_control",
     "../modules/congestion_controller/rtp:congestion_controller",
     "../modules/pacing",
+    "../modules/rtp_rtcp:rtp_rtcp",
+    "../modules/rtp_rtcp:rtp_rtcp_format",
+    "../modules/rtp_rtcp:rtp_video_header",
     "../modules/utility",
+    "../modules/video_coding:video_codec_interface",
+    "../rtc_base:checks",
+    "../rtc_base:rate_limiter",
     "../rtc_base:rtc_base",
     "../rtc_base:rtc_base_approved",
-    "../system_wrappers:field_trial_api",
+    "../rtc_base:rtc_task_queue",
+    "../system_wrappers:field_trial",
+    "//third_party/abseil-cpp/absl/memory",
   ]
 }
 
@@ -114,6 +148,8 @@ rtc_source_set("bitrate_configurator") {
   ]
   deps = [
     ":rtp_interfaces",
+    "../api:libjingle_peerconnection_api",
+    "../api/transport:bitrate_settings",
     "../rtc_base:checks",
     "../rtc_base:rtc_base_approved",
   ]
@@ -130,13 +166,9 @@ rtc_source_set("bitrate_allocator") {
     "../rtc_base:rtc_base_approved",
     "../rtc_base:sequenced_task_checker",
     "../system_wrappers",
-    "../system_wrappers:field_trial_api",
-    "../system_wrappers:metrics_api",
+    "../system_wrappers:field_trial",
+    "../system_wrappers:metrics",
   ]
-  if (!build_with_chromium && is_clang) {
-    # Suppress warnings from the Chromium Clang plugin (bugs.webrtc.org/163).
-    suppressed_configs += [ "//build/config/clang:find_bad_constructs" ]
-  }
 }
 
 rtc_static_library("call") {
@@ -152,11 +184,6 @@ rtc_static_library("call") {
     "receive_time_calculator.h",
   ]
 
-  if (!build_with_chromium && is_clang) {
-    # Suppress warnings from the Chromium Clang plugin (bugs.webrtc.org/163).
-    suppressed_configs += [ "//build/config/clang:find_bad_constructs" ]
-  }
-
   deps = [
     ":bitrate_allocator",
     ":call_interfaces",
@@ -164,11 +191,13 @@ rtc_static_library("call") {
     ":rtp_interfaces",
     ":rtp_receiver",
     ":rtp_sender",
+    ":simulated_network",
     ":video_stream_api",
     "..:webrtc_common",
     "../api:callfactory_api",
-    "../api:optional",
+    "../api:simulated_network_api",
     "../api:transport_api",
+    "../api/transport:network_control",
     "../audio",
     "../logging:rtc_event_audio",
     "../logging:rtc_event_log_api",
@@ -177,7 +206,6 @@ rtc_static_library("call") {
     "../logging:rtc_stream_config",
     "../modules/bitrate_controller",
     "../modules/congestion_controller",
-    "../modules/congestion_controller/network_control",
     "../modules/pacing",
     "../modules/rtp_rtcp",
     "../modules/rtp_rtcp:rtp_rtcp_format",
@@ -191,16 +219,16 @@ rtc_static_library("call") {
     "../rtc_base:sequenced_task_checker",
     "../rtc_base/synchronization:rw_lock_wrapper",
     "../system_wrappers",
-    "../system_wrappers:field_trial_api",
-    "../system_wrappers:metrics_api",
+    "../system_wrappers:field_trial",
+    "../system_wrappers:metrics",
     "../video",
+    "//third_party/abseil-cpp/absl/memory",
+    "//third_party/abseil-cpp/absl/types:optional",
   ]
 }
 
 rtc_source_set("video_stream_api") {
   sources = [
-    "video_config.cc",
-    "video_config.h",
     "video_receive_stream.cc",
     "video_receive_stream.h",
     "video_send_stream.cc",
@@ -208,17 +236,41 @@ rtc_source_set("video_stream_api") {
   ]
   deps = [
     ":rtp_interfaces",
-    "../:typedefs",
     "../:webrtc_common",
     "../api:libjingle_peerconnection_api",
-    "../api:optional",
     "../api:transport_api",
-    "../api:video_frame_api",
+    "../api/video:video_frame",
+    "../api/video:video_stream_encoder",
     "../api/video_codecs:video_codecs_api",
     "../common_video:common_video",
     "../modules/rtp_rtcp:rtp_rtcp_format",
     "../rtc_base:checks",
     "../rtc_base:rtc_base_approved",
+    "//third_party/abseil-cpp/absl/types:optional",
+  ]
+}
+
+rtc_source_set("simulated_network") {
+  sources = [
+    "simulated_network.cc",
+    "simulated_network.h",
+  ]
+  deps = [
+    "../api:simulated_network_api",
+    "../rtc_base:rtc_base_approved",
+    "//third_party/abseil-cpp/absl/memory",
+    "//third_party/abseil-cpp/absl/types:optional",
+  ]
+}
+
+rtc_source_set("simulated_packet_receiver") {
+  sources = [
+    "simulated_packet_receiver.h",
+  ]
+  deps = [
+    ":call_interfaces",
+    "../api:simulated_network_api",
+    "../modules:module_api",
   ]
 }
 
@@ -229,20 +281,17 @@ rtc_source_set("fake_network") {
   ]
   deps = [
     ":call_interfaces",
-    "..:typedefs",
+    ":simulated_network",
+    ":simulated_packet_receiver",
     "..:webrtc_common",
+    "../api:simulated_network_api",
     "../api:transport_api",
     "../modules:module_api",
-    "../modules/rtp_rtcp",
     "../rtc_base:rtc_base_approved",
     "../rtc_base:sequenced_task_checker",
     "../system_wrappers",
+    "//third_party/abseil-cpp/absl/memory",
   ]
-
-  if (!build_with_chromium && is_clang) {
-    # Suppress warnings from the Chromium Clang plugin (bugs.webrtc.org/163).
-    suppressed_configs += [ "//build/config/clang:find_bad_constructs" ]
-  }
 }
 
 if (rtc_include_tests) {
@@ -258,7 +307,9 @@ if (rtc_include_tests) {
       "rtcp_demuxer_unittest.cc",
       "rtp_bitrate_configurator_unittest.cc",
       "rtp_demuxer_unittest.cc",
+      "rtp_payload_params_unittest.cc",
       "rtp_rtcp_demuxer_helper_unittest.cc",
+      "rtp_video_sender_unittest.cc",
       "rtx_receive_stream_unittest.cc",
     ]
     deps = [
@@ -270,6 +321,7 @@ if (rtc_include_tests) {
       ":rtp_interfaces",
       ":rtp_receiver",
       ":rtp_sender",
+      ":simulated_network",
       "..:webrtc_common",
       "../api:array_view",
       "../api:libjingle_peerconnection_api",
@@ -290,15 +342,23 @@ if (rtc_include_tests) {
       "../modules/rtp_rtcp:mock_rtp_rtcp",
       "../modules/rtp_rtcp:rtp_rtcp_format",
       "../modules/utility:mock_process_thread",
+      "../modules/video_coding:video_codec_interface",
+      "../modules/video_coding:video_coding",
       "../rtc_base:checks",
+      "../rtc_base:rate_limiter",
       "../rtc_base:rtc_base_approved",
       "../system_wrappers",
       "../test:audio_codec_mocks",
       "../test:direct_transport",
+      "../test:fake_video_codecs",
+      "../test:field_trial",
       "../test:test_common",
       "../test:test_support",
       "../test:video_test_common",
+      "../video:video",
+      "//testing/gmock",
       "//testing/gtest",
+      "//third_party/abseil-cpp/absl/memory",
     ]
     if (!build_with_chromium && is_clang) {
       # Suppress warnings from the Chromium Clang plugin (bugs.webrtc.org/163).
@@ -316,9 +376,13 @@ if (rtc_include_tests) {
     ]
     deps = [
       ":call_interfaces",
+      ":simulated_network",
       ":video_stream_api",
       "..:webrtc_common",
+      "../api:simulated_network_api",
       "../api/audio_codecs:builtin_audio_encoder_factory",
+      "../api/video:video_bitrate_allocation",
+      "../api/video_codecs:video_codecs_api",
       "../logging:rtc_event_log_api",
       "../modules/audio_coding",
       "../modules/audio_device",
@@ -328,9 +392,9 @@ if (rtc_include_tests) {
       "../rtc_base:checks",
       "../rtc_base:rtc_base_approved",
       "../system_wrappers",
-      "../system_wrappers:metrics_default",
-      "../system_wrappers:runtime_enabled_features_default",
+      "../system_wrappers:metrics",
       "../test:direct_transport",
+      "../test:fake_video_codecs",
       "../test:field_trial",
       "../test:fileutils",
       "../test:perf_test",
@@ -339,6 +403,7 @@ if (rtc_include_tests) {
       "../test:video_test_common",
       "../video",
       "//testing/gtest",
+      "//third_party/abseil-cpp/absl/memory",
     ]
     if (!build_with_chromium && is_clang) {
       # Suppress warnings from the Chromium Clang plugin (bugs.webrtc.org/163).
@@ -356,6 +421,7 @@ if (rtc_include_tests) {
     ]
     deps = [
       ":rtp_interfaces",
+      "../api:libjingle_peerconnection_api",
       "../modules/congestion_controller",
       "../modules/pacing",
       "../rtc_base:rate_limiter",
@@ -363,7 +429,17 @@ if (rtc_include_tests) {
       "../test:test_support",
     ]
   }
+  rtc_source_set("mock_bitrate_allocator") {
+    testonly = true
 
+    sources = [
+      "test/mock_bitrate_allocator.h",
+    ]
+    deps = [
+      ":bitrate_allocator",
+      "//test:test_support",
+    ]
+  }
   rtc_source_set("mock_call_interfaces") {
     testonly = true
 
@@ -380,6 +456,7 @@ if (rtc_include_tests) {
     deps = [
       ":call_interfaces",
       ":fake_network",
+      ":simulated_network",
       "../modules/rtp_rtcp",
       "../rtc_base:rtc_base_approved",
       "../system_wrappers",
@@ -390,9 +467,5 @@ if (rtc_include_tests) {
     sources = [
       "test/fake_network_pipe_unittest.cc",
     ]
-    if (!build_with_chromium && is_clang) {
-      # Suppress warnings from the Chromium Clang plugin (bugs.webrtc.org/163).
-      suppressed_configs += [ "//build/config/clang:find_bad_constructs" ]
-    }
   }
 }

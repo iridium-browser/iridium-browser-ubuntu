@@ -8,7 +8,6 @@
 
 #include "base/bind.h"
 #include "base/files/file_util.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "chrome/browser/sync_file_system/sync_file_system_test_util.h"
 #include "chrome/browser/sync_file_system/sync_status_code.h"
@@ -349,6 +348,11 @@ base::FilePath FakeDriveServiceHelper::WriteToTempFile(
   EXPECT_EQ(static_cast<int>(content.size()),
             base::WriteFile(temp_file, content.data(), content.size()));
   return temp_file;
+}
+
+void FakeDriveServiceHelper::AddTeamDrive(const std::string& team_drive_id,
+                                          const std::string& team_drive_name) {
+  fake_drive_service_->AddTeamDrive(team_drive_id, team_drive_name);
 }
 
 }  // namespace drive_backend

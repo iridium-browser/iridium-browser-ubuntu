@@ -9,10 +9,11 @@
 #include "base/mac/bundle_locations.h"
 #import "base/mac/scoped_nsobject.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop/message_loop_current.h"
 #include "base/run_loop.h"
 #include "base/strings/sys_string_conversions.h"
 #include "base/threading/thread_task_runner_handle.h"
+#include "chrome/browser/browser_process_impl.h"
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/first_run/first_run_dialog.h"
 #include "chrome/browser/metrics/metrics_reporting_state.h"
@@ -54,8 +55,7 @@ FirstRunShowBridge::FirstRunShowBridge(
 void FirstRunShowBridge::ShowDialog(const base::Closure& quit_closure) {
   // Proceeding past the modal dialog requires user interaction. Allow nested
   // tasks to run so that signal handlers operate correctly.
-  base::MessageLoop::ScopedNestableTaskAllower allow_nested(
-      base::MessageLoop::current());
+  base::MessageLoopCurrent::ScopedNestableTaskAllower allow_nested;
   [controller_ show];
   quit_closure.Run();
 }
@@ -138,10 +138,24 @@ void ShowFirstRunDialog(Profile* profile) {
 
   scoped_refptr<FirstRunShowBridge> bridge(new FirstRunShowBridge(self));
   base::RunLoop run_loop;
+
+  // At this point during startup, ChromeBrowserMain has yet to start the main
+  // message loop. Consequently, this run loop will effectively be the main
+  // message loop for the duration of the dialog's lifetime. Tell the
+  // BrowserProcessImpl how to quit the loop if any of the shutdown signal
+  // handlers is received. (The ShutdownDetector posts a task to the UI thread's
+  // TaskRunner to begin shutdown upon receiving a SIGTERM.)
+  static_cast<BrowserProcessImpl*>(g_browser_process)
+      ->SetQuitClosure(run_loop.QuitClosure());
+
+  // Barring a shutdown signal, the run loop will quit when the user closes the
+  // first run dialog.
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, base::Bind(&FirstRunShowBridge::ShowDialog, bridge.get(),
                             run_loop.QuitClosure()));
   run_loop.Run();
+
+  static_cast<BrowserProcessImpl*>(g_browser_process)->ClearQuitClosure();
 }
 
 - (void)show {

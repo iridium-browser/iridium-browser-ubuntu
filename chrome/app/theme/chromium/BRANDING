@@ -7,3 +7,4 @@ PRODUCT_INSTALLER_SHORTNAME=Iridium Installer
 COPYRIGHT=Copyright 2018 The browser authors. All rights reserved.
 MAC_BUNDLE_ID=org.chromium.Chromium
 MAC_CREATOR_CODE=Cr24
+MAC_TEAM_ID=

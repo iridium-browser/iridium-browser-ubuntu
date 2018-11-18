@@ -20,6 +20,9 @@
 // The web view's frame rectangle.
 @property(readonly, assign) CGRect frame;
 
+// Adds an offset to the scrollable content's frame.
+@property(nonatomic, assign) CGPoint contentOffset;
+
 // Adds an inset to the content view. Implementations of this protocol can
 // implement this method using UIScrollView.contentInset (where applicable) or
 // via resizing a subview's frame. Changing this property may impact performance
@@ -32,6 +35,10 @@
 // Gives the embedder access to the web view's UIScrollView in a limited and
 // controlled manner.
 @property(nonatomic, readonly) CRWWebViewScrollViewProxy* scrollViewProxy;
+
+// A Boolean value indicating whether horizontal swipe gestures will trigger
+// back-forward list navigations.
+@property(nonatomic) BOOL allowsBackForwardNavigationGestures;
 
 // Returns the webview's gesture recognizers.
 @property(nonatomic, readonly) NSArray* gestureRecognizers;
@@ -61,9 +68,6 @@
 
 // Returns the currently visible keyboard accessory, or nil.
 - (UIView*)keyboardAccessory;
-
-// Returns the currently visible keyboard input assistant item, or nil.
-- (UITextInputAssistantItem*)inputAssistantItem;
 
 // Wrapper around the becomeFirstResponder method of the webview.
 - (BOOL)becomeFirstResponder;

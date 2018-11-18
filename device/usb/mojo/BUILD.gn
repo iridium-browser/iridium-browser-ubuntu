@@ -8,8 +8,6 @@ source_set("mojo") {
     "device_impl.h",
     "device_manager_impl.cc",
     "device_manager_impl.h",
-    "permission_provider.cc",
-    "permission_provider.h",
     "type_converters.cc",
     "type_converters.h",
   ]
@@ -19,7 +17,6 @@ source_set("mojo") {
     "//device/usb",
     "//device/usb/public/cpp",
     "//device/usb/public/mojom",
-    "//mojo/common",
     "//mojo/public/cpp/bindings",
     "//net",
   ]

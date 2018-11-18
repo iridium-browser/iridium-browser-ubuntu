@@ -28,7 +28,7 @@ SyncBackendRegistrar::SyncBackendRegistrar(
 }
 
 void SyncBackendRegistrar::RegisterNonBlockingType(ModelType type) {
-  DCHECK(ui_thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   base::AutoLock lock(lock_);
   // There may have been a previously successful sync of a type when passive,
   // which is now NonBlocking. We're not sure what order these two sets of types
@@ -52,12 +52,12 @@ void SyncBackendRegistrar::SetInitialTypes(ModelTypeSet initial_types) {
   // Set our initial state to reflect the current status of the sync directory.
   // This will ensure that our calculations in ConfigureDataTypes() will always
   // return correct results.
-  for (ModelTypeSet::Iterator it = initial_types.First(); it.Good(); it.Inc()) {
+  for (ModelType type : initial_types) {
     // If this type is also registered as NonBlocking, assume that it shouldn't
     // be registered as passive. The NonBlocking path will eventually take care
     // of adding to routing_info_ later on.
-    if (!non_blocking_types_.Has(it.Get())) {
-      routing_info_[it.Get()] = GROUP_PASSIVE;
+    if (!non_blocking_types_.Has(type)) {
+      routing_info_[type] = GROUP_PASSIVE;
     }
   }
 
@@ -78,16 +78,18 @@ void SyncBackendRegistrar::SetInitialTypes(ModelTypeSet initial_types) {
 }
 
 void SyncBackendRegistrar::AddRestoredNonBlockingType(ModelType type) {
-  DCHECK(ui_thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   base::AutoLock lock(lock_);
-  DCHECK(non_blocking_types_.Has(type));
-  DCHECK(routing_info_.find(type) == routing_info_.end());
+  DCHECK(non_blocking_types_.Has(type)) << syncer::ModelTypeToString(type);
+  DCHECK(routing_info_.find(type) == routing_info_.end() ||
+         routing_info_[type] == GROUP_NON_BLOCKING)
+      << syncer::ModelTypeToString(type);
   routing_info_[type] = GROUP_NON_BLOCKING;
   last_configured_types_.Put(type);
 }
 
 bool SyncBackendRegistrar::IsNigoriEnabled() const {
-  DCHECK(ui_thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   base::AutoLock lock(lock_);
   return routing_info_.find(NIGORI) != routing_info_.end();
 }
@@ -108,18 +110,16 @@ ModelTypeSet SyncBackendRegistrar::ConfigureDataTypes(
 
   base::AutoLock lock(lock_);
   ModelTypeSet newly_added_types;
-  for (ModelTypeSet::Iterator it = filtered_types_to_add.First(); it.Good();
-       it.Inc()) {
+  for (ModelType type : filtered_types_to_add) {
     // Add a newly specified data type corresponding initial group into the
     // routing_info, if it does not already exist.
-    if (routing_info_.count(it.Get()) == 0) {
-      routing_info_[it.Get()] = GetInitialGroupForType(it.Get());
-      newly_added_types.Put(it.Get());
+    if (routing_info_.count(type) == 0) {
+      routing_info_[type] = GetInitialGroupForType(type);
+      newly_added_types.Put(type);
     }
   }
-  for (ModelTypeSet::Iterator it = types_to_remove.First(); it.Good();
-       it.Inc()) {
-    routing_info_.erase(it.Get());
+  for (ModelType type : types_to_remove) {
+    routing_info_.erase(type);
   }
 
   // TODO(akalin): Use SVLOG/SLOG if we add any more logging.
@@ -139,7 +139,7 @@ ModelTypeSet SyncBackendRegistrar::GetLastConfiguredTypes() const {
 }
 
 void SyncBackendRegistrar::RequestWorkerStopOnUIThread() {
-  DCHECK(ui_thread_checker_.CalledOnValidThread());
+  DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
   base::AutoLock lock(lock_);
   for (const auto& kv : workers_) {
     kv.second->RequestStop();
@@ -154,7 +154,7 @@ void SyncBackendRegistrar::ActivateDataType(ModelType type,
 
   base::AutoLock lock(lock_);
   // Ensure that the given data type is in the PASSIVE group.
-  ModelSafeRoutingInfo::iterator i = routing_info_.find(type);
+  auto i = routing_info_.find(type);
   DCHECK(i != routing_info_.end());
   DCHECK_EQ(i->second, GROUP_PASSIVE);
   routing_info_[type] = group;
@@ -172,7 +172,9 @@ void SyncBackendRegistrar::ActivateDataType(ModelType type,
 void SyncBackendRegistrar::DeactivateDataType(ModelType type) {
   DVLOG(1) << "Deactivate: " << ModelTypeToString(type);
 
-  DCHECK(ui_thread_checker_.CalledOnValidThread() || IsControlType(type));
+  if (!IsControlType(type)) {
+    DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
+  }
   base::AutoLock lock(lock_);
 
   routing_info_.erase(type);

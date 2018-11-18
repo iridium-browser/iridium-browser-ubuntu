@@ -8,7 +8,8 @@
 
 #include "base/mac/mach_logging.h"
 #include "base/mac/scoped_mach_vm.h"
-#include "base/numerics/checked_math.h"
+#include "base/metrics/histogram_functions.h"
+#include "base/metrics/histogram_macros.h"
 #include "build/build_config.h"
 
 #if defined(OS_IOS)
@@ -17,6 +18,17 @@
 
 namespace base {
 namespace subtle {
+
+namespace {
+
+void LogCreateError(PlatformSharedMemoryRegion::CreateError error,
+                    kern_return_t mac_error) {
+  UMA_HISTOGRAM_ENUMERATION("SharedMemory.CreateError", error);
+  if (mac_error != KERN_SUCCESS)
+    UmaHistogramSparse("SharedMemory.CreateMacError", mac_error);
+}
+
+}  // namespace
 
 // static
 PlatformSharedMemoryRegion PlatformSharedMemoryRegion::Take(
@@ -37,6 +49,20 @@ PlatformSharedMemoryRegion PlatformSharedMemoryRegion::Take(
       CheckPlatformHandlePermissionsCorrespondToMode(handle.get(), mode, size));
 
   return PlatformSharedMemoryRegion(std::move(handle), mode, size, guid);
+}
+
+// static
+PlatformSharedMemoryRegion
+PlatformSharedMemoryRegion::TakeFromSharedMemoryHandle(
+    const SharedMemoryHandle& handle,
+    Mode mode) {
+  CHECK(mode == Mode::kReadOnly || mode == Mode::kUnsafe);
+  CHECK(handle.GetType() == SharedMemoryHandle::MACH);
+  if (!handle.IsValid())
+    return {};
+
+  return Take(base::mac::ScopedMachSendRight(handle.GetMemoryObject()), mode,
+              handle.GetSize(), handle.GetGUID());
 }
 
 mach_port_t PlatformSharedMemoryRegion::GetPlatformHandle() const {
@@ -113,18 +139,21 @@ bool PlatformSharedMemoryRegion::ConvertToReadOnly(void* mapped_addr) {
   return true;
 }
 
-bool PlatformSharedMemoryRegion::MapAt(off_t offset,
-                                       size_t size,
-                                       void** memory,
-                                       size_t* mapped_size) const {
+bool PlatformSharedMemoryRegion::ConvertToUnsafe() {
   if (!IsValid())
     return false;
 
-  size_t end_byte;
-  if (!CheckAdd(offset, size).AssignIfValid(&end_byte) || end_byte > size_) {
-    return false;
-  }
+  CHECK_EQ(mode_, Mode::kWritable)
+      << "Only writable shared memory region can be converted to unsafe";
 
+  mode_ = Mode::kUnsafe;
+  return true;
+}
+
+bool PlatformSharedMemoryRegion::MapAtInternal(off_t offset,
+                                               size_t size,
+                                               void** memory,
+                                               size_t* mapped_size) const {
   bool write_allowed = mode_ != Mode::kReadOnly;
   vm_prot_t vm_prot_write = write_allowed ? VM_PROT_WRITE : 0;
   kern_return_t kr = mach_vm_map(
@@ -143,19 +172,21 @@ bool PlatformSharedMemoryRegion::MapAt(off_t offset,
   }
 
   *mapped_size = size;
-  DCHECK_EQ(0U,
-            reinterpret_cast<uintptr_t>(*memory) & (kMapMinimumAlignment - 1));
   return true;
 }
 
 // static
 PlatformSharedMemoryRegion PlatformSharedMemoryRegion::Create(Mode mode,
                                                               size_t size) {
-  if (size == 0)
+  if (size == 0) {
+    LogCreateError(CreateError::SIZE_ZERO, KERN_SUCCESS);
     return {};
+  }
 
-  if (size > static_cast<size_t>(std::numeric_limits<int>::max()))
+  if (size > static_cast<size_t>(std::numeric_limits<int>::max())) {
+    LogCreateError(CreateError::SIZE_TOO_LARGE, KERN_SUCCESS);
     return {};
+  }
 
   CHECK_NE(mode, Mode::kReadOnly) << "Creating a region in read-only mode will "
                                      "lead to this region being non-modifiable";
@@ -168,12 +199,14 @@ PlatformSharedMemoryRegion PlatformSharedMemoryRegion::Create(Mode mode,
       MAP_MEM_NAMED_CREATE | VM_PROT_READ | VM_PROT_WRITE,
       named_right.receive(),
       MACH_PORT_NULL);  // Parent handle.
-  if (kr != KERN_SUCCESS) {
-    MACH_DLOG(ERROR, kr) << "mach_make_memory_entry_64";
-    return {};
-  }
+  if (kr != KERN_SUCCESS)
+    LogCreateError(CreateError::CREATE_FILE_MAPPING_FAILURE, kr);
+  // Crash as soon as shm allocation fails to debug the issue
+  // https://crbug.com/872237.
+  MACH_CHECK(kr == KERN_SUCCESS, kr) << "mach_make_memory_entry_64";
   DCHECK_GE(vm_size, size);
 
+  LogCreateError(CreateError::SUCCESS, KERN_SUCCESS);
   return PlatformSharedMemoryRegion(std::move(named_right), mode, size,
                                     UnguessableToken::Create());
 }
@@ -183,7 +216,31 @@ bool PlatformSharedMemoryRegion::CheckPlatformHandlePermissionsCorrespondToMode(
     PlatformHandle handle,
     Mode mode,
     size_t size) {
-  // TODO(https://crbug.com/825177): implement this.
+  mach_vm_address_t temp_addr = 0;
+  kern_return_t kr =
+      mach_vm_map(mach_task_self(), &temp_addr, size, 0, VM_FLAGS_ANYWHERE,
+                  handle, 0, FALSE, VM_PROT_READ | VM_PROT_WRITE,
+                  VM_PROT_READ | VM_PROT_WRITE, VM_INHERIT_NONE);
+  if (kr == KERN_SUCCESS) {
+    kern_return_t kr_deallocate =
+        mach_vm_deallocate(mach_task_self(), temp_addr, size);
+    MACH_DLOG_IF(ERROR, kr_deallocate != KERN_SUCCESS, kr_deallocate)
+        << "mach_vm_deallocate";
+  } else if (kr != KERN_INVALID_RIGHT) {
+    MACH_DLOG(ERROR, kr) << "mach_vm_map";
+    return false;
+  }
+
+  bool is_read_only = kr == KERN_INVALID_RIGHT;
+  bool expected_read_only = mode == Mode::kReadOnly;
+
+  if (is_read_only != expected_read_only) {
+    DLOG(ERROR) << "VM region has a wrong protection mask: it is"
+                << (is_read_only ? " " : " not ") << "read-only but it should"
+                << (expected_read_only ? " " : " not ") << "be";
+    return false;
+  }
+
   return true;
 }
 

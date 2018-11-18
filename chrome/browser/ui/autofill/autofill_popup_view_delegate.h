@@ -44,11 +44,14 @@ class AutofillPopupViewDelegate {
   // out of the popup bounds.
   virtual void SelectionCleared() = 0;
 
+  // Returns true if any of the suggestions is selected.
+  virtual bool HasSelection() const = 0;
+
   // The actual bounds of the popup.
   virtual gfx::Rect popup_bounds() const = 0;
 
   // The view that the form field element sits in.
-  virtual gfx::NativeView container_view() = 0;
+  virtual gfx::NativeView container_view() const = 0;
 
   // The bounds of the form field element (screen coordinates).
   virtual const gfx::RectF& element_bounds() const = 0;

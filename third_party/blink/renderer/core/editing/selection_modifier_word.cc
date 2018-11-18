@@ -27,7 +27,6 @@
 
 #include "third_party/blink/renderer/core/editing/editing_utilities.h"
 #include "third_party/blink/renderer/core/editing/inline_box_position.h"
-#include "third_party/blink/renderer/core/editing/rendered_position.h"
 #include "third_party/blink/renderer/core/editing/visible_position.h"
 #include "third_party/blink/renderer/core/editing/visible_units.h"
 #include "third_party/blink/renderer/core/layout/line/inline_text_box.h"
@@ -93,11 +92,11 @@ const InlineTextBox* CachedLogicallyOrderedLeafBoxes::NextTextBox(
   // If box is null, root is box's next RootInlineBox, and nextBox is the first
   // logical box in root. Otherwise, root is box's RootInlineBox, and nextBox is
   // the next logical box in the same line.
-  size_t next_box_index = 0;
+  wtf_size_t next_box_index = 0;
   if (box)
     next_box_index = BoxIndexInLeaves(box) + 1;
 
-  for (size_t i = next_box_index; i < leaf_boxes_.size(); ++i) {
+  for (wtf_size_t i = next_box_index; i < leaf_boxes_.size(); ++i) {
     if (leaf_boxes_[i]->IsInlineTextBox())
       return ToInlineTextBox(leaf_boxes_[i]);
   }
@@ -117,7 +116,7 @@ const Vector<InlineBox*>& CachedLogicallyOrderedLeafBoxes::CollectBoxes(
 
 int CachedLogicallyOrderedLeafBoxes::BoxIndexInLeaves(
     const InlineTextBox* box) const {
-  for (size_t i = 0; i < leaf_boxes_.size(); ++i) {
+  for (wtf_size_t i = 0; i < leaf_boxes_.size(); ++i) {
     if (box == leaf_boxes_[i])
       return i;
   }
@@ -152,12 +151,15 @@ const InlineTextBox* LogicallyPreviousBox(
     if (position.IsNull())
       break;
 
-    RenderedPosition rendered_position(position, TextAffinity::kDownstream);
-    const RootInlineBox* previous_root = rendered_position.RootBox();
-    if (!previous_root)
+    const InlineBox* inline_box =
+        ComputeInlineBoxPosition(
+            PositionWithAffinity(position, TextAffinity::kDownstream))
+            .inline_box;
+    if (!inline_box)
       break;
 
-    previous_box = leaf_boxes.PreviousTextBox(previous_root, nullptr);
+    const RootInlineBox& previous_root = inline_box->Root();
+    previous_box = leaf_boxes.PreviousTextBox(&previous_root, nullptr);
     if (previous_box) {
       previous_box_in_different_block = true;
       return previous_box;
@@ -197,12 +199,15 @@ const InlineTextBox* LogicallyNextBox(
     if (position.IsNull())
       break;
 
-    RenderedPosition rendered_position(position, TextAffinity::kDownstream);
-    const RootInlineBox* next_root = rendered_position.RootBox();
-    if (!next_root)
+    const InlineBox* inline_box =
+        ComputeInlineBoxPosition(
+            PositionWithAffinity(position, TextAffinity::kDownstream))
+            .inline_box;
+    if (!inline_box)
       break;
 
-    next_box = leaf_boxes.NextTextBox(next_root, nullptr);
+    const RootInlineBox& next_root = inline_box->Root();
+    next_box = leaf_boxes.NextTextBox(&next_root, nullptr);
     if (next_box) {
       next_box_in_different_block = true;
       return next_box;

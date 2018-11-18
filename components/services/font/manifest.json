@@ -2,13 +2,13 @@
   "name": "font_service",
   "display_name": "Font Service",
   "sandbox_type": "none",
+  "options" : {
+    "instance_sharing" : "shared_instance_across_users"
+  },
   "interface_provider_specs": {
     "service_manager:connector": {
       "provides": {
-        "app": [ "font_service::mojom::FontService" ]
-      },
-      "requires": {
-        "*": [ "app" ]
+        "font_service": [ "font_service.mojom.FontService" ]
       }
     }
   }

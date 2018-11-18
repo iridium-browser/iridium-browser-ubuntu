@@ -41,21 +41,24 @@ component("public") {
     "download_save_info.cc",
     "download_save_info.h",
     "download_source.h",
+    "download_start_observer.h",
     "download_stats.h",
     "download_task_runner.h",
     "download_ukm_helper.h",
     "download_url_loader_factory_getter.h",
+    "download_url_loader_factory_getter_impl.h",
     "download_url_parameters.cc",
     "download_url_parameters.h",
     "download_utils.h",
+    "in_progress_download_manager.h",
     "input_stream.cc",
     "input_stream.h",
     "parallel_download_configs.h",
     "rate_estimator.h",
-    "resource_downloader.h",
     "resume_mode.h",
     "stream_handle_input_stream.h",
     "url_download_handler_factory.h",
+    "url_download_request_handle.h",
   ]
 
   configs += [ ":components_download_implementation" ]
@@ -66,7 +69,7 @@ component("public") {
 
   deps = [
     "//base",
-    "//components/download/downloader/in_progress",
+    "//components/download/database",
     "//components/download/internal/common:internal",
     "//crypto",
     "//net",
@@ -78,7 +81,7 @@ component("public") {
 
   allow_circular_includes_from = [
     "//components/download/internal/common:internal",
-    "//components/download/downloader/in_progress",
+    "//components/download/database",
   ]
 }
 
@@ -88,7 +91,7 @@ if (is_android) {
 
     deps = [
       "//base:base_java",
-      "//third_party/android_tools:android_support_annotations_java",
+      "//third_party/android_deps:android_support_annotations_java",
     ]
   }
 
@@ -102,10 +105,6 @@ if (is_android) {
 mojom("interfaces") {
   sources = [
     "download_stream.mojom",
-  ]
-
-  public_deps = [
-    "//mojo/common:common_custom_types",
   ]
 
   export_class_attribute = "COMPONENTS_DOWNLOAD_EXPORT"

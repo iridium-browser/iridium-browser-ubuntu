@@ -8,18 +8,22 @@
 #include "base/macros.h"
 
 namespace aura {
+
+class Env;
+class WindowOcclusionTracker;
+
 namespace test {
 
 class WindowOcclusionTrackerTestApi {
  public:
-  WindowOcclusionTrackerTestApi();
+  explicit WindowOcclusionTrackerTestApi(Env* env);
   ~WindowOcclusionTrackerTestApi();
 
-  // Returns true if WindowOcclusionTracker had to recompute occlusion too many
-  // times before becoming stable since the last call to this.
-  bool WasOcclusionRecomputedTooManyTimes();
+  // Returns the number of times that occlusion was recomputed in this process.
+  int GetNumTimesOcclusionRecomputed() const;
 
  private:
+  WindowOcclusionTracker* const tracker_;
   DISALLOW_COPY_AND_ASSIGN(WindowOcclusionTrackerTestApi);
 };
 

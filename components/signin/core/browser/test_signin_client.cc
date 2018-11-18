@@ -9,14 +9,48 @@
 #include "base/logging.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "components/signin/core/browser/webdata/token_service_table.h"
-#include "components/webdata/common/web_data_service_base.h"
-#include "components/webdata/common/web_database_service.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+namespace {
+class FakeCookieManager : public network::mojom::CookieManager {
+ public:
+  void SetCanonicalCookie(const net::CanonicalCookie& cookie,
+                          bool secure_source,
+                          bool modify_http_only,
+                          SetCanonicalCookieCallback callback) override;
+  void GetAllCookies(GetAllCookiesCallback callback) override {}
+  void GetCookieList(const GURL& url,
+                     const net::CookieOptions& cookie_options,
+                     GetCookieListCallback callback) override {}
+  void DeleteCanonicalCookie(const net::CanonicalCookie& cookie,
+                             DeleteCanonicalCookieCallback callback) override {}
+  void DeleteCookies(network::mojom::CookieDeletionFilterPtr filter,
+                     DeleteCookiesCallback callback) override {}
+  void AddCookieChangeListener(
+      const GURL& url,
+      const std::string& name,
+      network::mojom::CookieChangeListenerPtr listener) override {}
+  void AddGlobalChangeListener(
+      network::mojom::CookieChangeListenerPtr notification_pointer) override {}
+  void CloneInterface(
+      network::mojom::CookieManagerRequest new_interface) override {}
+  void FlushCookieStore(FlushCookieStoreCallback callback) override {}
+  void SetContentSettings(
+      const std::vector<::ContentSettingPatternSource>& settings) override {}
+  void SetForceKeepSessionState() override {}
+  void BlockThirdPartyCookies(bool block) override {}
+};
+}  // namespace
+
 TestSigninClient::TestSigninClient(PrefService* pref_service)
-    : pref_service_(pref_service),
+    : shared_factory_(
+          base::MakeRefCounted<network::WeakWrapperSharedURLLoaderFactory>(
+              &test_url_loader_factory_)),
+      pref_service_(pref_service),
       are_signin_cookies_allowed_(true),
-      network_calls_delayed_(false) {}
+      network_calls_delayed_(false),
+      is_signout_allowed_(true) {}
 
 TestSigninClient::~TestSigninClient() {}
 
@@ -26,14 +60,12 @@ PrefService* TestSigninClient::GetPrefs() {
   return pref_service_;
 }
 
-scoped_refptr<TokenWebData> TestSigninClient::GetDatabase() {
-  return database_;
-}
-
-bool TestSigninClient::CanRevokeCredentials() { return true; }
-
-std::string TestSigninClient::GetSigninScopedDeviceId() {
-  return std::string();
+void FakeCookieManager::SetCanonicalCookie(
+    const net::CanonicalCookie& cookie,
+    bool secure_source,
+    bool modify_http_only,
+    SetCanonicalCookieCallback callback) {
+  std::move(callback).Run(false);
 }
 
 void TestSigninClient::OnSignedOut() {}
@@ -44,42 +76,26 @@ void TestSigninClient::PostSignedIn(const std::string& account_id,
   signed_in_password_ = password;
 }
 
-net::URLRequestContextGetter* TestSigninClient::GetURLRequestContext() {
-  return request_context_.get();
+void TestSigninClient::PreSignOut(
+    base::OnceCallback<void(SignoutDecision)> on_signout_decision_reached,
+    signin_metrics::ProfileSignout signout_source_metric) {
+  std::move(on_signout_decision_reached)
+      .Run(is_signout_allowed_ ? SignoutDecision::ALLOW_SIGNOUT
+                               : SignoutDecision::DISALLOW_SIGNOUT);
 }
 
-void TestSigninClient::SetURLRequestContext(
-    net::URLRequestContextGetter* request_context) {
-  request_context_ = request_context;
+scoped_refptr<network::SharedURLLoaderFactory>
+TestSigninClient::GetURLLoaderFactory() {
+  return shared_factory_;
+}
+
+network::mojom::CookieManager* TestSigninClient::GetCookieManager() {
+  if (!cookie_manager_)
+    cookie_manager_ = std::make_unique<FakeCookieManager>();
+  return cookie_manager_.get();
 }
 
 std::string TestSigninClient::GetProductVersion() { return ""; }
-
-void TestSigninClient::LoadTokenDatabase() {
-  ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
-  base::FilePath path = temp_dir_.GetPath().AppendASCII("TestWebDB");
-  scoped_refptr<WebDatabaseService> web_database =
-      new WebDatabaseService(path, base::ThreadTaskRunnerHandle::Get(),
-                             base::ThreadTaskRunnerHandle::Get());
-  web_database->AddTable(std::make_unique<TokenServiceTable>());
-  web_database->LoadDatabase();
-  database_ =
-      new TokenWebData(web_database, base::ThreadTaskRunnerHandle::Get(),
-                       base::ThreadTaskRunnerHandle::Get(),
-                       WebDataServiceBase::ProfileErrorCallback());
-  database_->Init();
-}
-
-bool TestSigninClient::ShouldMergeSigninCredentialsIntoCookieJar() {
-  return true;
-}
-
-std::unique_ptr<SigninClient::CookieChangeSubscription>
-TestSigninClient::AddCookieChangeCallback(const GURL& url,
-                                          const std::string& name,
-                                          net::CookieChangeCallback callback) {
-  return std::make_unique<SigninClient::CookieChangeSubscription>();
-}
 
 void TestSigninClient::SetNetworkCallsDelayed(bool value) {
   network_calls_delayed_ = value;
@@ -122,8 +138,9 @@ void TestSigninClient::DelayNetworkCall(const base::Closure& callback) {
 std::unique_ptr<GaiaAuthFetcher> TestSigninClient::CreateGaiaAuthFetcher(
     GaiaAuthConsumer* consumer,
     const std::string& source,
-    net::URLRequestContextGetter* getter) {
-  return std::make_unique<GaiaAuthFetcher>(consumer, source, getter);
+    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory) {
+  return std::make_unique<GaiaAuthFetcher>(consumer, source,
+                                           url_loader_factory);
 }
 
 void TestSigninClient::PreGaiaLogout(base::OnceClosure callback) {

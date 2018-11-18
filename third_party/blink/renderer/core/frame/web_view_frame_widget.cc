@@ -7,20 +7,14 @@
 #include "third_party/blink/public/mojom/page/page_visibility_state.mojom-blink.h"
 #include "third_party/blink/renderer/core/exported/web_view_impl.h"
 #include "third_party/blink/renderer/core/frame/web_local_frame_impl.h"
-#include "third_party/blink/renderer/platform/exported/web_active_gesture_animation.h"
 
 namespace blink {
 
 WebViewFrameWidget::WebViewFrameWidget(WebWidgetClient& client,
-                                       WebViewImpl& web_view,
-                                       WebLocalFrameImpl& main_frame)
-    : client_(&client),
+                                       WebViewImpl& web_view)
+    : WebFrameWidgetBase(client),
       web_view_(&web_view),
-      main_frame_(&main_frame),
-      self_keep_alive_(this) {
-  main_frame_->SetFrameWidget(this);
-  web_view_->SetCompositorVisibility(true);
-}
+      self_keep_alive_(this) {}
 
 WebViewFrameWidget::~WebViewFrameWidget() = default;
 
@@ -30,10 +24,9 @@ void WebViewFrameWidget::Close() {
   // updated. If the main frame is being swapped, then
   // m_webView()->mainFrameImpl() will no longer point to the original frame.
   web_view_->SetCompositorVisibility(false);
-  main_frame_->SetFrameWidget(nullptr);
-  main_frame_ = nullptr;
   web_view_ = nullptr;
-  client_ = nullptr;
+
+  WebFrameWidgetBase::Close();
 
   // Note: this intentionally does not forward to WebView::close(), to make it
   // easier to untangle the cleanup logic later.
@@ -45,54 +38,55 @@ WebSize WebViewFrameWidget::Size() {
 }
 
 void WebViewFrameWidget::Resize(const WebSize& size) {
-  return web_view_->Resize(size);
+  web_view_->Resize(size);
 }
 
 void WebViewFrameWidget::ResizeVisualViewport(const WebSize& size) {
-  return web_view_->ResizeVisualViewport(size);
+  web_view_->ResizeVisualViewport(size);
 }
 
 void WebViewFrameWidget::DidEnterFullscreen() {
-  return web_view_->DidEnterFullscreen();
+  web_view_->DidEnterFullscreen();
 }
 
 void WebViewFrameWidget::DidExitFullscreen() {
-  return web_view_->DidExitFullscreen();
+  web_view_->DidExitFullscreen();
 }
 
 void WebViewFrameWidget::SetSuppressFrameRequestsWorkaroundFor704763Only(
     bool suppress_frame_requests) {
-  return web_view_->SetSuppressFrameRequestsWorkaroundFor704763Only(
+  web_view_->SetSuppressFrameRequestsWorkaroundFor704763Only(
       suppress_frame_requests);
 }
-void WebViewFrameWidget::BeginFrame(double last_frame_time_monotonic) {
-  return web_view_->BeginFrame(last_frame_time_monotonic);
+void WebViewFrameWidget::BeginFrame(base::TimeTicks last_frame_time) {
+  web_view_->BeginFrame(last_frame_time);
+}
+
+void WebViewFrameWidget::RecordEndOfFrameMetrics(
+    base::TimeTicks frame_begin_time) {
+  web_view_->RecordEndOfFrameMetrics(frame_begin_time);
 }
 
 void WebViewFrameWidget::UpdateLifecycle(LifecycleUpdate requested_update) {
-  return web_view_->UpdateLifecycle(requested_update);
+  web_view_->UpdateLifecycle(requested_update);
 }
 
-void WebViewFrameWidget::UpdateAllLifecyclePhasesAndCompositeForTesting() {
-  web_view_->UpdateAllLifecyclePhasesAndCompositeForTesting();
+void WebViewFrameWidget::PaintContent(cc::PaintCanvas* canvas,
+                                      const WebRect& view_port) {
+  web_view_->PaintContent(canvas, view_port);
 }
 
-void WebViewFrameWidget::Paint(WebCanvas* canvas, const WebRect& view_port) {
-  return web_view_->Paint(canvas, view_port);
-}
-
-void WebViewFrameWidget::LayoutAndPaintAsync(
-    WebLayoutAndPaintAsyncCallback* callback) {
-  return web_view_->LayoutAndPaintAsync(callback);
+void WebViewFrameWidget::LayoutAndPaintAsync(base::OnceClosure callback) {
+  web_view_->LayoutAndPaintAsync(std::move(callback));
 }
 
 void WebViewFrameWidget::CompositeAndReadbackAsync(
-    WebCompositeAndReadbackAsyncCallback* callback) {
-  return web_view_->CompositeAndReadbackAsync(callback);
+    base::OnceCallback<void(const SkBitmap&)> callback) {
+  web_view_->CompositeAndReadbackAsync(std::move(callback));
 }
 
 void WebViewFrameWidget::ThemeChanged() {
-  return web_view_->ThemeChanged();
+  web_view_->ThemeChanged();
 }
 
 WebInputEventResult WebViewFrameWidget::HandleInputEvent(
@@ -105,33 +99,27 @@ WebInputEventResult WebViewFrameWidget::DispatchBufferedTouchEvents() {
 }
 
 void WebViewFrameWidget::SetCursorVisibilityState(bool is_visible) {
-  return web_view_->SetCursorVisibilityState(is_visible);
+  web_view_->SetCursorVisibilityState(is_visible);
 }
 
-void WebViewFrameWidget::ApplyViewportDeltas(
-    const WebFloatSize& visual_viewport_delta,
-    const WebFloatSize& layout_viewport_delta,
-    const WebFloatSize& elastic_overscroll_delta,
-    float scale_factor,
-    float browser_controls_shown_ratio_delta) {
-  return web_view_->ApplyViewportDeltas(
-      visual_viewport_delta, layout_viewport_delta, elastic_overscroll_delta,
-      scale_factor, browser_controls_shown_ratio_delta);
+void WebViewFrameWidget::ApplyViewportChanges(
+    const ApplyViewportChangesArgs& args) {
+  web_view_->ApplyViewportChanges(args);
 }
 
 void WebViewFrameWidget::RecordWheelAndTouchScrollingCount(
     bool has_scrolled_by_wheel,
     bool has_scrolled_by_touch) {
-  return web_view_->RecordWheelAndTouchScrollingCount(has_scrolled_by_wheel,
-                                                      has_scrolled_by_touch);
+  web_view_->RecordWheelAndTouchScrollingCount(has_scrolled_by_wheel,
+                                               has_scrolled_by_touch);
 }
 
 void WebViewFrameWidget::MouseCaptureLost() {
-  return web_view_->MouseCaptureLost();
+  web_view_->MouseCaptureLost();
 }
 
 void WebViewFrameWidget::SetFocus(bool enable) {
-  return web_view_->SetFocus(enable);
+  web_view_->SetFocus(enable);
 }
 
 bool WebViewFrameWidget::SelectionBounds(WebRect& anchor,
@@ -144,10 +132,10 @@ bool WebViewFrameWidget::IsAcceleratedCompositingActive() const {
 }
 
 void WebViewFrameWidget::WillCloseLayerTreeView() {
-  return web_view_->WillCloseLayerTreeView();
+  web_view_->WillCloseLayerTreeView();
 }
 
-WebColor WebViewFrameWidget::BackgroundColor() const {
+SkColor WebViewFrameWidget::BackgroundColor() const {
   return web_view_->BackgroundColor();
 }
 
@@ -156,39 +144,39 @@ WebPagePopup* WebViewFrameWidget::GetPagePopup() const {
 }
 
 void WebViewFrameWidget::UpdateBrowserControlsState(
-    WebBrowserControlsState constraints,
-    WebBrowserControlsState current,
+    cc::BrowserControlsState constraints,
+    cc::BrowserControlsState current,
     bool animate) {
-  return web_view_->UpdateBrowserControlsState(constraints, current, animate);
+  web_view_->UpdateBrowserControlsState(constraints, current, animate);
+}
+
+WebURL WebViewFrameWidget::GetURLForDebugTrace() {
+  return web_view_->GetURLForDebugTrace();
 }
 
 void WebViewFrameWidget::SetVisibilityState(
     mojom::PageVisibilityState visibility_state) {
-  return web_view_->SetVisibilityState(visibility_state, false);
+  web_view_->SetVisibilityState(visibility_state, false);
 }
 
-void WebViewFrameWidget::SetBackgroundColorOverride(WebColor color) {
+void WebViewFrameWidget::SetBackgroundColorOverride(SkColor color) {
   web_view_->SetBackgroundColorOverride(color);
 }
 
 void WebViewFrameWidget::ClearBackgroundColorOverride() {
-  return web_view_->ClearBackgroundColorOverride();
+  web_view_->ClearBackgroundColorOverride();
 }
 
-void WebViewFrameWidget::SetBaseBackgroundColorOverride(WebColor color) {
+void WebViewFrameWidget::SetBaseBackgroundColorOverride(SkColor color) {
   web_view_->SetBaseBackgroundColorOverride(color);
 }
 
 void WebViewFrameWidget::ClearBaseBackgroundColorOverride() {
-  return web_view_->ClearBaseBackgroundColorOverride();
+  web_view_->ClearBaseBackgroundColorOverride();
 }
 
-void WebViewFrameWidget::SetBaseBackgroundColor(WebColor color) {
+void WebViewFrameWidget::SetBaseBackgroundColor(SkColor color) {
   web_view_->SetBaseBackgroundColor(color);
-}
-
-WebLocalFrameImpl* WebViewFrameWidget::LocalRoot() const {
-  return web_view_->MainFrameImpl();
 }
 
 WebInputMethodController*
@@ -200,14 +188,24 @@ bool WebViewFrameWidget::ScrollFocusedEditableElementIntoView() {
   return web_view_->ScrollFocusedEditableElementIntoView();
 }
 
+void WebViewFrameWidget::Initialize() {
+  web_view_->SetCompositorVisibility(true);
+}
+
+void WebViewFrameWidget::SetLayerTreeView(WebLayerTreeView*) {
+  // The WebViewImpl already has its LayerTreeView, the WebWidgetClient
+  // thus does not initialize and set another one here.
+  NOTREACHED();
+}
+
 void WebViewFrameWidget::ScheduleAnimation() {
   web_view_->ScheduleAnimationForWidget();
 }
 
-base::WeakPtr<CompositorMutatorImpl>
-WebViewFrameWidget::EnsureCompositorMutator(
+base::WeakPtr<AnimationWorkletMutatorDispatcherImpl>
+WebViewFrameWidget::EnsureCompositorMutatorDispatcher(
     scoped_refptr<base::SingleThreadTaskRunner>* mutator_task_runner) {
-  return web_view_->EnsureCompositorMutator(mutator_task_runner);
+  return web_view_->EnsureCompositorMutatorDispatcher(mutator_task_runner);
 }
 
 void WebViewFrameWidget::SetRootGraphicsLayer(GraphicsLayer* layer) {
@@ -218,7 +216,7 @@ GraphicsLayer* WebViewFrameWidget::RootGraphicsLayer() const {
   return web_view_->RootGraphicsLayer();
 }
 
-void WebViewFrameWidget::SetRootLayer(WebLayer* layer) {
+void WebViewFrameWidget::SetRootLayer(scoped_refptr<cc::Layer> layer) {
   web_view_->SetRootLayer(layer);
 }
 
@@ -239,7 +237,6 @@ HitTestResult WebViewFrameWidget::CoreHitTestResultAt(const WebPoint& point) {
 }
 
 void WebViewFrameWidget::Trace(blink::Visitor* visitor) {
-  visitor->Trace(main_frame_);
   WebFrameWidgetBase::Trace(visitor);
 }
 

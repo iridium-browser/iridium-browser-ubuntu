@@ -14,8 +14,8 @@ static void test_casts(skiatest::Reporter* reporter) {
     SkPoint p = { 0, 0 };
     SkRect  r = { 0, 0, 0, 0 };
 
-    const SkScalar* pPtr = SkTCast<const SkScalar*>(&p);
-    const SkScalar* rPtr = SkTCast<const SkScalar*>(&r);
+    const SkScalar* pPtr = reinterpret_cast<const SkScalar*>(&p);
+    const SkScalar* rPtr = reinterpret_cast<const SkScalar*>(&r);
 
     REPORTER_ASSERT(reporter, SkPointPriv::AsScalars(p) == pPtr);
     REPORTER_ASSERT(reporter, r.asScalars() == rPtr);
@@ -31,6 +31,24 @@ static void test_Normalize(skiatest::Reporter* reporter,
     SkScalar newLength = point.length();
     REPORTER_ASSERT(reporter, SkScalarNearlyEqual(returned, oldLength));
     REPORTER_ASSERT(reporter, SkScalarNearlyEqual(newLength, SK_Scalar1));
+}
+
+static void test_normalize_cannormalize_consistent(skiatest::Reporter* reporter) {
+    const SkScalar values[] = { 1, 1e18f, 1e20f, 1e38f, SK_ScalarInfinity, SK_ScalarNaN };
+
+    for (SkScalar val : values) {
+        const SkScalar variants[] = { val, -val, SkScalarInvert(val), -SkScalarInvert(val) };
+
+        for (SkScalar v : variants) {
+            const SkPoint pts[] = { { 0, v }, { v, 0 }, { 1, v }, { v, 1 }, { v, v } };
+
+            for (SkPoint p : pts) {
+                bool can = SkPointPriv::CanNormalize(p.fX, p.fY);
+                bool nor = p.normalize();
+                REPORTER_ASSERT(reporter, can == nor);
+            }
+        }
+    }
 }
 
 // Tests that SkPoint::length() and SkPoint::Length() both return
@@ -134,6 +152,7 @@ DEF_TEST(Point, reporter) {
 
     test_underflow(reporter);
     test_overflow(reporter);
+    test_normalize_cannormalize_consistent(reporter);
 }
 
 DEF_TEST(Point_setLengthFast, reporter) {

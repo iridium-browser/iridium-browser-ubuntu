@@ -71,7 +71,10 @@ def main(argv):
   put_parser.add_argument(
     '-p',
     '--properties',
-    help='A file to load a JSON dict of properties from.',
+    help=(
+      'A file to load a JSON dict of properties from. Use "-" to pipe JSON '
+      'from another command.'
+    ),
   )
   args = parser.parse_args()
 
@@ -93,8 +96,13 @@ def main(argv):
     properties = {}
     if args.properties:
       try:
-        with open(args.properties) as fp:
-          properties.update(json.load(fp))
+        # Allow using pipes to stream properties from another command, e.g.
+        #   echo '{"foo": "bar", "baz": 42}' | buildbucket.py -p -
+        if args.properties == '-':
+          properties.update(json.load(sys.stdin))
+        else:
+          with open(args.properties) as fp:
+            properties.update(json.load(fp))
       except (TypeError, ValueError):
         sys.stderr.write('%s contained invalid JSON dict.\n' % args.properties)
         raise
@@ -125,6 +133,10 @@ def main(argv):
 
   if args.verbose:
     print content
+
+  build_url = json.loads(content).get('build', {}).get('url')
+  if build_url:
+    print 'Build triggered on: %s' % build_url
 
   return response.status != 200
 

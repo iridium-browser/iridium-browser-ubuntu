@@ -47,8 +47,8 @@ Elements.ComputedStyleWidget = class extends UI.ThrottledWidget {
 
     const hbox = this.contentElement.createChild('div', 'hbox styles-sidebar-pane-toolbar');
     const filterContainerElement = hbox.createChild('div', 'styles-sidebar-pane-filter-box');
-    const filterInput = Elements.StylesSidebarPane.createPropertyFilterElement(
-        Common.UIString('Filter'), hbox, filterCallback.bind(this), 'styles-filter-engaged');
+    const filterInput =
+        Elements.StylesSidebarPane.createPropertyFilterElement(ls`Filter`, hbox, filterCallback.bind(this));
     UI.ARIAUtils.setAccessibleName(filterInput, Common.UIString('Filter Computed Styles'));
     filterContainerElement.appendChild(filterInput);
     this.setDefaultFocusedElement(filterInput);
@@ -57,8 +57,13 @@ Elements.ComputedStyleWidget = class extends UI.ThrottledWidget {
     toolbar.appendToolbarItem(new UI.ToolbarSettingCheckbox(
         this._showInheritedComputedStylePropertiesSetting, undefined, Common.UIString('Show all')));
 
+    this._noMatchesElement = this.contentElement.createChild('div', 'gray-info-message');
+    this._noMatchesElement.textContent = ls`No matching property`;
+
     this._propertiesOutline = new UI.TreeOutlineInShadow();
     this._propertiesOutline.hideOverflow();
+    this._propertiesOutline.setShowSelectionOnKeyboardFocus(true);
+    this._propertiesOutline.setFocusable(true);
     this._propertiesOutline.registerRequiredCSS('elements/computedStyleWidgetTree.css');
     this._propertiesOutline.element.classList.add('monospace', 'computed-properties');
     this.contentElement.appendChild(this._propertiesOutline.element);
@@ -138,11 +143,14 @@ Elements.ComputedStyleWidget = class extends UI.ThrottledWidget {
       const propertyName = treeElement[Elements.ComputedStyleWidget._propertySymbol].name;
       expandedProperties.add(propertyName);
     }
+    const hadFocus = this._propertiesOutline.element.hasFocus();
     this._propertiesOutline.removeChildren();
     this._linkifier.reset();
     const cssModel = this._computedStyleModel.cssModel();
-    if (!nodeStyle || !matchedStyles || !cssModel)
+    if (!nodeStyle || !matchedStyles || !cssModel) {
+      this._noMatchesElement.classList.remove('hidden');
       return;
+    }
 
     const uniqueProperties = nodeStyle.computedStyle.keysArray();
     uniqueProperties.sort(propertySorter);
@@ -187,12 +195,13 @@ Elements.ComputedStyleWidget = class extends UI.ThrottledWidget {
       propertyValueElement.appendChild(semicolon);
 
       const treeElement = new UI.TreeElement();
-      treeElement.selectable = false;
       treeElement.title = propertyElement;
       treeElement[Elements.ComputedStyleWidget._propertySymbol] = {name: propertyName, value: propertyValue};
       const isOdd = this._propertiesOutline.rootElement().children().length % 2 === 0;
       treeElement.listItemElement.classList.toggle('odd-row', isOdd);
       this._propertiesOutline.appendChild(treeElement);
+      if (!this._propertiesOutline.selectedTreeElement)
+        treeElement.select(!hadFocus);
 
       const trace = propertyTraces.get(propertyName);
       if (trace) {
@@ -290,7 +299,6 @@ Elements.ComputedStyleWidget = class extends UI.ThrottledWidget {
 
       const traceTreeElement = new UI.TreeElement();
       traceTreeElement.title = trace;
-      traceTreeElement.selectable = false;
       rootTreeElement.appendChild(traceTreeElement);
     }
     return /** @type {!SDK.CSSProperty} */ (activeProperty);
@@ -336,11 +344,14 @@ Elements.ComputedStyleWidget = class extends UI.ThrottledWidget {
    */
   _updateFilter(regex) {
     const children = this._propertiesOutline.rootElement().children();
+    let hasMatch = false;
     for (const child of children) {
       const property = child[Elements.ComputedStyleWidget._propertySymbol];
       const matched = !regex || regex.test(property.name) || regex.test(property.value);
       child.hidden = !matched;
+      hasMatch |= matched;
     }
+    this._noMatchesElement.classList.toggle('hidden', hasMatch);
   }
 };
 

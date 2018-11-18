@@ -59,16 +59,15 @@ class STORAGE_EXPORT QuotaManagerProxy
                                 UsageAndQuotaCallback callback);
 
   // This method may only be called on the IO thread.
-  // It may return NULL if the manager has already been deleted.
+  // It may return nullptr if the manager has already been deleted.
   QuotaManager* quota_manager() const;
 
  protected:
   friend class QuotaManager;
   friend class base::RefCountedThreadSafe<QuotaManagerProxy>;
 
-  QuotaManagerProxy(
-      QuotaManager* manager,
-      const scoped_refptr<base::SingleThreadTaskRunner>& io_thread);
+  QuotaManagerProxy(QuotaManager* manager,
+                    scoped_refptr<base::SingleThreadTaskRunner> io_thread);
   virtual ~QuotaManagerProxy();
 
   QuotaManager* manager_;  // only accessed on the io thread

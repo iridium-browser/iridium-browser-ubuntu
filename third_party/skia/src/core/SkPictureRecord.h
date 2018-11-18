@@ -16,6 +16,7 @@
 #include "SkTArray.h"
 #include "SkTDArray.h"
 #include "SkTHash.h"
+#include "SkTo.h"
 #include "SkVertices.h"
 #include "SkWriter32.h"
 
@@ -31,26 +32,25 @@
 class SkPictureRecord : public SkCanvasVirtualEnforcer<SkCanvas> {
 public:
     SkPictureRecord(const SkISize& dimensions, uint32_t recordFlags);
-    ~SkPictureRecord() override;
 
-    const SkTDArray<const SkPicture* >& getPictureRefs() const {
-        return fPictureRefs;
+    const SkTArray<sk_sp<const SkPicture>>& getPictures() const {
+        return fPictures;
     }
 
-    const SkTDArray<SkDrawable* >& getDrawableRefs() const {
-        return fDrawableRefs;
+    const SkTArray<sk_sp<SkDrawable>>& getDrawables() const {
+        return fDrawables;
     }
 
-    const SkTDArray<const SkTextBlob* >& getTextBlobRefs() const {
-        return fTextBlobRefs;
+    const SkTArray<sk_sp<const SkTextBlob>>& getTextBlobs() const {
+        return fTextBlobs;
     }
 
-    const SkTDArray<const SkVertices* >& getVerticesRefs() const {
-        return fVerticesRefs;
+    const SkTArray<sk_sp<const SkVertices>>& getVertices() const {
+        return fVertices;
     }
 
-   const SkTDArray<const SkImage* >& getImageRefs() const {
-        return fImageRefs;
+    const SkTArray<sk_sp<const SkImage>>& getImages() const {
+        return fImages;
     }
 
     sk_sp<SkData> opData() const {
@@ -168,8 +168,6 @@ protected:
     void onDrawPosText(const void* text, size_t, const SkPoint pos[], const SkPaint&) override;
     void onDrawPosTextH(const void* text, size_t, const SkScalar xpos[], SkScalar constY,
                         const SkPaint&) override;
-    void onDrawTextOnPath(const void* text, size_t byteLength, const SkPath& path,
-                                  const SkMatrix* matrix, const SkPaint&) override;
     void onDrawTextRSXform(const void* text, size_t byteLength, const SkRSXform xform[],
                            const SkRect* cull, const SkPaint&) override;
     void onDrawTextBlob(const SkTextBlob* blob, SkScalar x, SkScalar y,
@@ -196,7 +194,8 @@ protected:
     void onDrawImageLattice(const SkImage*, const SkCanvas::Lattice& lattice, const SkRect& dst,
                             const SkPaint*) override;
     void onDrawShadowRec(const SkPath&, const SkDrawShadowRec&) override;
-    void onDrawVerticesObject(const SkVertices*, SkBlendMode, const SkPaint&) override;
+    void onDrawVerticesObject(const SkVertices*, const SkVertices::Bone bones[], int boneCount,
+                              SkBlendMode, const SkPaint&) override;
 
     void onClipRect(const SkRect&, SkClipOp, ClipEdgeStyle) override;
     void onClipRRect(const SkRRect&, SkClipOp, ClipEdgeStyle) override;
@@ -251,12 +250,11 @@ private:
 
     SkWriter32 fWriter;
 
-    // we ref each item in these arrays
-    SkTDArray<const SkImage*>    fImageRefs;
-    SkTDArray<const SkPicture*>  fPictureRefs;
-    SkTDArray<SkDrawable*>       fDrawableRefs;
-    SkTDArray<const SkTextBlob*> fTextBlobRefs;
-    SkTDArray<const SkVertices*> fVerticesRefs;
+    SkTArray<sk_sp<const SkImage>>    fImages;
+    SkTArray<sk_sp<const SkPicture>>  fPictures;
+    SkTArray<sk_sp<SkDrawable>>       fDrawables;
+    SkTArray<sk_sp<const SkTextBlob>> fTextBlobs;
+    SkTArray<sk_sp<const SkVertices>> fVertices;
 
     uint32_t fRecordFlags;
     int      fInitialSaveCount;

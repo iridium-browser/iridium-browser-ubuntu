@@ -21,7 +21,6 @@
 #include "base/metrics/persistent_memory_allocator.h"
 #include "base/observer_list.h"
 #include "build/build_config.h"
-#include "components/viz/service/display_embedder/shared_bitmap_allocation_notifier_impl.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_process_host_factory.h"
 #include "ipc/ipc_test_sink.h"
@@ -35,13 +34,12 @@
 #include "content/public/browser/android/child_process_importance.h"
 #endif
 
-class StoragePartition;
-class SiteInstance;
-
 namespace content {
 
 class MockRenderProcessHostFactory;
 class RenderWidgetHost;
+class SiteInstance;
+class StoragePartition;
 
 // A mock render process host that has no corresponding renderer process.  All
 // IPC messages are sent into the message sink for inspection by tests.
@@ -75,7 +73,8 @@ class MockRenderProcessHost : public RenderProcessHost {
   void ShutdownForBadMessage(CrashReportMode crash_report_mode) override;
   void UpdateClientPriority(PriorityClient* client) override;
   int VisibleClientCount() const override;
-  unsigned int GetFrameDepthForTesting() const override;
+  unsigned int GetFrameDepth() const override;
+  bool GetIntersectsViewport() const override;
   bool IsForGuestsOnly() const override;
   RendererAudioOutputStreamFactoryContext*
   GetRendererAudioOutputStreamFactoryContext() override;
@@ -87,10 +86,10 @@ class MockRenderProcessHost : public RenderProcessHost {
   bool FastShutdownIfPossible(size_t page_count,
                               bool skip_unload_handlers) override;
   bool FastShutdownStarted() const override;
-  base::ProcessHandle GetHandle() const override;
+  const base::Process& GetProcess() const override;
   bool IsReady() const override;
   int GetID() const override;
-  bool HasConnection() const override;
+  bool IsInitializedAndNotDead() const override;
   void SetIgnoreInputEvents(bool ignore_input_events) override;
   bool IgnoreInputEvents() const override;
   void Cleanup() override;
@@ -109,7 +108,6 @@ class MockRenderProcessHost : public RenderProcessHost {
   void AddFilter(BrowserMessageFilter* filter) override;
   base::TimeDelta GetChildProcessIdleTime() const override;
   void FilterURL(bool empty_allowed, GURL* url) override;
-#if BUILDFLAG(ENABLE_WEBRTC)
   void EnableAudioDebugRecordings(const base::FilePath& file) override;
   void DisableAudioDebugRecordings() override;
   void SetEchoCanceller3(
@@ -120,8 +118,6 @@ class MockRenderProcessHost : public RenderProcessHost {
       bool outgoing,
       const WebRtcRtpPacketCallback& packet_callback) override;
   void SetWebRtcEventLogOutput(int lid, bool enabled) override;
-#endif
-  void ResumeDeferredNavigation(const GlobalRequestID& request_id) override;
   void BindInterface(const std::string& interface_name,
                      mojo::ScopedMessagePipeHandle interface_pipe) override;
   const service_manager::Identity& GetChildIdentity() const override;
@@ -139,15 +135,20 @@ class MockRenderProcessHost : public RenderProcessHost {
   mojom::Renderer* GetRendererInterface() override;
   resource_coordinator::ProcessResourceCoordinator*
   GetProcessResourceCoordinator() override;
+  void CreateURLLoaderFactory(
+      const url::Origin& origin,
+      network::mojom::URLLoaderFactoryRequest request) override;
 
   void SetIsNeverSuitableForReuse() override;
   bool MayReuseHost() override;
   bool IsUnused() override;
   void SetIsUsed() override;
-  viz::SharedBitmapAllocationNotifierImpl* GetSharedBitmapAllocationNotifier()
-      override;
 
   bool HostHasNotBeenUsed() override;
+  void LockToOrigin(const GURL& lock_url) override;
+  void BindCacheStorage(blink::mojom::CacheStorageRequest request,
+                        const url::Origin& origin) override;
+  void CleanupCorbExceptionForPluginUponDestruction() override;
 
   // IPC::Sender via RenderProcessHost.
   bool Send(IPC::Message* msg) override;
@@ -170,8 +171,8 @@ class MockRenderProcessHost : public RenderProcessHost {
     is_process_backgrounded_ = is_process_backgrounded;
   }
 
-  void SetProcessHandle(std::unique_ptr<base::ProcessHandle> new_handle) {
-    process_handle = std::move(new_handle);
+  void SetProcess(base::Process&& new_process) {
+    process = std::move(new_process);
   }
 
   void OverrideBinderForTesting(const std::string& interface_name,
@@ -181,11 +182,10 @@ class MockRenderProcessHost : public RenderProcessHost {
       std::unique_ptr<mojo::AssociatedInterfacePtr<mojom::Renderer>>
           renderer_interface);
 
-  void set_did_frame_commit_navigation(bool did_frame_commit_navigation) {
-    did_frame_commit_navigation_ = did_frame_commit_navigation;
-  }
-  bool did_frame_commit_navigation() const {
-    return did_frame_commit_navigation_;
+  void OverrideURLLoaderFactory(network::mojom::URLLoaderFactory* factory);
+
+  bool is_renderer_locked_to_site() const {
+    return is_renderer_locked_to_site_;
   }
 
  private:
@@ -196,7 +196,7 @@ class MockRenderProcessHost : public RenderProcessHost {
   int id_;
   bool has_connection_;
   BrowserContext* browser_context_;
-  base::ObserverList<RenderProcessHostObserver> observers_;
+  base::ObserverList<RenderProcessHostObserver>::Unchecked observers_;
 
   base::flat_set<PriorityClient*> priority_clients_;
   int prev_routing_id_;
@@ -207,7 +207,7 @@ class MockRenderProcessHost : public RenderProcessHost {
   bool is_never_suitable_for_reuse_;
   bool is_process_backgrounded_;
   bool is_unused_;
-  std::unique_ptr<base::ProcessHandle> process_handle;
+  base::Process process;
   int keep_alive_ref_count_;
   std::unique_ptr<mojo::AssociatedInterfacePtr<mojom::Renderer>>
       renderer_interface_;
@@ -215,9 +215,9 @@ class MockRenderProcessHost : public RenderProcessHost {
   std::unique_ptr<resource_coordinator::ProcessResourceCoordinator>
       process_resource_coordinator_;
   service_manager::Identity child_identity_;
-  viz::SharedBitmapAllocationNotifierImpl
-      shared_bitmap_allocation_notifier_impl_;
-  bool did_frame_commit_navigation_ = false;
+  bool is_renderer_locked_to_site_ = false;
+  network::mojom::URLLoaderFactory* url_loader_factory_;
+  blink::mojom::CacheStorageRequest cache_storage_request_;
   base::WeakPtrFactory<MockRenderProcessHost> weak_ptr_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(MockRenderProcessHost);
@@ -250,23 +250,6 @@ class MockRenderProcessHostFactory : public RenderProcessHostFactory {
 
   DISALLOW_COPY_AND_ASSIGN(MockRenderProcessHostFactory);
 };
-
-// Like MockRenderProcessHostFactory, but automatically registers itself as the
-// default factory via RenderProcessHostImpl::set_render_process_host_factory.
-class ScopedMockRenderProcessHostFactory : public MockRenderProcessHostFactory {
- public:
-  ScopedMockRenderProcessHostFactory();
-  ~ScopedMockRenderProcessHostFactory() override;
-
- private:
-  DISALLOW_COPY_AND_ASSIGN(ScopedMockRenderProcessHostFactory);
-};
-
-// Convenient method to retrieve |InputMsg_HandleInputEvent|s from process sink
-// and returns a string of WebInputEvent types. Will append a trailing '*' if
-// other types of messages were found.
-// This method clears the sink.
-std::string GetInputMessageTypes(MockRenderProcessHost*);
 
 }  // namespace content
 

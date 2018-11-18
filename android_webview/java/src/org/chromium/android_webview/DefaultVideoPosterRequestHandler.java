@@ -5,10 +5,10 @@
 package org.chromium.android_webview;
 
 import android.graphics.Bitmap;
-import android.os.AsyncTask;
 import android.util.Log;
 
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.task.AsyncTask;
 
 import java.io.IOException;
 import java.io.InputStream;

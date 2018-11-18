@@ -15,7 +15,9 @@ import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.UrlConstants;
 import org.chromium.chrome.browser.preferences.datareduction.DataReductionDataUseItem;
 import org.chromium.chrome.browser.preferences.datareduction.DataReductionPromoUtils;
+import org.chromium.chrome.browser.preferences.datareduction.DataReductionProxySavingsClearedReason;
 import org.chromium.chrome.browser.preferences.datareduction.DataReductionStatsPreference;
+import org.chromium.chrome.browser.util.ConversionUtils;
 
 import java.text.NumberFormat;
 import java.util.ArrayList;
@@ -71,29 +73,9 @@ public class DataReductionProxySettings {
 
     private static final String PARAM_PERSISTENT_MENU_ITEM_ENABLED = "persistent_menu_item_enabled";
 
-    private Callback<List<DataReductionDataUseItem>> mQueryDataUsageCallback;
+    private static final long DATA_REDUCTION_MAIN_MENU_ITEM_SAVED_KB_THRESHOLD = 100;
 
-    /**
-     * Returns whether the data reduction proxy is enabled.
-     *
-     * The knowledge of the data reduction proxy status is needed before the
-     * native library is loaded.
-     *
-     * Note that the returned value can be out-of-date if the Data Reduction
-     * Proxy is enabled/disabled from the native side without going through the
-     * UI. The discrepancy will however be fixed at the next launch, so the
-     * value returned here can be wrong (both false-positive and false-negative)
-     * right after such a change.
-     *
-     * @param context The application context.
-     * @return Whether the data reduction proxy is enabled.
-     */
-    public static boolean isEnabledBeforeNativeLoad(Context context) {
-        // TODO(lizeb): Add a listener for the native preference change to keep
-        // both in sync and avoid the false-positives and false-negatives.
-        return ContextUtils.getAppSharedPreferences().getBoolean(
-            DATA_REDUCTION_ENABLED_PREF, false);
-    }
+    private Callback<List<DataReductionDataUseItem>> mQueryDataUsageCallback;
 
     /**
      * Handles calls for data reduction proxy initialization that need to happen after the native
@@ -196,6 +178,7 @@ public class DataReductionProxySettings {
     public boolean shouldUseDataReductionMainMenuItem() {
         if (!ChromeFeatureList.isEnabled(ChromeFeatureList.DATA_REDUCTION_MAIN_MENU)) return false;
 
+        boolean data_reduction_main_menu_item_allowed = false;
         if (ChromeFeatureList.getFieldTrialParamByFeatureAsBoolean(
                     ChromeFeatureList.DATA_REDUCTION_MAIN_MENU, PARAM_PERSISTENT_MENU_ITEM_ENABLED,
                     false)) {
@@ -207,11 +190,18 @@ public class DataReductionProxySettings {
                         .putBoolean(DATA_REDUCTION_HAS_EVER_BEEN_ENABLED_PREF, true)
                         .apply();
             }
-            return ContextUtils.getAppSharedPreferences().getBoolean(
-                    DATA_REDUCTION_HAS_EVER_BEEN_ENABLED_PREF, false);
+            data_reduction_main_menu_item_allowed =
+                    ContextUtils.getAppSharedPreferences().getBoolean(
+                            DATA_REDUCTION_HAS_EVER_BEEN_ENABLED_PREF, false);
         } else {
-            return isDataReductionProxyEnabled();
+            data_reduction_main_menu_item_allowed = isDataReductionProxyEnabled();
         }
+
+        if (data_reduction_main_menu_item_allowed) {
+            return ConversionUtils.bytesToKilobytes(getContentLengthSavedInHistorySummary())
+                    >= DATA_REDUCTION_MAIN_MENU_ITEM_SAVED_KB_THRESHOLD;
+        }
+        return false;
     }
 
     /** Returns true if the SPDY proxy is managed by an administrator's policy. */
@@ -238,8 +228,9 @@ public class DataReductionProxySettings {
 
     /**
      * Clears all data saving statistics.
+     * @param reason from the DataReductionProxySavingsClearedReason enum
      */
-    public void clearDataSavingStatistics() {
+    public void clearDataSavingStatistics(@DataReductionProxySavingsClearedReason int reason) {
         // When the data saving statistics are cleared, reset the snackbar promo that tells the user
         // how much data they have saved using Data Saver so far.
         DataReductionPromoUtils.saveSnackbarPromoDisplayed(0);
@@ -247,7 +238,7 @@ public class DataReductionProxySettings {
                 .edit()
                 .putLong(DATA_REDUCTION_FIRST_ENABLED_TIME, System.currentTimeMillis())
                 .apply();
-        nativeClearDataSavingStatistics(mNativeDataReductionProxySettings);
+        nativeClearDataSavingStatistics(mNativeDataReductionProxySettings, reason);
     }
 
     /**
@@ -391,7 +382,7 @@ public class DataReductionProxySettings {
     private native long nativeGetDataReductionLastUpdateTime(
             long nativeDataReductionProxySettingsAndroid);
     private native void nativeClearDataSavingStatistics(
-            long nativeDataReductionProxySettingsAndroid);
+            long nativeDataReductionProxySettingsAndroid, int reason);
     private native ContentLengths nativeGetContentLengths(
             long nativeDataReductionProxySettingsAndroid);
     private native long nativeGetTotalHttpContentLengthSaved(

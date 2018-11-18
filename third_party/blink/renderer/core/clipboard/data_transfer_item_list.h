@@ -51,16 +51,16 @@ class CORE_EXPORT DataTransferItemList final : public ScriptWrappable {
  public:
   static DataTransferItemList* Create(DataTransfer*, DataObject*);
 
-  size_t length() const;
-  DataTransferItem* item(unsigned long index);
-  void deleteItem(unsigned long index, ExceptionState&);
+  uint32_t length() const;
+  DataTransferItem* item(uint32_t index);
+  void deleteItem(uint32_t index, ExceptionState&);
   void clear();
   DataTransferItem* add(const String& data,
                         const String& type,
                         ExceptionState&);
   DataTransferItem* add(File*);
 
-  void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  private:
   DataTransferItemList(DataTransfer*, DataObject*);

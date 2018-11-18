@@ -9,7 +9,7 @@
 
 #include "base/bind.h"
 #include "base/files/file_util.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop/message_loop_current.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/time/time.h"
@@ -147,7 +147,7 @@ DownloadFileImpl::DownloadFileImpl(
       bytes_seen_without_parallel_streams_(0),
       is_paused_(false),
       download_id_(download_id),
-      main_task_runner_(base::MessageLoop::current()->task_runner()),
+      main_task_runner_(base::MessageLoopCurrent::Get()->task_runner()),
       observer_(observer),
       weak_factory_(this) {
   TRACE_EVENT_INSTANT0("download", "DownloadFileCreated",
@@ -229,7 +229,7 @@ void DownloadFileImpl::AddInputStream(std::unique_ptr<InputStream> stream,
     CancelRequest(offset);
     return;
   }
-
+  DCHECK(source_streams_.find(offset) == source_streams_.end());
   source_streams_[offset] =
       std::make_unique<SourceStream>(offset, length, std::move(stream));
   OnSourceStreamAdded(source_streams_[offset].get());
@@ -378,11 +378,6 @@ void DownloadFileImpl::RenameWithRetryInternal(
     return;
   }
 
-  if (!parameters->time_of_first_failure.is_null()) {
-    RecordDownloadFileRenameResultAfterRetry(
-        base::TimeTicks::Now() - parameters->time_of_first_failure, reason);
-  }
-
   if (reason == DOWNLOAD_INTERRUPT_REASON_NONE &&
       (parameters->option & ANNOTATE_WITH_SOURCE_INFORMATION)) {
     // Doing the annotation after the rename rather than before leaves
@@ -498,14 +493,12 @@ void DownloadFileImpl::StreamActive(SourceStream* source_stream,
         break;
       case InputStream::HAS_DATA: {
         ++num_buffers;
-        base::TimeTicks write_start(base::TimeTicks::Now());
         should_terminate = CalculateBytesToWrite(
             source_stream, incoming_data_size, &bytes_to_write);
         DCHECK_GE(incoming_data_size, bytes_to_write);
         reason = WriteDataToFile(
             source_stream->offset() + source_stream->bytes_written(),
-            incoming_data.get()->data(), bytes_to_write);
-        disk_writes_time_ += (base::TimeTicks::Now() - write_start);
+            incoming_data->data(), bytes_to_write);
         bytes_seen_ += bytes_to_write;
         total_incoming_data_size += bytes_to_write;
         if (reason == DOWNLOAD_INTERRUPT_REASON_NONE) {
@@ -548,11 +541,6 @@ void DownloadFileImpl::StreamActive(SourceStream* source_stream,
                                   MOJO_RESULT_OK));
   }
 
-  if (total_incoming_data_size)
-    RecordFileThreadReceiveBuffers(num_buffers);
-
-  RecordContiguousWriteTime(now - start);
-
   if (state == InputStream::COMPLETE)
     OnStreamCompleted(source_stream);
   else
@@ -565,7 +553,6 @@ void DownloadFileImpl::StreamActive(SourceStream* source_stream,
 
 void DownloadFileImpl::OnStreamCompleted(SourceStream* source_stream) {
   DownloadInterruptReason reason = HandleStreamCompletionStatus(source_stream);
-
   SendUpdate();
 
   NotifyObserver(source_stream, reason, InputStream::COMPLETE, false);
@@ -602,7 +589,7 @@ void DownloadFileImpl::NotifyObserver(SourceStream* source_stream,
 
     // All the stream reader are completed, shut down file IO processing.
     if (IsDownloadCompleted()) {
-      RecordFileBandwidth(bytes_seen_, disk_writes_time_,
+      RecordFileBandwidth(bytes_seen_,
                           base::TimeTicks::Now() - download_start_);
       if (record_stream_bandwidth_) {
         RecordParallelizableDownloadStats(

@@ -12,7 +12,8 @@
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
-#include "base/test/histogram_tester.h"
+#include "base/task/post_task.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "base/test/simple_test_clock.h"
 #include "base/test/thread_test_helper.h"
 #include "base/time/clock.h"
@@ -22,8 +23,8 @@
 #include "chrome/browser/safe_browsing/test_safe_browsing_service.h"
 #include "chrome/browser/ssl/certificate_error_report.h"
 #include "chrome/test/base/testing_profile.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/common/weak_wrapper_shared_url_loader_factory.h"
 #include "content/public/test/test_browser_thread.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "crypto/rsa_private_key.h"
@@ -34,6 +35,7 @@
 #include "net/test/url_request/url_request_mock_data_job.h"
 #include "net/url_request/url_request_filter.h"
 #include "net/url_request/url_request_test_util.h"
+#include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
 #include "services/network/test/test_url_loader_factory.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -166,7 +168,7 @@ class CertificateReportingServiceReporterOnIOThreadTest
  public:
   void SetUp() override {
     test_shared_loader_factory_ =
-        base::MakeRefCounted<content::WeakWrapperSharedURLLoaderFactory>(
+        base::MakeRefCounted<network::WeakWrapperSharedURLLoaderFactory>(
             &test_url_loader_factory_);
 
     message_loop_.reset(new base::MessageLoopForIO());
@@ -368,8 +370,8 @@ class CertificateReportingServiceTest : public ::testing::Test {
  public:
   CertificateReportingServiceTest()
       : thread_bundle_(content::TestBrowserThreadBundle::REAL_IO_THREAD),
-        io_task_runner_(content::BrowserThread::GetTaskRunnerForThread(
-            content::BrowserThread::IO)) {}
+        io_task_runner_(base::CreateSingleThreadTaskRunnerWithTraits(
+            {content::BrowserThread::IO})) {}
 
   ~CertificateReportingServiceTest() override {}
 

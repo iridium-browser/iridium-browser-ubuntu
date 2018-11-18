@@ -19,6 +19,7 @@
 #include "base/containers/flat_set.h"
 #include "base/gtest_prod_util.h"
 #include "base/strings/string_piece.h"
+#include "components/safe_browsing/common/safe_browsing_prefs.h"
 #include "components/safe_browsing/db/safebrowsing.pb.h"
 #include "net/url_request/url_request_status.h"
 #include "url/gurl.h"
@@ -78,6 +79,18 @@ struct V4ProtocolConfig {
   V4ProtocolConfig() = delete;
 };
 
+// Get the v4 protocol config struct with a given client name, and ability to
+// enable/disable database auto update.
+V4ProtocolConfig GetV4ProtocolConfig(const std::string& client_name,
+                                     bool disable_auto_update);
+
+// Returns the URL to use for sending threat reports and other Safe Browsing
+// hits back to Safe Browsing service.
+std::string GetReportUrl(
+    const V4ProtocolConfig& config,
+    const std::string& method,
+    const ExtendedReportingLevel* reporting_level = nullptr);
+
 // Different types of threats that SafeBrowsing protects against. This is the
 // type that's returned to the clients of SafeBrowsing in Chromium.
 // GENERATED_JAVA_ENUM_PACKAGE: org.chromium.components.safe_browsing
@@ -129,14 +142,20 @@ enum SBThreatType {
   // DEPRECATED. Url detected by password protection service.
   DEPRECATED_SB_THREAT_TYPE_URL_PASSWORD_PROTECTION_PHISHING,
 
-  // Password reuse detected on low reputation page,
-  SB_THREAT_TYPE_PASSWORD_REUSE,
+  // Chrome sign in password reuse detected on low reputation page,
+  SB_THREAT_TYPE_SIGN_IN_PASSWORD_REUSE,
 
   // A sample of an ad was collected
   SB_THREAT_TYPE_AD_SAMPLE,
 
   // The page loaded a resource from the Suspicious Site list.
   SB_THREAT_TYPE_SUSPICIOUS_SITE,
+
+  // Enterprise password reuse detected on low reputation page,
+  SB_THREAT_TYPE_ENTERPRISE_PASSWORD_REUSE,
+
+  // Potential billing detected.
+  SB_THREAT_TYPE_BILLING,
 };
 
 using SBThreatTypeSet = base::flat_set<SBThreatType>;
@@ -190,12 +209,14 @@ ListIdentifier GetChromeExtMalwareId();
 ListIdentifier GetChromeUrlApiId();
 ListIdentifier GetChromeUrlClientIncidentId();
 ListIdentifier GetIpMalwareId();
+ListIdentifier GetUrlBillingId();
 ListIdentifier GetUrlCsdDownloadWhitelistId();
 ListIdentifier GetUrlCsdWhitelistId();
 ListIdentifier GetUrlMalBinId();
 ListIdentifier GetUrlMalwareId();
 ListIdentifier GetUrlSocEngId();
 ListIdentifier GetUrlSubresourceFilterId();
+ListIdentifier GetUrlSuspiciousSiteId();
 ListIdentifier GetUrlUwsId();
 
 // Returns the basename of the store file, without the ".store" extension.

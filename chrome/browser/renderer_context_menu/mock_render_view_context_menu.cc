@@ -47,10 +47,6 @@ void MockRenderViewContextMenu::ExecuteCommand(int command_id,
   observer_->ExecuteCommand(command_id);
 }
 
-void MockRenderViewContextMenu::MenuWillShow(ui::SimpleMenuModel* source) {}
-
-void MockRenderViewContextMenu::MenuClosed(ui::SimpleMenuModel* source) {}
-
 void MockRenderViewContextMenu::AddMenuItem(int command_id,
                                             const base::string16& title) {
   MockMenuItem item;
@@ -140,6 +136,10 @@ void MockRenderViewContextMenu::UpdateMenuIcon(int command_id,
   FAIL() << "Menu observer is trying to change a menu item it doesn't own."
          << " command_id: " << command_id;
 }
+
+void MockRenderViewContextMenu::RemoveMenuItem(int command_id) {}
+
+void MockRenderViewContextMenu::RemoveAdjacentSeparators() {}
 
 void MockRenderViewContextMenu::AddSpellCheckServiceItem(bool is_checked) {
   AddCheckItem(

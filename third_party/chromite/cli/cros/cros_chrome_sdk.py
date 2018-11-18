@@ -8,24 +8,24 @@
 from __future__ import print_function
 
 import argparse
-import base64
 import collections
 import contextlib
 import glob
 import json
 import os
 
+from chromite.cbuildbot import archive_lib
 from chromite.cli import command
 from chromite.lib import cache
-from chromite.lib import cros_build_lib
-from chromite.lib import cros_logging as logging
-from chromite.lib import gob_util
-from chromite.lib import gs
-from chromite.lib import osutils
-from chromite.lib import path_util
-from chromite.cbuildbot import archive_lib
 from chromite.lib import config_lib
 from chromite.lib import constants
+from chromite.lib import cros_build_lib
+from chromite.lib import cros_logging as logging
+from chromite.lib import gs
+from chromite.lib import memoize
+from chromite.lib import osutils
+from chromite.lib import path_util
+from chromite.lib import retry_util
 from gn_helpers import gn_helpers
 
 
@@ -49,7 +49,7 @@ class NoChromiumSrcDir(Exception):
   """Error thrown when no chromium src dir is found."""
 
   def __init__(self, path):
-    Exception.__init__(self, 'No chromium src dir found in: ' % (path))
+    Exception.__init__(self, 'No chromium src dir found in: %s' % (path))
 
 class MissingLKGMFile(Exception):
   """Error thrown when we cannot get the version from CHROMEOS_LKGM."""
@@ -84,9 +84,8 @@ class SDKFetcher(object):
   MISC_CACHE = 'misc'
 
   TARGET_TOOLCHAIN_KEY = 'target_toolchain'
-  QEMU_BIN_KEY = 'app-emulation/qemu-2.6.0-r2.tbz2'
-  PREBUILT_CONF_PATH = ('chromiumos/overlays/board-overlays.git/+/'
-                        'master/overlay-amd64-host/prebuilt.conf')
+  QEMU_BIN_KEY = 'qemu'
+  QEMU_BIN_PATH = 'app-emulation/qemu'
 
   CANARIES_PER_DAY = 3
   DAYS_TO_CONSIDER = 14
@@ -118,6 +117,7 @@ class SDKFetcher(object):
     if clear_cache:
       logging.warning('Clearing the SDK cache.')
       osutils.RmDir(self.cache_base, ignore_missing=True)
+      self._RemoveOldCacheDir()
     self.tarball_cache = cache.TarballCache(
         os.path.join(self.cache_base, self.TARBALL_CACHE))
     self.misc_cache = cache.DiskCache(
@@ -142,6 +142,13 @@ class SDKFetcher(object):
 
     if self.toolchain_path is None:
       self.toolchain_path = 'gs://%s' % constants.SDK_GS_BUCKET
+
+  def _RemoveOldCacheDir(self):
+    """Deletes old cache directory."""
+    checkout = path_util.DetermineCheckout(os.getcwd())
+    if checkout.type == path_util.CHECKOUT_TYPE_GCLIENT:
+      old_path = os.path.join(checkout.root, path_util.OLD_CHROME_CACHE_DIR)
+      osutils.RmDir(old_path, ignore_missing=True)
 
   def _UpdateTarball(self, url, ref):
     """Worker function to fetch tarballs"""
@@ -195,16 +202,57 @@ class SDKFetcher(object):
     logging.debug('Read LKGM version from %s: %s', lkgm_file, version)
     return version
 
-  @staticmethod
-  def _GetQemuBinPath():
-    """Get prebuilt QEMU binary path from google storage."""
-    contents_b64 = gob_util.FetchUrl(
-        constants.EXTERNAL_GOB_HOST,
-        '%s?format=TEXT' % SDKFetcher.PREBUILT_CONF_PATH)
-    binhost, path = base64.b64decode(contents_b64.read()).strip().split('=')
-    if binhost != 'FULL_BINHOST' or not path:
+  @memoize.Memoize
+  def _GetSDKVersion(self, version):
+    """Get SDK version from metadata.
+
+    sdk_version looks like 2018.06.04.200410
+    """
+    return self._GetMetadata(version)['sdk-version']
+
+  def _GetQemuVersion(self, version):
+    """Get QEMU version from the cache, or from the build manifest."""
+    with self.misc_cache.Lookup(('qemu-version', self.board, version)) as ref:
+      if ref.Exists(lock=True):
+        return osutils.ReadFile(ref.path).strip()
+      else:
+        manifest_path = gs.GetGsURL(
+            bucket=constants.SDK_GS_BUCKET,
+            suburl='cros-sdk-%s.tar.xz.Manifest' % self._GetSDKVersion(version),
+            for_gsutil=True)
+        manifest = json.loads(self.gs_ctx.Cat(manifest_path))
+
+        qemu_version = manifest['packages'][self.QEMU_BIN_PATH][0][0]
+        ref.AssignText(qemu_version)
+        logging.debug('QEMU version: %s', qemu_version)
+        return qemu_version
+
+  def _GetQemuBinGSPath(self, version):
+    """Get google storage path of prebuilt QEMU binary."""
+    return gs.GetGsURL(
+        bucket='chromeos-prebuilt',
+        suburl='board/amd64-host/chroot-%s/packages/%s-%s.tbz2' %
+        (self._GetSDKVersion(version), self.QEMU_BIN_PATH,
+         self._GetQemuVersion(version)),
+        for_gsutil=True)
+
+  def _GetFullVersionFromStorage(self, version_file):
+    """Cat |version_file| in google storage.
+
+    Args:
+      version_file: google storage path of the version file.
+
+    Returns:
+      Version number in the format 'R30-3929.0.0' or None.
+    """
+    try:
+       # If the version doesn't exist in google storage,
+       # which isn't unlikely, don't waste time on retries.
+      full_version = self.gs_ctx.Cat(version_file, retries=0)
+      assert full_version.startswith('R')
+      return full_version
+    except (gs.GSNoSuchKey, gs.GSCommandError):
       return None
-    return path.strip('"')
 
   def _GetFullVersionFromRecentLatest(self, version):
     """Gets the full version number from a recent LATEST- file.
@@ -229,15 +277,12 @@ class SDKFetcher(object):
     for v in xrange(version_base - 1, version_base_min, -1):
       version_file = '%s/LATEST-%d.0.0' % (self.gs_base, v)
       logging.info('Trying: %s', version_file)
-      try:
-        full_version = self.gs_ctx.Cat(version_file)
-        assert full_version.startswith('R')
+      full_version = self._GetFullVersionFromStorage(version_file)
+      if full_version is not None:
         logging.warning(
             'Using cros version from most recent LATEST file: %s -> %s',
             version_file, full_version)
         return full_version
-      except (gs.GSNoSuchKey, gs.GSCommandError):
-        pass
     logging.warning('No recent LATEST file found from %d.0.0 to %d.0.0: ',
                     version_base_min, version_base)
     return None
@@ -252,13 +297,11 @@ class SDKFetcher(object):
       Version number in the format 'R30-3929.0.0' or None.
     """
     version_file = '%s/LATEST-%s' % (self.gs_base, version)
-    try:
-      full_version = self.gs_ctx.Cat(version_file)
-      assert full_version.startswith('R')
-      return full_version
-    except (gs.GSNoSuchKey, gs.GSCommandError):
+    full_version = self._GetFullVersionFromStorage(version_file)
+    if full_version is None:
       logging.warning('No LATEST file matching SDK version %s', version)
       return self._GetFullVersionFromRecentLatest(version)
+    return full_version
 
   def GetDefaultVersion(self):
     """Get the default SDK version to use.
@@ -405,10 +448,9 @@ class SDKFetcher(object):
 
     # Also fetch QEMU binary if VM_IMAGE_TAR is specified.
     if constants.VM_IMAGE_TAR in components:
-      qemu_bin_path = self._GetQemuBinPath()
+      qemu_bin_path = self._GetQemuBinGSPath(version)
       if qemu_bin_path:
-        fetch_urls[self.QEMU_BIN_KEY] = os.path.join(
-            qemu_bin_path, self.QEMU_BIN_KEY)
+        fetch_urls[self.QEMU_BIN_KEY] = qemu_bin_path
       else:
         logging.warning('Failed to find a QEMU binary to download.')
 
@@ -462,8 +504,9 @@ class ChromeSDKCommand(command.CliCommand):
   """
 
   # Note, this URL is not accessible outside of corp.
-  _GOMA_URL = ('https://clients5.google.com/cxx-compiler-service/'
-               'download/goma_ctl.py')
+  _GOMA_DOWNLOAD_URL = ('https://clients5.google.com/cxx-compiler-service/'
+                        'download/downloadurl')
+  _GOMA_TGZ = 'goma-goobuntu.tgz'
 
   _CHROME_CLANG_DIR = 'third_party/llvm-build/Release+Asserts/bin'
   _HOST_BINUTILS_DIR = 'third_party/binutils/Linux_x64/Release/bin/'
@@ -475,6 +518,7 @@ class ChromeSDKCommand(command.CliCommand):
       'AR',
       'AS',
       'LD',
+      'NM',
       'RANLIB',
 
       # Compiler flags.
@@ -493,7 +537,6 @@ class ChromeSDKCommand(command.CliCommand):
   SDK_GOMA_DIR_ENV = 'SDK_GOMA_DIR'
 
   GOMACC_PORT_CMD = ['./gomacc', 'port']
-  FETCH_GOMA_CMD = ['wget', _GOMA_URL]
 
   # Override base class property to use cache related commandline options.
   use_caching_options = True
@@ -539,13 +582,6 @@ class ChromeSDKCommand(command.CliCommand):
         help='Sets up SDK for building official (internal) Chrome '
              'Chrome, rather than Chromium.')
     parser.add_argument(
-        '--component', action='store_true', default=False,
-        help='Deprecated and ignored. Set is_component_build=true in args.gn '
-             'instead.')
-    parser.add_argument(
-        '--fastbuild', action='store_true', default=False,
-        help='Deprecated and ignored. Set symbol_level=1 in args.gn instead.')
-    parser.add_argument(
         '--use-external-config', action='store_true', default=False,
         help='Use the external configuration for the specified board, even if '
              'an internal configuration is avalable.')
@@ -589,6 +625,12 @@ class ChromeSDKCommand(command.CliCommand):
     parser.add_argument(
         '--download-vm', action='store_true', default=False,
         help='Additionally downloads a VM image from cloud storage.')
+    parser.add_argument(
+        '--thinlto', action='store_true', default=False,
+        help='Enable ThinLTO in build.')
+    parser.add_argument(
+        '--cfi', action='store_true', default=False,
+        help='Enable CFI in build.')
 
     parser.caching_group.add_argument(
         '--clear-sdk-cache', action='store_true',
@@ -643,6 +685,11 @@ class ChromeSDKCommand(command.CliCommand):
       current_ps1 = r'\u@\h \w $ '
     ps1_prefix = ChromeSDKCommand._PS1Prefix(board, version, chroot)
     return '%s %s' % (ps1_prefix, current_ps1)
+
+  def _BuildDir(self):
+    """Returns a full path build directory."""
+    return os.path.join(self.options.chrome_src, 'out_%s' % self.board,
+                        'Release')
 
   def _FixGoldPath(self, var_contents, toolchain_path):
     """Point to the gold linker in the toolchain tarball.
@@ -762,6 +809,11 @@ class ChromeSDKCommand(command.CliCommand):
       env['CXXFLAGS'] = ' '.join(env['CXXFLAGS'].split() + clang_append_flags)
       env['LD'] = env['CXX']
 
+    # Use cros nm for the target builds. TODO: Delete it after Sept 2018 since
+    # NM env variable should already be set, https://crbug.com/862831.
+    if 'NM' not in env:
+      env['NM'] = sdk_ctx.target_tc + '-nm'
+
     # For host compiler, we use the compiler that comes with Chrome
     # instead of the target compiler.
     env['CC_host'] = os.path.join(chrome_clang_path, 'clang')
@@ -770,6 +822,23 @@ class ChromeSDKCommand(command.CliCommand):
 
     binutils_path = os.path.join(options.chrome_src, self._HOST_BINUTILS_DIR)
     env['AR_host'] = os.path.join(binutils_path, 'ar')
+    env['NM_host'] = os.path.join(binutils_path, 'nm')
+
+  def _ModifyPathForGomaBuild(self, compiler, tc_path=None):
+    """Modify toolchain path for goma build.
+
+    This function relativizes path of -B flag, but absolutize compiler path.
+    Compiler path will be relativized in build/toolchain/cros/BUILD.gn for
+    directory independent cache sharing in some distributed build system.
+    """
+    args = []
+    for i, v in enumerate(compiler.split()):
+      if v.startswith('-B'):
+        v = '-B' + os.path.relpath(v[len('-B'):], self._BuildDir())
+      elif i == 0 and os.path.basename(v) == v:
+        v = os.path.join(tc_path, 'bin', v)
+      args.append(v)
+    return ' '.join(args)
 
   def _SetupEnvironment(self, board, sdk_ctx, options, goma_dir=None,
                         goma_port=None):
@@ -823,6 +892,11 @@ class ChromeSDKCommand(command.CliCommand):
       os.environ[self.sdk.SDK_PATH_ENV] = options.sdk_path
     os.environ[self.sdk.SDK_VERSION_ENV] = sdk_ctx.version
 
+    # Add board and sdk version as gn args so that tests can bind them in
+    # test wrappers generated at compile time.
+    gn_args['cros_board'] = board
+    gn_args['cros_sdk_version'] = sdk_ctx.version
+
     # Export the board/version info in a more accessible way, so developers can
     # reference them in their chrome_sdk.bashrc files, as well as within the
     # chrome-sdk shell.
@@ -837,13 +911,6 @@ class ChromeSDKCommand(command.CliCommand):
 
     # SYSROOT is necessary for Goma and the sysroot wrapper.
     env['SYSROOT'] = sysroot
-
-    # Deprecated options warnings. TODO(stevenjb): Eliminate these entirely
-    # once removed from any builders.
-    if options.component:
-      logging.warning('--component is deprecated, ignoring')
-    if options.fastbuild:
-      logging.warning('--fastbuild is deprecated, ignoring')
 
     gn_args['target_sysroot'] = sysroot
     gn_args.pop('pkg_config', None)
@@ -871,50 +938,70 @@ class ChromeSDKCommand(command.CliCommand):
     # See crosbug/618346.
     gn_args['cros_v8_snapshot_is_clang'] = True
     #
-    gn_args['cros_target_cc'] = env['CC']
-    gn_args['cros_target_cxx'] = env['CXX']
+    target_tc_path = sdk_ctx.key_map[self.sdk.TARGET_TOOLCHAIN_KEY].path
+    modified_env_cc = self._ModifyPathForGomaBuild(env['CC'], target_tc_path)
+    modified_env_cxx = self._ModifyPathForGomaBuild(env['CXX'], target_tc_path)
+    gn_args['cros_target_cc'] = modified_env_cc.split()[0]
+    gn_args['cros_target_cxx'] = modified_env_cxx.split()[0]
     gn_args['cros_target_ld'] = env['LD']
-    gn_args['cros_target_extra_cflags'] = env.get('CFLAGS', '')
-    gn_args['cros_target_extra_cxxflags'] = env.get('CXXFLAGS', '')
-    gn_args['cros_host_cc'] = env['CC_host']
-    gn_args['cros_host_cxx'] = env['CXX_host']
+    gn_args['cros_target_nm'] = env['NM']
+    gn_args['cros_target_extra_cflags'] = ' '.join(
+        [env.get('CFLAGS', '')] + modified_env_cc.split()[1:])
+    gn_args['cros_target_extra_cxxflags'] = ' '.join(
+        [env.get('CXXFLAGS', '')] + modified_env_cxx.split()[1:])
+    gn_args['cros_host_cc'] = self._ModifyPathForGomaBuild(env['CC_host'])
+    gn_args['cros_host_cxx'] = self._ModifyPathForGomaBuild(env['CXX_host'])
     gn_args['cros_host_ld'] = env['LD_host']
+    gn_args['cros_host_nm'] = env['NM_host']
     gn_args['cros_host_ar'] = env['AR_host']
-    gn_args['cros_v8_snapshot_cc'] = env['CC_host']
-    gn_args['cros_v8_snapshot_cxx'] = env['CXX_host']
+    gn_args['cros_v8_snapshot_cc'] = self._ModifyPathForGomaBuild(
+        env['CC_host'])
+    gn_args['cros_v8_snapshot_cxx'] = self._ModifyPathForGomaBuild(
+        env['CXX_host'])
     gn_args['cros_v8_snapshot_ld'] = env['LD_host']
+    gn_args['cros_v8_snapshot_nm'] = env['NM_host']
     gn_args['cros_v8_snapshot_ar'] = env['AR_host']
     # No need to adjust CFLAGS and CXXFLAGS for GN since the only
     # adjustment made in _SetupTCEnvironment is for split debug which
     # is done with 'use_debug_fission'.
 
     # Enable goma if requested.
-    if goma_dir:
-      gn_args['use_goma'] = True
-      gn_args['goma_dir'] = goma_dir
-    elif not options.goma:
+    if not options.goma:
       # If --nogoma option is explicitly set, disable goma, even if it is
       # used in the original GN_ARGS.
       gn_args['use_goma'] = False
+    elif goma_dir:
+      gn_args['use_goma'] = True
+
+      # Disable automatic gomacc handling in gn since we handle it ourselves.
+      gn_args['has_gomacc_path'] = True
+      env['GOMACC_PATH'] = os.path.join(goma_dir, 'gomacc')
+
+      # This is used to invoke host compiler via gomacc (e.g. v8_snapshot).
+      gn_args['goma_dir'] = goma_dir
 
     gn_args.pop('internal_khronos_glcts_tests', None)  # crbug.com/588080
 
     # Disable ThinLTO and CFI for simplechrome. Tryjob machines do not have
     # enough file descriptors to use. crbug.com/789607
-    if 'use_thin_lto' in gn_args:
+    if not options.thinlto and 'use_thin_lto' in gn_args:
       gn_args['use_thin_lto'] = False
-    if 'is_cfi' in gn_args:
+    if not options.cfi and 'is_cfi' in gn_args:
       gn_args['is_cfi'] = False
-    if 'use_cfi_cast' in gn_args:
       gn_args['use_cfi_cast'] = False
-    # We need to remove the flag below from cros_target_extra_ldflags.
+    # We need to remove the flag -Wl,-plugin-opt,-import-instr-limit=$num
+    # from cros_target_extra_ldflags if options.thinlto is not set.
     # The format of ld flags is something like
     # '-Wl,-O1 -Wl,-O2 -Wl,--as-needed -stdlib=libc++'
-    extra_thinlto_flag = '-Wl,-plugin-opt,-import-instr-limit=30'
-    extra_ldflags = gn_args.get('cros_target_extra_ldflags', '')
-    if extra_thinlto_flag in extra_ldflags:
-      gn_args['cros_target_extra_ldflags'] = extra_ldflags.replace(
-          extra_thinlto_flag, '')
+    if not options.thinlto:
+      extra_ldflags = gn_args.get('cros_target_extra_ldflags', '')
+
+      ld_flags_list = extra_ldflags.split()
+      ld_flags_list = (
+          [f for f in ld_flags_list
+           if not f.startswith('-Wl,-plugin-opt,-import-instr-limit')])
+      if extra_ldflags:
+        gn_args['cros_target_extra_ldflags'] = ' '.join(ld_flags_list)
 
     # We removed webcore debug symbols on release builds on arm.
     # See crbug.com/792999. However, we want to keep the symbols
@@ -1050,20 +1137,31 @@ class ChromeSDKCommand(command.CliCommand):
         Log('Installing Goma.', silent=self.silent)
         with osutils.TempDir() as tempdir:
           goma_dir = os.path.join(tempdir, 'goma')
-          os.mkdir(goma_dir)
-          result = cros_build_lib.DebugRunCommand(
-              self.FETCH_GOMA_CMD, cwd=goma_dir, error_code_ok=True)
-          if result.returncode:
-            raise GomaError('Failed to fetch Goma')
-         # Update to latest version of goma. We choose the outside-chroot
-         # version ('goobuntu') over the chroot version ('chromeos') by
-         # supplying input='1' to the following prompt:
-         #
-         # What is your platform?
-         #  1. Goobuntu  2. Precise (32bit)  3. Lucid (32bit)  4. Debian
-         #  5. Chrome OS  6. MacOS ? -->
-          cros_build_lib.DebugRunCommand(
-              ['python2', 'goma_ctl.py', 'update'], cwd=goma_dir, input='1\n')
+          osutils.SafeMakedirs(goma_dir)
+          with osutils.ChdirContext(tempdir):
+            try:
+              result = retry_util.RunCurl(['--fail', self._GOMA_DOWNLOAD_URL],
+                                          stdout_to_pipe=True)
+              if result.returncode:
+                raise GomaError('Failed to fetch Goma Download URL')
+              download_url = result.output.strip()
+              result = retry_util.RunCurl(
+                  ['--fail', '%s/%s' % (download_url, self._GOMA_TGZ),
+                   '--output', self._GOMA_TGZ])
+              if result.returncode:
+                raise GomaError('Failed to fetch Goma')
+            except retry_util.DownloadError:
+              raise GomaError('Failed to fetch Goma')
+            result = cros_build_lib.DebugRunCommand(
+                ['tar', 'xf', self._GOMA_TGZ,
+                 '--strip=1', '-C', goma_dir])
+            if result.returncode:
+              raise GomaError('Failed to extract Goma')
+            result = cros_build_lib.DebugRunCommand(
+                [os.path.join(goma_dir, 'goma_ctl.py'), 'update'],
+                extra_env={'PLATFORM': 'goobuntu'})
+            if result.returncode:
+              raise GomaError('Failed to install Goma')
           ref.SetDefault(goma_dir)
       goma_dir = ref.path
 
@@ -1071,7 +1169,7 @@ class ChromeSDKCommand(command.CliCommand):
     if self.options.start_goma:
       Log('Starting Goma.', silent=self.silent)
       cros_build_lib.DebugRunCommand(
-          ['python2', 'goma_ctl.py', 'ensure_start'], cwd=goma_dir)
+          [os.path.join(goma_dir, 'goma_ctl.py'), 'ensure_start'])
       port = self._GomaPort(goma_dir)
       Log('Goma is started on port %s', port, silent=self.silent)
       if not port:
@@ -1095,6 +1193,9 @@ class ChromeSDKCommand(command.CliCommand):
 
     if self.options.version and self.options.sdk_path:
       cros_build_lib.Die('Cannot specify both --version and --sdk-path.')
+
+    if self.options.cfi and not self.options.thinlto:
+      cros_build_lib.Die('CFI requires ThinLTO.')
 
     self.silent = bool(self.options.cmd)
     # Lazy initialize because SDKFetcher creates a GSContext() object in its

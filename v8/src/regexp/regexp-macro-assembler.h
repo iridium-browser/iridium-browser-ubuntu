@@ -212,8 +212,8 @@ class NativeRegExpMacroAssembler: public RegExpMacroAssembler {
   enum Result { RETRY = -2, EXCEPTION = -1, FAILURE = 0, SUCCESS = 1 };
 
   NativeRegExpMacroAssembler(Isolate* isolate, Zone* zone);
-  virtual ~NativeRegExpMacroAssembler();
-  virtual bool CanReadUnaligned();
+  ~NativeRegExpMacroAssembler() override;
+  bool CanReadUnaligned() override;
 
   static Result Match(Handle<Code> regexp,
                       Handle<String> subject,
@@ -244,7 +244,7 @@ class NativeRegExpMacroAssembler: public RegExpMacroAssembler {
   static const byte word_character_map[256];
 
   static Address word_character_map_address() {
-    return const_cast<Address>(&word_character_map[0]);
+    return reinterpret_cast<Address>(&word_character_map[0]);
   }
 
   static Result Execute(Code* code,

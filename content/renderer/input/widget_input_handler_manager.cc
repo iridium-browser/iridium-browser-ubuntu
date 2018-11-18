@@ -9,14 +9,13 @@
 #include "base/bind.h"
 #include "base/logging.h"
 #include "content/common/input_messages.h"
-#include "content/renderer/gpu/render_widget_compositor.h"
+#include "content/renderer/gpu/layer_tree_view.h"
 #include "content/renderer/ime_event_guard.h"
-#include "content/renderer/input/input_handler_manager.h"
 #include "content/renderer/input/widget_input_handler_impl.h"
 #include "content/renderer/render_thread_impl.h"
 #include "content/renderer/render_widget.h"
 #include "third_party/blink/public/platform/platform.h"
-#include "third_party/blink/public/platform/scheduler/web_main_thread_scheduler.h"
+#include "third_party/blink/public/platform/scheduler/web_thread_scheduler.h"
 #include "third_party/blink/public/platform/web_coalesced_input_event.h"
 #include "third_party/blink/public/platform/web_keyboard_event.h"
 #include "third_party/blink/public/web/web_local_frame.h"
@@ -24,7 +23,7 @@
 
 #if defined(OS_ANDROID)
 #include "content/public/common/content_client.h"
-#include "content/renderer/android/synchronous_compositor_proxy_mojo.h"
+#include "content/renderer/android/synchronous_compositor_proxy.h"
 #include "content/renderer/android/synchronous_compositor_registry.h"
 #endif
 
@@ -41,6 +40,26 @@ void CallCallback(mojom::WidgetInputHandler::DispatchEventCallback callback,
           ? base::Optional<ui::DidOverscrollParams>(*overscroll_params)
           : base::nullopt,
       touch_action);
+}
+
+InputEventAckState InputEventDispositionToAck(
+    ui::InputHandlerProxy::EventDisposition disposition) {
+  switch (disposition) {
+    case ui::InputHandlerProxy::DID_HANDLE:
+      return INPUT_EVENT_ACK_STATE_CONSUMED;
+    case ui::InputHandlerProxy::DID_NOT_HANDLE:
+      return INPUT_EVENT_ACK_STATE_NOT_CONSUMED;
+    case ui::InputHandlerProxy::DID_NOT_HANDLE_NON_BLOCKING_DUE_TO_FLING:
+      return INPUT_EVENT_ACK_STATE_SET_NON_BLOCKING_DUE_TO_FLING;
+    case ui::InputHandlerProxy::DROP_EVENT:
+      return INPUT_EVENT_ACK_STATE_NO_CONSUMER_EXISTS;
+    case ui::InputHandlerProxy::DID_HANDLE_NON_BLOCKING:
+      return INPUT_EVENT_ACK_STATE_SET_NON_BLOCKING;
+    case ui::InputHandlerProxy::DID_HANDLE_SHOULD_BUBBLE:
+      return INPUT_EVENT_ACK_STATE_CONSUMED_SHOULD_BUBBLE;
+  }
+  NOTREACHED();
+  return INPUT_EVENT_ACK_STATE_UNKNOWN;
 }
 
 }  // namespace
@@ -61,14 +80,14 @@ class SynchronousCompositorProxyRegistry
 
   void CreateProxy(ui::SynchronousInputHandlerProxy* handler) {
     DCHECK(compositor_task_runner_->BelongsToCurrentThread());
-    proxy_ = std::make_unique<SynchronousCompositorProxyMojo>(handler);
+    proxy_ = std::make_unique<SynchronousCompositorProxy>(handler);
     proxy_->Init();
 
     if (sink_)
       proxy_->SetLayerTreeFrameSink(sink_);
   }
 
-  SynchronousCompositorProxyMojo* proxy() { return proxy_.get(); }
+  SynchronousCompositorProxy* proxy() { return proxy_.get(); }
 
   void RegisterLayerTreeFrameSink(
       int routing_id,
@@ -95,7 +114,7 @@ class SynchronousCompositorProxyRegistry
 
  private:
   scoped_refptr<base::SingleThreadTaskRunner> compositor_task_runner_;
-  std::unique_ptr<SynchronousCompositorProxyMojo> proxy_;
+  std::unique_ptr<SynchronousCompositorProxy> proxy_;
   SynchronousLayerTreeFrameSink* sink_ = nullptr;
 };
 
@@ -104,7 +123,7 @@ class SynchronousCompositorProxyRegistry
 scoped_refptr<WidgetInputHandlerManager> WidgetInputHandlerManager::Create(
     base::WeakPtr<RenderWidget> render_widget,
     scoped_refptr<base::SingleThreadTaskRunner> compositor_task_runner,
-    blink::scheduler::WebMainThreadScheduler* main_thread_scheduler) {
+    blink::scheduler::WebThreadScheduler* main_thread_scheduler) {
   scoped_refptr<WidgetInputHandlerManager> manager =
       new WidgetInputHandlerManager(std::move(render_widget),
                                     std::move(compositor_task_runner),
@@ -116,7 +135,7 @@ scoped_refptr<WidgetInputHandlerManager> WidgetInputHandlerManager::Create(
 WidgetInputHandlerManager::WidgetInputHandlerManager(
     base::WeakPtr<RenderWidget> render_widget,
     scoped_refptr<base::SingleThreadTaskRunner> compositor_task_runner,
-    blink::scheduler::WebMainThreadScheduler* main_thread_scheduler)
+    blink::scheduler::WebThreadScheduler* main_thread_scheduler)
     : render_widget_(render_widget),
       main_thread_scheduler_(main_thread_scheduler),
       input_event_queue_(render_widget->GetInputEventQueue()),
@@ -142,7 +161,7 @@ void WidgetInputHandlerManager::Init() {
         FROM_HERE,
         base::BindOnce(
             &WidgetInputHandlerManager::InitOnCompositorThread, this,
-            render_widget_->compositor()->GetInputHandler(),
+            render_widget_->layer_tree_view()->GetInputHandler(),
             render_widget_->compositor_deps()->IsScrollAnimatorEnabled(),
             sync_compositing));
   }
@@ -206,15 +225,6 @@ void WidgetInputHandlerManager::DispatchNonBlockingEventToMainThread(
       INPUT_EVENT_ACK_STATE_SET_NON_BLOCKING, HandledEventCallback());
 }
 
-std::unique_ptr<blink::WebGestureCurve>
-WidgetInputHandlerManager::CreateFlingAnimationCurve(
-    blink::WebGestureDevice device_source,
-    const blink::WebFloatPoint& velocity,
-    const blink::WebSize& cumulative_scroll) {
-  return blink::Platform::Current()->CreateFlingAnimationCurve(
-      device_source, velocity, cumulative_scroll);
-}
-
 void WidgetInputHandlerManager::DidOverscroll(
     const gfx::Vector2dF& accumulated_overscroll,
     const gfx::Vector2dF& latest_overscroll_delta,
@@ -231,13 +241,6 @@ void WidgetInputHandlerManager::DidOverscroll(
   params.causal_event_viewport_point = causal_event_viewport_point;
   params.overscroll_behavior = overscroll_behavior;
   host->DidOverscroll(params);
-}
-
-void WidgetInputHandlerManager::DidStopFlinging() {
-  mojom::WidgetInputHandlerHost* host = GetWidgetInputHandlerHost();
-  if (!host)
-    return;
-  host->DidStopFlinging();
 }
 
 void WidgetInputHandlerManager::DidAnimateForInput() {
@@ -341,8 +344,7 @@ void WidgetInputHandlerManager::DispatchEvent(
   // platform timestamp in this process. Instead use the time that the event is
   // received as the event's timestamp.
   if (!base::TimeTicks::IsConsistentAcrossProcesses()) {
-    event->web_event->SetTimeStampSeconds(
-        ui::EventTimeStampToSeconds(base::TimeTicks::Now()));
+    event->web_event->SetTimeStamp(base::TimeTicks::Now());
   }
 
   if (compositor_task_runner_) {
@@ -371,10 +373,8 @@ void WidgetInputHandlerManager::InitOnCompositorThread(
     const base::WeakPtr<cc::InputHandler>& input_handler,
     bool smooth_scroll_enabled,
     bool sync_compositing) {
-  input_handler_proxy_ = std::make_unique<ui::InputHandlerProxy>(
-      input_handler.get(), this,
-      base::FeatureList::IsEnabled(features::kTouchpadAndWheelScrollLatching),
-      base::FeatureList::IsEnabled(features::kAsyncWheelEvents));
+  input_handler_proxy_ =
+      std::make_unique<ui::InputHandlerProxy>(input_handler.get(), this);
   input_handler_proxy_->set_smooth_scroll_enabled(smooth_scroll_enabled);
 
 #if defined(OS_ANDROID)
@@ -437,25 +437,21 @@ void WidgetInputHandlerManager::DidHandleInputEventAndOverscroll(
     const ui::LatencyInfo& latency_info,
     std::unique_ptr<ui::DidOverscrollParams> overscroll_params) {
   InputEventAckState ack_state = InputEventDispositionToAck(event_disposition);
-  switch (ack_state) {
-    case INPUT_EVENT_ACK_STATE_CONSUMED:
-      main_thread_scheduler_->DidHandleInputEventOnCompositorThread(
-          *input_event, blink::scheduler::WebMainThreadScheduler::
-                            InputEventState::EVENT_CONSUMED_BY_COMPOSITOR);
-      break;
-    case INPUT_EVENT_ACK_STATE_NOT_CONSUMED:
-    case INPUT_EVENT_ACK_STATE_SET_NON_BLOCKING_DUE_TO_FLING:
-      main_thread_scheduler_->DidHandleInputEventOnCompositorThread(
-          *input_event, blink::scheduler::WebMainThreadScheduler::
-                            InputEventState::EVENT_FORWARDED_TO_MAIN_THREAD);
-      break;
-    default:
-      break;
+  if (ack_state == INPUT_EVENT_ACK_STATE_CONSUMED) {
+    main_thread_scheduler_->DidHandleInputEventOnCompositorThread(
+        *input_event, blink::scheduler::WebThreadScheduler::InputEventState::
+                          EVENT_CONSUMED_BY_COMPOSITOR);
+  } else if (MainThreadEventQueue::IsForwardedAndSchedulerKnown(ack_state)) {
+    main_thread_scheduler_->DidHandleInputEventOnCompositorThread(
+        *input_event, blink::scheduler::WebThreadScheduler::InputEventState::
+                          EVENT_FORWARDED_TO_MAIN_THREAD);
   }
+
   if (ack_state == INPUT_EVENT_ACK_STATE_SET_NON_BLOCKING ||
       ack_state == INPUT_EVENT_ACK_STATE_SET_NON_BLOCKING_DUE_TO_FLING ||
       ack_state == INPUT_EVENT_ACK_STATE_NOT_CONSUMED) {
     DCHECK(!overscroll_params);
+    DCHECK(!latency_info.coalesced());
     InputEventDispatchType dispatch_type = callback.is_null()
                                                ? DISPATCH_TYPE_NON_BLOCKING
                                                : DISPATCH_TYPE_BLOCKING;

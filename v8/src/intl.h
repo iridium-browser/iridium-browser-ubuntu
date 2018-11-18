@@ -9,6 +9,8 @@
 #ifndef V8_INTL_H_
 #define V8_INTL_H_
 
+#include <string>
+
 #include "src/base/timezone-cache.h"
 #include "src/objects.h"
 #include "src/objects/string.h"
@@ -21,22 +23,28 @@ class TimeZone;
 namespace v8 {
 namespace internal {
 
+enum class ICUService {
+  kBreakIterator,
+  kCollator,
+  kDateFormat,
+  kNumberFormat,
+  kPluralRules,
+  kRelativeDateTimeFormatter,
+  kListFormatter,
+  kSegmenter
+};
+
 const UChar* GetUCharBufferFromFlat(const String::FlatContent& flat,
                                     std::unique_ptr<uc16[]>* dest,
                                     int32_t length);
-V8_WARN_UNUSED_RESULT Object* LocaleConvertCase(Handle<String> s,
-                                                Isolate* isolate,
-                                                bool is_to_upper,
-                                                const char* lang);
-V8_WARN_UNUSED_RESULT Object* ConvertToLower(Handle<String> s,
-                                             Isolate* isolate);
-V8_WARN_UNUSED_RESULT Object* ConvertToUpper(Handle<String> s,
-                                             Isolate* isolate);
-V8_WARN_UNUSED_RESULT Object* ConvertCase(Handle<String> s, bool is_upper,
-                                          Isolate* isolate);
+MaybeHandle<String> LocaleConvertCase(Handle<String> s, Isolate* isolate,
+                                      bool is_to_upper, const char* lang);
+MaybeHandle<String> ConvertToLower(Handle<String> s, Isolate* isolate);
+MaybeHandle<String> ConvertToUpper(Handle<String> s, Isolate* isolate);
+MaybeHandle<String> ConvertCase(Handle<String> s, bool is_upper,
+                                Isolate* isolate);
 
-V8_WARN_UNUSED_RESULT Object* ConvertOneByteToLower(String* src, String* dst,
-                                                    Isolate* isolate);
+V8_WARN_UNUSED_RESULT String* ConvertOneByteToLower(String* src, String* dst);
 
 const uint8_t* ToLatin1LowerTable();
 
@@ -64,9 +72,8 @@ class ICUTimezoneCache : public base::TimezoneCache {
 
   icu::TimeZone* timezone_;
 
-  static const int32_t kMaxTimezoneChars = 100;
-  char timezone_name_[kMaxTimezoneChars];
-  char dst_timezone_name_[kMaxTimezoneChars];
+  std::string timezone_name_;
+  std::string dst_timezone_name_;
 };
 
 }  // namespace internal

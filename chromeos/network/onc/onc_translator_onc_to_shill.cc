@@ -323,8 +323,8 @@ void LocalTranslator::TranslateEAP() {
   // password substitution variable is set.
   const base::Value* password_field =
       onc_object_->FindKey(::onc::eap::kPassword);
-  if (password_field &&
-      password_field->GetString() == ::onc::substitutes::kPasswordField) {
+  if (password_field && password_field->GetString() ==
+                            ::onc::substitutes::kPasswordPlaceholderVerbatim) {
     shill_dictionary_->SetKey(shill::kEapUseLoginPasswordProperty,
                               base::Value(true));
   }
@@ -363,10 +363,10 @@ void LocalTranslator::TranslateNetworkConfiguration() {
   const base::DictionaryValue* proxy_settings = nullptr;
   if (onc_object_->GetDictionaryWithoutPathExpansion(
           ::onc::network_config::kProxySettings, &proxy_settings)) {
-    std::unique_ptr<base::DictionaryValue> proxy_config =
+    base::Value proxy_config =
         ConvertOncProxySettingsToProxyConfig(*proxy_settings);
     std::string proxy_config_str;
-    base::JSONWriter::Write(*proxy_config.get(), &proxy_config_str);
+    base::JSONWriter::Write(proxy_config, &proxy_config_str);
     shill_dictionary_->SetKey(shill::kProxyConfigProperty,
                               base::Value(proxy_config_str));
   }

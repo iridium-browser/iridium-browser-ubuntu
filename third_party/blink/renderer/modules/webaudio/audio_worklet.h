@@ -24,13 +24,11 @@ class MODULES_EXPORT AudioWorklet final : public Worklet {
   WTF_MAKE_NONCOPYABLE(AudioWorklet);
 
  public:
-  // When the AudioWorklet runtime flag is not enabled, this constructor returns
-  // |nullptr|.
   static AudioWorklet* Create(BaseAudioContext*);
 
-  ~AudioWorklet() = default;
+  ~AudioWorklet() override = default;
 
-  void CreateProcessor(AudioWorkletHandler*,
+  void CreateProcessor(scoped_refptr<AudioWorkletHandler>,
                        MessagePortChannel,
                        scoped_refptr<SerializedScriptValue> node_options);
 

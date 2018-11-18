@@ -6,9 +6,11 @@
 
 #include "base/strings/pattern.h"
 #include "base/strings/stringprintf.h"
+#include "base/task/post_task.h"
 #include "content/browser/devtools/devtools_interceptor_controller.h"
 #include "content/browser/devtools/devtools_url_interceptor_request_job.h"
 #include "content/browser/devtools/protocol/network_handler.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/resource_request_info.h"
 #include "net/url_request/url_request.h"
@@ -27,8 +29,8 @@ DevToolsURLRequestInterceptor::DevToolsURLRequestInterceptor(
     : next_id_(0), weak_factory_(this) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   auto target_registry = std::make_unique<DevToolsTargetRegistry>(
-      content::BrowserThread::GetTaskRunnerForThread(
-          content::BrowserThread::IO));
+      base::CreateSingleThreadTaskRunnerWithTraits(
+          {content::BrowserThread::IO}));
   target_resolver_ = target_registry->CreateResolver();
   // Controller lifetime is managed by the browser context.
   auto* controller = new DevToolsInterceptorController(
@@ -58,8 +60,8 @@ void DevToolsURLRequestInterceptor::ContinueInterceptedRequest(
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DevToolsURLInterceptorRequestJob* job = GetJob(interception_id);
   if (!job) {
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, {BrowserThread::UI},
         base::BindOnce(
             &ContinueInterceptedRequestCallback::sendFailure,
             std::move(callback),
@@ -97,8 +99,8 @@ void DevToolsURLRequestInterceptor::GetResponseBody(
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
   DevToolsURLInterceptorRequestJob* job = GetJob(interception_id);
   if (!job) {
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, {BrowserThread::UI},
         base::BindOnce(
             &GetResponseBodyForInterceptionCallback::sendFailure,
             std::move(callback),
@@ -141,12 +143,11 @@ net::URLRequestJob* DevToolsURLRequestInterceptor::InnerMaybeInterceptRequest(
     return nullptr;
   DCHECK(interception_stage != DONT_INTERCEPT);
 
-  bool is_redirect;
-  std::string interception_id = GetIdForRequest(request, &is_redirect);
+  std::string interception_id = base::StringPrintf("id-%zu", ++next_id_);
 
   if (IsNavigationRequest(resource_type)) {
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, {BrowserThread::UI},
         base::BindOnce(&DevToolsInterceptorController::NavigationStarted,
                        controller_, interception_id,
                        resource_request_info->GetGlobalRequestID()));
@@ -155,8 +156,7 @@ net::URLRequestJob* DevToolsURLRequestInterceptor::InnerMaybeInterceptRequest(
   DevToolsURLInterceptorRequestJob* job = new DevToolsURLInterceptorRequestJob(
       this, interception_id, reinterpret_cast<intptr_t>(entry), request,
       network_delegate, target_info->devtools_token, entry->callback,
-      is_redirect, resource_request_info->GetResourceType(),
-      interception_stage);
+      resource_request_info->GetResourceType(), interception_stage);
   interception_id_to_job_map_[interception_id] = job;
   return job;
 }
@@ -219,7 +219,9 @@ DevToolsURLRequestInterceptor::FilterEntryForRequest(
     return nullptr;
 
   const std::vector<std::unique_ptr<FilterEntry>>& entries = it->second;
-  const std::string url_str = protocol::NetworkHandler::ClearUrlRef(url).spec();
+  std::string unused;
+  const std::string url_str =
+      protocol::NetworkHandler::ExtractFragment(url, &unused);
   for (const auto& entry : entries) {
     for (const Pattern& pattern : entry->patterns) {
       if (!pattern.resource_types.empty() &&
@@ -259,28 +261,6 @@ void DevToolsURLRequestInterceptor::UnregisterSubRequest(
   sub_requests_.erase(sub_request);
 }
 
-void DevToolsURLRequestInterceptor::ExpectRequestAfterRedirect(
-    const net::URLRequest* request,
-    std::string id) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  expected_redirects_[request] = id;
-}
-
-std::string DevToolsURLRequestInterceptor::GetIdForRequest(
-    const net::URLRequest* request,
-    bool* is_redirect) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
-  auto find_it = expected_redirects_.find(request);
-  if (find_it == expected_redirects_.end()) {
-    *is_redirect = false;
-    return base::StringPrintf("id-%zu", ++next_id_);
-  }
-  *is_redirect = true;
-  std::string id = find_it->second;
-  expected_redirects_.erase(find_it);
-  return id;
-}
-
 DevToolsURLInterceptorRequestJob* DevToolsURLRequestInterceptor::GetJob(
     const std::string& interception_id) const {
   DCHECK_CURRENTLY_ON(BrowserThread::IO);
@@ -297,8 +277,8 @@ void DevToolsURLRequestInterceptor::JobFinished(
   interception_id_to_job_map_.erase(interception_id);
   if (!is_navigation)
     return;
-  BrowserThread::PostTask(
-      BrowserThread::UI, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::UI},
       base::BindOnce(&DevToolsInterceptorController::NavigationFinished,
                      controller_, interception_id));
 }

@@ -9,7 +9,6 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/threading/thread_task_runner_handle.h"
@@ -74,11 +73,12 @@ class CaptivePortalWindowTest : public InProcessBrowserTest {
   void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitch(chromeos::switches::kForceLoginManagerInTests);
     command_line->AppendSwitch(chromeos::switches::kLoginManager);
+    command_line->AppendSwitch(chromeos::switches::kDisableHIDDetectionOnOOBE);
   }
 
   void SetUpOnMainThread() override {
     content::WebContents* web_contents =
-        LoginDisplayHost::default_host()->GetWebUILoginView()->GetWebContents();
+        LoginDisplayHost::default_host()->GetOobeWebContents();
     captive_portal_window_proxy_.reset(
         new CaptivePortalWindowProxy(&delegate_, web_contents));
   }
@@ -103,6 +103,8 @@ IN_PROC_BROWSER_TEST_F(CaptivePortalWindowTest, ShowClose) {
   CheckState(true, 0);
 
   Close();
+  // Wait for widget to be destroyed
+  base::RunLoop().RunUntilIdle();
   CheckState(false, 0);
 }
 
@@ -116,6 +118,8 @@ IN_PROC_BROWSER_TEST_F(CaptivePortalWindowTest, OnRedirected) {
   CheckState(true, 1);
 
   Close();
+  // Wait for widget to be destroyed
+  base::RunLoop().RunUntilIdle();
   CheckState(false, 1);
 }
 
@@ -129,6 +133,8 @@ IN_PROC_BROWSER_TEST_F(CaptivePortalWindowTest, OnOriginalURLLoaded) {
   CheckState(true, 1);
 
   OnOriginalURLLoaded();
+  // Wait for widget to be destroyed
+  base::RunLoop().RunUntilIdle();
   CheckState(false, 1);
 }
 
@@ -142,12 +148,16 @@ IN_PROC_BROWSER_TEST_F(CaptivePortalWindowTest, MultipleCalls) {
   CheckState(true, 0);
 
   Close();
+  // Wait for widget to be destroyed
+  base::RunLoop().RunUntilIdle();
   CheckState(false, 0);
 
   OnRedirected();
   CheckState(false, 1);
 
   OnOriginalURLLoaded();
+  // Wait for widget to be destroyed
+  base::RunLoop().RunUntilIdle();
   CheckState(false, 1);
 
   Show();
@@ -157,6 +167,8 @@ IN_PROC_BROWSER_TEST_F(CaptivePortalWindowTest, MultipleCalls) {
   CheckState(true, 2);
 
   Close();
+  // Wait for widget to be destroyed
+  base::RunLoop().RunUntilIdle();
   CheckState(false, 2);
 
   OnOriginalURLLoaded();
@@ -165,7 +177,8 @@ IN_PROC_BROWSER_TEST_F(CaptivePortalWindowTest, MultipleCalls) {
 
 class CaptivePortalWindowCtorDtorTest : public LoginManagerTest {
  public:
-  CaptivePortalWindowCtorDtorTest() : LoginManagerTest(false) {}
+  CaptivePortalWindowCtorDtorTest()
+      : LoginManagerTest(false, true /* should_initialize_webui */) {}
   ~CaptivePortalWindowCtorDtorTest() override {}
 
   void SetUpInProcessBrowserTestFixture() override {

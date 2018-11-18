@@ -6,7 +6,7 @@
 
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/renderer/core/dom/document.h"
-#include "third_party/blink/renderer/platform/feature_policy/feature_policy.h"
+#include "third_party/blink/renderer/core/feature_policy/feature_policy.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_utf8_adaptor.h"
 
 namespace blink {
@@ -40,13 +40,13 @@ TEST_F(HTMLIFrameElementTest, FramesUseCorrectOrigin) {
   effective_origin = GetOriginForFeaturePolicy(frame_element);
   EXPECT_FALSE(
       effective_origin->IsSameSchemeHostPort(document->GetSecurityOrigin()));
-  EXPECT_TRUE(effective_origin->IsUnique());
+  EXPECT_TRUE(effective_origin->IsOpaque());
 
   frame_element->setAttribute(HTMLNames::srcAttr, "http://example.net/");
   effective_origin = GetOriginForFeaturePolicy(frame_element);
   EXPECT_FALSE(
       effective_origin->IsSameSchemeHostPort(document->GetSecurityOrigin()));
-  EXPECT_FALSE(effective_origin->IsUnique());
+  EXPECT_FALSE(effective_origin->IsOpaque());
 }
 
 // Test that a unique origin is used when constructing the container policy in a
@@ -65,13 +65,13 @@ TEST_F(HTMLIFrameElementTest, SandboxFramesUseCorrectOrigin) {
       GetOriginForFeaturePolicy(frame_element);
   EXPECT_FALSE(
       effective_origin->IsSameSchemeHostPort(document->GetSecurityOrigin()));
-  EXPECT_TRUE(effective_origin->IsUnique());
+  EXPECT_TRUE(effective_origin->IsOpaque());
 
   frame_element->setAttribute(HTMLNames::srcAttr, "http://example.net/");
   effective_origin = GetOriginForFeaturePolicy(frame_element);
   EXPECT_FALSE(
       effective_origin->IsSameSchemeHostPort(document->GetSecurityOrigin()));
-  EXPECT_TRUE(effective_origin->IsUnique());
+  EXPECT_TRUE(effective_origin->IsOpaque());
 }
 
 // Test that a sandboxed iframe with the allow-same-origin sandbox flag uses the
@@ -90,7 +90,7 @@ TEST_F(HTMLIFrameElementTest, SameOriginSandboxFramesUseCorrectOrigin) {
       GetOriginForFeaturePolicy(frame_element);
   EXPECT_TRUE(
       effective_origin->IsSameSchemeHostPort(document->GetSecurityOrigin()));
-  EXPECT_FALSE(effective_origin->IsUnique());
+  EXPECT_FALSE(effective_origin->IsOpaque());
 }
 
 // Test that the parent document's origin is used when constructing the
@@ -126,7 +126,7 @@ TEST_F(HTMLIFrameElementTest, SandboxedSrcdocFramesUseCorrectOrigin) {
       GetOriginForFeaturePolicy(frame_element);
   EXPECT_FALSE(
       effective_origin->IsSameSchemeHostPort(document->GetSecurityOrigin()));
-  EXPECT_TRUE(effective_origin->IsUnique());
+  EXPECT_TRUE(effective_origin->IsOpaque());
 }
 
 // Test that iframes with relative src urls correctly construct their origin
@@ -216,27 +216,6 @@ TEST_F(HTMLIFrameElementTest, AllowAttributeContainerPolicy) {
   EXPECT_FALSE(container_policy2[1].matches_all_origins);
   EXPECT_EQ(1UL, container_policy2[1].origins.size());
   EXPECT_EQ("http://example.net", container_policy2[1].origins[0].Serialize());
-
-  // TODO(loonybear): Remove this test when deprecating the old syntax.
-  // Test for supporting old allow syntax.
-  frame_element->setAttribute(HTMLNames::allowAttr, "payment fullscreen");
-
-  const ParsedFeaturePolicy& container_policy3 =
-      frame_element->ContainerPolicy();
-  EXPECT_EQ(2UL, container_policy3.size());
-  EXPECT_TRUE(container_policy3[0].feature ==
-                  mojom::FeaturePolicyFeature::kFullscreen ||
-              container_policy3[1].feature ==
-                  mojom::FeaturePolicyFeature::kFullscreen);
-  EXPECT_TRUE(
-      container_policy3[0].feature == mojom::FeaturePolicyFeature::kPayment ||
-      container_policy3[1].feature == mojom::FeaturePolicyFeature::kPayment);
-  EXPECT_FALSE(container_policy3[0].matches_all_origins);
-  EXPECT_EQ(1UL, container_policy3[0].origins.size());
-  EXPECT_EQ("http://example.net", container_policy3[0].origins[0].Serialize());
-  EXPECT_FALSE(container_policy3[1].matches_all_origins);
-  EXPECT_EQ(1UL, container_policy3[1].origins.size());
-  EXPECT_EQ("http://example.net", container_policy3[1].origins[0].Serialize());
 }
 
 // Test that the allow attribute on a sandboxed frame results in a container
@@ -290,7 +269,7 @@ TEST_F(HTMLIFrameElementTest, SameOriginSandboxAttributeContainerPolicy) {
   EXPECT_FALSE(container_policy[0].matches_all_origins);
   EXPECT_FALSE(container_policy[0].matches_opaque_src);
   EXPECT_EQ(1UL, container_policy[0].origins.size());
-  EXPECT_FALSE(container_policy[0].origins[0].unique());
+  EXPECT_FALSE(container_policy[0].origins[0].opaque());
   EXPECT_EQ("http://example.net", container_policy[0].origins[0].Serialize());
 }
 
@@ -305,7 +284,7 @@ TEST_F(HTMLIFrameElementTest, ConstructEmptyContainerPolicy) {
   HTMLIFrameElement* frame_element = HTMLIFrameElement::Create(*document);
 
   ParsedFeaturePolicy container_policy =
-      frame_element->ConstructContainerPolicy(nullptr, nullptr);
+      frame_element->ConstructContainerPolicy(nullptr);
   EXPECT_EQ(0UL, container_policy.size());
 }
 
@@ -320,7 +299,7 @@ TEST_F(HTMLIFrameElementTest, ConstructContainerPolicy) {
   HTMLIFrameElement* frame_element = HTMLIFrameElement::Create(*document);
   frame_element->setAttribute(HTMLNames::allowAttr, "payment; usb");
   ParsedFeaturePolicy container_policy =
-      frame_element->ConstructContainerPolicy(nullptr, nullptr);
+      frame_element->ConstructContainerPolicy(nullptr);
   EXPECT_EQ(2UL, container_policy.size());
   EXPECT_EQ(mojom::FeaturePolicyFeature::kPayment, container_policy[0].feature);
   EXPECT_FALSE(container_policy[0].matches_all_origins);
@@ -346,7 +325,7 @@ TEST_F(HTMLIFrameElementTest, ConstructContainerPolicyWithAllowFullscreen) {
   frame_element->SetBooleanAttribute(HTMLNames::allowfullscreenAttr, true);
 
   ParsedFeaturePolicy container_policy =
-      frame_element->ConstructContainerPolicy(nullptr, nullptr);
+      frame_element->ConstructContainerPolicy(nullptr);
   EXPECT_EQ(1UL, container_policy.size());
   EXPECT_EQ(mojom::FeaturePolicyFeature::kFullscreen,
             container_policy[0].feature);
@@ -366,7 +345,7 @@ TEST_F(HTMLIFrameElementTest, ConstructContainerPolicyWithAllowPaymentRequest) {
   frame_element->SetBooleanAttribute(HTMLNames::allowpaymentrequestAttr, true);
 
   ParsedFeaturePolicy container_policy =
-      frame_element->ConstructContainerPolicy(nullptr, nullptr);
+      frame_element->ConstructContainerPolicy(nullptr);
   EXPECT_EQ(2UL, container_policy.size());
   EXPECT_EQ(mojom::FeaturePolicyFeature::kUsb, container_policy[0].feature);
   EXPECT_FALSE(container_policy[0].matches_all_origins);
@@ -395,7 +374,7 @@ TEST_F(HTMLIFrameElementTest, ConstructContainerPolicyWithAllowAttributes) {
   frame_element->SetBooleanAttribute(HTMLNames::allowpaymentrequestAttr, true);
 
   ParsedFeaturePolicy container_policy =
-      frame_element->ConstructContainerPolicy(nullptr, nullptr);
+      frame_element->ConstructContainerPolicy(nullptr);
   EXPECT_EQ(3UL, container_policy.size());
   EXPECT_EQ(mojom::FeaturePolicyFeature::kPayment, container_policy[0].feature);
   EXPECT_FALSE(container_policy[0].matches_all_origins);

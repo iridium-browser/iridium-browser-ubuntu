@@ -51,7 +51,7 @@ void LayoutTableBoxComponent::MutableForPainting::UpdatePaintResult(
   auto& box = static_cast<LayoutTableBoxComponent&>(layout_object_);
   if (box.last_paint_result_ != kFullyPainted &&
       box.last_paint_rect_ != paint_rect)
-    layout_object_.SetDisplayItemsUncached();
+    static_cast<const DisplayItemClient&>(layout_object_).Invalidate();
 
   box.last_paint_result_ = paint_result;
   box.last_paint_rect_ = paint_rect;
@@ -60,7 +60,9 @@ void LayoutTableBoxComponent::MutableForPainting::UpdatePaintResult(
 void LayoutTableBoxComponent::StyleDidChange(StyleDifference diff,
                                              const ComputedStyle* old_style) {
   LayoutBox::StyleDidChange(diff, old_style);
-  SetCanContainFixedPositionObjects(Style()->CanContainFixedPositionObjects());
+  SetCanContainFixedPositionObjects(
+      StyleRef().CanContainFixedPositionObjects(false) ||
+      ShouldApplyPaintContainment() || ShouldApplyLayoutContainment());
 }
 
 }  // namespace blink

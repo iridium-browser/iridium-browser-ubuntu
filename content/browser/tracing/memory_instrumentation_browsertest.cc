@@ -27,7 +27,7 @@ namespace content {
 class MemoryInstrumentationTest : public ContentBrowserTest {
  protected:
   void Navigate(Shell* shell) {
-    NavigateToURL(shell, GetTestUrl("", "title.html"));
+    EXPECT_TRUE(NavigateToURL(shell, GetTestUrl("", "title1.html")));
   }
 };
 
@@ -53,15 +53,16 @@ std::unique_ptr<GlobalMemoryDump> DoGlobalDump() {
   std::unique_ptr<GlobalMemoryDump> result = nullptr;
   base::RunLoop run_loop;
   memory_instrumentation::MemoryInstrumentation::GetInstance()
-      ->RequestGlobalDump(base::Bind(
-          [](base::Closure quit_closure,
-             std::unique_ptr<GlobalMemoryDump>* out_result, bool success,
-             std::unique_ptr<GlobalMemoryDump> result) {
-            EXPECT_TRUE(success);
-            *out_result = std::move(result);
-            std::move(quit_closure).Run();
-          },
-          run_loop.QuitClosure(), &result));
+      ->RequestGlobalDump(
+          {}, base::Bind(
+                  [](base::Closure quit_closure,
+                     std::unique_ptr<GlobalMemoryDump>* out_result,
+                     bool success, std::unique_ptr<GlobalMemoryDump> result) {
+                    EXPECT_TRUE(success);
+                    *out_result = std::move(result);
+                    std::move(quit_closure).Run();
+                  },
+                  run_loop.QuitClosure(), &result));
   run_loop.Run();
   return result;
 }
@@ -72,7 +73,7 @@ std::unique_ptr<GlobalMemoryDump> DoGlobalDump() {
     defined(THREAD_SANITIZER)
 #define MAYBE_PrivateFootprintComputation DISABLED_PrivateFootprintComputation
 #else
-#define MAYBE_PrivateFootprintComputation PrivateFootprintComputatio
+#define MAYBE_PrivateFootprintComputation PrivateFootprintComputation
 #endif
 
 // Despite the location, this test is not tracing related.
@@ -96,7 +97,7 @@ IN_PROC_BROWSER_TEST_F(MemoryInstrumentationTest,
 
   content::WebContents* web_contents = shell()->web_contents();
   base::ProcessId renderer_pid =
-      base::GetProcId(web_contents->GetMainFrame()->GetProcess()->GetHandle());
+      web_contents->GetMainFrame()->GetProcess()->GetProcess().Pid();
 
   // Should allocate at least 4*10^6 / 1024 = 4000kb.
   EXPECT_TRUE(content::ExecuteScript(web_contents,

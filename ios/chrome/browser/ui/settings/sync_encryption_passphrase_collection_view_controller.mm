@@ -11,7 +11,7 @@
 
 #include "base/strings/sys_string_conversions.h"
 #include "components/browser_sync/profile_sync_service.h"
-#include "components/google/core/browser/google_util.h"
+#include "components/google/core/common/google_util.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #import "components/signin/ios/browser/oauth2_token_service_observer_bridge.h"
 #include "components/strings/grit/components_strings.h"
@@ -20,11 +20,12 @@
 #include "ios/chrome/browser/chrome_url_constants.h"
 #import "ios/chrome/browser/signin/authentication_service.h"
 #include "ios/chrome/browser/signin/authentication_service_factory.h"
-#include "ios/chrome/browser/signin/oauth2_token_service_factory.h"
-#include "ios/chrome/browser/sync/ios_chrome_profile_sync_service_factory.h"
+#include "ios/chrome/browser/signin/profile_oauth2_token_service_factory.h"
+#include "ios/chrome/browser/sync/profile_sync_service_factory.h"
 #include "ios/chrome/browser/sync/sync_setup_service.h"
 #include "ios/chrome/browser/sync/sync_setup_service_factory.h"
 #import "ios/chrome/browser/ui/collection_view/cells/MDCCollectionViewCell+Chrome.h"
+#import "ios/chrome/browser/ui/collection_view/cells/collection_view_cell_constants.h"
 #import "ios/chrome/browser/ui/collection_view/cells/collection_view_footer_item.h"
 #import "ios/chrome/browser/ui/collection_view/cells/collection_view_item.h"
 #import "ios/chrome/browser/ui/collection_view/collection_view_model.h"
@@ -118,7 +119,7 @@ const CGFloat kSpinnerButtonPadding = 18;
             ->GetAuthenticatedUserEmail();
     DCHECK(userEmail);
     browser_sync::ProfileSyncService* service =
-        IOSChromeProfileSyncServiceFactory::GetForBrowserState(browserState_);
+        ProfileSyncServiceFactory::GetForBrowserState(browserState_);
     if (service->IsEngineInitialized() &&
         service->IsUsingSecondaryPassphrase()) {
       base::Time passphrase_time = service->GetExplicitPassphraseTime();
@@ -141,7 +142,8 @@ const CGFloat kSpinnerButtonPadding = 18;
     footerMessage_ = l10n_util::GetNSString(IDS_IOS_SYNC_PASSPHRASE_RECOVER);
 
     tokenServiceObserver_.reset(new OAuth2TokenServiceObserverBridge(
-        OAuth2TokenServiceFactory::GetForBrowserState(browserState_), self));
+        ProfileOAuth2TokenServiceFactory::GetForBrowserState(browserState_),
+        self));
 
     // TODO(crbug.com/764578): -loadModel should not be called from
     // initializer. A possible fix is to move this call to -viewDidLoad.
@@ -236,7 +238,6 @@ const CGFloat kSpinnerButtonPadding = 18;
     [self unregisterTextField:passphrase_];
   }
   passphrase_ = [[UITextField alloc] init];
-  [passphrase_ setFont:[MDCTypography body1Font]];
   [passphrase_ setSecureTextEntry:YES];
   [passphrase_ setBackgroundColor:[UIColor clearColor]];
   [passphrase_ setAutoresizingMask:UIViewAutoresizingFlexibleWidth];
@@ -261,6 +262,7 @@ const CGFloat kSpinnerButtonPadding = 18;
 - (CollectionViewItem*)footerItem {
   CollectionViewFooterItem* footerItem =
       [[CollectionViewFooterItem alloc] initWithType:ItemTypeFooter];
+  footerItem.cellStyle = CollectionViewCellStyle::kUIKit;
   footerItem.text = self.footerMessage;
   footerItem.linkURL = google_util::AppendGoogleLocaleParam(
       GURL(kSyncGoogleDashboardURL),
@@ -311,23 +313,6 @@ const CGFloat kSpinnerButtonPadding = 18;
   return MDCCellDefaultOneLineHeight;
 }
 
-#pragma mark - UICollectionViewDataSource
-
-- (UICollectionViewCell*)collectionView:(UICollectionView*)collectionView
-                 cellForItemAtIndexPath:(NSIndexPath*)indexPath {
-  UICollectionViewCell* cell =
-      [super collectionView:collectionView cellForItemAtIndexPath:indexPath];
-  CollectionViewItem* item =
-      [self.collectionViewModel itemAtIndexPath:indexPath];
-  if (item.type == ItemTypeMessage) {
-    CardMultilineCell* messageCell =
-        base::mac::ObjCCastStrict<CardMultilineCell>(cell);
-    messageCell.textLabel.font =
-        [[MDCTypography fontLoader] mediumFontOfSize:14];
-  }
-  return cell;
-}
-
 #pragma mark - UICollectionViewDelegate
 
 - (void)collectionView:(UICollectionView*)collectionView
@@ -351,15 +336,14 @@ const CGFloat kSpinnerButtonPadding = 18;
 
   if (!syncObserver_.get()) {
     syncObserver_.reset(new SyncObserverBridge(
-        self,
-        IOSChromeProfileSyncServiceFactory::GetForBrowserState(browserState_)));
+        self, ProfileSyncServiceFactory::GetForBrowserState(browserState_)));
   }
 
   // Clear out the error message.
   self.syncErrorMessage = nil;
 
   browser_sync::ProfileSyncService* service =
-      IOSChromeProfileSyncServiceFactory::GetForBrowserState(browserState_);
+      ProfileSyncServiceFactory::GetForBrowserState(browserState_);
   DCHECK(service);
   // It is possible for a race condition to happen where a user is allowed
   // to call the backend with the passphrase before the backend is
@@ -535,7 +519,7 @@ const CGFloat kSpinnerButtonPadding = 18;
 
 - (void)onSyncStateChanged {
   browser_sync::ProfileSyncService* service =
-      IOSChromeProfileSyncServiceFactory::GetForBrowserState(browserState_);
+      ProfileSyncServiceFactory::GetForBrowserState(browserState_);
 
   if (!service->IsEngineInitialized()) {
     return;

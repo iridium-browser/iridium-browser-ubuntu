@@ -20,7 +20,6 @@
 #include "chrome/browser/extensions/launch_util.h"
 #include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/app_list/app_list_service.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_finder.h"
@@ -32,7 +31,7 @@
 #include "chrome/browser/ui/extensions/extension_enable_flow_delegate.h"
 #include "chrome/browser/ui/extensions/hosted_app_browser_controller.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
-#include "chrome/browser/web_applications/web_app.h"
+#include "chrome/browser/web_applications/components/web_app_helpers.h"
 #include "chrome/common/extensions/manifest_handlers/app_launch_info.h"
 #include "chrome/common/url_constants.h"
 #include "content/public/browser/web_contents.h"
@@ -62,16 +61,14 @@ namespace {
 // This class manages its own lifetime.
 class EnableViaDialogFlow : public ExtensionEnableFlowDelegate {
  public:
-  EnableViaDialogFlow(
-      ExtensionService* service,
-      Profile* profile,
-      const std::string& extension_id,
-      const base::Closure& callback)
+  EnableViaDialogFlow(extensions::ExtensionService* service,
+                      Profile* profile,
+                      const std::string& extension_id,
+                      const base::Closure& callback)
       : service_(service),
         profile_(profile),
         extension_id_(extension_id),
-        callback_(callback) {
-  }
+        callback_(callback) {}
 
   ~EnableViaDialogFlow() override {}
 
@@ -94,7 +91,7 @@ class EnableViaDialogFlow : public ExtensionEnableFlowDelegate {
 
   void ExtensionEnableFlowAborted(bool user_initiated) override { delete this; }
 
-  ExtensionService* service_;
+  extensions::ExtensionService* service_;
   Profile* profile_;
   std::string extension_id_;
   base::Closure callback_;
@@ -244,7 +241,7 @@ WebContents* OpenApplicationTab(const AppLaunchParams& launch_params,
     contents = existing_tab;
   } else {
     Navigate(&params);
-    contents = params.target_contents;
+    contents = params.navigated_or_inserted_contents;
   }
 
 #if defined(OS_CHROMEOS)
@@ -338,15 +335,18 @@ WebContents* OpenApplication(const AppLaunchParams& params) {
   return OpenEnabledApplication(params);
 }
 
-WebContents* OpenApplicationWindow(const AppLaunchParams& params,
-                                   const GURL& url) {
+Browser* CreateApplicationWindow(const AppLaunchParams& params,
+                                 const GURL& url) {
   Profile* const profile = params.profile;
   const Extension* const extension = GetExtension(params);
 
-  std::string app_name =
-      extension
-          ? web_app::GenerateApplicationNameFromExtensionId(extension->id())
-          : web_app::GenerateApplicationNameFromURL(url);
+  std::string app_name;
+  if (!params.override_app_name.empty())
+    app_name = params.override_app_name;
+  else if (extension)
+    app_name = web_app::GenerateApplicationNameFromAppId(extension->id());
+  else
+    app_name = web_app::GenerateApplicationNameFromURL(url);
 
   gfx::Rect initial_bounds;
   if (!params.override_bounds.IsEmpty()) {
@@ -366,7 +366,13 @@ WebContents* OpenApplicationWindow(const AppLaunchParams& params,
   browser_params.initial_show_state =
       DetermineWindowShowState(profile, params.container, extension);
 
-  Browser* browser = new Browser(browser_params);
+  return new Browser(browser_params);
+}
+
+WebContents* ShowApplicationWindow(const AppLaunchParams& params,
+                                   const GURL& url,
+                                   Browser* browser) {
+  const Extension* const extension = GetExtension(params);
   ui::PageTransition transition =
       (extension ? ui::PAGE_TRANSITION_AUTO_BOOKMARK
                  : ui::PAGE_TRANSITION_AUTO_TOPLEVEL);
@@ -376,10 +382,9 @@ WebContents* OpenApplicationWindow(const AppLaunchParams& params,
   nav_params.opener = params.opener;
   Navigate(&nav_params);
 
-  WebContents* web_contents = nav_params.target_contents;
+  WebContents* web_contents = nav_params.navigated_or_inserted_contents;
   extensions::HostedAppBrowserController::SetAppPrefsForWebContents(
       browser->hosted_app_controller(), web_contents);
-
   browser->window()->Show();
 
   // TODO(jcampan): http://crbug.com/8123 we should not need to set the initial
@@ -388,13 +393,19 @@ WebContents* OpenApplicationWindow(const AppLaunchParams& params,
   return web_contents;
 }
 
+WebContents* OpenApplicationWindow(const AppLaunchParams& params,
+                                   const GURL& url) {
+  Browser* browser = CreateApplicationWindow(params, url);
+  return ShowApplicationWindow(params, url, browser);
+}
+
 void OpenApplicationWithReenablePrompt(const AppLaunchParams& params) {
   const Extension* extension = GetExtension(params);
   if (!extension)
     return;
   Profile* profile = params.profile;
 
-  ExtensionService* service =
+  extensions::ExtensionService* service =
       extensions::ExtensionSystem::Get(profile)->extension_service();
   if (!service->IsExtensionEnabled(extension->id()) ||
       extensions::ExtensionRegistry::Get(profile)->GetExtensionById(
@@ -445,7 +456,7 @@ Browser* ReparentWebContentsIntoAppBrowser(
   DCHECK(!profile->IsOffTheRecord());
 
   Browser::CreateParams browser_params(Browser::CreateParams::CreateForApp(
-      web_app::GenerateApplicationNameFromExtensionId(extension->id()),
+      web_app::GenerateApplicationNameFromAppId(extension->id()),
       true /* trusted_source */, gfx::Rect(), profile,
       true /* user_gesture */));
   Browser* target_browser = new Browser(browser_params);

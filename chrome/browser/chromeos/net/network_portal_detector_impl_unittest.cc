@@ -16,7 +16,7 @@
 #include "base/metrics/histogram_samples.h"
 #include "base/metrics/statistics_recorder.h"
 #include "base/run_loop.h"
-#include "base/test/histogram_tester.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
 #include "chrome/browser/chromeos/net/network_portal_detector_test_utils.h"
 #include "chrome/test/base/testing_browser_process.h"
@@ -106,7 +106,7 @@ class NetworkPortalDetectorImplTest
     EXPECT_TRUE(user_manager::UserManager::Get()->GetPrimaryUser());
 
     network_portal_detector_.reset(
-        new NetworkPortalDetectorImpl(test_loader_factory(), false));
+        new NetworkPortalDetectorImpl(test_loader_factory()));
     network_portal_detector_->Enable(false);
 
     set_detector(network_portal_detector_->captive_portal_detector_.get());
@@ -171,8 +171,8 @@ class NetworkPortalDetectorImplTest
     return network_portal_detector()->state();
   }
 
-  bool start_detection_if_idle() {
-    return network_portal_detector()->StartDetectionIfIdle();
+  bool StartPortalDetection(bool force) {
+    return network_portal_detector()->StartPortalDetection(force);
   }
 
   void enable_error_screen_strategy() {
@@ -857,7 +857,7 @@ TEST_F(NetworkPortalDetectorImplTest, TestDetectionRestart) {
   // First portal detection attempts determines ONLINE state.
   SetConnected(kStubWireless1);
   ASSERT_EQ(State::STATE_CHECKING_FOR_PORTAL, state());
-  ASSERT_FALSE(start_detection_if_idle());
+  ASSERT_FALSE(StartPortalDetection(false /* force */));
 
   CompleteURLFetch(net::OK, 204, nullptr);
 

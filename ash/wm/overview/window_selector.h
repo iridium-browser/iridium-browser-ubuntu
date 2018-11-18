@@ -57,9 +57,41 @@ class ASH_EXPORT WindowSelector : public display::DisplayObserver,
   enum Direction { LEFT, UP, RIGHT, DOWN };
 
   enum class OverviewTransition {
-    kEnter,  // In the entering process of overview.
-    kExit    // In the exiting process of overview.
+    kEnter,       // In the entering process of overview.
+    kInOverview,  // Already in overview.
+    kExit         // In the exiting process of overview.
   };
+
+  // Enum describing the different ways overview can be entered or exited.
+  // TODO(minch|xdai): Investigate if we should add kWindowDragged and/or
+  // kWindowSnapped to this.
+  enum class EnterExitOverviewType {
+    // The default way, window(s) animate from their initial bounds to the grid
+    // bounds. Window(s) that are not visible to the user do not get animated.
+    // This should always be the type when in clamshell mode.
+    kNormal,
+    // When going to or from a state which all window(s) are minimized, slides
+    // the windows in or out. This will minimize windows on exit if needed, so
+    // that we do not need to add a delayed observer to handle minimizing the
+    // windows after overview exit animations are finished.
+    kWindowsMinimized,
+    // Overview can be closed by swiping up from the shelf. In this mode, the
+    // call site will handle shifting the bounds of the windows, so overview
+    // code does not need to handle any animations. This is an exit only type.
+    kSwipeFromShelf,
+    // Overview can be opened by start dragging a window from top or be closed
+    // if the dragged window restores back to maximized/full-screened. Used as
+    // an exit type only currently to avoid the update bounds animation of the
+    // windows in overview grid on overview mode ended.
+    kWindowDragged
+  };
+
+  // Callback which fills out the passed settings object. Used by several
+  // functions so different callers can do similar animations with different
+  // settings.
+  using UpdateAnimationSettingsCallback =
+      base::RepeatingCallback<void(ui::ScopedLayerAnimationSettings* settings,
+                                   bool observe)>;
 
   using WindowList = std::vector<aura::Window*>;
 
@@ -89,11 +121,7 @@ class ASH_EXPORT WindowSelector : public display::DisplayObserver,
   // Activates |item's| window.
   void SelectWindow(WindowSelectorItem* item);
 
-  // Called when |window| is about to get closed.
-  void WindowClosing(WindowSelectorItem* window);
-
   // Called to set bounds for window grids. Used for split view.
-  void SetBoundsForWindowGridsInScreen(const gfx::Rect& bounds);
   void SetBoundsForWindowGridsInScreenIgnoringWindow(
       const gfx::Rect& bounds,
       WindowSelectorItem* ignored_item);
@@ -104,27 +132,59 @@ class ASH_EXPORT WindowSelector : public display::DisplayObserver,
   void SetSplitViewDragIndicatorsIndicatorState(
       IndicatorState indicator_state,
       const gfx::Point& event_location);
+
   // Retrieves the window grid whose root window matches |root_window|. Returns
   // nullptr if the window grid is not found.
   WindowGrid* GetGridWithRootWindow(aura::Window* root_window);
 
   // Add |window| to the grid in |grid_list_| with the same root window. Does
-  // nothing if the grid already contains |window|.
-  void AddItem(aura::Window* window);
+  // nothing if the grid already contains |window|. And if |reposition| is true,
+  // re-position all windows in the target window grid. If |animate| is true,
+  // re-position with animation. This function may be called in two scenarios:
+  // 1) when a item in split view mode was previously snapped but should now be
+  // returned to the window grid (e.g. split view divider dragged to either
+  // edge, or a window is snapped to a postion that already has a snapped
+  // window); 2) when a window (not from overview) is dragged while overview is
+  // open and the window is dropped on the drop target, the dragged window is
+  // then added to the overview.
+  void AddItem(aura::Window* window, bool reposition, bool animate);
 
-  // Removes the window selector item from the overview window grid.
-  void RemoveWindowSelectorItem(WindowSelectorItem* item);
+  // Removes the window selector item from the overview window grid. And if
+  // |reposition| is true, re-position all windows in the target window grid.
+  // This may be called in two scenarioes: 1) when a user drags an overview item
+  // to snap to one side of the screen, the item should be removed from the
+  // overview grid; 2) when a window (not from overview) ends its dragging while
+  // overview is open, the drop target should be removed. Note in both cases,
+  // the windows in the window grid do not need to be repositioned.
+  void RemoveWindowSelectorItem(WindowSelectorItem* item, bool reposition);
 
   void InitiateDrag(WindowSelectorItem* item,
                     const gfx::Point& location_in_screen);
   void Drag(WindowSelectorItem* item, const gfx::Point& location_in_screen);
   void CompleteDrag(WindowSelectorItem* item,
                     const gfx::Point& location_in_screen);
+  void StartSplitViewDragMode(const gfx::Point& location_in_screen);
+  void Fling(WindowSelectorItem* item,
+             const gfx::Point& location_in_screen,
+             float velocity_x,
+             float velocity_y);
   void ActivateDraggedWindow();
   void ResetDraggedWindowGesture();
 
-  // Positions all of the windows in the overview.
-  void PositionWindows(bool animate);
+  // Called when a window (either it's browser window or an app window)
+  // start/continue/end being dragged in tablet mode.
+  // TODO(xdai): Currently it doesn't work for multi-display scenario.
+  void OnWindowDragStarted(aura::Window* dragged_window, bool animate);
+  void OnWindowDragContinued(aura::Window* dragged_window,
+                             const gfx::Point& location_in_screen,
+                             IndicatorState indicator_state);
+  void OnWindowDragEnded(aura::Window* dragged_window,
+                         const gfx::Point& location_in_screen,
+                         bool should_drop_window_into_overview);
+
+  // Positions all of the windows in the overview, except |ignored_item|.
+  void PositionWindows(bool animate,
+                       WindowSelectorItem* ignored_item = nullptr);
 
   // If we are in middle of ending overview mode.
   bool IsShuttingDown() const;
@@ -134,29 +194,54 @@ class ASH_EXPORT WindowSelector : public display::DisplayObserver,
   // the entire workspace, true otherwise.
   bool ShouldAnimateWallpaper(aura::Window* root_window);
 
+  // Returns true if |window| is currently showing in overview.
+  bool IsWindowInOverview(const aura::Window* window);
+
+  // Set the window grid that's displaying in |root_window| not animate when
+  // exiting overview mode, i.e., all window items in the grid will not animate
+  // when exiting overview mode. It may be called in two cases: 1) When a window
+  // gets snapped (either from overview or not) and thus cause the end of the
+  // overview mode, we should not do the exiting animation; 2) When a window
+  // is dragged around and when released, it causes the end of the overview
+  // mode, we also should not do the exiting animation.
+  void SetWindowListNotAnimatedWhenExiting(aura::Window* root_window);
+
+  // Shifts and fades the grid in |grid_list_| associated with |location|.
+  void UpdateGridAtLocationYPositionAndOpacity(
+      int64_t display_id,
+      int new_y,
+      float opacity,
+      const gfx::Rect& work_area,
+      UpdateAnimationSettingsCallback callback);
+
+  // Shows or hides all the window selector items' mask and shadow.
+  void UpdateMaskAndShadow(bool show);
+
   WindowSelectorDelegate* delegate() { return delegate_; }
 
-  bool restoring_minimized_windows() const {
-    return restoring_minimized_windows_;
+  SplitViewDragIndicators* split_view_drag_indicators() {
+    return split_view_drag_indicators_.get();
   }
 
   int text_filter_bottom() const { return text_filter_bottom_; }
 
-  const std::vector<std::unique_ptr<WindowGrid>>& grid_list_for_testing()
-      const {
-    return grid_list_;
+  EnterExitOverviewType enter_exit_overview_type() const {
+    return enter_exit_overview_type_;
   }
-
-  SplitViewDragIndicators* split_view_drag_indicators() {
-    return split_view_drag_indicators_.get();
+  void set_enter_exit_overview_type(EnterExitOverviewType val) {
+    enter_exit_overview_type_ = val;
   }
 
   OverviewWindowDragController* window_drag_controller() {
     return window_drag_controller_.get();
   }
 
+  const std::vector<std::unique_ptr<WindowGrid>>& grid_list_for_testing()
+      const {
+    return grid_list_;
+  }
+
   // display::DisplayObserver:
-  void OnDisplayAdded(const display::Display& display) override;
   void OnDisplayRemoved(const display::Display& display) override;
   void OnDisplayMetricsChanged(const display::Display& display,
                                uint32_t metrics) override;
@@ -262,13 +347,14 @@ class ASH_EXPORT WindowSelector : public display::DisplayObserver,
   // during this overview mode session.
   size_t num_times_textfield_cleared_ = 0;
 
-  // Tracks whether minimized windows are currently being restored for overview
-  // mode.
-  bool restoring_minimized_windows_ = false;
-
   // The distance between the top edge of the screen and the bottom edge of
   // the text filtering textfield.
   int text_filter_bottom_ = 0;
+
+  // Stores the overview enter/exit type. See the enum declaration for
+  // information on how these types affect overview mode.
+  EnterExitOverviewType enter_exit_overview_type_ =
+      EnterExitOverviewType::kNormal;
 
   // The selected item when exiting overview mode. nullptr if no window
   // selected.

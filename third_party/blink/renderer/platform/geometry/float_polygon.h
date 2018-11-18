@@ -30,38 +30,25 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_PLATFORM_GEOMETRY_FLOAT_POLYGON_H_
 #define THIRD_PARTY_BLINK_RENDERER_PLATFORM_GEOMETRY_FLOAT_POLYGON_H_
 
-#include <memory>
 #include "third_party/blink/renderer/platform/geometry/float_point.h"
 #include "third_party/blink/renderer/platform/geometry/float_rect.h"
-#include "third_party/blink/renderer/platform/graphics/graphics_types.h"
-#include "third_party/blink/renderer/platform/pod_interval_tree.h"
 #include "third_party/blink/renderer/platform/wtf/allocator.h"
+#include "third_party/blink/renderer/platform/wtf/pod_interval_tree.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
 namespace blink {
 
 class FloatPolygonEdge;
 
-// This class is used by PODIntervalTree for debugging.
-#ifndef NDEBUG
-template <class>
-struct ValueToString;
-#endif
-
 class PLATFORM_EXPORT FloatPolygon {
   USING_FAST_MALLOC(FloatPolygon);
   WTF_MAKE_NONCOPYABLE(FloatPolygon);
 
  public:
-  FloatPolygon(std::unique_ptr<Vector<FloatPoint>> vertices,
-               WindRule fill_rule);
+  explicit FloatPolygon(Vector<FloatPoint> vertices);
 
-  const FloatPoint& VertexAt(unsigned index) const {
-    return (*vertices_)[index];
-  }
-  unsigned NumberOfVertices() const { return vertices_->size(); }
-
-  WindRule FillRule() const { return fill_rule_; }
+  const FloatPoint& VertexAt(unsigned index) const { return vertices_[index]; }
+  unsigned NumberOfVertices() const { return vertices_.size(); }
 
   const FloatPolygonEdge& EdgeAt(unsigned index) const { return edges_[index]; }
   unsigned NumberOfEdges() const { return edges_.size(); }
@@ -70,18 +57,15 @@ class PLATFORM_EXPORT FloatPolygon {
   bool OverlappingEdges(float min_y,
                         float max_y,
                         Vector<const FloatPolygonEdge*>& result) const;
-  bool Contains(const FloatPoint&) const;
+  bool ContainsNonZero(const FloatPoint&) const;
+  bool ContainsEvenOdd(const FloatPoint&) const;
   bool IsEmpty() const { return empty_; }
 
  private:
-  typedef PODInterval<float, FloatPolygonEdge*> EdgeInterval;
-  typedef PODIntervalTree<float, FloatPolygonEdge*> EdgeIntervalTree;
+  typedef WTF::PODInterval<float, FloatPolygonEdge*> EdgeInterval;
+  typedef WTF::PODIntervalTree<float, FloatPolygonEdge*> EdgeIntervalTree;
 
-  bool ContainsNonZero(const FloatPoint&) const;
-  bool ContainsEvenOdd(const FloatPoint&) const;
-
-  std::unique_ptr<Vector<FloatPoint>> vertices_;
-  WindRule fill_rule_;
+  Vector<FloatPoint> vertices_;
   FloatRect bounding_box_;
   bool empty_;
   Vector<FloatPolygonEdge> edges_;
@@ -106,7 +90,7 @@ class PLATFORM_EXPORT VertexPair {
 };
 
 class PLATFORM_EXPORT FloatPolygonEdge final : public VertexPair {
-  DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
+  DISALLOW_NEW();
   friend class FloatPolygon;
 
  public:
@@ -148,25 +132,21 @@ class PLATFORM_EXPORT FloatPolygonEdge final : public VertexPair {
   const FloatPolygon* polygon_;
 };
 
+}  // namespace blink
+
+namespace WTF {
 // These structures are used by PODIntervalTree for debugging.
 #ifndef NDEBUG
 template <>
-struct ValueToString<float> {
+struct ValueToString<blink::FloatPolygonEdge*> {
   STATIC_ONLY(ValueToString);
-  static String ToString(const float value) { return String::Number(value); }
-};
-
-template <>
-struct ValueToString<FloatPolygonEdge*> {
-  STATIC_ONLY(ValueToString);
-  static String ToString(const FloatPolygonEdge* edge) {
+  static String ToString(const blink::FloatPolygonEdge* edge) {
     return String::Format("%p (%f,%f %f,%f)", edge, edge->Vertex1().X(),
                           edge->Vertex1().Y(), edge->Vertex2().X(),
                           edge->Vertex2().Y());
   }
 };
 #endif
-
-}  // namespace blink
+}  // namespace WTF
 
 #endif  // THIRD_PARTY_BLINK_RENDERER_PLATFORM_GEOMETRY_FLOAT_POLYGON_H_

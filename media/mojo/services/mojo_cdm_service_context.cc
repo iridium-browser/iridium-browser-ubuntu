@@ -5,6 +5,7 @@
 #include "media/mojo/services/mojo_cdm_service_context.h"
 
 #include "base/logging.h"
+#include "media/base/callback_registry.h"
 #include "media/base/cdm_context.h"
 #include "media/base/content_decryption_module.h"
 #include "media/cdm/cdm_context_ref_impl.h"
@@ -38,13 +39,21 @@ class CdmProxyContextRef : public CdmContextRef, public CdmContext {
 
  private:
   // CdmContext implementation.
+  std::unique_ptr<CallbackRegistration> RegisterNewKeyCB(
+      base::RepeatingClosure new_key_cb) final {
+    DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+    return cdm_context_ ? cdm_context_->RegisterNewKeyCB(std::move(new_key_cb))
+                        : nullptr;
+  }
+
+  Decryptor* GetDecryptor() final {
+    DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
+    return cdm_context_ ? cdm_context_->GetDecryptor() : nullptr;
+  }
+
   CdmProxyContext* GetCdmProxyContext() final {
     DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-
-    if (!cdm_context_)
-      return nullptr;
-
-    return cdm_context_->GetCdmProxyContext();
+    return cdm_context_ ? cdm_context_->GetCdmProxyContext() : nullptr;
   }
 
   base::WeakPtr<CdmContext> cdm_context_;

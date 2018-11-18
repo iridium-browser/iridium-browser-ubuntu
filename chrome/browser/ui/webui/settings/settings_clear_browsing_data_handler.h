@@ -12,19 +12,18 @@
 #include "base/containers/flat_set.h"
 #include "base/macros.h"
 #include "base/scoped_observer.h"
-#include "chrome/browser/engagement/important_sites_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/settings/settings_page_ui_handler.h"
 #include "components/browser_sync/profile_sync_service.h"
 #include "components/browsing_data/core/browsing_data_utils.h"
 #include "components/browsing_data/core/counters/browsing_data_counter.h"
+#include "components/signin/core/browser/account_reconcilor.h"
 
 namespace base {
 class ListValue;
 }
 
 namespace content {
-class BrowsingDataFilterBuilder;
 class WebUI;
 }
 
@@ -49,23 +48,14 @@ class ClearBrowsingDataHandler : public SettingsPageUIHandler,
   // Clears browsing data, called by Javascript.
   void HandleClearBrowsingData(const base::ListValue* value);
 
-  // Parses a ListValue with important site information and creates a
-  // BrowsingDataFilterBuilder.
-  std::unique_ptr<content::BrowsingDataFilterBuilder> ProcessImportantSites(
-      const base::ListValue* important_sites);
-
   // Called when a clearing task finished. |webui_callback_id| is provided
   // by the WebUI action that initiated it.
+  // The ScopedSyncedDataDeletion is passed here to ensure that the Sync token
+  // is not invalidated before this function is run.
   void OnClearingTaskFinished(
       const std::string& webui_callback_id,
-      const base::flat_set<browsing_data::BrowsingDataType>& data_types);
-
-  // Get important sites, called by Javascript.
-  void HandleGetImportantSites(const base::ListValue* value);
-
-  void OnFetchImportantSitesFinished(
-      const std::string& callback_id,
-      std::vector<ImportantSitesUtil::ImportantDomainInfo> sites);
+      const base::flat_set<browsing_data::BrowsingDataType>& data_types,
+      std::unique_ptr<AccountReconcilor::ScopedSyncedDataDeletion> deletion);
 
   // Initializes the dialog UI. Called by JavaScript when the DOM is ready.
   void HandleInitialize(const base::ListValue* args);

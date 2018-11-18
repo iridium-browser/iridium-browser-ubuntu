@@ -54,27 +54,13 @@ SDK.RuntimeModel = class extends SDK.SDKModel {
   }
 
   /**
-   * @param {string} code
-   * @return {string}
+   * @param {!SDK.RuntimeModel.EvaluationResult} response
    */
-  static wrapObjectLiteralExpressionIfNeeded(code) {
-    // Only parenthesize what appears to be an object literal.
-    if (!(/^\s*\{/.test(code) && /\}\s*$/.test(code)))
-      return code;
-
-    const parse = (async () => 0).constructor;
-    try {
-      // Check if the code can be interpreted as an expression.
-      parse('return ' + code + ';');
-
-      // No syntax error! Does it work parenthesized?
-      const wrappedCode = '(' + code + ')';
-      parse(wrappedCode);
-
-      return wrappedCode;
-    } catch (e) {
-      return code;
-    }
+  static isSideEffectFailure(response) {
+    const exceptionDetails = !response[Protocol.Error] && response.exceptionDetails;
+    return !!(
+        exceptionDetails && exceptionDetails.exception && exceptionDetails.exception.description &&
+        exceptionDetails.exception.description.startsWith('EvalError: Possible side-effect in debug-evaluate'));
   }
 
   /**
@@ -174,7 +160,7 @@ SDK.RuntimeModel = class extends SDK.SDKModel {
     console.assert(typeof payload === 'object', 'Remote object payload should only be an object');
     return new SDK.RemoteObjectImpl(
         this, payload.objectId, payload.type, payload.subtype, payload.value, payload.unserializableValue,
-        payload.description, payload.preview, payload.customPreview);
+        payload.description, payload.preview, payload.customPreview, payload.className);
   }
 
   /**
@@ -195,18 +181,9 @@ SDK.RuntimeModel = class extends SDK.SDKModel {
   createRemoteObjectFromPrimitiveValue(value) {
     const type = typeof value;
     let unserializableValue = undefined;
-    if (type === 'number') {
-      const description = String(value);
-      if (value === 0 && 1 / value < 0)
-        unserializableValue = SDK.RemoteObject.UnserializableNumber.Negative0;
-      else if (
-          description === SDK.RemoteObject.UnserializableNumber.NaN ||
-          description === SDK.RemoteObject.UnserializableNumber.Infinity ||
-          description === SDK.RemoteObject.UnserializableNumber.NegativeInfinity)
-        unserializableValue = description;
-    }
-    if (type === 'bigint')
-      unserializableValue = /** @type {!Protocol.Runtime.UnserializableValue} */ (String(value) + 'n');
+    const unserializableDescription = SDK.RemoteObject.unserializableDescription(value);
+    if (unserializableDescription !== null)
+      unserializableValue = /** @type {!Protocol.Runtime.UnserializableValue} */ (unserializableDescription);
     if (typeof unserializableValue !== 'undefined')
       value = undefined;
     return new SDK.RemoteObjectImpl(this, undefined, type, undefined, value, unserializableValue);
@@ -230,6 +207,19 @@ SDK.RuntimeModel = class extends SDK.SDKModel {
    */
   releaseObjectGroup(objectGroupName) {
     this._agent.releaseObjectGroup(objectGroupName);
+  }
+
+  /**
+   * @param {!SDK.RuntimeModel.EvaluationResult} result
+   */
+  releaseEvaluationResult(result) {
+    if (result.object)
+      result.object.release();
+    if (result.exceptionDetails && result.exceptionDetails.exception) {
+      const exception = result.exceptionDetails.exception;
+      const exceptionObject = this.createRemoteObject({type: exception.type, objectId: exception.objectId});
+      exceptionObject.release();
+    }
   }
 
   runIfWaitingForDebugger() {
@@ -378,8 +368,8 @@ SDK.RuntimeModel = class extends SDK.SDKModel {
       InspectorFrontendHost.copyText(object.unserializableValue() || object.value);
       return;
     }
-    object.callFunctionJSON(
-        toStringForClipboard, [{value: object.subtype}], InspectorFrontendHost.copyText.bind(InspectorFrontendHost));
+    object.callFunctionJSON(toStringForClipboard, [{value: object.subtype}])
+        .then(InspectorFrontendHost.copyText.bind(InspectorFrontendHost));
 
     /**
      * @param {string} subtype
@@ -502,12 +492,8 @@ SDK.RuntimeModel = class extends SDK.SDKModel {
     const response = await this._agent.invoke_evaluate(
         {expression: SDK.RuntimeModel._sideEffectTestExpression, contextId: testContext.id, throwOnSideEffect: true});
 
-    const exceptionDetails = !response[Protocol.Error] && response.exceptionDetails;
-    const supports =
-        !!(exceptionDetails && exceptionDetails.exception &&
-           exceptionDetails.exception.description.startsWith('EvalError: Possible side-effect in debug-evaluate'));
-    this._hasSideEffectSupport = supports;
-    return supports;
+    this._hasSideEffectSupport = SDK.RuntimeModel.isSideEffectFailure(response);
+    return this._hasSideEffectSupport;
   }
 
   /**
@@ -559,7 +545,8 @@ SDK.RuntimeModel.CompileScriptResult;
  *    silent: (boolean|undefined),
  *    returnByValue: (boolean|undefined),
  *    generatePreview: (boolean|undefined),
- *    throwOnSideEffect: (boolean|undefined)
+ *    throwOnSideEffect: (boolean|undefined),
+ *    timeout: (number|undefined)
  *  }}
  */
 SDK.RuntimeModel.EvaluationOptions;
@@ -591,7 +578,7 @@ SDK.RuntimeModel.QueryObjectResult;
 SDK.RuntimeModel.ConsoleAPICall;
 
 /**
- * @implements {Protocol.RuntimeDispatcher}
+ * @extends {Protocol.RuntimeDispatcher}
  * @unrestricted
  */
 SDK.RuntimeDispatcher = class {
@@ -738,7 +725,9 @@ SDK.ExecutionContext = class {
     // FIXME: It will be moved to separate ExecutionContext.
     if (this.debuggerModel.selectedCallFrame())
       return this.debuggerModel.evaluateOnSelectedCallFrame(options);
-    if (!options.throwOnSideEffect || this.runtimeModel.hasSideEffectSupport())
+    // Assume backends either support both throwOnSideEffect and timeout options or neither.
+    const needsTerminationOptions = !!options.throwOnSideEffect || options.timeout !== undefined;
+    if (!needsTerminationOptions || this.runtimeModel.hasSideEffectSupport())
       return this._evaluateGlobal(options, userGesture, awaitPromise);
 
     /** @type {!SDK.RuntimeModel.EvaluationResult} */
@@ -793,7 +782,8 @@ SDK.ExecutionContext = class {
       generatePreview: options.generatePreview,
       userGesture: userGesture,
       awaitPromise: awaitPromise,
-      throwOnSideEffect: options.throwOnSideEffect
+      throwOnSideEffect: options.throwOnSideEffect,
+      timeout: options.timeout
     });
 
     const error = response[Protocol.Error];

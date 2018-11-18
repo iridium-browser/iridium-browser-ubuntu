@@ -4,8 +4,12 @@
 
 #include "chrome/browser/ui/views/ime_driver/remote_text_input_client.h"
 
+#include "base/bind.h"
+#include "base/bind_helpers.h"
+#include "ui/events/event_dispatcher.h"
+
 RemoteTextInputClient::RemoteTextInputClient(
-    ui::mojom::TextInputClientPtr remote_client,
+    ws::mojom::TextInputClientPtr remote_client,
     ui::TextInputType text_input_type,
     ui::TextInputMode text_input_mode,
     base::i18n::TextDirection text_direction,
@@ -18,7 +22,13 @@ RemoteTextInputClient::RemoteTextInputClient(
       text_input_flags_(text_input_flags),
       caret_bounds_(caret_bounds) {}
 
-RemoteTextInputClient::~RemoteTextInputClient() {}
+RemoteTextInputClient::~RemoteTextInputClient() {
+  while (!pending_callbacks_.empty()) {
+    auto callback = std::move(pending_callbacks_.front());
+    pending_callbacks_.pop();
+    std::move(callback).Run(false);
+  }
+}
 
 void RemoteTextInputClient::SetTextInputType(
     ui::TextInputType text_input_type) {
@@ -27,6 +37,15 @@ void RemoteTextInputClient::SetTextInputType(
 
 void RemoteTextInputClient::SetCaretBounds(const gfx::Rect& caret_bounds) {
   caret_bounds_ = caret_bounds;
+}
+
+void RemoteTextInputClient::OnDispatchKeyEventPostIMECompleted(bool completed) {
+  DCHECK(!pending_callbacks_.empty());
+  base::OnceCallback<void(bool)> callback =
+      std::move(pending_callbacks_.front());
+  pending_callbacks_.pop();
+  if (callback)
+    std::move(callback).Run(completed);
 }
 
 void RemoteTextInputClient::SetCompositionText(
@@ -89,6 +108,12 @@ bool RemoteTextInputClient::HasCompositionText() const {
   // TODO(moshayedi): crbug.com/631527.
   NOTIMPLEMENTED_LOG_ONCE();
   return false;
+}
+
+ui::TextInputClient::FocusReason RemoteTextInputClient::GetFocusReason() const {
+  // TODO(https://crbug.com/824604): Implement this correctly.
+  NOTIMPLEMENTED_LOG_ONCE();
+  return ui::TextInputClient::FOCUS_REASON_OTHER;
 }
 
 bool RemoteTextInputClient::GetTextRange(gfx::Range* range) const {
@@ -164,15 +189,25 @@ void RemoteTextInputClient::SetTextEditCommandForNextKeyEvent(
   NOTIMPLEMENTED_LOG_ONCE();
 }
 
-const std::string& RemoteTextInputClient::GetClientSourceInfo() const {
+ukm::SourceId RemoteTextInputClient::GetClientSourceForMetrics() const {
   // TODO(moshayedi): crbug.com/631527.
   NOTIMPLEMENTED_LOG_ONCE();
-  return base::EmptyString();
+  return ukm::SourceId();
+}
+
+bool RemoteTextInputClient::ShouldDoLearning() {
+  // TODO(https://crbug.com/311180): Implement this method.
+  NOTIMPLEMENTED_LOG_ONCE();
+  return false;
 }
 
 ui::EventDispatchDetails RemoteTextInputClient::DispatchKeyEventPostIME(
-    ui::KeyEvent* event) {
-  remote_client_->DispatchKeyEventPostIME(ui::Event::Clone(*event),
-                                          base::OnceCallback<void(bool)>());
+    ui::KeyEvent* event,
+    base::OnceCallback<void(bool)> ack_callback) {
+  pending_callbacks_.push(std::move(ack_callback));
+  remote_client_->DispatchKeyEventPostIME(
+      ui::Event::Clone(*event),
+      base::BindOnce(&RemoteTextInputClient::OnDispatchKeyEventPostIMECompleted,
+                     weak_ptr_factory_.GetWeakPtr()));
   return ui::EventDispatchDetails();
 }

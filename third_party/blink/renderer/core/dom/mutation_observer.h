@@ -35,7 +35,9 @@
 #include "third_party/blink/renderer/bindings/core/v8/active_script_wrappable.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/dom/context_lifecycle_observer.h"
+#include "third_party/blink/renderer/core/dom/mutation_observer_options.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
+#include "third_party/blink/renderer/platform/bindings/name_client.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/bindings/trace_wrapper_member.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
@@ -55,9 +57,6 @@ class Node;
 class ScriptState;
 class V8MutationCallback;
 
-typedef unsigned char MutationObserverOptions;
-typedef unsigned char MutationRecordDeliveryOptions;
-
 using MutationObserverSet = HeapHashSet<Member<MutationObserver>>;
 using MutationObserverRegistrationSet =
     HeapHashSet<WeakMember<MutationObserverRegistration>>;
@@ -72,14 +71,6 @@ class CORE_EXPORT MutationObserver final
   USING_GARBAGE_COLLECTED_MIXIN(MutationObserver);
 
  public:
-  enum MutationType {
-    kChildList = 1 << 0,
-    kAttributes = 1 << 1,
-    kCharacterData = 1 << 2,
-
-    kAllMutationTypes = kChildList | kAttributes | kCharacterData
-  };
-
   enum ObservationFlags { kSubtree = 1 << 3, kAttributeFilter = 1 << 4 };
 
   enum DeliveryFlags {
@@ -88,14 +79,13 @@ class CORE_EXPORT MutationObserver final
   };
 
   class CORE_EXPORT Delegate : public GarbageCollectedFinalized<Delegate>,
-                               public TraceWrapperBase {
+                               public NameClient {
    public:
     virtual ~Delegate() = default;
     virtual ExecutionContext* GetExecutionContext() const = 0;
     virtual void Deliver(const MutationRecordVector& records,
                          MutationObserver&) = 0;
     virtual void Trace(blink::Visitor* visitor) {}
-    void TraceWrappers(const ScriptWrappableVisitor* visitor) const override {}
     const char* NameInHeapSnapshot() const override {
       return "MutationObserver::Delegate";
     }
@@ -110,7 +100,7 @@ class CORE_EXPORT MutationObserver final
   static void EnqueueSlotChange(HTMLSlotElement&);
   static void CleanSlotChangeList(Document&);
 
-  ~MutationObserver();
+  ~MutationObserver() override;
 
   void observe(Node*, const MutationObserverInit&, ExceptionState&);
   MutationRecordVector takeRecords();
@@ -126,9 +116,7 @@ class CORE_EXPORT MutationObserver final
 
   // Eagerly finalized as destructor accesses heap object members.
   EAGERLY_FINALIZE();
-  void Trace(blink::Visitor*);
-
-  virtual void TraceWrappers(const ScriptWrappableVisitor*) const;
+  void Trace(blink::Visitor*) override;
 
  private:
   struct ObserverLessThan;

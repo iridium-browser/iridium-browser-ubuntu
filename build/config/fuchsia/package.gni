@@ -3,18 +3,33 @@
 # found in the LICENSE file.
 
 import("//build/config/fuchsia/config.gni")
+import("//build/config/sysroot.gni")
 
 # Creates a Fuchsia .far package file.
 #
 # Parameters are:
-# package_name: The name of the package to build.
-# binary: The name of the executable which should be launched by the package.
-#         Will be renamed as "bin/app" in the package contents.
-# deps: A list of targets whose output will be included in the package.
-template("package") {
+# package_name_override: Specifies the name of the package to generate,
+#     if different than |target_name|.
+# binary: The executable target which should be launched.
+# sandbox_policy: A path to the sandbox_policy that will be used.
+#     "testonly" targets default to using
+#     //build/config/fuchsia/testing_sandbox_policy by default.
+#     Non-test targets must explicitly specify a |sandbox_policy|.
+# deps: Additional targets to build and include in the package (optional).
+template("fuchsia_package") {
   pkg = {
-    package_name = target_name
     forward_variables_from(invoker, "*")
+
+    if (defined(package_name_override)) {
+      package_name = package_name_override
+    } else {
+      package_name = invoker.target_name
+    }
+
+    if (!defined(sandbox_policy)) {
+      assert(testonly == true)
+      sandbox_policy = "//build/config/fuchsia/testing_sandbox_policy"
+    }
   }
   assert(defined(pkg.binary))
 
@@ -22,7 +37,8 @@ template("package") {
 
   _pkg_out_dir = "$root_out_dir/gen/" + get_label_info(pkg.package_name, "dir")
   _runtime_deps_file = "$_pkg_out_dir/${pkg.package_name}.runtime_deps"
-  _manifest_file = "$_pkg_out_dir/${pkg.package_name}.archive_manifest"
+  _archive_manifest = "$_pkg_out_dir/${pkg.package_name}.archive_manifest"
+  _component_manifest = "$_pkg_out_dir/${pkg.package_name}.cmx"
   _key_file = "$_pkg_out_dir/signing-key"
   _meta_far_file = "$_pkg_out_dir/meta.far"
   _combined_far_file = "$_pkg_out_dir/${pkg.package_name}-0.far"
@@ -34,12 +50,13 @@ template("package") {
   _bundle_target = "${pkg.package_name}__bundle"
 
   # Generates a manifest file based on the GN runtime deps
-  # suitable for "far" tool consumption.
+  # suitable for "pm" tool consumption.
   action(_write_manifest_target) {
+    _depfile = "${target_gen_dir}/${target_name}_stamp.d"
+
     forward_variables_from(invoker,
                            [
                              "deps",
-                             "public_deps",
                              "testonly",
                            ])
 
@@ -47,21 +64,34 @@ template("package") {
 
     inputs = [
       _runtime_deps_file,
+      pkg.sandbox_policy,
     ]
 
     outputs = [
-      _manifest_file,
+      _archive_manifest,
+      _component_manifest,
     ]
 
-    data_deps = pkg.deps
+    if (!defined(deps)) {
+      deps = []
+    }
+    deps += [ pkg.binary ]
+    data_deps = deps
+
+    # Use a depfile to trigger package rebuilds if any of the files (static
+    # assets, shared libraries, etc.) included by the package have changed.
+    depfile = _depfile
 
     args = [
       rebase_path("//"),
       rebase_path(root_out_dir),
       pkg.package_name,
-      pkg.binary,
+      get_label_info(pkg.binary, "name"),
+      rebase_path(pkg.sandbox_policy),
       rebase_path(_runtime_deps_file),
-      rebase_path(_manifest_file),
+      rebase_path(_depfile),
+      rebase_path(dist_libroot) + "," + rebase_path("${sysroot}/dist"),
+      rebase_path(_archive_manifest),
     ]
 
     write_runtime_deps = _runtime_deps_file
@@ -72,6 +102,11 @@ template("package") {
     forward_variables_from(invoker, [ "testonly" ])
 
     script = "//build/gn_run_binary.py"
+
+    inputs = [
+      # Depend on the SDK hash, to ensure rebuild if the SDK tools change.
+      rebase_path("$fuchsia_sdk/.hash"),
+    ]
 
     outputs = [
       _key_file,
@@ -97,6 +132,8 @@ template("package") {
     ]
 
     inputs = [
+      # Depend on the SDK hash, to ensure rebuild if the SDK tools change.
+      rebase_path("$fuchsia_sdk/.hash"),
       _key_file,
     ]
 
@@ -111,7 +148,7 @@ template("package") {
       "-k",
       rebase_path(_key_file),
       "-m",
-      rebase_path(_manifest_file),
+      rebase_path(_archive_manifest),
       "build",
     ]
   }
@@ -128,8 +165,10 @@ template("package") {
     ]
 
     inputs = [
+      # Depend on the SDK hash, to ensure rebuild if the SDK tools change.
+      rebase_path("$fuchsia_sdk/.hash"),
       _meta_far_file,
-      _manifest_file,
+      _archive_manifest,
     ]
 
     outputs = [
@@ -141,7 +180,7 @@ template("package") {
       "-o",
       rebase_path(_pkg_out_dir),
       "-m",
-      rebase_path(_manifest_file),
+      rebase_path(_archive_manifest),
       "archive",
     ]
   }

@@ -227,8 +227,7 @@ std::unique_ptr<V4GetHashProtocolManager> V4GetHashProtocolManager::Create(
 // static
 void V4GetHashProtocolManager::RegisterFactory(
     std::unique_ptr<V4GetHashProtocolManagerFactory> factory) {
-  if (factory_)
-    delete factory_;
+  delete factory_;
   factory_ = factory.release();
 }
 
@@ -532,8 +531,7 @@ void V4GetHashProtocolManager::OnFullHashForApi(
   ThreatMetadata md;
   for (const FullHashInfo& full_hash_info : full_hash_infos) {
     DCHECK_EQ(GetChromeUrlApiId(), full_hash_info.list_id);
-    DCHECK(std::find(full_hashes.begin(), full_hashes.end(),
-                     full_hash_info.full_hash) != full_hashes.end());
+    DCHECK(base::ContainsValue(full_hashes, full_hash_info.full_hash));
     md.api_permissions.insert(full_hash_info.metadata.api_permissions.begin(),
                               full_hash_info.metadata.api_permissions.end());
   }
@@ -704,6 +702,7 @@ void V4GetHashProtocolManager::ParseMetadata(const ThreatMatch& match,
 void V4GetHashProtocolManager::ResetGetHashErrors() {
   gethash_error_count_ = 0;
   gethash_back_off_mult_ = 1;
+  next_gethash_time_ = base::Time();
 }
 
 void V4GetHashProtocolManager::SetClockForTests(base::Clock* clock) {
@@ -779,7 +778,7 @@ void V4GetHashProtocolManager::OnURLLoaderComplete(
 
   std::string data;
   if (response_body)
-    data = *response_body.get();
+    data = *response_body;
 
   OnURLLoaderCompleteInternal(url_loader, url_loader->NetError(), response_code,
                               data);
@@ -790,7 +789,7 @@ void V4GetHashProtocolManager::OnURLLoaderCompleteInternal(
     int net_error,
     int response_code,
     const std::string& data) {
-  PendingHashRequests::iterator it = pending_hash_requests_.find(url_loader);
+  auto it = pending_hash_requests_.find(url_loader);
   DCHECK(it != pending_hash_requests_.end()) << "Request not found";
   V4ProtocolManagerUtil::RecordHttpResponseOrErrorCode(
       "SafeBrowsing.V4GetHash.Network.Result", net_error, response_code);

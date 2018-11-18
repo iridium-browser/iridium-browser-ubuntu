@@ -8,30 +8,31 @@
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/loader/modulescript/module_script_fetch_request.h"
-#include "third_party/blink/renderer/core/loader/modulescript/module_script_loader_registry.h"
+#include "third_party/blink/renderer/core/loader/modulescript/module_tree_linker.h"
 #include "third_party/blink/renderer/core/loader/modulescript/module_tree_linker_registry.h"
 #include "third_party/blink/renderer/core/script/dynamic_module_resolver.h"
+#include "third_party/blink/renderer/core/script/layered_api.h"
 #include "third_party/blink/renderer/core/script/module_map.h"
 #include "third_party/blink/renderer/core/script/module_script.h"
 #include "third_party/blink/renderer/core/script/script_module_resolver_impl.h"
 #include "third_party/blink/renderer/platform/bindings/v8_throw_exception.h"
+#include "third_party/blink/renderer/platform/loader/fetch/fetch_client_settings_object_snapshot.h"
 
 namespace blink {
 
 ExecutionContext* ModulatorImplBase::GetExecutionContext() const {
-  return ExecutionContext::From(script_state_.get());
+  return ExecutionContext::From(script_state_);
 }
 
-ModulatorImplBase::ModulatorImplBase(scoped_refptr<ScriptState> script_state)
-    : script_state_(std::move(script_state)),
-      task_runner_(ExecutionContext::From(script_state_.get())
+ModulatorImplBase::ModulatorImplBase(ScriptState* script_state)
+    : script_state_(script_state),
+      task_runner_(ExecutionContext::From(script_state_)
                        ->GetTaskRunner(TaskType::kNetworking)),
       map_(ModuleMap::Create(this)),
-      loader_registry_(ModuleScriptLoaderRegistry::Create()),
       tree_linker_registry_(ModuleTreeLinkerRegistry::Create()),
       script_module_resolver_(ScriptModuleResolverImpl::Create(
           this,
-          ExecutionContext::From(script_state_.get()))),
+          ExecutionContext::From(script_state_))),
       dynamic_module_resolver_(DynamicModuleResolver::Create(this)) {
   DCHECK(script_state_);
   DCHECK(task_runner_);
@@ -39,72 +40,119 @@ ModulatorImplBase::ModulatorImplBase(scoped_refptr<ScriptState> script_state)
 
 ModulatorImplBase::~ModulatorImplBase() {}
 
-ReferrerPolicy ModulatorImplBase::GetReferrerPolicy() {
-  return GetExecutionContext()->GetReferrerPolicy();
-}
-
-const SecurityOrigin* ModulatorImplBase::GetSecurityOriginForFetch() {
-  return GetExecutionContext()->GetSecurityOrigin();
+bool ModulatorImplBase::IsScriptingDisabled() const {
+  return !GetExecutionContext()->CanExecuteScripts(kAboutToExecuteScript);
 }
 
 // [fetch-a-module-script-tree]
 // https://html.spec.whatwg.org/multipage/webappapis.html#fetch-a-module-script-tree
 // [fetch-a-module-worker-script-tree]
 // https://html.spec.whatwg.org/multipage/webappapis.html#fetch-a-module-worker-script-tree
-void ModulatorImplBase::FetchTree(const ModuleScriptFetchRequest& request,
-                                  ModuleTreeClient* client) {
-  // [fetch-a-module-script-tree] Step 2. Perform the internal module script
-  // graph fetching procedure given url, settings object, destination, options,
-  // settings object, visited set, "client", and with the top-level module fetch
-  // flag set. If the caller of this algorithm specified custom perform the
-  // fetch steps, pass those along as well. [spec text]
+void ModulatorImplBase::FetchTree(
+    const KURL& url,
+    FetchClientSettingsObjectSnapshot* fetch_client_settings_object,
+    mojom::RequestContextType destination,
+    const ScriptFetchOptions& options,
+    ModuleScriptCustomFetchType custom_fetch_type,
+    ModuleTreeClient* client) {
+  // <spec label="fetch-a-module-script-tree" step="2">Perform the internal
+  // module script graph fetching procedure given url, settings object,
+  // destination, options, settings object, visited set, "client", and with the
+  // top-level module fetch flag set. If the caller of this algorithm specified
+  // custom perform the fetch steps, pass those along as well.</spec>
 
-  // [fetch-a-module-worker-script-tree] Step 3. Perform the internal module
-  // script graph fetching procedure given url, fetch client settings object,
-  // destination, options, module map settings object, visited set, "client",
-  // and with the top-level module fetch flag set. If the caller of this
-  // algorithm specified custom perform the fetch steps, pass those along as
-  // well. [spec text]
+  // <spec label="fetch-a-module-worker-script-tree" step="3">Perform the
+  // internal module script graph fetching procedure given url, fetch client
+  // settings object, destination, options, module map settings object, visited
+  // set, "client", and with the top-level module fetch flag set. If the caller
+  // of this algorithm specified custom perform the fetch steps, pass those
+  // along as well.</spec>
 
-  // Note: "Fetch a module script graph" algorithm doesn't have "referrer" as
-  // its argument.
-  DCHECK(request.GetReferrer().IsNull());
+  ModuleTreeLinker::Fetch(url, fetch_client_settings_object, destination,
+                          options, this, custom_fetch_type,
+                          tree_linker_registry_, client);
 
-  tree_linker_registry_->Fetch(request, this, client);
+  // <spec label="fetch-a-module-script-tree" step="3">When the internal module
+  // script graph fetching procedure asynchronously completes with result,
+  // asynchronously complete this algorithm with result.</spec>
 
-  // [fetch-a-module-script-tree] Step 3. When the internal module script graph
-  // fetching procedure asynchronously completes with result, asynchronously
-  // complete this algorithm with result. [spec text]
-
-  // [fetch-a-module-worker-script-tree] Step 4. When the internal module script
-  // graph fetching procedure asynchronously completes with result,
-  // asynchronously complete this algorithm with result. [spec text]
+  // <spec label="fetch-a-module-worker-script-tree" step="4">When the internal
+  // module script graph fetching procedure asynchronously completes with
+  // result, asynchronously complete this algorithm with result.</spec>
 
   // Note: We delegate to ModuleTreeLinker to notify ModuleTreeClient.
 }
 
 void ModulatorImplBase::FetchDescendantsForInlineScript(
     ModuleScript* module_script,
+    FetchClientSettingsObjectSnapshot* fetch_client_settings_object,
+    mojom::RequestContextType destination,
     ModuleTreeClient* client) {
-  tree_linker_registry_->FetchDescendantsForInlineScript(module_script, this,
-                                                         client);
+  ModuleTreeLinker::FetchDescendantsForInlineScript(
+      module_script, fetch_client_settings_object, destination, this,
+      ModuleScriptCustomFetchType::kNone, tree_linker_registry_, client);
 }
 
-void ModulatorImplBase::FetchSingle(const ModuleScriptFetchRequest& request,
-                                    ModuleGraphLevel level,
-                                    SingleModuleClient* client) {
-  map_->FetchSingleModuleScript(request, level, client);
-}
-
-void ModulatorImplBase::FetchNewSingleModule(
+void ModulatorImplBase::FetchSingle(
     const ModuleScriptFetchRequest& request,
+    FetchClientSettingsObjectSnapshot* fetch_client_settings_object,
     ModuleGraphLevel level,
-    ModuleScriptLoaderClient* client) {
-  loader_registry_->Fetch(request, level, this, client);
+    ModuleScriptCustomFetchType custom_fetch_type,
+    SingleModuleClient* client) {
+  map_->FetchSingleModuleScript(request, fetch_client_settings_object, level,
+                                custom_fetch_type, client);
 }
 
 ModuleScript* ModulatorImplBase::GetFetchedModuleScript(const KURL& url) {
   return map_->GetFetchedModuleScript(url);
+}
+
+// https://html.spec.whatwg.org/multipage/webappapis.html#resolve-a-module-specifier
+KURL ModulatorImplBase::ResolveModuleSpecifier(const String& module_request,
+                                               const KURL& base_url,
+                                               String* failure_reason) {
+  // <spec step="1">Apply the URL parser to specifier. If the result is not
+  // failure, return the result.</spec>
+  KURL url(NullURL(), module_request);
+  if (url.IsValid()) {
+    // <spec
+    // href="https://github.com/drufball/layered-apis/blob/master/spec.md#resolve-a-module-specifier"
+    // step="1">Let parsed be the result of applying the URL parser to
+    // specifier. If parsed is not failure, then return the layered API fetching
+    // URL given parsed and script's base URL.</spec>
+    if (RuntimeEnabledFeatures::LayeredAPIEnabled())
+      return blink::layered_api::ResolveFetchingURL(url);
+
+    return url;
+  }
+
+  // <spec step="2">If specifier does not start with the character U+002F
+  // SOLIDUS (/), the two-character sequence U+002E FULL STOP, U+002F SOLIDUS
+  // (./), or the three-character sequence U+002E FULL STOP, U+002E FULL STOP,
+  // U+002F SOLIDUS (../), return failure.</spec>
+  //
+  // (../), return failure and abort these steps." [spec text]
+  if (!module_request.StartsWith("/") && !module_request.StartsWith("./") &&
+      !module_request.StartsWith("../")) {
+    if (failure_reason) {
+      *failure_reason =
+          "Relative references must start with either \"/\", \"./\", or "
+          "\"../\".";
+    }
+    return KURL();
+  }
+
+  // <spec step="3">Return the result of applying the URL parser to specifier
+  // with script's base URL as the base URL.</spec>
+  DCHECK(base_url.IsValid());
+  KURL absolute_url(base_url, module_request);
+  if (absolute_url.IsValid())
+    return absolute_url;
+
+  if (failure_reason) {
+    *failure_reason = "Invalid relative url or base scheme isn't hierarchical.";
+  }
+  return KURL();
 }
 
 bool ModulatorImplBase::HasValidContext() {
@@ -140,49 +188,21 @@ ModuleImportMeta ModulatorImplBase::HostGetImportMetaProperties(
   return ModuleImportMeta(url_string);
 }
 
-ScriptModule ModulatorImplBase::CompileModule(
-    const String& provided_source,
-    const KURL& source_url,
-    const KURL& base_url,
-    const ScriptFetchOptions& options,
-    AccessControlStatus access_control_status,
-    const TextPosition& position,
-    ExceptionState& exception_state) {
-  // Implements Steps 3-5 of
-  // https://html.spec.whatwg.org/multipage/webappapis.html#creating-a-module-script
-
-  // Step 3. Let realm be the provided environment settings object's Realm.
-  // Note: Realm is v8::Context.
-
-  // Step 4. If scripting is disabled for the given environment settings
-  // object's responsible browsing context, then let script source be the empty
-  // string. Otherwise, let script source be the provided script source.
-  String script_source;
-  if (GetExecutionContext()->CanExecuteScripts(kAboutToExecuteScript))
-    script_source = provided_source;
-
-  // Step 5. Let result be ParseModule(script source, realm, script).
-  ScriptState::Scope scope(script_state_.get());
-  return ScriptModule::Compile(
-      script_state_->GetIsolate(), script_source, source_url, base_url, options,
-      access_control_status, position, exception_state);
-}
-
 ScriptValue ModulatorImplBase::InstantiateModule(ScriptModule script_module) {
-  ScriptState::Scope scope(script_state_.get());
-  return script_module.Instantiate(script_state_.get());
+  ScriptState::Scope scope(script_state_);
+  return script_module.Instantiate(script_state_);
 }
 
 Vector<Modulator::ModuleRequest>
 ModulatorImplBase::ModuleRequestsFromScriptModule(ScriptModule script_module) {
-  ScriptState::Scope scope(script_state_.get());
-  Vector<String> specifiers = script_module.ModuleRequests(script_state_.get());
+  ScriptState::Scope scope(script_state_);
+  Vector<String> specifiers = script_module.ModuleRequests(script_state_);
   Vector<TextPosition> positions =
-      script_module.ModuleRequestPositions(script_state_.get());
+      script_module.ModuleRequestPositions(script_state_);
   DCHECK_EQ(specifiers.size(), positions.size());
   Vector<ModuleRequest> requests;
   requests.ReserveInitialCapacity(specifiers.size());
-  for (size_t i = 0; i < specifiers.size(); ++i) {
+  for (wtf_size_t i = 0; i < specifiers.size(); ++i) {
     requests.emplace_back(specifiers[i], positions[i]);
   }
   return requests;
@@ -200,12 +220,12 @@ ScriptValue ModulatorImplBase::ExecuteModule(
 
   // Step 3. "Check if we can run script with settings.
   //          If this returns "do not run" then return." [spec text]
-  if (!GetExecutionContext()->CanExecuteScripts(kAboutToExecuteScript))
+  if (IsScriptingDisabled())
     return ScriptValue();
 
   // Step 4. "Prepare to run script given settings." [spec text]
   // This is placed here to also cover ScriptModule::ReportException().
-  ScriptState::Scope scope(script_state_.get());
+  ScriptState::Scope scope(script_state_);
 
   // Step 5. "Let evaluationStatus be null." [spec text]
   // |error| corresponds to "evaluationStatus of [[Type]]: throw".
@@ -224,7 +244,7 @@ ScriptValue ModulatorImplBase::ExecuteModule(
     CHECK(!record.IsNull());
 
     // Step 7.2. "Set evaluationStatus to record.Evaluate()." [spec text]
-    error = record.Evaluate(script_state_.get());
+    error = record.Evaluate(script_state_);
 
     // "If Evaluate fails to complete as a result of the user agent aborting the
     // running script, then set evaluationStatus to Completion { [[Type]]:
@@ -241,7 +261,7 @@ ScriptValue ModulatorImplBase::ExecuteModule(
 
     // Step 8.2. "Otherwise, report the exception given by
     // evaluationStatus.[[Value]] for script." [spec text]
-    ScriptModule::ReportException(script_state_.get(), error.V8Value());
+    ScriptModule::ReportException(script_state_, error.V8Value());
   }
 
   // Step 9. "Clean up after running script with settings." [spec text]
@@ -250,19 +270,13 @@ ScriptValue ModulatorImplBase::ExecuteModule(
 }
 
 void ModulatorImplBase::Trace(blink::Visitor* visitor) {
-  Modulator::Trace(visitor);
+  visitor->Trace(script_state_);
   visitor->Trace(map_);
-  visitor->Trace(loader_registry_);
   visitor->Trace(tree_linker_registry_);
   visitor->Trace(script_module_resolver_);
   visitor->Trace(dynamic_module_resolver_);
-}
 
-void ModulatorImplBase::TraceWrappers(
-    const ScriptWrappableVisitor* visitor) const {
-  visitor->TraceWrappers(map_);
-  visitor->TraceWrappers(tree_linker_registry_);
-  Modulator::TraceWrappers(visitor);
+  Modulator::Trace(visitor);
 }
 
 }  // namespace blink

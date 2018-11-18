@@ -18,10 +18,6 @@
 #include "base/task_runner_util.h"
 
 namespace base {
-class MessageLoop;
-}
-
-namespace base {
 class Location;
 }
 
@@ -42,20 +38,11 @@ class WebThreadDelegate;
 // one IO thread for the entire process, and various pieces of code find it
 // useful to retrieve a pointer to the IO thread's message loop.
 //
-// Invoke a task by thread ID:
+// See web_task_traits.h for posting Tasks to a WebThread.
 //
-//   WebThread::PostTask(WebThread::IO, FROM_HERE, task);
-//
-// The return value is false if the task couldn't be posted because the target
-// thread doesn't exist.  If this could lead to data loss, you need to check the
-// result and restructure the code to ensure it doesn't occur.
-//
-// This class automatically handles the lifetime of different threads.
-// It's always safe to call PostTask on any thread.  If it's not yet created,
-// the task is deleted.  There are no race conditions.  If the thread that the
-// task is posted to is guaranteed to outlive the current thread, then no locks
-// are used.  You should never need to cache pointers to MessageLoops, since
-// they're not thread safe.
+// This class automatically handles the lifetime of different threads. You
+// should never need to cache pointers to MessageLoops, since they're not thread
+// safe.
 class WebThread {
  public:
   // An enumeration of the well-known threads.
@@ -69,10 +56,8 @@ class WebThread {
     // Blocking IO should happen in TaskScheduler.
     IO,
 
-    // NOTE: do not add new threads here that are only used by a small number of
-    // files. Instead you should just use a Thread class and pass its
-    // SingleThreadTaskRunner around. Named threads there are only for threads
-    // that are used in many places.
+    // NOTE: do not add new threads here. Instead you should just use
+    // base::Create*TaskRunnerWithTraits to run tasks on the TaskScheduler.
 
     // This identifier does not represent a thread.  Instead it counts the
     // number of well-known threads.  Insert new well-known threads before this
@@ -80,42 +65,10 @@ class WebThread {
     ID_COUNT
   };
 
-  // These are the same methods as in message_loop.h, but are guaranteed to
-  // either get posted to the MessageLoop if it's still alive, or be deleted
-  // otherwise.
-  // They return true iff the thread existed and the task was posted.
-  static bool PostTask(ID identifier,
-                       const base::Location& from_here,
-                       base::OnceClosure task);
-  static bool PostDelayedTask(ID identifier,
-                              const base::Location& from_here,
-                              base::OnceClosure task,
-                              base::TimeDelta delay);
-  static bool PostNonNestableTask(ID identifier,
-                                  const base::Location& from_here,
-                                  base::OnceClosure task);
-  static bool PostNonNestableDelayedTask(ID identifier,
-                                         const base::Location& from_here,
-                                         base::OnceClosure task,
-                                         base::TimeDelta delay);
+  // NOTE: Task posting APIs have moved to post_task.h. See web_task_traits.h.
 
-  static bool PostTaskAndReply(ID identifier,
-                               const base::Location& from_here,
-                               base::OnceClosure task,
-                               base::OnceClosure reply);
-
-  template <typename ReturnType, typename ReplyArgType>
-  static bool PostTaskAndReplyWithResult(
-      ID identifier,
-      const base::Location& from_here,
-      base::OnceCallback<ReturnType()> task,
-      base::OnceCallback<void(ReplyArgType)> reply) {
-    scoped_refptr<base::SingleThreadTaskRunner> task_runner =
-        GetTaskRunnerForThread(identifier);
-    return base::PostTaskAndReplyWithResult(task_runner.get(), from_here,
-                                            std::move(task), std::move(reply));
-  }
-
+  // TODO(crbug.com/878356): Consider replacing callsites of this with
+  // base::CreateTaskRunnerWithTraits({id})->DeleteSoon(..).
   template <class T>
   static bool DeleteSoon(ID identifier,
                          const base::Location& from_here,
@@ -134,11 +87,6 @@ class WebThread {
   // If the current message loop is one of the known threads, returns true and
   // sets identifier to its ID.
   static bool GetCurrentThreadIdentifier(ID* identifier) WARN_UNUSED_RESULT;
-
-  // Callers can hold on to a refcounted SingleThreadTaskRunner beyond the
-  // lifetime of the thread.
-  static scoped_refptr<base::SingleThreadTaskRunner> GetTaskRunnerForThread(
-      ID identifier);
 
   // Sets the delegate for the specified WebThread.
   //
@@ -200,6 +148,10 @@ class WebThread {
 
  private:
   friend class WebThreadImpl;
+
+  // For DeleteSoon() only.
+  static scoped_refptr<base::SingleThreadTaskRunner> GetTaskRunnerForThread(
+      ID identifier);
 
   WebThread() {}
   DISALLOW_COPY_AND_ASSIGN(WebThread);

@@ -10,6 +10,7 @@ import org.chromium.base.VisibleForTesting;
 import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
 import org.chromium.chrome.browser.background_task_scheduler.NativeBackgroundTask;
+import org.chromium.chrome.browser.background_task_scheduler.NativeBackgroundTask.StartBeforeNativeResult;
 import org.chromium.chrome.browser.offlinepages.DeviceConditions;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.components.background_task_scheduler.BackgroundTask.TaskFinishedCallback;
@@ -27,17 +28,17 @@ public class PrefetchBackgroundTask extends NativeBackgroundTask {
 
     private static final int MINIMUM_BATTERY_PERCENTAGE_FOR_PREFETCHING = 50;
 
-    private static boolean sSkipConditionCheckingForTesting = false;
+    private static boolean sSkipConditionCheckingForTesting;
 
-    private long mNativeTask = 0;
-    private TaskFinishedCallback mTaskFinishedCallback = null;
-    private Profile mProfile = null;
+    private long mNativeTask;
+    private TaskFinishedCallback mTaskFinishedCallback;
+    private Profile mProfile;
     // We update this when we call TaskFinishedCallback, so that subsequent calls to
     // onStopTask* can respond the same way.  This is possible due to races with the JobScheduler.
     // Defaults to true so that we are rescheduled automatically if somehow we were unable to start
     // up native.
     private boolean mCachedRescheduleResult = true;
-    private boolean mLimitlessPrefetchingEnabled = false;
+    private boolean mLimitlessPrefetchingEnabled;
 
     public PrefetchBackgroundTask() {}
 
@@ -47,7 +48,7 @@ public class PrefetchBackgroundTask extends NativeBackgroundTask {
     }
 
     @Override
-    public int onStartTaskBeforeNativeLoaded(
+    public @StartBeforeNativeResult int onStartTaskBeforeNativeLoaded(
             Context context, TaskParameters taskParameters, TaskFinishedCallback callback) {
         // Ensure that the conditions are right to do work.  If the maximum time to
         // wait is reached, it is possible the task will fire even if network conditions are
@@ -63,21 +64,20 @@ public class PrefetchBackgroundTask extends NativeBackgroundTask {
         // specific Android devices.
         final DeviceConditions deviceConditions;
         if (!sSkipConditionCheckingForTesting) {
-            deviceConditions = DeviceConditions.getCurrentConditions(context);
+            deviceConditions = DeviceConditions.getCurrent(context);
         } else {
             deviceConditions = null;
         }
 
         // Note: when |deviceConditions| is null native is always loaded because with the evidence
         // we have so far only specific devices that do not run on batteries actually return null.
-        if (deviceConditions != null
-                && (!areBatteryConditionsMet(deviceConditions)
-                           || !areNetworkConditionsMet(context, deviceConditions)
-                           || deviceConditions.inPowerSaveMode())) {
-            return NativeBackgroundTask.RESCHEDULE;
+        if (deviceConditions == null
+                || (areBatteryConditionsMet(deviceConditions)
+                           && areNetworkConditionsMet(deviceConditions))) {
+            return StartBeforeNativeResult.LOAD_NATIVE;
         }
 
-        return NativeBackgroundTask.LOAD_NATIVE;
+        return StartBeforeNativeResult.RESCHEDULE;
     }
 
     /**
@@ -148,18 +148,19 @@ public class PrefetchBackgroundTask extends NativeBackgroundTask {
 
     /** Whether battery conditions (on power or enough battery percentage) are met. */
     private boolean areBatteryConditionsMet(DeviceConditions deviceConditions) {
-        return deviceConditions.isPowerConnected()
-                || (deviceConditions.getBatteryPercentage()
-                           >= MINIMUM_BATTERY_PERCENTAGE_FOR_PREFETCHING)
+        return (!deviceConditions.isInPowerSaveMode()
+                       && (deviceConditions.isPowerConnected()
+                                  || (deviceConditions.getBatteryPercentage()
+                                             >= MINIMUM_BATTERY_PERCENTAGE_FOR_PREFETCHING)))
                 || mLimitlessPrefetchingEnabled;
     }
 
     /** Whether network conditions are met. */
-    private boolean areNetworkConditionsMet(Context context, DeviceConditions deviceConditions) {
+    private boolean areNetworkConditionsMet(DeviceConditions deviceConditions) {
         if (mLimitlessPrefetchingEnabled) {
             return deviceConditions.getNetConnectionType() != ConnectionType.CONNECTION_NONE;
         }
-        return !DeviceConditions.isActiveNetworkMetered(context)
+        return !deviceConditions.isActiveNetworkMetered()
                 && deviceConditions.getNetConnectionType() == ConnectionType.CONNECTION_WIFI;
     }
 

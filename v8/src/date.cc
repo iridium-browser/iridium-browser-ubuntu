@@ -4,8 +4,9 @@
 
 #include "src/date.h"
 
-#include "src/objects.h"
+#include "src/conversions.h"
 #include "src/objects-inl.h"
+#include "src/objects.h"
 
 #ifdef V8_INTL_SUPPORT
 #include "src/intl.h"
@@ -26,7 +27,7 @@ static const char kDaysInMonths[] =
     {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
 
 DateCache::DateCache()
-    : stamp_(0),
+    : stamp_(nullptr),
       tz_cache_(
 #ifdef V8_INTL_SUPPORT
           FLAG_icu_timezone_data ? new ICUTimezoneCache()
@@ -65,6 +66,13 @@ void DateCache::ResetDateCache() {
   dst_tz_name_ = nullptr;
 }
 
+// ECMA 262 - ES#sec-timeclip TimeClip (time)
+double DateCache::TimeClip(double time) {
+  if (-kMaxTimeInMs <= time && time <= kMaxTimeInMs) {
+    return DoubleToInteger(time) + 0.0;
+  }
+  return std::numeric_limits<double>::quiet_NaN();
+}
 
 void DateCache::ClearSegment(DST* segment) {
   segment->start_sec = kMaxEpochTimeInSec;

@@ -15,9 +15,9 @@
 #include "chrome/browser/page_load_metrics/page_load_metrics_update_dispatcher.h"
 #include "chrome/browser/page_load_metrics/user_input_tracker.h"
 #include "chrome/common/page_load_metrics/page_load_timing.h"
-#include "components/ukm/ukm_source.h"
 #include "content/public/browser/global_request_id.h"
 #include "content/public/browser/web_contents_observer.h"
+#include "services/metrics/public/cpp/ukm_source.h"
 #include "ui/base/page_transition_types.h"
 
 class GURL;
@@ -136,6 +136,11 @@ enum InternalErrorLoadEvent {
   // frequently this case is encountered.
   ERR_SUBFRAME_IPC_WITH_NO_RELEVANT_LOAD,
 
+  // We received browser-process reported metrics when we weren't tracking a
+  // committed load. We expect this error to happen, and track it so we can
+  // understand how frequently this case is encountered.
+  ERR_BROWSER_USAGE_WITH_NO_RELEVANT_LOAD,
+
   // Add values before this final count.
   ERR_LAST_ENTRY,
 };
@@ -175,6 +180,8 @@ class PageLoadTracker : public PageLoadMetricsUpdateDispatcher::Client {
   void OnSubframeMetadataChanged() override;
   void UpdateFeaturesUsage(
       const mojom::PageLoadFeatures& new_features) override;
+  void UpdateResourceDataUse(
+      const std::vector<mojom::ResourceDataUpdatePtr>& resources) override;
 
   void Redirect(content::NavigationHandle* navigation_handle);
   void WillProcessNavigationResponse(
@@ -182,6 +189,7 @@ class PageLoadTracker : public PageLoadMetricsUpdateDispatcher::Client {
   void Commit(content::NavigationHandle* navigation_handle);
   void DidCommitSameDocumentNavigation(
       content::NavigationHandle* navigation_handle);
+  void DidInternalNavigationAbort(content::NavigationHandle* navigation_handle);
   void DidFinishSubFrameNavigation(
       content::NavigationHandle* navigation_handle);
   void FailedProvisionalLoad(content::NavigationHandle* navigation_handle,

@@ -9,14 +9,20 @@ import android.animation.AnimatorListenerAdapter;
 import android.animation.ValueAnimator;
 
 import org.chromium.base.ObserverList;
+import org.chromium.base.UserData;
+import org.chromium.base.UserDataHost;
 import org.chromium.chrome.browser.fullscreen.FullscreenManager;
 import org.chromium.chrome.browser.tabmodel.TabModelImpl;
-import org.chromium.chrome.browser.util.FeatureUtilities;
+import org.chromium.chrome.browser.vr.VrModeObserver;
+import org.chromium.chrome.browser.vr.VrModuleProvider;
 
 /**
  * Handles browser controls offset for a Tab.
  */
-public class TabBrowserControlsOffsetHelper {
+public class TabBrowserControlsOffsetHelper implements VrModeObserver, UserData {
+    private static final Class<TabBrowserControlsOffsetHelper> USER_DATA_KEY =
+            TabBrowserControlsOffsetHelper.class;
+
     /**
      * Maximum duration for the control container slide-in animation. Note that this value matches
      * the one in browser_controls_offset_manager.cc.
@@ -35,6 +41,7 @@ public class TabBrowserControlsOffsetHelper {
 
     private final Tab mTab;
     private final ObserverList<Observer> mObservers = new ObserverList<>();
+    private final TabObserver mTabObserver;
 
     private float mPreviousTopControlsOffsetY = Float.NaN;
     private float mPreviousBottomControlsOffsetY = Float.NaN;
@@ -51,10 +58,37 @@ public class TabBrowserControlsOffsetHelper {
     private ValueAnimator mControlsAnimator;
 
     /**
+     * Whether the browser is currently in VR mode.
+     */
+    private boolean mIsInVr;
+
+    public static TabBrowserControlsOffsetHelper from(Tab tab) {
+        UserDataHost host = tab.getUserDataHost();
+        TabBrowserControlsOffsetHelper helper = host.getUserData(USER_DATA_KEY);
+        return helper != null
+                ? helper
+                : host.setUserData(USER_DATA_KEY, new TabBrowserControlsOffsetHelper(tab));
+    }
+
+    /**
      * @param tab The {@link Tab} that this class is associated with.
      */
-    TabBrowserControlsOffsetHelper(Tab tab) {
+    private TabBrowserControlsOffsetHelper(Tab tab) {
         mTab = tab;
+        mTabObserver = new EmptyTabObserver() {
+            @Override
+            public void onCrash(Tab tab) {
+                if (SadTab.isShowing(tab)) showAndroidControls(false);
+            }
+            @Override
+            public void onRendererResponsiveStateChanged(boolean isResponsive) {
+                if (!isResponsive) showAndroidControls(false);
+            }
+        };
+
+        mTab.addObserver(mTabObserver);
+        VrModuleProvider.registerVrModeObserver(this);
+        if (VrModuleProvider.getDelegate().isInVr()) onEnterVr();
     }
 
     /**
@@ -107,7 +141,7 @@ public class TabBrowserControlsOffsetHelper {
         if (!Float.isNaN(contentOffsetY)) mPreviousContentOffsetY = contentOffsetY;
 
         if (mTab.getFullscreenManager() == null) return;
-        if (mTab.isShowingSadTab() || mTab.isNativePage()) {
+        if (SadTab.isShowing(mTab) || mTab.isNativePage()) {
             showAndroidControls(false);
         } else {
             updateFullscreenManagerOffsets(false, mPreviousTopControlsOffsetY,
@@ -120,7 +154,7 @@ public class TabBrowserControlsOffsetHelper {
      * Shows the Android browser controls view.
      * @param animate Whether a slide-in animation should be run.
      */
-    void showAndroidControls(boolean animate) {
+    public void showAndroidControls(boolean animate) {
         if (mTab.getFullscreenManager() == null) return;
 
         if (animate) {
@@ -133,22 +167,19 @@ public class TabBrowserControlsOffsetHelper {
     /**
      * Resets the controls positions in {@link FullscreenManager} to the cached positions.
      */
-    void resetPositions() {
+    public void resetPositions() {
         resetControlsOffsetOverridden();
         if (mTab.getFullscreenManager() == null) return;
 
         boolean topOffsetsInitialized =
                 !Float.isNaN(mPreviousTopControlsOffsetY) && !Float.isNaN(mPreviousContentOffsetY);
-        boolean bottomOffsetsInitialized = !Float.isNaN(mPreviousBottomControlsOffsetY);
-        boolean isChromeHomeEnabled = FeatureUtilities.isChromeHomeEnabled();
 
         // Make sure the dominant control offsets have been set.
-        if ((!topOffsetsInitialized && !isChromeHomeEnabled)
-                || (!bottomOffsetsInitialized && isChromeHomeEnabled)) {
-            showAndroidControls(false);
-        } else {
+        if (topOffsetsInitialized) {
             updateFullscreenManagerOffsets(false, mPreviousTopControlsOffsetY,
                     mPreviousBottomControlsOffsetY, mPreviousContentOffsetY);
+        } else {
+            showAndroidControls(false);
         }
         mTab.updateFullscreenEnabledState();
     }
@@ -156,7 +187,7 @@ public class TabBrowserControlsOffsetHelper {
     /**
      * Clears the cached browser controls positions.
      */
-    void clearPreviousPositions() {
+    private void clearPreviousPositions() {
         mPreviousTopControlsOffsetY = Float.NaN;
         mPreviousBottomControlsOffsetY = Float.NaN;
         mPreviousContentOffsetY = Float.NaN;
@@ -171,7 +202,19 @@ public class TabBrowserControlsOffsetHelper {
         final FullscreenManager manager = mTab.getFullscreenManager();
         if (manager == null) return;
 
-        if (toNonFullscreen) {
+        if (mIsInVr) {
+            VrModuleProvider.getDelegate().rawTopContentOffsetChanged(topContentOffset);
+            // The dip scale of java UI and WebContents are different while in VR, leading to a
+            // mismatch in size in pixels when converting from dips. Since we hide the controls in
+            // VR anyways, just set the offsets to what they're supposed to be with the controls
+            // hidden.
+            // TODO(mthiesse): Should we instead just set the top controls height to be 0 while in
+            // VR?
+            topControlsOffset = -manager.getTopControlsHeight();
+            bottomControlsOffset = manager.getBottomControlsHeight();
+            topContentOffset = 0;
+            manager.setPositionsForTab(topControlsOffset, bottomControlsOffset, topContentOffset);
+        } else if (toNonFullscreen) {
             manager.setPositionsForTabToNonFullscreen();
         } else {
             manager.setPositionsForTab(topControlsOffset, bottomControlsOffset, topContentOffset);
@@ -227,5 +270,30 @@ public class TabBrowserControlsOffsetHelper {
                     false, (float) animator.getAnimatedValue(), 0, topControlHeight);
         });
         mControlsAnimator.start();
+    }
+
+    @Override
+    public void onEnterVr() {
+        mIsInVr = true;
+        resetPositions();
+    }
+
+    @Override
+    public void onExitVr() {
+        mIsInVr = false;
+        // Call resetPositions() to clear the VR-specific overrides for controls height.
+        resetPositions();
+        // Show the Controls explicitly because under some situations, like when we're showing a
+        // Native Page, the renderer won't send any new offsets.
+        showAndroidControls(false);
+    }
+
+    // UserData
+
+    @Override
+    public void destroy() {
+        clearPreviousPositions();
+        VrModuleProvider.unregisterVrModeObserver(this);
+        mTab.removeObserver(mTabObserver);
     }
 }

@@ -10,21 +10,53 @@
 #include "media/base/test_data_util.h"
 #include "media/base/timestamp_constants.h"
 
+namespace {
+
+// Copies parsed type and codecs from |mimetype| into |type| and |codecs|.
+// This code assumes that |mimetype| is one of the following forms:
+// 1. mimetype without codecs (e.g. audio/mpeg)
+// 2. mimetype with codecs (e.g. video/webm; codecs="vorbis,vp8")
+void SplitMime(const std::string& mimetype,
+               std::string* type,
+               std::string* codecs) {
+  DCHECK(type);
+  DCHECK(codecs);
+  size_t semicolon = mimetype.find(";");
+  if (semicolon == std::string::npos) {
+    *type = mimetype;
+    *codecs = "";
+    return;
+  }
+
+  *type = mimetype.substr(0, semicolon);
+  size_t codecs_param_start = mimetype.find("codecs=\"", semicolon);
+  CHECK_NE(codecs_param_start, std::string::npos);
+  codecs_param_start += 8;  // Skip over the codecs=".
+  size_t codecs_param_end = mimetype.find("\"", codecs_param_start);
+  CHECK_NE(codecs_param_end, std::string::npos);
+  *codecs = mimetype.substr(codecs_param_start,
+                            codecs_param_end - codecs_param_start);
+}
+
+}  // namespace
+
 namespace media {
 
 constexpr char kSourceId[] = "SourceId";
 
 MockMediaSource::MockMediaSource(const std::string& filename,
                                  const std::string& mimetype,
-                                 size_t initial_append_size)
+                                 size_t initial_append_size,
+                                 bool initial_sequence_mode)
     : current_position_(0),
       initial_append_size_(initial_append_size),
+      initial_sequence_mode_(initial_sequence_mode),
       mimetype_(mimetype),
       chunk_demuxer_(new ChunkDemuxer(
           base::Bind(&MockMediaSource::DemuxerOpened, base::Unretained(this)),
           base::DoNothing(),
-          base::Bind(&MockMediaSource::OnEncryptedMediaInitData,
-                     base::Unretained(this)),
+          base::BindRepeating(&MockMediaSource::OnEncryptedMediaInitData,
+                              base::Unretained(this)),
           &media_log_)),
       owned_chunk_demuxer_(chunk_demuxer_) {
   file_data_ = ReadTestDataFile(filename);
@@ -38,16 +70,18 @@ MockMediaSource::MockMediaSource(const std::string& filename,
 
 MockMediaSource::MockMediaSource(scoped_refptr<DecoderBuffer> data,
                                  const std::string& mimetype,
-                                 size_t initial_append_size)
+                                 size_t initial_append_size,
+                                 bool initial_sequence_mode)
     : file_data_(data),
       current_position_(0),
       initial_append_size_(initial_append_size),
+      initial_sequence_mode_(initial_sequence_mode),
       mimetype_(mimetype),
       chunk_demuxer_(new ChunkDemuxer(
           base::Bind(&MockMediaSource::DemuxerOpened, base::Unretained(this)),
           base::DoNothing(),
-          base::Bind(&MockMediaSource::OnEncryptedMediaInitData,
-                     base::Unretained(this)),
+          base::BindRepeating(&MockMediaSource::OnEncryptedMediaInitData,
+                              base::Unretained(this)),
           &media_log_)),
       owned_chunk_demuxer_(chunk_demuxer_) {
   if (initial_append_size_ == kAppendWholeFile)
@@ -61,6 +95,14 @@ MockMediaSource::~MockMediaSource() = default;
 
 std::unique_ptr<Demuxer> MockMediaSource::GetDemuxer() {
   return std::move(owned_chunk_demuxer_);
+}
+
+void MockMediaSource::SetAppendWindow(base::TimeDelta timestamp_offset,
+                                      base::TimeDelta append_window_start,
+                                      base::TimeDelta append_window_end) {
+  last_timestamp_offset_ = timestamp_offset;
+  append_window_start_ = append_window_start;
+  append_window_end_ = append_window_end;
 }
 
 void MockMediaSource::Seek(base::TimeDelta seek_time,
@@ -81,6 +123,11 @@ void MockMediaSource::Seek(base::TimeDelta seek_time) {
   chunk_demuxer_->StartWaitingForSeek(seek_time);
 }
 
+void MockMediaSource::SetSequenceMode(bool sequence_mode) {
+  CHECK(!chunk_demuxer_->IsParsingMediaSegment(kSourceId));
+  chunk_demuxer_->SetSequenceMode(kSourceId, sequence_mode);
+}
+
 void MockMediaSource::AppendData(size_t size) {
   CHECK(chunk_demuxer_);
   CHECK_LT(current_position_, file_data_->data_size());
@@ -88,7 +135,7 @@ void MockMediaSource::AppendData(size_t size) {
 
   bool success = chunk_demuxer_->AppendData(
       kSourceId, file_data_->data() + current_position_, size,
-      base::TimeDelta(), kInfiniteDuration, &last_timestamp_offset_);
+      append_window_start_, append_window_end_, &last_timestamp_offset_);
   current_position_ += size;
 
   ASSERT_EQ(expect_append_success_, success);
@@ -105,8 +152,8 @@ bool MockMediaSource::AppendAtTime(base::TimeDelta timestamp_offset,
                                    int size) {
   CHECK(!chunk_demuxer_->IsParsingMediaSegment(kSourceId));
   bool success =
-      chunk_demuxer_->AppendData(kSourceId, pData, size, base::TimeDelta(),
-                                 kInfiniteDuration, &timestamp_offset);
+      chunk_demuxer_->AppendData(kSourceId, pData, size, append_window_start_,
+                                 append_window_end_, &timestamp_offset);
   last_timestamp_offset_ = timestamp_offset;
   return success;
 }
@@ -144,6 +191,10 @@ void MockMediaSource::EndOfStream() {
   chunk_demuxer_->MarkEndOfStream(PIPELINE_OK);
 }
 
+void MockMediaSource::UnmarkEndOfStream() {
+  chunk_demuxer_->UnmarkEndOfStream();
+}
+
 void MockMediaSource::Shutdown() {
   if (!chunk_demuxer_)
     return;
@@ -162,7 +213,7 @@ void MockMediaSource::DemuxerOpened() {
 void MockMediaSource::DemuxerOpenedTask() {
   ChunkDemuxer::Status status = AddId();
   if (status != ChunkDemuxer::kOk) {
-    CHECK(!demuxer_failure_cb_.is_null());
+    CHECK(demuxer_failure_cb_);
     demuxer_failure_cb_.Run(DEMUXER_ERROR_COULD_NOT_OPEN);
     return;
   }
@@ -174,40 +225,32 @@ void MockMediaSource::DemuxerOpenedTask() {
       kSourceId,
       base::Bind(&MockMediaSource::OnParseWarningMock, base::Unretained(this)));
 
+  SetSequenceMode(initial_sequence_mode_);
   AppendData(initial_append_size_);
 }
 
 ChunkDemuxer::Status MockMediaSource::AddId() {
-  // This code assumes that |mimetype_| is one of the following forms.
-  // 1. audio/mpeg
-  // 2. video/webm;codec="vorbis,vp8".
-  size_t semicolon = mimetype_.find(";");
-  std::string type = mimetype_;
-  std::string codecs_param = "";
-  if (semicolon != std::string::npos) {
-    type = mimetype_.substr(0, semicolon);
-    size_t codecs_param_start = mimetype_.find("codecs=\"", semicolon);
+  std::string type;
+  std::string codecs;
+  SplitMime(mimetype_, &type, &codecs);
+  return chunk_demuxer_->AddId(kSourceId, type, codecs);
+}
 
-    CHECK_NE(codecs_param_start, std::string::npos);
-
-    codecs_param_start += 8;  // Skip over the codecs=".
-
-    size_t codecs_param_end = mimetype_.find("\"", codecs_param_start);
-
-    CHECK_NE(codecs_param_end, std::string::npos);
-
-    codecs_param = mimetype_.substr(codecs_param_start,
-                                    codecs_param_end - codecs_param_start);
-  }
-
-  return chunk_demuxer_->AddId(kSourceId, type, codecs_param);
+void MockMediaSource::ChangeType(const std::string& mimetype) {
+  chunk_demuxer_->ResetParserState(kSourceId, base::TimeDelta(),
+                                   kInfiniteDuration, &last_timestamp_offset_);
+  std::string type;
+  std::string codecs;
+  SplitMime(mimetype, &type, &codecs);
+  mimetype_ = mimetype;
+  chunk_demuxer_->ChangeType(kSourceId, type, codecs);
 }
 
 void MockMediaSource::OnEncryptedMediaInitData(
     EmeInitDataType init_data_type,
     const std::vector<uint8_t>& init_data) {
   CHECK(!init_data.empty());
-  CHECK(!encrypted_media_init_data_cb_.is_null());
+  CHECK(encrypted_media_init_data_cb_);
   encrypted_media_init_data_cb_.Run(init_data_type, init_data);
 }
 

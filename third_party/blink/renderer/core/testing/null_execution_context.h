@@ -6,8 +6,8 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_TESTING_NULL_EXECUTION_CONTEXT_H_
 
 #include <memory>
+#include "base/single_thread_task_runner.h"
 #include "third_party/blink/renderer/bindings/core/v8/source_location.h"
-#include "third_party/blink/renderer/core/dom/events/event_queue.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/execution_context/security_context.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
@@ -34,8 +34,11 @@ class NullExecutionContext
   void DisableEval(const String&) override {}
   String UserAgent() const override { return String(); }
 
+  HttpsState GetHttpsState() const override {
+    return CalculateHttpsState(GetSecurityOrigin());
+  }
+
   EventTarget* ErrorEventTarget() override { return nullptr; }
-  EventQueue* GetEventQueue() const override { return queue_.Get(); }
 
   bool TasksNeedPause() override { return tasks_need_pause_; }
   void SetTasksNeedPause(bool flag) { tasks_need_pause_ = flag; }
@@ -43,6 +46,9 @@ class NullExecutionContext
   void DidUpdateSecurityOrigin() override {}
   SecurityContext& GetSecurityContext() override { return *this; }
   DOMTimerCoordinator* Timers() override { return nullptr; }
+  const base::UnguessableToken& GetAgentClusterID() const final {
+    return base::UnguessableToken::Null();
+  }
 
   void AddConsoleMessage(ConsoleMessage*) override {}
   void ExceptionThrown(ErrorEvent*) override {}
@@ -54,14 +60,13 @@ class NullExecutionContext
 
   ResourceFetcher* Fetcher() const override { return nullptr; }
 
-  FrameOrWorkerGlobalScopeScheduler* GetScheduler() override;
+  FrameOrWorkerScheduler* GetScheduler() override;
   scoped_refptr<base::SingleThreadTaskRunner> GetTaskRunner(TaskType) override;
 
   using SecurityContext::GetSecurityOrigin;
   using SecurityContext::GetContentSecurityPolicy;
 
-  virtual void Trace(blink::Visitor* visitor) {
-    visitor->Trace(queue_);
+  void Trace(blink::Visitor* visitor) override {
     SecurityContext::Trace(visitor);
     ExecutionContext::Trace(visitor);
   }
@@ -69,7 +74,6 @@ class NullExecutionContext
  private:
   bool tasks_need_pause_;
   bool is_secure_context_;
-  Member<EventQueue> queue_;
 
   KURL url_;
 };

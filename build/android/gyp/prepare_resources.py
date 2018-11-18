@@ -19,6 +19,14 @@ import generate_v14_compatible_resources
 from util import build_utils
 from util import resource_utils
 
+_AAPT_IGNORE_PATTERN = ':'.join([
+    'OWNERS',  # Allow OWNERS files within res/
+    '*.py',  # PRESUBMIT.py sometimes exist.
+    '*.pyc',
+    '*~',  # Some editors create these as temp files.
+    '.*',  # Never makes sense to include dot(files/dirs).
+    '*.d.stamp', # Ignore stamp files
+    ])
 
 def _ParseArgs(args):
   """Parses command line options.
@@ -91,6 +99,7 @@ def _ZipResources(resource_dirs, zip_path, ignore_pattern):
   # ignore_pattern is a string of ':' delimited list of globs used to ignore
   # files that should not be part of the final resource zip.
   files_to_zip = dict()
+  files_to_zip_without_generated = dict()
   globs = _GenerateGlobs(ignore_pattern)
   for d in resource_dirs:
     for root, _, files in os.walk(d):
@@ -102,7 +111,13 @@ def _ZipResources(resource_dirs, zip_path, ignore_pattern):
         path = os.path.join(root, f)
         if build_utils.MatchesGlob(archive_path, globs):
           continue
+        # We want the original resource dirs in the .info file rather than the
+        # generated overridden path.
+        if not path.startswith('/tmp'):
+          files_to_zip_without_generated[archive_path] = path
         files_to_zip[archive_path] = path
+  resource_utils.CreateResourceInfoFile(files_to_zip_without_generated,
+                                        zip_path)
   build_utils.DoZip(files_to_zip.iteritems(), zip_path)
 
 
@@ -124,10 +139,14 @@ def _GenerateRTxt(options, dep_subdirs, gen_dir):
                      '--no-crunch',
                      '--auto-add-overlay',
                      '--no-version-vectors',
-                     '-I', options.android_sdk_jar,
+                    ]
+  for j in options.include_resources:
+    package_command += ['-I', j]
+
+  package_command += [
                      '--output-text-symbols', gen_dir,
                      '-J', gen_dir,  # Required for R.txt generation.
-                     '--ignore-assets', build_utils.AAPT_IGNORE_PATTERN]
+                     '--ignore-assets', _AAPT_IGNORE_PATTERN]
 
   # Adding all dependencies as sources is necessary for @type/foo references
   # to symbols within dependencies to resolve. However, it has the side-effect
@@ -170,7 +189,7 @@ def _GenerateResourcesZip(output_resource_zip, input_resource_dirs,
     input_resource_dirs.append(v14_dir)
 
   _ZipResources(input_resource_dirs, output_resource_zip,
-                  build_utils.AAPT_IGNORE_PATTERN)
+                _AAPT_IGNORE_PATTERN)
 
 
 def _OnStaleMd5(options):
@@ -248,8 +267,8 @@ def main(args):
   possible_input_paths = [
     options.aapt_path,
     options.android_manifest,
-    options.android_sdk_jar,
   ]
+  possible_input_paths += options.include_resources
   input_paths = [x for x in possible_input_paths if x]
   input_paths.extend(options.dependencies_res_zips)
   input_paths.extend(options.extra_r_text_files)
@@ -278,7 +297,8 @@ def main(args):
       input_paths=input_paths,
       input_strings=input_strings,
       output_paths=output_paths,
-      depfile_deps=depfile_deps)
+      depfile_deps=depfile_deps,
+      add_pydeps=False)
 
 
 if __name__ == '__main__':

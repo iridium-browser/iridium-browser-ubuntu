@@ -7,6 +7,7 @@
 
 #include "mojo/public/cpp/bindings/associated_binding_set.h"
 #include "third_party/blink/public/platform/modules/bluetooth/web_bluetooth.mojom-blink.h"
+#include "third_party/blink/renderer/bindings/core/v8/active_script_wrappable.h"
 #include "third_party/blink/renderer/core/dom/context_lifecycle_observer.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_array_piece.h"
 #include "third_party/blink/renderer/core/typed_arrays/dom_data_view.h"
@@ -20,6 +21,7 @@ namespace blink {
 
 class BluetoothCharacteristicProperties;
 class BluetoothDevice;
+class DOMException;
 class ExecutionContext;
 class ScriptPromise;
 class ScriptState;
@@ -34,6 +36,7 @@ class ScriptState;
 // CallbackPromiseAdapter class comments.
 class BluetoothRemoteGATTCharacteristic final
     : public EventTargetWithInlineData,
+      public ActiveScriptWrappable<BluetoothRemoteGATTCharacteristic>,
       public ContextLifecycleObserver,
       public mojom::blink::WebBluetoothCharacteristicClient {
   USING_PRE_FINALIZER(BluetoothRemoteGATTCharacteristic, Dispose);
@@ -71,6 +74,9 @@ class BluetoothRemoteGATTCharacteristic final
   const AtomicString& InterfaceName() const override;
   ExecutionContext* GetExecutionContext() const override;
 
+  // ActiveScriptWrappable methods:
+  bool HasPendingActivity() const override;
+
   // Interface required by garbage collection.
   void Trace(blink::Visitor*) override;
 
@@ -105,7 +111,7 @@ class BluetoothRemoteGATTCharacteristic final
 
   void ReadValueCallback(ScriptPromiseResolver*,
                          mojom::blink::WebBluetoothResult,
-                         const Optional<Vector<uint8_t>>& value);
+                         const base::Optional<Vector<uint8_t>>& value);
   void WriteValueCallback(ScriptPromiseResolver*,
                           const Vector<uint8_t>& value,
                           mojom::blink::WebBluetoothResult);
@@ -122,7 +128,7 @@ class BluetoothRemoteGATTCharacteristic final
       mojom::blink::WebBluetoothGATTQueryQuantity,
       ScriptPromiseResolver*,
       mojom::blink::WebBluetoothResult,
-      Optional<Vector<mojom::blink::WebBluetoothRemoteGATTDescriptorPtr>>
+      base::Optional<Vector<mojom::blink::WebBluetoothRemoteGATTDescriptorPtr>>
           descriptors);
 
   DOMException* CreateInvalidCharacteristicError();

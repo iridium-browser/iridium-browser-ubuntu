@@ -14,7 +14,7 @@
 #include "chrome/browser/ui/bookmarks/bookmark_utils.h"
 #include "chrome/browser/ui/bookmarks/bookmark_utils_desktop.h"
 #include "chrome/browser/ui/browser_dialogs.h"
-#include "chrome/browser/ui/views/harmony/chrome_layout_provider.h"
+#include "chrome/browser/ui/views/chrome_layout_provider.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/locale_settings.h"
 #include "components/bookmarks/browser/bookmark_model.h"
@@ -26,7 +26,6 @@
 #include "components/user_prefs/user_prefs.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/material_design/material_design_controller.h"
 #include "ui/events/event.h"
 #include "ui/views/background.h"
 #include "ui/views/controls/button/md_text_button.h"
@@ -42,14 +41,6 @@
 using bookmarks::BookmarkExpandedStateTracker;
 using bookmarks::BookmarkModel;
 using bookmarks::BookmarkNode;
-using views::GridLayout;
-
-namespace {
-
-// Background color of text field when URL is invalid.
-const SkColor kErrorColor = SkColorSetRGB(0xFF, 0xBC, 0xBC);
-
-}  // namespace
 
 BookmarkEditorView::BookmarkEditorView(
     Profile* profile,
@@ -339,7 +330,7 @@ void BookmarkEditorView::Init() {
     new_folder_button_->SetEnabled(false);
   }
 
-  GridLayout* layout =
+  views::GridLayout* layout =
       SetLayoutManager(std::make_unique<views::GridLayout>(this));
   ChromeLayoutProvider* provider = ChromeLayoutProvider::Get();
 
@@ -348,34 +339,38 @@ void BookmarkEditorView::Init() {
   const int buttons_column_set_id = 2;
 
   views::ColumnSet* column_set = layout->AddColumnSet(labels_column_set_id);
-  column_set->AddColumn(provider->GetControlLabelGridAlignment(),
-                        GridLayout::CENTER, 0, GridLayout::USE_PREF, 0, 0);
+  column_set->AddColumn(
+      provider->GetControlLabelGridAlignment(), views::GridLayout::CENTER,
+      views::GridLayout::kFixedSize, views::GridLayout::USE_PREF, 0, 0);
   column_set->AddPaddingColumn(
-      0,
+      views::GridLayout::kFixedSize,
       provider->GetDistanceMetric(views::DISTANCE_RELATED_CONTROL_HORIZONTAL));
-  column_set->AddColumn(GridLayout::FILL, GridLayout::CENTER, 1,
-                        GridLayout::USE_PREF, 0, 0);
+  column_set->AddColumn(views::GridLayout::FILL, views::GridLayout::CENTER, 1.0,
+                        views::GridLayout::USE_PREF, 0, 0);
 
   column_set = layout->AddColumnSet(single_column_view_set_id);
-  column_set->AddColumn(GridLayout::FILL, GridLayout::FILL, 1,
-                        GridLayout::USE_PREF, 0, 0);
+  column_set->AddColumn(views::GridLayout::FILL, views::GridLayout::FILL, 1.0,
+                        views::GridLayout::USE_PREF, 0, 0);
 
   column_set = layout->AddColumnSet(buttons_column_set_id);
-  column_set->AddColumn(GridLayout::FILL, GridLayout::LEADING, 0,
-                        GridLayout::USE_PREF, 0, 0);
+  column_set->AddColumn(views::GridLayout::FILL, views::GridLayout::LEADING,
+                        views::GridLayout::kFixedSize,
+                        views::GridLayout::USE_PREF, 0, 0);
   column_set->AddPaddingColumn(
-      1,
+      1.0,
       provider->GetDistanceMetric(views::DISTANCE_RELATED_CONTROL_HORIZONTAL));
-  column_set->AddColumn(GridLayout::FILL, GridLayout::LEADING, 0,
-                        GridLayout::USE_PREF, 0, 0);
+  column_set->AddColumn(views::GridLayout::FILL, views::GridLayout::LEADING,
+                        views::GridLayout::kFixedSize,
+                        views::GridLayout::USE_PREF, 0, 0);
   column_set->AddPaddingColumn(
-      0,
+      views::GridLayout::kFixedSize,
       provider->GetDistanceMetric(views::DISTANCE_RELATED_CONTROL_HORIZONTAL));
-  column_set->AddColumn(GridLayout::FILL, GridLayout::LEADING, 0,
-                        GridLayout::USE_PREF, 0, 0);
+  column_set->AddColumn(views::GridLayout::FILL, views::GridLayout::LEADING,
+                        views::GridLayout::kFixedSize,
+                        views::GridLayout::USE_PREF, 0, 0);
   column_set->LinkColumnSizes(0, 2, 4, -1);
 
-  layout->StartRow(0, labels_column_set_id);
+  layout->StartRow(views::GridLayout::kFixedSize, labels_column_set_id);
   layout->AddView(title_label_);
   layout->AddView(title_tf_);
 
@@ -390,24 +385,27 @@ void BookmarkEditorView::Init() {
         l10n_util::GetStringUTF16(IDS_BOOKMARK_AX_EDITOR_URL_LABEL));
     url_tf_->SetTextInputType(ui::TextInputType::TEXT_INPUT_TYPE_URL);
 
-    layout->AddPaddingRow(0, provider->GetDistanceMetric(
-                                 views::DISTANCE_RELATED_CONTROL_VERTICAL));
+    layout->AddPaddingRow(
+        views::GridLayout::kFixedSize,
+        provider->GetDistanceMetric(views::DISTANCE_RELATED_CONTROL_VERTICAL));
 
-    layout->StartRow(0, labels_column_set_id);
+    layout->StartRow(views::GridLayout::kFixedSize, labels_column_set_id);
     layout->AddView(url_label_);
     layout->AddView(url_tf_);
   }
 
   if (show_tree_) {
-    layout->AddPaddingRow(0, provider->GetDistanceMetric(
-                                 views::DISTANCE_RELATED_CONTROL_VERTICAL));
-    layout->StartRow(1, single_column_view_set_id);
+    layout->AddPaddingRow(
+        views::GridLayout::kFixedSize,
+        provider->GetDistanceMetric(views::DISTANCE_RELATED_CONTROL_VERTICAL));
+    layout->StartRow(1.0, single_column_view_set_id);
     layout->AddView(tree_view_->CreateParentIfNecessary());
   }
 
   if (provider->UseExtraDialogPadding()) {
-    layout->AddPaddingRow(0, provider->GetDistanceMetric(
-                                 views::DISTANCE_RELATED_CONTROL_VERTICAL));
+    layout->AddPaddingRow(
+        views::GridLayout::kFixedSize,
+        provider->GetDistanceMetric(views::DISTANCE_RELATED_CONTROL_VERTICAL));
   }
 
   if (!show_tree_ || bb_model_->loaded())
@@ -448,12 +446,7 @@ GURL BookmarkEditorView::GetInputURL() const {
 void BookmarkEditorView::UserInputChanged() {
   if (details_.GetNodeType() != BookmarkNode::FOLDER) {
     const GURL url(GetInputURL());
-    if (ui::MaterialDesignController::IsSecondaryUiMaterial())
-      url_tf_->SetInvalid(!url.is_valid());
-    else if (!url.is_valid())
-      url_tf_->SetBackgroundColor(kErrorColor);
-    else
-      url_tf_->UseDefaultBackgroundColor();
+    url_tf_->SetInvalid(!url.is_valid());
   }
   DialogModelChanged();
 }
@@ -482,8 +475,7 @@ BookmarkEditorView::EditorNode* BookmarkEditorView::AddNewFolder(
 void BookmarkEditorView::ExpandAndSelect() {
   BookmarkExpandedStateTracker::Nodes expanded_nodes =
       bb_model_->expanded_state_tracker()->GetExpandedNodes();
-  for (BookmarkExpandedStateTracker::Nodes::const_iterator i(
-       expanded_nodes.begin()); i != expanded_nodes.end(); ++i) {
+  for (auto i(expanded_nodes.begin()); i != expanded_nodes.end(); ++i) {
     EditorNode* editor_node =
         FindNodeWithID(tree_model_->GetRoot(), (*i)->id());
     if (editor_node)

@@ -18,15 +18,11 @@ DEPS = [
   'recipe_engine/path',
   'recipe_engine/properties',
   'recipe_engine/step',
-  'core',
+  'checkout',
   'infra',
   'run',
   'vars',
 ]
-
-UPDATE_DOCS_GITCOOKIES_FILE = 'update_docs.git_cookies'
-UPDATE_DOCS_GITCOOKIES_GS_PATH = (
-    'gs://skia-buildbots/artifacts/server/.gitcookies_update-docs')
 
 
 def go_get_fiddlecli(api):
@@ -37,19 +33,19 @@ def go_get_fiddlecli(api):
         api.step,
         'go get fiddlecli',
         5,  # Update attempts.
-        cmd=[api.infra.go_exe, 'get', '-u', '-t',
-             'go.skia.org/infra/fiddle/go/fiddlecli'])
+        cmd=[api.infra.go_exe, 'get', 'go.skia.org/infra/fiddlek/go/fiddlecli'])
 
 
 def RunSteps(api):
   api.vars.setup()
-  api.core.checkout_bot_update()
+  checkout_root = api.checkout.default_checkout_root
+  api.checkout.bot_update(checkout_root=checkout_root)
   api.infra.go_version()
   go_get_fiddlecli(api)
 
-  with api.context(cwd=api.vars.skia_dir, env=api.infra.go_env):
-    bookmaker_binary = api.path.join(api.vars.skia_out, api.vars.configuration,
-                                     'bookmaker')
+  skia_dir = checkout_root.join('skia')
+  with api.context(cwd=skia_dir, env=api.infra.go_env):
+    bookmaker_binary = api.vars.build_dir.join('bookmaker')
     buildername = api.vars.builder_name
 
     if 'PerCommit' in buildername:
@@ -81,11 +77,16 @@ def RunSteps(api):
              ]
       api.run(api.step, 'Extract all fiddles out of md files', cmd=cmd)
 
+      # Output fiddle.json for easy debugging.
+      api.run(api.step, 'Output fiddle.json',
+              cmd=['cat', fiddlecli_input])
+
       # Step 2: Forces fiddle.skia.org to compile all fiddles extracted out of
       #         markdown files and get output in JSON.
       cmd = [fiddlecli_binary,
              '--input', fiddlecli_input,
              '--output', fiddlecli_output,
+             '--procs', 10, # Number of concurrent requests.
              '--logtostderr',
              '--force',
           ]
@@ -128,17 +129,12 @@ def RunSteps(api):
 
       # Step 4: Update docs in site/user/api/ with the output of fiddlecli.
       #         If there are any new changes then upload and commit the changes.
-      update_docs_gitcookies = api.path['start_dir'].join(
-          UPDATE_DOCS_GITCOOKIES_FILE)
       cmd = ['python',
-             api.vars.skia_dir.join('infra', 'bots', 'upload_md.py'),
+             skia_dir.join('infra', 'bots', 'upload_md.py'),
             '--bookmaker_binary', bookmaker_binary,
-             '--fiddlecli_output', fiddlecli_output,
-            '--gitcookies', str(update_docs_gitcookies)]
-      with api.infra.DownloadGitCookies(
-         UPDATE_DOCS_GITCOOKIES_GS_PATH, update_docs_gitcookies, api):
-        with api.context(cwd=api.vars.skia_dir, env=api.infra.go_env):
-          api.run(api.step, 'Generate and Upload Markdown files', cmd=cmd)
+             '--fiddlecli_output', fiddlecli_output]
+      with api.context(cwd=skia_dir, env=api.infra.go_env):
+        api.run(api.step, 'Generate and Upload Markdown files', cmd=cmd)
 
 
 def GenTests(api):
@@ -176,7 +172,7 @@ def GenTests(api):
                 "col": 0
             },
             {
-                "text": "c++ -MMD -MF obj/tools/fiddle/fiddle.draw.o.d -DNDEBUG -DSK_HAS_HEIF_LIBRARY -DSK_HAS_JPEG_LIBRARY -DSK_SUPPORT_PDF -DSK_PDF_USE_SFNTLY -DSK_HAS_PNG_LIBRARY -DSK_CODEC_DECODES_RAW -DSK_HAS_WEBP_LIBRARY -DSK_XML -DSK_GAMMA_APPLY_TO_A8 -DSK_ENABLE_DISCRETE_GPU -DGR_TEST_UTILS=1 -DSK_SAMPLES_FOR_X -DSK_SUPPORT_ATLAS_TEXT=1 -I../../tools/flags -I../../include/private -I../../src/c -I../../src/codec -I../../src/core -I../../src/effects -I../../src/fonts -I../../src/image -I../../src/images -I../../src/lazy -I../../src/opts -I../../src/pathops -I../../src/pdf -I../../src/ports -I../../src/sfnt -I../../src/shaders -I../../src/shaders/gradients -I../../src/sksl -I../../src/utils -I../../src/utils/win -I../../src/xml -I../../third_party/gif -I../../src/gpu -I../../tools/gpu -I../../include/android -I../../include/c -I../../include/codec -I../../include/config -I../../include/core -I../../include/effects -I../../include/encode -I../../include/gpu -I../../include/gpu/gl -I../../include/atlastext -I../../include/pathops -I../../include/ports -I../../include/svg -I../../include/utils -I../../include/utils/mac -I../../include/atlastext -Igen -fstrict-aliasing -fPIC -Werror -Wall -Wextra -Winit-self -Wpointer-arith -Wsign-compare -Wvla -Wno-deprecated-declarations -Wno-maybe-uninitialized -Wno-unused-parameter -O3 -fdata-sections -ffunction-sections -g -std=c++11 -fno-exceptions -fno-rtti -Wnon-virtual-dtor -Wno-error -c ../../tools/fiddle/draw.cpp -o obj/tools/fiddle/fiddle.draw.o",
+                "text": "c++ -MMD -MF obj/tools/fiddle/fiddle.draw.o.d -DNDEBUG -DSK_HAS_HEIF_LIBRARY -DSK_HAS_JPEG_LIBRARY -DSK_SUPPORT_PDF -DSK_PDF_USE_SFNTLY -DSK_HAS_PNG_LIBRARY -DSK_CODEC_DECODES_RAW -DSK_HAS_WEBP_LIBRARY -DSK_XML -DSK_GAMMA_APPLY_TO_A8 -DSK_ENABLE_DISCRETE_GPU -DGR_TEST_UTILS=1 -DSK_SAMPLES_FOR_X -DSK_SUPPORT_ATLAS_TEXT=1 -I../../tools/flags -I../../include/private -I../../src/c -I../../src/codec -I../../src/core -I../../src/effects -I../../src/fonts -I../../src/image -I../../src/images -I../../src/lazy -I../../src/opts -I../../src/pathops -I../../src/pdf -I../../src/ports -I../../src/sfnt -I../../src/shaders -I../../src/shaders/gradients -I../../src/sksl -I../../src/utils -I../../src/utils/win -I../../src/xml -I../../third_party/gif -I../../src/gpu -I../../tools/gpu -I../../include/android -I../../include/c -I../../include/codec -I../../include/config -I../../include/core -I../../include/effects -I../../include/encode -I../../include/gpu -I../../include/gpu/gl -I../../include/atlastext -I../../include/pathops -I../../include/ports -I../../include/svg -I../../include/utils -I../../include/utils/mac -I../../include/atlastext -Igen -fstrict-aliasing -fPIC -Werror -Wall -Wextra -Winit-self -Wpointer-arith -Wsign-compare -Wvla -Wno-deprecated-declarations -Wno-maybe-uninitialized -Wno-unused-parameter -O3 -fdata-sections -ffunction-sections -g -std=c++14 -fno-exceptions -fno-rtti -Wnon-virtual-dtor -Wno-error -c ../../tools/fiddle/draw.cpp -o obj/tools/fiddle/fiddle.draw.o",
                 "line": 0,
                 "col": 0
             },
@@ -285,8 +281,7 @@ def GenTests(api):
                      path_config='kitchen',
                      fiddleout_test_data=fiddleout_no_errors_test_data,
                      swarm_out_dir='[SWARM_OUT_DIR]') +
-      api.path.exists(api.path['start_dir'].join('fiddleout.json'),
-                      api.path['start_dir'].join(UPDATE_DOCS_GITCOOKIES_FILE))
+      api.path.exists(api.path['start_dir'].join('fiddleout.json'))
   )
 
   yield (

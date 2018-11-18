@@ -73,8 +73,8 @@ BYTE* PEImageSafe::GetOptionalHeader() {
   PIMAGE_OPTIONAL_HEADER optional_header =
       reinterpret_cast<PIMAGE_OPTIONAL_HEADER>(
           reinterpret_cast<char*>(file_header) + sizeof(IMAGE_FILE_HEADER));
-  DWORD optional_header_offset = reinterpret_cast<char*>(optional_header) -
-                                 reinterpret_cast<char*>(dos_header_);
+  uintptr_t optional_header_offset = reinterpret_cast<char*>(optional_header) -
+                                     reinterpret_cast<char*>(dos_header_);
   if (optional_header_offset + sizeof(IMAGE_OPTIONAL_HEADER::Magic) >
       image_size_) {
     return nullptr;
@@ -91,12 +91,25 @@ BYTE* PEImageSafe::GetOptionalHeader() {
     return nullptr;
   }
 
+  // Sanity check that the full optional header is in this buffer.
   if ((bitness_ == ImageBitness::k64 &&
        (optional_header_offset + sizeof(IMAGE_OPTIONAL_HEADER64)) >
            image_size_) ||
       (optional_header_offset + sizeof(IMAGE_OPTIONAL_HEADER32) >
        image_size_)) {
     return nullptr;
+  }
+
+  // If |image_size_| is currently |kImageSizeNotSet| (this is an image mapped
+  // into memory by NTLoader), now the size can be updated for accuracy.
+  if (image_size_ == kImageSizeNotSet) {
+    if (bitness_ == ImageBitness::k64) {
+      image_size_ = reinterpret_cast<PIMAGE_OPTIONAL_HEADER64>(optional_header)
+                        ->SizeOfImage;
+    } else {
+      image_size_ = reinterpret_cast<PIMAGE_OPTIONAL_HEADER32>(optional_header)
+                        ->SizeOfImage;
+    }
   }
 
   // Nothing to verify inside the optional header at this point.
@@ -118,9 +131,17 @@ ImageBitness PEImageSafe::GetImageBitness() {
 // have been memory mapped by NTLoader.
 //----------------------------------------------------------------------------
 
+void* PEImageSafe::RVAToAddr(DWORD rva) {
+  assert(ldr_image_mapping_);
+  if (rva >= image_size_)
+    return nullptr;
+
+  return reinterpret_cast<char*>(image_) + rva;
+}
+
 void* PEImageSafe::GetImageDirectoryEntryAddr(int directory,
                                               DWORD* directory_size) {
-  assert(directory > 0 && directory < IMAGE_NUMBEROF_DIRECTORY_ENTRIES &&
+  assert(directory >= 0 && directory < IMAGE_NUMBEROF_DIRECTORY_ENTRIES &&
          ldr_image_mapping_);
 
   // GetOptionalHeader() validates the optional header.
@@ -168,18 +189,13 @@ PIMAGE_EXPORT_DIRECTORY PEImageSafe::GetExportDirectory() {
       GetImageDirectoryEntryAddr(IMAGE_DIRECTORY_ENTRY_EXPORT, &dir_size));
 
   if (export_dir_) {
-    if (sizeof(IMAGE_EXPORT_DIRECTORY) != dir_size)
+    // Basic sanity check.  |dir_size| will often be larger than just the given
+    // base directory structure.
+    if (sizeof(IMAGE_EXPORT_DIRECTORY) > dir_size)
       export_dir_ = nullptr;
   }
 
   return export_dir_;
-}
-
-// Converts a Relative Virtual Address (RVA) to direct pointer.
-// - This function does not validate the resulting address.
-void* PEImageSafe::RVAToAddr(DWORD rva) {
-  assert(ldr_image_mapping_);
-  return reinterpret_cast<char*>(image_) + rva;
 }
 
 }  // namespace pe_image_safe

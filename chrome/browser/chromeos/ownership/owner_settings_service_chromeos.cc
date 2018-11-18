@@ -17,7 +17,7 @@
 #include "base/command_line.h"
 #include "base/memory/ptr_util.h"
 #include "base/stl_util.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "base/threading/thread_checker.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/login/session/user_session_manager.h"
@@ -25,6 +25,7 @@
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/device_settings_provider.h"
+#include "chrome/browser/chromeos/settings/install_attributes.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
@@ -33,6 +34,7 @@
 #include "components/prefs/pref_service.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_service.h"
@@ -81,8 +83,8 @@ void LoadPrivateKeyByPublicKeyOnWorkerThread(
   scoped_refptr<PublicKey> public_key;
   if (!owner_key_util->ImportPublicKey(&public_key_data)) {
     scoped_refptr<PrivateKey> private_key;
-    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                            base::Bind(callback, public_key, private_key));
+    base::PostTaskWithTraits(FROM_HERE, {BrowserThread::UI},
+                             base::Bind(callback, public_key, private_key));
     return;
   }
   public_key = new PublicKey();
@@ -103,9 +105,8 @@ void LoadPrivateKeyByPublicKeyOnWorkerThread(
     private_key = new PrivateKey(owner_key_util->FindPrivateKeyInSlot(
         public_key->data(), public_slot.get()));
   }
-  BrowserThread::PostTask(BrowserThread::UI,
-                          FROM_HERE,
-                          base::Bind(callback, public_key, private_key));
+  base::PostTaskWithTraits(FROM_HERE, {BrowserThread::UI},
+                           base::Bind(callback, public_key, private_key));
 }
 
 void ContinueLoadPrivateKeyOnIOThread(
@@ -117,7 +118,7 @@ void ContinueLoadPrivateKeyOnIOThread(
 
   scoped_refptr<base::TaskRunner> task_runner =
       base::CreateTaskRunnerWithTraits(
-          {base::MayBlock(), base::TaskPriority::BACKGROUND,
+          {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
            base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN});
   task_runner->PostTask(
       FROM_HERE,
@@ -165,7 +166,7 @@ void DoesPrivateKeyExistAsync(
   }
   scoped_refptr<base::TaskRunner> task_runner =
       base::CreateTaskRunnerWithTraits(
-          {base::MayBlock(), base::TaskPriority::BACKGROUND,
+          {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
            base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN});
   base::PostTaskAndReplyWithResult(
       task_runner.get(),
@@ -265,6 +266,23 @@ void OwnerSettingsServiceChromeOS::OnEasyUnlockKeyOpsFinished() {
 bool OwnerSettingsServiceChromeOS::HasPendingChanges() const {
   return !pending_changes_.empty() || tentative_settings_.get() ||
          has_pending_fixups_;
+}
+
+bool OwnerSettingsServiceChromeOS::IsOwner() {
+  if (InstallAttributes::Get()->IsEnterpriseManaged()) {
+    return false;
+  }
+  return OwnerSettingsService::IsOwner();
+}
+
+void OwnerSettingsServiceChromeOS::IsOwnerAsync(
+    const IsOwnerCallback& callback) {
+  if (InstallAttributes::Get()->IsEnterpriseManaged()) {
+    base::ThreadTaskRunnerHandle::Get()->PostTask(
+        FROM_HERE, base::BindOnce(callback, false));
+    return;
+  }
+  OwnerSettingsService::IsOwnerAsync(callback);
 }
 
 bool OwnerSettingsServiceChromeOS::HandlesSetting(const std::string& setting) {
@@ -388,9 +406,8 @@ void OwnerSettingsServiceChromeOS::IsOwnerForSafeModeAsync(
 
   // Make sure NSS is initialized and NSS DB is loaded for the user before
   // searching for the owner key.
-  BrowserThread::PostTaskAndReply(
-      BrowserThread::IO,
-      FROM_HERE,
+  base::PostTaskWithTraitsAndReply(
+      FROM_HERE, {BrowserThread::IO},
       base::Bind(base::IgnoreResult(&crypto::InitializeNSSForChromeOSUser),
                  user_hash,
                  ProfileHelper::GetProfilePathByUserIdHash(user_hash)),
@@ -689,8 +706,8 @@ void OwnerSettingsServiceChromeOS::ReloadKeypairImpl(const base::Callback<
     return;
   }
 
-  bool rv = BrowserThread::PostTask(
-      BrowserThread::IO, FROM_HERE,
+  bool rv = base::PostTaskWithTraits(
+      FROM_HERE, {BrowserThread::IO},
       base::Bind(&LoadPrivateKeyOnIOThread, owner_key_util_,
                  ProfileHelper::GetUserIdHashFromProfile(profile_), callback));
   if (!rv) {

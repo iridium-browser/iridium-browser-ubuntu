@@ -7,10 +7,14 @@
 #include <utility>
 
 #include "base/strings/stringprintf.h"
+#include "base/threading/thread_restrictions.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/test/integration/profile_sync_service_harness.h"
 #include "chrome/browser/sync/test/integration/sync_datatype_helper.h"
 #include "chrome/browser/sync/test/integration/sync_test.h"
+#include "chrome/common/chrome_constants.h"
+#include "components/pref_registry/pref_registry_syncable.h"
+#include "components/prefs/persistent_pref_store.h"
 #include "components/prefs/pref_change_registrar.h"
 #include "components/prefs/pref_service.h"
 #include "components/prefs/scoped_user_pref_update.h"
@@ -25,6 +29,15 @@ PrefService* GetPrefs(int index) {
 
 PrefService* GetVerifierPrefs() {
   return test()->verifier()->GetPrefs();
+}
+
+user_prefs::PrefRegistrySyncable* GetRegistry(Profile* profile) {
+  // TODO(tschumann): Not sure what's the cleanest way to avoid this deprecated
+  // call is. Ideally we could use a servicification integration test.
+  // Another option would be to have a ForTest-only variant of
+  // KeyedServiceBaseFactory::GetAssociatedPrefRegistry().
+  return static_cast<user_prefs::PrefRegistrySyncable*>(
+      profile->GetPrefs()->DeprecatedGetPrefRegistry());
 }
 
 void ChangeBooleanPref(int index, const char* pref_name) {
@@ -74,9 +87,7 @@ void ChangeListPref(int index,
   {
     ListPrefUpdate update(GetPrefs(index), pref_name);
     base::ListValue* list = update.Get();
-    for (base::ListValue::const_iterator it = new_value.begin();
-         it != new_value.end();
-         ++it) {
+    for (auto it = new_value.begin(); it != new_value.end(); ++it) {
       list->Append(it->CreateDeepCopy());
     }
   }
@@ -84,12 +95,30 @@ void ChangeListPref(int index,
   if (test()->use_verifier()) {
     ListPrefUpdate update_verifier(GetVerifierPrefs(), pref_name);
     base::ListValue* list_verifier = update_verifier.Get();
-    for (base::ListValue::const_iterator it = new_value.begin();
-         it != new_value.end();
-         ++it) {
+    for (auto it = new_value.begin(); it != new_value.end(); ++it) {
       list_verifier->Append(it->CreateDeepCopy());
     }
   }
+}
+
+scoped_refptr<PrefStore> BuildPrefStoreFromPrefsFile(Profile* profile) {
+  profile->GetPrefs()->CommitPendingWrite();
+  // Writes are scheduled on the IO thread. The JsonPrefStore requires all
+  // access (construction, Get, Set, ReadPrefs) to be made from the same thread.
+  // So instead of reading the file from the IO thread, we simply schedule a
+  // dummy task to avoid races with writing the file and reading it.
+  base::RunLoop run_loop;
+  profile->GetIOTaskRunner()->PostTask(FROM_HERE,
+                                       base::BindOnce(run_loop.QuitClosure()));
+  run_loop.Run();
+
+  auto pref_store = base::MakeRefCounted<JsonPrefStore>(
+      profile->GetPath().Append(chrome::kPreferencesFilename));
+  base::ScopedAllowBlockingForTesting allow_blocking;
+  if (pref_store->ReadPrefs() != PersistentPrefStore::PREF_READ_ERROR_NONE) {
+    ADD_FAILURE() << " Failed reading the prefs file into the store.";
+  }
+  return pref_store;
 }
 
 bool BooleanPrefMatches(const char* pref_name) {

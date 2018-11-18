@@ -44,7 +44,8 @@ class FakeProfile : public Profile {
   storage::SpecialStoragePolicy* GetSpecialStoragePolicy() override;
   content::PushMessagingService* GetPushMessagingService() override;
   content::SSLHostStateDelegate* GetSSLHostStateDelegate() override;
-  content::PermissionManager* GetPermissionManager() override;
+  content::PermissionControllerDelegate* GetPermissionControllerDelegate()
+      override;
   content::BackgroundFetchDelegate* GetBackgroundFetchDelegate() override;
   content::BackgroundSyncController* GetBackgroundSyncController() override;
   content::BrowsingDataRemoverDelegate* GetBrowsingDataRemoverDelegate()
@@ -75,8 +76,8 @@ class FakeProfile : public Profile {
   const PrefService* GetPrefs() const override;
   PrefService* GetOffTheRecordPrefs() override;
   net::URLRequestContextGetter* GetRequestContext() override;
-  net::URLRequestContextGetter* GetRequestContextForExtensions() override;
-  net::SSLConfigService* GetSSLConfigService() override;
+  base::OnceCallback<net::CookieStore*()> GetExtensionsCookieStoreGetter()
+      override;
   bool IsSameProfile(Profile* profile) override;
   base::Time GetStartTime() const override;
   base::FilePath last_selected_directory() override;
@@ -86,7 +87,6 @@ class FakeProfile : public Profile {
   void OnLogin() override;
   void InitChromeOSPreferences() override;
 
-  chrome_browser_net::Predictor* GetNetworkPredictor() override;
   GURL GetHomePage() override;
   bool WasCreatedByVersionOrLater(const std::string& version) override;
   void SetExitType(ExitType exit_type) override;

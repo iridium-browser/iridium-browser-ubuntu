@@ -6,11 +6,12 @@
 
 #include <memory>
 #include <string>
+#include <utility>
 
 #include "base/files/file_util.h"
 #include "base/format_macros.h"
 #include "base/memory/weak_ptr.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "chrome/browser/chromeos/drive/file_system_util.h"
 #include "chrome/browser/chromeos/extensions/file_manager/private_api_util.h"
 #include "chrome/browser/chromeos/file_manager/fileapi_util.h"
@@ -135,9 +136,9 @@ void FileManagerPrivateAddMountFunction::RunAfterGetDriveFile(
   }
 
   file_system->IsCacheFileMarkedAsMounted(
-      drive_path, base::Bind(&FileManagerPrivateAddMountFunction::
-                                 RunAfterIsCacheFileMarkedAsMounted,
-                             this, drive_path, cache_path));
+      drive_path, base::BindOnce(&FileManagerPrivateAddMountFunction::
+                                     RunAfterIsCacheFileMarkedAsMounted,
+                                 this, drive_path, cache_path));
 }
 
 void FileManagerPrivateAddMountFunction::RunAfterIsCacheFileMarkedAsMounted(
@@ -167,10 +168,9 @@ void FileManagerPrivateAddMountFunction::RunAfterIsCacheFileMarkedAsMounted(
   }
   file_system->MarkCacheFileAsMounted(
       drive_path,
-      base::Bind(
+      base::BindOnce(
           &FileManagerPrivateAddMountFunction::RunAfterMarkCacheFileAsMounted,
-          this,
-          drive_path.BaseName()));
+          this, drive_path.BaseName()));
 }
 
 void FileManagerPrivateAddMountFunction::RunAfterMarkCacheFileAsMounted(
@@ -193,7 +193,7 @@ void FileManagerPrivateAddMountFunction::RunAfterMarkCacheFileAsMounted(
   disk_mount_manager->MountPath(
       file_path.AsUTF8Unsafe(),
       base::FilePath(display_name.Extension()).AsUTF8Unsafe(),
-      display_name.AsUTF8Unsafe(), chromeos::MOUNT_TYPE_ARCHIVE,
+      display_name.AsUTF8Unsafe(), {}, chromeos::MOUNT_TYPE_ARCHIVE,
       chromeos::MOUNT_ACCESS_MODE_READ_WRITE);
 }
 
@@ -225,8 +225,12 @@ bool FileManagerPrivateRemoveMountFunction::RunAsync() {
   switch (volume->type()) {
     case file_manager::VOLUME_TYPE_REMOVABLE_DISK_PARTITION:
     case file_manager::VOLUME_TYPE_MOUNTED_ARCHIVE_FILE: {
+      chromeos::UnmountOptions unmount_options = chromeos::UNMOUNT_OPTIONS_NONE;
+      if (volume->is_read_only())
+        unmount_options = chromeos::UNMOUNT_OPTIONS_LAZY;
+
       DiskMountManager::GetInstance()->UnmountPath(
-          volume->mount_path().value(), chromeos::UNMOUNT_OPTIONS_NONE,
+          volume->mount_path().value(), unmount_options,
           DiskMountManager::UnmountPathCallback());
       break;
     }
@@ -241,6 +245,10 @@ bool FileManagerPrivateRemoveMountFunction::RunAsync() {
       }
       break;
     }
+    case file_manager::VOLUME_TYPE_CROSTINI:
+      file_manager::VolumeManager::Get(GetProfile())
+          ->RemoveSshfsCrostiniVolume(volume->mount_path());
+      break;
     default:
       // Requested unmounting a device which is not unmountable.
       return false;
@@ -308,9 +316,10 @@ void FileManagerPrivateMarkCacheAsMountedFunction::RunAfterGetDriveFile(
   // doesn't give bad side effect.
   if (is_mounted) {
     file_system->MarkCacheFileAsMounted(
-        drive_path, base::Bind(&FileManagerPrivateMarkCacheAsMountedFunction::
-                                   RunAfterMarkCacheFileAsMounted,
-                               this));
+        drive_path,
+        base::BindOnce(&FileManagerPrivateMarkCacheAsMountedFunction::
+                           RunAfterMarkCacheFileAsMounted,
+                       this));
   } else {
     file_system->MarkCacheFileAsUnmounted(
         cache_path, base::Bind(&FileManagerPrivateMarkCacheAsMountedFunction::

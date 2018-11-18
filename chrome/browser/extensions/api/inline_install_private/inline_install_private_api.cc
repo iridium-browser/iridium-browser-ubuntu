@@ -14,6 +14,7 @@
 #include "components/crx_file/id_util.h"
 #include "content/public/browser/browser_thread.h"
 #include "extensions/browser/extension_registry.h"
+#include "extensions/browser/view_type_utils.h"
 
 namespace extensions {
 
@@ -28,10 +29,6 @@ class Installer : public WebstoreInstallWithPrompt {
  protected:
   friend class base::RefCountedThreadSafe<Installer>;
   ~Installer() override;
-
-  // Needed so that we send the right referrer value in requests to the
-  // webstore.
-  const GURL& GetRequestorURL() const override { return requestor_url_; }
 
   std::unique_ptr<ExtensionInstallPrompt::Prompt> CreateInstallPrompt()
       const override;
@@ -57,7 +54,7 @@ std::unique_ptr<ExtensionInstallPrompt::Prompt> Installer::CreateInstallPrompt()
     const {
   std::unique_ptr<ExtensionInstallPrompt::Prompt> prompt(
       new ExtensionInstallPrompt::Prompt(
-          ExtensionInstallPrompt::INLINE_INSTALL_PROMPT));
+          ExtensionInstallPrompt::WEBSTORE_WIDGET_PROMPT));
   prompt->SetWebstoreData(localized_user_count(),
                           show_user_count(),
                           average_rating(),
@@ -106,10 +103,11 @@ InlineInstallPrivateInstallFunction::Run() {
     return RespondNow(CreateResponse("Must be called with a user gesture",
                                      webstore_install::NOT_PERMITTED));
 
-  content::WebContents* web_contents = GetAssociatedWebContents();
-  if (!web_contents)
+  content::WebContents* web_contents = GetSenderWebContents();
+  if (!web_contents || GetViewType(web_contents) != VIEW_TYPE_APP_WINDOW) {
     return RespondNow(CreateResponse("Must be called from a foreground page",
                                      webstore_install::NOT_PERMITTED));
+  }
 
   ExtensionRegistry* registry = ExtensionRegistry::Get(browser_context());
   if (registry->GetExtensionById(params->id, ExtensionRegistry::EVERYTHING))

@@ -16,6 +16,7 @@
 #include "SkPDFTypes.h"
 #include "SkPDFUtils.h"
 #include "SkStream.h"
+#include "SkTo.h"
 #include "SkUnPreMultiply.h"
 
 bool image_compute_is_opaque(const SkImage* image) {
@@ -433,7 +434,7 @@ sk_sp<SkPDFObject> SkPDFCreateBitmapObject(sk_sp<SkImage> image, int encodingQua
     SkISize dimensions = image->dimensions();
     sk_sp<SkData> data = image->refEncodedData();
     if (auto jpeg = make_jpeg_bitmap(std::move(data), dimensions)) {
-        return jpeg;
+        return std::move(jpeg);
     }
 
     const bool isOpaque = image_compute_is_opaque(image.get());
@@ -441,7 +442,7 @@ sk_sp<SkPDFObject> SkPDFCreateBitmapObject(sk_sp<SkImage> image, int encodingQua
     if (encodingQuality <= 100 && isOpaque) {
         data = image->encodeToData(SkEncodedImageFormat::kJPEG, encodingQuality);
         if (auto jpeg = make_jpeg_bitmap(std::move(data), dimensions)) {
-            return jpeg;
+            return std::move(jpeg);
         }
     }
 

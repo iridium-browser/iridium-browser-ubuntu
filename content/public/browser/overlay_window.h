@@ -9,6 +9,10 @@
 
 #include "ui/gfx/native_widget_types.h"
 
+namespace blink {
+struct PictureInPictureControlInfo;
+}
+
 namespace gfx {
 class Rect;
 class Size;
@@ -27,6 +31,12 @@ class PictureInPictureWindowController;
 // browser windows.
 class OverlayWindow {
  public:
+  enum PlaybackState {
+    kPlaying = 0,
+    kPaused,
+    kNoVideo,
+  };
+
   OverlayWindow() = default;
   virtual ~OverlayWindow() = default;
 
@@ -36,14 +46,26 @@ class OverlayWindow {
       PictureInPictureWindowController* controller);
 
   virtual bool IsActive() const = 0;
-  virtual void Show() = 0;
   virtual void Close() = 0;
+  virtual void Show() = 0;
+  virtual void Hide() = 0;
   virtual bool IsVisible() const = 0;
   virtual bool IsAlwaysOnTop() const = 0;
   virtual ui::Layer* GetLayer() = 0;
   // Retrieves the window's current bounds, including its window.
   virtual gfx::Rect GetBounds() const = 0;
   virtual void UpdateVideoSize(const gfx::Size& natural_size) = 0;
+  virtual void SetPlaybackState(PlaybackState playback_state) = 0;
+  virtual void SetPictureInPictureCustomControls(
+      const std::vector<blink::PictureInPictureControlInfo>& controls) = 0;
+  virtual void SetAlwaysHidePlayPauseButton(bool is_visible) = 0;
+
+  // Retrieves the ui::Layers corresponding to the window and video.
+  virtual ui::Layer* GetWindowBackgroundLayer() = 0;
+  virtual ui::Layer* GetVideoLayer() = 0;
+
+  // Retrieves the bounds of the video.
+  virtual gfx::Rect GetVideoBounds() = 0;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(OverlayWindow);

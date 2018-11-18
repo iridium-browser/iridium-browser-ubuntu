@@ -27,7 +27,6 @@ class CORE_EXPORT ClassicPendingScript final : public PendingScript,
                                                public ResourceClient,
                                                public MemoryCoordinatorClient {
   USING_GARBAGE_COLLECTED_MIXIN(ClassicPendingScript);
-  USING_PRE_FINALIZER(ClassicPendingScript, Prefinalize);
 
  public:
   // https://html.spec.whatwg.org/multipage/webappapis.html#fetch-a-classic-script
@@ -37,6 +36,7 @@ class CORE_EXPORT ClassicPendingScript final : public PendingScript,
   static ClassicPendingScript* Fetch(const KURL&,
                                      Document&,
                                      const ScriptFetchOptions&,
+                                     CrossOriginAttributeValue,
                                      const WTF::TextEncoding&,
                                      ScriptElementBase*,
                                      FetchParameters::DeferOption);
@@ -53,26 +53,24 @@ class CORE_EXPORT ClassicPendingScript final : public PendingScript,
   void SetStreamer(ScriptStreamer*);
   void StreamingFinished();
 
-  void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
   blink::ScriptType GetScriptType() const override {
     return blink::ScriptType::kClassic;
   }
 
-  bool CheckMIMETypeBeforeRunScript(Document* context_document) const override;
-  ClassicScript* GetSource(const KURL& document_url,
-                           bool& error_occurred) const override;
+  ClassicScript* GetSource(const KURL& document_url) const override;
   bool IsReady() const override;
   bool IsExternal() const override { return is_external_; }
-  bool ErrorOccurred() const override;
   bool WasCanceled() const override;
-  bool StartStreamingIfPossible(ScriptStreamer::Type,
-                                base::OnceClosure) override;
+  bool StartStreamingIfPossible(base::OnceClosure) override;
   bool IsCurrentlyStreaming() const override;
   KURL UrlForTracing() const override;
   void DisposeInternal() override;
 
-  void Prefinalize();
+  void SetNotStreamingReasonForTest(ScriptStreamer::NotStreamingReason reason) {
+    not_streamed_reason_ = reason;
+  }
 
  private:
   // See AdvanceReadyState implementation for valid state transitions.
@@ -101,13 +99,17 @@ class CORE_EXPORT ClassicPendingScript final : public PendingScript,
   void FinishWaitingForStreaming();
   void FinishReadyStreaming();
   void CancelStreaming();
-
   void CheckState() const override;
 
   // ResourceClient
   void NotifyFinished(Resource*) override;
   String DebugName() const override { return "PendingScript"; }
   void DataReceived(Resource*, const char*, size_t) override;
+
+  static void RecordStreamingHistogram(
+      ScriptSchedulingType type,
+      bool can_use_streamer,
+      ScriptStreamer::NotStreamingReason reason);
 
   // MemoryCoordinatorClient
   void OnPurgeMemory() override;
@@ -119,6 +121,10 @@ class CORE_EXPORT ClassicPendingScript final : public PendingScript,
   // which will eventually be used as #concept-script-base-url.
   // https://html.spec.whatwg.org/multipage/webappapis.html#concept-script-base-url
   const KURL base_url_for_inline_script_;
+
+  // "element's child text content" snapshot taken at
+  // #prepare-a-script (Step 4).
+  const String source_text_for_inline_script_;
 
   const ScriptSourceLocationType source_location_type_;
   const bool is_external_;
@@ -145,11 +151,8 @@ class CORE_EXPORT ClassicPendingScript final : public PendingScript,
   // (See also: crbug.com/754360)
   bool is_currently_streaming_;
 
-  // This is a temporary flag to confirm that ClassicPendingScript is not
-  // touched after its refinalizer call and thus https://crbug.com/715309
-  // doesn't break assumptions.
-  // TODO(hiroshige): Check the state in more general way.
-  bool prefinalizer_called_ = false;
+  // Specifies the reason that script was never streamed.
+  ScriptStreamer::NotStreamingReason not_streamed_reason_;
 };
 
 }  // namespace blink

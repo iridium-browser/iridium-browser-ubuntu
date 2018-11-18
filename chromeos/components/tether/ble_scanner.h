@@ -7,7 +7,7 @@
 
 #include "base/macros.h"
 #include "base/observer_list.h"
-#include "components/cryptauth/remote_device.h"
+#include "components/cryptauth/remote_device_ref.h"
 
 namespace device {
 class BluetoothDevice;
@@ -23,7 +23,7 @@ class BleScanner {
   class Observer {
    public:
     virtual void OnReceivedAdvertisementFromDevice(
-        const cryptauth::RemoteDevice& remote_device,
+        cryptauth::RemoteDeviceRef remote_device,
         device::BluetoothDevice* bluetooth_device,
         bool is_background_advertisement) {}
     virtual void OnDiscoverySessionStateChanged(bool discovery_session_active) {
@@ -53,13 +53,13 @@ class BleScanner {
 
  protected:
   void NotifyReceivedAdvertisementFromDevice(
-      const cryptauth::RemoteDevice& remote_device,
+      cryptauth::RemoteDeviceRef remote_device,
       device::BluetoothDevice* bluetooth_device,
       bool is_background_advertisement);
   void NotifyDiscoverySessionStateChanged(bool discovery_session_active);
 
  private:
-  base::ObserverList<Observer> observer_list_;
+  base::ObserverList<Observer>::Unchecked observer_list_;
 
   DISALLOW_COPY_AND_ASSIGN(BleScanner);
 };

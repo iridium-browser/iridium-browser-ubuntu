@@ -29,12 +29,14 @@ namespace {
 const base::FilePath::CharType kOriginDatabaseName[] =
     FILE_PATH_LITERAL("Origins");
 const char kOriginKeyPrefix[] = "ORIGIN:";
-const char kLastPathKey[] = "LAST_PATH";
-const int64_t kMinimumReportIntervalHours = 1;
-const char kInitStatusHistogramLabel[] = "FileSystem.OriginDatabaseInit";
-const char kDatabaseRepairHistogramLabel[] = "FileSystem.OriginDatabaseRepair";
+const char kSandboxOriginLastPathKey[] = "LAST_PATH";
+const int64_t kSandboxOriginMinimumReportIntervalHours = 1;
+const char kSandboxOriginInitStatusHistogramLabel[] =
+    "FileSystem.OriginDatabaseInit";
+const char kSandboxOriginDatabaseRepairHistogramLabel[] =
+    "FileSystem.OriginDatabaseRepair";
 
-enum InitStatus {
+enum class InitSandboxOriginStatus {
   INIT_STATUS_OK = 0,
   INIT_STATUS_CORRUPTION,
   INIT_STATUS_IO_ERROR,
@@ -42,7 +44,7 @@ enum InitStatus {
   INIT_STATUS_MAX
 };
 
-enum RepairResult {
+enum class SandboxOriginRepairResult {
   DB_REPAIR_SUCCEEDED = 0,
   DB_REPAIR_FAILED,
   DB_REPAIR_MAX
@@ -54,7 +56,7 @@ std::string OriginToOriginKey(const std::string& origin) {
 }
 
 const char* LastPathKey() {
-  return kLastPathKey;
+  return kSandboxOriginLastPathKey;
 }
 
 }  // namespace
@@ -105,13 +107,16 @@ bool SandboxOriginDatabase::Init(InitOption init_option,
       LOG(WARNING) << "Attempting to repair SandboxOriginDatabase.";
 
       if (RepairDatabase(path)) {
-        UMA_HISTOGRAM_ENUMERATION(kDatabaseRepairHistogramLabel,
-                                  DB_REPAIR_SUCCEEDED, DB_REPAIR_MAX);
+        UMA_HISTOGRAM_ENUMERATION(
+            kSandboxOriginDatabaseRepairHistogramLabel,
+            SandboxOriginRepairResult::DB_REPAIR_SUCCEEDED,
+            SandboxOriginRepairResult::DB_REPAIR_MAX);
         LOG(WARNING) << "Repairing SandboxOriginDatabase completed.";
         return true;
       }
-      UMA_HISTOGRAM_ENUMERATION(kDatabaseRepairHistogramLabel,
-                                DB_REPAIR_FAILED, DB_REPAIR_MAX);
+      UMA_HISTOGRAM_ENUMERATION(kSandboxOriginDatabaseRepairHistogramLabel,
+                                SandboxOriginRepairResult::DB_REPAIR_FAILED,
+                                SandboxOriginRepairResult::DB_REPAIR_MAX);
       FALLTHROUGH;
     case DELETE_ON_CORRUPTION:
       if (!base::DeleteFile(file_system_directory_, true))
@@ -145,8 +150,7 @@ bool SandboxOriginDatabase::RepairDatabase(const std::string& db_path) {
   base::FilePath path_each;
   while (!(path_each = file_enum.Next()).empty())
     directories.insert(path_each.BaseName());
-  std::set<base::FilePath>::iterator db_dir_itr =
-      directories.find(base::FilePath(kOriginDatabaseName));
+  auto db_dir_itr = directories.find(base::FilePath(kOriginDatabaseName));
   // Make sure we have the database file in its directory and therefore we are
   // working on the correct path.
   DCHECK(db_dir_itr != directories.end());
@@ -159,13 +163,10 @@ bool SandboxOriginDatabase::RepairDatabase(const std::string& db_path) {
   }
 
   // Delete any obsolete entries from the origins database.
-  for (std::vector<OriginRecord>::iterator db_origin_itr = origins.begin();
-       db_origin_itr != origins.end();
-       ++db_origin_itr) {
-    std::set<base::FilePath>::iterator dir_itr =
-        directories.find(db_origin_itr->path);
+  for (const OriginRecord& record : origins) {
+    auto dir_itr = directories.find(record.path);
     if (dir_itr == directories.end()) {
-      if (!RemovePathForOrigin(db_origin_itr->origin)) {
+      if (!RemovePathForOrigin(record.origin)) {
         DropDatabase();
         return false;
       }
@@ -175,11 +176,9 @@ bool SandboxOriginDatabase::RepairDatabase(const std::string& db_path) {
   }
 
   // Delete any directories not listed in the origins database.
-  for (std::set<base::FilePath>::iterator dir_itr = directories.begin();
-       dir_itr != directories.end();
-       ++dir_itr) {
-    if (!base::DeleteFile(file_system_directory_.Append(*dir_itr),
-                           true /* recursive */)) {
+  for (const base::FilePath& dir : directories) {
+    if (!base::DeleteFile(file_system_directory_.Append(dir),
+                          true /* recursive */)) {
       DropDatabase();
       return false;
     }
@@ -198,23 +197,28 @@ void SandboxOriginDatabase::HandleError(const base::Location& from_here,
 void SandboxOriginDatabase::ReportInitStatus(const leveldb::Status& status) {
   base::Time now = base::Time::Now();
   base::TimeDelta minimum_interval =
-      base::TimeDelta::FromHours(kMinimumReportIntervalHours);
+      base::TimeDelta::FromHours(kSandboxOriginMinimumReportIntervalHours);
   if (last_reported_time_ + minimum_interval >= now)
     return;
   last_reported_time_ = now;
 
   if (status.ok()) {
-    UMA_HISTOGRAM_ENUMERATION(kInitStatusHistogramLabel,
-                              INIT_STATUS_OK, INIT_STATUS_MAX);
+    UMA_HISTOGRAM_ENUMERATION(kSandboxOriginInitStatusHistogramLabel,
+                              InitSandboxOriginStatus::INIT_STATUS_OK,
+                              InitSandboxOriginStatus::INIT_STATUS_MAX);
   } else if (status.IsCorruption()) {
-    UMA_HISTOGRAM_ENUMERATION(kInitStatusHistogramLabel,
-                              INIT_STATUS_CORRUPTION, INIT_STATUS_MAX);
+    UMA_HISTOGRAM_ENUMERATION(kSandboxOriginInitStatusHistogramLabel,
+                              InitSandboxOriginStatus::INIT_STATUS_CORRUPTION,
+                              InitSandboxOriginStatus::INIT_STATUS_MAX);
   } else if (status.IsIOError()) {
-    UMA_HISTOGRAM_ENUMERATION(kInitStatusHistogramLabel,
-                              INIT_STATUS_IO_ERROR, INIT_STATUS_MAX);
+    UMA_HISTOGRAM_ENUMERATION(kSandboxOriginInitStatusHistogramLabel,
+                              InitSandboxOriginStatus::INIT_STATUS_IO_ERROR,
+                              InitSandboxOriginStatus::INIT_STATUS_MAX);
   } else {
-    UMA_HISTOGRAM_ENUMERATION(kInitStatusHistogramLabel,
-                              INIT_STATUS_UNKNOWN_ERROR, INIT_STATUS_MAX);
+    UMA_HISTOGRAM_ENUMERATION(
+        kSandboxOriginInitStatusHistogramLabel,
+        InitSandboxOriginStatus::INIT_STATUS_UNKNOWN_ERROR,
+        InitSandboxOriginStatus::INIT_STATUS_MAX);
   }
 }
 

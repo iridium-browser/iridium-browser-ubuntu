@@ -38,6 +38,7 @@ class SharedURLLoaderFactory;
 namespace safe_browsing {
 
 class BaseUIManager;
+class ReferrerChainProvider;
 
 // Maps a URL to its Resource.
 class ThreatDetailsCacheCollector;
@@ -66,18 +67,20 @@ using FrameTreeIdToChildIdsMap = base::hash_map<int, std::unordered_set<int>>;
 // sending a report.
 using ThreatDetailsDoneCallback = base::Callback<void(content::WebContents*)>;
 
-class ThreatDetails : public base::RefCounted<ThreatDetails>,
-                      public content::WebContentsObserver {
+class ThreatDetails : public content::WebContentsObserver {
  public:
   typedef security_interstitials::UnsafeResource UnsafeResource;
 
+  ~ThreatDetails() override;
+
   // Constructs a new ThreatDetails instance, using the factory.
-  static ThreatDetails* NewThreatDetails(
+  static std::unique_ptr<ThreatDetails> NewThreatDetails(
       BaseUIManager* ui_manager,
       content::WebContents* web_contents,
       const UnsafeResource& resource,
       scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
       history::HistoryService* history_service,
+      ReferrerChainProvider* referrer_chain_provider,
       bool trim_to_ad_tags,
       ThreatDetailsDoneCallback done_callback);
 
@@ -99,9 +102,17 @@ class ThreatDetails : public base::RefCounted<ThreatDetails>,
 
   void OnRedirectionCollectionReady();
 
+  // WebContentsObserver implementation:
+  void FrameDeleted(content::RenderFrameHost* render_frame_host) override;
+  void RenderFrameHostChanged(content::RenderFrameHost* old_host,
+                              content::RenderFrameHost* new_host) override;
+
+  base::WeakPtr<ThreatDetails> GetWeakPtr();
+
  protected:
   friend class ThreatDetailsFactoryImpl;
   friend class TestThreatDetailsFactory;
+  friend class ThreatDetailsTest;
 
   ThreatDetails(
       BaseUIManager* ui_manager,
@@ -109,13 +120,12 @@ class ThreatDetails : public base::RefCounted<ThreatDetails>,
       const UnsafeResource& resource,
       scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
       history::HistoryService* history_service,
+      ReferrerChainProvider* referrer_chain_provider,
       bool trim_to_ad_tags,
       ThreatDetailsDoneCallback done_callback);
 
   // Default constructor for testing only.
   ThreatDetails();
-
-  ~ThreatDetails() override;
 
   virtual void AddDOMDetails(const int frame_tree_node_id,
                              std::vector<mojom::ThreatDOMDetailsNodePtr> params,
@@ -127,12 +137,10 @@ class ThreatDetails : public base::RefCounted<ThreatDetails>,
   // Used to get a pointer to the HTTP cache.
   scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory_;
 
- private:
-  friend class base::RefCounted<ThreatDetails>;
-
   // Starts the collection of the report.
   void StartCollection();
 
+ private:
   // Whether the url is "public" so we can add it to the report.
   bool IsReportableUrl(const GURL& url) const;
 
@@ -176,12 +184,19 @@ class ThreatDetails : public base::RefCounted<ThreatDetails>,
                      const std::vector<mojom::AttributeNameValuePtr> attributes,
                      const ClientSafeBrowsingReportRequest::Resource* resource);
 
+  // Populates the referrer chain data in |report_|. This may be skipped if the
+  // referrer chain provider isn't available, or the type of report doesn't
+  // include the referrer chain.
+  void MaybeFillReferrerChain();
+
   // Called when the report is complete. Runs |done_callback_|.
   void AllDone();
 
   scoped_refptr<BaseUIManager> ui_manager_;
 
   const UnsafeResource resource_;
+
+  ReferrerChainProvider* referrer_chain_provider_;
 
   // For every Url we collect we create a Resource message. We keep
   // them in a map so we can avoid duplicates.
@@ -250,11 +265,20 @@ class ThreatDetails : public base::RefCounted<ThreatDetails>,
   // Whether the |done_callback_| has been invoked.
   bool is_all_done_;
 
+  // The set of RenderFrameHosts that have pending requests and haven't been
+  // deleted.
+  std::vector<content::RenderFrameHost*> pending_render_frame_hosts_;
+
+  // Used for references to |this| bound in callbacks.
+  base::WeakPtrFactory<ThreatDetails> weak_factory_;
+
   FRIEND_TEST_ALL_PREFIXES(ThreatDetailsTest, HistoryServiceUrls);
   FRIEND_TEST_ALL_PREFIXES(ThreatDetailsTest, HttpsResourceSanitization);
   FRIEND_TEST_ALL_PREFIXES(ThreatDetailsTest, HTTPCacheNoEntries);
   FRIEND_TEST_ALL_PREFIXES(ThreatDetailsTest, HTTPCache);
   FRIEND_TEST_ALL_PREFIXES(ThreatDetailsTest, ThreatDOMDetails_AmbiguousDOM);
+  FRIEND_TEST_ALL_PREFIXES(ThreatDetailsTest,
+                           ThreatDOMDetails_EmptyReportNotSent);
   FRIEND_TEST_ALL_PREFIXES(ThreatDetailsTest, ThreatDOMDetails_MultipleFrames);
   FRIEND_TEST_ALL_PREFIXES(ThreatDetailsTest, ThreatDOMDetails_TrimToAdTags);
   FRIEND_TEST_ALL_PREFIXES(ThreatDetailsTest, ThreatDOMDetails);
@@ -267,12 +291,13 @@ class ThreatDetailsFactory {
  public:
   virtual ~ThreatDetailsFactory() {}
 
-  virtual ThreatDetails* CreateThreatDetails(
+  virtual std::unique_ptr<ThreatDetails> CreateThreatDetails(
       BaseUIManager* ui_manager,
       content::WebContents* web_contents,
       const security_interstitials::UnsafeResource& unsafe_resource,
       scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
       history::HistoryService* history_service,
+      ReferrerChainProvider* referrer_chain_provider,
       bool trim_to_ad_tags,
       ThreatDetailsDoneCallback done_callback) = 0;
 };

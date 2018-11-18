@@ -7,7 +7,6 @@
 
 from __future__ import print_function
 
-import json
 import os
 import time
 
@@ -18,6 +17,7 @@ from chromite.lib import constants
 from chromite.lib import config_lib
 from chromite.lib import cros_logging as logging
 from chromite.lib import failures_lib
+from chromite.lib import request_build
 from chromite.lib.const import waterfall
 
 
@@ -46,6 +46,8 @@ def BuilderName(build_config, active_waterfall, current_builder):
 class ScheduleSlavesStage(generic_stages.BuilderStage):
   """Stage that schedules slaves for the master build."""
 
+  category = constants.CI_INFRA_STAGE
+
   def __init__(self, builder_run, sync_stage, **kwargs):
     super(ScheduleSlavesStage, self).__init__(builder_run, **kwargs)
     self.sync_stage = sync_stage
@@ -73,62 +75,48 @@ class ScheduleSlavesStage(generic_stages.BuilderStage):
 
   def PostSlaveBuildToBuildbucket(self, build_name, build_config,
                                   master_build_id, master_buildbucket_id,
-                                  buildset_tag, dryrun=False):
+                                  dryrun=False):
     """Send a Put slave build request to Buildbucket.
 
     Args:
-      build_name: Salve build name to put to Buildbucket.
+      build_name: Slave build name to put to Buildbucket.
       build_config: Slave build config to put to Buildbucket.
       master_build_id: CIDB id of the master scheduling the slave build.
       master_buildbucket_id: buildbucket id of the master scheduling the
                              slave build.
-      buildset_tag: The buildset tag for strong consistent tag queries.
-                    More context: crbug.com/661689
       dryrun: Whether a dryrun, default to False.
+
+    Returns:
+      Tuple:
+        buildbucket_id
+        created_ts
     """
-    current_buildername = os.environ.get('BUILDBOT_BUILDERNAME', None)
-    builder_name = BuilderName(
-        build_name, build_config.active_waterfall, current_buildername)
+    bucket = self._GetBuildbucketBucket(build_name, build_config)
 
-    # TODO: Find a way to unify these tags with
-    #       remote_try._GetRequestBody
-    tags = ['buildset:%s' % buildset_tag,
-            'build_type:%s' % build_config.build_type,
-            'master:False',
-            'master_config:%s' % self._run.config.name,
-            'cbb_display_label:%s' % build_config.display_label,
-            'cbb_branch:%s' % self._run.manifest_branch,
-            'cbb_config:%s' % build_name,
-            'cbb_master_build_id:%s' % master_build_id,
-            'cbb_master_buildbucket_id:%s' % master_buildbucket_id,
-            'cbb_email:']
+    luci_builder = None
+    if bucket != constants.INTERNAL_SWARMING_BUILDBUCKET_BUCKET:
+      # If it's not a swarming build, we must explicitly set this to the
+      # waterfall column name.
+      current_buildername = os.environ.get('BUILDBOT_BUILDERNAME', None)
+      luci_builder = BuilderName(
+          build_name, build_config.active_waterfall, current_buildername)
 
-    if build_config.boards:
-      for board in build_config.boards:
-        tags.append('board:%s' % board)
-
-    body = json.dumps({
-        'bucket': self._GetBuildbucketBucket(build_name, build_config),
-        'parameters_json': json.dumps({
-            'builder_name': builder_name,
-            'properties': {
-                'cbb_config': build_name,
-                'cbb_branch': self._run.manifest_branch,
-                'cbb_master_build_id': master_build_id,
-            }
-        }),
-        'tags': tags
-    })
-
-    content = self.buildbucket_client.PutBuildRequest(body, dryrun)
-
-    buildbucket_id = buildbucket_lib.GetBuildId(content)
-    created_ts = buildbucket_lib.GetBuildCreated_ts(content)
+    request = request_build.RequestBuild(
+        build_config=build_name,
+        luci_builder=luci_builder,
+        display_label=build_config.display_label,
+        branch=self._run.manifest_branch,
+        master_cidb_id=master_build_id,
+        master_buildbucket_id=master_buildbucket_id,
+        bucket=bucket,
+        extra_args=['--buildbot'])  # TODO: This shouldn't be hard coded here.
+    result = request.Submit(dryrun=dryrun)
 
     logging.info('Build_name %s buildbucket_id %s created_timestamp %s',
-                 build_name, buildbucket_id, created_ts)
+                 result.build_config, result.buildbucket_id, result.created_ts)
+    logging.PrintBuildbotLink(result.build_config, result.url)
 
-    return (buildbucket_id, created_ts)
+    return (result.buildbucket_id, result.created_ts)
 
   def ScheduleSlaveBuildsViaBuildbucket(self, important_only=False,
                                         dryrun=False):
@@ -149,10 +137,7 @@ class ScheduleSlavesStage(generic_stages.BuilderStage):
       return
 
     # May be None. This is okay.
-    buildbucket_id = self._run.options.buildbucket_id
-
-    buildset_tag = 'cbuildbot/%s/%s/%s' % (
-        self._run.manifest_branch, self._run.config.name, build_id)
+    master_buildbucket_id = self._run.options.buildbucket_id
 
     scheduled_important_slave_builds = []
     scheduled_experimental_slave_builds = []
@@ -161,11 +146,11 @@ class ScheduleSlavesStage(generic_stages.BuilderStage):
 
     # Get all active slave build configs.
     slave_config_map = self._GetSlaveConfigMap(important_only)
-    for slave_config_name, slave_config in slave_config_map.iteritems():
+    for slave_config_name, slave_config in sorted(slave_config_map.iteritems()):
       try:
         buildbucket_id, created_ts = self.PostSlaveBuildToBuildbucket(
-            slave_config_name, slave_config, build_id, buildbucket_id,
-            buildset_tag, dryrun=dryrun)
+            slave_config_name, slave_config, build_id, master_buildbucket_id,
+            dryrun=dryrun)
         request_reason = None
 
         if slave_config.important:
@@ -187,8 +172,8 @@ class ScheduleSlavesStage(generic_stages.BuilderStage):
         if important_only or slave_config.important:
           raise
         else:
-          logging.warning('Failed to schedule %s current timestamp %s: %s'
-                          % (slave_config_name, current_ts, e))
+          logging.warning('Failed to schedule %s current timestamp %s: %s',
+                          slave_config_name, current_ts, e)
 
     if config_lib.IsMasterCQ(self._run.config) and db and scheduled_build_reqs:
       db.InsertBuildRequests(scheduled_build_reqs)

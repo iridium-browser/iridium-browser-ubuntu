@@ -13,12 +13,13 @@
 #include "base/bind_helpers.h"
 #include "base/memory/singleton.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/printing/cups_print_job.h"
 #include "chrome/browser/chromeos/printing/cups_print_job_manager.h"
 #include "chrome/browser/chromeos/printing/cups_print_job_manager_factory.h"
 #include "chrome/browser/chromeos/printing/cups_printers_manager.h"
+#include "chrome/browser/chromeos/printing/cups_printers_manager_factory.h"
 #include "chrome/browser/chromeos/printing/printer_configurer.h"
 #include "chrome/browser/printing/print_job.h"
 #include "chrome/browser/printing/print_job_worker.h"
@@ -26,15 +27,17 @@
 #include "components/arc/arc_bridge_service.h"
 #include "components/arc/arc_browser_context_keyed_service_factory_base.h"
 #include "components/keyed_service/core/keyed_service.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
 #include "content/public/common/child_process_host.h"
-#include "mojo/edk/embedder/embedder.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
+#include "mojo/public/cpp/platform/platform_handle.h"
+#include "mojo/public/cpp/system/platform_handle.h"
 #include "printing/backend/print_backend.h"
 #include "printing/backend/print_backend_consts.h"
-#include "printing/pdf_metafile_skia.h"
+#include "printing/metafile_skia.h"
 #include "printing/print_job_constants.h"
 #include "printing/printed_document.h"
 #include "printing/units.h"
@@ -110,7 +113,7 @@ class ArcPrintServiceFactory
 
 // This creates a Metafile instance which is a wrapper around a byte buffer at
 // this point.
-std::unique_ptr<printing::PdfMetafileSkia> ReadFileOnBlockingTaskRunner(
+std::unique_ptr<printing::MetafileSkia> ReadFileOnBlockingTaskRunner(
     base::File file,
     size_t data_size) {
   // TODO(vkuzkokov) Can we make give pipe to CUPS directly?
@@ -125,7 +128,7 @@ std::unique_ptr<printing::PdfMetafileSkia> ReadFileOnBlockingTaskRunner(
 
   file.Close();
 
-  auto metafile = std::make_unique<printing::PdfMetafileSkia>();
+  auto metafile = std::make_unique<printing::MetafileSkia>();
   if (!metafile->InitFromData(buf.data(), buf.size())) {
     LOG(ERROR) << "Failed to initialize PDF metafile";
     return nullptr;
@@ -153,8 +156,8 @@ void CreateQueryOnIOThread(std::unique_ptr<printing::PrintSettings> settings,
 // Send initialized PrinterQuery to UI thread.
 void OnSetSettingsDoneOnIOThread(scoped_refptr<printing::PrinterQuery> query,
                                  PrinterQueryCallback callback) {
-  content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
-                                   base::BindOnce(std::move(callback), query));
+  base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI},
+                           base::BindOnce(std::move(callback), query));
 }
 
 std::unique_ptr<printing::PrinterSemanticCapsAndDefaults>
@@ -194,7 +197,9 @@ class PrinterDiscoverySessionHostImpl
       : binding_(this, std::move(request)),
         instance_(std::move(instance)),
         service_(service),
-        printers_manager_(chromeos::CupsPrintersManager::Create(profile)),
+        printers_manager_(
+            chromeos::CupsPrintersManagerFactory::GetForBrowserContext(
+                profile)),
         configurer_(chromeos::PrinterConfigurer::Create(profile)),
         weak_ptr_factory_(this) {
     printers_manager_->AddObserver(this);
@@ -279,7 +284,7 @@ class PrinterDiscoverySessionHostImpl
       RemovePrinter(printer->id());
       return;
     }
-    printers_manager_->PrinterInstalled(*printer);
+    printers_manager_->PrinterInstalled(*printer, true /*is_automatic*/);
     const std::string& printer_id = printer->id();
     base::PostTaskWithTraitsAndReplyWithResult(
         FROM_HERE, {base::MayBlock()},
@@ -311,7 +316,7 @@ class PrinterDiscoverySessionHostImpl
 
   mojom::PrinterDiscoverySessionInstancePtr instance_;
   ArcPrintServiceImpl* const service_;
-  std::unique_ptr<chromeos::CupsPrintersManager> printers_manager_;
+  chromeos::CupsPrintersManager* printers_manager_;
   std::unique_ptr<chromeos::PrinterConfigurer> configurer_;
   base::WeakPtrFactory<PrinterDiscoverySessionHostImpl> weak_ptr_factory_;
 
@@ -370,8 +375,8 @@ class PrintJobHostImpl : public mojom::PrintJobHost,
                        data_size),
         base::BindOnce(&PrintJobHostImpl::OnFileRead,
                        weak_ptr_factory_.GetWeakPtr()));
-    content::BrowserThread::PostTask(
-        content::BrowserThread::IO, FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, {content::BrowserThread::IO},
         base::BindOnce(&CreateQueryOnIOThread, std::move(settings),
                        base::BindOnce(&PrintJobHostImpl::OnSetSettingsDone,
                                       weak_ptr_factory_.GetWeakPtr())));
@@ -420,7 +425,7 @@ class PrintJobHostImpl : public mojom::PrintJobHost,
       case printing::JobEventDetails::DOC_DONE:
         DCHECK(event_details.document());
         service_->JobIdGenerated(
-            this, chromeos::CupsPrintJob::GetUniqueId(
+            this, chromeos::CupsPrintJob::CreateUniqueId(
                       base::UTF16ToUTF8(
                           event_details.document()->settings().device_name()),
                       event_details.job_id()));
@@ -444,7 +449,7 @@ class PrintJobHostImpl : public mojom::PrintJobHost,
   }
 
   // Store Metafile and start printing if PrintJob is created as well.
-  void OnFileRead(std::unique_ptr<printing::PdfMetafileSkia> metafile) {
+  void OnFileRead(std::unique_ptr<printing::MetafileSkia> metafile) {
     metafile_ = std::move(metafile);
     StartPrintingIfReady();
   }
@@ -477,7 +482,7 @@ class PrintJobHostImpl : public mojom::PrintJobHost,
   mojom::PrintJobInstancePtr instance_;
   ArcPrintServiceImpl* const service_;
   chromeos::CupsPrintJobManager* const job_manager_;
-  std::unique_ptr<printing::PdfMetafileSkia> metafile_;
+  std::unique_ptr<printing::MetafileSkia> metafile_;
   scoped_refptr<printing::PrintJob> job_;
   chromeos::CupsPrintJob* cups_job_;
   content::NotificationRegistrar registrar_;
@@ -598,15 +603,14 @@ void ArcPrintServiceImpl::Print(mojom::PrintJobInstancePtr instance,
   settings->set_color(FromArcColorMode(attr->color_mode));
   settings->set_copies(print_job->copies);
   settings->set_duplex_mode(FromArcDuplexMode(attr->duplex_mode));
-  mojo::edk::ScopedPlatformHandle scoped_handle;
-  PassWrappedPlatformHandle(print_job->data.release().value(), &scoped_handle);
 
+  base::ScopedFD fd =
+      mojo::UnwrapPlatformHandle(std::move(print_job->data)).TakeFD();
   mojom::PrintJobHostPtr host_proxy;
   auto job = std::make_unique<PrintJobHostImpl>(
       mojo::MakeRequest(&host_proxy), std::move(instance), this,
       chromeos::CupsPrintJobManagerFactory::GetForBrowserContext(profile_),
-      std::move(settings), base::File(scoped_handle.release().handle),
-      print_job->data_size);
+      std::move(settings), base::File(fd.release()), print_job->data_size);
   PrintJobHostImpl* job_raw = job.get();
   jobs_.emplace(job_raw, std::move(job));
   std::move(callback).Run(std::move(host_proxy));

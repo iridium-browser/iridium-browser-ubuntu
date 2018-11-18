@@ -35,6 +35,16 @@ Polymer({
 
     /** @private */
     showSetupFingerprintDialog_: Boolean,
+
+    /**
+     * Whether add another finger is allowed.
+     * @type {boolean}
+     * @private
+     */
+    allowAddAnotherFinger_: {
+      type: Boolean,
+      value: true,
+    },
   },
 
   /** @private {?settings.FingerprintBrowserProxy} */
@@ -118,6 +128,7 @@ Polymer({
     // Update iron-list.
     this.fingerprints_ = fingerprintInfo.fingerprintsList.slice();
     this.$$('.action-button').disabled = fingerprintInfo.isMaxed;
+    this.allowAddAnotherFinger_ = !fingerprintInfo.isMaxed;
   },
 
   /**
@@ -169,6 +180,15 @@ Polymer({
         settings.getCurrentRoute() == settings.routes.FINGERPRINT) {
       this.onSetupFingerprintDialogClose_();
     }
+  },
+
+  /**
+   * @param {string} item
+   * @return {string}
+   * @private
+   */
+  getButtonAriaLabel_: function(item) {
+    return this.i18n('lockScreenDeleteFingerprintLabel', item);
   },
 });
 })();

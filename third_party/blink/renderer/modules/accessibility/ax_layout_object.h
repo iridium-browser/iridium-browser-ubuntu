@@ -56,8 +56,12 @@ class MODULES_EXPORT AXLayoutObject : public AXNodeObject {
   LayoutObject* GetLayoutObject() const final { return layout_object_; }
   LayoutBoxModelObject* GetLayoutBoxModelObject() const;
   ScrollableArea* GetScrollableAreaIfScrollable() const final;
-  AccessibilityRole DetermineAccessibilityRole() override;
-  AccessibilityRole NativeAccessibilityRoleIgnoringAria() const override;
+  ax::mojom::Role DetermineAccessibilityRole() override;
+  ax::mojom::Role NativeRoleIgnoringAria() const override;
+
+  // If this is an anonymous block, returns the node of its containing layout
+  // block, otherwise returns the node of this layout object.
+  Node* GetNodeOrContainingBlockNode() const;
 
  protected:
   LayoutObject* layout_object_;
@@ -76,6 +80,7 @@ class MODULES_EXPORT AXLayoutObject : public AXNodeObject {
   bool IsAXLayoutObject() const override { return true; }
 
   // Check object role or purpose.
+  bool IsAutofillAvailable() override { return is_autofill_available_; }
   bool IsEditable() const override;
   bool IsRichlyEditable() const override;
   bool IsLinked() const override;
@@ -86,6 +91,7 @@ class MODULES_EXPORT AXLayoutObject : public AXNodeObject {
   // Check object state.
   bool IsFocused() const override;
   AccessibilitySelectedState IsSelected() const override;
+  bool IsSelectedFromFocus() const override;
 
   // Whether objects are ignored, i.e. not included in the tree.
   AXObjectInclusion DefaultObjectInclusion(
@@ -96,12 +102,13 @@ class MODULES_EXPORT AXLayoutObject : public AXNodeObject {
   const AtomicString& AccessKey() const override;
   RGBA32 ComputeBackgroundColor() const final;
   RGBA32 GetColor() const final;
-  String FontFamily() const final;
+  AtomicString FontFamily() const final;
   // Font size is in pixels.
   float FontSize() const final;
   String ImageDataUrl(const IntSize& max_size) const final;
   String GetText() const override;
-  AccessibilityTextDirection GetTextDirection() const final;
+  ax::mojom::TextDirection GetTextDirection() const final;
+  ax::mojom::TextPosition GetTextPosition() const final;
   int TextLength() const override;
   TextStyle GetTextStyle() const final;
   KURL Url() const override;
@@ -118,7 +125,7 @@ class MODULES_EXPORT AXLayoutObject : public AXNodeObject {
   void AriaDescribedbyElements(AXObjectVector&) const override;
   void AriaOwnsElements(AXObjectVector&) const override;
 
-  bool AriaHasPopup() const override;
+  ax::mojom::HasPopup HasPopup() const override;
   bool SupportsARIADragging() const override;
   bool SupportsARIADropping() const override;
   bool SupportsARIAFlowTo() const override;
@@ -132,7 +139,7 @@ class MODULES_EXPORT AXLayoutObject : public AXNodeObject {
   String TextAlternative(bool recursive,
                          bool in_aria_labelled_by_traversal,
                          AXObjectSet& visited,
-                         AXNameFrom&,
+                         ax::mojom::NameFrom&,
                          AXRelatedObjectVector*,
                          NameSources*) const override;
 
@@ -159,10 +166,6 @@ class MODULES_EXPORT AXLayoutObject : public AXNodeObject {
   AXObject* RawNextSibling() const override;
   void AddChildren() override;
   bool CanHaveChildren() const override;
-  void UpdateChildrenIfNecessary() override;
-  bool NeedsToUpdateChildren() const override { return children_dirty_; }
-  void SetNeedsToUpdateChildren() override { children_dirty_ = true; }
-  void ClearChildren() override;
 
   // Properties of the object's owning document or page.
   double EstimatedLoadingProgress() const override;
@@ -172,16 +175,37 @@ class MODULES_EXPORT AXLayoutObject : public AXNodeObject {
   Document* GetDocument() const override;
   LocalFrameView* DocumentFrameView() const override;
   Element* AnchorElement() const override;
+  AtomicString Language() const override;
 
   // Notifications that this object may have changed.
   void HandleActiveDescendantChanged() override;
   void HandleAriaExpandedChanged() override;
+  // Called when autofill becomes available/unavailable on a form control.
+  void HandleAutofillStateChanged(bool) override;
   void TextChanged() override;
 
   // Text metrics. Most of these should be deprecated, needs major cleanup.
   int Index(const VisiblePosition&) const override;
   VisiblePosition VisiblePositionForIndex(int) const override;
   void LineBreaks(Vector<int>&) const final;
+
+  // For a table.
+  bool IsDataTable() const override;
+  unsigned ColumnCount() const override;
+  unsigned RowCount() const override;
+  void ColumnHeaders(AXObjectVector&) const override;
+  void RowHeaders(AXObjectVector&) const override;
+  AXObject* CellForColumnAndRow(unsigned column, unsigned row) const override;
+
+  // For a table cell.
+  unsigned ColumnIndex() const override;
+  unsigned RowIndex() const override;  // Also for a table row.
+  unsigned ColumnSpan() const override;
+  unsigned RowSpan() const override;
+  ax::mojom::SortDirection GetSortDirection() const override;
+
+  // For a table row or column.
+  AXObject* HeaderObject() const override;
 
  private:
   bool IsTabItemSelected() const;
@@ -195,12 +219,14 @@ class MODULES_EXPORT AXLayoutObject : public AXNodeObject {
   AXObject* RemoteSVGElementHitTest(const IntPoint&) const;
   void OffsetBoundingBoxForRemoteSVGElement(LayoutRect&) const;
   void AddHiddenChildren();
-  void AddTextFieldChildren();
   void AddImageMapChildren();
-  void AddCanvasChildren();
   void AddPopupChildren();
   void AddRemoteSVGChildren();
+  void AddTableChildren();
   void AddInlineTextBoxChildren(bool force);
+  ax::mojom::Role DetermineTableCellRole() const;
+  ax::mojom::Role DetermineTableRowRole() const;
+  bool FindAllTableCellsWithRole(ax::mojom::Role, AXObjectVector&) const;
 
   LayoutRect ComputeElementRect() const;
   AXSelection TextControlSelection() const;
@@ -210,6 +236,9 @@ class MODULES_EXPORT AXLayoutObject : public AXNodeObject {
   bool CanIgnoreTextAsEmpty() const;
   bool CanIgnoreSpaceNextTo(LayoutObject*, bool is_after) const;
   bool HasAriaCellRole(Element*) const;
+  bool IsPlaceholder() const;
+
+  bool is_autofill_available_;
 
   DISALLOW_COPY_AND_ASSIGN(AXLayoutObject);
 };

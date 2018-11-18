@@ -5,7 +5,6 @@
 #include "third_party/blink/renderer/core/editing/commands/delete_selection_command.h"
 
 #include "testing/gtest/include/gtest/gtest.h"
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/editing/frame_selection.h"
 #include "third_party/blink/renderer/core/editing/position.h"
@@ -15,6 +14,7 @@
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame_view.h"
 #include "third_party/blink/renderer/core/testing/dummy_page_holder.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 
 #include <memory>
 
@@ -37,11 +37,12 @@ TEST_F(DeleteSelectionCommandTest, deleteListFromTable) {
   Element* br = GetDocument().QuerySelector("br");
 
   LocalFrame* frame = GetDocument().GetFrame();
-  frame->Selection().SetSelectionAndEndTyping(
+  frame->Selection().SetSelection(
       SelectionInDOMTree::Builder()
           .Collapse(Position(br, PositionAnchorType::kBeforeAnchor))
           .Extend(Position(table, PositionAnchorType::kAfterAnchor))
-          .Build());
+          .Build(),
+      SetSelectionOptions());
 
   DeleteSelectionCommand* command =
       DeleteSelectionCommand::Create(GetDocument(),
@@ -63,8 +64,9 @@ TEST_F(DeleteSelectionCommandTest, deleteListFromTable) {
 
 TEST_F(DeleteSelectionCommandTest, ForwardDeleteWithFirstLetter) {
   InsertStyleElement("p::first-letter {font-size:200%;}");
-  Selection().SetSelectionAndEndTyping(
-      SetSelectionTextToBody("<p contenteditable>a^b|c</p>"));
+  Selection().SetSelection(
+      SetSelectionTextToBody("<p contenteditable>a^b|c</p>"),
+      SetSelectionOptions());
 
   DeleteSelectionCommand& command = *DeleteSelectionCommand::Create(
       GetDocument(), DeleteSelectionOptions::Builder()

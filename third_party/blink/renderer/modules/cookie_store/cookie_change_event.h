@@ -5,9 +5,11 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_COOKIE_STORE_COOKIE_CHANGE_EVENT_H_
 #define THIRD_PARTY_BLINK_RENDERER_MODULES_COOKIE_STORE_COOKIE_CHANGE_EVENT_H_
 
+#include "third_party/blink/public/platform/web_canonical_cookie.h"
 #include "third_party/blink/renderer/modules/cookie_store/cookie_list_item.h"
 #include "third_party/blink/renderer/modules/event_modules.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/wtf/text/atomic_string.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
@@ -22,7 +24,7 @@ class CookieChangeEvent final : public Event {
 
   // Used by Blink.
   //
-  // The caller is expected to create a HeapVector and std::move() it into this
+  // The caller is expected to create HeapVectors and std::move() them into this
   // method.
   static CookieChangeEvent* Create(const AtomicString& type,
                                    HeapVector<CookieListItem> changed,
@@ -46,6 +48,17 @@ class CookieChangeEvent final : public Event {
 
   // GarbageCollected
   void Trace(blink::Visitor*) override;
+
+  static void ToCookieListItem(
+      const WebCanonicalCookie& canonical_cookie,
+      bool is_deleted,  // True for information from a cookie deletion event.
+      CookieListItem& cookie);
+
+  // Helper for converting backend event information into a CookieChangeEvent.
+  static void ToEventInfo(const WebCanonicalCookie& cookie,
+                          ::network::mojom::CookieChangeCause cause,
+                          HeapVector<CookieListItem>& changed,
+                          HeapVector<CookieListItem>& deleted);
 
  private:
   CookieChangeEvent();

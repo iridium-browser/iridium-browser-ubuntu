@@ -50,8 +50,9 @@ volumeManagerUtil.validateError = function(error) {
 };
 
 /**
- * Builds the VolumeInfo data from VolumeMetadata.
- * @param {VolumeMetadata} volumeMetadata Metadata instance for the volume.
+ * Builds the VolumeInfo data from chrome.fileManagerPrivate.VolumeMetadata.
+ * @param {chrome.fileManagerPrivate.VolumeMetadata} volumeMetadata Metadata
+ * instance for the volume.
  * @return {!Promise<!VolumeInfo>} Promise settled with the VolumeInfo instance.
  */
 volumeManagerUtil.createVolumeInfo = function(volumeMetadata) {
@@ -77,6 +78,12 @@ volumeManagerUtil.createVolumeInfo = function(volumeMetadata) {
           break;
       }
       break;
+    case VolumeManagerCommon.VolumeType.CROSTINI:
+      localizedLabel = str('LINUX_FILES_ROOT_LABEL');
+      break;
+    case VolumeManagerCommon.VolumeType.ANDROID_FILES:
+      localizedLabel = str('ANDROID_FILES_ROOT_LABEL');
+      break;
     default:
       // TODO(mtomasz): Calculate volumeLabel for all types of volumes in the
       // C++ layer.
@@ -85,7 +92,9 @@ volumeManagerUtil.createVolumeInfo = function(volumeMetadata) {
       break;
   }
 
-  console.debug('Requesting file system.');
+  console.debug(
+      'Requesting file system: ' + volumeMetadata.volumeType + ' ' +
+      volumeMetadata.volumeId);
   return util.timeoutPromise(
       new Promise(function(resolve, reject) {
         chrome.fileSystem.requestFileSystem(
@@ -144,8 +153,8 @@ volumeManagerUtil.createVolumeInfo = function(volumeMetadata) {
           fileSystem.root.createReader().readEntries(
               function() { /* do nothing */ },
               function(error) {
-                console.error(
-                    'Triggering full feed fetch is failed: ' +
+                console.warn(
+                    'Triggering full feed fetch has failed: ' +
                     error.name);
               });
         }
@@ -167,7 +176,7 @@ volumeManagerUtil.createVolumeInfo = function(volumeMetadata) {
        * @param {*} error
        */
       function(error) {
-        console.error('Failed to mount a file system: ' +
+        console.warn('Failed to mount a file system: ' +
             volumeMetadata.volumeId + ' because of: ' +
             (error.stack || error));
         volumeManagerUtil.reportMountError(volumeMetadata, error);
@@ -195,7 +204,7 @@ volumeManagerUtil.createVolumeInfo = function(volumeMetadata) {
  * Note that errorType and volumeType must be an element of fixed set of strings
  * to avoid sending dynamic strings to analytics.
  *
- * @param {VolumeMetadata} volumeMetadata
+ * @param {chrome.fileManagerPrivate.VolumeMetadata} volumeMetadata
  * @param {*} error
  */
 volumeManagerUtil.reportMountError = function(volumeMetadata, error) {

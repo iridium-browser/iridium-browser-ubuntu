@@ -7,9 +7,13 @@
 #include "base/version.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/manifest_constants.h"
+#include "extensions/common/manifest_handlers/background_info.h"
+#include "extensions/common/manifest_handlers/content_scripts_handler.h"
 #include "extensions/common/manifest_handlers/externally_connectable.h"
 #include "extensions/common/permissions/permissions_data.h"
+#include "extensions/common/user_script.h"
 #include "extensions/common/value_builder.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 namespace extensions {
@@ -77,6 +81,30 @@ TEST(ExtensionBuilderTest, Actions) {
   }
 }
 
+TEST(ExtensionBuilderTest, Background) {
+  {
+    scoped_refptr<const Extension> extension =
+        ExtensionBuilder("no background").Build();
+    EXPECT_FALSE(BackgroundInfo::HasBackgroundPage(extension.get()));
+  }
+  {
+    scoped_refptr<const Extension> extension =
+        ExtensionBuilder("persistent background page")
+            .SetBackgroundPage(ExtensionBuilder::BackgroundPage::PERSISTENT)
+            .Build();
+    EXPECT_TRUE(BackgroundInfo::HasBackgroundPage(extension.get()));
+    EXPECT_TRUE(BackgroundInfo::HasPersistentBackgroundPage(extension.get()));
+  }
+  {
+    scoped_refptr<const Extension> extension =
+        ExtensionBuilder("event page")
+            .SetBackgroundPage(ExtensionBuilder::BackgroundPage::EVENT)
+            .Build();
+    EXPECT_TRUE(BackgroundInfo::HasBackgroundPage(extension.get()));
+    EXPECT_TRUE(BackgroundInfo::HasLazyBackgroundPage(extension.get()));
+  }
+}
+
 TEST(ExtensionBuilderTest, MergeManifest) {
   DictionaryBuilder connectable;
   connectable.Set("matches", ListBuilder().Append("*://example.com/*").Build());
@@ -140,6 +168,67 @@ TEST(ExtensionBuilderTest, MergeManifestOverridesValues) {
             .Build();
     EXPECT_EQ("42.1", extension->version().GetString());
   }
+}
+
+TEST(ExtensionBuilderTest, SetManifestKey) {
+  scoped_refptr<const Extension> extension =
+      ExtensionBuilder("foo")
+          .SetManifestKey("short_name", "short name")
+          .Build();
+  EXPECT_EQ("short name", extension->short_name());
+}
+
+TEST(ExtensionBuilderTest, AddContentScript) {
+  constexpr char kScriptOne[] = "one.js";
+  const std::vector<std::string> script_one_patterns = {
+      "https://example.com/*", "https://chromium.org/foo"};
+  constexpr char kScriptTwo[] = "two.js";
+  const std::vector<std::string> script_two_patterns = {"https://google.com/*"};
+  scoped_refptr<const Extension> extension =
+      ExtensionBuilder("foo")
+          .AddContentScript(kScriptOne, script_one_patterns)
+          .AddContentScript(kScriptTwo, script_two_patterns)
+          .Build();
+
+  const UserScriptList& content_scripts =
+      ContentScriptsInfo::GetContentScripts(extension.get());
+  auto script_by_name =
+      [&content_scripts](const char* name) -> const extensions::UserScript* {
+    for (const auto& script : content_scripts) {
+      if (script->js_scripts()[0]->relative_path().AsUTF8Unsafe() == name) {
+        return script.get();
+      }
+    }
+    return nullptr;
+  };
+
+  auto patterns_as_strings = [](const URLPatternSet& patterns) {
+    std::vector<std::string> strings;
+    for (const auto& pattern : patterns)
+      strings.push_back(pattern.GetAsString());
+    return strings;
+  };
+
+  {
+    const UserScript* script_one = script_by_name(kScriptOne);
+    ASSERT_TRUE(script_one);
+    EXPECT_THAT(patterns_as_strings(script_one->url_patterns()),
+                testing::UnorderedElementsAreArray(script_one_patterns));
+  }
+
+  {
+    const UserScript* script_two = script_by_name(kScriptTwo);
+    ASSERT_TRUE(script_two);
+    EXPECT_THAT(patterns_as_strings(script_two->url_patterns()),
+                testing::UnorderedElementsAreArray(script_two_patterns));
+  }
+}
+
+TEST(ExtensionBuilderTest, SetVersion) {
+  constexpr char kVersion[] = "42.0.99.1";
+  scoped_refptr<const Extension> extension =
+      ExtensionBuilder("foo").SetVersion(kVersion).Build();
+  EXPECT_EQ(kVersion, extension->VersionString());
 }
 
 }  // namespace extensions

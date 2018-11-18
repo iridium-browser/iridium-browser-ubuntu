@@ -93,10 +93,16 @@ SCALE_FACTOR_OVERRIDES = {
 def DefaultPages(base_name):
   return [
     PixelTestPage(
+      'pixel_background_image.html',
+      base_name + '_BackgroundImage',
+      test_rect=[20, 20, 370, 370],
+      revision=1),
+
+    PixelTestPage(
       'pixel_canvas2d.html',
       base_name + '_Canvas2DRedBox',
       test_rect=[0, 0, 300, 300],
-      revision=7),
+      revision=10),
 
     PixelTestPage(
       'pixel_canvas2d_untagged.html',
@@ -108,37 +114,37 @@ def DefaultPages(base_name):
       'pixel_css3d.html',
       base_name + '_CSS3DBlueBox',
       test_rect=[0, 0, 300, 300],
-      revision=18),
+      revision=23),
 
     PixelTestPage(
       'pixel_webgl_aa_alpha.html',
       base_name + '_WebGLGreenTriangle_AA_Alpha',
       test_rect=[0, 0, 300, 300],
-      revision=3),
+      revision=7),
 
     PixelTestPage(
       'pixel_webgl_noaa_alpha.html',
       base_name + '_WebGLGreenTriangle_NoAA_Alpha',
       test_rect=[0, 0, 300, 300],
-      revision=1),
+      revision=4),
 
     PixelTestPage(
       'pixel_webgl_aa_noalpha.html',
       base_name + '_WebGLGreenTriangle_AA_NoAlpha',
       test_rect=[0, 0, 300, 300],
-      revision=4),
+      revision=8),
 
     PixelTestPage(
       'pixel_webgl_noaa_noalpha.html',
       base_name + '_WebGLGreenTriangle_NoAA_NoAlpha',
       test_rect=[0, 0, 300, 300],
-      revision=1),
+      revision=4),
 
     PixelTestPage(
       'pixel_webgl_noalpha_implicit_clear.html',
       base_name + '_WebGLTransparentGreenTriangle_NoAlpha_ImplicitClear',
       test_rect=[0, 0, 300, 300],
-      revision=1),
+      revision=4),
 
     PixelTestPage(
       'pixel_webgl_sad_canvas.html',
@@ -180,7 +186,7 @@ def DefaultPages(base_name):
       'pixel_canvas2d_webgl.html',
       base_name + '_2DCanvasWebGL',
       test_rect=[0, 0, 300, 300],
-      revision=6),
+      revision=10),
 
     PixelTestPage(
       'pixel_background.html',
@@ -192,13 +198,13 @@ def DefaultPages(base_name):
       'pixel_video_mp4.html',
       base_name + '_Video_MP4',
       test_rect=[0, 0, 300, 300],
-      revision=7),
+      revision=10),
 
     PixelTestPage(
       'pixel_video_vp9.html',
       base_name + '_Video_VP9',
       test_rect=[0, 0, 300, 300],
-      revision=8),
+      revision=10),
 
     PixelTestPage(
       'pixel_webgl_premultiplied_alpha_false.html',
@@ -401,42 +407,66 @@ def ExperimentalCanvasFeaturesPages(base_name):
       'pixel_offscreenCanvas_transfer_after_style_resize.html',
       base_name + '_OffscreenCanvasTransferAfterStyleResize',
       test_rect=[0, 0, 350, 350],
-      revision=5,
+      revision=9,
       browser_args=browser_args),
 
     PixelTestPage(
       'pixel_offscreenCanvas_transfer_before_style_resize.html',
       base_name + '_OffscreenCanvasTransferBeforeStyleResize',
       test_rect=[0, 0, 350, 350],
-      revision=5,
+      revision=9,
       browser_args=browser_args),
+
+    PixelTestPage(
+      'pixel_offscreenCanvas_webgl_paint_after_resize.html',
+      base_name + '_OffscreenCanvasWebGLPaintAfterResize',
+      test_rect=[0, 0, 200, 200],
+      browser_args=browser_args,
+      revision=0, # This is not used.
+      expected_colors=[
+        SCALE_FACTOR_OVERRIDES,
+        {
+          'comment': 'resized area',
+          'location': [1, 1],
+          'size': [48, 98],
+          'color': [0, 255, 0],
+          'tolerance': 0
+        },
+        {
+          'comment': 'outside resized area',
+          'location': [51, 1],
+          'size': [48, 98],
+          'color': [255, 255, 255],
+          'tolerance': 0
+        },
+      ]),
 
     PixelTestPage(
       'pixel_offscreenCanvas_transferToImageBitmap_main.html',
       base_name + '_OffscreenCanvasTransferToImageBitmap',
       test_rect=[0, 0, 300, 300],
-      revision=2,
+      revision=5,
       browser_args=browser_args),
 
     PixelTestPage(
       'pixel_offscreenCanvas_transferToImageBitmap_worker.html',
       base_name + '_OffscreenCanvasTransferToImageBitmapWorker',
       test_rect=[0, 0, 300, 300],
-      revision=2,
+      revision=5,
       browser_args=browser_args),
 
     PixelTestPage(
       'pixel_offscreenCanvas_webgl_commit_main.html',
       base_name + '_OffscreenCanvasWebGLDefault',
       test_rect=[0, 0, 360, 200],
-      revision=7,
+      revision=11,
       browser_args=browser_args),
 
     PixelTestPage(
       'pixel_offscreenCanvas_webgl_commit_worker.html',
       base_name + '_OffscreenCanvasWebGLDefaultWorker',
       test_rect=[0, 0, 360, 200],
-      revision=7,
+      revision=11,
       browser_args=browser_args),
 
     PixelTestPage(
@@ -457,14 +487,14 @@ def ExperimentalCanvasFeaturesPages(base_name):
       'pixel_offscreenCanvas_2d_commit_main.html',
       base_name + '_OffscreenCanvasAccelerated2D',
       test_rect=[0, 0, 360, 200],
-      revision=10,
+      revision=11,
       browser_args=browser_args),
 
     PixelTestPage(
       'pixel_offscreenCanvas_2d_commit_worker.html',
       base_name + '_OffscreenCanvasAccelerated2DWorker',
       test_rect=[0, 0, 360, 200],
-      revision=10,
+      revision=11,
       browser_args=browser_args),
 
     PixelTestPage(
@@ -485,35 +515,35 @@ def ExperimentalCanvasFeaturesPages(base_name):
       'pixel_offscreenCanvas_2d_commit_main.html',
       base_name + '_OffscreenCanvasUnaccelerated2DGPUCompositing',
       test_rect=[0, 0, 360, 200],
-      revision=11,
+      revision=13,
       browser_args=browser_args + ['--disable-accelerated-2d-canvas']),
 
     PixelTestPage(
       'pixel_offscreenCanvas_2d_commit_worker.html',
       base_name + '_OffscreenCanvasUnaccelerated2DGPUCompositingWorker',
       test_rect=[0, 0, 360, 200],
-      revision=11,
+      revision=13,
       browser_args=browser_args + ['--disable-accelerated-2d-canvas']),
 
     PixelTestPage(
       'pixel_offscreenCanvas_2d_resize_on_worker.html',
       base_name + '_OffscreenCanvas2DResizeOnWorker',
       test_rect=[0, 0, 200, 200],
-      revision=4,
+      revision=7,
       browser_args=browser_args),
 
     PixelTestPage(
       'pixel_offscreenCanvas_webgl_resize_on_worker.html',
       base_name + '_OffscreenCanvasWebglResizeOnWorker',
       test_rect=[0, 0, 200, 200],
-      revision=5,
+      revision=9,
       browser_args=browser_args),
 
     PixelTestPage(
       'pixel_canvas_display_linear-rgb.html',
       base_name + '_CanvasDisplayLinearRGBAccelerated2D',
       test_rect=[0, 0, 140, 140],
-      revision=1,
+      revision=5,
       browser_args=browser_args),
 
     PixelTestPage(
@@ -527,22 +557,39 @@ def ExperimentalCanvasFeaturesPages(base_name):
       'pixel_canvas_display_linear-rgb.html',
       base_name + '_CanvasDisplayLinearRGBUnaccelerated2DGPUCompositing',
       test_rect=[0, 0, 140, 140],
-      revision=1,
+      revision=5,
       browser_args=browser_args + ['--disable-accelerated-2d-canvas']),
 
     PixelTestPage(
       'pixel_canvas_low_latency_2d.html',
       base_name + '_CanvasLowLatency2D',
       test_rect=[0, 0, 100, 100],
-      revision=1,
+      revision=2,
       browser_args=browser_args),
 
     PixelTestPage(
       'pixel_canvas_low_latency_2d.html',
       base_name + '_CanvasUnacceleratedLowLatency2D',
       test_rect=[0, 0, 100, 100],
-      revision=1,
+      revision=2,
       browser_args=browser_args + unaccelerated_args),
+
+    PixelTestPage(
+      'pixel_canvas_low_latency_webgl.html',
+      base_name + '_CanvasLowLatencyWebGL',
+      test_rect=[0, 0, 200, 200],
+      revision=0, # not used
+      browser_args=browser_args,
+      expected_colors=[
+        SCALE_FACTOR_OVERRIDES,
+        {
+          'comment': 'green',
+          'location': [1, 1],
+          'size': [98, 98],
+          'color': [0, 255, 0],
+          'tolerance': 0
+        },
+      ]),
   ]
 
 # Only add these tests on platforms where SwiftShader is enabled.
@@ -599,8 +646,7 @@ def NoGpuProcessPages(base_name):
 # arguments.
 def MacSpecificPages(base_name):
   iosurface_2d_canvas_args = [
-    '--enable-accelerated-2d-canvas',
-    '--disable-display-list-2d-canvas']
+    '--enable-accelerated-2d-canvas']
 
   non_chromium_image_args = ['--disable-webgl-image-chromium']
 
@@ -689,18 +735,159 @@ def MacSpecificPages(base_name):
 
 def DirectCompositionPages(base_name):
   browser_args = ['--enable-direct-composition-layers']
+  browser_args_Underlay = browser_args + [
+    '--enable-features=DirectCompositionUnderlays']
+  browser_args_Nonroot = browser_args +[
+    '--enable-features=DirectCompositionNonrootOverlays,' +
+    'DirectCompositionUnderlays']
+  browser_args_Complex = browser_args + [
+    '--enable-features=DirectCompositionComplexOverlays,' +
+    'DirectCompositionNonrootOverlays,' +
+    'DirectCompositionUnderlays']
   return [
     PixelTestPage(
       'pixel_video_mp4.html',
       base_name + '_DirectComposition_Video_MP4',
       test_rect=[0, 0, 300, 300],
-      revision=7,
+      revision=8,
       browser_args=browser_args),
 
     PixelTestPage(
       'pixel_video_vp9.html',
       base_name + '_DirectComposition_Video_VP9',
       test_rect=[0, 0, 300, 300],
-      revision=8,
+      revision=10,
       browser_args=browser_args),
-  ]
+
+    PixelTestPage(
+      'pixel_video_underlay.html',
+      base_name + '_DirectComposition_Underlay',
+      test_rect=[0, 0, 240, 136],
+      revision=0, # Golden image revision is not used
+      browser_args=browser_args_Underlay,
+      expected_colors=[
+        {
+          'comment': 'black top left',
+          'location': [4, 4],
+          'size': [20, 20],
+          'color': [0, 0, 0],
+          'tolerance': 3
+        },
+        {
+          'comment': 'yellow top left quadrant',
+          'location': [4, 34],
+          'size': [110, 30],
+          'color': [255, 255, 15],
+          'tolerance': 3
+        },
+        {
+          'comment': 'red top right quadrant',
+          'location': [124, 4],
+          'size': [110, 60],
+          'color': [255, 17, 24],
+          'tolerance': 3
+        },
+        {
+          'comment': 'blue bottom left quadrant',
+          'location': [4, 72],
+          'size': [110, 60],
+          'color': [12, 12, 255],
+          'tolerance': 3
+        },
+        {
+          'comment': 'green bottom right quadrant',
+          'location': [124, 72],
+          'size': [110, 60],
+          'color': [44, 255, 16],
+          'tolerance': 3
+        }
+      ]),
+
+    PixelTestPage(
+      'pixel_video_nonroot.html',
+      base_name + '_DirectComposition_Nonroot',
+      test_rect=[0, 0, 240, 136],
+      revision=0, # Golden image revision is not used
+      browser_args=browser_args_Nonroot,
+      expected_colors=[
+        {
+          'comment': 'black top left',
+          'location': [4, 4],
+          'size': [20, 20],
+          'color': [0, 0, 0],
+          'tolerance': 3
+        },
+        {
+          'comment': 'yellow top left quadrant',
+          'location': [4, 34],
+          'size': [110, 30],
+          'color': [255, 255, 15],
+          'tolerance': 3
+        },
+        {
+          'comment': 'red top right quadrant',
+          'location': [124, 4],
+          'size': [50, 60],
+          'color': [255, 17, 24],
+          'tolerance': 3
+        },
+        {
+          'comment': 'blue bottom left quadrant',
+          'location': [4, 72],
+          'size': [110, 60],
+          'color': [12, 12, 255],
+          'tolerance': 3
+        },
+        {
+          'comment': 'green bottom right quadrant',
+          'location': [124, 72],
+          'size': [50, 60],
+          'color': [44, 255, 16],
+          'tolerance': 3
+        }
+      ]),
+
+    PixelTestPage(
+      'pixel_video_complex_overlays.html',
+      base_name + '_DirectComposition_ComplexOverlays',
+      test_rect=[0, 0, 240, 136],
+      revision=0, # Golden image revision is not used
+      browser_args=browser_args_Complex,
+      expected_colors=[
+        {
+          'comment': 'black top left',
+          'location': [4, 4],
+          'size': [20, 20],
+          'color': [0, 0, 0],
+          'tolerance': 3
+        },
+        {
+          'comment': 'yellow top left quadrant',
+          'location': [60, 10],
+          'size': [65, 30],
+          'color': [255, 255, 15],
+          'tolerance': 3
+        },
+        {
+          'comment': 'red top right quadrant',
+          'location': [150, 45],
+          'size': [65, 30],
+          'color': [255, 17, 24],
+          'tolerance': 3
+        },
+        {
+          'comment': 'blue bottom left quadrant',
+          'location': [30, 70],
+          'size': [65, 30],
+          'color': [12, 12, 255],
+          'tolerance': 3
+        },
+        {
+          'comment': 'green bottom right quadrant',
+          'location': [130, 100],
+          'size': [65, 30],
+          'color': [44, 255, 16],
+          'tolerance': 3
+        }
+      ]),
+    ]

@@ -9,9 +9,14 @@
 #include "PreprocessorTest.h"
 #include "compiler/preprocessor/Token.h"
 
+namespace angle
+{
+
 class SpaceTest : public PreprocessorTest
 {
   protected:
+    SpaceTest() : PreprocessorTest(SH_GLES2_SPEC) {}
+
     void expectSpace(const std::string& str)
     {
         const char* cstr = str.c_str();
@@ -106,3 +111,5 @@ TEST_F(SpaceTest, LeadingSpace)
     EXPECT_EQ("bar", token.text);
     EXPECT_FALSE(token.hasLeadingSpace());
 }
+
+}  // namespace angle

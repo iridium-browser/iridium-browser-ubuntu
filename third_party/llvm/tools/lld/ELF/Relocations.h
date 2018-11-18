@@ -43,6 +43,7 @@ enum RelExpr {
   R_GOT_OFF,
   R_GOT_PAGE_PC,
   R_GOT_PC,
+  R_HEXAGON_GOT,
   R_HINT,
   R_MIPS_GOTREL,
   R_MIPS_GOT_GP,
@@ -59,27 +60,35 @@ enum RelExpr {
   R_PLT,
   R_PLT_PAGE_PC,
   R_PLT_PC,
-  R_PPC_OPD,
-  R_PPC_PLT_OPD,
+  R_PPC_CALL,
+  R_PPC_CALL_PLT,
   R_PPC_TOC,
   R_RELAX_GOT_PC,
   R_RELAX_GOT_PC_NOPIC,
   R_RELAX_TLS_GD_TO_IE,
   R_RELAX_TLS_GD_TO_IE_ABS,
   R_RELAX_TLS_GD_TO_IE_END,
+  R_RELAX_TLS_GD_TO_IE_GOT_OFF,
   R_RELAX_TLS_GD_TO_IE_PAGE_PC,
   R_RELAX_TLS_GD_TO_LE,
   R_RELAX_TLS_GD_TO_LE_NEG,
   R_RELAX_TLS_IE_TO_LE,
   R_RELAX_TLS_LD_TO_LE,
+  R_RELAX_TLS_LD_TO_LE_ABS,
+  R_RISCV_PC_INDIRECT,
   R_SIZE,
   R_TLS,
   R_TLSDESC,
   R_TLSDESC_CALL,
   R_TLSDESC_PAGE,
-  R_TLSGD,
+  R_TLSGD_GOT,
+  R_TLSGD_GOT_FROM_END,
   R_TLSGD_PC,
-  R_TLSLD,
+  R_TLSIE_HINT,
+  R_TLSLD_GOT,
+  R_TLSLD_GOT_FROM_END,
+  R_TLSLD_GOT_OFF,
+  R_TLSLD_HINT,
   R_TLSLD_PC,
 };
 
@@ -122,6 +131,21 @@ struct Relocation {
   Symbol *Sym;
 };
 
+struct RelocationOffsetComparator {
+  bool operator()(const Relocation &Lhs, const Relocation &Rhs) {
+    return Lhs.Offset < Rhs.Offset;
+  }
+
+  // For std::lower_bound, std::upper_bound, std::equal_range.
+  bool operator()(const Relocation &Rel, uint64_t Val) {
+    return Rel.Offset < Val;
+  }
+
+  bool operator()(uint64_t Val, const Relocation &Rel) {
+    return Val < Rel.Offset;
+  }
+};
+
 template <class ELFT> void scanRelocations(InputSectionBase &);
 
 class ThunkSection;
@@ -151,7 +175,7 @@ private:
 
   void forEachInputSectionDescription(
       ArrayRef<OutputSection *> OutputSections,
-      std::function<void(OutputSection *, InputSectionDescription *)> Fn);
+      llvm::function_ref<void(OutputSection *, InputSectionDescription *)> Fn);
 
   std::pair<Thunk *, bool> getThunk(Symbol &Sym, RelType Type, uint64_t Src);
 

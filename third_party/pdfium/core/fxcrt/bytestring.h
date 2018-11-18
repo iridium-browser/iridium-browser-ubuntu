@@ -17,9 +17,11 @@
 #include "core/fxcrt/string_data_template.h"
 #include "core/fxcrt/string_view_template.h"
 #include "third_party/base/optional.h"
+#include "third_party/base/span.h"
 
 namespace fxcrt {
 
+class ByteString_Assign_Test;
 class ByteString_Concat_Test;
 class StringPool_ByteString_Test;
 class WideString;
@@ -64,8 +66,6 @@ class ByteString {
 
   void clear() { m_pData.Reset(); }
 
-  static ByteString FromUnicode(const WideString& str) WARN_UNUSED_RESULT;
-
   // Explicit conversion to C-style string.
   // Note: Any subsequent modification of |this| will invalidate the result.
   const char* c_str() const { return m_pData ? m_pData->m_String : ""; }
@@ -81,6 +81,16 @@ class ByteString {
   // Note: Any subsequent modification of |this| will invalidate the result.
   ByteStringView AsStringView() const {
     return ByteStringView(raw_str(), GetLength());
+  }
+
+  // Explicit conversion to span.
+  // Note: Any subsequent modification of |this| will invalidate the result.
+  pdfium::span<const char> AsSpan() const {
+    return pdfium::make_span(m_pData ? m_pData->m_String : nullptr,
+                             GetLength());
+  }
+  pdfium::span<const uint8_t> AsRawSpan() const {
+    return pdfium::make_span(raw_str(), GetLength());
   }
 
   // Note: Any subsequent modification of |this| will invalidate iterators.
@@ -122,7 +132,8 @@ class ByteString {
 
   const ByteString& operator=(const char* str);
   const ByteString& operator=(const ByteStringView& bstrc);
-  const ByteString& operator=(const ByteString& stringSrc);
+  const ByteString& operator=(const ByteString& that);
+  const ByteString& operator=(ByteString&& that);
 
   const ByteString& operator+=(char ch);
   const ByteString& operator+=(const char* str);
@@ -145,7 +156,10 @@ class ByteString {
   size_t Delete(size_t index, size_t count = 1);
 
   void Reserve(size_t len);
-  char* GetBuffer(size_t len);
+
+  // Note: any modification of the string (including ReleaseBuffer()) may
+  // invalidate the span, which must not outlive its buffer.
+  pdfium::span<char> GetBuffer(size_t len);
   void ReleaseBuffer(size_t len);
 
   ByteString Mid(size_t first, size_t count) const;
@@ -195,9 +209,11 @@ class ByteString {
   void AllocCopy(ByteString& dest, size_t nCopyLen, size_t nCopyIndex) const;
   void AssignCopy(const char* pSrcData, size_t nSrcLen);
   void Concat(const char* lpszSrcData, size_t nSrcLen);
+  intptr_t ReferenceCountForTesting() const;
 
   RetainPtr<StringData> m_pData;
 
+  friend ByteString_Assign_Test;
   friend ByteString_Concat_Test;
   friend class StringPool_ByteString_Test;
 };

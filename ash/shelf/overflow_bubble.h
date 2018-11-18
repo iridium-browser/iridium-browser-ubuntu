@@ -5,12 +5,17 @@
 #ifndef ASH_SHELF_OVERFLOW_BUBBLE_H_
 #define ASH_SHELF_OVERFLOW_BUBBLE_H_
 
+#include "ash/ash_export.h"
 #include "base/macros.h"
-#include "ui/views/pointer_watcher.h"
+#include "ui/events/event_handler.h"
 #include "ui/views/widget/widget_observer.h"
 
+namespace views {
+class Widget;
+}
+
 namespace ui {
-class PointerEvent;
+class LocatedEvent;
 }
 
 namespace ash {
@@ -21,8 +26,8 @@ class ShelfView;
 
 // OverflowBubble shows shelf items that won't fit on the main shelf in a
 // separate bubble.
-class OverflowBubble : public views::PointerWatcher,
-                       public views::WidgetObserver {
+class ASH_EXPORT OverflowBubble : public ui::EventHandler,
+                                  public views::WidgetObserver {
  public:
   // |shelf| is the shelf that spawns the bubble.
   explicit OverflowBubble(Shelf* shelf);
@@ -36,26 +41,21 @@ class OverflowBubble : public views::PointerWatcher,
   void Hide();
 
   bool IsShowing() const { return !!bubble_; }
-  ShelfView* shelf_view() { return shelf_view_; }
   OverflowBubbleView* bubble_view() { return bubble_; }
 
  private:
-  void ProcessPressedEvent(const gfx::Point& event_location_in_screen);
+  void ProcessPressedEvent(ui::LocatedEvent* event);
 
-  // views::PointerWatcher:
-  void OnPointerEventObserved(const ui::PointerEvent& event,
-                              const gfx::Point& location_in_screen,
-                              gfx::NativeView target) override;
+  // ui::EventHandler:
+  void OnMouseEvent(ui::MouseEvent* event) override;
+  void OnTouchEvent(ui::TouchEvent* event) override;
 
-  // Overridden from views::WidgetObserver:
+  // views::WidgetObserver:
   void OnWidgetDestroying(views::Widget* widget) override;
 
   Shelf* shelf_;
   OverflowBubbleView* bubble_;       // Owned by views hierarchy.
   OverflowButton* overflow_button_;  // Owned by ShelfView.
-
-  // ShelfView containing the overflow items. Owned by |bubble_|.
-  ShelfView* shelf_view_;
 
   DISALLOW_COPY_AND_ASSIGN(OverflowBubble);
 };

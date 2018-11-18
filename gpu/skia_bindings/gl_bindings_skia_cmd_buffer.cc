@@ -26,9 +26,10 @@ class ScopedCallingGLFromSkia {
 };
 
 template <typename R, typename... Args>
-GrGLFunction<R (*)(Args...)> gles_bind(R (GLES2Interface::*func)(Args...),
-                                       GLES2Interface* gles2_interface,
-                                       ContextSupport* context_support) {
+GrGLFunction<R GR_GL_FUNCTION_TYPE(Args...)> gles_bind(
+    R (GLES2Interface::*func)(Args...),
+    GLES2Interface* gles2_interface,
+    ContextSupport* context_support) {
   if (context_support->HasGrContextSupport()) {
     return [func, context_support, gles2_interface](Args... args) {
       ScopedCallingGLFromSkia guard(context_support);
@@ -417,6 +418,19 @@ sk_sp<GrGLInterface> CreateGLES2InterfaceBindings(
       &GLES2Interface::CoverageModulationCHROMIUM, impl, context_support);
   functions->fWindowRectangles =
       gles_bind(&GLES2Interface::WindowRectanglesEXT, impl, context_support);
+  // Skia should not use program binaries over the command buffer. Allowing
+  // clients to submit them would be unsafe, and we already cache program
+  // binaries internally anyway.
+  functions->fGetProgramBinary = [](GLuint, GLsizei, GLsizei*, GLenum*, void*) {
+    LOG(FATAL) << "Skia shouldn't use program binaries over the command buffer";
+  };
+  functions->fProgramBinary = [](GLuint, GLenum, const void*, GLsizei) {
+    LOG(FATAL) << "Skia shouldn't use program binaries over the command buffer";
+  };
+  functions->fProgramParameteri = [](GLuint, GLenum pname, GLint) {
+    // This method is only used for GL_PROGRAM_BINARY_RETRIEVABLE_HINT in ES3.
+    LOG(FATAL) << "Skia shouldn't use program binaries over the command buffer";
+  };
   return interface;
 }
 

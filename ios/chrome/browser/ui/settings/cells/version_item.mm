@@ -4,6 +4,8 @@
 
 #import "ios/chrome/browser/ui/settings/cells/version_item.h"
 
+#include "ios/chrome/browser/ui/collection_view/cells/collection_view_cell_constants.h"
+#import "ios/chrome/browser/ui/uikit_ui_util.h"
 #include "ios/chrome/grit/ios_strings.h"
 #import "ios/third_party/material_components_ios/src/components/Palettes/src/MaterialPalettes.h"
 #import "ios/third_party/material_components_ios/src/components/Typography/src/MaterialTypography.h"
@@ -48,14 +50,11 @@
 
     _textLabel = [[UILabel alloc] init];
     _textLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    _textLabel.font = [UIFont systemFontOfSize:kUIKitFooterFontSize];
+    _textLabel.textColor = UIColorFromRGB(kUIKitFooterTextColor);
     _textLabel.backgroundColor = [UIColor clearColor];
     _textLabel.textAlignment = NSTextAlignmentCenter;
-    _textLabel.shadowOffset = CGSizeMake(1, 0);
-    _textLabel.shadowColor = [UIColor whiteColor];
     [self addSubview:_textLabel];
-
-    _textLabel.font = [[MDCTypography fontLoader] mediumFontOfSize:14];
-    _textLabel.textColor = [[MDCPalette greyPalette] tint900];
 
     // Set up the constraints.
     [NSLayoutConstraint activateConstraints:@[

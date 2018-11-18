@@ -24,6 +24,7 @@
 #define THIRD_PARTY_BLINK_RENDERER_CORE_STYLE_SVG_COMPUTED_STYLE_H_
 
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/core/css/style_color.h"
 #include "third_party/blink/renderer/core/style/computed_style_constants.h"
 #include "third_party/blink/renderer/core/style/data_ref.h"
 #include "third_party/blink/renderer/core/style/svg_computed_style_defs.h"
@@ -92,12 +93,10 @@ class SVGComputedStyle : public RefCounted<SVGComputedStyle> {
   static float InitialFloodOpacity() { return 1; }
   static Color InitialFloodColor() { return Color(0, 0, 0); }
   static Color InitialLightingColor() { return Color(255, 255, 255); }
-  static const AtomicString& InitialMaskerResource() { return g_null_atom; }
-  static const AtomicString& InitialMarkerStartResource() {
-    return g_null_atom;
-  }
-  static const AtomicString& InitialMarkerMidResource() { return g_null_atom; }
-  static const AtomicString& InitialMarkerEndResource() { return g_null_atom; }
+  static StyleSVGResource* InitialMaskerResource() { return nullptr; }
+  static StyleSVGResource* InitialMarkerStartResource() { return nullptr; }
+  static StyleSVGResource* InitialMarkerMidResource() { return nullptr; }
+  static StyleSVGResource* InitialMarkerEndResource() { return nullptr; }
   static EMaskType InitialMaskType() { return MT_LUMINANCE; }
   static EPaintOrder InitialPaintOrder() { return kPaintOrderNormal; }
   static StylePath* InitialD() { return nullptr; }
@@ -243,14 +242,21 @@ class SVGComputedStyle : public RefCounted<SVGComputedStyle> {
       misc.Access()->flood_opacity = obj;
   }
 
-  void SetFloodColor(const Color& obj) {
-    if (!(misc->flood_color == obj))
-      misc.Access()->flood_color = obj;
+  void SetFloodColor(const StyleColor& style_color) {
+    if (FloodColor() != style_color) {
+      StyleMiscData* mutable_misc = misc.Access();
+      mutable_misc->flood_color = style_color.Resolve(Color());
+      mutable_misc->flood_color_is_current_color = style_color.IsCurrentColor();
+    }
   }
 
-  void SetLightingColor(const Color& obj) {
-    if (!(misc->lighting_color == obj))
-      misc.Access()->lighting_color = obj;
+  void SetLightingColor(const StyleColor& style_color) {
+    if (LightingColor() != style_color) {
+      StyleMiscData* mutable_misc = misc.Access();
+      mutable_misc->lighting_color = style_color.Resolve(Color());
+      mutable_misc->lighting_color_is_current_color =
+          style_color.IsCurrentColor();
+    }
   }
 
   void SetBaselineShiftValue(const Length& baseline_shift_value) {
@@ -259,26 +265,14 @@ class SVGComputedStyle : public RefCounted<SVGComputedStyle> {
   }
 
   // Setters for non-inherited resources
-  void SetMaskerResource(const AtomicString& obj) {
-    if (!(resources->masker == obj))
-      resources.Access()->masker = obj;
-  }
+  void SetMaskerResource(scoped_refptr<StyleSVGResource> resource);
 
   // Setters for inherited resources
-  void SetMarkerStartResource(const AtomicString& obj) {
-    if (!(inherited_resources->marker_start == obj))
-      inherited_resources.Access()->marker_start = obj;
-  }
+  void SetMarkerStartResource(scoped_refptr<StyleSVGResource> resource);
 
-  void SetMarkerMidResource(const AtomicString& obj) {
-    if (!(inherited_resources->marker_mid == obj))
-      inherited_resources.Access()->marker_mid = obj;
-  }
+  void SetMarkerMidResource(scoped_refptr<StyleSVGResource> resource);
 
-  void SetMarkerEndResource(const AtomicString& obj) {
-    if (!(inherited_resources->marker_end == obj))
-      inherited_resources.Access()->marker_end = obj;
-  }
+  void SetMarkerEndResource(scoped_refptr<StyleSVGResource> resource);
 
   // Read accessors for all the properties
   EAlignmentBaseline AlignmentBaseline() const {
@@ -328,8 +322,15 @@ class SVGComputedStyle : public RefCounted<SVGComputedStyle> {
   float StopOpacity() const { return stops->opacity; }
   const Color& StopColor() const { return stops->color; }
   float FloodOpacity() const { return misc->flood_opacity; }
-  const Color& FloodColor() const { return misc->flood_color; }
-  const Color& LightingColor() const { return misc->lighting_color; }
+  StyleColor FloodColor() const {
+    return misc->flood_color_is_current_color ? StyleColor::CurrentColor()
+                                              : StyleColor(misc->flood_color);
+  }
+  StyleColor LightingColor() const {
+    return misc->lighting_color_is_current_color
+               ? StyleColor::CurrentColor()
+               : StyleColor(misc->lighting_color);
+  }
   const Length& BaselineShiftValue() const {
     return misc->baseline_shift_value;
   }
@@ -341,15 +342,15 @@ class SVGComputedStyle : public RefCounted<SVGComputedStyle> {
   const Length& R() const { return geometry->r; }
   const Length& Rx() const { return geometry->rx; }
   const Length& Ry() const { return geometry->ry; }
-  const AtomicString& MaskerResource() const { return resources->masker; }
-  const AtomicString& MarkerStartResource() const {
-    return inherited_resources->marker_start;
+  StyleSVGResource* MaskerResource() const { return resources->masker.get(); }
+  StyleSVGResource* MarkerStartResource() const {
+    return inherited_resources->marker_start.get();
   }
-  const AtomicString& MarkerMidResource() const {
-    return inherited_resources->marker_mid;
+  StyleSVGResource* MarkerMidResource() const {
+    return inherited_resources->marker_mid.get();
   }
-  const AtomicString& MarkerEndResource() const {
-    return inherited_resources->marker_end;
+  StyleSVGResource* MarkerEndResource() const {
+    return inherited_resources->marker_end.get();
   }
   EMaskType MaskType() const {
     return (EMaskType)svg_noninherited_flags.f.mask_type;
@@ -377,10 +378,9 @@ class SVGComputedStyle : public RefCounted<SVGComputedStyle> {
   }
 
   // convenience
-  bool HasMasker() const { return !MaskerResource().IsEmpty(); }
+  bool HasMasker() const { return MaskerResource(); }
   bool HasMarkers() const {
-    return !MarkerStartResource().IsEmpty() || !MarkerMidResource().IsEmpty() ||
-           !MarkerEndResource().IsEmpty();
+    return MarkerStartResource() || MarkerMidResource() || MarkerEndResource();
   }
   bool HasStroke() const { return !StrokePaint().IsNone(); }
   bool HasVisibleStroke() const {

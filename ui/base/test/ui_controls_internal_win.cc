@@ -201,7 +201,8 @@ LRESULT CALLBACK InputDispatcher::MouseHook(int n_code,
   if (n_code == HC_ACTION) {
     DCHECK(current_dispatcher_);
     current_dispatcher_->DispatchedMessage(
-        w_param, reinterpret_cast<MOUSEHOOKSTRUCT*>(l_param));
+        static_cast<UINT>(w_param),
+        reinterpret_cast<MOUSEHOOKSTRUCT*>(l_param));
   }
   return CallNextHookEx(next_hook, n_code, w_param, l_param);
 }
@@ -311,24 +312,49 @@ bool ShouldSendThroughScanCode(ui::KeyboardCode key) {
   return native_code == MapVirtualKey(scan_code, MAPVK_VSC_TO_VK);
 }
 
-// Populate the INPUT structure with the appropriate keyboard event
+// Append an INPUT structure with the appropriate keyboard event
 // parameters required by SendInput
-bool FillKeyboardInput(ui::KeyboardCode key, INPUT* input, bool key_up) {
-  memset(input, 0, sizeof(INPUT));
-  input->type = INPUT_KEYBOARD;
-  input->ki.wVk = ui::WindowsKeyCodeForKeyboardCode(key);
+void AppendKeyboardInput(ui::KeyboardCode key,
+                         bool key_up,
+                         std::vector<INPUT>* input) {
+  INPUT key_input = {};
+  key_input.type = INPUT_KEYBOARD;
+  key_input.ki.wVk = ui::WindowsKeyCodeForKeyboardCode(key);
   if (ShouldSendThroughScanCode(key)) {
-    input->ki.wScan = MapVirtualKeyToScanCode(input->ki.wVk);
+    key_input.ki.wScan = MapVirtualKeyToScanCode(key_input.ki.wVk);
     // When KEYEVENTF_SCANCODE is used, ki.wVk is ignored, so we do not need to
     // clear it.
-    input->ki.dwFlags = KEYEVENTF_SCANCODE;
-    if ((input->ki.wScan & 0xFF00) != 0)
-      input->ki.dwFlags |= KEYEVENTF_EXTENDEDKEY;
+    key_input.ki.dwFlags = KEYEVENTF_SCANCODE;
+    if ((key_input.ki.wScan & 0xFF00) != 0)
+      key_input.ki.dwFlags |= KEYEVENTF_EXTENDEDKEY;
   }
   if (key_up)
-    input->ki.dwFlags |= KEYEVENTF_KEYUP;
+    key_input.ki.dwFlags |= KEYEVENTF_KEYUP;
+  input->push_back(key_input);
+}
 
-  return true;
+// Append an INPUT structure with a simple mouse up or down event to be used
+// by SendInput.
+void AppendMouseInput(DWORD flags, std::vector<INPUT>* input) {
+  INPUT mouse_input = {};
+  mouse_input.type = INPUT_MOUSE;
+  mouse_input.mi.dwFlags = flags;
+  input->push_back(mouse_input);
+}
+
+// Append an INPUT array with optional accelerator keys that may be pressed
+// with a keyboard or mouse event. This array will be sent by SendInput.
+void AppendAcceleratorInputs(bool control,
+                             bool shift,
+                             bool alt,
+                             bool key_up,
+                             std::vector<INPUT>* input) {
+  if (control)
+    AppendKeyboardInput(ui::VKEY_CONTROL, key_up, input);
+  if (alt)
+    AppendKeyboardInput(ui::VKEY_LMENU, key_up, input);
+  if (shift)
+    AppendKeyboardInput(ui::VKEY_SHIFT, key_up, input);
 }
 
 }  // namespace
@@ -370,55 +396,20 @@ bool SendKeyPressImpl(HWND window,
     return true;
   }
 
-  INPUT input[8] = {};  // 8, assuming all the modifiers are activated.
+  std::vector<INPUT> input;
+  AppendAcceleratorInputs(control, shift, alt, false, &input);
+  AppendKeyboardInput(key, false, &input);
 
-  UINT i = 0;
-  if (control) {
-    if (!FillKeyboardInput(ui::VKEY_CONTROL, &input[i], false))
-      return false;
-    i++;
-  }
+  AppendKeyboardInput(key, true, &input);
+  AppendAcceleratorInputs(control, shift, alt, true, &input);
 
-  if (shift) {
-    if (!FillKeyboardInput(ui::VKEY_SHIFT, &input[i], false))
-      return false;
-    i++;
-  }
-
-  if (alt) {
-    if (!FillKeyboardInput(ui::VKEY_LMENU, &input[i], false))
-      return false;
-    i++;
-  }
-
-  if (!FillKeyboardInput(key, &input[i], false))
+  if (input.size() > std::numeric_limits<UINT>::max())
     return false;
-  i++;
 
-  if (!FillKeyboardInput(key, &input[i], true))
+  if (::SendInput(static_cast<UINT>(input.size()), input.data(),
+                  sizeof(INPUT)) != input.size()) {
     return false;
-  i++;
-
-  if (alt) {
-    if (!FillKeyboardInput(ui::VKEY_LMENU, &input[i], true))
-      return false;
-    i++;
   }
-
-  if (shift) {
-    if (!FillKeyboardInput(ui::VKEY_SHIFT, &input[i], true))
-      return false;
-    i++;
-  }
-
-  if (control) {
-    if (!FillKeyboardInput(ui::VKEY_CONTROL, &input[i], true))
-      return false;
-    i++;
-  }
-
-  if (::SendInput(i, input, sizeof(INPUT)) != i)
-    return false;
 
   if (dispatcher)
     dispatcher->AddRef();
@@ -481,7 +472,10 @@ bool SendMouseMoveImpl(long screen_x, long screen_y, base::OnceClosure task) {
   return true;
 }
 
-bool SendMouseEventsImpl(MouseButton type, int state, base::OnceClosure task) {
+bool SendMouseEventsImpl(MouseButton type,
+                         int button_state,
+                         base::OnceClosure task,
+                         int accelerator_state) {
   DWORD down_flags = MOUSEEVENTF_ABSOLUTE;
   DWORD up_flags = MOUSEEVENTF_ABSOLUTE;
   UINT last_event;
@@ -490,19 +484,19 @@ bool SendMouseEventsImpl(MouseButton type, int state, base::OnceClosure task) {
     case LEFT:
       down_flags |= MOUSEEVENTF_LEFTDOWN;
       up_flags |= MOUSEEVENTF_LEFTUP;
-      last_event = (state & UP) ? WM_LBUTTONUP : WM_LBUTTONDOWN;
+      last_event = (button_state & UP) ? WM_LBUTTONUP : WM_LBUTTONDOWN;
       break;
 
     case MIDDLE:
       down_flags |= MOUSEEVENTF_MIDDLEDOWN;
       up_flags |= MOUSEEVENTF_MIDDLEUP;
-      last_event = (state & UP) ? WM_MBUTTONUP : WM_MBUTTONDOWN;
+      last_event = (button_state & UP) ? WM_MBUTTONUP : WM_MBUTTONDOWN;
       break;
 
     case RIGHT:
       down_flags |= MOUSEEVENTF_RIGHTDOWN;
       up_flags |= MOUSEEVENTF_RIGHTUP;
-      last_event = (state & UP) ? WM_RBUTTONUP : WM_RBUTTONDOWN;
+      last_event = (button_state & UP) ? WM_RBUTTONUP : WM_RBUTTONDOWN;
       break;
 
     default:
@@ -514,15 +508,28 @@ bool SendMouseEventsImpl(MouseButton type, int state, base::OnceClosure task) {
   if (task)
     dispatcher = InputDispatcher::CreateForMessage(last_event, std::move(task));
 
-  INPUT input = { 0 };
-  input.type = INPUT_MOUSE;
-  input.mi.dwFlags = down_flags;
-  if ((state & DOWN) && !::SendInput(1, &input, sizeof(INPUT)))
+  std::vector<INPUT> input;
+  if (button_state & DOWN) {
+    AppendAcceleratorInputs(accelerator_state & kControl,
+                            accelerator_state & kShift,
+                            accelerator_state & kAlt, false, &input);
+    AppendMouseInput(down_flags, &input);
+  }
+
+  if (button_state & UP) {
+    AppendMouseInput(up_flags, &input);
+    AppendAcceleratorInputs(accelerator_state & kControl,
+                            accelerator_state & kShift,
+                            accelerator_state & kAlt, true, &input);
+  }
+
+  if (input.size() > std::numeric_limits<UINT>::max())
     return false;
 
-  input.mi.dwFlags = up_flags;
-  if ((state & UP) && !::SendInput(1, &input, sizeof(INPUT)))
+  if (::SendInput(static_cast<UINT>(input.size()), input.data(),
+                  sizeof(INPUT)) != input.size()) {
     return false;
+  }
 
   if (dispatcher)
     dispatcher->AddRef();

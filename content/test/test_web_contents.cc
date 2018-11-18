@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 
+#include "base/no_destructor.h"
 #include "content/browser/browser_url_handler_impl.h"
 #include "content/browser/frame_host/cross_process_frame_connector.h"
 #include "content/browser/frame_host/debug_urls.h"
@@ -15,6 +16,7 @@
 #include "content/browser/frame_host/navigation_handle_impl.h"
 #include "content/browser/frame_host/navigator.h"
 #include "content/browser/frame_host/navigator_impl.h"
+#include "content/browser/renderer_host/render_process_host_impl.h"
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/site_instance_impl.h"
 #include "content/common/frame_messages.h"
@@ -35,15 +37,36 @@
 
 namespace content {
 
+namespace {
+
+const RenderProcessHostFactory* GetMockProcessFactory() {
+  static base::NoDestructor<MockRenderProcessHostFactory> factory;
+  return factory.get();
+}
+
+}  // namespace
+
 TestWebContents::TestWebContents(BrowserContext* browser_context)
     : WebContentsImpl(browser_context),
       delegate_view_override_(nullptr),
       expect_set_history_offset_and_length_(false),
-      expect_set_history_offset_and_length_history_length_(0) {}
+      expect_set_history_offset_and_length_history_length_(0),
+      pause_subresource_loading_called_(false) {
+  if (!RenderProcessHostImpl::get_render_process_host_factory_for_testing()) {
+    // Most unit tests should prefer to create a generic MockRenderProcessHost
+    // (instead of a real RenderProcessHostImpl).  Tests that need to use a
+    // specific, custom RenderProcessHostFactory should set it before creating
+    // the first TestWebContents.
+    RenderProcessHostImpl::set_render_process_host_factory_for_testing(
+        GetMockProcessFactory());
+  }
+}
 
-TestWebContents* TestWebContents::Create(BrowserContext* browser_context,
-                                         scoped_refptr<SiteInstance> instance) {
-  TestWebContents* test_web_contents = new TestWebContents(browser_context);
+std::unique_ptr<TestWebContents> TestWebContents::Create(
+    BrowserContext* browser_context,
+    scoped_refptr<SiteInstance> instance) {
+  std::unique_ptr<TestWebContents> test_web_contents(
+      new TestWebContents(browser_context));
   test_web_contents->Init(CreateParams(browser_context, std::move(instance)));
   return test_web_contents;
 }
@@ -90,6 +113,13 @@ const GURL& TestWebContents::GetLastCommittedURL() const {
     return last_committed_url_;
   }
   return WebContentsImpl::GetLastCommittedURL();
+}
+
+const base::string16& TestWebContents::GetTitle() const {
+  if (title_)
+    return title_.value();
+
+  return WebContentsImpl::GetTitle();
 }
 
 void TestWebContents::TestDidNavigate(RenderFrameHost* render_frame_host,
@@ -151,12 +181,8 @@ void TestWebContents::TestDidNavigateWithSequenceNumber(
   params.history_list_was_cleared = false;
   params.render_view_routing_id = 0;
   params.origin = url::Origin();
-  params.report_type = FrameMsg_UILoadMetricsReportType::NO_REPORT;
-  params.ui_timestamp = base::TimeTicks();
   params.insecure_request_policy = blink::kLeaveInsecureRequestsAlone;
   params.has_potentially_trustworthy_unique_origin = false;
-  params.searchable_form_url = GURL();
-  params.searchable_form_encoding = std::string();
 
   rfh->SendNavigateWithParams(&params, was_within_same_document);
 }
@@ -193,16 +219,17 @@ void TestWebContents::SetLastCommittedURL(const GURL& url) {
   last_committed_url_ = url;
 }
 
+void TestWebContents::SetTitle(const base::string16& title) {
+  title_ = title;
+}
+
 void TestWebContents::SetMainFrameMimeType(const std::string& mime_type) {
   WebContentsImpl::SetMainFrameMimeType(mime_type);
 }
 
-void TestWebContents::SetWasRecentlyAudible(bool audible) {
-  audio_stream_monitor()->set_was_recently_audible_for_testing(audible);
-}
-
 void TestWebContents::SetIsCurrentlyAudible(bool audible) {
   audio_stream_monitor()->set_is_currently_audible_for_testing(audible);
+  OnAudioStateChanged();
 }
 
 void TestWebContents::TestDidReceiveInputEvent(
@@ -214,6 +241,11 @@ void TestWebContents::TestDidReceiveInputEvent(
                                                  ->current_frame_host()
                                                  ->GetRenderWidgetHost();
   DidReceiveInputEvent(render_widget_host, type);
+}
+
+void TestWebContents::TestDidFinishLoad(const GURL& url) {
+  FrameHostMsg_DidFinishLoad msg(0, url);
+  frame_tree_.root()->current_frame_host()->OnMessageReceived(msg);
 }
 
 void TestWebContents::TestDidFailLoadWithError(
@@ -241,8 +273,8 @@ bool TestWebContents::CreateRenderViewForRenderManager(
   return true;
 }
 
-WebContents* TestWebContents::Clone() {
-  WebContentsImpl* contents =
+std::unique_ptr<WebContents> TestWebContents::Clone() {
+  std::unique_ptr<WebContentsImpl> contents =
       Create(GetBrowserContext(), SiteInstance::Create(GetBrowserContext()));
   contents->GetController().CopyStateFrom(controller_, true);
   return contents;
@@ -258,6 +290,15 @@ void TestWebContents::NavigateAndCommit(const GURL& url) {
   // ui::PAGE_TRANSITION_TYPED which makes more sense in this context.
   navigation->SetTransition(ui::PAGE_TRANSITION_LINK);
   navigation->Commit();
+}
+
+void TestWebContents::NavigateAndFail(
+    const GURL& url,
+    int error_code,
+    scoped_refptr<net::HttpResponseHeaders> response_headers) {
+  std::unique_ptr<NavigationSimulator> navigation =
+      NavigationSimulator::CreateBrowserInitiated(url, this);
+  navigation->FailWithResponseHeaders(error_code, std::move(response_headers));
 }
 
 void TestWebContents::TestSetIsLoading(bool value) {
@@ -284,6 +325,7 @@ void TestWebContents::CommitPendingNavigation() {
   DCHECK(entry);
 
   TestRenderFrameHost* old_rfh = GetMainFrame();
+  NavigationRequest* request = old_rfh->frame_tree_node()->navigation_request();
 
   // PlzNavigate: the pending RenderFrameHost is not created before the
   // navigation commit, so it is necessary to simulate the IO thread response
@@ -301,11 +343,14 @@ void TestWebContents::CommitPendingNavigation() {
   TestRenderFrameHost* rfh = GetPendingMainFrame();
   if (!rfh)
     rfh = old_rfh;
-  const bool browser_side_navigation = IsBrowserSideNavigationEnabled();
-  CHECK(!browser_side_navigation || rfh->is_loading() ||
-        IsRendererDebugURL(entry->GetURL()));
-  CHECK(!browser_side_navigation ||
-        !rfh->frame_tree_node()->navigation_request());
+  CHECK(rfh->is_loading() || IsRendererDebugURL(entry->GetURL()));
+  CHECK(!rfh->frame_tree_node()->navigation_request());
+
+  if (request && !request->navigation_handle()->IsSameDocument()) {
+    rfh->SimulateCommitProcessed(
+        request->navigation_handle()->GetNavigationId(),
+        true /* was successful */);
+  }
 
   rfh->SendNavigateWithTransition(entry->GetUniqueID(),
                                   GetController().GetPendingEntryIndex() == -1,
@@ -327,12 +372,14 @@ void TestWebContents::SetOpener(WebContents* opener) {
       static_cast<WebContentsImpl*>(opener)->GetFrameTree()->root());
 }
 
-void TestWebContents::AddPendingContents(TestWebContents* contents) {
+void TestWebContents::AddPendingContents(
+    std::unique_ptr<WebContentsImpl> contents) {
   // This is normally only done in WebContentsImpl::CreateNewWindow.
-  ProcessRoutingIdPair key(contents->GetRenderViewHost()->GetProcess()->GetID(),
-                           contents->GetRenderViewHost()->GetRoutingID());
-  pending_contents_[key] = contents;
-  AddDestructionObserver(contents);
+  GlobalRoutingID key(
+      contents->GetRenderViewHost()->GetProcess()->GetID(),
+      contents->GetRenderViewHost()->GetWidget()->GetRoutingID());
+  AddDestructionObserver(contents.get());
+  pending_contents_[key] = std::move(contents);
 }
 
 void TestWebContents::ExpectSetHistoryOffsetAndLength(int history_offset,
@@ -350,11 +397,6 @@ void TestWebContents::SetHistoryOffsetAndLength(int history_offset,
             history_offset);
   EXPECT_EQ(expect_set_history_offset_and_length_history_length_,
             history_length);
-}
-
-void TestWebContents::TestDidFinishLoad(const GURL& url) {
-  FrameHostMsg_DidFinishLoad msg(0, url);
-  frame_tree_.root()->current_frame_host()->OnMessageReceived(msg);
 }
 
 void TestWebContents::SetNavigationData(
@@ -381,8 +423,7 @@ void TestWebContents::CreateNewWindow(
 
 void TestWebContents::CreateNewWidget(int32_t render_process_id,
                                       int32_t route_id,
-                                      mojom::WidgetPtr widget,
-                                      blink::WebPopupType popup_type) {}
+                                      mojom::WidgetPtr widget) {}
 
 void TestWebContents::CreateNewFullscreenWidget(int32_t render_process_id,
                                                 int32_t route_id,
@@ -411,6 +452,28 @@ void TestWebContents::SaveFrameWithHeaders(
     const base::string16& suggested_filename) {
   save_frame_headers_ = headers;
   suggested_filename_ = suggested_filename;
+}
+
+std::vector<blink::mojom::PauseSubresourceLoadingHandlePtr>
+TestWebContents::PauseSubresourceLoading() {
+  pause_subresource_loading_called_ = true;
+  return std::vector<blink::mojom::PauseSubresourceLoadingHandlePtr>();
+}
+
+bool TestWebContents::GetPauseSubresourceLoadingCalled() {
+  return pause_subresource_loading_called_;
+}
+
+void TestWebContents::ResetPauseSubresourceLoadingCalled() {
+  pause_subresource_loading_called_ = false;
+}
+
+void TestWebContents::SetPageImportanceSignals(PageImportanceSignals signals) {
+  page_importance_signals_ = signals;
+}
+
+void TestWebContents::SetLastActiveTime(base::TimeTicks last_active_time) {
+  last_active_time_ = last_active_time;
 }
 
 }  // namespace content

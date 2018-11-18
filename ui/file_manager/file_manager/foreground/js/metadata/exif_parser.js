@@ -4,14 +4,27 @@
 
 /**
  * Protocol + host parts of extension URL.
+ *
+ * The __FILE_NAME suffix is because the same string constant is used in
+ * multiple JS files, and JavaScript doesn't have C's #define mechanism (which
+ * only affects the file its in). Without the suffix, we'd have "constant
+ * FILE_MANAGER_HOST assigned a value more than once" compiler warnings.
+ *
  * @type {string}
  * @const
  */
-var FILE_MANAGER_HOST = 'chrome-extension://hhaomjibdihmijegdhdafkllkbggdgoj';
+var FILE_MANAGER_HOST__EXIF_PARSER =
+    'chrome-extension://hhaomjibdihmijegdhdafkllkbggdgoj';
 
 importScripts(
-    FILE_MANAGER_HOST + '/foreground/js/metadata/exif_constants.js');
+    FILE_MANAGER_HOST__EXIF_PARSER +
+    '/foreground/js/metadata/exif_constants.js');
 
+/**
+ * @param {MetadataParserLogger} parent Parent object.
+ * @constructor
+ * @extends {ImageParser}
+ */
 function ExifParser(parent) {
   ImageParser.call(this, parent, 'jpeg', /\.jpe?g$/i);
 }
@@ -44,8 +57,10 @@ ExifParser.prototype.requestSlice = function(
   var self = this;
   var reader = new FileReader();
   reader.onerror = errorCallback;
-  reader.onload = function() { self.parseSlice(
-      file, callback, errorCallback, metadata, filePos, reader.result);
+  reader.onload = function() {
+    self.parseSlice(
+        file, callback, errorCallback, metadata, filePos,
+        /** @type{ArrayBuffer} */ (reader.result));
   };
   reader.readAsArrayBuffer(file.slice(filePos, filePos + opt_length));
 };
@@ -53,7 +68,7 @@ ExifParser.prototype.requestSlice = function(
 /**
  * @param {File} file File object to parse.
  * @param {function(!Object)} callback Callback to be called on success.
- * @param {function(string)} errorCallback Error callback.
+ * @param {function((Event|string))} errorCallback Error callback.
  * @param {!Object} metadata Metadata object.
  * @param {number} filePos Position to slice at.
  * @param {ArrayBuffer} buf Buffer to be parsed.
@@ -266,13 +281,13 @@ ExifParser.prototype.readMarkLength = function(br) {
 
 /**
  * @param {ByteReader} br Byte reader to be used for reading.
- * @param {Array<Object>} tags Array of tags to be written to.
+ * @param {Object<number, Object>} tags Map of tags to be written to.
  * @return {number} Directory offset.
  */
 ExifParser.prototype.readDirectory = function(br, tags) {
   var entryCount = br.readScalar(2);
   for (var i = 0; i < entryCount; i++) {
-    var tagId = br.readScalar(2);
+    var tagId = /** @type Exif.Tag<number> */ (br.readScalar(2));
     var tag = tags[tagId] = {id: tagId};
     tag.format = br.readScalar(2);
     tag.componentCount = br.readScalar(4);
@@ -284,7 +299,7 @@ ExifParser.prototype.readDirectory = function(br, tags) {
 
 /**
  * @param {ByteReader} br Byte reader to be used for reading.
- * @param {Object} tag Tag object.
+ * @param {ExifEntry} tag Tag object.
  */
 ExifParser.prototype.readTagValue = function(br, tag) {
   var self = this;
@@ -311,8 +326,9 @@ ExifParser.prototype.readTagValue = function(br, tag) {
    * @param {boolean=} opt_signed
    */
   function unsafeRead(size, opt_readFunction, opt_signed) {
-    var readFunction = opt_readFunction ||
-        function(size) { return br.readScalar(size, opt_signed) };
+    var readFunction = opt_readFunction || function(size) {
+      return br.readScalar(size, opt_signed);
+    };
 
     var totalSize = tag.componentCount * size;
     if (totalSize < 1) {
@@ -358,9 +374,10 @@ ExifParser.prototype.readTagValue = function(br, tag) {
       if (tag.componentCount === 0) {
         tag.value = '';
       } else if (tag.componentCount === 1) {
-        tag.value = String.fromCharCode(tag.value);
+        tag.value = String.fromCharCode(/** @type {number} */ (tag.value));
       } else {
-        tag.value = String.fromCharCode.apply(null, tag.value);
+        tag.value = String.fromCharCode.apply(
+            null, /** @type{Array<number>} */ (tag.value));
       }
       this.validateAndFixStringTag_(tag);
       break;

@@ -50,13 +50,13 @@ class CSSImageSetValue : public CSSValueList {
   StyleImage* CacheImage(
       const Document&,
       float device_scale_factor,
-      FetchParameters::PlaceholderImageRequestType,
+      FetchParameters::ImageRequestOptimization,
       CrossOriginAttributeValue = kCrossOriginAttributeNotSet);
 
   String CustomCSSText() const;
 
   struct ImageWithScale {
-    DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
+    DISALLOW_NEW();
     String image_url;
     Referrer referrer;
     float scale_factor;

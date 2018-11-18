@@ -5,15 +5,19 @@
 #include "components/cronet/native/url_request.h"
 
 #include <utility>
+#include <vector>
 
 #include "base/logging.h"
 #include "base/macros.h"
+#include "components/cronet/cronet_upload_data_stream.h"
 #include "components/cronet/native/engine.h"
 #include "components/cronet/native/generated/cronet.idl_impl_struct.h"
 #include "components/cronet/native/include/cronet_c.h"
 #include "components/cronet/native/io_buffer_with_cronet_buffer.h"
 #include "components/cronet/native/runnables.h"
+#include "components/cronet/native/upload_data_sink.h"
 #include "net/base/io_buffer.h"
+#include "net/base/load_states.h"
 
 namespace {
 
@@ -126,20 +130,100 @@ std::unique_ptr<Cronet_Error> CreateCronet_Error(
   return error;
 }
 
+#if DCHECK_IS_ON()
+// Runnable used to verify that Executor calls Cronet_Runnable_Destroy().
+class VerifyDestructionRunnable : public Cronet_Runnable {
+ public:
+  VerifyDestructionRunnable(base::WaitableEvent* destroyed)
+      : destroyed_(destroyed) {}
+  // Signal event indicating Runnable was properly Destroyed.
+  ~VerifyDestructionRunnable() override { destroyed_->Signal(); }
+
+  void Run() override {}
+
+ private:
+  // Event indicating destructor is called.
+  base::WaitableEvent* const destroyed_;
+
+  DISALLOW_COPY_AND_ASSIGN(VerifyDestructionRunnable);
+};
+#endif  // DCHECK_IS_ON()
+
+// Convert net::LoadState to Cronet_UrlRequestStatusListener_Status.
+Cronet_UrlRequestStatusListener_Status ConvertLoadState(
+    net::LoadState load_state) {
+  switch (load_state) {
+    case net::LOAD_STATE_IDLE:
+      return Cronet_UrlRequestStatusListener_Status_IDLE;
+
+    case net::LOAD_STATE_WAITING_FOR_STALLED_SOCKET_POOL:
+      return Cronet_UrlRequestStatusListener_Status_WAITING_FOR_STALLED_SOCKET_POOL;
+
+    case net::LOAD_STATE_WAITING_FOR_AVAILABLE_SOCKET:
+      return Cronet_UrlRequestStatusListener_Status_WAITING_FOR_AVAILABLE_SOCKET;
+
+    case net::LOAD_STATE_WAITING_FOR_DELEGATE:
+      return Cronet_UrlRequestStatusListener_Status_WAITING_FOR_DELEGATE;
+
+    case net::LOAD_STATE_WAITING_FOR_CACHE:
+      return Cronet_UrlRequestStatusListener_Status_WAITING_FOR_CACHE;
+
+    case net::LOAD_STATE_DOWNLOADING_PAC_FILE:
+      return Cronet_UrlRequestStatusListener_Status_DOWNLOADING_PAC_FILE;
+
+    case net::LOAD_STATE_RESOLVING_PROXY_FOR_URL:
+      return Cronet_UrlRequestStatusListener_Status_RESOLVING_PROXY_FOR_URL;
+
+    case net::LOAD_STATE_RESOLVING_HOST_IN_PAC_FILE:
+      return Cronet_UrlRequestStatusListener_Status_RESOLVING_HOST_IN_PAC_FILE;
+
+    case net::LOAD_STATE_ESTABLISHING_PROXY_TUNNEL:
+      return Cronet_UrlRequestStatusListener_Status_ESTABLISHING_PROXY_TUNNEL;
+
+    case net::LOAD_STATE_RESOLVING_HOST:
+      return Cronet_UrlRequestStatusListener_Status_RESOLVING_HOST;
+
+    case net::LOAD_STATE_CONNECTING:
+      return Cronet_UrlRequestStatusListener_Status_CONNECTING;
+
+    case net::LOAD_STATE_SSL_HANDSHAKE:
+      return Cronet_UrlRequestStatusListener_Status_SSL_HANDSHAKE;
+
+    case net::LOAD_STATE_SENDING_REQUEST:
+      return Cronet_UrlRequestStatusListener_Status_SENDING_REQUEST;
+
+    case net::LOAD_STATE_WAITING_FOR_RESPONSE:
+      return Cronet_UrlRequestStatusListener_Status_WAITING_FOR_RESPONSE;
+
+    case net::LOAD_STATE_READING_RESPONSE:
+      return Cronet_UrlRequestStatusListener_Status_READING_RESPONSE;
+
+    default:
+      // A load state is retrieved but there is no corresponding
+      // request status. This most likely means that the mapping is
+      // incorrect.
+      CHECK(false);
+      return Cronet_UrlRequestStatusListener_Status_INVALID;
+  }
+}
+
 }  // namespace
 
 namespace cronet {
 
-// Callback is owned by CronetURLRequest. It is constructed on client thread,
-// but invoked and deleted on the network thread.
-class Cronet_UrlRequestImpl::Callback : public CronetURLRequest::Callback {
+// NetworkTasks is owned by CronetURLRequest. It is constructed on client
+// thread, but invoked and deleted on the network thread.
+class Cronet_UrlRequestImpl::NetworkTasks : public CronetURLRequest::Callback {
  public:
-  Callback(const std::string& url,
-           Cronet_UrlRequestImpl* url_request,
-           Cronet_UrlRequestCallbackPtr callback,
-           Cronet_ExecutorPtr executor);
-  ~Callback() override = default;
-  // CronetURLRequest::Callback implementations:
+  NetworkTasks(const std::string& url, Cronet_UrlRequestImpl* url_request);
+  ~NetworkTasks() override = default;
+
+  // Callback function used for GetStatus().
+  void OnStatus(Cronet_UrlRequestStatusListenerPtr listener,
+                net::LoadState load_state);
+
+ private:
+  // CronetURLRequest::Callback implementation:
   void OnReceivedRedirect(const std::string& new_location,
                           int http_status_code,
                           const std::string& http_status_text,
@@ -183,34 +267,36 @@ class Cronet_UrlRequestImpl::Callback : public CronetURLRequest::Callback {
                           int64_t sent_bytes_count,
                           int64_t received_bytes_count) override;
 
- private:
-  void PostTaskToExecutor(base::OnceClosure task);
-
   // The UrlRequest which owns context that owns the callback.
-  Cronet_UrlRequestImpl* url_request_ = nullptr;
-
-  // Application callback interface, used, but not owned, by |this|.
-  Cronet_UrlRequestCallbackPtr callback_ = nullptr;
-  // Executor for application callback, used, but not owned, by |this|.
-  Cronet_ExecutorPtr executor_ = nullptr;
+  Cronet_UrlRequestImpl* const url_request_ = nullptr;
 
   // URL chain contains the URL currently being requested, and
   // all URLs previously requested. New URLs are added before
   // Cronet_UrlRequestCallback::OnRedirectReceived is called.
   std::vector<std::string> url_chain_;
 
+  // Set to true when OnCanceled/OnSucceeded/OnFailed is posted.
+  // When true it is unsafe to attempt to post other callbacks
+  // like OnStatus because the request may be destroyed.
+  bool final_callback_posted_ = false;
+
   // All methods except constructor are invoked on the network thread.
   THREAD_CHECKER(network_thread_checker_);
-  DISALLOW_COPY_AND_ASSIGN(Callback);
+  DISALLOW_COPY_AND_ASSIGN(NetworkTasks);
 };
 
 Cronet_UrlRequestImpl::Cronet_UrlRequestImpl() = default;
 
 Cronet_UrlRequestImpl::~Cronet_UrlRequestImpl() {
   base::AutoLock lock(lock_);
-  // Request may already be destroyed if it hasn't started or got canceled.
-  if (request_)
-    request_->Destroy(false);
+  // Only request that has never started is allowed to exist at this point.
+  // The app must wait for OnSucceeded / OnFailed / OnCanceled  callback before
+  // destroying |this|.
+  if (request_) {
+    CHECK(!started_);
+    DestroyRequestUnlessDoneLocked(
+        Cronet_RequestFinishedInfo_FINISHED_REASON_SUCCEEDED);
+  }
 }
 
 Cronet_RESULT Cronet_UrlRequestImpl::InitWithParams(
@@ -232,24 +318,37 @@ Cronet_RESULT Cronet_UrlRequestImpl::InitWithParams(
 
   VLOG(1) << "New Cronet_UrlRequest: " << url;
 
-  // Tests call InitWithParams() repeatedly on the same Cronet_UrlRequestPtr,
-  // rather than Destroy()ing and creating a new one, so ensure that any prior
-  // |request_| is not leaked (see https://crbug.com/829077).
-  {
-    base::AutoLock lock(lock_);
-    if (request_)
-      request_->Destroy(false);
+  base::AutoLock lock(lock_);
+  if (request_) {
+    return engine_->CheckResult(
+        Cronet_RESULT_ILLEGAL_STATE_REQUEST_ALREADY_INITIALIZED);
   }
 
+  callback_ = callback;
+  executor_ = executor;
+
+  auto network_tasks = std::make_unique<NetworkTasks>(url, this);
+  network_tasks_ = network_tasks.get();
+
   request_ = new CronetURLRequest(
-      engine_->cronet_url_request_context(),
-      std::make_unique<Callback>(url, this, callback, executor), GURL(url),
-      ConvertRequestPriority(params->priority), params->disable_cache,
-      true /* params->disableConnectionMigration */,
+      engine_->cronet_url_request_context(), std::move(network_tasks),
+      GURL(url), ConvertRequestPriority(params->priority),
+      params->disable_cache, true /* params->disableConnectionMigration */,
       false /* params->enableMetrics */,
       // TODO(pauljensen): Consider exposing TrafficStats API via C++ API.
       false /* traffic_stats_tag_set */, 0 /* traffic_stats_tag */,
       false /* traffic_stats_uid_set */, 0 /* traffic_stats_uid */);
+
+  if (params->upload_data_provider) {
+    upload_data_sink_ = std::make_unique<Cronet_UploadDataSinkImpl>(
+        this, params->upload_data_provider,
+        params->upload_data_provider_executor
+            ? params->upload_data_provider_executor
+            : executor);
+    if (!upload_data_sink_->InitRequest(request_))
+      return engine_->CheckResult(Cronet_RESULT_NULL_POINTER_CALLBACK);
+    request_->SetHttpMethod("POST");
+  }
 
   if (!params->http_method.empty() &&
       !request_->SetHttpMethod(params->http_method)) {
@@ -281,6 +380,10 @@ Cronet_RESULT Cronet_UrlRequestImpl::Start() {
     return engine_->CheckResult(
         Cronet_RESULT_ILLEGAL_STATE_REQUEST_NOT_INITIALIZED);
   }
+#if DCHECK_IS_ON()
+  Cronet_Executor_Execute(executor_,
+                          new VerifyDestructionRunnable(&runnable_destroyed_));
+#endif  // DCHECK_IS_ON()
   request_->Start();
   started_ = true;
   return engine_->CheckResult(Cronet_RESULT_SUCCESS);
@@ -303,8 +406,10 @@ Cronet_RESULT Cronet_UrlRequestImpl::Read(Cronet_BufferPtr buffer) {
   if (!waiting_on_read_)
     return engine_->CheckResult(Cronet_RESULT_ILLEGAL_STATE_UNEXPECTED_READ);
   waiting_on_read_ = false;
-  if (IsDoneLocked())
+  if (IsDoneLocked()) {
+    Cronet_Buffer_Destroy(buffer);
     return engine_->CheckResult(Cronet_RESULT_SUCCESS);
+  }
   // Create IOBuffer that will own |buffer| while it is used by |request_|.
   net::IOBuffer* io_buffer = new IOBufferWithCronet_Buffer(buffer);
   if (request_->ReadData(io_buffer, Cronet_Buffer_GetSize(buffer)))
@@ -358,25 +463,132 @@ bool Cronet_UrlRequestImpl::DestroyRequestUnlessDoneLocked(
 
 void Cronet_UrlRequestImpl::GetStatus(
     Cronet_UrlRequestStatusListenerPtr listener) {
-  NOTIMPLEMENTED();
+  {
+    base::AutoLock lock(lock_);
+    if (started_ && request_) {
+      status_listeners_.insert(listener);
+      request_->GetStatus(
+          base::BindOnce(&Cronet_UrlRequestImpl::NetworkTasks::OnStatus,
+                         base::Unretained(network_tasks_), listener));
+      return;
+    }
+  }
+  PostTaskToExecutor(
+      base::BindOnce(Cronet_UrlRequestStatusListener_OnStatus, listener,
+                     Cronet_UrlRequestStatusListener_Status_INVALID));
 }
 
-Cronet_UrlRequestImpl::Callback::Callback(const std::string& url,
-                                          Cronet_UrlRequestImpl* url_request,
-                                          Cronet_UrlRequestCallbackPtr callback,
-                                          Cronet_ExecutorPtr executor)
-    : url_request_(url_request),
-      callback_(callback),
-      executor_(executor),
-      url_chain_({url}) {
+void Cronet_UrlRequestImpl::OnUploadDataProviderError(
+    const std::string& error_message) {
+  {
+    base::AutoLock lock(lock_);
+    // If |error_| is not nullptr, that means that another network error is
+    // already reported.
+    if (error_)
+      return;
+    error_ = CreateCronet_Error(
+        0, 0, "Failure from UploadDataProvider: " + error_message);
+    error_->error_code = Cronet_Error_ERROR_CODE_ERROR_CALLBACK;
+  }
+  // Invoke Cronet_UrlRequestCallback_OnFailed on client executor.
+  PostTaskToExecutor(base::BindOnce(
+      &Cronet_UrlRequestImpl::InvokeCallbackOnFailed, base::Unretained(this)));
+}
+
+void Cronet_UrlRequestImpl::PostTaskToExecutor(base::OnceClosure task) {
+  Cronet_RunnablePtr runnable =
+      new cronet::OnceClosureRunnable(std::move(task));
+  // |runnable| is passed to executor, which destroys it after execution.
+  Cronet_Executor_Execute(executor_, runnable);
+}
+
+void Cronet_UrlRequestImpl::InvokeCallbackOnRedirectReceived() {
+  if (IsDone())
+    return;
+  Cronet_UrlRequestCallback_OnRedirectReceived(
+      callback_, this, response_info_.get(),
+      response_info_->url_chain.front().c_str());
+}
+
+void Cronet_UrlRequestImpl::InvokeCallbackOnResponseStarted() {
+  if (IsDone())
+    return;
+#if DCHECK_IS_ON()
+  // Verify that Executor calls Cronet_Runnable_Destroy().
+  if (!runnable_destroyed_.TimedWait(base::TimeDelta::FromSeconds(5))) {
+    LOG(ERROR) << "Cronet Executor didn't call Cronet_Runnable_Destroy() in "
+                  "5s; still waiting.";
+    runnable_destroyed_.Wait();
+  }
+#endif  // DCHECK_IS_ON()
+  Cronet_UrlRequestCallback_OnResponseStarted(callback_, this,
+                                              response_info_.get());
+}
+
+void Cronet_UrlRequestImpl::InvokeCallbackOnReadCompleted(
+    std::unique_ptr<Cronet_Buffer> cronet_buffer,
+    int bytes_read) {
+  if (IsDone())
+    return;
+  Cronet_UrlRequestCallback_OnReadCompleted(
+      callback_, this, response_info_.get(), cronet_buffer.release(),
+      bytes_read);
+}
+
+void Cronet_UrlRequestImpl::InvokeCallbackOnSucceeded() {
+  if (DestroyRequestUnlessDone(
+          Cronet_RequestFinishedInfo_FINISHED_REASON_SUCCEEDED)) {
+    return;
+  }
+  InvokeAllStatusListeners();
+  Cronet_UrlRequestCallback_OnSucceeded(callback_, this, response_info_.get());
+}
+
+void Cronet_UrlRequestImpl::InvokeCallbackOnFailed() {
+  if (DestroyRequestUnlessDone(
+          Cronet_RequestFinishedInfo_FINISHED_REASON_FAILED)) {
+    return;
+  }
+  InvokeAllStatusListeners();
+  Cronet_UrlRequestCallback_OnFailed(callback_, this, response_info_.get(),
+                                     error_.get());
+}
+
+void Cronet_UrlRequestImpl::InvokeCallbackOnCanceled() {
+  InvokeAllStatusListeners();
+  Cronet_UrlRequestCallback_OnCanceled(callback_, this, response_info_.get());
+}
+
+void Cronet_UrlRequestImpl::InvokeAllStatusListeners() {
+  std::unordered_multiset<Cronet_UrlRequestStatusListenerPtr> status_listeners;
+  {
+    base::AutoLock lock(lock_);
+    // Verify the request has already been destroyed, which ensures no more
+    // status listeners can be added.
+    DCHECK(!request_);
+    status_listeners.swap(status_listeners_);
+  }
+  for (Cronet_UrlRequestStatusListener* status_listener : status_listeners) {
+    Cronet_UrlRequestStatusListener_OnStatus(
+        status_listener, Cronet_UrlRequestStatusListener_Status_INVALID);
+  }
+#if DCHECK_IS_ON()
+  // Verify no status listeners added during OnStatus() callbacks.
+  base::AutoLock lock(lock_);
+  DCHECK(status_listeners_.empty());
+#endif  // DCHECK_IS_ON()
+}
+
+Cronet_UrlRequestImpl::NetworkTasks::NetworkTasks(
+    const std::string& url,
+    Cronet_UrlRequestImpl* url_request)
+    : url_request_(url_request), url_chain_({url}) {
   DETACH_FROM_THREAD(network_thread_checker_);
   DCHECK(url_request);
-  DCHECK(callback);
-  DCHECK(executor);
 }
 
-// CronetURLRequest::Callback implementations:
-void Cronet_UrlRequestImpl::Callback::OnReceivedRedirect(
+// CronetURLRequest::NetworkTasks implementations:
+void Cronet_UrlRequestImpl::NetworkTasks::OnReceivedRedirect(
     const std::string& new_location,
     int http_status_code,
     const std::string& http_status_text,
@@ -386,28 +598,24 @@ void Cronet_UrlRequestImpl::Callback::OnReceivedRedirect(
     const std::string& proxy_server,
     int64_t received_byte_count) {
   DCHECK_CALLED_ON_VALID_THREAD(network_thread_checker_);
-  base::AutoLock lock(url_request_->lock_);
-  url_request_->waiting_on_redirect_ = true;
-  url_request_->response_info_ = CreateCronet_UrlResponseInfo(
-      url_chain_, http_status_code, http_status_text, headers, was_cached,
-      negotiated_protocol, proxy_server, received_byte_count);
+  {
+    base::AutoLock lock(url_request_->lock_);
+    url_request_->waiting_on_redirect_ = true;
+    url_request_->response_info_ = CreateCronet_UrlResponseInfo(
+        url_chain_, http_status_code, http_status_text, headers, was_cached,
+        negotiated_protocol, proxy_server, received_byte_count);
+  }
+
   // Have to do this after creating responseInfo.
   url_chain_.push_back(new_location);
 
-  // Invoke Cronet_UrlRequestCallback_OnRedrectReceived using OnceClosure.
-  PostTaskToExecutor(base::BindOnce(
-      [](Cronet_UrlRequestCallback* callback,
-         Cronet_UrlRequestImpl* url_request) {
-        if (url_request->IsDone())
-          return;
-        Cronet_UrlRequestCallback_OnRedirectReceived(
-            callback, url_request, url_request->response_info_.get(),
-            url_request->response_info_->url_chain.front().c_str());
-      },
-      callback_, url_request_));
+  // Invoke Cronet_UrlRequestCallback_OnRedirectReceived on client executor.
+  url_request_->PostTaskToExecutor(
+      base::BindOnce(&Cronet_UrlRequestImpl::InvokeCallbackOnRedirectReceived,
+                     base::Unretained(url_request_)));
 }
 
-void Cronet_UrlRequestImpl::Callback::OnResponseStarted(
+void Cronet_UrlRequestImpl::NetworkTasks::OnResponseStarted(
     int http_status_code,
     const std::string& http_status_text,
     const net::HttpResponseHeaders* headers,
@@ -416,25 +624,24 @@ void Cronet_UrlRequestImpl::Callback::OnResponseStarted(
     const std::string& proxy_server,
     int64_t received_byte_count) {
   DCHECK_CALLED_ON_VALID_THREAD(network_thread_checker_);
-  base::AutoLock lock(url_request_->lock_);
-  url_request_->waiting_on_read_ = true;
-  url_request_->response_info_ = CreateCronet_UrlResponseInfo(
-      url_chain_, http_status_code, http_status_text, headers, was_cached,
-      negotiated_protocol, proxy_server, received_byte_count);
+  {
+    base::AutoLock lock(url_request_->lock_);
+    url_request_->waiting_on_read_ = true;
+    url_request_->response_info_ = CreateCronet_UrlResponseInfo(
+        url_chain_, http_status_code, http_status_text, headers, was_cached,
+        negotiated_protocol, proxy_server, received_byte_count);
+  }
 
-  // Invoke Cronet_UrlRequestCallback_OnResponseStarted using OnceClosure.
-  PostTaskToExecutor(base::BindOnce(
-      [](Cronet_UrlRequestCallback* callback,
-         Cronet_UrlRequestImpl* url_request) {
-        if (url_request->IsDone())
-          return;
-        Cronet_UrlRequestCallback_OnResponseStarted(
-            callback, url_request, url_request->response_info_.get());
-      },
-      callback_, url_request_));
+  if (url_request_->upload_data_sink_)
+    url_request_->upload_data_sink_->PostCloseToExecutor();
+
+  // Invoke Cronet_UrlRequestCallback_OnResponseStarted on client executor.
+  url_request_->PostTaskToExecutor(
+      base::BindOnce(&Cronet_UrlRequestImpl::InvokeCallbackOnResponseStarted,
+                     base::Unretained(url_request_)));
 }
 
-void Cronet_UrlRequestImpl::Callback::OnReadCompleted(
+void Cronet_UrlRequestImpl::NetworkTasks::OnReadCompleted(
     scoped_refptr<net::IOBuffer> buffer,
     int bytes_read,
     int64_t received_byte_count) {
@@ -442,88 +649,75 @@ void Cronet_UrlRequestImpl::Callback::OnReadCompleted(
   IOBufferWithCronet_Buffer* io_buffer =
       reinterpret_cast<IOBufferWithCronet_Buffer*>(buffer.get());
   std::unique_ptr<Cronet_Buffer> cronet_buffer(io_buffer->Release());
-  base::AutoLock lock(url_request_->lock_);
-  url_request_->waiting_on_read_ = true;
-  url_request_->response_info_->received_byte_count = received_byte_count;
-
-  // Invoke Cronet_UrlRequestCallback_OnReadCompleted using OnceClosure.
-  PostTaskToExecutor(base::BindOnce(
-      [](Cronet_UrlRequestCallback* callback,
-         Cronet_UrlRequestImpl* url_request,
-         std::unique_ptr<Cronet_Buffer> cronet_buffer, int bytes_read) {
-        if (url_request->IsDone())
-          return;
-
-        Cronet_UrlRequestCallback_OnReadCompleted(
-            callback, url_request, url_request->response_info_.get(),
-            cronet_buffer.release(), bytes_read);
-      },
-      callback_, url_request_, std::move(cronet_buffer), bytes_read));
-}
-
-void Cronet_UrlRequestImpl::Callback::OnSucceeded(int64_t received_byte_count) {
-  DCHECK_CALLED_ON_VALID_THREAD(network_thread_checker_);
-  base::AutoLock lock(url_request_->lock_);
-  url_request_->response_info_->received_byte_count = received_byte_count;
-
-  // Invoke Cronet_UrlRequestCallback_OnSucceeded using OnceClosure.
-  PostTaskToExecutor(base::BindOnce(
-      [](Cronet_UrlRequestCallback* callback,
-         Cronet_UrlRequestImpl* url_request) {
-        if (url_request->DestroyRequestUnlessDone(
-                Cronet_RequestFinishedInfo_FINISHED_REASON_SUCCEEDED)) {
-          return;
-        }
-        Cronet_UrlRequestCallback_OnSucceeded(
-            callback, url_request, url_request->response_info_.get());
-      },
-      callback_, url_request_));
-}
-
-void Cronet_UrlRequestImpl::Callback::OnError(int net_error,
-                                              int quic_error,
-                                              const std::string& error_string,
-                                              int64_t received_byte_count) {
-  DCHECK_CALLED_ON_VALID_THREAD(network_thread_checker_);
-  base::AutoLock lock(url_request_->lock_);
-  if (url_request_->response_info_)
+  {
+    base::AutoLock lock(url_request_->lock_);
+    url_request_->waiting_on_read_ = true;
     url_request_->response_info_->received_byte_count = received_byte_count;
+  }
 
-  url_request_->error_ =
-      CreateCronet_Error(net_error, quic_error, error_string);
-
-  // Invoke Cronet_UrlRequestCallback_OnFailed using OnceClosure.
-  PostTaskToExecutor(base::BindOnce(
-      [](Cronet_UrlRequestCallback* callback,
-         Cronet_UrlRequestImpl* url_request) {
-        if (url_request->DestroyRequestUnlessDone(
-                Cronet_RequestFinishedInfo_FINISHED_REASON_FAILED)) {
-          return;
-        }
-        Cronet_UrlRequestCallback_OnFailed(callback, url_request,
-                                           url_request->response_info_.get(),
-                                           url_request->error_.get());
-      },
-      callback_, url_request_));
+  // Invoke Cronet_UrlRequestCallback_OnReadCompleted on client executor.
+  url_request_->PostTaskToExecutor(base::BindOnce(
+      &Cronet_UrlRequestImpl::InvokeCallbackOnReadCompleted,
+      base::Unretained(url_request_), std::move(cronet_buffer), bytes_read));
 }
 
-void Cronet_UrlRequestImpl::Callback::OnCanceled() {
+void Cronet_UrlRequestImpl::NetworkTasks::OnSucceeded(
+    int64_t received_byte_count) {
   DCHECK_CALLED_ON_VALID_THREAD(network_thread_checker_);
-  PostTaskToExecutor(base::BindOnce(
-      [](Cronet_UrlRequestCallback* callback,
-         Cronet_UrlRequestImpl* url_request) {
-        Cronet_UrlRequestCallback_OnCanceled(callback, url_request,
-                                             url_request->response_info_.get());
-      },
-      callback_, url_request_));
+  {
+    base::AutoLock lock(url_request_->lock_);
+    url_request_->response_info_->received_byte_count = received_byte_count;
+  }
+
+  // Invoke Cronet_UrlRequestCallback_OnSucceeded on client executor.
+  url_request_->PostTaskToExecutor(
+      base::BindOnce(&Cronet_UrlRequestImpl::InvokeCallbackOnSucceeded,
+                     base::Unretained(url_request_)));
+  final_callback_posted_ = true;
 }
 
-void Cronet_UrlRequestImpl::Callback::OnDestroyed() {
+void Cronet_UrlRequestImpl::NetworkTasks::OnError(
+    int net_error,
+    int quic_error,
+    const std::string& error_string,
+    int64_t received_byte_count) {
+  DCHECK_CALLED_ON_VALID_THREAD(network_thread_checker_);
+  {
+    base::AutoLock lock(url_request_->lock_);
+    if (url_request_->response_info_)
+      url_request_->response_info_->received_byte_count = received_byte_count;
+    url_request_->error_ =
+        CreateCronet_Error(net_error, quic_error, error_string);
+  }
+
+  if (url_request_->upload_data_sink_)
+    url_request_->upload_data_sink_->PostCloseToExecutor();
+
+  // Invoke Cronet_UrlRequestCallback_OnFailed on client executor.
+  url_request_->PostTaskToExecutor(
+      base::BindOnce(&Cronet_UrlRequestImpl::InvokeCallbackOnFailed,
+                     base::Unretained(url_request_)));
+  final_callback_posted_ = true;
+}
+
+void Cronet_UrlRequestImpl::NetworkTasks::OnCanceled() {
+  DCHECK_CALLED_ON_VALID_THREAD(network_thread_checker_);
+  if (url_request_->upload_data_sink_)
+    url_request_->upload_data_sink_->PostCloseToExecutor();
+
+  // Invoke Cronet_UrlRequestCallback_OnCanceled on client executor.
+  url_request_->PostTaskToExecutor(
+      base::BindOnce(&Cronet_UrlRequestImpl::InvokeCallbackOnCanceled,
+                     base::Unretained(url_request_)));
+  final_callback_posted_ = true;
+}
+
+void Cronet_UrlRequestImpl::NetworkTasks::OnDestroyed() {
   DCHECK_CALLED_ON_VALID_THREAD(network_thread_checker_);
   DCHECK(url_request_);
 }
 
-void Cronet_UrlRequestImpl::Callback::OnMetricsCollected(
+void Cronet_UrlRequestImpl::NetworkTasks::OnMetricsCollected(
     const base::Time& request_start_time,
     const base::TimeTicks& request_start,
     const base::TimeTicks& dns_start,
@@ -544,12 +738,23 @@ void Cronet_UrlRequestImpl::Callback::OnMetricsCollected(
   DCHECK_CALLED_ON_VALID_THREAD(network_thread_checker_);
 }
 
-void Cronet_UrlRequestImpl::Callback::PostTaskToExecutor(
-    base::OnceClosure task) {
-  Cronet_RunnablePtr runnable =
-      new cronet::OnceClosureRunnable(std::move(task));
-  // |runnable| is passed to executor, which destroys it after execution.
-  Cronet_Executor_Execute(executor_, runnable);
+void Cronet_UrlRequestImpl::NetworkTasks::OnStatus(
+    Cronet_UrlRequestStatusListenerPtr listener,
+    net::LoadState load_state) {
+  DCHECK_CALLED_ON_VALID_THREAD(network_thread_checker_);
+  if (final_callback_posted_)
+    return;
+  {
+    base::AutoLock lock(url_request_->lock_);
+    auto element = url_request_->status_listeners_.find(listener);
+    CHECK(element != url_request_->status_listeners_.end());
+    url_request_->status_listeners_.erase(element);
+  }
+
+  // Invoke Cronet_UrlRequestCallback_OnCanceled on client executor.
+  url_request_->PostTaskToExecutor(
+      base::BindOnce(&Cronet_UrlRequestStatusListener_OnStatus, listener,
+                     ConvertLoadState(load_state)));
 }
 
 };  // namespace cronet

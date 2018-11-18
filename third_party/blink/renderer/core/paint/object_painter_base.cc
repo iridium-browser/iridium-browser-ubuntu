@@ -12,6 +12,7 @@
 #include "third_party/blink/renderer/platform/graphics/color.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context.h"
 #include "third_party/blink/renderer/platform/graphics/graphics_context_state_saver.h"
+#include "third_party/blink/renderer/platform/graphics/skia/skia_utils.h"
 
 namespace blink {
 
@@ -110,7 +111,7 @@ void PaintComplexOutline(GraphicsContext& graphics_context,
 
   SkPath::Iter iter(path, false);
   SkPoint points[4];
-  size_t count = 0;
+  wtf_size_t count = 0;
   for (SkPath::Verb verb = iter.next(points, false); verb != SkPath::kDone_Verb;
        verb = iter.next(points, false)) {
     if (verb != SkPath::kLine_Verb)
@@ -162,7 +163,7 @@ void PaintComplexOutline(GraphicsContext& graphics_context,
   // edge.
   int adjacent_width_start = first_adjacent_width;
   int adjacent_width_end;
-  for (size_t i = 0; i < count; ++i) {
+  for (wtf_size_t i = 0; i < count; ++i) {
     OutlineEdgeInfo& edge = edges[i];
     adjacent_width_end = i == count - 1
                              ? first_adjacent_width
@@ -203,10 +204,10 @@ void FillQuad(GraphicsContext& context,
               const Color& color,
               bool antialias) {
   SkPath path;
-  path.moveTo(quad[0]);
-  path.lineTo(quad[1]);
-  path.lineTo(quad[2]);
-  path.lineTo(quad[3]);
+  path.moveTo(FloatPointToSkPoint(quad[0]));
+  path.lineTo(FloatPointToSkPoint(quad[1]));
+  path.lineTo(FloatPointToSkPoint(quad[2]));
+  path.lineTo(FloatPointToSkPoint(quad[3]));
   PaintFlags flags(context.FillFlags());
   flags.setAntiAlias(antialias);
   flags.setColor(color.Rgb());

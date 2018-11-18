@@ -8,7 +8,6 @@
 
 #include "android_webview/browser/aw_content_browser_client.h"
 #include "android_webview/browser/aw_media_url_interceptor.h"
-#include "android_webview/browser/aw_safe_browsing_config_helper.h"
 #include "android_webview/browser/browser_view_renderer.h"
 #include "android_webview/browser/command_line_helper.h"
 #include "android_webview/browser/deferred_gpu_command_service.h"
@@ -16,7 +15,7 @@
 #include "android_webview/common/aw_descriptors.h"
 #include "android_webview/common/aw_paths.h"
 #include "android_webview/common/aw_switches.h"
-#include "android_webview/common/crash_reporter/aw_microdump_crash_reporter.h"
+#include "android_webview/common/crash_reporter/aw_crash_reporter_client.h"
 #include "android_webview/common/crash_reporter/crash_keys.h"
 #include "android_webview/gpu/aw_content_gpu_client.h"
 #include "android_webview/renderer/aw_content_renderer_client.h"
@@ -35,7 +34,9 @@
 #include "components/crash/content/app/breakpad_linux.h"
 #include "components/crash/core/common/crash_key.h"
 #include "components/safe_browsing/android/safe_browsing_api_handler_bridge.h"
+#include "components/services/heap_profiling/public/cpp/allocator_shim.h"
 #include "components/spellcheck/spellcheck_buildflags.h"
+#include "components/viz/common/features.h"
 #include "content/public/browser/android/browser_media_player_manager_register.h"
 #include "content/public/browser/browser_main_runner.h"
 #include "content/public/browser/browser_thread.h"
@@ -82,10 +83,8 @@ bool AwMainDelegate::BasicStartupComplete(int* exit_code) {
   // Web Notification API and the Push API are not supported (crbug.com/434712)
   cl->AppendSwitch(switches::kDisableNotifications);
 
-#if BUILDFLAG(ENABLE_WEBRTC)
   // WebRTC hardware decoding is not supported, internal bug 15075307
   cl->AppendSwitch(switches::kDisableWebRtcHWDecoding);
-#endif
 
   // Check damage in OnBeginFrame to prevent unnecessary draws.
   cl->AppendSwitch(cc::switches::kCheckDamageEarly);
@@ -163,8 +162,22 @@ bool AwMainDelegate::BasicStartupComplete(int* exit_code) {
 
   CommandLineHelper::AddDisabledFeature(*cl, features::kWebPayments.name);
 
+  // WebView does not and should not support WebAuthN.
+  CommandLineHelper::AddDisabledFeature(*cl, features::kWebAuth.name);
+
+  // WebView isn't compatible with OOP-D.
+  CommandLineHelper::AddDisabledFeature(*cl,
+                                        features::kVizDisplayCompositor.name);
+
   // WebView does not support AndroidOverlay yet for video overlays.
   CommandLineHelper::AddDisabledFeature(*cl, media::kUseAndroidOverlay.name);
+
+  // WebView doesn't support embedding CompositorFrameSinks which is needed for
+  // UseSurfaceLayerForVideo[PIP] feature. https://crbug.com/853832
+  CommandLineHelper::AddDisabledFeature(*cl,
+                                        media::kUseSurfaceLayerForVideo.name);
+  CommandLineHelper::AddDisabledFeature(
+      *cl, media::kUseSurfaceLayerForVideoPIP.name);
 
   // WebView does not support EME persistent license yet, because it's not
   // clear on how user can remove persistent media licenses from UI.
@@ -178,6 +191,8 @@ bool AwMainDelegate::BasicStartupComplete(int* exit_code) {
       *cl, autofill::features::kAutofillRestrictUnownedFieldsToFormlessCheckout
                .name);
 
+  CommandLineHelper::AddDisabledFeature(*cl, features::kBackgroundFetch.name);
+
   android_webview::RegisterPathProvider();
 
   safe_browsing_api_handler_.reset(
@@ -189,6 +204,14 @@ bool AwMainDelegate::BasicStartupComplete(int* exit_code) {
   // as is the case by default in aw_tracing_controller.cc
   base::trace_event::TraceLog::GetInstance()->SetArgumentFilterPredicate(
       base::BindRepeating(&IsTraceEventArgsWhitelisted));
+
+  // The TLS slot used by the memlog allocator shim needs to be initialized
+  // early to ensure that it gets assigned a low slot number. If it gets
+  // initialized too late, the glibc TLS system will require a malloc call in
+  // order to allocate storage for a higher slot number. Since malloc is hooked,
+  // this causes re-entrancy into the allocator shim, while the TLS object is
+  // partially-initialized, which the TLS object is supposed to protect again.
+  heap_profiling::InitTLSSlot();
 
   return false;
 }
@@ -279,6 +302,13 @@ void AwMainDelegate::ProcessExiting(const std::string& process_type) {
   // TODO(torne): Clean up resources when we handle them.
 
   logging::CloseLogFile();
+}
+
+bool AwMainDelegate::ShouldCreateFeatureList() {
+  // TODO(https://crbug.com/887468): Move the creation of FeatureList from
+  // AwBrowserMainParts::PreCreateThreads() to
+  // AwMainDelegate::PostEarlyInitialization().
+  return false;
 }
 
 content::ContentBrowserClient* AwMainDelegate::CreateContentBrowserClient() {

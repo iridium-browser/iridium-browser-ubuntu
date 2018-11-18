@@ -4,6 +4,33 @@
 
 import("//build/config/ios/asset_catalog.gni")
 
+imageset("popup_menu_paste_and_go") {
+  sources = [
+    "popup_menu_paste_and_go.imageset/Contents.json",
+    "popup_menu_paste_and_go.imageset/popup_menu_paste_and_go.png",
+    "popup_menu_paste_and_go.imageset/popup_menu_paste_and_go@2x.png",
+    "popup_menu_paste_and_go.imageset/popup_menu_paste_and_go@3x.png",
+  ]
+}
+
+imageset("popup_menu_qr_scanner") {
+  sources = [
+    "popup_menu_qr_scanner.imageset/Contents.json",
+    "popup_menu_qr_scanner.imageset/popup_menu_qr_scanner.png",
+    "popup_menu_qr_scanner.imageset/popup_menu_qr_scanner@2x.png",
+    "popup_menu_qr_scanner.imageset/popup_menu_qr_scanner@3x.png",
+  ]
+}
+
+imageset("popup_menu_voice_search") {
+  sources = [
+    "popup_menu_voice_search.imageset/Contents.json",
+    "popup_menu_voice_search.imageset/popup_menu_voice_search.png",
+    "popup_menu_voice_search.imageset/popup_menu_voice_search@2x.png",
+    "popup_menu_voice_search.imageset/popup_menu_voice_search@3x.png",
+  ]
+}
+
 imageset("popup_menu_read_later") {
   sources = [
     "popup_menu_read_later.imageset/Contents.json",
@@ -13,12 +40,30 @@ imageset("popup_menu_read_later") {
   ]
 }
 
+imageset("popup_menu_edit_bookmark") {
+  sources = [
+    "popup_menu_edit_bookmark.imageset/Contents.json",
+    "popup_menu_edit_bookmark.imageset/popup_menu_edit_bookmark.png",
+    "popup_menu_edit_bookmark.imageset/popup_menu_edit_bookmark@2x.png",
+    "popup_menu_edit_bookmark.imageset/popup_menu_edit_bookmark@3x.png",
+  ]
+}
+
 imageset("popup_menu_add_bookmark") {
   sources = [
     "popup_menu_add_bookmark.imageset/Contents.json",
     "popup_menu_add_bookmark.imageset/popup_menu_add_bookmark.png",
     "popup_menu_add_bookmark.imageset/popup_menu_add_bookmark@2x.png",
     "popup_menu_add_bookmark.imageset/popup_menu_add_bookmark@3x.png",
+  ]
+}
+
+imageset("popup_menu_close_tab") {
+  sources = [
+    "popup_menu_close_tab.imageset/Contents.json",
+    "popup_menu_close_tab.imageset/popup_menu_close_tab.png",
+    "popup_menu_close_tab.imageset/popup_menu_close_tab@2x.png",
+    "popup_menu_close_tab.imageset/popup_menu_close_tab@3x.png",
   ]
 }
 
@@ -55,15 +100,6 @@ imageset("popup_menu_settings") {
     "popup_menu_settings.imageset/popup_menu_settings.png",
     "popup_menu_settings.imageset/popup_menu_settings@2x.png",
     "popup_menu_settings.imageset/popup_menu_settings@3x.png",
-  ]
-}
-
-imageset("popup_background") {
-  sources = [
-    "popup_background.imageset/Contents.json",
-    "popup_background.imageset/popup_background.png",
-    "popup_background.imageset/popup_background@2x.png",
-    "popup_background.imageset/popup_background@3x.png",
   ]
 }
 

@@ -149,7 +149,8 @@ ManifestPermission* AutomationManifestPermission::Intersect(
   bool interact =
       automation_info_->interact && other->automation_info_->interact;
   URLPatternSet matches = URLPatternSet::CreateIntersection(
-      automation_info_->matches, other->automation_info_->matches);
+      automation_info_->matches, other->automation_info_->matches,
+      URLPatternSet::IntersectionBehavior::kStringComparison);
   return new AutomationManifestPermission(
       base::WrapUnique(new const AutomationInfo(desktop, matches, interact)));
 }
@@ -167,7 +168,7 @@ bool AutomationHandler::Parse(Extension* extension, base::string16* error) {
   if (!error->empty())
     return false;
 
-  extension->AddInstallWarnings(install_warnings);
+  extension->AddInstallWarnings(std::move(install_warnings));
 
   if (!info)
     return true;
@@ -176,8 +177,9 @@ bool AutomationHandler::Parse(Extension* extension, base::string16* error) {
   return true;
 }
 
-const std::vector<std::string> AutomationHandler::Keys() const {
-  return SingleKey(keys::kAutomation);
+base::span<const char* const> AutomationHandler::Keys() const {
+  static constexpr const char* kKeys[] = {keys::kAutomation};
+  return kKeys;
 }
 
 ManifestPermission* AutomationHandler::CreatePermission() {
@@ -241,8 +243,7 @@ std::unique_ptr<AutomationInfo> AutomationInfo::FromValue(
     } else {
       specified_matches = true;
 
-      for (std::vector<std::string>::iterator it =
-               automation_object.matches->begin();
+      for (auto it = automation_object.matches->begin();
            it != automation_object.matches->end(); ++it) {
         // TODO(aboxhall): Refactor common logic from content_scripts_handler,
         // manifest_url_handler and user_script.cc into a single location and
@@ -251,7 +252,7 @@ std::unique_ptr<AutomationInfo> AutomationInfo::FromValue(
                            ~URLPattern::SCHEME_CHROMEUI);
         URLPattern::ParseResult parse_result = pattern.Parse(*it);
 
-        if (parse_result != URLPattern::PARSE_SUCCESS) {
+        if (parse_result != URLPattern::ParseResult::kSuccess) {
           install_warnings->push_back(
               InstallWarning(ErrorUtils::FormatErrorMessage(
                   automation_errors::kErrorInvalidMatch, *it,

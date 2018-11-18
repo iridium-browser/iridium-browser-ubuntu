@@ -90,7 +90,6 @@ def GetXbuddyPath(path):
   """
   parsed = urlparse.urlparse(path)
 
-  # pylint: disable=E1101
   if parsed.scheme == 'xbuddy':
     return '%s%s' % (parsed.netloc, parsed.path)
   elif parsed.scheme == '':
@@ -560,9 +559,13 @@ class DevServerWrapper(multiprocessing.Process):
       cmd.append('--board=%s' % self.board)
 
     chroot_args = ['--no-ns-pid']
+    # The chromite bin directory is needed for cros_generate_update_payload.
+    extra_env = {
+        'PATH': '%s:%s' % (os.environ['PATH'],
+                           path_resolver.ToChroot(constants.CHROMITE_BIN_DIR))}
     result = self._RunCommand(
         cmd, enter_chroot=True, chroot_args=chroot_args,
-        cwd=constants.SOURCE_ROOT, error_code_ok=True,
+        cwd=constants.SOURCE_ROOT, extra_env=extra_env, error_code_ok=True,
         redirect_stdout=True, combine_stdout_stderr=True)
     if result.returncode != 0:
       msg = ('Devserver failed to start!\n'
@@ -787,7 +790,7 @@ You can fix this with one of the following three options:
       host_log = 'api/hostlog?ip=%s' % host
       devserver_host_log = self.GetDevServerURL(ip=ip, port=port,
                                                 sub_dir=host_log)
-      logging.debug('Host Log URL: %s' % devserver_host_log)
+      logging.debug('Host Log URL: %s', devserver_host_log)
       return devserver_host_log
     else:
       logging.error('Cannot get hostlog URL. Devserver not alive.')

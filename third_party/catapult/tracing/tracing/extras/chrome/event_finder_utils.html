@@ -22,6 +22,16 @@ tr.exportTo('tr.e.chrome', function() {
     // Special URL used to start a navigation to an unreachable error page.
     'chrome-error://chromewebdata/'
   ];
+  // Titles for top level tasks in the scheduler. Any input event queued during
+  // a top level task cannot be handled until the end of that task.
+  const TOP_LEVEL_TASK_TITLES = [
+    // Old name of scheduler top level tasks. Preserved for backwards
+    // compatibility with old traces.
+    'TaskQueueManager::ProcessTaskFromWorkQueue',
+    // This is the name of top level scheduler tasks as of
+    // https://crrev.com/c/883346.
+    'ThreadControllerImpl::DoWork',
+  ];
 
   /**
    * Utility class providing methods to efficiently find events.
@@ -41,6 +51,28 @@ tr.exportTo('tr.e.chrome', function() {
     }
 
     /**
+     * Returns the list of main thread slices of |rendererHelper|
+     * with title |eventTitle| and category |eventCategory|.
+     * Returned slices do not include telemetry internal events.
+     *
+     * @param {tr.model.helpers.ChromeRendererHelper} rendererHelper
+     * @param {string} eventTitle
+     * @param {string} eventCategory
+     * @returns {Array<!tr.model.ThreadSlice>}
+     */
+    static* getMainThreadEvents(
+        rendererHelper, eventTitle, eventCategory) {
+      // Events yielded by childEvents() are sorted by start time.
+      for (const ev of rendererHelper.mainThread.sliceGroup.childEvents()) {
+        if (rendererHelper.isTelemetryInternalEvent(ev)) continue;
+        if (!this.hasCategoryAndName(ev, eventCategory, eventTitle)) {
+          continue;
+        }
+        yield ev;
+      }
+    }
+
+    /**
      * Returns a map of frame id to main thread slices of |rendererHelper| with
      * title |eventTitle| and categry |eventCategory|, sorted by start
      * time. Returned slices do not include telemetry internal events.
@@ -53,14 +85,9 @@ tr.exportTo('tr.e.chrome', function() {
     static getSortedMainThreadEventsByFrame(
         rendererHelper, eventTitle, eventCategory) {
       const eventsByFrame = new Map();
-
-      // Events yielded by childEvents() are sorted by start time.
-      for (const ev of rendererHelper.mainThread.sliceGroup.childEvents()) {
-        if (rendererHelper.isTelemetryInternalEvent(ev)) continue;
-        if (!this.hasCategoryAndName(ev, eventCategory, eventTitle)) {
-          continue;
-        }
-
+      const events = this.getMainThreadEvents(
+          rendererHelper, eventTitle, eventCategory);
+      for (const ev of events) {
         const frameIdRef = ev.args.frame;
         if (frameIdRef === undefined) continue;
         if (!eventsByFrame.has(frameIdRef)) {
@@ -70,6 +97,31 @@ tr.exportTo('tr.e.chrome', function() {
       }
 
       return eventsByFrame;
+    }
+
+    /**
+     * Returns a map of navigation id to main thread slices of |rendererHelper|
+     * with title |eventTitle| and categry |eventCategory|.
+     * Returned slices do not include telemetry internal events.
+     *
+     * @param {tr.model.helpers.ChromeRendererHelper} rendererHelper
+     * @param {string} eventTitle
+     * @param {string} eventCategory
+     * @returns {Map.<string, tr.model.ThreadSlice>}
+     */
+    static getSortedMainThreadEventsByNavId(
+        rendererHelper, eventTitle, eventCategory) {
+      const eventsByNavId = new Map();
+      const events = this.getMainThreadEvents(
+          rendererHelper, eventTitle, eventCategory);
+      for (const ev of events) {
+        if (ev.args.data === undefined) continue;
+        const navIdRef = ev.args.data.navigationId;
+        if (navIdRef === undefined) continue;
+        eventsByNavId.set(navIdRef, ev);
+      }
+
+      return eventsByNavId;
     }
 
     /**
@@ -151,6 +203,20 @@ tr.exportTo('tr.e.chrome', function() {
         return undefined;
       }
       return sortedEvents[firstIndexOnOrAfterTimestamp];
+    }
+
+    /**
+     * Returns a list of top level scheduler tasks.
+     * It is used by TTI and EQT metrics.
+     * @param {!tr.model.Thread} mainThread - the main thead of the renderer.
+     * @returns {!Array<tr.model.Slice>}
+     */
+    static findToplevelSchedulerTasks(mainThread) {
+      const titles = new Set(TOP_LEVEL_TASK_TITLES);
+      const tasks = [];
+      tasks.push(...mainThread.findTopmostSlices(
+          slice => titles.has(slice.title)));
+      return tasks;
     }
   }
 

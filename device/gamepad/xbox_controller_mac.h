@@ -25,12 +25,12 @@ namespace device {
 
 class XboxControllerMac {
  public:
-  static const int kVendorMicrosoft = 0x045e;
-  static const int kProductXbox360Controller = 0x028e;
-  static const int kProductXboxOneController2013 = 0x02d1;
-  static const int kProductXboxOneController2015 = 0x02dd;
-  static const int kProductXboxOneEliteController = 0x02e3;
-  static const int kProductXboxOneSController = 0x02ea;
+  static const uint16_t kVendorMicrosoft = 0x045e;
+  static const uint16_t kProductXbox360Controller = 0x028e;
+  static const uint16_t kProductXboxOneController2013 = 0x02d1;
+  static const uint16_t kProductXboxOneController2015 = 0x02dd;
+  static const uint16_t kProductXboxOneEliteController = 0x02e3;
+  static const uint16_t kProductXboxOneSController = 0x02ea;
 
   enum ControllerType {
     UNKNOWN_CONTROLLER,
@@ -114,8 +114,8 @@ class XboxControllerMac {
       mojom::GamepadHapticsManager::ResetVibrationActuatorCallback callback);
 
   UInt32 location_id() { return location_id_; }
-  int GetVendorId() const;
-  int GetProductId() const;
+  uint16_t GetVendorId() const;
+  uint16_t GetProductId() const;
   ControllerType GetControllerType() const;
   std::string GetControllerTypeString() const;
   std::string GetIdString() const;
@@ -150,6 +150,7 @@ class XboxControllerMac {
   void WriteXbox360Rumble(uint8_t strong_magnitude, uint8_t weak_magnitude);
   void WriteXboxOneInit();
   void WriteXboxOneRumble(uint8_t strong_magnitude, uint8_t weak_magnitude);
+  void WriteXboxOneAckGuide(uint8_t sequence_number);
 
   // Handle for the USB device. IOUSBDeviceStruct320 is the latest version of
   // the device API that is supported on Mac OS 10.6.

@@ -10,6 +10,7 @@ import android.view.Window;
 
 import org.chromium.chrome.browser.fullscreen.FullscreenHtmlApiHandler.FullscreenHtmlApiDelegate;
 import org.chromium.chrome.browser.tab.Tab;
+import org.chromium.chrome.browser.tab.TabBrowserControlsOffsetHelper;
 
 /**
  * Manages the basic fullscreen functionality required by a Tab.
@@ -49,6 +50,11 @@ public abstract class FullscreenManager {
      * @return The height of the top controls in pixels.
      */
     public abstract int getTopControlsHeight();
+
+    /**
+     * @return The height of the bottom controls in pixels.
+     */
+    public abstract int getBottomControlsHeight();
 
     /**
      * @return The ratio that the browser controls are off screen; this will be a number [0,1]
@@ -106,12 +112,18 @@ public abstract class FullscreenManager {
         if (mTab == tab) return;
 
         // Remove the fullscreen manager from the old tab before setting the new tab.
-        if (mTab != null) mTab.setFullscreenManager(null);
+        setFullscreenManager(null);
 
         mTab = tab;
 
         // Initialize the new tab with the correct fullscreen manager reference.
-        if (mTab != null) mTab.setFullscreenManager(this);
+        setFullscreenManager(this);
+    }
+
+    private void setFullscreenManager(FullscreenManager manager) {
+        if (mTab == null) return;
+        mTab.setFullscreenManager(manager);
+        TabBrowserControlsOffsetHelper.from(mTab).resetPositions();
     }
 
     /**
@@ -122,13 +134,24 @@ public abstract class FullscreenManager {
     }
 
     /**
-     * Enters or exits persistent fullscreen mode.  In this mode, the browser controls will be
+     * Enters persistent fullscreen mode.  In this mode, the browser controls will be
      * permanently hidden until this mode is exited.
-     *
-     * @param enabled Whether to enable persistent fullscreen mode.
      */
-    public void setPersistentFullscreenMode(boolean enabled) {
-        mHtmlApiHandler.setPersistentFullscreenMode(enabled);
+    public void enterPersistentFullscreenMode(FullscreenOptions options) {
+        mHtmlApiHandler.enterPersistentFullscreenMode(options);
+
+        Tab tab = getTab();
+        if (tab != null) {
+            tab.updateFullscreenEnabledState();
+        }
+    }
+
+    /**
+     * Exits persistent fullscreen mode.  In this mode, the browser controls will be
+     * permanently hidden until this mode is exited.
+     */
+    public void exitPersistentFullscreenMode() {
+        mHtmlApiHandler.exitPersistentFullscreenMode();
 
         Tab tab = getTab();
         if (tab != null) {

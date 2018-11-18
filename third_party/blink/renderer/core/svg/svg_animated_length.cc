@@ -34,19 +34,13 @@
 
 namespace blink {
 
-void SVGAnimatedLength::SetDefaultValueAsString(const String& value) {
-  BaseValue()->SetValueAsString(value);
-}
+SVGParsingError SVGAnimatedLength::AttributeChanged(const String& value) {
+  SVGParsingError parse_status =
+      SVGAnimatedProperty<SVGLength>::AttributeChanged(value);
 
-SVGParsingError SVGAnimatedLength::SetBaseValueAsString(const String& value) {
-  SVGParsingError parse_status = BaseValue()->SetValueAsString(value);
-
-  if (parse_status != SVGParseStatus::kNoError)
-    BaseValue()->NewValueSpecifiedUnits(CSSPrimitiveValue::UnitType::kUserUnits,
-                                        0);
-  else if (SVGLength::NegativeValuesForbiddenForAnimatedLengthAttribute(
-               AttributeName()) &&
-           BaseValue()->ValueInSpecifiedUnits() < 0)
+  if (SVGLength::NegativeValuesForbiddenForAnimatedLengthAttribute(
+          AttributeName()) &&
+      BaseValue()->ValueInSpecifiedUnits() < 0)
     parse_status = SVGParseStatus::kNegativeValue;
 
   return parse_status;
@@ -55,12 +49,6 @@ SVGParsingError SVGAnimatedLength::SetBaseValueAsString(const String& value) {
 void SVGAnimatedLength::Trace(blink::Visitor* visitor) {
   SVGAnimatedProperty<SVGLength>::Trace(visitor);
   ScriptWrappable::Trace(visitor);
-}
-
-void SVGAnimatedLength::TraceWrappers(
-    const ScriptWrappableVisitor* visitor) const {
-  SVGAnimatedProperty<SVGLength>::TraceWrappers(visitor);
-  ScriptWrappable::TraceWrappers(visitor);
 }
 
 }  // namespace blink

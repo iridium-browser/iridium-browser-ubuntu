@@ -8,19 +8,20 @@
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_fragment.h"
 #include "third_party/blink/renderer/core/layout/ng/ng_physical_box_fragment.h"
+#include "third_party/blink/renderer/platform/text/text_direction.h"
 #include "third_party/blink/renderer/platform/text/writing_mode.h"
 
 namespace blink {
 
-class NGPhysicalBoxFragment;
 struct NGBaselineRequest;
 struct NGLineHeightMetrics;
 
 class CORE_EXPORT NGBoxFragment final : public NGFragment {
  public:
   NGBoxFragment(WritingMode writing_mode,
+                TextDirection direction,
                 const NGPhysicalBoxFragment& physical_fragment)
-      : NGFragment(writing_mode, physical_fragment) {}
+      : NGFragment(writing_mode, physical_fragment), direction_(direction) {}
 
   // Compute baseline metrics (ascent/descent) for this box.
   //
@@ -31,10 +32,23 @@ class CORE_EXPORT NGBoxFragment final : public NGFragment {
   // not have any baselines, while the other version synthesize the baseline
   // from the box.
   NGLineHeightMetrics BaselineMetricsWithoutSynthesize(
-      const NGBaselineRequest&,
-      const NGConstraintSpace&) const;
+      const NGBaselineRequest&) const;
   NGLineHeightMetrics BaselineMetrics(const NGBaselineRequest&,
                                       const NGConstraintSpace&) const;
+
+  NGBoxStrut Borders() const {
+    const auto& physical_fragment = ToNGPhysicalBoxFragment(physical_fragment_);
+    return physical_fragment.Borders().ConvertToLogical(GetWritingMode(),
+                                                        direction_);
+  }
+  NGBoxStrut Padding() const {
+    const auto& physical_fragment = ToNGPhysicalBoxFragment(physical_fragment_);
+    return physical_fragment.Padding().ConvertToLogical(GetWritingMode(),
+                                                        direction_);
+  }
+
+ protected:
+  TextDirection direction_;
 };
 
 DEFINE_TYPE_CASTS(NGBoxFragment,

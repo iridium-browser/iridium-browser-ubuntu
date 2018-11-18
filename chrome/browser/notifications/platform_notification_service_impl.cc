@@ -9,27 +9,17 @@
 
 #include "base/feature_list.h"
 #include "base/metrics/histogram_macros.h"
-#include "base/metrics/user_metrics.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/post_task.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/content_settings/host_content_settings_map_factory.h"
-#include "chrome/browser/engagement/site_engagement_service.h"
+#include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/notifications/metrics/notification_metrics_logger.h"
 #include "chrome/browser/notifications/metrics/notification_metrics_logger_factory.h"
-#include "chrome/browser/notifications/notification_common.h"
 #include "chrome/browser/notifications/notification_display_service.h"
 #include "chrome/browser/notifications/notification_display_service_factory.h"
-#include "chrome/browser/permissions/permission_decision_auto_blocker.h"
-#include "chrome/browser/permissions/permission_manager.h"
-#include "chrome/browser/permissions/permission_result.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/profiles/profile_attributes_storage.h"
-#include "chrome/browser/profiles/profile_io_data.h"
-#include "chrome/browser/profiles/profile_manager.h"
-#include "chrome/browser/safe_browsing/ping_manager.h"
-#include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
@@ -40,49 +30,33 @@
 #include "chrome/common/chrome_features.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
-#include "components/content_settings/core/browser/host_content_settings_map.h"
-#include "components/content_settings/core/common/content_settings.h"
-#include "components/content_settings/core/common/content_settings_types.h"
+#include "components/pref_registry/pref_registry_syncable.h"
+#include "components/prefs/pref_change_registrar.h"
+#include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/notification_event_dispatcher.h"
-#include "content/public/common/notification_resources.h"
-#include "content/public/common/platform_notification_data.h"
 #include "extensions/buildflags/buildflags.h"
+#include "services/metrics/public/cpp/ukm_builders.h"
+#include "third_party/blink/public/common/notifications/notification_resources.h"
+#include "third_party/blink/public/common/notifications/platform_notification_data.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/resource/resource_bundle.h"
 #include "ui/base/ui_base_features.h"
 #include "ui/message_center/public/cpp/features.h"
-#include "ui/message_center/public/cpp/notification.h"
 #include "ui/message_center/public/cpp/notification_types.h"
 #include "ui/message_center/public/cpp/notifier_id.h"
-#include "url/url_constants.h"
-
-#if BUILDFLAG(ENABLE_BACKGROUND_MODE)
-#include "components/keep_alive_registry/keep_alive_types.h"
-#include "components/keep_alive_registry/scoped_keep_alive.h"
-#endif
 
 #if BUILDFLAG(ENABLE_EXTENSIONS)
-#include "chrome/browser/notifications/notifier_state_tracker.h"
-#include "chrome/browser/notifications/notifier_state_tracker_factory.h"
 #include "extensions/browser/extension_registry.h"
-#include "extensions/browser/info_map.h"
 #include "extensions/common/constants.h"
-#include "extensions/common/permissions/api_permission.h"
-#include "extensions/common/permissions/permissions_data.h"
 #endif
 
 using content::BrowserContext;
 using content::BrowserThread;
+using content::NotificationDatabaseData;
 using message_center::NotifierId;
 
 namespace {
-
-// Invalid id for a renderer process. Used in cases where we need to check for
-// permission without having an associated renderer process yet.
-const int kInvalidRenderProcessId = -1;
 
 // Whether a web notification should be displayed when chrome is in full
 // screen mode.
@@ -120,11 +94,6 @@ static bool ShouldDisplayWebNotificationOnFullScreen(Profile* profile,
   return false;
 }
 
-NotificationMetricsLogger* GetMetricsLogger(BrowserContext* browser_context) {
-  return NotificationMetricsLoggerFactory::GetForBrowserContext(
-      browser_context);
-}
-
 }  // namespace
 
 // static
@@ -133,199 +102,23 @@ PlatformNotificationServiceImpl::GetInstance() {
   return base::Singleton<PlatformNotificationServiceImpl>::get();
 }
 
-PlatformNotificationServiceImpl::PlatformNotificationServiceImpl() {
-#if BUILDFLAG(ENABLE_BACKGROUND_MODE)
-  pending_click_dispatch_events_ = 0;
-#endif
+// static
+void PlatformNotificationServiceImpl::RegisterProfilePrefs(
+    user_prefs::PrefRegistrySyncable* registry) {
+  // The first persistent ID is registered as 10000 rather than 1 to prevent the
+  // reuse of persistent notification IDs, which must be unique. Reuse of
+  // notification IDs may occur as they were previously stored in a different
+  // data store.
+  registry->RegisterIntegerPref(prefs::kNotificationNextPersistentId, 10000);
 }
 
-PlatformNotificationServiceImpl::~PlatformNotificationServiceImpl() {}
+PlatformNotificationServiceImpl::PlatformNotificationServiceImpl() = default;
 
-// TODO(miguelg): Move this to PersistentNotificationHandler
-void PlatformNotificationServiceImpl::OnPersistentNotificationClick(
-    BrowserContext* browser_context,
-    const std::string& notification_id,
-    const GURL& origin,
-    const base::Optional<int>& action_index,
-    const base::Optional<base::string16>& reply,
-    base::OnceClosure completed_closure) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  blink::mojom::PermissionStatus permission_status =
-      CheckPermissionOnUIThread(browser_context, origin,
-                                kInvalidRenderProcessId);
+PlatformNotificationServiceImpl::~PlatformNotificationServiceImpl() = default;
 
-  NotificationMetricsLogger* metrics_logger = GetMetricsLogger(browser_context);
-
-  // TODO(peter): Change this to a CHECK() when Issue 555572 is resolved.
-  // Also change this method to be const again.
-  if (permission_status != blink::mojom::PermissionStatus::GRANTED) {
-    metrics_logger->LogPersistentNotificationClickWithoutPermission();
-
-    std::move(completed_closure).Run();
-    return;
-  }
-
-  if (action_index.has_value()) {
-    metrics_logger->LogPersistentNotificationActionButtonClick();
-  } else {
-    metrics_logger->LogPersistentNotificationClick();
-  }
-
-#if BUILDFLAG(ENABLE_BACKGROUND_MODE)
-  // Ensure the browser stays alive while the event is processed.
-  if (pending_click_dispatch_events_++ == 0) {
-    click_dispatch_keep_alive_.reset(
-        new ScopedKeepAlive(KeepAliveOrigin::PENDING_NOTIFICATION_CLICK_EVENT,
-                            KeepAliveRestartOption::DISABLED));
-  }
-#endif
-
-  RecordSiteEngagement(browser_context, origin);
-  content::NotificationEventDispatcher::GetInstance()
-      ->DispatchNotificationClickEvent(
-          browser_context, notification_id, origin, action_index, reply,
-          base::BindOnce(
-              &PlatformNotificationServiceImpl::OnClickEventDispatchComplete,
-              base::Unretained(this), std::move(completed_closure)));
-}
-
-// TODO(miguelg): Move this to PersistentNotificationHandler
-void PlatformNotificationServiceImpl::OnPersistentNotificationClose(
-    BrowserContext* browser_context,
-    const std::string& notification_id,
-    const GURL& origin,
-    bool by_user,
-    base::OnceClosure completed_closure) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-
-  // If we programatically closed this notification, don't dispatch any event.
-  if (closed_notifications_.erase(notification_id) != 0) {
-    std::move(completed_closure).Run();
-    return;
-  }
-
-  NotificationMetricsLogger* metrics_logger = GetMetricsLogger(browser_context);
-  if (by_user)
-    metrics_logger->LogPersistentNotificationClosedByUser();
-  else
-    metrics_logger->LogPersistentNotificationClosedProgrammatically();
-
-  content::NotificationEventDispatcher::GetInstance()
-      ->DispatchNotificationCloseEvent(
-          browser_context, notification_id, origin, by_user,
-          base::BindOnce(
-              &PlatformNotificationServiceImpl::OnCloseEventDispatchComplete,
-              base::Unretained(this), std::move(completed_closure)));
-}
-
-blink::mojom::PermissionStatus
-PlatformNotificationServiceImpl::CheckPermissionOnUIThread(
-    BrowserContext* browser_context,
-    const GURL& origin,
-    int render_process_id) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-
-  Profile* profile = Profile::FromBrowserContext(browser_context);
-  DCHECK(profile);
-
-#if BUILDFLAG(ENABLE_EXTENSIONS)
-  // Extensions support an API permission named "notification". This will grant
-  // not only grant permission for using the Chrome App extension API, but also
-  // for the Web Notification API.
-  if (origin.SchemeIs(extensions::kExtensionScheme)) {
-    extensions::ExtensionRegistry* registry =
-        extensions::ExtensionRegistry::Get(browser_context);
-    extensions::ProcessMap* process_map =
-        extensions::ProcessMap::Get(browser_context);
-
-    const extensions::Extension* extension =
-        registry->GetExtensionById(origin.host(),
-                                   extensions::ExtensionRegistry::ENABLED);
-
-    if (extension &&
-        extension->permissions_data()->HasAPIPermission(
-            extensions::APIPermission::kNotifications) &&
-        process_map->Contains(extension->id(), render_process_id)) {
-      NotifierStateTracker* notifier_state_tracker =
-          NotifierStateTrackerFactory::GetForProfile(profile);
-      DCHECK(notifier_state_tracker);
-
-      NotifierId notifier_id(NotifierId::APPLICATION, extension->id());
-      if (notifier_state_tracker->IsNotifierEnabled(notifier_id))
-        return blink::mojom::PermissionStatus::GRANTED;
-    }
-  }
-#endif
-
-  ContentSetting setting =
-      PermissionManager::Get(profile)
-          ->GetPermissionStatus(CONTENT_SETTINGS_TYPE_NOTIFICATIONS, origin,
-                                origin)
-          .content_setting;
-  if (setting == CONTENT_SETTING_ALLOW)
-    return blink::mojom::PermissionStatus::GRANTED;
-  if (setting == CONTENT_SETTING_ASK)
-    return blink::mojom::PermissionStatus::ASK;
-  DCHECK_EQ(CONTENT_SETTING_BLOCK, setting);
-  return blink::mojom::PermissionStatus::DENIED;
-}
-
-blink::mojom::PermissionStatus
-PlatformNotificationServiceImpl::CheckPermissionOnIOThread(
-    content::ResourceContext* resource_context,
-    const GURL& origin,
-    int render_process_id) {
-  DCHECK_CURRENTLY_ON(BrowserThread::IO);
-
-  ProfileIOData* io_data = ProfileIOData::FromResourceContext(resource_context);
-#if BUILDFLAG(ENABLE_EXTENSIONS)
-  // Extensions support an API permission named "notification". This will grant
-  // not only grant permission for using the Chrome App extension API, but also
-  // for the Web Notification API.
-  if (origin.SchemeIs(extensions::kExtensionScheme)) {
-    extensions::InfoMap* extension_info_map = io_data->GetExtensionInfoMap();
-    const extensions::ProcessMap& process_map =
-        extension_info_map->process_map();
-
-    const extensions::Extension* extension =
-        extension_info_map->extensions().GetByID(origin.host());
-
-    if (extension &&
-        extension->permissions_data()->HasAPIPermission(
-            extensions::APIPermission::kNotifications) &&
-        process_map.Contains(extension->id(), render_process_id)) {
-      if (!extension_info_map->AreNotificationsDisabled(extension->id()))
-        return blink::mojom::PermissionStatus::GRANTED;
-    }
-  }
-#endif
-
-  // No enabled extensions exist, so check the normal host content settings.
-  HostContentSettingsMap* host_content_settings_map =
-      io_data->GetHostContentSettingsMap();
-  ContentSetting setting = host_content_settings_map->GetContentSetting(
-      origin,
-      origin,
-      CONTENT_SETTINGS_TYPE_NOTIFICATIONS,
-      content_settings::ResourceIdentifier());
-
-  if (setting == CONTENT_SETTING_ALLOW)
-    return blink::mojom::PermissionStatus::GRANTED;
-  if (setting == CONTENT_SETTING_BLOCK)
-    return blink::mojom::PermissionStatus::DENIED;
-
-  // Check whether the permission has been embargoed (automatically blocked).
-  // TODO(crbug.com/658020): make PermissionManager::GetPermissionStatus thread
-  // safe so it isn't necessary to do this HostContentSettingsMap and embargo
-  // check outside of the permissions code.
-  PermissionResult result = PermissionDecisionAutoBlocker::GetEmbargoResult(
-      host_content_settings_map, origin, CONTENT_SETTINGS_TYPE_NOTIFICATIONS,
-      base::Time::Now());
-  DCHECK(result.content_setting == CONTENT_SETTING_ASK ||
-         result.content_setting == CONTENT_SETTING_BLOCK);
-  return result.content_setting == CONTENT_SETTING_ASK
-             ? blink::mojom::PermissionStatus::ASK
-             : blink::mojom::PermissionStatus::DENIED;
+bool PlatformNotificationServiceImpl::WasClosedProgrammatically(
+    const std::string& notification_id) {
+  return closed_notifications_.erase(notification_id) != 0;
 }
 
 // TODO(awdf): Rename to DisplayNonPersistentNotification (Similar for Close)
@@ -333,8 +126,8 @@ void PlatformNotificationServiceImpl::DisplayNotification(
     BrowserContext* browser_context,
     const std::string& notification_id,
     const GURL& origin,
-    const content::PlatformNotificationData& notification_data,
-    const content::NotificationResources& notification_resources) {
+    const blink::PlatformNotificationData& notification_data,
+    const blink::NotificationResources& notification_resources) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   // Posted tasks can request notifications to be added, which would cause a
@@ -348,9 +141,9 @@ void PlatformNotificationServiceImpl::DisplayNotification(
   DCHECK_EQ(0u, notification_data.actions.size());
   DCHECK_EQ(0u, notification_resources.action_icons.size());
 
-  message_center::Notification notification = CreateNotificationFromData(
-      profile, origin, notification_id, notification_data,
-      notification_resources, nullptr /* delegate */);
+  message_center::Notification notification =
+      CreateNotificationFromData(profile, origin, notification_id,
+                                 notification_data, notification_resources);
 
   NotificationDisplayServiceFactory::GetForProfile(profile)->Display(
       NotificationHandler::Type::WEB_NON_PERSISTENT, notification);
@@ -361,8 +154,8 @@ void PlatformNotificationServiceImpl::DisplayPersistentNotification(
     const std::string& notification_id,
     const GURL& service_worker_scope,
     const GURL& origin,
-    const content::PlatformNotificationData& notification_data,
-    const content::NotificationResources& notification_resources) {
+    const blink::PlatformNotificationData& notification_data,
+    const blink::NotificationResources& notification_resources) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   // Posted tasks can request notifications to be added, which would cause a
@@ -374,9 +167,9 @@ void PlatformNotificationServiceImpl::DisplayPersistentNotification(
   Profile* profile = Profile::FromBrowserContext(browser_context);
   DCHECK(profile);
 
-  message_center::Notification notification = CreateNotificationFromData(
-      profile, origin, notification_id, notification_data,
-      notification_resources, nullptr /* delegate */);
+  message_center::Notification notification =
+      CreateNotificationFromData(profile, origin, notification_id,
+                                 notification_data, notification_resources);
   auto metadata = std::make_unique<PersistentNotificationMetadata>();
   metadata->service_worker_scope = service_worker_scope;
 
@@ -384,7 +177,8 @@ void PlatformNotificationServiceImpl::DisplayPersistentNotification(
       NotificationHandler::Type::WEB_PERSISTENT, notification,
       std::move(metadata));
 
-  GetMetricsLogger(browser_context)->LogPersistentNotificationShown();
+  NotificationMetricsLoggerFactory::GetForBrowserContext(browser_context)
+      ->LogPersistentNotificationShown();
 }
 
 void PlatformNotificationServiceImpl::CloseNotification(
@@ -430,32 +224,103 @@ void PlatformNotificationServiceImpl::GetDisplayedNotifications(
       callback);
 }
 
-void PlatformNotificationServiceImpl::OnClickEventDispatchComplete(
-    base::OnceClosure completed_closure,
-    content::PersistentNotificationStatus status) {
-  UMA_HISTOGRAM_ENUMERATION(
-      "Notifications.PersistentWebNotificationClickResult", status,
-      content::PersistentNotificationStatus::
-          PERSISTENT_NOTIFICATION_STATUS_MAX);
-#if BUILDFLAG(ENABLE_BACKGROUND_MODE)
-  DCHECK_GT(pending_click_dispatch_events_, 0);
-  if (--pending_click_dispatch_events_ == 0) {
-    click_dispatch_keep_alive_.reset();
-  }
-#endif
+int64_t PlatformNotificationServiceImpl::ReadNextPersistentNotificationId(
+    BrowserContext* browser_context) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  PrefService* prefs = Profile::FromBrowserContext(browser_context)->GetPrefs();
 
-  std::move(completed_closure).Run();
+  int64_t current_id = prefs->GetInteger(prefs::kNotificationNextPersistentId);
+  int64_t next_id = current_id + 1;
+
+  prefs->SetInteger(prefs::kNotificationNextPersistentId, next_id);
+  return next_id;
 }
 
-void PlatformNotificationServiceImpl::OnCloseEventDispatchComplete(
-    base::OnceClosure completed_closure,
-    content::PersistentNotificationStatus status) {
-  UMA_HISTOGRAM_ENUMERATION(
-      "Notifications.PersistentWebNotificationCloseResult", status,
-      content::PersistentNotificationStatus::
-          PERSISTENT_NOTIFICATION_STATUS_MAX);
+void PlatformNotificationServiceImpl::RecordNotificationUkmEvent(
+    BrowserContext* browser_context,
+    const NotificationDatabaseData& data) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  // Only record the event if a user explicitly interacted with the notification
+  // to close it.
+  if (data.closed_reason != NotificationDatabaseData::ClosedReason::USER &&
+      data.num_clicks == 0 && data.num_action_button_clicks == 0) {
+    return;
+  }
 
-  std::move(completed_closure).Run();
+  // Query the HistoryService so we only record a notification if the origin is
+  // in the user's history.
+  Profile* profile = Profile::FromBrowserContext(browser_context);
+  history::HistoryService* history_service =
+      HistoryServiceFactory::GetForProfile(profile,
+                                           ServiceAccessType::EXPLICIT_ACCESS);
+  DCHECK(history_service);
+  history_service->QueryURL(
+      data.origin, /*want_visits=*/false,
+      base::BindOnce(
+          &PlatformNotificationServiceImpl::OnUrlHistoryQueryComplete,
+          base::Unretained(this), data),
+      &task_tracker_);
+}
+
+void PlatformNotificationServiceImpl::OnUrlHistoryQueryComplete(
+    const content::NotificationDatabaseData& data,
+    bool found_url,
+    const history::URLRow& url_row,
+    const history::VisitVector& visits) {
+  // Post the |history_query_complete_closure_for_testing_| closure to the
+  // current task runner to inform tests that the history query has completed.
+  if (history_query_complete_closure_for_testing_) {
+    base::PostTask(FROM_HERE,
+                   std::move(history_query_complete_closure_for_testing_));
+  }
+
+  // Only record the notification if the |data.origin| is in the history
+  // service.
+  if (!found_url)
+    return;
+
+  ukm::UkmRecorder* recorder = ukm::UkmRecorder::Get();
+  DCHECK(recorder);
+  // We are using UpdateSourceURL as notifications are not tied to a navigation.
+  // This is ok from a privacy perspective as we have explicitly verified that
+  // |data.origin| is in the HistoryService before recording to UKM.
+  ukm::SourceId source_id = ukm::UkmRecorder::GetNewSourceID();
+  recorder->UpdateSourceURL(source_id, data.origin);
+
+  ukm::builders::Notification builder(source_id);
+
+  int64_t time_until_first_click_millis =
+      data.time_until_first_click_millis.has_value()
+          ? data.time_until_first_click_millis.value().InMilliseconds()
+          : -1;
+
+  int64_t time_until_last_click_millis =
+      data.time_until_last_click_millis.has_value()
+          ? data.time_until_last_click_millis.value().InMilliseconds()
+          : -1;
+
+  int64_t time_until_close_millis =
+      data.time_until_close_millis.has_value()
+          ? data.time_until_close_millis.value().InMilliseconds()
+          : -1;
+
+  // TODO(yangsharon):Add did_user_open_settings field and update here.
+  builder.SetClosedReason(static_cast<int>(data.closed_reason))
+      .SetDidReplaceAnotherNotification(data.replaced_existing_notification)
+      .SetHasBadge(!data.notification_data.badge.is_empty())
+      .SetHasIcon(!data.notification_data.icon.is_empty())
+      .SetHasImage(!data.notification_data.image.is_empty())
+      .SetHasRenotify(data.notification_data.renotify)
+      .SetHasTag(!data.notification_data.tag.empty())
+      .SetIsSilent(data.notification_data.silent)
+      .SetNumActions(data.notification_data.actions.size())
+      .SetNumActionButtonClicks(data.num_action_button_clicks)
+      .SetNumClicks(data.num_clicks)
+      .SetRequireInteraction(data.notification_data.require_interaction)
+      .SetTimeUntilClose(time_until_close_millis)
+      .SetTimeUntilFirstClick(time_until_first_click_millis)
+      .SetTimeUntilLastClick(time_until_last_click_millis)
+      .Record(recorder);
 }
 
 message_center::Notification
@@ -463,9 +328,8 @@ PlatformNotificationServiceImpl::CreateNotificationFromData(
     Profile* profile,
     const GURL& origin,
     const std::string& notification_id,
-    const content::PlatformNotificationData& notification_data,
-    const content::NotificationResources& notification_resources,
-    scoped_refptr<message_center::NotificationDelegate> delegate) const {
+    const blink::PlatformNotificationData& notification_data,
+    const blink::NotificationResources& notification_resources) const {
   DCHECK_EQ(notification_data.actions.size(),
             notification_resources.action_icons.size());
 
@@ -482,8 +346,9 @@ PlatformNotificationServiceImpl::CreateNotificationFromData(
       message_center::NOTIFICATION_TYPE_SIMPLE, notification_id,
       notification_data.title, notification_data.body,
       gfx::Image::CreateFrom1xBitmap(notification_resources.notification_icon),
-      base::UTF8ToUTF16(origin.host()), origin, NotifierId(origin),
-      optional_fields, delegate);
+      base::UTF8ToUTF16(origin.host()), origin,
+      message_center::NotifierId(origin), optional_fields,
+      nullptr /* delegate */);
 
   notification.set_context_message(
       DisplayNameForContextMessage(profile, origin));
@@ -500,16 +365,6 @@ PlatformNotificationServiceImpl::CreateNotificationFromData(
     notification.set_type(message_center::NOTIFICATION_TYPE_IMAGE);
     notification.set_image(
         gfx::Image::CreateFrom1xBitmap(notification_resources.image));
-    // n.b. this should only be posted once per notification.
-    if (g_browser_process->safe_browsing_service() &&
-        g_browser_process->safe_browsing_service()->enabled_by_prefs()) {
-      g_browser_process->safe_browsing_service()
-          ->ping_manager()
-          ->ReportNotificationImage(
-              profile,
-              g_browser_process->safe_browsing_service()->database_manager(),
-              origin, notification_resources.image);
-    }
   }
 
   // Badges are only supported on Android, primarily because it's the only
@@ -524,14 +379,14 @@ PlatformNotificationServiceImpl::CreateNotificationFromData(
   // Developer supplied action buttons.
   std::vector<message_center::ButtonInfo> buttons;
   for (size_t i = 0; i < notification_data.actions.size(); ++i) {
-    const content::PlatformNotificationAction& action =
+    const blink::PlatformNotificationAction& action =
         notification_data.actions[i];
     message_center::ButtonInfo button(action.title);
     // TODO(peter): Handle different screen densities instead of always using
     // the 1x bitmap - crbug.com/585815.
     button.icon =
         gfx::Image::CreateFrom1xBitmap(notification_resources.action_icons[i]);
-    if (action.type == content::PLATFORM_NOTIFICATION_ACTION_TYPE_TEXT) {
+    if (action.type == blink::PLATFORM_NOTIFICATION_ACTION_TYPE_TEXT) {
       button.placeholder = action.placeholder.as_optional_string16().value_or(
           l10n_util::GetStringUTF16(IDS_NOTIFICATION_REPLY_PLACEHOLDER));
     }
@@ -564,14 +419,4 @@ base::string16 PlatformNotificationServiceImpl::DisplayNameForContextMessage(
 #endif
 
   return base::string16();
-}
-
-void PlatformNotificationServiceImpl::RecordSiteEngagement(
-    BrowserContext* browser_context,
-    const GURL& origin) {
-  // TODO(dominickn, peter): This would be better if the site engagement service
-  // could directly observe each notification.
-  SiteEngagementService* engagement_service =
-      SiteEngagementService::Get(Profile::FromBrowserContext(browser_context));
-  engagement_service->HandleNotificationInteraction(origin);
 }

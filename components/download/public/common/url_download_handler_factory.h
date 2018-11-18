@@ -5,13 +5,15 @@
 #ifndef COMPONENTS_DOWNLOAD_PUBLIC_COMMON_URL_DOWNLOAD_HANDLER_FACTORY_H_
 #define COMPONENTS_DOWNLOAD_PUBLIC_COMMON_URL_DOWNLOAD_HANDLER_FACTORY_H_
 
+#include "base/memory/ref_counted.h"
 #include "components/download/public/common/url_download_handler.h"
 
-namespace network {
-class SharedURLLoaderFactory;
+namespace net {
+class URLRequestContextGetter;
 }
 
 namespace download {
+class DownloadURLLoaderFactoryGetter;
 class DownloadUrlParameters;
 
 // Class for handling the creation of a URLDownloadHandler. This is used to
@@ -28,7 +30,9 @@ class COMPONENTS_DOWNLOAD_EXPORT UrlDownloadHandlerFactory {
   static UrlDownloadHandler::UniqueUrlDownloadHandlerPtr Create(
       std::unique_ptr<download::DownloadUrlParameters> params,
       base::WeakPtr<download::UrlDownloadHandler::Delegate> delegate,
-      scoped_refptr<network::SharedURLLoaderFactory> shared_url_loader_factory,
+      scoped_refptr<download::DownloadURLLoaderFactoryGetter>
+          url_loader_factory_getter,
+      scoped_refptr<net::URLRequestContextGetter> url_request_context_getter,
       const scoped_refptr<base::SingleThreadTaskRunner>& task_runner);
 
   virtual ~UrlDownloadHandlerFactory();
@@ -42,7 +46,9 @@ class COMPONENTS_DOWNLOAD_EXPORT UrlDownloadHandlerFactory {
   CreateUrlDownloadHandler(
       std::unique_ptr<download::DownloadUrlParameters> params,
       base::WeakPtr<download::UrlDownloadHandler::Delegate> delegate,
-      scoped_refptr<network::SharedURLLoaderFactory> shared_url_loader_factory,
+      scoped_refptr<download::DownloadURLLoaderFactoryGetter>
+          url_loader_factory_getter,
+      scoped_refptr<net::URLRequestContextGetter> url_request_context_getter,
       const scoped_refptr<base::SingleThreadTaskRunner>& task_runner) = 0;
 };
 

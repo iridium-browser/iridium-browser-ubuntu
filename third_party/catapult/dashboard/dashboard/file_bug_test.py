@@ -4,6 +4,7 @@
 
 import datetime
 import json
+import sys
 import unittest
 
 import mock
@@ -22,8 +23,12 @@ from dashboard.common import testing_common
 from dashboard.common import utils
 from dashboard.models import anomaly
 from dashboard.models import bug_label_patterns
+from dashboard.models import histogram
 from dashboard.models import sheriff
 from dashboard.services import crrev_service
+
+from tracing.value.diagnostics import generic_set
+from tracing.value.diagnostics import reserved_infos
 
 
 class MockIssueTrackerService(object):
@@ -259,6 +264,48 @@ class FileBugTest(testing_common.TestCase):
       file_bug, '_GetAllCurrentVersionsFromOmahaProxy',
       mock.MagicMock(return_value=[]))
   @mock.patch.object(
+      file_bug.auto_bisect, 'StartNewBisectForBug',
+      mock.MagicMock(return_value={'issue_id': 123, 'issue_url': 'foo.com'}))
+  def testGet_WithFinish_CreatesBug_WithDocs(self):
+    diag_dict = generic_set.GenericSet([[u'Benchmark doc link', u'http://docs']])
+    diag = histogram.SparseDiagnostic(
+        data=diag_dict.AsDict(), start_revision=1, end_revision=sys.maxint,
+        name=reserved_infos.DOCUMENTATION_URLS.name,
+        test=utils.TestKey('ChromiumPerf/linux/scrolling'))
+    diag.put()
+
+    # When a POST request is sent with keys specified and with the finish
+    # parameter given, an issue will be created using the issue tracker
+    # API, and the anomalies will be updated, and a response page will
+    # be sent which indicates success.
+    self.service.bug_id = 277761
+    response = self._PostSampleBug()
+
+    # The response page should have a bug number.
+    self.assertIn('277761', response.body)
+
+    # The anomaly entities should be updated.
+    for anomaly_entity in anomaly.Anomaly.query().fetch():
+      if anomaly_entity.end_revision in [112005, 112010]:
+        self.assertEqual(277761, anomaly_entity.bug_id)
+      else:
+        self.assertIsNone(anomaly_entity.bug_id)
+
+    # Two HTTP requests are made when filing a bug; only test 2nd request.
+    comment = self.service.add_comment_args[1]
+    self.assertIn(
+        'https://chromeperf.appspot.com/group_report?bug_id=277761', comment)
+    self.assertIn('https://chromeperf.appspot.com/group_report?sid=', comment)
+    self.assertIn(
+        '\n\n\nBot(s) for this bug\'s original alert(s):\n\nlinux', comment)
+    self.assertIn('scrolling - Benchmark doc link:', comment)
+    self.assertIn('http://docs', comment)
+
+  @mock.patch.object(utils, 'ServiceAccountHttp', mock.MagicMock())
+  @mock.patch.object(
+      file_bug, '_GetAllCurrentVersionsFromOmahaProxy',
+      mock.MagicMock(return_value=[]))
+  @mock.patch.object(
       crrev_service, 'GetNumbering',
       mock.MagicMock(return_value={
           'git_sha': '852ba7672ce02911e9f8f2a22363283adc80940e'}))
@@ -289,6 +336,42 @@ class FileBugTest(testing_common.TestCase):
         'Assigning to foo@bar.com because this is the only CL in range',
         comment)
     self.assertIn('My first commit', comment)
+
+  @mock.patch.object(utils, 'ServiceAccountHttp', mock.MagicMock())
+  @mock.patch.object(
+      file_bug, '_GetAllCurrentVersionsFromOmahaProxy',
+      mock.MagicMock(return_value=[]))
+  @mock.patch.object(
+      crrev_service, 'GetNumbering',
+      mock.MagicMock(return_value={
+          'git_sha': '852ba7672ce02911e9f8f2a22363283adc80940e'}))
+  @mock.patch('dashboard.services.gitiles_service.CommitInfo',
+              mock.MagicMock(return_value={
+                  'author': {'email': 'v8-autoroll@chromium.org'},
+                  'message': 'This is a roll\n\nTBR=sheriff@bar.com'}))
+  def testGet_WithFinish_CreatesBugSingleRevAutorollOwner(self):
+    # When a POST request is sent with keys specified and with the finish
+    # parameter given, an issue will be created using the issue tracker
+    # API, and the anomalies will be updated, and a response page will
+    # be sent which indicates success.
+    namespaced_stored_object.Set(
+        'repositories',
+        {"chromium": {
+            "repository_url": "https://chromium.googlesource.com/chromium/src"
+        }})
+    self.service.bug_id = 277761
+    response = self._PostSampleBug(is_single_rev=True)
+
+    # The response page should have a bug number.
+    self.assertIn('277761', response.body)
+
+    # Three HTTP requests are made when filing a bug with owner; test third
+    # request for owner hame.
+    comment = self.service.add_comment_args[1]
+    self.assertIn(
+        'Assigning to sheriff sheriff@bar.com because this autoroll',
+        comment)
+    self.assertIn('This is a roll', comment)
 
   @mock.patch.object(utils, 'ServiceAccountHttp', mock.MagicMock())
   @mock.patch.object(

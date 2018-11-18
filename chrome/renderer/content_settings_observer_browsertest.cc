@@ -65,7 +65,7 @@ class MockContentSettingsObserver : public ContentSettingsObserver {
 MockContentSettingsObserver::MockContentSettingsObserver(
     content::RenderFrame* render_frame,
     service_manager::BinderRegistry* registry)
-    : ContentSettingsObserver(render_frame, NULL, false, registry),
+    : ContentSettingsObserver(render_frame, false, registry),
       image_url_("http://www.foo.com/image.jpg"),
       image_origin_("http://www.foo.com") {}
 
@@ -98,8 +98,8 @@ class CommitTimeConditionChecker : public content::RenderFrameObserver {
  protected:
   // RenderFrameObserver:
   void OnDestruct() override {}
-  void DidCommitProvisionalLoad(bool is_new_navigation,
-                                bool is_same_document_navigation) override {
+  void DidCommitProvisionalLoad(bool is_same_document_navigation,
+                                ui::PageTransition transition) override {
     EXPECT_EQ(expectation_, predicate_.Run());
   }
 
@@ -136,10 +136,9 @@ TEST_F(ContentSettingsObserverBrowserTest, DidBlockContentType) {
 }
 
 // Tests that multiple invokations of AllowDOMStorage result in a single IPC.
-// Fails due to http://crbug.com/104300
-TEST_F(ContentSettingsObserverBrowserTest, DISABLED_AllowDOMStorage) {
+TEST_F(ContentSettingsObserverBrowserTest, AllowDOMStorage) {
   // Load some HTML, so we have a valid security origin.
-  LoadHTML("<html></html>");
+  LoadHTMLWithUrlOverride("<html></html>", "https://example.com/");
   MockContentSettingsObserver observer(view_->GetMainRenderFrame(),
                                        registry_.get());
   ON_CALL(observer,
@@ -225,7 +224,7 @@ TEST_F(ContentSettingsObserverBrowserTest, PluginsTemporarilyAllowed) {
   EXPECT_FALSE(observer->IsPluginTemporarilyAllowed(bar_plugin));
 
   // Simulate same document navigation.
-  OnSameDocumentNavigation(GetMainFrame(), true, true);
+  OnSameDocumentNavigation(GetMainFrame(), true);
   EXPECT_TRUE(observer->IsPluginTemporarilyAllowed(foo_plugin));
   EXPECT_FALSE(observer->IsPluginTemporarilyAllowed(bar_plugin));
 
@@ -463,7 +462,7 @@ TEST_F(ContentSettingsObserverBrowserTest,
 
   // The page shouldn't see the change to script blocking setting after a
   // same document navigation.
-  OnSameDocumentNavigation(GetMainFrame(), true, true);
+  OnSameDocumentNavigation(GetMainFrame(), true);
   EXPECT_TRUE(observer->AllowScript(true));
 }
 

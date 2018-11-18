@@ -39,17 +39,17 @@ import org.chromium.chrome.browser.omnibox.MatchClassificationStyle;
 import org.chromium.chrome.browser.omnibox.OmniboxSuggestion;
 import org.chromium.chrome.browser.omnibox.OmniboxSuggestion.MatchClassification;
 import org.chromium.chrome.browser.omnibox.UrlBar;
+import org.chromium.chrome.browser.search_engines.TemplateUrl;
 import org.chromium.chrome.browser.search_engines.TemplateUrlService;
-import org.chromium.chrome.browser.search_engines.TemplateUrlService.TemplateUrl;
 import org.chromium.chrome.browser.searchwidget.SearchActivity.SearchActivityDelegate;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.MultiActivityTestRule;
 import org.chromium.chrome.test.util.ActivityUtils;
 import org.chromium.chrome.test.util.OmniboxTestUtils;
-import org.chromium.content.browser.test.util.Criteria;
-import org.chromium.content.browser.test.util.CriteriaHelper;
-import org.chromium.content.browser.test.util.KeyUtils;
+import org.chromium.content_public.browser.test.util.Criteria;
+import org.chromium.content_public.browser.test.util.CriteriaHelper;
+import org.chromium.content_public.browser.test.util.KeyUtils;
 import org.chromium.content_public.common.ContentUrlConstants;
 
 import java.util.ArrayList;
@@ -103,12 +103,12 @@ public class SearchActivityTest {
                 LocaleManager.setInstanceForTest(new LocaleManager() {
                     @Override
                     public int getSearchEnginePromoShowType() {
-                        return SEARCH_ENGINE_PROMO_SHOW_EXISTING;
+                        return SearchEnginePromoType.SHOW_EXISTING;
                     }
 
                     @Override
                     public List<TemplateUrl> getSearchEnginesForPromoDialog(int promoType) {
-                        return TemplateUrlService.getInstance().getSearchEngines();
+                        return TemplateUrlService.getInstance().getTemplateUrls();
                     }
                 });
                 super.showSearchEngineDialogIfNeeded(activity, onSearchEngineFinalized);
@@ -505,13 +505,18 @@ public class SearchActivityTest {
 
     @SuppressLint("SetTextI18n")
     private void setUrlBarText(final Activity activity, final String url) {
-        ThreadUtils.runOnUiThreadBlocking(new Runnable() {
+        CriteriaHelper.pollUiThread(new Criteria() {
             @Override
-            public void run() {
+            public boolean isSatisfied() {
                 UrlBar urlBar = (UrlBar) activity.findViewById(R.id.url_bar);
-                if (!urlBar.hasFocus()) urlBar.requestFocus();
-                urlBar.setText(url);
+                if (urlBar.isFocusable() && urlBar.hasFocus()) return true;
+                urlBar.requestFocus();
+                return false;
             }
+        });
+        ThreadUtils.runOnUiThreadBlocking(() -> {
+            UrlBar urlBar = (UrlBar) activity.findViewById(R.id.url_bar);
+            urlBar.setText(url);
         });
     }
 }

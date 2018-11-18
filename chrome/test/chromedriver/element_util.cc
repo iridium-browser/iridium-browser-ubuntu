@@ -26,14 +26,6 @@ namespace {
 const char kElementKey[] = "ELEMENT";
 const char kElementKeyW3C[] = "element-6066-11e4-a52e-4f735466cecf";
 
-std::string GetElementKey() {
-  Session* session = GetThreadLocalSession();
-  if (session && session->w3c_compliant)
-    return kElementKeyW3C;
-  else
-    return kElementKey;
-}
-
 bool ParseFromValue(base::Value* value, WebPoint* point) {
   base::DictionaryValue* dict_value;
   if (!value->GetAsDictionary(&dict_value))
@@ -230,12 +222,32 @@ Status GetElementBorder(
   base::StringToInt(border_top_str, &border_top_tmp);
   if (border_left_tmp == -1 || border_top_tmp == -1)
     return Status(kUnknownError, "failed to get border width of element");
-  *border_left = border_left_tmp;
-  *border_top = border_top_tmp;
+  std::string padding_left_str;
+  status = GetElementEffectiveStyle(frame, web_view, element_id, "padding-left",
+                                    &padding_left_str);
+  int padding_left = 0;
+  if (status.IsOk())
+    base::StringToInt(padding_left_str, &padding_left);
+  std::string padding_top_str;
+  status = GetElementEffectiveStyle(frame, web_view, element_id, "padding-top",
+                                    &padding_top_str);
+  int padding_top = 0;
+  if (status.IsOk())
+    base::StringToInt(padding_top_str, &padding_top);
+  *border_left = border_left_tmp + padding_left;
+  *border_top = border_top_tmp + padding_top;
   return Status(kOk);
 }
 
 }  // namespace
+
+std::string GetElementKey() {
+  Session* session = GetThreadLocalSession();
+  if (session && session->w3c_compliant)
+    return kElementKeyW3C;
+  else
+    return kElementKey;
+}
 
 std::unique_ptr<base::DictionaryValue> CreateElement(
     const std::string& element_id) {
@@ -421,12 +433,19 @@ Status GetElementClickableLocation(
       return Status(kUnknownError, "no element reference returned by script");
   }
   bool is_displayed = false;
-  status = IsElementDisplayed(
+  base::TimeTicks start_time = base::TimeTicks::Now();
+  while (true) {
+    Status status = IsElementDisplayed(
       session, web_view, target_element_id, true, &is_displayed);
-  if (status.IsError())
-    return status;
-  if (!is_displayed)
-    return Status(kElementNotVisible);
+    if (status.IsError())
+      return status;
+    if (is_displayed)
+      break;
+    if (base::TimeTicks::Now() - start_time >= session->implicit_wait) {
+      return Status(kElementNotVisible);
+    }
+    base::PlatformThread::Sleep(base::TimeDelta::FromMilliseconds(50));
+  }
 
   WebRect rect;
   status = GetElementRegion(session, web_view, element_id, &rect);
@@ -650,18 +669,8 @@ Status ScrollElementRegionIntoView(
       "  return document.evaluate(xpath, document, null,"
       "      XPathResult.FIRST_ORDERED_NODE_TYPE, null).singleNodeValue;"
       "}";
-  bool needs_special_oopif_handling =
-      !session->chrome->GetBrowserInfo()->is_android &&
-      session->chrome->GetBrowserInfo()->major_version <= 65;
-  bool has_saved_region_offset = false;
-  WebPoint saved_region_offset;
-  for (std::list<FrameInfo>::reverse_iterator rit = session->frames.rbegin();
-       rit != session->frames.rend(); ++rit) {
-    if (needs_special_oopif_handling && !has_saved_region_offset &&
-        web_view->IsOOPIF(rit->frame_id)) {
-      saved_region_offset = region_offset;
-      has_saved_region_offset = true;
-    }
+  for (auto rit = session->frames.rbegin(); rit != session->frames.rend();
+       ++rit) {
     base::ListValue args;
     args.AppendString(
         base::StringPrintf("//*[@cd_frame_id_ = '%s']",
@@ -695,8 +704,6 @@ Status ScrollElementRegionIntoView(
     if (status.IsError())
       return status;
   }
-  if (has_saved_region_offset)
-    region_offset = saved_region_offset;
   *location = region_offset;
   return Status(kOk);
 }

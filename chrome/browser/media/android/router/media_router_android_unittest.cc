@@ -9,12 +9,12 @@
 #include "chrome/browser/media/android/router/media_router_android_bridge.h"
 #include "chrome/browser/media/router/test/test_helper.h"
 #include "content/public/browser/presentation_service_delegate.h"
-#include "content/public/common/presentation_info.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/origin.h"
 
+using blink::mojom::PresentationConnectionState;
 using testing::_;
 using testing::Expectation;
 using testing::Return;
@@ -41,8 +41,8 @@ class MockMediaRouterAndroidBridge : public MediaRouterAndroidBridge {
                     int,
                     int));
   MOCK_METHOD1(TerminateRoute, void(const MediaRoute::Id&));
-  MOCK_METHOD3(SendRouteMessage,
-               void(const MediaRoute::Id&, const std::string&, int));
+  MOCK_METHOD2(SendRouteMessage,
+               void(const MediaRoute::Id&, const std::string&));
   MOCK_METHOD1(DetachRoute, void(const MediaRoute::Id&));
   MOCK_METHOD1(StartObservingMediaSinks, bool(const MediaSource::Id&));
   MOCK_METHOD1(StopObservingMediaSinks, void(const MediaSource::Id&));
@@ -69,10 +69,10 @@ TEST_F(MediaRouterAndroidTest, DetachRoute) {
   base::MockCallback<content::PresentationConnectionStateChangedCallback>
       callback;
   content::PresentationConnectionStateChangeInfo change_info_closed(
-      content::PRESENTATION_CONNECTION_STATE_CLOSED);
+      PresentationConnectionState::CLOSED);
   change_info_closed.close_reason =
-      content::PRESENTATION_CONNECTION_CLOSE_REASON_CLOSED;
-  change_info_closed.message = "Remove route";
+      blink::mojom::PresentationConnectionCloseReason::CLOSED;
+  change_info_closed.message = "Route closed normally";
   EXPECT_CALL(callback, Run(StateChangeInfoEquals(change_info_closed)));
 
   Expectation createRouteExpectation =
@@ -83,8 +83,7 @@ TEST_F(MediaRouterAndroidTest, DetachRoute) {
       .WillOnce(Return());
 
   router_->CreateRoute("source", "sink", url::Origin(), nullptr,
-                       std::vector<MediaRouteResponseCallback>(),
-                       base::TimeDelta(), false);
+                       base::DoNothing(), base::TimeDelta(), false);
   router_->OnRouteCreated("route", "sink", 1, false);
 
   EXPECT_NE(nullptr, router_->FindRouteBySource("source"));
@@ -97,20 +96,42 @@ TEST_F(MediaRouterAndroidTest, DetachRoute) {
   EXPECT_EQ(nullptr, router_->FindRouteBySource("source"));
 }
 
+TEST_F(MediaRouterAndroidTest, OnRouteTerminated) {
+  Expectation createRouteExpectation =
+      EXPECT_CALL(*mock_bridge_, CreateRoute(_, _, _, _, _, _, 1))
+          .WillOnce(Return());
+
+  router_->CreateRoute("source", "sink", url::Origin(), nullptr,
+                       base::DoNothing(), base::TimeDelta(), false);
+  router_->OnRouteCreated("route", "sink", 1, false);
+
+  EXPECT_NE(nullptr, router_->FindRouteBySource("source"));
+
+  // Route termination on Android results in the PresentationConnectionPtr
+  // directly being messaged, and therefore there is no
+  // PresentationConnectionStateChangedCallback that can be intercepted for
+  // test verification purposes.
+  router_->OnRouteTerminated("route");
+
+  EXPECT_EQ(nullptr, router_->FindRouteBySource("source"));
+}
+
 TEST_F(MediaRouterAndroidTest, OnRouteClosed) {
   base::MockCallback<content::PresentationConnectionStateChangedCallback>
       callback;
-  content::PresentationConnectionStateChangeInfo change_info_terminated(
-      content::PRESENTATION_CONNECTION_STATE_TERMINATED);
-  EXPECT_CALL(callback, Run(StateChangeInfoEquals(change_info_terminated)));
+  content::PresentationConnectionStateChangeInfo change_info_closed(
+      PresentationConnectionState::CLOSED);
+  change_info_closed.close_reason =
+      blink::mojom::PresentationConnectionCloseReason::CLOSED;
+  change_info_closed.message = "Remove route";
+  EXPECT_CALL(callback, Run(StateChangeInfoEquals(change_info_closed)));
 
   Expectation createRouteExpectation =
       EXPECT_CALL(*mock_bridge_, CreateRoute(_, _, _, _, _, _, 1))
           .WillOnce(Return());
 
   router_->CreateRoute("source", "sink", url::Origin(), nullptr,
-                       std::vector<MediaRouteResponseCallback>(),
-                       base::TimeDelta(), false);
+                       base::DoNothing(), base::TimeDelta(), false);
   router_->OnRouteCreated("route", "sink", 1, false);
 
   EXPECT_NE(nullptr, router_->FindRouteBySource("source"));
@@ -118,7 +139,35 @@ TEST_F(MediaRouterAndroidTest, OnRouteClosed) {
   std::unique_ptr<PresentationConnectionStateSubscription> subscription =
       router_->AddPresentationConnectionStateChangedCallback("route",
                                                              callback.Get());
-  router_->OnRouteClosed("route");
+  router_->OnRouteClosed("route", base::nullopt);
+
+  EXPECT_EQ(nullptr, router_->FindRouteBySource("source"));
+}
+
+TEST_F(MediaRouterAndroidTest, OnRouteClosedWithError) {
+  base::MockCallback<content::PresentationConnectionStateChangedCallback>
+      callback;
+  content::PresentationConnectionStateChangeInfo change_info_closed(
+      PresentationConnectionState::CLOSED);
+  change_info_closed.close_reason =
+      blink::mojom::PresentationConnectionCloseReason::CONNECTION_ERROR;
+  change_info_closed.message = "Some failure";
+  EXPECT_CALL(callback, Run(StateChangeInfoEquals(change_info_closed)));
+
+  Expectation createRouteExpectation =
+      EXPECT_CALL(*mock_bridge_, CreateRoute(_, _, _, _, _, _, 1))
+          .WillOnce(Return());
+
+  router_->CreateRoute("source", "sink", url::Origin(), nullptr,
+                       base::DoNothing(), base::TimeDelta(), false);
+  router_->OnRouteCreated("route", "sink", 1, false);
+
+  EXPECT_NE(nullptr, router_->FindRouteBySource("source"));
+
+  std::unique_ptr<PresentationConnectionStateSubscription> subscription =
+      router_->AddPresentationConnectionStateChangedCallback("route",
+                                                             callback.Get());
+  router_->OnRouteClosed("route", "Some failure");
 
   EXPECT_EQ(nullptr, router_->FindRouteBySource("source"));
 }

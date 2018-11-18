@@ -11,6 +11,7 @@
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/loader/document_load_timing.h"
 #include "third_party/blink/renderer/core/loader/document_loader.h"
+#include "third_party/blink/renderer/core/performance_entry_names.h"
 #include "third_party/blink/renderer/core/timing/performance.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_timing_info.h"
 
@@ -22,8 +23,8 @@ PerformanceNavigationTiming::PerformanceNavigationTiming(
     TimeTicks time_origin,
     const WebVector<WebServerTimingInfo>& server_timing)
     : PerformanceResourceTiming(
-          info ? info->FinalResponse().Url().GetString() : "",
-          "navigation",
+          info ? AtomicString(info->FinalResponse().Url().GetString())
+               : g_empty_atom,
           time_origin,
           server_timing),
       ContextClient(frame),
@@ -33,6 +34,14 @@ PerformanceNavigationTiming::PerformanceNavigationTiming(
 }
 
 PerformanceNavigationTiming::~PerformanceNavigationTiming() = default;
+
+AtomicString PerformanceNavigationTiming::entryType() const {
+  return PerformanceEntryNames::navigation;
+}
+
+PerformanceEntryType PerformanceNavigationTiming::EntryTypeEnum() const {
+  return PerformanceEntry::EntryType::kNavigation;
+}
 
 void PerformanceNavigationTiming::Trace(blink::Visitor* visitor) {
   ContextClient::Trace(visitor);
@@ -88,21 +97,21 @@ unsigned long long PerformanceNavigationTiming::GetDecodedBodySize() const {
 }
 
 AtomicString PerformanceNavigationTiming::GetNavigationType(
-    NavigationType type,
+    WebNavigationType type,
     const Document* document) {
   if (document && document->GetPageVisibilityState() ==
                       mojom::PageVisibilityState::kPrerender) {
     return "prerender";
   }
   switch (type) {
-    case kNavigationTypeReload:
+    case kWebNavigationTypeReload:
       return "reload";
-    case kNavigationTypeBackForward:
+    case kWebNavigationTypeBackForward:
       return "back_forward";
-    case kNavigationTypeLinkClicked:
-    case kNavigationTypeFormSubmitted:
-    case kNavigationTypeFormResubmitted:
-    case kNavigationTypeOther:
+    case kWebNavigationTypeLinkClicked:
+    case kWebNavigationTypeFormSubmitted:
+    case kWebNavigationTypeFormResubmitted:
+    case kWebNavigationTypeOther:
       return "navigate";
   }
   NOTREACHED();
@@ -110,7 +119,7 @@ AtomicString PerformanceNavigationTiming::GetNavigationType(
 }
 
 AtomicString PerformanceNavigationTiming::initiatorType() const {
-  return "navigation";
+  return PerformanceEntryNames::navigation;
 }
 
 bool PerformanceNavigationTiming::GetAllowRedirectDetails() const {

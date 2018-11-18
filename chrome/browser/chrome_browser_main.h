@@ -6,7 +6,6 @@
 #define CHROME_BROWSER_CHROME_BROWSER_MAIN_H_
 
 #include <memory>
-#include <vector>
 
 #include "base/macros.h"
 #include "build/build_config.h"
@@ -15,23 +14,21 @@
 #include "chrome/browser/first_run/first_run.h"
 #include "chrome/browser/process_singleton.h"
 #include "chrome/browser/ui/startup/startup_browser_creator.h"
-#include "chrome/common/thread_profiler.h"
 #include "content/public/browser/browser_main_parts.h"
 #include "content/public/common/main_function_params.h"
+#include "ui/base/resource/data_pack.h"
 
 class BrowserProcessImpl;
 class ChromeBrowserMainExtraParts;
-class FieldTrialSynchronizer;
+class ChromeFeatureListCreator;
+class HeapProfilerController;
 class PrefService;
 class Profile;
 class StartupBrowserCreator;
 class StartupTimeBomb;
 class ShutdownWatcherHelper;
+class ThreadProfiler;
 class WebUsbDetector;
-
-namespace base {
-class SequencedTaskRunner;
-}
 
 namespace chrome_browser {
 // For use by ShowMissingLocaleMessageBox.
@@ -51,16 +48,19 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
   // Add additional ChromeBrowserMainExtraParts.
   virtual void AddParts(ChromeBrowserMainExtraParts* parts);
 
- protected:
 #if !defined(OS_ANDROID)
-  class DeferringTaskRunner;
+  // Returns the RunLoop that would be run by MainMessageLoopRun. This is used
+  // by InProcessBrowserTests to allow them to run until the BrowserProcess is
+  // ready for the browser to exit.
+  static std::unique_ptr<base::RunLoop> TakeRunLoopForTest();
 #endif
 
-  explicit ChromeBrowserMainParts(
-      const content::MainFunctionParams& parameters);
+ protected:
+  ChromeBrowserMainParts(const content::MainFunctionParams& parameters,
+                         std::unique_ptr<ui::DataPack> data_pack,
+                         ChromeFeatureListCreator* chrome_feature_list_creator);
 
   // content::BrowserMainParts overrides.
-  bool ShouldContentCreateFeatureList() override;
   // These are called in-order by content::BrowserMainLoop.
   // Each stage calls the same stages in any ChromeBrowserMainExtraParts added
   // with AddParts() from ChromeContentBrowserClient::CreateBrowserMainParts.
@@ -104,10 +104,6 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
  private:
   friend class ChromeBrowserMainPartsTestApi;
 
-  // Sets up the field trials and related initialization. Call only after
-  // about:flags have been converted to switches.
-  void SetupFieldTrials();
-
   // Constructs the metrics service and initializes metrics recording.
   void SetupMetrics();
 
@@ -127,8 +123,7 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
   // If the return value is RESULT_CODE_MISSING_DATA, then
   // |failed_to_load_resource_bundle| indicates if the ResourceBundle couldn't
   // be loaded.
-  int LoadLocalState(base::SequencedTaskRunner* local_state_task_runner,
-                     bool* failed_to_load_resource_bundle);
+  int LoadLocalState(bool* failed_to_load_resource_bundle);
 
   // Applies any preferences (to local state) needed for first run. This is
   // always called and early outs if not first-run. Return value is an exit
@@ -148,6 +143,9 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
   const base::CommandLine& parsed_command_line_;
   int result_code_;
 
+  ChromeBrowserFieldTrials browser_field_trials_;
+
+#if !defined(OS_ANDROID)
   // Create StartupTimeBomb object for watching jank during startup.
   std::unique_ptr<StartupTimeBomb> startup_watcher_;
 
@@ -156,11 +154,8 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
   // it is destroyed last.
   std::unique_ptr<ShutdownWatcherHelper> shutdown_watcher_;
 
-  ChromeBrowserFieldTrials browser_field_trials_;
-
-#if !defined(OS_ANDROID)
   std::unique_ptr<WebUsbDetector> web_usb_detector_;
-#endif
+#endif  // !defined(OS_ANDROID)
 
   // Vector of additional ChromeBrowserMainExtraParts.
   // Parts are deleted in the inverse order they are added.
@@ -168,6 +163,10 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
 
   // A profiler that periodically samples stack traces on the UI thread.
   std::unique_ptr<ThreadProfiler> ui_thread_profiler_;
+
+  // The controller schedules UMA heap profiles collections and forwarding down
+  // the reporting pipeline.
+  std::unique_ptr<HeapProfilerController> heap_profiler_controller_;
 
   // Whether PerformPreMainMessageLoopStartup() is called on VariationsService.
   // Initialized to true if |MainFunctionParams::ui_task| is null (meaning not
@@ -199,17 +198,13 @@ class ChromeBrowserMainParts : public content::BrowserMainParts {
   Profile* profile_;
   bool run_message_loop_;
 
-  // Initialized in |SetupFieldTrials()|.
-  scoped_refptr<FieldTrialSynchronizer> field_trial_synchronizer_;
-
   base::FilePath user_data_dir_;
 
-#if !defined(OS_ANDROID)
-  // This TaskRunner is created and the constructor and destroyed in
-  // PreCreateThreadsImpl(). It's used to queue any tasks scheduled before the
-  // real task scheduler has been created.
-  scoped_refptr<DeferringTaskRunner> initial_task_runner_;
-#endif
+  // This is used to store the ui data pack. The data pack is moved when
+  // resource bundle gets created.
+  std::unique_ptr<ui::DataPack> service_manifest_data_pack_;
+
+  ChromeFeatureListCreator* chrome_feature_list_creator_;
 
   DISALLOW_COPY_AND_ASSIGN(ChromeBrowserMainParts);
 };

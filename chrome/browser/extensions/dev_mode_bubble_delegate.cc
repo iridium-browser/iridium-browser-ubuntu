@@ -23,7 +23,7 @@ namespace extensions {
 
 namespace {
 
-base::LazyInstance<std::set<Profile*>>::Leaky g_shown =
+base::LazyInstance<std::set<Profile*>>::Leaky g_dev_mode_shown =
     LAZY_INSTANCE_INITIALIZER;
 
 }  // namespace
@@ -75,13 +75,7 @@ base::string16 DevModeBubbleDelegate::GetActionButtonLabel() const {
 }
 
 base::string16 DevModeBubbleDelegate::GetDismissButtonLabel() const {
-// TODO(https://crbug.com/671656): Keep the cancel button on MACOSX unless
-// using views or the Cocoa version is updated.
-#if defined(OS_MACOSX) && !BUILDFLAG(MAC_VIEWS_BROWSER)
-  return l10n_util::GetStringUTF16(IDS_CANCEL);
-#else
   return base::string16();
-#endif
 }
 
 bool DevModeBubbleDelegate::ShouldCloseOnDeactivate() const {
@@ -95,19 +89,19 @@ bool DevModeBubbleDelegate::ShouldAcknowledgeOnDeactivate() const {
 bool DevModeBubbleDelegate::ShouldShow(
     const ExtensionIdList& extensions) const {
   DCHECK_LE(1u, extensions.size());
-  return !g_shown.Get().count(profile_->GetOriginalProfile());
+  return !g_dev_mode_shown.Get().count(profile_->GetOriginalProfile());
 }
 
 void DevModeBubbleDelegate::OnShown(const ExtensionIdList& extensions) {
   DCHECK_LE(1u, extensions.size());
-  DCHECK(!g_shown.Get().count(profile_));
-  g_shown.Get().insert(profile_->GetOriginalProfile());
+  DCHECK(!g_dev_mode_shown.Get().count(profile_));
+  g_dev_mode_shown.Get().insert(profile_->GetOriginalProfile());
 }
 
 void DevModeBubbleDelegate::OnAction() {}
 
 void DevModeBubbleDelegate::ClearProfileSetForTesting() {
-  g_shown.Get().clear();
+  g_dev_mode_shown.Get().clear();
 }
 
 bool DevModeBubbleDelegate::ShouldShowExtensionList() const {

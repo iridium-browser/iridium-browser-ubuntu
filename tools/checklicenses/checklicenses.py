@@ -452,13 +452,10 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
     'third_party/lzma_sdk': [
         'UNKNOWN',
     ],
-    'third_party/mesa/src': [
-        'GPL (v2)',
-        'GPL (v3 or later)',
-        'MIT/X11 (BSD like) GPL (v3 or later) with Bison parser exception',
-        'UNKNOWN',  # http://crbug.com/98450
-    ],
     'third_party/modp_b64': [
+        'UNKNOWN',
+    ],
+    'third_party/nvml': [
         'UNKNOWN',
     ],
     # Missing license headers in openh264 sources: https://github.com/cisco/openh264/issues/2233
@@ -467,9 +464,6 @@ PATH_SPECIFIC_WHITELISTED_LICENSES = {
     ],
     'third_party/openmax_dl/dl' : [
         'Khronos Group',
-    ],
-    'third_party/opus/src/autogen.sh' : [  # https://trac.xiph.org/ticket/2253#ticket
-        'UNKNOWN',
     ],
     'third_party/boringssl': [
         # There are some files in BoringSSL which came from OpenSSL and have no

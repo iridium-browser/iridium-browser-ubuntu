@@ -158,6 +158,7 @@ class IssueTrackerService(object):
         'labels': labels or [],
         'components': components or [],
         'status': 'Assigned' if owner else 'Untriaged',
+        'projectId': 'chromium'
     }
     if owner:
       body['owner'] = {'name': owner}
@@ -260,7 +261,7 @@ class IssueTrackerService(object):
       response = request.execute()
       return response
     except errors.HttpError as e:
-      logging.error(e)
+      logging.error('HttpError: %r', e)
       if ignore_error:
         return None
       raise e

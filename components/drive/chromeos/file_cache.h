@@ -43,7 +43,7 @@ const int64_t kMinFreeSpaceInBytes = 512ull * 1024ull * 1024ull;  // 512MB
 // implementation that reports fake free disk space.
 class FreeDiskSpaceGetterInterface {
  public:
-  virtual ~FreeDiskSpaceGetterInterface() {}
+  virtual ~FreeDiskSpaceGetterInterface() = default;
   virtual int64_t AmountOfFreeDiskSpace() = 0;
 };
 
@@ -55,6 +55,8 @@ class FileCache {
  public:
   // The file extended attribute assigned to Drive cache directory.
   static const char kGCacheFilesAttribute[];
+  // The file extended attribute assigned to files that can be removed.
+  static const char kGCacheRemovableAttribute[];
 
   // Enum defining type of file operation e.g. copy or move, etc.
   enum FileOperationType {
@@ -226,7 +228,7 @@ class FileCache {
   // IDs of files marked mounted.
   std::set<std::string> mounted_files_;
 
-  base::ThreadChecker thread_checker_;
+  THREAD_CHECKER(thread_checker_);
 
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate its weak pointers before any other members are destroyed.

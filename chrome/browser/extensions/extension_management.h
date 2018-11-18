@@ -24,6 +24,7 @@
 
 class GURL;
 class PrefService;
+class Profile;
 
 namespace content {
 class BrowserContext;
@@ -70,7 +71,7 @@ class ExtensionManagement : public KeyedService {
     INSTALLATION_RECOMMENDED,
   };
 
-  ExtensionManagement(PrefService* pref_service, bool is_signin_profile);
+  explicit ExtensionManagement(Profile* profile);
   ~ExtensionManagement() override;
 
   // KeyedService implementations:
@@ -115,32 +116,32 @@ class ExtensionManagement : public KeyedService {
   APIPermissionSet GetBlockedAPIPermissions(const Extension* extension) const;
 
   // Returns the list of hosts blocked by policy for |extension|.
-  const URLPatternSet& GetRuntimeBlockedHosts(const Extension* extension) const;
+  const URLPatternSet& GetPolicyBlockedHosts(const Extension* extension) const;
 
-  // Returns the hosts exempted by policy from the RuntimeBlockedHosts for
+  // Returns the hosts exempted by policy from the PolicyBlockedHosts for
   // |extension|.
-  const URLPatternSet& GetRuntimeAllowedHosts(const Extension* extension) const;
+  const URLPatternSet& GetPolicyAllowedHosts(const Extension* extension) const;
 
   // Returns the list of hosts blocked by policy for Default scope. This can be
-  // overridden by an invividual scope which is queried via
-  // GetRuntimeBlockedHosts.
-  const URLPatternSet& GetDefaultRuntimeBlockedHosts() const;
+  // overridden by an individual scope which is queried via
+  // GetPolicyBlockedHosts.
+  const URLPatternSet& GetDefaultPolicyBlockedHosts() const;
 
-  // Returns the hosts exempted by policy from RuntimeBlockedHosts for
+  // Returns the hosts exempted by policy from PolicyBlockedHosts for
   // the default scope. This can be overridden by an individual scope which is
-  // queries via GetRuntimeAllowedHosts. This should only be used to
+  // queries via GetPolicyAllowedHosts. This should only be used to
   // initialize a new renderer.
-  const URLPatternSet& GetDefaultRuntimeAllowedHosts() const;
+  const URLPatternSet& GetDefaultPolicyAllowedHosts() const;
 
   // Checks if an |extension| has its own runtime_blocked_hosts or
   // runtime_allowed_hosts defined in the individual scope of the
   // ExtensionSettings policy.
   // Returns false if an individual scoped setting isn't defined.
-  bool UsesDefaultRuntimeHostRestrictions(const Extension* extension) const;
+  bool UsesDefaultPolicyHostRestrictions(const Extension* extension) const;
 
   // Checks if a URL is on the blocked host permissions list for a specific
   // extension.
-  bool IsRuntimeBlockedHost(const Extension* extension, const GURL& url) const;
+  bool IsPolicyBlockedHost(const Extension* extension, const GURL& url) const;
 
   // Returns blocked permission set for |extension|.
   std::unique_ptr<const PermissionSet> GetBlockedPermissions(
@@ -224,10 +225,11 @@ class ExtensionManagement : public KeyedService {
   // Extension settings applicable to all extensions.
   std::unique_ptr<internal::GlobalSettings> global_settings_;
 
+  Profile* const profile_ = nullptr;
   PrefService* pref_service_ = nullptr;
   bool is_signin_profile_ = false;
 
-  base::ObserverList<Observer, true> observer_list_;
+  base::ObserverList<Observer, true>::Unchecked observer_list_;
   PrefChangeRegistrar pref_change_registrar_;
   std::vector<std::unique_ptr<ManagementPolicy::Provider>> providers_;
 

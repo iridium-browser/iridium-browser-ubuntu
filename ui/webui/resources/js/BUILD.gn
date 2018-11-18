@@ -22,6 +22,7 @@ js_type_check("js_resources") {
     ":i18n_template",
     ":i18n_template_no_process",
     ":icon",
+    ":list_property_update_behavior",
     ":load_time_data",
     ":parse_html_subset",
     ":promise_resolver",
@@ -29,6 +30,7 @@ js_type_check("js_resources") {
     ":util",
     ":web_ui_listener_behavior",
     ":webui_listener_tracker",
+    ":webui_resource_test",
   ]
 }
 
@@ -86,6 +88,9 @@ js_library("i18n_behavior") {
   ]
 }
 
+js_library("list_property_update_behavior") {
+}
+
 js_library("load_time_data") {
   deps = [
     ":assert",
@@ -114,4 +119,8 @@ js_library("web_ui_listener_behavior") {
   deps = [
     ":cr",
   ]
+}
+
+js_library("webui_resource_test") {
+  externs_list = [ "dom_automation_controller.js" ]
 }

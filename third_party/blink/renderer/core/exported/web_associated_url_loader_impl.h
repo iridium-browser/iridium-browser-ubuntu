@@ -13,11 +13,11 @@
 #include "third_party/blink/public/web/web_associated_url_loader.h"
 #include "third_party/blink/public/web/web_associated_url_loader_options.h"
 #include "third_party/blink/renderer/core/core_export.h"
-#include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/persistent.h"
 
 namespace blink {
 
-class DocumentThreadableLoader;
+class ThreadableLoader;
 class WebAssociatedURLLoaderClient;
 class Document;
 
@@ -26,7 +26,7 @@ class CORE_EXPORT WebAssociatedURLLoaderImpl final
     : public WebAssociatedURLLoader {
  public:
   WebAssociatedURLLoaderImpl(Document*, const WebAssociatedURLLoaderOptions&);
-  ~WebAssociatedURLLoaderImpl();
+  ~WebAssociatedURLLoaderImpl() override;
 
   void LoadAsynchronously(const WebURLRequest&,
                           WebAssociatedURLLoaderClient*) override;
@@ -57,10 +57,10 @@ class CORE_EXPORT WebAssociatedURLLoaderImpl final
   WebAssociatedURLLoaderClient* client_;
   WebAssociatedURLLoaderOptions options_;
 
-  // An adapter which converts the DocumentThreadableLoaderClient method
+  // An adapter which converts the hreadableLoaderClient method
   // calls into the WebURLLoaderClient method calls.
   std::unique_ptr<ClientAdapter> client_adapter_;
-  Persistent<DocumentThreadableLoader> loader_;
+  Persistent<ThreadableLoader> loader_;
 
   // A ContextLifecycleObserver for cancelling |m_loader| when the Document
   // is detached.

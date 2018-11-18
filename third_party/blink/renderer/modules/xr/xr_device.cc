@@ -4,63 +4,44 @@
 
 #include "third_party/blink/renderer/modules/xr/xr_device.h"
 
+#include "services/metrics/public/cpp/ukm_builders.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_promise_resolver.h"
+#include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
 #include "third_party/blink/renderer/core/frame/frame.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/modules/event_target_modules.h"
 #include "third_party/blink/renderer/modules/xr/xr.h"
 #include "third_party/blink/renderer/modules/xr/xr_frame_provider.h"
+#include "third_party/blink/renderer/modules/xr/xr_presentation_context.h"
 #include "third_party/blink/renderer/modules/xr/xr_session.h"
 
 namespace blink {
 
 namespace {
 
-const char kActiveExclusiveSession[] =
-    "XRDevice already has an active, exclusive session";
-
-const char kExclusiveNotSupported[] =
-    "XRDevice does not support the creation of exclusive sessions.";
+const char kActiveImmersiveSession[] =
+    "XRDevice already has an active, immersive session";
 
 const char kNoOutputContext[] =
-    "Non-exclusive sessions must be created with an outputContext.";
+    "Non-immersive sessions must be created with an outputContext.";
 
-const char kRequestNotInUserGesture[] =
-    "Exclusive sessions can only be requested during a user gesture.";
+const char kRequestRequiresUserActivation[] =
+    "The requested session requires user activation.";
+
+const char kSessionNotSupported[] =
+    "The specified session configuration is not supported.";
 
 }  // namespace
 
-XRDevice::XRDevice(
-    XR* xr,
-    device::mojom::blink::VRMagicWindowProviderPtr magic_window_provider,
-    device::mojom::blink::VRDisplayHostPtr display,
-    device::mojom::blink::VRDisplayClientRequest client_request,
-    device::mojom::blink::VRDisplayInfoPtr display_info)
-    : xr_(xr),
-      magic_window_provider_(std::move(magic_window_provider)),
-      display_(std::move(display)),
-      display_client_binding_(this, std::move(client_request)) {
-  SetXRDisplayInfo(std::move(display_info));
-}
-
-ExecutionContext* XRDevice::GetExecutionContext() const {
-  return xr_->GetExecutionContext();
-}
-
-const AtomicString& XRDevice::InterfaceName() const {
-  return EventTargetNames::XRDevice;
-}
+XRDevice::XRDevice(XR* xr, device::mojom::blink::XRDevicePtr device)
+    : xr_(xr), device_ptr_(std::move(device)) {}
 
 const char* XRDevice::checkSessionSupport(
     const XRSessionCreationOptions& options) const {
-  if (options.exclusive()) {
-    // Validation for exclusive sessions.
-    if (!supports_exclusive_) {
-      return kExclusiveNotSupported;
-    }
-  } else {
-    // Validation for non-exclusive sessions.
+  if (!options.immersive()) {
+    // Validation for non-immersive sessions. Validation for immersive sessions
+    // happens browser side.
     if (!options.hasOutputContext()) {
       return kNoOutputContext;
     }
@@ -71,72 +52,160 @@ const char* XRDevice::checkSessionSupport(
 
 ScriptPromise XRDevice::supportsSession(
     ScriptState* script_state,
-    const XRSessionCreationOptions& options) const {
+    const XRSessionCreationOptions& options) {
   // Check to see if the device is capable of supporting the requested session
   // options. Note that reporting support here does not guarantee that creating
   // a session with those options will succeed, as other external and
-  // time-sensitve factors (focus state, existance of another exclusive session,
+  // time-sensitve factors (focus state, existence of another immersive session,
   // etc.) may prevent the creation of a session as well.
   const char* reject_reason = checkSessionSupport(options);
   if (reject_reason) {
     return ScriptPromise::RejectWithDOMException(
-        script_state, DOMException::Create(kNotSupportedError, reject_reason));
+        script_state, DOMException::Create(DOMExceptionCode::kNotSupportedError,
+                                           reject_reason));
   }
 
   // If the above checks pass, resolve without a value. Future API iterations
   // may specify a value to be returned here.
   ScriptPromiseResolver* resolver = ScriptPromiseResolver::Create(script_state);
   ScriptPromise promise = resolver->Promise();
-  resolver->Resolve();
+
+  device::mojom::blink::XRSessionOptionsPtr session_options =
+      device::mojom::blink::XRSessionOptions::New();
+  session_options->immersive = options.immersive();
+
+  device_ptr_->SupportsSession(
+      std::move(session_options),
+      WTF::Bind(&XRDevice::OnSupportsSessionReturned, WrapPersistent(this),
+                WrapPersistent(resolver)));
+
   return promise;
+}
+
+void XRDevice::OnSupportsSessionReturned(ScriptPromiseResolver* resolver,
+                                         bool supports_session) {
+  supports_session
+      ? resolver->Resolve()
+      : resolver->Reject(DOMException::Create(
+            DOMExceptionCode::kNotSupportedError, kSessionNotSupported));
+}
+
+int64_t XRDevice::GetSourceId() const {
+  return xr_->GetSourceId();
 }
 
 ScriptPromise XRDevice::requestSession(
     ScriptState* script_state,
     const XRSessionCreationOptions& options) {
+  Document* doc = To<Document>(ExecutionContext::From(script_state));
+
+  if (options.immersive() && !did_log_request_immersive_session_ && doc) {
+    ukm::builders::XR_WebXR(GetSourceId())
+        .SetDidRequestPresentation(1)
+        .Record(doc->UkmRecorder());
+    did_log_request_immersive_session_ = true;
+  }
+
   // Check first to see if the device is capable of supporting the requested
   // options.
   const char* reject_reason = checkSessionSupport(options);
   if (reject_reason) {
     return ScriptPromise::RejectWithDOMException(
-        script_state, DOMException::Create(kNotSupportedError, reject_reason));
+        script_state, DOMException::Create(DOMExceptionCode::kNotSupportedError,
+                                           reject_reason));
   }
+
+  // TODO(ijamardo): Should we just exit if there is not document?
+  bool has_user_activation =
+      LocalFrame::HasTransientUserActivation(doc ? doc->GetFrame() : nullptr);
 
   // Check if the current page state prevents the requested session from being
   // created.
-  if (options.exclusive()) {
-    if (frameProvider()->exclusive_session()) {
+  if (options.immersive()) {
+    if (frameProvider()->immersive_session()) {
       return ScriptPromise::RejectWithDOMException(
           script_state,
-          DOMException::Create(kInvalidStateError, kActiveExclusiveSession));
+          DOMException::Create(DOMExceptionCode::kInvalidStateError,
+                               kActiveImmersiveSession));
     }
 
-    Document* doc = ToDocumentOrNull(ExecutionContext::From(script_state));
-    if (!Frame::HasTransientUserActivation(doc ? doc->GetFrame() : nullptr)) {
+    if (!has_user_activation) {
       return ScriptPromise::RejectWithDOMException(
-          script_state,
-          DOMException::Create(kInvalidStateError, kRequestNotInUserGesture));
+          script_state, DOMException::Create(DOMExceptionCode::kSecurityError,
+                                             kRequestRequiresUserActivation));
+    }
+  }
+
+  // All AR sessions require a user gesture.
+  if (options.environmentIntegration()) {
+    if (!has_user_activation) {
+      return ScriptPromise::RejectWithDOMException(
+          script_state, DOMException::Create(DOMExceptionCode::kSecurityError,
+                                             kRequestRequiresUserActivation));
     }
   }
 
   ScriptPromiseResolver* resolver = ScriptPromiseResolver::Create(script_state);
   ScriptPromise promise = resolver->Promise();
 
-  XRPresentationContext* output_context = nullptr;
-  if (options.hasOutputContext()) {
-    output_context = options.outputContext();
+  device::mojom::blink::XRSessionOptionsPtr session_options =
+      device::mojom::blink::XRSessionOptions::New();
+  session_options->immersive = options.immersive();
+  session_options->provide_passthrough_camera =
+      options.environmentIntegration();
+  session_options->has_user_activation = has_user_activation;
+
+  XRPresentationContext* output_context =
+      options.hasOutputContext() ? options.outputContext() : nullptr;
+
+  // TODO(http://crbug.com/826899) Once device activation is sorted out for
+  // WebXR, either pass in the correct value for metrics to know whether
+  // this was triggered by device activation, or remove the value as soon as
+  // legacy API has been removed.
+  device_ptr_->RequestSession(
+      std::move(session_options), false /* triggered by display activate */,
+      WTF::Bind(&XRDevice::OnRequestSessionReturned, WrapWeakPersistent(this),
+                WrapPersistent(resolver), WrapPersistent(output_context),
+                options.environmentIntegration(), options.immersive()));
+  return promise;
+}
+
+void XRDevice::OnRequestSessionReturned(
+    ScriptPromiseResolver* resolver,
+    XRPresentationContext* output_context,
+    bool environment_integration,
+    bool immersive,
+    device::mojom::blink::XRSessionPtr session_ptr) {
+  // TODO(https://crbug.com/872316) Improve the error messaging to indicate why
+  // a request failed.
+  if (!session_ptr) {
+    DOMException* exception = DOMException::Create(
+        DOMExceptionCode::kNotSupportedError, kSessionNotSupported);
+    resolver->Reject(exception);
+    return;
   }
 
-  XRSession* session = new XRSession(this, options.exclusive(), output_context);
+  XRSession::EnvironmentBlendMode blend_mode = XRSession::kBlendModeOpaque;
+  if (environment_integration)
+    blend_mode = XRSession::kBlendModeAlphaBlend;
+
+  XRSession* session =
+      new XRSession(this, std::move(session_ptr->client_request), immersive,
+                    environment_integration, output_context, blend_mode);
+  // immersive sessions must supply display info.
+  DCHECK(!immersive || session_ptr->display_info);
+  if (session_ptr->display_info)
+    session->SetXRDisplayInfo(std::move(session_ptr->display_info));
   sessions_.insert(session);
 
-  if (options.exclusive()) {
-    frameProvider()->BeginExclusiveSession(session, resolver);
+  if (immersive) {
+    frameProvider()->BeginImmersiveSession(session, std::move(session_ptr));
   } else {
-    resolver->Resolve(session);
+    magic_window_provider_.Bind(std::move(session_ptr->data_provider));
+    environment_provider_.Bind(std::move(session_ptr->environment_provider));
   }
 
-  return promise;
+  resolver->Resolve(session);
 }
 
 void XRDevice::OnFrameFocusChanged() {
@@ -157,26 +226,6 @@ bool XRDevice::IsFrameFocused() {
   return xr_->IsFrameFocused();
 }
 
-// TODO: Forward these calls on to the sessions once they've been implemented.
-void XRDevice::OnChanged(device::mojom::blink::VRDisplayInfoPtr display_info) {
-  SetXRDisplayInfo(std::move(display_info));
-}
-void XRDevice::OnExitPresent() {}
-void XRDevice::OnBlur() {
-  // The device is reporting to us that it is blurred.  This could happen for a
-  // variety of reasons, such as browser UI, a different application using the
-  // headset, or another page entering an exclusive session.
-  has_device_focus_ = false;
-  OnFocusChanged();
-}
-void XRDevice::OnFocus() {
-  has_device_focus_ = true;
-  OnFocusChanged();
-}
-void XRDevice::OnActivate(device::mojom::blink::VRDisplayEventReason,
-                          OnActivateCallback on_handled) {}
-void XRDevice::OnDeactivate(device::mojom::blink::VRDisplayEventReason) {}
-
 XRFrameProvider* XRDevice::frameProvider() {
   if (!frame_provider_) {
     frame_provider_ = new XRFrameProvider(this);
@@ -186,24 +235,15 @@ XRFrameProvider* XRDevice::frameProvider() {
 }
 
 void XRDevice::Dispose() {
-  display_client_binding_.Close();
   if (frame_provider_)
     frame_provider_->Dispose();
-}
-
-void XRDevice::SetXRDisplayInfo(
-    device::mojom::blink::VRDisplayInfoPtr display_info) {
-  display_info_id_++;
-  display_info_ = std::move(display_info);
-  is_external_ = display_info_->capabilities->hasExternalDisplay;
-  supports_exclusive_ = (display_info_->capabilities->canPresent);
 }
 
 void XRDevice::Trace(blink::Visitor* visitor) {
   visitor->Trace(xr_);
   visitor->Trace(frame_provider_);
   visitor->Trace(sessions_);
-  EventTargetWithInlineData::Trace(visitor);
+  ScriptWrappable::Trace(visitor);
 }
 
 }  // namespace blink

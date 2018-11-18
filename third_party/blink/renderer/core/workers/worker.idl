@@ -31,13 +31,14 @@
     ActiveScriptWrappable,
     Constructor(DOMString scriptURL, optional WorkerOptions options),
     ConstructorCallWith=ExecutionContext,
-    // TODO(foolip): Exposed=(Window,Worker),
+    Exposed(Window StableBlinkFeatures,DedicatedWorker NestedWorkers),
     RaisesException=Constructor,
     ImplementedAs=DedicatedWorker
 ] interface Worker : EventTarget {
     void terminate();
 
-    [PostMessage, RaisesException] void postMessage(any message, optional sequence<object> transfer);
+    [CallWith=ScriptState, RaisesException] void postMessage(any message, optional sequence<object> transfer=[]);
+    [RuntimeEnabled=PostMessageOptions, CallWith=ScriptState, RaisesException] void postMessage(any message, PostMessageOptions options);
     attribute EventHandler onmessage;
 };
 

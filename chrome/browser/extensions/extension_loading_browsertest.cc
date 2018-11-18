@@ -9,6 +9,8 @@
 #include "base/strings/stringprintf.h"
 #include "base/version.h"
 #include "build/build_config.h"
+#include "chrome/browser/devtools/devtools_window.h"
+#include "chrome/browser/devtools/devtools_window_testing.h"
 #include "chrome/browser/extensions/devtools_util.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -189,12 +191,19 @@ IN_PROC_BROWSER_TEST_F(ExtensionLoadingTest,
       InstallExtension(extension_dir.Pack(), 1 /*new install*/);
   ASSERT_TRUE(extension);
   std::string extension_id = extension->id();
+  const auto dev_tools_activity =
+      std::make_pair(Activity::DEV_TOOLS, std::string());
 
   ProcessManager* process_manager = ProcessManager::Get(profile());
   EXPECT_EQ(0, process_manager->GetLazyKeepaliveCount(extension));
+  ProcessManager::ActivitiesMultiset activities =
+      process_manager->GetLazyKeepaliveActivities(extension);
+  EXPECT_TRUE(activities.empty());
 
   devtools_util::InspectBackgroundPage(extension, profile());
   EXPECT_EQ(1, process_manager->GetLazyKeepaliveCount(extension));
+  activities = process_manager->GetLazyKeepaliveActivities(extension);
+  EXPECT_THAT(activities, testing::UnorderedElementsAre(dev_tools_activity));
 
   // Opening DevTools will cause the background page to load. Wait for it.
   WaitForExtensionViewsToLoad();
@@ -221,6 +230,8 @@ IN_PROC_BROWSER_TEST_F(ExtensionLoadingTest,
 
   // Keepalive count should stabilize back to 1, because DevTools is still open.
   EXPECT_EQ(1, process_manager->GetLazyKeepaliveCount(extension));
+  activities = process_manager->GetLazyKeepaliveActivities(extension);
+  EXPECT_THAT(activities, testing::UnorderedElementsAre(dev_tools_activity));
 }
 
 // Tests whether the extension runtime stays valid when an extension reloads
@@ -295,6 +306,11 @@ IN_PROC_BROWSER_TEST_F(ExtensionLoadingTest, RuntimeValidWhileDevToolsOpen) {
   ASSERT_TRUE(content::ExecuteScriptAndExtractBool(
       bg_contents, "domAutomationController.send(is_valid);", &is_valid));
   EXPECT_TRUE(is_valid);
+
+  // Tidy up.
+  DevToolsWindowTesting::CloseDevToolsWindowSync(
+      DevToolsWindow::FindDevToolsWindow(
+          content::DevToolsAgentHost::GetOrCreateFor(bg_contents).get()));
 }
 
 }  // namespace

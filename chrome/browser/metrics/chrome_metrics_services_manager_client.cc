@@ -8,13 +8,14 @@
 #include "base/feature_list.h"
 #include "base/logging.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/metrics/chrome_metrics_service_accessor.h"
 #include "chrome/browser/metrics/chrome_metrics_service_client.h"
 #include "chrome/browser/metrics/variations/chrome_variations_service_client.h"
 #include "chrome/browser/metrics/variations/ui_string_overrider_factory.h"
+#include "chrome/browser/net/system_network_context_manager.h"
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_otr_state.h"
 #include "chrome/common/chrome_switches.h"
@@ -27,6 +28,8 @@
 #include "components/variations/variations_associated_data.h"
 #include "components/version_info/version_info.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/network_service_instance.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 
 #if defined(OS_ANDROID)
 #include "chrome/browser/ui/android/tab_model/tab_model.h"
@@ -66,7 +69,7 @@ const char kRateParamName[] = "sampling_rate_per_mille";
 // because it needs access to IO and cannot work from UI thread.
 void PostStoreMetricsClientInfo(const metrics::ClientInfo& client_info) {
   base::PostTaskWithTraits(
-      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
       base::BindOnce(&GoogleUpdateSettings::StoreMetricsClientInfo,
                      client_info));
 }
@@ -117,11 +120,13 @@ base::string16 GetRegistryBackupKey() {
 class ChromeMetricsServicesManagerClient::ChromeEnabledStateProvider
     : public metrics::EnabledStateProvider {
  public:
-  ChromeEnabledStateProvider() {}
+  explicit ChromeEnabledStateProvider(PrefService* local_state)
+      : local_state_(local_state) {}
   ~ChromeEnabledStateProvider() override {}
 
   bool IsConsentGiven() const override {
-    return ChromeMetricsServiceAccessor::IsMetricsAndCrashReportingEnabled();
+    return ChromeMetricsServiceAccessor::IsMetricsAndCrashReportingEnabled(
+        local_state_);
   }
 
   bool IsReportingEnabled() const override {
@@ -129,12 +134,16 @@ class ChromeMetricsServicesManagerClient::ChromeEnabledStateProvider
            ChromeMetricsServicesManagerClient::IsClientInSample();
   }
 
+ private:
+  PrefService* const local_state_;
+
   DISALLOW_COPY_AND_ASSIGN(ChromeEnabledStateProvider);
 };
 
 ChromeMetricsServicesManagerClient::ChromeMetricsServicesManagerClient(
     PrefService* local_state)
-    : enabled_state_provider_(std::make_unique<ChromeEnabledStateProvider>()),
+    : enabled_state_provider_(
+          std::make_unique<ChromeEnabledStateProvider>(local_state)),
       local_state_(local_state) {
   DCHECK(local_state);
 }
@@ -238,7 +247,8 @@ ChromeMetricsServicesManagerClient::CreateVariationsService() {
   return variations::VariationsService::Create(
       std::make_unique<ChromeVariationsServiceClient>(), local_state_,
       GetMetricsStateManager(), switches::kDisableBackgroundNetworking,
-      chrome_variations::CreateUIStringOverrider());
+      chrome_variations::CreateUIStringOverrider(),
+      base::BindOnce(&content::GetNetworkConnectionTracker));
 }
 
 std::unique_ptr<metrics::MetricsServiceClient>
@@ -252,9 +262,10 @@ ChromeMetricsServicesManagerClient::CreateEntropyProvider() {
   return GetMetricsStateManager()->CreateDefaultEntropyProvider();
 }
 
-net::URLRequestContextGetter*
-ChromeMetricsServicesManagerClient::GetURLRequestContext() {
-  return g_browser_process->system_request_context();
+scoped_refptr<network::SharedURLLoaderFactory>
+ChromeMetricsServicesManagerClient::GetURLLoaderFactory() {
+  return g_browser_process->system_network_context_manager()
+      ->GetSharedURLLoaderFactory();
 }
 
 bool ChromeMetricsServicesManagerClient::IsMetricsReportingEnabled() {

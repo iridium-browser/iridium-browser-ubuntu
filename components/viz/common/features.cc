@@ -23,10 +23,6 @@ const base::Feature kEnableSurfaceSynchronization{
     "SurfaceSynchronization", base::FEATURE_DISABLED_BY_DEFAULT};
 #endif
 
-// Enables DumpWithoutCrashing of surface invariants violations.
-const base::Feature kEnableInvariantsViolationLogging{
-    "InvariantsViolationLogging", base::FEATURE_DISABLED_BY_DEFAULT};
-
 // Enables running the display compositor as part of the viz service in the GPU
 // process. This is also referred to as out-of-process display compositor
 // (OOP-D).
@@ -40,16 +36,19 @@ const base::Feature kEnableVizHitTestDrawQuad{
 const base::Feature kEnableVizHitTestSurfaceLayer{
     "VizHitTestSurfaceLayer", base::FEATURE_DISABLED_BY_DEFAULT};
 
+// Use the SkiaRenderer.
+const base::Feature kUseSkiaDeferredDisplayList{
+    "UseSkiaDeferredDisplayList", base::FEATURE_DISABLED_BY_DEFAULT};
+
+// Use the Skia deferred display list.
+const base::Feature kUseSkiaRenderer{"UseSkiaRenderer",
+                                     base::FEATURE_DISABLED_BY_DEFAULT};
+
 bool IsSurfaceSynchronizationEnabled() {
   auto* command_line = base::CommandLine::ForCurrentProcess();
   return base::FeatureList::IsEnabled(kEnableSurfaceSynchronization) ||
          command_line->HasSwitch(switches::kEnableSurfaceSynchronization) ||
          base::FeatureList::IsEnabled(kVizDisplayCompositor);
-}
-
-bool IsSurfaceInvariantsViolationLoggingEnabled() {
-  return IsSurfaceSynchronizationEnabled() &&
-         base::FeatureList::IsEnabled(kEnableInvariantsViolationLogging);
 }
 
 bool IsVizHitTestingDrawQuadEnabled() {
@@ -63,16 +62,26 @@ bool IsVizHitTestingEnabled() {
 }
 
 bool IsVizHitTestingSurfaceLayerEnabled() {
-  // TODO(riajiang): Check feature flag as well. https://crbug.com/804888
   // TODO(riajiang): Check kVizDisplayCompositor feature when it works with
   // that config.
-  return base::CommandLine::ForCurrentProcess()->HasSwitch(
-             switches::kUseVizHitTestSurfaceLayer) ||
-         base::FeatureList::IsEnabled(kEnableVizHitTestSurfaceLayer);
+  return (base::CommandLine::ForCurrentProcess()->HasSwitch(
+              switches::kUseVizHitTestSurfaceLayer) ||
+          base::FeatureList::IsEnabled(kEnableVizHitTestSurfaceLayer)) &&
+         !IsVizHitTestingDrawQuadEnabled();
 }
 
 bool IsDrawOcclusionEnabled() {
   return base::FeatureList::IsEnabled(kEnableDrawOcclusion);
+}
+
+bool IsUsingSkiaRenderer() {
+  return base::FeatureList::IsEnabled(kUseSkiaRenderer);
+}
+
+bool IsUsingSkiaDeferredDisplayList() {
+  return IsUsingSkiaRenderer() &&
+         base::FeatureList::IsEnabled(kUseSkiaDeferredDisplayList) &&
+         base::FeatureList::IsEnabled(kVizDisplayCompositor);
 }
 
 }  // namespace features

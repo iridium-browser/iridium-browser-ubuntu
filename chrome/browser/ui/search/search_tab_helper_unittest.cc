@@ -11,9 +11,11 @@
 #include <tuple>
 #include <utility>
 
+#include "base/bind.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "chrome/browser/signin/fake_signin_manager_builder.h"
+#include "chrome/browser/signin/identity_manager_factory.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/sync/profile_sync_test_util.h"
@@ -36,6 +38,7 @@
 #include "ipc/ipc_message.h"
 #include "ipc/ipc_test_sink.h"
 #include "net/base/net_errors.h"
+#include "services/identity/public/cpp/identity_test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -53,10 +56,23 @@ class MockSearchIPCRouterDelegate : public SearchIPCRouter::Delegate {
  public:
   virtual ~MockSearchIPCRouterDelegate() {}
 
-  MOCK_METHOD1(FocusOmnibox, void(OmniboxFocusState state));
+  MOCK_METHOD1(FocusOmnibox, void(bool focus));
   MOCK_METHOD1(OnDeleteMostVisitedItem, void(const GURL& url));
   MOCK_METHOD1(OnUndoMostVisitedDeletion, void(const GURL& url));
   MOCK_METHOD0(OnUndoAllMostVisitedDeletions, void());
+  MOCK_METHOD2(OnAddCustomLink,
+               bool(const GURL& url, const std::string& title));
+  MOCK_METHOD3(OnUpdateCustomLink,
+               bool(const GURL& url,
+                    const GURL& new_url,
+                    const std::string& new_title));
+  MOCK_METHOD1(OnDeleteCustomLink, bool(const GURL& url));
+  MOCK_METHOD0(OnUndoCustomLinkAction, void());
+  MOCK_METHOD0(OnResetCustomLinks, void());
+  MOCK_METHOD2(
+      OnDoesUrlResolve,
+      void(const GURL& url,
+           chrome::mojom::EmbeddedSearch::DoesUrlResolveCallback callback));
   MOCK_METHOD2(OnLogEvent, void(NTPLoggingEventType event,
                                 base::TimeDelta time));
   MOCK_METHOD1(OnLogMostVisitedImpression,
@@ -66,6 +82,13 @@ class MockSearchIPCRouterDelegate : public SearchIPCRouter::Delegate {
   MOCK_METHOD1(PasteIntoOmnibox, void(const base::string16&));
   MOCK_METHOD1(ChromeIdentityCheck, bool(const base::string16& identity));
   MOCK_METHOD0(HistorySyncCheck, bool());
+  MOCK_METHOD1(OnSetCustomBackgroundURL, void(const GURL& url));
+  MOCK_METHOD4(OnSetCustomBackgroundURLWithAttributions,
+               void(const GURL& background_url,
+                    const std::string& attribution_line_1,
+                    const std::string& attribution_line_2,
+                    const GURL& action_url));
+  MOCK_METHOD0(OnSelectLocalBackgroundImage, void());
 };
 
 class MockEmbeddedSearchClientFactory
@@ -95,22 +118,20 @@ class SearchTabHelperTest : public ChromeRenderViewHostTestHarness {
   content::BrowserContext* CreateBrowserContext() override {
     TestingProfile::Builder builder;
     builder.AddTestingFactory(SigninManagerFactory::GetInstance(),
-                              BuildFakeSigninManagerBase);
-    builder.AddTestingFactory(ProfileSyncServiceFactory::GetInstance(),
-                              BuildMockProfileSyncService);
+                              base::BindRepeating(&BuildFakeSigninManagerBase));
+    builder.AddTestingFactory(
+        ProfileSyncServiceFactory::GetInstance(),
+        base::BindRepeating(&BuildMockProfileSyncService));
     return builder.Build().release();
   }
 
-  // Creates a sign-in manager for tests.  If |username| is not empty, the
-  // testing profile of the WebContents will be connected to the given account.
-  void CreateSigninManager(const std::string& username) {
-    SigninManagerBase* signin_manager =
-        SigninManagerFactory::GetForProfile(profile());
-
-    if (!username.empty()) {
-      ASSERT_TRUE(signin_manager);
-      signin_manager->SetAuthenticatedAccountInfo(username, username);
-    }
+  // Associates |email| with profile as the primary account. |email|
+  // should not be empty.
+  void SetUpAccount(const std::string& email) {
+    ASSERT_FALSE(email.empty());
+    identity::SetPrimaryAccount(
+        SigninManagerFactory::GetForProfile(profile()),
+        IdentityManagerFactory::GetForProfile(profile()), email);
   }
 
   // Configure the account to |sync_history| or not.
@@ -140,7 +161,7 @@ class SearchTabHelperTest : public ChromeRenderViewHostTestHarness {
 
 TEST_F(SearchTabHelperTest, ChromeIdentityCheckMatch) {
   NavigateAndCommit(GURL(chrome::kChromeSearchLocalNtpUrl));
-  CreateSigninManager(std::string("foo@bar.com"));
+  SetUpAccount("foo@bar.com");
   SearchTabHelper* search_tab_helper =
       SearchTabHelper::FromWebContents(web_contents());
   ASSERT_NE(nullptr, search_tab_helper);
@@ -151,7 +172,7 @@ TEST_F(SearchTabHelperTest, ChromeIdentityCheckMatch) {
 
 TEST_F(SearchTabHelperTest, ChromeIdentityCheckMatchSlightlyDifferentGmail) {
   NavigateAndCommit(GURL(chrome::kChromeSearchLocalNtpUrl));
-  CreateSigninManager(std::string("foobar123@gmail.com"));
+  SetUpAccount("foobar123@gmail.com");
   SearchTabHelper* search_tab_helper =
       SearchTabHelper::FromWebContents(web_contents());
   ASSERT_NE(nullptr, search_tab_helper);
@@ -165,8 +186,7 @@ TEST_F(SearchTabHelperTest, ChromeIdentityCheckMatchSlightlyDifferentGmail) {
 
 TEST_F(SearchTabHelperTest, ChromeIdentityCheckMatchSlightlyDifferentGmail2) {
   NavigateAndCommit(GURL(chrome::kChromeSearchLocalNtpUrl));
-  //
-  CreateSigninManager(std::string("chrome.user.7FOREVER"));
+  SetUpAccount("chrome.user.7FOREVER");
   SearchTabHelper* search_tab_helper =
       SearchTabHelper::FromWebContents(web_contents());
   ASSERT_NE(nullptr, search_tab_helper);
@@ -180,7 +200,7 @@ TEST_F(SearchTabHelperTest, ChromeIdentityCheckMatchSlightlyDifferentGmail2) {
 
 TEST_F(SearchTabHelperTest, ChromeIdentityCheckMismatch) {
   NavigateAndCommit(GURL(chrome::kChromeSearchLocalNtpUrl));
-  CreateSigninManager(std::string("foo@bar.com"));
+  SetUpAccount("foo@bar.com");
   SearchTabHelper* search_tab_helper =
       SearchTabHelper::FromWebContents(web_contents());
   ASSERT_NE(nullptr, search_tab_helper);
@@ -218,6 +238,19 @@ TEST_F(SearchTabHelperTest, HistorySyncCheckNotSyncing) {
   ASSERT_NE(nullptr, search_tab_helper);
 
   EXPECT_FALSE(search_tab_helper->HistorySyncCheck());
+}
+
+TEST_F(SearchTabHelperTest, FileSelectedUpdatesLastSelectedDirectory) {
+  NavigateAndCommit(GURL(chrome::kChromeUINewTabURL));
+  SearchTabHelper* search_tab_helper =
+      SearchTabHelper::FromWebContents(web_contents());
+  ASSERT_NE(nullptr, search_tab_helper);
+
+  base::FilePath filePath =
+      base::FilePath::FromUTF8Unsafe("a/b/c/Picture/kitten.png");
+  search_tab_helper->FileSelected(filePath, 0, {});
+  Profile* profile = search_tab_helper->profile();
+  EXPECT_EQ(filePath.DirName(), profile->last_selected_directory());
 }
 
 TEST_F(SearchTabHelperTest, TitleIsSetForNTP) {

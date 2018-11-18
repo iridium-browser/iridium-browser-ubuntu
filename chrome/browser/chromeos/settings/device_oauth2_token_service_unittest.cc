@@ -11,12 +11,13 @@
 #include <utility>
 
 #include "base/run_loop.h"
-#include "base/task_scheduler/task_scheduler.h"
+#include "base/task/task_scheduler/task_scheduler.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "chrome/browser/chromeos/policy/device_policy_builder.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/device_oauth2_token_service_delegate.h"
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
+#include "chrome/browser/chromeos/settings/scoped_cros_settings_test_helper.h"
 #include "chrome/browser/chromeos/settings/token_encryptor.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/scoped_testing_local_state.h"
@@ -31,11 +32,12 @@
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_utils.h"
 #include "google_apis/gaia/gaia_oauth_client.h"
+#include "google_apis/gaia/gaia_urls.h"
 #include "google_apis/gaia/oauth2_token_service_test_util.h"
 #include "net/http/http_status_code.h"
-#include "net/url_request/test_url_fetcher_factory.h"
-#include "net/url_request/url_fetcher_delegate.h"
-#include "net/url_request/url_request_test_util.h"
+#include "services/network/public/cpp/weak_wrapper_shared_url_loader_factory.h"
+#include "services/network/test/test_url_loader_factory.h"
+#include "services/network/test/test_utils.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -59,16 +61,13 @@ MockOAuth2TokenServiceObserver::~MockOAuth2TokenServiceObserver() {
 
 }  // namespace
 
-static const int kOAuthTokenServiceUrlFetcherId = 0;
-static const int kValidatorUrlFetcherId = gaia::GaiaOAuthClient::kUrlFetcherId;
-
 class DeviceOAuth2TokenServiceTest : public testing::Test {
  public:
   DeviceOAuth2TokenServiceTest()
       : scoped_testing_local_state_(TestingBrowserProcess::GetGlobal()),
-        request_context_getter_(new net::TestURLRequestContextGetter(
-            base::ThreadTaskRunnerHandle::Get())) {}
-  ~DeviceOAuth2TokenServiceTest() override {}
+        test_shared_loader_factory_(
+            base::MakeRefCounted<network::WeakWrapperSharedURLLoaderFactory>(
+                &test_url_loader_factory_)) {}
 
   // Most tests just want a noop crypto impl with a dummy refresh token value in
   // Local State (if the value is an empty string, it will be ignored).
@@ -111,24 +110,19 @@ class DeviceOAuth2TokenServiceTest : public testing::Test {
 
     SystemSaltGetter::Initialize();
 
-    DeviceSettingsService::Initialize();
     scoped_refptr<ownership::MockOwnerKeyUtil> owner_key_util_(
         new ownership::MockOwnerKeyUtil());
     owner_key_util_->SetPublicKeyFromPrivateKey(
         *device_policy_.GetSigningKey());
     DeviceSettingsService::Get()->SetSessionManager(&session_manager_client_,
                                                     owner_key_util_);
-
-    CrosSettings::Initialize();
   }
 
   void TearDown() override {
     oauth2_service_.reset();
-    CrosSettings::Shutdown();
-    TestingBrowserProcess::GetGlobal()->ShutdownBrowserPolicyConnector();
+    test_shared_loader_factory_->Detach();
     base::TaskScheduler::GetInstance()->FlushForTesting();
     DeviceSettingsService::Get()->UnsetSessionManager();
-    DeviceSettingsService::Shutdown();
     SystemSaltGetter::Shutdown();
     DBusThreadManager::Shutdown();
     base::RunLoop().RunUntilIdle();
@@ -136,7 +130,7 @@ class DeviceOAuth2TokenServiceTest : public testing::Test {
 
   void CreateService() {
     auto delegate = std::make_unique<DeviceOAuth2TokenServiceDelegate>(
-        request_context_getter_.get(), scoped_testing_local_state_.Get());
+        test_shared_loader_factory_, scoped_testing_local_state_.Get());
     delegate->max_refresh_token_validation_retries_ = 0;
     oauth2_service_.reset(new DeviceOAuth2TokenService(std::move(delegate)));
     oauth2_service_->set_max_authorization_token_fetch_retries_for_testing(0);
@@ -171,16 +165,15 @@ class DeviceOAuth2TokenServiceTest : public testing::Test {
 
   // A utility method to return fake URL results, for testing the refresh token
   // validation logic.  For a successful validation attempt, this method will be
-  // called three times for the steps listed below (steps 1 and 2 happen in
-  // parallel).
+  // called three times for the steps listed below.
   //
   // Step 1a: fetch the access token for the tokeninfo API.
   // Step 1b: call the tokeninfo API.
   // Step 2:  Fetch the access token for the requested scope
   //          (in this case, cloudprint).
-  void ReturnOAuthUrlFetchResults(int fetcher_id,
+  void ReturnOAuthUrlFetchResults(const std::string& url,
                                   net::HttpStatusCode response_code,
-                                  const std::string&  response_string);
+                                  const std::string& response_string);
 
   // Generates URL fetch replies with the specified results for requests
   // generated by the token service.
@@ -208,9 +201,11 @@ class DeviceOAuth2TokenServiceTest : public testing::Test {
   };
 
   content::TestBrowserThreadBundle test_browser_thread_bundle_;
+  ScopedCrosSettingsTestHelper cros_settings_test_helper_;
   ScopedTestingLocalState scoped_testing_local_state_;
-  scoped_refptr<net::TestURLRequestContextGetter> request_context_getter_;
-  net::TestURLFetcherFactory factory_;
+  network::TestURLLoaderFactory test_url_loader_factory_;
+  scoped_refptr<network::WeakWrapperSharedURLLoaderFactory>
+      test_shared_loader_factory_;
   FakeCryptohomeClient* fake_cryptohome_client_;
   FakeSessionManagerClient session_manager_client_;
   policy::DevicePolicyBuilder device_policy_;
@@ -220,16 +215,13 @@ class DeviceOAuth2TokenServiceTest : public testing::Test {
 };
 
 void DeviceOAuth2TokenServiceTest::ReturnOAuthUrlFetchResults(
-    int fetcher_id,
+    const std::string& url,
     net::HttpStatusCode response_code,
     const std::string& response_string) {
-  net::TestURLFetcher* fetcher = factory_.GetFetcherByID(fetcher_id);
-  if (fetcher) {
-    factory_.RemoveFetcherFromMap(fetcher_id);
-    fetcher->set_response_code(response_code);
-    fetcher->SetResponseString(response_string);
-    fetcher->delegate()->OnURLFetchComplete(fetcher);
-    base::RunLoop().RunUntilIdle();
+  if (test_url_loader_factory_.IsPending(url)) {
+    test_url_loader_factory_.SimulateResponseForPendingRequest(
+        GURL(url), network::URLLoaderCompletionStatus(net::OK),
+        network::CreateResourceResponseHead(response_code), response_string);
   }
 }
 
@@ -240,20 +232,17 @@ void DeviceOAuth2TokenServiceTest::PerformURLFetchesWithResults(
     const std::string& tokeninfo_fetch_response,
     net::HttpStatusCode service_access_token_status,
     const std::string& service_access_token_response) {
-  ReturnOAuthUrlFetchResults(
-      kValidatorUrlFetcherId,
-      tokeninfo_access_token_status,
-      tokeninfo_access_token_response);
+  ReturnOAuthUrlFetchResults(GaiaUrls::GetInstance()->oauth2_token_url().spec(),
+                             tokeninfo_access_token_status,
+                             tokeninfo_access_token_response);
 
   ReturnOAuthUrlFetchResults(
-      kValidatorUrlFetcherId,
-      tokeninfo_fetch_status,
-      tokeninfo_fetch_response);
+      GaiaUrls::GetInstance()->oauth2_token_info_url().spec(),
+      tokeninfo_fetch_status, tokeninfo_fetch_response);
 
-  ReturnOAuthUrlFetchResults(
-      kOAuthTokenServiceUrlFetcherId,
-      service_access_token_status,
-      service_access_token_response);
+  ReturnOAuthUrlFetchResults(GaiaUrls::GetInstance()->oauth2_token_url().spec(),
+                             service_access_token_status,
+                             service_access_token_response);
 }
 
 void DeviceOAuth2TokenServiceTest::PerformURLFetches() {

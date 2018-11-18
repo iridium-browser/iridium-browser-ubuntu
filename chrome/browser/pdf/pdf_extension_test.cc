@@ -18,10 +18,12 @@
 #include "base/run_loop.h"
 #include "base/strings/pattern.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/post_task.h"
 #include "base/test/test_timeouts.h"
 #include "base/threading/thread_restrictions.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/content_settings/host_content_settings_map_factory.h"
 #include "chrome/browser/extensions/component_loader.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -38,6 +40,7 @@
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/download/public/common/download_item.h"
 #include "components/viz/common/features.h"
 #include "components/zoom/page_zoom.h"
@@ -45,6 +48,7 @@
 #include "components/zoom/zoom_controller.h"
 #include "content/public/browser/browser_accessibility_state.h"
 #include "content/public/browser/browser_plugin_guest_manager.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/notification_observer.h"
@@ -53,19 +57,20 @@
 #include "content/public/browser/plugin_service.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
-#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/content_features.h"
 #include "content/public/common/context_menu_params.h"
 #include "content/public/test/browser_test_utils.h"
+#include "content/public/test/hit_test_region_observer.h"
 #include "content/public/test/test_navigation_observer.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/manifest_handlers/mime_types_handler.h"
 #include "extensions/test/result_catcher.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
+#include "services/network/public/cpp/features.h"
 #include "ui/accessibility/ax_enum_util.h"
 #include "ui/accessibility/ax_node.h"
 #include "ui/accessibility/ax_tree.h"
@@ -105,7 +110,7 @@ bool GetGuestCallback(WebContents** guest_out, WebContents* guest) {
   return false;
 }
 
-class PDFExtensionTest : public ExtensionApiTest {
+class PDFExtensionTest : public extensions::ExtensionApiTest {
  public:
   ~PDFExtensionTest() override {}
 
@@ -114,7 +119,7 @@ class PDFExtensionTest : public ExtensionApiTest {
   }
 
   void SetUpOnMainThread() override {
-    ExtensionApiTest::SetUpOnMainThread();
+    extensions::ExtensionApiTest::SetUpOnMainThread();
     host_resolver()->AddRule("*", "127.0.0.1");
     ASSERT_TRUE(embedded_test_server()->InitializeAndListen());
     content::SetupCrossSiteRedirector(embedded_test_server());
@@ -123,15 +128,13 @@ class PDFExtensionTest : public ExtensionApiTest {
 
   void TearDownOnMainThread() override {
     ASSERT_TRUE(embedded_test_server()->ShutdownAndWaitUntilComplete());
-    ExtensionApiTest::TearDownOnMainThread();
+    extensions::ExtensionApiTest::TearDownOnMainThread();
   }
 
   bool PdfIsExpectedToLoad(const std::string& pdf_file) {
     const char* const kFailingPdfs[] = {
         "pdf_private/accessibility_crash_1.pdf",
         "pdf_private/cfuzz5.pdf",
-        "pdf_private/cfuzz6.pdf",
-        "pdf_private/crash-11-14-44.pdf",
         "pdf_private/js.pdf",
         "pdf_private/segv-ecx.pdf",
         "pdf_private/tests.pdf",
@@ -164,13 +167,13 @@ class PDFExtensionTest : public ExtensionApiTest {
     {
       base::ScopedAllowBlockingForTesting allow_blocking;
       base::FilePath test_data_dir;
-      PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir);
+      base::PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir);
       test_data_dir = test_data_dir.Append(FILE_PATH_LITERAL("pdf"));
       base::FilePath test_util_path = test_data_dir.AppendASCII("test_util.js");
       ASSERT_TRUE(base::ReadFileToString(test_util_path, &test_util_js));
 
       base::FilePath source_root_dir;
-      PathService::Get(base::DIR_SOURCE_ROOT, &source_root_dir);
+      base::PathService::Get(base::DIR_SOURCE_ROOT, &source_root_dir);
       base::FilePath mock_interactions_path = source_root_dir.Append(
           FILE_PATH_LITERAL("third_party/polymer/v1_0/components-chromium/"
                             "iron-test-helpers/mock-interactions.js"));
@@ -230,7 +233,7 @@ class PDFExtensionTest : public ExtensionApiTest {
   void LoadAllPdfsTest(const std::string& dir_name, int k) {
     base::ScopedAllowBlockingForTesting allow_blocking;
     base::FilePath test_data_dir;
-    ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir));
+    ASSERT_TRUE(base::PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir));
     base::FileEnumerator file_enumerator(test_data_dir.AppendASCII(dir_name),
                                          false, base::FileEnumerator::FILES,
                                          FILE_PATH_LITERAL("*.pdf"));
@@ -246,6 +249,11 @@ class PDFExtensionTest : public ExtensionApiTest {
       if (static_cast<int>(base::Hash(filename) % kNumberLoadTestParts) == k) {
         LOG(INFO) << "Loading: " << pdf_file;
         bool success = LoadPdf(embedded_test_server()->GetURL("/" + pdf_file));
+        if (base::FeatureList::IsEnabled(network::features::kNetworkService)) {
+          // This file has races in loading correctly or not.
+          if (pdf_file == "pdf_private/cfuzz5.pdf")
+            continue;
+        }
         EXPECT_EQ(PdfIsExpectedToLoad(pdf_file), success) << pdf_file;
       }
       ++count;
@@ -332,8 +340,8 @@ class PDFExtensionTest : public ExtensionApiTest {
   int CountPDFProcesses() {
     int result = -1;
     base::RunLoop run_loop;
-    content::BrowserThread::PostTaskAndReply(
-        content::BrowserThread::IO, FROM_HERE,
+    base::PostTaskWithTraitsAndReply(
+        FROM_HERE, {content::BrowserThread::IO},
         base::BindOnce(&PDFExtensionTest::CountPDFProcessesOnIOThread,
                        base::Unretained(this), base::Unretained(&result)),
         run_loop.QuitClosure());
@@ -344,7 +352,7 @@ class PDFExtensionTest : public ExtensionApiTest {
   void CountPDFProcessesOnIOThread(int* result) {
     auto* service = content::PluginService::GetInstance();
     *result = service->CountPpapiPluginProcessesForProfile(
-        base::FilePath::FromUTF8Unsafe(ChromeContentClient::kPDFPluginPath),
+        base::FilePath(ChromeContentClient::kPDFPluginPath),
         browser()->profile()->GetPath());
   }
 };
@@ -365,6 +373,8 @@ class PDFExtensionHitTestTest : public PDFExtensionTest,
     PDFExtensionTest::SetUpCommandLine(command_line);
     if (GetParam()) {
       feature_list_.InitAndEnableFeature(features::kEnableVizHitTestDrawQuad);
+    } else {
+      feature_list_.InitAndDisableFeature(features::kEnableVizHitTestDrawQuad);
     }
   }
 
@@ -512,6 +522,26 @@ IN_PROC_BROWSER_TEST_F(PDFExtensionTest, WhitespaceTitle) {
   RunTestsInFile("whitespace_title_test.js", "test-whitespace-title.pdf");
 }
 
+IN_PROC_BROWSER_TEST_F(PDFExtensionTest, Beep) {
+  RunTestsInFile("beep_test.js", "test-beep.pdf");
+}
+
+// TODO(tsepez): See https://crbug.com/696650.
+IN_PROC_BROWSER_TEST_F(PDFExtensionTest, DISABLED_NoBeep) {
+  // Block the exact query from pdf/main.js while still allowing enough
+  // JavaScript to run in the extension for this test harness to complete
+  // its work.
+  auto* map =
+      HostContentSettingsMapFactory::GetForProfile(browser()->profile());
+  map->SetContentSettingCustomScope(
+      ContentSettingsPattern::Wildcard(),
+      ContentSettingsPattern::FromString(
+          "chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai"),
+      CONTENT_SETTINGS_TYPE_JAVASCRIPT, std::string(), CONTENT_SETTING_BLOCK);
+
+  RunTestsInFile("nobeep_test.js", "test-beep.pdf");
+}
+
 IN_PROC_BROWSER_TEST_F(PDFExtensionTest, PageChange) {
   RunTestsInFile("page_change_test.js", "test-bookmarks.pdf");
 }
@@ -588,7 +618,7 @@ IN_PROC_BROWSER_TEST_F(PDFExtensionTest, EnsurePDFFromLocalFileLoads) {
   {
     base::ScopedAllowBlockingForTesting allow_blocking;
     base::FilePath test_data_dir;
-    ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir));
+    ASSERT_TRUE(base::PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir));
     test_data_dir = test_data_dir.Append(FILE_PATH_LITERAL("pdf"));
     base::FilePath test_data_file = test_data_dir.AppendASCII("test.pdf");
     ASSERT_TRUE(PathExists(test_data_file));
@@ -962,12 +992,17 @@ IN_PROC_BROWSER_TEST_F(PDFExtensionTest, NavigationOnCorrectTab) {
   WebContents* active_web_contents = GetActiveWebContents();
   ASSERT_NE(web_contents, active_web_contents);
 
+  content::TestNavigationObserver active_navigation_observer(
+      active_web_contents);
+  content::TestNavigationObserver navigation_observer(web_contents);
   ASSERT_TRUE(content::ExecuteScript(
       guest_contents,
       "viewer.navigator_.navigate("
       "    'www.example.com', Navigator.WindowOpenDisposition.CURRENT_TAB);"));
+  navigation_observer.Wait();
 
-  EXPECT_TRUE(web_contents->GetController().GetPendingEntry());
+  EXPECT_FALSE(navigation_observer.last_navigation_url().is_empty());
+  EXPECT_TRUE(active_navigation_observer.last_navigation_url().is_empty());
   EXPECT_FALSE(active_web_contents->GetController().GetPendingEntry());
 }
 
@@ -983,13 +1018,10 @@ IN_PROC_BROWSER_TEST_F(PDFExtensionTest, OpenFromFTP) {
 }
 
 // For both PDFExtensionTest and PDFIsolatedExtensionTest, MultipleDomains case
-// flakily times out on Win7 Tests (dbg)(1) and win_chromium_dbg_ng bots.
+// is flaky.
 // https://crbug.com/825038
-#if defined(OS_WIN) && !defined(NDEBUG)
+// https://crbug.com/851805
 #define MAYBE_MultipleDomains DISABLED_MultipleDomains
-#else
-#define MAYBE_MultipleDomains MultipleDomains
-#endif
 
 IN_PROC_BROWSER_TEST_F(PDFExtensionTest, MAYBE_MultipleDomains) {
   for (const auto& url :
@@ -1016,7 +1048,8 @@ class PDFIsolatedExtensionTest : public PDFExtensionTest {
   base::test::ScopedFeatureList features_;
 };
 
-// See MAYBE_MultipleDomains definition, above. https://crbug.com/825038
+// See MAYBE_MultipleDomains definition, above.
+// https://crbug.com/825038 and https://crbug.com/851805
 IN_PROC_BROWSER_TEST_F(PDFIsolatedExtensionTest, MAYBE_MultipleDomains) {
   for (const auto& url :
        {embedded_test_server()->GetURL("a.com", "/pdf/test.pdf"),
@@ -1208,8 +1241,7 @@ IN_PROC_BROWSER_TEST_F(PDFExtensionLinkClickTest, OpenPDFWithReplaceState) {
   // Click on the link which opens the PDF via JS.
   content::TestNavigationObserver navigation_observer(web_contents);
   const char kPdfLinkClick[] = "document.getElementById('link').click();";
-  ASSERT_TRUE(content::ExecuteScript(web_contents->GetRenderViewHost(),
-                                     kPdfLinkClick));
+  ASSERT_TRUE(content::ExecuteScript(web_contents, kPdfLinkClick));
   navigation_observer.Wait();
   const GURL& current_url = web_contents->GetURL();
   ASSERT_EQ("/pdf/test-link.pdf", current_url.path());
@@ -1245,6 +1277,114 @@ IN_PROC_BROWSER_TEST_F(PDFExtensionLinkClickTest, OpenPDFWithReplaceState) {
 
   const GURL& url = new_web_contents->GetURL();
   EXPECT_EQ("http://www.example.com/", url.spec());
+}
+
+class PDFExtensionInternalLinkClickTest : public PDFExtensionTest {
+ public:
+  PDFExtensionInternalLinkClickTest() : guest_contents_(nullptr) {}
+  ~PDFExtensionInternalLinkClickTest() override {}
+
+ protected:
+  void LoadTestLinkPdfGetGuestContents() {
+    GURL test_pdf_url(
+        embedded_test_server()->GetURL("/pdf/test-internal-link.pdf"));
+    guest_contents_ = LoadPdfGetGuestContents(test_pdf_url);
+    ASSERT_TRUE(guest_contents_);
+  }
+
+  gfx::Point GetLinkPosition() {
+    // The whole first page is a link.
+    gfx::Point link_position(100, 100);
+    ConvertPageCoordToScreenCoord(guest_contents_, &link_position);
+    return link_position;
+  }
+
+ private:
+  WebContents* guest_contents_;
+};
+
+IN_PROC_BROWSER_TEST_F(PDFExtensionInternalLinkClickTest, CtrlLeft) {
+  LoadTestLinkPdfGetGuestContents();
+
+  WebContents* web_contents = GetActiveWebContents();
+
+  content::WindowedNotificationObserver observer(
+      chrome::NOTIFICATION_TAB_ADDED,
+      content::NotificationService::AllSources());
+  content::SimulateMouseClickAt(web_contents, kDefaultKeyModifier,
+                                blink::WebMouseEvent::Button::kLeft,
+                                GetLinkPosition());
+  observer.Wait();
+
+  int tab_count = browser()->tab_strip_model()->count();
+  ASSERT_EQ(2, tab_count);
+
+  WebContents* active_web_contents = GetActiveWebContents();
+  ASSERT_EQ(web_contents, active_web_contents);
+
+  WebContents* new_web_contents =
+      browser()->tab_strip_model()->GetWebContentsAt(1);
+  ASSERT_TRUE(new_web_contents);
+  ASSERT_NE(web_contents, new_web_contents);
+
+  const GURL& url = new_web_contents->GetURL();
+  EXPECT_EQ("/pdf/test-internal-link.pdf", url.path());
+  EXPECT_EQ("page=2&zoom=100,0,200", url.ref());
+}
+
+IN_PROC_BROWSER_TEST_F(PDFExtensionInternalLinkClickTest, Middle) {
+  LoadTestLinkPdfGetGuestContents();
+
+  WebContents* web_contents = GetActiveWebContents();
+
+  content::WindowedNotificationObserver observer(
+      chrome::NOTIFICATION_TAB_ADDED,
+      content::NotificationService::AllSources());
+  content::SimulateMouseClickAt(web_contents, 0,
+                                blink::WebMouseEvent::Button::kMiddle,
+                                GetLinkPosition());
+  observer.Wait();
+
+  int tab_count = browser()->tab_strip_model()->count();
+  ASSERT_EQ(2, tab_count);
+
+  WebContents* active_web_contents = GetActiveWebContents();
+  ASSERT_EQ(web_contents, active_web_contents);
+
+  WebContents* new_web_contents =
+      browser()->tab_strip_model()->GetWebContentsAt(1);
+  ASSERT_TRUE(new_web_contents);
+  ASSERT_NE(web_contents, new_web_contents);
+
+  const GURL& url = new_web_contents->GetURL();
+  EXPECT_EQ("/pdf/test-internal-link.pdf", url.path());
+  EXPECT_EQ("page=2&zoom=100,0,200", url.ref());
+}
+
+IN_PROC_BROWSER_TEST_F(PDFExtensionInternalLinkClickTest, ShiftLeft) {
+  LoadTestLinkPdfGetGuestContents();
+
+  ASSERT_EQ(1U, chrome::GetTotalBrowserCount());
+
+  WebContents* web_contents = GetActiveWebContents();
+
+  content::WindowedNotificationObserver observer(
+      chrome::NOTIFICATION_BROWSER_OPENED,
+      content::NotificationService::AllSources());
+  content::SimulateMouseClickAt(web_contents, blink::WebInputEvent::kShiftKey,
+                                blink::WebMouseEvent::Button::kLeft,
+                                GetLinkPosition());
+  observer.Wait();
+
+  ASSERT_EQ(2U, chrome::GetTotalBrowserCount());
+
+  WebContents* active_web_contents =
+      chrome::FindLastActive()->tab_strip_model()->GetActiveWebContents();
+  ASSERT_NE(web_contents, active_web_contents);
+
+  const GURL& url = active_web_contents->GetURL();
+  EXPECT_EQ("/pdf/test-internal-link.pdf", url.path());
+  EXPECT_EQ("page=2&zoom=100,0,200", url.ref());
 }
 
 class PDFExtensionClipboardTest : public PDFExtensionTest {
@@ -1632,6 +1772,64 @@ IN_PROC_BROWSER_TEST_F(PDFExtensionTest, CtrlWheelInvokesCustomZoom) {
 
 #endif  // defined(OS_MACOSX)
 
+#if (defined(OS_WIN) && defined(ADDRESS_SANITIZER)) || \
+    (defined(OS_CHROME) && defined(MEMORY_SANITIZER))
+// https://crbug.com/856169, https://crbug.com/892484
+#define MAYBE_MouseLeave DISABLED_MouseLeave
+#else
+#define MAYBE_MouseLeave MouseLeave
+#endif
+IN_PROC_BROWSER_TEST_P(PDFExtensionHitTestTest, MAYBE_MouseLeave) {
+  GURL url = embedded_test_server()->GetURL("/pdf/pdf_embed.html");
+
+  // Load page with embedded PDF and make sure it succeeds.
+  ASSERT_TRUE(LoadPdf(url));
+  WebContents* guest_contents = nullptr;
+  WebContents* embedder_contents = GetActiveWebContents();
+  content::BrowserPluginGuestManager* guest_manager =
+      embedder_contents->GetBrowserContext()->GetGuestManager();
+  ASSERT_NO_FATAL_FAILURE(guest_manager->ForEachGuest(
+      embedder_contents, base::Bind(&GetGuestCallback, &guest_contents)));
+  ASSERT_NE(nullptr, guest_contents);
+  content::WaitForHitTestDataOrGuestSurfaceReady(guest_contents);
+
+  gfx::Point point_in_parent(250, 25);
+  gfx::Point point_in_pdf(250, 250);
+
+  // Inject script to count MouseLeaves in the PDF.
+  ASSERT_TRUE(content::ExecuteScript(
+      guest_contents,
+      "var enter_count = 0;\n"
+      "var leave_count = 0;\n"
+      "document.addEventListener('mouseenter', function (){\n"
+      "  enter_count++;"
+      "});\n"
+      "document.addEventListener('mouseleave', function (){\n"
+      "  leave_count++;"
+      "});"));
+
+  // Inject some MouseMoves to invoke a MouseLeave in the PDF.
+  content::SimulateRoutedMouseEvent(
+      embedder_contents, blink::WebInputEvent::kMouseMove, point_in_parent);
+  content::SimulateRoutedMouseEvent(
+      embedder_contents, blink::WebInputEvent::kMouseMove, point_in_pdf);
+  content::SimulateRoutedMouseEvent(
+      embedder_contents, blink::WebInputEvent::kMouseMove, point_in_parent);
+
+  // Verify MouseEnter, MouseLeave received.
+  int leave_count = 0;
+  do {
+    ASSERT_TRUE(ExecuteScriptAndExtractInt(
+        guest_contents, "window.domAutomationController.send(leave_count);",
+        &leave_count));
+  } while (!leave_count);
+  int enter_count = 0;
+  ASSERT_TRUE(ExecuteScriptAndExtractInt(
+      guest_contents, "window.domAutomationController.send(enter_count);",
+      &enter_count));
+  EXPECT_EQ(1, enter_count);
+}
+
 IN_PROC_BROWSER_TEST_P(PDFExtensionHitTestTest, ContextMenuCoordinates) {
   GURL url = embedded_test_server()->GetURL("/pdf/pdf_embed.html");
 
@@ -1644,12 +1842,8 @@ IN_PROC_BROWSER_TEST_P(PDFExtensionHitTestTest, ContextMenuCoordinates) {
   ASSERT_NO_FATAL_FAILURE(guest_manager->ForEachGuest(
       embedder_contents, base::Bind(&GetGuestCallback, &guest_contents)));
   ASSERT_NE(nullptr, guest_contents);
-#if defined(USE_AURA)
-  // TODO(wjmaclean): In theory this should be used to make sure the hit testing
-  // for routing to the guest process works as intended. Not sure if not having
-  // this on Mac is an issue.
-  content::WaitForGuestSurfaceReady(guest_contents);
-#endif
+  content::WaitForHitTestDataOrGuestSurfaceReady(guest_contents);
+
   content::RenderProcessHost* guest_process_host =
       guest_contents->GetMainFrame()->GetProcess();
 

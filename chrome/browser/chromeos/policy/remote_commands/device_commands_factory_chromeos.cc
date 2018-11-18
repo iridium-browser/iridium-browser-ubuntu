@@ -4,14 +4,14 @@
 
 #include "chrome/browser/chromeos/policy/remote_commands/device_commands_factory_chromeos.h"
 
-#include <memory>
-
-#include "base/memory/ptr_util.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/logging.h"
+#include "chrome/browser/chromeos/policy/remote_commands/crd_host_delegate.h"
 #include "chrome/browser/chromeos/policy/remote_commands/device_command_fetch_status_job.h"
 #include "chrome/browser/chromeos/policy/remote_commands/device_command_reboot_job.h"
 #include "chrome/browser/chromeos/policy/remote_commands/device_command_screenshot_job.h"
 #include "chrome/browser/chromeos/policy/remote_commands/device_command_set_volume_job.h"
+#include "chrome/browser/chromeos/policy/remote_commands/device_command_start_crd_session_job.h"
+#include "chrome/browser/chromeos/policy/remote_commands/device_command_wipe_users_job.h"
 #include "chrome/browser/chromeos/policy/remote_commands/screenshot_delegate.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "components/policy/core/common/remote_commands/remote_command_job.h"
@@ -21,30 +21,42 @@ namespace em = enterprise_management;
 
 namespace policy {
 
-DeviceCommandsFactoryChromeOS::DeviceCommandsFactoryChromeOS() {
-}
+DeviceCommandsFactoryChromeOS::DeviceCommandsFactoryChromeOS() = default;
 
-DeviceCommandsFactoryChromeOS::~DeviceCommandsFactoryChromeOS() {
-}
+DeviceCommandsFactoryChromeOS::~DeviceCommandsFactoryChromeOS() = default;
 
 std::unique_ptr<RemoteCommandJob>
-DeviceCommandsFactoryChromeOS::BuildJobForType(em::RemoteCommand_Type type) {
+DeviceCommandsFactoryChromeOS::BuildJobForType(em::RemoteCommand_Type type,
+                                               RemoteCommandsService* service) {
   switch (type) {
     case em::RemoteCommand_Type_DEVICE_REBOOT:
-      return base::WrapUnique<RemoteCommandJob>(new DeviceCommandRebootJob(
-          chromeos::DBusThreadManager::Get()->GetPowerManagerClient()));
+      return std::make_unique<DeviceCommandRebootJob>(
+          chromeos::DBusThreadManager::Get()->GetPowerManagerClient());
     case em::RemoteCommand_Type_DEVICE_SCREENSHOT:
-      return base::WrapUnique<RemoteCommandJob>(new DeviceCommandScreenshotJob(
-          std::make_unique<ScreenshotDelegate>()));
+      return std::make_unique<DeviceCommandScreenshotJob>(
+          std::make_unique<ScreenshotDelegate>());
     case em::RemoteCommand_Type_DEVICE_SET_VOLUME:
-      return base::WrapUnique<RemoteCommandJob>(
-          new DeviceCommandSetVolumeJob());
+      return std::make_unique<DeviceCommandSetVolumeJob>();
+    case em::RemoteCommand_Type_DEVICE_START_CRD_SESSION:
+      return std::make_unique<DeviceCommandStartCRDSessionJob>(
+          GetCRDHostDelegate());
     case em::RemoteCommand_Type_DEVICE_FETCH_STATUS:
-      return base::WrapUnique<RemoteCommandJob>(
-          new DeviceCommandFetchStatusJob());
+      return std::make_unique<DeviceCommandFetchStatusJob>();
+    case em::RemoteCommand_Type_DEVICE_WIPE_USERS:
+      return std::make_unique<DeviceCommandWipeUsersJob>(service);
     default:
+      // Other types of commands should be sent to UserCommandsFactoryChromeOS
+      // instead of here.
+      NOTREACHED();
       return nullptr;
   }
+}
+
+CRDHostDelegate* DeviceCommandsFactoryChromeOS::GetCRDHostDelegate() {
+  if (!crd_host_delegate_) {
+    crd_host_delegate_ = std::make_unique<CRDHostDelegate>();
+  }
+  return crd_host_delegate_.get();
 }
 
 }  // namespace policy

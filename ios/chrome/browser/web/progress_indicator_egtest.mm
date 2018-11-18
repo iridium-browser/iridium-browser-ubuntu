@@ -10,7 +10,7 @@
 #include "base/run_loop.h"
 #include "base/strings/stringprintf.h"
 #include "base/synchronization/condition_variable.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #import "base/test/ios/wait_util.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/time/time.h"
@@ -97,7 +97,7 @@ class InfinitePendingResponseProvider : public HtmlResponseProvider {
     base::test::ios::WaitUntilCondition(
         ^{
           base::AutoLock auto_lock(lock_);
-          return terminated_.load(std::memory_order_release);
+          return terminated_.load(std::memory_order_acquire);
         },
         false, base::TimeDelta::FromSeconds(10));
   }
@@ -120,7 +120,7 @@ class InfinitePendingResponseProvider : public HtmlResponseProvider {
       *response_body = base::StringPrintf("<p>%s</p>", kPageText);
       {
         base::AutoLock auto_lock(lock_);
-        while (!aborted_.load(std::memory_order_release))
+        while (!aborted_.load(std::memory_order_acquire))
           condition_variable_.Wait();
         terminated_.store(true, std::memory_order_release);
       }

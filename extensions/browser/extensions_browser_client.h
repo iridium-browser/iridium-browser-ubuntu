@@ -15,6 +15,7 @@
 #include "content/public/common/resource_type.h"
 #include "extensions/browser/extension_event_histogram_value.h"
 #include "extensions/browser/extension_prefs_observer.h"
+#include "extensions/browser/extensions_browser_api_provider.h"
 #include "extensions/common/extension_id.h"
 #include "extensions/common/view_type.h"
 #include "services/network/public/mojom/url_loader.mojom.h"
@@ -44,6 +45,12 @@ class URLRequest;
 class URLRequestJob;
 }
 
+namespace network {
+namespace mojom {
+class NetworkContext;
+}
+}  // namespace network
+
 namespace update_client {
 class UpdateClient;
 }
@@ -67,6 +74,7 @@ class KioskDelegate;
 class ProcessManagerDelegate;
 class ProcessMap;
 class RuntimeAPIDelegate;
+class UserScriptListener;
 
 // Interface to allow the extensions module to make browser-process-specific
 // queries of the embedder. Should be Set() once in the browser process.
@@ -76,7 +84,23 @@ class RuntimeAPIDelegate;
 // they are only used in the browser process.
 class ExtensionsBrowserClient {
  public:
-  virtual ~ExtensionsBrowserClient() {}
+  ExtensionsBrowserClient();
+  virtual ~ExtensionsBrowserClient();
+
+  // Returns the single instance of |this|.
+  static ExtensionsBrowserClient* Get();
+
+  // Sets and initializes the single instance.
+  static void Set(ExtensionsBrowserClient* client);
+
+  // Registers all extension functions.
+  void RegisterExtensionFunctions(ExtensionFunctionRegistry* registry);
+
+  // Adds a new API provider to the client.
+  void AddAPIProvider(std::unique_ptr<ExtensionsBrowserAPIProvider> provider);
+
+  /////////////////////////////////////////////////////////////////////////////
+  // Virtual Methods
 
   // Returns true if the embedder has started shutting down.
   virtual bool IsShuttingDown() = 0;
@@ -201,6 +225,13 @@ class ExtensionsBrowserClient {
   // ExternalProtocolHandler::PermitLaunchUrl() in Chrome.
   virtual void PermitExternalProtocolHandler() = 0;
 
+  // Return true if the device is enrolled in Demo Mode.
+  virtual bool IsInDemoMode() = 0;
+
+  // Return true if |app_id| matches the screensaver and the device is enrolled
+  // in Demo Mode.
+  virtual bool IsScreensaverInDemoMode(const std::string& app_id) = 0;
+
   // Return true if the system is run in forced app mode.
   virtual bool IsRunningInForcedAppMode() = 0;
 
@@ -214,10 +245,6 @@ class ExtensionsBrowserClient {
   // Returns the factory that provides an ExtensionSystem to be returned from
   // ExtensionSystem::Get.
   virtual ExtensionSystemProvider* GetExtensionSystemFactory() = 0;
-
-  // Registers extension functions not belonging to the core extensions APIs.
-  virtual void RegisterExtensionFunctions(
-      ExtensionFunctionRegistry* registry) const = 0;
 
   // Registers additional interfaces to expose to a RenderFrame.
   virtual void RegisterExtensionInterfaces(
@@ -324,11 +351,21 @@ class ExtensionsBrowserClient {
   virtual bool IsExtensionEnabled(const std::string& extension_id,
                                   content::BrowserContext* context) const;
 
-  // Returns the single instance of |this|.
-  static ExtensionsBrowserClient* Get();
+  // http://crbug.com/829412
+  // Renderers with WebUI bindings shouldn't make http(s) requests for security
+  // reasons (e.g. to avoid malicious responses being able to run code in
+  // priviliged renderers). Fix these webui's to make requests through C++
+  // code instead.
+  virtual bool IsWebUIAllowedToMakeNetworkRequests(const url::Origin& origin);
 
-  // Initialize the single instance.
-  static void Set(ExtensionsBrowserClient* client);
+  virtual network::mojom::NetworkContext* GetSystemNetworkContext();
+
+  virtual UserScriptListener* GetUserScriptListener();
+
+ private:
+  std::vector<std::unique_ptr<ExtensionsBrowserAPIProvider>> providers_;
+
+  DISALLOW_COPY_AND_ASSIGN(ExtensionsBrowserClient);
 };
 
 }  // namespace extensions

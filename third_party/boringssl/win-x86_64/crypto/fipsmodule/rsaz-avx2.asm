@@ -2,6 +2,10 @@ default	rel
 %define XMMWORD
 %define YMMWORD
 %define ZMMWORD
+
+%ifdef BORINGSSL_PREFIX
+%include "boringssl_prefix_symbols_nasm.inc"
+%endif
 section	.text code align=64
 
 
@@ -1817,6 +1821,11 @@ ALIGN	32
 rsaz_avx2_eligible:
 	lea	rax,[OPENSSL_ia32cap_P]
 	mov	eax,DWORD[8+rax]
+	mov	ecx,524544
+	mov	edx,0
+	and	ecx,eax
+	cmp	ecx,524544
+	cmove	eax,edx
 	and	eax,32
 	shr	eax,5
 	DB	0F3h,0C3h		;repret

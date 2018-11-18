@@ -363,7 +363,8 @@ on an alert, or clicks on a "triage" button on the alerts page. It allows the
         // pipeline. So for now we just hard code a list of suites that specify
         // an additional subtest entry to make life easier for sheriffs.
         // https://github.com/catapult-project/catapult/issues/3150
-        const SUITES_WITH_SUBTEST_ENTRY = ['v8'];
+        const SUITES_WITH_SUBTEST_ENTRY =
+            ['rendering.desktop', 'rendering.mobile', 'v8'];
         if (SUITES_WITH_SUBTEST_ENTRY.indexOf(alert.testsuite) == -1) {
           return alert.testsuite;
         }
@@ -453,7 +454,7 @@ on an alert, or clicks on a "triage" button on the alerts page. It allows the
             const input = document.createElement('textarea');
             input.name = data[i].name;
             input.value = (typeof data[i].value === 'object' ?
-                JSON.stringify(data[i].value) : data[i].value);
+              JSON.stringify(data[i].value) : data[i].value);
             Polymer.dom(form).appendChild(input);
           }
         }

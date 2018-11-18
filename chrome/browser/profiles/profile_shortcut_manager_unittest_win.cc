@@ -9,8 +9,8 @@
 #include "base/location.h"
 #include "base/path_service.h"
 #include "base/strings/string16.h"
+#include "base/task/post_task.h"
 #include "base/task_runner_util.h"
-#include "base/task_scheduler/post_task.h"
 #include "base/test/scoped_path_override.h"
 #include "base/test/test_shortcut_win.h"
 #include "chrome/browser/profiles/profile.h"
@@ -21,12 +21,12 @@
 #include "chrome/browser/profiles/profile_shortcut_manager_win.h"
 #include "chrome/browser/shell_integration_win.h"
 #include "chrome/grit/chromium_strings.h"
-#include "chrome/installer/util/browser_distribution.h"
-#include "chrome/installer/util/product.h"
+#include "chrome/installer/util/install_util.h"
 #include "chrome/installer/util/shell_util.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
+#include "components/account_id/account_id.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -91,7 +91,7 @@ class ProfileShortcutManagerTest : public testing::Test {
         << location.ToString();
     profile_attributes_storage_->AddProfile(profile_1_path_, profile_1_name_,
                                             std::string(), base::string16(), 0,
-                                            std::string());
+                                            std::string(), EmptyAccountId());
     // Also create a non-badged shortcut for Chrome, which is conveniently done
     // by |CreateProfileShortcut()| since there is only one profile.
     profile_shortcut_manager_->CreateProfileShortcut(profile_1_path_);
@@ -110,8 +110,7 @@ class ProfileShortcutManagerTest : public testing::Test {
   base::FilePath GetDefaultShortcutPathForProfile(
       const base::string16& profile_name) {
     return GetUserShortcutsDirectory().Append(
-        profiles::internal::GetShortcutFilenameForProfile(profile_name,
-                                                          GetDistribution()));
+        profiles::internal::GetShortcutFilenameForProfile(profile_name));
   }
 
   // Returns true if the shortcut for this profile exists.
@@ -147,7 +146,7 @@ class ProfileShortcutManagerTest : public testing::Test {
     expected_properties.set_app_id(
         shell_integration::win::GetChromiumModelIdForProfile(profile_path));
     expected_properties.set_target(GetExePath());
-    expected_properties.set_description(GetDistribution()->GetAppDescription());
+    expected_properties.set_description(InstallUtil::GetAppDescription());
     expected_properties.set_dual_mode(false);
     expected_properties.set_arguments(
         profiles::internal::CreateProfileShortcutFlags(profile_path));
@@ -172,7 +171,7 @@ class ProfileShortcutManagerTest : public testing::Test {
     expected_properties.set_target(GetExePath());
     expected_properties.set_arguments(base::string16());
     expected_properties.set_icon(GetExePath(), 0);
-    expected_properties.set_description(GetDistribution()->GetAppDescription());
+    expected_properties.set_description(InstallUtil::GetAppDescription());
     expected_properties.set_dual_mode(false);
     PostValidateShortcut(location, shortcut_path, expected_properties);
   }
@@ -190,7 +189,7 @@ class ProfileShortcutManagerTest : public testing::Test {
         << location.ToString();
     profile_attributes_storage_->AddProfile(profile_path, profile_name,
                                             std::string(), base::string16(), 0,
-                                            std::string());
+                                            std::string(), EmptyAccountId());
     profile_shortcut_manager_->CreateProfileShortcut(profile_path);
     thread_bundle_.RunUntilIdle();
     ValidateProfileShortcut(location, profile_name, profile_path);
@@ -204,8 +203,8 @@ class ProfileShortcutManagerTest : public testing::Test {
         base::CreateCOMSTATaskRunnerWithTraits({base::MayBlock()}).get(),
         location,
         base::Bind(&ShellUtil::CreateOrUpdateShortcut,
-                   ShellUtil::SHORTCUT_LOCATION_DESKTOP, GetDistribution(),
-                   properties, ShellUtil::SHELL_SHORTCUT_CREATE_ALWAYS),
+                   ShellUtil::SHORTCUT_LOCATION_DESKTOP, properties,
+                   ShellUtil::SHELL_SHORTCUT_CREATE_ALWAYS),
         base::Bind([](bool succeeded) { EXPECT_TRUE(succeeded); }));
     thread_bundle_.RunUntilIdle();
   }
@@ -219,9 +218,8 @@ class ProfileShortcutManagerTest : public testing::Test {
         GetUserShortcutsDirectory().Append(shortcut_name + installer::kLnkExt);
     EXPECT_FALSE(base::PathExists(shortcut_path)) << location.ToString();
 
-    installer::Product product(GetDistribution());
     ShellUtil::ShortcutProperties properties(ShellUtil::CURRENT_USER);
-    product.AddDefaultShortcutProperties(GetExePath(), &properties);
+    ShellUtil::AddDefaultShortcutProperties(GetExePath(), &properties);
     properties.set_shortcut_name(shortcut_name);
     PostCreateOrUpdateShortcut(location, properties);
     EXPECT_TRUE(base::PathExists(shortcut_path)) << location.ToString();
@@ -231,13 +229,11 @@ class ProfileShortcutManagerTest : public testing::Test {
 
   base::FilePath CreateRegularSystemLevelShortcut(
       const base::Location& location) {
-    BrowserDistribution* distribution = GetDistribution();
-    installer::Product product(distribution);
     ShellUtil::ShortcutProperties properties(ShellUtil::SYSTEM_LEVEL);
-    product.AddDefaultShortcutProperties(GetExePath(), &properties);
+    ShellUtil::AddDefaultShortcutProperties(GetExePath(), &properties);
     PostCreateOrUpdateShortcut(location, properties);
     const base::FilePath system_level_shortcut_path =
-        GetSystemShortcutsDirectory().Append(distribution->GetShortcutName() +
+        GetSystemShortcutsDirectory().Append(InstallUtil::GetShortcutName() +
                                              installer::kLnkExt);
     EXPECT_TRUE(base::PathExists(system_level_shortcut_path))
         << location.ToString();
@@ -255,20 +251,15 @@ class ProfileShortcutManagerTest : public testing::Test {
     thread_bundle_.RunUntilIdle();
   }
 
-  BrowserDistribution* GetDistribution() {
-    return BrowserDistribution::GetDistribution();
-  }
-
   base::FilePath GetExePath() {
     base::FilePath exe_path;
-    EXPECT_TRUE(PathService::Get(base::FILE_EXE, &exe_path));
+    EXPECT_TRUE(base::PathService::Get(base::FILE_EXE, &exe_path));
     return exe_path;
   }
 
   base::FilePath GetUserShortcutsDirectory() {
     base::FilePath user_shortcuts_directory;
     EXPECT_TRUE(ShellUtil::GetShortcutPath(ShellUtil::SHORTCUT_LOCATION_DESKTOP,
-                                           GetDistribution(),
                                            ShellUtil::CURRENT_USER,
                                            &user_shortcuts_directory));
     return user_shortcuts_directory;
@@ -277,7 +268,6 @@ class ProfileShortcutManagerTest : public testing::Test {
   base::FilePath GetSystemShortcutsDirectory() {
     base::FilePath system_shortcuts_directory;
     EXPECT_TRUE(ShellUtil::GetShortcutPath(ShellUtil::SHORTCUT_LOCATION_DESKTOP,
-                                           GetDistribution(),
                                            ShellUtil::SYSTEM_LEVEL,
                                            &system_shortcuts_directory));
     return system_shortcuts_directory;
@@ -300,12 +290,10 @@ class ProfileShortcutManagerTest : public testing::Test {
 
 TEST_F(ProfileShortcutManagerTest, ShortcutFilename) {
   const base::string16 kProfileName = L"Harry";
-  BrowserDistribution* distribution = GetDistribution();
   const base::string16 expected_name = kProfileName + L" - " +
       l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME) + installer::kLnkExt;
   EXPECT_EQ(expected_name,
-            profiles::internal::GetShortcutFilenameForProfile(kProfileName,
-                                                              distribution));
+            profiles::internal::GetShortcutFilenameForProfile(kProfileName));
 }
 
 TEST_F(ProfileShortcutManagerTest, ShortcutLongFilenameIsTrimmed) {
@@ -314,27 +302,23 @@ TEST_F(ProfileShortcutManagerTest, ShortcutLongFilenameIsTrimmed) {
       L"Harry Harry Harry Harry Harry Harry Harry Harry Harry Harry Harry"
       L"Harry Harry Harry Harry Harry Harry Harry Harry Harry Harry Harry";
   const base::string16 file_name =
-      profiles::internal::GetShortcutFilenameForProfile(kLongProfileName,
-                                                        GetDistribution());
+      profiles::internal::GetShortcutFilenameForProfile(kLongProfileName);
   EXPECT_LT(file_name.size(), kLongProfileName.size());
 }
 
 TEST_F(ProfileShortcutManagerTest, ShortcutFilenameStripsReservedCharacters) {
   const base::string16 kProfileName = L"<Harry/>";
   const base::string16 kSanitizedProfileName = L"Harry";
-  BrowserDistribution* distribution = GetDistribution();
   const base::string16 expected_name = kSanitizedProfileName + L" - " +
       l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME) + installer::kLnkExt;
   EXPECT_EQ(expected_name,
-            profiles::internal::GetShortcutFilenameForProfile(kProfileName,
-                                                              distribution));
+            profiles::internal::GetShortcutFilenameForProfile(kProfileName));
 }
 
 TEST_F(ProfileShortcutManagerTest, UnbadgedShortcutFilename) {
-  BrowserDistribution* distribution = GetDistribution();
-  EXPECT_EQ(distribution->GetShortcutName() + installer::kLnkExt,
-            profiles::internal::GetShortcutFilenameForProfile(base::string16(),
-                                                              distribution));
+  EXPECT_EQ(
+      InstallUtil::GetShortcutName() + installer::kLnkExt,
+      profiles::internal::GetShortcutFilenameForProfile(base::string16()));
 }
 
 TEST_F(ProfileShortcutManagerTest, ShortcutFlags) {
@@ -372,7 +356,7 @@ TEST_F(ProfileShortcutManagerTest, CreateSecondProfileBadgesFirstShortcut) {
   // Create a second profile without a shortcut.
   profile_attributes_storage_->AddProfile(profile_2_path_, profile_2_name_,
                                           std::string(), base::string16(), 0,
-                                          std::string());
+                                          std::string(), EmptyAccountId());
   thread_bundle_.RunUntilIdle();
 
   // Ensure that the second profile doesn't have a shortcut and that the first
@@ -591,8 +575,8 @@ TEST_F(ProfileShortcutManagerTest, UpdateShortcutWithNoFlags) {
   // a new one without any command-line flags.
   ASSERT_TRUE(base::DeleteFile(
       GetDefaultShortcutPathForProfile(base::string16()), false));
-  const base::FilePath regular_shortcut_path = CreateRegularShortcutWithName(
-      FROM_HERE, GetDistribution()->GetShortcutName());
+  const base::FilePath regular_shortcut_path =
+      CreateRegularShortcutWithName(FROM_HERE, InstallUtil::GetShortcutName());
 
   // Add another profile and check that the shortcut was replaced with
   // a badged shortcut with the right command line for the profile
@@ -608,8 +592,8 @@ TEST_F(ProfileShortcutManagerTest, UpdateTwoShortcutsWithNoFlags) {
   // two new ones without any command-line flags.
   ASSERT_TRUE(base::DeleteFile(
       GetDefaultShortcutPathForProfile(base::string16()), false));
-  const base::FilePath regular_shortcut_path = CreateRegularShortcutWithName(
-      FROM_HERE, GetDistribution()->GetShortcutName());
+  const base::FilePath regular_shortcut_path =
+      CreateRegularShortcutWithName(FROM_HERE, InstallUtil::GetShortcutName());
   const base::FilePath customized_regular_shortcut_path =
       CreateRegularShortcutWithName(FROM_HERE, L"MyChrome");
 
@@ -691,7 +675,7 @@ TEST_F(ProfileShortcutManagerTest, ProfileShortcutsWithSystemLevelShortcut) {
   // Create the initial profile.
   profile_attributes_storage_->AddProfile(profile_1_path_, profile_1_name_,
                                           std::string(), base::string16(), 0,
-                                          std::string());
+                                          std::string(), EmptyAccountId());
   thread_bundle_.RunUntilIdle();
   ASSERT_EQ(1u, profile_attributes_storage_->GetNumberOfProfiles());
 
@@ -710,7 +694,7 @@ TEST_F(ProfileShortcutManagerTest, ProfileShortcutsWithSystemLevelShortcut) {
   // Create a third profile without a shortcut and ensure it doesn't get one.
   profile_attributes_storage_->AddProfile(profile_3_path_, profile_3_name_,
                                           std::string(), base::string16(), 0,
-                                          std::string());
+                                          std::string(), EmptyAccountId());
   thread_bundle_.RunUntilIdle();
   EXPECT_FALSE(ProfileShortcutExistsAtDefaultPath(profile_3_name_));
 
@@ -886,38 +870,38 @@ TEST_F(ProfileShortcutManagerTest, ShortcutFilenameUniquified) {
   std::set<base::FilePath> excludes;
 
   base::string16 shortcut_filename =
-      profiles::internal::GetUniqueShortcutFilenameForProfile(
-          L"Carrie", excludes, GetDistribution());
+      profiles::internal::GetUniqueShortcutFilenameForProfile(L"Carrie",
+                                                              excludes);
   EXPECT_EQ(
       L"Carrie - " + suffix + installer::kLnkExt, shortcut_filename);
   excludes.insert(GetUserShortcutsDirectory().Append(shortcut_filename));
 
   shortcut_filename = profiles::internal::GetUniqueShortcutFilenameForProfile(
-      L"Carrie", excludes, GetDistribution());
+      L"Carrie", excludes);
   EXPECT_EQ(
       L"Carrie - " + suffix + L" (1)" + installer::kLnkExt, shortcut_filename);
   excludes.insert(GetUserShortcutsDirectory().Append(shortcut_filename));
 
   shortcut_filename = profiles::internal::GetUniqueShortcutFilenameForProfile(
-      L"Carrie", excludes, GetDistribution());
+      L"Carrie", excludes);
   EXPECT_EQ(
       L"Carrie - " + suffix + L" (2)" + installer::kLnkExt, shortcut_filename);
   excludes.insert(GetUserShortcutsDirectory().Append(shortcut_filename));
 
   shortcut_filename = profiles::internal::GetUniqueShortcutFilenameForProfile(
-      L"Steven", excludes, GetDistribution());
+      L"Steven", excludes);
   EXPECT_EQ(
       L"Steven - " + suffix + installer::kLnkExt, shortcut_filename);
   excludes.insert(GetUserShortcutsDirectory().Append(shortcut_filename));
 
   shortcut_filename = profiles::internal::GetUniqueShortcutFilenameForProfile(
-      L"Steven", excludes, GetDistribution());
+      L"Steven", excludes);
   EXPECT_EQ(
       L"Steven - " + suffix + L" (1)" + installer::kLnkExt, shortcut_filename);
   excludes.insert(GetUserShortcutsDirectory().Append(shortcut_filename));
 
   shortcut_filename = profiles::internal::GetUniqueShortcutFilenameForProfile(
-      L"Carrie", excludes, GetDistribution());
+      L"Carrie", excludes);
   EXPECT_EQ(
       L"Carrie - " + suffix + L" (3)" + installer::kLnkExt, shortcut_filename);
   excludes.insert(GetUserShortcutsDirectory().Append(shortcut_filename));
@@ -926,14 +910,13 @@ TEST_F(ProfileShortcutManagerTest, ShortcutFilenameUniquified) {
       GetUserShortcutsDirectory().Append(
           L"Carrie - " + suffix + installer::kLnkExt));
   shortcut_filename = profiles::internal::GetUniqueShortcutFilenameForProfile(
-      L"Carrie", excludes, GetDistribution());
+      L"Carrie", excludes);
   EXPECT_EQ(
       L"Carrie - " + suffix + installer::kLnkExt, shortcut_filename);
 }
 
 TEST_F(ProfileShortcutManagerTest, ShortcutFilenameMatcher) {
-  profiles::internal::ShortcutFilenameMatcher matcher(L"Carrie",
-                                                      GetDistribution());
+  profiles::internal::ShortcutFilenameMatcher matcher(L"Carrie");
   const auto suffix = l10n_util::GetStringUTF16(IDS_SHORT_PRODUCT_NAME);
 
   EXPECT_TRUE(matcher.IsCanonical(L"Carrie - " + suffix + L" (2)" +

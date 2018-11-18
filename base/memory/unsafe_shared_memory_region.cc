@@ -19,6 +19,20 @@ UnsafeSharedMemoryRegion UnsafeSharedMemoryRegion::Create(size_t size) {
 }
 
 // static
+UnsafeSharedMemoryRegion UnsafeSharedMemoryRegion::CreateFromHandle(
+    const SharedMemoryHandle& handle) {
+  if (!handle.IsValid())
+    return UnsafeSharedMemoryRegion();
+  auto platform_region =
+      subtle::PlatformSharedMemoryRegion::TakeFromSharedMemoryHandle(
+          handle, subtle::PlatformSharedMemoryRegion::Mode::kUnsafe);
+  if (!platform_region.IsValid()) {
+    return UnsafeSharedMemoryRegion();
+  }
+  return Deserialize(std::move(platform_region));
+}
+
+// static
 UnsafeSharedMemoryRegion UnsafeSharedMemoryRegion::Deserialize(
     subtle::PlatformSharedMemoryRegion handle) {
   return UnsafeSharedMemoryRegion(std::move(handle));
@@ -67,8 +81,10 @@ bool UnsafeSharedMemoryRegion::IsValid() const {
 UnsafeSharedMemoryRegion::UnsafeSharedMemoryRegion(
     subtle::PlatformSharedMemoryRegion handle)
     : handle_(std::move(handle)) {
-  CHECK_EQ(handle_.GetMode(),
-           subtle::PlatformSharedMemoryRegion::Mode::kUnsafe);
+  if (handle_.IsValid()) {
+    CHECK_EQ(handle_.GetMode(),
+             subtle::PlatformSharedMemoryRegion::Mode::kUnsafe);
+  }
 }
 
 }  // namespace base

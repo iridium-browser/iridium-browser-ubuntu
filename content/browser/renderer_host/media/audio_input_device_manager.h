@@ -3,10 +3,10 @@
 // found in the LICENSE file.
 //
 // AudioInputDeviceManager manages the audio input devices. In particular it
-// communicates with MediaStreamManager and AudioInputRendererHost on the
-// browser IO thread, handles queries like
+// communicates with MediaStreamManager and RenderFrameAudioInputStreamFactory
+// on the browser IO thread, handles queries like
 // enumerate/open/close/GetOpenedDeviceById from MediaStreamManager and
-// GetOpenedDeviceById from AudioInputRendererHost.
+// GetOpenedDeviceById from RenderFrameAudioInputStreamFactory.
 // The work for enumerate/open/close is handled asynchronously on Media Stream
 // device thread, while GetOpenedDeviceById is synchronous on the IO thread.
 
@@ -111,7 +111,7 @@ class CONTENT_EXPORT AudioInputDeviceManager : public MediaStreamProvider {
   MediaStreamDevices::iterator GetDevice(int session_id);
 
   // Only accessed on Browser::IO thread.
-  base::ObserverList<MediaStreamProviderListener> listeners_;
+  base::ObserverList<MediaStreamProviderListener>::Unchecked listeners_;
   int next_capture_session_id_;
   MediaStreamDevices devices_;
 

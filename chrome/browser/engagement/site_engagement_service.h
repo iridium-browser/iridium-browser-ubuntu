@@ -177,7 +177,6 @@ class SiteEngagementService : public KeyedService,
 
  private:
   friend class SiteEngagementObserver;
-  friend class SiteEngagementServiceAndroid;
   friend class SiteEngagementServiceTest;
   FRIEND_TEST_ALL_PREFIXES(SiteEngagementServiceTest, CheckHistograms);
   FRIEND_TEST_ALL_PREFIXES(SiteEngagementServiceTest, CleanupEngagementScores);
@@ -211,6 +210,7 @@ class SiteEngagementService : public KeyedService,
 
 #if defined(OS_ANDROID)
   // Shim class to expose the service to Java.
+  friend class SiteEngagementServiceAndroid;
   SiteEngagementServiceAndroid* GetAndroidService() const;
   void SetAndroidService(
       std::unique_ptr<SiteEngagementServiceAndroid> android_service);
@@ -284,11 +284,6 @@ class SiteEngagementService : public KeyedService,
                          const GURL& url,
                          EngagementType type);
 
-  // Called if |url| changes to |level| engagement, and informs every Helper of
-  // the change.
-  void SendLevelChangeToHelpers(const GURL& url,
-                                blink::mojom::EngagementLevel level);
-
   // Returns true if the last engagement increasing event seen by the site
   // engagement service was sufficiently long ago that we need to reset all
   // scores to be relative to now. This ensures that users who do not use the
@@ -297,10 +292,7 @@ class SiteEngagementService : public KeyedService,
 
   // Overridden from history::HistoryServiceObserver:
   void OnURLsDeleted(history::HistoryService* history_service,
-                     bool all_history,
-                     bool expired,
-                     const history::URLRows& deleted_rows,
-                     const std::set<GURL>& favicon_urls) override;
+                     const history::DeletionInfo& deletion_info) override;
 
   // Returns the number of origins with maximum daily and total engagement
   // respectively.
@@ -308,10 +300,8 @@ class SiteEngagementService : public KeyedService,
   int OriginsWithMaxEngagement(
       const std::vector<mojom::SiteEngagementDetails>& details) const;
 
-  // Callback for the history service when it is asked for a map of origins to
-  // how many URLs corresponding to that origin remain in history.
-  void GetCountsAndLastVisitForOriginsComplete(
-      history::HistoryService* history_service,
+  // Update site engagement scores after a history deletion.
+  void UpdateEngagementScores(
       const std::multiset<GURL>& deleted_url_origins,
       bool expired,
       const history::OriginCountAndLastVisitMap& remaining_origin_counts);
@@ -336,12 +326,9 @@ class SiteEngagementService : public KeyedService,
   // upload.
   base::Time last_metrics_time_;
 
-  // All helpers currently attached to a WebContents.
-  std::set<SiteEngagementService::Helper*> helpers_;
-
   // A list of observers. When any origin registers an engagement-increasing
   // event, each observer's OnEngagementEvent method will be called.
-  base::ObserverList<SiteEngagementObserver> observer_list_;
+  base::ObserverList<SiteEngagementObserver>::Unchecked observer_list_;
 
   base::WeakPtrFactory<SiteEngagementService> weak_factory_;
 

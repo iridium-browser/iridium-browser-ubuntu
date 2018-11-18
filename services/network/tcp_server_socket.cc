@@ -22,10 +22,20 @@ TCPServerSocket::TCPServerSocket(
     Delegate* delegate,
     net::NetLog* net_log,
     const net::NetworkTrafficAnnotationTag& traffic_annotation)
+    : TCPServerSocket(
+          std::make_unique<net::TCPServerSocket>(net_log, net::NetLogSource()),
+          0 /*backlog*/,
+          delegate,
+          traffic_annotation) {}
+
+TCPServerSocket::TCPServerSocket(
+    std::unique_ptr<net::ServerSocket> server_socket,
+    int backlog,
+    Delegate* delegate,
+    const net::NetworkTrafficAnnotationTag& traffic_annotation)
     : delegate_(delegate),
-      socket_(
-          std::make_unique<net::TCPServerSocket>(net_log, net::NetLogSource())),
-      backlog_(0),
+      socket_(std::move(server_socket)),
+      backlog_(backlog),
       traffic_annotation_(traffic_annotation),
       weak_factory_(this) {}
 
@@ -41,11 +51,11 @@ int TCPServerSocket::Listen(const net::IPEndPoint& local_addr,
   backlog_ = backlog;
   int net_error = socket_->Listen(local_addr, backlog);
   if (net_error == net::OK)
-    socket_->GetLocalAddress(local_addr_out);
+    net_error = socket_->GetLocalAddress(local_addr_out);
   return net_error;
 }
 
-void TCPServerSocket::Accept(mojom::TCPConnectedSocketObserverPtr observer,
+void TCPServerSocket::Accept(mojom::SocketObserverPtr observer,
                              AcceptCallback callback) {
   if (pending_accepts_queue_.size() >= static_cast<size_t>(backlog_)) {
     std::move(callback).Run(net::ERR_INSUFFICIENT_RESOURCES, base::nullopt,
@@ -65,9 +75,8 @@ void TCPServerSocket::SetSocketForTest(
   socket_ = std::move(socket);
 }
 
-TCPServerSocket::PendingAccept::PendingAccept(
-    AcceptCallback callback,
-    mojom::TCPConnectedSocketObserverPtr observer)
+TCPServerSocket::PendingAccept::PendingAccept(AcceptCallback callback,
+                                              mojom::SocketObserverPtr observer)
     : callback(std::move(callback)), observer(std::move(observer)) {}
 
 TCPServerSocket::PendingAccept::~PendingAccept() {}
@@ -90,7 +99,8 @@ void TCPServerSocket::OnAcceptCompleted(int result) {
     mojom::TCPConnectedSocketPtr socket;
     auto connected_socket = std::make_unique<TCPConnectedSocket>(
         std::move(pending_accept->observer),
-        base::WrapUnique(accepted_socket_.release()),
+        base::WrapUnique(static_cast<net::TransportClientSocket*>(
+            accepted_socket_.release())),
         std::move(receive_pipe.producer_handle),
         std::move(send_pipe.consumer_handle), traffic_annotation_);
     delegate_->OnAccept(std::move(connected_socket),

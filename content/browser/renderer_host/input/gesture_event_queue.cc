@@ -26,8 +26,8 @@ GestureEventQueue::Config::Config() {
 
 GestureEventQueue::GestureEventQueue(
     GestureEventQueueClient* client,
-    TouchpadTapSuppressionControllerClient* touchpad_client,
-    FlingControllerClient* fling_client,
+    FlingControllerEventSenderClient* fling_event_sender_client,
+    FlingControllerSchedulerClient* fling_scheduler_client,
     const Config& config)
     : client_(client),
       fling_in_progress_(false),
@@ -37,23 +37,32 @@ GestureEventQueue::GestureEventQueue(
           base::FeatureList::IsEnabled(features::kVsyncAlignedInputEvents)),
       debounce_interval_(config.debounce_interval),
       fling_controller_(this,
-                        touchpad_client,
-                        fling_client,
+                        fling_event_sender_client,
+                        fling_scheduler_client,
                         config.fling_config) {
   DCHECK(client);
-  DCHECK(touchpad_client);
-  DCHECK(fling_client);
+  DCHECK(fling_event_sender_client);
+  DCHECK(fling_scheduler_client);
 }
 
 GestureEventQueue::~GestureEventQueue() { }
 
-bool GestureEventQueue::QueueEvent(
+bool GestureEventQueue::DebounceOrQueueEvent(
+    const GestureEventWithLatencyInfo& gesture_event) {
+  // GFS should have been filtered in FlingControllerFilterEvent.
+  DCHECK_NE(gesture_event.event.GetType(), WebInputEvent::kGestureFlingStart);
+  if (!ShouldForwardForBounceReduction(gesture_event))
+    return false;
+
+  QueueAndForwardIfNecessary(gesture_event);
+  return true;
+}
+
+bool GestureEventQueue::FlingControllerFilterEvent(
     const GestureEventWithLatencyInfo& gesture_event) {
   TRACE_EVENT0("input", "GestureEventQueue::QueueEvent");
-  if (!ShouldForwardForBounceReduction(gesture_event) ||
-      fling_controller_.FilterGestureEvent(gesture_event)) {
-    return false;
-  }
+  if (fling_controller_.FilterGestureEvent(gesture_event))
+    return true;
 
   // fling_controller_ is in charge of handling GFS events and the events are
   // not sent to the renderer, the controller processes the fling and generates
@@ -62,7 +71,7 @@ bool GestureEventQueue::QueueEvent(
   if (gesture_event.event.GetType() == WebInputEvent::kGestureFlingStart) {
     fling_controller_.ProcessGestureFlingStart(gesture_event);
     fling_in_progress_ = true;
-    return false;
+    return true;
   }
 
   // If the GestureFlingStart event is processed by the fling_controller_, the
@@ -70,15 +79,10 @@ bool GestureEventQueue::QueueEvent(
   if (gesture_event.event.GetType() == WebInputEvent::kGestureFlingCancel) {
     fling_controller_.ProcessGestureFlingCancel(gesture_event);
     fling_in_progress_ = false;
-    return false;
+    return true;
   }
 
-  QueueAndForwardIfNecessary(gesture_event);
-  return true;
-}
-
-gfx::Vector2dF GestureEventQueue::ProgressFling(base::TimeTicks current_time) {
-  return fling_controller_.ProgressFling(current_time);
+  return false;
 }
 
 void GestureEventQueue::StopFling() {
@@ -90,8 +94,8 @@ bool GestureEventQueue::FlingCancellationIsDeferred() const {
   return fling_controller_.FlingCancellationIsDeferred();
 }
 
-bool GestureEventQueue::TouchscreenFlingInProgress() const {
-  return fling_controller_.TouchscreenFlingInProgress();
+gfx::Vector2dF GestureEventQueue::CurrentFlingVelocity() const {
+  return fling_controller_.CurrentFlingVelocity();
 }
 
 bool GestureEventQueue::ShouldDiscardFlingCancelEvent(

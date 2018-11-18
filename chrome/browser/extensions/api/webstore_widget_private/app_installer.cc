@@ -42,6 +42,7 @@ AppInstaller::AppInstaller(content::WebContents* web_contents,
       callback_(callback),
       web_contents_(web_contents),
       web_contents_observer_(new WebContentsObserver(web_contents, this)) {
+  DCHECK(web_contents_);
 }
 
 AppInstaller::~AppInstaller() {
@@ -52,10 +53,6 @@ bool AppInstaller::CheckRequestorAlive() const {
   return web_contents_ != NULL;
 }
 
-const GURL& AppInstaller::GetRequestorURL() const {
-  return GURL::EmptyGURL();
-}
-
 std::unique_ptr<ExtensionInstallPrompt::Prompt>
 AppInstaller::CreateInstallPrompt() const {
   if (silent_installation_)
@@ -63,7 +60,7 @@ AppInstaller::CreateInstallPrompt() const {
 
   std::unique_ptr<ExtensionInstallPrompt::Prompt> prompt(
       new ExtensionInstallPrompt::Prompt(
-          ExtensionInstallPrompt::INLINE_INSTALL_PROMPT));
+          ExtensionInstallPrompt::WEBSTORE_WIDGET_PROMPT));
 
   prompt->SetWebstoreData(localized_user_count(), show_user_count(),
                           average_rating(), rating_count());
@@ -80,22 +77,6 @@ bool AppInstaller::ShouldShowAppInstalledBubble() const {
 
 content::WebContents* AppInstaller::GetWebContents() const {
   return web_contents_;
-}
-
-bool AppInstaller::CheckInlineInstallPermitted(
-    const base::DictionaryValue& webstore_data,
-    std::string* error) const {
-  DCHECK(error != NULL);
-  DCHECK(error->empty());
-  return true;
-}
-
-bool AppInstaller::CheckRequestorPermitted(
-    const base::DictionaryValue& webstore_data,
-    std::string* error) const {
-  DCHECK(error != NULL);
-  DCHECK(error->empty());
-  return true;
 }
 
 void AppInstaller::OnWebContentsDestroyed(content::WebContents* web_contents) {

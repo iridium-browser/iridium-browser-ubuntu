@@ -6,7 +6,7 @@
 
 #include "base/metrics/field_trial_params.h"
 #include "base/metrics/histogram_macros.h"
-#include "services/resource_coordinator/coordination_unit/coordination_unit_manager.h"
+#include "services/resource_coordinator/coordination_unit/coordination_unit_graph.h"
 #include "services/resource_coordinator/coordination_unit/frame_coordination_unit_impl.h"
 #include "services/resource_coordinator/coordination_unit/page_coordination_unit_impl.h"
 #include "services/resource_coordinator/coordination_unit/process_coordination_unit_impl.h"
@@ -15,8 +15,6 @@
 #include "services/resource_coordinator/resource_coordinator_clock.h"
 
 namespace resource_coordinator {
-
-const size_t kDefaultMaxCPUUsageMeasurements = 30u;
 
 // Audio is considered to have started playing if the page has never
 // previously played audio, or has been silent for at least one minute.
@@ -54,8 +52,7 @@ size_t GetNumCoresidentTabs(const PageCoordinationUnitImpl* page_cu) {
   return coresident_tabs.size() - 1;
 }
 
-MetricsCollector::MetricsCollector()
-    : max_ukm_cpu_usage_measurements_(kDefaultMaxCPUUsageMeasurements) {
+MetricsCollector::MetricsCollector() {
   UpdateWithFieldTrialParams();
 }
 
@@ -105,7 +102,7 @@ void MetricsCollector::OnFramePropertyChanged(
           metrics_report_record_map_.find(page_cu->id())->second;
       record.first_audible.OnSignalReceived(
           frame_cu->IsMainFrame(), page_cu->TimeSinceLastVisibilityChange(),
-          coordination_unit_manager().ukm_recorder());
+          coordination_unit_graph().ukm_recorder());
     }
   }
 }
@@ -135,15 +132,7 @@ void MetricsCollector::OnProcessPropertyChanged(
     const ProcessCoordinationUnitImpl* process_cu,
     const mojom::PropertyType property_type,
     int64_t value) {
-  if (property_type == mojom::PropertyType::kCPUUsage) {
-    for (auto* page_cu : process_cu->GetAssociatedPageCoordinationUnits()) {
-      if (IsCollectingCPUUsageForUkm(page_cu->id())) {
-        RecordCPUUsageForUkm(page_cu->id(), page_cu->GetCPUUsage(),
-                             GetNumCoresidentTabs(page_cu));
-      }
-    }
-  } else if (property_type ==
-             mojom::PropertyType::kExpectedTaskQueueingDuration) {
+  if (property_type == mojom::PropertyType::kExpectedTaskQueueingDuration) {
     for (auto* page_cu : process_cu->GetAssociatedPageCoordinationUnits()) {
       if (IsCollectingExpectedQueueingTimeForUkm(page_cu->id())) {
         int64_t expected_queueing_time;
@@ -169,7 +158,7 @@ void MetricsCollector::OnFrameEventReceived(
         metrics_report_record_map_.find(page_cu->id())->second;
     record.first_alert_fired.OnSignalReceived(
         frame_cu->IsMainFrame(), page_cu->TimeSinceLastVisibilityChange(),
-        coordination_unit_manager().ukm_recorder());
+        coordination_unit_graph().ukm_recorder());
   } else if (event == mojom::Event::kNonPersistentNotificationCreated) {
     auto* page_cu = frame_cu->GetPageCoordinationUnit();
     // Only record metrics while it is backgrounded.
@@ -180,7 +169,7 @@ void MetricsCollector::OnFrameEventReceived(
         metrics_report_record_map_.find(page_cu->id())->second;
     record.first_non_persistent_notification_created.OnSignalReceived(
         frame_cu->IsMainFrame(), page_cu->TimeSinceLastVisibilityChange(),
-        coordination_unit_manager().ukm_recorder());
+        coordination_unit_graph().ukm_recorder());
   }
 }
 
@@ -195,7 +184,7 @@ void MetricsCollector::OnPageEventReceived(
         metrics_report_record_map_.find(page_cu->id())->second;
     record.first_title_updated.OnSignalReceived(
         true, page_cu->TimeSinceLastVisibilityChange(),
-        coordination_unit_manager().ukm_recorder());
+        coordination_unit_graph().ukm_recorder());
   } else if (event == mojom::Event::kFaviconUpdated) {
     // Only record metrics while it is backgrounded.
     if (page_cu->IsVisible() || !ShouldReportMetrics(page_cu))
@@ -204,7 +193,7 @@ void MetricsCollector::OnPageEventReceived(
         metrics_report_record_map_.find(page_cu->id())->second;
     record.first_favicon_updated.OnSignalReceived(
         true, page_cu->TimeSinceLastVisibilityChange(),
-        coordination_unit_manager().ukm_recorder());
+        coordination_unit_graph().ukm_recorder());
   }
 }
 
@@ -213,32 +202,11 @@ bool MetricsCollector::ShouldReportMetrics(
   return page_cu->TimeSinceLastNavigation() > kMetricsReportDelayTimeout;
 }
 
-bool MetricsCollector::IsCollectingCPUUsageForUkm(
-    const CoordinationUnitID& page_cu_id) {
-  const UkmCollectionState& state = ukm_collection_state_map_[page_cu_id];
-
-  return state.ukm_source_id > ukm::kInvalidSourceId &&
-         state.num_cpu_usage_measurements < max_ukm_cpu_usage_measurements_;
-}
-
 bool MetricsCollector::IsCollectingExpectedQueueingTimeForUkm(
     const CoordinationUnitID& page_cu_id) {
   UkmCollectionState& state = ukm_collection_state_map_[page_cu_id];
-  return state.ukm_source_id > ukm::kInvalidSourceId &&
+  return state.ukm_source_id != ukm::kInvalidSourceId &&
          ++state.num_unreported_eqt_measurements >= frequency_ukm_eqt_reported_;
-}
-
-void MetricsCollector::RecordCPUUsageForUkm(
-    const CoordinationUnitID& page_cu_id,
-    double cpu_usage,
-    size_t num_coresident_tabs) {
-  UkmCollectionState& state = ukm_collection_state_map_[page_cu_id];
-
-  ukm::builders::CPUUsageMeasurement(state.ukm_source_id)
-      .SetTick(state.num_cpu_usage_measurements++)
-      .SetCPUUsage(cpu_usage)
-      .SetNumberOfCoresidentTabs(num_coresident_tabs)
-      .Record(coordination_unit_manager().ukm_recorder());
 }
 
 void MetricsCollector::RecordExpectedQueueingTimeForUkm(
@@ -248,7 +216,7 @@ void MetricsCollector::RecordExpectedQueueingTimeForUkm(
   state.num_unreported_eqt_measurements = 0u;
   ukm::builders::ResponsivenessMeasurement(state.ukm_source_id)
       .SetExpectedTaskQueueingDuration(expected_queueing_time)
-      .Record(coordination_unit_manager().ukm_recorder());
+      .Record(coordination_unit_graph().ukm_recorder());
 }
 
 void MetricsCollector::UpdateUkmSourceIdForPage(
@@ -258,19 +226,10 @@ void MetricsCollector::UpdateUkmSourceIdForPage(
 
   state.ukm_source_id = ukm_source_id;
   // Updating the |ukm_source_id| restarts usage collection.
-  state.num_cpu_usage_measurements = 0u;
   state.num_unreported_eqt_measurements = 0u;
 }
 
 void MetricsCollector::UpdateWithFieldTrialParams() {
-  int64_t interval_ms = GetGRCRenderProcessCPUProfilingIntervalInMs();
-  int64_t duration_ms = GetGRCRenderProcessCPUProfilingDurationInMs();
-
-  if (interval_ms > 0 && duration_ms > 0 && duration_ms >= interval_ms) {
-    max_ukm_cpu_usage_measurements_ =
-        static_cast<size_t>(duration_ms / interval_ms);
-  }
-
   frequency_ukm_eqt_reported_ = base::GetFieldTrialParamByFeatureAsInt(
       ukm::kUkmFeature, "FrequencyUKMExpectedQueueingTime",
       kDefaultFrequencyUkmEQTReported);

@@ -22,6 +22,7 @@
 #include "cc/test/layer_tree_test.h"
 #include "cc/trees/layer_tree_host_common.h"
 #include "cc/trees/layer_tree_impl.h"
+#include "cc/trees/transform_node.h"
 #include "components/viz/service/display/bsp_tree.h"
 #include "components/viz/service/display/draw_polygon.h"
 #include "components/viz/test/paths.h"
@@ -59,7 +60,7 @@ class BspTreePerfTest : public cc::LayerTreeTest {
 
   void ReadTestFile(const std::string& name) {
     base::FilePath test_data_dir;
-    ASSERT_TRUE(PathService::Get(Paths::DIR_TEST_DATA, &test_data_dir));
+    ASSERT_TRUE(base::PathService::Get(Paths::DIR_TEST_DATA, &test_data_dir));
     base::FilePath json_file = test_data_dir.AppendASCII(name + ".json");
     ASSERT_TRUE(base::ReadFileToString(json_file, &json_));
   }
@@ -106,16 +107,19 @@ class BspTreePerfTest : public cc::LayerTreeTest {
     cc::RenderSurfaceList update_list;
     cc::LayerTreeHostCommon::CalcDrawPropsImplInputs inputs(
         active_tree->root_layer_for_testing(),
-        active_tree->DeviceViewport().size(), host_impl->DrawTransform(),
+        active_tree->GetDeviceViewport().size(), host_impl->DrawTransform(),
         active_tree->device_scale_factor(),
         active_tree->current_page_scale_factor(),
         active_tree->InnerViewportContainerLayer(),
         active_tree->InnerViewportScrollLayer(),
         active_tree->OuterViewportScrollLayer(),
         active_tree->elastic_overscroll()->Current(active_tree->IsActiveTree()),
-        active_tree->OverscrollElasticityLayer(), max_texture_size,
+        active_tree->OverscrollElasticityElementId(), max_texture_size,
         host_impl->settings().layer_transforms_should_scale_layer_contents,
-        &update_list, active_tree->property_trees());
+        &update_list, active_tree->property_trees(),
+        active_tree->property_trees()->transform_tree.Node(
+            active_tree->InnerViewportContainerLayer()
+                ->transform_tree_index()));
     cc::LayerTreeHostCommon::CalculateDrawProperties(&inputs);
   }
 

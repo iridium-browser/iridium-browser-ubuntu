@@ -11,6 +11,7 @@ import android.webkit.WebView;
 
 import com.android.webview.chromium.CallbackConverter;
 import com.android.webview.chromium.SharedStatics;
+import com.android.webview.chromium.SharedTracingControllerAdapter;
 import com.android.webview.chromium.WebViewChromiumAwInit;
 import com.android.webview.chromium.WebkitToSharedGlueConverter;
 
@@ -54,13 +55,26 @@ class SupportLibWebViewChromiumFactory implements WebViewProviderFactoryBoundary
                     Features.WEB_RESOURCE_ERROR_GET_CODE,
                     Features.SAFE_BROWSING_RESPONSE_BACK_TO_SAFETY,
                     Features.SAFE_BROWSING_RESPONSE_PROCEED,
-                    Features.SAFE_BROWSING_RESPONSE_SHOW_INTERSTITIAL
+                    Features.SAFE_BROWSING_RESPONSE_SHOW_INTERSTITIAL,
+                    Features.WEB_MESSAGE_PORT_POST_MESSAGE,
+                    Features.WEB_MESSAGE_PORT_CLOSE,
+                    Features.WEB_MESSAGE_PORT_SET_MESSAGE_CALLBACK,
+                    Features.CREATE_WEB_MESSAGE_CHANNEL,
+                    Features.POST_WEB_MESSAGE,
+                    Features.WEB_MESSAGE_CALLBACK_ON_MESSAGE,
+                    Features.GET_WEB_VIEW_CLIENT,
+                    Features.GET_WEB_CHROME_CLIENT,
+                    Features.PROXY_OVERRIDE,
+                    Features.GET_WEB_VIEW_RENDERER,
+                    Features.WEB_VIEW_RENDERER_TERMINATE,
+                    Features.TRACING_CONTROLLER_BASIC_USAGE,
             };
     // clang-format on
 
     // Initialization guarded by mAwInit.getLock()
     private InvocationHandler mStatics;
     private InvocationHandler mServiceWorkerController;
+    private InvocationHandler mTracingController;
 
     public SupportLibWebViewChromiumFactory() {
         mCompatConverterAdapter = BoundaryInterfaceReflectionUtil.createInvocationHandlerFor(
@@ -102,6 +116,17 @@ class SupportLibWebViewChromiumFactory implements WebViewProviderFactoryBoundary
         public Uri getSafeBrowsingPrivacyPolicyUrl() {
             return mSharedStatics.getSafeBrowsingPrivacyPolicyUrl();
         }
+
+        @Override
+        public void setProxyOverride(
+                String host, int port, String[] exclusionList, Runnable callback) {
+            mSharedStatics.setProxyOverride(host, port, exclusionList, callback);
+        }
+
+        @Override
+        public void clearProxyOverride(Runnable callback) {
+            mSharedStatics.clearProxyOverride(callback);
+        }
     }
 
     @Override
@@ -132,5 +157,17 @@ class SupportLibWebViewChromiumFactory implements WebViewProviderFactoryBoundary
             }
         }
         return mServiceWorkerController;
+    }
+
+    @Override
+    public InvocationHandler getTracingController() {
+        synchronized (mAwInit.getLock()) {
+            if (mTracingController == null) {
+                mTracingController = BoundaryInterfaceReflectionUtil.createInvocationHandlerFor(
+                        new SupportLibTracingControllerAdapter(new SharedTracingControllerAdapter(
+                                mAwInit.getRunQueue(), mAwInit.getAwTracingController())));
+            }
+        }
+        return mTracingController;
     }
 }

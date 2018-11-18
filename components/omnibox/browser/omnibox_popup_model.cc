@@ -11,6 +11,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/omnibox/browser/autocomplete_match.h"
+#include "components/omnibox/browser/autocomplete_match_type.h"
 #include "components/omnibox/browser/omnibox_client.h"
 #include "components/omnibox/browser/omnibox_edit_controller.h"
 #include "components/omnibox/browser/omnibox_field_trial.h"
@@ -186,11 +187,30 @@ void OmniboxPopupModel::SetSelectedLineState(LineState state) {
   DCHECK(!result().empty());
   DCHECK_NE(kNoMatch, selected_line_);
 
-  const AutocompleteMatch& match = result().match_at(selected_line_);
-  DCHECK(match.associated_keyword.get());
+  const AutocompleteResult& result = this->result();
+  if (result.empty())
+    return;
+
+  const AutocompleteMatch& match = result.match_at(selected_line_);
+  GURL current_destination(match.destination_url);
+
+  if (state == KEYWORD) {
+    DCHECK(match.associated_keyword.get());
+  }
+
+  if (state == TAB_SWITCH) {
+    // TODO(orinj): If in-suggestion Pedals are kept, refactor a bit
+    // so that button presence doesn't always assume tab switching use case.
+    DCHECK(match.has_tab_match || match.pedal);
+    old_focused_url_ = current_destination;
+  }
 
   selected_line_state_ = state;
   view_->InvalidateLine(selected_line_);
+
+  // Ensures update of accessibility data.
+  edit_model_->view()->OnTemporaryTextMaybeChanged(
+    edit_model_->view()->GetText(), match, false, false);
 }
 
 void OmniboxPopupModel::TryDeletingCurrentItem() {
@@ -231,14 +251,27 @@ bool OmniboxPopupModel::IsStarredMatch(const AutocompleteMatch& match) const {
 }
 
 void OmniboxPopupModel::OnResultChanged() {
-  answer_bitmap_ = SkBitmap();
+  rich_suggestion_bitmaps_.clear();
   const AutocompleteResult& result = this->result();
+  size_t old_selected_line = selected_line_;
   selected_line_ = result.default_match() == result.end() ?
       kNoMatch : static_cast<size_t>(result.default_match() - result.begin());
   // There had better not be a nonempty result set with no default match.
   CHECK((selected_line_ != kNoMatch) || result.empty());
   has_selected_match_ = false;
-  selected_line_state_ = NORMAL;
+  // If selected line state was |TAB_SWITCH| and nothing has changed, leave it.
+  if (selected_line_ != kNoMatch) {
+    const bool has_focused_match =
+        selected_line_state_ == TAB_SWITCH &&
+        result.match_at(selected_line_).has_tab_match;
+    const bool has_changed =
+        selected_line_ != old_selected_line ||
+        result.match_at(selected_line_).destination_url != old_focused_url_;
+    if (!has_focused_match || has_changed)
+      selected_line_state_ = NORMAL;
+  } else {
+    selected_line_state_ = NORMAL;
+  }
 
   bool popup_was_open = view_->IsOpen();
   view_->UpdatePopupAppearance();
@@ -246,8 +279,18 @@ void OmniboxPopupModel::OnResultChanged() {
     edit_model_->controller()->OnPopupVisibilityChanged();
 }
 
-void OmniboxPopupModel::SetAnswerBitmap(const SkBitmap& bitmap) {
-  answer_bitmap_ = bitmap;
+const SkBitmap* OmniboxPopupModel::RichSuggestionBitmapAt(
+    int result_index) const {
+  const auto iter = rich_suggestion_bitmaps_.find(result_index);
+  if (iter == rich_suggestion_bitmaps_.end()) {
+    return nullptr;
+  }
+  return &iter->second;
+}
+
+void OmniboxPopupModel::SetRichSuggestionBitmap(int result_index,
+                                                const SkBitmap& bitmap) {
+  rich_suggestion_bitmaps_[result_index] = bitmap;
   view_->UpdatePopupAppearance();
 }
 
@@ -257,11 +300,12 @@ gfx::Image OmniboxPopupModel::GetMatchIcon(const AutocompleteMatch& match,
                                            SkColor vector_icon_color) {
   gfx::Image extension_icon =
       edit_model_->client()->GetIconIfExtensionMatch(match);
+  // Extension icons are the correct size for non-touch UI but need to be
+  // adjusted to be the correct size for touch mode.
   if (!extension_icon.IsEmpty())
-    return extension_icon;
+    return edit_model_->client()->GetSizedIcon(extension_icon);
 
-  if (base::FeatureList::IsEnabled(
-          omnibox::kUIExperimentShowSuggestionFavicons) &&
+  if (OmniboxFieldTrial::IsShowSuggestionFaviconsEnabled() &&
       !AutocompleteMatch::IsSearchType(match.type)) {
     // Because the Views UI code calls GetMatchIcon in both the layout and
     // painting code, we may generate multiple OnFaviconFetched callbacks,
@@ -270,19 +314,27 @@ gfx::Image OmniboxPopupModel::GetMatchIcon(const AutocompleteMatch& match,
     // costly, we can optimize away the redundant extra callbacks.
     gfx::Image favicon = edit_model_->client()->GetFaviconForPageUrl(
         match.destination_url,
-        base::Bind(&OmniboxPopupModel::OnFaviconFetched,
-                   weak_factory_.GetWeakPtr(), match.destination_url));
+        base::BindOnce(&OmniboxPopupModel::OnFaviconFetched,
+                       weak_factory_.GetWeakPtr(), match.destination_url));
 
+    // Extension icons are the correct size for non-touch UI but need to be
+    // adjusted to be the correct size for touch mode.
     if (!favicon.IsEmpty())
-      return favicon;
+      return edit_model_->client()->GetSizedIcon(favicon);
   }
 
   const auto& vector_icon_type = AutocompleteMatch::TypeToVectorIcon(
-      match.type, IsStarredMatch(match), match.has_tab_match);
+      match.type, IsStarredMatch(match), match.document_type);
+
   return edit_model_->client()->GetSizedIcon(vector_icon_type,
                                              vector_icon_color);
 }
 #endif  // !defined(OS_ANDROID) && !defined(OS_IOS)
+
+bool OmniboxPopupModel::SelectedLineHasTabMatch() {
+  return selected_line_ != kNoMatch &&
+         result().match_at(selected_line_).ShouldShowTabMatch();
+}
 
 void OmniboxPopupModel::OnFaviconFetched(const GURL& page_url,
                                          const gfx::Image& icon) {

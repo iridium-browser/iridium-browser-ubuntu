@@ -70,7 +70,7 @@ class CONTENT_EXPORT RenderView : public IPC::Sender {
   // Returns the device scale factor of the display the render view is in.
   virtual float GetDeviceScaleFactor() const = 0;
 
-  // Returns the device scale factor of the display the render view is in.
+  // Returns the page's zoom level for the render view.
   virtual float GetZoomLevel() const = 0;
 
   // Gets WebKit related preferences associated with this view.
@@ -95,10 +95,6 @@ class CONTENT_EXPORT RenderView : public IPC::Sender {
   // false, but set to true by some tests.
   virtual bool GetContentStateImmediately() const = 0;
 
-  // Notifies the renderer that a paint is to be generated for the size
-  // passed in.
-  virtual void Repaint(const gfx::Size& size) = 0;
-
   // Inject edit commands to be used for the next keyboard event.
   // TODO(alexmos): Currently, these are used only by BlinkTestRunner.  They
   // should be removed from RenderView and instead be plumbed through the
@@ -110,7 +106,7 @@ class CONTENT_EXPORT RenderView : public IPC::Sender {
   // Returns |renderer_preferences_.accept_languages| value.
   virtual const std::string& GetAcceptLanguages() const = 0;
 
-#if defined(OS_ANDROID)
+#if defined(OS_ANDROID) || defined(OS_CHROMEOS)
   virtual void UpdateBrowserControlsState(BrowserControlsState constraints,
                                           BrowserControlsState current,
                                           bool animate) = 0;
@@ -125,8 +121,6 @@ class CONTENT_EXPORT RenderView : public IPC::Sender {
   // This function will update the layout if required.
   virtual gfx::RectF ElementBoundsInWindow(const blink::WebElement& element)
       = 0;
-
-  virtual bool HasAddedInputHandler() const = 0;
 
  protected:
   ~RenderView() override {}

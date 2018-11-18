@@ -26,8 +26,7 @@
 
 #include "third_party/blink/renderer/core/html/forms/html_option_element.h"
 
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
-#include "third_party/blink/renderer/core/dom/ax_object_cache.h"
+#include "third_party/blink/renderer/core/accessibility/ax_object_cache.h"
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/node_computed_style.h"
 #include "third_party/blink/renderer/core/dom/node_traversal.h"
@@ -40,6 +39,7 @@
 #include "third_party/blink/renderer/core/html_names.h"
 #include "third_party/blink/renderer/core/layout/layout_theme.h"
 #include "third_party/blink/renderer/core/style/computed_style.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/wtf/text/string_builder.h"
 
 namespace blink {
@@ -49,9 +49,9 @@ using namespace HTMLNames;
 HTMLOptionElement::HTMLOptionElement(Document& document)
     : HTMLElement(optionTag, document), is_selected_(false) {}
 
-// An explicit empty destructor should be in HTMLOptionElement.cpp, because
+// An explicit empty destructor should be in html_option_element.cc, because
 // if an implicit destructor is used or an empty destructor is defined in
-// HTMLOptionElement.h, when including HTMLOptionElement.h,
+// html_option_element.h, when including html_option_element.h,
 // msvc tries to expand the destructor and causes
 // a compile error because of lack of ComputedStyle definition.
 HTMLOptionElement::~HTMLOptionElement() = default;
@@ -84,16 +84,6 @@ HTMLOptionElement* HTMLOptionElement::CreateForJSConstructor(
   element->SetSelected(selected);
 
   return element;
-}
-
-void HTMLOptionElement::AttachLayoutTree(AttachContext& context) {
-  AttachContext option_context(context);
-  if (!GetNonAttachedStyle() && ParentComputedStyle()) {
-    if (HTMLSelectElement* select = OwnerSelectElement())
-      select->UpdateListOnLayoutObject();
-    SetNonAttachedStyle(StyleForLayoutObject());
-  }
-  HTMLElement::AttachLayoutTree(option_context);
 }
 
 bool HTMLOptionElement::SupportsFocus() const {
@@ -278,12 +268,12 @@ void HTMLOptionElement::SetDirty(bool value) {
 }
 
 void HTMLOptionElement::ChildrenChanged(const ChildrenChange& change) {
+  HTMLElement::ChildrenChanged(change);
   if (HTMLDataListElement* data_list = OwnerDataListElement())
     data_list->OptionElementChildrenChanged();
   else if (HTMLSelectElement* select = OwnerSelectElement())
     select->OptionElementChildrenChanged(*this);
   UpdateLabel();
-  HTMLElement::ChildrenChanged(change);
 }
 
 HTMLDataListElement* HTMLOptionElement::OwnerDataListElement() const {
@@ -339,22 +329,22 @@ String HTMLOptionElement::DefaultToolTip() const {
 }
 
 Node::InsertionNotificationRequest HTMLOptionElement::InsertedInto(
-    ContainerNode* insertion_point) {
+    ContainerNode& insertion_point) {
   HTMLElement::InsertedInto(insertion_point);
   if (HTMLSelectElement* select = OwnerSelectElement()) {
-    if (insertion_point == select || (IsHTMLOptGroupElement(*insertion_point) &&
-                                      insertion_point->parentNode() == select))
+    if (&insertion_point == select || (IsHTMLOptGroupElement(insertion_point) &&
+                                       insertion_point.parentNode() == select))
       select->OptionInserted(*this, is_selected_);
   }
   return kInsertionDone;
 }
 
-void HTMLOptionElement::RemovedFrom(ContainerNode* insertion_point) {
-  if (auto* select = ToHTMLSelectElementOrNull(*insertion_point)) {
+void HTMLOptionElement::RemovedFrom(ContainerNode& insertion_point) {
+  if (auto* select = ToHTMLSelectElementOrNull(insertion_point)) {
     if (!parentNode() || IsHTMLOptGroupElement(*parentNode()))
       select->OptionRemoved(*this);
-  } else if (IsHTMLOptGroupElement(*insertion_point)) {
-    if (auto* select = ToHTMLSelectElementOrNull(insertion_point->parentNode()))
+  } else if (IsHTMLOptGroupElement(insertion_point)) {
+    if (auto* select = ToHTMLSelectElementOrNull(insertion_point.parentNode()))
       select->OptionRemoved(*this);
   }
   HTMLElement::RemovedFrom(insertion_point);
@@ -400,13 +390,6 @@ bool HTMLOptionElement::SpatialNavigationFocused() const {
 bool HTMLOptionElement::IsDisplayNone() const {
   const ComputedStyle* style = GetComputedStyle();
   return !style || style->Display() == EDisplay::kNone;
-}
-
-String HTMLOptionElement::innerText() {
-  // A workaround for crbug.com/424578. We add ShadowRoot to an OPTION, but
-  // innerText behavior for Shadow DOM is unclear.  We just return the same
-  // string before adding ShadowRoot.
-  return textContent();
 }
 
 }  // namespace blink

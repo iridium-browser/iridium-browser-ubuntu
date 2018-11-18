@@ -8,6 +8,7 @@
 
 #include "base/logging.h"
 #include "base/threading/thread_restrictions.h"
+#include "components/browser_sync/profile_sync_service.h"
 #include "ios/web_view/cwv_web_view_features.h"
 #include "ios/web_view/internal/app/application_context.h"
 #import "ios/web_view/internal/autofill/cwv_autofill_data_manager_internal.h"
@@ -15,7 +16,13 @@
 #import "ios/web_view/internal/cwv_preferences_internal.h"
 #import "ios/web_view/internal/cwv_user_content_controller_internal.h"
 #import "ios/web_view/internal/cwv_web_view_internal.h"
-#import "ios/web_view/internal/signin/cwv_authentication_controller_internal.h"
+#include "ios/web_view/internal/signin/ios_web_view_signin_client.h"
+#include "ios/web_view/internal/signin/web_view_account_tracker_service_factory.h"
+#include "ios/web_view/internal/signin/web_view_oauth2_token_service_factory.h"
+#include "ios/web_view/internal/signin/web_view_signin_client_factory.h"
+#include "ios/web_view/internal/signin/web_view_signin_manager_factory.h"
+#import "ios/web_view/internal/sync/cwv_sync_controller_internal.h"
+#import "ios/web_view/internal/sync/web_view_profile_sync_service_factory.h"
 #include "ios/web_view/internal/web_view_browser_state.h"
 #include "ios/web_view/internal/web_view_global_state_util.h"
 
@@ -34,19 +41,18 @@
   BOOL _wasShutDown;
 }
 
-#if BUILDFLAG(IOS_WEB_VIEW_ENABLE_SIGNIN)
-// This web view configuration's authentication controller.
-// nil if CWVWebViewConfiguration is created with +incognitoConfiguration.
-@property(nonatomic, readonly, nullable)
-    CWVAuthenticationController* authenticationController;
-#endif  // BUILDFLAG(IOS_WEB_VIEW_ENABLE_SIGNIN)
-
 #if BUILDFLAG(IOS_WEB_VIEW_ENABLE_AUTOFILL)
 // This web view configuration's autofill data manager.
 // nil if CWVWebViewConfiguration is created with +incognitoConfiguration.
 @property(nonatomic, readonly, nullable)
     CWVAutofillDataManager* autofillDataManager;
 #endif  // BUILDFLAG(IOS_WEB_VIEW_ENABLE_AUTOFILL)
+
+#if BUILDFLAG(IOS_WEB_VIEW_ENABLE_SYNC)
+// This web view configuration's sync controller.
+// nil if CWVWebViewConfiguration is created with +incognitoConfiguration.
+@property(nonatomic, readonly, nullable) CWVSyncController* syncController;
+#endif  // BUILDFLAG(IOS_WEB_VIEW_ENABLE_SYNC)
 
 // Initializes configuration with the specified browser state mode.
 - (instancetype)initWithBrowserState:
@@ -56,13 +62,13 @@
 
 @implementation CWVWebViewConfiguration
 
-#if BUILDFLAG(IOS_WEB_VIEW_ENABLE_SIGNIN)
-@synthesize authenticationController = _authenticationController;
-#endif  // BUILDFLAG(IOS_WEB_VIEW_ENABLE_SIGNIN)
 #if BUILDFLAG(IOS_WEB_VIEW_ENABLE_AUTOFILL)
 @synthesize autofillDataManager = _autofillDataManager;
 #endif  // BUILDFLAG(IOS_WEB_VIEW_ENABLE_AUTOFILL)
 @synthesize preferences = _preferences;
+#if BUILDFLAG(IOS_WEB_VIEW_ENABLE_SYNC)
+@synthesize syncController = _syncController;
+#endif  // BUILDFLAG(IOS_WEB_VIEW_ENABLE_SYNC)
 @synthesize userContentController = _userContentController;
 
 namespace {
@@ -71,8 +77,11 @@ CWVWebViewConfiguration* gIncognitoConfiguration = nil;
 }  // namespace
 
 + (void)shutDown {
-  [gDefaultConfiguration shutDown];
+  // Incognito should be shut down first because it holds onto members of the
+  // non-incognito browser state. This ensures that the non-incognito browser
+  // state will not leave any dangling references.
   [gIncognitoConfiguration shutDown];
+  [gDefaultConfiguration shutDown];
 }
 
 + (instancetype)defaultConfiguration {
@@ -127,21 +136,8 @@ CWVWebViewConfiguration* gIncognitoConfiguration = nil;
   DCHECK(_wasShutDown);
 }
 
-#if BUILDFLAG(IOS_WEB_VIEW_ENABLE_SIGNIN)
-#pragma mark - Signin
-
-- (CWVAuthenticationController*)authenticationController {
-  if (!_authenticationController && self.persistent) {
-    _authenticationController = [[CWVAuthenticationController alloc]
-        initWithBrowserState:self.browserState];
-  }
-  return _authenticationController;
-}
-#endif  // BUILDFLAG(IOS_WEB_VIEW_ENABLE_SIGNIN)
-
 #if BUILDFLAG(IOS_WEB_VIEW_ENABLE_AUTOFILL)
 #pragma mark - Autofill
-
 - (CWVAutofillDataManager*)autofillDataManager {
   if (!_autofillDataManager && self.persistent) {
     autofill::PersonalDataManager* personalDataManager =
@@ -152,8 +148,41 @@ CWVWebViewConfiguration* gIncognitoConfiguration = nil;
   }
   return _autofillDataManager;
 }
-
 #endif  // BUILDFLAG(IOS_WEB_VIEW_ENABLE_AUTOFILL)
+
+#if BUILDFLAG(IOS_WEB_VIEW_ENABLE_SYNC)
+#pragma mark - Sync
+- (CWVSyncController*)syncController {
+  if (!_syncController && self.persistent) {
+    browser_sync::ProfileSyncService* profileSyncService =
+        ios_web_view::WebViewProfileSyncServiceFactory::GetForBrowserState(
+            self.browserState);
+    AccountTrackerService* accountTrackerService =
+        ios_web_view::WebViewAccountTrackerServiceFactory::GetForBrowserState(
+            self.browserState);
+    SigninManager* signinManager =
+        ios_web_view::WebViewSigninManagerFactory::GetForBrowserState(
+            self.browserState);
+    ProfileOAuth2TokenService* tokenService =
+        ios_web_view::WebViewOAuth2TokenServiceFactory::GetForBrowserState(
+            self.browserState);
+
+    _syncController = [[CWVSyncController alloc]
+        initWithProfileSyncService:profileSyncService
+             accountTrackerService:accountTrackerService
+                     signinManager:signinManager
+                      tokenService:tokenService];
+
+    // Set the newly created CWVSyncController on IOSWebViewSigninClient to
+    // so access tokens can be fetched.
+    IOSWebViewSigninClient* signinClient =
+        ios_web_view::WebViewSigninClientFactory::GetForBrowserState(
+            self.browserState);
+    signinClient->SetSyncController(_syncController);
+  }
+  return _syncController;
+}
+#endif  // BUILDFLAG(IOS_WEB_VIEW_ENABLE_SYNC)
 
 #pragma mark - Public Methods
 

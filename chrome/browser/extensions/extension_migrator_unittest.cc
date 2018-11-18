@@ -24,12 +24,8 @@ namespace {
 const char kOldId[] = "oooooooooooooooooooooooooooooooo";
 const char kNewId[] = "nnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnn";
 
-scoped_refptr<Extension> CreateExtension(const std::string& id) {
-  return ExtensionBuilder()
-      .SetManifest(
-          DictionaryBuilder().Set("name", "test").Set("version", "0.1").Build())
-      .SetID(id)
-      .Build();
+scoped_refptr<const Extension> CreateExtension(const std::string& id) {
+  return ExtensionBuilder("test").SetID(id).Build();
 }
 
 }  // namespace
@@ -60,7 +56,7 @@ class ExtensionMigratorTest : public ExtensionServiceTestBase {
   }
 
   void AddExtension(const std::string& id) {
-    scoped_refptr<Extension> fake_app = CreateExtension(id);
+    scoped_refptr<const Extension> fake_app = CreateExtension(id);
     service()->AddExtension(fake_app.get());
   }
 

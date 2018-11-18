@@ -69,7 +69,7 @@ class CORE_EXPORT TextResourceDecoder {
   String Flush();
 
   bool SawError() const { return saw_error_; }
-  size_t CheckForBOM(const char*, size_t);
+  wtf_size_t CheckForBOM(const char*, wtf_size_t);
 
  protected:
   TextResourceDecoder(const TextResourceDecoderOptions&);
@@ -79,10 +79,10 @@ class CORE_EXPORT TextResourceDecoder {
       TextResourceDecoderOptions::ContentType,
       const WTF::TextEncoding& default_encoding);
 
-  bool CheckForCSSCharset(const char*, size_t, bool& moved_data_to_buffer);
-  bool CheckForXMLCharset(const char*, size_t, bool& moved_data_to_buffer);
-  void CheckForMetaCharset(const char*, size_t);
-  void AutoDetectEncodingIfAllowed(const char* data, size_t len);
+  bool CheckForCSSCharset(const char*, wtf_size_t, bool& moved_data_to_buffer);
+  bool CheckForXMLCharset(const char*, wtf_size_t, bool& moved_data_to_buffer);
+  void CheckForMetaCharset(const char*, wtf_size_t);
+  void AutoDetectEncodingIfAllowed(const char* data, wtf_size_t len);
 
   const TextResourceDecoderOptions options_;
 
@@ -95,6 +95,7 @@ class CORE_EXPORT TextResourceDecoder {
   bool checked_for_xml_charset_;
   bool checked_for_meta_charset_;
   bool saw_error_;
+  bool detection_completed_;
 
   std::unique_ptr<HTMLMetaCharsetParser> charset_parser_;
 

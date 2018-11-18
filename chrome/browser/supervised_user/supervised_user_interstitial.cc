@@ -13,6 +13,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/post_task.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
@@ -26,6 +27,7 @@
 #include "components/infobars/core/infobar.h"
 #include "components/infobars/core/infobar_delegate.h"
 #include "components/prefs/pref_service.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/interstitial_page.h"
 #include "content/public/browser/navigation_controller.h"
@@ -79,9 +81,8 @@ class TabCloser : public content::WebContentsUserData<TabCloser> {
 
   explicit TabCloser(WebContents* web_contents)
       : web_contents_(web_contents), weak_ptr_factory_(this) {
-    BrowserThread::PostTask(
-        BrowserThread::UI,
-        FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, {BrowserThread::UI},
         base::Bind(&TabCloser::CloseTabImpl, weak_ptr_factory_.GetWeakPtr()));
   }
 
@@ -109,8 +110,6 @@ class TabCloser : public content::WebContentsUserData<TabCloser> {
 };
 
 }  // namespace
-
-DEFINE_WEB_CONTENTS_USER_DATA_KEY(TabCloser);
 
 const content::InterstitialPageDelegate::TypeID
     SupervisedUserInterstitial::kTypeForTesting =
@@ -186,7 +185,7 @@ void SupervisedUserInterstitial::Init() {
     DCHECK(details.is_navigation_to_different_page());
     const content::NavigationController& controller =
         web_contents_->GetController();
-    details.entry = controller.GetActiveEntry();
+    details.entry = controller.GetVisibleEntry();
     if (controller.GetLastCommittedEntry()) {
       details.previous_entry_index = controller.GetLastCommittedEntryIndex();
       details.previous_url = controller.GetLastCommittedEntry()->GetURL();
@@ -221,9 +220,7 @@ std::string SupervisedUserInterstitial::GetHTMLContents(
     supervised_user_error_page::FilteringBehaviorReason reason) {
   bool is_child_account = profile->IsChild();
 
-  bool is_deprecated =
-      !is_child_account &&
-      !base::FeatureList::IsEnabled(features::kSupervisedUserCreation);
+  bool is_deprecated = !is_child_account;
 
   SupervisedUserService* supervised_user_service =
       SupervisedUserServiceFactory::GetForProfile(profile);
@@ -354,8 +351,10 @@ void SupervisedUserInterstitial::OnAccessRequestAdded(bool success) {
           << (success ? " successfully" : " unsuccessfully");
   std::string jsFunc =
       base::StringPrintf("setRequestStatus(%s);", success ? "true" : "false");
-  interstitial_page_->GetMainFrame()->ExecuteJavaScript(
-      base::ASCIIToUTF16(jsFunc));
+  if (interstitial_page_->GetMainFrame()) {
+    interstitial_page_->GetMainFrame()->ExecuteJavaScript(
+        base::ASCIIToUTF16(jsFunc));
+  }
 }
 
 bool SupervisedUserInterstitial::ShouldProceed() {

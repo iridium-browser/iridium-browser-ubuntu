@@ -5,7 +5,6 @@
 package com.android.webview.chromium;
 
 import android.annotation.SuppressLint;
-import android.annotation.TargetApi;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Bitmap;
@@ -29,11 +28,9 @@ import android.webkit.JsDialogHelper;
 import android.webkit.JsPromptResult;
 import android.webkit.JsResult;
 import android.webkit.PermissionRequest;
-import android.webkit.RenderProcessGoneDetail;
 import android.webkit.SslErrorHandler;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
-import android.webkit.WebChromeClient.CustomViewCallback;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -52,12 +49,15 @@ import org.chromium.android_webview.AwWebResourceResponse;
 import org.chromium.android_webview.JsPromptResultReceiver;
 import org.chromium.android_webview.JsResultReceiver;
 import org.chromium.android_webview.SafeBrowsingAction;
+import org.chromium.android_webview.ScopedSysTraceEvent;
 import org.chromium.android_webview.permission.AwPermissionRequest;
 import org.chromium.android_webview.permission.Resource;
 import org.chromium.base.Callback;
 import org.chromium.base.Log;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.TraceEvent;
+import org.chromium.base.compat.ApiHelperForM;
+import org.chromium.base.compat.ApiHelperForN;
 import org.chromium.support_lib_boundary.util.Features;
 import org.chromium.support_lib_callback_glue.SupportLibWebViewContentsClientAdapter;
 
@@ -93,16 +93,14 @@ class WebViewContentsClientAdapter extends AwContentsClient {
     private static final String TAG = "WebViewCallback";
     // Enables API callback tracing
     private static final boolean TRACE = false;
-    // Default WebViewClient used to avoid null checks.
-    private static WebViewClient sNullWebViewClient = new WebViewClient();
     // The WebView instance that this adapter is serving.
     protected final WebView mWebView;
     // The Context to use. This is different from mWebView.getContext(), which should not be used.
     private final Context mContext;
-    // The WebViewClient instance that was passed to WebView.setWebViewClient().
-    protected WebViewClient mWebViewClient = sNullWebViewClient;
+    // A reference to the current WebViewClient associated with this WebView.
+    protected WebViewClient mWebViewClient = SharedWebViewChromium.sNullWebViewClient;
     // Some callbacks will be forwarded to this client for apps using the support library.
-    private SupportLibWebViewContentsClientAdapter mSupportLibClient;
+    private final SupportLibWebViewContentsClientAdapter mSupportLibClient;
     // The WebChromeClient instance that was passed to WebView.setContentViewClient().
     private WebChromeClient mWebChromeClient;
     // The listener receiving find-in-page API results.
@@ -142,50 +140,43 @@ class WebViewContentsClientAdapter extends AwContentsClient {
         mContext = context;
         mWebView = webView;
         mWebViewDelegate = webViewDelegate;
-        mSupportLibClient = new SupportLibWebViewContentsClientAdapter();
-        setWebViewClient(null);
+        try (ScopedSysTraceEvent event =
+                        ScopedSysTraceEvent.scoped("WebViewContentsClientAdapter.constructor")) {
+            mSupportLibClient = new SupportLibWebViewContentsClientAdapter();
 
-        mUiThreadHandler = new Handler() {
-            @Override
-            public void handleMessage(Message msg) {
-                switch (msg.what) {
-                    case NEW_WEBVIEW_CREATED:
-                        WebView.WebViewTransport t = (WebView.WebViewTransport) msg.obj;
-                        WebView newWebView = t.getWebView();
-                        if (newWebView == mWebView) {
-                            throw new IllegalArgumentException(
-                                    "Parent WebView cannot host it's own popup window. Please "
-                                    + "use WebSettings.setSupportMultipleWindows(false)");
-                        }
+            mUiThreadHandler = new Handler() {
+                @Override
+                public void handleMessage(Message msg) {
+                    switch (msg.what) {
+                        case NEW_WEBVIEW_CREATED:
+                            WebView.WebViewTransport t = (WebView.WebViewTransport) msg.obj;
+                            WebView newWebView = t.getWebView();
+                            if (newWebView == mWebView) {
+                                throw new IllegalArgumentException(
+                                        "Parent WebView cannot host it's own popup window. Please "
+                                        + "use WebSettings.setSupportMultipleWindows(false)");
+                            }
 
-                        if (newWebView != null && newWebView.copyBackForwardList().getSize() != 0) {
-                            throw new IllegalArgumentException(
-                                    "New WebView for popup window must not have been previously "
-                                    + "navigated.");
-                        }
+                            if (newWebView != null
+                                    && newWebView.copyBackForwardList().getSize() != 0) {
+                                throw new IllegalArgumentException(
+                                        "New WebView for popup window must not have been "
+                                        + " previously navigated.");
+                            }
 
-                        WebViewChromium.completeWindowCreation(mWebView, newWebView);
-                        break;
-                    default:
-                        throw new IllegalStateException();
+                            WebViewChromium.completeWindowCreation(mWebView, newWebView);
+                            break;
+                        default:
+                            throw new IllegalStateException();
+                    }
                 }
-            }
-        };
+            };
+        }
     }
 
     void setWebViewClient(WebViewClient client) {
-        if (client != null) {
-            mWebViewClient = client;
-        } else {
-            mWebViewClient = sNullWebViewClient;
-        }
-        // Always reset mSupportLibClient, since the WebViewClient may no longer be a
-        // WebViewClientCompat, or may support a different set of Features.
-        mSupportLibClient.setWebViewClient(mWebViewClient);
-    }
-
-    WebViewClient getWebViewClient() {
-        return mWebViewClient;
+        mWebViewClient = client;
+        mSupportLibClient.setWebViewClient(client);
     }
 
     void setWebChromeClient(WebChromeClient client) {
@@ -218,7 +209,7 @@ class WebViewContentsClientAdapter extends AwContentsClient {
      */
     @Override
     public boolean hasWebViewClient() {
-        return mWebViewClient != sNullWebViewClient;
+        return mWebViewClient != SharedWebViewChromium.sNullWebViewClient;
     }
 
     /**
@@ -299,7 +290,6 @@ class WebViewContentsClientAdapter extends AwContentsClient {
     /**
      * @see AwContentsClient#shouldOverrideUrlLoading(AwContentsClient.AwWebResourceRequest)
      */
-    @TargetApi(Build.VERSION_CODES.N)
     @Override
     public boolean shouldOverrideUrlLoading(AwContentsClient.AwWebResourceRequest request) {
         try {
@@ -310,8 +300,8 @@ class WebViewContentsClientAdapter extends AwContentsClient {
                 result = mSupportLibClient.shouldOverrideUrlLoading(
                         mWebView, new WebResourceRequestAdapter(request));
             } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                result = mWebViewClient.shouldOverrideUrlLoading(
-                        mWebView, new WebResourceRequestAdapter(request));
+                result = ApiHelperForN.shouldOverrideUrlLoading(
+                        mWebViewClient, mWebView, new WebResourceRequestAdapter(request));
             } else {
                 result = mWebViewClient.shouldOverrideUrlLoading(mWebView, request.url);
             }
@@ -543,7 +533,7 @@ class WebViewContentsClientAdapter extends AwContentsClient {
             if (mSupportLibClient.isFeatureAvailable(Features.VISUAL_STATE_CALLBACK)) {
                 mSupportLibClient.onPageCommitVisible(mWebView, url);
             } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                mWebViewClient.onPageCommitVisible(mWebView, url);
+                ApiHelperForM.onPageCommitVisible(mWebViewClient, mWebView, url);
             }
             // Otherwise, the API does not exist, so do nothing.
         } finally {
@@ -596,8 +586,7 @@ class WebViewContentsClientAdapter extends AwContentsClient {
                 mSupportLibClient.onReceivedError(
                         mWebView, new WebResourceRequestAdapter(request), error);
             } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                mWebViewClient.onReceivedError(mWebView, new WebResourceRequestAdapter(request),
-                        new WebResourceErrorAdapter(error));
+                GlueApiHelperForM.onReceivedError(mWebViewClient, mWebView, request, error);
             }
             // Otherwise, this is handled by {@link #onReceivedError}.
         } finally {
@@ -606,7 +595,6 @@ class WebViewContentsClientAdapter extends AwContentsClient {
     }
 
     @Override
-    @TargetApi(Build.VERSION_CODES.O_MR1)
     public void onSafeBrowsingHit(AwWebResourceRequest request, int threatType,
             final Callback<AwSafeBrowsingResponse> callback) {
         try {
@@ -615,14 +603,15 @@ class WebViewContentsClientAdapter extends AwContentsClient {
                 mSupportLibClient.onSafeBrowsingHit(
                         mWebView, new WebResourceRequestAdapter(request), threatType, callback);
             } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
-                mWebViewClient.onSafeBrowsingHit(mWebView, new WebResourceRequestAdapter(request),
-                        threatType, new SafeBrowsingResponseAdapter(callback));
+                GlueApiHelperForOMR1.onSafeBrowsingHit(
+                        mWebViewClient, mWebView, request, threatType, callback);
+
             } else {
                 callback.onResult(new AwSafeBrowsingResponse(SafeBrowsingAction.SHOW_INTERSTITIAL,
                         /* reporting */ true));
             }
         } finally {
-            TraceEvent.end("WebViewContentsClientAdapter.onRenderProcessGone");
+            TraceEvent.end("WebViewContentsClientAdapter.onSafeBrowsingHit");
         }
     }
 
@@ -640,10 +629,7 @@ class WebViewContentsClientAdapter extends AwContentsClient {
                                 response.getStatusCode(), response.getReasonPhrase(),
                                 response.getResponseHeaders(), response.getData()));
             } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                mWebViewClient.onReceivedHttpError(mWebView, new WebResourceRequestAdapter(request),
-                        new WebResourceResponse(true, response.getMimeType(), response.getCharset(),
-                                response.getStatusCode(), response.getReasonPhrase(),
-                                response.getResponseHeaders(), response.getData()));
+                GlueApiHelperForM.onReceivedHttpError(mWebViewClient, mWebView, request, response);
             }
             // Otherwise, the API does not exist, so do nothing.
         } finally {
@@ -1221,24 +1207,13 @@ class WebViewContentsClientAdapter extends AwContentsClient {
     }
 
     @Override
-    @TargetApi(Build.VERSION_CODES.O)
     public boolean onRenderProcessGone(final AwRenderProcessGoneDetail detail) {
         // WebViewClient.onRenderProcessGone was added in O.
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false;
 
         try {
             TraceEvent.begin("WebViewContentsClientAdapter.onRenderProcessGone");
-            return mWebViewClient.onRenderProcessGone(mWebView, new RenderProcessGoneDetail() {
-                @Override
-                public boolean didCrash() {
-                    return detail.didCrash();
-                }
-
-                @Override
-                public int rendererPriorityAtExit() {
-                    return detail.rendererPriority();
-                }
-            });
+            return GlueApiHelperForO.onRenderProcessGone(mWebViewClient, mWebView, detail);
         } finally {
             TraceEvent.end("WebViewContentsClientAdapter.onRenderProcessGone");
         }

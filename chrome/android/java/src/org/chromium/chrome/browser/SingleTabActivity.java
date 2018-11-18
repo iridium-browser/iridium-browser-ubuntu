@@ -40,7 +40,7 @@ public abstract class SingleTabActivity extends ChromeActivity {
     protected TabModelSelector createTabModelSelector() {
         return new SingleTabModelSelector(this, false, false) {
             @Override
-            public Tab openNewTab(LoadUrlParams loadUrlParams, TabLaunchType type, Tab parent,
+            public Tab openNewTab(LoadUrlParams loadUrlParams, @TabLaunchType int type, Tab parent,
                     boolean incognito) {
                 getTabCreator(incognito).createNewTab(loadUrlParams, type, parent);
                 return null;
@@ -136,5 +136,5 @@ public abstract class SingleTabActivity extends ChromeActivity {
     }
 
     @Override
-    public void onCheckForUpdate(boolean updateAvailable) {}
+    public void onCheckForUpdate() {}
 }

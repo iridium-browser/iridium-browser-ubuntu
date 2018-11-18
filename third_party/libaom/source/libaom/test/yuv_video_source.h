@@ -8,8 +8,8 @@
  * Media Patent License 1.0 was not distributed with this source code in the
  * PATENTS file, you can obtain it at www.aomedia.org/license/patent.
  */
-#ifndef TEST_YUV_VIDEO_SOURCE_H_
-#define TEST_YUV_VIDEO_SOURCE_H_
+#ifndef AOM_TEST_YUV_VIDEO_SOURCE_H_
+#define AOM_TEST_YUV_VIDEO_SOURCE_H_
 
 #include <cstdio>
 #include <cstdlib>
@@ -86,11 +86,9 @@ class YUVVideoSource : public VideoSource {
       switch (format) {
         case AOM_IMG_FMT_I420: raw_size_ = width * height * 3 / 2; break;
         case AOM_IMG_FMT_I422: raw_size_ = width * height * 2; break;
-        case AOM_IMG_FMT_I440: raw_size_ = width * height * 2; break;
         case AOM_IMG_FMT_I444: raw_size_ = width * height * 3; break;
         case AOM_IMG_FMT_I42016: raw_size_ = width * height * 3; break;
         case AOM_IMG_FMT_I42216: raw_size_ = width * height * 4; break;
-        case AOM_IMG_FMT_I44016: raw_size_ = width * height * 4; break;
         case AOM_IMG_FMT_I44416: raw_size_ = width * height * 6; break;
         default: ASSERT_TRUE(0);
       }
@@ -122,4 +120,4 @@ class YUVVideoSource : public VideoSource {
 
 }  // namespace libaom_test
 
-#endif  // TEST_YUV_VIDEO_SOURCE_H_
+#endif  // AOM_TEST_YUV_VIDEO_SOURCE_H_

@@ -5,7 +5,9 @@
 #include "chrome/browser/ui/app_list/extension_app_item.h"
 
 #include <stddef.h>
+#include <utility>
 
+#include "ash/public/cpp/app_list/app_list_config.h"
 #include "base/macros.h"
 #include "base/metrics/user_metrics.h"
 #include "build/build_config.h"
@@ -16,6 +18,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/app_list/app_list_controller_delegate.h"
 #include "chrome/browser/ui/app_list/extension_app_context_menu.h"
+#include "chrome/browser/ui/app_list/md_icon_normalizer.h"
 #include "chrome/browser/ui/extensions/extension_enable_flow.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/extensions/extension_metrics.h"
@@ -47,7 +50,6 @@ ExtensionAppItem::ExtensionAppItem(
     const gfx::ImageSkia& installing_icon,
     bool is_platform_app)
     : ChromeAppListItem(profile, extension_id),
-      extension_enable_flow_controller_(NULL),
       extension_name_(extension_name),
       installing_icon_(CreateDisabledIcon(installing_icon)),
       is_platform_app_(is_platform_app) {
@@ -55,14 +57,13 @@ ExtensionAppItem::ExtensionAppItem(
   if (sync_item && sync_item->item_ordinal.IsValid())
     UpdateFromSync(sync_item);
   else
-    SetDefaultPositionIfApplicable();
+    SetDefaultPositionIfApplicable(model_updater);
 
   // Set model updater last to avoid being called during construction.
   set_model_updater(model_updater);
 }
 
-ExtensionAppItem::~ExtensionAppItem() {
-}
+ExtensionAppItem::~ExtensionAppItem() = default;
 
 void ExtensionAppItem::Reload() {
   const Extension* extension = GetExtension();
@@ -76,7 +77,9 @@ void ExtensionAppItem::Reload() {
   SetNameAndShortName(extension->name(), extension->short_name());
   if (!icon_) {
     icon_ = extensions::ChromeAppIconService::Get(profile())->CreateIcon(
-        this, extension_id(), extension_misc::EXTENSION_ICON_MEDIUM);
+        this, extension_id(),
+        app_list::AppListConfig::instance().grid_icon_dimension(),
+        base::BindRepeating(&app_list::MaybeResizeAndPadIconForMd));
   } else {
     icon_->Reload();
   }
@@ -89,8 +92,7 @@ void ExtensionAppItem::OnIconUpdated(extensions::ChromeAppIcon* icon) {
 const Extension* ExtensionAppItem::GetExtension() const {
   const extensions::ExtensionRegistry* registry =
       extensions::ExtensionRegistry::Get(profile());
-  const Extension* extension = registry->GetInstalledExtension(
-      extension_id());
+  const Extension* extension = registry->GetInstalledExtension(extension_id());
   return extension;
 }
 
@@ -100,11 +102,8 @@ bool ExtensionAppItem::RunExtensionEnableFlow() {
     return false;
 
   if (!extension_enable_flow_) {
-    extension_enable_flow_controller_ = GetController();
-    extension_enable_flow_controller_->OnShowChildDialog();
-
-    extension_enable_flow_.reset(new ExtensionEnableFlow(
-        profile(), extension_id(), this));
+    extension_enable_flow_ =
+        std::make_unique<ExtensionEnableFlow>(profile(), extension_id(), this);
     extension_enable_flow_->StartForNativeWindow(nullptr);
   }
   return true;
@@ -130,17 +129,12 @@ void ExtensionAppItem::Launch(int event_flags) {
 
 void ExtensionAppItem::ExtensionEnableFlowFinished() {
   extension_enable_flow_.reset();
-  extension_enable_flow_controller_->OnCloseChildDialog();
-  extension_enable_flow_controller_ = NULL;
-
   // Automatically launch app after enabling.
   Launch(ui::EF_NONE);
 }
 
 void ExtensionAppItem::ExtensionEnableFlowAborted(bool user_initiated) {
   extension_enable_flow_.reset();
-  extension_enable_flow_controller_->OnCloseChildDialog();
-  extension_enable_flow_controller_ = NULL;
 }
 
 void ExtensionAppItem::Activate(int event_flags) {
@@ -157,19 +151,16 @@ void ExtensionAppItem::Activate(int event_flags) {
     return;
 
   extensions::RecordAppListMainLaunch(extension);
-  GetController()->ActivateApp(profile(),
-                               extension,
+  GetController()->ActivateApp(profile(), extension,
                                AppListControllerDelegate::LAUNCH_FROM_APP_LIST,
                                event_flags);
 }
 
-ui::MenuModel* ExtensionAppItem::GetContextMenuModel() {
-  context_menu_.reset(new app_list::ExtensionAppContextMenu(this,
-                                                            profile(),
-                                                            extension_id(),
-                                                            GetController()));
+void ExtensionAppItem::GetContextMenuModel(GetMenuModelCallback callback) {
+  context_menu_ = std::make_unique<app_list::ExtensionAppContextMenu>(
+      this, profile(), extension_id(), GetController());
   context_menu_->set_is_platform_app(is_platform_app_);
-  return context_menu_->GetMenuModel();
+  context_menu_->GetMenuModel(std::move(callback));
 }
 
 // static

@@ -28,12 +28,17 @@
 
 #include "third_party/blink/renderer/platform/graphics/skia/skia_utils.h"
 #include "third_party/blink/renderer/platform/image-decoders/image_decoder.h"
+#include "third_party/skia/include/core/SkCanvas.h"
+#include "third_party/skia/include/core/SkColorSpace.h"
+#include "third_party/skia/include/core/SkImage.h"
+#include "third_party/skia/include/core/SkSurface.h"
 
 namespace blink {
 
 ImageFrame::ImageFrame()
     : allocator_(nullptr),
       has_alpha_(true),
+      pixel_format_(kN32),
       status_(kFrameEmpty),
       disposal_method_(kDisposeNotSpecified),
       alpha_blend_source_(kBlendAtopPreviousFrame),
@@ -59,6 +64,7 @@ ImageFrame& ImageFrame::operator=(const ImageFrame& other) {
   // Be sure that this is called after we've called SetStatus(), since we
   // look at our status to know what to do with the alpha value.
   SetHasAlpha(other.HasAlpha());
+  pixel_format_ = other.pixel_format_;
   SetRequiredPreviousFrameIndex(other.RequiredPreviousFrameIndex());
   return *this;
 }
@@ -80,11 +86,19 @@ void ImageFrame::ZeroFillPixelData() {
 bool ImageFrame::CopyBitmapData(const ImageFrame& other) {
   DCHECK_NE(this, &other);
   has_alpha_ = other.has_alpha_;
+  pixel_format_ = other.pixel_format_;
   bitmap_.reset();
   SkImageInfo info = other.bitmap_.info();
-  return bitmap_.tryAllocPixels(info) &&
-         other.bitmap_.readPixels(info, bitmap_.getPixels(), bitmap_.rowBytes(),
-                                  0, 0);
+  if (!bitmap_.tryAllocPixels(info)) {
+    return false;
+  }
+
+  if (!other.bitmap_.readPixels(info, bitmap_.getPixels(), bitmap_.rowBytes(),
+                                0, 0))
+    return false;
+
+  status_ = kFrameInitialized;
+  return true;
 }
 
 bool ImageFrame::TakeBitmapDataIfWritable(ImageFrame* other) {
@@ -95,9 +109,11 @@ bool ImageFrame::TakeBitmapDataIfWritable(ImageFrame* other) {
   if (other->bitmap_.isImmutable())
     return false;
   has_alpha_ = other->has_alpha_;
+  pixel_format_ = other->pixel_format_;
   bitmap_.reset();
   bitmap_.swap(other->bitmap_);
   other->status_ = kFrameEmpty;
+  status_ = kFrameInitialized;
   return true;
 }
 
@@ -107,15 +123,18 @@ bool ImageFrame::AllocatePixelData(int new_width,
   // AllocatePixelData() should only be called once.
   DCHECK(!Width() && !Height());
 
-  bitmap_.setInfo(SkImageInfo::MakeN32(
+  SkImageInfo info = SkImageInfo::MakeN32(
       new_width, new_height,
       premultiply_alpha_ ? kPremul_SkAlphaType : kUnpremul_SkAlphaType,
-      std::move(color_space)));
-  return bitmap_.tryAllocPixels(allocator_);
-}
+      std::move(color_space));
+  if (pixel_format_ == kRGBA_F16)
+    info = info.makeColorType(kRGBA_F16_SkColorType);
+  bitmap_.setInfo(info);
+  bool allocated = bitmap_.tryAllocPixels(allocator_);
+  if (allocated)
+    status_ = kFrameInitialized;
 
-bool ImageFrame::HasAlpha() const {
-  return has_alpha_;
+  return allocated;
 }
 
 sk_sp<SkImage> ImageFrame::FinalizePixelsAndGetImage() {
@@ -150,6 +169,40 @@ void ImageFrame::ZeroFillFrameRect(const IntRect& rect) {
 
   bitmap_.eraseArea(rect, SkColorSetARGB(0, 0, 0, 0));
   SetHasAlpha(true);
+}
+
+static void BlendRGBAF16Buffer(ImageFrame::PixelDataF16* dst,
+                               ImageFrame::PixelDataF16* src,
+                               size_t num_pixels,
+                               SkAlphaType dst_alpha_type) {
+  // Source is always unpremul, but the blending result might be premul or
+  // unpremul, depending on the alpha type of the destination pixel passed to
+  // this function.
+  SkImageInfo info =
+      SkImageInfo::Make(num_pixels, 1, kRGBA_F16_SkColorType, dst_alpha_type,
+                        SkColorSpace::MakeSRGBLinear());
+  sk_sp<SkSurface> surface =
+      SkSurface::MakeRasterDirect(info, dst, info.minRowBytes());
+
+  SkPixmap src_pixmap(info.makeAlphaType(kUnpremul_SkAlphaType), src,
+                      info.minRowBytes());
+  sk_sp<SkImage> src_image =
+      SkImage::MakeFromRaster(src_pixmap, nullptr, nullptr);
+
+  surface->getCanvas()->drawImage(src_image, 0, 0);
+  surface->flush();
+}
+
+void ImageFrame::BlendRGBARawF16Buffer(PixelDataF16* dst,
+                                       PixelDataF16* src,
+                                       size_t num_pixels) {
+  BlendRGBAF16Buffer(dst, src, num_pixels, kUnpremul_SkAlphaType);
+}
+
+void ImageFrame::BlendRGBAPremultipliedF16Buffer(PixelDataF16* dst,
+                                                 PixelDataF16* src,
+                                                 size_t num_pixels) {
+  BlendRGBAF16Buffer(dst, src, num_pixels, kPremul_SkAlphaType);
 }
 
 static uint8_t BlendChannel(uint8_t src,

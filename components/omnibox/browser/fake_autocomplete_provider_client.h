@@ -12,7 +12,6 @@
 #include "components/omnibox/browser/in_memory_url_index.h"
 #include "components/omnibox/browser/mock_autocomplete_provider_client.h"
 #include "components/omnibox/browser/test_scheme_classifier.h"
-#include "components/search_engines/search_terms_data.h"
 
 namespace bookmarks {
 class BookmarkModel;
@@ -41,7 +40,6 @@ class FakeAutocompleteProviderClient : public MockAutocompleteProviderClient {
   history::HistoryService* GetHistoryService() override;
   bookmarks::BookmarkModel* GetBookmarkModel() override;
   InMemoryURLIndex* GetInMemoryURLIndex() override;
-  const SearchTermsData& GetSearchTermsData() const override;
   scoped_refptr<ShortcutsBackend> GetShortcutsBackend() override;
   scoped_refptr<ShortcutsBackend> GetShortcutsBackendIfExists() override;
 
@@ -51,19 +49,24 @@ class FakeAutocompleteProviderClient : public MockAutocompleteProviderClient {
 
   bool IsTabOpenWithURL(const GURL& url,
                         const AutocompleteInput* input) override;
-  void set_is_tab_open_with_url(bool is_open) {
-    is_tab_open_with_url_ = is_open;
+
+  // A test calls this to establish the set of URLs that will return
+  // true from IsTabOpenWithURL() above. It's a simple substring match
+  // of the URL.
+  void set_url_substring_match(const std::string& substr) {
+    substring_to_match_ = substr;
   }
 
  private:
   base::ScopedTempDir history_dir_;
   std::unique_ptr<bookmarks::BookmarkModel> bookmark_model_;
   TestSchemeClassifier scheme_classifier_;
-  SearchTermsData search_terms_data_;
   std::unique_ptr<InMemoryURLIndex> in_memory_url_index_;
   std::unique_ptr<history::HistoryService> history_service_;
-  bool is_tab_open_with_url_;
   scoped_refptr<ShortcutsBackend> shortcuts_backend_;
+
+  // Substring used to match URLs for IsTabOpenWithURL().
+  std::string substring_to_match_;
 
   DISALLOW_COPY_AND_ASSIGN(FakeAutocompleteProviderClient);
 };

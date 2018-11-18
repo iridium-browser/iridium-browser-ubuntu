@@ -8,7 +8,6 @@
 #include <string>
 
 #include "ash/app_list/test/app_list_test_helper.h"
-#include "ash/public/cpp/config.h"
 #include "ash/root_window_controller.h"
 #include "ash/session/session_controller.h"
 #include "ash/shelf/shelf.h"
@@ -92,7 +91,7 @@ TEST_F(AppListButtonTest, SwipeUpToOpenFullscreenAppList) {
   gfx::Point end = start;
   end.set_y(shelf->GetIdealBounds().bottom() -
             ShelfLayoutManager::kAppListDragSnapToPeekingThreshold + 10);
-  GetEventGenerator().GestureScrollSequence(
+  GetEventGenerator()->GestureScrollSequence(
       start, end, base::TimeDelta::FromMilliseconds(100), 4 /* steps */);
   GetAppListTestHelper()->WaitUntilIdle();
   GetAppListTestHelper()->CheckVisibility(true);
@@ -106,7 +105,7 @@ TEST_F(AppListButtonTest, SwipeUpToOpenFullscreenAppList) {
   // Swiping above the threshold should trigger a fullscreen app list.
   end.set_y(shelf->GetIdealBounds().bottom() -
             ShelfLayoutManager::kAppListDragSnapToPeekingThreshold - 10);
-  GetEventGenerator().GestureScrollSequence(
+  GetEventGenerator()->GestureScrollSequence(
       start, end, base::TimeDelta::FromMilliseconds(100), 4 /* steps */);
   RunAllPendingInMessageLoop();
   GetAppListTestHelper()->WaitUntilIdle();

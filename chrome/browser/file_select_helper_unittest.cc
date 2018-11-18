@@ -20,7 +20,7 @@
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
-using content::FileChooserParams;
+using blink::mojom::FileChooserParams;
 
 class FileSelectHelperTest : public testing::Test {
  public:
@@ -28,7 +28,7 @@ class FileSelectHelperTest : public testing::Test {
 
  protected:
   void SetUp() override {
-    ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &data_dir_));
+    ASSERT_TRUE(base::PathService::Get(chrome::DIR_TEST_DATA, &data_dir_));
     data_dir_ = data_dir_.AppendASCII("file_select_helper");
     ASSERT_TRUE(base::PathExists(data_dir_));
   }
@@ -143,9 +143,8 @@ TEST_F(FileSelectHelperTest, LastSelectedDirectory) {
 
   // Modes where the parent of the selection is remembered.
   const std::vector<FileChooserParams::Mode> modes = {
-    FileChooserParams::Open,
-    FileChooserParams::OpenMultiple,
-    FileChooserParams::Save,
+      FileChooserParams::Mode::kOpen, FileChooserParams::Mode::kOpenMultiple,
+      FileChooserParams::Mode::kSave,
   };
 
   for (const auto& mode : modes) {
@@ -169,7 +168,7 @@ TEST_F(FileSelectHelperTest, LastSelectedDirectory) {
   }
 
   // Type where the selected folder itself is remembered.
-  file_select_helper->dialog_mode_ = FileChooserParams::UploadFolder;
+  file_select_helper->dialog_mode_ = FileChooserParams::Mode::kUploadFolder;
 
   file_select_helper->AddRef();  // Normally called by RunFileChooser().
   file_select_helper->FileSelected(dir_path_1, index, params);

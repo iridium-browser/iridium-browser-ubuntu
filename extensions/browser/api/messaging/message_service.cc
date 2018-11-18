@@ -56,6 +56,8 @@ using content::WebContents;
 
 namespace extensions {
 
+namespace {
+
 const char kReceivingEndDoesntExistError[] =
     "Could not establish connection. Receiving end does not exist.";
 #if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_LINUX)
@@ -65,6 +67,30 @@ const char kProhibitedByPoliciesError[] =
     "Access to the native messaging host was disabled by the system "
     "administrator.";
 #endif
+
+enum class IncludeTlsChannelIdBehavior {
+  // The TLS channel ID was not requested.
+  kNotRequested = 0,
+
+  // The TLS channel ID was requested, but was not included because the target
+  // extension did not allow it.
+  kRequestedButDenied = 1,
+
+  // The TLS channel ID was requested, but was not found.
+  kRequestedButNotFound = 2,
+
+  // The TLS channel ID was requested, allowed, and included in the response.
+  kRequestedAndIncluded = 3,
+
+  kMaxValue = kRequestedAndIncluded,
+};
+
+void RecordIncludeTlsChannelIdBehavior(IncludeTlsChannelIdBehavior behavior) {
+  UMA_HISTOGRAM_ENUMERATION("Extensions.Messaging.IncludeChannelIdBehavior",
+                            behavior);
+}
+
+}  // namespace
 
 struct MessageService::MessageChannel {
   std::unique_ptr<MessagePort> opener;
@@ -83,6 +109,7 @@ struct MessageService::OpenChannelParams {
   GURL source_url;
   std::string channel_name;
   bool include_tls_channel_id;
+  bool requested_tls_channel_id;
   std::string tls_channel_id;
   bool include_guest_process_info;
 
@@ -98,6 +125,7 @@ struct MessageService::OpenChannelParams {
                     const GURL& source_url,
                     const std::string& channel_name,
                     bool include_tls_channel_id,
+                    bool requested_tls_channel_id,
                     bool include_guest_process_info)
       : source_process_id(source_process_id),
         source_routing_id(source_routing_id),
@@ -109,6 +137,7 @@ struct MessageService::OpenChannelParams {
         source_url(source_url),
         channel_name(channel_name),
         include_tls_channel_id(include_tls_channel_id),
+        requested_tls_channel_id(requested_tls_channel_id),
         include_guest_process_info(include_guest_process_info) {
     if (source_tab)
       this->source_tab = std::move(source_tab);
@@ -171,6 +200,10 @@ void MessageService::OpenChannelToExtension(
     bool include_tls_channel_id) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(source_port_id.is_opener);
+
+  // Record if the channel requested the channel id. We may not respect the
+  // request if the target extension is not externally connectable.
+  const bool requested_include_tls_channel_id = include_tls_channel_id;
 
   content::RenderFrameHost* source =
       content::RenderFrameHost::FromID(source_process_id, source_routing_id);
@@ -267,7 +300,7 @@ void MessageService::OpenChannelToExtension(
       source_process_id, source_routing_id, std::move(source_tab),
       source_frame_id, nullptr, receiver_port_id, source_extension_id,
       target_extension_id, source_url, channel_name, include_tls_channel_id,
-      include_guest_process_info));
+      requested_include_tls_channel_id, include_guest_process_info));
 
   pending_incognito_channels_[params->receiver_port_id.GetChannelId()] =
       PendingMessagesQueue();
@@ -454,7 +487,7 @@ void MessageService::OpenChannelToTab(int source_process_id,
       -1,  // If there is no tab, then there is no frame either.
       receiver.release(), receiver_port_id, extension_id, extension_id,
       GURL(),  // Source URL doesn't make sense for opening to tabs.
-      channel_name,
+      channel_name, false,
       false,    // Connections to tabs don't get TLS channel IDs.
       false));  // Connections to tabs aren't webview guests.
   OpenChannelImpl(receiver_contents->GetBrowserContext(), std::move(params),
@@ -572,7 +605,7 @@ void MessageService::OpenPort(const PortId& port_id,
   DCHECK(!port_id.is_opener);
 
   ChannelId channel_id = port_id.GetChannelId();
-  MessageChannelMap::iterator it = channels_.find(channel_id);
+  auto it = channels_.find(channel_id);
   if (it == channels_.end())
     return;
 
@@ -601,10 +634,9 @@ void MessageService::ClosePortImpl(const PortId& port_id,
                                    const std::string& error_message) {
   // Note: The channel might be gone already, if the other side closed first.
   ChannelId channel_id = port_id.GetChannelId();
-  MessageChannelMap::iterator it = channels_.find(channel_id);
+  auto it = channels_.find(channel_id);
   if (it == channels_.end()) {
-    PendingLazyBackgroundPageChannelMap::iterator pending =
-        pending_lazy_background_page_channels_.find(channel_id);
+    auto pending = pending_lazy_background_page_channels_.find(channel_id);
     if (pending != pending_lazy_background_page_channels_.end()) {
       lazy_background_task_queue_->AddPendingTask(
           pending->second.first, pending->second.second,
@@ -655,7 +687,7 @@ void MessageService::PostMessage(const PortId& source_port_id,
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   ChannelId channel_id = source_port_id.GetChannelId();
-  MessageChannelMap::iterator iter = channels_.find(channel_id);
+  auto iter = channels_.find(channel_id);
   if (iter == channels_.end()) {
     // If this channel is pending, queue up the PostMessage to run once
     // the channel opens.
@@ -671,8 +703,7 @@ void MessageService::EnqueuePendingMessage(const PortId& source_port_id,
                                            const Message& message) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  PendingChannelMap::iterator pending_for_incognito =
-      pending_incognito_channels_.find(channel_id);
+  auto pending_for_incognito = pending_incognito_channels_.find(channel_id);
   if (pending_for_incognito != pending_incognito_channels_.end()) {
     pending_for_incognito->second.push_back(
         PendingMessage(source_port_id, message));
@@ -683,7 +714,7 @@ void MessageService::EnqueuePendingMessage(const PortId& source_port_id,
         !base::ContainsKey(pending_lazy_background_page_channels_, channel_id));
     return;
   }
-  PendingChannelMap::iterator pending_for_tls_channel_id =
+  auto pending_for_tls_channel_id =
       pending_tls_channel_id_channels_.find(channel_id);
   if (pending_for_tls_channel_id != pending_tls_channel_id_channels_.end()) {
     pending_for_tls_channel_id->second.push_back(
@@ -705,8 +736,7 @@ void MessageService::EnqueuePendingMessageForLazyBackgroundLoad(
     const Message& message) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  PendingLazyBackgroundPageChannelMap::iterator pending =
-      pending_lazy_background_page_channels_.find(channel_id);
+  auto pending = pending_lazy_background_page_channels_.find(channel_id);
   if (pending != pending_lazy_background_page_channels_.end()) {
     lazy_background_task_queue_->AddPendingTask(
         pending->second.first, pending->second.second,
@@ -770,8 +800,7 @@ void MessageService::OnOpenChannelAllowed(
 
   ChannelId channel_id = params->receiver_port_id.GetChannelId();
 
-  PendingChannelMap::iterator pending_for_incognito =
-      pending_incognito_channels_.find(channel_id);
+  auto pending_for_incognito = pending_incognito_channels_.find(channel_id);
   if (pending_for_incognito == pending_incognito_channels_.end()) {
     NOTREACHED();
     return;
@@ -826,7 +855,19 @@ void MessageService::OnOpenChannelAllowed(
         source_process->GetStoragePartition(), source_url,
         base::Bind(&MessageService::GotChannelID, weak_factory_.GetWeakPtr(),
                    base::Passed(&params)));
+    // Flow continues in MessageService::GotChannelID(), which will also record
+    // tls channel ID behavior.
     return;
+  }
+
+  {
+    // The connection is not including TLS channel ID information. Log the
+    // result.
+    const auto tls_channel_id_behavior =
+        params->requested_tls_channel_id
+            ? IncludeTlsChannelIdBehavior::kRequestedButDenied
+            : IncludeTlsChannelIdBehavior::kNotRequested;
+    RecordIncludeTlsChannelIdBehavior(tls_channel_id_behavior);
   }
 
   ExtensionRegistry* registry = ExtensionRegistry::Get(context);
@@ -852,11 +893,18 @@ void MessageService::OnOpenChannelAllowed(
 void MessageService::GotChannelID(std::unique_ptr<OpenChannelParams> params,
                                   const std::string& tls_channel_id) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  {
+    const auto tls_channel_id_behavior =
+        tls_channel_id.empty()
+            ? IncludeTlsChannelIdBehavior::kRequestedButNotFound
+            : IncludeTlsChannelIdBehavior::kRequestedAndIncluded;
+    RecordIncludeTlsChannelIdBehavior(tls_channel_id_behavior);
+  }
 
   params->tls_channel_id.assign(tls_channel_id);
   ChannelId channel_id = params->receiver_port_id.GetChannelId();
 
-  PendingChannelMap::iterator pending_for_tls_channel_id =
+  auto pending_for_tls_channel_id =
       pending_tls_channel_id_channels_.find(channel_id);
   if (pending_for_tls_channel_id == pending_tls_channel_id_channels_.end()) {
     NOTREACHED();
@@ -925,7 +973,7 @@ void MessageService::DispatchPendingMessages(const PendingMessagesQueue& queue,
                                              const ChannelId& channel_id) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  MessageChannelMap::iterator channel_iter = channels_.find(channel_id);
+  auto channel_iter = channels_.find(channel_id);
   if (channel_iter != channels_.end()) {
     for (const PendingMessage& message : queue) {
       DispatchMessage(message.first, channel_iter->second.get(),

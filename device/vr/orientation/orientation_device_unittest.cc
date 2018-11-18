@@ -84,7 +84,7 @@ class VROrientationDeviceTest : public testing::Test {
 
     shared_buffer_handle_ = mojo::SharedBufferHandle::Create(
         sizeof(SensorReadingSharedBuffer) *
-        static_cast<uint64_t>(mojom::SensorType::LAST));
+        (static_cast<uint64_t>(mojom::SensorType::kMaxValue) + 1));
 
     shared_buffer_mapping_ = shared_buffer_handle_->MapAtOffset(
         mojom::SensorInitParams::kReadBufferSizeForTests, GetBufferOffset());
@@ -100,8 +100,7 @@ class VROrientationDeviceTest : public testing::Test {
   void TearDown() override { shared_buffer_handle_.reset(); }
 
   double GetBufferOffset() {
-    return SensorReadingSharedBuffer::GetOffset(
-        mojom::SensorType::RELATIVE_ORIENTATION_QUATERNION);
+    return SensorReadingSharedBuffer::GetOffset(kOrientationSensorType);
   }
 
   void InitializeDevice(mojom::SensorInitParamsPtr params) {
@@ -135,11 +134,11 @@ class VROrientationDeviceTest : public testing::Test {
 
     base::RunLoop loop;
 
-    device_->OnMagicWindowPoseRequest(base::BindOnce(
+    device_->OnMagicWindowFrameDataRequest(base::BindOnce(
         [](base::OnceClosure quit_closure,
            base::OnceCallback<void(mojom::VRPosePtr)> callback,
-           mojom::VRPosePtr ptr) {
-          std::move(callback).Run(std::move(ptr));
+           mojom::XRFrameDataPtr ptr) {
+          std::move(callback).Run(std::move(ptr->pose));
           std::move(quit_closure).Run();
         },
         loop.QuitClosure(), std::move(callback)));
@@ -154,8 +153,7 @@ class VROrientationDeviceTest : public testing::Test {
     auto init_params = mojom::SensorInitParams::New();
     init_params->sensor = std::move(sensor_ptr_);
     init_params->default_configuration = PlatformSensorConfiguration(
-        SensorTraits<mojom::SensorType::RELATIVE_ORIENTATION_QUATERNION>::
-            kDefaultFrequency);
+        SensorTraits<kOrientationSensorType>::kDefaultFrequency);
 
     init_params->client_request = mojo::MakeRequest(&sensor_client_ptr_);
 
@@ -235,7 +233,7 @@ TEST_F(VROrientationDeviceTest, SensorIsAvailableTest) {
 }
 
 TEST_F(VROrientationDeviceTest, GetOrientationTest) {
-  // Tests that OnMagicWindowPoseRequest returns a pose ptr without mishap.
+  // Tests that OnMagicWindowFrameDataRequest returns a pose ptr without mishap.
 
   InitializeDevice(FakeInitParams());
 

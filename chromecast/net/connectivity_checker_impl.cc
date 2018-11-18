@@ -32,10 +32,8 @@ namespace {
 // How often connectivity checks are performed in seconds while not connected.
 const unsigned int kConnectivityPeriodSeconds = 1;
 
-#if BUILDFLAG(IS_CAST_AUDIO_ONLY)
 // How often connectivity checks are performed in seconds while connected.
 const unsigned int kConnectivitySuccessPeriodSeconds = 60;
-#endif
 
 // Number of consecutive connectivity check errors before status is changed
 // to offline.
@@ -58,20 +56,30 @@ const char kMetricNameNetworkConnectivityCheckingErrorType[] =
 
 }  // namespace
 
+// static
+scoped_refptr<ConnectivityCheckerImpl> ConnectivityCheckerImpl::Create(
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner,
+    net::URLRequestContextGetter* url_request_context_getter) {
+  DCHECK(task_runner);
+
+  auto connectivity_checker =
+      base::WrapRefCounted(new ConnectivityCheckerImpl(task_runner));
+  task_runner->PostTask(
+      FROM_HERE,
+      base::BindOnce(&ConnectivityCheckerImpl::Initialize, connectivity_checker,
+                     base::RetainedRef(url_request_context_getter)));
+  return connectivity_checker;
+}
+
 ConnectivityCheckerImpl::ConnectivityCheckerImpl(
-    const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
-    net::URLRequestContextGetter* url_request_context_getter)
+    scoped_refptr<base::SingleThreadTaskRunner> task_runner)
     : ConnectivityChecker(),
-      task_runner_(task_runner),
+      task_runner_(std::move(task_runner)),
       connected_(false),
       connection_type_(net::NetworkChangeNotifier::CONNECTION_NONE),
       check_errors_(0),
       network_changed_pending_(false) {
   DCHECK(task_runner_.get());
-
-  task_runner->PostTask(
-      FROM_HERE, base::BindOnce(&ConnectivityCheckerImpl::Initialize, this,
-                                base::RetainedRef(url_request_context_getter)));
 }
 
 void ConnectivityCheckerImpl::Initialize(
@@ -190,14 +198,11 @@ void ConnectivityCheckerImpl::OnResponseStarted(net::URLRequest* request,
     VLOG(1) << "Connectivity check succeeded";
     check_errors_ = 0;
     SetConnected(true);
-#if BUILDFLAG(IS_CAST_AUDIO_ONLY)
-    // Audio products do not have an idle screen that makes periodic network
-    // requests. Schedule another check for audio devices to make sure
-    // connectivity hasn't dropped.
+    // Some products don't have an idle screen that makes periodic network
+    // requests. Schedule another check to ensure connectivity hasn't dropped.
     task_runner_->PostDelayedTask(
         FROM_HERE, base::Bind(&ConnectivityCheckerImpl::CheckInternal, this),
         base::TimeDelta::FromSeconds(kConnectivitySuccessPeriodSeconds));
-#endif
     timeout_.Cancel();
     return;
   }

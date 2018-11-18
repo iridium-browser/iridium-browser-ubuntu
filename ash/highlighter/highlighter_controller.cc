@@ -13,8 +13,10 @@
 #include "ash/public/cpp/scale_utility.h"
 #include "ash/public/cpp/shell_window_ids.h"
 #include "ash/shell.h"
+#include "ash/shell_state.h"
 #include "ash/system/palette/palette_utils.h"
 #include "base/metrics/histogram_macros.h"
+#include "chromeos/chromeos_switches.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/events/base_event_utils.h"
@@ -64,10 +66,49 @@ HighlighterController::~HighlighterController() {
   Shell::Get()->RemovePreTargetHandler(this);
 }
 
+void HighlighterController::AddObserver(Observer* observer) {
+  DCHECK(observer);
+  observers_.AddObserver(observer);
+}
+
+void HighlighterController::RemoveObserver(Observer* observer) {
+  DCHECK(observer);
+  observers_.RemoveObserver(observer);
+}
+
 void HighlighterController::SetExitCallback(base::OnceClosure exit_callback,
                                             bool require_success) {
   exit_callback_ = std::move(exit_callback);
   require_success_ = require_success;
+}
+
+void HighlighterController::UpdateEnabledState(
+    HighlighterEnabledState enabled_state) {
+  if (enabled_state_ == enabled_state)
+    return;
+  enabled_state_ = enabled_state;
+
+  SetEnabled(enabled_state == HighlighterEnabledState::kEnabled);
+  for (auto& observer : observers_)
+    observer.OnHighlighterEnabledChanged(enabled_state);
+}
+
+void HighlighterController::AbortSession() {
+  if (enabled_state_ == HighlighterEnabledState::kEnabled)
+    UpdateEnabledState(HighlighterEnabledState::kDisabledBySessionAbort);
+}
+
+void HighlighterController::BindRequest(
+    mojom::HighlighterControllerRequest request) {
+  binding_.Bind(std::move(request));
+}
+
+void HighlighterController::SetClient(
+    mojom::HighlighterControllerClientPtr client) {
+  client_ = std::move(client);
+  client_.set_connection_error_handler(
+      base::BindOnce(&HighlighterController::OnClientConnectionLost,
+                     weak_factory_.GetWeakPtr()));
 }
 
 void HighlighterController::SetEnabled(bool enabled) {
@@ -89,21 +130,9 @@ void HighlighterController::SetEnabled(bool enabled) {
     if (highlighter_view_ && !highlighter_view_->animating())
       DestroyPointerView();
   }
+
   if (client_)
     client_->HandleEnabledStateChange(enabled);
-}
-
-void HighlighterController::BindRequest(
-    mojom::HighlighterControllerRequest request) {
-  binding_.Bind(std::move(request));
-}
-
-void HighlighterController::SetClient(
-    mojom::HighlighterControllerClientPtr client) {
-  client_ = std::move(client);
-  client_.set_connection_error_handler(
-      base::Bind(&HighlighterController::OnClientConnectionLost,
-                 weak_factory_.GetWeakPtr()));
 }
 
 void HighlighterController::ExitHighlighterMode() {
@@ -195,10 +224,26 @@ void HighlighterController::RecognizeGesture() {
 
   if (!box.IsEmpty() &&
       gesture_type != HighlighterGestureType::kNotRecognized) {
-    if (client_) {
-      client_->HandleSelection(gfx::ToEnclosingRect(
-          gfx::ScaleRect(box, GetScreenshotScale(current_window))));
-    }
+    // The window for selection should be the root window to show assistant.
+    Shell::Get()->shell_state()->SetRootWindowForNewWindows(
+        current_window->GetRootWindow());
+
+    // TODO(muyuanli): Delete the check when native assistant is default on.
+    // This is a temporary workaround to support both ARC-based assistant
+    // and native assistant. In ARC-based assistant, we send the rect in pixels
+    // to ARC side, where the app will crop the screenshot. In native assistant,
+    // we pass the rect directly to UI snapshot API, which assumes coordinates
+    // in DP.
+    const gfx::Rect selection_rect =
+        chromeos::switches::IsAssistantEnabled()
+            ? gfx::ToEnclosingRect(box)
+            : gfx::ToEnclosingRect(
+                  gfx::ScaleRect(box, GetScreenshotScale(current_window)));
+    if (client_)
+      client_->HandleSelection(selection_rect);
+
+    for (auto& observer : observers_)
+      observer.OnHighlighterSelectionRecognized(selection_rect);
 
     result_view_ = std::make_unique<HighlighterResultView>(current_window);
     result_view_->Animate(box, gesture_type,

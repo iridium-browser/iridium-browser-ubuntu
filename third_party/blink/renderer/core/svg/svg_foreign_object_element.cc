@@ -32,21 +32,24 @@ inline SVGForeignObjectElement::SVGForeignObjectElement(Document& document)
     : SVGGraphicsElement(SVGNames::foreignObjectTag, document),
       x_(SVGAnimatedLength::Create(this,
                                    SVGNames::xAttr,
-                                   SVGLength::Create(SVGLengthMode::kWidth),
+                                   SVGLengthMode::kWidth,
+                                   SVGLength::Initial::kUnitlessZero,
                                    CSSPropertyX)),
       y_(SVGAnimatedLength::Create(this,
                                    SVGNames::yAttr,
-                                   SVGLength::Create(SVGLengthMode::kHeight),
+                                   SVGLengthMode::kHeight,
+                                   SVGLength::Initial::kUnitlessZero,
                                    CSSPropertyY)),
       width_(SVGAnimatedLength::Create(this,
                                        SVGNames::widthAttr,
-                                       SVGLength::Create(SVGLengthMode::kWidth),
+                                       SVGLengthMode::kWidth,
+                                       SVGLength::Initial::kUnitlessZero,
                                        CSSPropertyWidth)),
-      height_(
-          SVGAnimatedLength::Create(this,
-                                    SVGNames::heightAttr,
-                                    SVGLength::Create(SVGLengthMode::kHeight),
-                                    CSSPropertyHeight)) {
+      height_(SVGAnimatedLength::Create(this,
+                                        SVGNames::heightAttr,
+                                        SVGLengthMode::kHeight,
+                                        SVGLength::Initial::kUnitlessZero,
+                                        CSSPropertyHeight)) {
   AddToPropertyMap(x_);
   AddToPropertyMap(y_);
   AddToPropertyMap(width_);
@@ -119,25 +122,6 @@ void SVGForeignObjectElement::SvgAttributeChanged(
 LayoutObject* SVGForeignObjectElement::CreateLayoutObject(
     const ComputedStyle&) {
   return new LayoutSVGForeignObject(this);
-}
-
-bool SVGForeignObjectElement::LayoutObjectIsNeeded(
-    const ComputedStyle& style) const {
-  // Suppress foreignObject layoutObjects in SVG hidden containers.
-  // (https://bugs.webkit.org/show_bug.cgi?id=87297)
-  // Note that we currently do not support foreignObject instantiation via
-  // <use>, hence it is safe to use parentElement() here. If that changes, this
-  // method should be updated to use parentOrShadowHostElement() instead.
-  Element* ancestor = parentElement();
-  while (ancestor && ancestor->IsSVGElement()) {
-    if (ancestor->GetLayoutObject() &&
-        ancestor->GetLayoutObject()->IsSVGHiddenContainer())
-      return false;
-
-    ancestor = ancestor->parentElement();
-  }
-
-  return SVGGraphicsElement::LayoutObjectIsNeeded(style);
 }
 
 bool SVGForeignObjectElement::SelfHasRelativeLengths() const {

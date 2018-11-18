@@ -7,6 +7,7 @@ module autofill.mojom;
 import "mojo/public/mojom/base/text_direction.mojom";
 import "mojo/public/mojom/base/time.mojom";
 import "mojo/public/mojom/base/string16.mojom";
+import "ui/gfx/geometry/mojo/geometry.mojom";
 import "url/mojom/origin.mojom";
 import "url/mojom/url.mojom";
 
@@ -29,12 +30,6 @@ enum GenerationUploadStatus {
   POSITIVE_SIGNAL_SENT,
   NEGATIVE_SIGNAL_SENT,
   UNKNOWN_STATUS = 10
-};
-
-// autofill::PasswordForm::Layout
-enum PasswordFormLayout {
-  LAYOUT_OTHER,
-  LAYOUT_LOGIN_AND_SIGNUP
 };
 
 // autofill::PasswordForm::Type
@@ -60,11 +55,9 @@ enum PasswordFormSubmissionIndicatorEvent {
     SAME_DOCUMENT_NAVIGATION,
     XHR_SUCCEEDED,
     FRAME_DETACHED,
-    MANUAL_SAVE,
     DOM_MUTATION_AFTER_XHR,
     PROVISIONALLY_SAVED_FORM_ON_START_PROVISIONAL_LOAD,
-    FILLED_FORM_ON_START_PROVISIONAL_LOAD,
-    FILLED_INPUT_ELEMENTS_ON_START_PROVISIONAL_LOAD,
+    PROBABLE_FORM_SUBMISSION,
     SUBMISSION_INDICATOR_EVENT_COUNT
 };
 
@@ -78,6 +71,7 @@ enum PasswordFormFieldPredictionType {
 
 // autofill::SubmissionSource
 enum SubmissionSource {
+  NONE,
   SAME_DOCUMENT_NAVIGATION,
   XHR_SUCCEEDED,
   FRAME_DETACHED,
@@ -101,6 +95,13 @@ enum LabelSource {
   VALUE,
 };
 
+// autofill::FillingStatus
+enum FillingStatus {
+  SUCCESS,
+  ERROR_NO_VALID_FIELD,
+  ERROR_NOT_ALLOWED,
+};
+
 // autofill::FormFieldData
 struct FormFieldData {
   mojo_base.mojom.String16 label;
@@ -111,15 +112,20 @@ struct FormFieldData {
   string autocomplete_attribute;
   mojo_base.mojom.String16 placeholder;
   mojo_base.mojom.String16 css_classes;
+  uint32 unique_renderer_id;
   uint32 properties_mask;
 
   uint64 max_length;
   bool is_autofilled;
+  string section;
   CheckStatus check_status;
   bool is_focusable;
   bool should_autocomplete;
   RoleAttribute role;
   mojo_base.mojom.TextDirection text_direction;
+  bool is_enabled;
+  bool is_readonly;
+  mojo_base.mojom.String16 typed_value;
 
   array<mojo_base.mojom.String16> option_values;
   array<mojo_base.mojom.String16> option_contents;
@@ -136,7 +142,9 @@ struct FormData {
   url.mojom.Origin main_frame_origin;
   bool is_form_tag;
   bool is_formless_checkout;
+  uint32 unique_renderer_id;
   array<FormFieldData> fields;
+  array<uint32> username_predictions;
 };
 
 // autofill::FormFieldDataPredictions
@@ -147,6 +155,7 @@ struct FormFieldDataPredictions {
   string server_type;
   string overall_type;
   string parseable_name;
+  string section;
 };
 
 // autofill::FormDataPredictions
@@ -164,15 +173,16 @@ struct PasswordAndRealm {
 
 // autofill::PasswordFormFillData
 struct PasswordFormFillData {
-  mojo_base.mojom.String16 name;
+  uint32 form_renderer_id;
   url.mojom.Url origin;
   url.mojom.Url action;
   FormFieldData username_field;
   FormFieldData password_field;
+  bool username_may_use_prefilled_placeholder;
   string preferred_realm;
   map<mojo_base.mojom.String16, PasswordAndRealm> additional_logins;
   bool wait_for_username;
-  bool is_possible_change_password_form;
+  bool has_renderer_ids;
 };
 
 // autofill::PasswordFormGenerationData
@@ -181,6 +191,15 @@ struct PasswordFormGenerationData {
   uint32 field_signature;
   bool has_confirmation_field;
   uint32 confirmation_field_signature;
+};
+
+// autofill::password_generation::PasswordGenerationUIData
+struct PasswordGenerationUIData {
+  gfx.mojom.RectF bounds;
+  int32 max_length;
+  mojo_base.mojom.String16 generation_element;
+  mojo_base.mojom.TextDirection text_direction;
+  PasswordForm password_form;
 };
 
 // autofill::ValueElementPair
@@ -205,10 +224,8 @@ struct PasswordForm {
   bool form_has_autofilled_value;
   mojo_base.mojom.String16 password_element;
   mojo_base.mojom.String16 password_value;
-  bool password_value_is_default;
   mojo_base.mojom.String16 new_password_element;
   mojo_base.mojom.String16 new_password_value;
-  bool new_password_value_is_default;
   bool new_password_marked_by_site;
   mojo_base.mojom.String16 confirmation_password_element;
   bool preferred;
@@ -223,13 +240,12 @@ struct PasswordForm {
   url.mojom.Url icon_url;
   url.mojom.Origin federation_origin;
   bool skip_zero_click;
-  PasswordFormLayout layout;
   bool was_parsed_using_autofill_predictions;
   bool is_public_suffix_match;
   bool is_affiliation_based_match;
-  bool does_look_like_signup_form;
   PasswordFormSubmissionIndicatorEvent submission_event;
   bool only_for_fallback_saving;
+  bool is_gaia_with_skip_save_password_form;
 };
 
 // TODO(leonhsl): Use map directly after http://crbug.com/628104 solved.

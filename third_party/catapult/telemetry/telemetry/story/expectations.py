@@ -4,6 +4,8 @@
 
 import logging
 
+from telemetry.core import os_version as os_version_module
+
 
 class StoryExpectations(object):
   """An object that contains disabling expectations for benchmarks and stories.
@@ -245,7 +247,7 @@ class _TestConditionByAndroidModel(_TestCondition):
 class _TestConditionAndroidWebview(_TestCondition):
   def ShouldDisable(self, platform, finder_options):
     return (platform.GetOSName() == 'android' and
-            finder_options.browser_type == 'android-webview')
+            finder_options.browser_type.startswith('android-webview'))
 
   def __str__(self):
     return 'Android Webview'
@@ -253,7 +255,7 @@ class _TestConditionAndroidWebview(_TestCondition):
 class _TestConditionAndroidNotWebview(_TestCondition):
   def ShouldDisable(self, platform, finder_options):
     return (platform.GetOSName() == 'android' and not
-            finder_options.browser_type == 'android-webview')
+            finder_options.browser_type.startswith('android-webview'))
 
   def __str__(self):
     return 'Android but not webview'
@@ -271,6 +273,20 @@ class _TestConditionByMacVersion(_TestCondition):
     if platform.GetOSName() != 'mac':
       return False
     return platform.GetOSVersionDetailString().startswith(self._version)
+
+
+class _TestConditionByWinVersion(_TestCondition):
+  def __init__(self, version, name):
+    self._version = version
+    self._name = name
+
+  def __str__(self):
+    return self._name
+
+  def ShouldDisable(self, platform, finder_options):
+    if platform.GetOSName() != 'win':
+      return False
+    return platform.GetOSVersionName() == self._version
 
 
 class _TestConditionLogicalAndConditions(_TestCondition):
@@ -302,6 +318,8 @@ class _TestConditionLogicalOrConditions(_TestCondition):
 ALL = _AllTestCondition()
 ALL_MAC = _TestConditionByPlatformList(['mac'], 'Mac')
 ALL_WIN = _TestConditionByPlatformList(['win'], 'Win')
+WIN_7 = _TestConditionByWinVersion(os_version_module.WIN7, 'Win 7')
+WIN_10 = _TestConditionByWinVersion(os_version_module.WIN10, 'Win 10')
 ALL_LINUX = _TestConditionByPlatformList(['linux'], 'Linux')
 ALL_CHROMEOS = _TestConditionByPlatformList(['chromeos'], 'ChromeOS')
 ALL_ANDROID = _TestConditionByPlatformList(['android'], 'Android')
@@ -324,6 +342,7 @@ ANDROID_ONE = _TestConditionByAndroidModel('W6210', 'Android One')
 ANDROID_SVELTE = _TestConditionAndroidSvelte()
 ANDROID_LOW_END = _TestConditionLogicalOrConditions(
     [ANDROID_GO, ANDROID_SVELTE, ANDROID_ONE], 'Android Low End')
+ANDROID_PIXEL2 = _TestConditionByAndroidModel('Pixel 2')
 ANDROID_WEBVIEW = _TestConditionAndroidWebview()
 ANDROID_NOT_WEBVIEW = _TestConditionAndroidNotWebview()
 # MAC_10_11 Includes:
@@ -347,6 +366,8 @@ EXPECTATION_NAME_MAP = {
     'Android_but_not_webview': ANDROID_NOT_WEBVIEW,
     'Mac': ALL_MAC,
     'Win': ALL_WIN,
+    'Win_7': WIN_7,
+    'Win_10': WIN_10,
     'Linux': ALL_LINUX,
     'ChromeOS': ALL_CHROMEOS,
     'Android': ALL_ANDROID,
@@ -357,6 +378,7 @@ EXPECTATION_NAME_MAP = {
     'Nexus_6': ANDROID_NEXUS6,
     'Nexus_6P': ANDROID_NEXUS6P,
     'Nexus_7': ANDROID_NEXUS7,
+    'Pixel_2': ANDROID_PIXEL2,
     'Mac_10.11': MAC_10_11,
     'Mac_10.12': MAC_10_12,
     'Nexus6_Webview': ANDROID_NEXUS6_WEBVIEW,

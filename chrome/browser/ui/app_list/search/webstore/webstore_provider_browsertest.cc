@@ -11,6 +11,7 @@
 #include <string>
 #include <utility>
 
+#include "ash/public/cpp/app_list/app_list_switches.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/macros.h"
@@ -28,7 +29,6 @@
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "net/test/embedded_test_server/http_request.h"
 #include "net/test/embedded_test_server/http_response.h"
-#include "ui/app_list/app_list_switches.h"
 
 using content::BrowserThread;
 using extensions::Manifest;
@@ -175,9 +175,9 @@ class WebstoreProviderTest : public InProcessBrowserTest {
     const GURL gallery_url(embedded_test_server()->base_url().spec() + "path");
     extension_test_util::SetGalleryURL(gallery_url);
 
-    mock_controller_.reset(new AppListControllerDelegateForTest);
-    webstore_provider_.reset(new WebstoreProvider(
-        ProfileManager::GetActiveUserProfile(), mock_controller_.get()));
+    mock_controller_ = std::make_unique<AppListControllerDelegateForTest>();
+    webstore_provider_ = std::make_unique<WebstoreProvider>(
+        ProfileManager::GetActiveUserProfile(), mock_controller_.get());
     webstore_provider_->set_webstore_search_fetched_callback(
         base::Bind(&WebstoreProviderTest::OnSearchResultsFetched,
                    base::Unretained(this)));
@@ -192,7 +192,7 @@ class WebstoreProviderTest : public InProcessBrowserTest {
 
     if (webstore_provider_->query_pending_ && !mock_server_response.empty()) {
       DCHECK(!run_loop_);
-      run_loop_.reset(new base::RunLoop);
+      run_loop_ = std::make_unique<base::RunLoop>();
       run_loop_->Run();
       run_loop_.reset();
 
@@ -241,7 +241,7 @@ class WebstoreProviderTest : public InProcessBrowserTest {
       }
 
       EXPECT_EQ(std::string(expected_results[i].title),
-                ChromeSearchResult::TagsDebugString(
+                ChromeSearchResult::TagsDebugStringForTest(
                     base::UTF16ToUTF8(result->title()), result->title_tags()));
 
       // Ensure the number of action buttons is appropriate for the item type.
@@ -264,7 +264,8 @@ class WebstoreProviderTest : public InProcessBrowserTest {
 
  private:
   std::unique_ptr<HttpResponse> HandleRequest(const HttpRequest& request) {
-    std::unique_ptr<BasicHttpResponse> response(new BasicHttpResponse);
+    std::unique_ptr<BasicHttpResponse> response =
+        std::make_unique<BasicHttpResponse>();
 
     if (request.relative_url.find("/jsonsearch?") != std::string::npos) {
       if (mock_server_response_ == "ERROR_NOT_FOUND") {

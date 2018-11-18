@@ -26,7 +26,10 @@
 #include <vector>
 
 namespace llvm {
+enum class DebugCompressionType;
+namespace objcopy {
 
+class Buffer;
 class SectionBase;
 class Section;
 class OwnedDataSection;
@@ -36,8 +39,12 @@ class RelocationSection;
 class DynamicRelocationSection;
 class GnuDebugLinkSection;
 class GroupSection;
+class SectionIndexSection;
+class CompressedSection;
+class DecompressedSection;
 class Segment;
 class Object;
+struct Symbol;
 
 class SectionTableRef {
   MutableArrayRef<std::unique_ptr<SectionBase>> Sections;
@@ -52,13 +59,22 @@ public:
   iterator begin() { return iterator(Sections.data()); }
   iterator end() { return iterator(Sections.data() + Sections.size()); }
 
-  SectionBase *getSection(uint16_t Index, Twine ErrMsg);
+  SectionBase *getSection(uint32_t Index, Twine ErrMsg);
 
   template <class T>
-  T *getSectionOfType(uint16_t Index, Twine IndexErrMsg, Twine TypeErrMsg);
+  T *getSectionOfType(uint32_t Index, Twine IndexErrMsg, Twine TypeErrMsg);
 };
 
 enum ElfType { ELFT_ELF32LE, ELFT_ELF64LE, ELFT_ELF32BE, ELFT_ELF64BE };
+
+// This type keeps track of the machine info for various architectures. This
+// lets us map architecture names to ELF types and the e_machine value of the
+// ELF file.
+struct MachineInfo {
+  uint16_t EMachine;
+  bool Is64Bit;
+  bool IsLittleEndian;
+};
 
 class SectionVisitor {
 public:
@@ -72,11 +88,14 @@ public:
   virtual void visit(const DynamicRelocationSection &Sec) = 0;
   virtual void visit(const GnuDebugLinkSection &Sec) = 0;
   virtual void visit(const GroupSection &Sec) = 0;
+  virtual void visit(const SectionIndexSection &Sec) = 0;
+  virtual void visit(const CompressedSection &Sec) = 0;
+  virtual void visit(const DecompressedSection &Sec) = 0;
 };
 
 class SectionWriter : public SectionVisitor {
 protected:
-  FileOutputBuffer &Out;
+  Buffer &Out;
 
 public:
   virtual ~SectionWriter(){};
@@ -89,8 +108,11 @@ public:
   virtual void visit(const RelocationSection &Sec) override = 0;
   virtual void visit(const GnuDebugLinkSection &Sec) override = 0;
   virtual void visit(const GroupSection &Sec) override = 0;
+  virtual void visit(const SectionIndexSection &Sec) override = 0;
+  virtual void visit(const CompressedSection &Sec) override = 0;
+  virtual void visit(const DecompressedSection &Sec) override = 0;
 
-  SectionWriter(FileOutputBuffer &Buf) : Out(Buf) {}
+  explicit SectionWriter(Buffer &Buf) : Out(Buf) {}
 };
 
 template <class ELFT> class ELFSectionWriter : public SectionWriter {
@@ -98,6 +120,7 @@ private:
   using Elf_Word = typename ELFT::Word;
   using Elf_Rel = typename ELFT::Rel;
   using Elf_Rela = typename ELFT::Rela;
+  using Elf_Sym = typename ELFT::Sym;
 
 public:
   virtual ~ELFSectionWriter() {}
@@ -105,8 +128,11 @@ public:
   void visit(const RelocationSection &Sec) override;
   void visit(const GnuDebugLinkSection &Sec) override;
   void visit(const GroupSection &Sec) override;
+  void visit(const SectionIndexSection &Sec) override;
+  void visit(const CompressedSection &Sec) override;
+  void visit(const DecompressedSection &Sec) override;
 
-  ELFSectionWriter(FileOutputBuffer &Buf) : SectionWriter(Buf) {}
+  explicit ELFSectionWriter(Buffer &Buf) : SectionWriter(Buf) {}
 };
 
 #define MAKE_SEC_WRITER_FRIEND                                                 \
@@ -121,32 +147,76 @@ public:
   void visit(const RelocationSection &Sec) override;
   void visit(const GnuDebugLinkSection &Sec) override;
   void visit(const GroupSection &Sec) override;
+  void visit(const SectionIndexSection &Sec) override;
+  void visit(const CompressedSection &Sec) override;
+  void visit(const DecompressedSection &Sec) override;
 
-  BinarySectionWriter(FileOutputBuffer &Buf) : SectionWriter(Buf) {}
+  explicit BinarySectionWriter(Buffer &Buf) : SectionWriter(Buf) {}
+};
+
+// The class Buffer abstracts out the common interface of FileOutputBuffer and
+// WritableMemoryBuffer so that the hierarchy of Writers depends on this
+// abstract interface and doesn't depend on a particular implementation.
+// TODO: refactor the buffer classes in LLVM to enable us to use them here
+// directly.
+class Buffer {
+  StringRef Name;
+
+public:
+  virtual ~Buffer();
+  virtual void allocate(size_t Size) = 0;
+  virtual uint8_t *getBufferStart() = 0;
+  virtual Error commit() = 0;
+
+  explicit Buffer(StringRef Name) : Name(Name) {}
+  StringRef getName() const { return Name; }
+};
+
+class FileBuffer : public Buffer {
+  std::unique_ptr<FileOutputBuffer> Buf;
+
+public:
+  void allocate(size_t Size) override;
+  uint8_t *getBufferStart() override;
+  Error commit() override;
+
+  explicit FileBuffer(StringRef FileName) : Buffer(FileName) {}
+};
+
+class MemBuffer : public Buffer {
+  std::unique_ptr<WritableMemoryBuffer> Buf;
+
+public:
+  void allocate(size_t Size) override;
+  uint8_t *getBufferStart() override;
+  Error commit() override;
+
+  explicit MemBuffer(StringRef Name) : Buffer(Name) {}
+
+  std::unique_ptr<WritableMemoryBuffer> releaseMemoryBuffer();
 };
 
 class Writer {
 protected:
-  StringRef File;
   Object &Obj;
-  std::unique_ptr<FileOutputBuffer> BufPtr;
-
-  void createBuffer(uint64_t Size);
+  Buffer &Buf;
 
 public:
   virtual ~Writer();
-
   virtual void finalize() = 0;
   virtual void write() = 0;
 
-  Writer(StringRef File, Object &Obj) : File(File), Obj(Obj) {}
+  Writer(Object &O, Buffer &B) : Obj(O), Buf(B) {}
 };
 
 template <class ELFT> class ELFWriter : public Writer {
 private:
+  using Elf_Addr = typename ELFT::Addr;
   using Elf_Shdr = typename ELFT::Shdr;
   using Elf_Phdr = typename ELFT::Phdr;
   using Elf_Ehdr = typename ELFT::Ehdr;
+
+  void initEhdrSegment();
 
   void writeEhdr();
   void writePhdr(const Segment &Seg);
@@ -168,8 +238,8 @@ public:
 
   void finalize() override;
   void write() override;
-  ELFWriter(StringRef File, Object &Obj, bool WSH)
-      : Writer(File, Obj), WriteSectionHeaders(WSH) {}
+  ELFWriter(Object &Obj, Buffer &Buf, bool WSH)
+      : Writer(Obj, Buf), WriteSectionHeaders(WSH) {}
 };
 
 class BinaryWriter : public Writer {
@@ -182,16 +252,17 @@ public:
   ~BinaryWriter() {}
   void finalize() override;
   void write() override;
-  BinaryWriter(StringRef File, Object &Obj) : Writer(File, Obj) {}
+  BinaryWriter(Object &Obj, Buffer &Buf) : Writer(Obj, Buf) {}
 };
 
 class SectionBase {
 public:
-  StringRef Name;
+  std::string Name;
   Segment *ParentSegment = nullptr;
   uint64_t HeaderOffset;
-  uint64_t OriginalOffset;
+  uint64_t OriginalOffset = std::numeric_limits<uint64_t>::max();
   uint32_t Index;
+  bool HasSymbol = false;
 
   uint64_t Addr = 0;
   uint64_t Align = 1;
@@ -203,13 +274,19 @@ public:
   uint64_t Offset = 0;
   uint64_t Size = 0;
   uint64_t Type = ELF::SHT_NULL;
+  ArrayRef<uint8_t> OriginalData;
+
+  SectionBase() = default;
+  SectionBase(const SectionBase &) = default;
 
   virtual ~SectionBase() = default;
 
   virtual void initialize(SectionTableRef SecTable);
   virtual void finalize();
   virtual void removeSectionReferences(const SectionBase *Sec);
+  virtual void removeSymbols(function_ref<bool(const Symbol &)> ToRemove);
   virtual void accept(SectionVisitor &Visitor) const = 0;
+  virtual void markSymbols();
 };
 
 class Segment {
@@ -259,11 +336,15 @@ class Section : public SectionBase {
   MAKE_SEC_WRITER_FRIEND
 
   ArrayRef<uint8_t> Contents;
+  SectionBase *LinkSection = nullptr;
 
 public:
   explicit Section(ArrayRef<uint8_t> Data) : Contents(Data) {}
 
   void accept(SectionVisitor &Visitor) const override;
+  void removeSectionReferences(const SectionBase *Sec) override;
+  void initialize(SectionTableRef SecTable) override;
+  void finalize() override;
 };
 
 class OwnedDataSection : public SectionBase {
@@ -274,13 +355,54 @@ class OwnedDataSection : public SectionBase {
 public:
   OwnedDataSection(StringRef SecName, ArrayRef<uint8_t> Data)
       : Data(std::begin(Data), std::end(Data)) {
-    Name = SecName;
+    Name = SecName.str();
     Type = ELF::SHT_PROGBITS;
     Size = Data.size();
     OriginalOffset = std::numeric_limits<uint64_t>::max();
   }
 
   void accept(SectionVisitor &Sec) const override;
+};
+
+class CompressedSection : public SectionBase {
+  MAKE_SEC_WRITER_FRIEND
+
+  DebugCompressionType CompressionType;
+  uint64_t DecompressedSize;
+  uint64_t DecompressedAlign;
+  SmallVector<char, 128> CompressedData;
+
+public:
+  CompressedSection(const SectionBase &Sec,
+                    DebugCompressionType CompressionType);
+  CompressedSection(ArrayRef<uint8_t> CompressedData, uint64_t DecompressedSize,
+                    uint64_t DecompressedAlign);
+
+  uint64_t getDecompressedSize() const { return DecompressedSize; }
+  uint64_t getDecompressedAlign() const { return DecompressedAlign; }
+
+  void accept(SectionVisitor &Visitor) const override;
+
+  static bool classof(const SectionBase *S) {
+    return (S->Flags & ELF::SHF_COMPRESSED) ||
+           (StringRef(S->Name).startswith(".zdebug"));
+  }
+};
+
+class DecompressedSection : public SectionBase {
+  MAKE_SEC_WRITER_FRIEND
+
+public:
+  explicit DecompressedSection(const CompressedSection &Sec)
+      : SectionBase(Sec) {
+    Size = Sec.getDecompressedSize();
+    Align = Sec.getDecompressedAlign();
+    Flags = (Flags & ~ELF::SHF_COMPRESSED);
+    if (StringRef(Name).startswith(".zdebug"))
+      Name = "." + Name.substr(2);
+  }
+
+  void accept(SectionVisitor &Visitor) const override;
 };
 
 // There are two types of string tables that can exist, dynamic and not dynamic.
@@ -325,6 +447,7 @@ enum SymbolShndxType {
   SYMBOL_HEXAGON_SCOMMON_2 = ELF::SHN_HEXAGON_SCOMMON_2,
   SYMBOL_HEXAGON_SCOMMON_4 = ELF::SHN_HEXAGON_SCOMMON_4,
   SYMBOL_HEXAGON_SCOMMON_8 = ELF::SHN_HEXAGON_SCOMMON_8,
+  SYMBOL_XINDEX = ELF::SHN_XINDEX,
 };
 
 struct Symbol {
@@ -332,14 +455,41 @@ struct Symbol {
   SectionBase *DefinedIn = nullptr;
   SymbolShndxType ShndxType;
   uint32_t Index;
-  StringRef Name;
+  std::string Name;
   uint32_t NameIndex;
   uint64_t Size;
   uint8_t Type;
   uint64_t Value;
   uint8_t Visibility;
+  bool Referenced = false;
 
   uint16_t getShndx() const;
+};
+
+class SectionIndexSection : public SectionBase {
+  MAKE_SEC_WRITER_FRIEND
+
+private:
+  std::vector<uint32_t> Indexes;
+  SymbolTableSection *Symbols = nullptr;
+
+public:
+  virtual ~SectionIndexSection() {}
+  void addIndex(uint32_t Index) {
+    Indexes.push_back(Index);
+    Size += 4;
+  }
+  void setSymTab(SymbolTableSection *SymTab) { Symbols = SymTab; }
+  void initialize(SectionTableRef SecTable) override;
+  void finalize() override;
+  void accept(SectionVisitor &Visitor) const override;
+
+  SectionIndexSection() {
+    Name = ".symtab_shndx";
+    Align = 4;
+    EntrySize = 4;
+    Type = ELF::SHT_SYMTAB_SHNDX;
+  }
 };
 
 class SymbolTableSection : public SectionBase {
@@ -351,21 +501,33 @@ class SymbolTableSection : public SectionBase {
 protected:
   std::vector<std::unique_ptr<Symbol>> Symbols;
   StringTableSection *SymbolNames = nullptr;
+  SectionIndexSection *SectionIndexTable = nullptr;
 
   using SymPtr = std::unique_ptr<Symbol>;
 
 public:
-  void addSymbol(StringRef Name, uint8_t Bind, uint8_t Type,
-                 SectionBase *DefinedIn, uint64_t Value, uint8_t Visibility,
-                 uint16_t Shndx, uint64_t Sz);
-  void addSymbolNames();
+  SymbolTableSection() { Type = ELF::SHT_SYMTAB; }
+
+  void addSymbol(Twine Name, uint8_t Bind, uint8_t Type, SectionBase *DefinedIn,
+                 uint64_t Value, uint8_t Visibility, uint16_t Shndx,
+                 uint64_t Size);
+  void prepareForLayout();
+  // An 'empty' symbol table still contains a null symbol.
+  bool empty() const { return Symbols.size() == 1; }
+  void setShndxTable(SectionIndexSection *ShndxTable) {
+    SectionIndexTable = ShndxTable;
+  }
+  const SectionIndexSection *getShndxTable() const { return SectionIndexTable; }
   const SectionBase *getStrTab() const { return SymbolNames; }
   const Symbol *getSymbolByIndex(uint32_t Index) const;
+  Symbol *getSymbolByIndex(uint32_t Index);
+  void updateSymbols(function_ref<void(Symbol &)> Callable);
+
   void removeSectionReferences(const SectionBase *Sec) override;
-  void localize(std::function<bool(const Symbol &)> ToLocalize);
   void initialize(SectionTableRef SecTable) override;
   void finalize() override;
   void accept(SectionVisitor &Visitor) const override;
+  void removeSymbols(function_ref<bool(const Symbol &)> ToRemove) override;
 
   static bool classof(const SectionBase *S) {
     return S->Type == ELF::SHT_SYMTAB;
@@ -373,7 +535,7 @@ public:
 };
 
 struct Relocation {
-  const Symbol *RelocSymbol = nullptr;
+  Symbol *RelocSymbol = nullptr;
   uint64_t Offset;
   uint64_t Addend;
   uint32_t Type;
@@ -426,6 +588,8 @@ class RelocationSection
 public:
   void addRelocation(Relocation Rel) { Relocations.push_back(Rel); }
   void accept(SectionVisitor &Visitor) const override;
+  void removeSymbols(function_ref<bool(const Symbol &)> ToRemove) override;
+  void markSymbols() override;
 
   static bool classof(const SectionBase *S) {
     if (S->Flags & ELF::SHF_ALLOC)
@@ -440,7 +604,7 @@ public:
 class GroupSection : public SectionBase {
   MAKE_SEC_WRITER_FRIEND
   const SymbolTableSection *SymTab = nullptr;
-  const Symbol *Sym = nullptr;
+  Symbol *Sym = nullptr;
   ELF::Elf32_Word FlagWord;
   SmallVector<SectionBase *, 3> GroupMembers;
 
@@ -452,44 +616,33 @@ public:
   explicit GroupSection(ArrayRef<uint8_t> Data) : Contents(Data) {}
 
   void setSymTab(const SymbolTableSection *SymTabSec) { SymTab = SymTabSec; }
-  void setSymbol(const Symbol *S) { Sym = S; }
+  void setSymbol(Symbol *S) { Sym = S; }
   void setFlagWord(ELF::Elf32_Word W) { FlagWord = W; }
   void addMember(SectionBase *Sec) { GroupMembers.push_back(Sec); }
 
-  void initialize(SectionTableRef SecTable) override {};
+  void initialize(SectionTableRef SecTable) override{};
   void accept(SectionVisitor &) const override;
   void finalize() override;
+  void removeSymbols(function_ref<bool(const Symbol &)> ToRemove) override;
+  void markSymbols() override;
 
   static bool classof(const SectionBase *S) {
     return S->Type == ELF::SHT_GROUP;
   }
 };
 
-class SectionWithStrTab : public Section {
-  const SectionBase *StrTab = nullptr;
-  void setStrTab(const SectionBase *StringTable) { StrTab = StringTable; }
-
+class DynamicSymbolTableSection : public Section {
 public:
-  explicit SectionWithStrTab(ArrayRef<uint8_t> Data) : Section(Data) {}
-  void removeSectionReferences(const SectionBase *Sec) override;
-  void initialize(SectionTableRef SecTable) override;
-  void finalize() override;
-  static bool classof(const SectionBase *S);
-};
-
-class DynamicSymbolTableSection : public SectionWithStrTab {
-public:
-  explicit DynamicSymbolTableSection(ArrayRef<uint8_t> Data)
-      : SectionWithStrTab(Data) {}
+  explicit DynamicSymbolTableSection(ArrayRef<uint8_t> Data) : Section(Data) {}
 
   static bool classof(const SectionBase *S) {
     return S->Type == ELF::SHT_DYNSYM;
   }
 };
 
-class DynamicSection : public SectionWithStrTab {
+class DynamicSection : public Section {
 public:
-  explicit DynamicSection(ArrayRef<uint8_t> Data) : SectionWithStrTab(Data) {}
+  explicit DynamicSection(ArrayRef<uint8_t> Data) : Section(Data) {}
 
   static bool classof(const SectionBase *S) {
     return S->Type == ELF::SHT_DYNAMIC;
@@ -541,11 +694,32 @@ using object::ELFFile;
 using object::ELFObjectFile;
 using object::OwningBinary;
 
+template <class ELFT> class BinaryELFBuilder {
+  using Elf_Sym = typename ELFT::Sym;
+
+  uint16_t EMachine;
+  MemoryBuffer *MemBuf;
+  std::unique_ptr<Object> Obj;
+
+  void initFileHeader();
+  void initHeaderSegment();
+  StringTableSection *addStrTab();
+  SymbolTableSection *addSymTab(StringTableSection *StrTab);
+  void addData(SymbolTableSection *SymTab);
+  void initSections();
+
+public:
+  BinaryELFBuilder(uint16_t EM, MemoryBuffer *MB)
+      : EMachine(EM), MemBuf(MB), Obj(llvm::make_unique<Object>()) {}
+
+  std::unique_ptr<Object> build();
+};
+
 template <class ELFT> class ELFBuilder {
 private:
   using Elf_Addr = typename ELFT::Addr;
   using Elf_Shdr = typename ELFT::Shdr;
-  using Elf_Ehdr = typename ELFT::Ehdr;
+  using Elf_Word = typename ELFT::Word;
 
   const ELFFile<ELFT> &ElfFile;
   Object &Obj;
@@ -564,15 +738,22 @@ public:
   void build();
 };
 
-class ELFReader : public Reader {
-private:
-  std::unique_ptr<Binary> Bin;
-  std::shared_ptr<MemoryBuffer> Data;
+class BinaryReader : public Reader {
+  const MachineInfo &MInfo;
+  MemoryBuffer *MemBuf;
 
 public:
-  ElfType getElfType() const;
+  BinaryReader(const MachineInfo &MI, MemoryBuffer *MB)
+      : MInfo(MI), MemBuf(MB) {}
   std::unique_ptr<Object> create() const override;
-  ELFReader(StringRef File);
+};
+
+class ELFReader : public Reader {
+  Binary *Bin;
+
+public:
+  std::unique_ptr<Object> create() const override;
+  explicit ELFReader(Binary *B) : Bin(B) {}
 };
 
 class Object {
@@ -580,7 +761,6 @@ private:
   using SecPtr = std::unique_ptr<SectionBase>;
   using SegPtr = std::unique_ptr<Segment>;
 
-  std::shared_ptr<MemoryBuffer> OwnedData;
   std::vector<SecPtr> Sections;
   std::vector<SegPtr> Segments;
 
@@ -602,7 +782,6 @@ public:
   Segment ElfHdrSegment;
   Segment ProgramHdrSegment;
 
-  uint8_t Ident[16];
   uint64_t Entry;
   uint64_t SHOffset;
   uint32_t Type;
@@ -612,10 +791,7 @@ public:
 
   StringTableSection *SectionNames = nullptr;
   SymbolTableSection *SymbolTable = nullptr;
-
-  explicit Object(std::shared_ptr<MemoryBuffer> Data)
-      : OwnedData(std::move(Data)) {}
-  virtual ~Object() = default;
+  SectionIndexSection *SectionIndexTable = nullptr;
 
   void sortSections();
   SectionTableRef sections() { return SectionTableRef(Sections); }
@@ -626,10 +802,12 @@ public:
   ConstRange<Segment> segments() const { return make_pointee_range(Segments); }
 
   void removeSections(std::function<bool(const SectionBase &)> ToRemove);
+  void removeSymbols(function_ref<bool(const Symbol &)> ToRemove);
   template <class T, class... Ts> T &addSection(Ts &&... Args) {
     auto Sec = llvm::make_unique<T>(std::forward<Ts>(Args)...);
     auto Ptr = Sec.get();
     Sections.emplace_back(std::move(Sec));
+    Ptr->Index = Sections.size();
     return *Ptr;
   }
   Segment &addSegment(ArrayRef<uint8_t> Data) {
@@ -637,6 +815,7 @@ public:
     return *Segments.back();
   }
 };
+} // end namespace objcopy
 } // end namespace llvm
 
 #endif // LLVM_TOOLS_OBJCOPY_OBJECT_H

@@ -42,6 +42,7 @@ gl::Error TextureNULL::setSubImage(const gl::Context *context,
                                    GLenum format,
                                    GLenum type,
                                    const gl::PixelUnpackState &unpack,
+                                   gl::Buffer *unpackBuffer,
                                    const uint8_t *pixels)
 {
     return gl::NoError();
@@ -131,8 +132,10 @@ gl::Error TextureNULL::releaseTexImage(const gl::Context *context)
     return gl::NoError();
 }
 
-void TextureNULL::syncState(const gl::Texture::DirtyBits &dirtyBits)
+angle::Result TextureNULL::syncState(const gl::Context *context,
+                                     const gl::Texture::DirtyBits &dirtyBits)
 {
+    return angle::Result::Continue();
 }
 
 gl::Error TextureNULL::setStorageMultisample(const gl::Context *context,
@@ -145,10 +148,10 @@ gl::Error TextureNULL::setStorageMultisample(const gl::Context *context,
     return gl::NoError();
 }
 
-gl::Error TextureNULL::initializeContents(const gl::Context *context,
-                                          const gl::ImageIndex &imageIndex)
+angle::Result TextureNULL::initializeContents(const gl::Context *context,
+                                              const gl::ImageIndex &imageIndex)
 {
-    return gl::NoError();
+    return angle::Result::Continue();
 }
 
 }  // namespace rx

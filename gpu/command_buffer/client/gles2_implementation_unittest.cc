@@ -177,7 +177,7 @@ class GLES2ImplementationTest : public testing::Test {
 
   class TestContext {
    public:
-    TestContext() : commands_(NULL), token_(0) {}
+    TestContext() : commands_(nullptr), token_(0) {}
 
     bool Initialize(ShareGroup* share_group,
                     bool bind_generates_resource_client,
@@ -304,15 +304,14 @@ class GLES2ImplementationTest : public testing::Test {
     Capabilities capabilities_;
   };
 
-  GLES2ImplementationTest() : commands_(NULL) {}
+  GLES2ImplementationTest() : commands_(nullptr) {}
 
   void SetUp() override;
   void TearDown() override;
 
   bool NoCommandsWritten() {
     scoped_refptr<Buffer> ring_buffer = helper_->get_ring_buffer();
-    const uint8_t* cmds =
-        reinterpret_cast<const uint8_t*>(ring_buffer->memory());
+    const uint8_t* cmds = static_cast<const uint8_t*>(ring_buffer->memory());
     const uint8_t* end = cmds + ring_buffer->size();
     for (; cmds < end; ++cmds) {
       if (*cmds != kInitialValue) {
@@ -461,6 +460,8 @@ class GLES2ImplementationTest : public testing::Test {
     return limits;
   }
 
+  void ResetErrorMessageCallback() { gl_->error_message_callback_.Reset(); }
+
   TestContext test_contexts_[kNumTestContexts];
 
   scoped_refptr<ShareGroup> share_group_;
@@ -572,6 +573,30 @@ class GLES2ImplementationStrictSharedTest : public GLES2ImplementationTest {
     ResApi::Delete(gl1, 1, &id2);
     ResApi::Gen(gl2, 1, &id3);
     EXPECT_EQ(id1, id3);
+  }
+
+  // Require that deleting definitely-invalid IDs produces an error.
+  template <class ResApi>
+  void DeletingInvalidIdGeneratesError() {
+    GLES2Implementation* gl1 = test_contexts_[0].gl_.get();
+    GLuint id1;
+    ResApi::Gen(gl1, 1, &id1);
+    const GLuint kDefinitelyInvalidId = 0xBEEF;
+    EXPECT_EQ(GL_NO_ERROR, CheckError());
+    ResApi::Delete(gl1, 1, &kDefinitelyInvalidId);
+    EXPECT_EQ(GL_INVALID_VALUE, CheckError());
+  }
+
+  // Require that double-deleting IDs produces an error.
+  template <class ResApi>
+  void DoubleDeletingIdGeneratesError() {
+    GLES2Implementation* gl1 = test_contexts_[0].gl_.get();
+    GLuint id1;
+    ResApi::Gen(gl1, 1, &id1);
+    ResApi::Delete(gl1, 1, &id1);
+    EXPECT_EQ(GL_NO_ERROR, CheckError());
+    ResApi::Delete(gl1, 1, &id1);
+    EXPECT_EQ(GL_INVALID_VALUE, CheckError());
   }
 };
 
@@ -1335,8 +1360,8 @@ TEST_F(GLES2ImplementationTest, GetVertexBufferPointerv) {
                            GL_FLOAT, GL_FALSE, kStride2,
                            reinterpret_cast<const void*>(kOffset2));
   // now get them both.
-  void* ptr1 = NULL;
-  void* ptr2 = NULL;
+  void* ptr1 = nullptr;
+  void* ptr2 = nullptr;
 
   gl_->GetVertexAttribPointerv(
       kAttribIndex1, GL_VERTEX_ATTRIB_ARRAY_POINTER, &ptr1);
@@ -1560,7 +1585,7 @@ TEST_F(GLES2ImplementationTest, FreeUnusedSharedMemory) {
 
   void* mem = gl_->MapBufferSubDataCHROMIUM(
       kTarget, kOffset, kSize, GL_WRITE_ONLY);
-  ASSERT_TRUE(mem != NULL);
+  ASSERT_TRUE(mem != nullptr);
   gl_->UnmapBufferSubDataCHROMIUM(mem);
   EXPECT_CALL(*command_buffer(), DestroyTransferBuffer(_))
       .Times(1)
@@ -1586,7 +1611,7 @@ TEST_F(GLES2ImplementationTest, MapUnmapBufferSubDataCHROMIUM) {
 
   void* mem = gl_->MapBufferSubDataCHROMIUM(
       kTarget, kOffset, kSize, GL_WRITE_ONLY);
-  ASSERT_TRUE(mem != NULL);
+  ASSERT_TRUE(mem != nullptr);
   gl_->UnmapBufferSubDataCHROMIUM(mem);
   EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
 }
@@ -1615,13 +1640,13 @@ TEST_F(GLES2ImplementationTest, MapUnmapBufferSubDataCHROMIUMBadArgs) {
 
   void* mem;
   mem = gl_->MapBufferSubDataCHROMIUM(kTarget, -1, kSize, GL_WRITE_ONLY);
-  ASSERT_TRUE(mem == NULL);
+  ASSERT_TRUE(mem == nullptr);
   EXPECT_EQ(static_cast<GLenum>(GL_INVALID_VALUE), gl_->GetError());
   mem = gl_->MapBufferSubDataCHROMIUM(kTarget, kOffset, -1, GL_WRITE_ONLY);
-  ASSERT_TRUE(mem == NULL);
+  ASSERT_TRUE(mem == nullptr);
   EXPECT_EQ(static_cast<GLenum>(GL_INVALID_VALUE), gl_->GetError());
   mem = gl_->MapBufferSubDataCHROMIUM(kTarget, kOffset, kSize, GL_READ_ONLY);
-  ASSERT_TRUE(mem == NULL);
+  ASSERT_TRUE(mem == nullptr);
   EXPECT_EQ(static_cast<GLenum>(GL_INVALID_ENUM), gl_->GetError());
   const char* kPtr = "something";
   gl_->UnmapBufferSubDataCHROMIUM(kPtr);
@@ -1659,7 +1684,7 @@ TEST_F(GLES2ImplementationTest, MapUnmapTexSubImage2DCHROMIUM) {
       kFormat,
       kType,
       GL_WRITE_ONLY);
-  ASSERT_TRUE(mem != NULL);
+  ASSERT_TRUE(mem != nullptr);
   gl_->UnmapTexSubImage2DCHROMIUM(mem);
   EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
 }
@@ -1710,7 +1735,7 @@ TEST_F(GLES2ImplementationTest, MapUnmapTexSubImage2DCHROMIUMBadArgs) {
     kFormat,
     kType,
     GL_WRITE_ONLY);
-  EXPECT_TRUE(mem == NULL);
+  EXPECT_TRUE(mem == nullptr);
   EXPECT_EQ(static_cast<GLenum>(GL_INVALID_VALUE), gl_->GetError());
   mem = gl_->MapTexSubImage2DCHROMIUM(
     GL_TEXTURE_2D,
@@ -1722,7 +1747,7 @@ TEST_F(GLES2ImplementationTest, MapUnmapTexSubImage2DCHROMIUMBadArgs) {
     kFormat,
     kType,
     GL_WRITE_ONLY);
-  EXPECT_TRUE(mem == NULL);
+  EXPECT_TRUE(mem == nullptr);
   EXPECT_EQ(static_cast<GLenum>(GL_INVALID_VALUE), gl_->GetError());
   mem = gl_->MapTexSubImage2DCHROMIUM(
     GL_TEXTURE_2D,
@@ -1734,7 +1759,7 @@ TEST_F(GLES2ImplementationTest, MapUnmapTexSubImage2DCHROMIUMBadArgs) {
     kFormat,
     kType,
     GL_WRITE_ONLY);
-  EXPECT_TRUE(mem == NULL);
+  EXPECT_TRUE(mem == nullptr);
   EXPECT_EQ(static_cast<GLenum>(GL_INVALID_VALUE), gl_->GetError());
   mem = gl_->MapTexSubImage2DCHROMIUM(
     GL_TEXTURE_2D,
@@ -1746,7 +1771,7 @@ TEST_F(GLES2ImplementationTest, MapUnmapTexSubImage2DCHROMIUMBadArgs) {
     kFormat,
     kType,
     GL_WRITE_ONLY);
-  EXPECT_TRUE(mem == NULL);
+  EXPECT_TRUE(mem == nullptr);
   EXPECT_EQ(static_cast<GLenum>(GL_INVALID_VALUE), gl_->GetError());
   mem = gl_->MapTexSubImage2DCHROMIUM(
     GL_TEXTURE_2D,
@@ -1758,7 +1783,7 @@ TEST_F(GLES2ImplementationTest, MapUnmapTexSubImage2DCHROMIUMBadArgs) {
     kFormat,
     kType,
     GL_WRITE_ONLY);
-  EXPECT_TRUE(mem == NULL);
+  EXPECT_TRUE(mem == nullptr);
   EXPECT_EQ(static_cast<GLenum>(GL_INVALID_VALUE), gl_->GetError());
   mem = gl_->MapTexSubImage2DCHROMIUM(
     GL_TEXTURE_2D,
@@ -1770,7 +1795,7 @@ TEST_F(GLES2ImplementationTest, MapUnmapTexSubImage2DCHROMIUMBadArgs) {
     kFormat,
     kType,
     GL_READ_ONLY);
-  EXPECT_TRUE(mem == NULL);
+  EXPECT_TRUE(mem == nullptr);
   EXPECT_EQ(static_cast<GLenum>(GL_INVALID_ENUM), gl_->GetError());
   const char* kPtr = "something";
   gl_->UnmapTexSubImage2DCHROMIUM(kPtr);
@@ -1874,7 +1899,7 @@ TEST_F(GLES2ImplementationTest, GetProgramInfoCHROMIUMBadArgs) {
   EXPECT_EQ(static_cast<GLenum>(GL_INVALID_VALUE), gl_->GetError());
   ClearCommands();
   // try no size ptr.
-  gl_->GetProgramInfoCHROMIUM(kProgramId, sizeof(buf), NULL, &buf);
+  gl_->GetProgramInfoCHROMIUM(kProgramId, sizeof(buf), nullptr, &buf);
   EXPECT_TRUE(NoCommandsWritten());
   EXPECT_EQ(static_cast<GLenum>(GL_INVALID_VALUE), gl_->GetError());
 }
@@ -1976,7 +2001,7 @@ TEST_F(GLES2ImplementationTest, GetUniformBlocksCHROMIUMBadArgs) {
   EXPECT_EQ(static_cast<GLenum>(GL_INVALID_VALUE), gl_->GetError());
   ClearCommands();
   // try no size ptr.
-  gl_->GetUniformBlocksCHROMIUM(kProgramId, sizeof(buf), NULL, &buf);
+  gl_->GetUniformBlocksCHROMIUM(kProgramId, sizeof(buf), nullptr, &buf);
   EXPECT_TRUE(NoCommandsWritten());
   EXPECT_EQ(static_cast<GLenum>(GL_INVALID_VALUE), gl_->GetError());
 }
@@ -2252,12 +2277,12 @@ TEST_F(GLES2ImplementationTest, TexImage2DViaTexSubImage2D) {
       &size, &unpadded_row_size, &padded_row_size));
   const GLsizei kHeight = (MaxTransferBufferSize() / padded_row_size) * 2;
   ASSERT_TRUE(GLES2Util::ComputeImageDataSizes(
-      kWidth, kHeight, 1, kFormat, kType, kPixelStoreUnpackAlignment,
-      &size, NULL, NULL));
+      kWidth, kHeight, 1, kFormat, kType, kPixelStoreUnpackAlignment, &size,
+      nullptr, nullptr));
   uint32_t half_size = 0;
   ASSERT_TRUE(GLES2Util::ComputeImageDataSizes(
       kWidth, kHeight / 2, 1, kFormat, kType, kPixelStoreUnpackAlignment,
-      &half_size, NULL, NULL));
+      &half_size, nullptr, nullptr));
 
   std::unique_ptr<uint8_t[]> pixels(new uint8_t[size]);
   for (uint32_t ii = 0; ii < size; ++ii) {
@@ -2694,7 +2719,7 @@ TEST_F(GLES2ImplementationTest, TexImage3DSingleCommand) {
   const GLsizei kHeight = MaxTransferBufferSize() / padded_row_size / kDepth;
   ASSERT_TRUE(GLES2Util::ComputeImageDataSizes(
       kWidth, kHeight, kDepth, kFormat, kType, kPixelStoreUnpackAlignment,
-      &size, NULL, NULL));
+      &size, nullptr, nullptr));
 
   std::unique_ptr<uint8_t[]> pixels(new uint8_t[size]);
   for (uint32_t ii = 0; ii < size; ++ii) {
@@ -2747,7 +2772,7 @@ TEST_F(GLES2ImplementationTest, TexImage3DViaMappedMem) {
   const GLsizei kHeight = kMaxHeight * 2;
   ASSERT_TRUE(GLES2Util::ComputeImageDataSizes(
       kWidth, kHeight, kDepth, kFormat, kType, kPixelStoreUnpackAlignment,
-      &size, NULL, NULL));
+      &size, nullptr, nullptr));
 
   std::unique_ptr<uint8_t[]> pixels(new uint8_t[size]);
   for (uint32_t ii = 0; ii < size; ++ii) {
@@ -2798,8 +2823,8 @@ TEST_F(GLES2ImplementationTest, TexImage3DViaTexSubImage3D) {
   // Makes sure the data is more than one command can hold.
   const GLsizei kHeight = MaxTransferBufferSize() / padded_row_size + 3;
   ASSERT_TRUE(GLES2Util::ComputeImageDataSizes(
-      kWidth, kHeight, 1, kFormat, kType, kPixelStoreUnpackAlignment,
-      &size, NULL, NULL));
+      kWidth, kHeight, 1, kFormat, kType, kPixelStoreUnpackAlignment, &size,
+      nullptr, nullptr));
   uint32_t first_size = padded_row_size * (kHeight - 3);
   uint32_t second_size =
       padded_row_size * 3 - (padded_row_size - unpadded_row_size);
@@ -2859,7 +2884,7 @@ TEST_F(GLES2ImplementationTest, TexSubImage3D4Writes) {
   const GLsizei kHeight = MaxTransferBufferSize() / padded_row_size + 2;
   ASSERT_TRUE(GLES2Util::ComputeImageDataSizes(
       kWidth, kHeight, kDepth, kFormat, kType, kPixelStoreUnpackAlignment,
-      &size, NULL, NULL));
+      &size, nullptr, nullptr));
   uint32_t first_size = (kHeight - 2) * padded_row_size;
   uint32_t second_size = 2 * padded_row_size;
   uint32_t third_size = first_size;
@@ -2945,6 +2970,34 @@ TEST_F(GLES2ImplementationStrictSharedTest,
 TEST_F(GLES2ImplementationStrictSharedTest,
        CrossContextGenerationAutoFlushTestTextures) {
   CrossContextGenerationAutoFlushTest<GenTexturesAPI>();
+}
+
+// Test deleting an invalid ID.
+TEST_F(GLES2ImplementationStrictSharedTest,
+       DeletingInvalidIdGeneratesErrorBuffers) {
+  DeletingInvalidIdGeneratesError<GenBuffersAPI>();
+}
+TEST_F(GLES2ImplementationStrictSharedTest,
+       DeletingInvalidIdGeneratesErrorRenderbuffers) {
+  DeletingInvalidIdGeneratesError<GenRenderbuffersAPI>();
+}
+TEST_F(GLES2ImplementationStrictSharedTest,
+       DeletingInvalidIdGeneratesErrorTextures) {
+  DeletingInvalidIdGeneratesError<GenTexturesAPI>();
+}
+
+// Test double-deleting the same ID.
+TEST_F(GLES2ImplementationStrictSharedTest,
+       DoubleDeletingIdGeneratesErrorBuffers) {
+  DoubleDeletingIdGeneratesError<GenBuffersAPI>();
+}
+TEST_F(GLES2ImplementationStrictSharedTest,
+       DoubleDeletingIdGeneratesErrorRenderbuffers) {
+  DoubleDeletingIdGeneratesError<GenRenderbuffersAPI>();
+}
+TEST_F(GLES2ImplementationStrictSharedTest,
+       DoubleDeletingIdGeneratesErrorTextures) {
+  DoubleDeletingIdGeneratesError<GenTexturesAPI>();
 }
 
 TEST_F(GLES2ImplementationTest, GetString) {
@@ -3120,7 +3173,7 @@ TEST_F(GLES2ImplementationTest, BeginEndQueryEXT) {
   const void* commands = GetPut();
   gl_->BeginQueryEXT(GL_ANY_SAMPLES_PASSED_EXT, id1);
   QueryTracker::Query* query = GetQuery(id1);
-  ASSERT_TRUE(query != NULL);
+  ASSERT_TRUE(query != nullptr);
   expected_begin_cmds.begin_query.Init(
       GL_ANY_SAMPLES_PASSED_EXT, id1, query->shm_id(), query->shm_offset());
   EXPECT_EQ(0, memcmp(
@@ -3318,7 +3371,7 @@ TEST_F(GLES2ImplementationTest, QueryCounterEXT) {
   gl_->QueryCounterEXT(id1, GL_TIMESTAMP_EXT);
   EXPECT_EQ(GL_NO_ERROR, CheckError());
   QueryTracker::Query* query = GetQuery(id1);
-  ASSERT_TRUE(query != NULL);
+  ASSERT_TRUE(query != nullptr);
   expected_query_counter_cmds.query_counter.Init(
       id1, GL_TIMESTAMP_EXT, query->shm_id(), query->shm_offset(),
       query->submit_count());
@@ -3331,7 +3384,7 @@ TEST_F(GLES2ImplementationTest, QueryCounterEXT) {
   gl_->QueryCounterEXT(id2, GL_TIMESTAMP_EXT);
   EXPECT_EQ(GL_NO_ERROR, CheckError());
   QueryTracker::Query* query2 = GetQuery(id2);
-  ASSERT_TRUE(query2 != NULL);
+  ASSERT_TRUE(query2 != nullptr);
   expected_query_counter_cmds.query_counter.Init(
       id2, GL_TIMESTAMP_EXT, query2->shm_id(), query2->shm_offset(),
       query2->submit_count());
@@ -3374,7 +3427,7 @@ TEST_F(GLES2ImplementationTest, ErrorQuery) {
   gl_->BeginQueryEXT(GL_GET_ERROR_QUERY_CHROMIUM, id);
   EXPECT_TRUE(NoCommandsWritten());
   QueryTracker::Query* query = GetQuery(id);
-  ASSERT_TRUE(query != NULL);
+  ASSERT_TRUE(query != nullptr);
 
   // Test EndQueryEXT sends both begin and end command
   struct EndCmds {
@@ -3432,7 +3485,7 @@ TEST_F(GLES2ImplementationTest, VertexArrays) {
   gl_->BindVertexArrayOES(id);
 
   // Test that VertexAttribPointer cannot be called with a bound buffer of 0
-  // unless the offset is NULL
+  // unless the offset is nullptr
   gl_->BindBuffer(GL_ARRAY_BUFFER, 0);
 
   gl_->VertexAttribPointer(
@@ -3440,8 +3493,8 @@ TEST_F(GLES2ImplementationTest, VertexArrays) {
       reinterpret_cast<const void*>(4));
   EXPECT_EQ(GL_INVALID_OPERATION, CheckError());
 
-  gl_->VertexAttribPointer(
-      kAttribIndex1, kNumComponents1, GL_FLOAT, GL_FALSE, kClientStride, NULL);
+  gl_->VertexAttribPointer(kAttribIndex1, kNumComponents1, GL_FLOAT, GL_FALSE,
+                           kClientStride, nullptr);
   EXPECT_EQ(GL_NO_ERROR, CheckError());
 }
 #endif
@@ -3496,10 +3549,10 @@ TEST_F(GLES2ImplementationTest, ProduceTextureDirectCHROMIUM) {
     GLbyte data[GL_MAILBOX_SIZE_CHROMIUM];
   };
 
-  Mailbox mailbox = Mailbox::Generate();
+  Mailbox mailbox;
+  gl_->ProduceTextureDirectCHROMIUM(kTexturesStartId, mailbox.name);
   Cmds expected;
   expected.cmd.Init(kTexturesStartId, mailbox.name);
-  gl_->ProduceTextureDirectCHROMIUM(kTexturesStartId, mailbox.name);
   EXPECT_EQ(0, memcmp(&expected, commands_, sizeof(expected)));
 }
 
@@ -3555,25 +3608,25 @@ TEST_F(GLES2ImplementationTest, LimitSizeAndOffsetTo32Bit) {
   // Call MapBufferSubDataCHROMIUM() should succeed with legal paramaters.
   void* mem =
       gl_->MapBufferSubDataCHROMIUM(GL_ARRAY_BUFFER, 0, 1, GL_WRITE_ONLY);
-  EXPECT_TRUE(NULL != mem);
+  EXPECT_TRUE(nullptr != mem);
   EXPECT_EQ(GL_NO_ERROR, CheckError());
   gl_->UnmapBufferSubDataCHROMIUM(mem);
 
   // MapBufferSubDataCHROMIUM: offset
-  EXPECT_TRUE(NULL == gl_->MapBufferSubDataCHROMIUM(
-      GL_ARRAY_BUFFER, offset, 1, GL_WRITE_ONLY));
+  EXPECT_TRUE(nullptr == gl_->MapBufferSubDataCHROMIUM(GL_ARRAY_BUFFER, offset,
+                                                       1, GL_WRITE_ONLY));
   EXPECT_EQ(GL_INVALID_OPERATION, CheckError());
   EXPECT_STREQ(kOffsetOverflowMessage, GetLastError().c_str());
 
   // MapBufferSubDataCHROMIUM: size
   EXPECT_EQ(GL_NO_ERROR, CheckError());
-  EXPECT_TRUE(NULL == gl_->MapBufferSubDataCHROMIUM(
-      GL_ARRAY_BUFFER, 0, size, GL_WRITE_ONLY));
+  EXPECT_TRUE(nullptr == gl_->MapBufferSubDataCHROMIUM(GL_ARRAY_BUFFER, 0, size,
+                                                       GL_WRITE_ONLY));
   EXPECT_EQ(GL_INVALID_OPERATION, CheckError());
   EXPECT_STREQ(kSizeOverflowMessage, GetLastError().c_str());
 
   // Call DrawElements() should succeed with legal paramaters.
-  gl_->DrawElements(GL_POINTS, 1, GL_UNSIGNED_BYTE, NULL);
+  gl_->DrawElements(GL_POINTS, 1, GL_UNSIGNED_BYTE, nullptr);
   EXPECT_EQ(GL_NO_ERROR, CheckError());
 
   // DrawElements: offset
@@ -3583,7 +3636,7 @@ TEST_F(GLES2ImplementationTest, LimitSizeAndOffsetTo32Bit) {
   EXPECT_STREQ(kOffsetOverflowMessage, GetLastError().c_str());
 
   // Call DrawElementsInstancedANGLE() should succeed with legal paramaters.
-  gl_->DrawElementsInstancedANGLE(GL_POINTS, 1, GL_UNSIGNED_BYTE, NULL, 1);
+  gl_->DrawElementsInstancedANGLE(GL_POINTS, 1, GL_UNSIGNED_BYTE, nullptr, 1);
   EXPECT_EQ(GL_NO_ERROR, CheckError());
 
   // DrawElementsInstancedANGLE: offset
@@ -3595,8 +3648,8 @@ TEST_F(GLES2ImplementationTest, LimitSizeAndOffsetTo32Bit) {
   // Call VertexAttribPointer() should succeed with legal paramaters.
   const GLuint kAttribIndex = 1;
   const GLsizei kStride = 4;
-  gl_->VertexAttribPointer(
-      kAttribIndex, 1, GL_FLOAT, GL_FALSE, kStride, NULL);
+  gl_->VertexAttribPointer(kAttribIndex, 1, GL_FLOAT, GL_FALSE, kStride,
+                           nullptr);
   EXPECT_EQ(GL_NO_ERROR, CheckError());
 
   // VertexAttribPointer: offset
@@ -4133,53 +4186,6 @@ TEST_F(GLES2ImplementationTest, DeleteBuffersUnmapsDataStore) {
   EXPECT_EQ(GL_INVALID_OPERATION, CheckError());
 }
 
-TEST_F(GLES3ImplementationTest, GetBufferSubDataAsyncCHROMIUM) {
-  const GLuint kBufferId = 123;
-  void* mem;
-
-  std::vector<GLenum> targets = {
-      GL_ARRAY_BUFFER,      GL_ELEMENT_ARRAY_BUFFER,      GL_COPY_READ_BUFFER,
-      GL_COPY_WRITE_BUFFER, GL_TRANSFORM_FEEDBACK_BUFFER, GL_UNIFORM_BUFFER,
-      GL_PIXEL_PACK_BUFFER, GL_PIXEL_UNPACK_BUFFER,
-  };
-
-  // Positive tests
-  for (size_t i = 0; i < targets.size(); i++) {
-    gl_->BindBuffer(targets[i], kBufferId);
-    mem = gl_->GetBufferSubDataAsyncCHROMIUM(targets[i], 10, 64);
-    EXPECT_TRUE(mem != nullptr);
-    EXPECT_EQ(GL_NO_ERROR, CheckError());
-    gl_->FreeSharedMemory(mem);
-    EXPECT_EQ(GL_NO_ERROR, CheckError());
-    gl_->BindBuffer(targets[i], 0);
-  }
-
-  // Negative tests: invalid target
-  for (size_t i = 0; i < targets.size(); i++) {
-    GLenum wrong_target = targets[(i + 1) % targets.size()];
-    gl_->BindBuffer(targets[i], kBufferId);
-    mem = gl_->GetBufferSubDataAsyncCHROMIUM(wrong_target, 10, 64);
-    EXPECT_TRUE(mem == nullptr);
-    EXPECT_EQ(GL_INVALID_OPERATION, CheckError());
-    gl_->BindBuffer(targets[i], 0);
-  }
-}
-
-TEST_F(GLES3ImplementationTest, GetBufferSubDataAsyncCHROMIUMInvalidValue) {
-  const GLuint kBufferId = 123;
-  void* mem;
-
-  gl_->BindBuffer(GL_ARRAY_BUFFER, kBufferId);
-
-  mem = gl_->GetBufferSubDataAsyncCHROMIUM(GL_ARRAY_BUFFER, -1, 64);
-  EXPECT_TRUE(mem == nullptr);
-  EXPECT_EQ(GL_INVALID_VALUE, CheckError());
-
-  mem = gl_->GetBufferSubDataAsyncCHROMIUM(GL_ARRAY_BUFFER, 0, -1);
-  EXPECT_TRUE(mem == nullptr);
-  EXPECT_EQ(GL_INVALID_VALUE, CheckError());
-}
-
 TEST_F(GLES2ImplementationTest, GetInternalformativ) {
   const GLint kNumSampleCounts = 8;
   struct Cmds {
@@ -4409,6 +4415,29 @@ TEST_F(GLES2ImplementationTest, DiscardableTextureLockCounting) {
       EXPECT_EQ(0, bound_texture_id);
     }
   }
+}
+
+struct ErrorMessageCounter {
+  explicit ErrorMessageCounter(GLES2Implementation* gl) : gl(gl) {}
+
+  void Callback(const char* message, int32_t id) {
+    if (++num_calls == 1)
+      gl->ShaderBinary(-1, nullptr, 0, nullptr, 0);
+  }
+
+  GLES2Implementation* gl;
+  int32_t num_calls = 0;
+};
+
+TEST_F(GLES2ImplementationTest, ReentrantErrorCallbacksShouldNotCrash) {
+  ErrorMessageCounter counter(gl_);
+  gl_->SetErrorMessageCallback(base::BindRepeating(
+      &ErrorMessageCounter::Callback, base::Unretained(&counter)));
+  // Call any function which can easily provoke an error. See also the
+  // callback above.
+  gl_->ShaderBinary(-1, nullptr, 0, nullptr, 0);
+  EXPECT_EQ(2, counter.num_calls);
+  ResetErrorMessageCallback();
 }
 
 #include "base/macros.h"

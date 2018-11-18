@@ -45,7 +45,8 @@ void InvokeIdleCallback(const base::Closure& idle_callback,
 
 SyncWorker::SyncWorker(
     const base::FilePath& base_dir,
-    const base::WeakPtr<ExtensionServiceInterface>& extension_service,
+    const base::WeakPtr<extensions::ExtensionServiceInterface>&
+        extension_service,
     leveldb::Env* env_override)
     : base_dir_(base_dir),
       env_override_(env_override),
@@ -411,18 +412,19 @@ void SyncWorker::UpdateRegisteredApps() {
 }
 
 void SyncWorker::QueryAppStatusOnUIThread(
-    const base::WeakPtr<ExtensionServiceInterface>& extension_service_ptr,
+    const base::WeakPtr<extensions::ExtensionServiceInterface>&
+        extension_service_ptr,
     const std::vector<std::string>* app_ids,
     AppStatusMap* status,
     const base::Closure& callback) {
-  ExtensionServiceInterface* extension_service = extension_service_ptr.get();
+  extensions::ExtensionServiceInterface* extension_service =
+      extension_service_ptr.get();
   if (!extension_service) {
     callback.Run();
     return;
   }
 
-  for (std::vector<std::string>::const_iterator itr = app_ids->begin();
-       itr != app_ids->end(); ++itr) {
+  for (auto itr = app_ids->begin(); itr != app_ids->end(); ++itr) {
     const std::string& app_id = *itr;
     if (!extension_service->GetInstalledExtension(app_id))
       (*status)[app_id] = APP_STATUS_UNINSTALLED;
@@ -442,8 +444,7 @@ void SyncWorker::DidQueryAppStatus(const AppStatusMap* app_status) {
   DCHECK(metadata_db);
 
   // Update the status of every origin using status from ExtensionService.
-  for (AppStatusMap::const_iterator itr = app_status->begin();
-       itr != app_status->end(); ++itr) {
+  for (auto itr = app_status->begin(); itr != app_status->end(); ++itr) {
     const std::string& app_id = itr->first;
     GURL origin = extensions::Extension::GetBaseURLFromExtensionId(app_id);
 

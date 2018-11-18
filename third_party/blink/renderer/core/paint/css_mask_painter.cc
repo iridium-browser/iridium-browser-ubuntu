@@ -12,26 +12,28 @@
 
 namespace blink {
 
-Optional<IntRect> CSSMaskPainter::MaskBoundingBox(
+base::Optional<IntRect> CSSMaskPainter::MaskBoundingBox(
     const LayoutObject& object,
     const LayoutPoint& paint_offset) {
   if (!object.IsBoxModelObject() && !object.IsSVGChild())
-    return WTF::nullopt;
+    return base::nullopt;
 
   if (object.IsSVG()) {
     SVGResources* resources =
         SVGResourcesCache::CachedResourcesForLayoutObject(object);
     LayoutSVGResourceMasker* masker = resources ? resources->Masker() : nullptr;
-    if (masker)
-      return EnclosingIntRect(masker->ResourceBoundingBox(&object));
+    if (masker) {
+      return EnclosingIntRect(
+          masker->ResourceBoundingBox(object.ObjectBoundingBox()));
+    }
   }
 
   if (object.IsSVGChild() && !object.IsSVGForeignObject())
-    return WTF::nullopt;
+    return base::nullopt;
 
   const ComputedStyle& style = object.StyleRef();
   if (!style.HasMask())
-    return WTF::nullopt;
+    return base::nullopt;
 
   LayoutRect maximum_mask_region;
   // For HTML/CSS objects, the extent of the mask is known as "mask
@@ -64,7 +66,7 @@ ColorFilter CSSMaskPainter::MaskColorFilter(const LayoutObject& object) {
   LayoutSVGResourceMasker* masker = resources ? resources->Masker() : nullptr;
   if (!masker)
     return kColorFilterNone;
-  return masker->Style()->SvgStyle().MaskType() == MT_LUMINANCE
+  return masker->StyleRef().SvgStyle().MaskType() == MT_LUMINANCE
              ? kColorFilterLuminanceToAlpha
              : kColorFilterNone;
 }

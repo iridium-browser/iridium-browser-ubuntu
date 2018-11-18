@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROMEOS_COMPONENTS_TETHER_HOST_SCAN_SCHEDULER_IMPL_H
-#define CHROMEOS_COMPONENTS_TETHER_HOST_SCAN_SCHEDULER_IMPL_H
+#ifndef CHROMEOS_COMPONENTS_TETHER_HOST_SCAN_SCHEDULER_IMPL_H_
+#define CHROMEOS_COMPONENTS_TETHER_HOST_SCAN_SCHEDULER_IMPL_H_
 
 #include <memory>
 
@@ -28,6 +28,7 @@ class SessionManager;
 namespace chromeos {
 
 class NetworkStateHandler;
+class NetworkTypePattern;
 
 namespace tether {
 
@@ -47,12 +48,12 @@ class HostScanSchedulerImpl : public HostScanScheduler,
   ~HostScanSchedulerImpl() override;
 
   // HostScanScheduler:
-  void ScheduleScan() override;
+  void AttemptScanIfOffline() override;
 
  protected:
   // NetworkStateHandlerObserver:
   void DefaultNetworkChanged(const NetworkState* network) override;
-  void ScanRequested() override;
+  void ScanRequested(const NetworkTypePattern& type) override;
 
   // HostScanner::Observer:
   void ScanFinished() override;
@@ -63,13 +64,14 @@ class HostScanSchedulerImpl : public HostScanScheduler,
  private:
   friend class HostScanSchedulerImplTest;
 
-  void EnsureScan();
+  void AttemptScan();
   bool IsTetherNetworkConnectingOrConnected();
+  bool IsOnlineOrHasActiveTetherConnection(const NetworkState* default_network);
   void LogHostScanBatchMetric();
 
   void SetTestDoubles(
-      std::unique_ptr<base::Timer> test_host_scan_batch_timer,
-      std::unique_ptr<base::Timer> test_delay_scan_after_unlock_timer,
+      std::unique_ptr<base::OneShotTimer> test_host_scan_batch_timer,
+      std::unique_ptr<base::OneShotTimer> test_delay_scan_after_unlock_timer,
       base::Clock* test_clock,
       scoped_refptr<base::TaskRunner> test_task_runner);
 
@@ -77,8 +79,8 @@ class HostScanSchedulerImpl : public HostScanScheduler,
   HostScanner* host_scanner_;
   session_manager::SessionManager* session_manager_;
 
-  std::unique_ptr<base::Timer> host_scan_batch_timer_;
-  std::unique_ptr<base::Timer> delay_scan_after_unlock_timer_;
+  std::unique_ptr<base::OneShotTimer> host_scan_batch_timer_;
+  std::unique_ptr<base::OneShotTimer> delay_scan_after_unlock_timer_;
   base::Clock* clock_;
   scoped_refptr<base::TaskRunner> task_runner_;
 
@@ -96,4 +98,4 @@ class HostScanSchedulerImpl : public HostScanScheduler,
 
 }  // namespace chromeos
 
-#endif  // CHROMEOS_COMPONENTS_TETHER_HOST_SCAN_SCHEDULER_IMPL_H
+#endif  // CHROMEOS_COMPONENTS_TETHER_HOST_SCAN_SCHEDULER_IMPL_H_

@@ -293,7 +293,11 @@ tr.exportTo('tr.metrics.sh', function() {
             addProcessScalar);
       }
       // v8:heap:...
-      const heapDump = isolateDump.getDescendantDumpByFullName('heap_spaces');
+      let heapDump = isolateDump.getDescendantDumpByFullName('heap');
+      if (heapDump === undefined) {
+        // Old V8 memory dumps call this 'heap_spaces'.
+        heapDump = isolateDump.getDescendantDumpByFullName('heap_spaces');
+      }
       if (heapDump !== undefined) {
         addV8ComponentValues(heapDump, ['v8', 'heap'], addProcessScalar);
         heapDump.children.forEach(function(spaceDump) {
@@ -547,6 +551,51 @@ tr.exportTo('tr.metrics.sh', function() {
     }
   };
 
+  const JAVA_BASE_CLEAN_RESIDENT = {
+    name: 'java_base_clean_resident',
+    unit: sizeInBytes_smallerIsBetter,
+    buildDescriptionPrefix(componentPath, processName) {
+      return buildOsValueDescriptionPrefix(componentPath, processName,
+          'java base odex and vdex total clean resident size');
+    }
+  };
+
+  const JAVA_BASE_PSS = {
+    name: 'java_base_pss',
+    unit: sizeInBytes_smallerIsBetter,
+    buildDescriptionPrefix(componentPath, processName) {
+      return buildOsValueDescriptionPrefix(componentPath, processName,
+          'java base odex and vdex proportional resident size');
+    }
+  };
+
+  const NATIVE_LIBRARY_PRIVATE_CLEAN_RESIDENT = {
+    name: 'native_library_private_clean_resident',
+    unit: sizeInBytes_smallerIsBetter,
+    buildDescriptionPrefix(componentPath, processName) {
+      return buildOsValueDescriptionPrefix(componentPath, processName,
+          'native library private clean resident size');
+    }
+  };
+
+  const NATIVE_LIBRARY_SHARED_CLEAN_RESIDENT = {
+    name: 'native_library_shared_clean_resident',
+    unit: sizeInBytes_smallerIsBetter,
+    buildDescriptionPrefix(componentPath, processName) {
+      return buildOsValueDescriptionPrefix(componentPath, processName,
+          'native library shared clean resident size');
+    }
+  };
+
+  const NATIVE_LIBRARY_PROPORTIONAL_RESIDENT = {
+    name: 'native_library_proportional_resident',
+    unit: sizeInBytes_smallerIsBetter,
+    buildDescriptionPrefix(componentPath, processName) {
+      return buildOsValueDescriptionPrefix(componentPath, processName,
+          'native library proportional resident size');
+    }
+  };
+
   /**
    * Build a description prefix for a memory:<browser-name>:<process-name>:
    * reported_by_os:... value.
@@ -642,7 +691,7 @@ tr.exportTo('tr.metrics.sh', function() {
           // Add memory:<browser-name>:<process-name>:reported_by_os:
           // system_memory:... values.
           for (const [componentName, componentSpec] of
-              Object.entries(SYSTEM_VALUE_COMPONENTS)) {
+            Object.entries(SYSTEM_VALUE_COMPONENTS)) {
             const node = getDescendantVmRegionClassificationNode(
                 processDump.vmRegions, componentSpec.classificationPath);
             const componentPath = ['system_memory'];
@@ -652,15 +701,63 @@ tr.exportTo('tr.metrics.sh', function() {
               component: componentPath,
               property: PROPORTIONAL_RESIDENT_SIZE,
               value: node === undefined ?
-                  0 : (node.byteStats.proportionalResident || 0)
+                0 : (node.byteStats.proportionalResident || 0)
             });
             addProcessScalar({
               source: 'reported_by_os',
               component: componentPath,
               property: PRIVATE_DIRTY_SIZE,
               value: node === undefined ?
-                  0 : (node.byteStats.privateDirtyResident || 0)
+                0 : (node.byteStats.privateDirtyResident || 0)
             });
+
+            // Only add java base stats when they are nonzero.
+            if (node) {
+              if (node.byteStats.javaBasePss) {
+                addProcessScalar({
+                  source: 'reported_by_os',
+                  component: componentPath,
+                  property: JAVA_BASE_PSS,
+                  value: node.byteStats.javaBasePss
+                });
+              }
+              if (node.byteStats.javaBaseCleanResident) {
+                addProcessScalar({
+                  source: 'reported_by_os',
+                  component: componentPath,
+                  property: JAVA_BASE_CLEAN_RESIDENT,
+                  value: node.byteStats.javaBaseCleanResident
+                });
+              }
+            }
+
+            // Only add native library stats when they are nonzero.
+            if (node) {
+              if (node.byteStats.nativeLibraryPrivateCleanResident) {
+                addProcessScalar({
+                  source: 'reported_by_os',
+                  component: componentPath,
+                  property: NATIVE_LIBRARY_PRIVATE_CLEAN_RESIDENT,
+                  value: node.byteStats.nativeLibraryPrivateCleanResident
+                });
+              }
+              if (node.byteStats.nativeLibrarySharedCleanResident) {
+                addProcessScalar({
+                  source: 'reported_by_os',
+                  component: componentPath,
+                  property: NATIVE_LIBRARY_SHARED_CLEAN_RESIDENT,
+                  value: node.byteStats.nativeLibrarySharedCleanResident
+                });
+              }
+              if (node.byteStats.nativeLibraryProportionalResident) {
+                addProcessScalar({
+                  source: 'reported_by_os',
+                  component: componentPath,
+                  property: NATIVE_LIBRARY_PROPORTIONAL_RESIDENT,
+                  value: node.byteStats.nativeLibraryProportionalResident
+                });
+              }
+            }
           }
 
           // Add memory:<browser-name>:<process-name>:reported_by_os:
@@ -762,7 +859,7 @@ tr.exportTo('tr.metrics.sh', function() {
       reportMemoryDumpCountAsValue(browserName, undefined /* total */,
           totalDumpCount, values);
       for (const [levelOfDetailName, levelOfDetailDumpCount] of
-          Object.entries(levelOfDetailNameToDumpCount)) {
+        Object.entries(levelOfDetailNameToDumpCount)) {
         reportMemoryDumpCountAsValue(browserName, levelOfDetailName,
             levelOfDetailDumpCount, values);
       }

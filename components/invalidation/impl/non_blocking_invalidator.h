@@ -16,9 +16,9 @@
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
+#include "components/invalidation/impl/deprecated_invalidator_registrar.h"
 #include "components/invalidation/impl/invalidation_state_tracker.h"
 #include "components/invalidation/impl/invalidator.h"
-#include "components/invalidation/impl/invalidator_registrar.h"
 #include "components/invalidation/impl/unacked_invalidation_set.h"
 #include "components/invalidation/public/invalidation_export.h"
 #include "components/invalidation/public/invalidator_state.h"
@@ -27,6 +27,11 @@
 namespace base {
 class SingleThreadTaskRunner;
 }  // namespace base
+
+namespace network {
+class NetworkConnectionTracker;
+class SharedURLLoaderFactoryInfo;
+}  // namespace network
 
 namespace syncer {
 class SyncNetworkChannel;
@@ -58,6 +63,8 @@ class INVALIDATION_EXPORT NonBlockingInvalidator
   void RegisterHandler(InvalidationHandler* handler) override;
   bool UpdateRegisteredIds(InvalidationHandler* handler,
                            const ObjectIdSet& ids) override;
+  bool UpdateRegisteredIds(InvalidationHandler* handler,
+                           const TopicSet& ids) override;
   void UnregisterHandler(InvalidationHandler* handler) override;
   InvalidatorState GetInvalidatorState() const override;
   void UpdateCredentials(const std::string& email,
@@ -72,7 +79,9 @@ class INVALIDATION_EXPORT NonBlockingInvalidator
   static NetworkChannelCreator MakePushClientChannelCreator(
       const notifier::NotifierOptions& notifier_options);
   static NetworkChannelCreator MakeGCMNetworkChannelCreator(
-      scoped_refptr<net::URLRequestContextGetter> request_context_getter,
+      std::unique_ptr<network::SharedURLLoaderFactoryInfo>
+          url_loader_factory_info,
+      network::NetworkConnectionTracker* network_connection_tracker,
       std::unique_ptr<GCMNetworkChannelDelegate> delegate);
 
   // These methods are forwarded to the invalidation_state_tracker_.
@@ -94,7 +103,7 @@ class INVALIDATION_EXPORT NonBlockingInvalidator
   struct InitializeOptions;
   class Core;
 
-  InvalidatorRegistrar registrar_;
+  DeprecatedInvalidatorRegistrar registrar_;
   InvalidationStateTracker* invalidation_state_tracker_;
 
   // The real guts of NonBlockingInvalidator, which allows this class to live

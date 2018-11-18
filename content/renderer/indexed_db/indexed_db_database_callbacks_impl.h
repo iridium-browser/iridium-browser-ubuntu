@@ -5,7 +5,8 @@
 #ifndef CONTENT_RENDERER_INDEXED_DB_INDEXED_DB_DATABASE_CALLBACKS_IMPL_H_
 #define CONTENT_RENDERER_INDEXED_DB_INDEXED_DB_DATABASE_CALLBACKS_IMPL_H_
 
-#include "content/common/indexed_db/indexed_db.mojom.h"
+#include "base/single_thread_task_runner.h"
+#include "third_party/blink/public/mojom/indexeddb/indexeddb.mojom.h"
 
 namespace blink {
 class WebIDBDatabaseCallbacks;
@@ -14,25 +15,23 @@ class WebIDBDatabaseCallbacks;
 namespace content {
 
 class IndexedDBDatabaseCallbacksImpl
-    : public indexed_db::mojom::DatabaseCallbacks {
+    : public blink::mojom::IDBDatabaseCallbacks {
  public:
   explicit IndexedDBDatabaseCallbacksImpl(
-      std::unique_ptr<blink::WebIDBDatabaseCallbacks> callbacks,
-      scoped_refptr<base::SingleThreadTaskRunner> callback_runner);
+      std::unique_ptr<blink::WebIDBDatabaseCallbacks> callbacks);
   ~IndexedDBDatabaseCallbacksImpl() override;
 
-  // indexed_db::mojom::DatabaseCallbacks implementation
+  // blink::mojom::IDBDatabaseCallbacks implementation
   void ForcedClose() override;
   void VersionChange(int64_t old_version, int64_t new_version) override;
   void Abort(int64_t transaction_id,
              int32_t code,
              const base::string16& message) override;
   void Complete(int64_t transaction_id) override;
-  void Changes(indexed_db::mojom::ObserverChangesPtr changes) override;
+  void Changes(blink::mojom::IDBObserverChangesPtr changes) override;
 
  private:
-  scoped_refptr<base::SingleThreadTaskRunner> callback_runner_;
-  blink::WebIDBDatabaseCallbacks* callbacks_;
+  std::unique_ptr<blink::WebIDBDatabaseCallbacks> callbacks_;
 
   DISALLOW_COPY_AND_ASSIGN(IndexedDBDatabaseCallbacksImpl);
 };

@@ -37,17 +37,19 @@ class PlatformSensorProviderWin final : public PlatformSensorProvider {
   ~PlatformSensorProviderWin() override;
 
   // PlatformSensorProvider interface implementation.
-  void FreeResources() override;
   void CreateSensorInternal(mojom::SensorType type,
                             SensorReadingSharedBuffer* reading_buffer,
                             const CreateSensorCallback& callback) override;
 
  private:
+  friend struct base::DefaultSingletonTraits<PlatformSensorProviderWin>;
+
   PlatformSensorProviderWin();
 
-  void CreateSensorThread();
-  bool StartSensorThread();
-  void StopSensorThread();
+  void InitSensorManager();
+  void OnInitSensorManager(mojom::SensorType type,
+                           SensorReadingSharedBuffer* reading_buffer,
+                           const CreateSensorCallback& callback);
   std::unique_ptr<PlatformSensorReaderWin> CreateSensorReader(
       mojom::SensorType type);
   void SensorReaderCreated(
@@ -56,11 +58,8 @@ class PlatformSensorProviderWin final : public PlatformSensorProvider {
       const CreateSensorCallback& callback,
       std::unique_ptr<PlatformSensorReaderWin> sensor_reader);
 
- private:
-  friend struct base::DefaultSingletonTraits<PlatformSensorProviderWin>;
-
-  class SensorThread;
-  std::unique_ptr<SensorThread> sensor_thread_;
+  scoped_refptr<base::SingleThreadTaskRunner> com_sta_task_runner_;
+  Microsoft::WRL::ComPtr<ISensorManager> sensor_manager_;
 
   DISALLOW_COPY_AND_ASSIGN(PlatformSensorProviderWin);
 };

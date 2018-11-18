@@ -21,7 +21,7 @@ void TestExecutor_Execute(Cronet_ExecutorPtr self,
   CHECK(self);
   DVLOG(1) << "Post Task";
   base::SequencedTaskRunnerHandle::Get()->PostTask(
-      FROM_HERE, base::BindOnce(Cronet_Runnable_Run, runnable));
+      FROM_HERE, cronet::test::RunnableWrapper::CreateOnceClosure(runnable));
 }
 }  // namespace
 
@@ -53,6 +53,11 @@ Cronet_EnginePtr CreateTestEngine(int quic_server_port) {
   Cronet_QuicHint_Destroy(quic_hint);
   // Create Cronet Engine.
   Cronet_EnginePtr cronet_engine = Cronet_Engine_Create();
+  // Set Mock Cert Verifier.
+  auto cert_verifier = std::make_unique<net::MockCertVerifier>();
+  cert_verifier->set_default_result(net::OK);
+  Cronet_Engine_SetMockCertVerifierForTesting(cronet_engine,
+                                              cert_verifier.release());
   // Start Cronet Engine.
   Cronet_Engine_StartWithParams(cronet_engine, engine_params);
   Cronet_EngineParams_Destroy(engine_params);
@@ -61,6 +66,13 @@ Cronet_EnginePtr CreateTestEngine(int quic_server_port) {
 
 Cronet_ExecutorPtr CreateTestExecutor() {
   return Cronet_Executor_CreateWith(TestExecutor_Execute);
+}
+
+// static
+base::OnceClosure RunnableWrapper::CreateOnceClosure(
+    Cronet_RunnablePtr runnable) {
+  return base::BindOnce(&RunnableWrapper::Run,
+                        std::make_unique<RunnableWrapper>(runnable));
 }
 
 }  // namespace test

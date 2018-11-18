@@ -19,16 +19,24 @@ void NGBaseLayoutAlgorithmTest::SetUp() {
   EnableCompositing();
 }
 
-std::pair<scoped_refptr<NGPhysicalBoxFragment>,
-          scoped_refptr<NGConstraintSpace>>
+void NGBaseLayoutAlgorithmTest::AdvanceToLayoutPhase() {
+  if (GetDocument().Lifecycle().GetState() ==
+      DocumentLifecycle::kInPerformLayout)
+    return;
+  GetDocument().Lifecycle().AdvanceTo(DocumentLifecycle::kInStyleRecalc);
+  GetDocument().Lifecycle().AdvanceTo(DocumentLifecycle::kStyleClean);
+  GetDocument().Lifecycle().AdvanceTo(DocumentLifecycle::kInPerformLayout);
+}
+
+std::pair<scoped_refptr<const NGPhysicalBoxFragment>, NGConstraintSpace>
 NGBaseLayoutAlgorithmTest::RunBlockLayoutAlgorithmForElement(Element* element) {
   LayoutBlockFlow* block_flow = ToLayoutBlockFlow(element->GetLayoutObject());
   NGBlockNode node(block_flow);
-  scoped_refptr<NGConstraintSpace> space =
+  NGConstraintSpace space =
       NGConstraintSpace::CreateFromLayoutObject(*block_flow);
 
   scoped_refptr<NGLayoutResult> result =
-      NGBlockLayoutAlgorithm(node, *space).Layout();
+      NGBlockLayoutAlgorithm(node, space).Layout();
   return std::make_pair(
       ToNGPhysicalBoxFragment(result->PhysicalFragment().get()),
       std::move(space));
@@ -49,7 +57,8 @@ const NGPhysicalBoxFragment* NGBaseLayoutAlgorithmTest::CurrentFragmentFor(
   return block_flow->CurrentFragment();
 }
 
-const NGPhysicalBoxFragment* FragmentChildIterator::NextChild() {
+const NGPhysicalBoxFragment* FragmentChildIterator::NextChild(
+    NGPhysicalOffset* fragment_offset) {
   if (!parent_)
     return nullptr;
   if (index_ >= parent_->Children().size())
@@ -60,10 +69,13 @@ const NGPhysicalBoxFragment* FragmentChildIterator::NextChild() {
     if (index_ >= parent_->Children().size())
       return nullptr;
   }
-  return ToNGPhysicalBoxFragment(parent_->Children()[index_++].get());
+  auto& child = parent_->Children()[index_++];
+  if (fragment_offset)
+    *fragment_offset = child.Offset();
+  return ToNGPhysicalBoxFragment(child.get());
 }
 
-scoped_refptr<NGConstraintSpace> ConstructBlockLayoutTestConstraintSpace(
+NGConstraintSpace ConstructBlockLayoutTestConstraintSpace(
     WritingMode writing_mode,
     TextDirection direction,
     NGLogicalSize size,
@@ -77,7 +89,7 @@ scoped_refptr<NGConstraintSpace> ConstructBlockLayoutTestConstraintSpace(
 
   return NGConstraintSpaceBuilder(
              writing_mode,
-             /* icb_size */ size.ConvertToPhysical(writing_mode))
+             /* icb_size */ NGPhysicalSize(LayoutUnit(800), LayoutUnit(600)))
       .SetAvailableSize(size)
       .SetPercentageResolutionSize(size)
       .SetTextDirection(direction)

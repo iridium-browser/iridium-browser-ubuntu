@@ -63,6 +63,14 @@ class VertexArrayState final : angle::NonCopyable
         return mVertexAttributes[attribIndex].bindingIndex;
     }
 
+    void setAttribBinding(size_t attribIndex, GLuint newBindingIndex);
+
+    // Extra validation performed on the Vertex Array.
+    bool hasEnabledNullPointerClientArray() const;
+
+    // Get all the attributes in an AttributesMask that are using the given binding.
+    AttributesMask getBindingToAttributesMask(GLuint bindingIndex) const;
+
   private:
     friend class VertexArray;
     std::string mLabel;
@@ -71,9 +79,22 @@ class VertexArrayState final : angle::NonCopyable
     std::vector<VertexBinding> mVertexBindings;
     AttributesMask mEnabledAttributesMask;
     ComponentTypeMask mVertexAttributesTypeMask;
+
+    // From the GLES 3.1 spec:
+    // When a generic attribute array is sourced from client memory, the vertex attribute binding
+    // state is ignored. Thus we don't have to worry about binding state when using client memory
+    // attribs.
+    gl::AttributesMask mClientMemoryAttribsMask;
+    gl::AttributesMask mNullPointerClientMemoryAttribsMask;
+
+    // Used for validation cache. Indexed by attribute.
+    AttributesMask mCachedMappedArrayBuffers;
+    AttributesMask mCachedEnabledMappedArrayBuffers;
 };
 
-class VertexArray final : public angle::ObserverInterface, public LabeledObject
+class VertexArray final : public angle::ObserverInterface,
+                          public LabeledObject,
+                          public angle::Subject
 {
   public:
     VertexArray(rx::GLImplFactory *factory, GLuint id, size_t maxAttribs, size_t maxAttribBindings);
@@ -154,6 +175,18 @@ class VertexArray final : public angle::ObserverInterface, public LabeledObject
         return mState.getEnabledAttributesMask();
     }
 
+    gl::AttributesMask getClientAttribsMask() const { return mState.mClientMemoryAttribsMask; }
+
+    bool hasEnabledNullPointerClientArray() const
+    {
+        return mState.hasEnabledNullPointerClientArray();
+    }
+
+    bool hasMappedEnabledArrayBuffer() const
+    {
+        return mState.mCachedEnabledMappedArrayBuffers.any();
+    }
+
     // Observer implementation
     void onSubjectStateChange(const gl::Context *context,
                               angle::SubjectIndex index,
@@ -215,13 +248,14 @@ class VertexArray final : public angle::ObserverInterface, public LabeledObject
 
     static size_t GetVertexIndexFromDirtyBit(size_t dirtyBit);
 
-    gl::Error syncState(const Context *context);
+    angle::Result syncState(const Context *context);
     bool hasAnyDirtyBit() const { return mDirtyBits.any(); }
 
     ComponentTypeMask getAttributesTypeMask() const { return mState.mVertexAttributesTypeMask; }
     AttributesMask getAttributesMask() const { return mState.mEnabledAttributesMask; }
 
-    void onBindingChanged(bool bound);
+    void onBindingChanged(const Context *context, int incr);
+    bool hasTransformFeedbackBindingConflict(const gl::Context *context) const;
 
   private:
     ~VertexArray() override;
@@ -231,6 +265,14 @@ class VertexArray final : public angle::ObserverInterface, public LabeledObject
 
     void updateObserverBinding(size_t bindingIndex);
     DirtyBitType getDirtyBitFromIndex(bool contentsChanged, angle::SubjectIndex index) const;
+    void setDependentDirtyBit(const gl::Context *context,
+                              bool contentsChanged,
+                              angle::SubjectIndex index);
+
+    // These are used to optimize draw call validation.
+    void updateCachedBufferBindingSize(VertexBinding *binding);
+    void updateCachedTransformFeedbackBindingValidation(size_t bindingIndex, const Buffer *buffer);
+    void updateCachedMappedArrayBuffers(VertexBinding *binding);
 
     GLuint mId;
 
@@ -244,6 +286,8 @@ class VertexArray final : public angle::ObserverInterface, public LabeledObject
 
     std::vector<angle::ObserverBinding> mArrayBufferObserverBindings;
     angle::ObserverBinding mElementArrayBufferObserverBinding;
+
+    AttributesMask mCachedTransformFeedbackConflictedBindingsMask;
 };
 
 }  // namespace gl

@@ -12,7 +12,6 @@
 #include "base/i18n/rtl.h"
 #include "base/logging.h"
 #include "base/macros.h"
-#include "base/message_loop/message_loop.h"
 #include "base/strings/string16.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
@@ -65,8 +64,7 @@ class DownloadItemModelTest : public testing::Test {
   DownloadItemModelTest()
       : model_(&item_) {}
 
-  virtual ~DownloadItemModelTest() {
-  }
+  ~DownloadItemModelTest() override {}
 
  protected:
   // Sets up defaults for the download item and sets |model_| to a new
@@ -174,6 +172,8 @@ TEST_F(DownloadItemModelTest, InterruptedStatus) {
        "Failed - Server unreachable"},
       {download::DOWNLOAD_INTERRUPT_REASON_SERVER_CONTENT_LENGTH_MISMATCH,
        "Failed - File incomplete"},
+      {download::DOWNLOAD_INTERRUPT_REASON_SERVER_CROSS_ORIGIN_REDIRECT,
+       "Failed - Download error"},
       {download::DOWNLOAD_INTERRUPT_REASON_USER_CANCELED, "Canceled"},
       {download::DOWNLOAD_INTERRUPT_REASON_USER_SHUTDOWN, "Failed - Shutdown"},
       {download::DOWNLOAD_INTERRUPT_REASON_CRASH, "Failed - Crash"},
@@ -252,6 +252,8 @@ TEST_F(DownloadItemModelTest, InterruptTooltip) {
        "foo.bar\nServer unreachable"},
       {download::DOWNLOAD_INTERRUPT_REASON_SERVER_CONTENT_LENGTH_MISMATCH,
        "foo.bar\nFile incomplete"},
+      {download::DOWNLOAD_INTERRUPT_REASON_SERVER_CROSS_ORIGIN_REDIRECT,
+       "foo.bar\nDownload error"},
       {download::DOWNLOAD_INTERRUPT_REASON_USER_CANCELED, "foo.bar"},
       {download::DOWNLOAD_INTERRUPT_REASON_USER_SHUTDOWN, "foo.bar\nShutdown"},
       {download::DOWNLOAD_INTERRUPT_REASON_CRASH, "foo.bar\nCrash"},

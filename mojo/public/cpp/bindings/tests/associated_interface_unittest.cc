@@ -14,7 +14,8 @@
 #include "base/run_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
+#include "base/test/bind_test_util.h"
 #include "base/test/scoped_task_environment.h"
 #include "base/threading/sequenced_task_runner_handle.h"
 #include "base/threading/thread.h"
@@ -49,8 +50,8 @@ class IntegerSenderImpl : public IntegerSender {
     notify_send_method_called_ = callback;
   }
 
-  void Echo(int32_t value, const EchoCallback& callback) override {
-    callback.Run(value);
+  void Echo(int32_t value, EchoCallback callback) override {
+    std::move(callback).Run(value);
   }
   void Send(int32_t value) override { notify_send_method_called_.Run(value); }
 
@@ -79,11 +80,11 @@ class IntegerSenderConnectionImpl : public IntegerSenderConnection {
         base::Bind(&DeleteSender, sender_impl));
   }
 
-  void AsyncGetSender(const AsyncGetSenderCallback& callback) override {
+  void AsyncGetSender(AsyncGetSenderCallback callback) override {
     IntegerSenderAssociatedPtrInfo ptr_info;
     auto request = MakeRequest(&ptr_info);
     GetSender(std::move(request));
-    callback.Run(std::move(ptr_info));
+    std::move(callback).Run(std::move(ptr_info));
   }
 
   Binding<IntegerSenderConnection>* binding() { return &binding_; }
@@ -614,10 +615,10 @@ class PingServiceImpl : public PingService {
   }
 
   // PingService:
-  void Ping(const PingCallback& callback) override {
+  void Ping(PingCallback callback) override {
     if (!ping_handler_.is_null())
       ping_handler_.Run();
-    callback.Run();
+    std::move(callback).Run();
   }
 
  private:
@@ -1182,6 +1183,32 @@ TEST_F(AssociatedInterfaceTest, AssociateWithDisconnectedPipe) {
   IntegerSenderAssociatedPtr sender;
   AssociateWithDisconnectedPipe(MakeRequest(&sender).PassHandle());
   sender->Send(42);
+}
+
+TEST_F(AssociatedInterfaceTest, AsyncErrorHandlersWhenClosingMasterInterface) {
+  // Ensures that associated interface error handlers are not invoked
+  // synchronously when the master interface pipe is closed. Regression test for
+  // https://crbug.com/864731.
+
+  IntegerSenderConnectionPtr connection_ptr;
+  IntegerSenderConnectionImpl connection(MakeRequest(&connection_ptr));
+
+  base::RunLoop loop;
+  bool error_handler_invoked = false;
+  IntegerSenderAssociatedPtr sender0;
+  connection_ptr->GetSender(MakeRequest(&sender0));
+  sender0.set_connection_error_handler(base::BindLambdaForTesting([&] {
+    error_handler_invoked = true;
+    loop.Quit();
+  }));
+
+  // This should not trigger the error handler synchronously...
+  connection_ptr.reset();
+  EXPECT_FALSE(error_handler_invoked);
+
+  // ...but it should be triggered once we spin the scheduler.
+  loop.Run();
+  EXPECT_TRUE(error_handler_invoked);
 }
 
 }  // namespace

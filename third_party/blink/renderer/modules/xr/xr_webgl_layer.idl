@@ -4,9 +4,10 @@
 
 typedef (WebGLRenderingContext or WebGL2RenderingContext) XRWebGLRenderingContext;
 
-// https://immersive-web.github.io/webxr/spec/latest/#xrwebgllayer-interface
+// https://immersive-web.github.io/webxr/#xrwebgllayer-interface
 [
     SecureContext,
+    Exposed=Window,
     OriginTrialEnabled=WebXR,
     Constructor(XRSession session, XRWebGLRenderingContext context, optional XRWebGLLayerInit layerInit),
     RaisesException=Constructor
@@ -24,4 +25,6 @@ typedef (WebGLRenderingContext or WebGL2RenderingContext) XRWebGLRenderingContex
 
   XRViewport? getViewport(XRView view);
   void requestViewportScaling(double viewportScaleFactor);
+
+  static double getNativeFramebufferScaleFactor(XRSession session);
 };

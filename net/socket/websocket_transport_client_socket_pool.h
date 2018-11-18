@@ -10,6 +10,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <utility>
 
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
@@ -50,7 +51,7 @@ class NET_EXPORT_PRIVATE WebSocketTransportConnectJob : public ConnectJob {
       ClientSocketPool::RespectLimits respect_limits,
       const scoped_refptr<TransportSocketParams>& params,
       base::TimeDelta timeout_duration,
-      const CompletionCallback& callback,
+      CompletionOnceCallback callback,
       ClientSocketFactory* client_socket_factory,
       HostResolver* host_resolver,
       ClientSocketHandle* handle,
@@ -65,7 +66,7 @@ class NET_EXPORT_PRIVATE WebSocketTransportConnectJob : public ConnectJob {
   ClientSocketHandle* handle() const { return handle_; }
 
   // Stash the callback from RequestSocket() here for convenience.
-  const CompletionCallback& callback() const { return callback_; }
+  CompletionOnceCallback release_callback() { return std::move(callback_); }
 
   const NetLogWithSource& request_net_log() const { return request_net_log_; }
 
@@ -125,7 +126,7 @@ class NET_EXPORT_PRIVATE WebSocketTransportConnectJob : public ConnectJob {
   TransportConnectJob::RaceResult race_result_;
   ClientSocketHandle* const handle_;
   WebSocketEndpointLockManager* const websocket_endpoint_lock_manager_;
-  CompletionCallback callback_;
+  CompletionOnceCallback callback_;
   NetLogWithSource request_net_log_;
 
   bool had_ipv4_;
@@ -163,13 +164,12 @@ class NET_EXPORT_PRIVATE WebSocketTransportClientSocketPool
                     const SocketTag& socket_tag,
                     RespectLimits respect_limits,
                     ClientSocketHandle* handle,
-                    const CompletionCallback& callback,
+                    CompletionOnceCallback callback,
                     const NetLogWithSource& net_log) override;
   void RequestSockets(const std::string& group_name,
                       const void* params,
                       int num_sockets,
-                      const NetLogWithSource& net_log,
-                      HttpRequestInfo::RequestMotivation motivation) override;
+                      const NetLogWithSource& net_log) override;
   void SetPriority(const std::string& group_name,
                    ClientSocketHandle* handle,
                    RequestPriority priority) override;
@@ -214,20 +214,22 @@ class NET_EXPORT_PRIVATE WebSocketTransportClientSocketPool
     StalledRequest(const scoped_refptr<TransportSocketParams>& params,
                    RequestPriority priority,
                    ClientSocketHandle* handle,
-                   const CompletionCallback& callback,
+                   CompletionOnceCallback callback,
                    const NetLogWithSource& net_log);
-    StalledRequest(const StalledRequest& other);
+    StalledRequest(StalledRequest&& other);
     ~StalledRequest();
+
     const scoped_refptr<TransportSocketParams> params;
     const RequestPriority priority;
     ClientSocketHandle* const handle;
-    const CompletionCallback callback;
+    CompletionOnceCallback callback;
     const NetLogWithSource net_log;
   };
 
   friend class ConnectJobDelegate;
 
-  typedef std::map<const ClientSocketHandle*, WebSocketTransportConnectJob*>
+  typedef std::map<const ClientSocketHandle*,
+                   std::unique_ptr<WebSocketTransportConnectJob>>
       PendingConnectsMap;
   // This is a list so that we can remove requests from the middle, and also
   // so that iterators are not invalidated unless the corresponding request is
@@ -242,10 +244,10 @@ class NET_EXPORT_PRIVATE WebSocketTransportClientSocketPool
   bool TryHandOutSocket(int result, WebSocketTransportConnectJob* job);
   void OnConnectJobComplete(int result, WebSocketTransportConnectJob* job);
   void InvokeUserCallbackLater(ClientSocketHandle* handle,
-                               const CompletionCallback& callback,
+                               CompletionOnceCallback callback,
                                int rv);
   void InvokeUserCallback(ClientSocketHandle* handle,
-                          const CompletionCallback& callback,
+                          CompletionOnceCallback callback,
                           int rv);
   bool ReachedMaxSocketsLimit() const;
   void HandOutSocket(std::unique_ptr<StreamSocket> socket,

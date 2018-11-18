@@ -16,6 +16,7 @@
 #include "chrome/test/chromedriver/chrome/log.h"
 #include "chrome/test/chromedriver/chrome/status.h"
 #include "chrome/test/chromedriver/chrome/util.h"
+#include "chrome/test/chromedriver/chrome/web_view_impl.h"
 #include "chrome/test/chromedriver/net/sync_websocket.h"
 #include "chrome/test/chromedriver/net/url_request_context_getter.h"
 
@@ -89,13 +90,17 @@ DevToolsClientImpl::DevToolsClientImpl(const SyncWebSocketFactory& factory,
     : socket_(factory.Run()),
       url_(url),
       parent_(nullptr),
+      owner_(nullptr),
       crashed_(false),
+      detached_(false),
       id_(id),
       frontend_closer_func_(base::Bind(&FakeCloseFrontends)),
       parser_func_(base::Bind(&internal::ParseInspectorMessage)),
       unnotified_event_(NULL),
       next_id_(1),
-      stack_count_(0) {}
+      stack_count_(0) {
+  socket_->SetId(id_);
+}
 
 DevToolsClientImpl::DevToolsClientImpl(
     const SyncWebSocketFactory& factory,
@@ -105,19 +110,25 @@ DevToolsClientImpl::DevToolsClientImpl(
     : socket_(factory.Run()),
       url_(url),
       parent_(nullptr),
+      owner_(nullptr),
       crashed_(false),
+      detached_(false),
       id_(id),
       frontend_closer_func_(frontend_closer_func),
       parser_func_(base::Bind(&internal::ParseInspectorMessage)),
       unnotified_event_(NULL),
       next_id_(1),
-      stack_count_(0) {}
+      stack_count_(0) {
+  socket_->SetId(id_);
+}
 
 DevToolsClientImpl::DevToolsClientImpl(DevToolsClientImpl* parent,
                                        const std::string& session_id)
     : parent_(parent),
+      owner_(nullptr),
       session_id_(session_id),
       crashed_(false),
+      detached_(false),
       id_(session_id),
       frontend_closer_func_(base::BindRepeating(&FakeCloseFrontends)),
       parser_func_(base::BindRepeating(&internal::ParseInspectorMessage)),
@@ -136,13 +147,17 @@ DevToolsClientImpl::DevToolsClientImpl(
     : socket_(factory.Run()),
       url_(url),
       parent_(nullptr),
+      owner_(nullptr),
       crashed_(false),
+      detached_(false),
       id_(id),
       frontend_closer_func_(frontend_closer_func),
       parser_func_(parser_func),
       unnotified_event_(NULL),
       next_id_(1),
-      stack_count_(0) {}
+      stack_count_(0) {
+  socket_->SetId(id_);
+}
 
 DevToolsClientImpl::~DevToolsClientImpl() {
   if (parent_ != nullptr)
@@ -271,6 +286,14 @@ Status DevToolsClientImpl::HandleEventsUntil(
   }
 }
 
+void DevToolsClientImpl::SetDetached() {
+  detached_ = true;
+}
+
+void DevToolsClientImpl::SetOwner(WebViewImpl* owner) {
+  owner_ = owner;
+}
+
 DevToolsClientImpl::ResponseInfo::ResponseInfo(const std::string& method)
     : state(kWaiting), method(method) {}
 
@@ -293,8 +316,10 @@ Status DevToolsClientImpl::SendCommandInternal(
   command.SetKey("params", params.Clone());
   std::string message = SerializeValue(&command);
   if (IsVLogOn(1)) {
-    VLOG(1) << "DEVTOOLS COMMAND " << method << " (id=" << command_id << ") "
-            << FormatValueForDisplay(params);
+    // Note: ChromeDriver log-replay depends on the format of this logging.
+    // see chromedriver/log_replay/devtools_log_reader.cc.
+    VLOG(1) << "DevTools WebSocket Command: " << method << " (id=" << command_id
+            << ") " << id_ << " " << FormatValueForDisplay(params);
   }
   if (parent_ != nullptr) {
     base::DictionaryValue params2;
@@ -360,13 +385,16 @@ Status DevToolsClientImpl::ProcessNextMessage(
   // have been deleted from |response_info_map_|) or blocked while notifying
   // listeners.
   if (expected_id != -1) {
-    ResponseInfoMap::iterator iter = response_info_map_.find(expected_id);
+    auto iter = response_info_map_.find(expected_id);
     if (iter == response_info_map_.end() || iter->second->state != kWaiting)
       return Status(kOk);
   }
 
   if (crashed_)
     return Status(kTabCrashed);
+
+  if (detached_)
+    return Status(kTargetDetached);
 
   if (parent_ != nullptr)
     return parent_->ProcessNextMessage(-1, timeout);
@@ -413,7 +441,9 @@ Status DevToolsClientImpl::HandleMessage(int expected_id,
 
 Status DevToolsClientImpl::ProcessEvent(const internal::InspectorEvent& event) {
   if (IsVLogOn(1)) {
-    VLOG(1) << "DEVTOOLS EVENT " << event.method << " "
+    // Note: ChromeDriver log-replay depends on the format of this logging.
+    // see chromedriver/log_replay/devtools_log_reader.cc.
+    VLOG(1) << "DevTools WebSocket Event: " << event.method << " " << id_ << " "
             << FormatValueForDisplay(*event.params);
   }
   unnotified_event_listeners_ = listeners_;
@@ -470,6 +500,7 @@ Status DevToolsClientImpl::ProcessEvent(const internal::InspectorEvent& event) {
           kUnknownError,
           "missing message in Target.receivedMessageFromTarget event");
 
+    WebViewImplHolder childHolder(child->owner_);
     return child->HandleMessage(-1, message);
   }
   return Status(kOk);
@@ -477,7 +508,7 @@ Status DevToolsClientImpl::ProcessEvent(const internal::InspectorEvent& event) {
 
 Status DevToolsClientImpl::ProcessCommandResponse(
     const internal::InspectorCommandResponse& response) {
-  ResponseInfoMap::iterator iter = response_info_map_.find(response.id);
+  auto iter = response_info_map_.find(response.id);
   if (IsVLogOn(1)) {
     std::string method, result;
     if (iter != response_info_map_.end())
@@ -486,8 +517,10 @@ Status DevToolsClientImpl::ProcessCommandResponse(
       result = FormatValueForDisplay(*response.result);
     else
       result = response.error;
-    VLOG(1) << "DEVTOOLS RESPONSE " << method << " (id=" << response.id
-            << ") " << result;
+    // Note: ChromeDriver log-replay depends on the format of this logging.
+    // see chromedriver/log_replay/devtools_log_reader.cc.
+    VLOG(1) << "DevTools WebSocket Response: " << method
+            << " (id=" << response.id << ") " << id_ << " " << result;
   }
 
   if (iter == response_info_map_.end())

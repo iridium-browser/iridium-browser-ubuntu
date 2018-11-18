@@ -8,7 +8,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/script_value.h"
 #include "third_party/blink/renderer/modules/event_modules.h"
 #include "third_party/blink/renderer/modules/payments/payment_request_event_init.h"
-#include "third_party/blink/renderer/modules/serviceworkers/extendable_event.h"
+#include "third_party/blink/renderer/modules/service_worker/extendable_event.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 
 namespace WTF {
@@ -35,7 +35,7 @@ class MODULES_EXPORT PaymentRequestEvent final : public ExtendableEvent {
 
   const AtomicString& InterfaceName() const override;
 
-  const String& topLevelOrigin() const;
+  const String& topOrigin() const;
   const String& paymentRequestOrigin() const;
   const String& paymentRequestId() const;
   const HeapVector<PaymentMethodData>& methodData() const;
@@ -46,7 +46,7 @@ class MODULES_EXPORT PaymentRequestEvent final : public ExtendableEvent {
   ScriptPromise openWindow(ScriptState*, const String& url);
   void respondWith(ScriptState*, ScriptPromise, ExceptionState&);
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  private:
   PaymentRequestEvent(const AtomicString& type,
@@ -54,7 +54,7 @@ class MODULES_EXPORT PaymentRequestEvent final : public ExtendableEvent {
                       RespondWithObserver*,
                       WaitUntilObserver*);
 
-  String top_level_origin_;
+  String top_origin_;
   String payment_request_origin_;
   String payment_request_id_;
   HeapVector<PaymentMethodData> method_data_;

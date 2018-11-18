@@ -125,6 +125,85 @@ tr.b.unittest.testSuite(function() {
     checkParsedAndStreamInput(events, checkModel);
   });
 
+  test('nonMonotonicInstantEvents', function() {
+    function checkModel(m) {
+      assert.strictEqual(m.numProcesses, 1);
+      const p = m.processes[52];
+      assert.isDefined(p);
+
+      assert.strictEqual(p.numThreads, 3);
+      const t1 = p.threads[1];
+      assert.isDefined(t1);
+      assert.strictEqual(t1.sliceGroup.length, 3);
+
+      let slice = t1.sliceGroup.slices[1];
+      assert.strictEqual(slice.title, 'b');
+      assert.strictEqual(slice.category, 'foo');
+      assert.strictEqual(slice.start, 2);
+      assert.strictEqual(slice.duration, 0);
+      assert.strictEqual(slice.subSlices.length, 0);
+
+      slice = t1.sliceGroup.slices[2];
+      assert.strictEqual(slice.title, 'a');
+      assert.strictEqual(slice.category, 'foo');
+      assert.strictEqual(slice.start, 3);
+      assert.strictEqual(slice.duration, 5);
+      assert.strictEqual(slice.subSlices.length, 0);
+
+      const t2 = p.threads[2];
+      assert.isDefined(t2);
+      assert.strictEqual(t2.sliceGroup.length, 3);
+
+      slice = t2.sliceGroup.slices[1];
+      assert.strictEqual(slice.title, 'b');
+      assert.strictEqual(slice.start, 2);
+      assert.strictEqual(slice.duration, 0);
+      assert.strictEqual(slice.subSlices.length, 0);
+
+      slice = t2.sliceGroup.slices[2];
+      assert.strictEqual(slice.title, 'a');
+      assert.strictEqual(slice.category, 'foo');
+      assert.strictEqual(slice.start, 3);
+      assert.strictEqual(slice.duration, 5);
+      assert.strictEqual(slice.subSlices.length, 0);
+
+      const t3 = p.threads[3];
+      assert.isDefined(t3);
+      assert.strictEqual(t3.sliceGroup.length, 3);
+
+      slice = t3.sliceGroup.slices[1];
+      assert.strictEqual(slice.title, 'b');
+      assert.strictEqual(slice.start, 2);
+      assert.strictEqual(slice.duration, 0);
+      assert.strictEqual(slice.subSlices.length, 0);
+
+      slice = t3.sliceGroup.slices[2];
+      assert.strictEqual(slice.title, 'a');
+      assert.strictEqual(slice.category, 'foo');
+      assert.strictEqual(slice.start, 3);
+      assert.strictEqual(slice.duration, 5);
+      assert.strictEqual(slice.subSlices.length, 0);
+    }
+
+    const events = [
+      {name: 'x', args: {}, pid: 52, ts: 0, cat: 'foo', tid: 1, ph: 'R'},
+      {name: 'a', args: {}, pid: 52, ts: 3000, cat: 'foo', tid: 1, ph: 'X',
+        dur: 5000},
+      {name: 'b', args: {}, pid: 52, ts: 2000, cat: 'foo', tid: 1, ph: 'R'},
+
+      {name: 'x', args: {}, pid: 52, ts: 0, cat: 'foo', tid: 2, ph: 'R'},
+      {name: 'b', args: {}, pid: 52, ts: 2000, cat: 'foo', tid: 2, ph: 'R'},
+      {name: 'a', args: {}, pid: 52, ts: 3000, cat: 'foo', tid: 2, ph: 'X',
+        dur: 5000},
+
+      {name: 'x', args: {}, pid: 52, ts: 0, cat: 'foo', tid: 3, ph: 'R'},
+      {name: 'a', args: {}, pid: 52, ts: 3000, cat: 'foo', tid: 3, ph: 'B'},
+      {name: 'b', args: {}, pid: 52, ts: 2000, cat: 'foo', tid: 3, ph: 'R'},
+      {name: 'a', args: {}, pid: 52, ts: 8000, cat: 'foo', tid: 3, ph: 'E'}
+    ];
+    checkParsedAndStreamInput(events, checkModel);
+  });
+
   test('basicSingleThreadNonnestedParsingWithCpuDuration', function() {
     function checkModel(m) {
       assert.strictEqual(m.numProcesses, 1);
@@ -754,7 +833,7 @@ tr.b.unittest.testSuite(function() {
 
       // Check getAllThreads.
       assert.deepEqual(m.getAllThreads(),
-                        [m.processes[1].threads[1], m.processes[2].threads[2]]);
+          [m.processes[1].threads[1], m.processes[2].threads[2]]);
     }
 
     const events = [
@@ -3151,7 +3230,7 @@ tr.b.unittest.testSuite(function() {
       assert.strictEqual(m.samples[0].title, 'cycles:HG');
       assert.strictEqual(m.samples[0].start, 1);
       assert.deepEqual(
-        ['a_sub', 'a', 'main'],
+          ['a_sub', 'a', 'main'],
           m.samples[0].userFriendlyStack
               .map(x => x.substr(0, x.indexOf('url') - 1)));
       assert.strictEqual(m.samples[0].weight, 1);
@@ -5687,13 +5766,13 @@ tr.b.unittest.testSuite(function() {
 
     const eventData = { traceEvents: [
       {name: 'a', args: {}, pid: 52, ts: 524, cat: 'foo', tid: 53, ph: 'B'}],
-      traceAnnotations: [
-        {typeName: 'xmarker', args: {timestamp: 12}},
-        {typeName: 'rect', args: {
-          start: location1.toDict(), end: location2.toDict()}},
-        {typeName: 'comment_box', args: {text: 'test',
-          location: location1.toDict()}}
-      ]};
+    traceAnnotations: [
+      {typeName: 'xmarker', args: {timestamp: 12}},
+      {typeName: 'rect', args: {
+        start: location1.toDict(), end: location2.toDict()}},
+      {typeName: 'comment_box', args: {text: 'test',
+        location: location1.toDict()}}
+    ]};
     checkParsedAndStreamInput(eventData, checkModel);
   });
 
@@ -6355,11 +6434,11 @@ tr.b.unittest.testSuite(function() {
               'timeDeltas': [1, 1],
               'cpuProfile': {
                 'nodes': [
-                 // eslint-disable-next-line
+                  // eslint-disable-next-line
                  {'callFrame': {'functionName': '(root)', 'scriptId': 0}, 'id': 1},
-                 // eslint-disable-next-line
+                  // eslint-disable-next-line
                  {'callFrame': {'functionName': 'a', 'url': 'a.js', 'scriptId': 1, 'lineNumber': 1, 'columnNumber': 2}, 'id': 2, 'parent': 1},
-                 // eslint-disable-next-line
+                  // eslint-disable-next-line
                  {'callFrame': {'functionName': 'b', 'url': 'b.js', 'scriptId': 2, 'lineNumber': 1, 'columnNumber': 2}, 'deoptReason': 'a reason', 'id': 3, 'parent': 2}
                 ],
                 'samples': [3, 2]
@@ -6376,9 +6455,9 @@ tr.b.unittest.testSuite(function() {
               'timeDeltas': [3, 3],
               'cpuProfile': {
                 'nodes': [
-                 // eslint-disable-next-line
+                  // eslint-disable-next-line
                  {'callFrame': {'functionName': 'c', 'url': 'c.js', 'scriptId': 3, 'lineNumber': 2, 'columnNumber': 3}, 'id': 4, 'parent': 2},
-                 // eslint-disable-next-line
+                  // eslint-disable-next-line
                  {'callFrame': {'functionName': 'd', 'url': 'd.js', 'scriptId': 4, 'lineNumber': 2, 'columnNumber': 3}, 'deoptReason': 'another reason', 'id': 5, 'parent': 3}
                 ],
                 'samples': [5, 4]

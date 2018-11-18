@@ -5,25 +5,26 @@
 // Original code copyright 2014 Foxit Software Inc. http://www.foxitsoftware.com
 
 #include "core/fpdfapi/edit/cpdf_encryptor.h"
+
 #include "core/fpdfapi/parser/cpdf_crypto_handler.h"
 
-CPDF_Encryptor::CPDF_Encryptor(CPDF_CryptoHandler* pHandler,
-                               int objnum,
-                               const uint8_t* src_data,
-                               uint32_t src_size) {
-  if (src_size == 0)
-    return;
+CPDF_Encryptor::CPDF_Encryptor(CPDF_CryptoHandler* pHandler, int objnum)
+    : m_pHandler(pHandler), m_ObjNum(objnum) {
+  ASSERT(m_pHandler);
+}
 
-  if (!pHandler) {
-    m_pData = src_data;
-    m_dwSize = src_size;
-    return;
-  }
-  m_dwSize = pHandler->EncryptGetSize(objnum, 0, src_data, src_size);
-  m_pNewBuf.reset(FX_Alloc(uint8_t, m_dwSize));
-  pHandler->EncryptContent(objnum, 0, src_data, src_size, m_pNewBuf.get(),
-                           m_dwSize);
-  m_pData = m_pNewBuf.get();
+std::vector<uint8_t> CPDF_Encryptor::Encrypt(
+    pdfium::span<const uint8_t> src_data) const {
+  if (src_data.empty())
+    return std::vector<uint8_t>();
+
+  std::vector<uint8_t> result;
+  uint32_t buf_size = m_pHandler->EncryptGetSize(src_data);
+  result.resize(buf_size);
+  m_pHandler->EncryptContent(m_ObjNum, 0, src_data, result.data(),
+                             buf_size);  // Updates |buf_size| with actual.
+  result.resize(buf_size);
+  return result;
 }
 
 CPDF_Encryptor::~CPDF_Encryptor() {}

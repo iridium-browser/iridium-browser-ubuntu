@@ -44,10 +44,10 @@ import org.chromium.chrome.test.ChromeActivityTestRule;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
 import org.chromium.chrome.test.util.OmniboxTestUtils;
 import org.chromium.chrome.test.util.OmniboxTestUtils.StubAutocompleteController;
-import org.chromium.content.browser.test.util.Criteria;
-import org.chromium.content.browser.test.util.CriteriaHelper;
-import org.chromium.content.browser.test.util.KeyUtils;
-import org.chromium.content.browser.test.util.TouchCommon;
+import org.chromium.content_public.browser.test.util.Criteria;
+import org.chromium.content_public.browser.test.util.CriteriaHelper;
+import org.chromium.content_public.browser.test.util.KeyUtils;
+import org.chromium.content_public.browser.test.util.TouchCommon;
 
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
@@ -129,8 +129,8 @@ public class UrlBarTest {
                 LocationBarLayout locationBar =
                         (LocationBarLayout) mActivityTestRule.getActivity().findViewById(
                                 R.id.location_bar);
-                locationBar.cancelPendingAutocompleteStart();
-                locationBar.setAutocompleteController(controller);
+                locationBar.getAutocompleteCoordinator().cancelPendingAutocompleteStart();
+                locationBar.getAutocompleteCoordinator().setAutocompleteController(controller);
             }
         });
     }
@@ -252,16 +252,10 @@ public class UrlBarTest {
             }
         });
         Assert.assertFalse(state.hasAutocomplete);
-        if (ChromeFeatureList.isEnabled(ChromeFeatureList.SPANNABLE_INLINE_AUTOCOMPLETE)) {
-            // Note: new model clears autocomplete text when non-IME change has been made.
-            // The autocomplete gets removed.
-            Assert.assertEquals("tast", state.textWithoutAutocomplete);
-            Assert.assertEquals("tast", state.textWithAutocomplete);
-        } else {
-            // The autocomplete gets committed.
-            Assert.assertEquals("tasting is fun", state.textWithoutAutocomplete);
-            Assert.assertEquals("tasting is fun", state.textWithAutocomplete);
-        }
+        // Clears autocomplete text when non-IME change has been made.
+        // The autocomplete gets removed.
+        Assert.assertEquals("tast", state.textWithoutAutocomplete);
+        Assert.assertEquals("tast", state.textWithAutocomplete);
 
         // Replace part of the autocomplete text.
         setTextAndVerifyNoAutocomplete(urlBar, "test");

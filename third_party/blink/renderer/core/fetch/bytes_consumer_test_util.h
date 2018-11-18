@@ -54,7 +54,7 @@ class BytesConsumerTestUtil {
       return new testing::StrictMock<MockFetchDataLoaderClient>;
     }
 
-    virtual void Trace(blink::Visitor* visitor) {
+    void Trace(blink::Visitor* visitor) override {
       FetchDataLoader::Client::Trace(visitor);
     }
 
@@ -81,7 +81,7 @@ class BytesConsumerTestUtil {
   };
 
   class Command final {
-    DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
+    DISALLOW_NEW();
 
    public:
     enum Name {

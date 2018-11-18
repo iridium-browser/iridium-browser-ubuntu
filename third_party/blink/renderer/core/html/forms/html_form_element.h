@@ -71,13 +71,11 @@ class CORE_EXPORT HTMLFormElement final : public HTMLElement {
   void Disassociate(HTMLImageElement&);
   void DidAssociateByParser();
 
-  void PrepareForSubmission(Event*, HTMLFormControlElement* submit_button);
+  void PrepareForSubmission(Event&, HTMLFormControlElement* submit_button);
   void submitFromJavaScript();
   void reset();
 
-  void SetDemoted(bool);
-
-  void SubmitImplicitly(Event*, bool from_implicit_submission_trigger);
+  void SubmitImplicitly(Event&, bool from_implicit_submission_trigger);
 
   String GetName() const;
 
@@ -112,12 +110,13 @@ class CORE_EXPORT HTMLFormElement final : public HTMLElement {
   void ConstructFormDataSet(HTMLFormControlElement* submit_button,
                             FormData& form_data);
 
+  unsigned UniqueRendererFormId() const { return unique_renderer_form_id_; }
+
  private:
   explicit HTMLFormElement(Document&);
 
-  bool LayoutObjectIsNeeded(const ComputedStyle&) const override;
-  InsertionNotificationRequest InsertedInto(ContainerNode*) override;
-  void RemovedFrom(ContainerNode*) override;
+  InsertionNotificationRequest InsertedInto(ContainerNode&) override;
+  void RemovedFrom(ContainerNode&) override;
   void FinishParsingChildren() override;
 
   void HandleLocalEvents(Event&) override;
@@ -129,9 +128,6 @@ class CORE_EXPORT HTMLFormElement final : public HTMLElement {
   NamedItemType GetNamedItemType() const override {
     return NamedItemType::kName;
   }
-
-  void CloneNonAttributePropertiesFrom(const Element&,
-                                       CloneChildrenFlag) override;
 
   void SubmitDialog(FormSubmission*);
   void Submit(Event*, HTMLFormControlElement* submit_button);
@@ -162,16 +158,17 @@ class CORE_EXPORT HTMLFormElement final : public HTMLElement {
 
   RadioButtonGroupScope radio_button_group_scope_;
 
-  // Do not access m_listedElements directly. Use listedElements()
-  // instead.
+  // Do not access listed_elements_ directly. Use ListedElements() instead.
   ListedElement::List listed_elements_;
-  // Do not access m_imageElements directly. Use imageElements() instead.
+  // Do not access image_elements_ directly. Use ImageElements() instead.
   HeapVector<Member<HTMLImageElement>> image_elements_;
 
   // https://html.spec.whatwg.org/multipage/forms.html#planned-navigation
   // Unlike the specification, we use this only for web-exposed submit()
   // function in 'submit' event handler.
   Member<FormSubmission> planned_navigation_;
+
+  unsigned unique_renderer_form_id_;
 
   bool is_submitting_ = false;
   bool in_user_js_submit_event_ = false;
@@ -182,7 +179,6 @@ class CORE_EXPORT HTMLFormElement final : public HTMLElement {
   bool has_elements_associated_by_form_attribute_ : 1;
   bool did_finish_parsing_children_ : 1;
   bool is_in_reset_function_ : 1;
-  bool was_demoted_ : 1;
 };
 
 }  // namespace blink

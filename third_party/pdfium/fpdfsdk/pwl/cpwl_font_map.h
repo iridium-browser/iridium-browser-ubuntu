@@ -46,15 +46,12 @@ class CPWL_FontMap : public IPVT_FontMap {
   static int32_t GetNativeCharset();
   ByteString GetNativeFontName(int32_t nCharset);
 
-  static ByteString GetDefaultFontByCharset(int32_t nCharset);
-  static const FPDF_CharsetFontMap defaultTTFMap[];
-
  protected:
   virtual void Initialize();
-  virtual CPDF_Document* GetDocument();
+  virtual CPDF_Document* GetDocument() = 0;
   virtual CPDF_Font* FindFontSameCharset(ByteString* sFontAlias,
-                                         int32_t nCharset);
-  virtual void AddedFont(CPDF_Font* pFont, const ByteString& sFontAlias);
+                                         int32_t nCharset) = 0;
+  virtual void AddedFont(CPDF_Font* pFont, const ByteString& sFontAlias) = 0;
 
   bool KnowWord(int32_t nFontIndex, uint16_t word);
 
@@ -64,7 +61,7 @@ class CPWL_FontMap : public IPVT_FontMap {
                        bool bFind);
   int32_t AddFontData(CPDF_Font* pFont,
                       const ByteString& sFontAlias,
-                      int32_t nCharset = FX_CHARSET_Default);
+                      int32_t nCharset);
 
   ByteString EncodeFontAlias(const ByteString& sFontName, int32_t nCharset);
   ByteString EncodeFontAlias(const ByteString& sFontName);
@@ -73,9 +70,7 @@ class CPWL_FontMap : public IPVT_FontMap {
   std::vector<std::unique_ptr<CPWL_FontMap_Native>> m_NativeFont;
 
  private:
-  int32_t FindFont(const ByteString& sFontName,
-                   int32_t nCharset = FX_CHARSET_Default);
-
+  int32_t FindFont(const ByteString& sFontName, int32_t nCharset);
   ByteString GetNativeFont(int32_t nCharset);
   CPDF_Font* AddFontToDocument(CPDF_Document* pDoc,
                                ByteString& sFontName,
@@ -86,7 +81,6 @@ class CPWL_FontMap : public IPVT_FontMap {
                            ByteString& sFontName,
                            uint8_t nCharset);
 
-  std::unique_ptr<CPDF_Document> m_pPDFDoc;
   UnownedPtr<CFX_SystemHandler> const m_pSystemHandler;
 };
 

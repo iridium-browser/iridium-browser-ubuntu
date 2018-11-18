@@ -28,22 +28,27 @@ namespace tpm_firmware_update {
 TEST(TPMFirmwareUpdateTest, DecodeSettingsProto) {
   enterprise_management::TPMFirmwareUpdateSettingsProto settings;
   settings.set_allow_user_initiated_powerwash(true);
+  settings.set_allow_user_initiated_preserve_device_state(true);
   auto dict = DecodeSettingsProto(settings);
   ASSERT_TRUE(dict);
   bool value = false;
   EXPECT_TRUE(dict->GetBoolean("allow-user-initiated-powerwash", &value));
   EXPECT_TRUE(value);
+  EXPECT_TRUE(
+      dict->GetBoolean("allow-user-initiated-preserve-device-state", &value));
+  EXPECT_TRUE(value);
 }
 
-class ShouldOfferUpdateViaPowerwashTest : public testing::Test {
+class TPMFirmwareUpdateModesTest : public testing::Test {
  public:
   enum class Availability {
     kPending,
-    kUnavailble,
+    kUnavailable,
+    kUnavailableROCAVulnerable,
     kAvailable,
   };
 
-  ShouldOfferUpdateViaPowerwashTest() = default;
+  TPMFirmwareUpdateModesTest() = default;
 
   void SetUp() override {
     feature_list_ = std::make_unique<base::test::ScopedFeatureList>();
@@ -51,30 +56,53 @@ class ShouldOfferUpdateViaPowerwashTest : public testing::Test {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     base::FilePath update_location_path =
         temp_dir_.GetPath().AppendASCII("tpm_firmware_update_location");
-    path_override_ = std::make_unique<base::ScopedPathOverride>(
+    path_override_location_ = std::make_unique<base::ScopedPathOverride>(
         chrome::FILE_CHROME_OS_TPM_FIRMWARE_UPDATE_LOCATION,
         update_location_path, update_location_path.IsAbsolute(), false);
+    base::FilePath srk_vulnerable_roca_path = temp_dir_.GetPath().AppendASCII(
+        "tpm_firmware_update_srk_vulnerable_roca");
+    path_override_srk_vulnerable_roca_ =
+        std::make_unique<base::ScopedPathOverride>(
+            chrome::FILE_CHROME_OS_TPM_FIRMWARE_UPDATE_SRK_VULNERABLE_ROCA,
+            srk_vulnerable_roca_path, srk_vulnerable_roca_path.IsAbsolute(),
+            false);
     SetUpdateAvailability(Availability::kAvailable);
-    callback_ =
-        base::BindOnce(&ShouldOfferUpdateViaPowerwashTest::RecordResponse,
-                       base::Unretained(this));
+    callback_ = base::BindOnce(&TPMFirmwareUpdateModesTest::RecordResponse,
+                               base::Unretained(this));
   }
 
-  void RecordResponse(bool available) {
+  void RecordResponse(const std::set<Mode>& modes) {
     callback_received_ = true;
-    update_available_ = available;
+    callback_modes_ = modes;
   }
 
   void SetUpdateAvailability(Availability availability) {
+    base::FilePath srk_vulnerable_roca_path;
+    ASSERT_TRUE(base::PathService::Get(
+        chrome::FILE_CHROME_OS_TPM_FIRMWARE_UPDATE_SRK_VULNERABLE_ROCA,
+        &srk_vulnerable_roca_path));
+    switch (availability) {
+      case Availability::kPending:
+      case Availability::kUnavailable:
+        base::DeleteFile(srk_vulnerable_roca_path, false);
+        break;
+      case Availability::kAvailable:
+      case Availability::kUnavailableROCAVulnerable:
+        ASSERT_TRUE(base::ImportantFileWriter::WriteFileAtomically(
+            srk_vulnerable_roca_path, ""));
+        break;
+    }
+
     base::FilePath update_location_path;
-    ASSERT_TRUE(
-        PathService::Get(chrome::FILE_CHROME_OS_TPM_FIRMWARE_UPDATE_LOCATION,
-                         &update_location_path));
+    ASSERT_TRUE(base::PathService::Get(
+        chrome::FILE_CHROME_OS_TPM_FIRMWARE_UPDATE_LOCATION,
+        &update_location_path));
     switch (availability) {
       case Availability::kPending:
         base::DeleteFile(update_location_path, false);
         break;
-      case Availability::kUnavailble:
+      case Availability::kUnavailable:
+      case Availability::kUnavailableROCAVulnerable:
         ASSERT_TRUE(base::ImportantFileWriter::WriteFileAtomically(
             update_location_path, ""));
         break;
@@ -88,51 +116,55 @@ class ShouldOfferUpdateViaPowerwashTest : public testing::Test {
 
   std::unique_ptr<base::test::ScopedFeatureList> feature_list_;
   base::ScopedTempDir temp_dir_;
-  std::unique_ptr<base::ScopedPathOverride> path_override_;
+  std::unique_ptr<base::ScopedPathOverride> path_override_location_;
+  std::unique_ptr<base::ScopedPathOverride> path_override_srk_vulnerable_roca_;
   base::test::ScopedTaskEnvironment scoped_task_environment_{
       base::test::ScopedTaskEnvironment::MainThreadType::MOCK_TIME};
+  ScopedCrosSettingsTestHelper cros_settings_test_helper_;
   chromeos::system::ScopedFakeStatisticsProvider statistics_provider_;
 
+  const std::set<Mode> kAllModes{Mode::kPowerwash, Mode::kPreserveDeviceState};
+
   bool callback_received_ = false;
-  bool update_available_ = false;
-  base::OnceCallback<void(bool)> callback_;
+  std::set<Mode> callback_modes_;
+  base::OnceCallback<void(const std::set<Mode>&)> callback_;
 };
 
-TEST_F(ShouldOfferUpdateViaPowerwashTest, FeatureDisabled) {
+TEST_F(TPMFirmwareUpdateModesTest, FeatureDisabled) {
   feature_list_.reset();
   feature_list_ = std::make_unique<base::test::ScopedFeatureList>();
   feature_list_->InitAndDisableFeature(features::kTPMFirmwareUpdate);
-  ShouldOfferUpdateViaPowerwash(std::move(callback_), base::TimeDelta());
+  GetAvailableUpdateModes(std::move(callback_), base::TimeDelta());
   EXPECT_TRUE(callback_received_);
-  EXPECT_FALSE(update_available_);
+  EXPECT_TRUE(callback_modes_.empty());
 }
 
-TEST_F(ShouldOfferUpdateViaPowerwashTest, FRERequired) {
+TEST_F(TPMFirmwareUpdateModesTest, FRERequired) {
   statistics_provider_.SetMachineStatistic(system::kCheckEnrollmentKey, "1");
-  ShouldOfferUpdateViaPowerwash(std::move(callback_), base::TimeDelta());
+  GetAvailableUpdateModes(std::move(callback_), base::TimeDelta());
   EXPECT_TRUE(callback_received_);
-  EXPECT_FALSE(update_available_);
+  EXPECT_TRUE(callback_modes_.empty());
 }
 
-TEST_F(ShouldOfferUpdateViaPowerwashTest, Pending) {
+TEST_F(TPMFirmwareUpdateModesTest, Pending) {
   SetUpdateAvailability(Availability::kPending);
-  ShouldOfferUpdateViaPowerwash(std::move(callback_), base::TimeDelta());
+  GetAvailableUpdateModes(std::move(callback_), base::TimeDelta());
   scoped_task_environment_.RunUntilIdle();
   EXPECT_TRUE(callback_received_);
-  EXPECT_FALSE(update_available_);
+  EXPECT_TRUE(callback_modes_.empty());
 }
 
-TEST_F(ShouldOfferUpdateViaPowerwashTest, Available) {
-  ShouldOfferUpdateViaPowerwash(std::move(callback_), base::TimeDelta());
+TEST_F(TPMFirmwareUpdateModesTest, Available) {
+  GetAvailableUpdateModes(std::move(callback_), base::TimeDelta());
   scoped_task_environment_.RunUntilIdle();
   EXPECT_TRUE(callback_received_);
-  EXPECT_TRUE(update_available_);
+  EXPECT_EQ(kAllModes, callback_modes_);
 }
 
-TEST_F(ShouldOfferUpdateViaPowerwashTest, AvailableAfterWaiting) {
+TEST_F(TPMFirmwareUpdateModesTest, AvailableAfterWaiting) {
   SetUpdateAvailability(Availability::kPending);
-  ShouldOfferUpdateViaPowerwash(std::move(callback_),
-                                base::TimeDelta::FromSeconds(5));
+  GetAvailableUpdateModes(std::move(callback_),
+                          base::TimeDelta::FromSeconds(5));
   scoped_task_environment_.RunUntilIdle();
   EXPECT_FALSE(callback_received_);
 
@@ -148,7 +180,7 @@ TEST_F(ShouldOfferUpdateViaPowerwashTest, AvailableAfterWaiting) {
   while (!callback_received_) {
     scoped_task_environment_.RunUntilIdle();
   }
-  EXPECT_TRUE(update_available_);
+  EXPECT_EQ(kAllModes, callback_modes_);
 
   // Trigger timeout and validate there are no further callbacks or crashes.
   callback_received_ = false;
@@ -157,85 +189,117 @@ TEST_F(ShouldOfferUpdateViaPowerwashTest, AvailableAfterWaiting) {
   EXPECT_FALSE(callback_received_);
 }
 
-TEST_F(ShouldOfferUpdateViaPowerwashTest, Timeout) {
+TEST_F(TPMFirmwareUpdateModesTest, NoUpdateVulnerableSRK) {
+  SetUpdateAvailability(Availability::kUnavailableROCAVulnerable);
+  GetAvailableUpdateModes(std::move(callback_), base::TimeDelta());
+  scoped_task_environment_.RunUntilIdle();
+  EXPECT_TRUE(callback_received_);
+  EXPECT_EQ(std::set<Mode>{Mode::kCleanup}, callback_modes_);
+}
+
+TEST_F(TPMFirmwareUpdateModesTest, NoUpdateNonVulnerableSRK) {
+  SetUpdateAvailability(Availability::kUnavailable);
+  GetAvailableUpdateModes(std::move(callback_), base::TimeDelta());
+  scoped_task_environment_.RunUntilIdle();
+  EXPECT_TRUE(callback_received_);
+  EXPECT_EQ(std::set<Mode>(), callback_modes_);
+}
+
+TEST_F(TPMFirmwareUpdateModesTest, Timeout) {
   SetUpdateAvailability(Availability::kPending);
-  ShouldOfferUpdateViaPowerwash(std::move(callback_),
-                                base::TimeDelta::FromSeconds(5));
+  GetAvailableUpdateModes(std::move(callback_),
+                          base::TimeDelta::FromSeconds(5));
   scoped_task_environment_.RunUntilIdle();
   EXPECT_FALSE(callback_received_);
 
   scoped_task_environment_.FastForwardBy(base::TimeDelta::FromSeconds(5));
   scoped_task_environment_.RunUntilIdle();
   EXPECT_TRUE(callback_received_);
-  EXPECT_FALSE(update_available_);
+  EXPECT_TRUE(callback_modes_.empty());
 }
 
-class ShouldOfferUpdateViaPowerwashEnterpriseTest
-    : public ShouldOfferUpdateViaPowerwashTest {
+class TPMFirmwareUpdateModesEnterpriseTest : public TPMFirmwareUpdateModesTest {
  public:
   void SetUp() override {
-    ShouldOfferUpdateViaPowerwashTest::SetUp();
-    cros_settings_test_helper_.ReplaceProvider(kTPMFirmwareUpdateSettings);
+    TPMFirmwareUpdateModesTest::SetUp();
+    cros_settings_test_helper_.ReplaceDeviceSettingsProviderWithStub();
+    cros_settings_test_helper_.InstallAttributes()->SetCloudManaged(
+        "example.com", "fake-device-id");
   }
 
-  void SetPolicy(bool allowed) {
+  void SetPolicy(const std::set<Mode>& modes) {
     base::DictionaryValue dict;
-    dict.SetKey(kSettingsKeyAllowPowerwash, base::Value(allowed));
+    dict.SetKey(kSettingsKeyAllowPowerwash,
+                base::Value(modes.count(Mode::kPowerwash) > 0));
+    dict.SetKey(kSettingsKeyAllowPreserveDeviceState,
+                base::Value(modes.count(Mode::kPreserveDeviceState) > 0));
     cros_settings_test_helper_.Set(kTPMFirmwareUpdateSettings, dict);
   }
-
-  ScopedStubInstallAttributes install_attributes_ =
-      ScopedStubInstallAttributes::CreateCloudManaged("example.com",
-                                                      "fake-device-id");
-  ScopedCrosSettingsTestHelper cros_settings_test_helper_;
 };
 
-TEST_F(ShouldOfferUpdateViaPowerwashEnterpriseTest, DeviceSettingPending) {
-  SetPolicy(true);
+TEST_F(TPMFirmwareUpdateModesEnterpriseTest, DeviceSettingPending) {
+  SetPolicy(kAllModes);
 
   cros_settings_test_helper_.SetTrustedStatus(
       CrosSettingsProvider::TEMPORARILY_UNTRUSTED);
-  ShouldOfferUpdateViaPowerwash(std::move(callback_), base::TimeDelta());
+  GetAvailableUpdateModes(std::move(callback_), base::TimeDelta());
   scoped_task_environment_.RunUntilIdle();
   EXPECT_FALSE(callback_received_);
 
-  cros_settings_test_helper_.SetTrustedStatus(
-      CrosSettingsProvider::TRUSTED);
+  cros_settings_test_helper_.SetTrustedStatus(CrosSettingsProvider::TRUSTED);
   scoped_task_environment_.RunUntilIdle();
   EXPECT_TRUE(callback_received_);
-  EXPECT_TRUE(update_available_);
+  EXPECT_EQ(kAllModes, callback_modes_);
 }
 
-TEST_F(ShouldOfferUpdateViaPowerwashEnterpriseTest, DeviceSettingUntrusted) {
+TEST_F(TPMFirmwareUpdateModesEnterpriseTest, DeviceSettingUntrusted) {
   cros_settings_test_helper_.SetTrustedStatus(
       CrosSettingsProvider::PERMANENTLY_UNTRUSTED);
-  ShouldOfferUpdateViaPowerwash(std::move(callback_), base::TimeDelta());
+  GetAvailableUpdateModes(std::move(callback_), base::TimeDelta());
   scoped_task_environment_.RunUntilIdle();
   EXPECT_TRUE(callback_received_);
-  EXPECT_FALSE(update_available_);
+  EXPECT_TRUE(callback_modes_.empty());
 }
 
-TEST_F(ShouldOfferUpdateViaPowerwashEnterpriseTest, DeviceSettingNotSet) {
-  ShouldOfferUpdateViaPowerwash(std::move(callback_), base::TimeDelta());
+TEST_F(TPMFirmwareUpdateModesEnterpriseTest, DeviceSettingNotSet) {
+  GetAvailableUpdateModes(std::move(callback_), base::TimeDelta());
   scoped_task_environment_.RunUntilIdle();
   EXPECT_TRUE(callback_received_);
-  EXPECT_FALSE(update_available_);
+  EXPECT_TRUE(callback_modes_.empty());
 }
 
-TEST_F(ShouldOfferUpdateViaPowerwashEnterpriseTest, DeviceSettingDisallowed) {
-  SetPolicy(false);
-  ShouldOfferUpdateViaPowerwash(std::move(callback_), base::TimeDelta());
+TEST_F(TPMFirmwareUpdateModesEnterpriseTest, DeviceSettingDisallowed) {
+  SetPolicy({});
+  GetAvailableUpdateModes(std::move(callback_), base::TimeDelta());
   scoped_task_environment_.RunUntilIdle();
   EXPECT_TRUE(callback_received_);
-  EXPECT_FALSE(update_available_);
+  EXPECT_TRUE(callback_modes_.empty());
 }
 
-TEST_F(ShouldOfferUpdateViaPowerwashEnterpriseTest, DeviceSettingAllowed) {
-  SetPolicy(true);
-  ShouldOfferUpdateViaPowerwash(std::move(callback_), base::TimeDelta());
+TEST_F(TPMFirmwareUpdateModesEnterpriseTest, DeviceSettingPowerwashAllowed) {
+  SetPolicy({Mode::kPowerwash});
+  GetAvailableUpdateModes(std::move(callback_), base::TimeDelta());
   scoped_task_environment_.RunUntilIdle();
   EXPECT_TRUE(callback_received_);
-  EXPECT_TRUE(update_available_);
+  EXPECT_EQ(std::set<Mode>({Mode::kPowerwash}), callback_modes_);
+}
+
+TEST_F(TPMFirmwareUpdateModesEnterpriseTest,
+       DeviceSettingPreserveDeviceStateAllowed) {
+  SetPolicy({Mode::kPreserveDeviceState});
+  GetAvailableUpdateModes(std::move(callback_), base::TimeDelta());
+  scoped_task_environment_.RunUntilIdle();
+  EXPECT_TRUE(callback_received_);
+  EXPECT_EQ(std::set<Mode>({Mode::kPreserveDeviceState}), callback_modes_);
+}
+
+TEST_F(TPMFirmwareUpdateModesEnterpriseTest, VulnerableSRK) {
+  SetUpdateAvailability(Availability::kUnavailableROCAVulnerable);
+  SetPolicy({Mode::kPreserveDeviceState});
+  GetAvailableUpdateModes(std::move(callback_), base::TimeDelta());
+  scoped_task_environment_.RunUntilIdle();
+  EXPECT_TRUE(callback_received_);
+  EXPECT_EQ(std::set<Mode>({Mode::kCleanup}), callback_modes_);
 }
 
 }  // namespace tpm_firmware_update

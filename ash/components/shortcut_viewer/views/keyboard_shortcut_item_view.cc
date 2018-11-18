@@ -13,6 +13,7 @@
 #include "ash/components/shortcut_viewer/views/bubble_view.h"
 #include "ash/components/strings/grit/ash_components_strings.h"
 #include "base/i18n/rtl.h"
+#include "base/no_destructor.h"
 #include "base/strings/utf_string_conversions.h"
 #include "ui/accessibility/ax_node_data.h"
 #include "ui/base/l10n/l10n_util.h"
@@ -21,14 +22,14 @@
 #include "ui/views/border.h"
 #include "ui/views/controls/image_view.h"
 #include "ui/views/controls/styled_label.h"
+
 namespace keyboard_shortcut_viewer {
 
 namespace {
 
 // Creates the separator view between bubble views of modifiers and key.
 std::unique_ptr<views::View> CreateSeparatorView() {
-  constexpr SkColor kSeparatorColor =
-      SkColorSetARGBMacro(0xFF, 0x1A, 0x73, 0xE8);
+  constexpr SkColor kSeparatorColor = SkColorSetARGB(0xFF, 0x1A, 0x73, 0xE8);
   constexpr int kIconSize = 16;
 
   std::unique_ptr<views::ImageView> separator_view =
@@ -75,7 +76,13 @@ KeyboardShortcutItemView::KeyboardShortcutItemView(
   replacement_strings.reserve(shortcut_key_codes_size);
   bool has_invalid_dom_key = false;
   for (ui::KeyboardCode key_code : item.shortcut_key_codes) {
-    const base::string16& dom_key_string = GetStringForKeyboardCode(key_code);
+    auto iter = GetKeycodeToString16Cache()->find(key_code);
+    if (iter == GetKeycodeToString16Cache()->end()) {
+      iter = GetKeycodeToString16Cache()
+                 ->emplace(key_code, GetStringForKeyboardCode(key_code))
+                 .first;
+    }
+    const base::string16& dom_key_string = iter->second;
     // If the |key_code| has no mapped |dom_key_string|, we use alternative
     // string to indicate that the shortcut is not supported by current keyboard
     // layout.
@@ -130,9 +137,8 @@ KeyboardShortcutItemView::KeyboardShortcutItemView(
   // redundant child label text is not also spoken.
   GetViewAccessibility().OverrideRole(ax::mojom::Role::kListItem);
   GetViewAccessibility().OverrideIsLeaf();
-  accessible_name_ = GetStringForCategory(category_) +
-                     description_label_view_->text() +
-                     shortcut_label_view_->text();
+  accessible_name_ = description_label_view_->text() +
+                     base::ASCIIToUTF16(", ") + shortcut_label_view_->text();
 }
 
 void KeyboardShortcutItemView::GetAccessibleNodeData(
@@ -149,39 +155,76 @@ void KeyboardShortcutItemView::Layout() {
   MaybeCalculateAndDoLayout(GetLocalBounds().width());
 }
 
+// static
+void KeyboardShortcutItemView::ClearKeycodeToString16Cache() {
+  GetKeycodeToString16Cache()->clear();
+}
+
+// static
+std::map<ui::KeyboardCode, base::string16>*
+KeyboardShortcutItemView::GetKeycodeToString16Cache() {
+  static base::NoDestructor<std::map<ui::KeyboardCode, base::string16>>
+      key_code_to_string16_cache;
+  return key_code_to_string16_cache.get();
+}
+
 void KeyboardShortcutItemView::MaybeCalculateAndDoLayout(int width) const {
   if (width == calculated_size_.width())
     return;
+  TRACE_EVENT0("shortcut_viewer", "MaybeCalculateAndDoLayout");
 
   const gfx::Insets insets = GetInsets();
   width -= insets.width();
   if (width <= 0)
     return;
 
-  // The width of |description_label_view_| and |shortcut_label_view_| as a
-  // ratio of its parent view's width. The unused width is to have some spacing
-  // in between the two views.
-  // These values are chosen to put all the bubble views in one line.
-  constexpr float kDescriptionViewPreferredWidthRatio = 0.29f;
+  // The max width of |shortcut_label_view_| as a ratio of its parent view's
+  // width. This value is chosen to put all the bubble views in one line.
   constexpr float kShortcutViewPreferredWidthRatio = 0.69f;
-  const int description_view_preferred_width =
-      width * kDescriptionViewPreferredWidthRatio;
+  // The minimum spacing between |description_label_view_| and
+  // |shortcut_label_view_|.
+  constexpr int kMinimumSpacing = 64;
+
   const int shortcut_view_preferred_width =
       width * kShortcutViewPreferredWidthRatio;
+  const int shortcut_view_height =
+      shortcut_label_view_->GetHeightForWidth(shortcut_view_preferred_width);
+
+  // Sets the bounds and layout in order to get the left most label in the
+  // |shortcut_label_view_|, which is used to calculate the preferred width for
+  // |description_label_view_|.
+  shortcut_label_view_->SetBounds(0, 0, shortcut_view_preferred_width,
+                                  shortcut_view_height);
+  DCHECK(shortcut_label_view_->has_children());
+  // Labels in |shortcut_label_view_| are right aligned, so we need to find the
+  // minimum left coordinates of all the lables.
+  int min_left = shortcut_view_preferred_width;
+  for (int i = 0; i < shortcut_label_view_->child_count(); ++i) {
+    min_left =
+        std::min(min_left, shortcut_label_view_->child_at(i)->bounds().x());
+  }
+
+  // The width of |description_label_view_| will be dynamically adjusted to fill
+  // the spacing.
+  int description_view_preferred_width =
+      width - (shortcut_view_preferred_width - min_left) - kMinimumSpacing;
+  if (description_view_preferred_width < kMinimumSpacing) {
+    // The min width of |description_label_view_| as a ratio of its parent
+    // view's width when the |description_view_preferred_width| calculated above
+    // is smaller than |kMinimumSpacing|.
+    constexpr float kDescriptionViewMinWidthRatio = 0.29f;
+    description_view_preferred_width = width * kDescriptionViewMinWidthRatio;
+  }
+
   const int description_view_height =
       description_label_view_->GetHeightForWidth(
           description_view_preferred_width);
-  const int shortcut_view_height =
-      shortcut_label_view_->GetHeightForWidth(shortcut_view_preferred_width);
 
   // Sets the bounds and layout in order to get the center points of the views
   // making up the top lines in both the description and shortcut views.
   // We want the center of the top lines in both views to align with each other.
   description_label_view_->SetBounds(0, 0, description_view_preferred_width,
                                      description_view_height);
-  shortcut_label_view_->SetBounds(0, 0, shortcut_view_preferred_width,
-                                  shortcut_view_height);
-
   DCHECK(shortcut_label_view_->has_children() &&
          description_label_view_->has_children());
   const int description_view_top_line_center_offset_y =

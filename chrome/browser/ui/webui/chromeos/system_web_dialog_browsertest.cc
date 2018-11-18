@@ -9,7 +9,7 @@
 #include "chrome/browser/chromeos/login/login_manager_test.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/common/webui_url_constants.h"
-#include "components/signin/core/account_id/account_id.h"
+#include "components/account_id/account_id.h"
 #include "content/public/common/service_manager_connection.h"
 #include "services/service_manager/public/cpp/connector.h"
 #include "ui/aura/test/mus/change_completion_waiter.h"
@@ -39,7 +39,8 @@ bool IsSystemModalWindowOpen() {
 
 class SystemWebDialogTest : public chromeos::LoginManagerTest {
  public:
-  SystemWebDialogTest() : LoginManagerTest(false) {}
+  SystemWebDialogTest()
+      : LoginManagerTest(false, true /* should_initialize_webui */) {}
   ~SystemWebDialogTest() override = default;
 
  private:

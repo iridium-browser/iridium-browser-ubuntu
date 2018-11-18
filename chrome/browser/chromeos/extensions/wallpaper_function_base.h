@@ -23,6 +23,8 @@ extern const char kCancelWallpaperMessage[];
 
 ash::WallpaperLayout GetLayoutEnum(const std::string& layout);
 
+std::string GetLayoutString(const ash::WallpaperLayout& layout);
+
 // This is used to record the wallpaper layout when the user sets a custom
 // wallpaper or changes the existing custom wallpaper's layout.
 void RecordCustomWallpaperLayout(const ash::WallpaperLayout& layout);
@@ -58,20 +60,13 @@ class WallpaperFunctionBase : public UIThreadExtensionFunction {
   static UnsafeWallpaperDecoder* unsafe_wallpaper_decoder_;
 
   // Starts to decode |data|. Must run on UI thread.
-  void StartDecode(const std::vector<char>& data);
+  void StartDecode(const std::vector<uint8_t>& data);
 
   // Handles cancel case. No error message should be set.
   void OnCancel();
 
   // Handles failure case. Sets error message.
   void OnFailure(const std::string& error);
-
-  // Handles failure case with setting an error message with results argument.
-  // TODO(wzang): This is a bug, we shouldn't be sending arguments when the
-  // function fails. Only used in setWallpaperIfExists function. See
-  // https://crbug.com/830212 for details.
-  void OnFailureWithArguments(std::unique_ptr<base::ListValue> args,
-                              const std::string& error);
 
   // Resize the image to |size|, encode it and save to |thumbnail_data_out|.
   void GenerateThumbnail(

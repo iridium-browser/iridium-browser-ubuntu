@@ -5,20 +5,24 @@
 #include "content/browser/webauth/authenticator_type_converters.h"
 
 #include <algorithm>
+#include <utility>
 
+#include "base/containers/flat_set.h"
 #include "device/fido/fido_constants.h"
+#include "device/fido/fido_parsing_utils.h"
 
 namespace mojo {
 
-using ::webauth::mojom::PublicKeyCredentialUserEntityPtr;
-using ::webauth::mojom::PublicKeyCredentialRpEntityPtr;
-using ::webauth::mojom::AuthenticatorTransport;
-using ::webauth::mojom::PublicKeyCredentialType;
-using ::webauth::mojom::PublicKeyCredentialParametersPtr;
-using ::webauth::mojom::PublicKeyCredentialDescriptorPtr;
-using ::webauth::mojom::AuthenticatorSelectionCriteriaPtr;
-using ::webauth::mojom::AuthenticatorAttachment;
-using ::webauth::mojom::UserVerificationRequirement;
+using ::blink::mojom::PublicKeyCredentialUserEntityPtr;
+using ::blink::mojom::PublicKeyCredentialRpEntityPtr;
+using ::blink::mojom::AuthenticatorTransport;
+using ::blink::mojom::PublicKeyCredentialType;
+using ::blink::mojom::PublicKeyCredentialParametersPtr;
+using ::blink::mojom::PublicKeyCredentialDescriptorPtr;
+using ::blink::mojom::AuthenticatorSelectionCriteriaPtr;
+using ::blink::mojom::AuthenticatorAttachment;
+using ::blink::mojom::UserVerificationRequirement;
+using ::blink::mojom::CableAuthenticationPtr;
 
 // static
 ::device::FidoTransportProtocol
@@ -31,9 +35,32 @@ TypeConverter<::device::FidoTransportProtocol, AuthenticatorTransport>::Convert(
       return ::device::FidoTransportProtocol::kNearFieldCommunication;
     case AuthenticatorTransport::BLE:
       return ::device::FidoTransportProtocol::kBluetoothLowEnergy;
+    case AuthenticatorTransport::CABLE:
+      return ::device::FidoTransportProtocol::kCloudAssistedBluetoothLowEnergy;
+    case AuthenticatorTransport::INTERNAL:
+      return ::device::FidoTransportProtocol::kInternal;
   }
   NOTREACHED();
   return ::device::FidoTransportProtocol::kUsbHumanInterfaceDevice;
+}
+
+AuthenticatorTransport
+TypeConverter<AuthenticatorTransport, ::device::FidoTransportProtocol>::Convert(
+    const ::device::FidoTransportProtocol& input) {
+  switch (input) {
+    case ::device::FidoTransportProtocol::kUsbHumanInterfaceDevice:
+      return AuthenticatorTransport::USB;
+    case ::device::FidoTransportProtocol::kNearFieldCommunication:
+      return AuthenticatorTransport::NFC;
+    case ::device::FidoTransportProtocol::kBluetoothLowEnergy:
+      return AuthenticatorTransport::BLE;
+    case ::device::FidoTransportProtocol::kCloudAssistedBluetoothLowEnergy:
+      return AuthenticatorTransport::CABLE;
+    case ::device::FidoTransportProtocol::kInternal:
+      return AuthenticatorTransport::INTERNAL;
+  }
+  NOTREACHED();
+  return AuthenticatorTransport::USB;
 }
 
 // static
@@ -76,10 +103,14 @@ TypeConverter<std::vector<::device::PublicKeyCredentialDescriptor>,
   credential_descriptors.reserve(input.size());
 
   for (const auto& credential : input) {
+    base::flat_set<::device::FidoTransportProtocol> protocols;
+    for (const auto& protocol : credential->transports) {
+      protocols.emplace(ConvertTo<::device::FidoTransportProtocol>(protocol));
+    }
+
     credential_descriptors.emplace_back(::device::PublicKeyCredentialDescriptor(
-        device::to_string(
-            ConvertTo<::device::CredentialType>(credential->type)),
-        credential->id));
+        ConvertTo<::device::CredentialType>(credential->type), credential->id,
+        std::move(protocols)));
   }
   return credential_descriptors;
 }
@@ -88,7 +119,7 @@ TypeConverter<std::vector<::device::PublicKeyCredentialDescriptor>,
 ::device::UserVerificationRequirement
 TypeConverter<::device::UserVerificationRequirement,
               UserVerificationRequirement>::
-    Convert(const ::webauth::mojom::UserVerificationRequirement& input) {
+    Convert(const UserVerificationRequirement& input) {
   switch (input) {
     case UserVerificationRequirement::PREFERRED:
       return ::device::UserVerificationRequirement::kPreferred;
@@ -159,6 +190,37 @@ TypeConverter<::device::PublicKeyCredentialUserEntity,
     user_entity.SetIconUrl(*input->icon);
 
   return user_entity;
+}
+
+// static
+std::vector<::device::CableDiscoveryData>
+TypeConverter<std::vector<::device::CableDiscoveryData>,
+              std::vector<CableAuthenticationPtr>>::
+    Convert(const std::vector<CableAuthenticationPtr>& input) {
+  std::vector<::device::CableDiscoveryData> discovery_data;
+  discovery_data.reserve(input.size());
+
+  for (const auto& data : input) {
+    ::device::EidArray client_eid;
+    DCHECK_EQ(client_eid.size(), data->client_eid.size());
+    std::copy(data->client_eid.begin(), data->client_eid.end(),
+              client_eid.begin());
+
+    ::device::EidArray authenticator_eid;
+    DCHECK_EQ(authenticator_eid.size(), data->authenticator_eid.size());
+    std::copy(data->authenticator_eid.begin(), data->authenticator_eid.end(),
+              authenticator_eid.begin());
+
+    ::device::SessionPreKeyArray session_pre_key;
+    DCHECK_EQ(session_pre_key.size(), data->session_pre_key.size());
+    std::copy(data->session_pre_key.begin(), data->session_pre_key.end(),
+              session_pre_key.begin());
+
+    discovery_data.push_back(::device::CableDiscoveryData{
+        data->version, client_eid, authenticator_eid, session_pre_key});
+  }
+
+  return discovery_data;
 }
 
 }  // namespace mojo

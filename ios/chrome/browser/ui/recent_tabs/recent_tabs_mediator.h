@@ -8,25 +8,32 @@
 #import <Foundation/Foundation.h>
 
 #import "ios/chrome/browser/sync/synced_sessions_bridge.h"
-#import "ios/chrome/browser/ui/ntp/recent_tabs/closed_tabs_observer_bridge.h"
-#import "ios/chrome/browser/ui/ntp/recent_tabs/legacy_recent_tabs_table_view_controller_delegate.h"
+#import "ios/chrome/browser/ui/recent_tabs/closed_tabs_observer_bridge.h"
+#import "ios/chrome/browser/ui/recent_tabs/recent_tabs_image_data_source.h"
+#import "ios/chrome/browser/ui/recent_tabs/recent_tabs_table_view_controller_delegate.h"
 
 namespace ios {
 class ChromeBrowserState;
 }
 
-@protocol RecentTabsTableConsumer;
+@protocol RecentTabsConsumer;
 
-// RecentTabsMediator controls the RecentTabsTableConsumer,
+// RecentTabsMediator controls the RecentTabsConsumer,
 // based on the user's signed-in and chrome-sync states.
 //
 // RecentTabsMediator listens for notifications about Chrome Sync
-// and ChromeToDevice and changes/updates the RecentTabsTableConsumer
+// and ChromeToDevice and changes/updates the RecentTabsConsumer
 // accordingly.
-@interface RecentTabsMediator
-    : NSObject<ClosedTabsObserving,
-               SyncedSessionsObserver,
-               LegacyRecentTabsTableViewControllerDelegate>
+@interface RecentTabsMediator : NSObject<ClosedTabsObserving,
+                                         RecentTabsTableViewControllerDelegate,
+                                         RecentTabsImageDataSource>
+
+// The consumer for this object. This can change during the lifetime of this
+// object and may be nil.
+@property(nonatomic, strong) id<RecentTabsConsumer> consumer;
+
+// The coordinator's BrowserState.
+@property(nonatomic, assign) ios::ChromeBrowserState* browserState;
 
 // Starts observing the he user's signed-in and chrome-sync states.
 - (void)initObservers;
@@ -34,12 +41,10 @@ class ChromeBrowserState;
 // Disconnects the mediator from all observers.
 - (void)disconnect;
 
-// The consumer for this object. This can change during the lifetime of this
-// object and may be nil.
-@property(nonatomic, strong) id<RecentTabsTableConsumer> consumer;
+// Configures the consumer with current data. Intended to be called immediately
+// after initialization.
+- (void)configureConsumer;
 
-// The coordinator's BrowserState.
-@property(nonatomic, assign) ios::ChromeBrowserState* browserState;
 @end
 
 #endif  // IOS_CHROME_BROWSER_UI_RECENT_TABS_RECENT_TABS_MEDIATOR_H_

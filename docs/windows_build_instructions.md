@@ -23,7 +23,7 @@ Are you a Google employee? See
 
 ### Visual Studio
 
-As of September, 2017 (R503915) Chromium requires Visual Studio 2017 update 3.x
+As of September, 2017 (R503915) Chromium requires Visual Studio 2017 (15.7.2)
 to build. The clang-cl compiler is used but Visual Studio's header files,
 libraries, and some tools are required. Visual Studio Community Edition should
 work if its license is appropriate for you. You must install the "Desktop
@@ -35,7 +35,7 @@ Studio installer that you download:
     --add Microsoft.VisualStudio.Component.VC.ATLMFC --includeRecommended
 ```
 
-You must have the version 10.0.15063 Windows 10 SDK installed. This can be
+You must have the version 10.0.17134 Windows 10 SDK installed. This can be
 installed separately or by checking the appropriate box in the Visual Studio
 Installer.
 
@@ -138,10 +138,10 @@ development and testing purposes.
 
 ## Setting up the build
 
-Chromium uses [Ninja](https://ninja-build.org) as its main build tool along
-with a tool called [GN](../tools/gn/docs/quick_start.md) to generate `.ninja`
-files. You can create any number of *build directories* with different
-configurations. To create a build directory:
+Chromium uses [Ninja](https://ninja-build.org) as its main build tool along with
+a tool called [GN](https://gn.googlesource.com/gn/+/master/docs/quick_start.md)
+to generate `.ninja` files. You can create any number of *build directories*
+with different configurations. To create a build directory:
 
 ```shell
 $ gn gen out/Default
@@ -155,8 +155,8 @@ $ gn gen out/Default
   configuration](https://www.chromium.org/developers/gn-build-configuration).
   The default will be a debug component build matching the current host
   operating system and CPU.
-* For more info on GN, run `gn help` on the command line or read the
-  [quick start guide](../tools/gn/docs/quick_start.md).
+* For more info on GN, run `gn help` on the command line or read the [quick
+  start guide](https://gn.googlesource.com/gn/+/master/docs/quick_start.md).
 
 ### Using the Visual Studio IDE
 
@@ -233,15 +233,10 @@ don't' set enable_nacl = false then build times may get worse.
 * `remove_webcore_debug_symbols = true` - turn off source-level debugging for
 blink to reduce build times, appropriate if you don't plan to debug blink.
 
-In order to ensure that linking is fast enough we recommend that you use one of
-these settings - they all have tradeoffs:
-* `use_lld = true` - this linker is very fast on full links but does not support
-incremental linking.
-* `is_win_fastlink = true` - this option makes the Visual Studio linker run much
-faster, and incremental linking is supported, but it can lead to debugger
-slowdowns or out-of-memory crashes.
-* `symbol_level = 1` - this option reduces the work the linker has to do but
-when this option is set you cannot do source-level debugging.
+In order to speed up linking you can set `symbol_level = 1` - this option
+reduces the work the linker has to do but when this option is set you cannot do
+source-level debugging. Switching from `symbol_level = 2` (the default) to
+`symbol_level = 1` requires recompiling everything.
 
 In addition, Google employees should use goma, a distributed compilation system.
 Detailed information is available internally but the relevant gn arg is:
@@ -338,12 +333,14 @@ CLParser::Parse         45      1889.1          85.0
 
 ## Build Chromium
 
-Build Chromium (the "chrome" target) with Ninja (or autoninja) using the
-command:
+Build Chromium (the "chrome" target) with Ninja using the command:
 
 ```shell
-$ ninja -C out\Default chrome
+$ autoninja -C out\Default chrome
 ```
+
+`autoninja` is a wrapper that automatically provides optimal values for the
+arguments passed to `ninja`.
 
 You can get a list of all of the other build targets from GN by running
 `gn ls out/Default` from the command line. To compile one, pass to Ninja

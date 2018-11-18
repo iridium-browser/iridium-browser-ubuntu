@@ -9,6 +9,7 @@
 #include "base/trace_event/memory_dump_provider.h"
 #include "base/trace_event/process_memory_dump.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/persistent.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/web_process_memory_dump.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/wtf/allocator.h"
@@ -21,7 +22,7 @@ class PLATFORM_EXPORT MemoryCacheDumpClient : public GarbageCollectedMixin {
   virtual bool OnMemoryDump(WebMemoryDumpLevelOfDetail,
                             WebProcessMemoryDump*) = 0;
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 };
 
 // This class is wrapper around MemoryCache to take memory snapshots. It dumps

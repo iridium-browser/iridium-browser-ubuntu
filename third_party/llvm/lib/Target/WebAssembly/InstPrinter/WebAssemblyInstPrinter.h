@@ -8,7 +8,7 @@
 //===----------------------------------------------------------------------===//
 ///
 /// \file
-/// \brief This class prints an WebAssembly MCInst to wasm file syntax.
+/// This class prints an WebAssembly MCInst to wasm file syntax.
 ///
 //===----------------------------------------------------------------------===//
 
@@ -50,8 +50,7 @@ public:
 
 namespace WebAssembly {
 
-const char *TypeToString(MVT Ty);
-const char *TypeToString(wasm::ValType Type);
+const char *TypeToString(wasm::ValType Ty);
 
 } // end namespace WebAssembly
 

@@ -11,23 +11,28 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/arc/arc_browser_context_keyed_service_factory_base.h"
+#include "components/arc/arc_util.h"
 #include "components/arc/ime/arc_ime_bridge_impl.h"
 #include "components/exo/shell_surface.h"
-#include "components/exo/surface.h"
 #include "components/exo/wm_helper.h"
 #include "ui/aura/env.h"
 #include "ui/aura/window.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/base/ime/input_method.h"
+#include "ui/base/ui_base_features.h"
 #include "ui/events/base_event_utils.h"
 #include "ui/events/event.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/gfx/range/range.h"
+#include "ui/keyboard/keyboard_controller.h"
+#include "ui/views/widget/widget.h"
+#include "ui/views/window/non_client_view.h"
 
 namespace arc {
 
 namespace {
 
+// TODO(yhanada): Remove this once IsArcAppWindow is fixed for ARC++ Kiosk app.
 constexpr char kArcAppIdPrefix[] = "org.chromium.arc";
 
 base::Optional<double> g_override_default_device_scale_factor;
@@ -47,31 +52,33 @@ class ArcWindowDelegateImpl : public ArcImeService::ArcWindowDelegate {
 
   ~ArcWindowDelegateImpl() override = default;
 
-  bool IsExoWindow(const aura::Window* window) const override {
-    return exo::Surface::AsSurface(window) ||
-           exo::ShellSurface::GetMainSurface(window);
-  }
-
-  bool IsArcWindow(const aura::Window* window) const override {
-    if (!IsExoWindow(window))
-      return false;
-
+  bool IsInArcAppWindow(const aura::Window* window) const override {
     aura::Window* active = exo::WMHelper::GetInstance()->GetActiveWindow();
-    if (!active || !active->Contains(window))
-      return false;
+    for (; window; window = window->parent()) {
+      if (IsArcAppWindow(window))
+        return true;
 
-    if (IsArcNotificationWindow(window, active))
-      return true;
-
-    // Need to get an application id from the active window because only
-    // ShellSurface window has the application id.
-    const std::string* app_id = exo::ShellSurface::GetApplicationId(active);
-    return app_id && base::StartsWith(*app_id, kArcAppIdPrefix,
-                                      base::CompareCase::SENSITIVE);
+      // IsArcAppWindow returns false for a window of ARC++ Kiosk app, so we
+      // have to check application id of the active window to cover that case.
+      // TODO(yhanada): Make IsArcAppWindow support a window of ARC++ Kiosk.
+      // Specifically, a window of ARC++ Kiosk should have ash::AppType::ARC_APP
+      // property. Please see implementation of IsArcAppWindow().
+      if (window == active) {
+        const std::string* app_id = exo::ShellSurface::GetApplicationId(window);
+        if (IsArcKioskMode() && app_id &&
+            base::StartsWith(*app_id, kArcAppIdPrefix,
+                             base::CompareCase::SENSITIVE)) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   void RegisterFocusObserver() override {
-    DCHECK(exo::WMHelper::HasInstance());
+    // WMHelper is not created in tests.
+    if (!exo::WMHelper::HasInstance())
+      return;
     exo::WMHelper::GetInstance()->AddFocusObserver(ime_service_);
   }
 
@@ -91,20 +98,6 @@ class ArcWindowDelegateImpl : public ArcImeService::ArcWindowDelegate {
   }
 
  private:
-  bool IsArcNotificationWindow(const aura::Window* window,
-                               const aura::Window* active) const {
-    DCHECK(IsExoWindow(window));
-    // TODO(yhanada): Should set an application id for NotificationSurface
-    //                to kArcAppIdPrefix, then we can eliminate this method.
-    //                https://crbug.com/834027
-    for (const aura::Window* parent = window; parent != active;
-         parent = parent->parent()) {
-      if (parent->GetName() == "ExoNotificationSurface")
-        return true;
-    }
-    return false;
-  }
-
   ArcImeService* const ime_service_;
 
   DISALLOW_COPY_AND_ASSIGN(ArcWindowDelegateImpl);
@@ -145,12 +138,11 @@ ArcImeService::ArcImeService(content::BrowserContext* context,
     : ime_bridge_(new ArcImeBridgeImpl(this, bridge_service)),
       arc_window_delegate_(new ArcWindowDelegateImpl(this)),
       ime_type_(ui::TEXT_INPUT_TYPE_NONE),
-      has_composition_text_(false),
-      keyboard_controller_(nullptr),
-      is_focus_observer_installed_(false) {
-  aura::Env* env = aura::Env::GetInstanceDontCreate();
-  if (env)
-    env->AddObserver(this);
+      is_personalized_learning_allowed_(false),
+      has_composition_text_(false) {
+  if (aura::Env::HasInstance())
+    aura::Env::GetInstance()->AddObserver(this);
+  arc_window_delegate_->RegisterFocusObserver();
 }
 
 ArcImeService::~ArcImeService() {
@@ -160,16 +152,17 @@ ArcImeService::~ArcImeService() {
 
   if (focused_arc_window_)
     focused_arc_window_->RemoveObserver(this);
-  if (is_focus_observer_installed_)
-    arc_window_delegate_->UnregisterFocusObserver();
-  aura::Env* env = aura::Env::GetInstanceDontCreate();
-  if (env)
-    env->RemoveObserver(this);
-  // Removing |this| from KeyboardController.
-  keyboard::KeyboardController* keyboard_controller =
-      keyboard::KeyboardController::GetInstance();
-  if (keyboard_controller && keyboard_controller_ == keyboard_controller) {
-    keyboard_controller_->RemoveObserver(this);
+  arc_window_delegate_->UnregisterFocusObserver();
+  if (aura::Env::HasInstance())
+    aura::Env::GetInstance()->RemoveObserver(this);
+
+  // KeyboardController is destroyed before ArcImeService (except in tests),
+  // so check whether there is a KeyboardController first before removing |this|
+  // from KeyboardController observers.
+  if (keyboard::KeyboardController::HasInstance()) {
+    auto* keyboard_controller = keyboard::KeyboardController::Get();
+    if (keyboard_controller->HasObserver(this))
+      keyboard_controller->RemoveObserver(this);
   }
 }
 
@@ -206,20 +199,15 @@ void ArcImeService::ReattachInputMethod(aura::Window* old_window,
 // Overridden from aura::EnvObserver:
 
 void ArcImeService::OnWindowInitialized(aura::Window* new_window) {
-  // Register the focus observer when every exo window is created because an
-  // application id might not be set here yet.
-  if (arc_window_delegate_->IsExoWindow(new_window)) {
-    if (!is_focus_observer_installed_) {
-      arc_window_delegate_->RegisterFocusObserver();
-      is_focus_observer_installed_ = true;
+  // TODO(mash): Support virtual keyboard under MASH. There is no
+  // KeyboardController in the browser process under MASH.
+  if (!features::IsUsingWindowService() &&
+      keyboard::KeyboardController::HasInstance()) {
+    auto* keyboard_controller = keyboard::KeyboardController::Get();
+    if (keyboard_controller->IsEnabled() &&
+        !keyboard_controller->HasObserver(this)) {
+      keyboard_controller->AddObserver(this);
     }
-  }
-  keyboard::KeyboardController* keyboard_controller =
-      keyboard::KeyboardController::GetInstance();
-  if (keyboard_controller && keyboard_controller_ != keyboard_controller) {
-    // Registering |this| as an observer only once per KeyboardController.
-    keyboard_controller_ = keyboard_controller;
-    keyboard_controller_->AddObserver(this);
   }
 }
 
@@ -250,8 +238,7 @@ void ArcImeService::OnWindowFocused(aura::Window* gained_focus,
     return;
 
   const bool detach = (lost_focus && focused_arc_window_ == lost_focus);
-  const bool attach =
-      (gained_focus && arc_window_delegate_->IsArcWindow(gained_focus));
+  const bool attach = arc_window_delegate_->IsInArcAppWindow(gained_focus);
 
   if (detach) {
     focused_arc_window_->RemoveObserver(this);
@@ -269,10 +256,15 @@ void ArcImeService::OnWindowFocused(aura::Window* gained_focus,
 ////////////////////////////////////////////////////////////////////////////////
 // Overridden from arc::ArcImeBridge::Delegate
 
-void ArcImeService::OnTextInputTypeChanged(ui::TextInputType type) {
-  if (ime_type_ == type)
+void ArcImeService::OnTextInputTypeChanged(
+    ui::TextInputType type,
+    bool is_personalized_learning_allowed) {
+  if (ime_type_ == type &&
+      is_personalized_learning_allowed_ == is_personalized_learning_allowed) {
     return;
+  }
   ime_type_ = type;
+  is_personalized_learning_allowed_ = is_personalized_learning_allowed;
 
   ui::InputMethod* const input_method = GetInputMethod();
   if (input_method)
@@ -297,10 +289,10 @@ void ArcImeService::OnCancelComposition() {
     input_method->CancelComposition(this);
 }
 
-void ArcImeService::ShowImeIfNeeded() {
+void ArcImeService::ShowVirtualKeyboardIfEnabled() {
   ui::InputMethod* const input_method = GetInputMethod();
   if (input_method && input_method->GetTextInputClient() == this) {
-    input_method->ShowImeIfNeeded();
+    input_method->ShowVirtualKeyboardIfEnabled();
   }
 }
 
@@ -322,6 +314,22 @@ void ArcImeService::OnCursorRectChangedWithSurroundingText(
     input_method->OnCaretBoundsChanged(this);
 }
 
+void ArcImeService::RequestHideIme() {
+  // Ignore the request when the ARC app is not focused.
+  ui::InputMethod* const input_method = GetInputMethod();
+  if (!input_method || input_method->GetTextInputClient() != nullptr)
+    return;
+
+  // TODO(mash): Support virtual keyboard under MASH. There is no
+  // KeyboardController in the browser process under MASH.
+  if (!features::IsUsingWindowService() &&
+      keyboard::KeyboardController::HasInstance()) {
+    auto* keyboard_controller = keyboard::KeyboardController::Get();
+    if (keyboard_controller->IsEnabled())
+      keyboard_controller->HideKeyboardImplicitlyBySystem();
+  }
+}
+
 ////////////////////////////////////////////////////////////////////////////////
 // Overridden from keyboard::KeyboardControllerObserver
 void ArcImeService::OnKeyboardAppearanceChanged(
@@ -339,8 +347,7 @@ void ArcImeService::OnKeyboardAppearanceChanged(
   gfx::Rect bounds_in_px =
       gfx::ScaleToEnclosingRect(new_bounds, GetDefaultDeviceScaleFactor());
 
-  ime_bridge_->SendOnKeyboardAppearanceChanging(bounds_in_px,
-                                                state.is_available);
+  ime_bridge_->SendOnKeyboardAppearanceChanging(bounds_in_px, state.is_visible);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -478,6 +485,13 @@ bool ArcImeService::HasCompositionText() const {
   return has_composition_text_;
 }
 
+ui::TextInputClient::FocusReason ArcImeService::GetFocusReason() const {
+  // TODO(https://crbug.com/824604): Determine how the current input client got
+  // focused.
+  NOTIMPLEMENTED_LOG_ONCE();
+  return ui::TextInputClient::FOCUS_REASON_OTHER;
+}
+
 bool ArcImeService::GetCompositionTextRange(gfx::Range* range) const {
   return false;
 }
@@ -500,10 +514,14 @@ bool ArcImeService::IsTextEditCommandEnabled(
   return false;
 }
 
-const std::string& ArcImeService::GetClientSourceInfo() const {
+ukm::SourceId ArcImeService::GetClientSourceForMetrics() const {
   // TODO(yhanada): Implement this method. crbug.com/752657
   NOTIMPLEMENTED_LOG_ONCE();
-  return base::EmptyString();
+  return ukm::SourceId();
+}
+
+bool ArcImeService::ShouldDoLearning() {
+  return is_personalized_learning_allowed_;
 }
 
 // static
@@ -535,6 +553,20 @@ bool ArcImeService::UpdateCursorRect(const gfx::Rect& rect,
     converted.Offset(focused_arc_window_->GetToplevelWindow()
                          ->GetBoundsInScreen()
                          .OffsetFromOrigin());
+  } else if (focused_arc_window_) {
+    auto* window = focused_arc_window_->GetToplevelWindow();
+    auto* widget = views::Widget::GetWidgetForNativeWindow(window);
+    // Check fullscreen window as well because it's possible for ARC to request
+    // frame regardless of window state.
+    bool covers_display =
+        widget && (widget->IsMaximized() || widget->IsFullscreen());
+    if (covers_display) {
+      auto* frame_view = widget->non_client_view()->frame_view();
+      // The frame height will be subtracted from client bounds.
+      gfx::Rect bounds =
+          frame_view->GetWindowBoundsForClientBounds(gfx::Rect());
+      converted.Offset(0, -bounds.y());
+    }
   }
 
   if (cursor_rect_ == converted)

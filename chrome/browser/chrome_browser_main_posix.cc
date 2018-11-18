@@ -16,10 +16,12 @@
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/macros.h"
+#include "base/task/post_task.h"
 #include "build/build_config.h"
 #include "chrome/app/shutdown_signal_handlers_posix.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/browser/sessions/session_restore.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/result_codes.h"
 
@@ -87,8 +89,8 @@ void ExitHandler::OnSessionRestoreDone(int /* num_tabs */) {
     // At this point the message loop may not be running (meaning we haven't
     // gotten through browser startup, but are close). Post the task to at which
     // point the message loop is running.
-    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                            base::BindOnce(&ExitHandler::Exit));
+    base::PostTaskWithTraits(FROM_HERE, {BrowserThread::UI},
+                             base::BindOnce(&ExitHandler::Exit));
     delete this;
   }
 }
@@ -108,13 +110,16 @@ void ExitHandler::Exit() {
 // ChromeBrowserMainPartsPosix -------------------------------------------------
 
 ChromeBrowserMainPartsPosix::ChromeBrowserMainPartsPosix(
-    const content::MainFunctionParams& parameters)
-    : ChromeBrowserMainParts(parameters) {
-}
+    const content::MainFunctionParams& parameters,
+    std::unique_ptr<ui::DataPack> data_pack,
+    ChromeFeatureListCreator* chrome_feature_list_creator)
+    : ChromeBrowserMainParts(parameters,
+                             std::move(data_pack),
+                             chrome_feature_list_creator) {}
 
 int ChromeBrowserMainPartsPosix::PreEarlyInitialization() {
   const int result = ChromeBrowserMainParts::PreEarlyInitialization();
-  if (result != content::RESULT_CODE_NORMAL_EXIT)
+  if (result != service_manager::RESULT_CODE_NORMAL_EXIT)
     return result;
 
   // We need to accept SIGCHLD, even though our handler is a no-op because
@@ -124,7 +129,7 @@ int ChromeBrowserMainPartsPosix::PreEarlyInitialization() {
   action.sa_handler = SIGCHLDHandler;
   CHECK(sigaction(SIGCHLD, &action, NULL) == 0);
 
-  return content::RESULT_CODE_NORMAL_EXIT;
+  return service_manager::RESULT_CODE_NORMAL_EXIT;
 }
 
 void ChromeBrowserMainPartsPosix::PostMainMessageLoopStart() {
@@ -133,7 +138,7 @@ void ChromeBrowserMainPartsPosix::PostMainMessageLoopStart() {
   // Exit in response to SIGINT, SIGTERM, etc.
   InstallShutdownSignalHandlers(
       base::Bind(&ExitHandler::ExitWhenPossibleOnUIThread),
-      BrowserThread::GetTaskRunnerForThread(BrowserThread::UI));
+      base::CreateSingleThreadTaskRunnerWithTraits({BrowserThread::UI}));
 }
 
 void ChromeBrowserMainPartsPosix::ShowMissingLocaleMessageBox() {

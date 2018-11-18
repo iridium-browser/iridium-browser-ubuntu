@@ -19,9 +19,10 @@ class CHROMEOS_EXPORT ConciergeClient : public DBusClient {
  public:
   class Observer {
    public:
-    // OnContainerStarted is signaled by Concierge after the long-running
-    // container startup process has been completed and the container is ready.
-    virtual void OnContainerStarted(
+    // OnContainerStartupFailed is signaled by Concierge after the long-running
+    // container startup process's failure is detected. Note the signal protocol
+    // buffer type is the same as in OnContainerStarted.
+    virtual void OnContainerStartupFailed(
         const vm_tools::concierge::ContainerStartedSignal& signal) = 0;
 
    protected:
@@ -34,15 +35,29 @@ class CHROMEOS_EXPORT ConciergeClient : public DBusClient {
   // Removes an observer if added.
   virtual void RemoveObserver(Observer* observer) = 0;
 
-  // IsContainerStartedSignalConnected must return true before StartContainer
-  // is called.
-  virtual bool IsContainerStartedSignalConnected() = 0;
+  // IsContainerStartupFailedSignalConnected must return true before
+  // StartContainer is called.
+  virtual bool IsContainerStartupFailedSignalConnected() = 0;
 
   // Creates a disk image for the Termina VM.
   // |callback| is called after the method call finishes.
   virtual void CreateDiskImage(
       const vm_tools::concierge::CreateDiskImageRequest& request,
       DBusMethodCallback<vm_tools::concierge::CreateDiskImageResponse>
+          callback) = 0;
+
+  // Destroys a Termina VM and removes its disk image.
+  // |callback| is called after the method call finishes.
+  virtual void DestroyDiskImage(
+      const vm_tools::concierge::DestroyDiskImageRequest& request,
+      DBusMethodCallback<vm_tools::concierge::DestroyDiskImageResponse>
+          callback) = 0;
+
+  // Lists the Termina VMs.
+  // |callback| is called after the method call finishes.
+  virtual void ListVmDisks(
+      const vm_tools::concierge::ListVmDisksRequest& request,
+      DBusMethodCallback<vm_tools::concierge::ListVmDisksResponse>
           callback) = 0;
 
   // Starts a Termina VM if there is not alread one running.
@@ -57,21 +72,6 @@ class CHROMEOS_EXPORT ConciergeClient : public DBusClient {
       const vm_tools::concierge::StopVmRequest& request,
       DBusMethodCallback<vm_tools::concierge::StopVmResponse> callback) = 0;
 
-  // Starts a Container inside an existing Termina VM.
-  // |callback| is called after the method call finishes.
-  virtual void StartContainer(
-      const vm_tools::concierge::StartContainerRequest& request,
-      DBusMethodCallback<vm_tools::concierge::StartContainerResponse>
-          callback) = 0;
-
-  // Launches an application inside a running Container.
-  // |callback| is called after the method call finishes.
-  virtual void LaunchContainerApplication(
-      const vm_tools::concierge::LaunchContainerApplicationRequest& request,
-      DBusMethodCallback<
-          vm_tools::concierge::LaunchContainerApplicationResponse>
-          callback) = 0;
-
   // Registers |callback| to run when the Concierge service becomes available.
   // If the service is already available, or if connecting to the name-owner-
   // changed signal fails, |callback| will be run once asynchronously.
@@ -79,6 +79,14 @@ class CHROMEOS_EXPORT ConciergeClient : public DBusClient {
   // becomes available.
   virtual void WaitForServiceToBeAvailable(
       dbus::ObjectProxy::WaitForServiceToBeAvailableCallback callback) = 0;
+
+  // Gets SSH server public key of container and trusted SSH client private key
+  // which can be used to connect to the container.
+  // |callback| is called after the method call finishes.
+  virtual void GetContainerSshKeys(
+      const vm_tools::concierge::ContainerSshKeysRequest& request,
+      DBusMethodCallback<vm_tools::concierge::ContainerSshKeysResponse>
+          callback) = 0;
 
   // Creates an instance of ConciergeClient.
   static ConciergeClient* Create();

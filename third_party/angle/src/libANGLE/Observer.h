@@ -13,7 +13,7 @@
 #ifndef LIBANGLE_OBSERVER_H_
 #define LIBANGLE_OBSERVER_H_
 
-#include "common/FixedVector.h"
+#include "common/FastVector.h"
 #include "common/angleutils.h"
 
 namespace gl
@@ -30,7 +30,10 @@ enum class SubjectMessage
 {
     CONTENTS_CHANGED,
     STORAGE_CHANGED,
+    BINDING_CHANGED,
     DEPENDENT_DIRTY_BITS,
+    RESOURCE_MAPPED,
+    RESOURCE_UNMAPPED,
 };
 
 // The observing class inherits from this interface class.
@@ -65,8 +68,7 @@ class Subject : NonCopyable
     // Keep a short list of observers so we can allocate/free them quickly. But since we support
     // unlimited bindings, have a spill-over list of that uses dynamic allocation.
     static constexpr size_t kMaxFixedObservers = 8;
-    angle::FixedVector<ObserverBinding *, kMaxFixedObservers> mFastObservers;
-    std::vector<ObserverBinding *> mSlowObservers;
+    angle::FastVector<ObserverBinding *, kMaxFixedObservers> mObservers;
 };
 
 // Keeps a binding between a Subject and Observer, with a specific subject index.
@@ -79,7 +81,9 @@ class ObserverBinding final
     ObserverBinding &operator=(const ObserverBinding &other);
 
     void bind(Subject *subject);
-    void reset();
+
+    ANGLE_INLINE void reset() { bind(nullptr); }
+
     void onStateChange(const gl::Context *context, SubjectMessage message) const;
     void onSubjectReset();
 

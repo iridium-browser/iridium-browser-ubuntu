@@ -23,7 +23,7 @@ base::FilePath MasterPrefsPath() {
 #ifndef ANDROID
   master_prefs = base::FilePath("/etc/iridium-browser");
 #else
-  if (!PathService::Get(base::DIR_EXE, &master_prefs))
+  if (!base::PathService::Get(base::DIR_EXE, &master_prefs))
     return base::FilePath();
 #endif
   return master_prefs.AppendASCII(installer::kDefaultMasterPrefs);

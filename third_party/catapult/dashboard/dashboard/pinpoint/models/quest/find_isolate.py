@@ -2,6 +2,9 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import logging
+import time
+
 from dashboard.pinpoint.models import isolate
 from dashboard.pinpoint.models.quest import execution
 from dashboard.pinpoint.models.quest import quest
@@ -65,12 +68,32 @@ class _FindIsolateExecution(execution.Execution):
     self._previous_builds = previous_builds
 
     self._build = None
+    self._build_url = None
 
   def _AsDict(self):
-    return {
-        'build': self._build,
-        'builder': self._builder_name,
-    }
+    details = []
+    details.append({
+        'key': 'builder',
+        'value': self._builder_name,
+    })
+    if self._build:
+      details.append({
+          'key': 'build',
+          'value': self._build,
+          'url': self._build_url if hasattr(self, '_build_url') else None,
+      })
+    if self._result_arguments:
+      if not self._result_arguments.get('isolate_server'):
+        # TODO: Remove after data migration. crbug.com/822008
+        self._result_arguments['isolate_server'] = (
+            'https://isolateserver.appspot.com')
+      details.append({
+          'key': 'isolate',
+          'value': self._result_arguments['isolate_hash'],
+          'url': self._result_arguments['isolate_server'] + '/browse?digest=' +
+                 self._result_arguments['isolate_hash'],
+      })
+    return details
 
   def _Poll(self):
     if self._CheckCompleted():
@@ -89,10 +112,16 @@ class _FindIsolateExecution(execution.Execution):
       True iff the isolate was found, meaning the execution is completed.
     """
     try:
-      isolate_hash = isolate.Get(self._builder_name, self._change, self._target)
+      isolate_server, isolate_hash = isolate.Get(
+          self._builder_name, self._change, self._target)
     except KeyError:
       return False
-    self._Complete(result_arguments={'isolate_hash': isolate_hash})
+
+    result_arguments = {
+        'isolate_server': isolate_server,
+        'isolate_hash': isolate_hash,
+    }
+    self._Complete(result_arguments=result_arguments)
     return True
 
   def _CheckBuildStatus(self):
@@ -101,19 +130,36 @@ class _FindIsolateExecution(execution.Execution):
     Raises:
       BuildError: The build failed, was canceled, or didn't produce an isolate.
     """
-    status = buildbucket_service.GetJobStatus(self._build)
+    build = buildbucket_service.GetJobStatus(self._build)['build']
 
-    if status['build']['status'] != 'COMPLETED':
+    self._build_url = build.get('url')
+
+    if build['status'] != 'COMPLETED':
       return
 
-    if status['build']['result'] == 'FAILURE':
-      raise BuildError('Build failed: ' + status['build']['failure_reason'])
-    elif status['build']['result'] == 'CANCELED':
-      raise BuildError('Build was canceled: ' +
-                       status['build']['cancelation_reason'])
+    if build['result'] == 'FAILURE':
+      raise BuildError('Build failed: ' + build['failure_reason'])
+    elif build['result'] == 'CANCELED':
+      raise BuildError('Build was canceled: ' + build['cancelation_reason'])
     else:
       if self._CheckCompleted():
         return
+      logging.debug('Debugging info for chromium:882573')
+      try:
+        logging.debug(isolate.Get(
+            self._builder_name, self._change, self._target))
+      except KeyError:
+        logging.debug('Isolate not found.')
+      logging.debug(build)
+      logging.debug(self._builder_name)
+      logging.debug(self._change.id_string)
+      logging.debug(self._target)
+      time.sleep(1)
+      try:
+        logging.debug(isolate.Get(
+            self._builder_name, self._change, self._target))
+      except KeyError:
+        logging.debug('Isolate not found.')
       raise IsolateNotFoundError(
           'Buildbucket says the build completed successfully, '
           "but Pinpoint can't find the isolate hash.")

@@ -4,7 +4,6 @@
 
 #include "crazy_linker_wrappers.h"
 
-#include <dlfcn.h>
 #include <link.h>
 
 #include "crazy_linker_debug.h"
@@ -12,6 +11,7 @@
 #include "crazy_linker_library_list.h"
 #include "crazy_linker_library_view.h"
 #include "crazy_linker_shared_library.h"
+#include "crazy_linker_system_linker.h"
 #include "crazy_linker_thread.h"
 #include "crazy_linker_util.h"
 
@@ -38,7 +38,7 @@ namespace crazy {
 
 namespace {
 
-#ifndef UNIT_TESTS
+#ifndef UNIT_TEST
 // LLVM's demangler is large, and we have no need of it.  Overriding it with
 // our own stub version here stops a lot of code being pulled in from libc++.
 // This reduces the on-disk footprint of the crazy linker library by more than
@@ -56,7 +56,7 @@ extern "C" char* __cxa_demangle(const char* mangled_name,
     *status = kMemoryAllocFailure;
   return NULL;
 }
-#endif  // UNIT_TESTS
+#endif  // UNIT_TEST
 
 #ifdef __arm__
 extern "C" int __cxa_atexit(void (*)(void*), void*, void*);
@@ -75,7 +75,7 @@ int __aeabi_atexit(void* object, void (*destructor)(void*), void* dso_handle) {
 // Used to save the system dlerror() into our thread-specific data.
 void SaveSystemError() {
   ThreadData* data = GetThreadData();
-  data->SetError(::dlerror());
+  data->SetError(SystemLinker::Error());
 }
 
 char* WrapDlerror() {
@@ -96,8 +96,7 @@ void* WrapDlopen(const char* path, int mode) {
   if (path) {
     Error error;
     LibraryView* wrap = globals->libraries()->LoadLibrary(
-        path, mode, 0U /* load_address */, 0U /* file_offset */,
-        globals->search_path_list(), false, &error);
+        path, 0U /* load_address */, globals->search_path_list(), &error);
     if (wrap) {
       globals->valid_handles()->Add(wrap);
       return wrap;
@@ -105,15 +104,13 @@ void* WrapDlopen(const char* path, int mode) {
   }
 
   // Try to load the executable with the system dlopen() instead.
-  ::dlerror();
-  void* system_lib = ::dlopen(path, mode);
+  void* system_lib = SystemLinker::Open(path, mode);
   if (system_lib == NULL) {
     SaveSystemError();
-    return NULL;
+    return nullptr;
   }
 
-  LibraryView* wrap_lib = new LibraryView();
-  wrap_lib->SetSystem(system_lib, path ? path : "<executable>");
+  auto* wrap_lib = new LibraryView(system_lib, path ? path : "<executable>");
   globals->libraries()->AddLibrary(wrap_lib);
   globals->valid_handles()->Add(wrap_lib);
   return wrap_lib;
@@ -148,28 +145,25 @@ void* WrapDlsym(void* lib_handle, const char* symbol_name) {
   if (!globals->valid_handles()->Has(lib_handle)) {
     // Note: the handle was not opened with the crazy linker, so fall back
     // to the system linker. That can happen in rare cases.
-    void* result = ::dlsym(lib_handle, symbol_name);
-    if (!result) {
+    SystemLinker::SearchResult sym =
+        SystemLinker::Resolve(lib_handle, symbol_name);
+    if (!sym.IsValid()) {
       SaveSystemError();
-      LOG("dlsym: could not find symbol '%s' from foreign library\n",
-          symbol_name, GetThreadData()->GetError());
+      LOG("Could not find symbol '%s' from foreign library [%s]", symbol_name,
+          GetThreadData()->GetError());
     }
-    return result;
+    return sym.address;
   }
 
   auto* wrap_lib = reinterpret_cast<LibraryView*>(lib_handle);
   if (wrap_lib->IsSystem()) {
-    // Note: the system dlsym() only looks into the target library,
-    // while the GNU linker performs a breadth-first search.
-    void* result = ::dlsym(wrap_lib->GetSystem(), symbol_name);
-    if (!result) {
+    LibraryView::SearchResult sym = wrap_lib->LookupSymbol(symbol_name);
+    if (!sym.IsValid()) {
       SaveSystemError();
-      LOG("dlsym:%s: could not find symbol '%s' from system library\n%s",
-          wrap_lib->GetName(),
-          symbol_name,
-          GetThreadData()->GetError());
+      LOG("Could not find symbol '%s' from system library %s [%s]", symbol_name,
+          wrap_lib->GetName(), GetThreadData()->GetError());
     }
-    return result;
+    return sym.address;
   }
 
   if (wrap_lib->IsCrazy()) {
@@ -209,8 +203,7 @@ int WrapDladdr(void* address, Dl_info* info) {
     }
   }
   // Otherwise, use system version.
-  ::dlerror();
-  int ret = ::dladdr(address, info);
+  int ret = SystemLinker::AddressInfo(address, info);
   if (ret != 0)
     SaveSystemError();
   return ret;
@@ -226,9 +219,9 @@ int WrapDlclose(void* lib_handle) {
   if (!globals->valid_handles()->Remove(lib_handle)) {
     // This is a foreign handle that was not created by the crazy linker.
     // Fall-back to the system in this case.
-    if (::dlclose(lib_handle) != 0) {
+    if (SystemLinker::Close(lib_handle) != 0) {
       SaveSystemError();
-      LOG("dlclose: could not close foreign library handle %p\n%s", lib_handle,
+      LOG("Could not close foreign library handle %p\n%s", lib_handle,
           GetThreadData()->GetError());
       return -1;
     }
@@ -287,16 +280,16 @@ void* GetDlCloseWrapperAddressForTesting() {
 // the address of a heap-allocated array of pointers, which must be explicitly
 // free()-ed by the caller. This returns nullptr is the array is empty.
 // On exit, sets |*p_count| to the number of items in the array.
-void** GetValidDlopenHandlesForTesting(size_t* p_count) {
+const void** GetValidDlopenHandlesForTesting(size_t* p_count) {
   ScopedLockedGlobals globals;
-  const Vector<void*>& handles =
+  const Vector<const void*>& handles =
       globals->valid_handles()->GetValuesForTesting();
   *p_count = handles.GetCount();
   if (handles.IsEmpty())
     return nullptr;
 
-  auto* ptr =
-      reinterpret_cast<void**>(malloc(handles.GetCount() * sizeof(void*)));
+  auto* ptr = reinterpret_cast<const void**>(
+      malloc(handles.GetCount() * sizeof(void*)));
   for (size_t n = 0; n < handles.GetCount(); ++n) {
     ptr[n] = handles[n];
   }

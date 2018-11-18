@@ -5,7 +5,6 @@
 package org.chromium.chrome.browser.compositor.scene_layer;
 
 import android.content.Context;
-import android.graphics.Color;
 import android.graphics.RectF;
 
 import org.chromium.base.annotations.JNINamespace;
@@ -22,7 +21,6 @@ import org.chromium.chrome.browser.fullscreen.ChromeFullscreenManager;
 import org.chromium.chrome.browser.ntp.NewTabPage;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.util.ColorUtils;
-import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.chrome.browser.widget.ClipDrawableProgressBar.DrawingInfo;
 import org.chromium.chrome.browser.widget.ControlContainer;
 import org.chromium.ui.base.DeviceFormFactor;
@@ -76,8 +74,8 @@ public class ToolbarSceneLayer extends SceneOverlayLayer implements SceneOverlay
      */
     private void update(int browserControlsBackgroundColor, float browserControlsUrlBarAlpha,
             ChromeFullscreenManager fullscreenManager, ResourceManager resourceManager,
-            boolean forceHideAndroidBrowserControls, ViewportMode viewportMode, boolean isTablet,
-            float windowHeight) {
+            boolean forceHideAndroidBrowserControls, @ViewportMode int viewportMode,
+            boolean isTablet, float windowHeight) {
         if (!DeviceClassManager.enableFullscreen()) return;
 
         if (fullscreenManager == null) return;
@@ -95,11 +93,7 @@ public class ToolbarSceneLayer extends SceneOverlayLayer implements SceneOverlay
         boolean showShadow = fullscreenManager.drawControlsAsTexture()
                 || forceHideAndroidBrowserControls;
 
-        int textBoxColor = Color.WHITE;
-        int textBoxResourceId = R.drawable.card_single;
-
         boolean isLocationBarShownInNtp = false;
-        boolean useModern = false;
         Tab currentTab = fullscreenManager.getTab();
         if (currentTab != null) {
             boolean isNtp =
@@ -108,20 +102,16 @@ public class ToolbarSceneLayer extends SceneOverlayLayer implements SceneOverlay
                 isLocationBarShownInNtp =
                         ((NewTabPage) currentTab.getNativePage()).isLocationBarShownInNTP();
             }
-            useModern = currentTab.getActivity().supportsModernDesign()
-                    && FeatureUtilities.isChromeModernDesignEnabled();
         }
 
-        if (useModern) {
-            textBoxColor = ColorUtils.getTextBoxColorForToolbarBackground(mContext.getResources(),
-                    isLocationBarShownInNtp, browserControlsBackgroundColor, true);
-            textBoxResourceId = R.drawable.modern_location_bar;
-        }
+        int textBoxColor = ColorUtils.getTextBoxColorForToolbarBackground(
+                mContext.getResources(), isLocationBarShownInNtp, browserControlsBackgroundColor);
+        int textBoxResourceId = R.drawable.modern_location_bar;
 
         nativeUpdateToolbarLayer(mNativePtr, resourceManager, R.id.control_container,
                 browserControlsBackgroundColor, textBoxResourceId, browserControlsUrlBarAlpha,
                 textBoxColor, fullscreenManager.getTopControlOffset(), windowHeight, useTexture,
-                showShadow, useModern);
+                showShadow);
 
         if (mProgressBarDrawingInfo == null) return;
         nativeUpdateProgressBar(mNativePtr, mProgressBarDrawingInfo.progressBarRect.left,
@@ -165,12 +155,12 @@ public class ToolbarSceneLayer extends SceneOverlayLayer implements SceneOverlay
             LayerTitleCache layerTitleCache, ResourceManager resourceManager, float yOffset) {
         boolean forceHideBrowserControlsAndroidView =
                 mLayoutProvider.getActiveLayout().forceHideBrowserControlsAndroidView();
-        ViewportMode viewportMode = mLayoutProvider.getActiveLayout().getViewportMode();
+        @ViewportMode
+        int viewportMode = mLayoutProvider.getActiveLayout().getViewportMode();
 
         // In Chrome modern design, the url bar is always opaque since it is drawn in the
         // compositor.
-        float alpha = mRenderHost.getBrowserControlsUrlBarAlpha();
-        if (FeatureUtilities.isChromeModernDesignEnabled()) alpha = 1;
+        float alpha = 1;
 
         update(mRenderHost.getBrowserControlsBackgroundColor(), alpha,
                 mLayoutProvider.getFullscreenManager(), resourceManager,
@@ -192,11 +182,7 @@ public class ToolbarSceneLayer extends SceneOverlayLayer implements SceneOverlay
 
     @Override
     public void onSizeChanged(
-            float width, float height, float visibleViewportOffsetY, int orientation) {
-        // If Chrome Home is enabled, a size change means the toolbar is now in a different
-        // location so a render is needed.
-        if (FeatureUtilities.isChromeHomeEnabled()) mRenderHost.requestRender();
-    }
+            float width, float height, float visibleViewportOffsetY, int orientation) {}
 
     @Override
     public void getVirtualViews(List<VirtualView> views) {}
@@ -234,49 +220,16 @@ public class ToolbarSceneLayer extends SceneOverlayLayer implements SceneOverlay
     public void tabModelSwitched(boolean incognito) {}
 
     @Override
-    public void tabSelected(long time, boolean incognito, int id, int prevId) {}
-
-    @Override
-    public void tabMoved(long time, boolean incognito, int id, int oldIndex, int newIndex) {}
-
-    @Override
-    public void tabClosed(long time, boolean incognito, int id) {}
-
-    @Override
-    public void tabClosureCancelled(long time, boolean incognito, int id) {}
-
-    @Override
     public void tabCreated(long time, boolean incognito, int id, int prevId, boolean selected) {}
-
-    @Override
-    public void tabPageLoadStarted(int id, boolean incognito) {}
-
-    @Override
-    public void tabPageLoadFinished(int id, boolean incognito) {}
-
-    @Override
-    public void tabLoadStarted(int id, boolean incognito) {}
-
-    @Override
-    public void tabLoadFinished(int id, boolean incognito) {}
 
     private native long nativeInit();
     private native void nativeSetContentTree(
             long nativeToolbarSceneLayer,
             SceneLayer contentTree);
-    private native void nativeUpdateToolbarLayer(
-            long nativeToolbarSceneLayer,
-            ResourceManager resourceManager,
-            int resourceId,
-            int toolbarBackgroundColor,
-            int urlBarResourceId,
-            float urlBarAlpha,
-            int urlBarColor,
-            float topOffset,
-            float viewHeight,
-            boolean visible,
-            boolean showShadow,
-            boolean browserControlsAtBottom);
+    private native void nativeUpdateToolbarLayer(long nativeToolbarSceneLayer,
+            ResourceManager resourceManager, int resourceId, int toolbarBackgroundColor,
+            int urlBarResourceId, float urlBarAlpha, int urlBarColor, float topOffset,
+            float viewHeight, boolean visible, boolean showShadow);
     private native void nativeUpdateProgressBar(
             long nativeToolbarSceneLayer,
             int progressBarX,

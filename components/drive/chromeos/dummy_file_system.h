@@ -6,6 +6,8 @@
 #define COMPONENTS_DRIVE_CHROMEOS_DUMMY_FILE_SYSTEM_H_
 
 #include <stdint.h>
+#include <set>
+#include <string>
 
 #include "components/drive/chromeos/file_system_interface.h"
 
@@ -14,10 +16,11 @@ namespace drive {
 // Dummy implementation of FileSystemInterface. All functions do nothing.
 class DummyFileSystem : public FileSystemInterface {
  public:
-  ~DummyFileSystem() override {}
+  ~DummyFileSystem() override = default;
   void AddObserver(FileSystemObserver* observer) override {}
   void RemoveObserver(FileSystemObserver* observer) override {}
   void CheckForUpdates() override {}
+  void CheckForUpdates(const std::set<std::string>& ids) override {}
   void TransferFileFromLocalToRemote(
       const base::FilePath& local_src_file_path,
       const base::FilePath& remote_dest_file_path,
@@ -25,7 +28,7 @@ class DummyFileSystem : public FileSystemInterface {
   void OpenFile(const base::FilePath& file_path,
                 OpenMode open_mode,
                 const std::string& mime_type,
-                const OpenFileCallback& callback) override {}
+                OpenFileCallback callback) override {}
   void Copy(const base::FilePath& src_file_path,
             const base::FilePath& dest_file_path,
             bool preserve_last_modified,
@@ -56,42 +59,39 @@ class DummyFileSystem : public FileSystemInterface {
   void Unpin(const base::FilePath& file_path,
              const FileOperationCallback& callback) override {}
   void GetFile(const base::FilePath& file_path,
-               const GetFileCallback& callback) override {}
+               GetFileCallback callback) override {}
   void GetFileForSaving(const base::FilePath& file_path,
-                        const GetFileCallback& callback) override {}
+                        GetFileCallback callback) override {}
   base::Closure GetFileContent(
       const base::FilePath& file_path,
-      const GetFileContentInitializedCallback& initialized_callback,
+      GetFileContentInitializedCallback initialized_callback,
       const google_apis::GetContentCallback& get_content_callback,
       const FileOperationCallback& completion_callback) override;
   void GetResourceEntry(const base::FilePath& file_path,
-                        const GetResourceEntryCallback& callback) override {}
+                        GetResourceEntryCallback callback) override {}
   void ReadDirectory(
       const base::FilePath& file_path,
-      const ReadDirectoryEntriesCallback& entries_callback,
+      ReadDirectoryEntriesCallback entries_callback,
       const FileOperationCallback& completion_callback) override {}
   void Search(const std::string& search_query,
               const GURL& next_link,
-              const SearchCallback& callback) override {}
+              SearchCallback callback) override {}
   void SearchMetadata(const std::string& query,
                       int options,
                       int at_most_num_matches,
                       MetadataSearchOrder order,
-                      const SearchMetadataCallback& callback) override {}
+                      SearchMetadataCallback callback) override {}
   void SearchByHashes(const std::set<std::string>& hashes,
-                      const SearchByHashesCallback& callback) override {}
-  void GetAvailableSpace(const GetAvailableSpaceCallback& callback) override {}
-  void GetShareUrl(const base::FilePath& file_path,
-                   const GURL& embed_origin,
-                   const GetShareUrlCallback& callback) override {}
-  void GetMetadata(const GetFilesystemMetadataCallback& callback) override {}
+                      SearchByHashesCallback callback) override {}
+  void GetAvailableSpace(GetAvailableSpaceCallback callback) override {}
+  void GetMetadata(GetFilesystemMetadataCallback callback) override {}
   void MarkCacheFileAsMounted(const base::FilePath& drive_file_path,
-                              const MarkMountedCallback& callback) override {}
+                              MarkMountedCallback callback) override {}
   void MarkCacheFileAsUnmounted(
       const base::FilePath& cache_file_path,
       const FileOperationCallback& callback) override {}
   void IsCacheFileMarkedAsMounted(const base::FilePath& drive_file_path,
-                                  const IsMountedCallback& callback) override {}
+                                  IsMountedCallback callback) override {}
   void AddPermission(const base::FilePath& drive_file_path,
                      const std::string& email,
                      google_apis::drive::PermissionRole role,

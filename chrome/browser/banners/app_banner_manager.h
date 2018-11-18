@@ -19,8 +19,8 @@
 #include "chrome/browser/installable/installable_metrics.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "mojo/public/cpp/bindings/binding.h"
+#include "third_party/blink/public/common/manifest/web_display_mode.h"
 #include "third_party/blink/public/platform/modules/app_banner/app_banner.mojom.h"
-#include "third_party/blink/public/platform/web_display_mode.h"
 
 class InstallableManager;
 class SkBitmap;
@@ -157,6 +157,7 @@ class AppBannerManager : public content::WebContentsObserver,
   // InstallableAmbientBadgeInfoBarDelegate::Client overrides. Further
   // overridden on Android.
   void AddToHomescreenFromBadge() override {}
+  void BadgeDismissed() override {}
 
  protected:
   explicit AppBannerManager(content::WebContents* web_contents);
@@ -203,7 +204,7 @@ class AppBannerManager : public content::WebContentsObserver,
 
   // Callback invoked by the InstallableManager once it has fetched the page's
   // manifest.
-  void OnDidGetManifest(const InstallableData& result);
+  virtual void OnDidGetManifest(const InstallableData& result);
 
   // Returns an InstallableParams object that requests all checks necessary for
   // a web app banner.
@@ -281,7 +282,7 @@ class AppBannerManager : public content::WebContentsObserver,
   GURL manifest_url_;
 
   // The manifest object.
-  content::Manifest manifest_;
+  blink::Manifest manifest_;
 
   // The URL of the primary icon.
   GURL primary_icon_url_;
@@ -325,7 +326,7 @@ class AppBannerManager : public content::WebContentsObserver,
   // blink::mojom::AppBannerService overrides.
   // Called when Blink has prevented a banner from being shown, and is now
   // requesting that it be shown later.
-  void DisplayAppBanner(bool user_gesture) override;
+  void DisplayAppBanner() override;
 
   // Returns an InstallableStatusCode indicating whether a banner should be
   // shown.

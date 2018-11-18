@@ -31,9 +31,18 @@ class URLLoaderFactoryGetter
   CONTENT_EXPORT URLLoaderFactoryGetter();
 
   // Initializes this object on the UI thread. The |partition| is used to
-  // initialize the URLLoaderFactories for the network service and AppCache, and
-  // will be cached to recover from connection error.
+  // initialize the URLLoaderFactories for the network service, AppCache, and
+  // ServiceWorkers, and will be cached to recover from connection error.
+  // After Initialize(), you can get URLLoaderFactories from this
+  // getter. However, any messages on it will be queued until
+  // HandleFactoryRequests() is called.
   void Initialize(StoragePartitionImpl* partition);
+
+  // Called on the UI thread to actually instantiate factories whose pointers
+  // are to be exposed by this getter.  This must be called after NetworkContext
+  // is initialized.
+  // TODO(shimazu): Remove this once NetworkService is shipped.
+  void HandleFactoryRequests();
 
   // Clear the cached pointer to |StoragePartitionImpl| on the UI thread. Should
   // be called when the partition is going away.
@@ -51,15 +60,18 @@ class URLLoaderFactoryGetter
   CONTENT_EXPORT std::unique_ptr<network::SharedURLLoaderFactoryInfo>
   GetNetworkFactoryInfo();
 
-  // Called on the IO thread. Will clone the internal factory to the network
-  // service which doesn't support auto-reconnect after crash. Useful for
-  // one-off requests (e.g. A single navigation) to avoid additional mojo hop.
+  // Called on the IO thread. The factory obtained from here can only be used
+  // from the browser process. It must NOT be sent to a renderer process.
+  //
+  // When NetworkService is enabled, this clones the internal factory to the
+  // network service, which doesn't support auto-reconnect after crash. Useful
+  // for one-off requests (e.g. a single navigation) to avoid an additional Mojo
+  // hop.
+  //
+  // When NetworkService is disabled, this clones the non-NetworkService direct
+  // network factory.
   CONTENT_EXPORT void CloneNetworkFactory(
       network::mojom::URLLoaderFactoryRequest network_factory_request);
-
-  // Called on the IO thread to get the URLLoaderFactory to the blob service.
-  // The pointer shouldn't be cached.
-  CONTENT_EXPORT network::mojom::URLLoaderFactory* GetBlobFactory();
 
   // Overrides the network URLLoaderFactory for subsequent requests. Passing a
   // null pointer will restore the default behavior.
@@ -92,8 +104,11 @@ class URLLoaderFactoryGetter
 
   CONTENT_EXPORT ~URLLoaderFactoryGetter();
   void InitializeOnIOThread(
-      network::mojom::URLLoaderFactoryPtrInfo network_factory,
-      network::mojom::URLLoaderFactoryPtrInfo blob_factory);
+      network::mojom::URLLoaderFactoryPtrInfo network_factory);
+
+  // Moves |network_factory| to |network_factory_| and sets up an error handler.
+  void ReinitializeOnIOThread(
+      network::mojom::URLLoaderFactoryPtr network_factory);
 
   // Send |network_factory_request| to cached |StoragePartitionImpl|.
   void HandleNetworkFactoryRequestOnUIThread(
@@ -103,12 +118,15 @@ class URLLoaderFactoryGetter
   // The pointer shouldn't be cached.
   network::mojom::URLLoaderFactory* GetURLLoaderFactory();
 
-  // Call |network_factory_.FlushForTesting()|. For test use only.
-  void FlushNetworkInterfaceForTesting();
+  // Call |network_factory_.FlushForTesting()|. For test use only. When the
+  // flush is complete, |callback| will be called.
+  void FlushNetworkInterfaceForTesting(base::OnceClosure callback);
+
+  // Bound with appropriate URLLoaderFactories at HandleFactoryRequests().
+  network::mojom::URLLoaderFactoryRequest pending_network_factory_request_;
 
   // Only accessed on IO thread.
   network::mojom::URLLoaderFactoryPtr network_factory_;
-  network::mojom::URLLoaderFactoryPtr blob_factory_;
   network::mojom::URLLoaderFactory* test_factory_ = nullptr;
 
   // Used to re-create |network_factory_| when connection error happens. Can

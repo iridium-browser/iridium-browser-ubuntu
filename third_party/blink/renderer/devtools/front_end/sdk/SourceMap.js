@@ -136,18 +136,6 @@ SDK.SourceMap.prototype = {
    * @return {?SDK.SourceMapEntry}
    */
   findEntry(lineNumber, columnNumber) {},
-
-  /**
-   * @return {boolean}
-   */
-  editable() {},
-
-  /**
-   * @param {!Array<!TextUtils.TextRange>} ranges
-   * @param {!Array<string>} texts
-   * @return {!Promise<?SDK.SourceMap.EditResult>}
-   */
-  editCompiled(ranges, texts) {},
 };
 
 /**
@@ -164,20 +152,6 @@ SDK.SourceMap.EditResult = class {
     this.compiledEdits = compiledEdits;
     this.newSources = newSources;
   }
-};
-
-/**
- * @interface
- */
-SDK.SourceMapFactory = function() {};
-
-SDK.SourceMapFactory.prototype = {
-  /**
-   * @param {!SDK.Target} target
-   * @param {!SDK.SourceMap} sourceMap
-   * @return {!Promise<?SDK.SourceMap>}
-   */
-  editableSourceMap(target, sourceMap) {},
 };
 
 /**
@@ -298,24 +272,6 @@ SDK.TextSourceMap = class {
 
   /**
    * @override
-   * @return {boolean}
-   */
-  editable() {
-    return false;
-  }
-
-  /**
-   * @override
-   * @param {!Array<!TextUtils.TextRange>} ranges
-   * @param {!Array<string>} texts
-   * @return {!Promise<?SDK.SourceMap.EditResult>}
-   */
-  editCompiled(ranges, texts) {
-    return Promise.resolve(/** @type {?SDK.SourceMap.EditResult} */ (null));
-  }
-
-  /**
-   * @override
    * @param {number} lineNumber in compiled resource
    * @param {number} columnNumber in compiled resource
    * @return {?SDK.SourceMapEntry}
@@ -340,11 +296,11 @@ SDK.TextSourceMap = class {
     if (first >= mappings.length || mappings[first].sourceLineNumber !== lineNumber)
       return null;
     const columnMappings = mappings.slice(first, last);
+    if (!columnMappings.length)
+      return null;
     const index =
         columnMappings.lowerBound(columnNumber, (columnNumber, mapping) => columnNumber - mapping.sourceColumnNumber);
-    if (index >= columnMappings.length)
-      return null;
-    return columnMappings[index];
+    return index >= columnMappings.length ? columnMappings[columnMappings.length - 1] : columnMappings[index];
 
     /**
      * @param {number} lineNumber

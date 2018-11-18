@@ -7,11 +7,10 @@
 
 #include "third_party/blink/renderer/core/frame/local_frame_client.h"
 #include "third_party/blink/renderer/core/testing/core_unit_test_helper.h"
-#include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
 
 namespace blink {
 
-// The NGLayoutTest is intended to let all NGFooTest classes easiy inherit
+// The NGLayoutTest is intended to let all NGFooTest classes easily inherit
 // ScopedLayoutNGForTest as well as RenderingTest. The ScopedLayoutNGForTest
 // ensures original settings are restored for other tests.
 // See http://crbug.com/769541 for more details.

@@ -58,6 +58,14 @@ class FakeRendererPpapiHost : public content::RendererPpapiHost {
       const base::SharedMemoryHandle& handle) override {
     return base::SharedMemoryHandle();
   }
+  base::UnsafeSharedMemoryRegion ShareUnsafeSharedMemoryRegionWithRemote(
+      const base::UnsafeSharedMemoryRegion& region) override {
+    return base::UnsafeSharedMemoryRegion();
+  }
+  base::ReadOnlySharedMemoryRegion ShareReadOnlySharedMemoryRegionWithRemote(
+      const base::ReadOnlySharedMemoryRegion& region) override {
+    return base::ReadOnlySharedMemoryRegion();
+  }
   bool IsRunningInProcess() const override { return false; }
   std::string GetPluginName() const override { return std::string(); }
   void SetToExternalPluginHost() override {}
@@ -83,7 +91,7 @@ class PdfAccessibilityTreeTest : public content::RenderViewTest {
     content::RenderViewTest::SetUp();
 
     base::FilePath pak_dir;
-    PathService::Get(base::DIR_MODULE, &pak_dir);
+    base::PathService::Get(base::DIR_MODULE, &pak_dir);
     base::FilePath pak_file =
         pak_dir.Append(FILE_PATH_LITERAL("components_tests_resources.pak"));
     ui::ResourceBundle::GetSharedInstance().AddDataPackFromPath(
@@ -92,6 +100,10 @@ class PdfAccessibilityTreeTest : public content::RenderViewTest {
     viewport_info_.zoom = 1.0;
     viewport_info_.scroll = {0, 0};
     viewport_info_.offset = {0, 0};
+    viewport_info_.selection_start_page_index = 0;
+    viewport_info_.selection_start_char_index = 0;
+    viewport_info_.selection_end_page_index = 0;
+    viewport_info_.selection_end_char_index = 0;
     doc_info_.page_count = 1;
     page_info_.page_index = 0;
     page_info_.text_run_count = 0;
@@ -139,9 +151,7 @@ TEST_F(PdfAccessibilityTreeTest, TestAccessibilityDisabledDuringPDFLoad) {
 
   // Disable accessibility while the PDF is loading, make sure this
   // doesn't crash.
-  blink::WebView* web_view = render_frame->GetRenderView()->GetWebView();
-  blink::WebSettings* settings = web_view->GetSettings();
-  settings->SetAccessibilityEnabled(false);
+  render_frame->SetAccessibilityModeForTest(ui::AXMode());
 
   pdf_accessibility_tree.SetAccessibilityPageInfo(page_info_, text_runs_,
                                                   chars_);

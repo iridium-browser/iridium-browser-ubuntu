@@ -39,18 +39,18 @@ class _CommonSystemHealthBenchmark(perf_benchmark.PerfBenchmark):
     cat_filter = chrome_trace_category_filter.ChromeTraceCategoryFilter(
         filter_string='rail,toplevel')
     cat_filter.AddIncludedCategory('accessibility')
+    # Needed for the console error metric.
+    cat_filter.AddIncludedCategory('v8.console')
 
     options = timeline_based_measurement.Options(cat_filter)
-    options.config.enable_battor_trace = True
     options.config.enable_chrome_trace = True
     options.config.enable_cpu_trace = True
     options.SetTimelineBasedMetrics([
-        'clockSyncLatencyMetric',
-        'cpuTimeMetric',
-        'powerMetric',
-        'tracingMetric',
         'accessibilityMetric',
-        'limitedCpuTimeMetric'
+        'consoleErrorMetric',
+        'cpuTimeMetric',
+        'limitedCpuTimeMetric',
+        'tracingMetric'
     ])
     loading_metrics_category.AugmentOptionsForLoadingMetrics(options)
     # The EQT metric depends on the same categories as the loading metric.
@@ -61,7 +61,11 @@ class _CommonSystemHealthBenchmark(perf_benchmark.PerfBenchmark):
     return page_sets.SystemHealthStorySet(platform=self.PLATFORM)
 
 
-@benchmark.Owner(emails=['charliea@chromium.org', 'nednguyen@chromium.org'])
+@benchmark.Info(emails=['charliea@chromium.org', 'sullivan@chromium.org',
+                        'tdresser@chromium.org',
+                        'chrome-speed-metrics-dev@chromium.org'],
+                component='Speed>Metrics>SystemHealthRegressions',
+                documentation_url='https://bit.ly/system-health-benchmarks')
 class DesktopCommonSystemHealth(_CommonSystemHealthBenchmark):
   """Desktop Chrome Energy System Health Benchmark."""
   PLATFORM = 'desktop'
@@ -72,8 +76,11 @@ class DesktopCommonSystemHealth(_CommonSystemHealthBenchmark):
     return 'system_health.common_desktop'
 
 
-@benchmark.Owner(emails=['charliea@chromium.org', 'nednguyen@chromium.org',
-                         'perezju@chromium.org'])
+@benchmark.Info(emails=['charliea@chromium.org', 'sullivan@chromium.org',
+                        'tdresser@chromium.org', 'perezju@chromium.org',
+                        'chrome-speed-metrics-dev@chromium.org'],
+                component='Speed>Metrics>SystemHealthRegressions',
+                documentation_url='https://bit.ly/system-health-benchmarks')
 class MobileCommonSystemHealth(_CommonSystemHealthBenchmark):
   """Mobile Chrome Energy System Health Benchmark."""
   PLATFORM = 'mobile'
@@ -95,11 +102,16 @@ class _MemorySystemHealthBenchmark(perf_benchmark.PerfBenchmark):
   options = {'pageset_repeat': 3}
 
   def CreateCoreTimelineBasedMeasurementOptions(self):
-    options = timeline_based_measurement.Options(
-        chrome_trace_category_filter.ChromeTraceCategoryFilter(
-            '-*,disabled-by-default-memory-infra'))
+    cat_filter = chrome_trace_category_filter.ChromeTraceCategoryFilter(
+        filter_string='-*,disabled-by-default-memory-infra')
+    # Needed for the console error metric.
+    cat_filter.AddIncludedCategory('v8.console')
+    options = timeline_based_measurement.Options(cat_filter)
     options.config.enable_android_graphics_memtrack = True
-    options.SetTimelineBasedMetrics(['memoryMetric'])
+    options.SetTimelineBasedMetrics([
+      'consoleErrorMetric',
+      'memoryMetric'
+    ])
     # Setting an empty memory dump config disables periodic dumps.
     options.config.chrome_trace_config.SetMemoryDumpConfig(
         chrome_trace_config.MemoryDumpConfig())
@@ -117,7 +129,8 @@ class _MemorySystemHealthBenchmark(perf_benchmark.PerfBenchmark):
     return not _IGNORED_STATS_RE.search(name)
 
 
-@benchmark.Owner(emails=['perezju@chromium.org'])
+@benchmark.Info(emails=['perezju@chromium.org'],
+                documentation_url='https://bit.ly/system-health-benchmarks')
 class DesktopMemorySystemHealth(_MemorySystemHealthBenchmark):
   """Desktop Chrome Memory System Health Benchmark."""
   PLATFORM = 'desktop'
@@ -127,16 +140,9 @@ class DesktopMemorySystemHealth(_MemorySystemHealthBenchmark):
   def Name(cls):
     return 'system_health.memory_desktop'
 
-  def SetExtraBrowserOptions(self, options):
-    super(DesktopMemorySystemHealth, self).SetExtraBrowserOptions(
-          options)
-    # Heap profiling is disabled because of crbug.com/757847.
-    #options.AppendExtraBrowserArgs([
-    #  '--enable-heap-profiling=native',
-    #])
 
-
-@benchmark.Owner(emails=['perezju@chromium.org'])
+@benchmark.Info(emails=['perezju@chromium.org'],
+                documentation_url='https://bit.ly/system-health-benchmarks')
 class MobileMemorySystemHealth(_MemorySystemHealthBenchmark):
   """Mobile Chrome Memory System Health Benchmark."""
   PLATFORM = 'mobile'
@@ -156,7 +162,9 @@ class MobileMemorySystemHealth(_MemorySystemHealthBenchmark):
     return 'system_health.memory_mobile'
 
 
-@benchmark.Owner(emails=['perezju@chromium.org', 'torne@chromium.org'])
+@benchmark.Info(emails=['perezju@chromium.org', 'torne@chromium.org',
+                         'changwan@chromium.org'],
+                 component='Mobile>WebView>Perf')
 class WebviewStartupSystemHealthBenchmark(perf_benchmark.PerfBenchmark):
   """Webview startup time benchmark
 

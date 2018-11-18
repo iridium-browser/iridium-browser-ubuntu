@@ -41,6 +41,9 @@ class CORE_EXPORT HTMLScriptElement final : public HTMLElement,
  public:
   static HTMLScriptElement* Create(Document&, const CreateElementFlags);
 
+  // Returns attributes that should be checked against Trusted Types
+  const HashSet<AtomicString>& GetCheckedAttributeNames() const override;
+
   String text() { return TextFromChildren(); }
   void setText(const String&);
 
@@ -54,14 +57,13 @@ class CORE_EXPORT HTMLScriptElement final : public HTMLElement,
   bool IsScriptElement() const override { return true; }
   Document& GetDocument() const override;
 
-  virtual void Trace(blink::Visitor*);
-  void TraceWrappers(const ScriptWrappableVisitor*) const;
+  void Trace(blink::Visitor*) override;
 
  private:
   HTMLScriptElement(Document&, const CreateElementFlags);
 
   void ParseAttribute(const AttributeModificationParams&) override;
-  InsertionNotificationRequest InsertedInto(ContainerNode*) override;
+  InsertionNotificationRequest InsertedInto(ContainerNode&) override;
   void DidNotifySubtreeInsertionsToDocument() override;
   void ChildrenChanged(const ChildrenChange&) override;
   void DidMoveToNewDocument(Document& old_document) override;
@@ -80,6 +82,7 @@ class CORE_EXPORT HTMLScriptElement final : public HTMLElement,
   String EventAttributeValue() const override;
   String CrossOriginAttributeValue() const override;
   String IntegrityAttributeValue() const override;
+  String ReferrerPolicyAttributeValue() const override;
   String TextFromChildren() override;
   bool AsyncAttributeValue() const override;
   bool DeferAttributeValue() const override;

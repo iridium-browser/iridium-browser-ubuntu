@@ -10,6 +10,7 @@ service("viz") {
   sources = [
     "main.cc",
   ]
+  configs = [ "//build/config/compiler:wexit_time_destructors" ]
   deps = [
     ":lib",
     "//services/service_manager/public/cpp",
@@ -23,9 +24,10 @@ source_set("lib") {
     "service.h",
   ]
 
+  configs += [ "//build/config/compiler:wexit_time_destructors" ]
+
   deps = [
     "//base",
-    "//cc",
     "//components/viz/service",
     "//components/viz/service/main",
     "//mojo/public/cpp/system",

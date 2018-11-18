@@ -2,10 +2,9 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include <GLES2/gl2.h>
-
 #include "gpu/command_buffer/service/shader_translator.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_version_info.h"
 
 namespace gpu {
@@ -16,7 +15,7 @@ class ShaderTranslatorTest : public testing::Test {
   ShaderTranslatorTest() {
     shader_output_language_ =
         ShaderTranslator::GetShaderOutputLanguageForContext(
-            gl::GLVersionInfo("2.0", "", gl::ExtensionSet()));
+            gl::GLVersionInfo("2.0", "", gfx::ExtensionSet()));
   }
 
   ~ShaderTranslatorTest() override = default;
@@ -41,8 +40,8 @@ class ShaderTranslatorTest : public testing::Test {
                                            false));
   }
   void TearDown() override {
-    vertex_translator_ = NULL;
-    fragment_translator_ = NULL;
+    vertex_translator_ = nullptr;
+    fragment_translator_ = nullptr;
   }
 
   scoped_refptr<ShaderTranslator> vertex_translator_;
@@ -55,7 +54,7 @@ class ES3ShaderTranslatorTest : public testing::Test {
   ES3ShaderTranslatorTest() {
     shader_output_language_ =
         ShaderTranslator::GetShaderOutputLanguageForContext(
-            gl::GLVersionInfo("3.0", "", gl::ExtensionSet()));
+            gl::GLVersionInfo("3.0", "", gfx::ExtensionSet()));
   }
 
   ~ES3ShaderTranslatorTest() override = default;
@@ -80,8 +79,8 @@ class ES3ShaderTranslatorTest : public testing::Test {
                                            false));
   }
   void TearDown() override {
-    vertex_translator_ = NULL;
-    fragment_translator_ = NULL;
+    vertex_translator_ = nullptr;
+    fragment_translator_ = nullptr;
   }
 
   scoped_refptr<ShaderTranslator> vertex_translator_;
@@ -508,7 +507,7 @@ TEST_P(ShaderTranslatorOutputVersionTest, HasCorrectOutputGLSLVersion) {
       "}";
 
   gl::GLVersionInfo output_context_version(testing::get<0>(GetParam()), "",
-                                           gl::ExtensionSet());
+                                           gfx::ExtensionSet());
 
   scoped_refptr<ShaderTranslator> translator = new ShaderTranslator();
   ShBuiltInResources resources;

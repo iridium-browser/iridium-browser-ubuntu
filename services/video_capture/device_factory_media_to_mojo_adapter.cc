@@ -41,7 +41,6 @@ static void TranslateDeviceInfos(
               : media::PIXEL_FORMAT_I420;
       translated_format.frame_size = format.frame_size;
       translated_format.frame_rate = format.frame_rate;
-      translated_format.pixel_storage = media::VideoPixelStorage::CPU;
       if (base::ContainsValue(translated_device_info.supported_formats,
                               translated_format))
         continue;
@@ -78,17 +77,21 @@ DeviceFactoryMediaToMojoAdapter::ActiveDeviceEntry::operator=(
     DeviceFactoryMediaToMojoAdapter::ActiveDeviceEntry&& other) = default;
 
 DeviceFactoryMediaToMojoAdapter::DeviceFactoryMediaToMojoAdapter(
-    std::unique_ptr<service_manager::ServiceContextRef> service_ref,
     std::unique_ptr<media::VideoCaptureSystem> capture_system,
-    const media::VideoCaptureJpegDecoderFactoryCB&
-        jpeg_decoder_factory_callback)
-    : service_ref_(std::move(service_ref)),
-      capture_system_(std::move(capture_system)),
-      jpeg_decoder_factory_callback_(jpeg_decoder_factory_callback),
+    media::MojoJpegDecodeAcceleratorFactoryCB jpeg_decoder_factory_callback,
+    scoped_refptr<base::SequencedTaskRunner> jpeg_decoder_task_runner)
+    : capture_system_(std::move(capture_system)),
+      jpeg_decoder_factory_callback_(std::move(jpeg_decoder_factory_callback)),
+      jpeg_decoder_task_runner_(std::move(jpeg_decoder_task_runner)),
       has_called_get_device_infos_(false),
       weak_factory_(this) {}
 
 DeviceFactoryMediaToMojoAdapter::~DeviceFactoryMediaToMojoAdapter() = default;
+
+void DeviceFactoryMediaToMojoAdapter::SetServiceRef(
+    std::unique_ptr<service_manager::ServiceContextRef> service_ref) {
+  service_ref_ = std::move(service_ref);
+}
 
 void DeviceFactoryMediaToMojoAdapter::GetDeviceInfos(
     GetDeviceInfosCallback callback) {
@@ -129,12 +132,25 @@ void DeviceFactoryMediaToMojoAdapter::CreateDevice(
   capture_system_->GetDeviceInfosAsync(
       base::Bind(&DiscardDeviceInfosAndCallContinuation,
                  base::Passed(&create_and_add_new_device_cb)));
+  has_called_get_device_infos_ = true;
 }
 
-void DeviceFactoryMediaToMojoAdapter::AddVirtualDevice(
+void DeviceFactoryMediaToMojoAdapter::AddSharedMemoryVirtualDevice(
     const media::VideoCaptureDeviceInfo& device_info,
     mojom::ProducerPtr producer,
-    mojom::VirtualDeviceRequest virtual_device_request) {
+    bool send_buffer_handles_to_producer_as_raw_file_descriptors,
+    mojom::SharedMemoryVirtualDeviceRequest virtual_device_request) {
+  NOTIMPLEMENTED();
+}
+
+void DeviceFactoryMediaToMojoAdapter::AddTextureVirtualDevice(
+    const media::VideoCaptureDeviceInfo& device_info,
+    mojom::TextureVirtualDeviceRequest virtual_device_request) {
+  NOTIMPLEMENTED();
+}
+
+void DeviceFactoryMediaToMojoAdapter::RegisterVirtualDevicesChangedObserver(
+    mojom::DevicesChangedObserverPtr observer) {
   NOTIMPLEMENTED();
 }
 
@@ -142,6 +158,7 @@ void DeviceFactoryMediaToMojoAdapter::CreateAndAddNewDevice(
     const std::string& device_id,
     mojom::DeviceRequest device_request,
     CreateDeviceCallback callback) {
+  DCHECK(service_ref_);
   std::unique_ptr<media::VideoCaptureDevice> media_device =
       capture_system_->CreateDevice(device_id);
   if (media_device == nullptr) {
@@ -154,7 +171,7 @@ void DeviceFactoryMediaToMojoAdapter::CreateAndAddNewDevice(
   ActiveDeviceEntry device_entry;
   device_entry.device = std::make_unique<DeviceMediaToMojoAdapter>(
       service_ref_->Clone(), std::move(media_device),
-      jpeg_decoder_factory_callback_);
+      jpeg_decoder_factory_callback_, jpeg_decoder_task_runner_);
   device_entry.binding = std::make_unique<mojo::Binding<mojom::Device>>(
       device_entry.device.get(), std::move(device_request));
   device_entry.binding->set_connection_error_handler(base::Bind(

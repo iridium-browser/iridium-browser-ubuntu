@@ -1,27 +1,14 @@
 #Topic Point
-#Alias Points
-#Alias Point_Reference
-
-#Subtopic Overview
-    #Subtopic Subtopic
-    #Populate
-    ##
-##
+#Alias Points ##
+#Alias Point_Reference ##
 
 #Struct SkPoint
 
-SkPoint holds two 32 bit floating point coordinates.
-
-#Subtopic Related_Function
+#Code
 #Populate
 ##
 
-#Subtopic Member_Function
-#Populate
-##
-
-#Subtopic Member
-#Populate
+SkPoint holds two 32-bit floating point coordinates.
 
 #Member SkScalar  fX
 #Line # x-axis value ##
@@ -35,16 +22,10 @@ y-axis value used by both Point and Vector. May contain any value, including
 infinities and NaN.
 ##
 
-#Subtopic Member ##
-
 # ------------------------------------------------------------------------------
 
-#Subtopic Constructor
-#Populate
-##
-
 #Method static constexpr SkPoint Make(SkScalar x, SkScalar y)
-#In Constructor
+#In Constructors
 #Line # constructs from SkScalar inputs ##
 Sets fX to x, fY to y. Used both to set Point and Vector.
 
@@ -72,7 +53,6 @@ all equal
 
 #Subtopic Property
 #Line # member values ##
-#Populate
 ##
 
 #Method SkScalar x() const
@@ -142,7 +122,6 @@ pt.isZero() == true
 # ------------------------------------------------------------------------------
 
 #Subtopic Set
-#Populate
 #Line # replaces all values ##
 ##
 
@@ -174,9 +153,9 @@ pt1 == pt2
 #Line # sets to integer input ##
 Sets fX to x and fY to y, promoting integers to SkScalar values.
 
-Assigning a large integer value directly to fX or fY may cause a compiler 
+Assigning a large integer value directly to fX or fY may cause a compiler
 error, triggered by narrowing conversion of int to SkScalar. This safely
-casts x and y to avoid the error. 
+casts x and y to avoid the error.
 
 #Param x  new value for fX ##
 #Param y  new value for fY ##
@@ -199,7 +178,7 @@ Sets fX to p.fX and fY to p.fY, promoting integers to SkScalar values.
 
 Assigning an IPoint containing a large integer value directly to fX or fY may
 cause a compiler error, triggered by narrowing conversion of int to SkScalar.
-This safely casts p.fX and p.fY to avoid the error. 
+This safely casts p.fX and p.fY to avoid the error.
 
 #Param p  IPoint members promoted to SkScalar ##
 
@@ -245,7 +224,7 @@ pt: nan, -nan  abs: nan, nan
 ##
 ##
 
-#SeeAlso set Make negate 
+#SeeAlso set Make negate
 
 #Method ##
 
@@ -253,7 +232,6 @@ pt: nan, -nan  abs: nan, nan
 
 #Subtopic Offset
 #Line # moves sides ##
-#Populate
 ##
 
 #Method static void Offset(SkPoint points[], int count, const SkVector& offset)
@@ -557,13 +535,9 @@ true.
 
 # ------------------------------------------------------------------------------
 
-#Subtopic Operator
-#Populate
-##
-
 #Method void scale(SkScalar scale, SkPoint* dst) const
 #In Offset
-#In Operator
+#In Operators
 #Line # multiplies Point by scale factor ##
 Sets dst to Point times scale. dst may be Point to modify Point in place.
 
@@ -615,7 +589,7 @@ Scales Point in place by scale.
 # ------------------------------------------------------------------------------
 
 #Method void negate()
-#In Operator
+#In Operators
 #Line # reverses the sign of both members ##
 Changes the sign of fX and fY.
 
@@ -674,11 +648,7 @@ pt: nan, -nan  negate: -nan, nan
 #Method void operator+=(const SkVector& v)
 
 #Line # adds Vector to Point ##
-Adds Vector v to Point. Sets Point to:
-#Formula
-(fX + v.fX, fY + v.fY)
-##
-.
+Adds Vector v to Point. Sets Point to: #Formula # (fX + v.fX, fY + v.fY) ##.
 
 #Param v  Vector to add ##
 
@@ -708,11 +678,7 @@ Adds Vector v to Point. Sets Point to:
 #Method void operator-=(const SkVector& v)
 
 #Line # subtracts Vector from Point ##
-Subtracts Vector v from Point. Sets Point to:
-#Formula
-(fX - v.fX, fY - v.fY)
-##
-.
+Subtracts Vector v from Point. Sets Point to: #Formula # (fX - v.fX, fY - v.fY) ##.
 
 #Param v  Vector to subtract ##
 
@@ -775,10 +741,7 @@ Returns Point multiplied by scale.
 #Method SkPoint& operator*=(SkScalar scale)
 
 #Line # multiplies Point by scale factor ##
-Multiplies Point by scale. Sets Point to:
-#Formula
-(fX * scale, fY * scale)
-##
+Multiplies Point by scale. Sets Point to: #Formula # (fX * scale, fY * scale) ##.
 
 #Param scale  Scalar to multiply by ##
 
@@ -835,7 +798,7 @@ pt: nan, -1  finite: false
 # ------------------------------------------------------------------------------
 
 #Method bool equals(SkScalar x, SkScalar y) const
-#In Operator
+#In Operators
 #Line # returns true if Points are equal ##
 Returns true if Point is equivalent to Point constructed from (x, y).
 
@@ -924,11 +887,7 @@ pt: nan, -1  != pt
 #Method SkVector operator-(const SkPoint& a, const SkPoint& b)
 
 #Line # returns Vector between Points ##
-Returns Vector from b to a, computed as
-#Formula
-(a.fX - b.fX, a.fY - b.fY)
-##
-.
+Returns Vector from b to a, computed as #Formula # (a.fX - b.fX, a.fY - b.fY) ##.
 
 Can also be used to subtract Vector from Point, returning Point.
 Can also be used to subtract Vector from Vector, returning Vector.
@@ -964,10 +923,7 @@ Can also be used to subtract Vector from Vector, returning Vector.
 
 #Line # returns Point offset by Vector ##
 Returns Point resulting from Point a offset by Vector b, computed as:
-#Formula
-(a.fX + b.fX, a.fY + b.fY)
-##
-.
+#Formula # (a.fX + b.fX, a.fY + b.fY) ##.
 
 Can also be used to offset Point b by Vector a, returning Point.
 Can also be used to add Vector to Vector, returning Vector.
@@ -1117,7 +1073,7 @@ Returns the Euclidean_Distance between a and b.
 # ------------------------------------------------------------------------------
 
 #Method static SkScalar DotProduct(const SkVector& a, const SkVector& b)
-#In Operator
+#In Operators
 #Line # returns dot product ##
 Returns the dot product of Vector a and Vector b.
 
@@ -1149,7 +1105,7 @@ Returns the dot product of Vector a and Vector b.
 # ------------------------------------------------------------------------------
 
 #Method static SkScalar CrossProduct(const SkVector& a, const SkVector& b)
-#In Operator
+#In Operators
 #Line # returns cross product ##
 Returns the cross product of Vector a and Vector b.
 
@@ -1189,7 +1145,7 @@ to zero. The cross product z-axis component is returned.
 # ------------------------------------------------------------------------------
 
 #Method SkScalar cross(const SkVector& vec) const
-#In Operator
+#In Operators
 #Line # returns cross product ##
 Returns the cross product of Vector and vec.
 
@@ -1228,7 +1184,7 @@ equal to zero. The cross product z-axis component is returned.
 # ------------------------------------------------------------------------------
 
 #Method SkScalar dot(const SkVector& vec) const
-#In Operator
+#In Operators
 #Line # returns dot product ##
 Returns the dot product of Vector and Vector vec.
 
@@ -1258,12 +1214,21 @@ Returns the dot product of Vector and Vector vec.
 
 #Struct SkPoint ##
 
-#Topic Point ##
 
 # ------------------------------------------------------------------------------
 
-#Topic Vector
-    #Alias Vectors
+#Subtopic Vector
+#Line # alias for Point ##
+    #Alias Vector ##
+    #Alias Vectors ##
     #Typedef SkPoint SkVector
+    #Line # alias for Point ##
+    #Code
+    typedef SkPoint SkVector;
+    ##
+    SkVector provides an alternative name for SkPoint. SkVector and SkPoint can
+    be used interchangeably for all purposes.
     #Typedef ##
 ##
+
+#Topic Point ##

@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/node_computed_style.h"
+#include "third_party/blink/renderer/core/frame/local_dom_window.h"
 #include "third_party/blink/renderer/core/input/event_handler.h"
 #include "third_party/blink/renderer/core/input/scroll_manager.h"
 #include "third_party/blink/renderer/core/layout/layout_box.h"
@@ -21,8 +22,12 @@ class ScrollSnapTest : public SimTest {
   // the pointer/finger's location on touch screen.
   void GestureScroll(double x, double y, double delta_x, double delta_y);
   void ScrollBegin(double x, double y, double hint_x, double hint_y);
-  void ScrollUpdate(double x, double y, double delta_x, double delta_y);
-  void ScrollEnd(double x, double y);
+  void ScrollUpdate(double x,
+                    double y,
+                    double delta_x,
+                    double delta_y,
+                    bool is_in_inertial_phase = false);
+  void ScrollEnd(double x, double y, bool is_in_inertial_phase = false);
   void SetInitialScrollOffset(double x, double y);
 };
 
@@ -85,8 +90,7 @@ void ScrollSnapTest::ScrollBegin(double x,
                                  double hint_x,
                                  double hint_y) {
   WebGestureEvent event(WebInputEvent::kGestureScrollBegin,
-                        WebInputEvent::kNoModifiers,
-                        CurrentTimeTicksInSeconds(),
+                        WebInputEvent::kNoModifiers, CurrentTimeTicks(),
                         WebGestureDevice::kWebGestureDeviceTouchscreen);
   event.SetPositionInWidget(WebFloatPoint(x, y));
   event.SetPositionInScreen(WebFloatPoint(x, y));
@@ -100,26 +104,32 @@ void ScrollSnapTest::ScrollBegin(double x,
 void ScrollSnapTest::ScrollUpdate(double x,
                                   double y,
                                   double delta_x,
-                                  double delta_y) {
+                                  double delta_y,
+                                  bool is_in_inertial_phase) {
   WebGestureEvent event(WebInputEvent::kGestureScrollUpdate,
-                        WebInputEvent::kNoModifiers,
-                        CurrentTimeTicksInSeconds(),
+                        WebInputEvent::kNoModifiers, CurrentTimeTicks(),
                         WebGestureDevice::kWebGestureDeviceTouchscreen);
   event.SetPositionInWidget(WebFloatPoint(x, y));
   event.SetPositionInScreen(WebFloatPoint(x, y));
   event.data.scroll_update.delta_x = delta_x;
   event.data.scroll_update.delta_y = delta_y;
+  if (is_in_inertial_phase) {
+    event.data.scroll_update.inertial_phase = WebGestureEvent::kMomentumPhase;
+    event.SetTimeStamp(base::TimeTicks());
+  }
   event.SetFrameScale(1);
   GetDocument().GetFrame()->GetEventHandler().HandleGestureScrollEvent(event);
 }
 
-void ScrollSnapTest::ScrollEnd(double x, double y) {
+void ScrollSnapTest::ScrollEnd(double x, double y, bool is_in_inertial_phase) {
   WebGestureEvent event(WebInputEvent::kGestureScrollEnd,
-                        WebInputEvent::kNoModifiers,
-                        CurrentTimeTicksInSeconds(),
+                        WebInputEvent::kNoModifiers, CurrentTimeTicks(),
                         WebGestureDevice::kWebGestureDeviceTouchscreen);
   event.SetPositionInWidget(WebFloatPoint(x, y));
   event.SetPositionInScreen(WebFloatPoint(x, y));
+  event.data.scroll_end.inertial_phase =
+      is_in_inertial_phase ? WebGestureEvent::kMomentumPhase
+                           : WebGestureEvent::kNonMomentumPhase;
   GetDocument().GetFrame()->GetEventHandler().HandleGestureScrollEvent(event);
 }
 
@@ -162,6 +172,33 @@ TEST_F(ScrollSnapTest, ScrollSnapOnBoth) {
 
   Element* scroller = GetDocument().getElementById("scroller");
   // A scroll gesture that has move in both x and y would snap on both axes.
+  ASSERT_EQ(scroller->scrollLeft(), 200);
+  ASSERT_EQ(scroller->scrollTop(), 200);
+}
+
+TEST_F(ScrollSnapTest, AnimateFlingToArriveAtSnapPoint) {
+  SetUpForDiv();
+  // Vertically align with the area.
+  SetInitialScrollOffset(0, 200);
+  Element* scroller = GetDocument().getElementById("scroller");
+  ASSERT_EQ(scroller->scrollLeft(), 0);
+  ASSERT_EQ(scroller->scrollTop(), 200);
+
+  ScrollBegin(100, 100, -5, 0);
+  // Starts with a non-inertial GSU.
+  ScrollUpdate(100, 100, -5, 0);
+  // Fling with an inertial GSU.
+  ScrollUpdate(95, 100, -5, 0, true);
+  ScrollEnd(90, 100);
+  Compositor().BeginFrame();
+  // Animate halfway through the fling.
+  Compositor().BeginFrame(0.2);
+  ASSERT_GT(scroller->scrollLeft(), 150);
+  ASSERT_LT(scroller->scrollLeft(), 180);
+  ASSERT_EQ(scroller->scrollTop(), 200);
+  // Finish the animation.
+  Compositor().BeginFrame(0.6);
+
   ASSERT_EQ(scroller->scrollLeft(), 200);
   ASSERT_EQ(scroller->scrollTop(), 200);
 }

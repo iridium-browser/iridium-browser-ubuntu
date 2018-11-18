@@ -306,13 +306,13 @@ void V4UpdateProtocolManager::IssueUpdateRequest() {
   DCHECK_CALLED_ON_VALID_SEQUENCE(sequence_checker_);
 
   // If an update request is already pending, record and return silently.
-  if (request_.get()) {
+  if (request_) {
     RecordUpdateResult(V4OperationResult::ALREADY_PENDING_ERROR);
     return;
   }
 
   net::NetworkTrafficAnnotationTag traffic_annotation =
-      net::DefineNetworkTrafficAnnotation("safe_browsing_g4_update", R"(
+      net::DefineNetworkTrafficAnnotation("safe_browsing_v4_update", R"(
         semantics {
           sender: "Safe Browsing"
           description:
@@ -376,7 +376,7 @@ void V4UpdateProtocolManager::OnURLLoaderComplete(
 
   std::string data;
   if (response_body)
-    data = *response_body.get();
+    data = *response_body;
 
   OnURLLoaderCompleteInternal(request_->NetError(), response_code, data);
 }
@@ -405,8 +405,8 @@ void V4UpdateProtocolManager::OnURLLoaderCompleteInternal(
     }
     request_.reset();
 
-    UMA_HISTOGRAM_COUNTS("SafeBrowsing.V4Update.ResponseSizeKB",
-                         data.size() / 1024);
+    UMA_HISTOGRAM_COUNTS_1M("SafeBrowsing.V4Update.ResponseSizeKB",
+                            data.size() / 1024);
 
     // The caller should update its state now, based on parsed_server_response.
     // The callback must call ScheduleNextUpdate() at the end to resume

@@ -18,10 +18,14 @@
 #include "components/viz/common/surfaces/surface_id.h"
 #include "components/viz/host/hit_test/hit_test_query.h"
 #include "components/viz/service/surfaces/surface_hittest_delegate.h"
+#include "content/browser/renderer_host/event_with_latency_info.h"
+#include "content/browser/renderer_host/input/touch_emulator_client.h"
 #include "content/browser/renderer_host/render_widget_host_view_base_observer.h"
 #include "content/browser/renderer_host/render_widget_targeter.h"
 #include "content/common/content_export.h"
+#include "content/public/common/input_event_ack_state.h"
 #include "ui/gfx/geometry/vector2d_conversions.h"
+#include "ui/gfx/transform.h"
 
 struct FrameHostMsg_HittestData_Params;
 
@@ -48,6 +52,8 @@ class RenderWidgetHostImpl;
 class RenderWidgetHostView;
 class RenderWidgetHostViewBase;
 class RenderWidgetTargeter;
+class TouchEmulator;
+class TouchEventAckQueue;
 
 // Class owned by WebContentsImpl for the purpose of directing input events
 // to the correct RenderWidgetHost on pages with multiple RenderWidgetHosts.
@@ -57,7 +63,8 @@ class RenderWidgetTargeter;
 // forwards the event to the owning RWHV of the returned Surface ID.
 class CONTENT_EXPORT RenderWidgetHostInputEventRouter
     : public RenderWidgetHostViewBaseObserver,
-      public RenderWidgetTargeter::Delegate {
+      public RenderWidgetTargeter::Delegate,
+      public TouchEmulatorClient {
  public:
   RenderWidgetHostInputEventRouter();
   ~RenderWidgetHostInputEventRouter() final;
@@ -75,6 +82,9 @@ class CONTENT_EXPORT RenderWidgetHostInputEventRouter
                          blink::WebGestureEvent* event,
                          const ui::LatencyInfo& latency);
   void OnHandledTouchStartOrFirstTouchMove(uint32_t unique_touch_event_id);
+  void ProcessAckedTouchEvent(const TouchEventWithLatencyInfo& event,
+                              InputEventAckState ack_result,
+                              RenderWidgetHostViewBase* view);
   void RouteTouchEvent(RenderWidgetHostViewBase* root_view,
                        blink::WebTouchEvent *event,
                        const ui::LatencyInfo& latency);
@@ -95,6 +105,11 @@ class CONTENT_EXPORT RenderWidgetHostInputEventRouter
 
   void OnHittestData(const FrameHostMsg_HittestData_Params& params);
 
+  TouchEmulator* GetTouchEmulator();
+  // Since GetTouchEmulator will lazily create a touch emulator, the following
+  // accessor allows testing for its existence without causing it to be created.
+  bool has_touch_emulator() const { return touch_emulator_.get(); }
+
   // Returns the RenderWidgetHostImpl inside the |root_view| at |point| where
   // |point| is with respect to |root_view|'s coordinates. If a RWHI is found,
   // the value of |transformed_point| is the coordinate of the point with
@@ -105,8 +120,26 @@ class CONTENT_EXPORT RenderWidgetHostInputEventRouter
       const gfx::PointF& point,
       gfx::PointF* transformed_point);
 
+  // RenderWidgetTargeter::Delegate:
+  RenderWidgetHostViewBase* FindViewFromFrameSinkId(
+      const viz::FrameSinkId& frame_sink_id) const override;
+
+  // Allows a target to claim or release capture of mouse events.
+  void SetMouseCaptureTarget(RenderWidgetHostViewBase* target,
+                             bool captures_dragging);
+  RenderWidgetHostImpl* GetMouseCaptureWidgetForTests() const;
+
   std::vector<RenderWidgetHostView*> GetRenderWidgetHostViewsForTests() const;
   RenderWidgetTargeter* GetRenderWidgetTargeterForTests();
+
+  // TouchEmulatorClient:
+  void ForwardEmulatedGestureEvent(
+      const blink::WebGestureEvent& event) override;
+  void ForwardEmulatedTouchEvent(const blink::WebTouchEvent& event,
+                                 RenderWidgetHostViewBase* target) override;
+  void SetCursor(const WebCursor& cursor) override;
+  void ShowContextMenuAtPoint(const gfx::Point& point,
+                              const ui::MenuSourceType source_type) override;
 
  private:
   struct HittestData {
@@ -133,6 +166,7 @@ class CONTENT_EXPORT RenderWidgetHostInputEventRouter
   struct TargetData {
     RenderWidgetHostViewBase* target;
     gfx::Vector2dF delta;
+    gfx::Transform transform;
 
     TargetData() : target(nullptr) {}
   };
@@ -146,6 +180,7 @@ class CONTENT_EXPORT RenderWidgetHostInputEventRouter
       viz::EventSource source,
       gfx::PointF* transformed_point) const;
 
+  bool IsViewInMap(const RenderWidgetHostViewBase* view) const;
   void RouteTouchscreenGestureEvent(RenderWidgetHostViewBase* root_view,
                                     blink::WebGestureEvent* event,
                                     const ui::LatencyInfo& latency);
@@ -214,7 +249,8 @@ class CONTENT_EXPORT RenderWidgetHostInputEventRouter
                           RenderWidgetHostViewBase* target,
                           const blink::WebTouchEvent& touch_event,
                           const ui::LatencyInfo& latency,
-                          const base::Optional<gfx::PointF>& target_location);
+                          const base::Optional<gfx::PointF>& target_location,
+                          bool is_emulated);
   // Assumes |gesture_event| has coordinates in root view's coordinate space.
   void DispatchTouchscreenGestureEvent(
       RenderWidgetHostViewBase* root_view,
@@ -246,18 +282,21 @@ class CONTENT_EXPORT RenderWidgetHostInputEventRouter
       const blink::WebInputEvent& event,
       const ui::LatencyInfo& latency,
       const base::Optional<gfx::PointF>& target_location) override;
-  RenderWidgetHostViewBase* FindViewFromFrameSinkId(
-      const viz::FrameSinkId& frame_sink_id) const override;
+  // Notify whether the events in the queue are being flushed due to touch ack
+  // timeout, or the flushing has completed.
+  void SetEventsBeingFlushed(bool events_being_flushed) override;
 
   FrameSinkIdOwnerMap owner_map_;
   TargetMap touchscreen_gesture_target_map_;
   TargetData touch_target_;
   TargetData touchscreen_gesture_target_;
+  // The following variable is temporary, for diagnosis of
+  // https://crbug.com/824774.
+  bool touchscreen_gesture_target_in_map_;
   TargetData touchpad_gesture_target_;
   TargetData bubbling_gesture_scroll_target_;
   TargetData first_bubbling_scroll_target_;
-  // Used to target wheel events for the duration of a scroll when wheel scroll
-  // latching is enabled.
+  // Used to target wheel events for the duration of a scroll.
   TargetData wheel_target_;
   // Maintains the same target between mouse down and mouse up.
   TargetData mouse_capture_target_;
@@ -265,6 +304,20 @@ class CONTENT_EXPORT RenderWidgetHostInputEventRouter
   // Tracked for the purpose of generating MouseEnter and MouseLeave events.
   RenderWidgetHostViewBase* last_mouse_move_target_;
   RenderWidgetHostViewBase* last_mouse_move_root_view_;
+
+  // Tracked for the purpose of targeting subsequent fling cancel events.
+  RenderWidgetHostViewBase* last_fling_start_target_ = nullptr;
+
+  // During scroll bubbling we bubble the GFS to the target view so that its
+  // fling controller takes care of flinging. In this case we should also send
+  // the GFC to the bubbling target so that the fling controller currently in
+  // charge of the fling progress could handle the fling cancellelation as well.
+  RenderWidgetHostViewBase* last_fling_start_bubbled_target_ = nullptr;
+
+  // Tracked for the purpose of providing a root_view when dispatching emulated
+  // touch/gesture events.
+  RenderWidgetHostViewBase* last_emulated_event_root_view_;
+  float last_device_scale_factor_;
 
   int active_touches_;
   // Keep track of when we are between GesturePinchBegin and GesturePinchEnd
@@ -277,6 +330,10 @@ class CONTENT_EXPORT RenderWidgetHostInputEventRouter
 
   std::unique_ptr<RenderWidgetTargeter> event_targeter_;
   bool use_viz_hit_test_ = false;
+  bool events_being_flushed_ = false;
+
+  std::unique_ptr<TouchEmulator> touch_emulator_;
+  std::unique_ptr<TouchEventAckQueue> touch_event_ack_queue_;
 
   base::WeakPtrFactory<RenderWidgetHostInputEventRouter> weak_ptr_factory_;
 
@@ -290,6 +347,8 @@ class CONTENT_EXPORT RenderWidgetHostInputEventRouter
                            InputEventRouterGesturePreventDefaultTargetMapTest);
   FRIEND_TEST_ALL_PREFIXES(SitePerProcessHitTestBrowserTest,
                            InputEventRouterTouchpadGestureTargetTest);
+  FRIEND_TEST_ALL_PREFIXES(SitePerProcessHitTestBrowserTest,
+                           TouchpadPinchOverOOPIF);
   FRIEND_TEST_ALL_PREFIXES(SitePerProcessMouseWheelHitTestBrowserTest,
                            InputEventRouterWheelTargetTest);
   FRIEND_TEST_ALL_PREFIXES(SitePerProcessMacBrowserTest,

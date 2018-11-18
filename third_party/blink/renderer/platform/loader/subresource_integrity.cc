@@ -77,7 +77,10 @@ bool SubresourceIntegrity::CheckSubresourceIntegrity(
     const KURL& resource_url,
     const Resource& resource,
     ReportInfo& report_info) {
-  if (!resource.IsSameOriginOrCORSSuccessful()) {
+  // FetchResponseType::kError never arrives because it is a loading error.
+  DCHECK_NE(resource.GetResponse().GetType(),
+            network::mojom::FetchResponseType::kError);
+  if (!resource.GetResponse().IsCORSSameOrigin()) {
     report_info.AddConsoleErrorMessage(
         "Subresource Integrity: The resource '" + resource_url.ElidedString() +
         "' has an integrity attribute, but the resource "
@@ -318,7 +321,7 @@ SubresourceIntegrity::ParseAttributeAlgorithm(const UChar*& begin,
   // The last algorithm prefix is the ed25519 signature algorithm, which should
   // only be enabled if kSignatures is requested. We'll implement this by
   // adjusting the last_prefix index into the array.
-  size_t last_prefix = WTF_ARRAY_LENGTH(kPrefixes);
+  size_t last_prefix = arraysize(kPrefixes);
   if (features != IntegrityFeatures::kSignatures)
     last_prefix--;
 
@@ -332,8 +335,8 @@ SubresourceIntegrity::ParseIntegrityHeaderAlgorithm(
     IntegrityAlgorithm& algorithm) {
   static const AlgorithmPrefixPair kPrefixes[] = {
       {"ed25519", IntegrityAlgorithm::kEd25519}};
-  return ParseAlgorithmPrefix(begin, end, kPrefixes,
-                              WTF_ARRAY_LENGTH(kPrefixes), algorithm);
+  return ParseAlgorithmPrefix(begin, end, kPrefixes, arraysize(kPrefixes),
+                              algorithm);
 }
 
 SubresourceIntegrity::AlgorithmParseResult

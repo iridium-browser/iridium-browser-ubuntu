@@ -25,7 +25,6 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/test/test_browser_dialog.h"
-#include "chrome/browser/ui/webui/extensions/extension_settings_handler.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/extensions/extension_test_util.h"
 #include "chrome/grit/generated_resources.h"
@@ -46,7 +45,8 @@ using extensions::PermissionIDSet;
 using extensions::PermissionMessage;
 using extensions::PermissionMessages;
 
-class ExtensionInstallDialogViewTestBase : public ExtensionBrowserTest {
+class ExtensionInstallDialogViewTestBase
+    : public extensions::ExtensionBrowserTest {
  protected:
   ExtensionInstallDialogViewTestBase();
 
@@ -69,9 +69,9 @@ ExtensionInstallDialogViewTestBase::ExtensionInstallDialogViewTestBase()
     : extension_(nullptr), web_contents_(nullptr) {}
 
 void ExtensionInstallDialogViewTestBase::SetUpOnMainThread() {
-  ExtensionBrowserTest::SetUpOnMainThread();
+  extensions::ExtensionBrowserTest::SetUpOnMainThread();
 
-  extension_ = ExtensionBrowserTest::LoadExtension(test_data_dir_.AppendASCII(
+  extension_ = LoadExtension(test_data_dir_.AppendASCII(
       "install_prompt/permissions_scrollbar_regression"));
 
   web_contents_ = browser()->tab_strip_model()->GetWebContentsAt(0);
@@ -129,8 +129,7 @@ IN_PROC_BROWSER_TEST_F(ScrollbarTest, LongPromptScrollbar) {
   }
   std::unique_ptr<ExtensionInstallPrompt::Prompt> prompt =
       CreatePrompt(ExtensionInstallPrompt::PERMISSIONS_PROMPT);
-  prompt->AddPermissions(permissions,
-                         ExtensionInstallPrompt::REGULAR_PERMISSIONS);
+  prompt->AddPermissions(permissions);
   ASSERT_TRUE(IsScrollbarVisible(std::move(prompt)))
       << "Scrollbar is not visible";
 }
@@ -145,8 +144,7 @@ IN_PROC_BROWSER_TEST_F(ScrollbarTest, ScrollbarRegression) {
                                           PermissionIDSet()));
   std::unique_ptr<ExtensionInstallPrompt::Prompt> prompt =
       CreatePrompt(ExtensionInstallPrompt::PERMISSIONS_PROMPT);
-  prompt->AddPermissions(permissions,
-                         ExtensionInstallPrompt::REGULAR_PERMISSIONS);
+  prompt->AddPermissions(permissions);
   ASSERT_FALSE(IsScrollbarVisible(std::move(prompt))) << "Scrollbar is visible";
 }
 
@@ -178,6 +176,13 @@ class ExtensionInstallDialogViewTest
 
 // Verifies that the delegate is notified when the user selects to accept or
 // cancel the install.
+//
+// Crashes flakily on Mac.  See http://crbug.com/851167
+#if defined(OS_MACOSX)
+#define MAYBE_NotifyDelegate DISABLED_NotifyDelegate
+#else
+#define MAYBE_NotifyDelegate NotifyDelegate
+#endif
 IN_PROC_BROWSER_TEST_F(ExtensionInstallDialogViewTest, NotifyDelegate) {
   {
     // User presses install.
@@ -237,7 +242,7 @@ class ExtensionInstallDialogViewInteractiveBrowserTest
   void ShowUi(const std::string& name) override {
     extensions::ChromeTestExtensionLoader loader(browser()->profile());
     base::FilePath test_data_dir;
-    PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir);
+    base::PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir);
     scoped_refptr<const extensions::Extension> extension = loader.LoadExtension(
         test_data_dir.AppendASCII("extensions/uitest/long_name"));
 
@@ -247,10 +252,7 @@ class ExtensionInstallDialogViewInteractiveBrowserTest
     icon.eraseARGB(255, 128, 255, 128);
 
     auto prompt = std::make_unique<ExtensionInstallPrompt::Prompt>(type_);
-    prompt->AddPermissions(permissions_,
-                           ExtensionInstallPrompt::REGULAR_PERMISSIONS);
-    prompt->AddPermissions(withheld_permissions_,
-                           ExtensionInstallPrompt::WITHHELD_PERMISSIONS);
+    prompt->AddPermissions(permissions_);
     prompt->set_retained_files(retained_files_);
     prompt->set_retained_device_messages(retained_devices_);
 
@@ -274,11 +276,6 @@ class ExtensionInstallDialogViewInteractiveBrowserTest
         PermissionMessage(base::ASCIIToUTF16(permission), PermissionIDSet()));
   }
 
-  void AddWithheldPermission(std::string permission) {
-    withheld_permissions_.push_back(
-        PermissionMessage(base::ASCIIToUTF16(permission), PermissionIDSet()));
-  }
-
   void AddRetainedFile(const base::FilePath& path) {
     retained_files_.push_back(path);
   }
@@ -297,10 +294,9 @@ class ExtensionInstallDialogViewInteractiveBrowserTest
 
  private:
   ExtensionInstallPrompt::PromptType type_ =
-      ExtensionInstallPrompt::INLINE_INSTALL_PROMPT;
+      ExtensionInstallPrompt::INSTALL_PROMPT;
   bool from_webstore_ = false;
   PermissionMessages permissions_;
-  PermissionMessages withheld_permissions_;
   std::vector<base::FilePath> retained_files_;
   std::vector<base::string16> retained_devices_;
 
@@ -334,12 +330,14 @@ IN_PROC_BROWSER_TEST_F(ExtensionInstallDialogViewInteractiveBrowserTest,
 
 IN_PROC_BROWSER_TEST_F(ExtensionInstallDialogViewInteractiveBrowserTest,
                        InvokeUi_FromWebstore) {
+  set_type(ExtensionInstallPrompt::WEBSTORE_WIDGET_PROMPT);
   set_from_webstore();
   ShowAndVerifyUi();
 }
 
 IN_PROC_BROWSER_TEST_F(ExtensionInstallDialogViewInteractiveBrowserTest,
                        InvokeUi_FromWebstoreWithPermission) {
+  set_type(ExtensionInstallPrompt::WEBSTORE_WIDGET_PROMPT);
   set_from_webstore();
   AddPermission("Example permission");
   ShowAndVerifyUi();
@@ -369,12 +367,6 @@ IN_PROC_BROWSER_TEST_F(ExtensionInstallDialogViewInteractiveBrowserTest,
        base::ASCIIToUTF16("Detailed permission 2"),
        base::ASCIIToUTF16("Very very very very very very long detailed "
                           "permission that wraps to a new line")});
-  ShowAndVerifyUi();
-}
-
-IN_PROC_BROWSER_TEST_F(ExtensionInstallDialogViewInteractiveBrowserTest,
-                       InvokeUi_WithheldPermission) {
-  AddWithheldPermission("Example permission");
   ShowAndVerifyUi();
 }
 
@@ -431,7 +423,7 @@ void ExtensionInstallDialogRatingsSectionTest::TestRatingsSectionA11y(
       "Testing with %d ratings, %f average rating. Expected text: '%s'.",
       num_ratings, average_rating, expected_text.c_str()));
   std::unique_ptr<ExtensionInstallPrompt::Prompt> prompt =
-      CreatePrompt(ExtensionInstallPrompt::INLINE_INSTALL_PROMPT);
+      CreatePrompt(ExtensionInstallPrompt::REPAIR_PROMPT);
   prompt->SetWebstoreData("1,234", true, average_rating, num_ratings);
 
   ExtensionInstallDialogView* dialog = new ExtensionInstallDialogView(

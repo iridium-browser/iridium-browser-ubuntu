@@ -12,7 +12,9 @@ from dashboard.common import testing_common
 from dashboard.common import utils
 from dashboard.models import anomaly
 from dashboard.models import graph_data
+from dashboard.models import histogram
 from dashboard.models import sheriff
+from tracing.value.diagnostics import generic_set
 
 # Masters, bots and test names to add to the mock datastore.
 _MOCK_DATA = [
@@ -43,6 +45,8 @@ class MigrateTestNamesTest(testing_common.TestCase):
     self.testapp = webtest.TestApp(app)
     # Make sure puts get split up into multiple calls.
     migrate_test_names._MAX_DATASTORE_PUTS_PER_PUT_MULTI_CALL = 30
+    self.SetCurrentUser('internal@foo.bar')
+    testing_common.SetIsInternalUser('internal@foo.bar', True)
 
   def _AddMockData(self):
     """Adds sample TestMetadata, Row, and Anomaly entities."""
@@ -56,9 +60,17 @@ class MigrateTestNamesTest(testing_common.TestCase):
     for rev in range(15000, 15100, 2):
       graph_data.Row(id=rev, parent=test_container_key, value=(rev * 2)).put()
       if rev % 50 == 0:
+        data = generic_set.GenericSet(['foo_%s' % rev])
+        data = data.AsDict()
         anomaly.Anomaly(
             start_revision=(rev - 2), end_revision=rev,
             median_before_anomaly=100, median_after_anomaly=50,
+            test=test_key).put()
+        histogram.SparseDiagnostic(
+            test=test_key,
+            start_revision=rev - 50, end_revision=rev - 1,
+            data=data).put()
+        histogram.Histogram(
             test=test_key).put()
 
   def _CheckRows(self, test_path, multiplier=2):
@@ -79,6 +91,9 @@ class MigrateTestNamesTest(testing_common.TestCase):
     self.assertEqual(15098, rows[49].revision)
     self.assertEqual(15098 * multiplier, rows[49].value)
 
+    t = utils.TestKey(test_path).get()
+    self.assertTrue(t.has_rows)
+
   def _CheckAnomalies(self, test_path, r1=15000, r2=15050):
     """Checks whether the anomalies match the ones added in _AddMockData.
 
@@ -93,6 +108,15 @@ class MigrateTestNamesTest(testing_common.TestCase):
     self.assertEqual(2, len(anomalies))
     self.assertEqual(r1, anomalies[0].end_revision)
     self.assertEqual(r2, anomalies[1].end_revision)
+
+  def _CheckHistogramData(self, test_path):
+    diagnostics = histogram.SparseDiagnostic.query(
+        histogram.SparseDiagnostic.test == utils.TestKey(test_path)).fetch()
+    self.assertEqual(2, len(diagnostics))
+
+    histograms = histogram.SparseDiagnostic.query(
+        histogram.Histogram.test == utils.TestKey(test_path)).fetch()
+    self.assertEqual(2, len(histograms))
 
   def _CheckTests(self, expected_tests):
     """Checks whether the current TestMetadata entities match the expected list.
@@ -171,6 +195,7 @@ class MigrateTestNamesTest(testing_common.TestCase):
 
     self._CheckRows('ChromiumPerf/mac/SunSpider/OverallScore/t')
     self._CheckAnomalies('ChromiumPerf/mac/SunSpider/OverallScore/t')
+    self._CheckHistogramData('ChromiumPerf/mac/SunSpider/OverallScore/t')
     expected_tests = [
         'SunSpider',
         'SunSpider/3d-cube',
@@ -197,6 +222,7 @@ class MigrateTestNamesTest(testing_common.TestCase):
 
     self._CheckRows('ChromiumPerf/mac/SunSpider1.0/Total/t')
     self._CheckAnomalies('ChromiumPerf/mac/SunSpider1.0/Total/t')
+    self._CheckHistogramData('ChromiumPerf/mac/SunSpider1.0/Total/t')
     expected_tests = [
         'SunSpider1.0',
         'SunSpider1.0/3d-cube',
@@ -224,6 +250,7 @@ class MigrateTestNamesTest(testing_common.TestCase):
     # The Row and Anomaly entities have been moved.
     self._CheckRows('ChromiumPerf/mac/SunSpider/Total')
     self._CheckAnomalies('ChromiumPerf/mac/SunSpider/Total')
+    self._CheckHistogramData('ChromiumPerf/mac/SunSpider/Total')
 
     # There is no SunSpider/Total/time any more.
     expected_tests = [

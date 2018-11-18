@@ -24,7 +24,7 @@
 #include "components/offline_pages/core/background/save_page_request.h"
 #include "components/offline_pages/core/offline_page_item.h"
 #include "components/offline_pages/core/offline_store_types.h"
-#include "components/offline_pages/core/task_queue.h"
+#include "components/offline_pages/task/task_queue.h"
 
 namespace offline_pages {
 
@@ -35,20 +35,20 @@ class RequestQueueStore;
 class RequestQueue : public TaskQueue::Delegate {
  public:
   // Callback used for |GetRequests|.
-  typedef base::Callback<void(GetRequestsResult,
-                              std::vector<std::unique_ptr<SavePageRequest>>)>
+  typedef base::OnceCallback<
+      void(GetRequestsResult, std::vector<std::unique_ptr<SavePageRequest>>)>
       GetRequestsCallback;
 
   // Callback used for |AddRequest|.
-  typedef base::Callback<void(AddRequestResult, const SavePageRequest& request)>
+  typedef base::OnceCallback<void(AddRequestResult,
+                                  const SavePageRequest& request)>
       AddRequestCallback;
 
   // Callback used by |ChangeRequestsState|.
-  typedef base::Callback<void(std::unique_ptr<UpdateRequestsResult>)>
-      UpdateCallback;
+  typedef base::OnceCallback<void(UpdateRequestsResult)> UpdateCallback;
 
   // Callback used by |UdpateRequest|.
-  typedef base::Callback<void(UpdateRequestResult)> UpdateRequestCallback;
+  typedef base::OnceCallback<void(UpdateRequestResult)> UpdateRequestCallback;
 
   explicit RequestQueue(std::unique_ptr<RequestQueueStore> store);
   ~RequestQueue() override;
@@ -58,41 +58,40 @@ class RequestQueue : public TaskQueue::Delegate {
 
   // Gets all of the active requests from the store. Calling this method may
   // schedule purging of the request queue.
-  void GetRequests(const GetRequestsCallback& callback);
+  void GetRequests(GetRequestsCallback callback);
 
   // Adds |request| to the request queue. Result is returned through |callback|.
   // In case adding the request violates policy, the result will fail with
   // appropriate result. Callback will also return a copy of a request with all
   // fields set.
-  void AddRequest(const SavePageRequest& request,
-                  const AddRequestCallback& callback);
+  void AddRequest(const SavePageRequest& request, AddRequestCallback callback);
 
   // Removes the requests matching the |request_ids|. Result is returned through
   // |callback|.  If a request id cannot be removed, this will still remove the
   // others.
   void RemoveRequests(const std::vector<int64_t>& request_ids,
-                      const UpdateCallback& callback);
+                      UpdateCallback callback);
 
   // Changes the state to |new_state| for requests matching the
   // |request_ids|. Results are returned through |callback|.
   void ChangeRequestsState(const std::vector<int64_t>& request_ids,
                            const SavePageRequest::RequestState new_state,
-                           const UpdateCallback& callback);
+                           UpdateCallback callback);
 
   // Marks attempt with |request_id| as started. Results are returned through
   // |callback|.
-  void MarkAttemptStarted(int64_t request_id, const UpdateCallback& callback);
+  void MarkAttemptStarted(int64_t request_id, UpdateCallback callback);
 
   // Marks attempt with |request_id| as aborted. Results are returned through
   // |callback|.
-  void MarkAttemptAborted(int64_t request_id, const UpdateCallback& callback);
+  void MarkAttemptAborted(int64_t request_id, UpdateCallback callback);
 
   // Marks attempt with |request_id| as completed. The attempt may have
   // completed with either success or failure (stored in FailState). Results are
   // returned through |callback|.
   void MarkAttemptCompleted(int64_t request_id,
                             FailState fail_state,
-                            const UpdateCallback& callback);
+                            UpdateCallback callback);
 
   // Make a task to pick the next request, and report our choice to the
   // callbacks.
@@ -101,12 +100,12 @@ class RequestQueue : public TaskQueue::Delegate {
       PickRequestTask::RequestPickedCallback picked_callback,
       PickRequestTask::RequestNotPickedCallback not_picked_callback,
       PickRequestTask::RequestCountCallback request_count_callback,
-      DeviceConditions& conditions,
-      std::set<int64_t>& disabled_requests,
-      base::circular_deque<int64_t>& prioritized_requests);
+      DeviceConditions conditions,
+      const std::set<int64_t>& disabled_requests,
+      base::circular_deque<int64_t>* prioritized_requests);
 
   // Reconcile any requests that were active the last time chrome exited.
-  void ReconcileRequests(const UpdateCallback& callback);
+  void ReconcileRequests(UpdateCallback callback);
 
   // Cleanup requests that have expired, exceeded the start or completed retry
   // limit.

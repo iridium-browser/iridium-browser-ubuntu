@@ -9,6 +9,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "ui/accessibility/ax_enums.mojom.h"
 #include "ui/accessibility/ax_node_data.h"
+#include "ui/accessibility/ax_tree_id.h"
 #include "ui/accessibility/platform/aura_window_properties.h"
 #include "ui/accessibility/platform/ax_unique_id.h"
 #include "ui/aura/client/focus_client.h"
@@ -58,6 +59,10 @@ AXWindowObjWrapper::~AXWindowObjWrapper() {
   window_ = NULL;
 }
 
+bool AXWindowObjWrapper::IsIgnored() {
+  return false;
+}
+
 AXAuraObjWrapper* AXWindowObjWrapper::GetParent() {
   if (!window_->parent())
     return NULL;
@@ -92,9 +97,9 @@ void AXWindowObjWrapper::Serialize(ui::AXNodeData* out_node_data) {
   if (!window_->IsVisible())
     out_node_data->AddState(ax::mojom::State::kInvisible);
   out_node_data->location = gfx::RectF(window_->GetBoundsInScreen());
-  ui::AXTreeIDRegistry::AXTreeID child_ax_tree_id =
-      window_->GetProperty(ui::kChildAXTreeID);
-  if (child_ax_tree_id != ui::AXTreeIDRegistry::kNoAXTreeID) {
+  std::string* child_ax_tree_id_ptr = window_->GetProperty(ui::kChildAXTreeID);
+  if (child_ax_tree_id_ptr && ui::AXTreeID::FromString(*child_ax_tree_id_ptr) !=
+                                  ui::AXTreeIDUnknown()) {
     // Most often, child AX trees are parented to Views. We need to handle
     // the case where they're not here, but we don't want the same AX tree
     // to be a child of two different parents.
@@ -106,8 +111,8 @@ void AXWindowObjWrapper::Serialize(ui::AXNodeData* out_node_data) {
       return;
     }
 
-    out_node_data->AddIntAttribute(ax::mojom::IntAttribute::kChildTreeId,
-                                   child_ax_tree_id);
+    out_node_data->AddStringAttribute(ax::mojom::StringAttribute::kChildTreeId,
+                                      *child_ax_tree_id_ptr);
   }
 }
 
@@ -153,9 +158,16 @@ void AXWindowObjWrapper::OnWindowPropertyChanged(aura::Window* window,
 
 void AXWindowObjWrapper::OnWindowVisibilityChanged(aura::Window* window,
                                                    bool visible) {
-  AXAuraObjCache::GetInstance()->FireEvent(
-      AXAuraObjCache::GetInstance()->GetOrCreate(window_),
-      ax::mojom::Event::kStateChanged);
+  AXAuraObjCache::GetInstance()->FireEvent(this,
+                                           ax::mojom::Event::kStateChanged);
+}
+
+void AXWindowObjWrapper::OnWindowTransformed(aura::Window* window,
+                                             ui::PropertyChangeReason reason) {
+  if (window != window_)
+    return;
+
+  FireLocationChanges(window_);
 }
 
 }  // namespace views

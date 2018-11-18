@@ -5,14 +5,18 @@
 #ifndef CHROME_TEST_BASE_TEST_BROWSER_WINDOW_H_
 #define CHROME_TEST_BASE_TEST_BROWSER_WINDOW_H_
 
+#include <memory>
+#include <string>
 #include <vector>
 
 #include "base/macros.h"
+#include "build/build_config.h"
 #include "chrome/browser/download/test_download_shelf.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/location_bar/location_bar.h"
+#include "chrome/browser/ui/page_action/page_action_icon_container.h"
 #include "chrome/common/buildflags.h"
 
 #if defined(OS_CHROMEOS)
@@ -48,6 +52,12 @@ class TestBrowserWindow : public BrowserWindow {
   bool IsAlwaysOnTop() const override;
   void SetAlwaysOnTop(bool always_on_top) override {}
   gfx::NativeWindow GetNativeWindow() const override;
+  void SetTopControlsShownRatio(content::WebContents* web_contents,
+                                float ratio) override;
+  bool DoBrowserControlsShrinkRendererSize(
+      const content::WebContents* contents) const override;
+  int GetTopControlsHeight() const override;
+  void SetTopControlsGestureScrollInProgress(bool in_progress) override;
   StatusBubble* GetStatusBubble() override;
   void UpdateTitleBar() override {}
   void BookmarkBarStateChanged(
@@ -74,6 +84,7 @@ class TestBrowserWindow : public BrowserWindow {
   bool IsFullscreen() const override;
   bool IsFullscreenBubbleVisible() const override;
   LocationBar* GetLocationBar() const override;
+  PageActionIconContainer* GetPageActionIconContainer() override;
   void SetFocusToLocationBar(bool select_all) override {}
   void UpdateReloadStopState(bool is_loading, bool force) override {}
   void UpdateToolbar(content::WebContents* contents) override {}
@@ -100,12 +111,17 @@ class TestBrowserWindow : public BrowserWindow {
 #if defined(OS_CHROMEOS)
   void ShowIntentPickerBubble(
       std::vector<chromeos::IntentPickerAppInfo> app_info,
+      bool disable_stay_in_chrome,
       IntentPickerResponse callback) override {}
   void SetIntentPickerViewVisibility(bool visible) override {}
 #endif  // defined(OS_CHROMEOS)
   autofill::SaveCardBubbleView* ShowSaveCreditCardBubble(
       content::WebContents* contents,
       autofill::SaveCardBubbleController* controller,
+      bool user_gesture) override;
+  autofill::LocalCardMigrationBubble* ShowLocalCardMigrationBubble(
+      content::WebContents* contents,
+      autofill::LocalCardMigrationBubbleController* controller,
       bool user_gesture) override;
   ShowTranslateBubbleResult ShowTranslateBubble(
       content::WebContents* contents,
@@ -126,8 +142,6 @@ class TestBrowserWindow : public BrowserWindow {
       const base::Callback<void(bool)>& callback) override {}
   void UserChangedTheme() override {}
   void CutCopyPaste(int command_id) override {}
-  WindowOpenDisposition GetDispositionForPopupBounds(
-      const gfx::Rect& bounds) override;
   FindBar* CreateFindBar() override;
   web_modal::WebContentsModalDialogHost* GetWebContentsModalDialogHost()
       override;
@@ -136,6 +150,12 @@ class TestBrowserWindow : public BrowserWindow {
       const signin::ManageAccountsParams& manage_accounts_params,
       signin_metrics::AccessPoint access_point,
       bool is_source_keyboard) override {}
+
+#if defined(OS_CHROMEOS) || defined(OS_MACOSX) || defined(OS_WIN) || \
+    defined(OS_LINUX)
+  void ShowHatsBubbleFromAppMenuButton() override {}
+#endif
+
   int GetRenderViewHeightInsetWithDetachedBookmarkBar() override;
   void ExecuteExtensionCommand(const extensions::Extension* extension,
                                const extensions::Command& command) override;
@@ -160,19 +180,19 @@ class TestBrowserWindow : public BrowserWindow {
     GURL GetDestinationURL() const override;
     WindowOpenDisposition GetWindowOpenDisposition() const override;
     ui::PageTransition GetPageTransition() const override;
+    base::TimeTicks GetMatchSelectionTimestamp() const override;
     void AcceptInput() override {}
+    void AcceptInput(base::TimeTicks match_selection_timestamp) override {}
     void FocusLocation(bool select_all) override {}
     void FocusSearch() override {}
     void UpdateContentSettingsIcons() override {}
     void UpdateManagePasswordsIconAndBubble() override {}
     void UpdateSaveCreditCardIcon() override {}
-    void UpdateFindBarIconVisibility() override {}
+    void UpdateLocalCardMigrationIcon() override {}
     void UpdateBookmarkStarVisibility() override {}
-    void UpdateZoomViewVisibility() override {}
     void UpdateLocationBarVisibility(bool visible, bool animate) override {}
     void SaveStateToContents(content::WebContents* contents) override {}
     void Revert() override {}
-    bool ShowPageInfoDialog(content::WebContents* contents) override;
     const OmniboxView* GetOmniboxView() const override;
     OmniboxView* GetOmniboxView() override;
     LocationBarTesting* GetLocationBarForTesting() override;

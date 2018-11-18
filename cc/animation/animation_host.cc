@@ -10,6 +10,7 @@
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/ptr_util.h"
+#include "base/stl_util.h"
 #include "base/trace_event/trace_event.h"
 #include "base/trace_event/trace_event_argument.h"
 #include "cc/animation/animation.h"
@@ -29,13 +30,6 @@
 #include "ui/gfx/geometry/scroll_offset.h"
 
 namespace cc {
-
-namespace {
-WorkletAnimation* ToWorkletAnimation(Animation* animation) {
-  DCHECK(animation->IsWorkletAnimation());
-  return static_cast<WorkletAnimation*>(animation);
-}
-}  // namespace
 
 std::unique_ptr<AnimationHost> AnimationHost::CreateMainInstance() {
   return base::WrapUnique(new AnimationHost(ThreadInstance::MAIN));
@@ -257,8 +251,6 @@ void AnimationHost::PushPropertiesToImplThread(AnimationHost* host_impl) {
   scroll_offset_animations_->PushPropertiesTo(
       host_impl->scroll_offset_animations_impl_.get());
   host_impl->main_thread_animations_count_ = main_thread_animations_count_;
-  host_impl->main_thread_compositable_animations_count_ =
-      main_thread_compositable_animations_count_;
   host_impl->current_frame_had_raf_ = current_frame_had_raf_;
   host_impl->next_frame_has_pending_raf_ = next_frame_has_pending_raf_;
 }
@@ -284,21 +276,19 @@ bool AnimationHost::NeedsTickAnimations() const {
   return !ticking_animations_.empty();
 }
 
-bool AnimationHost::NeedsTickMutator(base::TimeTicks monotonic_time,
-                                     const ScrollTree& scroll_tree) const {
-  if (!mutator_ || !mutator_->HasAnimators())
+bool AnimationHost::TickMutator(base::TimeTicks monotonic_time,
+                                const ScrollTree& scroll_tree,
+                                bool is_active_tree) {
+  if (!mutator_ || !mutator_->HasMutators())
     return false;
 
-  for (auto& animation : ticking_animations_) {
-    if (!animation->IsWorkletAnimation())
-      continue;
+  std::unique_ptr<MutatorInputState> state = CollectWorkletAnimationsState(
+      monotonic_time, scroll_tree, is_active_tree);
+  if (state->IsEmpty())
+    return false;
 
-    if (ToWorkletAnimation(animation.get())
-            ->NeedsUpdate(monotonic_time, scroll_tree))
-      return true;
-  }
-
-  return false;
+  mutator_->Mutate(std::move(state));
+  return true;
 }
 
 bool AnimationHost::ActivateAnimations() {
@@ -313,50 +303,69 @@ bool AnimationHost::ActivateAnimations() {
   return true;
 }
 
-bool AnimationHost::TickAnimations(base::TimeTicks monotonic_time,
-                                   const ScrollTree& scroll_tree) {
-  TRACE_EVENT0("cc", "AnimationHost::TickAnimations");
-  bool did_animate = false;
-
-  if (NeedsTickAnimations()) {
-    AnimationsList ticking_animations_copy = ticking_animations_;
-    for (auto& it : ticking_animations_copy)
+void TickAnimationsIf(AnimationHost::AnimationsList animations,
+                      base::TimeTicks monotonic_time,
+                      bool (*predicate)(const Animation&)) {
+  for (auto& it : animations) {
+    if (predicate(*it))
       it->Tick(monotonic_time);
-
-    did_animate = true;
   }
-  if (NeedsTickMutator(monotonic_time, scroll_tree)) {
-    // TODO(majidvp): At the moment we call this for both active and pending
-    // trees similar to other animations. However our final goal is to only call
-    // it once, ideally after activation, and only when the input
-    // to an active timeline has changed. http://crbug.com/767210
-    mutator_->Mutate(CollectAnimatorsState(monotonic_time, scroll_tree));
-    did_animate = true;
-  }
+}
 
-  return did_animate;
+bool AnimationHost::TickAnimations(base::TimeTicks monotonic_time,
+                                   const ScrollTree& scroll_tree,
+                                   bool is_active_tree) {
+  TRACE_EVENT0("cc", "AnimationHost::TickAnimations");
+  // We tick animations in the following order:
+  // 1. regular animations 2. mutator 3. worklet animations
+  //
+  // Mutator may depend on scroll offset as its time input e.g., when there is
+  // a worklet animation attached to a scroll timeline.
+  // This ordering ensures we use the latest scroll offset as the input to the
+  // mutator even if there are active scroll animations. Furthermore ticking
+  // worklet animations at the end gaurantees that mutator output takes effect
+  // in the same impl frame that it was mutated.
+
+  if (!NeedsTickAnimations())
+    return false;
+
+  TRACE_EVENT_INSTANT0("cc", "NeedsTickAnimations", TRACE_EVENT_SCOPE_THREAD);
+
+  // Worklet animations are ticked at a later stage. See above comment for
+  // details.
+  TickAnimationsIf(ticking_animations_, monotonic_time,
+                   [](const Animation& animation) {
+                     return !animation.IsWorkletAnimation();
+                   });
+
+  // TODO(majidvp): At the moment we call this for both active and pending
+  // trees similar to other animations. However our final goal is to only call
+  // it once, ideally after activation, and only when the input
+  // to an active timeline has changed. http://crbug.com/767210
+  TickMutator(monotonic_time, scroll_tree, is_active_tree);
+
+  // TODO(crbug.com/834452): This works because at the moment the above call is
+  // synchronous. We will need a different approach once it becomes asynchronous
+  // but until then this simple ordering is sufficient.
+  TickAnimationsIf(ticking_animations_, monotonic_time,
+                   [](const Animation& animation) {
+                     return animation.IsWorkletAnimation();
+                   });
+  return true;
 }
 
 void AnimationHost::TickScrollAnimations(base::TimeTicks monotonic_time,
                                          const ScrollTree& scroll_tree) {
-  // TODO(majidvp) For now the logic simply generates an update when at least
-  // one animation needs updating but this is inefficient. We need a more
-  // fine-grained approach based on invalidating individual ScrollTimelines and
-  // then ticking the animations attached to those timelines. To make
-  // this happen we probably need to move "ticking" animations to timeline.
-  if (!NeedsTickMutator(monotonic_time, scroll_tree))
-    return;
-  DCHECK(mutator_);
-
   // TODO(majidvp): We need to return a boolean here so that LTHI knows
   // whether it needs to schedule another frame.
-  mutator_->Mutate(CollectAnimatorsState(monotonic_time, scroll_tree));
+  TickMutator(monotonic_time, scroll_tree, true /* is_active_tree */);
 }
 
-std::unique_ptr<MutatorInputState> AnimationHost::CollectAnimatorsState(
+std::unique_ptr<MutatorInputState> AnimationHost::CollectWorkletAnimationsState(
     base::TimeTicks monotonic_time,
-    const ScrollTree& scroll_tree) {
-  TRACE_EVENT0("cc", "AnimationHost::CollectAnimatorsState");
+    const ScrollTree& scroll_tree,
+    bool is_active_tree) {
+  TRACE_EVENT0("cc", "AnimationHost::CollectWorkletAnimationsState");
   std::unique_ptr<MutatorInputState> result =
       std::make_unique<MutatorInputState>();
 
@@ -364,12 +373,9 @@ std::unique_ptr<MutatorInputState> AnimationHost::CollectAnimatorsState(
     if (!animation->IsWorkletAnimation())
       continue;
 
-    WorkletAnimation* worklet_animation = ToWorkletAnimation(animation.get());
-    MutatorInputState::AnimationState state{
-        worklet_animation->id(), worklet_animation->name(),
-        worklet_animation->CurrentTime(monotonic_time, scroll_tree)};
-
-    result->animations.push_back(std::move(state));
+    ToWorkletAnimation(animation.get())
+        ->UpdateInputState(result.get(), monotonic_time, scroll_tree,
+                           is_active_tree);
   }
 
   return result;
@@ -388,6 +394,12 @@ bool AnimationHost::UpdateAnimationState(bool start_ready_animations,
     it->UpdateState(start_ready_animations, animation_events);
 
   return true;
+}
+
+void AnimationHost::PromoteScrollTimelinesPendingToActive() {
+  for (auto& animation : ticking_animations_) {
+    animation->PromoteScrollTimelinePendingToActive();
+  }
 }
 
 std::unique_ptr<MutatorEvents> AnimationHost::CreateEvents() {
@@ -592,8 +604,7 @@ void AnimationHost::ScrollAnimationAbort() {
 }
 
 void AnimationHost::AddToTicking(scoped_refptr<Animation> animation) {
-  DCHECK(std::find(ticking_animations_.begin(), ticking_animations_.end(),
-                   animation) == ticking_animations_.end());
+  DCHECK(!base::ContainsValue(ticking_animations_, animation));
   ticking_animations_.push_back(animation);
 }
 
@@ -629,19 +640,19 @@ void AnimationHost::SetMutationUpdate(
 
   TRACE_EVENT0("cc", "AnimationHost::SetMutationUpdate");
   for (auto& animation_state : output_state->animations) {
-    int id = animation_state.animation_id;
+    WorkletAnimationId id = animation_state.worklet_animation_id;
 
     // TODO(majidvp): Use a map to make lookup O(1)
-    auto to_update =
-        std::find_if(ticking_animations_.begin(), ticking_animations_.end(),
-                     [id](auto& it) { return it->id() == id; });
+    auto to_update = std::find_if(
+        ticking_animations_.begin(), ticking_animations_.end(), [id](auto& it) {
+          return it->IsWorkletAnimation() &&
+                 ToWorkletAnimation(it.get())->worklet_animation_id() == id;
+        });
 
     if (to_update == ticking_animations_.end())
       continue;
 
-    DCHECK(to_update->get()->IsWorkletAnimation());
-    ToWorkletAnimation(to_update->get())
-        ->SetLocalTime(animation_state.local_time);
+    ToWorkletAnimation(to_update->get())->SetOutputState(animation_state);
   }
 }
 
@@ -654,7 +665,6 @@ size_t AnimationHost::CompositedAnimationsCount() const {
 
 void AnimationHost::SetAnimationCounts(
     size_t total_animations_count,
-    size_t main_thread_compositable_animations_count,
     bool current_frame_had_raf,
     bool next_frame_has_pending_raf) {
   // If an animation is being run on the compositor, it will have a ticking
@@ -669,14 +679,6 @@ void AnimationHost::SetAnimationCounts(
     DCHECK_GE(main_thread_animations_count_, 0u);
     SetNeedsPushProperties();
   }
-  if (main_thread_compositable_animations_count_ !=
-      main_thread_compositable_animations_count) {
-    main_thread_compositable_animations_count_ =
-        main_thread_compositable_animations_count;
-    SetNeedsPushProperties();
-  }
-  DCHECK_GE(main_thread_animations_count_,
-            main_thread_compositable_animations_count_);
   if (current_frame_had_raf != current_frame_had_raf_) {
     current_frame_had_raf_ = current_frame_had_raf;
     SetNeedsPushProperties();
@@ -689,10 +691,6 @@ void AnimationHost::SetAnimationCounts(
 
 size_t AnimationHost::MainThreadAnimationsCount() const {
   return main_thread_animations_count_;
-}
-
-size_t AnimationHost::MainThreadCompositableAnimationsCount() const {
-  return main_thread_compositable_animations_count_;
 }
 
 bool AnimationHost::CurrentFrameHadRAF() const {

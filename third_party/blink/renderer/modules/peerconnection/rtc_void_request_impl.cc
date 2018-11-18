@@ -31,7 +31,6 @@
 #include "third_party/blink/renderer/modules/peerconnection/rtc_void_request_impl.h"
 
 #include "third_party/blink/renderer/core/dom/dom_exception.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
 #include "third_party/blink/renderer/modules/peerconnection/rtc_error_util.h"
 #include "third_party/blink/renderer/modules/peerconnection/rtc_peer_connection.h"
 
@@ -69,12 +68,12 @@ void RTCVoidRequestImpl::RequestSucceeded() {
   Clear();
 }
 
-void RTCVoidRequestImpl::RequestFailed(const WebRTCError& error) {
+void RTCVoidRequestImpl::RequestFailed(const webrtc::RTCError& error) {
   bool should_fire_callback =
       requester_ && requester_->ShouldFireDefaultCallbacks();
   if (should_fire_callback && error_callback_.Get()) {
     error_callback_->InvokeAndReportException(
-        nullptr, CreateDOMExceptionFromWebRTCError(error));
+        nullptr, CreateDOMExceptionFromRTCError(error));
   }
 
   Clear();

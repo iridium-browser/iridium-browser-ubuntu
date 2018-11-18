@@ -56,12 +56,10 @@ struct LevelInfoGL
 class TextureGL : public TextureImpl
 {
   public:
-    TextureGL(const gl::TextureState &state,
-              const FunctionsGL *functions,
-              const WorkaroundsGL &workarounds,
-              StateManagerGL *stateManager,
-              BlitGL *blitter);
+    TextureGL(const gl::TextureState &state, GLuint id);
     ~TextureGL() override;
+
+    gl::Error onDestroy(const gl::Context *context) override;
 
     gl::Error setImage(const gl::Context *context,
                        const gl::ImageIndex &index,
@@ -77,6 +75,7 @@ class TextureGL : public TextureImpl
                           GLenum format,
                           GLenum type,
                           const gl::PixelUnpackState &unpack,
+                          gl::Buffer *unpackBuffer,
                           const uint8_t *pixels) override;
 
     gl::Error setCompressedImage(const gl::Context *context,
@@ -118,7 +117,7 @@ class TextureGL : public TextureImpl
                              const gl::ImageIndex &index,
                              const gl::Offset &destOffset,
                              size_t sourceLevel,
-                             const gl::Rectangle &sourceArea,
+                             const gl::Box &sourceBox,
                              bool unpackFlipY,
                              bool unpackPremultiplyAlpha,
                              bool unpackUnmultiplyAlpha,
@@ -129,8 +128,7 @@ class TextureGL : public TextureImpl
                                    const gl::Offset &destOffset,
                                    size_t sourceLevel,
                                    const gl::Rectangle &sourceArea,
-                                   GLenum destFormat,
-                                   GLenum destType,
+                                   const gl::InternalFormat &destFormat,
                                    bool unpackFlipY,
                                    bool unpackPremultiplyAlpha,
                                    bool unpackUnmultiplyAlpha,
@@ -163,24 +161,29 @@ class TextureGL : public TextureImpl
                                 gl::TextureType type,
                                 egl::Image *image) override;
 
-    GLuint getTextureID() const;
+    GLuint getTextureID() const { return mTextureID; }
+
     gl::TextureType getType() const;
 
-    void syncState(const gl::Texture::DirtyBits &dirtyBits) override;
+    angle::Result syncState(const gl::Context *context,
+                            const gl::Texture::DirtyBits &dirtyBits) override;
     bool hasAnyDirtyBit() const;
 
     gl::Error setBaseLevel(const gl::Context *context, GLuint baseLevel) override;
 
-    gl::Error initializeContents(const gl::Context *context,
-                                 const gl::ImageIndex &imageIndex) override;
+    angle::Result initializeContents(const gl::Context *context,
+                                     const gl::ImageIndex &imageIndex) override;
 
-    void setMinFilter(GLenum filter);
-    void setMagFilter(GLenum filter);
+    void setMinFilter(const gl::Context *context, GLenum filter);
+    void setMagFilter(const gl::Context *context, GLenum filter);
 
-    void setSwizzle(GLint swizzle[4]);
+    void setSwizzle(const gl::Context *context, GLint swizzle[4]);
+
+    GLenum getNativeInternalFormat(const gl::ImageIndex &index) const;
 
   private:
-    void setImageHelper(gl::TextureTarget target,
+    void setImageHelper(const gl::Context *context,
+                        gl::TextureTarget target,
                         size_t level,
                         GLenum internalFormat,
                         const gl::Extents &size,
@@ -188,7 +191,8 @@ class TextureGL : public TextureImpl
                         GLenum type,
                         const uint8_t *pixels);
     // This changes the current pixel unpack state that will have to be reapplied.
-    void reserveTexImageToBeFilled(gl::TextureTarget target,
+    void reserveTexImageToBeFilled(const gl::Context *context,
+                                   gl::TextureTarget target,
                                    size_t level,
                                    GLenum internalFormat,
                                    const gl::Extents &size,
@@ -219,21 +223,18 @@ class TextureGL : public TextureImpl
                                  GLenum value,
                                  GLenum *outValue);
 
-    void setLevelInfo(gl::TextureTarget target,
+    void setLevelInfo(const gl::Context *context,
+                      gl::TextureTarget target,
                       size_t level,
                       size_t levelCount,
                       const LevelInfoGL &levelInfo);
-    void setLevelInfo(gl::TextureType type,
+    void setLevelInfo(const gl::Context *context,
+                      gl::TextureType type,
                       size_t level,
                       size_t levelCount,
                       const LevelInfoGL &levelInfo);
     const LevelInfoGL &getLevelInfo(gl::TextureTarget target, size_t level) const;
     const LevelInfoGL &getBaseLevelInfo() const;
-
-    const FunctionsGL *mFunctions;
-    const WorkaroundsGL &mWorkarounds;
-    StateManagerGL *mStateManager;
-    BlitGL *mBlitter;
 
     std::vector<LevelInfoGL> mLevelInfo;
     gl::Texture::DirtyBits mLocalDirtyBits;

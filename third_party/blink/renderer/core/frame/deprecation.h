@@ -16,6 +16,7 @@ namespace mojom {
 enum class FeaturePolicyFeature;
 }  // namespace mojom
 
+class DocumentLoader;
 class LocalFrame;
 
 class CORE_EXPORT Deprecation {
@@ -38,12 +39,10 @@ class CORE_EXPORT Deprecation {
   // Be considerate to developers' consoles: features should only send
   // deprecation warnings when we're actively interested in removing them from
   // the platform.
-  //
-  // For shared workers and service workers, the ExecutionContext* overload
-  // doesn't count the usage but only sends a console warning.
   static void CountDeprecation(const LocalFrame*, WebFeature);
   static void CountDeprecation(ExecutionContext*, WebFeature);
   static void CountDeprecation(const Document&, WebFeature);
+  static void CountDeprecation(DocumentLoader*, WebFeature);
 
   // Count only features if they're being used in an iframe which does not
   // have script access into the top level document.
@@ -60,6 +59,8 @@ class CORE_EXPORT Deprecation {
 
  protected:
   void Suppress(CSSPropertyID unresolved_property);
+  void SetReported(WebFeature feature);
+  bool GetReported(WebFeature feature) const;
   // CSSPropertyIDs that aren't deprecated return an empty string.
   static String DeprecationMessage(CSSPropertyID unresolved_property);
 
@@ -67,6 +68,9 @@ class CORE_EXPORT Deprecation {
   // ReportingObservers. Also sends the deprecation message to the console.
   static void GenerateReport(const LocalFrame*, WebFeature);
 
+  // To minimize the report/console spam from frames coming and going, report
+  // each deprecation at most once per page load per renderer process.
+  BitVector features_deprecation_bits_;
   BitVector css_property_deprecation_bits_;
   unsigned mute_count_;
 

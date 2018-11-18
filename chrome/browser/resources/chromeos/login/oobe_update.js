@@ -9,6 +9,8 @@
 Polymer({
   is: 'oobe-update-md',
 
+  behaviors: [I18nBehavior, OobeDialogHostBehavior],
+
   properties: {
     /**
      * Shows "Checking for update ..." section and hides "Updating..." section.
@@ -16,6 +18,15 @@ Polymer({
     checkingForUpdate: {
       type: Boolean,
       value: true,
+    },
+
+    /**
+     * Shows a warning to the user the update is about to proceed over a
+     * cellular network, and asks the user to confirm.
+     */
+    requiresPermissionForCellular: {
+      type: Boolean,
+      value: false,
     },
 
     /**
@@ -72,6 +83,18 @@ Polymer({
     },
   },
 
+  onBeforeShow: function() {
+    this.behaviors.forEach((behavior) => {
+      if (behavior.onBeforeShow)
+        behavior.onBeforeShow.call(this);
+    });
+    // 'indeterminate' paper-progress will recalculate styles on every frame
+    // wnen OOBE is loaded (even when another screen is open).
+    // So we make it 'indeterminate' only right before screen is shown, and
+    // make it hidden when its container dialog is hidden.
+    this.$['checking-progress'].indeterminate = true;
+  },
+
   /**
    * This updates "Cancel Update" message.
    */
@@ -88,5 +111,18 @@ Polymer({
    */
   isNotAllowedOrUpdateCompleted_: function(isAllowed, updateCompleted) {
     return !isAllowed || updateCompleted;
+  },
+
+  hideUpdatingScreen_: function(
+      checkingForUpdate, requiresPermissionForCellular) {
+    return checkingForUpdate || requiresPermissionForCellular;
+  },
+
+  onBackClicked_: function() {
+    chrome.send('login.UpdateScreen.userActed', ['update-reject-cellular']);
+  },
+
+  onNextClicked_: function() {
+    chrome.send('login.UpdateScreen.userActed', ['update-accept-cellular']);
   },
 });

@@ -15,6 +15,9 @@ void FakeArcBridgeHost::OnAccessibilityHelperInstanceReady(
 
 void FakeArcBridgeHost::OnAppInstanceReady(mojom::AppInstancePtr app_ptr) {}
 
+void FakeArcBridgeHost::OnAppfuseInstanceReady(
+    mojom::AppfuseInstancePtr app_ptr) {}
+
 void FakeArcBridgeHost::OnAudioInstanceReady(
     mojom::AudioInstancePtr audio_ptr) {}
 
@@ -41,6 +44,9 @@ void FakeArcBridgeHost::OnClipboardInstanceReady(
 void FakeArcBridgeHost::OnCrashCollectorInstanceReady(
     mojom::CrashCollectorInstancePtr crash_collector_ptr) {}
 
+void FakeArcBridgeHost::OnDiskQuotaInstanceReady(
+    mojom::DiskQuotaInstancePtr disk_quota_ptr) {}
+
 void FakeArcBridgeHost::OnEnterpriseReportingInstanceReady(
     mojom::EnterpriseReportingInstancePtr enterprise_reporting_ptr) {}
 
@@ -48,6 +54,9 @@ void FakeArcBridgeHost::OnFileSystemInstanceReady(
     mojom::FileSystemInstancePtr file_system_ptr) {}
 
 void FakeArcBridgeHost::OnImeInstanceReady(mojom::ImeInstancePtr ime_ptr) {}
+
+void FakeArcBridgeHost::OnInputMethodManagerInstanceReady(
+    mojom::InputMethodManagerInstancePtr input_method_manager_ptr) {}
 
 void FakeArcBridgeHost::OnIntentHelperInstanceReady(
     mojom::IntentHelperInstancePtr intent_helper_ptr) {}
@@ -57,6 +66,9 @@ void FakeArcBridgeHost::OnKioskInstanceReady(
 
 void FakeArcBridgeHost::OnLockScreenInstanceReady(
     mojom::LockScreenInstancePtr lock_screen_ptr) {}
+
+void FakeArcBridgeHost::OnMediaSessionInstanceReady(
+    mojom::MediaSessionInstancePtr media_sesssion_ptr) {}
 
 void FakeArcBridgeHost::OnMetricsInstanceReady(
     mojom::MetricsInstancePtr metrics_ptr) {}
@@ -75,6 +87,8 @@ void FakeArcBridgeHost::OnObbMounterInstanceReady(
 void FakeArcBridgeHost::OnOemCryptoInstanceReady(
     mojom::OemCryptoInstancePtr oemcrypto_ptr) {}
 
+void FakeArcBridgeHost::OnPipInstanceReady(mojom::PipInstancePtr pip_ptr) {}
+
 void FakeArcBridgeHost::OnPolicyInstanceReady(
     mojom::PolicyInstancePtr policy_ptr) {}
 
@@ -86,6 +100,9 @@ void FakeArcBridgeHost::OnPrintInstanceReady(
 
 void FakeArcBridgeHost::OnProcessInstanceReady(
     mojom::ProcessInstancePtr process_ptr) {}
+
+void FakeArcBridgeHost::OnPropertyInstanceReady(
+    mojom::PropertyInstancePtr property_ptr) {}
 
 void FakeArcBridgeHost::OnRotationLockInstanceReady(
     mojom::RotationLockInstancePtr rotation_lock_ptr) {}

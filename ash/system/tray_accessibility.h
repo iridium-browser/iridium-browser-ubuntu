@@ -9,7 +9,8 @@
 
 #include "ash/accessibility/accessibility_delegate.h"
 #include "ash/accessibility/accessibility_observer.h"
-#include "ash/system/tray/tray_details_view.h"
+#include "ash/session/session_observer.h"
+#include "ash/system/tray/tray_detailed_view.h"
 #include "ash/system/tray/tray_image_item.h"
 #include "base/macros.h"
 #include "ui/gfx/font.h"
@@ -28,16 +29,16 @@ class View;
 
 namespace ash {
 class HoverHighlightView;
-class SystemTrayItem;
+class DetailedViewDelegate;
 class TrayAccessibilityLoginScreenTest;
 class TrayAccessibilityTest;
 
 namespace tray {
 
 // Create the detailed view of accessibility tray.
-class AccessibilityDetailedView : public TrayDetailsView {
+class ASH_EXPORT AccessibilityDetailedView : public TrayDetailedView {
  public:
-  explicit AccessibilityDetailedView(SystemTrayItem* owner);
+  explicit AccessibilityDetailedView(DetailedViewDelegate* delegate);
   ~AccessibilityDetailedView() override {}
 
   void OnAccessibilityStatusChanged();
@@ -47,7 +48,7 @@ class AccessibilityDetailedView : public TrayDetailsView {
   friend class ::ash::TrayAccessibilityTest;
   friend class chromeos::TrayAccessibilityTest;
 
-  // TrayDetailsView:
+  // TrayDetailedView:
   void HandleViewClicked(views::View* view) override;
   void HandleButtonPressed(views::Button* sender,
                            const ui::Event& event) override;
@@ -64,6 +65,7 @@ class AccessibilityDetailedView : public TrayDetailsView {
 
   HoverHighlightView* spoken_feedback_view_ = nullptr;
   HoverHighlightView* select_to_speak_view_ = nullptr;
+  HoverHighlightView* dictation_view_ = nullptr;
   HoverHighlightView* high_contrast_view_ = nullptr;
   HoverHighlightView* screen_magnifier_view_ = nullptr;
   HoverHighlightView* docked_magnifier_view_ = nullptr;
@@ -81,6 +83,7 @@ class AccessibilityDetailedView : public TrayDetailsView {
   // These exist for tests. The canonical state is stored in prefs.
   bool spoken_feedback_enabled_ = false;
   bool select_to_speak_enabled_ = false;
+  bool dictation_enabled_ = false;
   bool high_contrast_enabled_ = false;
   bool screen_magnifier_enabled_ = false;
   bool docked_magnifier_enabled_ = false;
@@ -100,7 +103,9 @@ class AccessibilityDetailedView : public TrayDetailsView {
 
 }  // namespace tray
 
-class TrayAccessibility : public TrayImageItem, public AccessibilityObserver {
+class TrayAccessibility : public TrayImageItem,
+                          public AccessibilityObserver,
+                          public SessionObserver {
  public:
   explicit TrayAccessibility(SystemTray* system_tray);
   ~TrayAccessibility() override;
@@ -123,7 +128,9 @@ class TrayAccessibility : public TrayImageItem, public AccessibilityObserver {
 
   // Overridden from AccessibilityObserver.
   void OnAccessibilityStatusChanged() override;
-  void ShowAccessibilityNotification() override;
+
+  // Overridden from SessionObserver:
+  void OnSessionStateChanged(session_manager::SessionState state) override;
 
   views::View* default_;
   tray::AccessibilityDetailedView* detailed_menu_;
@@ -131,11 +138,12 @@ class TrayAccessibility : public TrayImageItem, public AccessibilityObserver {
   bool tray_icon_visible_;
   LoginStatus login_;
 
-  // Bitmap of values from AccessibilityState enum.
-  uint32_t previous_accessibility_state_;
-
   // A11y feature status on just entering the lock screen.
   bool show_a11y_menu_on_lock_screen_;
+
+  ScopedSessionObserver session_observer_{this};
+
+  const std::unique_ptr<DetailedViewDelegate> detailed_view_delegate_;
 
   DISALLOW_COPY_AND_ASSIGN(TrayAccessibility);
 };

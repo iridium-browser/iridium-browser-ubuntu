@@ -51,7 +51,7 @@ void ConsolidateCaptureFormats(media::VideoCaptureFormats* formats) {
   }
   std::sort(formats->begin(), formats->end(), IsCaptureFormatSmaller);
   // Remove duplicates
-  media::VideoCaptureFormats::iterator last =
+  auto last =
       std::unique(formats->begin(), formats->end(), IsCaptureFormatEqual);
   formats->erase(last, formats->end());
 }
@@ -79,7 +79,7 @@ void VideoCaptureSystemImpl::GetDeviceInfosAsync(
 }
 
 void VideoCaptureSystemImpl::ProcessDeviceInfoRequest() {
-  DeviceEnumQueue::iterator request = device_enum_request_queue_.begin();
+  auto request = device_enum_request_queue_.begin();
   if (request == device_enum_request_queue_.end()) {
     return;
   }
@@ -143,10 +143,17 @@ void VideoCaptureSystemImpl::DeviceInfosReady(
   }
 
   devices_info_cache_.swap(new_devices_info_cache);
-  base::ResetAndReturn(&device_enum_request_queue_.front())
-      .Run(devices_info_cache_);
-
+  auto request_cb = std::move(device_enum_request_queue_.front());
   device_enum_request_queue_.pop_front();
+  // If |request_cb| was the last callback in |device_enum_request_queue_|,
+  // |this| may be out of scope after running it. We need to be careful to
+  // not touch the state of |this| after running the callback in this case.
+  if (device_enum_request_queue_.empty()) {
+    std::move(request_cb).Run(devices_info_cache_);
+    return;
+  }
+  std::move(request_cb).Run(devices_info_cache_);
   ProcessDeviceInfoRequest();
 }
+
 }  // namespace media

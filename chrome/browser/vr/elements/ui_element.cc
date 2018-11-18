@@ -12,8 +12,9 @@
 #include "base/strings/string_split.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
+#include "chrome/browser/vr/input_event.h"
 #include "chrome/browser/vr/model/camera_model.h"
-#include "third_party/blink/public/platform/web_gesture_event.h"
+#include "chrome/browser/vr/vr_gl_util.h"
 #include "third_party/skia/include/core/SkRRect.h"
 #include "third_party/skia/include/core/SkRect.h"
 #include "ui/gfx/geometry/angle_conversions.h"
@@ -23,8 +24,8 @@ namespace vr {
 
 namespace {
 
-constexpr bool kEnableOptimizedTreeWalks = false;
 constexpr float kHitTestResolutionInMeter = 0.000001f;
+constexpr gfx::RectF kRelativeFullRectClip = {-0.5f, 0.5f, 1.0f, 1.0f};
 
 int AllocateId() {
   static int g_next_id = 1;
@@ -152,7 +153,8 @@ void UiElement::Render(UiElementRenderer* renderer,
 
 void UiElement::Initialize(SkiaSurfaceProvider* provider) {}
 
-void UiElement::OnHoverEnter(const gfx::PointF& position) {
+void UiElement::OnHoverEnter(const gfx::PointF& position,
+                             base::TimeTicks timestamp) {
   if (GetSounds().hover_enter != kSoundNone && audio_delegate_) {
     audio_delegate_->PlaySound(GetSounds().hover_enter);
   }
@@ -160,61 +162,76 @@ void UiElement::OnHoverEnter(const gfx::PointF& position) {
   if (event_handlers_.hover_enter) {
     event_handlers_.hover_enter.Run();
   } else if (parent() && bubble_events()) {
-    parent()->OnHoverEnter(position);
+    parent()->OnHoverEnter(position, timestamp);
   }
 }
 
-void UiElement::OnHoverLeave() {
+void UiElement::OnHoverLeave(base::TimeTicks timestamp) {
   if (GetSounds().hover_leave != kSoundNone && audio_delegate_) {
     audio_delegate_->PlaySound(GetSounds().hover_leave);
   }
   if (event_handlers_.hover_leave) {
     event_handlers_.hover_leave.Run();
   } else if (parent() && bubble_events()) {
-    parent()->OnHoverLeave();
+    parent()->OnHoverLeave(timestamp);
   }
 }
 
-void UiElement::OnMove(const gfx::PointF& position) {
-  if (GetSounds().move != kSoundNone && audio_delegate_) {
-    audio_delegate_->PlaySound(GetSounds().move);
+void UiElement::OnHoverMove(const gfx::PointF& position,
+                            base::TimeTicks timestamp) {
+  if (GetSounds().hover_move != kSoundNone && audio_delegate_) {
+    audio_delegate_->PlaySound(GetSounds().hover_move);
   }
   if (event_handlers_.hover_move) {
     event_handlers_.hover_move.Run(position);
   } else if (parent() && bubble_events()) {
-    parent()->OnMove(position);
+    parent()->OnHoverMove(position, timestamp);
   }
 }
 
-void UiElement::OnButtonDown(const gfx::PointF& position) {
+void UiElement::OnButtonDown(const gfx::PointF& position,
+                             base::TimeTicks timestamp) {
   if (GetSounds().button_down != kSoundNone && audio_delegate_) {
     audio_delegate_->PlaySound(GetSounds().button_down);
   }
   if (event_handlers_.button_down) {
     event_handlers_.button_down.Run();
   } else if (parent() && bubble_events()) {
-    parent()->OnButtonDown(position);
+    parent()->OnButtonDown(position, timestamp);
   }
 }
 
-void UiElement::OnButtonUp(const gfx::PointF& position) {
+void UiElement::OnButtonUp(const gfx::PointF& position,
+                           base::TimeTicks timestamp) {
   if (GetSounds().button_up != kSoundNone && audio_delegate_) {
     audio_delegate_->PlaySound(GetSounds().button_up);
   }
   if (event_handlers_.button_up) {
     event_handlers_.button_up.Run();
   } else if (parent() && bubble_events()) {
-    parent()->OnButtonUp(position);
+    parent()->OnButtonUp(position, timestamp);
   }
 }
 
-void UiElement::OnFlingCancel(std::unique_ptr<blink::WebGestureEvent> gesture,
+void UiElement::OnTouchMove(const gfx::PointF& position,
+                            base::TimeTicks timestamp) {
+  if (GetSounds().touch_move != kSoundNone && audio_delegate_) {
+    audio_delegate_->PlaySound(GetSounds().touch_move);
+  }
+  if (event_handlers_.touch_move) {
+    event_handlers_.touch_move.Run(position);
+  } else if (parent() && bubble_events()) {
+    parent()->OnTouchMove(position, timestamp);
+  }
+}
+
+void UiElement::OnFlingCancel(std::unique_ptr<InputEvent> gesture,
                               const gfx::PointF& position) {}
-void UiElement::OnScrollBegin(std::unique_ptr<blink::WebGestureEvent> gesture,
+void UiElement::OnScrollBegin(std::unique_ptr<InputEvent> gesture,
                               const gfx::PointF& position) {}
-void UiElement::OnScrollUpdate(std::unique_ptr<blink::WebGestureEvent> gesture,
+void UiElement::OnScrollUpdate(std::unique_ptr<InputEvent> gesture,
                                const gfx::PointF& position) {}
-void UiElement::OnScrollEnd(std::unique_ptr<blink::WebGestureEvent> gesture,
+void UiElement::OnScrollEnd(std::unique_ptr<InputEvent> gesture,
                             const gfx::PointF& position) {}
 
 void UiElement::OnFocusChanged(bool focused) {
@@ -241,27 +258,32 @@ void UiElement::UpdateInput(const EditedText& info) {
   NOTREACHED();
 }
 
-bool UiElement::DoBeginFrame(const gfx::Transform& head_pose) {
-  set_update_phase(UiElement::kDirty);
+bool UiElement::DoBeginFrame(const gfx::Transform& head_pose,
+                             bool force_animations_to_completion) {
   // TODO(mthiesse): This is overly cautious. We may have keyframe_models but
   // not trigger any updates, so we should refine this logic and have
   // Animation::Tick return a boolean. Similarly, the bindings update may have
   // had no visual effect and dirtiness should be related to setting properties
   // that do indeed cause visual updates.
   bool keyframe_models_updated = animation_.keyframe_models().size() > 0;
-  animation_.Tick(last_frame_time_);
+  if (force_animations_to_completion) {
+    animation_.FinishAll();
+  } else {
+    animation_.Tick(last_frame_time_);
+  }
   set_update_phase(kUpdatedAnimations);
   bool begin_frame_updated = OnBeginFrame(head_pose);
   UpdateComputedOpacity();
-  bool was_visible_at_any_point = IsVisible() || updated_visibility_this_frame_;
+  bool was_visible_at_any_point = IsVisible() ||
+                                  updated_visibility_this_frame_ ||
+                                  IsOrWillBeLocallyVisible();
   bool dirty = (begin_frame_updated || keyframe_models_updated ||
                 updated_bindings_this_frame_) &&
                was_visible_at_any_point;
 
-  if (!kEnableOptimizedTreeWalks || was_visible_at_any_point ||
-      visibility_bindings_depend_on_child_visibility_) {
+  if (was_visible_at_any_point) {
     for (auto& child : children_)
-      dirty |= child->DoBeginFrame(head_pose);
+      dirty |= child->DoBeginFrame(head_pose, force_animations_to_completion);
   }
 
   return dirty;
@@ -275,9 +297,11 @@ bool UiElement::PrepareToDraw() {
   return false;
 }
 
-bool UiElement::UpdateTexture() {
+bool UiElement::HasDirtyTexture() const {
   return false;
 }
+
+void UiElement::UpdateTexture() {}
 
 bool UiElement::IsHitTestable() const {
   return IsVisible() && hit_testable_;
@@ -301,7 +325,23 @@ void UiElement::SetVisibleImmediately(bool visible) {
 }
 
 bool UiElement::IsVisible() const {
-  return opacity() > 0.0f && computed_opacity() > 0.0f;
+  // Many things rely on checking element visibility, including tests.
+  // Therefore, support reporting visibility even if an element sits in an
+  // invisible portion of the tree.  We can infer that if the scene computed
+  // opacities, but this element did not, it must be invisible.
+  DCHECK(update_phase_ >= kUpdatedComputedOpacity ||
+         FrameLifecycle::phase() >= kUpdatedComputedOpacity);
+  // TODO(crbug.com/832216): we shouldn't need to check opacity() here.
+  return update_phase_ >= kUpdatedComputedOpacity && opacity() > 0.0f &&
+         computed_opacity() > 0.0f;
+}
+
+bool UiElement::IsVisibleAndOpaque() const {
+  DCHECK(update_phase_ >= kUpdatedComputedOpacity ||
+         FrameLifecycle::phase() >= kUpdatedComputedOpacity);
+  // TODO(crbug.com/832216): we shouldn't need to check opacity() here.
+  return update_phase_ >= kUpdatedComputedOpacity && opacity() == 1.0f &&
+         computed_opacity() == 1.0f;
 }
 
 bool UiElement::IsOrWillBeLocallyVisible() const {
@@ -449,13 +489,12 @@ float UiElement::ComputedAndLocalOpacityForTest() const {
 }
 
 bool UiElement::LocalHitTest(const gfx::PointF& point) const {
-  if (point.x() < 0.0f || point.x() > 1.0f || point.y() < 0.0f ||
-      point.y() > 1.0f) {
+  if (!gfx::RectF(0.0f, 0.0f, 1.0f, 1.0f).Contains(point) ||
+      !GetClipRect().Contains(point))
     return false;
-  } else if (corner_radii_.IsZero()) {
-    return point.x() >= 0.0f && point.x() <= 1.0f && point.y() >= 0.0f &&
-           point.y() <= 1.0f;
-  }
+
+  if (corner_radii_.IsZero())
+    return true;
 
   float width = size().width();
   float height = size().height();
@@ -628,11 +667,6 @@ void UiElement::SetSounds(Sounds sounds, AudioDelegate* delegate) {
 
 void UiElement::OnUpdatedWorldSpaceTransform() {}
 
-// TODO(cgrant): Remove this method, and use bindings instead.
-gfx::SizeF UiElement::stale_size() const {
-  return size_;
-}
-
 void UiElement::AddChild(std::unique_ptr<UiElement> child) {
   for (UiElement* current = this; current; current = current->parent())
     current->set_descendants_updated(true);
@@ -641,6 +675,12 @@ void UiElement::AddChild(std::unique_ptr<UiElement> child) {
 }
 
 std::unique_ptr<UiElement> UiElement::RemoveChild(UiElement* to_remove) {
+  return ReplaceChild(to_remove, nullptr);
+}
+
+std::unique_ptr<UiElement> UiElement::ReplaceChild(
+    UiElement* to_remove,
+    std::unique_ptr<UiElement> to_add) {
   for (UiElement* current = this; current; current = current->parent())
     current->set_descendants_updated(true);
   DCHECK_EQ(this, to_remove->parent_);
@@ -654,8 +694,13 @@ std::unique_ptr<UiElement> UiElement::RemoveChild(UiElement* to_remove) {
   DCHECK(it != std::end(children_));
 
   std::unique_ptr<UiElement> removed(it->release());
-  children_.erase(it);
-  DCHECK_NE(old_size, children_.size());
+  if (to_add) {
+    to_add->parent_ = this;
+    *it = std::move(to_add);
+  } else {
+    children_.erase(it);
+    DCHECK_EQ(old_size - 1, children_.size());
+  }
   return removed;
 }
 
@@ -673,7 +718,7 @@ void UiElement::UpdateBindings() {
   should_recur |= IsOrWillBeLocallyVisible();
 
   set_update_phase(kUpdatedBindings);
-  if (!should_recur && kEnableOptimizedTreeWalks)
+  if (!should_recur)
     return;
 
   for (auto& child : children_)
@@ -777,32 +822,50 @@ bool UiElement::IsAnimatingProperty(TargetProperty property) const {
 }
 
 bool UiElement::SizeAndLayOut() {
-  if (!IsVisible() && kEnableOptimizedTreeWalks)
+  if (!IsVisible() && !IsOrWillBeLocallyVisible())
     return false;
-  bool changed = false;
-  for (auto& child : children_)
-    changed |= child->SizeAndLayOut();
-  changed |= PrepareToDraw();
-  set_update_phase(kUpdatedSize);
-  DoLayOutChildren();
-  set_update_phase(kUpdatedLayout);
-  return changed;
-}
 
-void UiElement::DoLayOutChildren() {
-  LayOutChildren();
-  if (!bounds_contain_children_) {
+  // May be overridden by layout elements.
+  bool changed = SizeAndLayOutChildren();
+
+  changed |= PrepareToDraw();
+
+  LayOutContributingChildren();
+
+  if (bounds_contain_children_) {
+    gfx::RectF bounds = ComputeContributingChildrenBounds();
+    if (bounds.size() != GetTargetSize())
+      SetSize(bounds.width(), bounds.height());
+  } else {
     DCHECK_EQ(0.0f, right_padding_);
     DCHECK_EQ(0.0f, left_padding_);
     DCHECK_EQ(0.0f, top_padding_);
     DCHECK_EQ(0.0f, bottom_padding_);
-    return;
+  }
+  set_update_phase(kUpdatedSize);
+
+  LayOutNonContributingChildren();
+
+  if (clips_descendants_) {
+    clip_rect_ = kRelativeFullRectClip;
+    ClipChildren();
   }
 
-  bool requires_relayout = false;
+  set_update_phase(kUpdatedLayout);
+  return changed;
+}
+
+bool UiElement::SizeAndLayOutChildren() {
+  bool changed = false;
+  for (auto& child : children_)
+    changed |= child->SizeAndLayOut();
+  return changed;
+}
+
+gfx::RectF UiElement::ComputeContributingChildrenBounds() {
   gfx::RectF bounds;
   for (auto& child : children_) {
-    if (!child->IsVisible())
+    if (!child->IsVisible() || !child->contributes_to_parent_bounds())
       continue;
 
     gfx::RectF outer_bounds(child->size());
@@ -812,11 +875,7 @@ void UiElement::DoLayOutChildren() {
                          child->right_padding_, child->top_padding_);
     }
     gfx::SizeF size = inner_bounds.size();
-    if (child->x_anchoring() != NONE || child->y_anchoring() != NONE) {
-      DCHECK(!child->contributes_to_parent_bounds());
-      requires_relayout = true;
-    }
-    if (size.IsEmpty() || !child->contributes_to_parent_bounds())
+    if (size.IsEmpty())
       continue;
 
     gfx::Vector2dF delta =
@@ -843,20 +902,30 @@ void UiElement::DoLayOutChildren() {
     world_space_transform_dirty_ = true;
     local_origin_ = bounds.origin();
   }
-  if (bounds.size() == GetTargetSize())
-    return;
 
-  SetSize(bounds.width(), bounds.height());
-
-  if (requires_relayout)
-    LayOutChildren();
+  return bounds;
 }
 
-void UiElement::LayOutChildren() {
+void UiElement::LayOutContributingChildren() {
+  for (auto& child : children_) {
+    if (!child->IsVisible() || !child->contributes_to_parent_bounds())
+      continue;
+    // Nothing to actually do since we aren't a layout object.  Children that
+    // contribute to parent bounds cannot center or anchor to the edge of the
+    // parent.
+    DCHECK_EQ(child->x_centering(), NONE) << child->DebugName();
+    DCHECK_EQ(child->y_centering(), NONE) << child->DebugName();
+    DCHECK_EQ(child->x_anchoring(), NONE) << child->DebugName();
+    DCHECK_EQ(child->y_anchoring(), NONE) << child->DebugName();
+  }
+}
+
+void UiElement::LayOutNonContributingChildren() {
   DCHECK_LE(kUpdatedSize, update_phase_);
   for (auto& child : children_) {
-    if (!child->IsVisible())
+    if (!child->IsVisible() || child->contributes_to_parent_bounds())
       continue;
+
     // To anchor a child, use the parent's size to find its edge.
     float x_offset = 0.0f;
     if (child->x_anchoring() == LEFT) {
@@ -880,6 +949,49 @@ void UiElement::LayOutChildren() {
     }
     child->SetLayoutOffset(x_offset, y_offset);
   }
+}
+
+void UiElement::ClipChildren() {
+  ClipChildren(GetAbsoluteClipRect());
+}
+
+void UiElement::ClipChildren(const gfx::RectF& abs_clip) {
+  for (auto& child : children_) {
+    // Nested clipping is not supported yet.
+    DCHECK(!child->clips_descendants_);
+
+    if (!child->IsVisible())
+      continue;
+
+    DCHECK(child->LocalTransform().IsScaleOrTranslation());
+    auto child_abs_clip = abs_clip;
+    child->LocalTransform().TransformRectReverse(&child_abs_clip);
+    if (!child->size().IsEmpty()) {
+      child->clip_rect_ = child_abs_clip;
+      child->clip_rect_.Scale(1.0f / child->size().width(),
+                              1.0f / child->size().height());
+    } else {
+      child->clip_rect_ = kRelativeFullRectClip;
+    }
+    child->ClipChildren(child_abs_clip);
+  }
+}
+
+gfx::RectF UiElement::GetAbsoluteClipRect() const {
+  auto result = clip_rect_;
+  result.Scale(size().width(), size().height());
+  return result;
+}
+
+gfx::RectF UiElement::GetClipRect() const {
+  auto corner_origin = clip_rect_.origin() - gfx::Vector2dF(-0.5f, 0.5f);
+  return gfx::RectF({corner_origin.x(), -corner_origin.y()}, clip_rect_.size());
+}
+
+void UiElement::SetClipRect(const gfx::RectF& rect) {
+  auto new_origin = gfx::PointF(rect.origin().x(), -rect.origin().y()) +
+                    gfx::Vector2dF(-0.5f, 0.5f);
+  clip_rect_ = gfx::RectF(new_origin, rect.size());
 }
 
 UiElement* UiElement::FirstLaidOutChild() const {
@@ -906,13 +1018,13 @@ void UiElement::UpdateComputedOpacity() {
   updated_visibility_this_frame_ = IsVisible() != was_visible;
 }
 
-void UiElement::UpdateWorldSpaceTransform(bool parent_changed) {
-  if (!IsVisible() && !updated_visibility_this_frame_ &&
-      kEnableOptimizedTreeWalks)
-    return;
+bool UiElement::UpdateWorldSpaceTransform(bool parent_changed) {
+  if (!IsVisible() && !updated_visibility_this_frame_)
+    return false;
 
   bool changed = false;
-  if (ShouldUpdateWorldSpaceTransform(parent_changed)) {
+  bool should_update = ShouldUpdateWorldSpaceTransform(parent_changed);
+  if (should_update) {
     gfx::Transform transform;
     transform.Translate(local_origin_.x(), local_origin_.y());
 
@@ -929,17 +1041,23 @@ void UiElement::UpdateWorldSpaceTransform(bool parent_changed) {
     }
 
     transform.ConcatTransform(inheritable);
+    changed = !transform.ApproximatelyEqual(world_space_transform_) ||
+              !inheritable.ApproximatelyEqual(inheritable_transform_);
     set_world_space_transform(transform);
     set_inheritable_transform(inheritable);
-    changed = true;
   }
 
+  bool child_changed = false;
   set_update_phase(kUpdatedWorldSpaceTransform);
   for (auto& child : children_) {
-    child->UpdateWorldSpaceTransform(changed);
+    // TODO(crbug.com/850260): it's unfortunate that we're not passing down the
+    // same dirtiness signal that we return. I.e., we'd ideally use |changed|
+    // here.
+    child_changed |= child->UpdateWorldSpaceTransform(should_update);
   }
 
   OnUpdatedWorldSpaceTransform();
+  return changed || child_changed;
 }
 
 gfx::Transform UiElement::LocalTransform() const {

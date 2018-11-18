@@ -23,6 +23,11 @@ enum ContentSettingsType {
   CONTENT_SETTINGS_TYPE_IMAGES,
   CONTENT_SETTINGS_TYPE_JAVASCRIPT,
   CONTENT_SETTINGS_TYPE_PLUGINS,
+
+  // This setting governs both popups and unwanted redirects like tab-unders and
+  // framebusting.
+  // TODO(csharrison): Consider renaming it to POPUPS_AND_REDIRECTS, but it
+  // might not be worth the trouble.
   CONTENT_SETTINGS_TYPE_POPUPS,
   CONTENT_SETTINGS_TYPE_GEOLOCATION,
   CONTENT_SETTINGS_TYPE_NOTIFICATIONS,
@@ -111,6 +116,11 @@ enum ContentSettingsType {
   // to access USB devices. If this is allowed specific device permissions are
   // stored under CONTENT_SETTINGS_TYPE_USB_CHOOSER_DATA.
   CONTENT_SETTINGS_TYPE_USB_GUARD,
+
+  // Nothing is stored in this setting at present. Please refer to
+  // BackgroundFetchPermissionContext for details on how this permission
+  // is ascertained.
+  CONTENT_SETTINGS_TYPE_BACKGROUND_FETCH,
 
   CONTENT_SETTINGS_NUM_TYPES,
 };

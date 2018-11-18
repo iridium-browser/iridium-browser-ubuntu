@@ -13,14 +13,11 @@
 #include "Test.h"
 #include "sk_tool_utils.h"
 
-#if SK_SUPPORT_GPU
 #include "GrBackendSurface.h"
 #include "GrContext.h"
 #include "GrContextPriv.h"
 #include "GrGpu.h"
 #include "GrProxyProvider.h"
-#include "GrTest.h"
-#endif
 
 #include <initializer_list>
 
@@ -434,7 +431,6 @@ DEF_TEST(WritePixels, reporter) {
     }
 }
 
-#if SK_SUPPORT_GPU
 static void test_write_pixels(skiatest::Reporter* reporter, GrContext* context, int sampleCnt) {
     const SkImageInfo ii = SkImageInfo::MakeN32Premul(DEV_W, DEV_H);
     for (auto& origin : { kTopLeft_GrSurfaceOrigin, kBottomLeft_GrSurfaceOrigin }) {
@@ -461,7 +457,7 @@ static void test_write_pixels_non_texture(skiatest::Reporter* reporter, GrContex
 
     for (auto& origin : { kTopLeft_GrSurfaceOrigin, kBottomLeft_GrSurfaceOrigin }) {
         GrBackendTexture backendTex = gpu->createTestingOnlyBackendTexture(
-                nullptr, DEV_W, DEV_H, kSkia8888_GrPixelConfig, true, GrMipMapped::kNo);
+                nullptr, DEV_W, DEV_H, GrColorType::kRGBA_8888, true, GrMipMapped::kNo);
         if (!backendTex.isValid()) {
             continue;
         }
@@ -572,6 +568,3 @@ DEF_GPUTEST_FOR_RENDERING_CONTEXTS(WritePixelsPendingIO, reporter, ctxInfo) {
 
     REPORTER_ASSERT(reporter, isCorrect);
 }
-
-
-#endif

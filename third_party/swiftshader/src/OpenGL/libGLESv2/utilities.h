@@ -23,6 +23,8 @@
 
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
+#include <GL/glcorearb.h>
+#include <GL/glext.h>
 
 #include <string>
 
@@ -42,26 +44,27 @@ namespace es2
 
 	int AllocateFirstFreeBits(unsigned int *bits, unsigned int allocationSize, unsigned int bitsSize);
 
-	bool IsCompressed(GLint intenalformat, GLint clientVersion);
+	bool IsCompressed(GLint intenalformat);
 	bool IsSizedInternalFormat(GLint internalformat);   // Not compressed.
 	GLenum ValidateSubImageParams(bool compressed, bool copy, GLenum target, GLint level, GLint xoffset, GLint yoffset,
-	                              GLsizei width, GLsizei height, GLenum format, GLenum type, Texture *texture, GLint clientVersion);
+	                              GLsizei width, GLsizei height, GLenum format, GLenum type, Texture *texture);
 	GLenum ValidateSubImageParams(bool compressed, bool copy, GLenum target, GLint level, GLint xoffset, GLint yoffset, GLint zoffset,
-	                              GLsizei width, GLsizei height, GLsizei depth, GLenum format, GLenum type, Texture *texture, GLint clientVersion);
+	                              GLsizei width, GLsizei height, GLsizei depth, GLenum format, GLenum type, Texture *texture);
 	bool ValidateCopyFormats(GLenum textureFormat, GLenum colorbufferFormat);
-	bool IsValidReadPixelsFormatType(const Framebuffer *framebuffer, GLenum format, GLenum type, GLint clientVersion);
-	bool IsDepthTexture(GLenum format);
-	bool IsStencilTexture(GLenum format);
+	bool ValidateReadPixelsFormatType(const Framebuffer *framebuffer, GLenum format, GLenum type);
+	bool IsDepthTexture(GLint format);
+	bool IsStencilTexture(GLint format);
 	bool IsCubemapTextureTarget(GLenum target);
 	int CubeFaceIndex(GLenum cubeTarget);
 	bool IsTextureTarget(GLenum target);
-	GLenum ValidateTextureFormatType(GLenum format, GLenum type, GLint internalformat, GLenum target, GLint clientVersion);
+	GLenum ValidateTextureFormatType(GLenum format, GLenum type, GLint internalformat, GLenum target);
 	size_t GetTypeSize(GLenum type);
+	sw::Format ConvertReadFormatType(GLenum format, GLenum type);
 
-	bool IsColorRenderable(GLint internalformat, GLint clientVersion);
-	bool IsDepthRenderable(GLint internalformat, GLint clientVersion);
-	bool IsStencilRenderable(GLint internalformat, GLint clientVersion);
-	bool IsMipmappable(GLint internalformat, GLint clientVersion);
+	bool IsColorRenderable(GLint internalformat);
+	bool IsDepthRenderable(GLint internalformat);
+	bool IsStencilRenderable(GLint internalformat);
+	bool IsMipmappable(GLint internalformat);
 
 	GLuint GetAlphaSize(GLint internalformat);
 	GLuint GetRedSize(GLint internalformat);

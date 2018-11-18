@@ -21,14 +21,20 @@
 #include <unistd.h>
 
 #include "base/logging.h"
+#include "client/annotation.h"
+#include "client/annotation_list.h"
 #include "client/crash_report_database.h"
 #include "client/simulate_crash.h"
 #include "gtest/gtest.h"
-#include "test/multiprocess_exec.h"
+#include "snapshot/annotation_snapshot.h"
+#include "snapshot/minidump/process_snapshot_minidump.h"
+#include "snapshot/sanitized/sanitization_information.h"
 #include "test/multiprocess.h"
+#include "test/multiprocess_exec.h"
 #include "test/scoped_temp_dir.h"
 #include "test/test_paths.h"
 #include "util/file/file_io.h"
+#include "util/file/filesystem.h"
 #include "util/linux/exception_handler_client.h"
 #include "util/linux/exception_information.h"
 #include "util/misc/address_types.h"
@@ -85,13 +91,39 @@ TEST(CrashpadClient, SimulateCrash) {
     std::vector<CrashReportDatabase::Report> reports;
     ASSERT_EQ(database->GetPendingReports(&reports),
               CrashReportDatabase::kNoError);
-    EXPECT_EQ(reports.size(), 0u);
+    EXPECT_EQ(reports.size(), 1u);
 
     reports.clear();
     ASSERT_EQ(database->GetCompletedReports(&reports),
               CrashReportDatabase::kNoError);
-    EXPECT_EQ(reports.size(), 1u);
+    EXPECT_EQ(reports.size(), 0u);
   }
+}
+
+constexpr char kTestAnnotationName[] = "name_of_annotation";
+constexpr char kTestAnnotationValue[] = "value_of_annotation";
+
+void ValidateDump(const CrashReportDatabase::UploadReport* report) {
+  ProcessSnapshotMinidump minidump_snapshot;
+  ASSERT_TRUE(minidump_snapshot.Initialize(report->Reader()));
+
+  for (const ModuleSnapshot* module : minidump_snapshot.Modules()) {
+    for (const AnnotationSnapshot& annotation : module->AnnotationObjects()) {
+      if (static_cast<Annotation::Type>(annotation.type) !=
+          Annotation::Type::kString) {
+        continue;
+      }
+
+      if (annotation.name == kTestAnnotationName) {
+        std::string value(
+            reinterpret_cast<const char*>(annotation.value.data()),
+            annotation.value.size());
+        EXPECT_EQ(value, kTestAnnotationValue);
+        return;
+      }
+    }
+  }
+  ADD_FAILURE();
 }
 
 CRASHPAD_CHILD_TEST_MAIN(StartHandlerAtCrashChild) {
@@ -105,6 +137,11 @@ CRASHPAD_CHILD_TEST_MAIN(StartHandlerAtCrashChild) {
 
   base::FilePath handler_path = TestPaths::Executable().DirName().Append(
       FILE_PATH_LITERAL("crashpad_handler"));
+
+  crashpad::AnnotationList::Register();
+
+  static StringAnnotation<32> test_annotation(kTestAnnotationName);
+  test_annotation.Set(kTestAnnotationValue);
 
   crashpad::CrashpadClient client;
   if (!client.StartHandlerAtCrash(handler_path,
@@ -145,13 +182,19 @@ class StartHandlerAtCrashTest : public MultiprocessExec {
     ASSERT_TRUE(database);
 
     std::vector<CrashReportDatabase::Report> reports;
-    ASSERT_EQ(database->GetPendingReports(&reports),
+    ASSERT_EQ(database->GetCompletedReports(&reports),
               CrashReportDatabase::kNoError);
     EXPECT_EQ(reports.size(), 0u);
 
-    ASSERT_EQ(database->GetCompletedReports(&reports),
+    reports.clear();
+    ASSERT_EQ(database->GetPendingReports(&reports),
               CrashReportDatabase::kNoError);
     EXPECT_EQ(reports.size(), 1u);
+
+    std::unique_ptr<const CrashReportDatabase::UploadReport> report;
+    ASSERT_EQ(database->GetReportForUploading(reports[0].uuid, &report),
+              CrashReportDatabase::kNoError);
+    ValidateDump(report.get());
   }
 
   DISALLOW_COPY_AND_ASSIGN(StartHandlerAtCrashTest);
@@ -168,7 +211,9 @@ class StartHandlerForClientTest {
   StartHandlerForClientTest() = default;
   ~StartHandlerForClientTest() = default;
 
-  bool Initialize() {
+  bool Initialize(bool sanitize) {
+    sanitize_ = sanitize;
+
     int socks[2];
     if (socketpair(AF_UNIX, SOCK_STREAM, 0, socks) != 0) {
       PLOG(ERROR) << "socketpair";
@@ -211,18 +256,23 @@ class StartHandlerForClientTest {
     ASSERT_TRUE(database);
 
     std::vector<CrashReportDatabase::Report> reports;
-    ASSERT_EQ(database->GetPendingReports(&reports),
+    ASSERT_EQ(database->GetCompletedReports(&reports),
               CrashReportDatabase::kNoError);
     EXPECT_EQ(reports.size(), 0u);
 
-    ASSERT_EQ(database->GetCompletedReports(&reports),
+    reports.clear();
+    ASSERT_EQ(database->GetPendingReports(&reports),
               CrashReportDatabase::kNoError);
-    EXPECT_EQ(reports.size(), 1u);
+    if (sanitize_) {
+      EXPECT_EQ(reports.size(), 0u);
+    } else {
+      EXPECT_EQ(reports.size(), 1u);
+    }
   }
 
   bool InstallHandler() {
     auto signal_handler = SandboxedHandler::Get();
-    return signal_handler->Initialize(client_sock_.get());
+    return signal_handler->Initialize(client_sock_.get(), sanitize_);
   }
 
  private:
@@ -235,8 +285,9 @@ class StartHandlerForClientTest {
       return instance;
     }
 
-    bool Initialize(FileHandle client_sock) {
+    bool Initialize(FileHandle client_sock, bool sanitize) {
       client_sock_ = client_sock;
+      sanitize_ = sanitize;
       return Signals::InstallCrashHandlers(HandleCrash, 0, nullptr);
     }
 
@@ -259,10 +310,19 @@ class StartHandlerForClientTest {
               context);
       exception_information.thread_id = syscall(SYS_gettid);
 
-      ClientInformation info = {};
+      ClientInformation info;
       info.exception_information_address =
           FromPointerCast<decltype(info.exception_information_address)>(
               &exception_information);
+
+      SanitizationInformation sanitization_info = {};
+      if (state->sanitize_) {
+        info.sanitization_information_address =
+            FromPointerCast<VMAddress>(&sanitization_info);
+        // Target a non-module address to prevent a crash dump.
+        sanitization_info.target_module_address =
+            FromPointerCast<VMAddress>(&sanitization_info);
+      }
 
       ExceptionHandlerClient handler_client(state->client_sock_);
       CHECK_EQ(handler_client.RequestCrashDump(info), 0);
@@ -271,6 +331,7 @@ class StartHandlerForClientTest {
     }
 
     FileHandle client_sock_;
+    bool sanitize_;
 
     DISALLOW_COPY_AND_ASSIGN(SandboxedHandler);
   };
@@ -278,6 +339,7 @@ class StartHandlerForClientTest {
   ScopedTempDir temp_dir_;
   ScopedFileHandle client_sock_;
   ScopedFileHandle server_sock_;
+  bool sanitize_;
 
   DISALLOW_COPY_AND_ASSIGN(StartHandlerForClientTest);
 };
@@ -288,9 +350,9 @@ class StartHandlerForChildTest : public Multiprocess {
   StartHandlerForChildTest() = default;
   ~StartHandlerForChildTest() = default;
 
-  bool Initialize() {
+  bool Initialize(bool sanitize) {
     SetExpectedChildTerminationBuiltinTrap();
-    return test_state_.Initialize();
+    return test_state_.Initialize(sanitize);
   }
 
  private:
@@ -318,7 +380,13 @@ class StartHandlerForChildTest : public Multiprocess {
 
 TEST(CrashpadClient, StartHandlerForChild) {
   StartHandlerForChildTest test;
-  ASSERT_TRUE(test.Initialize());
+  ASSERT_TRUE(test.Initialize(/* sanitize= */ false));
+  test.Run();
+}
+
+TEST(CrashpadClient, SanitizedChild) {
+  StartHandlerForChildTest test;
+  ASSERT_TRUE(test.Initialize(/* sanitize= */ true));
   test.Run();
 }
 

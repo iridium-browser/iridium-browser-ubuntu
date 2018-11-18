@@ -18,7 +18,7 @@ class SwitchProControllerBase : public AbstractHapticGamepad {
   SwitchProControllerBase() = default;
   ~SwitchProControllerBase() override;
 
-  static bool IsSwitchPro(int vendor_id, int product_id);
+  static bool IsSwitchPro(uint16_t vendor_id, uint16_t product_id);
 
   void DoShutdown() override;
 
@@ -35,7 +35,6 @@ class SwitchProControllerBase : public AbstractHapticGamepad {
 
  private:
   uint32_t counter_ = 0;
-  uint32_t report_id_ = 0;
   bool force_usb_hid_ = false;
   bool sent_handshake_ = false;
 };

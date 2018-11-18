@@ -7,6 +7,7 @@
 #include "base/files/file_util.h"
 #include "base/path_service.h"
 #include "base/strings/utf_string_conversion_utils.h"
+#include "chrome/browser/vr/gl_texture_location.h"
 #include "chrome/browser/vr/skia_surface_provider.h"
 #include "chrome/browser/vr/ui_element_renderer.h"
 #include "third_party/skia/include/core/SkCanvas.h"
@@ -29,7 +30,7 @@ void TestKeyboardRenderer::Initialize(SkiaSurfaceProvider* provider,
   // is provided by the physical keyboard.
   // Read and decode keyboard image.
   base::FilePath dir;
-  PathService::Get(base::DIR_CURRENT, &dir);
+  base::PathService::Get(base::DIR_CURRENT, &dir);
   dir = dir.Append(base::FilePath().AppendASCII(kKeyboardImagePath));
   DCHECK(base::PathExists(dir));
   std::string file_contents;
@@ -50,9 +51,9 @@ void TestKeyboardRenderer::Initialize(SkiaSurfaceProvider* provider,
 void TestKeyboardRenderer::Draw(const CameraModel& model,
                                 const gfx::Transform& world_space_transform) {
   renderer_->DrawTexturedQuad(
-      texture_handle_, 0, UiElementRenderer::kTextureLocationLocal,
+      texture_handle_, 0, kGlTextureLocationLocal,
       model.view_proj_matrix * world_space_transform, gfx::RectF(0, 0, 1, 1), 1,
-      {drawn_size_.width(), drawn_size_.height()}, 0);
+      {drawn_size_.width(), drawn_size_.height()}, 0, true /* blend */);
 }
 
 }  // namespace vr

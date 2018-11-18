@@ -4,9 +4,18 @@
 
 #include "device/bluetooth/chromeos/bluetooth_utils.h"
 
+#include "base/feature_list.h"
+#include "device/base/features.h"
+
 namespace device {
 
 namespace {
+
+// https://www.bluetooth.com/specifications/gatt/services.
+const char kHIDServiceUUID[] = "1812";
+
+// https://www.bluetooth.com/specifications/assigned-numbers/16-bit-uuids-for-sdos.
+const char kSecurityKeyServiceUUID[] = "FFFD";
 
 // Get limited number of devices from |devices| and
 // prioritize paired/connecting devices over other devices.
@@ -40,10 +49,34 @@ BluetoothAdapter::DeviceList GetLimitedNumDevices(
 // Filter out unknown devices from the list.
 BluetoothAdapter::DeviceList FilterUnknownDevices(
     const BluetoothAdapter::DeviceList& devices) {
+  if (base::FeatureList::IsEnabled(device::kUnfilteredBluetoothDevices))
+    return devices;
+
   BluetoothAdapter::DeviceList result;
   for (BluetoothDevice* device : devices) {
-    if (device->GetDeviceType() != device::BluetoothDeviceType::UNKNOWN)
-      result.push_back(device);
+    switch (device->GetType()) {
+      // Device with invalid bluetooth transport is filtered out.
+      case BLUETOOTH_TRANSPORT_INVALID:
+        break;
+      // For LE devices, check the service UUID to determine if it supports HID
+      // or second factor authenticator (security key).
+      case BLUETOOTH_TRANSPORT_LE:
+        if (base::ContainsKey(device->GetUUIDs(),
+                              device::BluetoothUUID(kHIDServiceUUID)) ||
+            base::ContainsKey(device->GetUUIDs(),
+                              device::BluetoothUUID(kSecurityKeyServiceUUID))) {
+          result.push_back(device);
+        }
+        break;
+      // For classic and dual mode devices, only filter out if the name is empty
+      // because the device could have an unknown or even known type and still
+      // also provide audio/HID functionality.
+      case BLUETOOTH_TRANSPORT_CLASSIC:
+      case BLUETOOTH_TRANSPORT_DUAL:
+        if (device->GetName())
+          result.push_back(device);
+        break;
+    }
   }
   return result;
 }

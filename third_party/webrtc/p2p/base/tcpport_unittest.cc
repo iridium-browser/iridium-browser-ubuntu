@@ -14,6 +14,7 @@
 #include "p2p/base/basicpacketsocketfactory.h"
 #include "p2p/base/tcpport.h"
 #include "rtc_base/gunit.h"
+#include "rtc_base/helpers.h"
 #include "rtc_base/thread.h"
 #include "rtc_base/virtualsocketserver.h"
 
@@ -54,8 +55,7 @@ class TCPPortTest : public testing::Test, public sigslot::has_slots<> {
         main_(ss_.get()),
         socket_factory_(rtc::Thread::Current()),
         username_(rtc::CreateRandomString(ICE_UFRAG_LENGTH)),
-        password_(rtc::CreateRandomString(ICE_PWD_LENGTH)) {
-  }
+        password_(rtc::CreateRandomString(ICE_PWD_LENGTH)) {}
 
   rtc::Network* MakeNetwork(const SocketAddress& addr) {
     networks_.emplace_back("unittest", "unittest", addr.ipaddr(), 32);

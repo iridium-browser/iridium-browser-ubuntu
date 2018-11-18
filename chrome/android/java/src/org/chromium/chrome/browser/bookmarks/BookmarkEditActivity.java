@@ -17,7 +17,6 @@ import org.chromium.chrome.R;
 import org.chromium.chrome.browser.SynchronousInitializationActivity;
 import org.chromium.chrome.browser.bookmarks.BookmarkBridge.BookmarkItem;
 import org.chromium.chrome.browser.bookmarks.BookmarkBridge.BookmarkModelObserver;
-import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.chrome.browser.widget.EmptyAlertEditText;
 import org.chromium.chrome.browser.widget.TintedDrawable;
 import org.chromium.components.bookmarks.BookmarkId;
@@ -87,15 +86,10 @@ public class BookmarkEditActivity extends SynchronousInitializationActivity {
         updateViewContent(false);
 
         View shadow = findViewById(R.id.shadow);
-        if (!FeatureUtilities.isChromeModernDesignEnabled()) {
-            shadow.setVisibility(View.VISIBLE);
-            toolbar.setTitleTextAppearance(toolbar.getContext(), R.style.BlackHeadline2);
-        } else {
-            View scrollView = findViewById(R.id.scroll_view);
-            scrollView.getViewTreeObserver().addOnScrollChangedListener(() -> {
-                shadow.setVisibility(scrollView.getScrollY() > 0 ? View.VISIBLE : View.GONE);
-            });
-        }
+        View scrollView = findViewById(R.id.scroll_view);
+        scrollView.getViewTreeObserver().addOnScrollChangedListener(() -> {
+            shadow.setVisibility(scrollView.getScrollY() > 0 ? View.VISIBLE : View.GONE);
+        });
     }
 
     /**
@@ -118,7 +112,7 @@ public class BookmarkEditActivity extends SynchronousInitializationActivity {
     public boolean onCreateOptionsMenu(Menu menu) {
         mDeleteButton = menu.add(R.string.bookmark_action_bar_delete)
                                 .setIcon(TintedDrawable.constructTintedDrawable(
-                                        getResources(), R.drawable.ic_delete_white_24dp))
+                                        this, R.drawable.ic_delete_white_24dp))
                                 .setShowAsActionFlags(MenuItem.SHOW_AS_ACTION_IF_ROOM);
 
         return super.onCreateOptionsMenu(menu);

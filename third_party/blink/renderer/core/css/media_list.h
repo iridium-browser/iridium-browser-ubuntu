@@ -24,7 +24,6 @@
 
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/css/media_query.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
@@ -99,7 +98,7 @@ class MediaList final : public ScriptWrappable {
 
   void Reattach(scoped_refptr<MediaQuerySet>);
 
-  void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  private:
   MediaList(scoped_refptr<MediaQuerySet>, CSSStyleSheet* parent_sheet);

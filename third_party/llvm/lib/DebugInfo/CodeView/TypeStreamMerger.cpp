@@ -226,7 +226,10 @@ bool TypeStreamMerger::remapIndexFallback(TypeIndex &Idx,
   if (IsSecondPass && MapPos >= Map.size()) {
     // FIXME: Print a more useful error. We can give the current record and the
     // index that we think its pointing to.
-    LastError = joinErrors(std::move(*LastError), errorCorruptRecord());
+    if (LastError)
+      LastError = joinErrors(std::move(*LastError), errorCorruptRecord());
+    else
+      LastError = errorCorruptRecord();
   }
 
   ++NumBadIndices;
@@ -323,7 +326,7 @@ Error TypeStreamMerger::doit(const CVTypeArray &Types) {
            "second pass found more bad indices");
     if (!LastError && NumBadIndices == BadIndicesRemaining) {
       return llvm::make_error<CodeViewError>(
-          cv_error_code::corrupt_record, "input type graph contains cycles");
+          cv_error_code::corrupt_record, "Input type graph contains cycles");
     }
   }
 

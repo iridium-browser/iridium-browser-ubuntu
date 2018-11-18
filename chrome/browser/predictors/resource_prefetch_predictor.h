@@ -149,14 +149,19 @@ class ResourcePrefetchPredictor : public history::HistoryServiceObserver {
   virtual void RecordPageRequestSummary(
       std::unique_ptr<PageRequestSummary> summary);
 
+  // Deletes all URLs from the predictor database and caches.
+  void DeleteAllUrls();
+
  private:
   friend class LoadingPredictor;
   friend class ::PredictorsHandler;
   friend class LoadingDataCollector;
   friend class ResourcePrefetchPredictorTest;
-  friend class ResourcePrefetchPredictorBrowserTest;
+  friend class PredictorInitializer;
 
   FRIEND_TEST_ALL_PREFIXES(ResourcePrefetchPredictorTest, DeleteUrls);
+  FRIEND_TEST_ALL_PREFIXES(ResourcePrefetchPredictorTest,
+                           DeleteAllUrlsUninitialized);
   FRIEND_TEST_ALL_PREFIXES(ResourcePrefetchPredictorTest,
                            LazilyInitializeEmpty);
   FRIEND_TEST_ALL_PREFIXES(ResourcePrefetchPredictorTest,
@@ -214,9 +219,6 @@ class ResourcePrefetchPredictor : public history::HistoryServiceObserver {
   // database has been read.
   void OnHistoryAndCacheLoaded();
 
-  // Deletes all URLs from the predictor database and caches.
-  void DeleteAllUrls();
-
   // Deletes data for the input |urls| and their corresponding hosts from the
   // predictor database and caches.
   void DeleteUrls(const history::URLRows& urls);
@@ -237,10 +239,7 @@ class ResourcePrefetchPredictor : public history::HistoryServiceObserver {
 
   // history::HistoryServiceObserver:
   void OnURLsDeleted(history::HistoryService* history_service,
-                     bool all_history,
-                     bool expired,
-                     const history::URLRows& deleted_rows,
-                     const std::set<GURL>& favicon_urls) override;
+                     const history::DeletionInfo& deletion_info) override;
   void OnHistoryServiceLoaded(
       history::HistoryService* history_service) override;
 
@@ -265,6 +264,10 @@ class ResourcePrefetchPredictor : public history::HistoryServiceObserver {
 
   ScopedObserver<history::HistoryService, history::HistoryServiceObserver>
       history_service_observer_;
+
+  // Indicates if all predictors data should be deleted after the
+  // initialization is completed.
+  bool delete_all_data_requested_ = false;
 
   base::WeakPtrFactory<ResourcePrefetchPredictor> weak_factory_;
 

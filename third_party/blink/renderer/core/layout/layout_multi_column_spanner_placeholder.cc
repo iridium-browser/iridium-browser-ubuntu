@@ -46,7 +46,7 @@ void LayoutMultiColumnSpannerPlaceholder::
   if (FlowThread()->RemoveSpannerPlaceholderIfNoLongerValid(
           object_in_flow_thread)) {
     // No longer a valid spanner, due to style changes. |this| is now dead.
-    if (object_in_flow_thread->Style()->HasOutOfFlowPosition() &&
+    if (object_in_flow_thread->StyleRef().HasOutOfFlowPosition() &&
         !old_style->HasOutOfFlowPosition()) {
       // We went from being a spanner to being out-of-flow positioned. When an
       // object becomes out-of-flow positioned, we need to lay out its parent,
@@ -143,10 +143,9 @@ void LayoutMultiColumnSpannerPlaceholder::ComputeLogicalHeight(
 }
 
 void LayoutMultiColumnSpannerPlaceholder::Paint(
-    const PaintInfo& paint_info,
-    const LayoutPoint& paint_offset) const {
+    const PaintInfo& paint_info) const {
   if (!layout_object_in_flow_thread_->HasSelfPaintingLayer())
-    layout_object_in_flow_thread_->Paint(paint_info, paint_offset);
+    layout_object_in_flow_thread_->Paint(paint_info);
 }
 
 bool LayoutMultiColumnSpannerPlaceholder::NodeAtPoint(

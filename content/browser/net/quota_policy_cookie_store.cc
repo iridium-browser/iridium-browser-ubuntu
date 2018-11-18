@@ -13,7 +13,8 @@
 #include "base/files/file_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/sequenced_task_runner.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/cookie_store_factory.h"
 #include "net/cookies/canonical_cookie.h"
@@ -21,102 +22,23 @@
 #include "net/cookies/cookie_util.h"
 #include "net/extras/sqlite/cookie_crypto_delegate.h"
 #include "storage/browser/quota/special_storage_policy.h"
-#include "url/gurl.h"
 
 namespace content {
 
 QuotaPolicyCookieStore::QuotaPolicyCookieStore(
     const scoped_refptr<net::SQLitePersistentCookieStore>& cookie_store,
     storage::SpecialStoragePolicy* special_storage_policy)
-    : special_storage_policy_(special_storage_policy),
-      persistent_store_(cookie_store) {
-}
+    : SessionCleanupCookieStore(cookie_store),
+      special_storage_policy_(special_storage_policy) {}
 
 QuotaPolicyCookieStore::~QuotaPolicyCookieStore() {
-  using CookieOrigin = net::SQLitePersistentCookieStore::CookieOrigin;
   if (!special_storage_policy_.get() ||
       !special_storage_policy_->HasSessionOnlyOrigins()) {
     return;
   }
 
-  std::list<CookieOrigin> session_only_cookies;
-  auto delete_cookie_predicate =
-      special_storage_policy_->CreateDeleteCookieOnExitPredicate();
-  DCHECK(delete_cookie_predicate);
-
-  for (const auto& entry : cookies_per_origin_) {
-    if (entry.second == 0) {
-      continue;
-    }
-    const CookieOrigin& cookie = entry.first;
-    const GURL url(
-        net::cookie_util::CookieOriginToURL(cookie.first, cookie.second));
-    if (!url.is_valid() ||
-        !delete_cookie_predicate.Run(cookie.first, cookie.second)) {
-      continue;
-    }
-    session_only_cookies.push_back(cookie);
-  }
-
-  persistent_store_->DeleteAllInList(session_only_cookies);
-}
-
-void QuotaPolicyCookieStore::Load(const LoadedCallback& loaded_callback) {
-  persistent_store_->Load(
-      base::Bind(&QuotaPolicyCookieStore::OnLoad, this, loaded_callback));
-}
-
-void QuotaPolicyCookieStore::LoadCookiesForKey(
-    const std::string& key,
-    const LoadedCallback& loaded_callback) {
-  persistent_store_->LoadCookiesForKey(
-      key,
-      base::Bind(&QuotaPolicyCookieStore::OnLoad, this, loaded_callback));
-}
-
-void QuotaPolicyCookieStore::AddCookie(const net::CanonicalCookie& cc) {
-  net::SQLitePersistentCookieStore::CookieOrigin origin(
-      cc.Domain(), cc.IsSecure());
-  ++cookies_per_origin_[origin];
-  persistent_store_->AddCookie(cc);
-}
-
-void QuotaPolicyCookieStore::UpdateCookieAccessTime(
-    const net::CanonicalCookie& cc) {
-  persistent_store_->UpdateCookieAccessTime(cc);
-}
-
-void QuotaPolicyCookieStore::DeleteCookie(const net::CanonicalCookie& cc) {
-  net::SQLitePersistentCookieStore::CookieOrigin origin(
-      cc.Domain(), cc.IsSecure());
-  DCHECK_GE(cookies_per_origin_[origin], 1U);
-  --cookies_per_origin_[origin];
-  persistent_store_->DeleteCookie(cc);
-}
-
-void QuotaPolicyCookieStore::SetForceKeepSessionState() {
-  special_storage_policy_ = nullptr;
-}
-
-void QuotaPolicyCookieStore::SetBeforeFlushCallback(
-    base::RepeatingClosure callback) {
-  persistent_store_->SetBeforeFlushCallback(std::move(callback));
-}
-
-void QuotaPolicyCookieStore::Flush(base::OnceClosure callback) {
-  persistent_store_->Flush(std::move(callback));
-}
-
-void QuotaPolicyCookieStore::OnLoad(
-    const LoadedCallback& loaded_callback,
-    std::vector<std::unique_ptr<net::CanonicalCookie>> cookies) {
-  for (const auto& cookie : cookies) {
-    net::SQLitePersistentCookieStore::CookieOrigin origin(
-        cookie->Domain(), cookie->IsSecure());
-    ++cookies_per_origin_[origin];
-  }
-
-  loaded_callback.Run(std::move(cookies));
+  DeleteSessionCookies(
+      special_storage_policy_->CreateDeleteCookieOnExitPredicate());
 }
 
 CookieStoreConfig::CookieStoreConfig()
@@ -146,12 +68,14 @@ CookieStoreConfig::~CookieStoreConfig() {
 }
 
 std::unique_ptr<net::CookieStore> CreateCookieStore(
-    const CookieStoreConfig& config) {
+    const CookieStoreConfig& config,
+    net::NetLog* net_log) {
   std::unique_ptr<net::CookieMonster> cookie_monster;
 
   if (config.path.empty()) {
     // Empty path means in-memory store.
-    cookie_monster.reset(new net::CookieMonster(nullptr));
+    cookie_monster = std::make_unique<net::CookieMonster>(
+        nullptr /* store */, nullptr /* channel_id_service */, net_log);
   } else {
     scoped_refptr<base::SequencedTaskRunner> client_task_runner =
         config.client_task_runner;
@@ -160,12 +84,12 @@ std::unique_ptr<net::CookieStore> CreateCookieStore(
 
     if (!client_task_runner.get()) {
       client_task_runner =
-          BrowserThread::GetTaskRunnerForThread(BrowserThread::IO);
+          base::CreateSingleThreadTaskRunnerWithTraits({BrowserThread::IO});
     }
 
     if (!background_task_runner.get()) {
       background_task_runner = base::CreateSequencedTaskRunnerWithTraits(
-          {base::MayBlock(), base::TaskPriority::BACKGROUND,
+          {base::MayBlock(), net::GetCookieStoreBackgroundSequencePriority(),
            base::TaskShutdownBehavior::BLOCK_SHUTDOWN});
     }
 
@@ -179,8 +103,8 @@ std::unique_ptr<net::CookieStore> CreateCookieStore(
             sqlite_store.get(),
             config.storage_policy.get());
 
-    cookie_monster.reset(new net::CookieMonster(persistent_store,
-                                                config.channel_id_service));
+    cookie_monster = std::make_unique<net::CookieMonster>(
+        persistent_store, config.channel_id_service, net_log);
     if (config.persist_session_cookies)
       cookie_monster->SetPersistSessionCookies(true);
   }

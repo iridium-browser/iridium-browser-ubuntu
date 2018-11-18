@@ -3,6 +3,29 @@
 // found in the LICENSE file.
 
 /**
+ * Stats collected about Metadata handling for tests.
+ * @struct
+ */
+class MetadataStats {
+  constructor() {
+    /** @public {number} Total of entries fulfilled from cache. */
+    this.fromCache = 0;
+
+    /** @public {number} Total of entries that requested to backends. */
+    this.fullFetch = 0;
+
+    /** @public {number} Total of entries that called to invalidate. */
+    this.invalidateCount = 0;
+
+    /** @public {number} Total of entries that called to clear. */
+    this.clearCacheCount = 0;
+
+    /** @public {number} Total of calls to function clearAllCache. */
+    this.clearAllCount = 0;
+  }
+}
+
+/**
  * @param {!MetadataProvider} rawProvider
  * @constructor
  * @struct
@@ -25,10 +48,15 @@ function MetadataModel(rawProvider) {
    * @const
    */
   this.callbackRequests_ = [];
+
+  /** @private {?MetadataStats} record stats about Metadata when in tests. */
+  this.stats_ = null;
+  if (window.IN_TEST)
+    this.stats_ = new MetadataStats();
 }
 
 /**
- * @param {!VolumeManagerCommon.VolumeInfoProvider} volumeManager
+ * @param {!VolumeManager} volumeManager
  * @return {!MetadataModel}
  */
 MetadataModel.create = function(volumeManager) {
@@ -57,8 +85,14 @@ MetadataModel.prototype.get = function(entries, names) {
   this.rawProvider_.checkPropertyNames(names);
 
   // Check if the results are cached or not.
-  if (this.cache_.hasFreshCache(entries, names))
+  if (this.cache_.hasFreshCache(entries, names)) {
+    if (window.IN_TEST)
+      this.stats_.fromCache += entries.length;
     return Promise.resolve(this.getCache(entries, names));
+  }
+
+  if (window.IN_TEST)
+    this.stats_.fullFetch += entries.length;
 
   // The LRU cache may be cached out when the callback is completed.
   // To hold cached values, create snapshot of the cache for entries.
@@ -90,7 +124,7 @@ MetadataModel.prototype.get = function(entries, names) {
       }
 
       // Store cache.
-      this.cache_.storeProperties(requestId, requestedEntries, list);
+      this.cache_.storeProperties(requestId, requestedEntries, list, names);
 
       // Invoke callbacks.
       var i = 0;
@@ -127,6 +161,8 @@ MetadataModel.prototype.getCache = function(entries, names) {
  */
 MetadataModel.prototype.notifyEntriesCreated = function(entries) {
   this.cache_.clear(util.entriesToURLs(entries));
+  if (window.IN_TEST)
+    this.stats_.clearCacheCount += entries.length;
 };
 
 /**
@@ -136,6 +172,8 @@ MetadataModel.prototype.notifyEntriesCreated = function(entries) {
  */
 MetadataModel.prototype.notifyEntriesRemoved = function(urls) {
   this.cache_.clear(urls);
+  if (window.IN_TEST)
+    this.stats_.clearCacheCount += urls.length;
 };
 
 /**
@@ -144,6 +182,8 @@ MetadataModel.prototype.notifyEntriesRemoved = function(urls) {
  */
 MetadataModel.prototype.notifyEntriesChanged = function(entries) {
   this.cache_.invalidate(this.cache_.generateRequestId(), entries);
+  if (window.IN_TEST)
+    this.stats_.invalidateCount += entries.length;
 };
 
 /**
@@ -151,6 +191,13 @@ MetadataModel.prototype.notifyEntriesChanged = function(entries) {
  */
 MetadataModel.prototype.clearAllCache = function() {
   this.cache_.clearAll();
+  if (window.IN_TEST)
+    this.stats_.clearAllCount++;
+};
+
+/** @return {MetadataStats} */
+MetadataModel.prototype.getStats = function() {
+  return this.stats_;
 };
 
 /**
@@ -160,6 +207,15 @@ MetadataModel.prototype.clearAllCache = function() {
  */
 MetadataModel.prototype.addEventListener = function(type, callback) {
   this.cache_.addEventListener(type, callback);
+};
+
+/**
+ * Removes event listener from internal cache object.
+ * @param {string} type Name of the event to removed.
+ * @param {function(Event):undefined} callback Event listener.
+ */
+MetadataModel.prototype.removeEventListener = function(type, callback) {
+  this.cache_.removeEventListener(type, callback);
 };
 
 /**
@@ -206,7 +262,7 @@ function MetadataProviderCallbackRequest(entries, names, cache, fulfill) {
  */
 MetadataProviderCallbackRequest.prototype.storeProperties = function(
     requestId, entries, objects) {
-  this.cache_.storeProperties(requestId, entries, objects);
+  this.cache_.storeProperties(requestId, entries, objects, this.names_);
   if (this.cache_.hasFreshCache(this.entries_, this.names_)) {
     this.fulfill_(this.cache_.get(this.entries_, this.names_));
     return true;

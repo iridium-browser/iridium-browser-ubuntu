@@ -18,7 +18,8 @@
 #include "chrome/browser/policy/profile_policy_connector_factory.h"
 #include "chrome/browser/prefs/pref_service_syncable_util.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/signin/signin_manager_factory.h"
+#include "chrome/browser/signin/identity_manager_factory.h"
+#include "chrome/browser/ui/ash/tablet_mode_client.h"
 #include "chrome/browser/ui/extensions/app_launch_params.h"
 #include "chrome/browser/ui/extensions/application_launch.h"
 #include "chrome/common/chrome_switches.h"
@@ -31,7 +32,6 @@
 #include "components/prefs/pref_service.h"
 #include "components/signin/core/browser/account_info.h"
 #include "components/signin/core/browser/account_tracker_service.h"
-#include "components/signin/core/browser/signin_manager.h"
 #include "components/sync_preferences/pref_service_syncable.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/notification_observer.h"
@@ -40,6 +40,7 @@
 #include "content/public/common/content_switches.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/constants.h"
+#include "services/identity/public/cpp/identity_manager.h"
 #include "ui/gfx/geometry/rect.h"
 
 namespace chromeos {
@@ -48,7 +49,7 @@ namespace first_run {
 namespace {
 
 void LaunchDialogForProfile(Profile* profile) {
-  ExtensionService* service =
+  extensions::ExtensionService* service =
       extensions::ExtensionSystem::Get(profile)->extension_service();
   if (!service)
     return;
@@ -74,6 +75,10 @@ void TryLaunchFirstRunDialog(Profile* profile) {
     LaunchDialogForProfile(profile);
     return;
   }
+
+  // TabletModeClient does not exist in some tests.
+  if (TabletModeClient::Get() && TabletModeClient::Get()->tablet_mode_enabled())
+    return;
 
   if (policy::ProfilePolicyConnectorFactory::GetForBrowserContext(profile)
           ->IsManaged())
@@ -122,14 +127,15 @@ class DialogLauncher : public content::NotificationObserver {
 
     // Whether the account is supported for voice interaction.
     bool account_supported = false;
-    SigninManagerBase* signin_manager =
-        SigninManagerFactory::GetForProfile(profile_);
-    if (signin_manager) {
+    identity::IdentityManager* identity_manager =
+        IdentityManagerFactory::GetForProfile(profile_);
+    if (identity_manager) {
       std::string hosted_domain =
-          signin_manager->GetAuthenticatedAccountInfo().hosted_domain;
+          identity_manager->GetPrimaryAccountInfo().hosted_domain;
       if (hosted_domain == AccountTrackerService::kNoHostedDomainFound ||
-          hosted_domain == "google.com")
+          hosted_domain == "google.com") {
         account_supported = true;
+      }
     }
 
     // If voice interaction value prop needs to be shown, the tutorial will be

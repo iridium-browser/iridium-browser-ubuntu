@@ -6,7 +6,7 @@
 
 #include "base/bind.h"
 #include "base/logging.h"
-#include "base/message_loop/message_loop.h"
+#include "base/message_loop/message_loop_current.h"
 #include "base/strings/string16.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread.h"
@@ -16,12 +16,12 @@
 
 namespace heap_profiling {
 
-ReceiverPipe::ReceiverPipe(mojo::edk::ScopedPlatformHandle handle)
+ReceiverPipe::ReceiverPipe(mojo::PlatformHandle handle)
     : ReceiverPipeBase(std::move(handle)),
       read_buffer_(new char[SenderPipe::kPipeSize]) {
   ZeroOverlapped();
-  base::MessageLoopForIO::current()->RegisterIOHandler(handle_.get().handle,
-                                                       this);
+  base::MessageLoopCurrentForIO::Get()->RegisterIOHandler(
+      handle_.GetHandle().Get(), this);
 }
 
 ReceiverPipe::~ReceiverPipe() {}
@@ -41,7 +41,7 @@ void ReceiverPipe::ReadUntilBlocking() {
 
   DCHECK(!read_outstanding_);
   read_outstanding_ = this;
-  if (!::ReadFile(handle_.get().handle, read_buffer_.get(),
+  if (!::ReadFile(handle_.GetHandle().Get(), read_buffer_.get(),
                   SenderPipe::kPipeSize, &bytes_read, &context_.overlapped)) {
     if (GetLastError() == ERROR_IO_PENDING) {
       return;
@@ -72,10 +72,11 @@ void ReceiverPipe::OnIOCompleted(base::MessagePumpForIO::IOContext* context,
 
   if (bytes_transfered && receiver_) {
     receiver_task_runner_->PostTask(
-        FROM_HERE, base::BindOnce(&ReceiverPipe::OnStreamDataThunk, this,
-                                  base::MessageLoop::current()->task_runner(),
-                                  std::move(read_buffer_),
-                                  static_cast<size_t>(bytes_transfered)));
+        FROM_HERE,
+        base::BindOnce(&ReceiverPipe::OnStreamDataThunk, this,
+                       base::MessageLoopCurrent::Get()->task_runner(),
+                       std::move(read_buffer_),
+                       static_cast<size_t>(bytes_transfered)));
     read_buffer_.reset(new char[SenderPipe::kPipeSize]);
   }
   ReadUntilBlocking();

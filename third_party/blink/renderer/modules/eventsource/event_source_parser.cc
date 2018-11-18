@@ -22,19 +22,18 @@ EventSourceParser::EventSourceParser(const AtomicString& last_event_id,
       client_(client),
       codec_(NewTextCodec(UTF8Encoding())) {}
 
-void EventSourceParser::AddBytes(const char* bytes, size_t size) {
+void EventSourceParser::AddBytes(const char* bytes, uint32_t size) {
   // A line consists of |m_line| followed by
   // |bytes[start..(next line break)]|.
-  size_t start = 0;
+  uint32_t start = 0;
   const unsigned char kBOM[] = {0xef, 0xbb, 0xbf};
-  for (size_t i = 0; i < size && !is_stopped_; ++i) {
+  for (uint32_t i = 0; i < size && !is_stopped_; ++i) {
     // As kBOM contains neither CR nor LF, we can think BOM and the line
     // break separately.
-    if (is_recognizing_bom_ &&
-        line_.size() + (i - start) == WTF_ARRAY_LENGTH(kBOM)) {
+    if (is_recognizing_bom_ && line_.size() + (i - start) == arraysize(kBOM)) {
       Vector<char> line = line_;
       line.Append(&bytes[start], i - start);
-      DCHECK_EQ(line.size(), WTF_ARRAY_LENGTH(kBOM));
+      DCHECK_EQ(line.size(), arraysize(kBOM));
       is_recognizing_bom_ = false;
       if (memcmp(line.data(), kBOM, sizeof(kBOM)) == 0) {
         start = i;
@@ -78,8 +77,8 @@ void EventSourceParser::ParseLine() {
     event_type_ = g_null_atom;
     return;
   }
-  size_t field_name_end = line_.Find(':');
-  size_t field_value_start;
+  wtf_size_t field_name_end = line_.Find(':');
+  wtf_size_t field_value_start;
   if (field_name_end == WTF::kNotFound) {
     field_name_end = line_.size();
     field_value_start = field_name_end;
@@ -89,7 +88,7 @@ void EventSourceParser::ParseLine() {
       ++field_value_start;
     }
   }
-  size_t field_value_size = line_.size() - field_value_start;
+  wtf_size_t field_value_size = line_.size() - field_value_start;
   String field_name = FromUTF8(line_.data(), field_name_end);
   if (field_name == "event") {
     event_type_ = AtomicString(
@@ -110,7 +109,8 @@ void EventSourceParser::ParseLine() {
   }
   if (field_name == "retry") {
     bool has_only_digits = true;
-    for (size_t i = field_value_start; i < line_.size() && has_only_digits; ++i)
+    for (wtf_size_t i = field_value_start; i < line_.size() && has_only_digits;
+         ++i)
       has_only_digits = IsASCIIDigit(line_[i]);
     if (field_value_start == line_.size()) {
       client_->OnReconnectionTimeSet(EventSource::kDefaultReconnectDelay);
@@ -127,8 +127,8 @@ void EventSourceParser::ParseLine() {
   // Unrecognized field name. Ignore!
 }
 
-String EventSourceParser::FromUTF8(const char* bytes, size_t size) {
-  return codec_->Decode(bytes, size, WTF::kDataEOF);
+String EventSourceParser::FromUTF8(const char* bytes, uint32_t size) {
+  return codec_->Decode(bytes, size, WTF::FlushBehavior::kDataEOF);
 }
 
 void EventSourceParser::Trace(blink::Visitor* visitor) {

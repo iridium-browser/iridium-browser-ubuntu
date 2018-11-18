@@ -9,8 +9,8 @@
 #include "components/payments/content/web_app_manifest.h"
 #include "components/payments/core/payment_instrument.h"
 #include "content/public/browser/stored_payment_app.h"
-#include "third_party/blink/public/platform/modules/payments/payment_app.mojom.h"
-#include "third_party/blink/public/platform/modules/payments/payment_request.mojom.h"
+#include "third_party/blink/public/mojom/payments/payment_app.mojom.h"
+#include "third_party/blink/public/mojom/payments/payment_request.mojom.h"
 
 namespace content {
 class BrowserContext;
@@ -28,7 +28,7 @@ class ServiceWorkerPaymentInstrument : public PaymentInstrument {
   // Chrome.
   ServiceWorkerPaymentInstrument(
       content::BrowserContext* browser_context,
-      const GURL& top_level_origin,
+      const GURL& top_origin,
       const GURL& frame_origin,
       const PaymentRequestSpec* spec,
       std::unique_ptr<content::StoredPaymentApp> stored_payment_app_info,
@@ -38,7 +38,7 @@ class ServiceWorkerPaymentInstrument : public PaymentInstrument {
   // Chrome but can be installed when paying with it.
   ServiceWorkerPaymentInstrument(
       content::WebContents* web_contents,
-      const GURL& top_level_origin,
+      const GURL& top_origin,
       const GURL& frame_origin,
       const PaymentRequestSpec* spec,
       std::unique_ptr<WebAppInstallationInfo> installable_payment_app_info,
@@ -69,7 +69,7 @@ class ServiceWorkerPaymentInstrument : public PaymentInstrument {
   void RecordUse() override;
   base::string16 GetLabel() const override;
   base::string16 GetSublabel() const override;
-  bool IsValidForModifier(const std::vector<std::string>& methods,
+  bool IsValidForModifier(const std::string& method,
                           bool supported_networks_specified,
                           const std::set<std::string>& supported_networks,
                           bool supported_types_specified,
@@ -87,7 +87,7 @@ class ServiceWorkerPaymentInstrument : public PaymentInstrument {
   void OnCanMakePayment(ValidateCanMakePaymentCallback callback, bool result);
 
   content::BrowserContext* browser_context_;
-  GURL top_level_origin_;
+  GURL top_origin_;
   GURL frame_origin_;
   const PaymentRequestSpec* spec_;
   std::unique_ptr<content::StoredPaymentApp> stored_payment_app_info_;

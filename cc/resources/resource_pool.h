@@ -13,18 +13,19 @@
 
 #include "base/containers/circular_deque.h"
 #include "base/macros.h"
-#include "base/memory/memory_coordinator_client.h"
+#include "base/memory/memory_pressure_listener.h"
 #include "base/memory/weak_ptr.h"
 #include "base/optional.h"
 #include "base/trace_event/memory_allocator_dump_guid.h"
 #include "base/trace_event/memory_dump_provider.h"
 #include "base/unguessable_token.h"
 #include "cc/cc_export.h"
-#include "cc/resources/resource.h"
-#include "components/viz/common/quads/shared_bitmap.h"
 #include "components/viz/common/resources/resource_format.h"
+#include "components/viz/common/resources/resource_id.h"
+#include "components/viz/common/resources/shared_bitmap.h"
 #include "gpu/command_buffer/common/sync_token.h"
 #include "third_party/khronos/GLES2/gl2.h"
+#include "ui/gfx/color_space.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/gpu_memory_buffer.h"
 
@@ -32,11 +33,18 @@ namespace base {
 class SingleThreadTaskRunner;
 }
 
-namespace cc {
-class LayerTreeResourceProvider;
+namespace gpu {
+struct Capabilities;
+}
 
-class CC_EXPORT ResourcePool : public base::trace_event::MemoryDumpProvider,
-                               public base::MemoryCoordinatorClient {
+namespace viz {
+class ClientResourceProvider;
+class ContextProvider;
+}
+
+namespace cc {
+
+class CC_EXPORT ResourcePool : public base::trace_event::MemoryDumpProvider {
   class PoolResource;
 
  public:
@@ -50,14 +58,22 @@ class CC_EXPORT ResourcePool : public base::trace_event::MemoryDumpProvider,
    public:
     virtual ~GpuBacking() = default;
 
-    // Guids for for memory dumps. This guid will be valid once the GpuBacking
-    // has memory allocated. Called on the compositor thread.
-    virtual base::trace_event::MemoryAllocatorDumpGuid MemoryDumpGuid(
-        uint64_t tracing_process_id) = 0;
-    // Some gpu resources can be shared memory-backed, and this guid should be
-    // prefered in that case. But if not then this will be empty. Called on the
-    // compositor thread.
-    virtual base::UnguessableToken SharedMemoryGuid() = 0;
+    // Dumps information about the memory backing the GpuBacking to |pmd|.
+    // The memory usage is attributed to |buffer_dump_guid|.
+    // |tracing_process_id| uniquely identifies the process owning the memory.
+    // |importance| is relevant only for the cases of co-ownership, the memory
+    // gets attributed to the owner with the highest importance.
+    // Called on the compositor thread.
+    virtual void OnMemoryDump(
+        base::trace_event::ProcessMemoryDump* pmd,
+        const base::trace_event::MemoryAllocatorDumpGuid& buffer_dump_guid,
+        uint64_t tracing_process_id,
+        int importance) const = 0;
+
+    void InitOverlayCandidateAndTextureTarget(
+        const viz::ResourceFormat format,
+        const gpu::Capabilities& caps,
+        bool use_gpu_memory_buffer_resources);
 
     gpu::Mailbox mailbox;
     gpu::SyncToken mailbox_sync_token;
@@ -82,8 +98,17 @@ class CC_EXPORT ResourcePool : public base::trace_event::MemoryDumpProvider,
    public:
     virtual ~SoftwareBacking() = default;
 
-    // Return the guid for this resource, based on the shared memory backing it.
-    virtual base::UnguessableToken SharedMemoryGuid() = 0;
+    // Dumps information about the memory backing the SoftwareBacking to |pmd|.
+    // The memory usage is attributed to |buffer_dump_guid|.
+    // |tracing_process_id| uniquely identifies the process owning the memory.
+    // |importance| is relevant only for the cases of co-ownership, the memory
+    // gets attributed to the owner with the highest importance.
+    // Called on the compositor thread.
+    virtual void OnMemoryDump(
+        base::trace_event::ProcessMemoryDump* pmd,
+        const base::trace_event::MemoryAllocatorDumpGuid& buffer_dump_guid,
+        uint64_t tracing_process_id,
+        int importance) const = 0;
 
     viz::SharedBitmapId shared_bitmap_id;
   };
@@ -161,14 +186,13 @@ class CC_EXPORT ResourcePool : public base::trace_event::MemoryDumpProvider,
     PoolResource* resource_ = nullptr;
   };
 
-  enum class Mode { kGpu, kSoftware };
-
-  // This takes a hint for if the pool will be holding gpu or software
-  // resources, which is used for consistency checking.
-  ResourcePool(LayerTreeResourceProvider* resource_provider,
+  // When holding gpu resources, the |context_provider| should be non-null,
+  // and when holding software resources, it should be null. It is used for
+  // consistency checking as well as for correctness.
+  ResourcePool(viz::ClientResourceProvider* resource_provider,
+               viz::ContextProvider* context_provider,
                scoped_refptr<base::SingleThreadTaskRunner> task_runner,
                const base::TimeDelta& expiration_delay,
-               Mode resource_mode,
                bool disallow_non_exact_reuse);
 
   ~ResourcePool() override;
@@ -218,9 +242,8 @@ class CC_EXPORT ResourcePool : public base::trace_event::MemoryDumpProvider,
   bool OnMemoryDump(const base::trace_event::MemoryDumpArgs& args,
                     base::trace_event::ProcessMemoryDump* pmd) override;
 
-  // Overriden from base::MemoryCoordinatorClient.
-  void OnPurgeMemory() override;
-  void OnMemoryStateChange(base::MemoryState state) override;
+  void OnMemoryPressure(
+      base::MemoryPressureListener::MemoryPressureLevel level);
 
   size_t GetTotalMemoryUsageForTesting() const {
     return total_memory_usage_bytes_;
@@ -282,7 +305,7 @@ class CC_EXPORT ResourcePool : public base::trace_event::MemoryDumpProvider,
 
     void OnMemoryDump(base::trace_event::ProcessMemoryDump* pmd,
                       int tracing_id,
-                      const LayerTreeResourceProvider* resource_provider,
+                      const viz::ClientResourceProvider* resource_provider,
                       bool is_free) const;
 
    private:
@@ -343,8 +366,8 @@ class CC_EXPORT ResourcePool : public base::trace_event::MemoryDumpProvider,
   bool HasEvictableResources() const;
   base::TimeTicks GetUsageTimeForLRUResource() const;
 
-  LayerTreeResourceProvider* const resource_provider_ = nullptr;
-  const bool using_gpu_resources_ = false;
+  viz::ClientResourceProvider* const resource_provider_;
+  viz::ContextProvider* const context_provider_;
   const scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
   const base::TimeDelta resource_expiration_delay_;
   const bool disallow_non_exact_reuse_ = false;
@@ -365,6 +388,8 @@ class CC_EXPORT ResourcePool : public base::trace_event::MemoryDumpProvider,
 
   // Map from the PoolResource |unique_id| to the PoolResource.
   std::map<size_t, std::unique_ptr<PoolResource>> in_use_resources_;
+
+  std::unique_ptr<base::MemoryPressureListener> memory_pressure_listener_;
 
   base::WeakPtrFactory<ResourcePool> weak_ptr_factory_;
 

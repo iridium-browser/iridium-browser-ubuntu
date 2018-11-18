@@ -10,13 +10,13 @@
 #include "base/memory/ptr_util.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/platform/heap/thread_state.h"
+#include "third_party/blink/renderer/platform/scheduler/public/thread.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
 #include "third_party/blink/renderer/platform/wtf/threading_primitives.h"
 #include "v8/include/v8.h"
 
 namespace blink {
 
-class WebThread;
 class WebThreadSupportingGC;
 struct WorkerBackingThreadStartupData;
 
@@ -27,21 +27,8 @@ struct WorkerBackingThreadStartupData;
 class CORE_EXPORT WorkerBackingThread final {
  public:
   static std::unique_ptr<WorkerBackingThread> Create(
-      const WebThreadCreationParams& params) {
-    return base::WrapUnique(new WorkerBackingThread(params, false));
-  }
-  static std::unique_ptr<WorkerBackingThread> Create(WebThread* thread) {
-    return base::WrapUnique(new WorkerBackingThread(thread, false));
-  }
-
-  // These are needed to suppress leak reports. See
-  // https://crbug.com/590802 and https://crbug.com/v8/1428.
-  static std::unique_ptr<WorkerBackingThread> CreateForTest(
-      const WebThreadCreationParams& params) {
-    return base::WrapUnique(new WorkerBackingThread(params, true));
-  }
-  static std::unique_ptr<WorkerBackingThread> CreateForTest(WebThread* thread) {
-    return base::WrapUnique(new WorkerBackingThread(thread, true));
+      const ThreadCreationParams& params) {
+    return base::WrapUnique(new WorkerBackingThread(params));
   }
 
   ~WorkerBackingThread();
@@ -66,14 +53,10 @@ class CORE_EXPORT WorkerBackingThread final {
   static void SetRAILModeOnWorkerThreadIsolates(v8::RAILMode);
 
  private:
-  WorkerBackingThread(const WebThreadCreationParams&,
-                      bool should_call_gc_on_shutdown);
-  WorkerBackingThread(WebThread*, bool should_call_gc_on_s_hutdown);
+  explicit WorkerBackingThread(const ThreadCreationParams&);
 
   std::unique_ptr<WebThreadSupportingGC> backing_thread_;
   v8::Isolate* isolate_ = nullptr;
-  bool is_owning_thread_;
-  bool should_call_gc_on_shutdown_;
 };
 
 }  // namespace blink

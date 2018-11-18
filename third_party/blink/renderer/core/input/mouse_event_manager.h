@@ -41,9 +41,9 @@ class CORE_EXPORT MouseEventManager final
  public:
   MouseEventManager(LocalFrame&, ScrollManager&);
   virtual ~MouseEventManager();
-  void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
-  enum FakeMouseMoveReason { kDuringScroll, kPerFrame };
+  enum UpdateHoverReason { kScrollOffsetChanged, kLayoutOrStyleChanged };
 
   WebInputEventResult DispatchMouseEvent(EventTarget*,
                                          const AtomicString&,
@@ -89,8 +89,9 @@ class CORE_EXPORT MouseEventManager final
   void FakeMouseMoveEventTimerFired(TimerBase*);
 
   void CancelFakeMouseMoveEvent();
-  void DispatchFakeMouseMoveEventSoon(MouseEventManager::FakeMouseMoveReason);
-  void DispatchFakeMouseMoveEventSoonInQuad(const FloatQuad&);
+  void MayUpdateHoverWhenContentUnderMouseChanged(
+      MouseEventManager::UpdateHoverReason);
+  void MayUpdateHoverAfterScroll(const FloatQuad&);
 
   void SetLastKnownMousePosition(const WebMouseEvent&);
   void SetLastMousePositionAsUnknown();
@@ -215,7 +216,7 @@ class CORE_EXPORT MouseEventManager final
   // https://w3c.github.io/pointerevents/#dfn-tracking-the-effective-position-of-the-legacy-mouse-pointer.
   Member<Node> node_under_mouse_;
 
-  // The last mouse movement position this frame has seen in root frame
+  // The last mouse movement position this frame has seen in viewport
   // coordinates.
   FloatPoint last_known_mouse_position_;
   FloatPoint last_known_mouse_global_position_;

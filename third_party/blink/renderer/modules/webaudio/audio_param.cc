@@ -25,11 +25,11 @@
 
 #include "third_party/blink/renderer/modules/webaudio/audio_param.h"
 
-#include "third_party/blink/renderer/core/dom/exception_code.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_node.h"
 #include "third_party/blink/renderer/modules/webaudio/audio_node_output.h"
 #include "third_party/blink/renderer/platform/audio/audio_utilities.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/histogram.h"
 #include "third_party/blink/renderer/platform/wtf/math_extras.h"
 
@@ -40,17 +40,21 @@ const double AudioParamHandler::kSnapThreshold = 0.001;
 
 AudioParamHandler::AudioParamHandler(BaseAudioContext& context,
                                      AudioParamType param_type,
-                                     String param_name,
                                      double default_value,
+                                     AutomationRate rate,
+                                     AutomationRateMode rate_mode,
                                      float min_value,
                                      float max_value)
     : AudioSummingJunction(context.GetDeferredTaskHandler()),
       param_type_(param_type),
-      param_name_(param_name),
       intrinsic_value_(default_value),
       default_value_(default_value),
+      automation_rate_(rate),
+      rate_mode_(rate_mode),
       min_value_(min_value),
-      max_value_(max_value) {
+      max_value_(max_value),
+      summing_bus_(
+          AudioBus::Create(1, AudioUtilities::kRenderQuantumFrames, false)) {
   // The destination MUST exist because we need the destination handler for the
   // AudioParam.
   CHECK(context.destination());
@@ -67,8 +71,82 @@ void AudioParamHandler::SetParamType(AudioParamType param_type) {
   param_type_ = param_type;
 }
 
+void AudioParamHandler::SetCustomParamName(const String name) {
+  DCHECK(param_type_ == kParamTypeAudioWorklet);
+  custom_param_name_ = name;
+}
+
 String AudioParamHandler::GetParamName() const {
-  return param_name_;
+  switch (GetParamType()) {
+    case kParamTypeAudioBufferSourcePlaybackRate:
+      return "AudioBufferSource.playbackRate";
+    case kParamTypeAudioBufferSourceDetune:
+      return "AudioBufferSource.detune";
+    case kParamTypeBiquadFilterFrequency:
+      return "BiquadFilter.frequency";
+    case kParamTypeBiquadFilterQ:
+      return "BiquadFilter.Q";
+    case kParamTypeBiquadFilterGain:
+      return "BiquadFilter.Gain";
+    case kParamTypeBiquadFilterDetune:
+      return "BiquadFilter.detune";
+    case kParamTypeDelayDelayTime:
+      return "Delay.delayTime";
+    case kParamTypeDynamicsCompressorThreshold:
+      return "DynamicsCompressor.threshold";
+    case kParamTypeDynamicsCompressorKnee:
+      return "DynamicsCompressor.knee";
+    case kParamTypeDynamicsCompressorRatio:
+      return "DynamicsCompressor.ratio";
+    case kParamTypeDynamicsCompressorAttack:
+      return "DynamicsCompressor.attack";
+    case kParamTypeDynamicsCompressorRelease:
+      return "DynamicsCompressor.release";
+    case kParamTypeGainGain:
+      return "Gain.gain";
+    case kParamTypeOscillatorFrequency:
+      return "Oscillator.frequency";
+    case kParamTypeOscillatorDetune:
+      return "Oscillator.detune";
+    case kParamTypeStereoPannerPan:
+      return "StereoPanner.pan";
+    case kParamTypePannerPositionX:
+      return "Panner.positionX";
+    case kParamTypePannerPositionY:
+      return "Panner.positionY";
+    case kParamTypePannerPositionZ:
+      return "Panner.positionZ";
+    case kParamTypePannerOrientationX:
+      return "Panner.orientationX";
+    case kParamTypePannerOrientationY:
+      return "Panner.orientationY";
+    case kParamTypePannerOrientationZ:
+      return "Panner.orientationZ";
+    case kParamTypeAudioListenerPositionX:
+      return "AudioListener.positionX";
+    case kParamTypeAudioListenerPositionY:
+      return "AudioListener.positionY";
+    case kParamTypeAudioListenerPositionZ:
+      return "AudioListener.positionZ";
+    case kParamTypeAudioListenerForwardX:
+      return "AudioListener.forwardX";
+    case kParamTypeAudioListenerForwardY:
+      return "AudioListener.forwardY";
+    case kParamTypeAudioListenerForwardZ:
+      return "AudioListener.forwardZ";
+    case kParamTypeAudioListenerUpX:
+      return "AudioListener.upX";
+    case kParamTypeAudioListenerUpY:
+      return "AudioListener.upY";
+    case kParamTypeAudioListenerUpZ:
+      return "AudioListener.upZ";
+    case kParamTypeConstantSourceOffset:
+      return "ConstantSource.offset";
+    case kParamTypeAudioWorklet:
+      return custom_param_name_;
+    default:
+      NOTREACHED();
+  }
 }
 
 float AudioParamHandler::Value() {
@@ -148,7 +226,7 @@ void AudioParamHandler::CalculateSampleAccurateValues(
   if (!is_safe)
     return;
 
-  CalculateFinalValues(values, number_of_values, true);
+  CalculateFinalValues(values, number_of_values, IsAudioRate());
 }
 
 void AudioParamHandler::CalculateFinalValues(float* values,
@@ -176,27 +254,31 @@ void AudioParamHandler::CalculateFinalValues(float* values,
     if (has_value)
       value = timeline_value;
 
-    values[0] = value;
+    for (unsigned k = 0; k < number_of_values; ++k) {
+      values[k] = value;
+    }
     SetIntrinsicValue(value);
   }
 
-  // Now sum all of the audio-rate connections together (unity-gain summing
-  // junction).  Note that connections would normally be mono, but we mix down
-  // to mono if necessary.
-  scoped_refptr<AudioBus> summing_bus =
-      AudioBus::Create(1, number_of_values, false);
-  summing_bus->SetChannelMemory(0, values, number_of_values);
+  // If there are any connections, sum all of the audio-rate connections
+  // together (unity-gain summing junction).  Note that connections would
+  // normally be mono, but we mix down to mono if necessary.
+  if (NumberOfRenderingConnections() > 0) {
+    DCHECK_LE(number_of_values, AudioUtilities::kRenderQuantumFrames);
 
-  for (unsigned i = 0; i < NumberOfRenderingConnections(); ++i) {
-    AudioNodeOutput* output = RenderingOutput(i);
-    DCHECK(output);
+    summing_bus_->SetChannelMemory(0, values, number_of_values);
 
-    // Render audio from this output.
-    AudioBus* connection_bus =
-        output->Pull(nullptr, AudioUtilities::kRenderQuantumFrames);
+    for (unsigned i = 0; i < NumberOfRenderingConnections(); ++i) {
+      AudioNodeOutput* output = RenderingOutput(i);
+      DCHECK(output);
 
-    // Sum, with unity-gain.
-    summing_bus->SumFrom(*connection_bus);
+      // Render audio from this output.
+      AudioBus* connection_bus =
+          output->Pull(nullptr, AudioUtilities::kRenderQuantumFrames);
+
+      // Sum, with unity-gain.
+      summing_bus_->SumFrom(*connection_bus);
+    }
   }
 }
 
@@ -217,7 +299,7 @@ void AudioParamHandler::CalculateTimelineValues(float* values,
 }
 
 void AudioParamHandler::Connect(AudioNodeOutput& output) {
-  DCHECK(GetDeferredTaskHandler().IsGraphOwner());
+  GetDeferredTaskHandler().AssertGraphOwner();
 
   if (outputs_.Contains(&output))
     return;
@@ -228,7 +310,7 @@ void AudioParamHandler::Connect(AudioNodeOutput& output) {
 }
 
 void AudioParamHandler::Disconnect(AudioNodeOutput& output) {
-  DCHECK(GetDeferredTaskHandler().IsGraphOwner());
+  GetDeferredTaskHandler().AssertGraphOwner();
 
   if (outputs_.Contains(&output)) {
     outputs_.erase(&output);
@@ -249,27 +331,51 @@ int AudioParamHandler::ComputeQHistogramValue(float new_value) const {
 
 AudioParam::AudioParam(BaseAudioContext& context,
                        AudioParamType param_type,
-                       String param_name,
                        double default_value,
+                       AudioParamHandler::AutomationRate rate,
+                       AudioParamHandler::AutomationRateMode rate_mode,
                        float min_value,
                        float max_value)
     : handler_(AudioParamHandler::Create(context,
                                          param_type,
-                                         param_name,
                                          default_value,
+                                         rate,
+                                         rate_mode,
                                          min_value,
                                          max_value)),
-      context_(context) {}
+      context_(context),
+      deferred_task_handler_(&context.GetDeferredTaskHandler()) {}
 
 AudioParam* AudioParam::Create(BaseAudioContext& context,
                                AudioParamType param_type,
-                               String param_name,
+                               double default_value) {
+  return new AudioParam(context, param_type, default_value,
+                        AudioParamHandler::AutomationRate::kAudio,
+                        AudioParamHandler::AutomationRateMode::kVariable,
+                        -std::numeric_limits<float>::max(),
+                        std::numeric_limits<float>::max());
+}
+
+AudioParam* AudioParam::Create(BaseAudioContext& context,
+                               AudioParamType param_type,
                                double default_value,
+                               AudioParamHandler::AutomationRate rate,
+                               AudioParamHandler::AutomationRateMode rate_mode,
                                float min_value,
                                float max_value) {
   DCHECK_LE(min_value, max_value);
-  return new AudioParam(context, param_type, param_name, default_value,
+
+  return new AudioParam(context, param_type, default_value, rate, rate_mode,
                         min_value, max_value);
+}
+
+AudioParam::~AudioParam() {
+  // The graph lock is required to destroy the handler. And we can't use
+  // |context_| to touch it, since that object may also be a dead heap object.
+  {
+    DeferredTaskHandler::GraphAutoLocker locker(*deferred_task_handler_);
+    handler_ = nullptr;
+  }
 }
 
 void AudioParam::Trace(blink::Visitor* visitor) {
@@ -322,6 +428,40 @@ float AudioParam::maxValue() const {
 
 void AudioParam::SetParamType(AudioParamType param_type) {
   Handler().SetParamType(param_type);
+}
+
+void AudioParam::SetCustomParamName(const String name) {
+  Handler().SetCustomParamName(name);
+}
+
+String AudioParam::automationRate() const {
+  switch (Handler().GetAutomationRate()) {
+    case AudioParamHandler::AutomationRate::kAudio:
+      return "a-rate";
+    case AudioParamHandler::AutomationRate::kControl:
+      return "k-rate";
+    default:
+      NOTREACHED();
+      return "a-rate";
+  }
+}
+
+void AudioParam::setAutomationRate(const String& rate,
+                                   ExceptionState& exception_state) {
+  if (Handler().IsAutomationRateFixed()) {
+    exception_state.ThrowDOMException(
+        DOMExceptionCode::kInvalidStateError,
+        Handler().GetParamName() +
+            ".automationRate is fixed and cannot be changed to \"" + rate +
+            "\"");
+    return;
+  }
+
+  if (rate == "a-rate") {
+    Handler().SetAutomationRate(AudioParamHandler::AutomationRate::kAudio);
+  } else if (rate == "k-rate") {
+    Handler().SetAutomationRate(AudioParamHandler::AutomationRate::kControl);
+  }
 }
 
 AudioParam* AudioParam::setValueAtTime(float value,

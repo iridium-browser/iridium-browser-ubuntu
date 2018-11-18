@@ -47,7 +47,6 @@ class IconWithBadgeImageSource : public gfx::CanvasImageSource {
   void set_paint_blocked_actions_decoration(bool should_paint) {
     paint_blocked_actions_decoration_ = should_paint;
   }
-
   bool grayscale() const { return grayscale_; }
   bool paint_page_action_decoration() const {
     return paint_page_action_decoration_;
@@ -86,15 +85,15 @@ class IconWithBadgeImageSource : public gfx::CanvasImageSource {
 
   // Whether or not the icon should be grayscaled (e.g., to show it is
   // disabled).
-  bool grayscale_;
+  bool grayscale_ = false;
 
   // Whether or not to paint a decoration over the base icon to indicate the
   // represented action wants to run.
-  bool paint_page_action_decoration_;
+  bool paint_page_action_decoration_ = false;
 
   // Whether or not to paint a decoration to indicate that the extension has
   // had actions blocked.
-  bool paint_blocked_actions_decoration_;
+  bool paint_blocked_actions_decoration_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(IconWithBadgeImageSource);
 };

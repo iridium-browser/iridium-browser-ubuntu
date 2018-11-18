@@ -23,6 +23,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/html_script_element_or_svg_script_element.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_event_listener.h"
 #include "third_party/blink/renderer/core/dom/attribute.h"
+#include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
 #include "third_party/blink/renderer/core/frame/csp/content_security_policy.h"
 #include "third_party/blink/renderer/core/html_names.h"
@@ -37,8 +38,7 @@ inline SVGScriptElement::SVGScriptElement(Document& document,
     : SVGElement(SVGNames::scriptTag, document),
       SVGURIReference(this),
       loader_(InitializeScriptLoader(flags.IsCreatedByParser(),
-                                     flags.WasAlreadyStarted(),
-                                     false)) {}
+                                     flags.WasAlreadyStarted())) {}
 
 SVGScriptElement* SVGScriptElement::Create(Document& document,
                                            const CreateElementFlags flags) {
@@ -50,8 +50,9 @@ void SVGScriptElement::ParseAttribute(
   if (params.name == HTMLNames::onerrorAttr) {
     SetAttributeEventListener(
         EventTypeNames::error,
-        CreateAttributeEventListener(this, params.name, params.new_value,
-                                     EventParameterName()));
+        CreateAttributeEventListener(
+            this, params.name, params.new_value,
+            JSEventHandler::HandlerType::kOnErrorEventHandler));
   } else {
     SVGElement::ParseAttribute(params);
   }
@@ -68,7 +69,7 @@ void SVGScriptElement::SvgAttributeChanged(const QualifiedName& attr_name) {
 }
 
 Node::InsertionNotificationRequest SVGScriptElement::InsertedInto(
-    ContainerNode* root_parent) {
+    ContainerNode& root_parent) {
   SVGElement::InsertedInto(root_parent);
   return kInsertionShouldCallDidNotifySubtreeInsertions;
 }
@@ -77,7 +78,7 @@ void SVGScriptElement::DidNotifySubtreeInsertionsToDocument() {
   loader_->DidNotifySubtreeInsertionsToDocument();
 
   if (!loader_->IsParserInserted())
-    loader_->SetHaveFiredLoadEvent(true);
+    have_fired_load_ = true;
 }
 
 void SVGScriptElement::ChildrenChanged(const ChildrenChange& change) {
@@ -96,11 +97,11 @@ bool SVGScriptElement::IsURLAttribute(const Attribute& attribute) const {
 
 void SVGScriptElement::FinishParsingChildren() {
   SVGElement::FinishParsingChildren();
-  loader_->SetHaveFiredLoadEvent(true);
+  have_fired_load_ = true;
 }
 
 bool SVGScriptElement::HaveLoadedRequiredResources() {
-  return loader_->HaveFiredLoadEvent();
+  return have_fired_load_;
 }
 
 String SVGScriptElement::SourceAttributeValue() const {
@@ -155,11 +156,12 @@ Element* SVGScriptElement::CloneWithoutAttributesAndChildren(
 }
 
 void SVGScriptElement::DispatchLoadEvent() {
-  DispatchEvent(Event::Create(EventTypeNames::load));
+  DispatchEvent(*Event::Create(EventTypeNames::load));
+  have_fired_load_ = true;
 }
 
 void SVGScriptElement::DispatchErrorEvent() {
-  DispatchEvent(Event::Create(EventTypeNames::error));
+  DispatchEvent(*Event::Create(EventTypeNames::error));
 }
 
 void SVGScriptElement::SetScriptElementForBinding(
@@ -182,12 +184,6 @@ void SVGScriptElement::Trace(blink::Visitor* visitor) {
   SVGElement::Trace(visitor);
   SVGURIReference::Trace(visitor);
   ScriptElementBase::Trace(visitor);
-}
-
-void SVGScriptElement::TraceWrappers(
-    const ScriptWrappableVisitor* visitor) const {
-  visitor->TraceWrappers(loader_);
-  SVGElement::TraceWrappers(visitor);
 }
 
 }  // namespace blink

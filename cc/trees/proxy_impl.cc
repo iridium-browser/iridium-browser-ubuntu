@@ -27,6 +27,7 @@
 #include "components/viz/common/gpu/context_provider.h"
 #include "gpu/command_buffer/client/gles2_interface.h"
 #include "services/metrics/public/cpp/ukm_recorder.h"
+#include "ui/gfx/presentation_feedback.h"
 
 namespace cc {
 
@@ -68,6 +69,7 @@ ProxyImpl::ProxyImpl(base::WeakPtr<ProxyMain> proxy_main_weak_ptr,
 
   host_impl_ = layer_tree_host->CreateLayerTreeHostImpl(this);
   const LayerTreeSettings& settings = layer_tree_host->GetSettings();
+  send_compositor_frame_ack_ = settings.send_compositor_frame_ack;
 
   SchedulerSettings scheduler_settings(settings.ToSchedulerSettings());
 
@@ -136,17 +138,12 @@ void ProxyImpl::InitializeLayerTreeFrameSinkOnImpl(
   proxy_main_frame_sink_bound_weak_ptr_ = proxy_main_frame_sink_bound_weak_ptr;
 
   LayerTreeHostImpl* host_impl = host_impl_.get();
-  bool success = host_impl->InitializeRenderer(layer_tree_frame_sink);
+  bool success = host_impl->InitializeFrameSink(layer_tree_frame_sink);
   MainThreadTaskRunner()->PostTask(
       FROM_HERE, base::BindOnce(&ProxyMain::DidInitializeLayerTreeFrameSink,
                                 proxy_main_weak_ptr_, success));
   if (success)
     scheduler_->DidCreateAndInitializeLayerTreeFrameSink();
-}
-
-void ProxyImpl::MainThreadHasStoppedFlingingOnImpl() {
-  DCHECK(IsImplThread());
-  host_impl_->MainThreadHasStoppedFlinging();
 }
 
 void ProxyImpl::SetInputThrottledUntilCommitOnImpl(bool is_throttled) {
@@ -295,9 +292,11 @@ void ProxyImpl::DidReceiveCompositorFrameAckOnImplThread() {
                "ProxyImpl::DidReceiveCompositorFrameAckOnImplThread");
   DCHECK(IsImplThread());
   scheduler_->DidReceiveCompositorFrameAck();
-  MainThreadTaskRunner()->PostTask(
-      FROM_HERE, base::BindOnce(&ProxyMain::DidReceiveCompositorFrameAck,
-                                proxy_main_frame_sink_bound_weak_ptr_));
+  if (send_compositor_frame_ack_) {
+    MainThreadTaskRunner()->PostTask(
+        FROM_HERE, base::BindOnce(&ProxyMain::DidReceiveCompositorFrameAck,
+                                  proxy_main_frame_sink_bound_weak_ptr_));
+  }
 }
 
 void ProxyImpl::OnCanDrawStateChanged(bool can_draw) {
@@ -367,10 +366,6 @@ size_t ProxyImpl::MainThreadAnimationsCount() const {
   return host_impl_->mutator_host()->MainThreadAnimationsCount();
 }
 
-size_t ProxyImpl::MainThreadCompositableAnimationsCount() const {
-  return host_impl_->mutator_host()->MainThreadCompositableAnimationsCount();
-}
-
 bool ProxyImpl::CurrentFrameHadRAF() const {
   return host_impl_->mutator_host()->CurrentFrameHadRAF();
 }
@@ -406,9 +401,8 @@ void ProxyImpl::RenewTreePriority() {
   if (smoothness_priority_expiration_notifier_.HasPendingNotification())
     tree_priority = SMOOTHNESS_TAKES_PRIORITY;
 
-  // New content always takes priority when there is an invalid viewport size or
-  // ui resources have been evicted.
-  if (host_impl_->active_tree()->ViewportSizeInvalid() ||
+  // New content always takes priority when ui resources have been evicted.
+  if (host_impl_->active_tree()->GetDeviceViewport().size().IsEmpty() ||
       host_impl_->EvictedUIResourcesExist() || input_throttled_until_commit_) {
     // Once we enter NEW_CONTENTS_TAKES_PRIORITY mode, visible tiles on active
     // tree might be freed. We need to set RequiresHighResToDraw to ensure that
@@ -467,9 +461,11 @@ void ProxyImpl::DidCompletePageScaleAnimationOnImplThread() {
                                 proxy_main_weak_ptr_));
 }
 
-void ProxyImpl::OnDrawForLayerTreeFrameSink(bool resourceless_software_draw) {
+void ProxyImpl::OnDrawForLayerTreeFrameSink(bool resourceless_software_draw,
+                                            bool skip_draw) {
   DCHECK(IsImplThread());
-  scheduler_->OnDrawForLayerTreeFrameSink(resourceless_software_draw);
+  scheduler_->OnDrawForLayerTreeFrameSink(resourceless_software_draw,
+                                          skip_draw);
 }
 
 void ProxyImpl::NeedsImplSideInvalidation(bool needs_first_draw_on_activation) {
@@ -483,14 +479,13 @@ void ProxyImpl::NotifyImageDecodeRequestFinished() {
 }
 
 void ProxyImpl::DidPresentCompositorFrameOnImplThread(
-    const std::vector<int>& source_frames,
-    base::TimeTicks time,
-    base::TimeDelta refresh,
-    uint32_t flags) {
+    uint32_t frame_token,
+    std::vector<LayerTreeHost::PresentationTimeCallback> callbacks,
+    const gfx::PresentationFeedback& feedback) {
   MainThreadTaskRunner()->PostTask(
       FROM_HERE, base::BindOnce(&ProxyMain::DidPresentCompositorFrame,
-                                proxy_main_weak_ptr_, source_frames, time,
-                                refresh, flags));
+                                proxy_main_weak_ptr_, frame_token,
+                                std::move(callbacks), feedback));
 }
 
 bool ProxyImpl::WillBeginImplFrame(const viz::BeginFrameArgs& args) {
@@ -615,10 +610,10 @@ void ProxyImpl::ScheduledActionPrepareTiles() {
   host_impl_->PrepareTiles();
 }
 
-void ProxyImpl::ScheduledActionInvalidateLayerTreeFrameSink() {
+void ProxyImpl::ScheduledActionInvalidateLayerTreeFrameSink(bool needs_redraw) {
   TRACE_EVENT0("cc", "ProxyImpl::ScheduledActionInvalidateLayerTreeFrameSink");
   DCHECK(IsImplThread());
-  host_impl_->InvalidateLayerTreeFrameSink();
+  host_impl_->InvalidateLayerTreeFrameSink(needs_redraw);
 }
 
 void ProxyImpl::ScheduledActionPerformImplSideInvalidation() {
@@ -719,22 +714,13 @@ base::SingleThreadTaskRunner* ProxyImpl::MainThreadTaskRunner() {
 
 void ProxyImpl::SetURLForUkm(const GURL& url) {
   DCHECK(IsImplThread());
-  if (!host_impl_->ukm_manager())
-    return;
-
-  // The active tree might still be from content for the previous page when the
-  // recorder is updated here, since new content will be pushed with the next
-  // main frame. But we should only get a few impl frames wrong here in that
-  // case. Also, since checkerboard stats are only recorded with user
-  // interaction, it must be in progress when the navigation commits for this
-  // case to occur.
-  host_impl_->ukm_manager()->SetSourceURL(url);
+  host_impl_->SetActiveURL(url);
 }
 
-void ProxyImpl::ClearHistoryOnNavigation() {
+void ProxyImpl::ClearHistory() {
   DCHECK(IsImplThread());
   DCHECK(IsMainThreadBlocked());
-  scheduler_->ClearHistoryOnNavigation();
+  scheduler_->ClearHistory();
 }
 
 void ProxyImpl::SetRenderFrameObserver(

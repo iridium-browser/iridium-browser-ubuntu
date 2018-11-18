@@ -11,12 +11,13 @@
 #include "base/lazy_instance.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/post_task.h"
 #include "build/build_config.h"
-#include "components/viz/common/features.h"
 #include "content/browser/bad_message.h"
 #include "content/browser/child_process_security_policy_impl.h"
 #include "content/browser/devtools/devtools_frame_trace_recorder.h"
 #include "content/browser/devtools/devtools_manager.h"
+#include "content/browser/devtools/devtools_renderer_channel.h"
 #include "content/browser/devtools/devtools_session.h"
 #include "content/browser/devtools/protocol/browser_handler.h"
 #include "content/browser/devtools/protocol/dom_handler.h"
@@ -41,8 +42,10 @@
 #include "content/browser/renderer_host/render_view_host_impl.h"
 #include "content/browser/site_instance_impl.h"
 #include "content/browser/web_contents/web_contents_impl.h"
+#include "content/browser/web_package/signed_exchange_envelope.h"
 #include "content/common/view_messages.h"
 #include "content/public/browser/browser_context.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
 #include "content/public/browser/navigation_handle.h"
@@ -50,14 +53,16 @@
 #include "content/public/browser/render_widget_host_iterator.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/common/browser_side_navigation_policy.h"
-#include "content/public/common/content_features.h"
 #include "mojo/public/cpp/bindings/associated_binding.h"
 #include "net/base/load_flags.h"
 #include "net/http/http_request_headers.h"
+#include "net/ssl/ssl_info.h"
 #include "services/network/public/cpp/features.h"
 #include "third_party/blink/public/common/associated_interfaces/associated_interface_provider.h"
+#include "third_party/blink/public/web/devtools_agent.mojom.h"
 
 #if defined(OS_ANDROID)
+#include "content/browser/renderer_host/compositor_impl_android.h"
 #include "content/public/browser/render_widget_host_view.h"
 #include "services/device/public/mojom/wake_lock_context.mojom.h"
 #endif
@@ -208,19 +213,70 @@ void RenderFrameDevToolsAgentHost::OnNavigationResponseReceived(
   std::string frame_id = ftn->devtools_frame_token().ToString();
   GURL url = nav_request.common_params().url;
   DispatchToAgents(ftn, &protocol::NetworkHandler::ResponseReceived, id, id,
-                   url, protocol::Page::ResourceTypeEnum::Document,
+                   url, protocol::Network::ResourceTypeEnum::Document,
                    response.head, frame_id);
 }
 
 // static
 void RenderFrameDevToolsAgentHost::OnNavigationRequestFailed(
     const NavigationRequest& nav_request,
-    int error_code) {
+    const network::URLLoaderCompletionStatus& status) {
   FrameTreeNode* ftn = nav_request.frame_tree_node();
   std::string id = nav_request.devtools_navigation_token().ToString();
   DispatchToAgents(ftn, &protocol::NetworkHandler::LoadingComplete, id,
-                   protocol::Page::ResourceTypeEnum::Document,
-                   network::URLLoaderCompletionStatus(error_code));
+                   protocol::Network::ResourceTypeEnum::Document, status);
+}
+
+// static
+void RenderFrameDevToolsAgentHost::OnSignedExchangeReceived(
+    FrameTreeNode* frame_tree_node,
+    base::Optional<const base::UnguessableToken> devtools_navigation_token,
+    const GURL& outer_request_url,
+    const network::ResourceResponseHead& outer_response,
+    const base::Optional<SignedExchangeEnvelope>& envelope,
+    const scoped_refptr<net::X509Certificate>& certificate,
+    const base::Optional<net::SSLInfo>& ssl_info,
+    const std::vector<SignedExchangeError>& errors) {
+  DispatchToAgents(frame_tree_node,
+                   &protocol::NetworkHandler::OnSignedExchangeReceived,
+                   devtools_navigation_token, outer_request_url, outer_response,
+                   envelope, certificate, ssl_info, errors);
+}
+
+// static
+void RenderFrameDevToolsAgentHost::OnSignedExchangeCertificateRequestSent(
+    FrameTreeNode* frame_tree_node,
+    const base::UnguessableToken& request_id,
+    const base::UnguessableToken& loader_id,
+    const network::ResourceRequest& request,
+    const GURL& signed_exchange_url) {
+  DispatchToAgents(frame_tree_node, &protocol::NetworkHandler::RequestSent,
+                   request_id.ToString(), loader_id.ToString(), request,
+                   protocol::Network::Initiator::TypeEnum::SignedExchange,
+                   signed_exchange_url);
+}
+
+// static
+void RenderFrameDevToolsAgentHost::OnSignedExchangeCertificateResponseReceived(
+    FrameTreeNode* frame_tree_node,
+    const base::UnguessableToken& request_id,
+    const base::UnguessableToken& loader_id,
+    const GURL& url,
+    const network::ResourceResponseHead& head) {
+  DispatchToAgents(frame_tree_node, &protocol::NetworkHandler::ResponseReceived,
+                   request_id.ToString(), loader_id.ToString(), url,
+                   protocol::Network::ResourceTypeEnum::Other, head,
+                   protocol::Maybe<std::string>());
+}
+
+// static
+void RenderFrameDevToolsAgentHost::OnSignedExchangeCertificateRequestCompleted(
+    FrameTreeNode* frame_tree_node,
+    const base::UnguessableToken& request_id,
+    const network::URLLoaderCompletionStatus& status) {
+  DispatchToAgents(frame_tree_node, &protocol::NetworkHandler::LoadingComplete,
+                   request_id.ToString(),
+                   protocol::Network::ResourceTypeEnum::Other, status);
 }
 
 // static
@@ -282,6 +338,10 @@ void RenderFrameDevToolsAgentHost::ApplyOverrides(
     network->ApplyOverrides(&headers, &begin_params->skip_service_worker,
                             &disable_cache);
   }
+
+  for (auto* emulation : protocol::EmulationHandler::ForAgentHost(agent_host))
+    emulation->ApplyOverrides(&headers);
+
   if (disable_cache) {
     begin_params->load_flags &=
         ~(net::LOAD_VALIDATE_CACHE | net::LOAD_SKIP_CACHE_VALIDATION |
@@ -296,6 +356,7 @@ void RenderFrameDevToolsAgentHost::ApplyOverrides(
 bool RenderFrameDevToolsAgentHost::WillCreateURLLoaderFactory(
     RenderFrameHostImpl* rfh,
     bool is_navigation,
+    bool is_download,
     network::mojom::URLLoaderFactoryRequest* target_factory_request) {
   FrameTreeNode* frame_tree_node = rfh->frame_tree_node();
   base::UnguessableToken frame_token = frame_tree_node->devtools_frame_token();
@@ -304,9 +365,10 @@ bool RenderFrameDevToolsAgentHost::WillCreateURLLoaderFactory(
   if (!agent_host)
     return false;
   int process_id = is_navigation ? 0 : rfh->GetProcess()->GetID();
+  DCHECK(!is_download || is_navigation);
   for (auto* network : protocol::NetworkHandler::ForAgentHost(agent_host)) {
-    if (network->MaybeCreateProxyForInterception(frame_token, process_id,
-                                                 target_factory_request)) {
+    if (network->MaybeCreateProxyForInterception(
+            frame_token, process_id, is_download, target_factory_request)) {
       return true;
     }
   }
@@ -367,12 +429,10 @@ WebContents* RenderFrameDevToolsAgentHost::GetWebContents() {
   return web_contents();
 }
 
-bool RenderFrameDevToolsAgentHost::AttachSession(DevToolsSession* session) {
-  if (session->restricted() && !IsFrameHostAllowedForRestrictedSessions())
+bool RenderFrameDevToolsAgentHost::AttachSession(DevToolsSession* session,
+                                                 TargetRegistry* registry) {
+  if (!ShouldAllowSession(session))
     return false;
-  session->SetRenderer(frame_host_ ? frame_host_->GetProcess()->GetID()
-                                   : ChildProcessHost::kInvalidUniqueID,
-                       frame_host_);
 
   protocol::EmulationHandler* emulation_handler =
       new protocol::EmulationHandler();
@@ -384,32 +444,38 @@ bool RenderFrameDevToolsAgentHost::AttachSession(DevToolsSession* session) {
   session->AddHandler(base::WrapUnique(new protocol::IOHandler(
       GetIOContext())));
   session->AddHandler(base::WrapUnique(new protocol::MemoryHandler()));
-  session->AddHandler(base::WrapUnique(new protocol::NetworkHandler(GetId())));
+  session->AddHandler(base::WrapUnique(new protocol::NetworkHandler(
+      GetId(),
+      frame_tree_node_ ? frame_tree_node_->devtools_frame_token()
+                       : base::UnguessableToken(),
+      GetIOContext())));
   session->AddHandler(base::WrapUnique(new protocol::SchemaHandler()));
   session->AddHandler(base::WrapUnique(new protocol::ServiceWorkerHandler()));
   session->AddHandler(base::WrapUnique(new protocol::StorageHandler()));
-  if (!session->restricted()) {
-    session->AddHandler(base::WrapUnique(
-        new protocol::TargetHandler(false /* browser_only */)));
-  }
-  session->AddHandler(
-      base::WrapUnique(new protocol::PageHandler(emulation_handler)));
+  session->AddHandler(base::WrapUnique(new protocol::TargetHandler(
+      session->client()->MayDiscoverTargets()
+          ? protocol::TargetHandler::AccessMode::kRegular
+          : protocol::TargetHandler::AccessMode::kAutoAttachOnly,
+      GetId(), registry)));
+  session->AddHandler(base::WrapUnique(new protocol::PageHandler(
+      emulation_handler, session->client()->MayAffectLocalFiles())));
   session->AddHandler(base::WrapUnique(new protocol::SecurityHandler()));
   if (!frame_tree_node_ || !frame_tree_node_->parent()) {
     session->AddHandler(base::WrapUnique(
         new protocol::TracingHandler(frame_tree_node_, GetIOContext())));
   }
 
-  if (EnsureAgent())
-    session->AttachToAgent(agent_ptr_);
-
-  if (sessions().size() == 1) {
-    // Taking screenshots using the video capture API is done in TracingHandler.
-    if (!base::FeatureList::IsEnabled(features::kVizDisplayCompositor) &&
-        !base::FeatureList::IsEnabled(
-            features::kUseVideoCaptureApiForDevToolsSnapshots)) {
+  if (sessions().empty()) {
+    bool use_video_capture_api = true;
+#ifdef OS_ANDROID
+    // Video capture API cannot be used on Android WebView.
+    if (!CompositorImpl::IsInitialized())
+      use_video_capture_api = false;
+#endif
+    // When video capture API is used, don't instantiate
+    // DevToolsFrameTraceRecorder. Taking snapshots happens in TracingHandler.
+    if (!use_video_capture_api)
       frame_trace_recorder_.reset(new DevToolsFrameTraceRecorder());
-    }
     GrantPolicy();
 #if defined(OS_ANDROID)
     GetWakeLock()->RequestWakeLock();
@@ -427,12 +493,6 @@ void RenderFrameDevToolsAgentHost::DetachSession(DevToolsSession* session) {
     GetWakeLock()->CancelWakeLock();
 #endif
   }
-}
-
-void RenderFrameDevToolsAgentHost::DispatchProtocolMessage(
-    DevToolsSession* session,
-    const std::string& message) {
-  session->DispatchProtocolMessage(message);
 }
 
 void RenderFrameDevToolsAgentHost::InspectElement(RenderFrameHost* frame_host,
@@ -453,9 +513,7 @@ void RenderFrameDevToolsAgentHost::InspectElement(RenderFrameHost* frame_host,
           view->TransformRootPointToViewCoordSpace(gfx::PointF(point)));
     }
   }
-
-  if (host->EnsureAgent())
-    host->agent_ptr_->InspectElement(point);
+  host->GetRendererChannel()->InspectElement(point);
 }
 
 RenderFrameDevToolsAgentHost::~RenderFrameDevToolsAgentHost() {
@@ -512,7 +570,7 @@ void RenderFrameDevToolsAgentHost::UpdateFrameHost(
       render_frame_alive_ = true;
       for (auto* inspector : protocol::InspectorHandler::ForAgentHost(this))
         inspector->TargetReloadedAfterCrash();
-      MaybeReattachToRenderFrame();
+      UpdateRendererChannel(IsAttached());
     }
     return;
   }
@@ -527,10 +585,14 @@ void RenderFrameDevToolsAgentHost::UpdateFrameHost(
     RevokePolicy();
 
   frame_host_ = frame_host;
-  agent_ptr_.reset();
 
-  if (!IsFrameHostAllowedForRestrictedSessions())
-    ForceDetachRestrictedSessions();
+  std::vector<DevToolsSession*> restricted_sessions;
+  for (DevToolsSession* session : sessions()) {
+    if (!ShouldAllowSession(session))
+      restricted_sessions.push_back(session);
+  }
+  if (!restricted_sessions.empty())
+    ForceDetachRestrictedSessions(restricted_sessions);
 
   if (!render_frame_alive_) {
     render_frame_alive_ = true;
@@ -538,21 +600,9 @@ void RenderFrameDevToolsAgentHost::UpdateFrameHost(
       inspector->TargetReloadedAfterCrash();
   }
 
-  if (IsAttached()) {
+  if (IsAttached())
     GrantPolicy();
-    for (DevToolsSession* session : sessions()) {
-      session->SetRenderer(frame_host ? frame_host->GetProcess()->GetID() : -1,
-                           frame_host);
-    }
-    MaybeReattachToRenderFrame();
-  }
-}
-
-void RenderFrameDevToolsAgentHost::MaybeReattachToRenderFrame() {
-  if (!EnsureAgent())
-    return;
-  for (DevToolsSession* session : sessions())
-    session->AttachToAgent(agent_ptr_);
+  UpdateRendererChannel(IsAttached());
 }
 
 void RenderFrameDevToolsAgentHost::GrantPolicy() {
@@ -626,7 +676,7 @@ void RenderFrameDevToolsAgentHost::FrameDeleted(RenderFrameHost* rfh) {
 void RenderFrameDevToolsAgentHost::RenderFrameDeleted(RenderFrameHost* rfh) {
   if (rfh == frame_host_) {
     render_frame_alive_ = false;
-    agent_ptr_.reset();
+    UpdateRendererChannel(IsAttached());
   }
 }
 
@@ -636,7 +686,7 @@ void RenderFrameDevToolsAgentHost::DestroyOnRenderFrameGone() {
     RevokePolicy();
   ForceDetachAllSessions();
   frame_host_ = nullptr;
-  agent_ptr_.reset();
+  UpdateRendererChannel(IsAttached());
   SetFrameTreeNode(nullptr);
   Release();
 }
@@ -674,6 +724,7 @@ void RenderFrameDevToolsAgentHost::RenderProcessGone(
     case base::TERMINATION_STATUS_LAUNCH_FAILED:
       for (auto* inspector : protocol::InspectorHandler::ForAgentHost(this))
         inspector->TargetCrashed();
+      NotifyCrashed(status);
       break;
     default:
       for (auto* inspector : protocol::InspectorHandler::ForAgentHost(this))
@@ -700,23 +751,6 @@ void RenderFrameDevToolsAgentHost::OnVisibilityChanged(
   else
     GetWakeLock()->RequestWakeLock();
 #endif
-}
-
-void RenderFrameDevToolsAgentHost::DidReceiveCompositorFrame() {
-  const viz::CompositorFrameMetadata& metadata =
-      RenderWidgetHostImpl::From(
-          web_contents()->GetRenderViewHost()->GetWidget())
-          ->last_frame_metadata();
-  for (auto* page : protocol::PageHandler::ForAgentHost(this))
-    page->OnSwapCompositorFrame(metadata.Clone());
-
-  if (!frame_trace_recorder_)
-    return;
-  bool did_initiate_recording = false;
-  for (auto* tracing : protocol::TracingHandler::ForAgentHost(this))
-    did_initiate_recording |= tracing->did_initiate_recording();
-  if (did_initiate_recording)
-    frame_trace_recorder_->OnSwapCompositorFrame(frame_host_, metadata);
 }
 
 void RenderFrameDevToolsAgentHost::OnPageScaleFactorChanged(
@@ -861,8 +895,8 @@ void RenderFrameDevToolsAgentHost::SignalSynchronousSwapCompositorFrame(
       static_cast<RenderFrameHostImpl*>(frame_host)->frame_tree_node()));
   if (dtah) {
     // Unblock the compositor.
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, {BrowserThread::UI},
         base::BindOnce(
             &RenderFrameDevToolsAgentHost::SynchronousSwapCompositorFrame,
             dtah.get(), std::move(frame_metadata)));
@@ -885,21 +919,37 @@ void RenderFrameDevToolsAgentHost::SynchronousSwapCompositorFrame(
   }
 }
 
-bool RenderFrameDevToolsAgentHost::EnsureAgent() {
-  if (!frame_host_ || !render_frame_alive_)
-    return false;
-  if (!agent_ptr_)
-    frame_host_->GetRemoteAssociatedInterfaces()->GetInterface(&agent_ptr_);
-  return true;
+void RenderFrameDevToolsAgentHost::UpdateRendererChannel(bool force) {
+  blink::mojom::DevToolsAgentAssociatedPtr agent_ptr;
+  blink::mojom::DevToolsAgentHostAssociatedRequest host_request;
+  if (frame_host_ && render_frame_alive_ && force) {
+    blink::mojom::DevToolsAgentHostAssociatedPtrInfo host_ptr_info;
+    host_request = mojo::MakeRequest(&host_ptr_info);
+    frame_host_->BindDevToolsAgent(std::move(host_ptr_info),
+                                   mojo::MakeRequest(&agent_ptr));
+  }
+  int process_id = frame_host_ ? frame_host_->GetProcess()->GetID()
+                               : ChildProcessHost::kInvalidUniqueID;
+  GetRendererChannel()->SetRenderer(
+      std::move(agent_ptr), std::move(host_request), process_id, frame_host_);
 }
 
 bool RenderFrameDevToolsAgentHost::IsChildFrame() {
   return frame_tree_node_ && frame_tree_node_->parent();
 }
 
-bool RenderFrameDevToolsAgentHost::IsFrameHostAllowedForRestrictedSessions() {
-  return !frame_host_ ||
-         (!frame_host_->web_ui() && !frame_host_->pending_web_ui());
+bool RenderFrameDevToolsAgentHost::ShouldAllowSession(
+    DevToolsSession* session) {
+  DevToolsManager* manager = DevToolsManager::GetInstance();
+  if (manager->delegate() && frame_host_) {
+    if (!manager->delegate()->AllowInspectingRenderFrameHost(frame_host_))
+      return false;
+  }
+  const bool is_webui =
+      frame_host_ && (frame_host_->web_ui() || frame_host_->pending_web_ui());
+  if (!session->client()->MayAttachToRenderer(frame_host_, is_webui))
+    return false;
+  return true;
 }
 
 }  // namespace content

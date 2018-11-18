@@ -11,13 +11,21 @@
 #include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
+#include "build/build_config.h"
 #include "services/service_manager/public/cpp/binder_registry.h"
 #include "services/service_manager/public/cpp/service.h"
-#include "services/service_manager/public/cpp/service_context_ref.h"
 #include "services/tracing/agent_registry.h"
 #include "services/tracing/coordinator.h"
 
+#if defined(OS_ANDROID) || defined(OS_LINUX) || defined(OS_MACOSX) || \
+    defined(OS_WIN)
+#define PERFETTO_SERVICE_AVAILABLE
+#endif
+
 namespace tracing {
+
+class PerfettoTracingCoordinator;
+class PerfettoService;
 
 class TracingService : public service_manager::Service {
  public:
@@ -34,17 +42,18 @@ class TracingService : public service_manager::Service {
                        const std::string& interface_name,
                        mojo::ScopedMessagePipeHandle interface_pipe) override;
 
-  service_manager::ServiceContextRefFactory* ref_factory() {
-    return ref_factory_.get();
-  }
-
  private:
   service_manager::BinderRegistryWithArgs<
       const service_manager::BindSourceInfo&>
       registry_;
   std::unique_ptr<tracing::AgentRegistry> tracing_agent_registry_;
-  std::unique_ptr<tracing::Coordinator> tracing_coordinator_;
-  std::unique_ptr<service_manager::ServiceContextRefFactory> ref_factory_;
+  std::unique_ptr<Coordinator> tracing_coordinator_;
+  scoped_refptr<base::SequencedTaskRunner> task_runner_;
+
+#if defined(PERFETTO_SERVICE_AVAILABLE)
+  std::unique_ptr<tracing::PerfettoService> perfetto_service_;
+  std::unique_ptr<PerfettoTracingCoordinator> perfetto_tracing_coordinator_;
+#endif
 
   // WeakPtrFactory members should always come last so WeakPtrs are destructed
   // before other members.

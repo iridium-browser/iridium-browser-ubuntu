@@ -7,7 +7,9 @@
 
 #include "base/compiler_specific.h"
 #include "base/macros.h"
+#include "base/memory/scoped_refptr.h"
 #include "components/autofill/core/browser/autofill_driver.h"
+#include "services/network/test/test_url_loader_factory.h"
 
 namespace autofill {
 
@@ -19,9 +21,11 @@ class TestAutofillDriver : public AutofillDriver {
 
   // AutofillDriver implementation overrides.
   bool IsIncognito() const override;
+  bool IsInMainFrame() const override;
   // Returns the value passed in to the last call to |SetURLRequestContext()|
   // or NULL if that method has never been called.
   net::URLRequestContextGetter* GetURLRequestContext() override;
+  scoped_refptr<network::SharedURLLoaderFactory> GetURLLoaderFactory() override;
   bool RendererIsAvailable() override;
   void SendFormDataToRenderer(int query_id,
                               RendererFormDataAction action,
@@ -32,7 +36,7 @@ class TestAutofillDriver : public AutofillDriver {
       const std::vector<FormStructure*>& forms) override;
   void RendererShouldAcceptDataListSuggestion(
       const base::string16& value) override;
-  void RendererShouldClearFilledForm() override;
+  void RendererShouldClearFilledSection() override;
   void RendererShouldClearPreviewedForm() override;
   void RendererShouldFillFieldWithValue(const base::string16& value) override;
   void RendererShouldPreviewFieldWithValue(
@@ -50,14 +54,20 @@ class TestAutofillDriver : public AutofillDriver {
   bool GetDidInteractWithCreditCardForm() const;
 
   void SetIsIncognito(bool is_incognito);
+  void SetIsInMainFrame(bool is_in_main_frame);
 
   // Sets the URL request context for this instance. |url_request_context|
   // should outlive this instance.
   void SetURLRequestContext(net::URLRequestContextGetter* url_request_context);
+  void SetSharedURLLoaderFactory(
+      scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory);
 
  private:
   net::URLRequestContextGetter* url_request_context_;
+  network::TestURLLoaderFactory test_url_loader_factory_;
+  scoped_refptr<network::SharedURLLoaderFactory> test_shared_loader_factory_;
   bool is_incognito_ = false;
+  bool is_in_main_frame_ = false;
   bool did_interact_with_credit_card_form_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(TestAutofillDriver);

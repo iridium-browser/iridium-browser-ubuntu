@@ -28,6 +28,7 @@ import org.chromium.base.ApplicationState;
 import org.chromium.base.ApplicationStatus;
 import org.chromium.base.ContextUtils;
 import org.chromium.base.PathUtils;
+import org.chromium.base.StrictModeContext;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.base.metrics.RecordUserAction;
@@ -45,6 +46,7 @@ import org.chromium.chrome.browser.instantapps.InstantAppsHandler;
 import org.chromium.chrome.browser.tab.EmptyTabObserver;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tab.TabObserver;
+import org.chromium.chrome.browser.tab.TabRedirectHandler;
 import org.chromium.chrome.browser.util.IntentUtils;
 import org.chromium.chrome.browser.util.UrlUtilities;
 import org.chromium.chrome.browser.webapps.WebappActivity;
@@ -59,6 +61,7 @@ import org.chromium.ui.base.WindowAndroid;
 import org.chromium.webapk.lib.client.WebApkValidator;
 
 import java.util.ArrayList;
+import java.util.Iterator;
 import java.util.List;
 
 /**
@@ -259,39 +262,27 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
         Context context = getAvailableContext();
         if (context instanceof WebappActivity) {
             WebappActivity webappActivity = (WebappActivity) context;
-            return webappActivity.scopePolicy().applyPolicyForNavigationToUrl(
-                    webappActivity.getWebappInfo(), url);
+            return WebappScopePolicy.applyPolicyForNavigationToUrl(
+                    webappActivity.scopePolicy(), webappActivity.getWebappInfo(), url);
         }
         return WebappScopePolicy.NavigationDirective.NORMAL_BEHAVIOR;
     }
 
     @Override
-    public int countSpecializedHandlers(List<ResolveInfo> infos) {
-        return getSpecializedHandlersWithFilter(infos, null).size();
+    public int countSpecializedHandlers(List<ResolveInfo> infos, Intent intent) {
+        return getSpecializedHandlersWithFilter(infos, null, intent).size();
     }
 
     @VisibleForTesting
-    static ArrayList<String> getSpecializedHandlersWithFilter(
-            List<ResolveInfo> infos, String filterPackageName) {
+    public static ArrayList<String> getSpecializedHandlersWithFilter(
+            List<ResolveInfo> infos, String filterPackageName, Intent intent) {
         ArrayList<String> result = new ArrayList<>();
         if (infos == null) {
             return result;
         }
 
         for (ResolveInfo info : infos) {
-            IntentFilter filter = info.filter;
-            if (filter == null) {
-                // Error on the side of classifying ResolveInfo as generic.
-                continue;
-            }
-            if (filter.countDataAuthorities() == 0 && filter.countDataPaths() == 0) {
-                // Don't count generic handlers.
-                continue;
-            }
-
-            if (!TextUtils.isEmpty(filterPackageName)
-                    && (info.activityInfo == null
-                               || !info.activityInfo.packageName.equals(filterPackageName))) {
+            if (!matchResolveInfoExceptWildCardHost(info, filterPackageName, intent)) {
                 continue;
             }
 
@@ -309,6 +300,39 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
         return result;
     }
 
+    private static boolean matchResolveInfoExceptWildCardHost(
+            ResolveInfo info, String filterPackageName, Intent intent) {
+        IntentFilter intentFilter = info.filter;
+        if (intentFilter == null) {
+            // Error on the side of classifying ResolveInfo as generic.
+            return false;
+        }
+        if (intentFilter.countDataAuthorities() == 0 && intentFilter.countDataPaths() == 0) {
+            // Don't count generic handlers.
+            return false;
+        }
+        if (intent != null) {
+            boolean isWildCardHost = false;
+            Iterator<IntentFilter.AuthorityEntry> it = intentFilter.authoritiesIterator();
+            while (it != null && it.hasNext()) {
+                IntentFilter.AuthorityEntry entry = it.next();
+                if ("*".equals(entry.getHost())) {
+                    isWildCardHost = true;
+                    break;
+                }
+            }
+            if (isWildCardHost) {
+                return false;
+            }
+        }
+        if (!TextUtils.isEmpty(filterPackageName)
+                && (info.activityInfo == null
+                           || !info.activityInfo.packageName.equals(filterPackageName))) {
+            return false;
+        }
+        return true;
+    }
+
     /**
      * Check whether the given package is a specialized handler for the given intent
      *
@@ -319,10 +343,12 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
      */
     public static boolean isPackageSpecializedHandler(String packageName, Intent intent) {
         Context context = ContextUtils.getApplicationContext();
-        try {
+        // On certain Samsung devices, queryIntentActivities can trigger a
+        // StrictModeDiskReadViolation (https://crbug.com/894160).
+        try (StrictModeContext unused = StrictModeContext.allowDiskReads()){
             List<ResolveInfo> handlers = context.getPackageManager().queryIntentActivities(
                     intent, PackageManager.GET_RESOLVED_FILTER);
-            return getSpecializedHandlersWithFilter(handlers, packageName).size() > 0;
+            return getSpecializedHandlersWithFilter(handlers, packageName, intent).size() > 0;
         } catch (RuntimeException e) {
             IntentUtils.logTransactionTooLargeOrRethrow(e, intent);
         }
@@ -523,7 +549,7 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
     }
 
     @Override
-    public OverrideUrlLoadingResult clobberCurrentTab(String url, String referrerUrl) {
+    public @OverrideUrlLoadingResult int clobberCurrentTab(String url, String referrerUrl) {
         int transitionType = PageTransition.LINK;
         final LoadUrlParams loadUrlParams = new LoadUrlParams(url, transitionType);
         if (!TextUtils.isEmpty(referrerUrl)) {
@@ -539,9 +565,7 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
                 @Override
                 public void run() {
                     // Tab might be closed when this is run. See https://crbug.com/662877
-                    if (!mIsTabDestroyed) {
-                        mTab.loadUrl(loadUrlParams);
-                    }
+                    if (!mIsTabDestroyed) mTab.loadUrl(loadUrlParams);
                 }
             });
             return OverrideUrlLoadingResult.OVERRIDE_WITH_CLOBBERING_TAB;
@@ -596,7 +620,7 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
     @Override
     public void maybeRecordAppHandlersInIntent(Intent intent, List<ResolveInfo> infos) {
         intent.putExtra(IntentHandler.EXTRA_EXTERNAL_NAV_PACKAGES,
-                getSpecializedHandlersWithFilter(infos, null));
+                getSpecializedHandlersWithFilter(infos, null, intent));
     }
 
     @Override
@@ -621,9 +645,8 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
         if (!hasValidTab() || mTab.getWebContents() == null) return false;
 
         InstantAppsHandler handler = InstantAppsHandler.getInstance();
-        Intent intent = mTab.getTabRedirectHandler() != null
-                ? mTab.getTabRedirectHandler().getInitialIntent()
-                : null;
+        TabRedirectHandler redirect = TabRedirectHandler.get(mTab);
+        Intent intent = redirect != null ? redirect.getInitialIntent() : null;
         // TODO(mariakhomenko): consider also handling NDEF_DISCOVER action redirects.
         if (isIncomingRedirect && intent != null && Intent.ACTION_VIEW.equals(intent.getAction())) {
             // Set the URL the redirect was resolved to for checking the existence of the
@@ -665,5 +688,10 @@ public class ExternalNavigationDelegateImpl implements ExternalNavigationDelegat
      */
     private boolean hasValidTab() {
         return mTab != null && !mIsTabDestroyed;
+    }
+
+    @Override
+    public boolean isIntentForTrustedCallingApp(Intent intent) {
+        return false;
     }
 }

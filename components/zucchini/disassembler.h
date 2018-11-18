@@ -17,70 +17,19 @@
 
 namespace zucchini {
 
-class Disassembler;
-
-// A ReferenceGroup is associated with a specific |type| and has convenience
-// methods to obtain readers and writers for that type. A ReferenceGroup does
-// not store references; it is a lightweight class that communicates with the
-// disassembler to operate on them.
-class ReferenceGroup {
+// A vacuous ReferenceReader that produces no references.
+class EmptyReferenceReader : public ReferenceReader {
  public:
-  // Member function pointer used to obtain a ReferenceReader.
-  using ReaderFactory = std::unique_ptr<ReferenceReader> (
-      Disassembler::*)(offset_t lower, offset_t upper);
-
-  // Member function pointer used to obtain a ReferenceWriter.
-  using WriterFactory = std::unique_ptr<ReferenceWriter> (Disassembler::*)(
-      MutableBufferView image);
-
-  ReferenceGroup() = default;
-
-  // RefinedGeneratorFactory and RefinedReceptorFactory don't have to be
-  // identical to GeneratorFactory and ReceptorFactory, but they must be
-  // convertible. As a result, they can be pointer to member function of a
-  // derived Disassembler.
-  template <class RefinedReaderFactory, class RefinedWriterFactory>
-  ReferenceGroup(ReferenceTypeTraits traits,
-                 RefinedReaderFactory reader_factory,
-                 RefinedWriterFactory writer_factory)
-      : traits_(traits),
-        reader_factory_(static_cast<ReaderFactory>(reader_factory)),
-        writer_factory_(static_cast<WriterFactory>(writer_factory)) {}
-
-  // Returns a reader for all references in the binary.
-  // Invalidates any other writer or reader previously obtained for |disasm|.
-  std::unique_ptr<ReferenceReader> GetReader(Disassembler* disasm) const;
-
-  // Returns a reader for references whose bytes are entirely contained in
-  // |[lower, upper)|.
-  // Invalidates any other writer or reader previously obtained for |disasm|.
-  std::unique_ptr<ReferenceReader> GetReader(offset_t lower,
-                                             offset_t upper,
-                                             Disassembler* disasm) const;
-
-  // Returns a writer for references in |image|, assuming that |image| was the
-  // same one initially parsed by |disasm|.
-  // Invalidates any other writer or reader previously obtained for |disasm|.
-  std::unique_ptr<ReferenceWriter> GetWriter(MutableBufferView image,
-                                             Disassembler* disasm) const;
-
-  // Returns traits describing the reference type.
-  const ReferenceTypeTraits& traits() const { return traits_; }
-
-  // Shorthand for traits().width.
-  offset_t width() const { return traits().width; }
-
-  // Shorthand for traits().type_tag.
-  TypeTag type_tag() const { return traits().type_tag; }
-
-  // Shorthand for traits().pool_tag.
-  PoolTag pool_tag() const { return traits().pool_tag; }
-
- private:
-  ReferenceTypeTraits traits_;
-  ReaderFactory reader_factory_ = nullptr;
-  WriterFactory writer_factory_ = nullptr;
+  base::Optional<Reference> GetNext() override;
 };
+
+// Disassembler needs to be declared before ReferenceGroup because the latter
+// contains member pointers based on the former, and we use a compiler flag,
+// -fcomplete-member-pointers, which enforces that member pointer base types are
+// complete. This flag helps prevent us from running into problems in the
+// Microsoft C++ ABI (see https://crbug.com/847724).
+
+class ReferenceGroup;
 
 // A Disassembler is used to encapsulate architecture specific operations, to:
 // - Describe types of references found in the architecture using traits.
@@ -132,6 +81,67 @@ class Disassembler {
   int num_equivalence_iterations_;
 
   DISALLOW_COPY_AND_ASSIGN(Disassembler);
+};
+
+// A ReferenceGroup is associated with a specific |type| and has convenience
+// methods to obtain readers and writers for that type. A ReferenceGroup does
+// not store references; it is a lightweight class that communicates with the
+// disassembler to operate on them.
+class ReferenceGroup {
+ public:
+  // Member function pointer used to obtain a ReferenceReader.
+  using ReaderFactory = std::unique_ptr<ReferenceReader> (
+      Disassembler::*)(offset_t lower, offset_t upper);
+
+  // Member function pointer used to obtain a ReferenceWriter.
+  using WriterFactory = std::unique_ptr<ReferenceWriter> (Disassembler::*)(
+      MutableBufferView image);
+
+  // RefinedGeneratorFactory and RefinedReceptorFactory don't have to be
+  // identical to GeneratorFactory and ReceptorFactory, but they must be
+  // convertible. As a result, they can be pointer to member function of a
+  // derived Disassembler.
+  template <class RefinedReaderFactory, class RefinedWriterFactory>
+  ReferenceGroup(ReferenceTypeTraits traits,
+                 RefinedReaderFactory reader_factory,
+                 RefinedWriterFactory writer_factory)
+      : traits_(traits),
+        reader_factory_(static_cast<ReaderFactory>(reader_factory)),
+        writer_factory_(static_cast<WriterFactory>(writer_factory)) {}
+
+  // Returns a reader for all references in the binary.
+  // Invalidates any other writer or reader previously obtained for |disasm|.
+  std::unique_ptr<ReferenceReader> GetReader(Disassembler* disasm) const;
+
+  // Returns a reader for references whose bytes are entirely contained in
+  // |[lower, upper)|.
+  // Invalidates any other writer or reader previously obtained for |disasm|.
+  std::unique_ptr<ReferenceReader> GetReader(offset_t lower,
+                                             offset_t upper,
+                                             Disassembler* disasm) const;
+
+  // Returns a writer for references in |image|, assuming that |image| was the
+  // same one initially parsed by |disasm|.
+  // Invalidates any other writer or reader previously obtained for |disasm|.
+  std::unique_ptr<ReferenceWriter> GetWriter(MutableBufferView image,
+                                             Disassembler* disasm) const;
+
+  // Returns traits describing the reference type.
+  const ReferenceTypeTraits& traits() const { return traits_; }
+
+  // Shorthand for traits().width.
+  offset_t width() const { return traits().width; }
+
+  // Shorthand for traits().type_tag.
+  TypeTag type_tag() const { return traits().type_tag; }
+
+  // Shorthand for traits().pool_tag.
+  PoolTag pool_tag() const { return traits().pool_tag; }
+
+ private:
+  ReferenceTypeTraits traits_;
+  ReaderFactory reader_factory_ = nullptr;
+  WriterFactory writer_factory_ = nullptr;
 };
 
 }  // namespace zucchini

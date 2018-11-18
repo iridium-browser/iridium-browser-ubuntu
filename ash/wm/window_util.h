@@ -20,12 +20,9 @@ class Point;
 
 namespace ui {
 class Event;
-class EventHandler;
 }
 
 namespace ash {
-
-class ImmersiveFullscreenController;
 
 namespace wm {
 
@@ -79,9 +76,6 @@ ASH_EXPORT bool MoveWindowToDisplay(aura::Window* window, int64_t display_id);
 ASH_EXPORT bool MoveWindowToEventRoot(aura::Window* window,
                                       const ui::Event& event);
 
-// Snap the window's layer to physical pixel boundary.
-ASH_EXPORT void SnapWindowToPixelBoundary(aura::Window* window);
-
 // Mark the container window so that InstallSnapLayoutManagerToContainers
 // installs the SnapToPixelLayoutManager.
 ASH_EXPORT void SetSnapsChildrenToPhysicalPixelBoundary(
@@ -100,24 +94,13 @@ ASH_EXPORT void SetChildrenUseExtendedHitRegionForWindow(aura::Window* window);
 // forward to an associated widget.
 ASH_EXPORT void CloseWidgetForWindow(aura::Window* window);
 
-// Adds or removes a handler to receive events targeted at this window, before
-// this window handles the events itself; the handler does not receive events
-// from embedded windows. This only supports windows with internal widgets;
-// see ash::GetInternalWidgetForWindow(). Ownership of the handler is not
-// transferred.
-//
-// Also note that the target of these events is always an aura::Window.
-ASH_EXPORT void AddLimitedPreTargetHandlerForWindow(ui::EventHandler* handler,
-                                                    aura::Window* window);
-ASH_EXPORT void RemoveLimitedPreTargetHandlerForWindow(
-    ui::EventHandler* handler,
+// Installs a resize handler on the window that makes it easier to resize
+// the window.
+ASH_EXPORT void InstallResizeHandleWindowTargeterForWindow(
     aura::Window* window);
 
-// Installs a resize handler on the window that makes it easier to resize
-// the window. See ResizeHandleWindowTargeter for the specifics.
-ASH_EXPORT void InstallResizeHandleWindowTargeterForWindow(
-    aura::Window* window,
-    ImmersiveFullscreenController* immersive_fullscreen_controller);
+// Returns true if |window| is currently in tab-dragging process.
+ASH_EXPORT bool IsDraggingTabs(const aura::Window* window);
 
 }  // namespace wm
 }  // namespace ash

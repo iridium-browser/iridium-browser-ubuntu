@@ -20,6 +20,7 @@
 #include "media/mojo/clients/mojo_decryptor.h"
 #include "media/mojo/common/media_type_converters.h"
 #include "media/mojo/interfaces/decryptor.mojom.h"
+#include "media/mojo/interfaces/interface_factory.mojom.h"
 #include "services/service_manager/public/cpp/connect.h"
 #include "services/service_manager/public/mojom/interface_provider.mojom.h"
 #include "url/origin.h"
@@ -41,14 +42,15 @@ void MojoCdm::Create(
     const url::Origin& security_origin,
     const CdmConfig& cdm_config,
     mojom::ContentDecryptionModulePtr remote_cdm,
+    mojom::InterfaceFactory* interface_factory,
     const SessionMessageCB& session_message_cb,
     const SessionClosedCB& session_closed_cb,
     const SessionKeysChangeCB& session_keys_change_cb,
     const SessionExpirationUpdateCB& session_expiration_update_cb,
     const CdmCreatedCB& cdm_created_cb) {
-  scoped_refptr<MojoCdm> mojo_cdm(
-      new MojoCdm(std::move(remote_cdm), session_message_cb, session_closed_cb,
-                  session_keys_change_cb, session_expiration_update_cb));
+  scoped_refptr<MojoCdm> mojo_cdm(new MojoCdm(
+      std::move(remote_cdm), interface_factory, session_message_cb,
+      session_closed_cb, session_keys_change_cb, session_expiration_update_cb));
 
   // |mojo_cdm| ownership is passed to the promise.
   std::unique_ptr<CdmInitializedPromise> promise(
@@ -59,13 +61,14 @@ void MojoCdm::Create(
 }
 
 MojoCdm::MojoCdm(mojom::ContentDecryptionModulePtr remote_cdm,
+                 mojom::InterfaceFactory* interface_factory,
                  const SessionMessageCB& session_message_cb,
                  const SessionClosedCB& session_closed_cb,
                  const SessionKeysChangeCB& session_keys_change_cb,
                  const SessionExpirationUpdateCB& session_expiration_update_cb)
     : remote_cdm_(std::move(remote_cdm)),
+      interface_factory_(interface_factory),
       client_binding_(this),
-      task_runner_(base::ThreadTaskRunnerHandle::Get()),
       cdm_id_(CdmContext::kInvalidCdmId),
       session_message_cb_(session_message_cb),
       session_closed_cb_(session_closed_cb),
@@ -73,24 +76,19 @@ MojoCdm::MojoCdm(mojom::ContentDecryptionModulePtr remote_cdm,
       session_expiration_update_cb_(session_expiration_update_cb),
       weak_factory_(this) {
   DVLOG(1) << __func__;
-  DCHECK(!session_message_cb_.is_null());
-  DCHECK(!session_closed_cb_.is_null());
-  DCHECK(!session_keys_change_cb_.is_null());
-  DCHECK(!session_expiration_update_cb_.is_null());
+  DCHECK(session_message_cb_);
+  DCHECK(session_closed_cb_);
+  DCHECK(session_keys_change_cb_);
+  DCHECK(session_expiration_update_cb_);
 
-  mojom::ContentDecryptionModuleClientPtr client;
-  client_binding_.Bind(mojo::MakeRequest(&client));
-  remote_cdm_->SetClient(std::move(client));
+  mojom::ContentDecryptionModuleClientAssociatedPtrInfo client_ptr_info;
+  client_binding_.Bind(mojo::MakeRequest(&client_ptr_info));
+  remote_cdm_->SetClient(std::move(client_ptr_info));
 }
 
 MojoCdm::~MojoCdm() {
   DVLOG(1) << __func__;
   DCHECK_CALLED_ON_VALID_THREAD(thread_checker_);
-
-  // TODO(crbug.com/819269): It seems possible that |this| is destructed on the
-  // wrong thread. Add this check to help investigation. We cannot CHECK on the
-  // |thread_checker_| because it will not check anything in release builds.
-  CHECK(task_runner_->BelongsToCurrentThread());
 
   base::AutoLock auto_lock(lock_);
 
@@ -303,13 +301,26 @@ Decryptor* MojoCdm::GetDecryptor() {
     decryptor_task_runner_ = base::ThreadTaskRunnerHandle::Get();
   DCHECK(decryptor_task_runner_->BelongsToCurrentThread());
 
+  if (decryptor_)
+    return decryptor_.get();
+
+  mojom::DecryptorPtr decryptor_ptr;
+
   // Can be called on a different thread.
   if (decryptor_ptr_info_.is_valid()) {
-    DCHECK(!decryptor_);
-    mojom::DecryptorPtr decryptor_ptr;
+    DVLOG(1) << __func__ << ": Using Decryptor exposed by the CDM directly";
     decryptor_ptr.Bind(std::move(decryptor_ptr_info_));
-    decryptor_.reset(new MojoDecryptor(std::move(decryptor_ptr)));
+  } else if (interface_factory_ && cdm_id_ != CdmContext::kInvalidCdmId) {
+    // TODO(xhwang): Pass back info on whether Decryptor is supported by the
+    // remote CDM.
+    DVLOG(1) << __func__ << ": Using Decryptor associated with CDM ID "
+             << cdm_id_ << ", typically hosted by CdmProxy in MediaService";
+    interface_factory_->CreateDecryptor(cdm_id_,
+                                        mojo::MakeRequest(&decryptor_ptr));
   }
+
+  if (decryptor_ptr)
+    decryptor_.reset(new MojoDecryptor(std::move(decryptor_ptr)));
 
   return decryptor_.get();
 }

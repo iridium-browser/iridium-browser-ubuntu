@@ -4,6 +4,7 @@
 
 #import "ios/chrome/browser/ui/download/download_manager_coordinator.h"
 
+#import <MobileCoreServices/MobileCoreServices.h>
 #import <StoreKit/StoreKit.h>
 #import <UIKit/UIKit.h>
 
@@ -11,8 +12,9 @@
 #include "base/mac/foundation_util.h"
 #include "base/run_loop.h"
 #include "base/strings/sys_string_conversions.h"
-#include "base/test/histogram_tester.h"
-#include "base/test/user_action_tester.h"
+#import "base/test/ios/wait_util.h"
+#include "base/test/metrics/histogram_tester.h"
+#include "base/test/metrics/user_action_tester.h"
 #include "ios/chrome/browser/download/download_directory_util.h"
 #include "ios/chrome/browser/download/download_manager_metric_names.h"
 #import "ios/chrome/browser/download/download_manager_tab_helper.h"
@@ -24,7 +26,6 @@
 #import "ios/chrome/test/fakes/fake_contained_presenter.h"
 #import "ios/chrome/test/fakes/fake_document_interaction_controller.h"
 #import "ios/chrome/test/scoped_key_window.h"
-#import "ios/testing/wait_util.h"
 #import "ios/web/public/test/fakes/fake_download_task.h"
 #import "ios/web/public/test/fakes/test_web_state.h"
 #include "ios/web/public/test/test_web_thread_bundle.h"
@@ -38,8 +39,8 @@
 #error "This file requires ARC support."
 #endif
 
-using testing::WaitUntilConditionOrTimeout;
-using testing::kWaitForUIElementTimeout;
+using base::test::ios::WaitUntilConditionOrTimeout;
+using base::test::ios::kWaitForUIElementTimeout;
 
 namespace {
 
@@ -359,11 +360,12 @@ TEST_F(DownloadManagerCoordinatorTest, InstallDrive) {
   application_ = OCMClassMock([UIApplication class]);
   OCMStub([application_ sharedApplication]).andReturn(application_);
   OCMStub([application_ canOpenURL:GetGoogleDriveAppUrl()]).andReturn(YES);
-  EXPECT_TRUE(WaitUntilConditionOrTimeout(testing::kWaitForActionTimeout, ^{
-    base::RunLoop().RunUntilIdle();
-    return user_action_tester_.GetActionCount(
-               "MobileDownloadFileUIInstallGoogleDrive") == 1;
-  }));
+  EXPECT_TRUE(
+      WaitUntilConditionOrTimeout(base::test::ios::kWaitForActionTimeout, ^{
+        base::RunLoop().RunUntilIdle();
+        return user_action_tester_.GetActionCount(
+                   "MobileDownloadFileUIInstallGoogleDrive") == 1;
+      }));
 }
 
 // Tests presenting Open In... menu without actually opening the download.
@@ -405,6 +407,8 @@ TEST_F(DownloadManagerCoordinatorTest, OpenIn) {
     [viewController.delegate downloadManagerViewController:viewController
                           presentOpenInMenuWithLayoutGuide:guide];
   }
+  ASSERT_NSEQ((__bridge NSString*)kUTTypeHTML,
+              document_interaction_controller.UTI);
   ASSERT_TRUE(document_interaction_controller.presentedOpenInMenu);
   ASSERT_TRUE(CGRectEqualToRect(
       CGRectZero, document_interaction_controller.presentedOpenInMenu.rect));
@@ -456,10 +460,11 @@ TEST_F(DownloadManagerCoordinatorTest, DestroyInProgressDownload) {
   }
 
   // Starting download is async for model.
-  ASSERT_TRUE(WaitUntilConditionOrTimeout(testing::kWaitForDownloadTimeout, ^{
-    base::RunLoop().RunUntilIdle();
-    return task_ptr->GetState() == web::DownloadTask::State::kInProgress;
-  }));
+  ASSERT_TRUE(
+      WaitUntilConditionOrTimeout(base::test::ios::kWaitForDownloadTimeout, ^{
+        base::RunLoop().RunUntilIdle();
+        return task_ptr->GetState() == web::DownloadTask::State::kInProgress;
+      }));
 
   // Download task is destroyed before the download is complete.
   task = nullptr;
@@ -499,10 +504,11 @@ TEST_F(DownloadManagerCoordinatorTest, QuitDuringInProgressDownload) {
   }
 
   // Starting download is async for model.
-  ASSERT_TRUE(WaitUntilConditionOrTimeout(testing::kWaitForDownloadTimeout, ^{
-    base::RunLoop().RunUntilIdle();
-    return task_ptr->GetState() == web::DownloadTask::State::kInProgress;
-  }));
+  ASSERT_TRUE(
+      WaitUntilConditionOrTimeout(base::test::ios::kWaitForDownloadTimeout, ^{
+        base::RunLoop().RunUntilIdle();
+        return task_ptr->GetState() == web::DownloadTask::State::kInProgress;
+      }));
 
   // Web States are closed without user action only during app termination.
   web_state_list.CloseAllWebStates(WebStateList::CLOSE_NO_FLAGS);
@@ -554,10 +560,11 @@ TEST_F(DownloadManagerCoordinatorTest, OpenInDrive) {
         downloadManagerViewControllerDidStartDownload:viewController];
   }
   // Starting download is async for model.
-  ASSERT_TRUE(WaitUntilConditionOrTimeout(testing::kWaitForDownloadTimeout, ^{
-    base::RunLoop().RunUntilIdle();
-    return task_ptr->GetState() == web::DownloadTask::State::kInProgress;
-  }));
+  ASSERT_TRUE(
+      WaitUntilConditionOrTimeout(base::test::ios::kWaitForDownloadTimeout, ^{
+        base::RunLoop().RunUntilIdle();
+        return task_ptr->GetState() == web::DownloadTask::State::kInProgress;
+      }));
   task.SetDone(true);
 
   // Present Open In... menu.
@@ -618,10 +625,11 @@ TEST_F(DownloadManagerCoordinatorTest, OpenInOtherApp) {
         downloadManagerViewControllerDidStartDownload:viewController];
   }
   // Starting download is async for model.
-  ASSERT_TRUE(WaitUntilConditionOrTimeout(testing::kWaitForDownloadTimeout, ^{
-    base::RunLoop().RunUntilIdle();
-    return task_ptr->GetState() == web::DownloadTask::State::kInProgress;
-  }));
+  ASSERT_TRUE(
+      WaitUntilConditionOrTimeout(base::test::ios::kWaitForDownloadTimeout, ^{
+        base::RunLoop().RunUntilIdle();
+        return task_ptr->GetState() == web::DownloadTask::State::kInProgress;
+      }));
 
   // Present Open In... menu.
   ASSERT_FALSE([document_interaction_controller presentedOpenInMenu]);
@@ -730,9 +738,10 @@ TEST_F(DownloadManagerCoordinatorTest, CloseInProgressDownload) {
   }
 
   // |stop| should dismiss the alert.
-  ASSERT_TRUE(WaitUntilConditionOrTimeout(testing::kWaitForUIElementTimeout, ^{
-    return !base_view_controller_.presentedViewController;
-  }));
+  ASSERT_TRUE(
+      WaitUntilConditionOrTimeout(base::test::ios::kWaitForUIElementTimeout, ^{
+        return !base_view_controller_.presentedViewController;
+      }));
 }
 
 // Tests downloadManagerTabHelper:decidePolicyForDownload:completionHandler:.
@@ -760,9 +769,10 @@ TEST_F(DownloadManagerCoordinatorTest, DecidePolicyForDownload) {
   }
 
   // |stop| should dismiss the alert.
-  ASSERT_TRUE(WaitUntilConditionOrTimeout(testing::kWaitForUIElementTimeout, ^{
-    return !base_view_controller_.presentedViewController;
-  }));
+  ASSERT_TRUE(
+      WaitUntilConditionOrTimeout(base::test::ios::kWaitForUIElementTimeout, ^{
+        return !base_view_controller_.presentedViewController;
+      }));
 }
 
 // Tests starting the download. Verifies that download task is started and its
@@ -784,10 +794,11 @@ TEST_F(DownloadManagerCoordinatorTest, StartDownload) {
   }
 
   // Starting download is async for model.
-  ASSERT_TRUE(WaitUntilConditionOrTimeout(testing::kWaitForDownloadTimeout, ^{
-    base::RunLoop().RunUntilIdle();
-    return task_ptr->GetState() == web::DownloadTask::State::kInProgress;
-  }));
+  ASSERT_TRUE(
+      WaitUntilConditionOrTimeout(base::test::ios::kWaitForDownloadTimeout, ^{
+        base::RunLoop().RunUntilIdle();
+        return task_ptr->GetState() == web::DownloadTask::State::kInProgress;
+      }));
 
   // Download file should be located in download directory.
   base::FilePath file = task.GetResponseWriter()->AsFileWriter()->file_path();
@@ -828,10 +839,11 @@ TEST_F(DownloadManagerCoordinatorTest, RetryingDownload) {
   }
 
   // Starting download is async for model.
-  ASSERT_TRUE(WaitUntilConditionOrTimeout(testing::kWaitForDownloadTimeout, ^{
-    base::RunLoop().RunUntilIdle();
-    return task_ptr->GetState() == web::DownloadTask::State::kInProgress;
-  }));
+  ASSERT_TRUE(
+      WaitUntilConditionOrTimeout(base::test::ios::kWaitForDownloadTimeout, ^{
+        base::RunLoop().RunUntilIdle();
+        return task_ptr->GetState() == web::DownloadTask::State::kInProgress;
+      }));
 
   histogram_tester_.ExpectUniqueSample("Download.IOSDownloadedFileNetError",
                                        -net::ERR_INTERNET_DISCONNECTED, 1);

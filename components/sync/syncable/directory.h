@@ -265,8 +265,6 @@ class Directory {
   // to indicate the continuation state of the next GetUpdates operation.
   void GetDownloadProgress(ModelType type,
                            sync_pb::DataTypeProgressMarker* value_out) const;
-  void GetDownloadProgressAsString(ModelType type,
-                                   std::string* value_out) const;
   void SetDownloadProgress(ModelType type,
                            const sync_pb::DataTypeProgressMarker& value);
   bool HasEmptyDownloadProgress(ModelType type) const;
@@ -280,6 +278,9 @@ class Directory {
   // Estimates memory usage of entries and corresponding indices of type
   // |model_type|.
   size_t EstimateMemoryUsageByType(ModelType model_type);
+
+  // Get the count of entries of type |model_type|.
+  size_t CountEntriesByType(ModelType model_type) const;
 
   // Gets/Increments transaction version of a model type. Must be called when
   // holding kernel mutex.
@@ -556,9 +557,14 @@ class Directory {
   // Used by CheckTreeInvariants.
   void GetAllMetaHandles(BaseTransaction* trans, MetahandleSet* result);
 
+  // Checks whether |entry| is safe to purge.
+  bool SafeToPurgeFromMemory(const EntryKernel& entry) const;
+
   // Used by VacuumAfterSaveChanges.
-  bool SafeToPurgeFromMemory(WriteTransaction* trans,
-                             const EntryKernel* const entry) const;
+  bool SafeToPurgeFromMemoryForTransaction(
+      WriteTransaction* trans,
+      const EntryKernel* const entry) const;
+
   // A helper used by GetTotalNodeCount.
   void GetChildSetForKernel(
       BaseTransaction*,

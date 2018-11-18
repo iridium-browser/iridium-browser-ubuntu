@@ -271,7 +271,7 @@ Polymer({
    * @private
    */
   updateDeviceList_: function() {
-    if (!this.bluetoothToggleState) {
+    if (!this.adapterState || !this.adapterState.powered) {
       this.deviceList_ = [];
       return;
     }
@@ -364,14 +364,6 @@ Polymer({
       this.forgetDevice_(device);
     else
       console.error('Unexected action: ' + action);
-  },
-
-  /**
-   * @param {!Event} event
-   * @private
-   */
-  stopTap_: function(event) {
-    event.stopPropagation();
   },
 
   /**

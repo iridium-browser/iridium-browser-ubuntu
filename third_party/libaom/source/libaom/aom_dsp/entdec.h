@@ -9,8 +9,8 @@
  * PATENTS file, you can obtain it at www.aomedia.org/license/patent.
  */
 
-#if !defined(_entdec_H)
-#define _entdec_H (1)
+#ifndef AOM_AOM_DSP_ENTDEC_H_
+#define AOM_AOM_DSP_ENTDEC_H_
 #include <limits.h>
 #include "aom_dsp/entcode.h"
 
@@ -32,16 +32,10 @@ typedef struct od_ec_dec od_ec_dec;
 struct od_ec_dec {
   /*The start of the current input buffer.*/
   const unsigned char *buf;
-  /*The read pointer for the raw bits.*/
-  const unsigned char *eptr;
-  /*Bits that will be read from/written at the end.*/
-  od_ec_window end_window;
-  /*Number of valid bits in end_window.*/
-  int nend_bits;
   /*An offset used to keep track of tell after reaching the end of the stream.
     This is constant throughout most of the decoding process, but becomes
      important once we hit the end of the buffer and stop incrementing pointers
-     (and instead pretend cnt/nend_bits have lots of bits).*/
+     (and instead pretend cnt has lots of bits).*/
   int32_t tell_offs;
   /*The end of the current input buffer.*/
   const unsigned char *end;
@@ -86,4 +80,4 @@ OD_WARN_UNUSED_RESULT uint32_t od_ec_dec_tell_frac(const od_ec_dec *dec)
 }  // extern "C"
 #endif
 
-#endif
+#endif  // AOM_AOM_DSP_ENTDEC_H_

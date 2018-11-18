@@ -128,6 +128,8 @@ static bool compare_img(const vpx_image_t *img1, const vpx_image_t *img2) {
   bool match = (img1->fmt == img2->fmt) && (img1->cs == img2->cs) &&
                (img1->d_w == img2->d_w) && (img1->d_h == img2->d_h);
 
+  if (!match) return false;
+
   const unsigned int width_y = img1->d_w;
   const unsigned int height_y = img1->d_h;
   unsigned int i;
@@ -201,7 +203,7 @@ void EncoderTest::RunLoop(VideoSource *video) {
       PreEncodeFrameHook(video, encoder.get());
       encoder->EncodeFrame(video, frame_flags_);
 
-      PostEncodeFrameHook();
+      PostEncodeFrameHook(encoder.get());
 
       CxDataIterator iter = encoder->GetCxData();
 
@@ -214,6 +216,7 @@ void EncoderTest::RunLoop(VideoSource *video) {
           case VPX_CODEC_CX_FRAME_PKT:
             has_cxdata = true;
             if (decoder.get() != NULL && DoDecode()) {
+              PreDecodeFrameHook(video, decoder.get());
               vpx_codec_err_t res_dec = decoder->DecodeFrame(
                   (const uint8_t *)pkt->data.frame.buf, pkt->data.frame.sz);
 

@@ -82,7 +82,7 @@ void TestConfigConvertExtraData(
 TEST_F(FFmpegCommonTest, AVStreamToDecoderConfig) {
   // Open a file to get a real AVStreams from FFmpeg.
   base::MemoryMappedFile file;
-  file.Initialize(GetTestDataFilePath("bear-320x240.webm"));
+  ASSERT_TRUE(file.Initialize(GetTestDataFilePath("bear-320x240.webm")));
   InMemoryUrlProtocol protocol(file.data(), file.length(), false);
   FFmpegGlue glue(&protocol);
   ASSERT_TRUE(glue.OpenContext());
@@ -125,8 +125,8 @@ TEST_F(FFmpegCommonTest, AVStreamToDecoderConfig) {
 
 TEST_F(FFmpegCommonTest, AVStreamToAudioDecoderConfig_OpusAmbisonics_4ch) {
   base::MemoryMappedFile file;
-  file.Initialize(
-      GetTestDataFilePath("bear-opus-end-trimming-4ch-channelmapping2.webm"));
+  ASSERT_TRUE(file.Initialize(
+      GetTestDataFilePath("bear-opus-end-trimming-4ch-channelmapping2.webm")));
   InMemoryUrlProtocol protocol(file.data(), file.length(), false);
   FFmpegGlue glue(&protocol);
   ASSERT_TRUE(glue.OpenContext());
@@ -148,8 +148,8 @@ TEST_F(FFmpegCommonTest, AVStreamToAudioDecoderConfig_OpusAmbisonics_4ch) {
 
 TEST_F(FFmpegCommonTest, AVStreamToAudioDecoderConfig_OpusAmbisonics_11ch) {
   base::MemoryMappedFile file;
-  file.Initialize(
-      GetTestDataFilePath("bear-opus-end-trimming-11ch-channelmapping2.webm"));
+  ASSERT_TRUE(file.Initialize(
+      GetTestDataFilePath("bear-opus-end-trimming-11ch-channelmapping2.webm")));
   InMemoryUrlProtocol protocol(file.data(), file.length(), false);
   FFmpegGlue glue(&protocol);
   ASSERT_TRUE(glue.OpenContext());
@@ -171,7 +171,7 @@ TEST_F(FFmpegCommonTest, AVStreamToAudioDecoderConfig_OpusAmbisonics_11ch) {
 
 TEST_F(FFmpegCommonTest, AVStreamToAudioDecoderConfig_9ch_wav) {
   base::MemoryMappedFile file;
-  file.Initialize(GetTestDataFilePath("9ch.wav"));
+  ASSERT_TRUE(file.Initialize(GetTestDataFilePath("9ch.wav")));
   InMemoryUrlProtocol protocol(file.data(), file.length(), false);
   FFmpegGlue glue(&protocol);
   ASSERT_TRUE(glue.OpenContext());
@@ -283,6 +283,9 @@ TEST_F(FFmpegCommonTest, VerifyUmaCodecHashes) {
 
           {"pcm_s24le_planar_deprecated", 1535518292},
           {"sanm_deprecated", 2047102762},
+
+          {"mpegvideo_xvmc_deprecated", 1550758811},
+          {"voxware_deprecated", 1656834662}
       };
 
   for (auto& kv : kDeprecatedHashes)

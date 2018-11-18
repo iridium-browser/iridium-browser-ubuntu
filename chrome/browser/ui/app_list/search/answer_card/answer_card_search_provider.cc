@@ -6,6 +6,7 @@
 
 #include <utility>
 
+#include "ash/public/cpp/app_list/app_list_features.h"
 #include "base/command_line.h"
 #include "base/metrics/histogram_macros.h"
 #include "base/metrics/user_metrics.h"
@@ -18,7 +19,6 @@
 #include "components/omnibox/browser/autocomplete_input.h"
 #include "components/omnibox/browser/autocomplete_match.h"
 #include "components/search_engines/template_url_service.h"
-#include "ui/app_list/app_list_features.h"
 
 namespace app_list {
 
@@ -67,7 +67,7 @@ AnswerCardSearchProvider::AnswerCardSearchProvider(
     : profile_(profile),
       model_updater_(model_updater),
       list_controller_(list_controller),
-      answer_server_url_(features::AnswerServerUrl()),
+      answer_server_url_(app_list_features::AnswerServerUrl()),
       template_url_service_(TemplateURLServiceFactory::GetForProfile(profile)) {
   navigation_contexts_[0].contents = std::move(contents0);
   navigation_contexts_[1].contents = std::move(contents1);
@@ -94,7 +94,7 @@ void AnswerCardSearchProvider::Start(const base::string16& query) {
   // |replacements|.
   const std::string prefixed_query(
       "q=" + net::EscapeQueryParamValue(base::UTF16ToUTF8(query), true) +
-      features::AnswerServerQuerySuffix());
+      app_list_features::AnswerServerQuerySuffix());
   GURL::Replacements replacements;
   replacements.SetQueryStr(prefixed_query);
   current_request_url_ = answer_server_url_.ReplaceComponents(replacements);

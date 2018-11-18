@@ -7,6 +7,7 @@
 #include "ash/public/cpp/ash_pref_names.h"
 #include "base/command_line.h"
 #include "base/macros.h"
+#include "chrome/browser/chromeos/login/session/user_session_manager.h"
 #include "chrome/browser/chromeos/login/test/oobe_base_test.h"
 #include "chrome/browser/chromeos/preferences.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
@@ -14,14 +15,16 @@
 #include "chrome/browser/prefs/pref_service_syncable_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/supervised_user/supervised_user_constants.h"
+#include "chrome/browser/ui/ash/ksv/keyboard_shortcut_viewer_util.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chromeos/chromeos_switches.h"
+#include "components/account_id/account_id.h"
 #include "components/policy/core/common/mock_configuration_policy_provider.h"
 #include "components/prefs/pref_service.h"
 #include "components/session_manager/core/session_manager.h"
-#include "components/signin/core/account_id/account_id.h"
 #include "components/user_manager/user_names.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/ime/chromeos/component_extension_ime_manager.h"
@@ -161,6 +164,14 @@ bool IsMonoAudioEnabled() {
   return AccessibilityManager::Get()->IsMonoAudioEnabled();
 }
 
+void SetSelectToSpeakEnabled(bool enabled) {
+  AccessibilityManager::Get()->SetSelectToSpeakEnabled(enabled);
+}
+
+bool IsSelectToSpeakEnabled() {
+  return AccessibilityManager::Get()->IsSelectToSpeakEnabled();
+}
+
 void SetAlwaysShowMenuEnabledPref(bool enabled) {
   GetActiveUserPrefs()->SetBoolean(
       ash::prefs::kShouldAlwaysShowAccessibilityMenu, enabled);
@@ -199,6 +210,11 @@ void SetVirtualKeyboardEnabledPref(bool enabled) {
 void SetMonoAudioEnabledPref(bool enabled) {
   GetActiveUserPrefs()->SetBoolean(ash::prefs::kAccessibilityMonoAudioEnabled,
                                    enabled);
+}
+
+void SetSelectToSpeakEnabledPref(bool enabled) {
+  GetActiveUserPrefs()->SetBoolean(
+      ash::prefs::kAccessibilitySelectToSpeakEnabled, enabled);
 }
 
 bool IsBrailleImeActive() {
@@ -252,6 +268,7 @@ IN_PROC_BROWSER_TEST_F(AccessibilityManagerTest, TypePref) {
   EXPECT_EQ(default_autoclick_delay_, GetAutoclickDelay());
   EXPECT_FALSE(IsVirtualKeyboardEnabled());
   EXPECT_FALSE(IsMonoAudioEnabled());
+  EXPECT_FALSE(IsSelectToSpeakEnabled());
 
   SetLargeCursorEnabledPref(true);
   EXPECT_TRUE(IsLargeCursorEnabled());
@@ -274,6 +291,9 @@ IN_PROC_BROWSER_TEST_F(AccessibilityManagerTest, TypePref) {
   SetMonoAudioEnabledPref(true);
   EXPECT_TRUE(IsMonoAudioEnabled());
 
+  SetSelectToSpeakEnabledPref(true);
+  EXPECT_TRUE(IsSelectToSpeakEnabled());
+
   SetLargeCursorEnabledPref(false);
   EXPECT_FALSE(IsLargeCursorEnabled());
 
@@ -291,6 +311,9 @@ IN_PROC_BROWSER_TEST_F(AccessibilityManagerTest, TypePref) {
 
   SetMonoAudioEnabledPref(false);
   EXPECT_FALSE(IsMonoAudioEnabled());
+
+  SetSelectToSpeakEnabledPref(false);
+  EXPECT_FALSE(IsSelectToSpeakEnabled());
 }
 
 IN_PROC_BROWSER_TEST_F(AccessibilityManagerTest,
@@ -351,6 +374,20 @@ IN_PROC_BROWSER_TEST_F(AccessibilityManagerTest,
   EXPECT_FALSE(observer.observed_enabled());
   EXPECT_EQ(observer.observed_type(), ACCESSIBILITY_TOGGLE_MONO_AUDIO);
   EXPECT_FALSE(IsMonoAudioEnabled());
+
+  observer.reset();
+  SetSelectToSpeakEnabled(true);
+  EXPECT_TRUE(observer.observed());
+  EXPECT_TRUE(observer.observed_enabled());
+  EXPECT_EQ(observer.observed_type(), ACCESSIBILITY_TOGGLE_SELECT_TO_SPEAK);
+  EXPECT_TRUE(IsSelectToSpeakEnabled());
+
+  observer.reset();
+  SetSelectToSpeakEnabled(false);
+  EXPECT_TRUE(observer.observed());
+  EXPECT_FALSE(observer.observed_enabled());
+  EXPECT_EQ(observer.observed_type(), ACCESSIBILITY_TOGGLE_SELECT_TO_SPEAK);
+  EXPECT_FALSE(IsSelectToSpeakEnabled());
 }
 
 IN_PROC_BROWSER_TEST_F(AccessibilityManagerTest,
@@ -411,6 +448,20 @@ IN_PROC_BROWSER_TEST_F(AccessibilityManagerTest,
   EXPECT_FALSE(observer.observed_enabled());
   EXPECT_EQ(observer.observed_type(), ACCESSIBILITY_TOGGLE_MONO_AUDIO);
   EXPECT_FALSE(IsMonoAudioEnabled());
+
+  observer.reset();
+  SetSelectToSpeakEnabledPref(true);
+  EXPECT_TRUE(observer.observed());
+  EXPECT_TRUE(observer.observed_enabled());
+  EXPECT_EQ(observer.observed_type(), ACCESSIBILITY_TOGGLE_SELECT_TO_SPEAK);
+  EXPECT_TRUE(IsSelectToSpeakEnabled());
+
+  observer.reset();
+  SetSelectToSpeakEnabledPref(false);
+  EXPECT_TRUE(observer.observed());
+  EXPECT_FALSE(observer.observed_enabled());
+  EXPECT_EQ(observer.observed_type(), ACCESSIBILITY_TOGGLE_SELECT_TO_SPEAK);
+  EXPECT_FALSE(IsSelectToSpeakEnabled());
 }
 
 IN_PROC_BROWSER_TEST_F(AccessibilityManagerTest, AccessibilityMenuVisibility) {
@@ -457,6 +508,40 @@ IN_PROC_BROWSER_TEST_F(AccessibilityManagerTest, AccessibilityMenuVisibility) {
   EXPECT_TRUE(ShouldShowAccessibilityMenu());
   SetMonoAudioEnabled(false);
   EXPECT_FALSE(ShouldShowAccessibilityMenu());
+
+  SetSelectToSpeakEnabled(true);
+  EXPECT_TRUE(ShouldShowAccessibilityMenu());
+  SetSelectToSpeakEnabled(false);
+  EXPECT_FALSE(ShouldShowAccessibilityMenu());
+}
+
+// Tests text caret highlighting for remote mojo applications (e.g. shortcut
+// viewer). This test integration of AccessibilityManager with the IME driver.
+IN_PROC_BROWSER_TEST_F(AccessibilityManagerTest, CaretHighlightInRemoteApp) {
+  AccessibilityManager::Get()->SetCaretHighlightEnabled(true);
+
+  // App launch is asynchronous so we will wait for a non-empty caret bounds
+  // update.
+  auto wait_for_bounds = [](base::RunLoop* run_loop, const gfx::Rect& bounds) {
+    // Under mash the first bounds update we see might be from the ash process
+    // clearing its caret highlight. Wait for the app's highlight to show up.
+    if (!bounds.IsEmpty())
+      run_loop->Quit();
+  };
+  base::RunLoop run_loop;
+  AccessibilityManager::Get()->SetCaretBoundsObserverForTest(
+      base::BindRepeating(wait_for_bounds, &run_loop));
+
+  // Focus will move to the search field and show a text caret highlight.
+  keyboard_shortcut_viewer_util::ToggleKeyboardShortcutViewer();
+
+  // Wait for the app to launch, the IME session to start and the caret bounds
+  // to be set.
+  run_loop.Run();
+
+  // Browser tests spin the message loop during shutdown which can lead to
+  // additional bounds updates.
+  AccessibilityManager::Get()->SetCaretBoundsObserverForTest(base::DoNothing());
 }
 
 // For signin screen to user session accessibility manager tests.
@@ -521,7 +606,12 @@ IN_PROC_BROWSER_TEST_F(AccessibilityManagerLoginTest, BrailleOnLoginScreen) {
   EXPECT_TRUE(IsSpokenFeedbackEnabled());
 }
 
-IN_PROC_BROWSER_TEST_F(AccessibilityManagerLoginTest, Login) {
+#if defined(OS_CHROMEOS)
+#define MAYBE_Login DISABLED_Login
+#else
+#define MAYBE_Login Login
+#endif
+IN_PROC_BROWSER_TEST_F(AccessibilityManagerLoginTest, MAYBE_Login) {
   WaitForSigninScreen();
   EXPECT_FALSE(IsLargeCursorEnabled());
   EXPECT_FALSE(IsSpokenFeedbackEnabled());
@@ -592,7 +682,15 @@ class AccessibilityManagerUserTypeTest : public AccessibilityManagerTest,
           user_manager::GuestAccountId().GetUserEmail());
     } else if (GetParam() ==
                AccountId::FromUserEmail(kTestSupervisedUserName)) {
-      command_line->AppendSwitchASCII(::switches::kSupervisedUserId, "asdf");
+      command_line->AppendSwitchASCII(::switches::kSupervisedUserId,
+                                      supervised_users::kChildAccountSUID);
+#if defined(OS_CHROMEOS)
+      command_line->AppendSwitchASCII(
+          chromeos::switches::kLoginUser,
+          "supervised_user@locally-managed.localhost");
+      command_line->AppendSwitchASCII(chromeos::switches::kLoginProfile,
+                                      "hash");
+#endif
     }
     AccessibilityManager::SetBrailleControllerForTest(&braille_controller_);
   }

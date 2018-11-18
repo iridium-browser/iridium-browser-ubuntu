@@ -66,12 +66,13 @@ enum RebootPromptType {
 // Settings page is not the current active tab.
 extern const base::Feature kRebootPromptDialogFeature;
 
-// When enabled, users can initiate cleanups from the Settings page.
-extern const base::Feature kUserInitiatedChromeCleanupsFeature;
-
 // Feature, parameters of which control which software reporter and cleanup tool
 // versions will be downloaded. When not enabled, default versions will be used.
 extern const base::Feature kChromeCleanupDistributionFeature;
+
+// Quarantine feature. When enabled, Chrome Cleaner will backup the removed
+// files.
+extern const base::Feature kChromeCleanupQuarantineFeature;
 
 extern const char kSRTPromptTrial[];
 
@@ -82,9 +83,6 @@ bool IsInSRTPromptFieldTrialGroups();
 // Returns true if this Chrome is in a field trial group which doesn't need an
 // elevation icon, i.e., the SRT won't ask for elevation on startup.
 bool SRTPromptNeedsElevationIcon();
-
-// Returns true if feature kUserInitiatedChromeCleanupsFeature is enabled.
-bool UserInitiatedCleanupsEnabled();
 
 // Returns the correct SRT download URL for the current field trial.
 GURL GetSRTDownloadURL();

@@ -8,8 +8,8 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
-#ifndef VP9_ENCODER_DENOISER_H_
-#define VP9_ENCODER_DENOISER_H_
+#ifndef VPX_VP9_ENCODER_VP9_DENOISER_H_
+#define VPX_VP9_ENCODER_VP9_DENOISER_H_
 
 #include "vp9/encoder/vp9_block.h"
 #include "vp9/encoder/vp9_skin_detection.h"
@@ -70,14 +70,15 @@ struct VP9_COMP;
 struct SVC;
 
 void vp9_denoiser_update_frame_info(
-    VP9_DENOISER *denoiser, YV12_BUFFER_CONFIG src, FRAME_TYPE frame_type,
-    int refresh_alt_ref_frame, int refresh_golden_frame, int refresh_last_frame,
-    int alt_fb_idx, int gld_fb_idx, int lst_fb_idx, int resized,
-    int svc_base_is_key, int second_spatial_layer);
+    VP9_DENOISER *denoiser, YV12_BUFFER_CONFIG src, struct SVC *svc,
+    FRAME_TYPE frame_type, int refresh_alt_ref_frame, int refresh_golden_frame,
+    int refresh_last_frame, int alt_fb_idx, int gld_fb_idx, int lst_fb_idx,
+    int resized, int svc_refresh_denoiser_buffers, int second_spatial_layer);
 
 void vp9_denoiser_denoise(struct VP9_COMP *cpi, MACROBLOCK *mb, int mi_row,
                           int mi_col, BLOCK_SIZE bs, PICK_MODE_CONTEXT *ctx,
-                          VP9_DENOISER_DECISION *denoiser_decision);
+                          VP9_DENOISER_DECISION *denoiser_decision,
+                          int use_gf_temporal_ref);
 
 void vp9_denoiser_reset_frame_stats(PICK_MODE_CONTEXT *ctx);
 
@@ -86,9 +87,9 @@ void vp9_denoiser_update_frame_stats(MODE_INFO *mi, unsigned int sse,
                                      PICK_MODE_CONTEXT *ctx);
 
 int vp9_denoiser_realloc_svc(VP9_COMMON *cm, VP9_DENOISER *denoiser,
-                             int svc_buf_shift, int refresh_alt,
-                             int refresh_gld, int refresh_lst, int alt_fb_idx,
-                             int gld_fb_idx, int lst_fb_idx);
+                             struct SVC *svc, int svc_buf_shift,
+                             int refresh_alt, int refresh_gld, int refresh_lst,
+                             int alt_fb_idx, int gld_fb_idx, int lst_fb_idx);
 
 int vp9_denoiser_alloc(VP9_COMMON *cm, struct SVC *svc, VP9_DENOISER *denoiser,
                        int use_svc, int noise_sen, int width, int height,
@@ -119,8 +120,10 @@ int64_t vp9_scale_acskip_thresh(int64_t threshold,
                                 VP9_DENOISER_LEVEL noise_level, int abs_sumdiff,
                                 int temporal_layer_id);
 
+void vp9_denoiser_update_ref_frame(struct VP9_COMP *const cpi);
+
 #ifdef __cplusplus
 }  // extern "C"
 #endif
 
-#endif  // VP9_ENCODER_DENOISER_H_
+#endif  // VPX_VP9_ENCODER_VP9_DENOISER_H_

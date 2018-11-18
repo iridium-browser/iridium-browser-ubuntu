@@ -4,18 +4,33 @@
 
 #include "components/cryptauth/cryptauth_api_call_flow.h"
 
+#include "base/optional.h"
 #include "base/strings/string_number_conversions.h"
 #include "chromeos/components/proximity_auth/logging/logging.h"
 #include "net/traffic_annotation/network_traffic_annotation.h"
-#include "net/url_request/url_fetcher.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
 
 namespace cryptauth {
 
 namespace {
 
-const char kResponseBodyError[] = "Failed to get response body";
-const char kRequestFailedError[] = "Request failed";
-const char kHttpStatusErrorPrefix[] = "HTTP status: ";
+const char kPost[] = "POST";
+
+NetworkRequestError GetErrorForHttpResponseCode(int response_code) {
+  if (response_code == 400)
+    return NetworkRequestError::kBadRequest;
+
+  if (response_code == 403)
+    return NetworkRequestError::kAuthenticationError;
+
+  if (response_code == 404)
+    return NetworkRequestError::kEndpointNotFound;
+
+  if (response_code >= 500 && response_code < 600)
+    return NetworkRequestError::kInternalServerError;
+
+  return NetworkRequestError::kUnknown;
+}
 
 }  // namespace
 
@@ -25,17 +40,18 @@ CryptAuthApiCallFlow::CryptAuthApiCallFlow() {
 CryptAuthApiCallFlow::~CryptAuthApiCallFlow() {
 }
 
-void CryptAuthApiCallFlow::Start(const GURL& request_url,
-                                 net::URLRequestContextGetter* context,
-                                 const std::string& access_token,
-                                 const std::string& serialized_request,
-                                 const ResultCallback& result_callback,
-                                 const ErrorCallback& error_callback) {
+void CryptAuthApiCallFlow::Start(
+    const GURL& request_url,
+    scoped_refptr<network::SharedURLLoaderFactory> url_loader_factory,
+    const std::string& access_token,
+    const std::string& serialized_request,
+    const ResultCallback& result_callback,
+    const ErrorCallback& error_callback) {
   request_url_ = request_url;
   serialized_request_ = serialized_request;
   result_callback_ = result_callback;
   error_callback_ = error_callback;
-  OAuth2ApiCallFlow::Start(context, access_token);
+  OAuth2ApiCallFlow::Start(std::move(url_loader_factory), access_token);
 }
 
 GURL CryptAuthApiCallFlow::CreateApiCallUrl() {
@@ -50,35 +66,43 @@ std::string CryptAuthApiCallFlow::CreateApiCallBodyContentType() {
   return "application/x-protobuf";
 }
 
-net::URLFetcher::RequestType CryptAuthApiCallFlow::GetRequestTypeForBody(
+std::string CryptAuthApiCallFlow::GetRequestTypeForBody(
     const std::string& body) {
-  return net::URLFetcher::POST;
+  return kPost;
 }
 
 void CryptAuthApiCallFlow::ProcessApiCallSuccess(
-    const net::URLFetcher* source) {
-  std::string serialized_response;
-  if (!source->GetResponseAsString(&serialized_response)) {
-    error_callback_.Run(kResponseBodyError);
+    const network::ResourceResponseHead* head,
+    std::unique_ptr<std::string> body) {
+  if (!body) {
+    error_callback_.Run(NetworkRequestError::kResponseMalformed);
     return;
   }
-  result_callback_.Run(serialized_response);
+  result_callback_.Run(std::move(*body));
 }
 
 void CryptAuthApiCallFlow::ProcessApiCallFailure(
-    const net::URLFetcher* source) {
+    int net_error,
+    const network::ResourceResponseHead* head,
+    std::unique_ptr<std::string> body) {
+  base::Optional<NetworkRequestError> error;
   std::string error_message;
-  if (source->GetStatus().status() == net::URLRequestStatus::SUCCESS) {
-    error_message =
-        kHttpStatusErrorPrefix + base::IntToString(source->GetResponseCode());
+  if (net_error == net::OK) {
+    int response_code = -1;
+    if (head && head->headers)
+      response_code = head->headers->response_code();
+    error = GetErrorForHttpResponseCode(response_code);
   } else {
-    error_message = kRequestFailedError;
+    error = NetworkRequestError::kOffline;
   }
 
-  std::string response;
-  source->GetResponseAsString(&response);
-  PA_LOG(INFO) << "API call failed:\n" << response;
-  error_callback_.Run(error_message);
+  if (body) {
+    PA_LOG(INFO) << "API call failed:\n" << *body;
+  } else {
+    PA_LOG(INFO) << "API call failed, no response body available, net_error:"
+                 << net_error;
+  }
+  error_callback_.Run(*error);
 }
 
 net::PartialNetworkTrafficAnnotationTag

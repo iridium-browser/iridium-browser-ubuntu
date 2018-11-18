@@ -24,6 +24,7 @@
 
 #include "third_party/blink/renderer/core/dom/document_encoding_data.h"
 #include "third_party/blink/renderer/core/dom/document_fragment.h"
+#include "third_party/blink/renderer/core/dom/document_init.h"
 #include "third_party/blink/renderer/core/dom/dom_implementation.h"
 #include "third_party/blink/renderer/core/editing/serializers/serialization.h"
 #include "third_party/blink/renderer/core/frame/csp/content_security_policy.h"
@@ -69,7 +70,11 @@ Document* XSLTProcessor::CreateDocumentFromSource(
   if (owner_document == source_node)
     url = owner_document->Url();
 
-  DocumentInit init = DocumentInit::Create().WithFrame(frame).WithURL(url);
+  DocumentInit init =
+      DocumentInit::Create()
+          .WithDocumentLoader(frame ? frame->Loader().GetDocumentLoader()
+                                    : nullptr)
+          .WithURL(url);
 
   String document_source = source_string;
   bool force_xhtml = source_mime_type == "text/plain";

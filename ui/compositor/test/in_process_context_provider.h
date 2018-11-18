@@ -38,7 +38,6 @@ class InProcessContextProvider
  public:
   static scoped_refptr<InProcessContextProvider> Create(
       const gpu::ContextCreationAttribs& attribs,
-      InProcessContextProvider* shared_context,
       gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
       gpu::ImageFactory* image_factory,
       gpu::SurfaceHandle window,
@@ -49,7 +48,6 @@ class InProcessContextProvider
   static scoped_refptr<InProcessContextProvider> CreateOffscreen(
       gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
       gpu::ImageFactory* image_factory,
-      InProcessContextProvider* shared_context,
       bool support_locking);
 
   // viz::ContextProvider / viz::RasterContextProvider implementation.
@@ -62,6 +60,7 @@ class InProcessContextProvider
   gpu::raster::RasterInterface* RasterInterface() override;
   gpu::ContextSupport* ContextSupport() override;
   class GrContext* GrContext() override;
+  gpu::SharedImageInterface* SharedImageInterface() override;
   viz::ContextCacheController* CacheController() override;
   base::Lock* GetLock() override;
   void AddObserver(viz::ContextLostObserver* obs) override;
@@ -76,7 +75,6 @@ class InProcessContextProvider
 
   InProcessContextProvider(
       const gpu::ContextCreationAttribs& attribs,
-      InProcessContextProvider* shared_context,
       gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager,
       gpu::ImageFactory* image_factory,
       gpu::SurfaceHandle window,
@@ -107,7 +105,6 @@ class InProcessContextProvider
   gpu::ContextResult bind_result_;
 
   gpu::ContextCreationAttribs attribs_;
-  InProcessContextProvider* shared_context_;
   gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager_;
   gpu::ImageFactory* image_factory_;
   gpu::SurfaceHandle window_;

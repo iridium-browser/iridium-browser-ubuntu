@@ -11,13 +11,10 @@
 
 #include "chrome/browser/chromeos/login/ui/login_display_host.h"
 #include "content/public/browser/notification_observer.h"
+#include "content/public/browser/notification_registrar.h"
 
 class AccountId;
 class ScopedKeepAlive;
-
-namespace wm {
-class ScopedDragDropDisabler;
-}
 
 namespace chromeos {
 
@@ -26,7 +23,7 @@ class DemoAppLauncher;
 
 // LoginDisplayHostCommon contains code which is not specific to a particular UI
 // implementation - the goal is to reduce code duplication between
-// LoginDisplayHostViews and LoginDisplayHostWebUI.
+// LoginDisplayHostMojo and LoginDisplayHostWebUI.
 class LoginDisplayHostCommon : public LoginDisplayHost,
                                public content::NotificationObserver {
  public:
@@ -53,6 +50,9 @@ class LoginDisplayHostCommon : public LoginDisplayHost,
   void LoadWallpaper(const AccountId& account_id) final;
   void LoadSigninWallpaper() final;
   bool IsUserWhitelisted(const AccountId& account_id) final;
+  void CancelPasswordChangedFlow() final;
+  void MigrateUserData(const std::string& old_password) final;
+  void ResyncUserData() final;
 
   // content::NotificationObserver:
   void Observe(int type,
@@ -66,6 +66,7 @@ class LoginDisplayHostCommon : public LoginDisplayHost,
   virtual void OnBrowserCreated() = 0;
   virtual void OnStartUserAdding() = 0;
   virtual void OnFinalize() = 0;
+  virtual void OnCancelPasswordChangedFlow() = 0;
 
   // Deletes |auth_prewarmer_|.
   void OnAuthPrewarmDone();
@@ -96,12 +97,11 @@ class LoginDisplayHostCommon : public LoginDisplayHost,
   // still in the process of cleaning up after login (http://crbug.com/134463).
   bool shutting_down_ = false;
 
+  // Used to make sure Finalize() is not called twice.
+  bool is_finalizing_ = false;
+
   // Make sure chrome won't exit while we are at login/oobe screen.
   std::unique_ptr<ScopedKeepAlive> keep_alive_;
-
-  // Keeps a copy of the old Drag'n'Drop client, so that it would be disabled
-  // during a login session and restored afterwards.
-  std::unique_ptr<wm::ScopedDragDropDisabler> scoped_drag_drop_disabler_;
 
   // Called after host deletion.
   std::vector<base::OnceClosure> completion_callbacks_;

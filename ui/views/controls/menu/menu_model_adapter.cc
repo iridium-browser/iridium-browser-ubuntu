@@ -80,6 +80,9 @@ MenuItemView* MenuModelAdapter::AddMenuItemFromModelAt(ui::MenuModel* model,
     case ui::MenuModel::TYPE_SUBMENU:
       type = MenuItemView::SUBMENU;
       break;
+    case ui::MenuModel::TYPE_ACTIONABLE_SUBMENU:
+      type = MenuItemView::ACTIONABLE_SUBMENU;
+      break;
   }
 
   if (*type == MenuItemView::SEPARATOR) {
@@ -169,17 +172,19 @@ base::string16 MenuModelAdapter::GetLabel(int id) const {
   return base::string16();
 }
 
-const gfx::FontList* MenuModelAdapter::GetLabelFontList(int id) const {
+void MenuModelAdapter::GetLabelStyle(int id, LabelStyle* style) const {
   ui::MenuModel* model = menu_model_;
   int index = 0;
   if (ui::MenuModel::GetModelAndIndexForCommandId(id, &model, &index)) {
     const gfx::FontList* font_list = model->GetLabelFontListAt(index);
-    if (font_list)
-      return font_list;
+    if (font_list) {
+      style->font_list = *font_list;
+      return;
+    }
   }
 
   // This line may be reached for the empty menu item.
-  return MenuDelegate::GetLabelFontList(id);
+  return MenuDelegate::GetLabelStyle(id, style);
 }
 
 bool MenuModelAdapter::IsCommandEnabled(int id) const {
@@ -266,10 +271,16 @@ void MenuModelAdapter::BuildMenuImpl(MenuItemView* menu, ui::MenuModel* model) {
   const int item_count = model->GetItemCount();
   for (int i = 0; i < item_count; ++i) {
     MenuItemView* item = AppendMenuItem(menu, model, i);
+    if (item) {
+      item->SetEnabled(model->IsEnabledAt(i));
+      item->SetVisible(model->IsVisibleAt(i));
+    }
 
-    if (model->GetTypeAt(i) == ui::MenuModel::TYPE_SUBMENU) {
+    if (model->GetTypeAt(i) == ui::MenuModel::TYPE_SUBMENU ||
+        model->GetTypeAt(i) == ui::MenuModel::TYPE_ACTIONABLE_SUBMENU) {
       DCHECK(item);
-      DCHECK_EQ(MenuItemView::SUBMENU, item->GetType());
+      DCHECK(item->GetType() == MenuItemView::SUBMENU ||
+             item->GetType() == MenuItemView::ACTIONABLE_SUBMENU);
       ui::MenuModel* submodel = model->GetSubmenuModelAt(i);
       DCHECK(submodel);
       BuildMenuImpl(item, submodel);

@@ -7,12 +7,12 @@
 #include "base/callback_helpers.h"
 #include "chrome/browser/android/android_theme_resources.h"
 #include "chrome/browser/infobars/infobar_service.h"
-#include "chrome/browser/media/webrtc/desktop_streams_registry.h"
 #include "chrome/browser/media/webrtc/media_capture_devices_dispatcher.h"
 #include "chrome/browser/media/webrtc/media_stream_capture_indicator.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/infobars/core/infobar.h"
 #include "components/url_formatter/elide_url.h"
+#include "content/public/browser/desktop_media_id.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/media_stream_request.h"
 #include "third_party/webrtc/modules/desktop_capture/desktop_capture_types.h"
@@ -22,28 +22,31 @@
 void ScreenCaptureInfoBarDelegateAndroid::Create(
     content::WebContents* web_contents,
     const content::MediaStreamRequest& request,
-    const content::MediaResponseCallback& callback) {
+    content::MediaResponseCallback callback) {
   InfoBarService* infobar_service =
       InfoBarService::FromWebContents(web_contents);
 
   infobar_service->AddInfoBar(infobar_service->CreateConfirmInfoBar(
       std::unique_ptr<ConfirmInfoBarDelegate>(
           new ScreenCaptureInfoBarDelegateAndroid(web_contents, request,
-                                                  callback))));
+                                                  std::move(callback)))));
 }
 
 ScreenCaptureInfoBarDelegateAndroid::ScreenCaptureInfoBarDelegateAndroid(
     content::WebContents* web_contents,
     const content::MediaStreamRequest& request,
-    const content::MediaResponseCallback& callback)
-    : web_contents_(web_contents), request_(request), callback_(callback) {
-  DCHECK_EQ(content::MEDIA_DESKTOP_VIDEO_CAPTURE, request.video_type);
+    content::MediaResponseCallback callback)
+    : web_contents_(web_contents),
+      request_(request),
+      callback_(std::move(callback)) {
+  DCHECK_EQ(content::MEDIA_GUM_DESKTOP_VIDEO_CAPTURE, request.video_type);
 }
 
 ScreenCaptureInfoBarDelegateAndroid::~ScreenCaptureInfoBarDelegateAndroid() {
   if (!callback_.is_null()) {
-    callback_.Run(content::MediaStreamDevices(),
-                  content::MEDIA_DEVICE_FAILED_DUE_TO_SHUTDOWN, nullptr);
+    std::move(callback_).Run(content::MediaStreamDevices(),
+                             content::MEDIA_DEVICE_FAILED_DUE_TO_SHUTDOWN,
+                             nullptr);
   }
 }
 
@@ -91,13 +94,14 @@ void ScreenCaptureInfoBarDelegateAndroid::RunCallback(
   if (result == content::MEDIA_DEVICE_OK) {
     content::DesktopMediaID screen_id = content::DesktopMediaID(
         content::DesktopMediaID::TYPE_SCREEN, webrtc::kFullDesktopScreenId);
-    devices.push_back(content::MediaStreamDevice(
-        content::MEDIA_DESKTOP_VIDEO_CAPTURE, screen_id.ToString(), "Screen"));
+    devices.push_back(
+        content::MediaStreamDevice(content::MEDIA_GUM_DESKTOP_VIDEO_CAPTURE,
+                                   screen_id.ToString(), "Screen"));
 
     ui = MediaCaptureDevicesDispatcher::GetInstance()
              ->GetMediaStreamCaptureIndicator()
              ->RegisterMediaStream(web_contents_, devices);
   }
 
-  base::ResetAndReturn(&callback_).Run(devices, result, std::move(ui));
+  std::move(callback_).Run(devices, result, std::move(ui));
 }

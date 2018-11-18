@@ -39,15 +39,13 @@ class SplayTree {
       : root_(nullptr), allocator_(allocator) {}
   ~SplayTree();
 
-  INLINE(void* operator new(size_t size,
-                            AllocationPolicy allocator = AllocationPolicy())) {
+  V8_INLINE void* operator new(
+      size_t size, AllocationPolicy allocator = AllocationPolicy()) {
     return allocator.New(static_cast<int>(size));
   }
-  INLINE(void operator delete(void* p)) {
-    AllocationPolicy::Delete(p);
-  }
+  V8_INLINE void operator delete(void* p) { AllocationPolicy::Delete(p); }
   // Please the MSVC compiler.  We should never have to execute this.
-  INLINE(void operator delete(void* p, AllocationPolicy policy)) {
+  V8_INLINE void operator delete(void* p, AllocationPolicy policy) {
     UNREACHABLE();
   }
 
@@ -102,15 +100,15 @@ class SplayTree {
     Node(const Key& key, const Value& value)
         : key_(key), value_(value), left_(nullptr), right_(nullptr) {}
 
-    INLINE(void* operator new(size_t size, AllocationPolicy allocator)) {
+    V8_INLINE void* operator new(size_t size, AllocationPolicy allocator) {
       return allocator.New(static_cast<int>(size));
     }
-    INLINE(void operator delete(void* p)) {
+    V8_INLINE void operator delete(void* p) {
       return AllocationPolicy::Delete(p);
     }
     // Please the MSVC compiler.  We should never have to execute
     // this.
-    INLINE(void operator delete(void* p, AllocationPolicy allocator)) {
+    V8_INLINE void operator delete(void* p, AllocationPolicy allocator) {
       UNREACHABLE();
     }
 
@@ -130,7 +128,7 @@ class SplayTree {
 
   // A locator provides access to a node in the tree without actually
   // exposing the node.
-  class Locator BASE_EMBEDDED {
+  class Locator {
    public:
     explicit Locator(Node* node) : node_(node) { }
     Locator() : node_(nullptr) {}
@@ -161,8 +159,8 @@ class SplayTree {
   // Removes root_ node.
   void RemoveRootNode(const Key& key);
 
-  template<class Callback>
-  class NodeToPairAdaptor BASE_EMBEDDED {
+  template <class Callback>
+  class NodeToPairAdaptor {
    public:
     explicit NodeToPairAdaptor(Callback* callback)
         : callback_(callback) { }
@@ -176,9 +174,9 @@ class SplayTree {
     DISALLOW_COPY_AND_ASSIGN(NodeToPairAdaptor);
   };
 
-  class NodeDeleter BASE_EMBEDDED {
+  class NodeDeleter {
    public:
-    NodeDeleter() { }
+    NodeDeleter() = default;
     void Call(Node* node) { AllocationPolicy::Delete(node); }
 
    private:

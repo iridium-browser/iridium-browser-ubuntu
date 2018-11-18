@@ -51,11 +51,13 @@ WebViewPersonalDataManagerFactory::BuildServiceInstanceFor(
   std::unique_ptr<autofill::PersonalDataManager> service(
       new autofill::PersonalDataManager(
           ApplicationContext::GetInstance()->GetApplicationLocale()));
-  service->Init(
+  auto autofill_db =
       WebViewWebDataServiceWrapperFactory::GetAutofillWebDataForBrowserState(
-          browser_state, ServiceAccessType::EXPLICIT_ACCESS),
-      browser_state->GetPrefs(),
+          browser_state, ServiceAccessType::EXPLICIT_ACCESS);
+  service->Init(
+      autofill_db, nullptr, browser_state->GetPrefs(),
       WebViewIdentityManagerFactory::GetForBrowserState(browser_state),
+      /*client_profile_validator=*/nullptr, /*history_service=*/nullptr,
       browser_state->IsOffTheRecord());
   return service;
 }

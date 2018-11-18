@@ -35,7 +35,7 @@ struct {
 
 class LoginUITest : public chromeos::LoginManagerTest {
  public:
-  LoginUITest() : LoginManagerTest(false) {
+  LoginUITest() : LoginManagerTest(false, true /* should_initialize_webui */) {
     for (size_t i = 0; i < arraysize(kTestUsers); ++i) {
       test_users_.emplace_back(AccountId::FromUserEmailGaiaId(
           kTestUsers[i].email, kTestUsers[i].gaia_id));
@@ -86,10 +86,10 @@ IN_PROC_BROWSER_TEST_F(LoginUITest, PRE_InterruptedAutoStartEnrollment) {
   prefs->SetBoolean(prefs::kDeviceEnrollmentCanExit, false);
 }
 
-// Tests that the default first screen is the network screen after OOBE
+// Tests that the default first screen is the welcome screen after OOBE
 // when auto enrollment is enabled and device is not yet enrolled.
 IN_PROC_BROWSER_TEST_F(LoginUITest, InterruptedAutoStartEnrollment) {
-  OobeScreenWaiter(OobeScreen::SCREEN_OOBE_NETWORK).Wait();
+  OobeScreenWaiter(OobeScreen::SCREEN_OOBE_WELCOME).Wait();
 }
 
 IN_PROC_BROWSER_TEST_F(LoginUITest, OobeNoExceptions) {

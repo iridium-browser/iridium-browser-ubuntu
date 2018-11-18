@@ -18,6 +18,7 @@
 #include "base/strings/string16.h"
 #include "base/synchronization/lock.h"
 #include "base/values.h"
+#include "content/browser/media/session/audio_focus_observer.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -31,12 +32,19 @@ namespace media {
 struct MediaLogEvent;
 }
 
+namespace media_session {
+namespace mojom {
+enum class AudioFocusType;
+}  // namespace mojom
+}  // namespace media_session
+
 namespace content {
 
 // This class stores information about currently active media.
 // TODO(crbug.com/812557): Remove inheritance from media::AudioLogFactory once
 // the creation of the AudioManager instance moves to the audio service.
 class CONTENT_EXPORT MediaInternals : public media::AudioLogFactory,
+                                      public AudioFocusObserver,
                                       public NotificationObserver {
  public:
   // Called with the update string.
@@ -67,12 +75,18 @@ class CONTENT_EXPORT MediaInternals : public media::AudioLogFactory,
   // Replay all saved media events.
   void SendHistoricalMediaEvents();
 
+  // Sends general audio information to each registered UpdateCallback.
+  void SendGeneralAudioInformation();
+
   // Sends all audio cached data to each registered UpdateCallback.
   void SendAudioStreamData();
 
   // Sends all video capture capabilities cached data to each registered
   // UpdateCallback.
   void SendVideoCaptureDeviceCapabilities();
+
+  // Sends all audio focus information to each registered UpdateCallback.
+  void SendAudioFocusState();
 
   // Called to inform of the capabilities enumerated for video devices.
   void UpdateVideoCaptureDeviceCapabilities(
@@ -92,15 +106,38 @@ class CONTENT_EXPORT MediaInternals : public media::AudioLogFactory,
       int render_process_id = -1,
       int render_frame_id = MSG_ROUTING_NONE);
 
+  // Strongly bounds |request| to a new media::mojom::AudioLog instance. Safe to
+  // call from any thread.
+  void CreateMojoAudioLog(AudioComponent component,
+                          int component_id,
+                          media::mojom::AudioLogRequest request,
+                          int render_process_id = -1,
+                          int render_frame_id = MSG_ROUTING_NONE);
+
   void OnProcessTerminatedForTesting(int process_id);
 
  private:
+  class AudioLogImpl;
   // Inner class to handle reporting pipelinestatus to UMA
   class MediaInternalsUMAHandler;
 
-  friend class AudioLogImpl;
-
   MediaInternals();
+
+  // AudioFocusObserver implementation.
+  void OnFocusGained(media_session::mojom::MediaSessionInfoPtr media_session,
+                     media_session::mojom::AudioFocusType type) override;
+  void OnFocusLost(
+      media_session::mojom::MediaSessionInfoPtr media_session) override;
+
+  // Called when we receive the list of audio focus requests to display.
+  void DidGetAudioFocusRequestList(
+      std::vector<media_session::mojom::AudioFocusRequestStatePtr>);
+
+  // Called when we receive audio focus debug info to display for a single
+  // audio focus request.
+  void DidGetAudioFocusDebugInfo(
+      const std::string& id,
+      media_session::mojom::MediaSessionDebugInfoPtr info);
 
   // Sends |update| to each registered UpdateCallback.  Safe to call from any
   // thread, but will forward to the IO thread.
@@ -123,6 +160,15 @@ class CONTENT_EXPORT MediaInternals : public media::AudioLogFactory,
                       const std::string& function,
                       const base::DictionaryValue* value);
 
+  std::unique_ptr<AudioLogImpl> CreateAudioLogImpl(AudioComponent component,
+                                                   int component_id,
+                                                   int render_process_id,
+                                                   int render_frame_id);
+
+  // Holds a pointer to the media session service and it's debug interface.
+  media_session::mojom::AudioFocusManagerPtr audio_focus_ptr_;
+  media_session::mojom::AudioFocusManagerDebugPtr audio_focus_debug_ptr_;
+
   // Must only be accessed on the UI thread.
   std::vector<UpdateCallback> update_callbacks_;
 
@@ -133,6 +179,9 @@ class CONTENT_EXPORT MediaInternals : public media::AudioLogFactory,
   base::ListValue video_capture_capabilities_cached_data_;
 
   NotificationRegistrar registrar_;
+
+  // Must only be accessed on the UI thread.
+  base::DictionaryValue audio_focus_data_;
 
   // All variables below must be accessed under |lock_|.
   base::Lock lock_;

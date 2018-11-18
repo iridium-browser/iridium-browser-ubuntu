@@ -5,17 +5,19 @@
 #ifndef CHROME_BROWSER_SPEECH_SPEECH_RECOGNIZER_H_
 #define CHROME_BROWSER_SPEECH_SPEECH_RECOGNIZER_H_
 
+#include <memory>
 #include <string>
 
 #include "base/macros.h"
+#include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 
 namespace content {
 struct SpeechRecognitionSessionPreamble;
 }
 
-namespace net {
-class URLRequestContextGetter;
+namespace network {
+class SharedURLLoaderFactoryInfo;
 }
 
 class SpeechRecognizerDelegate;
@@ -26,7 +28,9 @@ class SpeechRecognizerDelegate;
 class SpeechRecognizer {
  public:
   SpeechRecognizer(const base::WeakPtr<SpeechRecognizerDelegate>& delegate,
-                   net::URLRequestContextGetter* url_request_context_getter,
+                   std::unique_ptr<network::SharedURLLoaderFactoryInfo>
+                       shared_url_loader_factory_info,
+                   const std::string& accept_language,
                    const std::string& locale);
   ~SpeechRecognizer();
 

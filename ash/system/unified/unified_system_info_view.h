@@ -6,6 +6,7 @@
 #define ASH_SYSTEM_UNIFIED_UNIFIED_SYSTEM_INFO_VIEW_H_
 
 #include "ash/ash_export.h"
+#include "ash/system/unified/unified_system_tray_controller.h"
 #include "ui/views/view.h"
 
 namespace ash {
@@ -15,7 +16,7 @@ namespace ash {
 // is enterprise managed or not.
 class ASH_EXPORT UnifiedSystemInfoView : public views::View {
  public:
-  UnifiedSystemInfoView();
+  explicit UnifiedSystemInfoView(UnifiedSystemTrayController* controller);
   ~UnifiedSystemInfoView() override;
 
   // views::View:
@@ -26,9 +27,13 @@ class ASH_EXPORT UnifiedSystemInfoView : public views::View {
   FRIEND_TEST_ALL_PREFIXES(UnifiedSystemInfoViewTest, EnterpriseManagedVisible);
   FRIEND_TEST_ALL_PREFIXES(UnifiedSystemInfoViewTest,
                            EnterpriseManagedVisibleForActiveDirectory);
+  FRIEND_TEST_ALL_PREFIXES(UnifiedSystemInfoViewNoSessionTest,
+                           SupervisedVisible);
 
   // EnterpriseManagedView for unit testing. Unowned.
   views::View* const enterprise_managed_;
+  // SupervisedUserView for unit testing. Unowned.
+  views::View* const supervised_;
 
   DISALLOW_COPY_AND_ASSIGN(UnifiedSystemInfoView);
 };

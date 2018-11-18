@@ -43,11 +43,13 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_downloader.h"
 #include "chrome/browser/signin/account_tracker_service_factory.h"
+#include "chrome/browser/signin/profile_oauth2_token_service_factory.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chromeos/chromeos_paths.h"
 #include "chromeos/chromeos_switches.h"
+#include "chromeos/cryptohome/cryptohome_parameters.h"
 #include "chromeos/dbus/cryptohome_client.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/fake_session_manager_client.h"
@@ -60,16 +62,19 @@
 #include "components/prefs/pref_change_registrar.h"
 #include "components/prefs/pref_service.h"
 #include "components/prefs/scoped_user_pref_update.h"
+#include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/user_manager/scoped_user_manager.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_image/user_image.h"
 #include "components/user_manager/user_manager.h"
 #include "crypto/rsa_private_key.h"
 #include "google_apis/gaia/gaia_oauth_client.h"
+#include "google_apis/gaia/gaia_urls.h"
 #include "google_apis/gaia/oauth2_token_service.h"
+#include "net/test/embedded_test_server/controllable_http_response.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
-#include "net/url_request/test_url_fetcher_factory.h"
-#include "net/url_request/url_fetcher_delegate.h"
+#include "net/test/embedded_test_server/http_request.h"
+#include "net/test/embedded_test_server/http_response.h"
 #include "net/url_request/url_request_status.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -89,6 +94,8 @@ constexpr char kTestUser1[] = "test-user@gmail.com";
 constexpr char kTestUser1GaiaId[] = "1111111111";
 constexpr char kTestUser2[] = "test-user2@gmail.com";
 constexpr char kTestUser2GaiaId[] = "2222222222";
+
+constexpr char kRandomTokenStrForTesting[] = "random-token-str-for-testing";
 
 policy::CloudPolicyStore* GetStoreForUser(const user_manager::User* user) {
   Profile* profile = ProfileHelper::Get()->GetProfileByUserUnsafe(user);
@@ -134,15 +141,45 @@ class UserImageChangeWaiter : public user_manager::UserManager::Observer {
 
 class UserImageManagerTest : public LoginManagerTest,
                              public user_manager::UserManager::Observer {
+ public:
+  std::unique_ptr<net::test_server::BasicHttpResponse> HandleRequest(
+      const net::test_server::HttpRequest& request) {
+    if (request.relative_url != "/avatar.jpg")
+      return nullptr;
+
+    // Check whether the token string is the same.
+    EXPECT_TRUE(request.headers.find(net::HttpRequestHeaders::kAuthorization) !=
+                request.headers.end());
+    const std::string authorization_header =
+        request.headers.at(net::HttpRequestHeaders::kAuthorization);
+    const size_t pos = authorization_header.find(" ");
+    EXPECT_TRUE(pos != std::string::npos);
+    const std::string token = authorization_header.substr(pos + 1);
+    EXPECT_TRUE(token == kRandomTokenStrForTesting);
+
+    std::string profile_image_data;
+    base::FilePath test_data_dir;
+    EXPECT_TRUE(base::PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir));
+    EXPECT_TRUE(
+        ReadFileToString(test_data_dir.Append("chromeos").Append("avatar1.jpg"),
+                         &profile_image_data));
+    std::unique_ptr<net::test_server::BasicHttpResponse> response =
+        std::make_unique<net::test_server::BasicHttpResponse>();
+    response->set_content_type("image/jpeg");
+    response->set_code(net::HTTP_OK);
+    response->set_content(profile_image_data);
+    return response;
+  }
+
  protected:
-  UserImageManagerTest() : LoginManagerTest(true) {}
+  UserImageManagerTest() : LoginManagerTest(true, true) {}
 
   // LoginManagerTest overrides:
   void SetUpInProcessBrowserTestFixture() override {
     LoginManagerTest::SetUpInProcessBrowserTestFixture();
 
-    ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir_));
-    ASSERT_TRUE(PathService::Get(chrome::DIR_USER_DATA, &user_data_dir_));
+    ASSERT_TRUE(base::PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir_));
+    ASSERT_TRUE(base::PathService::Get(chrome::DIR_USER_DATA, &user_data_dir_));
   }
 
   void SetUpCommandLine(base::CommandLine* command_line) override {
@@ -156,9 +193,25 @@ class UserImageManagerTest : public LoginManagerTest,
   }
 
   void SetUpOnMainThread() override {
+    // Set up the test server.
+    controllable_http_response_ =
+        std::make_unique<net::test_server::ControllableHttpResponse>(
+            embedded_test_server(), "/avatar.jpg",
+            true /*relative_url_is_prefix*/);
+    ASSERT_TRUE(embedded_test_server()->Started());
+
     LoginManagerTest::SetUpOnMainThread();
     local_state_ = g_browser_process->local_state();
     user_manager::UserManager::Get()->AddObserver(this);
+
+    // FakeGaia authorizes requests for profile info.
+    FakeGaia::AccessTokenInfo token_info;
+    token_info.any_scope = true;
+    token_info.audience = GaiaUrls::GetInstance()->oauth2_chrome_client_id();
+    token_info.token = kRandomTokenStrForTesting;
+    token_info.email = test_account_id1_.GetUserEmail();
+    fake_gaia_.IssueOAuthToken(kRandomTokenStrForTesting, token_info);
+    fake_gaia_.MapEmailToGaiaId(kTestUser1, kTestUser1GaiaId);
   }
 
   void TearDownOnMainThread() override {
@@ -231,57 +284,26 @@ class UserImageManagerTest : public LoginManagerTest,
     info.given_name = account_id.GetUserEmail();
     info.hosted_domain = AccountTrackerService::kNoHostedDomainFound;
     info.locale = account_id.GetUserEmail();
-    info.picture_url = "http://localhost/avatar.jpg";
+    info.picture_url = embedded_test_server()->GetURL("/avatar.jpg").spec();
     info.is_child_account = false;
 
     AccountTrackerServiceFactory::GetForProfile(profile)->SeedAccountInfo(info);
   }
 
-  // Completes the download of all non-image profile data for the user
-  // |account_id|.  This method must only be called after a profile data
-  // download has been started.  |url_fetcher_factory| will capture
-  // the net::TestURLFetcher created by the ProfileDownloader to
-  // download the profile image.
-  void CompleteProfileMetadataDownload(
-      const AccountId& account_id,
-      net::TestURLFetcherFactory* url_fetcher_factory) {
-    ProfileDownloader* profile_downloader =
-        reinterpret_cast<UserImageManagerImpl*>(
-            ChromeUserManager::Get()->GetUserImageManager(account_id))
-            ->profile_downloader_.get();
-    ASSERT_TRUE(profile_downloader);
-
-    static_cast<OAuth2TokenService::Consumer*>(profile_downloader)
-        ->OnGetTokenSuccess(NULL, std::string(),
-                            base::Time::Now() + base::TimeDelta::FromDays(1));
-  }
-
   // Completes the download of the currently logged-in user's profile image.
   // This method must only be called after a profile data download including
-  // the profile image has been started, the download of all non-image data has
-  // been completed by calling CompleteProfileMetadataDownload() and the
-  // net::TestURLFetcher created by the ProfileDownloader to download the
-  // profile image has been captured by |url_fetcher_factory|.
-  void CompleteProfileImageDownload(
-      net::TestURLFetcherFactory* url_fetcher_factory) {
-    std::string profile_image_data;
-    base::FilePath test_data_dir;
-    ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir));
-    EXPECT_TRUE(
-        ReadFileToString(test_data_dir.Append("chromeos").Append("avatar1.jpg"),
-                         &profile_image_data));
+  // the profile image has been started.
+  void CompleteProfileImageDownload() {
+    controllable_http_response_->WaitForRequest();
+    std::unique_ptr<net::test_server::BasicHttpResponse> response =
+        HandleRequest(*controllable_http_response_->http_request());
+    controllable_http_response_->Send(response->ToResponseString());
+    controllable_http_response_->Done();
 
     base::RunLoop run_loop;
     PrefChangeRegistrar pref_change_registrar;
     pref_change_registrar.Init(local_state_);
     pref_change_registrar.Add("UserDisplayName", run_loop.QuitClosure());
-    net::TestURLFetcher* fetcher = url_fetcher_factory->GetFetcherByID(0);
-    ASSERT_TRUE(fetcher);
-    fetcher->SetResponseString(profile_image_data);
-    fetcher->set_status(
-        net::URLRequestStatus(net::URLRequestStatus::SUCCESS, net::OK));
-    fetcher->set_response_code(200);
-    fetcher->delegate()->OnURLFetchComplete(fetcher);
     run_loop.Run();
 
     const user_manager::User* user =
@@ -304,14 +326,17 @@ class UserImageManagerTest : public LoginManagerTest,
 
   std::unique_ptr<base::RunLoop> run_loop_;
 
+  std::unique_ptr<net::test_server::ControllableHttpResponse>
+      controllable_http_response_;
+
   const AccountId test_account_id1_ =
       AccountId::FromUserEmailGaiaId(kTestUser1, kTestUser1GaiaId);
   const AccountId test_account_id2_ =
       AccountId::FromUserEmailGaiaId(kTestUser2, kTestUser2GaiaId);
   const AccountId enterprise_account_id_ =
       AccountId::FromUserEmailGaiaId(kEnterpriseUser1, kEnterpriseUser1GaiaId);
-  const cryptohome::Identification cryptohome_id_ =
-      cryptohome::Identification(enterprise_account_id_);
+  const cryptohome::AccountIdentifier cryptohome_id_ =
+      cryptohome::CreateAccountIdentifierFromAccountId(enterprise_account_id_);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(UserImageManagerTest);
@@ -502,6 +527,8 @@ IN_PROC_BROWSER_TEST_F(UserImageManagerTest, SaveUserImageFromProfileImage) {
   UserImageManagerImpl::IgnoreProfileDataDownloadDelayForTesting();
   LoginUser(test_account_id1_);
   Profile* profile = ProfileHelper::Get()->GetProfileByUserUnsafe(user);
+  ProfileOAuth2TokenServiceFactory::GetForProfile(profile)->UpdateCredentials(
+      test_account_id1_.GetUserEmail(), kRandomTokenStrForTesting);
   SeedAccountTrackerService(test_account_id1_, profile);
 
   run_loop_.reset(new base::RunLoop);
@@ -510,9 +537,7 @@ IN_PROC_BROWSER_TEST_F(UserImageManagerTest, SaveUserImageFromProfileImage) {
   user_image_manager->SaveUserImageFromProfileImage();
   run_loop_->Run();
 
-  net::TestURLFetcherFactory url_fetcher_factory;
-  CompleteProfileMetadataDownload(test_account_id1_, &url_fetcher_factory);
-  CompleteProfileImageDownload(&url_fetcher_factory);
+  CompleteProfileImageDownload();
 
   const gfx::ImageSkia& profile_image =
       user_image_manager->DownloadedProfileImage();
@@ -554,6 +579,8 @@ IN_PROC_BROWSER_TEST_F(UserImageManagerTest,
   UserImageManagerImpl::IgnoreProfileDataDownloadDelayForTesting();
   LoginUser(test_account_id1_);
   Profile* profile = ProfileHelper::Get()->GetProfileByUserUnsafe(user);
+  ProfileOAuth2TokenServiceFactory::GetForProfile(profile)->UpdateCredentials(
+      test_account_id1_.GetUserEmail(), kRandomTokenStrForTesting);
   SeedAccountTrackerService(test_account_id1_, profile);
 
   run_loop_.reset(new base::RunLoop);
@@ -562,13 +589,10 @@ IN_PROC_BROWSER_TEST_F(UserImageManagerTest,
   user_image_manager->SaveUserImageFromProfileImage();
   run_loop_->Run();
 
-  net::TestURLFetcherFactory url_fetcher_factory;
-  CompleteProfileMetadataDownload(test_account_id1_, &url_fetcher_factory);
-
   user_image_manager->SaveUserDefaultImageIndex(
       default_user_image::kFirstDefaultImageIndex);
 
-  CompleteProfileImageDownload(&url_fetcher_factory);
+  CompleteProfileImageDownload();
 
   EXPECT_TRUE(user->HasDefaultImage());
   EXPECT_EQ(default_user_image::kFirstDefaultImageIndex, user->image_index());
@@ -596,12 +620,6 @@ class UserImageManagerPolicyTest : public UserImageManagerTest,
     DBusThreadManager::GetSetterForTesting()->SetSessionManagerClient(
         std::unique_ptr<SessionManagerClient>(fake_session_manager_client_));
 
-    // Set up fake install attributes.
-    std::unique_ptr<chromeos::StubInstallAttributes> attributes =
-        std::make_unique<chromeos::StubInstallAttributes>();
-    attributes->SetCloudManaged("fake-domain", "fake-id");
-    policy::BrowserPolicyConnectorChromeOS::SetInstallAttributesForTesting(
-        attributes.release());
     UserImageManagerTest::SetUpInProcessBrowserTestFixture();
   }
 
@@ -610,7 +628,7 @@ class UserImageManagerPolicyTest : public UserImageManagerTest,
 
     base::FilePath user_keys_dir;
     ASSERT_TRUE(
-        PathService::Get(chromeos::DIR_USER_POLICY_KEYS, &user_keys_dir));
+        base::PathService::Get(chromeos::DIR_USER_POLICY_KEYS, &user_keys_dir));
     const std::string sanitized_username =
         chromeos::CryptohomeClient::GetStubSanitizedUsername(cryptohome_id_);
     const base::FilePath user_key_file =
@@ -660,6 +678,8 @@ class UserImageManagerPolicyTest : public UserImageManagerTest,
     return policy;
   }
 
+  ScopedStubInstallAttributes test_install_attributes_{
+      StubInstallAttributes::CreateCloudManaged("fake-domain", "fake-id")};
   policy::UserPolicyBuilder user_policy_;
   policy::DevicePolicyBuilder device_policy_;
   scoped_refptr<ownership::MockOwnerKeyUtil> owner_key_util_;

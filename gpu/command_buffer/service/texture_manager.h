@@ -18,6 +18,7 @@
 #include "base/containers/hash_tables.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/memory/weak_ptr.h"
 #include "gpu/command_buffer/service/feature_info.h"
 #include "gpu/command_buffer/service/gl_utils.h"
 #include "gpu/command_buffer/service/memory_tracking.h"
@@ -27,9 +28,15 @@
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gl/gl_image.h"
 
+namespace gl {
+class ProgressReporter;
+}
+
 namespace gpu {
 class DecoderContext;
 class ServiceDiscardableManager;
+class SharedImageBackingGLTexture;
+class SharedImageBackingFactoryGLTexture;
 
 namespace gles2 {
 class GLStreamTextureImage;
@@ -38,15 +45,16 @@ struct DecoderFramebufferState;
 class ErrorState;
 class FeatureInfo;
 class FramebufferManager;
-class ProgressReporter;
 class Texture;
 class TextureManager;
 class TextureRef;
 
 // A ref-counted version of the TextureBase class that deletes the texture after
 // all references have been released.
-class TexturePassthrough final : public TextureBase,
-                                 public base::RefCounted<TexturePassthrough> {
+class GPU_GLES2_EXPORT TexturePassthrough final
+    : public TextureBase,
+      public base::RefCounted<TexturePassthrough>,
+      public base::SupportsWeakPtr<TexturePassthrough> {
  public:
   TexturePassthrough(GLuint service_id, GLenum target);
 
@@ -57,6 +65,13 @@ class TexturePassthrough final : public TextureBase,
   void SetLevelImage(GLenum target, GLint level, gl::GLImage* image);
   gl::GLImage* GetLevelImage(GLenum target, GLint level) const;
 
+  // Return true if and only if the decoder should BindTexImage / CopyTexImage
+  // us before sampling.
+  bool is_bind_pending() const { return is_bind_pending_; }
+  void set_is_bind_pending(bool is_bind_pending) {
+    is_bind_pending_ = is_bind_pending;
+  }
+
  protected:
   ~TexturePassthrough() override;
 
@@ -64,6 +79,7 @@ class TexturePassthrough final : public TextureBase,
   friend class base::RefCounted<TexturePassthrough>;
 
   bool have_context_;
+  bool is_bind_pending_ = false;
 
   // Bound images divided into faces and then levels
   std::vector<std::vector<scoped_refptr<gl::GLImage>>> level_images_;
@@ -154,6 +170,10 @@ class GPU_GLES2_EXPORT Texture final : public TextureBase {
   GLint max_level() const {
     return max_level_;
   }
+
+  GLint unclamped_base_level() const { return unclamped_base_level_; }
+
+  GLint unclamped_max_level() const { return unclamped_max_level_; }
 
   GLenum swizzle_r() const { return swizzle_r_; }
 
@@ -308,18 +328,28 @@ class GPU_GLES2_EXPORT Texture final : public TextureBase {
                               GLenum internal_format,
                               bool immutable);
 
+  // Marks a particular level as cleared or uncleared.
+  void SetLevelCleared(GLenum target, GLint level, bool cleared);
+
+  MemoryTypeTracker* GetMemTracker();
+
  private:
   friend class MailboxManagerSync;
   friend class MailboxManagerTest;
+  friend class gpu::SharedImageBackingGLTexture;
+  friend class gpu::SharedImageBackingFactoryGLTexture;
   friend class TextureDefinition;
   friend class TextureManager;
   friend class TextureRef;
   friend class TextureTestHelper;
+  FRIEND_TEST_ALL_PREFIXES(TextureMemoryTrackerTest, LightweightRef);
 
   ~Texture() override;
   void AddTextureRef(TextureRef* ref);
   void RemoveTextureRef(TextureRef* ref, bool have_context);
-  MemoryTypeTracker* GetMemTracker();
+  void SetLightweightRef(MemoryTypeTracker* tracker);
+  void RemoveLightweightRef(bool have_context);
+  void MaybeDeleteThis(bool have_context);
 
   // Condition on which this texture is renderable. Can be ONLY_IF_NPOT if it
   // depends on context support for non-power-of-two textures (i.e. will be
@@ -412,9 +442,6 @@ class GPU_GLES2_EXPORT Texture final : public TextureBase {
   void SetLevelClearedRect(GLenum target,
                            GLint level,
                            const gfx::Rect& cleared_rect);
-
-  // Marks a particular level as cleared or uncleared.
-  void SetLevelCleared(GLenum target, GLint level, bool cleared);
 
   // Updates the cleared flag for this texture by inspecting all the mips.
   void UpdateCleared();
@@ -548,12 +575,13 @@ class GPU_GLES2_EXPORT Texture final : public TextureBase {
   std::vector<FaceInfo> face_infos_;
 
   // The texture refs that point to this Texture.
-  typedef std::set<TextureRef*> RefSet;
+  typedef base::flat_set<TextureRef*> RefSet;
   RefSet refs_;
+  MemoryTypeTracker* lightweight_ref_ = nullptr;
 
   // The single TextureRef that accounts for memory for this texture. Must be
   // one of refs_.
-  TextureRef* memory_tracking_ref_;
+  TextureRef* memory_tracking_ref_ = nullptr;
 
   // The id of the texture that we are responsible for deleting.  Normally, this
   // is the same as |service_id_|, unless a GLStreamTextureImage with its own
@@ -563,62 +591,65 @@ class GPU_GLES2_EXPORT Texture final : public TextureBase {
   GLuint owned_service_id_;
 
   // Whether all renderable mips of this texture have been cleared.
-  bool cleared_;
+  bool cleared_ = true;
 
-  int num_uncleared_mips_;
-  int num_npot_faces_;
+  int num_uncleared_mips_ = 0;
+  int num_npot_faces_ = 0;
 
   // Texture parameters.
   SamplerState sampler_state_;
-  GLenum usage_;
-  GLint base_level_;
-  GLint max_level_;
-  GLenum swizzle_r_;
-  GLenum swizzle_g_;
-  GLenum swizzle_b_;
-  GLenum swizzle_a_;
+  GLenum usage_ = GL_NONE;
+  GLint base_level_ = 0;
+  GLint max_level_ = 1000;
+  GLenum swizzle_r_ = GL_RED;
+  GLenum swizzle_g_ = GL_GREEN;
+  GLenum swizzle_b_ = GL_BLUE;
+  GLenum swizzle_a_ = GL_ALPHA;
+
+  GLint unclamped_base_level_ = 0;
+  GLint unclamped_max_level_ = 1000;
 
   // The maximum level that has been set.
-  GLint max_level_set_;
+  GLint max_level_set_ = -1;
 
   // Whether or not this texture is "texture complete"
-  bool texture_complete_;
+  bool texture_complete_ = false;
 
   // Whether or not this texture is "cube complete"
-  bool cube_complete_;
+  bool cube_complete_ = false;
 
   // Whether mip levels, base_level, or max_level have changed and
   // texture_completeness_ and cube_completeness_ should be reverified.
-  bool completeness_dirty_;
+  bool completeness_dirty_ = false;
 
   // Whether or not this texture is non-power-of-two
-  bool npot_;
+  bool npot_ = false;
 
   // Whether this texture has ever been bound.
-  bool has_been_bound_;
+  bool has_been_bound_ = false;
 
   // The number of framebuffers this texture is attached to.
-  int framebuffer_attachment_count_;
+  int framebuffer_attachment_count_ = 0;
 
   // Whether the texture is immutable and no further changes to the format
   // or dimensions of the texture object can be made.
-  bool immutable_;
+  bool immutable_ = false;
 
   // Whether or not this texture has images.
-  bool has_images_;
+  bool has_images_ = false;
 
   // Size in bytes this texture is assumed to take in memory.
-  uint32_t estimated_size_;
+  uint32_t estimated_size_ = 0;
 
   // Cache of the computed CanRenderCondition flag.
-  CanRenderCondition can_render_condition_;
+  CanRenderCondition can_render_condition_ = CAN_RENDER_ALWAYS;
 
   // Whether we have initialized TEXTURE_MAX_ANISOTROPY to 1.
-  bool texture_max_anisotropy_initialized_;
+  bool texture_max_anisotropy_initialized_ = false;
 
-  const CompatibilitySwizzle* compatibility_swizzle_;
+  const CompatibilitySwizzle* compatibility_swizzle_ = nullptr;
 
-  bool emulating_rgb_;
+  bool emulating_rgb_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(Texture);
 };
@@ -679,7 +710,6 @@ struct DecoderTextureState {
   // group.
   bool tex_image_failed;
 
-  bool texsubimage_faster_than_teximage;
   bool force_cube_map_positive_x_allocation;
   bool force_cube_complete;
   bool force_int_or_srgb_cube_texture_complete;
@@ -729,7 +759,7 @@ class GPU_GLES2_EXPORT TextureManager
                  GLsizei max_3d_texture_size,
                  GLsizei max_array_texture_layers,
                  bool use_default_textures,
-                 ProgressReporter* progress_reporter,
+                 gl::ProgressReporter* progress_reporter,
                  ServiceDiscardableManager* discardable_manager);
   ~TextureManager() override;
 
@@ -833,8 +863,6 @@ class GPU_GLES2_EXPORT TextureManager
                     GLenum type,
                     const gfx::Rect& cleared_rect);
 
-  Texture* Produce(TextureRef* ref);
-
   // Maps an existing texture into the texture manager, at a given client ID.
   TextureRef* Consume(GLuint client_id, Texture* texture);
 
@@ -905,7 +933,7 @@ class GPU_GLES2_EXPORT TextureManager
         return default_textures_[kRectangleARB].get();
       default:
         NOTREACHED();
-        return NULL;
+        return nullptr;
     }
   }
 
@@ -1089,6 +1117,9 @@ class GPU_GLES2_EXPORT TextureManager
   uint32_t GetServiceIdGeneration() const;
   void IncrementServiceIdGeneration();
 
+  static const Texture::CompatibilitySwizzle* GetCompatibilitySwizzle(
+      const gles2::FeatureInfo* feature_info,
+      GLenum format);
   static GLenum AdjustTexInternalFormat(const gles2::FeatureInfo* feature_info,
                                         GLenum format);
   static GLenum AdjustTexFormat(const gles2::FeatureInfo* feature_info,
@@ -1221,7 +1252,7 @@ class GPU_GLES2_EXPORT TextureManager
   // Used to notify the watchdog thread of progress during destruction,
   // preventing time-outs when destruction takes a long time. May be null when
   // using in-process command buffer.
-  ProgressReporter* progress_reporter_;
+  gl::ProgressReporter* progress_reporter_;
 
   ServiceDiscardableManager* discardable_manager_;
 

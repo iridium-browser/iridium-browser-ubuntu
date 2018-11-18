@@ -4,6 +4,8 @@
 
 package org.chromium.chrome.browser.compositor.layouts.phone;
 
+import static org.chromium.chrome.browser.compositor.layouts.ChromeAnimation.AnimatableAnimation.createAnimation;
+
 import android.content.Context;
 import android.graphics.Rect;
 import android.graphics.RectF;
@@ -11,12 +13,15 @@ import android.os.SystemClock;
 import android.support.annotation.IntDef;
 import android.view.ViewGroup;
 import android.view.ViewGroup.LayoutParams;
-import android.view.animation.Interpolator;
 import android.widget.FrameLayout;
 
 import org.chromium.base.VisibleForTesting;
+import org.chromium.base.metrics.RecordHistogram;
+import org.chromium.base.metrics.RecordUserAction;
+import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ChromeFeatureList;
 import org.chromium.chrome.browser.compositor.LayerTitleCache;
+import org.chromium.chrome.browser.compositor.layouts.ChromeAnimation;
 import org.chromium.chrome.browser.compositor.layouts.ChromeAnimation.Animatable;
 import org.chromium.chrome.browser.compositor.layouts.Layout;
 import org.chromium.chrome.browser.compositor.layouts.LayoutManager;
@@ -27,7 +32,8 @@ import org.chromium.chrome.browser.compositor.layouts.content.TabContentManager;
 import org.chromium.chrome.browser.compositor.layouts.eventfilter.EventFilter;
 import org.chromium.chrome.browser.compositor.layouts.eventfilter.GestureEventFilter;
 import org.chromium.chrome.browser.compositor.layouts.eventfilter.GestureHandler;
-import org.chromium.chrome.browser.compositor.layouts.eventfilter.ScrollDirection;
+import org.chromium.chrome.browser.compositor.layouts.phone.stack.NonOverlappingStack;
+import org.chromium.chrome.browser.compositor.layouts.phone.stack.OverlappingStack;
 import org.chromium.chrome.browser.compositor.layouts.phone.stack.Stack;
 import org.chromium.chrome.browser.compositor.layouts.phone.stack.StackTab;
 import org.chromium.chrome.browser.compositor.scene_layer.SceneLayer;
@@ -37,11 +43,12 @@ import org.chromium.chrome.browser.partnercustomizations.HomepageManager;
 import org.chromium.chrome.browser.tab.Tab;
 import org.chromium.chrome.browser.tabmodel.TabList;
 import org.chromium.chrome.browser.tabmodel.TabModelSelector;
+import org.chromium.chrome.browser.tabmodel.TabModelSelectorTabModelObserver;
 import org.chromium.chrome.browser.tabmodel.TabModelUtils;
 import org.chromium.chrome.browser.util.FeatureUtilities;
 import org.chromium.chrome.browser.util.MathUtils;
+import org.chromium.ui.UiUtils;
 import org.chromium.ui.base.LocalizationUtils;
-import org.chromium.ui.interpolators.BakedBezierInterpolator;
 import org.chromium.ui.resources.ResourceManager;
 
 import java.io.Serializable;
@@ -55,27 +62,30 @@ import java.util.List;
 /**
  * Base class for layouts that show one or more stacks of tabs.
  */
-public abstract class StackLayoutBase
-        extends Layout implements Animatable<StackLayoutBase.Property> {
-    public enum Property {
-        INNER_MARGIN_PERCENT,
-        STACK_SNAP,
-        STACK_OFFSET_Y_PERCENT,
+public abstract class StackLayoutBase extends Layout implements Animatable {
+    @IntDef({Property.INNER_MARGIN_PERCENT, Property.STACK_SNAP, Property.STACK_OFFSET_Y_PERCENT})
+    @Retention(RetentionPolicy.SOURCE)
+    public @interface Property {
+        int INNER_MARGIN_PERCENT = 0;
+        int STACK_SNAP = 1;
+        int STACK_OFFSET_Y_PERCENT = 2;
     }
 
-    @IntDef({DRAG_DIRECTION_NONE, DRAG_DIRECTION_HORIZONTAL, DRAG_DIRECTION_VERTICAL})
+    @IntDef({DragDirection.NONE, DragDirection.HORIZONTAL, DragDirection.VERTICAL})
     @Retention(RetentionPolicy.SOURCE)
-    public @interface DragDirection {}
-    private static final int DRAG_DIRECTION_NONE = 0;
-    private static final int DRAG_DIRECTION_HORIZONTAL = 1;
-    private static final int DRAG_DIRECTION_VERTICAL = 2;
+    public @interface DragDirection {
+        int NONE = 0;
+        int HORIZONTAL = 1;
+        int VERTICAL = 2;
+    }
 
-    @IntDef({SWIPE_MODE_NONE, SWIPE_MODE_SEND_TO_STACK, SWIPE_MODE_SWITCH_STACK})
+    @IntDef({SwipeMode.NONE, SwipeMode.SEND_TO_STACK, SwipeMode.SWITCH_STACK})
     @Retention(RetentionPolicy.SOURCE)
-    public @interface SwipeMode {}
-    protected static final int SWIPE_MODE_NONE = 0;
-    protected static final int SWIPE_MODE_SEND_TO_STACK = 1;
-    protected static final int SWIPE_MODE_SWITCH_STACK = 2;
+    public @interface SwipeMode {
+        int NONE = 0;
+        int SEND_TO_STACK = 1;
+        int SWITCH_STACK = 2;
+    }
 
     protected static final int INVALID_STACK_INDEX = -1;
 
@@ -89,15 +99,24 @@ public abstract class StackLayoutBase
     private static final int FLING_MIN_DURATION = 100; // ms
 
     private static final float THRESHOLD_TO_SWITCH_STACK = 0.4f;
-    private static final int NEW_TAB_ANIMATION_DURATION_MS = 300;
-
-    public static final int MODERN_TOP_MARGIN_DP = 16;
 
     /**
      * The delta time applied on the velocity from the fling. This is to compute the kick to help
      * switching the stack.
      */
     private static final float SWITCH_STACK_FLING_DT = 1.0f / 30.0f;
+
+    /**
+     * True if this is currently the active layout and startHiding() has not yet been called, false
+     * otherwise.
+     */
+    protected boolean mIsActiveLayout;
+
+    /**
+     * This is true if a new tab was just created and we're in the process of hiding this layout as
+     * a result and false otherwise.
+     */
+    private boolean mIsHidingBecauseOfNewTabCreation;
 
     /** The list of potentially visible stacks. */
     protected final ArrayList<Stack> mStacks;
@@ -116,7 +135,7 @@ public abstract class StackLayoutBase
     // from the event handler; and mRenderedScrollIndex is the value we get
     // after map mScrollIndex through a decelerate function.
     // Here we use float as index so we can smoothly animate the transition between stack.
-    private float mRenderedScrollOffset;
+    protected float mRenderedScrollOffset;
     private float mScrollIndexOffset;
 
     private final int mMinMaxInnerMargin;
@@ -124,10 +143,10 @@ public abstract class StackLayoutBase
     private float mStackOffsetYPercent;
 
     @DragDirection
-    private int mDragDirection = DRAG_DIRECTION_NONE;
+    private int mDragDirection = DragDirection.NONE;
 
     @SwipeMode
-    private int mInputMode = SWIPE_MODE_NONE;
+    private int mInputMode = SwipeMode.NONE;
     private float mLastOnDownX;
     private float mLastOnDownY;
     private long mLastOnDownTimeStamp;
@@ -151,6 +170,12 @@ public abstract class StackLayoutBase
     private static final int LAYOUTTAB_ASYNCHRONOUS_INITIALIZATION_BATCH_SIZE = 4;
     private boolean mDelayedLayoutTabInitRequired;
 
+    /** Which model (normal or incognito) was active when StackLayout was shown. */
+    private int mModelIndexWhenOpened;
+
+    /** ID of the tab that was active when this layout was shown. */
+    private int mCurrentTabIdWhenOpened;
+
     /**
      * Temporarily stores the index of the selected tab stack. This is used to set the currently
      * selected stack in TabModelSelector once the stack-switching animation finishes.
@@ -168,23 +193,18 @@ public abstract class StackLayoutBase
 
     private StackLayoutGestureHandler mGestureHandler;
 
-    /** A {@link LayoutTab} used for new tab animations. */
-    private LayoutTab mNewTabLayoutTab;
-
-    /**
-     * Whether or not the new layout tab has been properly initialized (a frame can occur between
-     * creation and initialization).
-     */
-    private boolean mIsNewTabInitialized;
+    private ChromeAnimation<Animatable> mLayoutAnimations;
 
     private class StackLayoutGestureHandler implements GestureHandler {
         @Override
         public void onDown(float x, float y, boolean fromMouse, int buttons) {
             long time = time();
-            mDragDirection = DRAG_DIRECTION_NONE;
+            mDragDirection = DragDirection.NONE;
             mLastOnDownX = x;
             mLastOnDownY = y;
             mLastOnDownTimeStamp = time;
+
+            if (shouldIgnoreTouchInput()) return;
             mStacks.get(getTabStackIndex()).onDown(time);
         }
 
@@ -195,6 +215,8 @@ public abstract class StackLayoutBase
 
         @Override
         public void drag(float x, float y, float dx, float dy, float tx, float ty) {
+            if (shouldIgnoreTouchInput()) return;
+
             @SwipeMode
             int oldInputMode = mInputMode;
             long time = time();
@@ -202,25 +224,27 @@ public abstract class StackLayoutBase
             float amountY = dy;
             mInputMode = computeInputMode(time, x, y, amountX, amountY);
 
-            if (mDragDirection == DRAG_DIRECTION_HORIZONTAL) amountY = 0;
-            if (mDragDirection == DRAG_DIRECTION_VERTICAL) amountX = 0;
+            if (mDragDirection == DragDirection.HORIZONTAL) amountY = 0;
+            if (mDragDirection == DragDirection.VERTICAL) amountX = 0;
 
-            if (oldInputMode == SWIPE_MODE_SEND_TO_STACK && mInputMode == SWIPE_MODE_SWITCH_STACK) {
+            if (oldInputMode == SwipeMode.SEND_TO_STACK && mInputMode == SwipeMode.SWITCH_STACK) {
                 mStacks.get(getTabStackIndex()).onUpOrCancel(time);
-            } else if (oldInputMode == SWIPE_MODE_SWITCH_STACK
-                    && mInputMode == SWIPE_MODE_SEND_TO_STACK) {
+            } else if (oldInputMode == SwipeMode.SWITCH_STACK
+                    && mInputMode == SwipeMode.SEND_TO_STACK) {
                 onUpOrCancel(time);
             }
 
-            if (mInputMode == SWIPE_MODE_SEND_TO_STACK) {
+            if (mInputMode == SwipeMode.SEND_TO_STACK) {
                 mStacks.get(getTabStackIndex()).drag(time, x, y, amountX, amountY);
-            } else if (mInputMode == SWIPE_MODE_SWITCH_STACK) {
+            } else if (mInputMode == SwipeMode.SWITCH_STACK) {
                 scrollStacks(isUsingHorizontalLayout() ? amountY : amountX);
             }
         }
 
         @Override
         public void click(float x, float y, boolean fromMouse, int buttons) {
+            if (shouldIgnoreTouchInput()) return;
+
             // Click event happens before the up event. mClicked is set to mute the up event.
             mClicked = true;
             PortraitViewport viewportParams = getViewportParameters();
@@ -233,23 +257,25 @@ public abstract class StackLayoutBase
                 if (!mStacks.get(newStackIndex).isDisplayable()) return;
                 flingStacks(newStackIndex);
             }
-            requestStackUpdate();
+            requestUpdate();
         }
 
         @Override
         public void fling(float x, float y, float velocityX, float velocityY) {
+            if (shouldIgnoreTouchInput()) return;
+
             long time = time();
             float vx = velocityX;
             float vy = velocityY;
 
-            if (mInputMode == SWIPE_MODE_NONE) {
+            if (mInputMode == SwipeMode.NONE) {
                 mInputMode = computeInputMode(
                         time, x, y, vx * SWITCH_STACK_FLING_DT, vy * SWITCH_STACK_FLING_DT);
             }
 
-            if (mInputMode == SWIPE_MODE_SEND_TO_STACK) {
+            if (mInputMode == SwipeMode.SEND_TO_STACK) {
                 mStacks.get(getTabStackIndex()).fling(time, x, y, vx, vy);
-            } else if (mInputMode == SWIPE_MODE_SWITCH_STACK) {
+            } else if (mInputMode == SwipeMode.SWITCH_STACK) {
                 final float velocity = isUsingHorizontalLayout() ? vy : vx;
                 final float origin = isUsingHorizontalLayout() ? y : x;
                 final float max = isUsingHorizontalLayout() ? getHeight() : getWidth();
@@ -257,20 +283,24 @@ public abstract class StackLayoutBase
                 final float delta = MathUtils.clamp(predicted, 0, max) - origin;
                 scrollStacks(delta);
             }
-            requestStackUpdate();
+            requestUpdate();
         }
 
         @Override
         public void onLongPress(float x, float y) {
+            if (shouldIgnoreTouchInput()) return;
             mStacks.get(getTabStackIndex()).onLongPress(time(), x, y);
         }
 
         @Override
         public void onPinch(float x0, float y0, float x1, float y1, boolean firstEvent) {
+            if (shouldIgnoreTouchInput()) return;
             mStacks.get(getTabStackIndex()).onPinch(time(), x0, y0, x1, y1, firstEvent);
         }
 
         private void onUpOrCancel(long time) {
+            if (shouldIgnoreTouchInput()) return;
+
             int currentIndex = getTabStackIndex();
             if (!mClicked
                     && Math.abs(currentIndex + mRenderedScrollOffset) > THRESHOLD_TO_SWITCH_STACK) {
@@ -288,7 +318,7 @@ public abstract class StackLayoutBase
             mClicked = false;
             finishScrollStacks();
             mStacks.get(getTabStackIndex()).onUpOrCancel(time);
-            mInputMode = SWIPE_MODE_NONE;
+            mInputMode = SwipeMode.NONE;
         }
 
         private long time() {
@@ -318,12 +348,19 @@ public abstract class StackLayoutBase
     }
 
     /**
+     * Whether or not the HorizontalTabSwitcherAndroid flag (which enables the new horizontal tab
+     * switcher in both portrait and landscape mode) is enabled.
+     */
+    protected boolean isHorizontalTabSwitcherFlagEnabled() {
+        return ChromeFeatureList.isEnabled(ChromeFeatureList.HORIZONTAL_TAB_SWITCHER_ANDROID);
+    }
+
+    /**
      * Whether or not we're currently having the tabs scroll horizontally (as opposed to
      * vertically).
      */
     private boolean isUsingHorizontalLayout() {
-        return getOrientation() == Orientation.LANDSCAPE
-                || ChromeFeatureList.isEnabled(ChromeFeatureList.HORIZONTAL_TAB_SWITCHER_ANDROID);
+        return getOrientation() == Orientation.LANDSCAPE || isHorizontalTabSwitcherFlagEnabled();
     }
 
     /**
@@ -336,7 +373,12 @@ public abstract class StackLayoutBase
             mStacks.subList(lists.size(), mStacks.size()).clear();
         }
         while (mStacks.size() < lists.size()) {
-            Stack stack = new Stack(getContext(), this);
+            Stack stack;
+            if (isHorizontalTabSwitcherFlagEnabled()) {
+                stack = new NonOverlappingStack(getContext(), this);
+            } else {
+                stack = new OverlappingStack(getContext(), this);
+            }
             stack.notifySizeChanged(mWidth, mHeight, mOrientation);
             mStacks.add(stack);
         }
@@ -351,6 +393,14 @@ public abstract class StackLayoutBase
     @Override
     public boolean forceShowBrowserControlsAndroidView() {
         return true;
+    }
+
+    /**
+     * A subclass can override this to return true to cause touch input to be ignored during certain
+     * operations (e.g. animations).
+     */
+    protected boolean shouldIgnoreTouchInput() {
+        return false;
     }
 
     /**
@@ -380,15 +430,32 @@ public abstract class StackLayoutBase
     }
 
     @Override
-    public ViewportMode getViewportMode() {
+    public @ViewportMode int getViewportMode() {
         return ViewportMode.ALWAYS_FULLSCREEN;
     }
 
     @Override
     public void setTabModelSelector(TabModelSelector modelSelector, TabContentManager manager) {
         super.setTabModelSelector(modelSelector, manager);
+        mSceneLayer.setTabModelSelector(modelSelector);
         resetScrollData();
+
+        new TabModelSelectorTabModelObserver(mTabModelSelector) {
+            @Override
+            public void tabClosureUndone(Tab tab) {
+                if (!isActive()) return;
+                onTabClosureCancelled(LayoutManager.time(), tab.getId(), tab.isIncognito());
+            }
+        };
     }
+
+    /**
+     * Called when a tab close has been undone and the tab has been restored.
+     * @param time      The current time of the app in ms.
+     * @param id        The id of the Tab.
+     * @param incognito True if the tab is incognito
+     */
+    public void onTabClosureCancelled(long time, int id, boolean incognito) {}
 
     /**
      * Get the tab stack at the specified index.
@@ -441,6 +508,22 @@ public abstract class StackLayoutBase
 
     @Override
     public void onTabSelecting(long time, int tabId) {
+        // We update TabModelSelector's current model when incognito mode is toggled in the tab
+        // switcher. So the "current model index" is already the one that we're leaving active when
+        // the tab switcher is closed.
+        final int newModelIndex = mTabModelSelector.getCurrentModelIndex();
+        if (newModelIndex != mModelIndexWhenOpened) {
+            final int indexInNewModel = mTabModelSelector.getCurrentModel().index();
+            if (indexInNewModel == mTabModelSelector.getCurrentModel().index()) {
+                // TabModelImpl logs this action when we switch to a different index within a
+                // TabModelImpl. If we switch between TabModelImpls (i.e. switch between normal and
+                // incognito mode), but leave the index the same (i.e. switch back to the most
+                // recently active tab in that stack), TabModelImpl doesn't catch that case, so we
+                // log it here.
+                RecordUserAction.record("MobileTabSwitched");
+            }
+        }
+
         commitOutstandingModelState(time);
         if (tabId == Tab.INVALID_TAB_ID) tabId = mTabModelSelector.getCurrentTabId();
         super.onTabSelecting(time, tabId);
@@ -463,11 +546,6 @@ public abstract class StackLayoutBase
     }
 
     @Override
-    public void onTabClosureCancelled(long time, int id, boolean incognito) {
-        super.onTabClosureCancelled(time, id, incognito);
-    }
-
-    @Override
     public boolean handlesCloseAll() {
         return true;
     }
@@ -484,11 +562,21 @@ public abstract class StackLayoutBase
 
     @Override
     public void attachViews(ViewGroup container) {
-        // TODO(dtrainor): This is a hack.  We're attaching to the parent of the view container
-        // which is the content container of the Activity.
-        ((ViewGroup) container.getParent())
-                .addView(mViewContainer,
-                        new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
+        if (FeatureUtilities.isBottomToolbarEnabled()) {
+            // In practice, the "container view" is used for animation. When Duet is enabled, the
+            // container is placed behind the bottom toolbar since it is persistent.
+            ViewGroup compositorViewHolder = container.findViewById(R.id.compositor_view_holder);
+            UiUtils.insertAfter((ViewGroup) compositorViewHolder.getParent(), mViewContainer,
+                    compositorViewHolder);
+            mViewContainer.getLayoutParams().width = LayoutParams.MATCH_PARENT;
+            mViewContainer.getLayoutParams().height = LayoutParams.MATCH_PARENT;
+        } else {
+            // TODO(dtrainor): This is a hack.  We're attaching to the parent of the view container
+            // which is the content container of the Activity.
+            ((ViewGroup) container.getParent())
+                    .addView(mViewContainer,
+                            new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
+        }
     }
 
     @Override
@@ -532,26 +620,20 @@ public abstract class StackLayoutBase
             boolean background, float originX, float originY) {
         super.onTabCreated(
                 time, id, tabIndex, sourceId, newIsIncognito, background, originX, originY);
+
+        // Suppress startHiding()'s logging to the Tabs.TabOffsetOfSwitch histogram.
+        mIsHidingBecauseOfNewTabCreation = true;
         startHiding(id, false);
         mStacks.get(getTabStackIndex(id)).tabCreated(time, id);
 
-        if (FeatureUtilities.isChromeHomeEnabled()) {
-            mNewTabLayoutTab = createLayoutTab(id, newIsIncognito, NO_CLOSE_BUTTON, NO_TITLE);
-            mNewTabLayoutTab.setScale(1.f);
-            mNewTabLayoutTab.setBorderScale(1.f);
-            mNewTabLayoutTab.setDecorationAlpha(0.f);
-            mNewTabLayoutTab.setY(getHeight() / 2);
-
-            mIsNewTabInitialized = true;
-
-            Interpolator interpolator = BakedBezierInterpolator.TRANSFORM_CURVE;
-            addToAnimation(mNewTabLayoutTab, LayoutTab.Property.Y, mNewTabLayoutTab.getY(), 0.f,
-                    NEW_TAB_ANIMATION_DURATION_MS, 0, false, interpolator);
-        } else {
-            startMarginAnimation(false);
-        }
+        startMarginAnimation(false);
     }
 
+    // This method is called if the following sequence of operations occurs:
+    // 1. Enter multi-window mode
+    // 2. Create a second Chrome instance by moving a tab to the other window
+    // 3. In the top window, enter the tab switcher
+    // 4. Expand the top window to full screen.
     @Override
     public void onTabRestored(long time, int tabId) {
         super.onTabRestored(time, tabId);
@@ -562,7 +644,20 @@ public abstract class StackLayoutBase
 
     @Override
     public boolean onUpdateAnimation(long time, boolean jumpToEnd) {
-        boolean animationsWasDone = super.onUpdateAnimation(time, jumpToEnd);
+        boolean animationsWasDone = true;
+        if (mLayoutAnimations != null) {
+            if (jumpToEnd) {
+                animationsWasDone = mLayoutAnimations.finished();
+                mLayoutAnimations.updateAndFinish();
+            } else {
+                animationsWasDone = mLayoutAnimations.update(time);
+            }
+
+            if (animationsWasDone || jumpToEnd) {
+                mLayoutAnimations = null;
+                onAnimationFinished();
+            }
+        }
 
         boolean finishedAllViews = true;
         for (int i = 0; i < mStacks.size(); i++) {
@@ -577,26 +672,33 @@ public abstract class StackLayoutBase
         if (animationsWasDone && finishedAllViews && finishedAllCompositors) {
             return true;
         } else {
-            if (!animationsWasDone || !finishedAllCompositors) {
-                requestStackUpdate();
-            }
-
+            if (!animationsWasDone || !finishedAllCompositors) requestUpdate();
             return false;
         }
     }
 
-    @Override
+    /**
+     * Called by a NonOverlappingStack that's had switchAwayEffect() called on it, once the
+     * animation has finished.
+     */
+    public void onSwitchAwayFinished() {}
+
+    /**
+     * Called by a NonOverlappingStack that's had switchToEffect() called on it, once the
+     * animation has finished.
+     */
+    public void onSwitchToFinished() {}
+
+    /**
+     * Called when layout-specific actions are needed after the animation finishes.
+     */
     protected void onAnimationStarted() {
-        if (mStackAnimationCount == 0) super.onAnimationStarted();
     }
 
-    @Override
+    /**
+     * Called when layout-specific actions are needed after the animation finishes.
+     */
     protected void onAnimationFinished() {
-        if (mStackAnimationCount == 0) super.onAnimationFinished();
-        if (mNewTabLayoutTab != null) {
-            mIsNewTabInitialized = false;
-            mNewTabLayoutTab = null;
-        }
     }
 
     /**
@@ -652,7 +754,10 @@ public abstract class StackLayoutBase
      * Called when a {@link Stack} instance is done animating the stack enter effect.
      */
     public void uiDoneEnteringStack() {
-        mSortingComparator = mVisibilityComparator;
+        // Tabs don't overlap in the horizontal tab switcher experiment, so the order comparator
+        // already does what we want (the visibility comparator's logic actually doesn't compute
+        // visibility properly in this case).
+        if (!isHorizontalTabSwitcherFlagEnabled()) mSortingComparator = mVisibilityComparator;
         doneShowing();
     }
 
@@ -693,6 +798,22 @@ public abstract class StackLayoutBase
     public void show(long time, boolean animate) {
         super.show(time, animate);
 
+        if (!mIsActiveLayout) {
+            // The mIsActiveLayout check is necessary because there are certain edge cases where
+            // show() is called (e.g. to refresh the Stacks) while the tab switcher is already
+            // showing.
+
+            // Note: there are some edge cases (e.g. the last open tab is closed somehow while the
+            // tab switcher is not open) that can also cause this event to be logged without a
+            // toolbar interaction. The event name contains "Toolbar" for historical reasons; the
+            // current intent is to log whenever the tab switcher is entered.
+            RecordUserAction.record("MobileToolbarShowStackView");
+
+            mModelIndexWhenOpened = mTabModelSelector.getCurrentModelIndex();
+            mCurrentTabIdWhenOpened = mTabModelSelector.getCurrentTabId();
+        }
+        mIsActiveLayout = true;
+
         Tab tab = mTabModelSelector.getCurrentTab();
         if (tab != null && tab.isNativePage()) mTabContentManager.cacheTabThumbnail(tab);
 
@@ -730,39 +851,6 @@ public abstract class StackLayoutBase
     }
 
     @Override
-    public void swipeStarted(long time, ScrollDirection direction, float x, float y) {
-        mStacks.get(getTabStackIndex()).swipeStarted(time, direction, x, y);
-    }
-
-    @Override
-    public void swipeUpdated(long time, float x, float y, float dx, float dy, float tx, float ty) {
-        mStacks.get(getTabStackIndex()).swipeUpdated(time, x, y, dx, dy, tx, ty);
-    }
-
-    @Override
-    public void swipeFinished(long time) {
-        mStacks.get(getTabStackIndex()).swipeFinished(time);
-    }
-
-    @Override
-    public void swipeCancelled(long time) {
-        mStacks.get(getTabStackIndex()).swipeCancelled(time);
-    }
-
-    @Override
-    public void swipeFlingOccurred(
-            long time, float x, float y, float tx, float ty, float vx, float vy) {
-        mStacks.get(getTabStackIndex()).swipeFlingOccurred(time, x, y, tx, ty, vx, vy);
-    }
-
-    private void requestStackUpdate() {
-        // TODO(jgreenwald): It isn't always necessary to invalidate all stacks.
-        for (int i = 0; i < mStacks.size(); i++) {
-            mStacks.get(i).requestUpdate();
-        }
-    }
-
-    @Override
     public void notifySizeChanged(float width, float height, int orientation) {
         mWidth = width;
         mHeight = height;
@@ -773,7 +861,7 @@ public abstract class StackLayoutBase
             stack.notifySizeChanged(width, height, orientation);
         }
         resetScrollData();
-        requestStackUpdate();
+        requestUpdate();
     }
 
     @Override
@@ -783,7 +871,7 @@ public abstract class StackLayoutBase
         for (Stack stack : mStacks) {
             stack.contextChanged(context);
         }
-        requestStackUpdate();
+        requestUpdate();
     }
 
     protected int getMinRenderedScrollOffset() {
@@ -800,8 +888,8 @@ public abstract class StackLayoutBase
      * @return     The input mode to select.
      */
     protected @SwipeMode int computeInputMode(long time, float x, float y, float dx, float dy) {
-        if (mStacks.size() == 0) return SWIPE_MODE_NONE;
-        if (mStacks.size() == 1) return SWIPE_MODE_SEND_TO_STACK;
+        if (mStacks.size() == 0) return SwipeMode.NONE;
+        if (mStacks.size() == 1) return SwipeMode.SEND_TO_STACK;
 
         int currentIndex = getTabStackIndex();
 
@@ -809,16 +897,16 @@ public abstract class StackLayoutBase
         // next touch down. The deltas here are already verified by StackLayoutGestureHandler as
         // being above some threshold so that we know we're handling a drag or fling and not a long
         // press.
-        if (mDragDirection == DRAG_DIRECTION_NONE) {
+        if (mDragDirection == DragDirection.NONE) {
             if (Math.abs(dx) > Math.abs(dy)) {
-                mDragDirection = DRAG_DIRECTION_HORIZONTAL;
+                mDragDirection = DragDirection.HORIZONTAL;
             } else {
-                mDragDirection = DRAG_DIRECTION_VERTICAL;
+                mDragDirection = DragDirection.VERTICAL;
             }
         }
 
-        if ((mDragDirection == DRAG_DIRECTION_VERTICAL) ^ isUsingHorizontalLayout()) {
-            return SWIPE_MODE_SEND_TO_STACK;
+        if ((mDragDirection == DragDirection.VERTICAL) ^ isUsingHorizontalLayout()) {
+            return SwipeMode.SEND_TO_STACK;
         }
 
         float relativeX = mLastOnDownX - (x + dx);
@@ -842,10 +930,10 @@ public abstract class StackLayoutBase
         if ((onLeftmostStack && switchDelta < 0) || (onRightmostStack && switchDelta > 0)) {
             // Dragging in a direction the stack cannot switch. Pass the drag to the Stack, which
             // will treat it as intending to discard a tab.
-            return SWIPE_MODE_SEND_TO_STACK;
+            return SwipeMode.SEND_TO_STACK;
         } else {
             // Interpret the drag as intending to switch between tab stacks.
-            return SWIPE_MODE_SWITCH_STACK;
+            return SwipeMode.SWITCH_STACK;
         }
     }
 
@@ -942,7 +1030,6 @@ public abstract class StackLayoutBase
         }
 
         float getTopHeightOffset() {
-            if (FeatureUtilities.isChromeHomeEnabled()) return MODERN_TOP_MARGIN_DP;
             return getTopBrowserControlsHeight() * mStackOffsetYPercent;
         }
     }
@@ -956,6 +1043,10 @@ public abstract class StackLayoutBase
 
         @Override
         float getInnerMargin() {
+            // If we're using the new horizontal tab switcher, don't show the edge of the other
+            // stack (normal if in incognito mode and incognito if in normal mode) on-screen.
+            if (isHorizontalTabSwitcherFlagEnabled()) return 0;
+
             float margin = mInnerMarginPercent
                     * Math.max(mMinMaxInnerMargin, mWidth * INNER_MARGIN_PERCENT_PERCENT);
             return margin;
@@ -1010,6 +1101,10 @@ public abstract class StackLayoutBase
 
         @Override
         float getStack0ToStack1TranslationY() {
+            // Need getHeight() for this case instead of getHeightMinusBrowserControls() so the
+            // normal stack goes up high enough to clear the status bar when the incognito stack is
+            // active.
+            if (isHorizontalTabSwitcherFlagEnabled()) return StackLayoutBase.this.getHeight();
             return Math.round(mWidth - getInnerMargin());
         }
     }
@@ -1042,7 +1137,7 @@ public abstract class StackLayoutBase
                 !isUsingHorizontalLayout() && LocalizationUtils.isLayoutRtl());
         mRenderedScrollOffset =
                 MathUtils.clamp(mScrollIndexOffset, 0, getMinRenderedScrollOffset());
-        requestStackUpdate();
+        requestUpdate();
     }
 
     /**
@@ -1053,7 +1148,7 @@ public abstract class StackLayoutBase
     protected void flingStacks(int index) {
         setActiveStackState(index);
         finishScrollStacks();
-        requestStackUpdate();
+        requestUpdate();
     }
 
     /**
@@ -1130,9 +1225,17 @@ public abstract class StackLayoutBase
             final float scrollDistance = Math.abs(i + mRenderedScrollOffset);
             final float stackFocus = MathUtils.clamp(1 - scrollDistance, 0, 1);
 
-            mStacks.get(i).setStackFocusInfo(stackFocus,
-                    mSortingComparator == mOrderComparator ? mStacks.get(i).getTabList().index()
-                                                           : -1);
+            // The overlapping stack only uses the OrderComparator for visibliity prioritization
+            // during the animation to open the tab switcher. For this case, we pass a fixed index
+            // for the currently-selected tab.
+            //
+            // If the non-overlapping horizontal tab switcher experiment is enabled, we pass -1 so
+            // NonOverlappingStack can use the scroll position to keep the index used for visibility
+            // prioritization up-to-date.
+            final boolean useFixedIndex =
+                    mSortingComparator == mOrderComparator && !isHorizontalTabSwitcherFlagEnabled();
+            mStacks.get(i).setStackFocusInfo(
+                    stackFocus, useFixedIndex ? mStacks.get(i).getTabList().index() : -1);
         }
 
         // Compute position and visibility
@@ -1147,12 +1250,10 @@ public abstract class StackLayoutBase
             tabVisibleCount += mStacks.get(i).getVisibleCount();
         }
 
-        int layoutTabCount = tabVisibleCount + (mNewTabLayoutTab == null ? 0 : 1);
-
-        if (layoutTabCount == 0) {
+        if (tabVisibleCount == 0) {
             mLayoutTabs = null;
-        } else if (mLayoutTabs == null || mLayoutTabs.length != layoutTabCount) {
-            mLayoutTabs = new LayoutTab[layoutTabCount];
+        } else if (mLayoutTabs == null || mLayoutTabs.length != tabVisibleCount) {
+            mLayoutTabs = new LayoutTab[tabVisibleCount];
         }
 
         int index = 0;
@@ -1167,11 +1268,6 @@ public abstract class StackLayoutBase
         // Update tab snapping
         for (int i = 0; i < tabVisibleCount; i++) {
             if (mLayoutTabs[i].updateSnap(dt)) needUpdate = true;
-        }
-
-        if (mNewTabLayoutTab != null && mIsNewTabInitialized) {
-            mLayoutTabs[mLayoutTabs.length - 1] = mNewTabLayoutTab;
-            if (mNewTabLayoutTab.updateSnap(dt)) needUpdate = true;
         }
 
         if (needUpdate) requestUpdate();
@@ -1210,6 +1306,11 @@ public abstract class StackLayoutBase
      * @return The distance between two neighboring tab stacks.
      */
     private float getFullScrollDistance() {
+        // For the horizontal tab switcher experiment, we use getHeight() instead of
+        // getHeightMinusBrowserControls() to make sure the normal stack goes up enough to clear the
+        // status bar when switching to incognito mode.
+        if (isHorizontalTabSwitcherFlagEnabled()) return getHeight();
+
         float distance = isUsingHorizontalLayout() ? getHeightMinusBrowserControls() : getWidth();
         if (mStacks.size() > 2) {
             return distance - getViewportParameters().getInnerMargin();
@@ -1219,7 +1320,42 @@ public abstract class StackLayoutBase
     }
 
     @Override
+    public void startHiding(int nextTabId, boolean hintAtTabSelection) {
+        super.startHiding(nextTabId, hintAtTabSelection);
+
+        // Reset mIsActiveLayout here instead of in doneHiding() so if a user hits the tab switcher
+        // button on the toolbar to re-open it while we're still in the process of hiding the tab
+        // switcher, we don't skip the logging.
+        mIsActiveLayout = false;
+
+        if (mCurrentTabIdWhenOpened == nextTabId) {
+            RecordUserAction.record("MobileTabReturnedToCurrentTab");
+        }
+    }
+
+    @Override
     public void doneHiding() {
+        // Log offset between newly-selected and previously-active tabs. A positive offset means the
+        // user switched to a tab earlier in the stack. A negative offset means the user switched to
+        // a tab later in the stack. 0 means they stayed on the same tab. We do not log anything if
+        // the user switched between stacks (normal to incognito or vice-versa). We also do not log
+        // anything if the tab switch was the result of a new tab being created (we do log for
+        // presses of the tab switcher button on the toolbar).
+
+        // Note: we log this in doneHiding() instead of startHiding() because Layout#doneHiding() is
+        // where the new tab actually gets selected. If the user immediately reopens the tab
+        // switcher before the close animation finishes, the new tab doesn't actually get selected.
+        if (!mIsHidingBecauseOfNewTabCreation
+                && mModelIndexWhenOpened == mTabModelSelector.getCurrentModelIndex()) {
+            final int currentIndex = mTabModelSelector.getCurrentModel().index();
+            final Tab newTab = mTabModelSelector.getTabById(mNextTabId);
+            final int newIndex = mTabModelSelector.getCurrentModel().indexOf(newTab);
+            assert newIndex != TabList.INVALID_TAB_INDEX;
+            RecordHistogram.recordSparseSlowlyHistogram(
+                    "Tabs.TabOffsetOfSwitch", currentIndex - newIndex);
+        }
+        mIsHidingBecauseOfNewTabCreation = false;
+
         super.doneHiding();
 
         mInnerMarginPercent = 0.0f;
@@ -1356,29 +1492,28 @@ public abstract class StackLayoutBase
      * @param p New value of the property
      */
     @Override
-    public void setProperty(Property prop, float p) {
+    public void setProperty(@Property int prop, float p) {
         switch (prop) {
-            case STACK_SNAP:
+            case Property.STACK_SNAP:
                 mRenderedScrollOffset = p;
                 mScrollIndexOffset = p;
                 break;
-            case INNER_MARGIN_PERCENT:
+            case Property.INNER_MARGIN_PERCENT:
                 mInnerMarginPercent = p;
                 break;
-            case STACK_OFFSET_Y_PERCENT:
+            case Property.STACK_OFFSET_Y_PERCENT:
                 mStackOffsetYPercent = p;
                 break;
         }
     }
 
     @Override
-    public void onPropertyAnimationFinished(Property prop) {}
+    public void onPropertyAnimationFinished(@Property int prop) {}
 
     /**
      * Called by the stacks whenever they start an animation.
      */
     public void onStackAnimationStarted() {
-        if (mStackAnimationCount == 0) super.onAnimationStarted();
         mStackAnimationCount++;
     }
 
@@ -1387,7 +1522,6 @@ public abstract class StackLayoutBase
      */
     public void onStackAnimationFinished() {
         mStackAnimationCount--;
-        if (mStackAnimationCount == 0) super.onAnimationFinished();
     }
 
     @Override
@@ -1410,5 +1544,47 @@ public abstract class StackLayoutBase
 
         mSceneLayer.pushLayers(getContext(), viewport, contentViewport, this, layerTitleCache,
                 tabContentManager, resourceManager, fullscreenManager);
+    }
+
+    /**
+     * Creates an {@link org.chromium.chrome.browser.compositor.layouts.ChromeAnimation
+     * .AnimatableAnimation} and adds it to the animation.
+     * Automatically sets the start value at the beginning of the animation.
+     */
+    protected void addToAnimation(
+            Animatable object, int prop, float start, float end, long duration, long startTime) {
+        ChromeAnimation.Animation<Animatable> component = createAnimation(object, prop, start, end,
+                duration, startTime, false, ChromeAnimation.getDecelerateInterpolator());
+        if (mLayoutAnimations == null || mLayoutAnimations.finished()) {
+            mLayoutAnimations = new ChromeAnimation<Animatable>();
+            mLayoutAnimations.start();
+        }
+        component.start();
+        mLayoutAnimations.add(component);
+        requestUpdate();
+    }
+
+    @Override
+    protected void forceAnimationToFinish() {
+        super.forceAnimationToFinish();
+        if (mLayoutAnimations != null) {
+            mLayoutAnimations.updateAndFinish();
+            mLayoutAnimations = null;
+        }
+    }
+
+    /**
+     * Cancels any animation for the given object and property.
+     * @param object The object being animated.
+     * @param prop   The property to search for.
+     */
+    protected void cancelAnimation(Animatable object, int prop) {
+        if (mLayoutAnimations != null) mLayoutAnimations.cancel(object, prop);
+    }
+
+    @Override
+    @VisibleForTesting
+    public boolean isLayoutAnimating() {
+        return mLayoutAnimations != null && !mLayoutAnimations.finished();
     }
 }

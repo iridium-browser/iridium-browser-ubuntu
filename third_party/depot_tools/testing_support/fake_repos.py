@@ -247,7 +247,7 @@ class FakeReposBase(object):
       return False
     for repo in ['repo_%d' % r for r in range(1, self.NB_GIT_REPOS + 1)]:
       subprocess2.check_call(['git', 'init', '-q', join(self.git_root, repo)])
-      self.git_hashes[repo] = [None]
+      self.git_hashes[repo] = [(None, None)]
     self.git_port = find_free_port(self.host, 20000)
     self.git_base = 'git://%s:%d/git/' % (self.host, self.git_port)
     # Start the daemon.
@@ -275,16 +275,27 @@ class FakeReposBase(object):
     return subprocess2.check_output(
         ['git', 'rev-parse', 'HEAD'], cwd=path).strip()
 
-  def _commit_git(self, repo, tree):
+  def _commit_git(self, repo, tree, base=None):
     repo_root = join(self.git_root, repo)
+    if base:
+      base_commit = self.git_hashes[repo][base][0]
+      subprocess2.check_call(
+          ['git', 'checkout', base_commit], cwd=repo_root)
     self._genTree(repo_root, tree)
     commit_hash = commit_git(repo_root)
-    if self.git_hashes[repo][-1]:
-      new_tree = self.git_hashes[repo][-1][1].copy()
+    base = base or -1
+    if self.git_hashes[repo][base][1]:
+      new_tree = self.git_hashes[repo][base][1].copy()
       new_tree.update(tree)
     else:
       new_tree = tree.copy()
     self.git_hashes[repo].append((commit_hash, new_tree))
+
+  def _create_ref(self, repo, ref, revision):
+    repo_root = join(self.git_root, repo)
+    subprocess2.check_call(
+        ['git', 'update-ref', ref, self.git_hashes[repo][revision][0]],
+        cwd=repo_root)
 
   def _fast_import_git(self, repo, data):
     repo_root = join(self.git_root, repo)
@@ -309,7 +320,7 @@ class FakeReposBase(object):
 
 class FakeRepos(FakeReposBase):
   """Implements populateGit()."""
-  NB_GIT_REPOS = 14
+  NB_GIT_REPOS = 16
 
   def populateGit(self):
     # Testing:
@@ -412,6 +423,10 @@ deps = {
 deps = {
   'src/repo2': '%(git_base)srepo_2@%(hash)s',
   'src/repo2/repo_renamed': '/repo_3',
+  'src/should_not_process': {
+    'url': '/repo_4',
+    'condition': 'False',
+  }
 }
 # I think this is wrong to have the hooks run from the base of the gclient
 # checkout. It's maybe a bit too late to change that behavior.
@@ -535,6 +550,8 @@ deps = {
     'url': None,
   },
   'src/repo8': '/repo_8',
+  'src/repo15': '/repo_15',
+  'src/repo16': '/repo_16',
 }
 deps_os ={
   'mac': {
@@ -577,6 +594,8 @@ hooks_os = {
 recursedeps = [
   'src/repo2',
   'src/repo8',
+  'src/repo15',
+  'src/repo16',
 ]""" % {
         'git_base': self.git_base,
         'hash': self.git_hashes['repo_2'][1][0][:7]
@@ -620,6 +639,13 @@ deps_os ={
 
     self._commit_git('repo_9', {
       'DEPS': """
+vars = {
+  'str_var': 'xyz',
+}
+gclient_gn_args_file = 'src/repo2/gclient.args'
+gclient_gn_args = [
+  'str_var',
+]
 deps = {
   'src/repo8': '/repo_8',
 
@@ -644,6 +670,7 @@ recursedeps = [
 
     self._commit_git('repo_10', {
       'DEPS': """
+gclient_gn_args_from = 'src/repo9'
 deps = {
   'src/repo9': '/repo_9',
 
@@ -716,8 +743,31 @@ deps = {
       'origin': 'git/repo_13@2\n',
     })
 
+    # src/repo12 is now a CIPD dependency.
+    self._commit_git('repo_13', {
+      'DEPS': """
+deps = {
+  'src/repo12': {
+    'packages': [
+      {
+        'package': 'foo',
+        'version': '1.3',
+      },
+    ],
+    'dep_type': 'cipd',
+  },
+}
+hooks = [{
+  # make sure src/repo12 exists and is a CIPD dir.
+  'action': ['python', '-c', 'with open("src/repo12/_cipd"): pass'],
+}]
+""",
+      'origin': 'git/repo_13@3\n'
+    })
+
     self._commit_git('repo_14', {
       'DEPS': textwrap.dedent("""\
+        vars = {}
         deps = {
           'src/cipd_dep': {
             'packages': [
@@ -728,10 +778,55 @@ deps = {
             ],
             'dep_type': 'cipd',
           },
+          'src/another_cipd_dep': {
+            'packages': [
+              {
+                'package': 'package1',
+                'version': '1.1-cr0',
+              },
+              {
+                'package': 'package2',
+                'version': '1.13',
+              },
+            ],
+            'dep_type': 'cipd',
+          },
+          'src/cipd_dep_with_cipd_variable': {
+            'packages': [
+              {
+                'package': 'package3/${{platform}}',
+                'version': '1.2',
+              },
+            ],
+            'dep_type': 'cipd',
+          },
         }"""),
       'origin': 'git/repo_14@2\n'
     })
 
+    # A repo with a hook to be recursed in, without use_relative_hooks
+    self._commit_git('repo_15', {
+      'DEPS': textwrap.dedent("""\
+        hooks = [{
+          "name": "absolute_cwd",
+          "pattern": ".",
+          "action": ["python", "-c", "pass"]
+        }]"""),
+      'origin': 'git/repo_15@2\n'
+    })
+    # A repo with a hook to be recursed in, with use_relative_hooks
+    self._commit_git('repo_16', {
+      'DEPS': textwrap.dedent("""\
+        use_relative_paths=True
+        use_relative_hooks=True
+        hooks = [{
+          "name": "relative_cwd",
+          "pattern": ".",
+          "action": ["python", "relative.py"]
+        }]"""),
+      'relative.py': 'pass',
+      'origin': 'git/repo_16@2\n'
+    })
 
 class FakeRepoSkiaDEPS(FakeReposBase):
   """Simulates the Skia DEPS transition in Chrome."""
@@ -835,6 +930,7 @@ class FakeReposTestBase(trial_dir.TestCase):
 
   def checkString(self, expected, result, msg=None):
     """Prints the diffs to ease debugging."""
+    self.assertEquals(expected.splitlines(), result.splitlines(), msg)
     if expected != result:
       # Strip the begining
       while expected and result and expected[0] == result[0]:
@@ -858,9 +954,9 @@ class FakeReposTestBase(trial_dir.TestCase):
     actual = read_tree(tree_root)
     diff = dict_diff(tree, actual)
     if diff:
-      logging.debug('Actual %s\n%s' % (tree_root, pprint.pformat(actual)))
-      logging.debug('Expected\n%s' % pprint.pformat(tree))
-      logging.debug('Diff\n%s' % pprint.pformat(diff))
+      logging.error('Actual %s\n%s' % (tree_root, pprint.pformat(actual)))
+      logging.error('Expected\n%s' % pprint.pformat(tree))
+      logging.error('Diff\n%s' % pprint.pformat(diff))
     self.assertEquals(diff, {})
 
   def mangle_git_tree(self, *args):

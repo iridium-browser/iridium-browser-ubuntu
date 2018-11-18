@@ -6,7 +6,6 @@ package org.chromium.components.autofill;
 
 import android.annotation.SuppressLint;
 import android.content.Context;
-import android.graphics.Color;
 import android.view.View;
 import android.view.View.AccessibilityDelegate;
 import android.view.ViewGroup;
@@ -14,7 +13,6 @@ import android.view.accessibility.AccessibilityEvent;
 import android.widget.AdapterView;
 import android.widget.PopupWindow;
 
-import org.chromium.ui.DropdownAdapter;
 import org.chromium.ui.DropdownItem;
 import org.chromium.ui.DropdownPopupWindow;
 
@@ -26,16 +24,9 @@ import java.util.List;
 /**
  * The Autofill suggestion popup that lists relevant suggestions.
  */
-public class AutofillPopup extends DropdownPopupWindow implements AdapterView.OnItemClickListener,
-        AdapterView.OnItemLongClickListener, PopupWindow.OnDismissListener {
-
-    /**
-     * The constant used to specify a separator in a list of Autofill suggestions.
-     * Has to be kept in sync with {@code POPUP_ITEM_ID_SEPARATOR} enum in
-     * components/autofill/core/browser/popup_item_ids.h
-     */
-    private static final int ITEM_ID_SEPARATOR_ENTRY = -3;
-
+public class AutofillPopup extends DropdownPopupWindow
+        implements AdapterView.OnItemClickListener, AdapterView.OnItemLongClickListener,
+                   PopupWindow.OnDismissListener, AutofillDropdownFooter.Observer {
     /**
      * We post a delayed runnable to clear accessibility focus from the autofill popup's list view
      * when we receive a {@code TYPE_VIEW_ACCESSIBILITY_FOCUS_CLEARED} event because we receive a
@@ -78,37 +69,31 @@ public class AutofillPopup extends DropdownPopupWindow implements AdapterView.On
      * Filters the Autofill suggestions to the ones that we support and shows the popup.
      * @param suggestions Autofill suggestion data.
      * @param isRtl @code true if right-to-left text.
-     * @param backgroundColor popup background color, or {@code Color.TRANSPARENT} if unspecified.
-     * @param dividerColor color for divider between popup items, or {@code Color.TRANSPARENT} if
-     * unspecified.
-     * @param isBoldLabel true if suggestion label's type face is {@code Typeface.BOLD}, false if
-     * suggestion label's type face is {@code Typeface.NORMAL}.
-     * @param dropdownItemHeight height of each dropdown item in dimension independent pixel units,
-     * 0 if unspecified.
-     * @param margin Margin for icon, label and between icon and label in dimension independent
-     * pixel units, 0 if not specified.
+     * @param isRefresh Whether or not refreshed visual style should be used.
      */
     @SuppressLint("InlinedApi")
-    public void filterAndShow(AutofillSuggestion[] suggestions, boolean isRtl,
-            int backgroundColor, int dividerColor, int dropdownItemHeight, int margin) {
+    public void filterAndShow(AutofillSuggestion[] suggestions, boolean isRtl, boolean isRefresh) {
         mSuggestions = new ArrayList<AutofillSuggestion>(Arrays.asList(suggestions));
         // Remove the AutofillSuggestions with IDs that are not supported by Android
-        ArrayList<DropdownItem> cleanedData = new ArrayList<DropdownItem>();
+        List<DropdownItem> cleanedData = new ArrayList<>();
+        List<DropdownItem> footerRows = new ArrayList<>();
         HashSet<Integer> separators = new HashSet<Integer>();
         for (int i = 0; i < suggestions.length; i++) {
             int itemId = suggestions[i].getSuggestionId();
-            if (itemId == ITEM_ID_SEPARATOR_ENTRY) {
+            if (itemId == PopupItemId.ITEM_ID_SEPARATOR) {
                 separators.add(cleanedData.size());
+            } else if (isFooter(itemId, isRefresh)) {
+                footerRows.add(suggestions[i]);
             } else {
                 cleanedData.add(suggestions[i]);
             }
         }
 
-        setAdapter(new DropdownAdapter(mContext, cleanedData, separators,
-                backgroundColor == Color.TRANSPARENT ? null : backgroundColor,
-                dividerColor == Color.TRANSPARENT ? null : dividerColor,
-                dropdownItemHeight == 0 ? null : dropdownItemHeight,
-                margin == 0 ? null : margin));
+        if (!footerRows.isEmpty()) {
+            setFooterView(new AutofillDropdownFooter(mContext, footerRows, this));
+        }
+
+        setAdapter(new AutofillDropdownAdapter(mContext, cleanedData, separators, isRefresh));
         setRtl(isRtl);
         show();
         getListView().setOnItemLongClickListener(this);
@@ -129,7 +114,7 @@ public class AutofillPopup extends DropdownPopupWindow implements AdapterView.On
 
     @Override
     public void onItemClick(AdapterView<?> parent, View view, int position, long id) {
-        DropdownAdapter adapter = (DropdownAdapter) parent.getAdapter();
+        AutofillDropdownAdapter adapter = (AutofillDropdownAdapter) parent.getAdapter();
         int listIndex = mSuggestions.indexOf(adapter.getItem(position));
         assert listIndex > -1;
         mAutofillDelegate.suggestionSelected(listIndex);
@@ -137,7 +122,7 @@ public class AutofillPopup extends DropdownPopupWindow implements AdapterView.On
 
     @Override
     public boolean onItemLongClick(AdapterView<?> parent, View view, int position, long id) {
-        DropdownAdapter adapter = (DropdownAdapter) parent.getAdapter();
+        AutofillDropdownAdapter adapter = (AutofillDropdownAdapter) parent.getAdapter();
         AutofillSuggestion suggestion = (AutofillSuggestion) adapter.getItem(position);
         if (!suggestion.isDeletable()) return false;
 
@@ -150,5 +135,30 @@ public class AutofillPopup extends DropdownPopupWindow implements AdapterView.On
     @Override
     public void onDismiss() {
         mAutofillDelegate.dismissed();
+    }
+
+    @Override
+    public void onFooterSelection(DropdownItem item) {
+        int index = mSuggestions.indexOf(item);
+        assert index > -1;
+        mAutofillDelegate.suggestionSelected(index);
+    }
+
+    private boolean isFooter(int row, boolean isRefresh) {
+        // Footer items are only handled as a special case in the refreshed UI.
+        if (!isRefresh) {
+            return false;
+        }
+
+        switch (row) {
+            case PopupItemId.ITEM_ID_CLEAR_FORM:
+            case PopupItemId.ITEM_ID_AUTOFILL_OPTIONS:
+            case PopupItemId.ITEM_ID_SCAN_CREDIT_CARD:
+            case PopupItemId.ITEM_ID_CREDIT_CARD_SIGNIN_PROMO:
+            case PopupItemId.ITEM_ID_ALL_SAVED_PASSWORDS_ENTRY:
+                return true;
+            default:
+                return false;
+        }
     }
 }

@@ -15,8 +15,10 @@ WebViewTranslateService::TranslateRequestsAllowedListener::
     TranslateRequestsAllowedListener()
     : resource_request_allowed_notifier_(
           ios_web_view::ApplicationContext::GetInstance()->GetLocalState(),
-          /*disable_network_switch=*/nullptr) {
-  resource_request_allowed_notifier_.Init(this);
+          /*disable_network_switch=*/nullptr,
+          base::BindOnce(&ApplicationContext::GetNetworkConnectionTracker,
+                         base::Unretained(ApplicationContext::GetInstance()))) {
+  resource_request_allowed_notifier_.Init(this, /*leaky=*/false);
 }
 
 WebViewTranslateService::TranslateRequestsAllowedListener::
@@ -47,9 +49,10 @@ void WebViewTranslateService::Initialize() {
   // Initialize translate.
   translate::TranslateDownloadManager* download_manager =
       translate::TranslateDownloadManager::GetInstance();
-  download_manager->set_request_context(
+  download_manager->set_url_loader_factory(
       ios_web_view::ApplicationContext::GetInstance()
-          ->GetSystemURLRequestContext());
+          ->GetSharedURLLoaderFactory()
+          .get());
   download_manager->set_application_locale(
       ios_web_view::ApplicationContext::GetInstance()->GetApplicationLocale());
 }

@@ -7,7 +7,6 @@
 
 #include <memory>
 #include <ostream>
-#include <string>
 
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
@@ -25,8 +24,8 @@ class Profile;
 namespace arc {
 
 class ArcAndroidManagementChecker;
-class ArcAuthContext;
 class ArcDataRemover;
+class ArcFastAppReinstallStarter;
 class ArcPaiStarter;
 class ArcTermsOfServiceNegotiator;
 enum class ProvisioningResult : int;
@@ -143,8 +142,8 @@ class ArcSessionManager : public ArcSessionRunner::Observer,
 
   static ArcSessionManager* Get();
 
-  static void DisableUIForTesting();
-  static void EnableCheckAndroidManagementForTesting();
+  static void SetUiEnabledForTesting(bool enabled);
+  static void EnableCheckAndroidManagementForTesting(bool enable);
 
   // Returns true if ARC is allowed to run for the current session.
   // TODO(hidehiko): The name is very close to IsArcAllowedForProfile(), but
@@ -218,10 +217,6 @@ class ArcSessionManager : public ArcSessionRunner::Observer,
 
   ArcSupportHost* support_host() { return support_host_.get(); }
 
-  // TODO(hidehiko): Get rid of the getter by migration between ArcAuthContext
-  // and ArcAuthCodeFetcher.
-  ArcAuthContext* auth_context() { return context_.get(); }
-
   // On provisioning completion (regardless of whether successfully done or
   // not), this is called with its status. On success, called with
   // ProvisioningResult::SUCCESS, otherwise |result| is the error reason.
@@ -241,6 +236,12 @@ class ArcSessionManager : public ArcSessionRunner::Observer,
   // Returns PAI starter that is used to start Play Auto Install flow. It is
   // available only on initial start.
   ArcPaiStarter* pai_starter() { return pai_starter_.get(); }
+
+  // Returns Fast App Reinstall starter that is used to start Play Fast App
+  // Reinstall flow. It is available only on initial start.
+  ArcFastAppReinstallStarter* fast_app_resintall_starter() {
+    return fast_app_reinstall_starter_.get();
+  }
 
   // Returns true if the current ARC run has started with skipping user ToS
   // negotiation, because the user had accepted already or policy does not
@@ -360,7 +361,7 @@ class ArcSessionManager : public ArcSessionRunner::Observer,
   // Internal state machine. See also State enum class.
   State state_ = State::NOT_INITIALIZED;
 
-  base::ObserverList<Observer> observer_list_;
+  base::ObserverList<Observer>::Unchecked observer_list_;
   std::unique_ptr<ArcAppLauncher> playstore_launcher_;
   bool reenable_arc_ = false;
   bool provisioning_reported_ = false;
@@ -379,11 +380,11 @@ class ArcSessionManager : public ArcSessionRunner::Observer,
 
   std::unique_ptr<ArcTermsOfServiceNegotiator> terms_of_service_negotiator_;
 
-  std::unique_ptr<ArcAuthContext> context_;
   std::unique_ptr<ArcAndroidManagementChecker> android_management_checker_;
 
   std::unique_ptr<ScopedOptInFlowTracker> scoped_opt_in_tracker_;
   std::unique_ptr<ArcPaiStarter> pai_starter_;
+  std::unique_ptr<ArcFastAppReinstallStarter> fast_app_reinstall_starter_;
 
   // The time when the sign in process started.
   base::Time sign_in_start_time_;

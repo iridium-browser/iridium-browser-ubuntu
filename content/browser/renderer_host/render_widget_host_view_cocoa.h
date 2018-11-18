@@ -10,12 +10,16 @@
 #include <set>
 #include <vector>
 
+#include "base/containers/flat_set.h"
 #include "base/mac/scoped_nsobject.h"
+#include "base/optional.h"
 #include "content/browser/renderer_host/input/mouse_wheel_rails_filter_mac.h"
 #include "content/common/edit_command.h"
+#include "content/common/render_widget_host_ns_view.mojom.h"
 #import "ui/base/cocoa/command_dispatcher.h"
 #import "ui/base/cocoa/tool_tip_base_view.h"
 #include "ui/base/ime/ime_text_span.h"
+#include "ui/base/ime/text_input_type.h"
 #include "ui/gfx/range/range.h"
 
 namespace blink {
@@ -23,19 +27,24 @@ class WebGestureEvent;
 }
 
 namespace content {
+namespace mojom {
 class RenderWidgetHostNSViewClient;
+}
+
+class RenderWidgetHostNSViewClientHelper;
 class RenderWidgetHostViewMac;
 class RenderWidgetHostViewMacEditCommandHelper;
 }
 
 namespace ui {
+enum class DomCode;
 struct DidOverscrollParams;
 }
 
 @protocol RenderWidgetHostViewMacDelegate;
 
 @protocol RenderWidgetHostNSViewClientOwner
-- (content::RenderWidgetHostNSViewClient*)renderWidgetHostNSViewClient;
+- (content::mojom::RenderWidgetHostNSViewClient*)renderWidgetHostNSViewClient;
 @end
 
 // This is the view that lives in the Cocoa view hierarchy. In Windows-land,
@@ -50,12 +59,22 @@ struct DidOverscrollParams;
  @private
   // The communications channel to the RenderWidgetHostViewMac. This pointer is
   // always valid. When the original client disconnects, |client_| is changed to
-  // point to |noopClient_|, to avoid having to preface every dereference with
+  // point to |dummyClient_|, to avoid having to preface every dereference with
   // a nullptr check.
-  content::RenderWidgetHostNSViewClient* client_;
+  content::mojom::RenderWidgetHostNSViewClient* client_;
 
-  // Dummy client that is always valid (see above).
-  std::unique_ptr<content::RenderWidgetHostNSViewClient> noopClient_;
+  // A separate client interface for the parts of the interface to
+  // RenderWidgetHostViewMac that cannot or should not be forwarded over mojo.
+  // This includes events (where the extra translation is unnecessary or loses
+  // information) and access to accessibility structures (only present in the
+  // browser process).
+  content::RenderWidgetHostNSViewClientHelper* clientHelper_;
+
+  // Dummy client and client helper that are always valid (see above comments
+  // about client_).
+  content::mojom::RenderWidgetHostNSViewClientPtr dummyClient_;
+  std::unique_ptr<content::RenderWidgetHostNSViewClientHelper>
+      dummyClientHelper_;
 
   // This ivar is the cocoa delegate of the NSResponder.
   base::scoped_nsobject<NSObject<RenderWidgetHostViewMacDelegate>>
@@ -110,6 +129,8 @@ struct DidOverscrollParams;
   // TODO(suzhe): This is currently a fake value, as we do not support accessing
   // the whole content yet.
   NSRange markedRange_;
+
+  ui::TextInputType textInputType_;
 
   // The text selection, cached from the RenderWidgetHostView. This is only ever
   // updated from the renderer.
@@ -166,9 +187,16 @@ struct DidOverscrollParams;
   // The filter used to guide touch events towards a horizontal or vertical
   // orientation.
   content::MouseWheelRailsFilterMac mouseWheelFilter_;
+
+  // Whether the direct manipulation feature is enabled.
+  bool direct_manipulation_enabled_;
+
+  // Whether the pen's tip is in contact with the stylus digital tablet.
+  bool has_pen_contact_;
 }
 
 @property(nonatomic, assign) NSRange markedRange;
+@property(nonatomic, assign) ui::TextInputType textInputType;
 
 // Common code path for handling begin gesture events. This helper method is
 // called via different codepaths based on OS version and SDK:
@@ -176,7 +204,8 @@ struct DidOverscrollParams;
 //   |magnifyWithEvent:| when the given event's phase is NSEventPhaseBegin.
 // - On 10.10 and earlier, or when linking with an earlier SDK, it is called
 //   by |beginGestureWithEvent:| when a gesture begins.
-- (void)handleBeginGestureWithEvent:(NSEvent*)event;
+- (void)handleBeginGestureWithEvent:(NSEvent*)event
+            isSyntheticallyInjected:(BOOL)isSyntheticallyInjected;
 
 // Common code path for handling end gesture events. This helper method is
 // called via different codepaths based on OS version and SDK:
@@ -213,8 +242,14 @@ struct DidOverscrollParams;
 - (base::string16)selectedText;
 // Set the current TextInputManager::CompositionRangeInfo from the renderer.
 - (void)setCompositionRange:(gfx::Range)range;
+
+// KeyboardLock methods.
+- (void)lockKeyboard:(base::Optional<base::flat_set<ui::DomCode>>)keysToLock;
+- (void)unlockKeyboard;
+
 // Methods previously marked as private.
-- (id)initWithClient:(content::RenderWidgetHostNSViewClient*)client;
+- (id)initWithClient:(content::mojom::RenderWidgetHostNSViewClient*)client
+    withClientHelper:(content::RenderWidgetHostNSViewClientHelper*)clientHelper;
 - (void)setResponderDelegate:
     (NSObject<RenderWidgetHostViewMacDelegate>*)delegate;
 - (void)processedGestureScrollEvent:(const blink::WebGestureEvent&)event

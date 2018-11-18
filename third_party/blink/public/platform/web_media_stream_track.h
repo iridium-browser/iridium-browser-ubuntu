@@ -43,6 +43,13 @@ class WebString;
 class WebMediaStreamTrack {
  public:
   enum class FacingMode { kNone, kUser, kEnvironment, kLeft, kRight };
+  enum class DisplayCaptureSurfaceType {
+    kMonitor,
+    kWindow,
+    kApplication,
+    kBrowser
+  };
+  enum class CursorCaptureType { kNever, kAlways, kMotion };
 
   struct Settings {
     bool HasFrameRate() const { return frame_rate >= 0.0; }
@@ -50,6 +57,11 @@ class WebMediaStreamTrack {
     bool HasHeight() const { return height >= 0; }
     bool HasAspectRatio() const { return aspect_ratio >= 0.0; }
     bool HasFacingMode() const { return facing_mode != FacingMode::kNone; }
+    bool HasSampleRate() const { return sample_rate >= 0; }
+    bool HasSampleSize() const { return sample_size >= 0; }
+    bool HasChannelCount() const { return channel_count >= 0; }
+    bool HasLatency() const { return latency >= 0; }
+    bool HasVolume() const { return volume >= 0; }
     bool HasVideoKind() const { return !video_kind.IsNull(); }
     bool HasFocalLengthX() const { return focal_length_x >= 0.0; }
     bool HasFocalLengthY() const { return focal_length_y >= 0.0; }
@@ -58,20 +70,33 @@ class WebMediaStreamTrack {
     // The variables are read from
     // MediaStreamTrack::GetSettings only.
     double frame_rate = -1.0;
-    long width = -1;
-    long height = -1;
+    int32_t width = -1;
+    int32_t height = -1;
     double aspect_ratio = -1.0;
     WebString device_id;
+    WebString group_id;
     FacingMode facing_mode = FacingMode::kNone;
     base::Optional<bool> echo_cancellation;
     base::Optional<bool> auto_gain_control;
     base::Optional<bool> noise_supression;
+    WebString echo_cancellation_type;
+    int32_t sample_rate = -1;
+    int32_t sample_size = -1;
+    int32_t channel_count = -1;
+    double latency = -1.0;
+    double volume = -1.0;
+
     // Media Capture Depth Stream Extensions.
     WebString video_kind;
     double focal_length_x = -1.0;
     double focal_length_y = -1.0;
     double depth_near = -1.0;
     double depth_far = -1.0;
+
+    // Screen Capture extensions
+    base::Optional<DisplayCaptureSurfaceType> display_surface;
+    base::Optional<bool> logical_surface;
+    base::Optional<CursorCaptureType> cursor;
   };
 
   class TrackData {
@@ -86,7 +111,8 @@ class WebMediaStreamTrack {
     kAudioSpeech,
     kAudioMusic,
     kVideoMotion,
-    kVideoDetail
+    kVideoDetail,
+    kVideoText
   };
 
   WebMediaStreamTrack() = default;

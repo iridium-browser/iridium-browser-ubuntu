@@ -96,9 +96,11 @@ X11EventSource::X11EventSource(X11EventSourceDelegate* delegate,
       display_(display),
       dispatching_event_(nullptr),
       dummy_initialized_(false),
-      continue_stream_(true) {
+      continue_stream_(true),
+      distribution_(0, 999) {
   DCHECK(!instance_);
   instance_ = this;
+  SetTimestampServer(this);
 
   DCHECK(delegate_);
   DCHECK(display_);
@@ -109,6 +111,7 @@ X11EventSource::X11EventSource(X11EventSourceDelegate* delegate,
 X11EventSource::~X11EventSource() {
   DCHECK_EQ(this, instance_);
   instance_ = nullptr;
+  SetTimestampServer(nullptr);
   if (dummy_initialized_)
     XDestroyWindow(display_, dummy_window_);
 }
@@ -156,7 +159,13 @@ Time X11EventSource::GetCurrentServerTime() {
     dummy_initialized_ = true;
   }
 
-  base::TimeTicks start = base::TimeTicks::Now();
+  // No need to measure Linux.X11.ServerRTT on every call.
+  // base::TimeTicks::Now() itself has non-trivial overhead.
+  bool measure_rtt = distribution_(generator_) == 0;
+
+  base::TimeTicks start;
+  if (measure_rtt)
+    start = base::TimeTicks::Now();
 
   // Make a no-op property change on |dummy_window_|.
   XChangeProperty(display_, dummy_window_, dummy_atom_, XA_STRING, 8,
@@ -167,9 +176,12 @@ Time X11EventSource::GetCurrentServerTime() {
   XIfEvent(display_, &event, IsPropertyNotifyForTimestamp,
            reinterpret_cast<XPointer>(&dummy_window_));
 
-  UMA_HISTOGRAM_CUSTOM_COUNTS(
-      "Linux.X11.ServerRTT", (base::TimeTicks::Now() - start).InMicroseconds(),
-      1, base::TimeDelta::FromMilliseconds(50).InMicroseconds(), 50);
+  if (measure_rtt) {
+    UMA_HISTOGRAM_CUSTOM_COUNTS(
+        "Linux.X11.ServerRTT",
+        (base::TimeTicks::Now() - start).InMicroseconds(), 1,
+        base::TimeDelta::FromMilliseconds(50).InMicroseconds(), 50);
+  }
   return event.xproperty.time;
 }
 

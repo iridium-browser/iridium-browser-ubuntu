@@ -14,7 +14,8 @@
 #include "base/sequenced_task_runner.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/sys_info.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 
 namespace chromeos {
@@ -34,8 +35,8 @@ class FreezerCgroupProcessManager::FileWorker {
  public:
   // Called on UI thread.
   explicit FileWorker(scoped_refptr<base::SequencedTaskRunner> file_thread)
-      : ui_thread_(content::BrowserThread::GetTaskRunnerForThread(
-            content::BrowserThread::UI)),
+      : ui_thread_(base::CreateSingleThreadTaskRunnerWithTraits(
+            {content::BrowserThread::UI})),
         file_thread_(file_thread),
         enabled_(false),
         froze_successfully_(false) {
@@ -157,7 +158,7 @@ class FreezerCgroupProcessManager::FileWorker {
 
 FreezerCgroupProcessManager::FreezerCgroupProcessManager()
     : file_thread_(base::CreateSequencedTaskRunnerWithTraits(
-          {base::TaskPriority::BACKGROUND, base::MayBlock()})),
+          {base::TaskPriority::BEST_EFFORT, base::MayBlock()})),
       file_worker_(new FileWorker(file_thread_)) {
   file_thread_->PostTask(FROM_HERE,
                          base::Bind(&FileWorker::Start,

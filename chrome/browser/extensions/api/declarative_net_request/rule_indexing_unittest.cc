@@ -11,7 +11,7 @@
 #include "base/memory/ref_counted.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/test/histogram_tester.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "chrome/browser/extensions/api/declarative_net_request/dnr_test_base.h"
 #include "chrome/browser/extensions/chrome_test_extension_loader.h"
 #include "chrome/browser/extensions/extension_service.h"
@@ -20,6 +20,7 @@
 #include "extensions/browser/api/declarative_net_request/parse_info.h"
 #include "extensions/browser/api/declarative_net_request/test_utils.h"
 #include "extensions/browser/test_extension_registry_observer.h"
+#include "extensions/common/api/declarative_net_request.h"
 #include "extensions/common/api/declarative_net_request/test_utils.h"
 #include "extensions/common/file_util.h"
 #include "extensions/common/install_warning.h"
@@ -131,11 +132,10 @@ class RuleIndexingTest : public DNRTestBase {
     if (rules_value_) {
       WriteManifestAndRuleset(extension_dir_, kJSONRulesetFilepath,
                               kJSONRulesFilename, *rules_value_,
-                              {URLPattern::kAllUrlsPattern});
+                              {} /* hosts */);
     } else {
       WriteManifestAndRuleset(extension_dir_, kJSONRulesetFilepath,
-                              kJSONRulesFilename, rules_list_,
-                              {URLPattern::kAllUrlsPattern});
+                              kJSONRulesFilename, rules_list_, {} /* hosts */);
     }
 
     // Overwrite the JSON rules file with some invalid json.
@@ -223,8 +223,9 @@ TEST_P(RuleIndexingTest, InvalidRedirectRulePriority) {
 TEST_P(RuleIndexingTest, NoApplicableResourceTypes) {
   TestRule rule = CreateGenericRule();
   rule.condition->excluded_resource_types = std::vector<std::string>(
-      {"sub_frame", "stylesheet", "script", "image", "font", "object",
-       "xmlhttprequest", "ping", "media", "websocket", "other"});
+      {"main_frame", "sub_frame", "stylesheet", "script", "image", "font",
+       "object", "xmlhttprequest", "ping", "csp_report", "media", "websocket",
+       "other"});
   AddRule(rule);
   LoadAndExpectError(
       ParseInfo(ParseResult::ERROR_NO_APPLICABLE_RESOURCE_TYPES, 0u)
@@ -267,7 +268,8 @@ TEST_P(RuleIndexingTest, InvalidRedirectURL) {
 
 TEST_P(RuleIndexingTest, ListNotPassed) {
   SetRules(std::make_unique<base::DictionaryValue>());
-  LoadAndExpectError(manifest_errors::kDeclarativeNetRequestListNotPassed);
+  LoadAndExpectError(ParseInfo(ParseResult::ERROR_LIST_NOT_PASSED)
+                         .GetErrorDescription(kJSONRulesFilename));
 }
 
 TEST_P(RuleIndexingTest, DuplicateIDS) {
@@ -291,7 +293,7 @@ TEST_P(RuleIndexingTest, InvalidJSONRule) {
   extension_loader()->set_ignore_manifest_warnings(true);
   LoadAndExpectSuccess(1 /* rules count */);
 
-  // TODO(crbug.com/696822): CrxInstaller reloads the extension after moving it,
+  // TODO(crbug.com/879355): CrxInstaller reloads the extension after moving it,
   // which causes it to lose the install warning. This should be fixed.
   if (GetParam() != ExtensionLoadType::PACKED) {
     ASSERT_EQ(1u, extension()->install_warnings().size());
@@ -302,11 +304,47 @@ TEST_P(RuleIndexingTest, InvalidJSONRule) {
   }
 }
 
+// Ensure that we can add up to MAX_NUMBER_OF_RULES.
+TEST_P(RuleIndexingTest, RuleCountLimitMatched) {
+  namespace dnr_api = extensions::api::declarative_net_request;
+  TestRule rule = CreateGenericRule();
+  for (int i = 0; i < dnr_api::MAX_NUMBER_OF_RULES; ++i) {
+    rule.id = kMinValidID + i;
+    rule.condition->url_filter = std::to_string(i);
+    AddRule(rule);
+  }
+  LoadAndExpectSuccess(dnr_api::MAX_NUMBER_OF_RULES);
+}
+
+// Ensure that we get an install warning on exceeding the rule count limit.
+TEST_P(RuleIndexingTest, RuleCountLimitExceeded) {
+  namespace dnr_api = extensions::api::declarative_net_request;
+  TestRule rule = CreateGenericRule();
+  for (int i = 1; i <= dnr_api::MAX_NUMBER_OF_RULES + 1; ++i) {
+    rule.id = kMinValidID + i;
+    rule.condition->url_filter = std::to_string(i);
+    AddRule(rule);
+  }
+
+  extension_loader()->set_ignore_manifest_warnings(true);
+  LoadAndExpectSuccess(dnr_api::MAX_NUMBER_OF_RULES);
+
+  // TODO(crbug.com/879355): CrxInstaller reloads the extension after moving it,
+  // which causes it to lose the install warning. This should be fixed.
+  if (GetParam() != ExtensionLoadType::PACKED) {
+    ASSERT_EQ(1u, extension()->install_warnings().size());
+    EXPECT_EQ(InstallWarning(kRuleCountExceeded,
+                             manifest_keys::kDeclarativeNetRequestKey,
+                             manifest_keys::kDeclarativeRuleResourcesKey),
+              extension()->install_warnings()[0]);
+  }
+}
+
 TEST_P(RuleIndexingTest, InvalidJSONFile) {
   set_persist_invalid_json_file();
-  // The error is returned by the JSON parser we use. Hence just test that an
-  // error is thrown without verifying what it is.
-  LoadAndExpectError("");
+  // The error is returned by the JSON parser we use. Hence just test that it's
+  // prepended with |kJSONRulesFilename|.
+  LoadAndExpectError(base::StringPrintf("%s: ", kJSONRulesFilename));
 }
 
 TEST_P(RuleIndexingTest, EmptyRuleset) {

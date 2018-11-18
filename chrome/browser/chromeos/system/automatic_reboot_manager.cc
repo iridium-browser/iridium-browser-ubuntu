@@ -21,12 +21,11 @@
 #include "base/location.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
-#include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/task_scheduler/post_task.h"
-#include "base/threading/thread_restrictions.h"
+#include "base/task/post_task.h"
+#include "base/threading/scoped_blocking_call.h"
 #include "base/time/tick_clock.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -54,7 +53,7 @@ const int kGracePeriodMs = 24 * 60 * 60 * 1000;    // 24 hours.
 const int kOneKilobyte = 1 << 10;                  // 1 kB in bytes.
 
 base::TimeDelta ReadTimeDeltaFromFile(const base::FilePath& path) {
-  base::AssertBlockingAllowed();
+  base::ScopedBlockingCall scoped_blocking_call(base::BlockingType::MAY_BLOCK);
   base::ScopedFD fd(
       HANDLE_EINTR(open(path.value().c_str(), O_RDONLY | O_NOFOLLOW)));
   if (!fd.is_valid())
@@ -76,29 +75,29 @@ base::TimeDelta ReadTimeDeltaFromFile(const base::FilePath& path) {
 
 AutomaticRebootManager::SystemEventTimes GetSystemEventTimes() {
   base::FilePath uptime_file;
-  CHECK(PathService::Get(chromeos::FILE_UPTIME, &uptime_file));
+  CHECK(base::PathService::Get(chromeos::FILE_UPTIME, &uptime_file));
   base::FilePath update_reboot_needed_uptime_file;
-  CHECK(PathService::Get(chromeos::FILE_UPDATE_REBOOT_NEEDED_UPTIME,
-                         &update_reboot_needed_uptime_file));
+  CHECK(base::PathService::Get(chromeos::FILE_UPDATE_REBOOT_NEEDED_UPTIME,
+                               &update_reboot_needed_uptime_file));
   return AutomaticRebootManager::SystemEventTimes(
       ReadTimeDeltaFromFile(uptime_file),
       ReadTimeDeltaFromFile(update_reboot_needed_uptime_file));
 }
 
 void SaveUpdateRebootNeededUptime() {
-  base::AssertBlockingAllowed();
+  base::ScopedBlockingCall scoped_blocking_call(base::BlockingType::MAY_BLOCK);
   const base::TimeDelta kZeroTimeDelta;
 
   base::FilePath update_reboot_needed_uptime_file;
-  CHECK(PathService::Get(chromeos::FILE_UPDATE_REBOOT_NEEDED_UPTIME,
-                         &update_reboot_needed_uptime_file));
+  CHECK(base::PathService::Get(chromeos::FILE_UPDATE_REBOOT_NEEDED_UPTIME,
+                               &update_reboot_needed_uptime_file));
   const base::TimeDelta last_update_reboot_needed_uptime =
       ReadTimeDeltaFromFile(update_reboot_needed_uptime_file);
   if (last_update_reboot_needed_uptime != kZeroTimeDelta)
     return;
 
   base::FilePath uptime_file;
-  CHECK(PathService::Get(chromeos::FILE_UPTIME, &uptime_file));
+  CHECK(base::PathService::Get(chromeos::FILE_UPTIME, &uptime_file));
   const base::TimeDelta uptime = ReadTimeDeltaFromFile(uptime_file);
   if (uptime == kZeroTimeDelta)
     return;
@@ -226,7 +225,7 @@ void AutomaticRebootManager::UpdateStatusChanged(
   }
 
   base::PostTaskWithTraits(FROM_HERE,
-                           {base::MayBlock(), base::TaskPriority::BACKGROUND,
+                           {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
                             base::TaskShutdownBehavior::BLOCK_SHUTDOWN},
                            base::Bind(&SaveUpdateRebootNeededUptime));
 

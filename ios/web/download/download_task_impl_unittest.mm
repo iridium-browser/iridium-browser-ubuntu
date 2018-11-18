@@ -9,13 +9,13 @@
 
 #include <memory>
 
+#include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
-#import "base/mac/bind_objc_block.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
-#import "ios/testing/wait_util.h"
+#import "base/test/ios/wait_util.h"
 #import "ios/web/net/cookies/wk_cookie_util.h"
 #import "ios/web/public/download/download_task_observer.h"
 #import "ios/web/public/test/fakes/test_web_state.h"
@@ -34,10 +34,10 @@
 #error "This file requires ARC support."
 #endif
 
-using testing::kWaitForDownloadTimeout;
-using testing::kWaitForFileOperationTimeout;
-using testing::WaitUntilConditionOrTimeout;
-using base::BindBlockArc;
+using base::test::ios::kWaitForCookiesTimeout;
+using base::test::ios::kWaitForDownloadTimeout;
+using base::test::ios::kWaitForFileOperationTimeout;
+using base::test::ios::WaitUntilConditionOrTimeout;
 
 namespace web {
 
@@ -82,7 +82,10 @@ class FakeDownloadTaskImplDelegate : public DownloadTaskImpl::Delegate {
   FakeDownloadTaskImplDelegate()
       : configuration_([NSURLSessionConfiguration
             backgroundSessionConfigurationWithIdentifier:
-                [NSUUID UUID].UUIDString]) {}
+                [NSUUID UUID].UUIDString]),
+        session_(OCMStrictClassMock([NSURLSession class])) {
+    OCMStub([session_ configuration]).andReturn(configuration_);
+  }
 
   MOCK_METHOD1(OnTaskDestroyed, void(DownloadTaskImpl* task));
 
@@ -91,13 +94,8 @@ class FakeDownloadTaskImplDelegate : public DownloadTaskImpl::Delegate {
                               id<NSURLSessionDataDelegate> delegate,
                               NSOperationQueue* delegate_queue) {
     // Make sure this method is called only once.
-    EXPECT_FALSE(session_);
     EXPECT_FALSE(session_delegate_);
-
     session_delegate_ = delegate;
-    session_ = OCMStrictClassMock([NSURLSession class]);
-    OCMStub([session_ configuration]).andReturn(configuration_);
-
     return session_;
   }
 
@@ -141,6 +139,7 @@ class DownloadTaskImplTest : public PlatformTest {
     NSURL* url = [NSURL URLWithString:@(kUrl)];
     CRWFakeNSURLSessionTask* session_task =
         [[CRWFakeNSURLSessionTask alloc] initWithURL:url];
+    EXPECT_TRUE(task_delegate_.session());
     OCMExpect([task_delegate_.session() dataTaskWithURL:url])
         .andReturn(session_task);
 
@@ -168,7 +167,7 @@ class DownloadTaskImplTest : public PlatformTest {
         completionHandler:^{
           cookie_was_set = true;
         }];
-    return WaitUntilConditionOrTimeout(testing::kWaitForCookiesTimeout, ^{
+    return WaitUntilConditionOrTimeout(kWaitForCookiesTimeout, ^{
       return cookie_was_set;
     });
   }
@@ -579,10 +578,11 @@ TEST_F(DownloadTaskImplTest, FileDeletion) {
       std::make_unique<net::URLFetcherFileWriter>(
           base::ThreadTaskRunnerHandle::Get(), temp_file);
   __block bool initialized_file_writer = false;
-  ASSERT_EQ(net::ERR_IO_PENDING, writer->Initialize(BindBlockArc(^(int error) {
-    ASSERT_FALSE(error);
-    initialized_file_writer = true;
-  })));
+  ASSERT_EQ(net::ERR_IO_PENDING,
+            writer->Initialize(base::BindRepeating(^(int error) {
+              ASSERT_FALSE(error);
+              initialized_file_writer = true;
+            })));
   ASSERT_TRUE(WaitUntilConditionOrTimeout(1.0, ^{
     base::RunLoop().RunUntilIdle();
     return initialized_file_writer;
@@ -690,6 +690,69 @@ TEST_F(DownloadTaskImplTest, DownloadTaskShutdown) {
 
   task_->ShutDown();
   EXPECT_TRUE(session_task.state = NSURLSessionTaskStateCanceling);
+}
+
+// Tests valid data:// url downloads.
+TEST_F(DownloadTaskImplTest, ValidDataUrl) {
+  // Create data:// url download task.
+  char kDataUrl[] = "data:text/plain;base64,Q2hyb21pdW0=";
+  auto task = std::make_unique<DownloadTaskImpl>(
+      &web_state_, GURL(kDataUrl), kContentDisposition,
+      /*total_bytes=*/-1, kMimeType, ui::PageTransition::PAGE_TRANSITION_TYPED,
+      task_delegate_.configuration().identifier, &task_delegate_);
+
+  // Start and wait until the download is complete.
+  task->Start(std::make_unique<net::URLFetcherStringWriter>());
+  DownloadTaskImpl* task_ptr = task.get();
+  ASSERT_TRUE(WaitUntilConditionOrTimeout(kWaitForDownloadTimeout, ^{
+    base::RunLoop().RunUntilIdle();
+    return task_ptr->IsDone();
+  }));
+
+  // Verify the state of downloaded task.
+  const char kTestData[] = "Chromium";
+  EXPECT_EQ(DownloadTask::State::kComplete, task->GetState());
+  EXPECT_EQ(0, task->GetErrorCode());
+  EXPECT_EQ(strlen(kTestData), static_cast<size_t>(task->GetTotalBytes()));
+  EXPECT_EQ(strlen(kTestData), static_cast<size_t>(task->GetReceivedBytes()));
+  EXPECT_EQ(100, task->GetPercentComplete());
+  EXPECT_EQ("text/plain", task->GetMimeType());
+  EXPECT_EQ(kTestData, task->GetResponseWriter()->AsStringWriter()->data());
+
+  // One OnTaskDestroyed for |task_| and one for |task|.
+  EXPECT_CALL(task_delegate_, OnTaskDestroyed(task_.get()));
+  EXPECT_CALL(task_delegate_, OnTaskDestroyed(task.get()));
+}
+
+// Tests empty data:// url downloads.
+TEST_F(DownloadTaskImplTest, EmptyDataUrl) {
+  // Create data:// url download task.
+  char kDataUrl[] = "data://";
+  auto task = std::make_unique<DownloadTaskImpl>(
+      &web_state_, GURL(kDataUrl), kContentDisposition,
+      /*total_bytes=*/-1, kMimeType, ui::PageTransition::PAGE_TRANSITION_TYPED,
+      task_delegate_.configuration().identifier, &task_delegate_);
+
+  // Start and wait until the download is complete.
+  task->Start(std::make_unique<net::URLFetcherStringWriter>());
+  DownloadTaskImpl* task_ptr = task.get();
+  ASSERT_TRUE(WaitUntilConditionOrTimeout(kWaitForDownloadTimeout, ^{
+    base::RunLoop().RunUntilIdle();
+    return task_ptr->IsDone();
+  }));
+
+  // Verify the state of downloaded task.
+  EXPECT_EQ(DownloadTask::State::kComplete, task->GetState());
+  EXPECT_EQ(net::ERR_INVALID_URL, task->GetErrorCode());
+  EXPECT_EQ(-1, task->GetTotalBytes());
+  EXPECT_EQ(0, task->GetReceivedBytes());
+  EXPECT_EQ(0, task->GetPercentComplete());
+  EXPECT_EQ("", task->GetMimeType());
+  EXPECT_EQ("", task->GetResponseWriter()->AsStringWriter()->data());
+
+  // One OnTaskDestroyed for |task_| and one for |task|.
+  EXPECT_CALL(task_delegate_, OnTaskDestroyed(task_.get()));
+  EXPECT_CALL(task_delegate_, OnTaskDestroyed(task.get()));
 }
 
 }  // namespace web

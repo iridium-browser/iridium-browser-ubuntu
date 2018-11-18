@@ -22,72 +22,21 @@
 #ifndef THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_LAYOUT_SELECTION_H_
 #define THIRD_PARTY_BLINK_RENDERER_CORE_EDITING_LAYOUT_SELECTION_H_
 
+#include "base/optional.h"
 #include "third_party/blink/renderer/core/core_export.h"
 #include "third_party/blink/renderer/core/editing/forward.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
-#include "third_party/blink/renderer/platform/wtf/optional.h"
 
 namespace blink {
 
 class IntRect;
 class LayoutObject;
-class NGPhysicalTextFragment;
+class LayoutText;
+class NGPaintFragment;
 class FrameSelection;
-
-// This class represents a selection range in layout tree for painting and
-// paint invalidation.
-// The current selection to be painted is represented as 2 pairs of
-// (LayoutObject, offset).
-// 2 LayoutObjects are only valid for |Text| node without 'transform' or
-// 'first-letter'.
-// TODO(editing-dev): Clarify the meaning of "offset".
-// editing/ passes them as offsets in the DOM tree but layout uses them as
-// offset in the layout tree. This doesn't work in the cases of
-// CSS first-letter or character transform. See crbug.com/17528.
-class SelectionPaintRange {
-  DISALLOW_NEW();
-
- public:
-  class Iterator
-      : public std::iterator<std::input_iterator_tag, LayoutObject*> {
-   public:
-    explicit Iterator(const SelectionPaintRange*);
-    Iterator(const Iterator&) = default;
-    bool operator==(const Iterator& other) const {
-      return current_ == other.current_;
-    }
-    bool operator!=(const Iterator& other) const { return !operator==(other); }
-    Iterator& operator++();
-    LayoutObject* operator*() const;
-
-   private:
-    LayoutObject* current_;
-    const LayoutObject* stop_;
-  };
-  Iterator begin() const { return Iterator(this); };
-  Iterator end() const { return Iterator(nullptr); };
-
-  SelectionPaintRange() = default;
-  SelectionPaintRange(LayoutObject* start_layout_object,
-                      WTF::Optional<unsigned> start_offset,
-                      LayoutObject* end_layout_object,
-                      WTF::Optional<unsigned> end_offset);
-
-  bool operator==(const SelectionPaintRange& other) const;
-
-  LayoutObject* StartLayoutObject() const;
-  WTF::Optional<unsigned> StartOffset() const;
-  LayoutObject* EndLayoutObject() const;
-  WTF::Optional<unsigned> EndOffset() const;
-
-  bool IsNull() const { return !start_layout_object_; }
-
- private:
-  LayoutObject* start_layout_object_ = nullptr;
-  WTF::Optional<unsigned> start_offset_ = WTF::nullopt;
-  LayoutObject* end_layout_object_ = nullptr;
-  WTF::Optional<unsigned> end_offset_ = WTF::nullopt;
-};
+struct LayoutSelectionStatus;
+struct LayoutTextSelectionStatus;
+class SelectionPaintRange;
 
 class LayoutSelection final : public GarbageCollected<LayoutSelection> {
  public:
@@ -95,22 +44,15 @@ class LayoutSelection final : public GarbageCollected<LayoutSelection> {
     return new LayoutSelection(frame_selection);
   }
 
-  bool HasPendingSelection() const { return has_pending_selection_; }
   void SetHasPendingSelection();
   void Commit();
 
   IntRect AbsoluteSelectionBounds();
   void InvalidatePaintForSelection();
 
-  void ClearSelection();
-  WTF::Optional<unsigned> SelectionStart() const;
-  WTF::Optional<unsigned> SelectionEnd() const;
-  // This function returns selected part of |text_fragment|.
-  // Returned pair is a partial range of
-  // (text_fragment.StartOffset(), text_fragment.EndOffset()).
-  // If first equals second, it indicates "no selection in fragment".
-  std::pair<unsigned, unsigned> SelectionStartEndForNG(
-      const NGPhysicalTextFragment&) const;
+  LayoutTextSelectionStatus ComputeSelectionStatus(const LayoutText&) const;
+  LayoutSelectionStatus ComputeSelectionStatus(const NGPaintFragment&) const;
+  static bool IsSelected(const LayoutObject&);
 
   void OnDocumentShutdown();
 
@@ -122,13 +64,8 @@ class LayoutSelection final : public GarbageCollected<LayoutSelection> {
   Member<FrameSelection> frame_selection_;
   bool has_pending_selection_ : 1;
 
-  SelectionPaintRange paint_range_;
+  Member<SelectionPaintRange> paint_range_;
 };
-
-void CORE_EXPORT PrintLayoutObjectForSelection(std::ostream&, LayoutObject*);
-#ifndef NDEBUG
-void ShowLayoutObjectForSelection(LayoutObject*);
-#endif
 
 }  // namespace blink
 

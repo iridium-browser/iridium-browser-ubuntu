@@ -12,7 +12,7 @@
 #import "ios/web/public/web_state/web_state.h"
 #include "ios/web/public/web_state/web_state_observer.h"
 #include "ios/web/public/web_state/web_state_user_data.h"
-#include "services/metrics/public/cpp/ukm_recorder.h"
+#include "services/metrics/public/cpp/delegating_ukm_recorder.h"
 #include "services/metrics/public/cpp/ukm_source_id.h"
 #include "url/gurl.h"
 
@@ -130,17 +130,24 @@ void SourceUrlRecorderWebStateObserver::MaybeRecordUrl(
     const GURL& initial_url) {
   DCHECK(!navigation_context->IsSameDocument());
 
-  UkmRecorder* ukm_recorder = UkmRecorder::Get();
+  DelegatingUkmRecorder* ukm_recorder = DelegatingUkmRecorder::Get();
   if (!ukm_recorder)
     return;
 
-  const SourceId source_id = ConvertToSourceId(
-      navigation_context->GetNavigationId(), SourceIdType::NAVIGATION_ID);
-  ukm_recorder->UpdateSourceURL(source_id, initial_url);
-
   const GURL& final_url = navigation_context->GetUrl();
+
+  UkmSource::NavigationData navigation_data;
+  // TODO(crbug.com/869123): This check isn't quite correct, as self redirecting
+  // is possible. This may also be changed to include the entire redirect chain.
   if (final_url != initial_url)
-    ukm_recorder->UpdateSourceURL(source_id, final_url);
+    navigation_data.urls = {initial_url};
+  navigation_data.urls.push_back(final_url);
+
+  // TODO(crbug.com/873316): Fill out the other fields in NavigationData.
+
+  const ukm::SourceId source_id = ukm::ConvertToSourceId(
+      navigation_context->GetNavigationId(), ukm::SourceIdType::NAVIGATION_ID);
+  ukm_recorder->RecordNavigation(source_id, navigation_data);
 }
 
 }  // namespace internal

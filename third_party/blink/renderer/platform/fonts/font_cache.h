@@ -45,6 +45,7 @@
 #include "third_party/blink/renderer/platform/fonts/font_platform_data.h"
 #include "third_party/blink/renderer/platform/fonts/shaping/shape_cache.h"
 #include "third_party/blink/renderer/platform/heap/heap_allocator.h"
+#include "third_party/blink/renderer/platform/heap/persistent.h"
 #include "third_party/blink/renderer/platform/platform_export.h"
 #include "third_party/blink/renderer/platform/wtf/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/forward.h"
@@ -53,9 +54,8 @@
 #include "third_party/blink/renderer/platform/wtf/text/cstring.h"
 #include "third_party/blink/renderer/platform/wtf/text/unicode.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
+#include "third_party/skia/include/core/SkFontMgr.h"
 #include "third_party/skia/include/core/SkRefCnt.h"
-
-#include "SkFontMgr.h"
 
 class SkString;
 class SkTypeface;
@@ -157,6 +157,15 @@ class PLATFORM_EXPORT FontCache {
   sk_sp<SkFontMgr> FontManager() { return font_manager_; }
   static void SetFontManager(sk_sp<SkFontMgr>);
 
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+  // These are needed for calling QueryRenderStyleForStrike, since
+  // gfx::GetFontRenderParams makes distinctions based on DSF.
+  static float DeviceScaleFactor() { return device_scale_factor_; }
+  static void SetDeviceScaleFactor(float device_scale_factor) {
+    device_scale_factor_ = device_scale_factor;
+  }
+#endif
+
 #if !defined(OS_MACOSX)
   static const AtomicString& SystemFontFamily();
 #else
@@ -172,14 +181,10 @@ class PLATFORM_EXPORT FontCache {
   // related to FontCache. Move it somewhere else, e.g. to WebThemeEngine.
   static bool AntialiasedTextEnabled() { return antialiased_text_enabled_; }
   static bool LcdTextEnabled() { return lcd_text_enabled_; }
-  static float DeviceScaleFactor() { return device_scale_factor_; }
   static void SetAntialiasedTextEnabled(bool enabled) {
     antialiased_text_enabled_ = enabled;
   }
   static void SetLCDTextEnabled(bool enabled) { lcd_text_enabled_ = enabled; }
-  static void SetDeviceScaleFactor(float device_scale_factor) {
-    device_scale_factor_ = device_scale_factor;
-  }
   static void AddSideloadedFontForTesting(sk_sp<SkTypeface>);
   // Functions to cache and retrieve the system font metrics.
   static void SetMenuFontMetrics(const wchar_t* family_name,
@@ -282,10 +287,9 @@ class PLATFORM_EXPORT FontCache {
       const FontFaceCreationParams&,
       float font_size);
 
-  // Implemented on skia platforms.
-  PaintTypeface CreateTypeface(const FontDescription&,
-                               const FontFaceCreationParams&,
-                               CString& name);
+  sk_sp<SkTypeface> CreateTypeface(const FontDescription&,
+                                   const FontFaceCreationParams&,
+                                   CString& name);
 
 #if defined(OS_ANDROID) || defined(OS_LINUX) || defined(OS_FUCHSIA)
   static AtomicString GetFamilyNameForCharacter(SkFontMgr*,
@@ -308,8 +312,7 @@ class PLATFORM_EXPORT FontCache {
 #if defined(OS_WIN)
   static bool antialiased_text_enabled_;
   static bool lcd_text_enabled_;
-  static float device_scale_factor_;
-  static HashMap<String, sk_sp<SkTypeface>>* sideloaded_fonts_;
+  static HashMap<String, sk_sp<SkTypeface>, CaseFoldingHash>* sideloaded_fonts_;
   // The system font metrics cache.
   static AtomicString* menu_font_family_name_;
   static int32_t menu_font_height_;
@@ -323,6 +326,10 @@ class PLATFORM_EXPORT FontCache {
   // to ensure it's not happening in the production from the crash log.
   bool is_test_font_mgr_ = false;
 #endif  // defined(OS_WIN)
+
+#if defined(OS_LINUX) || defined(OS_CHROMEOS)
+  static float device_scale_factor_;
+#endif
 
   unsigned short generation_ = 0;
   bool platform_init_ = false;

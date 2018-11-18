@@ -14,20 +14,23 @@
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/browser_navigator_params.h"
 #include "chrome/browser/ui/browser_window.h"
-#include "chrome/browser/ui/views/harmony/chrome_layout_provider.h"
-#include "chrome/browser/ui/views/harmony/chrome_typography.h"
+#include "chrome/browser/ui/views/chrome_layout_provider.h"
+#include "chrome/browser/ui/views/chrome_typography.h"
+#include "chrome/browser/ui/views/profiles/profile_chooser_view.h"
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/constrained_window/constrained_window_views.h"
 #include "components/signin/core/browser/profile_management_switches.h"
 #include "components/strings/grit/components_strings.h"
+#include "components/vector_icons/vector_icons.h"
 #include "content/public/browser/web_contents.h"
 #include "google_apis/gaia/gaia_auth_util.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/base/l10n/l10n_util.h"
-#include "ui/base/ui_features.h"
+#include "ui/gfx/color_palette.h"
 #include "ui/gfx/font.h"
 #include "ui/gfx/native_widget_types.h"
+#include "ui/gfx/paint_vector_icon.h"
 #include "ui/gfx/range/range.h"
 #include "ui/views/background.h"
 #include "ui/views/border.h"
@@ -40,10 +43,6 @@
 #include "ui/views/views_delegate.h"
 #include "ui/views/widget/widget.h"
 #include "ui/views/window/dialog_client_view.h"
-
-#if !defined(OS_MACOSX) || BUILDFLAG(MAC_VIEWS_BROWSER)
-#include "chrome/browser/ui/views/profiles/profile_chooser_view.h"
-#endif
 
 ProfileSigninConfirmationDialogViews::ProfileSigninConfirmationDialogViews(
     Browser* browser,
@@ -65,7 +64,6 @@ void ProfileSigninConfirmationDialogViews::ShowDialog(
     Profile* profile,
     const std::string& username,
     std::unique_ptr<ui::ProfileSigninConfirmationDelegate> delegate) {
-#if !defined(OS_MACOSX) || BUILDFLAG(MAC_VIEWS_BROWSER)
   // Hides the new avatar bubble if it is currently shown. The new avatar bubble
   // should be automatically closed when it loses focus. However on windows the
   // profile signin confirmation dialog is not modal yet thus it does not take
@@ -74,7 +72,6 @@ void ProfileSigninConfirmationDialogViews::ShowDialog(
   // TODO(guohui): removes the workaround once the profile confirmation dialog
   // is fixed.
   ProfileChooserView::Hide();
-#endif
 
   ProfileSigninConfirmationDialogViews* dialog =
       new ProfileSigninConfirmationDialogViews(browser, username,
@@ -158,6 +155,13 @@ void ProfileSigninConfirmationDialogViews::ViewHierarchyChanged(
       ui::GetSigninConfirmationPromptBarColor(
           GetNativeTheme(), ui::kSigninConfirmationPromptBarBackgroundAlpha);
 
+  // Create business icon.
+  int business_icon_size = 20;
+  views::ImageView* business_icon = new views::ImageView();
+  business_icon->SetImage(gfx::CreateVectorIcon(gfx::IconDescription(
+      vector_icons::kBusinessIcon, business_icon_size, gfx::kChromeIconGrey,
+      base::TimeDelta(), gfx::kNoneIcon)));
+
   // Create the prompt label.
   size_t offset;
   const base::string16 domain =
@@ -217,31 +221,46 @@ void ProfileSigninConfirmationDialogViews::ViewHierarchyChanged(
       views::CreateEmptyBorder(ChromeLayoutProvider::Get()->GetInsetsMetric(
           views::INSETS_DIALOG_SUBSECTION)));
   constexpr int kPromptBarColumnSetId = 0;
-  prompt_layout->AddColumnSet(kPromptBarColumnSetId)
-      ->AddColumn(views::GridLayout::FILL, views::GridLayout::CENTER, 100,
-                  views::GridLayout::USE_PREF, 0, 0);
-  prompt_layout->StartRow(0, kPromptBarColumnSetId);
+  auto* prompt_columnset = prompt_layout->AddColumnSet(kPromptBarColumnSetId);
+  prompt_columnset->AddColumn(
+      views::GridLayout::FILL, views::GridLayout::CENTER,
+      views::GridLayout::kFixedSize, views::GridLayout::USE_PREF, 0, 0);
+  prompt_columnset->AddPaddingColumn(
+      views::GridLayout::kFixedSize,
+      ChromeLayoutProvider::Get()->GetDistanceMetric(
+          views::DISTANCE_TEXTFIELD_HORIZONTAL_TEXT_PADDING));
+  prompt_columnset->AddColumn(views::GridLayout::FILL,
+                              views::GridLayout::CENTER, 1.0,
+                              views::GridLayout::USE_PREF, 0, 0);
+
+  prompt_layout->StartRow(views::GridLayout::kFixedSize, kPromptBarColumnSetId);
+  prompt_layout->AddView(business_icon);
   prompt_layout->AddView(prompt_label);
+
   // Use a column set with no padding.
-  dialog_layout->AddColumnSet(0)->AddColumn(
-      views::GridLayout::FILL, views::GridLayout::FILL, 100,
-      views::GridLayout::USE_PREF, 0, 0);
-  dialog_layout->StartRow(0, 0);
+  dialog_layout->AddColumnSet(0)->AddColumn(views::GridLayout::FILL,
+                                            views::GridLayout::FILL, 1.0,
+                                            views::GridLayout::USE_PREF, 0, 0);
+  dialog_layout->StartRow(views::GridLayout::kFixedSize, 0);
   dialog_layout->AddView(
       prompt_bar, 1, 1,
       views::GridLayout::FILL, views::GridLayout::FILL, 0, 0);
 
   // Use a new column set for the explanation label so we can add padding.
-  dialog_layout->AddPaddingRow(0.0, content_insets.top());
+  dialog_layout->AddPaddingRow(views::GridLayout::kFixedSize,
+                               content_insets.top());
   constexpr int kExplanationColumnSetId = 1;
   views::ColumnSet* explanation_columns =
       dialog_layout->AddColumnSet(kExplanationColumnSetId);
-  explanation_columns->AddPaddingColumn(0.0, content_insets.left());
-  explanation_columns->AddColumn(
-      views::GridLayout::FILL, views::GridLayout::FILL, 100,
-      views::GridLayout::USE_PREF, 0, 0);
-  explanation_columns->AddPaddingColumn(0.0, content_insets.right());
-  dialog_layout->StartRow(0, kExplanationColumnSetId);
+  explanation_columns->AddPaddingColumn(views::GridLayout::kFixedSize,
+                                        content_insets.left());
+  explanation_columns->AddColumn(views::GridLayout::FILL,
+                                 views::GridLayout::FILL, 1.0,
+                                 views::GridLayout::USE_PREF, 0, 0);
+  explanation_columns->AddPaddingColumn(views::GridLayout::kFixedSize,
+                                        content_insets.right());
+  dialog_layout->StartRow(views::GridLayout::kFixedSize,
+                          kExplanationColumnSetId);
   const int kPreferredWidth = 440;
   dialog_layout->AddView(explanation_label, 1, 1, views::GridLayout::FILL,
                          views::GridLayout::FILL, kPreferredWidth,

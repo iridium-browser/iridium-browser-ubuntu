@@ -7,6 +7,7 @@
 
 #include "third_party/blink/public/platform/input_host.mojom-blink.h"
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/document_shutdown_observer.h"
 #include "third_party/blink/renderer/core/editing/forward.h"
 #include "third_party/blink/renderer/core/editing/markers/document_marker.h"
@@ -43,7 +44,7 @@ class CORE_EXPORT TextSuggestionController final
   void OnSuggestionMenuClosed();
   void SuggestionMenuTimeoutCallback(size_t max_number_of_suggestions);
 
-  void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  private:
   Document& GetDocument() const;

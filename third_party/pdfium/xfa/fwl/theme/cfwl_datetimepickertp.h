@@ -9,7 +9,7 @@
 
 #include "xfa/fwl/theme/cfwl_widgettp.h"
 
-class CFWL_DateTimePickerTP : public CFWL_WidgetTP {
+class CFWL_DateTimePickerTP final : public CFWL_WidgetTP {
  public:
   CFWL_DateTimePickerTP();
   ~CFWL_DateTimePickerTP() override;
@@ -17,7 +17,7 @@ class CFWL_DateTimePickerTP : public CFWL_WidgetTP {
   // CFWL_WidgetTP
   void DrawBackground(CFWL_ThemeBackground* pParams) override;
 
- protected:
+ private:
   void DrawDropDownButton(CFWL_ThemeBackground* pParams, CFX_Matrix* pMatrix);
 };
 

@@ -23,15 +23,16 @@
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/post_task.h"
 #include "base/values.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
+#include "chrome/browser/chromeos/login/screens/gaia_view.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/login/test/https_forwarder.h"
 #include "chrome/browser/chromeos/login/test/oobe_base_test.h"
 #include "chrome/browser/chromeos/login/test/oobe_screen_waiter.h"
-#include "chrome/browser/chromeos/login/ui/login_display_host_webui.h"
-#include "chrome/browser/chromeos/login/ui/login_display_webui.h"
+#include "chrome/browser/chromeos/login/ui/login_display_host.h"
 #include "chrome/browser/chromeos/login/users/chrome_user_manager.h"
 #include "chrome/browser/chromeos/login/wizard_controller.h"
 #include "chrome/browser/chromeos/policy/affiliation_test_helper.h"
@@ -61,6 +62,7 @@
 #include "chromeos/dbus/shill_manager_client.h"
 #include "chromeos/login/auth/key.h"
 #include "chromeos/settings/cros_settings_names.h"
+#include "components/account_id/account_id.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
 #include "components/content_settings/core/common/content_settings_types.h"
 #include "components/guest_view/browser/test_guest_view_manager.h"
@@ -74,7 +76,9 @@
 #include "components/policy/proto/device_management_backend.pb.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
@@ -105,8 +109,8 @@ namespace em = enterprise_management;
 using net::test_server::BasicHttpResponse;
 using net::test_server::HttpRequest;
 using net::test_server::HttpResponse;
-using testing::Return;
 using testing::_;
+using testing::Return;
 
 namespace chromeos {
 
@@ -120,14 +124,24 @@ constexpr char kTestAuthSIDCookie2[] = "fake-auth-SID-cookie-2";
 constexpr char kTestAuthLSIDCookie1[] = "fake-auth-LSID-cookie-1";
 constexpr char kTestAuthLSIDCookie2[] = "fake-auth-LSID-cookie-2";
 
-constexpr char kFirstSAMLUserEmail[] = "bob@example.com";
-constexpr char kSecondSAMLUserEmail[] = "alice@example.com";
-constexpr char kHTTPSAMLUserEmail[] = "carol@example.com";
-constexpr char kNonSAMLUserEmail[] = "dan@example.com";
+// Note: SAML account cannot be @gmail or @example.com account.  The former by
+// design, the latter because @example.com is used in another tests as regular
+// user. So we use @corp.example.com and @example.test, so that we can handle
+// it specially in embedded_setup_chromeos.html .
+constexpr char kFirstSAMLUserEmail[] = "bob@corp.example.com";
+constexpr char kSecondSAMLUserEmail[] = "alice@corp.example.com";
+constexpr char kHTTPSAMLUserEmail[] = "carol@corp.example.com";
+constexpr char kNonSAMLUserEmail[] = "dan@corp.example.com";
 constexpr char kDifferentDomainSAMLUserEmail[] = "eve@example.test";
 
-constexpr char kIdPHost[] = "login.example.com";
-constexpr char kAdditionalIdPHost[] = "login2.example.com";
+constexpr char kFirstSAMLUserGaiaId[] = "bob-gaia";
+constexpr char kSecondSAMLUserGaiaId[] = "alice-gaia";
+constexpr char kHTTPSAMLUserGaiaId[] = "carol-gaia";
+constexpr char kNonSAMLUserGaiaId[] = "dan-gaia";
+constexpr char kDifferentDomainSAMLUserGaiaId[] = "eve-gaia";
+
+constexpr char kIdPHost[] = "login.corp.example.com";
+constexpr char kAdditionalIdPHost[] = "login2.corp.example.com";
 
 constexpr char kSAMLIdPCookieName[] = "saml";
 constexpr char kSAMLIdPCookieValue1[] = "value-1";
@@ -185,7 +199,7 @@ FakeSamlIdp::~FakeSamlIdp() {}
 
 void FakeSamlIdp::SetUp(const std::string& base_path, const GURL& gaia_url) {
   base::FilePath test_data_dir;
-  ASSERT_TRUE(PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir));
+  ASSERT_TRUE(base::PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir));
   html_template_dir_ = test_data_dir.Append("login");
 
   login_path_ = base_path;
@@ -277,7 +291,7 @@ class SecretInterceptingFakeCryptohomeClient : public FakeCryptohomeClient {
  public:
   SecretInterceptingFakeCryptohomeClient();
 
-  void MountEx(const cryptohome::Identification& id,
+  void MountEx(const cryptohome::AccountIdentifier& id,
                const cryptohome::AuthorizationRequest& auth,
                const cryptohome::MountRequest& request,
                DBusMethodCallback<cryptohome::BaseReply> callback) override;
@@ -294,7 +308,7 @@ SecretInterceptingFakeCryptohomeClient::
     SecretInterceptingFakeCryptohomeClient() {}
 
 void SecretInterceptingFakeCryptohomeClient::MountEx(
-    const cryptohome::Identification& id,
+    const cryptohome::AccountIdentifier& id,
     const cryptohome::AuthorizationRequest& auth,
     const cryptohome::MountRequest& request,
     DBusMethodCallback<cryptohome::BaseReply> callback) {
@@ -325,7 +339,7 @@ class SamlTest : public OobeBaseTest {
         kHTTPSAMLUserEmail,
         embedded_test_server()->base_url().Resolve("/SAML"));
     fake_gaia_->RegisterSamlUser(kDifferentDomainSAMLUserEmail, saml_idp_url);
-    fake_gaia_->RegisterSamlDomainRedirectUrl("example.com", saml_idp_url);
+    fake_gaia_->RegisterSamlDomainRedirectUrl("corp.example.com", saml_idp_url);
 
     OobeBaseTest::SetUpCommandLine(command_line);
   }
@@ -365,7 +379,10 @@ class SamlTest : public OobeBaseTest {
     SetupAuthFlowChangeListener();
 
     content::DOMMessageQueue message_queue;  // Start observe before SAML.
-    GetLoginDisplay()->ShowSigninScreenForCreds(gaia_email, "");
+    LoginDisplayHost::default_host()
+        ->GetOobeUI()
+        ->GetGaiaScreenView()
+        ->ShowSigninScreenForTest(gaia_email, "", "[]");
 
     std::string message;
     ASSERT_TRUE(message_queue.WaitForMessage(&message));
@@ -576,7 +593,9 @@ IN_PROC_BROWSER_TEST_F(SamlTest, MAYBE_ScrapedDynamic) {
 }
 
 // Tests the multiple password scraped flow.
-IN_PROC_BROWSER_TEST_F(SamlTest, ScrapedMultiple) {
+//
+// Disabled due to flakiness: crbug.com/834703
+IN_PROC_BROWSER_TEST_F(SamlTest, DISABLED_ScrapedMultiple) {
   fake_saml_idp()->SetLoginHTMLTemplate("saml_login_two_passwords.html");
 
   StartSamlAndWaitForIdpPageLoad(kFirstSAMLUserEmail);
@@ -629,9 +648,9 @@ IN_PROC_BROWSER_TEST_F(SamlTest, ScrapedNone) {
   session_start_waiter.Wait();
 }
 
-// Types |bob@example.com| into the GAIA login form but then authenticates as
-// |alice@example.com| via SAML. Verifies that the logged-in user is correctly
-// identified as Alice.
+// Types |bob@corp.example.com| into the GAIA login form but then authenticates
+// as |alice@corp.example.com| via SAML. Verifies that the logged-in user is
+// correctly identified as Alice.
 //
 // Disabled since it's occasionally timed out: https://crbug.com/830322.
 #if defined(ADDRESS_SANITIZER) || defined(LEAK_SANITIZER)
@@ -642,12 +661,12 @@ IN_PROC_BROWSER_TEST_F(SamlTest, ScrapedNone) {
 #endif
 IN_PROC_BROWSER_TEST_F(SamlTest, MAYBE_UseAutenticatedUserEmailAddress) {
   fake_saml_idp()->SetLoginHTMLTemplate("saml_login.html");
-  // Type |bob@example.com| into the GAIA login form.
+  // Type |bob@corp.example.com| into the GAIA login form.
   StartSamlAndWaitForIdpPageLoad(kSecondSAMLUserEmail);
 
-  // Authenticate as alice@example.com via SAML (the |Email| provided here is
-  // irrelevant - the authenticated user's e-mail address that FakeGAIA
-  // reports was set via |SetFakeMergeSessionParams|.
+  // Authenticate as alice@corp.example.com via SAML (the |Email| provided here
+  // is irrelevant - the authenticated user's e-mail address that FakeGAIA
+  // reports was set via |SetFakeMergeSessionParams|).
   SetSignFormField("Email", "fake_user");
   SetSignFormField("Password", "fake_password");
 
@@ -778,7 +797,10 @@ IN_PROC_BROWSER_TEST_F(SamlTest, HTTPRedirectDisallowed) {
   fake_saml_idp()->SetLoginHTMLTemplate("saml_login.html");
 
   WaitForSigninScreen();
-  GetLoginDisplay()->ShowSigninScreenForCreds(kHTTPSAMLUserEmail, "");
+  LoginDisplayHost::default_host()
+      ->GetOobeUI()
+      ->GetGaiaScreenView()
+      ->ShowSigninScreenForTest(kHTTPSAMLUserEmail, "", "[]");
 
   const GURL url = embedded_test_server()->base_url().Resolve("/SAML");
   EXPECT_EQ(l10n_util::GetStringFUTF8(IDS_LOGIN_FATAL_ERROR_TEXT_INSECURE_URL,
@@ -802,7 +824,10 @@ IN_PROC_BROWSER_TEST_F(SamlTest, MAYBE_MetaRefreshToHTTPDisallowed) {
   fake_saml_idp()->SetRefreshURL(url);
 
   WaitForSigninScreen();
-  GetLoginDisplay()->ShowSigninScreenForCreds(kFirstSAMLUserEmail, "");
+  LoginDisplayHost::default_host()
+      ->GetOobeUI()
+      ->GetGaiaScreenView()
+      ->ShowSigninScreenForTest(kFirstSAMLUserEmail, "", "[]");
 
   EXPECT_EQ(l10n_util::GetStringFUTF8(IDS_LOGIN_FATAL_ERROR_TEXT_INSECURE_URL,
                                       base::UTF8ToUTF16(url.spec())),
@@ -1055,8 +1080,10 @@ void SAMLPolicyTest::SetUpInProcessBrowserTestFixture() {
   // Initialize device policy.
   std::set<std::string> device_affiliation_ids;
   device_affiliation_ids.insert(kAffiliationID);
-  policy::affiliation_test_helper::SetDeviceAffiliationID(
-      &test_helper_, fake_session_manager_client_, device_affiliation_ids);
+  auto affiliation_helper = policy::AffiliationTestHelper::CreateForCloud(
+      fake_session_manager_client_);
+  ASSERT_NO_FATAL_FAILURE((affiliation_helper.SetDeviceAffiliationIDs(
+      &test_helper_, device_affiliation_ids)));
 
   // Initialize user policy.
   EXPECT_CALL(provider_, IsInitializationComplete(_))
@@ -1069,26 +1096,32 @@ void SAMLPolicyTest::SetUpOnMainThread() {
 
   // Pretend that the test users' OAuth tokens are valid.
   user_manager::UserManager::Get()->SaveUserOAuthStatus(
-      AccountId::FromUserEmail(kFirstSAMLUserEmail),
+      AccountId::FromUserEmailGaiaId(kFirstSAMLUserEmail, kFirstSAMLUserGaiaId),
       user_manager::User::OAUTH2_TOKEN_STATUS_VALID);
   user_manager::UserManager::Get()->SaveUserOAuthStatus(
-      AccountId::FromUserEmail(kNonSAMLUserEmail),
+      AccountId::FromUserEmailGaiaId(kNonSAMLUserEmail, kNonSAMLUserGaiaId),
       user_manager::User::OAUTH2_TOKEN_STATUS_VALID);
   user_manager::UserManager::Get()->SaveUserOAuthStatus(
-      AccountId::FromUserEmail(kDifferentDomainSAMLUserEmail),
+      AccountId::FromUserEmailGaiaId(kDifferentDomainSAMLUserEmail,
+                                     kDifferentDomainSAMLUserGaiaId),
       user_manager::User::OAUTH2_TOKEN_STATUS_VALID);
 
   // Give affiliated users appropriate affiliation IDs.
   std::set<std::string> user_affiliation_ids;
   user_affiliation_ids.insert(kAffiliationID);
-  chromeos::ChromeUserManager::Get()->SetUserAffiliation(kFirstSAMLUserEmail,
-                                                         user_affiliation_ids);
-  chromeos::ChromeUserManager::Get()->SetUserAffiliation(kSecondSAMLUserEmail,
-                                                         user_affiliation_ids);
-  chromeos::ChromeUserManager::Get()->SetUserAffiliation(kHTTPSAMLUserEmail,
-                                                         user_affiliation_ids);
-  chromeos::ChromeUserManager::Get()->SetUserAffiliation(kNonSAMLUserEmail,
-                                                         user_affiliation_ids);
+  chromeos::ChromeUserManager::Get()->SetUserAffiliation(
+      AccountId::FromUserEmailGaiaId(kFirstSAMLUserEmail, kFirstSAMLUserGaiaId),
+      user_affiliation_ids);
+  chromeos::ChromeUserManager::Get()->SetUserAffiliation(
+      AccountId::FromUserEmailGaiaId(kSecondSAMLUserEmail,
+                                     kSecondSAMLUserGaiaId),
+      user_affiliation_ids);
+  chromeos::ChromeUserManager::Get()->SetUserAffiliation(
+      AccountId::FromUserEmailGaiaId(kHTTPSAMLUserEmail, kHTTPSAMLUserGaiaId),
+      user_affiliation_ids);
+  chromeos::ChromeUserManager::Get()->SetUserAffiliation(
+      AccountId::FromUserEmailGaiaId(kNonSAMLUserEmail, kNonSAMLUserGaiaId),
+      user_affiliation_ids);
 
   // Set up fake networks.
   DBusThreadManager::Get()
@@ -1254,8 +1287,8 @@ void SAMLPolicyTest::GetCookies() {
       user_manager::UserManager::Get()->GetActiveUser());
   ASSERT_TRUE(profile);
   base::RunLoop run_loop;
-  content::BrowserThread::PostTask(
-      content::BrowserThread::IO, FROM_HERE,
+  base::PostTaskWithTraits(
+      FROM_HERE, {content::BrowserThread::IO},
       base::BindOnce(&SAMLPolicyTest::GetCookiesOnIOThread,
                      base::Unretained(this),
                      scoped_refptr<net::URLRequestContextGetter>(
@@ -1275,8 +1308,7 @@ void SAMLPolicyTest::GetCookiesOnIOThread(
 void SAMLPolicyTest::StoreCookieList(const base::Closure& callback,
                                      const net::CookieList& cookie_list) {
   cookie_list_ = cookie_list;
-  content::BrowserThread::PostTask(content::BrowserThread::UI, FROM_HERE,
-                                   callback);
+  base::PostTaskWithTraits(FROM_HERE, {content::BrowserThread::UI}, callback);
 }
 
 IN_PROC_BROWSER_TEST_F(SAMLPolicyTest, PRE_NoSAML) {
@@ -1290,7 +1322,10 @@ IN_PROC_BROWSER_TEST_F(SAMLPolicyTest, PRE_NoSAML) {
   SetupFakeGaiaForLogin(kNonSAMLUserEmail, "", kTestRefreshToken);
 
   // Log in without SAML.
-  GetLoginDisplay()->ShowSigninScreenForCreds(kNonSAMLUserEmail, "password");
+  LoginDisplayHost::default_host()
+      ->GetOobeUI()
+      ->GetGaiaScreenView()
+      ->ShowSigninScreenForTest(kNonSAMLUserEmail, "password", "[]");
 
   content::WindowedNotificationObserver(
       chrome::NOTIFICATION_SESSION_STARTED,
@@ -1483,7 +1518,7 @@ IN_PROC_BROWSER_TEST_F(SAMLPolicyTest, TestLoginMediaPermission) {
   fake_saml_idp()->SetLoginHTMLTemplate("saml_login.html");
 
   const GURL url1("https://google.com");
-  const GURL url2("https://example.com");
+  const GURL url2("https://corp.example.com");
   const GURL url3("https://not-allowed.com");
   SetLoginVideoCaptureAllowedUrls({url1, url2});
   WaitForSigninScreen();

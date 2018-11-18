@@ -10,6 +10,7 @@
 
 #include "base/gtest_prod_util.h"
 #include "base/macros.h"
+#include "base/memory/weak_ptr.h"
 #include "base/scoped_observer.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/timer/timer.h"
@@ -87,7 +88,6 @@ class PeopleHandler : public SettingsPageUIHandler,
       PeopleHandlerTest,
       DisplayConfigureWithEngineDisabledAndSyncStartupCompleted);
   FRIEND_TEST_ALL_PREFIXES(PeopleHandlerTest, HandleSetupUIWhenSyncDisabled);
-  FRIEND_TEST_ALL_PREFIXES(PeopleHandlerTest, SelectCustomEncryption);
   FRIEND_TEST_ALL_PREFIXES(PeopleHandlerTest,
                            ShowSetupCustomPassphraseRequired);
   FRIEND_TEST_ALL_PREFIXES(PeopleHandlerTest, ShowSetupEncryptAll);
@@ -101,9 +101,7 @@ class PeopleHandler : public SettingsPageUIHandler,
   FRIEND_TEST_ALL_PREFIXES(PeopleHandlerTest, ShowSigninOnAuthError);
   FRIEND_TEST_ALL_PREFIXES(PeopleHandlerTest, ShowSyncSetup);
   FRIEND_TEST_ALL_PREFIXES(PeopleHandlerTest, ShowSyncSetupWhenNotSignedIn);
-  FRIEND_TEST_ALL_PREFIXES(PeopleHandlerTest, SuccessfullySetPassphrase);
   FRIEND_TEST_ALL_PREFIXES(PeopleHandlerTest, TestSyncEverything);
-  FRIEND_TEST_ALL_PREFIXES(PeopleHandlerTest, TestSyncNothing);
   FRIEND_TEST_ALL_PREFIXES(PeopleHandlerTest, TestSyncAllManually);
   FRIEND_TEST_ALL_PREFIXES(PeopleHandlerTest, TestPassphraseStillRequired);
   FRIEND_TEST_ALL_PREFIXES(PeopleHandlerTest, TestSyncIndividualTypes);
@@ -116,13 +114,15 @@ class PeopleHandler : public SettingsPageUIHandler,
   FRIEND_TEST_ALL_PREFIXES(PeopleHandlerNonCrosTest,
                            UnrecoverableErrorInitializingSync);
   FRIEND_TEST_ALL_PREFIXES(PeopleHandlerNonCrosTest, GaiaErrorInitializingSync);
-  FRIEND_TEST_ALL_PREFIXES(PeopleHandlerNonCrosTest, HandleCaptcha);
-  FRIEND_TEST_ALL_PREFIXES(PeopleHandlerNonCrosTest, HandleGaiaAuthFailure);
-  FRIEND_TEST_ALL_PREFIXES(PeopleHandlerNonCrosTest,
-                           SubmitAuthWithInvalidUsername);
   FRIEND_TEST_ALL_PREFIXES(PeopleHandlerFirstSigninTest, DisplayBasicLogin);
   FRIEND_TEST_ALL_PREFIXES(PeopleHandlerTest,
                            AcquireSyncBlockerWhenLoadingSyncSettingsSubpage);
+  FRIEND_TEST_ALL_PREFIXES(PeopleHandlerTest, RestartSyncAfterDashboardClear);
+  FRIEND_TEST_ALL_PREFIXES(
+      PeopleHandlerTest,
+      RestartSyncAfterDashboardClearWithStandaloneTransport);
+  FRIEND_TEST_ALL_PREFIXES(PeopleHandlerDiceUnifiedConsentTest,
+                           StoredAccountsList);
 
   // SettingsPageUIHandler implementation.
   void RegisterMessages() override;
@@ -148,6 +148,8 @@ class PeopleHandler : public SettingsPageUIHandler,
 #if BUILDFLAG(ENABLE_DICE_SUPPORT)
   // AccountTrackerService::Observer implementation.
   void OnAccountUpdated(const AccountInfo& info) override;
+  void OnAccountImageUpdated(const std::string& account_id,
+                             const gfx::Image& image) override;
   void OnAccountRemoved(const AccountInfo& info) override;
 #endif
 
@@ -167,13 +169,19 @@ class PeopleHandler : public SettingsPageUIHandler,
   void OnDidClosePage(const base::ListValue* args);
   void HandleSetDatatypes(const base::ListValue* args);
   void HandleSetEncryption(const base::ListValue* args);
-  void HandleSetSyncEverything(const base::ListValue* args);
   void HandleShowSetupUI(const base::ListValue* args);
   void HandleAttemptUserExit(const base::ListValue* args);
+#if defined(OS_CHROMEOS)
+  void HandleRequestPinLoginState(const base::ListValue* args);
+#endif
+#if !defined(OS_CHROMEOS)
   void HandleStartSignin(const base::ListValue* args);
-  void HandleStopSyncing(const base::ListValue* args);
+  void HandleSignout(const base::ListValue* args);
+  void HandlePauseSync(const base::ListValue* args);
+#endif
   void HandleGetSyncStatus(const base::ListValue* args);
   void HandleManageOtherPeople(const base::ListValue* args);
+  void OnUnifiedConsentToggleChanged(const base::ListValue* args);
 
 #if !defined(OS_CHROMEOS)
   // Displays the GAIA login form.
@@ -183,6 +191,10 @@ class PeopleHandler : public SettingsPageUIHandler,
   // This function is virtual so that tests can override.
   virtual void DisplayGaiaLoginInNewTabOrWindow(
       signin_metrics::AccessPoint access_point);
+#endif
+
+#if defined(OS_CHROMEOS)
+  void OnPinLoginAvailable(bool is_available);
 #endif
 
 #if BUILDFLAG(ENABLE_DICE_SUPPORT)
@@ -253,6 +265,10 @@ class PeopleHandler : public SettingsPageUIHandler,
 #if BUILDFLAG(ENABLE_DICE_SUPPORT)
   ScopedObserver<AccountTrackerService, PeopleHandler>
       account_tracker_observer_;
+#endif
+
+#if defined(OS_CHROMEOS)
+  base::WeakPtrFactory<PeopleHandler> weak_factory_{this};
 #endif
 
   DISALLOW_COPY_AND_ASSIGN(PeopleHandler);

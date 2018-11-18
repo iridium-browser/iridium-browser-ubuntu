@@ -29,16 +29,17 @@
 
 #include "third_party/blink/renderer/core/dom/document.h"
 
+#include "base/auto_reset.h"
 #include "third_party/blink/renderer/core/dom/events/scoped_event_queue.h"
 #include "third_party/blink/renderer/core/editing/commands/editing_commands_utilities.h"
 #include "third_party/blink/renderer/core/editing/commands/editor_command.h"
 #include "third_party/blink/renderer/core/editing/editing_tri_state.h"
 #include "third_party/blink/renderer/core/editing/editor.h"
+#include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/frame/use_counter.h"
 #include "third_party/blink/renderer/core/html/forms/text_control_element.h"
 #include "third_party/blink/renderer/core/inspector/console_message.h"
 #include "third_party/blink/renderer/platform/histogram.h"
-#include "third_party/blink/renderer/platform/wtf/auto_reset.h"
 #include "third_party/blink/renderer/platform/wtf/std_lib_extras.h"
 
 namespace blink {
@@ -63,7 +64,8 @@ bool Document::execCommand(const String& command_name,
                            ExceptionState& exception_state) {
   if (!IsHTMLDocument() && !IsXHTMLDocument()) {
     exception_state.ThrowDOMException(
-        kInvalidStateError, "execCommand is only supported on HTML documents.");
+        DOMExceptionCode::kInvalidStateError,
+        "execCommand is only supported on HTML documents.");
     return false;
   }
   if (FocusedElement() && IsTextControl(*FocusedElement()))
@@ -82,7 +84,7 @@ bool Document::execCommand(const String& command_name,
                                              kWarningMessageLevel, message));
     return false;
   }
-  AutoReset<bool> execute_scope(&is_running_exec_command_, true);
+  base::AutoReset<bool> execute_scope(&is_running_exec_command_, true);
 
   // Postpone DOM mutation events, which can execute scripts and change
   // DOM tree against implementation assumption.
@@ -100,7 +102,7 @@ bool Document::queryCommandEnabled(const String& command_name,
                                    ExceptionState& exception_state) {
   if (!IsHTMLDocument() && !IsXHTMLDocument()) {
     exception_state.ThrowDOMException(
-        kInvalidStateError,
+        DOMExceptionCode::kInvalidStateError,
         "queryCommandEnabled is only supported on HTML documents.");
     return false;
   }
@@ -112,7 +114,7 @@ bool Document::queryCommandIndeterm(const String& command_name,
                                     ExceptionState& exception_state) {
   if (!IsHTMLDocument() && !IsXHTMLDocument()) {
     exception_state.ThrowDOMException(
-        kInvalidStateError,
+        DOMExceptionCode::kInvalidStateError,
         "queryCommandIndeterm is only supported on HTML documents.");
     return false;
   }
@@ -124,7 +126,7 @@ bool Document::queryCommandState(const String& command_name,
                                  ExceptionState& exception_state) {
   if (!IsHTMLDocument() && !IsXHTMLDocument()) {
     exception_state.ThrowDOMException(
-        kInvalidStateError,
+        DOMExceptionCode::kInvalidStateError,
         "queryCommandState is only supported on HTML documents.");
     return false;
   }
@@ -136,7 +138,7 @@ bool Document::queryCommandSupported(const String& command_name,
                                      ExceptionState& exception_state) {
   if (!IsHTMLDocument() && !IsXHTMLDocument()) {
     exception_state.ThrowDOMException(
-        kInvalidStateError,
+        DOMExceptionCode::kInvalidStateError,
         "queryCommandSupported is only supported on HTML documents.");
     return false;
   }
@@ -148,7 +150,7 @@ String Document::queryCommandValue(const String& command_name,
                                    ExceptionState& exception_state) {
   if (!IsHTMLDocument() && !IsXHTMLDocument()) {
     exception_state.ThrowDOMException(
-        kInvalidStateError,
+        DOMExceptionCode::kInvalidStateError,
         "queryCommandValue is only supported on HTML documents.");
     return "";
   }

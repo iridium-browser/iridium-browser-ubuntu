@@ -5,6 +5,8 @@
 #ifndef COMPONENTS_VIZ_SERVICE_DISPLAY_GL_RENDERER_H_
 #define COMPONENTS_VIZ_SERVICE_DISPLAY_GL_RENDERER_H_
 
+#include <map>
+#include <memory>
 #include <unordered_map>
 #include <vector>
 
@@ -33,12 +35,6 @@ namespace base {
 class SingleThreadTaskRunner;
 }
 
-namespace cc {
-class GLRendererShaderTest;
-class OutputSurface;
-class StreamVideoDrawQuad;
-}  // namespace cc
-
 namespace gpu {
 namespace gles2 {
 class GLES2Interface;
@@ -48,8 +44,11 @@ class GLES2Interface;
 namespace viz {
 
 class DynamicGeometryBinding;
+class GLRendererShaderTest;
+class OutputSurface;
 class ScopedRenderPassTexture;
 class StaticGeometryBinding;
+class StreamVideoDrawQuad;
 class TextureDrawQuad;
 
 // Class that handles drawing of composited render layers using GL.
@@ -59,13 +58,14 @@ class VIZ_SERVICE_EXPORT GLRenderer : public DirectRenderer {
 
   GLRenderer(const RendererSettings* settings,
              OutputSurface* output_surface,
-             cc::DisplayResourceProvider* resource_provider,
+             DisplayResourceProvider* resource_provider,
              scoped_refptr<base::SingleThreadTaskRunner> current_task_runner);
   ~GLRenderer() override;
 
   bool use_swap_with_bounds() const { return use_swap_with_bounds_; }
 
-  void SwapBuffers(std::vector<ui::LatencyInfo> latency_info) override;
+  void SwapBuffers(std::vector<ui::LatencyInfo> latency_info,
+                   bool need_presentation_feedback) override;
   void SwapBuffersComplete() override;
 
   void DidReceiveTextureInUseResponses(
@@ -76,23 +76,7 @@ class VIZ_SERVICE_EXPORT GLRenderer : public DirectRenderer {
  protected:
   void DidChangeVisibility() override;
 
-  const gfx::QuadF& SharedGeometryQuad() const { return shared_geometry_quad_; }
-  const StaticGeometryBinding* SharedGeometry() const {
-    return shared_geometry_.get();
-  }
-
-  // Returns the format to use for storage if copying from the current
-  // framebuffer. If the root renderpass is current, it uses the best matching
-  // format from the OutputSurface, otherwise it uses the best matching format
-  // from the texture being drawn to as the backbuffer.
-  GLenum GetFramebufferCopyTextureFormat();
-  void ReleaseRenderPassTextures();
-  enum BoundGeometry { NO_BINDING, SHARED_BINDING, CLIPPED_BINDING };
-  void PrepareGeometry(BoundGeometry geometry_to_bind);
-  void SetStencilEnabled(bool enabled);
   bool stencil_enabled() const { return stencil_shadow_; }
-  void SetBlendEnabled(bool enabled);
-  bool blend_enabled() const { return blend_shadow_; }
 
   bool CanPartialSwap() override;
   void UpdateRenderPassTextures(
@@ -154,7 +138,7 @@ class VIZ_SERVICE_EXPORT GLRenderer : public DirectRenderer {
   friend class GLRendererTest;
 
   using OverlayResourceLock =
-      std::unique_ptr<cc::DisplayResourceProvider::ScopedReadLockGL>;
+      std::unique_ptr<DisplayResourceProvider::ScopedReadLockGL>;
   using OverlayResourceLockList = std::vector<OverlayResourceLock>;
 
   // If a RenderPass is used as an overlay, we render the RenderPass with any
@@ -168,6 +152,18 @@ class VIZ_SERVICE_EXPORT GLRenderer : public DirectRenderer {
   };
 
   struct DrawRenderPassDrawQuadParams;
+
+  // Returns the format to use for storage if copying from the current
+  // framebuffer. If the root renderpass is current, it uses the best matching
+  // format from the OutputSurface, otherwise it uses the best matching format
+  // from the texture being drawn to as the backbuffer.
+  GLenum GetFramebufferCopyTextureFormat();
+  void ReleaseRenderPassTextures();
+  enum BoundGeometry { NO_BINDING, SHARED_BINDING, CLIPPED_BINDING };
+  void PrepareGeometry(BoundGeometry geometry_to_bind);
+  void SetStencilEnabled(bool enabled);
+  void SetBlendEnabled(bool enabled);
+  bool blend_enabled() const { return blend_shadow_; }
 
   // If any of the following functions returns false, then it means that drawing
   // is not possible.
@@ -243,7 +239,6 @@ class VIZ_SERVICE_EXPORT GLRenderer : public DirectRenderer {
                            const gfx::QuadF* clip_region);
   void DrawYUVVideoQuad(const YUVVideoDrawQuad* quad,
                         const gfx::QuadF* clip_region);
-  void DrawOverlayCandidateQuadBorder(float* gl_matrix);
 
   void SetShaderOpacity(float opacity);
   void SetShaderQuadF(const gfx::QuadF& quad);
@@ -259,6 +254,11 @@ class VIZ_SERVICE_EXPORT GLRenderer : public DirectRenderer {
   void DrawQuadGeometryWithAA(const DrawQuad* quad,
                               gfx::QuadF* local_quad,
                               const gfx::Rect& tile_rect);
+
+  const gfx::QuadF& SharedGeometryQuad() const { return shared_geometry_quad_; }
+  const StaticGeometryBinding* SharedGeometry() const {
+    return shared_geometry_.get();
+  }
 
   // If |dst_color_space| is invalid, then no color conversion (apart from
   // YUV to RGB conversion) is performed. This explicit argument is available

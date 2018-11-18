@@ -842,7 +842,9 @@ class MetaBuildWrapper(object):
                  '--logcat-output-file', '${ISOLATED_OUTDIR}/logcats',
                  '--store-tombstones']
     else:
-      extra_files = ['../../testing/test_env.py']
+      if isolate_map[target].get('use_webcam', False):
+        cmdline.append('../../tools_webrtc/ensure_webcam_is_running.py')
+        extra_files.append('../../tools_webrtc/ensure_webcam_is_running.py')
 
       # This needs to mirror the settings in //build/config/ui.gni:
       # use_x11 = is_linux && !use_ozone.
@@ -850,27 +852,12 @@ class MetaBuildWrapper(object):
 
       xvfb = use_x11 and test_type == 'windowed_test_launcher'
       if xvfb:
-        extra_files += [
-            '../../testing/xvfb.py',
-        ]
+        cmdline.append('../../testing/xvfb.py')
+        extra_files.append('../../testing/xvfb.py')
+      else:
+        cmdline.append('../../testing/test_env.py')
 
-      cmdline = (['../../testing/xvfb.py'] if xvfb else
-                 ['../../testing/test_env.py'])
-
-      # Memcheck is only supported for linux. Ignore in other platforms.
-      if is_linux and 'rtc_use_memcheck=true' in vals['gn_args']:
-        cmdline += [
-            'bash',
-            '../../tools_webrtc/valgrind/webrtc_tests.sh',
-            '--tool',
-            'memcheck',
-            '--target',
-            'Release',
-            '--build-dir',
-            '..',
-            '--test',
-        ]
-      elif test_type != 'raw':
+      if test_type != 'raw':
         extra_files += [
             '../../third_party/gtest-parallel/gtest-parallel',
             '../../third_party/gtest-parallel/gtest_parallel.py',
@@ -899,8 +886,6 @@ class MetaBuildWrapper(object):
       executable = executable_prefix + target + executable_suffix
 
       cmdline.append(executable)
-      if test_type != 'raw':
-        cmdline.append('--')
 
       asan = 'is_asan=true' in vals['gn_args']
       lsan = 'is_lsan=true' in vals['gn_args']

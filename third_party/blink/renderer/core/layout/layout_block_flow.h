@@ -66,6 +66,7 @@ class NGPaintFragment;
 class NGPhysicalFragment;
 
 struct NGInlineNodeData;
+struct NGPhysicalOffset;
 
 enum IndentTextOrNot { kDoNotIndentText, kIndentText };
 
@@ -102,15 +103,17 @@ class CORE_EXPORT LayoutBlockFlow : public LayoutBlock {
   explicit LayoutBlockFlow(ContainerNode*);
   ~LayoutBlockFlow() override;
 
-  static LayoutBlockFlow* CreateAnonymous(Document*);
+  static LayoutBlockFlow* CreateAnonymous(Document*,
+                                          scoped_refptr<ComputedStyle>);
   bool BeingDestroyed() const { return being_destroyed_; }
 
   bool IsLayoutBlockFlow() const final { return true; }
 
   void UpdateBlockLayout(bool relayout_children) override;
 
-  void ComputeOverflow(LayoutUnit old_client_after_edge,
-                       bool recompute_floats = false) override;
+  void ComputeVisualOverflow(const LayoutRect&, bool recompute_floats) override;
+  void ComputeLayoutOverflow(LayoutUnit old_client_after_edge,
+                             bool recompute_floats) override;
 
   void DeleteLineBoxTree();
 
@@ -142,7 +145,7 @@ class CORE_EXPORT LayoutBlockFlow : public LayoutBlock {
       LayoutUnit position,
       IndentTextOrNot indent_text,
       LayoutUnit logical_height = LayoutUnit()) const {
-    return Style()->IsLeftToRightDirection()
+    return StyleRef().IsLeftToRightDirection()
                ? LogicalLeftOffsetForLine(position, indent_text, logical_height)
                : LogicalWidth() - LogicalRightOffsetForLine(
                                       position, indent_text, logical_height);
@@ -170,7 +173,7 @@ class CORE_EXPORT LayoutBlockFlow : public LayoutBlock {
   LayoutUnit StartOffsetForAvoidingFloats(
       LayoutUnit position,
       LayoutUnit logical_height = LayoutUnit()) const {
-    return Style()->IsLeftToRightDirection()
+    return StyleRef().IsLeftToRightDirection()
                ? LogicalLeftOffsetForAvoidingFloats(position, logical_height)
                : LogicalWidth() - LogicalRightOffsetForAvoidingFloats(
                                       position, logical_height);
@@ -178,7 +181,7 @@ class CORE_EXPORT LayoutBlockFlow : public LayoutBlock {
   LayoutUnit EndOffsetForAvoidingFloats(
       LayoutUnit position,
       LayoutUnit logical_height = LayoutUnit()) const {
-    return !Style()->IsLeftToRightDirection()
+    return !StyleRef().IsLeftToRightDirection()
                ? LogicalLeftOffsetForAvoidingFloats(position, logical_height)
                : LogicalWidth() - LogicalRightOffsetForAvoidingFloats(
                                       position, logical_height);
@@ -194,11 +197,6 @@ class CORE_EXPORT LayoutBlockFlow : public LayoutBlock {
   RootInlineBox* LastRootBox() const {
     return static_cast<RootInlineBox*>(LastLineBox());
   }
-
-  LayoutUnit LogicalLeftSelectionOffset(const LayoutBlock* root_block,
-                                        LayoutUnit position) const override;
-  LayoutUnit LogicalRightSelectionOffset(const LayoutBlock* root_block,
-                                         LayoutUnit position) const override;
 
   RootInlineBox* CreateAndAppendRootInlineBox();
   RootInlineBox* ConstructLine(BidiRunList<BidiRun>&, const LineInfo&);
@@ -309,7 +307,7 @@ class CORE_EXPORT LayoutBlockFlow : public LayoutBlock {
 
   static bool ShouldSkipCreatingRunsForObject(LineLayoutItem obj) {
     return obj.IsFloating() || (obj.IsOutOfFlowPositioned() &&
-                                !obj.Style()->IsOriginalDisplayInlineType() &&
+                                !obj.StyleRef().IsOriginalDisplayInlineType() &&
                                 !obj.Container().IsLayoutInline());
   }
 
@@ -321,7 +319,9 @@ class CORE_EXPORT LayoutBlockFlow : public LayoutBlock {
       rare_data_->multi_column_flow_thread_ = nullptr;
   }
 
-  void AddOverflowFromInlineChildren();
+  void AddVisualOverflowFromInlineChildren();
+
+  void AddLayoutOverflowFromInlineChildren();
 
   // FIXME: This should be const to avoid a const_cast, but can modify child
   // dirty bits and LayoutTextCombine.
@@ -424,7 +424,7 @@ class CORE_EXPORT LayoutBlockFlow : public LayoutBlock {
   void SetShouldDoFullPaintInvalidationForFirstLine();
 
   void SimplifiedNormalFlowInlineLayout();
-  bool RecalcInlineChildrenOverflowAfterStyleChange();
+  bool RecalcInlineChildrenOverflow();
 
   PositionWithAffinity PositionForPoint(const LayoutPoint&) const override;
 
@@ -446,25 +446,32 @@ class CORE_EXPORT LayoutBlockFlow : public LayoutBlock {
     is_self_collapsing_ = CheckIfIsSelfCollapsingBlock();
   }
 
-  // This function is only public so we can call it from NGBlockNode while we're
-  // still working on LayoutNG.
-  void AddOverflowFromFloats();
+  // These functions are only public so we can call it from NGBlockNode while
+  // we're still working on LayoutNG.
+  void AddVisualOverflowFromFloats();
+  void AddLayoutOverflowFromFloats();
 
+  virtual NGInlineNodeData* TakeNGInlineNodeData() { return nullptr; }
   virtual NGInlineNodeData* GetNGInlineNodeData() const { return nullptr; }
   virtual void ResetNGInlineNodeData() {}
   virtual bool HasNGInlineNodeData() const { return false; }
   virtual NGPaintFragment* PaintFragment() const { return nullptr; }
-  virtual Vector<NGPaintFragment*> GetPaintFragments(const LayoutObject&) const;
   virtual scoped_refptr<NGLayoutResult> CachedLayoutResult(
       const NGConstraintSpace&,
-      NGBreakToken*) const;
-  virtual scoped_refptr<NGLayoutResult> CachedLayoutResultForTesting();
+      const NGBreakToken*) const;
+  virtual scoped_refptr<const NGLayoutResult> CachedLayoutResultForTesting();
   virtual void SetCachedLayoutResult(const NGConstraintSpace&,
-                                     NGBreakToken*,
-                                     scoped_refptr<NGLayoutResult>);
+                                     const NGBreakToken*,
+                                     const NGLayoutResult&);
+  virtual void ClearCachedLayoutResult();
   virtual void WillCollectInlines() {}
-  virtual void SetPaintFragment(scoped_refptr<const NGPhysicalFragment>);
-  virtual void ClearPaintFragment() {}
+  virtual void SetPaintFragment(const NGBreakToken*,
+                                scoped_refptr<const NGPhysicalFragment>,
+                                NGPhysicalOffset);
+  virtual void UpdatePaintFragmentFromCachedLayoutResult(
+      const NGBreakToken*,
+      scoped_refptr<const NGPhysicalFragment>,
+      NGPhysicalOffset);
   virtual const NGPhysicalBoxFragment* CurrentFragment() const {
     return nullptr;
   }
@@ -534,7 +541,7 @@ class CORE_EXPORT LayoutBlockFlow : public LayoutBlock {
 
   void AddOutlineRects(Vector<LayoutRect>&,
                        const LayoutPoint& additional_offset,
-                       IncludeBlockVisualOverflowOrNot) const override;
+                       NGOutlineType) const override;
 
   bool PaintedOutputOfObjectHasNoEffectRegardlessOfSize() const override;
   void InvalidateDisplayItemClients(PaintInvalidationReason) const override;
@@ -631,7 +638,7 @@ class CORE_EXPORT LayoutBlockFlow : public LayoutBlock {
 
   void DirtyLinesFromChangedChild(
       LayoutObject* child,
-      MarkingBehavior marking_behaviour = kMarkContainerChain) final {
+      MarkingBehavior marking_behaviour = kMarkContainerChain) override {
     line_boxes_.DirtyLinesFromChangedChild(
         LineLayoutItem(this), LineLayoutItem(child),
         marking_behaviour == kMarkContainerChain);
@@ -663,6 +670,7 @@ class CORE_EXPORT LayoutBlockFlow : public LayoutBlock {
   void ReparentSubsequentFloatingOrOutOfFlowSiblings();
   void ReparentPrecedingFloatingOrOutOfFlowSiblings();
 
+  bool NeedsAnonymousInlineWrapper() const;
   void MakeChildrenInlineIfPossible();
 
   void MakeChildrenNonInline(LayoutObject* insertion_point = nullptr);
@@ -692,7 +700,7 @@ class CORE_EXPORT LayoutBlockFlow : public LayoutBlock {
 
  public:
   struct FloatWithRect {
-    DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
+    DISALLOW_NEW();
     FloatWithRect(LayoutBox* f)
         : object(f), rect(f->FrameRect()), ever_had_layout(f->EverHadLayout()) {
       rect.Expand(f->MarginBoxOutsets());

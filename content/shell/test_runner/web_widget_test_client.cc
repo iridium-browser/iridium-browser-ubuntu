@@ -38,9 +38,9 @@ void WebWidgetTestClient::ScheduleAnimation() {
 
   if (!animation_scheduled_) {
     animation_scheduled_ = true;
-    delegate()->PostDelayedTask(base::Bind(&WebWidgetTestClient::AnimateNow,
-                                           weak_factory_.GetWeakPtr()),
-                                1);
+    delegate()->PostDelayedTask(base::BindOnce(&WebWidgetTestClient::AnimateNow,
+                                               weak_factory_.GetWeakPtr()),
+                                base::TimeDelta::FromMilliseconds(1));
   }
 }
 
@@ -49,10 +49,13 @@ void WebWidgetTestClient::AnimateNow() {
     return;
 
   animation_scheduled_ = false;
+  bool animation_requires_raster = test_runner()->animation_requires_raster();
   blink::WebWidget* web_widget = web_widget_test_proxy_base_->web_widget();
-  web_widget->UpdateAllLifecyclePhasesAndCompositeForTesting();
+  web_widget->UpdateAllLifecyclePhasesAndCompositeForTesting(
+      animation_requires_raster);
   if (blink::WebPagePopup* popup = web_widget->GetPagePopup())
-    popup->UpdateAllLifecyclePhasesAndCompositeForTesting();
+    popup->UpdateAllLifecyclePhasesAndCompositeForTesting(
+        animation_requires_raster);
 }
 
 blink::WebScreenInfo WebWidgetTestClient::GetScreenInfo() {
@@ -90,13 +93,19 @@ void WebWidgetTestClient::SetToolTipText(const blink::WebString& text,
 void WebWidgetTestClient::StartDragging(blink::WebReferrerPolicy policy,
                                         const blink::WebDragData& data,
                                         blink::WebDragOperationsMask mask,
-                                        const blink::WebImage& image,
-                                        const blink::WebPoint& point) {
-  test_runner()->setDragImage(image);
+                                        const SkBitmap& drag_image,
+                                        const blink::WebPoint& image_offset) {
+  test_runner()->setDragImage(drag_image);
 
   // When running a test, we need to fake a drag drop operation otherwise
   // Windows waits for real mouse events to know when the drag is over.
   web_widget_test_proxy_base_->event_sender()->DoDragDrop(data, mask);
+}
+
+bool WebWidgetTestClient::AllowsBrokenNullLayerTreeView() const {
+  // This call should go to the production client, not here.
+  NOTREACHED();
+  return false;
 }
 
 TestRunnerForSpecificView* WebWidgetTestClient::view_test_runner() {

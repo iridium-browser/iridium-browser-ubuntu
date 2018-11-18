@@ -10,6 +10,8 @@
 Polymer({
   is: 'oobe-eula-md',
 
+  behaviors: [I18nBehavior, OobeDialogHostBehavior],
+
   properties: {
     /**
      * Shows "Loading..." section.
@@ -52,12 +54,38 @@ Polymer({
     },
   },
 
+  /**
+   * Flag that ensures that OOBE configuration is applied only once.
+   * @private {boolean}
+   */
+  configuration_applied_: false,
+
   focus: function() {
     if (this.eulaLoadingScreenShown) {
       this.$.eulaLoadingDialog.show();
     } else {
       this.$.eulaDialog.show();
     }
+  },
+
+  /** Called when dialog is shown */
+  onBeforeShow: function() {
+    this.behaviors.forEach((behavior) => {
+      if (behavior.onBeforeShow)
+        behavior.onBeforeShow.call(this);
+    });
+    if (this.configuration_applied_)
+      return;
+    var configuration = Oobe.getInstance().getOobeConfiguration();
+    if (!configuration)
+      return;
+    if (configuration.eulaSendStatistics) {
+      this.usageStatsChecked = true;
+    }
+    if (configuration.eulaAutoAccept) {
+      this.eulaAccepted_();
+    }
+    this.configuration_applied_ = true;
   },
 
   /**
@@ -73,6 +101,7 @@ Polymer({
   updateLocalizedContent: function(event) {
     // This forces frame to reload.
     this.screen.loadEulaToWebview_(this.$.crosEulaFrame);
+    this.i18nUpdateLocale();
   },
 
   /**

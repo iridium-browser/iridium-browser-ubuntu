@@ -13,8 +13,8 @@
 #include "base/threading/thread_checker.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_headers.h"
 #include "net/base/host_port_pair.h"
-#include "net/base/network_change_notifier.h"
 #include "net/url_request/url_request.h"
+#include "services/network/public/cpp/network_connection_tracker.h"
 
 namespace net {
 class HttpResponseHeaders;
@@ -27,7 +27,7 @@ namespace data_reduction_proxy {
 class DataReductionProxyConfig;
 
 class DataReductionProxyBypassStats
-    : public net::NetworkChangeNotifier::NetworkChangeObserver {
+    : public network::NetworkConnectionTracker::NetworkConnectionObserver {
  public:
   typedef base::Callback<void(bool /* unreachable */)> UnreachableCallback;
 
@@ -52,7 +52,8 @@ class DataReductionProxyBypassStats
   // |config| must not be null.
   DataReductionProxyBypassStats(
       DataReductionProxyConfig* config,
-      UnreachableCallback unreachable_callback);
+      UnreachableCallback unreachable_callback,
+      network::NetworkConnectionTracker* network_connection_tracker);
 
   ~DataReductionProxyBypassStats() override;
 
@@ -73,9 +74,11 @@ class DataReductionProxyBypassStats
   // Visible for testing.
   DataReductionProxyBypassType GetBypassType() const;
 
-  // Records all the data reduction proxy bytes-related histograms for the
-  // completed URLRequest |request|.
-  void RecordBytesHistograms(
+  // Given |data_reduction_proxy_enabled|, a |request|, and the
+  // |data_reduction_proxy_config| records the number of bypassed bytes for that
+  // |request| into UMAs based on bypass type. |data_reduction_proxy_enabled|
+  // tells us the state of the Data Reduction Proxy enabling preference.
+  void RecordBypassedBytesHistograms(
       const net::URLRequest& request,
       bool data_reduction_proxy_enabled,
       const net::ProxyConfig& data_reduction_proxy_config);
@@ -95,8 +98,6 @@ class DataReductionProxyBypassStats
 
  private:
   friend class DataReductionProxyBypassStatsTest;
-  FRIEND_TEST_ALL_PREFIXES(DataReductionProxyBypassStatsTest,
-                           RecordMissingViaHeaderBytes);
 
   enum BypassedBytesType {
     NOT_BYPASSED = 0,         /* Not bypassed. */
@@ -110,23 +111,8 @@ class DataReductionProxyBypassStats
     BYPASSED_BYTES_TYPE_MAX   /* This must always be last.*/
   };
 
-  // Given |data_reduction_proxy_enabled|, a |request|, and the
-  // |data_reduction_proxy_config| records the number of bypassed bytes for that
-  // |request| into UMAs based on bypass type. |data_reduction_proxy_enabled|
-  // tells us the state of the Data Reduction Proxy enabling preference.
-  void RecordBypassedBytesHistograms(
-      const net::URLRequest& request,
-      bool data_reduction_proxy_enabled,
-      const net::ProxyConfig& data_reduction_proxy_config);
-
-  // Records UMA of the number of response bytes of responses that are expected
-  // to have the data reduction proxy via header, but where the data reduction
-  // proxy via header is not present.
-  void RecordMissingViaHeaderBytes(const net::URLRequest& request);
-
-  // NetworkChangeNotifier::NetworkChangeObserver:
-  void OnNetworkChanged(
-      net::NetworkChangeNotifier::ConnectionType type) override;
+  // network::NetworkConnectionTracker::NetworkConnectionObserver:
+  void OnConnectionChanged(network::mojom::ConnectionType type) override;
 
   void RecordBypassedBytes(DataReductionProxyBypassType bypass_type,
                            BypassedBytesType bypassed_bytes_type,
@@ -135,6 +121,9 @@ class DataReductionProxyBypassStats
   DataReductionProxyConfig* data_reduction_proxy_config_;
 
   UnreachableCallback unreachable_callback_;
+
+  // Watches for network changes.
+  network::NetworkConnectionTracker* network_connection_tracker_;
 
   // The last reason for bypass as determined by
   // MaybeBypassProxyAndPrepareToRetry

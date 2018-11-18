@@ -6,7 +6,7 @@
 
 #include "base/macros.h"
 #include "base/strings/utf_string_conversions.h"
-#include "ui/views/bubble/bubble_dialog_delegate.h"
+#include "ui/views/bubble/bubble_dialog_delegate_view.h"
 #include "ui/views/controls/button/checkbox.h"
 #include "ui/views/controls/button/label_button.h"
 #include "ui/views/controls/button/md_text_button.h"
@@ -59,7 +59,7 @@ class DialogExample::Delegate : public virtual DialogType {
   }
 
   // DialogDelegate:
-  View* CreateExtraView() {
+  View* CreateExtraView() override {
     if (!parent_->has_extra_button_->checked())
       return nullptr;
     return MdTextButton::CreateSecondaryUiButton(
@@ -205,8 +205,7 @@ void DialogExample::StartTextfieldRow(GridLayout* layout,
 }
 
 void DialogExample::AddCheckbox(GridLayout* layout, Checkbox** member) {
-  Checkbox* checkbox = new Checkbox(base::string16());
-  checkbox->set_listener(this);
+  Checkbox* checkbox = new Checkbox(base::string16(), this);
   checkbox->SetChecked(true);
   layout->AddView(checkbox);
   *member = checkbox;

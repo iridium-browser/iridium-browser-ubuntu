@@ -10,6 +10,7 @@ import android.os.Process;
 import android.os.StrictMode;
 import android.os.SystemClock;
 
+import org.chromium.base.annotations.CalledByNative;
 import org.chromium.base.annotations.JNINamespace;
 import org.chromium.base.annotations.MainDex;
 
@@ -100,19 +101,25 @@ public class EarlyTraceEvent {
     @VisibleForTesting static final int STATE_FINISHING = 2;
     @VisibleForTesting static final int STATE_FINISHED = 3;
 
+    private static final String BACKGROUND_STARTUP_TRACING_ENABLED_KEY = "bg_startup_tracing";
+    private static boolean sCachedBackgroundStartupTracingFlag;
+
     // Locks the fields below.
     private static final Object sLock = new Object();
 
     @VisibleForTesting static volatile int sState = STATE_DISABLED;
     // Not final as these object are not likely to be used at all.
     @VisibleForTesting static List<Event> sCompletedEvents;
-    @VisibleForTesting static Map<String, Event> sPendingEvents;
+    @VisibleForTesting
+    static Map<String, Event> sPendingEventByKey;
     @VisibleForTesting static List<AsyncEvent> sAsyncEvents;
+    @VisibleForTesting static List<String> sPendingAsyncEvents;
 
     /** @see TraceEvent#MaybeEnableEarlyTracing().
      */
     static void maybeEnable() {
         ThreadUtils.assertOnUiThread();
+        if (sState != STATE_DISABLED) return;
         boolean shouldEnable = false;
         // Checking for the trace config filename touches the disk.
         StrictMode.ThreadPolicy oldPolicy = StrictMode.allowThreadDiskReads();
@@ -126,6 +133,18 @@ public class EarlyTraceEvent {
                     // Access denied, not enabled.
                 }
             }
+            if (ContextUtils.getAppSharedPreferences().getBoolean(
+                        BACKGROUND_STARTUP_TRACING_ENABLED_KEY, false)) {
+                if (shouldEnable) {
+                    // If user has enabled tracing, then force disable background tracing for this
+                    // session.
+                    setBackgroundStartupTracingFlag(false);
+                    sCachedBackgroundStartupTracingFlag = false;
+                } else {
+                    sCachedBackgroundStartupTracingFlag = true;
+                    shouldEnable = true;
+                }
+            }
         } finally {
             StrictMode.setThreadPolicy(oldPolicy);
         }
@@ -137,8 +156,9 @@ public class EarlyTraceEvent {
         synchronized (sLock) {
             if (sState != STATE_DISABLED) return;
             sCompletedEvents = new ArrayList<Event>();
-            sPendingEvents = new HashMap<String, Event>();
+            sPendingEventByKey = new HashMap<String, Event>();
             sAsyncEvents = new ArrayList<AsyncEvent>();
+            sPendingAsyncEvents = new ArrayList<String>();
             sState = STATE_ENABLED;
         }
     }
@@ -172,6 +192,28 @@ public class EarlyTraceEvent {
         return sState == STATE_ENABLED;
     }
 
+    /**
+     * Sets the background startup tracing enabled in app preferences for next startup.
+     */
+    @CalledByNative
+    static void setBackgroundStartupTracingFlag(boolean enabled) {
+        ContextUtils.getAppSharedPreferences()
+                .edit()
+                .putBoolean(BACKGROUND_STARTUP_TRACING_ENABLED_KEY, enabled)
+                .apply();
+    }
+
+    /**
+     * Returns true if the background startup tracing flag is set.
+     *
+     * This does not return the correct value if called before maybeEnable() was called. But that is
+     * called really early in startup.
+     */
+    @CalledByNative
+    public static boolean getBackgroundStartupTracingFlag() {
+        return sCachedBackgroundStartupTracingFlag;
+    }
+
     /** @see {@link TraceEvent#begin()}. */
     public static void begin(String name) {
         // begin() and end() are going to be called once per TraceEvent, this avoids entering a
@@ -181,7 +223,7 @@ public class EarlyTraceEvent {
         Event conflictingEvent;
         synchronized (sLock) {
             if (!enabled()) return;
-            conflictingEvent = sPendingEvents.put(name, event);
+            conflictingEvent = sPendingEventByKey.put(makeEventKeyForCurrentThread(name), event);
         }
         if (conflictingEvent != null) {
             throw new IllegalArgumentException(
@@ -194,7 +236,7 @@ public class EarlyTraceEvent {
         if (!isActive()) return;
         synchronized (sLock) {
             if (!isActive()) return;
-            Event event = sPendingEvents.remove(name);
+            Event event = sPendingEventByKey.remove(makeEventKeyForCurrentThread(name));
             if (event == null) return;
             event.end();
             sCompletedEvents.add(event);
@@ -209,16 +251,19 @@ public class EarlyTraceEvent {
         synchronized (sLock) {
             if (!enabled()) return;
             sAsyncEvents.add(event);
+            sPendingAsyncEvents.add(name);
         }
     }
 
     /** @see {@link TraceEvent#finishAsync()}. */
     public static void finishAsync(String name, long id) {
-        if (!enabled()) return;
+        if (!isActive()) return;
         AsyncEvent event = new AsyncEvent(name, id, false /*isStart*/);
         synchronized (sLock) {
-            if (!enabled()) return;
+            if (!isActive()) return;
+            if (!sPendingAsyncEvents.remove(name)) return;
             sAsyncEvents.add(event);
+            if (sState == STATE_FINISHING) maybeFinishLocked();
         }
     }
 
@@ -226,8 +271,9 @@ public class EarlyTraceEvent {
     static void resetForTesting() {
         sState = EarlyTraceEvent.STATE_DISABLED;
         sCompletedEvents = null;
-        sPendingEvents = null;
+        sPendingEventByKey = null;
         sAsyncEvents = null;
+        sPendingAsyncEvents = null;
     }
 
     private static void maybeFinishLocked() {
@@ -239,17 +285,17 @@ public class EarlyTraceEvent {
             dumpAsyncEvents(sAsyncEvents);
             sAsyncEvents.clear();
         }
-        if (sPendingEvents.isEmpty()) {
+        if (sPendingEventByKey.isEmpty() && sPendingAsyncEvents.isEmpty()) {
             sState = STATE_FINISHED;
-            sPendingEvents = null;
+            sPendingEventByKey = null;
             sCompletedEvents = null;
+            sPendingAsyncEvents = null;
+            sAsyncEvents = null;
         }
     }
 
     private static void dumpEvents(List<Event> events) {
-        long nativeNowNanos = TimeUtils.nativeGetTimeTicksNowUs() * 1000;
-        long javaNowNanos = Event.elapsedRealtimeNanos();
-        long offsetNanos = nativeNowNanos - javaNowNanos;
+        long offsetNanos = getOffsetNanos();
         for (Event e : events) {
             nativeRecordEarlyEvent(e.mName, e.mBeginTimeNanos + offsetNanos,
                     e.mEndTimeNanos + offsetNanos, e.mThreadId,
@@ -257,9 +303,7 @@ public class EarlyTraceEvent {
         }
     }
     private static void dumpAsyncEvents(List<AsyncEvent> events) {
-        long nativeNowNanos = TimeUtils.nativeGetTimeTicksNowUs() * 1000;
-        long javaNowNanos = Event.elapsedRealtimeNanos();
-        long offsetNanos = nativeNowNanos - javaNowNanos;
+        long offsetNanos = getOffsetNanos();
         for (AsyncEvent e : events) {
             if (e.mIsStart) {
                 nativeRecordEarlyStartAsyncEvent(e.mName, e.mId, e.mTimestampNanos + offsetNanos);
@@ -267,6 +311,22 @@ public class EarlyTraceEvent {
                 nativeRecordEarlyFinishAsyncEvent(e.mName, e.mId, e.mTimestampNanos + offsetNanos);
             }
         }
+    }
+
+    private static long getOffsetNanos() {
+        long nativeNowNanos = TimeUtils.nativeGetTimeTicksNowUs() * 1000;
+        long javaNowNanos = Event.elapsedRealtimeNanos();
+        return nativeNowNanos - javaNowNanos;
+    }
+
+    /**
+     * Returns a key which consists of |name| and the ID of the current thread.
+     * The key is used with pending events making them thread-specific, thus avoiding
+     * an exception when similarly named events are started from multiple threads.
+     */
+    @VisibleForTesting
+    static String makeEventKeyForCurrentThread(String name) {
+        return name + "@" + Process.myTid();
     }
 
     private static native void nativeRecordEarlyEvent(String name, long beginTimNanos,

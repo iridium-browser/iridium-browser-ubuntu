@@ -91,10 +91,13 @@ class PopupBlockerTabHelper
   // |opener_url| is an optional parameter used to compute how the popup
   // permission will behave. If it is not set the current committed URL will be
   // used instead.
+  //
+  // If this function returns true, then the contents of |params| is moved to
+  // |blocked_popups_|.
   static bool MaybeBlockPopup(
       content::WebContents* web_contents,
       const base::Optional<GURL>& opener_url,
-      const NavigateParams& params,
+      NavigateParams* params,
       const content::OpenURLParams* open_url_params,
       const blink::mojom::WindowFeatures& window_features);
 
@@ -118,7 +121,7 @@ class PopupBlockerTabHelper
 
   explicit PopupBlockerTabHelper(content::WebContents* web_contents);
 
-  void AddBlockedPopup(const NavigateParams& params,
+  void AddBlockedPopup(NavigateParams* params,
                        const blink::mojom::WindowFeatures& window_features,
                        PopupBlockType block_type);
 
@@ -131,7 +134,7 @@ class PopupBlockerTabHelper
   // list, so it is keyed by an id which is continually increased.
   std::map<int32_t, std::unique_ptr<BlockedRequest>> blocked_popups_;
 
-  base::ObserverList<Observer> observers_;
+  base::ObserverList<Observer>::Unchecked observers_;
 
   int32_t next_id_ = 0;
 

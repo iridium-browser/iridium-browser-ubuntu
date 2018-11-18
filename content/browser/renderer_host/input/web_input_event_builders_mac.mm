@@ -37,8 +37,10 @@
 
 #include "base/mac/sdk_forward_declarations.h"
 #include "base/strings/string_util.h"
+#include "base/time/time.h"
 #include "third_party/blink/public/platform/web_input_event.h"
 #include "ui/base/cocoa/cocoa_base_utils.h"
+#include "ui/events/base_event_utils.h"
 #include "ui/events/blink/blink_event_util.h"
 #import "ui/events/cocoa/cocoa_event_utils.h"
 #include "ui/events/keycodes/keyboard_code_conversion.h"
@@ -217,10 +219,10 @@ blink::WebKeyboardEvent WebKeyboardEventBuilder::Build(NSEvent* event) {
   if (([event type] != NSFlagsChanged) && [event isARepeat])
     modifiers |= blink::WebInputEvent::kIsAutoRepeat;
 
-  blink::WebKeyboardEvent result(ui::IsKeyUpEvent(event)
-                                     ? blink::WebInputEvent::kKeyUp
-                                     : blink::WebInputEvent::kRawKeyDown,
-                                 modifiers, [event timestamp]);
+  blink::WebKeyboardEvent result(
+      ui::IsKeyUpEvent(event) ? blink::WebInputEvent::kKeyUp
+                              : blink::WebInputEvent::kRawKeyDown,
+      modifiers, ui::EventTimeStampFromSeconds([event timestamp]));
   result.windows_key_code =
       ui::LocatedToNonLocatedKeyboardCode(ui::KeyboardCodeFromNSEvent(event));
   result.native_key_code = [event keyCode];
@@ -330,7 +332,8 @@ blink::WebMouseEvent WebMouseEventBuilder::Build(
   // NSMouseExited and NSMouseEntered events don't have deviceID.
   // Therefore pen exit and enter events can't get correct id.
   blink::WebMouseEvent result(event_type, ModifiersFromEvent(event),
-                              [event timestamp], 0);
+                              ui::EventTimeStampFromSeconds([event timestamp]),
+                              0);
   result.click_count = click_count;
   result.button = button;
   SetWebEventLocationFromEventInView(&result, event, view);
@@ -372,9 +375,9 @@ blink::WebMouseEvent WebMouseEventBuilder::Build(
 blink::WebMouseWheelEvent WebMouseWheelEventBuilder::Build(
     NSEvent* event,
     NSView* view) {
-  blink::WebMouseWheelEvent result(blink::WebInputEvent::kMouseWheel,
-                                   ModifiersFromEvent(event),
-                                   [event timestamp]);
+  blink::WebMouseWheelEvent result(
+      blink::WebInputEvent::kMouseWheel, ModifiersFromEvent(event),
+      ui::EventTimeStampFromSeconds([event timestamp]));
   result.button = blink::WebMouseEvent::Button::kNoButton;
 
   SetWebEventLocationFromEventInView(&result, event, view);
@@ -527,14 +530,18 @@ blink::WebGestureEvent WebGestureEventBuilder::Build(NSEvent* event,
   result.SetPositionInScreen(temp.PositionInScreen());
 
   result.SetModifiers(ModifiersFromEvent(event));
-  result.SetTimeStampSeconds([event timestamp]);
+  result.SetTimeStamp(ui::EventTimeStampFromSeconds([event timestamp]));
 
   result.SetSourceDevice(blink::kWebGestureDeviceTouchpad);
 
   switch ([event type]) {
     case NSEventTypeMagnify:
+      // We don't need to set the type based on |[event phase]| as the caller
+      // must set the begin and end types in order to support older Mac
+      // versions.
       result.SetType(blink::WebInputEvent::kGesturePinchUpdate);
       result.data.pinch_update.scale = [event magnification] + 1.0;
+      result.SetNeedsWheelEvent(true);
       break;
     case NSEventTypeSmartMagnify:
       // Map the Cocoa "double-tap with two fingers" zoom gesture to regular
@@ -561,6 +568,74 @@ blink::WebGestureEvent WebGestureEventBuilder::Build(NSEvent* event,
       NOTIMPLEMENTED();
   }
 
+  return result;
+}
+
+// WebTouchEvent --------------------------------------------------------------
+
+blink::WebTouchEvent WebTouchEventBuilder::Build(NSEvent* event, NSView* view) {
+  blink::WebInputEvent::Type event_type =
+      blink::WebInputEvent::Type::kUndefined;
+  NSEventType type = [event type];
+  blink::WebTouchPoint::State state = blink::WebTouchPoint::kStateUndefined;
+  switch (type) {
+    case NSLeftMouseDown:
+      event_type = blink::WebInputEvent::kTouchStart;
+      state = blink::WebTouchPoint::kStatePressed;
+      break;
+    case NSLeftMouseUp:
+      event_type = blink::WebInputEvent::kTouchEnd;
+      state = blink::WebTouchPoint::kStateReleased;
+      break;
+    case NSLeftMouseDragged:
+    case NSRightMouseDragged:
+    case NSOtherMouseDragged:
+    case NSMouseMoved:
+    case NSRightMouseDown:
+    case NSOtherMouseDown:
+    case NSRightMouseUp:
+    case NSOtherMouseUp:
+      event_type = blink::WebInputEvent::kTouchMove;
+      state = blink::WebTouchPoint::kStateMoved;
+      break;
+    default:
+      NOTREACHED() << "Invalid types for touch events." << type;
+  }
+
+  blink::WebTouchEvent result(event_type, ModifiersFromEvent(event),
+                              ui::EventTimeStampFromSeconds([event timestamp]));
+  result.hovering = event_type == blink::WebInputEvent::kTouchEnd;
+  result.unique_touch_event_id = ui::GetNextTouchEventId();
+  result.touches_length = 1;
+
+  // Use a temporary WebMouseEvent to get the location.
+  blink::WebMouseEvent temp;
+  SetWebEventLocationFromEventInView(&temp, event, view);
+  result.touches[0].SetPositionInWidget(temp.PositionInWidget());
+  result.touches[0].SetPositionInScreen(temp.PositionInScreen());
+  result.touches[0].movement_x = temp.movement_x;
+  result.touches[0].movement_y = temp.movement_y;
+
+  result.touches[0].state = state;
+  result.touches[0].pointer_type =
+      blink::WebPointerProperties::PointerType::kPen;
+  result.touches[0].id = [event pointingDeviceID];
+  result.touches[0].force = [event pressure];
+  NSPoint tilt = [event tilt];
+  result.touches[0].tilt_x = lround(tilt.x * 90);
+  result.touches[0].tilt_y = lround(tilt.y * 90);
+  result.touches[0].tangential_pressure = [event tangentialPressure];
+  // NSEvent spec doesn't specify the range of rotation, we make sure that
+  // this value is in the range of [0,359].
+  int twist = (int)[event rotation];
+  twist = twist % 360;
+  if (twist < 0)
+    twist += 360;
+  result.touches[0].twist = twist;
+  float rotation_angle = twist % 180;
+  if (rotation_angle > 90)
+    rotation_angle = 180.f - rotation_angle;
+  result.touches[0].rotation_angle = rotation_angle;
   return result;
 }
 

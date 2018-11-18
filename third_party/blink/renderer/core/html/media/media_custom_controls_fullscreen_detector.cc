@@ -14,9 +14,11 @@
 
 namespace blink {
 
+using blink::WebFullscreenVideoStatus;
+
 namespace {
 
-constexpr double kCheckFullscreenIntervalSeconds = 1.0f;
+constexpr TimeDelta kCheckFullscreenInterval = TimeDelta::FromSeconds(1);
 constexpr float kMostlyFillViewportThresholdOfOccupationProportion = 0.85f;
 constexpr float kMostlyFillViewportThresholdOfVisibleProportion = 0.75f;
 
@@ -27,7 +29,7 @@ MediaCustomControlsFullscreenDetector::MediaCustomControlsFullscreenDetector(
     : EventListener(kCPPEventListenerType),
       video_element_(video),
       check_viewport_intersection_timer_(
-          video.GetDocument().GetTaskRunner(TaskType::kUnthrottled),
+          video.GetDocument().GetTaskRunner(TaskType::kInternalMedia),
           this,
           &MediaCustomControlsFullscreenDetector::
               OnCheckViewportIntersectionTimerFired) {
@@ -57,10 +59,8 @@ void MediaCustomControlsFullscreenDetector::Detach() {
       EventTypeNames::fullscreenchange, this, true);
   check_viewport_intersection_timer_.Stop();
 
-  if (VideoElement().GetWebMediaPlayer()) {
-    VideoElement().GetWebMediaPlayer()->SetIsEffectivelyFullscreen(
-        blink::WebFullscreenVideoStatus::kNotEffectivelyFullscreen);
-  }
+  VideoElement().SetIsEffectivelyFullscreen(
+      WebFullscreenVideoStatus::kNotEffectivelyFullscreen);
 }
 
 bool MediaCustomControlsFullscreenDetector::ComputeIsDominantVideoForTests(
@@ -113,23 +113,16 @@ void MediaCustomControlsFullscreenDetector::handleEvent(
   if (!VideoElement().isConnected() || !IsVideoOrParentFullscreen()) {
     check_viewport_intersection_timer_.Stop();
 
-    if (VideoElement().GetWebMediaPlayer()) {
-      VideoElement().GetWebMediaPlayer()->SetIsEffectivelyFullscreen(
-          blink::WebFullscreenVideoStatus::kNotEffectivelyFullscreen);
-    }
-
+    VideoElement().SetIsEffectivelyFullscreen(
+        WebFullscreenVideoStatus::kNotEffectivelyFullscreen);
     return;
   }
 
-  check_viewport_intersection_timer_.StartOneShot(
-      kCheckFullscreenIntervalSeconds, FROM_HERE);
+  check_viewport_intersection_timer_.StartOneShot(kCheckFullscreenInterval,
+                                                  FROM_HERE);
 }
 
 void MediaCustomControlsFullscreenDetector::ContextDestroyed() {
-  // This method is called by HTMLVideoElement when it observes context destroy.
-  // The reason is that when HTMLMediaElement observes context destroy, it will
-  // destroy webMediaPlayer() thus the final
-  // setIsEffectivelyFullscreen(kNotEffectivelyFullscreen) is not called.
   Detach();
 }
 
@@ -144,12 +137,9 @@ void MediaCustomControlsFullscreenDetector::
       geometry.TargetIntRect(), geometry.RootIntRect(),
       geometry.IntersectionIntRect());
 
-  if (!VideoElement().GetWebMediaPlayer())
-    return;
-
   if (!is_dominant) {
-    VideoElement().GetWebMediaPlayer()->SetIsEffectivelyFullscreen(
-        blink::WebFullscreenVideoStatus::kNotEffectivelyFullscreen);
+    VideoElement().SetIsEffectivelyFullscreen(
+        WebFullscreenVideoStatus::kNotEffectivelyFullscreen);
     return;
   }
 
@@ -158,12 +148,11 @@ void MediaCustomControlsFullscreenDetector::
       !RuntimeEnabledFeatures::PictureInPictureEnabled() &&
       !VideoElement().FastHasAttribute(HTMLNames::disablepictureinpictureAttr);
   if (picture_in_picture_allowed) {
-    VideoElement().GetWebMediaPlayer()->SetIsEffectivelyFullscreen(
-        blink::WebFullscreenVideoStatus::kFullscreenAndPictureInPictureEnabled);
+    VideoElement().SetIsEffectivelyFullscreen(
+        WebFullscreenVideoStatus::kFullscreenAndPictureInPictureEnabled);
   } else {
-    VideoElement().GetWebMediaPlayer()->SetIsEffectivelyFullscreen(
-        blink::WebFullscreenVideoStatus::
-            kFullscreenAndPictureInPictureDisabled);
+    VideoElement().SetIsEffectivelyFullscreen(
+        WebFullscreenVideoStatus::kFullscreenAndPictureInPictureDisabled);
   }
 }
 

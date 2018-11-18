@@ -9,8 +9,9 @@
 #include "base/command_line.h"
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
+#include "base/strings/string_split.h"
 #include "base/synchronization/waitable_event.h"
-#include "base/task_scheduler/task_scheduler.h"
+#include "base/task/task_scheduler/task_scheduler.h"
 #include "base/threading/thread.h"
 #include "base/time/time.h"
 #include "build/build_config.h"
@@ -116,9 +117,15 @@ class CertVerifyImplUsingProc : public CertVerifyImpl {
       return true;  // "skipping" is considered a successful return.
     }
 
+    base::FilePath dump_path;
+    if (!dump_prefix_path.empty()) {
+      dump_path = dump_prefix_path.AddExtension(FILE_PATH_LITERAL(".pem"))
+                      .InsertBeforeExtensionASCII("." + GetName());
+    }
+
     return VerifyUsingCertVerifyProc(proc_.get(), target_der_cert, hostname,
                                      intermediate_der_certs, root_der_certs,
-                                     crl_set, dump_prefix_path);
+                                     crl_set, dump_path);
   }
 
  private:
@@ -152,6 +159,25 @@ class CertVerifyImplUsingPathBuilder : public CertVerifyImpl {
   }
 };
 
+// Creates an subclass of CertVerifyImpl based on its name, or returns nullptr.
+std::unique_ptr<CertVerifyImpl> CreateCertVerifyImplFromName(
+    base::StringPiece impl_name) {
+  if (impl_name == "platform")
+    return std::make_unique<CertVerifyImplUsingProc>(
+        "CertVerifyProc (default)", net::CertVerifyProc::CreateDefault());
+
+  if (impl_name == "builtin") {
+    return std::make_unique<CertVerifyImplUsingProc>(
+        "CertVerifyProcBuiltin", net::CreateCertVerifyProcBuiltin());
+  }
+
+  if (impl_name == "pathbuilder")
+    return std::make_unique<CertVerifyImplUsingPathBuilder>();
+
+  std::cerr << "WARNING: Unrecognized impl: " << impl_name << "\n";
+  return nullptr;
+}
+
 const char kUsage[] =
     " [flags] <target/chain>\n"
     "\n"
@@ -173,6 +199,17 @@ const char kUsage[] =
     " --intermediates=<certs path>\n"
     "      <certs path> is a file containing certificates [1] for use when\n"
     "      path building is looking for intermediates.\n"
+    "\n"
+    " --impls=<ordered list of implementations>\n"
+    "      Ordered list of the verifier implementations to run. If omitted,\n"
+    "      will default to: \"platform,builtin,pathbuilder\".\n"
+    "      Changing this can lead to different results in cases where the\n"
+    "      platform verifier affects global caches (as in the case of NSS).\n"
+    "\n"
+    " --trust-last-cert\n"
+    "      Removes the final intermediate from the chain and instead adds it\n"
+    "      as a root. This is useful when providing a <target/chain>\n"
+    "      parameter whose final certificate is a trust anchor.\n"
     "\n"
     " --time=<time>\n"
     "      Use <time> instead of the current system time. <time> is\n"
@@ -279,6 +316,18 @@ int main(int argc, char** argv) {
     return 1;
   }
 
+  // If --trust-last-cert was specified, move the final intermediate to the
+  // roots list.
+  if (command_line.HasSwitch("trust-last-cert")) {
+    if (intermediate_der_certs.empty()) {
+      std::cerr << "ERROR: no intermediate certificates\n";
+      return 1;
+    }
+
+    root_der_certs.push_back(intermediate_der_certs.back());
+    intermediate_der_certs.pop_back();
+  }
+
   // Create a network thread to be used for AIA fetches, and wait for a
   // CertNetFetcher to be constructed on that thread.
   base::Thread::Options options(base::MessageLoop::TYPE_IO, 0);
@@ -295,16 +344,25 @@ int main(int argc, char** argv) {
                                 &initialization_complete_event));
   initialization_complete_event.Wait();
 
-  // Sequentially run each of the certificate verifier implementations.
   std::vector<std::unique_ptr<CertVerifyImpl>> impls;
 
-  impls.push_back(
-      std::unique_ptr<CertVerifyImplUsingProc>(new CertVerifyImplUsingProc(
-          "CertVerifyProc (default)", net::CertVerifyProc::CreateDefault())));
-  impls.push_back(std::make_unique<CertVerifyImplUsingProc>(
-      "CertVerifyProcBuiltin", net::CreateCertVerifyProcBuiltin()));
-  impls.push_back(std::make_unique<CertVerifyImplUsingPathBuilder>());
+  // Parse the ordered list of CertVerifyImpl passed via command line flags into
+  // |impls|.
+  std::string impls_str = command_line.GetSwitchValueASCII("impls");
+  if (impls_str.empty())
+    impls_str = "platform,builtin,pathbuilder";  // Default value.
 
+  std::vector<std::string> impl_names = base::SplitString(
+      impls_str, ",", base::TRIM_WHITESPACE, base::SPLIT_WANT_NONEMPTY);
+
+  for (const std::string& impl_name : impl_names) {
+    auto verify_impl = CreateCertVerifyImplFromName(impl_name);
+    if (verify_impl)
+      impls.push_back(std::move(verify_impl));
+  }
+
+  // Sequentially run the chain with each of the selected verifier
+  // implementations.
   bool all_impls_success = true;
 
   for (size_t i = 0; i < impls.size(); ++i) {

@@ -7,12 +7,15 @@
 #include <memory>
 #include <utility>
 
+#include "base/bind.h"
+#include "base/json/json_writer.h"
 #include "base/mac/foundation_util.h"
 #include "base/strings/sys_string_conversions.h"
 #import "components/autofill/ios/browser/autofill_agent.h"
 #import "components/autofill/ios/browser/js_autofill_manager.h"
 #import "components/autofill/ios/browser/js_suggestion_manager.h"
 #include "google_apis/google_api_keys.h"
+#include "ios/web/public/favicon_url.h"
 #include "ios/web/public/load_committed_details.h"
 #import "ios/web/public/navigation_manager.h"
 #include "ios/web/public/referrer.h"
@@ -20,16 +23,18 @@
 #import "ios/web/public/web_state/context_menu_params.h"
 #import "ios/web/public/web_state/js/crw_js_injection_receiver.h"
 #import "ios/web/public/web_state/navigation_context.h"
-#import "ios/web/public/web_state/ui/crw_web_delegate.h"
 #import "ios/web/public/web_state/ui/crw_web_view_proxy.h"
 #import "ios/web/public/web_state/ui/crw_web_view_scroll_view_proxy.h"
+#import "ios/web/public/web_state/web_frames_manager.h"
 #import "ios/web/public/web_state/web_state.h"
 #import "ios/web/public/web_state/web_state_delegate_bridge.h"
 #import "ios/web/public/web_state/web_state_observer_bridge.h"
 #include "ios/web_view/cwv_web_view_features.h"
 #import "ios/web_view/internal/autofill/cwv_autofill_controller_internal.h"
+#import "ios/web_view/internal/cwv_favicon_internal.h"
 #import "ios/web_view/internal/cwv_html_element_internal.h"
 #import "ios/web_view/internal/cwv_navigation_action_internal.h"
+#import "ios/web_view/internal/cwv_script_command_internal.h"
 #import "ios/web_view/internal/cwv_scroll_view_internal.h"
 #import "ios/web_view/internal/cwv_web_view_configuration_internal.h"
 #import "ios/web_view/internal/translate/cwv_translation_controller_internal.h"
@@ -53,7 +58,25 @@
 namespace {
 // A key used in NSCoder to store the session storage object.
 NSString* const kSessionStorageKey = @"sessionStorage";
+
+// Converts base::DictionaryValue to NSDictionary.
+NSDictionary* NSDictionaryFromDictionaryValue(
+    const base::DictionaryValue& value) {
+  std::string json;
+  if (!base::JSONWriter::Write(value, &json)) {
+    NOTREACHED() << "Failed to convert base::DictionaryValue to JSON";
+    return nil;
+  }
+
+  NSData* json_data = [NSData dataWithBytes:json.c_str() length:json.length()];
+  NSDictionary* ns_dictionary =
+      [NSJSONSerialization JSONObjectWithData:json_data
+                                      options:kNilOptions
+                                        error:nil];
+  DCHECK(ns_dictionary) << "Failed to convert JSON to NSDictionary";
+  return ns_dictionary;
 }
+}  // namespace
 
 @interface CWVWebView ()<CRWWebStateDelegate, CRWWebStateObserver> {
   CWVWebViewConfiguration* _configuration;
@@ -66,6 +89,8 @@ NSString* const kSessionStorageKey = @"sessionStorage";
   // Handles presentation of JavaScript dialogs.
   std::unique_ptr<ios_web_view::WebViewJavaScriptDialogPresenter>
       _javaScriptDialogPresenter;
+  std::map<std::string, web::WebState::ScriptCommandCallback>
+      _scriptCommandCallbacks;
 }
 
 // Redefine these properties as readwrite to define setters, which send KVO
@@ -162,6 +187,16 @@ static NSString* gUserAgentProduct = nil;
   return self;
 }
 
+- (BOOL)allowsBackForwardNavigationGestures {
+  return _webState->GetWebViewProxy().allowsBackForwardNavigationGestures;
+}
+
+- (void)setAllowsBackForwardNavigationGestures:
+    (BOOL)allowsBackForwardNavigationGestures {
+  _webState->GetWebViewProxy().allowsBackForwardNavigationGestures =
+      allowsBackForwardNavigationGestures;
+}
+
 - (void)dealloc {
   if (_webState && _webStateObserver) {
     _webState->RemoveObserver(_webStateObserver.get());
@@ -227,6 +262,10 @@ static NSString* gUserAgentProduct = nil;
 - (void)webStateDestroyed:(web::WebState*)webState {
   webState->RemoveObserver(_webStateObserver.get());
   _webStateObserver.reset();
+  for (const auto& pair : _scriptCommandCallbacks) {
+    webState->RemoveScriptCommandCallback(pair.first);
+  }
+  _scriptCommandCallbacks.clear();
 }
 
 - (void)webState:(web::WebState*)webState
@@ -394,6 +433,43 @@ static NSString* gUserAgentProduct = nil;
   }
 }
 
+- (void)webState:(web::WebState*)webState
+    didUpdateFaviconURLCandidates:
+        (const std::vector<web::FaviconURL>&)candidates {
+  if ([_UIDelegate respondsToSelector:@selector(webView:didLoadFavicons:)]) {
+    [_UIDelegate webView:self
+         didLoadFavicons:[CWVFavicon faviconsFromFaviconURLs:candidates]];
+  }
+}
+
+- (void)addScriptCommandHandler:(id<CWVScriptCommandHandler>)handler
+                  commandPrefix:(NSString*)commandPrefix {
+  CWVWebView* __weak weakSelf = self;
+  const web::WebState::ScriptCommandCallback callback =
+      base::BindRepeating(^bool(
+          const base::DictionaryValue& content, const GURL& mainDocumentURL,
+          bool userInteracting, bool isMainFrame, web::WebFrame* senderFrame) {
+        NSDictionary* nsContent = NSDictionaryFromDictionaryValue(content);
+        CWVScriptCommand* command = [[CWVScriptCommand alloc]
+            initWithContent:nsContent
+            mainDocumentURL:net::NSURLWithGURL(mainDocumentURL)
+            userInteracting:userInteracting];
+        return [handler webView:weakSelf
+            handleScriptCommand:command
+                  fromMainFrame:isMainFrame];
+      });
+
+  std::string stdCommandPrefix = base::SysNSStringToUTF8(commandPrefix);
+  _webState->AddScriptCommandCallback(callback, stdCommandPrefix);
+  _scriptCommandCallbacks[stdCommandPrefix] = callback;
+}
+
+- (void)removeScriptCommandHandlerForCommandPrefix:(NSString*)commandPrefix {
+  std::string stdCommandPrefix = base::SysNSStringToUTF8(commandPrefix);
+  _webState->RemoveScriptCommandCallback(stdCommandPrefix);
+  _scriptCommandCallbacks.erase(stdCommandPrefix);
+}
+
 #pragma mark - Translation
 
 - (CWVTranslationController*)translationController {
@@ -433,11 +509,15 @@ static NSString* gUserAgentProduct = nil;
       base::mac::ObjCCastStrict<JsSuggestionManager>(
           [_webState->GetJSInjectionReceiver()
               instanceOfClass:[JsSuggestionManager class]]);
+  web::WebFramesManager* framesManager =
+      web::WebFramesManager::FromWebState(_webState.get());
+  [JSSuggestionManager setWebFramesManager:framesManager];
   return [[CWVAutofillController alloc] initWithWebState:_webState.get()
                                            autofillAgent:autofillAgent
                                        JSAutofillManager:JSAutofillManager
                                      JSSuggestionManager:JSSuggestionManager];
 }
+
 #endif  // BUILDFLAG(IOS_WEB_VIEW_ENABLE_AUTOFILL)
 
 #pragma mark - Preserving and Restoring State
@@ -474,12 +554,19 @@ static NSString* gUserAgentProduct = nil;
     if (_webStateObserver) {
       _webState->RemoveObserver(_webStateObserver.get());
     }
+    for (const auto& pair : _scriptCommandCallbacks) {
+      _webState->RemoveScriptCommandCallback(pair.first);
+    }
 
     // The web view provided by the old |_webState| has been added as a subview.
     // It must be removed and replaced with a new |_webState|'s web view, which
     // is added later.
     [_webState->GetView() removeFromSuperview];
   }
+
+  BOOL allowsBackForwardNavigationGestures =
+      _webState &&
+      _webState->GetWebViewProxy().allowsBackForwardNavigationGestures;
 
   web::WebState::CreateParams webStateCreateParams(_configuration.browserState);
   if (sessionStorage) {
@@ -506,6 +593,13 @@ static NSString* gUserAgentProduct = nil;
   _javaScriptDialogPresenter =
       std::make_unique<ios_web_view::WebViewJavaScriptDialogPresenter>(self,
                                                                        nullptr);
+
+  for (const auto& pair : _scriptCommandCallbacks) {
+    _webState->AddScriptCommandCallback(pair.second, pair.first);
+  }
+
+  _webState->GetWebViewProxy().allowsBackForwardNavigationGestures =
+      allowsBackForwardNavigationGestures;
 
   _scrollView.proxy = _webState.get()->GetWebViewProxy().scrollViewProxy;
 

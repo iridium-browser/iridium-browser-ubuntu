@@ -42,6 +42,15 @@ ReadOnlySharedMemoryRegion WritableSharedMemoryRegion::ConvertToReadOnly(
   return ReadOnlySharedMemoryRegion::Deserialize(std::move(handle));
 }
 
+UnsafeSharedMemoryRegion WritableSharedMemoryRegion::ConvertToUnsafe(
+    WritableSharedMemoryRegion region) {
+  subtle::PlatformSharedMemoryRegion handle = std::move(region.handle_);
+  if (!handle.ConvertToUnsafe())
+    return {};
+
+  return UnsafeSharedMemoryRegion::Deserialize(std::move(handle));
+}
+
 WritableSharedMemoryRegion::WritableSharedMemoryRegion() = default;
 WritableSharedMemoryRegion::WritableSharedMemoryRegion(
     WritableSharedMemoryRegion&& region) = default;
@@ -75,8 +84,10 @@ bool WritableSharedMemoryRegion::IsValid() const {
 WritableSharedMemoryRegion::WritableSharedMemoryRegion(
     subtle::PlatformSharedMemoryRegion handle)
     : handle_(std::move(handle)) {
-  CHECK_EQ(handle_.GetMode(),
-           subtle::PlatformSharedMemoryRegion::Mode::kWritable);
+  if (handle_.IsValid()) {
+    CHECK_EQ(handle_.GetMode(),
+             subtle::PlatformSharedMemoryRegion::Mode::kWritable);
+  }
 }
 
 }  // namespace base

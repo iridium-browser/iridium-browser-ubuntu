@@ -17,6 +17,7 @@
 #include "components/metrics/metrics_pref_names.h"
 #include "components/prefs/pref_registry_simple.h"
 #include "components/prefs/pref_service.h"
+#include "components/variations/hashing.h"
 #include "extensions/buildflags/buildflags.h"
 #include "third_party/metrics_proto/system_profile.pb.h"
 
@@ -60,6 +61,24 @@ void RecordChildKills(RendererType histogram_type) {
                             histogram_type, RENDERER_TYPE_COUNT);
 }
 
+// Macro for logging the age of a crashed process.
+//
+// Notes:
+// - IMPORTANT: When changing the constants below, please change the names of
+//   the histograms logged via UMA_HISTOGRAM_CRASHED_PROCESS_AGE.
+// - 99th percentile of Memory.Experimental.Renderer.Uptime hovers around 17h.
+// - |kCrashedProcessAgeMin| is as low as possible, so that we may with
+//   high-confidence categorize crashes that occur during early startup (e.g.
+//   crashes that end up with STATUS_DLL_INIT_FAILED or STATUS_DLL_NOT_FOUND).
+// - Note that even with just 50 buckets, we still get narrow and accurate
+//   buckets at the lower end: 0ms, 1ms, 2ms, 3ms, 4-5ms, 6-8ms, 9-12ms, ...
+constexpr auto kCrashedProcessAgeMin = base::TimeDelta::FromMilliseconds(1);
+constexpr auto kCrashedProcessAgeMax = base::TimeDelta::FromHours(48);
+constexpr uint32_t kCrashedProcessAgeCount = 50;
+#define UMA_HISTOGRAM_CRASHED_PROCESS_AGE(histogram_name, uptime)           \
+  UMA_HISTOGRAM_CUSTOM_TIMES(histogram_name, uptime, kCrashedProcessAgeMin, \
+                             kCrashedProcessAgeMax, kCrashedProcessAgeCount)
+
 }  // namespace
 
 StabilityMetricsHelper::StabilityMetricsHelper(PrefService* local_state)
@@ -84,6 +103,12 @@ void StabilityMetricsHelper::ProvideStabilityMetrics(
   if (count) {
     stability_proto->set_child_process_crash_count(count);
     local_state_->SetInteger(prefs::kStabilityChildProcessCrashCount, 0);
+  }
+
+  count = local_state_->GetInteger(prefs::kStabilityGpuCrashCount);
+  if (count) {
+    stability_proto->set_gpu_crash_count(count);
+    local_state_->SetInteger(prefs::kStabilityGpuCrashCount, 0);
   }
 
   count = local_state_->GetInteger(prefs::kStabilityRendererCrashCount);
@@ -141,6 +166,7 @@ void StabilityMetricsHelper::ClearSavedStabilityMetrics() {
   local_state_->SetInteger(prefs::kStabilityExtensionRendererFailedLaunchCount,
                            0);
   local_state_->SetInteger(prefs::kStabilityExtensionRendererLaunchCount, 0);
+  local_state_->SetInteger(prefs::kStabilityGpuCrashCount, 0);
   local_state_->SetInteger(prefs::kStabilityPageLoadCount, 0);
   local_state_->SetInteger(prefs::kStabilityRendererCrashCount, 0);
   local_state_->SetInteger(prefs::kStabilityRendererFailedLaunchCount, 0);
@@ -157,6 +183,7 @@ void StabilityMetricsHelper::RegisterPrefs(PrefRegistrySimple* registry) {
       prefs::kStabilityExtensionRendererFailedLaunchCount, 0);
   registry->RegisterIntegerPref(prefs::kStabilityExtensionRendererLaunchCount,
                                 0);
+  registry->RegisterIntegerPref(prefs::kStabilityGpuCrashCount, 0);
   registry->RegisterIntegerPref(prefs::kStabilityPageLoadCount, 0);
   registry->RegisterIntegerPref(prefs::kStabilityRendererCrashCount, 0);
   registry->RegisterIntegerPref(prefs::kStabilityRendererFailedLaunchCount, 0);
@@ -168,6 +195,27 @@ void StabilityMetricsHelper::RegisterPrefs(PrefRegistrySimple* registry) {
 
 void StabilityMetricsHelper::IncreaseRendererCrashCount() {
   IncrementPrefValue(prefs::kStabilityRendererCrashCount);
+}
+
+void StabilityMetricsHelper::IncreaseGpuCrashCount() {
+  IncrementPrefValue(prefs::kStabilityGpuCrashCount);
+}
+
+void StabilityMetricsHelper::BrowserUtilityProcessLaunched(
+    const std::string& metrics_name) {
+  uint32_t hash = variations::HashName(metrics_name);
+  base::UmaHistogramSparse("ChildProcess.Launched.UtilityProcessHash", hash);
+}
+
+void StabilityMetricsHelper::BrowserUtilityProcessCrashed(
+    const std::string& metrics_name,
+    int exit_code) {
+  // TODO(wfh): there doesn't appear to be a good way to log these exit_codes
+  // without adding something into the stability proto, so for now only log the
+  // crash and if the numbers are high enough, logging exit codes can be added
+  // later.
+  uint32_t hash = variations::HashName(metrics_name);
+  base::UmaHistogramSparse("ChildProcess.Crashed.UtilityProcessHash", hash);
 }
 
 void StabilityMetricsHelper::BrowserChildProcessCrashed() {
@@ -184,9 +232,11 @@ void StabilityMetricsHelper::LogLoadStarted(bool is_incognito) {
   // might be lost due to a crash :-(.
 }
 
-void StabilityMetricsHelper::LogRendererCrash(bool was_extension_process,
-                                              base::TerminationStatus status,
-                                              int exit_code) {
+void StabilityMetricsHelper::LogRendererCrash(
+    bool was_extension_process,
+    base::TerminationStatus status,
+    int exit_code,
+    base::Optional<base::TimeDelta> uptime) {
   RendererType histogram_type =
       was_extension_process ? RENDERER_TYPE_EXTENSION : RENDERER_TYPE_RENDERER;
 
@@ -204,11 +254,19 @@ void StabilityMetricsHelper::LogRendererCrash(bool was_extension_process,
 
         base::UmaHistogramSparse("CrashExitCodes.Extension",
                                  MapCrashExitCodeForHistogram(exit_code));
+        if (uptime.has_value()) {
+          UMA_HISTOGRAM_CRASHED_PROCESS_AGE(
+              "Stability.CrashedProcessAge.Extension", uptime.value());
+        }
       } else {
         IncrementPrefValue(prefs::kStabilityRendererCrashCount);
 
         base::UmaHistogramSparse("CrashExitCodes.Renderer",
                                  MapCrashExitCodeForHistogram(exit_code));
+        if (uptime.has_value()) {
+          UMA_HISTOGRAM_CRASHED_PROCESS_AGE(
+              "Stability.CrashedProcessAge.Renderer", uptime.value());
+        }
       }
 
       UMA_HISTOGRAM_ENUMERATION("BrowserRenderProcessHost.ChildCrashes",

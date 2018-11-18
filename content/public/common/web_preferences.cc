@@ -90,6 +90,8 @@ WebPreferences::WebPreferences()
       xss_auditor_enabled(true),
       dns_prefetching_enabled(true),
       data_saver_enabled(false),
+      data_saver_holdback_web_api_enabled(false),
+      data_saver_holdback_media_api_enabled(false),
       local_storage_enabled(false),
       databases_enabled(false),
       application_cache_enabled(false),
@@ -156,7 +158,9 @@ WebPreferences::WebPreferences()
       shrinks_viewport_contents_to_fit(true),
       viewport_style(ViewportStyle::MOBILE),
       always_show_context_menu_on_touch(false),
-      smooth_scroll_for_find_enabled(true),
+      // TODO(sunyunjia): Re-enable smooth scroll for find on Android.
+      // https://crbug.com/845500
+      smooth_scroll_for_find_enabled(false),
 #else
       viewport_meta_enabled(false),
       shrinks_viewport_contents_to_fit(false),
@@ -183,13 +187,19 @@ WebPreferences::WebPreferences()
       user_gesture_required_for_presentation(true),
       text_track_margin_percentage(0.0f),
       immersive_mode_enabled(false),
-#if defined(OS_ANDROID)
+#if defined(OS_ANDROID) || defined(OS_MACOSX)
+      double_tap_to_zoom_enabled(true),
+#else
+      double_tap_to_zoom_enabled(false),
+#endif
+#if !defined(OS_ANDROID)
+      text_autosizing_enabled(false),
+#else
       text_autosizing_enabled(true),
       font_scale_factor(1.0f),
       device_scale_adjustment(1.0f),
       force_enable_zoom(false),
       fullscreen_supported(true),
-      double_tap_to_zoom_enabled(true),
       support_deprecated_target_density_dpi(false),
       use_legacy_background_size_shorthand_behavior(false),
       wide_viewport_quirk(false),
@@ -223,13 +233,15 @@ WebPreferences::WebPreferences()
       default_maximum_page_scale_factor(4.f),
 #endif
       hide_download_ui(false),
-      background_video_track_optimization_enabled(false),
       presentation_receiver(false),
       media_controls_enabled(true),
       do_not_update_selection_on_mutating_selection_range(false),
       autoplay_policy(AutoplayPolicy::kDocumentUserActivationRequired),
       low_priority_iframes_threshold(net::EFFECTIVE_CONNECTION_TYPE_UNKNOWN),
-      picture_in_picture_enabled(false) {
+      picture_in_picture_enabled(true),
+      translate_service_available(false),
+      network_quality_estimator_web_holdback(
+          net::EFFECTIVE_CONNECTION_TYPE_UNKNOWN) {
   standard_font_family_map[kCommonScript] =
       base::ASCIIToUTF16("Times New Roman");
   fixed_font_family_map[kCommonScript] = base::ASCIIToUTF16("Courier New");

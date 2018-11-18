@@ -88,6 +88,9 @@ class ContentBrowserTestSuite : public ContentTestSuiteBase {
     InitializeMojo();
 #endif
 
+    // Browser tests are expected not to tear-down various globals.
+    base::TestSuite::DisableCheckForLeakedGlobals();
+
     ContentTestSuiteBase::Initialize();
   }
 

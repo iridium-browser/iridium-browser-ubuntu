@@ -16,6 +16,7 @@
 #include "xfa/fgas/font/cfgas_fontmgr.h"
 #include "xfa/fwl/cfwl_notedriver.h"
 #include "xfa/fwl/cfwl_widgetmgr.h"
+#include "xfa/fwl/ifwl_adaptertimermgr.h"
 #include "xfa/fxfa/cxfa_ffdoc.h"
 #include "xfa/fxfa/cxfa_ffwidgethandler.h"
 #include "xfa/fxfa/cxfa_fontmgr.h"
@@ -51,9 +52,12 @@ CFGAS_FontMgr* CXFA_FFApp::GetFDEFontMgr() {
   return m_pFDEFontMgr.get();
 }
 
-CXFA_FWLTheme* CXFA_FFApp::GetFWLTheme() {
-  if (!m_pFWLTheme)
-    m_pFWLTheme = pdfium::MakeUnique<CXFA_FWLTheme>(this);
+CXFA_FWLTheme* CXFA_FFApp::GetFWLTheme(CXFA_FFDoc* doc) {
+  if (!m_pFWLTheme) {
+    auto fwl_theme = pdfium::MakeUnique<CXFA_FWLTheme>(this);
+    if (fwl_theme->LoadCalendarFont(doc))
+      m_pFWLTheme = std::move(fwl_theme);
+  }
   return m_pFWLTheme.get();
 }
 
@@ -63,8 +67,8 @@ CXFA_FWLAdapterWidgetMgr* CXFA_FFApp::GetFWLAdapterWidgetMgr() {
   return m_pAdapterWidgetMgr.get();
 }
 
-IFWL_AdapterTimerMgr* CXFA_FFApp::GetTimerMgr() const {
-  return m_pProvider->GetTimerMgr();
+std::unique_ptr<IFWL_AdapterTimerMgr> CXFA_FFApp::NewTimerMgr() const {
+  return m_pProvider->NewTimerMgr();
 }
 
 void CXFA_FFApp::ClearEventTargets() {

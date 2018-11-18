@@ -22,9 +22,8 @@ extern "C" {
 #define GL_MAILBOX_SIZE_CHROMIUM 16
 #endif
 #ifdef GL_GLEXT_PROTOTYPES
-GL_APICALL void GL_APIENTRY glGenMailboxCHROMIUM(GLbyte* mailbox);
-GL_APICALL void GL_APIENTRY
-glProduceTextureDirectCHROMIUM(GLuint texture, const GLbyte* mailbox);
+GL_APICALL void GL_APIENTRY glProduceTextureDirectCHROMIUM(GLuint texture,
+                                                           GLbyte* mailbox);
 GL_APICALL GLuint GL_APIENTRY
 glCreateAndConsumeTextureCHROMIUM(const GLbyte* mailbox);
 #endif
@@ -181,11 +180,19 @@ typedef void (GL_APIENTRYP PFNGLREQUESTEXTENSIONCHROMIUMPROC) (
 #ifndef GL_CHROMIUM_post_sub_buffer
 #define GL_CHROMIUM_post_sub_buffer 1
 #ifdef GL_GLEXT_PROTOTYPES
-GL_APICALL void GL_APIENTRY glPostSubBufferCHROMIUM(
-    GLint x, GLint y, GLint width, GLint height);
+GL_APICALL void GL_APIENTRY glPostSubBufferCHROMIUM(GLuint64 swap_id,
+                                                    GLint x,
+                                                    GLint y,
+                                                    GLint width,
+                                                    GLint height,
+                                                    GLbitfield flags);
 #endif
-typedef void (GL_APIENTRYP PFNGLPOSTSUBBUFFERCHROMIUMPROC) (
-    GLint x, GLint y, GLint width, GLint height);
+typedef void(GL_APIENTRYP PFNGLPOSTSUBBUFFERCHROMIUMPROC)(GLuint64 swap_id,
+                                                          GLint x,
+                                                          GLint y,
+                                                          GLint width,
+                                                          GLint height,
+                                                          GLbitfield flags);
 #endif  /* GL_CHROMIUM_post_sub_buffer */
 
 /* GL_CHROMIUM_bind_uniform_location */
@@ -389,17 +396,6 @@ typedef void(GL_APIENTRYP PFNGLCOPYSUBTEXTURECHROMIUMPROC)(
     GLboolean unpack_premultiply_alpha,
     GLboolean unpack_unmultiply_alpha);
 #endif  /* GL_CHROMIUM_copy_texture */
-
-/* GL_CHROMIUM_compressed_copy_texture */
-#ifndef GL_CHROMIUM_compressed_copy_texture
-#define GL_CHROMIUM_compressed_copy_texture 1
-#ifdef GL_GLEXT_PROTOTYPES
-GL_APICALL void GL_APIENTRY glCompressedCopyTextureCHROMIUM(
-    GLenum source_id, GLenum dest_id);
-#endif
-typedef void(GL_APIENTRYP PFNGLCOMPRESSEDCOPYTEXTURECHROMIUMPROC)(
-    GLenum source_id, GLenum dest_id);
-#endif  /* GL_CHROMIUM_compressed_copy_texture */
 
 /* GL_CHROMIUM_lose_context */
 #ifndef GL_CHROMIUM_lose_context
@@ -732,7 +728,8 @@ glScheduleOverlayPlaneCHROMIUM(GLint plane_z_order,
                                GLfloat uv_y,
                                GLfloat uv_width,
                                GLfloat uv_height,
-                               GLboolean enable_blend);
+                               GLboolean enable_blend,
+                               GLuint gpu_fence_id);
 #endif
 typedef void(GL_APIENTRYP PFNGLSCHEDULEOVERLAYPLANECHROMIUMPROC)(
     GLint plane_z_order,
@@ -746,7 +743,8 @@ typedef void(GL_APIENTRYP PFNGLSCHEDULEOVERLAYPLANECHROMIUMPROC)(
     GLfloat uv_y,
     GLfloat uv_width,
     GLfloat uv_height,
-    GLboolean enable_blend);
+    GLboolean enable_blend,
+    GLuint gpu_fence_id);
 #endif /* GL_CHROMIUM_schedule_overlay_plane */
 
 #ifndef GL_CHROMIUM_schedule_ca_layer
@@ -811,6 +809,15 @@ typedef void(GL_APIENTRYP PFNGLSCHEDULECALAYERINUSEQUERYCHROMIUMPROC)(
 #define GL_COMMANDS_COMPLETED_CHROMIUM 0x84F7
 #endif
 #endif  /* GL_CHROMIUM_sync_query */
+
+/* GL_CHROMIUM_nonblocking_readback */
+#ifndef GL_CHROMIUM_nonblocking_readback
+#define GL_CHROMIUM_nonblocking_readback 1
+
+#ifndef GL_READBACK_SHADOW_COPIES_UPDATED_CHROMIUM
+#define GL_READBACK_SHADOW_COPIES_UPDATED_CHROMIUM 0x84F8
+#endif
+#endif /* GL_CHROMIUM_nonblocking_readback */
 
 #ifndef GL_CHROMIUM_path_rendering
 #define GL_CHROMIUM_path_rendering 1
@@ -1264,6 +1271,10 @@ typedef void(GL_APIENTRYP PFNGLUNPREMULTIPLYANDDITHERCOPYCHROMIUMPROC)(
     GLsizei width,
     GLsizei height);
 #endif /* GL_CHROMIUM_unpremultiply_and_dither_copy */
+
+#ifndef GL_QUERY_RESULT_AVAILABLE_NO_FLUSH_CHROMIUM_EXT
+#define GL_QUERY_RESULT_AVAILABLE_NO_FLUSH_CHROMIUM_EXT 0x8868
+#endif
 
 #ifdef __cplusplus
 }

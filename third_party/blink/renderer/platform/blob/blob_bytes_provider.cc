@@ -5,11 +5,12 @@
 #include "third_party/blink/renderer/platform/blob/blob_bytes_provider.h"
 
 #include "base/numerics/safe_conversions.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "mojo/public/cpp/bindings/strong_binding.h"
 #include "third_party/blink/public/platform/platform.h"
 #include "third_party/blink/renderer/platform/cross_thread_functional.h"
 #include "third_party/blink/renderer/platform/histogram.h"
+#include "third_party/blink/renderer/platform/scheduler/public/thread.h"
 #include "third_party/blink/renderer/platform/web_task_runner.h"
 #include "third_party/blink/renderer/platform/wtf/functional.h"
 
@@ -95,7 +96,6 @@ void IncreaseChildProcessRefCount() {
     return;
   }
   Platform::Current()->SuddenTerminationChanged(false);
-  Platform::Current()->AddRefProcess();
 }
 
 void DecreaseChildProcessRefCount() {
@@ -106,7 +106,6 @@ void DecreaseChildProcessRefCount() {
     return;
   }
   Platform::Current()->SuddenTerminationChanged(true);
-  Platform::Current()->ReleaseRefProcess();
 }
 
 }  // namespace
@@ -188,7 +187,7 @@ void BlobBytesProvider::RequestAsFile(uint64_t source_offset,
                                   ("Storage.Blob.RendererFileWriteFailed"));
 
   if (!file.IsValid()) {
-    std::move(callback).Run(WTF::nullopt);
+    std::move(callback).Run(base::nullopt);
     return;
   }
 
@@ -197,7 +196,7 @@ void BlobBytesProvider::RequestAsFile(uint64_t source_offset,
   bool seek_failed = seek_distance < 0;
   seek_histogram.Count(seek_failed);
   if (seek_failed) {
-    std::move(callback).Run(WTF::nullopt);
+    std::move(callback).Run(base::nullopt);
     return;
   }
 
@@ -231,7 +230,7 @@ void BlobBytesProvider::RequestAsFile(uint64_t source_offset,
       bool write_failed = actual_written < 0;
       write_histogram.Count(write_failed);
       if (write_failed) {
-        std::move(callback).Run(WTF::nullopt);
+        std::move(callback).Run(base::nullopt);
         return;
       }
       written += actual_written;
@@ -241,12 +240,12 @@ void BlobBytesProvider::RequestAsFile(uint64_t source_offset,
   }
 
   if (!file.Flush()) {
-    std::move(callback).Run(WTF::nullopt);
+    std::move(callback).Run(base::nullopt);
     return;
   }
   base::File::Info info;
   if (!file.GetInfo(&info)) {
-    std::move(callback).Run(WTF::nullopt);
+    std::move(callback).Run(base::nullopt);
     return;
   }
   std::move(callback).Run(info.last_modified);

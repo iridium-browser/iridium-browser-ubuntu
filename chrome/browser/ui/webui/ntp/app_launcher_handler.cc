@@ -20,11 +20,13 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
+#include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/crx_installer.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/extensions/extension_ui_util.h"
+#include "chrome/browser/extensions/extension_util.h"
 #include "chrome/browser/extensions/launch_util.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
@@ -41,6 +43,7 @@
 #include "chrome/browser/ui/webui/extensions/extension_basic_info.h"
 #include "chrome/browser/ui/webui/extensions/extension_icon_source.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
+#include "chrome/browser/web_applications/extensions/bookmark_app_util.h"
 #include "chrome/common/buildflags.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/extension_constants.h"
@@ -101,7 +104,8 @@ AppLauncherHandler::AppInstallInfo::AppInstallInfo() {}
 
 AppLauncherHandler::AppInstallInfo::~AppInstallInfo() {}
 
-AppLauncherHandler::AppLauncherHandler(ExtensionService* extension_service)
+AppLauncherHandler::AppLauncherHandler(
+    extensions::ExtensionService* extension_service)
     : extension_service_(extension_service),
       ignore_changes_(false),
       attempted_bookmark_app_install_(false),
@@ -111,10 +115,9 @@ AppLauncherHandler::~AppLauncherHandler() {
   ExtensionRegistry::Get(Profile::FromWebUI(web_ui()))->RemoveObserver(this);
 }
 
-void AppLauncherHandler::CreateAppInfo(
-    const Extension* extension,
-    ExtensionService* service,
-    base::DictionaryValue* value) {
+void AppLauncherHandler::CreateAppInfo(const Extension* extension,
+                                       extensions::ExtensionService* service,
+                                       base::DictionaryValue* value) {
   // The items which are to be written into |value| are also described in
   // chrome/browser/resources/ntp4/page_list_view.js in @typedef for AppInfo.
   // Please update it whenever you add or remove any keys here.
@@ -149,6 +152,22 @@ void AppLauncherHandler::CreateAppInfo(
   value->SetBoolean("mayDisable", extensions::ExtensionSystem::Get(
       service->profile())->management_policy()->UserMayModifySettings(
       extension, NULL));
+
+  bool is_locally_installed =
+      !extension->is_hosted_app() ||
+      BookmarkAppIsLocallyInstalled(service->profile(), extension);
+  value->SetBoolean("mayChangeLaunchType",
+                    !extension->is_platform_app() && is_locally_installed);
+
+#if defined(OS_MACOSX)
+  // On Mac, only packaged apps can have shortcuts created.
+  value->SetBoolean("mayCreateShortcuts", extension->is_platform_app());
+#else
+  // On other platforms, any locally installed app can have shortcuts created.
+  value->SetBoolean("mayCreateShortcuts", is_locally_installed);
+#endif
+
+  value->SetBoolean("isLocallyInstalled", is_locally_installed);
 
   auto icon_size = extension_misc::EXTENSION_ICON_LARGE;
   auto match_type = ExtensionIconSet::MATCH_BIGGER;
@@ -357,8 +376,7 @@ void AppLauncherHandler::FillAppDictionary(base::DictionaryValue* dictionary) {
   Profile* profile = Profile::FromWebUI(web_ui());
   PrefService* prefs = profile->GetPrefs();
 
-  for (std::set<std::string>::iterator it = visible_apps_.begin();
-       it != visible_apps_.end(); ++it) {
+  for (auto it = visible_apps_.begin(); it != visible_apps_.end(); ++it) {
     const Extension* extension = extension_service_->GetInstalledExtension(*it);
     if (extension && extensions::ui_util::ShouldDisplayInNewTabPage(
             extension, profile)) {
@@ -823,7 +841,7 @@ void AppLauncherHandler::ExtensionEnableFlowAborted(bool user_initiated) {
       extension_service_->GetExtensionById(extension_id_prompting_, true);
   std::string histogram_name = user_initiated ? "ReEnableCancel"
                                               : "ReEnableAbort";
-  ExtensionService::RecordPermissionMessagesHistogram(
+  extensions::ExtensionService::RecordPermissionMessagesHistogram(
       extension, histogram_name.c_str());
 
   extension_enable_flow_.reset();

@@ -69,14 +69,12 @@ bool chrome_logging_failed_ = false;
 // Assertion handler for logging errors that occur when dialogs are
 // silenced.  To record a new error, pass the log string associated
 // with that error in the str parameter.
-MSVC_DISABLE_OPTIMIZE();
-void SilentRuntimeAssertHandler(const char* file,
-                                int line,
-                                const base::StringPiece message,
-                                const base::StringPiece stack_trace) {
+NOINLINE void SilentRuntimeAssertHandler(const char* file,
+                                         int line,
+                                         const base::StringPiece message,
+                                         const base::StringPiece stack_trace) {
   base::debug::BreakDebugger();
 }
-MSVC_ENABLE_OPTIMIZE();
 
 // Suppresses error/assertion dialogs and enables the logging of
 // those errors into silenced_errors_.
@@ -128,7 +126,7 @@ bool GetLogsPath(base::FilePath* result) {
 #ifdef NDEBUG
   // Release builds write to the data dir. This is a copy of the Windows
   // implementation of GetDefaultUserDataDirectory().
-  if (!PathService::Get(base::DIR_LOCAL_APP_DATA, result))
+  if (!base::PathService::Get(base::DIR_LOCAL_APP_DATA, result))
     return false;
   *result = result->Append(install_static::GetChromeInstallSubDirectory());
   *result = result->Append(chrome::kUserDataDirname);
@@ -136,7 +134,7 @@ bool GetLogsPath(base::FilePath* result) {
 
 #else
   // Debug builds write next to the binary (in the build tree)
-  return PathService::Get(base::DIR_EXE, result);
+  return base::PathService::Get(base::DIR_EXE, result);
 #endif  // NDEBUG
 }
 

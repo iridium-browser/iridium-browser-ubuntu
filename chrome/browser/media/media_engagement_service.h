@@ -65,9 +65,6 @@ class MediaEngagementService : public KeyedService,
   // Record a visit of a |url|.
   void RecordVisit(const GURL& url);
 
-  // Record a media playback on a |url|.
-  void RecordPlayback(const GURL& url);
-
   // Returns an array of engagement score details for all origins which
   // have a score.
   std::vector<media::mojom::MediaEngagementScoreDetailsPtr> GetAllScoreDetails()
@@ -75,10 +72,7 @@ class MediaEngagementService : public KeyedService,
 
   // Overridden from history::HistoryServiceObserver:
   void OnURLsDeleted(history::HistoryService* history_service,
-                     bool all_history,
-                     bool expired,
-                     const history::URLRows& deleted_rows,
-                     const std::set<GURL>& favicon_urls) override;
+                     const history::DeletionInfo& deletion_info) override;
 
   // KeyedService support:
   void Shutdown() override;
@@ -105,6 +99,8 @@ class MediaEngagementService : public KeyedService,
   // The name of the histogram that records the reason why the engagement was
   // cleared, either partially or fully.
   static const char kHistogramClearName[];
+
+  const base::Clock* clock() const { return clock_; }
 
  private:
   friend class MediaEngagementBrowserTest;

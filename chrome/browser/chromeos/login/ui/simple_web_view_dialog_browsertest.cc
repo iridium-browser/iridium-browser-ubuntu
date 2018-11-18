@@ -50,7 +50,8 @@ class InterstitialPageDelegate : public content::InterstitialPageDelegate {
 
 class SimpleWebViewDialogTest : public LoginManagerTest {
  public:
-  SimpleWebViewDialogTest() : LoginManagerTest(false) {}
+  SimpleWebViewDialogTest()
+      : LoginManagerTest(false, true /* should_initialize_webui */) {}
   ~SimpleWebViewDialogTest() override {}
 
   InterstitialPageDelegate* CreateDelegate(CaptivePortalWindowProxy* proxy) {
@@ -65,7 +66,7 @@ class SimpleWebViewDialogTest : public LoginManagerTest {
 
 IN_PROC_BROWSER_TEST_F(SimpleWebViewDialogTest, Interstitial) {
   content::WebContents* web_contents =
-      LoginDisplayHost::default_host()->GetWebUILoginView()->GetWebContents();
+      LoginDisplayHost::default_host()->GetOobeWebContents();
   StubDelegate delegate;
   CaptivePortalWindowProxy proxy(&delegate, web_contents);
   proxy.Show();

@@ -401,9 +401,12 @@ InjectedScript.prototype = {
                     var isAccessorProperty = descriptor && ("get" in descriptor || "set" in descriptor);
                     if (accessorPropertiesOnly && !isAccessorProperty)
                         continue;
-                    if (descriptor && "get" in descriptor && "set" in descriptor && name !== "__proto__" &&
+                    // Special case for Symbol.prototype.description where the receiver of the getter is not an actual object.
+                    // Should only occur for nested previews.
+                    var isSymbolDescription = isSymbol(object) && name === 'description';
+                    if (isSymbolDescription || (descriptor && "get" in descriptor && "set" in descriptor && name !== "__proto__" &&
                             InjectedScriptHost.formatAccessorsAsProperties(object, descriptor.get) &&
-                            !doesAttributeHaveObservableSideEffectOnGet(object, name)) {
+                            !doesAttributeHaveObservableSideEffectOnGet(object, name))) {
                         descriptor.value = object[property];
                         descriptor.isOwn = true;
                         delete descriptor.get;
@@ -594,6 +597,9 @@ InjectedScript.prototype = {
             return toString(obj);
 
         if (subtype === "node") {
+            // We should warmup blink dom binding before calling anything,
+            // see (crbug.com/827585) for details.
+            InjectedScriptHost.getOwnPropertyDescriptor(/** @type {!Object} */(obj), "nodeName");
             var description = "";
             var nodeName = InjectedScriptHost.getProperty(obj, "nodeName");
             if (nodeName) {
@@ -655,16 +661,15 @@ InjectedScript.prototype = {
 
         if (InjectedScriptHost.subtype(obj) === "error") {
             try {
-                var stack = obj.stack;
-                var message = obj.message && obj.message.length ? ": " + obj.message : "";
-                var firstCallFrame = /^\s+at\s/m.exec(stack);
-                var stackMessageEnd = firstCallFrame ? firstCallFrame.index : -1;
-                if (stackMessageEnd !== -1) {
-                    var stackTrace = stack.substr(stackMessageEnd);
-                    return className + message + "\n" + stackTrace;
-                }
-                return className + message;
+                const stack = obj.stack;
+                if (stack.substr(0, className.length) === className)
+                    return stack;
+                const message = obj.message;
+                const index = /* suppressBlacklist */ stack.indexOf(message);
+                const messageWithStack = index !== -1 ? stack.substr(index) : message;
+                return className + ': ' + messageWithStack;
             } catch(e) {
+                return className;
             }
         }
 

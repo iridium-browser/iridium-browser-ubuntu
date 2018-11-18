@@ -11,6 +11,7 @@ import android.accounts.AccountManagerCallback;
 import android.accounts.AuthenticatorDescription;
 import android.accounts.AuthenticatorException;
 import android.accounts.OperationCanceledException;
+import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -189,10 +190,29 @@ public class SystemAccountManagerDelegate implements AccountManagerDelegate {
      * @param elapsedMs the elapsed time in milliseconds.
      */
     protected static void recordElapsedTimeHistogram(String histogramName, long elapsedMs) {
-        if (!LibraryLoader.isInitialized()) return;
+        if (!LibraryLoader.getInstance().isInitialized()) return;
         RecordHistogram.recordTimesHistogram(histogramName, elapsedMs, TimeUnit.MILLISECONDS);
     }
 
+    // No permission is needed on 23+ and Chrome always has MANAGE_ACCOUNTS permission on lower APIs
+    @SuppressLint("MissingPermission")
+    @Override
+    public void createAddAccountIntent(Callback<Intent> callback) {
+        AccountManagerCallback<Bundle> accountManagerCallback = accountManagerFuture -> {
+            try {
+                Bundle bundle = accountManagerFuture.getResult();
+                callback.onResult(bundle.getParcelable(AccountManager.KEY_INTENT));
+            } catch (OperationCanceledException | IOException | AuthenticatorException e) {
+                Log.e(TAG, "Error while creating an intent to add an account: ", e);
+                callback.onResult(null);
+            }
+        };
+        mAccountManager.addAccount(GoogleAuthUtil.GOOGLE_ACCOUNT_TYPE, null, null, null, null,
+                accountManagerCallback, null);
+    }
+
+    // No permission is needed on 23+ and Chrome always has MANAGE_ACCOUNTS permission on lower APIs
+    @SuppressLint("MissingPermission")
     @Override
     public void updateCredentials(
             Account account, Activity activity, final Callback<Boolean> callback) {

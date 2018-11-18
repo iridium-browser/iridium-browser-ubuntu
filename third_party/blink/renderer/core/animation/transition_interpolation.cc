@@ -46,7 +46,8 @@ NonInterpolableValue* TransitionInterpolation::CurrentNonInterpolableValue()
 }
 
 void TransitionInterpolation::Apply(StyleResolverState& state) const {
-  CSSInterpolationTypesMap map(state.GetDocument().GetPropertyRegistry());
+  CSSInterpolationTypesMap map(state.GetDocument().GetPropertyRegistry(),
+                               state.GetDocument());
   CSSInterpolationEnvironment environment(map, state, nullptr);
   type_.Apply(CurrentInterpolableValue(), CurrentNonInterpolableValue(),
               environment);
@@ -58,10 +59,10 @@ TransitionInterpolation::GetInterpolatedValue() const {
       type_, CurrentInterpolableValue().Clone(), CurrentNonInterpolableValue());
 }
 
-scoped_refptr<AnimatableValue>
-TransitionInterpolation::GetInterpolatedCompositorValue() const {
-  return AnimatableValue::Interpolate(compositor_start_.get(),
-                                      compositor_end_.get(), cached_fraction_);
+AnimatableValue* TransitionInterpolation::GetInterpolatedCompositorValue()
+    const {
+  return AnimatableValue::Interpolate(compositor_start_, compositor_end_,
+                                      cached_fraction_);
 }
 
 }  // namespace blink

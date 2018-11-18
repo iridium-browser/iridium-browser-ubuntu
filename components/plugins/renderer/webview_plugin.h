@@ -15,9 +15,10 @@
 #include "third_party/blink/public/platform/web_string.h"
 #include "third_party/blink/public/platform/web_url_response.h"
 #include "third_party/blink/public/web/blink.h"
-#include "third_party/blink/public/web/web_frame_client.h"
+#include "third_party/blink/public/web/web_local_frame_client.h"
 #include "third_party/blink/public/web/web_plugin.h"
 #include "third_party/blink/public/web/web_view_client.h"
+#include "third_party/blink/public/web/web_widget_client.h"
 
 namespace blink {
 class WebLocalFrame;
@@ -90,7 +91,7 @@ class WebViewPlugin : public blink::WebPlugin,
   bool IsErrorPlaceholder() override;
 
   void UpdateAllLifecyclePhases() override;
-  void Paint(blink::WebCanvas* canvas, const blink::WebRect& rect) override;
+  void Paint(cc::PaintCanvas* canvas, const blink::WebRect& rect) override;
 
   // Coordinates are relative to the containing window.
   void UpdateGeometry(const blink::WebRect& window_rect,
@@ -106,7 +107,7 @@ class WebViewPlugin : public blink::WebPlugin,
       blink::WebCursorInfo& cursor_info) override;
 
   void DidReceiveResponse(const blink::WebURLResponse& response) override;
-  void DidReceiveData(const char* data, int data_length) override;
+  void DidReceiveData(const char* data, size_t data_length) override;
   void DidFinishLoading() override;
   void DidFailLoading(const blink::WebURLError& error) override;
 
@@ -147,7 +148,8 @@ class WebViewPlugin : public blink::WebPlugin,
 
   // A helper that handles interaction from WebViewPlugin's internal WebView.
   class WebViewHelper : public blink::WebViewClient,
-                        public blink::WebFrameClient {
+                        public blink::WebWidgetClient,
+                        public blink::WebLocalFrameClient {
    public:
     WebViewHelper(WebViewPlugin* plugin,
                   const content::WebPreferences& preferences);
@@ -160,6 +162,7 @@ class WebViewPlugin : public blink::WebPlugin,
     bool AcceptsLoadDrops() override;
     bool CanHandleGestureEvent() override;
     bool CanUpdateLayout() override;
+    blink::WebWidgetClient* WidgetClient() override;
 
     // WebWidgetClient methods:
     void SetToolTipText(const blink::WebString&,
@@ -167,10 +170,10 @@ class WebViewPlugin : public blink::WebPlugin,
     void StartDragging(blink::WebReferrerPolicy,
                        const blink::WebDragData&,
                        blink::WebDragOperationsMask,
-                       const blink::WebImage&,
+                       const SkBitmap&,
                        const blink::WebPoint&) override;
-    // TODO(ojan): Remove this override and have this class use a non-null
-    // layerTreeView.
+    // TODO(ojan): Remove this override and have this class give a
+    // LayerTreeView to the WebWidget. Or stop making this a WebView?
     bool AllowsBrokenNullLayerTreeView() const override;
     void DidInvalidateRect(const blink::WebRect&) override;
     void DidChangeCursor(const blink::WebCursorInfo& cursor) override;
@@ -178,7 +181,7 @@ class WebViewPlugin : public blink::WebPlugin,
     std::unique_ptr<blink::WebURLLoaderFactory> CreateURLLoaderFactory()
         override;
 
-    // WebFrameClient methods:
+    // WebLocalFrameClient methods:
     void DidClearWindowObject() override;
     void FrameDetached(DetachType) override;
 

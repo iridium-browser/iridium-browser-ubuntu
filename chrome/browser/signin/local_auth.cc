@@ -105,7 +105,7 @@ std::string CreateSecurePasswordHash(const std::string& salt,
 
   // Library call to create secure password hash as SymmetricKey (uses PBKDF2).
   std::unique_ptr<crypto::SymmetricKey> password_key(
-      crypto::SymmetricKey::DeriveKeyFromPassword(
+      crypto::SymmetricKey::DeriveKeyFromPasswordUsingPbkdf2(
           crypto::SymmetricKey::AES, password, salt, encoding.iteration_count,
           encoding.hash_bits));
   std::string password_hash = password_key->key();
@@ -164,12 +164,6 @@ bool DecodePasswordHashRecord(const std::string& encoded,
 std::string LocalAuth::TruncateStringByBits(const std::string& str,
                                             const size_t len_bits) {
   return ::TruncateStringByBits(str, len_bits);
-}
-
-void LocalAuth::RegisterLocalAuthPrefs(
-    user_prefs::PrefRegistrySyncable* registry) {
-  registry->RegisterStringPref(prefs::kGoogleServicesPasswordHash,
-                               std::string());
 }
 
 void LocalAuth::SetLocalAuthCredentialsWithEncoding(

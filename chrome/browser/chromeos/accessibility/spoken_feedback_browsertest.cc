@@ -6,12 +6,19 @@
 
 #include "ash/accelerators/accelerator_controller.h"
 #include "ash/public/cpp/accelerators.h"
+#include "ash/public/cpp/app_list/app_list_features.h"
+#include "ash/public/cpp/app_list/app_list_switches.h"
+#include "ash/public/cpp/ash_features.h"
+#include "ash/root_window_controller.h"
 #include "ash/shell.h"
+#include "ash/system/status_area_widget.h"
 #include "ash/system/tray/system_tray.h"
+#include "ash/system/unified/unified_system_tray.h"
 #include "base/command_line.h"
 #include "base/macros.h"
 #include "base/strings/pattern.h"
 #include "base/strings/string_util.h"
+#include "base/task/post_task.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/accessibility/accessibility_manager.h"
@@ -20,9 +27,11 @@
 #include "chrome/browser/chromeos/login/ui/login_display_host.h"
 #include "chrome/browser/chromeos/login/ui/webui_login_view.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
+#include "chrome/browser/extensions/api/automation_internal/automation_event_router.h"
 #include "chrome/browser/extensions/api/braille_display_private/stub_braille_controller.h"
 #include "chrome/browser/speech/tts_controller.h"
 #include "chrome/browser/speech/tts_platform.h"
+#include "chrome/browser/ui/ash/ksv/keyboard_shortcut_viewer_util.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_window.h"
@@ -34,8 +43,9 @@
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/ui_test_utils.h"
 #include "chromeos/chromeos_switches.h"
-#include "components/signin/core/account_id/account_id.h"
+#include "components/account_id/account_id.h"
 #include "components/user_manager/user_names.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/test/browser_test_utils.h"
@@ -43,10 +53,9 @@
 #include "extensions/browser/extension_host.h"
 #include "extensions/browser/process_manager.h"
 #include "testing/gtest/include/gtest/gtest.h"
-#include "ui/app_list/app_list_features.h"
-#include "ui/app_list/app_list_switches.h"
 #include "ui/base/test/ui_controls.h"
 #include "ui/compositor/scoped_animation_duration_scale_mode.h"
+#include "ui/views/mus/ax_remote_host.h"
 #include "ui/views/widget/widget.h"
 
 using extensions::api::braille_display_private::StubBrailleController;
@@ -239,6 +248,43 @@ IN_PROC_BROWSER_TEST_F(LoggedInSpokenFeedbackTest,
   EXPECT_EQ("Not pressed", speech_monitor_.GetNextUtterance());
 }
 
+// Tests the keyboard shortcut viewer, which is an out-of-process mojo app.
+IN_PROC_BROWSER_TEST_F(LoggedInSpokenFeedbackTest, KeyboardShortcutViewer) {
+  EnableChromeVox();
+  keyboard_shortcut_viewer_util::ToggleKeyboardShortcutViewer();
+
+  // Focus should move to the search field and ChromeVox should speak it.
+  while ("Search for keyboard shortcuts" !=
+         speech_monitor_.GetNextUtterance()) {
+  }
+
+  // Capture the destroyed AX tree id when the remote host disconnects.
+  base::RunLoop run_loop;
+  ui::AXTreeID destroyed_tree_id = ui::AXTreeIDUnknown();
+  extensions::AutomationEventRouter::GetInstance()
+      ->SetTreeDestroyedCallbackForTest(base::BindRepeating(
+          [](base::RunLoop* run_loop, ui::AXTreeID* destroyed_tree_id,
+             ui::AXTreeID tree_id) {
+            *destroyed_tree_id = tree_id;
+            run_loop->Quit();
+          },
+          &run_loop, &destroyed_tree_id));
+
+  // Close the remote shortcut viewer app.
+  keyboard_shortcut_viewer_util::ToggleKeyboardShortcutViewer();
+
+  // Wait for the AX tree to be destroyed.
+  run_loop.Run();
+
+  // Verify an AX tree was destroyed. It's awkward to get the remote app's
+  // actual tree ID, so just ensure it's a valid ID and not the desktop.
+  EXPECT_NE(ui::AXTreeIDUnknown(), destroyed_tree_id);
+  EXPECT_NE(ui::DesktopAXTreeID(), destroyed_tree_id);
+
+  extensions::AutomationEventRouter::GetInstance()
+      ->SetTreeDestroyedCallbackForTest(base::DoNothing());
+}
+
 //
 // Spoken feedback tests in both a logged in browser window and guest mode.
 //
@@ -321,11 +367,9 @@ IN_PROC_BROWSER_TEST_P(SpokenFeedbackTest, FocusShelf) {
   EXPECT_TRUE(base::MatchPattern(speech_monitor_.GetNextUtterance(), "Button"));
 }
 
-IN_PROC_BROWSER_TEST_P(SpokenFeedbackTest, NavigateAppLauncher) {
-  // TODO(newcomer): reimplement this test once the AppListFocus changes are
-  // complete (http://crbug.com/784942).
-  return;
-
+// TODO(newcomer): reimplement this test once the AppListFocus changes are
+// complete (http://crbug.com/784942).
+IN_PROC_BROWSER_TEST_P(SpokenFeedbackTest, DISABLED_NavigateAppLauncher) {
   EnableChromeVox();
 
   EXPECT_TRUE(PerformAcceleratorAction(ash::FOCUS_SHELF));
@@ -589,8 +633,8 @@ IN_PROC_BROWSER_TEST_P(SpokenFeedbackTest, DISABLED_ChromeVoxNextStickyMode) {
 
   // Sticky key has a minimum 100 ms check to prevent key repeat from toggling
   // it.
-  content::BrowserThread::PostDelayedTask(
-      content::BrowserThread::UI, FROM_HERE,
+  base::PostDelayedTaskWithTraits(
+      FROM_HERE, {content::BrowserThread::UI},
       base::Bind(&LoggedInSpokenFeedbackTest::SendKeyPress,
                  base::Unretained(this), ui::VKEY_LWIN),
       base::TimeDelta::FromMilliseconds(200));
@@ -605,8 +649,8 @@ IN_PROC_BROWSER_TEST_P(SpokenFeedbackTest, DISABLED_ChromeVoxNextStickyMode) {
 
   // Sticky key has a minimum 100 ms check to prevent key repeat from toggling
   // it.
-  content::BrowserThread::PostDelayedTask(
-      content::BrowserThread::UI, FROM_HERE,
+  base::PostDelayedTaskWithTraits(
+      FROM_HERE, {content::BrowserThread::UI},
       base::Bind(&LoggedInSpokenFeedbackTest::SendKeyPress,
                  base::Unretained(this), ui::VKEY_LWIN),
       base::TimeDelta::FromMilliseconds(200));
@@ -622,7 +666,15 @@ IN_PROC_BROWSER_TEST_P(SpokenFeedbackTest, DISABLED_TouchExploreStatusTray) {
 
   // Send an accessibility hover event on the system tray, which is
   // what we get when you tap it on a touch screen when ChromeVox is on.
-  ash::SystemTray* tray = ash::Shell::Get()->GetPrimarySystemTray();
+  ash::TrayBackgroundView* tray =
+      ash::features::IsSystemTrayUnifiedEnabled()
+          ? static_cast<ash::TrayBackgroundView*>(
+                ash::Shell::Get()
+                    ->GetPrimaryRootWindowController()
+                    ->GetStatusAreaWidget()
+                    ->unified_system_tray())
+          : static_cast<ash::TrayBackgroundView*>(
+                ash::Shell::Get()->GetPrimarySystemTray());
   tray->NotifyAccessibilityEvent(ax::mojom::Event::kHover, true);
 
   EXPECT_EQ("Status tray,", speech_monitor_.GetNextUtterance());
@@ -709,7 +761,8 @@ IN_PROC_BROWSER_TEST_F(GuestSpokenFeedbackTest, FocusToolbar) {
 
 class OobeSpokenFeedbackTest : public LoginManagerTest {
  protected:
-  OobeSpokenFeedbackTest() : LoginManagerTest(false) {}
+  OobeSpokenFeedbackTest()
+      : LoginManagerTest(false, true /* should_initialize_webui */) {}
   ~OobeSpokenFeedbackTest() override {}
 
   void SetUpCommandLine(base::CommandLine* command_line) override {

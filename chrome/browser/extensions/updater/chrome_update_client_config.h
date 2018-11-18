@@ -11,6 +11,7 @@
 #include <string>
 #include <vector>
 
+#include "base/containers/flat_map.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "components/component_updater/configurator_impl.h"
@@ -26,9 +27,16 @@ class ActivityDataService;
 
 namespace extensions {
 
+class ExtensionUpdateClientBaseTest;
+
 class ChromeUpdateClientConfig : public update_client::Configurator {
  public:
-  explicit ChromeUpdateClientConfig(content::BrowserContext* context);
+  using FactoryCallback =
+      base::RepeatingCallback<scoped_refptr<ChromeUpdateClientConfig>(
+          content::BrowserContext* context)>;
+
+  static scoped_refptr<ChromeUpdateClientConfig> Create(
+      content::BrowserContext* context);
 
   int InitialDelay() const override;
   int NextCheckDelay() const override;
@@ -42,9 +50,10 @@ class ChromeUpdateClientConfig : public update_client::Configurator {
   std::string GetBrand() const override;
   std::string GetLang() const override;
   std::string GetOSLongName() const override;
-  std::string ExtraRequestParams() const override;
+  base::flat_map<std::string, std::string> ExtraRequestParams() const override;
   std::string GetDownloadPreference() const override;
-  scoped_refptr<net::URLRequestContextGetter> RequestContext() const override;
+  scoped_refptr<network::SharedURLLoaderFactory> URLLoaderFactory()
+      const override;
   std::unique_ptr<service_manager::Connector> CreateServiceManagerConnector()
       const override;
   bool EnabledDeltas() const override;
@@ -55,10 +64,19 @@ class ChromeUpdateClientConfig : public update_client::Configurator {
   update_client::ActivityDataService* GetActivityDataService() const override;
   bool IsPerUserInstall() const override;
   std::vector<uint8_t> GetRunActionKeyHash() const override;
+  std::string GetAppGuid() const override;
 
  protected:
   friend class base::RefCountedThreadSafe<ChromeUpdateClientConfig>;
+  friend class ExtensionUpdateClientBaseTest;
+
+  explicit ChromeUpdateClientConfig(content::BrowserContext* context);
   ~ChromeUpdateClientConfig() override;
+
+  // Injects a new client config by changing the creation factory.
+  // Should be used for tests only.
+  static void SetChromeUpdateClientConfigFactoryForTesting(
+      FactoryCallback factory);
 
  private:
   content::BrowserContext* context_ = nullptr;

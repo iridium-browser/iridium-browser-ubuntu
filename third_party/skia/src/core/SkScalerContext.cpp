@@ -29,7 +29,9 @@
 #include "SkStrokeRec.h"
 #include "SkSurfacePriv.h"
 #include "SkTextFormatParams.h"
+#include "SkTo.h"
 #include "SkWriteBuffer.h"
+#include <new>
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -55,36 +57,126 @@ SkScalerContext::SkScalerContext(sk_sp<SkTypeface> typeface, const SkScalerConte
     SkDebugf("SkScalerContext checksum %x count %d length %d\n",
              desc->getChecksum(), desc->getCount(), desc->getLength());
     SkDebugf("%s", fRec.dump().c_str());
-    SkDebugf("  pathEffect %x maskFilter %x\n",
-             desc->findEntry(kPathEffect_SkDescriptorTag, nullptr),
-        desc->findEntry(kMaskFilter_SkDescriptorTag, nullptr));
+    SkDebugf("  effects %x\n", desc->findEntry(kEffects_SkDescriptorTag, nullptr));
 #endif
 }
 
 SkScalerContext::~SkScalerContext() {}
 
+/**
+ * In order to call cachedDeviceLuminance, cachedPaintLuminance, or
+ * cachedMaskGamma the caller must hold the gMaskGammaCacheMutex and continue
+ * to hold it until the returned pointer is refed or forgotten.
+ */
+SK_DECLARE_STATIC_MUTEX(gMaskGammaCacheMutex);
+
+static SkMaskGamma* gLinearMaskGamma = nullptr;
+static SkMaskGamma* gMaskGamma = nullptr;
+static SkScalar gContrast = SK_ScalarMin;
+static SkScalar gPaintGamma = SK_ScalarMin;
+static SkScalar gDeviceGamma = SK_ScalarMin;
+
+/**
+ * The caller must hold the gMaskGammaCacheMutex and continue to hold it until
+ * the returned SkMaskGamma pointer is refed or forgotten.
+ */
+static const SkMaskGamma& cached_mask_gamma(SkScalar contrast, SkScalar paintGamma,
+                                            SkScalar deviceGamma) {
+    gMaskGammaCacheMutex.assertHeld();
+    if (0 == contrast && SK_Scalar1 == paintGamma && SK_Scalar1 == deviceGamma) {
+        if (nullptr == gLinearMaskGamma) {
+            gLinearMaskGamma = new SkMaskGamma;
+        }
+        return *gLinearMaskGamma;
+    }
+    if (gContrast != contrast || gPaintGamma != paintGamma || gDeviceGamma != deviceGamma) {
+        SkSafeUnref(gMaskGamma);
+        gMaskGamma = new SkMaskGamma(contrast, paintGamma, deviceGamma);
+        gContrast = contrast;
+        gPaintGamma = paintGamma;
+        gDeviceGamma = deviceGamma;
+    }
+    return *gMaskGamma;
+}
+
+/**
+ * Expands fDeviceGamma, fPaintGamma, fContrast, and fLumBits into a mask pre-blend.
+ */
+SkMaskGamma::PreBlend SkScalerContext::GetMaskPreBlend(const SkScalerContextRec& rec) {
+    SkAutoMutexAcquire ama(gMaskGammaCacheMutex);
+    const SkMaskGamma& maskGamma = cached_mask_gamma(rec.getContrast(),
+                                                     rec.getPaintGamma(),
+                                                     rec.getDeviceGamma());
+    return maskGamma.preBlend(rec.getLuminanceColor());
+}
+
+size_t SkScalerContext::GetGammaLUTSize(SkScalar contrast, SkScalar paintGamma,
+                                        SkScalar deviceGamma, int* width, int* height) {
+    SkAutoMutexAcquire ama(gMaskGammaCacheMutex);
+    const SkMaskGamma& maskGamma = cached_mask_gamma(contrast,
+                                                     paintGamma,
+                                                     deviceGamma);
+
+    maskGamma.getGammaTableDimensions(width, height);
+    size_t size = (*width)*(*height)*sizeof(uint8_t);
+
+    return size;
+}
+
+bool SkScalerContext::GetGammaLUTData(SkScalar contrast, SkScalar paintGamma, SkScalar deviceGamma,
+                                      uint8_t* data) {
+    SkAutoMutexAcquire ama(gMaskGammaCacheMutex);
+    const SkMaskGamma& maskGamma = cached_mask_gamma(contrast,
+                                                     paintGamma,
+                                                     deviceGamma);
+    const uint8_t* gammaTables = maskGamma.getGammaTables();
+    if (!gammaTables) {
+        return false;
+    }
+
+    int width, height;
+    maskGamma.getGammaTableDimensions(&width, &height);
+    size_t size = width*height * sizeof(uint8_t);
+    memcpy(data, gammaTables, size);
+    return true;
+}
+
 void SkScalerContext::getAdvance(SkGlyph* glyph) {
-    // mark us as just having a valid advance
-    glyph->fMaskFormat = MASK_FORMAT_JUST_ADVANCE;
-    // we mark the format before making the call, in case the impl
-    // internally ends up calling its generateMetrics, which is OK
-    // albeit slower than strictly necessary
-    generateAdvance(glyph);
+    if (generateAdvance(glyph)) {
+        glyph->fMaskFormat = MASK_FORMAT_JUST_ADVANCE;
+    } else {
+        this->getMetrics(glyph);
+        SkASSERT(glyph->fMaskFormat != MASK_FORMAT_UNKNOWN);
+    }
 }
 
 void SkScalerContext::getMetrics(SkGlyph* glyph) {
     bool generatingImageFromPath = fGenerateImageFromPath;
     if (!generatingImageFromPath) {
         generateMetrics(glyph);
+        SkASSERT(glyph->fMaskFormat != MASK_FORMAT_UNKNOWN);
     } else {
-        SkPath      devPath, fillPath;
-        SkMatrix    fillToDevMatrix;
-        generatingImageFromPath = this->internalGetPath(glyph->getPackedID(), &fillPath, &devPath,
-                                                        &fillToDevMatrix);
+        SkPath devPath;
+        generatingImageFromPath = this->internalGetPath(glyph->getPackedID(), &devPath);
         if (!generatingImageFromPath) {
             generateMetrics(glyph);
+            SkASSERT(glyph->fMaskFormat != MASK_FORMAT_UNKNOWN);
         } else {
-            generateAdvance(glyph);
+            uint8_t originMaskFormat = glyph->fMaskFormat;
+            if (!generateAdvance(glyph)) {
+                generateMetrics(glyph);
+            }
+
+            if (originMaskFormat != MASK_FORMAT_UNKNOWN) {
+                glyph->fMaskFormat = originMaskFormat;
+            } else {
+                glyph->fMaskFormat = fRec.fMaskFormat;
+            }
+
+            // If we are going to create the mask, then we cannot keep the color
+            if (SkMask::kARGB32_Format == glyph->fMaskFormat) {
+                glyph->fMaskFormat = SkMask::kA8_Format;
+            }
 
             const SkIRect ir = devPath.getBounds().roundOut();
             if (ir.isEmpty() || !SkRectPriv::Is16Bit(ir)) {
@@ -96,7 +188,7 @@ void SkScalerContext::getMetrics(SkGlyph* glyph) {
             glyph->fHeight  = SkToU16(ir.height());
 
             if (glyph->fWidth > 0) {
-                switch (fRec.fMaskFormat) {
+                switch (glyph->fMaskFormat) {
                 case SkMask::kLCD16_Format:
                     glyph->fWidth += 2;
                     glyph->fLeft -= 1;
@@ -108,15 +200,6 @@ void SkScalerContext::getMetrics(SkGlyph* glyph) {
         }
     }
 
-    // for now we have separate cache entries for devkerning on and off
-    // in the future we might share caches, but make our measure/draw
-    // code make the distinction. Thus we zap the values if the caller
-    // has not asked for them.
-    if ((fRec.fFlags & SkScalerContext::kDevKernText_Flag) == 0) {
-        // no devkern, so zap the fields
-        glyph->fLsbDelta = glyph->fRsbDelta = 0;
-    }
-
     // if either dimension is empty, zap the image bounds of the glyph
     if (0 == glyph->fWidth || 0 == glyph->fHeight) {
         glyph->fWidth   = 0;
@@ -125,15 +208,6 @@ void SkScalerContext::getMetrics(SkGlyph* glyph) {
         glyph->fLeft    = 0;
         glyph->fMaskFormat = 0;
         return;
-    }
-
-    if (SkMask::kARGB32_Format != glyph->fMaskFormat) {
-        glyph->fMaskFormat = fRec.fMaskFormat;
-    }
-
-    // If we are going to create the mask, then we cannot keep the color
-    if ((generatingImageFromPath || fMaskFilter) && SkMask::kARGB32_Format == glyph->fMaskFormat) {
-        glyph->fMaskFormat = SkMask::kA8_Format;
     }
 
     if (fMaskFilter) {
@@ -164,8 +238,6 @@ SK_ERROR:
     glyph->fTop      = 0;
     glyph->fWidth    = 0;
     glyph->fHeight   = 0;
-    glyph->fLsbDelta = 0;
-    glyph->fRsbDelta = 0;
     // put a valid value here, in case it was earlier set to
     // MASK_FORMAT_JUST_ADVANCE
     glyph->fMaskFormat = fRec.fMaskFormat;
@@ -384,26 +456,6 @@ static void generateMask(const SkMask& mask, const SkPath& path,
     }
 }
 
-static void extract_alpha(const SkMask& dst,
-                          const SkPMColor* srcRow, size_t srcRB) {
-    int width = dst.fBounds.width();
-    int height = dst.fBounds.height();
-    int dstRB = dst.fRowBytes;
-    uint8_t* dstRow = dst.fImage;
-
-    for (int y = 0; y < height; ++y) {
-        for (int x = 0; x < width; ++x) {
-            dstRow[x] = SkGetPackedA32(srcRow[x]);
-        }
-        // zero any padding on each row
-        for (int x = width; x < dstRB; ++x) {
-            dstRow[x] = 0;
-        }
-        dstRow += dstRB;
-        srcRow = (const SkPMColor*)((const char*)srcRow + srcRB);
-    }
-}
-
 void SkScalerContext::getImage(const SkGlyph& origGlyph) {
     const SkGlyph*  glyph = &origGlyph;
     SkGlyph         tmpGlyph;
@@ -416,9 +468,9 @@ void SkScalerContext::getImage(const SkGlyph& origGlyph) {
         tmpGlyph.initWithGlyphID(origGlyph.getPackedID());
 
         // need the original bounds, sans our maskfilter
-        SkMaskFilter* mf = fMaskFilter.release();   // temp disable
+        sk_sp<SkMaskFilter> mf = std::move(fMaskFilter);
         this->getMetrics(&tmpGlyph);
-        fMaskFilter = sk_sp<SkMaskFilter>(mf);      // restore
+        fMaskFilter = std::move(mf);
 
         // we need the prefilter bounds to be <= filter bounds
         SkASSERT(tmpGlyph.fWidth <= origGlyph.fWidth);
@@ -436,12 +488,11 @@ void SkScalerContext::getImage(const SkGlyph& origGlyph) {
     if (!fGenerateImageFromPath) {
         generateImage(*glyph);
     } else {
-        SkPath      devPath, fillPath;
-        SkMatrix    fillToDevMatrix;
-        SkMask      mask;
+        SkPath devPath;
+        SkMask mask;
 
         glyph->toMask(&mask);
-        if (!this->internalGetPath(glyph->getPackedID(), &fillPath, &devPath, &fillToDevMatrix)) {
+        if (!this->internalGetPath(glyph->getPackedID(), &devPath)) {
             generateImage(*glyph);
         } else {
             SkASSERT(SkMask::kARGB32_Format != origGlyph.fMaskFormat);
@@ -459,25 +510,13 @@ void SkScalerContext::getImage(const SkGlyph& origGlyph) {
         // the src glyph image shouldn't be 3D
         SkASSERT(SkMask::k3D_Format != glyph->fMaskFormat);
 
-        SkAutoSMalloc<32*32> a8storage;
         glyph->toMask(&srcM);
-        if (SkMask::kARGB32_Format == srcM.fFormat) {
-            // now we need to extract the alpha-channel from the glyph's image
-            // and copy it into a temp buffer, and then point srcM at that temp.
-            srcM.fFormat = SkMask::kA8_Format;
-            srcM.fRowBytes = SkAlign4(srcM.fBounds.width());
-            size_t size = srcM.computeImageSize();
-            a8storage.reset(size);
-            srcM.fImage = (uint8_t*)a8storage.get();
-            extract_alpha(srcM,
-                          (const SkPMColor*)glyph->fImage, glyph->rowBytes());
-        }
 
         fRec.getMatrixFrom2x2(&matrix);
 
         if (as_MFB(fMaskFilter)->filterMask(&dstM, srcM, matrix, nullptr)) {
-            int width = SkFastMin32(origGlyph.fWidth, dstM.fBounds.width());
-            int height = SkFastMin32(origGlyph.fHeight, dstM.fBounds.height());
+            int width = SkMin32(origGlyph.fWidth, dstM.fBounds.width());
+            int height = SkMin32(origGlyph.fHeight, dstM.fBounds.height());
             int dstRB = origGlyph.rowBytes();
             int srcRB = dstM.fRowBytes;
 
@@ -499,7 +538,7 @@ void SkScalerContext::getImage(const SkGlyph& origGlyph) {
             }
             SkMask::FreeImage(dstM.fImage);
 
-            if (fPreBlendForFilter.isApplicable()) {
+            if (SkMask::kA8_Format == dstM.fFormat && fPreBlendForFilter.isApplicable()) {
                 applyLUTToA8Mask(srcM, fPreBlendForFilter.fG);
             }
         }
@@ -507,7 +546,7 @@ void SkScalerContext::getImage(const SkGlyph& origGlyph) {
 }
 
 bool SkScalerContext::getPath(SkPackedGlyphID glyphID, SkPath* path) {
-    return this->internalGetPath(glyphID, nullptr, path, nullptr);
+    return this->internalGetPath(glyphID, path);
 }
 
 void SkScalerContext::getFontMetrics(SkPaint::FontMetrics* fm) {
@@ -521,8 +560,7 @@ SkUnichar SkScalerContext::generateGlyphToChar(uint16_t glyph) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-bool SkScalerContext::internalGetPath(SkPackedGlyphID glyphID, SkPath* fillPath,
-                                      SkPath* devPath, SkMatrix* fillToDevMatrix) {
+bool SkScalerContext::internalGetPath(SkPackedGlyphID glyphID, SkPath* devPath) {
     SkPath  path;
     if (!generatePath(glyphID.code(), &path)) {
         return false;
@@ -546,7 +584,7 @@ bool SkScalerContext::internalGetPath(SkPackedGlyphID glyphID, SkPath* fillPath,
 
         fRec.getMatrixFrom2x2(&matrix);
         if (!matrix.invert(&inverse)) {
-            // assume fillPath and devPath are already empty.
+            // assume devPath is already empty.
             return true;
         }
         path.transform(inverse, &localPath);
@@ -579,37 +617,17 @@ bool SkScalerContext::internalGetPath(SkPackedGlyphID glyphID, SkPath* fillPath,
         }
 
         // now return stuff to the caller
-        if (fillToDevMatrix) {
-            *fillToDevMatrix = matrix;
-        }
         if (devPath) {
             localPath.transform(matrix, devPath);
         }
-        if (fillPath) {
-            fillPath->swap(localPath);
-        }
     } else {   // nothing tricky to do
-        if (fillToDevMatrix) {
-            fillToDevMatrix->reset();
-        }
         if (devPath) {
-            if (fillPath == nullptr) {
-                devPath->swap(path);
-            } else {
-                *devPath = path;
-            }
-        }
-
-        if (fillPath) {
-            fillPath->swap(path);
+            devPath->swap(path);
         }
     }
 
     if (devPath) {
         devPath->updateBoundsCache();
-    }
-    if (fillPath) {
-        fillPath->updateBoundsCache();
     }
     return true;
 }
@@ -788,10 +806,12 @@ protected:
     uint16_t generateCharToGlyph(SkUnichar uni) override {
         return 0;
     }
-    void generateAdvance(SkGlyph* glyph) override {
+    bool generateAdvance(SkGlyph* glyph) override {
         glyph->zeroMetrics();
+        return true;
     }
     void generateMetrics(SkGlyph* glyph) override {
+        glyph->fMaskFormat = fRec.fMaskFormat;
         glyph->zeroMetrics();
     }
     void generateImage(const SkGlyph& glyph) override {}
@@ -884,8 +904,11 @@ void SkScalerContext::MakeRecAndEffects(const SkPaint& paint,
                                         const SkMatrix* deviceMatrix,
                                         SkScalerContextFlags scalerContextFlags,
                                         SkScalerContextRec* rec,
-                                        SkScalerContextEffects* effects) {
+                                        SkScalerContextEffects* effects,
+                                        bool enableTypefaceFiltering) {
     SkASSERT(deviceMatrix == nullptr || !deviceMatrix->hasPerspective());
+
+    sk_bzero(rec, sizeof(SkScalerContextRec));
 
     SkTypeface* typeface = SkPaintPriv::GetTypefaceOrDefault(paint);
 
@@ -939,10 +962,6 @@ void SkScalerContext::MakeRecAndEffects(const SkPaint& paint,
             strokeWidth += extra;
         }
 #endif
-    }
-
-    if (paint.isDevKernText()) {
-        flags |= SkScalerContext::kDevKernText_Flag;
     }
 
     if (style != SkPaint::kFill_Style && strokeWidth > 0) {
@@ -1006,9 +1025,6 @@ void SkScalerContext::MakeRecAndEffects(const SkPaint& paint,
     if (paint.isVerticalText()) {
         flags |= SkScalerContext::kVertical_Flag;
     }
-    if (paint.getFlags() & SkPaint::kGenA8FromLCD_Flag) {
-        flags |= SkScalerContext::kGenA8FromLCD_Flag;
-    }
     rec->fFlags = SkToU16(flags);
 
     // these modify fFlags, so do them after assigning fFlags
@@ -1037,7 +1053,9 @@ void SkScalerContext::MakeRecAndEffects(const SkPaint& paint,
     // cache. This way if we're asking for something that they will ignore,
     // they can modify our rec up front, so we don't create duplicate cache
     // entries.
-    typeface->onFilterRec(rec);
+    if (enableTypefaceFiltering) {
+        typeface->onFilterRec(rec);
+    }
 
     if (!SkToBool(scalerContextFlags & SkScalerContextFlags::kFakeGamma)) {
         rec->ignoreGamma();
@@ -1047,31 +1065,27 @@ void SkScalerContext::MakeRecAndEffects(const SkPaint& paint,
     }
 
     new (effects) SkScalerContextEffects{paint};
-    if (effects->fPathEffect) {
-        rec->fMaskFormat = SkMask::kA8_Format;  // force antialiasing when we do the scan conversion
-        // seems like we could support kLCD as well at this point...
-    }
     if (effects->fMaskFilter) {
-        // force antialiasing with maskfilters
-        rec->fMaskFormat = SkMask::kA8_Format;
         // Pre-blend is not currently applied to filtered text.
         // The primary filter is blur, for which contrast makes no sense,
         // and for which the destination guess error is more visible.
         // Also, all existing users of blur have calibrated for linear.
+        // TODO: this means fPreBlendForFilter is never used?
         rec->ignorePreBlend();
     }
 
+    bool luminanceColorWillBeUsed = rec->getDeviceGamma() != SK_Scalar1 ||
+                                    rec->getPaintGamma()  != SK_Scalar1;
     // If we're asking for A8, we force the colorlum to be gray, since that
     // limits the number of unique entries, and the scaler will only look at
     // the lum of one of them.
     switch (rec->fMaskFormat) {
-        case SkMask::kLCD16_Format: {
+        case SkMask::kLCD16_Format: if (luminanceColorWillBeUsed) {
             // filter down the luminance color to a finite number of bits
             SkColor color = rec->getLuminanceColor();
             rec->setLuminanceColor(SkMaskGamma::CanonicalColor(color));
-            break;
-        }
-        case SkMask::kA8_Format: {
+        } break;
+        case SkMask::kA8_Format: if (luminanceColorWillBeUsed) {
             // filter down the luminance to a single component, since A8 can't
             // use per-component information
             SkColor color = rec->getLuminanceColor();
@@ -1081,8 +1095,7 @@ void SkScalerContext::MakeRecAndEffects(const SkPaint& paint,
             // reduce to our finite number of bits
             color = SkColorSetRGB(lum, lum, lum);
             rec->setLuminanceColor(SkMaskGamma::CanonicalColor(color));
-            break;
-        }
+        } break;
         case SkMask::kBW_Format:
             // No need to differentiate gamma or apply contrast if we're BW
             rec->ignorePreBlend();
@@ -1111,107 +1124,36 @@ SkDescriptor* SkScalerContext::CreateDescriptorAndEffectsUsingPaint(
     return AutoDescriptorGivenRecAndEffects(rec, *effects, ad);
 }
 
-static size_t calculate_size_and_flatten(
-    const SkScalerContextRec& rec,
-    const SkScalerContextEffects& effects,
-    SkBinaryWriteBuffer* pathEffectBuffer,
-    SkBinaryWriteBuffer* maskFilterBuffer)
-{
+static size_t calculate_size_and_flatten(const SkScalerContextRec& rec,
+                                         const SkScalerContextEffects& effects,
+                                         SkBinaryWriteBuffer* effectBuffer) {
     size_t descSize = sizeof(rec);
     int entryCount = 1;
 
-    if (effects.fPathEffect) {
-        effects.fPathEffect->flatten(*pathEffectBuffer);
-        descSize += pathEffectBuffer->bytesWritten();
+    if (effects.fPathEffect || effects.fMaskFilter) {
+        if (effects.fPathEffect) { effectBuffer->writeFlattenable(effects.fPathEffect); }
+        if (effects.fMaskFilter) { effectBuffer->writeFlattenable(effects.fMaskFilter); }
         entryCount += 1;
-    }
-    if (effects.fMaskFilter) {
-        effects.fMaskFilter->flatten(*maskFilterBuffer);
-        descSize += maskFilterBuffer->bytesWritten();
-        entryCount += 1;
+        descSize += effectBuffer->bytesWritten();
     }
 
     descSize += SkDescriptor::ComputeOverhead(entryCount);
     return descSize;
 }
 
-#ifdef SK_DEBUG
-  #define TEST_DESC
-#endif
-
-#ifdef TEST_DESC
-static void test_desc(const SkScalerContextRec& rec,
-                      const SkScalerContextEffects& effects,
-                      SkBinaryWriteBuffer* peBuffer,
-                      SkBinaryWriteBuffer* mfBuffer,
-                      const SkDescriptor* desc) {
-    // Check that we completely write the bytes in desc (our key), and that
-    // there are no uninitialized bytes. If there were, then we would get
-    // false-misses (or worse, false-hits) in our fontcache.
-    //
-    // We do this buy filling 2 others, one with 0s and the other with 1s
-    // and create those, and then check that all 3 are identical.
-    SkAutoDescriptor    ad1(desc->getLength());
-    SkAutoDescriptor    ad2(desc->getLength());
-    SkDescriptor*       desc1 = ad1.getDesc();
-    SkDescriptor*       desc2 = ad2.getDesc();
-
-    memset(desc1, 0x00, desc->getLength());
-    memset(desc2, 0xFF, desc->getLength());
-
-    desc1->init();
-    desc2->init();
-    desc1->addEntry(kRec_SkDescriptorTag, sizeof(rec), &rec);
-    desc2->addEntry(kRec_SkDescriptorTag, sizeof(rec), &rec);
-
-    auto add_flattenable = [](SkDescriptor* desc, uint32_t tag,
-                              SkBinaryWriteBuffer* buffer) {
-        buffer->writeToMemory(desc->addEntry(tag, buffer->bytesWritten(), nullptr));
-    };
-
-    if (effects.fPathEffect) {
-        add_flattenable(desc1, kPathEffect_SkDescriptorTag, peBuffer);
-        add_flattenable(desc2, kPathEffect_SkDescriptorTag, peBuffer);
-    }
-    if (effects.fMaskFilter) {
-        add_flattenable(desc1, kMaskFilter_SkDescriptorTag, mfBuffer);
-        add_flattenable(desc2, kMaskFilter_SkDescriptorTag, mfBuffer);
-    }
-
-    SkASSERT(desc->getLength() == desc1->getLength());
-    SkASSERT(desc->getLength() == desc2->getLength());
-    desc1->computeChecksum();
-    desc2->computeChecksum();
-    SkASSERT(!memcmp(desc, desc1, desc->getLength()));
-    SkASSERT(!memcmp(desc, desc2, desc->getLength()));
-}
-#endif
-
-void generate_descriptor(
-    const SkScalerContextRec& rec,
-    const SkScalerContextEffects& effects,
-    SkBinaryWriteBuffer* pathEffectBuffer,
-    SkBinaryWriteBuffer* maskFilterBuffer,
-    SkDescriptor* desc)
-{
+static void generate_descriptor(const SkScalerContextRec& rec,
+                                const SkBinaryWriteBuffer& effectBuffer,
+                                SkDescriptor* desc) {
     desc->init();
     desc->addEntry(kRec_SkDescriptorTag, sizeof(rec), &rec);
 
-    auto add = [&desc](uint32_t tag, SkBinaryWriteBuffer* buffer) {
-        buffer->writeToMemory(desc->addEntry(tag, buffer->bytesWritten(), nullptr));
-    };
-
-    if (effects.fPathEffect) {
-        add(kPathEffect_SkDescriptorTag, pathEffectBuffer);
-    }
-    if (effects.fMaskFilter) {
-        add(kMaskFilter_SkDescriptorTag, maskFilterBuffer);
+    if (effectBuffer.bytesWritten() > 0) {
+        effectBuffer.writeToMemory(desc->addEntry(kEffects_SkDescriptorTag,
+                                                  effectBuffer.bytesWritten(),
+                                                  nullptr));
     }
 
     desc->computeChecksum();
-#ifdef TEST_DESC
-    test_desc(rec, effects, pathEffectBuffer, maskFilterBuffer, desc);
-#endif
 }
 
 SkDescriptor* SkScalerContext::AutoDescriptorGivenRecAndEffects(
@@ -1219,11 +1161,10 @@ SkDescriptor* SkScalerContext::AutoDescriptorGivenRecAndEffects(
     const SkScalerContextEffects& effects,
     SkAutoDescriptor* ad)
 {
-    SkBinaryWriteBuffer peBuffer, mfBuffer;
+    SkBinaryWriteBuffer buf;
 
-    ad->reset(calculate_size_and_flatten(rec, effects, &peBuffer, &mfBuffer));
-
-    generate_descriptor(rec, effects, &peBuffer, &mfBuffer, ad->getDesc());
+    ad->reset(calculate_size_and_flatten(rec, effects, &buf));
+    generate_descriptor(rec, buf, ad->getDesc());
 
     return ad->getDesc();
 }
@@ -1232,27 +1173,23 @@ std::unique_ptr<SkDescriptor> SkScalerContext::DescriptorGivenRecAndEffects(
     const SkScalerContextRec& rec,
     const SkScalerContextEffects& effects)
 {
-    SkBinaryWriteBuffer peBuffer, mfBuffer;
+    SkBinaryWriteBuffer buf;
 
-    auto desc = SkDescriptor::Alloc(calculate_size_and_flatten(rec, effects, &peBuffer, &mfBuffer));
-
-    generate_descriptor(rec, effects, &peBuffer, &mfBuffer, desc.get());
+    auto desc = SkDescriptor::Alloc(calculate_size_and_flatten(rec, effects, &buf));
+    generate_descriptor(rec, buf, desc.get());
 
     return desc;
 }
 
 void SkScalerContext::DescriptorBufferGiveRec(const SkScalerContextRec& rec, void* buffer) {
-    SkScalerContextEffects noEffects;
-    SkBinaryWriteBuffer peBuffer, mfBuffer;
-    generate_descriptor(rec, noEffects, &peBuffer, &mfBuffer, (SkDescriptor*)buffer);
+    generate_descriptor(rec, SkBinaryWriteBuffer{}, (SkDescriptor*)buffer);
 }
 
 bool SkScalerContext::CheckBufferSizeForRec(const SkScalerContextRec& rec,
                                             const SkScalerContextEffects& effects,
                                             size_t size) {
-    SkBinaryWriteBuffer peBuffer, mfBuffer;
-
-    return size >= calculate_size_and_flatten(rec, effects, &peBuffer, &mfBuffer);
+    SkBinaryWriteBuffer buf;
+    return size >= calculate_size_and_flatten(rec, effects, &buf);
 }
 
 

@@ -10,6 +10,8 @@
 
 goog.provide('cvox.ChromeVoxPrefs');
 
+goog.require('ConsoleTts');
+goog.require('EventStreamLogger');
 goog.require('cvox.ChromeVox');
 goog.require('cvox.ExtensionBridge');
 goog.require('cvox.KeyMap');
@@ -72,7 +74,11 @@ cvox.ChromeVoxPrefs.DEFAULT_PREFS = {
   // should just store in local storage.
   'currentKeyMap': cvox.KeyMap.DEFAULT_KEYMAP,
   'cvoxKey': '',
+  'enableBrailleLogging': false,
+  'enableEarconLogging': true,
+  'enableSpeechLogging': true,
   'earcons': true,
+  'enableEventStreamLogging': false,
   'focusFollowsMouse': false,
   'granularity': undefined,
   'position': '{}',
@@ -81,11 +87,65 @@ cvox.ChromeVoxPrefs.DEFAULT_PREFS = {
       'trk:152:https://ssl.gstatic.com/accessibility/javascript/ext/',
   'siteSpecificScriptLoader':
       'trk:153:https://ssl.gstatic.com/accessibility/javascript/ext/loader.js',
+  'speakTextUnderMouse': false,
   'sticky': false,
   'typingEcho': 0,
   'useIBeamCursor': cvox.ChromeVox.isMac,
   'useClassic': false,
   'useVerboseMode': true,
+
+  // eventStreamFilters
+  'activedescendantchanged': true,
+  'alert': true,
+  'ariaAttributeChanged': true,
+  'autocorrectionOccured': true,
+  'blur': true,
+  'checkedStateChanged': true,
+  'childrenChanged': true,
+  'clicked': true,
+  'documentSelectionChanged': true,
+  'documentTitleChanged': true,
+  'expandedChanged': true,
+  'focus': true,
+  'focusContext': true,
+  'imageFrameUpdated': true,
+  'hide': true,
+  'hitTestResult': true,
+  'hover': true,
+  'invalidStatusChanged': true,
+  'layoutComplete': true,
+  'liveRegionCreated': true,
+  'liveRegionChanged': true,
+  'loadComplete': true,
+  'locationChanged': true,
+  'mediaStartedPlaying': true,
+  'mediaStoppedPlaying': true,
+  'menuEnd': true,
+  'menuListItemSelected': true,
+  'menuListValueChanged': true,
+  'menuPopupEnd': true,
+  'menuPopupStart': true,
+  'menuStart': true,
+  'mouseCanceled': true,
+  'mouseDragged': true,
+  'mouseMoved': true,
+  'mousePressed': true,
+  'mouseReleased': true,
+  'rowCollapsed': true,
+  'rowCountChanged': true,
+  'rowExpanded': true,
+  'scrollPositionChanged': true,
+  'scrolledToAnchor': true,
+  'selectedChildrenChanged': true,
+  'selection': true,
+  'selectionAdd': true,
+  'selectionRemove': true,
+  'show': true,
+  'stateChanged': true,
+  'textChanged': true,
+  'textSelectionChanged': true,
+  'treeChanged': true,
+  'valueChanged': true
 };
 
 
@@ -226,6 +286,27 @@ cvox.ChromeVoxPrefs.prototype.setPref = function(key, value) {
     localStorage[key] = value;
     this.sendPrefsToAllTabs(true, false);
   }
+};
+
+/** @enum {string} */
+cvox.ChromeVoxPrefs.loggingPrefs = {
+  SPEECH: 'enableSpeechLogging',
+  BRAILLE: 'enableBrailleLogging',
+  EARCON: 'enableEarconLogging',
+  EVENT: 'enableEventStreamLogging',
+};
+
+/**
+ * Set the value of a pref of logging options.
+ * @param {cvox.ChromeVoxPrefs.loggingPrefs} key The pref key.
+ * @param {boolean} value The new value of the pref.
+ */
+cvox.ChromeVoxPrefs.prototype.setLoggingPrefs = function(key, value) {
+  localStorage[key] = value;
+  if (key == 'enableSpeechLogging')
+    ConsoleTts.getInstance().setEnabled(value);
+  else if (key == 'enableEventStreamLogging')
+    EventStreamLogger.instance.notifyEventStreamFilterChangedAll(value);
 };
 
 /**

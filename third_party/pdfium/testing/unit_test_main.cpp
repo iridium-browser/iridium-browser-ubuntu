@@ -9,13 +9,14 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "testing/test_support.h"
+#include "third_party/base/ptr_util.h"
 
-#if PDF_ENABLE_V8
+#ifdef PDF_ENABLE_V8
 #include "v8/include/v8-platform.h"
 #include "v8/include/v8.h"
-#endif
+#endif  // PDF_ENABLE_V8
 
-#if PDF_ENABLE_XFA
+#ifdef PDF_ENABLE_XFA
 #include "core/fxge/cfx_fontmgr.h"
 #include "core/fxge/cfx_gemodule.h"
 #include "xfa/fgas/font/cfgas_fontmgr.h"
@@ -26,7 +27,7 @@ namespace {
 // The loading time of the CFGAS_FontMgr is linear in the number of times it is
 // loaded. So, if a test suite has a lot of tests that need a font manager they
 // can end up executing very, very slowly.
-class Environment : public testing::Environment {
+class Environment final : public testing::Environment {
  public:
   void SetUp() override {
     // TODO(dsinclair): This font loading is slow. We should make a test font
@@ -74,7 +75,7 @@ int main(int argc, char** argv) {
 #endif  // V8_USE_EXTERNAL_STARTUP_DATA
 #endif  // PDF_ENABLE_V8
 
-#if PDF_ENABLE_XFA
+#ifdef PDF_ENABLE_XFA
   env_ = new Environment();
   // The env will be deleted by gtest.
   AddGlobalTestEnvironment(env_);

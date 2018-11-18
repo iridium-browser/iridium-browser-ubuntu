@@ -12,12 +12,12 @@ import os
 from chromite.cros_bisect import autotest_evaluator
 from chromite.lib import commandline
 from chromite.lib import cros_build_lib
-from chromite.lib import cros_build_lib_unittest
 from chromite.lib import cros_test_lib
 from chromite.lib import osutils
 from chromite.lib import partial_mock
 from chromite.lib import remote_access
 from chromite.lib import remote_access_unittest
+from chromite.lib import repo_util_unittest
 
 
 class RemoteShScpMock(remote_access_unittest.RemoteShMock):
@@ -269,7 +269,7 @@ class TestAutotestEvaluator(cros_test_lib.MockTempDirTestCase):
 
     Tests that it invokes expected command and performs path normalization.
     """
-    command_mock = self.StartPatcher(cros_build_lib_unittest.RunCommandMock())
+    command_mock = self.StartPatcher(cros_test_lib.RunCommandMock())
     results_base_path = self.GetTestResultPath(self.evaluator)
     find_command_result = (
         './%s/results/results-chart.json\n' % self.TEST_NAME)
@@ -285,7 +285,7 @@ class TestAutotestEvaluator(cros_test_lib.MockTempDirTestCase):
 
   def testLookupReportFileMissing(self):
     """Tests LookupReportFile() when the report does not exist."""
-    command_mock = self.StartPatcher(cros_build_lib_unittest.RunCommandMock())
+    command_mock = self.StartPatcher(cros_test_lib.RunCommandMock())
     results_base_path = self.GetTestResultPath(self.evaluator)
     command_mock.AddCmdResult(
         ['find', '.', '-name', 'results-chart.json'],
@@ -317,7 +317,7 @@ class TestAutotestEvaluator(cros_test_lib.MockTempDirTestCase):
     Tests that it invokes expected commands and report file being copied to
     designated path.
     """
-    command_mock = self.StartPatcher(cros_build_lib_unittest.RunCommandMock())
+    command_mock = self.StartPatcher(cros_test_lib.RunCommandMock())
     self.SkipMaySetupBoard()
     command_mock.AddCmdResult(self.TEST_THAT_COMMAND, returncode=0)
     report_path, report_content = self.WriteTestResult(self.evaluator)
@@ -337,7 +337,7 @@ class TestAutotestEvaluator(cros_test_lib.MockTempDirTestCase):
     """Tests TestFromHost() with failed autotest and --eval-passing-only."""
     self.UpdateOptionsAndEvaluator(dict(eval_passing_only=True))
 
-    command_mock = self.StartPatcher(cros_build_lib_unittest.RunCommandMock())
+    command_mock = self.StartPatcher(cros_test_lib.RunCommandMock())
     self.SkipMaySetupBoard()
     command_mock.AddCmdResult(self.TEST_THAT_COMMAND, returncode=1)
 
@@ -348,7 +348,7 @@ class TestAutotestEvaluator(cros_test_lib.MockTempDirTestCase):
 
     It will try evaluating test result.
     """
-    command_mock = self.StartPatcher(cros_build_lib_unittest.RunCommandMock())
+    command_mock = self.StartPatcher(cros_test_lib.RunCommandMock())
     self.SkipMaySetupBoard()
     # test_that failed.
     command_mock.AddCmdResult(self.TEST_THAT_COMMAND, returncode=1)
@@ -369,7 +369,7 @@ class TestAutotestEvaluator(cros_test_lib.MockTempDirTestCase):
 
   def testRunTestFromHostTestThatFailReportMissing(self):
     """Tests TestFromHost() with failed autotest and without report."""
-    command_mock = self.StartPatcher(cros_build_lib_unittest.RunCommandMock())
+    command_mock = self.StartPatcher(cros_test_lib.RunCommandMock())
     self.SkipMaySetupBoard()
     # test_that failed.
     command_mock.AddCmdResult(self.TEST_THAT_COMMAND, returncode=1)
@@ -382,7 +382,7 @@ class TestAutotestEvaluator(cros_test_lib.MockTempDirTestCase):
 
   def testRunTestFromHostReportFileMissing(self):
     """Tests TestFromHost() when test report file does not exist."""
-    command_mock = self.StartPatcher(cros_build_lib_unittest.RunCommandMock())
+    command_mock = self.StartPatcher(cros_test_lib.RunCommandMock())
     self.SkipMaySetupBoard()
     command_mock.AddCmdResult(self.TEST_THAT_COMMAND, returncode=0)
     command_mock.AddCmdResult(
@@ -475,7 +475,7 @@ class TestAutotestEvaluator(cros_test_lib.MockTempDirTestCase):
   def testEvaluateFromHost(self):
     """Tests Evaluate() which runs test from host."""
     # Mock RunTestFromDut fail.
-    command_mock = self.StartPatcher(cros_build_lib_unittest.RunCommandMock())
+    command_mock = self.StartPatcher(cros_test_lib.RunCommandMock())
     command_mock.AddCmdResult(
         partial_mock.InOrder(['rm', '-f', self.REMOTE_REPORT_FILE]),
         returncode=0)
@@ -549,15 +549,17 @@ class TestAutotestEvaluator(cros_test_lib.MockTempDirTestCase):
     Returns:
       command_mock object.
     """
-    command_mock = self.StartPatcher(cros_build_lib_unittest.RunCommandMock())
+    command_mock = self.StartPatcher(cros_test_lib.RunCommandMock())
     command_mock.AddCmdResult(
-        ['repo', 'init', '-u',
+        ['repo', 'init', '--manifest-url',
          'https://chromium.googlesource.com/chromiumos/manifest.git',
          '--repo-url',
          'https://chromium.googlesource.com/external/repo.git'],
+        kwargs={'cwd': cwd},
+        side_effect=repo_util_unittest.RepoInitSideEffects)
+    command_mock.AddCmdResult(
+        [repo_util_unittest.RepoCmdPath(cwd), 'sync', '--jobs', '8'],
         kwargs={'cwd': cwd})
-    command_mock.AddCmdResult(['repo', 'sync', '-j8'],
-                              kwargs={'cwd': cwd})
     return command_mock
 
   def testSetupCrosRepo(self):

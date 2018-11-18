@@ -4,6 +4,9 @@
 
 #include "ash/login/ui/animated_rounded_image_view.h"
 
+#include <limits>
+
+#include "base/numerics/ranges.h"
 #include "skia/ext/image_operations.h"
 #include "third_party/skia/include/core/SkPath.h"
 #include "ui/gfx/canvas.h"
@@ -11,6 +14,31 @@
 #include "ui/gfx/skia_util.h"
 
 namespace ash {
+namespace {
+
+// Decodes a single animation frame.
+class SingleFrameImageDecoder
+    : public AnimatedRoundedImageView::AnimationDecoder {
+ public:
+  SingleFrameImageDecoder(const gfx::ImageSkia& image) : image_(image) {}
+  ~SingleFrameImageDecoder() override = default;
+
+  // AnimatedRoundedImageView::AnimationDecoder:
+  AnimationFrames Decode(float image_scale) override {
+    AnimationFrame frame;
+    frame.image = image_;
+    return {frame};
+  }
+
+ private:
+  gfx::ImageSkia image_;
+
+  DISALLOW_COPY_AND_ASSIGN(SingleFrameImageDecoder);
+};
+
+}  // namespace
+
+AnimatedRoundedImageView::AnimationDecoder::~AnimationDecoder() = default;
 
 AnimatedRoundedImageView::AnimatedRoundedImageView(const gfx::Size& size,
                                                    int corner_radius)
@@ -18,28 +46,23 @@ AnimatedRoundedImageView::AnimatedRoundedImageView(const gfx::Size& size,
 
 AnimatedRoundedImageView::~AnimatedRoundedImageView() = default;
 
-void AnimatedRoundedImageView::SetAnimation(const AnimationFrames& animation) {
-  frames_.clear();
-  frames_.reserve(animation.size());
-  for (AnimationFrame frame : animation) {
-    // Try to get the best image quality for the animation.
-    frame.image = gfx::ImageSkiaOperations::CreateResizedImage(
-        frame.image, skia::ImageOperations::RESIZE_BEST, image_size_);
-    DCHECK(frame.image.bitmap()->isImmutable());
-    frames_.emplace_back(frame);
-  }
-
-  StartOrStopAnimation();
+void AnimatedRoundedImageView::SetAnimationDecoder(
+    std::unique_ptr<AnimationDecoder> decoder,
+    Playback playback) {
+  decoder_ = std::move(decoder);
+  playback_ = playback;
+  // Force a new decode and repaint.
+  frames_scale_ = NAN;
+  SchedulePaint();
 }
 
 void AnimatedRoundedImageView::SetImage(const gfx::ImageSkia& image) {
-  AnimationFrame frame;
-  frame.image = image;
-  SetAnimation({frame});
+  SetAnimationDecoder(std::make_unique<SingleFrameImageDecoder>(image),
+                      Playback::kFirstFrameOnly);
 }
 
-void AnimatedRoundedImageView::SetAnimationEnabled(bool enabled) {
-  should_animate_ = enabled;
+void AnimatedRoundedImageView::SetAnimationPlayback(Playback playback) {
+  playback_ = playback;
   StartOrStopAnimation();
 }
 
@@ -49,6 +72,15 @@ gfx::Size AnimatedRoundedImageView::CalculatePreferredSize() const {
 }
 
 void AnimatedRoundedImageView::OnPaint(gfx::Canvas* canvas) {
+  // Rebuild animation frames if the scaling has changed.
+  if (decoder_ &&
+      !base::IsApproximatelyEqual(canvas->image_scale(), frames_scale_,
+                                  std::numeric_limits<float>::epsilon())) {
+    BuildAnimationFrames(canvas->image_scale());
+    StartOrStopAnimation();
+  }
+
+  // Nothing to render.
   if (frames_.empty())
     return;
 
@@ -71,7 +103,7 @@ void AnimatedRoundedImageView::OnPaint(gfx::Canvas* canvas) {
 void AnimatedRoundedImageView::StartOrStopAnimation() {
   // If animation is disabled or if there are less than 2 frames, show a static
   // image.
-  if (!should_animate_ || frames_.size() < 2) {
+  if (playback_ == Playback::kFirstFrameOnly || frames_.size() < 2) {
     active_frame_ = 0;
     update_frame_timer_.Stop();
     SchedulePaint();
@@ -90,11 +122,27 @@ void AnimatedRoundedImageView::UpdateAnimationFrame() {
   active_frame_ = (active_frame_ + 1) % frames_.size();
   SchedulePaint();
 
-  // Schedule next frame update.
-  update_frame_timer_.Start(
-      FROM_HERE, frames_[active_frame_].duration,
-      base::BindRepeating(&AnimatedRoundedImageView::UpdateAnimationFrame,
-                          base::Unretained(this)));
+  if (static_cast<size_t>(active_frame_ + 1) < frames_.size() ||
+      playback_ == Playback::kRepeat) {
+    // Schedule next frame update.
+    update_frame_timer_.Start(
+        FROM_HERE, frames_[active_frame_].duration,
+        base::BindRepeating(&AnimatedRoundedImageView::UpdateAnimationFrame,
+                            base::Unretained(this)));
+  }
+}
+
+void AnimatedRoundedImageView::BuildAnimationFrames(float image_scale) {
+  frames_scale_ = image_scale;
+  AnimationFrames frames = decoder_->Decode(frames_scale_);
+  frames_.clear();
+  frames_.reserve(frames.size());
+  for (AnimationFrame frame : frames) {
+    frame.image = gfx::ImageSkiaOperations::CreateResizedImage(
+        frame.image, skia::ImageOperations::RESIZE_BEST, image_size_);
+    DCHECK(frame.image.bitmap()->isImmutable());
+    frames_.emplace_back(frame);
+  }
 }
 
 }  // namespace ash

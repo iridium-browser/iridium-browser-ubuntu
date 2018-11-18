@@ -10,7 +10,7 @@
 #include "base/run_loop.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/test/bind_test_util.h"
-#include "base/test/histogram_tester.h"
+#include "base/test/metrics/histogram_tester.h"
 #include "chrome/browser/android/customtabs/detached_resource_request.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/browser/browser_context.h"
@@ -44,6 +44,9 @@ constexpr const char kUrlKey[] = "url";
 constexpr const char kCookieFromNoContent[] = "no-content-cookie";
 constexpr const char kIndexKey[] = "index";
 constexpr const char kMaxKey[] = "max";
+
+const DetachedResourceRequest::Motivation kMotivation =
+    DetachedResourceRequest::Motivation::kParallelRequest;
 
 // /set-cookie-and-redirect?cookie=bla&url=https://redictected-url
 // Sets a cookies, then responds with HTTP code 302.
@@ -201,7 +204,7 @@ class DetachedResourceRequestTest : public ::testing::Test {
 
     DetachedResourceRequest::CreateAndStart(
         browser_context(), url, site_for_cookies,
-        content::Referrer::GetDefaultReferrerPolicy());
+        content::Referrer::GetDefaultReferrerPolicy(), kMotivation);
     first_request_waiter.Run();
     second_request_waiter.Run();
 
@@ -224,9 +227,9 @@ class DetachedResourceRequestTest : public ::testing::Test {
     GURL site_for_cookies(initial_referrer);
 
     DetachedResourceRequest::CreateAndStart(
-        browser_context(), url, site_for_cookies, policy,
-        base::BindLambdaForTesting([&](bool success) {
-          EXPECT_TRUE(success);
+        browser_context(), url, site_for_cookies, policy, kMotivation,
+        base::BindLambdaForTesting([&](int net_error) {
+          EXPECT_EQ(net::OK, net_error);
           request_completion_waiter.Quit();
         }));
     server_request_waiter.Run();
@@ -256,9 +259,9 @@ TEST_F(DetachedResourceRequestTest, Simple) {
 
   DetachedResourceRequest::CreateAndStart(
       browser_context(), url, site_for_cookies,
-      content::Referrer::GetDefaultReferrerPolicy(),
-      base::BindLambdaForTesting([&](bool success) {
-        EXPECT_TRUE(success);
+      content::Referrer::GetDefaultReferrerPolicy(), kMotivation,
+      base::BindLambdaForTesting([&](int net_error) {
+        EXPECT_EQ(net::OK, net_error);
         request_completion_waiter.Quit();
       }));
   server_request_waiter.Run();
@@ -268,6 +271,8 @@ TEST_F(DetachedResourceRequestTest, Simple) {
       "CustomTabs.DetachedResourceRequest.RedirectsCount.Success", 0, 1);
   histogram_tester.ExpectTotalCount(
       "CustomTabs.DetachedResourceRequest.Duration.Success", 1);
+  histogram_tester.ExpectBucketCount(
+      "CustomTabs.DetachedResourceRequest.FinalStatus", net::OK, 1);
 }
 
 TEST_F(DetachedResourceRequestTest, SimpleFailure) {
@@ -279,9 +284,9 @@ TEST_F(DetachedResourceRequestTest, SimpleFailure) {
 
   DetachedResourceRequest::CreateAndStart(
       browser_context(), url, site_for_cookies,
-      content::Referrer::GetDefaultReferrerPolicy(),
-      base::BindLambdaForTesting([&](bool success) {
-        EXPECT_FALSE(success);
+      content::Referrer::GetDefaultReferrerPolicy(), kMotivation,
+      base::BindLambdaForTesting([&](int net_error) {
+        EXPECT_NE(net::OK, net_error);
         request_waiter.Quit();
       }));
   request_waiter.Run();
@@ -289,6 +294,8 @@ TEST_F(DetachedResourceRequestTest, SimpleFailure) {
       "CustomTabs.DetachedResourceRequest.RedirectsCount.Failure", 0, 1);
   histogram_tester.ExpectTotalCount(
       "CustomTabs.DetachedResourceRequest.Duration.Failure", 1);
+  histogram_tester.ExpectBucketCount(
+      "CustomTabs.DetachedResourceRequest.FinalStatus", -net::ERR_FAILED, 1);
 }
 
 TEST_F(DetachedResourceRequestTest, MultipleRequests) {
@@ -308,7 +315,7 @@ TEST_F(DetachedResourceRequestTest, MultipleRequests) {
   for (int i = 0; i < 2; ++i) {
     DetachedResourceRequest::CreateAndStart(
         browser_context(), url, site_for_cookies,
-        content::Referrer::GetDefaultReferrerPolicy());
+        content::Referrer::GetDefaultReferrerPolicy(), kMotivation);
   }
   request_waiter.Run();
   EXPECT_EQ(site_for_cookies.spec(), headers["referer"]);
@@ -329,7 +336,7 @@ TEST_F(DetachedResourceRequestTest, NoReferrerWhenDowngrade) {
 
   DetachedResourceRequest::CreateAndStart(
       browser_context(), url, site_for_cookies,
-      content::Referrer::GetDefaultReferrerPolicy());
+      content::Referrer::GetDefaultReferrerPolicy(), kMotivation);
   request_waiter.Run();
   EXPECT_EQ("", headers["referer"]);
 }
@@ -356,7 +363,7 @@ TEST_F(DetachedResourceRequestTest, FollowRedirect) {
 
   DetachedResourceRequest::CreateAndStart(
       browser_context(), url, site_for_cookies,
-      content::Referrer::GetDefaultReferrerPolicy());
+      content::Referrer::GetDefaultReferrerPolicy(), kMotivation);
   first_request_waiter.Run();
   second_request_waiter.Run();
 }
@@ -381,9 +388,9 @@ TEST_F(DetachedResourceRequestTest, NoContentCanSetCookie) {
 
   DetachedResourceRequest::CreateAndStart(
       browser_context(), url, site_for_cookies,
-      content::Referrer::GetDefaultReferrerPolicy(),
-      base::BindLambdaForTesting([&](bool success) {
-        EXPECT_TRUE(success);
+      content::Referrer::GetDefaultReferrerPolicy(), kMotivation,
+      base::BindLambdaForTesting([&](int net_error) {
+        EXPECT_EQ(net::OK, net_error);
         request_completion_waiter.Quit();
       }));
 
@@ -442,9 +449,9 @@ TEST_F(DetachedResourceRequestTest, MultipleOrigins) {
 
   DetachedResourceRequest::CreateAndStart(
       browser_context(), url, site_for_cookies,
-      content::Referrer::GetDefaultReferrerPolicy(),
-      base::BindLambdaForTesting([&](bool success) {
-        EXPECT_TRUE(success);
+      content::Referrer::GetDefaultReferrerPolicy(), kMotivation,
+      base::BindLambdaForTesting([&](int net_error) {
+        EXPECT_EQ(net::OK, net_error);
         detached_request_waiter.Quit();
       }));
   first_request_waiter.Run();
@@ -457,6 +464,8 @@ TEST_F(DetachedResourceRequestTest, MultipleOrigins) {
   ASSERT_EQ(kCookieFromNoContent, cookie);
   histogram_tester.ExpectUniqueSample(
       "CustomTabs.DetachedResourceRequest.RedirectsCount.Success", 1, 1);
+  histogram_tester.ExpectBucketCount(
+      "CustomTabs.DetachedResourceRequest.FinalStatus", net::OK, 1);
 }
 
 TEST_F(DetachedResourceRequestTest, ManyRedirects) {
@@ -471,14 +480,16 @@ TEST_F(DetachedResourceRequestTest, ManyRedirects) {
 
   DetachedResourceRequest::CreateAndStart(
       browser_context(), url, site_for_cookies,
-      content::Referrer::GetDefaultReferrerPolicy(),
-      base::BindLambdaForTesting([&](bool success) {
-        EXPECT_TRUE(success);
+      content::Referrer::GetDefaultReferrerPolicy(), kMotivation,
+      base::BindLambdaForTesting([&](int net_error) {
+        EXPECT_EQ(net::OK, net_error);
         request_waiter.Quit();
       }));
   request_waiter.Run();
   histogram_tester.ExpectUniqueSample(
       "CustomTabs.DetachedResourceRequest.RedirectsCount.Success", 9, 1);
+  histogram_tester.ExpectBucketCount(
+      "CustomTabs.DetachedResourceRequest.FinalStatus", net::OK, 1);
 }
 
 TEST_F(DetachedResourceRequestTest, TooManyRedirects) {
@@ -493,14 +504,17 @@ TEST_F(DetachedResourceRequestTest, TooManyRedirects) {
 
   DetachedResourceRequest::CreateAndStart(
       browser_context(), url, site_for_cookies,
-      content::Referrer::GetDefaultReferrerPolicy(),
-      base::BindLambdaForTesting([&](bool success) {
-        EXPECT_FALSE(success);
+      content::Referrer::GetDefaultReferrerPolicy(), kMotivation,
+      base::BindLambdaForTesting([&](int net_error) {
+        EXPECT_EQ(-net::ERR_TOO_MANY_REDIRECTS, net_error);
         request_waiter.Quit();
       }));
   request_waiter.Run();
   histogram_tester.ExpectUniqueSample(
       "CustomTabs.DetachedResourceRequest.RedirectsCount.Failure", 20, 1);
+  histogram_tester.ExpectBucketCount(
+      "CustomTabs.DetachedResourceRequest.FinalStatus",
+      -net::ERR_TOO_MANY_REDIRECTS, 1);
 }
 
 TEST_F(DetachedResourceRequestTest, CachedResponse) {
@@ -519,18 +533,18 @@ TEST_F(DetachedResourceRequestTest, CachedResponse) {
 
   DetachedResourceRequest::CreateAndStart(
       browser_context(), url, site_for_cookies,
-      content::Referrer::GetDefaultReferrerPolicy(),
-      base::BindLambdaForTesting([&](bool success) {
-        EXPECT_TRUE(success);
+      content::Referrer::GetDefaultReferrerPolicy(), kMotivation,
+      base::BindLambdaForTesting([&](int net_error) {
+        EXPECT_EQ(net::OK, net_error);
         first_request_waiter.Quit();
       }));
   first_request_waiter.Run();
 
   DetachedResourceRequest::CreateAndStart(
       browser_context(), url, site_for_cookies,
-      content::Referrer::GetDefaultReferrerPolicy(),
-      base::BindLambdaForTesting([&](bool success) {
-        EXPECT_TRUE(success);
+      content::Referrer::GetDefaultReferrerPolicy(), kMotivation,
+      base::BindLambdaForTesting([&](int net_error) {
+        EXPECT_EQ(net::OK, net_error);
         second_request_waiter.Quit();
       }));
   second_request_waiter.Run();

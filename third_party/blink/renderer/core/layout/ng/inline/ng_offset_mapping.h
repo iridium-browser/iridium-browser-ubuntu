@@ -5,12 +5,14 @@
 #ifndef NGOffsetMapping_h
 #define NGOffsetMapping_h
 
+#include "base/optional.h"
 #include "third_party/blink/renderer/core/core_export.h"
+#include "third_party/blink/renderer/core/dom/node.h"
 #include "third_party/blink/renderer/core/editing/forward.h"
 #include "third_party/blink/renderer/platform/heap/handle.h"
+#include "third_party/blink/renderer/platform/heap/persistent.h"
 #include "third_party/blink/renderer/platform/wtf/allocator.h"
 #include "third_party/blink/renderer/platform/wtf/hash_map.h"
-#include "third_party/blink/renderer/platform/wtf/optional.h"
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
 
@@ -18,7 +20,6 @@ namespace blink {
 
 class LayoutBlockFlow;
 class LayoutObject;
-class Node;
 
 enum class NGOffsetMappingUnitType { kIdentity, kCollapsed, kExpanded };
 
@@ -37,7 +38,7 @@ enum class NGOffsetMappingUnitType { kIdentity, kCollapsed, kExpanded };
 //   in the dom range is expanded into multiple characters.
 // See design doc https://goo.gl/CJbxky for details.
 class CORE_EXPORT NGOffsetMappingUnit {
-  DISALLOW_NEW_EXCEPT_PLACEMENT_NEW();
+  DISALLOW_NEW();
 
  public:
   NGOffsetMappingUnit(NGOffsetMappingUnitType,
@@ -55,19 +56,25 @@ class CORE_EXPORT NGOffsetMappingUnit {
   unsigned TextContentStart() const { return text_content_start_; }
   unsigned TextContentEnd() const { return text_content_end_; }
 
+  // If the passed unit can be concatenated to |this| to create a bigger unit,
+  // replaces |this| by the result and returns true; Returns false otherwise.
+  bool Concatenate(const NGOffsetMappingUnit&);
+
   unsigned ConvertDOMOffsetToTextContent(unsigned) const;
 
   unsigned ConvertTextContentToFirstDOMOffset(unsigned) const;
   unsigned ConvertTextContentToLastDOMOffset(unsigned) const;
 
  private:
-  const NGOffsetMappingUnitType type_ = NGOffsetMappingUnitType::kIdentity;
+  NGOffsetMappingUnitType type_ = NGOffsetMappingUnitType::kIdentity;
 
-  const Persistent<const Node> owner_;
-  const unsigned dom_start_;
-  const unsigned dom_end_;
-  const unsigned text_content_start_;
-  const unsigned text_content_end_;
+  Persistent<const Node> owner_;
+  unsigned dom_start_;
+  unsigned dom_end_;
+  unsigned text_content_start_;
+  unsigned text_content_end_;
+
+  friend class NGOffsetMappingBuilder;
 };
 
 class NGMappingUnitRange {
@@ -134,7 +141,7 @@ class CORE_EXPORT NGOffsetMapping {
 
   // Returns the text content offset corresponding to the given position.
   // Returns nullopt when the position is not laid out in this context.
-  Optional<unsigned> GetTextContentOffset(const Position&) const;
+  base::Optional<unsigned> GetTextContentOffset(const Position&) const;
 
   // Starting from the given position, searches for non-collapsed content in
   // the anchor node in forward/backward direction and returns the position
@@ -151,7 +158,7 @@ class CORE_EXPORT NGOffsetMapping {
 
   // Maps the given position to a text content offset, and then returns the text
   // content character before the offset. Returns nullopt if it does not exist.
-  Optional<UChar> GetCharacterBefore(const Position&) const;
+  base::Optional<UChar> GetCharacterBefore(const Position&) const;
 
   // ------ Mapping APIs from text content to DOM ------
 
@@ -170,7 +177,20 @@ class CORE_EXPORT NGOffsetMapping {
   Position GetFirstPosition(unsigned) const;
   Position GetLastPosition(unsigned) const;
 
+  // Returns all NGOffsetMappingUnits whose text content ranges has non-empty
+  // (but possibly collapsed) intersection with (start, end). Note that units
+  // that only "touch" |start| or |end| are excluded.
+  NGMappingUnitRange GetMappingUnitsForTextContentOffsetRange(
+      unsigned start,
+      unsigned end) const;
+
   // TODO(xiaochengh): Add offset-to-DOM APIs skipping generated contents.
+
+  // ------ APIs inspecting the text content string ------
+
+  // Returns false if all characters in [start, end) of |text_| are bidi
+  // control charcters. Returns true otherwise.
+  bool HasBidiControlCharactersOnly(unsigned start, unsigned end) const;
 
  private:
   // The NGOffsetMappingUnits of the inline formatting context in osrted order.

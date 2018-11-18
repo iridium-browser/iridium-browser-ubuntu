@@ -15,8 +15,8 @@
 #include "base/run_loop.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/test/test_timeouts.h"
+#include "base/threading/sequenced_task_runner_handle.h"
 #include "base/threading/thread.h"
-#include "base/threading/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "components/invalidation/impl/invalidator_storage.h"
 #include "components/invalidation/impl/profile_invalidation_provider.h"
@@ -42,8 +42,8 @@
 #include "components/sync_preferences/testing_pref_service_syncable.h"
 #include "google/cacheinvalidation/include/types.h"
 #include "google_apis/gaia/gaia_constants.h"
-#include "net/url_request/test_url_fetcher_factory.h"
-#include "net/url_request/url_request_context_getter.h"
+#include "services/network/public/cpp/shared_url_loader_factory.h"
+#include "services/network/test/test_network_connection_tracker.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
@@ -69,25 +69,34 @@ class TestSyncEngineHost : public SyncEngineHostStub {
                            const WeakHandle<JsBackend>&,
                            const WeakHandle<DataTypeDebugInfoListener>&,
                            const std::string&,
+                           const std::string&,
                            bool success) override {
     EXPECT_EQ(expect_success_, success);
     set_engine_types_.Run(initial_types);
-    base::RunLoop::QuitCurrentWhenIdleDeprecated();
+    std::move(quit_closure_).Run();
   }
 
   void SetExpectSuccess(bool expect_success) {
     expect_success_ = expect_success;
   }
 
+  void set_quit_closure(base::OnceClosure quit_closure) {
+    quit_closure_ = std::move(quit_closure);
+  }
+
  private:
   base::Callback<void(ModelTypeSet)> set_engine_types_;
   bool expect_success_ = false;
+  base::OnceClosure quit_closure_;
 };
 
 class FakeSyncManagerFactory : public SyncManagerFactory {
  public:
-  explicit FakeSyncManagerFactory(FakeSyncManager** fake_manager)
-      : fake_manager_(fake_manager) {
+  explicit FakeSyncManagerFactory(
+      FakeSyncManager** fake_manager,
+      network::NetworkConnectionTracker* network_connection_tracker)
+      : SyncManagerFactory(network_connection_tracker),
+        fake_manager_(fake_manager) {
     *fake_manager_ = nullptr;
   }
   ~FakeSyncManagerFactory() override {}
@@ -137,6 +146,7 @@ class NullEncryptionObserver : public SyncEncryptionHandler::Observer {
  public:
   void OnPassphraseRequired(
       PassphraseRequiredReason reason,
+      const KeyDerivationParams& key_derivation_params,
       const sync_pb::EncryptedData& pending_keys) override {}
   void OnPassphraseAccepted() override {}
   void OnBootstrapTokenUpdated(const std::string& bootstrap_token,
@@ -176,8 +186,8 @@ class SyncEngineTest : public testing::Test {
     credentials_.sync_token = "sync_token";
     credentials_.scope_set.insert(GaiaConstants::kChromeSyncOAuth2Scope);
 
-    fake_manager_factory_ =
-        std::make_unique<FakeSyncManagerFactory>(&fake_manager_);
+    fake_manager_factory_ = std::make_unique<FakeSyncManagerFactory>(
+        &fake_manager_, network::TestNetworkConnectionTracker::GetInstance());
 
     // These types are always implicitly enabled.
     enabled_types_.PutAll(ControlTypes());
@@ -209,9 +219,9 @@ class SyncEngineTest : public testing::Test {
     host_.SetExpectSuccess(expect_success);
     SyncEngine::HttpPostProviderFactoryGetter
         http_post_provider_factory_getter =
-            base::Bind(&NetworkResources::GetHttpPostProviderFactory,
-                       base::Unretained(network_resources_.get()), nullptr,
-                       base::DoNothing());
+            base::BindOnce(&NetworkResources::GetHttpPostProviderFactory,
+                           base::Unretained(network_resources_.get()), nullptr,
+                           base::DoNothing());
 
     SyncEngine::InitParams params;
     params.sync_task_runner = sync_thread_.task_runner();
@@ -221,7 +231,7 @@ class SyncEngineTest : public testing::Test {
                                   base::Unretained(&sync_client_)));
     params.encryption_observer_proxy =
         std::make_unique<NullEncryptionObserver>();
-    params.http_factory_getter = http_post_provider_factory_getter;
+    params.http_factory_getter = std::move(http_post_provider_factory_getter);
     params.credentials = credentials_;
     params.sync_manager_factory = std::move(fake_manager_factory_);
     params.delete_sync_data_folder = true;
@@ -273,7 +283,7 @@ class SyncEngineTest : public testing::Test {
  protected:
   void DownloadReady(ModelTypeSet succeeded_types, ModelTypeSet failed_types) {
     engine_types_.PutAll(succeeded_types);
-    base::RunLoop::QuitCurrentWhenIdleDeprecated();
+    std::move(quit_loop_).Run();
   }
 
   void OnDownloadRetry() { NOTIMPLEMENTED(); }
@@ -285,7 +295,9 @@ class SyncEngineTest : public testing::Test {
 
   void PumpSyncThread() {
     base::RunLoop run_loop;
-    base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
+    quit_loop_ = run_loop.QuitClosure();
+    host_.set_quit_closure(run_loop.QuitClosure());
+    base::SequencedTaskRunnerHandle::Get()->PostDelayedTask(
         FROM_HERE, run_loop.QuitClosure(), TestTimeouts::action_timeout());
     run_loop.Run();
   }
@@ -306,6 +318,7 @@ class SyncEngineTest : public testing::Test {
   ModelTypeSet enabled_types_;
   std::unique_ptr<NetworkResources> network_resources_;
   std::unique_ptr<SyncEncryptionHandler::NigoriState> saved_nigori_state_;
+  base::OnceClosure quit_loop_;
 };
 
 // Test basic initialization with no initial types (first time initialization).

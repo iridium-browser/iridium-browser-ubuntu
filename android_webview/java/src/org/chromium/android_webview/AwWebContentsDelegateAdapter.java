@@ -8,7 +8,6 @@ import android.annotation.SuppressLint;
 import android.content.Context;
 import android.media.AudioManager;
 import android.net.Uri;
-import android.os.AsyncTask;
 import android.os.Handler;
 import android.os.Message;
 import android.provider.MediaStore;
@@ -22,7 +21,7 @@ import android.widget.FrameLayout;
 import org.chromium.base.Callback;
 import org.chromium.base.ContentUriUtils;
 import org.chromium.base.ThreadUtils;
-import org.chromium.content.browser.ContentVideoViewEmbedder;
+import org.chromium.base.task.AsyncTask;
 import org.chromium.content_public.browser.InvalidateTypes;
 import org.chromium.content_public.common.ContentUrlConstants;
 import org.chromium.content_public.common.ResourceRequestBody;
@@ -41,7 +40,6 @@ class AwWebContentsDelegateAdapter extends AwWebContentsDelegate {
     private final Context mContext;
     private View mContainerView;
     private FrameLayout mCustomView;
-    private AwContentVideoViewEmbedder mVideoViewEmbedder;
 
     public AwWebContentsDelegateAdapter(AwContents awContents, AwContentsClient contentsClient,
             AwSettings settings, Context context, View containerView) {
@@ -54,6 +52,7 @@ class AwWebContentsDelegateAdapter extends AwWebContentsDelegate {
 
     public void setContainerView(View containerView) {
         mContainerView = containerView;
+        mContainerView.setClickable(true);
     }
 
     @Override
@@ -182,7 +181,7 @@ class AwWebContentsDelegateAdapter extends AwWebContentsDelegate {
     @Override
     public void showRepostFormWarningDialog() {
         // TODO(mkosiba) We should be using something akin to the JsResultReceiver as the
-        // callback parameter (instead of ContentViewCore) and implement a way of converting
+        // callback parameter (instead of WebContents) and implement a way of converting
         // that to a pair of messages.
         final int msgContinuePendingReload = 1;
         final int msgCancelPendingReload = 2;
@@ -265,12 +264,13 @@ class AwWebContentsDelegateAdapter extends AwWebContentsDelegate {
     }
 
     @Override
-    public void toggleFullscreenModeForTab(boolean enterFullscreen) {
-        if (enterFullscreen) {
-            enterFullscreen();
-        } else {
-            exitFullscreen();
-        }
+    public void enterFullscreenModeForTab(boolean prefersNavigationBar) {
+        enterFullscreen();
+    }
+
+    @Override
+    public void exitFullscreenModeForTab() {
+        exitFullscreen();
     }
 
     @Override
@@ -310,16 +310,9 @@ class AwWebContentsDelegateAdapter extends AwWebContentsDelegate {
     private void exitFullscreen() {
         if (mCustomView != null) {
             mCustomView = null;
-            if (mVideoViewEmbedder != null) mVideoViewEmbedder.setCustomView(null);
             mAwContents.exitFullScreen();
             mContentsClient.onHideCustomView();
         }
-    }
-
-    @Override
-    public ContentVideoViewEmbedder getContentVideoViewEmbedder() {
-        mVideoViewEmbedder = new AwContentVideoViewEmbedder(mContext, mContentsClient, mCustomView);
-        return mVideoViewEmbedder;
     }
 
     @Override
@@ -328,7 +321,7 @@ class AwWebContentsDelegateAdapter extends AwWebContentsDelegate {
                 ? mAwSettings.getBlockNetworkLoads() && URLUtil.isNetworkUrl(url) : true;
     }
 
-    private static class GetDisplayNameTask extends AsyncTask<Void, Void, String[]> {
+    private static class GetDisplayNameTask extends AsyncTask<String[]> {
         final int mProcessId;
         final int mRenderId;
         final int mModeFlags;
@@ -348,7 +341,7 @@ class AwWebContentsDelegateAdapter extends AwWebContentsDelegate {
         }
 
         @Override
-        protected String[] doInBackground(Void...voids) {
+        protected String[] doInBackground() {
             String[] displayNames = new String[mFilePaths.length];
             for (int i = 0; i < mFilePaths.length; i++) {
                 displayNames[i] = resolveFileName(mFilePaths[i]);

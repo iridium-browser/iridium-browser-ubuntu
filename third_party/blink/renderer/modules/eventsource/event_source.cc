@@ -35,12 +35,10 @@
 #include <memory>
 #include "third_party/blink/public/platform/task_type.h"
 #include "third_party/blink/public/platform/web_url_request.h"
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_controller.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/serialized_script_value.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/serialized_script_value_factory.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
 #include "third_party/blink/renderer/core/events/message_event.h"
 #include "third_party/blink/renderer/core/execution_context/execution_context.h"
 #include "third_party/blink/renderer/core/frame/csp/content_security_policy.h"
@@ -51,6 +49,7 @@
 #include "third_party/blink/renderer/core/loader/threadable_loader.h"
 #include "third_party/blink/renderer/core/probe/core_probes.h"
 #include "third_party/blink/renderer/modules/eventsource/event_source_init.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_error.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_loader_options.h"
 #include "third_party/blink/renderer/platform/loader/fetch/resource_request.h"
@@ -80,21 +79,21 @@ EventSource* EventSource::Create(ExecutionContext* context,
                                  const String& url,
                                  const EventSourceInit& event_source_init,
                                  ExceptionState& exception_state) {
-  if (context->IsDocument())
-    UseCounter::Count(ToDocument(context), WebFeature::kEventSourceDocument);
-  else
-    UseCounter::Count(context, WebFeature::kEventSourceWorker);
+  UseCounter::Count(context, IsA<Document>(context)
+                                 ? WebFeature::kEventSourceDocument
+                                 : WebFeature::kEventSourceWorker);
 
   if (url.IsEmpty()) {
     exception_state.ThrowDOMException(
-        kSyntaxError, "Cannot open an EventSource to an empty URL.");
+        DOMExceptionCode::kSyntaxError,
+        "Cannot open an EventSource to an empty URL.");
     return nullptr;
   }
 
   KURL full_url = context->CompleteURL(url);
   if (!full_url.IsValid()) {
     exception_state.ThrowDOMException(
-        kSyntaxError,
+        DOMExceptionCode::kSyntaxError,
         "Cannot open an EventSource to '" + url + "'. The URL is invalid.");
     return nullptr;
   }
@@ -108,10 +107,6 @@ EventSource* EventSource::Create(ExecutionContext* context,
 EventSource::~EventSource() {
   DCHECK_EQ(kClosed, state_);
   DCHECK(!loader_);
-}
-
-void EventSource::Dispose() {
-  probe::detachClientRequest(GetExecutionContext(), this);
 }
 
 void EventSource::ScheduleInitialConnect() {
@@ -131,7 +126,7 @@ void EventSource::Connect() {
   request.SetHTTPMethod(HTTPNames::GET);
   request.SetHTTPHeaderField(HTTPNames::Accept, "text/event-stream");
   request.SetHTTPHeaderField(HTTPNames::Cache_Control, "no-cache");
-  request.SetRequestContext(WebURLRequest::kRequestContextEventSource);
+  request.SetRequestContext(mojom::RequestContextType::EVENT_SOURCE);
   request.SetFetchRequestMode(network::mojom::FetchRequestMode::kCORS);
   request.SetFetchCredentialsMode(
       with_credentials_ ? network::mojom::FetchCredentialsMode::kInclude
@@ -153,25 +148,16 @@ void EventSource::Connect() {
                      last_event_id_utf8.length()));
   }
 
-  const SecurityOrigin* origin = execution_context.GetSecurityOrigin();
-
-  ThreadableLoaderOptions options;
-
   ResourceLoaderOptions resource_loader_options;
   resource_loader_options.data_buffering_policy = kDoNotBufferData;
-  resource_loader_options.security_origin = origin;
 
   probe::willSendEventSourceRequest(&execution_context, this);
-  // probe::documentThreadableLoaderStartedLoadingForClient
-  // will be called synchronously.
-  loader_ = ThreadableLoader::Create(execution_context, this, options,
-                                     resource_loader_options);
+  loader_ =
+      new ThreadableLoader(execution_context, this, resource_loader_options);
   loader_->Start(request);
 }
 
 void EventSource::NetworkRequestEnded() {
-  probe::didFinishEventSourceRequest(GetExecutionContext(), this);
-
   loader_ = nullptr;
 
   if (state_ != kClosed)
@@ -180,8 +166,9 @@ void EventSource::NetworkRequestEnded() {
 
 void EventSource::ScheduleReconnect() {
   state_ = kConnecting;
-  connect_timer_.StartOneShot(reconnect_delay_ / 1000.0, FROM_HERE);
-  DispatchEvent(Event::Create(EventTypeNames::error));
+  connect_timer_.StartOneShot(TimeDelta::FromMilliseconds(reconnect_delay_),
+                              FROM_HERE);
+  DispatchEvent(*Event::Create(EventTypeNames::error));
 }
 
 void EventSource::ConnectTimerFired(TimerBase*) {
@@ -232,13 +219,14 @@ ExecutionContext* EventSource::GetExecutionContext() const {
 }
 
 void EventSource::DidReceiveResponse(
-    unsigned long,
+    unsigned long identifier,
     const ResourceResponse& response,
     std::unique_ptr<WebDataConsumerHandle> handle) {
   DCHECK(!handle);
   DCHECK_EQ(kConnecting, state_);
   DCHECK(loader_);
 
+  resource_identifier_ = identifier;
   current_url_ = response.Url();
   event_stream_origin_ = SecurityOrigin::Create(response.Url())->ToString();
   int status_code = response.HttpStatusCode();
@@ -281,7 +269,7 @@ void EventSource::DidReceiveResponse(
       last_event_id = parser_->LastEventId();
     }
     parser_ = new EventSourceParser(last_event_id, this);
-    DispatchEvent(Event::Create(EventTypeNames::open));
+    DispatchEvent(*Event::Create(EventTypeNames::open));
   } else {
     loader_->Cancel();
   }
@@ -295,7 +283,7 @@ void EventSource::DidReceiveData(const char* data, unsigned length) {
   parser_->AddBytes(data, length);
 }
 
-void EventSource::DidFinishLoading(unsigned long, double) {
+void EventSource::DidFinishLoading(unsigned long) {
   DCHECK_EQ(kOpen, state_);
   DCHECK(loader_);
 
@@ -338,9 +326,10 @@ void EventSource::OnMessageEvent(const AtomicString& event_type,
   e->initMessageEvent(event_type, false, false, data, event_stream_origin_,
                       last_event_id, nullptr, nullptr);
 
-  probe::willDispatchEventSourceEvent(GetExecutionContext(), this, event_type,
+  probe::willDispatchEventSourceEvent(GetExecutionContext(),
+                                      resource_identifier_, event_type,
                                       last_event_id, data);
-  DispatchEvent(e);
+  DispatchEvent(*e);
 }
 
 void EventSource::OnReconnectionTimeSet(unsigned long long reconnection_time) {
@@ -354,11 +343,10 @@ void EventSource::AbortConnectionAttempt() {
   state_ = kClosed;
   NetworkRequestEnded();
 
-  DispatchEvent(Event::Create(EventTypeNames::error));
+  DispatchEvent(*Event::Create(EventTypeNames::error));
 }
 
 void EventSource::ContextDestroyed(ExecutionContext*) {
-  probe::detachClientRequest(GetExecutionContext(), this);
   close();
 }
 

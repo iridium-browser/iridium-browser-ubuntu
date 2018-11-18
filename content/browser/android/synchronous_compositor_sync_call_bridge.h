@@ -8,13 +8,13 @@
 #include "base/containers/circular_deque.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
+#include "base/thread_annotations.h"
 #include "components/viz/common/quads/compositor_frame.h"
 #include "content/common/input/sync_compositor_messages.h"
 #include "content/public/browser/android/synchronous_compositor.h"
 
 namespace content {
 
-class SynchronousCompositorBrowserFilter;
 class SynchronousCompositorHost;
 
 // For the synchronous compositor feature of webview it is necessary
@@ -71,9 +71,6 @@ class SynchronousCompositorSyncCallBridge
  public:
   explicit SynchronousCompositorSyncCallBridge(SynchronousCompositorHost* host);
 
-  // Attach a filter.
-  void BindFilterOnUIThread();
-
   // Indicatation that the remote is now ready to process requests. Called
   // on either UI or IO thread.
   void RemoteReady();
@@ -117,15 +114,9 @@ class SynchronousCompositorSyncCallBridge
   void ProcessFrameMetadataOnUIThread(uint32_t metadata_version,
                                       viz::CompositorFrameMetadata metadata);
 
-  void UnregisterSyncCallBridgeOnIOThread(
-      scoped_refptr<SynchronousCompositorBrowserFilter> filter);
-
   // Signal all waiters for closure. Callee must host a lock to |lock_|.
-  void SignalRemoteClosedToAllWaitersOnIOThread();
-
-  // Post a task to unregister the bridge with the filter if necessary. Can
-  // be called on either thread but must hold a lock to |lock_|.
-  void UnregisterSyncCallBridgeIfNecessary();
+  void SignalRemoteClosedToAllWaitersOnIOThread()
+      EXCLUSIVE_LOCKS_REQUIRED(lock_);
 
   using FrameFutureQueue =
       base::circular_deque<scoped_refptr<SynchronousCompositor::FrameFuture>>;
@@ -137,21 +128,14 @@ class SynchronousCompositorSyncCallBridge
   // UI thread only.
   ui::WindowAndroid* window_android_in_vsync_ = nullptr;
   SynchronousCompositorHost* host_;
-  bool bound_to_filter_ = false;
-  bool mojo_enabled_;
 
   // Shared variables between the IO thread and UI thread.
   base::Lock lock_;
-  FrameFutureQueue frame_futures_;
-  bool begin_frame_response_valid_ = false;
-  SyncCompositorCommonRendererParams last_render_params_;
-  base::ConditionVariable begin_frame_condition_;
-  RemoteState remote_state_ = RemoteState::INIT;
-
-  // IO thread based callback that will unbind this object from
-  // the SynchronousCompositorBrowserFilter. Only called once
-  // all pending frames are acknowledged.
-  base::OnceClosure unregister_callback_;
+  FrameFutureQueue frame_futures_ GUARDED_BY(lock_);
+  bool begin_frame_response_valid_ GUARDED_BY(lock_) = false;
+  SyncCompositorCommonRendererParams last_render_params_ GUARDED_BY(lock_);
+  base::ConditionVariable begin_frame_condition_ GUARDED_BY(lock_);
+  RemoteState remote_state_ GUARDED_BY(lock_) = RemoteState::INIT;
 
   DISALLOW_COPY_AND_ASSIGN(SynchronousCompositorSyncCallBridge);
 };

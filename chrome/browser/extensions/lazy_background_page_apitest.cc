@@ -47,6 +47,7 @@
 #include "extensions/test/result_catcher.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/test/embedded_test_server/embedded_test_server.h"
+#include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 
@@ -250,12 +251,22 @@ IN_PROC_BROWSER_TEST_F(LazyBackgroundPageApiTest, WaitForDialog) {
   // With the dialog open the background page is still alive.
   EXPECT_TRUE(IsBackgroundPageAlive(extension->id()));
 
-  // Close the dialog. The keep alive count is decremented.
+  // Close the dialog. The keep alive count is decremented. Check for the
+  // presence of the MODAL_DIALOG activity and that it goes away when
+  // the dialog is closed.
+  const auto dialog_box_activity =
+      std::make_pair(Activity::MODAL_DIALOG,
+                     dialog->web_contents()->GetLastCommittedURL().spec());
   ProcessManager* pm = ProcessManager::Get(browser()->profile());
   int previous_keep_alive_count = pm->GetLazyKeepaliveCount(extension);
+  ProcessManager::ActivitiesMultiset activities =
+      pm->GetLazyKeepaliveActivities(extension);
+  EXPECT_EQ(1u, activities.count(dialog_box_activity));
   dialog->CloseModalDialog();
   EXPECT_EQ(previous_keep_alive_count - 1,
             pm->GetLazyKeepaliveCount(extension));
+  activities = pm->GetLazyKeepaliveActivities(extension);
+  EXPECT_EQ(0u, activities.count(dialog_box_activity));
 
   // The background page closes now that the dialog is gone.
   background_observer.WaitUntilClosed();
@@ -312,8 +323,8 @@ IN_PROC_BROWSER_TEST_F(LazyBackgroundPageApiTest, WaitForRequest) {
 
   // Abort the request.
   bool result = false;
-  EXPECT_TRUE(content::ExecuteScriptAndExtractBool(
-      host->render_view_host(), "abortRequest()", &result));
+  EXPECT_TRUE(content::ExecuteScriptAndExtractBool(host->web_contents(),
+                                                   "abortRequest()", &result));
   EXPECT_TRUE(result);
   page_complete.Wait();
 
@@ -329,7 +340,7 @@ IN_PROC_BROWSER_TEST_F(LazyBackgroundPageApiTest, NaClInBackgroundPage) {
   {
     base::FilePath extdir;
     base::ScopedAllowBlockingForTesting allow_blocking;
-    ASSERT_TRUE(PathService::Get(chrome::DIR_GEN_TEST_DATA, &extdir));
+    ASSERT_TRUE(base::PathService::Get(chrome::DIR_GEN_TEST_DATA, &extdir));
     extdir = extdir.AppendASCII("ppapi/tests/extensions/load_unload/newlib");
     LazyBackgroundObserver page_complete;
     ASSERT_TRUE(LoadExtension(extdir));
@@ -366,7 +377,7 @@ IN_PROC_BROWSER_TEST_F(LazyBackgroundPageApiTest, NaClInView) {
   {
     base::FilePath extdir;
     base::ScopedAllowBlockingForTesting allow_blocking;
-    ASSERT_TRUE(PathService::Get(chrome::DIR_GEN_TEST_DATA, &extdir));
+    ASSERT_TRUE(base::PathService::Get(chrome::DIR_GEN_TEST_DATA, &extdir));
     extdir = extdir.AppendASCII("ppapi/tests/extensions/popup/newlib");
     ResultCatcher catcher;
     const Extension* extension = LoadExtension(extdir);
@@ -571,61 +582,6 @@ IN_PROC_BROWSER_TEST_F(LazyBackgroundPageApiTest, EventDispatchToTab) {
   EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();
 }
 
-// Tests that the lazy background page updates the chrome://extensions page
-// when it is destroyed.
-IN_PROC_BROWSER_TEST_F(LazyBackgroundPageApiTest, UpdateExtensionsPage) {
-  base::test::ScopedFeatureList scoped_feature_list;
-  scoped_feature_list.InitWithFeatures(
-      {} /* enabled */, {features::kMaterialDesignExtensions} /* disabled */);
-
-  ui_test_utils::NavigateToURL(browser(), GURL(chrome::kChromeUIExtensionsURL));
-  auto* extensions_page = browser()->tab_strip_model()->GetActiveWebContents();
-
-  ResultCatcher catcher;
-  base::FilePath extdir = test_data_dir_.AppendASCII("lazy_background_page").
-      AppendASCII("wait_for_view");
-  const Extension* extension = LoadExtension(extdir);
-  ASSERT_TRUE(extension);
-  EXPECT_TRUE(catcher.GetNextResult()) << catcher.message();
-
-  // The extension should've opened a new tab to an extension page.
-  EXPECT_EQ(extension->GetResourceURL("extension_page.html").spec(),
-            browser()->tab_strip_model()->GetActiveWebContents()->
-                GetURL().spec());
-
-  // Lazy Background Page still exists, because the extension created a new tab
-  // to an extension page.
-  EXPECT_TRUE(IsBackgroundPageAlive(last_loaded_extension_id()));
-
-  // Close the new tab.
-  LazyBackgroundObserver page_complete;
-  browser()->tab_strip_model()->CloseWebContentsAt(
-      browser()->tab_strip_model()->active_index(), TabStripModel::CLOSE_NONE);
-  page_complete.WaitUntilClosed();
-
-  // Lazy Background Page has been shut down.
-  EXPECT_FALSE(IsBackgroundPageAlive(last_loaded_extension_id()));
-
-  // Updating the extensions page is a process that has back-and-forth
-  // communication (i.e., backend tells extensions page something changed,
-  // extensions page requests updated data, backend responds with updated data,
-  // and so forth). This makes it difficult to know for sure when the page is
-  // done updating, so just try a few times. We limit the total number of
-  // attempts so that a) the test *fails* (instead of times out), and b) we
-  // know we're not making a ridiculous amount of trips to update the page.
-  bool is_inactive = false;
-  int kMaxTries = 10;
-  int num_tries = 0;
-  while (!is_inactive && num_tries++ < kMaxTries) {
-    EXPECT_TRUE(content::ExecuteScriptAndExtractBool(
-        extensions_page,
-        "var ele = document.querySelectorAll('div.active-views');"
-        "window.domAutomationController.send("
-        "    ele[0].innerHTML.search('(Inactive)') > 0);",
-        &is_inactive));
-  }
-}
-
 // Tests that the lazy background page will be unloaded if the onSuspend event
 // handler calls an API function such as chrome.storage.local.set().
 // See: http://crbug.com/296834
@@ -675,6 +631,66 @@ IN_PROC_BROWSER_TEST_F(LazyBackgroundPageApiTest, EventListenerCleanup) {
   EXPECT_FALSE(IsBackgroundPageAlive(extension->id()));
   EXPECT_TRUE(event_router->HasLazyEventListenerForTesting(kEvent));
   EXPECT_FALSE(event_router->HasNonLazyEventListenerForTesting(kEvent));
+}
+
+class PictureInPictureLazyBackgroundPageApiTest
+    : public LazyBackgroundPageApiTest {
+ public:
+  PictureInPictureLazyBackgroundPageApiTest() = default;
+  ~PictureInPictureLazyBackgroundPageApiTest() override {}
+
+  void SetUpInProcessBrowserTestFixture() override {
+    LazyBackgroundPageApiTest::SetUpInProcessBrowserTestFixture();
+    // Delays are set so that video is loaded when toggling Picture-in-Picture.
+    ProcessManager::SetEventPageIdleTimeForTesting(2000);
+    ProcessManager::SetEventPageSuspendingTimeForTesting(2000);
+  }
+
+ private:
+  DISALLOW_COPY_AND_ASSIGN(PictureInPictureLazyBackgroundPageApiTest);
+};
+
+// Tests that the lazy background page stays alive while a video is playing in
+// Picture-in-Picture mode.
+IN_PROC_BROWSER_TEST_F(PictureInPictureLazyBackgroundPageApiTest,
+                       PictureInPictureInBackgroundPage) {
+  ASSERT_TRUE(StartEmbeddedTestServer());
+  ASSERT_TRUE(LoadExtensionAndWait("browser_action_picture_in_picture"));
+
+  const Extension* extension = GetSingleLoadedExtension();
+  ASSERT_TRUE(extension) << message_;
+
+  // Click on the browser action icon to load video.
+  {
+    ExtensionTestMessageListener video_loaded("video_loaded", false);
+    BrowserActionTestUtil::Create(browser())->Press(0);
+    EXPECT_TRUE(video_loaded.WaitUntilSatisfied());
+  }
+
+  // Click on the browser action icon to enter Picture-in-Picture and check
+  // that keep alive count is incremented.
+  {
+    ProcessManager* pm = ProcessManager::Get(browser()->profile());
+    const auto pip_activity =
+        std::make_pair(Activity::MEDIA, Activity::kPictureInPicture);
+    EXPECT_THAT(pm->GetLazyKeepaliveActivities(extension),
+                testing::Not(testing::Contains(pip_activity)));
+
+    ExtensionTestMessageListener entered_pip("entered_pip", false);
+    BrowserActionTestUtil::Create(browser())->Press(0);
+    EXPECT_TRUE(entered_pip.WaitUntilSatisfied());
+    EXPECT_THAT(pm->GetLazyKeepaliveActivities(extension),
+                testing::Contains(pip_activity));
+  }
+
+  // Click on the browser action icon to exit Picture-in-Picture and the Lazy
+  // Background Page shuts down.
+  {
+    LazyBackgroundObserver page_complete;
+    BrowserActionTestUtil::Create(browser())->Press(0);
+    page_complete.WaitUntilClosed();
+    EXPECT_FALSE(IsBackgroundPageAlive(extension->id()));
+  }
 }
 
 }  // namespace extensions

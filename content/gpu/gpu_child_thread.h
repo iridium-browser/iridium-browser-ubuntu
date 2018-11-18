@@ -14,6 +14,7 @@
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "base/macros.h"
+#include "base/memory/memory_coordinator_client.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/weak_ptr.h"
 #include "base/time/time.h"
@@ -21,10 +22,9 @@
 #include "components/viz/service/gl/gpu_service_impl.h"
 #include "components/viz/service/main/viz_main_impl.h"
 #include "content/child/child_thread_impl.h"
-#include "content/common/associated_interface_registry_impl.h"
-#include "gpu/command_buffer/service/gpu_preferences.h"
 #include "gpu/config/gpu_feature_info.h"
 #include "gpu/config/gpu_info.h"
+#include "gpu/config/gpu_preferences.h"
 #include "gpu/ipc/service/gpu_channel.h"
 #include "gpu/ipc/service/gpu_channel_manager.h"
 #include "gpu/ipc/service/gpu_channel_manager_delegate.h"
@@ -36,6 +36,7 @@
 #include "services/service_manager/public/cpp/service_context_ref.h"
 #include "services/service_manager/public/mojom/service_factory.mojom.h"
 #include "services/viz/privileged/interfaces/viz_main.mojom.h"
+#include "third_party/blink/public/common/associated_interfaces/associated_interface_registry.h"
 #include "ui/gfx/native_widget_types.h"
 
 namespace content {
@@ -46,9 +47,11 @@ class GpuServiceFactory;
 // IPC messages to gpu::GpuChannelManager, which is responsible for issuing
 // rendering commands to the GPU.
 class GpuChildThread : public ChildThreadImpl,
-                       public viz::VizMainImpl::Delegate {
+                       public viz::VizMainImpl::Delegate,
+                       public base::MemoryCoordinatorClient {
  public:
-  GpuChildThread(std::unique_ptr<gpu::GpuInit> gpu_init,
+  GpuChildThread(base::RepeatingClosure quit_closure,
+                 std::unique_ptr<gpu::GpuInit> gpu_init,
                  viz::VizMainImpl::LogMessages deferred_messages);
 
   GpuChildThread(const InProcessChildThreadParams& params,
@@ -59,7 +62,8 @@ class GpuChildThread : public ChildThreadImpl,
   void Init(const base::Time& process_start_time);
 
  private:
-  GpuChildThread(const ChildThreadImpl::Options& options,
+  GpuChildThread(base::RepeatingClosure quit_closure,
+                 const ChildThreadImpl::Options& options,
                  std::unique_ptr<gpu::GpuInit> gpu_init);
 
   void CreateVizMainService(viz::mojom::VizMainAssociatedRequest request);
@@ -79,6 +83,14 @@ class GpuChildThread : public ChildThreadImpl,
   void OnGpuServiceConnection(viz::GpuServiceImpl* gpu_service) override;
   void PostCompositorThreadCreated(
       base::SingleThreadTaskRunner* task_runner) override;
+  void QuitMainMessageLoop() override;
+
+  // ChildMemoryCoordinatorDelegate implementation.
+  void OnTrimMemoryImmediately() override;
+  // base::MemoryCoordinatorClient implementation:
+  void OnPurgeMemory() override;
+  void OnMemoryPressure(
+      base::MemoryPressureListener::MemoryPressureLevel level);
 
   void BindServiceFactoryRequest(
       service_manager::mojom::ServiceFactoryRequest request);
@@ -99,10 +111,12 @@ class GpuChildThread : public ChildThreadImpl,
   mojo::BindingSet<service_manager::mojom::ServiceFactory>
       service_factory_bindings_;
 
-  AssociatedInterfaceRegistryImpl associated_interfaces_;
+  blink::AssociatedInterfaceRegistry associated_interfaces_;
 
   // Holds a closure that releases pending interface requests on the IO thread.
   base::Closure release_pending_requests_closure_;
+
+  std::unique_ptr<base::MemoryPressureListener> memory_pressure_listener_;
 
   base::WeakPtrFactory<GpuChildThread> weak_factory_;
 

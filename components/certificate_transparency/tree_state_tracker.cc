@@ -17,7 +17,6 @@
 #include "net/cert/signed_tree_head.h"
 #include "net/cert/x509_certificate.h"
 #include "net/dns/dns_client.h"
-#include "net/dns/dns_config_service.h"
 #include "net/log/net_log.h"
 
 using net::X509Certificate;
@@ -54,9 +53,6 @@ TreeStateTracker::~TreeStateTracker() {}
 void TreeStateTracker::OnSCTVerified(base::StringPiece hostname,
                                      X509Certificate* cert,
                                      const SignedCertificateTimestamp* sct) {
-  if (!base::FeatureList::IsEnabled(kCTLogAuditing))
-    return;
-
   auto it = tree_trackers_.find(sct->log_id);
   // Ignore if the SCT is from an unknown log.
   if (it == tree_trackers_.end())

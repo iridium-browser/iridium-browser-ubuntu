@@ -19,20 +19,19 @@
 #include "base/process/launch.h"
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_restrictions.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/upgrade_detector.h"
+#include "chrome/browser/upgrade_detector/upgrade_detector.h"
 #include "chrome/common/service_process_util.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/child_process_launcher_utils.h"
-#include "mojo/edk/embedder/embedder.h"
-#include "mojo/edk/embedder/named_platform_handle.h"
-#include "mojo/edk/embedder/named_platform_handle_utils.h"
-#include "mojo/edk/embedder/peer_connection.h"
+#include "mojo/public/cpp/platform/named_platform_channel.h"
+#include "mojo/public/cpp/system/isolated_connection.h"
 
 using content::BrowserThread;
 
@@ -48,36 +47,34 @@ constexpr base::TimeDelta kInitialConnectionRetryDelay =
 
 void ConnectAsyncWithBackoff(
     service_manager::mojom::InterfaceProviderRequest interface_provider_request,
-    mojo::edk::NamedPlatformHandle os_pipe,
+    mojo::NamedPlatformChannel::ServerName server_name,
     size_t num_retries_left,
     base::TimeDelta retry_delay,
     scoped_refptr<base::TaskRunner> response_task_runner,
-    base::OnceCallback<void(std::unique_ptr<mojo::edk::PeerConnection>)>
+    base::OnceCallback<void(std::unique_ptr<mojo::IsolatedConnection>)>
         response_callback) {
-  mojo::edk::ScopedPlatformHandle os_pipe_handle =
-      mojo::edk::CreateClientHandle(os_pipe);
-  if (!os_pipe_handle.is_valid()) {
+  mojo::PlatformChannelEndpoint endpoint =
+      mojo::NamedPlatformChannel::ConnectToServer(server_name);
+  if (!endpoint.is_valid()) {
     if (num_retries_left == 0) {
       response_task_runner->PostTask(
           FROM_HERE, base::BindOnce(std::move(response_callback), nullptr));
     } else {
       base::PostDelayedTaskWithTraits(
-          FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
+          FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
           base::BindOnce(
               &ConnectAsyncWithBackoff, std::move(interface_provider_request),
-              std::move(os_pipe), num_retries_left - 1, retry_delay * 2,
+              server_name, num_retries_left - 1, retry_delay * 2,
               std::move(response_task_runner), std::move(response_callback)),
           retry_delay);
     }
   } else {
-    auto peer_connection = std::make_unique<mojo::edk::PeerConnection>();
-    mojo::FuseMessagePipes(
-        peer_connection->Connect(mojo::edk::ConnectionParams(
-            mojo::edk::TransportProtocol::kLegacy, std::move(os_pipe_handle))),
-        interface_provider_request.PassMessagePipe());
+    auto mojo_connection = std::make_unique<mojo::IsolatedConnection>();
+    mojo::FuseMessagePipes(mojo_connection->Connect(std::move(endpoint)),
+                           interface_provider_request.PassMessagePipe());
     response_task_runner->PostTask(FROM_HERE,
                                    base::BindOnce(std::move(response_callback),
-                                                  std::move(peer_connection)));
+                                                  std::move(mojo_connection)));
   }
 }
 
@@ -108,19 +105,19 @@ void ServiceProcessControl::ConnectInternal() {
   auto interface_provider_request = mojo::MakeRequest(&remote_interfaces);
   SetMojoHandle(std::move(remote_interfaces));
   base::PostTaskWithTraits(
-      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
       base::BindOnce(
           &ConnectAsyncWithBackoff, std::move(interface_provider_request),
-          GetServiceProcessChannel(), kMaxConnectionAttempts,
+          GetServiceProcessServerName(), kMaxConnectionAttempts,
           kInitialConnectionRetryDelay, base::ThreadTaskRunnerHandle::Get(),
           base::BindOnce(&ServiceProcessControl::OnPeerConnectionComplete,
                          weak_factory_.GetWeakPtr())));
 }
 
 void ServiceProcessControl::OnPeerConnectionComplete(
-    std::unique_ptr<mojo::edk::PeerConnection> peer_connection) {
+    std::unique_ptr<mojo::IsolatedConnection> connection) {
   // Hold onto the connection object so the connection is kept alive.
-  peer_connection_ = std::move(peer_connection);
+  mojo_connection_ = std::move(connection);
 }
 
 void ServiceProcessControl::SetMojoHandle(
@@ -157,7 +154,7 @@ void ServiceProcessControl::RunConnectDoneTasks() {
 
 // static
 void ServiceProcessControl::RunAllTasksHelper(TaskList* task_list) {
-  TaskList::iterator index = task_list->begin();
+  auto index = task_list->begin();
   while (index != task_list->end()) {
     std::move(*index).Run();
     index = task_list->erase(index);
@@ -201,7 +198,7 @@ void ServiceProcessControl::Launch(base::OnceClosure success_task,
 
 void ServiceProcessControl::Disconnect() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  peer_connection_.reset();
+  mojo_connection_.reset();
   remote_interfaces_.Close();
   service_process_.reset();
 }
@@ -209,6 +206,7 @@ void ServiceProcessControl::Disconnect() {
 void ServiceProcessControl::OnProcessLaunched() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (launcher_->launched()) {
+    saved_pid_ = launcher_->saved_pid();
     UMA_HISTOGRAM_ENUMERATION("CloudPrint.ServiceEvents",
                               SERVICE_EVENT_LAUNCHED, SERVICE_EVENT_MAX);
     // After we have successfully created the service process we try to connect
@@ -306,9 +304,9 @@ bool ServiceProcessControl::GetHistograms(
   // Run timeout task to make sure |histograms_callback| is called.
   histograms_timeout_callback_.Reset(base::Bind(
       &ServiceProcessControl::RunHistogramsCallback, base::Unretained(this)));
-  BrowserThread::PostDelayedTask(BrowserThread::UI, FROM_HERE,
-                                 histograms_timeout_callback_.callback(),
-                                 timeout);
+  base::PostDelayedTaskWithTraits(FROM_HERE, {BrowserThread::UI},
+                                  histograms_timeout_callback_.callback(),
+                                  timeout);
 
   histograms_callback_ = histograms_callback;
   return true;
@@ -363,8 +361,8 @@ void ServiceProcessControl::Launcher::DoDetectLaunched() {
   if (launched_ || (retry_count_ >= kMaxLaunchDetectRetries) ||
       process_.WaitForExitWithTimeout(base::TimeDelta(), &exit_code)) {
     process_.Close();
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE, base::Bind(&Launcher::Notify, this));
+    base::PostTaskWithTraits(FROM_HERE, {BrowserThread::UI},
+                             base::Bind(&Launcher::Notify, this));
     return;
   }
   retry_count_++;
@@ -385,12 +383,12 @@ void ServiceProcessControl::Launcher::DoRun() {
 #endif
   process_ = base::LaunchProcess(*cmd_line_, options);
   if (process_.IsValid()) {
-    BrowserThread::PostTask(
-        BrowserThread::IO, FROM_HERE,
-        base::Bind(&Launcher::DoDetectLaunched, this));
+    saved_pid_ = process_.Pid();
+    base::PostTaskWithTraits(FROM_HERE, {BrowserThread::IO},
+                             base::Bind(&Launcher::DoDetectLaunched, this));
   } else {
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE, base::Bind(&Launcher::Notify, this));
+    base::PostTaskWithTraits(FROM_HERE, {BrowserThread::UI},
+                             base::Bind(&Launcher::Notify, this));
   }
 }
 #endif  // !OS_MACOSX

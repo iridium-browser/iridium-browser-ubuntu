@@ -23,6 +23,7 @@ import android.provider.Browser;
 import android.support.test.InstrumentationRegistry;
 import android.support.test.espresso.intent.rule.IntentsTestRule;
 import android.support.test.filters.SmallTest;
+import android.support.v7.widget.AppCompatImageButton;
 import android.support.v7.widget.RecyclerView;
 import android.support.v7.widget.RecyclerView.ViewHolder;
 import android.text.TextUtils;
@@ -33,7 +34,6 @@ import org.junit.Assert;
 import org.junit.Before;
 import org.junit.Rule;
 import org.junit.Test;
-import org.junit.rules.TestRule;
 import org.junit.runner.RunWith;
 
 import org.chromium.base.ThreadUtils;
@@ -51,18 +51,18 @@ import org.chromium.chrome.browser.preferences.PrefServiceBridge;
 import org.chromium.chrome.browser.profiles.Profile;
 import org.chromium.chrome.browser.signin.SigninManager;
 import org.chromium.chrome.browser.signin.SigninManager.SignInStateObserver;
+import org.chromium.chrome.browser.signin.SignoutReason;
 import org.chromium.chrome.browser.widget.DateDividedAdapter;
-import org.chromium.chrome.browser.widget.TintedImageButton;
 import org.chromium.chrome.browser.widget.selection.SelectableItemView;
 import org.chromium.chrome.browser.widget.selection.SelectableItemViewHolder;
 import org.chromium.chrome.browser.widget.selection.SelectionDelegate.SelectionObserver;
 import org.chromium.chrome.test.ChromeJUnit4ClassRunner;
-import org.chromium.chrome.test.util.browser.ChromeModernDesign;
 import org.chromium.chrome.test.util.browser.signin.SigninTestUtil;
 import org.chromium.chrome.test.util.browser.sync.SyncTestUtil;
 import org.chromium.components.signin.ChromeSigninController;
-import org.chromium.content.browser.test.util.Criteria;
-import org.chromium.content.browser.test.util.CriteriaHelper;
+import org.chromium.content_public.browser.test.util.Criteria;
+import org.chromium.content_public.browser.test.util.CriteriaHelper;
+import org.chromium.ui.base.PageTransition;
 import org.chromium.ui.test.util.UiRestriction;
 
 import java.util.Date;
@@ -79,9 +79,6 @@ public class HistoryActivityTest {
     @Rule
     public IntentsTestRule<HistoryActivity> mActivityTestRule =
             new IntentsTestRule<>(HistoryActivity.class, false, false);
-
-    @Rule
-    public TestRule mChromeModernDesignStateRule = new ChromeModernDesign.Processor();
 
     private static class TestObserver extends RecyclerView.AdapterDataObserver
             implements SelectionObserver<HistoryItem>, SignInStateObserver, PrefObserver {
@@ -193,7 +190,7 @@ public class HistoryActivityTest {
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
             public void run() {
-                ((TintedImageButton) itemView.findViewById(R.id.remove)).performClick();
+                ((AppCompatImageButton) itemView.findViewById(R.id.remove)).performClick();
             }
         });
 
@@ -328,12 +325,16 @@ public class HistoryActivityTest {
         Assert.assertEquals(mItem1.getUrl(), intent.getDataString());
         Assert.assertFalse(intent.hasExtra(IntentHandler.EXTRA_OPEN_NEW_INCOGNITO_TAB));
         Assert.assertFalse(intent.hasExtra(Browser.EXTRA_CREATE_NEW_TAB));
+        Assert.assertEquals(PageTransition.AUTO_BOOKMARK,
+                intent.getIntExtra(IntentHandler.EXTRA_PAGE_TRANSITION_TYPE, -1));
 
         intent = mHistoryManager.getOpenUrlIntent(mItem2.getUrl(), true, true);
         Assert.assertEquals(mItem2.getUrl(), intent.getDataString());
         Assert.assertTrue(
                 intent.getBooleanExtra(IntentHandler.EXTRA_OPEN_NEW_INCOGNITO_TAB, false));
         Assert.assertTrue(intent.getBooleanExtra(Browser.EXTRA_CREATE_NEW_TAB, false));
+        Assert.assertEquals(PageTransition.AUTO_BOOKMARK,
+                intent.getIntExtra(IntentHandler.EXTRA_PAGE_TRANSITION_TYPE, -1));
     }
 
     @Test
@@ -416,7 +417,6 @@ public class HistoryActivityTest {
 
     @Test
     @SmallTest
-    @ChromeModernDesign.Enable
     public void testSearchView() throws Exception {
         final HistoryManagerToolbar toolbar = mHistoryManager.getToolbarForTests();
         View toolbarShadow = mHistoryManager.getSelectableListLayout().getToolbarShadowForTests();
@@ -742,7 +742,7 @@ public class HistoryActivityTest {
         ThreadUtils.runOnUiThreadBlocking(new Runnable() {
             @Override
             public void run() {
-                SigninManager.get().signOut(null);
+                SigninManager.get().signOut(SignoutReason.SIGNOUT_TEST);
             }
         });
         mTestObserver.onSigninStateChangedCallback.waitForCallback(currentCallCount, 1);

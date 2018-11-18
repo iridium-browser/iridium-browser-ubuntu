@@ -7,6 +7,8 @@
 
 #include <stdint.h>
 
+#include <vector>
+
 #include "base/optional.h"
 #include "base/time/time.h"
 #include "net/base/net_export.h"
@@ -27,12 +29,12 @@ class NET_EXPORT_PRIVATE Observation {
  public:
   Observation(int32_t value,
               base::TimeTicks timestamp,
-              const base::Optional<int32_t>& signal_strength,
+              int32_t signal_strength,
               NetworkQualityObservationSource source);
 
   Observation(int32_t value,
               base::TimeTicks timestamp,
-              const base::Optional<int32_t>& signal_strength,
+              int32_t signal_strength,
               NetworkQualityObservationSource source,
               const base::Optional<IPHash>& host);
 
@@ -47,8 +49,9 @@ class NET_EXPORT_PRIVATE Observation {
   // Time when the observation was taken.
   base::TimeTicks timestamp() const { return timestamp_; }
 
-  // Signal strength when the observation was taken.
-  base::Optional<int32_t> signal_strength() const { return signal_strength_; }
+  // Signal strength when the observation was taken. Set to INT32_MIN when the
+  // value is unavailable. Otherwise, must be between 0 and 4 (both inclusive).
+  int32_t signal_strength() const { return signal_strength_; }
 
   // The source of the observation.
   NetworkQualityObservationSource source() const { return source_; }
@@ -56,15 +59,18 @@ class NET_EXPORT_PRIVATE Observation {
   // A unique identifier for the remote host which was used for the measurement.
   base::Optional<IPHash> host() const { return host_; }
 
-  // Returns the observation category of this observation.
-  ObservationCategory GetObservationCategory() const;
+  // Returns the observation categories to which this observation belongs to.
+  std::vector<ObservationCategory> GetObservationCategories() const;
 
  private:
   int32_t value_;
 
   base::TimeTicks timestamp_;
 
-  base::Optional<int32_t> signal_strength_;
+  // Signal strength of the network when the observation was taken. Set to
+  // INT32_MIN when the value is unavailable. Otherwise, must be between 0 and 4
+  // (both inclusive).
+  int32_t signal_strength_;
 
   NetworkQualityObservationSource source_;
 

@@ -42,14 +42,14 @@ LayoutTestURLRequestContextGetter::~LayoutTestURLRequestContextGetter() {
 
 std::unique_ptr<net::NetworkDelegate>
 LayoutTestURLRequestContextGetter::CreateNetworkDelegate() {
-  ShellNetworkDelegate::SetBlockThirdPartyCookies(true);
+  ShellNetworkDelegate::SetBlockThirdPartyCookies(false);
   return base::WrapUnique(new ShellNetworkDelegate);
 }
 
 std::unique_ptr<net::CertVerifier>
 LayoutTestURLRequestContextGetter::GetCertVerifier() {
   return network::IgnoreErrorsCertVerifier::MaybeWrapCertVerifier(
-      *base::CommandLine::ForCurrentProcess(), switches::kRunLayoutTest,
+      *base::CommandLine::ForCurrentProcess(), switches::kRunWebTests,
       net::CertVerifier::CreateDefault());
 }
 

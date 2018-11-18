@@ -29,7 +29,6 @@
 #include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
-#include "third_party/blink/renderer/core/dom/sync_reattach_context.h"
 #include "third_party/blink/renderer/core/dom/tag_collection.h"
 #include "third_party/blink/renderer/core/dom/text.h"
 #include "third_party/blink/renderer/core/exported/web_plugin_container_impl.h"
@@ -70,6 +69,13 @@ void HTMLObjectElement::Trace(blink::Visitor* visitor) {
   HTMLPlugInElement::Trace(visitor);
 }
 
+const HashSet<AtomicString>& HTMLObjectElement::GetCheckedAttributeNames()
+    const {
+  DEFINE_STATIC_LOCAL(HashSet<AtomicString>, attribute_set,
+                      ({"data", "codebase"}));
+  return attribute_set;
+}
+
 LayoutEmbeddedContent* HTMLObjectElement::ExistingLayoutEmbeddedContent()
     const {
   // This will return 0 if the layoutObject is not a LayoutEmbeddedContent.
@@ -100,15 +106,13 @@ void HTMLObjectElement::ParseAttribute(
     FormAttributeChanged();
   } else if (name == typeAttr) {
     SetServiceType(params.new_value.LowerASCII());
-    size_t pos = service_type_.Find(";");
+    wtf_size_t pos = service_type_.Find(";");
     if (pos != kNotFound)
       SetServiceType(service_type_.Left(pos));
     // TODO(schenney): crbug.com/572908 What is the right thing to do here?
     // Should we suppress the reload stuff when a persistable widget-type is
     // specified?
     ReloadPluginOnAttributeChange(name);
-    if (!GetLayoutObject())
-      RequestPluginCreationWithoutLayoutObjectIfPossible();
   } else if (name == dataAttr) {
     SetUrl(StripLeadingAndTrailingHTMLSpaces(params.new_value));
     if (GetLayoutObject() && IsImageType()) {
@@ -169,7 +173,7 @@ void HTMLObjectElement::ParametersForPlugin(PluginParameters& plugin_params) {
     // TODO(schenney): crbug.com/572908 serviceType calculation does not belong
     // in this function.
     if (service_type_.IsEmpty() && DeprecatedEqualIgnoringCase(name, "type")) {
-      size_t pos = p->Value().Find(";");
+      wtf_size_t pos = p->Value().Find(";");
       if (pos != kNotFound)
         SetServiceType(p->Value().GetString().Left(pos));
     }
@@ -237,7 +241,7 @@ void HTMLObjectElement::ReloadPluginOnAttributeChange(
 }
 
 // TODO(schenney): crbug.com/572908 This should be unified with
-// HTMLEmbedElement::updatePlugin and moved down into HTMLPluginElement.cpp
+// HTMLEmbedElement::UpdatePlugin and moved down into html_plugin_element.cc
 void HTMLObjectElement::UpdatePluginInternal() {
   DCHECK(!GetLayoutEmbeddedObject()->ShowsUnavailablePluginIndicator());
   DCHECK(NeedsPluginUpdate());
@@ -292,13 +296,13 @@ void HTMLObjectElement::UpdatePluginInternal() {
 }
 
 Node::InsertionNotificationRequest HTMLObjectElement::InsertedInto(
-    ContainerNode* insertion_point) {
+    ContainerNode& insertion_point) {
   HTMLPlugInElement::InsertedInto(insertion_point);
   ListedElement::InsertedInto(insertion_point);
   return kInsertionDone;
 }
 
-void HTMLObjectElement::RemovedFrom(ContainerNode* insertion_point) {
+void HTMLObjectElement::RemovedFrom(ContainerNode& insertion_point) {
   HTMLPlugInElement::RemovedFrom(insertion_point);
   ListedElement::RemovedFrom(insertion_point);
 }
@@ -331,15 +335,9 @@ const AtomicString HTMLObjectElement::ImageSourceURL() const {
   return getAttribute(dataAttr);
 }
 
-// TODO(schenney): crbug.com/572908 Remove this hack.
 void HTMLObjectElement::ReattachFallbackContent() {
-  if (GetDocument().InStyleRecalc()) {
-    // This can happen inside of AttachLayoutTree() in the middle of a
-    // RebuildLayoutTree, so we need to reattach synchronously here.
-    ReattachLayoutTree(SyncReattachContext::CurrentAttachContext());
-  } else {
+  if (!GetDocument().InStyleRecalc())
     LazyReattachIfAttached();
-  }
 }
 
 void HTMLObjectElement::RenderFallbackContent() {
@@ -428,11 +426,6 @@ bool HTMLObjectElement::WillUseFallbackContentAtLayout() const {
 
 void HTMLObjectElement::AssociateWith(HTMLFormElement* form) {
   AssociateByParser(form);
-}
-
-void HTMLObjectElement::AttachLayoutTree(AttachContext& context) {
-  SyncReattachContext reattach_context(context);
-  HTMLPlugInElement::AttachLayoutTree(context);
 }
 
 const HTMLObjectElement* ToHTMLObjectElementFromListedElement(

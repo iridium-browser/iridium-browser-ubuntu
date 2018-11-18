@@ -7,11 +7,38 @@
 
 #include "SkTypes.h"
 
-#if SK_SUPPORT_GPU
-
+#include "GrContext.h"
+#include "GrContextFactory.h"
 #include "GrContextPriv.h"
+#include "GrDeferredUpload.h"
+#include "GrDrawOpAtlas.h"
+#include "GrDrawingManager.h"
+#include "GrMemoryPool.h"
+#include "GrOnFlushResourceProvider.h"
+#include "GrOpFlushState.h"
+#include "GrRenderTargetContext.h"
+#include "GrSurfaceProxyPriv.h"
+#include "GrTextureProxy.h"
+#include "GrTypesPriv.h"
+#include "GrXferProcessor.h"
+#include "SkBitmap.h"
+#include "SkColor.h"
+#include "SkColorSpace.h"
+#include "SkIPoint16.h"
+#include "SkImageInfo.h"
+#include "SkMatrix.h"
+#include "SkPaint.h"
+#include "SkPoint.h"
+#include "SkRefCnt.h"
 #include "Test.h"
-#include "text/GrGlyphCache.h"
+#include "ops/GrDrawOp.h"
+#include "text/GrAtlasManager.h"
+#include "text/GrTextContext.h"
+#include "text/GrTextTarget.h"
+
+#include <memory>
+
+class GrResourceProvider;
 
 static const int kNumPlots = 2;
 static const int kPlotSize = 32;
@@ -20,7 +47,7 @@ static const int kAtlasSize = kNumPlots * kPlotSize;
 int GrDrawOpAtlas::numAllocated_TestingOnly() const {
     int count = 0;
     for (uint32_t i = 0; i < this->maxPages(); ++i) {
-        if (fProxies[i]->priv().isInstantiated()) {
+        if (fProxies[i]->isInstantiated()) {
             ++count;
         }
     }
@@ -145,16 +172,6 @@ DEF_GPUTEST_FOR_RENDERING_CONTEXTS(BasicDrawOpAtlas, reporter, ctxInfo) {
     check(reporter, atlas.get(), 1, 4, 1);
 }
 
-#include "GrTest.h"
-
-#include "GrDrawingManager.h"
-#include "GrOpFlushState.h"
-#include "GrProxyProvider.h"
-
-#include "effects/GrConstColorProcessor.h"
-#include "ops/GrAtlasTextOp.h"
-#include "text/GrAtlasTextContext.h"
-
 // This test verifies that the GrAtlasTextOp::onPrepare method correctly handles a failure
 // when allocating an atlas page.
 DEF_GPUTEST_FOR_RENDERING_CONTEXTS(GrAtlasTextOpPreparation, reporter, ctxInfo) {
@@ -164,7 +181,8 @@ DEF_GPUTEST_FOR_RENDERING_CONTEXTS(GrAtlasTextOpPreparation, reporter, ctxInfo) 
     auto gpu = context->contextPriv().getGpu();
     auto resourceProvider = context->contextPriv().resourceProvider();
     auto drawingManager = context->contextPriv().drawingManager();
-    auto textContext = drawingManager->getAtlasTextContext();
+    auto textContext = drawingManager->getTextContext();
+    auto opMemoryPool = context->contextPriv().opMemoryPool();
 
     auto rtc =  context->contextPriv().makeDeferredRenderTargetContext(SkBackingFit::kApprox,
                                                                        32, 32,
@@ -176,15 +194,12 @@ DEF_GPUTEST_FOR_RENDERING_CONTEXTS(GrAtlasTextOpPreparation, reporter, ctxInfo) 
     paint.setLCDRenderText(false);
     paint.setAntiAlias(false);
     paint.setSubpixelText(false);
-    GrTextUtils::Paint utilsPaint(&paint, &rtc->colorSpaceInfo());
 
     const char* text = "a";
 
-    std::unique_ptr<GrDrawOp> op = textContext->createOp_TestingOnly(context, textContext,
-                                                                     rtc.get(), paint,
-                                                                     SkMatrix::I(), text,
-                                                                     16, 16);
-    op->finalize(*context->caps(), nullptr, GrPixelConfigIsClamped::kNo);
+    std::unique_ptr<GrDrawOp> op = textContext->createOp_TestingOnly(
+            context, textContext, rtc.get(), paint, SkMatrix::I(), text, 16, 16);
+    op->finalize(*context->contextPriv().caps(), nullptr);
 
     TestingUploadTarget uploadTarget;
 
@@ -206,7 +221,5 @@ DEF_GPUTEST_FOR_RENDERING_CONTEXTS(GrAtlasTextOpPreparation, reporter, ctxInfo) 
     flushState.setOpArgs(&opArgs);
     op->prepare(&flushState);
     flushState.setOpArgs(nullptr);
+    opMemoryPool->release(std::move(op));
 }
-
-
-#endif

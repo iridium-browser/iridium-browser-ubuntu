@@ -51,8 +51,8 @@ class CORE_EXPORT SVGSMILElement : public SVGElement, public SVGTests {
 
   void ParseAttribute(const AttributeModificationParams&) override;
   void SvgAttributeChanged(const QualifiedName&) override;
-  InsertionNotificationRequest InsertedInto(ContainerNode*) override;
-  void RemovedFrom(ContainerNode*) override;
+  InsertionNotificationRequest InsertedInto(ContainerNode&) override;
+  void RemovedFrom(ContainerNode&) override;
 
   virtual bool HasValidTarget();
   virtual void AnimationAttributeChanged() = 0;
@@ -125,7 +125,7 @@ class CORE_EXPORT SVGSMILElement : public SVGElement, public SVGTests {
 
   virtual bool IsSVGDiscardElement() const { return false; }
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  protected:
   enum BeginOrEnd { kBegin, kEnd };

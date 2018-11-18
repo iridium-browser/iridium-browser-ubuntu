@@ -89,7 +89,10 @@ found in the LICENSE file.
     </div>
   </div>
   <div class="dialog-container">
-    <div id="dialog-header"></div>
+    <div id="dialog-header">
+      <div id="minimize-button"></div>
+      <div id="close-button"></div>
+    </div>
     <div class="dialog-body">
       <div class="dialog-topbar">
         <div id="navstrip">
@@ -102,12 +105,43 @@ found in the LICENSE file.
       <div class="dialog-main">
         <div id="category-container">
           <div id="wallpaper-set-by-message"></div>
-          <grid id="wallpaper-grid" class="image-picker"></grid>
+          <div id="current-wallpaper-info-bar">
+            <img id="current-wallpaper-image" aria-hidden="true"></img>
+            <div id="current-wallpaper-spinner" hidden></div>
+            <div id="current-wallpaper-more-info">
+              <div id="currently-set-message"
+                  i18n-content="currentlySetLabel"></div>
+              <div id="current-wallpaper-title"></div>
+              <div id="current-wallpaper-description"></div>
+            </div>
+            <div id="current-wallpaper-more-options">
+              <div id="refresh">
+                <div class="icon"></div>
+                <div class="text" i18n-content="refreshLabel"></div>
+              </div>
+              <div id="explore">
+                <div class="icon"></div>
+                <div class="text" i18n-content="exploreLabel"></div>
+              </div>
+              <div id="center">
+                <div class="icon"></div>
+                <div class="text" i18n-content="centerLayout"></div>
+              </div>
+              <div id="center-cropped">
+                <div class="icon"></div>
+                <div class="text" i18n-content="centerCroppedLayout"></div>
+              </div>
+            </div>
+          </div>
+          <grid id="wallpaper-grid" class="image-picker" tabIndex="-1"></grid>
           <div id="spinner-container" hidden></div>
           <div class="progress-bar" hidden>
             <div class="progress-track"></div>
           </div>
-          <div id="no-images-message" i18n-content="noImagesAvailable"></div>
+          <div id="no-images-message">
+            <div class="icon"></div>
+            <div class="text" i18n-content="noImagesAvailable"></div>
+          </div>
           <div class="bottom-bar">
             <div id="online-wallpaper-attribute">
               <img id="attribute-image" hidden>
@@ -131,39 +165,39 @@ found in the LICENSE file.
         </div>
       </div>
     </div>
-    <div id="current-wallpaper-info-bar">
-      <img id="current-wallpaper-image"></img>
-      <div>
-        <div id="currently-set-message"></div>
-        <div id="current-wallpaper-title"></div>
-        <div id="current-wallpaper-description"></div>
-      </div>
-      <div id="current-wallpaper-explore">
-        <a id="current-wallpaper-explore-link" i18n-content="exploreLabel"
-            target="_blank"></a>
-      </div>
-    </div>
   </div>
   <div id="top-header">
     <div class="top-header-contents">
+      <div id="cancel-preview-wallpaper" class="preview-option"></div>
       <div id="image-title"></div>
-      <div id="collection-name"></div>
+      <div class="divider"></div>
+      <div id="wallpaper-description"></div>
       <div class="more-options">
-        <div id="refresh" class='online-option' i18n-content="refreshLabel">
+        <div class="center-button custom-option">
+          <div class="icon"></div>
+          <div class="text" i18n-content="centerLayout"></div>
         </div>
-        <div id="center" class='custom-option' i18n-content="centerLayout">
+        <div class="center-cropped-button custom-option">
+          <div class="icon"></div>
+          <div class="text" i18n-content="centerCroppedLayout"></div>
         </div>
-        <div id="center-cropped" class='custom-option'
-            i18n-content="centerCroppedLayout"></div>
-        <div id="cancel-preview-wallpaper" class='preview-option'></div>
-        <div id="confirm-preview-wallpaper" class='preview-option'></div>
+        <div id="refresh-wallpaper" class="daily-option"
+            i18n-content="refreshLabel"></div>
+        <div id="confirm-preview-wallpaper" class="preview-option"
+            i18n-content="confirmPreviewLabel"></div>
       </div>
     </div>
   </div>
-  <div id="set-successfully-message"></div>
-  <div class="daily-refresh-banner" hidden>
-    <div id="daily-refresh-label" i18n-content="surpriseMeLabel"></div>
-    <span class="daily-refresh-slider"></span>
+  <div id="message-container" i18n-content="connectionFailed"></div>
+  <div id="preview-canvas"></div>
+  <div id="preview-spinner" hidden></div>
+  <div id="daily-refresh-banner-template" hidden>
+    <div class="daily-refresh-banner">
+      <div class="daily-refresh-label" i18n-content="surpriseMeLabel"
+          aria-hidden="true"></div>
+      <span role="checkbox" tabIndex="0" class="daily-refresh-slider">
+        <div class="ripple-circle"></div></span>
+    </div>
   </div>
 </body>
 </html>

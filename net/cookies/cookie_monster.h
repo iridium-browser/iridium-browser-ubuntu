@@ -31,6 +31,7 @@
 #include "net/cookies/cookie_constants.h"
 #include "net/cookies/cookie_monster_change_dispatcher.h"
 #include "net/cookies/cookie_store.h"
+#include "net/log/net_log_with_source.h"
 #include "url/gurl.h"
 
 namespace base {
@@ -130,18 +131,19 @@ class NET_EXPORT CookieMonster : public CookieStore {
   // class will take care of initializing it. The backing store is NOT owned by
   // this class, but it must remain valid for the duration of the cookie
   // monster's existence. If |store| is NULL, then no backing store will be
-  // updated.
-  explicit CookieMonster(scoped_refptr<PersistentCookieStore> store);
-
-  // Like above, but includes a non-owning pointer |channel_id_service| for the
+  // updated. |channel_id_service| is a non-owninng pointer for the
   // corresponding ChannelIDService used with this CookieStore. The
-  // |channel_id_service| must outlive the CookieMonster.
+  // |channel_id_service| must outlive the CookieMonster. |net_log| must outlive
+  // the CookieMonster. Both |channel_id_service| and |net_log| can be null.
   CookieMonster(scoped_refptr<PersistentCookieStore> store,
-                ChannelIDService* channel_id_service);
+                ChannelIDService* channel_id_service,
+                NetLog* net_log);
 
   // Only used during unit testing.
+  // |net_log| must outlive the CookieMonster.
   CookieMonster(scoped_refptr<PersistentCookieStore> store,
-                base::TimeDelta last_access_threshold);
+                base::TimeDelta last_access_threshold,
+                NetLog* net_log);
 
   ~CookieMonster() override;
 
@@ -171,14 +173,11 @@ class NET_EXPORT CookieMonster : public CookieStore {
                          base::OnceClosure callback) override;
   void DeleteCanonicalCookieAsync(const CanonicalCookie& cookie,
                                   DeleteCallback callback) override;
-  void DeleteAllCreatedBetweenAsync(const base::Time& delete_begin,
-                                    const base::Time& delete_end,
-                                    DeleteCallback callback) override;
-  void DeleteAllCreatedBetweenWithPredicateAsync(
-      const base::Time& delete_begin,
-      const base::Time& delete_end,
-      const base::Callback<bool(const CanonicalCookie&)>& predicate,
+  void DeleteAllCreatedInTimeRangeAsync(
+      const CookieDeletionInfo::TimeRange& creation_range,
       DeleteCallback callback) override;
+  void DeleteAllMatchingInfoAsync(CookieDeletionInfo delete_info,
+                                  DeleteCallback callback) override;
   void DeleteSessionCookiesAsync(DeleteCallback) override;
   void FlushStore(base::OnceClosure callback) override;
   void SetForceKeepSessionState() override;
@@ -216,7 +215,8 @@ class NET_EXPORT CookieMonster : public CookieStore {
  private:
   CookieMonster(scoped_refptr<PersistentCookieStore> store,
                 ChannelIDService* channel_id_service,
-                base::TimeDelta last_access_threshold);
+                base::TimeDelta last_access_threshold,
+                NetLog* net_log);
 
   // For garbage collection constants.
   FRIEND_TEST_ALL_PREFIXES(CookieMonsterTest, TestHostGarbageCollection);
@@ -377,16 +377,12 @@ class NET_EXPORT CookieMonster : public CookieStore {
                                 const CookieOptions& options,
                                 GetCookieListCallback callback);
 
-  void DeleteAllCreatedBetween(const base::Time& delete_begin,
-                               const base::Time& delete_end,
-                               DeleteCallback callback);
-
-  // Predicate will be called with the calling thread.
-  void DeleteAllCreatedBetweenWithPredicate(
-      const base::Time& delete_begin,
-      const base::Time& delete_end,
-      const base::Callback<bool(const CanonicalCookie&)>& predicate,
+  void DeleteAllCreatedInTimeRange(
+      const CookieDeletionInfo::TimeRange& creation_range,
       DeleteCallback callback);
+
+  void DeleteAllMatchingInfo(net::CookieDeletionInfo delete_info,
+                             DeleteCallback callback);
 
   void SetCookieWithOptions(const GURL& url,
                             const std::string& cookie_line,
@@ -624,6 +620,8 @@ class NET_EXPORT CookieMonster : public CookieStore {
   // for typical use.
   bool seen_global_task_;
 
+  NetLogWithSource net_log_;
+
   scoped_refptr<PersistentCookieStore> store_;
 
   base::Time last_time_seen_;
@@ -672,7 +670,10 @@ class NET_EXPORT CookieMonster::PersistentCookieStore
   // that are not yet returned to CookieMonster by previous priority loads.
   //
   // |loaded_callback| may not be NULL.
-  virtual void Load(const LoadedCallback& loaded_callback) = 0;
+  // |net_log| is a NetLogWithSource that may be copied if the persistent
+  // store wishes to log NetLog events.
+  virtual void Load(const LoadedCallback& loaded_callback,
+                    const NetLogWithSource& net_log) = 0;
 
   // Does a priority load of all cookies for the domain key (eTLD+1). The
   // callback will return all the cookies that are not yet returned by previous

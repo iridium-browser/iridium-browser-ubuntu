@@ -13,7 +13,6 @@
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_file.h"
-#include "base/mac/bind_objc_block.h"
 #include "base/mac/foundation_util.h"
 #include "base/macros.h"
 #include "base/message_loop/message_loop.h"
@@ -21,6 +20,8 @@
 #include "base/single_thread_task_runner.h"
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread_restrictions.h"
+#include "components/cronet/cronet_buildflags.h"
+#include "components/cronet/cronet_global_state.h"
 #include "components/cronet/cronet_prefs_manager.h"
 #include "components/cronet/histogram_manager.h"
 #include "components/prefs/pref_filter.h"
@@ -43,9 +44,10 @@
 #include "net/log/net_log_capture_mode.h"
 #include "net/log/net_log_util.h"
 #include "net/proxy_resolution/proxy_resolution_service.h"
-#include "net/quic/core/quic_versions.h"
 #include "net/socket/ssl_client_socket.h"
 #include "net/ssl/channel_id_service.h"
+#include "net/ssl/ssl_key_logger_impl.h"
+#include "net/third_party/quic/core/quic_versions.h"
 #include "net/url_request/http_user_agent_settings.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_builder.h"
@@ -304,15 +306,12 @@ void CronetEnvironment::InitializeOnNetworkThread() {
   DCHECK(GetNetworkThreadTaskRunner()->BelongsToCurrentThread());
   base::DisallowBlocking();
 
-  if (network_thread_priority_ != kKeepDefaultThreadPriority) {
-    SetNetworkThreadPriorityOnNetworkThread(network_thread_priority_);
-  }
-
   static bool ssl_key_log_file_set = false;
   if (!ssl_key_log_file_set && !ssl_key_log_file_name_.empty()) {
     ssl_key_log_file_set = true;
     base::FilePath ssl_key_log_file(ssl_key_log_file_name_);
-    net::SSLClientSocket::SetSSLKeyLogFile(ssl_key_log_file);
+    net::SSLClientSocket::SetSSLKeyLogger(
+        std::make_unique<net::SSLKeyLoggerImpl>(ssl_key_log_file));
   }
 
   if (user_agent_partial_)
@@ -320,7 +319,7 @@ void CronetEnvironment::InitializeOnNetworkThread() {
 
   // Cache
   base::FilePath storage_path;
-  if (!PathService::Get(base::DIR_CACHE, &storage_path))
+  if (!base::PathService::Get(base::DIR_CACHE, &storage_path))
     return;
   storage_path = storage_path.Append(FILE_PATH_LITERAL("cronet"));
 
@@ -340,6 +339,8 @@ void CronetEnvironment::InitializeOnNetworkThread() {
       experimental_options_;  // Set experimental Cronet options.
   context_config_builder.mock_cert_verifier = std::move(
       mock_cert_verifier_);  // MockCertVerifier to use for testing purposes.
+  if (network_thread_priority_ != kKeepDefaultThreadPriority)
+    context_config_builder.network_thread_priority = network_thread_priority_;
   std::unique_ptr<URLRequestContextConfig> config =
       context_config_builder.Build();
 
@@ -376,9 +377,8 @@ void CronetEnvironment::InitializeOnNetworkThread() {
   // of changing it.
   [[NSHTTPCookieStorage sharedHTTPCookieStorage]
       setCookieAcceptPolicy:NSHTTPCookieAcceptPolicyAlways];
-  std::unique_ptr<net::CookieStore> cookie_store =
-      std::make_unique<net::CookieStoreIOS>(
-          [NSHTTPCookieStorage sharedHTTPCookieStorage]);
+  auto cookie_store = std::make_unique<net::CookieStoreIOS>(
+      [NSHTTPCookieStorage sharedHTTPCookieStorage], nullptr /* net_log */);
   context_builder.SetCookieAndChannelIdStores(std::move(cookie_store), nullptr);
 
   context_builder.set_enable_brotli(brotli_enabled_);
@@ -400,7 +400,7 @@ void CronetEnvironment::InitializeOnNetworkThread() {
                                          quic_hint.port());
     main_context_->http_server_properties()->SetQuicAlternativeService(
         quic_hint_server, alternative_service, base::Time::Max(),
-        net::QuicTransportVersionVector());
+        quic::QuicTransportVersionVector());
   }
 
   main_context_->transport_security_state()
@@ -441,8 +441,12 @@ std::string CronetEnvironment::user_agent() {
 
 std::vector<uint8_t> CronetEnvironment::GetHistogramDeltas() {
   std::vector<uint8_t> data;
+#if BUILDFLAG(DISABLE_HISTOGRAM_SUPPORT)
+  NOTREACHED() << "Histogram support is disabled";
+#else   // BUILDFLAG(DISABLE_HISTOGRAM_SUPPORT)
   if (!HistogramManager::GetInstance()->GetDeltas(&data))
     return std::vector<uint8_t>();
+#endif  // BUILDFLAG(DISABLE_HISTOGRAM_SUPPORT)
   return data;
 }
 
@@ -467,11 +471,7 @@ void CronetEnvironment::SetHostResolverRulesOnNetworkThread(
 void CronetEnvironment::SetNetworkThreadPriorityOnNetworkThread(
     double priority) {
   DCHECK(GetNetworkThreadTaskRunner()->BelongsToCurrentThread());
-  DCHECK_LE(priority, 1.0);
-  DCHECK_GE(priority, 0.0);
-  if (priority >= 0.0 && priority <= 1.0) {
-    [NSThread setThreadPriority:priority];
-  }
+  cronet::SetNetworkThreadPriorityOnNetworkThread(priority);
 }
 
 std::string CronetEnvironment::getDefaultQuicUserAgentId() const {

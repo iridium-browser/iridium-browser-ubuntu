@@ -16,15 +16,13 @@
 #include "components/viz/common/quads/render_pass.h"
 #include "components/viz/common/resources/transferable_resource.h"
 #include "components/viz/common/surfaces/surface_id.h"
+#include "components/viz/common/surfaces/surface_range.h"
 #include "components/viz/service/viz_service_export.h"
 #include "ui/gfx/color_space.h"
 
-namespace cc {
-class DisplayResourceProvider;
-}  // namespace cc
-
 namespace viz {
 class CompositorFrame;
+class DisplayResourceProvider;
 class Surface;
 class SurfaceClient;
 class SurfaceDrawQuad;
@@ -36,12 +34,13 @@ class VIZ_SERVICE_EXPORT SurfaceAggregator {
   using FrameSinkIdMap = base::flat_map<FrameSinkId, LocalSurfaceId>;
 
   SurfaceAggregator(SurfaceManager* manager,
-                    cc::DisplayResourceProvider* provider,
+                    DisplayResourceProvider* provider,
                     bool aggregate_only_damaged);
   ~SurfaceAggregator();
 
   CompositorFrame Aggregate(const SurfaceId& surface_id,
-                            base::TimeTicks expected_display_time);
+                            base::TimeTicks expected_display_time,
+                            int64_t display_trace_id = -1);
   void ReleaseResources(const SurfaceId& surface_id);
   const SurfaceIndexMap& previous_contained_surfaces() const {
     return previous_contained_surfaces_;
@@ -56,6 +55,8 @@ class VIZ_SERVICE_EXPORT SurfaceAggregator {
   // to the output surface.
   void SetOutputColorSpace(const gfx::ColorSpace& blending_color_space,
                            const gfx::ColorSpace& output_color_space);
+
+  bool NotifySurfaceDamageAndCheckForDisplayDamage(const SurfaceId& surface_id);
 
  private:
   struct ClipData {
@@ -86,8 +87,6 @@ class VIZ_SERVICE_EXPORT SurfaceAggregator {
   struct SurfaceDrawQuadUmaStats {
     void Reset() {
       valid_surface = 0;
-      missing_surface = 0;
-      no_active_frame = 0;
       using_fallback_surface = 0;
     }
 
@@ -148,9 +147,6 @@ class VIZ_SERVICE_EXPORT SurfaceAggregator {
       SkColor background_color,
       RenderPass* dest_pass);
 
-  void ReportMissingFallbackSurface(const SurfaceId& fallback_surface_id,
-                                    const Surface* fallback_surface);
-
   SharedQuadState* CopySharedQuadState(const SharedQuadState* source_sqs,
                                        const gfx::Transform& target_transform,
                                        const ClipData& clip_rect,
@@ -202,7 +198,7 @@ class VIZ_SERVICE_EXPORT SurfaceAggregator {
                              const std::vector<ReturnedResource>& resources);
 
   SurfaceManager* manager_;
-  cc::DisplayResourceProvider* provider_;
+  DisplayResourceProvider* provider_;
 
   // Every Surface has its own RenderPass ID namespace. This structure maps
   // each source (SurfaceId, RenderPass id) to a unified ID namespace that's
@@ -280,6 +276,12 @@ class VIZ_SERVICE_EXPORT SurfaceAggregator {
 
   // Tracks UMA stats for SurfaceDrawQuads during a call to Aggregate().
   SurfaceDrawQuadUmaStats uma_stats_;
+
+  // For each FrameSinkId, contains a vector of SurfaceRanges that will damage
+  // the display if they're damaged.
+  base::flat_map<FrameSinkId, std::vector<SurfaceRange>> damage_ranges_;
+
+  int64_t display_trace_id_ = -1;
 
   base::WeakPtrFactory<SurfaceAggregator> weak_factory_;
 

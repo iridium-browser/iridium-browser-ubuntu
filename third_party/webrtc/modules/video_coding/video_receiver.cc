@@ -27,7 +27,6 @@ namespace vcm {
 
 VideoReceiver::VideoReceiver(Clock* clock,
                              EventFactory* event_factory,
-                             EncodedImageCallback* pre_decode_image_callback,
                              VCMTiming* timing,
                              NackSender* nack_sender,
                              KeyFrameRequestSender* keyframe_request_sender)
@@ -46,7 +45,6 @@ VideoReceiver::VideoReceiver(Clock* clock,
       drop_frames_until_keyframe_(false),
       max_nack_list_size_(0),
       _codecDataBase(),
-      pre_decode_image_callback_(pre_decode_image_callback),
       _receiveStatsTimer(1000, clock_),
       _retransmissionTimer(10, clock_),
       _keyRequestTimer(500, clock_) {
@@ -156,8 +154,7 @@ int32_t VideoReceiver::SetVideoProtection(VCMVideoProtection videoProtection,
 
     case kProtectionNackFEC: {
       RTC_DCHECK(enable);
-      _receiver.SetNackMode(kNack,
-                            media_optimization::kLowRttNackMs,
+      _receiver.SetNackMode(kNack, media_optimization::kLowRttNackMs,
                             media_optimization::kMaxRttDelayThreshold);
       _receiver.SetDecodeErrorMode(kNoErrors);
       break;
@@ -298,16 +295,6 @@ int32_t VideoReceiver::Decode(uint16_t maxWaitTimeMs) {
     return VCM_FRAME_NOT_READY;
   }
 
-  if (pre_decode_image_callback_) {
-    EncodedImage encoded_image(frame->EncodedImage());
-    int qp = -1;
-    if (qp_parser_.GetQp(*frame, &qp)) {
-      encoded_image.qp_ = qp;
-    }
-    pre_decode_image_callback_->OnEncodedImage(encoded_image,
-                                               frame->CodecSpecific(), nullptr);
-  }
-
   // If this frame was too late, we should adjust the delay accordingly
   _timing->UpdateCurrentDelay(frame->RenderTimeMs(),
                               clock_->TimeInMilliseconds());
@@ -328,15 +315,6 @@ int32_t VideoReceiver::Decode(uint16_t maxWaitTimeMs) {
 //                 VCMEncodedFrame with FrameObject.
 int32_t VideoReceiver::Decode(const webrtc::VCMEncodedFrame* frame) {
   RTC_DCHECK_RUN_ON(&decoder_thread_checker_);
-  if (pre_decode_image_callback_) {
-    EncodedImage encoded_image(frame->EncodedImage());
-    int qp = -1;
-    if (qp_parser_.GetQp(*frame, &qp)) {
-      encoded_image.qp_ = qp;
-    }
-    pre_decode_image_callback_->OnEncodedImage(encoded_image,
-                                               frame->CodecSpecific(), nullptr);
-  }
   return Decode(*frame);
 }
 
@@ -484,16 +462,6 @@ void VideoReceiver::SetNackSettings(size_t max_nack_list_size,
   }
   _receiver.SetNackSettings(max_nack_list_size, max_packet_age_to_nack,
                             max_incomplete_time_ms);
-}
-
-int VideoReceiver::SetMinReceiverDelay(int desired_delay_ms) {
-  RTC_DCHECK_RUN_ON(&construction_thread_checker_);
-  RTC_DCHECK(!IsDecoderThreadRunning());
-  // TODO(tommi): Is the method only used by tests? Maybe could be offered
-  // via a test only subclass?
-  // Info from Stefan: If it is indeed only used by tests I think it's just that
-  // it hasn't been cleaned up when the calling code was cleaned up.
-  return _receiver.SetMinReceiverDelay(desired_delay_ms);
 }
 
 bool VideoReceiver::IsDecoderThreadRunning() {

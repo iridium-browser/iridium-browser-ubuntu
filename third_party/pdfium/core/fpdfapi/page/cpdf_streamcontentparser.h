@@ -10,10 +10,12 @@
 #include <map>
 #include <memory>
 #include <set>
+#include <stack>
 #include <vector>
 
-#include "core/fpdfapi/page/cpdf_contentmark.h"
+#include "core/fpdfapi/page/cpdf_contentmarks.h"
 #include "core/fpdfapi/parser/cpdf_stream.h"
+#include "core/fxcrt/fx_number.h"
 #include "core/fxcrt/fx_string.h"
 #include "core/fxge/cfx_pathdata.h"
 
@@ -43,7 +45,11 @@ class CPDF_StreamContentParser {
                            std::set<const uint8_t*>* parsedSet);
   ~CPDF_StreamContentParser();
 
-  uint32_t Parse(const uint8_t* pData, uint32_t dwSize, uint32_t max_cost);
+  uint32_t Parse(const uint8_t* pData,
+                 uint32_t dwSize,
+                 uint32_t start_offset,
+                 uint32_t max_cost,
+                 const std::vector<uint32_t>& stream_start_offsets);
   CPDF_PageObjectHolder* GetPageObjectHolder() const {
     return m_pObjectHolder.Get();
   }
@@ -65,18 +71,9 @@ class CPDF_StreamContentParser {
     ~ContentParam();
 
     Type m_Type;
+    FX_Number m_Number;
+    ByteString m_Name;
     std::unique_ptr<CPDF_Object> m_pObject;
-    struct {
-      bool m_bInteger;
-      union {
-        int m_Integer;
-        float m_Float;
-      };
-    } m_Number;
-    struct {
-      int m_Len;
-      char m_Buffer[32];
-    } m_Name;
   };
 
   static const int kParamBufSize = 16;
@@ -90,14 +87,21 @@ class CPDF_StreamContentParser {
   int GetNextParamPos();
   void ClearAllParams();
   CPDF_Object* GetObject(uint32_t index);
-  ByteString GetString(uint32_t index);
-  float GetNumber(uint32_t index);
-  int GetInteger(uint32_t index) { return (int32_t)(GetNumber(index)); }
+  ByteString GetString(uint32_t index) const;
+  float GetNumber(uint32_t index) const;
+  // Calls GetNumber() |count| times and returns the values in reverse order.
+  // e.g. for |count| = 3, returns [GetNumber(2), GetNumber(1), GetNumber(0)].
+  std::vector<float> GetNumbers(size_t count) const;
+  int GetInteger(uint32_t index) const {
+    return static_cast<int>(GetNumber(index));
+  }
   void OnOperator(const ByteStringView& op);
-  void AddTextObject(ByteString* pText,
+  void AddTextObject(const ByteString* pStrs,
                      float fInitKerning,
-                     float* pKerning,
-                     int count);
+                     const std::vector<float>& kernings,
+                     size_t nSegs);
+  float GetHorizontalTextSize(float fKerning) const;
+  float GetVerticalTextSize(float fKerning) const;
 
   void OnChangeTextMatrix();
   void ParsePathObject();
@@ -119,6 +123,10 @@ class CPDF_StreamContentParser {
 
   // Takes ownership of |pImageObj|, returns unowned pointer to it.
   CPDF_ImageObject* AddImageObject(std::unique_ptr<CPDF_ImageObject> pImageObj);
+
+  std::vector<float> GetColors() const;
+  std::vector<float> GetNamedColors() const;
+  int32_t GetCurrentStreamIndex();
 
   void Handle_CloseFillStrokePath();
   void Handle_FillStrokePath();
@@ -196,16 +204,16 @@ class CPDF_StreamContentParser {
   UnownedPtr<CPDF_Document> const m_pDocument;
   UnownedPtr<CPDF_Dictionary> const m_pPageResources;
   UnownedPtr<CPDF_Dictionary> const m_pParentResources;
-  UnownedPtr<CPDF_Dictionary> m_pResources;
+  UnownedPtr<CPDF_Dictionary> const m_pResources;
   UnownedPtr<CPDF_PageObjectHolder> const m_pObjectHolder;
   UnownedPtr<std::set<const uint8_t*>> const m_ParsedSet;
   CFX_Matrix m_mtContentToUser;
   const CFX_FloatRect m_BBox;
   uint32_t m_ParamStartPos;
   uint32_t m_ParamCount;
-  CPDF_StreamParser* m_pSyntax;
+  UnownedPtr<CPDF_StreamParser> m_pSyntax;
   std::unique_ptr<CPDF_AllStates> m_pCurStates;
-  CPDF_ContentMark m_CurContentMark;
+  std::stack<std::unique_ptr<CPDF_ContentMarks>> m_ContentMarksStack;
   std::vector<std::unique_ptr<CPDF_TextObject>> m_ClipTextList;
   UnownedPtr<CPDF_TextObject> m_pLastTextObject;
   float m_DefFontSize;
@@ -222,6 +230,13 @@ class CPDF_StreamContentParser {
   std::vector<std::unique_ptr<CPDF_AllStates>> m_StateStack;
   float m_Type3Data[6];
   ContentParam m_ParamBuf[kParamBufSize];
+
+  // The merged stream offsets at which a content stream ends and another
+  // begins.
+  std::vector<uint32_t> m_StreamStartOffsets;
+
+  // The merged stream offset at which the last |m_pSyntax| started parsing.
+  uint32_t m_StartParseOffset = 0;
 };
 
 #endif  // CORE_FPDFAPI_PAGE_CPDF_STREAMCONTENTPARSER_H_

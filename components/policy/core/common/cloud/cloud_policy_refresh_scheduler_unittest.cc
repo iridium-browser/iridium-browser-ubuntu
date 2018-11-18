@@ -18,6 +18,7 @@
 #include "components/policy/core/common/cloud/cloud_policy_constants.h"
 #include "components/policy/core/common/cloud/mock_cloud_policy_client.h"
 #include "components/policy/core/common/cloud/mock_cloud_policy_store.h"
+#include "services/network/test/test_network_connection_tracker.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -38,8 +39,7 @@ const int64_t kInitialCacheAgeMinutes = 1;
 class CloudPolicyRefreshSchedulerTest : public testing::Test {
  protected:
   CloudPolicyRefreshSchedulerTest()
-      : task_runner_(new base::TestSimpleTaskRunner()),
-        network_change_notifier_(net::NetworkChangeNotifier::CreateMock()) {}
+      : task_runner_(new base::TestSimpleTaskRunner()) {}
 
   void SetUp() override {
     client_.SetDMToken("token");
@@ -59,14 +59,18 @@ class CloudPolicyRefreshSchedulerTest : public testing::Test {
 
   CloudPolicyRefreshScheduler* CreateRefreshScheduler() {
     EXPECT_EQ(0u, task_runner_->NumPendingTasks());
-    CloudPolicyRefreshScheduler* scheduler =
-        new CloudPolicyRefreshScheduler(&client_, &store_, task_runner_);
+    CloudPolicyRefreshScheduler* scheduler = new CloudPolicyRefreshScheduler(
+        &client_, &store_, task_runner_,
+        network::TestNetworkConnectionTracker::CreateGetter());
+    // Make sure the NetworkConnectionTracker has been set up.
+    base::RunLoop().RunUntilIdle();
     scheduler->SetDesiredRefreshDelay(kPolicyRefreshRate);
     return scheduler;
   }
 
-  void NotifyIPAddressChanged() {
-    net::NetworkChangeNotifier::NotifyObserversOfIPAddressChangeForTests();
+  void NotifyConnectionChanged() {
+    network::TestNetworkConnectionTracker::GetInstance()->SetConnectionType(
+        network::mojom::ConnectionType::CONNECTION_WIFI);
     base::RunLoop().RunUntilIdle();
   }
 
@@ -165,7 +169,6 @@ class CloudPolicyRefreshSchedulerTest : public testing::Test {
   MockCloudPolicyClient client_;
   MockCloudPolicyStore store_;
   scoped_refptr<base::TestSimpleTaskRunner> task_runner_;
-  std::unique_ptr<net::NetworkChangeNotifier> network_change_notifier_;
 
   // Base time for the refresh that the scheduler should be using.
   base::Time last_update_;
@@ -265,7 +268,9 @@ TEST_F(CloudPolicyRefreshSchedulerTest, RefreshSoonOverriding) {
 
 TEST_F(CloudPolicyRefreshSchedulerTest, InvalidationsAvailable) {
   std::unique_ptr<CloudPolicyRefreshScheduler> scheduler(
-      new CloudPolicyRefreshScheduler(&client_, &store_, task_runner_));
+      new CloudPolicyRefreshScheduler(
+          &client_, &store_, task_runner_,
+          network::TestNetworkConnectionTracker::CreateGetter()));
   scheduler->SetDesiredRefreshDelay(kPolicyRefreshRate);
 
   // The scheduler has scheduled refreshes at the initial refresh rate.
@@ -294,7 +299,9 @@ TEST_F(CloudPolicyRefreshSchedulerTest, InvalidationsAvailable) {
 
 TEST_F(CloudPolicyRefreshSchedulerTest, InvalidationsNotAvailable) {
   std::unique_ptr<CloudPolicyRefreshScheduler> scheduler(
-      new CloudPolicyRefreshScheduler(&client_, &store_, task_runner_));
+      new CloudPolicyRefreshScheduler(
+          &client_, &store_, task_runner_,
+          network::TestNetworkConnectionTracker::CreateGetter()));
   scheduler->SetDesiredRefreshDelay(kPolicyRefreshRate);
 
   // Signal that invalidations are not available. The scheduler will not
@@ -324,7 +331,9 @@ TEST_F(CloudPolicyRefreshSchedulerTest, InvalidationsNotAvailable) {
 
 TEST_F(CloudPolicyRefreshSchedulerTest, InvalidationsOffAndOn) {
   std::unique_ptr<CloudPolicyRefreshScheduler> scheduler(
-      new CloudPolicyRefreshScheduler(&client_, &store_, task_runner_));
+      new CloudPolicyRefreshScheduler(
+          &client_, &store_, task_runner_,
+          network::TestNetworkConnectionTracker::CreateGetter()));
   scheduler->SetDesiredRefreshDelay(kPolicyRefreshRate);
   scheduler->SetInvalidationServiceAvailability(true);
   // Initial fetch.
@@ -351,7 +360,9 @@ TEST_F(CloudPolicyRefreshSchedulerTest, InvalidationsOffAndOn) {
 
 TEST_F(CloudPolicyRefreshSchedulerTest, InvalidationsDisconnected) {
   std::unique_ptr<CloudPolicyRefreshScheduler> scheduler(
-      new CloudPolicyRefreshScheduler(&client_, &store_, task_runner_));
+      new CloudPolicyRefreshScheduler(
+          &client_, &store_, task_runner_,
+          network::TestNetworkConnectionTracker::CreateGetter()));
   scheduler->SetDesiredRefreshDelay(kPolicyRefreshRate);
   scheduler->SetInvalidationServiceAvailability(true);
   // Initial fetch.
@@ -374,7 +385,7 @@ TEST_F(CloudPolicyRefreshSchedulerTest, InvalidationsDisconnected) {
   CheckTiming(kPolicyRefreshRate);
 }
 
-TEST_F(CloudPolicyRefreshSchedulerTest, OnIPAddressChangedUnregistered) {
+TEST_F(CloudPolicyRefreshSchedulerTest, OnConnectionChangedUnregistered) {
   client_.SetDMToken(std::string());
   std::unique_ptr<CloudPolicyRefreshScheduler> scheduler(
       CreateRefreshScheduler());
@@ -383,14 +394,16 @@ TEST_F(CloudPolicyRefreshSchedulerTest, OnIPAddressChangedUnregistered) {
   EXPECT_FALSE(task_runner_->HasPendingTask());
 
   EmulateSleepThroughLastRefreshTime(scheduler.get());
-  scheduler->OnIPAddressChanged();
+  scheduler->OnConnectionChanged(
+      network::mojom::ConnectionType::CONNECTION_WIFI);
   EXPECT_FALSE(task_runner_->HasPendingTask());
 }
+
 // TODO(igorcov): Before sleep in normal flow there's a task pending. When the
-// device wakes up, OnIPAddressChanged is called which should cancel the
+// device wakes up, OnConnectionChanged is called which should cancel the
 // pending task and queue a new task to run earlier. It is desirable to
 // simulate that flow here.
-TEST_F(CloudPolicyRefreshSchedulerTest, OnIPAddressChangedAfterSleep) {
+TEST_F(CloudPolicyRefreshSchedulerTest, OnConnectionChangedAfterSleep) {
   std::unique_ptr<CloudPolicyRefreshScheduler> scheduler(
       CreateRefreshScheduler());
 
@@ -400,7 +413,8 @@ TEST_F(CloudPolicyRefreshSchedulerTest, OnIPAddressChangedAfterSleep) {
   EXPECT_FALSE(task_runner_->HasPendingTask());
 
   EmulateSleepThroughLastRefreshTime(scheduler.get());
-  scheduler->OnIPAddressChanged();
+  scheduler->OnConnectionChanged(
+      network::mojom::ConnectionType::CONNECTION_WIFI);
   EXPECT_TRUE(task_runner_->HasPendingTask());
   task_runner_->ClearPendingTasks();
 }
@@ -463,9 +477,9 @@ TEST_F(CloudPolicyRefreshSchedulerSteadyStateTest, RefreshDelayChange) {
   CheckTiming(CloudPolicyRefreshScheduler::kRefreshDelayMaxMs);
 }
 
-TEST_F(CloudPolicyRefreshSchedulerSteadyStateTest, OnIPAddressChanged) {
+TEST_F(CloudPolicyRefreshSchedulerSteadyStateTest, OnConnectionChanged) {
   client_.SetStatus(DM_STATUS_REQUEST_FAILED);
-  NotifyIPAddressChanged();
+  NotifyConnectionChanged();
   EXPECT_EQ(GetLastDelay(), base::TimeDelta());
 }
 
@@ -495,6 +509,7 @@ static const ClientErrorTestParam kClientErrorTestCases[] = {
     {DM_STATUS_SERVICE_MISSING_LICENSES, -1, 1},
     {DM_STATUS_SERVICE_DEVICE_ID_CONFLICT, -1, 1},
     {DM_STATUS_SERVICE_POLICY_NOT_FOUND, kPolicyRefreshRate, 1},
+    {DM_STATUS_SERVICE_CONSUMER_ACCOUNT_WITH_PACKAGED_LICENSE, -1, 1},
 };
 
 class CloudPolicyRefreshSchedulerClientErrorTest

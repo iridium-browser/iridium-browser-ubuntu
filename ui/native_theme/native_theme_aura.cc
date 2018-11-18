@@ -48,6 +48,7 @@ const SkColor kTrackColor = SkColorSetRGB(0xF1, 0xF1, 0xF1);
 ////////////////////////////////////////////////////////////////////////////////
 // NativeTheme:
 
+#if !defined(OS_MACOSX)
 // static
 NativeTheme* NativeTheme::GetInstanceForWeb() {
   return NativeThemeAura::web_instance();
@@ -58,7 +59,8 @@ NativeTheme* NativeTheme::GetInstanceForWeb() {
 NativeTheme* NativeTheme::GetInstanceForNativeUi() {
   return NativeThemeAura::instance();
 }
-#endif
+#endif  // OS_WIN
+#endif  // !OS_MACOSX
 
 ////////////////////////////////////////////////////////////////////////////////
 // NativeThemeAura:
@@ -86,15 +88,15 @@ NativeThemeAura::~NativeThemeAura() {}
 
 // static
 NativeThemeAura* NativeThemeAura::instance() {
-  CR_DEFINE_STATIC_LOCAL(NativeThemeAura, s_native_theme, (false));
-  return &s_native_theme;
+  static base::NoDestructor<NativeThemeAura> s_native_theme(false);
+  return s_native_theme.get();
 }
 
 // static
 NativeThemeAura* NativeThemeAura::web_instance() {
-  CR_DEFINE_STATIC_LOCAL(NativeThemeAura, s_native_theme_for_web,
-                         (IsOverlayScrollbarEnabled()));
-  return &s_native_theme_for_web;
+  static base::NoDestructor<NativeThemeAura> s_native_theme_for_web(
+      IsOverlayScrollbarEnabled());
+  return s_native_theme_for_web.get();
 }
 
 // This implementation returns hardcoded colors.

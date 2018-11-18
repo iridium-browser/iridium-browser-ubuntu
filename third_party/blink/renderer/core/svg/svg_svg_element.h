@@ -53,7 +53,7 @@ class SVGSVGElement final : public SVGGraphicsElement,
   float IntrinsicHeight() const;
   FloatSize CurrentViewportSize() const;
   FloatRect CurrentViewBoxRect() const;
-  SVGPreserveAspectRatio* CurrentPreserveAspectRatio() const;
+  const SVGPreserveAspectRatio* CurrentPreserveAspectRatio() const;
 
   float currentScale() const;
   void setCurrentScale(float scale);
@@ -109,16 +109,13 @@ class SVGSVGElement final : public SVGGraphicsElement,
   SVGAnimatedLength* width() const { return width_.Get(); }
   SVGAnimatedLength* height() const { return height_.Get(); }
 
-  virtual void Trace(blink::Visitor*);
-
-  SVGViewSpec* ViewSpec() const { return view_spec_; }
-  void SetViewSpec(SVGViewSpec*);
+  void Trace(blink::Visitor*) override;
 
  private:
   explicit SVGSVGElement(Document&);
   ~SVGSVGElement() override;
 
-  SVGViewSpec& EnsureViewSpec();
+  void SetViewSpec(const SVGViewSpec*);
 
   void ParseAttribute(const AttributeModificationParams&) override;
   bool IsPresentationAttribute(const QualifiedName&) const override;
@@ -132,8 +129,8 @@ class SVGSVGElement final : public SVGGraphicsElement,
   bool LayoutObjectIsNeeded(const ComputedStyle&) const override;
   LayoutObject* CreateLayoutObject(const ComputedStyle&) override;
 
-  InsertionNotificationRequest InsertedInto(ContainerNode*) override;
-  void RemovedFrom(ContainerNode*) override;
+  InsertionNotificationRequest InsertedInto(ContainerNode&) override;
+  void RemovedFrom(ContainerNode&) override;
 
   void SvgAttributeChanged(const QualifiedName&) override;
 
@@ -163,7 +160,7 @@ class SVGSVGElement final : public SVGGraphicsElement,
 
   Member<SMILTimeContainer> time_container_;
   Member<SVGPoint> translation_;
-  Member<SVGViewSpec> view_spec_;
+  Member<const SVGViewSpec> view_spec_;
   float current_scale_;
 
   friend class SVGCurrentTranslateTearOff;

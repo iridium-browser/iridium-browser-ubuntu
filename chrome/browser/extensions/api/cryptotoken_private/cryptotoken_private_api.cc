@@ -7,6 +7,7 @@
 #include <stddef.h>
 
 #include "base/callback.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
@@ -24,6 +25,25 @@
 
 namespace {
 
+// U2FAttestationPromptResult enumerates events related to attestation prompts.
+// These values are recorded in an UMA histogram and so should not be
+// reassigned.
+enum class U2FAttestationPromptResult {
+  // kQueried indicates that the embedder was queried in order to determine
+  // whether attestation information should be returned to the origin.
+  kQueried = 0,
+  // kAllowed indicates that the query to the embedder was resolved positively.
+  // (E.g. the user clicked to allow, or the embedder allowed immediately by
+  // policy.) Note that this may still be recorded if the user clicks to allow
+  // attestation after the request has timed out.
+  kAllowed = 1,
+  // kBlocked indicates that the query to the embedder was resolved negatively.
+  // (E.g. the user clicked to block, or closed the dialog.) Navigating away or
+  // closing the tab also fall into this bucket.
+  kBlocked = 2,
+  kMaxValue = kBlocked,
+};
+
 const char kGoogleDotCom[] = "google.com";
 constexpr const char* kGoogleGstaticAppIds[] = {
     "trk:273:https://www.gstatic.com/securitykey/origins.json",
@@ -32,7 +52,7 @@ constexpr const char* kGoogleGstaticAppIds[] = {
 // ContainsAppIdByHash returns true iff the SHA-256 hash of one of the
 // elements of |list| equals |hash|.
 bool ContainsAppIdByHash(const base::ListValue& list,
-                         const std::vector<char>& hash) {
+                         const std::vector<uint8_t>& hash) {
   if (hash.size() != crypto::kSHA256Length) {
     return false;
   }
@@ -44,14 +64,20 @@ bool ContainsAppIdByHash(const base::ListValue& list,
       continue;
     }
 
-    if (crypto::SHA256HashString(s).compare(0, crypto::kSHA256Length,
-                                            hash.data(),
-                                            crypto::kSHA256Length) == 0) {
+    if (crypto::SHA256HashString(s).compare(
+            0, crypto::kSHA256Length,
+            reinterpret_cast<const char*>(hash.data()),
+            crypto::kSHA256Length) == 0) {
       return true;
     }
   }
 
   return false;
+}
+
+void RecordAttestationEvent(U2FAttestationPromptResult event) {
+  UMA_HISTOGRAM_ENUMERATION("WebAuthentication.U2FAttestationPromptResult",
+                            event);
 }
 
 }  // namespace
@@ -150,6 +176,14 @@ CryptotokenPrivateCanAppIdGetAttestationFunction::Run() {
   std::unique_ptr<cryptotoken_private::CanAppIdGetAttestation::Params> params =
       cryptotoken_private::CanAppIdGetAttestation::Params::Create(*args_);
   EXTENSION_FUNCTION_VALIDATE(params);
+
+  const GURL origin_url(params->options.origin);
+  if (!origin_url.is_valid()) {
+    return RespondNow(Error(extensions::ErrorUtils::FormatErrorMessage(
+        "Security origin * is not a valid URL", params->options.origin)));
+  }
+  const url::Origin origin(url::Origin::Create(origin_url));
+
   const std::string& app_id = params->options.app_id;
 
   // If the appId is permitted by the enterprise policy then no permission
@@ -168,7 +202,8 @@ CryptotokenPrivateCanAppIdGetAttestationFunction::Run() {
 
   // If prompting is disabled, allow attestation because that is the historical
   // behavior.
-  if (!base::FeatureList::IsEnabled(features::kSecurityKeyAttestationPrompt)) {
+  if (!base::FeatureList::IsEnabled(
+          ::features::kSecurityKeyAttestationPrompt)) {
     return RespondNow(OneArgument(std::make_unique<base::Value>(true)));
   }
 
@@ -191,8 +226,8 @@ CryptotokenPrivateCanAppIdGetAttestationFunction::Run() {
     return RespondNow(Error("no PermissionRequestManager"));
   }
 
+  RecordAttestationEvent(U2FAttestationPromptResult::kQueried);
   // The created AttestationPermissionRequest deletes itself once complete.
-  const url::Origin origin(url::Origin::Create(app_id_url));
   permission_request_manager->AddRequest(NewAttestationPermissionRequest(
       origin,
       base::BindOnce(
@@ -201,6 +236,8 @@ CryptotokenPrivateCanAppIdGetAttestationFunction::Run() {
 }
 
 void CryptotokenPrivateCanAppIdGetAttestationFunction::Complete(bool result) {
+  RecordAttestationEvent(result ? U2FAttestationPromptResult::kAllowed
+                                : U2FAttestationPromptResult::kBlocked);
   Respond(OneArgument(std::make_unique<base::Value>(result)));
 }
 

@@ -4,6 +4,7 @@
 
 #include "chrome/browser/vr/renderers/base_renderer.h"
 
+#include "base/logging.h"
 #include "chrome/browser/vr/vr_gl_util.h"
 
 namespace vr {
@@ -27,6 +28,7 @@ BaseRenderer::BaseRenderer(const char* vertex_src, const char* fragment_src) {
   glDeleteShader(fragment_shader_handle);
 
   position_handle_ = glGetAttribLocation(program_handle_, "a_Position");
+  clip_rect_handle_ = glGetUniformLocation(program_handle_, "u_ClipRect");
 }
 
 BaseRenderer::~BaseRenderer() = default;

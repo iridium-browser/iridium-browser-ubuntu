@@ -12,8 +12,6 @@
 #include "ui/views/focus/focus_manager.h"
 #include "ui/views/widget/widget.h"
 
-DEFINE_WEB_CONTENTS_USER_DATA_KEY(ChromeWebContentsViewFocusHelper);
-
 // static
 void ChromeWebContentsViewFocusHelper::CreateForWebContents(
     content::WebContents* web_contents) {
@@ -40,8 +38,10 @@ bool ChromeWebContentsViewFocusHelper::Focus() {
 
   const web_modal::WebContentsModalDialogManager* manager =
       web_modal::WebContentsModalDialogManager::FromWebContents(web_contents_);
-  if (manager && manager->IsDialogActive())
+  if (manager && manager->IsDialogActive()) {
     manager->FocusTopmostDialog();
+    return true;
+  }
 
   return false;
 }

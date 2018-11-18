@@ -4,7 +4,12 @@
 
 #include "chrome/browser/ui/signin_view_controller.h"
 
+#include <utility>
+
 #include "chrome/browser/profiles/profile.h"
+#include "chrome/browser/search/search.h"
+#include "chrome/browser/signin/account_consistency_mode_manager.h"
+#include "chrome/browser/signin/account_tracker_service_factory.h"
 #include "chrome/browser/signin/dice_tab_helper.h"
 #include "chrome/browser/signin/signin_manager_factory.h"
 #include "chrome/browser/signin/signin_promo.h"
@@ -15,12 +20,16 @@
 #include "chrome/browser/ui/signin_view_controller_delegate.h"
 #include "chrome/browser/ui/singleton_tabs.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/common/webui_url_constants.h"
 #include "components/signin/core/browser/profile_management_switches.h"
 #include "components/signin/core/browser/signin_manager.h"
+#include "content/public/browser/web_contents.h"
 #include "google_apis/gaia/gaia_urls.h"
+#include "url/url_constants.h"
 
 namespace {
 
+#if !defined(OS_CHROMEOS)
 // Returns the sign-in reason for |mode|.
 signin_metrics::Reason GetSigninReasonFromMode(profiles::BubbleViewMode mode) {
   DCHECK(SigninViewController::ShouldShowSigninForMode(mode));
@@ -36,6 +45,55 @@ signin_metrics::Reason GetSigninReasonFromMode(profiles::BubbleViewMode mode) {
       return signin_metrics::Reason::REASON_UNKNOWN_REASON;
   }
 }
+
+// Opens a new tab on |url| or reuses the current tab if it is the NTP.
+void ShowTabOverwritingNTP(Browser* browser, const GURL& url) {
+  NavigateParams params(browser, url, ui::PAGE_TRANSITION_AUTO_BOOKMARK);
+  params.disposition = WindowOpenDisposition::NEW_FOREGROUND_TAB;
+  params.window_action = NavigateParams::SHOW_WINDOW;
+  params.user_gesture = true;
+  params.tabstrip_add_types |= TabStripModel::ADD_INHERIT_OPENER;
+
+  content::WebContents* contents =
+      browser->tab_strip_model()->GetActiveWebContents();
+  if (contents) {
+    const GURL& contents_url = contents->GetVisibleURL();
+    if (contents_url == chrome::kChromeUINewTabURL ||
+        search::IsInstantNTP(contents) || contents_url == url::kAboutBlankURL) {
+      params.disposition = WindowOpenDisposition::CURRENT_TAB;
+    }
+  }
+
+  Navigate(&params);
+}
+
+// Returns the index of an existing re-usable Dice signin tab, or -1.
+int FindDiceSigninTab(TabStripModel* tab_strip) {
+  int tab_count = tab_strip->count();
+  for (int tab_index = 0; tab_index < tab_count; ++tab_index) {
+    content::WebContents* web_contents = tab_strip->GetWebContentsAt(tab_index);
+    DiceTabHelper* tab_helper = DiceTabHelper::FromWebContents(web_contents);
+    if (tab_helper && tab_helper->IsChromeSigninPage())
+      return tab_index;
+  }
+  return -1;
+}
+
+// Returns the promo action to be used when signing with a new account.
+signin_metrics::PromoAction GetPromoActionForNewAccount(
+    AccountTrackerService* account_tracker,
+    signin::AccountConsistencyMethod account_consistency) {
+  if (account_consistency != signin::AccountConsistencyMethod::kDice)
+    return signin_metrics::PromoAction::PROMO_ACTION_NEW_ACCOUNT_PRE_DICE;
+
+  return account_tracker->GetAccounts().size() > 0
+             ? signin_metrics::PromoAction::
+                   PROMO_ACTION_NEW_ACCOUNT_EXISTING_ACCOUNT
+             : signin_metrics::PromoAction::
+                   PROMO_ACTION_NEW_ACCOUNT_NO_EXISTING_ACCOUNT;
+}
+
+#endif
 
 }  // namespace
 
@@ -53,25 +111,36 @@ bool SigninViewController::ShouldShowSigninForMode(
          mode == profiles::BUBBLE_VIEW_MODE_GAIA_REAUTH;
 }
 
-void SigninViewController::ShowSignin(
-    profiles::BubbleViewMode mode,
-    Browser* browser,
-    signin_metrics::AccessPoint access_point) {
+void SigninViewController::ShowSignin(profiles::BubbleViewMode mode,
+                                      Browser* browser,
+                                      signin_metrics::AccessPoint access_point,
+                                      const GURL& redirect_url) {
   DCHECK(ShouldShowSigninForMode(mode));
-  if (signin::IsDicePrepareMigrationEnabled()) {
+
+#if defined(OS_CHROMEOS)
+  ShowModalSigninDialog(mode, browser, access_point);
+#else   // defined(OS_CHROMEOS)
+  Profile* profile = browser->profile();
+  signin::AccountConsistencyMethod account_consistency =
+      AccountConsistencyModeManager::GetMethodForProfile(profile);
+  if (signin::DiceMethodGreaterOrEqual(
+          account_consistency,
+          signin::AccountConsistencyMethod::kDiceMigration)) {
     std::string email;
     if (GetSigninReasonFromMode(mode) ==
         signin_metrics::Reason::REASON_REAUTHENTICATION) {
-      SigninManagerBase* manager =
-          SigninManagerFactory::GetForProfile(browser->profile());
+      SigninManagerBase* manager = SigninManagerFactory::GetForProfile(profile);
       email = manager->GetAuthenticatedAccountInfo().email;
     }
-    ShowDiceSigninTab(mode, browser, access_point,
-                      signin_metrics::PromoAction::PROMO_ACTION_NEW_ACCOUNT,
-                      email);
+    signin_metrics::PromoAction promo_action = GetPromoActionForNewAccount(
+        AccountTrackerServiceFactory::GetForProfile(profile),
+        account_consistency);
+    ShowDiceSigninTab(mode, browser, access_point, promo_action, email,
+                      redirect_url);
   } else {
     ShowModalSigninDialog(mode, browser, access_point);
   }
+#endif  // defined(OS_CHROMEOS)
 }
 
 void SigninViewController::ShowModalSigninDialog(
@@ -96,9 +165,19 @@ void SigninViewController::ShowModalSyncConfirmationDialog(Browser* browser) {
   // The delegate will delete itself on request of the UI code when the widget
   // is closed.
   delegate_ = SigninViewControllerDelegate::CreateSyncConfirmationDelegate(
-      this, browser);
+      this, browser, false /* is consent bump */);
   chrome::RecordDialogCreation(
       chrome::DialogIdentifier::SIGN_IN_SYNC_CONFIRMATION);
+}
+
+void SigninViewController::ShowModalSyncConsentBump(Browser* browser) {
+  CloseModalSignin();
+  // The delegate will delete itself on request of the UI code when the widget
+  // is closed.
+  delegate_ = SigninViewControllerDelegate::CreateSyncConfirmationDelegate(
+      this, browser, true /* is consent bump */);
+  chrome::RecordDialogCreation(
+      chrome::DialogIdentifier::UNITY_SYNC_CONSENT_BUMP);
 }
 
 void SigninViewController::ShowModalSigninErrorDialog(Browser* browser) {
@@ -135,12 +214,14 @@ void SigninViewController::ResetModalSigninDelegate() {
   delegate_ = nullptr;
 }
 
+#if !defined(OS_CHROMEOS)
 void SigninViewController::ShowDiceSigninTab(
     profiles::BubbleViewMode mode,
     Browser* browser,
     signin_metrics::AccessPoint access_point,
     signin_metrics::PromoAction promo_action,
-    const std::string& email) {
+    const std::string& email,
+    const GURL& redirect_url) {
   signin_metrics::Reason signin_reason = GetSigninReasonFromMode(mode);
   GURL signin_url = signin::GetSigninURLForDice(browser->profile(), email);
   content::WebContents* active_contents = nullptr;
@@ -151,16 +232,32 @@ void SigninViewController::ShowDiceSigninTab(
                                   ui::PAGE_TRANSITION_AUTO_TOPLEVEL, false);
     active_contents->OpenURL(params);
   } else {
-    NavigateParams params = GetSingletonTabNavigateParams(browser, signin_url);
-    ShowSingletonTabOverwritingNTP(browser, params);
+    // Check if there is already a signin-tab open.
+    TabStripModel* tab_strip = browser->tab_strip_model();
+    int dice_tab_index = FindDiceSigninTab(tab_strip);
+    if (dice_tab_index != -1) {
+      if (access_point !=
+          signin_metrics::AccessPoint::ACCESS_POINT_EXTENSIONS) {
+        // Extensions do not activate the tab to prevent misbehaving
+        // extensions to keep focusing the signin tab.
+        tab_strip->ActivateTabAt(dice_tab_index, true /* user_gesture */);
+      }
+      // Do not create a new signin tab, because there is already one.
+      return;
+    }
+
+    ShowTabOverwritingNTP(browser, signin_url);
     active_contents = browser->tab_strip_model()->GetActiveWebContents();
   }
+
   DCHECK(active_contents);
   DCHECK_EQ(signin_url, active_contents->GetVisibleURL());
   DiceTabHelper::CreateForWebContents(active_contents);
   DiceTabHelper* tab_helper = DiceTabHelper::FromWebContents(active_contents);
-  tab_helper->InitializeSigninFlow(access_point, signin_reason, promo_action);
+  tab_helper->InitializeSigninFlow(signin_url, access_point, signin_reason,
+                                   promo_action, redirect_url);
 }
+#endif  // !defined(OS_CHROMEOS)
 
 content::WebContents*
 SigninViewController::GetModalDialogWebContentsForTesting() {

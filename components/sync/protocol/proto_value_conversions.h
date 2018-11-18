@@ -46,10 +46,12 @@ class ManagedUserSettingSpecifics;
 class ManagedUserSharedSettingSpecifics;
 class ManagedUserSpecifics;
 class ManagedUserWhitelistSpecifics;
+class MountainShareSpecifics;
 class NavigationRedirect;
 class NigoriSpecifics;
 class PasswordSpecifics;
 class PasswordSpecificsData;
+class PaymentsCustomerData;
 class PreferenceSpecifics;
 class PrinterPPDReference;
 class PrinterSpecifics;
@@ -68,6 +70,7 @@ class TabNavigation;
 class ThemeSpecifics;
 class TimeRangeDirective;
 class TypedUrlSpecifics;
+class UserConsentSpecifics;
 class UserEventSpecifics;
 class WalletMaskedCreditCard;
 class WalletMetadataSpecifics;
@@ -183,6 +186,9 @@ std::unique_ptr<base::DictionaryValue> ManagedUserWhitelistSpecificsToValue(
     const sync_pb::ManagedUserWhitelistSpecifics&
         managed_user_whitelist_specifics);
 
+std::unique_ptr<base::DictionaryValue> MountainShareSpecificsToValue(
+    const sync_pb::MountainShareSpecifics& mountain_share_specifics);
+
 std::unique_ptr<base::DictionaryValue> NavigationRedirectToValue(
     const sync_pb::NavigationRedirect& navigation_redirect);
 
@@ -194,6 +200,9 @@ std::unique_ptr<base::DictionaryValue> PasswordSpecificsToValue(
 
 std::unique_ptr<base::DictionaryValue> PasswordSpecificsDataToValue(
     const sync_pb::PasswordSpecificsData& password_specifics_data);
+
+std::unique_ptr<base::DictionaryValue> PaymentsCustomerDataToValue(
+    const sync_pb::PaymentsCustomerData& payments_customer_data);
 
 std::unique_ptr<base::DictionaryValue> PreferenceSpecificsToValue(
     const sync_pb::PreferenceSpecifics& password_specifics);
@@ -247,6 +256,9 @@ std::unique_ptr<base::DictionaryValue> TimeRangeDirectiveToValue(
 
 std::unique_ptr<base::DictionaryValue> TypedUrlSpecificsToValue(
     const sync_pb::TypedUrlSpecifics& typed_url_specifics);
+
+std::unique_ptr<base::DictionaryValue> UserConsentSpecificsToValue(
+    const sync_pb::UserConsentSpecifics& user_consent_specifics);
 
 std::unique_ptr<base::DictionaryValue> UserEventSpecificsToValue(
     const sync_pb::UserEventSpecifics& user_event_specifics);

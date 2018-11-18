@@ -14,6 +14,7 @@
 
 #include "base/base_paths.h"
 #include "base/bind.h"
+#include "base/containers/flat_set.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
@@ -25,28 +26,34 @@
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "base/values.h"
 #include "build/build_config.h"
 #include "components/component_updater/component_installer.h"
 #include "components/component_updater/component_updater_service.h"
 #include "components/version_info/version_info.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/cdm_registry.h"
 #include "content/public/common/cdm_info.h"
 #include "crypto/sha2.h"
+// TODO(crbug.com/825041): Move EncryptionMode out of decrypt_config and
+// rename it to EncryptionScheme.
+#include "media/base/decrypt_config.h"
 #include "media/base/video_codecs.h"
+#include "media/cdm/cdm_proxy.h"
 #include "media/cdm/supported_cdm_versions.h"
+#include "third_party/widevine/cdm/buildflags.h"
 #include "third_party/widevine/cdm/widevine_cdm_common.h"
 
-#include "widevine_cdm_version.h"  // In SHARED_INTERMEDIATE_DIR. NOLINT
+#if !BUILDFLAG(ENABLE_WIDEVINE_CDM_COMPONENT)
+#error This file should only be compiled when Widevine CDM component is enabled
+#endif
 
 using content::BrowserThread;
 using content::CdmRegistry;
 
 namespace component_updater {
-
-#if defined(WIDEVINE_CDM_AVAILABLE) && defined(WIDEVINE_CDM_IS_COMPONENT)
 
 namespace {
 
@@ -100,6 +107,10 @@ const char kCdmCodecsListName[] = "x-cdm-codecs";
 //  Whether persistent license is supported by the CDM: "true" or "false".
 const char kCdmPersistentLicenseSupportName[] =
     "x-cdm-persistent-license-support";
+const char kCdmSupportedEncryptionSchemesName[] =
+    "x-cdm-supported-encryption-schemes";
+const char kCdmSupportedCdmProxyProtocolsName[] =
+    "x-cdm-supported-cdm-proxy-protocols";
 
 // The following strings are used to specify supported codecs in the
 // parameter |kCdmCodecsListName|.
@@ -108,6 +119,15 @@ const char kCdmSupportedCodecVp9[] = "vp9.0";
 #if BUILDFLAG(USE_PROPRIETARY_CODECS)
 const char kCdmSupportedCodecAvc1[] = "avc1";
 #endif
+
+// The following strings are used to specify supported encryption schemes in
+// the parameter |kCdmSupportedEncryptionSchemesName|.
+const char kCdmSupportedEncryptionSchemeCenc[] = "cenc";
+const char kCdmSupportedEncryptionSchemeCbcs[] = "cbcs";
+
+// The following string(s) are used to specify supported CdmProxy protocols in
+// the parameter |kCdmSupportedCdmProxyProtocolsName|.
+const char kCdmSupportedCdmProxyProtocolIntel[] = "intel";
 
 // Widevine CDM is packaged as a multi-CRX. Widevine CDM binaries are located in
 // _platform_specific/<platform_arch> folder in the package. This function
@@ -147,57 +167,194 @@ bool CheckForCompatibleVersion(const base::DictionaryValue& manifest,
 }
 
 // Returns whether the CDM's API versions, as specified in the manifest, are
-// compatible with this Chrome binary.
+// supported in this Chrome binary and not disabled at run time.
 // Checks the module API, CDM interface API, and Host API.
 // This should never fail except in rare cases where the component has not been
 // updated recently or the user downgrades Chrome.
 bool IsCompatibleWithChrome(const base::DictionaryValue& manifest) {
-  return CheckForCompatibleVersion(manifest,
-                                   kCdmModuleVersionsName,
+  return CheckForCompatibleVersion(manifest, kCdmModuleVersionsName,
                                    media::IsSupportedCdmModuleVersion) &&
-         CheckForCompatibleVersion(manifest,
-                                   kCdmInterfaceVersionsName,
-                                   media::IsSupportedCdmInterfaceVersion) &&
-         CheckForCompatibleVersion(manifest,
-                                   kCdmHostVersionsName,
+         CheckForCompatibleVersion(
+             manifest, kCdmInterfaceVersionsName,
+             media::IsSupportedAndEnabledCdmInterfaceVersion) &&
+         CheckForCompatibleVersion(manifest, kCdmHostVersionsName,
                                    media::IsSupportedCdmHostVersion);
 }
 
-std::string GetCodecs(const base::DictionaryValue& manifest) {
-  std::string codecs;
-  if (manifest.GetStringASCII(kCdmCodecsListName, &codecs)) {
-    DVLOG_IF(1, codecs.empty())
-        << "Widevine CDM component manifest has empty codecs list";
-  } else {
-    DVLOG(1) << "Widevine CDM component manifest is missing codecs";
-  }
-  return codecs;
-}
+// Returns true and updates |video_codecs| if the appropriate manifest entry is
+// valid. Returns false and does not modify |video_codecs| if the manifest entry
+// is incorrectly formatted.
+bool GetCodecs(const base::DictionaryValue& manifest,
+               std::vector<media::VideoCodec>* video_codecs) {
+  DCHECK(video_codecs);
 
-std::vector<media::VideoCodec> ConvertCodecsString(const std::string& codecs) {
-  std::vector<media::VideoCodec> supported_video_codecs;
+  const base::Value* value = manifest.FindKey(kCdmCodecsListName);
+  if (!value) {
+    DLOG(WARNING) << "Widevine CDM component manifest is missing codecs.";
+    return true;
+  }
+
+  if (!value->is_string()) {
+    DLOG(ERROR) << "Manifest entry " << kCdmCodecsListName
+                << " is not a string.";
+    return false;
+  }
+
+  const std::string& codecs = value->GetString();
+  if (codecs.empty()) {
+    DLOG(WARNING) << "Widevine CDM component manifest has empty codecs list.";
+    return true;
+  }
+
+  std::vector<media::VideoCodec> result;
   const std::vector<base::StringPiece> supported_codecs =
       base::SplitStringPiece(codecs, kCdmValueDelimiter, base::TRIM_WHITESPACE,
                              base::SPLIT_WANT_NONEMPTY);
 
   for (const auto& codec : supported_codecs) {
     if (codec == kCdmSupportedCodecVp8)
-      supported_video_codecs.push_back(media::VideoCodec::kCodecVP8);
+      result.push_back(media::VideoCodec::kCodecVP8);
     else if (codec == kCdmSupportedCodecVp9)
-      supported_video_codecs.push_back(media::VideoCodec::kCodecVP9);
+      result.push_back(media::VideoCodec::kCodecVP9);
 #if BUILDFLAG(USE_PROPRIETARY_CODECS)
     else if (codec == kCdmSupportedCodecAvc1)
-      supported_video_codecs.push_back(media::VideoCodec::kCodecH264);
+      result.push_back(media::VideoCodec::kCodecH264);
 #endif  // BUILDFLAG(USE_PROPRIETARY_CODECS)
   }
 
-  return supported_video_codecs;
+  video_codecs->swap(result);
+  return true;
 }
 
-bool GetPersistentLicenseSupport(const base::DictionaryValue& manifest) {
-  std::string supported;
+// Returns true and updates |session_types| if the appropriate manifest entry is
+// valid. Returns false if the manifest entry is incorrectly formatted.
+bool GetSessionTypes(const base::DictionaryValue& manifest,
+                     base::flat_set<media::CdmSessionType>* session_types) {
+  DCHECK(session_types);
+
+  bool is_persistent_license_supported = false;
   const base::Value* value = manifest.FindKey(kCdmPersistentLicenseSupportName);
-  return value && value->is_bool() && value->GetBool();
+  if (value) {
+    if (!value->is_bool())
+      return false;
+    is_persistent_license_supported = value->GetBool();
+  }
+
+  // Temporary session is always supported.
+  session_types->insert(media::CdmSessionType::kTemporary);
+
+  if (is_persistent_license_supported)
+    session_types->insert(media::CdmSessionType::kPersistentLicense);
+
+  return true;
+}
+
+// Returns true and updates |encryption_schemes| if the appropriate manifest
+// entry is valid. Returns false and does not modify |encryption_schemes| if the
+// manifest entry is incorrectly formatted. It is assumed that all CDMs support
+// 'cenc', so if the manifest entry is missing, the result will indicate support
+// for 'cenc' only. Incorrect types in the manifest entry will log the error and
+// fail. Unrecognized values will be reported but otherwise ignored.
+bool GetEncryptionSchemes(
+    const base::DictionaryValue& manifest,
+    base::flat_set<media::EncryptionMode>* encryption_schemes) {
+  DCHECK(encryption_schemes);
+
+  const base::Value* value =
+      manifest.FindKey(kCdmSupportedEncryptionSchemesName);
+  if (!value) {
+    // No manifest entry found, so assume only 'cenc' supported for backwards
+    // compatibility.
+    encryption_schemes->insert(media::EncryptionMode::kCenc);
+    return true;
+  }
+
+  if (!value->is_list()) {
+    DLOG(ERROR) << "Manifest entry " << kCdmSupportedEncryptionSchemesName
+                << " is not a list.";
+    return false;
+  }
+
+  const base::Value::ListStorage& list = value->GetList();
+  base::flat_set<media::EncryptionMode> result;
+  for (const auto& item : list) {
+    if (!item.is_string()) {
+      DLOG(ERROR) << "Unrecognized item type in manifest entry "
+                  << kCdmSupportedEncryptionSchemesName;
+      return false;
+    }
+
+    const std::string& scheme = item.GetString();
+    if (scheme == kCdmSupportedEncryptionSchemeCenc) {
+      result.insert(media::EncryptionMode::kCenc);
+    } else if (scheme == kCdmSupportedEncryptionSchemeCbcs) {
+      result.insert(media::EncryptionMode::kCbcs);
+    } else {
+      DLOG(WARNING) << "Unrecognized encryption scheme " << scheme
+                    << " in manifest entry "
+                    << kCdmSupportedEncryptionSchemesName;
+    }
+  }
+
+  // As the manifest entry exists, it must specify at least one valid value.
+  if (result.empty())
+    return false;
+
+  encryption_schemes->swap(result);
+  return true;
+}
+
+// Returns true and updates |cdm_proxy_protocols| if the appropriate manifest
+// entry is valid. Returns false and does not modify |cdm_proxy_protocols| if
+// the manifest entry is incorrectly formatted. Incorrect types in the manifest
+// entry will log the error and fail. Unrecognized values will be reported but
+// otherwise ignored.
+bool GetCdmProxyProtocols(
+    const base::DictionaryValue& manifest,
+    base::flat_set<media::CdmProxy::Protocol>* cdm_proxy_protocols) {
+  const auto* value = manifest.FindKey(kCdmSupportedCdmProxyProtocolsName);
+  if (!value)
+    return true;
+
+  if (!value->is_list()) {
+    DLOG(ERROR) << "Manifest entry " << kCdmSupportedCdmProxyProtocolsName
+                << " is not a list.";
+    return false;
+  }
+
+  const base::Value::ListStorage& list = value->GetList();
+  base::flat_set<media::CdmProxy::Protocol> result;
+  for (const auto& item : list) {
+    if (!item.is_string()) {
+      DLOG(ERROR) << "Unrecognized item type in manifest entry "
+                  << kCdmSupportedCdmProxyProtocolsName;
+      return false;
+    }
+
+    const std::string& protocol = item.GetString();
+    if (protocol == kCdmSupportedCdmProxyProtocolIntel) {
+      result.insert(media::CdmProxy::Protocol::kIntel);
+    } else {
+      DLOG(WARNING) << "Unrecognized CdmProxy protocol" << protocol
+                    << " in manifest entry "
+                    << kCdmSupportedCdmProxyProtocolsName;
+    }
+  }
+
+  cdm_proxy_protocols->swap(result);
+  return true;
+}
+
+// Returns true if the entries in the manifest can be parsed correctly,
+// false otherwise. Updates |capability|, with the values obtained from the
+// manifest, if they are provided. If this method returns false, |capability|
+// may or may not be updated.
+bool ParseManifest(const base::DictionaryValue& manifest,
+                   content::CdmCapability* capability) {
+  return GetCodecs(manifest, &capability->video_codecs) &&
+         GetEncryptionSchemes(manifest, &capability->encryption_schemes) &&
+         GetSessionTypes(manifest, &capability->session_types) &&
+         GetCdmProxyProtocols(manifest, &capability->cdm_proxy_protocols);
 }
 
 void RegisterWidevineCdmWithChrome(
@@ -205,21 +362,25 @@ void RegisterWidevineCdmWithChrome(
     const base::FilePath& cdm_install_dir,
     std::unique_ptr<base::DictionaryValue> manifest) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  const std::string codecs = GetCodecs(*manifest);
-  bool supports_persistent_license = GetPersistentLicenseSupport(*manifest);
+
+  // This check must be a subset of the check in VerifyInstallation() to
+  // avoid the case where the CDM is accepted by the component updater
+  // but not registered.
+  content::CdmCapability capability;
+  if (!ParseManifest(*manifest, &capability)) {
+    VLOG(1) << "Not registering Widevine CDM due to malformed manifest.";
+    return;
+  }
 
   VLOG(1) << "Register Widevine CDM with Chrome";
 
   const base::FilePath cdm_path =
       GetPlatformDirectory(cdm_install_dir)
           .AppendASCII(base::GetNativeLibraryName(kWidevineCdmLibraryName));
-  std::vector<media::VideoCodec> supported_video_codecs =
-      ConvertCodecsString(codecs);
-
-  CdmRegistry::GetInstance()->RegisterCdm(content::CdmInfo(
-      kWidevineCdmDisplayName, kWidevineCdmGuid, cdm_version, cdm_path,
-      kWidevineCdmFileSystemId, supported_video_codecs,
-      supports_persistent_license, kWidevineKeySystem, false));
+  CdmRegistry::GetInstance()->RegisterCdm(
+      content::CdmInfo(kWidevineCdmDisplayName, kWidevineCdmGuid, cdm_version,
+                       cdm_path, kWidevineCdmFileSystemId,
+                       std::move(capability), kWidevineKeySystem, false));
 }
 
 }  // namespace
@@ -237,9 +398,8 @@ class WidevineCdmComponentInstallerPolicy : public ComponentInstallerPolicy {
       const base::DictionaryValue& manifest,
       const base::FilePath& install_dir) override;
   void OnCustomUninstall() override;
-  bool VerifyInstallation(
-      const base::DictionaryValue& manifest,
-      const base::FilePath& install_dir) const override;
+  bool VerifyInstallation(const base::DictionaryValue& manifest,
+                          const base::FilePath& install_dir) const override;
   void ComponentReady(const base::Version& version,
                       const base::FilePath& path,
                       std::unique_ptr<base::DictionaryValue> manifest) override;
@@ -288,7 +448,7 @@ void WidevineCdmComponentInstallerPolicy::ComponentReady(
   }
 
   base::PostTaskWithTraits(
-      FROM_HERE, {base::MayBlock(), base::TaskPriority::BACKGROUND},
+      FROM_HERE, {base::MayBlock(), base::TaskPriority::BEST_EFFORT},
       base::BindOnce(&WidevineCdmComponentInstallerPolicy::UpdateCdmPath,
                      base::Unretained(this), version, path,
                      base::Passed(&manifest)));
@@ -297,10 +457,12 @@ void WidevineCdmComponentInstallerPolicy::ComponentReady(
 bool WidevineCdmComponentInstallerPolicy::VerifyInstallation(
     const base::DictionaryValue& manifest,
     const base::FilePath& install_dir) const {
+  content::CdmCapability capability;
   return IsCompatibleWithChrome(manifest) &&
          base::PathExists(GetPlatformDirectory(install_dir)
                               .AppendASCII(base::GetNativeLibraryName(
-                                  kWidevineCdmLibraryName)));
+                                  kWidevineCdmLibraryName))) &&
+         ParseManifest(manifest, &capability);
 }
 
 // The base directory on Windows looks like:
@@ -344,21 +506,17 @@ void WidevineCdmComponentInstallerPolicy::UpdateCdmPath(
     return;
   }
 
-  content::BrowserThread::GetTaskRunnerForThread(content::BrowserThread::UI)
+  base::CreateSingleThreadTaskRunnerWithTraits({content::BrowserThread::UI})
       ->PostTask(
           FROM_HERE,
           base::BindOnce(&RegisterWidevineCdmWithChrome, cdm_version,
                          absolute_cdm_install_dir, base::Passed(&manifest)));
 }
 
-#endif  // defined(WIDEVINE_CDM_AVAILABLE) && defined(WIDEVINE_CDM_IS_COMPONENT)
-
 void RegisterWidevineCdmComponent(ComponentUpdateService* cus) {
-#if defined(WIDEVINE_CDM_AVAILABLE) && defined(WIDEVINE_CDM_IS_COMPONENT)
   auto installer = base::MakeRefCounted<ComponentInstaller>(
       std::make_unique<WidevineCdmComponentInstallerPolicy>());
   installer->Register(cus, base::OnceClosure());
-#endif  // defined(WIDEVINE_CDM_AVAILABLE) && defined(WIDEVINE_CDM_IS_COMPONENT)
 }
 
 }  // namespace component_updater

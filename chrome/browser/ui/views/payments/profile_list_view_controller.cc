@@ -30,13 +30,12 @@ namespace payments {
 
 namespace {
 
-constexpr int kFirstTagValue =
-    static_cast<int>(PaymentRequestCommonTags::PAYMENT_REQUEST_COMMON_TAG_MAX);
-
-enum class PaymentMethodViewControllerTags : int {
-  // The tag for the button that triggers the "add address" flow. Starts at
-  // |kFirstTagValue| not to conflict with tags common to all views.
-  ADD_SHIPPING_ADDRESS_BUTTON = kFirstTagValue,
+enum class ProfileListViewControllerTags : int {
+  // The tag for the button that triggers the "add address"
+  // flow. Starts at |PAYMENT_REQUEST_COMMON_TAG_MAX| not to conflict
+  // with tags common to all views.
+  ADD_SHIPPING_ADDRESS_BUTTON = static_cast<int>(
+      PaymentRequestCommonTags::PAYMENT_REQUEST_COMMON_TAG_MAX),
   ADD_CONTACT_BUTTON,
 };
 
@@ -232,7 +231,7 @@ class ShippingProfileViewController : public ProfileListViewController,
 
   int GetSecondaryButtonTag() override {
     return static_cast<int>(
-        PaymentMethodViewControllerTags::ADD_SHIPPING_ADDRESS_BUTTON);
+        ProfileListViewControllerTags::ADD_SHIPPING_ADDRESS_BUTTON);
   }
 
   int GetSecondaryButtonViewId() override {
@@ -259,6 +258,8 @@ class ShippingProfileViewController : public ProfileListViewController,
         // The error profile is known, refresh the view to display it correctly.
         PopulateList();
         UpdateContentView();
+        if (spec()->has_shipping_address_error())
+          ShowEditor(state()->selected_shipping_option_error_profile());
       }
     }
   }
@@ -327,8 +328,7 @@ class ContactProfileViewController : public ProfileListViewController {
   int GetSecondaryButtonTextId() override { return IDS_PAYMENTS_ADD_CONTACT; }
 
   int GetSecondaryButtonTag() override {
-    return static_cast<int>(
-        PaymentMethodViewControllerTags::ADD_CONTACT_BUTTON);
+    return static_cast<int>(ProfileListViewControllerTags::ADD_CONTACT_BUTTON);
   }
 
   int GetSecondaryButtonViewId() override {

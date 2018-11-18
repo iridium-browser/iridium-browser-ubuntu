@@ -5,12 +5,15 @@
 #ifndef CONTENT_RENDERER_SERVICE_WORKER_CONTROLLER_SERVICE_WORKER_CONNECTOR_H_
 #define CONTENT_RENDERER_SERVICE_WORKER_CONTROLLER_SERVICE_WORKER_CONNECTOR_H_
 
+#include <string>
+
 #include "base/macros.h"
 #include "base/memory/ref_counted.h"
 #include "base/observer_list.h"
 #include "content/common/content_export.h"
 #include "content/common/service_worker/controller_service_worker.mojom.h"
 #include "content/common/service_worker/service_worker_container.mojom.h"
+#include "mojo/public/cpp/bindings/binding_set.h"
 
 namespace content {
 
@@ -23,7 +26,8 @@ class ServiceWorkerContainerHost;
 // ServiceWorkerProviderContext::ControlleeState and
 // ServiceWorkerSubresourceLoader{,Factory}.
 class CONTENT_EXPORT ControllerServiceWorkerConnector
-    : public base::RefCounted<ControllerServiceWorkerConnector> {
+    : public mojom::ControllerServiceWorkerConnector,
+      public base::RefCounted<ControllerServiceWorkerConnector> {
  public:
   // Observes the connection to the controller.
   class Observer {
@@ -51,17 +55,15 @@ class CONTENT_EXPORT ControllerServiceWorkerConnector
     kNoContainerHost,
   };
 
-  // Use this ctor when no |controller_ptr| is available at creation time.
-  // |state_| is set to kDisconnected.
-  // TODO(bashi): Remove this one constructor. We need to update
-  // WorkerFetchContextImpl to remove this constructor.
-  explicit ControllerServiceWorkerConnector(
-      mojom::ServiceWorkerContainerHost* container_host);
-
-  // Use this ctor when |controller_ptr| is given by the browser at the
-  // creation time. |state_| is set to either kConnected or kNoController.
+  // This class should only be created if a controller exists for the client.
+  // |controller_ptr| may be nullptr if the caller does not yet have a Mojo
+  // connection to the controller. |state_| is set to kDisconnected in that
+  // case.
+  // Creates and holds the ownership of |container_host_ptr_| (as |this|
+  // will be created on a different thread from the thread that has the
+  // original |container_host|).
   ControllerServiceWorkerConnector(
-      mojom::ServiceWorkerContainerHost* container_host,
+      mojom::ServiceWorkerContainerHostPtrInfo container_host_info,
       mojom::ControllerServiceWorkerPtr controller_ptr,
       const std::string& client_id);
 
@@ -76,36 +78,35 @@ class CONTENT_EXPORT ControllerServiceWorkerConnector
   void OnContainerHostConnectionClosed();
   void OnControllerConnectionClosed();
 
-  // Resets the controller connection with the given |controller_ptr|, this
-  // can be called when a new controller is given, e.g. due to claim().
-  void ResetControllerConnection(
-      mojom::ControllerServiceWorkerPtr controller_ptr,
-      const std::string& client_id);
+  void AddBinding(mojom::ControllerServiceWorkerConnectorRequest request);
+
+  // mojom::ControllerServiceWorkerConnector:
+  void UpdateController(
+      mojom::ControllerServiceWorkerPtr controller_ptr) override;
 
   State state() const { return state_; }
 
   const std::string& client_id() const { return client_id_; }
 
  private:
+  void SetControllerServiceWorkerPtr(
+      mojom::ControllerServiceWorkerPtr controller_ptr);
+
   State state_ = State::kDisconnected;
 
   friend class base::RefCounted<ControllerServiceWorkerConnector>;
-  ~ControllerServiceWorkerConnector();
+  ~ControllerServiceWorkerConnector() override;
 
-  // Connection to the ServiceWorkerProviderHost that lives in the
-  // browser process. This is used to (re-)obtain Mojo connection to
-  // |controller_service_worker_| when it is not established.
-  // Cleared when the connection is dropped.
-  mojom::ServiceWorkerContainerHost* container_host_;
+  mojo::BindingSet<mojom::ControllerServiceWorkerConnector> bindings_;
 
-  // Connection to the ControllerServiceWorker. The consumer of this connection
-  // should not need to know which process this is connected to.
-  // (Currently this is connected to BrowserSideControllerServiceWorker,
-  // but will eventually be directly connected to the controller service worker
-  // in the renderer process)
+  // Connection to the container host in the browser process.
+  mojom::ServiceWorkerContainerHostPtr container_host_ptr_;
+
+  // Connection to the controller service worker, which lives in a renderer
+  // process that's not necessarily the same as this connector.
   mojom::ControllerServiceWorkerPtr controller_service_worker_;
 
-  base::ObserverList<Observer> observer_list_;
+  base::ObserverList<Observer>::Unchecked observer_list_;
 
   // The web-exposed client id, used for FetchEvent#clientId (i.e.,
   // ServiceWorkerProviderHost::client_uuid and not

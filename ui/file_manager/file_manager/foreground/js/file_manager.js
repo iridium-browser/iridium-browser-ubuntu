@@ -18,7 +18,7 @@ function FileManager() {
 
   /**
    * Volume manager.
-   * @type {VolumeManagerWrapper}
+   * @type {FilteredVolumeManager}
    * @private
    */
   this.volumeManager_ = null;
@@ -77,11 +77,9 @@ function FileManager() {
 
   /**
    * File filter.
-   * @private {!FileFilter}
-   * @const
+   * @private {FileFilter}
    */
-  this.fileFilter_ = new FileFilter(
-      false  /* Don't show dot files and *.crdownload by default. */);
+  this.fileFilter_ = null;
 
   /**
    * Model of current directory.
@@ -353,6 +351,14 @@ function FileManager() {
    * @private
    */
   this.initBackgroundPagePromise_ = null;
+
+  /**
+   * Flags async retrieved once at startup and can be used to switch behaviour
+   * on sync functions.
+   * @dict
+   * @private
+   */
+  this.commandLineFlags_ = {};
 }
 
 FileManager.prototype = /** @struct */ {
@@ -370,7 +376,7 @@ FileManager.prototype = /** @struct */ {
     return this.directoryTreeNamingController_;
   },
   /**
-   * @return {!FileFilter}
+   * @return {FileFilter}
    */
   get fileFilter() {
     return this.fileFilter_;
@@ -460,7 +466,7 @@ FileManager.prototype = /** @struct */ {
     return this.backgroundPage_;
   },
   /**
-   * @return {VolumeManagerWrapper}
+   * @return {FilteredVolumeManager}
    */
   get volumeManager() {
     return this.volumeManager_;
@@ -508,12 +514,16 @@ FileManager.prototype = /** @struct */ {
   FileManager.prototype.startInitSettings_ = function() {
     metrics.startInterval('Load.InitSettings');
     this.appStateController_ = new AppStateController(this.dialogType);
-    return new Promise(function(resolve) {
-      this.appStateController_.loadInitialViewOptions().then(function() {
-        metrics.recordInterval('Load.InitSettings');
-        resolve();
-      });
-    }.bind(this));
+    return Promise
+        .all([
+          this.appStateController_.loadInitialViewOptions(),
+          util.isMyFilesNavigationDisabled(),
+        ])
+        .then(values => {
+          this.commandLineFlags_['disable-my-files-navigation'] =
+              /** @type {boolean} */ (values[1]);
+          metrics.recordInterval('Load.InitSettings');
+        });
   };
 
   /**
@@ -563,6 +573,7 @@ FileManager.prototype = /** @struct */ {
     assert(this.launchParams_);
     assert(this.volumeManager_);
     assert(this.dialogDom_);
+    assert(this.fileFilter_);
 
     this.scanController_ = new ScanController(
         this.directoryModel_,
@@ -579,7 +590,8 @@ FileManager.prototype = /** @struct */ {
         this.ui_.gearButtonToggleRipple,
         this.ui_.gearMenu,
         this.directoryModel_,
-        this.commandHandler_);
+        this.commandHandler_,
+        assert(this.providersModel_));
     this.selectionMenuController_ = new SelectionMenuController(
         this.ui_.selectionMenuButton,
         util.queryDecoratedElement('#file-context-menu', cr.ui.Menu));
@@ -591,8 +603,7 @@ FileManager.prototype = /** @struct */ {
         this.selectionHandler_,
         this.directoryModel_);
     this.emptyFolderController_ = new EmptyFolderController(
-        this.ui_.emptyFolder,
-        this.directoryModel_);
+        this.ui_.emptyFolder, this.directoryModel_, this.ui_.alertDialog);
     this.actionsController_ = new ActionsController(
         this.volumeManager_, assert(this.metadataModel_), this.directoryModel_,
         assert(this.folderShortcutsModel_),
@@ -707,27 +718,52 @@ FileManager.prototype = /** @struct */ {
     for (var j = 0; j < commandButtons.length; j++)
       CommandButton.decorate(commandButtons[j]);
 
-    var inputs = this.dialogDom_.querySelectorAll(
-        'input[type=text], input[type=search], textarea');
-    for (var i = 0; i < inputs.length; i++) {
-      cr.ui.contextMenuHandler.setContextMenu(
-          inputs[i], this.ui_.textContextMenu);
-      this.registerInputCommands_(inputs[i]);
-    }
+    var inputs = this.getDomInputs_();
 
-    cr.ui.contextMenuHandler.setContextMenu(this.ui_.listContainer.renameInput,
-                                            this.ui_.textContextMenu);
-    this.registerInputCommands_(this.ui_.listContainer.renameInput);
+    for (let input of inputs)
+      this.setContextMenuForInput_(input);
 
-    cr.ui.contextMenuHandler.setContextMenu(
-        this.directoryTreeNamingController_.getInputElement(),
-        this.ui_.textContextMenu);
-    this.registerInputCommands_(
+    this.setContextMenuForInput_(this.ui_.listContainer.renameInput);
+    this.setContextMenuForInput_(
         this.directoryTreeNamingController_.getInputElement());
 
     this.document_.addEventListener(
         'command',
         this.ui_.listContainer.clearHover.bind(this.ui_.listContainer));
+  };
+
+  /**
+   * Get input elements from root DOM element of this app.
+   * @private
+   */
+  FileManager.prototype.getDomInputs_ = function() {
+    return this.dialogDom_.querySelectorAll(
+        'input[type=text], input[type=search], textarea, cr-input');
+  };
+
+  /**
+   * Set context menu and handlers for an input element.
+   * @private
+   */
+  FileManager.prototype.setContextMenuForInput_ = function(input) {
+    var touchInduced = false;
+
+    // stop contextmenu propagation for touch-induced events.
+    input.addEventListener('touchstart', (e) => {
+      touchInduced = true;
+    });
+    input.addEventListener('contextmenu', (e) => {
+      if (touchInduced) {
+        e.stopImmediatePropagation();
+      }
+      touchInduced = false;
+    });
+    input.addEventListener('click', (e) => {
+      touchInduced = false;
+    });
+
+    cr.ui.contextMenuHandler.setContextMenu(input, this.ui_.textContextMenu);
+    this.registerInputCommands_(input);
   };
 
   /**
@@ -774,20 +810,20 @@ FileManager.prototype = /** @struct */ {
     this.document_ = this.dialogDom_.ownerDocument;
 
     metrics.startInterval('Load.InitDocuments');
-    return Promise.all([
-      this.initBackgroundPagePromise_,
-      window.importElementsPromise
-    ]).then(function() {
-      metrics.recordInterval('Load.InitDocuments');
-      metrics.startInterval('Load.InitUI');
-      this.initEssentialUI_();
-      this.initAdditionalUI_();
-      return this.initSettingsPromise_;
-    }.bind(this)).then(function() {
-      this.initFileSystemUI_();
-      this.initUIFocus_();
-      metrics.recordInterval('Load.InitUI');
-    }.bind(this));
+    return Promise
+        .all([this.initBackgroundPagePromise_, window.importElementsPromise])
+        .then(function() {
+          metrics.recordInterval('Load.InitDocuments');
+          metrics.startInterval('Load.InitUI');
+          this.initEssentialUI_();
+          this.initAdditionalUI_();
+          return this.initSettingsPromise_;
+        }.bind(this))
+        .then(function() {
+          this.initFileSystemUI_();
+          this.initUIFocus_();
+          metrics.recordInterval('Load.InitUI');
+        }.bind(this));
   };
 
   /**
@@ -869,7 +905,7 @@ FileManager.prototype = /** @struct */ {
     var writableOnly =
         this.launchParams_.type === DialogType.SELECT_SAVEAS_FILE;
 
-    // VolumeManagerWrapper hides virtual file system related event and data
+    // FilteredVolumeManager hides virtual file system related event and data
     // even depends on the value of |supportVirtualPath|. If it is
     // VirtualPathSupport.NO_VIRTUAL_PATH, it hides Drive even if Drive is
     // enabled on preference.
@@ -878,7 +914,7 @@ FileManager.prototype = /** @struct */ {
     // true.
     // Note that the Drive enabling preference change is listened by
     // DriveIntegrationService, so here we don't need to take care about it.
-    this.volumeManager_ = new VolumeManagerWrapper(
+    this.volumeManager_ = new FilteredVolumeManager(
         allowedPaths, writableOnly, this.backgroundPage_);
   };
 
@@ -906,6 +942,7 @@ FileManager.prototype = /** @struct */ {
     this.metadataModel_ = MetadataModel.create(this.volumeManager_);
     this.thumbnailModel_ = new ThumbnailModel(this.metadataModel_);
     this.providersModel_ = new ProvidersModel(this.volumeManager_);
+    this.fileFilter_ = new FileFilter(this.metadataModel_);
 
     // Create the root view of FileManager.
     assert(this.dialogDom_);
@@ -1113,6 +1150,7 @@ FileManager.prototype = /** @struct */ {
     // Create naming controller.
     assert(this.ui_.alertDialog);
     assert(this.ui_.confirmDialog);
+    assert(this.fileFilter_);
     this.namingController_ = new NamingController(
         this.ui_.listContainer,
         this.ui_.alertDialog,
@@ -1154,9 +1192,6 @@ FileManager.prototype = /** @struct */ {
         (this.dialogDom_.querySelector('#directory-tree'));
     var fakeEntriesVisible =
         this.dialogType !== DialogType.SELECT_SAVEAS_FILE;
-    var addNewServicesVisible =
-        this.dialogType === DialogType.FULL_PAGE &&
-        !chrome.extension.inIncognitoContext;
     this.navigationUma_ = new NavigationUma(assert(this.volumeManager_));
     DirectoryTree.decorate(directoryTree,
                            assert(this.directoryModel_),
@@ -1166,23 +1201,53 @@ FileManager.prototype = /** @struct */ {
                            fakeEntriesVisible);
     directoryTree.dataModel = new NavigationListModel(
         assert(this.volumeManager_), assert(this.folderShortcutsModel_),
-        addNewServicesVisible ?
-            new NavigationModelMenuItem(
-                str('ADD_NEW_SERVICES_BUTTON_LABEL'), '#add-new-services-menu',
-                'add-new-services') :
-            null,
         fakeEntriesVisible &&
                 !DialogType.isFolderDialog(this.launchParams_.type) ?
-            new NavigationModelRecentItem(str('RECENT_ROOT_LABEL'), {
-              isDirectory: true,
-              rootType: VolumeManagerCommon.RootType.RECENT,
-              toURL: function() {
-                return 'fake-entry://recent';
-              },
-              sourceRestriction: this.getSourceRestriction_()
-            }) :
-            null);
+            new NavigationModelFakeItem(
+                str('RECENT_ROOT_LABEL'), NavigationModelItemType.RECENT,
+                new FakeEntry(
+                    str('RECENT_ROOT_LABEL'),
+                    VolumeManagerCommon.RootType.RECENT, true,
+                    this.getSourceRestriction_())) :
+            null,
+        this.commandLineFlags_['disable-my-files-navigation']);
+    this.setupCrostini_();
     this.ui_.initDirectoryTree(directoryTree);
+  };
+
+  /**
+   * Check if crostini is enabled to create linuxFilesItem.
+   * @private
+   */
+  FileManager.prototype.setupCrostini_ = function() {
+    chrome.fileManagerPrivate.isCrostiniEnabled((enabled) => {
+      // Check for 'crostini-files' cmd line flag.
+      chrome.commandLinePrivate.hasSwitch('crostini-files', (filesEnabled) => {
+        Crostini.IS_CROSTINI_FILES_ENABLED = filesEnabled;
+      });
+
+      // Setup Linux files fake root.
+      this.directoryTree.dataModel.linuxFilesItem = enabled ?
+          new NavigationModelFakeItem(
+              str('LINUX_FILES_ROOT_LABEL'), NavigationModelItemType.CROSTINI,
+              new FakeEntry(
+                  str('LINUX_FILES_ROOT_LABEL'),
+                  VolumeManagerCommon.RootType.CROSTINI, true)) :
+          null;
+
+      // Redraw the tree even if not enabled.  This is required for testing.
+      this.directoryTree.redraw(false);
+
+      if (!enabled)
+        return;
+
+      // Load any existing shared paths.
+      chrome.fileManagerPrivate.getCrostiniSharedPaths((entries) => {
+        for (let i = 0; i < entries.length; i++) {
+          Crostini.registerSharedPath(entries[i], assert(this.volumeManager_));
+        }
+      });
+    });
   };
 
   /**
@@ -1361,6 +1426,26 @@ FileManager.prototype = /** @struct */ {
           }.bind(this));
     }.bind(this));
 
+    queue.run((callback) => {
+      // If there is target to be selected, just move to next step.
+      if (nextCurrentDirEntry) {
+        callback();
+        return;
+      }
+
+      // Try to select MyFiles if anything else has failed.
+      nextCurrentDirEntry = this.directoryTree.dataModel.myFilesModel_.entry;
+      callback();
+    });
+
+    // If there is no target select MyFiles by default.
+    queue.run((callback) => {
+      if (!nextCurrentDirEntry)
+        nextCurrentDirEntry = this.directoryTree.dataModel.myFilesModel_.entry;
+
+      callback();
+    });
+
     // Finalize.
     queue.run(function(callback) {
       // Check directory change.
@@ -1379,7 +1464,7 @@ FileManager.prototype = /** @struct */ {
   };
 
   /**
-   * @param {!DirectoryEntry} directoryEntry Directory to be opened.
+   * @param {DirectoryEntry} directoryEntry Directory to be opened.
    * @param {Entry=} opt_selectionEntry Entry to be selected.
    * @param {string=} opt_suggestedName Suggested name for a non-existing\
    *     selection.
@@ -1388,38 +1473,18 @@ FileManager.prototype = /** @struct */ {
   FileManager.prototype.finishSetupCurrentDirectory_ = function(
       directoryEntry, opt_selectionEntry, opt_suggestedName) {
     // Open the directory, and select the selection (if passed).
-    this.directoryModel_.changeDirectoryEntry(directoryEntry, function() {
-      if (opt_selectionEntry)
-        this.directoryModel_.selectEntry(opt_selectionEntry);
-    }.bind(this));
+    if (directoryEntry) {
+      this.directoryModel_.changeDirectoryEntry(directoryEntry, function() {
+        if (opt_selectionEntry)
+          this.directoryModel_.selectEntry(opt_selectionEntry);
 
-    if (this.dialogType === DialogType.FULL_PAGE) {
-      // In the FULL_PAGE mode if the restored URL points to a file we might
-      // have to invoke a task after selecting it.
-      if (this.launchParams_.action === 'select')
-        return;
+        this.ui_.addLoadedAttribute();
+      }.bind(this));
+    } else {
+      this.ui_.addLoadedAttribute();
+    }
 
-      var task = null;
-
-      // TODO(mtomasz): Implement remounting archives after crash.
-      //                See: crbug.com/333139
-
-      // If there is a task to be run, run it after the scan is completed.
-      if (task) {
-        var listener = function() {
-          if (!util.isSameEntry(this.directoryModel_.getCurrentDirEntry(),
-                                directoryEntry)) {
-            // Opened on a different URL. Probably fallbacked. Therefore,
-            // do not invoke a task.
-            return;
-          }
-          this.directoryModel_.removeEventListener(
-              'scan-completed', listener);
-          task();
-        }.bind(this);
-        this.directoryModel_.addEventListener('scan-completed', listener);
-      }
-    } else if (this.dialogType === DialogType.SELECT_SAVEAS_FILE) {
+    if (this.dialogType === DialogType.SELECT_SAVEAS_FILE) {
       this.ui_.dialogFooter.filenameInput.value = opt_suggestedName || '';
       this.ui_.dialogFooter.selectTargetNameInFilenameInput();
     }
@@ -1427,7 +1492,8 @@ FileManager.prototype = /** @struct */ {
 
   /**
    * Return DirectoryEntry of the current directory or null.
-   * @return {DirectoryEntry|FakeEntry} DirectoryEntry of the current directory.
+   * @return {DirectoryEntry|FakeEntry|FilesAppDirEntry} DirectoryEntry of the
+   *     current directory.
    *     Returns null if the directory model is not ready or the current
    *     directory is not set.
    */
@@ -1521,18 +1587,5 @@ FileManager.prototype = /** @struct */ {
    */
   FileManager.prototype.getCurrentList = function() {
     return this.ui.listContainer.currentList;
-  };
-
-  /**
-   * Outputs the current state for debugging.
-   */
-  FileManager.prototype.debugMe = function() {
-    var out = 'Debug information.\n';
-
-    out += '1. VolumeManagerWrapper\n' +
-        this.volumeManager_.toString() + '\n';
-
-    out += 'End of debug information.';
-    console.log(out);
   };
 })();

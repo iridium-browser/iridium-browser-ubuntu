@@ -17,6 +17,8 @@ class EXTTextureFilterAnisotropic;
 class OESTextureFloatLinear;
 class WebGLDebugRendererInfo;
 class WebGLLoseContext;
+class WebGLMultiview;
+class KHRParallelShaderCompile;
 
 class WebGL2RenderingContext : public WebGL2RenderingContextBase {
   DEFINE_WRAPPERTYPEINFO();
@@ -47,9 +49,7 @@ class WebGL2RenderingContext : public WebGL2RenderingContextBase {
   void SetCanvasGetContextResult(RenderingContext&) final;
   void SetOffscreenCanvasGetContextResult(OffscreenRenderingContext&) final;
 
-  virtual void Trace(blink::Visitor*);
-
-  virtual void TraceWrappers(const ScriptWrappableVisitor*) const;
+  void Trace(blink::Visitor*) override;
 
  protected:
   WebGL2RenderingContext(
@@ -61,9 +61,9 @@ class WebGL2RenderingContext : public WebGL2RenderingContextBase {
   Member<EXTColorBufferFloat> ext_color_buffer_float_;
   Member<EXTDisjointTimerQueryWebGL2> ext_disjoint_timer_query_web_gl2_;
   Member<EXTTextureFilterAnisotropic> ext_texture_filter_anisotropic_;
+  Member<KHRParallelShaderCompile> khr_parallel_shader_compile_;
   Member<OESTextureFloatLinear> oes_texture_float_linear_;
   Member<WebGLCompressedTextureASTC> webgl_compressed_texture_astc_;
-  Member<WebGLCompressedTextureATC> webgl_compressed_texture_atc_;
   Member<WebGLCompressedTextureETC> webgl_compressed_texture_etc_;
   Member<WebGLCompressedTextureETC1> webgl_compressed_texture_etc1_;
   Member<WebGLCompressedTexturePVRTC> webgl_compressed_texture_pvrtc_;
@@ -71,18 +71,19 @@ class WebGL2RenderingContext : public WebGL2RenderingContextBase {
   Member<WebGLCompressedTextureS3TCsRGB> webgl_compressed_texture_s3tc_srgb_;
   Member<WebGLDebugRendererInfo> webgl_debug_renderer_info_;
   Member<WebGLDebugShaders> webgl_debug_shaders_;
-  Member<WebGLGetBufferSubDataAsync> webgl_get_buffer_sub_data_async_;
   Member<WebGLLoseContext> webgl_lose_context_;
+  Member<WebGLMultiview> webgl_multiview_;
 };
 
 DEFINE_TYPE_CASTS(WebGL2RenderingContext,
                   CanvasRenderingContext,
                   context,
                   context->Is3d() &&
-                      WebGLRenderingContextBase::GetWebGLVersion(context) == 2,
+                      WebGLRenderingContextBase::GetWebGLVersion(context) ==
+                          Platform::kWebGL2ContextType,
                   context.Is3d() &&
                       WebGLRenderingContextBase::GetWebGLVersion(&context) ==
-                          2);
+                          Platform::kWebGL2ContextType);
 
 }  // namespace blink
 

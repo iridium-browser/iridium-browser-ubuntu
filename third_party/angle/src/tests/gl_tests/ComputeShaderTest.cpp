@@ -19,6 +19,58 @@ class ComputeShaderTest : public ANGLETest
 {
   protected:
     ComputeShaderTest() {}
+
+    template <class T, GLint kWidth, GLint kHeight>
+    void runSharedMemoryTest(const char *csSource,
+                             GLenum internalFormat,
+                             GLenum format,
+                             const std::array<T, kWidth * kHeight> &inputData,
+                             const std::array<T, kWidth * kHeight> &expectedValues)
+    {
+        GLTexture texture[2];
+        GLFramebuffer framebuffer;
+
+        glBindTexture(GL_TEXTURE_2D, texture[0]);
+        glTexStorage2D(GL_TEXTURE_2D, 1, internalFormat, kWidth, kHeight);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, kWidth, kHeight, GL_RED_INTEGER, format,
+                        inputData.data());
+        EXPECT_GL_NO_ERROR();
+
+        constexpr T initData[kWidth * kHeight] = {};
+        glBindTexture(GL_TEXTURE_2D, texture[1]);
+        glTexStorage2D(GL_TEXTURE_2D, 1, internalFormat, kWidth, kHeight);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, kWidth, kHeight, GL_RED_INTEGER, format, initData);
+        EXPECT_GL_NO_ERROR();
+
+        ANGLE_GL_COMPUTE_PROGRAM(program, csSource);
+        glUseProgram(program.get());
+
+        glBindImageTexture(0, texture[0], 0, GL_FALSE, 0, GL_READ_ONLY, internalFormat);
+        EXPECT_GL_NO_ERROR();
+
+        glBindImageTexture(1, texture[1], 0, GL_FALSE, 0, GL_WRITE_ONLY, internalFormat);
+        EXPECT_GL_NO_ERROR();
+
+        glDispatchCompute(1, 1, 1);
+        EXPECT_GL_NO_ERROR();
+
+        glMemoryBarrier(GL_TEXTURE_UPDATE_BARRIER_BIT);
+
+        T outputValues[kWidth * kHeight] = {};
+        glUseProgram(0);
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer);
+
+        glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture[1],
+                               0);
+        EXPECT_GL_NO_ERROR();
+        glReadPixels(0, 0, kWidth, kHeight, GL_RED_INTEGER, format, outputValues);
+        EXPECT_GL_NO_ERROR();
+
+        for (int i = 0; i < kWidth * kHeight; i++)
+        {
+            EXPECT_EQ(expectedValues[i], outputValues[i]);
+        }
+    }
 };
 
 class ComputeShaderTestES3 : public ANGLETest
@@ -343,6 +395,62 @@ TEST_P(ComputeShaderTest, DispatchCompute)
     EXPECT_GL_NO_ERROR();
 }
 
+// Basic test for DispatchComputeIndirect.
+TEST_P(ComputeShaderTest, DispatchComputeIndirect)
+{
+    GLTexture texture;
+    GLFramebuffer framebuffer;
+    const char kCSSource[] =
+        R"(#version 310 es
+        layout(local_size_x=1, local_size_y=1, local_size_z=1) in;
+        layout(r32ui, binding = 0) uniform highp uimage2D uImage;
+        void main()
+        {
+            imageStore(uImage, ivec2(gl_WorkGroupID.x, gl_WorkGroupID.y), uvec4(100, 0, 0, 0));
+        })";
+
+    ANGLE_GL_COMPUTE_PROGRAM(program, kCSSource);
+    glUseProgram(program.get());
+    const int kWidth = 4, kHeight = 6;
+    GLuint inputValues[] = {0};
+
+    GLBuffer buffer;
+    glBindBuffer(GL_DISPATCH_INDIRECT_BUFFER, buffer);
+    GLuint params[] = {kWidth, kHeight, 1};
+    glBufferData(GL_DISPATCH_INDIRECT_BUFFER, sizeof(params), params, GL_STATIC_DRAW);
+
+    glBindTexture(GL_TEXTURE_2D, texture);
+    glTexStorage2D(GL_TEXTURE_2D, 1, GL_R32UI, kWidth, kHeight);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, kWidth, kHeight, GL_RED_INTEGER, GL_UNSIGNED_INT,
+                    inputValues);
+    EXPECT_GL_NO_ERROR();
+
+    glBindImageTexture(0, texture, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R32UI);
+    EXPECT_GL_NO_ERROR();
+
+    glDispatchComputeIndirect(0);
+    EXPECT_GL_NO_ERROR();
+
+    glMemoryBarrier(GL_TEXTURE_UPDATE_BARRIER_BIT);
+    glUseProgram(0);
+    GLuint outputValues[kWidth][kHeight];
+    GLuint expectedValue = 100u;
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer);
+
+    glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0);
+    EXPECT_GL_NO_ERROR();
+    glReadPixels(0, 0, kWidth, kHeight, GL_RED_INTEGER, GL_UNSIGNED_INT, outputValues);
+    EXPECT_GL_NO_ERROR();
+
+    for (int i = 0; i < kWidth; i++)
+    {
+        for (int j = 0; j < kHeight; j++)
+        {
+            EXPECT_EQ(expectedValue, outputValues[i][j]);
+        }
+    }
+}
+
 // Use image uniform to write texture in compute shader, and verify the content is expected.
 TEST_P(ComputeShaderTest, BindImageTexture)
 {
@@ -600,6 +708,76 @@ TEST_P(ComputeShaderTest, TextureSampling)
     glUnmapBuffer(GL_SHADER_STORAGE_BUFFER);
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
     EXPECT_GL_NO_ERROR();
+}
+
+// Test mixed use of sampler and image.
+TEST_P(ComputeShaderTest, SamplingAndImageReadWrite)
+{
+    GLTexture texture[3];
+    GLFramebuffer framebuffer;
+    const std::string csSource =
+        R"(#version 310 es
+        layout(local_size_x=1, local_size_y=1, local_size_z=1) in;
+        layout(r32ui, binding = 0) readonly uniform highp uimage2D uImage_1;
+        layout(r32ui, binding = 1) writeonly uniform highp uimage2D uImage_2;
+        precision highp usampler2D;
+        uniform usampler2D tex;
+        void main()
+        {
+            uvec4 value_1 = texelFetch(tex, ivec2(gl_LocalInvocationID.xy), 0);
+            uvec4 value_2 = imageLoad(uImage_1, ivec2(gl_LocalInvocationID.xy));
+            imageStore(uImage_2, ivec2(gl_LocalInvocationID.xy), value_1 + value_2);
+        })";
+
+    constexpr int kWidth = 1, kHeight = 1;
+    constexpr GLuint kInputValues[3][1] = {{50}, {100}, {20}};
+
+    glBindTexture(GL_TEXTURE_2D, texture[0]);
+    glTexStorage2D(GL_TEXTURE_2D, 1, GL_R32UI, kWidth, kHeight);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, kWidth, kHeight, GL_RED_INTEGER, GL_UNSIGNED_INT,
+                    kInputValues[0]);
+    glBindTexture(GL_TEXTURE_2D, texture[2]);
+    glTexStorage2D(GL_TEXTURE_2D, 1, GL_R32UI, kWidth, kHeight);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, kWidth, kHeight, GL_RED_INTEGER, GL_UNSIGNED_INT,
+                    kInputValues[2]);
+    EXPECT_GL_NO_ERROR();
+    glBindTexture(GL_TEXTURE_2D, 0);
+
+    glBindTexture(GL_TEXTURE_2D, texture[1]);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexStorage2D(GL_TEXTURE_2D, 1, GL_R32UI, kWidth, kHeight);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, kWidth, kHeight, GL_RED_INTEGER, GL_UNSIGNED_INT,
+                    kInputValues[1]);
+
+    EXPECT_GL_NO_ERROR();
+
+    ANGLE_GL_COMPUTE_PROGRAM(program, csSource);
+    glUseProgram(program.get());
+
+    glBindImageTexture(0, texture[0], 0, GL_FALSE, 0, GL_READ_ONLY, GL_R32UI);
+    glBindImageTexture(1, texture[2], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R32UI);
+    EXPECT_GL_NO_ERROR();
+
+    glDispatchCompute(1, 1, 1);
+    EXPECT_GL_NO_ERROR();
+
+    glMemoryBarrier(GL_TEXTURE_UPDATE_BARRIER_BIT);
+    GLuint outputValues[kWidth * kHeight];
+    constexpr GLuint expectedValue = 150;
+    glUseProgram(0);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer);
+
+    glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture[2], 0);
+    EXPECT_GL_NO_ERROR();
+    glReadPixels(0, 0, kWidth, kHeight, GL_RED_INTEGER, GL_UNSIGNED_INT, outputValues);
+    EXPECT_GL_NO_ERROR();
+
+    for (int i = 0; i < kWidth * kHeight; i++)
+    {
+        EXPECT_EQ(expectedValue, outputValues[i]);
+    }
 }
 
 // Use image uniform to read and write Texture2D in compute shader, and verify the contents.
@@ -1207,6 +1385,885 @@ TEST_P(ComputeShaderTest, groupMemoryBarrierAndBarrierTest)
     {
         EXPECT_EQ(kExpectedValue, outputValues[i]);
     }
+}
+
+// Verify that a link error is generated when the sum of the number of active image uniforms and
+// active shader storage blocks in a compute shader exceeds GL_MAX_COMBINED_SHADER_OUTPUT_RESOURCES.
+TEST_P(ComputeShaderTest, ExceedCombinedShaderOutputResourcesInCS)
+{
+    // TODO(jiawei.shao@intel.com): enable this test when shader storage buffer is supported on
+    // D3D11 back-ends.
+    ANGLE_SKIP_TEST_IF(IsD3D11());
+
+    GLint maxCombinedShaderOutputResources;
+    GLint maxComputeShaderStorageBlocks;
+    GLint maxComputeImageUniforms;
+
+    glGetIntegerv(GL_MAX_COMBINED_SHADER_OUTPUT_RESOURCES, &maxCombinedShaderOutputResources);
+    glGetIntegerv(GL_MAX_COMPUTE_SHADER_STORAGE_BLOCKS, &maxComputeShaderStorageBlocks);
+    glGetIntegerv(GL_MAX_COMPUTE_IMAGE_UNIFORMS, &maxComputeImageUniforms);
+
+    ANGLE_SKIP_TEST_IF(maxCombinedShaderOutputResources >=
+                       maxComputeShaderStorageBlocks + maxComputeImageUniforms);
+
+    std::ostringstream computeShaderStream;
+    computeShaderStream << "#version 310 es\n"
+                           "layout(local_size_x = 3, local_size_y = 1, local_size_z = 1) in;\n"
+                           "layout(shared, binding = 0) buffer blockName"
+                           "{\n"
+                           "    uint data;\n"
+                           "} instance["
+                        << maxComputeShaderStorageBlocks << "];\n";
+
+    ASSERT_GE(maxComputeImageUniforms, 4);
+    int numImagesInArray  = maxComputeImageUniforms / 2;
+    int numImagesNonArray = maxComputeImageUniforms - numImagesInArray;
+    for (int i = 0; i < numImagesNonArray; ++i)
+    {
+        computeShaderStream << "layout(r32f, binding = " << i << ") uniform highp image2D image"
+                            << i << ";\n";
+    }
+
+    computeShaderStream << "layout(r32f, binding = " << numImagesNonArray
+                        << ") uniform highp image2D imageArray[" << numImagesInArray << "];\n";
+
+    computeShaderStream << "void main()\n"
+                           "{\n"
+                           "    uint val = 0u;\n"
+                           "    vec4 val2 = vec4(0.0);\n";
+
+    for (int i = 0; i < maxComputeShaderStorageBlocks; ++i)
+    {
+        computeShaderStream << "    val += instance[" << i << "].data; \n";
+    }
+
+    for (int i = 0; i < numImagesNonArray; ++i)
+    {
+        computeShaderStream << "    val2 += imageLoad(image" << i
+                            << ", ivec2(gl_LocalInvocationID.xy)); \n";
+    }
+
+    for (int i = 0; i < numImagesInArray; ++i)
+    {
+        computeShaderStream << "    val2 += imageLoad(imageArray[" << i << "]"
+                            << ", ivec2(gl_LocalInvocationID.xy)); \n";
+    }
+
+    computeShaderStream << "    instance[0].data = val + uint(val2.x);\n"
+                           "}\n";
+
+    GLuint computeProgram = CompileComputeProgram(computeShaderStream.str());
+    EXPECT_EQ(0u, computeProgram);
+}
+
+// Test that uniform block with struct member in compute shader is supported.
+TEST_P(ComputeShaderTest, UniformBlockWithStructMember)
+{
+    const std::string csSource =
+        R"(#version 310 es
+        layout(local_size_x=8) in;
+        layout(rgba8) uniform highp readonly image2D mImage2DInput;
+        layout(rgba8) uniform highp writeonly image2D mImage2DOutput;
+        struct S {
+          ivec3 a;
+          ivec2 b;
+        };
+
+        layout(std140, binding=0) uniform blockName {
+            S bd;
+        } instanceName;
+        void main()
+        {
+            ivec2 t1 = instanceName.bd.b;
+            vec4 result2d = imageLoad(mImage2DInput, t1);
+            imageStore(mImage2DOutput, ivec2(gl_LocalInvocationID.xy), result2d);
+        })";
+
+    ANGLE_GL_COMPUTE_PROGRAM(program, csSource);
+    EXPECT_GL_NO_ERROR();
+}
+
+// Verify shared non-array variables can work correctly.
+TEST_P(ComputeShaderTest, NonArraySharedVariable)
+{
+    const char kCSShader[] =
+        R"(#version 310 es
+        layout (local_size_x = 2, local_size_y = 2, local_size_z = 1) in;
+        layout (r32ui, binding = 0) readonly uniform highp uimage2D srcImage;
+        layout (r32ui, binding = 1) writeonly uniform highp uimage2D dstImage;
+        shared uint temp;
+        void main()
+        {
+            if (gl_LocalInvocationID == uvec3(0, 0, 0))
+            {
+                temp = imageLoad(srcImage, ivec2(gl_LocalInvocationID.xy)).x;
+            }
+            groupMemoryBarrier();
+            barrier();
+            if (gl_LocalInvocationID == uvec3(1, 1, 0))
+            {
+                imageStore(dstImage, ivec2(gl_LocalInvocationID.xy), uvec4(temp));
+            }
+            else
+            {
+                uint inputValue = imageLoad(srcImage, ivec2(gl_LocalInvocationID.xy)).x;
+                imageStore(dstImage, ivec2(gl_LocalInvocationID.xy), uvec4(inputValue));
+            }
+        })";
+
+    const std::array<GLuint, 4> inputData      = {{250, 200, 150, 100}};
+    const std::array<GLuint, 4> expectedValues = {{250, 200, 150, 250}};
+    runSharedMemoryTest<GLuint, 2, 2>(kCSShader, GL_R32UI, GL_UNSIGNED_INT, inputData,
+                                      expectedValues);
+}
+
+// Verify shared non-struct array variables can work correctly.
+TEST_P(ComputeShaderTest, NonStructArrayAsSharedVariable)
+{
+    const char kCSShader[] =
+        R"(#version 310 es
+        layout (local_size_x = 2, local_size_y = 2, local_size_z = 1) in;
+        layout (r32ui, binding = 0) readonly uniform highp uimage2D srcImage;
+        layout (r32ui, binding = 1) writeonly uniform highp uimage2D dstImage;
+        shared uint sharedData[2][2];
+        void main()
+        {
+            uint inputData = imageLoad(srcImage, ivec2(gl_LocalInvocationID.xy)).x;
+            sharedData[gl_LocalInvocationID.x][gl_LocalInvocationID.y] = inputData;
+            groupMemoryBarrier();
+            barrier();
+            imageStore(dstImage, ivec2(gl_LocalInvocationID.xy),
+                       uvec4(sharedData[gl_LocalInvocationID.y][gl_LocalInvocationID.x]));
+        })";
+
+    const std::array<GLuint, 4> inputData      = {{250, 200, 150, 100}};
+    const std::array<GLuint, 4> expectedValues = {{250, 150, 200, 100}};
+    runSharedMemoryTest<GLuint, 2, 2>(kCSShader, GL_R32UI, GL_UNSIGNED_INT, inputData,
+                                      expectedValues);
+}
+
+// Verify shared struct array variables work correctly.
+TEST_P(ComputeShaderTest, StructArrayAsSharedVariable)
+{
+    const char kCSShader[] =
+        R"(#version 310 es
+        layout (local_size_x = 2, local_size_y = 2, local_size_z = 1) in;
+        layout (r32ui, binding = 0) readonly uniform highp uimage2D srcImage;
+        layout (r32ui, binding = 1) writeonly uniform highp uimage2D dstImage;
+        struct SharedStruct
+        {
+            uint data;
+        };
+        shared SharedStruct sharedData[2][2];
+        void main()
+        {
+            uint inputData = imageLoad(srcImage, ivec2(gl_LocalInvocationID.xy)).x;
+            sharedData[gl_LocalInvocationID.x][gl_LocalInvocationID.y].data = inputData;
+            groupMemoryBarrier();
+            barrier();
+            imageStore(dstImage, ivec2(gl_LocalInvocationID.xy),
+                       uvec4(sharedData[gl_LocalInvocationID.y][gl_LocalInvocationID.x].data));
+        })";
+
+    const std::array<GLuint, 4> inputData      = {{250, 200, 150, 100}};
+    const std::array<GLuint, 4> expectedValues = {{250, 150, 200, 100}};
+    runSharedMemoryTest<GLuint, 2, 2>(kCSShader, GL_R32UI, GL_UNSIGNED_INT, inputData,
+                                      expectedValues);
+}
+
+// Verify using atomic functions without return value can work correctly.
+TEST_P(ComputeShaderTest, AtomicFunctionsNoReturnValue)
+{
+    // TODO(jiawei.shao@intel.com): find out why this shader causes a link error on Android Nexus 5
+    // bot.
+    ANGLE_SKIP_TEST_IF(IsAndroid());
+
+    const char kCSShader[] =
+        R"(#version 310 es
+        layout (local_size_x = 8, local_size_y = 1, local_size_z = 1) in;
+        layout (r32ui, binding = 0) readonly uniform highp uimage2D srcImage;
+        layout (r32ui, binding = 1) writeonly uniform highp uimage2D dstImage;
+
+        const uint kSumIndex = 0u;
+        const uint kMinIndex = 1u;
+        const uint kMaxIndex = 2u;
+        const uint kOrIndex = 3u;
+        const uint kAndIndex = 4u;
+        const uint kXorIndex = 5u;
+        const uint kExchangeIndex = 6u;
+        const uint kCompSwapIndex = 7u;
+
+        shared highp uint results[8];
+
+        void main()
+        {
+            if (gl_LocalInvocationID.x == kMinIndex || gl_LocalInvocationID.x == kAndIndex)
+            {
+                results[gl_LocalInvocationID.x] = 0xFFFFu;
+            }
+            else if (gl_LocalInvocationID.x == kCompSwapIndex)
+            {
+                results[gl_LocalInvocationID.x] = 1u;
+            }
+            else
+            {
+                results[gl_LocalInvocationID.x] = 0u;
+            }
+            memoryBarrierShared();
+            barrier();
+
+            uint value = imageLoad(srcImage, ivec2(gl_LocalInvocationID.xy)).x;
+            atomicAdd(results[kSumIndex], value);
+            atomicMin(results[kMinIndex], value);
+            atomicMax(results[kMaxIndex], value);
+            atomicOr(results[kOrIndex], value);
+            atomicAnd(results[kAndIndex], value);
+            atomicXor(results[kXorIndex], value);
+            atomicExchange(results[kExchangeIndex], value);
+            atomicCompSwap(results[kCompSwapIndex], value, 256u);
+            memoryBarrierShared();
+            barrier();
+
+            imageStore(dstImage, ivec2(gl_LocalInvocationID.xy),
+                       uvec4(results[gl_LocalInvocationID.x]));
+        })";
+
+    const std::array<GLuint, 8> inputData      = {{1, 2, 4, 8, 16, 32, 64, 128}};
+    const std::array<GLuint, 8> expectedValues = {{255, 1, 128, 255, 0, 255, 128, 256}};
+    runSharedMemoryTest<GLuint, 8, 1>(kCSShader, GL_R32UI, GL_UNSIGNED_INT, inputData,
+                                      expectedValues);
+}
+
+// Verify using atomic functions in a non-initializer single assignment can work correctly.
+TEST_P(ComputeShaderTest, AtomicFunctionsInNonInitializerSingleAssignment)
+{
+    const char kCSShader[] =
+        R"(#version 310 es
+        layout (local_size_x = 9, local_size_y = 1, local_size_z = 1) in;
+        layout (r32i, binding = 0) readonly uniform highp iimage2D srcImage;
+        layout (r32i, binding = 1) writeonly uniform highp iimage2D dstImage;
+
+        shared highp int sharedVariable;
+
+        shared highp int inputData[9];
+        shared highp int outputData[9];
+
+        void main()
+        {
+            int inputValue = imageLoad(srcImage, ivec2(gl_LocalInvocationID.xy)).x;
+            inputData[gl_LocalInvocationID.x] = inputValue;
+            memoryBarrierShared();
+            barrier();
+
+            if (gl_LocalInvocationID.x == 0u)
+            {
+                sharedVariable = 0;
+
+                outputData[0] = atomicAdd(sharedVariable, inputData[0]);
+                outputData[1] = atomicMin(sharedVariable, inputData[1]);
+                outputData[2] = atomicMax(sharedVariable, inputData[2]);
+                outputData[3] = atomicAnd(sharedVariable, inputData[3]);
+                outputData[4] = atomicOr(sharedVariable, inputData[4]);
+                outputData[5] = atomicXor(sharedVariable, inputData[5]);
+                outputData[6] = atomicExchange(sharedVariable, inputData[6]);
+                outputData[7] = atomicCompSwap(sharedVariable, 64, inputData[7]);
+                outputData[8] = atomicAdd(sharedVariable, inputData[8]);
+            }
+            memoryBarrierShared();
+            barrier();
+
+            imageStore(dstImage, ivec2(gl_LocalInvocationID.xy),
+                       ivec4(outputData[gl_LocalInvocationID.x]));
+        })";
+
+    const std::array<GLint, 9> inputData      = {{1, 2, 4, 8, 16, 32, 64, 128, 1}};
+    const std::array<GLint, 9> expectedValues = {{0, 1, 1, 4, 0, 16, 48, 64, 128}};
+    runSharedMemoryTest<GLint, 9, 1>(kCSShader, GL_R32I, GL_INT, inputData, expectedValues);
+}
+
+// Verify using atomic functions in an initializers and using unsigned int works correctly.
+TEST_P(ComputeShaderTest, AtomicFunctionsInitializerWithUnsigned)
+{
+    constexpr char kCShader[] =
+        R"(#version 310 es
+layout (local_size_x = 9, local_size_y = 1, local_size_z = 1) in;
+layout (r32ui, binding = 0) readonly uniform highp uimage2D srcImage;
+layout (r32ui, binding = 1) writeonly uniform highp uimage2D dstImage;
+
+shared highp uint sharedVariable;
+
+shared highp uint inputData[9];
+shared highp uint outputData[9];
+
+void main()
+{
+    uint inputValue = imageLoad(srcImage, ivec2(gl_LocalInvocationID.xy)).x;
+    inputData[gl_LocalInvocationID.x] = inputValue;
+    memoryBarrierShared();
+    barrier();
+
+    if (gl_LocalInvocationID.x == 0u)
+    {
+        sharedVariable = 0u;
+
+        uint addValue = atomicAdd(sharedVariable, inputData[0]);
+        outputData[0] = addValue;
+        uint minValue = atomicMin(sharedVariable, inputData[1]);
+        outputData[1] = minValue;
+        uint maxValue = atomicMax(sharedVariable, inputData[2]);
+        outputData[2] = maxValue;
+        uint andValue = atomicAnd(sharedVariable, inputData[3]);
+        outputData[3] = andValue;
+        uint orValue = atomicOr(sharedVariable, inputData[4]);
+        outputData[4] = orValue;
+        uint xorValue = atomicXor(sharedVariable, inputData[5]);
+        outputData[5] = xorValue;
+        uint exchangeValue = atomicExchange(sharedVariable, inputData[6]);
+        outputData[6] = exchangeValue;
+        uint compSwapValue = atomicCompSwap(sharedVariable, 64u, inputData[7]);
+        outputData[7] = compSwapValue;
+        uint sharedVariable = atomicAdd(sharedVariable, inputData[8]);
+        outputData[8] = sharedVariable;
+
+    }
+    memoryBarrierShared();
+    barrier();
+
+    imageStore(dstImage, ivec2(gl_LocalInvocationID.xy),
+                uvec4(outputData[gl_LocalInvocationID.x]));
+})";
+
+    constexpr std::array<GLuint, 9> kInputData      = {{1, 2, 4, 8, 16, 32, 64, 128, 1}};
+    constexpr std::array<GLuint, 9> kExpectedValues = {{0, 1, 1, 4, 0, 16, 48, 64, 128}};
+    runSharedMemoryTest<GLuint, 9, 1>(kCShader, GL_R32UI, GL_UNSIGNED_INT, kInputData,
+                                      kExpectedValues);
+}
+
+// Verify using atomic functions inside expressions as unsigned int.
+TEST_P(ComputeShaderTest, AtomicFunctionsReturnWithUnsigned)
+{
+    constexpr char kCShader[] =
+        R"(#version 310 es
+layout (local_size_x = 9, local_size_y = 1, local_size_z = 1) in;
+layout (r32ui, binding = 0) readonly uniform highp uimage2D srcImage;
+layout (r32ui, binding = 1) writeonly uniform highp uimage2D dstImage;
+
+shared highp uint sharedVariable;
+
+shared highp uint inputData[9];
+shared highp uint outputData[9];
+
+void main()
+{
+    uint inputValue = imageLoad(srcImage, ivec2(gl_LocalInvocationID.xy)).x;
+    inputData[gl_LocalInvocationID.x] = inputValue;
+    memoryBarrierShared();
+    barrier();
+
+    if (gl_LocalInvocationID.x == 0u)
+    {
+        sharedVariable = 0u;
+
+        outputData[0] = 1u + atomicAdd(sharedVariable, inputData[0]);
+        outputData[1] = 1u + atomicMin(sharedVariable, inputData[1]);
+        outputData[2] = 1u + atomicMax(sharedVariable, inputData[2]);
+        outputData[3] = 1u + atomicAnd(sharedVariable, inputData[3]);
+        outputData[4] = 1u + atomicOr(sharedVariable, inputData[4]);
+        outputData[5] = 1u + atomicXor(sharedVariable, inputData[5]);
+        outputData[6] = 1u + atomicExchange(sharedVariable, inputData[6]);
+        outputData[7] = 1u + atomicCompSwap(sharedVariable, 64u, inputData[7]);
+        outputData[8] = 1u + atomicAdd(sharedVariable, inputData[8]);
+    }
+    memoryBarrierShared();
+    barrier();
+
+    imageStore(dstImage, ivec2(gl_LocalInvocationID.xy),
+                uvec4(outputData[gl_LocalInvocationID.x]));
+})";
+
+    constexpr std::array<GLuint, 9> kInputData      = {{1, 2, 4, 8, 16, 32, 64, 128, 1}};
+    constexpr std::array<GLuint, 9> kExpectedValues = {{1, 2, 2, 5, 1, 17, 49, 65, 129}};
+    runSharedMemoryTest<GLuint, 9, 1>(kCShader, GL_R32UI, GL_UNSIGNED_INT, kInputData,
+                                      kExpectedValues);
+}
+
+// Verify using nested atomic functions in expressions.
+TEST_P(ComputeShaderTest, AtomicFunctionsReturnWithMultipleTypes)
+{
+    constexpr char kCShader[] =
+        R"(#version 310 es
+layout (local_size_x = 4, local_size_y = 1, local_size_z = 1) in;
+layout (r32ui, binding = 0) readonly uniform highp uimage2D srcImage;
+layout (r32ui, binding = 1) writeonly uniform highp uimage2D dstImage;
+
+shared highp uint sharedVariable;
+shared highp int  indexVariable;
+
+shared highp uint inputData[4];
+shared highp uint outputData[4];
+
+void main()
+{
+    uint inputValue = imageLoad(srcImage, ivec2(gl_LocalInvocationID.xy)).x;
+    inputData[gl_LocalInvocationID.x] = inputValue;
+    memoryBarrierShared();
+    barrier();
+
+    if (gl_LocalInvocationID.x == 0u)
+    {
+        sharedVariable = 0u;
+        indexVariable = 2;
+
+        outputData[0] = 1u + atomicAdd(sharedVariable, inputData[atomicAdd(indexVariable, -1)]);
+        outputData[1] = 1u + atomicAdd(sharedVariable, inputData[atomicAdd(indexVariable, -1)]);
+        outputData[2] = 1u + atomicAdd(sharedVariable, inputData[atomicAdd(indexVariable, -1)]);
+        outputData[3] = atomicAdd(sharedVariable, 0u);
+
+    }
+    memoryBarrierShared();
+    barrier();
+
+    imageStore(dstImage, ivec2(gl_LocalInvocationID.xy),
+                uvec4(outputData[gl_LocalInvocationID.x]));
+})";
+
+    constexpr std::array<GLuint, 4> kInputData      = {{1, 2, 3, 0}};
+    constexpr std::array<GLuint, 4> kExpectedValues = {{1, 4, 6, 6}};
+    runSharedMemoryTest<GLuint, 4, 1>(kCShader, GL_R32UI, GL_UNSIGNED_INT, kInputData,
+                                      kExpectedValues);
+}
+
+// Basic uniform buffer functionality.
+TEST_P(ComputeShaderTest, UniformBuffer)
+{
+    GLTexture texture;
+    GLBuffer buffer;
+    GLFramebuffer framebuffer;
+    const std::string csSource =
+        R"(#version 310 es
+        layout(local_size_x=1, local_size_y=1, local_size_z=1) in;
+        uniform uni
+        {
+            uvec4 value;
+        };
+        layout(rgba32ui, binding = 0) writeonly uniform highp uimage2D uImage;
+        void main()
+        {
+            imageStore(uImage, ivec2(gl_LocalInvocationID.xy), value);
+        })";
+
+    constexpr int kWidth = 1, kHeight = 1;
+    constexpr GLuint kInputValues[4] = {56, 57, 58, 59};
+
+    glBindTexture(GL_TEXTURE_2D, texture);
+    glTexStorage2D(GL_TEXTURE_2D, 1, GL_RGBA32UI, kWidth, kHeight);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, kWidth, kHeight, GL_RGBA_INTEGER, GL_UNSIGNED_INT,
+                    kInputValues);
+    EXPECT_GL_NO_ERROR();
+
+    ANGLE_GL_COMPUTE_PROGRAM(program, csSource);
+    glUseProgram(program.get());
+
+    GLint uniformBufferIndex = glGetUniformBlockIndex(program, "uni");
+    EXPECT_NE(uniformBufferIndex, -1);
+    GLuint data[4] = {201, 202, 203, 204};
+    glBindBuffer(GL_UNIFORM_BUFFER, buffer);
+    glBufferData(GL_UNIFORM_BUFFER, sizeof(GLuint) * 4, data, GL_STATIC_DRAW);
+    glBindBufferBase(GL_UNIFORM_BUFFER, 0, buffer);
+    glUniformBlockBinding(program, uniformBufferIndex, 0);
+    EXPECT_GL_NO_ERROR();
+
+    glBindImageTexture(0, texture, 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_RGBA32UI);
+    EXPECT_GL_NO_ERROR();
+
+    glDispatchCompute(1, 1, 1);
+    EXPECT_GL_NO_ERROR();
+
+    glMemoryBarrier(GL_TEXTURE_UPDATE_BARRIER_BIT);
+    GLuint outputValues[kWidth * kHeight * 4];
+    glUseProgram(0);
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer);
+
+    glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0);
+    EXPECT_GL_NO_ERROR();
+    glReadPixels(0, 0, kWidth, kHeight, GL_RGBA_INTEGER, GL_UNSIGNED_INT, outputValues);
+    EXPECT_GL_NO_ERROR();
+
+    for (int i = 0; i < kWidth * kHeight * 4; i++)
+    {
+        EXPECT_EQ(data[i], outputValues[i]);
+    }
+}
+
+// Test that storing data to image and then loading the same image data works correctly.
+TEST_P(ComputeShaderTest, StoreImageThenLoad)
+{
+    const char kCSSource[] =
+        R"(#version 310 es
+        layout(local_size_x=1, local_size_y=1, local_size_z=1) in;
+        layout(r32ui, binding = 0) readonly uniform highp uimage2D uImage_1;
+        layout(r32ui, binding = 1) writeonly uniform highp uimage2D uImage_2;
+        void main()
+        {
+            uvec4 value = imageLoad(uImage_1, ivec2(gl_LocalInvocationID.xy));
+            imageStore(uImage_2, ivec2(gl_LocalInvocationID.xy), value);
+        })";
+
+    constexpr GLuint kInputValues[3][1] = {{300}, {200}, {100}};
+    GLTexture texture[3];
+    glBindTexture(GL_TEXTURE_2D, texture[0]);
+    glTexStorage2D(GL_TEXTURE_2D, 1, GL_R32UI, 1, 1);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1, 1, GL_RED_INTEGER, GL_UNSIGNED_INT, kInputValues[0]);
+    EXPECT_GL_NO_ERROR();
+
+    glBindTexture(GL_TEXTURE_2D, texture[1]);
+    glTexStorage2D(GL_TEXTURE_2D, 1, GL_R32UI, 1, 1);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1, 1, GL_RED_INTEGER, GL_UNSIGNED_INT, kInputValues[1]);
+    EXPECT_GL_NO_ERROR();
+
+    glBindTexture(GL_TEXTURE_2D, texture[2]);
+    glTexStorage2D(GL_TEXTURE_2D, 1, GL_R32UI, 1, 1);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1, 1, GL_RED_INTEGER, GL_UNSIGNED_INT, kInputValues[2]);
+    EXPECT_GL_NO_ERROR();
+
+    ANGLE_GL_COMPUTE_PROGRAM(program, kCSSource);
+    glUseProgram(program.get());
+
+    glBindImageTexture(0, texture[0], 0, GL_FALSE, 0, GL_READ_ONLY, GL_R32UI);
+    glBindImageTexture(1, texture[1], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R32UI);
+
+    glDispatchCompute(1, 1, 1);
+    glMemoryBarrier(GL_TEXTURE_UPDATE_BARRIER_BIT);
+    EXPECT_GL_NO_ERROR();
+
+    glBindImageTexture(0, texture[1], 0, GL_FALSE, 0, GL_READ_ONLY, GL_R32UI);
+    glBindImageTexture(1, texture[2], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R32UI);
+
+    glDispatchCompute(1, 1, 1);
+    glMemoryBarrier(GL_TEXTURE_UPDATE_BARRIER_BIT);
+    EXPECT_GL_NO_ERROR();
+
+    GLuint outputValue;
+    GLFramebuffer framebuffer;
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer);
+    glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture[2], 0);
+    glReadPixels(0, 0, 1, 1, GL_RED_INTEGER, GL_UNSIGNED_INT, &outputValue);
+    EXPECT_GL_NO_ERROR();
+
+    EXPECT_EQ(300u, outputValue);
+}
+
+// Test that loading image data and then storing data to the same image works correctly.
+TEST_P(ComputeShaderTest, LoadImageThenStore)
+{
+    const char kCSSource[] =
+        R"(#version 310 es
+        layout(local_size_x=1, local_size_y=1, local_size_z=1) in;
+        layout(r32ui, binding = 0) readonly uniform highp uimage2D uImage_1;
+        layout(r32ui, binding = 1) writeonly uniform highp uimage2D uImage_2;
+        void main()
+        {
+            uvec4 value = imageLoad(uImage_1, ivec2(gl_LocalInvocationID.xy));
+            imageStore(uImage_2, ivec2(gl_LocalInvocationID.xy), value);
+        })";
+
+    constexpr GLuint kInputValues[3][1] = {{300}, {200}, {100}};
+    GLTexture texture[3];
+    glBindTexture(GL_TEXTURE_2D, texture[0]);
+    glTexStorage2D(GL_TEXTURE_2D, 1, GL_R32UI, 1, 1);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1, 1, GL_RED_INTEGER, GL_UNSIGNED_INT, kInputValues[0]);
+    EXPECT_GL_NO_ERROR();
+
+    glBindTexture(GL_TEXTURE_2D, texture[1]);
+    glTexStorage2D(GL_TEXTURE_2D, 1, GL_R32UI, 1, 1);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1, 1, GL_RED_INTEGER, GL_UNSIGNED_INT, kInputValues[1]);
+    EXPECT_GL_NO_ERROR();
+
+    glBindTexture(GL_TEXTURE_2D, texture[2]);
+    glTexStorage2D(GL_TEXTURE_2D, 1, GL_R32UI, 1, 1);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 1, 1, GL_RED_INTEGER, GL_UNSIGNED_INT, kInputValues[2]);
+    EXPECT_GL_NO_ERROR();
+
+    ANGLE_GL_COMPUTE_PROGRAM(program, kCSSource);
+    glUseProgram(program.get());
+
+    glBindImageTexture(0, texture[0], 0, GL_FALSE, 0, GL_READ_ONLY, GL_R32UI);
+    glBindImageTexture(1, texture[1], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R32UI);
+
+    glDispatchCompute(1, 1, 1);
+    glMemoryBarrier(GL_TEXTURE_UPDATE_BARRIER_BIT);
+    EXPECT_GL_NO_ERROR();
+
+    glBindImageTexture(0, texture[2], 0, GL_FALSE, 0, GL_READ_ONLY, GL_R32UI);
+    glBindImageTexture(1, texture[0], 0, GL_FALSE, 0, GL_WRITE_ONLY, GL_R32UI);
+
+    glDispatchCompute(1, 1, 1);
+    glMemoryBarrier(GL_TEXTURE_UPDATE_BARRIER_BIT);
+    EXPECT_GL_NO_ERROR();
+
+    GLuint outputValue;
+    GLFramebuffer framebuffer;
+    glBindFramebuffer(GL_READ_FRAMEBUFFER, framebuffer);
+    glFramebufferTexture2D(GL_READ_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture[0], 0);
+    glReadPixels(0, 0, 1, 1, GL_RED_INTEGER, GL_UNSIGNED_INT, &outputValue);
+    EXPECT_GL_NO_ERROR();
+
+    EXPECT_EQ(100u, outputValue);
+}
+
+// Test that scalar buffer variables are supported.
+TEST_P(ComputeShaderTest, ShaderStorageBlocksScalar)
+{
+    const char kCSSource[] =
+        R"(#version 310 es
+        layout(local_size_x=1) in;
+        layout(std140, binding = 0) buffer blockA {
+            uvec3 uv;
+            float f;
+        } instanceA;
+        layout(std140, binding = 1) buffer blockB {
+            vec2 v;
+            uint u[3];
+            float f;
+        };
+        void main()
+        {
+            f = instanceA.f;
+        })";
+
+    ANGLE_GL_COMPUTE_PROGRAM(program, kCSSource);
+    EXPECT_GL_NO_ERROR();
+}
+
+// Test that vector buffer variables are supported.
+TEST_P(ComputeShaderTest, ShaderStorageBlocksVector)
+{
+    const char kCSSource[] =
+        R"(#version 310 es
+        layout(local_size_x=1) in;
+        layout(std140, binding = 0) buffer blockA {
+            vec2 f;
+        } instanceA;
+        layout(std140, binding = 1) buffer blockB {
+            vec3 f;
+        };
+        void main()
+        {
+            f[1] = instanceA.f[0];
+        })";
+
+    ANGLE_GL_COMPUTE_PROGRAM(program, kCSSource);
+    EXPECT_GL_NO_ERROR();
+}
+
+// Test that matrix buffer variables are supported.
+TEST_P(ComputeShaderTest, ShaderStorageBlocksMatrix)
+{
+    const char kCSSource[] =
+        R"(#version 310 es
+        layout(local_size_x=1) in;
+        layout(std140, binding = 0) buffer blockA {
+            mat3x4 m;
+        } instanceA;
+        layout(std140, binding = 1) buffer blockB {
+            mat3x4 m;
+        };
+        void main()
+        {
+            m[0][1] = instanceA.m[0][1];
+        })";
+
+    ANGLE_GL_COMPUTE_PROGRAM(program, kCSSource);
+    EXPECT_GL_NO_ERROR();
+}
+
+// Test that scalar array buffer variables are supported.
+TEST_P(ComputeShaderTest, ShaderStorageBlocksScalarArray)
+{
+    const char kCSSource[] =
+        R"(#version 310 es
+        layout(local_size_x=8) in;
+        layout(std140, binding = 0) buffer blockA {
+            float f[8];
+        } instanceA;
+        layout(std140, binding = 1) buffer blockB {
+            float f[8];
+        };
+        void main()
+        {
+            f[gl_LocalInvocationIndex] = instanceA.f[gl_LocalInvocationIndex];
+        })";
+
+    ANGLE_GL_COMPUTE_PROGRAM(program, kCSSource);
+    EXPECT_GL_NO_ERROR();
+}
+
+// Test that vector array buffer variables are supported.
+TEST_P(ComputeShaderTest, ShaderStorageBlocksVectorArray)
+{
+    const char kCSSource[] =
+        R"(#version 310 es
+        layout(local_size_x=4) in;
+        layout(std140, binding = 0) buffer blockA {
+            vec2 v[4];
+        } instanceA;
+        layout(std140, binding = 1) buffer blockB {
+            vec4 v[4];
+        };
+        void main()
+        {
+            v[0][gl_LocalInvocationIndex] = instanceA.v[gl_LocalInvocationIndex][1];
+        })";
+
+    ANGLE_GL_COMPUTE_PROGRAM(program, kCSSource);
+    EXPECT_GL_NO_ERROR();
+}
+
+// Test that matrix array buffer variables are supported.
+TEST_P(ComputeShaderTest, ShaderStorageBlocksMatrixArray)
+{
+    const char kCSSource[] =
+        R"(#version 310 es
+        layout(local_size_x=8) in;
+        layout(std140, binding = 0) buffer blockA {
+            float v1[5];
+            mat4 m[8];
+        } instanceA;
+        layout(std140, binding = 1) buffer blockB {
+            vec2 v1[3];
+            mat4 m[8];
+        };
+        void main()
+        {
+            float data = instanceA.m[gl_LocalInvocationIndex][0][0];
+            m[gl_LocalInvocationIndex][gl_LocalInvocationIndex][gl_LocalInvocationIndex] = data;
+        })";
+
+    ANGLE_GL_COMPUTE_PROGRAM(program, kCSSource);
+    EXPECT_GL_NO_ERROR();
+}
+
+// Test that shader storage blocks only in assignment right is supported.
+TEST_P(ComputeShaderTest, ShaderStorageBlocksInAssignmentRight)
+{
+    const char kCSSource[] =
+        R"(#version 310 es
+        layout(local_size_x=8) in;
+        layout(std140, binding = 0) buffer blockA {
+            float data[8];
+        } instanceA;
+        layout(r32f, binding = 0) writeonly uniform highp image2D imageOut;
+
+        void main()
+        {
+            float data = 1.0;
+            data = instanceA.data[gl_LocalInvocationIndex];
+            imageStore(imageOut, ivec2(gl_LocalInvocationID.xy), vec4(data));
+        }
+        )";
+
+    ANGLE_GL_COMPUTE_PROGRAM(program, kCSSource);
+    EXPECT_GL_NO_ERROR();
+}
+
+// Test that shader storage blocks with unsized array are supported.
+TEST_P(ComputeShaderTest, ShaderStorageBlocksWithUnsizedArray)
+{
+    const char kCSSource[] =
+        R"(#version 310 es
+        layout(local_size_x=8) in;
+        layout(std140, binding = 0) buffer blockA {
+            float v[];
+        } instanceA;
+        layout(std140, binding = 0) buffer blockB {
+            float v[];
+        } instanceB[1];
+
+        void main()
+        {
+            float data = instanceA.v[gl_LocalInvocationIndex];
+            instanceB[0].v[gl_LocalInvocationIndex * 2u + 1u] = data;
+        }
+        )";
+
+    ANGLE_GL_COMPUTE_PROGRAM(program, kCSSource);
+    EXPECT_GL_NO_ERROR();
+}
+
+// Test that EOpIndexDirect/EOpIndexIndirect/EOpIndexDirectStruct nodes in ssbo EOpIndexInDirect
+// don't need to calculate the offset and should be translated by OutputHLSL directly.
+TEST_P(ComputeShaderTest, IndexAndDotOperatorsInSSBOIndexIndirectOperator)
+{
+    constexpr char kComputeShaderSource[] =
+        R"(#version 310 es
+        layout(local_size_x=1) in;
+        layout(std140, binding = 0) buffer blockA {
+            float v[4];
+        };
+        layout(std140, binding = 1) buffer blockB {
+            float v[4];
+        } instanceB[1];
+        struct S
+        {
+           uvec4 index[2];
+        } s;
+        void main()
+        {
+             s.index[0] = uvec4(0u, 1u, 2u, 3u);
+            float data = v[s.index[0].y];
+            instanceB[0].v[s.index[0].x] = data;
+        }
+        )";
+
+    ANGLE_GL_COMPUTE_PROGRAM(program, kComputeShaderSource);
+    EXPECT_GL_NO_ERROR();
+}
+
+// Test that swizzle node in non-SSBO symbol works well.
+TEST_P(ComputeShaderTest, ShaderStorageBlocksWithNonSSBOSwizzle)
+{
+    constexpr char kComputeShaderSource[] =
+        R"(#version 310 es
+        layout(local_size_x=8) in;
+        layout(std140, binding = 0) buffer blockA {
+            float v[8];
+        };
+        layout(std140, binding = 1) buffer blockB {
+            float v[8];
+        } instanceB[1];
+
+        void main()
+        {
+            float data = v[gl_GlobalInvocationID.x];
+            instanceB[0].v[gl_GlobalInvocationID.x] = data;
+        }
+        )";
+
+    ANGLE_GL_COMPUTE_PROGRAM(program, kComputeShaderSource);
+    EXPECT_GL_NO_ERROR();
+}
+
+// Test that swizzle node in SSBO symbol works well.
+TEST_P(ComputeShaderTest, ShaderStorageBlocksWithSSBOSwizzle)
+{
+    constexpr char kComputeShaderSource[] =
+        R"(#version 310 es
+        layout(local_size_x=1) in;
+        layout(std140, binding = 0) buffer blockA {
+            vec2 v;
+        };
+        layout(std140, binding = 1) buffer blockB {
+            float v;
+        } instanceB[1];
+
+        void main()
+        {
+            instanceB[0].v = v.x;
+        }
+        )";
+
+    ANGLE_GL_COMPUTE_PROGRAM(program, kComputeShaderSource);
+    EXPECT_GL_NO_ERROR();
 }
 
 // Check that it is not possible to create a compute shader when the context does not support ES

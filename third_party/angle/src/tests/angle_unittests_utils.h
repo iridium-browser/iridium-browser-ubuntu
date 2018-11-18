@@ -53,7 +53,7 @@ class NullFactory : public GLImplFactory
     }
 
     // Query and Fence creation
-    QueryImpl *createQuery(GLenum type) override { return nullptr; }
+    QueryImpl *createQuery(gl::QueryType type) override { return nullptr; }
     FenceNVImpl *createFenceNV() override { return nullptr; }
     SyncImpl *createSync() override { return nullptr; }
 
@@ -92,7 +92,7 @@ class MockGLFactory : public GLImplFactory
     MOCK_METHOD1(createRenderbuffer, RenderbufferImpl *(const gl::RenderbufferState &));
     MOCK_METHOD1(createBuffer, BufferImpl *(const gl::BufferState &));
     MOCK_METHOD1(createVertexArray, VertexArrayImpl *(const gl::VertexArrayState &));
-    MOCK_METHOD1(createQuery, QueryImpl *(GLenum type));
+    MOCK_METHOD1(createQuery, QueryImpl *(gl::QueryType type));
     MOCK_METHOD0(createFenceNV, FenceNVImpl *());
     MOCK_METHOD0(createSync, SyncImpl *());
     MOCK_METHOD1(createTransformFeedback,
@@ -119,9 +119,16 @@ class MockEGLFactory : public EGLImplFactory
                  SurfaceImpl *(const egl::SurfaceState &,
                                NativePixmapType,
                                const egl::AttributeMap &));
-    MOCK_METHOD3(createImage,
-                 ImageImpl *(const egl::ImageState &, EGLenum, const egl::AttributeMap &));
-    MOCK_METHOD1(createContext, ContextImpl *(const gl::ContextState &));
+    MOCK_METHOD4(createImage,
+                 ImageImpl *(const egl::ImageState &,
+                             const gl::Context *,
+                             EGLenum,
+                             const egl::AttributeMap &));
+    MOCK_METHOD4(createContext,
+                 ContextImpl *(const gl::ContextState &,
+                               const egl::Config *,
+                               const gl::Context *,
+                               const egl::AttributeMap &));
     MOCK_METHOD2(createStreamProducerD3DTexture,
                  StreamProducerImpl *(egl::Stream::ConsumerType, const egl::AttributeMap &));
 };

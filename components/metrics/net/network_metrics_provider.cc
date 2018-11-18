@@ -17,7 +17,7 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "base/threading/thread_task_runner_handle.h"
 #include "build/build_config.h"
 #include "net/base/net_errors.h"
@@ -94,7 +94,7 @@ class NetworkMetricsProvider::EffectiveConnectionTypeObserver
   void OnEffectiveConnectionTypeChanged(
       net::EffectiveConnectionType type) override {
     DCHECK(thread_checker_.CalledOnValidThread());
-    callback_task_runner_->PostTask(FROM_HERE, base::Bind(callback_, type));
+    callback_task_runner_->PostTask(FROM_HERE, base::BindOnce(callback_, type));
   }
 
   // Notifies |this| when there is a change in the effective connection type.
@@ -126,7 +126,7 @@ NetworkMetricsProvider::NetworkMetricsProvider(
       min_effective_connection_type_(net::EFFECTIVE_CONNECTION_TYPE_UNKNOWN),
       max_effective_connection_type_(net::EFFECTIVE_CONNECTION_TYPE_UNKNOWN),
       weak_ptr_factory_(this) {
-  net::NetworkChangeNotifier::AddConnectionTypeObserver(this);
+  net::NetworkChangeNotifier::AddNetworkChangeObserver(this);
   connection_type_ = net::NetworkChangeNotifier::GetConnectionType();
   if (connection_type_ != net::NetworkChangeNotifier::CONNECTION_UNKNOWN)
     network_change_notifier_initialized_ = true;
@@ -157,7 +157,7 @@ NetworkMetricsProvider::NetworkMetricsProvider(
 
 NetworkMetricsProvider::~NetworkMetricsProvider() {
   DCHECK(thread_checker_.CalledOnValidThread());
-  net::NetworkChangeNotifier::RemoveConnectionTypeObserver(this);
+  net::NetworkChangeNotifier::RemoveNetworkChangeObserver(this);
 
   if (network_quality_estimator_provider_) {
     scoped_refptr<base::SequencedTaskRunner> network_quality_task_runner =
@@ -208,13 +208,15 @@ void NetworkMetricsProvider::ProvideSystemProfileMetrics(
   // window, since OnConnectionTypeChanged() ignores transitions to the "none"
   // state.
   connection_type_ = net::NetworkChangeNotifier::GetConnectionType();
+  if (connection_type_ != net::NetworkChangeNotifier::CONNECTION_UNKNOWN)
+    network_change_notifier_initialized_ = true;
   // Reset the "ambiguous" flags, since a new metrics log session has started.
   connection_type_is_ambiguous_ = false;
   wifi_phy_layer_protocol_is_ambiguous_ = false;
   min_effective_connection_type_ = effective_connection_type_;
   max_effective_connection_type_ = effective_connection_type_;
 
-  if (!wifi_access_point_info_provider_.get()) {
+  if (!wifi_access_point_info_provider_) {
 #if defined(OS_CHROMEOS)
     wifi_access_point_info_provider_.reset(
         new WifiAccessPointInfoProviderChromeos());
@@ -230,7 +232,7 @@ void NetworkMetricsProvider::ProvideSystemProfileMetrics(
     WriteWifiAccessPointProto(info, network);
 }
 
-void NetworkMetricsProvider::OnConnectionTypeChanged(
+void NetworkMetricsProvider::OnNetworkChanged(
     net::NetworkChangeNotifier::ConnectionType type) {
   DCHECK(thread_checker_.CalledOnValidThread());
   // To avoid reporting an ambiguous connection type for users on flaky
@@ -316,7 +318,7 @@ void NetworkMetricsProvider::ProbeWifiPHYLayerProtocol() {
   DCHECK(thread_checker_.CalledOnValidThread());
   base::PostTaskWithTraitsAndReplyWithResult(
       FROM_HERE,
-      {base::MayBlock(), base::TaskPriority::BACKGROUND,
+      {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
        base::TaskShutdownBehavior::CONTINUE_ON_SHUTDOWN},
       base::BindOnce(&net::GetWifiPHYLayerProtocol),
       base::BindOnce(&NetworkMetricsProvider::OnWifiPHYLayerProtocolResult,
@@ -404,17 +406,18 @@ void NetworkMetricsProvider::WriteWifiAccessPointProto(
   for (const base::StringPiece& oui_str : base::SplitStringPiece(
            info.oui_list, " ", base::TRIM_WHITESPACE, base::SPLIT_WANT_ALL)) {
     uint32_t oui;
-    if (base::HexStringToUInt(oui_str, &oui))
+    if (base::HexStringToUInt(oui_str, &oui)) {
       vendor->add_element_identifier(oui);
-    else
-      NOTREACHED();
+    } else {
+      DLOG(WARNING) << "Error when parsing OUI list of the WiFi access point";
+    }
   }
 }
 
 void NetworkMetricsProvider::LogAggregatedMetrics() {
   DCHECK(thread_checker_.CalledOnValidThread());
   base::HistogramBase* error_codes = base::SparseHistogram::FactoryGet(
-      "Net.ErrorCodesForMainFrame3",
+      "Net.ErrorCodesForMainFrame4",
       base::HistogramBase::kUmaTargetedHistogramFlag);
   std::unique_ptr<base::HistogramSamples> samples =
       error_codes->SnapshotSamples();

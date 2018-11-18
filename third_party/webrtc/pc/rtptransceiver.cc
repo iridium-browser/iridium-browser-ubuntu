@@ -16,10 +16,6 @@
 
 namespace webrtc {
 
-std::ostream& operator<<(std::ostream& os, RtpTransceiverDirection direction) {
-  return os << RtpTransceiverDirectionToString(direction);
-}
-
 RtpTransceiver::RtpTransceiver(cricket::MediaType media_type)
     : unified_plan_(false), media_type_(media_type) {
   RTC_DCHECK(media_type == cricket::MEDIA_TYPE_AUDIO ||
@@ -152,7 +148,7 @@ cricket::MediaType RtpTransceiver::media_type() const {
   return media_type_;
 }
 
-rtc::Optional<std::string> RtpTransceiver::mid() const {
+absl::optional<std::string> RtpTransceiver::mid() const {
   return mid_;
 }
 
@@ -188,6 +184,10 @@ void RtpTransceiver::set_current_direction(RtpTransceiverDirection direction) {
   }
 }
 
+void RtpTransceiver::set_fired_direction(RtpTransceiverDirection direction) {
+  fired_direction_ = direction;
+}
+
 bool RtpTransceiver::stopped() const {
   return stopped_;
 }
@@ -207,9 +207,14 @@ void RtpTransceiver::SetDirection(RtpTransceiverDirection new_direction) {
   SignalNegotiationNeeded();
 }
 
-rtc::Optional<RtpTransceiverDirection> RtpTransceiver::current_direction()
+absl::optional<RtpTransceiverDirection> RtpTransceiver::current_direction()
     const {
   return current_direction_;
+}
+
+absl::optional<RtpTransceiverDirection> RtpTransceiver::fired_direction()
+    const {
+  return fired_direction_;
 }
 
 void RtpTransceiver::Stop() {
@@ -220,7 +225,7 @@ void RtpTransceiver::Stop() {
     receiver->internal()->Stop();
   }
   stopped_ = true;
-  current_direction_ = rtc::nullopt;
+  current_direction_ = absl::nullopt;
 }
 
 void RtpTransceiver::SetCodecPreferences(

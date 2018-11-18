@@ -14,6 +14,7 @@
 #include "base/metrics/histogram_macros.h"
 #include "base/sequenced_task_runner_helpers.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/task/post_task.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/safe_browsing/browser_feature_extractor.h"
@@ -25,6 +26,7 @@
 #include "components/safe_browsing/db/database_manager.h"
 #include "components/safe_browsing/db/whitelist_checker_client.h"
 #include "components/safe_browsing/proto/csd.pb.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
@@ -126,14 +128,22 @@ class ClientSideDetectionHost::ShouldClassifyUrlRequest
       DontClassifyForMalware(NO_CLASSIFY_OFF_THE_RECORD);
     }
 
+    // Don't start classification if |url_| is whitelisted by enterprise policy.
+    Profile* profile =
+        Profile::FromBrowserContext(web_contents_->GetBrowserContext());
+    if (profile && IsURLWhitelistedByPolicy(url_, *profile->GetPrefs())) {
+      DontClassifyForPhishing(NO_CLASSIFY_WHITELISTED_BY_POLICY);
+      DontClassifyForMalware(NO_CLASSIFY_WHITELISTED_BY_POLICY);
+    }
+
     // We lookup the csd-whitelist before we lookup the cache because
     // a URL may have recently been whitelisted.  If the URL matches
     // the csd-whitelist we won't start phishing classification.  The
     // csd-whitelist check has to be done on the IO thread because it
     // uses the SafeBrowsing service class.
     if (ShouldClassifyForPhishing() || ShouldClassifyForMalware()) {
-      BrowserThread::PostTask(
-          BrowserThread::IO, FROM_HERE,
+      base::PostTaskWithTraits(
+          FROM_HERE, {BrowserThread::IO},
           base::BindOnce(&ShouldClassifyUrlRequest::CheckSafeBrowsingDatabase,
                          this, url_));
     }
@@ -168,6 +178,7 @@ class ClientSideDetectionHost::ShouldClassifyUrlRequest
     NO_CLASSIFY_RESULT_FROM_CACHE = 9,
     DEPRECATED_NO_CLASSIFY_NOT_HTTP_URL = 10,
     NO_CLASSIFY_SCHEME_NOT_SUPPORTED = 11,
+    NO_CLASSIFY_WHITELISTED_BY_POLICY = 12,
 
     NO_CLASSIFY_MAX  // Always add new values before this one.
   };
@@ -247,8 +258,8 @@ class ClientSideDetectionHost::ShouldClassifyUrlRequest
                << " because it matches the csd whitelist";
       phishing_reason = NO_CLASSIFY_MATCH_CSD_WHITELIST;
     }
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, {BrowserThread::UI},
         base::BindOnce(&ShouldClassifyUrlRequest::CheckCache, this,
                        phishing_reason, malware_reason));
   }
@@ -446,11 +457,14 @@ void ClientSideDetectionHost::DidFinishNavigation(
 }
 
 void ClientSideDetectionHost::ResourceLoadComplete(
+    content::RenderFrameHost* render_frame_host,
+    const content::GlobalRequestID& request_id,
     const content::mojom::ResourceLoadInfo& resource_load_info) {
   if (!content::IsResourceTypeFrame(resource_load_info.resource_type) &&
       browse_info_.get() && should_extract_malware_features_ &&
-      resource_load_info.url.is_valid() && resource_load_info.ip.has_value()) {
-    UpdateIPUrlMap(resource_load_info.ip->ToString(),
+      resource_load_info.url.is_valid() &&
+      resource_load_info.network_info->ip_port_pair.has_value()) {
+    UpdateIPUrlMap(resource_load_info.network_info->ip_port_pair->host(),
                    resource_load_info.url.spec(), resource_load_info.method,
                    resource_load_info.referrer.spec(),
                    resource_load_info.resource_type);
@@ -714,7 +728,7 @@ void ClientSideDetectionHost::UpdateIPUrlMap(const std::string& ip,
   if (ip.empty() || url.empty())
     return;
 
-  IPUrlMap::iterator it = browse_info_->ips.find(ip);
+  auto it = browse_info_->ips.find(ip);
   if (it == browse_info_->ips.end()) {
     if (browse_info_->ips.size() < kMaxIPsPerBrowse) {
       std::vector<IPUrlInfo> url_infos;

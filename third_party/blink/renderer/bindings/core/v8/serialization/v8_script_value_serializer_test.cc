@@ -8,7 +8,6 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/blink/public/platform/web_blob_info.h"
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_controller.h"
 #include "third_party/blink/renderer/bindings/core/v8/script_source_code.h"
 #include "third_party/blink/renderer/bindings/core/v8/serialization/unpacked_serialized_script_value.h"
@@ -29,6 +28,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/v8_image_bitmap.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_image_data.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_message_port.h"
+#include "third_party/blink/renderer/bindings/core/v8/v8_mojo_handle.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_offscreen_canvas.h"
 #include "third_party/blink/renderer/bindings/core/v8/v8_string_resource.h"
 #include "third_party/blink/renderer/core/fileapi/blob.h"
@@ -44,7 +44,10 @@
 #include "third_party/blink/renderer/core/geometry/dom_rect_read_only.h"
 #include "third_party/blink/renderer/core/html/canvas/image_data.h"
 #include "third_party/blink/renderer/core/messaging/message_port.h"
+#include "third_party/blink/renderer/core/mojo/mojo_handle.h"
 #include "third_party/blink/renderer/core/offscreencanvas/offscreen_canvas.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
+#include "third_party/blink/renderer/platform/file_metadata.h"
 #include "third_party/blink/renderer/platform/graphics/static_bitmap_image.h"
 #include "third_party/blink/renderer/platform/testing/runtime_enabled_features_test_helpers.h"
 #include "third_party/blink/renderer/platform/wtf/date_math.h"
@@ -62,7 +65,7 @@ v8::Local<v8::Value> RoundTrip(
     ExceptionState* override_exception_state = nullptr,
     Transferables* transferables = nullptr,
     WebBlobInfoArray* blob_info = nullptr) {
-  scoped_refptr<ScriptState> script_state = scope.GetScriptState();
+  ScriptState* script_state = scope.GetScriptState();
   ExceptionState& exception_state = override_exception_state
                                         ? *override_exception_state
                                         : scope.GetExceptionState();
@@ -103,11 +106,11 @@ v8::Local<v8::Value> RoundTrip(
 v8::Local<v8::Value> Eval(const String& source, V8TestingScope& scope) {
   return scope.GetFrame()
       .GetScriptController()
-      .ExecuteScriptInMainWorldAndReturnValue(source);
+      .ExecuteScriptInMainWorldAndReturnValue(source, KURL(), kOpaqueResource);
 }
 
 String ToJSON(v8::Local<v8::Object> object, const V8TestingScope& scope) {
-  return V8StringToWebCoreString<String>(
+  return ToBlinkString<String>(
       v8::JSON::Stringify(scope.GetContext(), object).ToLocalChecked(),
       kDoNotExternalize);
 }
@@ -851,10 +854,10 @@ TEST(V8ScriptValueSerializerTest, DecodeImageDataV18) {
 }
 
 MessagePort* MakeMessagePort(ExecutionContext* execution_context,
-                             MojoHandle* unowned_handle_out = nullptr) {
+                             ::MojoHandle* unowned_handle_out = nullptr) {
   MessagePort* port = MessagePort::Create(*execution_context);
   mojo::MessagePipe pipe;
-  MojoHandle unowned_handle = pipe.handle0.get().value();
+  ::MojoHandle unowned_handle = pipe.handle0.get().value();
   port->Entangle(std::move(pipe.handle0));
   EXPECT_TRUE(port->IsEntangled());
   EXPECT_EQ(unowned_handle, port->EntangledHandleForTesting());
@@ -866,7 +869,7 @@ MessagePort* MakeMessagePort(ExecutionContext* execution_context,
 TEST(V8ScriptValueSerializerTest, RoundTripMessagePort) {
   V8TestingScope scope;
 
-  MojoHandle unowned_handle;
+  ::MojoHandle unowned_handle;
   MessagePort* port =
       MakeMessagePort(scope.GetExecutionContext(), &unowned_handle);
   v8::Local<v8::Value> wrapper = ToV8(port, scope.GetScriptState());
@@ -951,8 +954,43 @@ TEST(V8ScriptValueSerializerTest, OutOfRangeMessagePortIndex) {
   }
 }
 
+TEST(V8ScriptValueSerializerTest, RoundTripMojoHandle) {
+  V8TestingScope scope;
+
+  mojo::MessagePipe pipe;
+  MojoHandle* handle =
+      MojoHandle::Create(mojo::ScopedHandle::From(std::move(pipe.handle0)));
+  v8::Local<v8::Value> wrapper = ToV8(handle, scope.GetScriptState());
+  Transferables transferables;
+  transferables.mojo_handles.push_back(handle);
+
+  v8::Local<v8::Value> result =
+      RoundTrip(wrapper, scope, nullptr, &transferables);
+  ASSERT_TRUE(V8MojoHandle::hasInstance(result, scope.GetIsolate()));
+  MojoHandle* new_handle = V8MojoHandle::ToImpl(result.As<v8::Object>());
+  EXPECT_FALSE(handle->TakeHandle().is_valid());
+  EXPECT_TRUE(new_handle->TakeHandle().is_valid());
+}
+
+TEST(V8ScriptValueSerializerTest, UntransferredMojoHandleThrowsDataCloneError) {
+  V8TestingScope scope;
+  ExceptionState exception_state(scope.GetIsolate(),
+                                 ExceptionState::kExecutionContext, "Window",
+                                 "postMessage");
+
+  mojo::MessagePipe pipe;
+  MojoHandle* handle =
+      MojoHandle::Create(mojo::ScopedHandle::From(std::move(pipe.handle0)));
+  v8::Local<v8::Value> wrapper = ToV8(handle, scope.GetScriptState());
+  Transferables transferables;
+
+  RoundTrip(wrapper, scope, &exception_state, &transferables);
+  ASSERT_TRUE(HadDOMExceptionInCoreTest(
+      "DataCloneError", scope.GetScriptState(), exception_state));
+}
+
 // Decode tests for backward compatibility are not required for message ports
-// because they cannot be persisted to disk.
+// and Mojo handles because they cannot be persisted to disk.
 
 // A more exhaustive set of ImageBitmap cases are covered by LayoutTests.
 TEST(V8ScriptValueSerializerTest, RoundTripImageBitmap) {

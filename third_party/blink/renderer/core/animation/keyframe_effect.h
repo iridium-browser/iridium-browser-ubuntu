@@ -34,6 +34,7 @@
 #include "third_party/blink/renderer/bindings/core/v8/script_value.h"
 #include "third_party/blink/renderer/core/animation/animation_effect.h"
 #include "third_party/blink/renderer/core/animation/compositor_animations.h"
+#include "third_party/blink/renderer/core/animation/keyframe_effect_model.h"
 #include "third_party/blink/renderer/core/core_export.h"
 
 namespace blink {
@@ -76,12 +77,15 @@ class CORE_EXPORT KeyframeEffect final : public AnimationEffect {
 
   // IDL implementation.
   Element* target() const { return target_; }
+  void setTarget(Element*);
   String composite() const;
   void setComposite(String);
   Vector<ScriptValue> getKeyframes(ScriptState*);
   void setKeyframes(ScriptState*,
                     const ScriptValue& keyframes,
                     ExceptionState&);
+
+  void SetKeyframes(StringKeyframeVector keyframes);
 
   bool Affects(const PropertyHandle&) const;
   const KeyframeEffectModelBase* Model() const { return model_.Get(); }
@@ -95,24 +99,25 @@ class CORE_EXPORT KeyframeEffect final : public AnimationEffect {
   void NotifySampledEffectRemovedFromEffectStack();
 
   CompositorAnimations::FailureCode CheckCanStartAnimationOnCompositor(
+      const base::Optional<CompositorElementIdSet>& composited_element_ids,
       double animation_playback_rate) const;
   // Must only be called once.
   void StartAnimationOnCompositor(int group,
-                                  WTF::Optional<double> start_time,
+                                  base::Optional<double> start_time,
                                   double time_offset,
                                   double animation_playback_rate,
                                   CompositorAnimation* = nullptr);
   bool HasActiveAnimationsOnCompositor() const;
   bool HasActiveAnimationsOnCompositor(const PropertyHandle&) const;
-  bool CancelAnimationOnCompositor();
+  bool CancelAnimationOnCompositor(CompositorAnimation*);
   void CancelIncompatibleAnimationsOnCompositor();
   void PauseAnimationForTestingOnCompositor(double pause_time);
 
   void AttachCompositedLayers();
 
-  void SetCompositorAnimationIdsForTesting(
-      const Vector<int>& compositor_animation_ids) {
-    compositor_animation_ids_ = compositor_animation_ids;
+  void SetCompositorKeyframeModelIdsForTesting(
+      const Vector<int>& compositor_keyframe_model_ids) {
+    compositor_keyframe_model_ids_ = compositor_keyframe_model_ids;
   }
 
   void DowngradeToNormal() { priority_ = kDefaultPriority; }
@@ -136,6 +141,8 @@ class CORE_EXPORT KeyframeEffect final : public AnimationEffect {
   void UpdateChildrenAndEffects() const override;
   void Attach(AnimationEffectOwner*) override;
   void Detach() override;
+  void AttachTarget(Animation*);
+  void DetachTarget(Animation*);
   double CalculateTimeToEffectChange(
       bool forwards,
       double inherited_time,
@@ -149,7 +156,7 @@ class CORE_EXPORT KeyframeEffect final : public AnimationEffect {
 
   Priority priority_;
 
-  Vector<int> compositor_animation_ids_;
+  Vector<int> compositor_keyframe_model_ids_;
 };
 
 DEFINE_TYPE_CASTS(KeyframeEffect,

@@ -17,7 +17,7 @@
 #include "rtc_base/messagehandler.h"
 #include "rtc_base/refcountedobject.h"
 #include "rtc_base/scoped_ref_ptr.h"
-#include "rtc_base/sigslot.h"
+#include "rtc_base/third_party/sigslot/sigslot.h"
 #include "rtc_base/thread.h"
 #include "rtc_base/thread_annotations.h"
 
@@ -48,12 +48,10 @@ class AsyncClosure {
 template <class FunctorT>
 class FireAndForgetAsyncClosure : public AsyncClosure {
  public:
-  explicit FireAndForgetAsyncClosure(AsyncInvoker* invoker,
-                                     FunctorT&& functor)
+  explicit FireAndForgetAsyncClosure(AsyncInvoker* invoker, FunctorT&& functor)
       : AsyncClosure(invoker), functor_(std::forward<FunctorT>(functor)) {}
-  virtual void Execute() {
-    functor_();
-  }
+  virtual void Execute() { functor_(); }
+
  private:
   typename std::decay<FunctorT>::type functor_;
 };

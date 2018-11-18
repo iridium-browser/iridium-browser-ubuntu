@@ -11,7 +11,7 @@
 #include "base/json/json_writer.h"
 #include "base/macros.h"
 #include "base/memory/ref_counted_memory.h"
-#include "base/task_scheduler/post_task.h"
+#include "base/task/post_task.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_data_delegate.h"
@@ -24,6 +24,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "components/prefs/pref_service.h"
 #include "components/prefs/scoped_user_pref_update.h"
+#include "content/public/browser/browser_task_traits.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/service_manager_connection.h"
 #include "extensions/browser/extension_system.h"
@@ -83,7 +84,7 @@ class KioskAppData::CrxLoader : public extensions::SandboxedUnpackerClient {
         crx_file_(crx_file),
         success_(false),
         task_runner_(base::CreateSequencedTaskRunnerWithTraits(
-            {base::MayBlock(), base::TaskPriority::BACKGROUND,
+            {base::MayBlock(), base::TaskPriority::BEST_EFFORT,
              base::TaskShutdownBehavior::SKIP_ON_SHUTDOWN})) {}
 
   void Start() {
@@ -161,8 +162,8 @@ class KioskAppData::CrxLoader : public extensions::SandboxedUnpackerClient {
                    << temp_dir_.GetPath().value();
     }
 
-    BrowserThread::PostTask(
-        BrowserThread::UI, FROM_HERE,
+    base::PostTaskWithTraits(
+        FROM_HERE, {BrowserThread::UI},
         base::BindOnce(&CrxLoader::NotifyFinishedOnUIThread, this));
   }
 
@@ -370,10 +371,6 @@ void KioskAppData::SetStatus(Status status) {
   }
 }
 
-net::URLRequestContextGetter* KioskAppData::GetRequestContextGetter() {
-  return g_browser_process->system_request_context();
-}
-
 network::mojom::URLLoaderFactory* KioskAppData::GetURLLoaderFactory() {
   return g_browser_process->system_network_context_manager()
       ->GetURLLoaderFactory();
@@ -464,10 +461,11 @@ void KioskAppData::StartFetch() {
     return;
   }
 
-  webstore_fetcher_.reset(new extensions::WebstoreDataFetcher(
-      this, GetRequestContextGetter(), GURL(), app_id()));
+  webstore_fetcher_.reset(
+      new extensions::WebstoreDataFetcher(this, GURL(), app_id()));
   webstore_fetcher_->set_max_auto_retries(3);
-  webstore_fetcher_->Start();
+  webstore_fetcher_->Start(g_browser_process->system_network_context_manager()
+                               ->GetURLLoaderFactory());
 }
 
 void KioskAppData::OnWebstoreRequestFailure() {

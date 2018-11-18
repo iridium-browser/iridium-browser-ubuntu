@@ -8,6 +8,9 @@
  *  be found in the AUTHORS file in the root of the source tree.
  */
 
+#include "api/test/simulated_network.h"
+#include "call/fake_network_pipe.h"
+#include "call/simulated_network.h"
 #include "system_wrappers/include/sleep.h"
 #include "test/call_test.h"
 #include "test/field_trial.h"
@@ -23,11 +26,6 @@ class CallOperationEndToEndTest
  public:
   CallOperationEndToEndTest() : field_trial_(GetParam()) {}
 
-  virtual ~CallOperationEndToEndTest() {
-    EXPECT_EQ(nullptr, video_send_stream_);
-    EXPECT_TRUE(video_receive_streams_.empty());
-  }
-
  private:
   test::ScopedFieldTrials field_trial_;
 };
@@ -35,12 +33,11 @@ class CallOperationEndToEndTest
 INSTANTIATE_TEST_CASE_P(
     FieldTrials,
     CallOperationEndToEndTest,
-    ::testing::Values("WebRTC-RoundRobinPacing/Disabled/",
-                      "WebRTC-RoundRobinPacing/Enabled/",
-                      "WebRTC-TaskQueueCongestionControl/Enabled/"));
+    ::testing::Values("WebRTC-TaskQueueCongestionControl/Enabled/",
+                      "WebRTC-TaskQueueCongestionControl/Disabled/"));
 
 TEST_P(CallOperationEndToEndTest, ReceiverCanBeStartedTwice) {
-  CreateCalls(Call::Config(event_log_.get()), Call::Config(event_log_.get()));
+  CreateCalls();
 
   test::NullTransport transport;
   CreateSendConfig(1, 0, 0, &transport);
@@ -55,7 +52,7 @@ TEST_P(CallOperationEndToEndTest, ReceiverCanBeStartedTwice) {
 }
 
 TEST_P(CallOperationEndToEndTest, ReceiverCanBeStoppedTwice) {
-  CreateCalls(Call::Config(event_log_.get()), Call::Config(event_log_.get()));
+  CreateCalls();
 
   test::NullTransport transport;
   CreateSendConfig(1, 0, 0, &transport);
@@ -70,7 +67,7 @@ TEST_P(CallOperationEndToEndTest, ReceiverCanBeStoppedTwice) {
 }
 
 TEST_P(CallOperationEndToEndTest, ReceiverCanBeStoppedAndRestarted) {
-  CreateCalls(Call::Config(event_log_.get()), Call::Config(event_log_.get()));
+  CreateCalls();
 
   test::NullTransport transport;
   CreateSendConfig(1, 0, 0, &transport);
@@ -113,12 +110,20 @@ TEST_P(CallOperationEndToEndTest, RendersSingleDelayedFrame) {
 
   task_queue_.SendTask([this, &renderer, &frame_forwarder, &sender_transport,
                         &receiver_transport]() {
-    CreateCalls(Call::Config(event_log_.get()), Call::Config(event_log_.get()));
+    CreateCalls();
 
-    sender_transport = rtc::MakeUnique<test::DirectTransport>(
-        &task_queue_, sender_call_.get(), payload_type_map_);
-    receiver_transport = rtc::MakeUnique<test::DirectTransport>(
-        &task_queue_, receiver_call_.get(), payload_type_map_);
+    sender_transport = absl::make_unique<test::DirectTransport>(
+        &task_queue_,
+        absl::make_unique<FakeNetworkPipe>(Clock::GetRealTimeClock(),
+                                           absl::make_unique<SimulatedNetwork>(
+                                               BuiltInNetworkBehaviorConfig())),
+        sender_call_.get(), payload_type_map_);
+    receiver_transport = absl::make_unique<test::DirectTransport>(
+        &task_queue_,
+        absl::make_unique<FakeNetworkPipe>(Clock::GetRealTimeClock(),
+                                           absl::make_unique<SimulatedNetwork>(
+                                               BuiltInNetworkBehaviorConfig())),
+        receiver_call_.get(), payload_type_map_);
     sender_transport->SetReceiver(receiver_call_->Receiver());
     receiver_transport->SetReceiver(sender_call_->Receiver());
 
@@ -134,10 +139,9 @@ TEST_P(CallOperationEndToEndTest, RendersSingleDelayedFrame) {
     // to check that the callbacks are done after processing video.
     std::unique_ptr<test::FrameGenerator> frame_generator(
         test::FrameGenerator::CreateSquareGenerator(
-            kWidth, kHeight, rtc::nullopt, rtc::nullopt));
-    video_send_stream_->SetSource(
-        &frame_forwarder,
-        VideoSendStream::DegradationPreference::kMaintainFramerate);
+            kWidth, kHeight, absl::nullopt, absl::nullopt));
+    GetVideoSendStream()->SetSource(&frame_forwarder,
+                                    DegradationPreference::MAINTAIN_FRAMERATE);
 
     frame_forwarder.IncomingCapturedFrame(*frame_generator->NextFrame());
   });
@@ -154,16 +158,7 @@ TEST_P(CallOperationEndToEndTest, RendersSingleDelayedFrame) {
   });
 }
 
-// TODO(bugs.webrtc.org/9060): Re-enable this test with the TaskQueue when it
-// is no longer flaky.
-class CallOperationEndToEndTestNoTaskQueueCongestionControl
-    : public CallOperationEndToEndTest {};
-INSTANTIATE_TEST_CASE_P(FieldTrials,
-                        CallOperationEndToEndTestNoTaskQueueCongestionControl,
-                        ::testing::Values("WebRTC-RoundRobinPacing/Disabled/",
-                                          "WebRTC-RoundRobinPacing/Enabled/"));
-TEST_P(CallOperationEndToEndTestNoTaskQueueCongestionControl,
-       TransmitsFirstFrame) {
+TEST_P(CallOperationEndToEndTest, TransmitsFirstFrame) {
   class Renderer : public rtc::VideoSinkInterface<VideoFrame> {
    public:
     Renderer() : event_(false, false) {}
@@ -183,12 +178,20 @@ TEST_P(CallOperationEndToEndTestNoTaskQueueCongestionControl,
 
   task_queue_.SendTask([this, &renderer, &frame_generator, &frame_forwarder,
                         &sender_transport, &receiver_transport]() {
-    CreateCalls(Call::Config(event_log_.get()), Call::Config(event_log_.get()));
+    CreateCalls();
 
-    sender_transport = rtc::MakeUnique<test::DirectTransport>(
-        &task_queue_, sender_call_.get(), payload_type_map_);
-    receiver_transport = rtc::MakeUnique<test::DirectTransport>(
-        &task_queue_, receiver_call_.get(), payload_type_map_);
+    sender_transport = absl::make_unique<test::DirectTransport>(
+        &task_queue_,
+        absl::make_unique<FakeNetworkPipe>(Clock::GetRealTimeClock(),
+                                           absl::make_unique<SimulatedNetwork>(
+                                               BuiltInNetworkBehaviorConfig())),
+        sender_call_.get(), payload_type_map_);
+    receiver_transport = absl::make_unique<test::DirectTransport>(
+        &task_queue_,
+        absl::make_unique<FakeNetworkPipe>(Clock::GetRealTimeClock(),
+                                           absl::make_unique<SimulatedNetwork>(
+                                               BuiltInNetworkBehaviorConfig())),
+        receiver_call_.get(), payload_type_map_);
     sender_transport->SetReceiver(receiver_call_->Receiver());
     receiver_transport->SetReceiver(sender_call_->Receiver());
 
@@ -200,101 +203,14 @@ TEST_P(CallOperationEndToEndTestNoTaskQueueCongestionControl,
     Start();
 
     frame_generator = test::FrameGenerator::CreateSquareGenerator(
-        kDefaultWidth, kDefaultHeight, rtc::nullopt, rtc::nullopt);
-    video_send_stream_->SetSource(
-        &frame_forwarder,
-        VideoSendStream::DegradationPreference::kMaintainFramerate);
+        kDefaultWidth, kDefaultHeight, absl::nullopt, absl::nullopt);
+    GetVideoSendStream()->SetSource(&frame_forwarder,
+                                    DegradationPreference::MAINTAIN_FRAMERATE);
     frame_forwarder.IncomingCapturedFrame(*frame_generator->NextFrame());
   });
 
   EXPECT_TRUE(renderer.Wait())
       << "Timed out while waiting for the frame to render.";
-
-  task_queue_.SendTask([this, &sender_transport, &receiver_transport]() {
-    Stop();
-    DestroyStreams();
-    sender_transport.reset();
-    receiver_transport.reset();
-    DestroyCalls();
-  });
-}
-
-// TODO(bugs.webrtc.org/9060): Re-enable this test with the TaskQueue when it
-// is no longer flaky.
-TEST_P(CallOperationEndToEndTestNoTaskQueueCongestionControl,
-       ObserversEncodedFrames) {
-  class EncodedFrameTestObserver : public EncodedFrameObserver {
-   public:
-    EncodedFrameTestObserver()
-        : length_(0), frame_type_(kEmptyFrame), called_(false, false) {}
-    virtual ~EncodedFrameTestObserver() {}
-
-    virtual void EncodedFrameCallback(const EncodedFrame& encoded_frame) {
-      frame_type_ = encoded_frame.frame_type_;
-      length_ = encoded_frame.length_;
-      buffer_.reset(new uint8_t[length_]);
-      memcpy(buffer_.get(), encoded_frame.data_, length_);
-      called_.Set();
-    }
-
-    bool Wait() { return called_.Wait(kDefaultTimeoutMs); }
-
-    void ExpectEqualFrames(const EncodedFrameTestObserver& observer) {
-      ASSERT_EQ(length_, observer.length_)
-          << "Observed frames are of different lengths.";
-      EXPECT_EQ(frame_type_, observer.frame_type_)
-          << "Observed frames have different frame types.";
-      EXPECT_EQ(0, memcmp(buffer_.get(), observer.buffer_.get(), length_))
-          << "Observed encoded frames have different content.";
-    }
-
-   private:
-    std::unique_ptr<uint8_t[]> buffer_;
-    size_t length_;
-    FrameType frame_type_;
-    rtc::Event called_;
-  };
-
-  EncodedFrameTestObserver post_encode_observer;
-  EncodedFrameTestObserver pre_decode_observer;
-  test::FrameForwarder forwarder;
-  std::unique_ptr<test::FrameGenerator> frame_generator;
-
-  std::unique_ptr<test::DirectTransport> sender_transport;
-  std::unique_ptr<test::DirectTransport> receiver_transport;
-
-  task_queue_.SendTask([&]() {
-    CreateCalls(Call::Config(event_log_.get()), Call::Config(event_log_.get()));
-
-    sender_transport = rtc::MakeUnique<test::DirectTransport>(
-        &task_queue_, sender_call_.get(), payload_type_map_);
-    receiver_transport = rtc::MakeUnique<test::DirectTransport>(
-        &task_queue_, receiver_call_.get(), payload_type_map_);
-    sender_transport->SetReceiver(receiver_call_->Receiver());
-    receiver_transport->SetReceiver(sender_call_->Receiver());
-
-    CreateSendConfig(1, 0, 0, sender_transport.get());
-    CreateMatchingReceiveConfigs(receiver_transport.get());
-    video_send_config_.post_encode_callback = &post_encode_observer;
-    video_receive_configs_[0].pre_decode_callback = &pre_decode_observer;
-
-    CreateVideoStreams();
-    Start();
-
-    frame_generator = test::FrameGenerator::CreateSquareGenerator(
-        kDefaultWidth, kDefaultHeight, rtc::nullopt, rtc::nullopt);
-    video_send_stream_->SetSource(
-        &forwarder, VideoSendStream::DegradationPreference::kMaintainFramerate);
-    forwarder.IncomingCapturedFrame(*frame_generator->NextFrame());
-  });
-
-  EXPECT_TRUE(post_encode_observer.Wait())
-      << "Timed out while waiting for send-side encoded-frame callback.";
-
-  EXPECT_TRUE(pre_decode_observer.Wait())
-      << "Timed out while waiting for pre-decode encoded-frame callback.";
-
-  post_encode_observer.ExpectEqualFrames(pre_decode_observer);
 
   task_queue_.SendTask([this, &sender_transport, &receiver_transport]() {
     Stop();

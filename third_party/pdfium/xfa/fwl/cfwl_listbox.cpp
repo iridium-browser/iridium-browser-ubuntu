@@ -94,10 +94,11 @@ void CFWL_ListBox::DrawWidget(CXFA_Graphics* pGraphics,
                               const CFX_Matrix& matrix) {
   if (!pGraphics)
     return;
-  if (!m_pProperties->m_pThemeProvider)
+
+  IFWL_ThemeProvider* pTheme = m_pProperties->m_pThemeProvider.Get();
+  if (!pTheme)
     return;
 
-  IFWL_ThemeProvider* pTheme = m_pProperties->m_pThemeProvider;
   pGraphics->SaveGraphState();
   if (HasBorder())
     DrawBorder(pGraphics, CFWL_Part::Border, pTheme, matrix);
@@ -458,7 +459,7 @@ void CFWL_ListBox::DrawItem(CXFA_Graphics* pGraphics,
   textParam.m_pGraphics = pGraphics;
   textParam.m_matrix.Concat(*pMatrix);
   textParam.m_rtPart = rtText;
-  textParam.m_wsText = wsText;
+  textParam.m_wsText = std::move(wsText);
   textParam.m_dwTTOStyles = m_dwTTOStyles;
   textParam.m_iTTOAlign = m_iTTOAligns;
   textParam.m_bMaximize = true;
@@ -599,8 +600,8 @@ float CFWL_ListBox::GetMaxTextWidth() {
     if (!pItem)
       continue;
 
-    CFX_SizeF sz =
-        CalcTextSize(pItem->GetText(), m_pProperties->m_pThemeProvider, false);
+    CFX_SizeF sz = CalcTextSize(pItem->GetText(),
+                                m_pProperties->m_pThemeProvider.Get(), false);
     fRet = std::max(fRet, sz.width);
   }
   return fRet;
@@ -702,7 +703,7 @@ void CFWL_ListBox::OnProcessEvent(CFWL_Event* pEvent) {
   if (pEvent->GetType() != CFWL_Event::Type::Scroll)
     return;
 
-  CFWL_Widget* pSrcTarget = pEvent->m_pSrcTarget;
+  CFWL_Widget* pSrcTarget = pEvent->GetSrcTarget();
   if ((pSrcTarget == m_pVertScrollBar.get() && m_pVertScrollBar) ||
       (pSrcTarget == m_pHorzScrollBar.get() && m_pHorzScrollBar)) {
     CFWL_EventScroll* pScrollEvent = static_cast<CFWL_EventScroll*>(pEvent);
@@ -741,8 +742,6 @@ void CFWL_ListBox::OnFocusChanged(CFWL_Message* pMsg, bool bSet) {
 
 void CFWL_ListBox::OnLButtonDown(CFWL_MessageMouse* pMsg) {
   m_bLButtonDown = true;
-  if ((m_pProperties->m_dwStates & FWL_WGTSTATE_Focused) == 0)
-    SetFocus(true);
 
   CFWL_ListItem* pItem = GetItemAtPoint(pMsg->m_pos);
   if (!pItem)

@@ -16,6 +16,8 @@
 #include "third_party/blink/renderer/modules/shapedetection/detected_face.h"
 #include "third_party/blink/renderer/modules/shapedetection/face_detector_options.h"
 #include "third_party/blink/renderer/modules/shapedetection/landmark.h"
+#include "third_party/blink/renderer/modules/shapedetection/shape_detection_type_converter.h"
+#include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 
 namespace blink {
 
@@ -48,8 +50,9 @@ ScriptPromise FaceDetector::DoDetect(ScriptPromiseResolver* resolver,
                                      SkBitmap bitmap) {
   ScriptPromise promise = resolver->Promise();
   if (!face_service_) {
-    resolver->Reject(DOMException::Create(
-        kNotSupportedError, "Face detection service unavailable."));
+    resolver->Reject(
+        DOMException::Create(DOMExceptionCode::kNotSupportedError,
+                             "Face detection service unavailable."));
     return promise;
   }
   face_service_requests_.insert(resolver);
@@ -71,26 +74,24 @@ void FaceDetector::OnDetectFaces(
   for (const auto& face : face_detection_results) {
     HeapVector<Landmark> landmarks;
     for (const auto& landmark : face->landmarks) {
-      Point2D location;
-      location.setX(landmark->location.x);
-      location.setY(landmark->location.y);
       HeapVector<Point2D> locations;
-      locations.push_back(location);
+      for (const auto& location : landmark->locations) {
+        Point2D web_location;
+        web_location.setX(location.x);
+        web_location.setY(location.y);
+        locations.push_back(web_location);
+      }
 
       Landmark web_landmark;
       web_landmark.setLocations(locations);
-      if (landmark->type == shape_detection::mojom::blink::LandmarkType::EYE) {
-        web_landmark.setType("eye");
-      } else if (landmark->type ==
-                 shape_detection::mojom::blink::LandmarkType::MOUTH) {
-        web_landmark.setType("mouth");
-      }
+      web_landmark.setType(mojo::ConvertTo<String>(landmark->type));
       landmarks.push_back(web_landmark);
     }
 
     detected_faces.push_back(DetectedFace::Create(
-        DOMRect::Create(face->bounding_box.x, face->bounding_box.y,
-                        face->bounding_box.width, face->bounding_box.height),
+        DOMRectReadOnly::Create(face->bounding_box.x, face->bounding_box.y,
+                                face->bounding_box.width,
+                                face->bounding_box.height),
         landmarks));
   }
 
@@ -99,7 +100,7 @@ void FaceDetector::OnDetectFaces(
 
 void FaceDetector::OnFaceServiceConnectionError() {
   for (const auto& request : face_service_requests_) {
-    request->Reject(DOMException::Create(kNotSupportedError,
+    request->Reject(DOMException::Create(DOMExceptionCode::kNotSupportedError,
                                          "Face Detection not implemented."));
   }
   face_service_requests_.clear();

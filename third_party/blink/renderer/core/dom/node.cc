@@ -26,14 +26,14 @@
 
 #include "third_party/blink/renderer/core/dom/node.h"
 
-#include "third_party/blink/renderer/bindings/core/v8/exception_state.h"
 #include "third_party/blink/renderer/bindings/core/v8/node_or_string.h"
+#include "third_party/blink/renderer/core/accessibility/ax_object_cache.h"
 #include "third_party/blink/renderer/core/css/css_selector.h"
 #include "third_party/blink/renderer/core/css/resolver/style_resolver.h"
+#include "third_party/blink/renderer/core/css/style_change_reason.h"
 #include "third_party/blink/renderer/core/css/style_engine.h"
 #include "third_party/blink/renderer/core/dom/attr.h"
 #include "third_party/blink/renderer/core/dom/attribute.h"
-#include "third_party/blink/renderer/core/dom/ax_object_cache.h"
 #include "third_party/blink/renderer/core/dom/child_list_mutation_scope.h"
 #include "third_party/blink/renderer/core/dom/child_node_list.h"
 #include "third_party/blink/renderer/core/dom/document.h"
@@ -44,12 +44,13 @@
 #include "third_party/blink/renderer/core/dom/element_rare_data.h"
 #include "third_party/blink/renderer/core/dom/element_traversal.h"
 #include "third_party/blink/renderer/core/dom/events/event.h"
+#include "third_party/blink/renderer/core/dom/events/event_dispatch_forbidden_scope.h"
 #include "third_party/blink/renderer/core/dom/events/event_dispatcher.h"
 #include "third_party/blink/renderer/core/dom/events/event_listener.h"
-#include "third_party/blink/renderer/core/dom/exception_code.h"
 #include "third_party/blink/renderer/core/dom/flat_tree_traversal.h"
 #include "third_party/blink/renderer/core/dom/get_root_node_options.h"
 #include "third_party/blink/renderer/core/dom/layout_tree_builder_traversal.h"
+#include "third_party/blink/renderer/core/dom/mutation_observer_registration.h"
 #include "third_party/blink/renderer/core/dom/node_lists_node_data.h"
 #include "third_party/blink/renderer/core/dom/node_rare_data.h"
 #include "third_party/blink/renderer/core/dom/node_traversal.h"
@@ -57,6 +58,7 @@
 #include "third_party/blink/renderer/core/dom/range.h"
 #include "third_party/blink/renderer/core/dom/shadow_root.h"
 #include "third_party/blink/renderer/core/dom/slot_assignment.h"
+#include "third_party/blink/renderer/core/dom/slot_assignment_engine.h"
 #include "third_party/blink/renderer/core/dom/static_node_list.h"
 #include "third_party/blink/renderer/core/dom/template_content_document_fragment.h"
 #include "third_party/blink/renderer/core/dom/text.h"
@@ -99,10 +101,10 @@
 #include "third_party/blink/renderer/core/svg/graphics/svg_image.h"
 #include "third_party/blink/renderer/core/svg/svg_element.h"
 #include "third_party/blink/renderer/platform/bindings/dom_data_store.h"
+#include "third_party/blink/renderer/platform/bindings/exception_state.h"
 #include "third_party/blink/renderer/platform/bindings/microtask.h"
 #include "third_party/blink/renderer/platform/bindings/script_wrappable_visitor.h"
 #include "third_party/blink/renderer/platform/bindings/v8_dom_wrapper.h"
-#include "third_party/blink/renderer/platform/event_dispatch_forbidden_scope.h"
 #include "third_party/blink/renderer/platform/instance_counters.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/trace_event.h"
 #include "third_party/blink/renderer/platform/instrumentation/tracing/traced_value.h"
@@ -153,6 +155,7 @@ NodeRenderingData::~NodeRenderingData() {
 void NodeRenderingData::SetNonAttachedStyle(
     scoped_refptr<ComputedStyle> non_attached_style) {
   DCHECK_NE(&SharedEmptyData(), this);
+  DCHECK(!non_attached_style || !non_attached_style_);
   non_attached_style_ = non_attached_style;
 }
 
@@ -354,6 +357,16 @@ void Node::setNodeValue(const String&) {
   // By default, setting nodeValue has no effect.
 }
 
+ContainerNode* Node::parentNode() const {
+  return IsShadowRoot() ? nullptr : ParentOrShadowHostNode();
+}
+
+ContainerNode* Node::ParentNodeWithCounting() const {
+  if (GetFlag(kInDOMNodeRemovedHandler))
+    GetDocument().CountDetachingNodeAccessInDOMNodeRemovedHandler();
+  return IsShadowRoot() ? nullptr : ParentOrShadowHostNode();
+}
+
 NodeList* Node::childNodes() {
   ThreadState::MainThreadGCForbiddenScope gc_forbidden;
   if (IsContainerNode())
@@ -436,7 +449,8 @@ Node* Node::insertBefore(Node* new_child,
                                                exception_state);
 
   exception_state.ThrowDOMException(
-      kHierarchyRequestError, "This node type does not support this method.");
+      DOMExceptionCode::kHierarchyRequestError,
+      "This node type does not support this method.");
   return nullptr;
 }
 
@@ -452,7 +466,8 @@ Node* Node::replaceChild(Node* new_child,
                                                exception_state);
 
   exception_state.ThrowDOMException(
-      kHierarchyRequestError, "This node type does not support this method.");
+      DOMExceptionCode::kHierarchyRequestError,
+      "This node type does not support this method.");
   return nullptr;
 }
 
@@ -465,7 +480,8 @@ Node* Node::removeChild(Node* old_child, ExceptionState& exception_state) {
     return ToContainerNode(this)->RemoveChild(old_child, exception_state);
 
   exception_state.ThrowDOMException(
-      kNotFoundError, "This node type does not support this method.");
+      DOMExceptionCode::kNotFoundError,
+      "This node type does not support this method.");
   return nullptr;
 }
 
@@ -478,7 +494,8 @@ Node* Node::appendChild(Node* new_child, ExceptionState& exception_state) {
     return ToContainerNode(this)->AppendChild(new_child, exception_state);
 
   exception_state.ThrowDOMException(
-      kHierarchyRequestError, "This node type does not support this method.");
+      DOMExceptionCode::kHierarchyRequestError,
+      "This node type does not support this method.");
   return nullptr;
 }
 
@@ -605,7 +622,7 @@ Node* Node::cloneNode(bool deep, ExceptionState& exception_state) const {
   // 1. If context object is a shadow root, then throw a
   // "NotSupportedError" DOMException.
   if (IsShadowRoot()) {
-    exception_state.ThrowDOMException(kNotSupportedError,
+    exception_state.ThrowDOMException(DOMExceptionCode::kNotSupportedError,
                                       "ShadowRoot nodes are not clonable.");
     return nullptr;
   }
@@ -621,7 +638,7 @@ Node* Node::cloneNode(bool deep) const {
 }
 
 void Node::normalize() {
-  UpdateDistribution();
+  UpdateDistributionForFlatTreeTraversal();
 
   // Go through the subtree beneath us, normalizing all nodes. This means that
   // any two adjacent text nodes are merged and any empty text nodes are
@@ -763,8 +780,6 @@ bool Node::NeedsDistributionRecalc() const {
 }
 
 bool Node::MayContainLegacyNodeTreeWhereDistributionShouldBeSupported() const {
-  if (!RuntimeEnabledFeatures::IncrementalShadowDOMEnabled())
-    return true;
   if (isConnected() && !GetDocument().MayContainV0Shadow()) {
     // TODO(crbug.com/787717): Some built-in elements still use <content>
     // elements in their user-agent shadow roots. DCHECK() fails if such an
@@ -775,7 +790,15 @@ bool Node::MayContainLegacyNodeTreeWhereDistributionShouldBeSupported() const {
   return true;
 }
 
-void Node::UpdateDistribution() {
+void Node::UpdateDistributionForUnknownReasons() {
+  UpdateDistributionInternal();
+  // For the sake of safety, call RecalcSlotAssignments as well as
+  // UpdateDistribution().
+  if (isConnected())
+    GetDocument().GetSlotAssignmentEngine().RecalcSlotAssignments();
+}
+
+void Node::UpdateDistributionInternal() {
   if (!MayContainLegacyNodeTreeWhereDistributionShouldBeSupported())
     return;
   // Extra early out to avoid spamming traces.
@@ -820,10 +843,21 @@ void Node::SetNeedsStyleInvalidation() {
 
 void Node::MarkAncestorsWithChildNeedsStyleInvalidation() {
   ScriptForbiddenScope forbid_script_during_raw_iteration;
-  for (Node* node = ParentOrShadowHostNode();
-       node && !node->ChildNeedsStyleInvalidation();
-       node = node->ParentOrShadowHostNode())
-    node->SetChildNeedsStyleInvalidation();
+  ContainerNode* ancestor = ParentOrShadowHostNode();
+  bool parent_dirty = ancestor && ancestor->NeedsStyleInvalidation();
+  for (; ancestor && !ancestor->ChildNeedsStyleInvalidation();
+       ancestor = ancestor->ParentOrShadowHostNode()) {
+    ancestor->SetChildNeedsStyleInvalidation();
+    if (ancestor->NeedsStyleInvalidation())
+      break;
+  }
+  if (!isConnected())
+    return;
+  // If the parent node is already dirty, we can keep the same invalidation
+  // root. The early return here is a performance optimization.
+  if (parent_dirty)
+    return;
+  GetDocument().GetStyleEngine().UpdateStyleInvalidationRoot(ancestor, this);
   GetDocument().ScheduleLayoutTreeUpdateIfNeeded();
 }
 
@@ -841,37 +875,57 @@ inline void Node::SetStyleChange(StyleChangeType change_type) {
 }
 
 void Node::MarkAncestorsWithChildNeedsStyleRecalc() {
-  for (ContainerNode* p = ParentOrShadowHostNode();
-       p && !p->ChildNeedsStyleRecalc(); p = p->ParentOrShadowHostNode())
-    p->SetChildNeedsStyleRecalc();
+  ContainerNode* ancestor = ParentOrShadowHostNode();
+  bool parent_dirty = ancestor && ancestor->NeedsStyleRecalc();
+  for (; ancestor && !ancestor->ChildNeedsStyleRecalc();
+       ancestor = ancestor->ParentOrShadowHostNode()) {
+    ancestor->SetChildNeedsStyleRecalc();
+    if (ancestor->NeedsStyleRecalc())
+      break;
+  }
+  if (!isConnected())
+    return;
+  // If the parent node is already dirty, we can keep the same recalc root. The
+  // early return here is a performance optimization.
+  if (parent_dirty)
+    return;
+  GetDocument().GetStyleEngine().UpdateStyleRecalcRoot(ancestor, this);
   GetDocument().ScheduleLayoutTreeUpdateIfNeeded();
 }
 
-static ContainerNode* GetReattachParent(Node& node) {
-  if (node.IsPseudoElement())
-    return node.ParentOrShadowHostNode();
-  if (node.IsChildOfV1ShadowHost()) {
-    HTMLSlotElement* slot = RuntimeEnabledFeatures::SlotInFlatTreeEnabled()
-                                ? node.AssignedSlot()
-                                : node.FinalDestinationSlot();
-    if (slot)
+ContainerNode* Node::GetReattachParent() const {
+  if (IsPseudoElement())
+    return ParentOrShadowHostNode();
+  if (IsChildOfV1ShadowHost()) {
+    if (HTMLSlotElement* slot = AssignedSlot())
       return slot;
   }
-  if (node.IsInV0ShadowTree() || node.IsChildOfV0ShadowHost()) {
-    if (ShadowRootWhereNodeCanBeDistributedForV0(node)) {
+  if (IsInV0ShadowTree() || IsChildOfV0ShadowHost()) {
+    if (ShadowRootWhereNodeCanBeDistributedForV0(*this)) {
       if (V0InsertionPoint* insertion_point =
-              const_cast<V0InsertionPoint*>(ResolveReprojection(&node))) {
+              const_cast<V0InsertionPoint*>(ResolveReprojection(this))) {
         return insertion_point;
       }
     }
   }
-  return node.ParentOrShadowHostNode();
+  return ParentOrShadowHostNode();
 }
 
 void Node::MarkAncestorsWithChildNeedsReattachLayoutTree() {
-  for (ContainerNode* p = GetReattachParent(*this);
-       p && !p->ChildNeedsReattachLayoutTree(); p = GetReattachParent(*p))
-    p->SetChildNeedsReattachLayoutTree();
+  DCHECK(isConnected());
+  ContainerNode* ancestor = GetReattachParent();
+  bool parent_dirty = ancestor && ancestor->NeedsReattachLayoutTree();
+  for (; ancestor && !ancestor->ChildNeedsReattachLayoutTree();
+       ancestor = ancestor->GetReattachParent()) {
+    ancestor->SetChildNeedsReattachLayoutTree();
+    if (ancestor->NeedsReattachLayoutTree())
+      break;
+  }
+  // If the parent node is already dirty, we can keep the same rebuild root. The
+  // early return here is a performance optimization.
+  if (parent_dirty)
+    return;
+  GetDocument().GetStyleEngine().UpdateLayoutTreeRebuildRoot(ancestor, this);
 }
 
 void Node::SetNeedsReattachLayoutTree() {
@@ -883,8 +937,11 @@ void Node::SetNeedsReattachLayoutTree() {
 
 void Node::SetNeedsStyleRecalc(StyleChangeType change_type,
                                const StyleChangeReasonForTracing& reason) {
+  DCHECK(!GetDocument().GetStyleEngine().InRebuildLayoutTree());
   DCHECK(change_type != kNoStyleChange);
   if (!InActiveDocument())
+    return;
+  if (!IsContainerNode() && !IsTextNode())
     return;
 
   TRACE_EVENT_INSTANT1(
@@ -933,11 +990,6 @@ bool Node::IsInert() const {
   DCHECK(!ChildNeedsDistributionRecalc());
 
   if (this != GetDocument()) {
-    // TODO(foolip): When fullscreen uses top layer, this can be simplified to
-    // just look at the topmost element in top layer. https://crbug.com/240576.
-    // Note: It's currently appropriate that a modal dialog element takes
-    // precedence over a fullscreen element, because it will be rendered on top,
-    // but with fullscreen merged into top layer that will no longer be true.
     const Element* modal_element = GetDocument().ActiveModalDialog();
     if (!modal_element)
       modal_element = Fullscreen::FullscreenElementFrom(GetDocument());
@@ -1100,7 +1152,7 @@ void Node::AttachLayoutTree(AttachContext& context) {
   ClearNeedsStyleRecalc();
   ClearNeedsReattachLayoutTree();
 
-  if (AXObjectCache* cache = GetDocument().GetOrCreateAXObjectCache())
+  if (AXObjectCache* cache = GetDocument().ExistingAXObjectCache())
     cache->UpdateCacheAfterNodeIsAttached(this);
 }
 
@@ -1161,10 +1213,7 @@ bool Node::IsStyledElement() const {
 
 bool Node::CanParticipateInFlatTree() const {
   // TODO(hayato): Return false for pseudo elements.
-  if (RuntimeEnabledFeatures::SlotInFlatTreeEnabled()) {
-    return !IsShadowRoot() && !IsActiveV0InsertionPoint(*this);
-  }
-  return !IsShadowRoot() && !IsActiveSlotOrActiveV0InsertionPoint();
+  return !IsShadowRoot() && !IsActiveV0InsertionPoint(*this);
 }
 
 bool Node::IsActiveSlotOrActiveV0InsertionPoint() const {
@@ -1292,7 +1341,7 @@ bool Node::isEqualNode(Node* other) const {
     if (ToElement(this)->TagQName() != ToElement(other)->TagQName())
       return false;
 
-    if (!ToElement(this)->HasEquivalentAttributes(ToElement(other)))
+    if (!ToElement(this)->HasEquivalentAttributes(ToElement(*other)))
       return false;
   } else if (nodeName() != other->nodeName()) {
     return false;
@@ -1359,7 +1408,7 @@ const AtomicString& Node::lookupPrefix(
       context = ToElement(this);
       break;
     case kDocumentNode:
-      context = ToDocument(this)->documentElement();
+      context = To<Document>(this)->documentElement();
       break;
     case kDocumentFragmentNode:
     case kDocumentTypeNode:
@@ -1429,7 +1478,7 @@ const AtomicString& Node::lookupNamespaceURI(
       return g_null_atom;
     }
     case kDocumentNode:
-      if (Element* de = ToDocument(this)->documentElement())
+      if (Element* de = To<Document>(this)->documentElement())
         return de->lookupNamespaceURI(prefix);
       return g_null_atom;
     case kDocumentTypeNode:
@@ -1667,7 +1716,7 @@ String Node::DebugName() const {
 
     if (this_element.HasClass()) {
       name.Append(" class=\'");
-      for (size_t i = 0; i < this_element.ClassNames().size(); ++i) {
+      for (wtf_size_t i = 0; i < this_element.ClassNames().size(); ++i) {
         if (i > 0)
           name.Append(' ');
         AppendUnsafe(name, this_element.ClassNames()[i]);
@@ -1972,7 +2021,7 @@ void Node::WillMoveToNewDocument(Document& old_document,
       old_document.GetPage() == new_document.GetPage())
     return;
 
-  old_document.GetPage()->GetEventHandlerRegistry().DidMoveOutOfPage(*this);
+  old_document.GetFrame()->GetEventHandlerRegistry().DidMoveOutOfPage(*this);
 
   if (IsElementNode()) {
     StylePropertyMapReadOnly* computed_style_map_item =
@@ -1995,11 +2044,11 @@ void Node::DidMoveToNewDocument(Document& old_document) {
         GetDocument().AddListenerTypeIfNeeded(type, *this);
     }
   }
-
-  old_document.Markers().RemoveMarkersForNode(this);
+  if (IsTextNode())
+    old_document.Markers().RemoveMarkersForNode(*ToText(this));
   if (GetDocument().GetPage() &&
       GetDocument().GetPage() != old_document.GetPage()) {
-    GetDocument().GetPage()->GetEventHandlerRegistry().DidMoveIntoPage(*this);
+    GetDocument().GetFrame()->GetEventHandlerRegistry().DidMoveIntoPage(*this);
   }
 
   if (const HeapVector<TraceWrapperMember<MutationObserverRegistration>>*
@@ -2020,9 +2069,10 @@ void Node::AddedEventListener(const AtomicString& event_type,
                               RegisteredEventListener& registered_listener) {
   EventTarget::AddedEventListener(event_type, registered_listener);
   GetDocument().AddListenerTypeIfNeeded(event_type, *this);
-  if (Page* page = GetDocument().GetPage())
-    page->GetEventHandlerRegistry().DidAddEventHandler(
+  if (auto* frame = GetDocument().GetFrame()) {
+    frame->GetEventHandlerRegistry().DidAddEventHandler(
         *this, event_type, registered_listener.Options());
+  }
 }
 
 void Node::RemovedEventListener(
@@ -2032,15 +2082,16 @@ void Node::RemovedEventListener(
   // FIXME: Notify Document that the listener has vanished. We need to keep
   // track of a number of listeners for each type, not just a bool - see
   // https://bugs.webkit.org/show_bug.cgi?id=33861
-  if (Page* page = GetDocument().GetPage())
-    page->GetEventHandlerRegistry().DidRemoveEventHandler(
+  if (auto* frame = GetDocument().GetFrame()) {
+    frame->GetEventHandlerRegistry().DidRemoveEventHandler(
         *this, event_type, registered_listener.Options());
+  }
 }
 
 void Node::RemoveAllEventListeners() {
   if (HasEventListeners() && GetDocument().GetPage())
     GetDocument()
-        .GetPage()
+        .GetFrame()
         ->GetEventHandlerRegistry()
         .DidRemoveAllEventHandlers(*this);
   EventTarget::RemoveAllEventListeners();
@@ -2056,11 +2107,11 @@ void Node::RemoveAllEventListenersRecursively() {
 }
 
 using EventTargetDataMap =
-    PersistentHeapHashMap<WeakMember<Node>,
-                          TraceWrapperMember<EventTargetData>>;
+    HeapHashMap<WeakMember<Node>, TraceWrapperMember<EventTargetData>>;
 static EventTargetDataMap& GetEventTargetDataMap() {
-  DEFINE_STATIC_LOCAL(EventTargetDataMap, map, ());
-  return map;
+  DEFINE_STATIC_LOCAL(Persistent<EventTargetDataMap>, map,
+                      (new EventTargetDataMap));
+  return *map;
 }
 
 EventTargetData* Node::GetEventTargetData() {
@@ -2103,7 +2154,7 @@ static inline void CollectMatchingObserversForMutation(
         observers,
     Registry* registry,
     Node& target,
-    MutationObserver::MutationType type,
+    MutationType type,
     const QualifiedName* attribute_name) {
   if (!registry)
     return;
@@ -2124,9 +2175,9 @@ static inline void CollectMatchingObserversForMutation(
 void Node::GetRegisteredMutationObserversOfType(
     HeapHashMap<Member<MutationObserver>, MutationRecordDeliveryOptions>&
         observers,
-    MutationObserver::MutationType type,
+    MutationType type,
     const QualifiedName* attribute_name) {
-  DCHECK((type == MutationObserver::kAttributes && attribute_name) ||
+  DCHECK((type == kMutationTypeAttributes && attribute_name) ||
          !attribute_name);
   CollectMatchingObserversForMutation(observers, MutationObserverRegistry(),
                                       *this, type, attribute_name);
@@ -2239,15 +2290,15 @@ void Node::HandleLocalEvents(Event& event) {
     return;
   }
 
-  FireEventListeners(&event);
+  FireEventListeners(event);
 }
 
-void Node::DispatchScopedEvent(Event* event) {
-  event->SetTrusted(true);
+void Node::DispatchScopedEvent(Event& event) {
+  event.SetTrusted(true);
   EventDispatcher::DispatchScopedEvent(*this, event);
 }
 
-DispatchEventResult Node::DispatchEventInternal(Event* event) {
+DispatchEventResult Node::DispatchEventInternal(Event& event) {
   return EventDispatcher::DispatchEvent(*this, event);
 }
 
@@ -2262,8 +2313,8 @@ void Node::DispatchSubtreeModifiedEvent() {
   if (!GetDocument().HasListenerType(Document::kDOMSubtreeModifiedListener))
     return;
 
-  DispatchScopedEvent(MutationEvent::Create(EventTypeNames::DOMSubtreeModified,
-                                            Event::Bubbles::kYes));
+  DispatchScopedEvent(*MutationEvent::Create(EventTypeNames::DOMSubtreeModified,
+                                             Event::Bubbles::kYes));
 }
 
 DispatchEventResult Node::DispatchDOMActivateEvent(int detail,
@@ -2271,120 +2322,16 @@ DispatchEventResult Node::DispatchDOMActivateEvent(int detail,
 #if DCHECK_IS_ON()
   DCHECK(!EventDispatchForbiddenScope::IsEventDispatchForbidden());
 #endif
-  UIEvent* event = UIEvent::Create();
-  event->initUIEvent(EventTypeNames::DOMActivate, true, true,
-                     GetDocument().domWindow(), detail);
-  event->SetUnderlyingEvent(&underlying_event);
-  event->SetComposed(underlying_event.composed());
+  UIEvent& event = *UIEvent::Create();
+  event.initUIEvent(EventTypeNames::DOMActivate, true, true,
+                    GetDocument().domWindow(), detail);
+  event.SetUnderlyingEvent(&underlying_event);
+  event.SetComposed(underlying_event.composed());
   DispatchScopedEvent(event);
 
   // TODO(dtapuska): Dispatching scoped events shouldn't check the return
   // type because the scoped event could get put off in the delayed queue.
-  return EventTarget::GetDispatchEventResult(*event);
-}
-
-void Node::CreateAndDispatchPointerEvent(const AtomicString& mouse_event_name,
-                                         const WebMouseEvent& mouse_event,
-                                         LocalDOMWindow* view) {
-  AtomicString pointer_event_name;
-  if (mouse_event_name == EventTypeNames::mousemove)
-    pointer_event_name = EventTypeNames::pointermove;
-  else if (mouse_event_name == EventTypeNames::mousedown)
-    pointer_event_name = EventTypeNames::pointerdown;
-  else if (mouse_event_name == EventTypeNames::mouseup)
-    pointer_event_name = EventTypeNames::pointerup;
-  else
-    return;
-
-  PointerEventInit pointer_event_init;
-
-  pointer_event_init.setPointerId(PointerEventFactory::kMouseId);
-  pointer_event_init.setPointerType("mouse");
-  pointer_event_init.setIsPrimary(true);
-  pointer_event_init.setButtons(
-      MouseEvent::WebInputEventModifiersToButtons(mouse_event.GetModifiers()));
-
-  pointer_event_init.setBubbles(true);
-  pointer_event_init.setCancelable(true);
-  pointer_event_init.setComposed(true);
-  pointer_event_init.setDetail(0);
-
-  pointer_event_init.setScreenX(mouse_event.PositionInScreen().x);
-  pointer_event_init.setScreenY(mouse_event.PositionInScreen().y);
-
-  IntPoint location_in_frame_zoomed;
-  if (view && view->GetFrame() && view->GetFrame()->View()) {
-    LocalFrame* frame = view->GetFrame();
-    LocalFrameView* frame_view = frame->View();
-    IntPoint location_in_contents = frame_view->RootFrameToContents(
-        FlooredIntPoint(mouse_event.PositionInRootFrame()));
-    location_in_frame_zoomed =
-        frame_view->ContentsToFrame(location_in_contents);
-    float scale_factor = 1 / frame->PageZoomFactor();
-    location_in_frame_zoomed.Scale(scale_factor, scale_factor);
-  }
-
-  // Set up initial values for coordinates.
-  pointer_event_init.setClientX(location_in_frame_zoomed.X());
-  pointer_event_init.setClientY(location_in_frame_zoomed.Y());
-
-  if (pointer_event_name == EventTypeNames::pointerdown ||
-      pointer_event_name == EventTypeNames::pointerup) {
-    pointer_event_init.setButton(static_cast<int>(mouse_event.button));
-  } else {
-    pointer_event_init.setButton(
-        static_cast<int>(WebPointerProperties::Button::kNoButton));
-  }
-
-  UIEventWithKeyState::SetFromWebInputEventModifiers(
-      pointer_event_init,
-      static_cast<WebInputEvent::Modifiers>(mouse_event.GetModifiers()));
-  pointer_event_init.setView(view);
-
-  DispatchEvent(PointerEvent::Create(pointer_event_name, pointer_event_init));
-}
-
-// TODO(crbug.com/665924): This function bypasses all Blink event path.
-// It should be using that flow instead of creating/sending events directly.
-void Node::DispatchMouseEvent(const WebMouseEvent& event,
-                              const AtomicString& mouse_event_type,
-                              int detail,
-                              const String& canvas_region_id,
-                              Node* related_target) {
-  CreateAndDispatchPointerEvent(mouse_event_type, event,
-                                GetDocument().domWindow());
-
-  bool is_mouse_enter_or_leave =
-      mouse_event_type == EventTypeNames::mouseenter ||
-      mouse_event_type == EventTypeNames::mouseleave;
-  MouseEventInit initializer;
-  initializer.setBubbles(!is_mouse_enter_or_leave);
-  initializer.setCancelable(!is_mouse_enter_or_leave);
-  MouseEvent::SetCoordinatesFromWebPointerProperties(
-      event.FlattenTransform(), GetDocument().domWindow(), initializer);
-  initializer.setButton(static_cast<short>(event.button));
-  initializer.setButtons(
-      MouseEvent::WebInputEventModifiersToButtons(event.GetModifiers()));
-  initializer.setView(GetDocument().domWindow());
-  initializer.setDetail(detail);
-  initializer.setComposed(true);
-  initializer.setRegion(canvas_region_id);
-  initializer.setRelatedTarget(related_target);
-  UIEventWithKeyState::SetFromWebInputEventModifiers(
-      initializer, static_cast<WebInputEvent::Modifiers>(event.GetModifiers()));
-  initializer.setSourceCapabilities(
-      GetDocument().domWindow() ? GetDocument()
-                                      .domWindow()
-                                      ->GetInputDeviceCapabilities()
-                                      ->FiresTouchEvents(event.FromTouch())
-                                : nullptr);
-
-  DispatchEvent(MouseEvent::Create(
-      mouse_event_type, initializer,
-      TimeTicksFromSeconds(event.TimeStampSeconds()),
-      event.FromTouch() ? MouseEvent::kFromTouch
-                        : MouseEvent::kRealOrIndistinguishable,
-      event.menu_source_type));
+  return EventTarget::GetDispatchEventResult(event);
 }
 
 void Node::DispatchSimulatedClick(Event* underlying_event,
@@ -2396,42 +2343,43 @@ void Node::DispatchSimulatedClick(Event* underlying_event,
 
 void Node::DispatchInputEvent() {
   // Legacy 'input' event for forms set value and checked.
-  DispatchScopedEvent(Event::CreateBubble(EventTypeNames::input));
+  DispatchScopedEvent(*Event::CreateBubble(EventTypeNames::input));
 }
 
-void Node::DefaultEventHandler(Event* event) {
-  if (event->target() != this)
+void Node::DefaultEventHandler(Event& event) {
+  if (event.target() != this)
     return;
-  const AtomicString& event_type = event->type();
+  const AtomicString& event_type = event.type();
   if (event_type == EventTypeNames::keydown ||
       event_type == EventTypeNames::keypress) {
-    if (event->IsKeyboardEvent()) {
-      if (LocalFrame* frame = GetDocument().GetFrame())
+    if (event.IsKeyboardEvent()) {
+      if (LocalFrame* frame = GetDocument().GetFrame()) {
         frame->GetEventHandler().DefaultKeyboardEventHandler(
-            ToKeyboardEvent(event));
+            ToKeyboardEvent(&event));
+      }
     }
   } else if (event_type == EventTypeNames::click) {
-    int detail =
-        event->IsUIEvent() ? static_cast<UIEvent*>(event)->detail() : 0;
-    if (DispatchDOMActivateEvent(detail, *event) !=
+    int detail = event.IsUIEvent() ? ToUIEvent(event).detail() : 0;
+    if (DispatchDOMActivateEvent(detail, event) !=
         DispatchEventResult::kNotCanceled)
-      event->SetDefaultHandled();
+      event.SetDefaultHandled();
   } else if (event_type == EventTypeNames::contextmenu &&
-             event->IsMouseEvent()) {
+             event.IsMouseEvent()) {
     if (Page* page = GetDocument().GetPage()) {
       page->GetContextMenuController().HandleContextMenuEvent(
-          ToMouseEvent(event));
+          ToMouseEvent(&event));
     }
   } else if (event_type == EventTypeNames::textInput) {
-    if (event->HasInterface(EventNames::TextEvent)) {
-      if (LocalFrame* frame = GetDocument().GetFrame())
+    if (event.HasInterface(EventNames::TextEvent)) {
+      if (LocalFrame* frame = GetDocument().GetFrame()) {
         frame->GetEventHandler().DefaultTextInputEventHandler(
-            ToTextEvent(event));
+            ToTextEvent(&event));
+      }
     }
   } else if (RuntimeEnabledFeatures::MiddleClickAutoscrollEnabled() &&
-             event_type == EventTypeNames::mousedown && event->IsMouseEvent()) {
-    MouseEvent* mouse_event = ToMouseEvent(event);
-    if (mouse_event->button() ==
+             event_type == EventTypeNames::mousedown && event.IsMouseEvent()) {
+    auto& mouse_event = ToMouseEvent(event);
+    if (mouse_event.button() ==
         static_cast<short>(WebPointerProperties::Button::kMiddle)) {
       if (EnclosingLinkEventParentOrSelf())
         return;
@@ -2447,9 +2395,8 @@ void Node::DefaultEventHandler(Event* event) {
           layout_object &&
           (!layout_object->IsBox() ||
            !ToLayoutBox(layout_object)->CanBeScrolledAndHasScrollableArea())) {
-        if (layout_object->GetNode() &&
-            layout_object->GetNode()->IsDocumentNode()) {
-          Element* owner = ToDocument(layout_object->GetNode())->LocalOwner();
+        if (auto* document = DynamicTo<Document>(layout_object->GetNode())) {
+          Element* owner = document->LocalOwner();
           layout_object = owner ? owner->GetLayoutObject() : nullptr;
         } else {
           layout_object = layout_object->Parent();
@@ -2460,25 +2407,47 @@ void Node::DefaultEventHandler(Event* event) {
           frame->GetEventHandler().StartMiddleClickAutoscroll(layout_object);
       }
     }
-  } else if (event_type == EventTypeNames::mouseup && event->IsMouseEvent()) {
-    MouseEvent* mouse_event = ToMouseEvent(event);
-    if (mouse_event->button() ==
+  } else if (event_type == EventTypeNames::mouseup && event.IsMouseEvent()) {
+    auto& mouse_event = ToMouseEvent(event);
+    if (mouse_event.button() ==
         static_cast<short>(WebPointerProperties::Button::kBack)) {
       if (LocalFrame* frame = GetDocument().GetFrame()) {
         if (frame->Client()->NavigateBackForward(-1))
-          event->SetDefaultHandled();
+          event.SetDefaultHandled();
       }
-    } else if (mouse_event->button() ==
+    } else if (mouse_event.button() ==
                static_cast<short>(WebPointerProperties::Button::kForward)) {
       if (LocalFrame* frame = GetDocument().GetFrame()) {
         if (frame->Client()->NavigateBackForward(1))
-          event->SetDefaultHandled();
+          event.SetDefaultHandled();
       }
     }
   }
 }
 
-void Node::WillCallDefaultEventHandler(const Event&) {}
+void Node::WillCallDefaultEventHandler(const Event& event) {
+  if (!event.IsKeyboardEvent())
+    return;
+
+  if (!IsFocused() || GetDocument().LastFocusType() != kWebFocusTypeMouse)
+    return;
+
+  if (event.type() != EventTypeNames::keydown ||
+      GetDocument().HadKeyboardEvent())
+    return;
+
+  GetDocument().SetHadKeyboardEvent(true);
+
+  // Changes to HadKeyboardEvent may affect :focus-visible matching,
+  // ShouldHaveFocusAppearance and LayoutTheme::IsFocused().
+  // Inform LayoutTheme if HadKeyboardEvent changes.
+  if (GetLayoutObject()) {
+    GetLayoutObject()->InvalidateIfControlStateChanged(kFocusControlState);
+
+    if (RuntimeEnabledFeatures::CSSFocusVisibleEnabled() && IsContainerNode())
+      ToContainerNode(*this).FocusVisibleStateChanged();
+  }
+}
 
 bool Node::HasActivationBehavior() const {
   return false;
@@ -2526,7 +2495,7 @@ void Node::DecrementConnectedSubframeCount() {
 }
 
 StaticNodeList* Node::getDestinationInsertionPoints() {
-  UpdateDistribution();
+  UpdateDistributionForLegacyDistributedNodes();
   HeapVector<Member<V0InsertionPoint>, 8> insertion_points;
   CollectDestinationInsertionPoints(*this, insertion_points);
   HeapVector<Member<Node>> filtered_insertion_points;
@@ -2568,15 +2537,13 @@ HTMLSlotElement* Node::assignedSlotForBinding() {
 }
 
 void Node::SetFocused(bool flag, WebFocusType focus_type) {
+  if (!flag || focus_type == kWebFocusTypeMouse)
+    GetDocument().SetHadKeyboardEvent(false);
   GetDocument().UserActionElements().SetFocused(this, flag);
 }
 
 void Node::SetHasFocusWithin(bool flag) {
   GetDocument().UserActionElements().SetHasFocusWithin(this, flag);
-}
-
-void Node::SetWasFocusedByMouse(bool flag) {
-  GetDocument().UserActionElements().SetWasFocusedByMouse(this, flag);
 }
 
 void Node::SetActive(bool flag) {
@@ -2621,11 +2588,6 @@ bool Node::IsUserActionElementHasFocusWithin() const {
   return GetDocument().UserActionElements().HasFocusWithin(this);
 }
 
-bool Node::IsUserActionElementWasFocusedByMouse() const {
-  DCHECK(IsUserActionElement());
-  return GetDocument().UserActionElements().WasFocusedByMouse(this);
-}
-
 void Node::SetCustomElementState(CustomElementState new_state) {
   CustomElementState old_state = GetCustomElementState();
 
@@ -2657,8 +2619,10 @@ void Node::SetCustomElementState(CustomElementState new_state) {
                 static_cast<NodeFlags>(new_state);
   DCHECK(new_state == GetCustomElementState());
 
-  if (element->IsDefined() != was_defined)
+  if (element->IsDefined() != was_defined) {
     element->PseudoStateChanged(CSSSelector::kPseudoDefined);
+    element->PseudoStateChanged(CSSSelector::kPseudoUnresolved);
+  }
 }
 
 void Node::SetV0CustomElementState(V0CustomElementState new_state) {
@@ -2683,8 +2647,10 @@ void Node::SetV0CustomElementState(V0CustomElementState new_state) {
   SetFlag(kV0CustomElementFlag);
   SetFlag(new_state == kV0Upgraded, kV0CustomElementUpgradedFlag);
 
-  if (old_state == kV0NotCustomElement || new_state == kV0Upgraded)
+  if (old_state == kV0NotCustomElement || new_state == kV0Upgraded) {
     ToElement(this)->PseudoStateChanged(CSSSelector::kPseudoUnresolved);
+    ToElement(this)->PseudoStateChanged(CSSSelector::kPseudoDefined);
+  }
 }
 
 void Node::CheckSlotChange(SlotChangeType slot_change_type) {
@@ -2757,25 +2723,13 @@ void Node::Trace(blink::Visitor* visitor) {
   visitor->Trace(parent_or_shadow_host_node_);
   visitor->Trace(previous_);
   visitor->Trace(next_);
-  // rareData() and m_data.m_layoutObject share their storage. We have to trace
-  // only one of them.
+  // rareData() and data_.node_layout_data_ share their storage. We have to
+  // trace only one of them.
   if (HasRareData())
-    visitor->Trace(RareData());
-
+    visitor->TraceWithWrappers(RareData());
+  visitor->TraceWithWrappers(GetEventTargetData());
   visitor->Trace(tree_scope_);
-  // EventTargetData is traced through EventTargetDataMap.
   EventTarget::Trace(visitor);
-}
-
-void Node::TraceWrappers(const ScriptWrappableVisitor* visitor) const {
-  visitor->TraceWrappers(parent_or_shadow_host_node_);
-  visitor->TraceWrappers(previous_);
-  visitor->TraceWrappers(next_);
-  if (HasRareData())
-    visitor->TraceWrappersWithManualWriteBarrier(RareData());
-  visitor->TraceWrappersWithManualWriteBarrier(
-      const_cast<Node*>(this)->GetEventTargetData());
-  EventTarget::TraceWrappers(visitor);
 }
 
 }  // namespace blink

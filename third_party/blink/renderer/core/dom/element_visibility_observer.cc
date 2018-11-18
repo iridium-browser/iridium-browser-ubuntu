@@ -4,6 +4,7 @@
 
 #include "third_party/blink/renderer/core/dom/element_visibility_observer.h"
 
+#include "third_party/blink/renderer/core/dom/document.h"
 #include "third_party/blink/renderer/core/dom/element.h"
 #include "third_party/blink/renderer/core/frame/local_frame.h"
 #include "third_party/blink/renderer/core/intersection_observer/intersection_observer_entry.h"
@@ -22,8 +23,7 @@ void ElementVisibilityObserver::Start(float threshold) {
   DCHECK(!intersection_observer_);
 
   ExecutionContext* context = element_->GetExecutionContext();
-  DCHECK(context->IsDocument());
-  Document& document = ToDocument(*context);
+  Document& document = To<Document>(*context);
 
   intersection_observer_ = IntersectionObserver::Create(
       {} /* root_margin */, {threshold}, &document,

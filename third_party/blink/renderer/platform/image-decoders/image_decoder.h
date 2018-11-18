@@ -41,17 +41,19 @@
 #include "third_party/blink/renderer/platform/wtf/text/wtf_string.h"
 #include "third_party/blink/renderer/platform/wtf/time.h"
 #include "third_party/blink/renderer/platform/wtf/vector.h"
-#include "third_party/skia/include/core/SkColorSpaceXform.h"
+#include "third_party/skia/third_party/skcms/skcms.h"
+
+class SkColorSpace;
 
 namespace blink {
 
 #if SK_B32_SHIFT
-inline SkColorSpaceXform::ColorFormat XformColorFormat() {
-  return SkColorSpaceXform::kRGBA_8888_ColorFormat;
+inline skcms_PixelFormat XformColorFormat() {
+  return skcms_PixelFormat_RGBA_8888;
 }
 #else
-inline SkColorSpaceXform::ColorFormat XformColorFormat() {
-  return SkColorSpaceXform::kBGRA_8888_ColorFormat;
+inline skcms_PixelFormat XformColorFormat() {
+  return skcms_PixelFormat_BGRA_8888;
 }
 #endif
 
@@ -73,6 +75,37 @@ class PLATFORM_EXPORT ImagePlanes final {
   size_t row_bytes_[3];
 };
 
+class PLATFORM_EXPORT ColorProfile final {
+  USING_FAST_MALLOC(ColorProfile);
+  WTF_MAKE_NONCOPYABLE(ColorProfile);
+
+ public:
+  ColorProfile(const skcms_ICCProfile&, std::unique_ptr<uint8_t[]> = nullptr);
+  static std::unique_ptr<ColorProfile> Create(const void* buffer, size_t size);
+
+  const skcms_ICCProfile* GetProfile() const { return &profile_; }
+
+ private:
+  skcms_ICCProfile profile_;
+  std::unique_ptr<uint8_t[]> buffer_;
+};
+
+class PLATFORM_EXPORT ColorProfileTransform final {
+  USING_FAST_MALLOC(ColorProfileTransform);
+  WTF_MAKE_NONCOPYABLE(ColorProfileTransform);
+
+ public:
+  ColorProfileTransform(const skcms_ICCProfile* src_profile,
+                        const skcms_ICCProfile* dst_profile);
+
+  const skcms_ICCProfile* SrcProfile() const;
+  const skcms_ICCProfile* DstProfile() const;
+
+ private:
+  const skcms_ICCProfile* src_profile_;
+  skcms_ICCProfile dst_profile_;
+};
+
 // ImageDecoder is a base for all format-specific decoders
 // (e.g. JPEGImageDecoder). This base manages the ImageFrame cache.
 //
@@ -85,6 +118,12 @@ class PLATFORM_EXPORT ImageDecoder {
       Platform::kNoDecodedImageByteLimit;
 
   enum AlphaOption { kAlphaPremultiplied, kAlphaNotPremultiplied };
+  enum HighBitDepthDecodingOption {
+    // Decode everything to uint8 pixel format (kN32 channel order).
+    kDefaultBitDepth,
+    // Decode high bit depth images to half float pixel format.
+    kHighBitDepthToHalfFloat
+  };
 
   virtual ~ImageDecoder() = default;
 
@@ -96,21 +135,30 @@ class PLATFORM_EXPORT ImageDecoder {
       scoped_refptr<SegmentReader> data,
       bool data_complete,
       AlphaOption,
+      HighBitDepthDecodingOption,
       const ColorBehavior&,
       const SkISize& desired_size = SkISize::MakeEmpty());
   static std::unique_ptr<ImageDecoder> Create(
       scoped_refptr<SharedBuffer> data,
       bool data_complete,
       AlphaOption alpha_option,
+      HighBitDepthDecodingOption high_bit_depth_decoding_option,
       const ColorBehavior& color_behavior,
       const SkISize& desired_size = SkISize::MakeEmpty()) {
     return Create(SegmentReader::CreateFromSharedBuffer(std::move(data)),
-                  data_complete, alpha_option, color_behavior, desired_size);
+                  data_complete, alpha_option, high_bit_depth_decoding_option,
+                  color_behavior, desired_size);
   }
 
   virtual String FilenameExtension() const = 0;
 
   bool IsAllDataReceived() const { return is_all_data_received_; }
+
+  // Returns true if the decoder supports decoding to high bit depth. The
+  // decoded output will be high bit depth (half float backed bitmap) iff
+  // encoded image is high bit depth and high_bit_depth_decoding_option_ is set
+  // to kHighBitDepthToHalfFloat.
+  virtual bool ImageIsHighBitDepth() { return false; }
 
   // Returns true if the buffer holds enough data to instantiate a decoder.
   // This is useful for callers to determine whether a decoder instantiation
@@ -173,7 +221,11 @@ class PLATFORM_EXPORT ImageDecoder {
   // Returns whether the size is legal (i.e. not going to result in
   // overflow elsewhere).  If not, marks decoding as failed.
   virtual bool SetSize(unsigned width, unsigned height) {
-    if (SizeCalculationMayOverflow(width, height))
+    unsigned decoded_bytes_per_pixel = 4;
+    if (ImageIsHighBitDepth() &&
+        high_bit_depth_decoding_option_ == kHighBitDepthToHalfFloat)
+      decoded_bytes_per_pixel = 8;
+    if (SizeCalculationMayOverflow(width, height, decoded_bytes_per_pixel))
       return SetFailed();
 
     size_ = IntSize(width, height);
@@ -218,17 +270,17 @@ class PLATFORM_EXPORT ImageDecoder {
   // This returns the color space that will be included in the SkImageInfo of
   // SkImages created from this decoder. This will be nullptr unless the
   // decoder was created with the option ColorSpaceTagged.
-  sk_sp<SkColorSpace> ColorSpaceForSkImages() const;
+  sk_sp<SkColorSpace> ColorSpaceForSkImages();
 
   // This returns whether or not the image included a not-ignored embedded
-  // color space. This is independent of whether or not that space's transform
-  // has been baked into the pixel values.
-  bool HasEmbeddedColorSpace() const { return embedded_color_space_.get(); }
+  // color profile. This is independent of whether or not that profile's
+  // transform has been baked into the pixel values.
+  bool HasEmbeddedColorProfile() const { return embedded_color_profile_.get(); }
 
-  void SetEmbeddedColorSpace(sk_sp<SkColorSpace> src_space);
+  void SetEmbeddedColorProfile(std::unique_ptr<ColorProfile> profile);
 
   // Transformation from embedded color space to target color space.
-  SkColorSpaceXform* ColorTransform();
+  ColorProfileTransform* ColorTransform();
 
   AlphaOption GetAlphaOption() const {
     return premultiply_alpha_ ? kAlphaPremultiplied : kAlphaNotPremultiplied;
@@ -251,15 +303,6 @@ class PLATFORM_EXPORT ImageDecoder {
   // Callers may pass WTF::kNotFound to clear all frames.
   // Note: If |frame_buffer_cache_| contains only one frame, it won't be
   // cleared. Returns the number of bytes of frame data actually cleared.
-  //
-  // This is a virtual method because MockImageDecoder needs to override it in
-  // order to run the test ImageFrameGeneratorTest::ClearMultiFrameDecode.
-  //
-  // @TODO  Let MockImageDecoder override ImageFrame::ClearFrameBuffer instead,
-  //        so this method can be made non-virtual. It is used in the test
-  //        ImageFrameGeneratorTest::ClearMultiFrameDecode. The test needs to
-  //        be modified since two frames may be kept in cache, instead of
-  //        always just one, with this ClearCacheExceptFrame implementation.
   virtual size_t ClearCacheExceptFrame(size_t);
 
   // If the image has a cursor hot-spot, stores it in the argument
@@ -284,9 +327,11 @@ class PLATFORM_EXPORT ImageDecoder {
 
  protected:
   ImageDecoder(AlphaOption alpha_option,
+               HighBitDepthDecodingOption high_bit_depth_decoding_option,
                const ColorBehavior& color_behavior,
                size_t max_decoded_bytes)
       : premultiply_alpha_(alpha_option == kAlphaPremultiplied),
+        high_bit_depth_decoding_option_(high_bit_depth_decoding_option),
         color_behavior_(color_behavior),
         max_decoded_bytes_(max_decoded_bytes),
         purge_aggressively_(false) {}
@@ -366,6 +411,7 @@ class PLATFORM_EXPORT ImageDecoder {
   scoped_refptr<SegmentReader> data_;  // The encoded data.
   Vector<ImageFrame, 1> frame_buffer_cache_;
   const bool premultiply_alpha_;
+  const HighBitDepthDecodingOption high_bit_depth_decoding_option_;
   const ColorBehavior color_behavior_;
   ImageOrientation orientation_;
 
@@ -399,16 +445,22 @@ class PLATFORM_EXPORT ImageDecoder {
   // |index| is smaller than |frame_buffer_cache_|.size().
   virtual bool FrameStatusSufficientForSuccessors(size_t index) {
     DCHECK(index < frame_buffer_cache_.size());
-    return frame_buffer_cache_[index].GetStatus() != ImageFrame::kFrameEmpty;
+    ImageFrame::Status frame_status = frame_buffer_cache_[index].GetStatus();
+    return frame_status == ImageFrame::kFramePartial ||
+           frame_status == ImageFrame::kFrameComplete;
   }
 
  private:
-  // Some code paths compute the size of the image as "width * height * 4"
+  // Some code paths compute the size of the image as "width * height * 4 or 8"
   // and return it as a (signed) int.  Avoid overflow.
-  static bool SizeCalculationMayOverflow(unsigned width, unsigned height) {
+  static bool SizeCalculationMayOverflow(unsigned width,
+                                         unsigned height,
+                                         unsigned decoded_bytes_per_pixel) {
     unsigned long long total_size = static_cast<unsigned long long>(width) *
                                     static_cast<unsigned long long>(height);
-    return total_size > ((1 << 29) - 1);
+    if (decoded_bytes_per_pixel == 4)
+      return total_size > ((1 << 29) - 1);
+    return total_size > ((1 << 28) - 1);
   }
 
   bool purge_aggressively_;
@@ -427,9 +479,11 @@ class PLATFORM_EXPORT ImageDecoder {
   bool failed_ = false;
   bool has_histogrammed_color_space_ = false;
 
-  sk_sp<SkColorSpace> embedded_color_space_ = nullptr;
+  std::unique_ptr<ColorProfile> embedded_color_profile_;
+  sk_sp<SkColorSpace> color_space_for_sk_images_;
+
   bool source_to_target_color_transform_needs_update_ = false;
-  std::unique_ptr<SkColorSpaceXform> source_to_target_color_transform_;
+  std::unique_ptr<ColorProfileTransform> source_to_target_color_transform_;
 };
 
 }  // namespace blink

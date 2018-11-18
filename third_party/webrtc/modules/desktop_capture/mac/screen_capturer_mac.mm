@@ -12,82 +12,17 @@
 
 #include "modules/desktop_capture/mac/screen_capturer_mac.h"
 
-#include "modules/desktop_capture/mac/desktop_frame_cgimage.h"
+#include "modules/desktop_capture/mac/desktop_frame_provider.h"
 #include "rtc_base/checks.h"
 #include "rtc_base/constructormagic.h"
 #include "rtc_base/logging.h"
 #include "rtc_base/timeutils.h"
-#include "sdk/objc/Framework/Classes/Common/scoped_cftyperef.h"
+#include "rtc_base/trace_event.h"
+#include "sdk/objc/helpers/scoped_cftyperef.h"
 
 namespace webrtc {
 
-// CGDisplayStreamRefs need to be destroyed asynchronously after receiving a
-// kCGDisplayStreamFrameStatusStopped callback from CoreGraphics. This may
-// happen after the ScreenCapturerMac has been destroyed. DisplayStreamManager
-// is responsible for destroying all extant CGDisplayStreamRefs, and will
-// destroy itself once it's done.
-class DisplayStreamManager {
- public:
-  int GetUniqueId() { return ++unique_id_generator_; }
-  void DestroyStream(int unique_id) {
-    auto it = display_stream_wrappers_.find(unique_id);
-    RTC_CHECK(it != display_stream_wrappers_.end());
-    RTC_CHECK(!it->second.active);
-    CFRelease(it->second.stream);
-    display_stream_wrappers_.erase(it);
-
-    if (ready_for_self_destruction_ && display_stream_wrappers_.empty()) delete this;
-  }
-
-  void SaveStream(int unique_id, CGDisplayStreamRef stream) {
-    RTC_CHECK(unique_id <= unique_id_generator_);
-    DisplayStreamWrapper wrapper;
-    wrapper.stream = stream;
-    display_stream_wrappers_[unique_id] = wrapper;
-  }
-
-  void UnregisterActiveStreams() {
-    for (auto& pair : display_stream_wrappers_) {
-      DisplayStreamWrapper& wrapper = pair.second;
-      if (wrapper.active) {
-        wrapper.active = false;
-        CFRunLoopSourceRef source = CGDisplayStreamGetRunLoopSource(wrapper.stream);
-        CFRunLoopRemoveSource(CFRunLoopGetCurrent(), source, kCFRunLoopCommonModes);
-        CGDisplayStreamStop(wrapper.stream);
-      }
-    }
-  }
-
-  void PrepareForSelfDestruction() {
-    ready_for_self_destruction_ = true;
-
-    if (display_stream_wrappers_.empty()) delete this;
-  }
-
-  // Once the DisplayStreamManager is ready for destruction, the
-  // ScreenCapturerMac is no longer present. Any updates should be ignored.
-  bool ShouldIgnoreUpdates() { return ready_for_self_destruction_; }
-
- private:
-  struct DisplayStreamWrapper {
-    // The registered CGDisplayStreamRef.
-    CGDisplayStreamRef stream = nullptr;
-
-    // Set to false when the stream has been stopped. An asynchronous callback
-    // from CoreGraphics will let us destroy the CGDisplayStreamRef.
-    bool active = true;
-  };
-
-  std::map<int, DisplayStreamWrapper> display_stream_wrappers_;
-  int unique_id_generator_ = 0;
-  bool ready_for_self_destruction_ = false;
-};
-
 namespace {
-
-// Standard Mac displays have 72dpi, but we report 96dpi for
-// consistency with Windows and Linux.
-const int kStandardDPI = 96;
 
 // Scales all coordinates of a rect by a specified factor.
 DesktopRect ScaleAndRoundCGRect(const CGRect& rect, float scale) {
@@ -215,26 +150,28 @@ rtc::ScopedCFTypeRef<CGImageRef> CreateExcludedWindowRegionImage(const DesktopRe
 
 ScreenCapturerMac::ScreenCapturerMac(
     rtc::scoped_refptr<DesktopConfigurationMonitor> desktop_config_monitor,
-    bool detect_updated_region)
+    bool detect_updated_region,
+    bool allow_iosurface)
     : detect_updated_region_(detect_updated_region),
-      desktop_config_monitor_(desktop_config_monitor) {
-  display_stream_manager_ = new DisplayStreamManager;
+      desktop_config_monitor_(desktop_config_monitor),
+      desktop_frame_provider_(allow_iosurface) {
+  RTC_LOG(LS_INFO) << "Allow IOSurface: " << allow_iosurface;
+  thread_checker_.DetachFromThread();
 }
 
 ScreenCapturerMac::~ScreenCapturerMac() {
+  RTC_DCHECK(thread_checker_.CalledOnValidThread());
   ReleaseBuffers();
   UnregisterRefreshAndMoveHandlers();
-  display_stream_manager_->PrepareForSelfDestruction();
 }
 
 bool ScreenCapturerMac::Init() {
+  TRACE_EVENT0("webrtc", "ScreenCapturerMac::Init");
+
   desktop_config_monitor_->Lock();
   desktop_config_ = desktop_config_monitor_->desktop_configuration();
   desktop_config_monitor_->Unlock();
-  if (!RegisterRefreshAndMoveHandlers()) {
-    return false;
-  }
-  ScreenConfigurationChanged();
+
   return true;
 }
 
@@ -246,13 +183,25 @@ void ScreenCapturerMac::ReleaseBuffers() {
 }
 
 void ScreenCapturerMac::Start(Callback* callback) {
+  RTC_DCHECK(thread_checker_.CalledOnValidThread());
   RTC_DCHECK(!callback_);
   RTC_DCHECK(callback);
+  TRACE_EVENT_INSTANT1(
+      "webrtc", "ScreenCapturermac::Start", "target display id ", current_display_);
 
   callback_ = callback;
+  // Start and operate CGDisplayStream handler all from capture thread.
+  if (!RegisterRefreshAndMoveHandlers()) {
+    RTC_LOG(LS_ERROR) << "Failed to register refresh and move handlers.";
+    callback_->OnCaptureResult(Result::ERROR_PERMANENT, nullptr);
+    return;
+  }
+  ScreenConfigurationChanged();
 }
 
 void ScreenCapturerMac::CaptureFrame() {
+  RTC_DCHECK(thread_checker_.CalledOnValidThread());
+  TRACE_EVENT0("webrtc", "creenCapturerMac::CaptureFrame");
   int64_t capture_start_time_nanos = rtc::TimeNanos();
 
   queue_.MoveToNextFrame();
@@ -266,7 +215,11 @@ void ScreenCapturerMac::CaptureFrame() {
     // structures. Occasionally, the refresh and move handlers are lost when
     // the screen mode changes, so re-register them here.
     UnregisterRefreshAndMoveHandlers();
-    RegisterRefreshAndMoveHandlers();
+    if (!RegisterRefreshAndMoveHandlers()) {
+      RTC_LOG(LS_ERROR) << "Failed to register refresh and move handlers.";
+      callback_->OnCaptureResult(Result::ERROR_PERMANENT, nullptr);
+      return;
+    }
     ScreenConfigurationChanged();
   }
 
@@ -406,8 +359,8 @@ bool ScreenCapturerMac::CgBlit(const DesktopFrame& frame, const DesktopRegion& r
       }
     }
 
-    std::unique_ptr<DesktopFrameCGImage> frame_source =
-        DesktopFrameCGImage::CreateForDisplay(display_config.id);
+    std::unique_ptr<DesktopFrame> frame_source =
+        desktop_frame_provider_.TakeLatestFrameForDisplay(display_config.id);
     if (!frame_source) {
       continue;
     }
@@ -487,14 +440,12 @@ void ScreenCapturerMac::ScreenConfigurationChanged() {
 }
 
 bool ScreenCapturerMac::RegisterRefreshAndMoveHandlers() {
+  RTC_DCHECK(thread_checker_.CalledOnValidThread());
   desktop_config_ = desktop_config_monitor_->desktop_configuration();
   for (const auto& config : desktop_config_.displays) {
     size_t pixel_width = config.pixel_bounds.width();
     size_t pixel_height = config.pixel_bounds.height();
     if (pixel_width == 0 || pixel_height == 0) continue;
-    // Using a local variable forces the block to capture the raw pointer.
-    DisplayStreamManager* manager = display_stream_manager_;
-    int unique_id = manager->GetUniqueId();
     CGDirectDisplayID display_id = config.id;
     DesktopVector display_origin = config.pixel_bounds.top_left();
 
@@ -502,12 +453,8 @@ bool ScreenCapturerMac::RegisterRefreshAndMoveHandlers() {
                                                      uint64_t display_time,
                                                      IOSurfaceRef frame_surface,
                                                      CGDisplayStreamUpdateRef updateRef) {
-      if (status == kCGDisplayStreamFrameStatusStopped) {
-        manager->DestroyStream(unique_id);
-        return;
-      }
-
-      if (manager->ShouldIgnoreUpdates()) return;
+      RTC_DCHECK(thread_checker_.CalledOnValidThread());
+      if (status == kCGDisplayStreamFrameStatusStopped) return;
 
       // Only pay attention to frame updates.
       if (status != kCGDisplayStreamFrameStatusFrameComplete) return;
@@ -518,7 +465,7 @@ bool ScreenCapturerMac::RegisterRefreshAndMoveHandlers() {
       if (count != 0) {
         // According to CGDisplayStream.h, it's safe to call
         // CGDisplayStreamStop() from within the callback.
-        ScreenRefresh(count, rects, display_origin);
+        ScreenRefresh(display_id, count, rects, display_origin, frame_surface);
       }
     };
 
@@ -539,7 +486,7 @@ bool ScreenCapturerMac::RegisterRefreshAndMoveHandlers() {
 
       CFRunLoopSourceRef source = CGDisplayStreamGetRunLoopSource(display_stream);
       CFRunLoopAddSource(CFRunLoopGetCurrent(), source, kCFRunLoopCommonModes);
-      display_stream_manager_->SaveStream(unique_id, display_stream);
+      display_streams_.push_back(display_stream);
     }
   }
 
@@ -547,12 +494,25 @@ bool ScreenCapturerMac::RegisterRefreshAndMoveHandlers() {
 }
 
 void ScreenCapturerMac::UnregisterRefreshAndMoveHandlers() {
-  display_stream_manager_->UnregisterActiveStreams();
+  RTC_DCHECK(thread_checker_.CalledOnValidThread());
+
+  for (CGDisplayStreamRef stream : display_streams_) {
+    CFRunLoopSourceRef source = CGDisplayStreamGetRunLoopSource(stream);
+    CFRunLoopRemoveSource(CFRunLoopGetCurrent(), source, kCFRunLoopCommonModes);
+    CGDisplayStreamStop(stream);
+    CFRelease(stream);
+  }
+  display_streams_.clear();
+
+  // Release obsolete io surfaces.
+  desktop_frame_provider_.Release();
 }
 
-void ScreenCapturerMac::ScreenRefresh(CGRectCount count,
+void ScreenCapturerMac::ScreenRefresh(CGDirectDisplayID display_id,
+                                      CGRectCount count,
                                       const CGRect* rect_array,
-                                      DesktopVector display_origin) {
+                                      DesktopVector display_origin,
+                                      IOSurfaceRef io_surface) {
   if (screen_pixel_bounds_.is_empty()) ScreenConfigurationChanged();
 
   // The refresh rects are in display coordinates. We want to translate to
@@ -574,7 +534,10 @@ void ScreenCapturerMac::ScreenRefresh(CGRectCount count,
 
     region.AddRect(rect);
   }
-
+  // Always having the latest iosurface before invalidating a region.
+  // See https://bugs.chromium.org/p/webrtc/issues/detail?id=8652 for details.
+  desktop_frame_provider_.InvalidateIOSurface(
+      display_id, rtc::ScopedCFTypeRef<IOSurfaceRef>(io_surface, rtc::RetainPolicy::RETAIN));
   helper_.InvalidateRegion(region);
 }
 

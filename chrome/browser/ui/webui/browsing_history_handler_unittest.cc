@@ -9,6 +9,7 @@
 #include <set>
 #include <utility>
 
+#include "base/bind.h"
 #include "base/macros.h"
 #include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
@@ -30,7 +31,6 @@
 #include "components/sync/base/model_type.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/test/mock_render_process_host.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_web_ui.h"
 #include "net/http/http_status_code.h"
@@ -62,21 +62,27 @@ class TestSyncService : public browser_sync::TestProfileSyncService {
   explicit TestSyncService(Profile* profile)
       : browser_sync::TestProfileSyncService(
             CreateProfileSyncServiceParamsForTest(profile)),
-        sync_active_(true) {}
+        state_(TransportState::ACTIVE) {}
 
-  bool IsSyncActive() const override { return sync_active_; }
+  TransportState GetTransportState() const override { return state_; }
+
+  int GetDisableReasons() const override { return DISABLE_REASON_NONE; }
+
+  bool IsFirstSetupComplete() const override { return true; }
 
   syncer::ModelTypeSet GetActiveDataTypes() const override {
     return syncer::ModelTypeSet::All();
   }
 
-  void SetSyncActive(bool active) {
-    sync_active_ = active;
+  void SetTransportState(TransportState state) {
+    state_ = state;
     NotifyObservers();
   }
 
  private:
-  bool sync_active_;
+  TransportState state_;
+
+  DISALLOW_COPY_AND_ASSIGN(TestSyncService);
 };
 
 class BrowsingHistoryHandlerWithWebUIForTesting
@@ -92,6 +98,8 @@ class BrowsingHistoryHandlerWithWebUIForTesting
 
  private:
   base::SimpleTestClock test_clock_;
+
+  DISALLOW_COPY_AND_ASSIGN(BrowsingHistoryHandlerWithWebUIForTesting);
 };
 
 }  // namespace
@@ -100,14 +108,15 @@ class BrowsingHistoryHandlerTest : public ::testing::Test {
  public:
   void SetUp() override {
     TestingProfile::Builder builder;
-    builder.AddTestingFactory(ProfileOAuth2TokenServiceFactory::GetInstance(),
-                              &BuildFakeProfileOAuth2TokenService);
+    builder.AddTestingFactory(
+        ProfileOAuth2TokenServiceFactory::GetInstance(),
+        base::BindRepeating(&BuildFakeProfileOAuth2TokenService));
     builder.AddTestingFactory(SigninManagerFactory::GetInstance(),
-                              &BuildFakeSigninManagerBase);
+                              base::BindRepeating(&BuildFakeSigninManagerBase));
     builder.AddTestingFactory(ProfileSyncServiceFactory::GetInstance(),
-                              &BuildFakeSyncService);
+                              base::BindRepeating(&BuildFakeSyncService));
     builder.AddTestingFactory(WebHistoryServiceFactory::GetInstance(),
-                              &BuildFakeWebHistoryService);
+                              base::BindRepeating(&BuildFakeWebHistoryService));
     profile_ = builder.Build();
     profile_->CreateBookmarkModel(false);
 
@@ -116,8 +125,8 @@ class BrowsingHistoryHandlerTest : public ::testing::Test {
     web_history_service_ = static_cast<history::FakeWebHistoryService*>(
         WebHistoryServiceFactory::GetForProfile(profile_.get()));
 
-    web_contents_.reset(content::WebContents::Create(
-        content::WebContents::CreateParams(profile_.get())));
+    web_contents_ = content::WebContents::Create(
+        content::WebContents::CreateParams(profile_.get()));
     web_ui_.reset(new content::TestWebUI);
     web_ui_->set_web_contents(web_contents_.get());
   }
@@ -144,18 +153,11 @@ class BrowsingHistoryHandlerTest : public ::testing::Test {
 
   static std::unique_ptr<KeyedService> BuildFakeWebHistoryService(
       content::BrowserContext* context) {
-    Profile* profile = static_cast<TestingProfile*>(context);
-
     std::unique_ptr<history::FakeWebHistoryService> service =
-        std::make_unique<history::FakeWebHistoryService>(
-            profile->GetRequestContext());
+        std::make_unique<history::FakeWebHistoryService>();
     service->SetupFakeResponse(true /* success */, net::HTTP_OK);
     return std::move(service);
   }
-
-  // TODO(lukasza): https://crbug.com/832100: Move the factory into
-  // TestingProfile, so individual tests don't need to worry about it.
-  content::ScopedMockRenderProcessHostFactory test_process_factory_;
 
   content::TestBrowserThreadBundle thread_bundle_;
   std::unique_ptr<TestingProfile> profile_;
@@ -173,7 +175,8 @@ TEST_F(BrowsingHistoryHandlerTest, ObservingWebHistoryDeletions) {
   // BrowsingHistoryHandler is informed about WebHistoryService history
   // deletions.
   {
-    sync_service()->SetSyncActive(true);
+    sync_service()->SetTransportState(
+        syncer::SyncService::TransportState::ACTIVE);
     BrowsingHistoryHandlerWithWebUIForTesting handler(web_ui());
     handler.RegisterMessages();
 
@@ -188,10 +191,12 @@ TEST_F(BrowsingHistoryHandlerTest, ObservingWebHistoryDeletions) {
   // BrowsingHistoryHandler will be informed about WebHistoryService deletions
   // even if history sync is activated later.
   {
-    sync_service()->SetSyncActive(false);
+    sync_service()->SetTransportState(
+        syncer::SyncService::TransportState::INITIALIZING);
     BrowsingHistoryHandlerWithWebUIForTesting handler(web_ui());
     handler.RegisterMessages();
-    sync_service()->SetSyncActive(true);
+    sync_service()->SetTransportState(
+        syncer::SyncService::TransportState::ACTIVE);
 
     web_history_service()->ExpireHistoryBetween(
         std::set<GURL>(), base::Time(), base::Time::Max(), callback,
@@ -204,7 +209,8 @@ TEST_F(BrowsingHistoryHandlerTest, ObservingWebHistoryDeletions) {
   // BrowsingHistoryHandler does not fire historyDeleted while a web history
   // delete request is happening.
   {
-    sync_service()->SetSyncActive(true);
+    sync_service()->SetTransportState(
+        syncer::SyncService::TransportState::ACTIVE);
     BrowsingHistoryHandlerWithWebUIForTesting handler(web_ui());
     handler.RegisterMessages();
 
@@ -226,7 +232,8 @@ TEST_F(BrowsingHistoryHandlerTest, ObservingWebHistoryDeletions) {
   // deletions. The WebHistoryService object still exists (because it's a
   // BrowserContextKeyedService), but is not visible to BrowsingHistoryHandler.
   {
-    sync_service()->SetSyncActive(false);
+    sync_service()->SetTransportState(
+        syncer::SyncService::TransportState::INITIALIZING);
     BrowsingHistoryHandlerWithWebUIForTesting handler(web_ui());
     handler.RegisterMessages();
 

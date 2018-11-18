@@ -26,10 +26,9 @@ class RootVisitor;
 class StackFrameIteratorBase;
 class StringStream;
 class ThreadLocalTop;
-class WasmCompiledModule;
 class WasmDebugInfo;
 class WasmInstanceObject;
-class WasmSharedModuleData;
+class WasmModuleObject;
 
 class InnerPointerToCodeCache {
  public:
@@ -43,9 +42,7 @@ class InnerPointerToCodeCache {
     Flush();
   }
 
-  void Flush() {
-    memset(&cache_[0], 0, sizeof(cache_));
-  }
+  void Flush() { memset(static_cast<void*>(&cache_[0]), 0, sizeof(cache_)); }
 
   InnerPointerToCodeCacheEntry* GetCacheEntry(Address inner_pointer);
 
@@ -70,8 +67,7 @@ class StackHandlerConstants : public AllStatic {
   static const int kSlotCount = kSize >> kPointerSizeLog2;
 };
 
-
-class StackHandler BASE_EMBEDDED {
+class StackHandler {
  public:
   // Get the address of this stack handler.
   inline Address address() const;
@@ -96,6 +92,7 @@ class StackHandler BASE_EMBEDDED {
   V(JS_TO_WASM, JsToWasmFrame)                                            \
   V(WASM_INTERPRETER_ENTRY, WasmInterpreterEntryFrame)                    \
   V(C_WASM_ENTRY, CWasmEntryFrame)                                        \
+  V(WASM_COMPILE_LAZY, WasmCompileLazyFrame)                              \
   V(INTERPRETED, InterpretedFrame)                                        \
   V(STUB, StubFrame)                                                      \
   V(BUILTIN_CONTINUATION, BuiltinContinuationFrame)                       \
@@ -110,7 +107,7 @@ class StackHandler BASE_EMBEDDED {
   V(NATIVE, NativeFrame)
 
 // Abstract base class for all stack frames.
-class StackFrame BASE_EMBEDDED {
+class StackFrame {
  public:
 #define DECLARE_TYPE(type, ignore) type,
   enum Type {
@@ -146,8 +143,8 @@ class StackFrame BASE_EMBEDDED {
                 kHeapObjectTag);
 
   struct State {
-    Address sp = nullptr;
-    Address fp = nullptr;
+    Address sp = kNullAddress;
+    Address fp = kNullAddress;
     Address* pc_address = nullptr;
     Address* callee_pc_address = nullptr;
     Address* constant_pool_address = nullptr;
@@ -201,6 +198,7 @@ class StackFrame BASE_EMBEDDED {
   bool is_optimized() const { return type() == OPTIMIZED; }
   bool is_interpreted() const { return type() == INTERPRETED; }
   bool is_wasm_compiled() const { return type() == WASM_COMPILED; }
+  bool is_wasm_compile_lazy() const { return type() == WASM_COMPILE_LAZY; }
   bool is_wasm_to_js() const { return type() == WASM_TO_JS; }
   bool is_js_to_wasm() const { return type() == JS_TO_WASM; }
   bool is_wasm_interpreter_entry() const {
@@ -237,7 +235,7 @@ class StackFrame BASE_EMBEDDED {
   Address sp() const { return state_.sp; }
   Address fp() const { return state_.fp; }
   Address callee_pc() const {
-    return state_.callee_pc_address ? *state_.callee_pc_address : nullptr;
+    return state_.callee_pc_address ? *state_.callee_pc_address : kNullAddress;
   }
   Address caller_sp() const { return GetCallerStackPointer(); }
 
@@ -261,7 +259,7 @@ class StackFrame BASE_EMBEDDED {
   }
 
   // Get the id of this stack frame.
-  Id id() const { return static_cast<Id>(OffsetFrom(caller_sp())); }
+  Id id() const { return static_cast<Id>(caller_sp()); }
 
   // Get the top handler from the current stack iterator.
   inline StackHandler* top_handler() const;
@@ -300,7 +298,7 @@ class StackFrame BASE_EMBEDDED {
 
  protected:
   inline explicit StackFrame(StackFrameIteratorBase* iterator);
-  virtual ~StackFrame() { }
+  virtual ~StackFrame() = default;
 
   // Compute the stack pointer for the calling frame.
   virtual Address GetCallerStackPointer() const = 0;
@@ -475,7 +473,7 @@ class BuiltinExitFrame : public ExitFrame {
 
 class StandardFrame;
 
-class FrameSummary BASE_EMBEDDED {
+class FrameSummary {
  public:
 // Subclasses for the different summary kinds:
 #define FRAME_SUMMARY_VARIANTS(F)                                             \
@@ -786,10 +784,6 @@ class JavaScriptFrame : public StandardFrame {
 
   virtual int GetNumberOfIncomingArguments() const;
 
-  // Garbage collection support. Iterates over incoming arguments,
-  // receiver, and any callee-saved registers.
-  void IterateArguments(RootVisitor* v) const;
-
   virtual void PrintFrameKind(StringStream* accumulator) const {}
 
  private:
@@ -979,7 +973,7 @@ class WasmCompiledFrame final : public StandardFrame {
   Code* unchecked_code() const override;
 
   // Accessors.
-  WasmInstanceObject* wasm_instance() const;  // TODO(titzer): deprecate.
+  WasmInstanceObject* wasm_instance() const;
   wasm::WasmCode* wasm_code() const;
   uint32_t function_index() const;
   Script* script() const override;
@@ -1000,8 +994,7 @@ class WasmCompiledFrame final : public StandardFrame {
 
  private:
   friend class StackFrameIteratorBase;
-  WasmCompiledModule* compiled_module() const;
-  WasmSharedModuleData* shared() const;
+  WasmModuleObject* module_object() const;
 };
 
 class WasmInterpreterEntryFrame final : public StandardFrame {
@@ -1022,7 +1015,7 @@ class WasmInterpreterEntryFrame final : public StandardFrame {
 
   // Accessors.
   WasmDebugInfo* debug_info() const;
-  WasmInstanceObject* wasm_instance() const;  // TODO(titzer): deprecate.
+  WasmInstanceObject* wasm_instance() const;
 
   Script* script() const override;
   int position() const override;
@@ -1040,8 +1033,7 @@ class WasmInterpreterEntryFrame final : public StandardFrame {
 
  private:
   friend class StackFrameIteratorBase;
-  WasmCompiledModule* compiled_module() const;
-  WasmSharedModuleData* shared() const;
+  WasmModuleObject* module_object() const;
 };
 
 class WasmToJsFrame : public StubFrame {
@@ -1072,6 +1064,31 @@ class CWasmEntryFrame : public StubFrame {
 
  protected:
   inline explicit CWasmEntryFrame(StackFrameIteratorBase* iterator);
+
+ private:
+  friend class StackFrameIteratorBase;
+};
+
+class WasmCompileLazyFrame : public StandardFrame {
+ public:
+  Type type() const override { return WASM_COMPILE_LAZY; }
+
+  Code* unchecked_code() const override { return nullptr; }
+  WasmInstanceObject* wasm_instance() const;
+  Object** wasm_instance_slot() const;
+
+  // Garbage collection support.
+  void Iterate(RootVisitor* v) const override;
+
+  static WasmCompileLazyFrame* cast(StackFrame* frame) {
+    DCHECK(frame->is_wasm_compile_lazy());
+    return static_cast<WasmCompileLazyFrame*>(frame);
+  }
+
+ protected:
+  inline explicit WasmCompileLazyFrame(StackFrameIteratorBase* iterator);
+
+  Address GetCallerStackPointer() const override;
 
  private:
   friend class StackFrameIteratorBase;
@@ -1182,7 +1199,7 @@ class JavaScriptBuiltinContinuationWithCatchFrame
   friend class StackFrameIteratorBase;
 };
 
-class StackFrameIteratorBase BASE_EMBEDDED {
+class StackFrameIteratorBase {
  public:
   Isolate* isolate() const { return isolate_; }
 
@@ -1237,7 +1254,7 @@ class StackFrameIterator: public StackFrameIteratorBase {
 };
 
 // Iterator that supports iterating through all JavaScript frames.
-class JavaScriptFrameIterator BASE_EMBEDDED {
+class JavaScriptFrameIterator {
  public:
   inline explicit JavaScriptFrameIterator(Isolate* isolate);
   inline JavaScriptFrameIterator(Isolate* isolate, ThreadLocalTop* top);
@@ -1255,7 +1272,7 @@ class JavaScriptFrameIterator BASE_EMBEDDED {
 // NOTE: The stack trace frame iterator is an iterator that only traverse proper
 // JavaScript frames that have proper JavaScript functions and WebAssembly
 // frames.
-class StackTraceFrameIterator BASE_EMBEDDED {
+class StackTraceFrameIterator {
  public:
   explicit StackTraceFrameIterator(Isolate* isolate);
   // Skip frames until the frame with the given id is reached.
@@ -1303,11 +1320,6 @@ class SafeStackFrameIterator: public StackFrameIteratorBase {
   StackFrame::Type top_frame_type_;
   ExternalCallbackScope* external_callback_scope_;
 };
-
-// Reads all frames on the current stack and copies them into the current
-// zone memory.
-Vector<StackFrame*> CreateStackMap(Isolate* isolate, Zone* zone);
-
 }  // namespace internal
 }  // namespace v8
 

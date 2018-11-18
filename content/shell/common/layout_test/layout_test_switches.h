@@ -20,7 +20,6 @@ extern const char kAndroidStderrPort[];
 extern const char kAndroidStdinPort[];
 extern const char kAndroidStdoutPort[];
 #endif // defined(OS_ANDROID)
-extern const char kCheckLayoutTestSysDeps[];
 extern const char kCrashOnFailure[];
 extern const char kCustomDevToolsFrontend[];
 extern const char kDebugDevTools[];
@@ -29,8 +28,10 @@ extern const char kEnableFontAntialiasing[];
 extern const char kAlwaysUseComplexText[];
 extern const char kEnableLeakDetection[];
 extern const char kEncodeBinary[];
-extern const char kRunLayoutTest[];
+extern const char kRunWebTests[];
 extern const char kStableReleaseMode[];
+extern const char kTestsInBlink[];
+extern const char kEnableDisplayCompositorPixelDump[];
 
 }  // namespace switches
 

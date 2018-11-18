@@ -20,13 +20,21 @@
 namespace {
 
 // The total number of Ash accelerators.
-constexpr int kAshAcceleratorsTotalNum = 98;
+constexpr int kAshAcceleratorsTotalNum = 100;
 // The hash of Ash accelerators.
-constexpr char kAshAcceleratorsHash[] = "71c96531d7639ba0ecf255a59546c243";
+constexpr char kAshAcceleratorsHash[] = "58ba78b2c8ec069c0642e3073636a1b3";
+#if defined(GOOGLE_CHROME_BUILD)
+// Internal builds add an extra accelerator for the Feedback app.
+// The total number of Chrome accelerators (available on Chrome OS).
+constexpr int kChromeAcceleratorsTotalNum = 92;
+// The hash of Chrome accelerators (available on Chrome OS).
+constexpr char kChromeAcceleratorsHash[] = "15a6c673dc62825b04e80036ad690514";
+#else
 // The total number of Chrome accelerators (available on Chrome OS).
 constexpr int kChromeAcceleratorsTotalNum = 91;
 // The hash of Chrome accelerators (available on Chrome OS).
 constexpr char kChromeAcceleratorsHash[] = "cde825b73b85f0ff34a1ff78086e61c8";
+#endif  // defined(GOOGLE_CHROME_BUILD)
 
 const char* BooleanToString(bool value) {
   return value ? "true" : "false";
@@ -217,7 +225,7 @@ TEST_F(KeyboardShortcutViewerMetadataTest,
       "Keyboard Shortcut Viewer shortcuts and the following value(s) on the "
       "top of this file:\n";
   const int ash_accelerators_number = ash_accelerators.size();
-  EXPECT_TRUE(ash_accelerators_number == kAshAcceleratorsTotalNum)
+  EXPECT_EQ(ash_accelerators_number, kAshAcceleratorsTotalNum)
       << kCommonMessage
       << "kAshAcceleratorsTotalNum=" << ash_accelerators_number << "\n";
 
@@ -225,12 +233,12 @@ TEST_F(KeyboardShortcutViewerMetadataTest,
                    AshAcceleratorDataCmp());
   const std::string ash_accelerators_hash =
       HashAshAcceleratorData(ash_accelerators);
-  EXPECT_TRUE(ash_accelerators_hash == kAshAcceleratorsHash)
+  EXPECT_EQ(ash_accelerators_hash, kAshAcceleratorsHash)
       << kCommonMessage << "kAshAcceleratorsHash=\"" << ash_accelerators_hash
       << "\"\n";
 
   const int chrome_accelerators_number = chrome_accelerators.size();
-  EXPECT_TRUE(chrome_accelerators_number == kChromeAcceleratorsTotalNum)
+  EXPECT_EQ(chrome_accelerators_number, kChromeAcceleratorsTotalNum)
       << kCommonMessage
       << "kChromeAcceleratorsTotalNum=" << chrome_accelerators_number << "\n";
 
@@ -238,7 +246,7 @@ TEST_F(KeyboardShortcutViewerMetadataTest,
                    ChromeAcceleratorMappingCmp());
   const std::string chrome_accelerators_hash =
       HashChromeAcceleratorMapping(chrome_accelerators);
-  EXPECT_TRUE(chrome_accelerators_hash == kChromeAcceleratorsHash)
+  EXPECT_EQ(chrome_accelerators_hash, kChromeAcceleratorsHash)
       << kCommonMessage << "kChromeAcceleratorsHash=\""
       << chrome_accelerators_hash << "\"\n";
 }

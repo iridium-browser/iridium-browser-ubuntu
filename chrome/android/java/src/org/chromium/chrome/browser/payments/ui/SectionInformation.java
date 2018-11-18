@@ -35,6 +35,7 @@ public class SectionInformation {
     @PaymentRequestUI.DataType private final int mDataType;
     protected ArrayList<EditableOption> mItems;
     private int mSelectedItem;
+    private boolean mDisplayInSingleLineInNormalMode = true;
     public String mErrorMessage;
     @Nullable
     public String mAddditionalText;
@@ -223,11 +224,11 @@ public class SectionInformation {
      * @return ID if the user can add a new option, or 0 if they can't.
      */
     public int getAddStringId() {
-        if (mDataType == PaymentRequestUI.TYPE_SHIPPING_ADDRESSES) {
+        if (mDataType == PaymentRequestUI.DataType.SHIPPING_ADDRESSES) {
             return R.string.payments_add_address;
-        } else if (mDataType == PaymentRequestUI.TYPE_CONTACT_DETAILS) {
+        } else if (mDataType == PaymentRequestUI.DataType.CONTACT_DETAILS) {
             return R.string.payments_add_contact;
-        } else if (mDataType == PaymentRequestUI.TYPE_PAYMENT_METHODS) {
+        } else if (mDataType == PaymentRequestUI.DataType.PAYMENT_METHODS) {
             return R.string.payments_add_card;
         }
         return 0;
@@ -240,13 +241,13 @@ public class SectionInformation {
      */
     public int getPreviewStringResourceId() {
         switch (mDataType) {
-            case PaymentRequestUI.TYPE_SHIPPING_ADDRESSES:
+            case PaymentRequestUI.DataType.SHIPPING_ADDRESSES:
                 return R.plurals.payment_request_shipping_addresses_preview;
-            case PaymentRequestUI.TYPE_SHIPPING_OPTIONS:
+            case PaymentRequestUI.DataType.SHIPPING_OPTIONS:
                 return R.plurals.payment_request_shipping_options_preview;
-            case PaymentRequestUI.TYPE_PAYMENT_METHODS:
+            case PaymentRequestUI.DataType.PAYMENT_METHODS:
                 return R.plurals.payment_request_payment_methods_preview;
-            case PaymentRequestUI.TYPE_CONTACT_DETAILS:
+            case PaymentRequestUI.DataType.CONTACT_DETAILS:
                 return R.plurals.payment_request_contacts_preview;
             default:
                 assert false : "unknown data type";
@@ -300,5 +301,24 @@ public class SectionInformation {
             mSelectedItem = selection;
             mItems = new ArrayList<>(itemCollection);
         }
+    }
+
+    /**
+     * Set whether display the selected item summary in single line in
+     * PaymentRequestSection.DISPLAY_MODE_NORMAL.
+     *
+     * @param singleLine whether display in single line, note that the default value is true.
+     */
+    public void setDisplaySelectedItemSummaryInSingleLineInNormalMode(boolean singleLine) {
+        mDisplayInSingleLineInNormalMode = singleLine;
+    }
+
+    /**
+     * Get whether display the selected item summary in single line in
+     * PaymentRequestSection.DISPLAY_MODE_NORMAL.
+     *
+     */
+    public boolean getDisplaySelectedItemSummaryInSingleLineInNormalMode() {
+        return mDisplayInSingleLineInNormalMode;
     }
 }

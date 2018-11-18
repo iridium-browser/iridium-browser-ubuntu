@@ -9,6 +9,7 @@
 
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/strings/utf_string_conversions.h"
 #include "build/build_config.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/profile.h"
@@ -18,15 +19,16 @@
 #include "chrome/browser/ui/views/apps/app_info_dialog/app_info_header_panel.h"
 #include "chrome/browser/ui/views/apps/app_info_dialog/app_info_permissions_panel.h"
 #include "chrome/browser/ui/views/apps/app_info_dialog/app_info_summary_panel.h"
-#include "chrome/browser/ui/views/harmony/chrome_layout_provider.h"
+#include "chrome/browser/ui/views/chrome_layout_provider.h"
 #include "chrome/common/buildflags.h"
 #include "chrome/common/chrome_switches.h"
-#include "chrome/common/extensions/extension_constants.h"
 #include "components/constrained_window/constrained_window_views.h"
 #include "content/public/browser/web_contents.h"
 #include "extensions/browser/extension_registry.h"
+#include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/manifest.h"
+#include "ui/aura/window.h"
 #include "ui/gfx/geometry/insets.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/size.h"
@@ -63,16 +65,16 @@ bool CanShowAppInfoDialog() {
 #if BUILDFLAG(ENABLE_APP_LIST)
 void ShowAppInfoInAppList(const gfx::Rect& app_info_bounds,
                           Profile* profile,
-                          const extensions::Extension* app,
-                          const base::Closure& close_callback) {
+                          const extensions::Extension* app) {
   views::View* app_info_view = new AppInfoDialog(profile, app);
-  views::DialogDelegate* dialog =
-      CreateAppListContainerForView(app_info_view, close_callback);
+  views::DialogDelegate* dialog = CreateAppListContainerForView(app_info_view);
   views::Widget* dialog_widget = new views::Widget();
   views::Widget::InitParams params =
       views::DialogDelegate::GetDialogWidgetInitParams(dialog, nullptr, nullptr,
                                                        app_info_bounds);
   dialog_widget->Init(params);
+  // The title is not shown on the dialog, but it is used for overview mode.
+  dialog_widget->GetNativeWindow()->SetTitle(base::UTF8ToUTF16(app->name()));
   dialog_widget->Show();
 }
 #endif

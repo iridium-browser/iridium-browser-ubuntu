@@ -85,11 +85,11 @@ ScriptPromise NavigatorWebMIDI::requestMIDIAccess(ScriptState* script_state,
                                                   const MIDIOptions& options) {
   if (!script_state->ContextIsValid()) {
     return ScriptPromise::RejectWithDOMException(
-        script_state,
-        DOMException::Create(kAbortError, "The frame is not working."));
+        script_state, DOMException::Create(DOMExceptionCode::kAbortError,
+                                           "The frame is not working."));
   }
 
-  Document& document = *ToDocument(ExecutionContext::From(script_state));
+  Document& document = *To<Document>(ExecutionContext::From(script_state));
   if (options.hasSysex() && options.sysex()) {
     UseCounter::Count(
         document,
@@ -102,20 +102,14 @@ ScriptPromise NavigatorWebMIDI::requestMIDIAccess(ScriptState* script_state,
   UseCounter::CountCrossOriginIframe(
       document, WebFeature::kRequestMIDIAccessIframe_ObscuredByFootprinting);
 
-  if (RuntimeEnabledFeatures::FeaturePolicyForPermissionsEnabled()) {
-    if (!document.GetFrame()->IsFeatureEnabled(
-            mojom::FeaturePolicyFeature::kMidiFeature)) {
-      UseCounter::Count(document, WebFeature::kMidiDisabledByFeaturePolicy);
-      document.AddConsoleMessage(
-          ConsoleMessage::Create(kJSMessageSource, kWarningMessageLevel,
-                                 kFeaturePolicyConsoleWarning));
-      return ScriptPromise::RejectWithDOMException(
-          script_state,
-          DOMException::Create(kSecurityError, kFeaturePolicyErrorMessage));
-    }
-  } else {
-    Deprecation::CountDeprecationFeaturePolicy(
-        document, mojom::FeaturePolicyFeature::kMidiFeature);
+  if (!document.IsFeatureEnabled(mojom::FeaturePolicyFeature::kMidiFeature,
+                                 ReportOptions::kReportOnFailure)) {
+    UseCounter::Count(document, WebFeature::kMidiDisabledByFeaturePolicy);
+    document.AddConsoleMessage(ConsoleMessage::Create(
+        kJSMessageSource, kWarningMessageLevel, kFeaturePolicyConsoleWarning));
+    return ScriptPromise::RejectWithDOMException(
+        script_state, DOMException::Create(DOMExceptionCode::kSecurityError,
+                                           kFeaturePolicyErrorMessage));
   }
 
   return MIDIAccessInitializer::Start(script_state, options);

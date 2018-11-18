@@ -14,15 +14,19 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <vector>
 
+#include "api/transport/network_control.h"
 #include "call/rtp_bitrate_configurator.h"
 #include "call/rtp_transport_controller_send_interface.h"
+#include "call/rtp_video_sender.h"
 #include "common_types.h"  // NOLINT(build/include)
 #include "modules/congestion_controller/include/send_side_congestion_controller_interface.h"
 #include "modules/pacing/packet_router.h"
 #include "modules/utility/include/process_thread.h"
 #include "rtc_base/constructormagic.h"
 #include "rtc_base/networkroute.h"
+#include "rtc_base/task_queue.h"
 
 namespace webrtc {
 class Clock;
@@ -35,10 +39,26 @@ class RtpTransportControllerSend final
     : public RtpTransportControllerSendInterface,
       public NetworkChangedObserver {
  public:
-  RtpTransportControllerSend(Clock* clock,
-                             RtcEventLog* event_log,
-                             const BitrateConstraints& bitrate_config);
+  RtpTransportControllerSend(
+      Clock* clock,
+      RtcEventLog* event_log,
+      NetworkControllerFactoryInterface* controller_factory,
+      const BitrateConstraints& bitrate_config);
   ~RtpTransportControllerSend() override;
+
+  RtpVideoSenderInterface* CreateRtpVideoSender(
+      const std::vector<uint32_t>& ssrcs,
+      std::map<uint32_t, RtpState> suspended_ssrcs,
+      const std::map<uint32_t, RtpPayloadState>&
+          states,  // move states into RtpTransportControllerSend
+      const RtpConfig& rtp_config,
+      const RtcpConfig& rtcp_config,
+      Transport* send_transport,
+      const RtpSenderObservers& observers,
+      RtcEventLog* event_log,
+      std::unique_ptr<FecController> fec_controller) override;
+  void DestroyRtpVideoSender(
+      RtpVideoSenderInterface* rtp_video_sender) override;
 
   // Implements NetworkChangedObserver interface.
   void OnNetworkChanged(uint32_t bitrate_bps,
@@ -47,6 +67,7 @@ class RtpTransportControllerSend final
                         int64_t probing_interval_ms) override;
 
   // Implements RtpTransportControllerSendInterface
+  rtc::TaskQueue* GetWorkerQueue() override;
   PacketRouter* packet_router() override;
 
   TransportFeedbackObserver* transport_feedback_observer() override;
@@ -78,12 +99,17 @@ class RtpTransportControllerSend final
   void OnSentPacket(const rtc::SentPacket& sent_packet) override;
 
   void SetSdpBitrateParameters(const BitrateConstraints& constraints) override;
-  void SetClientBitratePreferences(
-      const BitrateConstraintsMask& preferences) override;
+  void SetClientBitratePreferences(const BitrateSettings& preferences) override;
+
+  void SetAllocatedBitrateWithoutFeedback(uint32_t bitrate_bps) override;
+
+  void OnTransportOverheadChanged(
+      size_t transport_overhead_per_packet) override;
 
  private:
   const Clock* const clock_;
   PacketRouter packet_router_;
+  std::vector<std::unique_ptr<RtpVideoSenderInterface>> video_rtp_senders_;
   PacedSender pacer_;
   RtpKeepAliveConfig keepalive_;
   RtpBitrateConfigurator bitrate_configurator_;
@@ -91,17 +117,13 @@ class RtpTransportControllerSend final
   const std::unique_ptr<ProcessThread> process_thread_;
   rtc::CriticalSection observer_crit_;
   TargetTransferRateObserver* observer_ RTC_GUARDED_BY(observer_crit_);
-  // Caches send_side_cc_.get(), to avoid racing with destructor.
-  // Note that this is declared before send_side_cc_ to ensure that it is not
-  // invalidated until no more tasks can be running on the send_side_cc_ task
-  // queue.
-  // TODO(srte): Remove this when only the task queue based send side congestion
-  // controller is used and it is no longer accessed synchronously in the
-  // OnNetworkChanged callback.
-  SendSideCongestionControllerInterface* send_side_cc_ptr_;
-  // Declared last since it will issue callbacks from a task queue. Declaring it
-  // last ensures that it is destroyed first.
-  const std::unique_ptr<SendSideCongestionControllerInterface> send_side_cc_;
+  std::unique_ptr<SendSideCongestionControllerInterface> send_side_cc_;
+  RateLimiter retransmission_rate_limiter_;
+
+  // TODO(perkj): |task_queue_| is supposed to replace |process_thread_|.
+  // |task_queue_| is defined last to ensure all pending tasks are cancelled
+  // and deleted before any other members.
+  rtc::TaskQueue task_queue_;
   RTC_DISALLOW_COPY_AND_ASSIGN(RtpTransportControllerSend);
 };
 

@@ -22,8 +22,9 @@ import android.content.Context;
 import android.content.pm.PackageManager;
 import android.provider.Settings;
 import android.view.ActionMode;
-import android.view.View;
+import android.view.ViewGroup;
 
+import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
@@ -36,13 +37,15 @@ import org.robolectric.shadows.ShadowLog;
 
 import org.chromium.base.test.BaseRobolectricTestRunner;
 import org.chromium.base.test.util.Feature;
+import org.chromium.content.browser.ContentClassFactory;
 import org.chromium.content.browser.PopupController;
-import org.chromium.content.browser.RenderCoordinates;
+import org.chromium.content.browser.RenderCoordinatesImpl;
 import org.chromium.content.browser.webcontents.WebContentsImpl;
 import org.chromium.content_public.browser.SelectionClient;
 import org.chromium.content_public.browser.SelectionMetricsLogger;
 import org.chromium.content_public.browser.SelectionPopupController;
 import org.chromium.ui.base.MenuSourceType;
+import org.chromium.ui.base.ViewAndroidDelegate;
 import org.chromium.ui.base.WindowAndroid;
 import org.chromium.ui.touch_selection.SelectionEventType;
 
@@ -56,13 +59,15 @@ public class SelectionPopupControllerTest {
     private Context mContext;
     private WindowAndroid mWindowAndroid;
     private WebContentsImpl mWebContents;
-    private View mView;
+    private ViewGroup mView;
+    private ViewAndroidDelegate mViewAndroidDelegate;
     private ActionMode mActionMode;
     private PackageManager mPackageManager;
     private SmartSelectionMetricsLogger mLogger;
-    private RenderCoordinates mRenderCoordinates;
+    private RenderCoordinatesImpl mRenderCoordinates;
     private ContentResolver mContentResolver;
     private PopupController mPopupController;
+    private ContentClassFactory mOriginalContentClassFactory;
 
     private static final String MOUNTAIN_FULL = "585 Franklin Street, Mountain View, CA 94041";
     private static final String MOUNTAIN = "Mountain";
@@ -125,12 +130,20 @@ public class SelectionPopupControllerTest {
         mContext = Mockito.mock(Context.class);
         mWindowAndroid = Mockito.mock(WindowAndroid.class);
         mWebContents = Mockito.mock(WebContentsImpl.class);
-        mView = Mockito.mock(View.class);
+        mView = Mockito.mock(ViewGroup.class);
+        mViewAndroidDelegate = ViewAndroidDelegate.createBasicDelegate(mView);
         mActionMode = Mockito.mock(ActionMode.class);
         mPackageManager = Mockito.mock(PackageManager.class);
-        mRenderCoordinates = Mockito.mock(RenderCoordinates.class);
+        mRenderCoordinates = Mockito.mock(RenderCoordinatesImpl.class);
         mLogger = Mockito.mock(SmartSelectionMetricsLogger.class);
         mPopupController = Mockito.mock(PopupController.class);
+
+        mOriginalContentClassFactory = ContentClassFactory.get();
+        ContentClassFactory mockContentClassFactory = Mockito.mock(ContentClassFactory.class);
+        when(mockContentClassFactory.createHandleObserver(
+                     Mockito.any(SelectionPopupControllerImpl.ReadbackViewCallback.class)))
+                .thenReturn(null);
+        ContentClassFactory.set(mockContentClassFactory);
 
         mContentResolver = RuntimeEnvironment.application.getContentResolver();
         // To let isDeviceProvisioned() call in showSelectionMenu() return true.
@@ -140,9 +153,15 @@ public class SelectionPopupControllerTest {
         when(mContext.getContentResolver()).thenReturn(mContentResolver);
         when(mWebContents.getRenderCoordinates()).thenReturn(mRenderCoordinates);
         when(mRenderCoordinates.getDeviceScaleFactor()).thenReturn(1.f);
+        when(mWebContents.getViewAndroidDelegate()).thenReturn(mViewAndroidDelegate);
+        when(mWebContents.getContext()).thenReturn(mContext);
+        when(mWebContents.getTopLevelNativeWindow()).thenReturn(mWindowAndroid);
+        mController = SelectionPopupControllerImpl.createForTesting(mWebContents, mPopupController);
+    }
 
-        mController = SelectionPopupControllerImpl.createForTesting(
-                mContext, mWindowAndroid, mWebContents, mView, mPopupController);
+    @After
+    public void tearDown() throws Exception {
+        ContentClassFactory.set(mOriginalContentClassFactory);
     }
 
     @Test

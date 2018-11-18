@@ -33,7 +33,7 @@
 #include "ui/gfx/animation/tween.h"
 #include "ui/gfx/geometry/point.h"
 #include "ui/gfx/geometry/rect.h"
-#include "ui/gfx/geometry/rect_f.h"
+#include "ui/gfx/geometry/size_f.h"
 #include "ui/gfx/transform.h"
 #include "ui/gfx/transform_util.h"
 #include "ui/wm/core/window_util.h"
@@ -115,7 +115,8 @@ gfx::Transform CreateScreenRotationOldLayerTransformForDisplay(
     display::Display::Rotation new_rotation,
     const display::Display& display) {
   gfx::Transform inverse;
-  CHECK(CreateRotationTransform(old_rotation, new_rotation, display)
+  CHECK(CreateRotationTransform(old_rotation, new_rotation,
+                                gfx::SizeF(display.size()))
             .GetInverse(&inverse));
   return inverse;
 }
@@ -202,6 +203,7 @@ void ScreenRotationAnimator::StartRotationAnimation(
           rotation_request->mode) {
     StartSlowAnimation(std::move(rotation_request));
   } else {
+    current_async_rotation_request_ = ScreenRotationRequest(*rotation_request);
     RequestCopyScreenRotationContainerLayer(
         std::make_unique<viz::CopyOutputRequest>(
             viz::CopyOutputRequest::ResultFormat::RGBA_TEXTURE,
@@ -224,6 +226,9 @@ void ScreenRotationAnimator::SetRotation(
     display::Display::Rotation old_rotation,
     display::Display::Rotation new_rotation,
     display::Display::RotationSource source) {
+  // Reset the current request because its rotation must be applied if any.
+  current_async_rotation_request_.reset();
+
   // Allow compositor locks to extend timeout, so that screen rotation only
   // takes output copy after contents are properlly resized, such as wallpaper
   // and ARC apps.
@@ -459,9 +464,25 @@ void ScreenRotationAnimator::Rotate(
       std::make_unique<ScreenRotationRequest>(rotation_request_id_, display_id,
                                               new_rotation, source, mode);
   target_rotation_ = new_rotation;
+
+  if (mode == DisplayConfigurationController::ANIMATION_SYNC)
+    current_async_rotation_request_.reset();
+
   switch (screen_rotation_state_) {
     case IDLE:
+      DCHECK(!current_async_rotation_request_);
+      FALLTHROUGH;
     case COPY_REQUESTED:
+      if (current_async_rotation_request_ &&
+          !RootWindowChangedForDisplayId(
+              root_window_, current_async_rotation_request_->display_id)) {
+        Shell::Get()->display_manager()->SetDisplayRotation(
+            current_async_rotation_request_->display_id,
+            current_async_rotation_request_->new_rotation,
+            current_async_rotation_request_->source);
+        current_async_rotation_request_.reset();
+      }
+
       StartRotationAnimation(std::move(rotation_request));
       break;
     case ROTATING:
@@ -488,6 +509,7 @@ void ScreenRotationAnimator::ProcessAnimationQueue() {
   old_layer_tree_owner_.reset();
   new_layer_tree_owner_.reset();
   mask_layer_tree_owner_.reset();
+  current_async_rotation_request_.reset();
   if (last_pending_request_ &&
       !RootWindowChangedForDisplayId(root_window_,
                                      last_pending_request_->display_id)) {

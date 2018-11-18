@@ -12,6 +12,8 @@
 #include "chrome/browser/ui/browser_list.h"
 #include "chrome/browser/ui/browser_window.h"
 #include "testing/gtest/include/gtest/gtest.h"
+#include "ui/display/display.h"
+#include "ui/display/screen.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 
 namespace ui_test_utils {
@@ -187,11 +189,11 @@ bool SendMouseMoveSync(const gfx::Point& location) {
   return !testing::Test::HasFatalFailure();
 }
 
-bool SendMouseEventsSync(ui_controls::MouseButton type, int state) {
+bool SendMouseEventsSync(ui_controls::MouseButton type, int button_state) {
   scoped_refptr<content::MessageLoopRunner> runner =
       new content::MessageLoopRunner;
-  if (!ui_controls::SendMouseEventsNotifyWhenDone(
-          type, state, runner->QuitClosure())) {
+  if (!ui_controls::SendMouseEventsNotifyWhenDone(type, button_state,
+                                                  runner->QuitClosure())) {
     return false;
   }
   runner->Run();
@@ -201,16 +203,32 @@ bool SendMouseEventsSync(ui_controls::MouseButton type, int state) {
 namespace internal {
 
 void ClickTask(ui_controls::MouseButton button,
-               int state,
-               base::OnceClosure followup) {
+               int button_state,
+               base::OnceClosure followup,
+               int accelerator_state) {
   if (!followup.is_null()) {
-    ui_controls::SendMouseEventsNotifyWhenDone(button, state,
-                                               std::move(followup));
+    ui_controls::SendMouseEventsNotifyWhenDone(
+        button, button_state, std::move(followup), accelerator_state);
   } else {
-    ui_controls::SendMouseEvents(button, state);
+    ui_controls::SendMouseEvents(button, button_state, accelerator_state);
   }
 }
 
 }  // namespace internal
+
+display::Display GetSecondaryDisplay(display::Screen* screen) {
+  for (const auto& iter : screen->GetAllDisplays()) {
+    if (iter.id() != screen->GetPrimaryDisplay().id())
+      return iter;
+  }
+  NOTREACHED();
+  return display::Display();
+}
+
+std::pair<display::Display, display::Display> GetDisplays(
+    display::Screen* screen) {
+  return std::make_pair(screen->GetPrimaryDisplay(),
+                        GetSecondaryDisplay(screen));
+}
 
 }  // namespace ui_test_utils

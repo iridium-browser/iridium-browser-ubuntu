@@ -27,7 +27,7 @@ class MODULES_EXPORT MediaControlDownloadButtonElement final
   WebLocalizedString::Name GetOverflowStringName() const final;
   bool HasOverflowButton() const final;
 
-  virtual void Trace(blink::Visitor*);
+  void Trace(blink::Visitor*) override;
 
  protected:
   const char* GetNameForHistograms() const final;
@@ -42,7 +42,7 @@ class MODULES_EXPORT MediaControlDownloadButtonElement final
     kCount  // Keep last.
   };
 
-  void DefaultEventHandler(Event*) final;
+  void DefaultEventHandler(Event&) final;
 };
 
 }  // namespace blink
